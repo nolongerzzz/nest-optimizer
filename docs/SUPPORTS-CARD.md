@@ -24,10 +24,18 @@ underside area can be clicked from above.
 Opening **Supports** - or selecting a piece while it is open - runs detection
 at once, on the selected piece (the only piece on the plate, when nothing is
 selected). Every hanging area is outlined and the card says **"N hanging areas
-at 45&deg; on &lt;piece&gt;"**. The angle is a field on the card
-(`#sup-angle`, 1..89, default 45 - `detectOverhangs`' own); typing re-detects
-once the typing pauses. It is a setting, like Style: not an Undo step. Nothing
-is generated.
+at 35&deg; on &lt;piece&gt;"**. The angle is a field on the card
+(`#sup-angle`, 1..89, default 35, labelled **"35&deg; &middot; Bambu 30&deg;"**);
+typing re-detects once the typing pauses. It is a setting, like Style: not an
+Undo step. Nothing is generated.
+
+**What the number means.** Faces within this many degrees of horizontal get
+support (`nso_support_aim.js`: a face hangs when `n.z < -cos(angle)`, its tilt
+off the plate under the angle). The field's tooltip says so. Bambu Studio's
+`support_threshold_angle` is measured the same way, so the label names Bambu's
+default, 30, beside the card's number for comparison - it is not a conversion.
+The default is 35, a hair more sensitive than Bambu's 30 (owner's call). See
+0a for the correction that set it.
 
 The areas are editable before GENERATE, on the mesh, where the effect shows:
 
@@ -35,11 +43,49 @@ The areas are editable before GENERATE, on the mesh, where the effect shows:
 - **Shift-click on the piece** adds a spot - one beacon, outlined like the rest
   (an area of its own, or part of the nearest one).
 
+## 0a. The angle is from horizontal: 60 was not Bambu's 30 (2026-10-21)
+
+The card shipped defaulting to 60, labelled "60&deg; &middot; Bambu 30&deg;", on
+the belief that Bambu measures its threshold from vertical (90 - 60 = 30). It
+does not. Measured on `fixtures/supports/simple_overhang.3mf` (the Simple
+Overhang Test: an arc whose underside steps 10, 20 ... 80&deg; off horizontal,
+each step 20 mm wide), sliced by the owner in Bambu Studio 02.08.02.61, tree
+slim, threshold 30: Bambu supported only the arc's underside within 30&deg; of
+horizontal - **z 41.4 - 46.2, 254 mm&sup2;** (its support transition and
+interface layers run z 41.4 - 46.2) - and printed the **40 - 60&deg; stretch
+(175 mm&sup2;)** as overhang walls, with no support.
+
+NSO's angle already meant "faces within N&deg; of horizontal", so Bambu's 30 is
+NSO's 30, and the old 60 asked for supports Bambu leaves out. On the same
+file (`support:test` section 13):
+
+| angle | flagged faces (triangle pass) | area | z | hanging areas (spots) |
+| --- | --- | --- | --- | --- |
+| **35 (default)** | the 10, 20 and 30&deg; steps, 6 triangles | **259.06 mm&sup2;** (+2.0 % on Bambu's 254) | 37.74 - 46.47 | 3 (40 + 1 + 1 = 42) |
+| 30 (Bambu's) | the same | 259.06 mm&sup2; | 37.74 - 46.47 | 3 (42) |
+| 60 (old default) | the 10 - 40&deg; steps, 7 triangles | 301.88 mm&sup2; | 32.23 - 46.47 | 2 (70 + 1 = 71) |
+
+At 35 the arc's area is its top only: 40 spots at z 38.0 - 46.3, every one on a
+10 - 30&deg; face. The two single spots beside it are side spots on ridges at z
+17.7 (27.5 and 28.8&deg;), off the arc; they are there at 30 too. At 60 the arc's
+area reaches down it to z 17.7, its 40 - 60&deg; faces as `gap` and `edge` spots
+(15 gap spots at 40 - 60&deg;), plus one spot at z 8.6: 71 spots against 42, the
+area's plan 630 mm&sup2; against 360. The triangle pass gains only half of the
+40&deg; step at 60: the rays down from the rest of the 40 - 60&deg; faces land on
+the model's 2 mm base, so it counts them self-supported, and the beacon grid -
+what the card plans from - flags them as `gap` spots instead. So the extra
+surface at 60 shows in the grid, 1.7 times the spots, not in the triangle area.
+
+What changes elsewhere: a 45&deg; chamfer (`support:test` section 11's band) is
+steeper than 35 and is no longer detected at the default; on the standing clamp
+the default finds 262 spots in 4 areas (344 at 60), on the wedge 326 in 10 (427
+in 25). The top_clip_x2 coupon and top_clip_x2 detect the same at 35 as at 60.
+
 ## 1. The three states
 
 | state | the card says | what is live |
 | --- | --- | --- |
-| **IDLE** (a piece is picked) | **"N hanging areas at 45&deg; on &lt;piece&gt;"** (`&middot; K left out` once any is) | **GENERATE**; Angle, Style, Size, "May rest on the part" (off); a click on an outlined area leaves it out (grey) or puts it back. Nothing builds on a click. |
+| **IDLE** (a piece is picked) | **"N hanging areas at 35&deg; on &lt;piece&gt;"** (`&middot; K left out` once any is) | **GENERATE**; Angle, Style, Size, "May rest on the part" (off); a click on an outlined area leaves it out (grey) or puts it back. Nothing builds on a click. |
 | **BUILDING** (GENERATE pressed) | one **bar** under the readout, 0 to 100 % over the whole build, and the phase in words: **"Planning 142 / 344 &middot; 21 %"**, then **"Building 41 / 436 &middot; 55 %"** (section 1a) | every control is locked, **REGENERATE** and **REMOVE ALL** (shown once built) are off; **Escape** cancels |
 | **BUILT** | **"Built: M supports &middot; held H &middot; unsupported K &middot; unreachable U"** | **REGENERATE** (replaces every support on the piece) and **REMOVE ALL** beside it; a click on a built support picks it and **REMOVE** takes that one; areas the plate could not reach stay outlined **red**; a row under the readout for every area that is not held |
 
@@ -219,6 +265,16 @@ host to scan).
 spots a build could not reach) goes back with the step.
 
 ## 4. Measured (`support:workflow`)
+
+**At the default 35&deg; (since 0a, 2026-10-21, on the cloud box):** the tilted
+box reads "1 hanging area at 35&deg; on tilted" with "35&deg; &middot; Bambu 30&deg;"
+beside the field; 25&deg; finds nothing, 60&deg; finds the area again (label "60&deg;
+&middot; Bambu 30&deg;"), 95&deg; is refused and the angle stays 60, then back to 35.
+The wedge opens with **10 hanging areas, 326 spots** (25 areas and 427 spots at
+60&deg;, pinned); GENERATE over all 10 builds 7 supports, "held 10 &middot;
+unsupported 0 &middot; unreachable 0", in 19.6 s. The standing clamp opens with 4
+areas, 262 spots (344 at 60&deg;). The paragraphs below were measured at the
+defaults of their day (45&deg;, then 60&deg;).
 
 On support:beacons' tilted box (40 x 30 x 10, underside at 30 deg): opening the
 card detects at once, "1 hanging area at 45&deg; on tilted", 120 spots in 1 area,

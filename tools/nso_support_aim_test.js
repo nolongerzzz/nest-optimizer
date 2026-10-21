@@ -471,13 +471,15 @@ check('every planned case was written out', CASES.length === 3, `${CASES.length}
 console.log('\n=== 11. A sloped band is held along its length, not only at its ends ===');
 
 {
-  /* At the card's 60 deg the band's nz = -0.707 is inside the threshold
-     (nzMax = -0.5). The triangle pass gives it no region - the ray down from
+  /* At 60 deg the band's nz = -0.707 is inside the threshold (nzMax =
+     -0.5). 60 was the card's default; at its 35 now the 45 deg band is
+     steeper than the threshold and is not detected (section 13 holds that).
+     The triangle pass gives it no region - the ray down from
      each chamfer triangle meets the floor, so all of them count as self-
      supported - and that is not what the card plans from: it plans the beacon
      grid, which flags the band as 'gap' spots. Those spots go through
      planTree the way the card sends one area (the card's own opts, the band's
-     beacons), at the card's default (may not rest on the part) and with rest
+     beacons), at the card's default rest (may not rest on the part) and with rest
      on. Held means a tip, and a pad, on the band. */
   const host = chamferBand();
   let vol = 0;
@@ -530,11 +532,11 @@ async function coupon() {
   console.log('\n=== 12. The top_clip_x2 coupon, as the card builds it ===');
   const GP = ctx.NSO_SupportGridpack, SI = ctx.NSO_SupportInterface;
   const piece = readSTL(path.join(ROOT, 'fixtures', 'supports', 'top_clip_x2_coupon.stl'));
-  const opts = { skipList: [], angleDeg: 60, occluders: [] };
+  const opts = { skipList: [], angleDeg: 35, occluders: [] };
   const det = SA.detectOverhangs(piece, opts);
   const regs = det.beaconRegions || [];
   const zs = regs.map(r => [...new Set(r.beacons.map(b => +b.z.toFixed(3)))].join('/'));
-  check('two areas at the card\'s 60 deg: the slab\'s underside (40 spots, z 13.5) and the hanging leg\'s (9 spots, z 6.5)',
+  check('two areas at the card\'s 35 deg: the slab\'s underside (40 spots, z 13.5) and the hanging leg\'s (9 spots, z 6.5)',
     det.ok && regs.length === 2 && regs[0].beacons.length === 40 && zs[0] === '13.5' && regs[1].beacons.length === 9 && zs[1] === '6.5',
     regs.map((r, k) => `${r.beacons.length} spots at z ${zs[k]}`).join('; '));
   const builds = [];
@@ -576,7 +578,70 @@ async function coupon() {
     JSON.stringify(SI.SHEET.slicerSettings) === JSON.stringify({ wall_generator: 'classic', detect_thin_wall: '1' }), JSON.stringify(SI.SHEET.slicerSettings));
 }
 
-coupon().catch(err => { check('the coupon builds', false, (err && err.stack) || String(err)); }).then(() => {
+/* 13. THE ANGLE IS FROM HORIZONTAL, AS BAMBU'S IS. fixtures/supports/
+   simple_overhang.3mf (the owner's Simple Overhang Test): an arc whose
+   underside steps 10, 20 ... 80 deg off horizontal, each step 20 mm wide.
+   Bambu Studio (tree slim, threshold 30, the owner's slice of this file)
+   supported only the arc's underside within 30 deg of horizontal - z 41.4 -
+   46.2, 254 mm^2 - and printed the 40 - 60 deg stretch (175 mm^2) as overhang
+   walls. The card's 60 was read as "Bambu 30" on the belief that Bambu
+   measures from vertical; it does not. At the card's 35 the detected area is
+   the top of the arc only; at the old 60 it reaches down the arc (pinned, so
+   the change shows). */
+async function overhangArc() {
+  console.log('\n=== 13. The Simple Overhang Test: the card\'s 35 is Bambu\'s 30, a hair more sensitive ===');
+  const card = fs.readFileSync(path.join(ROOT, 'app-supports-card.js'), 'utf8');
+  const ANGLE = +(/var ANGLE_DEFAULT = (\d+);/.exec(card) || [])[1], BAMBU = +(/var BAMBU_ANGLE = (\d+);/.exec(card) || [])[1];
+  check('the card defaults to 35 deg and names Bambu\'s 30 beside it', ANGLE === 35 && BAMBU === 30, `ANGLE_DEFAULT ${ANGLE}, BAMBU_ANGLE ${BAMBU}`);
+  const R3 = require(path.join(ROOT, 'nso-3mf-read.js'));
+  const res = await R3.parse3MF(new Uint8Array(fs.readFileSync(path.join(ROOT, 'fixtures', 'supports', 'simple_overhang.3mf'))));
+  const piece = res.objects[0].positions;
+  const tilt = t => {
+    const o = t * 9, u = [0, 1, 2].map(k => piece[o + 3 + k] - piece[o + k]), v = [0, 1, 2].map(k => piece[o + 6 + k] - piece[o + k]);
+    const n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+    return Math.acos(-n[2] / Math.hypot(...n)) * 180 / Math.PI;
+  };
+  const read = a => {
+    const d = SA.detectOverhangs(piece, { skipList: [], angleDeg: a, occluders: [] });
+    const tris = d.ok ? d.regions.flatMap(r => r.tris) : [];
+    const zs = tris.flatMap(t => [2, 5, 8].map(k => piece[t * 9 + k]));
+    const bz = (d.beacons || []).map(b => b.z);
+    return { d, tris, area: d.ok ? d.regions.reduce((s, r) => s + r.areaMm2, 0) : 0, zlo: Math.min(...zs), zhi: Math.max(...zs),
+      tilts: [...new Set(tris.map(t => Math.round(tilt(t))))].sort((x, y) => x - y),
+      areas: (d.beaconRegions || []).map(r => r.beacons.length), spots: bz.length, bzlo: Math.min(...bz) };
+  };
+  const BAMBU_MM2 = 254;
+  const at = read(ANGLE);
+  check('at 35: one overhang, the arc\'s 10, 20 and 30 deg steps (6 triangles) and nothing steeper',
+    at.d.ok && at.d.regions.length === 1 && at.tris.length === 6 && JSON.stringify(at.tilts) === '[10,20,30]',
+    `${at.d.regions.length} region(s), ${at.tris.length} triangles, steps ${at.tilts.join(', ')} deg`);
+  check('...the top of the arc only (z 37.7 - 46.5), within 20 % of Bambu\'s 254 mm^2',
+    at.zlo > 37 && near(at.area, 259.06, 0.05) && Math.abs(at.area - BAMBU_MM2) <= 0.2 * BAMBU_MM2,
+    `${at.area.toFixed(2)} mm^2 (${(100 * (at.area - BAMBU_MM2) / BAMBU_MM2).toFixed(1)} % off Bambu's), z ${at.zlo.toFixed(2)} - ${at.zhi.toFixed(2)}`);
+  const arc = at.d.beaconRegions[0].beacons, side = at.d.beaconRegions.slice(1).flatMap(r => r.beacons);
+  check('...its hanging areas: the arc\'s top (40 spots, z 38 - 46.3, faces 10 - 30 deg) and two single side spots on ridges at z 17.7 (27.5 and 28.8 deg)',
+    JSON.stringify(at.areas) === '[40,1,1]' && arc.every(b => b.z > 37.9 && b.need.angle <= 30 + 1e-6 && !b.need.side) &&
+      side.every(b => b.need.kind === 'ridge' && b.need.side && near(b.z, 17.73, 0.02) && b.need.angle < 29),
+    `areas ${at.areas.join(', ')}; arc z ${Math.min(...arc.map(b => b.z)).toFixed(2)} - ${Math.max(...arc.map(b => b.z)).toFixed(2)}; side ` +
+      side.map(b => `${b.need.kind} z ${b.z.toFixed(2)} ${b.need.angle.toFixed(1)} deg`).join(', '));
+  const at30 = read(BAMBU);
+  check('...the same set as at Bambu\'s own 30', at30.tris.length === 6 && near(at30.area, at.area, 1e-9) && JSON.stringify(at30.areas) === JSON.stringify(at.areas),
+    `${at30.tris.length} triangles, ${at30.area.toFixed(2)} mm^2, areas ${at30.areas.join(', ')}`);
+  const old = read(60);
+  check('at the old 60: the 40 deg step joins (7 triangles, 301.88 mm^2, down to z 32.2)',
+    old.d.ok && old.d.regions.length === 1 && old.tris.length === 7 && JSON.stringify(old.tilts) === '[10,20,30,40]' && near(old.area, 301.88, 0.05) && near(old.zlo, 32.23, 0.02),
+    `${old.tris.length} triangles, steps ${old.tilts.join(', ')} deg, ${old.area.toFixed(2)} mm^2, z ${old.zlo.toFixed(2)} - ${old.zhi.toFixed(2)}`);
+  check('...and the hanging areas reach down the arc: 71 spots in 2 areas (70 + 1), the lowest at z 8.6, against 42 at 35',
+    JSON.stringify(old.areas) === '[70,1]' && old.spots === 71 && near(old.bzlo, 8.56, 0.02) && at.spots === 42,
+    `areas ${old.areas.join(', ')}, ${old.spots} spots, lowest z ${old.bzlo.toFixed(2)}; at 35: ${at.spots} spots`);
+  /* section 11's 45 deg chamfer band is steeper than 35: the card leaves it alone now */
+  const band = (SA.detectOverhangs(chamferBand(), { skipList: [], angleDeg: ANGLE, occluders: [] }).beacons || [])
+    .filter(b => near(b.normal[0], Math.SQRT1_2, 0.05) && near(b.normal[2], -Math.SQRT1_2, 0.05));
+  check('section 11\'s 45 deg chamfer band is not detected at the card\'s 35', band.length === 0, `${band.length} spot(s) on the band`);
+}
+
+coupon().catch(err => { check('the coupon builds', false, (err && err.stack) || String(err)); })
+  .then(overhangArc).catch(err => { check('the Simple Overhang Test reads', false, (err && err.stack) || String(err)); }).then(() => {
   console.log('\n' + (fail ? `FAILED  ${fail} of ${pass + fail}` : `PASSED  all ${pass}`));
   if (fail) { console.log('  ' + FAILS.join('\n  ')); process.exit(1); }
 });

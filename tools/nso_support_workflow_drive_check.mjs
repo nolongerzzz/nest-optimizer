@@ -8,15 +8,16 @@
  * in one area); piece B is that box beside a block with a tunnel through it
  * (the tunnel's ceiling hangs over its own floor, so with "May rest on the
  * part" off the plate cannot reach it); the wedge is library/v9_mirror_factory.stl
- * (187 x 34 x 21 mm, 49k triangles, 25 hanging areas at 60 deg).
+ * (187 x 34 x 21 mm, 49k triangles, 10 hanging areas at 35 deg, 25 at the old 60).
  *
  *   1  DETECT FIRST. Opening the card on a plate with one piece detects at
- *      once: "1 hanging area at 60 deg on <piece>", the area outlined (one outline of
+ *      once: "1 hanging area at 35 deg on <piece>", the area outlined (one outline of
  *      44 edges, not a grid), nothing generated, nothing in Undo; GENERATE on;
  *      the Paint disclosure is gone; the green build tag and the HUD's copy of
  *      the readout are not drawn.
  *   2  THE ANGLE is editable on the card and re-detects as it changes: 25 deg
- *      is below the underside's 30 deg (nothing hangs), 35 finds the area again.
+ *      is below the underside's 30 deg (nothing hangs), 60 finds the area again,
+ *      the label naming Bambu's 30 beside either; back to the default 35.
  *   3  EDIT BEFORE GENERATE. A click on the outline leaves the area out (it dims,
  *      GENERATE off); a click puts it back; Shift-click on the wall adds a spot
  *      (an area of its own, outlined like the rest). Each is one Undo.
@@ -38,10 +39,11 @@
  *      unsupported, with its row.
  *   8  SELECTING A PIECE while the card is open detects there at once (a click
  *      on the piece, or the app's own selection from the Pieces list).
- *   9  THE WEDGE (the piece that used to hang): detect on open, 25 areas at once (at the default 60 deg);
- *      Generate over all 25 ends BUILT in seconds (the planner has a spatial
- *      index now), the three counts pinned. The watchdog is section 8's.
- *      Its build shows well over 10 progress updates, planning 427 / 427 and
+ *   9  THE WEDGE (the piece that used to hang): detect on open, 10 areas at once
+ *      (at the default 35 deg; 25 at the old 60, pinned); Generate over all 10
+ *      ends BUILT in seconds (the planner has a spatial index now), the three
+ *      counts pinned. The watchdog is section 8's.
+ *      Its build shows well over 10 progress updates, planning 326 / 326 and
  *      building n / n both at 100 % before BUILT; Escape in the middle of
  *      planning terminates the real worker and changes nothing.
  *  10  PROGRESS. One bar, 0 to 100 % over the whole build, one phase word at a
@@ -73,9 +75,9 @@ import { join } from 'node:path';
 import { serveRoot, routeCdn, mkCheck, launchOpts, ROOT } from './cth-test/browser-lib.mjs';
 
 const check = mkCheck();
-/* The wedge (section 9) pinned: spots held / unsupported / unreachable over 25 areas, and the time budget. */
+/* The wedge (section 9) pinned: areas held / unsupported / unreachable over its 10 areas at 35 deg, and the time budget. */
 /* (measured: 51 supports in ~30.5 s on this box, twice; the default watchdog is 60 s) */
-const WEDGE_HELD = 25, WEDGE_UNSUPPORTED = 0, WEDGE_UNREACHABLE = 0, WEDGE_BUILD_MS = 50000;
+const WEDGE_HELD = 10, WEDGE_UNSUPPORTED = 0, WEDGE_UNREACHABLE = 0, WEDGE_BUILD_MS = 50000;
 /* The clamp (section 11): 23-27 s here with the weld (16 s of it), 8.4-8.9 s without. */
 const CLAMP_BUILD_MS = 30000;
 const SHOTS = join(ROOT, 'tools', 'supports-out');
@@ -383,9 +385,11 @@ async function main() {
   await frames(page);
   c = await T.card();
   v = await T.view();
-  check('opening Supports (the only piece, nothing selected) detects at once: IDLE, "1 hanging area at 60° on tilted"',
-    [c.state, c.line, c.angle], ['idle', '1 hanging area at 60' + DEG + ' on tilted', '60']);
-  check('...the angle defaults to 60\u00b0, labelled with Bambu\'s own number', c.note, '60\u00b0 \u00b7 Bambu 30\u00b0');
+  check('opening Supports (the only piece, nothing selected) detects at once: IDLE, "1 hanging area at 35° on tilted"',
+    [c.state, c.line, c.angle], ['idle', '1 hanging area at 35' + DEG + ' on tilted', '35']);
+  check('...the angle defaults to 35\u00b0, Bambu\'s own 30\u00b0 named beside it', c.note, '35\u00b0 \u00b7 Bambu 30\u00b0');
+  check('...the field says what the number means: faces within it of horizontal get support',
+    await page.evaluate(() => /^Faces within this many degrees of horizontal get support\. /.test(document.getElementById('sup-angle').title)), true);
   check('...GENERATE is the one live button; Angle, Style, Size and May-rest are live; Remove all and Remove are out of sight',
     [c.go, c.removeAll.shown, c.remove.shown, c.controls, c.locked, c.rows.shown], [{ text: 'Generate', on: true }, false, false, [true, true, true, true], false, false]);
   check('...nothing is built and nothing was added to Undo', [(await T.sups()).length, await T.undoDepth()], [0, 0]);
@@ -411,21 +415,21 @@ async function main() {
   check('25° is below the underside\'s 30°: nothing hangs, no outline, GENERATE off',
     [c.state, c.line.startsWith('Nothing hangs in air'), await T.outlines(), c.go.on], ['nothing', true, null, false]);
   await T.shot('02-angle-25-nothing.png');
-  await page.fill('#sup-angle', '35');
-  await page.waitForFunction(() => window.NSO_SUPPORTS_CARD.view().angle === 35, null, { timeout: 10000 });
+  await page.fill('#sup-angle', '60');
+  await page.waitForFunction(() => window.NSO_SUPPORTS_CARD.view().angle === 60, null, { timeout: 10000 });
   await frames(page);
   c = await T.card();
-  check('35° finds the area again: "1 hanging area at 35° on tilted", outlined, GENERATE on',
-    [c.state, c.line, (await T.outlines()).areas.length, c.go.on], ['idle', '1 hanging area at 35' + DEG + ' on tilted', 1, true]);
-  check('...and the label follows the field', c.note, '35\u00b0 \u00b7 Bambu 55\u00b0');
+  check('60° finds the area again: "1 hanging area at 60° on tilted", outlined, GENERATE on',
+    [c.state, c.line, (await T.outlines()).areas.length, c.go.on], ['idle', '1 hanging area at 60' + DEG + ' on tilted', 1, true]);
+  check('...the label follows the field, Bambu\'s 30 beside it (the same measure: no 90 minus)', c.note, '60\u00b0 \u00b7 Bambu 30\u00b0');
   await page.fill('#sup-angle', '95');
   await frames(page);
   c = await T.card();
-  check('an angle outside 1..89 is refused in words and changes nothing', [c.line, (await T.view()).angle], ['The angle is between 1' + DEG + ' and 89' + DEG + '.', 35]);
-  await page.fill('#sup-angle', '60');
-  await page.waitForFunction(() => window.NSO_SUPPORTS_CARD.view().angle === 60 && window.NSO_SUPPORTS_CARD.view().state === 'idle', null, { timeout: 10000 });
+  check('an angle outside 1..89 is refused in words and changes nothing', [c.line, (await T.view()).angle], ['The angle is between 1' + DEG + ' and 89' + DEG + '.', 60]);
+  await page.fill('#sup-angle', '35');
+  await page.waitForFunction(() => window.NSO_SUPPORTS_CARD.view().angle === 35 && window.NSO_SUPPORTS_CARD.view().state === 'idle', null, { timeout: 10000 });
   await frames(page);
-  check('back at 60°: the first line again', (await T.card()).line, '1 hanging area at 60' + DEG + ' on tilted');
+  check('back at 35°: the first line again', [(await T.card()).line, (await T.card()).note], ['1 hanging area at 35' + DEG + ' on tilted', '35\u00b0 \u00b7 Bambu 30\u00b0']);
   check('the angle is a setting, not an edit: Undo is still empty', await T.undoDepth(), 0);
   await page.evaluate(() => document.activeElement && document.activeElement.blur());
 
@@ -435,19 +439,19 @@ async function main() {
   xy = await T.areaXY(0);
   await T.oneStep('Leaving the area out', async () => { await page.mouse.click(xy[0], xy[1]); });
   c = await T.card();
-  check('the count drops: "0 hanging areas at 60° on tilted · 1 left out", still IDLE', [c.state, c.line], ['idle', '0 hanging areas at 60' + DEG + ' on tilted · 1 left out']);
+  check('the count drops: "0 hanging areas at 35° on tilted · 1 left out", still IDLE', [c.state, c.line], ['idle', '0 hanging areas at 35' + DEG + ' on tilted · 1 left out']);
   check('...the outline dims to grey', (await T.outlines()).areas.map((a) => [a.kind, a.colour]), [['off', 0x7b8494]]);
   check('...GENERATE is off (nothing to build), and nothing was built', [c.go.on, (await T.sups()).length], [false, 0]);
   await T.hudClean('left out');
   await T.shot('03-area-left-out.png');
   await T.clickUndo();
   c = await T.card();
-  check('Undo puts it back: "1 hanging area", white', [c.line, (await T.outlines()).areas[0].kind], ['1 hanging area at 60' + DEG + ' on tilted', 'on']);
+  check('Undo puts it back: "1 hanging area", white', [c.line, (await T.outlines()).areas[0].kind], ['1 hanging area at 35' + DEG + ' on tilted', 'on']);
   await T.oneStep('Leaving the area out again', async () => { await page.mouse.click(xy[0], xy[1]); });
   await T.oneStep('Putting it back', async () => { await page.mouse.click(xy[0], xy[1]); });
   c = await T.card();
   check('a click on the grey outline puts it back: white, GENERATE on, nothing built',
-    [c.line, (await T.outlines()).areas[0].kind, c.go.on, (await T.sups()).length], ['1 hanging area at 60' + DEG + ' on tilted', 'on', true, 0]);
+    [c.line, (await T.outlines()).areas[0].kind, c.go.on, (await T.sups()).length], ['1 hanging area at 35' + DEG + ' on tilted', 'on', true, 0]);
 
   const wall = await page.evaluate(() => {
     const p = state.placed.find((q) => q.mesh && !state.models.find((m) => m.id === q.sourceId).nsoSupport);
@@ -473,18 +477,18 @@ async function main() {
   c = await T.card();
   v = await T.view();
   check('Shift-click on the wall adds one spot: an area of its own, one Undo step',
-    [c.line, v.areas.length, v.beacons.filter((b) => b.manual).length, await T.undoDepth()], ['2 hanging areas at 60' + DEG + ' on tilted', 2, 1, d3 + 1]);
+    [c.line, v.areas.length, v.beacons.filter((b) => b.manual).length, await T.undoDepth()], ['2 hanging areas at 35' + DEG + ' on tilted', 2, 1, d3 + 1]);
   check('...both areas outlined the same way', (await T.outlines()).areas.map((a) => [a.area, a.kind, a.colour]), [[0, 'on', 0xffffff], [1, 'on', 0xffffff]]);
   await T.hudClean('added spot');
   await T.shot('04-spot-added.png');
   xy = await T.screenOf(wall.p);
   await T.oneStep('Leaving the new area out', async () => { await page.mouse.click(xy[0], xy[1]); });
   check('a click on its outline dims just that area: "1 hanging area ... · 1 left out"',
-    [(await T.card()).line, (await T.outlines()).areas.map((a) => [a.area, a.kind])], ['1 hanging area at 60' + DEG + ' on tilted · 1 left out', [[0, 'on'], [1, 'off']]]);
+    [(await T.card()).line, (await T.outlines()).areas.map((a) => [a.area, a.kind])], ['1 hanging area at 35' + DEG + ' on tilted · 1 left out', [[0, 'on'], [1, 'off']]]);
   await T.clickUndo();
-  check('Undo: both areas again', (await T.card()).line, '2 hanging areas at 60' + DEG + ' on tilted');
+  check('Undo: both areas again', (await T.card()).line, '2 hanging areas at 35' + DEG + ' on tilted');
   await T.clickUndo();
-  check('Undo again takes the spot away', [(await T.card()).line, (await T.view()).beacons.length, await T.undoDepth()], ['1 hanging area at 60' + DEG + ' on tilted', 120, d3]);
+  check('Undo again takes the spot away', [(await T.card()).line, (await T.view()).beacons.length, await T.undoDepth()], ['1 hanging area at 35' + DEG + ' on tilted', 120, d3]);
 
   // =======================================================================
   console.log('\n--- 4. GENERATE: BUILDING ---');
@@ -554,7 +558,7 @@ async function main() {
   c = await T.card();
   check('REMOVE ALL: every support off the plate, the card back in IDLE, the area still outlined',
     [(await T.sups()).length, c.state, c.line, c.go, c.removeAll.shown, (await T.outlines()).areas.map((a) => a.kind)],
-    [0, 'idle', '1 hanging area at 60' + DEG + ' on tilted', { text: 'Generate', on: true }, false, ['on']]);
+    [0, 'idle', '1 hanging area at 35' + DEG + ' on tilted', { text: 'Generate', on: true }, false, ['on']]);
   await T.clickUndo();
   check('Undo puts the same pieces back and the card reads BUILT', [T.ids(await T.sups()), (await T.card()).state], [built1, 'built']);
 
@@ -622,8 +626,8 @@ async function main() {
   /* Into the tunnel from the front, a little above and to the side. */
   await T.look([80, 20, 15], [0.12, -1, 0.3], 150);
   c = await T.card();
-  check('the box and the tunnel block: IDLE at once, "2 hanging areas at 60° on with-tunnel", each outlined in white',
-    [c.state, c.line, (await T.outlines()).areas.map((a) => [a.area, a.kind])], ['idle', '2 hanging areas at 60' + DEG + ' on with-tunnel', [[0, 'on'], [1, 'on']]]);
+  check('the box and the tunnel block: IDLE at once, "2 hanging areas at 35° on with-tunnel", each outlined in white',
+    [c.state, c.line, (await T.outlines()).areas.map((a) => [a.area, a.kind])], ['idle', '2 hanging areas at 35' + DEG + ' on with-tunnel', [[0, 'on'], [1, 'on']]]);
   await T.shot('11-two-areas.png');
   await T.oneStep('Generate', () => page.click('#btn-sup-all'));
   c = await T.card();
@@ -692,8 +696,8 @@ async function main() {
   await page.mouse.click(cA[0], cA[1]);
   await frames(page);
   c = await T.card();
-  check('a click on the first piece detects there at once: "1 hanging area at 60° on tilted", outlined, nothing generated',
-    [c.state, c.line, (await T.outlines()).kids, (await T.sups()).length, await T.undoDepth()], ['idle', '1 hanging area at 60' + DEG + ' on tilted', 1, 0, dSel]);
+  check('a click on the first piece detects there at once: "1 hanging area at 35° on tilted", outlined, nothing generated',
+    [c.state, c.line, (await T.outlines()).kids, (await T.sups()).length, await T.undoDepth()], ['idle', '1 hanging area at 35' + DEG + ' on tilted', 1, 0, dSel]);
   await T.shot('13-select-a.png');
   await page.evaluate((i) => selectPlaced(i), 1);
   await page.waitForFunction((id) => window.NSO_SUPPORTS_CARD.host() === id, ids[1], { timeout: 10000 });
@@ -720,32 +724,32 @@ async function main() {
   const openMs = Date.now() - tOpen;
   c = await T.card();
   v = await T.view();
-  check('opening Supports on the wedge detects at once: 25 hanging areas outlined, nothing generated',
-    [c.state, c.line, (await T.outlines()).kids, (await T.sups()).length, await T.undoDepth()], ['idle', '25 hanging areas at 60' + DEG + ' on v9_mirror_factory', 25, 0, 0]);
+  check('opening Supports on the wedge detects at once: 10 hanging areas outlined, nothing generated',
+    [c.state, c.line, (await T.outlines()).kids, (await T.sups()).length, await T.undoDepth()], ['idle', '10 hanging areas at 35' + DEG + ' on v9_mirror_factory', 10, 0, 0]);
   console.log('       detect on open: ' + openMs + ' ms, ' + v.beacons.length + ' spots in ' + v.areas.length + ' areas; biggest area ' + Math.max(...v.areas.map((a) => a.count)) + ' spots');
   await T.shot('15-wedge-detected.png');
-  await page.fill('#sup-angle', '30');
-  await page.waitForFunction(() => window.NSO_SUPPORTS_CARD.view().angle === 30, null, { timeout: 15000 });
-  await frames(page);
-  c = await T.card();
-  const at30 = c.line;
-  check('the angle re-detects on the wedge too: the line says 30°', /^\d+ hanging areas? at 30° on v9_mirror_factory/.test(at30), true);
-  console.log('       at 30 deg: ' + at30);
   await page.fill('#sup-angle', '60');
   await page.waitForFunction(() => window.NSO_SUPPORTS_CARD.view().angle === 60, null, { timeout: 15000 });
+  await frames(page);
+  c = await T.card();
+  v = await T.view();
+  check('the angle re-detects on the wedge too: at the old default 60°, 25 areas, 427 spots (326 at 35°)',
+    [c.line, v.beacons.length], ['25 hanging areas at 60' + DEG + ' on v9_mirror_factory', 427]);
+  await page.fill('#sup-angle', '35');
+  await page.waitForFunction(() => window.NSO_SUPPORTS_CARD.view().angle === 35, null, { timeout: 15000 });
   await page.evaluate(() => document.activeElement && document.activeElement.blur());
   await frames(page);
 
-  /* The build that used to hang: the 377 spots under the slab took the planner
-     minutes (nso_support_aim.js's inside test walked every triangle on every
-     probe). With the spatial index it takes seconds, so Generate over all 25
-     areas ENDS BUILT, inside the default 60 s watchdog. The watchdog path is
+  /* The build that used to hang: the 377 spots under the slab (at 60 deg; 317
+     at 35) took the planner minutes (nso_support_aim.js's inside test walked
+     every triangle on every probe). With the spatial index it takes seconds,
+     so Generate over all 10 areas ENDS BUILT, inside the default 60 s watchdog. The watchdog path is
      covered by section 8's planner that never answers, not by this piece. */
   before = await T.plate();
   const wedgeSpots = (await T.view()).beacons.length;
   await T.watch();
   const tb = Date.now();
-  await T.oneStep('Generate over all 25 areas', () => page.click('#btn-sup-all'));
+  await T.oneStep('Generate over all 10 areas', () => page.click('#btn-sup-all'));
   const buildMs = Date.now() - tb;
   const wedgeRun = await T.unwatch();
   await frames(page);
@@ -753,10 +757,10 @@ async function main() {
   v = await T.view();
   const nSup = (await T.sups()).length;
   console.log('       BUILT: ' + c.line + '  (' + (buildMs / 1000).toFixed(1) + ' s); stats ' + JSON.stringify(v.stats));
-  check('Generate over all 25 areas ends BUILT, inside the watchdog and well inside the old planner\'s minutes',
+  check('Generate over all 10 areas ends BUILT, inside the watchdog and well inside the old planner\'s minutes',
     [c.state, c.bar.shown, c.locked, buildMs < WEDGE_BUILD_MS], ['built', false, false, true]);
-  check('...with the three counts pinned, which add up to all 25 areas',
-    [v.stats.held, v.stats.unsupported, v.stats.unreachable, v.stats.held + v.stats.unsupported + v.stats.unreachable], [WEDGE_HELD, WEDGE_UNSUPPORTED, WEDGE_UNREACHABLE, 25]);
+  check('...with the three counts pinned, which add up to all 10 areas',
+    [v.stats.held, v.stats.unsupported, v.stats.unreachable, v.stats.held + v.stats.unsupported + v.stats.unreachable], [WEDGE_HELD, WEDGE_UNSUPPORTED, WEDGE_UNREACHABLE, 10]);
   check('...the line is the three counts', c.line, BUILT(nSup, v.stats.held, v.stats.unsupported, v.stats.unreachable));
   check('...a row for every area that is not held', c.rows.list.length, v.stats.unsupported + v.stats.unreachable);
   await T.shot('17-wedge-built.png');
@@ -900,7 +904,7 @@ async function main() {
   await page.waitForFunction(() => /hanging area/.test(window.NSO_SUPPORTS_CARD.view().count), null, { timeout: 60000 });
   c = await T.card();
   const clampSpots = (await T.view()).beacons.length;
-  check('the clamp, standing: detected at once at the card\'s defaults', /^\d+ hanging areas? at 60° on clamp_body/.test(c.line), true);
+  check('the clamp, standing: detected at once at the card\'s defaults', /^\d+ hanging areas? at 35° on clamp_body/.test(c.line), true);
   console.log('       ' + c.line + ', ' + clampSpots + ' spots');
   await T.watch();
   const tc = Date.now();

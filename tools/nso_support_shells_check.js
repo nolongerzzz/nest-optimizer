@@ -5,7 +5,7 @@
 // shell, one support object holding the trunks whose feet touch and the sheet
 // over their tips. A slicer fills an object's overlapping shells as one, so
 // the printed layers must be the welded support's. This holds it, piece by
-// piece, area by area, at the card's defaults (angle 60, Tree, 1.2 mm, rest
+// piece, area by area, at the card's defaults (angle 35, Tree, 1.2 mm, rest
 // off, the sheet on):
 //
 //   1. THE SAME SUPPORTS. shells() groups the parts into the solids weld()
@@ -75,7 +75,7 @@ for (const f of ['nso_thickness.js', 'nso_support_beacons.js', 'nso_support_aim.
   vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), ctx, { filename: f });
 }
 const SA = ctx.NSO_SupportAim, ST = ctx.NSO_SupportTree, GP = ctx.NSO_SupportGridpack;
-const CARD = { skipList: [], angleDeg: 60, occluders: [], style: 'tree', restOnModel: false, sideMm: 1.2 };
+const CARD = { skipList: [], angleDeg: 35, occluders: [], style: 'tree', restOnModel: false, sideMm: 1.2 };
 /* app-supports-card.js PARTS_OPTS, but for the feet: the card builds every
    trunk on its foot with no pad (footPads 'shared') and draws the pads over
    every area at once (shareFeet); here each area draws its own pads, so its
@@ -121,7 +121,7 @@ function tilted() {
 const PIECES = [
   ['top_clip_x2 (the coupon)', readSTL(path.join(ROOT, 'fixtures', 'supports', 'top_clip_x2_coupon.stl'))],
   ['clamp_body (standing)', standing(readSTL(path.join(ROOT, 'fixtures', 'supports', 'clamp_body.stl')))],
-  /* support:workflow's: many trunks on feet that touch, and 25 areas */
+  /* support:workflow's: many trunks on feet that touch, and 10 areas at 35 deg (25 at 60) */
   ['tilted box', tilted()],
   ['wedge (v9_mirror_factory)', readSTL(path.join(ROOT, 'library', 'v9_mirror_factory.stl'))],
   ['shelf', soupOf(box([0, 0, 0], [10, 10, 20]), box([10, 0, 16], [22, 10, 20]))],

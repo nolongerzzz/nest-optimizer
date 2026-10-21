@@ -6413,3 +6413,53 @@ and `pose:drive` re-pinned where they pinned the old axis.
 - `?v=`: `app-rotate-handles.js` detents1 -> leantip1, `app-core.js` punchb16 ->
   leantip1, on the ticket's instruction. `testStepWeights` `rotate:handles`
   255000 -> 275000.
+
+## Supports angle default - 35, and Bambu's 30 is from horizontal too (2026-10-21)
+Branch `claude/supports-angle-default`, off `claude-wip` 6f3354f. No engine change:
+`app-supports-card.js` (`ANGLE_DEFAULT`, `BAMBU_ANGLE`, the label), `index.html`
+(the field's value, tooltip, label), docs, the fixture, and the checks that built
+"at the card's defaults" with 60.
+
+- **The finding (owner's measurement).** On the Simple Overhang Test (an arc
+  whose underside steps 10, 20 ... 80 deg off horizontal), Bambu Studio, tree
+  slim, threshold 30, supported only the arc's underside within 30 deg of
+  HORIZONTAL - z 41.4 - 46.2, 254 mm^2 (its support transition / interface
+  layers, read from the owner's slice: z 41.4 - 46.2) - and printed the 40 - 60
+  deg stretch (175 mm^2) as overhang walls, no support. The card's "60 deg -
+  Bambu 30 deg" assumed Bambu measures from vertical; it does not. NSO's angle
+  already meant "faces within N deg of horizontal" (`n.z < -cos(angle)`), so
+  Bambu's 30 is NSO's 30, and 60 asked for supports Bambu leaves out.
+- **The change.** `ANGLE_DEFAULT` 60 -> 35 (owner: a hair more sensitive than
+  Bambu's 30). The label is the card's number and Bambu's default side by side,
+  "35 deg - Bambu 30 deg" - no more 90 minus. The tooltip says what the number
+  means: "Faces within this many degrees of horizontal get support."
+- **The arc, measured** (`support:test` section 13, on
+  `fixtures/supports/simple_overhang.3mf`): at 35 the triangle pass flags the
+  10, 20 and 30 deg steps only - 6 triangles, **259.06 mm^2 (+2.0 % on Bambu's
+  254)**, z 37.74 - 46.47 - the same set as at 30. The card's areas: the arc's
+  top (40 spots, z 38.0 - 46.3, every one on a 10 - 30 deg face) and two single
+  side spots on ridges at z 17.7 (27.5 / 28.8 deg, off the arc; there at 30
+  too). At the old 60: 7 triangles (half the 40 deg step joins), 301.88 mm^2,
+  down to z 32.23; the grid's areas reach down the arc, 71 spots in 2 areas
+  (70 + 1, the lowest at z 8.6) against 42. The rays down from the rest of the
+  40 - 60 deg faces land on the model's 2 mm base, so the triangle pass counts them
+  self-supported and the grid flags them as gap spots: the extra at 60 is 1.7x
+  the spots, not 2x the triangle area.
+- **What else moves at 35.** A 45 deg chamfer is no longer detected (section
+  11's band keeps its explicit 60; section 13 holds that the band is left at
+  35). The standing clamp: 262 spots in 4 areas (344 at 60) - area 1 loses the
+  45 deg chamfer at z 62-71 and its 69 side tips, area 3 goes 27 -> 14 spots
+  (docs/SUPPORT-INTERFACE.md section 4 table re-measured). The wedge: 326 spots
+  in 10 areas (427 in 25). The top_clip_x2 coupon and top_clip_x2 detect the
+  same at 35 as at 60, so `support:print-export`'s 3MF is unchanged.
+- **Re-pinned.** `support:workflow` (default line, label and tooltip; the angle
+  section now 25 -> 60 -> 95 -> back to 35; every "at 60" line to 35; the
+  wedge 25 -> 10 areas, `WEDGE_HELD` 25 -> 10, its 25 areas / 427 spots at 60
+  pinned as a comparison; the clamp's line regex). `support:test` section 12
+  (coupon) at 35, section 13 new. `CARD.angleDeg` 60 -> 35 in
+  `support:interface`, `support:shells`, `support:print-export`,
+  `slicer:supports` - every one passes unchanged at 35 (131, 81, -, 26).
+- `support:card` fails identically on the base (it drives the pre-detect-first
+  card and is out of `testSteps`); not touched.
+- `?v=`: `app-supports-card.js` print3 -> angle35, on the ticket's instruction.
+  `testStepWeights` `support:test` 17000 -> 17500.

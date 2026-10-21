@@ -8,7 +8,7 @@
    DETECT FIRST. Opening the card, or picking another piece while it is open,
    runs detection at once on the selected piece (the only piece on the plate,
    when nothing is selected). Every hanging area is outlined, and the card says
-   "N hanging areas at 60\u00b0 on <piece>" with the angle editable right there:
+   "N hanging areas at 35\u00b0 on <piece>" with the angle editable right there:
    a new angle re-detects. Nothing is generated yet.
    IDLE      the areas are editable before GENERATE: a click on an outline
              leaves that area out (it dims) or puts it back; Shift-click on the
@@ -82,7 +82,16 @@ var NSO_SUPPORTS_CARD = (function () {
      is left out, red when the plate could not reach all of it. */
   var OUTLINE = { on: 0xffffff, off: 0x7b8494, red: 0xff2d2d };
   var OUTLINE_ALPHA = { on: 0.55, off: 0.6, red: 0.95 };
-  var ANGLE_DEFAULT = 60;        // faces within 60 deg of horizontal: Bambu's 30 deg overhang threshold (90 - 60)
+  /* The angle is the tilt off the plate: a face within ANGLE of horizontal
+     hangs (nso_support_aim.js: n.z < -cos(angle)). Bambu's support threshold
+     is measured the same way, from horizontal - not from vertical - so its 30
+     is our 30 (measured on fixtures/supports/simple_overhang.3mf: Bambu, tree
+     slim at 30, supported only the arc's underside within 30 deg of
+     horizontal, z 41.4 - 46.2, 254 mm^2, and printed the 40 - 60 deg stretch
+     as overhang walls). The default is a hair more sensitive than Bambu's;
+     the label names Bambu's for comparison. */
+  var ANGLE_DEFAULT = 35;
+  var BAMBU_ANGLE = 30;          // Bambu Studio's default support_threshold_angle
   var ANGLE_MIN = 1, ANGLE_MAX = 89;
   var ANGLE_DEBOUNCE_MS = 220;   // typing "3" on the way to "30" does not detect at 3
   var JOIN_PITCHES = 1.5;        // a manual beacon this close to a region joins it (the grid's own z rule)
@@ -596,7 +605,7 @@ var NSO_SUPPORTS_CARD = (function () {
     en('btn-sup-remove', cs === 'built' && S.selSupport != null && !!modelOf(S.selSupport));
     ['sup-angle', 'sup-style', 'sup-size', 'sup-rest'].forEach(function (id) { var e = $(id); if (e) e.disabled = !!S.busy; });
     var note = $('sup-angle-note');
-    if (note) note.textContent = S.angle + '\u00b0 \u00b7 Bambu ' + (90 - S.angle) + '\u00b0';
+    if (note) note.textContent = S.angle + '\u00b0 \u00b7 Bambu ' + BAMBU_ANGLE + '\u00b0';
     var ang = $('sup-angle');
     if (ang && document.activeElement !== ang && ang.value !== String(S.angle)) ang.value = String(S.angle);
     drawRows(cs === 'built' && st ? rowsFor(eff, st) : []);
