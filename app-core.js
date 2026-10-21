@@ -3679,7 +3679,9 @@ function bringSelectedToPlate() {
   setStatus('On the plate - ' + (moved < 0 ? 'up ' : 'down ') + Math.abs(moved).toFixed(2) + ' mm');
 }
 
-/* Tilt ←/→: 15° about the piece's own width line (own Z), end-over-end.
+/* Tilt ←/→: 15° about the 'ss' lean ring's axis - a level side of the
+   piece's footprint, its own width line (own Z) while it lies as loaded -
+   end-over-end, never a yaw (app-rotate-handles.js leanAxes).
    dir +1 is Tilt →: a negative turn about own Z, which on a flat, un-turned
    piece lifts its LEFT end, as the title says; Tilt ← lifts the right. It
    used to be the other way round (+15 on tiltZ for →, lifting the right end
@@ -3690,8 +3692,9 @@ function bankSelected(dir) {
   setStatus('Bank ' + (dir > 0 ? '→' : '←') + ' 15°');
 }
 
-/* Tilt ↑/↓: 15° about the piece's own length (own X), front edge over back.
-   dir +1 is Tilt ↑: on a flat, un-turned piece +15 about X raises -Z, the
+/* Tilt ↑/↓: 15° about the 'fb' lean ring's axis - a level side of the
+   piece's footprint, its own length (own X) while it lies as loaded - front
+   edge over back. dir +1 is Tilt ↑: on a flat, un-turned piece +15 about X raises -Z, the
    far edge, as the title says. The status names the step: tiltX is the lean
    about the PLATE's X, which is not this once the piece has been turned. */
 function tiltSelected(dir) {

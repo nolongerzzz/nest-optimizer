@@ -331,11 +331,14 @@ withApp(async (page, logs) => {
   r = await N(q => window.__d.delta(q), start.q);
   check('...and the next takes back the Stand: flat again', r.deg < 1e-6, r.deg.toExponential(2) + '°');
 
-  /* Reported, not a defect: Tip on side stands the piece's width line
-     upright, and Tilt ←/→ turn about that line - so here they spin it on the
-     plate, by definition of "its own width line". The old tiltZ write did the
-     same (innermost factor). */
-  console.log('\n=== 2b. Tip on side, then Tilt ← (report) ===');
+  /* Tip on side stands the piece's own width line (own Z) upright. Tilt ←/→
+     used to turn about that line all the same - so here they spun it on the
+     plate, as the old tiltZ write (innermost factor) did. The lean rings'
+     axes are the level sides of the footprint now (app-rotate-handles.js
+     leanAxes), re-read at every press, so after a Tip the Tilt is a lean:
+     about a level line, the upright width line tipping 15° off vertical.
+     Turn is the only control that turns the piece about the vertical. */
+  console.log('\n=== 2b. Tip on side, then Tilt ←: a lean, not a spin ===');
   await press('#btn-flip');
   const side = await N(() => ({ q: window.__d.q(), ownZ: window.__d.own([0, 0, 1]) }));
   check('Tip on side stood the piece\'s own Z (its width line) upright', near(Math.abs(side.ownZ[1]), 1, 1e-9), fmtAxis(side.ownZ));
@@ -343,8 +346,11 @@ withApp(async (page, logs) => {
   await press('#btn-bank-dn');
   r = await N(q => window.__d.delta(q), side.q);
   console.log('   old tiltZ += 15 from this pose would have been ' + old2b.deg.toFixed(3) + '° about ' + fmtAxis(old2b.axis));
-  check('Tilt ← turns it 15° about its own width line - vertical here, so it spins in place',
-    near(r.deg, 15, 1e-6) && same(r.axis, side.ownZ), r.deg.toFixed(9) + '° about ' + fmtAxis(r.axis));
+  const sideTilt = await N(() => ({ ownZ: window.__d.own([0, 0, 1]) }));
+  const offUp = Math.acos(Math.min(1, Math.abs(sideTilt.ownZ[1]))) * 180 / Math.PI;
+  check('Tilt ← turns it 15° about a level line - a side of its footprint, not its upright width line',
+    near(r.deg, 15, 1e-6) && Math.abs(r.axis[1]) < 1e-9 && !same(r.axis, side.ownZ), r.deg.toFixed(9) + '° about ' + fmtAxis(r.axis));
+  check('...so it leans: the width line that stood upright is now 15° off vertical', near(offUp, 15, 1e-6), offUp.toFixed(9) + '°');
   await shot(page, '02d-tipped-on-side-tilt-left-front');
   await undo(); await undo();
   r = await N(q => window.__d.delta(q), start.q);
@@ -470,10 +476,15 @@ withApp(async (page, logs) => {
   await openMenu('menu-tip');
   const qT = await N(() => window.__d.q());
   const wT = await N(() => window.__d.own([0, 0, 1]));
+  const sT = await N(() => window.nsoRotate.ringAxis('ss'));
   for (let i = 0; i < 2; i++) { await press('#btn-bank-up'); chain.push(await N(() => window.__d.q())); }
   r = await N(q => window.__d.delta(q), qT);
-  check('Tilt → twice on top of that: 30° about its own width line as it lay', near(r.deg, 30, 1e-6) && same(r.axis, wT),
-    r.deg.toFixed(9) + '° about ' + fmtAxis(r.axis) + ', own Z was ' + fmtAxis(wT));
+  /* Rolled 45° its width line is 45° off level, so the lean ring's axis is
+     the footprint's level side across its length instead (leanAxes): the
+     Tilt tips it end over end, with no turn about the vertical. */
+  check('Tilt → twice on top of that: 30° about the side/side lean ring\'s level axis as it lay',
+    near(r.deg, 30, 1e-6) && same(r.axis, sT) && Math.abs(r.axis[1]) < 1e-9,
+    r.deg.toFixed(9) + '° about ' + fmtAxis(r.axis) + ', ring axis was ' + fmtAxis(sT) + ', own Z was ' + fmtAxis(wT));
   await shot(page, '04e-leaned-turned-and-tilted-camA');
 
   /* ------------------------------------------------------------------- 5 */

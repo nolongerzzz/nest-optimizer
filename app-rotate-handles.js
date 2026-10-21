@@ -21,12 +21,13 @@
 
    WHAT THIS DOES INSTEAD.
 
-   Turn is about the plate's vertical; the two leans are about the PIECE's
-   own axes as it lies - the ring on its own X and the ring on its own Z - so
-   each lean ring is drawn in the piece's frame and the ring you grab is the
-   motion you get (frameOf). A Turn step is premultiplied onto the piece's
-   orientation, a lean step postmultiplied (turned), and either way the
-   result is decomposed back into the SAME pose fields,
+   Turn is about the plate's vertical; the two leans are about the two sides
+   of the piece's FOOTPRINT - level lines in the plate's plane, the long side
+   and the short side of the rectangle it covers on the plate as it lies
+   right now - so each lean ring stands upright on the plate and the ring you
+   grab is the motion you get (frameOf, leanAxes). Every step, Turn or lean,
+   is premultiplied onto the piece's orientation, about a WORLD axis
+   (turned), and the result is decomposed back into the SAME pose fields,
    in the same XYZ order applyMeshRotation composes them in (writePose below).
    Nothing that reads those fields has to know this file exists: export, Undo
    snapshots, Join's NSO_rotateRawSoupByPlacedPose, Mirror and the Tip menu
@@ -38,15 +39,26 @@
    WHAT THE LEANS ARE CALLED follows the piece's footprint (leanMap). "Lean
    front/back" is the lean that tips the piece ALONG the long dimension of its
    footprint as it lies - its two ends rise and fall - and "Lean side/side"
-   tips it ACROSS - one long edge rises. The rings themselves do not move:
-   they stay on the piece's own X and Z, and a ring's id ('fb' = own X, 'ss' =
-   own Z) names that axis, as Tilt and the checks have always called it. Only
-   which ring carries which NAME, colour and card row is looked up, from the
-   footprint, every time it is asked - so a Turn, a Tip, a Scale or a bake
-   that changes the footprint changes the names with no event to forget. A
-   footprint within 5% of square has no long side: there the old mapping
-   stands (front/back = own X). During a drag the names are held, so the ring
-   in your hand does not change colour under it.
+   tips it ACROSS - one long edge rises. A ring's id ('fb', 'ss') is a slot:
+   'fb' is the footprint side nearer the piece's own X, 'ss' the other, so on
+   a piece lying as it was loaded they are its own X and Z, as Tilt and the
+   checks have always called them. Which slot carries which NAME, colour and
+   card row is looked up, from the footprint, every time it is asked - so a
+   Turn, a Tip, a Scale or a bake that changes the footprint changes the
+   names with no event to forget. A footprint within 5% of square has no long
+   side: there the old mapping stands (front/back = 'fb'). During a drag the
+   names and the dragged ring's axis are held, so the ring in your hand does
+   not change colour or swing under it.
+
+   WHY THE FOOTPRINT AND NOT THE PIECE'S OWN AXES. The leans used to be the
+   piece's own X and Z, turned with it. That is right while the piece lies
+   the way it was loaded, but Tip stands one of those axes upright - Tip on
+   side turns own Z to the vertical - and a lean about the vertical is a
+   turn: the dart yawed the piece. So the axes are re-derived from the
+   footprint at the moment a dart is pressed, a click is stepped or a ring is
+   drawn - after every Tip, Flip, Turn, lean and bake - and a lean axis is
+   always level: never within 45 degrees of vertical, never a yaw. Turn is
+   the only control that turns the piece about the vertical.
 
    THE DARTS sit on a major (45 degree) tick of their ring, the one nearest the
    camera, and nowhere between ticks. They stay on it until the camera has
@@ -89,12 +101,12 @@
   /* The three rings. `e1, e2` span the ring's plane with e1 x e2 = axis, so a
      point at angle t, c + r (cos t e1 + sin t e2), moves the right-handed
      positive way about the axis as t grows. The ids are AXES: 'turn' the
-     plate's vertical, 'fb' the piece's own X, 'ss' its own Z - whatever the
-     ring is called on screen (LOOKS, leanMap). */
+     plate's vertical, 'fb' the footprint side nearer the piece's own X, 'ss'
+     the other side - whatever the ring is called on screen (LOOKS, leanMap). */
   var RINGS = {
     turn: { frame: 'plate', axis: [0, 1, 0], e1: [0, 0, 1], e2: [1, 0, 0] },
-    fb:   { frame: 'piece', local: [1, 0, 0] },
-    ss:   { frame: 'piece', local: [0, 0, 1] }
+    fb:   { frame: 'footprint' },
+    ss:   { frame: 'footprint' }
   };
   /* What a ring is called, coloured and boxed as. Keyed by ROLE: 'fb' is the
      lean along the footprint's long side, 'ss' the lean across it. Colours
@@ -108,39 +120,85 @@
 
   /* WHICH AXIS EACH RING IS. Turn is the plate's vertical, always: it stays
      level, and a turn is about the plate however the piece lies. The two
-     leans are the PIECE's own axes as it currently lies, so they turn with
-     it - at rest exactly #135's rings, plate X and plate Z, and after that
-     wherever the piece has taken them. The 'fb' ring is its own X, its
-     length if it lies along X: its ring lies ACROSS the piece and rolls it.
-     The 'ss' ring is its own Z, the line across its width: its ring runs
-     ALONG the piece and tips it end-over-end. Turn a bar 45 degrees and lean
-     it about its own Z: its long axis rises at the same 45 degree heading,
+     leans are the sides of the piece's footprint as it lies NOW (leanAxes):
+     at rest exactly #135's rings, plate X and plate Z; turned, the piece's
+     own length and width lines, so they turn with it; tipped, the two level
+     lines of the face it now rests on. Turn a bar 45 degrees and lean it
+     about its width line: its long axis rises at the same 45 degree heading,
      with no twist. A lean about the PLATE's axis there would have swung it
      sideways as it rose. Which of the two is CALLED front/back is leanMap's
      business, not the axis's.
 
+     The footprint is the rectangle the piece's bounding box covers on the
+     plate, oriented the way that covers least: its sides are tried along the
+     shadow of each of the piece's own axes (an axis standing upright casts
+     none), and the narrowest rectangle wins - for a piece lying square, its
+     own two level axes exactly. 'fb' takes the side nearer own X's shadow,
+     'ss' the other, each signed to point with own X (Z) where it can, so on
+     an untipped piece they ARE own X and Z, sign and all, and every lean
+     there is the turn it always was. Ties go to own X, then the first
+     side found, so the answer never flickers on a piece balanced at 45.
+
      frameOf gives a ring's axis A and the two vectors e1, e2 spanning its
      plane (e1 x e2 = A), in world terms, for the orientation q. For a lean
-     ring e1 is kept level - the horizontal line in the ring's plane - so the
-     ring's scale reads 0 with the piece's end flat and 90 with it upright,
-     and turning about A itself leaves A, and so the whole frame, where it was.
-     Only when A is straight up is there no level line; the piece's own most
-     nearly perpendicular axis stands in. */
+     ring e1 is the level line in the ring's plane, so the ring's scale reads
+     0 with the piece's end flat and 90 with it upright; A is level, so there
+     always is one. The ring in a drag keeps the frame it was pressed in
+     (drag.F): turning about A leaves A where it was, but the footprint it was
+     read off moves with the piece, and the axis in hand must not. */
   function frameOf(ring, q) {
     var R = RINGS[ring];
     if (R.frame === 'plate') return { A: v3(R.axis), e1: v3(R.e1), e2: v3(R.e2) };
-    var A = v3(R.local).applyQuaternion(q).normalize();
-    var e1 = v3(UP).cross(A);
-    if (e1.lengthSq() < 1e-12) {
-      var best = null, bl = -1;
-      [[1, 0, 0], [0, 1, 0], [0, 0, 1]].forEach(function (b) {
-        var w = v3(b).applyQuaternion(q), l = 1 - Math.pow(w.dot(A), 2);
-        if (l > bl) { bl = l; best = w; }
-      });
-      e1 = best.projectOnPlane(A);
-    }
-    e1.normalize();
+    if (drag && drag.ring === ring && drag.F) return drag.F;
+    var A = leanAxes(q)[ring];
+    var e1 = v3(UP).cross(A).normalize();
     return { A: A, e1: e1, e2: A.clone().cross(e1).normalize() };
+  }
+  var LEVEL_EPS = 1e-9;
+  function leanAxes(q, p) {
+    p = p || piece();
+    var own = [[1, 0, 0], [0, 1, 0], [0, 0, 1]].map(function (b) { return v3(b).applyQuaternion(q); });
+    var shadow = own.map(function (a) { return new THREE.Vector3(a.x, 0, a.z); });
+    var corners = [];
+    var g = p && p.mesh && p.mesh.geometry;
+    if (g && !g.boundingBox) g.computeBoundingBox();
+    var bb = g && g.boundingBox;
+    if (bb && !bb.isEmpty()) {
+      [bb.min.x, bb.max.x].forEach(function (x) {
+        [bb.min.y, bb.max.y].forEach(function (y) {
+          [bb.min.z, bb.max.z].forEach(function (z) { corners.push(new THREE.Vector3(x, y, z).applyQuaternion(q)); });
+        });
+      });
+    }
+    var span = function (d) {
+      var lo = Infinity, hi = -Infinity;
+      corners.forEach(function (c) { var t = c.dot(d); if (t < lo) lo = t; if (t > hi) hi = t; });
+      return corners.length ? hi - lo : 1;
+    };
+    var best = null;
+    shadow.forEach(function (s) {
+      if (s.lengthSq() < 1e-12) return;                    // upright: no shadow, no side
+      var d = s.clone().normalize(), n = new THREE.Vector3(d.z, 0, -d.x);
+      var area = span(d) * span(n);
+      if (!best || area < best.area * (1 - 1e-9)) best = { d: d, n: n, area: area };
+    });
+    if (!best) best = { d: v3([1, 0, 0]), n: v3([0, 0, 1]) };
+    var u = [best.d, best.n];
+    var lean = function (v, k) { return Math.abs(v.dot(shadow[k])); };
+    var score = function (v) { return lean(v, 0) - lean(v, 2); };
+    var diff = score(u[0]) - score(u[1]);
+    var fbI = Math.abs(diff) > LEVEL_EPS ? (diff > 0 ? 0 : 1)
+            : (lean(u[1], 0) > lean(u[0], 0) + LEVEL_EPS ? 1 : 0);
+    return { fb: signTo(u[fbI].clone(), [shadow[0], shadow[1], shadow[2]]),
+             ss: signTo(u[1 - fbI].clone(), [shadow[2], shadow[1], shadow[0]]) };
+  }
+  /* point v the way of the first of `prefs` it is not square to */
+  function signTo(v, prefs) {
+    for (var i = 0; i < prefs.length; i++) {
+      var t = v.dot(prefs[i]);
+      if (Math.abs(t) > LEVEL_EPS) return t < 0 ? v.negate() : v;
+    }
+    return v;
   }
   function pieceQ() {
     var p = piece();
@@ -183,9 +241,9 @@
     var big = Math.max(fp.w, fp.d);
     if (!(big > 0) || Math.abs(fp.w - fp.d) <= SQUARE_WITHIN * big) return old;
     var across = fp.w > fp.d ? v3([0, 0, 1]) : v3([1, 0, 0]);
-    var q = p.mesh.quaternion;
-    var x = Math.abs(v3(RINGS.fb.local).applyQuaternion(q).dot(across));
-    var z = Math.abs(v3(RINGS.ss.local).applyQuaternion(q).dot(across));
+    var ax = leanAxes(p.mesh.quaternion, p);
+    var x = Math.abs(ax.fb.dot(across));
+    var z = Math.abs(ax.ss.dot(across));
     if (Math.abs(x - z) < 1e-6) return old;
     return z > x ? { along: 'ss', across: 'fb', square: false }
                  : { along: 'fb', across: 'ss', square: false };
@@ -211,11 +269,11 @@
       return "A ring about the plate's vertical. Click an arrowhead to turn 1\u00b0, drag it to swing round the ring.";
     if (map.square)
       return role === 'fb'
-        ? "Tips the piece front over back, about its own X line: its front edge goes up as the back goes down, turning with the piece. (This footprint is square, so there is no long side to follow.)" + TIP_TAIL
-        : "Tips the piece side over side, about its own Z line: one side edge goes up as the other goes down, turning with the piece. (This footprint is square, so there is no long side to follow.)" + TIP_TAIL;
+        ? "Tips the piece front over back, about a level side of its footprint: its front edge goes up as the back goes down. (This footprint is square, so there is no long side to follow.)" + TIP_TAIL
+        : "Tips the piece side over side, about the other level side of its footprint: one side edge goes up as the other goes down. (This footprint is square, so there is no long side to follow.)" + TIP_TAIL;
     return role === 'fb'
-      ? "Tips the piece along its length: its two ends go up and down, turning with the piece." + TIP_TAIL
-      : "Tips the piece across its width: one long edge goes up as the other goes down, turning with the piece." + TIP_TAIL;
+      ? "Tips the piece along its length, about the level line across its footprint: its two ends go up and down." + TIP_TAIL
+      : "Tips the piece across its width, about the level line along its footprint: one long edge goes up as the other goes down." + TIP_TAIL;
   }
 
   /* ---- which rings, for this Rotate session ------------------------------
@@ -349,16 +407,14 @@
     if (typeof refreshOutline === 'function') refreshOutline(p);
   }
 
-  /* A turn of `deg` on a ring. Turn: R(vertical, deg) * q0, on the PLATE's
-     side - about the plate, whatever q0 already is. The leans: q0 * R(own
-     axis, deg), on the PIECE's side - about the piece's own axis as it lies.
-     (The same thing as R(q0 * axis, deg) * q0, which is why frameOf's A is the
-     axis the dial and the snap measure about.) */
-  function turned(q0, ring, deg) {
-    var R = RINGS[ring];
-    if (R.frame === 'plate')
-      return new THREE.Quaternion().setFromAxisAngle(v3(R.axis), deg * RAD).multiply(q0);
-    return q0.clone().multiply(new THREE.Quaternion().setFromAxisAngle(v3(R.local), deg * RAD));
+  /* A turn of `deg` on a ring: R(A, deg) * q0, on the PLATE's side - about a
+     world axis, whatever q0 already is. Turn's A is the vertical; a lean's is
+     the footprint side frameOf reads for q0 - or the one a drag holds, when
+     the caller hands it in. On a piece lying as loaded that is its own X or Z,
+     and R(q0 * axis, deg) * q0 is q0 * R(axis, deg): the lean it always was. */
+  function turned(q0, ring, deg, A) {
+    A = A || frameOf(ring, q0).A;
+    return new THREE.Quaternion().setFromAxisAngle(A, deg * RAD).multiply(q0);
   }
 
   /* Where the piece stands on a ring, in degrees, for the snap to act on.
@@ -517,7 +573,7 @@
     if (snapped && !drag.snapped) flash();
     drag.snapped = snapped;
     drag.applied = at - drag.abs0;
-    writePose(p, turned(drag.q0, drag.ring, drag.applied), true);
+    writePose(p, turned(drag.q0, drag.ring, drag.applied, drag.F.A), true);
     if (drag.arrow0 != null) arrowAt[drag.ring] = drag.arrow0 + drag.applied * RAD;
     refresh();
     say(drag.ring, drag.applied * drag.sign, snapped ? tickDeg(at) : null, x, y);
@@ -1058,7 +1114,7 @@
     activeRing: activeRing,
     step: function (ring, dir, fine) { return stepBy(ring, (dir < 0 ? -1 : 1) * (fine ? FINE_STEP_DEG : STEP_DEG)); },
     /* A programmatic turn of `deg` about a ring's axis - the plate's vertical
-       for Turn, the piece's own X / Z for the leans - no Undo point and no
+       for Turn, a level side of the footprint for the leans - no Undo point and no
        lock check: what a click does, without the click. The pose
        buttons (app-core's rotateSelected / tiltSelected / bankSelected) call
        this and keep their own Undo, lock and status around it.
@@ -1090,7 +1146,7 @@
                       moved: drag.moved, snapped: drag.snapped } : null;
     },
     /* A ring's axis in the world, now: the plate's vertical for Turn, the
-       piece's own Z / X as it lies for the two leans. */
+       footprint's two level sides for the leans (leanAxes). */
     ringAxis: function (ring) { return RINGS[ring] ? frameOf(ring, pieceQ()).A.toArray() : null; },
     ringFrame: function (ring) {
       if (!RINGS[ring]) return null;
@@ -1166,8 +1222,7 @@
                  RING_RADIUS_MM: RING_RADIUS_MM, ARROW_FRACTION: ARROW_FRACTION,
                  ARROW_BASE: ARROW_BASE, ARROW_HIT: ARROW_HIT,
                  RUN_MS: RUN_MS, TICK_STEP_DEG: TICK_STEP_DEG, TICK_LEN: TICK_LEN, TICK_WIDTH: TICK_WIDTH,
-                 MAJOR_DEG: MAJOR_DEG, SEAT_HYST_DEG: SEAT_HYST_DEG, SQUARE_WITHIN: SQUARE_WITHIN,
-                 LOCAL: { fb: RINGS.fb.local, ss: RINGS.ss.local } }
+                 MAJOR_DEG: MAJOR_DEG, SEAT_HYST_DEG: SEAT_HYST_DEG, SQUARE_WITHIN: SQUARE_WITHIN }
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bind);
