@@ -317,7 +317,11 @@
     return out.join('\n') + '\n';
   }
 
-  /** Bambu-specific object/plate naming. Bambu regenerates what it needs. */
+  /** Bambu-specific object/plate naming, and an object's own settings.
+   *  Bambu regenerates what it needs. obj.settings ({key: value}, optional)
+   *  is written as the object's metadata, as Bambu saves a per-object
+   *  override: Bambu Studio reads it into that object's config for any
+   *  vendor's 3MF (and drops it when the file is imported as geometry only). */
   function buildModelSettings(objects) {
     var out = [];
     out.push('<?xml version="1.0" encoding="UTF-8"?>');
@@ -325,6 +329,9 @@
     objects.forEach(function (obj, i) {
       out.push('  <object id="' + (i + 1) + '">');
       out.push('    <metadata key="name" value="' + xmlEscape(objectName(obj, i)) + '"/>');
+      Object.keys(obj.settings || {}).forEach(function (k) {
+        out.push('    <metadata key="' + xmlEscape(k) + '" value="' + xmlEscape(String(obj.settings[k])) + '"/>');
+      });
       out.push('  </object>');
     });
     out.push('  <plate>');
@@ -353,7 +360,10 @@
 
   /**
    * @param {object} opts
-   * @param {{name:string, vertices:number[], triangles:number[]}[]} opts.objects
+   * @param {{name:string, vertices:number[], triangles:number[], settings?:object}[]} opts.objects
+   *        settings: the object's own slicer settings ({key: value}), written
+   *        into Metadata/model_settings.config; absent, the object carries
+   *        none and the archive is what this wrote before
    * @param {string} [opts.profileId]   cooling profile to bake in
    * @param {string} [opts.plateName]
    * @param {string} [opts.sceneJson]   serialized NSO scene block; written as

@@ -44,7 +44,7 @@ Deterministic. Dials:
 | strut side `s` | `buildStrut`'s, 1.2 mm, never under `NSO_Thickness.floorFor` | existing strut law |
 | point pitch `p` | the detector's own 3 mm, widened for fat struts (below) | the beacon grid |
 | lean limit θ | `BRANCH_TILT_DEG` **30°** | the proven structure's widest lean was 31.44° (p95 26.83°); rounded down so every leg sits inside it, and so a face tilted exactly 30° is a face a vertical post holds |
-| foot pad | one first layer (0.2 mm), `r = max(3 mm, 2.5 × the trunk's half-width)` | §2, *Feet* |
+| foot pad | one first layer (0.2 mm) per cluster of feet (within 6 mm): the union of the footprints grown 4 mm, 0.2 mm off the piece | §2, *Feet* (supports-print-1) |
 | node lattice `L` | 5 mm: nodes every L/2 = 2.5 mm in x, y and z (z from the plate) | the ticket; Bambu's own 2.5/5 lattice |
 
 **Beacons.** `{ p, n }`: a point on the surface and its outward normal.
@@ -122,24 +122,61 @@ does not touch the wall stays (`plan.tight`).
   (0.4 mm) pad one support gap (0.18 mm) above the surface. It is counted
   *resting on the part*.
 
-**Feet.** Every trunk that lands on the plate stands on a pad: one first layer
-(0.2 mm, `opts.firstLayerMm`) of a round slab at the plate, `r = max(3 mm, 2.5 ×
-the landing member's half-width)` (3 mm for a 1.2 mm strut and for the
-capped 2.4 mm trunk; 3.75 mm for a lone 3 mm strut; 7.5 mm for a 6 mm trunk).
-Pads of trunks that stand close overlap and are **unioned**: the trunks in one
-solid are joined through them (98 trunks of the 30° closed box became 10
-solids). Where several pads ring a gap the union has a hole in its first layer,
-a handle by Euler count (6 of them on that box); the trunks alone have none.
+**Feet** (supports-print-1, `FEET` in the file's header). Every trunk that
+lands on the plate stands on a pad one first layer thick (0.2 mm,
+`opts.firstLayerMm`). Trunks whose feet stand within 6 mm (`FOOT_CLUSTER_MM`,
+single linkage) share ONE pad: the union of their footprints grown 4 mm
+(`FOOT_GROW_MM`), kept 0.2 mm (`FOOT_GAP_MM`) off the piece. Pads that would
+touch (overlap, or part by less than 0.1 mm, `FOOT_TOUCH_MM`) are one pad, and
+every trunk on one pad is one support: on the 2026-10-20 print the first layers
+of two supports overlapped and Bambu Studio reported a path conflict between
+support 1.1 and 2.2. Bambu's own tree (baselineV2, the same coupon): pads of
+15-24 mm, about 900 mm of first-layer line for 10 trunks.
 
+- **The footprint** is the circle round the trunk's end square (r = side / root
+  2), whatever way the sweep turned the square, so a pad depends only on where
+  the trunk lands - the same with the sheet as without it.
+- **Drawn on a raster** of 0.05 mm (`FOOT_CELL_MM`, coarser past 4 million
+  cells): a cell is pad when its centre is within the grown circle and further
+  than 0.2 mm, plus the raster's own slack (a row between two that read the
+  piece, a cell's half-diagonal, the outline's simplification), from the piece
+  anywhere through the slab and the gap above it (horizontal row rays, parity,
+  every 0.04 mm up). The cells in the circle INSIDE the trunk's square are
+  always pad, so a pad comes no nearer the piece than the trunk standing on it.
+  Air the pad closes round is filled (no handle), a crack under 0.1 mm is
+  closed, and a hole the piece stands in (a leg of it with trunks all round)
+  is opened to the outside by a slot three cells wide - one hole at a time,
+  along the way that cuts least pad, bending between the feet, ending at the
+  first air it meets (`support:exposed` 4c) - so every pad is one simple
+  outline, simplified to a cell, ear-clipped and extruded.
+- **One raster per group of feet** whose grown footprints could come within
+  0.1 mm of each other: one raster over every foot coarsened the cells with
+  their spread (a foot 250 mm away made them 0.13 mm, and the keep-off's
+  slack rang a thin trunk round with piece that was not there).
+- **Pads too near to print apart are one support.** Pads the keep-off leaves
+  under 0.1 mm apart (`FOOT_TOUCH_MM`, plus the outlines' simplification)
+  are linked: their trunks are one support (`groups`), whatever the gap. A
+  cluster split is counted (`clustersSplit`) when a cluster's feet still
+  stand in more than one support - unless every foot apart from the rest is
+  one the piece itself hems in, measured exactly (`clustersHemmed`: no point
+  in the band a pad touching its end square would cover, out to 0.2 mm from
+  the square, stands 0.2 mm clear of the piece through the slab, so no pad
+  can touch it and keep the gap - the wedge's trunk in a pocket of
+  `v9_mirror_factory` has none within 0.95 mm of its middle). A pad that is nothing but a
+  foot's own end is counted (`hemmed`), and a sliver of that kind that will
+  not triangulate is no pad (`padsDropped`): its trunk stands on its own end,
+  in its linked support.
+- **The card draws them across areas.** It builds each area with
+  `footPads: 'shared'` (every trunk on its foot, no pad) and hands every area's
+  `shells()` to `shareFeet(builds, piece, opts)`, which draws the pads once over
+  every area's feet and joins the supports that stand on one pad into one
+  object (`support:shells` §5: no two supports' first layers within 0.1 mm on
+  the coupon, the clamp, the wedge).
 - **Nothing below z = 0.** The pad's bottom *is* the plate; the trunk's
   end cap sits half a layer inside the pad (so it is never coplanar with the
   pad's bottom, the one input the boolean cannot be trusted with). A member
   whose last leg would reach the plate leaning stops 1 mm short and drops the
   rest straight, because a leaning cap's low corner goes under the plate.
-- **Clear of the piece.** A pad's corners are drawn in wherever the piece (or an
-  occluder) stands within 0.2 mm of its slab, found with horizontal rays at four
-  heights from the landing point, so a foot never fuses a support to the part's
-  own first layer (measured 0.256 mm from the piece on the closed box).
 - `opts.footPads: false` leaves them off (the suites that weigh members and
   bores on their own use it, with the reason in each).
 - Pads are only for trunks that land on the plate. A resting trunk keeps its
@@ -181,7 +218,7 @@ goes down within a phase and never passes `total`. Between units the last messag
 is repeated once 200 ms (`HEARTBEAT_MS`) has passed, and `beat()` does the same
 from inside the steer, nudge and merge loops, so the gap between messages is at
 most 200 ms plus the longest single call that does not beat - the first detect
-and index of a piece, `padGaps`, one wasm union. A callback that throws is
+and index of a piece, the feet's raster, one wasm union. A callback that throws is
 ignored.
 
 `solid(plan)` is two calls now: `parts(plan, opts)` (the BUILDING half, a trunk
@@ -193,21 +230,21 @@ no callback and no `yieldFn` is the same bytes as before: it runs the sync
 **Shells, no weld.** `shells(plan, parts)` is `solid()`'s answer with no
 boolean: every part (column, foot, stub, pad bridge and fill, each layer of the
 interface sheet) is kept as its own closed shell, and the parts are grouped into
-the solids `weld()` would have made - trunks whose foot pads touch (a cluster of
-`padGaps`, `parts.padGroups`) and each sheet with every trunk carrying one of
-its tips. Synchronous, milliseconds. A slicer fills an object's overlapping
+the solids `weld()` would have made - trunks on one pad (`parts.padGroups`)
+and each sheet with every trunk carrying one of its tips (each cap with its
+own column). Synchronous, milliseconds. A slicer fills an object's overlapping
 shells as one, so the printed layers are the weld's: `support:shells` cuts both
 with `nso_slicer.js` at every 0.2 mm layer and holds them to two microns. The
 Supports card calls `parts` then `shells` in its worker; `weld` stays for
 `solid()` (G-scope's row, and `hollow`, whose bores are a subtraction from
 one solid).
 
-## 3. Measured (`support:gridpack`, 80 checks; `support:exposed`, 114)
+## 3. Measured (`support:gridpack`, 80 checks; `support:exposed`, 129)
 
 | fixture | result |
 |---|---|
 | **tilted box 30°** (40 × 12 × 6 on its edge) | 44 of 44 held (the detector's beacons; the lattice gave 50), 26 trunks, all on the plate, no refusal; 12 pickups, 5 merges; every leg within 30°; mesh_validate clean, one shell per solid |
-| **closed hollow box, 30°** (`library/box_closed.stl`) | `support:exposed`: **1 area, 238 beacons, 238 held** on 98 trunks (62 merges, 78 pickups), none unreachable; worst leg 29.8°; no beacon on the cavity; 98 trunks on feet join into 10 solids with no handle (Euler 20; 6 before the pads' gaps were filled), nothing below z = 0, 0.256 mm from the piece |
+| **closed hollow box, 30°** (`library/box_closed.stl`) | `support:exposed`: **1 area, 238 beacons, 238 held** on 98 trunks (62 merges, 78 pickups), none unreachable; worst leg 29.8°; no beacon on the cavity; 98 trunks in 10 clusters of feet stand on ONE pad (2359 mm², supports-print-1: the footprints grown 4 mm meet) and are one solid with no handle (Euler 2; one hole of air filled, one round the piece slotted), nothing below z = 0, 0.296 mm from the piece |
 | **flat shelf, 3 × 3** | 12 beacons (9 face + 3 corner `edge` beside the post, which the lattice could not see); 3 first merges, each at the predicted level (within 0.1 mm); every merge 2 members except one of 3 |
 | **box with a through-hole** | 26 of 26 held (the arm's whole underside, since supports-followups; 9 of 9 before); 25 steered; 22 trunks, each in the hole or beyond the block's edge, none through the block; every last run upright |
 | **mushroom on a wide stem**, rest OFF | 12 of 12 cap points *unreachable from the plate*, nothing built, no refusal |
@@ -216,6 +253,8 @@ one solid).
 | **60 mm overhang** | 28 of 28 on **one trunk**, its section capped at 2.4 mm (4 × the strut area) |
 | **Generate twice** | identical bytes (2,936 triangles on the boss) |
 | strut style | no merges or pickups: 9 posts for 9 points |
+| **pads under a slab** (`support:exposed` 4b) | 3 × 3 struts 5, 6 and 9 mm apart: one pad, one solid; 12 mm apart: 9 pads of 74.1 mm², 9 solids, no slab half way between two feet |
+| **a post with feet all round it** (`support:exposed` 4c) | a 1 mm post ringed by 8 feet, two posts, an 11 × 11 grid round two posts: one pad each, slotted (1, 2, 2), one support, 0.26 mm off the piece |
 | gecko-hand | the tree's plan exactly; mesh clean, no handles on the boss |
 | point inside the piece | the one refusal, one plain line; beside a good point it is left out and counted |
 
@@ -305,9 +344,8 @@ Nothing was re-pinned: every plan is the same JSON, byte for byte.
 ## 6. Flags and out of scope
 
 - **FLAG** foot pad: 0.2 mm thick (the 0.2 mm layers the gaps here are sized
-  for; `opts.firstLayerMm`), `max(3 mm, 2.5 × half-width)`, a 48-sided disc
-  drawn in 0.2 mm off the piece. The ticket's numbers except the thickness and
-  the 0.2 mm clearance.
+  for; `opts.firstLayerMm`), one per cluster of feet within 6 mm, the
+  footprints grown 4 mm, 0.2 mm off the piece (supports-print-1's numbers).
 - **FLAG** exposed-only keeps an overhang that has more of the same piece
   directly below it (supports-followups; docs/SUPPORT-BEACONS.md, *Exposed
   only*): a cap over a wide stem, a shelf over its base, an arch over its floor
@@ -316,9 +354,9 @@ Nothing was re-pinned: every plan is the same JSON, byte for byte.
   third of a second each to give up on (the 59 of the workflow's tunnel: 25 s).
 - **FLAG** a fan of rays is a sample, not a proof, that a spot's air reaches the
   outside (docs/SUPPORT-BEACONS.md, *Limit*).
-- **FLAG** foot pads: a gap is filled and a touch bridged by raster and a
-  rule of thumb (0.025 mm cell, 0.1 mm touch), not by an exact polygon union; a
-  pad void narrower than a cell and not at a touch could survive as a handle.
+- **FLAG** foot pads: drawn on a 0.05 mm raster, not as an exact polygon
+  union; a crack under 0.1 mm is closed and every hole filled or slotted, so a
+  pad has no handle, but its outline is a cell's width off the exact union.
 
 - **FLAG** square section everywhere; area cap 4 × s²; merges of up to 3.
 - **FLAG** pickup reach = 1.05 × the pitch; the stub's vertical last run is 2 × s.

@@ -1,8 +1,11 @@
 #!/usr/bin/env node
 // The interface SHEET under a support tree (nso_support_interface.js sheet(),
 // built by nso_support_gridpack.js parts({ interface: true }) - the Supports
-// card's build), held to the Bambu Studio reference: clamp_body sliced with
-// tree supports, 0.2 mm layers (docs/SUPPORT-INTERFACE.md).
+// card's build), held to the Bambu Studio references: clamp_body sliced with
+// tree supports, and the top_clip_x2 coupon (baselineV2 and
+// thinwall_sideXside.gcode.3mf: Bambu's tree, tip caps, two transition and two
+// interface layers on them, each one serpentine, shared pads), 0.2 mm layers
+// (docs/SUPPORT-INTERFACE.md).
 //
 //   node tools/nso_support_sheet_check.js            exit 0 = every gate held
 //   node tools/nso_support_sheet_check.js --export   also writes the clamp with
@@ -14,21 +17,43 @@
 //
 // PER AREA
 //   1. THE STACK. Every area with a tip that meets a ceiling carries a sheet:
-//      4 layers - transition, transition, interface, interface - each one
-//      0.2 mm layer, its top GAP under the ceiling.
+//      T1, T2, I1, I2, each one 0.2 mm layer, T1 on z_cap, the top GAP under
+//      the ceiling.
+//   1b. THE CAPS. Every tip under the sheet ends in a flat cap 2.5 - 4 mm
+//      across (narrower only where the tips stand closer than that: a cap
+//      stops CAP_PART short of its neighbour, never over it), every cap's
+//      nearest neighbour at most 2 mm away edge to edge, every cap's flat top
+//      exactly z_cap, T1's underside - measured on the parts built.
+//   1c. A LOOP AND ONE SERPENTINE A LAYER: a closed rectangle round the
+//      footprint, then the serpentine inside it, its line ends and turns on
+//      the loop (thinwall_sideXside: every layer opens with its 14.3 x 22.2
+//      loop), no line under 2 mm, T2 and I2 T1's; each layer's own
+//      cross-section at mid-layer ONE connected region whose outer boundary
+//      is a closed rectangle (+-0.1 mm) one bead wide.
+//   1d. NSO's slicer, with the export's detect_thin_wall = 1, prints every
+//      layer as ONE path a piece (the loop, then its serpentine), the plan's
+//      centreline to 3 %, none under 2 mm, no line drawn twice.
 //   2. THE LINES, read off the welded support itself (a horizontal slice at
-//      each layer's middle): one direction per layer, each across the one
-//      below (90 deg), line pitch 0.84 +- 0.05 mm.
+//      each layer's middle): one direction per layer - T1, T2, I2 along one
+//      way, I1 across them (90 deg) - line pitch 0.84 +- 0.05 mm.
 //   3. THE GAP. The true minimum distance from the interface zone (the sheet,
 //      every tip, 3 mm under the lowest contact) to the piece is 0.18 mm -
 //      nso_support_interface.js's minDistance (the sampler finish() measures
 //      with) and the exact triangle-to-triangle distance beside it.
-//   4. NO TIP ABOVE THE SHEET'S UNDERSIDE: no part of the tree but the sheet
-//      stands above the sheet's underside under any of its lines.
+//   4. NOTHING BUT THE SHEET ABOVE z_cap: no part of the build but the sheet
+//      between z_cap and the sheet's top under any of its paths.
 //   5. Closed, manifold, no degenerate triangle (tools/mesh_validate.py), no
 //      piercing pair in the sheet (NSO_Repair.js's count, = the checker's);
 //      no sheet left standing alone. The trees and feet below are held to
 //      the bare build: no nearer the piece, counts reported beside its own.
+//   6. THE FEET: every trunk on the plate stands on a pad, every cluster of
+//      feet (within 6 mm) on ONE pad, each pad 0.18 mm or more off the piece
+//      - or, inside a trunk's own end square, no nearer than the trunks
+//      standing on it - and the trunks on one pad in one support (shells()).
+// THE COUPON, across its two areas as the card builds them (footPads
+//   'shared', then shareFeet): one pad under every cluster whatever area it
+//   holds, the trees on one pad one support - so no two supports' first
+//   layers touch - and the whole build under 10 s.
 
 const fs = require('fs');
 const path = require('path');
@@ -39,6 +64,7 @@ const ROOT = path.join(__dirname, '..');
 const OUT = path.join(ROOT, 'tools', 'support-interface-out');
 const { readSTL, writeSTL, loadRepairModule } = require('./nso_stl_io.js');
 const { csgContext } = require('./nso_csg_node.js');
+const SL = require('../nso_slicer.js');
 const EXPORT = process.argv.includes('--export');
 
 const ctx = {
@@ -53,7 +79,7 @@ for (const f of ['nso_thickness.js', 'nso_support_beacons.js', 'nso_support_aim.
   vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), ctx, { filename: f });
 }
 const SA = ctx.NSO_SupportAim, ST = ctx.NSO_SupportTree, GP = ctx.NSO_SupportGridpack, SI = ctx.NSO_SupportInterface;
-const GAP = SI.DEFAULTS.gapMm, LAYER = SI.DEFAULTS.layerMm, PITCH = SI.SHEET.pitchMm, EPS = SI.DEFAULTS.epsMm;
+const GAP = SI.DEFAULTS.gapMm, LAYER = SI.DEFAULTS.layerMm, PITCH = SI.SHEET.pitchMm;
 const CARD = { skipList: [], angleDeg: 60, occluders: [], style: 'tree', restOnModel: false, sideMm: 1.2 };
 
 let pass = 0, fail = 0;
@@ -87,6 +113,7 @@ function standing(soup) {
 }
 
 const PIECES = [
+  ['top_clip_x2 (the 2026-10-20 coupon)', readSTL(path.join(ROOT, 'fixtures', 'supports', 'top_clip_x2_coupon.stl')), 'coupon'],
   ['clamp_body (standing, as the reference)', standing(readSTL(path.join(ROOT, 'fixtures', 'supports', 'clamp_body.stl'))), 'clamp'],
   /* tree:interface's own fixtures */
   ['shelf', soupOf(box([0, 0, 0], [10, 10, 20]), box([10, 0, 16], [22, 10, 20])), 'shelf'],
@@ -108,10 +135,10 @@ function sliceAt(soup, z) {
   }
   return segs;
 }
-/* is (x, y) under one of the level's lines (any layer)? a coarse grid of segments */
-function lineIndex(level) {
+/* is (x, y) under one of the level's lines (any layer; which 0: only its pieces' loops, 1: only their serpentines)? a coarse grid of segments */
+function lineIndex(level, which) {
   const cell = 2, g = new Map();
-  for (const Ly of level.layers) for (const p of Ly.paths) for (let k = 0; k + 1 < p.length; k++) {
+  for (const Ly of level.layers) for (const p of (which == null ? Ly.paths : Ly.paths.filter((q, i) => i % 2 === which))) for (let k = 0; k + 1 < p.length; k++) {
     const a = p[k], b = p[k + 1];
     for (let i = Math.floor(Math.min(a[0], b[0]) / cell) - 1; i <= Math.floor(Math.max(a[0], b[0]) / cell) + 1; i++)
       for (let j = Math.floor(Math.min(a[1], b[1]) / cell) - 1; j <= Math.floor(Math.max(a[1], b[1]) / cell) + 1; j++) {
@@ -128,8 +155,133 @@ function lineIndex(level) {
   return (x, y, r) => (g.get(Math.floor(x / cell) + ',' + Math.floor(y / cell)) || []).some(s => inStrip([x, y], s[0], s[1], r));
 }
 
-/* the lines of one layer, read off a slice: direction, pitch */
-function layerLines(segs, inFoot) {
+/* a slice's segments joined into loops: the closed outlines (their points),
+   and how many chains were left open */
+function loopsOf(segs) {
+  const key = p => Math.round(p[0] / 1e-5) + ',' + Math.round(p[1] / 1e-5), adj = new Map();
+  segs.forEach((sg, i) => [key(sg[0]), key(sg[1])].forEach(k => { if (!adj.has(k)) adj.set(k, []); adj.get(k).push(i); }));
+  const used = new Uint8Array(segs.length), polys = [];
+  let open = 0;
+  for (let i = 0; i < segs.length; i++) {
+    if (used[i]) continue;
+    used[i] = 1;
+    const start = key(segs[i][0]), pts = [segs[i][0]];
+    let at = key(segs[i][1]), pt = segs[i][1], closed = false;
+    for (;;) {
+      if (at === start) { closed = true; break; }
+      pts.push(pt);
+      const nx = (adj.get(at) || []).find(j => !used[j]);
+      if (nx == null) break;
+      used[nx] = 1;
+      const fwd = key(segs[nx][0]) === at;
+      pt = fwd ? segs[nx][1] : segs[nx][0]; at = key(pt);
+    }
+    if (closed) polys.push(pts); else open++;
+  }
+  return { loops: polys.length, open, polys };
+}
+const areaOf = P => { let a = 0; for (let i = 0; i < P.length; i++) { const p = P[i], q = P[(i + 1) % P.length]; a += p[0] * q[1] - q[0] * p[1]; } return a / 2; };
+const inPoly = (p, P) => { let c = false; for (let i = 0, j = P.length - 1; i < P.length; j = i++) { const a = P[i], b = P[j];
+  if ((a[1] > p[1]) !== (b[1] > p[1]) && p[0] < (b[0] - a[0]) * (p[1] - a[1]) / (b[1] - a[1]) + a[0]) c = !c; } return c; };
+/* a layer's section read in the sheet's frame (A at deg), against its
+   pieces (loops: each piece's loop, in the plan): ONE connected region a
+   piece - loop and serpentine, joined at the bridge - so one outer outline
+   and one hole a piece (the loop's inside round the serpentine: no channel
+   closed anywhere, no region apart), no chain left open. The loop one bead
+   wide: its outline the loop grown half a bead and its hole's bounds the
+   loop shrunk half a bead - a RECTANGLE piece's outline a closed rectangle
+   (+-0.1 mm), an OUTLINE piece's rectilinear (every edge along A or B) and
+   as large as the loop's polygon grown half a bead (within 0.05 mm x the
+   perimeter). */
+function oneRegion(sec, deg, pieces, loops, width) {
+  const th = deg * Math.PI / 180, d = [Math.cos(th), Math.sin(th)], n = [-d[1], d[0]];
+  const uv = P => P.map(p => [p[0] * n[0] + p[1] * n[1], p[0] * d[0] + p[1] * d[1]]);
+  const box = Q => Q.reduce((b, q) => [Math.min(b[0], q[0]), Math.min(b[1], q[1]), Math.max(b[2], q[0]), Math.max(b[3], q[1])], [Infinity, Infinity, -Infinity, -Infinity]);
+  if (!sec.polys.length) return { ok: false, why: 'no section' };
+  const big = sec.polys.reduce((a, b) => Math.abs(areaOf(b)) > Math.abs(areaOf(a)) ? b : a), sg = Math.sign(areaOf(big));
+  const outers = sec.polys.filter(P => Math.sign(areaOf(P)) === sg), holes = sec.polys.filter(P => Math.sign(areaOf(P)) !== sg);
+  const usedO = new Set(), usedH = new Set();
+  const offAxes = Q => { let w = 0; for (let k = 0; k < Q.length; k++) { const a = Q[k], b = Q[(k + 1) % Q.length], l = Math.hypot(b[0] - a[0], b[1] - a[1]); if (l > 1e-3) w = Math.max(w, Math.min(Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1])) / l); } return w; };
+  const res = pieces.map((pc, i) => {
+    const lb = box(uv(loops[i])), cx = (lb[0] + lb[2]) / 2, cy = (lb[1] + lb[3]) / 2;
+    const near = (P, size) => { const b = box(uv(P)); return Math.abs((b[0] + b[2]) / 2 - cx) < 0.2 && Math.abs((b[1] + b[3]) / 2 - cy) < 0.2 && Math.abs(b[2] - b[0] - size[0]) <= 0.1 && Math.abs(b[3] - b[1] - size[1]) <= 0.1; };
+    const oi = outers.findIndex((O, k) => !usedO.has(k) && near(O, [pc.sizeMm[0] + width, pc.sizeMm[1] + width]));
+    const hi = holes.findIndex((H, k) => !usedH.has(k) && near(H, [pc.sizeMm[0] - width, pc.sizeMm[1] - width]));
+    if (oi < 0 || hi < 0) return { ok: false, kind: pc.kind, why: oi < 0 ? 'no outline the loop\'s size and a bead' : 'no hole the loop\'s size less a bead' };
+    usedO.add(oi); usedH.add(hi);
+    const O = uv(outers[oi]), ob = box(O), hb = box(uv(holes[hi]));
+    const apart = outers.filter((S, k) => k !== oi && inPoly(S[0], holes[hi])).length;
+    let shapeOk, area = Math.abs(areaOf(outers[oi])), want = pc.areaMm2 + pc.perimMm * width / 2 + width * width;
+    if (pc.kind === 'rectangle') {
+      const off = Math.max(...O.map(q => Math.min(Math.abs(q[0] - ob[0]), Math.abs(q[0] - ob[2]), Math.abs(q[1] - ob[1]), Math.abs(q[1] - ob[3]))));
+      shapeOk = off <= 0.1;
+    } else shapeOk = offAxes(O) < 1e-3 && Math.abs(area - want) <= 0.05 * pc.perimMm;
+    return { ok: shapeOk && apart === 0, kind: pc.kind, dims: [ob[2] - ob[0], ob[3] - ob[1]], hole: [hb[2] - hb[0], hb[3] - hb[1]], apart, area, want };
+  });
+  return { ok: outers.length === pieces.length && holes.length === pieces.length && sec.open === 0 && res.every(r => r.ok),
+           outers: outers.length, holes: holes.length, polys: sec.polys, res };
+}
+/* one sheet layer's soup through NSO's own slicer, as the export's support
+   object is sliced (detect_thin_wall = 1, the classic thin-wall pass): its
+   slice layers, its extrusion paths, the shortest, its moves, the passes
+   over the layer's centreline (the plan's loops and serpentines, turns and
+   all), and how much of the toolpath runs over toolpath drawn earlier in
+   the layer (a second pass over a line) */
+let SLW = null;
+function nsoLayer(soup, centreMm, width) {
+  const o = Object.assign(SL.defaultsFor(0.4), { layerMm: LAYER, firstLayerMm: LAYER, dropToPlate: false });
+  const r = SL.sliceObjects([{ soup, detectThinWall: true }], o, SLW);
+  const Ls = r.ok ? r.objects[0].layers : [];
+  let paths = 0, closed = 0, total = 0, shortest = Infinity, moves = 0;
+  const pts = [], samples = [];
+  Ls.forEach(ly => (ly.paths || []).forEach(pa => {
+    if (pa.closed) closed++;
+    pts.push(pa.pts[0]);
+    const q = pa.closed ? pa.pts.concat([pa.pts[0]]) : pa.pts; let l = 0;
+    for (let i = 0; i + 1 < q.length; i++) {
+      const d = Math.hypot(q[i + 1][0] - q[i][0], q[i + 1][1] - q[i][1]);
+      for (let s = 0.05; s < d; s += 0.1) samples.push({ x: q[i][0] + (q[i + 1][0] - q[i][0]) * s / d, y: q[i][1] + (q[i + 1][1] - q[i][1]) * s / d, at: total + l + s });
+      l += d; moves++;
+    }
+    paths++; total += l; shortest = Math.min(shortest, l);
+  }));
+  /* over toolpath already drawn: a sample within half a bead of an earlier
+     sample more than two beads back along the toolpath (closer, it is the
+     same run turning a corner). The longest such run: where the serpentine
+     leaves the loop, and where the loop closes, it is under two beads; a
+     line drawn twice is the line's length (the shortest, I1 on the coupon's
+     leg, is 0.84 mm) */
+  const cell = new Map(), key = (i, j) => i + ',' + j;
+  let twice = 0, run = 0, lastAt = -1;
+  for (const s of samples) {
+    const i = Math.floor(s.x / width), j = Math.floor(s.y / width);
+    let hit = false;
+    for (let a = -1; a <= 1 && !hit; a++) for (let b = -1; b <= 1 && !hit; b++) {
+      const l = cell.get(key(i + a, j + b));
+      if (l) hit = l.some(t => s.at - t.at > 2 * width && Math.hypot(t.x - s.x, t.y - s.y) < width / 2);
+    }
+    if (hit) { run = lastAt >= 0 && s.at - lastAt < 0.15 ? run + 0.1 : 0.1; lastAt = s.at; twice = Math.max(twice, run); }
+    if (!cell.has(key(i, j))) cell.set(key(i, j), []);
+    cell.get(key(i, j)).push(s);
+  }
+  return { layers: Ls.length, paths, closed, totalMm: total, shortest, moves, twiceMm: twice, passes: centreMm > 0 ? total / centreMm : 0, starts: pts };
+}
+/* the plan's own centreline on a layer: every loop (closed) and serpentine, turns and all */
+function planMm(layer) {
+  let l = 0;
+  layer.paths.forEach((q, i) => {
+    for (let k = 0; k + 1 < q.length; k++) l += Math.hypot(q[k + 1][0] - q[k][0], q[k + 1][1] - q[k][1]);
+    if (i % 2 === 0 && q.length > 2) l += Math.hypot(q[0][0] - q[q.length - 1][0], q[0][1] - q[q.length - 1][1]);
+  });
+  return l;
+}
+
+/* the lines of one layer, read off a slice: direction, pitch. solid(x, y):
+   is the point under one of this layer's own paths - an edge's material
+   side, so a line is an edge with material above it and the next edge, a
+   bead on, with material below (the gap between two lines, 0.41 mm, is all
+   but a bead wide itself) */
+function layerLines(segs, inFoot, width, solid) {
   const hist = new Map();
   let total = 0;
   const S = segs.filter(s => inFoot((s[0][0] + s[1][0]) / 2, (s[0][1] + s[1][1]) / 2));
@@ -165,19 +317,21 @@ function layerLines(segs, inFoot) {
     const L = Math.hypot(s[1][0] - s[0][0], s[1][1] - s[0][1]);
     const deg = ((Math.atan2(s[1][1] - s[0][1], s[1][0] - s[0][0]) * 180 / Math.PI) % 180 + 180) % 180;
     if (!(L > 1e-6) || Math.min(Math.abs(deg - dom), 180 - Math.abs(deg - dom)) > 1) continue;
-    us.push([((s[0][0] + s[1][0]) / 2) * nx + ((s[0][1] + s[1][1]) / 2) * ny, L]);
+    const mx = (s[0][0] + s[1][0]) / 2, my = (s[0][1] + s[1][1]) / 2;
+    const side = !solid ? 0 : (solid(mx + 0.1 * nx, my + 0.1 * ny) ? 1 : 0) - (solid(mx - 0.1 * nx, my - 0.1 * ny) ? 1 : 0);
+    us.push([mx * nx + my * ny, L, side]);
   }
   us.sort((a, b) => a[0] - b[0]);
   const clusters = [];
-  for (const [u, L] of us) {
+  for (const [u, L, sd] of us) {
     const c = clusters[clusters.length - 1];
-    if (c && u - c.last <= 0.01) { c.sum += u * L; c.len += L; c.last = u; } else clusters.push({ sum: u * L, len: L, last: u });
+    if (c && u - c.last <= 0.01) { c.sum += u * L; c.len += L; c.side += sd * L; c.last = u; } else clusters.push({ sum: u * L, len: L, side: sd * L, last: u });
   }
-  const uniq = clusters.filter(c => c.len >= 1).map(c => c.sum / c.len);
+  const kept = clusters.filter(c => c.len >= 1), uniq = kept.map(c => c.sum / c.len), up = kept.map(c => !solid || c.side > 0), down = kept.map(c => !solid || c.side < 0);
   /* a strip is two edges a line width apart; its centre is their middle */
   const centres = [];
   for (let i = 0; i + 1 < uniq.length; i++) {
-    if (Math.abs(uniq[i + 1] - uniq[i] - 0.42) < 0.03) { centres.push((uniq[i] + uniq[i + 1]) / 2); i++; }
+    if (up[i] && down[i + 1] && Math.abs(uniq[i + 1] - uniq[i] - width) < 0.03) { centres.push((uniq[i] + uniq[i + 1]) / 2); i++; }
   }
   const diffs = [];
   for (let i = 0; i + 1 < centres.length; i++) diffs.push(centres[i + 1] - centres[i]);
@@ -288,6 +442,7 @@ fs.mkdirSync(OUT, { recursive: true });
 (async () => {
   const csg = csgContext();
   ctx.NSO_unionSoups = csg.NSO_unionSoups; ctx.NSO_subtractSoups = csg.NSO_subtractSoups;
+  SLW = await SL.loadKernel({});
   const exportObjects = [];
   const report = [];
 
@@ -317,7 +472,8 @@ fs.mkdirSync(OUT, { recursive: true });
       T.weldBare += Date.now() - t;
       /* the build with the sheet */
       t = Date.now();
-      const tp = await GP.parts(p, { interface: true });
+      /* as the card builds it: the sheet's layers left as they are (weld() folds them itself) */
+      const tp = await GP.parts(p, { interface: true, foldSheets: false });
       T.parts += Date.now() - t;
       if (!tp.ok) { check(label + ': builds with the sheet', false, tp.reason); continue; }
       t = Date.now();
@@ -331,6 +487,12 @@ fs.mkdirSync(OUT, { recursive: true });
       const why = {};
       sh.tips.filter(x => x.mode !== 'sheet' || x.carried === false).forEach(x => { const k = x.mode + ': ' + (x.why || 'held off its face'); why[k] = (why[k] || 0) + 1; });
       Object.keys(why).forEach(k => console.log('          ' + why[k] + ' x ' + k));
+      const CARRIED_MIN = { clamp: [161, 34] }[tag];
+      if (CARRIED_MIN && CARRIED_MIN[rg.id] != null) {
+        const carried = sh.tips.filter(x => x.mode === 'sheet' && x.carried !== false).length;
+        check(`${label}: ${CARRIED_MIN[rg.id]} tips or more carried by its sheet, as one serpentine a level carried them`,
+          carried >= CARRIED_MIN[rg.id], `${carried} of ${sh.tips.length} carried (${c.sheet} under a sheet, ${c.gap} cut at the gap, ${c.side} side)`);
+      }
 
       /* 1. the stack */
       const flatTips = sh.tips.filter(x => x.mode !== 'side').length;
@@ -342,38 +504,156 @@ fs.mkdirSync(OUT, { recursive: true });
         const roles = L.layers.map(x => x.role).join(',');
         const hs = L.layers.map(x => x.z1 - x.z0);
         const ceiling = Math.min(...L.tips.map(i => sh.tips[i].zTop)) + GAP;
-        check(`${label}, sheet at ${f3(L.zTop)}: 2 transition + 2 interface layers, each one ${LAYER} mm layer, the top ${GAP} mm under the ceiling`,
+        check(`${label}, sheet at ${f3(L.zTop)}: transition, transition, interface, interface - each one ${LAYER} mm layer, T1 on z_cap, the top ${GAP} mm under the ceiling`,
           roles === 'transition,transition,interface,interface' && hs.every(h => Math.abs(h - LAYER) < 1e-9) &&
-          Math.abs(L.layers[3].z1 - L.zTop) < 1e-6 && Math.abs(L.layers[0].z0 - L.zBase) < 1e-6,
+          Math.abs(L.layers[3].z1 - L.zTop) < 1e-6 && Math.abs(L.layers[0].z0 - L.zBase) < 1e-6 && Math.abs(L.zCap - L.zBase) < 1e-9,
           `${L.tips.length} tips, layers ${L.layers.map(x => f3(x.z0) + '-' + f3(x.z1)).join(' | ')}, ceiling ${f3(ceiling)}`);
+        /* 1b. the caps */
+        const CAP = SI.CAP, tipsHere = L.tips.map(i => sh.tips[i]), carried = tipsHere.filter(t => t.carried !== false);
+        const caps = tipsHere.filter(t => t.cap).map(t => t.cap);
+        const gapsOf = caps.map(c => caps.length < 2 ? null : Math.min(...caps.filter(d => d !== c).map(d => Math.hypot(d.c[0] - c.c[0], d.c[1] - c.c[1]) - (c.w + d.w) / 2)));
+        const inRange = caps.filter(c => c.w >= CAP.minMm - 1e-9 && c.w <= CAP.maxMm + 1e-9).length;
+        /* a cap under CAP.minMm was held short of a neighbour (tips under
+           2.55 mm apart: caps never overlap) or narrowed off the piece */
+        const shortOk = caps.every(c => (c.w >= CAP.minMm - 1e-9 && c.w <= CAP.maxMm + 1e-9) ||
+          (c.w < CAP.minMm && /held short of a neighbour|piece|another support/.test(c.why || '')));
+        const capless = carried.filter(t => !t.cap);
+        const narrowWhy = {};
+        caps.filter(c => c.w < CAP.minMm - 1e-9).forEach(c => { const k = (c.why || '').replace(/[\d.]+ mm away/, 'n mm away'); narrowWhy[k] = (narrowWhy[k] || 0) + 1; });
+        check(`${label}, sheet at ${f3(L.zTop)}: every tip under it ends in a flat cap ${CAP.minMm} - ${CAP.maxMm} mm across, narrower only short of a neighbour or the piece`,
+          caps.length > 0 && shortOk && capless.every(t => /no room for a cap/.test(t.why || '')),
+          `${caps.length} caps on ${carried.length} tips (${capless.length} with no room for one); ${inRange} of ${caps.length} at ${CAP.minMm} - ${CAP.maxMm} mm, ` +
+          `widths ${f3(Math.min(...caps.map(c => c.w)))} - ${f3(Math.max(...caps.map(c => c.w)))}` +
+          (Object.keys(narrowWhy).length ? '; narrower: ' + Object.keys(narrowWhy).map(k => narrowWhy[k] + ' x ' + k).join(', ') : ''));
+        const gs = gapsOf.filter(g => g != null);
+        check(`${label}, sheet at ${f3(L.zTop)}: every cap's nearest neighbour ${CAP.gapMaxMm} mm or less away edge to edge, and none over another`,
+          gs.length === 0 || (Math.max(...gs) <= CAP.gapMaxMm + 1e-9 && Math.min(...gs) >= SI.CAP.partMm - 1e-6),
+          gs.length ? `nearest-neighbour gaps ${f3(Math.min(...gs))} - ${f3(Math.max(...gs))} mm` : 'one cap');
+        /* measured on the parts built, not read back off the plan: I1's
+           lowest point, and the top of every part that ends just above it */
+        const sheetPart = tp.trunks.find(tr => tr.sheet === L.id);
+        let zI1 = Infinity;
+        if (sheetPart) { const s0 = sheetPart.parts[0].soup; for (let i = 2; i < s0.length; i += 3) zI1 = Math.min(zI1, s0[i]); }
+        /* each cap found among the parts built by its own flat top: the
+           part whose top face's middle is the cap's centre */
+        const tops = [];
+        tp.trunks.forEach(tr => { if (tr.sheet != null) return; tr.parts.forEach(pt => {
+          if (pt.pad) return;
+          let hi = -Infinity; for (let i = 2; i < pt.soup.length; i += 3) hi = Math.max(hi, pt.soup[i]);
+          if (!(hi > zI1 - 0.05 && hi < zI1 + 0.05)) return;
+          let sx = 0, sy = 0, n = 0;
+          for (let i = 0; i < pt.soup.length; i += 3) if (Math.abs(pt.soup[i + 2] - hi) < 1e-5) { sx += pt.soup[i]; sy += pt.soup[i + 1]; n++; }
+          tops.push({ c: [sx / n, sy / n], into: hi - zI1 });
+        }); });
+        const builtCaps = caps.map(c => { const m = tops.filter(q => Math.hypot(q.c[0] - c.c[0], q.c[1] - c.c[1]) < 0.02); return m.length === 1 ? m[0].into : null; });
+        const found = builtCaps.filter(d => d != null), others = tops.length - found.length;
+        check(`${label}, sheet at ${f3(L.zTop)}: every cap ends at z_cap, all at one level, and T1 lies on that level field - measured on the parts built`,
+          found.length === caps.length && found.every(d => Math.abs(d) < 2e-5) && Math.abs(zI1 - L.zCap) < 2e-5,
+          `${found.length} of ${caps.length} caps found by their tops, ${found.length ? f4(Math.min(...found)) + ' - ' + f4(Math.max(...found)) : '-'} mm off T1's underside (z_cap ${f4(L.zCap)}, T1 from ${f4(zI1)}); ` +
+          `${others} other part(s) end within 0.05 mm of it (capless tips, cut flat at z_cap)`);
+        /* 1c. A LOOP AND ONE SERPENTINE A PIECE, JOINED AT ONE POINT: in the
+           plan each piece of each layer is two paths - its loop, closed,
+           round its outline, then ONE serpentine whose every step runs
+           along the grid, whose first point is on the loop (the bridge, one
+           step) and whose every other point stands a pitch or more off the
+           loop: the turns never touch it (a clear gap of the pitch less a
+           bead); a rectangle's lines 2 mm or longer; T2 and I2 T1's, I1 in
+           T1's loops. In the parts built, each layer's own section at its
+           middle is ONE connected region a piece (oneRegion) */
+        const sheetEntry = tp.trunks.find(tr => tr.sheet === L.id);
+        const same = (a, b) => a.length === b.length && a.every((q, k) => Math.hypot(q[0] - b[k][0], q[1] - b[k][1]) < 1e-9);
+        const segD = (q, a, b) => { const ex = b[0] - a[0], ey = b[1] - a[1], ll = ex * ex + ey * ey, f = ll > 0 ? Math.max(0, Math.min(1, ((q[0] - a[0]) * ex + (q[1] - a[1]) * ey) / ll)) : 0;
+          return Math.hypot(q[0] - a[0] - f * ex, q[1] - a[1] - f * ey); };
+        let nearest = Infinity;
+        const pieceOk = (x, i) => {
+          const loop = x.paths[2 * i], snake = x.paths[2 * i + 1];
+          if (!same([loop[0]], [loop[loop.length - 1]]) || snake.length < 2) return false;
+          for (let k = 0; k + 1 < snake.length; k++) if (Math.abs(Math.hypot(snake[k + 1][0] - snake[k][0], snake[k + 1][1] - snake[k][1]) - PITCH) > 1e-6) return false;
+          let first = Infinity;
+          for (let k = 0; k + 1 < loop.length; k++) first = Math.min(first, segD(snake[0], loop[k], loop[k + 1]));
+          if (first > 1e-6) return false;
+          for (const q of snake.slice(1)) for (let k = 0; k + 1 < loop.length; k++) nearest = Math.min(nearest, segD(q, loop[k], loop[k + 1]));
+          return true;
+        };
+        const allRect = L.layers[0].pieces.every(q => q.kind === 'rectangle');
+        const shapeOk = x => x.paths.length === 2 * x.pieces.length && x.pieces.every((q, i) => pieceOk(x, i)) &&
+          (!allRect || L.layers.filter(y => y.role === 'transition').every(y => y.shortestMm >= SI.SHEET.minRunMm - 1e-9));
+        const loopsSame = k => L.layers[0].pieces.every((q, i) => same(L.layers[k].paths[2 * i], L.layers[0].paths[2 * i]));
+        const layersOk = L.layers.every(shapeOk);
+        check(`${label}, sheet at ${f3(L.zTop)}: every piece of every layer a closed loop round its outline and ONE serpentine a pitch inside it, joined to it at its start and nowhere else; T2 and I2 T1's, I1 in T1's loops`,
+          layersOk && nearest >= PITCH - 1e-6 && loopsSame(1) && loopsSame(2) && loopsSame(3) && same(L.layers[1].paths.flat(), L.layers[0].paths.flat()) && same(L.layers[3].paths.flat(), L.layers[0].paths.flat()),
+          L.layers[0].pieces.map(q => `${q.kind} ${q.sizeMm.map(f3).join(' x ')} mm (${q.caps} caps)`).join('; ') + `; the serpentine on the loop at its start, everywhere else ${f3(nearest)} mm (centres) off it, a ${f3(nearest - sh.widthMm)} mm gap; ` +
+          L.layers.map(x => `${x.role[0].toUpperCase()}: ${x.lines} lines, shortest ${f3(x.shortestMm)} mm`).join(' | '));
+        const regions = sheetEntry ? sheetEntry.parts.map((pt, k) => oneRegion(loopsOf(sliceAt(pt.soup, (L.layers[k].z0 + L.layers[k].z1) / 2)), L.lines.angleDeg,
+          L.layers[k].pieces, L.layers[k].paths.filter((q, i) => i % 2 === 0), sh.widthMm)) : [];
+        check(`${label}, sheet at ${f3(L.zTop)}: each layer's section at mid-layer is ONE connected region a piece - loop and serpentine joined at the bridge - its one hole the loop's inside, the loop one bead wide`,
+          regions.length === L.layers.length && regions.every(r => r.ok),
+          regions.map((r, k) => r.res ? `${L.layers[k].role[0].toUpperCase()}${k + 1}: ${r.outers} region(s), ${r.holes} hole(s); ` + r.res.map(q => q.why ? q.why :
+            `${q.kind} loop ${q.dims.map(f3).join(' x ')} round ${q.hole.map(f3).join(' x ')}, outline ${q.area.toFixed(2)} mm2 against ${q.want.toFixed(2)}, ${q.apart} region(s) apart`).join(', ') : r.why).join(' | '));
+        /* the coupon's slab stays ONE rectangle; the clamp's areas carry at
+           least what one serpentine a level carried (161 and 34 of 45) */
+        if (tag === 'coupon' && rg.id === 0)
+          check(`${label}, sheet at ${f3(L.zTop)}: the slab's sheet is ONE rectangle`, L.layers[0].pieces.length === 1 && allRect,
+            L.layers[0].pieces.map(q => q.kind + ' ' + q.sizeMm.map(f3).join(' x ')).join('; '));
+        /* 1d. NSO's slicer, with the export's detect_thin_wall = 1 (its
+           classic thin-wall pass, as Bambu Studio printed the 0.40 sheet):
+           every layer ONE extrusion path a piece - the loop, then the
+           serpentine joined to it, no travel between - its length the plan's
+           centreline (turns and all) to 3 %, no path under 2 mm, and no
+           second pass over any line. Reported: its moves, the passes */
+        const nso = sheetEntry ? sheetEntry.parts.map((pt, k) => nsoLayer(pt.soup, planMm(L.layers[k]), sh.widthMm)) : [];
+        const regionsOf = (n, k) => { const r = regions[k]; if (!r || !r.polys) return -1;
+          const big = r.polys.reduce((a, b) => Math.abs(areaOf(b)) > Math.abs(areaOf(a)) ? b : a), sg = Math.sign(areaOf(big));
+          const outs = r.polys.filter(P => Math.sign(areaOf(P)) === sg), hit = new Set();
+          n.starts.forEach(p => { const k2 = outs.findIndex(O => inPoly(p, O) && !outs.some(O2 => O2 !== O && inPoly(p, O2) && Math.abs(areaOf(O2)) < Math.abs(areaOf(O)))); hit.add(k2); });
+          return hit.has(-1) ? -1 : hit.size; };
+        check(`${label}, sheet at ${f3(L.zTop)}: NSO's slicer (detect_thin_wall = 1) draws every layer as ONE path a piece, the plan's centreline to 3 %, none under 2 mm, no second pass over any line`,
+          nso.length === L.layers.length && nso.every((n, k) => n.layers === 1 && n.paths === L.layers[k].pieces.length &&
+            regionsOf(n, k) === L.layers[k].pieces.length && Math.abs(n.passes - 1) <= 0.03 && n.shortest >= 2 && n.twiceMm < 2 * sh.widthMm),
+          nso.map((n, k) => `${L.layers[k].role[0].toUpperCase()}${k + 1}: ${n.paths} path(s) of ${n.totalMm.toFixed(1)} mm in ${n.moves} moves, in ${regionsOf(n, k)} region(s), shortest ${f3(n.shortest)} mm, ` +
+            `${n.passes.toFixed(3)} passes, longest run over toolpath already drawn ${n.twiceMm.toFixed(2)} mm`).join(' | '));
         /* 2. the lines, off the welded solid */
-        const under = lineIndex(L);
-        const lines = L.layers.map(x => layerLines(sliceAt(w.soup, (x.z0 + x.z1) / 2), (px, py) => under(px, py, 0.3)));
-        const dirs = lines.map(l => l ? l.dir : NaN);
-        const alt = dirs.every((d, k) => k === 0 || Math.abs(Math.abs(d - dirs[k - 1]) - 90) <= 1);
-        check(`${label}, sheet at ${f3(L.zTop)}: one direction per layer, each across the one below`,
-          lines.every(l => l && l.oneDirShare >= 0.75) && alt,
-          `layers at ${dirs.map(d => d + ' deg').join(' / ')}, one-direction share ${lines.map(l => l ? l.oneDirShare.toFixed(3) : '-').join(' / ')}`);
-        const pitchOk = lines.every(l => l && l.medianPitch != null && Math.abs(l.medianPitch - PITCH) <= 0.05 && l.offGrid === 0);
+        const under = lineIndex(L), loopAt = lineIndex(L, 0);
+        /* a layer's direction and pitch read on its serpentine's lines, off
+           the loop (whose short sides cross them in every layer) */
+        const lines = L.layers.map(x => { const own = lineIndex({ layers: [x] });
+          return layerLines(sliceAt(w.soup, (x.z0 + x.z1) / 2), (px, py) => under(px, py, 0.3) && !loopAt(px, py, sh.widthMm), sh.widthMm, (px, py) => own(px, py, sh.widthMm / 2)); });
+        /* a layer whose lines are under 2 mm on the whole (a piece three or
+           four cells across has room for 0.84 - 1.68 mm lines one way: I1
+           on the coupon's leg; Bambu's own leg I1 is 55 % one way) is read
+           from the plan - its lines along its direction by construction -
+           and said so; every other layer is measured on the slice */
+        const short = L.layers.map(x => x.lines > 0 && x.linesMm / x.lines < SI.SHEET.minRunMm);
+        const dirs = lines.map((l, k) => short[k] ? +L.layers[k].angleDeg.toFixed(2) : l ? l.dir : NaN);
+        const ang = (a, b) => { const d = Math.abs(a - b) % 180; return Math.min(d, 180 - d); };
+        const alt = ang(dirs[1], dirs[0]) <= 1 && Math.abs(ang(dirs[2], dirs[1]) - 90) <= 1 && ang(dirs[3], dirs[0]) <= 1;
+        check(`${label}, sheet at ${f3(L.zTop)}: one direction per layer - T1, T2 and I2 along A, I1 across them`,
+          lines.every((l, k) => short[k] || (l && l.oneDirShare >= 0.75)) && alt && !short[0],
+          `layers at ${dirs.map(d => d + ' deg').join(' / ')}, one-direction share ${lines.map((l, k) => short[k] ? 'plan (lines ' + f3(L.layers[k].linesMm / L.layers[k].lines) + ' mm on average)' : l ? l.oneDirShare.toFixed(3) : '-').join(' / ')}`);
+        const pitchOk = lines.every((l, k) => short[k] || (l && l.medianPitch != null && Math.abs(l.medianPitch - PITCH) <= 0.05 && l.offGrid === 0));
         check(`${label}, sheet at ${f3(L.zTop)}: line pitch ${PITCH} +- 0.05 mm, measured on the welded support`,
-          pitchOk, lines.map(l => l ? `${l.lines} lines, median ${f3(l.medianPitch)}, ${l.adjacent} adjacent pairs at ${PITCH}+-0.05, ${l.offGrid} off the pitch` : '-').join(' | '));
-        report.push({ label, zTop: L.zTop, tips: L.tips.length, t1: L.t1, lines });
-        /* 4. no tip above the sheet's underside */
-        let above = 0, worst = -Infinity;
+          pitchOk, lines.map((l, k) => short[k] ? 'plan: on the grid' : l ? `${l.lines} lines, median ${f3(l.medianPitch)}, ${l.adjacent} adjacent pairs at ${PITCH}+-0.05, ${l.offGrid} off the pitch` : '-').join(' | '));
+        report.push({ label, zTop: L.zTop, tips: L.tips.length, angle: L.lines, caps: L.caps.length, lines });
+        /* 4. NOTHING BUT THE SHEET ABOVE z_cap: no vertex of any other part
+           of the build between z_cap and the sheet's top + the gap under the
+           sheet's paths (within half a line and 0.05 mm); and a tip cut at
+           the gap beside it, standing through those layers, is counted */
+        let above = 0, worst = -Infinity, beside = 0;
         tp.trunks.forEach(tr => {
           if (tr.sheet != null) return;
           tr.parts.forEach(pt => {
             const s = pt.soup;
             for (let i = 0; i < s.length; i += 3) {
               const z = s[i + 2];
-              if (z <= L.zBase + EPS + 1e-4 || z > L.zTop + GAP) continue;
-              if (!under(s[i], s[i + 1], 0.21 + 0.05)) continue;
-              above++; worst = Math.max(worst, z - L.zBase);
+              if (z <= L.zCap + 1e-6 || z > L.zTop + GAP) continue;
+              if (!under(s[i], s[i + 1], sh.widthMm / 2 + 0.05)) { beside++; continue; }
+              above++; worst = Math.max(worst, z - L.zCap);
             }
           });
         });
-        check(`${label}, sheet at ${f3(L.zTop)}: no tip reaches above the sheet's underside (${f3(L.zBase)}) under its lines`,
-          above === 0, above ? `${above} vertices, up to ${f3(worst)} mm above it` : 'every tip under it is cut at ' + f3(L.zBase + EPS));
+        check(`${label}, sheet at ${f3(L.zTop)}: no support geometry above z_cap (${f3(L.zCap)}) but the sheet, under any of its paths`,
+          above === 0, (above ? `${above} vertices, up to ${f3(worst)} mm above it` : 'every tip under it ends at z_cap') +
+          `; ${beside} vertex(es) of other parts in its layers beside it (tips cut at the gap, other supports' columns)`);
       }
       /* 3. THE GAP, in two parts.
          THE INTERFACE ZONE - the sheet, every tip, and everything within
@@ -415,7 +695,81 @@ fs.mkdirSync(OUT, { recursive: true });
       const feet0 = SI.exactDistance(feetOf(w0.soup, FOOT), piece, { reach: 1 }).mm, feet1 = SI.exactDistance(feetOf(w.soup, FOOT), piece, { reach: 1 }).mm;
       check(`${label}: the feet are as they were - their distance to the piece unchanged by the sheet`,
         Math.abs(feet0 - feet1) < 1e-6 || (feet0 === Infinity && feet1 === Infinity),
-        `${fmt(feet1)} with the sheet, ${fmt(feet0)} without` + (feet1 < GAP ? ' (UNDER the gap: the pads, not this build - footRadii keeps 0.2 mm on rays at the corners only)' : ''));
+        `${fmt(feet1)} with the sheet, ${fmt(feet0)} without` + (feet1 < GAP ? ' (UNDER the gap: a trunk\'s own end in its pad - the pads keep 0.2 mm, the planner keeps the trunk off on rays)' : ''));
+      /* 6. the feet: one pad per cluster, the trunks on a pad one support */
+      /* each pad against the piece, and against the trunks standing on IT:
+         a pad is always under its trunks' own end squares, so where the
+         planner stood one nearer the piece than the gap, that pad may come as
+         near as that trunk - and no nearer */
+      const padSoups = [], trunkFoot = {};
+      tp.trunks.forEach(tr => { trunkFoot[tr.trunk] = tr.parts.filter(pt => !pt.pad).map(pt => feetOf(pt.soup, FOOT)); });
+      let padD = Infinity, colD = Infinity, padsUnder = 0;
+      tp.trunks.forEach(tr => tr.parts.forEach(pt => {
+        if (!pt.pad) return;
+        padSoups.push(pt.soup);
+        const dP = SI.exactDistance(pt.soup, piece, { reach: 1 }).mm;
+        const own = [].concat(...(pt.keys || [tr.trunk]).map(t => trunkFoot[t] || []));
+        const dT = own.length ? SI.exactDistance(new Float32Array([].concat(...own.map(x => Array.from(x)))), piece, { reach: 1 }).mm : Infinity;
+        if (dP < Math.min(GAP, dT) - 1e-6) padsUnder++;
+        if (dP < padD) { padD = dP; colD = dT; }
+      }));
+      const shl = GP.shells(p, tp), solidOf = {};
+      shl.solids.forEach((x, k) => x.trunks.forEach(t => { solidOf[t] = k; }));
+      /* RECOUNTED HERE, not read off the engine's counters: the clusters from
+         the feet (6 mm, single linkage), each foot on a built pad (its centre
+         inside the pad's top face) of a trunk in its own support, and every
+         cluster in one support - but for a foot the piece hems in, measured
+         here: no point on rings just outside its end square stands the gap
+         clear of the piece through the slab */
+      const feetL = tp.feet || [], par = feetL.map((f, i) => i), find = x => { while (par[x] !== x) x = par[x] = par[par[x]]; return x; };
+      for (let a = 0; a < feetL.length; a++) for (let b = a + 1; b < feetL.length; b++) if (Math.hypot(feetL[a].c[0] - feetL[b].c[0], feetL[a].c[1] - feetL[b].c[1]) <= 6 + 1e-9) par[find(a)] = find(b);
+      const padParts = [];
+      tp.trunks.forEach(tr => tr.parts.forEach(pt => { if (pt.pad) padParts.push({ owner: tr.trunk, soup: pt.soup }); }));
+      const onTop = (soup, x, y) => {
+        let zt = -Infinity; for (let i = 2; i < soup.length; i += 3) zt = Math.max(zt, soup[i]);
+        for (let t = 0; t < soup.length; t += 9) {
+          if (!(Math.abs(soup[t + 2] - zt) < 1e-5 && Math.abs(soup[t + 5] - zt) < 1e-5 && Math.abs(soup[t + 8] - zt) < 1e-5)) continue;
+          const ax = soup[t], ay = soup[t + 1], bx = soup[t + 3], by = soup[t + 4], cx = soup[t + 6], cy = soup[t + 7];
+          const d1 = (x - bx) * (ay - by) - (ax - bx) * (y - by), d2 = (x - cx) * (by - cy) - (bx - cx) * (y - cy), d3 = (x - ax) * (cy - ay) - (cx - ax) * (y - ay);
+          if (!((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0))) return true;
+        }
+        return false;
+      };
+      const PR = ctx.NSO_Thickness.prepare(piece, {}), plateZ0 = p.plateZ || 0;
+      const hemmedHere = f => {
+        const rIn = f.r * Math.SQRT1_2;
+        for (let dr = 0.05; dr <= 0.2 + 1e-9; dr += 0.05) for (let k = 0; k < 36; k++) {
+          const a = 2 * Math.PI * k / 36, x = f.c[0] + (rIn + dr) * Math.cos(a), y = f.c[1] + (rIn + dr) * Math.sin(a);
+          let clear = true;
+          for (let z = 0.02; z <= FOOT + GAP + 1e-9 && clear; z += 0.06) {
+            const q = [x, y, plateZ0 + z];
+            if (PR.inside(q)) { clear = false; break; }
+            const hit = PR.nearest(q, GAP); if (hit && hit.dist < GAP) clear = false;
+          }
+          if (clear) return false;
+        }
+        return true;
+      };
+      let offPad = 0, split = 0, hemmedN = 0;
+      feetL.forEach(f => {
+        const mine = padParts.filter(pd => onTop(pd.soup, f.c[0], f.c[1]));
+        if (!mine.some(pd => solidOf[pd.owner] === solidOf[f.trunk]) && !hemmedHere(f)) offPad++;
+      });
+      const groups = {};
+      feetL.forEach((f, i) => (groups[find(i)] || (groups[find(i)] = [])).push(f));
+      Object.values(groups).forEach(fs => {
+        const bySolid = {};
+        fs.forEach(f => (bySolid[solidOf[f.trunk]] || (bySolid[solidOf[f.trunk]] = [])).push(f));
+        const parts = Object.values(bySolid).sort((u, v) => v.length - u.length);
+        if (parts.length < 2) return;
+        if (parts.slice(1).every(pt => pt.every(hemmedHere))) hemmedN++; else split++;
+      });
+      const onPads = p.trunks.filter(tr => tr.landing === 'plate').length;
+      check(`${label}: feet - ${tp.pads.count} pad(s) under ${onPads} trunk(s) on the plate, every cluster of feet (6 mm) in one support and every foot on a pad of it (counted here), the pads ${GAP} mm or more off the piece (or no nearer than the trunk standing there)`,
+        tp.pads.count >= 1 && feetL.length === onPads && offPad === 0 && split === 0 && padsUnder === 0 && padSoups.length === tp.pads.count,
+        `${Object.keys(groups).length} cluster(s), ${split} split, ${hemmedN} with a foot the piece hems in, ${offPad} foot/feet on no pad of their support (engine: ${tp.pads.clustersSplit} split); ` +
+        `pads ${(tp.pads.areasMm2 || []).map(a => a.toFixed(0) + ' mm2').join(', ')}; ` +
+        `closest pad to the piece ${fmt(padD)} (its own trunks ${fmt(colD)}), ${padsUnder} pad(s) nearer than the gap and their trunks; ${shl.solids.length} support(s)`);
       /* 5. solids: closed, manifold, no degenerate triangle (the canonical
          checker, tools/mesh_validate.py), and NO PIERCING PAIR IN THE SHEET:
          none with a triangle above the sheet's underside. Self-intersection
@@ -438,6 +792,40 @@ fs.mkdirSync(OUT, { recursive: true });
       if (tag === 'clamp') w.solids.forEach((x, k) => exportObjects.push({ name: `support ${rg.id + 1}.${k + 1}`, soup: x.soup }));
     }
     console.log(`  time  ${name}: plan ${T.plan} ms; parts ${T.partsBare} -> ${T.parts} ms, weld ${T.weldBare} -> ${T.weld} ms (without -> with the sheet)`);
+  }
+
+  /* THE COUPON AS THE CARD BUILDS IT: every area planned, built with its
+     trunks on their feet and no pad (app-supports-card.js PARTS_OPTS), handed
+     back as shells, then the pads drawn over every area at once (shareFeet) */
+  {
+    console.log('\n=== top_clip_x2: the card\'s build, across its areas ===');
+    const piece = PIECES.find(x => x[2] === 'coupon')[1];
+    const t0 = Date.now();
+    const det = SA.detectOverhangs(piece, { skipList: [], angleDeg: CARD.angleDeg, occluders: [] });
+    const builds = [];
+    let plateZ = 0;
+    for (const rg of det.beaconRegions) {
+      const bs = rg.beacons.map(b => ({ x: b.x, y: b.y, z: b.z, normal: b.normal, regionId: rg.id, key: 'k' }));
+      const p = ST.planTree(piece, Object.assign({}, CARD, { beacons: bs }));
+      if (!p.ok) continue;
+      plateZ = p.plateZ;
+      const tp = await GP.parts(p, { interface: true, foldSheets: false, footPads: 'shared' });
+      builds.push({ p, tp, sh: GP.shells(p, tp) });
+    }
+    const sf = GP.shareFeet(builds.map(b => ({ solids: b.sh.solids })), piece, { plateZ });
+    const ms = Date.now() - t0;
+    check('top_clip_x2: the card\'s build - detect, plan, build every area, shells, shared feet - in under 10 s',
+      sf.ok && ms < 10000, `${ms} ms; ${builds.length} area(s); ${sf.reason}`);
+    check('top_clip_x2: every cluster of feet on one pad, whatever area its trees hold; the slab\'s and the leg\'s trees on one pad are ONE support',
+      sf.ok && sf.clustersSplit === 0 && sf.objects.length === 1 && sf.objects[0].from.length === builds.reduce((n, b) => n + b.sh.solids.length, 0) && sf.pads === 1,
+      sf.ok ? `${sf.pads} pad(s), ${sf.clusters} cluster(s), ${sf.objects.length} support(s): ` + sf.objects.map(o => JSON.stringify(o.from)).join(' ') : sf.reason);
+    /* no two supports' first layers touch: the path conflict Bambu reported between support 1.1 and 2.2 */
+    let closest = Infinity;
+    for (let a = 0; a < sf.objects.length; a++) for (let b = a + 1; b < sf.objects.length; b++) {
+      closest = Math.min(closest, SI.exactDistance(feetOf(sf.objects[a].soup, 0.2 + 1e-3), feetOf(sf.objects[b].soup, 0.2 + 1e-3), { reach: 1 }).mm);
+    }
+    check('top_clip_x2: no two supports\' first layers within 0.1 mm of each other', closest >= 0.1,
+      sf.objects.length > 1 ? `closest ${closest === Infinity ? 'over 1 mm' : closest.toFixed(4) + ' mm'}` : 'one support');
   }
 
   if (EXPORT && exportObjects.length) {

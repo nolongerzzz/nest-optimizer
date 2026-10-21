@@ -32,6 +32,17 @@
  *      layer structure can only be compared with what Bambu does to its OWN
  *      trees (docs/SUPPORT-TREE-SHAPE.md) - said so where it is used.
  *
+ *   C. The top_clip_x2 coupon export (npm run support:print-export, the
+ *      Supports card's build): NSO's 0.40 sheet, which Bambu Studio prints
+ *      with classic walls + Detect thin wall as ONE pass per line (the
+ *      owner's print, 2026-10-20). NSO's slice of it - read by the same
+ *      audit tool that reads Bambu's (tools/nso_slicer_audit.js sheetAudit)
+ *      - against the record (Bambu: 54 extrusions, ~434 mm, a slab sheet
+ *      layer), and against the owner's own Bambu G-code of this export
+ *      (fixtures/supports/top_clip_x2_supports.gcode.3mf, breakawayV1): per
+ *      sheet layer one connected drawing in both, every line printed, total
+ *      mm within 10 % (Bambu's 2 runs a layer against NSO's 1 a finding).
+ *
  * Agreement is asserted (a failure is a regression). Disagreement is printed
  * as FINDING and pinned where it is stable, so it cannot silently change.
  */
@@ -47,6 +58,7 @@ const ROOT = path.join(__dirname, '..');
 const SL = require('../nso_slicer.js');
 const G = require('../nso-gcode-lines.js');
 const R = require('../nso-3mf-read.js');
+const { readSTL } = require('./nso_stl_io.js');
 
 let pass = 0, fail = 0;
 const findings = [];
@@ -401,13 +413,13 @@ function coverage(footprintPolys, ifaceMoves, reach, grow) {
   check('layer 90 is empty of support; the underside starts printing at layer 91 (the gap: CONSTANTS.supportGap, 0.182 mm < one 0.2 layer)',
         rIf.objects[1].layers[89].areaMm2 === 0 && rIf.objects[2].layers[89].areaMm2 === 0 && pieceFirstUnder === 91,
         'piece from ' + pieceFirstUnder);
-  // The tree stands on its foot pads again (supports-followups; #195 built it
-  // without them). Layer 1 is the feet: two whole discs of r = 3 mm, 2 x 28.19
-  // mm^2 (a 48-gon of that radius), an outline each and no hole in either;
-  // above them the section is the two trunks alone.
+  // The tree stands on ONE foot pad (supports-print-1): its two trunks stand
+  // within 6 mm, so they share a pad - their footprints grown by 4 mm, kept
+  // 0.2 mm off the piece (it was two discs of r = 3 mm, 2 x 28.19 mm^2). One
+  // outline and no hole in it; above it the section is the two trunks alone.
   const footL = rIf.objects[2].layers[0], trunkL = rIf.objects[2].layers[1];
-  check('the tree stands on two feet: layer 1 is two whole discs, 2 x 28.19 mm^2, every outline an outer one (no ring)',
-        footL.sectionPolys.length === 2 && footL.sectionPolys.every(p => SL.signedArea(p) > 0) && Math.abs(footL.areaMm2 - 56.387) < 0.01,
+  check('the tree stands on one shared foot: layer 1 is one whole pad, 178.77 mm^2, its one outline an outer one (no ring)',
+        footL.sectionPolys.length === 1 && footL.sectionPolys.every(p => SL.signedArea(p) > 0) && Math.abs(footL.areaMm2 - 178.766) < 0.01,
         footL.sectionPolys.length + ' outline(s), ' + footL.areaMm2.toFixed(3) + ' mm^2');
   check('... walled, and layer 2 is the trunks alone (8.640 mm^2)', footL.wallCount >= 1 && Math.abs(trunkL.areaMm2 - 8.64) < 0.01,
         footL.wallCount + ' wall(s); layer 2 ' + trunkL.areaMm2.toFixed(3) + ' mm^2');
@@ -489,6 +501,90 @@ function coverage(footprintPolys, ifaceMoves, reach, grow) {
     t06.length + ' tube layers get NO wall at all (the tube wall is thinner than one line; Bambu\'s detect_thin_wall = 0 drops such ' +
     'regions the same way). In-house prediction, not yet seen in a real 0.6 slice: build the tree at hollowWallMm = 0.63 for the 0.6 nozzle.');
   check('... pinned: at 0.63 mm lines the 0.42 mm tube walls vanish on most tube layers', lost > t06.length / 2, lost + ' of ' + t06.length);
+
+  // =========================================================================
+  section('5. The coupon export - the sheet as Bambu Studio prints it (classic walls, Detect thin wall)');
+  // =========================================================================
+  {
+    const PX = require('./nso_supports_print_export.js');
+    const AU = require('./nso_slicer_audit.js');
+    const piece = readSTL(path.join(ROOT, 'fixtures', 'supports', 'top_clip_x2_coupon.stl'));
+    const plen = p => { const q = p.closed ? p.pts.concat([p.pts[0]]) : p.pts; let l = 0; for (let i = 0; i + 1 < q.length; i++) l += Math.hypot(q[i + 1][0] - q[i][0], q[i + 1][1] - q[i][1]); return l; };
+    /* the export, sliced as G-scope slices it: the piece a part, each support a support (thin walls on, as its
+       detect_thin_wall = 1 says); the sheet layers' thin passes, and the audit tool's reading of the G-code */
+    const sliceExport = async over => {
+      const b = await PX.build(piece, over);
+      const objs = b.objects.map((o, i) => i === 0 ? { name: o.name, soup: o.soup, key: 1, role: 'part' } : { name: o.name, soup: o.soup, role: 'support', hostKey: 1 });
+      const r = SL.sliceObjects(objs, SL.defaultsFor(0.4, { layerMm: 0.2, firstLayerMm: 0.2 }), wasm);
+      const names = {}; b.objects.forEach((o, i) => { names[i] = o.name; });
+      const boxes = AU.exportSheetBoxes(b.objects.map(o => ({ name: o.name, soup: o.soup })));
+      const au = AU.sheetAudit(r.gcode, { names, boxes, shift: [0, 0] });
+      const sheetLayers = [];
+      r.objects.forEach(ob => ob.role === 'support' && ob.layers.forEach(L => {
+        const th = L.paths.filter(p => p.thinWall);
+        if (th.length && L.paths.some(p => /Support (interface|transition)/.test(p.feature)))
+          sheetLayers.push({ z: L.printZ, paths: th.length, mm: th.reduce((a, p) => a + plen(p), 0), moves: th.reduce((a, p) => a + p.pts.length - 1 + (p.closed ? 1 : 0), 0),
+                             feats: [...new Set(th.map(p => p.feature))] });
+      }));
+      return { b, r, au, sheetLayers };
+    };
+    const s40 = await sliceExport({}), s43 = await sliceExport({ sheetWidthMm: 0.43 });
+    const w40 = s40.b.areas[0].tp.sheet.widthMm, w43 = s43.b.areas[0].tp.sheet.widthMm;
+    const show = S => S.sheetLayers.map(l => 'z ' + l.z.toFixed(2) + ': ' + l.paths + ' path(s), ' + l.mm.toFixed(1) + ' mm in ' + l.moves + ' moves').join(' | ');
+    console.log('  NSO\'s slice of the ' + f3(w40) + ' export, sheet layers: ' + show(s40));
+    check('the card\'s export (' + f3(w40) + ' lines): 8 sheet layers (slab and leg, 4 each), every one ONE thin-wall path, Support transition then interface',
+          w40 === 0.4 && s40.sheetLayers.length === 8 && s40.sheetLayers.every(l => l.paths === 1) &&
+          s40.sheetLayers.filter(l => /interface/.test(l.feats[0])).length === 4, s40.sheetLayers.map(l => l.feats.join('+')).join(', '));
+    /* the record: the slab's sheet layer in Bambu Studio, one run of 54 extrusions, ~434 mm (PR #256's reading of
+       the owner's thinwall plate; Bambu draws the loop, then the serpentine joined to it, no travel between) */
+    const slab = s40.sheetLayers.filter(l => l.mm > 200);
+    check('the slab\'s 4 layers: ONE path each within 10 % of Bambu\'s 434 mm, and the T / I2 layers within 10 % of its 54 extrusions (the record)',
+          slab.length === 4 && slab.every(l => Math.abs(l.mm / 434 - 1) <= 0.10) && slab.filter(l => l.moves > 40).every(l => Math.abs(l.moves / 54 - 1) <= 0.10),
+          slab.map(l => l.mm.toFixed(1) + ' mm / ' + l.moves + ' moves').join(', ') + ' (I1 runs its 16 lines the long way: ' + (slab.find(l => l.moves <= 40) || {}).moves + ' moves)');
+    check('the ' + f3(w43) + ' export slices to the same path count, layer for layer (one pass, not an outline)',
+          w43 === 0.43 && s43.sheetLayers.length === s40.sheetLayers.length && s43.sheetLayers.every((l, i) => l.paths === s40.sheetLayers[i].paths &&
+            Math.abs(l.mm / s40.sheetLayers[i].mm - 1) < 0.02), show(s43));
+    /* read back by the audit tool, as it reads Bambu's G-code */
+    const L40 = s40.au.layers;
+    console.log('  the audit tool on NSO\'s G-code: ' + L40.map(l => 'z ' + l.z.toFixed(2) + ' ' + l.chains + ' run(s), ' + l.toolpathMm.toFixed(0) + ' mm on its lines, ' +
+      l.passes.toFixed(2) + ' passes, E/mm ' + l.eMm.toFixed(4) + ' = ' + l.ratio.toFixed(2) + ' x outer wall, ' + l.printed + '/' + l.exportLines + ' lines').join(' | '));
+    /* passes: the toolpath on the lines over their length - a turn's ends where it meets its lines count too, so
+       one pass reads a little over 1; a line drawn twice (out and back round a sliver) reads 2 */
+    check('...the audit tool reads it as Bambu\'s thin-wall print: every line printed, once (passes 1.00 - 1.10), at the outer wall\'s E/mm (+- 15 %)',
+          L40.length === 8 && L40.every(l => l.printed === l.exportLines && l.passes >= 1 && l.passes <= 1.10 && Math.abs(l.lineRatio - 1) <= 0.15),
+          'outer wall ' + s40.au.outerWallEmm.toFixed(4) + ' E/mm (Bambu measured 0.0307)');
+    /* the owner's Bambu G-code of this export, when it is in the repo */
+    const BG = path.join(ROOT, 'fixtures', 'supports', 'top_clip_x2_supports.gcode.3mf');
+    if (!fs.existsSync(BG)) {      /* the file is in the repo; kept so a checkout without it still runs */
+      finding('the coupon export against Bambu\'s own slice of it: NOT RUN - fixtures/supports/top_clip_x2_supports.gcode.3mf is not in the repo. ' +
+        'Slice tools/supports-print-out/top_clip_x2_supports.3mf in Bambu Studio (open as a project; classic walls, Detect thin wall), save the ' +
+        '.gcode.3mf there, and this section compares path count and total mm per sheet layer within 10 %.');
+    } else {
+      const zip = R.openZip(new Uint8Array(fs.readFileSync(BG)));
+      const dec = new TextDecoder();
+      const plate = zip.names().find(n => /plate_\d+\.gcode$/.test(n));
+      const gcode = dec.decode(await zip.read(plate));
+      const info = zip.names().includes('Metadata/slice_info.config') ? dec.decode(await zip.read('Metadata/slice_info.config')) : '';
+      const bnames = AU.sliceNames(info);
+      const boxes = AU.exportSheetBoxes(s40.b.objects.map(o => ({ name: o.name, soup: o.soup })));
+      const reg = AU.registerShift(AU.extrusions(gcode), bnames, boxes);
+      const bau = AU.sheetAudit(gcode, { names: bnames, boxes, shift: reg ? reg.shift : [0, 0] });
+      const pairs = L40.map(l => ({ n: l, b: bau.layers.find(x => Math.abs(x.z - l.z) < 0.05) }));
+      const row = l => l.drawings + ' drawing(s) in ' + l.runs + ' run(s), ' + l.runMm.toFixed(1) + ' mm (' + l.toolpathMm.toFixed(0) + ' on its lines), ' + l.printed + '/' + l.exportLines + ' lines';
+      console.log('  Bambu\'s slice of it (' + path.basename(BG) + ', registered ' + (reg ? reg.shift.join(', ') + ' mm, ' + Math.round(100 * reg.share) + ' %' : 'not') + '):\n    ' +
+        pairs.map(p => 'z ' + p.n.z.toFixed(2) + ': NSO ' + row(p.n) + ' | Bambu ' + (p.b ? row(p.b) : 'no layer')).join('\n    '));
+      /* a path is a connected drawing: Bambu draws each layer's one wall in two runs - from a seam mid-serpentine
+         both ways on the slab, the loop and then the serpentine ending on it on the leg - NSO in one */
+      check('Bambu\'s own slice of this export (breakawayV1, the owner\'s breakaway print): every sheet layer one connected drawing in both, every line printed in both, total mm within 10 %',
+            pairs.length === 8 && pairs.every(p => p.b && p.n.drawings === 1 && p.b.drawings === 1 && p.n.printed === p.n.exportLines && p.b.printed === p.b.exportLines &&
+              Math.abs(p.n.runMm / p.b.runMm - 1) <= 0.10),
+            pairs.map(p => 'z ' + p.n.z.toFixed(2) + ' ' + (p.b ? (100 * (p.n.runMm / p.b.runMm - 1)).toFixed(1) + ' %' : '-')).join(', '));
+      finding('runs: Bambu draws every sheet layer of the coupon export in 2 runs of extrusion (slab: from a seam at the foot of a ' +
+        'serpentine line, one way to its free end, travel back, then the other way through the bridge and round the loop - its 54 extrusions ' +
+        'and 3 travels; leg: the loop closed, then the serpentine as a run of its own ending on it). NSO draws each in ONE run (the loop, then ' +
+        'the serpentine). One connected wall in both; ' + pairs.map(p => p.b ? p.b.runs : '-').join('/') + ' runs against ' + pairs.map(p => p.n.runs).join('/') + '.');
+    }
+  }
 
   // =========================================================================
   console.log('\n' + pass + ' passed, ' + fail + ' failed; ' + findings.length + ' finding(s) recorded');
