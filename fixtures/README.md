@@ -249,3 +249,10 @@ per-layer angle histograms and line centres. See `docs/CROSSHATCH.md`.
   (baselineV2) is the reference for the caps and the pads;
   `support:interface`, `support:shells` and `support:test` build it.
   See docs/SUPPORT-INTERFACE.md.
+- top_clip_x2_supports.gcode.3mf — the owner's own Bambu Studio slice
+  (02.08.02.61, A1 mini, 0.4 nozzle, 0.2 mm layers, classic walls + Detect
+  thin wall; breakawayV1, 2026-10-20) of the coupon with the card's supports,
+  the export `npm run support:print-export` writes (0.40 sheet). G-code and
+  settings only. `slicer:bambu` §5 registers it to the export (−1.650 mm in
+  x) and holds NSO's slice of the sheet to it, layer by layer. See
+  docs/SLICER.md, "Thin walls".

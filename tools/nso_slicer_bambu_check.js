@@ -37,11 +37,11 @@
  *      with classic walls + Detect thin wall as ONE pass per line (the
  *      owner's print, 2026-10-20). NSO's slice of it - read by the same
  *      audit tool that reads Bambu's (tools/nso_slicer_audit.js sheetAudit)
- *      - against the record (Bambu: one run of 54 extrusions, ~434 mm, a
- *      slab sheet layer), and against the owner's own Bambu G-code of this
- *      export once it is in the repo (fixtures/supports/
- *      top_clip_x2_supports.gcode.3mf): per sheet layer, path count and
- *      total mm within 10 %.
+ *      - against the record (Bambu: 54 extrusions, ~434 mm, a slab sheet
+ *      layer), and against the owner's own Bambu G-code of this export
+ *      (fixtures/supports/top_clip_x2_supports.gcode.3mf, breakawayV1): per
+ *      sheet layer one connected drawing in both, every line printed, total
+ *      mm within 10 % (Bambu's 2 runs a layer against NSO's 1 a finding).
  *
  * Agreement is asserted (a failure is a regression). Disagreement is printed
  * as FINDING and pinned where it is stable, so it cannot silently change.
@@ -555,7 +555,7 @@ function coverage(footprintPolys, ifaceMoves, reach, grow) {
           'outer wall ' + s40.au.outerWallEmm.toFixed(4) + ' E/mm (Bambu measured 0.0307)');
     /* the owner's Bambu G-code of this export, when it is in the repo */
     const BG = path.join(ROOT, 'fixtures', 'supports', 'top_clip_x2_supports.gcode.3mf');
-    if (!fs.existsSync(BG)) {
+    if (!fs.existsSync(BG)) {      /* the file is in the repo; kept so a checkout without it still runs */
       finding('the coupon export against Bambu\'s own slice of it: NOT RUN - fixtures/supports/top_clip_x2_supports.gcode.3mf is not in the repo. ' +
         'Slice tools/supports-print-out/top_clip_x2_supports.3mf in Bambu Studio (open as a project; classic walls, Detect thin wall), save the ' +
         '.gcode.3mf there, and this section compares path count and total mm per sheet layer within 10 %.');
@@ -570,10 +570,19 @@ function coverage(footprintPolys, ifaceMoves, reach, grow) {
       const reg = AU.registerShift(AU.extrusions(gcode), bnames, boxes);
       const bau = AU.sheetAudit(gcode, { names: bnames, boxes, shift: reg ? reg.shift : [0, 0] });
       const pairs = L40.map(l => ({ n: l, b: bau.layers.find(x => Math.abs(x.z - l.z) < 0.05) }));
-      console.log('  Bambu\'s slice of it: ' + bau.layers.map(l => 'z ' + l.z.toFixed(2) + ' ' + l.chains + ' run(s), ' + l.toolpathMm.toFixed(0) + ' mm').join(' | '));
-      check('Bambu\'s own slice of this export: per sheet layer, NSO\'s path count and total mm within 10 % of Bambu\'s',
-            pairs.every(p => p.b && Math.abs(p.n.chains - p.b.chains) <= Math.max(0, Math.floor(0.1 * p.b.chains)) && Math.abs(p.n.toolpathMm / p.b.toolpathMm - 1) <= 0.10),
-            pairs.map(p => 'z ' + p.n.z.toFixed(2) + ': NSO ' + p.n.chains + ' / ' + p.n.toolpathMm.toFixed(0) + ' mm, Bambu ' + (p.b ? p.b.chains + ' / ' + p.b.toolpathMm.toFixed(0) + ' mm' : 'no layer')).join(' | '));
+      const row = l => l.drawings + ' drawing(s) in ' + l.runs + ' run(s), ' + l.runMm.toFixed(1) + ' mm (' + l.toolpathMm.toFixed(0) + ' on its lines), ' + l.printed + '/' + l.exportLines + ' lines';
+      console.log('  Bambu\'s slice of it (' + path.basename(BG) + ', registered ' + (reg ? reg.shift.join(', ') + ' mm, ' + Math.round(100 * reg.share) + ' %' : 'not') + '):\n    ' +
+        pairs.map(p => 'z ' + p.n.z.toFixed(2) + ': NSO ' + row(p.n) + ' | Bambu ' + (p.b ? row(p.b) : 'no layer')).join('\n    '));
+      /* a path is a connected drawing: Bambu draws each layer's one wall in two runs - from a seam mid-serpentine
+         both ways on the slab, the loop and then the serpentine ending on it on the leg - NSO in one */
+      check('Bambu\'s own slice of this export (breakawayV1, the owner\'s breakaway print): every sheet layer one connected drawing in both, every line printed in both, total mm within 10 %',
+            pairs.length === 8 && pairs.every(p => p.b && p.n.drawings === 1 && p.b.drawings === 1 && p.n.printed === p.n.exportLines && p.b.printed === p.b.exportLines &&
+              Math.abs(p.n.runMm / p.b.runMm - 1) <= 0.10),
+            pairs.map(p => 'z ' + p.n.z.toFixed(2) + ' ' + (p.b ? (100 * (p.n.runMm / p.b.runMm - 1)).toFixed(1) + ' %' : '-')).join(', '));
+      finding('runs: Bambu draws every sheet layer of the coupon export in 2 runs of extrusion (slab: from a seam at the foot of a ' +
+        'serpentine line, one way to its free end, travel back, then the other way through the bridge and round the loop - its 54 extrusions ' +
+        'and 3 travels; leg: the loop closed, then the serpentine as a run of its own ending on it). NSO draws each in ONE run (the loop, then ' +
+        'the serpentine). One connected wall in both; ' + pairs.map(p => p.b ? p.b.runs : '-').join('/') + ' runs against ' + pairs.map(p => p.n.runs).join('/') + '.');
     }
   }
 

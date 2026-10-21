@@ -6341,13 +6341,22 @@ lines, `slicer:supports` and `gscope:select` §10 lost their support rows
     per sheet layer; the slab is within 10 % of the record (Bambu: 54
     extrusions, 434 mm); the audit tool reads every line printed once, at the
     outer wall's E/mm.
-- **Waiting on the owner**: the owner's Bambu `.gcode.3mf` of
-  `tools/supports-print-out/top_clip_x2_supports.3mf`, at
-  `fixtures/supports/top_clip_x2_supports.gcode.3mf`. With it, `slicer:bambu`
-  §5 compares path count and total mm per sheet layer within 10 %. Until then
-  that comparison is a finding.
+- **Against Bambu's own slice**: `fixtures/supports/top_clip_x2_supports.gcode.3mf`
+  is the owner's breakawayV1 slice of this export. It registers at −1.650 mm
+  in x, and 100 % of the export's lines land on toolpath.
+  - Per sheet layer, NSO and Bambu are both one connected drawing with every
+    line printed. NSO's total is 0.5 - 3.6 % over Bambu's.
+  - Bambu draws each layer in 2 runs (a seam mid-serpentine on the slab; the
+    loop, then the serpentine, on the leg). NSO draws one, as the kickoff
+    asked. That is recorded as a finding, not forced to match.
 - **Audit tool**: `exportSheetBoxes` read 0 lines on #256's export, because
   stacked sheet layers weld into one piece taller than its 0.5 mm limit. It
   now reads such a piece band by band (129 lines on the coupon). Its
-  per-layer record carries `chains` (runs of extrusion).
+  per-layer record carries `chains` (runs of extrusion), and with `--export`
+  also `runs`, `runMm` and `drawings` (runs joined where an end meets
+  another).
+  - `registerShift` searched ±1.5 mm, and breakawayV1 sits 1.651 mm off. A
+    sheet's lines a pitch apart let a one-pitch-wrong shift (−0.815) lay all
+    but one line a layer on toolpath. It now searches ±3 mm, sampling every
+    6th point in the coarse pass.
   `nso_supports_print_export.js` exports `build` for `slicer:bambu`.

@@ -200,10 +200,10 @@ because it compares like with like.
 
 ## 5. Validation against real Bambu slices (Task 7)
 
-`npm run slicer:bambu`: 57 checks, about 70 s. Result: **57 passed, 8 findings
-recorded.** §5, the coupon export's sheet, is described under
-[Thin walls](#thin-walls-classic-walls-with-detect-thin-wall-on); its eighth
-finding says the comparison with the owner's own Bambu G-code is not run yet.
+`npm run slicer:bambu`: 58 checks, about 90 s. Result: **58 passed, 8 findings
+recorded.** §5, the coupon export's sheet against Bambu's own slice of it, is
+described under [Thin walls](#thin-walls-classic-walls-with-detect-thin-wall-on);
+its eighth finding records the run counts (Bambu 2 a layer, NSO 1).
 
 ### What there is to compare with, honestly
 
@@ -460,9 +460,22 @@ classic semantics, not Arachne: one fixed width, no variable bead.
   - The 0.43 export gives the same path count, layer for layer.
   - Read back by `nso_slicer_audit.js`, every line is printed once, at
     1.00 x the outer wall's E/mm.
-  - The comparison with the owner's own Bambu G-code of this export runs once
-    `fixtures/supports/top_clip_x2_supports.gcode.3mf` is in the repo. Until
-    then it is a finding, not a check.
+  - **Against Bambu's own slice of it**
+    (`fixtures/supports/top_clip_x2_supports.gcode.3mf`, the owner's
+    breakawayV1, Bambu Studio 02.08.02.61, classic walls + Detect thin wall),
+    every sheet layer is one connected drawing in both and every line is
+    printed in both. NSO's total is within 0.5 - 3.6 % of Bambu's: 408.0
+    against 404.7 - 405.9 mm on the slab, 56.9 against 54.9 - 56.5 on the
+    leg. Bambu's thin wall runs at 1.06 x its outer wall's E/mm (0.0327
+    against 0.0307); NSO's at 1.00.
+  - **Runs differ, by design.** Bambu draws each layer in 2 runs. On the slab
+    it starts at the foot of a serpentine line, goes one way to the free end,
+    travels back, then goes the other way through the bridge and round the
+    loop (its 54 extrusions and 3 travels). On the leg it draws the loop
+    closed, then the serpentine as a run of its own ending on the loop. NSO
+    draws each layer in ONE run, the loop then the serpentine, as asked. It
+    is the same connected wall; `slicer:bambu` records the run counts as a
+    finding.
 - **Pinned.** The repo meshes give the same G-code byte for byte with the
   flag off and on (`slicer:test` §9, 32 slices at both nozzles). None of them
   has a thin wall 0.13 mm or wider.
@@ -489,7 +502,7 @@ classic semantics, not Arachne: one fixed width, no variable bead.
 | step | what | time |
 |---|---|---|
 | `slicer:test` | 63 checks: sections equal manifold's own `Manifold.slice` on 6 repo meshes (worst rel 1.3e-9); orientation; open and inside-out meshes; wall offsets and counts; grid pitch and angles; density scaling; shells; overhang on cones either side of 30° / 45°, a mushroom (area exact to the step), model vs plate; G-code round trip; conflicts; constants; thin walls (a strip, a ring, a loop with its serpentine, a fin on a block, the 1.05-bead threshold, who has it on) and the repo meshes' G-code pinned byte for byte, flag off and on | ~8 s |
-| `slicer:bambu` | §5 above: 57 checks, 8 findings | ~75 s |
+| `slicer:bambu` | §5 above: 58 checks, 8 findings | ~90 s |
 | `gcode:gscope-slice` | 45 checks, real clicks, screenshots in `tools/gscope-slice-out/` | ~10 s |
 | `slicer:supports` | 26 checks on the clip coupon and its 2 card-default supports: every support line Support / transition / interface, interface exactly the top 2 layers' moves and transition the 2 below, the three Features rows, each clip's overhang credited to the support under it (uncovered 0 under the sheet), the readout's words, byte-identical G-code without supports | ~2 s |
 | `gcode:gscope-slice-view` | 50 checks: Normal -> Slice view -> Normal twice, the one All features list and its toggles, settings persisted, the whole-part state restored exactly | ~15 s |

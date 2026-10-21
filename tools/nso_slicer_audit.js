@@ -389,6 +389,9 @@ function calibrate(res, bambu) {
                   back) 2
      E per mm of LINE: the ratio times the passes - what the bead amounts to
      chains       the runs of extrusion it is drawn in (a travel ends one)
+     runs, runMm, drawings (with --export) the runs half on the sheet's lines
+                  or more, their length in all, and the connected drawings
+                  they make (runs joined where an end of one lies on another)
    A layer is OK when the E per mm of line is RATIO_TARGET +- RATIO_TOL of the
    outer wall's and at least SEGMENT_SHARE of its toolpath is in segments of
    SEGMENT_MIN_MM or more.
@@ -488,10 +491,13 @@ function sliceNames(xml) {
 }
 /* Where the slicer put the export: the shift (g-code minus export) that
    lays the most of the export's sheet lines on toolpath of their own object
-   and layer - a search over +-1.5 mm, then a finer one round the best.
+   and layer - a search over +-3 mm, then a finer one round the best.
    Bambu Studio arranges the plate: the 2026-10-20 slice sits 0.425 mm off
    its export in x, and unregistered its diagonal sheet lines read as
-   missing. The objects' own extents do not register it: a brim, a pad, a
+   missing; breakawayV1 (the coupon's 0.40 sheet) sits 1.651 mm off. A sheet
+   is lines a pitch apart, so a shift one pitch out lays all but one of them
+   on toolpath too: the search has to reach the true one (+-1.5 mm found
+   breakawayV1's alias at -0.815, one line short a layer). The objects' own extents do not register it: a brim, a pad, a
    wall the slicer drops each move a middle by more than that. */
 function registerShift(moves, names, boxes) {
   if (!boxes || !boxes.length) return null;
@@ -532,7 +538,7 @@ function registerShift(moves, names, boxes) {
     return { hit, sum };
   };
   let best = null;
-  for (const [span, step, tol, every] of [[1.5, 0.1, 0.15, 3], [0.15, 0.02, 0.06, 1], [0.03, 0.005, 0.03, 1]]) {
+  for (const [span, step, tol, every] of [[3, 0.1, 0.15, 6], [0.15, 0.02, 0.06, 1], [0.03, 0.005, 0.03, 1]]) {
     const cx = best ? best.dx : 0, cy = best ? best.dy : 0;
     best = null;
     for (let dx = cx - span; dx <= cx + span + 1e-9; dx += step) for (let dy = cy - span; dy <= cy + span + 1e-9; dy += step) {
@@ -652,6 +658,34 @@ function sheetAudit(gcode, opts) {
     rec.lineRatio = rec.ratio * passes;
     /* the runs of extrusion the layer's sheet toolpath is drawn in (a travel ends one) */
     rec.chains = new Set(use.map(m => m.chain)).size;
+    if (lines) {
+      /* the sheet's runs - each run of extrusion with half its length or more
+         on the lines, or lying wholly inside their box (a serpentine of lines
+         too short to read as lines: the coupon leg's I1) - and the drawings
+         they make: runs joined where an end
+         of one lies on another (within half a line). Bambu draws a sheet
+         layer as one connected wall in two runs (from a seam mid-serpentine,
+         each way; or the loop, then the serpentine ending on it); a slicer
+         that draws it in one has one run and the same one drawing */
+      const byChain = new Map();
+      ms.forEach(m => { if (!byChain.has(m.chain)) byChain.set(m.chain, []); byChain.get(m.chain).push(m); });
+      const runs = [], wl = lines[0].widthMm || 0.4;
+      const bx = lines.flatMap(b => [b.a[0], b.b[0]]), by = lines.flatMap(b => [b.a[1], b.b[1]]);
+      const box = [Math.min(...bx) - wl, Math.max(...bx) + wl, Math.min(...by) - wl, Math.max(...by) + wl];
+      const inBox = m => movePts(m).every(q => q[0] - shift[0] >= box[0] && q[0] - shift[0] <= box[1] && q[1] - shift[1] >= box[2] && q[1] - shift[1] <= box[3]);
+      for (const c of byChain.values()) {
+        const len = c.reduce((a, m) => a + m.len, 0), on = c.filter(onLine).reduce((a, m) => a + m.len, 0);
+        if (len > 0 && (on >= 0.5 * len || c.every(inBox))) runs.push({ mm: len, pts: [].concat(...c.map((m, i) => i ? movePts(m).slice(1) : movePts(m))) });
+      }
+      const w = wl, par = runs.map((r, i) => i), find = i => par[i] === i ? i : (par[i] = find(par[i]));
+      const near = (p, r) => { for (let q = 0; q + 1 < r.pts.length; q++) if (segDist(p, r.pts[q], r.pts[q + 1]) <= w / 2) return true; return false; };
+      runs.forEach((a, i) => runs.forEach((b, j) => {
+        if (i < j && [a.pts[0], a.pts[a.pts.length - 1]].some(p => near(p, b)) || i < j && [b.pts[0], b.pts[b.pts.length - 1]].some(p => near(p, a))) par[find(i)] = find(j);
+      }));
+      rec.runs = runs.length;
+      rec.runMm = runs.reduce((a, r) => a + r.mm, 0);
+      rec.drawings = new Set(runs.map((r, i) => find(i))).size;
+    }
     if (lines) {
       /* each export line: printed when toolpath covers COVER_SHARE of its centreline */
       const pts = [];
@@ -907,7 +941,8 @@ async function sheetMain(argv, fs, R) {
       console.log(`    z ${L.z.toFixed(2)}: ${L.segments} segments, mean ${f2(L.meanSegMm)} mm (median ${f2(L.medianSegMm)}), ` +
                   `${Math.round(100 * L.longShare)} % of ${L.toolpathMm.toFixed(0)} mm in segments >= ${T.segmentMinMm} mm; ` +
                   `E/mm ${f4(L.eMm)} = ${f2(L.ratio)} x outer wall; ${f2(L.passes)} passes -> ${f2(L.lineRatio)} x per mm of line` +
-                  (L.exportLines != null ? `; ${L.printed} of ${L.exportLines} lines printed` + (L.missingMm.length ? ' (missing: ' + L.missingMm.join(', ') + ' mm)' : '') : '') +
+                  (L.exportLines != null ? `; ${L.printed} of ${L.exportLines} lines printed` + (L.missingMm.length ? ' (missing: ' + L.missingMm.join(', ') + ' mm)' : '') +
+                    `; ${L.runs} run(s) of ${L.runMm.toFixed(0)} mm, ${L.drawings} drawing(s)` : '') +
                   `   ${L.ok ? 'OK' : 'NOT OK'}`);
     }
     if (r.reference.length) {
