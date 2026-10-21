@@ -44,7 +44,7 @@
       as the card builds it is byte for byte the build before the stair
       (sha-256 of each object's soup, recorded at claude-wip 6f3354f), and
       no stair forms on it.
-   8. THE REFUSAL, the card in Chromium at its default 60 deg: the arc's area
+   8. THE REFUSAL, the card in Chromium at 60 deg (its default until #263): the arc's area
       - its top included - reads held; the three spots at its foot the plate
       cannot reach (over the part's own 2 mm base, past the 30 deg lean) are
       an area of their own, "unreachable · no route to the plate · 3 spots".
@@ -172,7 +172,7 @@ async function build(piece) {
   return { areas, live, sf, objects, ms: Date.now() - t0 };
 }
 
-/* the card in Chromium at its default angle: section 8 */
+/* the card in Chromium at 60 deg: section 8 */
 async function cardRun() {
   const { pathToFileURL } = require('url');
   const lib = await import(pathToFileURL(path.join(__dirname, 'cth-test', 'browser-lib.mjs')).href);
@@ -192,7 +192,8 @@ async function cardRun() {
     await page.waitForFunction(() => state.models.length === 1 && state.placed.length === 1, null, { timeout: 30000 });
     const id = await page.evaluate(() => state.placed[0].sourceId);
     await page.click('#menu-supports > summary');
-    await page.evaluate(id => { NSO_SUPPORTS_CARD.pick(id); }, id);
+    /* 60 deg, set, not left to the default: #263 makes the card's default 35 */
+    await page.evaluate(id => { NSO_SUPPORTS_CARD.pick(id); NSO_SUPPORTS_CARD.angle(60); }, id);
     await page.waitForFunction(() => NSO_SUPPORTS_CARD.view().areas.length > 0, null, { timeout: 60000 });
     const before = await page.evaluate(() => NSO_SUPPORTS_CARD.view());
     await page.evaluate(() => NSO_SUPPORTS_CARD.generate());
@@ -372,7 +373,7 @@ async function cardRun() {
   }
 
   /* ------------------------------------------------------------------ 8 */
-  console.log('\n=== 8. the refusal, the card at its default 60 deg ===');
+  console.log('\n=== 8. the refusal, the card at 60 deg ===');
   {
     const run = await cardRun();
     const v = run.after, A = v.areas;
