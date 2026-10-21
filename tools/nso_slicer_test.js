@@ -17,6 +17,13 @@
  *   6. G-code     through parseGcode: widths recovered, nothing assumed.
  *   7. conflicts  two objects sharing a layer.
  *   8. constants  every measured default present, with its source.
+ *   9. thin walls Detect thin wall (classic): a wall under 1.05 x the bead is
+ *                 ONE centre pass at the bead's width - a strip, a ring, a
+ *                 loop with a serpentine joined to it (one path, loop then
+ *                 serpentine), a fin on a block; 1.05 x the bead and up
+ *                 unchanged; on for a support, off for a part unless asked;
+ *                 and the repo meshes' G-code pinned byte for byte, flag off
+ *                 and on (none of them has a thin wall 0.13 mm or wider).
  */
 'use strict';
 
@@ -25,6 +32,7 @@ const ROOT = path.join(__dirname, '..');
 const SL = require('../nso_slicer.js');
 const G = require('../nso-gcode-lines.js');
 const { readSTL } = require('./nso_stl_io.js');
+const crypto = require('crypto');
 
 let pass = 0, fail = 0;
 function check(what, cond, got) {
@@ -307,6 +315,131 @@ function frustum(n, r0, r1, z0, z1) {
     check('the Clipper2 adapter frees every WASM object it made', before > 0 && g.arenaSize() === 0, before + ' freed');
     check('an empty polygon list is an empty section, not a crash (binding: polygons2vec reads polygons[0])',
           (() => { const h = SL.geometry(wasm); try { return h.of([]).isEmpty(); } finally { h.free(); } })());
+  }
+
+  // =========================================================================
+  section('9. Thin walls - classic walls with Detect thin wall on');
+  // =========================================================================
+  {
+    const W = SL.defaultsFor(0.4).outerWallWidthMm;            // 0.42
+    /* a region (polygons with holes, Positive) extruded z0..z1, as a soup */
+    const extrudeCS = (polys, z0, z1) => {
+      const cs = new wasm.CrossSection(polys, 'Positive');
+      const m = cs.extrude(z1 - z0), mesh = m.getMesh(), np = mesh.numProp, V = mesh.vertProperties, T = mesh.triVerts, out = [];
+      for (let i = 0; i < T.length; i++) out.push(V[T[i] * np], V[T[i] * np + 1], V[T[i] * np + 2] + z0);
+      cs.delete(); m.delete();
+      return out;
+    };
+    const unionRects = rs => {
+      const parts = rs.map(r => new wasm.CrossSection([rect(...r)], 'Positive'));
+      const u = wasm.CrossSection.union(parts), polys = u.toPolygons();
+      parts.forEach(c => c.delete()); u.delete();
+      return polys;
+    };
+    const plen = p => { const q = p.closed ? p.pts.concat([p.pts[0]]) : p.pts; let l = 0; for (let i = 0; i + 1 < q.length; i++) l += Math.hypot(q[i + 1][0] - q[i][0], q[i + 1][1] - q[i][1]); return l; };
+    const opts = over => SL.defaultsFor(0.4, Object.assign({ layerMm: 0.2, firstLayerMm: 0.2 }, over));
+    const slice = (soup, over, ob) => SL.sliceObjects([Object.assign({ name: 't', soup }, ob || {})], opts(over), wasm);
+    const live = r => r.objects[0].layers.filter(L => L.areaMm2 > 0);
+
+    // a 0.40 x 20 strip, 1 mm tall: nothing without the flag, one pass with it
+    const strip = (wd, len) => prism(rect(0, len, 0, wd), 0, 1);
+    const off40 = slice(strip(0.40, 20)), on40 = slice(strip(0.40, 20), { detectThinWall: true });
+    check('a 0.40 strip (under the bead): without Detect thin wall, nothing is drawn (the classic inset keeps nothing)',
+          live(off40).every(L => L.paths.length === 0), live(off40).map(L => L.paths.length).join(' '));
+    const ps = live(on40).map(L => L.paths);
+    const p0 = ps[0][0];
+    check('...with it, every layer is ONE open Outer wall pass at the bead\'s width, down the middle (y 0.200), its ends flush: half a bead in (x 0.200 - 19.800)',
+          ps.length === 5 && ps.every(l => l.length === 1 && !l[0].closed && l[0].feature === 'Outer wall' && l[0].width === W && l[0].thinWall) &&
+          ps.every(l => l[0].pts.every(q => Math.abs(q[1] - 0.2) < 0.022)) &&
+          ps.every(l => { const xs = l[0].pts.map(q => q[0]); return Math.abs(Math.min(...xs) - 0.2) < 0.022 && Math.abs(Math.max(...xs) - 19.8) < 0.022; }),
+          ps.length + ' layers; ' + p0.pts.map(q => q.map(f4).join(',')).join(' -> '));
+    const pg = G.parseGcode(on40.gcode);
+    const thinMoves = pg.moves.filter(m => m.feature === 'Outer wall');
+    check('...and its G-code reads back at the bead\'s own width (flow for a full bead, as Bambu\'s thin wall: E/mm = its outer wall\'s)',
+          thinMoves.length > 0 && thinMoves.every(m => Math.abs(m.width - W) < 2e-4), thinMoves.length + ' moves at ' + f4(thinMoves[0] && thinMoves[0].width));
+    // 0.43: a sliver drawn round, out and back, without; one pass with
+    const off43 = slice(strip(0.43, 20)), on43 = slice(strip(0.43, 20), { detectThinWall: true });
+    const len43 = live(off43).map(L => L.paths.reduce((a, q) => a + plen(q), 0));
+    check('a 0.43 strip: without the flag a closed sliver outline (two passes, out and back); with it ONE open pass, the same path count as 0.40',
+          live(off43).every(L => L.paths.length === 1 && L.paths[0].closed) && len43.every(l => l > 39) &&
+          live(on43).every((L, i) => L.paths.length === 1 && !L.paths[0].closed && Math.abs(plen(L.paths[0]) - plen(ps[i][0])) < 0.05),
+          'without: ' + len43.map(l => l.toFixed(2)).join(' ') + ' mm; with: ' + live(on43).map(L => plen(L.paths[0]).toFixed(2)).join(' ') + ' mm');
+    // 1.05 x the bead and up: walls as ever, byte for byte
+    const thick = [0.45, 0.63, 1.0, 2.0].map(wd => { const a = slice(strip(wd, 20)).gcode, b = slice(strip(wd, 20), { detectThinWall: true }).gcode; return a === b; });
+    check('strips of 0.45 / 0.63 / 1.0 / 2.0 mm (1.05 bead = ' + f4(1.05 * W) + ' and up): the same G-code with the flag as without', thick.every(Boolean), thick.join(' '));
+    // a ring: one closed path round its middle
+    const ring = (() => { const n = 96, P = r => Array.from({ length: n }, (_, k) => [r * Math.cos(2 * Math.PI * k / n), r * Math.sin(2 * Math.PI * k / n)]);
+      return extrudeCS([P(5.2), P(4.8).reverse()], 0, 1); })();
+    const rr = live(slice(ring, { detectThinWall: true }));
+    const want = 2 * Math.PI * 5 * Math.cos(Math.PI / 96);   // the 96-gon's own centreline
+    check('a 0.40 ring (r 5): ONE closed path a layer round its middle, its length the centreline\'s to 0.5 %',
+          rr.every(L => L.paths.length === 1 && L.paths[0].closed && Math.abs(plen(L.paths[0]) / want - 1) < 0.005 &&
+            L.paths[0].pts.every(q => Math.abs(Math.hypot(q[0], q[1]) - 5) < 0.03)),
+          rr.map(L => L.paths.length + ' ' + (L.paths[0] && L.paths[0].closed ? 'closed ' : 'open ') + (L.paths[0] ? plen(L.paths[0]).toFixed(2) : '-')).join(' | ') + ' against ' + want.toFixed(2));
+    // a loop with a serpentine joined to it at one point (the support sheet's shape)
+    const PITCH = 0.84;
+    const centre = [[[0.2, 0.2], [9.8, 0.2]], [[9.8, 0.2], [9.8, 5.8]], [[9.8, 5.8], [0.2, 5.8]], [[0.2, 5.8], [0.2, 0.2]],   // the loop, 9.6 x 5.6
+                    [[9.8, 1.04], [8.96, 1.04]]];                                                                          // the bridge, one pitch
+    let x = 8.96, up = true, nLines = 0;
+    while (x >= 1.04 - 1e-9) {                                                     // lines a pitch apart, a pitch off the loop
+      centre.push(up ? [[x, 1.04], [x, 4.96]] : [[x, 4.96], [x, 1.04]]); nLines++;
+      if (x - PITCH >= 1.04 - 1e-9) centre.push([[x, up ? 4.96 : 1.04], [x - PITCH, up ? 4.96 : 1.04]]);
+      x -= PITCH; up = !up;
+    }
+    /* each centreline segment a strip 0.40 wide, square ends half a line past its points (as the sheet is built) */
+    const rects = centre.map(([a, b]) => [Math.min(a[0], b[0]) - 0.2, Math.max(a[0], b[0]) + 0.2, Math.min(a[1], b[1]) - 0.2, Math.max(a[1], b[1]) + 0.2]);
+    const sheet = extrudeCS(unionRects(rects), 0, 0.6);
+    const sr = live(slice(sheet, { detectThinWall: true }));
+    const planLen = centre.reduce((a, [p, q]) => a + Math.hypot(q[0] - p[0], q[1] - p[1]), 0);
+    check('a loop and a serpentine joined to it at one point (' + nLines + ' lines): ONE path a layer - the loop, then the serpentine, no travel between - its length the plan\'s to 1 %',
+          sr.length === 3 && sr.every(L => L.paths.length === 1 && !L.paths[0].closed && Math.abs(plen(L.paths[0]) / planLen - 1) < 0.01),
+          sr.map(L => L.paths.length + ' path(s), ' + L.paths.map(q => plen(q).toFixed(2) + ' mm in ' + (q.pts.length - 1) + ' moves').join(', ')).join(' | ') + ' against ' + planLen.toFixed(2));
+    const first = sr[0].paths[0].pts, onLoop = q => Math.min(Math.abs(q[0] - 0.2), Math.abs(q[0] - 9.8), Math.abs(q[1] - 0.2), Math.abs(q[1] - 5.8)) < 0.03;
+    let k = 0; while (k < first.length && onLoop(first[k])) k++;
+    check('...it starts on the loop, goes all the way round it, then leaves it once for the serpentine',
+          onLoop(first[0]) && k >= 5 && first.slice(k).every(q => !onLoop(q)), k + ' loop points, then ' + (first.length - k));
+    // a thin fin on a block: the block keeps its walls, the fin is one pass into the block's outer wall
+    const fin = extrudeCS(unionRects([[0, 10, 0, 10], [10, 15, 4.8, 5.2]]), 0, 0.6);
+    const block = extrudeCS(unionRects([[0, 10, 0, 10]]), 0, 0.6);
+    const fr = live(slice(fin, { detectThinWall: true })), br = live(slice(block));
+    const finPaths = fr.map(L => L.paths.filter(q => q.thinWall));
+    const outerSame = fr.every((L, i) => JSON.stringify(L.paths.filter(q => !q.thinWall && /wall/.test(q.feature)).map(q => q.pts)) ===
+                                         JSON.stringify(br[i].paths.filter(q => /wall/.test(q.feature)).map(q => q.pts)));
+    check('a 0.40 fin on a block: the block\'s walls are the block\'s own; the fin ONE pass that runs on into the block to its outer wall (x 9.79)',
+          outerSame && finPaths.every(l => l.length === 1 && Math.abs(Math.min(...l[0].pts.map(q => q[0])) - (10 - W / 2)) < 0.03 &&
+            Math.abs(Math.max(...l[0].pts.map(q => q[0])) - 14.8) < 0.03),
+          'block walls the same: ' + outerSame + '; fin x ' + finPaths.map(l => l[0] ? Math.min(...l[0].pts.map(q => q[0])).toFixed(3) + ' - ' + Math.max(...l[0].pts.map(q => q[0])).toFixed(3) : '-').join(' | '));
+    // who has it on
+    const asSupport = live(slice(strip(0.40, 20), {}, { role: 'support' })), asPart = live(slice(strip(0.40, 20), {}, { role: 'part' }));
+    const forced = live(slice(strip(0.40, 20), { detectThinWall: true }, { detectThinWall: false }));
+    check('on for a support (every NSO support carries detect_thin_wall = 1), off for a part, and an object can say either way',
+          SL.CONSTANTS.thinWall.supportsOn === true && SL.defaultsFor(0.4).detectThinWall === false &&
+          asSupport.every(L => L.paths.length === 1) && asPart.every(L => L.paths.length === 0) && forced.every(L => L.paths.length === 0));
+    check('the thin-wall constants cite their source: 1.05 x the bead, 0.13 mm the thinnest wall printed',
+          SL.CONSTANTS.thinWall.ratio === 1.05 && SL.CONSTANTS.thinWall.minMm === 0.13 && SL.CONSTANTS.thinWall.source.length > 40);
+    // the repo meshes, pinned: G-code sha256 (first 16 hex) at both nozzles, flag off and on - the slicer's own defaults
+    const PINS = {
+      'fixtures/box-20mm.stl': ['bf4fa6385480d9a1', '1ce8c7eb4eca30e8'],
+      'fixtures/cylinder_r10h30_s64.stl': ['4102db1663681585', 'ee3474b981bba976'],
+      'fixtures/fixture_sphere_curved.stl': ['fe9c5c9cc87c6876', 'b0cf24e5869176e3'],
+      'fixtures/hinge_knuckle_box.stl': ['7f1f8a5276b28a4e', '18bed110ec6c7169'],
+      'fixtures/quick/shape-torus.stl': ['c868d617c53a9c78', '93606c4799665dd6'],
+      'fixtures/quick/shape-tube.stl': ['59dafe6c8652a59d', 'df62d80fe91a6680'],
+      'fixtures/supports/top_clip_x2.stl': ['4d86925095fb0779', '4559c78d7bfa0163'],
+      'fixtures/supports/top_clip_x2_coupon.stl': ['606d27ea6a611218', '9cc87768a454c121']
+    };
+    const bad = [];
+    let n = 0;
+    for (const f of Object.keys(PINS)) {
+      const soup = readSTL(path.join(ROOT, f));
+      [0.4, 0.6].forEach((nz, i) => [false, true].forEach(on => {
+        const r = SL.sliceObjects([{ name: path.basename(f), soup }], SL.defaultsFor(nz, { detectThinWall: on }), wasm);
+        const hsh = crypto.createHash('sha256').update(r.gcode).digest('hex').slice(0, 16);
+        n++;
+        if (hsh !== PINS[f][i]) bad.push(f + ' @' + nz + (on ? ' on' : ' off') + ': ' + hsh);
+      }));
+    }
+    check('the repo meshes slice byte for byte as before the thin-wall pass, with it off and on (' + n + ' slices pinned)', !bad.length, bad.join('; ') || 'all ' + n);
   }
 
   console.log('\n' + pass + ' passed, ' + fail + ' failed');

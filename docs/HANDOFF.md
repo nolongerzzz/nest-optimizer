@@ -6302,3 +6302,52 @@ sheet drawn round its sliver).
 - **Export**: `npm run support:print-export` writes only
   `top_clip_x2_supports.3mf`, the card's export (0.40, both overrides). The
   width-matrix files are gone; `sheetWidthMm` still sets another width.
+
+### NSO's slicer prints the sheet as Bambu does: the thin-wall pass (2026-10-21, slicer-thin-wall)
+
+Bambu Studio with classic walls and Detect thin wall on prints the 0.40 sheet
+line in one pass. NSO's own slicer (G-scope's Slice view) had no thin-wall
+mode, so it drew nothing of a 0.40 sheet. Without interface or transition
+lines, `slicer:supports` and `gscope:select` §10 lost their support rows
+(#256's CI). It now has the pass (docs/SLICER.md, "Thin walls").
+
+- **The rule** (`nso_slicer.js` `thinWalls`): a piece of a layer narrower than
+  1.05 x the bead is printed as ONE pass down its medial centreline, at the
+  bead's width, and comes out of the region. The 1.05 is STATED, so the 0.43
+  sheet is one pass too. A corner or junction speck under half a bead doesn't
+  count, and a wall under 0.13 mm is nothing. Everything wider keeps its walls
+  and infill. Classic semantics, not Arachne.
+- **The centreline**: rasterise at 20 px a bead, Zhang-Suen skeleton, prune
+  spurs under a bead, place corners where the least-squares lines cross, then
+  Euler-trail it into the fewest paths. A closed loop is one closed path. A
+  serpentine joined at one point continues it: loop, then snake, no travel.
+- **Who**: support objects on (every NSO support carries
+  `detect_thin_wall = 1`). Parts off, as both real profiles are. An object's
+  `detectThinWall` overrides either. No UI changed.
+- **Typing**: unchanged. The sheet's passes are `Support interface` for the
+  top 2 layers and `Support transition` for the 2 below.
+- **Gates**:
+  - `support:interface`: the #256 assertion is flipped. Every sheet layer of
+    the coupon, the clamp, the shelf, the tab and the tall is ONE path a
+    piece, the plan's centreline to 3 %, none under 2 mm, no line drawn
+    twice. The coupon slab gives 408 mm in 55 moves.
+  - `slicer:supports`: 26/26. The interface / transition counts are exact.
+    The readout check now accepts "held by support" for the clip the 0.40
+    sheet covers whole.
+  - `slicer:test` §9: a strip, a ring, a loop with a serpentine, a fin on a
+    block, the 1.05 threshold, and 32 repo-mesh slices pinned byte for byte
+    with the flag off and on.
+  - `slicer:bambu` §5: the coupon export at 0.40 and 0.43. There is one path
+    per sheet layer; the slab is within 10 % of the record (Bambu: 54
+    extrusions, 434 mm); the audit tool reads every line printed once, at the
+    outer wall's E/mm.
+- **Waiting on the owner**: the owner's Bambu `.gcode.3mf` of
+  `tools/supports-print-out/top_clip_x2_supports.3mf`, at
+  `fixtures/supports/top_clip_x2_supports.gcode.3mf`. With it, `slicer:bambu`
+  §5 compares path count and total mm per sheet layer within 10 %. Until then
+  that comparison is a finding.
+- **Audit tool**: `exportSheetBoxes` read 0 lines on #256's export, because
+  stacked sheet layers weld into one piece taller than its 0.5 mm limit. It
+  now reads such a piece band by band (129 lines on the coupon). Its
+  per-layer record carries `chains` (runs of extrusion).
+  `nso_supports_print_export.js` exports `build` for `slicer:bambu`.

@@ -30,8 +30,9 @@
 //      loop), no line under 2 mm, T2 and I2 T1's; each layer's own
 //      cross-section at mid-layer ONE connected region whose outer boundary
 //      is a closed rectangle (+-0.1 mm) one bead wide.
-//   1d. NSO's slicer prints every layer in closed paths, none under 2 mm
-//      (its passes over the lines reported: it has no thin-wall mode).
+//   1d. NSO's slicer, with the export's detect_thin_wall = 1, prints every
+//      layer as ONE path a piece (the loop, then its serpentine), the plan's
+//      centreline to 3 %, none under 2 mm, no line drawn twice.
 //   2. THE LINES, read off the welded support itself (a horizontal slice at
 //      each layer's middle): one direction per layer - T1, T2, I2 along one
 //      way, I1 across them (90 deg) - line pitch 0.84 +- 0.05 mm.
@@ -220,24 +221,59 @@ function oneRegion(sec, deg, pieces, loops, width) {
   return { ok: outers.length === pieces.length && holes.length === pieces.length && sec.open === 0 && res.every(r => r.ok),
            outers: outers.length, holes: holes.length, polys: sec.polys, res };
 }
-/* one sheet layer's soup through NSO's own slicer: its slice layers, its
-   extrusion paths, the shortest, and the passes over the layer's centreline */
+/* one sheet layer's soup through NSO's own slicer, as the export's support
+   object is sliced (detect_thin_wall = 1, the classic thin-wall pass): its
+   slice layers, its extrusion paths, the shortest, its moves, the passes
+   over the layer's centreline (the plan's loops and serpentines, turns and
+   all), and how much of the toolpath runs over toolpath drawn earlier in
+   the layer (a second pass over a line) */
 let SLW = null;
-function nsoLayer(soup, centreMm) {
+function nsoLayer(soup, centreMm, width) {
   const o = Object.assign(SL.defaultsFor(0.4), { layerMm: LAYER, firstLayerMm: LAYER, dropToPlate: false });
-  const r = SL.sliceObjects([{ soup }], o, SLW);
+  const r = SL.sliceObjects([{ soup, detectThinWall: true }], o, SLW);
   const Ls = r.ok ? r.objects[0].layers : [];
-  let paths = 0, closed = 0, total = 0, shortest = Infinity;
-  const pts = [];
+  let paths = 0, closed = 0, total = 0, shortest = Infinity, moves = 0;
+  const pts = [], samples = [];
   Ls.forEach(ly => (ly.paths || []).forEach(pa => {
     if (pa.closed) closed++;
     pts.push(pa.pts[0]);
-    const q = pa.pts; let l = 0;
-    for (let i = 0; i + 1 < q.length; i++) l += Math.hypot(q[i + 1][0] - q[i][0], q[i + 1][1] - q[i][1]);
-    if (pa.closed && q.length > 1) l += Math.hypot(q[0][0] - q[q.length - 1][0], q[0][1] - q[q.length - 1][1]);
+    const q = pa.closed ? pa.pts.concat([pa.pts[0]]) : pa.pts; let l = 0;
+    for (let i = 0; i + 1 < q.length; i++) {
+      const d = Math.hypot(q[i + 1][0] - q[i][0], q[i + 1][1] - q[i][1]);
+      for (let s = 0.05; s < d; s += 0.1) samples.push({ x: q[i][0] + (q[i + 1][0] - q[i][0]) * s / d, y: q[i][1] + (q[i + 1][1] - q[i][1]) * s / d, at: total + l + s });
+      l += d; moves++;
+    }
     paths++; total += l; shortest = Math.min(shortest, l);
   }));
-  return { layers: Ls.length, paths, closed, totalMm: total, shortest, passes: centreMm > 0 ? total / centreMm : 0, starts: pts };
+  /* over toolpath already drawn: a sample within half a bead of an earlier
+     sample more than two beads back along the toolpath (closer, it is the
+     same run turning a corner). The longest such run: where the serpentine
+     leaves the loop, and where the loop closes, it is under two beads; a
+     line drawn twice is the line's length (the shortest, I1 on the coupon's
+     leg, is 0.84 mm) */
+  const cell = new Map(), key = (i, j) => i + ',' + j;
+  let twice = 0, run = 0, lastAt = -1;
+  for (const s of samples) {
+    const i = Math.floor(s.x / width), j = Math.floor(s.y / width);
+    let hit = false;
+    for (let a = -1; a <= 1 && !hit; a++) for (let b = -1; b <= 1 && !hit; b++) {
+      const l = cell.get(key(i + a, j + b));
+      if (l) hit = l.some(t => s.at - t.at > 2 * width && Math.hypot(t.x - s.x, t.y - s.y) < width / 2);
+    }
+    if (hit) { run = lastAt >= 0 && s.at - lastAt < 0.15 ? run + 0.1 : 0.1; lastAt = s.at; twice = Math.max(twice, run); }
+    if (!cell.has(key(i, j))) cell.set(key(i, j), []);
+    cell.get(key(i, j)).push(s);
+  }
+  return { layers: Ls.length, paths, closed, totalMm: total, shortest, moves, twiceMm: twice, passes: centreMm > 0 ? total / centreMm : 0, starts: pts };
+}
+/* the plan's own centreline on a layer: every loop (closed) and serpentine, turns and all */
+function planMm(layer) {
+  let l = 0;
+  layer.paths.forEach((q, i) => {
+    for (let k = 0; k + 1 < q.length; k++) l += Math.hypot(q[k + 1][0] - q[k][0], q[k + 1][1] - q[k][1]);
+    if (i % 2 === 0 && q.length > 2) l += Math.hypot(q[0][0] - q[q.length - 1][0], q[0][1] - q[q.length - 1][1]);
+  });
+  return l;
 }
 
 /* the lines of one layer, read off a slice: direction, pitch. solid(x, y):
@@ -559,26 +595,23 @@ fs.mkdirSync(OUT, { recursive: true });
         if (tag === 'coupon' && rg.id === 0)
           check(`${label}, sheet at ${f3(L.zTop)}: the slab's sheet is ONE rectangle`, L.layers[0].pieces.length === 1 && allRect,
             L.layers[0].pieces.map(q => q.kind + ' ' + q.sizeMm.map(f3).join(' x ')).join('; '));
-        /* 1d. NSO's slicer. It has no thin-wall mode: it insets a region by
-           half a bead for its outer wall, and of a line under a bead (0.40,
-           0.95 of one - printed by Bambu's thin-wall pass) it keeps nothing:
-           no path of the sheet at all, and nothing broken off it (a slicer
-           ticket). A layer it does draw (a line a bead wide or more) is drawn
-           in its one region a piece, every path closed, none under 2 mm.
-           Reported */
-        const nso = sheetEntry ? sheetEntry.parts.map((pt, k) => nsoLayer(pt.soup, L.layers[k].lengthMm)) : [];
+        /* 1d. NSO's slicer, with the export's detect_thin_wall = 1 (its
+           classic thin-wall pass, as Bambu Studio printed the 0.40 sheet):
+           every layer ONE extrusion path a piece - the loop, then the
+           serpentine joined to it, no travel between - its length the plan's
+           centreline (turns and all) to 3 %, no path under 2 mm, and no
+           second pass over any line. Reported: its moves, the passes */
+        const nso = sheetEntry ? sheetEntry.parts.map((pt, k) => nsoLayer(pt.soup, planMm(L.layers[k]), sh.widthMm)) : [];
         const regionsOf = (n, k) => { const r = regions[k]; if (!r || !r.polys) return -1;
           const big = r.polys.reduce((a, b) => Math.abs(areaOf(b)) > Math.abs(areaOf(a)) ? b : a), sg = Math.sign(areaOf(big));
           const outs = r.polys.filter(P => Math.sign(areaOf(P)) === sg), hit = new Set();
           n.starts.forEach(p => { const k2 = outs.findIndex(O => inPoly(p, O) && !outs.some(O2 => O2 !== O && inPoly(p, O2) && Math.abs(areaOf(O2)) < Math.abs(areaOf(O)))); hit.add(k2); });
           return hit.has(-1) ? -1 : hit.size; };
-        const thinLine = sh.widthMm < SL.defaultsFor(0.4).outerWallWidthMm - 1e-9;
-        check(`${label}, sheet at ${f3(L.zTop)}: NSO's slicer ` + (thinLine ? `draws nothing of a ${f3(sh.widthMm)} mm sheet (under a bead: no thin-wall mode), nothing broken off it`
-                                                                            : 'draws every layer in its one region a piece, every path closed, none under 2 mm'),
-          nso.length === L.layers.length && nso.every((n, k) => thinLine ? n.paths === 0
-            : n.layers === 1 && n.paths === n.closed && n.shortest >= 2 && regionsOf(n, k) === L.layers[k].pieces.length),
-          nso.map((n, k) => `${L.layers[k].role[0].toUpperCase()}${k + 1}: ${n.paths} path(s)` + (n.paths ? ` (${n.closed} closed) in ${regionsOf(n, k)} region(s), shortest ${f3(n.shortest)} mm, ${n.passes.toFixed(2)} passes` : '')).join(' | ') +
-          (thinLine ? ' (the sheet is for the thin-wall pass: wall_generator = classic, detect_thin_wall = 1 on the support object; NSO one pass is a slicer ticket)' : ' (no thin-wall mode: the sliver\'s outline and its hole\'s, two paths a piece)'));
+        check(`${label}, sheet at ${f3(L.zTop)}: NSO's slicer (detect_thin_wall = 1) draws every layer as ONE path a piece, the plan's centreline to 3 %, none under 2 mm, no second pass over any line`,
+          nso.length === L.layers.length && nso.every((n, k) => n.layers === 1 && n.paths === L.layers[k].pieces.length &&
+            regionsOf(n, k) === L.layers[k].pieces.length && Math.abs(n.passes - 1) <= 0.03 && n.shortest >= 2 && n.twiceMm < 2 * sh.widthMm),
+          nso.map((n, k) => `${L.layers[k].role[0].toUpperCase()}${k + 1}: ${n.paths} path(s) of ${n.totalMm.toFixed(1)} mm in ${n.moves} moves, in ${regionsOf(n, k)} region(s), shortest ${f3(n.shortest)} mm, ` +
+            `${n.passes.toFixed(3)} passes, longest run over toolpath already drawn ${n.twiceMm.toFixed(2)} mm`).join(' | '));
         /* 2. the lines, off the welded solid */
         const under = lineIndex(L), loopAt = lineIndex(L, 0);
         /* a layer's direction and pitch read on its serpentine's lines, off

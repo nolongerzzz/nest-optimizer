@@ -22,7 +22,8 @@
  *   3. The host is credited: each clip's overhang is covered by the support
  *      under it and by no other, its uncovered area is 0 where the sheet is
  *      under it, and the readout (NSO_GSCOPE_SLICE.report, the words
- *      #ms-slice-read shows) names the covering support. The support objects'
+ *      #ms-slice-read shows) names the covering support - with what is left
+ *      uncovered, or as "held by support" when nothing is. The support objects'
  *      own lines say "support for <host>: N tips, sheet at z ...", never
  *      "needs support".
  *   4. The words for a fully covered host: "no support needed (2 supports
@@ -213,10 +214,15 @@ function movesByObject(gcode) {
     const hostLine = words.slice(words.indexOf(HOST + ': '), words.indexOf(HOST + ' - support'));
     console.log('        readout: ' + words);
     const z = 'z ' + host.overhang[0].firstZ.toFixed(2);
-    check('the host\'s "needs support" lists each clip with its covered and uncovered area, naming the covering support',
-      host.overhang.every(h => hostLine.includes(h.footprintMm2.toFixed(1) + ' mm² overhang, ' + h.coveredMm2.toFixed(1) + ' covered by ' +
-        h.coveredBy[0].name.replace(HOST + ' - ', '').replace(/\s*\([^)]*\)$/, '') + ', ' + h.uncoveredMm2.toFixed(1) + ' uncovered')) &&
-        /support 1\.1/.test(hostLine) && /support 2\.1/.test(hostLine) && hostLine.includes(z + ':'), hostLine.trim());
+    /* a clip with some of it uncovered is listed with its covered and
+       uncovered area; one the sheet covers whole (#256's 0.40 sheet covers
+       one clip so) reads "held by support at z ... (A mm², support N)" */
+    const supName = h => h.coveredBy[0].name.replace(HOST + ' - ', '').replace(/\s*\([^)]*\)$/, '');
+    check('the host\'s readout lists each clip with its covered and uncovered area, or as held when nothing is uncovered, naming the covering support',
+      host.overhang.every(h => h.uncoveredMm2 > 0
+        ? hostLine.includes(z + ': ' + h.footprintMm2.toFixed(1) + ' mm² overhang, ' + h.coveredMm2.toFixed(1) + ' covered by ' + supName(h) + ', ' + h.uncoveredMm2.toFixed(1) + ' uncovered')
+        : hostLine.includes('held by support at ') && hostLine.includes(z + ' (' + h.coveredMm2.toFixed(1) + ' mm², ' + supName(h) + ')')) &&
+        /support 1\.1/.test(hostLine) && /support 2\.1/.test(hostLine), hostLine.trim());
     for (const ob of r.objects.slice(1)) {
       const at = words.indexOf(ob.name + ': '), next = words.indexOf('. ' + HOST, at);
       const line = words.slice(at, next < 0 ? undefined : next + 1);

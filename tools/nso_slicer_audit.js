@@ -388,6 +388,7 @@ function calibrate(res, bambu) {
                   line drawn once reads 1, a loop round a sliver (out and
                   back) 2
      E per mm of LINE: the ratio times the passes - what the bead amounts to
+     chains       the runs of extrusion it is drawn in (a travel ends one)
    A layer is OK when the E per mm of line is RATIO_TARGET +- RATIO_TOL of the
    outer wall's and at least SEGMENT_SHARE of its toolpath is in segments of
    SEGMENT_MIN_MM or more.
@@ -649,6 +650,8 @@ function sheetAudit(gcode, opts) {
                   medianSegMm: segs.length ? segs[segs.length >> 1] : 0, shortSegments: segs.filter(v => v < SEGMENT_MIN_MM).length,
                   longShare: L > 0 ? 1 - shortLen / L : 0, toolpathMm: L, eMm: L > 0 ? E / L : NaN, ratio: L > 0 ? E / L / ow : NaN, passes };
     rec.lineRatio = rec.ratio * passes;
+    /* the runs of extrusion the layer's sheet toolpath is drawn in (a travel ends one) */
+    rec.chains = new Set(use.map(m => m.chain)).size;
     if (lines) {
       /* each export line: printed when toolpath covers COVER_SHARE of its centreline */
       const pts = [];
@@ -714,10 +717,25 @@ function exportSheetBoxes(objects) {
       if (!comps.has(r)) comps.set(r, []);
       comps.get(r).push(t);
     }
+    /* a piece taller than 0.5 mm (sheet layers laid face to face weld into
+       one, and onto their caps) is read band by band: its wall triangles no
+       taller than 0.5 mm, by the z they stand on and reach */
+    const pieces = [];
     for (const tris of comps.values()) {
       let z0 = Infinity, z1 = -Infinity;
       for (const t of tris) for (let c = 0; c < 3; c++) { z0 = Math.min(z0, s[t + c * 3 + 2]); z1 = Math.max(z1, s[t + c * 3 + 2]); }
-      if (z1 - z0 > 0.5) continue;
+      if (z1 - z0 <= 0.5) { pieces.push({ tris, z0, z1 }); continue; }
+      const bands = new Map();
+      for (const t of tris) {
+        const zs = [s[t + 2], s[t + 5], s[t + 8]], lo = Math.min(...zs), hi = Math.max(...zs);
+        if (hi - lo > 0.5 || hi - lo < 1e-4) continue;
+        const k = Math.round(lo / 1e-4) + ':' + Math.round(hi / 1e-4);
+        if (!bands.has(k)) bands.set(k, { tris: [], z0: lo, z1: hi });
+        bands.get(k).tris.push(t);
+      }
+      bands.forEach(b => pieces.push(b));
+    }
+    for (const { tris, z0, z1 } of pieces) {
       /* the walls' bottom edges, each once */
       const edges = new Map();
       for (const t of tris) {

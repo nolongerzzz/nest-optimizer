@@ -32,6 +32,10 @@
  *                                     already vendors (vendor/manifold/,
  *                                     Apache-2.0), as `wasm.CrossSection`.
  *   4. walls      perimeters()      - offset inward by MEASURED line widths.
+ *   4b. thin      thinWalls()       - Detect thin wall: a piece under 1.05 x
+ *                                     the bead is ONE pass down its medial
+ *                                     centreline (medialPaths), at the bead's
+ *                                     width; the rest gets its walls as ever.
  *   5. shells     classify()        - top / bottom solid layers by region
  *                                     booleans against the layers above and
  *                                     below; bridges; sparse interior.
@@ -70,10 +74,12 @@
  * millimetres. Objects are dropped onto the plate together (one shift, their
  * relative placement kept) unless `dropToPlate: false`.
  *
- * OBJECTS. { name, soup, gapCloseMm?, role?, key?, hostKey? }. role is 'part'
+ * OBJECTS. { name, soup, gapCloseMm?, role?, key?, hostKey?, detectThinWall? }. role is 'part'
  * (the default) or 'support'; a support names the part it holds by that
  * part's key (hostKey). With no support among them the slice is exactly what
- * it was before roles existed.
+ * it was before roles existed. detectThinWall (Detect thin wall, classic
+ * walls) defaults to on for a support - every NSO support carries
+ * detect_thin_wall = 1 - and to opts.detectThinWall (off) for a part.
  *
  * API
  *   CONSTANTS                          the measured defaults, each with its source
@@ -85,6 +91,8 @@
  *   run(objects, opts)                 -> Promise of the same, loading the kernel itself
  *   toGcode(result, opts)              -> string
  *   scanFill(polys, angleRad, spacing, phase) -> segments (pure JS)
+ *   thinWalls(g, region, opts)         -> the thin pieces' centre passes, or null (Detect thin wall)
+ *   medialPaths(polys, w, restPolys)   -> a thin piece's centreline as paths (pure JS)
  */
 (function (root, factory) {
   'use strict';
@@ -174,9 +182,21 @@
       interfaceLayers: 2, transitionLayers: 2, closeMm: 0.5,
       source: 'nso_support_interface.js sheet(): SHEET_ROLES transition, transition, interface, ' +
               'interface - two one-direction transition layers under two interface layers, open ' +
-              'lines at 0.84 mm (0.42 line + 0.42 channel). closeMm is STATED, not measured: a ' +
+              'lines at 0.84 mm (0.40 line + 0.44 channel since supports-print-1). closeMm is STATED, not measured: a ' +
               'closing that shuts channels up to 1.0 mm, so a sheet layer of lines reads as the ' +
               'footprint it holds (finish()\'s 1.2 mm patches leave 0.78 mm)'
+    },
+    // --- thin walls: Classic walls with Detect thin wall on -----------------
+    thinWall: {
+      ratio: 1.05, minMm: 0.13, supportsOn: true,
+      source: 'ratio STATED, not measured: an island is a thin wall when nothing of it but corner / ' +
+              'junction specks survives shrinking by half of 1.05 x the bead (0.441 mm at 0.42) - so NSO\'s ' +
+              '0.40 sheet (0.95 bead, printed in one pass by Bambu Studio, classic walls + Detect thin wall, ' +
+              'the owner\'s breakaway print 2026-10-20) and its 0.43 one are both one centre pass, and a wall ' +
+              'of 1.05 bead or more keeps its loops. Drawn at the bead\'s own width: Bambu\'s thin wall measured ' +
+              'E/mm 0.0307 = its outer wall\'s. minMm STATED: classic walls with thin walls on print a wall from ' +
+              '0.13 mm up as one pass (PR #256\'s reading of Bambu Studio\'s behaviour); narrower is nothing. supportsOn: every NSO support object carries detect_thin_wall = 1 ' +
+              '(nso_support_interface.js SHEET.slicerSettings), so a support is sliced with it on'
     },
     // --- the flow model, shared with the importer ----------------------------
     flow: {
@@ -194,7 +214,7 @@
     wallLoops: 2, topShellLayers: 3, bottomShellLayers: 3, topShellThicknessMm: 0.8,
     sparseDensity: 0.15, sparsePattern: 'grid', solidPattern: 'zigzag', infillDirectionDeg: 45,
     infillWallOverlap: 0.15, sliceClosingRadiusMm: 0.049, resolutionMm: 0.012, supportThresholdDeg: 30,
-    onlyOneWallTop: true, minSparseAreaMm2: 15
+    onlyOneWallTop: true, minSparseAreaMm2: 15, detectThinWall: false
   };
 
   function wallWidthFor(nozzle) {
@@ -244,6 +264,12 @@
       narrowSparseMm: null,                // null -> 1.7 x infill spacing (bracketed by two real slices)
       minSparseAreaMm2: BAMBU_PROFILE_06.minSparseAreaMm2,
       sparseAnchorMaxMm: 20,
+      // Detect thin wall (classic walls): an island under the thin width is
+      // printed as one centre pass. Off, as in both real profiles
+      // (detect_thin_wall = 0); a support object is sliced with it on
+      // (CONSTANTS.thinWall.supportsOn), and an object can say either way.
+      detectThinWall: BAMBU_PROFILE_06.detectThinWall,
+      thinWallMm: null,                    // null -> CONSTANTS.thinWall.ratio x outer wall width
       // An open section chain (a hole in the mesh) is closed by a straight
       // chord when its ends are this close; wider, it is dropped and counted.
       // STATED, not measured - a robustness choice for damaged input.
@@ -759,6 +785,555 @@
     return { loops: loops, wallCount: count, infillRegion: innerEdge };
   }
 
+  // ===========================================================================
+  // Thin walls - Classic walls with Detect thin wall on (one centre pass)
+  // ===========================================================================
+  //
+  // Bambu Studio with the classic wall generator and Detect thin wall on
+  // prints a modelled wall narrower than its bead as ONE pass down the wall's
+  // middle, at the bead's own width: NSO's 0.40 mm support sheet printed that
+  // way (one pass per line, E/mm 0.0307 = the outer wall's; the owner's
+  // breakaway print, 2026-10-20 - docs/SLICER.md section 6). Without it the
+  // classic inset (w/2) keeps nothing of such a wall, or a sliver drawn out
+  // and back. This is Classic semantics, not Arachne: one fixed width, no
+  // variable bead.
+  //
+  // WHAT IS THIN. The layer region shrunk by half the thin width
+  // (CONSTANTS.thinWall: 1.05 x the bead, STATED) and grown back is what
+  // holds a wall of its own - less the specks a corner or a junction of thin
+  // walls leaves (an L of a 0.40 strip keeps a 0.47 mm circle, a T a 0.50
+  // one: under half a bead across). The rest of the region, opened by
+  // CONSTANTS.thinWall.minMm (0.13: narrower is nothing, as before), is thin;
+  // a piece of it with a centreline a bead long or more is printed as that
+  // centreline and nothing else, and comes out of the region. Everything
+  // else keeps the wall / infill treatment it always had, and a layer with
+  // no such piece is sliced exactly as before. A thin piece
+  // that meets a walled part (a sheet line against a trunk) runs on into it
+  // to the part's outer wall.
+  //
+  // THE CENTRELINE (medialPaths, pure JS): the island is rasterised at
+  // THIN_PX pixels a bead, thinned to a one-pixel skeleton (Zhang-Suen, a
+  // textbook method), traced into a graph of chains between ends and
+  // junctions, its spurs (a chain from a junction to an end shorter than a
+  // bead: the medial axis's prongs into corners and line ends) pruned, each
+  // chain straightened (a corner the raster rounds put back where its two
+  // fitted lines cross), and the graph drawn as the fewest paths that draw
+  // every chain once (an Euler trail per pair of odd nodes). A closed thin
+  // loop is one closed path; a serpentine joined to it at one point
+  // continues it - the loop, then the serpentine, no travel between. A free
+  // end is placed half the local width short of the piece's edge, so the
+  // bead ends flush.
+
+  var THIN_PX = 20;                 // pixels a bead (0.021 mm at 0.42): centreline within half of one
+  var THIN_MAX_PX = 4e6;            // a larger island is rasterised coarser, never more pixels than this
+
+  /**
+   * The thin pieces of a layer region and their centre passes, or null when
+   * there is none (the caller then slices the region exactly as before).
+   * -> { rest: the region less those pieces (walls and infill as ever), paths: [{ closed, pts }], pieces }
+   */
+  function thinWalls(g, region, o) {
+    var w = o.outerWallWidthMm;
+    var tw = o.thinWallMm > 0 ? o.thinWallMm : CONSTANTS.thinWall.ratio * w;
+    // what holds a wall of its own: the region shrunk by half the thin width,
+    // less the specks a corner or junction of thin walls leaves, grown back
+    var core = g.parts(g.offset(region, -tw / 2)).filter(function (c) {
+      var b = c.bounds();
+      return Math.max(b.max[0] - b.min[0], b.max[1] - b.min[1]) >= w / 2;
+    });
+    var body = g.offset(g.unionAll(core), tw / 2);
+    var rest0 = g.inter(region, body);
+    // the rest, opened by the thinnest wall printed (CONSTANTS.thinWall.minMm:
+    // narrower is nothing - and so is a sliver along a curved edge the
+    // opening did not quite give back), piece by piece
+    var thin = g.diff(region, body);
+    if (g.isEmpty(thin)) return null;
+    var tmin = CONSTANTS.thinWall.minMm;
+    thin = g.offset(g.offset(thin, -tmin / 2), tmin / 2);
+    var restPolys = g.isEmpty(rest0) ? [] : g.polys(g.offset(rest0, w / 20));
+    var keep = [], paths = [];
+    g.parts(thin).forEach(function (pc) {
+      if (!(pc.area() >= w * w / 4)) return;
+      var mine = medialPaths(g.polys(pc), w, restPolys);
+      if (!mine) return;
+      keep.push(pc);
+      paths = paths.concat(mine);
+    });
+    if (!keep.length) return null;
+    return { rest: g.diff(region, g.unionAll(keep)), paths: paths, pieces: keep.length };
+  }
+
+  /**
+   * The medial centreline of one thin piece (polygons with holes, as Clipper
+   * hands them back), as extrusion paths: [{ closed, pts }]. null when it has
+   * none a bead long (a blob, not a wall: it keeps the classic treatment).
+   * restPolys: the walled part beside it, slightly grown - an end that meets
+   * it runs on into it.
+   */
+  function medialPaths(polys, w, restPolys) {
+    var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    polys.forEach(function (P) { P.forEach(function (q) {
+      if (q[0] < x0) x0 = q[0]; if (q[0] > x1) x1 = q[0];
+      if (q[1] < y0) y0 = q[1]; if (q[1] > y1) y1 = q[1];
+    }); });
+    if (!(x1 > x0 && y1 > y0)) return null;
+    var p = Math.max(w / THIN_PX, Math.sqrt((x1 - x0) * (y1 - y0) / THIN_MAX_PX));
+    var nx = Math.ceil((x1 - x0) / p) + 5, ny = Math.ceil((y1 - y0) / p) + 5;
+    var ox = x0 - 2 * p, oy = y0 - 2 * p;
+    var img = new Uint8Array(nx * ny);
+    var edges = [], bnd = [];
+    polys.forEach(function (P) {
+      for (var i = 0; i < P.length; i++) {
+        var a = P[i], b = P[(i + 1) % P.length];
+        bnd.push(a, b);
+        if (a[1] !== b[1]) edges.push(a, b);
+      }
+    });
+    // pixel centres inside, even-odd (Clipper's polygons do not overlap)
+    var xs = [];
+    for (var j = 0; j < ny; j++) {
+      var y = oy + (j + 0.5) * p;
+      xs.length = 0;
+      for (var e = 0; e < edges.length; e += 2) {
+        var A = edges[e], B = edges[e + 1];
+        if ((A[1] <= y) !== (B[1] <= y)) xs.push(A[0] + (y - A[1]) * (B[0] - A[0]) / (B[1] - A[1]));
+      }
+      xs.sort(function (u, v) { return u - v; });
+      for (var t = 0; t + 1 < xs.length; t += 2) {
+        var i0 = Math.max(0, Math.ceil((xs[t] - ox) / p - 0.5)), i1 = Math.min(nx - 1, Math.floor((xs[t + 1] - ox) / p - 0.5));
+        for (var i = i0; i <= i1; i++) img[j * nx + i] = 1;
+      }
+    }
+    thinImage(img, nx, ny);
+    var G = skeletonGraph(img, nx, ny, function (k) { return [ox + (k % nx + 0.5) * p, oy + (Math.floor(k / nx) + 0.5) * p]; });
+    pruneSpurs(G, w);
+    if (!G.edges.some(function (ed) { return ed; })) return null;
+    G.edges.forEach(function (ed) { ed.pts = straighten(ed, G, w, 2 * p); });
+    var paths = eulerPaths(G);
+    var total = 0;
+    paths.forEach(function (pa) {
+      trimEnds(pa, bnd, w, restPolys || []);
+      total += pathLength(pa.pts, pa.closed);
+    });
+    if (!(total >= w)) return null;
+    return paths.map(function (pa) { return { closed: pa.closed, pts: pa.pts }; });
+  }
+
+  /** Zhang-Suen thinning, in place: one-pixel-wide, 8-connected skeleton. */
+  function thinImage(img, nx, ny) {
+    var live = [];
+    for (var k = 0; k < img.length; k++) if (img[k]) live.push(k);
+    var N = [-nx, -nx + 1, 1, nx + 1, nx, nx - 1, -1, -nx - 1];      // P2..P9, clockwise from north
+    var nb = new Array(8);
+    for (var changed = true; changed;) {
+      changed = false;
+      for (var step = 0; step < 2; step++) {
+        var del = [];
+        for (var q = 0; q < live.length; q++) {
+          var c = live[q];
+          if (!img[c]) continue;
+          var Bn = 0;
+          for (var d = 0; d < 8; d++) { nb[d] = img[c + N[d]]; Bn += nb[d]; }
+          if (Bn < 2 || Bn > 6) continue;
+          var An = 0;
+          for (var d2 = 0; d2 < 8; d2++) if (!nb[d2] && nb[(d2 + 1) % 8]) An++;
+          if (An !== 1) continue;
+          if (step === 0 ? (nb[0] && nb[2] && nb[4]) || (nb[2] && nb[4] && nb[6])
+                         : (nb[0] && nb[2] && nb[6]) || (nb[0] && nb[4] && nb[6])) continue;
+          del.push(c);
+        }
+        for (var r = 0; r < del.length; r++) img[del[r]] = 0;
+        if (del.length) changed = true;
+      }
+      live = live.filter(function (k2) { return img[k2]; });
+    }
+    // a 2 x 2 block thinning leaves: drop its simple pixels (one 8-transition)
+    for (var again = true; again;) {
+      again = false;
+      for (var s = 0; s < live.length; s++) {
+        var c2 = live[s];
+        if (!img[c2] || !(img[c2 + 1] && img[c2 + nx] && img[c2 + nx + 1])) continue;
+        [c2, c2 + 1, c2 + nx, c2 + nx + 1].some(function (m) {
+          var b = N.map(function (o2) { return img[m + o2]; });
+          var tr = 0;
+          for (var d3 = 0; d3 < 8; d3++) if (!b[d3] && b[(d3 + 1) % 8]) tr++;
+          if (tr === 1) { img[m] = 0; again = true; return true; }
+          return false;
+        });
+      }
+      live = live.filter(function (k3) { return img[k3]; });
+    }
+  }
+
+  /**
+   * The skeleton as a graph: nodes where it ends or branches, edges the pixel
+   * chains between them (mm points, node to node). A diagonal step is taken
+   * only where no 4-neighbour of both pixels is on (a staircase is a line).
+   * Junction pixels next to each other are one node.
+   */
+  function skeletonGraph(img, nx, ny, at) {
+    var N8 = [-nx, 1, nx, -1, -nx + 1, nx + 1, nx - 1, -nx - 1];
+    function nbrs(k) {
+      var out = [];
+      for (var d = 0; d < 8; d++) {
+        var m = k + N8[d];
+        if (!img[m]) continue;
+        if (d >= 4) {                    // diagonal: skip it when a shared 4-neighbour is on
+          var dx = (m % nx) - (k % nx), dy = Math.floor(m / nx) - Math.floor(k / nx);
+          if (img[k + dx] || img[k + dy * nx]) continue;
+        }
+        out.push(m);
+      }
+      return out;
+    }
+    var pix = [];
+    for (var k = 0; k < img.length; k++) if (img[k]) pix.push(k);
+    var deg = new Map();
+    pix.forEach(function (k2) { deg.set(k2, nbrs(k2).length); });
+    // nodes: every pixel that is not a plain chain pixel, adjacent ones merged
+    var nodeOf = new Map(), nodes = [];
+    pix.forEach(function (k3) {
+      if (deg.get(k3) === 2 || nodeOf.has(k3)) return;
+      var id = nodes.length, members = [], stack = [k3];
+      nodeOf.set(k3, id);
+      while (stack.length) {
+        var c = stack.pop();
+        members.push(c);
+        nbrs(c).forEach(function (m) { if (deg.get(m) !== 2 && !nodeOf.has(m) && deg.get(c) > 2 && deg.get(m) > 2) { nodeOf.set(m, id); stack.push(m); } });
+      }
+      var sx = 0, sy = 0;
+      members.forEach(function (m) { var q = at(m); sx += q[0]; sy += q[1]; });
+      nodes.push({ pt: [sx / members.length, sy / members.length], deg: 0 });
+    });
+    var edges = [], seen = new Set();
+    function walk(startNode, from, first) {
+      var pts = [nodes[startNode].pt], prev = from, cur = first;
+      if (seen.has(Math.min(from, first) + ',' + Math.max(from, first))) return;
+      for (var guard = 0; guard < img.length; guard++) {
+        seen.add(Math.min(prev, cur) + ',' + Math.max(prev, cur));
+        if (nodeOf.has(cur)) {
+          pts.push(nodes[nodeOf.get(cur)].pt);
+          edges.push({ a: startNode, b: nodeOf.get(cur), pts: pts });
+          return;
+        }
+        pts.push(at(cur));
+        var nx2 = nbrs(cur).filter(function (m) { return m !== prev; });
+        if (nx2.length !== 1) return;                  // cannot happen on a chain pixel; dropped if it does
+        prev = cur; cur = nx2[0];
+      }
+    }
+    nodeOf.forEach(function (id, k4) {
+      nbrs(k4).forEach(function (m) { if (nodeOf.get(m) !== id) walk(id, k4, m); });
+    });
+    // what is left is closed rings with no node: one node on each
+    pix.forEach(function (k5) {
+      if (nodeOf.has(k5)) return;
+      var nb = nbrs(k5);
+      if (seen.has(Math.min(k5, nb[0]) + ',' + Math.max(k5, nb[0]))) return;
+      var id = nodes.length;
+      nodes.push({ pt: at(k5), deg: 0 });
+      nodeOf.set(k5, id);
+      walk(id, k5, nb[0]);
+    });
+    return { nodes: nodes, edges: edges };
+  }
+
+  function nodeDegrees(G) {
+    G.nodes.forEach(function (nd) { nd.deg = 0; });
+    G.edges.forEach(function (ed) { if (ed) { G.nodes[ed.a].deg++; G.nodes[ed.b].deg++; } });
+  }
+
+  /**
+   * Drop the spurs - chains from a junction to a free end shorter than a
+   * bead (the medial axis's prongs into a corner, or the fork at a line's
+   * end) - and pieces shorter than a bead standing alone; then join the
+   * chains through every node left with two.
+   */
+  function pruneSpurs(G, w) {
+    for (var round = 0; round < 4; round++) {
+      nodeDegrees(G);
+      var cut = false;
+      G.edges.forEach(function (ed, i) {
+        if (!ed || ed.a === ed.b) return;
+        var da = G.nodes[ed.a].deg, db = G.nodes[ed.b].deg;
+        var spur = (da === 1 && db >= 3) || (db === 1 && da >= 3) || (da === 1 && db === 1);
+        if (spur && pathLength(ed.pts, false) < w) { G.edges[i] = null; cut = true; }
+      });
+      nodeDegrees(G);
+      // join through nodes of degree 2
+      G.nodes.forEach(function (nd, id) {
+        if (nd.deg !== 2) return;
+        var two = [];
+        G.edges.forEach(function (ed, i) { if (ed && (ed.a === id || ed.b === id)) two.push(i); });
+        if (two.length !== 2) return;                          // a ring through this node alone
+        var e1 = G.edges[two[0]], e2 = G.edges[two[1]];
+        var p1 = e1.b === id ? e1.pts : e1.pts.slice().reverse(), s1 = e1.b === id ? e1.a : e1.b;
+        var p2 = e2.a === id ? e2.pts : e2.pts.slice().reverse(), s2 = e2.a === id ? e2.b : e2.a;
+        G.edges[two[0]] = { a: s1, b: s2, pts: p1.concat(p2.slice(1)) };
+        G.edges[two[1]] = null;
+        cut = true;
+      });
+      if (!cut) break;
+    }
+    G.edges = G.edges.filter(Boolean);
+    nodeDegrees(G);
+  }
+
+  /** Douglas-Peucker to `eps`, ends kept: the indices kept. */
+  function simplifyIdx(pts, eps) {
+    if (pts.length < 3) return pts.map(function (q, i) { return i; });
+    var keep = new Uint8Array(pts.length);
+    keep[0] = keep[pts.length - 1] = 1;
+    var stack = [[0, pts.length - 1]];
+    while (stack.length) {
+      var s = stack.pop(), a = pts[s[0]], b = pts[s[1]];
+      var dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy), best = -1, bd = eps;
+      for (var i = s[0] + 1; i < s[1]; i++) {
+        var q = pts[i];
+        var d = L > 1e-12 ? Math.abs((q[0] - a[0]) * dy - (q[1] - a[1]) * dx) / L : Math.hypot(q[0] - a[0], q[1] - a[1]);
+        if (d > bd) { bd = d; best = i; }
+      }
+      if (best > 0) { keep[best] = 1; stack.push([s[0], best], [best, s[1]]); }
+    }
+    var out = [];
+    for (var k = 0; k < pts.length; k++) if (keep[k]) out.push(k);
+    return out;
+  }
+
+  /** The least-squares line through points: { c: centroid, d: unit direction } (null under 3). */
+  function fitLine(pts) {
+    if (pts.length < 3) return null;
+    var cx = 0, cy = 0;
+    pts.forEach(function (q) { cx += q[0]; cy += q[1]; });
+    cx /= pts.length; cy /= pts.length;
+    var sxx = 0, syy = 0, sxy = 0;
+    pts.forEach(function (q) { var dx = q[0] - cx, dy = q[1] - cy; sxx += dx * dx; syy += dy * dy; sxy += dx * dy; });
+    var th = 0.5 * Math.atan2(2 * sxy, sxx - syy);
+    return { c: [cx, cy], d: [Math.cos(th), Math.sin(th)] };
+  }
+
+  function crossLines(A, B) {
+    var den = A.d[0] * B.d[1] - A.d[1] * B.d[0];
+    if (Math.abs(den) < 0.2) return null;                  // under ~12 deg between them: no corner
+    var t = ((B.c[0] - A.c[0]) * B.d[1] - (B.c[1] - A.c[1]) * B.d[0]) / den;
+    return [A.c[0] + A.d[0] * t, A.c[1] + A.d[1] * t];
+  }
+
+  /**
+   * One chain of skeleton pixels as a polyline. Its corners are found on a
+   * coarse simplification (Douglas-Peucker to a quarter bead: the raster
+   * rounds a corner by about that much): a vertex turning 15 deg or more,
+   * with the vertices after it joined by segments under 3/4 bead, is one
+   * corner when the lines either side of it turn 30 deg or more - and it is
+   * put where its two lines cross: each line fitted (least squares) to the
+   * chain's pixels along it, less the stretch near either end where the
+   * raster rounds, when that lies within half a bead of where the raster
+   * put the corner. Between corners, the pixels are simplified to `eps`. A
+   * ring with no junction on it starts in the middle of its longest line, so
+   * no corner sits on its seam. Nodes never move.
+   */
+  function straighten(ed, G, w, eps) {
+    var raw = ed.pts;
+    if (ed.a === ed.b && G.nodes[ed.a].deg === 2 && raw.length > 8) {
+      var first = simplifyIdx(raw, w / 4), bi = 0, bl = -1;
+      for (var q0 = 0; q0 + 1 < first.length; q0++) {
+        var l0 = Math.hypot(raw[first[q0 + 1]][0] - raw[first[q0]][0], raw[first[q0 + 1]][1] - raw[first[q0]][1]);
+        if (l0 > bl) { bl = l0; bi = (first[q0] + first[q0 + 1]) >> 1; }
+      }
+      raw = raw.slice(bi, raw.length - 1).concat(raw.slice(0, bi + 1));
+      G.nodes[ed.a].pt = raw[0];
+    }
+    var C = simplifyIdx(raw, w / 4);
+    var P = function (k) { return raw[C[k]]; };
+    var segLen = function (k) { return Math.hypot(P(k + 1)[0] - P(k)[0], P(k + 1)[1] - P(k)[1]); };
+    var turn = function (k) {
+      var a = P(k - 1), b = P(k), c = P(k + 1);
+      var u = [b[0] - a[0], b[1] - a[1]], v = [c[0] - b[0], c[1] - b[1]];
+      return Math.abs(Math.atan2(u[0] * v[1] - u[1] * v[0], u[0] * v[0] + u[1] * v[1]));
+    };
+    // the line along coarse segment k: its pixels, less a stretch at each end
+    var lineOf = function (k) {
+      var L = segLen(k), cut = Math.min(0.6 * w, 0.3 * L), a = P(k), b = P(k + 1), pts = [];
+      for (var j = C[k]; j <= C[k + 1]; j++) {
+        var q = raw[j];
+        if (Math.hypot(q[0] - a[0], q[1] - a[1]) >= cut && Math.hypot(q[0] - b[0], q[1] - b[1]) >= cut) pts.push(q);
+      }
+      return fitLine(pts);
+    };
+    // anchors: the ends, and each corner (a group of turns) as one point
+    var anchors = [{ i: 0, pt: raw[0], corner: false }];
+    var dirOf = function (k) { return Math.atan2(P(k + 1)[1] - P(k)[1], P(k + 1)[0] - P(k)[0]); };
+    for (var k = 1; k + 1 < C.length; k++) {
+      if (turn(k) < Math.PI / 12) continue;
+      var k1 = k;
+      while (k1 + 2 < C.length && segLen(k1) < 0.75 * w) k1++;
+      var tot = Math.abs(((dirOf(k1) - dirOf(k - 1)) % (2 * Math.PI) + 3 * Math.PI) % (2 * Math.PI) - Math.PI);
+      if (tot < Math.PI / 6) { k = k1; continue; }
+      var A = lineOf(k - 1), B = lineOf(k1), X = A && B ? crossLines(A, B) : null;
+      var mid = P((k + k1) >> 1);
+      if (!X || Math.hypot(X[0] - mid[0], X[1] - mid[1]) > w / 2) X = k === k1 ? P(k) : null;
+      if (X) anchors.push({ i: C[k], j: C[k1], pt: X, corner: true });
+      else for (var kk = k; kk <= k1; kk++) anchors.push({ i: C[kk], j: C[kk], pt: P(kk), corner: false });
+      k = k1;
+    }
+    anchors.push({ i: raw.length - 1, pt: raw[raw.length - 1], corner: false });
+    // between anchors: the pixels, off the rounded corners, simplified
+    var out = [anchors[0].pt];
+    for (var t = 0; t + 1 < anchors.length; t++) {
+      var A0 = anchors[t], B0 = anchors[t + 1];
+      var from = A0.j != null ? A0.j : A0.i, to = B0.i;
+      var sub = [A0.pt];
+      for (var j2 = from + 1; j2 < to; j2++) {
+        var q2 = raw[j2];
+        if (A0.corner && Math.hypot(q2[0] - A0.pt[0], q2[1] - A0.pt[1]) < 0.6 * w) continue;
+        if (B0.corner && Math.hypot(q2[0] - B0.pt[0], q2[1] - B0.pt[1]) < 0.6 * w) continue;
+        sub.push(q2);
+      }
+      sub.push(B0.pt);
+      simplifyIdx(sub, eps).slice(1).forEach(function (m) { out.push(sub[m]); });
+    }
+    return out;
+  }
+
+  function pathLength(pts, closed) {
+    var l = 0;
+    for (var i = 0; i + 1 < pts.length; i++) l += Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]);
+    if (closed && pts.length > 2) l += Math.hypot(pts[0][0] - pts[pts.length - 1][0], pts[0][1] - pts[pts.length - 1][1]);
+    return l;
+  }
+
+  /**
+   * The fewest paths that draw every chain once. Per connected piece: its
+   * odd nodes paired nearest first by stand-in edges, one Euler circuit
+   * (Hierholzer), cut at the stand-ins. A piece with no odd node is one
+   * closed path. A path starts at its end with the more chains, so a loop
+   * with a serpentine joined to it is drawn loop first. Each path carries
+   * which of its points are nodes (`fixed`).
+   */
+  function eulerPaths(G) {
+    var E = G.edges.map(function (ed) { return { a: ed.a, b: ed.b, pts: ed.pts, real: true }; });
+    var adj = G.nodes.map(function () { return []; });
+    E.forEach(function (ed, i) { adj[ed.a].push(i); if (ed.b !== ed.a) adj[ed.b].push(i); });
+    var comp = G.nodes.map(function () { return -1; }), nc = 0;
+    G.nodes.forEach(function (nd, s) {
+      if (comp[s] >= 0 || !adj[s].length) return;
+      var st = [s]; comp[s] = nc;
+      while (st.length) {
+        var v = st.pop();
+        adj[v].forEach(function (i) { var u = E[i].a === v ? E[i].b : E[i].a; if (comp[u] < 0) { comp[u] = nc; st.push(u); } });
+      }
+      nc++;
+    });
+    var out = [];
+    for (var c = 0; c < nc; c++) {
+      var mine = [];
+      G.nodes.forEach(function (nd, v) { if (comp[v] === c) mine.push(v); });
+      var odd = mine.filter(function (v) { return G.nodes[v].deg % 2 === 1; });
+      var open = odd.length > 0;
+      while (odd.length) {                               // nearest pairs
+        var a = odd.shift(), bi = 0, bd = Infinity;
+        odd.forEach(function (b, i) {
+          var d = Math.hypot(G.nodes[a].pt[0] - G.nodes[b].pt[0], G.nodes[a].pt[1] - G.nodes[b].pt[1]);
+          if (d < bd) { bd = d; bi = i; }
+        });
+        var b2 = odd.splice(bi, 1)[0];
+        E.push({ a: a, b: b2, pts: [G.nodes[a].pt, G.nodes[b2].pt], real: false });
+        adj[a].push(E.length - 1); adj[b2].push(E.length - 1);
+      }
+      var start = mine.reduce(function (m, v) { return G.nodes[v].deg > G.nodes[m].deg ? v : m; }, mine[0]);
+      // Hierholzer: the circuit as (node, edge taken into it)
+      var used = new Uint8Array(E.length), ptr = {}, stack = [{ v: start, e: -1 }], circ = [];
+      while (stack.length) {
+        var top = stack[stack.length - 1], l = adj[top.v], k = ptr[top.v] || 0;
+        while (k < l.length && used[l[k]]) k++;
+        ptr[top.v] = k;
+        if (k < l.length) {
+          var ei = l[k]; used[ei] = 1;
+          stack.push({ v: E[ei].a === top.v ? E[ei].b : E[ei].a, e: ei });
+        } else circ.push(stack.pop());
+      }
+      circ.reverse();                                      // circ[0] = start, circ[i].e leads circ[i-1] -> circ[i]
+      var steps = [];
+      for (var q = 1; q < circ.length; q++) steps.push({ from: circ[q - 1].v, to: circ[q].v, e: circ[q].e });
+      if (open) {                                          // begin right after a stand-in, cut at each
+        var r0 = steps.findIndex(function (st2) { return !E[st2.e].real; });
+        steps = steps.slice(r0 + 1).concat(steps.slice(0, r0 + 1));
+      }
+      var runs = [], run = [];
+      steps.forEach(function (st3) {
+        if (E[st3.e].real) run.push(st3); else { if (run.length) runs.push(run); run = []; }
+      });
+      if (run.length) runs.push(run);
+      runs.forEach(function (rn) {
+        var s0 = rn[0].from, s1 = rn[rn.length - 1].to;
+        if (open && G.nodes[s1].deg > G.nodes[s0].deg) {
+          rn = rn.slice().reverse().map(function (st4) { return { from: st4.to, to: st4.from, e: st4.e }; });
+        }
+        var pts = [], fixed = [];
+        rn.forEach(function (st5, i) {
+          var ed = E[st5.e];
+          var seg = ed.a === st5.from ? ed.pts : ed.pts.slice().reverse();
+          for (var m = i === 0 ? 0 : 1; m < seg.length; m++) { pts.push(seg[m]); fixed.push(m === 0 || m === seg.length - 1); }
+        });
+        var closed = !open && rn.length && rn[0].from === rn[rn.length - 1].to;
+        if (closed) { pts.pop(); fixed.pop(); }
+        out.push({ closed: !!closed, pts: pts, fixed: fixed, endDeg: [G.nodes[rn[0].from].deg, G.nodes[rn[rn.length - 1].to].deg] });
+      });
+    }
+    return out;
+  }
+
+  /** Distance from q along unit dir to the first boundary edge it meets (Infinity if none). */
+  function rayToEdges(q, dir, edges) {
+    var best = Infinity;
+    for (var e = 0; e < edges.length; e += 2) {
+      var A = edges[e], B = edges[e + 1];
+      var sx = B[0] - A[0], sy = B[1] - A[1], den = dir[0] * sy - dir[1] * sx;
+      if (Math.abs(den) < 1e-12) continue;
+      var t = ((A[0] - q[0]) * sy - (A[1] - q[1]) * sx) / den;
+      var u = ((A[0] - q[0]) * dir[1] - (A[1] - q[1]) * dir[0]) / den;
+      if (t > 0 && u >= 0 && u <= 1 && t < best) best = t;
+    }
+    return best;
+  }
+  function distToEdges(q, edges) {
+    var best = Infinity;
+    for (var e = 0; e < edges.length; e += 2) {
+      var A = edges[e], B = edges[e + 1], dx = B[0] - A[0], dy = B[1] - A[1], L2 = dx * dx + dy * dy;
+      var t = L2 > 0 ? Math.max(0, Math.min(1, ((q[0] - A[0]) * dx + (q[1] - A[1]) * dy) / L2)) : 0;
+      var d = Math.hypot(q[0] - A[0] - t * dx, q[1] - A[1] - t * dy);
+      if (d < best) best = d;
+    }
+    return best;
+  }
+
+  /**
+   * A free end, flush: on the line of its last segment, half the local width
+   * short of the island's edge ahead (the local width read one bead back).
+   */
+  function trimEnds(pa, all, w, restPolys) {
+    if (pa.closed || pa.pts.length < 2) return;
+    var P = pa.pts, n = P.length, ends = [null, null];
+    [0, 1].forEach(function (side) {
+      if (pa.endDeg[side] !== 1) return;
+      var e = side === 0 ? P[0] : P[n - 1], f = side === 0 ? P[1] : P[n - 2];
+      var L = Math.hypot(e[0] - f[0], e[1] - f[1]);
+      if (!(L > 1e-9)) return;
+      var dir = [(e[0] - f[0]) / L, (e[1] - f[1]) / L];
+      var back = Math.min(L / 2, w);
+      var half = distToEdges([e[0] - dir[0] * back, e[1] - dir[1] * back], all);
+      var ahead = rayToEdges(f, dir, all);
+      if (!isFinite(ahead) || !isFinite(half)) return;
+      var hit = [f[0] + dir[0] * ahead, f[1] + dir[1] * ahead];
+      // an end that meets a walled part runs on into it, to its outer wall's centre
+      var t = restPolys.length && inside(restPolys, hit[0], hit[1]) ? ahead + w / 2 : Math.max(L / 2, ahead - half);
+      ends[side] = [f[0] + dir[0] * t, f[1] + dir[1] * t];
+    });
+    // both ends from the points as traced (a two-point path's ends are each other's)
+    if (ends[0]) P[0] = ends[0];
+    if (ends[1]) P[n - 1] = ends[1];
+  }
+
   function sliceObjects(objects, opts, wasm) {
     var o = defaultsFor(opts && opts.nozzleMm, opts);
     var t0 = Date.now();
@@ -810,6 +1385,8 @@
         return { name: ob.name || ('object ' + (oi + 1)), id: oi, mesh: sm, S: S, flipped: flipped,
                  nonSolid: ob.gapCloseMm === 0,
                  role: ob.role === 'support' ? 'support' : 'part', key: ob.key, hostKey: ob.hostKey,
+                 thin: ob.detectThinWall != null ? !!ob.detectThinWall
+                   : (ob.role === 'support' ? CONSTANTS.thinWall.supportsOn : !!o.detectThinWall),
                  layers: [] };
       });
 
@@ -826,7 +1403,10 @@
 
           var above = i + 1 < n ? S[i + 1] : g.empty();
           var below = i > 0 ? S[i - 1] : null;
-          var per = perimeters(g, region, h, o, o.onlyOneWallTop ? above : null);
+          // Detect thin wall: the thin islands come out of the region and
+          // print as their centre passes; with none, the region is as it was
+          var thin = P.thin ? thinWalls(g, region, o) : null;
+          var per = perimeters(g, thin ? thin.rest : region, h, o, o.onlyOneWallTop ? above : null);
           L.wallCount = per.wallCount;
           L.wallLoopsByDepth = per.loops.map(function (lp) { return g.polys(lp.cs).length; });
 
@@ -849,6 +1429,14 @@
               });
             });
           });
+
+          if (thin) {
+            thin.paths.forEach(function (pa) {
+              L.paths.push({ feature: 'Outer wall', width: o.outerWallWidthMm, closed: pa.closed, pts: pa.pts, thinWall: true });
+            });
+            L.thinWalls = thin.paths.length;
+            if (!L.wallCount) L.wallCount = 1;
+          }
 
           // --- shells (top / bottom solid) and sparse
           var inner = per.infillRegion;
@@ -995,7 +1583,7 @@
             layers: P.layers.map(function (L) {
               return {
                 index: L.index, printZ: L.printZ, h: L.h, areaMm2: L.areaMm2,
-                wallCount: L.wallCount || 0, wallLoopsByDepth: L.wallLoopsByDepth || [],
+                wallCount: L.wallCount || 0, wallLoopsByDepth: L.wallLoopsByDepth || [], thinWalls: L.thinWalls || 0,
                 areas: L.areas || null, overhangMm2: L.overhangMm2 || 0,
                 overhangPolys: L.overhangCs ? g.polys(L.overhangCs) : [],
                 sectionPolys: g.polys(P.S[L.index]),
@@ -1456,6 +2044,8 @@
     connect: connect,
     inside: inside,
     sliceObjects: sliceObjects,
+    thinWalls: thinWalls,
+    medialPaths: medialPaths,
     toGcode: toGcode,
     describe: describe,
     loadKernel: loadKernel,

@@ -26,6 +26,10 @@
 
    Slice any in Bambu Studio, save the .gcode.3mf, and read the sheet with
      node tools/nso_slicer_audit.js --sheet sliced.gcode.3mf --export tools/supports-print-out/top_clip_x2_supports.3mf
+
+   API (require): build(piece, partsOver) -> { areas, sf, ms, objects } - the
+   same build, PARTS_OPTS overridden by partsOver (e.g. { sheetWidthMm: 0.43 });
+   slicer:bambu slices it.
    ============================================================ */
 'use strict';
 const fs = require('fs');
@@ -55,7 +59,7 @@ const PARTS = { interface: true, foldSheets: false, footPads: 'shared' };
 const NAME = 'top_clip_x2';
 
 /* the build at the card's defaults, its objects named as the card names them */
-async function build(piece) {
+async function build(piece, partsOver) {
   const t0 = Date.now();
   const det = SA.detectOverhangs(piece, { skipList: [], angleDeg: CARD.angleDeg, occluders: [] });
   if (!det.ok) throw new Error(det.reason);
@@ -66,7 +70,7 @@ async function build(piece) {
     const p = ST.planTree(piece, Object.assign({}, CARD, { beacons: bs }));
     if (!p.ok) { console.log(`area ${rg.id + 1}: ${p.reason}`); continue; }
     plateZ = p.plateZ;
-    const tp = await GP.parts(p, PARTS);
+    const tp = await GP.parts(p, Object.assign({}, PARTS, partsOver || {}));
     if (!tp.ok) throw new Error(`area ${rg.id + 1}: ${tp.reason}`);
     areas.push({ rid: rg.id, p, tp, sh: GP.shells(p, tp) });
   }
@@ -88,7 +92,8 @@ async function write(file, objects) {
   fs.writeFileSync(file, Buffer.from(built.bytes));
 }
 
-(async () => {
+module.exports = { build, write, NAME };
+if (require.main === module) (async () => {
   const piece = readSTL(path.join(ROOT, 'fixtures', 'supports', 'top_clip_x2_coupon.stl'));
   fs.mkdirSync(OUT, { recursive: true });
   const b = await build(piece);

@@ -99,6 +99,10 @@ stated so nobody has to re-check them:
    Spacing is `w − h(1 − π/4)`, the stadium model `nso-gcode-lines.js`
    inverts. A loop that offsets to nothing is where the part is too thin, and
    the layer gets fewer walls there.
+
+   With **Detect thin wall** on (`thinWalls`), a wall narrower than the bead
+   is printed as one pass down its middle first, and only the rest gets these
+   loops. See [Thin walls](#thin-walls-classic-walls-with-detect-thin-wall-on).
 5. **Shells.** A layer is solid wherever the next `T` layers above, or the `B`
    layers below, do not all cover it. `T = max(top_shell_layers,
    ⌈top_shell_thickness / h⌉)`.
@@ -196,8 +200,10 @@ because it compares like with like.
 
 ## 5. Validation against real Bambu slices (Task 7)
 
-`npm run slicer:bambu`: 51 checks, about 70 s. Result: **51 passed, 7 findings
-recorded.**
+`npm run slicer:bambu`: 57 checks, about 70 s. Result: **57 passed, 8 findings
+recorded.** §5, the coupon export's sheet, is described under
+[Thin walls](#thin-walls-classic-walls-with-detect-thin-wall-on); its eighth
+finding says the comparison with the owner's own Bambu G-code is not run yet.
 
 ### What there is to compare with, honestly
 
@@ -382,18 +388,84 @@ right over the sheet that holds it.
   byte what it was, and so is the report: no credit fields, the same words.
   This was checked against the pre-change slicer on the sphere, the 20 mm
   box, the coupon and the wedge at both nozzles, and on a two-object plate.
-- **The nozzle has to fit the sheet.** The card builds the sheet for a
-  0.4 mm nozzle at 0.2 mm layers, with 0.42 mm lines. Sliced at the panel's
-  0.6 default (0.63 mm walls), a 0.42 mm line is narrower than a wall, so
-  those layers print nothing. The rule still types the top 4 layers *with
-  geometry*. At 0.3 mm layers the sheet's 0.8 mm spans fewer slicer layers
-  than it has, so the trunk tips under it take the transition rows. This
-  existed before this change and is not fixed by it. `slicer:supports` and
-  `gscope:select` §9 slice at 0.4 / 0.2.
+- **The sheet prints by the thin-wall pass.** The card builds the sheet for a
+  0.4 mm nozzle at 0.2 mm layers, with 0.40 mm lines (0.95 of a bead), and
+  every support object carries `detect_thin_wall = 1`. So a support object
+  is sliced with Detect thin wall on, and each sheet layer is one pass a
+  piece: the loop, then the serpentine (see Thin walls below). Sliced at the
+  panel's 0.6 default, the 0.40 line is under that nozzle's thin width too
+  (0.66 mm), so it prints as one pass at 0.63 mm. At 0.3 mm layers the
+  sheet's 0.8 mm spans fewer slicer layers than it has, so the trunk tips
+  under it take the transition rows; that is not changed. `slicer:supports`
+  and `gscope:select` §10 slice at 0.4 / 0.2.
 
 `slicer:supports` holds all of this on the clip coupon,
 `fixtures/supports/top_clip_x2.stl`: a 10 x 10 x 16 post with an 8 x 8 clip
 under its top on each side, and the card-default supports built for it.
+
+### Thin walls (classic walls with Detect thin wall on)
+
+Bambu Studio, with the **classic** wall generator and **Detect thin wall** on,
+prints a modelled wall narrower than its bead as **one pass** down the wall's
+middle, at the bead's own width. NSO's 0.40 mm support sheet prints that way:
+one pass per line, E/mm 0.0307, the same as Bambu's outer wall. The owner's
+breakaway print of 2026-10-20 confirmed it. Without Detect thin wall, the
+classic inset (`w/2`) keeps nothing of such a wall, or keeps a sliver drawn
+out and back. `nso_slicer.js` now has the same pass (`thinWalls`). It is
+classic semantics, not Arachne: one fixed width, no variable bead.
+
+- **Who has it on.**
+  - Support objects (`role: 'support'`): on, because every NSO support
+    carries `detect_thin_wall = 1` (`CONSTANTS.thinWall.supportsOn`).
+  - Parts: off by default (`detectThinWall: false`), as in both real
+    profiles (`detect_thin_wall = 0`).
+  - An object's own `detectThinWall` overrides either.
+- **What is thin.**
+  - Shrink the layer's region by half the thin width (**1.05 x the bead**,
+    0.441 mm at 0.42; STATED in `CONSTANTS.thinWall`) and grow it back. That
+    is what holds a wall of its own.
+  - Specks don't count. A corner or a junction of thin walls leaves a speck
+    under half a bead across (an L of a 0.40 strip keeps a 0.47 mm circle, a
+    T a 0.50 one).
+  - The rest, opened by the thinnest wall printed (**0.13 mm**, PR #256's
+    reading of Bambu's behaviour), is thin.
+  - A thin piece whose centreline is a bead long or more prints as that
+    centreline and nothing else. Everything else keeps its walls and infill.
+  - A layer with no thin piece is sliced exactly as before.
+- **The centreline** (`medialPaths`, pure JS):
+  1. Rasterise the piece at 20 pixels a bead.
+  2. Thin it to a one-pixel skeleton (Zhang-Suen, a textbook method).
+  3. Trace it into chains between ends and junctions, and prune spurs under a
+     bead. These are the medial axis's prongs into corners and line ends.
+  4. Find corners on a quarter-bead simplification, and put each one where
+     its two least-squares lines cross.
+  5. Draw the graph as the fewest paths that draw every chain once: an Euler
+     trail per pair of odd nodes.
+
+  So a closed thin loop is one closed path, and a serpentine joined to it at
+  one point continues it: the loop, then the serpentine, with no travel
+  between.
+- **Ends.** A free end stops half the local width short of the piece's edge,
+  so the bead ends flush. An end that meets a walled part (a sheet line
+  against a trunk) runs on into it, as far as the part's outer wall.
+- **Typed as walls.** A part's thin pass is an `Outer wall` path at the outer
+  wall's width (flow for a full bead). It is not split for overhang, so it
+  stays one path. In a support object, `typeSupports` types it like any other
+  line: `Support interface` for the top 2 layers, `Support transition` for the
+  2 below.
+- **What it does to the coupon export** (`slicer:bambu` §5):
+  - Each slab sheet layer is ONE path of **408 mm** in 55 moves (I1: 36).
+    Bambu's record is one run of 54 extrusions and about 434 mm.
+  - Each leg layer is one path of 56.9 mm.
+  - The 0.43 export gives the same path count, layer for layer.
+  - Read back by `nso_slicer_audit.js`, every line is printed once, at
+    1.00 x the outer wall's E/mm.
+  - The comparison with the owner's own Bambu G-code of this export runs once
+    `fixtures/supports/top_clip_x2_supports.gcode.3mf` is in the repo. Until
+    then it is a finding, not a check.
+- **Pinned.** The repo meshes give the same G-code byte for byte with the
+  flag off and on (`slicer:test` §9, 32 slices at both nozzles). None of them
+  has a thin wall 0.13 mm or wider.
 
 ---
 
@@ -416,8 +488,8 @@ under its top on each side, and the card-default supports built for it.
 
 | step | what | time |
 |---|---|---|
-| `slicer:test` | 52 checks: sections equal manifold's own `Manifold.slice` on 6 repo meshes (worst rel 1.3e-9); orientation; open and inside-out meshes; wall offsets and counts; grid pitch and angles; density scaling; shells; overhang on cones either side of 30° / 45°, a mushroom (area exact to the step), model vs plate; G-code round trip; conflicts; constants | ~2 s |
-| `slicer:bambu` | §5 above: 51 checks, 7 findings | ~70 s |
+| `slicer:test` | 63 checks: sections equal manifold's own `Manifold.slice` on 6 repo meshes (worst rel 1.3e-9); orientation; open and inside-out meshes; wall offsets and counts; grid pitch and angles; density scaling; shells; overhang on cones either side of 30° / 45°, a mushroom (area exact to the step), model vs plate; G-code round trip; conflicts; constants; thin walls (a strip, a ring, a loop with its serpentine, a fin on a block, the 1.05-bead threshold, who has it on) and the repo meshes' G-code pinned byte for byte, flag off and on | ~8 s |
+| `slicer:bambu` | §5 above: 57 checks, 8 findings | ~75 s |
 | `gcode:gscope-slice` | 45 checks, real clicks, screenshots in `tools/gscope-slice-out/` | ~10 s |
 | `slicer:supports` | 26 checks on the clip coupon and its 2 card-default supports: every support line Support / transition / interface, interface exactly the top 2 layers' moves and transition the 2 below, the three Features rows, each clip's overhang credited to the support under it (uncovered 0 under the sheet), the readout's words, byte-identical G-code without supports | ~2 s |
 | `gcode:gscope-slice-view` | 50 checks: Normal -> Slice view -> Normal twice, the one All features list and its toggles, settings persisted, the whole-part state restored exactly | ~15 s |
