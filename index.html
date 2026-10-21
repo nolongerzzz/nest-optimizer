@@ -78,8 +78,9 @@
               <button id="btn-rot-left" class="vp-bar-btn adjust-btn" disabled>⟲ 90°</button>
               <button id="btn-rot-right" class="vp-bar-btn adjust-btn" disabled>90° ⟳</button>
               <!-- Which rings are drawn on the piece. Turn is about the
-                   plate's vertical; the two leans are about the piece's own
-                   axes as it lies, and their rings turn with it. Front/back
+                   plate's vertical; the two leans are about the level sides
+                   of the piece's footprint as it lies, and their rings turn
+                   with it, Tip and Flip included. Front/back
                    is the lean that tips the piece along the long side of its
                    footprint, side/side the one across it: app-rotate-handles.js
                    decides which ring that is, ticks the row of the ring that
@@ -89,10 +90,10 @@
               <label class="vp-flag vp-flag-rotring vp-flag-rotring-turn" title="A ring about the plate's vertical. Click an arrowhead to turn 1°, drag it to swing round the ring.">
                 <input type="checkbox" id="chk-rot-ring-turn" checked><span class="vp-flag-face">Turn (horizontal)</span>
               </label>
-              <label class="vp-flag vp-flag-rotring vp-flag-rotring-fb" title="Tips the piece front over back, about its own X line: its front edge goes up as the back goes down, turning with the piece. (This footprint is square, so there is no long side to follow.) Click an arrowhead to lean 1°, drag it to swing round the ring.">
+              <label class="vp-flag vp-flag-rotring vp-flag-rotring-fb" title="Tips the piece front over back, about a level side of its footprint: its front edge goes up as the back goes down. (This footprint is square, so there is no long side to follow.) Click an arrowhead to lean 1°, drag it to swing round the ring.">
                 <input type="checkbox" id="chk-rot-ring-fb"><span class="vp-flag-face">Lean front/back</span>
               </label>
-              <label class="vp-flag vp-flag-rotring vp-flag-rotring-ss" title="Tips the piece side over side, about its own Z line: one side edge goes up as the other goes down, turning with the piece. (This footprint is square, so there is no long side to follow.) Click an arrowhead to lean 1°, drag it to swing round the ring.">
+              <label class="vp-flag vp-flag-rotring vp-flag-rotring-ss" title="Tips the piece side over side, about the other level side of its footprint: one side edge goes up as the other goes down. (This footprint is square, so there is no long side to follow.) Click an arrowhead to lean 1°, drag it to swing round the ring.">
                 <input type="checkbox" id="chk-rot-ring-ss"><span class="vp-flag-face">Lean side/side</span>
               </label>
             </div>
@@ -1767,7 +1768,7 @@
   <!-- Every tool helper goes in and out of the scene through this registry. -->
   <script src="nso-helpers.js?v=asis1"></script>
   <script src="nso-bounds.js?v=bigmesh1"></script>
-  <script src="app-core.js?v=punchb16"></script>
+  <script src="app-core.js?v=leantip1"></script>
 
 
 
@@ -1866,7 +1867,7 @@
        rather than three modules each hoping the other two are shut. -->
   <script src="app-input-mode.js?v=pull1"></script>
   <script src="app-tip-orient.js?v=tip3"></script>
-  <script src="app-rotate-handles.js?v=detents1"></script>
+  <script src="app-rotate-handles.js?v=leantip1"></script>
   <script src="app-move-vertical.js?v=helpers1"></script>
   <script src="app-grab-drop.js?v=plates1"></script>
   <script src="app-defects.js?v=helpers1"></script>

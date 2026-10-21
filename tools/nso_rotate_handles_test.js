@@ -40,7 +40,8 @@
   15. DEGREE MARKERS - a solid bar every 5, longer every 15, longest on
       the quarters, no numbers, as solid as the rail - are fixed in the
       ring's frame; the snap lands on one.
-  16. THE LEANS are the piece's own axes: turned 45 and leaned side/side
+  16. THE LEANS are the piece's own axes while it lies flat (the level sides
+      of its footprint - section 26 for a tipped piece): turned 45 and leaned side/side
       30, a bar rises end-over-end with no twist, in the drawn ring's plane;
       front/back from there is a roll about its length.
   17. A FIXED PIVOT: a drag turns the piece about one held point - it may
@@ -66,7 +67,14 @@
       next painted tick, whichever way the drag goes and wherever the darts
       sit. The window is 3° either side. The tick the piece is within it of
       is lit - a painted tick, in 12 seeded random drags - and the readout
-      says the angle it sits on.                                          */
+      says the angle it sits on.
+  26. AFTER TIP, FLIP, TURN the leans still lean: a 40x20x10 box after Tip
+      on side, Tip X, Flip, Tip then Flip, and Turn 45 then Tip - a 10° drag
+      and a real click on each lean dart tip its upright axis by exactly that,
+      one side of the top up and the other down, with the footprint's heading
+      unchanged within 0.1° and no part of the motion about the vertical. The
+      names still follow the long side. An untipped piece is exactly as
+      before: pose fields and quaternions pinned.                        */
 
 const path = require('path');
 const fs = require('fs');
@@ -122,15 +130,16 @@ withApp(async (page, logs) => {
       const d = b.clone().multiply(a.clone().invert());
       return 2 * Math.atan2(Math.hypot(d.x, d.y, d.z), Math.abs(d.w)) * 180 / Math.PI;
     };
-    /* a ring's axis in the world NOW: the plate's vertical for Turn, the
-       piece's own X (front/back) or Z (side/side) as it lies for the leans */
+    /* a ring's axis in the world NOW: the plate's vertical for Turn, a level
+       side of the piece's footprint as it lies for the leans - on a piece
+       lying as loaded, its own X (fb) or Z (ss) */
     H.axisVec = ring => new THREE.Vector3().fromArray(window.nsoRotate.ringAxis(ring));
-    /* what a ring's turn should be: Turn on the plate's side, a lean on the
-       piece's side about its own axis */
-    H.want = (ring, q0, d) => ring === 'turn'
-      ? new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), d * Math.PI / 180).multiply(q0)
-      : q0.clone().multiply(new THREE.Quaternion().setFromAxisAngle(
-          new THREE.Vector3().fromArray(window.nsoRotate.constants.LOCAL[ring]), d * Math.PI / 180));
+    /* what a ring's turn should be: about the WORLD axis the ring had before
+       it - the vertical for Turn, `A0` (default: the ring's axis now) for a
+       lean - premultiplied. On a piece lying as loaded a lean's A0 is its own
+       axis, and this is q0 * R(own axis, d), the lean it always was. */
+    H.want = (ring, q0, d, A0) => new THREE.Quaternion().setFromAxisAngle(
+      ring === 'turn' ? new THREE.Vector3(0, 1, 0) : (A0 || H.axisVec(ring)), d * Math.PI / 180).multiply(q0);
     H.camera = (offset) => {
       const c = H.p().mesh.position.clone();
       state.controls.target.copy(c);
@@ -179,7 +188,7 @@ withApp(async (page, logs) => {
       const H = window.__rot, a = window.nsoRotate, p = H.p();
       let seed = 12345;
       const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
-      let worst = 0, countsKept = true, n = 0;
+      let worst = 0, countsKept = true, n = 0, steepest = 0;
       const rings = ['turn', 'fb', 'ss'];
       const poses = [];
       for (let i = 0; i < 240; i++) {
@@ -196,9 +205,11 @@ withApp(async (page, logs) => {
           applyMeshRotation(p);
           const q0 = H.q();
           const counts = [p.tipX, p.tipZ, p.flipX];
+          const A0 = H.axisVec(ring);
+          if (ring !== 'turn') steepest = Math.max(steepest, Math.abs(A0.y));
           const d = rnd() < 0.2 ? 1 : (rnd() - 0.5) * 400;
           a.turn(ring, d);
-          const want = H.want(ring, q0, d);
+          const want = H.want(ring, q0, d, A0);
           worst = Math.max(worst, H.angleDeg(want, H.q()));
           if (p.tipX !== counts[0] || p.tipZ !== counts[1] || p.flipX !== counts[2]) countsKept = false;
           n++;
@@ -218,10 +229,12 @@ withApp(async (page, logs) => {
       a.turn('turn', 100);
       const at100 = { tiltX: p.tiltX, rotY: +(p.rotY * 180 / Math.PI).toFixed(9), tiltZ: p.tiltZ };
       H.zero();
-      return { n, worst, countsKept, off, tiltsStill, at100 };
+      return { n, worst, countsKept, off, tiltsStill, at100, steepest };
     });
-    check(r.n + ' turns from random poses: Turn lands on R(vertical, d) * q0, a lean on q0 * R(own axis, d)',
+    check(r.n + ' turns from random poses: Turn lands on R(vertical, d) * q0, a lean on R(footprint side, d) * q0',
       r.worst < 1e-6, 'worst ' + r.worst.toExponential(2) + '°');
+    check('...and in every one of those poses each lean axis lay level - never within 45° of vertical, never a yaw',
+      r.steepest < 1e-9, 'steepest |A.up| ' + r.steepest.toExponential(2));
     check('...and tipX / tipZ / flipX are never touched - they stay whole quarter-turn counts',
       r.countsKept);
     check('a flat piece walked round 400° a degree at a time: rotY tracks it, tilts stay 0',
@@ -1507,7 +1520,7 @@ withApp(async (page, logs) => {
       lying.fbColour === 0xf472b6 && lying.ssColour === 0xfbbf24, lying.fbColour.toString(16) + ' / ' + lying.ssColour.toString(16));
     const axes = await page.evaluate(() => {
       const H = window.__rot, a = window.nsoRotate, q = H.q();
-      const want = k => new THREE.Vector3().fromArray(a.constants.LOCAL[k]).applyQuaternion(q);
+      const want = k => new THREE.Vector3().fromArray(k === 'fb' ? [1, 0, 0] : [0, 0, 1]).applyQuaternion(q);
       return ['fb', 'ss'].map(k => H.axisVec(k).distanceTo(want(k)));
     });
     check('the rings did not move: "fb" is still the piece\'s own X, "ss" its own Z', axes.every(d => d < 1e-9),
@@ -1873,6 +1886,208 @@ withApp(async (page, logs) => {
       r.random.every(d => d.bad === 0) && r.random.reduce((n, d) => n + d.lit, 0) > 12,
       r.random.reduce((n, d) => n + d.lit, 0) + ' lit steps of ' + r.random.reduce((n, d) => n + d.steps, 0));
     check('...and the readout names it every time it is lit', r.random.every(d => d.unnamed === 0), '');
+  }
+
+  /* ----------------------------------------------------------------- 26 */
+  console.log('\n=== 26. after Tip, Flip, Turn: the leans lean - about the footprint\'s level sides, never a yaw ===');
+  {
+    files.box = writeBoxSTL(path.join(DIR, 'box40x20x10.stl'), 40, 20, 10);
+    await drop(files.box);
+    await page.evaluate(() => {
+      const H = window.__rot, a = window.nsoRotate;
+      a.setRing('fb', true); a.setRing('ss', true);
+      /* The footprint's long side as a heading in [0, 180): the narrowest
+         rectangle round the shadow of the box's eight corners, tried along
+         every pair of them - measured here from the corners alone, not from
+         anything the module computes. */
+      H.corners = () => {
+        const p = H.p(), g = p.mesh.geometry;
+        if (!g.boundingBox) g.computeBoundingBox();
+        const bb = g.boundingBox, out = [];
+        p.mesh.updateMatrixWorld(true);
+        for (const x of [bb.min.x, bb.max.x]) for (const y of [bb.min.y, bb.max.y]) for (const z of [bb.min.z, bb.max.z])
+          out.push(new THREE.Vector3(x, y, z).applyMatrix4(p.mesh.matrixWorld).sub(p.mesh.position));
+        return out;
+      };
+      H.footYaw = () => {
+        const pts = H.corners();
+        let best = null;
+        for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++) {
+          const dx = pts[j].x - pts[i].x, dz = pts[j].z - pts[i].z, l = Math.hypot(dx, dz);
+          if (l < 1e-6) continue;
+          const d = [dx / l, dz / l], n = [-d[1], d[0]];
+          const ext = v => { const t = pts.map(c => c.x * v[0] + c.z * v[1]); return Math.max(...t) - Math.min(...t); };
+          const ed = ext(d), en = ext(n);
+          if (!best || ed * en < best.area - 1e-9) best = { area: ed * en, long: ed >= en ? d : n, ed, en };
+        }
+        return { yaw: ((Math.atan2(-best.long[1], best.long[0]) * 180 / Math.PI) % 180 + 180) % 180,
+                 long: new THREE.Vector3(best.long[0], 0, best.long[1]),
+                 size: [Math.max(best.ed, best.en), Math.min(best.ed, best.en)] };
+      };
+      H.yawDiff = (a, b) => Math.abs((((b - a) + 90) % 180 + 180) % 180 - 90);
+      H.setups = {
+        'Tip on side': () => window.nsoTipOrient.tipOnSide(),
+        'Tip X 90': () => tipSelected(),
+        'Flip': () => window.nsoTipOrient.flipOver(),
+        'Tip on side, then Flip': () => { window.nsoTipOrient.tipOnSide(); window.nsoTipOrient.flipOver(); },
+        'Turn 45, then Tip on side': () => { window.nsoRotate.turn('turn', 45); window.nsoTipOrient.tipOnSide(); }
+      };
+      /* what one piece pose looks like to the gate: its own axis that is
+         most nearly upright, the footprint's heading, the corners */
+      H.look = () => {
+        const q = H.q(), own = [[1, 0, 0], [0, 1, 0], [0, 0, 1]].map(b => new THREE.Vector3().fromArray(b).applyQuaternion(q));
+        return { q, own, foot: H.footYaw(), corners: H.corners() };
+      };
+      /* Yaw is the part of the motion about the vertical: the twist of
+         q1 * q0^-1 about it (swing-twist). A lean about a level line has none.
+         The footprint's heading is the same thing seen on the plate, for a
+         piece resting on a face; one balanced on an edge (Turn 45, then Tip:
+         its box stands on a corner edge, 45 degrees each way) has a shadow
+         whose narrowest rectangle swings as it tips even about a level line,
+         so there the twist is the yaw and the heading is only reported. */
+      H.gate = (before, after) => {
+        const k = before.own.map(v => Math.abs(v.y)).reduce((m, y, i, all) => y > all[m] ? i : m, 0);
+        const onFace = Math.abs(before.own[k].y) > 1 - 1e-9;
+        const tilt = Math.acos(Math.min(1, Math.abs(after.own[k].y))) * 180 / Math.PI;
+        const d = after.q.clone().multiply(before.q.clone().invert());
+        const ax = new THREE.Vector3(d.x, d.y, d.z), s = ax.length();
+        const turnedBy = 2 * Math.atan2(s, Math.abs(d.w)) * 180 / Math.PI;
+        const twist = Math.abs(2 * Math.atan2(d.y, d.w) * 180 / Math.PI);
+        const yaw = Math.min(twist, 360 - twist);
+        /* every corner's height change, about the pivot: one side up, the other down */
+        const dys = before.corners.map((c, i) => after.corners[i].y - c.y);
+        return { turnedBy, onFace, tilt, axisUp: s > 1e-12 ? Math.abs(ax.y / s) : 0, yaw,
+                 heading: H.yawDiff(before.foot.yaw, after.foot.yaw), up: Math.max(...dys), down: Math.min(...dys),
+                 foot: after.foot.size.map(v => +v.toFixed(2)) };
+      };
+    });
+
+    const rows = [];
+    const names = await page.evaluate(() => Object.keys(window.__rot.setups));
+    for (const setup of names) {
+      for (const ring of ['fb', 'ss']) {
+        /* a dial drag of 10° on the ring, through the entry points app-core calls */
+        const r = await page.evaluate(([setup, ring]) => {
+          const H = window.__rot, a = window.nsoRotate;
+          H.zero(); H.setups[setup](); a.refresh(); H.home();
+          const b0 = H.look(), A0 = H.axisVec(ring);
+          const old = (() => {           // what the dart did before: q0 * R(own X | own Z, 10)
+            const q1 = b0.q.clone().multiply(new THREE.Quaternion().setFromAxisAngle(
+              new THREE.Vector3(ring === 'fb' ? 1 : 0, 0, ring === 'ss' ? 1 : 0), 10 * Math.PI / 180));
+            const p = H.p(), q = p.mesh.quaternion.clone();
+            p.mesh.quaternion.copy(q1); p.mesh.updateMatrixWorld(true);
+            const y = H.footYaw().yaw;
+            p.mesh.quaternion.copy(q); p.mesh.updateMatrixWorld(true);
+            return H.yawDiff(b0.foot.yaw, y);
+          })();
+          const role = a.ringLabel(ring), along = a.leanNames().along;
+          const tr = H.trace(ring, a.dialSign(ring) * 10);
+          const b1 = H.look();
+          const g = H.gate(b0, b1);
+          return Object.assign(g, { setup, ring, role, along, applied: tr.state.applied, oldYaw: old,
+                                    A0: A0.toArray().map(v => +v.toFixed(6)),
+                                    wantErr: H.angleDeg(H.want(ring, b0.q, tr.state.applied, A0), b1.q) });
+        }, [setup, ring]);
+        /* ...and a real click on the dart: one more degree, the same way */
+        const h = await page.evaluate(r => { window.__rot.look0 = window.__rot.look(); return window.nsoRotate.handleScreen(r, 1); }, ring);
+        await page.mouse.click(h.x, h.y);
+        await page.waitForTimeout(700);                                        // let the run seat
+        r.click = await page.evaluate(() => window.__rot.gate(window.__rot.look0, window.__rot.look()));
+        rows.push(r);
+      }
+    }
+    console.log('   setup                       ring  role             axis               drag   tilt     yaw      heading  axis.up  corners       click  yaw     | old dart yaw');
+    for (const r of rows) {
+      console.log('   ' + r.setup.padEnd(27) + ' ' + r.ring.padEnd(4) + '  ' + r.role.padEnd(16) + ' ' +
+        JSON.stringify(r.A0.map(v => Math.abs(v) < 1e-6 ? 0 : v)).padEnd(17) + ' ' + r.applied.toFixed(2).padStart(6) + ' ' +
+        (r.onFace ? r.tilt.toFixed(3) : 'edge').padStart(6) + ' ' + r.yaw.toExponential(1).padStart(8) + ' ' +
+        r.heading.toExponential(1).padStart(8) + ' ' + r.axisUp.toExponential(1).padStart(8) + '  ' +
+        ('+' + r.up.toFixed(2) + '/' + r.down.toFixed(2)).padEnd(13) + ' ' + r.click.turnedBy.toFixed(3).padStart(6) + ' ' +
+        r.click.yaw.toExponential(1).padStart(8) + ' | ' + r.oldYaw.toFixed(2) + '°');
+    }
+    for (const setup of names) {
+      const mine = rows.filter(r => r.setup === setup);
+      check(setup + ': a 10° drag on each lean dart tips the piece 10° about a level line' +
+        (mine[0].onFace ? ' - its upright axis leans 10°' : ' (it stands on an edge: no upright axis to read)'),
+        mine.every(r => near(Math.abs(r.applied), 10, 1e-6) && near(r.turnedBy, 10, 1e-6) && r.axisUp < 1e-9 &&
+          (!r.onFace || near(r.tilt, 10, 1e-6))),
+        mine.map(r => r.ring + ' ' + r.turnedBy.toFixed(6) + '°' + (r.onFace ? ', upright axis ' + r.tilt.toFixed(6) + '°' : '') +
+          ', axis.up ' + r.axisUp.toExponential(1)).join('; '));
+      check(setup + ': ...one side of it rises and the other drops',
+        mine.every(r => r.up > 0.5 && r.down < -0.5), mine.map(r => r.ring + ' +' + r.up.toFixed(2) + '/' + r.down.toFixed(2) + ' mm').join(', '));
+      check(setup + ': ...and its yaw is unchanged within 0.1°' + (mine[0].onFace ? ' - the footprint keeps its heading too' : ''),
+        mine.every(r => r.yaw <= 0.1 && (!r.onFace || r.heading <= 0.1)),
+        mine.map(r => r.ring + ' yaw ' + r.yaw.toExponential(1) + '°, heading ' + r.heading.toExponential(1) + '°').join('; '));
+      check(setup + ': ...the turn is R(the axis the ring had at the press, 10°) * q0',
+        mine.every(r => r.wantErr < 1e-6), mine.map(r => r.wantErr.toExponential(1)).join(' '));
+      check(setup + ': a real click on each dart: 1° more, still a lean, still no yaw',
+        mine.every(r => near(r.click.turnedBy, 1, 1e-6) && r.click.yaw <= 0.1 && r.click.axisUp < 1e-9 &&
+          (!r.click.onFace || r.click.heading <= 0.1)),
+        mine.map(r => r.ring + ' ' + r.click.turnedBy.toFixed(6) + '°, yaw ' + r.click.yaw.toExponential(1)).join('; '));
+    }
+    const tipped = rows.filter(r => r.setup === 'Tip on side' || r.setup === 'Tip X 90');
+    check('the bug, for the record: before, one dart on a tipped piece turned it about the vertical (yaw 10°)',
+      tipped.some(r => near(r.oldYaw, 10, 1e-3)), tipped.map(r => r.ring + ' ' + r.oldYaw.toFixed(3) + '°').join(', '));
+
+    /* the names still follow the long side (#219) once the piece is tipped */
+    const nm = await page.evaluate(() => {
+      const H = window.__rot, out = {};
+      for (const k of ['Tip on side', 'Turn 45, then Tip on side']) {
+        H.zero(); H.setups[k](); window.nsoRotate.refresh();
+        const f = H.footYaw(), A = ring => H.axisVec(ring);
+        out[k] = Object.assign(H.names(), { foot: f.size });
+        out[k].fbAcross = out[k].fbRing ? Math.abs(A(out[k].fbRing).dot(f.long)) : 1;
+        out[k].ssAlong = out[k].ssRing ? Math.abs(A(out[k].ssRing).dot(f.long)) : 0;
+      }
+      H.zero();
+      return out;
+    });
+    for (const k in nm) {
+      /* about the line ACROSS the long side, so its ends rise; side/side about the long side itself */
+      check(k + ': the lean named front/back tips the piece along the long side of its new footprint',
+        nm[k].fbRing && nm[k].ssRing && nm[k].fbRing !== nm[k].ssRing && nm[k].fbAcross < 1e-6 && near(nm[k].ssAlong, 1, 1e-6),
+        'footprint ' + nm[k].foot.map(v => v.toFixed(1)).join(' x ') + ', front/back = ring ' + nm[k].fbRing +
+        ' (axis . long side ' + nm[k].fbAcross.toExponential(1) + '), side/side = ring ' + nm[k].ssRing +
+        ' (' + nm[k].ssAlong.toFixed(6) + ')');
+    }
+
+    /* an untipped piece: exactly as before - the numbers pinned from the code
+       this replaced (q0 * R(own X | own Z, d)) */
+    const pin = await page.evaluate(() => {
+      const H = window.__rot, a = window.nsoRotate, p = H.p();
+      const rec = () => { const q = H.q(); return { f: [p.tipX, p.tipZ, p.flipX, p.tiltX, +(p.rotY * 180 / Math.PI).toFixed(9), p.tiltZ], q: [q.x, q.y, q.z, q.w] }; };
+      const out = {};
+      H.zero(); a.turn('fb', 10); out.fb10 = rec();
+      H.zero(); a.turn('ss', 10); out.ss10 = rec();
+      H.zero(); a.turn('turn', 45); a.turn('fb', 10); out.t45fb10 = rec();
+      H.zero(); a.turn('turn', 45); a.turn('ss', 10); out.t45ss10 = rec();
+      /* and the dart itself, dragged 10° on a fresh piece: own X / own Z, postmultiplied */
+      out.drag = ['fb', 'ss'].map(ring => {
+        H.zero(); H.home(); const q0 = H.q();
+        const tr = H.trace(ring, a.dialSign(ring) * 10);
+        const want = q0.clone().multiply(new THREE.Quaternion().setFromAxisAngle(
+          new THREE.Vector3(ring === 'fb' ? 1 : 0, 0, ring === 'ss' ? 1 : 0), tr.state.applied * Math.PI / 180));
+        return H.angleDeg(want, H.q());
+      });
+      H.zero();
+      return out;
+    });
+    const PIN = {
+      fb10:    { f: [0, 0, false, 10, 0, 0], q: [0.087155742748, 0, 0, 0.996194698092] },
+      ss10:    { f: [0, 0, false, 0, 0, 10], q: [0, 0, 0.087155742748, 0.996194698092] },
+      t45fb10: { f: [0, 0, false, 14.001942166, 44.136029464, -9.851076117], q: [0.080521406868, 0.38122720637, -0.033353058787, 0.920363891963] },
+      t45ss10: { f: [0, 0, false, 0, 45, 10], q: [0.033353058785, 0.381227206369, 0.080521406865, 0.920363891963] }
+    };
+    for (const k in PIN) {
+      const got = pin[k], want = PIN[k];
+      const fOk = got.f.every((v, i) => typeof v === 'boolean' ? v === want.f[i] : near(v, want.f[i], 1e-8));
+      const qOk = got.q.every((v, i) => near(v, want.q[i], 1e-11));
+      check('untipped, ' + k + ': pose fields and quaternion exactly as before', fOk && qOk,
+        'fields ' + got.f.map(v => typeof v === 'number' ? +v.toFixed(9) : v).join(',') + ' q ' + got.q.map(v => v.toFixed(12)).join(','));
+    }
+    check('untipped, a 10° drag on each dart: q0 * R(own X | own Z, 10), as before', pin.drag.every(d => d < 1e-9),
+      pin.drag.map(d => d.toExponential(1)).join(' '));
+    await page.evaluate(() => { window.nsoRotate.setRing('fb', false); window.nsoRotate.setRing('ss', false); });
   }
 
   const errs = logs.filter(l => l.startsWith('[pageerror]'));
