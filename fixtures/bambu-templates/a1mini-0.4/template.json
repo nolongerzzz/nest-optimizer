@@ -1,0 +1,8 @@
+{
+  "printer": "Bambu Lab A1 mini",
+  "nozzle": "0.4",
+  "studio_version": "02.08.02.61",
+  "file": "project_test.3mf",
+  "sha256": "2f13868a54f08f1751bdc4b5abb72944b7112ebd7af837ddf3f3bd355c4de1c7",
+  "source": "The owner's project_test.3mf: a project saved by Bambu Studio 02.08.02.61 on 2026-10-21 (top_clip_x2 and one tree support, Generic PLA @BBL A1M, 0.20mm Standard @BBL A1M). nso-3mf.js writes its envelope; see docs/BAMBU-PROJECT-EXPORT.md."
+}

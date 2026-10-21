@@ -228,9 +228,10 @@ withApp(async (page, logs) => {
   await page.evaluate(() => { const e = document.getElementById('export-format'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   await page.selectOption('#export-format', '3mf');
   /* a model's own slicer settings (the Supports card sets them on its
-     supports: wall_generator = classic, detect_thin_wall = 1) ride out as
-     that object's metadata in model_settings.config; B carries them here */
-  const SLICER = { wall_generator: 'classic', detect_thin_wall: '1' };
+     supports: wall_generator = classic, detect_thin_wall = 1, no top or
+     bottom shells) ride out as that object's metadata in model_settings.config;
+     B carries them here, A none */
+  const SLICER = { wall_generator: 'classic', detect_thin_wall: '1', top_shell_layers: '0', bottom_shell_layers: '0' };
   await page.evaluate(s => { const p = state.placed[1]; const m = state.models.find(x => x.id === p.sourceId); m.slicerSettings = s; }, SLICER);
   files.plate3MF = await download(page, '#btn-export-stl', tmp);
   await page.evaluate(() => { state.models.forEach(m => { delete m.slicerSettings; }); });
@@ -251,11 +252,15 @@ withApp(async (page, logs) => {
     });
     const zip = NSO3MFRead.openZip(new Uint8Array(fs.readFileSync(files.plate3MF)));
     const ms = new TextDecoder().decode(await zip.read('Metadata/model_settings.config'));
+    /* the project envelope (docs/BAMBU-PROJECT-EXPORT.md): piece N is object
+       2N, and its own metadata sits above its <part>, in key order with the
+       extruder, as Bambu Studio saves a per-object override */
     const keysOf = id => { const m = ms.match(new RegExp('<object id="' + id + '">([\\s\\S]*?)</object>'));
-      return m ? [...m[1].matchAll(/key="([^"]*)" value="([^"]*)"/g)].filter(k => k[1] !== 'name').map(k => k[1] + '=' + k[2]) : null; };
+      return m ? [...m[1].split('<part')[0].matchAll(/key="([^"]*)" value="([^"]*)"/g)].filter(k => k[1] !== 'name').map(k => k[1] + '=' + k[2]) : null; };
+    const wantB = Object.keys(Object.assign({ extruder: '1' }, SLICER)).sort().map(k => k + '=' + (k === 'extruder' ? '1' : SLICER[k]));
     check('a model\'s own slicer settings go out as its object\'s metadata in model_settings.config, and no other object\'s',
-      JSON.stringify(keysOf(2)) === JSON.stringify(['wall_generator=classic', 'detect_thin_wall=1']) && JSON.stringify(keysOf(1)) === '[]',
-      'object 1: ' + JSON.stringify(keysOf(1)) + ', object 2: ' + JSON.stringify(keysOf(2)));
+      JSON.stringify(keysOf(4)) === JSON.stringify(wantB) && JSON.stringify(keysOf(2)) === JSON.stringify(['extruder=1']),
+      'object 2: ' + JSON.stringify(keysOf(2)) + ', object 4: ' + JSON.stringify(keysOf(4)));
   }
 
   /* ---------- 3. Download selected, Format = STL ---------- */

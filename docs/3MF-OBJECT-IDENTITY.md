@@ -1,6 +1,13 @@
 # 3MF object identity — why the plate export names its objects
 
 Module: `nso-3mf.js`, `buildModelXml()`
+
+> **Since export-bambu-project** the default export is Bambu Studio's own
+> project envelope (docs/BAMBU-PROJECT-EXPORT.md): objects are named in
+> `Metadata/model_settings.config` and kept apart by Studio's counter UUIDs,
+> as Studio's own projects are, and every instance carries an `identify_id`.
+> What follows is the geometry-only envelope's story, which `build3MF` still
+> writes when the template cannot be read (`envelope: 'nso'`).
 Suites: `node tools/3mf-test/roundtrip-check.js`, `node tools/3mf-test/export-drive-check.mjs`
 
 Every number below was measured off real sliced G-code or a real `.3mf`.

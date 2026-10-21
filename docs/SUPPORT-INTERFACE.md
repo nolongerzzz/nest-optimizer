@@ -147,7 +147,9 @@ printed in the same layers as the lines, and every line was an island. So now:
 - **The line width is 0.40** (`SHEET_UNDER` 0.95 of the 0.42 bead, to the
   0.01 mm, at a 0.4 nozzle), section 5, printed by the slicer's thin-wall
   pass: every support object carries `wall_generator = classic` and
-  `detect_thin_wall = 1`; `sheetWidthMm` sets another width.
+  `detect_thin_wall = 1` (with `top_shell_layers = 0` and
+  `bottom_shell_layers = 0`, the support set: docs/BAMBU-PROJECT-EXPORT.md);
+  `sheetWidthMm` sets another width.
 - **The feet**: one shared first-layer pad per cluster of trunks, the trees on
   one pad one support (docs/SUPPORT-GRIDPACK.md, *Feet*).
 - **The gap stays 0.18.**
@@ -350,7 +352,10 @@ the importer reads an object's metadata into its config for any vendor's 3MF
 (`bbs_3mf.cpp`), and `Plater::load_files` resets it when the file comes in as
 geometry only (File > Import / Add, or "Import geometry only" on a plate that
 holds objects) - **open the export as a project**; the support object then
-shows the override badge in the object list. `npm run support:print-export`
+shows the override badge in the object list. Since export-bambu-project the
+export IS Studio's project envelope (docs/BAMBU-PROJECT-EXPORT.md), and the
+support set is four keys: these two, `top_shell_layers = 0` and
+`bottom_shell_layers = 0`. `npm run support:print-export`
 writes the coupon as the card exports it, `top_clip_x2_supports.3mf` (a
 21.84 x 14.28 loop, the serpentine a pitch inside it joined at its start,
 25 / 25 / 16 / 25 lines, 40 caps of 2.50 mm; the leg 2.52 x 13.44). In the owner's

@@ -289,11 +289,23 @@ const fmt = v => v.map(c => c.toFixed(3)).join(', ');
 
   /* ---- 6. read it back with an independent unzip ---------------------------- */
   const buf = fs.readFileSync(outPath);
+  /* Bambu's project envelope (docs/BAMBU-PROJECT-EXPORT.md): each object is
+     a wrapper in the root model, named in model_settings.config, its mesh in
+     its own object part, placed by its build item. found[i] = [, id, name,
+     UUID] with .soup(), the object's mesh in plate space. */
   const model = readEntry(buf, NSO3MF.PART_MODEL);
-  const re = /<object id="(\d+)" name="([^"]*)" type="model" p:UUID="([^"]+)">/g;
-  let m;
-  const found = [];
-  while ((m = re.exec(model))) found.push(m);
+  const settingsXml = readEntry(buf, NSO3MF.PART_MODEL_SETTINGS);
+  const nameOf = new Map([...settingsXml.matchAll(/<object id="(\d+)">\s*<metadata key="name" value="([^"]*)"\/>/g)].map(x => [x[1], x[2]]));
+  const placeOf = new Map([...model.matchAll(/<item objectid="(\d+)"[^>]*transform="([^"]*)"/g)].map(x => [x[1], x[2].split(' ').slice(9).map(Number)]));
+  const found = [...model.matchAll(/<object id="(\d+)" p:UUID="([^"]+)" type="model">\s*<components>\s*<component p:path="\/([^"]*)" objectid="(\d+)"/g)]
+    .map(x => {
+      const f = [x[0], x[1], nameOf.get(x[1]) || '', x[2]];
+      f.soup = () => {
+        const xml = readEntry(buf, x[3]);
+        return objectSoup(xml, xml.indexOf('<object id="' + x[4] + '"'), placeOf.get(x[1]));
+      };
+      return f;
+    });
   console.log('read back  ' + found.length + ' <object> elements in ' + NSO3MF.PART_MODEL + ':');
   for (const f of found) console.log('           id ' + f[1] + '  ' + f[2].padEnd(30) + ' ' + f[3]);
   const items = (model.match(/<item /g) || []).length;
@@ -311,7 +323,7 @@ const fmt = v => v.map(c => c.toFixed(3)).join(', ');
     let bad = 0;
     for (let si = 0; si < found.length - 1; si++) {
       const f = found[si + 1];
-      const soup = objectSoup(model, f.index);
+      const soup = f.soup();
       const tmp = path.join(os.tmpdir(), 'nso_artifact_' + f[1] + '.stl');
       writeSTL(tmp, soup, f[2]);
       const v = JSON.parse(execFileSync('python3', [path.join(ROOT, 'tools', 'mesh_validate.py'), tmp,
@@ -348,7 +360,7 @@ const fmt = v => v.map(c => c.toFixed(3)).join(', ');
         console.log('           ' + comps + ' connected component(s), ' + want + ' expected - ' + (comps === want
           ? 'every interface patch is fused to the tip it sits on' : 'SOMETHING IS FLOATING'));
         wallOk = wallOk && comps === want;
-        const pieceW = objectSoup(model, found[0].index);
+        const pieceW = found[0].soup();
         const gap = ctx.NSO_SupportInterface.minDistance(soup, pieceW, { thickness: TH, reach: 1 });
         const g0 = ctx.NSO_SupportInterface.DEFAULTS.gapMm;
         /* ...and again, EXACTLY: every triangle pair in closed form, candidates
@@ -383,15 +395,16 @@ const fmt = v => v.map(c => c.toFixed(3)).join(', ');
   }
 })().catch(err => { console.error(err); process.exit(1); });
 
-/* One object's mesh out of the model XML, as a soup. The writer emits each
-   object's <mesh> between its own <object ...> tag and the next. */
-function objectSoup(model, at) {
+/* One object's mesh out of its object part, as a soup, moved by its build
+   item's translation t. The writer emits each object's <mesh> between its own
+   <object ...> tag and the next. */
+function objectSoup(model, at, t) {
   const end = model.indexOf('</object>', at);
   const body = model.slice(at, end);
   const V = [];
   const vr = /<vertex x="([^"]+)" y="([^"]+)" z="([^"]+)"/g;
   let m;
-  while ((m = vr.exec(body))) V.push([+m[1], +m[2], +m[3]]);
+  while ((m = vr.exec(body))) V.push([+m[1] + t[0], +m[2] + t[1], +m[3] + t[2]]);
   const soup = [];
   const tr = /<triangle v1="(\d+)" v2="(\d+)" v3="(\d+)"/g;
   while ((m = tr.exec(body))) for (const k of [m[1], m[2], m[3]]) soup.push(...V[+k]);

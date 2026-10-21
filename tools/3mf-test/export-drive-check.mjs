@@ -241,25 +241,27 @@ async function main() {
 
   const names = execFileSync('unzip', ['-Z1', file], { encoding: 'utf8' })
     .trim().split('\n').sort();
-  // Metadata/nso_scene.json is the plate's own state (nso-3mf-scene.js). The
-  // plate export always writes it; an export with no scene to write leaves it
-  // out entirely, which tools/3mf-test/scene-check.js pins against this same
-  // six-part list.
-  check('every OPC part is present', names, [
-    '3D/3dmodel.model', 'Metadata/model_settings.config',
-    'Metadata/nso_profile.json', 'Metadata/nso_scene.json',
-    'Metadata/project_settings.config',
-    '[Content_Types].xml', '_rels/.rels',
-  ].sort());
+  // The Bambu project envelope (docs/BAMBU-PROJECT-EXPORT.md): the template's
+  // parts with one object part per piece, plus NSO's own two. Metadata/
+  // nso_scene.json is the plate's own state (nso-3mf-scene.js); the plate
+  // export always writes it. export:bambu gates the envelope part for part.
+  const tpl = await NSO3MF.loadTemplate();
+  const objectParts = (n) => Array.from({ length: n }, (_, i) => `3D/Objects/object_${i + 1}.model`);
+  const envelope = (n, scene) => tpl.names.filter((x) => !x.startsWith('3D/Objects/'))
+    .concat(objectParts(n), ['Metadata/nso_profile.json'], scene ? ['Metadata/nso_scene.json'] : []).sort();
+  check('every OPC part is present, the template\'s and NSO\'s', names, envelope(expectedObjects, true));
 
   const text = execFileSync('unzip', ['-p', file, NSO3MF.PART_PROJECT_SETTINGS],
     { encoding: 'utf8' });
-  const parsed = Profiles.parseProjectSettings(text);   // throws on shape drift
+  const raw = JSON.parse(text);
   const expected = Profiles.resolveValues(Profiles.DEFAULT_PROFILE_ID);
+  // Studio's filament keys hold a string per filament slot; NSO's value is on
+  // every one of them, so a slot that disagrees reads as "(slots differ)".
+  const cooling = (r) => Object.fromEntries(Object.keys(expected).map((k) => [k,
+    Array.isArray(r[k]) && r[k].length && r[k].every((v) => v === r[k][0]) ? r[k][0] : '(slots differ)']));
+  const parsed = cooling(raw);
 
-  check('exact key set and order survived', Object.keys(parsed), Object.keys(expected));
-  check('only the confirmed cooling keys are in the file',
-    Profiles.validateValues(parsed), []);
+  check('the template\'s key set and order survived', Object.keys(raw), Object.keys(tpl.settings));
 
   for (const key of Object.keys(expected)) {
     check(`  ${key} = ${JSON.stringify(expected[key])}`, parsed[key], expected[key]);
@@ -272,37 +274,52 @@ async function main() {
 
   // A tolerant JSON parser could hide a formatting slip; the raw text cannot.
   const rawMissing = Object.keys(expected).filter((k) =>
-    !text.includes(`    ${JSON.stringify(k)}: [${JSON.stringify(expected[k])}]`));
-  check('raw text carries each key verbatim as "key": ["value"]', rawMissing, []);
+    !text.includes(`    ${JSON.stringify(k)}: [\n` + raw[k].map(() => `        ${JSON.stringify(expected[k])}`).join(',\n') + '\n    ]'));
+  check('raw text carries each key verbatim, a line per filament slot', rawMissing, []);
 
-  // The geometry the app packed is really in there.
-  const model = execFileSync('unzip', ['-p', file, NSO3MF.PART_MODEL], { encoding: 'utf8' });
+  // The geometry the app packed is really in there: each wrapper object points
+  // at its own object part, and the build item places it.
+  function geometry(f, n) {
+    const model = execFileSync('unzip', ['-p', f, NSO3MF.PART_MODEL], { encoding: 'utf8' });
+    const items = [...model.matchAll(/<item objectid="(\d+)"[^>]*transform="([^"]*)"/g)]
+      .map((m) => ({ id: m[1], t: m[2].split(' ').map(Number) }));
+    const paths = Object.fromEntries([...model.matchAll(/<object id="(\d+)"[^>]*>\s*<components>\s*<component p:path="\/([^"]*)"/g)]
+      .map((m) => [m[1], m[2]]));
+    const verts = items.map((it) => {
+      const part = execFileSync('unzip', ['-p', f, paths[it.id]], { encoding: 'utf8' });
+      return [...part.matchAll(/<vertex x="([-\d.e]+)" y="([-\d.e]+)" z="([-\d.e]+)"/g)]
+        .map((m) => m.slice(1).map(Number)).map(([x, y, z]) => [x + it.t[9], y + it.t[10], z + it.t[11]]);
+    });
+    return { model, items, paths, verts, all: verts.flat(), n };
+  }
+  const plate = geometry(file, expectedObjects);
+  const model = plate.model;
   check('an object per packed piece reached the model part',
     (model.match(/<object /g) || []).length, expectedObjects);
+  check('each one is a wrapper on its own object part',
+    Object.values(plate.paths).sort(), objectParts(expectedObjects));
 
-  // Per-object identity, on the file the app itself wrote. A name that lives
-  // only in model_settings.config does not survive into the slice: Bambu folds
-  // the plate into one object. See docs/3MF-OBJECT-IDENTITY.md.
-  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+  // Per-object identity, on the file the app itself wrote: a project names
+  // its objects in model_settings.config, and Studio's counter UUIDs keep
+  // them apart. See docs/BAMBU-PROJECT-EXPORT.md.
+  const SUFFIXES = Object.values(NSO3MF.UUID_SUFFIX);
   check('the production extension is declared',
     model.includes('xmlns:p="http://schemas.microsoft.com/3dmanufacturing/production/2015/06"'), true);
-  check('every object carries a name on the <object> element',
-    (model.match(/<object [^>]*name="[^"]*"/g) || []).length, expectedObjects);
+  const plateSettings = execFileSync('unzip', ['-p', file, NSO3MF.PART_MODEL_SETTINGS], { encoding: 'utf8' });
   check('the names are the pieces the app placed',
-    [...model.matchAll(/<object [^>]*name="([^"]*)"/g)].map((m) => m[1]), placedNames);
+    [...plateSettings.matchAll(/<object id="\d+">\s*<metadata key="name" value="([^"]*)"/g)].map((m) => m[1]), placedNames);
   const modelUuids = [...model.matchAll(/p:UUID="([^"]*)"/g)].map((m) => m[1]);
-  check('object, build and item all carry a UUID',
-    modelUuids.length, expectedObjects * 2 + 1);
-  check('every UUID is a well-formed RFC 4122 v4',
-    modelUuids.filter((u) => !UUID_RE.test(u)), []);
+  check('object, component, build and item all carry a UUID',
+    modelUuids.length, expectedObjects * 3 + 1);
+  check('object, component and item UUIDs carry Studio\'s fixed suffixes',
+    modelUuids.slice(0, -expectedObjects - 1).concat(modelUuids.slice(-expectedObjects))
+      .filter((u) => !SUFFIXES.some((x) => u.endsWith(x))), []);
   check('no two UUIDs collide', new Set(modelUuids).size, modelUuids.length);
-  check('the model part has vertices', (model.match(/<vertex /g) || []).length > 0, true);
-  check('the model part has triangles', (model.match(/<triangle /g) || []).length > 0, true);
+  check('the object parts have vertices', plate.all.length > 0, true);
 
   // Plate coordinates, not the packer's plate-centred ones: nothing negative,
   // nothing past the 180 mm A1 Mini plate, and the piece sits on z = 0.
-  const xs = [...model.matchAll(/<vertex x="([-\d.]+)" y="([-\d.]+)" z="([-\d.]+)"/g)]
-    .map((m) => m.slice(1).map(Number));
+  const xs = plate.all;
   check('every vertex is inside the plate in X/Y',
     xs.every(([x, y]) => x >= 0 && x <= 180 && y >= 0 && y <= 180), true);
   check('the piece rests on the plate (min Z = 0)',
@@ -324,20 +341,17 @@ async function main() {
   }
   const pieceText = execFileSync('unzip', ['-p', pieceFile, NSO3MF.PART_PROJECT_SETTINGS],
     { encoding: 'utf8' });
-  const pieceParsed = Profiles.parseProjectSettings(pieceText);
-  check('selected-model export carries the same 14 keys in order',
-    Object.keys(pieceParsed), Object.keys(expected));
-  check('selected-model export carries the same values, "%" included',
+  const pieceParsed = cooling(JSON.parse(pieceText));
+  check('selected-model export carries the same 14 cooling values, "%" included',
     Object.keys(expected).map((k) => pieceParsed[k]),
     Object.keys(expected).map((k) => expected[k]));
   check('selected-model project_settings.config is byte-identical to the plate export',
     pieceText, text);
 
-  const pieceModel = execFileSync('unzip', ['-p', pieceFile, NSO3MF.PART_MODEL], { encoding: 'utf8' });
+  const piece = geometry(pieceFile, 1);
   check('selected-model export holds exactly one object',
-    (pieceModel.match(/<object /g) || []).length, 1);
-  const pv = [...pieceModel.matchAll(/<vertex x="([-\d.]+)" y="([-\d.]+)" z="([-\d.]+)"/g)]
-    .map((m) => m.slice(1).map(Number));
+    (piece.model.match(/<object /g) || []).length, 1);
+  const pv = piece.all;
   check('selected-model has vertices', pv.length > 0, true);
   const pxs = pv.map((v) => v[0]), pys = pv.map((v) => v[1]), pzs = pv.map((v) => v[2]);
   check('selected-model rests on the plate (min Z = 0)', Math.min(...pzs) < 1e-6, true);

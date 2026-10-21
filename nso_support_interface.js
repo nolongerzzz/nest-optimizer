@@ -542,7 +542,8 @@
      without the sheet and 1.14 m for a 0.43 sheet outlined round its
      sliver); with thin walls off it prints nothing of it. So every support
      object carries both, SHEET_SLICER: wall_generator = classic (Bambu's
-     default is Arachne) and detect_thin_wall = 1, as object metadata in
+     default is Arachne) and detect_thin_wall = 1 (with top_shell_layers and
+     bottom_shell_layers 0, the rest of the support set), as object metadata in
      Metadata/model_settings.config (nso-3mf.js, an object's settings) -
      Bambu reads object metadata into the object's config for any vendor's
      3MF, and drops it when the file is imported as geometry only. NSO's
@@ -645,7 +646,11 @@
   var SHEET_UNDER = 0.95;      /* a line is this much of a bead, to the 0.01 mm: see LINE WIDTH */
   /* what the sheet needs of the slicer, written on every support object
      (Metadata/model_settings.config): see LINE WIDTH */
-  var SHEET_SLICER = { wall_generator: 'classic', detect_thin_wall: '1' };
+  /* every support object's per-object overrides, one set for all of them
+     (docs/BAMBU-PROJECT-EXPORT.md): the sheet's thin-wall pass (above), and
+     no top or bottom shells - a support is its walls and its sheet. Per-family
+     tuning waits for a print. */
+  var SHEET_SLICER = { wall_generator: 'classic', detect_thin_wall: '1', top_shell_layers: '0', bottom_shell_layers: '0' };
   var CELL_MM = 0.1;           /* the footprint raster */
   var SAMPLE_MM = 0.05;        /* along a line */
   var LEVEL_TOL_MM = 0.01;

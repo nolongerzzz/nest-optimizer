@@ -6413,3 +6413,46 @@ and `pose:drive` re-pinned where they pinned the old axis.
 - `?v=`: `app-rotate-handles.js` detents1 -> leantip1, `app-core.js` punchb16 ->
   leantip1, on the ticket's instruction. `testStepWeights` `rotate:handles`
   255000 -> 275000.
+
+### export-bambu-project: NSO's 3MF is Bambu Studio's project envelope (2026-10-21, Phase 0 of the export/print plan)
+
+Branched off `claude/supports-print-1` (#256, which changed `nso-3mf.js`);
+PR against `claude-wip` once #256 is merged.
+
+- **Template, not invention.** `fixtures/bambu-templates/a1mini-0.4/` holds
+  the owner's `project_test.3mf` (Bambu Studio 02.08.02.61, unsliced) and
+  `template.json` (printer, nozzle, `studio_version`, file, sha256).
+  `nso-3mf.js` `build3MF` now writes that project's envelope part for part.
+  Application is `BambuStudio-02.08.02.61`, the template's version, never
+  newer: the compatibility shim, on record in docs/BAMBU-PROJECT-EXPORT.md.
+  - Each piece is a `<components>` wrapper (object 2N) on
+    `/3D/Objects/object_N.model` (object 2N-1, the mesh centred on its own
+    origin); the build item places it.
+  - UUIDs are Studio's counters with its fixed suffixes.
+  - `project_settings.config` is the template's 581 keys, with NSO's 14
+    cooling keys on every filament slot.
+  - `model_settings.config` is in project shape: per-object overrides,
+    `<part>`, the template's plate block, `identify_id` per instance,
+    `<assemble>`.
+  - The thumbnails, `slice_info`, `filament_sequence`, `cut_information` and
+    `plate_1.json` are written as the template has them.
+  - `nso_profile.json` and `nso_scene.json` are kept.
+- **identify_id**: the object's own `identifyId`, else derived from its name
+  and face count, so it is stable across exports and moves. Collisions step
+  to the next free id. This closes GRISPR limitation 4.
+- **Support set** (`NSO_SupportInterface.SHEET.slicerSettings`):
+  `wall_generator classic`, `detect_thin_wall 1`, `top_shell_layers 0`,
+  `bottom_shell_layers 0`. Nothing else; per-family tuning waits for a print.
+- **Fallback**: no template (file://, no fetch, a refused template) writes the
+  old geometry-only envelope and says so (`envelope: 'nso'`,
+  `templateError`).
+- **Gates**:
+  - `export:bambu` is new: part for part against the template, plus the
+    version guard on a known-bad copy.
+  - `3mf:roundtrip`, `3mf:drive`, `3mf:scene` and `export:roundtrip` read the
+    new envelope.
+  - `support:test` checks the four-key set.
+  - `?v=bambu1` on `nso-3mf.js` and `nso_support_interface.js`.
+- **The real gate is the owner's, in Studio**: File > Open, with no
+  geometry-only warning; the override badge on supports; Cooling showing NSO's
+  values; then slice.
