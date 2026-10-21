@@ -23,9 +23,12 @@
  *      face_count, one normal_part each; the support object's overrides on it
  *      alone; the template's plate block; <assemble> matching the build
  *   5. project_settings.config: the template's keys in its order, its version
- *      and presets, NSO's 14 cooling values on every filament slot
+ *      and presets, NSO's 14 cooling values on every filament slot, and each
+ *      slot's different_settings_to_system naming the keys NSO changed (else
+ *      Studio loads the system preset and drops them)
  *   6. identify_id: on every instance, unique, the same across two exports of
- *      the same plate, an object's own id honoured
+ *      the same plate, an object's own id honoured (what NSO writes; Studio
+ *      labels its G-code with its own ids, docs/BAMBU-PROJECT-EXPORT.md)
  *   7. the version guard: the written Application tag is "BambuStudio-" + the
  *      fixture's recorded version; a template whose tag and record differ is
  *      refused (a known-bad copy, made and removed here) and the export falls
@@ -305,8 +308,25 @@ const hex8 = (n) => ('0000000' + (n >>> 0).toString(16)).slice(-8);
     JSON.stringify(Object.keys(ps)) === JSON.stringify(Object.keys(tSettings)));
   const cool = Object.keys(values);
   check('14 cooling keys overlaid', cool.length === 14 && cool.every((k) => k in tSettings), cool.length);
-  const others = Object.keys(tSettings).filter((k) => !cool.includes(k) && JSON.stringify(ps[k]) !== JSON.stringify(tSettings[k]));
+  const DIFFS = 'different_settings_to_system';
+  const others = Object.keys(tSettings).filter((k) => !cool.includes(k) && k !== DIFFS && JSON.stringify(ps[k]) !== JSON.stringify(tSettings[k]));
   check('every other key is the template\'s value', others.length === 0, others.join(', '));
+  /* Studio loads a filament slot whose different_settings_to_system entry is
+     empty as the system preset itself, dropping the project's values: the
+     owner's first open showed Generic PLA's own 0 s / 8 s. Each slot's entry
+     must name the keys NSO changed from the template's slot, merged with
+     what the template listed, sorted, ';'-joined; the process and printer
+     entries stay the template's. */
+  const slots = tSettings.filament_settings_id.length;
+  const wantDiffs = tSettings[DIFFS].map((d, j) => {
+    if (j === 0 || j === slots + 1) return d;
+    const keys = new Set(d ? d.split(';') : []);
+    cool.forEach((k) => { if (tSettings[k][j - 1] !== values[k]) keys.add(k); });
+    return [...keys].sort().join(';');
+  });
+  check(DIFFS + ' lists, per filament slot, the cooling keys NSO changed (' + JSON.stringify(ps[DIFFS]) + ')',
+    JSON.stringify(ps[DIFFS]) === JSON.stringify(wantDiffs) && wantDiffs.slice(1, slots + 1).every((d) => d.length > 0),
+    'want ' + JSON.stringify(wantDiffs));
   check('version, printer_model and preset ids are the template\'s',
     ['version', 'printer_model', 'printer_settings_id', 'print_settings_id', 'filament_settings_id']
       .every((k) => JSON.stringify(ps[k]) === JSON.stringify(tSettings[k])));

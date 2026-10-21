@@ -169,7 +169,8 @@ async function validateProfile(profileId, outDir) {
     gotKeys.length === wantKeys.length && gotKeys.every((k, i) => k === wantKeys[i]),
     gotKeys.length + ' keys read');
   const coolKeys = Object.keys(expected);
-  const otherDiff = wantKeys.filter((k) => !coolKeys.includes(k) &&
+  // different_settings_to_system names the keys NSO changed; export:bambu gates it.
+  const otherDiff = wantKeys.filter((k) => !coolKeys.includes(k) && k !== 'different_settings_to_system' &&
     JSON.stringify(raw[k]) !== JSON.stringify(tpl.settings[k]));
   check('every key NSO does not own is the template\'s value', otherDiff.length === 0, otherDiff.join(', '));
 

@@ -6439,7 +6439,7 @@ PR against `claude-wip` once #256 is merged.
   - `nso_profile.json` and `nso_scene.json` are kept.
 - **identify_id**: the object's own `identifyId`, else derived from its name
   and face count, so it is stable across exports and moves. Collisions step
-  to the next free id. This closes GRISPR limitation 4.
+  to the next free id. (It does not close GRISPR limitation 4: see the next entry.)
 - **Support set** (`NSO_SupportInterface.SHEET.slicerSettings`):
   `wall_generator classic`, `detect_thin_wall 1`, `top_shell_layers 0`,
   `bottom_shell_layers 0`. Nothing else; per-family tuning waits for a print.
@@ -6456,3 +6456,25 @@ PR against `claude-wip` once #256 is merged.
 - **The real gate is the owner's, in Studio**: File > Open, with no
   geometry-only warning; the override badge on supports; Cooling showing NSO's
   values; then slice.
+
+### export-bambu-project, after the owner's first open (2026-10-21)
+
+The owner's report:
+- **What held.** The export loaded clean, as a project, and the four
+  overrides held. The G-code shows the support's layer 1 as wall plus sparse
+  infill (no bottom surface), and the four sheet layers as about 405 mm of
+  outer wall each.
+- **Cooling was dropped.** Studio showed Generic PLA's own 0 s / 8 s, and
+  the slice used them, because each filament slot's
+  `different_settings_to_system` entry was empty. Studio loads a slot with an
+  empty entry as the system preset itself. `nso-3mf.js` now names the keys
+  NSO changes in each slot's entry, `export:bambu` gates it, and the tag is
+  `?v=bambu2`. Needs a re-open.
+- **`identify_id` does not reach the G-code.** NSO wrote 1098 / 8388; the
+  labels were 96 / 107, Studio's runtime ids. GRISPR limitation 4 stays open.
+  The sliced file's `slice_info.config` pairs each label with the object's
+  name.
+- **To watch:** `bottom_shell_layers 0` makes the 0.2 mm foot pads a 15 %
+  lattice, not solid.
+
+docs/BAMBU-PROJECT-EXPORT.md has the details.

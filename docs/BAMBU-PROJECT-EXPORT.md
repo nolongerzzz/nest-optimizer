@@ -76,7 +76,7 @@ Parts are written in the template's order. NSO's two parts go last.
 | `3D/3dmodel.model` | the template's root element (`xmlns:BambuStudio`, `requiredextensions="p"`) and its metadata in order. Application is the template's tag; CreationDate and ModificationDate are the export date; DesignerUserId is blank (it is the template owner's account). One `<object id="2N">` per piece holds one `<component>` pointing at `/3D/Objects/object_N.model` (object `2N-1`), identity transform. **No mesh.** `<build>` has one `<item objectid="2N">` per piece, whose translation is the piece's placement, `printable="1"` |
 | `3D/_rels/3dmodel.model.rels` | one relationship per object part |
 | `3D/Objects/object_N.model` | piece N's mesh **centred on its own origin** (its bounding-box centre, at the writer's 6 dp, so centre + vertex prints back to the vertex), object `2N-1`, `<build/>` |
-| `Metadata/project_settings.config` | the template's keys (581 for a1mini-0.4) in its order, with NSO's 14 cooling keys overlaid on **every filament slot** (the template has two). `version`, `printer_model` and the preset ids are the template's. Written as Studio writes it: 4-space JSON |
+| `Metadata/project_settings.config` | the template's keys (581 for a1mini-0.4) in its order, with NSO's 14 cooling keys overlaid on **every filament slot** (the template has two). Each filament slot's `different_settings_to_system` entry names the keys NSO changed from the template's slot (see *Cooling*). `version`, `printer_model` and the preset ids are the template's. Written as Studio writes it: 4-space JSON |
 | `Metadata/model_settings.config` | project shape. Per object: its name, then its own config in key order (the extruder, which is the template's `1`, plus any per-object overrides), `face_count`, and one `<part subtype="normal_part">` with name, identity `matrix`, `source_file` / `source_object_id` / `source_volume_id` / `source_offset_*`, and `mesh_stat`. The plate block's metadata is the template's (filament maps, thumbnail names), with one `<model_instance>` per piece: `object_id`, `instance_id` 0, **`identify_id`**. Then `<assemble>`, two items per object, the instance's transform the build item's |
 | `Metadata/cut_information.xml` | one `<object id="N">` per piece, uncut |
 | `Metadata/plate_1.json` | the template's fields. `bbox_objects` has one entry per piece: its first layer, meaning its faces lying on the plate, as `bbox` and `area`, plus its `identify_id`, the template's layer height and its name. `bbox_all` is their union. `first_layer_time` is 0, because NSO has not sliced; Studio rewrites the file when it slices |
@@ -100,9 +100,7 @@ same plate exports byte for byte the same.
 
 ### identify_id
 
-The template shows that Bambu reads `identify_id`: Studio keeps it as the
-instance's id and labels the object with it in G-code. NSO now writes one per
-instance:
+NSO writes one per instance, as the template carries it:
 
 - An object's own `identifyId` (a positive integer) is used when the caller
   passes one.
@@ -113,7 +111,14 @@ instance:
   copies of one piece get two ids.
 - `build3MF` reports the ids it wrote (`identifyIds`).
 
-This closes GRISPR limitation 4.
+**This does not close GRISPR limitation 4.** Studio does not label its
+G-code with these ids. On the owner's first slice, NSO wrote 1098 and 8388,
+and the G-code's `unique label id`s were 96 and 107: Studio's own runtime
+ids. The template never showed otherwise: its `identify_id`s were 136 and
+158, but its `plate_1.json` said 171 and 172. The way back from a label to a
+piece is the sliced file's `Metadata/slice_info.config`. It lists
+`<object identify_id="96" name="top_clip_x2" .../>` for each object, and the
+names are NSO's.
 
 ### Names
 
@@ -137,6 +142,46 @@ Nothing else. Per-family tuning waits for a print.
 
 The Supports card puts the set on each support model (`m.slicerSettings`), and
 both app exports carry it to the object's metadata.
+
+## Cooling: `different_settings_to_system`
+
+The first export opened clean, but Studio's Cooling tab showed Generic PLA's
+own values: pre-start fan time 0 s and the max-fan-speed layer time 8 s.
+NSO's values are 2 s and 6 s. The slice used 0 and 8 as well.
+
+The cause is `different_settings_to_system`. It is Studio's list, per preset,
+of the keys a project changed from that system preset:
+- one entry for the process, one for each filament slot, then one for the
+  printer;
+- the keys in each entry are joined by `;` and sorted.
+
+A filament slot whose entry is empty loads as the system preset itself, and
+the project's values for it are dropped. The template's filament entries
+were empty.
+
+NSO now adds every key it changes from the template's slot to that slot's
+entry (the template's filaments are system presets). For the default
+profile that is `pre_start_fan_time;slow_down_layer_time` on both slots.
+`export:bambu` gates it. The owner's re-open is the proof.
+
+## The owner's first open (2026-10-21)
+
+- **No geometry-only warning.** The project loaded clean.
+- **The four overrides held.** The support object shows them locked in, and
+  the G-code follows them:
+  - layer 1 of the support is outer wall plus sparse infill, with no bottom
+    surface;
+  - the sheet's four layers (z 12.8-13.4) are outer wall only, about 405 mm
+    each.
+- **Not ours:** Studio warns "top_clip_x2 has floating regions" because it
+  cannot see that a separate object carries the clip. The support's ▲ is
+  "Error: 3826 non-manifold edges", the same count #256 measured where the
+  support's parts meet without being welded.
+- **To watch on the print:** with `bottom_shell_layers 0`, the support's
+  0.2 mm foot pads are no longer solid. They print as an outline and a 15 %
+  lattice: 98 mm of wall and 202 mm of sparse infill on layer 1. If they
+  lift or let go, the support set's bottom shells need to come back, or the
+  pad needs more than one layer.
 
 ## The fallback
 

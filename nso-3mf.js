@@ -536,18 +536,37 @@
   }
 
   /** The template's project settings with NSO's cooling values on every
-   *  filament slot, pretty-printed the way Studio writes the file. */
+   *  filament slot, pretty-printed the way Studio writes the file.
+   *
+   *  different_settings_to_system is Studio's list, per preset (the process,
+   *  each filament slot, the printer; keys joined by ';', sorted), of the keys
+   *  the project changed from that system preset. A filament slot whose list
+   *  is empty loads as the system preset itself and its project values are
+   *  dropped: the owner's first open showed Generic PLA's own 0 s / 8 s, not
+   *  NSO's 2 s / 6 s. So every key NSO changes from the template's slot (the
+   *  template's filaments are system presets) joins that slot's list. */
   function overlayProjectSettings(tplSettings, values) {
     var problems = Profiles.validateValues(values);
     if (problems.length) {
       throw new Error('Refusing to write invalid cooling settings:\n  - ' + problems.join('\n  - '));
     }
     var out = JSON.parse(JSON.stringify(tplSettings));
+    var diffs = out.different_settings_to_system;
+    var slots = (out.filament_settings_id || []).length;
+    if (!Array.isArray(diffs) || diffs.length !== slots + 2) {
+      throw new Error('The template\'s different_settings_to_system is not process + ' + slots + ' filaments + printer');
+    }
     Object.keys(values).forEach(function (k) {
-      if (!Array.isArray(out[k]) || !out[k].length) {
+      if (!Array.isArray(out[k]) || out[k].length !== slots) {
         throw new Error('The template has no per-filament "' + k + '" to overlay');
       }
-      out[k] = out[k].map(function () { return values[k]; });
+      out[k] = out[k].map(function (was, i) {
+        if (was !== values[k]) {
+          var keys = diffs[i + 1] ? diffs[i + 1].split(';') : [];
+          if (keys.indexOf(k) === -1) diffs[i + 1] = keys.concat([k]).sort().join(';');
+        }
+        return values[k];
+      });
     });
     return JSON.stringify(out, null, 4) + '\n';
   }
@@ -572,8 +591,10 @@
   }
 
   /**
-   * identify_id per instance. Studio reads it back as the instance's id, the
-   * one its G-code labels the object with. An object's own identifyId (a
+   * identify_id per instance, as the template carries it. Studio does NOT
+   * label the G-code with it: the owner's first slice labelled NSO's 1098 /
+   * 8388 as 96 / 107, its own runtime ids (slice_info.config pairs each label
+   * with the object's name). An object's own identifyId (a
    * positive integer) is used when it has one; otherwise it is derived from
    * the piece's name and face count, so the same plate exports the same ids.
    * A collision steps to the next free id, in object order.
