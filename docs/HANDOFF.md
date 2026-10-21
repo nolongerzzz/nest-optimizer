@@ -6498,3 +6498,10 @@ The owner opened the v3 export (cooling fix, two-key support set) in Bambu
 Studio 02.08.02.61 and confirmed every setting: it loads as a project, the
 support carries its two overrides, and Cooling shows NSO's values. The PR
 opens against `claude-wip` once #256 merges.
+
+### export-bambu-project: rebased onto claude-wip 6f3354f (batch 19, #256 merged)
+
+The four commits of this branch now sit on `claude-wip` 6f3354f.
+- **Conflicts:** two, both append-only. `package.json` gets the
+  `export:bambu` weight note beside #259's; `HANDOFF.md` keeps both appends.
+- **Tags:** `nso-3mf.js` and `nso_support_interface.js` are `?v=bambu3`.
