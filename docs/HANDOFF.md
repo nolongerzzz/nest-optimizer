@@ -6296,8 +6296,9 @@ sheet drawn round its sliver).
 - **Gates**: `support:interface` holds the one region a piece, the loop's
   inside the only hole; NSO's slicer, with no thin-wall mode, must draw
   nothing of a sheet under a bead (no path, nothing broken off). `support:test`
-  checks the 0.40 width and the two settings. `export:roundtrip` checks that a
-  model's settings go out on its object alone.
+  checks the 0.40 width and the two settings; the clamp carries 175 tips in
+  area 1 (176 at 0.43, floor 161) and 45 of 45 in area 2. `export:roundtrip`
+  checks that a model's settings go out on its object alone.
 - **Export**: `npm run support:print-export` writes only
   `top_clip_x2_supports.3mf`, the card's export (0.40, both overrides). The
   width-matrix files are gone; `sheetWidthMm` still sets another width.

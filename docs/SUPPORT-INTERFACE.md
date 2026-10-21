@@ -199,7 +199,7 @@ sheet, a piece at a time:
 
 | area | ceiling | tips carried / under a sheet / cut at the gap / side | pieces (each a loop and a serpentine) | lines T / I1 | caps (at 2.5-4 mm), widths |
 | --- | --- | --- | --- | --- | --- |
-| 1 | z 72 flat (+ 45 deg chamfer 62-71, fillet 72-75) | 176 / 176 / 14 / 69 | four strips round the boss, stepped outlines 12.6 x 27.7, 21.0 x 31.9, 21.0 x 17.6, 21.8 x 46.2 mm | 87 / 130, 45 deg | 167 (142), 2.13-2.50 |
+| 1 | z 72 flat (+ 45 deg chamfer 62-71, fillet 72-75) | 175 / 176 / 14 / 69 (176 at 0.43) | four strips round the boss, stepped outlines 12.6 x 27.7, 21.0 x 31.9, 21.0 x 17.6, 21.8 x 46.2 mm | 87 / 130, 45 deg | 167 (142), 2.13-2.50 |
 | 2 | z 80 flat (a ring round the boss) | 45 / 45 / 0 / 0 | four strips, 5.0 x 16.8, 12.6 x 5.9, 12.6 x 11.8, 3.4 x 12.6 mm | 36 / 30, 63.43 deg | 37 (1), 1.29-2.50 |
 | 3 | z 0.8-2.0 (the bottom fillet, over the plate) | 0 / 0 / 0 / 27 | - | - | none: every tip is a side tip |
 | 4 | z 86 ridge | 3 / 3 / 0 / 0 | one rectangle, 3.36 x 8.40 mm | 3 / 9, 90 deg | 3 (3), 2.50 |
