@@ -36,10 +36,15 @@
      1. drag follows the mouse: the piece moved on >= 90 % of a 60-move pull
         (across plate 1, then over to plate 2) and of a 60-move drag on plate
         2; on the file, every move after the first of its shorter drags
-     2. orbit >= 30 fps: (a) on the file, the main thread's work per frame
-        <= 33 ms - the frame rate there is SwiftShader's, ~6 fps on tabletop's
-        200,000 lines whatever the code does; (b) on the small slice, where the
-        software GPU is not the limit, the frame rate itself
+     2. orbit: (a) on the file, the main thread's work per frame <= 33 ms -
+        the frame rate there is SwiftShader's, ~6 fps on tabletop's 200,000
+        lines whatever the code does; (b) on the small slice, the main thread's
+        work per frame <= 2 ms (0.5 - 0.6 ms measured); (c) the small slice's
+        frame rate over the file's >= ORBIT_RATIO_MIN. Not a frame rate
+        against a clock: both are drawn by the same software GPU on the same
+        box in the same run, so a starved runner slows both and the ratio
+        holds, where ">= 30 fps" went red on 3 of 7 CI runs (26.6, 26.7). Each
+        frame rate is still logged, as a FINDING, so drift shows.
      3. the selection pass (the pick) <= 16 ms
      4. the main viewport does not render while G-scope covers it
      5. once a piece is in hand no move holds the main thread past a frame
@@ -61,12 +66,25 @@ const ROOT_HERE = path.resolve(__dirname, '..');
 const TREE = path.resolve(process.env.NSO_GSCOPE_SPEED_ROOT || ROOT_HERE);
 const { withApp } = require(path.join(TREE, 'tools', 'nso_app_harness'));
 const LOCAL = path.join(ROOT_HERE, 'tools', 'fixtures-local', 'baseline.gcode.3mf');
-const FILE = path.resolve(fs.existsSync(LOCAL) ? LOCAL
-  : process.env.NSO_GSCOPE_SPEED_FILE || path.join(ROOT_HERE, 'fixtures', '3mf', 'tabletop.gcode.3mf'));
+const TABLETOP = path.join(ROOT_HERE, 'fixtures', '3mf', 'tabletop.gcode.3mf');
+const FILE = path.resolve(fs.existsSync(LOCAL) ? LOCAL : process.env.NSO_GSCOPE_SPEED_FILE || TABLETOP);
 const SMALL = path.join(ROOT_HERE, 'fixtures', '3mf', 'supportwithinsupport.gcode.3mf');
 const OUT = path.join(ROOT_HERE, 'tools', 'gscope-speed-out');
 const JSON_ONLY = process.argv.includes('--json');
 const FULL = process.argv.includes('--full') || !!process.env.NSO_GSCOPE_SPEED_FULL || FILE === LOCAL;
+
+/* Gate 2c's floor: the small slice's orbit frame rate over tabletop's, on
+   SwiftShader. RECORDED: 6.44, 6.80, 7.19, 7.22, 7.42 on CI (Tests #297 -
+   #302; #303 read up to 8.1); 7.59 on the 4-core cloud box alone, 8.2 - 9.6
+   there with another suite running beside it. A neighbour only ever pushed
+   it UP - tabletop's frames are raster-bound on all of SwiftShader's threads
+   and lose more to it than the small slice does - so a band either side of
+   one reference cannot hold (9.6 / 6.44 is 1.49; +-20 % spans 1.5) and the
+   gate is a floor: 20 % under the lowest reading. What it catches is the
+   small slice falling behind the renderer - the page's own work per frame
+   growing. It is tabletop's: on any other file (the user's, or
+   NSO_GSCOPE_SPEED_FILE) the ratio is logged, not gated. */
+const ORBIT_RATIO_MIN = 5.2;
 
 let fails = 0;
 const check = (name, cond, detail) => {
@@ -187,7 +205,7 @@ function clockSummary(c) {
   const ev = {};
   Object.keys(c.ev).forEach(k => { const a = c.ev[k]; ev[k] = { n: a.length, med: r1(med(a)), p90: r1(p90(a)), max: r1(Math.max(...a)) }; });
   return {
-    fps: r1(span ? (c.ts.length - 1) / span * 1000 : 0), frameMs: r1(med(iv)),
+    fps: r1(span ? (c.ts.length - 1) / span * 1000 : 0), fpsExact: span ? (c.ts.length - 1) / span * 1000 : 0, frameMs: r1(med(iv)),
     gsRenderMs: r1(med(c.gs)), mainRenders: c.main.length, mainRenderMs: r1(med(c.main)), frames: c.ts.length, ev
   };
 }
@@ -313,6 +331,14 @@ withApp(async (page, logs) => {
   fs.mkdirSync(OUT, { recursive: true });
   const R = { tree: TREE === ROOT_HERE ? 'this tree' : TREE, file: path.relative(ROOT_HERE, FILE), full: FULL };
 
+  /* ---------------------------------------------------- orbit, both files, back to back
+     Gate 2c is the ratio of these two frame rates, so they are measured with
+     as little between them as there can be: a box another suite starts or
+     stops on between them reads it wrong (11.4, locally, when the file's
+     pulls stood between them). The small slice is opened again below. */
+  R.small = { file: path.basename(SMALL), moves: await openSlice(page, SMALL) };
+  R.small.orbit = await orbit(page, 60);
+
   /* ---------------------------------------------------- the file: every main-thread number */
   R.moves = await openSlice(page, FILE);
   say('\n' + R.file + ' - ' + R.moves + ' moves, on ' + R.tree + (FULL ? ' (full: 60-move drags here too)' : ''));
@@ -344,9 +370,8 @@ withApp(async (page, logs) => {
   if (R.pull && R.pull.landed.pieces) R.plate2 = await plate2Drive(page, FULL ? 60 : 10);
   await page.screenshot({ path: path.join(OUT, 'speed-file.png') });
 
-  /* ---------------------------------------------------- the small committed slice: 60-move drags, the frame rate */
-  R.small = { file: path.basename(SMALL), moves: await openSlice(page, SMALL) };
-  R.small.orbit = await orbit(page, 60);
+  /* ---------------------------------------------------- the small committed slice again: its 60-move drags */
+  await openSlice(page, SMALL);
   R.small.pull = await pullDrive(page, 60);
   if (R.small.pull && R.small.pull.landed.pieces) R.small.plate2 = await plate2Drive(page, 60);
   await page.screenshot({ path: path.join(OUT, 'speed-small.png') });
@@ -381,17 +406,12 @@ withApp(async (page, logs) => {
     R.pull && R.plate2 && R.pull.followed >= R.pull.n - 1 && R.plate2.followed >= R.plate2.n - 1, R.pull && R.plate2 && (R.pull.followed + '/' + R.pull.n + ', ' + R.plate2.followed + '/' + R.plate2.n));
   check('2a. orbit: the main thread\'s work per frame <= 33 ms (30 fps) on ' + path.basename(FILE), R.orbit.cpuPerFrame <= 33,
     R.orbit.cpuPerFrame + ' ms; the frame rate here is the software GPU\'s, ' + R.orbit.fps + ' fps');
-  // 2b's absolute floor (>= 30 fps) is a logged finding, not a gate, for now: on a CI runner it reads the
-  // runner's speed (33.2 / 40.1 / 26.6 / 31.3 / 26.7 / 26.7 / 26.3 fps on unchanged G-scope code) while the
-  // main thread's work per frame and the small/big frame-rate ratio held on every run. Ticket ci-timing-gates
-  // replaces the floor with a frames-rendered measure.
-  const ratio = R.orbit.fps > 0 ? +(R.small.orbit.fps / R.orbit.fps).toFixed(1) : 0;
-  say('  finding 2b. orbit ' + R.small.orbit.fps + ' fps on ' + R.small.file + ' (' + (R.small.orbit.fps >= 30 ? 'at or above' : 'below') +
-    ' the 30 fps target; not a gate - ci-timing-gates)');
-  check('2b. orbit where the software GPU is not the limit (' + R.small.file + '): the main thread\'s work per frame <= 33 ms',
-    R.small.orbit.cpuPerFrame <= 33, R.small.orbit.cpuPerFrame + ' ms');
-  check('2b. ...and it orbits >= 4x as fast as ' + path.basename(FILE) + ' on the same renderer (the GPU, not the page, is what limits the big one)',
-    ratio >= 4, ratio + 'x (' + R.small.orbit.fps + ' / ' + R.orbit.fps + ' fps)');
+  const ratio = R.orbit.fpsExact ? +(R.small.orbit.fpsExact / R.orbit.fpsExact).toFixed(2) : 0;
+  say('  FINDING orbit on the clock: ' + R.small.orbit.fps + ' fps on ' + R.small.file + ', ' + R.orbit.fps + ' fps on ' + path.basename(FILE));
+  check('2b. orbit: the main thread\'s work per frame <= 2 ms on ' + R.small.file, R.small.orbit.cpuPerFrame <= 2, R.small.orbit.cpuPerFrame + ' ms');
+  if (FILE === TABLETOP) check('2c. orbit: ' + R.small.file + '\'s frame rate over ' + path.basename(FILE) + '\'s >= ' + ORBIT_RATIO_MIN,
+    ratio >= ORBIT_RATIO_MIN, ratio + ' (' + R.small.orbit.fps + ' / ' + R.orbit.fps + ' fps)');
+  else say('  FINDING 2c is tabletop\'s reference; on ' + path.basename(FILE) + ' the ratio is ' + ratio + ', not gated');
   check('3. the selection pass (the pick under the pointer) <= 16 ms', R.pick && R.pick.max <= 16, JSON.stringify(R.pick));
   const renders = R.idle.mainRenders + R.orbit.mainRenders + R.small.orbit.mainRenders;
   check('4. the main viewport does not render while G-scope covers it', renders === 0, renders + ' renders');

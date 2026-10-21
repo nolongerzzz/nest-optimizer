@@ -51,6 +51,43 @@ function check(name, cond, detail) {
 const fx = f => path.join(ROOT, f);
 const near = (a, b, tol) => Math.abs(a - b) <= tol;
 
+/* The scan's time is gated against this box's speed right now, not against
+   seconds: a fixed amount of pure JS work - triangle normals from a typed
+   array, binned into a Map grid, the scan's own kind of work - run in this
+   process immediately before it. A box starved by another suite slows both,
+   so their ratio holds where "under 2 s" did not (red twice locally under
+   load). One untimed pass first, so the timed passes run warm, as the scan
+   does: detectOverhangs has run on four files before it.
+   RECORDED on the 4-core cloud box: 3.46 - 3.97 loops alone, 3.40 - 4.80
+   with another suite beside it (the scan 989 - 1642 ms on the clock). 8 is
+   twice the box alone, the headroom 2 s gave the ~1 s scan; one ray per
+   triangle, brute force (169 s), is ~470. */
+const SCAN_RATIO_MAX = 8;
+function calibrate() {
+  const N = 200000, PASSES = 40;
+  const v = new Float64Array(N * 9);
+  let s = 12345, acc = 0;
+  for (let i = 0; i < v.length; i++) { s = (s * 1103515245 + 12345) >>> 0; v[i] = s / 4294967296 * 100; }
+  const pass = p => {
+    const grid = new Map();
+    for (let t = 0; t < N; t++) {
+      const o = t * 9;
+      const ax = v[o + 3] - v[o], ay = v[o + 4] - v[o + 1], az = v[o + 5] - v[o + 2];
+      const bx = v[o + 6] - v[o], by = v[o + 7] - v[o + 1], bz = v[o + 8] - v[o + 2];
+      const nx = ay * bz - az * by, ny = az * bx - ax * bz, nz = ax * by - ay * bx;
+      const k = (Math.floor(v[o] / 2) + p) * 4096 + Math.floor(v[o + 1] / 2);
+      grid.set(k, (grid.get(k) || 0) + nz / (Math.sqrt(nx * nx + ny * ny + nz * nz) || 1));
+    }
+    for (const x of grid.values()) acc += x;
+  };
+  pass(-1);
+  const t0 = performance.now();
+  for (let p = 0; p < PASSES; p++) pass(p);
+  const ms = performance.now() - t0;
+  if (!isFinite(acc)) throw new Error('calibration loop: ' + acc);    // used, so it is not optimised away
+  return { ms };
+}
+
 /* ---- shapes built here, so the arithmetic is checkable by hand ---------- */
 
 function box(lo, hi) {
@@ -188,9 +225,11 @@ console.log('\n=== 2. DETECTION on real fixtures ===');
 {
   const f = 'fixtures/tape_on-edge-single-B101_rounded_v8_FINAL.stl';
   const soup = readSTL(fx(f));
-  const t0 = Date.now();
+  const cal = calibrate();
+  const t0 = performance.now();
   const d = SA.detectOverhangs(soup, { skipList: [] });
-  const ms = Date.now() - t0;
+  const ms = performance.now() - t0;
+  const ratio = ms / cal.ms;
   check(`${f}: a real 32862-triangle part, scanned`, d.ok, d.reason);
   check('tape: the biggest unsupported region is the on-edge underside, ~1188 mm^2 at ~18 mm up',
     d.regions.length > 0 && near(d.regions[0].areaMm2, 1187.86, 0.5) && near(d.regions[0].dropMm, 18.04, 0.05),
@@ -198,8 +237,9 @@ console.log('\n=== 2. DETECTION on real fixtures ===');
   check('tape: 5204 downward faces reduce to ' + d.trisFlagged + ' genuinely unsupported',
     d.trisDownward === 5204 && d.trisFlagged < d.trisDownward,
     `downward ${d.trisDownward}, self-supported ${d.trisSelfSupported}, on the plate ${d.trisOnPlate}`);
-  check('tape: the whole scan is under 2 s (one ray per triangle, brute force, is 169 s)',
-    ms < 2000, ms + ' ms');
+  console.log(`  FINDING tape: the scan took ${Math.round(ms)} ms on the clock; the calibration loop ${Math.round(cal.ms)} ms`);
+  check(`tape: the whole scan is under ${SCAN_RATIO_MAX} calibration loops (one ray per triangle, brute force, is ~470)`,
+    ratio < SCAN_RATIO_MAX, ratio.toFixed(2) + ' loops');
 }
 
 console.log('\n=== 3. The vertical-ray grid is exactly the brute-force answer ===');
