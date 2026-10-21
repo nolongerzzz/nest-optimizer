@@ -32,6 +32,7 @@
     "tree:interface": "node tools/nso_support_interface_check.js",
     "support:interface": "node tools/nso_support_sheet_check.js",
     "support:shells": "node tools/nso_support_shells_check.js",
+    "support:curved": "node tools/nso_support_curved_check.js",
     "support:interface-export": "node tools/nso_support_sheet_check.js --export",
     "support:print-export": "node tools/nso_supports_print_export.js",
     "tree:round-tall": "node tools/nso_support_tree_round_check.js --tall",
@@ -526,6 +527,7 @@
     "tree:interface",
     "support:interface",
     "support:shells",
+    "support:curved",
     "tree:round-tall",
     "tree:round-tall-gecko",
     "wire:extend",
@@ -627,7 +629,10 @@
     "  supports-angle-default's (#263) 13.6s / 13.2s for its new section 13).",
     "  gcode3mf:test 3200 (1.83s on the cloud box x 1.7, rounded up: it",
     "  re-packages the 1.6 MB reference .gcode.3mf several times and reads it",
-    "  back through G-scope's import; gcode3mf-packager, #270)."
+    "  back through G-scope's import; gcode3mf-packager, #270).",
+    "  support:curved 46000 (27s on the cloud box x 1.7, rounded up: the arc",
+    "  built at 35 deg, its slice, the coupon rebuilt, and the card in Chromium",
+    "  at 60 deg; supports-curved-sheet, #265)."
   ],
   "testStepWeightsSource": "Tests #297-#305 SUMMARY tables, read 2026-10-22 (ci-stability): fresh, runner-normalised means of every shard - testStepWeightsNote has the method",
   "testStepWeights": {
@@ -843,6 +848,7 @@
     "tree:interface": 39200,
     "support:interface": 184400,
     "support:shells": 1229300,
+    "support:curved": 46000,
     "tree:round-tall": 2200,
     "tree:round-tall-gecko": 5400,
     "wire:extend": 10750,

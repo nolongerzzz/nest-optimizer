@@ -125,7 +125,10 @@
          optionally with regionId and key) planned instead of detecting.
    Every plan.trunks[i] carries regionIds; every solid(plan).solids[i]
    carries beacons (ids), regionIds and landing.
-   parts(plan, { interface: true }) (and solid()): every tip that meets the
+   parts(plan, { interface: true }) (and solid()): a tip a STAIR holds by
+         itself (sheet()'s mode 'drop', docs/SUPPORT-INTERFACE.md section 7)
+         is not built, nor any member that holds only such tips; every
+         other tip that meets the
          part ends in a flat cap 2.5 - 4 mm across under
          nso_support_interface.js's SHEET - 2 transition and 2 interface
          layers at 0.84 mm, each a loop and a serpentine inside it, on the
@@ -1767,8 +1770,9 @@
         counts: plan.counts, reason: plan.reason, failed: plan.failed, tips: plan.tips, tipLog: tipLog, cap: plan.cap,
         levels: plan.levels.map(function (L) {
           return { id: L.id, zTop: L.zTop, zBase: L.zBase, zCap: L.zCap, tips: L.tips, caps: L.caps, lines: L.lines,
-                   minDistanceMm: L.minDistanceMm, solvedDropMm: L.solvedDropMm,
+                   minDistanceMm: L.minDistanceMm, solvedDropMm: L.solvedDropMm, stair: L.stair, held: L.held,
                    layers: L.layers.map(function (x) { return { role: x.role, angleDeg: x.angleDeg, z0: x.z0, z1: x.z1, lines: x.lines, lengthMm: x.lengthMm,
+                                                                widthMm: x.widthMm, overlapMm: x.overlapMm, cells: x.cells,
                                                                 linesMm: x.linesMm, loopMm: x.loopMm, pieces: (x.pieces || []).map(function (q) { return { kind: q.kind, sizeMm: q.sizeMm, areaMm2: q.areaMm2, perimMm: q.perimMm, caps: q.caps, lines: q.lines }; }), shortestMm: x.shortestMm, paths: x.paths }; }) };
         })
       };
@@ -1808,10 +1812,15 @@
     }
     /* One trunk's parts: null once swept, { ok: false, reason } when a member
        would not sweep. */
+    /* A TIP A STAIR HOLDS (sheet()'s THE STAIR: mode 'drop') is not built,
+       and neither is a member that holds only such tips, nor a stub to one */
+    function dropped(b) { return !!(sh && b != null && sh.byBeacon[b] && sh.byBeacon[b].mode === 'drop'); }
+    function leftOut(m) { return !!(sh && m.beacons && m.beacons.length && m.beacons.every(dropped)); }
     function step(t) {
       var tr = p.trunks[t], parts = [], fingers = [];
       for (var i = 0; i < tr.members.length; i++) {
         var m = p.members[tr.members[i]];
+        if (leftOut(m)) continue;
         var ms = sh && m.beacon != null && sh.byBeacon[m.beacon] ? sh.member(m) : memberSolid(P, m, foot);
         if (!ms.ok) return { ok: false, reason: ms.reason };
         m.points = ms.points;
@@ -1827,7 +1836,7 @@
           parts.push({ soup: boxSoup([a[0] - h, a[1] - h, m.pad.z0], [a[0] + h, a[1] + h, m.pad.z1]) });
         }
         p.stubs.forEach(function (s) {
-          if (s.member !== m.id) return;
+          if (s.member !== m.id || dropped(s.beacon)) return;
           /* Started AT the pickup point: it lies on the column's axis, inside
              both the column it leaves and the one below, and is no vertex of
              either. Run back a quarter side instead, the stub's start landed
@@ -1903,7 +1912,8 @@
         sh.plan.levels.forEach(function (L) {
           /* the trunks that carry its tips: what it is joined to */
           var carriers = [];
-          L.tips.forEach(function (ti) {
+          /* a stair is joined to the trunks it holds by itself as well: their spots are its */
+          L.tips.concat(L.held || []).forEach(function (ti) {
             var b = sh.plan.tips[ti].beacon;
             p.trunks.forEach(function (tr, k) { if (tr.beacons.indexOf(b) >= 0 && carriers.indexOf(k) < 0) carriers.push(k); });
           });
@@ -2024,7 +2034,7 @@
     var chain = Promise.resolve();
     var sheets = tp.trunks.filter(function (tr) { return tr.sheet != null; });
     tp.trunks.forEach(function (tr) {
-      if (tr.sheet != null) return;
+      if (tr.sheet != null || !tr.parts.length) return;
       var acc = null;
       tr.parts.forEach(function (part, k) {
         chain = chain.then(function () {
