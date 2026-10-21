@@ -189,6 +189,16 @@ profile that is `pre_start_fan_time;slow_down_layer_time` on both slots.
   spaghetti. The earlier print, with only the two thin-wall overrides, stood
   on a solid pad. The owner chose to go back to those two.
 
+## The owner's second open (2026-10-21): confirmed
+
+`top_clip_x2_supports_v3.3mf` carries the cooling fix and the two-key support
+set. In Bambu Studio 02.08.02.61 the owner confirmed every setting:
+- File > Open loads it as a project, with no geometry-only warning;
+- the support object carries its two overrides;
+- Cooling shows NSO's values.
+
+The real gate holds. The two-key set printed before, on #256's coupon.
+
 ## The fallback
 
 When the template cannot be read, `build3MF` writes NSO's original

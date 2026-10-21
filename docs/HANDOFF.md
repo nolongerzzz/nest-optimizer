@@ -6491,3 +6491,10 @@ docs/BAMBU-PROJECT-EXPORT.md has the details.
   dropped.
 - **Tags:** `nso_support_interface.js?v=bambu2`. `support:test`,
   `export:bambu` and `export:roundtrip` check the two-key set.
+
+### export-bambu-project: the owner's Studio gate holds (2026-10-21)
+
+The owner opened the v3 export (cooling fix, two-key support set) in Bambu
+Studio 02.08.02.61 and confirmed every setting: it loads as a project, the
+support carries its two overrides, and Cooling shows NSO's values. The PR
+opens against `claude-wip` once #256 merges.
