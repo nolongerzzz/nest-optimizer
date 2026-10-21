@@ -228,10 +228,10 @@ withApp(async (page, logs) => {
   await page.evaluate(() => { const e = document.getElementById('export-format'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   await page.selectOption('#export-format', '3mf');
   /* a model's own slicer settings (the Supports card sets them on its
-     supports: wall_generator = classic, detect_thin_wall = 1, no top or
-     bottom shells) ride out as that object's metadata in model_settings.config;
-     B carries them here, A none */
-  const SLICER = { wall_generator: 'classic', detect_thin_wall: '1', top_shell_layers: '0', bottom_shell_layers: '0' };
+     supports: wall_generator = classic, detect_thin_wall = 1) ride out as
+     that object's metadata in model_settings.config; B carries them here,
+     A none */
+  const SLICER = { wall_generator: 'classic', detect_thin_wall: '1' };
   await page.evaluate(s => { const p = state.placed[1]; const m = state.models.find(x => x.id === p.sourceId); m.slicerSettings = s; }, SLICER);
   files.plate3MF = await download(page, '#btn-export-stl', tmp);
   await page.evaluate(() => { state.models.forEach(m => { delete m.slicerSettings; }); });

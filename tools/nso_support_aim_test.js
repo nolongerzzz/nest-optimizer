@@ -572,8 +572,8 @@ async function coupon() {
   const want = Math.round(TH.floorFor() * SI.SHEET.under * 100) / 100;
   check('the sheet\'s lines are 0.95 of a bead, 0.40 mm at a 0.4 nozzle',
     want === 0.4 && sheets.every(S => S.widthMm === want), sheets.map(S => S.widthMm).join(', ') + ` mm (bead ${TH.floorFor()})`);
-  check('every support object asks for the classic wall generator and thin walls (the sheet is a thin wall), and no top or bottom shells',
-    JSON.stringify(SI.SHEET.slicerSettings) === JSON.stringify({ wall_generator: 'classic', detect_thin_wall: '1', top_shell_layers: '0', bottom_shell_layers: '0' }), JSON.stringify(SI.SHEET.slicerSettings));
+  check('every support object asks for the classic wall generator and thin walls (the sheet is a thin wall), and nothing else',
+    JSON.stringify(SI.SHEET.slicerSettings) === JSON.stringify({ wall_generator: 'classic', detect_thin_wall: '1' }), JSON.stringify(SI.SHEET.slicerSettings));
 }
 
 coupon().catch(err => { check('the coupon builds', false, (err && err.stack) || String(err)); }).then(() => {

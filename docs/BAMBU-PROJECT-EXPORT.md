@@ -135,10 +135,13 @@ Every support object carries one set: `NSO_SupportInterface.SHEET.slicerSettings
 | --- | --- | --- |
 | `wall_generator` | `classic` | the sheet's thin-wall pass (docs/SUPPORT-INTERFACE.md) |
 | `detect_thin_wall` | `1` | the sheet's thin-wall pass |
-| `top_shell_layers` | `0` | a support is its walls and its sheet: no shells |
-| `bottom_shell_layers` | `0` | as above |
 
 Nothing else. Per-family tuning waits for a print.
+
+`top_shell_layers 0` and `bottom_shell_layers 0` were in the set for the first
+print, and it failed from layer 1 (see *The owner's first open*). The set went
+back to these two, the ones the earlier successful print had. A shell
+override comes back only with a print behind it.
 
 The Supports card puts the set on each support model (`m.slicerSettings`), and
 both app exports carry it to the object's metadata.
@@ -167,7 +170,8 @@ profile that is `pre_start_fan_time;slow_down_layer_time` on both slots.
 ## The owner's first open (2026-10-21)
 
 - **No geometry-only warning.** The project loaded clean.
-- **The four overrides held.** The support object shows them locked in, and
+- **The four overrides then in the set held.** The support object showed
+  them locked in, and
   the G-code follows them:
   - layer 1 of the support is outer wall plus sparse infill, with no bottom
     surface;
@@ -177,11 +181,13 @@ profile that is `pre_start_fan_time;slow_down_layer_time` on both slots.
   cannot see that a separate object carries the clip. The support's ▲ is
   "Error: 3826 non-manifold edges", the same count #256 measured where the
   support's parts meet without being welded.
-- **To watch on the print:** with `bottom_shell_layers 0`, the support's
-  0.2 mm foot pads are no longer solid. They print as an outline and a 15 %
-  lattice: 98 mm of wall and 202 mm of sparse infill on layer 1. If they
-  lift or let go, the support set's bottom shells need to come back, or the
-  pad needs more than one layer.
+- **The print failed from layer 1.** With `bottom_shell_layers 0`, the
+  support's 0.2 mm foot pads were not solid: an outline and a 15 % lattice,
+  98 mm of wall and 202 mm of sparse infill on layer 1. On layer 2, only
+  18.5 % of the support's extrusion lies over a layer-1 line (outer wall
+  13 %, inner wall 24 %). The trunks' walls started in mid-air and went to
+  spaghetti. The earlier print, with only the two thin-wall overrides, stood
+  on a solid pad. The owner chose to go back to those two.
 
 ## The fallback
 

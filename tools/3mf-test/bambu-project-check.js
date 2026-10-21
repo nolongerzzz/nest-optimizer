@@ -278,8 +278,8 @@ const hex8 = (n) => ('0000000' + (n >>> 0).toString(16)).slice(-8);
   check('the support object carries the support set on itself, in key order with its extruder (' +
         Object.keys(SI.SHEET.slicerSettings).join(', ') + ')',
     JSON.stringify(own(4)) === JSON.stringify(supportKeys), JSON.stringify(own(4)));
-  check('the support set is wall_generator classic, detect_thin_wall 1, top and bottom shells 0',
-    JSON.stringify(SI.SHEET.slicerSettings) === JSON.stringify({ wall_generator: 'classic', detect_thin_wall: '1', top_shell_layers: '0', bottom_shell_layers: '0' }));
+  check('the support set is wall_generator classic and detect_thin_wall 1, nothing else (shells 0 failed on the print)',
+    JSON.stringify(SI.SHEET.slicerSettings) === JSON.stringify({ wall_generator: 'classic', detect_thin_wall: '1' }));
   check('the pieces without overrides carry only their extruder',
     JSON.stringify(own(2)) === '["extruder=1"]' && JSON.stringify(own(6)) === '["extruder=1"]', JSON.stringify([own(2), own(6)]));
   const plateHead = (x) => (x.match(/<plate>([\s\S]*?)<model_instance>/) || [])[1];

@@ -6478,3 +6478,16 @@ The owner's report:
   lattice, not solid.
 
 docs/BAMBU-PROJECT-EXPORT.md has the details.
+
+### export-bambu-project: the shell overrides failed on the print (2026-10-21)
+
+- **The print failed from layer 1.** Under `bottom_shell_layers 0` the foot
+  pads printed as an outline and a 15 % lattice. On layer 2, only 18.5 % of
+  the support's extrusion lies over a layer-1 line, so the trunks started in
+  mid-air.
+- **The set is back to two.** The owner chose to return to the two
+  overrides of the earlier successful print: `wall_generator classic`,
+  `detect_thin_wall 1`. `top_shell_layers` / `bottom_shell_layers` are
+  dropped.
+- **Tags:** `nso_support_interface.js?v=bambu2`. `support:test`,
+  `export:bambu` and `export:roundtrip` check the two-key set.

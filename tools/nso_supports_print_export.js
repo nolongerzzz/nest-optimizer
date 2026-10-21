@@ -16,10 +16,8 @@
                                 lines 0.40 mm (0.95 of a bead), and on every
                                 support object, as the card sets them
                                 (NSO_SupportInterface.SHEET.slicerSettings),
-                                wall_generator = classic, detect_thin_wall
-                                = 1, top_shell_layers = 0 and
-                                bottom_shell_layers = 0 in
-                                Metadata/model_settings.config - the
+                                wall_generator = classic and detect_thin_wall
+                                = 1 in Metadata/model_settings.config - the
                                 thin-wall pass prints each line once (the
                                 width matrix settled it: 0.40 printed in one
                                 pass on the owner's A1 mini). Open it in
