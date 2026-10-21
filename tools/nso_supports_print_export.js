@@ -12,16 +12,17 @@
    that stand on one pad joined into one. Named as the card names them.
 
    Writes, to tools/supports-print-out/ (git-ignored):
-     top_clip_x2_supports.3mf            the export as the card makes it:
-                                         0.43 mm lines, no thin-wall
-                                         override (a 0.43 wall is wider than
-                                         a bead: nothing for it to detect)
-     top_clip_x2_supports_w040_thinwall.3mf  THE WIDTH MATRIX: the sheet's
-     top_clip_x2_supports_w036_thinwall.3mf  lines 0.40 / 0.36 / 0.30 mm wide
-     top_clip_x2_supports_w030_thinwall.3mf  (sheetWidthMm), detect_thin_wall
-                                         = 1 on the supports: under one bead,
-                                         for Bambu's thin-wall pass (NSO's
-                                         own slicer draws none of them)
+     top_clip_x2_supports.3mf   the export as the card makes it: the sheet's
+                                lines 0.40 mm (0.95 of a bead), and on every
+                                support object, as the card sets them
+                                (NSO_SupportInterface.SHEET.slicerSettings),
+                                wall_generator = classic and detect_thin_wall
+                                = 1 in Metadata/model_settings.config - the
+                                thin-wall pass prints each line once (the
+                                width matrix settled it: 0.40 printed in one
+                                pass on the owner's A1 mini). Open it in
+                                Bambu Studio as a PROJECT: imported as
+                                geometry only, Bambu drops object settings.
 
    Slice any in Bambu Studio, save the .gcode.3mf, and read the sheet with
      node tools/nso_slicer_audit.js --sheet sliced.gcode.3mf --export tools/supports-print-out/top_clip_x2_supports.3mf
@@ -35,7 +36,6 @@ const ROOT = path.join(__dirname, '..');
 const OUT = path.join(ROOT, 'tools', 'supports-print-out');
 const { readSTL } = require('./nso_stl_io.js');
 const NSO3MF = require(path.join(ROOT, 'nso-3mf.js'));
-const R = require(path.join(ROOT, 'nso-3mf-read.js'));
 
 const ctx = {
   Math, Map, Set, console, Array, Object, Number, String, JSON, isFinite, Promise, Date, WeakMap,
@@ -48,14 +48,14 @@ for (const f of ['nso_thickness.js', 'nso_support_beacons.js', 'nso_support_aim.
                  'nso_support_interface.js']) {
   vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), ctx, { filename: f });
 }
-const SA = ctx.NSO_SupportAim, ST = ctx.NSO_SupportTree, GP = ctx.NSO_SupportGridpack;
+const SA = ctx.NSO_SupportAim, ST = ctx.NSO_SupportTree, GP = ctx.NSO_SupportGridpack, SI = ctx.NSO_SupportInterface;
 const CARD = { skipList: [], angleDeg: 60, occluders: [], style: 'tree', restOnModel: false, sideMm: 1.2 };
 /* app-supports-card.js PARTS_OPTS */
 const PARTS = { interface: true, foldSheets: false, footPads: 'shared' };
 const NAME = 'top_clip_x2';
 
-/* the build at one sheet line width (null: the card's), its objects named as the card names them */
-async function build(piece, widthMm) {
+/* the build at the card's defaults, its objects named as the card names them */
+async function build(piece) {
   const t0 = Date.now();
   const det = SA.detectOverhangs(piece, { skipList: [], angleDeg: CARD.angleDeg, occluders: [] });
   if (!det.ok) throw new Error(det.reason);
@@ -66,7 +66,7 @@ async function build(piece, widthMm) {
     const p = ST.planTree(piece, Object.assign({}, CARD, { beacons: bs }));
     if (!p.ok) { console.log(`area ${rg.id + 1}: ${p.reason}`); continue; }
     plateZ = p.plateZ;
-    const tp = await GP.parts(p, Object.assign({}, PARTS, widthMm == null ? {} : { sheetWidthMm: widthMm }));
+    const tp = await GP.parts(p, PARTS);
     if (!tp.ok) throw new Error(`area ${rg.id + 1}: ${tp.reason}`);
     areas.push({ rid: rg.id, p, tp, sh: GP.shells(p, tp) });
   }
@@ -77,58 +77,35 @@ async function build(piece, widthMm) {
   let n = 0;
   const objects = [{ name: NAME, soup: piece }];
   areas.forEach((a, ai) => sf.objects.filter(o => o.from[0][0] === ai).forEach(o => {
-    objects.push({ name: `${NAME} - support ${a.rid + 1}.${++n} (Tree)`, soup: o.soup, support: true });
+    objects.push({ name: `${NAME} - support ${a.rid + 1}.${++n} (Tree)`, soup: o.soup, settings: Object.assign({}, SI.SHEET.slicerSettings) });
   }));
   return { areas, sf, ms, objects };
 }
-/* the 3MF's bytes, with detect_thin_wall = 1 on the support objects when thin */
-async function write(file, objects, thin) {
-  const indexed = objects.map(o => { const m = NSO3MF.indexTriangleSoup(Array.from(o.soup)); return { name: o.name, vertices: m.vertices, triangles: m.triangles }; });
+/* the 3MF's bytes: each object with its own settings, as the card's export writes them */
+async function write(file, objects) {
+  const indexed = objects.map(o => { const m = NSO3MF.indexTriangleSoup(Array.from(o.soup)); return { name: o.name, vertices: m.vertices, triangles: m.triangles, settings: o.settings }; });
   const built = await NSO3MF.build3MF({ objects: indexed, plateName: 'Bambu A1 Mini' });
-  if (!thin) { fs.writeFileSync(file, Buffer.from(built.bytes)); return; }
-  const zip = R.openZip(built.bytes), dec = new TextDecoder(), enc = new TextEncoder();
-  const entries = [];
-  for (const name of zip.names()) {
-    let data = await zip.read(name);
-    if (name === NSO3MF.PART_MODEL_SETTINGS) {
-      let xml = dec.decode(data);
-      objects.forEach((o, i) => {
-        if (!o.support) return;
-        const open = `  <object id="${i + 1}">\n`;
-        xml = xml.replace(open, open + '    <metadata key="detect_thin_wall" value="1"/>\n');
-      });
-      data = enc.encode(xml);
-    }
-    entries.push({ name, data });
-  }
-  fs.writeFileSync(file, Buffer.from(await NSO3MF.buildZip(entries)));
+  fs.writeFileSync(file, Buffer.from(built.bytes));
 }
 
 (async () => {
   const piece = readSTL(path.join(ROOT, 'fixtures', 'supports', 'top_clip_x2_coupon.stl'));
   fs.mkdirSync(OUT, { recursive: true });
-  const runs = [{ w: null, files: [['_supports.3mf', false]] },
-                { w: 0.40, files: [['_supports_w040_thinwall.3mf', true]] },
-                { w: 0.36, files: [['_supports_w036_thinwall.3mf', true]] },
-                { w: 0.30, files: [['_supports_w030_thinwall.3mf', true]] }];
-  for (const run of runs) {
-    const b = await build(piece, run.w);
-    const S0 = b.areas[0] && b.areas[0].tp.sheet;
-    console.log(`${NAME}, sheet lines ${S0 ? S0.widthMm : '-'} mm: built in ${b.ms} ms - ${b.sf.reason}`);
-    b.areas.forEach(a => {
-      const S = a.tp.sheet;
-      console.log(`  area ${a.rid + 1}: ${a.p.reason} ${S ? S.reason : ''}`);
-      (S ? S.levels : []).forEach(L => {
-        const ws = L.caps.map(c => c.w);
-        console.log(`    sheet at ${L.zTop.toFixed(3)} (z_cap ${L.zCap.toFixed(3)}): ${L.caps.length} caps ${Math.min(...ws).toFixed(2)} - ${Math.max(...ws).toFixed(2)} mm; ` +
-          `loop ${L.layers[0].loopMm.map(v => v.toFixed(2)).join(' x ')} mm, ` +
-          L.layers.map(x => `${x.role[0].toUpperCase()} ${x.lines} lines of ${x.shortestMm.toFixed(2)} mm at ${x.angleDeg.toFixed(1)} deg`).join(', '));
-      });
+  const b = await build(piece);
+  const S0 = b.areas[0] && b.areas[0].tp.sheet;
+  console.log(`${NAME}, sheet lines ${S0 ? S0.widthMm : '-'} mm: built in ${b.ms} ms - ${b.sf.reason}`);
+  b.areas.forEach(a => {
+    const S = a.tp.sheet;
+    console.log(`  area ${a.rid + 1}: ${a.p.reason} ${S ? S.reason : ''}`);
+    (S ? S.levels : []).forEach(L => {
+      const ws = L.caps.map(c => c.w);
+      console.log(`    sheet at ${L.zTop.toFixed(3)} (z_cap ${L.zCap.toFixed(3)}): ${L.caps.length} caps ${Math.min(...ws).toFixed(2)} - ${Math.max(...ws).toFixed(2)} mm; ` +
+        `loop ${L.layers[0].loopMm.map(v => v.toFixed(2)).join(' x ')} mm, ` +
+        L.layers.map(x => `${x.role[0].toUpperCase()} ${x.lines} lines of ${x.shortestMm.toFixed(2)} mm at ${x.angleDeg.toFixed(1)} deg`).join(', '));
     });
-    for (const [suffix, thin] of run.files) {
-      const file = path.join(OUT, NAME + suffix);
-      await write(file, b.objects, thin);
-      console.log('  wrote ' + path.relative(ROOT, file) + (thin ? '   (detect_thin_wall = 1 on the supports)' : ''));
-    }
-  }
+  });
+  const file = path.join(OUT, NAME + '_supports.3mf');
+  await write(file, b.objects);
+  console.log('  wrote ' + path.relative(ROOT, file) + '   (on every support: ' +
+    Object.keys(SI.SHEET.slicerSettings).map(k => k + ' = ' + SI.SHEET.slicerSettings[k]).join(', ') + ')');
 })().catch(err => { console.error(err); process.exit(1); });

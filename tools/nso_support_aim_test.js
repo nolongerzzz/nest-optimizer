@@ -567,6 +567,13 @@ async function coupon() {
   const sf = GP.shareFeet(builds.map(b => ({ solids: b.solids })), piece, { plateZ });
   check('one pad under the slab\'s and the leg\'s trees, and so ONE support (Bambu reported a layer-1 conflict between two)',
     sf.ok && sf.pads === 1 && sf.objects.length === 1 && sf.clustersSplit === 0, sf.ok ? sf.reason : sf.reason);
+  /* the line: 0.95 of a bead, to the 0.01 mm - 0.40 at a 0.4 nozzle, under
+     the 0.42 bead, for the thin-wall pass the support object asks for */
+  const want = Math.round(TH.floorFor() * SI.SHEET.under * 100) / 100;
+  check('the sheet\'s lines are 0.95 of a bead, 0.40 mm at a 0.4 nozzle',
+    want === 0.4 && sheets.every(S => S.widthMm === want), sheets.map(S => S.widthMm).join(', ') + ` mm (bead ${TH.floorFor()})`);
+  check('every support object asks for the classic wall generator and thin walls (the sheet is a thin wall)',
+    JSON.stringify(SI.SHEET.slicerSettings) === JSON.stringify({ wall_generator: 'classic', detect_thin_wall: '1' }), JSON.stringify(SI.SHEET.slicerSettings));
 }
 
 coupon().catch(err => { check('the coupon builds', false, (err && err.stack) || String(err)); }).then(() => {

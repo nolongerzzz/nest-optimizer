@@ -4093,11 +4093,16 @@ function buildPlacedObjects3MF() {
       );
     }
     const mesh = window.NSO3MF.indexTriangleSoup(flat);
-    return {
+    const out = {
       name: p.name || ('piece_' + (i + 1)),
       vertices: mesh.vertices,
       triangles: mesh.triangles
     };
+    // A piece's own slicer settings (the Supports card's: its sheet is a thin
+    // wall) ride along as the object's override in model_settings.config.
+    const model = (state.models || []).find(m => m && m.id === p.sourceId);
+    if (model && model.slicerSettings) out.settings = Object.assign({}, model.slicerSettings);
+    return out;
   });
 }
 
@@ -4542,7 +4547,8 @@ function buildActiveModelObject3MF(m) {
     triangles: mesh.triangles,
     triCount: mesh.triangles.length / 3,
     dropped: dropped,
-    basis: basis
+    basis: basis,
+    settings: m.slicerSettings ? Object.assign({}, m.slicerSettings) : undefined
   };
 }
 

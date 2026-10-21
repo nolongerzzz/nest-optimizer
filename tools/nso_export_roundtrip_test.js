@@ -227,7 +227,13 @@ withApp(async (page, logs) => {
   // export-format moved into the top bar's Export dropdown; unfold it first.
   await page.evaluate(() => { const e = document.getElementById('export-format'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   await page.selectOption('#export-format', '3mf');
+  /* a model's own slicer settings (the Supports card sets them on its
+     supports: wall_generator = classic, detect_thin_wall = 1) ride out as
+     that object's metadata in model_settings.config; B carries them here */
+  const SLICER = { wall_generator: 'classic', detect_thin_wall: '1' };
+  await page.evaluate(s => { const p = state.placed[1]; const m = state.models.find(x => x.id === p.sourceId); m.slicerSettings = s; }, SLICER);
   files.plate3MF = await download(page, '#btn-export-stl', tmp);
+  await page.evaluate(() => { state.models.forEach(m => { delete m.slicerSettings; }); });
   check('downloads a .3mf', /\.3mf$/i.test(files.plate3MF), path.basename(files.plate3MF));
   let plate3MF = null;
   try { plate3MF = await parse3MF(files.plate3MF); } catch (e) { check('nso-3mf-read.js opens the archive', false, e.message); }
@@ -243,6 +249,13 @@ withApp(async (page, logs) => {
       const lift = i === 0 ? POSE_A.liftY : POSE_B.liftY;
       check('object ' + (i + 1) + ' rests at z = liftY (' + lift + ')', near(b.lo[2], lift, 1e-4), b.lo[2]);
     });
+    const zip = NSO3MFRead.openZip(new Uint8Array(fs.readFileSync(files.plate3MF)));
+    const ms = new TextDecoder().decode(await zip.read('Metadata/model_settings.config'));
+    const keysOf = id => { const m = ms.match(new RegExp('<object id="' + id + '">([\\s\\S]*?)</object>'));
+      return m ? [...m[1].matchAll(/key="([^"]*)" value="([^"]*)"/g)].filter(k => k[1] !== 'name').map(k => k[1] + '=' + k[2]) : null; };
+    check('a model\'s own slicer settings go out as its object\'s metadata in model_settings.config, and no other object\'s',
+      JSON.stringify(keysOf(2)) === JSON.stringify(['wall_generator=classic', 'detect_thin_wall=1']) && JSON.stringify(keysOf(1)) === '[]',
+      'object 1: ' + JSON.stringify(keysOf(1)) + ', object 2: ' + JSON.stringify(keysOf(2)));
   }
 
   /* ---------- 3. Download selected, Format = STL ---------- */

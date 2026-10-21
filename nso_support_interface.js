@@ -495,8 +495,9 @@
      rectilinear outline, as Bambu's loops follow the region - and its
      serpentine on the piece's INNER grid points only (a point all four of
      whose cells are the piece's): every line and turn of it stands a
-     pitch off the loop, a clear gap of the pitch less a bead (0.41 mm at
-     0.43, a line width; Bambu's turns stand 0.36 mm in from its loop) -
+     pitch off the loop, a clear gap of the pitch less a line (0.44 mm at
+     0.40, a line width and more; Bambu's turns stand 0.36 mm in from its
+     loop) -
      but for ONE grid step joining the serpentine's start to the loop (THE
      BRIDGE, bridged()), so loop and serpentine are one connected thin wall
      with one hole, drawn as one path. With the turns ON the loop (the
@@ -529,16 +530,24 @@
      carried when a wall of T1, loop or serpentine, either way, lies across
      it with its whole width on it.
 
-     LINE WIDTH. One bead and SHEET_OVER_MM: 0.43 at a 0.4 nozzle. A line
-     exactly one bead wide (0.42, NSO_Thickness.floorFor) is a ZERO-WIDTH
-     wall to a slicer, which insets the region by half a bead for its outer
-     wall: NSO's slicer (Clipper2) keeps none of a strip under 0.42 and
-     draws a 0.43 wall round its sliver - the loop as its two contours, the
-     serpentine as one: about two passes over each line (it has no
-     thin-wall mode; a slicer ticket). Bambu Studio
-     prints such a strip the same way with thin walls off; with
-     detect_thin_wall on it draws one centre pass, and the widths under a
-     bead (0.30 - 0.40) are for that (tools/nso_supports_print_export.js).
+     LINE WIDTH. SHEET_UNDER of a bead, to the 0.01 mm: the bead is
+     NSO_Thickness.floorFor, nozzle x 1.05 (0.42 at a 0.4 nozzle), so the
+     line is 0.42 x 0.95 = 0.399 -> 0.40 mm, one line width under the bead
+     (nozzle x 0.95 would be 0.38: not what printed). A slicer insets a
+     region by half a bead for its outer wall, so a strip under a bead has
+     no wall in it: it is a THIN WALL, and the sheet is printed by the
+     slicer's thin-wall pass, one centre pass a line. On the owner's A1 mini,
+     Bambu Studio with the classic wall generator and Detect thin wall on
+     printed the 0.40 sheet in one pass (filament 1.09 m, against 1.03 m
+     without the sheet and 1.14 m for a 0.43 sheet outlined round its
+     sliver); with thin walls off it prints nothing of it. So every support
+     object carries both, SHEET_SLICER: wall_generator = classic (Bambu's
+     default is Arachne) and detect_thin_wall = 1, as object metadata in
+     Metadata/model_settings.config (nso-3mf.js, an object's settings) -
+     Bambu reads object metadata into the object's config for any vendor's
+     3MF, and drops it when the file is imported as geometry only. NSO's
+     own slicer (Clipper2) has no thin-wall mode and keeps none of a strip
+     under a bead: it draws no sheet (a slicer ticket).
 
      THE LEVEL. A tip's sheet top is GAP_MM under the lowest point of the
      ceiling over the tip's cell (vertical rays; a point more than one layer
@@ -633,7 +642,10 @@
      =================================================================== */
   var SHEET_PITCH_MM = 0.84;   /* the reference's interface pitch (0.42 line + 0.42 channel) */
   var SHEET_ROLES = ['transition', 'transition', 'interface', 'interface'];
-  var SHEET_OVER_MM = 0.01;    /* a line is one bead and this much wide: see LINE WIDTH */
+  var SHEET_UNDER = 0.95;      /* a line is this much of a bead, to the 0.01 mm: see LINE WIDTH */
+  /* what the sheet needs of the slicer, written on every support object
+     (Metadata/model_settings.config): see LINE WIDTH */
+  var SHEET_SLICER = { wall_generator: 'classic', detect_thin_wall: '1' };
   var CELL_MM = 0.1;           /* the footprint raster */
   var SAMPLE_MM = 0.05;        /* along a line */
   var LEVEL_TOL_MM = 0.01;
@@ -665,7 +677,7 @@
     var o = {
       gap: opts.gapMm == null ? GAP_MM : +opts.gapMm,
       layer: opts.layerMm == null ? LAYER_MM : +opts.layerMm,
-      width: opts.widthMm == null ? Math.round((TH.floorFor(opts.nozzle) + SHEET_OVER_MM) * 1e6) / 1e6 : +opts.widthMm,
+      width: opts.widthMm == null ? Math.round(TH.floorFor(opts.nozzle) * SHEET_UNDER * 100) / 100 : +opts.widthMm,
       pitch: opts.pitchMm == null ? SHEET_PITCH_MM : +opts.pitchMm,
       side: opts.sideMm == null ? 1.2 : +opts.sideMm,
       plateZ: opts.plateZ == null ? 0 : +opts.plateZ,
@@ -1328,7 +1340,7 @@
       /* THE SERPENTINE, ONE PITCH INSIDE THE LOOP. It runs on the piece's
          inner grid points only - a point all four of whose cells are the
          piece's - so every one of its lines and turns stands a pitch off
-         the loop: a clear gap of a line width (0.84 - 0.43 mm) between the
+         the loop: a clear gap of a line width (0.84 - 0.40 mm) between the
          two walls, as Bambu's serpentine stands in from its loop, and the
          two never touch. Lines along one direction (lineOf: the line's
          index, alongOf: the position along it); on each line the inner
@@ -1785,8 +1797,9 @@
 
   var api = {
     DEFAULTS: { gapMm: GAP_MM, layerMm: LAYER_MM, pitchMm: PITCH_MM, repeats: REPEATS, epsMm: EPS_MM },
-    SHEET: { pitchMm: SHEET_PITCH_MM, roles: SHEET_ROLES.slice(), overMm: SHEET_OVER_MM, minRunMm: MIN_RUN_MM, cellMm: CELL_MM,
-             sampleMm: SAMPLE_MM, lineAngles: LINE_ANGLES.slice(), fieldMm: FIELD_MM, levelEdgeMm: LEVEL_EDGE_MM },
+    SHEET: { pitchMm: SHEET_PITCH_MM, roles: SHEET_ROLES.slice(), under: SHEET_UNDER, minRunMm: MIN_RUN_MM, cellMm: CELL_MM,
+             sampleMm: SAMPLE_MM, lineAngles: LINE_ANGLES.slice(), fieldMm: FIELD_MM, levelEdgeMm: LEVEL_EDGE_MM,
+             slicerSettings: Object.assign({}, SHEET_SLICER) },
     CAP: { riseMm: CAP_RISE_MM, minMm: CAP_MIN_MM, maxMm: CAP_MAX_MM, spaceMm: CAP_SPACE_MM, gapMaxMm: CAP_GAP_MAX_MM,
            tuckMm: CAP_TUCK_MM, partMm: CAP_PART_MM, bandMm: CAP_BAND_MM, foot: CAP_FOOT },
     sheet: sheet,

@@ -6270,3 +6270,34 @@ traced every channel: each line twice.
   support object by hand. The 24 sheet-layer shells of the three exports are
   each closed and manifold (0 open, non-manifold or mis-wound edges, no
   self-intersection), sections 2A/P = 0.400 / 0.360 / 0.300 mm.
+
+### The line is 0.40, printed by the thin-wall pass (2026-10-21, same branch)
+
+The owner's correction: with the classic wall generator and Detect thin wall
+on (Strength > Walls), Bambu Studio prints a 0.40 sheet line in one pass
+(filament 1.09 m, against 1.03 m without the sheet and 1.14 m for the 0.43
+sheet drawn round its sliver).
+
+- **Width**: `SHEET_UNDER` 0.95 of the bead (`NSO_Thickness.floorFor`, nozzle x
+  1.05), to the 0.01 mm: 0.42 x 0.95 = 0.399 -> **0.40** at a 0.4 nozzle (the
+  header says so; nozzle x 0.95 would be 0.38). The pitch stays 0.84, so the
+  gap beside the bridge is 0.44 mm (0.41 was at 0.43).
+- **Overrides on every support object**: `NSO_SupportInterface.SHEET.slicerSettings`
+  = `wall_generator: classic`, `detect_thin_wall: 1`. `nso-3mf.js` writes an
+  object's `settings` as its metadata in `Metadata/model_settings.config`; the
+  Supports card sets `m.slicerSettings` on each support model, and
+  `buildPlacedObjects3MF` / the selected-model export pass it on (pieces
+  without it export as before). In Bambu Studio's source both are per-object
+  options (`PrintObjectConfig::wall_generator`, `PrintRegionConfig::detect_thin_wall`),
+  read from object metadata for any vendor's 3MF; `Plater::load_files` resets
+  them when a file comes in as geometry only, so **open the export as a project**.
+- **The bridge** (the previous entry) stays: one connected thin wall, one path
+  a layer.
+- **Gates**: `support:interface` holds the one region a piece, the loop's
+  inside the only hole; NSO's slicer, with no thin-wall mode, must draw
+  nothing of a sheet under a bead (no path, nothing broken off). `support:test`
+  checks the 0.40 width and the two settings. `export:roundtrip` checks that a
+  model's settings go out on its object alone.
+- **Export**: `npm run support:print-export` writes only
+  `top_clip_x2_supports.3mf`, the card's export (0.40, both overrides). The
+  width-matrix files are gone; `sheetWidthMm` still sets another width.

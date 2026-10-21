@@ -90,16 +90,17 @@ printed in the same layers as the lines, and every line was an island. So now:
   stepped rectilinear outline, as Bambu's loops follow the region - and ONE
   serpentine on the piece's inner grid points (a point all four of whose cells
   are the piece's), so every line and turn of it stands a pitch off the loop: a
-  clear gap of 0.41 mm, a line width (Bambu's turns stand 0.36 mm in from its
-  loop). **The turns never touch the loop.** With them on it (this branch's
-  first build) loop and lines fused into one region with every channel closed
-  and a slicer traced every channel - each line twice: on the owner's plate
+  clear gap of 0.44 mm at the 0.40 line, a line width and more (0.41 at the
+  earlier 0.43; Bambu's turns stand 0.36 mm in from its loop). **The turns
+  never touch the loop.** With them on it (this branch's first build) loop
+  and lines fused into one region with every channel closed and a slicer
+  traced every channel - each line twice: on the owner's plate
   (`thinwall_supports_bambu.gcode.3mf`) our layers printed 610-856 mm in
   1,350-2,700 segments, Bambu's 434 mm in 54.
 - **The bridge: one point.** The serpentine starts one pitch from a loop
   vertex (its first line's end, on an inner point); a one-pitch stub from that
   vertex to it joins the two (`bridged`; where only the serpentine's far end
-  sits by the loop it runs reversed). Everywhere else the 0.41 mm gap stays.
+  sits by the loop it runs reversed). Everywhere else the gap stays.
   A layer's section is then exactly ONE region a piece - loop, stub and
   serpentine - with ONE hole, the loop's inside less the serpentine
   (`support:interface` 1c, measured on the parts built): one connected thin
@@ -143,8 +144,10 @@ printed in the same layers as the lines, and every line was an island. So now:
   0.05 mm (`CAP_PART_MM`) apart, the narrower keeping its width - and so are
   a cap and a neighbour's bare column top, and caps of neighbouring levels.
   Tips closer than 2.55 mm get caps under 2.5 mm (section 4).
-- **The line width is 0.43** (one bead and `SHEET_OVER_MM` 0.01, at a 0.4
-  nozzle), section 5; `sheetWidthMm` sets another (the width matrix).
+- **The line width is 0.40** (`SHEET_UNDER` 0.95 of the 0.42 bead, to the
+  0.01 mm, at a 0.4 nozzle), section 5, printed by the slicer's thin-wall
+  pass: every support object carries `wall_generator = classic` and
+  `detect_thin_wall = 1`; `sheetWidthMm` sets another width.
 - **The feet**: one shared first-layer pad per cluster of trunks, the trees on
   one pad one support (docs/SUPPORT-GRIDPACK.md, *Feet*).
 - **The gap stays 0.18.**
@@ -230,19 +233,20 @@ gaps edge to edge 0.05-0.84 mm, never over 2 mm.
   parts built.
 - **Layers**: every piece a closed loop and one serpentine a pitch inside it,
   touching it only at its start (the bridge; elsewhere 0.840 mm centre to
-  centre, a 0.410 mm gap), T2 and I2 T1's; every layer's mid-layer section ONE
+  centre, a 0.440 mm gap at 0.40), T2 and I2 T1's; every layer's mid-layer section ONE
   region a piece - its outline the loop's polygon grown half a bead (the
-  coupon's slab: 22.270 x 14.710, within 0.1 mm), its one hole within the
+  coupon's slab: 22.240 x 14.680, within 0.1 mm), its one hole within the
   loop's polygon shrunk half a bead - and no region apart. One
   direction per layer (share 0.94-0.96 on the coupon's slab), pitch 0.840 (a
   line's two edges paired only across that layer's own material: the gap
-  between two lines, 0.41 mm, is all but a bead wide itself); a
+  between two lines, 0.44 mm, is about a bead wide itself); a
   layer whose lines are under 2 mm on the whole (I1 on the coupon's leg and
   the clamp's ridge) is read from the plan, and says so.
-- **NSO's slicer**: every layer in closed paths in its one region a piece,
-  none under 2 mm - the coupon's slab: 2 paths a layer (the sliver's outline,
-  743.8 mm, and its hole's, 72.3 mm), about 2.1 passes over each line. It has no
-  thin-wall mode; printing a layer in one pass is a slicer ticket
+- **NSO's slicer**: it has no thin-wall mode, so of a 0.40 sheet (under its
+  0.42 outer wall) it draws nothing - no path, nothing broken off; a sheet a
+  bead wide or more it draws in closed paths in its one region a piece, none
+  under 2 mm (at 0.43: 2 paths a layer on the coupon's slab, 743.8 and
+  72.3 mm, about 2.1 passes over each line). One pass is a slicer ticket
   (`nso_slicer.js`), not this one.
 - **Nothing above z_cap but the sheet** under any of its paths.
 - **Feet**: one pad per cluster, none split; pads 0.28 mm or more from the
@@ -316,34 +320,48 @@ a bead for its outer wall - a 0.42 line is a **zero-width wall**.
   missing, which an earlier version of this page took at its word). With
   `detect_thin_wall` on, a line is one medial-axis pass at its width + 0.043.
 
-So the line is **0.43 mm** (`SHEET_OVER_MM` 0.01 over the bead), and each
-layer is **a loop and a serpentine joined at one point** (section 3): one
-connected thin wall. The first build joined every turn to the loop; loop and
+So the line was **0.43 mm**, a hair over the bead, until the width matrix
+below settled it: the line is now **0.40 mm** (`SHEET_UNDER`: 0.95 of the
+bead, 0.399 to the 0.01 mm; nozzle x 0.95 would be 0.38), printed by the
+thin-wall pass. Each layer is **a loop and a serpentine joined at one point**
+(section 3): one connected thin wall. The first build joined every turn to the loop; loop and
 lines fused into one region with every channel closed, and on the owner's
 plate (`thinwall_supports_bambu.gcode.3mf`) our layers printed 610-856 mm in
 1,350-2,700 segments - each line twice - against Bambu's 434 mm in 54. NSO's
-slicer has no thin-wall mode: it draws a 0.43 wall round its sliver - 2 closed
+slicer has no thin-wall mode: it drew a 0.43 wall round its sliver - 2 closed
 paths a layer on the coupon's slab, the outline's 743.8 mm and the hole's
-72.3 mm, about 2.1 passes over each line (`support:interface` 1d). Under a
-bead (0.40, 0.36, 0.30) it draws nothing. One pass is a slicer ticket.
+72.3 mm, about 2.1 passes over each line - and under a bead (0.40) it draws
+nothing (`support:interface` 1d). One pass is a slicer ticket.
 
-**The export.** `npm run support:print-export` writes the coupon as the card
-exports it - 0.43 mm lines, no thin-wall override: a 0.43 wall is wider than a
-bead, so the override had nothing to detect, and it is gone from the export -
-and **the width matrix**: the sheet's lines 0.40 / 0.36 / 0.30 mm wide
-(`sheetWidthMm`) with `detect_thin_wall = 1` on the support objects only,
-`top_clip_x2_supports_w040_thinwall.3mf`, `_w036_`, `_w030_` - under a bead, for
-Bambu's thin-wall pass. The slab is the same in each (a 21.84 x 14.28 loop, the
-serpentine a pitch inside it, 25 / 25 / 16 / 25 lines, 40 caps of 2.50 mm). The
-card exports 0.43 and does not set thin walls, and stays so until the width
-matrix says otherwise (the owner's call). In the owner's
+**The width matrix, settled (2026-10-21).** The sheet's lines at 0.40 / 0.36
+/ 0.30 mm with `detect_thin_wall = 1` on the supports were sliced on the
+owner's A1 mini: with the **classic** wall generator and **Detect thin wall**
+on (Strength > Walls), Bambu Studio prints a 0.40 line in **one pass** -
+filament 1.09 m, against 1.03 m without the sheet and 1.14 m for the 0.43
+sheet drawn round its sliver. So the card's line is 0.40, and every support
+object carries both overrides, `SHEET.slicerSettings`, in
+`Metadata/model_settings.config` (`nso-3mf.js` writes an object's `settings`
+as its metadata, as Bambu saves a per-object override; the card puts them on
+each support model, `buildPlacedObjects3MF` and the selected-model export
+carry them): `wall_generator = classic` (Bambu's default is Arachne) and
+`detect_thin_wall = 1`. In Bambu Studio's source both are per-object options
+(`PrintObjectConfig::wall_generator`, `PrintRegionConfig::detect_thin_wall`);
+the importer reads an object's metadata into its config for any vendor's 3MF
+(`bbs_3mf.cpp`), and `Plater::load_files` resets it when the file comes in as
+geometry only (File > Import / Add, or "Import geometry only" on a plate that
+holds objects) - **open the export as a project**; the support object then
+shows the override badge in the object list. `npm run support:print-export`
+writes the coupon as the card exports it, `top_clip_x2_supports.3mf` (a
+21.84 x 14.28 loop, the serpentine a pitch inside it joined at its start,
+25 / 25 / 16 / 25 lines, 40 caps of 2.50 mm; the leg 2.52 x 13.44). In the owner's
 `thinwall_sideXside.gcode.3mf` (thin walls off in its settings) the 0.43 lines
 of an earlier export printed as 2.00 passes, and Bambu's own tree's layers as
 one pass at 1.30 x the outer wall's E/mm.
 
-**Why Bambu shows no interface at 0.40 / 0.36 / 0.30** (2026-10-21, read in
-Bambu Studio's source - `bbs_3mf.cpp`, `Plater.cpp`, `PerimeterGenerator.cpp`
-- before the owner's gcode of them):
+**Why Bambu showed no interface at 0.40 / 0.36 / 0.30 at first** (2026-10-21,
+read in Bambu Studio's source - `bbs_3mf.cpp`, `Plater.cpp`,
+`PerimeterGenerator.cpp`; the owner's print since confirmed thin walls on
+print a 0.40 line in one pass):
 - The owner's process is classic walls with `detect_thin_wall = 0`. Classic,
   thin walls off, offsets each island in by half the outer wall, 0.21 mm at
   0.42: a 0.43 strip leaves a 0.01 sliver, drawn round out and back (807-814

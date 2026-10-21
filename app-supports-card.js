@@ -913,6 +913,10 @@ var NSO_SUPPORTS_CARD = (function () {
     if (!id) return { ok: false, reason: 'a support could not be added' };
     var m = modelOf(id);
     m.nsoSupport = meta;
+    /* the sheet is a thin wall (under a bead): the slicer settings it needs
+       go out on the support's object (NSO_SupportInterface.SHEET) */
+    var SI = window.NSO_SupportInterface;
+    if (SI && SI.SHEET && SI.SHEET.slicerSettings) m.slicerSettings = Object.assign({}, SI.SHEET.slicerSettings);
     var entry = placeModelMovable(m, (b.lo[0] + b.hi[0]) / 2, -(b.lo[1] + b.hi[1]) / 2);
     entry.mesh.position.y = (b.lo[2] + b.hi[2]) / 2;
     entry.liftY = (hostPlaced.liftY || 0) + (b.lo[2] - hostMinZ);

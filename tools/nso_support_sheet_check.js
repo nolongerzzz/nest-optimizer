@@ -559,22 +559,26 @@ fs.mkdirSync(OUT, { recursive: true });
         if (tag === 'coupon' && rg.id === 0)
           check(`${label}, sheet at ${f3(L.zTop)}: the slab's sheet is ONE rectangle`, L.layers[0].pieces.length === 1 && allRect,
             L.layers[0].pieces.map(q => q.kind + ' ' + q.sizeMm.map(f3).join(' x ')).join('; '));
-        /* 1d. NSO's slicer: every layer drawn in its one region a piece,
-           every path closed, none under 2 mm. It has no thin-wall mode, so a
-           wall a bead wide (and a hair) is drawn round its sliver: the
-           outline's contour and the hole's (round the loop's inside, the
-           bridge and the serpentine) - two paths a piece, about two passes
-           over each line. Reported */
+        /* 1d. NSO's slicer. It has no thin-wall mode: it insets a region by
+           half a bead for its outer wall, and of a line under a bead (0.40,
+           0.95 of one - printed by Bambu's thin-wall pass) it keeps nothing:
+           no path of the sheet at all, and nothing broken off it (a slicer
+           ticket). A layer it does draw (a line a bead wide or more) is drawn
+           in its one region a piece, every path closed, none under 2 mm.
+           Reported */
         const nso = sheetEntry ? sheetEntry.parts.map((pt, k) => nsoLayer(pt.soup, L.layers[k].lengthMm)) : [];
         const regionsOf = (n, k) => { const r = regions[k]; if (!r || !r.polys) return -1;
           const big = r.polys.reduce((a, b) => Math.abs(areaOf(b)) > Math.abs(areaOf(a)) ? b : a), sg = Math.sign(areaOf(big));
           const outs = r.polys.filter(P => Math.sign(areaOf(P)) === sg), hit = new Set();
           n.starts.forEach(p => { const k2 = outs.findIndex(O => inPoly(p, O) && !outs.some(O2 => O2 !== O && inPoly(p, O2) && Math.abs(areaOf(O2)) < Math.abs(areaOf(O)))); hit.add(k2); });
           return hit.has(-1) ? -1 : hit.size; };
-        check(`${label}, sheet at ${f3(L.zTop)}: NSO's slicer draws every layer in its one region a piece, every path closed, none under 2 mm`,
-          nso.length === L.layers.length && nso.every((n, k) => n.layers === 1 && n.paths === n.closed && n.shortest >= 2 && regionsOf(n, k) === L.layers[k].pieces.length),
-          nso.map((n, k) => `${L.layers[k].role[0].toUpperCase()}${k + 1}: ${n.paths} closed path(s) in ${regionsOf(n, k)} region(s), shortest ${f3(n.shortest)} mm, ${n.passes.toFixed(2)} passes`).join(' | ') +
-          ' (no thin-wall mode: the sliver\'s outline and its hole\'s, two paths a piece)');
+        const thinLine = sh.widthMm < SL.defaultsFor(0.4).outerWallWidthMm - 1e-9;
+        check(`${label}, sheet at ${f3(L.zTop)}: NSO's slicer ` + (thinLine ? `draws nothing of a ${f3(sh.widthMm)} mm sheet (under a bead: no thin-wall mode), nothing broken off it`
+                                                                            : 'draws every layer in its one region a piece, every path closed, none under 2 mm'),
+          nso.length === L.layers.length && nso.every((n, k) => thinLine ? n.paths === 0
+            : n.layers === 1 && n.paths === n.closed && n.shortest >= 2 && regionsOf(n, k) === L.layers[k].pieces.length),
+          nso.map((n, k) => `${L.layers[k].role[0].toUpperCase()}${k + 1}: ${n.paths} path(s)` + (n.paths ? ` (${n.closed} closed) in ${regionsOf(n, k)} region(s), shortest ${f3(n.shortest)} mm, ${n.passes.toFixed(2)} passes` : '')).join(' | ') +
+          (thinLine ? ' (the sheet is for the thin-wall pass: wall_generator = classic, detect_thin_wall = 1 on the support object; NSO one pass is a slicer ticket)' : ' (no thin-wall mode: the sliver\'s outline and its hole\'s, two paths a piece)'));
         /* 2. the lines, off the welded solid */
         const under = lineIndex(L), loopAt = lineIndex(L, 0);
         /* a layer's direction and pitch read on its serpentine's lines, off
