@@ -515,7 +515,8 @@ async function main() {
   c = await T.card();
   s = await T.sups();
   const N = s.length, built1 = T.ids(s);
-  const BUILT = (n, h, u, r) => 'Built: ' + n + ' supports · held ' + h + ' · unsupported ' + u + ' · unreachable ' + r;
+  // the card's own plural (app-supports-card.js plural): 1 support, 2 supports
+  const BUILT = (n, h, u, r) => 'Built: ' + n + (n === 1 ? ' support' : ' supports') + ' · held ' + h + ' · unsupported ' + u + ' · unreachable ' + r;
   check('BUILT: "Built: N supports · held 1 · unsupported 0 · unreachable 0", N the supports on the plate',
     [c.state, c.line, N > 0], ['built', BUILT(N, 1, 0, 0), true]);
   check('...GENERATE reads REGENERATE and REMOVE ALL sits beside it; Remove (one) is shown, off until a support is picked; no rows (nothing needs a look)',
