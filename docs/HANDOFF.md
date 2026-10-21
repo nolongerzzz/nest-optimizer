@@ -6237,3 +6237,36 @@ traced every channel: each line twice.
   lines are under 2 mm on the whole is read from the plan, and says so.
 - **Export**: the 0.43 thin-wall override is gone (nothing for it to detect at
   0.43); the card's 0.43 export and the 0.40 / 0.36 / 0.30 width matrix stay.
+
+### The serpentine joins its loop at one point; why Bambu drops the narrow lines (2026-10-21, same branch)
+
+- **The bridge.** Each serpentine starts one grid step from a loop vertex and
+  that step is laid as a stub (`bridged` in `nso_support_interface.js`; a
+  serpentine whose start has no loop vertex a step away runs reversed). Loop
+  and serpentine are one connected thin wall with one hole: one slicer path a
+  layer, as Bambu's (54 extrusions, 3 travels). Everywhere else the 0.41 mm
+  gap stays. The plans are otherwise unchanged (same pieces, lines and caps).
+- **Gates** (`support:interface`): each layer's section is ONE region a piece
+  with ONE hole, the outline the loop grown half a bead (rectangle within
+  0.1 mm, or a rectilinear outline of the right area), the hole within the
+  loop shrunk half a bead, no region apart. The serpentine's first point is on
+  the loop and every other point a pitch or more off it. NSO's slicer draws
+  2 closed paths a layer on the coupon's slab (743.8 and 72.3 mm, about 2.1
+  passes). The pitch reader now pairs a line's two edges only across that
+  layer's own material. The 0.41 mm gap is all but a bead wide, and one
+  serpentine's last line, a single pitch long, had left one edge unpaired, so
+  the reader read a gap as a line (clamp area 2, I1: 3 off the pitch).
+- **Bambu and 0.40 / 0.36 / 0.30** (read in Bambu Studio's source; the
+  owner's gcode will confirm). Their process is classic walls with thin walls
+  off. That shrinks each island by half the outer wall (0.21 mm): 0.43 keeps
+  a 0.01 sliver, drawn round out and back (807-814 mm a layer), and anything
+  under 0.42 vanishes. `min_feature_size` is Arachne's and does nothing here.
+  Our `detect_thin_wall = 1` is where Bambu reads it (`model_settings.config`,
+  `<object id="2">`, the support), and the importer takes it from any vendor.
+  But `Plater::load_files` resets every object's config when a 3MF is loaded
+  without config: **File > Import / Add**, or "Import geometry only" on a
+  plate that already has objects. Likely cause: the override is wiped on
+  import. To test, open the 3MF as a project, or set Detect thin wall on the
+  support object by hand. The 24 sheet-layer shells of the three exports are
+  each closed and manifold (0 open, non-manifold or mis-wound edges, no
+  self-intersection), sections 2A/P = 0.400 / 0.360 / 0.300 mm.

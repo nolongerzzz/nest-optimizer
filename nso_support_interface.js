@@ -474,9 +474,11 @@
         gap      0.18 mm of air, then the part
      EVERY LAYER IS A LOOP AND A SERPENTINE, a piece at a time: one closed
      perimeter loop round each piece of the sheet's footprint (Bambu's opens
-     every layer: 22.24 x 14.34 mm), then, apart from it, one serpentine
-     inside it - line, U-turn, line, at 0.84 mm (Bambu's: 13.6 mm lines,
-     0.84 mm turns) - whose turns stand IN from the loop and never touch it.
+     every layer: 22.24 x 14.34 mm), then one serpentine inside it - line,
+     U-turn, line, at 0.84 mm (Bambu's: 13.6 mm lines, 0.84 mm turns) -
+     whose turns stand IN from the loop and never touch it, joined to the
+     loop at ONE point, its start: one connected thin wall, one path a
+     layer (Bambu's: 54 extrusions, 3 travels).
      The loop is what the sheet releases by: the owner printed the loops
      alone, by accident, and they came away clean.
      NOTHING BUT THE SHEET OCCUPIES THE SHEET'S LAYERS: a cap's top, and a
@@ -487,23 +489,25 @@
      plane for 2 um, which the union left as slivers (2 piercing pairs on
      the clamp's area 1).
 
-     TWO THIN WALLS A PIECE, APART. The sheet is laid on a grid at the pitch
-     both ways in its frame (A along, B across). Each PIECE has its loop
-     round its outline - a rectangle, or a stepped rectilinear outline, as
-     Bambu's loops follow the region - and its serpentine on the piece's
-     INNER grid points only (a point all four of whose cells are the
-     piece's): every line and turn of it stands a pitch off the loop, a clear
-     gap of the pitch less a bead (0.41 mm at 0.43, a line width; Bambu's
-     turns stand 0.36 mm in from its loop), so the loop is one closed thin
-     wall and the serpentine a second, connected one, and each is drawn
-     once. With the turns ON the loop (the first build), loop and lines
-     fused into one region with every channel closed, and a slicer traced
-     each channel - each line twice: 610 - 856 mm a layer in 1,350 - 2,700
-     segments on the owner's plate (thinwall_supports_bambu.gcode.3mf),
-     against Bambu's 434 mm in 54. The serpentine's lines run along A (T1,
-     T2, I2) or B (I1); on each line the inner points' runs, and of those the
-     longest strip of runs on consecutive lines sharing a point with the
-     next, line i turning into line i + 1 at one end, the ends alternating.
+     ONE THIN WALL A PIECE, JOINED AT ONE POINT. The sheet is laid on a
+     grid at the pitch both ways in its frame (A along, B across). Each
+     PIECE has its loop round its outline - a rectangle, or a stepped
+     rectilinear outline, as Bambu's loops follow the region - and its
+     serpentine on the piece's INNER grid points only (a point all four of
+     whose cells are the piece's): every line and turn of it stands a
+     pitch off the loop, a clear gap of the pitch less a bead (0.41 mm at
+     0.43, a line width; Bambu's turns stand 0.36 mm in from its loop) -
+     but for ONE grid step joining the serpentine's start to the loop (THE
+     BRIDGE, bridged()), so loop and serpentine are one connected thin wall
+     with one hole, drawn as one path. With the turns ON the loop (the
+     first build), loop and lines fused into one region with every channel
+     closed, and a slicer traced each channel - each line twice: 610 - 856
+     mm a layer in 1,350 - 2,700 segments on the owner's plate
+     (thinwall_supports_bambu.gcode.3mf), against Bambu's 434 mm in 54.
+     The serpentine's lines run along A (T1, T2, I2) or B (I1); on each
+     line the inner points' runs, and of those the longest strip of runs on
+     consecutive lines sharing a point with the next, line i turning into
+     line i + 1 at one end, the ends alternating.
      NSO_Crosshatch.oneDirection is held on the lines of the layer's
      direction (the serpentine's and the loop's sides along it).
 
@@ -1398,9 +1402,30 @@
       /* A PIECE BUILT: its loop, its two serpentines (along A for T1, T2,
          I2; along B for I1), and the caps it carries - a wall of T1, loop or
          serpentine, either way, across the cap with its whole width on it */
+      /* THE BRIDGE: the serpentine joins its loop at ONE point - its start,
+         a pitch from a point of the loop, bridged by that one grid step - so
+         loop and serpentine are one connected thin wall, drawn as one path
+         (Bambu's: 54 extrusions, 3 travels a layer), and everywhere else
+         the serpentine keeps the pitch off the loop. If only its far end has
+         a loop point a step away, the serpentine is run the other way. */
+      function bridged(loop, sn) {
+        var onLoop = {};
+        loop.forEach(function (p) { onLoop[p[0] + ',' + p[1]] = p; });
+        function foot(p) {
+          var c = [[p[0] - 1, p[1]], [p[0] + 1, p[1]], [p[0], p[1] - 1], [p[0], p[1] + 1]];
+          for (var i = 0; i < c.length; i++) if (onLoop[c[i][0] + ',' + c[i][1]]) return c[i];
+          return null;
+        }
+        var path = sn.path, f = foot(path[0]);
+        if (!f) { var r = path.slice().reverse(), g = foot(r[0]); if (g) { path = r; f = g; } }
+        if (!f) return null;
+        return { path: [f].concat(path), lines: sn.lines };
+      }
       function pieceOf(G, has, kind) {
         var lp = loopOf(G, has), sA = serpentineOf(G, has, true), sB = serpentineOf(G, has, false);
         if (!lp.closed || !sA || !sB) return null;
+        sA = bridged(lp.loop, sA); sB = bridged(lp.loop, sB);
+        if (!sA || !sB) return null;
         /* T1's walls, edge by edge: 'a k,j' along A from (k, j), 'b j,k' along B from (k, j) */
         var mat = {};
         [lp.loop, sA.path].forEach(function (pth) {
@@ -1561,8 +1586,8 @@
            plane for EPS_MM, which the union leaves as slivers) */
         var zb = zBase + lk * o.layer;
         for (var pj = 0; pj < plan.length; pj++) {
-          /* a piece: its loop and its serpentine, two walls a clear line
-             width apart - two solids, never touching */
+          /* a piece: its loop and its serpentine, a clear line width apart
+             but at the bridge - one graph, one connected wall */
           var ex = RL.extrudeFlat([pieces[pj].loop, pieces[pj].snake], { width: o.width, height: o.layer, baseZ: zb });
           if (!ex.ok) return { ok: false, reason: 'layer ' + (lk + 1) + ', piece ' + (pj + 1) + ' would not extrude: ' + ex.reason };
           soups.push(ex.tris);
