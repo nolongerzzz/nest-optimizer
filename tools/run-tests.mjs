@@ -46,10 +46,10 @@
  *   npm test
  *   node tools/run-tests.mjs            # same thing
  *   node tools/run-tests.mjs --list     # print the steps and exit
- *   node tools/run-tests.mjs --shard=3/10 --timing-csv out.csv
+ *   node tools/run-tests.mjs --shard=3/20 --timing-csv out.csv
  *                                        # one CI shard, a CSV row per step
  *   node tools/run-tests.mjs --shard-plan [n]
- *                                        # the packing, n shards (CI's 10)
+ *                                        # the packing, n shards (CI's 20)
  *   node tools/run-tests.mjs --merge-timing <dir> --out timing.csv
  *                                        # the shards' CSVs as one, every step
  *   node tools/run-tests.mjs --weights-from a.csv[,b.csv] [--dry-run]
@@ -93,20 +93,24 @@ const SELF = 'run-tests.mjs';
    one shard, and `--shard-plan` prints the whole thing. Re-measure with
    `--shard-plan` after the suite grows and the weights drift. */
 
-/* CI's matrix size (.github/workflows/test.yml). Ten since the 257-step suite
-   measured ~13,800 s of typical-runner time on Tests #297-#305 (eight shards
-   were ~1,725 s each, and two of them ran past the 40-minute job timeout). */
-const CI_SHARDS = 10;
+/* CI's matrix size (.github/workflows/test.yml). Twenty since the three
+   steps that held the heaviest shard were split (support:shells, gscope:speed,
+   support:interface: ci-shard-split): the 261-step suite is ~@TOTAL@ s of
+   typical-runner time, and a wall clock of one shard's worth of it needs the
+   shards to be many and the steps in them small. Ten before that (eight were
+   ~1,725 s each on Tests #297-#305 and two ran past the 40-minute job
+   timeout), with support:shells alone ~1,229 s as the floor. */
+const CI_SHARDS = 20;
 
-/* What a shard may weigh, in the weights' typical-runner seconds: 1,200 s is
-   ~20 min of tests plus ~1.5 min of setup, a third of the job's 60-minute
-   timeout (about one runner in five ran #297-#305's steps in ~0.6 of the
-   time, and none measurably slower than typical, so the headroom is for a
+/* What a shard may weigh, in the weights' typical-runner seconds: 700 s is
+   ~12 min of tests plus ~1.5 min of setup, about a fifth of the job's
+   60-minute timeout (about one runner in five ran #297-#305's steps in ~0.6 of
+   the time, and none measurably slower than typical, so the headroom is for a
    runner sharing its cores and for drift between re-measures). `--shard-plan`
-   flags any shard over it. support:shells alone is ~1,229 s, so until it is
-   shorter or split no shard count meets it - the shard that holds it is over
-   by that step alone. */
-const SHARD_BUDGET_S = 1200;
+   flags any shard over it. The heaviest single step is now @HEAVIEST@
+   (@HEAVIEST_S@ s), so the floor is well under the budget; what holds the
+   budget is the shard count: the suite's seconds divided by it. */
+const SHARD_BUDGET_S = 700;
 
 function shardPlan(n) {
   const known = allSteps.map((s) => weights[s]).filter((w) => typeof w === 'number' && w > 0).sort((a, b) => a - b);

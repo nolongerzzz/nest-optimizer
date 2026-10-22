@@ -52,7 +52,16 @@
    NSO_GSCOPE_SPEED_ROOT=<a checkout> measures that tree with this script
    (an older commit, for the before / after).
 
-     node tools/nso_gscope_speed_test.js [--full]    exit 0 = every gate held */
+   TWO STEPS, ONE FILE. --only=orbit holds the frame and ratio gates (2a, 2b
+   twice, 4) and --only=drag the drag and press gates (1, 3, 5, 6, 7 twice, and
+   the page-error check); no flag runs both. CI runs them as
+   gscope:speed-orbit and gscope:speed-drag - together 14 checks, the 14 of the
+   one run, none twice. Each opens the file and the small slice for itself, and
+   --only=drag orbits the file once as well: gate 5's longest pointermove is
+   the orbit's as much as the pull's. A page error in --only=orbit fails the
+   step without being a fifteenth check.
+
+     node tools/nso_gscope_speed_test.js [--full] [--only=orbit|drag]    exit 0 = every gate held */
 
 const path = require('path');
 const fs = require('fs');
@@ -66,6 +75,13 @@ const FILE = path.resolve(fs.existsSync(LOCAL) ? LOCAL
 const SMALL = path.join(ROOT_HERE, 'fixtures', '3mf', 'supportwithinsupport.gcode.3mf');
 const OUT = path.join(ROOT_HERE, 'tools', 'gscope-speed-out');
 const JSON_ONLY = process.argv.includes('--json');
+const onlyArg = process.argv.find(a => a.startsWith('--only='));
+const ONLY = onlyArg ? onlyArg.slice('--only='.length) : null;
+if (ONLY !== null && ONLY !== 'orbit' && ONLY !== 'drag') {
+  console.error('nso_gscope_speed_test: --only=' + ONLY + ' is not orbit or drag');
+  process.exit(2);
+}
+const DO_ORBIT = !ONLY || ONLY === 'orbit', DO_DRAG = !ONLY || ONLY === 'drag';
 const FULL = process.argv.includes('--full') || !!process.env.NSO_GSCOPE_SPEED_FULL || FILE === LOCAL;
 
 let fails = 0;
@@ -316,13 +332,15 @@ withApp(async (page, logs) => {
   /* ---------------------------------------------------- the file: every main-thread number */
   R.moves = await openSlice(page, FILE);
   say('\n' + R.file + ' - ' + R.moves + ' moves, on ' + R.tree + (FULL ? ' (full: 60-move drags here too)' : ''));
-  await page.evaluate(() => window.__s.start());
-  await page.waitForTimeout(1500);
-  R.idle = clockSummary(await page.evaluate(() => window.__s.stop()));
+  if (DO_ORBIT) {
+    await page.evaluate(() => window.__s.start());
+    await page.waitForTimeout(1500);
+    R.idle = clockSummary(await page.evaluate(() => window.__s.stop()));
+  }
   R.orbit = await orbit(page, 60);
 
   /* the selection pass: the pick, a hover, a click */
-  const pp = await page.evaluate(() => window.__s.piecePx());
+  const pp = DO_DRAG ? await page.evaluate(() => window.__s.piecePx()) : null;
   R.piecePx = pp && pp.map(Math.round);
   if (pp) {
     await page.evaluate(([x, y]) => window.__s.pick(x, y, 3), pp);           // warm
@@ -340,15 +358,19 @@ withApp(async (page, logs) => {
     await page.evaluate(() => { NSO_MICROSCOPE.back(); if (NSO_MICROSCOPE.frame) NSO_MICROSCOPE.frame(); });
     await frames(page);
   }
-  R.pull = await pullDrive(page, FULL ? 60 : 10);
-  if (R.pull && R.pull.landed.pieces) R.plate2 = await plate2Drive(page, FULL ? 60 : 10);
+  if (DO_DRAG) {
+    R.pull = await pullDrive(page, FULL ? 60 : 10);
+    if (R.pull && R.pull.landed.pieces) R.plate2 = await plate2Drive(page, FULL ? 60 : 10);
+  }
   await page.screenshot({ path: path.join(OUT, 'speed-file.png') });
 
   /* ---------------------------------------------------- the small committed slice: 60-move drags, the frame rate */
   R.small = { file: path.basename(SMALL), moves: await openSlice(page, SMALL) };
-  R.small.orbit = await orbit(page, 60);
-  R.small.pull = await pullDrive(page, 60);
-  if (R.small.pull && R.small.pull.landed.pieces) R.small.plate2 = await plate2Drive(page, 60);
+  if (DO_ORBIT) R.small.orbit = await orbit(page, 60);
+  if (DO_DRAG) {
+    R.small.pull = await pullDrive(page, 60);
+    if (R.small.pull && R.small.pull.landed.pieces) R.small.plate2 = await plate2Drive(page, 60);
+  }
   await page.screenshot({ path: path.join(OUT, 'speed-small.png') });
   R.pageErrors = logs.filter(l => /^\[pageerror\]/.test(l)).slice(0, 3);
   fs.writeFileSync(path.join(OUT, 'speed.json'), JSON.stringify(R, null, 1));
@@ -358,53 +380,69 @@ withApp(async (page, logs) => {
     ' moves copied); later moves max ' + p.moveMaxAfterStart + ' ms; followed ' + p.followedOn1 + ' on plate 1, ' + p.followedTo2 + ' to plate 2; ghost on ' +
     p.ghostFrames + ' frames; release ' + p.releaseMs + ' ms';
   const p2Line = (q) => 'press ' + q.pressMs + ' ms; followed ' + q.followed + '/' + q.n + '; moves max ' + q.moveMax + ' ms; release ' + q.releaseMs + ' ms';
-  say('  idle   ' + R.idle.fps + ' fps; main viewport rendered ' + R.idle.mainRenders + 'x');
+  if (DO_ORBIT) say('  idle   ' + R.idle.fps + ' fps; main viewport rendered ' + R.idle.mainRenders + 'x');
   say('  orbit  ' + R.orbit.fps + ' fps on the box\'s software GPU (' + R.orbit.frameMs + ' ms/frame); main thread ' + R.orbit.cpuPerFrame + ' ms a frame; per pointermove ' +
       JSON.stringify(R.orbit.ev.pointermove) + ' ms; main viewport rendered ' + R.orbit.mainRenders + 'x');
-  say('  pick   ' + JSON.stringify(R.pick) + ' ms; hover per pointermove ' + JSON.stringify(R.hover) + ' ms; click (select + isolate) ' + R.click + ' ms');
-  if (R.pull) say('  pull   ' + pullLine(R.pull));
-  if (R.plate2) say('  plate2 ' + p2Line(R.plate2));
+  if (DO_DRAG) {
+    say('  pick   ' + JSON.stringify(R.pick) + ' ms; hover per pointermove ' + JSON.stringify(R.hover) + ' ms; click (select + isolate) ' + R.click + ' ms');
+    if (R.pull) say('  pull   ' + pullLine(R.pull));
+    if (R.plate2) say('  plate2 ' + p2Line(R.plate2));
+  }
   say('\n' + R.small.file + ' - ' + R.small.moves + ' moves');
-  say('  orbit  ' + R.small.orbit.fps + ' fps; main thread ' + R.small.orbit.cpuPerFrame + ' ms a frame; main viewport rendered ' + R.small.orbit.mainRenders + 'x');
-  if (R.small.pull) say('  pull   ' + pullLine(R.small.pull));
-  if (R.small.plate2) say('  plate2 ' + p2Line(R.small.plate2));
+  if (DO_ORBIT) say('  orbit  ' + R.small.orbit.fps + ' fps; main thread ' + R.small.orbit.cpuPerFrame + ' ms a frame; main viewport rendered ' + R.small.orbit.mainRenders + 'x');
+  if (DO_DRAG) {
+    if (R.small.pull) say('  pull   ' + pullLine(R.small.pull));
+    if (R.small.plate2) say('  plate2 ' + p2Line(R.small.plate2));
+  }
 
   say('\n=== gates ===');
-  const follows = [['the small slice', R.small.pull, R.small.plate2]].concat(FULL ? [[path.basename(FILE), R.pull, R.plate2]] : []);
-  follows.forEach(([nm, p, q]) => {
-    check('1. drag follows the mouse (' + nm + '): the copy moved on >= 90 % of the 60 moves of the pull (plate 1, then across to plate 2)',
-      p && p.followed >= 54, p && p.followed + '/60');
-    check('1. ...and it landed on plate 2', p && p.landed.plate === 'take' && p.landed.pieces === 1, p && JSON.stringify(p.landed));
-    check('1. ...and dragged on plate 2 it moved on >= 90 % of 60 moves', q && q.followed >= 54, q && q.followed + '/60');
-  });
-  if (!FULL) check('1. on ' + path.basename(FILE) + ' too, every move of the ' + (R.pull ? R.pull.n : '?') + '-move pull and plate 2 drag after the first moved the piece',
-    R.pull && R.plate2 && R.pull.followed >= R.pull.n - 1 && R.plate2.followed >= R.plate2.n - 1, R.pull && R.plate2 && (R.pull.followed + '/' + R.pull.n + ', ' + R.plate2.followed + '/' + R.plate2.n));
-  check('2a. orbit: the main thread\'s work per frame <= 33 ms (30 fps) on ' + path.basename(FILE), R.orbit.cpuPerFrame <= 33,
-    R.orbit.cpuPerFrame + ' ms; the frame rate here is the software GPU\'s, ' + R.orbit.fps + ' fps');
-  // 2b's absolute floor (>= 30 fps) is a logged finding, not a gate, for now: on a CI runner it reads the
-  // runner's speed (33.2 / 40.1 / 26.6 / 31.3 / 26.7 / 26.7 / 26.3 fps on unchanged G-scope code) while the
-  // main thread's work per frame and the small/big frame-rate ratio held on every run. Ticket ci-timing-gates
-  // replaces the floor with a frames-rendered measure.
-  const ratio = R.orbit.fps > 0 ? +(R.small.orbit.fps / R.orbit.fps).toFixed(1) : 0;
-  say('  finding 2b. orbit ' + R.small.orbit.fps + ' fps on ' + R.small.file + ' (' + (R.small.orbit.fps >= 30 ? 'at or above' : 'below') +
-    ' the 30 fps target; not a gate - ci-timing-gates)');
-  check('2b. orbit where the software GPU is not the limit (' + R.small.file + '): the main thread\'s work per frame <= 33 ms',
-    R.small.orbit.cpuPerFrame <= 33, R.small.orbit.cpuPerFrame + ' ms');
-  check('2b. ...and it orbits >= 4x as fast as ' + path.basename(FILE) + ' on the same renderer (the GPU, not the page, is what limits the big one)',
-    ratio >= 4, ratio + 'x (' + R.small.orbit.fps + ' / ' + R.orbit.fps + ' fps)');
-  check('3. the selection pass (the pick under the pointer) <= 16 ms', R.pick && R.pick.max <= 16, JSON.stringify(R.pick));
-  const renders = R.idle.mainRenders + R.orbit.mainRenders + R.small.orbit.mainRenders;
-  check('4. the main viewport does not render while G-scope covers it', renders === 0, renders + ' renders');
-  const worst = Math.max(R.orbit.ev.pointermove.max, R.pull ? R.pull.moveMaxAfterStart : 99, R.plate2 ? R.plate2.pressMs : 99, R.plate2 ? R.plate2.moveMax : 99);
-  check('5. once a piece is in hand no move holds the main thread past a frame (33 ms) - nor does a press on plate 2', worst <= 33, worst + ' ms at worst');
-  const perK = R.pull && R.pull.startMoveMs != null && R.pull.copied ? r1(R.pull.startMoveMs / (R.pull.copied / 1000)) : null;
-  check('6. the move that makes the copy (12 triangles a move, built and drawn) at most half d7abbea\'s: <= 7.2 ms per thousand moves copied (d7abbea: 14.4)',
-    perK != null && perK <= 7.2, R.pull && (R.pull.startMoveMs + ' ms for ' + R.pull.copied + ' moves - ' + perK + ' ms per thousand'));
-  [['the small slice', R.small.pull], [path.basename(FILE), R.pull]].forEach(([nm, p]) => {
-    const g = p && p.ghostFrames ? p.ghostFrames.split('/').map(Number) : [0, 0];
-    check('7. the copy (the ghost) is drawn on every frame from the slop to the release (' + nm + ')', g[1] > 0 && g[0] === g[1], p && p.ghostFrames);
-  });
-  check('no page error', !R.pageErrors.length, R.pageErrors.join(' | '));
+  if (DO_DRAG) {
+    const follows = [['the small slice', R.small.pull, R.small.plate2]].concat(FULL ? [[path.basename(FILE), R.pull, R.plate2]] : []);
+    follows.forEach(([nm, p, q]) => {
+      check('1. drag follows the mouse (' + nm + '): the copy moved on >= 90 % of the 60 moves of the pull (plate 1, then across to plate 2)',
+        p && p.followed >= 54, p && p.followed + '/60');
+      check('1. ...and it landed on plate 2', p && p.landed.plate === 'take' && p.landed.pieces === 1, p && JSON.stringify(p.landed));
+      check('1. ...and dragged on plate 2 it moved on >= 90 % of 60 moves', q && q.followed >= 54, q && q.followed + '/60');
+    });
+    if (!FULL) check('1. on ' + path.basename(FILE) + ' too, every move of the ' + (R.pull ? R.pull.n : '?') + '-move pull and plate 2 drag after the first moved the piece',
+      R.pull && R.plate2 && R.pull.followed >= R.pull.n - 1 && R.plate2.followed >= R.plate2.n - 1, R.pull && R.plate2 && (R.pull.followed + '/' + R.pull.n + ', ' + R.plate2.followed + '/' + R.plate2.n));
+  }
+  if (DO_ORBIT) {
+    check('2a. orbit: the main thread\'s work per frame <= 33 ms (30 fps) on ' + path.basename(FILE), R.orbit.cpuPerFrame <= 33,
+      R.orbit.cpuPerFrame + ' ms; the frame rate here is the software GPU\'s, ' + R.orbit.fps + ' fps');
+    // 2b's absolute floor (>= 30 fps) is a logged finding, not a gate, for now: on a CI runner it reads the
+    // runner's speed (33.2 / 40.1 / 26.6 / 31.3 / 26.7 / 26.7 / 26.3 fps on unchanged G-scope code) while the
+    // main thread's work per frame and the small/big frame-rate ratio held on every run. Ticket ci-timing-gates
+    // replaces the floor with a frames-rendered measure.
+    const ratio = R.orbit.fps > 0 ? +(R.small.orbit.fps / R.orbit.fps).toFixed(1) : 0;
+    say('  finding 2b. orbit ' + R.small.orbit.fps + ' fps on ' + R.small.file + ' (' + (R.small.orbit.fps >= 30 ? 'at or above' : 'below') +
+      ' the 30 fps target; not a gate - ci-timing-gates)');
+    check('2b. orbit where the software GPU is not the limit (' + R.small.file + '): the main thread\'s work per frame <= 33 ms',
+      R.small.orbit.cpuPerFrame <= 33, R.small.orbit.cpuPerFrame + ' ms');
+    check('2b. ...and it orbits >= 4x as fast as ' + path.basename(FILE) + ' on the same renderer (the GPU, not the page, is what limits the big one)',
+      ratio >= 4, ratio + 'x (' + R.small.orbit.fps + ' / ' + R.orbit.fps + ' fps)');
+  }
+  if (DO_DRAG) check('3. the selection pass (the pick under the pointer) <= 16 ms', R.pick && R.pick.max <= 16, JSON.stringify(R.pick));
+  if (DO_ORBIT) {
+    const renders = R.idle.mainRenders + R.orbit.mainRenders + R.small.orbit.mainRenders;
+    check('4. the main viewport does not render while G-scope covers it', renders === 0, renders + ' renders');
+  }
+  if (DO_DRAG) {
+    const worst = Math.max(R.orbit.ev.pointermove.max, R.pull ? R.pull.moveMaxAfterStart : 99, R.plate2 ? R.plate2.pressMs : 99, R.plate2 ? R.plate2.moveMax : 99);
+    check('5. once a piece is in hand no move holds the main thread past a frame (33 ms) - nor does a press on plate 2', worst <= 33, worst + ' ms at worst');
+    const perK = R.pull && R.pull.startMoveMs != null && R.pull.copied ? r1(R.pull.startMoveMs / (R.pull.copied / 1000)) : null;
+    check('6. the move that makes the copy (12 triangles a move, built and drawn) at most half d7abbea\'s: <= 7.2 ms per thousand moves copied (d7abbea: 14.4)',
+      perK != null && perK <= 7.2, R.pull && (R.pull.startMoveMs + ' ms for ' + R.pull.copied + ' moves - ' + perK + ' ms per thousand'));
+    [['the small slice', R.small.pull], [path.basename(FILE), R.pull]].forEach(([nm, p]) => {
+      const g = p && p.ghostFrames ? p.ghostFrames.split('/').map(Number) : [0, 0];
+      check('7. the copy (the ghost) is drawn on every frame from the slop to the release (' + nm + ')', g[1] > 0 && g[0] === g[1], p && p.ghostFrames);
+    });
+    check('no page error', !R.pageErrors.length, R.pageErrors.join(' | '));
+  } else if (R.pageErrors.length) {
+    // not a check of its own (the 14 stay 14): the drag step holds that line, and a page error here fails this step too
+    say('  FAIL page error (' + ONLY + ') - ' + R.pageErrors.join(' | '));
+    fails++;
+  }
   console.log(fails ? '\n' + fails + ' gate(s) FAILED' : '\nevery gate held');
   process.exitCode = fails ? 1 : 0;
 });
