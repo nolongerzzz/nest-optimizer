@@ -313,11 +313,13 @@ Round 1 did not make G-scope slow: 346bc38 and d7abbea measure the same. The
 slowness was the full rebuilds and walks above, and they predate the two plates.
 The frame rate on tabletop in this box is SwiftShader's (a software GPU), about
 6 fps whatever the code does, so the gate holds the main thread's share of a
-frame there. On the small committed slice (`supportwithinsupport.gcode.3mf`)
-it holds the main thread's share too, and a frame rate at least 4x the big
-file's on the same renderer; the 30 fps floor itself is logged as a finding,
-not gated (on a CI runner it reads the runner's speed - ticket
-ci-timing-gates).
+frame there (2a, <= 33 ms). On the small committed slice
+(`supportwithinsupport.gcode.3mf`) the main thread's share is gated at <= 2 ms
+(2b), and its frame rate over tabletop's at >= 5.2 (2c, `ORBIT_RATIO_MIN`,
+the two orbits measured back to back): both drawn by the same software GPU on
+the same box, so a starved runner slows both and the ratio holds, where a
+">= 30 fps" floor read the runner's speed. Each frame rate is logged as a
+finding (ticket ci-timing-gates).
 
 **Checks.** `gscope:speed` (`tools/nso_gscope_speed_test.js`) measures and gates
 the items above. It uses `tools/fixtures-local/baseline.gcode.3mf` when that
@@ -462,7 +464,7 @@ always:
 | `gscope:shell` | item 12: the column gone and the card present on open; IMPORT at the main page's Import spot; IMPORT ▾ → Read plate into the active plate; the switch flipping the view and the rows (Normal 2, Slice 4); the Slice settings folded, at the printer profile's 0.4 / 0.2; every removed control's job at its new home; the corner row (BACK · ◎ · CLEAR · EXPORT · CLOSE), the Export card, the dock clear of the card; the retired ids gone; shots of the card on both sides |
 | `gscope:select` | items 7, 8, 10, 12: the hover's clock on a fake clock; every hover waited for (up to 2 s, the failure says how long); REGION - click places a box, nothing isolated; a dot dragged resizes it, nothing isolated; a click inside / Isolate isolates exactly what it holds; Escape removes it; a dot behind the piece still takes the mousedown, in either mode; Region's hover where no move midpoint falls in the box; a big piece's hover answering while its tree builds; Piece in the view, a move's readout on hover, a layer by the slider + Take band; item 4's checkbox contract (two rows checked - exactly those two types drawn; none - nothing; hover changes nothing; the text toggles; Check all; Export and a drag take only what is shown) |
 | the #205 set | the older G-scope drive checks (camera, zoom, slice, solid, watch, legend, ...) still hold, driven through the card; `gcode:gscope`'s Crop sections are its Take band section now; `gcode:gscope-support` and `support:ui` are retired (item 5) |
-| `gscope:speed` | items 10 and 11: a 60-move drag follows on plate 1, across and on plate 2; the ghost drawn on every frame of a pull; orbit (the main thread's share of a frame, on the file and on the small slice, and the small slice at least 4x the file's frame rate; its 30 fps floor a logged finding); the pick <= 16 ms; nothing renders under G-scope; no press or held move past a frame; a pull's first move per thousand moves copied |
+| `gscope:speed` | items 10 and 11: a 60-move drag follows on plate 1, across and on plate 2; the ghost drawn on every frame of a pull; orbit (the main thread's share of a frame: <= 33 ms on the file, <= 2 ms on the small slice; the small slice's frame rate over the file's >= 5.2; each frame rate a logged finding); the pick <= 16 ms; nothing renders under G-scope; no press or held move past a frame; a pull's first move per thousand moves copied |
 | `gcode:lines-build` | item 10: `buildLineGeometry`'s typed-array prisms are the old build's, bit for bit |
 | `page:manifest` | the page loads each script once |
 
