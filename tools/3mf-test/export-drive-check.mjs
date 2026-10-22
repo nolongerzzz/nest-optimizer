@@ -78,12 +78,14 @@ async function main() {
       document.querySelector('#export-format option[value="3mf"]').disabled), false);
   check('a fresh session defaults to STL',
     await page.evaluate(() => document.getElementById('export-format').value), 'stl');
+  // The right-click item opens the Export card (ctx-menu, #268), so it keeps
+  // its own words whichever format is chosen.
   check('with STL selected the buttons say STL',
     await page.evaluate(() => [
       document.getElementById('btn-export-model').textContent,
       document.getElementById('btn-export-stl').textContent,
       document.getElementById('ctx-export').textContent]),
-    ['Download selected STL', 'Export plate STL', 'Export STL']);
+    ['Download selected STL', 'Export plate STL', 'Export selected as\u2026']);
   // export-format moved into the top bar's Export dropdown; unfold it first.
   await page.evaluate(() => { const e = document.getElementById('export-format'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   check('with STL selected the cooling row is hidden',
@@ -91,12 +93,12 @@ async function main() {
 
   await page.evaluate(() => { const e = document.getElementById('export-format'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   await page.selectOption('#export-format', '3mf');
-  check('switching to 3MF relabels both buttons and the right-click item',
+  check('switching to 3MF relabels both buttons; the right-click item stays as it was',
     await page.evaluate(() => [
       document.getElementById('btn-export-model').textContent,
       document.getElementById('btn-export-stl').textContent,
       document.getElementById('ctx-export').textContent]),
-    ['Download selected 3MF', 'Export plate 3MF', 'Export 3MF']);
+    ['Download selected 3MF', 'Export plate 3MF', 'Export selected as\u2026']);
   check('switching to 3MF reveals the cooling row',
     await page.evaluate(() => document.getElementById('cooling-profile-row').hidden), false);
   check('the choice is remembered for next time',
