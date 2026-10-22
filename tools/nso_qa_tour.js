@@ -253,11 +253,13 @@ function buildPlan() {
   V(COL, 'Join', 'join-slot-a', 'Pick piece A (a side wall)', { setup: 'two', run: async x => { await x.click('join-slot-a'); await x.pick(0, 0, false); } });
   V(COL, 'Join', 'join-slot-b', 'Pick piece B (a side wall)', { setup: 'two', pre: async x => { await x.click('join-slot-a'); await x.pick(0, 0, false); }, run: async x => { await x.click('join-slot-b'); await x.pick(1, 0, false); } });
   V(COL, 'Join', 'join-slot-c', 'Pick piece C (a side wall)', { setup: 'three', pre: async x => { await x.joinAB(); }, run: async x => { await x.click('join-slot-c'); await x.pick(2, 0, false); } });
-  V(COL, 'Join', 'btn-join', 'Complete Join (A, B picked)', { setup: 'two', pre: async x => { await x.joinAB(); }, run: press(['btn-join']) });
-  V(COL, 'Join', 'btn-join-clear', 'Cancel Join', { setup: 'two', pre: async x => { await x.joinAB(); }, run: press(['btn-join-clear']) });
-  V(COL, 'Join', 'triple-mode', 'A-B-C: mode (second)', { setup: 'three', view: true, run: async x => { await x.select('triple-mode', { index: 1 }); } });
-  V(COL, 'Join', 'triple-gap-ab', 'A-B-C: gap slider', { setup: 'three', view: true, run: async x => { await x.slider('triple-gap-ab', 0.7); } });
-  V(COL, 'Join', 'btn-join-triple', 'Join A-B-C', { setup: 'three', pre: async x => { await x.joinABC(); }, run: press(['btn-join-triple']) });
+  V(COL, 'Join', 'join-horizontal', 'Vertical / Horizontal toggle (to Horizontal)', { setup: 'three', view: true, run: flag('join-horizontal') });
+  V(COL, 'Join', 'join-gap-ab-on', 'A-B gap on', { setup: 'two', pre: async x => { await x.joinAB(); }, view: true, run: flag('join-gap-ab-on') });
+  V(COL, 'Join', 'join-gap-ab', 'A-B gap slider', { setup: 'two', view: true, pre: async x => { await x.joinAB(); await x.flag('join-gap-ab-on'); }, run: async x => { await x.slider('join-gap-ab', 0.7); } });
+  V(COL, 'Join', 'join-gap-bc-on', 'B-C gap on (C picked)', { setup: 'three', pre: async x => { await x.joinABC(); }, view: true, run: flag('join-gap-bc-on') });
+  V(COL, 'Join', 'btn-join', 'JOIN (A, B picked, gap off: Complete Join)', { setup: 'two', pre: async x => { await x.joinAB(); }, run: press(['btn-join']) });
+  V(COL, 'Join', 'btn-join', 'JOIN (A, B, C picked)', { setup: 'three', pre: async x => { await x.joinABC(); }, run: press(['btn-join']) });
+  V(COL, 'Join', 'btn-join-clear', 'Cancel', { setup: 'two', pre: async x => { await x.joinAB(); }, run: press(['btn-join-clear']) });
   const seatTwo = { setup: 'two', pre: async x => { await x.joinAB(); await x.click('btn-center-lock'); await x.wait(500); } };
   V(COL, 'Seat', 'btn-seat-support', 'Seat (support), after Center lock', Object.assign({ run: press(['btn-seat-support']) }, seatTwo));
   V(COL, 'Seat', 'seat-gap', 'Gap slider (drag), then Seat', Object.assign({ run: async x => { await x.slider('seat-gap', 0.8); await x.click('btn-seat-support'); } }, seatTwo));

@@ -27,13 +27,13 @@ const COL = ['btn-microscope', 'menu-scale', 'menu-cut', 'menu-crop', 'menu-join
 const MENUS = ROW.filter(id => id.startsWith('menu-')).concat(COL.filter(id => id.startsWith('menu-')));
 
 /* Every control that lived in the sidebar, and where it is now (Join and
-   A-B-C under Join; Plate and Pieces in the pinned Plate & pieces panel;
+   A-B-C as one card under Join; Plate and Pieces in the pinned Plate & pieces panel;
    Pack's Optimize a slab of its own, under Export). */
 const HOME = {
   'menu-joins': ['join-slot-a', 'join-slot-b', 'join-slot-c',
                 'join-name-a', 'join-name-b', 'join-name-c', 'btn-join', 'btn-join-clear',
-                'triple-join', 'triple-mode', 'triple-gap-ab', 'triple-gap-ab-value',
-                'triple-gap-bc', 'triple-gap-bc-value', 'btn-join-triple'],
+                'joins-card', 'join-horizontal', 'join-gap-ab-on', 'join-gap-ab', 'join-gap-ab-value',
+                'join-gap-bc-on', 'join-gap-bc', 'join-gap-bc-value', 'join-readout'],
   'menu-align': ['btn-join-align', 'btn-join-cx', 'btn-join-cz', 'btn-center-lock',
                  'btn-center-lock-pick', 'center-lock-ref'],
   'menu-seat': ['btn-seat-support', 'seat-gap', 'seat-gap-value', 'btn-seat-here',

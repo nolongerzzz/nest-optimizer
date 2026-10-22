@@ -2261,35 +2261,73 @@ select:focus, input:focus {
   accent-color: #4ade80;
   cursor: pointer;
 }
-/* Triple join: the two per-junction gaps, side by side, so a mixed pair
-   (a real air gap at one seam, a weld at the other) reads as two numbers at
-   a glance rather than one slider used twice. */
-.triple-join {
-  margin: 8px 0;
-  padding: 8px;
-  border: 1px solid #334155;
-  border-radius: 8px;
+/* The Join card (app-join-triple.js): the Vertical / Horizontal switch on
+   top, a gap row between each pair of slots it joins, JOIN and Cancel, and
+   the readout line. A gap row that is off greys its slider and number; the
+   B-C row is idle until C is picked. */
+.joins-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 248px;
 }
-.triple-join.triple-ready {
-  border-color: #60a5fa;
+.join-orient {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
 }
-.triple-join select,
-.triple-join .btn {
-  width: 100%;
+.joins-card:not(.join-horizontal) .join-orient-v,
+.joins-card.join-horizontal .join-orient-h { color: var(--text); }
+/* Both positions are a mode, neither is "off": the track keeps one colour. */
+.join-switch {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  flex: 0 0 34px;
+  width: 34px;
+  height: 18px;
+  margin: 0;
+  border-radius: 9px;
+  background: var(--accent);
+  cursor: pointer;
 }
-.triple-gap-row {
+.join-switch::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #f8fafc;
+  transition: transform 0.15s ease;
+}
+.join-switch:checked::before { transform: translateX(16px); }
+.join-switch:focus-visible { outline: 2px solid #f8fafc; outline-offset: 2px; }
+.join-gap-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 6px;
+  padding: 0 2px 0 12px;
 }
-.triple-gap-row label {
-  flex: 0 0 28px;
+.join-gap-check {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
   font-size: 12px;
-  font-weight: 700;
   color: var(--text);
+  cursor: pointer;
 }
-.triple-gap-row input[type="range"] {
+.join-gap-check input[type="checkbox"] { margin: 0; }
+.join-gap-row input[type="range"] {
   flex: 1 1 auto;
   min-width: 0;
   width: auto;
@@ -2297,15 +2335,30 @@ select:focus, input:focus {
   accent-color: #60a5fa;
   cursor: pointer;
 }
-.triple-gap-row output {
-  flex: 0 0 66px;
+.join-gap-row input[type="range"]:disabled { opacity: 0.35; cursor: default; }
+.join-gap-row output {
+  flex: 0 0 62px;
   text-align: right;
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   color: var(--text);
 }
-.triple-join .btn {
-  margin-top: 8px;
+.join-gap-row.join-gap-off output { color: var(--muted); }
+.join-gap-row.join-gap-idle { opacity: 0.45; }
+.join-gap-row.join-gap-idle .join-gap-check { cursor: default; }
+.join-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 4px;
+}
+.join-actions .btn { flex: 1 1 0; margin: 0; }
+.join-readout {
+  margin: 0;
+  font-size: 12px;
+  text-align: center;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .seat-support-row output {
@@ -3923,7 +3976,6 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
 }
 .vp-shell-col .vp-menu-body:not(.vp-finish) .btn { font-size: 12.5px; }
 /* The sidebar's cards gave these a top margin and a card behind them. */
-.vp-shell-menu .join-slots { margin-bottom: 0; }
 .vp-shell-menu .btn-secondary { margin-bottom: 0; }
 
 /* The merged drop-downs' members (Join ▾, Plate ▾, Gen+'s Photo) open in flow

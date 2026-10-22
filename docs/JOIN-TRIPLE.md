@@ -22,22 +22,57 @@ time.
 
 So: three slots, two gaps, one press.
 
-## Using it
+## The card (one card, all options — 2026-10-22)
 
-In the Join card, with a Join started:
+The Join column is one card. Join and A-B-C are no longer two sub-menus.
+
+```
+        Vertical ○━━● Horizontal          the toggle
+  [ A  Pick piece A                    ]
+   ☐ gap  ──────●────  -0.18 mm          A-B: checkbox + slider
+  [ B  Pick piece B                    ]
+   ☐ gap  ──────●────  -0.18 mm          B-C: live once C is picked
+  [ C  Pick piece C (optional)         ]
+  [ JOIN ]                 [ Cancel ]
+      A-B: touching · B-C: 0.18 gap · vertical
+```
 
 - **Pick A, B, C** — the three slots, in the order the sequence runs. A is the
   piece everything else comes to; B is seated onto A, then C is seated onto B.
   The three must be different pieces; a click that would put the same piece in
   two slots is refused and the slot stays armed.
-- **Mode** — *vertical stack* or *horizontal sequence* (below).
-- **A-B** and **B-C** — one gap per junction. Same range, step and meaning as
-  the Seat (support) slider: **-0.25 mm** (air) through **0** (touching) to
-  **+0.05 mm** (overlap — a solid, welded penetration). The two are
-  independent; mixing a real test gap at one seam with a weld at the other is
-  the case this was built for.
-- **Join A-B-C** — runs both junctions. Live only when all three slots are
-  filled with different pieces.
+- **The toggle** — *Vertical* stack or *Horizontal* sequence (below). It is the
+  mode of every junction JOIN seats, two pieces as well as three.
+- **The gap rows** sit between the slots they join. **Checkbox off** is no gap:
+  that junction is centre-locked and seated **touching (0)**, and its slider
+  greys out. **Checkbox on** is the slider's value: same range, step and meaning
+  as the Seat (support) slider, **-0.25 mm** (air) through **0** (touching) to
+  **+0.05 mm** (overlap, a solid welded penetration), default **-0.18**. The two
+  rows are independent. The B-C row is disabled until C is picked.
+- **JOIN** does one of three things:
+
+  | picked | A-B row | JOIN runs |
+  |---|---|---|
+  | A, B | off | **Complete Join**, exactly as before: B brought to A and welded into it, one piece |
+  | A, B | on | the **A-B junction** alone, at the slider's gap, in the toggle's mode: the triple's first junction |
+  | A, B, C | either | **both junctions**, each at its own row's gap (0 for a row that is off) |
+
+  Complete Join finds its own axis from where the pieces sit, so the toggle
+  does not steer it; the readout leaves the mode off for that case.
+- **Cancel** clears the slots. The toggle and both gap rows keep their setting.
+- **The readout** under JOIN says what it will do before it is pressed:
+  `A-B: touching · B-C: 0.18 gap · vertical`, `A-B: 0.18 gap · horizontal`,
+  `A-B: touching · welded into one piece`.
+
+Where the removed controls' jobs went:
+
+| removed | now |
+|---|---|
+| Join / A-B-C sub-menus | the one card |
+| `#triple-mode` select | the toggle, `#join-horizontal` |
+| `#triple-gap-ab` / `#triple-gap-bc` | the gap rows, `#join-gap-ab-on` + `#join-gap-ab`, `#join-gap-bc-on` + `#join-gap-bc` |
+| Complete Join / Join A-B-C | JOIN, `#btn-join` |
+| Cancel Join | Cancel, `#btn-join-clear` |
 
 The status line names both seams and what each one measured:
 
@@ -74,8 +109,11 @@ apply and B's own centre is used.
   `liftY = boxBottom - 0.2`, and `settlePlacedOnBed` puts the box bottom back
   on `0.2 + liftY`. The settle is idempotent on a seated piece, so the first
   seam survives the second untouched.
-- **Undo is four entries** — lock, seat, lock, seat — the same four a
-  hand-run pair of junctions leaves. Nothing is collapsed.
+- **One JOIN is one Undo.** The steps inside it are the ordinary ones — lock,
+  seat, lock, seat — kept as they were made, in one `stepGroup` entry that
+  undoes them last first (`app-core.js`). A sequence that stops at B-C leaves
+  the A-B steps it did take as that one entry. Complete Join was always one
+  entry and still is.
 - **A junction that cannot seat stops the sequence** and says which seam
   stopped it, and whether the earlier seam is seated and was left alone.
 - **Seat's own limits are still Seat's limits.** A piece whose footprint does
@@ -92,14 +130,21 @@ apply and B's own centre is used.
 
 | | |
 |---|---|
-| `app-join-triple.js` | the sequence, the modes, the two gaps, the UI |
-| `app-join.js` | slot C in `updateJoinUI` / `assignJoinClick`; `seatBitAtGap` returns its result; `readSeatGapInput(id)` / `updateSeatGapReadout(id, outId)` take an input id |
+| `app-join-triple.js` | the card: the sequence, the modes, the gap rows, the readout, what JOIN runs (`press`), one press as one Undo |
+| `app-join.js` | slot C in `updateJoinUI` / `assignJoinClick`; JOIN's click goes to `NSO_TripleJoin.press`; `seatBitAtGap` returns its result; `readSeatGapInput(id)` / `updateSeatGapReadout(id, outId)` take an input id |
 | `app-center-lock.js` | `NSO_CenterLock.lastError()` — why the last refusal was a refusal |
-| `app-core.js` | `state.joinThirdId` / `state.joinFaceC`, cleared wherever the pair is retired |
-| `index.html`, `styles.css` | the C slot, the mode select, the two gap rows |
+| `app-core.js` | `state.joinThirdId` / `state.joinFaceC`, cleared wherever the pair is retired; the `stepGroup` undo entry |
+| `index.html`, `styles.css` | the card: toggle, slots, gap rows, JOIN / Cancel, readout |
 | `tools/nso_join_triple_test.js` | the drive check (`npm run join:triple`) |
 
 The two load-bearing gates in the drive check are the ones that compare the
 sequence against the buttons it is made of: the pose the triple leaves B in is
 **bit-for-bit** the pose `Center lock` + `Seat (support)` leave B in by hand
 (vertical), and `Center Z` + `Seat (support)` leave B in by hand (horizontal).
+The card's gates sit beside them: two pieces with the gap off is Complete Join
+vertex for vertex (section 13); two pieces with the gap on is the triple's
+first junction pose for pose, both modes (14); a row that is off is that
+junction at 0, pose for pose, and Center lock + Seat at 0 by hand (15); the
+card's layout, the B-C row disabled until C, the readout (16); Cancel keeps the
+toggle (17). Section 18 writes the card in both toggle states to
+`tools/join-card-out/` (not committed).

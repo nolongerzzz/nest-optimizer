@@ -58,8 +58,8 @@ function updateJoinUI() {
   // Center lock rides the same A+B precondition; its own module owns the
   // armed/target label on the pick button.
   if (window.NSO_CenterLock) window.NSO_CenterLock.syncUI();
-  // Same for the triple sequence: it owns the enabled state of its own
-  // Run button and gap rows, off the very same A/B/C slots.
+  // Same for the card's gap rows, toggle and readout (app-join-triple.js),
+  // off the very same A/B/C slots.
   if (window.NSO_TripleJoin) window.NSO_TripleJoin.syncUI();
   if (step) {
     if (!state.joinSession) step.textContent = '1. Start Join';
@@ -68,8 +68,8 @@ function updateJoinUI() {
     else if (state.joinArmed === 'b') step.textContent = '3. Click piece B on the plate or list';
     else if (!state.joinPartnerId) step.textContent = '3. Click Pick B';
     else if (state.joinArmed === 'c') step.textContent = '4. Click piece C on the plate or list';
-    else if (state.joinThirdId) step.textContent = '4. Set a gap per junction, then Join A-B-C';
-    else step.textContent = '4. Align / slide B along the wall, then Complete Join';
+    else if (state.joinThirdId) step.textContent = '4. Set a gap per junction, then JOIN';
+    else step.textContent = '4. Set the A-B gap (or none), then JOIN';
   }
   paintJoinHighlights();
 }
@@ -130,12 +130,12 @@ function startJoinSession() {
 /* No Start Join: the Join column is the switch. Opening it starts the session
    (startJoinSession, what the button ran) and shows the Join card, with its
    slots, at once; shutting it with the column button again, with Escape, or by
-   the leave-tool gesture is Cancel Join (clearJoinSlots). A session already
+   the leave-tool gesture is Cancel (clearJoinSlots). A session already
    live is kept as it is: Seat, Align and Center lock work on the A and B the
    Join card holds, so opening one of THEIR columns shuts this one and leaves
    the session standing - returning to Join finds the slots as they were. (The
-   Cancel Join button is unchanged.) A MutationObserver on `open`, for the
-   reason the one-panel rule below gives. */
+   card's Cancel clears the slots and leaves the card open.) A MutationObserver
+   on `open`, for the reason the one-panel rule below gives. */
 function joinWireCard() {
   const menu = document.getElementById('menu-joins');
   if (!menu || menu.dataset.nsoWired === '1') return;
@@ -146,9 +146,6 @@ function joinWireCard() {
   };
   const show = function () {
     if (!state.joinSession) startJoinSession();
-    // The Join card shows first, unless a member (A-B-C) was opened with the column.
-    const card = document.getElementById('menu-join');
-    if (card && !menu.querySelector('.vp-sub-menu[open]')) card.open = true;
   };
   if (typeof MutationObserver === 'function') {
     new MutationObserver(function () {
@@ -2149,7 +2146,7 @@ async function joinSelectedModels() {
   const idA = state.editId;
   const idB = state.joinPartnerId;
   if (!state.joinSession || idA == null || idB == null || idA === idB) {
-    setStatus('Open JOIN, Pick A, Pick B, then Complete Join', true);
+    setStatus('Open JOIN, Pick A, Pick B, then JOIN', true);
     return;
   }
   const modelA = state.models.find(x => x.id === idA);
@@ -3154,13 +3151,16 @@ function setupUI() {
       var prevLabel = btnJoin.textContent;
       btnJoin.disabled = true;
       btnJoin.textContent = 'Joining...';
-      Promise.resolve(joinSelectedModels()).catch(function (err) {
+      // JOIN: two pieces with the A-B gap off is Complete Join; a gap or a
+      // third piece is the junction sequence (app-join-triple.js, press).
+      const go = window.NSO_TripleJoin ? window.NSO_TripleJoin.press : joinSelectedModels;
+      new Promise(function (resolve) { resolve(go()); }).catch(function (err) {
         console.warn('[join] unexpected error:', err);
         setStatus('Join failed - unexpected error', true);
       }).then(function () {
         joinBusy = false;
-        btnJoin.disabled = false;
         btnJoin.textContent = prevLabel;
+        updateJoinUI();
       });
     });
   }

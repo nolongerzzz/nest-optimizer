@@ -200,6 +200,18 @@ function undoLastStep() {
   const entry = state.undoStack.pop();
   updateUndoBtn();
   if (!entry) { setStatus('Nothing to undo'); return; }
+  if (entry.type === 'stepGroup') {
+    // One press that ran several ordinary steps (the Join card's JOIN: lock,
+    // seat, lock, seat). Each step is undone by its own branch, last first,
+    // so one Undo backs out the whole press.
+    (entry.steps || []).slice().reverse().forEach(step => {
+      state.undoStack.push(step);
+      undoLastStep();
+    });
+    updateUndoBtn();
+    setStatus(entry.label || 'Undo: reverted');
+    return;
+  }
   if (entry.type === 'addModels') {
     const ids = new Set(entry.ids || []);
     state.models = state.models.filter(m => !ids.has(m.id));
