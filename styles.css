@@ -3038,7 +3038,7 @@ select:focus, input:focus {
 .ms-main-head {
   display: flex;
   align-items: center;
-  height: var(--shell-btn-h);
+  height: calc(var(--shell-btn-h) + 1px);   /* IMPORT's 36 px, and the rule under it */
   flex: 0 0 auto;
   border-bottom: 1px solid rgba(255, 255, 255, 0.10);
 }
@@ -3136,7 +3136,9 @@ select:focus, input:focus {
 .ms-main-card[data-side="slice"] .ms-row:not([data-on~="slice"]) { display: none; }
 .ms-row .ms-btn-row { margin-bottom: 0; }
 .ms-row .ms-note { margin: 6px 0 0 0; }
-.ms-main-card button:not(.ms-switch-side):not(.ms-import-btn):not(.ms-import-more) {
+/* :where() keeps the base rule at one class's weight, so the states below
+   (armed, pressed, disabled, the disclosure row, the segment's corners) win. */
+.ms-main-card button:where(:not(.ms-switch-side, .ms-import-btn, .ms-import-more)) {
   background: var(--panel);
   border: 1px solid var(--border);
   color: var(--text);
@@ -3146,7 +3148,7 @@ select:focus, input:focus {
   cursor: pointer;
   font-family: inherit;
 }
-.ms-main-card button:not(.ms-switch-side):not(.ms-import-btn):not(.ms-import-more):hover:not(:disabled) { border-color: var(--accent); }
+.ms-main-card button:where(:not(.ms-switch-side, .ms-import-btn, .ms-import-more)):hover:not(:disabled) { border-color: var(--accent); }
 .ms-main-card button.active:not(.ms-switch-side),
 .ms-main-card button[aria-pressed="true"]:not(.ms-switch-side) {
   border-color: var(--accent);
@@ -3186,9 +3188,19 @@ select:focus, input:focus {
 }
 .ms-main-card button.ms-disclose::before { content: "\25B8"; display: inline-block; width: 1.2em; }
 .ms-main-card button.ms-disclose[aria-expanded="true"]::before { content: "\25BE"; }
-#ms-slice-settings { margin-top: 6px; }
-#ms-slice-settings .ms-btn-row { margin-bottom: 6px; gap: 4px 8px; }
-#ms-slice-settings label.ms-note { display: inline-flex; align-items: center; gap: 4px; }
+/* Two to a row: nozzle · layer, walls · infill, pattern · support below. */
+#ms-slice-settings {
+  margin-top: 6px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 10px;
+  align-items: center;
+}
+#ms-slice-settings > .ms-btn-row { display: contents; }
+#ms-slice-settings > .ms-note { grid-column: 1 / -1; margin: 2px 0 0 0; }
+#ms-slice-settings label.ms-note { display: inline-flex; align-items: center; gap: 4px; margin: 0; white-space: nowrap; }
+/* Wide enough for the longest value each takes (100 %, 0.25 mm) - a cut figure reads as another number. */
+#ms-slice-settings input[type="number"] { width: 5.2em; padding: 4px 4px 4px 6px; }
 #ms-slice-settings[hidden] { display: none; }
 
 .ms-card .ms-btn-row,
@@ -3209,7 +3221,7 @@ select:focus, input:focus {
   font-family: inherit;
 }
 
-/* The readouts, always up, never a card. Left wall, under the column: the
+/* The readouts, always up, never a card. Left wall, under the card: the
    file line, and the feature legend right under it. Along the bottom, right
    of them: the info, Features, the Slice report and the mode hint, side by
    side so they stay low and leave the piece clear. #ms-dock itself is only
@@ -3302,7 +3314,7 @@ select:focus, input:focus {
 
 /* The feature legend, on the left wall under the file line (see .ms-dock-left).
    A file with many features scrolls inside it rather than growing up into
-   the column. */
+   the card. */
 #ms-legend-float {
   flex: 0 1 auto;
   min-height: 0;

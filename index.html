@@ -1525,20 +1525,20 @@
                     <option value="0.6">0.6</option>
                   </select></label>
                 <label class="ms-note" for="ms-slice-layer" style="margin:0">layer
-                  <input type="number" id="ms-slice-layer" value="0.2" min="0.05" max="0.6" step="0.05" style="width:4.5em" /></label>
+                  <input type="number" id="ms-slice-layer" value="0.2" min="0.05" max="0.6" step="0.05" /></label>
                 <label class="ms-note" for="ms-slice-walls" style="margin:0">walls
-                  <input type="number" id="ms-slice-walls" value="2" min="1" max="10" step="1" style="width:3.5em" /></label>
+                  <input type="number" id="ms-slice-walls" value="2" min="1" max="10" step="1" /></label>
               </div>
               <div class="ms-btn-row" data-flex="1">
                 <label class="ms-note" for="ms-slice-density" style="margin:0">infill
-                  <input type="number" id="ms-slice-density" value="15" min="0" max="100" step="5" style="width:3.5em" />%</label>
+                  <input type="number" id="ms-slice-density" value="15" min="0" max="100" step="5" />%</label>
                 <select id="ms-slice-pattern" style="width:auto" title="Sparse infill pattern">
                   <option value="grid" selected>grid</option>
                   <option value="zigzag">zigzag</option>
                   <option value="lines">lines</option>
                 </select>
                 <label class="ms-note" for="ms-slice-angle" style="margin:0">support below
-                  <input type="number" id="ms-slice-angle" value="30" min="1" max="89" step="1" style="width:3.5em"
+                  <input type="number" id="ms-slice-angle" value="30" min="1" max="89" step="1"
                          title="Printable angle off the plate. 30 is the real Bambu profile's support_threshold_angle; auto-aim uses 45" />&deg;</label>
               </div>
               <p class="ms-note" id="ms-slice-settings-note">From the plate's printer profile. They take effect on the next slice: Normal, then Slice again.</p>
@@ -1552,10 +1552,11 @@
            after an Import. A card of the shell's (one open at a time; Escape,
            a press outside it, a choice or CLOSE shuts it), opening under the
            card's head. Both ways in load into the ACTIVE plate. -->
-      <div id="ms-import-menu" class="ms-card ms-menu" role="menu" aria-label="More ways in" data-nav="ms-btn-import-more">
+      <div id="ms-import-menu" class="ms-card ms-menu" role="menu" aria-label="More ways in" data-nav="ms-btn-import-more"
+           aria-describedby="ms-import-menu-note">
         <button id="ms-btn-plate" type="button" role="menuitem"
                 title="Read the pieces that are on the plate right now, as placed, onto the active plate. The plate itself is not changed.">Read plate</button>
-        <p class="ms-note">The pieces on the plate as they stand, onto the active plate. Opening G-scope from the plate already brings them.</p>
+        <p class="ms-note" id="ms-import-menu-note" role="presentation">The pieces on the plate as they stand, onto the active plate. Opening G-scope from the plate already brings them.</p>
       </div>
 
       <!-- Export: one card for all six. Which rows show is the engine's call

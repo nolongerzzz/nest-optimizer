@@ -188,7 +188,7 @@ var NSO_GSCOPE_SLICE = (function () {
     });
     var source = { label: d.name, objects: d.objects, docSource: d.source, subtitle: d.subtitle };
     busy = true;
-    syncToggle();
+    syncPanel();                          // the switch busy, the Slice report up for its progress
     var read = $('ms-slice-read');
     if (read) read.textContent = 'Slicing ' + objects.length + ' object(s)...';
     say('Slicing ' + d.name + '...');
@@ -217,6 +217,8 @@ var NSO_GSCOPE_SLICE = (function () {
       .then(function (out) {
         busy = false;
         syncPanel();
+        // a refusal's own words stay in the report (syncPanel writes the mesh's intro)
+        if (out && !out.ok && out.reason) { var rd = $('ms-slice-read'); if (rd) rd.textContent = out.reason; }
         return out;
       });
   }
@@ -327,6 +329,13 @@ var NSO_GSCOPE_SLICE = (function () {
     return showingSlice() ? 'slice' : 'normal';
   }
 
+  /** Off without dropping the keyboard: G-scope's own setDisabled (Escape stays the panel's). */
+  function off(el, yes) {
+    var M = MS();
+    if (!el) return;
+    if (M && M.setDisabled) M.setDisabled(el, yes); else el.disabled = !!yes;
+  }
+
   function syncToggle() {
     var d = MS() && MS().getDoc();
     var on = viewMode() === 'slice';
@@ -335,14 +344,14 @@ var NSO_GSCOPE_SLICE = (function () {
       n.classList.toggle('active', !on);
       n.setAttribute('aria-pressed', String(!on));
       // From a slice made here, Normal is its mesh; a sliced file has no mesh to go back to.
-      n.disabled = busy || (on && !(d && d.nsoSlice));
+      off(n, busy || (on && !(d && d.nsoSlice)));
     }
     if (c) {
       c.classList.toggle('active', on);
       c.setAttribute('aria-pressed', String(on));
       c.setAttribute('aria-busy', String(busy));
       // A mesh can be sliced; a toolpath is the Slice side already (a click there changes nothing).
-      c.disabled = busy || !d;
+      off(c, busy || !d);
     }
     if (sw) sw.classList.toggle('is-busy', busy);
   }
@@ -481,6 +490,7 @@ var NSO_GSCOPE_SLICE = (function () {
     normalView: normalView,
     viewMode: viewMode,
     syncToggle: syncToggle,
+    syncPanel: syncPanel,
     /** The plate's printer profile's settings: { printer, nozzle, layer }. */
     profileDefaults: profileDefaults,
     seedSettings: seedSettings,

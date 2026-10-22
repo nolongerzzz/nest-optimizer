@@ -1037,7 +1037,7 @@ var NSO_MICROSCOPE = (function () {
     var c = $('ms-main-card');
     if (c) c.dataset.side = cardSide();
     var S = window.NSO_GSCOPE_SLICE;
-    if (S && S.syncToggle) S.syncToggle();
+    if (S && S.syncPanel) S.syncPanel(); else if (S && S.syncToggle) S.syncToggle();
   }
   function badgeFor() {
     if (!isolated) badge(plateBadge());
@@ -1656,13 +1656,17 @@ var NSO_MICROSCOPE = (function () {
 
   /**
    * A press here: the selection when it is under the pointer, else what the mode
-   * takes. With REGION armed only the boxes' own selection counts as "the
-   * selection" here (a click inside the box isolates it); a piece picked before
-   * is boxed like any other.
+   * takes. With REGION armed and nothing isolated, a press on the selection is
+   * not "the selection": a click inside a box is the box's own (boxOwnsPress,
+   * its face), and anywhere else - a piece the boxes hold, outside them; a piece
+   * picked before - it places a box like any other click (item 7). Isolated,
+   * the selection is the selection in every mode: a click on it makes the view
+   * whole again, a drag copies it.
    */
+  function selectionTakes() { return isolated || mode !== 'select'; }
   function pressTarget(e) {
     if (!doc) return null;
-    if (currentSelection.length && (mode !== 'select' || selectionSource === 'box') && selectedHit(e)) {
+    if (currentSelection.length && selectionTakes() && selectedHit(e)) {
       return { items: currentSelection, source: selectionSource, selected: true, label: 'selection' };
     }
     return targetAt(e);
@@ -1809,7 +1813,7 @@ var NSO_MICROSCOPE = (function () {
       // a box's dot or (REGION armed) the box itself: a press there is the box's, so
       // nothing new is outlined - what a click inside it isolates is the selection, lit already
       own = boxOwnsPress(e);
-      if (!own && currentSelection.length && (mode !== 'select' || selectionSource === 'box') && selectedHit(e)) {
+      if (!own && currentSelection.length && selectionTakes() && selectedHit(e)) {
         if (doc.kind === 'toolpath') { var lh = lineHitAt(e); seg = lh && lh.seg; }
       } else if (!own) {
         tgt = targetAt(e);
@@ -2201,7 +2205,7 @@ var NSO_MICROSCOPE = (function () {
     var v = view;
     hoverPending = null;                                    // the press picks for itself (pressTarget); a move still waiting is not drawn after it
     if (pull && pull.touch) pull.cancelled = true;          // a second finger: the pinch's, not a click's
-    if (v) v.platePress = null;
+    if (v) { v.platePress = null; v.regionPress = null; }
     if (!v || e.button !== 0 || pull) return;
     if (!doc) { notePlatePress(e); return; }
     var own = boxOwnsPress(e);
@@ -2213,10 +2217,13 @@ var NSO_MICROSCOPE = (function () {
     v.boxPress = null;
     var tgt = pressTarget(e);
     if (!tgt) { notePlatePress(e); return; }    // bare floor: orbit (the other plate: a click there activates it)
+    // REGION where its box would hold nothing: the press is not taken - a drag
+    // orbits, as on bare floor - and a click there still places the box
+    if (tgt.source === 'box' && !tgt.items.length && !tgt.selected) { v.regionPress = { x: e.clientX, y: e.clientY, tgt: tgt }; return; }
     // a piece dragged here, nothing isolated, by the mouse: it is grabbed - it moves
     var o = !isolated && e.pointerType !== 'touch' ? takePieceAt(e) : null;
     if (o && window.nsoGrab && window.nsoGrab.begin(o, null, e, pieceWorld)) {
-      var tg = (currentSelection.length === 1 && currentSelection[0] === o && selectedHit(e))
+      var tg = (selectionTakes() && currentSelection.length === 1 && currentSelection[0] === o && selectedHit(e))
         ? { items: currentSelection, source: selectionSource, selected: true } : tgt;
       claimPress(e);
       pull = { kind: 'move', piece: o, tgt: tg, home: plateName, x0: e.clientX, y0: e.clientY, live: false, cancelled: false };
@@ -2293,10 +2300,16 @@ var NSO_MICROSCOPE = (function () {
         view.platePress = null;
         if (e && !view.hookTook && Math.hypot(e.clientX - pp.x, e.clientY - pp.y) < pullSlop() && isOpen()) { activatePlate(pp.name); return; }
       }
+      var rp = view && view.regionPress;
+      if (rp) {
+        view.regionPress = null;
+        if (e && !view.hookTook && Math.hypot(e.clientX - rp.x, e.clientY - rp.y) < pullSlop() && isOpen() && doc) { clickTarget(rp.tgt, e); return; }
+      }
       var bp = view && view.boxPress;
-      // a dot is a handle: pressed and let go, it isolates nothing (item 8)
-      if (bp && !bp.dot && e && Math.hypot(e.clientX - bp.x, e.clientY - bp.y) < pullSlop() && currentSelection.length) {
-        if (isolated) unIsolate(); else isolate();
+      // a click inside a box (no travel): what the boxes hold, isolated - or whole
+      // again; a dot is a handle: pressed and let go, it isolates nothing (item 8)
+      if (bp && !bp.dot && e && Math.hypot(e.clientX - bp.x, e.clientY - bp.y) < pullSlop()) {
+        if (isolated) unIsolate(); else isolateBoxes();
       }
       if (view) view.boxPress = null;
       return;
@@ -2310,8 +2323,12 @@ var NSO_MICROSCOPE = (function () {
       r = !P.cancelled && window.nsoGrab && window.nsoGrab.active() ? window.nsoGrab.end() : null;
     } catch (err) {
       console.error('[g-scope] let go', err);
-      say('That drop failed - see the console. G-scope is ready for the next press.', true);
       P.cancelled = true;
+      // the grab is put back too - else app-grab-drop.js keeps it, takes the next
+      // Escape for itself and replays the failed drop on the next click
+      try { if (window.nsoGrab && window.nsoGrab.active()) window.nsoGrab.cancel(); }
+      catch (err2) { console.error('[g-scope] put back', err2); }
+      say('That drop failed - see the console. Nothing was copied; G-scope is ready for the next press.', true);
     } finally {
       pull = null;
       carriedOver = null;
@@ -2354,6 +2371,18 @@ var NSO_MICROSCOPE = (function () {
       setSelection(tgt.items, tgt.source);
     }
     isolate();
+  }
+
+  /**
+   * Isolate (the REGION row) and a click inside a box: what the boxes hold, taken
+   * again from the boxes - a piece moved or dropped since may have been
+   * selected - and isolated. False with no box.
+   */
+  function isolateBoxes() {
+    if (isolated || !balls.length) return false;
+    selectionSource = 'box';
+    computeSelectionInfo();
+    return isolate();
   }
 
   /** Escape on a box not isolated: the last one placed goes (item 7). True if one did. */
@@ -3305,7 +3334,7 @@ var NSO_MICROSCOPE = (function () {
     if (b) {
       b.classList.toggle('active', mode === 'select');
       b.setAttribute('aria-pressed', String(mode === 'select'));
-      b.disabled = !modeAvailable('select');
+      setDisabled(b, !modeAvailable('select'));
     }
     var note = $('ms-region-note');
     if (note) note.hidden = mode !== 'select';
@@ -3450,7 +3479,11 @@ var NSO_MICROSCOPE = (function () {
         var i3 = balls.findIndex(function (b) { return b.boxMesh === surfaceHits[0].object; });
         // The footprint's proportion, fixed for the drag (see resizeR below).
         var m3 = Math.max(balls[i3].rx, balls[i3].ry);
-        v.dragState = { type: 'resizeR', ballIndex: i3, fx: balls[i3].rx / m3, fy: balls[i3].ry / m3 };
+        // Not live until it travels past the slop: a press inside the box that is
+        // let go in place is a click (it isolates - item 7), and a hand's jitter
+        // on the way must not resize the box first.
+        v.dragState = { type: 'resizeR', ballIndex: i3, fx: balls[i3].rx / m3, fy: balls[i3].ry / m3,
+                        r0: m3, x0: e.clientX, y0: e.clientY, d0: 0 };
         v.controls.enabled = false;
         var d3 = new THREE.Vector3();
         v.camera.getWorldDirection(d3);
@@ -3499,12 +3532,19 @@ var NSO_MICROSCOPE = (function () {
         defaultRx = ball.rx; defaultRy = ball.ry;
         updateBoxTransform(ball);
       } else if (v.dragState.type === 'resizeR') {
-        // footprint resize: horizontal distance only. The reference tool set
-        // its one `r` here; with a rectangle the LARGER side follows the
-        // pointer and the other keeps the proportion it had when the drag
-        // began, so a square behaves exactly as it did and a corner-drawn
-        // rectangle keeps its shape.
-        var flat = Math.max(0.3, Math.min(60, Math.hypot(hit.x - ball.point.x, hit.z - ball.point.z)));
+        // footprint resize: horizontal distance only, and only once the press
+        // has travelled past the slop (before that it is a click inside the
+        // box). The footprint then scales with the pointer's distance from the
+        // centre, from where the drag began - no jump to the press point. With
+        // a rectangle the LARGER side follows and the other keeps the
+        // proportion it had when the drag began, so a square stays a square and
+        // a corner-drawn rectangle keeps its shape.
+        var ds = v.dragState, rd = Math.hypot(hit.x - ball.point.x, hit.z - ball.point.z);
+        if (!ds.d0) {
+          if (Math.hypot(e.clientX - ds.x0, e.clientY - ds.y0) < pullSlop()) return;
+          ds.d0 = Math.max(rd, 1e-3);
+        }
+        var flat = Math.max(0.3, Math.min(60, ds.r0 * rd / ds.d0));
         ball.rx = Math.max(0.3, flat * v.dragState.fx);
         ball.ry = Math.max(0.3, flat * v.dragState.fy);
         defaultR = Math.max(ball.rx, ball.ry);
@@ -3644,15 +3684,17 @@ var NSO_MICROSCOPE = (function () {
 
   /** The card's REGION and WHOLE PART buttons: what each can do now. */
   function syncCardRows() {
-    setDisabled($('ms-btn-isolate'), isolated || !currentSelection.length);
+    setDisabled($('ms-btn-isolate'), isolated || !balls.length);
     setDisabled($('ms-btn-clear'), !balls.length);
     setDisabled($('ms-btn-back'), !isolated);
   }
 
   /**
-   * A button switched off. One that had the keyboard hands it to the panel: a
+   * A control switched off. One that had the keyboard hands it to the panel: a
    * disabled button drops its focus to the page, and Escape - the panel's -
-   * would then reach nothing (Isolate pressed, then Escape, did nothing).
+   * would then reach nothing (Isolate pressed, then Escape, did nothing; the
+   * last box Escaped away with EXPORT focused, and its rows emptied, did the
+   * same). Every control G-scope switches off goes through here.
    */
   function setDisabled(el, off) {
     if (!el || el.disabled === !!off) return;
@@ -4399,7 +4441,7 @@ var NSO_MICROSCOPE = (function () {
     var btn = $('ms-btn-take-band'), read = $('ms-band-read');
     var n = doc && doc.kind === 'toolpath' ? shownSegments().length : 0;
     var why = bandReason(n);
-    if (btn) btn.disabled = !!why;
+    setDisabled(btn, !!why);
     if (!read) return;
     if (why) { read.textContent = why + '.'; return; }
     var band = zBandMm();
@@ -4714,8 +4756,8 @@ var NSO_MICROSCOPE = (function () {
   function syncRenderRow() {
     var isPath = !!(doc && doc.kind === 'toolpath');
     var a = $('ms-render-toolpath'), b = $('ms-render-solid');
-    if (a) { a.classList.toggle('active', renderMode === 'toolpath'); a.setAttribute('aria-pressed', String(renderMode === 'toolpath')); a.disabled = !isPath; }
-    if (b) { b.classList.toggle('active', renderMode === 'solid'); b.setAttribute('aria-pressed', String(renderMode === 'solid')); b.disabled = !isPath; }
+    if (a) { a.classList.toggle('active', renderMode === 'toolpath'); a.setAttribute('aria-pressed', String(renderMode === 'toolpath')); setDisabled(a, !isPath); }
+    if (b) { b.classList.toggle('active', renderMode === 'solid'); b.setAttribute('aria-pressed', String(renderMode === 'solid')); setDisabled(b, !isPath); }
     var rd = $('ms-render-read');
     if (rd) {
       if (!isPath) rd.textContent = 'Flip the switch to Slice to draw the slice as a toolpath or as a solid.';
@@ -4834,7 +4876,7 @@ var NSO_MICROSCOPE = (function () {
     if (selTitle) selTitle.textContent = isPieces(doc) ? 'Selected piece' : 'Selection';
     syncCardRows();
     var sa = $('ms-btn-show-all');
-    if (sa) sa.disabled = !hasLineTypes();
+    setDisabled(sa, !hasLineTypes());
   }
 
   function syncHeader() {
@@ -5273,9 +5315,17 @@ var NSO_MICROSCOPE = (function () {
   function shellCardSet(card, on) {
     var el = $(card);
     if (el) el.classList.toggle('is-open', on);
-    // a shut card must not take the keyboard with it: Escape is the panel's
+    // a shut card must not take the keyboard with it: it goes back to the
+    // button that opened it (or, that one off, the panel - Escape is the panel's)
     var ae = document.activeElement, panel = $('microscope');
-    if (!on && el && ae && el.contains(ae) && panel && panel.focus) panel.focus();
+    if (!on && el && ae && el.contains(ae)) {
+      var opener = null;
+      SHELL_CARDS.forEach(function (c) { if (c[1] === card) opener = $(c[0]); });
+      if (opener && !opener.disabled && opener.focus) opener.focus();
+      else if (panel && panel.focus) panel.focus();
+    }
+    // the ▾ menu opened: the keyboard is on its item
+    if (on && card === 'ms-import-menu') { var item = $('ms-btn-plate'); if (item && item.focus) item.focus(); }
     SHELL_CARDS.forEach(function (c) {
       if (c[1] !== card) return;
       var btn = $(c[0]);
@@ -5305,7 +5355,7 @@ var NSO_MICROSCOPE = (function () {
       var btn = $(c[0]);
       if (!btn || !c[2]) return;
       var avail = c[2].some(rowShown);
-      btn.disabled = !avail;
+      setDisabled(btn, !avail);
       if (!avail && shellOpen === c[1]) shellCardClose();
     });
     // A labelled group of rows shows while any of its rows does.
@@ -5322,16 +5372,22 @@ var NSO_MICROSCOPE = (function () {
     SHELL_CARDS.forEach(function (c) {
       bind(c[0], 'click', function () { shellCardToggle(c[1]); });
     });
-    // a press anywhere but the ▾ menu (or its button) shuts the menu
+    // a press anywhere but the ▾ menu (or its button) shuts the menu, and so
+    // does the keyboard leaving it for anywhere else
     var panel = $('microscope');
     if (panel && panel.dataset.menuWired !== '1') {
       panel.dataset.menuWired = '1';
+      var outside = function (t) {
+        var m = $('ms-import-menu'), b = $('ms-btn-import-more');
+        return !((m && m.contains(t)) || (b && b.contains(t)));
+      };
       panel.addEventListener('pointerdown', function (ev) {
-        if (shellOpen !== 'ms-import-menu') return;
-        var m = $('ms-import-menu'), b = $('ms-btn-import-more'), t = ev.target;
-        if ((m && m.contains(t)) || (b && b.contains(t))) return;
-        shellCardClose();
+        if (shellOpen === 'ms-import-menu' && outside(ev.target)) shellCardClose();
       }, true);
+      var menu = $('ms-import-menu');
+      if (menu) menu.addEventListener('focusout', function (ev) {
+        if (shellOpen === 'ms-import-menu' && ev.relatedTarget && outside(ev.relatedTarget)) shellCardClose();
+      });
     }
     watchCard();
     if (typeof MutationObserver === 'undefined') { syncShell(); return; }
@@ -5405,7 +5461,7 @@ var NSO_MICROSCOPE = (function () {
       computeSelectionInfo();
       syncExportRow();
     });
-    bind('ms-btn-isolate', 'click', function () { isolate(); });
+    bind('ms-btn-isolate', 'click', function () { isolateBoxes(); });
     wireShell();
     bind('ms-btn-back', 'click', unIsolate);                  // WHOLE PART: back out of any isolate
     bind('ms-btn-show-all', 'click', checkAll);
@@ -5628,7 +5684,9 @@ var NSO_MICROSCOPE = (function () {
       setSelection(doc.objects.filter(function (o) { return want.has(o.name); }), source || 'pick');
       return currentSelection;
     },
-    getView: function () { return view; }
+    getView: function () { return view; },
+    /** Switch a control off without dropping the keyboard (app-gscope-slice.js's switch uses it). */
+    setDisabled: setDisabled
   };
 })();
 
