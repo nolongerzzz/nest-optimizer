@@ -1,12 +1,24 @@
 #!/usr/bin/env node
-/* G-scope's feature legend, down the left wall under the shell's button column,
-   with the G-scope file-line box directly above it. A layout move: the rows,
-   the Display checks and the click-to-isolate row are the same code, so
-   this checks WHERE it is and that moving it cost none of what it does.
-   (The legend is the FEATURES list now - docs/GSCOPE-SELECT.md section 3: the
-   per-row "only" button is gone; a row click isolates that line type.)
-   (It floated top-left over the sidebar-less viewport before the shell's
-   readouts went to the bottom; docs: nso_gscope_shell_test.js has the layout.)
+/* G-scope's feature legend, down the left wall under the ONE card (round 2c,
+   docs/GSCOPE.md item 12: IMPORT ▾ · Normal | Slice · the side's rows - the
+   old button column is gone), with the G-scope file-line box directly above
+   it. A layout move: the rows, the Display checks and Check all are the same
+   code, so this checks WHERE it is and that moving it cost none of what it does.
+   (The legend is the FEATURES list now - checkboxes only, docs/GSCOPE.md
+   item 4; Check all sits in its head.)
+   GATES:
+     1  the column is gone; the legend is on the left wall, bottom-left, the
+        file line right above it, the stack under the card's bottom edge; an
+        imported slice shows the card's Slice side (4 rows)
+     2  the Display checks hide/show without isolating; a row click off its
+        check does nothing (mode stays 'piece'); soloGroup; Check all in the
+        list's head shows every line type again
+     3  Slice side: at six real window shapes nothing overlaps anything (the
+        card included), nothing spills, the legend stays under the card, every
+        row is reachable
+     4  Normal side (a mesh through IMPORT): the card shows 2 rows and the same
+        layout gates hold at every shape
+   (docs: nso_gscope_shell_test.js has the card itself.)
      node tools/nso_gscope_legend_float_test.js      exit 0 = every gate held */
 
 const path = require('path');
@@ -20,20 +32,20 @@ const check = (name, cond, detail) => {
 };
 
 const SLICE = 'fixtures/3mf/supportwithinsupport.gcode.3mf';   // ten slicer features
+const MESH = 'fixtures/box-20mm.stl';                            // the Normal side
 const SHOTS = path.join(ROOT, 'tools', 'gscope-legend-out');
 
 /* Real window shapes, not one comfortable default. The toolbar work shipped a
    buried Undo button that every check at 1400x900 called clean and the suite
    caught at 720, so the short ones are the point of this list. 1280x560 is
    shorter than anyone uses and is here to force the legend's height cap to
-   engage: the button column takes 330 px of the left wall, the file line sits
-   under it, and the legend is what is left, so it scrolls inside itself. (Under
-   about 500 high the column leaves the left wall no room at all.) */
+   engage: the card's Slice side takes ~280 px of the left wall, the file line
+   sits under it, and the legend is what is left, so it scrolls inside itself. */
 const SIZES = [[1680, 1050], [1400, 900], [1366, 768], [1280, 720], [1024, 768], [1280, 560]];
 
 /* Everything that floats over this viewport. The legend has to clear all of
    them at every size. */
-const OVERLAYS = ['ms-sidebar', 'ms-corner', 'ms-legend-float', 'ms-title', 'ms-mode-badge', 'ms-info', 'ms-slice-readout',
+const OVERLAYS = ['ms-main-card', 'ms-corner', 'ms-legend-float', 'ms-title', 'ms-mode-badge', 'ms-info', 'ms-slice-readout',
                   'ms-hint-badge', 'ms-zr'];
 
 withApp(async (page, logs) => {
@@ -46,7 +58,7 @@ withApp(async (page, logs) => {
     await page.evaluate(() => !document.getElementById('microscope').hidden));
 
   /* ------------------------------------------------------------------ 1 */
-  console.log('\n=== 1. it left the sidebar and lives on the left wall, under the column ===');
+  console.log('\n=== 1. the column is gone; it lives on the left wall, under the card ===');
   {
     const where = await page.evaluate(() => {
       const el = document.getElementById('ms-legend');
@@ -54,7 +66,9 @@ withApp(async (page, logs) => {
       const vp = document.getElementById('ms-viewport').getBoundingClientRect();
       const b = box.getBoundingClientRect();
       return {
-        inSidebar: !!document.querySelector('#ms-sidebar #ms-legend'),
+        columnGone: !document.getElementById('ms-sidebar') && !document.getElementById('ms-card-select') &&
+                    !document.getElementById('ms-card-view'),
+        inCard: !!document.querySelector('#ms-main-card #ms-legend'),
         inViewport: !!document.querySelector('#ms-viewport #ms-legend'),
         sameNode: el === document.getElementById('ms-legend'),
         corner: [+(b.left - vp.left).toFixed(0), +(vp.bottom - b.bottom).toFixed(0)],
@@ -62,22 +76,34 @@ withApp(async (page, logs) => {
         inStack: box.parentElement.id === 'ms-dock-left',
         headAbove: (h => !!h && h.getBoundingClientRect().bottom <= b.top && b.top - h.getBoundingClientRect().bottom < 16)(
           document.querySelector('#ms-dock-left > .ms-head')),
-        clearOfColumn: b.top >= Math.max(...Array.from(document.querySelectorAll('#ms-sidebar > button')).map(e => e.getBoundingClientRect().bottom)),
+        cardBottom: (c => c ? c.getBoundingClientRect().bottom : null)(document.getElementById('ms-main-card')),
+        stackTop: document.getElementById('ms-dock-left').getBoundingClientRect().top,
+        legendTop: b.top,
+        side: (c => c && c.dataset.side)(document.getElementById('ms-main-card')),
+        apiSide: window.NSO_MICROSCOPE.cardSide(),
+        rows: [...document.querySelectorAll('#ms-main-card .ms-row')]
+          .filter(r => getComputedStyle(r).display !== 'none').map(r => r.id),
         title: document.getElementById('ms-legend-title').textContent
       };
     });
-    check('no longer in the sidebar', !where.inSidebar);
+    check('the left column and the SELECT / VIEW cards are gone', where.columnGone);
+    check('an imported slice shows the card\'s Slice side: its 4 rows',
+      where.side === 'slice' && where.apiSide === 'slice' &&
+      where.rows.join() === 'ms-region-row,ms-band-row,ms-render-row,ms-slice-row', where.side + ': ' + where.rows.join(', '));
+    check('the legend is not in the card', !where.inCard);
     check('now inside the viewport', where.inViewport);
     check('in the left-wall stack, which is pinned (not in flow)', where.inStack && where.positioned === 'absolute', where.positioned);
     check('anchored to the bottom-left: 8 px from the left wall, 12 px off the bottom', where.corner[0] === 8 && where.corner[1] === 12,
       '(' + where.corner.join(', ') + ') from the viewport\'s left and bottom');
     check('the G-scope file-line box is directly above it', where.headAbove);
-    check('and the whole stack is under the button column', where.clearOfColumn);
+    check('and the whole stack (file line + legend) is under the card\'s bottom edge',
+      where.cardBottom !== null && where.stackTop >= where.cardBottom && where.legendTop >= where.cardBottom,
+      'card bottom ' + (where.cardBottom | 0) + ', stack top ' + (where.stackTop | 0) + ', legend top ' + (where.legendTop | 0));
     check('still titled for what it lists', where.title === 'Features', where.title);
   }
 
   /* ------------------------------------------------------------------ 2 */
-  console.log('\n=== 2. click-to-isolate is untouched ===');
+  console.log('\n=== 2. the checks, the row click and Check all are untouched ===');
   {
     /* The behaviour gate. Driven through the rows themselves - a real click
        on the row's Display check, a real click on the row (off its check, the
@@ -162,14 +188,60 @@ withApp(async (page, logs) => {
       styled.type === 'checkbox' && styled.cursor === 'pointer' && styled.accent !== 'auto' && styled.margin === '0px',
       JSON.stringify(styled));
 
-    await page.evaluate(() => {
-      const el = document.getElementById('ms-btn-show-all');
-      if (el) el.click();
+    /* Check all left the VIEW card for the Features list's head (round 2c);
+       same job: every line type shown again, Travel too. A real click. */
+    const head = await page.evaluate(() => {
+      const b = document.getElementById('ms-btn-show-all');
+      return { inHead: !!(b && b.closest('#ms-legend-float .ms-legend-head')),
+               besideToggle: !!(b && b.parentElement.querySelector('#ms-legend-toggle')),
+               disabled: b ? b.disabled : null };
     });
+    check('Check all is in the Features list\'s head, next to its toggle',
+      head.inHead && head.besideToggle && head.disabled === false, JSON.stringify(head));
+    await page.click('#ms-btn-show-all');
+    const all = await page.evaluate(() => ({ hidden: window.NSO_MICROSCOPE.hidden(),
+      unchecked: [...document.querySelectorAll('#ms-legend input.ms-legend-display')].filter(c => !c.checked).length,
+      iso: window.NSO_MICROSCOPE.isIsolated() }));
+    check('Check all (real click) shows every line type again, Travel too, and isolates nothing',
+      all.hidden.length === 0 && all.unchecked === 0 && !all.iso, 'hidden: [' + all.hidden.join(', ') + ']');
   }
 
   /* ------------------------------------------------------------------ 3 */
-  console.log('\n=== 3. clear of every other overlay, at real window shapes ===');
+  console.log('\n=== 3. Slice side: clear of every other overlay, at real window shapes ===');
+  await clearAtEverySize(page, 'slice');
+
+  /* ------------------------------------------------------------------ 4 */
+  console.log('\n=== 4. Normal side (a mesh through IMPORT): the same, under a shorter card ===');
+  {
+    const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.click('#ms-btn-open')]);
+    await chooser.setFiles(path.join(ROOT, MESH));
+    await page.waitForFunction(() => (window.NSO_MICROSCOPE.getDoc() || {}).kind === 'mesh', null, { timeout: 30000 });
+    await page.waitForTimeout(450);
+    const n = await page.evaluate(() => ({
+      side: document.getElementById('ms-main-card').dataset.side, apiSide: window.NSO_MICROSCOPE.cardSide(),
+      rows: [...document.querySelectorAll('#ms-main-card .ms-row')]
+        .filter(r => getComputedStyle(r).display !== 'none').map(r => r.id),
+      legendUp: document.getElementById('ms-legend-float').getBoundingClientRect().height > 0,
+      note: (document.querySelector('#ms-legend .ms-legend-note') || {}).textContent || '',
+      checkAllOff: document.getElementById('ms-btn-show-all').disabled,
+      mode: window.NSO_MICROSCOPE.mode() }));
+    check('IMPORT (real click, the file picker) a mesh: the card turns to its Normal side, 2 rows',
+      n.side === 'normal' && n.apiSide === 'normal' && n.rows.join() === 'ms-region-row,ms-whole-row',
+      n.side + ': ' + n.rows.join(', '));
+    check('the Features list is up on this side too (a mesh has no line types: it says so; Check all is off), mode still piece',
+      n.legendUp && /no line types/.test(n.note) && n.checkAllOff && n.mode === 'piece', '"' + n.note + '", mode ' + n.mode);
+  }
+  await clearAtEverySize(page, 'normal');
+
+  const errs = logs.filter(l => l.type === 'error');
+  check('no console errors', errs.length === 0, errs.slice(0, 2).join(' | '));
+
+  if (fails) { console.log('\n' + fails + ' FAILED'); process.exit(1); }
+  console.log('\nall gates held');
+});
+
+/* Section 3's gates at every window shape, on the side the card shows now. */
+async function clearAtEverySize(page, side) {
   for (const [w, h] of SIZES) {
     await page.setViewportSize({ width: w, height: h });
     await page.waitForTimeout(450);
@@ -218,15 +290,23 @@ withApp(async (page, logs) => {
         hittableNow().forEach(i => reached.add(i));
       }
       L.scrollTop = 0;
+      const card = document.getElementById('ms-main-card').getBoundingClientRect();
+      const lb = L.getBoundingClientRect(), sb = document.getElementById('ms-dock-left').getBoundingClientRect();
       return { clash, spill, rows: rows.length, atRest: top.size, reached: reached.size,
+               cardBottom: card.bottom, legendTop: lb.top, stackTop: sb.top, legendShown: lb.height > 0,
+               side: document.getElementById('ms-main-card').dataset.side,
                capped: L.scrollHeight > L.clientHeight,
                missing: rows.map((rr, i) => reached.has(i) ? null : rr.dataset.group)
                             .filter(Boolean) };
     }, OVERLAYS);
 
-    const tag = w + 'x' + h;
-    check(tag + ': nothing overlaps anything', r.clash.length === 0,
-      r.clash.length ? r.clash.join('; ') : 'legend, mode badge, hint badge and layer slider all clear');
+    const tag = side + ' ' + w + 'x' + h;
+    check(tag + ': nothing overlaps anything', r.clash.length === 0 && r.side === side,
+      r.side !== side ? 'the card shows ' + r.side
+        : r.clash.length ? r.clash.join('; ') : 'card, legend, mode badge, hint badge and layer slider all clear');
+    check(tag + ': the legend stays under the card (its top >= the card\'s bottom)',
+      r.legendShown && r.legendTop >= r.cardBottom && r.stackTop >= r.cardBottom,
+      'card bottom ' + (r.cardBottom | 0) + ', stack top ' + (r.stackTop | 0) + ', legend top ' + (r.legendTop | 0));
     check(tag + ': nothing hangs outside the viewport', r.spill.length === 0, r.spill.join(', '));
     /* Reachable means hit-testable at rest OR after scrolling to the end -
        the union of the two, not a count at either. A cap that CLIPPED a
@@ -240,14 +320,8 @@ withApp(async (page, logs) => {
                    : (r.atRest + '/' + r.rows + ' shown, no scroll needed'));
 
     /* Standing rule: a screenshot at every size tested. */
-    await page.locator('#microscope').screenshot({ path: path.join(SHOTS, 'gscope-' + tag + '.png') });
+    await page.locator('#microscope').screenshot({ path: path.join(SHOTS, 'gscope-' + side + '-' + w + 'x' + h + '.png') });
   }
   await page.setViewportSize({ width: 1400, height: 900 });
   console.log('  screenshots: ' + SHOTS);
-
-  const errs = logs.filter(l => l.type === 'error');
-  check('no console errors', errs.length === 0, errs.slice(0, 2).join(' | '));
-
-  if (fails) { console.log('\n' + fails + ' FAILED'); process.exit(1); }
-  console.log('\nall gates held');
-});
+}

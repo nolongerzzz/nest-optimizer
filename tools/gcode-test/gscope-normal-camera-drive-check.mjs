@@ -18,11 +18,17 @@
  *   3  ISOLATE. A region selected in Normal is highlighted in the whole
  *      view. Isolate shows the selection ALONE, as-is (its own lines,
  *      endpoint for endpoint), still in Normal, turned to it from the same
- *      viewing angle. Full zoom and pan while isolated; the Normal button
+ *      viewing angle. Full zoom and pan while isolated; Normal's re-frame
  *      turns back to the selection alone. A changed box redraws the isolated
- *      view; Back leaves it. (There is no second camera: Close inspection is
- *      gone, and the View row's other button is Slice view -
- *      gscope-slice-view-drive-check.mjs.)
+ *      view; Escape (WHOLE PART's job on the Slice side) leaves it. (There is
+ *      no second camera: Close inspection is gone, and the switch's other
+ *      side is Slice - gscope-slice-view-drive-check.mjs.)
+ *
+ *   Round 2c: an imported .gcode.3mf opens on the card's SLICE side, where the
+ *   switch's Normal button is disabled (no mesh to go back to). "Normal" here is
+ *   the one free camera; its re-frame on a slice is NSO_MICROSCOPE.normalView(),
+ *   the job #ms-cam-normal did, and Whole part (#ms-btn-back) is a Normal-side
+ *   row, so the Slice side's way out of an isolate is Escape.
  *   4  SCREENSHOTS of each state, each asserted to be a drawn view.
  *
  * Usage:
@@ -267,7 +273,9 @@ async function main() {
   console.log('\n--- 1. Normal: zoom has no floor and no ceiling ---');
   // =======================================================================
   const c0 = await cam(page);
-  check('G-scope opens in Normal', c0.mode, 'normal');
+  // Round 2c: an imported slice is the card's Slice side; the camera is still the one free (Normal) camera.
+  check('G-scope opens a .gcode.3mf on the Slice side, its Normal button disabled',
+    [c0.mode, await page.evaluate(() => document.getElementById('ms-cam-normal').disabled)], ['slice', true]);
   check('Normal: the controls are unclamped - minDistance 0, maxDistance Infinity',
     [c0.minD, c0.maxD], [0, Infinity]);
   check('Normal: rotate, zoom and pan all on', [c0.rotate, c0.zoom, c0.pan], [true, true, true]);
@@ -291,7 +299,8 @@ async function main() {
   console.log(`       opening distance ${openDist.toFixed(2)} mm (both plates); the part's framing ${partDist.toFixed(2)} mm, its far plane ${oldFar.toFixed(0)} mm`);
 
   // Orbit mode: the wheel and drags go to the camera, never to a capture box.
-  await page.click('#ms-mode-piece');
+  // (Round 2c: no Piece button - Piece is the default, REGION is off on open.)
+  check('Piece on open: REGION not armed', await page.evaluate(() => window.NSO_MICROSCOPE.mode()), 'piece');
 
   // In, checking the frustum all the way.
   let z = await wheelUntil(page, centre, -300, (c) => c.d < 0.002);
@@ -332,7 +341,8 @@ async function main() {
   check('Normal zoom-out: the frustum held everything drawn at every step', holdsAll && c3.holdsWorld, true);
 
   // Back to a working distance: Normal button frames the whole part once.
-  await page.click('#ms-cam-normal');
+  // (Round 2c: #ms-cam-normal is disabled on an imported slice; its re-frame job is normalView().)
+  await page.evaluate(() => window.NSO_MICROSCOPE.normalView());
   await frames(page, 3);
   const c4 = await cam(page);
   check('the Normal button frames the whole part once', Math.abs(c4.d - openDist) < 1e-6, true);
@@ -343,7 +353,7 @@ async function main() {
   console.log(`       close zoom at ${c5.d.toFixed(2)} mm`);
   check('Normal: zoom in close, freely', c5.d < openDist / 5, true);
   await shot(page, 'nc-02-normal-zoomed-close.png', 'Normal, wheel-zoomed in close');
-  await page.click('#ms-cam-normal');
+  await page.evaluate(() => window.NSO_MICROSCOPE.normalView());   // #ms-cam-normal's re-frame (disabled on a slice)
   await frames(page, 3);
 
   // =======================================================================
@@ -422,7 +432,9 @@ async function main() {
       detail: v.detailGroup.visible, overview: v.overviewGroup.visible, highlight: v.highlightGroup.visible,
       detailKinds: [...new Set(v.detailGroup.children.map((c) => c.type))],
       hlKinds: [...new Set(v.highlightGroup.children.map((c) => c.type))],
-      back: getComputedStyle(document.getElementById('ms-detail-controls')).display !== 'none',
+      // Round 2c: the old Back row (#ms-detail-controls) is Whole part's state now - isolated, and
+      // #ms-btn-back enabled (it is a Normal-side row, hidden on this Slice side, but kept in sync).
+      back: M.isIsolated() && !document.getElementById('ms-btn-back').disabled,
       badge: document.getElementById('ms-mode-badge').textContent,
       sel: JSON.stringify(M.selection().map((q) => q.id)),
       boxes: JSON.stringify(M.boxes()),
@@ -459,7 +471,7 @@ async function main() {
   });
 
   // Picture 1: the normal view, a region selected.
-  await page.click('#ms-cam-normal');
+  await page.evaluate(() => window.NSO_MICROSCOPE.normalView());   // #ms-cam-normal's re-frame (disabled on a slice)
   await page.click('#ms-mode-select');
   const at = await page.evaluate(() => {
     const d = window.NSO_MICROSCOPE.getDoc();
@@ -470,7 +482,7 @@ async function main() {
   await frames(page, 3);
   let s0 = await display();
   check('selected, not isolated, Normal: the whole view with the selection highlighted',
-    [s0.mode, s0.overview, s0.highlight, s0.detail, s0.back], ['normal', true, true, false, false]);
+    [s0.mode, s0.overview, s0.highlight, s0.detail, s0.back], ['slice', true, true, false, false]);
   await shot(page, 'nc-05-normal-region-selected.png', 'Normal, a region selected');
   const n0 = JSON.parse(s0.sel).length;
   check('the region holds a few dozen moves', n0 > 10 && n0 <= 200, true);
@@ -480,7 +492,7 @@ async function main() {
   await page.click('#ms-btn-isolate');
   await frames(page, 3);
   const s1 = await display();
-  check('Isolate: stays in Normal', s1.mode, 'normal');
+  check('Isolate: stays as it was (the side does not change)', s1.mode, 'slice');
   check('Isolate: the selection ALONE - no overview, no highlight',
     [s1.detail, s1.overview, s1.highlight], [true, false, false]);
   check('Isolate: drawn as-is - the moves\' own lines', s1.detailKinds, ['LineSegments']);
@@ -488,7 +500,7 @@ async function main() {
   check('Isolate: exactly the selected moves, endpoint for endpoint, nothing else', [dis.same, dis.n], [true, n0]);
   check('Isolate: the selection, the boxes and the box handles are as they were',
     [s1.sel, s1.boxes, s1.boxesShown], [s0.sel, s0.boxes, true]);
-  check('Isolate: Back is offered', s1.back, true);
+  check('Isolate: Whole part is offered (isolated, #ms-btn-back enabled)', s1.back, true);
   const i1 = await settle(page), mid = await selCentre();
   check('Isolate: turned to the selection - target on its centre', near(i1.target, mid, 1e-6), true);
   check('Isolate: from the SAME viewing angle (no jump to a preset view)', near(dirOf(i1), dirOf(before), 1e-6), true);
@@ -496,7 +508,10 @@ async function main() {
   await shot(page, 'nc-06-isolated-normal.png', 'Isolated in Normal: the selection alone, as-is');
 
   // Full zoom and pan while isolated in Normal.
-  await page.click('#ms-mode-piece');
+  // (Round 2c: no Piece button - a second click on REGION disarms it back to Piece.)
+  await page.click('#ms-mode-select');
+  check('REGION disarmed, still isolated', [await page.evaluate(() => window.NSO_MICROSCOPE.mode()),
+    await page.evaluate(() => window.NSO_MICROSCOPE.isIsolated())], ['piece', true]);
   await drag(page, [xm, y], [xm + 120, y + 60], 'right');
   const i2 = await settle(page);
   check('isolated, Normal: a right-drag pans', !near(i2.target, i1.target, 1e-3), true);
@@ -506,12 +521,13 @@ async function main() {
 
   // Picture 3: the Normal button while isolated: the selection alone
   // again, turned back to it after the pan and zoom.
-  await page.click('#ms-cam-normal');
+  // (Round 2c: #ms-cam-normal is disabled on an imported slice; its job is normalView(), which fits the selection.)
+  await page.evaluate(() => window.NSO_MICROSCOPE.normalView());
   await frames(page, 3);
   const s3 = await display();
   const i4 = await settle(page);
   check('Normal while isolated: the selection alone, as-is',
-    [s3.mode, s3.detail, s3.overview, s3.highlight, (await detailIsSelection()).same], ['normal', true, false, false, true]);
+    [s3.mode, s3.detail, s3.overview, s3.highlight, (await detailIsSelection()).same], ['slice', true, false, false, true]);
   check('and turned to it (target on the selection)', near(i4.target, mid, 1e-6), true);
 
   // Isolated, the view IS the selection: resize the box, the view follows.
@@ -524,15 +540,17 @@ async function main() {
     [grown.same, grown.n > n0], [true, true]);
   check('and the camera did not move for it', near((await settle(page)).target, i4.target, 1e-6), true);
 
-  // Back leaves the isolation.
-  await page.click('#ms-mode-select');
-  await page.click('#ms-btn-back');
+  // Back leaves the isolation. (Round 2c: Whole part is a Normal-side row; on the Slice side
+  // its job is Escape - the first rung of the ladder while isolated.)
+  check('Whole part is not a row on the Slice side', await page.isVisible('#ms-whole-row'), false);
+  await page.keyboard.press('Escape');
   await frames(page, 3);
   const s4 = await display();
   const b4 = await settle(page);
-  check('Back: not isolated, the whole view, Normal',
-    [s4.back, s4.overview, s4.highlight, s4.detail, s4.mode], [false, true, true, false, 'normal']);
-  check('Back: framed on the whole part again', Math.abs(b4.d - openDist) < 1e-6, true);
+  check('Escape: not isolated, the whole view, the same side',
+    [s4.back, s4.overview, s4.highlight, s4.detail, s4.mode], [false, true, true, false, 'slice']);
+  check('Escape: framed on the whole part again', Math.abs(b4.d - openDist) < 1e-6, true);
+  check('Escape: the box stays (only the isolation went)', JSON.parse(s4.boxes).length, 1);
 
   // =======================================================================
   console.log('\n--- the build ---');

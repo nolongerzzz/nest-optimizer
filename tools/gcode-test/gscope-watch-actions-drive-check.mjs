@@ -13,10 +13,12 @@
  * in sequence with everything else, saying what was done and in which view.
  *
  *   1  A CLEAN SEQUENCE, EVERY ACTION A LINE. Armed on main, into G-scope
- *      (no re-arm), then 3D view clicks (on a piece in Piece mode, a box in
- *      Region mode, on empty space), mode buttons, and Normal / Slice
- *      switches with a Features-list row click, a Display check and a 3D
- *      click inside Slice view, out again. (A mesh has no line types, so the
+ *      (no re-arm), then 3D view clicks (on a piece with REGION off - the
+ *      piece click, no mode suffix since round 2c removed the Piece button -
+ *      a box placed with REGION armed, on empty space), the card's REGION /
+ *      Isolate / Clear boxes / Whole part, and its Normal / Slice switch with
+ *      a Features-list row click, a Display check and a REGION box in Slice
+ *      view, out again. (A mesh has no line types, so the
  *      Features list has rows only in Slice view.) Nothing goes wrong - and the Report still holds every one of
  *      those actions as its own row, in exactly the order they were done,
  *      each naming its view; "view Normal -> Slice" precedes "Sliced ...".
@@ -202,31 +204,38 @@ async function main() {
   // The sequence - each step, and the line it must leave, side by side.
   const expect = [/^G-scope Normal: entered G-scope - the plate$/];
   sink = expect;
-  // G-scope opens in Piece: a click takes (and isolates) the piece.
-  await page.click('#ms-mode-piece'); expect.push(/^G-scope Normal: click ms-mode-piece$/);
+  // G-scope opens on the piece click (REGION off): a click takes (and isolates) the piece. Round 2c
+  // removed the Piece button, so there is no "click ms-mode-piece" line, and Watch's gsMode() (it reads
+  // #ms-mode-*.active) finds no armed mode: the 3D line carries no "(piece mode)" suffix.
+  check('G-scope opened with REGION off, on the piece click (no Piece button)',
+    await page.evaluate(() => [window.NSO_MICROSCOPE.mode(), !!document.getElementById('ms-mode-piece')]), ['piece', false]);
   await click3d(page, await pointOn(page, 'mushroom'));
-  expect.push(new RegExp(`^G-scope Normal: 3D view click \\(piece mode\\) - hit "${gM}" at \\(`));
+  expect.push(new RegExp(`^G-scope Normal: 3D view click - hit "${gM}" at \\(`));
   check('... and that 3D click really took the piece and isolated it',
     await page.evaluate(() => [window.NSO_MICROSCOPE.selection().map((o) => o.name), window.NSO_MICROSCOPE.isIsolated()]), [[gM], true]);
-  await page.click('#ms-btn-back'); expect.push(/^G-scope Normal: click ms-btn-back$/);
-  // A box is something you arm: Region. A press on the SELECTION takes the selection, so empty it first.
+  await page.click('#ms-btn-back'); expect.push(/^G-scope Normal: click ms-btn-back$/);      // Whole part
+  // A box is something you arm: REGION (with it armed, a press is the box's, not the selection's).
   await page.click('#ms-mode-select'); expect.push(/^G-scope Normal: click ms-mode-select$/);
-  await page.click('#ms-btn-clear'); expect.push(/^G-scope Normal: click ms-btn-clear$/);
   const boxes0 = await page.evaluate(() => window.NSO_MICROSCOPE.boxes().length);
   await click3d(page, await pointOn(page, 'mushroom'));
   expect.push(new RegExp(`^G-scope Normal: 3D view click \\(select mode\\) - hit "${gM}" at \\(`));
-  check('... and the 3D click in Region mode really dropped a box', await page.evaluate(() => window.NSO_MICROSCOPE.boxes().length) > boxes0, true);
+  check('... and the 3D click with REGION armed really placed a box - and isolated nothing (item 7)',
+    await page.evaluate(() => [window.NSO_MICROSCOPE.boxes().length, window.NSO_MICROSCOPE.isIsolated()]), [boxes0 + 1, false]);
+  // after a REGION click nothing is isolated: Whole part is off, so the box's contents go through Isolate
+  await page.click('#ms-btn-isolate'); expect.push(/^G-scope Normal: click ms-btn-isolate$/);
+  check('... the card\'s Isolate isolated what the box holds', await page.evaluate(() => window.NSO_MICROSCOPE.isIsolated()), true);
   await page.click('#ms-btn-back'); expect.push(/^G-scope Normal: click ms-btn-back$/);
-  await page.click('#ms-btn-clear'); expect.push(/^G-scope Normal: click ms-btn-clear$/);
+  await page.click('#ms-btn-clear'); expect.push(/^G-scope Normal: click ms-btn-clear$/);   // Clear boxes
   const empty = await emptyPoint(page);
   check('found a point on the 3D view with nothing under it', !!empty, true);
   await click3d(page, empty); expect.push(/^G-scope Normal: 3D view click \(select mode\) - nothing hit$/);
-  await page.click('#ms-mode-piece'); expect.push(/^G-scope Normal: click ms-mode-piece$/);
+  // REGION off again: the toggle's second click (it replaces the old "click ms-mode-piece")
+  await page.click('#ms-mode-select'); expect.push(/^G-scope Normal: click ms-mode-select$/);
   await click3d(page, await pointOn(page, 'plain'));
-  expect.push(new RegExp(`^G-scope Normal: 3D view click \\(piece mode\\) - hit "${gP}" at \\(`));
+  expect.push(new RegExp(`^G-scope Normal: 3D view click - hit "${gP}" at \\(`));
   await page.click('#ms-btn-back'); expect.push(/^G-scope Normal: click ms-btn-back$/);
   await page.click('#ms-mode-select'); expect.push(/^G-scope Normal: click ms-mode-select$/);
-  await page.click('#ms-btn-clear'); expect.push(/^G-scope Normal: click ms-btn-clear$/);
+  // (no Clear boxes here: there is no box, and the button is off - an off button logs nothing)
   await page.click('#ms-cam-normal'); expect.push(/^G-scope Normal: view Normal \(already Normal - re-frame\)$/);
   await page.click('#ms-cam-slice'); expect.push(/^G-scope Normal: view Normal -> Slice$/);
   await sliced(page);
@@ -243,11 +252,17 @@ async function main() {
   check('... the Display check really hid that line type (a new slice opens with Travel off)',
     await page.evaluate(() => window.NSO_MICROSCOPE.hidden().slice().sort()), [wall, 'Travel'].sort());
   await display(page, wall); expect.push(new RegExp(`^G-scope Slice: Display "${wall}" on$`));
+  // A slice is a new document: it opens with REGION off, so one click arms it.
   await page.click('#ms-mode-select'); expect.push(/^G-scope Slice: click ms-mode-select$/);
-  await page.click('#ms-btn-clear'); expect.push(/^G-scope Slice: click ms-btn-clear$/);
   await click3d(page, await pointOn(page, wall));
   expect.push(/^G-scope Slice: 3D view click \(select mode\) - hit "[^"]+" at \(/);
-  await page.click('#ms-btn-back'); expect.push(/^G-scope Slice: click ms-btn-back$/);
+  await page.click('#ms-btn-isolate'); expect.push(/^G-scope Slice: click ms-btn-isolate$/);
+  check('... in Slice view too: the REGION click placed a box, and Isolate isolated it',
+    await page.evaluate(() => [window.NSO_MICROSCOPE.boxes().length, window.NSO_MICROSCOPE.isIsolated()]), [1, true]);
+  // Whole part is a Normal-side row; on the Slice side Escape backs out (Watch logs no key)
+  await page.keyboard.press('Escape');
+  check('... and Escape (the Slice side\'s Whole part) made it whole', await page.evaluate(() => window.NSO_MICROSCOPE.isIsolated()), false);
+  await page.click('#ms-btn-clear'); expect.push(/^G-scope Slice: click ms-btn-clear$/);
   await page.click('#ms-cam-slice'); expect.push(/^G-scope Slice: view Slice \(already Slice - no change\)$/);
   await page.click('#ms-cam-normal'); expect.push(/^G-scope Slice: view Slice -> Normal$/);
   await meshBack(page);
@@ -273,8 +288,9 @@ async function main() {
   const dispOff = lines1.find((e) => e.detail.action === 'display' && !e.detail.on);
   check('a Display line says which row and on/off in its detail', [dispOff.detail.group, dispOff.detail.on], [wall, false]);
   const hit = lines1.find((e) => e.detail.action === 'click3d' && e.detail.hit);
+  // (mode null: the piece click has no button since round 2c, so Watch's gsMode() finds none armed)
   check('a 3D click line says what was hit, and where, in its detail',
-    [hit.detail.hit, hit.detail.mode, Array.isArray(hit.detail.at) && hit.detail.at.length], [gM, 'piece', 3]);
+    [hit.detail.hit, hit.detail.mode, Array.isArray(hit.detail.at) && hit.detail.at.length], [gM, null, 3]);
 
   const all1 = await eventsAfter(page, seq1);
   const iSwitch = all1.findIndex((e) => e.kind === 'gscope' && /view Normal -> Slice/.test(e.msg));
@@ -310,14 +326,14 @@ async function main() {
   await frames(page);
   const before = [/^G-scope Normal: entered G-scope/];
   sink = before;
-  await page.click('#ms-mode-piece'); before.push(/^G-scope Normal: click ms-mode-piece$/);
+  // (a new visit: REGION off, the piece click)
   await click3d(page, await pointOn(page, 'plain'));
-  before.push(new RegExp(`^G-scope Normal: 3D view click \\(piece mode\\) - hit "${gP}"`));
+  before.push(new RegExp(`^G-scope Normal: 3D view click - hit "${gP}"`));
   await page.click('#ms-btn-back'); before.push(/^G-scope Normal: click ms-btn-back$/);
   await page.click('#ms-mode-select'); before.push(/^G-scope Normal: click ms-mode-select$/);
-  await page.click('#ms-btn-clear'); before.push(/^G-scope Normal: click ms-btn-clear$/);
   await click3d(page, await pointOn(page, 'mushroom'));
   before.push(new RegExp(`^G-scope Normal: 3D view click \\(select mode\\) - hit "${gM}"`));
+  await page.click('#ms-btn-isolate'); before.push(/^G-scope Normal: click ms-btn-isolate$/);
   await page.click('#ms-btn-back'); before.push(/^G-scope Normal: click ms-btn-back$/);
   await page.click('#ms-btn-clear'); before.push(/^G-scope Normal: click ms-btn-clear$/);
   await page.click('#ms-cam-normal'); before.push(/^G-scope Normal: view Normal \(already Normal - re-frame\)$/);
@@ -330,7 +346,8 @@ async function main() {
   await page.waitForFunction(() => /^1 phantom$/.test(document.getElementById('nso-watch-n-phantom').textContent), null, { timeout: 10000 });
   const between = [];
   sink = between;
-  await page.click('#ms-mode-piece'); between.push(/^G-scope Normal: click ms-mode-piece$/);
+  // REGION off and on again (the toggle; it was Piece then Region before round 2c)
+  await page.click('#ms-mode-select'); between.push(/^G-scope Normal: click ms-mode-select$/);
   await page.click('#ms-mode-select'); between.push(/^G-scope Normal: click ms-mode-select$/);
   await page.evaluate((m) => { setTimeout(() => { throw new Error(m); }, 0); }, PROBE);
   await page.waitForFunction(() => /^1 error$/.test(document.getElementById('nso-watch-n-error').textContent), null, { timeout: 5000 });
@@ -384,7 +401,7 @@ async function main() {
   check('turned off from main', await page.evaluate(() => NSOWatch.isOn()), false);
   await page.click('#btn-microscope');
   await frames(page);
-  await page.click('#ms-mode-select'); await page.click('#ms-mode-piece');
+  await page.click('#ms-mode-select'); await page.click('#ms-mode-select');     // REGION on, off (a toggle)
   await click3d(page, await pointOn(page, 'mushroom'));
   await page.click('#ms-cam-slice'); await sliced(page);
   await page.click('#ms-cam-normal'); await meshBack(page);
@@ -397,7 +414,7 @@ async function main() {
   const off = await openApp(browser, served);
   await off.page.click('#btn-microscope');
   await frames(off.page);
-  await off.page.click('#ms-mode-select'); await off.page.click('#ms-mode-piece');
+  await off.page.click('#ms-mode-select'); await off.page.click('#ms-mode-select');
   await click3d(off.page, await pointOn(off.page, 'mushroom'));
   await off.page.click('#ms-cam-slice'); await sliced(off.page);
   await off.page.click('#ms-cam-normal'); await meshBack(off.page);

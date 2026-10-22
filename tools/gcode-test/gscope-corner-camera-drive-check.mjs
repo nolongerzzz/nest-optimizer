@@ -11,7 +11,10 @@
  *      while the other shrinks, then the other way round. The centre and the
  *      thickness do not move, and what the box catches is exactly the
  *      rectangle predicate recomputed here from the parsed moves. A face drag
- *      afterwards scales the rectangle and keeps its shape.
+ *      afterwards scales the rectangle and keeps its shape. The dot is drawn
+ *      on top (round 2c, item 8). G-scope opens a .gcode.3mf on the card's
+ *      Slice side (Slice lit, Normal disabled); REGION is the card's toggle,
+ *      armed for the box and clicked again to go back to Piece for the orbit.
  *   2  SCREENSHOTS of each drag, each asserted to be a drawn view.
  *
  * Usage:
@@ -102,6 +105,8 @@ const camera = (page) => page.evaluate(() => {
     dist: c.distanceTo(t),
     normalOn: document.getElementById('ms-cam-normal').classList.contains('active'),
     sliceOn: document.getElementById('ms-cam-slice').classList.contains('active'),
+    normalDisabled: document.getElementById('ms-cam-normal').disabled,
+    side: window.NSO_MICROSCOPE.cardSide(),
   };
 });
 
@@ -158,8 +163,11 @@ async function main() {
   console.log('\n--- 1. corner drag: X and Y independently ---');
   // =======================================================================
   const opened = await camera(page);
-  check('G-scope opens in Normal: its button lit, pan free', [opened.mode, opened.normalOn, opened.sliceOn, opened.pan],
-    ['normal', true, false, true]);
+  // Round 2c: the side is the document's - an imported .gcode.3mf is a toolpath, so the Slice side
+  // (Slice lit; Normal disabled: there is no mesh to go back to). The camera is still free.
+  check('G-scope opens on the Slice side: Slice lit, Normal disabled, pan free',
+    [opened.mode, opened.side, opened.sliceOn, opened.normalOn, opened.normalDisabled, opened.pan],
+    ['slice', 'slice', true, false, true, true]);
 
   // One box at a move in the middle of the print, 3 x 3 mm, 1 mm thick.
   const at = await page.evaluate(() => {
@@ -167,9 +175,10 @@ async function main() {
     const m = d.parsed.moves[Math.floor(d.parsed.moves.length / 2)];
     return [(m.x0 + m.x1) / 2, (m.y0 + m.y1) / 2, m.z];
   });
-  // A box and its dots are Click to select region's, and G-scope opens in
-  // orbit: arm it, as a user does before dropping one.
+  // A box and its dots are REGION's, and G-scope opens with it off (Piece):
+  // arm it, as a user does before dropping one.
   await page.click('#ms-mode-select');
+  check('REGION armed: its toggle pressed', await page.getAttribute('#ms-mode-select', 'aria-pressed'), 'true');
   await page.evaluate(([x, y, z]) => window.NSO_MICROSCOPE.addBoxAt(x, y, z, 3, 1), at);
   await frames(page);
   const b0 = await boxState(page);
@@ -178,9 +187,12 @@ async function main() {
   const corner = await page.evaluate(() => {
     const b = window.NSO_MICROSCOPE.getView().scene.children.filter((o) => o.material &&
       o.material.color && o.material.color.getHex() === 0x4cd97b);
-    return b.length ? [b[0].position.x, b[0].position.y, b[0].position.z, b[0].visible] : null;
+    return b.length ? [b[0].position.x, b[0].position.y, b[0].position.z, b[0].visible,
+      b[0].material.depthTest, b[0].renderOrder] : null;
   });
   check('the box has a green corner dot, drawn', !!corner && corner[3], true);
+  // Round 2c item 8: the dots are drawn on top of everything (no depth test, drawn last).
+  check('the corner dot is drawn on top: depthTest off, renderOrder 20', [corner[4], corner[5]], [false, 20]);
   const b0v = await page.evaluate(() => {
     const d = window.NSO_MICROSCOPE.getDoc(), b = window.NSO_MICROSCOPE.boxes()[0];
     return [b.gx - d.cx, b.gz, -(b.gy - d.cy)];
@@ -228,7 +240,10 @@ async function main() {
 
   // Orbit half way round (a real left-drag from BARE plate - Piece mode, no region armed): the dot
   // moves to the corner that is now in front, and the box itself does not change.
-  await page.click('#ms-mode-piece');
+  // Round 2c: no Piece button - REGION is a toggle, a second click disarms it back to Piece.
+  await page.click('#ms-mode-select');
+  check('REGION disarmed: back to Piece', [await page.evaluate(() => window.NSO_MICROSCOPE.mode()),
+    await page.getAttribute('#ms-mode-select', 'aria-pressed')], ['piece', 'false']);
   // An orbit turns by the pixels dragged (2*pi per canvas height). The canvas was 1110 wide beside the
   // sidebar and is the whole panel now, so a drag of 0.7 of its width went further round than this
   // check means: keep the same 777 px of travel, from clear of the left wall's boxes.
