@@ -55,6 +55,9 @@
    12. tools/test-weights.json and package.json agree: every testStep has a
         {weight, note} entry and every entry names a script that is a testStep
         (tools/test-weights-check.cjs, also `node tools/run-tests.mjs --check`).
+   13. docs/HANDOFF.md's generated list is every docs/handoff/*.md, current
+        (tools/handoff-index.mjs --check): a ticket adds its file and runs
+        `npm run handoff:index`.
    Each gate is run on a known-bad sample first, so a checker that has gone
    blind fails here instead of passing. */
 
@@ -447,6 +450,32 @@ console.log('tools/test-weights.json');
     const real = problems(JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')), table);
     check('every step has a weight and every weight a script', real.length === 0, real.length ? real.length + ' disagree' : '');
     real.forEach((p) => console.log('       ' + p));
+  }
+}
+
+// --- the handoff index is current -------------------------------------------------
+console.log('docs/HANDOFF.md');
+{
+  const { spawnSync } = require('child_process');
+  const idx = path.join(ROOT, 'tools', 'handoff-index.mjs');
+  const r = spawnSync(process.execPath, [idx, '--check'], { encoding: 'utf8' });
+  check('the list of docs/handoff/*.md in HANDOFF.md is current', r.status === 0,
+    r.status === 0 ? r.stdout.trim() : 'run `npm run handoff:index`');
+  if (r.status !== 0) console.log('       ' + (r.stderr + r.stdout).trim());
+  // ...and the check on a known-bad tree: a ticket file the list does not name yet.
+  const os = require('os');
+  const sample = fs.mkdtempSync(path.join(os.tmpdir(), 'handoff-gate-'));
+  try {
+    fs.mkdirSync(path.join(sample, 'docs', 'handoff'), { recursive: true });
+    const index = path.join(sample, 'docs', 'HANDOFF.md');
+    fs.writeFileSync(index, '# Handoff\n\n<!-- handoff-index:start - x -->\n<!-- handoff-index:end -->\n');
+    fs.writeFileSync(path.join(sample, 'docs', 'handoff', 'a.md'), '## A ticket\n');
+    const run = (a) => spawnSync(process.execPath, [idx, ...a, '--root', sample], { encoding: 'utf8' });
+    check('a handoff file the list does not name is caught', run(['--check']).status === 1);
+    run([]);
+    check('...and the regenerated list passes, naming it', run(['--check']).status === 0 && /\[A ticket\]\(handoff\/a\.md\)/.test(fs.readFileSync(index, 'utf8')));
+  } finally {
+    fs.rmSync(sample, { recursive: true, force: true });
   }
 }
 

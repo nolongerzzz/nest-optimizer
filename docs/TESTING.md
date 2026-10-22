@@ -183,3 +183,4 @@ A new check that times something uses one of these. One that would read
 `ms < N` is the pattern this replaced.
 - **`?v=` tags** are checked by `page:manifest` (gate 11): a tag that is not its file's hash fails it. The fix is always `npm run stamp`.
 - **Step weights** are `tools/test-weights.json`, one step per line, not package.json; `run-tests.mjs` reads it for shard packing, and `--check` (also `page:manifest` gate 12) fails on a step with no entry or an entry with no script.
+- **Handoff index:** `page:manifest` (gate 13) fails if the generated list in `docs/HANDOFF.md` is not every `docs/handoff/*.md`; the fix is `npm run handoff:index`.

@@ -50,6 +50,10 @@ function check(name, cond, detail) {
   else { fail++; FAILS.push(name); console.log('  FAIL  ' + name + (detail ? '   ' + detail : '')); }
 }
 const read = f => fs.readFileSync(path.join(ROOT, f), 'utf8');
+/* docs/HANDOFF.md is a preamble and an index now; its sections are docs/handoff/*.md.
+   The rule text these checks look for lives in one of them, so read them all. */
+const readHandoff = () => ['docs/HANDOFF.md', ...fs.readdirSync(path.join(ROOT, 'docs', 'handoff')).sort().map(f => 'docs/handoff/' + f)]
+  .map(read).join('\n');
 
 /* ---- the validator, as a subprocess, the way CI and HANDOFF use it ---- */
 function validate(file, flags) {
@@ -109,7 +113,7 @@ console.log('\n== 1. every consumer states NON-SOLID SCOPE in source and reads n
   check('app-core undo knows nonSolidReplace', /entry\.type === 'nonSolidReplace'/.test(read('app-core.js')));
   const doc = read('docs/NON-SOLID.md');
   check('docs/NON-SOLID.md states the split', /still run/i.test(doc) && /skipped/i.test(doc) && /blanket bypass/i.test(doc));
-  check('HANDOFF.md points at the rule', /docs\/NON-SOLID\.md/.test(read('docs/HANDOFF.md')));
+  check('HANDOFF.md points at the rule', /docs\/NON-SOLID\.md/.test(readHandoff()));
 }
 
 /* ---- 2. NSO_Repair.commit with and without the flag ---- */
