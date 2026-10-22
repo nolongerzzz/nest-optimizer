@@ -217,11 +217,11 @@ async function main() {
      A speedup number that goes UP as contention gets worse is worse than no
      number at all.
      And since 2026-09-27 the weights are measured on GitHub's CI runners
-     (package.json "testStepWeightsNote"), ~1.7x slower than a local box, so
+     (the "about" in tools/test-weights.json), ~1.7x slower than a local box, so
      their sum is not this machine's sequential time either: dividing it by a
      local wall clock would claim ~8x. The sum is printed for what it is, and
      no ratio is drawn from it. */
-  const weights = pkg.testStepWeights || {};
+  const weights = Object.fromEntries(Object.entries(JSON.parse(readFileSync(join(ROOT, 'tools', 'test-weights.json'), 'utf8')).steps || {}).map(([k, v]) => [k, v && v.weight]));
   const baselineMs = declared.reduce((n, k) => n + (Number(weights[k]) || 0), 0);
   console.log(`\n  ${ran}/${declared.length} steps  |  wall ${fmt(wallMs)}` +
     (baselineMs ? `  |  same steps on GitHub's runners, sequential: ${fmt(baselineMs)} (not comparable - no speedup drawn)` : ''));

@@ -35,14 +35,13 @@
 # into a shard on its own.
 #
 # WHY TEN, AND WHY A PACKED SPLIT
-# Measured, not guessed - on these runners (package.json "testStepWeightsNote"
+# Measured, not guessed - on these runners (tools/test-weights.json "about"
 # has the method). The 257 steps are ~13,800s of work on a typical
 # ubuntu-latest runner and the shape is lopsided: support:shells alone is
 # ~1,230s, the ten slowest are 35%, and dozens of steps take under a second.
 # Slicing the list into ten equal-LENGTH pieces would leave one runner holding
 # the heavy steps, so the slowest shard - the only number CI waits on - would
-# hardly move. The runner packs by measured cost instead (package.json
-# "testStepWeights"), which lands all ten shards at ~1,380s of tests (~24 min
+# hardly move. The runner packs by measured cost instead (tools/test-weights.json), which lands all ten shards at ~1,380s of tests (~24 min
 # with setup on a typical runner; about one runner in five is ~0.6x that).
 #
 # Ten since ci-stability (Tests #297-#305): eight packed at ~1,725s of

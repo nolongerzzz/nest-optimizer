@@ -52,6 +52,9 @@
    11. Every ?v= on a page's local script / link is the first 8 hex of the
         sha256 of the file it points at (tools/stamp-tags.mjs --check). Nobody
         picks a tag by hand: run `npm run stamp` before you open the PR.
+   12. tools/test-weights.json and package.json agree: every testStep has a
+        {weight, note} entry and every entry names a script that is a testStep
+        (tools/test-weights-check.cjs, also `node tools/run-tests.mjs --check`).
    Each gate is run on a known-bad sample first, so a checker that has gone
    blind fails here instead of passing. */
 
@@ -424,6 +427,27 @@ console.log('?v= tags');
   check('every ?v= in the repo\'s pages matches its file', real.status === 0,
     real.status === 0 ? '' : 'run `npm run stamp`');
   if (real.status !== 0) console.log((real.stdout + real.stderr).split('\n').map((l) => '       ' + l).join('\n'));
+}
+
+// --- the step weights agree with the scripts ------------------------------------
+console.log('tools/test-weights.json');
+{
+  const { problems } = require('./test-weights-check.cjs');
+  const pkg = { scripts: { a: 'x', b: 'x', c: 'x' }, testSteps: ['a', 'b'] };
+  const ok = { steps: { a: { weight: 5, note: '' }, b: { weight: 7, note: 'n' } } };
+  check('a table with one entry per step and a script for each is clean', problems(pkg, ok).length === 0, problems(pkg, ok).join('; '));
+  check('a step with no entry is caught', problems(pkg, { steps: { a: ok.steps.a } }).some((p) => /step "b" has no entry/.test(p)));
+  check('an entry with no script is caught', problems(pkg, { steps: { ...ok.steps, z: { weight: 1, note: '' } } }).some((p) => /entry "z" has no script/.test(p)));
+  check('an entry for a script outside testSteps is caught', problems(pkg, { steps: { ...ok.steps, c: { weight: 1, note: '' } } }).some((p) => /"c" is a script but not in testSteps/.test(p)));
+  check('a zero or missing weight is caught', problems(pkg, { steps: { a: { weight: 0, note: '' }, b: { note: '' } } }).length === 2);
+  let table = null, err = '';
+  try { table = JSON.parse(fs.readFileSync(path.join(ROOT, 'tools', 'test-weights.json'), 'utf8')); } catch (e) { err = e.message; }
+  check('tools/test-weights.json parses', !!table, err);
+  if (table) {
+    const real = problems(JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')), table);
+    check('every step has a weight and every weight a script', real.length === 0, real.length ? real.length + ' disagree' : '');
+    real.forEach((p) => console.log('       ' + p));
+  }
 }
 
 // --- column cards ----------------------------------------------------------
