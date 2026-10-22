@@ -273,6 +273,7 @@ function nsoWorldSnapshot() {
     const mt = p.mesh && p.mesh.material;
     snap.placed.push({
       ref: p, fields: f, mesh: p.mesh || null,
+      geo: p.mesh ? p.mesh.geometry : null,   // a pose bake's Undo swaps it on the same mesh
       pos: p.mesh ? p.mesh.position.clone() : null,
       rot: p.mesh ? p.mesh.rotation.clone() : null,
       scl: p.mesh ? p.mesh.scale.clone() : null,
@@ -300,6 +301,7 @@ function nsoWorldRestore(snap) {
     const p = e.ref;
     if (e.mesh) {
       p.mesh = e.mesh;
+      if (e.geo) p.mesh.geometry = e.geo;
       p.mesh.position.copy(e.pos); p.mesh.rotation.copy(e.rot); p.mesh.scale.copy(e.scl);
       p.mesh.userData.placedIndex = i;
       const mt = p.mesh.material;
