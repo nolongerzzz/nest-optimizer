@@ -72,9 +72,28 @@ async function frames(page) {
    after). A real mouse click queues behind several of those frames, so the
    default is sized for a light page, not this one. Only the clicks made with
    tabletop on screen use this; every other click keeps the 30 s default, so a
-   genuine hang elsewhere still fails fast. */
-const HEAVY_CLICK_MS = 150000;
-function heavyClick(page, sel) { return page.click(sel, { timeout: HEAVY_CLICK_MS }); }
+   genuine hang elsewhere still fails fast.
+   The budget is also counted in FRAMES: HEAVY_CLICK_FRAMES of this page's own
+   frame time, measured once tabletop is up (heavyFrame) - 150 s at the 2.5 s a
+   frame it was sized on - so a runner whose frames are slower than that gets as
+   many frames, not as many seconds. The seconds it had stay the floor: 150 s
+   for a heavy click, and for the waits made with tabletop on screen
+   (heavy(HEAVY_WAIT_FRAMES), 60 s at 2.5 s a frame) the light page's 30 s,
+   which is at least what each of them had (10, 15 or 30 s). So no budget here
+   is shorter than it was; on a slow runner, it is longer. */
+const HEAVY_CLICK_FRAMES = 60, HEAVY_WAIT_FRAMES = 24;
+const HEAVY_CLICK_MS = 150000, WAIT_MS = 30000;
+let FRAME_MS = 2500;
+const heavy = (frames, floor = WAIT_MS) => Math.max(floor, Math.round(frames * FRAME_MS));
+async function heavyFrame(page) {
+  FRAME_MS = await page.evaluate(() => new Promise((r) => {
+    const t = [];
+    const f = () => { t.push(performance.now()); if (t.length < 4) requestAnimationFrame(f); else r((t[3] - t[0]) / 3); };
+    requestAnimationFrame(f);
+  }));
+  console.log(`       FINDING tabletop on screen: ${Math.round(FRAME_MS)} ms a frame; a heavy click may take ${Math.round(heavy(HEAVY_CLICK_FRAMES, HEAVY_CLICK_MS) / 1000)} s, a heavy wait ${Math.round(heavy(HEAVY_WAIT_FRAMES) / 1000)} s`);
+}
+function heavyClick(page, sel) { return page.click(sel, { timeout: heavy(HEAVY_CLICK_FRAMES, HEAVY_CLICK_MS) }); }
 
 async function shot(page, file, label, target = 'scope') {
   if (target === 'scope') await page.evaluate(() => window.NSO_MICROSCOPE.flushView());
@@ -401,6 +420,7 @@ async function main() {
   await page.setInputFiles('#file-input', join(ROOT, 'fixtures/3mf/tabletop.gcode.3mf'));
   await page.waitForFunction(() => window.NSO_MICROSCOPE.isOpen() &&
     ((window.NSO_MICROSCOPE.getDoc() || {}).name || '').startsWith('tabletop'), null, { timeout: 60000 });
+  await heavyFrame(page);
   const pick = await page.evaluate(() => {
     const d = window.NSO_MICROSCOPE.getDoc(), SO = window.NSOGcodeSolid;
     let best = null;
@@ -420,7 +440,7 @@ async function main() {
   await page.evaluate((ids) => window.NSO_MICROSCOPE.setSelectionMoves(ids), pick.ids);
   const n3 = await page.evaluate(() => state.models.length);
   await heavyClick(page, '#ms-btn-export-solid-plate');
-  await page.waitForFunction((n) => state.models.length === n + 1, n3, { timeout: 30000 });
+  await page.waitForFunction((n) => state.models.length === n + 1, n3, { timeout: heavy(HEAVY_WAIT_FRAMES) });
   const ex = await page.evaluate(() => {
     const m = state.models[state.models.length - 1];
     return { id: m.id, raw: Array.from(m.rawTris), status: document.getElementById('status').textContent };
@@ -436,7 +456,7 @@ async function main() {
     [vEx.verdict, vEx.open, vEx.nm, vEx.pierce], ['PASS', 0, 0, 0]);
 
   await page.evaluate(() => { const e = document.getElementById('model-list'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
-  await page.click(`.model-item[data-edit-id="${ex.id}"]`);
+  await heavyClick(page, `.model-item[data-edit-id="${ex.id}"]`);
   await page.evaluate(() => {
     const b = document.getElementById('btn-mirror');
     for (let n = b; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true;
@@ -445,14 +465,14 @@ async function main() {
   // Blank box first: Mirror reads the piece and names its axis - the same
   // first press a user makes.
   await page.fill('#inp-mirror-plane', '');
-  await page.click('#btn-mirror');
-  await page.waitForFunction(() => /Mirror/.test(document.getElementById('status').textContent), null, { timeout: 30000 });
+  await heavyClick(page, '#btn-mirror');
+  await page.waitForFunction(() => /Mirror/.test(document.getElementById('status').textContent), null, { timeout: heavy(HEAVY_WAIT_FRAMES) });
   const read = await page.evaluate(() => document.getElementById('status').textContent);
   console.log('       status: ' + read);
   check('Mirror reads the exported solid and finds its dominant axis', /Mirror: this piece runs along [XYZ]/.test(read), true);
   await page.fill('#inp-mirror-plane', '0');
-  await page.click('#btn-mirror');
-  await page.waitForFunction(() => /Mirror done|Mirror refused/.test(document.getElementById('status').textContent), null, { timeout: 30000 });
+  await heavyClick(page, '#btn-mirror');
+  await page.waitForFunction(() => /Mirror done|Mirror refused/.test(document.getElementById('status').textContent), null, { timeout: heavy(HEAVY_WAIT_FRAMES) });
   const mir = await page.evaluate((id) => {
     const m = state.models.find((q) => q.id === id);
     return { raw: Array.from(m.rawTris), status: document.getElementById('status').textContent,
@@ -471,23 +491,23 @@ async function main() {
     [vMir.verdict, b0 === -a1 && b1 === -a0, mir.raw.length, Math.abs(vMir.volume - vEx.volume) < 1e-9],
     ['PASS', true, ex.raw.length, true]);
   await shot(page, 'solid-07-mirrored.png', 'the exported loop and its mirror on the plate', 'body');
-  await page.click('#btn-undo');
-  await page.waitForFunction(() => /Undo/.test(document.getElementById('status').textContent), null, { timeout: 15000 });
+  await heavyClick(page, '#btn-undo');
+  await page.waitForFunction(() => /Undo/.test(document.getElementById('status').textContent), null, { timeout: heavy(HEAVY_WAIT_FRAMES) });
   const undone = await page.evaluate((id) => Array.from(state.models.find((q) => q.id === id).rawTris), ex.id);
   check('one Undo puts the exported solid back bit for bit', undone.length === ex.raw.length && undone.every((v, i) => v === ex.raw[i]), true);
 
   // A mesh document: Toolpath / Solid are disabled (they are a slice's - the
   // View card's row, docs/GSCOPE.md item 5) and there is no solid export.
-  if (await page.evaluate(() => window.NSO_MICROSCOPE.isOpen())) await page.click('#ms-close');
+  if (await page.evaluate(() => window.NSO_MICROSCOPE.isOpen())) await heavyClick(page, '#ms-close');
   const cubeBytes = Array.from(await readFile(join(ROOT, CUBE)));
   const nb = await page.evaluate(() => state.models.length);
   await page.evaluate((b) => handleFiles([new File([new Uint8Array(b)], 'cube.stl')]), cubeBytes);
-  await page.waitForFunction((n) => state.models.length === n + 1, nb, { timeout: 30000 });
-  await page.click('#btn-microscope');
-  await page.waitForFunction(() => window.NSO_MICROSCOPE.isOpen(), null, { timeout: 10000 });
+  await page.waitForFunction((n) => state.models.length === n + 1, nb, { timeout: heavy(HEAVY_WAIT_FRAMES) });
+  await heavyClick(page, '#btn-microscope');
+  await page.waitForFunction(() => window.NSO_MICROSCOPE.isOpen(), null, { timeout: heavy(HEAVY_WAIT_FRAMES) });
   // A file already under the lens stays there on reopen; Read the plate swaps to the plate.
   await heavyClick(page, '#ms-btn-plate');
-  await page.waitForFunction(() => window.NSO_MICROSCOPE.getDoc().kind === 'mesh', null, { timeout: 10000 });
+  await page.waitForFunction(() => window.NSO_MICROSCOPE.getDoc().kind === 'mesh', null, { timeout: heavy(HEAVY_WAIT_FRAMES) });
   await page.evaluate(() => { const M = window.NSO_MICROSCOPE; M.selectVisible(); });
   check('a mesh document: Toolpath / Solid disabled, no Export as solid (it already is a mesh)',
     [await page.evaluate(() => ['ms-render-toolpath', 'ms-render-solid'].every((id) => document.getElementById(id).disabled)),

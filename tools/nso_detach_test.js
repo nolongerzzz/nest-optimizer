@@ -29,6 +29,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 const { execFileSync } = require('child_process');
+const pace = require('./nso_pace.js');
 
 const ROOT = path.resolve(__dirname, '..');
 const OUT = path.join(__dirname, 'detach-out');
@@ -228,7 +229,13 @@ function box(lo, hi) {
     ' mm: ' + um(P[0].offset - innerOut) + ' of body shaved off, all the way down the wall');
 
   // Assemble, as it was: the foot, the twist, the length.
+  /* Its time (the module's own d.ms) is gated in calibration loops, run
+     either side of it (tools/nso_pace.js), not seconds: DETACH_LOOPS_MAX is
+     the old 15 s on the box it was set on. */
+  const DETACH_LOOPS_MAX = 52;
+  const cal0 = pace.calibrate();
   const d0 = DT.detach(v9, fl);
+  const detachCal = (cal0 + pace.calibrate()) / 2;
   const piece0 = d0.piece;
   const fr = piece0.frame;
   const mirrorRoot = [fr.origin[0], -fr.origin[1], fr.origin[2]];
@@ -341,7 +348,10 @@ function box(lo, hi) {
   let worstBack = 0;
   for (let i = 0; i < back.length; i++) worstBack = Math.max(worstBack, Math.abs(back[i] - d.piece.soup[i]));
   check('its frame takes it back to where it was', worstBack < 1e-5, um(worstBack));
-  check('time', d.ms < 15000, d.ms + ' ms (' + (v9.length / 9) + ' triangles)');
+  const detachLoops = d.ms / detachCal;
+  console.log(pace.finding('Detach on v9', { ms: d.ms, cal: detachCal, loops: detachLoops }));
+  check('time: under ' + DETACH_LOOPS_MAX + ' calibration loops', detachLoops < DETACH_LOOPS_MAX,
+    detachLoops.toFixed(2) + ' loops (' + d.ms + ' ms, ' + (v9.length / 9) + ' triangles)');
 
   // =========================================================================
   console.log('\n3. Reattach on the clamp bar, at the mirror-opposite position');

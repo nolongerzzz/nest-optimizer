@@ -47,8 +47,8 @@
         from a support, the readout credits the host, and Feature mode and
         the checkboxes treat the new rows as any other.
 
-   Every hover is waited for (waitHover: up to 2 s, then a failure that says
-   how long it waited), never read once after a fixed pause.
+   Every hover is waited for (waitHover: up to 120 animation frames, then a
+   failure that says how long it waited), never read once after a fixed pause.
 
    Screenshots go to tools/gscope-select-out/ (git-ignored).
 
@@ -110,19 +110,30 @@ const plate = page => page.evaluate(() => NSO_MICROSCOPE.plate());
 
 /* The hover, waited for. A hover is drawn on G-scope's own clock - at most one
    every 40 ms, the last move of a burst on a timer when the 40 ms are up - and
-   behind the box's frames, so a fixed wait races it. Polled until it answers, up to `ms` (2 s): { info, kids,
-   cursor, ms }, `info` null if nothing came in time - never read off a null. */
-async function waitHover(page, ms) {
-  const limit = ms || 2000, t0 = Date.now();
+   behind the box's frames, so a fixed wait races it. Polled until it answers, up to HOVER_FRAMES of the page's
+   animation frames: { info, kids, cursor, ms, frames }, `info` null if nothing came in time - never read off a
+   null. Frames, not 2 s: the hover waits on frames, and a runner starved for CPU draws fewer of them a second
+   (the 2 s ran out with nothing drawn yet on Tests #289 shard 6). 120 is the 2 s at 60 frames a second. The
+   wall clock only bounds a hang (HOVER_HANG_MS); it is not the gate. */
+const HOVER_FRAMES = 120, HOVER_HANG_MS = 20000;
+async function waitHover(page, frames) {
+  const limit = frames || HOVER_FRAMES, t0 = Date.now();
+  await page.evaluate(() => {
+    const F = window.__hoverFrames = { n: 0, on: true };
+    (function tick() { if (!F.on) return; F.n++; requestAnimationFrame(tick); })();
+  });
   for (;;) {
     const h = await page.evaluate(() => ({ info: NSO_MICROSCOPE.hoverInfo(), kids: NSO_MICROSCOPE.getView().hoverGroup.children.length,
-                                           cursor: NSO_MICROSCOPE.getView().renderer.domElement.style.cursor }));
+                                           cursor: NSO_MICROSCOPE.getView().renderer.domElement.style.cursor, frames: window.__hoverFrames.n }));
     const el = Date.now() - t0;
-    if (h.info || el >= limit) return Object.assign(h, { ms: el });
+    if (h.info || h.frames >= limit || el >= HOVER_HANG_MS) {
+      await page.evaluate(() => { window.__hoverFrames.on = false; });
+      return Object.assign(h, { ms: el });
+    }
     await page.waitForTimeout(20);
   }
 }
-const hoverSays = h => h.info ? J(h.info) + ' - after ' + h.ms + ' ms' : 'no hover after ' + h.ms + ' ms';
+const hoverSays = h => (h.info ? J(h.info) + ' - after ' : 'no hover after ') + h.frames + ' frames, ' + h.ms + ' ms';
 const lensState = page => page.evaluate(() => window.__t.state('lens'));
 const iso = page => page.evaluate(() => NSO_MICROSCOPE.isIsolated());
 
@@ -365,7 +376,7 @@ withApp(async (page, logs) => {
     const lp = await page.evaluate(sel => { const b = document.querySelector(sel).getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; }, lbl('Outer wall'));
     await page.mouse.move(lp[0], lp[1]);
     await page.waitForTimeout(200);
-    const hv = await waitHover(page);       // the whole 2 s: an outline that came late would be caught
+    const hv = await waitHover(page);       // the whole HOVER_FRAMES: an outline that came late would be caught
     check('hovering a row changes nothing: no outline, nothing on the plate changes', !hv.info && hv.kids === 0 && await lensState(page) === s0, hoverSays(hv));
 
     // a click on the row text toggles its box, and nothing else

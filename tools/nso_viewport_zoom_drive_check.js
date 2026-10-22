@@ -36,7 +36,21 @@ withApp(async (page, logs) => {
   await page.setViewportSize({ width: 1400, height: 860 });
   await loadSTL(page, path.join(ROOT, 'fixtures', 'box_hull_80x40x20-2.stl'));
   await loadSTL(page, path.join(ROOT, 'fixtures', 'tape_on-edge-single-B101_rounded_v8_FINAL.stl'));
-  await page.waitForTimeout(400);
+  /* Both pieces placed and the view at rest - waited for, in frames, not slept for: a fixed 400 ms is a
+     different amount of the app's work on every runner, and a read before the second piece is placed or the
+     camera has come to rest measures the wrong spot. "At rest" is three frames with the camera and its target
+     where they were (300 frames at most, so a view that never settles is still measured, and fails there). */
+  await page.waitForFunction(() => state.placed.length === 2 && state.placed.every(p => p && p.mesh), null, { timeout: 60000 });
+  await page.evaluate(() => new Promise(r => {
+    let last = null, still = 0, n = 0;
+    const f = () => {
+      const k = state.camera.position.toArray().concat(state.controls.target.toArray()).map(v => v.toFixed(5)).join();
+      still = k === last ? still + 1 : 0;
+      last = k;
+      if (still >= 3 || ++n >= 300) r(); else requestAnimationFrame(f);
+    };
+    requestAnimationFrame(f);
+  }));
   await page.evaluate(() => {
     const H = window.__z = {};
     const cv = state.renderer.domElement;

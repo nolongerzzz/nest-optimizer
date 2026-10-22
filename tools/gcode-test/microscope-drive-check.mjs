@@ -31,6 +31,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { serveRoot, routeCdn, mkCheck, launchOpts, ROOT } from '../cth-test/browser-lib.mjs';
 import gscopeCards from '../nso_gscope_cards.js';        // opens the card a G-scope control lives in, before the click
+import pace from '../nso_pace.js';
 
 const check = mkCheck();
 
@@ -639,7 +640,11 @@ async function main() {
   });
   // A drag re-runs the box predicate over every segment on every pointermove.
   // At 202,877 that is the worst case this view has, so it is measured rather
-  // than assumed - a drag that cannot keep up is a broken interaction.
+  // than assumed - a drag that cannot keep up is a broken interaction. Gated
+  // in calibration loops run in the page either side of it (tools/nso_pace.js),
+  // not ms: PASS_LOOPS_MAX is the old 16 ms frame on the box it was set on.
+  const PASS_LOOPS_MAX = 0.055;
+  const passCal0 = await pace.inPage(page);
   const dragCost = await page.evaluate(() => {
     const M = window.NSO_MICROSCOPE, d = M.getDoc();
     const m = d.parsed.moves[Math.floor(d.parsed.moves.length / 2)];
@@ -653,9 +658,11 @@ async function main() {
     M.clearBoxes();
     return { ms, n: d.segments.length };
   });
-  check('one selection pass over 202,877 segments stays inside a frame',
-    dragCost.ms < 16, true);
-  console.log(`       ${dragCost.ms.toFixed(1)} ms per pass over ${dragCost.n} segments`);
+  const passCal = (passCal0 + await pace.inPage(page)) / 2, passLoops = dragCost.ms / passCal;
+  console.log(pace.finding('one selection pass', { ms: dragCost.ms, cal: passCal, loops: passLoops }));
+  check(`one selection pass over 202,877 segments stays inside a frame: under ${PASS_LOOPS_MAX} calibration loops`,
+    passLoops < PASS_LOOPS_MAX, true);
+  console.log(`       ${dragCost.ms.toFixed(1)} ms per pass over ${dragCost.n} segments, ${passLoops.toFixed(4)} loops`);
 
   check('a whole layer out of the big file selects', bigLayer.n > 0, true);
   check('at one Z', bigLayer.zs, 1);

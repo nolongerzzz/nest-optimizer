@@ -28,6 +28,7 @@ const { execFileSync } = require('child_process');
 const ROOT = path.join(__dirname, '..');
 const { writeSTL, readSTL } = require('./nso_stl_io.js');
 const LIBDIR = require('./nso_library_dir.js');
+const pace = require('./nso_pace.js');
 
 const ctx = {
   Math, Map, Set, console, Array, Object, Number, String, JSON, isFinite, Date,
@@ -457,9 +458,14 @@ console.log('\n=== 8. an hourglass, and time ===');
   const r = NSO_tubeNeckRaw(tube, { point: [10, 0, 20], length: 36, dr: -5.5 });
   console.log('   ' + r.reason);
   if (common('hourglass: pinch −5.5 over 36', tube, r)) row('Stock tube, hourglass: pinch −5.5 over 36, smooth', tube, r, null, 'bore Ø' + f3(r.waistBoreDiaMm));
+  /* In calibration loops (tools/nso_pace.js), not seconds: NECK_LOOPS_MAX is
+     the old 5 s on the box it was set on. */
+  const NECK_LOOPS_MAX = 17;
   const big = stockTube(30, 2, 120, 2000);
-  const t0 = Date.now(), rb = NSO_tubeNeckRaw(big, { length: 30, dr: -6 }), ms = Date.now() - t0;
-  check('a 2000-sided tube (' + big.length / 9 + ' triangles) necks in under 5 s', rb.ok && ms < 5000, ms + ' ms · ' + (rb.ok ? rb.tris.length / 9 + ' out' : rb.reason));
+  const t = pace.time(() => NSO_tubeNeckRaw(big, { length: 30, dr: -6 })), rb = t.value, ms = Math.round(t.ms);
+  console.log(pace.finding('the 2000-sided neck', t));
+  check('a 2000-sided tube (' + big.length / 9 + ' triangles) necks in under ' + NECK_LOOPS_MAX + ' calibration loops', rb.ok && t.loops < NECK_LOOPS_MAX,
+    t.loops.toFixed(2) + ' loops (' + ms + ' ms) · ' + (rb.ok ? rb.tris.length / 9 + ' out' : rb.reason));
   if (rb.ok) row('2000-sided Ø60/2 tube, pinch −6 over 30, smooth', big, rb, ms, '');
 }
 

@@ -140,16 +140,50 @@ withApp(async (page, logs) => {
 
   console.log('\n=== 3. hold to spray, let go to pause ===');
   const spot = await pieceSpot(page);
+  /* The fill advances once a frame by the frame's own time (each step capped
+     at 0.5 s), so its speed is read off the frames: the level at every
+     animation frame of the hold, and its rise over the frames' own time. That
+     is the app's rate however many frames the runner managed - the old gate
+     held the level against this check's wall-clock hold, which also counts
+     the frames a starved runner drops (red on Tests #277, #284, and #289 even
+     at half the rate). The gate is the total rise over the total time of the
+     frames measured, not each frame's: this sampler reads the clock after the
+     app's tick and redraw, so one frame's time is off by the change in the
+     redraw's cost, and that cancels over the run where it would not frame by
+     frame. The per-frame spread and the wall-clock reading are logged. */
+  await page.evaluate(() => {
+    const S = window.__foamFrames = { on: true, rows: [] };
+    (function sample() {
+      const i = window.nsoFoam.info();
+      S.rows.push([performance.now(), i.height || 0, !!i.spraying]);
+      if (S.on) requestAnimationFrame(sample);
+    })();
+  });
   const t0 = Date.now();
   await hold(page, 1500, spot);
   const held = Date.now() - t0;
+  const rows = await page.evaluate(() => { window.__foamFrames.on = false; return window.__foamFrames.rows; });
   const i1 = await info(page);
-  const want = 26 / 3 * held / 1000;
+  const want = 26 / 3 * held / 1000, RATE = 26 / 3;        // mm a second: the 26 mm hollow in 3 s
+  /* frames where it was spraying on both ends and the step was not capped (0.45 s, under the app's 0.5) */
+  const rates = [];
+  let rise = 0, span = 0;
+  for (let k = 1; k < rows.length; k++) {
+    const dt = (rows[k][0] - rows[k - 1][0]) / 1000;
+    if (!(rows[k][2] && rows[k - 1][2] && dt > 0 && dt < 0.45)) continue;
+    rates.push((rows[k][1] - rows[k - 1][1]) / dt);
+    rise += rows[k][1] - rows[k - 1][1];
+    span += dt;
+  }
+  const rate = span > 0 ? rise / span : 0;
+  rates.sort((a, b) => a - b);
+  console.log('  FINDING the hold: ' + i1.height.toFixed(2) + ' mm in ' + held + ' ms on the clock (' + want.toFixed(2) +
+              ' at the full rate); ' + rows.length + ' frames, ' + rates.length + ' measured while spraying, ' +
+              (rates.length ? rates[0].toFixed(2) + ' - ' + rates[rates.length - 1].toFixed(2) + ' mm/s frame by frame' : 'none'));
   check('holding the mouse on the piece raised the level', i1.height > 0, i1.height.toFixed(2) + ' mm');
-  // 0.5, not 0.6: the fill advances per frame (each step capped at 0.5 s) and a starved CI runner drops frames the
-  // wall-clock hold still counts - Tests #277 (10.71 of 18.05 mm) and #284 (11.34 of 19.01) sat just under 0.6.
-  check('...at a steady speed that fills the hollow in about 3 s', i1.height > want * 0.5 && i1.height < want * 1.15,
-        i1.height.toFixed(2) + ' mm in ' + held + ' ms (' + want.toFixed(2) + ' expected)');
+  check('...at a steady speed that fills the hollow in about 3 s: ' + RATE.toFixed(2) + ' mm/s within 5 %, over the frames\' own time',
+        rates.length >= 3 && Math.abs(rate / RATE - 1) <= 0.05,
+        rate.toFixed(3) + ' mm/s: ' + rise.toFixed(2) + ' mm over ' + span.toFixed(3) + ' s of ' + rates.length + ' frames');
   await page.waitForTimeout(500);
   const i2 = await info(page);
   check('let go: the level stays where it is', Math.abs(i2.height - i1.height) < 1e-9 && !i2.spraying);

@@ -141,6 +141,14 @@ withApp(async (page, logs) => {
     await page.goto(page.url(), { waitUntil: 'load' });
     await page.waitForFunction(() => typeof state !== 'undefined' && state.ready === true, null, { timeout: 30000 });
   };
+  /* An import is done when it writes its last status line - one of these, after "Reading <file>..." (a
+     one-object file ends on its piece's own "Loaded: <name> (...)"). The line is cleared first, so a second
+     import of the same file is not mistaken for the first, and it is waited for, not slept for: a fixed 150 /
+     400 ms read the plate before a slow runner had restored it. */
+  const IMPORT_DONE = /^(Restored \d+ piece|Loaded \d+ objects from |Loaded: |Failed to load )|nothing this build could rebuild|no usable geometry found/;
+  const clearStatus = () => page.evaluate(() => { document.getElementById('status').textContent = ''; });
+  const importDone = () => page.waitForFunction(src => new RegExp(src).test(document.getElementById('status').textContent),
+                                                IMPORT_DONE.source, { timeout: 60000 }).catch(() => {});
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'nso-scene-rt-'));
   page.on('dialog', d => d.accept());   // the "restore this plate?" confirm
 
@@ -285,10 +293,11 @@ withApp(async (page, logs) => {
   section('re-open the file');
   // -----------------------------------------------------------------------
   const bytes = Array.from(fs.readFileSync(file));
+  await clearStatus();
   await page.evaluate(([b, n]) => { handleFiles([new File([new Uint8Array(b)], n)]); },
                       [bytes, path.basename(file)]);
   await page.waitForFunction(() => state.placed.length === 3, null, { timeout: 60000 });
-  await page.waitForTimeout(150);
+  await importDone();
 
   const after = await page.evaluate(snapshot);
   const plateAfter = await page.evaluate(plateSnapshot);
@@ -347,9 +356,10 @@ withApp(async (page, logs) => {
   // replaced plate, not a doubled one. Declining takes the geometry-only
   // fallback - tools/nso_export_roundtrip_test.js drives that side.
   await page.evaluate(() => { window.nsoPlateLockSet(false); });
+  await clearStatus();
   await page.evaluate(([b, n]) => { handleFiles([new File([new Uint8Array(b)], n)]); },
                       [bytes, path.basename(file)]);
-  await page.waitForTimeout(400);
+  await importDone();
   const again = await page.evaluate(plateSnapshot);
   eq('the plate was replaced, not doubled', again.pieces, 3);
   eq('and the plate lock came back with it', again.plateLock, true);
@@ -361,10 +371,11 @@ withApp(async (page, logs) => {
   await reload();
   const foreign = path.join(ROOT, 'fixtures', '3mf', 'pa_pattern.3mf');
   const fbytes = Array.from(fs.readFileSync(foreign));
+  await clearStatus();
   await page.evaluate(([b, n]) => { handleFiles([new File([new Uint8Array(b)], n)]); },
                       [fbytes, 'pa_pattern.3mf']);
   await page.waitForFunction(() => state.models.length > 0, null, { timeout: 30000 });
-  await page.waitForTimeout(150);
+  await importDone();
   const plain = await page.evaluate(() => ({
     models: state.models.length,
     placed: state.placed.length,
@@ -388,9 +399,11 @@ withApp(async (page, logs) => {
     profileId: 'default', plateName: 'Bambu A1 Mini'
   });
   await reload();
+  await clearStatus();
   await page.evaluate(([b, n]) => { handleFiles([new File([new Uint8Array(b)], n)]); },
                       [Array.from(bare.bytes), 'no-scene.3mf']);
   await page.waitForFunction(() => state.models.length > 0, null, { timeout: 30000 });
+  await importDone();
   const bareIn = await page.evaluate(() => ({
     models: state.models.length,
     status: document.getElementById('status').textContent

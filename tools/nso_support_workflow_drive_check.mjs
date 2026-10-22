@@ -62,7 +62,8 @@
  *      stands it), at the card's defaults: GENERATE ends with supports added,
  *      the bar reaches 100 % with at least 3 distinct Planning and 3 distinct
  *      Building counts on the way (Building moves while the sheet is planned,
- *      not only once the trunks are swept), inside CLAMP_BUILD_MS.
+ *      not only once the trunks are swept), inside CLAMP_BUILD_LOOPS
+ *      calibration loops (the time gates are in loops - see below).
  *  12  THE WATCHDOG IS SILENCE. A planner that posts progress every 5 s for
  *      90 s is not stopped (its own refusal ends the build); one that says
  *      nothing is stopped at 60 s (section 6); a build still running at the
@@ -73,13 +74,24 @@ import { chromium } from 'playwright';
 import { mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { serveRoot, routeCdn, mkCheck, launchOpts, ROOT } from './cth-test/browser-lib.mjs';
+import pace from './nso_pace.js';
 
 const check = mkCheck();
-/* The wedge (section 9) pinned: areas held / unsupported / unreachable over its 10 areas at 35 deg, and the time budget. */
-/* (measured: 51 supports in ~30.5 s on this box, twice; the default watchdog is 60 s) */
-const WEDGE_HELD = 10, WEDGE_UNSUPPORTED = 0, WEDGE_UNREACHABLE = 0, WEDGE_BUILD_MS = 50000;
-/* The clamp (section 11): 23-27 s here with the weld (16 s of it), 8.4-8.9 s without. */
-const CLAMP_BUILD_MS = 30000;
+/* The wedge (section 9) pinned: areas held / unsupported / unreachable over its 10 areas at 35 deg. */
+const WEDGE_HELD = 10, WEDGE_UNSUPPORTED = 0, WEDGE_UNREACHABLE = 0;
+/* THE TIME GATES ARE IN CALIBRATION LOOPS, not seconds: a loop is a fixed amount of plain JS run in the page
+   just before and just after the timed work (tools/nso_pace.js), so a runner starved for CPU slows both and the
+   ratio holds where the seconds did not (the planner's silence was red on Tests #301 at 1 s, the builds went with
+   the runner's speed). Each limit is the old one on the 4-core cloud box the old ones were set on - a loop is
+   ~285 ms in the page there - and the seconds are still logged as FINDINGs. The planner's own beat is wall-clock
+   by design (nso_support_gridpack.js HEARTBEAT_MS: a message goes out once 200 ms have passed, so a gap is the
+   beat plus the unit of work in hand), so it is the WORK in a gap, the gap less the beat, that is held to loops. */
+const WEDGE_BUILD_LOOPS = 175;      // the wedge's whole build (was 50 s; 13-17 s, ~48 loops, on that box)
+const CLAMP_BUILD_LOOPS = 105;      // the clamp's (was 30 s; 23 s, ~79 loops, on that box with the weld)
+const HEARTBEAT_MS = 200;
+const LATE_UNIT_LOOPS = 0.175;      // a beat held up by more work than this is late (was: a gap over 250 ms)
+const SILENCE_UNIT_LOOPS = 6.3;     // the most work between two messages (was: 2 s of silence; ~3.4 loops there)
+const FIRST_SECOND_LOOPS = 3.5;     // Building's "first second" (was 1 s)
 const SHOTS = join(ROOT, 'tools', 'supports-out');
 const W = 1280, H = 800;
 
@@ -337,6 +349,41 @@ async function main() {
     });
     t.unwatch = () => page.evaluate(() => { window.__sampling = false; window.__off(); return { log: window.__log, frames: window.__frames }; });
     t.logLen = () => page.evaluate(() => window.__log.length);
+    /** A probe for a build that ends on the card's own timers (the watchdog, the ceiling): started just before
+        the click, it notes when the card went busy and when it stopped, every progress message, and the worst
+        lag of the page's main thread - a 50 ms interval's lateness - in the page's own clock. A timer can only
+        fire as late as the thread was busy when it was due, so that lag is what a late stop is held to. */
+    t.lagProbe = () => page.evaluate(() => {
+      const P = window.__lag = { t0: performance.now(), busy: null, end: null, max: 0, msgs: [] };
+      let last = P.t0;
+      P.off = window.NSO_SUPPORTS_CARD.onProgress(() => P.msgs.push(performance.now()));
+      P.timer = setInterval(() => {
+        const now = performance.now(), b = window.NSO_SUPPORTS_CARD.busy();
+        P.max = Math.max(P.max, now - last - 50);
+        last = now;
+        if (b && P.busy === null) P.busy = now;
+        if (!b && P.busy !== null && P.end === null) { P.end = now; clearInterval(P.timer); P.off(); }
+      }, 50);
+    });
+    /* took / el: from just before the click (what a "not before" bound counts from - never later than the
+       build's start); ran / elRan: from when the card was seen busy, within a probe tick of the start (what a
+       "no later than" bound and the readout's seconds count from - the click itself takes its time). Read once
+       the build is over, it waits for the probe's own tick to have seen the end (t.idle returns on the frame
+       the card stops, a tick before the probe can have noted it). */
+    t.lagRead = () => page.evaluate(() => new Promise((res) => {
+      const P = window.__lag, s = (a, b) => (a === null || b === null ? null : (a - b) / 1000);
+      const read = () => {
+        const now = performance.now();
+        return { took: s(P.end, P.t0), ran: s(P.end, P.busy), lag: Math.max(0, P.max) / 1000,
+                 lastMsg: P.msgs.length ? s(P.msgs[P.msgs.length - 1], P.t0) : null, msgs: P.msgs.length,
+                 endAfterMsg: P.msgs.length ? s(P.end, P.msgs[P.msgs.length - 1]) : null,
+                 el: s(now, P.t0), elRan: s(now, P.busy) };
+      };
+      if (P.end !== null || window.NSO_SUPPORTS_CARD.busy()) { res(read()); return; }
+      const t0 = performance.now(), w = setInterval(() => {
+        if (P.end !== null || performance.now() - t0 > 3000) { clearInterval(w); res(read()); }
+      }, 10);
+    }));
     /** Hold the build worker's messages, from the first 'building' one on, until released, so BUILDING can be
         looked at: the next worker the card starts has its messages queued, then handed over in order. */
     t.holdBuild = () => page.evaluate(() => {
@@ -589,20 +636,32 @@ async function main() {
   await page.evaluate(() => window.NSO_SUPPORTS_CARD.setPlanner(() => new Promise(() => {})));
   before = await T.plate();
   const t0 = Date.now();
+  await T.lagProbe();
   await page.click('#btn-sup-all');
   await sleep(3000);
   c = await T.card();
   check('3 s in: a planner that says nothing gets "Building…" with no seconds yet, locked, the bar up and sweeping with no percent',
     [c.state, c.line, c.locked, c.bar.shown, c.bar.indeterminate, c.bar.now], ['building', 'Building…', true, true, true, null]);
   await sleep(Math.max(0, 12500 - (Date.now() - t0)));
+  /* The seconds against the page's own clock, read with the card: on a slow runner the read itself can land past
+     13 s, which is the runner, not the counter. */
   c = await T.card();
-  check('past 10 s the readout counts the seconds, on the card and on the button',
-    [/^Building… 1[0-3] s$/.test(c.line), c.go.text === c.line], [true, true]);
+  const at12 = await T.lagRead(), shownS = +((c.line.match(/^Building… (\d+) s$/) || [])[1]);
+  /* The readout is the whole seconds since the start, ticked once a second: it is behind by up to a second
+     and a tick, and a tick can be as late as the page's thread was busy. */
+  const behind = at12.elRan === null ? null : at12.elRan - shownS;
+  check('past 10 s the readout counts the seconds, on the card and on the button - the seconds the build has run, to a tick',
+    [shownS >= 10 && behind !== null && behind >= -0.5 && behind < 1.5 + 2 * at12.lag, c.go.text === c.line], [true, true]);
+  console.log('       FINDING the readout said ' + shownS + ' s at ' + (at12.elRan === null ? '-' : at12.elRan.toFixed(1)) +
+    ' s into the build on the page\'s clock (' + at12.el.toFixed(1) + ' s after the click began)');
   await T.shot('09-building-12s.png');
   await T.idle(90000);
-  const took = (Date.now() - t0) / 1000;
+  const wd = await T.lagRead();
   await frames(page);
-  check('the watchdog stops a build that says nothing at 60 s (default), not before and not long after', [took >= 59.5, took < 64], [true, true]);
+  console.log('       FINDING the watchdog stopped it ' + (wd.ran === null ? 'never' : wd.ran.toFixed(2) + ' s') + ' into the build on the page\'s clock (' +
+    ((Date.now() - t0) / 1000).toFixed(1) + ' s here); the page\'s thread lagged ' + wd.lag.toFixed(2) + ' s at worst');
+  check('the watchdog stops a build that says nothing at 60 s (default), not before, and no later than the page\'s own lag allows (1 s + twice its worst)',
+    [wd.took !== null && wd.took >= 59.5, wd.ran !== null && wd.ran - 60 < 1 + 2 * wd.lag], [true, true]);
   check('...and the bar turns into the message: gone, the readout says "Could not build"', [(await T.card()).bar.shown, (await T.card()).line.startsWith('Could not build: ')], [false, true]);
   c = await T.failed('a planner that never answers', before, 'the planner was still working after 60 s');
   check('...the old supports still stand', T.ids(await T.sups()), built1);
@@ -747,18 +806,23 @@ async function main() {
      covered by section 8's planner that never answers, not by this piece. */
   before = await T.plate();
   const wedgeSpots = (await T.view()).beacons.length;
+  const wedgeCal0 = await pace.inPage(page);
   await T.watch();
   const tb = Date.now();
   await T.oneStep('Generate over all 10 areas', () => page.click('#btn-sup-all'));
   const buildMs = Date.now() - tb;
   const wedgeRun = await T.unwatch();
+  /* The build's own time - its last message, from the start of the job - over the loops run either side of it. */
+  const wedgeCal = (wedgeCal0 + await pace.inPage(page)) / 2;
+  const wedgeMs = wedgeRun.log.length ? wedgeRun.log[wedgeRun.log.length - 1].ms : buildMs;
+  console.log(pace.finding('the wedge build', { ms: wedgeMs, cal: wedgeCal, loops: wedgeMs / wedgeCal }));
   await frames(page);
   c = await T.card();
   v = await T.view();
   const nSup = (await T.sups()).length;
   console.log('       BUILT: ' + c.line + '  (' + (buildMs / 1000).toFixed(1) + ' s); stats ' + JSON.stringify(v.stats));
-  check('Generate over all 10 areas ends BUILT, inside the watchdog and well inside the old planner\'s minutes',
-    [c.state, c.bar.shown, c.locked, buildMs < WEDGE_BUILD_MS], ['built', false, false, true]);
+  check('Generate over all 10 areas ends BUILT, inside the watchdog and well inside the old planner\'s minutes: under ' + WEDGE_BUILD_LOOPS + ' calibration loops',
+    [c.state, c.bar.shown, c.locked, wedgeMs / wedgeCal < WEDGE_BUILD_LOOPS], ['built', false, false, true]);
   check('...with the three counts pinned, which add up to all 10 areas',
     [v.stats.held, v.stats.unsupported, v.stats.unreachable, v.stats.held + v.stats.unsupported + v.stats.unreachable], [WEDGE_HELD, WEDGE_UNSUPPORTED, WEDGE_UNREACHABLE, 10]);
   check('...the line is the three counts', c.line, BUILT(nSup, v.stats.held, v.stats.unsupported, v.stats.unreachable));
@@ -777,19 +841,20 @@ async function main() {
      (the first detect, the pad gaps) are single calls. There is no welding: the parts come back as shells. */
   const sentGaps = (ph) => { const q = wedgeRun.log.filter((m) => ph.includes(m.phase)); return q.slice(1).map((m, i) => m.sent - q[i].sent); };
   const gaps = sentGaps(['planning', 'building']).sort((a, b) => a - b);
-  const over = gaps.filter((g) => g > 250).length;
+  /* The work in a gap is the gap less the beat; held to loops, the beat share and the longest silence mean what
+     250 ms and 2 s meant on this box, on any runner. */
+  const unit = (g) => Math.max(0, g - HEARTBEAT_MS) / wedgeCal;
+  const over = gaps.filter((g) => unit(g) > LATE_UNIT_LOOPS).length, longest = unit(gaps[gaps.length - 1]);
   console.log('       ' + updates + ' updates in ' + (buildMs / 1000).toFixed(1) + ' s; planner gaps (planning + building): median ' + gaps[gaps.length >> 1] +
-    ' ms, max ' + gaps[gaps.length - 1] + ' ms, ' + over + ' of ' + gaps.length + ' over 250 ms');
-  // The longest silence is a FINDING, not a gate (ci-timing-gates' pattern, #262): it is wall clock, and a CI
-  // runner at ~2x reads it past 2 s (2329 / 2213 ms on Tests #306 / #307, 1285 ms on #302, ~1.4 s here) while
-  // every functional check holds. Ticket ci-stability replaces it with a work-based measure; supports-progress-
-  // cadence (posting inside the #256 sheet step) still owns the < 1 s target. The 60 s watchdog (section 12)
-  // is unchanged and still asserted.
-  console.log('  FINDING the planner\'s longest silence on the wedge: ' + gaps[gaps.length - 1] + ' ms on the clock (target < 2000 ms; not a gate - ci-stability)');
-  check('the planner is heard from at least every 250 ms in all but a handful of its messages',
-    // 5%, not 2%: a CI runner starved for CPU stretched 25 of 686 beats past 250 ms (the build took 37 s, not 23 s);
-    // a planner that stopped beating would put nearly all of them over.
-    over <= Math.ceil(gaps.length * 0.05), true);
+    ' ms, max ' + gaps[gaps.length - 1] + ' ms, ' + over + ' of ' + gaps.length + ' late by more than ' + LATE_UNIT_LOOPS + ' loops (' +
+    Math.round(LATE_UNIT_LOOPS * wedgeCal) + ' ms here); the longest silence ' + longest.toFixed(2) + ' loops of work');
+  check('the planner is heard from every beat in all but a handful of its messages, and never goes quiet for more than ' + SILENCE_UNIT_LOOPS + ' loops of work',
+    // 5%, not 2%: a CI runner starved for CPU stretched 25 of 686 beats past 250 ms (the build took 37 s, not 23 s)
+    // while never going quiet for a second; a planner that stopped beating would put nearly all of them over.
+    // 6.3 loops is the 2 s it was, not the 1 s before that, for now: since supports-print-1 (#256) the sheet / cap
+    // planning posts nothing for ~1.2 s on the wedge (622 ms before it). Ticket supports-progress-cadence posts
+    // progress inside the sheet step and puts this back under 1 s (2.8 loops). The 60 s watchdog (section 12) is unchanged.
+    [over <= Math.ceil(gaps.length * 0.05), longest < SILENCE_UNIT_LOOPS], [true, true]);
 
   /* Escape in the middle of planning, on the real worker: REGENERATE over the standing supports, stopped at once. */
   const standing = T.ids(await T.sups());
@@ -909,11 +974,15 @@ async function main() {
   const clampSpots = (await T.view()).beacons.length;
   check('the clamp, standing: detected at once at the card\'s defaults', /^\d+ hanging areas? at 35° on clamp_body/.test(c.line), true);
   console.log('       ' + c.line + ', ' + clampSpots + ' spots');
+  const clampCal0 = await pace.inPage(page);
   await T.watch();
   const tc = Date.now();
   await T.oneStep('Generate on the clamp', () => page.click('#btn-sup-all'));
   const clampMs = Date.now() - tc;
   const clampRun = await T.unwatch();
+  const clampCal = (clampCal0 + await pace.inPage(page)) / 2;
+  const clampBuildMs = clampRun.log.length ? clampRun.log[clampRun.log.length - 1].ms : clampMs;
+  console.log(pace.finding('the clamp build', { ms: clampBuildMs, cal: clampCal, loops: clampBuildMs / clampCal }));
   c = await T.card();
   const clampSups = (await T.sups()).length;
   const distinct = (ph) => new Set(clampRun.log.filter((m) => m.phase === ph && m.done != null).map((m) => m.done)).size;
@@ -921,15 +990,12 @@ async function main() {
   const firstB = clampRun.log.filter((m) => m.phase === 'building'), bTotal = firstB.length ? firstB[0].total : 0;
   console.log('       ' + c.line + ' in ' + (clampMs / 1000).toFixed(1) + ' s: planning ' + span('planning') + ' (' + distinct('planning') + ' counts), building ' +
     span('building') + ' (' + distinct('building') + ' counts of ' + bTotal + ')');
-  // The build time is a FINDING, not a gate (#262's pattern; ticket ci-stability measures the work instead):
-  // ~2x runners read it past 30 s while the build itself is right.
-  console.log('  FINDING the clamp build took ' + (clampMs / 1000).toFixed(1) + ' s on the clock (target < ' + CLAMP_BUILD_MS / 1000 + ' s; not a gate - ci-stability)');
-  check('the clamp ends BUILT with supports added', [c.state, clampSups > 0], ['built', true]);
+  check('the clamp ends BUILT with supports added, inside ' + CLAMP_BUILD_LOOPS + ' calibration loops', [c.state, clampSups > 0, clampBuildMs / clampCal < CLAMP_BUILD_LOOPS], ['built', true, true]);
   check('...the bar reached 100 %', Math.max(...clampRun.log.map((m) => m.percent == null ? -1 : m.percent)), 100);
   check('...with at least 3 distinct Planning counts and 3 distinct Building counts on the way', [distinct('planning') >= 3, distinct('building') >= 3], [true, true]);
   /* the sheet is planned before the first trunk: its tips are counted, so the first second of building is not a still bar */
-  const b1 = firstB.length ? firstB.filter((m) => m.sent - firstB[0].sent <= 1000) : [];
-  check('...Building moves within its first second (the sheet\'s tips are counted while it is planned)', new Set(b1.map((m) => m.done)).size >= 3, true);
+  const b1 = firstB.length ? firstB.filter((m) => m.sent - firstB[0].sent <= FIRST_SECOND_LOOPS * clampCal) : [];
+  check('...Building moves within its first ' + FIRST_SECOND_LOOPS + ' loops (a second on this box: the sheet\'s tips are counted while it is planned)', new Set(b1.map((m) => m.done)).size >= 3, true);
   progressChecks('the clamp build', clampRun.log, clampSpots);
   frameChecks('the clamp build, as a person saw it', clampRun.frames);
   await T.shot('21-clamp-built.png');
@@ -955,16 +1021,19 @@ async function main() {
     }));
   }, chatSpots);
   before = await T.plate();
-  const t12 = Date.now();
+  await T.lagProbe();
   await page.click('#btn-sup-all');
   await sleep(65000);
   c = await T.card();
   check('a planner that posts every 5 s is still running at 65 s, past the 60 s watchdog: "Planning n / N", locked',
     [c.state, /^Planning \d+ \/ \d+ · \d+ %$/.test(c.line), c.locked], ['building', true, true]);
   await T.idle(60000);
-  const took12 = (Date.now() - t12) / 1000;
+  const p12 = await T.lagRead();
   await frames(page);
-  check('...and is not stopped: at 90 s it ends with its own answer, not the watchdog\'s', [took12 >= 89, took12 < 100], [true, true]);
+  console.log('       FINDING it ended ' + (p12.took === null ? 'never' : p12.took.toFixed(2) + ' s') + ' after the click, its last message at ' +
+    (p12.lastMsg === null ? '-' : p12.lastMsg.toFixed(2) + ' s') + ' (' + p12.msgs + ' messages), the page\'s thread lagging ' + p12.lag.toFixed(2) + ' s at worst');
+  check('...and is not stopped: at 90 s it ends with its own answer, not the watchdog\'s - on its last message, within the page\'s own lag',
+    [p12.took !== null && p12.took >= 89, p12.endAfterMsg !== null && p12.endAfterMsg < 1 + 2 * p12.lag], [true, true]);
   await T.failed('...a planner that was slow but said so', before, 'slow but said so');
   /* The ceiling: a build that keeps reporting but never ends is stopped at it (here 8 s, by the seam). */
   await page.evaluate(() => {
@@ -974,12 +1043,15 @@ async function main() {
       setInterval(() => opts.onProgress({ phase: 'planning', done: Math.min(1 + (k++ % 2), 2), total: 3 }), 500);
     }));
   });
-  const t12b = Date.now();
+  await T.lagProbe();
   await page.click('#btn-sup-all');
   await T.idle(30000);
-  const took12b = (Date.now() - t12b) / 1000;
+  const pc = await T.lagRead();
   await frames(page);
-  check('a build that keeps reporting but never ends is stopped at the ceiling, not before', [took12b >= 7.5, took12b < 11], [true, true]);
+  console.log('       FINDING the ceiling stopped it ' + (pc.ran === null ? 'never' : pc.ran.toFixed(2) + ' s') + ' into the build, the page\'s thread lagging ' +
+    pc.lag.toFixed(2) + ' s at worst');
+  check('a build that keeps reporting but never ends is stopped at the ceiling, not before, and no later than the page\'s own lag allows',
+    [pc.took !== null && pc.took >= 7.5, pc.ran !== null && pc.ran - 8 < 1 + 2 * pc.lag], [true, true]);
   await T.failed('...the runaway', before, 'the build was still running after 8 s');
   check('...the ceiling is 10 min by default', await page.evaluate(() => [window.NSO_SUPPORTS_CARD.ceilingMs(0), window.NSO_SUPPORTS_CARD.watchdogMs()]), [600000, 60000]);
   await page.evaluate(() => window.NSO_SUPPORTS_CARD.setPlanner(null));

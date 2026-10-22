@@ -190,13 +190,23 @@ function installHelpers() {
   };
 }
 
+/* A read waits for the page's frames, not for ms: Connect takes the pointer and the wheel on the page's own
+   frames, and a 40 ms sleep is less than one frame on a runner drawing five a second. A typed field redraws
+   through the card's 120 ms debounce timer (app-connect.js), so after a fill the read waits for that timer to
+   have run (state.connect.timer back to 0), then for frames - the way c3d35f3 made the Ribbon and Tube reads
+   wait for their readout, for every field. */
+const frames = (page, n = 2) => page.evaluate(n => new Promise(r => { let i = 0; const f = () => (++i >= n ? r() : requestAnimationFrame(f)); requestAnimationFrame(f); }), n);
+const fieldSettled = async page => {
+  await page.waitForFunction(() => !(state.connect && state.connect.timer), null, { timeout: 10000 });
+  await frames(page);
+};
 const SP = (page, q) => page.evaluate(q => window.__cn.screen(q), q);
 const P = page => page.evaluate(() => window.__cn.panel());
 async function clickAt(page, q) {
   const s = await SP(page, q);
   await page.mouse.move(s.x, s.y);
   await page.mouse.click(s.x, s.y);
-  await page.waitForTimeout(40);
+  await frames(page);
 }
 async function setAndWait(page) {
   const before = await page.evaluate(() => state.undoStack.length);
@@ -252,14 +262,14 @@ withApp(async (page, logs) => {
   // hover
   const sA = await SP(page, pa);
   await page.mouse.move(sA.x, sA.y);
-  await page.waitForTimeout(40);
+  await frames(page);
   C = await P(page);
   check('hovering a sphere lights the point and names it', C.overlay.includes('hover:point') && /Under the pointer: point - click to make it anchor A/.test(C.readout), C.overlay.join(',') + ' | ' + C.readout);
   await shot(page, '01-hover');
 
   // click A
   await page.mouse.click(sA.x, sA.y);
-  await page.waitForTimeout(40);
+  await frames(page);
   C = await P(page);
   const aPicked = C;
   check('one click is anchor A: it is marked, named on the card, and nothing is held', C.a === 'point' && !C.b && C.overlay.includes('a:point') &&
@@ -272,7 +282,7 @@ withApp(async (page, logs) => {
   const sB0 = await SP(page, pb);
   await page.mouse.move(sB0.x - 30, sB0.y);
   await page.mouse.move(sB0.x, sB0.y, { steps: 4 });
-  await page.waitForTimeout(40);
+  await frames(page);
   C = await P(page);
   check('a line from A follows the pointer (nothing held down)', C.line && C.a === 'point' && !C.b, 'line ' + C.line);
   await shot(page, '02-anchor-a-line');
@@ -285,7 +295,7 @@ withApp(async (page, logs) => {
   await page.mouse.down();
   await page.mouse.move(bare.x - 120, bare.y - 20, { steps: 8 });
   await page.mouse.up();
-  await page.waitForTimeout(50);
+  await frames(page);
   const camAfter = await page.evaluate(() => state.camera.position.toArray());
   C = await P(page);
   check('a real mouse drag from the plate orbits the camera, and A is unchanged', Math.hypot(...camAfter.map((v, i) => v - camBefore[i])) > 1 &&
@@ -293,7 +303,7 @@ withApp(async (page, logs) => {
   await page.mouse.move(bare.x, bare.y);
   const dBefore = await page.evaluate(() => state.camera.position.distanceTo(state.controls.target));
   await page.mouse.wheel(0, -400);
-  await page.waitForTimeout(80);
+  await frames(page);
   const dAfter = await page.evaluate(() => state.camera.position.distanceTo(state.controls.target));
   C = await P(page);
   check('the wheel zooms, and A is unchanged', Math.abs(dAfter - dBefore) > 0.5 && C.a === 'point' && C.aPoint.every((v, i) => v === aPicked.aPoint[i]), dBefore.toFixed(1) + ' -> ' + dAfter.toFixed(1));
@@ -330,7 +340,7 @@ withApp(async (page, logs) => {
   ];
   for (const [shape, re, rows] of SHAPES) {
     await page.selectOption('#sel-connect-shape', shape);
-    await page.waitForTimeout(60);
+    await frames(page);
     C = await P(page);
     check(shape + ': the card shows its own fields only, the ghost is its soup, the readout names it', C.planOk && re.test(C.readout) && C.ghost && C.ghostTris === C.planTris &&
       Object.keys(C.rows).every(k => C.rows[k] === (k === rows)), C.readout + ' | ' + C.ghostTris + ' tris');
@@ -341,23 +351,23 @@ withApp(async (page, logs) => {
   C = await P(page);
   check('typing a new Ø redraws the ghost with no further click', C.planOk && / · String Ø3\.0, /.test(C.readout), C.readout);
   await page.fill('#inp-connect-dia', '2');
-  await page.waitForTimeout(250);
+  await fieldSettled(page);
   await page.selectOption('#sel-connect-shape', 'ribbon');
   await page.fill('#inp-connect-width', '4');
   await page.waitForFunction(() => /^Ribbon 4\.0 /.test(document.getElementById('connect-readout').textContent), null, { timeout: 3000 }).catch(() => {});
   C = await P(page);
   check('a Ribbon\'s width field redraws it too', / · Ribbon 4\.0 × 1\.2 mm, /.test(C.readout), C.readout);
   await page.fill('#inp-connect-width', '6');
-  await page.waitForTimeout(250);
+  await fieldSettled(page);
   await page.selectOption('#sel-connect-shape', 'tube');
   await page.fill('#inp-connect-wall', '2');
   await page.waitForFunction(() => /leaves no bore/.test(document.getElementById('connect-readout').textContent), null, { timeout: 3000 }).catch(() => {});
   C = await P(page);
   check('a Tube whose wall is half its Ø is refused in words, no ghost, Set off', !C.planOk && C.bad && !C.ghost && C.goDisabled && /leaves no bore in a Ø4\.0 tube/.test(C.readout), C.readout);
   await page.fill('#inp-connect-wall', '0.8');
-  await page.waitForTimeout(250);
+  await fieldSettled(page);
   await page.selectOption('#sel-connect-shape', 'string');
-  await page.waitForTimeout(60);
+  await frames(page);
 
   console.log('\n=== 4. Set both ways, every shape, one Undo each ===');
   const spheres = await page.evaluate(() => window.__cn.snapshot());
@@ -366,7 +376,7 @@ withApp(async (page, logs) => {
     await page.check('input[name="connect-result"][value="' + result + '"]');
     for (const shape of ['string', 'ribbon', 'tube', 'tapered']) {
       await page.selectOption('#sel-connect-shape', shape);
-      await page.waitForTimeout(60);
+      await frames(page);
       C = await P(page);
       const planned = C.planOk && new RegExp(result === 'weld' ? 'welds into A and B · Set welds it$' : 'kept as its own piece · Set adds it$').test(C.readout);
       const depth = await page.evaluate(() => state.undoStack.length);
@@ -426,7 +436,7 @@ withApp(async (page, logs) => {
   check('...and the next click fills the empty anchor', C.a === 'point' && C.b === 'point' && C.planOk);
   const bare2 = await page.evaluate(() => window.__cn.barePixel(false));
   await page.mouse.click(bare2.x, bare2.y);
-  await page.waitForTimeout(40);
+  await frames(page);
   C = await P(page);
   check('a click on nothing clears the picks', !C.a && !C.b && !C.ghost && C.goDisabled && /Click anchor A on a piece/.test(C.readout), C.readout);
   await clickAt(page, pa);
@@ -451,7 +461,7 @@ withApp(async (page, logs) => {
     window.__cn.nudge(id, m[0] - (b.lo[0] + b.hi[0]) / 2, -(m[1] - (b.lo[1] + b.hi[1]) / 2));
   }, [boxId, mid]);
   await page.evaluate(() => { const e = document.getElementById('sel-connect-shape'); e.dispatchEvent(new Event('change')); });
-  await page.waitForTimeout(80);
+  await frames(page);
   C = await P(page);
   check('the straight connector through a piece standing between is refused in words, no ghost, Set off', !C.planOk && C.bad && !C.ghost && C.goDisabled &&
     /passes through a third piece \(/.test(C.readout), C.readout);
@@ -536,7 +546,7 @@ withApp(async (page, logs) => {
     await shot(page, '09-straight');
 
     // ---- Sag: typed, live
-    const setSag = async v => { await page.fill('#inp-connect-sag', String(v)); await page.waitForTimeout(300); return P(page); };
+    const setSag = async v => { await page.fill('#inp-connect-sag', String(v)); await fieldSettled(page); return P(page); };
     S = await setSag(6);
     check('typing a Sag of 6 redraws the ghost as an arc BOWING UP: the readout names the sag, the ghost reaches ' + (z0 + 6 + 1).toFixed(1) + ' mm (anchor + 6 + the string\'s radius)',
       S.planOk && S.straight === false && S.sag === 6 && / · String Ø2\.0, [\d.]+ mm between the anchors, sag \+6\.0 \(path [\d.]+ mm\) · welds into A and B · Set welds it$/.test(S.readout) &&
@@ -559,25 +569,25 @@ withApp(async (page, logs) => {
     const ghostWeld = S.ghostTris;
     for (const [ends, word] of [['ball', 'ball'], ['pad', 'foot pad']]) {
       await page.selectOption('#sel-connect-ends', ends);
-      await page.waitForTimeout(150);
+      await frames(page);
       S = await P(page);
       check('Ends = ' + ends + ': the readout names it and the sag, and the ghost now carries the ' + (ends === 'ball' ? 'spheres' : 'discs') + ' too',
         S.planOk && S.ends === ends && new RegExp('sag \\+6\\.0 \\(path [\\d.]+ mm\\), ' + word + ' ends · welds into A and B').test(S.readout) && S.ghostTris > ghostWeld && S.ghostTris === S.planTris, S.readout + ' | ' + S.ghostTris + ' tris');
       await shot(page, ends === 'ball' ? '13-ball-ends' : '14-pad-ends');
     }
     await page.selectOption('#sel-connect-ends', 'flat');
-    await page.waitForTimeout(150);
+    await frames(page);
     S = await P(page);
     check('Ends = Flat with Weld into A and B: refused in words (a flush face has nothing to weld with), no ghost, Set off', !S.planOk && S.bad && !S.ghost && S.goDisabled &&
       /Flat ends are cut flush with the surface and not sunk, so there is nothing to weld them with - pick Keep separate/.test(S.readout), S.readout);
     await page.check('input[name="connect-result"][value="separate"]');
-    await page.waitForTimeout(150);
+    await frames(page);
     S = await P(page);
     check('...Keep separate makes the Flat cut: it plans, "flat ends · kept as its own piece"', S.planOk && S.ends === 'flat' && /flat ends · kept as its own piece · Set adds it$/.test(S.readout), S.readout);
 
     // ---- Set + Undo: Keep separate, Ball ends, sag +6
     await page.selectOption('#sel-connect-ends', 'ball');
-    await page.waitForTimeout(150);
+    await frames(page);
     const spheres2 = await page.evaluate(() => window.__cn.snapshot());
     S = await P(page);
     check('Keep separate + Ball ends + sag +6 previews', S.planOk && /sag \+6\.0 \(path [\d.]+ mm\), ball ends · kept as its own piece · Set adds it$/.test(S.readout), S.readout);
@@ -830,7 +840,7 @@ withApp(async (page, logs) => {
       A.pressed === 'true' && A.lit && A.flag && /Attach armed/.test(A.status) && /cylinder blank/.test(A.status) && !C.a && !C.b && C.goDisabled, A.status);
     const s0 = await SP(page, pt);
     await page.mouse.move(s0.x, s0.y);
-    await page.waitForTimeout(60);
+    await frames(page);
     C = await P(page);
     check('...and Connect lights nothing under the pointer while it is armed', !C.overlay.some(o => /^hover/.test(o)), C.overlay.join(','));
 
@@ -963,7 +973,7 @@ withApp(async (page, logs) => {
     check('Esc mid-drag cancels the stroke: no stroke, no ghost, no line, the card still open - and nothing is built when the button comes up', !D.stroke && !D.ghost && !D.line && D.open && /^Stroke cancelled - nothing built\./.test(D.readout), D.readout);
     for (let i = Math.floor(sp.length * 0.5); i < sp.length; i++) await page.mouse.move(sp[i].x, sp[i].y);
     await page.mouse.up();
-    await page.waitForTimeout(150);
+    await frames(page);
     st = await page.evaluate(() => ({ models: state.models.length, undo: state.undoStack.length, stroke: !!state.connect.stroke, open: state.connect.open }));
     check('...(the rest of the drag and the release are just a mouse: no new piece, no undo step)', st.models === nm0 + 1 && st.undo === un1 && !st.stroke && st.open, JSON.stringify(st));
 

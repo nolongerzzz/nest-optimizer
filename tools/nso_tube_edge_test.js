@@ -26,6 +26,7 @@ const { execFileSync } = require('child_process');
 
 const ROOT = path.join(__dirname, '..');
 const { writeSTL } = require('./nso_stl_io.js');
+const pace = require('./nso_pace.js');
 
 const ctx = {
   Math, Map, Set, console, Array, Object, Number, String, JSON, isFinite, Date,
@@ -800,9 +801,15 @@ console.log('\n=== 9. Run: the reducer and the expander (tube-run) ===');
 
 console.log('\n=== 10. time ===');
 {
+  /* Gated in calibration loops (tools/nso_pace.js), not seconds: the 5 s this
+     gate used to be is ROLL_LOOPS_MAX loops on the box it was set on, the
+     same headroom over what that box measures, on any runner. */
+  const ROLL_LOOPS_MAX = 17;
   const big = NSO_Stock.revolve(NSO_Stock.profileTube(30, 28, 120), 2000);
-  const t0 = Date.now(), r = NSO_tubeEdgeRaw(big, { verb: 'roll', radius: 3, angle: 180 }), ms = Date.now() - t0;
-  check('a 2000-sided tube (' + big.length / 9 + ' triangles) rolls 180° in under 5 s', r.ok && ms < 5000, ms + ' ms · ' + (r.ok ? r.tris.length / 9 + ' out' : r.reason));
+  const t = pace.time(() => NSO_tubeEdgeRaw(big, { verb: 'roll', radius: 3, angle: 180 })), r = t.value, ms = Math.round(t.ms);
+  console.log(pace.finding('the 2000-sided roll', t));
+  check('a 2000-sided tube (' + big.length / 9 + ' triangles) rolls 180° in under ' + ROLL_LOOPS_MAX + ' calibration loops', r.ok && t.loops < ROLL_LOOPS_MAX,
+    t.loops.toFixed(2) + ' loops (' + ms + ' ms) · ' + (r.ok ? r.tris.length / 9 + ' out' : r.reason));
   if (r.ok) row('2000-sided Ø60/2 tube, roll 180° r 3', big, r, ms, '');
 }
 
