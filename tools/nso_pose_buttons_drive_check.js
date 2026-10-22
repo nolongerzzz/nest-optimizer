@@ -31,6 +31,7 @@ const fs = require('fs');
 const os = require('os');
 const { execFileSync } = require('child_process');
 const { withApp, loadSTL, ROOT } = require('./nso_app_harness');
+const { pieces3MF } = require('./3mf-test/pieces-3mf.js');
 
 const OUT = path.resolve(process.argv[2] || path.join(ROOT, 'tools', 'pose-buttons-out'));
 fs.mkdirSync(OUT, { recursive: true });
@@ -520,12 +521,14 @@ withApp(async (page, logs) => {
   const file = path.join(tmp, dl.suggestedFilename());
   await dl.saveAs(file);
   const parts = execFileSync('unzip', ['-Z1', file]).toString().split('\n').filter(n => /\.model$/.test(n));
+  /* Read through pieces3MF: Bambu's project envelope (export-bambu-project, #264) places each
+     piece's mesh by its component and build-item transforms, which the raw <vertex> lines do not
+     carry. */
   const verts = [], tris = [];
-  for (const part of parts) {
-    const xml = execFileSync('unzip', ['-p', file, part], { maxBuffer: 1 << 28 }).toString();
+  for (const pc of pieces3MF(file)) {
     const base = verts.length;
-    for (const m of xml.matchAll(/<vertex x="([^"]+)" y="([^"]+)" z="([^"]+)"/g)) verts.push([+m[1], +m[2], +m[3]]);
-    for (const m of xml.matchAll(/<triangle v1="(\d+)" v2="(\d+)" v3="(\d+)"/g)) tris.push([+m[1] + base, +m[2] + base, +m[3] + base]);
+    verts.push(...pc.verts);
+    for (const f of pc.faces) tris.push([f[0] + base, f[1] + base, f[2] + base]);
   }
   const screen = await N(() => {
     const p = window.__d.p(); p.mesh.updateMatrixWorld(true);

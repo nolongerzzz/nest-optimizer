@@ -9,8 +9,9 @@
  *   - the geometry-only envelope: each piece's mesh inline in 3D/3dmodel.model.
  *
  * One entry per build item, in build order: { id, verts: [[x, y, z], ...],
- * tris }. The item's and component's 3MF transforms (row-vector 3 x 4) are
- * applied.
+ * tris, faces: [[v1, v2, v3], ...] } - tris the triangle count, faces their
+ * indices into verts. The item's and component's 3MF transforms (row-vector
+ * 3 x 4) are applied.
  */
 'use strict';
 
@@ -52,7 +53,8 @@ function pieces3MF(file) {
     }
     const verts = [...body.matchAll(/<vertex x="([-\d.eE+]+)" y="([-\d.eE+]+)" z="([-\d.eE+]+)"/g)]
       .map((v) => apply(t, v.slice(1).map(Number)));
-    return { id: Number(it.id), verts, tris: (body.match(/<triangle /g) || []).length };
+    const faces = [...body.matchAll(/<triangle v1="(\d+)" v2="(\d+)" v3="(\d+)"/g)].map((f) => [+f[1], +f[2], +f[3]]);
+    return { id: Number(it.id), verts, tris: faces.length, faces };
   });
 }
 
