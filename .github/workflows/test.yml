@@ -10,8 +10,8 @@
 # They are claude-wip and claude-wip-next - the staging branch a batch of merges
 # is pushed to and run on before claude-wip is fast-forwarded to it.
 #
-# The optional `shard` input (1-10; default all) runs only that shard: the
-# re-run after a fix to one failing step, without paying for the other nine.
+# The optional `shard` input (1-20; default all) runs only that shard: the
+# re-run after a fix to one failing step, without paying for the other nineteen.
 # A one-shard run is not a full run - "npm test" then gates on that shard alone.
 #
 # This is the REQUIRED status check on main (Settings -> Branches -> branch
@@ -28,32 +28,35 @@
 # main. A branch may carry a newer copy, but main must always have one.
 #
 # WHAT IT RUNS
-# The suite, in ten parallel shards, through tools/run-tests.mjs. The suite
+# The suite, in twenty parallel shards, through tools/run-tests.mjs. The suite
 # list deliberately is NOT repeated here - package.json's "testSteps" is the
 # single definition, and a copy in this file would drift from it. Add a suite
 # there and CI picks it up with no change to this workflow: the runner packs it
 # into a shard on its own.
 #
-# WHY TEN, AND WHY A PACKED SPLIT
+# WHY TWENTY, AND WHY A PACKED SPLIT
 # Measured, not guessed - on these runners (package.json "testStepWeightsNote"
-# has the method). The 257 steps are ~13,800s of work on a typical
-# ubuntu-latest runner and the shape is lopsided: support:shells alone is
-# ~1,230s, the ten slowest are 35%, and dozens of steps take under a second.
-# Slicing the list into ten equal-LENGTH pieces would leave one runner holding
-# the heavy steps, so the slowest shard - the only number CI waits on - would
-# hardly move. The runner packs by measured cost instead (package.json
-# "testStepWeights"), which lands all ten shards at ~1,380s of tests (~24 min
-# with setup on a typical runner; about one runner in five is ~0.6x that).
+# has the method). The 261 steps are ~13,484s of work on a typical
+# ubuntu-latest runner and the shape is lopsided: the heaviest step is
+# support:shells-clamp (~467s) and dozens take under a second. Slicing the list
+# into equal-LENGTH pieces would leave one runner holding the heavy steps, so
+# the slowest shard - the only number CI waits on - would hardly move. The
+# runner packs by measured cost instead (package.json "testStepWeights"),
+# which lands all twenty shards at ~674s of tests (~13 min with setup on
+# a typical runner; about one runner in five is ~0.6x that).
 #
-# Ten since ci-stability (Tests #297-#305): eight packed at ~1,725s of
-# typical-runner time each and shards 7 of #301 and 4 of #305 ran past the
-# 40-min timeout. The longest single step (support:shells, ~1,230s) is the
-# floor: no shard count gets under it, and tools/run-tests.mjs's 1,200s shard
-# budget needs it shorter or split.
+# Twenty since ci-shard-split. Ten before it: the wall clock was the heaviest
+# shard, and no shard count gets under the heaviest step - support:shells was
+# ~1,230s, gscope:speed ~650s, support:interface ~185s. They are now seven
+# steps (support:shells-coupon / -clamp / -fixtures, gscope:speed-orbit /
+# -drag, support:interface-clamp / -fixtures, each the old one's checks cut by
+# fixture or by gate, none dropped), the longest ~467s, and the shard
+# count is what the budget (tools/run-tests.mjs SHARD_BUDGET_S, 700s) divides
+# the suite by. Sixteen would pack to ~843s: over the budget.
 #
 # THE REQUIRED CHECK IS THE "npm test" JOB BELOW, NOT THE SHARDS
 # Branch protection on main requires a check called "npm test". A bare matrix
-# would report as "shard 1 of 10", "shard 2 of 10" and so on, and the required
+# would report as "shard 1 of 20", "shard 2 of 20" and so on, and the required
 # check would never report at all - the same silent forever-pending failure
 # this file warns about above. So the shards do the work and a final job named
 # "npm test" gates on all of them. Renaming that job breaks main's protection;
@@ -102,11 +105,11 @@ on:
   workflow_dispatch:
     inputs:
       shard:
-        description: 'Run only this shard (1-10); all runs the whole suite'
+        description: 'Run only this shard (1-20); all runs the whole suite'
         type: choice
         required: false
         default: 'all'
-        options: ['all', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10']
+        options: ['all', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20']
 
 # One run per branch / PR. A superseded run is cancelled rather than left to burn
 # a runner. Note a cancelled run reads as "not passing" to branch protection
@@ -117,14 +120,14 @@ concurrency:
 
 jobs:
   shard:
-    name: shard ${{ matrix.shard }} of 10
+    name: shard ${{ matrix.shard }} of 20
     runs-on: ubuntu-latest
-    # A shard is ~24 minutes on a typical runner (~1,380s of tests + setup).
+    # A shard is ~13 minutes on a typical runner (~674s of tests + setup).
     # 15 was set when a shard was ~4 minutes; Tests #231 and #233 were
     # cancelled at it, 25 held until #266, and 40 until #301 and #305, whose
     # shards 7 and 4 ran past it: eight shards had grown to ~1,725s of tests
     # each and support:shells went from ~190s to ~1,200s in one PR. 60 is a
-    # backstop, ~2.5x the packed shard: a shard that nears it means re-measure
+    # backstop, ~4.5x the packed shard: a shard that nears it means re-measure
     # the weights (the "timing" artifact, above), not raise this again.
     timeout-minutes: 60
     permissions:
@@ -132,14 +135,14 @@ jobs:
     env:
       NSO_LIBRARY_DIR: ${{ github.workspace }}/nest-library
     strategy:
-      # Every shard reports. One shard failing must not cancel the other nine -
+      # Every shard reports. One shard failing must not cancel the other nineteen -
       # that would put back exactly the blindness the failure-tolerant runner
       # was written to remove.
       fail-fast: false
       matrix:
         # Every shard, unless a dispatch asked for one (the `shard` input). Push and
-        # pull_request runs have no inputs, so they always get all ten.
-        shard: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.shard != '' && inputs.shard != 'all' && format('[{0}]', inputs.shard) || '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]') }}
+        # pull_request runs have no inputs, so they always get all twenty.
+        shard: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.shard != '' && inputs.shard != 'all' && format('[{0}]', inputs.shard) || '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]') }}
 
     steps:
       - name: Check out
@@ -176,7 +179,7 @@ jobs:
       # whole job being cancelled around it.
       - name: Run this shard
         timeout-minutes: 57
-        run: node tools/run-tests.mjs --shard=${{ matrix.shard }}/10 --timing-csv timing/shard-${{ matrix.shard }}.csv
+        run: node tools/run-tests.mjs --shard=${{ matrix.shard }}/20 --timing-csv timing/shard-${{ matrix.shard }}.csv
 
       # Pass or fail, the times go up: a red shard's are the ones worth reading.
       - name: Upload this shard's step times
@@ -234,7 +237,7 @@ jobs:
       - name: Merge them into timing.csv
         continue-on-error: true
         run: |
-          node tools/run-tests.mjs --merge-timing timing --out timing.csv --shards 10 | tee timing-summary.txt
+          node tools/run-tests.mjs --merge-timing timing --out timing.csv --shards 20 | tee timing-summary.txt
           { echo '### Step times (artifact: timing)'; echo '```'; cat timing-summary.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload timing.csv

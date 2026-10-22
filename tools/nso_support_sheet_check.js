@@ -10,6 +10,12 @@
 //   node tools/nso_support_sheet_check.js            exit 0 = every gate held
 //   node tools/nso_support_sheet_check.js --export   also writes the clamp with
 //        its supports to tools/support-interface-out/clamp_body_sheet.3mf
+//   node tools/nso_support_sheet_check.js --only=clamp|fixtures   one half
+//        of the checks: the clamp, or everything else (the coupon, shelf,
+//        tab, tall and the coupon as the card builds it across its areas).
+//        CI runs the halves as support:interface-clamp and
+//        support:interface-fixtures; no flag runs both, and the two are a
+//        partition of the one run's checks.
 //
 // Each piece goes through the card's own pipeline, at the card's defaults
 // (angle 60, Tree, 1.2 mm, rest off): detectOverhangs, planTree per area with
@@ -67,6 +73,14 @@ const { csgContext } = require('./nso_csg_node.js');
 const pace = require('./nso_pace.js');
 const SL = require('../nso_slicer.js');
 const EXPORT = process.argv.includes('--export');
+const onlyArg = process.argv.find(a => a.startsWith('--only='));
+const ONLY = onlyArg ? onlyArg.slice('--only='.length) : null;
+if (ONLY !== null && ONLY !== 'clamp' && ONLY !== 'fixtures') {
+  console.error('nso_support_sheet_check: --only=' + ONLY + ' is not clamp or fixtures');
+  process.exit(2);
+}
+/* a piece's half: the clamp alone, or the rest */
+const halfOf = tag => tag === 'clamp' ? 'clamp' : 'fixtures';
 
 const ctx = {
   Math, Map, Set, console, Array, Object, Number, String, JSON, isFinite, Promise, Date,
@@ -448,6 +462,7 @@ fs.mkdirSync(OUT, { recursive: true });
   const report = [];
 
   for (const [name, piece, tag] of PIECES) {
+    if (ONLY && halfOf(tag) !== ONLY) continue;
     console.log('\n=== ' + name + ' ===');
     const T = { plan: 0, parts: 0, partsBare: 0, weld: 0, weldBare: 0 };
     const det = SA.detectOverhangs(piece, { skipList: [], angleDeg: CARD.angleDeg, occluders: [] });
@@ -798,7 +813,7 @@ fs.mkdirSync(OUT, { recursive: true });
   /* THE COUPON AS THE CARD BUILDS IT: every area planned, built with its
      trunks on their feet and no pad (app-supports-card.js PARTS_OPTS), handed
      back as shells, then the pads drawn over every area at once (shareFeet) */
-  {
+  if (!ONLY || ONLY === 'fixtures') {
     console.log('\n=== top_clip_x2: the card\'s build, across its areas ===');
     const piece = PIECES.find(x => x[2] === 'coupon')[1];
     /* In calibration loops (tools/nso_pace.js), not seconds: the old 10 s on
