@@ -780,13 +780,16 @@ async function main() {
   const over = gaps.filter((g) => g > 250).length;
   console.log('       ' + updates + ' updates in ' + (buildMs / 1000).toFixed(1) + ' s; planner gaps (planning + building): median ' + gaps[gaps.length >> 1] +
     ' ms, max ' + gaps[gaps.length - 1] + ' ms, ' + over + ' of ' + gaps.length + ' over 250 ms');
-  check('the planner is heard from at least every 250 ms in all but a handful of its messages, and never goes quiet for two seconds',
-    // 5%, not 2%: a CI runner starved for CPU stretched 25 of 686 beats past 250 ms (the build took 37 s, not 23 s)
-    // while never going quiet for a second; a planner that stopped beating would put nearly all of them over.
-    // 2 s, not 1 s, for now: since supports-print-1 (#256) the sheet / cap planning posts nothing for ~1.2 s on
-    // the wedge (622 ms before it). Ticket supports-progress-cadence posts progress inside the sheet step and
-    // puts this back to < 1 s. The 60 s watchdog (section 12) is unchanged.
-    [over <= Math.ceil(gaps.length * 0.05), gaps[gaps.length - 1] < 2000], [true, true]);
+  // The longest silence is a FINDING, not a gate (ci-timing-gates' pattern, #262): it is wall clock, and a CI
+  // runner at ~2x reads it past 2 s (2329 / 2213 ms on Tests #306 / #307, 1285 ms on #302, ~1.4 s here) while
+  // every functional check holds. Ticket ci-stability replaces it with a work-based measure; supports-progress-
+  // cadence (posting inside the #256 sheet step) still owns the < 1 s target. The 60 s watchdog (section 12)
+  // is unchanged and still asserted.
+  console.log('  FINDING the planner\'s longest silence on the wedge: ' + gaps[gaps.length - 1] + ' ms on the clock (target < 2000 ms; not a gate - ci-stability)');
+  check('the planner is heard from at least every 250 ms in all but a handful of its messages',
+    // 5%, not 2%: a CI runner starved for CPU stretched 25 of 686 beats past 250 ms (the build took 37 s, not 23 s);
+    // a planner that stopped beating would put nearly all of them over.
+    over <= Math.ceil(gaps.length * 0.05), true);
 
   /* Escape in the middle of planning, on the real worker: REGENERATE over the standing supports, stopped at once. */
   const standing = T.ids(await T.sups());
@@ -918,7 +921,10 @@ async function main() {
   const firstB = clampRun.log.filter((m) => m.phase === 'building'), bTotal = firstB.length ? firstB[0].total : 0;
   console.log('       ' + c.line + ' in ' + (clampMs / 1000).toFixed(1) + ' s: planning ' + span('planning') + ' (' + distinct('planning') + ' counts), building ' +
     span('building') + ' (' + distinct('building') + ' counts of ' + bTotal + ')');
-  check('the clamp ends BUILT with supports added, inside ' + CLAMP_BUILD_MS / 1000 + ' s', [c.state, clampSups > 0, clampMs < CLAMP_BUILD_MS], ['built', true, true]);
+  // The build time is a FINDING, not a gate (#262's pattern; ticket ci-stability measures the work instead):
+  // ~2x runners read it past 30 s while the build itself is right.
+  console.log('  FINDING the clamp build took ' + (clampMs / 1000).toFixed(1) + ' s on the clock (target < ' + CLAMP_BUILD_MS / 1000 + ' s; not a gate - ci-stability)');
+  check('the clamp ends BUILT with supports added', [c.state, clampSups > 0], ['built', true]);
   check('...the bar reached 100 %', Math.max(...clampRun.log.map((m) => m.percent == null ? -1 : m.percent)), 100);
   check('...with at least 3 distinct Planning counts and 3 distinct Building counts on the way', [distinct('planning') >= 3, distinct('building') >= 3], [true, true]);
   /* the sheet is planned before the first trunk: its tips are counted, so the first second of building is not a still bar */
