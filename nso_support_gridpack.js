@@ -432,10 +432,14 @@
     var reach = (opts.pickupReachMm == null ? bc.pitchMm * 1.05 : +opts.pickupReachMm) * (eager > 0 ? 1 : 0);
     var rest = !!opts.restOnModel;
     /* opts.mergeThroughCrowd: a member in a node's way that cannot join the
-       merge does not hold it up (a stair's own tree, a tip under every strip a
-       layer apart: crowded everywhere, it merged nowhere and stood 93
-       struts on the plate). Its legs may then touch that member - support
-       on support, kept as shells (shells()), never welded */
+       merge does not hold it up (a stair's own tree, a tip under every strip
+       a layer apart, is crowded everywhere: held to the usual rule it merged
+       nowhere and stood 93 struts on the plate; joining up to 8, or leaning
+       45 deg, did not free it). Its legs may then pass through that member -
+       support on support, kept as shells (shells(): the card's build, never
+       welded). FLAG: where a leg only grazes one, the weld (support:shells'
+       reference) closes a sliver of void the shells do not - the tilted box,
+       z 6.10, 0.009 mm2. */
     var crowd = !!opts.mergeThroughCrowd;
     out.branchTiltDeg = tiltDeg; out.latticeMm = L; out.plateZ = plateZ; out.restOnModel = rest;
     var obstacles = [rawTris].concat(opts.occluders || []);
@@ -2200,6 +2204,9 @@
                 if (!u || !u.ok) throw new Error('sheet ' + sh.sheet + ' does not meet the tips it was built on: ' + ((u && u.reason) || 'no result'));
                 var fin = flatSplits(T._finishUnion(u.soup).soup), trunks = [], sh2 = [sh.sheet];
                 mine.forEach(function (g) { trunks = trunks.concat(g.soup.trunks); sh2 = sh2.concat(g.soup.sheets); });
+                /* a trunk a stair holds by itself has no parts and no solid of
+                   its own: its spots are the stair's (as shells() counts them) */
+                (sh.carriers || []).forEach(function (t) { if (trunks.indexOf(t) < 0 && !groups.some(function (g) { return g.soup.trunks.indexOf(t) >= 0; })) trunks.push(t); });
                 groups = groups.filter(function (g) { return mine.indexOf(g) < 0; });
                 groups.push({ ids: [], soup: { soup: fin, box: bounds(fin), trunks: trunks, sheets: sh2 } });
               });
