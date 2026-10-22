@@ -280,7 +280,7 @@
     "detach:test": "node tools/nso_detach_test.js",
     "lift:test": "node tools/nso_lift_test.js",
     "lift:drive": "node tools/nso_lift_drive_check.js",
-    "foam:test": "node tools/nso_foam_test.js",
+    "foam:test": "node tools/nso_foam_test.js && node tools/nso_foam_box_test.js",
     "foam:drive": "node tools/nso_foam_drive_check.js",
     "cavity:thickwall": "node tools/nso_cavity_thickwall_test.js",
     "lift:shots": "node tools/nso_lift_drive_check.js tools/lift-out",
@@ -649,7 +649,9 @@
     "  supports-angle-default's (#263) 13.6s / 13.2s for its new section 13).",
     "  gcode3mf:test 3200 (1.83s on the cloud box x 1.7, rounded up: it",
     "  re-packages the 1.6 MB reference .gcode.3mf several times and reads it",
-    "  back through G-scope's import; gcode3mf-packager, #270)."
+    "  back through G-scope's import; gcode3mf-packager, #270).",
+    "  foam:test 23200 (4200 + foam-gun's box gates, tools/nso_foam_box_test.js,",
+    "  11.1s local x 1.7, rounded up; foam-gun, #273)."
   ],
   "testStepWeightsSource": "ci-shard-split: the seven new steps apportioned from their parents (testStepWeightsNote); the rest Tests #297-#305 SUMMARY tables, read 2026-10-22 (ci-stability): fresh, runner-normalised means of every shard - testStepWeightsNote has the method",
   "testStepWeights": {
@@ -698,7 +700,7 @@
     "pose:bounds": 24200,
     "bvh:test": 3600,
     "edges:test": 287,
-    "foam:test": 4050,
+    "foam:test": 23200,
     "foam:drive": 77350,
     "cavity:thickwall": 89,
     "slicer:test": 4650,

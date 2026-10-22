@@ -78,6 +78,7 @@ Current roster, by category:
 | G-scope Features (`app-gscope-lift.js`) | **none** - reads geometry, writes none | n/a | header comment + `docs/LIFT.md` §7 |
 | Grab and drop (`app-grab-drop.js`; a drop onto a piece is `NSO_seatPieceAt`, Seat here's seat) | none of its own - a drop over the plate or into the air is a move; onto a piece it is Seat here's whole-piece, on the carried piece, only when the seat turns it | Seat here's `nsoMaskCount(modelB)` | header comment + `docs/GRAB-DROP.md` §4 |
 | Foam (`app-foam.js`, Finish -> Shape) | sub-region | the faces of the one hollow it fills that the level reaches, against `nsoMaskFaceList(m)`; a null list (a painted recessed patch) stands it down | header comment + `docs/FOAM.md` §6 |
+| Foam in a box (`nso_foam.js` `foamBox`; its ADD card is the next ticket) | sub-region | the faces the foam welds to, against `piece.skipList` (`nsoMaskFaceList(m)`, required); a piece whose shells must be merged first stands down for any paint, since the merge replaces every triangle | header comment + `docs/FOAM.md` §10 |
 | Punch (`app-punch.js`, Subtract -> Punch; the geometry is `nso_punch.js`) | whole-piece | `nsoMaskCount(m) > 0` | header comment + `docs/PUNCH.md` |
 | Pull (`app-pull.js`, Shape -> Pull; the geometry is `nso_pull.js` + `nso_densify.js`) | sub-region | the moved vertices (where they were and where they went) against `nsoMaskPlaneList(m)`, `NSO_brushPaintCheck`; operand none | header comment + `docs/PULL.md` |
 
