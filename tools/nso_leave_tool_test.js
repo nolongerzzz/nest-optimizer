@@ -364,14 +364,13 @@ withApp(async (page, logs) => {
   {
     /* Shell v3: Measure and Align in the row; Join, Seat, Supports, Add,
        Subtract, Shape, Paint, Surface & edges, Sculpt and Check & repair in
-       the column. Then a member open inside a merged one (A-B-C in Join,
-       Photo in Gen+): the double-click shuts it and the drop-down holding
-       it. Plate & pieces is pinned open, not a drop-down: it stays. */
+       the column. Then a member open inside a merged one (Photo in Gen+):
+       the double-click shuts it and the drop-down holding it. Plate & pieces is pinned open, not a drop-down: it stays. */
     const COL = ['menu-measure', 'menu-align', 'menu-connect', 'menu-joins', 'menu-seat', 'menu-supports', 'menu-add', 'menu-bit',
                  'menu-shape', 'menu-paint', 'menu-surface', 'menu-sculpt', 'menu-repair'];
     const ids = await page.evaluate(() => [...document.querySelectorAll('.vp-col-menu')].map(d => d.id));
     check('the shell holds these thirteen', JSON.stringify(ids) === JSON.stringify(COL), ids.join(', '));
-    for (const id of COL.concat(['menu-abc', 'menu-photo'])) {
+    for (const id of COL.concat(['menu-photo'])) {
       await page.evaluate(() => document.querySelectorAll('.vp-menu').forEach(d => { d.open = false; }));
       await page.click('#' + id + ' > summary');
       await page.waitForTimeout(150);

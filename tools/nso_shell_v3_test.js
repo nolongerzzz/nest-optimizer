@@ -101,8 +101,9 @@ const HOLDS = {
                 'btn-crop-shape-piece', 'btn-crop-shape-outline', 'crop-readout', 'btn-crop', 'btn-crop-cancel'],
   // CONNECT: the builder, and Reattach as its last row (it moved here from the Crop card)
   'menu-connect': ['connect-panel', 'btn-reattach'],
-  'menu-joins': ['menu-join', 'join-slot-a', 'join-slot-b', 'join-slot-c', 'btn-join', 'btn-join-clear',
-                 'menu-abc', 'triple-mode', 'btn-join-triple'],
+  // JOIN: one card - the toggle, A, A-B gap, B, B-C gap, C, JOIN, Cancel
+  'menu-joins': ['joins-card', 'join-horizontal', 'join-slot-a', 'join-gap-ab-on', 'join-gap-ab', 'join-slot-b',
+                 'join-gap-bc-on', 'join-gap-bc', 'join-slot-c', 'btn-join', 'btn-join-clear', 'join-readout'],
   'menu-seat': ['btn-seat-support', 'seat-gap', 'btn-seat-here', 'chk-oversize-washer', 'btn-seat-flush', 'btn-flip-port', 'btn-seat-grid'],
   'menu-supports': ['supports-card', 'sup-angle', 'btn-sup-all', 'btn-sup-none', 'sup-style', 'sup-size',
                     'sup-rest', 'btn-sup-remove'],
@@ -155,8 +156,8 @@ const BEFORE = ['menu-import', 'file-input', 'btn-load-stl', 'btn-library', 'men
   /* The Crop card's axis buttons, box fields, Lift and Move controls are gone: one tool, a shape dragged to
      size (docs/CROP.md says where each job went). The ids that stay are the card's own, and Detach flange and
      Reattach, which moved to the Subtract and Connect cards under the same ids. */
-  'btn-crop', 'btn-detach', 'btn-reattach', 'menu-joins', 'menu-join', 'join-slot-a', 'join-slot-b',
-  'join-slot-c', 'btn-join', 'btn-join-clear', 'menu-abc', 'triple-mode', 'triple-gap-ab', 'triple-gap-bc', 'btn-join-triple',
+  'btn-crop', 'btn-detach', 'btn-reattach', 'menu-joins', 'join-horizontal', 'join-slot-a', 'join-gap-ab-on', 'join-gap-ab',
+  'join-slot-b', 'join-gap-bc-on', 'join-gap-bc', 'join-slot-c', 'btn-join', 'btn-join-clear',
   'btn-lift', 'menu-seat', 'btn-seat-support', 'seat-gap', 'btn-seat-here', 'chk-oversize-washer', 'oversize-gap',
   'btn-seat-flush', 'btn-flip-port', 'btn-seat-grid', 'menu-supports', 'sup-angle', 'btn-sup-all', 'btn-sup-none',
   'sup-style', 'sup-size', 'sup-rest', 'btn-sup-remove', 'menu-bit', 'btn-subtract', 'btn-extract-bit',
@@ -490,14 +491,14 @@ withApp(async (page, logs) => {
 
     // A member open inside a merged drop-down, then another drop-down: only the new one is open.
     await shutAll(page);
-    await clickFace(page, '#menu-joins > summary');
-    await clickFace(page, '#menu-abc > summary');
+    await clickFace(page, '#menu-gen > summary');
+    await clickFace(page, '#menu-photo > summary');
     const mid = await page.evaluate(() => [...document.querySelectorAll('.vp-menu[open]')].map(d => d.id));
     await clickFace(page, '#menu-shape > summary');
     await page.waitForTimeout(100);
     const end = await page.evaluate(() => [...document.querySelectorAll('.vp-menu[open]')].map(d => d.id));
     check('a member opens inside its drop-down, and the next drop-down shuts both',
-      mid.join() === 'menu-joins,menu-abc' && end.join() === 'menu-shape', mid.join() + ' -> ' + end.join());
+      mid.join() === 'menu-gen,menu-photo' && end.join() === 'menu-shape', mid.join() + ' -> ' + end.join());
     // The leave-tool gesture (double-click on the plate) shuts a drop-down and its open member.
     await shutAll(page);
     await clickFace(page, '#menu-gen > summary');

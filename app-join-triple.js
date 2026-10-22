@@ -56,9 +56,26 @@
  * junction one's gap survives junction two untouched - pinned directly in
  * tools/nso_join_triple_test.js rather than left as an argument.
  *
- * UNDO. Four entries, the same four a hand-run pair of junctions leaves:
- * lock, seat, lock, seat. Nothing here collapses them, so backing out of a
- * triple join is the same gesture as backing out of the steps it replaces.
+ * THE CARD. The Join card is this file's: one card, one JOIN. A
+ * Vertical / Horizontal toggle on top (the mode below), the A, B, C slots,
+ * and between each pair of slots the gap row for the junction they make - a
+ * checkbox and the slider. Checkbox off is no gap: that junction is seated
+ * touching (0) and its slider greys out. On, it is the slider's value. The
+ * B-C row is live once C is picked. JOIN does one of three things, and the
+ * readout under it says which before it is pressed:
+ *
+ *   A, B, gap off  - Complete Join (joinSelectedModels), exactly as it was:
+ *                    B is brought to A and welded into it, one piece.
+ *   A, B, gap on   - the A-B junction alone, at the slider's gap, in the
+ *                    toggle's mode: the first junction of the triple.
+ *   A, B, C        - both junctions (0 for a row that is off).
+ *
+ * Cancel clears the slots; the toggle and the gap rows are left as they are.
+ *
+ * UNDO. One press, one Undo. The steps a press takes are the ordinary ones -
+ * lock, seat (and lock, seat) - and they are kept as they were made, inside
+ * one stepGroup entry that undoes them last first (app-core.js). A sequence
+ * that stops at B-C leaves the A-B steps it did take as that one entry.
  */
 (function () {
   'use strict';
@@ -68,9 +85,10 @@
 
   function el(id) { return document.getElementById(id); }
 
+  /* The toggle: off is Vertical stack, on is Horizontal sequence. */
   function getMode() {
-    var sel = el('triple-mode');
-    return (sel && sel.value === MODE_HORIZONTAL) ? MODE_HORIZONTAL : MODE_VERTICAL;
+    var sw = el('join-horizontal');
+    return (sw && sw.checked) ? MODE_HORIZONTAL : MODE_VERTICAL;
   }
 
   /* The Center lock reference selector, read the same way Center lock reads
@@ -87,16 +105,24 @@
     return state.placed.find(function (p) { return p && p.sourceId === sourceId && p.mesh; }) || null;
   }
 
+  /* Two distinct pieces, both on the plate, inside a live Join. */
+  function pair() {
+    var a = state.editId, b = state.joinPartnerId;
+    if (!state.joinSession) return null;
+    if (a == null || b == null || a === b) return null;
+    var pa = placedOf(a), pb = placedOf(b);
+    if (!pa || !pb) return null;
+    return { ids: [a, b], placed: [pa, pb] };
+  }
+
   /* Three distinct pieces, all on the plate, inside a live Join. Same
      precondition shape the card's other pair tools use, one slot wider. */
   function trio() {
-    var a = state.editId, b = state.joinPartnerId, c = state.joinThirdId;
-    if (!state.joinSession) return null;
-    if (a == null || b == null || c == null) return null;
-    if (a === b || b === c || a === c) return null;
-    var pa = placedOf(a), pb = placedOf(b), pc = placedOf(c);
-    if (!pa || !pb || !pc) return null;
-    return { ids: [a, b, c], placed: [pa, pb, pc] };
+    var p = pair(), c = state.joinThirdId;
+    if (!p || c == null || c === p.ids[0] || c === p.ids[1]) return null;
+    var pc = placedOf(c);
+    if (!pc) return null;
+    return { ids: p.ids.concat([c]), placed: p.placed.concat([pc]) };
   }
 
   /* ---- the gaps ---- */
@@ -111,8 +137,16 @@
     return (typeof readSeatGapInput === 'function') ? readSeatGapInput(id) : NaN;
   }
 
-  function fmtGap(v) {
-    return (typeof NSO_formatSeatGap === 'function') ? NSO_formatSeatGap(v) : String(v);
+  /* A junction's row: its checkbox on, or not. */
+  function gapOn(seam) {
+    var box = el('join-gap-' + seam + '-on');
+    return !!(box && box.checked);
+  }
+
+  /* The gap a junction will be seated at: the slider's when its checkbox is
+     on, touching (0) when it is off. */
+  function junctionGap(seam) {
+    return gapOn(seam) ? readGap('join-gap-' + seam) : 0;
   }
 
   /* What a gap means in words - the same three cases seatBitAtGap prints. */
@@ -122,10 +156,69 @@
     return 'touching';
   }
 
+  /* The readout's shorter form: "touching", "0.18 gap", "0.05 overlap". */
+  function seamWord(g) {
+    if (!isFinite(g)) return 'gap out of range';
+    if (g < 0) return Math.abs(g).toFixed(2) + ' gap';
+    if (g > 0) return g.toFixed(2) + ' overlap';
+    return 'touching';
+  }
+
   function syncGapReadouts() {
     if (typeof updateSeatGapReadout === 'function') {
-      updateSeatGapReadout('triple-gap-ab', 'triple-gap-ab-value');
-      updateSeatGapReadout('triple-gap-bc', 'triple-gap-bc-value');
+      updateSeatGapReadout('join-gap-ab', 'join-gap-ab-value');
+      updateSeatGapReadout('join-gap-bc', 'join-gap-bc-value');
+    }
+  }
+
+  /* ---- what JOIN will do ---- */
+
+  /* 'triple' - three pieces: both junctions.
+     'pair'   - two pieces, A-B gap on: the A-B junction at its gap.
+     'complete' - two pieces, A-B gap off: Complete Join, one piece.
+     'none'   - not enough picked. */
+  function plan() {
+    var mode = getMode();
+    if (trio()) {
+      return { kind: 'triple', mode: mode, gapAB: junctionGap('ab'), gapBC: junctionGap('bc') };
+    }
+    if (pair()) {
+      return gapOn('ab')
+        ? { kind: 'pair', mode: mode, gapAB: junctionGap('ab') }
+        : { kind: 'complete', mode: mode, gapAB: 0 };
+    }
+    return { kind: 'none', mode: mode };
+  }
+
+  function readoutText(p) {
+    if (p.kind === 'none') {
+      if (!state.joinSession || state.editId == null) return 'Pick A and B';
+      return 'Pick B';
+    }
+    if (p.kind === 'complete') return 'A-B: touching · welded into one piece';
+    var parts = ['A-B: ' + seamWord(p.gapAB)];
+    if (p.kind === 'triple') parts.push('B-C: ' + seamWord(p.gapBC));
+    parts.push(p.mode);
+    return parts.join(' · ');
+  }
+
+  /* ---- one press, one Undo ---- */
+
+  /* Run fn with a fresh undo stack, then put what it pushed back as one
+     entry: the steps themselves when there was one, a stepGroup that undoes
+     them last first when there were more. The steps are the primitives' own
+     entries, untouched. */
+  function asOneStep(label, fn) {
+    var outer = state.undoStack;
+    state.undoStack = [];
+    try {
+      return fn();
+    } finally {
+      var steps = state.undoStack;
+      state.undoStack = outer;
+      if (steps.length === 1) pushUndo(steps[0]);
+      else if (steps.length > 1) pushUndo({ type: 'stepGroup', steps: steps, label: label });
+      else if (typeof updateUndoBtn === 'function') updateUndoBtn();
     }
   }
 
@@ -166,7 +259,7 @@
       return {
         ok: false,
         reason: 'the two pieces sit on the same spot - slide them apart first, '
-              + 'or use Vertical stack'
+              + 'or use Vertical'
       };
     }
     var runIsX = Math.abs(dx) >= Math.abs(dz);
@@ -199,82 +292,141 @@
     return { ok: true, seat: seat, runAxis: lock.runAxis };
   }
 
-  /* ---- the sequence ---- */
-
-  function run() {
-    var t = trio();
-    if (!t) {
-      setStatus('Open JOIN, then pick three different pieces A, B and C', true);
-      return false;
-    }
-    var gapAB = readGap('triple-gap-ab');
-    var gapBC = readGap('triple-gap-bc');
-    if (!isFinite(gapAB) || !isFinite(gapBC)) {
-      setStatus('A junction gap is missing or out of range - nothing joined', true);
-      return false;
-    }
-    var mode = getMode();
+  /* Put the slots back the way the press found them, and the card with them. */
+  function restorer() {
     var keepA = state.editId, keepB = state.joinPartnerId;
-    var restore = function () {
+    return function () {
       state.editId = keepA;
       state.joinPartnerId = keepB;
       renderModelList();
       updateEditSize();
       updateJoinUI();
     };
+  }
 
-    var r1 = junction(t.ids[0], t.ids[1], gapAB, mode);
-    if (!r1.ok) {
-      restore();
-      setStatus('Triple join stopped at A-B, nothing else moved - ' + r1.reason, true);
+  /* ---- the sequences ---- */
+
+  /* A-B-C: both junctions, each at its own row's gap (0 for a row that is off). */
+  function run() {
+    var t = trio();
+    if (!t) {
+      setStatus('Open JOIN, then pick three different pieces A, B and C', true);
       return false;
     }
-    var r2 = junction(t.ids[1], t.ids[2], gapBC, mode);
-    if (!r2.ok) {
-      restore();
-      // A-B really is seated and really is still there; saying so is the
-      // difference between "undo twice" and "undo four times".
-      setStatus('Triple join stopped at B-C - ' + r2.reason
-        + ' - A-B is seated at ' + gapWord(gapAB) + ' and was left alone', true);
+    var gapAB = junctionGap('ab');
+    var gapBC = junctionGap('bc');
+    if (!isFinite(gapAB) || !isFinite(gapBC)) {
+      setStatus('A junction gap is missing or out of range - nothing joined', true);
       return false;
     }
-    restore();
-    var how = (mode === MODE_HORIZONTAL) ? 'in a row' : 'stacked';
-    setStatus('Joined A-B-C ' + how
-      + ' - A-B ' + gapWord(gapAB) + ' (measured ' + r1.seat.measured.toFixed(3) + 'mm)'
-      + ', B-C ' + gapWord(gapBC) + ' (measured ' + r2.seat.measured.toFixed(3) + 'mm)');
-    return true;
+    var mode = getMode();
+    var restore = restorer();
+    return asOneStep('Undo: Join A-B-C reverted', function () {
+      var r1 = junction(t.ids[0], t.ids[1], gapAB, mode);
+      if (!r1.ok) {
+        restore();
+        setStatus('Triple join stopped at A-B, nothing else moved - ' + r1.reason, true);
+        return false;
+      }
+      var r2 = junction(t.ids[1], t.ids[2], gapBC, mode);
+      if (!r2.ok) {
+        restore();
+        // A-B really is seated and really is still there; saying so is what
+        // tells the person one Undo backs that seam out too.
+        setStatus('Triple join stopped at B-C - ' + r2.reason
+          + ' - A-B is seated at ' + gapWord(gapAB) + ' and was left alone', true);
+        return false;
+      }
+      restore();
+      var how = (mode === MODE_HORIZONTAL) ? 'in a row' : 'stacked';
+      setStatus('Joined A-B-C ' + how
+        + ' - A-B ' + gapWord(gapAB) + ' (measured ' + r1.seat.measured.toFixed(3) + 'mm)'
+        + ', B-C ' + gapWord(gapBC) + ' (measured ' + r2.seat.measured.toFixed(3) + 'mm)');
+      return true;
+    });
+  }
+
+  /* A-B with its gap on: the triple's first junction, alone. */
+  function runPair() {
+    var p = pair();
+    if (!p) {
+      setStatus('Open JOIN, then pick two different pieces A and B', true);
+      return false;
+    }
+    var gapAB = junctionGap('ab');
+    if (!isFinite(gapAB)) {
+      setStatus('The A-B gap is missing or out of range - nothing joined', true);
+      return false;
+    }
+    var mode = getMode();
+    var restore = restorer();
+    return asOneStep('Undo: Join A-B reverted', function () {
+      var r = junction(p.ids[0], p.ids[1], gapAB, mode);
+      restore();
+      if (!r.ok) {
+        setStatus('Join stopped at A-B - ' + r.reason, true);
+        return false;
+      }
+      var how = (mode === MODE_HORIZONTAL) ? 'in a row' : 'stacked';
+      setStatus('Joined A-B ' + how + ' - A-B ' + gapWord(gapAB)
+        + ' (measured ' + r.seat.measured.toFixed(3) + 'mm)');
+      return true;
+    });
+  }
+
+  /* JOIN: whichever of the three the card is set up for. Complete Join is
+     async (the kernel), the junctions are not; the caller gets a promise
+     either way. */
+  function press() {
+    var p = plan();
+    if (p.kind === 'triple') return Promise.resolve(run());
+    if (p.kind === 'pair') return Promise.resolve(runPair());
+    return Promise.resolve(joinSelectedModels());
   }
 
   /* ---- UI ---- */
 
   function syncUI() {
-    var ready = !!trio();
-    var btn = el('btn-join-triple');
-    if (btn) btn.disabled = !ready;
-    var box = el('triple-join');
-    if (box) box.classList.toggle('triple-ready', ready);
+    var hasC = !!trio();
+    var abOn = gapOn('ab');
+    var bcOn = gapOn('bc');
+    var abSlider = el('join-gap-ab');
+    if (abSlider) abSlider.disabled = !abOn;
+    var bcBox = el('join-gap-bc-on');
+    if (bcBox) bcBox.disabled = !hasC;
+    var bcSlider = el('join-gap-bc');
+    if (bcSlider) bcSlider.disabled = !(hasC && bcOn);
+    var rowAB = el('join-gap-ab-row');
+    if (rowAB) rowAB.classList.toggle('join-gap-off', !abOn);
+    var rowBC = el('join-gap-bc-row');
+    if (rowBC) {
+      rowBC.classList.toggle('join-gap-off', !bcOn);
+      rowBC.classList.toggle('join-gap-idle', !hasC);
+    }
+    var card = el('joins-card');
+    if (card) card.classList.toggle('join-horizontal', getMode() === MODE_HORIZONTAL);
+    var out = el('join-readout');
+    if (out) out.textContent = readoutText(plan());
     syncGapReadouts();
   }
 
   function bind() {
     var slotC = el('join-slot-c');
     if (slotC) slotC.addEventListener('click', function () { armJoinSlot('c'); });
-    var btn = el('btn-join-triple');
-    if (btn) btn.addEventListener('click', function () { run(); });
-    ['triple-gap-ab', 'triple-gap-bc'].forEach(function (id) {
+    ['join-gap-ab', 'join-gap-bc', 'join-gap-ab-on', 'join-gap-bc-on', 'join-horizontal'].forEach(function (id) {
       var input = el(id);
       if (!input) return;
-      input.addEventListener('input', syncGapReadouts);
-      input.addEventListener('change', syncGapReadouts);
+      input.addEventListener('input', syncUI);
+      input.addEventListener('change', syncUI);
     });
-    var mode = el('triple-mode');
-    if (mode) mode.addEventListener('change', syncUI);
     syncUI();
   }
 
   window.NSO_TripleJoin = {
     run: run,
+    runPair: runPair,
+    press: press,
+    plan: plan,
     syncUI: syncUI,
     trio: trio,
     readGap: readGap,
