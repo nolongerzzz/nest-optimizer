@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=reducercard1" />
+  <link rel="stylesheet" href="styles.css?v=ctxmenu1" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -323,7 +323,13 @@
           </details>
           <button id="btn-lock-pos" class="vp-bar-btn btn-lock-pos" type="button" disabled aria-pressed="false" title="Lock the selected piece's position. A locked piece refuses drag, the nudge arrows, Raise/Lower and the pose buttons, so a stray click cannot move it. Seat, Center, Align and Skin still place it. Shown by a teal outline and a 'locked' tag.">🔒 Lock position</button>
           <button id="btn-plate-lock" class="vp-bar-btn btn-plate-lock" type="button" disabled aria-pressed="false" title="Lock the plate configuration: hold every piece where it is, in their current relative positions, in one action. Separate from the per-piece lock - it sets no piece flag, so unlocking the plate gives back exactly the piece locks you had.">🔒 Lock plate</button>
-          <button id="btn-undo" class="vp-bar-btn" type="button" disabled>↶ Undo</button>
+          <!-- UNDO with REDO under it, the same stack as REMOVE / CLEAR PLATE and
+               EXPORT / OPTIMIZE: one slab tall in the row, the second below it. -->
+          <div class="vp-shell-stack" id="stack-undo">
+            <button id="btn-undo" class="vp-bar-btn" type="button" disabled>↶ Undo</button>
+            <button id="btn-redo" class="vp-bar-btn" type="button" disabled
+                    title="Nothing to redo">↷ Redo</button>
+          </div>
           <!-- REMOVE with CLEAR PLATE under it, EXPORT with OPTIMIZE under it: two
                stacks, each as wide as its wider label and one slab tall in the row,
                so the column still starts under Import. Optimize is the old Pack
@@ -1398,9 +1404,17 @@
       </section>
     </main>
   </div>
-  <div id="ctx-menu" class="ctx-menu hidden" role="menu">
-    <button type="button" id="ctx-export" class="ctx-item" role="menuitem">Export STL</button>
-    <button type="button" id="ctx-delete" class="ctx-item ctx-danger" role="menuitem">Delete piece</button>
+  <div id="ctx-menu" class="ctx-menu hidden" role="menu" data-piece="">
+    <button type="button" id="ctx-undo" class="ctx-item" role="menuitem" disabled><span>Undo</span><kbd id="ctx-undo-key" class="ctx-key">Ctrl+Z</kbd></button>
+    <button type="button" id="ctx-redo" class="ctx-item" role="menuitem" disabled><span>Redo</span><kbd id="ctx-redo-key" class="ctx-key">Ctrl+Y</kbd></button>
+    <div class="ctx-sep" role="separator"></div>
+    <button type="button" id="ctx-clone" class="ctx-item" role="menuitem" title="One copy of the piece, placed beside it" disabled>Clone</button>
+    <button type="button" id="ctx-mirror" class="ctx-item" role="menuitem" title="Reflect the piece across the plane through its centre, perpendicular to the plate's X axis. One Undo." disabled>Mirror across X</button>
+    <button type="button" id="ctx-export" class="ctx-item" role="menuitem" title="Open the Export card to download the selected piece as STL or 3MF" disabled>Export selected as&hellip;</button>
+    <button type="button" id="ctx-export-plate" class="ctx-item" role="menuitem" title="Open the Export card to export the whole plate as STL or 3MF" disabled>Export plate</button>
+    <div class="ctx-sep" role="separator"></div>
+    <button type="button" id="ctx-clear-plate" class="ctx-item" role="menuitem" title="Take every piece off the plate; the loaded pieces stay in the list" disabled>Clear plate</button>
+    <button type="button" id="ctx-delete" class="ctx-item ctx-danger" role="menuitem" disabled>Delete piece</button>
   </div>
 
   <!-- ===================================================================
@@ -1769,7 +1783,7 @@
   <!-- Every tool helper goes in and out of the scene through this registry. -->
   <script src="nso-helpers.js?v=asis1"></script>
   <script src="nso-bounds.js?v=bigmesh1"></script>
-  <script src="app-core.js?v=leantipb19"></script>
+  <script src="app-core.js?v=ctxmenu1"></script>
 
 
 
@@ -1828,7 +1842,7 @@
   <!-- Ring verbs: Outer / Bore / Wall, a rod's Diameter. Calls
        nso_section.js and app-fatten.js's face filter at apply time. -->
   <script src="nso_ring.js?v=ringidod1"></script>
-  <script src="app-scale.js?v=ringidod1"></script>
+  <script src="app-scale.js?v=ctxmenu1"></script>
   <script src="app-brush.js?v=pull1"></script>
   <!-- Pull: nso_densify.js is the shared subdivision (the gun will use it too), nso_pull.js the field and its guards, app-pull.js the pointer session. docs/PULL.md -->
   <script src="nso_densify.js?v=pull1"></script>
@@ -1839,7 +1853,7 @@
   <script src="app-stock.js?v=shelf2"></script>
   <script src="app-assemble.js?v=asis1"></script>
   <script src="app-sel-outline.js?v=bigmesh1"></script>
-  <script src="app-join.js?v=asis1"></script>
+  <script src="app-join.js?v=ctxmenu1"></script>
   <script src="app-center-lock.js?v=nogate2"></script>
   <script src="app-oversize-washer.js?v=oversize2"></script>
   <script src="app-join-triple.js?v=nogate2"></script>
@@ -1920,7 +1934,7 @@
   <script src="app-split-parts.js?v=bigmesh1"></script>
 
 
-  <script src="app-ux.js?v=inside9"></script>
+  <script src="app-ux.js?v=ctxmenu1"></script>
   <!-- Live watch: off until its button is pressed, and it patches nothing
        until then. Deleting this tag and the #btn-watch button above removes
        the feature completely. -->

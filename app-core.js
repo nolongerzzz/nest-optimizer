@@ -49,6 +49,7 @@ const state = {
   moveUndoFrom: null,
   rightPress: null,   // a right press not yet a pan or a click (onCanvasContextMenu)
   undoStack: [],
+  redoStack: [],      // entries Undo took off undoStack, newest last (redoLast)
   cameraFramed: false,
   cutAxis: null,
   // The plate lock (app-poslock.js): one flag for the whole arrangement,
@@ -107,9 +108,19 @@ function updateUndoBtn() {
   btn.disabled = !has;
   btn.classList.toggle('is-ready', has);
   btn.title = has ? ('Undo (' + state.undoStack.length + ') - Ctrl+Z') : 'Nothing to undo yet';
+  const redo = document.getElementById('btn-redo');
+  if (redo) {
+    const any = state.redoStack.length > 0;
+    redo.disabled = !any;
+    redo.classList.toggle('is-ready', any);
+    redo.title = any ? ('Redo (' + state.redoStack.length + ') - Shift+Ctrl+Z') : 'Nothing to redo';
+  }
+  if (typeof nsoCtxMenuRefresh === 'function') nsoCtxMenuRefresh();
 }
 function pushUndo(entry) {
   if (!entry || !entry.type) return;
+  // A new action: what Undo had set aside can no longer be re-applied.
+  state.redoStack = [];
   // A mesh swap and the paint on it belong to the same step: snapshot the
   // paint here so one Undo puts back both without every call site knowing.
   if (entry.prevMask === undefined && entry.modelId != null && typeof nsoMaskSnapshot === 'function') {
@@ -137,6 +148,7 @@ function pushUndo(entry) {
 }
 function clearUndo() {
   state.undoStack = [];
+  state.redoStack = [];
   updateUndoBtn();
 }
 /* The ops that undo by putting one piece's geometry back, and what each one
@@ -190,9 +202,158 @@ const UNDO_REPLACE_LABEL = {
 /* Undo, then the helper rule (nso-helpers.js): a helper drawn after the step
    just undone shows state that is gone, so its tool redraws it or it goes. */
 function undoLast() {
+  const top = state.undoStack[state.undoStack.length - 1];
+  const before = top ? nsoWorldSnapshot() : null;
+  const fpBefore = top ? nsoWorldFingerprint() : '';
+  const r = undoLastStep();
+  if (typeof nsoHelpers !== 'undefined') nsoHelpers.afterUndo();
+  if (top) {
+    const expect = nsoWorldFingerprint();
+    if (top.onUndone || before.volatile || expect === fpBefore) state.redoStack = [];
+    else {
+      state.redoStack.push({ entry: top, post: before, expect: expect });
+      if (state.redoStack.length > UNDO_MAX) state.redoStack.shift();
+    }
+    updateUndoBtn();
+  }
+  return r;
+}
+
+/* REDO. Undo sets the entry it took off aside on state.redoStack, with the
+   plate as it stood the moment BEFORE the Undo - the post-action state, which
+   the entry itself does not hold (entries keep the state to go back TO).
+   Redo puts that snapshot back and the entry back on the undo stack, so one
+   Redo is one step forward and the Undo after it is the entry's own Undo. The
+   tool is never re-run.
+
+   The snapshot is the plate's two lists and what rides with them, taken by
+   reference where the app only ever swaps (geometry, rawTris, meshes) and by
+   value where it edits in place (size, centerOffset, the pose numbers).
+   pushUndo empties the stack: any new action ends the line. So does a plate
+   that is not the one the Undo left (nsoWorldFingerprint) - an upload, a
+   Clear plate, an Optimize and the rest of what has no Undo of its own would
+   otherwise be overwritten by a Redo. Steps with an onUndone (G-scope Lift,
+   the Supports card) keep state of their own that a snapshot of the plate
+   does not hold; they are not redoable and an Undo of one empties the stack. */
+const REDO_LABEL = {
+  movePlaced: 'move re-applied', posePlaced: 'pose re-applied', addModels: 'clone re-applied',
+  splitReplace: 'Cut re-applied', joinReplace: 'Join re-applied', subtractReplace: 'Subtract re-applied',
+  removePlaced: 'piece removed again', removeModel: 'model removed again'
+};
+function nsoCopyFields(o) {
+  const f = Object.assign({}, o);
+  ['size', 'centerOffset'].forEach(k => {
+    const v = o[k];
+    if (v && typeof v === 'object') f[k] = (typeof v.clone === 'function') ? v.clone() : { x: v.x, y: v.y, z: v.z };
+  });
+  return f;
+}
+function nsoRestoreFields(o, f) {
+  Object.keys(o).forEach(k => { if (!(k in f)) delete o[k]; });
+  Object.assign(o, nsoCopyFields(f));
+}
+function nsoWorldFingerprint() {
+  const g = x => (x && x.geometry && x.geometry.uuid) || '';
+  const ms = state.models.map(m => [m.id, g(m), m.rawTris ? m.rawTris.length : 0, m.nonSolid ? 1 : 0, m.posLock ? 1 : 0,
+    (typeof nsoMaskCount === 'function') ? nsoMaskCount(m) : 0].join(':'));
+  const ps = state.placed.map(p => [p.sourceId, g(p), p.x, p.z, p.rotY || 0, p.flipX ? 1 : 0, p.tipX || 0, p.tipZ || 0,
+    p.tiltX || 0, p.tiltZ || 0, p.liftY || 0].join(':'));
+  return ms.join('|') + '#' + ps.join('|') + '#' + (state.plateLock ? 1 : 0);
+}
+function nsoWorldSnapshot() {
+  const snap = { models: [], placed: [], volatile: false };
+  state.models.forEach(m => snap.models.push({
+    ref: m, fields: nsoCopyFields(m),
+    mask: (typeof nsoMaskSnapshot === 'function') ? nsoMaskSnapshot(m) : null
+  }));
+  state.placed.forEach(p => {
+    if (p.mesh && p.mesh.userData && p.mesh.userData.editPreview) snap.volatile = true;
+    const f = nsoCopyFields(p);
+    f.outline = null;
+    const mt = p.mesh && p.mesh.material;
+    snap.placed.push({
+      ref: p, fields: f, mesh: p.mesh || null,
+      pos: p.mesh ? p.mesh.position.clone() : null,
+      rot: p.mesh ? p.mesh.rotation.clone() : null,
+      scl: p.mesh ? p.mesh.scale.clone() : null,
+      look: (mt && mt.color) ? { color: mt.color.getHex(), emissive: mt.emissive ? mt.emissive.getHex() : 0,
+                                 emissiveIntensity: mt.emissiveIntensity } : null
+    });
+  });
+  snap.editId = state.editId;
+  snap.selectedIndex = state.selectedIndex;
+  snap.plateLock = !!state.plateLock;
+  snap.cutterOpen = !!state.cutterOpen;
+  snap.cutT = state.cutT;
+  return snap;
+}
+function nsoWorldRestore(snap) {
+  const keep = new Set(snap.placed.map(e => e.mesh).filter(Boolean));
+  state.placed.forEach(p => {
+    if (!p.mesh) return;
+    if (p.mesh.parent) p.mesh.parent.remove(p.mesh);
+    if (!keep.has(p.mesh) && p.mesh.material && !Array.isArray(p.mesh.material)) p.mesh.material.dispose();
+  });
+  state.models = snap.models.map(e => { nsoRestoreFields(e.ref, e.fields); return e.ref; });
+  state.placed = snap.placed.map((e, i) => {
+    nsoRestoreFields(e.ref, e.fields);
+    const p = e.ref;
+    if (e.mesh) {
+      p.mesh = e.mesh;
+      p.mesh.position.copy(e.pos); p.mesh.rotation.copy(e.rot); p.mesh.scale.copy(e.scl);
+      p.mesh.userData.placedIndex = i;
+      const mt = p.mesh.material;
+      if (mt && e.look) { mt.color.setHex(e.look.color); mt.emissive.setHex(e.look.emissive); mt.emissiveIntensity = e.look.emissiveIntensity; }
+      if (state.modelGroup) state.modelGroup.add(p.mesh);
+      p.mesh.updateMatrixWorld(true);
+    }
+    nsoInvalidatePlacedBounds(p);
+    return p;
+  });
+  snap.models.forEach(e => {
+    if (e.mask && typeof nsoMaskRestore === 'function') nsoMaskRestore(e.ref, e.mask);
+  });
+  state.plateLock = snap.plateLock;
+  removeCutHelper();
+  state.previewMesh = null;
+  state.cutterOpen = snap.cutterOpen;
+  if (snap.cutT != null) state.cutT = snap.cutT;
+  state.editId = state.models.some(m => m.id === snap.editId) ? snap.editId : null;
+  state.selectedIndex = (snap.selectedIndex >= 0 && snap.selectedIndex < state.placed.length) ? snap.selectedIndex : -1;
+  state.placed.forEach(p => { if (typeof refreshOutline === 'function') refreshOutline(p); });
+  renderModelList(); updateOptimizeButton(); updateCutterUI(); updateEditSize(); updateAdjustUI();
+  if (typeof nsoMaskRepaint === 'function') nsoMaskRepaint();
+  if (typeof nsoPosLockRefresh === 'function') nsoPosLockRefresh();
+}
+function clearRedo() {
+  state.redoStack = [];
+  updateUndoBtn();
+}
+/* Undo that is not the user's: a tool taking back its own live preview. It
+   sets nothing aside for Redo. */
+function undoLastDiscard() {
   const r = undoLastStep();
   if (typeof nsoHelpers !== 'undefined') nsoHelpers.afterUndo();
   return r;
+}
+function redoLast() {
+  const r = state.redoStack[state.redoStack.length - 1];
+  if (!r) { setStatus('Nothing to redo'); updateUndoBtn(); return; }
+  if (nsoWorldFingerprint() !== r.expect) {
+    clearRedo();
+    setStatus('Nothing to redo - the plate changed after that Undo');
+    return;
+  }
+  state.redoStack.pop();
+  if (typeof nsoHelpers !== 'undefined') nsoHelpers.teardown('redo');
+  if (typeof removeFaceHelper === 'function') removeFaceHelper();
+  nsoWorldRestore(r.post);
+  state.undoStack.push(r.entry);
+  if (state.undoStack.length > UNDO_MAX) state.undoStack.shift();
+  updateUndoBtn();
+  const say = REDO_LABEL[r.entry.type] ||
+    (UNDO_REPLACE_LABEL[r.entry.type] || '').replace(/^Undo: /, '').replace(/ reverted$/, ' re-applied');
+  setStatus('Redo: ' + (say || r.entry.label || 'step re-applied'));
 }
 
 function undoLastStep() {
@@ -769,6 +930,7 @@ function initThree() {
     if (menu.contains(e.target)) return;
     hideCtxMenu();
   }, true);
+  wireCtxMenu();
 
   // Force one more resize after layout settles
   setTimeout(onResize, 150);
@@ -1614,6 +1776,7 @@ function clearPlateOnly() {
   // Every tool closed and every helper gone first, while the pieces they
   // were drawn on are still there to close against (nso-helpers.js).
   nsoHelpers.teardown('clear-plate');
+  clearRedo();
   clearPlaced();
   removeCutHelper();
   state.previewMesh = null;
@@ -1624,7 +1787,7 @@ function clearPlateOnly() {
   setStatus('Plate cleared - library models kept. Upload or Open cutter still work.');
 }
 
-function cloneSelectedModel() {
+function cloneSelectedModel(opts) {
   const m = getActiveModel();
   if (!m) {
     const p = state.selectedIndex >= 0 ? state.placed[state.selectedIndex] : null;
@@ -1638,7 +1801,10 @@ function cloneSelectedModel() {
     setStatus('Select a model to clone', true);
     return;
   }
-  const n = Math.max(1, Math.min(20, Number(document.getElementById('clone-count')?.value) || 1));
+  // The Clone button reads the count box; the right-click menu asks for one copy.
+  const n = (opts && typeof opts.count === 'number')
+    ? Math.max(1, Math.min(20, opts.count))
+    : Math.max(1, Math.min(20, Number(document.getElementById('clone-count')?.value) || 1));
   const plate = getCurrentPlate();
   const gap = 3;
   const w = src.size.x;
@@ -2908,18 +3074,124 @@ function onCanvasContextMenu(event) {
 }
 
 function openCanvasContextMenu(event) {
-  if (!state.placed.length) {
+  const idx = state.placed.length ? pickPlacedIndexFromEvent(event) : -1;
+  /* A piece, or the bare plate: the menu has Undo, Redo, Export plate and Clear
+     plate for the plate and greys the piece items on it. Off the plate, in the
+     background, there is still no menu. */
+  if (idx < 0 && !hitPlateSurface(event)) {
     hideCtxMenu();
     return;
   }
-  const idx = pickPlacedIndexFromEvent(event);
-  if (idx < 0) {
-    hideCtxMenu();
-    return;
-  }
-  selectPlaced(idx);
+  if (idx >= 0) selectPlaced(idx);
+  const menu = document.getElementById('ctx-menu');
+  if (menu) menu.dataset.piece = idx >= 0 ? String(idx) : '';
+  nsoCtxMenuRefresh();
   showCtxMenu(event.clientX, event.clientY);
-  setStatus('Selected #' + (idx + 1) + ' - Delete piece or press Delete');
+  if (idx >= 0) setStatus('Selected #' + (idx + 1) + ' - Delete piece or press Delete');
+}
+
+/* ---- the right-click menu's items ----
+   Undo / Redo / Clear plate / Delete are the app's own functions; Clone and
+   Mirror act on the piece the menu opened on (selectPlaced made it the
+   selection), and the two Export items open the Export card on the button for
+   that piece or for the plate. Each item greys when it has nothing to do. */
+function nsoCtxHasPiece() {
+  const menu = document.getElementById('ctx-menu');
+  const at = menu ? menu.dataset.piece : '';
+  return !!(at !== '' && at != null && state.placed[+at]);
+}
+function nsoCtxMenuRefresh() {
+  const menu = document.getElementById('ctx-menu');
+  if (!menu) return;
+  const piece = nsoCtxHasPiece();
+  const on = (id, yes) => { const el = document.getElementById(id); if (el) el.disabled = !yes; };
+  on('ctx-undo', state.undoStack.length > 0);
+  on('ctx-redo', state.redoStack.length > 0);
+  on('ctx-clone', piece);
+  on('ctx-mirror', piece);
+  on('ctx-export', piece);
+  on('ctx-export-plate', state.placed.length > 0);
+  on('ctx-clear-plate', state.placed.length > 0);
+  on('ctx-delete', piece);
+  const mac = /Mac|iPhone|iPad/.test((typeof navigator !== 'undefined' && navigator.platform) || '');
+  const key = (id, mac_, other) => { const el = document.getElementById(id); if (el) el.textContent = mac ? mac_ : other; };
+  key('ctx-undo-key', '\u2318Z', 'Ctrl+Z');
+  key('ctx-redo-key', '\u21E7\u2318Z', 'Ctrl+Y');
+}
+
+/* Which axis of the piece's own soup lies along the plate's X, and so which one
+   "across X" reflects. The pose is Rx * Ry * Rz (applyMeshRotation): tip, flip
+   and tilt-X turn about X and leave it alone; a yaw of 0 or 180 degrees leaves
+   the soup's X on the plate's X, a yaw of 90 puts the soup's Y there (display
+   z is minus soup y). Any other yaw, or a roll that is not a half turn, has no
+   soup axis on plate X, and Mirror stands down rather than reflect another
+   plane. Plate X is the frame used until the piece's own frame (pieceFrame)
+   exists. */
+function nsoCtxMirrorAxis(p) {
+  const rotY = p.rotY != null ? p.rotY : (p.rotated ? Math.PI / 2 : 0);
+  const roll = (p.tipZ || 0) * (Math.PI / 2) + ((p.tiltZ || 0) * Math.PI / 180);
+  const quarters = v => { const q = v / (Math.PI / 2); return Math.abs(q - Math.round(q)) < 1e-6 ? Math.round(q) : null; };
+  const r = quarters(rotY), z = quarters(roll);
+  if (r == null || z == null || (z % 2) !== 0) return null;
+  return (r % 2) === 0 ? 'x' : 'y';
+}
+function nsoCtxMirrorAcrossX() {
+  const p = state.placed[state.selectedIndex];
+  const m = getActiveModel();
+  if (!p || !m || typeof NSO_mirrorSelectedModel !== 'function') {
+    setStatus('Select a piece first', true);
+    return { ok: false, reason: 'no selection' };
+  }
+  const axis = nsoCtxMirrorAxis(p);
+  if (!axis) {
+    setStatus('Mirror across X needs the piece square to the plate (a quarter-turn yaw, no roll) - unchanged', true);
+    return { ok: false, reason: 'off-axis pose' };
+  }
+  if (!m.rawTris || m.rawAxis !== 'zup') {
+    setStatus('Mirror needs a raw piece - unchanged', true);
+    return { ok: false, reason: 'no rawTris' };
+  }
+  const k = axis === 'x' ? 0 : 1;
+  let lo = Infinity, hi = -Infinity;
+  for (let i = k; i < m.rawTris.length; i += 3) {
+    const c = m.rawTris[i];
+    if (c < lo) lo = c;
+    if (c > hi) hi = c;
+  }
+  // The plane through the centre of the piece's extent; the card's own gates
+  // (exact float32 mirror, cross-section bit for bit) decide whether it holds.
+  return NSO_mirrorSelectedModel({ axis: axis, plane: (lo + hi) / 2 });
+}
+/* Open the Export card with the button for this piece, or for the plate, in
+   front: the format chooser and the cooling profile are the card's own. */
+function nsoCtxOpenExport(which) {
+  const card = document.getElementById('menu-export');
+  if (!card) return;
+  card.open = true;
+  const btn = document.getElementById(which === 'plate' ? 'btn-export-stl' : 'btn-export-model');
+  if (btn && typeof btn.focus === 'function') btn.focus();
+  setStatus(which === 'plate'
+    ? 'Export: pick the format, then Export plate'
+    : 'Export: pick the format, then Download selected');
+}
+function wireCtxMenu() {
+  const menu = document.getElementById('ctx-menu');
+  if (!menu || menu.dataset.nsoWired === '1') return;
+  menu.dataset.nsoWired = '1';
+  const item = (id, fn) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('click', () => { if (el.disabled) return; hideCtxMenu(); fn(); });
+  };
+  item('ctx-undo', () => undoLast());
+  item('ctx-redo', () => redoLast());
+  item('ctx-clone', () => cloneSelectedModel({ count: 1 }));
+  item('ctx-mirror', () => nsoCtxMirrorAcrossX());
+  item('ctx-export', () => nsoCtxOpenExport('piece'));
+  item('ctx-export-plate', () => nsoCtxOpenExport('plate'));
+  item('ctx-clear-plate', () => clearPlateOnly());
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !menu.classList.contains('hidden')) hideCtxMenu();
+  }, true);
 }
 
 function onCanvasPointerDown(event) {
@@ -3955,8 +4227,6 @@ function updateExportFormatUI() {
   if (btnModel) btnModel.textContent = 'Download selected ' + label;
   const btnPlate = document.getElementById('btn-export-stl');
   if (btnPlate) btnPlate.textContent = 'Export plate ' + label;
-  const ctx = document.getElementById('ctx-export');
-  if (ctx) ctx.textContent = 'Export ' + label;
   const row = document.getElementById('cooling-profile-row');
   if (row) row.hidden = fmt !== '3mf';
 }
