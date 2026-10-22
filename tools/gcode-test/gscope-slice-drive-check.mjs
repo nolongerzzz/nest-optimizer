@@ -2,26 +2,33 @@
 /**
  * nest-optimizer / tools/gcode-test / gscope-slice-drive-check.mjs
  *
- * G-scope's Slice action (app-gscope-slice.js) - the View row's Slice view
- * button - driven through the real app in headless Chromium with real clicks.
- * (The Normal / Slice view round trip itself is gscope-slice-view-drive-check.mjs.)
+ * G-scope's Slice action (app-gscope-slice.js) - the Slice side of the card's
+ * Normal | Slice switch (round 2c) - driven through the real app in headless
+ * Chromium with real clicks.
+ * (The Normal / Slice round trip itself is gscope-slice-view-drive-check.mjs.)
  *
  *   1  THE ACTION IS THERE for a mesh document - the plate, and an STL opened
- *      straight into G-scope - and not for an imported slice.
+ *      straight into G-scope. The card is on its Normal side: the Slice
+ *      settings row is not shown there, and its defaults are the plate's
+ *      printer profile (0.4 nozzle, 0.2 layers on the A1 mini).
  *   2  A REAL CLICK SLICES THE PLATE and opens the result as a toolpath
- *      document. Its moves are, move for move, what NSO_Slicer + parseGcode
- *      give when called directly on the same pieces with the same options.
+ *      document, on the card's Slice side. Its moves are, move for move, what
+ *      NSO_Slicer + parseGcode give when called directly on the same pieces
+ *      with the same options. On the Slice side the settings row is there, and
+ *      changing its nozzle sets the layer to half of it (for the next slice).
  *   3  IT IS THE SAME KIND OF DOCUMENT an imported .gcode.3mf is: the same
  *      document keys, the same per-segment schema as tabletop.gcode.3mf opened
  *      through the import route, the slicer's own feature names coloured by
- *      the slicer table.
+ *      the slicer table. An imported slice is the Slice side too, with nothing
+ *      to slice and no mesh to go back to: Slice changes nothing, Normal is off.
+ *      IMPORT ▾ > Read plate brings the plate back as a mesh.
  *   4  G-SCOPE'S OWN TOOLS WORK ON IT unchanged: the legend's "only" (a real
- *      click), a whole layer, Pick a line + Isolate, the layer-range slider,
- *      the solid view, Clear from view.
+ *      click), a whole layer, Pick a line + Isolate (the API: the UI's
+ *      isolate-one-move is dropped in 2c), the layer-range slider, the solid view.
  *   5  THE REPORT names the support-need region on the mushroom and none on
  *      the plain box; a non-solid piece is sliced with its chains left open.
  *   6  NOTHING IS WRITTEN: no model, no plate piece, no undo step.
- *   7  NORMAL re-opens the plate; an STL opened into G-scope slices too.
+ *   7  NORMAL (the switch) re-opens the plate; an STL opened into G-scope slices too.
  *   8  THE PIECE STAYS EXPORTABLE while its slice is shown, with nothing
  *      selected: Export piece as STL downloads the piece's exact triangles,
  *      Export piece to plate adds them as a new piece with one Undo step.
@@ -59,6 +66,10 @@ const PLAIN = stl(box([0, 0, 0], [10, 8, 6]));
 async function frames(page) {
   await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
 }
+function settings(page) {
+  return page.evaluate(() => ['nozzle', 'layer', 'walls', 'density', 'pattern', 'angle']
+    .map((k) => document.getElementById('ms-slice-' + k).value));
+}
 async function sliced(page) {
   await page.waitForFunction(() => {
     const d = window.NSO_MICROSCOPE.getDoc();
@@ -89,21 +100,24 @@ async function main() {
   // =======================================================================
   console.log('\n--- 1. the action is there for a mesh document ---');
   // =======================================================================
-  check('the plate opened as a mesh document', await page.evaluate(() => window.NSO_MICROSCOPE.getDoc().kind), 'mesh');
-  check('the Slice section is visible', await page.isVisible('#ms-slice-row'), true);
-  check('the Slice view button is offered', [await page.isVisible('#ms-cam-slice'), await page.isEnabled('#ms-cam-slice')], [true, true]);
-  check('defaults are the real setup: 0.6 nozzle, 0.3 layers, 2 walls, 15 % grid, 30 deg (Bambu profile)',
-    await page.evaluate(() => [document.getElementById('ms-slice-nozzle').value, document.getElementById('ms-slice-layer').value,
-      document.getElementById('ms-slice-walls').value, document.getElementById('ms-slice-density').value,
-      document.getElementById('ms-slice-pattern').value, document.getElementById('ms-slice-angle').value]),
-    ['0.6', '0.3', '2', '15', 'grid', '30']);
+  check('the plate opened as a mesh document, the card on its Normal side',
+    await page.evaluate(() => [window.NSO_MICROSCOPE.getDoc().kind, window.NSO_MICROSCOPE.cardSide(),
+      document.getElementById('ms-main-card').dataset.side, window.NSO_GSCOPE_SLICE.viewMode()]),
+    ['mesh', 'normal', 'normal', 'normal']);
+  // round 2c: the settings are a Slice-side row of the one card (no VIEW card any more)
+  check('the Slice settings row is not shown on the Normal side (it lives in the card)',
+    [await page.isVisible('#ms-slice-row'),
+     await page.evaluate(() => !!document.getElementById('ms-slice-row').closest('#ms-main-card'))], [false, true]);
+  check('the switch\'s Slice is offered', [await page.isVisible('#ms-cam-slice'), await page.isEnabled('#ms-cam-slice'),
+    await page.textContent('#ms-cam-slice')], [true, true, 'Slice']);
+  const prof = await page.evaluate(() => [state.plate, window.NSO_GSCOPE_SLICE.profileDefaults()]);
+  check('defaults are the plate\'s printer profile: A1 mini, 0.4 nozzle, 0.2 layers, 2 walls, 15 % grid, 30 deg',
+    [prof[0], await settings(page)], ['a1mini', ['0.4', '0.2', '2', '15', 'grid', '30']]);
+  check('... and they are what NSO_GSCOPE_SLICE.profileDefaults() says', prof[1], { printer: 'a1mini', nozzle: 0.4, layer: 0.2 });
 
   // =======================================================================
   console.log('\n--- 2. a real click slices the plate ---');
   // =======================================================================
-  // the settings are plain fields in the Slice card; selectOption opens the card first
-  await page.selectOption('#ms-slice-nozzle', '0.4');
-  check('changing the nozzle sets the layer to half of it', await page.inputValue('#ms-slice-layer'), '0.2');
   const plateObjs = await page.evaluate(() => window.NSO_MICROSCOPE.getDoc().objects.map((o) => o.name));
   await page.click('#ms-cam-slice');
   await sliced(page);
@@ -112,8 +126,13 @@ async function main() {
     return { name: d.name, kind: d.kind, moves: d.parsed.moves.length, layers: d.parsed.layers.length,
       assumed: d.parsed.meta.assumed, segs: d.segments.length, groups: Object.keys(d.groups).sort() };
   });
-  check('the slice opened as a toolpath document, named for its source and settings',
+  check('the slice opened as a toolpath document, named for its source and the profile\'s settings',
     [doc.kind, /^Plate - NSO slice \(0\.4 mm nozzle, 0\.2 mm layers\)$/.test(doc.name)], ['toolpath', true]);
+  check('... and the card is on its Slice side, the switch showing it',
+    await page.evaluate(() => [window.NSO_MICROSCOPE.cardSide(), window.NSO_GSCOPE_SLICE.viewMode(),
+      document.getElementById('ms-cam-slice').classList.contains('active'),
+      document.getElementById('ms-cam-slice').getAttribute('aria-pressed'), document.getElementById('ms-cam-normal').disabled]),
+    ['slice', 'slice', true, 'true', false]);
   check('parsed with nothing assumed', doc.assumed, false);
   const direct = await page.evaluate(async (names) => {
     const d = window.NSO_MICROSCOPE.getDoc(), src = window.NSO_GSCOPE_SLICE.last().source;
@@ -131,6 +150,19 @@ async function main() {
   }, plateObjs);
   check('its moves are, move for move, NSO_Slicer + parseGcode called directly on the same pieces', direct.same, true);
   check('it sliced the pieces the plate document held', direct.srcNames, plateObjs);
+  // The settings, on the Slice side: the row is there, folded; selectOption unfolds it first.
+  check('on the Slice side the Slice settings row is there, folded',
+    [await page.evaluate(() => document.getElementById('ms-slice-row').offsetParent !== null),
+     await page.getAttribute('#ms-slice-settings-toggle', 'aria-expanded')], [true, 'false']);
+  await page.selectOption('#ms-slice-nozzle', '0.6');
+  check('changing the nozzle sets the layer to half of it (0.6 -> 0.3)',
+    [await page.getAttribute('#ms-slice-settings-toggle', 'aria-expanded'), await page.inputValue('#ms-slice-layer')], ['true', '0.3']);
+  check('... for the next slice: the slice shown is not touched',
+    await page.evaluate(() => window.NSO_MICROSCOPE.getDoc().name), doc.name);
+  await page.selectOption('#ms-slice-nozzle', '0.4');
+  check('... and back (0.4 -> 0.2)', await page.inputValue('#ms-slice-layer'), '0.2');
+  await page.click('#ms-slice-settings-toggle');        // fold the row again
+
   check('the legend is the slicer\'s features', doc.groups.filter((g) => g !== 'Travel'),
     ['Bottom surface', 'Bridge', 'Inner wall', 'Internal solid infill', 'Outer wall', 'Overhang wall', 'Sparse infill', 'Top surface']);
   await frames(page);
@@ -158,12 +190,29 @@ async function main() {
   check('same document keys as the imported real slice', shape.a.doc, shape.r.doc);
   check('same per-segment schema', shape.a.seg, shape.r.seg);
   check('same per-move schema (the parser\'s own)', shape.a.mv, shape.r.mv);
-  check('the Slice section hides on an imported slice (there is no mesh to slice)', await page.isVisible('#ms-slice-row'), false);
-  check('... and Slice view is disabled there', await page.isDisabled('#ms-cam-slice'), true);
+  // round 2c: an imported slice is the Slice side (it used to read Normal with Slice view disabled).
+  // There is nothing to slice: Slice is on and changes nothing; no mesh to go back to: Normal is off.
+  check('an imported slice is the card\'s Slice side: Slice on and enabled, Normal off',
+    await page.evaluate(() => [window.NSO_MICROSCOPE.cardSide(), window.NSO_GSCOPE_SLICE.viewMode(),
+      document.getElementById('ms-cam-slice').classList.contains('active'),
+      document.getElementById('ms-cam-normal').classList.contains('active')]), ['slice', 'slice', true, false]);
+  check('... Slice enabled, Normal disabled (there is no mesh)',
+    [await page.isEnabled('#ms-cam-slice'), await page.isDisabled('#ms-cam-normal')], [true, true]);
+  await page.evaluate(() => { window.__impDoc = window.NSO_MICROSCOPE.getDoc(); window.__lastSlice = window.NSO_GSCOPE_SLICE.last(); });
+  await page.click('#ms-cam-slice');
+  await page.click('#ms-camera-row .ms-switch-track');
+  await frames(page);
+  check('... a click on Slice, or on the switch\'s track, changes nothing (nothing is sliced)',
+    await page.evaluate(() => [window.NSO_MICROSCOPE.getDoc() === window.__impDoc, window.NSO_GSCOPE_SLICE.busy(),
+      window.NSO_GSCOPE_SLICE.last() === window.__lastSlice]), [true, false, true]);
+  check('... and no Slice report for it (it is not a slice made here)', await page.isVisible('#ms-slice-readout'), false);
 
-  // back to the plate, slice again for section 4
+  // back to the plate (IMPORT ▾ > Read plate - the helper opens the ▾ menu first), slice again for section 4
   await page.click('#ms-btn-plate');
   await page.waitForFunction(() => window.NSO_MICROSCOPE.getDoc().kind === 'mesh');
+  check('Read plate brings the plate back as a mesh, the menu shut, the Normal side',
+    await page.evaluate(() => [window.NSO_MICROSCOPE.getDoc().source, !!document.querySelector('.ms-card.is-open'),
+      window.NSO_MICROSCOPE.cardSide()]), ['plate', false, 'normal']);
   await page.click('#ms-cam-slice');
   await sliced(page);
 
@@ -248,7 +297,8 @@ async function main() {
   // non-solid: flag the plain block, slice again
   await page.click('#ms-cam-normal');
   await page.waitForFunction(() => window.NSO_MICROSCOPE.getDoc().kind === 'mesh');
-  check('Normal re-opens the plate', await page.evaluate(() => window.NSO_MICROSCOPE.getDoc().source), 'plate');
+  check('Normal re-opens the plate, the Normal side', await page.evaluate(() => [window.NSO_MICROSCOPE.getDoc().source,
+    window.NSO_MICROSCOPE.cardSide()]), ['plate', 'normal']);
   await page.evaluate(() => { state.models.find((m) => /plain/.test(m.name)).nonSolid = true; });
   await page.click('#ms-cam-slice');
   await sliced(page);
@@ -272,7 +322,7 @@ async function main() {
     await window.NSO_MICROSCOPE.load('mushroom.stl', a);
   }, MUSHROOM);
   check('the STL is a mesh document', await page.evaluate(() => [window.NSO_MICROSCOPE.getDoc().kind, window.NSO_MICROSCOPE.getDoc().source || 'file']), ['mesh', 'file']);
-  check('Slice view is offered on it', await page.isEnabled('#ms-cam-slice'), true);
+  check('Slice is offered on it', await page.isEnabled('#ms-cam-slice'), true);
   await page.click('#ms-cam-slice');
   await sliced(page);
   check('it slices into a toolpath document', await page.evaluate(() => /^mushroom\.stl - NSO slice/.test(window.NSO_MICROSCOPE.getDoc().name)), true);

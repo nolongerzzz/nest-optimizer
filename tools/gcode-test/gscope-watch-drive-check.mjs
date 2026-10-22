@@ -16,9 +16,11 @@
  *      viewport, on top (a hit test at the panel lands on the panel), still
  *      on, the SAME run - no second "watch on", no re-arm, the same counts.
  *   2  NORMAL VIEW. A mesh has no line types (the Features list says so), a
- *      real click on a piece in G-scope's own 3D view - in Piece mode, as
- *      G-scope opens, it isolates the piece and drops nothing; in Region mode
- *      a capture box drops (and isolates) - Normal re-frame.
+ *      real click on a piece in G-scope's own 3D view - as G-scope opens
+ *      (the piece click, REGION off) it isolates the piece and drops nothing;
+ *      with the card's REGION armed a click places a capture box and isolates
+ *      nothing, the card's Isolate isolates what it holds and Whole part backs
+ *      out - Normal re-frame (the card's switch).
  *      The panel stays visible throughout; it keeps its collapse state.
  *   3  SLICE VIEW. Slice view, its All features rows, Normal back to the
  *      mesh, Slice again - the panel is on top in each. The slice's own
@@ -131,17 +133,23 @@ async function clickPiece(page, which) {
   await frames(page);
 }
 
+/** The card's REGION toggle (round 2c: one button, a second click disarms) set to `on`. */
+async function region(page, on) {
+  const armed = await page.evaluate(() => document.getElementById('ms-mode-select').getAttribute('aria-pressed') === 'true');
+  if (armed !== on) await page.click('#ms-mode-select');
+}
 /** One pass of ordinary G-scope use, in whichever view is up. */
 async function exerciseNormal(page) {
   // (a mesh has no line types: no Features rows to click here - exerciseSlice does those)
-  await page.click('#ms-mode-piece');
+  await region(page, false);                   // the plain click: the piece (there is no Piece button since 2c)
   await clickPiece(page, 'mushroom');          // isolates the piece
+  await page.click('#ms-btn-back');            // Whole part
+  await region(page, true);
+  await clickPiece(page, 'mushroom');          // places a box (isolates nothing, item 7)
+  await page.click('#ms-btn-isolate');         // what the box holds, isolated
   await page.click('#ms-btn-back');
-  await page.click('#ms-mode-select');         // (Clear all boxes lives under Region)
-  await page.click('#ms-btn-clear');
-  await clickPiece(page, 'mushroom');          // drops a box (and isolates it)
-  await page.click('#ms-btn-back');
-  await page.click('#ms-btn-clear');
+  await page.click('#ms-btn-clear');           // Clear boxes
+  await region(page, false);
   await page.click('#ms-cam-normal');
   await frames(page);
 }
@@ -225,28 +233,30 @@ async function main() {
   check('a mesh has no line types: the Features list has no rows, and says so',
     await page.evaluate(() => [document.querySelectorAll('#ms-legend .ms-legend-item').length,
       /Not sliced/.test(document.getElementById('ms-legend').textContent)]), [0, true]);
-  // G-scope opens in Piece: a plain click on a piece, nothing armed, takes the piece (isolated)
-  // and drops no box. A box is something you ask for - Region mode.
-  check('G-scope opened in Piece mode, nothing armed', await page.evaluate(() => [window.NSO_MICROSCOPE.mode(),
-    document.getElementById('ms-mode-piece').classList.contains('active'),
-    document.getElementById('ms-mode-select').classList.contains('active')]), ['piece', true, false]);
+  // G-scope opens on the piece click: a plain click on a piece, nothing armed, takes the piece (isolated)
+  // and drops no box. A box is something you ask for - the card's REGION. (Round 2c: the Piece button is
+  // gone - the piece click is what the view does with REGION off.)
+  check('G-scope opened in Piece mode, nothing armed (REGION off, no Piece button)', await page.evaluate(() => [window.NSO_MICROSCOPE.mode(),
+    !!document.getElementById('ms-mode-piece'),
+    document.getElementById('ms-mode-select').classList.contains('active')]), ['piece', false, false]);
   await clickPiece(page, 'mushroom');
   check('a real click on a piece in Piece mode drops no box; it takes that piece and isolates it',
     await page.evaluate(() => [window.NSO_MICROSCOPE.boxes().length, window.NSO_MICROSCOPE.selection().map((o) => o.name),
       window.NSO_MICROSCOPE.isIsolated()]),
     [boxes0, [await page.evaluate(() => window.NSO_MICROSCOPE.getDoc().objects.find((o) => /mushroom/.test(o.name)).name)], true]);
-  // whole again and the selection emptied: a press on the SELECTION takes the selection, so a
-  // box would not drop while the piece is still the selection
+  // whole again (the card's Whole part); with REGION armed the press is the box's, not the selection's
   await page.click('#ms-btn-back');
   await page.click('#ms-mode-select');
-  await page.click('#ms-btn-clear');
   await clickPiece(page, 'mushroom');
-  check('Region mode, then a real click on the piece: a capture box drops, as before',
-    await page.evaluate(() => window.NSO_MICROSCOPE.boxes().length), boxes0 + 1);
-  check('... and catches the piece', await page.evaluate(() => window.NSO_MICROSCOPE.selection().map((o) => o.name)),
+  check('REGION armed, then a real click on the piece: a capture box is placed - and nothing isolated (item 7)',
+    await page.evaluate(() => [window.NSO_MICROSCOPE.boxes().length, window.NSO_MICROSCOPE.isIsolated()]), [boxes0 + 1, false]);
+  check('... and it catches the piece', await page.evaluate(() => window.NSO_MICROSCOPE.selection().map((o) => o.name)),
     [await page.evaluate(() => window.NSO_MICROSCOPE.getDoc().objects.find((o) => /mushroom/.test(o.name)).name)]);
+  await page.click('#ms-btn-isolate');
+  check('the card\'s Isolate isolates what the box holds', await page.evaluate(() => window.NSO_MICROSCOPE.isIsolated()), true);
   await page.click('#ms-btn-back');
   await page.click('#ms-btn-clear');
+  await page.click('#ms-mode-select');         // REGION off again (a toggle)
   await page.click('#ms-cam-normal');
   await frames(page);
   const n2 = await panel(page);
@@ -257,8 +267,9 @@ async function main() {
   console.log('\n--- 3. Slice view, Normal back, Slice again ---');
   // =======================================================================
   const det = await exerciseSlice(page);
-  check('Slice view is up, with its All features rows',
-    [await page.evaluate(() => window.NSO_GSCOPE_SLICE.viewMode()), det.some((d) => /wall/i.test(d))], ['slice', true]);
+  check('Slice view is up (the card on its Slice side), with its All features rows',
+    [await page.evaluate(() => [window.NSO_GSCOPE_SLICE.viewMode(), document.getElementById('ms-main-card').dataset.side]),
+      det.some((d) => /wall/i.test(d))], [['slice', 'slice'], true]);
   const s3 = await panel(page);
   check('in Slice view the panel is in G-scope, on top, on',
     [s3.on, s3.where, s3.shown, s3.onTop], [true, 'gscope', true, true]);

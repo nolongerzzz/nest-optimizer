@@ -14,19 +14,23 @@
  * the parser down, nothing can tell them apart, and nothing here re-implements
  * any of it.
  *
- * NORMAL / SLICE VIEW. The View row's two buttons are this module's: one
- * toggle between the mesh and its slice, not a camera. Slice view
- * (#ms-cam-slice) slices the open mesh at once with whatever the Slice
- * settings hold - collapsed out of the way by default, their values kept
- * across every round trip because nothing resets them. The floating list is
- * then the slice's All features list, one row per feature the slice printed,
- * each a show / hide toggle - and nothing else: no tab strip, and no rows for
- * overhangs or conflicts, which are the Supports tool's to show (its own
- * markers) and this panel's report line's to state. Normal (#ms-cam-normal)
- * goes back to the mesh through backToMesh(), which re-opens it - so the
- * whole part comes back as G-scope opens it: nothing selected, nothing
- * isolated, nothing hidden. On a mesh, Normal is the plain re-frame it always
- * was (NSO_MICROSCOPE.normalView).
+ * NORMAL ○━━● SLICE. The card's switch (docs/GSCOPE.md item 12) is this
+ * module's: Normal (#ms-cam-normal) is the mesh, Slice (#ms-cam-slice) the
+ * toolpaths - a toggle between the mesh and its slice, not a camera. The side
+ * it shows is the document's (NSO_MICROSCOPE.cardSide: a toolpath is the Slice
+ * side), and the card shows that side's rows. Slice slices the open mesh at
+ * once with whatever the Slice settings hold. The settings are a Slice-side
+ * row, folded by default; their defaults are the plate's printer profile (0.4
+ * mm nozzle, 0.2 mm layers on the A1 mini), set again at the start of every
+ * visit, and kept across every Normal / Slice round trip inside one. The
+ * Features list is then the slice's own, one row per feature the slice
+ * printed, each a checkbox - and nothing else: no rows for overhangs or
+ * conflicts, which are the Supports tool's to show (its own markers) and this
+ * panel's report line's to state. Normal goes back to the mesh through
+ * backToMesh(), which re-opens it - so the whole part comes back as G-scope
+ * opens it: nothing selected, nothing isolated, nothing hidden. On a mesh,
+ * Normal is the plain re-frame it always was (NSO_MICROSCOPE.normalView); a
+ * sliced FILE has no mesh, so there Normal is off.
  *
  * THE PIECE STAYS EXPORTABLE. While a slice is shown, the Slice section keeps
  * Export piece to plate / Export piece as STL for the piece(s) it was made
@@ -81,9 +85,51 @@ var NSO_GSCOPE_SLICE = (function () {
     return isFinite(v) ? v : dflt;
   }
 
+  // --- the plate's printer profile: the settings' defaults --------------------
+  //
+  // The plate's printer (app-core.js state.plate, the Plate select) gives a slice
+  // its nozzle and layer height. The A1 mini is the owner's printer, and their own
+  // Bambu slice says what it prints with: "Bambu Lab A1 mini 0.4 nozzle",
+  // "0.20mm Standard @BBL A1M" (fixtures/supports/top_clip_x2_supports.gcode.3mf,
+  // fixtures/README.md). Any other printer takes the app's nozzle
+  // (nso_thickness.js NOZZLE_DEFAULT, 0.4) and half of it - the slicer's own
+  // default (nso_slicer.js defaultsFor). Walls 2, 15 % grid and support below
+  // 30 degrees are the same Bambu profile's, whatever the nozzle.
+  var PRINTER_SLICE = { a1mini: { nozzle: 0.4, layer: 0.2 } };
+  var SLICE_REST = { walls: 2, density: 15, pattern: 'grid', angle: 30 };
+
+  /** { printer, nozzle, layer } for the plate's printer, read as it is now. */
+  function profileDefaults() {
+    var id = (typeof state !== 'undefined' && state && state.plate) || null;
+    var p = id && PRINTER_SLICE[id];
+    var T = window.NSO_Thickness;
+    var nz = p ? p.nozzle : ((T && T.NOZZLE_DEFAULT) || 0.4);
+    return { printer: id, nozzle: nz, layer: p ? p.layer : Math.round(nz * 0.5 * 100) / 100 };
+  }
+
+  /** The settings back to the printer profile's (the start of every visit). */
+  function seedSettings() {
+    var d = profileDefaults();
+    var set = function (id, v) { var el = $(id); if (el) el.value = String(v); };
+    set('ms-slice-nozzle', d.nozzle);
+    set('ms-slice-layer', d.layer);
+    set('ms-slice-walls', SLICE_REST.walls);
+    set('ms-slice-density', SLICE_REST.density);
+    set('ms-slice-pattern', SLICE_REST.pattern);
+    set('ms-slice-angle', SLICE_REST.angle);
+    return d;
+  }
+
+  /** The Slice settings row, folded or open. */
+  function setSettingsOpen(on) {
+    var box = $('ms-slice-settings'), b = $('ms-slice-settings-toggle');
+    if (box) box.hidden = !on;
+    if (b) b.setAttribute('aria-expanded', String(!!on));
+  }
+
   /** The slicer's options, from the panel. Widths are the repo's measured floor for the nozzle. */
   function panelOpts() {
-    var nozzle = num('ms-slice-nozzle', 0.6);
+    var nozzle = num('ms-slice-nozzle', profileDefaults().nozzle);
     var layer = num('ms-slice-layer', nozzle / 2);
     var over = {
       layerMm: layer, firstLayerMm: layer,
@@ -125,7 +171,7 @@ var NSO_GSCOPE_SLICE = (function () {
   function slice(optsOver) {
     if (busy) return Promise.resolve({ ok: false, reason: 'already slicing' });
     var d = MS() && MS().getDoc();
-    if (!d) return refuse('Open something first: Read the plate, or Import an STL / 3MF.');
+    if (!d) return refuse('Open something first: Import an STL / 3MF, or Read plate (IMPORT ▾).');
     if (d.kind !== 'mesh') return refuse('This is already a toolpath. Slice works on a mesh - the plate, an STL or a 3MF.');
     if (!SL()) return refuse('The slicer (nso_slicer.js) did not load - check console.');
     if (!window.NSOGcodeLines) return refuse('The toolpath reader did not load - check console.');
@@ -142,7 +188,7 @@ var NSO_GSCOPE_SLICE = (function () {
     });
     var source = { label: d.name, objects: d.objects, docSource: d.source, subtitle: d.subtitle };
     busy = true;
-    syncToggle();
+    syncPanel();                          // the switch busy, the Slice report up for its progress
     var read = $('ms-slice-read');
     if (read) read.textContent = 'Slicing ' + objects.length + ' object(s)...';
     say('Slicing ' + d.name + '...');
@@ -171,6 +217,8 @@ var NSO_GSCOPE_SLICE = (function () {
       .then(function (out) {
         busy = false;
         syncPanel();
+        // a refusal's own words stay in the report (syncPanel writes the mesh's intro)
+        if (out && !out.ok && out.reason) { var rd = $('ms-slice-read'); if (rd) rd.textContent = out.reason; }
         return out;
       });
   }
@@ -260,9 +308,10 @@ var NSO_GSCOPE_SLICE = (function () {
     return !!(d && d.nsoSlice);
   }
 
-  /** Slice view: slice the open mesh now, with the settings as they stand. */
+  /** Slice: slice the open mesh now, with the settings as they stand. A toolpath is the Slice side already. */
   function sliceView() {
-    if (showingSlice()) return Promise.resolve({ ok: true, reason: 'already in Slice view', doc: MS().getDoc() });
+    var d = MS() && MS().getDoc();
+    if (showingSlice() || (d && d.kind === 'toolpath')) return Promise.resolve({ ok: true, reason: 'already in Slice view', doc: d });
     return slice();
   }
 
@@ -273,25 +322,38 @@ var NSO_GSCOPE_SLICE = (function () {
     return MS() ? MS().normalView() : null;
   }
 
-  function viewMode() { return showingSlice() ? 'slice' : 'normal'; }
+  /** The switch's side: the card's (a toolpath - a slice made here, or a sliced file - is 'slice'). */
+  function viewMode() {
+    var M = MS();
+    if (M && M.cardSide) return M.cardSide();
+    return showingSlice() ? 'slice' : 'normal';
+  }
+
+  /** Off without dropping the keyboard: G-scope's own setDisabled (Escape stays the panel's). */
+  function off(el, yes) {
+    var M = MS();
+    if (!el) return;
+    if (M && M.setDisabled) M.setDisabled(el, yes); else el.disabled = !!yes;
+  }
 
   function syncToggle() {
     var d = MS() && MS().getDoc();
-    var on = showingSlice();
-    var n = $('ms-cam-normal'), c = $('ms-cam-slice');
+    var on = viewMode() === 'slice';
+    var n = $('ms-cam-normal'), c = $('ms-cam-slice'), sw = $('ms-camera-row');
     if (n) {
       n.classList.toggle('active', !on);
       n.setAttribute('aria-pressed', String(!on));
-      n.disabled = busy;
+      // From a slice made here, Normal is its mesh; a sliced file has no mesh to go back to.
+      off(n, busy || (on && !(d && d.nsoSlice)));
     }
     if (c) {
       c.classList.toggle('active', on);
       c.setAttribute('aria-pressed', String(on));
       c.setAttribute('aria-busy', String(busy));
-      // A mesh can be sliced; an imported .gcode.3mf is a slice already.
-      c.disabled = busy || !(d && (d.kind === 'mesh' || on));
-      c.textContent = busy ? 'Slicing...' : 'Slice view';
+      // A mesh can be sliced; a toolpath is the Slice side already (a click there changes nothing).
+      off(c, busy || !d);
     }
+    if (sw) sw.classList.toggle('is-busy', busy);
   }
 
   /** "support 1.1" out of "<host> - support 1.1 (Tree)": the card's name, less the host and the style. */
@@ -353,17 +415,23 @@ var NSO_GSCOPE_SLICE = (function () {
   }
 
   function syncPanel() {
-    var row = $('ms-slice-row');
     var d = MS() && MS().getDoc();
     var ours = !!(d && d.nsoSlice);
-    if (row) row.style.display = d && (d.kind === 'mesh' || ours) ? 'block' : 'none';
     syncToggle();
     var exp = $('ms-slice-export-row');
     if (exp) exp.style.display = ours ? 'flex' : 'none';
+    // The Slice report is a readout, in the dock: up while a mesh (what Slice would
+    // slice) or a slice made here is open, and while a slice is being made.
+    var rd = $('ms-slice-readout');
+    if (rd) rd.style.display = busy || (d && (d.kind === 'mesh' || ours)) ? '' : 'none';
+    var note = $('ms-slice-settings-note');
+    if (note) note.textContent = d && d.kind === 'toolpath' && !ours
+      ? 'This file is sliced already: the settings are for a slice made here, from a mesh.'
+      : 'From the plate\'s printer profile. They take effect on the next slice: Normal, then Slice again.';
     var read = $('ms-slice-read');
     if (!read || busy) return;
     if (ours) read.textContent = report(d.nsoSlice.result, d.nsoSlice.flagged);
-    else if (d && d.kind === 'mesh') read.textContent = 'Slice view slices every ' + (d.source === 'plate' ? 'piece' : 'object') +
+    else if (d && d.kind === 'mesh') read.textContent = 'Slice (the switch) slices every ' + (d.source === 'plate' ? 'piece' : 'object') +
       ' into real layers, walls and infill with the in-house slicer and lists its features.';
   }
 
@@ -372,21 +440,42 @@ var NSO_GSCOPE_SLICE = (function () {
     if (el && el.dataset.wired !== '1') { el.dataset.wired = '1'; el.addEventListener(ev, fn); }
   }
 
+  var visit = false;          // the settings were seeded for this visit
+
   function mount() {
     if (!MS()) return;
     MS().onDocument(function (d) {
       if (pending && d && d.kind === 'toolpath') { d.nsoSlice = pending; last = pending; }
       pending = null;
+      var open = MS().isOpen && MS().isOpen();
+      // A visit's first document takes the printer profile as it is then; CLOSE
+      // (the panel shut, nothing open) ends the visit and folds the row.
+      if (d && open && !visit) { visit = true; seedSettings(); }
+      if (!d && !open) { visit = false; setSettingsOpen(false); }
       syncPanel();
     });
     bind('ms-cam-slice', 'click', function () { sliceView(); });
     bind('ms-cam-normal', 'click', function () { normalView(); });
+    // the track between them flips to the other side, as its button would
+    var track = document.querySelector('#ms-camera-row .ms-switch-track');
+    if (track && track.dataset.wired !== '1') {
+      track.dataset.wired = '1';
+      track.addEventListener('click', function () {
+        var other = $(viewMode() === 'slice' ? 'ms-cam-normal' : 'ms-cam-slice');
+        if (other && !other.disabled) other.click();
+      });
+    }
+    bind('ms-slice-settings-toggle', 'click', function () {
+      var box = $('ms-slice-settings');
+      setSettingsOpen(!!(box && box.hidden));
+    });
     bind('ms-btn-slice-export-plate', 'click', exportPieceToPlate);
     bind('ms-btn-slice-export-stl', 'click', exportPieceAsSTL);
     bind('ms-slice-nozzle', 'change', function () {
-      var n = num('ms-slice-nozzle', 0.6), lay = $('ms-slice-layer');
+      var n = num('ms-slice-nozzle', profileDefaults().nozzle), lay = $('ms-slice-layer');
       if (lay) lay.value = String(Math.round(n * 0.5 * 100) / 100);
     });
+    seedSettings();
     syncPanel();
   }
 
@@ -400,6 +489,12 @@ var NSO_GSCOPE_SLICE = (function () {
     sliceView: sliceView,
     normalView: normalView,
     viewMode: viewMode,
+    syncToggle: syncToggle,
+    syncPanel: syncPanel,
+    /** The plate's printer profile's settings: { printer, nozzle, layer }. */
+    profileDefaults: profileDefaults,
+    seedSettings: seedSettings,
+    setSettingsOpen: setSettingsOpen,
     backToMesh: backToMesh,
     exportPieceToPlate: exportPieceToPlate,
     exportPieceAsSTL: exportPieceAsSTL,

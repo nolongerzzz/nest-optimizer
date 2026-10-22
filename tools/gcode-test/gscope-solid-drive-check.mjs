@@ -7,14 +7,18 @@
  * end. The headless proofs (runs, the closed sweep, every shell through the
  * canonical checker) are tools/gcode-test/gscope-solid-check.js.
  *
- *   1  THE TOGGLE. Toolpath | Solid in the Render row: shown for a slice,
- *      hidden for a mesh document. Solid draws the swept shells of exactly
+ *   1  THE TOGGLE. Toolpath | Solid in the Render row - a row of the card's
+ *      Slice side (round 2c, docs/GSCOPE.md item 12): shown for a slice, not
+ *      shown on the Normal side (a mesh document). Solid draws the swept shells of exactly
  *      the moves the toolpath view draws, switches the lines' material off
  *      (still raycastable), and back again. View only: plate, undo stack and
  *      downloads untouched; the selection survives the round trip.
- *   2  IT FOLLOWS THE FILTERS. The slider, "only", Clear from view: the solid
- *      shown is the solid of the moves shown, rebuilt from the chain cache.
- *      A real click on a line in solid mode still picks that one move.
+ *   2  IT FOLLOWS THE FILTERS. The slider and the Features list ("only"):
+ *      the solid shown is the solid of the moves shown, rebuilt from the chain
+ *      cache. In solid mode a real pointer on a bead still lands on that one
+ *      move: the hover readout (SELECT > Line's home since round 2c) names it,
+ *      and pickLineAt at that point picks it (the UI's isolate-one-move is
+ *      dropped; the API stays).
  *   3  VOLUME. The same selection in both views: the toolpath export's
  *      volume, the solid export's volume, and the Isolate detail meshes in
  *      each mode - equal, up to the counted seam closures.
@@ -198,9 +202,10 @@ async function main() {
     tp: document.getElementById('ms-render-toolpath').classList.contains('active'),
     so: document.getElementById('ms-render-solid').classList.contains('active'),
     mode: window.NSO_MICROSCOPE.renderMode(),
+    side: document.getElementById('ms-main-card').dataset.side,
   }));
-  check('a slice shows the Render row, with Toolpath on and Solid off', [ui0.row, ui0.tp, ui0.so, ui0.mode],
-    [true, true, false, 'toolpath']);
+  check('a slice is the card\'s Slice side and shows the Render row, with Toolpath on and Solid off',
+    [ui0.side, ui0.row, ui0.tp, ui0.so, ui0.mode], ['slice', true, true, false, 'toolpath']);
   await shot(page, 'solid-01-toolpath.png', 'the slice in the toolpath view');
 
   await page.click('#ms-render-solid');
@@ -232,7 +237,8 @@ async function main() {
 
   // the selection survives the round trip
   await page.evaluate(() => { window.NSO_MICROSCOPE.soloGroup('Inner wall'); });
-  await page.click('#ms-btn-select-visible');
+  // Select shown has no button since round 2c (what is shown is what a click / Export takes); its API stays.
+  await page.evaluate(() => window.NSO_MICROSCOPE.selectVisible());
   const selA = await page.evaluate(() => window.NSO_MICROSCOPE.selection().map((s) => s.mv.index).join(','));
   await page.click('#ms-render-toolpath');
   const selB = await page.evaluate(() => window.NSO_MICROSCOPE.selection().map((s) => s.mv.index).join(','));
@@ -275,8 +281,10 @@ async function main() {
   });
   check('"only Outer wall": the only solid drawn is the Outer wall\'s', solo, ['Outer wall']);
 
-  // A real click on a line, in solid mode.
-  await page.click('#ms-mode-line');
+  // A real pointer on a line, in solid mode. SELECT > Line is gone (round 2c):
+  // its readout is the hover in SELECTION / SEGMENT INFO, and isolating one
+  // move from the UI is dropped - so the pointer must name the move, and
+  // pickLineAt (the API) at that same point must pick it.
   const target = await page.evaluate(() => {
     const d = window.NSO_MICROSCOPE.getDoc();
     const top = Math.max(...d.segments.filter((s) => s.feature === 'Outer wall').map((s) => s.layer));
@@ -289,9 +297,21 @@ async function main() {
   }, target.idx);
   const px = await page.evaluate(projectJS, target.mid);
   await page.evaluate(() => window.NSO_MICROSCOPE.setSelectionMoves([]));
-  await page.mouse.click(px[0], px[1]);
-  const picked = await page.evaluate(() => window.NSO_MICROSCOPE.selection().map((s) => s.mv.index));
-  check('in the solid view a real click on a bead still picks that one move', picked, [target.idx]);
+  await page.mouse.move(px[0] - 40, px[1] - 40);
+  await page.mouse.move(px[0], px[1], { steps: 4 });
+  const want = 'Move ' + (target.idx + 1) + '</b>';
+  const hovered = await page.waitForFunction((w) => document.getElementById('ms-info').innerHTML.includes(w), want, { timeout: 15000 })
+    .then(() => true, () => false);
+  const readout = await page.evaluate(() => document.getElementById('ms-info').textContent);
+  check('in the solid view a real pointer on a bead reads out that one move (SELECTION / SEGMENT INFO)', hovered, true);
+  console.log('       ' + readout);
+  const picked = await page.evaluate((p) => {
+    const M = window.NSO_MICROSCOPE, r = M.getView().renderer.domElement.getBoundingClientRect();
+    M.pickLineAt((p[0] - r.left) / r.width * 2 - 1, -((p[1] - r.top) / r.height * 2 - 1));
+    return M.selection().map((s) => s.mv.index);
+  }, px);
+  check('and pickLineAt at that point picks that one move (still raycastable under the solid)', picked, [target.idx]);
+  await page.mouse.move(5, 450);
   await shot(page, 'solid-04-picked-line.png', 'a picked move, highlighted as its own solid');
   await page.evaluate(() => window.NSO_MICROSCOPE.showAll());
 
@@ -496,8 +516,10 @@ async function main() {
   const undone = await page.evaluate((id) => Array.from(state.models.find((q) => q.id === id).rawTris), ex.id);
   check('one Undo puts the exported solid back bit for bit', undone.length === ex.raw.length && undone.every((v, i) => v === ex.raw[i]), true);
 
-  // A mesh document: Toolpath / Solid are disabled (they are a slice's - the
-  // View card's row, docs/GSCOPE.md item 5) and there is no solid export.
+  // A mesh document is the card's Normal side: the Toolpath / Solid row is a
+  // Slice-side row, so it is not shown at all (round 2c, docs/GSCOPE.md item
+  // 12 - it used to be a disabled pair on the VIEW card), and there is no solid
+  // export.
   if (await page.evaluate(() => window.NSO_MICROSCOPE.isOpen())) await heavyClick(page, '#ms-close');
   const cubeBytes = Array.from(await readFile(join(ROOT, CUBE)));
   const nb = await page.evaluate(() => state.models.length);
@@ -505,14 +527,23 @@ async function main() {
   await page.waitForFunction((n) => state.models.length === n + 1, nb, { timeout: heavy(HEAVY_WAIT_FRAMES) });
   await heavyClick(page, '#btn-microscope');
   await page.waitForFunction(() => window.NSO_MICROSCOPE.isOpen(), null, { timeout: heavy(HEAVY_WAIT_FRAMES) });
-  // A file already under the lens stays there on reopen; Read the plate swaps to the plate.
+  // A file already under the lens stays there on reopen; Read the plate (in
+  // IMPORT's ▾ since round 2c - the cards helper opens the ▾ first) swaps to the plate.
   await heavyClick(page, '#ms-btn-plate');
   await page.waitForFunction(() => window.NSO_MICROSCOPE.getDoc().kind === 'mesh', null, { timeout: heavy(HEAVY_WAIT_FRAMES) });
+  check('Read plate, through IMPORT ▾ (real click): the mesh is under the lens, the ▾ menu shut again',
+    await page.evaluate(() => [window.NSO_MICROSCOPE.getDoc().kind, document.getElementById('ms-import-menu').classList.contains('is-open')]),
+    ['mesh', false]);
   await page.evaluate(() => { const M = window.NSO_MICROSCOPE; M.selectVisible(); });
-  check('a mesh document: Toolpath / Solid disabled, no Export as solid (it already is a mesh)',
-    [await page.evaluate(() => ['ms-render-toolpath', 'ms-render-solid'].every((id) => document.getElementById(id).disabled)),
+  const meshSide = await page.evaluate(() => ({
+    side: document.getElementById('ms-main-card').dataset.side,
+    renderRow: getComputedStyle(document.getElementById('ms-render-row')).display,
+    solidRow: getComputedStyle(document.getElementById('ms-export-solid-row')).display,
+  }));
+  check('a mesh document: the Normal side, the Toolpath / Solid row not shown, no Export as solid (it already is a mesh)',
+    [meshSide.side, meshSide.renderRow, meshSide.solidRow,
       await page.isVisible('#ms-btn-export-solid-plate'), await page.isVisible('#ms-btn-export-plate')],
-    [true, false, true]);
+    ['normal', 'none', 'none', false, true]);
 
   check('no page errors', errors, []);
   await browser.close();

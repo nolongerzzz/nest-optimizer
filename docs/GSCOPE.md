@@ -67,9 +67,10 @@ CLOSE, BACK (a producer's way back, e.g. Picture), and every export that leaves
 G-scope end the visit **whole**. The next open starts on plate 1 with:
 - a fresh read of the plate, or of the imported file if either plate was
   showing it (or a slice made from it) when G-scope closed;
-- nothing isolated, nothing selected, the slider at All;
-- the Features list's defaults (Travel off), Toolpath render, Piece mode, no
-  card open;
+- nothing isolated, nothing selected, no capture box, the slider at All;
+- the Features list's defaults (Travel off), Toolpath render, REGION off (a
+  click is the piece's), the ▾ menu and the Export card shut, the Slice
+  settings folded and back to the printer profile (item 12);
 - plate 2 empty, and the default view (◎'s framing of both plates).
 
 **Nothing from the previous visit survives except an imported file**, and a
@@ -90,39 +91,37 @@ checkbox - and nothing but checkboxes:
 - **A click on the row text toggles its box** (the text is the box's
   `<label>`), and does nothing else. **Hovering a row does nothing.** There is no
   row-click isolate, no hover preview, no snap-back, and a row is not dragged.
-- **Whatever is shown is what Select, a drag and Export act on.** A selection
+- **Whatever is shown is what a click, Isolate, a drag and Export act on.** A selection
   keeps its moves, but only the checked line types' moves are exported, copied
   across to the other plate or swept as a solid (`actedOn()`); a press where an unchecked
   type is drawn has nothing to take. Check it again and it is acted on again.
-- **Check all** (VIEW card, `#ms-btn-show-all`, the old Show all) checks every
-  box - Travel too - and nothing else: an isolation stays, and what was cleared
-  from view stays cleared (CLEAR makes a plate whole again).
+- **Check all** (`#ms-btn-show-all`, in the list's own head since round 2c; it
+  was the VIEW card's, and before that Show all) checks every box - Travel
+  too - and nothing else: an isolation stays as it is.
 - One set of boxes for both plates (`FEATURE_OFF`): unchecked on plate 1 is
   unchecked on plate 2.
 
-## 5. The column: IMPORT · READ PLATE | SELECT · VIEW (round 1b)
+## 5. The column: IMPORT · READ PLATE | SELECT · VIEW (round 1b; gone in round 2c)
 
-Every removed button's job, and where it went:
+Round 2c took the column away: ONE card holds what it did (item 12). The
+round-1b moves below stand, with their homes as they are now:
 
 | was | now |
 |---|---|
 | **OVERHANGS** | Gone from G-scope. Overhang detection is the plate **SUPPORTS** card's. The row (`ms-support-row`, `ms-btn-overhangs`, `ms-overhang-angle`, `ms-support-read`) is deleted; `app-gscope-support.js` still loads but nothing in G-scope switches its markers on (only its `setOn()` API). `gcode:gscope-support` and `support:ui` tested that G-scope UI, not the engine (the engine is `support:*`, `tree:*`, `support:card`, `support:workflow`), so both are **retired**. |
-| **RENDER** (Toolpath / Solid) | A row of the **VIEW** card, enabled only while a slice is shown (Slice view on, or a sliced file, which is a slice already); on a mesh it says to turn Slice view on. |
-| **SLICE** (nozzle, layer, walls, infill, pattern, support below) | **"Slice settings"** in the VIEW card, under Normal / Slice view. They take effect when Slice view is entered (from a slice: Normal, then Slice view). The two Slice exports (piece to plate / as STL) were already the EXPORT card's "Sliced piece". |
-| **CROP Z** ("Crop out band") | **SELECT › Layer**: the slider's range IS the band, and **Take band** (`#ms-btn-take-band`) isolates it as one piece - the Range card's selection (`rangeTarget`) - to drag onto plate 2 or export. No separate card; nothing is cut out of anything any more (`cropZBand` is gone). |
-
-**VIEW card order:** Normal · Slice view | Toolpath · Solid | Slice settings |
-Check all · Clear from view · Select shown.
+| **RENDER** (Toolpath / Solid) | A row of the card's **Slice** side (item 12): shown while a toolpath is open (a slice made here, or a sliced file). |
+| **SLICE** (nozzle, layer, walls, infill, pattern, support below) | **"Slice settings"**, the card's Slice side, folded; defaults from the printer profile. They take effect on the next slice (Normal, then Slice again). The two Slice exports (piece to plate / as STL) were already the EXPORT card's "Sliced piece". |
+| **CROP Z** ("Crop out band") | **TAKE BAND**, the card's Slice side: the slider's range IS the band, and Take band (`#ms-btn-take-band`) isolates it as one piece - the Range card's selection (`rangeTarget`) - to drag onto the other plate or export. Nothing is cut out of anything any more (`cropZBand` is gone). |
 
 ## 6. The two plates are the same (round 2b)
 
 **What the user sees.** Plate 2 is a second plate 1: its own zone, not a
 staging area. Every control acts on the **active** plate and works identically
 on either:
-- **IMPORT** and **READ PLATE** load into the active plate, in place of what it
-  held. The other plate is not touched.
-- The **Features list**, the **slider**, **SELECT**, **VIEW** (Slice view
-  too) and **EXPORT** act on the active plate's document, whatever it is.
+- **IMPORT** and **READ PLATE** (IMPORT ▾) load into the active plate, in
+  place of what it held. The other plate is not touched.
+- The **Features list**, the **slider**, the card (its switch and both sides'
+  rows) and **EXPORT** act on the active plate's document, whatever it is.
 - A drag copies across in **both** directions (item 11).
 - **CLEAR** empties the active plate (item 9).
 
@@ -150,6 +149,69 @@ exported "as solid".
   card's drag and every Export row read the active document. The checks that
   used to read "plate 2" now read what the document is: `isPieces(doc)`, or
   `hasBeads(doc)` (a mesh holding pieces still made of beads).
+
+## 7. REGION: place, then isolate (round 2c)
+
+**What the user sees.** REGION is a row of the card, on both sides. Its button
+(`#ms-mode-select`) arms and disarms the capture box; off, a click in the view
+is the piece's.
+
+- Armed, the hover shows the box a click would place - a wire, with what it
+  would hold outlined. On a sparse spot of a slice, where no move's midpoint
+  falls inside the default box, the box still shows, holding nothing (before,
+  the hover showed nothing there, and the click placed nothing).
+- **One click PLACES the box** - the default size, or the last box's shape -
+  **and does nothing else.** What it holds is the selection, lit; nothing is
+  isolated. Another click places another box; the selection is what they hold
+  together.
+- The box's dots size it (item 8). Sizing isolates nothing either.
+- **Isolating is a second, deliberate action**: a click **inside** the box -
+  on the box itself, never on a dot - or **Isolate** in the REGION row. Either
+  isolates what the boxes hold, taken from the boxes again (a piece moved or
+  dropped since may have been selected). Click inside again, or Escape, and it
+  is whole again. A click on a piece the box holds but outside the box places
+  another box, as any click does while REGION is armed; once something is
+  isolated, a click on it makes it whole again whatever REGION is.
+- A press inside the box that travels past the slop scales the box's
+  footprint, from where it was pressed; one let go in place is the click
+  above, and a hand's jitter on the way does not resize the box.
+- Where the box would hold nothing, the press is not taken: a drag from there
+  orbits, as on bare floor, and a click there still places the box.
+- **Escape removes a box that is not isolated** - the last one placed. With no
+  box left, Escape disarms REGION, and only then closes G-scope (item 12's
+  Escape ladder). **Clear boxes** removes them all.
+
+**How it is built** (`app-microscope.js`). `clickTarget` places a `'box'`
+target and returns - it never isolates it. A press inside a placed box
+(`boxOwnsPress` → `'face'`) is noted as `view.boxPress`, and `onPullUp`
+isolates on a click that never travelled (`isolateBoxes`, which Isolate calls
+too); a `'dot'` press never isolates. The box handler's footprint drag
+(`resizeR`) waits for the slop and scales from the press. `targetAt`, armed,
+answers with the box even when `selectByBox` catches nothing (`items: []`),
+and `onPressCapture` leaves such a press to the orbit (`view.regionPress`
+places the box on a click). Armed and nothing isolated, the selection under
+the pointer is not "the selection" (`selectionTakes`), in `pressTarget`, the
+hover and the plate-2 grab alike. `removeLastBox`, `disarmRegion`.
+
+## 8. The handle balls: always on top, always theirs (round 2c)
+
+- A box's three dots - the centre (move, blue), the top (thickness, orange)
+  and the corner (X and Y, green) - are **drawn over everything**: no depth
+  test, after the hover and the highlight (`renderOrder` 20), like the rotate
+  rings. And **never smaller than 6 px** on screen, whatever the zoom.
+- **They always own the pointer.** A left press on a dot is a handle drag in
+  every mode - REGION armed or not - even with the piece between the camera
+  and the dot. It never falls through to the piece: no pick, no pull, no
+  isolate. A dot is picked **on screen**, within 10 px of where it is drawn
+  (`dotAt`), in the old order where two overlap: centre > top > corner. A
+  right press still pans.
+- A dot pressed and let go without moving isolates nothing. Over a dot the
+  cursor is the grab hand, and nothing new is outlined.
+
+**How it is built.** `makeBoxVisuals` (the materials), `dotsOnScreen` (the
+render loop keeps each dot's least size), `dotAt` (used by `boxOwnsPress` in
+`onPressCapture`, by the box drag handler and by the hover).
+`NSO_MICROSCOPE.boxDots()` gives the dots' screen points, for checks.
 
 ## 9. CLEAR empties the active plate (round 2b)
 
@@ -251,19 +313,27 @@ Round 1 did not make G-scope slow: 346bc38 and d7abbea measure the same. The
 slowness was the full rebuilds and walks above, and they predate the two plates.
 The frame rate on tabletop in this box is SwiftShader's (a software GPU), about
 6 fps whatever the code does, so the gate holds the main thread's share of a
-frame there, and the frame rate itself on the small committed slice.
+frame there (2a, <= 33 ms). On the small committed slice
+(`supportwithinsupport.gcode.3mf`) the main thread's share is gated at <= 2 ms
+(2b), and its frame rate over tabletop's at >= 5.2 (2c, `ORBIT_RATIO_MIN`,
+the two orbits measured back to back): both drawn by the same software GPU on
+the same box, so a starved runner slows both and the ratio holds, where a
+">= 30 fps" floor read the runner's speed. Each frame rate is logged as a
+finding (ticket ci-timing-gates).
 
 **Checks.** `gscope:speed` (`tools/nso_gscope_speed_test.js`) measures and gates
 the items above. It uses `tools/fixtures-local/baseline.gcode.3mf` when that
-file is there (the user's, git-ignored), else tabletop; `NSO_GSCOPE_SPEED_ROOT`
-points it at another checkout for a before / after. `gcode:lines-build`
+file is there (the user's, git-ignored), else `NSO_GSCOPE_SPEED_FILE`, else
+tabletop; `NSO_GSCOPE_SPEED_ROOT` points it at another checkout for a before /
+after. `gcode:lines-build`
 (`tools/nso_gcode_lines_build_test.js`) checks the typed-array prisms against
 the old build, bit for bit.
 
 ## 11. The drag: a ghost, both ways (round 2b)
 
-**What the user sees.** Press a thing on one plate (a piece, a capture box's
-region, a line, a line type, a layer, the slider's range) and drag. Past 3 px
+**What the user sees.** Press a thing on one plate (a piece, what the capture
+boxes hold, an isolation - a band Take band took, say - the slider's range) and
+drag. Past 3 px
 a copy of it is in hand, **drawn under the pointer on every frame of the
 way**: over the plate it came from, across the gap, over the other plate. It
 slides on whichever bed is under the pointer, seats onto a piece of the other
@@ -279,8 +349,9 @@ plate is then active, with the copy selected.
   air - the main plate's grab (`app-grab-drop.js`). Carried over the **other**
   plate's bed and let go, it is **copied** there, where it was let go, and it
   stays where it was too. This is how a piece goes plate 2 → plate 1.
-- A press that never travels is a click (it isolates); a capture box's dots
-  keep their press; a press on bare floor orbits.
+- A press that never travels is a click: it isolates (REGION armed, it places
+  a box - item 7); a capture box's dots always keep their press (item 8); a
+  press on bare floor orbits.
 
 **Where it lands.**
 - **An empty plate** becomes a plate of pieces.
@@ -308,15 +379,92 @@ plate is then active, with the copy selected.
   moves).
 - `copyAcross` does the same for a grabbed piece let go over the other plate.
 
+## 12. One card (round 2c)
+
+**What the user sees.** The left column is gone. One card stands top-left,
+always:
+
+```
+┌─────────────────────────────────────────┐
+│ [ IMPORT ▾ ]      Normal ○━━● Slice      │
+│─────────────────────────────────────────│
+│  selection options for the current side  │
+└─────────────────────────────────────────┘
+```
+
+- **IMPORT** opens a file into the active plate; it stands where the main
+  page's Import slab stands, so it does not move as G-scope opens. Its **▾**
+  holds **READ PLATE** - the backup: opening G-scope from the plate already
+  brings the plate. Both load into the active plate (item 6). The ▾ menu shuts
+  on a choice, a press outside it, Escape or CLOSE.
+- **The switch is the view**: Normal (the mesh) | Slice (the toolpaths). The
+  document decides its side: a toolpath - a slice made here, a sliced file,
+  moves set down into a slice - is the Slice side; a mesh, pieces or an empty
+  plate is the Normal side. Slice on a mesh slices it with the Slice settings
+  as they stand; Normal on a slice made here goes back to its mesh, whole
+  again; Normal on a mesh re-frames; a sliced file has no mesh, so Normal is
+  off there. The track between the two flips it too. **Flipping it changes the
+  rows**:
+  - **Normal side**: REGION (item 7) · WHOLE PART (back out of any isolate).
+  - **Slice side**: REGION · TAKE BAND (the slider's range isolated as one
+    piece) · Toolpath | Solid · Slice settings (folded). An isolation there
+    is undone by Escape, or a click on it.
+- **Slice settings**: nozzle / layer / walls / infill (and its pattern) /
+  support below. Their defaults are the **plate's printer profile**: on the A1
+  mini a 0.4 mm nozzle and 0.2 mm layers (the owner's own Bambu slice:
+  `fixtures/supports/top_clip_x2_supports.gcode.3mf`, "Bambu Lab A1 mini 0.4
+  nozzle", "0.20mm Standard @BBL A1M"); on any other printer the app's 0.4
+  nozzle and half of it. Walls 2, 15 % grid and support below 30° are that
+  profile's. They are set from the profile at the start of every visit, an
+  edit lasts the visit, and they take effect on the next slice (Normal, then
+  Slice again), as before.
+- The **Features list** stays bottom-left (checkboxes only, item 4; Check all
+  in its head), the **slider** on the right, the **corner row** top-right. The
+  left wall stays under the card whichever side it shows.
+- **Escape**, one step at a time: the open ▾ menu or Export card shuts → an
+  isolation is whole again → the last box not isolated goes → REGION disarms
+  → G-scope closes.
+
+**Every job a removed control did, and where it is now.**
+
+| was | now |
+|---|---|
+| SELECT › Piece | a click / drag in the view (the default) |
+| SELECT › Feature | the Features list: what is checked is what a click, Isolate, a drag and Export take |
+| SELECT › Line | hovering a move of a slice reads it out in SELECTION / SEGMENT INFO ("Move N - feature, layer, Z, width x height, length, angle"); isolating one move is dropped (`pickLine` / `stepLine` stay in the API) |
+| SELECT › Layer | the slider (one step is one layer) + TAKE BAND |
+| SELECT › Region | the REGION row, both sides (item 7) |
+| VIEW › Normal / Slice view | the switch |
+| VIEW › Toolpath / Solid, Slice settings | the Slice side's rows |
+| VIEW › Check all | the Features list's head |
+| VIEW › Clear from view | the corner CLEAR, which empties the active plate (item 9). Hiding a selection from view has no button now; `clearFromView()` is the API's |
+| VIEW › Select shown | gone: what is shown is what is acted on, and TAKE BAND at All takes everything shown (`selectVisible()` stays in the API) |
+| READ PLATE | inside IMPORT ▾ |
+
+**How it is built.**
+- `index.html` `#ms-main-card`: each row names the sides it shows on
+  (`data-on`), the card names its side (`data-side`), and CSS shows the
+  side's rows. Every control with a new home keeps its id (`ms-btn-open`,
+  `ms-btn-plate`, `ms-cam-normal` / `ms-cam-slice`, `ms-mode-select`,
+  `ms-btn-isolate`, `ms-btn-clear`, `ms-btn-back`, `ms-btn-take-band`,
+  `ms-render-*`, `ms-slice-*`, `ms-btn-show-all`): Watch and the plate-side
+  checks find them by id.
+- `app-microscope.js`: `cardSide()` / `syncCard()` (from `syncPlate` and
+  `redrawDoc`), the Shell's `SHELL_CARDS` (the ▾ menu and Export: one open
+  at a time), `watchCard` (publishes `--ms-card-bottom` for the left wall and
+  the support pop). The modes are Piece and Region only.
+- `app-gscope-slice.js` owns the switch (`syncToggle`), the settings
+  (`profileDefaults`, `seedSettings`, `setSettingsOpen`) and the Slice report.
+
 ## Checks
 
 | check | what it holds |
 |---|---|
-| `gscope:take` (`tools/nso_gscope_take_test.js`) | items 1-3, 6, 9, 11: the two plates and click-to-activate; drags 1 -> 2 (five kinds) with the ghost under the pointer on every move and the copy landing exactly where let go; drag 2 -> 1 onto a plate read and into a slice; the refusals; grab and drop on a plate; Import and Read plate onto plate 2; the same content exporting byte-identical files from either plate; CLEAR on each plate emptying only that plate, from a fresh page and mid-session; Shift-CLEAR = CLEAR; CLOSE / BACK then reopen clean; an import surviving a close |
-| `gscope:shell` | the four-button column, the three cards (Select, View in its order, Export), the corner row (BACK · ◎ · CLEAR · EXPORT · CLOSE), the dock, the retired ids gone |
-| `gscope:select` | the hover's clock on a fake clock (the last move always answered, never an older one after it); every hover waited for (up to 2 s, the failure says how long); a big piece's hover answering while its tree builds (item 10); the Select card's five modes; item 4's checkbox contract (two rows checked - exactly those two types drawn; none - nothing; hover changes nothing; the text toggles; Check all; Export and a drag take only what is shown) |
-| the #205 set | the older G-scope drive checks (camera, zoom, slice, solid, watch, legend, ...) still hold; `gcode:gscope`'s Crop sections are its Take band section now; `gcode:gscope-support` and `support:ui` are retired (item 5) |
-| `gscope:speed` | items 10 and 11: a 60-move drag follows on plate 1, across and on plate 2; the ghost drawn on every frame of a pull; orbit (the main thread's share of a frame on the file, the frame rate on the small slice); the pick <= 16 ms; nothing renders under G-scope; no press or held move past a frame; a pull's first move per thousand moves copied |
+| `gscope:take` (`tools/nso_gscope_take_test.js`) | items 1-3, 6, 9, 11, 12: the two plates and click-to-activate; drags 1 -> 2 with the ghost under the pointer on every move and the copy landing exactly where let go; drag 2 -> 1 onto a plate read and into a slice; the refusals; grab and drop on a plate; Import, and IMPORT ▾ → Read plate, onto the active plate 2; the same content exporting byte-identical files from either plate; CLEAR on each plate emptying only that plate, from a fresh page and mid-session; CLOSE / BACK then reopen clean (REGION off, the ▾ menu shut, the settings folded); an import surviving a close |
+| `gscope:shell` | item 12: the column gone and the card present on open; IMPORT at the main page's Import spot; IMPORT ▾ → Read plate into the active plate; the switch flipping the view and the rows (Normal 2, Slice 4); the Slice settings folded, at the printer profile's 0.4 / 0.2; every removed control's job at its new home; the corner row (BACK · ◎ · CLEAR · EXPORT · CLOSE), the Export card, the dock clear of the card; the retired ids gone; shots of the card on both sides |
+| `gscope:select` | items 7, 8, 10, 12: the hover's clock on a fake clock; every hover waited for (up to 2 s, the failure says how long); REGION - click places a box, nothing isolated; a dot dragged resizes it, nothing isolated; a click inside / Isolate isolates exactly what it holds; Escape removes it; a dot behind the piece still takes the mousedown, in either mode; Region's hover where no move midpoint falls in the box; a big piece's hover answering while its tree builds; Piece in the view, a move's readout on hover, a layer by the slider + Take band; item 4's checkbox contract (two rows checked - exactly those two types drawn; none - nothing; hover changes nothing; the text toggles; Check all; Export and a drag take only what is shown) |
+| the #205 set | the older G-scope drive checks (camera, zoom, slice, solid, watch, legend, ...) still hold, driven through the card; `gcode:gscope`'s Crop sections are its Take band section now; `gcode:gscope-support` and `support:ui` are retired (item 5) |
+| `gscope:speed` | items 10 and 11: a 60-move drag follows on plate 1, across and on plate 2; the ghost drawn on every frame of a pull; orbit (the main thread's share of a frame: <= 33 ms on the file, <= 2 ms on the small slice; the small slice's frame rate over the file's >= 5.2; each frame rate a logged finding); the pick <= 16 ms; nothing renders under G-scope; no press or held move past a frame; a pull's first move per thousand moves copied |
 | `gcode:lines-build` | item 10: `buildLineGeometry`'s typed-array prisms are the old build's, bit for bit |
 | `page:manifest` | the page loads each script once |
 

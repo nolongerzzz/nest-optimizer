@@ -153,7 +153,8 @@ async function main() {
   await page.setInputFiles('#file-input', join(ROOT, SLICE));
   await page.waitForFunction(() => window.NSO_MICROSCOPE.isOpen() &&
     (window.NSO_MICROSCOPE.getDoc() || {}).kind === 'toolpath', null, { timeout: 30000 });
-  await page.click('#ms-mode-piece');
+  // Round 2c: no Piece button - Piece is the default; every document opens with REGION off.
+  check('the slice opens in Piece (REGION off)', await page.evaluate(() => window.NSO_MICROSCOPE.mode()), 'piece');
   await page.evaluate(install);
 
   const N = page.evaluate.bind(page);
@@ -454,7 +455,7 @@ async function main() {
     window.NSO_MICROSCOPE.openObjects('zoom box', [{ name: 'box', positions: new Float32Array(p) }]);
   });
   await page.waitForFunction(() => (window.NSO_MICROSCOPE.getDoc() || {}).kind === 'mesh');
-  await page.click('#ms-mode-piece');
+  check('the mesh opens in Piece (REGION off)', await page.evaluate(() => window.NSO_MICROSCOPE.mode()), 'piece');
   await page.evaluate(install);
   await frames(3);
   {

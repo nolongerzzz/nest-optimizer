@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=ctxmenub21" />
+  <link rel="stylesheet" href="styles.css?v=gscardb21" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -431,7 +431,7 @@
                into this one. See docs/GCODE-MICROSCOPE.md, "G-scope". -->
           <button id="btn-microscope" class="vp-bar-btn btn-gscope" type="button"
                   aria-label="G-scope"
-                  title="G-scope: put the plate under the lens, or open an STL, a 3MF or a sliced .gcode.3mf. Colour per part or per slicer feature, a capture box, single-line picking, a layer-range slider, clear-from-view - then export what you isolated, or crop a Z band out through the Crop tool.">G-scope</button>
+                  title="G-scope: put the plate under the lens, or open an STL, a 3MF or a sliced .gcode.3mf. Colour per part or per slicer feature, a capture box, a layer-range slider, Normal or Slice view - then export what you isolated, or drag it onto the second plate.">G-scope</button>
           <input type="file" id="ms-input" accept=".stl,.3mf" class="hidden-quiet" />
           <details class="vp-menu vp-top-menu vp-shell-menu" id="menu-scale">
             <summary class="vp-bar-btn" title="Read the piece's shape and size, then lengthen, shorten or scale it">Scale</summary>
@@ -1415,28 +1415,17 @@
   <!-- ===================================================================
        G-scope (the Microscope view). app-microscope.js owns it; deleting this block,
        the #btn-microscope button and that script tag removes the feature
-       whole. The layout is the main page's shell: a narrow button column on
-       the left, a card under each button opening to its right, a pinned
-       Back / Export / Close row in the top-right corner, and the readouts
-       docked bottom-left. The viewport takes the whole panel. Look and feel
-       only: every id is the one the engine and the gscope helper scripts
-       find their elements by. Only the cards' open / close and the buttons'
-       enabled state are the shell's own (app-microscope.js, "Shell").
-       docs/GCODE-MICROSCOPE.md has the audit.
+       whole. The layout (docs/GSCOPE.md, item 12): ONE card, always up,
+       top-left - IMPORT (its ▾ holds Read plate), the Normal | Slice switch,
+       and the selection rows for that side; a pinned BACK · ◎ · CLEAR ·
+       EXPORT · CLOSE row in the top-right corner, its Export card under it;
+       the Features list and the readouts docked bottom-left, the layer-range
+       slider on the right. The viewport takes the whole panel. Every id is
+       the one the engine and the gscope helper scripts find their elements
+       by. The ▾ menu's and Export's open / close and the buttons' enabled
+       state are the shell's own (app-microscope.js, "Shell").
        =================================================================== -->
   <div id="microscope" class="ms-panel" tabindex="0" hidden>
-    <div id="ms-sidebar" class="ms-col" role="toolbar" aria-label="G-scope" aria-orientation="vertical">
-      <button id="ms-btn-open" type="button" class="vp-bar-btn"
-              title="Open a file onto the active plate (it replaces what that plate holds; the other plate is not touched). STL and plain 3MF are not sliced, so they have no layers and no features and draw as whole parts.">Import</button>
-      <button id="ms-btn-plate" type="button" class="vp-bar-btn"
-              title="Read the pieces that are on the plate right now, as placed, onto the active plate. The plate itself is not changed.">Read plate</button>
-
-      <button id="ms-nav-select" type="button" class="vp-bar-btn ms-nav ms-group-start"
-              data-card="ms-card-select" aria-controls="ms-card-select" aria-expanded="false">Select</button>
-      <button id="ms-nav-view" type="button" class="vp-bar-btn ms-nav"
-              data-card="ms-card-view" aria-controls="ms-card-view" aria-expanded="false">View</button>
-    </div>
-
     <div id="ms-viewport" class="ms-viewport">
       <div id="ms-mode-badge">Whole part</div>
 
@@ -1458,134 +1447,125 @@
         <button id="ms-close" type="button" class="vp-bar-btn">Close</button>
       </div>
 
-      <!-- The cards. One open at a time, each beside the column, top-left of
-           the viewport (Export: under the corner row). The engine still shows
-           and hides the rows inside them by id, as it did in the sidebar. -->
-      <!-- SELECT: one selection model, five ways in. In every mode: hover outlines
-           what a click would take, a click isolates it (again, or Escape: whole
-           again), a drag copies it onto plate 2. A press on bare floor orbits. -->
-      <div id="ms-card-select" class="ms-card" role="group" aria-label="Select" data-nav="ms-nav-select">
-        <div class="ms-btn-row ms-seg" id="ms-mode-row" role="group" aria-label="Select by">
-          <button id="ms-mode-piece" type="button" class="active" aria-pressed="true"
-                  title="A whole piece">Piece</button>
-          <button id="ms-mode-select" type="button" aria-pressed="false"
-                  title="The capture box: click a piece to drop one, size it by its dots">Region</button>
-          <button id="ms-mode-feature" type="button" aria-pressed="false"
-                  title="A slicer line type: a line of it, or its row in the Features list (slices only)">Feature</button>
-          <button id="ms-mode-line" type="button" aria-pressed="false"
-                  title="One extrusion line; the arrows step along it (slices only)">Line</button>
-          <button id="ms-mode-layer" type="button" aria-pressed="false"
-                  title="One layer, or the slider's whole range (slices only)">Layer</button>
-        </div>
-        <p class="ms-note" id="ms-mode-note">Hover a piece, click to isolate it. Drag it onto plate 2.</p>
-        <div id="ms-select-controls" style="display:none;">
-          <div class="ms-btn-row">
-            <button id="ms-btn-isolate" type="button" disabled>Isolate all boxes &rarr;</button>
-            <button id="ms-btn-clear" type="button">Clear all boxes</button>
+      <!-- THE CARD (round 2c, docs/GSCOPE.md item 12): one, always up, top-left.
+           Its head is IMPORT - its ▾ holds READ PLATE - and the view switch,
+           Normal (the mesh) | Slice (the toolpaths). Its rows are the selection
+           options for the side the switch is on, and the document decides the
+           side: a toolpath is the Slice side. Each row names the sides it shows
+           on (data-on); the card names the side it is on (data-side). The
+           engine and app-gscope-slice.js still find every control by its id. -->
+      <div id="ms-main-card" class="ms-main-card" role="group" aria-label="G-scope" data-side="normal">
+        <div class="ms-main-head">
+          <div class="ms-import" role="group" aria-label="Import">
+            <button id="ms-btn-open" type="button" class="ms-import-btn"
+                    title="Open a file onto the active plate (it replaces what that plate holds; the other plate is not touched). STL and plain 3MF are not sliced, so they have no layers and no features and draw as whole parts.">Import</button>
+            <button id="ms-btn-import-more" type="button" class="ms-import-more"
+                    aria-haspopup="menu" aria-controls="ms-import-menu" aria-expanded="false"
+                    aria-label="More ways in: Read plate" title="Read plate">&#9662;</button>
+          </div>
+          <!-- app-gscope-slice.js owns the switch: Slice slices the open mesh with
+               the in-house slicer and shows the result; Normal goes from a slice
+               made here back to its mesh, and on a mesh re-frames it. -->
+          <div id="ms-camera-row" class="ms-switch" role="group" aria-label="View: Normal (the mesh) or Slice (the toolpaths)">
+            <button id="ms-cam-normal" type="button" class="ms-switch-side active" aria-pressed="true"
+                    title="The mesh: the pieces as they are. From a slice made here, back to the mesh it was made from">Normal</button>
+            <span class="ms-switch-track" aria-hidden="true"><span class="ms-switch-knob"></span></span>
+            <button id="ms-cam-slice" type="button" class="ms-switch-side" aria-pressed="false"
+                    title="The toolpaths: slice every piece into real layers, walls and infill with the in-house slicer (Slice settings) and list its features">Slice</button>
           </div>
         </div>
-        <div id="ms-line-controls" style="display:none;">
-          <div class="ms-btn-row">
-            <button id="ms-line-prev" type="button" title="Previous move (Left arrow)">&#9664; line</button>
-            <button id="ms-line-next" type="button" title="Next move (Right arrow)">line &#9654;</button>
-            <button id="ms-btn-isolate-line" type="button" disabled>Isolate &rarr;</button>
+        <div class="ms-main-rows">
+          <!-- REGION, both sides. Armed, a click on a piece PLACES a capture box
+               and does nothing else; its dots (always on top, always theirs to
+               press) size it; a click inside it, or Isolate, isolates what it
+               holds; Escape removes a box that is not isolated. -->
+          <div id="ms-region-row" class="ms-row" data-on="normal slice">
+            <div class="ms-btn-row">
+              <button id="ms-mode-select" type="button" aria-pressed="false"
+                      title="The capture box: a click on a piece places one. Drag its dots to size it; click inside it, or Isolate, to isolate what it holds. Esc removes it">Region</button>
+              <button id="ms-btn-isolate" type="button" disabled
+                      title="Isolate what the capture boxes hold">Isolate</button>
+              <button id="ms-btn-clear" type="button" disabled
+                      title="Remove every capture box">Clear boxes</button>
+            </div>
+            <p class="ms-note" id="ms-region-note" hidden>Click a piece: a box. Drag its dots to size it, then click inside it (or Isolate). Esc removes it.</p>
           </div>
-          <p class="ms-note" id="ms-line-read">&mdash;</p>
-        </div>
-        <div id="ms-layer-row" style="display:none;">
-          <div class="ms-btn-row">
-            <button id="ms-layer-prev" type="button" title="Previous layer">&#9660;</button>
-            <input type="number" id="ms-layer-index" value="0" min="0" max="0" step="1"
-                   title="Layer index, counted from the bed" />
-            <button id="ms-layer-next" type="button" title="Next layer">&#9650;</button>
-            <button id="ms-btn-layer-select" type="button"
-                    title="Select every move at this layer's printing height, whatever feature printed it">Select layer</button>
+          <!-- WHOLE PART, the Normal side: back out of any isolate. -->
+          <div id="ms-whole-row" class="ms-row" data-on="normal">
+            <div class="ms-btn-row">
+              <button id="ms-btn-back" type="button" disabled
+                      title="Back out of the isolate: the whole part again">Whole part</button>
+            </div>
           </div>
-          <p class="ms-note" id="ms-layer-note">&mdash;</p>
-          <!-- The slider's range IS the band: Take band isolates it as one piece,
-               to drag onto plate 2 or export. (It was Crop Z's "Crop out band".) -->
-          <div class="ms-btn-row">
-            <button id="ms-btn-take-band" type="button" disabled
-                    title="Isolate everything inside the layer-range slider's band as one piece - drag it onto plate 2, or Export it">Take band</button>
+          <!-- TAKE BAND, the Slice side. The layer-range slider's range IS the
+               band: this isolates it as one piece, to drag onto the other plate
+               or export. (It was Crop Z's "Crop out band".) -->
+          <div id="ms-band-row" class="ms-row" data-on="slice">
+            <div class="ms-btn-row">
+              <button id="ms-btn-take-band" type="button" disabled
+                      title="Isolate everything inside the layer-range slider's band as one piece - drag it onto the other plate, or Export it">Take band</button>
+            </div>
+            <p class="ms-note" id="ms-band-read">&mdash;</p>
           </div>
-          <p class="ms-note" id="ms-band-read">&mdash;</p>
-        </div>
-        <div id="ms-detail-controls" class="ms-btn-row" data-flex="1" style="display:none;">
-          <button id="ms-btn-back" type="button">&larr; Back to whole part</button>
+          <!-- Toolpath | Solid, the Slice side. View only: it changes what is
+               drawn, never what is selected. -->
+          <div id="ms-render-row" class="ms-row" data-on="slice">
+            <div class="ms-btn-row ms-seg" role="group" aria-label="Draw the toolpath as">
+              <button id="ms-render-toolpath" type="button" class="active" aria-pressed="true"
+                      title="Every move as a line, as the slicer wrote it">Toolpath</button>
+              <button id="ms-render-solid" type="button" aria-pressed="false"
+                      title="Every continuous run of bead swept into one closed solid, capped only where the nozzle stopped - what Export as solid writes">Solid</button>
+            </div>
+            <p class="ms-note" id="ms-render-read">&mdash;</p>
+          </div>
+          <!-- The in-house slicer's settings (nso_slicer.js, docs/SLICER.md), the
+               Slice side, collapsed. app-gscope-slice.js owns them: their defaults
+               are the plate's printer profile, and they take effect on the next
+               slice (Normal, then Slice again). The report (#ms-slice-read) is in
+               the readouts. -->
+          <div id="ms-slice-row" class="ms-row" data-on="slice">
+            <button id="ms-slice-settings-toggle" type="button" class="ms-disclose"
+                    aria-expanded="false" aria-controls="ms-slice-settings">Slice settings</button>
+            <div id="ms-slice-settings" hidden>
+              <div class="ms-btn-row" data-flex="1">
+                <label class="ms-note" for="ms-slice-nozzle" style="margin:0">nozzle
+                  <select id="ms-slice-nozzle" style="width:auto" title="Walls and infill take the repo's measured line for it: 0.42 mm at 0.4, 0.63 mm at 0.6">
+                    <option value="0.4" selected>0.4</option>
+                    <option value="0.6">0.6</option>
+                  </select></label>
+                <label class="ms-note" for="ms-slice-layer" style="margin:0">layer
+                  <input type="number" id="ms-slice-layer" value="0.2" min="0.05" max="0.6" step="0.05" /></label>
+                <label class="ms-note" for="ms-slice-walls" style="margin:0">walls
+                  <input type="number" id="ms-slice-walls" value="2" min="1" max="10" step="1" /></label>
+              </div>
+              <div class="ms-btn-row" data-flex="1">
+                <label class="ms-note" for="ms-slice-density" style="margin:0">infill
+                  <input type="number" id="ms-slice-density" value="15" min="0" max="100" step="5" />%</label>
+                <select id="ms-slice-pattern" style="width:auto" title="Sparse infill pattern">
+                  <option value="grid" selected>grid</option>
+                  <option value="zigzag">zigzag</option>
+                  <option value="lines">lines</option>
+                </select>
+                <label class="ms-note" for="ms-slice-angle" style="margin:0">support below
+                  <input type="number" id="ms-slice-angle" value="30" min="1" max="89" step="1"
+                         title="Printable angle off the plate. 30 is the real Bambu profile's support_threshold_angle; auto-aim uses 45" />&deg;</label>
+              </div>
+              <p class="ms-note" id="ms-slice-settings-note">From the plate's printer profile. They take effect on the next slice: Normal, then Slice again.</p>
+            </div>
+          </div>
         </div>
       </div>
 
-      <!-- VIEW: everything about how the plate is drawn, in this order -
-           Normal · Slice view | Toolpath · Solid | Slice settings | Check all ·
-           Clear from view · Select shown (docs/GSCOPE.md, item 5). View only:
-           none of it writes to the plate. -->
-      <div id="ms-card-view" class="ms-card" role="group" aria-label="View" data-nav="ms-nav-view">
-        <!-- Normal / Slice view. app-gscope-slice.js owns both buttons: Slice
-             view slices the open mesh with the in-house slicer and shows the
-             result; Normal re-frames, or from a slice goes back to the mesh. -->
-        <div class="ms-btn-row" id="ms-camera-row" role="group" aria-label="Mesh or slice view">
-          <button id="ms-cam-normal" type="button" class="active" aria-pressed="true"
-                  title="Free orbit, pan and zoom. Isolated, it shows the selection alone, as drawn. From Slice view, back to the mesh">Normal</button>
-          <button id="ms-cam-slice" type="button" aria-pressed="false"
-                  title="Slice every piece into real layers, walls and infill with the in-house slicer (the Slice settings below) and list its features">Slice view</button>
-        </div>
-        <!-- Live toolpath / solid toggle. View only: it changes what is drawn,
-             never what is selected. Enabled while a slice is shown (Slice view,
-             or a sliced file, which is a slice already). -->
-        <div id="ms-render-row" class="ms-section">
-          <div class="ms-btn-row ms-seg" role="group" aria-label="Render the toolpath as">
-            <button id="ms-render-toolpath" type="button" class="active" aria-pressed="true"
-                    title="Every move as a line, as the slicer wrote it">Toolpath</button>
-            <button id="ms-render-solid" type="button" aria-pressed="false"
-                    title="Every continuous run of bead swept into one closed solid, capped only where the nozzle stopped - what Export as solid writes">Solid</button>
-          </div>
-          <p class="ms-note" id="ms-render-read">&mdash;</p>
-        </div>
-        <!-- The in-house slicer's settings (nso_slicer.js, docs/SLICER.md).
-             app-gscope-slice.js owns this row: Slice view uses whatever they
-             hold when it is (re)entered, and they keep their values across
-             every Normal / Slice view round trip. The report (#ms-slice-read)
-             is in the readouts. -->
-        <div id="ms-slice-row" class="ms-section" style="display:none;">
-          <div class="ms-section-title">Slice settings</div>
-          <div id="ms-slice-settings">
-            <div class="ms-btn-row" data-flex="1">
-              <label class="ms-note" for="ms-slice-nozzle" style="margin:0">nozzle
-                <select id="ms-slice-nozzle" style="width:auto" title="Walls and infill take the repo's measured line for it: 0.42 mm at 0.4, 0.63 mm at 0.6">
-                  <option value="0.4">0.4</option>
-                  <option value="0.6" selected>0.6</option>
-                </select></label>
-              <label class="ms-note" for="ms-slice-layer" style="margin:0">layer
-                <input type="number" id="ms-slice-layer" value="0.3" min="0.05" max="0.6" step="0.05" style="width:4.5em" /></label>
-              <label class="ms-note" for="ms-slice-walls" style="margin:0">walls
-                <input type="number" id="ms-slice-walls" value="2" min="1" max="10" step="1" style="width:3.5em" /></label>
-            </div>
-            <div class="ms-btn-row" data-flex="1">
-              <label class="ms-note" for="ms-slice-density" style="margin:0">infill
-                <input type="number" id="ms-slice-density" value="15" min="0" max="100" step="5" style="width:3.5em" />%</label>
-              <select id="ms-slice-pattern" style="width:auto" title="Sparse infill pattern">
-                <option value="grid" selected>grid</option>
-                <option value="zigzag">zigzag</option>
-                <option value="lines">lines</option>
-              </select>
-              <label class="ms-note" for="ms-slice-angle" style="margin:0">support below
-                <input type="number" id="ms-slice-angle" value="30" min="1" max="89" step="1" style="width:3.5em"
-                       title="Printable angle off the plate. 30 is the real Bambu profile's support_threshold_angle; auto-aim uses 45" />&deg;</label>
-            </div>
-          </div>
-          <p class="ms-note">They take effect when Slice view is entered (from a slice: Normal, then Slice view again).</p>
-        </div>
-        <div class="ms-section" id="ms-visibility-row">
-          <div class="ms-section-title">Visibility (view only)</div>
-          <div class="ms-btn-row">
-            <button id="ms-btn-show-all" type="button" disabled
-                    title="Check every box in the Features list: every line type shown">Check all</button>
-            <button id="ms-btn-clear-view" type="button" disabled
-                    title="Hide what is selected. View only: nothing is exported, the plate is not touched, and there is nothing to undo. CLEAR brings it back">Clear from view</button>
-            <button id="ms-btn-select-visible" type="button" disabled
-                    title="Select everything drawn right now - the Features list's checks, the cleared set and the layer range decide what that is">Select shown</button>
-          </div>
-        </div>
+      <!-- IMPORT's ▾: the backup way in. Opening G-scope from the plate already
+           brings the plate, so Read plate is rarely needed - it is here for
+           after an Import. A card of the shell's (one open at a time; Escape,
+           a press outside it, a choice or CLOSE shuts it), opening under the
+           card's head. Both ways in load into the ACTIVE plate. -->
+      <div id="ms-import-menu" class="ms-card ms-menu" role="menu" aria-label="More ways in" data-nav="ms-btn-import-more"
+           aria-describedby="ms-import-menu-note">
+        <button id="ms-btn-plate" type="button" role="menuitem"
+                title="Read the pieces that are on the plate right now, as placed, onto the active plate. The plate itself is not changed.">Read plate</button>
+        <p class="ms-note" id="ms-import-menu-note" role="presentation">The pieces on the plate as they stand, onto the active plate. Opening G-scope from the plate already brings them.</p>
       </div>
 
       <!-- Export: one card for all six. Which rows show is the engine's call
@@ -1629,14 +1609,15 @@
         </div>
       </div>
 
-      <!-- The readouts, always up and never a card: down the left wall under
-           the column, the file line over the FEATURES list (with its minimize
-           toggle); along the bottom, the selection / segment info, the Slice
-           report and the mode hint. The list is the slicer's line types and
-           nothing else - Bambu-style: swatch, name, count, a Display check -
-           and acts on both plates; surface features are the plate's now. -->
+      <!-- The readouts, always up: down the left wall under the card, the file
+           line over the FEATURES list (Check all and the minimize toggle in its
+           head); along the bottom, the selection / segment info (a hovered
+           move's own line too), the Slice report and the mode hint. The list is
+           the slicer's line types and nothing else - Bambu-style: swatch, name,
+           count, a Display check - and acts on both plates; surface features
+           are the plate's now. -->
       <div id="ms-dock" class="ms-dock">
-        <!-- Left wall, under the column: the file line, and the legend right
+        <!-- Left wall, under the card: the file line, and the legend right
              below it. -->
         <div id="ms-dock-left" class="ms-dock-left">
           <div class="ms-glass ms-head">
@@ -1646,6 +1627,9 @@
           <div id="ms-legend-float" class="ms-section">
             <div class="ms-legend-head">
               <div class="ms-section-title" id="ms-legend-title">Features</div>
+              <!-- Check all (it was the VIEW card's): every box checked, Travel too - and nothing else. -->
+              <button id="ms-btn-show-all" type="button" class="ms-legend-btn" disabled
+                      title="Check every box in the Features list: every line type shown, Travel too">Check all</button>
               <button id="ms-legend-toggle" type="button" aria-expanded="true"
                       aria-controls="ms-legend" title="Minimize the list">&minus;</button>
             </div>
@@ -1899,7 +1883,7 @@
   <!-- Handle, bracket, lid and hinge detection for G-scope's Parts list, one
        row each under the Flange row. Pure. docs/GSCOPE-FEATURES.md. -->
   <script src="nso_face_features.js?v=features1"></script>
-  <script src="app-microscope.js?v=supfeat2"></script>
+  <script src="app-microscope.js?v=gscard1"></script>
   <!-- Detach / Reattach (Cut menu): cap a detected flange's hull on its own
        wall, lift the flange out as a piece, seat it elsewhere with Attach's
        seat. After nso_flange.js, app-crop.js, nso_assemble.js, app-assemble.js
@@ -1910,11 +1894,11 @@
        edit / remove. After app-microscope.js, whose hooks it uses, and after
        nso_support_aim.js / nso_support_tree.js / app-join.js, whose
        detection, generators and union it calls. See docs/GCODE-SUPPORTS.md. -->
-  <script src="app-gscope-support.js?v=column1"></script>
+  <script src="app-gscope-support.js?v=gscard1"></script>
   <!-- The Supports card on the main page: the same detection and planner,
        after app-core.js / app-join.js, whose ingest and soups it uses. -->
   <script src="app-supports-card.js?v=angle35"></script>
-  <script src="app-gscope-slice.js?v=supfeat2"></script>
+  <script src="app-gscope-slice.js?v=gscard1"></script>
   <!-- Lift: details off a face, the face left as it was round them. After
        nso_lift.js (Phase 1: a flat face), nso_lift_curved.js (Lift 3: the
        repair under a detail lifted off a curved base), nso_lift_auto.js

@@ -54,14 +54,14 @@
      needs a hollow, Back needs a producer). "no visible result" with "greyed
      out": the button stayed disabled after what a person would do first.
    - QA_TRACE=1 prints phases and the Join state to stderr; QA_LARGE=path
-     points at the 3MF. */
+     points at the 3MF; QA_OUT=dir writes the report and PNGs there instead. */
 
 const fs = require('fs');
 const path = require('path');
 const cp = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
-const OUT = path.join(__dirname, 'qa-out');
+const OUT = process.env.QA_OUT ? path.resolve(process.env.QA_OUT) : path.join(__dirname, 'qa-out');      // QA_OUT: write elsewhere (qa-out is not git-ignored)
 const CACHE = path.join(OUT, '.cache');
 const LOCAL = path.join(__dirname, 'fixtures-local');
 
@@ -330,31 +330,40 @@ function buildPlan() {
   V(COL, 'Check & repair', 'btn-solidify', 'Solidify', { run: press(['btn-solidify']) });
 
   /* ---- G-scope ---- */
-  /* G-scope opens on the plate; `nav` is the column button whose card the verb lives in. Both, and any
-     state the verb needs, are set up BEFORE the "before" is read, so a card opening is not the verb's result. */
+  /* G-scope opens on the plate, under its ONE card (docs/GSCOPE.md item 12, round 2c): IMPORT ▾, the
+     Normal | Slice switch, and the rows of the side the document is on - Normal: REGION, WHOLE PART;
+     Slice: REGION, TAKE BAND, Toolpath | Solid, the folded Slice settings. `nav` is the button that opens
+     what the verb lives in (IMPORT's ▾ menu, Export, the Slice settings fold), null for a row that is
+     always on the card. Both, and any state the verb needs (the Slice side included), are set up BEFORE
+     the "before" is read, so a card opening or a slice is not the verb's result.
+     Gone with the old column, and so not toured: Feature / Line / Layer modes (the Features list, the
+     hover readout, the slider + Take band are their homes), Clear from view and Select shown (API only). */
   const gsOpen = async x => { await x.click('btn-microscope'); await x.wait(1200); };
   const gs = (nav, setup, o) => Object.assign({ menu: null, view: true, pre: async x => { await gsOpen(x); if (setup) await setup(x); if (nav) await x.nav(nav); } }, o);
-  const isolated = async x => { await x.nav('ms-nav-select'); await x.click('ms-mode-piece'); await x.pick(0, 0, 'gs'); await x.wait(500); };
-  const boxed = async x => { await x.nav('ms-nav-select'); await x.click('ms-mode-select'); await x.pick(0, 0, 'gs'); await x.wait(300); };   // Region: a click drops a capture box
+  const isolated = async x => { await x.pick(0, 0, 'gs'); await x.wait(500); };            // the plain click (REGION off): the piece, isolated
+  const boxed = async x => { await x.click('ms-mode-select'); await x.pick(0, 0, 'gs'); await x.wait(300); };   // REGION: a click places a box (nothing isolated)
+  const sliced = async x => { await x.click('ms-cam-slice'); await x.gsDoc('toolpath'); };   // the switch to Slice: the mesh sliced, the card on its Slice side
   const taken = async x => { await x.gsTake(); };
+
   V(GS, 'G-scope', 'btn-microscope', 'Open (the plate under the lens)', { menu: null, view: true, run: press(['btn-microscope']) });
-  V(GS, 'G-scope', 'ms-btn-plate', 'Read plate', gs(null, null, { run: press(['ms-btn-plate']) }));
-  V(GS, 'G-scope', 'ms-btn-open', 'Import (a file instead of the plate)', gs(null, null, { run: async x => { await x.chooser('ms-btn-open', box20); } }));
-  V(GS, 'Select', 'ms-mode-piece', 'Piece: click it to isolate', gs('ms-nav-select', null, { run: async x => { await x.click('ms-mode-piece'); await x.pick(0, 0, 'gs'); } }));
-  V(GS, 'Select', 'ms-mode-select', 'Region: click it to drop a capture box', gs('ms-nav-select', null, { run: async x => { await x.click('ms-mode-select'); await x.pick(0, 0, 'gs'); } }));
-  V(GS, 'Select', 'ms-btn-isolate', 'Region: Isolate all boxes', gs('ms-nav-select', null, { pre: async x => { await gsOpen(x); await boxed(x); }, run: press(['ms-btn-isolate']) }));
-  V(GS, 'Select', 'ms-btn-clear', 'Region: Clear all boxes', gs('ms-nav-select', null, { pre: async x => { await gsOpen(x); await boxed(x); }, run: press(['ms-btn-clear']) }));
-  V(GS, 'Select', 'ms-mode-feature', 'Feature (click the piece)', gs('ms-nav-select', null, { run: async x => { await x.click('ms-mode-feature'); await x.pick(0, 0, 'gs'); } }));
-  V(GS, 'Select', 'ms-mode-line', 'Line (next line, Isolate)', gs('ms-nav-select', null, { run: async x => { await x.click('ms-mode-line'); await x.click('ms-line-next'); await x.click('ms-btn-isolate-line'); } }));
-  V(GS, 'Select', 'ms-mode-layer', 'Layer (next layer, Select layer)', gs('ms-nav-select', null, { run: async x => { await x.click('ms-mode-layer'); await x.click('ms-layer-next'); await x.click('ms-btn-layer-select'); } }));
-  V(GS, 'Select', 'ms-btn-back', 'Back to whole part (after isolating)', gs('ms-nav-select', isolated, { run: press(['ms-btn-back']) }));
-  V(GS, 'View', 'ms-cam-slice', 'Slice view', gs('ms-nav-view', null, { run: press(['ms-cam-slice']) }));
-  V(GS, 'View', 'ms-btn-clear-view', 'Clear from view (after isolating)', gs('ms-nav-view', isolated, { run: press(['ms-btn-clear-view']) }));
-  V(GS, 'View', 'ms-btn-show-all', 'Check all', gs('ms-nav-view', null, { run: press(['ms-btn-show-all']) }));
-  V(GS, 'View', 'ms-btn-select-visible', 'Select shown', gs('ms-nav-view', null, { run: press(['ms-btn-select-visible']) }));
-  V(GS, 'View', 'ms-slice-walls', 'Slice settings: walls 3, then Slice view', gs('ms-nav-view', null, { run: async x => { await x.fill('ms-slice-walls', 3); await x.click('ms-cam-slice'); } }));
-  V(GS, 'View', 'ms-render-solid', 'Solid (Slice view on)', gs('ms-nav-view', null, { pre: async x => { await gsOpen(x); await x.nav('ms-nav-view'); await x.click('ms-cam-slice'); await x.wait(3000); }, run: press(['ms-render-solid']) }));
-  V(GS, 'Select', 'ms-btn-take-band', 'Layer: Take band (Slice view on)', gs('ms-nav-select', null, { pre: async x => { await gsOpen(x); await x.nav('ms-nav-view'); await x.click('ms-cam-slice'); await x.wait(3000); await x.nav('ms-nav-select'); await x.click('ms-mode-layer'); }, run: press(['ms-btn-take-band']) }));
+  V(GS, 'Card', 'ms-btn-plate', 'IMPORT \u25be \u203a Read plate', gs('ms-btn-import-more', null, { run: press(['ms-btn-plate']) }));
+  V(GS, 'Card', 'ms-btn-open', 'IMPORT (a file instead of the plate)', gs(null, null, { run: async x => { await x.chooser('ms-btn-open', box20); } }));
+  V(GS, 'Card', 'ms-cam-slice', 'Switch: Slice (slices the mesh)', gs(null, null, { run: async x => { await x.click('ms-cam-slice'); await x.gsDoc('toolpath'); } }));
+  V(GS, 'Card', 'ms-cam-normal', 'Switch: Normal (back to the mesh from a slice)', gs(null, sliced, { run: async x => { await x.click('ms-cam-normal'); await x.gsDoc('mesh'); } }));
+  V(GS, 'Card', 'ms-viewport', 'Piece: click it to isolate (the plain click)', gs(null, null, { run: async x => { await x.pick(0, 0, 'gs'); } }));
+  V(GS, 'Card', 'ms-mode-select', 'REGION: click a piece to place a box', gs(null, null, { run: async x => { await x.click('ms-mode-select'); await x.pick(0, 0, 'gs'); } }));
+  V(GS, 'Card', 'ms-btn-isolate', 'REGION: Isolate what the box holds', gs(null, boxed, { run: press(['ms-btn-isolate']) }));
+  V(GS, 'Card', 'ms-btn-clear', 'REGION: Clear boxes', gs(null, boxed, { run: press(['ms-btn-clear']) }));
+  V(GS, 'Card', 'ms-btn-back', 'WHOLE PART (after isolating)', gs(null, isolated, { run: press(['ms-btn-back']) }));
+  V(GS, 'Card', 'ms-btn-take-band', 'TAKE BAND (Slice side)', gs(null, sliced, { run: press(['ms-btn-take-band']) }));
+  V(GS, 'Card', 'ms-render-solid', 'Solid (Slice side)', gs(null, sliced, { run: press(['ms-render-solid']) }));
+  V(GS, 'Card', 'ms-render-toolpath', 'Toolpath (Slice side, after Solid)', gs(null, async x => { await sliced(x); await x.click('ms-render-solid'); await x.wait(1500); }, { run: press(['ms-render-toolpath']) }));
+  V(GS, 'Card', 'ms-slice-walls', 'Slice settings: walls 3, then Normal, Slice again', gs('ms-slice-settings-toggle', sliced, { run: async x => {
+    await x.fill('ms-slice-walls', 3);
+    await x.click('ms-cam-normal'); await x.gsDoc('mesh');
+    await x.click('ms-cam-slice'); await x.gsDoc('toolpath');
+  } }));
+  V(GS, 'Features', 'ms-btn-show-all', 'Check all (Features list head, Slice side)', gs(null, sliced, { run: press(['ms-btn-show-all']) }));
   V(GS, 'Plates', 'ms-viewport', 'Copy the piece onto plate 2 (drag across)', gs(null, null, { run: async x => { await x.gsTake(); } }));
   V(GS, 'Plates', 'ms-btn-frame', 'Frame both plates (\u25ce)', gs(null, null, { run: press(['ms-btn-frame']) }));
   V(GS, 'Export', 'ms-btn-export-plate', 'Export to plate (a piece isolated)', gs('ms-nav-export', isolated, { view: false, run: press(['ms-btn-export-plate']) }));
@@ -648,11 +657,25 @@ async function worker(key, items) {
       if (!o.hold) await G('mouse', () => page.mouse.up());
       return true;
     };
-    /* a G-scope column button toggles its card: press it only when the card is not already open */
+    /* a G-scope button that opens something (IMPORT's ▾ menu, Export, the Slice settings fold) toggles it:
+       press it only when what it opens is not already open (each says so in aria-expanded) */
     X.nav = async id => {
-      const open = await G('nav', () => page.evaluate(id => { const b = document.getElementById(id), c = b && document.getElementById(b.getAttribute('data-card')); return !!(c && c.classList.contains('is-open')); }, id));
+      const open = await G('nav', () => page.evaluate(id => { const b = document.getElementById(id), c = b && document.getElementById(b.getAttribute('data-card'));
+        return !!(b && b.getAttribute('aria-expanded') === 'true') || !!(c && c.classList.contains('is-open')); }, id));
       if (!open) await X.click(id);
       await sleep(250);
+    };
+    /* G-scope: until the active plate holds a document of this kind ('toolpath' after Slice, 'mesh' after
+       Normal) and nothing is slicing. Short page calls polled, so a slice that blocks the page still reads as a freeze. */
+    X.gsDoc = async kind => {
+      const t0 = Date.now(), cap = LARGE ? 600000 : 60000;
+      while (Date.now() - t0 < cap) {
+        const k = await G('gsDoc', () => page.evaluate(() => { const S = window.NSO_GSCOPE_SLICE, d = window.NSO_MICROSCOPE && window.NSO_MICROSCOPE.getDoc();
+          return S && S.busy && S.busy() ? 'busy' : d ? d.kind : null; }));
+        if (k === kind) return true;
+        await sleep(250);
+      }
+      X.note('G-scope never showed a ' + kind + ' (' + Math.round(cap / 1000) + ' s)'); return false;
     };
     X.up = () => G('up', () => page.mouse.up());
     X.hold = async (p, ms) => { await G('mouse', () => page.mouse.move(p.x, p.y)); await G('mouse', () => page.mouse.down()); await sleep(ms); await G('mouse', () => page.mouse.up()); };

@@ -11,11 +11,14 @@
  *     FOUR file kinds - two real slices, a plain 3MF and a plain STL;
  *   - the reference tool's renderer is what draws it: one LineSegments per
  *     FEATURE for a slice, one Mesh per build object for a plain file;
- *   - both selection modes work and are unchanged - the capture box with its
- *     independent footprint and thickness, and whole-layer selection;
+ *   - both selections work and are unchanged - the capture box with its
+ *     independent footprint and thickness (Isolate in the card's REGION row;
+ *     on a slice, the card's Slice side, Escape is WHOLE PART), and
+ *     whole-layer selection (round 2c: the layer row is gone - the API's
+ *     selectLayer, and in the card the slider + TAKE BAND);
  *   - a plain STL/3MF degrades as documented: one whole unsegmented part,
- *     the layer control disabled with the reason on screen, the box still
- *     selecting;
+ *     the card on its Normal side with no Slice-side rows (no TAKE BAND, no
+ *     slice rows) and the reason on screen, the box still selecting;
  *   - Export to plate leaves the view and lands a real, standalone, undoable
  *     object in the main Nest 3D viewport;
  *   - Export as STL writes a real file, which is re-read from disk and shown
@@ -294,10 +297,10 @@ async function main() {
     await page.isVisible('#ms-export-row'), true);
   check('and Isolate is live', await page.isEnabled('#ms-btn-isolate'), true);
 
-  // Isolate / Back. Isolate shows the selection ALONE and
+  // Isolate / Whole part. Isolate shows the selection ALONE and
   // AS-IS: each move as the same line the overview draws, nothing else.
-  // The box controls - Isolate all boxes, Clear all boxes - are under Click
-  // to select region (Region mode), and G-scope opens in Piece: arm it, as a user does.
+  // The box controls - Isolate, Clear boxes - are the card's REGION row, and
+  // G-scope opens in Piece: arm REGION, as a user does.
   await page.click('#ms-mode-select');
   await page.click('#ms-btn-isolate');
   const isolated = await page.evaluate(() => {
@@ -312,15 +315,24 @@ async function main() {
       badge: document.getElementById('ms-mode-badge').textContent,
     };
   });
-  check('Isolate shows the detail group, in Normal', [isolated.detail, isolated.mode], [true, 'normal']);
+  // An imported slice is the card's Slice side now (round 2c; it used to read 'normal').
+  check('Isolate shows the detail group, on the Slice side', [isolated.detail, isolated.mode], [true, 'slice']);
   check('and hides the overview', isolated.overview, false);
   check('drawn as-is: the moves\' own lines, as the overview draws them', isolated.kinds, ['LineSegments']);
   check('two vertices per move - exactly the selection, nothing else', isolated.verts, isolated.segs * 2);
   check('the badge says what is on screen', /^Detail: \d+ segments$/.test(isolated.badge), true);
-  // Back: the whole view with the selection, still selected, highlighted
+  // Whole part: the whole view with the selection, still selected, highlighted
   // over it as each move's printed prism (extrudeFlatLine) - the solid
-  // Export writes, on screen.
-  await page.click('#ms-btn-back');
+  // Export writes, on screen. WHOLE PART is the Normal side's row; on the
+  // Slice side Escape is its job.
+  check('WHOLE PART is not shown on the Slice side',
+    await page.evaluate(() => !!document.getElementById('ms-btn-back').offsetParent), false);
+  // The Escape ladder: the Export card (opened by the export-row check above) shuts first, then the isolate.
+  await page.focus('#microscope');
+  await page.keyboard.press('Escape');
+  check('Escape shuts the open Export card first, still isolated',
+    await page.evaluate(() => [!!document.querySelector('#ms-card-export.is-open'), window.NSO_MICROSCOPE.isIsolated()]), [false, true]);
+  await page.keyboard.press('Escape');
   const closeIso = await page.evaluate(() => {
     const v = window.NSO_MICROSCOPE.getView();
     return {
@@ -329,7 +341,7 @@ async function main() {
       tris: v.highlightGroup.children.reduce((a, c) => a + c.geometry.attributes.position.count / 3, 0),
     };
   });
-  check('Back returns to the whole part: the whole view and the highlight together',
+  check('Escape returns to the whole part: the whole view and the highlight together',
     [closeIso.overview, closeIso.detail, closeIso.hl], [true, false, true]);
   check('the highlight is each move\'s own printed prism, 12 triangles per move',
     [closeIso.kinds, closeIso.tris], [['Mesh'], isolated.segs * 12]);
@@ -337,13 +349,12 @@ async function main() {
   // =======================================================================
   console.log('\n--- selection mode 2: full layer ---');
   // =======================================================================
-  check('the layer controls are live on a sliced file',
-    await page.isEnabled('#ms-btn-layer-select'), true);
-  check('and say how many there are',
-    /50 layers/.test(await page.textContent('#ms-layer-note')), true);
-
-  await page.fill('#ms-layer-index', '0');
-  await page.click('#ms-btn-layer-select');
+  // The layer row (index, Select layer, Prev / Next) is gone (round 2c): a
+  // whole layer is the API's selectLayer, and in the card the slider + TAKE
+  // BAND (checked after it). A second press on REGION disarms it first.
+  await page.click('#ms-mode-select');
+  check('REGION disarmed', await page.evaluate(() => window.NSO_MICROSCOPE.mode()), 'piece');
+  await page.evaluate(() => window.NSO_MICROSCOPE.selectLayer(0));
   const layerSel = await page.evaluate(() => {
     const M = window.NSO_MICROSCOPE, d = M.getDoc(), sel = M.selection();
     const G = window.NSOGcodeLines;
@@ -370,16 +381,35 @@ async function main() {
   console.log(`       L1: ${layerSel.n} moves at Z ${layerSel.zs[0]}, ` +
               `${layerSel.features} feature(s)`);
 
-  // Stepping is bounded, so neither end can run off the file.
+  // Bounded, so neither end can run off the file (the old Next past the top
+  // is the API's selectLayer(n) now: refused, the top layer kept).
   const stepped = await page.evaluate(() => {
     const M = window.NSO_MICROSCOPE;
     M.selectLayer(49);
-    const top = M.selection().length;
-    document.getElementById('ms-layer-next').click();      // past the top
-    return { top, after: +document.getElementById('ms-layer-index').value, n: M.layerCount() };
+    const top = M.selection().length, topLayers = [...new Set(M.selection().map((s) => s.layer))];
+    const past = M.selectLayer(M.layerCount()).length;
+    return { top, topLayers, past, kept: M.selection().length, keptLayers: [...new Set(M.selection().map((s) => s.layer))],
+      said: document.getElementById('status').textContent, n: M.layerCount() };
   });
-  check('stepping past the top layer stays on it', stepped.after, stepped.n - 1);
+  check('a layer past the top is refused and says so', [stepped.past, /is not in this file/.test(stepped.said)], [0, true]);
+  check('and the top layer stays selected', [stepped.kept, stepped.keptLayers], [stepped.top, [stepped.n - 1]]);
   check('and the top layer is a real one', stepped.top > 0, true);
+
+  // The layer's home in the card: the slider on one layer + TAKE BAND (the
+  // Slice side's row) takes that layer's shown moves as one piece.
+  await page.evaluate(() => { const M = window.NSO_MICROSCOPE; M.setSelectionMoves([]); M.setZRange(0, 0); M.flushView(); });
+  await page.click('#ms-btn-take-band');
+  const bandLayer = await page.evaluate(() => {
+    const M = window.NSO_MICROSCOPE, sel = M.selection();
+    return { n: sel.length, layers: [...new Set(sel.map((s) => s.layer))], src: M.selectionSource(), iso: M.isIsolated(),
+      shown: M.shownCount() };
+  });
+  check('the slider on layer 1 + TAKE BAND: that one layer, as one isolated piece',
+    [bandLayer.n > 0, bandLayer.n, bandLayer.layers, bandLayer.src, bandLayer.iso], [true, bandLayer.shown, [0], 'range', true]);
+  await page.focus('#microscope');
+  await page.keyboard.press('Escape');
+  check('and Escape makes it whole again', await page.evaluate(() => window.NSO_MICROSCOPE.isIsolated()), false);
+  await page.click('#ms-zr-all');
 
   // =======================================================================
   console.log('\n--- Export as STL: just the selection, to a real file ---');
@@ -479,10 +509,9 @@ async function main() {
       groups: M.groups(),
       layers: M.layerCount(),
       overviewKinds: [...new Set(v.overviewGroup.children.map((c) => c.type))],
-      note: document.getElementById('ms-layer-note').textContent,
       sub: document.getElementById('ms-sub').textContent,
-      layerBtn: document.getElementById('ms-btn-layer-select').disabled,
-      layerNum: document.getElementById('ms-layer-index').disabled,
+      side: M.cardSide(),
+      sliceRows: ['ms-band-row', 'ms-render-row', 'ms-slice-row'].map((id) => !!document.getElementById(id).offsetParent),
     };
   });
   check('it reads as a mesh, not a toolpath', stlDoc.kind, 'mesh');
@@ -493,11 +522,11 @@ async function main() {
     stlDoc.groups.length, 1);
   check('it is named after the file', stlDoc.groups[0], 'box-20mm');
   check('it has no layers', stlDoc.layers, 0);
-  check('so the layer control is disabled rather than faking one',
-    [stlDoc.layerBtn, stlDoc.layerNum], [true, true]);
-  check('and says why, on screen',
-    /not sliced, so it has no layers/.test(stlDoc.note), true);
-  check('the header says the same thing',
+  // The layer row is gone (round 2c): a mesh is the card's Normal side, which
+  // has no layer control to fake - no TAKE BAND, no Toolpath | Solid, no slice settings.
+  check('so the card is on its Normal side, with none of the Slice side\'s rows',
+    [stlDoc.side, stlDoc.sliceRows], ['normal', [false, false, false]]);
+  check('and the header says why, on screen',
     /Not sliced: no layers and no features/.test(stlDoc.sub), true);
   // A plain mesh has no line types: the Features list has no rows (no Parts
   // rows any more) and says so in one note.

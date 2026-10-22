@@ -16,7 +16,8 @@
  *   2  IT IS NOT GATED TO G-CODE. The piece driven here is a plain STL - no
  *      slicer, no features, no layers anywhere near it.
  *   3  ISOLATION AND BOTH EXPORTS STILL WORK from that source. A capture box
- *      over a plate piece, Isolate, and then Export to plate / Export as STL
+ *      over a plate piece, Isolate (the card's REGION row), WHOLE PART, and
+ *      then Export to plate / Export as STL
  *      writing the SAME triangles - the dissection-to-usable-object path,
  *      unchanged by where the document came from.
  *   4  A `.gcode.3mf` IMPORT LANDS HERE BY ITSELF. Through the app's own
@@ -28,7 +29,9 @@
  *      feature-named, feature-coloured groups - and the support interface
  *      comes out on its own, with none of the model's walls or infill in it.
  *      That is the support-isolation library's first step, taken with the
- *      shipped controls and nothing written for it.
+ *      shipped controls and nothing written for it (round 2c: soloGroup +
+ *      selectVisible - Select shown's API, its button is gone - then TAKE
+ *      BAND isolates what is shown; IMPORT ▾ › Read plate reads it back).
  *   6  SCREENSHOTS. Four, of the real canvas, each asserted to be a drawn 3D
  *      view and not a blank panel, because this feature's whole history is
  *      claims that did not survive being looked at.
@@ -280,8 +283,8 @@ async function main() {
     boxed.label, onPlate.name);
   check('the export row came up with the selection', boxed.exportRow, true);
 
-  // The box controls - Isolate all boxes, Clear all boxes - are under Click
-  // to select region, and G-scope opens in Piece: arm it, as a user does.
+  // The box controls - Isolate, Clear boxes - are the card's REGION row, and
+  // G-scope opens in Piece: arm REGION, as a user does.
   await page.click('#ms-mode-select');
   await page.click('#ms-btn-isolate');
   const isolated = await page.evaluate(() => {
@@ -298,7 +301,7 @@ async function main() {
   check('and the badge counts what is on screen', isolated.badge, 'Detail: 1 object(s)');
   await shot(page, '2-isolated-plate-piece.png', 'a plate piece isolated');
   await page.click('#ms-btn-back');
-  check('Back returns the whole plate',
+  check('WHOLE PART (the Normal side\'s row) returns the whole plate',
     await page.evaluate(() => window.NSO_MICROSCOPE.getView().overviewGroup.visible), true);
 
   // =======================================================================
@@ -406,11 +409,14 @@ async function main() {
       drawn: [...new Set(v.overviewGroup.children.map((c) => c.type))],
       coloured: v.overviewGroup.children.every(
         (c) => c.material.color.getHex() === G.colorForFeature(c.userData.feature)),
-      layerBtn: !document.getElementById('ms-btn-layer-select').disabled,
+      side: M.cardSide(),
+      bandRow: !!document.getElementById('ms-band-row').offsetParent,
+      layerOk: M.selectLayer(0).length > 0 && M.selectionSource() === 'layer',
       models: state.models.length,
       oldDoor: typeof window.NSO_TOOLPATH,
     };
   });
+  await page.evaluate(() => window.NSO_MICROSCOPE.setSelectionMoves([]));   // the selectLayer probe's layer, let go
   check('importing a .gcode.3mf lands in the microscope - no button pressed',
     landed.kind, 'toolpath');
   check('on the file that was imported', landed.name, 'supportwithinsupport.gcode.3mf');
@@ -420,8 +426,10 @@ async function main() {
   check('drawn the reference tool\'s way (one LineSegments per feature, plus nothing else)',
     landed.drawn, ['LineSegments']);
   check('Travel off by default, as the reference tool has it', landed.hidden, ['Travel']);
-  check('whole-layer selection is live, because this one really is sliced',
-    landed.layerBtn, true);
+  // The layer row is gone (round 2c): a slice is the card's Slice side, whose
+  // TAKE BAND (with the slider) is the layer's home; selectLayer is the API's.
+  check('whole-layer selection is live, because this one really is sliced: the Slice side, TAKE BAND shown, selectLayer answers',
+    [landed.side, landed.bandRow, landed.layerOk], ['slice', true, true]);
   check('the support interface is one of the groups it found',
     landed.groups.includes('Support interface'), true);
   // G-scope is the one G-code tool: a slice is looked THROUGH, and nothing
@@ -434,14 +442,15 @@ async function main() {
   console.log('\n--- support, alone: feature isolation, with shipped controls ---');
   // =======================================================================
   // The support interface out of the slice on its own, through soloGroup (the
-  // old legend "only" button's job; a row click now isolates instead) and Select shown - no box, nothing written for it - then
+  // old legend "only" button's job) and selectVisible (Select shown's job; its
+  // button is gone, round 2c) - no box, nothing written for it - then
   // onto the plate as an ordinary piece, and read back off the plate in the
   // slicer's own colour for it.
   check('the Support interface row is in the Features list',
     await page.locator('#ms-legend .ms-legend-item[data-group="Support interface"]').count(), 1);
   check('soloGroup takes the support interface', await page.evaluate(() =>
     window.NSO_MICROSCOPE.soloGroup('Support interface')), true);
-  await page.click('#ms-btn-select-visible');
+  await page.evaluate(() => window.NSO_MICROSCOPE.selectVisible());
   const supportOnly = await page.evaluate(() => {
     const M = window.NSO_MICROSCOPE, d = M.getDoc();
     const sel = M.selection();
@@ -456,16 +465,21 @@ async function main() {
   });
   check('soloGroup leaves the support interface as the one group shown',
     supportOnly.hidden.includes('Support interface'), false);
-  check('Select shown takes it and nothing else - no walls, no infill',
+  check('selectVisible takes it and nothing else - no walls, no infill',
     supportOnly.isSupportOnly, true);
   check('every support interface move, all of them', supportOnly.n, supportOnly.want);
   check('and what comes out is 12 triangles per move', supportOnly.tris, supportOnly.n * 12);
   console.log(`       ${supportOnly.label}: ${supportOnly.tris} triangles`);
 
-  // The box controls - Isolate all boxes, Clear all boxes - are under Click
-  // to select region, and G-scope opens in Piece: arm it, as a user does.
-  await page.click('#ms-mode-select');
-  await page.click('#ms-btn-isolate');
+  // Isolate is REGION's (it isolates what boxes hold, and there is none here):
+  // what is shown is isolated as one piece by the Slice side's TAKE BAND, the
+  // slider on All - the same set, the same name.
+  await page.click('#ms-zr-all');
+  await page.click('#ms-btn-take-band');
+  check('TAKE BAND (slider on All) isolates exactly that set, under the same name',
+    await page.evaluate(() => { const M = window.NSO_MICROSCOPE;
+      return [M.isIsolated(), M.selection().length, M.selection().every((s) => s.feature === 'Support interface'), M.exportLabel()]; }),
+    [true, supportOnly.n, true, supportOnly.label]);
   check('and it isolates on screen as one body',
     await page.evaluate(() => {
       const v = window.NSO_MICROSCOPE.getView();
@@ -481,8 +495,8 @@ async function main() {
   check('carrying the feature\'s name with it',
     await page.evaluate(() => state.models[state.models.length - 1].name), supportOnly.label);
 
-  // The rail button reopens the slice that is still loaded; the sidebar's
-  // "Read the plate" is the way from a file back to the plate.
+  // The rail button reopens the slice that is still loaded; IMPORT ▾ › Read
+  // plate is the way from a file back to the plate.
   await page.click('#btn-microscope');
   check('the rail button reopens G-scope on the slice it left',
     await page.evaluate(() => window.NSO_MICROSCOPE.getDoc().kind), 'toolpath');

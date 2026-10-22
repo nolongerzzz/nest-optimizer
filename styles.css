@@ -2860,30 +2860,10 @@ select:focus, input:focus {
   overflow: hidden;
 }
 .ms-panel[hidden] { display: none; }
-/* How far down the column reaches (4 slabs, 1 group gap, the top pad), plus a
-   gap: the left wall's readouts stay below it. The shell's short-window
-   tightening (under 760 high) shortens the column, and this with it. */
-.ms-panel { --ms-col-h: 240px; }
-@media (max-height: 759px) { .ms-panel { --ms-col-h: 204px; } }
-
-/* The column: the shell's slabs, 32px on a 36px pitch, in two groups
-   (Import, Read plate | Select, View - docs/GSCOPE.md, item 5), floated
-   over the viewport. The strip itself passes clicks through to the canvas;
-   only the slabs take them. */
-.ms-col {
-  position: absolute;
-  top: var(--shell-pad);
-  left: var(--shell-pad);
-  z-index: 7;
-  display: flex;
-  flex-direction: column;
-  gap: var(--shell-col-gap);
-  width: var(--shell-col-w);
-  pointer-events: none;
-}
-.ms-col > .ms-group-start {
-  margin-top: calc(var(--shell-group-gap) - var(--shell-col-gap));
-}
+/* How far down the card reaches, from the top of the panel: the left wall's
+   readouts stay below it. app-microscope.js measures the card and writes it
+   (--ms-card-bottom, "Shell"); this is the card's height before it has. */
+.ms-panel { --ms-card-bottom: 140px; }
 .ms-head h1 { font-size: 15px; margin: 0 0 4px 0; }
 .ms-sub {
   font-size: 12px;
@@ -2997,12 +2977,11 @@ select:focus, input:focus {
 .ms-viewport { flex: 1; position: relative; min-width: 0; }
 .ms-viewport canvas { display: block; }
 
-/* ---- G-scope's shell: slabs, cards, the corner row, the dock ----------------
-   The slabs are the main shell's own (".vp-shell-col > .vp-bar-btn"): same
-   width (--shell-col-w), pitch, glass and lit "open" border. They are written
-   out here rather than shared by class because the main page's checks count
-   ".vp-shell-col" and ".vp-shell-row" slabs by those classes. */
-.ms-col > .vp-bar-btn,
+/* ---- G-scope's shell: slabs, the card, the corner row, the dock ------------
+   The corner slabs are the main shell's own (".vp-shell-row > .vp-bar-btn"):
+   same height, glass and lit "open" border. They are written out here rather
+   than shared by class because the main page's checks count ".vp-shell-col"
+   and ".vp-shell-row" slabs by those classes. */
 .ms-corner > .vp-bar-btn {
   pointer-events: auto;
   display: flex;
@@ -3026,14 +3005,6 @@ select:focus, input:focus {
   user-select: none;
   transition: border-color 0.12s, box-shadow 0.12s;
 }
-.ms-col > .vp-bar-btn {
-  width: var(--shell-col-w);
-  height: var(--shell-col-btn-h);
-  letter-spacing: 0.16em;
-  line-height: 1.15;
-  text-align: center;
-  white-space: normal;          /* a label longer than the column wraps inside its slab */
-}
 .ms-corner > .vp-bar-btn {
   height: var(--shell-btn-h);
   letter-spacing: 0.07em;
@@ -3041,14 +3012,10 @@ select:focus, input:focus {
   white-space: nowrap;
 }
 .ms-corner > .vp-bar-btn[hidden] { display: none; }
-.ms-col > .vp-bar-btn:hover:not(:disabled),
 .ms-corner > .vp-bar-btn:hover:not(:disabled) { border-color: rgba(255, 255, 255, 0.45); }
-.ms-col > .vp-bar-btn:focus-visible,
 .ms-corner > .vp-bar-btn:focus-visible { outline: 2px solid #7dd3fc; outline-offset: 1px; }
-.ms-col > .vp-bar-btn:disabled,
 .ms-corner > .vp-bar-btn:disabled { opacity: 0.38; cursor: not-allowed; }
 /* Open: the lit border and glow the main shell's open drop-downs wear. */
-.ms-col > .vp-bar-btn.is-on,
 .ms-corner > .vp-bar-btn.is-on {
   border-color: var(--glass-border-lit);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), var(--glass-glow);
@@ -3068,9 +3035,10 @@ select:focus, input:focus {
   pointer-events: none;
 }
 
-/* A card: the main shell's panel, opening just right of the column at the
-   top of the viewport. Only .is-open shows; the rows inside are still shown
-   and hidden by the engine, by id. */
+/* A card that opens (IMPORT's ▾ menu, Export): the main shell's panel. Only
+   .is-open shows; the rows inside are still shown and hidden by the engine,
+   by id. Each says where it opens (the ▾ menu under the card's head, Export
+   under the corner row). */
 .ms-card {
   position: absolute;
   left: var(--shell-panel-x);
@@ -3106,6 +3074,210 @@ select:focus, input:focus {
   top: calc(var(--shell-pad) + var(--shell-btn-h) + 8px);
   max-height: calc(100% - var(--shell-pad) - var(--shell-btn-h) - 20px);
 }
+/* IMPORT's ▾ menu: opens under the card's head, over the card's rows. */
+.ms-card.ms-menu {
+  left: var(--shell-pad);
+  top: calc(var(--shell-pad) + var(--shell-btn-h) + 6px);
+  z-index: 9;
+  min-width: 0;
+  width: 240px;
+}
+.ms-card.ms-menu .ms-note { margin: 0; }
+
+/* ---- THE CARD (round 2c, docs/GSCOPE.md item 12) -----------------------------
+   One, always up, top-left. Its head: IMPORT (its ▾ holds Read plate) at the
+   very spot the main page's Import slab stands - the card's border sits a
+   pixel outside it - and the Normal | Slice switch centred in the rest. Its
+   rows: the selection options for the side the switch is on. No backdrop
+   blur: the card is up all the time, and a blur re-samples the canvas under
+   it every frame. */
+.ms-main-card {
+  position: absolute;
+  left: calc(var(--shell-pad) - 1px);
+  top: calc(var(--shell-pad) - 1px);
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  width: 300px;
+  max-height: calc(100% - 2 * var(--shell-pad));
+  overflow: hidden;
+  box-sizing: border-box;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: var(--glass-panel-solid);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 18px 40px rgba(0, 0, 0, 0.45);
+  color: #e8eef6;
+  font-family: var(--font);
+  font-size: 12.5px;
+}
+.ms-main-head {
+  display: flex;
+  align-items: center;
+  height: calc(var(--shell-btn-h) + 1px);   /* IMPORT's 36 px, and the rule under it */
+  flex: 0 0 auto;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+}
+/* IMPORT ▾: one slab, as wide as the main page's Import (--shell-col-w),
+   split into the button and its ▾. */
+.ms-import {
+  display: flex;
+  flex: 0 0 auto;
+  width: var(--shell-col-w);
+  height: var(--shell-btn-h);
+}
+.ms-import > button {
+  height: 100%;
+  margin: 0;
+  border: 0;
+  border-right: 1px solid rgba(255, 255, 255, 0.10);
+  background: var(--glass-slab);
+  color: #f1f5f9;
+  font-family: var(--font);
+  font-size: 11.5px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  cursor: pointer;
+  user-select: none;
+}
+.ms-import > .ms-import-btn { flex: 1 1 auto; padding: 0 8px; border-radius: 9px 0 0 0; }
+.ms-import > .ms-import-more { flex: 0 0 28px; padding: 0; font-size: 12px; letter-spacing: 0; }
+.ms-import > button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.16); }
+.ms-import > button:focus-visible { outline: 2px solid #7dd3fc; outline-offset: -2px; }
+.ms-import > .ms-import-more.is-on { box-shadow: inset 0 0 0 1px var(--glass-border-lit); }
+
+/* Normal ○━━● Slice. Two buttons (their ids are the old Normal / Slice view
+   ones: the engine, Watch and the checks find them by id) and a track
+   between them whose knob stands on the card's side. */
+.ms-switch {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+}
+.ms-switch-side {
+  background: transparent;
+  border: 0;
+  padding: 4px 2px;
+  color: var(--muted);
+  font-family: var(--font);
+  font-size: 12px;
+  cursor: pointer;
+}
+.ms-switch-side.active { color: #f1f5f9; font-weight: 600; }
+.ms-switch-side:disabled { opacity: 0.4; cursor: default; }
+.ms-switch-side:hover:not(:disabled):not(.active) { color: var(--text); }
+.ms-switch-side:focus-visible { outline: 2px solid #7dd3fc; outline-offset: 1px; border-radius: 4px; }
+.ms-switch-track {
+  position: relative;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 16px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-sizing: border-box;
+  cursor: pointer;
+}
+.ms-switch-knob {
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #f1f5f9;
+  transition: left 0.15s;
+}
+.ms-main-card[data-side="slice"] .ms-switch-track { background: rgba(59, 130, 246, 0.55); border-color: var(--accent); }
+.ms-main-card[data-side="slice"] .ms-switch-knob { left: 19px; }
+.ms-switch.is-busy .ms-switch-knob { left: 10px; opacity: 0.6; }
+
+/* The rows: each names the sides it shows on (data-on), the card names its
+   side (data-side). Normal: Region, Whole part. Slice: Region, Take band,
+   Toolpath | Solid, Slice settings. */
+.ms-main-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.ms-main-card[data-side="normal"] .ms-row:not([data-on~="normal"]),
+.ms-main-card[data-side="slice"] .ms-row:not([data-on~="slice"]) { display: none; }
+.ms-row .ms-btn-row { margin-bottom: 0; }
+.ms-row .ms-note { margin: 6px 0 0 0; }
+/* :where() keeps the base rule at one class's weight, so the states below
+   (armed, pressed, disabled, the disclosure row, the segment's corners) win. */
+.ms-main-card button:where(:not(.ms-switch-side, .ms-import-btn, .ms-import-more)) {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.ms-main-card button:where(:not(.ms-switch-side, .ms-import-btn, .ms-import-more)):hover:not(:disabled) { border-color: var(--accent); }
+.ms-main-card button.active:not(.ms-switch-side),
+.ms-main-card button[aria-pressed="true"]:not(.ms-switch-side) {
+  border-color: var(--accent);
+  background: rgba(59, 130, 246, 0.15);
+}
+.ms-main-card button:disabled { opacity: 0.4; cursor: default; }
+.ms-main-card input[type="number"] {
+  width: 62px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 5px 6px;
+  font-size: 12px;
+  font-family: inherit;
+}
+.ms-main-card select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 4px 6px;
+  font-size: 12px;
+  font-family: inherit;
+}
+/* "Slice settings": a row that opens. */
+.ms-main-card button.ms-disclose {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border-color: transparent;
+  padding: 4px 2px;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.ms-main-card button.ms-disclose::before { content: "\25B8"; display: inline-block; width: 1.2em; }
+.ms-main-card button.ms-disclose[aria-expanded="true"]::before { content: "\25BE"; }
+/* Two to a row: nozzle · layer, walls · infill, pattern · support below. */
+#ms-slice-settings {
+  margin-top: 6px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 10px;
+  align-items: center;
+}
+#ms-slice-settings > .ms-btn-row { display: contents; }
+#ms-slice-settings > .ms-note { grid-column: 1 / -1; margin: 2px 0 0 0; }
+#ms-slice-settings label.ms-note { display: inline-flex; align-items: center; gap: 4px; margin: 0; white-space: nowrap; }
+/* Wide enough for the longest value each takes (100 %, 0.25 mm) - a cut figure reads as another number. */
+#ms-slice-settings input[type="number"] { width: 5.2em; padding: 4px 4px 4px 6px; }
+#ms-slice-settings[hidden] { display: none; }
+
 .ms-card .ms-btn-row,
 .ms-card .ms-note,
 .ms-card .ms-section { margin-bottom: 8px; }
@@ -3124,7 +3296,7 @@ select:focus, input:focus {
   font-family: inherit;
 }
 
-/* The readouts, always up, never a card. Left wall, under the column: the
+/* The readouts, always up, never a card. Left wall, under the card: the
    file line, and the feature legend right under it. Along the bottom, right
    of them: the info, Features, the Slice report and the mode hint, side by
    side so they stay low and leave the piece clear. #ms-dock itself is only
@@ -3139,9 +3311,9 @@ select:focus, input:focus {
   flex-direction: column;
   gap: 8px;
   width: 257px;
-  /* Never up into the column: the column is --ms-col-h tall, so what is under
-     it is the window less that. The legend scrolls inside itself. */
-  max-height: calc(100vh - var(--ms-col-h) - 24px);
+  /* Never up into the card: what is under it is the window less the card's
+     bottom edge (--ms-card-bottom) and a gap. The legend scrolls inside itself. */
+  max-height: calc(100vh - var(--ms-card-bottom) - 20px);
   pointer-events: none;
 }
 .ms-readouts {
@@ -3180,13 +3352,12 @@ select:focus, input:focus {
 
 /* No backdrop-filter: solid slabs and cards, still readable over the canvas. */
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .ms-col > .vp-bar-btn,
   .ms-corner > .vp-bar-btn { background: var(--glass-slab-solid); }
   .ms-card { background: var(--glass-panel-solid); }
 }
 
 /* Top-CENTRE: the corner row (Back / Export / Close) has the top right, the
-   cards open at the top left. This is a view-state readout - "Whole part"
+   card stands at the top left. This is a view-state readout - "Whole part"
    when you are looking at the whole document, "Detail: N ..." once you have
    drilled into a selection - so it wants to stay in eyeshot. */
 #ms-mode-badge {
@@ -3218,7 +3389,7 @@ select:focus, input:focus {
 
 /* The feature legend, on the left wall under the file line (see .ms-dock-left).
    A file with many features scrolls inside it rather than growing up into
-   the column. */
+   the card. */
 #ms-legend-float {
   flex: 0 1 auto;
   min-height: 0;
@@ -3263,6 +3434,23 @@ button#ms-legend-toggle {
   cursor: pointer;
 }
 button#ms-legend-toggle:hover { color: var(--text, #fff); border-color: var(--accent); }
+/* Check all, in the list's head (it was the VIEW card's). */
+button.ms-legend-btn {
+  flex: 0 0 auto;
+  height: 20px;
+  margin: -2px 0 6px 0;
+  padding: 0 6px;
+  font-size: 11px;
+  font-family: inherit;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+button.ms-legend-btn:hover:not(:disabled) { color: var(--text, #fff); border-color: var(--accent); }
+button.ms-legend-btn:disabled { opacity: 0.4; cursor: default; }
+#ms-legend-float.collapsed button.ms-legend-btn { margin-bottom: 0; }
 #ms-legend-float.collapsed { width: auto; }
 #ms-legend-float.collapsed #ms-legend { display: none; }
 #ms-legend-float.collapsed .ms-section-title,
