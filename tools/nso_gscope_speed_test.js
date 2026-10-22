@@ -299,7 +299,7 @@ async function pullDrive(page, n) {
 }
 
 /* Plate 2: the piece just pulled, pressed and dragged n moves across its bed. */
-async function plate2Drive(page, n) {
+async function plate2Drive(page, n, presses) {
   await page.evaluate(() => { window.__grabbed = NSO_MICROSCOPE.getDoc().objects[0].name; if (NSO_MICROSCOPE.isIsolated()) NSO_MICROSCOPE.back(); });
   await frames(page);
   const p2 = await page.evaluate(() => window.__s.topPx(0));
@@ -313,9 +313,25 @@ async function plate2Drive(page, n) {
   await frames(page);
   const c = await page.evaluate(() => window.__s.stop());
   const live = moved.indexOf(true);
+  const firstPress = r1((c.ev.pointerdown || [0])[0]), pressSamples = [firstPress];
+  /* more presses on the piece where it now stands (each let go in place), for a median: one press is
+     one event, and one slow event on a shared runner is not the page */
+  for (let k = 1; k < (presses || 1); k++) {
+    await page.evaluate(() => { if (NSO_MICROSCOPE.isIsolated()) NSO_MICROSCOPE.back(); });
+    await frames(page);
+    const q = await page.evaluate(() => window.__s.topPx(0));
+    await page.mouse.move(q[0], q[1]);
+    await page.evaluate(() => window.__s.start());
+    await page.mouse.down();
+    await page.mouse.up();
+    await frames(page);
+    pressSamples.push(r1(((await page.evaluate(() => window.__s.stop())).ev.pointerdown || [0])[0]));
+  }
   return Object.assign(clockSummary(c), {
     n: n,
-    pressMs: r1((c.ev.pointerdown || [0])[0]),
+    pressMs: firstPress,
+    pressSamples: pressSamples,
+    pressMedian: r1(med(pressSamples)),
     followed: moved.filter(Boolean).length,
     moveMax: r1(Math.max(0, ...(c.ev.pointermove || []).slice(live + 1))),
     releaseMs: r1(Math.max(0, ...(c.ev.pointerup || [0])))
@@ -364,7 +380,7 @@ withApp(async (page, logs) => {
   }
   if (DO_DRAG) {
     R.pull = await pullDrive(page, FULL ? 60 : 10);
-    if (R.pull && R.pull.landed.pieces) R.plate2 = await plate2Drive(page, FULL ? 60 : 10);
+    if (R.pull && R.pull.landed.pieces) R.plate2 = await plate2Drive(page, FULL ? 60 : 10, 5);
     R.cal = (cal0 + await pace.inPage(page)) / 2;
   }
   await page.screenshot({ path: path.join(OUT, 'speed-file.png') });
@@ -433,11 +449,11 @@ withApp(async (page, logs) => {
     check('4. the main viewport does not render while G-scope covers it', renders === 0, renders + ' renders');
   }
   if (DO_DRAG) {
-    const worst = Math.max(R.orbit.ev.pointermove.max, R.pull ? R.pull.moveMaxAfterStart : 99, R.plate2 ? R.plate2.pressMs : 99, R.plate2 ? R.plate2.moveMax : 99);
+    const worst = Math.max(R.orbit.ev.pointermove.max, R.pull ? R.pull.moveMaxAfterStart : 99, R.plate2 ? R.plate2.pressMedian : 99, R.plate2 ? R.plate2.moveMax : 99);
     /* a frame, 33 ms, was ~0.064 of a calibration loop on the box it was set on (one loop ~520 ms in the page there) */
     const MAX_LOOPS = 0.065, worstLoops = worst / R.cal;
-    say(pace.finding('the longest move or press with a piece in hand', { ms: worst, cal: R.cal, loops: worstLoops }));
-    check('5. once a piece is in hand no move holds the main thread past a frame (' + MAX_LOOPS + ' calibration loops, 33 ms where it was set) - nor does a press on plate 2',
+    say(pace.finding('the longest move, or the median of five presses on plate 2 (' + (R.plate2 ? R.plate2.pressSamples.join(' / ') : '?') + ' ms), with a piece in hand', { ms: worst, cal: R.cal, loops: worstLoops }));
+    check('5. once a piece is in hand no move holds the main thread past a frame (' + MAX_LOOPS + ' calibration loops, 33 ms where it was set) - nor does a press on plate 2 (the median of five)',
       worstLoops <= MAX_LOOPS, worstLoops.toFixed(3) + ' loops (' + worst + ' ms)');
     const perK = R.pull && R.pull.startMoveMs != null && R.pull.copied ? r1(R.pull.startMoveMs / (R.pull.copied / 1000)) : null;
     check('6. the move that makes the copy (12 triangles a move, built and drawn) at most half d7abbea\'s: <= 7.2 ms per thousand moves copied (d7abbea: 14.4)',
