@@ -80,7 +80,7 @@ for (const f of ['nso_thickness.js', 'nso_support_beacons.js', 'nso_support_aim.
 }
 const SA = ctx.NSO_SupportAim, ST = ctx.NSO_SupportTree, GP = ctx.NSO_SupportGridpack, SI = ctx.NSO_SupportInterface;
 const GAP = SI.DEFAULTS.gapMm, LAYER = SI.DEFAULTS.layerMm, PITCH = SI.SHEET.pitchMm;
-const CARD = { skipList: [], angleDeg: 60, occluders: [], style: 'tree', restOnModel: false, sideMm: 1.2 };
+const CARD = { skipList: [], angleDeg: 35, occluders: [], style: 'tree', restOnModel: false, sideMm: 1.2 };
 
 let pass = 0, fail = 0;
 const FAILS = [];

@@ -810,8 +810,8 @@
               <p id="sup-count" class="bend-readout sup-count">Click a piece to see where it needs holding.</p>
               <div id="sup-progress" class="sup-progress" role="progressbar" aria-label="Building supports" aria-valuemin="0" aria-valuemax="100" hidden><div class="sup-progress-fill"></div></div>
               <label class="vp-bend-field" for="sup-angle">Angle
-                <input type="number" id="sup-angle" value="60" min="1" max="89" step="1" aria-label="Overhang angle, degrees"
-                       title="A face hangs when it is within this angle of horizontal. 60 is Bambu's 30 degree overhang threshold (Bambu measures from vertical: 90 minus this). A smaller angle finds only the flatter undersides. The outlines follow as you type."><span id="sup-angle-note" class="sup-angle-note">60&deg; &middot; Bambu 30&deg;</span></label>
+                <input type="number" id="sup-angle" value="35" min="1" max="89" step="1" aria-label="Overhang angle, degrees"
+                       title="Faces within this many degrees of horizontal get support. Bambu Studio's threshold means the same thing, and its default is 30. A smaller angle finds only the flatter undersides; a larger one reaches steeper faces too. The outlines follow as you type."><span id="sup-angle-note" class="sup-angle-note">35&deg; &middot; Bambu 30&deg;</span></label>
               <div class="sup-go-row">
                 <button id="btn-sup-all" class="btn btn-primary sup-go" type="button" disabled
                         title="Build supports for every outlined area. When the piece already has supports they are all replaced. One Undo puts it back. A build that cannot finish says why and adds nothing.">Generate</button>
@@ -1904,7 +1904,7 @@
   <script src="app-gscope-support.js?v=column1"></script>
   <!-- The Supports card on the main page: the same detection and planner,
        after app-core.js / app-join.js, whose ingest and soups it uses. -->
-  <script src="app-supports-card.js?v=print3"></script>
+  <script src="app-supports-card.js?v=angle35"></script>
   <script src="app-gscope-slice.js?v=supfeat2"></script>
   <!-- Lift: details off a face, the face left as it was round them. After
        nso_lift.js (Phase 1: a flat face), nso_lift_curved.js (Lift 3: the

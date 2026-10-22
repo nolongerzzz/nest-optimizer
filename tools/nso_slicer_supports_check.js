@@ -9,7 +9,7 @@
  * coupon - fixtures/supports/top_clip_x2.stl, a 10 x 10 x 16 post with two
  * 8 x 8 clips under its top, one each side (the user's top_clip_x2 case: one
  * ceiling per clip) - with the supports the Supports card builds for it at
- * its defaults (angle 60, Tree, 1.2 mm, rest off, the sheet on: the same
+ * its defaults (angle 35, Tree, 1.2 mm, rest off, the sheet on: the same
  * pipeline support:shells drives, NSO_SupportGridpack.parts then .shells).
  * Sliced at the card's own 0.4 mm nozzle / 0.2 mm layers.
  *
@@ -87,7 +87,7 @@ for (const f of ['nso_thickness.js', 'nso_support_beacons.js', 'nso_support_aim.
   vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), ctx, { filename: f });
 }
 const SA = ctx.NSO_SupportAim, ST = ctx.NSO_SupportTree, GP = ctx.NSO_SupportGridpack;
-const CARD = { skipList: [], angleDeg: 60, occluders: [], style: 'tree', restOnModel: false, sideMm: 1.2 };
+const CARD = { skipList: [], angleDeg: 35, occluders: [], style: 'tree', restOnModel: false, sideMm: 1.2 };
 const PARTS = { interface: true, foldSheets: false };
 
 /* the readout's own words: app-gscope-slice.js with no page (it mounts only where there is a document) */

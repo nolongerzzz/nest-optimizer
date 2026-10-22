@@ -195,13 +195,15 @@ side, as Bambu's), then the axes. The coupon's area 1: 90 deg, as Bambu's.
 ## 4. Measured (`support:interface`, 131 checks)
 
 The clamp at the card's defaults has four areas. Every flat ceiling carries a
-sheet, a piece at a time:
+sheet, a piece at a time. Measured at the card's 35 deg (since
+supports-angle-default, docs/SUPPORTS-CARD.md 0a; at the old 60 area 1 also
+took the 45 deg chamfer at z 62-71, 69 side tips, and area 3 had 27 spots):
 
 | area | ceiling | tips carried / under a sheet / cut at the gap / side | pieces (each a loop and a serpentine) | lines T / I1 | caps (at 2.5-4 mm), widths |
 | --- | --- | --- | --- | --- | --- |
-| 1 | z 72 flat (+ 45 deg chamfer 62-71, fillet 72-75) | 175 / 176 / 14 / 69 (176 at 0.43) | four strips round the boss, stepped outlines 12.6 x 27.7, 21.0 x 31.9, 21.0 x 17.6, 21.8 x 46.2 mm | 87 / 130, 45 deg | 167 (142), 2.13-2.50 |
+| 1 | z 72 flat (+ fillet 72-72.7) | 176 / 176 / 14 / 0 | four pieces round the boss: rectangles 9.24 x 43.68 and 8.40 x 43.68, outlines 22.68 x 26.04 and 22.68 x 14.28 mm | 71 / 146, 0 deg | 176 (152), 2.13-2.50 |
 | 2 | z 80 flat (a ring round the boss) | 45 / 45 / 0 / 0 | four strips, 5.0 x 16.8, 12.6 x 5.9, 12.6 x 11.8, 3.4 x 12.6 mm | 36 / 30, 63.43 deg | 37 (1), 1.29-2.50 |
-| 3 | z 0.8-2.0 (the bottom fillet, over the plate) | 0 / 0 / 0 / 27 | - | - | none: every tip is a side tip |
+| 3 | z 0.8 (the bottom fillet, over the plate) | 0 / 0 / 0 / 14 | - | - | none: every tip is a side tip |
 | 4 | z 86 ridge | 3 / 3 / 0 / 0 | one rectangle, 3.36 x 8.40 mm | 3 / 9, 90 deg | 3 (3), 2.50 |
 
 `support:interface` holds the clamp's coverage: area 1 at least 161 tips
@@ -416,8 +418,8 @@ toolpath in segments of 2 mm or more. `support:audit` holds it (section 5).
 - MAX_SPAN_MM stays 3.29 (tips at 3 mm on the beacon grid). Opening the
   pitch to the reference's 3.8-5.7 is a follow-up once the sheet has printed.
 - No detection change (`nso_support_aim.js` untouched): the 45 deg chamfer
-  under the clamp's ceiling is detected at the card's 60 deg and held by side
-  tips; Bambu at 30 deg leaves it.
+  under the clamp's ceiling was detected at the card's old 60 deg and held by
+  side tips; at its 35 now, as Bambu at 30, it is left alone.
 - Sloped and curved ceilings get no stair-stepped sheet: a tip on one is a
   level of its own, usually too narrow for a sheet, and is cut at the gap.
 - G-scope's support row builds as before (no `interface`).

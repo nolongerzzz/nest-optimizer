@@ -244,8 +244,9 @@ per-layer angle histograms and line centres. See `docs/CROSSHATCH.md`.
 - top_clip_x2_coupon.stl — the top_clip_x2 print coupon (58 triangles), as it stood
   on the A1 Mini plate in the 2026-10-20 export (nest_Bambu_A1_Mini_3pcs.3mf,
   object 1): a 29.3 x 14 mm slab at z 13.5 - 16.5 on a left leg to the plate
-  and a right leg hanging to z 6.5. Two areas at the card's 60 deg: the slab's
-  underside (40 spots) and the right leg's (9 spots). Bambu's own tree on it
+  and a right leg hanging to z 6.5. Two areas at the card's old 60 deg: the slab's
+  underside (40 spots) and the right leg's (9 spots) - the same at its 35 deg
+  now. Bambu's own tree on it
   (baselineV2) is the reference for the caps and the pads;
   `support:interface`, `support:shells` and `support:test` build it.
   See docs/SUPPORT-INTERFACE.md.
@@ -256,3 +257,12 @@ per-layer angle histograms and line centres. See `docs/CROSSHATCH.md`.
   settings only. `slicer:bambu` §5 registers it to the export (−1.650 mm in
   x) and holds NSO's slice of the sheet to it, layer by layer. See
   docs/SLICER.md, "Thin walls".
+- simple_overhang.3mf — the Simple Overhang Test (ilikeapples12, CC BY-SA, from
+  MakerWorld), as the owner saved it from Bambu Studio 02.08.02.61 on
+  2026-10-21: one 20 x 47.4 x 48.9 mm object (7656 triangles) whose arc's
+  underside steps 10, 20 ... 80 deg off horizontal, each step 20 mm wide.
+  Bambu's slice of it (tree slim, threshold 30) supported the arc only within
+  30 deg of horizontal (z 41.4 - 46.2, 254 mm²) and printed the 40 - 60 deg
+  stretch (175 mm²) as overhang walls. `support:test` §13 holds the card's 35
+  to that: the 10 - 30 deg steps, 259.06 mm², and the old 60 for comparison.
+  See docs/SUPPORTS-CARD.md §0a.
