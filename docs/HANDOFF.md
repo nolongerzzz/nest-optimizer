@@ -6584,14 +6584,14 @@ Rotate and Tip never fight over a half-applied pose.
   piece's vertices (hull + rotating calipers, Akl-Toussaint pre-filter, cached
   per geometry and 3 x 3 like the box), as level `long` / `short` unit
   vectors, the plate `up`, `lengths` { long, short, height }, `centre`,
-  `square` (5%). Exact ties go to the side nearest plate X. Within 1e-5 rad of a
-  body axis it takes that axis exactly (Float32 vertices would otherwise walk a
-  run of actions). `holdFrame` / `releaseFrame`: a Rotate drag holds it from
+  `square` (5%). Where the rectangle square to the piece's body axes is within
+  2% of the narrowest, it takes that one, sides exactly (see "CI batch 20"
+  below). `holdFrame` / `releaseFrame`: a Rotate drag holds it from
   press to release.
 - **`p.bakedQ` / `nsoPieceBodyQ(p)`**: the turns baked since load, and the body
   (mesh turn x bakedQ). Read by the Rotate rings' painted scale (so #229's
-  detents stay absolute), the dart slot names (which side is 'fb'), the
-  pieceFrame exact-snap above, and the checks. Nothing places, exports or aims
+  detents stay absolute), the dart slot names (which side is 'fb'),
+  pieceFrame's body-square choice, and the checks. Nothing places, exports or aims
   by it. `nsoPoseHome(p)` (for the checks) puts a piece back as it was before
   an unbroken run of bakes.
 - **Private frames deleted** (each now asks pieceFrame):
@@ -6646,3 +6646,61 @@ Rotate and Tip never fight over a half-applied pose.
   step). No full suite run (owner's instruction).
 - `?v=`: nso-bounds, app-core, app-rotate-handles, app-tip-orient, app-cut,
   app-bend, app-join, app-seat-surface, app-scale -> posebake1.
+
+### Pose bake - CI batch 20's eleven (2026-10-22)
+#261 broke eleven steps outside its gates (Tests #305): scale:inches,
+scale:card, seat:surface, grab:drop, ring:drive, wire:cut-bore, wire:cut-yaw,
+wire:offset, wire:scale, stock:shelf, leave:tool.
+
+- **Common cause: pieceFrame's angle meant nothing on some footprints.** The
+  narrowest rectangle is unique only for a footprint with a clear long side. A
+  round or square footprint (ring, rod, tube, sphere, torus, a square block) has
+  one per hull facet, and a geometry carrying a small unrecorded turn (Seat
+  here) is a hair off its axes. Every tool that turns by the frame (Seat's
+  basis, Scale's and Bend's frame space, the cut's base turn) turned the piece
+  by that arbitrary angle and back, and the answers drifted: the "no turn
+  needed" seat turned B 0.3 deg (long read [0.99998, 0, -0.0059]); a ring's Wall
+  edit lost its length (40.623); a curved piece re-seated at 12.7272 (12.7 with
+  the fix, same build otherwise); a Stock sphere / torus lost its tag. Not
+  bake rounding, not the re-seat, not the frame read before the bake, not
+  bakedQ against the geometry.
+  Fix (nso-bounds.js `squareToBody`): pieceFrame takes the rectangle square to
+  the piece's body axes (`nsoPieceBodyQ`, the shadows of body X / Z / Y, any
+  shadow under 0.5 skipped) when its area is within 2% (`BODY_TOL`) of the
+  narrowest, sides exact, canonical sense (long towards +X, or +Z when square
+  to X). The 1e-5 rad snap (`exactSide` / `SNAP_RAD`) is gone.
+- **Scale** (app-scale.js): the frame space turns by `R_y(-phi) x` the mesh's
+  own turn, phi the long side's heading mod 90 (identity when both are nil), so
+  a pose on the record reads as it lies. The stretch rows fill only where the
+  piece read more of L / W / H as loaded (`NSO_scaleBodyRows`, the raw soup
+  turned back by bakedQ, cached per soup) than it does now: a leaned box keeps
+  all three; a cone (stock:shelf) or a blob (wire:offset) gets no stretch row.
+- **Cut layout** (app-cut.js / app-join.js): a square cut across a turned
+  piece's length parts the halves along the blade normal (`layoutAfterSplit`'s
+  new `along`, from `getCutPlaneLocal`'s `normalWorld`), not along plate X. The
+  split itself was right (probe: halves at exactly [-30, 0] / [0, 30] along
+  the normal at 15 deg yaw).
+- **Reported as regressions, were measurement pins** (the bake empties the
+  pose fields and the mesh turn, so a check reading them sees 0):
+  - grab:drop "Rotate 90 changes height (31.8968)": the height check passed;
+    "it turns" compared mesh quaternions (identity after the bake) ->
+    `nsoPieceBodyQ`.
+  - leave:tool "piece turned 180 reads 0.000": it read rotY -> the body's turn
+    relative to before, 180 deg about the vertical; "two Undos put the turn
+    back" exact -> < 1e-9 deg.
+- **Re-pinned** (old -> new, each named in the test):
+  - scale:card section 5 (after Tip X, as it lies: Width 25.0 / Height 40.0,
+    readout `100.0 L x 25.0 W x 40.0 H`). Section 10's bar is baked standing (rotY
+    0, tipX 0, longUp 1; Longest 120.0 sits behind Height 120.0). Section 10's
+    taper: the Longest row is shown and typed (real = true).
+  - wire:cut-bore: the rolled ring's cut is named by the plate's axis, 'y' ->
+    'x'; cases named X / Z / Y.
+  - wire:cut-yaw: hook `cutSplitAt`, not `splitBothSides` (the cut frame's
+    inner split sees the copy turned into the cut frame); the bar direction's
+    sign `uz = -sin(yaw)` (hidden while the blade normal was a plate axis).
+  - scale:inches, seat:surface, ring:drive, wire:scale, wire:offset,
+    stock:shelf: no test change; fixed by the above.
+- Checks (all green, no full suite): the 11 gates from #261, the 11 above, and
+  wire:cut-blade, wire:cut-tip, wire:cut-blade-view, watch:test,
+  wire:cut-redesign, to-plate, input:mode, seat:tilted.
+- `?v=`: nso-bounds, app-cut, app-join, app-scale -> posebake2.
