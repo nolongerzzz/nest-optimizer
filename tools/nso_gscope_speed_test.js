@@ -69,6 +69,7 @@ const fs = require('fs');
 const ROOT_HERE = path.resolve(__dirname, '..');
 const TREE = path.resolve(process.env.NSO_GSCOPE_SPEED_ROOT || ROOT_HERE);
 const { withApp } = require(path.join(TREE, 'tools', 'nso_app_harness'));
+const pace = require(path.join(ROOT_HERE, 'tools', 'nso_pace.js'));
 const LOCAL = path.join(ROOT_HERE, 'tools', 'fixtures-local', 'baseline.gcode.3mf');
 const FILE = path.resolve(fs.existsSync(LOCAL) ? LOCAL
   : process.env.NSO_GSCOPE_SPEED_FILE || path.join(ROOT_HERE, 'fixtures', '3mf', 'tabletop.gcode.3mf'));
@@ -337,6 +338,9 @@ withApp(async (page, logs) => {
     await page.waitForTimeout(1500);
     R.idle = clockSummary(await page.evaluate(() => window.__s.stop()));
   }
+  /* gate 5 is read in calibration loops run in the page either side of the file's orbit, pull and
+     plate 2 drag (tools/nso_pace.js), not milliseconds */
+  const cal0 = DO_DRAG ? await pace.inPage(page) : 0;
   R.orbit = await orbit(page, 60);
 
   /* the selection pass: the pick, a hover, a click */
@@ -361,6 +365,7 @@ withApp(async (page, logs) => {
   if (DO_DRAG) {
     R.pull = await pullDrive(page, FULL ? 60 : 10);
     if (R.pull && R.pull.landed.pieces) R.plate2 = await plate2Drive(page, FULL ? 60 : 10);
+    R.cal = (cal0 + await pace.inPage(page)) / 2;
   }
   await page.screenshot({ path: path.join(OUT, 'speed-file.png') });
 
@@ -429,7 +434,11 @@ withApp(async (page, logs) => {
   }
   if (DO_DRAG) {
     const worst = Math.max(R.orbit.ev.pointermove.max, R.pull ? R.pull.moveMaxAfterStart : 99, R.plate2 ? R.plate2.pressMs : 99, R.plate2 ? R.plate2.moveMax : 99);
-    check('5. once a piece is in hand no move holds the main thread past a frame (33 ms) - nor does a press on plate 2', worst <= 33, worst + ' ms at worst');
+    /* a frame, 33 ms, was ~0.064 of a calibration loop on the box it was set on (one loop ~520 ms in the page there) */
+    const MAX_LOOPS = 0.065, worstLoops = worst / R.cal;
+    say(pace.finding('the longest move or press with a piece in hand', { ms: worst, cal: R.cal, loops: worstLoops }));
+    check('5. once a piece is in hand no move holds the main thread past a frame (' + MAX_LOOPS + ' calibration loops, 33 ms where it was set) - nor does a press on plate 2',
+      worstLoops <= MAX_LOOPS, worstLoops.toFixed(3) + ' loops (' + worst + ' ms)');
     const perK = R.pull && R.pull.startMoveMs != null && R.pull.copied ? r1(R.pull.startMoveMs / (R.pull.copied / 1000)) : null;
     check('6. the move that makes the copy (12 triangles a move, built and drawn) at most half d7abbea\'s: <= 7.2 ms per thousand moves copied (d7abbea: 14.4)',
       perK != null && perK <= 7.2, R.pull && (R.pull.startMoveMs + ' ms for ' + R.pull.copied + ' moves - ' + perK + ' ms per thousand'));
