@@ -418,17 +418,31 @@ withApp(async (page, logs) => {
       cost.perMoveMs + ' ms');
     check('a click costs well under a frame', cost.perClickMs < 5, cost.perClickMs + ' ms');
 
-    const frames = await page.evaluate(() => new Promise(res => {
-      let n = 0; const t0 = performance.now();
+    /* A stall is a requestAnimationFrame tick the app's loop did not draw on,
+       so that is what is counted: the main renderer's render() calls between
+       one tick and the next, over 60 ticks. Not frames a second against a
+       clock - that is the shared runner's speed, and on a starved shard it
+       read 15 against a bar of 15 with every tick drawn. The rate is still
+       logged, as a finding, so drift shows. */
+    const ticks = await page.evaluate(() => new Promise(res => {
+      const r = state.renderer, orig = r.render;
+      let renders = 0, last = -1;
+      const drew = [];
+      r.render = function () { renders++; return orig.apply(this, arguments); };
+      const t0 = performance.now();
       (function tick() {
-        n++;
-        if (performance.now() - t0 < 1200) requestAnimationFrame(tick);
-        else res(+(n / ((performance.now() - t0) / 1000)).toFixed(1));
+        if (last >= 0) drew.push(renders - last);
+        last = renders;
+        if (drew.length < 60) { requestAnimationFrame(tick); return; }
+        r.render = orig;
+        res({ drew, ms: performance.now() - t0 });
       })();
     }));
-    /* Software-rendered in this harness, so the bar is deliberately low: what
-       is being ruled out is a stall, not a slow GPU. */
-    check('the render loop is not stalled', frames > 15, frames + ' fps (swiftshader)');
+    const skipped = ticks.drew.filter(n => n < 1).length;
+    console.log('  FINDING the render loop ran ' + (60 / ticks.ms * 1000).toFixed(1) +
+      ' fps on the clock (swiftshader): 60 ticks in ' + Math.round(ticks.ms) + ' ms');
+    check('the render loop is not stalled: it drew on every one of 60 ticks', skipped === 0,
+      skipped + ' skipped; renders per tick ' + JSON.stringify([...new Set(ticks.drew)]));
 
     const residue = await page.evaluate(() => {
       let n = 0;
