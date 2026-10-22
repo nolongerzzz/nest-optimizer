@@ -1,10 +1,16 @@
 /* G-scope's cards, for the checks.
 
-   Since the G-scope shell the controls that used to sit in the sidebar live in
-   cards - Select, Line, Layer, View, Render, Overhangs, Crop Z, Slice and
-   Export - and a card only shows while its column button has opened it. A
-   check that clicks "#ms-cam-slice" by id has to open the View card first, the
-   way a person would.
+   G-scope has ONE card that is always up (round 2c, docs/GSCOPE.md item 12):
+   IMPORT ▾, the Normal | Slice switch and the selection rows for that side.
+   Two things open from it, or from the corner: IMPORT's ▾ menu (Read plate)
+   and the Export card - each only shows while its button has opened it - and
+   on the card's Slice side the Slice settings row unfolds. A check that clicks
+   "#ms-btn-plate" by id has to open the ▾ menu first, the way a person would;
+   one that fills "#ms-slice-nozzle" has to unfold the Slice settings.
+
+   A row on the side the switch is NOT on is reported 'unavailable' and left
+   alone: flipping the switch slices (or goes back to the mesh), which is a
+   check's own business, never a helper's.
 
    ONE helper does that for every check:
 
@@ -13,8 +19,9 @@
                              check / focus / hover ... and isVisible /
                              isEnabled / isDisabled / isChecked / isEditable,
                              so that before any of them acts on a selector
-                             that lives in a closed card, the card is opened
-                             from its own column button. Nothing else changes:
+                             that lives in a closed card (or the folded Slice
+                             settings), it is opened from its own button
+                             (the ▾, Export, the settings row). Nothing else changes:
                              the call goes on to Playwright exactly as written,
                              so a control the engine has hidden is still
                              hidden (the card's button is disabled, nothing
@@ -47,12 +54,17 @@ const ACTIONS = ['click', 'dblclick', 'fill', 'check', 'uncheck', 'setChecked', 
 
 /* Runs in the page. Finds the element and says what its card needs:
    { state, nav } - 'none' (not in a card), 'open', 'unavailable' (its button is
-   disabled: the engine has nothing to show in it) or 'closed', with nav the id
-   of the column button that opens it (the card names it, data-nav). */
+   disabled: the engine has nothing to show in it; or a card row on the side the
+   switch is not on) or 'closed', with nav the id of the button that opens it
+   (the card names it, data-nav; the Slice settings, their row's own button). */
 function findCardFor(sel) {
   let el = null;
   try { el = document.querySelector(sel); } catch (e) { return { state: 'unreadable', nav: null }; }
   if (!el) return { state: 'none', nav: null };
+  const row = el.closest('#ms-main-card .ms-row');
+  if (row && getComputedStyle(row).display === 'none') return { state: 'unavailable', nav: null };
+  const fold = el.closest('#ms-slice-settings');
+  if (fold) return { state: fold.hidden ? 'closed' : 'open', nav: 'ms-slice-settings-toggle' };
   const card = el.closest('.ms-card');
   if (!card) return { state: 'none', nav: null };
   const navId = card.getAttribute('data-nav');
@@ -61,7 +73,7 @@ function findCardFor(sel) {
   return { state: !nav || nav.disabled ? 'unavailable' : 'closed', nav: navId };
 }
 
-/* Runs in the page: press a column button, as a person would. */
+/* Runs in the page: press the button that opens it, as a person would. */
 function pressNav(navId) { document.getElementById(navId).click(); }
 
 /* Runs in the page: shut the open card, if any, by its own button. */

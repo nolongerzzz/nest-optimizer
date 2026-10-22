@@ -118,9 +118,30 @@ var NSO_MICROSCOPE = (function () {
   }
 
   /** The panel's own status line, which stays readable with the panel open. */
+  var infoBase = '';          // what the selection (or the document) says
+  var infoLine = null;        // the move a hover is reading out over it, or null
   function info(html) {
+    infoBase = html;
+    infoLine = null;            // a new word on the selection is read until the next hover
     var el = $('ms-info');
     if (el) el.innerHTML = html;
+  }
+
+  /**
+   * Line's readout (it was SELECT > Line's): the move under the pointer, on a
+   * slice, read out in SELECTION / SEGMENT INFO while it is hovered - in any
+   * mode; off it, the box says what it said before. Nothing is picked.
+   */
+  function hoverLine(seg) {
+    var el = $('ms-info');
+    if (seg && doc && doc.kind === 'toolpath' && seg.mv) {
+      if (infoLine === seg) return;
+      infoLine = seg;
+      if (el) el.innerHTML = describeLine(seg);
+    } else if (infoLine != null) {
+      infoLine = null;
+      if (el) el.innerHTML = infoBase;
+    }
   }
 
   function baseName(n) {
@@ -430,7 +451,7 @@ var NSO_MICROSCOPE = (function () {
       source: 'plate',
       subtitle: 'The plate as it stands, read off the pieces themselves. ' +
                 'Not a sliced file: no layers and no slicer features, so each ' +
-                'piece draws whole. Click one to drop a capture box over it.'
+                'piece draws whole. Click one to isolate it; Region places a capture box.'
     });
   }
 
@@ -567,7 +588,7 @@ var NSO_MICROSCOPE = (function () {
   // ===========================================================================
 
   var HIDDEN = null;          // Set of group names toggled off in the legend
-  var mode = 'piece';         // 'piece' | 'select' (Region) | 'feature' | 'line' | 'layer'; every document opens in 'piece'
+  var mode = 'piece';         // 'piece' | 'select' (REGION armed); every document opens in 'piece'
   var balls = [];             // the capture boxes
   var defaultR = 5.0;
   // A corner drag makes the footprint a rectangle; the next box dropped takes
@@ -968,13 +989,12 @@ var NSO_MICROSCOPE = (function () {
     applyDisplay();
     setMode(mode);
     syncHeader();
-    syncLayerRow();
     syncExportRow();
     syncRenderRow();
     syncZRangeUI();
     syncTakeBand();
-    syncLineRead();
     syncBackButton();
+    syncCard();
     if (doc && currentSelection.length) describeSelection(); else info(introInfo());
   }
 
@@ -1004,7 +1024,21 @@ var NSO_MICROSCOPE = (function () {
     if (vp) vp.dataset.plate = plateName === 'take' ? '2' : '1';
     syncExportRow();
   }
-  function syncPlate() { syncPlateUI(); badgeFor(); }
+  function syncPlate() { syncPlateUI(); badgeFor(); syncCard(); }
+
+  /**
+   * The card's side (docs/GSCOPE.md item 12): the document decides it. A
+   * toolpath - a slice made here, or a sliced file - is the Slice side; a mesh,
+   * pieces or an empty plate is the Normal side. The switch shows it, and the
+   * rows for that side are the ones the card shows (CSS, by data-side).
+   */
+  function cardSide() { return doc && doc.kind === 'toolpath' ? 'slice' : 'normal'; }
+  function syncCard() {
+    var c = $('ms-main-card');
+    if (c) c.dataset.side = cardSide();
+    var S = window.NSO_GSCOPE_SLICE;
+    if (S && S.syncToggle) S.syncToggle();
+  }
   function badgeFor() {
     if (!isolated) badge(plateBadge());
   }
@@ -1339,18 +1373,72 @@ var NSO_MICROSCOPE = (function () {
     return best;
   }
 
-  /** Is the press the capture box's: one of its three dots, or its face in front of what is drawn there? */
+  // A capture box's three dots (item 8) are drawn over everything and always
+  // own the pointer: a press on one is a handle drag even with the piece in
+  // front of it, in any mode, and never falls through to the piece. They are
+  // picked ON SCREEN - within DOT_PICK_PX of where a dot is drawn, however
+  // small - and never drawn smaller than DOT_MIN_PX, so at any zoom a dot you
+  // can see is one you can take.
+  var DOT_PICK_PX = 10, DOT_MIN_PX = 6;
+  // [part, the drag it starts] in the old handler's priority: move > thickness > X and Y
+  var DOT_KINDS = [['handle', 'move'], ['heightHandle', 'resizeH'], ['cornerHandle', 'resizeXY']];
+
+  /** World units per screen pixel at distance 1 from the camera. */
+  function worldPerPx() {
+    var h = (view.renderer.domElement.clientHeight || 1);
+    return 2 * Math.tan(view.camera.fov * Math.PI / 360) / h;
+  }
+
+  /** The dot under the pointer: { ballIndex, type } (type as the drag it starts), or null. */
+  function dotAt(e) {
+    if (!view || !balls.length) return null;
+    var r = view.renderer.domElement.getBoundingClientRect();
+    if (!r.width || !r.height) return null;
+    var px = e.clientX - r.left, py = e.clientY - r.top, k = worldPerPx();
+    var best = null, bestScore = Infinity, cam = view.camera, p = new THREE.Vector3();
+    balls.forEach(function (b, i) {
+      DOT_KINDS.forEach(function (kind, pri) {
+        var m = b[kind[0]];
+        m.getWorldPosition(p);
+        var dist = cam.position.distanceTo(p);
+        var q = p.clone().project(cam);
+        if (q.z > 1 || q.z < -1) return;                      // behind the camera, or past its far plane
+        var sx = (q.x + 1) / 2 * r.width, sy = (1 - q.y) / 2 * r.height;
+        var d = Math.hypot(sx - px, sy - py);
+        var reach = Math.max(DOT_PICK_PX, m.scale.x / (k * Math.max(dist, 1e-6)));
+        if (d > reach) return;
+        var score = d + pri * 0.01;                           // the nearest; on a tie, the old priority
+        if (score < bestScore) { bestScore = score; best = { ballIndex: i, type: kind[1] }; }
+      });
+    });
+    return best;
+  }
+
+  /** Each dot at least DOT_MIN_PX in radius on screen, whatever the zoom (the render loop asks). */
+  function dotsOnScreen(b) {
+    var cam = view.camera, k = worldPerPx();
+    [b.handle, b.heightHandle, b.cornerHandle].forEach(function (m) {
+      var base = m.userData.dotScale || m.scale.x;
+      m.scale.setScalar(Math.max(base, DOT_MIN_PX * k * cam.position.distanceTo(m.position)));
+    });
+  }
+
+  /**
+   * Is the press the capture box's? 'dot': one of its three dots, in any mode
+   * (item 8). 'face': REGION armed, the box itself, in front of what is drawn
+   * there - a click there isolates what it holds, a drag scales its footprint.
+   * Otherwise false.
+   */
   function boxOwnsPress(e) {
-    if (mode !== 'select' || !balls.length) return false;
-    var v = view, rc = rayAt(e), hs = [];
-    balls.forEach(function (b) { hs.push(b.handle, b.heightHandle, b.cornerHandle); });
-    if (rc.intersectObjects(hs).length) return true;
+    if (!balls.length) return false;
+    if (dotAt(e)) return 'dot';
+    if (mode !== 'select') return false;
+    var v = view, rc = rayAt(e);
     var fh = rc.intersectObjects(balls.map(function (b) { return b.boxMesh; }), false)[0];
     if (!fh) return false;
-    // Armed, a box's face scales the footprint - when it is in front of what the
-    // selection draws. Behind it (or with nothing there) the face is the box's.
+    // Behind what the selection draws, the press is that thing's, not the box's.
     var drawn = firstDrawn(e, isolated ? [v.detailGroup] : [v.highlightGroup, v.overviewGroup]);
-    return !drawn || fh.distance <= drawn.distance;
+    return !drawn || fh.distance <= drawn.distance ? 'face' : false;
   }
 
   var selSetOf = null;        // the selection as a Set, kept while it is the same selection (a hover asks per move)
@@ -1539,44 +1627,42 @@ var NSO_MICROSCOPE = (function () {
   function targetAt(e) {
     if (!view || !doc || isolated) return null;     // isolated, the selection is all there is (selectedHit)
     var isPath = doc.kind === 'toolpath', t;
+    // REGION's box goes where a click is, whatever it catches there: on a sparse
+    // spot (no move's midpoint within the default box) the hover still shows
+    // the box, holding nothing, and the click still places it.
     if (isPath) {
       var lh = lineHitAt(e);
       if (!lh) return null;
       var sg = lh.seg;
-      if (mode === 'line') return { items: [sg], source: 'line', seg: sg, point: lh.point, label: 'line' };
+      if (mode === 'select') {
+        var tb = tempBoxAt(lh.point);
+        t = selectByBox([gcodeBoxOf(tb)]);
+        return { items: t, source: 'box', point: lh.point, box: tb, label: 'region', seg: sg };
+      }
       var shown = shownMemo();
-      if (mode === 'piece') {
-        if (!shown.byObj.has(sg.obj)) shown.byObj.set(sg.obj, shown.list.filter(function (x) { return x.obj === sg.obj; }));
-        return { items: shown.byObj.get(sg.obj).slice(), source: 'pick', point: lh.point, label: 'piece' };
-      }
-      shown = shown.list;
-      if (mode === 'feature') {
-        t = shown.filter(function (x) { return x.obj === sg.obj && x.feature === sg.feature; });
-        return { items: t, source: 'feature', point: lh.point, label: sg.feature };
-      }
-      if (mode === 'layer') {
-        t = shown.filter(function (x) { return x.zi === sg.zi; });
-        return { items: t, source: 'layer', point: lh.point, label: 'layer ' + (sg.layer + 1) };
-      }
-      var tb = tempBoxAt(lh.point);
-      t = selectByBox([gcodeBoxOf(tb)]);
-      return t.length ? { items: t, source: 'box', point: lh.point, box: tb, label: 'region' } : null;
+      if (!shown.byObj.has(sg.obj)) shown.byObj.set(sg.obj, shown.list.filter(function (x) { return x.obj === sg.obj; }));
+      return { items: shown.byObj.get(sg.obj).slice(), source: 'pick', point: lh.point, label: 'piece', seg: sg };
     }
     var oh = objectHitAt(e);
     if (!oh) return null;
     if (mode === 'select') {
       var tb2 = tempBoxAt(oh.point);
       t = selectByBox([gcodeBoxOf(tb2)]);
-      return t.length ? { items: t, source: 'box', point: oh.point, box: tb2, label: 'region', stand: oh.box ? 'box' : null } : null;
+      return { items: t, source: 'box', point: oh.point, box: tb2, label: 'region', stand: oh.box ? 'box' : null };
     }
     // stand: 'box' when the piece's box answered for its surface (a big piece, its tree still building)
     return { items: [oh.obj], source: 'pick', point: oh.point, label: 'piece', stand: oh.box ? 'box' : null };
   }
 
-  /** A press here: the selection when it is under the pointer, else what the mode takes. */
+  /**
+   * A press here: the selection when it is under the pointer, else what the mode
+   * takes. With REGION armed only the boxes' own selection counts as "the
+   * selection" here (a click inside the box isolates it); a piece picked before
+   * is boxed like any other.
+   */
   function pressTarget(e) {
     if (!doc) return null;
-    if (currentSelection.length && selectedHit(e)) {
+    if (currentSelection.length && (mode !== 'select' || selectionSource === 'box') && selectedHit(e)) {
       return { items: currentSelection, source: selectionSource, selected: true, label: 'selection' };
     }
     return targetAt(e);
@@ -1613,6 +1699,7 @@ var NSO_MICROSCOPE = (function () {
       if (c.material) c.material.dispose();
     }
     if (view.renderer && view.renderer.domElement) view.renderer.domElement.style.cursor = '';
+    hoverLine(null);
   }
 
   /** Draw `tgt` as the hover: its lines in the hover colour over the view, or its pieces tinted. */
@@ -1628,7 +1715,7 @@ var NSO_MICROSCOPE = (function () {
     var mat = function () {
       return new THREE.LineBasicMaterial({ color: HOVER_COLOR, depthTest: false, transparent: true, opacity: 0.95 });
     };
-    if (doc.kind === 'toolpath') {
+    if (doc.kind === 'toolpath' && tgt.items.length) {
       var segs = tgt.items;
       if (segs.length <= HIGHLIGHT_PRISM_CAP) {
         var pm = prismMesh(segs, HOVER_COLOR);
@@ -1642,7 +1729,7 @@ var NSO_MICROSCOPE = (function () {
         ls.renderOrder = 8;
         g.add(ls);
       }
-    } else {
+    } else if (doc.kind !== 'toolpath') {
       tgt.items.forEach(function (o) {
         var m = view.overviewMeshes[o.name];
         if (!m || !m.visible) return;
@@ -1714,14 +1801,25 @@ var NSO_MICROSCOPE = (function () {
   }
   function hoverNow(e) {
     if (!view || !doc || !isOpen() || pull) return;
-    var tgt = null;
+    var tgt = null, own = false, seg = null;
     // a hover over a big plate 2 piece whose tree (nso_bvh.js) is not built yet outlines nothing until it is,
     // rather than walk every triangle - the main viewport's hover does the same
     view.raycaster.nsoHover = true;
-    try { tgt = (currentSelection.length && selectedHit(e)) ? null : targetAt(e); } catch (err) { tgt = null; }
+    try {
+      // a box's dot or (REGION armed) the box itself: a press there is the box's, so
+      // nothing new is outlined - what a click inside it isolates is the selection, lit already
+      own = boxOwnsPress(e);
+      if (!own && currentSelection.length && (mode !== 'select' || selectionSource === 'box') && selectedHit(e)) {
+        if (doc.kind === 'toolpath') { var lh = lineHitAt(e); seg = lh && lh.seg; }
+      } else if (!own) {
+        tgt = targetAt(e);
+        seg = tgt && tgt.seg;
+      }
+    } catch (err) { tgt = null; }
     finally { view.raycaster.nsoHover = false; }
-    if (!tgt) { clearHover(); return; }
-    drawHover(tgt);
+    if (own || !tgt) clearHover(); else drawHover(tgt);
+    if (own) view.renderer.domElement.style.cursor = own === 'dot' ? 'grab' : 'pointer';
+    hoverLine(seg);
   }
 
   /** A piece dragged onto the active plate (one that moves when dragged) under the pointer, or null. */
@@ -2106,8 +2204,10 @@ var NSO_MICROSCOPE = (function () {
     if (v) v.platePress = null;
     if (!v || e.button !== 0 || pull) return;
     if (!doc) { notePlatePress(e); return; }
-    if (boxOwnsPress(e)) {                         // the box's dots and face: the older handler has them
-      v.boxPress = [e.clientX, e.clientY];           // ...but a click on it (no travel) toggles the isolation of what it holds
+    var own = boxOwnsPress(e);
+    if (own) {                                     // the box's dots and face: the older handler has them
+      // ...and a click inside the box (no travel, not on a dot) toggles the isolation of what it holds
+      v.boxPress = { x: e.clientX, y: e.clientY, dot: own === 'dot' };
       return;
     }
     v.boxPress = null;
@@ -2194,17 +2294,29 @@ var NSO_MICROSCOPE = (function () {
         if (e && !view.hookTook && Math.hypot(e.clientX - pp.x, e.clientY - pp.y) < pullSlop() && isOpen()) { activatePlate(pp.name); return; }
       }
       var bp = view && view.boxPress;
-      if (bp && e && Math.hypot(e.clientX - bp[0], e.clientY - bp[1]) < pullSlop() && currentSelection.length) {
+      // a dot is a handle: pressed and let go, it isolates nothing (item 8)
+      if (bp && !bp.dot && e && Math.hypot(e.clientX - bp.x, e.clientY - bp.y) < pullSlop() && currentSelection.length) {
         if (isolated) unIsolate(); else isolate();
       }
       if (view) view.boxPress = null;
       return;
     }
-    var P = pull;
-    var r = !P.cancelled && window.nsoGrab && window.nsoGrab.active() ? window.nsoGrab.end() : null;
-    pull = null;
-    carriedOver = null;
-    if (view) view.controls.enabled = true;
+    var P = pull, r = null;
+    // Whatever the drop does - and it reaches far: a seat, a slice joined, a
+    // plate redrawn - the press is over when it returns or throws. A throw
+    // that left `pull` set used to lock G-scope: no click, hover or pull
+    // was ever taken again, and the orbit stayed off.
+    try {
+      r = !P.cancelled && window.nsoGrab && window.nsoGrab.active() ? window.nsoGrab.end() : null;
+    } catch (err) {
+      console.error('[g-scope] let go', err);
+      say('That drop failed - see the console. G-scope is ready for the next press.', true);
+      P.cancelled = true;
+    } finally {
+      pull = null;
+      carriedOver = null;
+      if (view) view.controls.enabled = true;
+    }
     if (P.cancelled) return;
     if (P.live || (r && r.handled)) { if (view) view.mouseDownPos = null; return; }
     if (P.dom) return;                                      // the card's own click does it
@@ -2216,27 +2328,43 @@ var NSO_MICROSCOPE = (function () {
 
   /**
    * A click on a target. On the selection: isolated, it is whole again; else it
-   * is isolated. On anything else: it becomes the selection and is isolated.
+   * is isolated. REGION armed (item 7): the click PLACES a box where it is, and
+   * does nothing else - the box's dots size it, and a click inside it (or
+   * Isolate) isolates what it holds. On anything else: it becomes the
+   * selection and is isolated.
    */
   function clickTarget(tgt, e) {
     if (!tgt || !doc) return;
-    if (mode === 'line' && e && e.shiftKey && tgt.seg && !isolated) { pickLine(tgt.seg, true); return; }
     if (tgt.selected) { if (isolated) unIsolate(); else isolate(); return; }
     if (tgt.source === 'box') {
-      // the box a click drops, where it dropped
+      // the box a click places, where it was placed
       var hp0 = tgt.point;
       var ang = pieceAngleNear(hp0.x + doc.cx, -hp0.z + doc.cy);
       if (defaultRx != null) addBall(hp0.clone(), defaultRx, defaultH, defaultRy, ang);
       else addBall(hp0.clone(), defaultR, defaultH, undefined, ang);
       selectionSource = 'box';
       computeSelectionInfo();
-    } else if (tgt.source === 'line' && tgt.seg) {
+      syncExportRow();
+      return;
+    }
+    if (tgt.source === 'line' && tgt.seg) {
       pickLine(tgt.seg, false);
     } else {
       removeAllBalls();
       setSelection(tgt.items, tgt.source);
     }
     isolate();
+  }
+
+  /** Escape on a box not isolated: the last one placed goes (item 7). True if one did. */
+  function removeLastBox() {
+    if (isolated || !balls.length || !view) return false;
+    var b = balls.pop();
+    boxParts(b).forEach(function (o) { view.scene.remove(o); disposeTree(o); });
+    selectionSource = 'box';
+    computeSelectionInfo();
+    syncExportRow();
+    return true;
   }
 
   /** A click on the other plate: it is the active one now - its Features, slider, cards and Export. */
@@ -2264,7 +2392,9 @@ var NSO_MICROSCOPE = (function () {
 
   function cancelPull() {
     if (!pull) return;
-    if (window.nsoGrab && window.nsoGrab.active()) window.nsoGrab.cancel();
+    // a cancel that throws must not stop what asked for it (close() starts here)
+    try { if (window.nsoGrab && window.nsoGrab.active()) window.nsoGrab.cancel(); }
+    catch (err) { console.error('[g-scope] cancel', err); }
     if (pull) pull.cancelled = true;
   }
 
@@ -2697,16 +2827,18 @@ var NSO_MICROSCOPE = (function () {
     var edges = new THREE.LineSegments(edgesGeo, new THREE.LineBasicMaterial({ color: 0xffffff }));
     boxMesh.add(edges);
 
-    var handle = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 8),
-      new THREE.MeshBasicMaterial({ color: 0x5b8cff }));       // centre dot - drag to MOVE
-    var heightHandle = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 6),
-      new THREE.MeshBasicMaterial({ color: 0xffb35b }));       // top dot - drag to set thickness
-    // corner dot - drag to size X and Y. Drawn over the toolpath: the corner
-    // it sits on is usually inside a wall of lines, and a handle you cannot
-    // see is one you cannot find (the raycast finds it through them anyway).
-    var cornerHandle = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 6),
-      new THREE.MeshBasicMaterial({ color: 0x4cd97b, depthTest: false, depthWrite: false }));
-    cornerHandle.renderOrder = 10;
+    // The three dots are drawn over everything - no depth test, after the
+    // hover and the highlight (renderOrder 20; those are 8) - like the rotate
+    // rings: a handle you cannot see is one you cannot find, and the piece is
+    // usually in front of at least one of them (item 8). dotAt() picks them on
+    // screen, so what is drawn is what takes the press.
+    var dotMat = function (c) {
+      return new THREE.MeshBasicMaterial({ color: c, depthTest: false, depthWrite: false, transparent: true });
+    };
+    var handle = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 8), dotMat(0x5b8cff));         // centre dot - drag to MOVE
+    var heightHandle = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 6), dotMat(0xffb35b));   // top dot - drag to set thickness
+    var cornerHandle = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 6), dotMat(0x4cd97b));   // corner dot - drag to size X and Y
+    handle.renderOrder = heightHandle.renderOrder = cornerHandle.renderOrder = 20;
 
     v.scene.add(boxMesh); v.scene.add(handle); v.scene.add(heightHandle); v.scene.add(cornerHandle);
     return { boxMesh: boxMesh, edges: edges, handle: handle, heightHandle: heightHandle,
@@ -2826,11 +2958,14 @@ var NSO_MICROSCOPE = (function () {
     b.boxMesh.rotation.set(0, b.a || 0, 0);
     b.boxMesh.scale.set(b.rx * 2, b.h * 2, b.ry * 2);
     b.handle.position.copy(b.point);
-    b.handle.scale.setScalar(Math.max(0.35, rMax * 0.1));
+    b.handle.userData.dotScale = Math.max(0.35, rMax * 0.1);
     b.heightHandle.position.set(b.point.x, b.point.y + b.h, b.point.z);
-    b.heightHandle.scale.setScalar(Math.max(0.3, rMax * 0.08));
+    b.heightHandle.userData.dotScale = Math.max(0.3, rMax * 0.08);
     b.cornerHandle.position.copy(cornerPoint(b));
-    b.cornerHandle.scale.setScalar(Math.max(0.3, rMax * 0.08));
+    b.cornerHandle.userData.dotScale = Math.max(0.3, rMax * 0.08);
+    // the size it has in the box; never under DOT_MIN_PX on screen
+    if (view) dotsOnScreen(b);
+    else [b.handle, b.heightHandle, b.cornerHandle].forEach(function (m) { m.scale.setScalar(m.userData.dotScale); });
   }
 
   // `r` is the square footprint every caller before the corner handle passed;
@@ -3141,59 +3276,49 @@ var NSO_MICROSCOPE = (function () {
   // --- viewport interaction -------------------------------------------------
 
   // ===========================================================================
-  // The Select card: five modes, one selection model
+  // Selecting: a click in the view, and the card's REGION row
   // ===========================================================================
   //
-  //   Piece    a whole piece
-  //   Region   the capture box (a box dropped where you click, sized by its dots)
-  //   Feature  a slicer line type - a line of it on the piece
-  //   Line     one extrusion line (slices only); the arrows step along it
-  //   Layer    every layer of a slice is a card; the slider's range is one more
-  //
-  // In EVERY mode the same three things, whatever the thing is:
-  //   hover   outlines what a click would take
-  //   click   isolates it (what is not it goes out of the view); click it again,
-  //           or press Escape, and it is whole again
-  //   drag    copies it onto plate 2 (the #223 gesture; a piece on plate 2 is moved)
-  // and a press on bare plate - nothing to take - orbits. There is no orbit
-  // MODE: the orbit is what a drag does where there is nothing to drag.
+  // The view's own gesture is the piece (it was SELECT > Piece): hover outlines
+  // it, a click isolates it (what is not it goes out of the view; click it
+  // again, or press Escape, and it is whole again), a drag copies it onto the
+  // other plate (a piece dragged onto a plate is moved). A press on bare plate -
+  // nothing to take - orbits. The card's REGION row arms the capture box
+  // (mode 'select', its button #ms-mode-select): a click places a box and does
+  // nothing else (item 7). The other ways in that SELECT had went to their new
+  // homes (docs/GSCOPE.md item 12): a line type is the Features list, a layer
+  // is the slider and Take band, a single move is read out on hover.
 
-  var MODES = ['piece', 'select', 'feature', 'line', 'layer'];   // 'select' is Region (its id, ms-mode-select, is older than its name)
+  var MODES = ['piece', 'select'];   // 'select' is Region (its id, ms-mode-select, is older than its name)
   var MODE_ALIAS = { orbit: 'piece', region: 'select' };
-  var MODE_SOURCE = { piece: 'pick', select: 'box', feature: 'feature', line: 'line', layer: 'layer' };
 
-  /** Does this plate have what the mode takes? Feature, Line and Layer are a slice's. */
+  /** REGION needs something to box. */
   function modeAvailable(m) {
-    if (!doc) return false;
-    if (m === 'piece' || m === 'select') return true;
-    return doc.kind === 'toolpath';
+    return m === 'piece' || !!doc;
   }
 
   function setMode(newMode) {
     newMode = MODE_ALIAS[newMode] || newMode;
     if (MODES.indexOf(newMode) < 0 || !modeAvailable(newMode)) newMode = 'piece';
     mode = newMode;
-    MODES.forEach(function (m) {
-      var b = $('ms-mode-' + m);
-      if (!b) return;
-      b.classList.toggle('active', mode === m);
-      b.setAttribute('aria-pressed', String(mode === m));
-      b.disabled = !modeAvailable(m);
-    });
-    show('ms-select-controls', mode === 'select' && !isolated);
-    var note = $('ms-mode-note');
-    var other = plateTitle(otherPlate()).toLowerCase();
-    var text = {
-      piece: 'Hover a piece, click to isolate it. Drag it onto ' + other + '.',
-      select: 'Click a piece to drop a flat capture box there. Drag its blue centre dot to move it, the green corner dot to size it along and across, a side to scale the footprint, the orange top dot to set how thick it is.',
-      feature: 'Hover a line for that line type. Click to isolate it. Drag it onto ' + other + '. (The Features list only shows and hides line types.)',
-      line: 'Hover a line. Click to isolate that one move; Shift-click adds or removes one. The arrows step to the neighbouring move.',
-      layer: 'Every layer is a card: hover one, click to isolate it, drag it onto ' + other + '. The slider\'s range is the band: Take band isolates it as one piece.'
-    }[mode];
-    if (note) note.textContent = text;
+    var b = $('ms-mode-select');
+    if (b) {
+      b.classList.toggle('active', mode === 'select');
+      b.setAttribute('aria-pressed', String(mode === 'select'));
+      b.disabled = !modeAvailable('select');
+    }
+    var note = $('ms-region-note');
+    if (note) note.hidden = mode !== 'select';
     var hint = $('ms-hint-badge');
     if (hint) hint.textContent = '';
     clearHover();
+  }
+
+  /** Escape with REGION armed and nothing else to undo: disarmed. True if it was armed. */
+  function disarmRegion() {
+    if (mode !== 'select') return false;
+    setMode('piece');
+    return true;
   }
 
   function ndc(e) {
@@ -3283,15 +3408,16 @@ var NSO_MICROSCOPE = (function () {
       v.mouseDownPos = [e.clientX, e.clientY];
       v.hookTook = false;
       // The box handles are left-button grabs; a right press is the pan.
-      if (mode !== 'select' || e.button !== 0) return;
+      if (e.button !== 0 || !balls.length) return;
       var p = ndc(e);
       v.dragRaycaster.setFromCamera(new THREE.Vector2(p[0], p[1]), v.camera);
 
-      // priority: centre handle (move) > height handle (thickness) >
-      //           corner handle (X and Y) > box face
-      var handleHits = v.dragRaycaster.intersectObjects(balls.map(function (b) { return b.handle; }));
-      if (handleHits.length > 0) {
-        var i1 = balls.findIndex(function (b) { return b.handle === handleHits[0].object; });
+      // A dot, in any mode, whatever stands in front of it (item 8), picked on
+      // screen as it is drawn (dotAt): the centre (move) > the top (thickness) >
+      // the corner (X and Y). Then, REGION armed, the box's face.
+      var dot = dotAt(e);
+      if (dot && dot.type === 'move') {
+        var i1 = dot.ballIndex;
         v.dragState = { type: 'move', ballIndex: i1 };
         v.controls.enabled = false;
         var d1 = new THREE.Vector3();
@@ -3299,26 +3425,22 @@ var NSO_MICROSCOPE = (function () {
         v.resizePlane.setFromNormalAndCoplanarPoint(d1, balls[i1].point);
         return;
       }
-      var heightHits = v.dragRaycaster.intersectObjects(balls.map(function (b) { return b.heightHandle; }));
-      if (heightHits.length > 0) {
-        v.dragState = {
-          type: 'resizeH',
-          ballIndex: balls.findIndex(function (b) { return b.heightHandle === heightHits[0].object; })
-        };
+      if (dot && dot.type === 'resizeH') {
+        v.dragState = { type: 'resizeH', ballIndex: dot.ballIndex };
         v.controls.enabled = false;
         return;
       }
       // The corner dot: drag it across a horizontal plane at the corner's own
       // height, and the footprint's X and Y half-extents follow the pointer
       // independently. The box stays centred, as every other resize keeps it.
-      var cornerHits = v.dragRaycaster.intersectObjects(balls.map(function (b) { return b.cornerHandle; }));
-      if (cornerHits.length > 0) {
-        var i2 = balls.findIndex(function (b) { return b.cornerHandle === cornerHits[0].object; });
+      if (dot && dot.type === 'resizeXY') {
+        var i2 = dot.ballIndex;
         v.dragState = { type: 'resizeXY', ballIndex: i2 };
         v.controls.enabled = false;
         v.resizePlane.setFromNormalAndCoplanarPoint(new THREE.Vector3(0, 1, 0), cornerPoint(balls[i2]));
         return;
       }
+      if (mode !== 'select') return;
       // Not recursive: the box's edge lines are a child of boxMesh, and at the
       // raycaster's 1 mm Line threshold a press near any edge hit THEM first -
       // no box owns that object, so the drag indexed balls[-1] and threw.
@@ -3516,9 +3638,27 @@ var NSO_MICROSCOPE = (function () {
     v.highlightGroup.visible = !detail;
     var unit = doc && doc.kind === 'toolpath' ? 'segments' : 'object(s)';
     badge(detail ? 'Detail: ' + currentSelection.length + ' ' + unit : plateBadge());
-    show('ms-detail-controls', isolated);
-    show('ms-select-controls', !isolated && mode === 'select');
+    syncCardRows();
     applyFeatureVisibility();
+  }
+
+  /** The card's REGION and WHOLE PART buttons: what each can do now. */
+  function syncCardRows() {
+    setDisabled($('ms-btn-isolate'), isolated || !currentSelection.length);
+    setDisabled($('ms-btn-clear'), !balls.length);
+    setDisabled($('ms-btn-back'), !isolated);
+  }
+
+  /**
+   * A button switched off. One that had the keyboard hands it to the panel: a
+   * disabled button drops its focus to the page, and Escape - the panel's -
+   * would then reach nothing (Isolate pressed, then Escape, did nothing).
+   */
+  function setDisabled(el, off) {
+    if (!el || el.disabled === !!off) return;
+    var panel = $('microscope');
+    if (off && document.activeElement === el && panel && panel.focus) panel.focus();
+    el.disabled = !!off;
   }
 
   function isolate(opts) {
@@ -3553,8 +3693,9 @@ var NSO_MICROSCOPE = (function () {
     requestAnimationFrame(function () { animate(gen); });
     view.controls.update();
     followClip();
-    // The corner dot follows the camera round to the near corner.
-    balls.forEach(function (b) { b.cornerHandle.position.copy(cornerPoint(b)); });
+    // The corner dot follows the camera round to the near corner, and every
+    // dot keeps its least size on screen.
+    balls.forEach(function (b) { b.cornerHandle.position.copy(cornerPoint(b)); dotsOnScreen(b); });
     view.renderer.render(view.scene, view.camera);
   }
 
@@ -3605,7 +3746,6 @@ var NSO_MICROSCOPE = (function () {
     wanted.forEach(function (m) { keep[m.index] = 1; });
     doc.layerIndex = li;
     setSelection(doc.segments.filter(function (s) { return keep[s.mv.index] === 1; }), 'layer');
-    syncLayerRow();
     return currentSelection;
   }
 
@@ -3749,7 +3889,6 @@ var NSO_MICROSCOPE = (function () {
     refreshHighlight();
     syncZRangeUI();
     syncTakeBand();
-    syncLineRead();
     syncRenderRow();
   }
   /** Coalesce a burst of slider moves into one redraw per frame. */
@@ -3828,8 +3967,8 @@ var NSO_MICROSCOPE = (function () {
   /**
    * Clear the selection FROM VIEW. Hides it - a piece, a feature's lines, a
    * picked line - and stops there: no export, no plate change, no undo entry.
-   * `Show all` brings it back. This is the view-only answer to "get this out
-   * of my way", and it is deliberately not wired to anything that writes.
+   * The card has no button for it (round 2c: its job is the corner CLEAR's);
+   * it is the API's, view only, and deliberately not wired to anything that writes.
    */
   function clearFromView() {
     if (!doc || !currentSelection.length) return 0;
@@ -3844,15 +3983,13 @@ var NSO_MICROSCOPE = (function () {
     setSelection([], selectionSource === 'line' ? 'line' : 'box');
     viewChanged();
     info('<b>' + n + ' ' + (doc.kind === 'toolpath' ? 'line(s)' : 'piece(s)') +
-         '</b> cleared from view. Nothing was exported and the plate is unchanged. ' +
-         '<b>Show all</b> brings them back.');
+         '</b> cleared from view. Nothing was exported and the plate is unchanged.');
     return n;
   }
 
   /**
-   * Check all: every box in the Features list checked - every line type shown,
-   * Travel too - and nothing else. What was isolated stays isolated, what was
-   * cleared from view stays cleared (CLEAR is what makes a plate whole again).
+   * Check all (the Features list's head): every box checked - every line type
+   * shown, Travel too - and nothing else. What was isolated stays isolated.
    */
   function checkAll() {
     if (!doc) return;
@@ -4048,7 +4185,6 @@ var NSO_MICROSCOPE = (function () {
     var shown = shownSegments();
     setSelection(sel, 'line');
     lineCursor = shown.indexOf(seg);
-    syncLineRead();
   }
 
   /** Step the picked line to the next / previous move that is drawn. */
@@ -4074,24 +4210,12 @@ var NSO_MICROSCOPE = (function () {
       m.length.toFixed(2) + ' mm long, ' + (m.angle * 180 / Math.PI).toFixed(1) + ' deg';
   }
 
-  function syncLineRead() {
-    var el = $('ms-line-read');
-    if (!el) return;
-    var shown = shownSegments();
-    if (selectionSource === 'line' && currentSelection.length && lineCursor >= 0) {
-      el.textContent = 'Line ' + (lineCursor + 1) + ' of ' + shown.length + ' shown' +
-        (currentSelection.length > 1 ? ' (' + currentSelection.length + ' picked)' : '');
-    } else {
-      el.textContent = shown.length + ' line(s) shown - click one, or step with the arrows';
-    }
-  }
-
   // --- the layer-range slider ---------------------------------------------------
   //
   // Two handles on one vertical track, docked to the viewport's right edge:
   // the lower and upper Z the view draws. On a slice the steps are the file's
   // own printing heights, so both handles on one step is one layer, and
-  // spread apart is a chunk of layers; on a mesh (no layers - see syncLayerRow)
+  // spread apart is a chunk of layers; on a mesh (no layers)
   // the steps are millimetres across the part and the view is clipped. A VIEW:
   // it changes what is drawn and what a click can catch. Take band reads the band.
 
@@ -4255,7 +4379,7 @@ var NSO_MICROSCOPE = (function () {
 
   // --- Take band: the slider's range, as one piece -----------------------------
   //
-  // The Select card's Layer row. The layer-range slider's range IS the band:
+  // The card's TAKE BAND row, the Slice side. The layer-range slider's range IS the band:
   // Take band selects everything it leaves drawn - the Range card's own
   // selection (rangeTarget) - and isolates it, one piece, to drag onto plate 2
   // or export like any isolation. It replaced Crop Z's "Crop out band" (round
@@ -4266,7 +4390,7 @@ var NSO_MICROSCOPE = (function () {
   // re-read it.
   function bandReason(n) {
     if (!doc) return 'Open something first';
-    if (doc.kind !== 'toolpath') return 'A band is a slice\'s layers: turn Slice view on';
+    if (doc.kind !== 'toolpath') return 'A band is a slice\'s layers: flip the switch to Slice';
     if (!(n != null ? n : shownSegments().length)) return 'Nothing is drawn in the slider\'s range';
     return '';
   }
@@ -4289,7 +4413,6 @@ var NSO_MICROSCOPE = (function () {
     if (why) { say('Take band: ' + why, true); return null; }
     var t = rangeTarget();
     if (isolated) back();
-    setMode('layer');
     removeAllBalls();
     setSelection(t.items, 'range');
     isolate();
@@ -4584,9 +4707,9 @@ var NSO_MICROSCOPE = (function () {
   }
 
   /**
-   * Toolpath / Solid, a row of the View card: always there, enabled only while
-   * a slice is shown - Slice view on, or a sliced file (a slice already). On a
-   * mesh there is nothing to draw as a toolpath, and the row says so.
+   * Toolpath / Solid, a row of the card's Slice side: enabled while a slice is
+   * shown - one made here, or a sliced file. On a mesh (the Normal side, where
+   * the row is not shown) there is nothing to draw as a toolpath.
    */
   function syncRenderRow() {
     var isPath = !!(doc && doc.kind === 'toolpath');
@@ -4595,7 +4718,7 @@ var NSO_MICROSCOPE = (function () {
     if (b) { b.classList.toggle('active', renderMode === 'solid'); b.setAttribute('aria-pressed', String(renderMode === 'solid')); b.disabled = !isPath; }
     var rd = $('ms-render-read');
     if (rd) {
-      if (!isPath) rd.textContent = 'Turn Slice view on to draw the slice as a toolpath or as a solid.';
+      if (!isPath) rd.textContent = 'Flip the switch to Slice to draw the slice as a toolpath or as a solid.';
       else if (renderMode !== 'solid') rd.textContent = 'Each move drawn as a line; a small selection is highlighted as its flat beads.';
       else if (view && view.solidBuilt) rd.textContent = 'Shown: ' + describeSolid(view.solidBuilt.stats) + '.';
       else rd.textContent = 'Nothing shown.';
@@ -4709,42 +4832,9 @@ var NSO_MICROSCOPE = (function () {
     show('ms-take-export-row', wholePlateObjects().length > 0);
     var selTitle = $('ms-export-sel-title');
     if (selTitle) selTitle.textContent = isPieces(doc) ? 'Selected piece' : 'Selection';
-    var iso = $('ms-btn-isolate');
-    if (iso) iso.disabled = !currentSelection.length;
-    var iso2 = $('ms-btn-isolate-line');
-    if (iso2) iso2.disabled = !currentSelection.length;
-    var clr = $('ms-btn-clear-view');
-    if (clr) clr.disabled = !currentSelection.length;
-    var sv = $('ms-btn-select-visible');
-    if (sv) sv.disabled = !doc;
+    syncCardRows();
     var sa = $('ms-btn-show-all');
     if (sa) sa.disabled = !hasLineTypes();
-  }
-
-  function syncLayerRow() {
-    var n = layerCount();
-    var row = $('ms-layer-row');
-    var isPath = !!(doc && doc.kind === 'toolpath');
-    if (row) row.style.display = isPath ? 'block' : 'none';
-    show('ms-line-controls', isPath);
-    var note = $('ms-layer-note');
-    var num = $('ms-layer-index');
-    var btn = $('ms-btn-layer-select');
-    var prev = $('ms-layer-prev'), next = $('ms-layer-next');
-    var has = n > 0;
-    [num, btn, prev, next].forEach(function (el) { if (el) el.disabled = !has; });
-    if (num) {
-      num.max = has ? String(n - 1) : '0';
-      num.value = String(doc && doc.layerIndex != null ? doc.layerIndex : 0);
-    }
-    if (note) {
-      // Refused, not faked. Inventing layers for an unsliced mesh would mean
-      // guessing a layer height the file never states - the same fiction the
-      // importer refuses when it drops Travel moves.
-      note.textContent = has
-        ? n + ' layers in this file'
-        : 'This file is not sliced, so it has no layers. Use the capture box.';
-    }
   }
 
   function syncHeader() {
@@ -5003,19 +5093,16 @@ var NSO_MICROSCOPE = (function () {
     buildOverview();
     buildLegend();
     applyFeatureVisibility();
-    // Orbit: a plain click on a piece does nothing until "Click to select
-    // region" is armed - a box is something you ask for, not a side effect
-    // of looking round the part.
+    // Every document opens with REGION off: a box is something you ask for, not
+    // a side effect of looking round the part.
     setMode('piece');
     normalView();                 // frames the whole part
     syncHeader();
-    syncLayerRow();
     info(introInfo());
     syncExportRow();
     syncRenderRow();
     syncZRangeUI();
     syncTakeBand();
-    syncLineRead();
     syncBackButton();
     if (view) view.worldSphere = worldSphere();
     docListeners.forEach(function (fn) {
@@ -5051,8 +5138,9 @@ var NSO_MICROSCOPE = (function () {
   /**
    * CLOSE (and BACK, and every export that leaves G-scope) end the visit
    * whole. Nothing of it survives but an imported file: plate 2 is thrown
-   * away, plate 1 is emptied, the Display set, the render mode, the mode and
-   * the open card go back to their defaults, and the next open starts from a
+   * away, plate 1 is emptied, the Display set, the render mode, REGION and the
+   * open ▾ menu or Export card go back to their defaults (the Slice settings
+   * fold and take the printer profile again: app-gscope-slice.js), and the next open starts from a
    * fresh read of the plate - or of the imported file, if plate 1 was showing
    * it (or a slice made from it) when G-scope closed.
    */
@@ -5069,7 +5157,7 @@ var NSO_MICROSCOPE = (function () {
     reset();
     FEATURE_OFF = new Set(['Travel']);
     renderMode = 'toolpath';
-    mode = 'piece';
+    setMode('piece');
   }
 
   /** Is this plate's document the imported file - as opened, re-opened, or a slice made from it? */
@@ -5114,7 +5202,6 @@ var NSO_MICROSCOPE = (function () {
     syncTakeBand();
     buildLegend();
     syncHeader();
-    syncLayerRow();
     syncExportRow();
     syncRenderRow();
     syncBackButton();
@@ -5158,23 +5245,22 @@ var NSO_MICROSCOPE = (function () {
   }
 
   // ===========================================================================
-  // Shell: the button column and its cards
+  // Shell: the card, and the two that open
   //
-  // Look and feel only. A column button opens its card (the same rows the
-  // sidebar had, now beside the column), one at a time; Escape shuts it. The
-  // engine still shows and hides those rows by id, exactly as before - the
-  // only thing added is that a button whose rows are all hidden is disabled
-  // (nothing to open), a card whose button is disabled shuts, and the Export
-  // card's two groups and the Slice report follow the rows they report on.
+  // The card (docs/GSCOPE.md item 12) is always up; the ▾ menu and Export are
+  // the two that open - one at a time, each from its own button; Escape, CLOSE
+  // or its button again shuts it, a press outside the ▾ menu shuts that one,
+  // and a choice in it does too. The engine still shows and hides the rows by
+  // id, as it always did - the only things added are that a button whose rows
+  // are all hidden is disabled (nothing to open), a card whose button is
+  // disabled shuts, and the Export card's groups follow the rows they hold.
+  // The card's height is published as --ms-card-bottom, so the left wall's
+  // readouts (and the support pop) stay under it whichever side it shows.
   // ===========================================================================
 
   // [button, card, the rows the engine shows for it - null: always available]
-  // The column is IMPORT . READ PLATE | SELECT . VIEW (docs/GSCOPE.md, item 5):
-  // Render and the Slice settings are rows of the View card, Take band is the
-  // Select card's (Layer), Overhangs is the plate SUPPORTS card's.
   var SHELL_CARDS = [
-    ['ms-nav-select', 'ms-card-select', null],
-    ['ms-nav-view', 'ms-card-view', null],
+    ['ms-btn-import-more', 'ms-import-menu', null],
     ['ms-nav-export', 'ms-card-export', ['ms-export-row', 'ms-export-solid-row', 'ms-slice-export-row', 'ms-take-export-row']]
   ];
   var shellOpen = null;      // the card id that is open, or null
@@ -5230,22 +5316,28 @@ var NSO_MICROSCOPE = (function () {
       });
       g.style.display = any ? '' : 'none';
     });
-    // The Slice report is a readout, so it lives in the dock; it shows while
-    // the Slice settings do (a mesh or a slice made here is open).
-    var rd = $('ms-slice-readout');
-    if (rd) rd.style.display = rowShown('ms-slice-row') ? '' : 'none';
   }
 
   function wireShell() {
     SHELL_CARDS.forEach(function (c) {
       bind(c[0], 'click', function () { shellCardToggle(c[1]); });
     });
+    // a press anywhere but the ▾ menu (or its button) shuts the menu
+    var panel = $('microscope');
+    if (panel && panel.dataset.menuWired !== '1') {
+      panel.dataset.menuWired = '1';
+      panel.addEventListener('pointerdown', function (ev) {
+        if (shellOpen !== 'ms-import-menu') return;
+        var m = $('ms-import-menu'), b = $('ms-btn-import-more'), t = ev.target;
+        if ((m && m.contains(t)) || (b && b.contains(t))) return;
+        shellCardClose();
+      }, true);
+    }
+    watchCard();
     if (typeof MutationObserver === 'undefined') { syncShell(); return; }
     var watch = new MutationObserver(syncShell);
     var seen = {};
-    // the Slice settings are a row of the View card (always available), but the
-    // Slice report in the dock follows them, so they are watched too
-    SHELL_CARDS.concat([[null, null, ['ms-slice-row']]]).forEach(function (c) {
+    SHELL_CARDS.forEach(function (c) {
       (c[2] || []).forEach(function (id) {
         var el = $(id);
         if (el && !seen[id]) { seen[id] = 1; watch.observe(el, { attributes: true, attributeFilter: ['style'] }); }
@@ -5254,12 +5346,26 @@ var NSO_MICROSCOPE = (function () {
     syncShell();
   }
 
+  /** The card's bottom edge, from the top of the panel, as --ms-card-bottom (the left wall stays under it). */
+  function watchCard() {
+    var card = $('ms-main-card'), panel = $('microscope');
+    if (!card || !panel || card.dataset.watched === '1') return;
+    card.dataset.watched = '1';
+    var put = function () {
+      var cr = card.getBoundingClientRect(), pr = panel.getBoundingClientRect();
+      if (!cr.height) return;                                // the panel is shut
+      panel.style.setProperty('--ms-card-bottom', Math.round(cr.bottom - pr.top) + 'px');
+    };
+    if (typeof ResizeObserver !== 'undefined') new ResizeObserver(put).observe(card);
+    put();
+  }
+
   function mount() {
     // X-ray's pattern: one rail button, a toggle, and it acts on what is
     // ALREADY on the plate rather than sending you off to fetch something
     // first. The file picker is what an empty plate falls back to, not the
-    // front door. A file already in the view is left alone on reopen - the
-    // sidebar's "Read the plate" is how you go back to the plate from one.
+    // front door. After an Import the next open shows the file again - IMPORT's
+    // ▾ Read plate is how you go back to the plate from one.
     bind('btn-microscope', 'click', function () {
       if (isOpen()) { close(); return; }
       // Every open is a fresh one (close() ended the last visit whole): the
@@ -5275,13 +5381,15 @@ var NSO_MICROSCOPE = (function () {
     bind('ms-btn-take-export-plate', 'click', exportTakeToPlate);
     bind('ms-btn-take-export-stl', 'click', exportTakeAsSTL);
     bind('ms-input', 'change', onPicked);
-    bind('ms-btn-open', 'click', openPicker);
+    bind('ms-btn-open', 'click', function () { shellCardClose(); openPicker(); });
     bind('ms-btn-plate', 'click', function () {
+      shellCardClose();                                       // a choice shuts the ▾ menu
       if (!openPlate()) say('Nothing on the plate to look at - import a file instead', true);
     });
     bind('ms-close', 'click', close);
     bind('ms-btn-back-producer', 'click', backToProducer);
-    MODES.forEach(function (m) { bind('ms-mode-' + m, 'click', function () { setMode(m); }); });
+    // REGION: a toggle - armed, a click places a capture box; again, the click is the piece's
+    bind('ms-mode-select', 'click', function () { setMode(mode === 'select' ? 'piece' : 'select'); });
     var zcard = $('ms-zr-card');
     if (zcard && zcard.dataset.wired !== '1') {
       zcard.dataset.wired = '1';
@@ -5291,19 +5399,16 @@ var NSO_MICROSCOPE = (function () {
       zcard.addEventListener('pointerleave', clearHover);
     }
     bind('ms-btn-clear', 'click', function () {
+      if (isolated && selectionSource === 'box') unIsolate();
       removeAllBalls();
       selectionSource = 'box';
       computeSelectionInfo();
+      syncExportRow();
     });
     bind('ms-btn-isolate', 'click', function () { isolate(); });
-    bind('ms-btn-isolate-line', 'click', function () { isolate(); });
     wireShell();
-    bind('ms-btn-back', 'click', back);
-    bind('ms-line-prev', 'click', function () { setMode('line'); stepLine(-1); });
-    bind('ms-line-next', 'click', function () { setMode('line'); stepLine(1); });
-    bind('ms-btn-clear-view', 'click', clearFromView);
+    bind('ms-btn-back', 'click', unIsolate);                  // WHOLE PART: back out of any isolate
     bind('ms-btn-show-all', 'click', checkAll);
-    bind('ms-btn-select-visible', 'click', selectVisible);
     bind('ms-btn-take-band', 'click', function () { takeBand(); });
     wireZRange();
     bind('ms-btn-export-plate', 'click', exportToPlate);
@@ -5312,13 +5417,6 @@ var NSO_MICROSCOPE = (function () {
     bind('ms-btn-export-solid-stl', 'click', exportSolidAsSTL);
     bind('ms-render-toolpath', 'click', function () { setRenderMode('toolpath'); });
     bind('ms-render-solid', 'click', function () { setRenderMode('solid'); });
-    bind('ms-layer-prev', 'click', function () { setMode('layer'); stepLayer(-1); });
-    bind('ms-layer-next', 'click', function () { setMode('layer'); stepLayer(1); });
-    bind('ms-btn-layer-select', 'click', function () {
-      var num = $('ms-layer-index');
-      setMode('layer');
-      selectLayer(num ? (parseInt(num.value, 10) || 0) : 0);
-    });
     if (!wiredWindow && window && window.addEventListener) {
       wiredWindow = true;
       window.addEventListener('resize', resize);
@@ -5327,30 +5425,26 @@ var NSO_MICROSCOPE = (function () {
     if (panel && panel.dataset.wired !== '1') {
       panel.dataset.wired = '1';
       panel.addEventListener('keydown', function (ev) {
-        // An open card shuts first; then what is isolated is whole again; with
-        // neither, Escape closes G-scope, as before.
-        if (ev.key === 'Escape') { if (!shellCardClose() && !unIsolate()) close(); ev.preventDefault(); return; }
-        // Left / Right step the picked line, the way the old Toolpath card's
-        // arrows did - unless a text field or the slider has the keys.
+        // Escape, one step at a time: an open ▾ menu or Export card shuts; then
+        // what is isolated is whole again; then the last box placed (not
+        // isolated) goes; then REGION disarms; with none of those, Escape
+        // closes G-scope, as before.
+        if (ev.key === 'Escape') {
+          if (!shellCardClose() && !unIsolate() && !removeLastBox() && !disarmRegion()) close();
+          ev.preventDefault();
+          return;
+        }
+        // Left / Right step a picked line (the API's pickLine / stepLine) -
+        // unless a text field or the slider has the keys.
         var t = ev.target;
         if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || (t.getAttribute && t.getAttribute('role') === 'slider'))) return;
         if (doc && doc.kind === 'toolpath' && (ev.key === 'ArrowRight' || ev.key === 'ArrowLeft') &&
-            (mode === 'line' || selectionSource === 'line')) {
+            selectionSource === 'line') {
           stepLine(ev.key === 'ArrowRight' ? 1 : -1);
           ev.preventDefault();
         }
       });
     }
-  }
-
-  function stepLayer(d) {
-    var n = layerCount();
-    if (!n) return;
-    var num = $('ms-layer-index');
-    var at = num ? (parseInt(num.value, 10) || 0) : 0;
-    var next = Math.max(0, Math.min(n - 1, at + d));
-    if (num) num.value = String(next);
-    selectLayer(next);
   }
 
   if (typeof document !== 'undefined') {
@@ -5419,6 +5513,22 @@ var NSO_MICROSCOPE = (function () {
       computeSelectionInfo();
     },
     boxes: function () { return gcodeBoxes(); },
+    /** The card's side, as the switch shows it: 'normal' (a mesh, pieces, nothing) or 'slice' (a toolpath). */
+    cardSide: function () { return cardSide(); },
+    /** Each capture box's three dots, where they are drawn on screen (client px): [{ move, resizeH, resizeXY }]. */
+    boxDots: function () {
+      if (!view) return [];
+      var r = view.renderer.domElement.getBoundingClientRect(), p = new THREE.Vector3();
+      return balls.map(function (b) {
+        var o = {};
+        DOT_KINDS.forEach(function (k) {
+          b[k[0]].getWorldPosition(p);
+          var q = p.clone().project(view.camera);
+          o[k[1]] = [r.left + (q.x + 1) / 2 * r.width, r.top + (1 - q.y) / 2 * r.height];
+        });
+        return o;
+      });
+    },
     setLegendCollapsed: function (on) { setLegendCollapsed(on); },
     selectLayer: selectLayer,
     selection: function () { return currentSelection.slice(); },

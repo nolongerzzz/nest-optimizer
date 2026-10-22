@@ -831,7 +831,7 @@ var NSO_GSCOPE_SUPPORT = (function () {
     var rest = !!(opt && opt.rest);
     if (busy) return Promise.resolve({ ok: false, reason: 'busy', plain: plainWhy({ reason: 'busy' }) });
     var d = plateDoc();
-    if (!d) return Promise.resolve({ ok: false, reason: 'G-scope is not on the plate', plain: 'Read the plate first.' });
+    if (!d) return Promise.resolve({ ok: false, reason: 'G-scope is not on the plate', plain: 'Read the plate first (IMPORT ▾, Read plate).' });
     var host = d.objects.find(function (o) { return o.name === hostName; });
     if (!host || isSupportId(host.sourceId)) return Promise.resolve({ ok: false, reason: 'no such piece: ' + hostName, plain: 'That piece is not on the plate.' });
     var o = optsFor(d, host);
@@ -1004,9 +1004,9 @@ var NSO_GSCOPE_SUPPORT = (function () {
    * WHERE THE CARD GOES. Next to the marker it belongs to - below and to the
    * right of it - and always wholly inside the part of the viewport the
    * window really shows (the viewport can run past the window's edge). No
-   * room below: it flips above the marker. No room above either: it pins to
-   * the shell's drop-down spot (--shell-panel-x / -y, the one spot every
-   * drop-down panel opens at), measured inside the viewport. Taller than the
+   * room below: it flips above the marker. No room above either: it pins
+   * under G-scope's card, at the left wall (--shell-pad, --ms-card-bottom:
+   * the card publishes its bottom edge), measured inside the viewport. Taller than the
    * window shows, it scrolls inside itself rather than running off. And it is
    * placed again whenever what it says changes, so a long message never
    * grows it past the edge after it was placed.
@@ -1016,7 +1016,7 @@ var NSO_GSCOPE_SUPPORT = (function () {
   function shellSpot(host) {
     var probe = document.createElement('div');
     probe.style.cssText = 'position:absolute;visibility:hidden;pointer-events:none;width:0;height:0;' +
-      'left:var(--shell-panel-x, 134px);top:var(--shell-panel-y, 52px)';
+      'left:var(--shell-pad, 8px);top:calc(var(--ms-card-bottom, 140px) + 8px)';
     host.appendChild(probe);
     var at = { x: probe.offsetLeft, y: probe.offsetTop };
     host.removeChild(probe);
