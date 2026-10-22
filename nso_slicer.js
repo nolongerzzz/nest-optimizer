@@ -1690,8 +1690,8 @@
    * layer grown by half a line (an edge the two share is not a top), opened
    * by half a line (a strip narrower than a line is an edge, not a top). A
    * stair (nso_support_interface.js, THE STAIR) is a top at every layer:
-   * each strip's down-slope pitch lies under the part, the next strip a
-   * pitch up the slope - grown by closeMm, the next strip hid it. From each top down the sheet is
+   * each strip's exposed edge lies under the part, the next strip a little
+   * up the slope - grown by closeMm, the next strip hid it. From each top down the sheet is
    * followed island by island - a layer's islands that overlap the sheet's on
    * the layer above, as each layer's lines cross the ones above (the bottom
    * transition layer runs tip to tip, past the top's footprint): the top 2
@@ -1709,8 +1709,9 @@
     var NI = C.interfaceLayers, NT = C.transitionLayers, R = C.closeMm;
     var gap = o.supportGapMm, w = o.outerWallWidthMm;
     /* a top may lie a layer further under the host than a sheet does: a
-       stair's strips stand on the 0.84 grid, so the one a layer lands on is
-       up to a pitch's rise below it (C.stairLayers) */
+       stair's band stands its back edge up to 0.55 mm under the part (its
+       width in whole beads), so the one a layer lands on can lie a layer
+       further below it (C.stairLayers) */
     var stairH = (C.stairLayers || 0) * (planes.length ? planes[planes.length - 1].h : 0.2);
     var parts = perObject.filter(function (Q) { return Q.role !== 'support'; });
     var n = planes.length;
@@ -1760,8 +1761,8 @@
         if (g.isEmpty(P.S[i])) continue;
         var over = overAt(i, gap);
         var t = over.length ? topUnder(i, over, P.footAt(i + 1)) : null;
-        /* A STAIR'S STRIP (C.stairLayers): its strips stand on the 0.84 grid,
-           so the one a layer of the part lands on can lie a layer further
+        /* A STAIR'S STRIP (C.stairLayers): a band whole beads wide, so the
+           one a layer of the part lands on can lie a layer further
            under it than a sheet does - a top there too, where it is OUTSIDE
            the support's next layer (a flat sheet's I1 seen through a channel
            of I2 is not) */

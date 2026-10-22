@@ -371,13 +371,13 @@ right over the sheet that holds it.
   other line of the object is **Support**. A STAIR (docs/SUPPORT-INTERFACE.md
   section 7) is read by the same rule, with two allowances: a top may lie a
   layer deeper under the host (`supportSheet.stairLayers`) where it lies
-  outside its next layer's outline - a strip on the 0.84 grid lies up to a
-  pitch's rise under the part; a flat sheet's I1 seen through a channel of
+  outside its next layer's outline - a band whole beads wide stands its back
+  edge up to 0.55 mm under the part; a flat sheet's I1 seen through a channel of
   I2 is inside it - and past its 2 + 2 layers the transition runs on while a
   layer repeats the footprint of the one over it (a steep stair stands
   several layers alike). The next layer was grown by 0.5 mm, which hid each
-  strip's exposed pitch under the next strip. The arc's stair: every one of
-  its 49 layers interface or transition; the clip coupon unchanged
+  strip's exposed edge under the next strip. The arc's stair: every one of
+  its 46 layers' bands interface or transition; the clip coupon unchanged
   (`slicer:supports` 26 of 26). No wall, infill or overhang wall
   comes out of a support object: the same beads, one type, as Bambu prints
   support.

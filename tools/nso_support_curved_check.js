@@ -22,24 +22,30 @@
       first it holds to the top, each a layer over the one below; nothing
       above the top: the top strip within two layers of the highest point
       of the underside less the gap, and no strip past it.
-   2. EACH STRIP, measured on the parts built (a cut at each layer's middle):
-      ONE connected region (its loop and its serpentine, joined at one
-      point), no chain left open; its width across the slope (the outline
-      less a line) 0.5 - 2.52 mm (two pitches, or three where the next strip
-      jumps two: see the report); its overlap with the strip below, along
-      the slope, 0.4 mm or more.
-   3. THE GAP: the whole support (stair, caps, trunks) against the arc with
+   2. EACH STRIP, measured on the parts built (a cut at each layer's
+      middle): ONE region; its width follows the band - one line (0.40)
+      where two would stand its back edge too far under the part, two beads
+      (a loop alone, as a slicer prints a 0.84 band) where they do not, more
+      only where the band is three beads or wider; its top 0.18 - 0.55 mm
+      under the part across its whole width (front edge, middle and back
+      edge, every 0.25 mm along it), median 0.35 or less.
+   3. THE GAP: the whole support (stair, caps, trees) against the arc with
       the exact triangle distance: 0.18 mm or more.
-   4. WHAT CARRIES IT: the lowest strip stands on caps over a few tips (its
-      transition under it); every other tip of the stair is held by the
-      stair and not built - a few tips, not trees.
+   4. WHAT HOLDS EACH STRIP: every strip whose leading part (not over the
+      strip below by half a line or more) is half a line or wider has a tip
+      under it every 5 mm or nearer along it, each one built - a column top
+      found under the strip, at its underside - grown as a tree with the
+      stair (its own trunks, merged); the stair's lean is never what holds
+      it. The lowest strip stands on its transition, the transition on caps
+      and tips. The plan's own tips on the curve are held by the stair and
+      not built.
    5. AGAINST BAMBU: every layer of Bambu's interface up to our top has a
-      strip of ours at that z, over the same stretch of the curve (their
-      ranges along the slope overlap).
+      strip of ours at that z, over the same stretch of the curve; and the
+      support's printed toolpath, layer by layer, beside Bambu's (reported).
    6. NSO's SLICE of the export (the card's own slicer, detect_thin_wall on):
-      every layer of the stair, its transition to its top, is typed Support
-      interface or Support transition; the support's lines are support lines
-      only.
+      every layer of the stair - its transition to its top - has its strip
+      typed Support interface or Support transition; the support's lines
+      are support lines only.
    7. FLAT CEILINGS UNCHANGED: the 2026-10-20 coupon (top_clip_x2_coupon.stl)
       as the card builds it is byte for byte the build before the stair
       (sha-256 of each object's soup, recorded at claude-wip 6f3354f), and
@@ -244,41 +250,50 @@ async function cardRun() {
     `${soups.length} parts, ${trans.length} transition + ${strips.length} strips`);
   const th = L.stair.angleDeg * Math.PI / 180, nrm = [-Math.sin(th), Math.cos(th)], dir = [Math.cos(th), Math.sin(th)];
   const uOf = q => q[0] * nrm[0] + q[1] * nrm[1], vOf = q => q[0] * dir[0] + q[1] * dir[1];
-  const W = S.widthMm;
+  const BEAD = TH.floorFor(0.4);
   const secs = L.layers.map((Ly, i) => {
     const sec = loopsOf(sliceAt(soups[i], (Ly.z0 + Ly.z1) / 2)), reg = regionsOf(sec);
     const us = reg.length ? reg[0].map(uOf) : [0], vs = reg.length ? reg[0].map(vOf) : [0];
     return { Ly, sec, reg, u: [Math.min(...us), Math.max(...us)], v: [Math.min(...vs), Math.max(...vs)] };
   });
   const badReg = secs.filter(s => s.reg.length !== 1 || s.sec.open);
-  check('every layer is ONE connected region (its loop and its serpentine, joined at one point), no chain left open',
-    !badReg.length, badReg.length ? badReg.map(s => `z ${f2(s.Ly.z1)}: ${s.reg.length} regions, ${s.sec.open} open`).join('; ')
-      : `${secs.length} layers, holes a layer ${[...new Set(secs.map(s => s.sec.polys.length - 1))].join(' / ')}`);
-  const widths = secs.map(s => s.u[1] - s.u[0] - W);
-  const wide = widths.filter(w => w > 2 * PITCH + 0.05).length;
-  check('each strip 0.5 - 2.52 mm across the slope (its outline less a line): two pitches, one at the top, three where the next strip jumps two',
-    widths.every(w => w >= 0.5 - 1e-3 && w <= 3 * PITCH + 0.05),
-    `${f2(Math.min(...widths))} - ${f2(Math.max(...widths))} mm; ${wide} strip(s) of three pitches (over 2.5)`);
-  check('...and as long as the arc is wide, near enough (Bambu\'s lines: 10.32 mm)', secs.every(s => s.v[1] - s.v[0] - W >= 8.0),
-    `${f2(Math.min(...secs.map(s => s.v[1] - s.v[0] - W)))} - ${f2(Math.max(...secs.map(s => s.v[1] - s.v[0] - W)))} mm of line`);
-  const ovs = [];
-  for (let i = 1; i < secs.length; i++) {
-    if (secs[i].Ly.role !== 'interface' || secs[i - 1].Ly.role !== 'interface') continue;
-    ovs.push({ z: secs[i].Ly.z1, mm: Math.min(secs[i].u[1], secs[i - 1].u[1]) - Math.max(secs[i].u[0], secs[i - 1].u[0]) });
-  }
-  const minOv = ovs.reduce((a, o) => o.mm < a.mm ? o : a, { mm: Infinity });
-  check('each strip overlaps the one below by 0.4 mm or more along the slope (it rests on it)', ovs.every(o => o.mm >= 0.4 - 1e-3),
-    `least ${f3(minOv.mm)} mm at z ${f2(minOv.z)}; ${ovs.filter(o => o.mm > 2 * PITCH).length} of ${ovs.length} over two pitches`);
+  check('every layer is ONE region, no chain left open', !badReg.length,
+    badReg.length ? badReg.map(s => `z ${f2(s.Ly.z1)}: ${s.reg.length} regions, ${s.sec.open} open`).join('; ') : `${secs.length} layers`);
+  const byW = {};
+  secs.forEach(s => { const w = f2(s.u[1] - s.u[0]); byW[w] = (byW[w] || 0) + 1; });
+  const wrong = strips.filter(Ly => !(Ly.beads === 1 ? Math.abs(Ly.widthMm - S.widthMm) < 1e-6 : Math.abs(Ly.widthMm - Ly.beads * BEAD) < 1e-6) ||
+    (Ly.beads >= 3 && Ly.advanceMm < 3 * BEAD - 1e-6));
+  check('each strip\'s width follows its band: one line (0.40), two beads (0.84, a loop alone), three or more only where the band is three beads wide',
+    !wrong.length && secs.every((s, i) => Math.abs(s.u[1] - s.u[0] - L.layers[i].widthMm) < 0.02),
+    Object.keys(byW).sort().map(w => `${w} mm x ${byW[w]}`).join(', ') + (wrong.length ? '; wrong at ' + wrong.map(x => f2(x.z1)).join(', ') : ''));
+  check('...and as long as the arc is wide, near enough (Bambu\'s lines: 10.32 mm)', secs.every(s => s.v[1] - s.v[0] >= 8.0),
+    `${f2(Math.min(...secs.map(s => s.v[1] - s.v[0])))} - ${f2(Math.max(...secs.map(s => s.v[1] - s.v[0])))} mm`);
   check('the transition is the lowest strip again, one layer under it', trans.length === 1 && Math.abs(trans[0].z1 - strips[0].z0) < 1e-6 &&
     Math.abs(secs[0].u[0] - secs[1].u[0]) < 1e-3 && Math.abs(secs[0].u[1] - secs[1].u[1]) < 1e-3, `${f2(trans[0].z0)} - ${f2(trans[0].z1)}`);
-  /* how near each strip lies under the part, over its down-slope line */
-  const lifts = strips.map(Ly => {
-    const lo = Math.min(...Ly.paths[0].map(uOf)), mid = (Math.min(...Ly.paths[0].map(vOf)) + Math.max(...Ly.paths[0].map(vOf))) / 2;
-    const q = [lo * nrm[0] + mid * dir[0], lo * nrm[1] + mid * dir[1]];
-    const h = P.hitsAlong([q[0], q[1], Ly.z1], [0, 0, 1], 5);
-    return h.length ? h[0] : Infinity;
-  }).sort((a, b) => a - b);
-  console.log(`        the part over each strip's down-slope line: ${f2(lifts[0])} - ${f2(lifts[lifts.length - 1])} mm over its top, median ${f2(lifts[lifts.length >> 1])} (the grid's pitch: a strip moves a whole pitch or none)`);
+  /* how far under the part each strip's top lies, across its whole width */
+  const dists = [], worst = [];
+  strips.forEach(Ly => {
+    const pts = Ly.paths[0], Wd = Ly.widthMm, mine = [];
+    for (let i = 0; i + 1 < pts.length; i++) {
+      const n = Math.max(1, Math.ceil(Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]) / 0.25));
+      for (let k = 0; k <= n; k++) {
+        const x = pts[i][0] + (pts[i + 1][0] - pts[i][0]) * k / n, y = pts[i][1] + (pts[i + 1][1] - pts[i][1]) * k / n;
+        for (const du of [-Wd / 2, 0, Wd / 2]) {
+          const h = P.hitsAlong([x + nrm[0] * du, y + nrm[1] * du, Ly.z1], [0, 0, 1], 5);
+          if (h.length) mine.push(h[0]);
+        }
+      }
+    }
+    dists.push(...mine);
+    worst.push({ z: Ly.z1, lo: Math.min(...mine), hi: Math.max(...mine) });
+  });
+  dists.sort((x, y) => x - y);
+  const med = dists[dists.length >> 1], out = worst.filter(w2 => w2.lo < GAP - 0.005 || w2.hi > 0.55 + 1e-3);
+  check('every strip\'s top lies 0.18 - 0.55 mm under the part across its whole width, median 0.35 or less',
+    !out.length && med <= 0.35, `${f3(dists[0])} - ${f3(dists[dists.length - 1])} mm over ${dists.length} points, median ${f3(med)}` +
+      (out.length ? '; out at ' + out.map(w2 => `${f2(w2.z)} (${f2(w2.lo)}-${f2(w2.hi)})`).join(', ') : ''));
+  const rests = strips.slice(1).map(x => x.overlapMm || 0);
+  console.log(`        each strip over the one below: ${f2(Math.min(...rests))} - ${f2(Math.max(...rests))} mm along the slope (median ${f2(rests.slice().sort((x, y) => x - y)[rests.length >> 1])}); the rest of it its tips hold`);
 
   /* ------------------------------------------------------------------ 3 */
   console.log('\n=== 3. the gap ===');
@@ -291,17 +306,40 @@ async function cardRun() {
     `${f3(dmin)} mm at ${at ? at.map(f2).join(', ') : '-'}; the stair alone ${f3(dStair)}`);
 
   /* ------------------------------------------------------------------ 4 */
-  console.log('\n=== 4. what carries it ===');
-  const tips = S.tips, held = tips.filter(t => t.mode === 'drop'), carriers = tips.filter(t => t.mode === 'sheet' && t.level === L.id);
-  check('the lowest strip stands on caps over a few tips; every other tip of the stair is held by the stair, not built',
-    carriers.length >= 2 && carriers.length <= 8 && held.length >= 20 && carriers.length + held.length === L.tips.length + (L.held || []).length,
-    `${carriers.length} tips carry it (${L.caps.length} caps, ${L.caps.map(c => f2(c.w)).join(' / ')} mm; z_cap ${f2(L.zCap)}), ${held.length} held by it, ${tips.filter(t => t.mode === 'gap').length} cut at the gap`);
-  const trunksBuilt = arc.tp.trunks.filter(t => t.sheet == null && t.parts.length).length;
-  const membersBuilt = arc.tp.trunks.filter(t => t.sheet == null).reduce((n, t) => n + t.parts.length, 0);
-  check('...a few tips, not trees: the members that hold only stair-held tips are left out', trunksBuilt <= arc.p.trunks.length && membersBuilt < arc.p.members.length,
-    `${trunksBuilt} of ${arc.p.trunks.length} trunks built, ${membersBuilt} parts for ${arc.p.members.filter(m => !m.dead).length} planned members`);
-  check('...and the stair is one support with the trunks it stands on (the spots it holds are its)', arc.sh.solids.filter(x => x.sheets.length).length === 1 &&
-    arc.sh.solids.find(x => x.sheets.length).beacons.length === arc.n, `${arc.sh.solids.length} solid(s); the stair's holds ${arc.sh.solids.find(x => x.sheets.length).beacons.length} of ${arc.n} spots`);
+  console.log('\n=== 4. what holds each strip ===');
+  {
+    const want = L.stair.tips, tree = (S.stairTrees || []).find(t => t.level === L.id) || {};
+    const per = {};
+    want.forEach(w => { per[w.strip] = (per[w.strip] || 0) + 1; });
+    const lacking = [];
+    L.layers.forEach((Ly, i) => {
+      if (Ly.role !== 'interface') return;
+      const len = secs[i].v[1] - secs[i].v[0], need = Math.ceil(len / 5 - 1e-9);
+      const lead = i === 1 ? Infinity : Ly.widthMm - (Ly.overlapMm || 0);
+      if (lead >= S.widthMm / 2 && (per[i - 1] || 0) < need && !(i === 1 && L.caps.length)) lacking.push(f2(Ly.z1));
+    });
+    check('every strip whose leading part is half a line or wider has a tip every 5 mm or nearer along it - the stair\'s lean holds nothing',
+      !lacking.length, `${want.length} tips for ${strips.length} strips (${Math.min(...Object.values(per))} - ${Math.max(...Object.values(per))} a strip)` + (lacking.length ? '; short at ' + lacking.join(', ') : ''));
+    /* each one built: a column top under the strip, found in the parts at its underside */
+    const treeSoups = arc.tp.trunks.filter(t => t.sheet == null && t.trunk >= arc.p.trunks.length).map(t => t.parts.map(q => q.soup));
+    const flat = [].concat(...treeSoups);
+    let found = 0;
+    want.forEach(w => {
+      const z = w.p[2] - 0.05;
+      if (flat.some(sp => loopsOf(sliceAt(sp, z)).polys.some(Pl => inPoly([w.p[0], w.p[1]], Pl)))) found++;
+    });
+    check('...each one built: a column top under the strip\'s underside, as planned', found === want.length && tree.unreachable === 0,
+      `${found} of ${want.length} found; the stair's tree: ${tree.trunks} trunk(s), ${tree.members} members, ${tree.unreachable} unreachable`);
+    check('...grown as a tree with the stair, not a strut a tip: its tips merge on the way down', tree.trunks >= 1 && tree.trunks <= Math.ceil(want.length / 8),
+      `${want.length} tips onto ${tree.trunks} trunk(s) to the plate`);
+    const tips = S.tips, held = tips.filter(t => t.mode === 'drop'), carriers = tips.filter(t => t.mode === 'sheet' && t.level === L.id);
+    check('the lowest strip stands on its transition, the transition on caps over the plan\'s tips under it (and tips of its own)',
+      carriers.length >= 1 && L.caps.length >= 1, `${carriers.length} carrier(s), caps ${L.caps.map(c => f2(c.w)).join(' / ')} mm at z_cap ${f2(L.zCap)}; ${per[0] || 0} tip(s) of its own`);
+    check('the plan\'s other tips on the curve are held by the stair, not built', held.length >= 20 && carriers.length + held.length === arc.n,
+      `${held.length} held, ${tips.filter(t => t.mode === 'gap').length} cut at the gap`);
+    check('...and the stair is one support with its trees (the spots it holds are its)', arc.sh.solids.filter(x => x.sheets.length).length === 1 &&
+      arc.sh.solids.find(x => x.sheets.length).beacons.length === arc.n, `${arc.sh.solids.length} solid(s); it holds ${arc.sh.solids.find(x => x.sheets.length).beacons.length} of ${arc.n} spots`);
+  }
 
   /* ------------------------------------------------------------------ 5 */
   console.log('\n=== 5. against Bambu\'s own (tree slim, threshold 30) ===');
@@ -321,7 +359,7 @@ async function cardRun() {
       const ours = strips.find(Ly => Math.abs(Ly.z1 - z) < 1e-3), bu = byZ.get(z.toFixed(2));
       if (z > top.z1 + 1e-6) { rows.push(`${f2(z)}: Bambu ${f2(bu[0])}-${f2(bu[1])}, ours none (past our top)`); return; }
       const ou = ours ? [Math.min(...ours.paths[0].map(uOf)), Math.max(...ours.paths[0].map(uOf))] : null;
-      const ov = ou ? Math.min(ou[1] + W / 2, bu[1]) - Math.max(ou[0] - W / 2, bu[0]) : -Infinity;
+      const ov = ou ? Math.min(ou[1] + ours.widthMm / 2, bu[1]) - Math.max(ou[0] - ours.widthMm / 2, bu[0]) : -Infinity;
       if (!(ov > 0)) misses.push(z);
       rows.push(`${f2(z)}: Bambu ${f2(bu[0])}-${f2(bu[1])}, ours ${ou ? f2(ou[0]) + '-' + f2(ou[1]) : 'none'}`);
     });
@@ -352,10 +390,23 @@ async function cardRun() {
       const k = r.planes.findIndex(pl => Math.abs(pl.printZ - Ly.z1) < 1e-3);
       const l = by[k] || {}, it = l['Support interface'] || 0, tr = l['Support transition'] || 0, su = l['Support'] || 0;
       rows.push(`${f2(Ly.z1)} ${Ly.role[0].toUpperCase()}: ${it ? 'interface ' + it : ''}${tr ? 'transition ' + tr : ''}${su ? ' Support ' + su : ''}`);
-      if (!(it + tr) || su) plain.push(Ly.z1);
+      if (!(it + tr)) plain.push(Ly.z1);
     });
     console.log('        moves by layer top:  ' + rows.join(' | '));
-    check('every layer of the stair - its transition to its top - is typed Support interface or Support transition, none plain Support',
+    /* the support's printed toolpath, layer by layer, beside Bambu's own (reported, not gated) */
+    {
+      const zip = R3.openZip(new Uint8Array(fs.readFileSync(BAMBU)));
+      const bex = AUD.extrusions(new TextDecoder().decode(await zip.read('Metadata/plate_1.gcode'))).filter(m => /^Support/.test(m.feat || ''));
+      const mm = (list) => list.reduce((a, m) => a + (m.len || Math.hypot((m.x1 - m.x0) || 0, (m.y1 - m.y0) || 0)), 0);
+      const row = [5, 15, 25, 35, 38, 40, 42, 44, 46].map(z => {
+        const k = r.planes.findIndex(pl => Math.abs(pl.printZ - z) < 0.11);
+        const ours = mm(p.moves.filter(m => m.layer === k && m.objectId >= 1));
+        const bz = bex.length ? bex.reduce((a, m) => Math.abs(m.z - z) < Math.abs(a - z) ? m.z : a, bex[0].z) : z;
+        return `z ${z}: ours ${ours.toFixed(0)}, Bambu ${mm(bex.filter(m => m.z === bz)).toFixed(0)}`;
+      });
+      console.log('        support toolpath a layer, mm:  ' + row.join(' | '));
+    }
+    check('every layer of the stair - its transition to its top - has its strip typed Support interface or Support transition (the tree\'s columns beside it are Support)',
       !plain.length, plain.length ? 'plain at ' + plain.map(f2).join(', ') : `${L.layers.length} layers; interface on ${rows.filter(x => /interface/.test(x)).length}, transition on ${rows.filter(x => /transition/.test(x)).length}`);
   }
 
