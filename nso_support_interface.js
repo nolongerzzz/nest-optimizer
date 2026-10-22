@@ -645,6 +645,12 @@
   var SHEET_UNDER = 0.95;      /* a line is this much of a bead, to the 0.01 mm: see LINE WIDTH */
   /* what the sheet needs of the slicer, written on every support object
      (Metadata/model_settings.config): see LINE WIDTH */
+  /* every support object's per-object overrides, one set for all of them
+     (docs/BAMBU-PROJECT-EXPORT.md): the sheet's thin-wall pass (above) and
+     nothing else. top / bottom_shell_layers 0 were tried and failed on the
+     owner's print: the 0.2 mm foot pads printed as a 15 % lattice, so 81 %
+     of layer 2's support walls had no line under them and the trunks went to
+     spaghetti. Per-family tuning waits for a print. */
   var SHEET_SLICER = { wall_generator: 'classic', detect_thin_wall: '1' };
   var CELL_MM = 0.1;           /* the footprint raster */
   var SAMPLE_MM = 0.05;        /* along a line */

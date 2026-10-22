@@ -37,6 +37,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
+const { pieces3MF } = require('./3mf-test/pieces-3mf.js');
 const { withApp, loadSTL, ROOT } = require('./nso_app_harness');
 const { openJoin } = require('./nso_join_card');
 
@@ -91,15 +92,16 @@ function edgeShells(tris) {
   tris.forEach((t, i) => { const r = find(i); if (!g.has(r)) g.set(r, []); g.get(r).push(t); });
   return [...g.values()].map(triStats);
 }
+/* one entry per piece, in plate space (tools/3mf-test/pieces-3mf.js reads the
+   project envelope's object parts and build items) */
 function objects3MF(file) {
-  const xml = execFileSync('unzip', ['-p', file, '3D/3dmodel.model'], { encoding: 'utf8', maxBuffer: 64 << 20 });
   const objs = [];
-  for (const m of xml.matchAll(/<object id="(\d+)"[^>]*>([\s\S]*?)<\/object>/g)) {
-    const verts = [...m[2].matchAll(/<vertex x="([-\d.eE+]+)" y="([-\d.eE+]+)" z="([-\d.eE+]+)"/g)].map(v => v.slice(1).map(Number));
+  for (const p of pieces3MF(file)) {
+    const verts = p.verts;
     if (!verts.length) continue;
     const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
     for (const v of verts) for (let a = 0; a < 3; a++) { if (v[a] < mn[a]) mn[a] = v[a]; if (v[a] > mx[a]) mx[a] = v[a]; }
-    objs.push({ id: Number(m[1]), verts: verts.length, min: mn, max: mx });
+    objs.push({ id: p.id, verts: verts.length, min: mn, max: mx });
   }
   return objs;
 }

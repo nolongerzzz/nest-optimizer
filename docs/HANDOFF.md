@@ -6463,3 +6463,95 @@ Branch `claude/supports-angle-default`, off `claude-wip` 6f3354f. No engine chan
   card and is out of `testSteps`); not touched.
 - `?v=`: `app-supports-card.js` print3 -> angle35, on the ticket's instruction.
   `testStepWeights` `support:test` 17000 -> 17500.
+
+### export-bambu-project: NSO's 3MF is Bambu Studio's project envelope (2026-10-21, Phase 0 of the export/print plan)
+
+Branched off `claude/supports-print-1` (#256, which changed `nso-3mf.js`);
+PR against `claude-wip` once #256 is merged.
+
+- **Template, not invention.** `fixtures/bambu-templates/a1mini-0.4/` holds
+  the owner's `project_test.3mf` (Bambu Studio 02.08.02.61, unsliced) and
+  `template.json` (printer, nozzle, `studio_version`, file, sha256).
+  `nso-3mf.js` `build3MF` now writes that project's envelope part for part.
+  Application is `BambuStudio-02.08.02.61`, the template's version, never
+  newer: the compatibility shim, on record in docs/BAMBU-PROJECT-EXPORT.md.
+  - Each piece is a `<components>` wrapper (object 2N) on
+    `/3D/Objects/object_N.model` (object 2N-1, the mesh centred on its own
+    origin); the build item places it.
+  - UUIDs are Studio's counters with its fixed suffixes.
+  - `project_settings.config` is the template's 581 keys, with NSO's 14
+    cooling keys on every filament slot.
+  - `model_settings.config` is in project shape: per-object overrides,
+    `<part>`, the template's plate block, `identify_id` per instance,
+    `<assemble>`.
+  - The thumbnails, `slice_info`, `filament_sequence`, `cut_information` and
+    `plate_1.json` are written as the template has them.
+  - `nso_profile.json` and `nso_scene.json` are kept.
+- **identify_id**: the object's own `identifyId`, else derived from its name
+  and face count, so it is stable across exports and moves. Collisions step
+  to the next free id. (It does not close GRISPR limitation 4: see the next entry.)
+- **Support set** (`NSO_SupportInterface.SHEET.slicerSettings`):
+  `wall_generator classic`, `detect_thin_wall 1`, `top_shell_layers 0`,
+  `bottom_shell_layers 0`. Nothing else; per-family tuning waits for a print.
+- **Fallback**: no template (file://, no fetch, a refused template) writes the
+  old geometry-only envelope and says so (`envelope: 'nso'`,
+  `templateError`).
+- **Gates**:
+  - `export:bambu` is new: part for part against the template, plus the
+    version guard on a known-bad copy.
+  - `3mf:roundtrip`, `3mf:drive`, `3mf:scene` and `export:roundtrip` read the
+    new envelope.
+  - `support:test` checks the four-key set.
+  - `?v=bambu1` on `nso-3mf.js` and `nso_support_interface.js`.
+- **The real gate is the owner's, in Studio**: File > Open, with no
+  geometry-only warning; the override badge on supports; Cooling showing NSO's
+  values; then slice.
+
+### export-bambu-project, after the owner's first open (2026-10-21)
+
+The owner's report:
+- **What held.** The export loaded clean, as a project, and the four
+  overrides held. The G-code shows the support's layer 1 as wall plus sparse
+  infill (no bottom surface), and the four sheet layers as about 405 mm of
+  outer wall each.
+- **Cooling was dropped.** Studio showed Generic PLA's own 0 s / 8 s, and
+  the slice used them, because each filament slot's
+  `different_settings_to_system` entry was empty. Studio loads a slot with an
+  empty entry as the system preset itself. `nso-3mf.js` now names the keys
+  NSO changes in each slot's entry, `export:bambu` gates it, and the tag is
+  `?v=bambu2`. Needs a re-open.
+- **`identify_id` does not reach the G-code.** NSO wrote 1098 / 8388; the
+  labels were 96 / 107, Studio's runtime ids. GRISPR limitation 4 stays open.
+  The sliced file's `slice_info.config` pairs each label with the object's
+  name.
+- **To watch:** `bottom_shell_layers 0` makes the 0.2 mm foot pads a 15 %
+  lattice, not solid.
+
+docs/BAMBU-PROJECT-EXPORT.md has the details.
+
+### export-bambu-project: the shell overrides failed on the print (2026-10-21)
+
+- **The print failed from layer 1.** Under `bottom_shell_layers 0` the foot
+  pads printed as an outline and a 15 % lattice. On layer 2, only 18.5 % of
+  the support's extrusion lies over a layer-1 line, so the trunks started in
+  mid-air.
+- **The set is back to two.** The owner chose to return to the two
+  overrides of the earlier successful print: `wall_generator classic`,
+  `detect_thin_wall 1`. `top_shell_layers` / `bottom_shell_layers` are
+  dropped.
+- **Tags:** `nso_support_interface.js?v=bambu2`. `support:test`,
+  `export:bambu` and `export:roundtrip` check the two-key set.
+
+### export-bambu-project: the owner's Studio gate holds (2026-10-21)
+
+The owner opened the v3 export (cooling fix, two-key support set) in Bambu
+Studio 02.08.02.61 and confirmed every setting: it loads as a project, the
+support carries its two overrides, and Cooling shows NSO's values. The PR
+opens against `claude-wip` once #256 merges.
+
+### export-bambu-project: rebased onto claude-wip 6f3354f (batch 19, #256 merged)
+
+The four commits of this branch now sit on `claude-wip` 6f3354f.
+- **Conflicts:** two, both append-only. `package.json` gets the
+  `export:bambu` weight note beside #259's; `HANDOFF.md` keeps both appends.
+- **Tags:** `nso-3mf.js` and `nso_support_interface.js` are `?v=bambu3`.

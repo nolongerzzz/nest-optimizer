@@ -306,10 +306,11 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'nso-scene-'));
         Buffer.from(withScene.bytes).equals(Buffer.from(again.bytes)));
 
   const bareParts = Array.from(readZip(Buffer.from(bare.bytes)).keys()).sort();
-  eq('no scene given, no part added', bareParts, [
-    '3D/3dmodel.model', 'Metadata/model_settings.config', 'Metadata/nso_profile.json',
-    'Metadata/project_settings.config', '[Content_Types].xml', '_rels/.rels'
-  ].sort());
+  // The project envelope's parts are export:bambu's to gate; here, the scene
+  // block is the only part a scene adds.
+  eq('no scene given, no part added', bareParts,
+     Array.from(parts.keys()).filter((n) => n !== W.PART_NSO_SCENE).sort());
+  check('the bare export is the project envelope', bare.envelope === 'project', bare.envelope);
   check('build3MF reports no scene on a bare export', bare.scene === false);
   check('the cooling settings are untouched by the scene block',
         withScene.settingsText === bare.settingsText);

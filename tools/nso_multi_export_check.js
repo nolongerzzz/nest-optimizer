@@ -39,6 +39,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
+const { pieces3MF } = require('./3mf-test/pieces-3mf.js');
 const { withApp, loadSTL, openFinishMenu, ROOT } = require('./nso_app_harness');
 const { openJoin } = require('./nso_join_card');
 
@@ -97,15 +98,16 @@ function edgeShells(tris) {
   return [...g.values()].map(triStats);
 }
 /* 3MF: one entry per <object>, vertices only (Bambu axes, plate at +90) */
+/* (tools/3mf-test/pieces-3mf.js reads the project envelope's object parts and
+   build items) */
 function objects3MF(file) {
-  const xml = execFileSync('unzip', ['-p', file, '3D/3dmodel.model'], { encoding: 'utf8', maxBuffer: 64 << 20 });
   const objs = [];
-  for (const m of xml.matchAll(/<object id="(\d+)"[^>]*>([\s\S]*?)<\/object>/g)) {
-    const verts = [...m[2].matchAll(/<vertex x="([-\d.eE+]+)" y="([-\d.eE+]+)" z="([-\d.eE+]+)"/g)].map(v => v.slice(1).map(Number));
-    const tris = (m[2].match(/<triangle /g) || []).length;
+  for (const p of pieces3MF(file)) {
+    const verts = p.verts;
+    const tris = p.tris;
     const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
     for (const v of verts) for (let a = 0; a < 3; a++) { if (v[a] < mn[a]) mn[a] = v[a]; if (v[a] > mx[a]) mx[a] = v[a]; }
-    objs.push({ id: Number(m[1]), verts: verts.length, tris, min: mn, max: mx,
+    objs.push({ id: p.id, verts: verts.length, tris, min: mn, max: mx,
                 centre: [(mn[0] + mx[0]) / 2, (mn[1] + mx[1]) / 2, (mn[2] + mx[2]) / 2] });
   }
   return objs;
@@ -382,7 +384,7 @@ withApp(async (page, logs) => {
     check('3MF #' + (p.i + 1) + ' ' + p.name + ': X/Y extents equal the scene box + 90 (2e-4)', dx.every(d => Math.abs(d) <= 2e-4), dx.map(d => d.toExponential(2)).join(' '));
     check('3MF #' + (p.i + 1) + ' ' + p.name + ': bottom at liftY, height as the scene (1e-5 / 2e-4)', near(o.min[2], p.liftY, 1e-5) && near(o.max[2] - o.min[2], e.max[2] - e.min[2], 2e-4), f6(o.min[2]) + ' h ' + f6(o.max[2] - o.min[2]));
     check('3MF #' + (p.i + 1) + ' ' + p.name + ': triangle count = the piece\'s raw soup', o.tris === p.rawTris, o.tris + ' vs ' + p.rawTris);
-    check('3MF #' + (p.i + 1) + ' ' + p.name + ': object is in order of the plate', o.id === p.i + 1, o.id);
+    check('3MF #' + (p.i + 1) + ' ' + p.name + ': object is in order of the plate', o.id === 2 * (p.i + 1), o.id);   /* piece N is object 2N: docs/BAMBU-PROJECT-EXPORT.md */
   }
   const oOf = id => m3.find(m => m.piece.id === id).shell;
   const g1m = oOf(idB1).min[2] - oOf(idA1).max[2], g2m = oOf(idB2).min[2] - oOf(idA2).max[2];
