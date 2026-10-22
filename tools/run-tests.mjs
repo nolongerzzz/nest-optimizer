@@ -95,7 +95,7 @@ const SELF = 'run-tests.mjs';
 
 /* CI's matrix size (.github/workflows/test.yml). Twenty since the three
    steps that held the heaviest shard were split (support:shells, gscope:speed,
-   support:interface: ci-shard-split): the 261-step suite is ~@TOTAL@ s of
+   support:interface: ci-shard-split): the 261-step suite is ~13,484 s of
    typical-runner time, and a wall clock of one shard's worth of it needs the
    shards to be many and the steps in them small. Ten before that (eight were
    ~1,725 s each on Tests #297-#305 and two ran past the 40-minute job
@@ -107,8 +107,8 @@ const CI_SHARDS = 20;
    60-minute timeout (about one runner in five ran #297-#305's steps in ~0.6 of
    the time, and none measurably slower than typical, so the headroom is for a
    runner sharing its cores and for drift between re-measures). `--shard-plan`
-   flags any shard over it. The heaviest single step is now @HEAVIEST@
-   (@HEAVIEST_S@ s), so the floor is well under the budget; what holds the
+   flags any shard over it. The heaviest single step is now support:shells-clamp
+   (467 s), so the floor is well under the budget; what holds the
    budget is the shard count: the suite's seconds divided by it. */
 const SHARD_BUDGET_S = 700;
 

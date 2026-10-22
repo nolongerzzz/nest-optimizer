@@ -36,13 +36,13 @@
 #
 # WHY TWENTY, AND WHY A PACKED SPLIT
 # Measured, not guessed - on these runners (package.json "testStepWeightsNote"
-# has the method). The 261 steps are ~@TOTAL@s of work on a typical
+# has the method). The 261 steps are ~13,484s of work on a typical
 # ubuntu-latest runner and the shape is lopsided: the heaviest step is
-# @HEAVIEST@ (~@HEAVIEST_S@s) and dozens take under a second. Slicing the list
+# support:shells-clamp (~467s) and dozens take under a second. Slicing the list
 # into equal-LENGTH pieces would leave one runner holding the heavy steps, so
 # the slowest shard - the only number CI waits on - would hardly move. The
 # runner packs by measured cost instead (package.json "testStepWeights"),
-# which lands all twenty shards at ~@PER@s of tests (~@MIN@ min with setup on
+# which lands all twenty shards at ~674s of tests (~13 min with setup on
 # a typical runner; about one runner in five is ~0.6x that).
 #
 # Twenty since ci-shard-split. Ten before it: the wall clock was the heaviest
@@ -50,9 +50,9 @@
 # ~1,230s, gscope:speed ~650s, support:interface ~185s. They are now seven
 # steps (support:shells-coupon / -clamp / -fixtures, gscope:speed-orbit /
 # -drag, support:interface-clamp / -fixtures, each the old one's checks cut by
-# fixture or by gate, none dropped), the longest ~@HEAVIEST_S@s, and the shard
+# fixture or by gate, none dropped), the longest ~467s, and the shard
 # count is what the budget (tools/run-tests.mjs SHARD_BUDGET_S, 700s) divides
-# the suite by. Sixteen would pack to ~@S16@s: over the budget.
+# the suite by. Sixteen would pack to ~843s: over the budget.
 #
 # THE REQUIRED CHECK IS THE "npm test" JOB BELOW, NOT THE SHARDS
 # Branch protection on main requires a check called "npm test". A bare matrix
@@ -122,12 +122,12 @@ jobs:
   shard:
     name: shard ${{ matrix.shard }} of 20
     runs-on: ubuntu-latest
-    # A shard is ~@MIN@ minutes on a typical runner (~@PER@s of tests + setup).
+    # A shard is ~13 minutes on a typical runner (~674s of tests + setup).
     # 15 was set when a shard was ~4 minutes; Tests #231 and #233 were
     # cancelled at it, 25 held until #266, and 40 until #301 and #305, whose
     # shards 7 and 4 ran past it: eight shards had grown to ~1,725s of tests
     # each and support:shells went from ~190s to ~1,200s in one PR. 60 is a
-    # backstop, ~2.5x the packed shard: a shard that nears it means re-measure
+    # backstop, ~4.5x the packed shard: a shard that nears it means re-measure
     # the weights (the "timing" artifact, above), not raise this again.
     timeout-minutes: 60
     permissions:
