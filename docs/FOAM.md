@@ -1,15 +1,21 @@
-# Foam - spray foam into a hollow, see it fill, bond it solid
+# Foam - spray foam into buried space, see it fill, bond it solid
 
 `nso_foam.js` (the geometry, headless, `window.NSO_Foam` and a Node module),
 `app-foam.js` (the Foam button, its panel, the ghost view and the spray),
-`tools/nso_foam_fixtures.js`, `tools/nso_foam_test.js`,
-`tools/nso_foam_drive_check.js`.
+`tools/nso_foam_fixtures.js`, `tools/nso_foam_box_fixtures.js`, `tools/nso_foam_test.js`,
+`tools/nso_foam_box_test.js`, `tools/nso_foam_drive_check.js`.
 
 ```
-npm run foam:test     headless: one cavity, two cavities, a stepped cavity that splits into
-                      pockets, a round one, a hollowed one, poses (on its side, tilted 15°),
-                      a captive solid, an open cup, a solid piece, paint; the canonical
-                      checker on every result (230 gates, ~5 s)
+npm run foam:test     headless, two files:
+                      nso_foam_test.js - the sealed-hollow Foam: one cavity, two cavities, a stepped
+                      cavity that splits into pockets, a round one, a hollowed one, poses (on its side,
+                      tilted 15°), a captive solid, an open cup, a solid piece, paint; the canonical
+                      checker on every result (231 gates, ~4 s)
+                      nso_foam_box_test.js - foamBox (§10): box_closed.stl merged and filled, a box
+                      larger than the piece, cups (square, stepped and slanted rims), a box half in a
+                      wall, two voids, amounts, a yawed box, a posed piece, refusals, paint, nothing
+                      outside the box changes, 90 random boxes against exact oracles, timings
+                      (158 gates, ~11 s; --vase also times the 1.44M-triangle vase)
 npm run foam:drive    the real app in Chromium: click Foam, HOLD the mouse on the piece,
                       let go, the slider, Set, Undo, Fill it all, Cancel, choosing a hollow
                       by a click in the ghost view, the refusals (36 gates, ~32 s)
@@ -18,6 +24,12 @@ npm run foam:drive    the real app in Chromium: click Foam, HOLD the mouse on th
 Both are in `npm test`.
 
 ## 1. What it is
+
+**foamBox** (§10) is the engine under all of it: foam as a stock generator bounded by
+a box, the way Extract bit is a cutter bounded by its bit. Given a piece and a box
+(Crop's Box: centre, size, yaw) it fills every bit of empty space in the box that is
+**buried** in the piece and welds to every face it meets. The Foam card below is its
+sealed-hollow case; the ADD card that sprays a box is the next ticket.
 
 Fill / Densify (`nso_hollow.js` `fill`) stays exactly as it is: one click, every
 enclosed cavity gone, nothing to see. Foam is its visible, partial counterpart.
@@ -39,14 +51,14 @@ Set cuts the hollow's shell with the flat plane at the level. The part of the
 hollow **above** stays a hollow; the cut is closed with a flat **floor facing up
 into what is left of the void**. Below the level is solid.
 
-- **The cut is the cut engine's.** `rawCut` (app-cut.js) - weld, snap to the
-  plane, clip, `rawNestLoops`, `rawFlatCapLoops`, split degenerates - cuts a
-  solid, so the hollow's shell is turned inside out (the void as a solid,
-  wound outward), cut keeping the side above the level, and turned back. Its
-  cap, which faces down out of the void-solid, faces up into the void once
-  turned back. No general boolean is involved: it is a plane through one
-  closed shell. (rawCut's `keepMin = true` keeps coordinate **>=** the plane;
-  the name reads the other way. See `cutVoid` in nso_foam.js.)
+- **The cut is foamBox's** (§10), with the box the hollow's own bounds: the void is
+  this hollow's shell turned inside out (wound outward), cut by the plane at the
+  level, the cut closed with a flat cap - rawCut's clip and cap (app-cut.js) on
+  exact shared corners - and turned back. Its cap, which faces down out of the
+  void-solid, faces up into the void once turned back. No general boolean is
+  involved: it is a plane through one closed shell. The **preview** (§3) is still
+  `rawCut` through the same void-solid (`keepMin = true` keeps coordinate **>=**
+  the plane; the name reads the other way. See `cutVoid` in nso_foam.js).
 - **Everything else is untouched, vertex for vertex.** Every triangle not on
   this hollow's shell is copied in its own order; the hollow's remaining walls
   follow. The outer surface, other hollows and captive solids come back bit
@@ -159,7 +171,8 @@ the skip list as a **required** input - `foam()` without one is refused - so
 ## 8. Flagged, not built
 
 - Freehand blobs (foam sprayed at a spot, not filling a hollow).
-- Filling open vessels (a cup from its floor up to a level) - refused in words.
+- Filling open vessels from the Foam card - refused there in words. foamBox (§10)
+  fills them; its ADD card is the next ticket.
 - Thin-wall beef-up (foam to thicken a wall from inside).
 - A prompt on other tools ("this piece is hollow - foam it first?").
 
@@ -167,3 +180,127 @@ the skip list as a **required** input - `foam()` without one is refused - so
 
 `nso_hollow.js?v=foam1`, `nso_foam.js?v=foam1` (new), `app-core.js?v=foam1`,
 `app-foam.js?v=foam1` (new), `app-input-mode.js?v=foam1`, `styles.css?v=foam1`.
+foam-gun: `nso_foam.js?v=foambox1`.
+
+## 10. foamBox: foam in a box, bounded by the piece
+
+```
+NSO_Foam.foamBox(piece, box, amount, opts)      -> Promise of the result below
+NSO_Foam.foamBoxSolid(piece, box, amount, opts) -> the same, now, on the piece as one solid as it is
+
+piece   { rawTris, toRaw?, name?, skipList }   rawTris in the piece's raw axes; toRaw (16 numbers,
+                                               column-major) maps the plate frame P into them, as Crop
+                                               takes it; skipList nsoMaskFaceList(m), REQUIRED
+box     { c: [x, y, z], h: [hx, hy, hz], yaw } Crop's Box, in P (mm; yaw in degrees about the vertical)
+amount  0..100                                 how far the foam has risen (below)
+-> { ok, changed, mesh, addedVolume, touched, level, span, merged, reason, ... }
+```
+
+`mesh` is the piece with the foam welded in (raw axes, a new soup); `addedVolume` the mm³ it
+gained; `touched` the ids of the piece's shells the foam welds to (shells numbered in the order of
+their first triangle; none when the box sits clear of every face and the foam stands free in the
+space it filled - the reason says so). Each call takes the previous result, so sprays stack:
+50 then 50 is 75 from the start (gated).
+
+### What is buried
+
+Per layer - a flat section of the piece across its up - the piece's outermost contours with their
+insides filled, inner contours ignored: the outer boundary a slicer reads. Empty space inside that
+outline is buried, sealed or open alike: a cup's bowl is, the air over its rim is not. The foam is
+the buried empty space inside the box, risen from the bottom of the buried space in the box to a
+level. Nothing protrudes past the piece's surface however far the box sticks out; the box's walls
+bound the fill where they are inside the piece, the piece's surface where the box leaves it.
+Nothing outside the box changes: every triangle clear of it comes back bit for bit (gated on three
+pieces, one with a yawed box).
+
+### How it is found, exactly
+
+- **The outer outlines.** A section's loop is an outer contour when it runs counter-clockwise (an
+  outline, nso_slicer.js's rule) and no larger outline holds it; every other loop - a hole's, an
+  island's in a hole - borders buried space.
+- **One section per slab.** The shape of the section can only change at a **critical vertex** of
+  the height on the surface: a lowest or highest point among its neighbours, a saddle (its lower
+  neighbours in more than one arc), a pinch (its fan more than one ring). Ties in height are broken
+  by corner id, which only adds critical vertices where faces lie flat. Between two critical
+  heights every loop only slides, and the faces of one loop's band - found by walking edges inside
+  the slab - all face the same side. So one section per slab says which side every face is on. A
+  flat face at a critical height asks the section just above it (facing up) or just below it
+  (facing down) whether its centre is inside an outline. The vase in §10 timings has 4 critical
+  heights; a CAD box has a handful.
+- **Cut at a height where the side changes.** A face whose side changes inside its span is cut at
+  that critical height (a slanted rim opens at the inner rim's lowest corner, a saddle mid-wall;
+  every inner wall of `slantCup` is one tall quad and is cut there).
+- **The void.** The faces that border buried space, turned inside out, closed by a flat **lid**
+  wherever the buried space ends against air (a cup's rim, a bell's mouth), are a closed solid.
+- **The foam** is that solid cut by the box's six faces and then the level, plane by plane, each
+  cut closed by a flat cap: rawCut's clip and cap, on **exact shared corners** - a corner made on an
+  edge is made once, from the edge's two ends in id order, and every face on that edge uses it. A
+  corner within 1e-4 mm of a plane is on it, and corners on a plane within 2e-4 mm of each other are
+  welded (rawCut's rule; a made corner folds only into a corner that stays put, never along a
+  chain, and an original corner never moves). A cap or lid a later cut crosses is laid again from
+  the corners other faces use, so no run of corners collects along the box's edges. No general
+  boolean.
+- **Setting it.** The void's faces inside the foam go (welded); their parts outside it stay, laid
+  again from only the corners something else needs, so a neighbour does not change; the foam's caps
+  and lids are added; an untouched face whose edge gained a corner is split at it (it does not move).
+  The result is checked closed, 2-manifold, nothing collapsed, before it is handed back.
+
+### Work as is: overlapping shells
+
+`box_closed.stl` (a tray and a lid slab overlapping by 0.1 mm) is merged for this operation only
+(`nsoOverlap` in the page; `opts.overlap`, or the kernel's `NSO_overlapMeasure` /
+`NSO_shellMergeCore`, elsewhere - docs/WORK-AS-IS.md) and the result is built on the merge: "Foam set -
+46,166 mm³ of buried space filled (100% of what the box holds, to 24.9 mm), welded to 2 shells
+(box_closed had 2 overlapping shells - merged for this operation)." Today's Foam calls the raw shells
+"open to the outside"; foamBox fills them. A box covering the hollow at 100 is today's Foam (Fill it
+all) on the merged solid - and Fill / Densify - vertex for vertex. A piece that is not one clean
+solid as it lies (shells that only touch, a seam the merge's weld closes) is merged too; one the
+merge cannot close is refused in words.
+
+### Decisions the ticket left open
+
+| | decided |
+|---|---|
+| amount | the level rises through the height of the buried space **inside the box**: 0 is its bottom (the box's floor, or the buried space's own floor if that is higher), 100 its top. A spray shows foam from its first moment, and 50 is half the height, not half the volume |
+| the old Foam's Set | foamBox's engine with the box the hollow's bounds and the void **named** - the hollow's shell - so a captive solid (a rattle's ball) stays held on its own shell as Fill holds it, and a level through it is still refused. foamBox itself welds a captive solid in (gated: the 40 mm block, one shell) |
+| paint | sub-region: the faces the foam welds to, against the skip list, which is required (it rides on `piece.skipList`, keeping the call at three arguments). A piece that needs a merge stands down for any paint: the merge replaces every triangle |
+| a box clear of every face | fills, and says it is welded to nothing - it stands free in the buried space (a box in the middle of a bowl) |
+
+### Results (`foam:test`, tools/nso_foam_box_test.js)
+
+| case | result |
+|---|---|
+| box_closed, a box covering the hollow, 100 | 46,166.4 mm³ = the merged hollow; = Fill / Densify and today's Foam on the merge, vertex for vertex; touched [0, 1] (tray and lid) |
+| box_closed, part of the hollow | 20 × 10 × 22.9 = 4,580 mm³, from the tray's floor to the lid's underside |
+| a box larger than the piece | box2's two voids = Fill / Densify bit for bit; the composite (a cup, a post past its rim, a sealed void in its floor) = the cup solid to its rim plus the post, every new face on the rim's outline at z 30 |
+| cups, the box out of the top | to the rim (30 mm) and no higher, nothing outside the wall; a slanted rim fills to its inner low corner (16.1 mm, 7,464.74 mm³ = the 48-gon x 14.1); a stepped rim to its lowest step (12,168 mm³) |
+| a box half in a wall | 2,000 mm³, the same as the box cut back to the bowl; a sealed hollow 1,000 |
+| two voids | both, welded to both void shells |
+| amount 25 / 50 / 75 / 100 | box2: 4,800 < 8,800 < 11,200 < 13,600 mm³ |
+| random boxes | 30 on the cup and 30 on the composite against the buried cells, 30 on the slanted cup (yawed, random amounts) against the closed form, 12 on box_closed: all within float32's rounding (worst 2.8e-4 mm³), all closed, the canonical checker on a sample |
+
+The canonical checker (`mesh_validate.py --gate`, self-intersection included) passes on every result
+it is run on. Offline, 1,000 more random boxes over ten fixtures (yawed, random amounts) gave 788
+fills, every one canonical-clean and gaining exactly the volume it reports.
+
+### Timings (Node, the cloud box)
+
+| piece | case | ms |
+|---|---|---|
+| box_closed (80 tris) | merge + fill | ~20 (the engine ~5) |
+| vase, 154,560 tris | the whole vase / a box at its side | ~250 / ~350 |
+| vase, 1,442,880 tris | the whole vase, 100 / 40 / a 24 x 20 x 30 box at its side | ~3,200 / ~3,700 / ~4,600 |
+
+The vase is `tools/nso_foam_box_fixtures.js` `vase()`: a flared thin wall with a wavy rim and bumps,
+the butterfly vase's size (that file is not in the repository). About a third of the time is
+indexing (exact corners, edges), a third the reading of buried space, the rest the cut, the
+assembly and the closing census. Nothing is cached between calls yet: a held spray on a big piece
+should keep the void for its piece while the amount changes (the card's ticket).
+
+### Limits, stated
+
+- A piece whose shells cross is merged (above); a single shell that passes through itself is not
+  merged (docs/WORK-AS-IS.md), and its sections' loops cross: it is refused if its buried space does
+  not close, in words.
+- The amount is by height, not volume.
+- The engine has no preview of its own yet; the card's ticket draws the foam from `mesh`.
