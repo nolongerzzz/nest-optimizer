@@ -33,6 +33,7 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 const G = require('../../nso-gcode-lines.js');
 const SO = require('../../nso-gcode-solid.js');
+const pace = require('../nso_pace.js');
 const S = require('../../nso_path_sweep.js');
 
 const REPO = path.join(__dirname, '..', '..');
@@ -346,14 +347,20 @@ async function fusedSelections(slices, TMP) {
   // --- 5c. the single run: untouched, exact, fast ------------------------------
   const inner = p.moves.filter((m) => m.feature === 'Inner wall');
   const one = SO.buildSolid(SO.chainsOf(inner)[5].moves);
+  /* "fast" in calibration loops (tools/nso_pace.js), not ms: ONE_LOOPS_MAX is
+     the old 50 ms on the box it was set on - a kernel load is seconds. */
+  const ONE_LOOPS_MAX = 0.17;
+  const calO = pace.calibrate();
   t0 = Date.now();
   const fo = await SO.fuseShells(one, { csg: csg.NSO_CSG });
   const msO = Date.now() - t0;
+  const calMeanO = (calO + pace.calibrate()) / 2, loopsO = msO / calMeanO;
   ok(fo.ok && fo.stats.contacts === 0 && fo.stats.unions === 0 && fo.bodies.length === 1 && !fo.bodies[0].fused,
      'one continuous run: no junction, no union, one body as swept');
   ok(fo.positions.length === one.positions.length && fo.positions.every((v, i) => v === one.positions[i]),
      'bit for bit the sweep\'s own shell - still exact (volume ' + fo.stats.fusedVolume.toFixed(6) + ' = ' + one.stats.solidVolume.toFixed(6) + ')');
-  ok(msO < 50, 'and still fast: ' + msO + ' ms, the kernel never loaded for it');
+  console.log(pace.finding('the single run\'s fuse', { ms: msO, cal: calMeanO, loops: loopsO }));
+  ok(loopsO < ONE_LOOPS_MAX, 'and still fast: ' + loopsO.toFixed(3) + ' calibration loops (' + msO + ' ms), the kernel never loaded for it');
   // Runs that touch nothing are passed through the same way inside a bigger selection.
   const apart = SO.buildSolid(inner.filter((m) => m.layer === 3 || m.layer === 9));
   const fa = await SO.fuseShells(apart, { csg: csg.NSO_CSG });

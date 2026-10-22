@@ -64,6 +64,7 @@ const ROOT = path.join(__dirname, '..');
 const OUT = path.join(ROOT, 'tools', 'support-interface-out');
 const { readSTL, writeSTL, loadRepairModule } = require('./nso_stl_io.js');
 const { csgContext } = require('./nso_csg_node.js');
+const pace = require('./nso_pace.js');
 const SL = require('../nso_slicer.js');
 const EXPORT = process.argv.includes('--export');
 
@@ -800,7 +801,11 @@ fs.mkdirSync(OUT, { recursive: true });
   {
     console.log('\n=== top_clip_x2: the card\'s build, across its areas ===');
     const piece = PIECES.find(x => x[2] === 'coupon')[1];
-    const t0 = Date.now();
+    /* In calibration loops (tools/nso_pace.js), not seconds: the old 10 s on
+       the box it was set on. Calibrated before and after the build. */
+    const BUILD_LOOPS_MAX = 34;
+    const cal0 = pace.calibrate();
+    const t0 = performance.now();
     const det = SA.detectOverhangs(piece, { skipList: [], angleDeg: CARD.angleDeg, occluders: [] });
     const builds = [];
     let plateZ = 0;
@@ -813,9 +818,11 @@ fs.mkdirSync(OUT, { recursive: true });
       builds.push({ p, tp, sh: GP.shells(p, tp) });
     }
     const sf = GP.shareFeet(builds.map(b => ({ solids: b.sh.solids })), piece, { plateZ });
-    const ms = Date.now() - t0;
-    check('top_clip_x2: the card\'s build - detect, plan, build every area, shells, shared feet - in under 10 s',
-      sf.ok && ms < 10000, `${ms} ms; ${builds.length} area(s); ${sf.reason}`);
+    const ms = Math.round(performance.now() - t0);
+    const cal = (cal0 + pace.calibrate()) / 2, loops = ms / cal;
+    console.log(pace.finding('top_clip_x2\'s build', { ms, cal, loops }));
+    check('top_clip_x2: the card\'s build - detect, plan, build every area, shells, shared feet - in under ' + BUILD_LOOPS_MAX + ' calibration loops',
+      sf.ok && loops < BUILD_LOOPS_MAX, `${loops.toFixed(2)} loops (${ms} ms); ${builds.length} area(s); ${sf.reason}`);
     check('top_clip_x2: every cluster of feet on one pad, whatever area its trees hold; the slab\'s and the leg\'s trees on one pad are ONE support',
       sf.ok && sf.clustersSplit === 0 && sf.objects.length === 1 && sf.objects[0].from.length === builds.reduce((n, b) => n + b.sh.solids.length, 0) && sf.pads === 1,
       sf.ok ? `${sf.pads} pad(s), ${sf.clusters} cluster(s), ${sf.objects.length} support(s): ` + sf.objects.map(o => JSON.stringify(o.from)).join(' ') : sf.reason);

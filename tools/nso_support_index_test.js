@@ -23,8 +23,9 @@
 //   7. THE WEDGE       library/v9_mirror_factory.stl, its big underside: 377
 //                      support points, 49,026 triangles. It took 478 s to plan
 //                      with every query walking the piece; it plans under
-//                      WEDGE_BUDGET_S here (the timing gate), to the plan it
-//                      always planned (pinned by hash)
+//                      WEDGE_LOOPS_MAX calibration loops here (the timing
+//                      gate, tools/nso_pace.js), to the plan it always planned
+//                      (pinned by hash)
 //
 // Loads the shipped files with vm, in index.html's order, the way
 // tools/nso_support_gridpack_test.js does.
@@ -34,9 +35,12 @@ const path = require('path');
 const vm = require('vm');
 const crypto = require('crypto');
 const { readSTL } = require('./nso_stl_io.js');
+const pace = require('./nso_pace.js');
 
 const ROOT = path.join(__dirname, '..');
-const WEDGE_BUDGET_S = 30;
+/* The wedge's plan, gated in calibration loops (tools/nso_pace.js), not
+   seconds: this is the old 30 s budget on the box it was set on. */
+const WEDGE_LOOPS_MAX = 103;
 /* The plan the wedge's 377 points have always planned to: sha256 (first 16 hex
    digits) of JSON.stringify of planTree's result, typed arrays as arrays.
    Taken from the walk-everything code before the index existed. Re-pin only
@@ -298,16 +302,17 @@ for (const [label, soup, opts] of [
     `${walked.beacons && walked.beacons.length} points, ${walked.members && walked.members.length} members, ${a.length} bytes`);
 }
 
-console.log('\n=== 7. THE WEDGE: 377 points, 49,026 triangles, under ' + WEDGE_BUDGET_S + ' s ===');
+console.log('\n=== 7. THE WEDGE: 377 points, 49,026 triangles, under ' + WEDGE_LOOPS_MAX + ' calibration loops ===');
 {
-  const t0 = Date.now();
-  const p = ST.planTree(CLAMP, { skipList: [], regionId: 0 });
-  const secs = (Date.now() - t0) / 1000;
+  const t = pace.time(() => ST.planTree(CLAMP, { skipList: [], regionId: 0 }));
+  const p = t.value, secs = t.ms / 1000;
   const json = planJSON(p);
   console.log('        planned in ' + secs.toFixed(1) + ' s (it took 478 s when every query walked the piece)');
+  console.log(pace.finding('planTree on the wedge', t));
   check('the big underside: 377 support points, all held', p.ok && p.beacons.length === 377 && p.held === 377,
     `${p.beacons && p.beacons.length} points, ${p.held} held, ${p.members && p.members.length} members`);
-  check(`TIMING GATE: planTree on the wedge's 377 points takes under ${WEDGE_BUDGET_S} s`, secs < WEDGE_BUDGET_S, secs.toFixed(1) + ' s');
+  check(`TIMING GATE: planTree on the wedge's 377 points takes under ${WEDGE_LOOPS_MAX} calibration loops`, t.loops < WEDGE_LOOPS_MAX,
+    t.loops.toFixed(1) + ' loops (' + secs.toFixed(1) + ' s)');
   check('...and is the plan it has always been (pinned by hash)', sha(json) === WEDGE_PLAN_SHA, sha(json) + (sha(json) === WEDGE_PLAN_SHA ? '' : '  expected ' + WEDGE_PLAN_SHA));
 }
 

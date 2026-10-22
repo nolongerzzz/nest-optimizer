@@ -28,6 +28,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const vm = require('vm');
+const pace = require('./nso_pace.js');
 const { execFileSync } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -395,13 +396,20 @@ check('the base estimator is one replaceable function (NSO_LiftAuto.estimateBase
 /* ============================================================ 9. speed */
 
 console.log('\n=== 9. speed: the dish at 0.17 mm per sample ===');
+/* The best of three builds, gated in calibration loops (tools/nso_pace.js)
+   run either side of them, not seconds: MAP_LOOPS_MAX is the old "under a
+   second" on the box it was set on. */
+const MAP_LOOPS_MAX = 3.4;
 const BG = FX.big(0.17).soup;
 const tm = [];
+const mapCal0 = pace.calibrate();
 for (let i = 0; i < 3; i++) { const t0 = Date.now(); LA.buildMap(BG, [0, 0, 1]); tm.push(Date.now() - t0); }
+const mapCal = (mapCal0 + pace.calibrate()) / 2, mapLoops = Math.min(...tm) / mapCal;
+console.log(pace.finding('the best of three dish maps', { ms: Math.min(...tm), cal: mapCal, loops: mapLoops }));
 const bSeed = seedNear(BG, 30, 35);
 const t1 = Date.now(), ABg = LA.analyse(BG, bSeed), full = Date.now() - t1;
-check('the map of ' + (BG.length / 9).toLocaleString('en') + ' triangles builds in under a second', Math.min(...tm) < 1000,
-  tm.join(' / ') + ' ms; the whole read ' + full + ' ms (' + Object.keys(ABg.ms).map(k => k + ' ' + Math.round(ABg.ms[k])).join(', ') + ')');
+check('the map of ' + (BG.length / 9).toLocaleString('en') + ' triangles builds in under ' + MAP_LOOPS_MAX + ' calibration loops', mapLoops < MAP_LOOPS_MAX,
+  mapLoops.toFixed(2) + ' loops; ' + tm.join(' / ') + ' ms; the whole read ' + full + ' ms (' + Object.keys(ABg.ms).map(k => k + ' ' + Math.round(ABg.ms[k])).join(', ') + ')');
 REPORT.push('speed: map of ' + BG.length / 9 + ' triangles ' + tm.join(' / ') + ' ms; whole read ' + full + ' ms ' + JSON.stringify(ABg.ms, (k, v) => typeof v === 'number' ? Math.round(v) : v));
 check('...and finds the same seven details', ABg.ok && ABg.islands.length === 7 && ABg.liftable === 6);
 

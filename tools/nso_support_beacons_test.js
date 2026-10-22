@@ -14,6 +14,7 @@ const vm = require('vm');
 
 const ROOT = path.join(__dirname, '..');
 const { readSTL } = require('./nso_stl_io.js');
+const pace = require('./nso_pace.js');
 
 const ctx = {
   Math, Map, Set, console, Array, Object, Number, String, JSON, isFinite,
@@ -407,11 +408,13 @@ console.log('\n=== 11. a real part ===');
 {
   const f = 'fixtures/tape_on-edge-single-B101_rounded_v8_FINAL.stl';
   const soup = readSTL(path.join(ROOT, f));
-  const t0 = Date.now();
-  const d = SB.detect(soup, {});
-  const ms = Date.now() - t0;
-  check(`${path.basename(f)}: ${soup.length / 9} triangles in under 2 s`, d.ok && ms < 2000,
-    `${ms} ms, ${d.reason}`);
+  /* In calibration loops (tools/nso_pace.js), not seconds: the old 2 s on the
+     box it was set on. */
+  const DETECT_LOOPS_MAX = 7;
+  const t = pace.time(() => SB.detect(soup, {})), d = t.value, ms = Math.round(t.ms);
+  console.log(pace.finding('the tape\'s detect', t));
+  check(`${path.basename(f)}: ${soup.length / 9} triangles in under ${DETECT_LOOPS_MAX} calibration loops`, d.ok && t.loops < DETECT_LOOPS_MAX,
+    `${t.loops.toFixed(2)} loops (${ms} ms), ${d.reason}`);
   const legacy = SA.detectOverhangs(soup, { skipList: [], beacons: false });
   const big = legacy.regions[0];
   const inBig = d.beacons.filter(b => b.x >= big.min[0] && b.x <= big.max[0] && b.y >= big.min[1] &&
