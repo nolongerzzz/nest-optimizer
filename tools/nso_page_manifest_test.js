@@ -49,6 +49,9 @@
     10. At 1280 x 800 the page has no <header> and no #btn-clear in its DOM,
         the viewport starts at the top of the window, and the top row and the
         pinned panel start at most 8 px below it.
+   11. Every ?v= on a page's local script / link is the first 8 hex of the
+        sha256 of the file it points at (tools/stamp-tags.mjs --check). Nobody
+        picks a tag by hand: run `npm run stamp` before you open the PR.
    Each gate is run on a known-bad sample first, so a checker that has gone
    blind fails here instead of passing. */
 
@@ -392,6 +395,35 @@ console.log('index.html');
   check('every button in a column <details> is inside its .vp-menu-body', loose.length === 0,
     loose.length ? loose.length + ' loose' : '');
   for (const l of loose) console.log('       index.html:' + l.line + '  #' + l.id + ' is loose in #' + l.column);
+}
+
+// --- the ?v= tags are the files' hashes ---------------------------------------
+console.log('?v= tags');
+{
+  const os = require('os');
+  const { spawnSync } = require('child_process');
+  const stamp = path.join(ROOT, 'tools', 'stamp-tags.mjs');
+  const run = (root) => spawnSync(process.execPath, [stamp, '--check', '--root', root], { encoding: 'utf8' });
+  const sample = fs.mkdtempSync(path.join(os.tmpdir(), 'stamp-gate-'));
+  try {
+    fs.writeFileSync(path.join(sample, 'a.js'), 'var a = 1;\n');
+    const tag = require('crypto').createHash('sha256').update('var a = 1;\n').digest('hex').slice(0, 8);
+    const page = (v) => '<script src="a.js?v=' + v + '"></script>\n<!-- <script src="a.js?v=old"></script> -->\n';
+    fs.writeFileSync(path.join(sample, 'p.html'), page('picked-by-hand'));
+    const bad = run(sample);
+    check('a hand-picked tag is caught', bad.status === 1 && /a\.js/.test(bad.stdout), 'exit ' + bad.status);
+    fs.writeFileSync(path.join(sample, 'p.html'), page(tag));
+    const good = run(sample);
+    check('the file\'s own hash passes, and a tag in a comment is not looked at', good.status === 0, 'exit ' + good.status);
+    fs.writeFileSync(path.join(sample, 'p.html'), '<script src="gone.js?v=1"></script>');
+    check('a tag on a file that does not exist is caught', run(sample).status === 2);
+  } finally {
+    fs.rmSync(sample, { recursive: true, force: true });
+  }
+  const real = run(ROOT);
+  check('every ?v= in the repo\'s pages matches its file', real.status === 0,
+    real.status === 0 ? '' : 'run `npm run stamp`');
+  if (real.status !== 0) console.log((real.stdout + real.stderr).split('\n').map((l) => '       ' + l).join('\n'));
 }
 
 // --- column cards ----------------------------------------------------------

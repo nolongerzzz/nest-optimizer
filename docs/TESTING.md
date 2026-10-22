@@ -181,3 +181,4 @@ check(`the build under ${BUILD_LOOPS_MAX} loops`, r.loops < BUILD_LOOPS_MAX, `${
 
 A new check that times something uses one of these. One that would read
 `ms < N` is the pattern this replaced.
+- **`?v=` tags** are checked by `page:manifest` (gate 11): a tag that is not its file's hash fails it. The fix is always `npm run stamp`.

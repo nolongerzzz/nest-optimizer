@@ -200,6 +200,7 @@
     "gcode:fixture": "node tools/gcode-test/make-fixture.js",
     "library:live": "node tools/nso_library_live_check.js",
     "page:manifest": "node tools/nso_page_manifest_test.js",
+    "stamp": "node tools/stamp-tags.mjs",
     "test": "node tools/run-tests.mjs",
     "test:par": "node tools/run-tests-parallel.mjs",
     "test:cached": "node tools/run-tests-cached.mjs",
