@@ -99,14 +99,8 @@
       }, true);
     }
     if (state.controls) state.controls.minDistance = 3;
-    const ctxExport = document.getElementById('ctx-export');
-    if (ctxExport) {
-      ctxExport.addEventListener('click', function () {
-        if (typeof hideCtxMenu === 'function') hideCtxMenu();
-        if (typeof exportSelected === 'function') exportSelected();
-        else if (typeof exportActiveModel === 'function') exportActiveModel();
-      });
-    }
+    /* The right-click menu's Export items open the Export card (nsoCtxOpenExport,
+       app-core.js); they no longer hard-wire one format here. */
   }
 
   if (document.readyState === 'loading') {

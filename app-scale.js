@@ -1360,7 +1360,7 @@ if (typeof document !== 'undefined') {
       if (!s.entry) return;
       var entry = s.entry;
       s.entry = null;
-      if (topEntry() === entry && typeof undoLast === 'function') undoLast();
+      if (topEntry() === entry && typeof undoLastDiscard === 'function') undoLastDiscard();
       else if (s.m && s.soup && s.m.rawTris !== s.soup) {
         withoutUndo(function () { NSO_sculptCommitRaw(s.m, s.soup, 'scaleReplace', ''); });
       }

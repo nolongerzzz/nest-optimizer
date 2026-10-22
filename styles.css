@@ -1538,7 +1538,7 @@ select:focus, input:focus {
 .ctx-menu {
   position: fixed;
   z-index: 1000;
-  min-width: 140px;
+  min-width: 220px;
   background: #1e222b;
   border: 1px solid #3a4558;
   border-radius: 8px;
@@ -1561,13 +1561,35 @@ select:focus, input:focus {
   border-radius: 6px;
   cursor: pointer;
 }
-.ctx-item:hover {
+.ctx-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  white-space: nowrap;
+}
+.ctx-item:hover:not(:disabled) {
   background: #2a303c;
+}
+.ctx-item:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+.ctx-key {
+  font: inherit;
+  font-size: 11.5px;
+  color: #94a3b8;
+  letter-spacing: 0.02em;
+}
+.ctx-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: #3a4558;
 }
 .ctx-item.ctx-danger {
   color: #fecaca;
 }
-.ctx-item.ctx-danger:hover {
+.ctx-item.ctx-danger:hover:not(:disabled) {
   background: #7f1d1d;
 }
 
@@ -3781,7 +3803,7 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
   line-height: calc(var(--shell-btn-h) - 2px);
 }
 /* Undo, Remove and Export to the right end of the row. */
-.vp-shell-row > #btn-undo { margin-left: auto; }
+.vp-shell-row > #stack-undo { margin-left: auto; }
 /* Remove with Clear plate under it, Export with Optimize under it. Each
    stack is one slab tall as far as the row is concerned - the second slab
    overflows below - so the column still starts right under Import. Both

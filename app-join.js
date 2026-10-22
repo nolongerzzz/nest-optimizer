@@ -3136,14 +3136,29 @@ function setupUI() {
     btnUndo.addEventListener('click', fireUndo, true);
     btnUndo.addEventListener('pointerdown', (e) => { e.stopPropagation(); }, true);
   }
+  const btnRedo = document.getElementById('btn-redo');
+  if (btnRedo) {
+    btnRedo.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      redoLast();
+    }, true);
+    btnRedo.addEventListener('pointerdown', (e) => { e.stopPropagation(); }, true);
+  }
   updateUndoBtn();
 
   window.addEventListener('keydown', (e) => {
     const tag = (e.target && e.target.tagName) || '';
     if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+    // Shift+Cmd/Ctrl+Z and Ctrl+Y redo; Cmd/Ctrl+Z undoes.
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || e.key === 'Y') && !e.shiftKey && !e.altKey) {
+      e.preventDefault();
+      redoLast();
+      return;
+    }
     if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
       e.preventDefault();
-      undoLast();
+      if (e.shiftKey) redoLast(); else undoLast();
       return;
     }
     if (cutterArmed('cut') && getActiveModel()) {
