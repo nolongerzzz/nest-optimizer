@@ -54,8 +54,18 @@ withApp(async (page, logs) => {
     selectPlaced(0);
     const H = window.__d = {};
     H.p = () => state.placed[0];
-    H.q = () => { const p = H.p(); p.mesh.updateMatrixWorld(true); return p.mesh.quaternion.toArray(); };
-    H.fields = () => { const p = H.p();
+    /* Every pose action is baked when it ends (app-core.js nsoBakePlacedPose):
+       the turn goes into the geometry, the mesh back to identity and the
+       fields to 0. So the piece's orientation is read off its BODY - the turn
+       on the mesh after the turns baked since it was loaded (nsoPieceBodyQ) -
+       and "the fields" are that body as the XYZ Euler the old accumulated
+       fields spelled it in (tipX / tipZ / flipX folded into the free three). */
+    H.q = () => nsoPieceBodyQ(H.p()).toArray();
+    H.fields = () => {
+      const e = new THREE.Euler().setFromQuaternion(nsoPieceBodyQ(H.p()), 'XYZ');
+      const c = v => { v = +v.toFixed(9); return v === 0 ? 0 : v; };
+      return { tipX: 0, tipZ: 0, flipX: false, tiltX: c(e.x * 180 / Math.PI), rotY: c(e.y), tiltZ: c(e.z * 180 / Math.PI) }; };
+    H.rawFields = () => { const p = H.p();
       return { tipX: p.tipX || 0, tipZ: p.tipZ || 0, flipX: !!p.flipX, tiltX: p.tiltX || 0,
                rotY: p.rotY || 0, tiltZ: p.tiltZ || 0 }; };
     /* the rotation that takes orientation qa to qb, as a signed angle about a
@@ -98,7 +108,7 @@ withApp(async (page, logs) => {
     };
     /* where one of the piece's own axes points in the world */
     H.own = (b) => { const p = H.p(); p.mesh.updateMatrixWorld(true);
-      return new THREE.Vector3().fromArray(b).applyQuaternion(p.mesh.quaternion).toArray(); };
+      return new THREE.Vector3().fromArray(b).applyQuaternion(nsoPieceBodyQ(p)).toArray(); };
     /* a point fixed to the piece, its screen angle about the piece's centre
        (screen y is down, so a growing angle is clockwise on screen) */
     H.markAngle = (local) => {
@@ -106,7 +116,9 @@ withApp(async (page, logs) => {
       const r = state.renderer.domElement.getBoundingClientRect();
       const s = v => { v = v.clone().project(state.camera);
         return { x: r.left + (v.x * .5 + .5) * r.width, y: r.top + (-v.y * .5 + .5) * r.height }; };
-      const a = s(p.mesh.localToWorld(new THREE.Vector3().fromArray(local))), c = s(p.mesh.position);
+      /* a point fixed to the piece's BODY (its load frame - the geometry is
+         re-centred and turned by every bake, so mesh-local is not it) */
+      const a = s(new THREE.Vector3().fromArray(local).applyQuaternion(nsoPieceBodyQ(p)).add(p.mesh.position)), c = s(p.mesh.position);
       return Math.atan2(a.y - c.y, a.x - c.x) * 180 / Math.PI;
     };
     H.status = () => document.getElementById('status').textContent;
@@ -147,14 +159,19 @@ withApp(async (page, logs) => {
       const p = window.__d.p(); p.mesh.updateMatrixWorld(true);
       const pos = p.mesh.geometry.attributes.position, v = new THREE.Vector3(), w = new THREE.Vector3();
       const acc = { far: [], near: [], left: [], right: [] };
+      /* which end a vertex is on, in the piece's body frame (the bake turns
+         and re-centres the geometry itself; the box is symmetric, so its
+         centre is the body's origin either way) */
+      const toBody = nsoPieceBodyQ(p).invert();
       for (let i = 0; i < pos.count; i++) {
         v.fromBufferAttribute(pos, i); w.copy(v); p.mesh.localToWorld(w);
+        v.applyQuaternion(p.mesh.quaternion).applyQuaternion(toBody);
         if (v.z < -9) acc.far.push(w.y); if (v.z > 9) acc.near.push(w.y);
         if (v.x < -39) acc.left.push(w.y); if (v.x > 39) acc.right.push(w.y);
       }
       const m = a => a.reduce((s, x) => s + x, 0) / a.length;
       const r = state.renderer.domElement.getBoundingClientRect();
-      const sx = x => { const q = p.mesh.localToWorld(new THREE.Vector3(x, 0, 0)).project(state.camera); return r.left + (q.x * .5 + .5) * r.width; };
+      const sx = x => { const q = new THREE.Vector3(x, 0, 0).applyQuaternion(nsoPieceBodyQ(p)).add(p.mesh.position).project(state.camera); return r.left + (q.x * .5 + .5) * r.width; };
       return { far: m(acc.far), near: m(acc.near), left: m(acc.left), right: m(acc.right),
                rightOnScreenRight: sx(39) > sx(-39) };
     });
@@ -381,7 +398,11 @@ withApp(async (page, logs) => {
   check('...each keeps its own status line', turns.every(t => /^Yaw #1$/.test(t.status)), turns[0].status);
   const back = await N(() => window.__d.fields());
   r = await N(q => window.__d.delta(q), start.q);
-  check('four of them: back to the start exactly', r.deg === 0 && JSON.stringify(back) === JSON.stringify(start.f),
+  /* re-pinned (pose-bake): was r.deg === 0, the fields wrapping rotY back to
+     0 exactly; each quarter is now baked and the body composed of four
+     quaternions, so it comes back within 1e-9 degrees and the fields, read
+     to 9 places, are the start's */
+  check('four of them: back to the start exactly', r.deg < 1e-9 && JSON.stringify(back) === JSON.stringify(start.f),
     r.deg + '°, fields ' + JSON.stringify(back));
   for (let i = 3; i >= 0; i--) {
     await undo();
@@ -451,11 +472,14 @@ withApp(async (page, logs) => {
     const p = window.__d.p(), f = window.__d.fields();
     const e = new THREE.Euler(f.tipX * Math.PI / 2 + f.tiltX * Math.PI / 180 + (f.flipX ? Math.PI : 0),
       f.rotY + o, f.tipZ * Math.PI / 2 + f.tiltZ * Math.PI / 180, 'XYZ');
-    const qa = p.mesh.quaternion.clone(), qb = new THREE.Quaternion().setFromEuler(e);
+    /* the geometry carries the body (baked, mesh at identity): the old
+       orientation is the body turned by qb * body^-1 */
+    const qa = nsoPieceBodyQ(p), qb = new THREE.Quaternion().setFromEuler(e);
+    const rel = qb.clone().multiply(qa.clone().invert());
     const pos = p.mesh.geometry.attributes.position, v = new THREE.Vector3(), ya = [], yb = [];
     for (let i = 0; i < pos.count; i++) {
-      v.fromBufferAttribute(pos, i);
-      ya.push(v.clone().applyQuaternion(qa).y); yb.push(v.clone().applyQuaternion(qb).y);
+      v.fromBufferAttribute(pos, i).applyQuaternion(p.mesh.quaternion);
+      ya.push(v.y); yb.push(v.clone().applyQuaternion(rel).y);
     }
     const la = Math.min(...ya), lb = Math.min(...yb);   // each seated on the plate
     return Math.max(...ya.map((y, i) => Math.abs((y - la) - (yb[i] - lb))));

@@ -109,14 +109,19 @@ function resolveAxis(model) {
 //
 // THE SQUARE CUT. The blade stands across the piece's LONGEST dimension as it
 // lies, so the default cut passes through the short cross-section and
-// severs the long way (cut to length). "As it lies" is the piece's own
-// geometry box, the frame Scale's Longest measures in (#162): a pose on the
-// plate (Tip, Stand, Tilt) turns the mesh, not that box, so a tipped piece
-// still cuts across its true length, and the blade, carried by the mesh's
-// transform, is square to the piece in world space. Ties go x, then z, then
-// y. `axis` is that local axis; `plateAxis` names the plate direction it
-// runs along now ('y' for a piece stood on end), for the readout and for
-// which way the halves are parted on the plate.
+// severs the long way (cut to length). "As it lies" is the piece's frame -
+// pieceFrame (nso-bounds.js), the one frame every tool reads: the long side
+// of its footprint, or the plate vertical when the piece stands taller than
+// it is long. Every pose action is baked when it ends (app-core.js
+// nsoBakePlacedPose), so the geometry's own box says nothing about which way
+// a turned piece lies; its footprint does. The blade travels along that
+// line, so a square blade is plumb on a piece that was leaned, and square to
+// the length of one that was turned. `axis` is the local axis nearest it and
+// `base` the turn about the vertical from that axis to it (0 for a piece
+// lying square, so the frame is the local one bit for bit); `plateAxis`
+// names the plate direction it runs along now ('y' for a piece stood on
+// end), for the readout and for which way the halves are parted on the
+// plate. Ties go x, then z, then y.
 //
 // A programmatic lock, state.cutAxis = 'x' | 'z', is kept for the checks
 // that cut a piece across a chosen plate axis (a tube's bore on every
@@ -224,7 +229,7 @@ function cutFrame(model) {
   const mesh = cutMeshOf(m);
   if (mesh) mesh.updateMatrixWorld(true);
   const toLocal = mesh ? new THREE.Matrix4().copy(mesh.matrixWorld).invert() : null;
-  let axis, plateAxis;
+  let axis, plateAxis, base = 0;
   if (state.cutAxis === 'x' || state.cutAxis === 'z') {
     plateAxis = state.cutAxis;
     axis = plateAxis;
@@ -234,7 +239,9 @@ function cutFrame(model) {
       axis = (ax >= ay && ax >= az) ? 'x' : (ay >= az ? 'y' : 'z');
     }
   } else {
-    axis = cutLongAxis(bbox);
+    const travel = cutTravel(m, mesh, toLocal, bbox);
+    axis = travel.axis;
+    base = travel.base;
     plateAxis = axis;
     if (mesh) {
       const w = new THREE.Vector3(axis === 'x' ? 1 : 0, axis === 'y' ? 1 : 0, axis === 'z' ? 1 : 0)
@@ -246,6 +253,9 @@ function cutFrame(model) {
   const length = bbox.max[axis] - bbox.min[axis];
   if (!(length > 0)) return null;
   const deg = cutMiterDeg(), bevel = cutBevelDeg();
+  /* the mitre is measured from the footprint's long side: the normal is the
+     local axis turned by the base anticlockwise, then by the mitre clockwise */
+  const turnDeg = base ? deg - base : deg;
   let turn = null, back = null;
   // The blade's travel axis in the piece's frame, and the piece's extent
   // along it: `origin` is its low end, `span` its length (the piece's own
@@ -254,9 +264,9 @@ function cutFrame(model) {
   let origin = bbox.min[axis], span = length;
   // The plate vertical, in the piece's own frame.
   const up = toLocal ? new THREE.Vector3(0, 1, 0).transformDirection(toLocal) : new THREE.Vector3(0, 1, 0);
-  if (deg) {
-    turn = cutTurnMatrix(up, deg);
-    back = cutTurnMatrix(up, -deg);
+  if (turnDeg) {
+    turn = cutTurnMatrix(up, turnDeg);
+    back = cutTurnMatrix(up, -turnDeg);
     normal.applyMatrix4(back);
   }
   if (bevel) {
@@ -273,7 +283,43 @@ function cutFrame(model) {
   }
   const lim = cutEndLimits(span);
   return { plateAxis: plateAxis, axis: axis, bbox: bbox, span: span, origin: origin, normal: normal,
-           lo: lim.lo, hi: lim.hi, mesh: mesh, deg: deg, bevel: bevel, up: up, turn: turn, back: back };
+           lo: lim.lo, hi: lim.hi, mesh: mesh, deg: deg, bevel: bevel, up: up, turn: turn, back: back,
+           base: base };
+}
+
+/* Which way the square blade travels, from the piece's frame (see THE SQUARE
+   CUT): { axis: the local axis nearest the travel line, base: the turn about
+   the vertical, anticlockwise from above in degrees, from that axis to it -
+   the opposite sense to the mitre's, which is why the mitre's turn is the
+   mitre less it }. A
+   base under 1e-4 degrees is Float32 noise on a piece lying square and is 0,
+   so such a piece keeps the local frame bit for bit. With nothing to measure
+   (no placed mesh, no nso-bounds), the geometry box decides, as it did. */
+function cutTravel(m, mesh, toLocal, bbox) {
+  const f = (mesh && typeof nsoBounds !== 'undefined' && nsoBounds.pieceFrame) ? nsoBounds.pieceFrame(mesh) : null;
+  if (!f || !toLocal) return { axis: cutLongAxis(bbox), base: 0 };
+  const loc = v => v.clone().transformDirection(toLocal);
+  const up = loc(new THREE.Vector3(0, 1, 0));
+  const AX = { x: new THREE.Vector3(1, 0, 0), y: new THREE.Vector3(0, 1, 0), z: new THREE.Vector3(0, 0, 1) };
+  if (f.lengths.height > f.lengths.long * (1 + 1e-9)) {
+    let best = 'x';
+    ['x', 'z', 'y'].forEach(k => { if (Math.abs(AX[k].dot(up)) > Math.abs(AX[best].dot(up)) + 1e-9) best = k; });
+    return { axis: best, base: 0 };
+  }
+  const L = loc(f.long);
+  let best = null;
+  ['x', 'z', 'y'].forEach(k => {
+    if (Math.abs(AX[k].dot(up)) > 0.5) return;               // the vertical is not a level travel line
+    if (!best || Math.abs(AX[k].dot(L)) > Math.abs(AX[best].dot(L)) + 1e-9) best = k;
+  });
+  if (!best) return { axis: cutLongAxis(bbox), base: 0 };
+  const a = AX[best].clone().projectOnPlane(up).normalize();
+  const l = L.clone().projectOnPlane(up).normalize();
+  if (a.dot(l) < 0) l.negate();                              // a line, either sense
+  // right-handed about the plate vertical (anticlockwise from above), a to l
+  let base = Math.atan2(a.clone().cross(l).dot(up), a.dot(l)) * 180 / Math.PI;
+  if (Math.abs(base) < 1e-4) base = 0;
+  return { axis: best, base: base };
 }
 
 /** The blade's lean, for the travel axis `n` (piece frame, after the mitre)
@@ -373,7 +419,9 @@ function getCutPlaneLocal(model) {
   // n, that is the coordinate `origin + mm` (square: the piece's own).
   const out = { axis: f.axis, plateAxis: f.plateAxis, plane: f.origin + mm, mm: mm, bbox: f.bbox, span: f.span,
                 t: mm / f.span, origin: f.origin, lo: f.lo, hi: f.hi, localBox: f.bbox,
-                deg: f.deg, bevel: f.bevel, turn: f.turn, frame: f.back };
+                deg: f.deg, bevel: f.bevel, turn: f.turn, frame: f.back, base: f.base || 0,
+                /* the travel line in the world, for parting the halves along it */
+                normalWorld: f.mesh ? f.normal.clone().transformDirection(f.mesh.matrixWorld) : null };
   if (f.turn) {
     const b = f.bbox, c = new THREE.Vector3(), box = new THREE.Box3();
     for (let i = 0; i < 8; i++) {
@@ -2558,7 +2606,7 @@ function cutCapSideX(model) {
   return nearMax >= nearMin ? 'max' : 'min';
 }
 
-function layoutAfterSplit(sourcePose, poseById, sourceId, modelA, modelB, axis, stayA, stayB) {
+function layoutAfterSplit(sourcePose, poseById, sourceId, modelA, modelB, axis, stayA, stayB, along) {
   if (!state.modelGroup) return;
   clearDisplayMeshes();
   state.placed = [];
@@ -2601,7 +2649,17 @@ function layoutAfterSplit(sourcePose, poseById, sourceId, modelA, modelB, axis, 
   let bOff = stayWorld(stayB, srcOri);
   let ax = aOff.x, az = aOff.z, bx = bOff.x, bz = bOff.z;
   const pad = SPLIT_VIEW_GAP_MM * 0.5;
-  if (axis === 'z') {
+  /* `along`: the cut's travel line on the plate, for a square cut across a
+     turned piece's length (cutFrame's base turn): the halves part along it,
+     away from the blade, as they part along the plate axis a square cut on a
+     piece lying square runs on. Null for every other cut, as before. */
+  const n = along ? new THREE.Vector3(along.x, 0, along.z) : null;
+  if (n && n.lengthSq() > 1e-12) {
+    n.normalize();
+    const dir = (bx - ax) * n.x + (bz - az) * n.z >= 0 ? 1 : -1;
+    ax -= dir * pad * n.x; az -= dir * pad * n.z;
+    bx += dir * pad * n.x; bz += dir * pad * n.z;
+  } else if (axis === 'z') {
     const dir = bz >= az ? 1 : -1;
     az -= dir * pad;
     bz += dir * pad;

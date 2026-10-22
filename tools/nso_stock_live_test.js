@@ -52,6 +52,7 @@ const shot = (page, id) => page.evaluate(i => {
     x: p ? +p.x.toFixed(4) : null, z: p ? +p.z.toFixed(4) : null,
     rotY: p ? (p.rotY || 0) : null, tipX: p ? (p.tipX || 0) : null,
     tiltX: p ? (p.tiltX || 0) : null, flipX: p ? !!p.flipX : null,
+    body: p ? nsoPieceBodyQ(p).toArray().map(v => +v.toFixed(9)) : null,
     meshUuid: p && p.mesh ? p.mesh.uuid : null,
     editId: state.editId, selectedIndex: state.selectedIndex,
     outlined: state.selectedIndex >= 0 && state.placed[state.selectedIndex]
@@ -148,9 +149,46 @@ withApp(async (page, logs) => {
     await page.evaluate(() => { const e = document.getElementById('btn-tilt-up'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
     await page.click('#btn-tilt-up');     /* pitch one step */
     posed = await shot(page, id);
+    /* re-pinned (pose-bake): the yaw and the pitch are baked into the block's
+       geometry when each press ends, so the pose is its BODY (nsoPieceBodyQ),
+       not rotY. */
     check('the block has been moved and posed by hand',
-      posed.x === 40 && posed.z === -25 && posed.rotY !== 0,
-      'x ' + posed.x + ', z ' + posed.z + ', rotY ' + posed.rotY + ', tipX ' + posed.tipX + ', tiltX ' + posed.tiltX);
+      posed.x === 40 && posed.z === -25 && Math.abs(posed.body[3]) < 1 - 1e-6,
+      'x ' + posed.x + ', z ' + posed.z + ', body ' + JSON.stringify(posed.body));
+
+    /* pose-bake: the yaw and the pitch are baked into the block, so its raw
+       axes no longer run along it. Scale reads it AS IT LIES (pieceFrame):
+       Length and Width along the level long and short sides of its footprint,
+       Height the plate vertical - all three rows, with those numbers, worked
+       out here from the block's own vertices in the world. */
+    await scaleCard(page, 'scale-height');
+    const rows = await page.evaluate(i => {
+      const p = state.placed.find(q => q && q.sourceId === i);
+      p.mesh.updateMatrixWorld(true);
+      const pos = p.mesh.geometry.attributes.position, pts = [];
+      let lo = Infinity, hi = -Infinity;
+      for (let k = 0; k < pos.count; k++) {
+        const v = new THREE.Vector3().fromBufferAttribute(pos, k).applyMatrix4(p.mesh.matrixWorld);
+        pts.push([v.x, v.z]); lo = Math.min(lo, v.y); hi = Math.max(hi, v.y);
+      }
+      let best = null;                                   // the footprint: narrowest rectangle round the shadow
+      for (let a = 0; a < pts.length; a++) for (let b = a + 1; b < pts.length; b++) {
+        const dx = pts[b][0] - pts[a][0], dz = pts[b][1] - pts[a][1], l = Math.hypot(dx, dz);
+        if (l < 1e-6) continue;
+        const d = [dx / l, dz / l], n = [-d[1], d[0]];
+        const ext = u => { const t = pts.map(q => q[0] * u[0] + q[1] * u[1]); return Math.max(...t) - Math.min(...t); };
+        const e1 = ext(d), e2 = ext(n);
+        if (!best || e1 * e2 < best.area - 1e-9) best = { area: e1 * e2, L: Math.max(e1, e2), W: Math.min(e1, e2) };
+      }
+      const val = id => +document.getElementById(id).value;
+      return { hidden: ['scale-length-row', 'scale-width-row', 'scale-height-row'].map(r => document.getElementById(r).hidden),
+               shown: { L: val('scale-length'), W: val('scale-width'), H: val('scale-height') },
+               want: { L: best.L, W: best.W, H: hi - lo } };
+    }, id);
+    check('a leaned block still shows Length, Width and Height', rows.hidden.every(h => !h), JSON.stringify(rows.hidden));
+    check('...with the numbers as it lies: footprint long, footprint short, the vertical',
+      Math.abs(rows.shown.L - rows.want.L) < 0.051 && Math.abs(rows.shown.W - rows.want.W) < 0.051 && Math.abs(rows.shown.H - rows.want.H) < 0.051,
+      'shown ' + JSON.stringify(rows.shown) + ', as it lies ' + JSON.stringify({ L: +rows.want.L.toFixed(3), W: +rows.want.W.toFixed(3), H: +rows.want.H.toFixed(3) }));
 
     /* The adjustment: Height 28.453 -> 40, a Scale field, no button. */
     await scaleType(page, id, 'scale-height', 40);
@@ -166,10 +204,10 @@ withApp(async (page, logs) => {
     check('POSITION survives: same placed entry, same index, same x / z',
       after.placedIndex === posed.placedIndex && after.x === posed.x && after.z === posed.z,
       'placed[' + after.placedIndex + '] at x ' + after.x + ', z ' + after.z);
-    check('ROTATION survives: yaw, tip and tilt all still on the piece',
-      after.rotY === posed.rotY && after.tipX === posed.tipX &&
-      after.tiltX === posed.tiltX && after.flipX === posed.flipX,
-      'rotY ' + after.rotY + ', tipX ' + after.tipX + ', tiltX ' + after.tiltX);
+    check('ROTATION survives: yaw, tip and tilt all still on the piece (its body, baked)',
+      JSON.stringify(after.body) === JSON.stringify(posed.body) &&
+      after.rotY === posed.rotY && after.tipX === posed.tipX && after.tiltX === posed.tiltX && after.flipX === posed.flipX,
+      'body ' + JSON.stringify(after.body));
     check('SELECTION survives, and both halves still agree',
       after.editId === id && after.outlined === id, 'editId ' + after.editId + ', outlined ' + after.outlined);
 

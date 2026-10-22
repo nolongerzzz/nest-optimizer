@@ -668,10 +668,59 @@ function NSO_seatFaceReaches(matrix, box, axis, sign, normal, aWorld) {
    untouched, the reach test only ever runs on a tie, and it can only change
    the answer where the losing face was one the fit would have refused.
    ============================================================ */
+/* The bit's frame is the piece's frame - pieceFrame (nso-bounds.js), the one
+   every tool reads: its footprint's long side, the plate vertical and its
+   short side. A pose is baked into the geometry when it ends (app-core.js
+   nsoBakePlacedPose), so the geometry's own box is the box of a turned piece,
+   not the piece's: its faces stand off it in the air. The box here is the
+   bit's box in the frame's axes, carried by matrix x basis. A bit whose frame
+   is its own axes (each frame axis one of them, either sense - a piece lying
+   square) keeps its own box exactly: null basis.
+
+   HELD for the geometry. The basis is in the mesh's own terms, so it turns
+   with the mesh, and it is kept for as long as the mesh has that geometry:
+   a seat's fit turns the bit on its mesh step by step and asks for its frame
+   at every step, and the frame it fits by must be the one it started from,
+   not one re-measured off the half-turned bit (as a drag holds its frame from
+   press to release). A pose action bakes into new geometry, and the frame is
+   measured again off that. */
+function NSO_plugBasis(bitMesh) {
+  if (typeof nsoBounds === 'undefined' || !nsoBounds.pieceFrame) return null;
+  var g = bitMesh.geometry, pos = g && g.attributes && g.attributes.position;
+  var held = bitMesh.userData.nsoPlugBasis;
+  if (held && held.g === g && held.pos === pos && held.version === (pos ? pos.version : -1)) {
+    return held.basis ? held.basis.clone() : null;
+  }
+  var f = nsoBounds.pieceFrame(bitMesh);
+  var basis = null;
+  if (f) {
+    var inv = new THREE.Matrix4().copy(bitMesh.matrixWorld).invert();
+    var e = [f.long, f.up, f.short].map(function (v) { return v.clone().transformDirection(inv); });
+    var onAxis = e.every(function (v) {
+      return Math.max(Math.abs(v.x), Math.abs(v.y), Math.abs(v.z)) > 1 - 1e-9;
+    });
+    basis = onAxis ? null : new THREE.Matrix4().makeBasis(e[0], e[1], e[2]);
+  }
+  bitMesh.userData.nsoPlugBasis = { g: g, pos: pos, version: pos ? pos.version : -1, basis: basis };
+  return basis ? basis.clone() : null;
+}
+function NSO_boxInBasis(geometry, basis) {
+  var pos = geometry.attributes.position, el = basis.elements, box = new THREE.Box3(), v = new THREE.Vector3();
+  var c = [[el[0], el[1], el[2]], [el[4], el[5], el[6]], [el[8], el[9], el[10]]];
+  for (var i = 0; i < pos.count; i++) {
+    var x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    box.expandByPoint(v.set(c[0][0] * x + c[0][1] * y + c[0][2] * z,
+                            c[1][0] * x + c[1][1] * y + c[1][2] * z,
+                            c[2][0] * x + c[2][1] * y + c[2][2] * z));
+  }
+  return box;
+}
 function NSO_plugFrame(bitMesh, hullCenterWorld, aWorld) {
   bitMesh.updateWorldMatrix(true, false);
-  var box = NSO_localAABB(bitMesh.geometry);
+  var basis = NSO_plugBasis(bitMesh);
+  var box = basis ? NSO_boxInBasis(bitMesh.geometry, basis) : NSO_localAABB(bitMesh.geometry);
   var M = bitMesh.matrixWorld.clone();
+  if (basis) M.multiply(basis);
 
   var plugCenterLocal = new THREE.Vector3();
   box.getCenter(plugCenterLocal);
@@ -2739,7 +2788,8 @@ function cutActiveModel(opts) {
   state.cutterOpen = true;
   removeCutHelper();
   state.previewMesh = null;
-  layoutAfterSplit(sourcePose, poseById, sourceId, modelA, modelB, plateAxis, stayA, stayB);
+  layoutAfterSplit(sourcePose, poseById, sourceId, modelA, modelB, plateAxis, stayA, stayB,
+                   info.base && !info.deg && !info.bevel ? info.normalWorld : null);
   state.cutterOpen = true;
   state.editId = null;
   removeCutHelper();

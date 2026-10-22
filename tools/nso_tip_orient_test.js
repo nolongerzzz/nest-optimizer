@@ -36,8 +36,7 @@ withApp(async (page, logs) => {
     const o = await page.evaluate(() => {
       const t = window.nsoTipOrient;
       const reset = () => { const p = state.placed[0];
-        p.tipX = 0; p.tipZ = 0; p.tiltX = 0; p.tiltZ = 0; p.rotY = 0; p.flipX = false;
-        applyMeshRotation(p); };
+        nsoPoseHome(p); };     // every Tip is baked when it ends: home is the loaded geometry
       const shot = id => { reset(); document.getElementById(id).click(); return t.orientation(); };
       reset();
       return { start: t.orientation(), side: shot('btn-flip'),
@@ -74,8 +73,7 @@ withApp(async (page, logs) => {
     const f = await page.evaluate(() => {
       const t = window.nsoTipOrient;
       const reset = () => { const p = state.placed[0];
-        p.tipX = 0; p.tipZ = 0; p.tiltX = 0; p.tiltZ = 0; p.rotY = 0; p.flipX = false;
-        applyMeshRotation(p); };
+        nsoPoseHome(p); };     // every Tip is baked when it ends: home is the loaded geometry
       const pick = n => {
         reset();
         const p = state.placed[0]; p.mesh.updateMatrixWorld(true);
@@ -130,12 +128,16 @@ withApp(async (page, logs) => {
   {
     const t = await page.evaluate(() => {
       const p = state.placed[0];
-      const zero = () => { p.tiltX = 0; p.tiltZ = 0; applyMeshRotation(p); };
+      const zero = () => nsoPoseHome(p);
+      /* a Tilt is baked when it ends - the fields are 0 again - so the step is
+         read off the piece's body (nsoPieceBodyQ), as the fields' Euler */
+      const body = () => { const e = new THREE.Euler().setFromQuaternion(nsoPieceBodyQ(p), 'XYZ');
+        return { tiltX: +(e.x * 180 / Math.PI).toFixed(9), tiltZ: +(e.z * 180 / Math.PI).toFixed(9) }; };
       const out = {};
-      zero(); document.getElementById('btn-tilt-up').click(); out.up = p.tiltX;
-      zero(); document.getElementById('btn-tilt-dn').click(); out.dn = p.tiltX;
-      zero(); document.getElementById('btn-bank-up').click(); out.bankUp = p.tiltZ;
-      zero(); document.getElementById('btn-bank-dn').click(); out.bankDn = p.tiltZ;
+      zero(); document.getElementById('btn-tilt-up').click(); out.up = body().tiltX;
+      zero(); document.getElementById('btn-tilt-dn').click(); out.dn = body().tiltX;
+      zero(); document.getElementById('btn-bank-up').click(); out.bankUp = body().tiltZ;
+      zero(); document.getElementById('btn-bank-dn').click(); out.bankDn = body().tiltZ;
       zero();
       out.labels = ['btn-tilt-up', 'btn-tilt-dn', 'btn-bank-up', 'btn-bank-dn']
         .map(i => document.getElementById(i).textContent.trim());
@@ -161,8 +163,8 @@ withApp(async (page, logs) => {
        motion itself is what is checked. */
     const sep = await page.evaluate(() => {
       const p = state.placed[0];
-      p.tiltX = 0; p.tiltZ = 0; p.rotY = 0; applyMeshRotation(p);
-      const q = () => { p.mesh.updateMatrixWorld(true); return p.mesh.quaternion.clone(); };
+      nsoPoseHome(p);
+      const q = () => nsoPieceBodyQ(p);
       const own = (b) => new THREE.Vector3().fromArray(b).applyQuaternion(q());
       const out = [];
       for (const [id, b, ring] of [['btn-tilt-up', [1, 0, 0], 'fb'], ['btn-bank-up', [0, 0, 1], 'ss'],
@@ -175,7 +177,7 @@ withApp(async (page, logs) => {
         out.push({ deg: 2 * Math.atan2(s, Math.abs(d.w)) * 180 / Math.PI,
                    own: dot(ax), ring: dot(ring0), up: s ? Math.abs(d.y) / s : 0 });
       }
-      p.tiltX = 0; p.tiltZ = 0; p.rotY = 0; applyMeshRotation(p);
+      nsoPoseHome(p);
       return out;
     });
     check('every Tilt press is a 15° turn about its lean ring\'s axis at the press - a level line, never the vertical',
@@ -187,16 +189,14 @@ withApp(async (page, logs) => {
        own width line - which now runs along the plate's X. */
     const tz = await page.evaluate(() => {
       const p = state.placed[0];
-      p.tiltX = 0; p.tiltZ = 0; p.rotY = 0; applyMeshRotation(p);
+      nsoPoseHome(p);
       window.nsoRotate.turn('turn', 90);
-      p.mesh.updateMatrixWorld(true);
-      const a = p.mesh.quaternion.clone();
+      const a = nsoPieceBodyQ(p);
       const w = new THREE.Vector3(0, 0, 1).applyQuaternion(a);
       document.getElementById('btn-bank-dn').click();
-      p.mesh.updateMatrixWorld(true);
-      const d = p.mesh.quaternion.clone().multiply(a.invert());
+      const d = nsoPieceBodyQ(p).multiply(a.invert());
       const s = Math.hypot(d.x, d.y, d.z);
-      p.tiltX = 0; p.tiltZ = 0; p.rotY = 0; applyMeshRotation(p);
+      nsoPoseHome(p);
       return { deg: 2 * Math.atan2(s, Math.abs(d.w)) * 180 / Math.PI,
                along: s ? Math.abs(d.x * w.x + d.y * w.y + d.z * w.z) / s : 0, x: s ? Math.abs(d.x) / s : 0 };
     });
@@ -210,26 +210,30 @@ withApp(async (page, logs) => {
   {
     const k = await page.evaluate(() => {
       const p = state.placed[0], menu = document.getElementById('menu-tip');
-      const zero = () => { p.tiltX = 0; p.tiltZ = 0; applyMeshRotation(p); };
+      const zero = () => nsoPoseHome(p);
+      /* a Tilt is baked when it ends - the fields are 0 again - so the step is
+         read off the piece's body (nsoPieceBodyQ), as the fields' Euler */
+      const body = () => { const e = new THREE.Euler().setFromQuaternion(nsoPieceBodyQ(p), 'XYZ');
+        return { tiltX: +(e.x * 180 / Math.PI).toFixed(9), tiltZ: +(e.z * 180 / Math.PI).toFixed(9) }; };
       const fire = (key, repeat) => document.dispatchEvent(new KeyboardEvent('keydown',
         { key: key, repeat: !!repeat, bubbles: true, cancelable: true }));
       const out = {};
       /* SHUT: the keys are not ours. This is the whole point of scoping them
          - another tool can hold the same four arrows without a collision. */
       menu.open = false; zero(); fire('ArrowUp'); fire('ArrowLeft');
-      out.shut = { tiltX: p.tiltX, tiltZ: p.tiltZ };
+      out.shut = body();
       menu.open = true;
-      zero(); fire('ArrowUp');    out.up = p.tiltX;
-      zero(); fire('ArrowDown');  out.down = p.tiltX;
-      zero(); fire('ArrowRight'); out.right = p.tiltZ;
-      zero(); fire('ArrowLeft');  out.left = p.tiltZ;
+      zero(); fire('ArrowUp');    out.up = body().tiltX;
+      zero(); fire('ArrowDown');  out.down = body().tiltX;
+      zero(); fire('ArrowRight'); out.right = body().tiltZ;
+      zero(); fire('ArrowLeft');  out.left = body().tiltZ;
       zero(); for (let i = 0; i < 6; i++) fire('ArrowUp', true);
-      out.held = p.tiltX;
+      out.held = body().tiltX;
       zero();
       const inp = document.querySelector('#menu-tip input, input[type="number"]');
       if (inp) { inp.dispatchEvent(new KeyboardEvent('keydown',
         { key: 'ArrowUp', bubbles: true, cancelable: true })); }
-      out.inField = p.tiltX;
+      out.inField = body().tiltX;
       zero(); menu.open = false;
       return out;
     });

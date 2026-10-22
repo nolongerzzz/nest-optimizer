@@ -690,12 +690,154 @@ function NSO_scaleSelectedModel(spec) {
    a selection change or a size-line refresh costs nothing. */
 var NSO_scaleSectionCache = (typeof WeakMap === 'function') ? new WeakMap() : null;
 function NSO_scaleSectionOf(m) {
-  var soup = (m && m.rawTris && m.rawAxis === 'zup') ? m.rawTris : null;
-  if (!soup || typeof NSO_sectionRead !== 'function') return null;
+  var raw = (m && m.rawTris && m.rawAxis === 'zup') ? m.rawTris : null;
+  if (!raw || typeof NSO_sectionRead !== 'function') return null;
+  var soup = NSO_scaleSpaceOf(m, raw).f;
   if (NSO_scaleSectionCache && NSO_scaleSectionCache.has(soup)) return NSO_scaleSectionCache.get(soup);
-  var s = NSO_sectionRead(soup);
+  var s = NSO_scaleAsItLies(NSO_sectionRead(soup), soup, NSO_scaleBodyRows(m, raw));
   if (NSO_scaleSectionCache) NSO_scaleSectionCache.set(soup, s);
   return s;
+}
+
+/* How many of Length / Width / Height the piece had as it was LOADED - its
+   soup turned back by the turns baked into it since (bakedQ, app-core.js).
+   A piece the pose verbs never turned reads as it is. */
+var NSO_scaleBodyCache = (typeof WeakMap === 'function') ? new WeakMap() : null;
+function NSO_scaleBodyRows(m, raw) {
+  if (NSO_scaleBodyCache && NSO_scaleBodyCache.has(raw)) return NSO_scaleBodyCache.get(raw);
+  var p = (m && typeof state !== 'undefined' && state.placed)
+    ? state.placed.find(function (q) { return q && q.sourceId === m.id; }) : null;
+  var soup = raw;
+  if (p && p.bakedQ && typeof THREE !== 'undefined' && typeof nsoRawTurnRows === 'function') {
+    var bq = new THREE.Quaternion(p.bakedQ[0], p.bakedQ[1], p.bakedQ[2], p.bakedQ[3]);
+    if (Math.abs(Math.abs(bq.w) - 1) > 1e-12) soup = nsoTurnRaw(raw, nsoRawTurnRows(bq.invert()));
+  }
+  var r = (soup === raw) ? NSO_sectionRead(raw) : NSO_sectionRead(soup);
+  var v = r && r.verbs, n = v ? ['length', 'width', 'height'].filter(function (k) { return v[k]; }).length : 0;
+  if (r && r.shape === 'round') n = 0;
+  if (NSO_scaleBodyCache) NSO_scaleBodyCache.set(raw, n);
+  return n;
+}
+
+/* THE PIECE'S FRAME. Length, Width and Height are the piece's as it LIES:
+   Length and Width along the level long and short sides of its footprint,
+   Height the plate vertical - pieceFrame (nso-bounds.js), the one frame every
+   tool reads. Every pose action is baked into the geometry when it ends
+   (app-core.js nsoBakePlacedPose), so the raw soup's own axes say nothing
+   about how a turned piece lies. The card reads and runs every verb on the
+   soup turned about the vertical to put the footprint's long side on raw X
+   (`f`); each result is turned back before it is committed (`toRaw`). A
+   piece whose long side is on a raw axis already (a quarter turn is) is its
+   own frame: f is its soup, bit for bit.
+
+   HELD for the soup: the turn is worked out once per soup, when the card
+   first reads it - while that soup is the piece's - and kept, so a live edit,
+   which runs every keystroke on the soup it began from, keeps the frame it
+   began with however the edit reshapes the piece. */
+var NSO_scaleSpaceCache = (typeof WeakMap === 'function') ? new WeakMap() : null;
+function NSO_scaleSpaceOf(m, raw) {
+  raw = raw || (m ? m.rawTris : null);
+  var same = { f: raw, toRaw: function (t) { return t; } };
+  if (!raw) return same;
+  if (NSO_scaleSpaceCache && NSO_scaleSpaceCache.has(raw)) return NSO_scaleSpaceCache.get(raw);
+  var space = same;
+  var p = (m && typeof state !== 'undefined' && state.placed)
+    ? state.placed.find(function (q) { return q && q.sourceId === m.id && q.mesh; }) : null;
+  if (p && raw === m.rawTris && typeof THREE !== 'undefined' && typeof nsoBounds !== 'undefined' &&
+      nsoBounds.pieceFrame && typeof nsoRawTurnRows === 'function') {
+    var fr = nsoBounds.pieceFrame(p);
+    if (fr) {
+      /* the soup as it lies: first the turn its mesh carries (none once a pose
+         is baked; a pose a non-verb wrote onto the record otherwise), then
+         about the vertical to put the footprint's long side on X */
+      p.mesh.updateMatrixWorld(true);
+      var phi = Math.atan2(-fr.long.z, fr.long.x);              // the long side's heading on the plate
+      phi -= Math.round(phi / (Math.PI / 2)) * (Math.PI / 2);   // a quarter turn is a raw axis already
+      var mq = p.mesh.quaternion.clone(), turned = Math.abs(Math.abs(mq.w) - 1) > 1e-12;
+      if (Math.abs(phi) >= 1e-6 || turned) {
+        var q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -phi).multiply(mq);
+        var Ri = nsoRawTurnRows(q.clone().invert());
+        space = { f: nsoTurnRaw(raw, nsoRawTurnRows(q)), toRaw: function (t) { return nsoTurnRaw(t, Ri); } };
+      }
+    }
+  }
+  if (NSO_scaleSpaceCache) NSO_scaleSpaceCache.set(raw, space);
+  return space;
+}
+
+/* A turn keeps the rows. Where the section reader finds a straight run along
+   a frame axis the row is that run's (Extend / Shorten, as ever). A piece
+   turned off its own axes - leaned, most often - has no straight run along a
+   level line any more, and would lose rows it had as it was loaded; when it
+   reads fewer of Length / Width / Height as it lies than it did then
+   (`bodyRows`), every missing one is the piece's extent along that frame axis,
+   and typing a value STRETCHES it there, every point scaled about the middle
+   along that one axis. A piece that had no straight run to begin with (a cone,
+   a blob) is not given one; rings, rods and the recognised shapes keep their
+   own rows. */
+function NSO_scaleAsItLies(s, soup, bodyRows) {
+  if (!s || !s.verbs || s.shape === 'round' || typeof NSO_sectionAxisWord !== 'function') return s;
+  var v = s.verbs, b = NSO_scaleRawBounds(soup);
+  var have = ['length', 'width', 'height'].filter(function (k) { return v[k]; }).length;
+  if (!b || have === 3 || !(bodyRows > have)) return s;
+  var out = {}, k;
+  for (k in s) out[k] = s[k];
+  var nv = {};
+  for (k in v) nv[k] = Array.isArray(v[k]) ? v[k].slice() : v[k];
+  [0, 1, 2].forEach(function (i) {
+    var word = NSO_sectionAxisWord(s, i);
+    if (nv[word]) return;
+    nv[word] = { axisIdx: i, axis: 'xyz'.charAt(i), mm: b.span[i], stretch: true };
+  });
+  nv.named = ['length', 'width', 'height'].filter(function (n) { return nv[n]; });
+  if (v.outer || v.diameter) nv.named.push(v.outer ? 'outer' : 'diameter');
+  if (v.bore) nv.named.push('bore');
+  if (v.wall) nv.named.push('wall');
+  var longest = Math.max(b.span[0], b.span[1], b.span[2]);
+  nv.longest = !['length', 'width', 'height'].some(function (n) {
+    return NSO_sectionShow(nv[n].mm) === NSO_sectionShow(longest);
+  });
+  nv.longestMm = longest;
+  out.verbs = nv;
+  var stretched = ['length', 'width', 'height'].filter(function (n) { return nv[n].stretch; });
+  out.reason = (s.why || s.reason) + ', so ' + stretched.map(function (n) { return n; }).join(', ') +
+    (stretched.length > 1 ? ' stretch' : ' stretches') + ' as it lies' + (nv.offset ? ', an even offset' : '') +
+    ' and whole-piece scaling apply';
+  return out;
+}
+
+/* Stretch along raw axis k of `soup` to `targetMm`: every point scaled about
+   the box's middle along k alone, solved to the target the way a uniform scale
+   is (Float32, a few passes), and gated the way it is - at the weld grid and
+   area of the smaller of 1 and the factor, so a stretch that only spreads
+   points apart is not read as tearing and one that squeezes them is. */
+function NSO_scaleStretchRaw(soup, k, targetMm) {
+  var b = NSO_scaleRawBounds(soup);
+  if (!b) return { ok: false, reason: 'piece has no measurable bounds' };
+  var span0 = b.span[k];
+  if (!(span0 > 0)) return { ok: false, reason: 'the piece is flat that way (span 0) - nothing to stretch' };
+  if (!isFinite(targetMm) || targetMm <= 0) return { ok: false, reason: 'must be a positive number of mm' };
+  if (targetMm < NSO_SCALE_MIN_SPAN_MM) {
+    return { ok: false, reason: 'would leave the piece ' + targetMm + ' mm that way, under the ' + NSO_SCALE_MIN_SPAN_MM + ' mm floor' };
+  }
+  var c = b.center[k], f = targetMm / span0, best = null;
+  for (var pass = 0; pass < NSO_SCALE_MAX_PASSES; pass++) {
+    if (!isFinite(f) || f <= 0) break;
+    var out = new Float32Array(soup);
+    for (var i = k; i < out.length; i += 3) out[i] = c + (soup[i] - c) * f;
+    var got = NSO_scaleRawBounds(out).span[k], err = Math.abs(got - targetMm);
+    if (!best || err < best.err) best = { f: f, tris: out, got: got, err: err };
+    if (err <= NSO_SCALE_TOL_MM || !(got > 0)) break;
+    f = f * (targetMm / got);
+  }
+  if (!best) return { ok: false, reason: 'could not solve a stretch for that size' };
+  if (best.f < NSO_SCALE_MIN_FACTOR || best.f > NSO_SCALE_MAX_FACTOR) {
+    return { ok: false, reason: 'a stretch of ' + best.f.toPrecision(4) + ' is outside ' + NSO_SCALE_MIN_FACTOR + '..' + NSO_SCALE_MAX_FACTOR };
+  }
+  var gate = NSO_scaleGate(soup, best.tris, Math.min(1, best.f));
+  if (!gate.ok) return { ok: false, reason: gate.reason, stats: gate };
+  return { ok: true, tris: best.tris, stretch: true, factor: best.f, axisIdx: k,
+           lengthBefore: span0, lengthAfter: best.got, errMm: best.err };
 }
 
 /* A capsule, sphere / ellipsoid or torus (nso_shapes.js), or null. A Stock
@@ -705,8 +847,9 @@ function NSO_scaleSectionOf(m) {
    soup, so a selection or pose change does not fit it again. */
 var NSO_scaleNotShape = (typeof WeakMap === 'function') ? new WeakMap() : null;
 function NSO_scaleShapeOf(m) {
-  var soup = (m && m.rawTris && m.rawAxis === 'zup') ? m.rawTris : null;
-  if (!soup || typeof NSO_shapeRead !== 'function') return null;
+  var raw = (m && m.rawTris && m.rawAxis === 'zup') ? m.rawTris : null;
+  if (!raw || typeof NSO_shapeRead !== 'function') return null;
+  var soup = NSO_scaleSpaceOf(m, raw).f;
   var tag = NSO_shapeTagOf(soup);
   if (tag) return tag;
   if (NSO_scaleNotShape && NSO_scaleNotShape.has(soup)) return null;
@@ -824,12 +967,15 @@ function NSO_scaleCardTry(verb, m, soup) {
     p.painted = painted;
     return p;
   }
-  var r = verb.run(soup);
+  /* in the piece's frame, as it lies (NSO_scaleSpaceOf), and turned back */
+  var space = NSO_scaleSpaceOf(m, soup);
+  var r = verb.run(space.f);
   if (!r.ok) {
     r.inline = NSO_scaleText(r.reason);
     r.status = verb.label + ' refused - piece unchanged (' + r.inline + ')';
     return r;
   }
+  if (r.tris) r.tris = space.toRaw(r.tris);
   r.said = verb.describe(r);
   r.status = verb.label + ' done - ' + r.said;
   return r;
@@ -895,10 +1041,16 @@ function NSO_scaleAxisVerb(verb, value) {
                  label.toLowerCase() };
       }
       if (!(value > 0)) return { ok: false, reason: label + ' must be a positive number of mm' };
+      if (dim.stretch) return NSO_scaleStretchRaw(soup, dim.axisIdx, +value);
       return NSO_extendRaw(soup, { axis: dim.axisIdx, length: +value });
     },
     describe: function (r) {
       var L = NSO_scaleLen, f = NSO_sectionShow;
+      if (r.stretch) {
+        return label + ' ' + L(r.lengthBefore, f) + ' → ' + L(r.lengthAfter, f) + NSO_scaleU() +
+          ', stretched ' + (verb === 'height' ? 'up the plate vertical' : 'along its footprint\'s ' +
+          (verb === 'length' ? 'long' : 'short') + ' side') + ' as it lies (×' + r.factor.toFixed(4) + ' that way, about the middle)';
+      }
       return r.axis.toUpperCase() + ' ' + L(r.lengthBefore, f) + ' → ' + L(r.lengthAfter, f) +
         NSO_scaleU() + ' (' + (r.mode === 'shorten' ? 'removed' : 'inserted') + ' at ' + r.axis.toUpperCase() + ' ' +
         L(r.cut, 2) + (NSO_scaleIn() ? ' in' : '') + '), every other coordinate unchanged (' + r.crossSectionDrift + ' drifted)';

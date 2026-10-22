@@ -323,8 +323,12 @@ withApp(async (page, logs) => {
   await page.evaluate(() => tipSelected());
   const r3 = await card(page);
   console.log('   after Tip X: ' + r3.readout + '   ' + JSON.stringify(r3.val));
-  check('a pose change (Tip X) repopulates: Width 40.0 again, Whole × 1', r3.val.width === '40.0' && r3.val.factor === '1', JSON.stringify(r3.val));
-  check('...and the names stay the piece\'s own, not the plate\'s: still 100 L × 40 W × 25 H', /^100\.0 L × 40\.0 W × 25\.0 H/.test(r3.readout), r3.readout);
+  /* re-pinned (pose-bake + the owner's call: Scale reads the piece AS IT
+     LIES): Tip X is baked into the tray, so its rows are its footprint's long
+     and short sides and the vertical - 100 / 25 / 40, not its own 100 / 40 / 25 */
+  check('a pose change (Tip X) repopulates: as it lies, Width 25.0 and Height 40.0, Whole × 1',
+    r3.val.width === '25.0' && r3.val.height === '40.0' && r3.val.factor === '1', JSON.stringify(r3.val));
+  check('...and the readout names it as it lies: 100 L × 25 W × 40 H', /^100\.0 L × 25\.0 W × 40\.0 H/.test(r3.readout), r3.readout);
   await undo(page);
 
   console.log('\n=== 6. The card fits a 900 px-tall window ===');
@@ -466,10 +470,12 @@ withApp(async (page, logs) => {
 
   console.log('\n=== 10. Longest on a bar turned 90° about Z and tipped ===');
   // Turn (90° about the plate's up, the piece's own Z) and Tip X, as the
-  // buttons do. As a pose the piece's own axes do not move, so the card reads
-  // it as before. Baked - NSO_rotateRawSoupByPlacedPose, Join's own bake of
-  // the pose, and what every exporter writes - the bar's long edge is its
-  // own Z: a file exported turned and loaded back.
+  // buttons do. Re-pinned (pose-bake): each is baked into the geometry when it
+  // ends, and the card reads the piece AS IT LIES (the owner's call), so the
+  // bar stands 120 tall and its Height row (a straight run) stands in for
+  // Longest and hides it; the taper has no straight run up its 120, so the
+  // Longest row shows and is typed, as before. The second half loads the same
+  // soup back as a file: the same reading.
   const longest = async (real) => {
     await openMenuFor(page, '#scale-readout');
     if (real) return typeAndLeave(page, 'scale-target', 150, 'Scale (done|refused)|stood down|Longest');
@@ -499,11 +505,15 @@ withApp(async (page, logs) => {
     await select(page, await loadSTL(page, f0));
     await page.evaluate(() => { rotateSelected(1); tipSelected(); });
     const p0 = await card(page);
-    const pose = await page.evaluate(() => { const p = state.placed[state.selectedIndex]; return { rotY: p.rotY, tipX: p.tipX }; });
-    console.log('   ' + what + ', posed ' + JSON.stringify(pose) + ': ' + p0.readout + '   Longest box ' + p0.val.longest +
+    const pose = await page.evaluate(() => { const p = state.placed[state.selectedIndex];
+      const up = new THREE.Vector3(1, 0, 0).applyQuaternion(nsoPieceBodyQ(p));
+      return { rotY: p.rotY, tipX: p.tipX, longUp: Math.abs(up.y) }; });
+    console.log('   ' + what + ', baked ' + JSON.stringify(pose) + ': ' + p0.readout + '   Longest box ' + p0.val.longest +
       (p0.shown.longest ? '' : ' (row hidden)'));
-    check('  ' + what + ' turned and tipped as a pose: Longest box 120.0, the row ' + (real ? 'shown' : 'hidden behind Length'),
-      Math.abs(pose.rotY) > 1.5 && pose.tipX === 1 && p0.val.longest === '120.0' && p0.shown.longest === real, p0.rows);
+    check('  ' + what + ' turned and tipped, baked: its length stands up; Longest box 120.0, the row ' +
+      (real ? 'shown' : 'hidden behind Height'),
+      pose.rotY === 0 && pose.tipX === 0 && Math.abs(pose.longUp - 1) < 1e-9 && p0.val.longest === '120.0' &&
+      (real || p0.val.height === '120.0') && p0.shown.longest === real, p0.rows);
     let st = await longest(real);
     console.log('     Longest 150: ' + st);
     let sp = await spans(page);

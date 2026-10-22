@@ -55,7 +55,8 @@ const piece = (page, id) => page.evaluate(id => {
   if (!p) return null;
   const bb = new THREE.Box3().setFromObject(p.mesh);
   return { i, min: bb.min.toArray(), max: bb.max.toArray(), liftY: p.liftY || 0, x: p.x, z: p.z,
-           pos: p.mesh.position.toArray(), quat: p.mesh.quaternion.toArray() };
+           pos: p.mesh.position.toArray(), quat: p.mesh.quaternion.toArray(),
+           body: nsoPieceBodyQ(p).toArray() };
 }, id);
 const near = (a, b, tol) => a.length === b.length && a.every((v, k) => Math.abs(v - b[k]) <= tol);
 const samePlace = (a, b, tol) => a && b && near(a.min, b.min, tol) && near(a.max, b.max, tol) && Math.abs(a.liftY - b.liftY) <= tol;
@@ -247,8 +248,10 @@ withApp(async (page, logs) => {
     'x +' + (N6.x - B3.x).toFixed(2) + ', bottom ' + N6.min[1].toFixed(4) + ' (was ' + h0.toFixed(4) + ')');
   await page.click('#btn-rot-right');
   const R6 = await piece(page, idB);
-  check('Rotate 90°: it turns, its height unchanged', !near(R6.quat, N6.quat, 1e-3) && Math.abs(R6.min[1] - h0) < 1e-6 && Math.abs(R6.liftY - B3.liftY) < 1e-9,
-    'bottom ' + R6.min[1].toFixed(4));
+  /* re-pinned (pose-bake): "it turns" is read off the BODY - the 90 is baked
+     into the geometry when it ends, so the mesh's own turn is identity again */
+  check('Rotate 90°: it turns, its height unchanged', !near(R6.body, N6.body, 1e-3) && Math.abs(R6.min[1] - h0) < 1e-6 && Math.abs(R6.liftY - B3.liftY) < 1e-9,
+    'bottom ' + R6.min[1].toFixed(4) + ', body turned ' + !near(R6.body, N6.body, 1e-3));
   await closeTopMenus(page);
 
   /* ======================================================= 7. To plate */

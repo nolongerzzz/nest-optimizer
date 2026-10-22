@@ -666,6 +666,10 @@ function undoLastStep() {
     setStatus('Undo: moved piece back');
     return;
   }
+  if (entry.type === 'poseBake') {
+    nsoUndoPoseBake(entry);
+    return;
+  }
   if (entry.type === 'posePlaced') {
     const p = state.placed[entry.index];
     if (!p) return;
@@ -677,6 +681,7 @@ function undoLastStep() {
     p.liftY = entry.liftY || 0;
     p.tiltX = entry.tiltX || 0;
     p.tiltZ = entry.tiltZ || 0;
+    if (entry.bakedQ !== undefined) p.bakedQ = entry.bakedQ ? entry.bakedQ.slice() : null;
     p.width = entry.width; p.depth = entry.depth; p.height = entry.height;
     if (p.mesh) {
       applyMeshRotation(p);
@@ -3537,6 +3542,7 @@ function snapshotPlacedPose(idx) {
     tiltZ: p.tiltZ || 0,
     width: p.width, depth: p.depth, height: p.height,
     yaw: p.yaw || 0,
+    bakedQ: p.bakedQ ? p.bakedQ.slice() : null,
     /* The mesh's own height, as it was. A piece dropped by ingest rests at
        +0.3 (m.size.y / 2 + 0.3) while every pose/move re-seats it on the
        0.2 baseline (applyMeshRotation, settlePlacedOnBed) - so re-deriving
@@ -3549,8 +3555,10 @@ function snapshotPlacedPose(idx) {
 /* The pose buttons - Rotate's 90° pair and Tip's four Tilts, and Tip's arrow
    keys, which call the same two functions - each turn the piece through
    nsoRotate.turn (app-rotate-handles.js), on the axis of the matching Rotate
-   ring: the increment is composed with the piece's current orientation and
-   the result written back into the pose fields.
+   ring: the increment is composed with the piece's current orientation, and
+   then BAKED (nsoBakePlacedPose): every pose action is complete when it ends.
+   The ring axes below are the level sides of the piece's footprint
+   (pieceFrame); "own X / own Z" is what they are on a piece lying as loaded.
 
      ⟲ / ⟳      'turn'  the plate's vertical
      Tilt ↑/↓   'fb'    the piece's own length (own X) - Lean front/back
@@ -3571,6 +3579,8 @@ function turnSelectedAbout(verb, ring, deg, opts) {
   if (typeof nsoRotate === 'undefined' || !nsoRotate.turn) return null;
   pushUndo(snapshotPlacedPose(state.selectedIndex));
   nsoRotate.turn(ring, deg, opts);
+  nsoBakePlacedPose(p);                 // the action is complete: baked, one Undo
+  if (nsoRotate.refresh) nsoRotate.refresh();
   updateExportButton();
   return p;
 }
@@ -3594,6 +3604,7 @@ function flipSelected() {
   pushUndo(snapshotPlacedPose(state.selectedIndex));
   p.rotY = (p.rotY || 0) + Math.PI;
   applyMeshRotation(p);
+  nsoBakePlacedPose(p);
   refreshOutline(p);
   updateExportButton();
   setStatus('Edge 180°');
@@ -3608,9 +3619,10 @@ function tipSelected() {
 
   p.tipX = ((p.tipX || 0) + 1) % 4; // 0,1,2,3 -> 0,90,180,270 deg
   applyMeshRotation(p);
+  nsoBakePlacedPose(p);                 // baked: the next Tip is 90 more from here
   refreshOutline(p);
   updateExportButton();
-  setStatus('Tip X ' + ((p.tipX || 0) * 90) + '°');
+  setStatus('Tip X 90°');
 }
 
 function rollSelected() {
@@ -3620,9 +3632,10 @@ function rollSelected() {
   pushUndo(snapshotPlacedPose(state.selectedIndex));
   p.tipZ = ((p.tipZ || 0) + 1) % 4;
   applyMeshRotation(p);
+  nsoBakePlacedPose(p);
   refreshOutline(p);
   updateExportButton();
-  setStatus('Roll Z ' + ((p.tipZ || 0) * 90) + '°');
+  setStatus('Roll Z 90°');
 }
 
 function liftSelected(dir) {
@@ -3803,6 +3816,248 @@ function nsoClearPlacedPose(p) {
   p.tipX = 0; p.tipZ = 0; p.tiltX = 0; p.tiltZ = 0;
   p.liftY = 0;
   nsoInvalidatePlacedBounds(p);
+}
+
+/* ---- BAKE ON RELEASE ------------------------------------------------------
+   Every pose action is COMPLETE when it ends (the owner's rule, 2026-10-21):
+   the next action starts from a finished piece, so Rotate and Tip never fight
+   over a half-applied pose. While a turn is in hand - a ring drag, a run of
+   clicks or keys - the pose fields are its scratch state and the mesh shows
+   the turn live. When the action ends, nsoBakePlacedPose writes the turn into
+   the geometry itself:
+
+   - the raw soup (or, for a piece without one, the display geometry) is
+     turned by the mesh's rotation, and the display geometry rebuilt from it,
+     centred as every bake centres it;
+   - the mesh goes back to identity and the turn fields to 0 (rotY, tipX,
+     tipZ, tiltX, tiltZ, flipX); x / z move by exactly what the re-centring
+     moved, so not one vertex moves in the world;
+   - the piece re-seats on its true lowest vertex at 0.2 + liftY (#220);
+   - its paint, stored as raw planes (app-mask.js), turns with it;
+   - and the footprint frame every tool reads (pieceFrame, nso-bounds.js) is
+     simply measured again off the new vertices.
+
+   One Undo per action, a geometry step: the verb's own pose snapshot (the
+   Undo point it took at the press) becomes this entry's prevPose, so Undo
+   puts back the previous geometry, mesh height and record bit for bit.
+
+   p.bakedQ is the turn baked into the geometry since the piece was loaded.
+   Nothing places, exports or aims by it; the Rotate rings' painted scale
+   reads it (with the scratch turn) so their detents stay absolute (#229). */
+function nsoPlacedIsTurned(p) {
+  return !!(p && (p.rotY || p.tipX || p.tiltX || p.flipX || p.tipZ || p.tiltZ));
+}
+function nsoBakedQ(p) {
+  const a = p && p.bakedQ;
+  return a ? new THREE.Quaternion(a[0], a[1], a[2], a[3]) : new THREE.Quaternion();
+}
+/* raw <-> display: display = (x, z, -y) of raw; a display-space turn q is the
+   raw-space turn that conjugates it. Its 3 x 3, row-major. */
+function nsoRawTurnRows(q) {
+  const col = v => { const d = new THREE.Vector3(v[0], v[2], -v[1]).applyQuaternion(q); return [d.x, -d.z, d.y]; };
+  const c0 = col([1, 0, 0]), c1 = col([0, 1, 0]), c2 = col([0, 0, 1]);
+  return [[c0[0], c1[0], c2[0]], [c0[1], c1[1], c2[1]], [c0[2], c1[2], c2[2]]];
+}
+function nsoTurnRaw(raw, R) {
+  const out = new Float32Array(raw.length);
+  const a = R[0], b = R[1], c = R[2];
+  for (let i = 0; i < raw.length; i += 3) {
+    const x = raw[i], y = raw[i + 1], z = raw[i + 2];
+    out[i] = a[0] * x + a[1] * y + a[2] * z;
+    out[i + 1] = b[0] * x + b[1] * y + b[2] * z;
+    out[i + 2] = c[0] * x + c[1] * y + c[2] * z;
+  }
+  return out;
+}
+/* The paint's raw planes, turned with the soup: n -> R n about the raw origin,
+   d unchanged. A face's axis-and-side survives a turn that sends its axis to
+   an axis (a quarter turn); any other turn leaves the plane alone to name it,
+   as a recessed face is named. */
+function nsoTurnMaskPlanes(m, R) {
+  const mask = m && m.faceMask;
+  if (!mask) return;
+  const turn = e => {
+    if (!e || !Array.isArray(e.n)) return;
+    const n = e.n, r = R.map(row => row[0] * n[0] + row[1] * n[1] + row[2] * n[2]);
+    e.n = r.map(v => Math.abs(v) < 1e-12 ? 0 : Math.abs(Math.abs(v) - 1) < 1e-12 ? Math.sign(v) : v);
+    const k = e.n.findIndex(v => Math.abs(Math.abs(v) - 1) < 1e-9);
+    if (e.axisIdx != null) {
+      if (k >= 0) { e.axisIdx = k; e.keepMin = e.n[k] < 0; }
+      else { e.axisIdx = null; e.keepMin = null; }
+    }
+    if (e.dispAxis != null) {
+      const dsp = [e.n[0], e.n[2], -e.n[1]], j = dsp.findIndex(v => Math.abs(Math.abs(v) - 1) < 1e-9);
+      if (j >= 0) { e.dispAxis = j; e.dispSign = dsp[j] > 0 ? 1 : -1; }
+      else { e.dispAxis = null; e.dispSign = null; }
+      e.dispPlane = null;
+    }
+  };
+  (mask.exclude || []).forEach(turn);
+  (mask.select || []).forEach(turn);
+}
+/* Write the piece's turn into its geometry (see above). Returns true when
+   there was a turn to bake. opts.undo === false: no Undo entry (a check that
+   drives the engine); otherwise the verb's own pose snapshot on top of the
+   stack, if it is this piece's, is folded into one geometry step. */
+function nsoBakePlacedPose(p, opts) {
+  opts = opts || {};
+  if (!p || !p.mesh || !nsoPlacedIsTurned(p)) return false;
+  const m = state.models.find(x => x && x.id === p.sourceId);
+  const geo0 = p.mesh.geometry;
+  if (!geo0 || !geo0.attributes || !geo0.attributes.position) return false;
+  const idx = state.placed.indexOf(p);
+  p.mesh.updateMatrixWorld(true);
+  const q = p.mesh.quaternion.clone();
+  const pos = p.mesh.position.clone();
+
+  if (opts.undo !== false) {
+    const top = state.undoStack[state.undoStack.length - 1];
+    const prevPose = (top && top.type === 'posePlaced' && top.index === idx) ? state.undoStack.pop() : snapshotPlacedPose(idx);
+    pushUndo({
+      type: 'poseBake', index: idx, modelId: m ? m.id : null, prevPose: prevPose,
+      prevGeometry: geo0,
+      prevRawTris: m ? m.rawTris : null, prevRawAxis: m ? m.rawAxis : null,
+      prevCenterOffset: m ? m.centerOffset : null,
+      prevSize: m && m.size ? { x: m.size.x, y: m.size.y, z: m.size.z } : null
+    });
+  }
+
+  /* the piece as loaded (or as the last other op left it), kept for
+     nsoPoseHome: the first bake after any other change records it */
+  if (!nsoPoseHomeHolds(p, geo0)) {
+    p.poseHome = { chain: new WeakSet(), geometry: geo0, rawTris: m ? m.rawTris : null, rawAxis: m ? m.rawAxis : null,
+                   centerOffset: m ? m.centerOffset : null, size: m && m.size ? { x: m.size.x, y: m.size.y, z: m.size.z } : null,
+                   mask: m && typeof nsoMaskSnapshot === 'function' ? nsoMaskSnapshot(m) : undefined,
+                   bakedQ: p.bakedQ ? p.bakedQ.slice() : null };
+  }
+
+  let newGeo, shift;
+  const raw = m && m.rawTris && m.rawAxis === 'zup' && m.rawTris.length >= 9 ? m.rawTris : null;
+  if (raw) {
+    /* the geometry is the raw soup in display axes less a centring offset o */
+    let lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    for (let i = 0; i < raw.length; i += 3) {
+      const d = [raw[i], raw[i + 2], -raw[i + 1]];
+      for (let k = 0; k < 3; k++) { if (d[k] < lo[k]) lo[k] = d[k]; if (d[k] > hi[k]) hi[k] = d[k]; }
+    }
+    if (!geo0.boundingBox) geo0.computeBoundingBox();
+    const gc = geo0.boundingBox.getCenter(new THREE.Vector3());
+    const o = new THREE.Vector3((lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2).sub(gc);
+    const R = nsoRawTurnRows(q);
+    const newRaw = nsoTurnRaw(raw, R);
+    newGeo = rawResultToDisplayGeometry(newRaw, { x: 0, y: 0, z: 0 });
+    newGeo.computeBoundingBox();
+    const c1 = newGeo.boundingBox.getCenter(new THREE.Vector3());
+    newGeo.translate(-c1.x, -c1.y, -c1.z);
+    newGeo.computeBoundingBox();
+    newGeo.computeBoundingSphere();
+    shift = c1.clone().sub(o.applyQuaternion(q));
+    m.rawTris = newRaw;
+    m.rawAxis = 'zup';
+    if (typeof computeCenterOffsetFromRaw === 'function') m.centerOffset = computeCenterOffsetFromRaw(newRaw);
+    nsoTurnMaskPlanes(m, R);
+  } else {
+    newGeo = geo0.clone();
+    newGeo.applyQuaternion(q);
+    newGeo.computeBoundingBox();
+    const c1 = newGeo.boundingBox.getCenter(new THREE.Vector3());
+    newGeo.translate(-c1.x, -c1.y, -c1.z);
+    newGeo.computeBoundingBox();
+    newGeo.computeBoundingSphere();
+    shift = c1;
+  }
+  const size = newGeo.boundingBox.getSize(new THREE.Vector3());
+  if (m) {
+    m.geometry = newGeo;
+    m.size = { x: size.x, y: size.y, z: size.z };
+  }
+  p.geometry = newGeo;
+  p.mesh.geometry = newGeo;
+  p.poseHome.chain.add(newGeo);
+  p.bakedQ = q.clone().multiply(nsoBakedQ(p)).toArray();
+  p.rotY = 0; p.rotated = false; p.flipX = false;
+  p.tipX = 0; p.tipZ = 0; p.tiltX = 0; p.tiltZ = 0;
+  p.x = pos.x + shift.x;
+  p.z = pos.z + shift.z;
+  nsoInvalidatePlacedBounds(p);
+  applyMeshRotation(p);
+  refreshOutline(p);
+  if (typeof nsoMaskRepaint === 'function') nsoMaskRepaint();
+  if (typeof updateEditSize === 'function') updateEditSize();
+  if (typeof updateExportButton === 'function') updateExportButton();
+  return true;
+}
+/* The piece's body orientation: the turn on its mesh (a turn in hand, or a
+   pose a non-verb wrote) after the turns baked into its geometry. Where its
+   load axes point now - what the checks measure a pose by. */
+function nsoPieceBodyQ(p) {
+  if (!p || !p.mesh) return new THREE.Quaternion();
+  p.mesh.updateMatrixWorld(true);
+  return p.mesh.quaternion.clone().multiply(nsoBakedQ(p));
+}
+/* For the checks: put a piece back exactly as it was before its pose bakes -
+   the geometry (and raw soup, paint) the first of an unbroken run of them
+   started from, the fields 0, the mesh at identity, re-seated where it
+   stands. Returns false when no such run is on the piece (nothing baked, or
+   another op has replaced the geometry since); the fields are zeroed anyway. */
+function nsoPoseHomeHolds(p, g) {
+  const h = p && p.poseHome;
+  return !!(h && g && (h.geometry === g || h.chain.has(g)));
+}
+function nsoPoseHome(p) {
+  if (!p || !p.mesh) return false;
+  p.rotY = 0; p.rotated = false; p.flipX = false;
+  p.tipX = 0; p.tipZ = 0; p.tiltX = 0; p.tiltZ = 0;
+  const h = p.poseHome;
+  const ok = nsoPoseHomeHolds(p, p.mesh.geometry);
+  if (ok) {
+    const m = state.models.find(x => x && x.id === p.sourceId);
+    if (m) {
+      m.geometry = h.geometry; m.rawTris = h.rawTris; m.rawAxis = h.rawAxis; m.centerOffset = h.centerOffset;
+      if (h.size) m.size = { x: h.size.x, y: h.size.y, z: h.size.z };
+      if (h.mask !== undefined && typeof nsoMaskRestore === 'function') nsoMaskRestore(m, h.mask);
+    }
+    p.geometry = h.geometry;
+    p.mesh.geometry = h.geometry;
+    p.bakedQ = h.bakedQ ? h.bakedQ.slice() : null;
+    p.poseHome = null;
+  }
+  nsoInvalidatePlacedBounds(p);
+  applyMeshRotation(p);
+  refreshOutline(p);
+  return ok;
+}
+/* Undo of a pose bake: the previous geometry, record and height, exactly. */
+function nsoUndoPoseBake(entry) {
+  const p = state.placed[entry.index];
+  const m = state.models.find(x => x && x.id === entry.modelId);
+  if (!p || !p.mesh) { setStatus('Undo: piece no longer exists'); return; }
+  if (m) {
+    if (entry.prevMask !== undefined && typeof nsoMaskRestore === 'function') nsoMaskRestore(m, entry.prevMask);
+    m.geometry = entry.prevGeometry;
+    m.rawTris = entry.prevRawTris;
+    m.rawAxis = entry.prevRawAxis;
+    m.centerOffset = entry.prevCenterOffset;
+    if (entry.prevSize) m.size = { x: entry.prevSize.x, y: entry.prevSize.y, z: entry.prevSize.z };
+  }
+  p.geometry = entry.prevGeometry;
+  p.mesh.geometry = entry.prevGeometry;
+  const e = entry.prevPose;
+  p.x = e.x; p.z = e.z;
+  p.rotY = e.rotY || 0; p.flipX = !!e.flipX; p.tipX = e.tipX || 0; p.tipZ = e.tipZ || 0;
+  p.liftY = e.liftY || 0; p.tiltX = e.tiltX || 0; p.tiltZ = e.tiltZ || 0;
+  p.bakedQ = e.bakedQ ? e.bakedQ.slice() : null;
+  nsoInvalidatePlacedBounds(p);
+  applyMeshRotation(p);
+  applyPlacedXZ(p, p.x, p.z);
+  restoreMeshY(p, e.meshY);
+  refreshOutline(p);
+  if (typeof nsoMaskRepaint === 'function') nsoMaskRepaint();
+  state.selectedIndex = entry.index;
+  updateEditSize();
+  updateAdjustUI();
+  updateUndoBtn();
+  setStatus('Undo: restored pose');
 }
 
 function refreshOutline(p) {

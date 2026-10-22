@@ -117,13 +117,19 @@ withApp(async (page, logs) => {
   await page.evaluate(() => {
     const H = window.__rot = {};
     H.p = () => state.placed[state.selectedIndex];
+    /* Every pose action is baked when it ends (app-core.js nsoBakePlacedPose):
+       a released drag or a settled run leaves the turn in the geometry and the
+       fields at 0. So home is nsoPoseHome - the geometry before the bakes,
+       the fields 0 - and a pose is read off the piece's BODY, the turn on the
+       mesh after the turns baked into it (nsoPieceBodyQ). A programmatic
+       a.turn is not an action: it leaves its turn on the mesh, as before. */
     H.zero = () => {
       const p = H.p();
-      p.tipX = 0; p.tipZ = 0; p.flipX = false; p.tiltX = 0; p.tiltZ = 0; p.rotY = 0;
-      applyMeshRotation(p);
+      if (window.nsoRotate.seat) window.nsoRotate.seat();
+      nsoPoseHome(p);
       window.nsoRotate.refresh();
     };
-    H.q = () => { const p = H.p(); p.mesh.updateMatrixWorld(true); return p.mesh.quaternion.clone(); };
+    H.q = () => nsoPieceBodyQ(H.p());
     /* The angle between two orientations, as 2 atan2(|v|, |w|) of b * a^-1 -
        acos of a dot product near 1 cannot see below ~3e-6 degrees. */
     H.angleDeg = (a, b) => {
@@ -173,8 +179,13 @@ withApp(async (page, logs) => {
         if (opts.each) seen.push(opts.each());
       }
       const st = a.dragState();
+      /* opts.atEnd: measured with the drag still in hand, the turn on the mesh
+         - the release bakes it into the geometry, which re-centres the mesh's
+         own frame (it moves no vertex), so a point picked in mesh-local terms
+         before the drag is only that point until the release */
+      const atEnd = opts.atEnd ? opts.atEnd() : undefined;
       a.endDrag();
-      return { state: st, seen: seen };
+      return { state: st, seen: seen, atEnd: atEnd };
     };
   });
 
@@ -263,19 +274,17 @@ withApp(async (page, logs) => {
       const world = () => corners.map(c => p.mesh.localToWorld(c.clone()).sub(p.mesh.position));
       const before = world();
       const fields0 = { tiltX: p.tiltX, rotY: p.rotY, tiltZ: p.tiltZ };
-      const tr = H.trace('turn', 30);
-      const after = world();
+      /* The old behaviour, for contrast: the same 30 written to rotY - worked
+         out before the drag, while the lean is still on the mesh (the release
+         bakes it into the geometry) */
+      p.rotY = fields0.rotY + 30 * Math.PI / 180; applyMeshRotation(p);
+      const old = world();
+      const oldDy = Math.max(...before.map((b, i) => Math.abs(b.y - old[i].y)));
+      Object.assign(p, fields0); applyMeshRotation(p);
+      const tr = H.trace('turn', 30, { atEnd: world });
+      const after = tr.atEnd;
       const dy = Math.max(...before.map((b, i) => Math.abs(b.y - after[i].y)));
       const dxz = Math.max(...before.map((b, i) => Math.hypot(b.x - after[i].x, b.z - after[i].z)));
-      // The turn's own axis, read off the motion: q1 * q0^-1.
-      // The old behaviour, for contrast: the same 30 written to rotY.
-      const q1 = H.q();
-      Object.assign(p, fields0); applyMeshRotation(p);
-      const keep = world();
-      p.rotY = fields0.rotY + tr.state.applied * Math.PI / 180; applyMeshRotation(p);
-      const old = world();
-      const oldDy = Math.max(...keep.map((b, i) => Math.abs(b.y - old[i].y)));
-      Object.assign(p, fields0); applyMeshRotation(p);
       a.setRing('fb', false);
       H.zero();
       return { turned: tr.state.applied, dy, dxz, oldDy };
@@ -319,8 +328,8 @@ withApp(async (page, logs) => {
             };
             const look = new THREE.Vector3(); state.camera.getWorldDirection(look);
             const q0 = H.q(), phi0 = ang();
-            const tr = H.trace(ring, screenDeg);
-            const phi1 = ang();
+            const tr = H.trace(ring, screenDeg, { atEnd: ang });
+            const phi1 = tr.atEnd;
             const dphi = ((phi1 - phi0 + 540) % 360) - 180;
             const turnedBy = H.angleDeg(q0, H.q());
             out.push({ ring, side: si === 0 ? '+' : '-', lookDotAxis: +look.dot(A).toFixed(3),
@@ -671,7 +680,8 @@ withApp(async (page, logs) => {
        tools/nso_pose_buttons_drive_check.js's. */
     const b = await page.evaluate(() => {
       const H = window.__rot; H.zero();
-      const yaw = () => +((H.p().rotY || 0) * 180 / Math.PI).toFixed(6);
+      /* the 90s are baked when they end: the yaw is read off the body */
+      const yaw = () => +(new THREE.Euler().setFromQuaternion(H.q(), 'XYZ').y * 180 / Math.PI).toFixed(6);
       const out = { before: yaw() };
       document.getElementById('btn-rot-right').click(); out.right = yaw();
       document.getElementById('btn-rot-left').click(); out.left = yaw();
@@ -943,7 +953,7 @@ withApp(async (page, logs) => {
       /* the piece's measured axis, projected into the ring's plane, against the tick */
       const p = H.p(); p.mesh.updateMatrixWorld(true);
       const A = new THREE.Vector3(0, 1, 0);
-      const best = [[1, 0, 0], [0, 1, 0], [0, 0, 1]].map(b => new THREE.Vector3().fromArray(b).applyQuaternion(p.mesh.quaternion))
+      const best = [[1, 0, 0], [0, 1, 0], [0, 0, 1]].map(b => new THREE.Vector3().fromArray(b).applyQuaternion(H.q()))
         .sort((u, v) => Math.abs(u.dot(A)) - Math.abs(v.dot(A)))[0].projectOnPlane(A).normalize();
       const q = ((Math.round(at / 90) * 90) % 360 + 360) % 360;
       const ticks = grab().turn.pts;
@@ -1036,8 +1046,8 @@ withApp(async (page, logs) => {
          must move square to the ring's axis - in the ring's plane */
       const tip = new THREE.Vector3(40, 10, 20);
       const w0 = p.mesh.localToWorld(tip.clone()).sub(p.mesh.position);
-      const tr = H.trace('ss', a.dialSign('ss') * 30);
-      const w1 = p.mesh.localToWorld(tip.clone()).sub(p.mesh.position);
+      const tr = H.trace('ss', a.dialSign('ss') * 30, { atEnd: () => p.mesh.localToWorld(tip.clone()).sub(p.mesh.position) });
+      const w1 = tr.atEnd;
       const L1 = len(), W1 = wid();
       /* for contrast: the same 30° about the PLATE's Z, the old ring */
       const qOld = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), tr.state.applied * Math.PI / 180)
@@ -1472,9 +1482,12 @@ withApp(async (page, logs) => {
        local extent): how far the axis's height changes. A lean that tips the
        piece along its length moves it; a roll about the length cannot. */
     H.endsRise = (ring) => {
-      const p = H.p(), g = p.mesh.geometry;
-      if (!g.boundingBox) g.computeBoundingBox();
-      const sz = g.boundingBox.getSize(new THREE.Vector3());
+      /* the longest extent in the piece's BODY frame: a bake turns the
+         geometry itself, so its own box is not the body's */
+      const p = H.p(), g = p.mesh.geometry, pos = g.attributes.position;
+      const toBody = H.q().invert().multiply(p.mesh.quaternion), v = new THREE.Vector3(), bb = new THREE.Box3();
+      for (let i = 0; i < pos.count; i++) bb.expandByPoint(v.fromBufferAttribute(pos, i).applyQuaternion(toBody));
+      const sz = bb.getSize(new THREE.Vector3());
       const k = sz.x >= sz.y && sz.x >= sz.z ? 0 : sz.y >= sz.z ? 1 : 2;
       const axis = new THREE.Vector3(k === 0 ? 1 : 0, k === 1 ? 1 : 0, k === 2 ? 1 : 0);
       const q0 = H.q(), q1 = H.want(ring, q0, 20);
@@ -1644,14 +1657,19 @@ withApp(async (page, logs) => {
       }
       const mid = { yaw: yaw(), w: H.p().width, d: H.p().depth };
       a.endDrag();
-      return { start: start, seen: seen, squareNow: squareNow, mid: mid, after: a.leanNames() };
+      /* the names read the footprint itself now (pieceFrame), not the box on
+         the plate: a 60 x 20 bar is 60 x 20 at every heading, square never */
+      return { start: start, seen: seen, squareNow: squareNow, mid: mid, after: a.leanNames(),
+               frameSquare: pieceFrame(H.p()).square };
     });
     check('mid-drag the names do not change, though the box passed through square',
       held.seen.every(x => x === held.start) && held.squareNow.some(x => x),
       'along = ' + held.start + ' throughout; box went square at ' + held.squareNow.filter(Boolean).length +
       ' of ' + held.squareNow.length + ' steps (yaw ' + held.mid.yaw.toFixed(1) + '°, ' + held.mid.w.toFixed(1) + ' x ' + held.mid.d.toFixed(1) + ')');
     check('...and on release they are read fresh from the footprint it landed on',
-      held.after.square === held.squareNow[held.squareNow.length - 1],
+      /* re-pinned (pose-bake): was === the box's 5% squareness at the last
+         step; the names follow pieceFrame's footprint, so it is that frame's */
+      held.after.square === held.frameSquare && held.frameSquare === false,
       JSON.stringify({ square: held.after.square, along: held.after.along }));
   }
 
@@ -1900,13 +1918,14 @@ withApp(async (page, logs) => {
          rectangle round the shadow of the box's eight corners, tried along
          every pair of them - measured here from the corners alone, not from
          anything the module computes. */
+      /* the box's own vertices, in the world (less the mesh's position): a
+         bake turns and re-centres the geometry but keeps its vertex order, so
+         vertex i is the same corner of the piece before and after */
       H.corners = () => {
-        const p = H.p(), g = p.mesh.geometry;
-        if (!g.boundingBox) g.computeBoundingBox();
-        const bb = g.boundingBox, out = [];
+        const p = H.p(), pos = p.mesh.geometry.attributes.position, out = [];
         p.mesh.updateMatrixWorld(true);
-        for (const x of [bb.min.x, bb.max.x]) for (const y of [bb.min.y, bb.max.y]) for (const z of [bb.min.z, bb.max.z])
-          out.push(new THREE.Vector3(x, y, z).applyMatrix4(p.mesh.matrixWorld).sub(p.mesh.position));
+        for (let i = 0; i < pos.count; i++)
+          out.push(new THREE.Vector3().fromBufferAttribute(pos, i).applyMatrix4(p.mesh.matrixWorld).sub(p.mesh.position));
         return out;
       };
       H.footYaw = () => {
@@ -1974,8 +1993,10 @@ withApp(async (page, logs) => {
           const old = (() => {           // what the dart did before: q0 * R(own X | own Z, 10)
             const q1 = b0.q.clone().multiply(new THREE.Quaternion().setFromAxisAngle(
               new THREE.Vector3(ring === 'fb' ? 1 : 0, 0, ring === 'ss' ? 1 : 0), 10 * Math.PI / 180));
+            /* q1 is the body it would have had; the mesh carries what the
+               geometry does not: q1 * body^-1 on top of the mesh's own */
             const p = H.p(), q = p.mesh.quaternion.clone();
-            p.mesh.quaternion.copy(q1); p.mesh.updateMatrixWorld(true);
+            p.mesh.quaternion.copy(q1.clone().multiply(b0.q.clone().invert()).multiply(q)); p.mesh.updateMatrixWorld(true);
             const y = H.footYaw().yaw;
             p.mesh.quaternion.copy(q); p.mesh.updateMatrixWorld(true);
             return H.yawDiff(b0.foot.yaw, y);

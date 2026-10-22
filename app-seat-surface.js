@@ -245,11 +245,17 @@
     placedB.mesh.updateMatrixWorld(true);
     var hull = meshToWorldSoup(target.mesh);
     if (!hull || !hull.length) { say(w.a + ' has no geometry to seat against', true); return { ok: false, reason: 'empty A' }; }
-    var boxB = NSO_localAABB(placedB.mesh.geometry);
+    /* B's box in B's frame - pieceFrame, through NSO_plugBasis (app-join.js),
+       the same frame Seat flush reads: a pose baked into B's geometry leaves
+       its own box standing off it, so the mating face comes off the frame's */
+    var basisB = (typeof NSO_plugBasis === 'function') ? NSO_plugBasis(placedB.mesh) : null;
+    var boxB = basisB ? NSO_boxInBasis(placedB.mesh.geometry, basisB) : NSO_localAABB(placedB.mesh.geometry);
+    var matB = placedB.mesh.matrixWorld.clone();
+    if (basisB) matB.multiply(basisB);
     var plan = NSO_SeatSurface.plan(hull, {
       soup: meshToWorldSoup(placedB.mesh),
       box: { min: boxB.min.toArray(), max: boxB.max.toArray() },
-      matrix: placedB.mesh.matrixWorld.elements.slice()
+      matrix: matB.elements.slice()
     }, {
       point: point, gap: gap,
       normalRadius: optsIn.normalRadius, dihedralDeg: optsIn.dihedralDeg,

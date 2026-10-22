@@ -170,12 +170,16 @@ withApp(async (page, logs) => {
   // Cut X runs across the turned bar's 12 mm width ...
   await page.evaluate(() => { const a = document.getElementById('edit-axis'); a.value = 'x'; a.dispatchEvent(new Event('change')); });   // the axis lock (Cut X is gone)
   let s = await st(c);
-  check('Cut X on the turned bar runs along its own Z, span 12', s.axis === 'z' && Math.abs(s.span - 12) < 1e-6, s.axis + ' ' + s.span);
+  /* re-pinned (pose-bake): the axis letter was the bar's own 'z' / 'x' / 'y'
+     under the pose on its mesh; Rotate 90 and Roll are baked into the
+     geometry now, so the mesh's own axes are the plate's and the same plane
+     is named by the plate axis - the spans are the same 12 / 60 / 8 */
+  check('Cut X on the turned bar runs across it, span 12', s.axis === 'x' && Math.abs(s.span - 12) < 1e-6, s.axis + ' ' + s.span);
   await ends('turned, Cut X', c, 12);
   // ... and Cut Z along its 60 mm length.
   await page.evaluate(() => { const a = document.getElementById('edit-axis'); a.value = 'z'; a.dispatchEvent(new Event('change')); });   // the axis lock (Cut Z is gone)
   s = await st(c);
-  check('Cut Z on the turned bar runs along its own X, span 60', s.axis === 'x' && Math.abs(s.span - 60) < 1e-6, s.axis + ' ' + s.span);
+  check('Cut Z on the turned bar runs along its length, span 60', s.axis === 'z' && Math.abs(s.span - 60) < 1e-6, s.axis + ' ' + s.span);
   await ends('turned, Cut Z', c, 60);
   // Dragging the red line on the turned piece: point the pointer at the
   // place 7.3 mm from the low end and let the app's own drag handler read it.
@@ -201,7 +205,7 @@ withApp(async (page, logs) => {
   await open(e);
   await page.evaluate(() => { const a = document.getElementById('edit-axis'); a.value = 'x'; a.dispatchEvent(new Event('change')); });   // the axis lock (Cut X is gone)
   s = await st(e);
-  check('Cut X on the rolled bar runs along its own Y, span 8', s.axis === 'y' && Math.abs(s.span - 8) < 1e-6, s.axis + ' ' + s.span);
+  check('Cut X on the rolled bar runs along the plate\'s X - its own Y, baked - span 8', s.axis === 'x' && Math.abs(s.span - 8) < 1e-4, s.axis + ' ' + s.span);
   await ends('rolled, Cut X', e, 8);
   await slide(-1000);
   const sE = await split(e);

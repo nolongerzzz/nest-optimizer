@@ -72,16 +72,22 @@ const STATE = `window.__bladeView = function (id) {
   const k = f.axis, AX = ['x', 'y', 'z'], across = AX.filter(a => a !== k);
   const slider = Number(document.getElementById('cut-slider').value);
   const plane = f.origin + slider;                 // where the slider says the cut is
-  const bladeLocal = verts(blade).concat(verts(frame)).map(v => v.applyMatrix4(toLocal));
+  /* In the CUT frame: the piece's own turned by f.turn (a mitre, a bevel, or
+     the base turn that squares the blade to a turned piece's length - every
+     pose is baked into the geometry now, so a turned piece is turned in its
+     own frame). Square on a piece lying square, f.turn is null and the cut
+     frame is the piece's own, as before. */
+  const T = f.turn || new THREE.Matrix4(), B = f.back || new THREE.Matrix4();
+  const cb = getCutPlaneLocal(m).bbox;
+  const bladeLocal = verts(blade).concat(verts(frame)).map(v => v.applyMatrix4(toLocal).applyMatrix4(T));
   const offPlane = Math.max(...bladeLocal.map(v => Math.abs(v[k] - plane)));
-  const margin = Math.min(...across.map(a => Math.min(f.bbox.min[a] - Math.min(...bladeLocal.map(v => v[a])),
-                                                     Math.max(...bladeLocal.map(v => v[a])) - f.bbox.max[a])));
+  const margin = Math.min(...across.map(a => Math.min(cb.min[a] - Math.min(...bladeLocal.map(v => v[a])),
+                                                     Math.max(...bladeLocal.map(v => v[a])) - cb.max[a])));
   // The plate line as drawn: every vertex of its strip and centre line.
   const pl = H.getObjectByName('cutPlateLine');
   const lineW = pl.children.map(verts).flat();
-  const P = f.bbox.getCenter(new THREE.Vector3()); P[k] = plane; P.applyMatrix4(mesh.matrixWorld);
-  const n = new THREE.Vector3(k === 'x' ? 1 : 0, k === 'y' ? 1 : 0, k === 'z' ? 1 : 0)
-    .applyMatrix3(new THREE.Matrix3().getNormalMatrix(mesh.matrixWorld)).normalize();
+  const P = cb.getCenter(new THREE.Vector3()); P[k] = plane; P.applyMatrix4(B).applyMatrix4(mesh.matrixWorld);
+  const n = f.normal.clone().applyMatrix3(new THREE.Matrix3().getNormalMatrix(mesh.matrixWorld)).normalize();
   const centre = verts(pl.children.find(c => !c.isMesh));
   // In the plate: is each centre-line end where the plane meets y = 0?
   const onTrace = Math.max(...centre.map(v => Math.abs(new THREE.Vector3(v.x, 0, v.z).sub(P).dot(n))));
@@ -268,8 +274,12 @@ withApp(async (page, logs) => {
   await open(turned);
   await page.evaluate(() => rotateActiveModelY(-15));   // the yaw the Cut card's ⟲ 15 made
   let s = await view(turned);
-  const want15 = 60 * Math.cos(Math.PI / 12) + 12 * Math.sin(Math.PI / 12);
-  check('turned 15 deg: the cut runs along X over the turned bar, span ' + want15.toFixed(2),
+  /* re-pinned (pose-bake): was span 60 cos 15 + 12 sin 15 = 61.06 along the
+     plate's X, across the turned section. The square blade now stands across
+     the piece's length AS IT LIES (pieceFrame): it travels the bar's own 60,
+     the local x turned 15 degrees by the cut frame's base */
+  const want15 = 60;
+  check('turned 15 deg: the cut runs along the turned bar\'s own length, span ' + want15.toFixed(2),
     s.axis === 'x' && Math.abs(s.span - want15) < 1e-3, s.axis + ' ' + s.span);
   await ends('turned 15 deg', turned);
   await pixels('turned 15 deg', turned);
@@ -280,11 +290,15 @@ withApp(async (page, logs) => {
   await open(quarter);
   await page.evaluate(() => { const a = document.getElementById('edit-axis'); a.value = 'x'; a.dispatchEvent(new Event('change')); });   // the axis lock (Cut X is gone)
   s = await view(quarter);
-  check('turned 90 deg, Cut X: the cut runs along the bar\'s own Z, span 12', s.axis === 'z' && Math.abs(s.span - 12) < 1e-6, s.axis + ' ' + s.span);
+  /* re-pinned (pose-bake): the axis letter was the bar's own 'z' / 'x' / 'y'
+     (the pose on its mesh); the quarter turn is baked into the geometry now,
+     so the mesh's own axes are the plate's and the same plane is named by the
+     plate axis - the spans are the same 12 / 60 / 30 */
+  check('turned 90 deg, Cut X: the cut runs across the bar, span 12', s.axis === 'x' && Math.abs(s.span - 12) < 1e-6, s.axis + ' ' + s.span);
   await ends('turned 90 deg, Cut X', quarter);
   await page.evaluate(() => { const a = document.getElementById('edit-axis'); a.value = 'z'; a.dispatchEvent(new Event('change')); });   // the axis lock (Cut Z is gone)
   s = await view(quarter);
-  check('turned 90 deg, Cut Z: the cut runs along the bar\'s own X, span 60', s.axis === 'x' && Math.abs(s.span - 60) < 1e-6, s.axis + ' ' + s.span);
+  check('turned 90 deg, Cut Z: the cut runs along the bar\'s length, span 60', s.axis === 'z' && Math.abs(s.span - 60) < 1e-6, s.axis + ' ' + s.span);
   await ends('turned 90 deg, Cut Z', quarter);
   await pixels('turned 90 deg', quarter);
   await page.evaluate(() => { const a = document.getElementById('edit-axis'); a.value = 'auto'; a.dispatchEvent(new Event('change')); });
@@ -295,7 +309,7 @@ withApp(async (page, logs) => {
   await open(rolled);
   await page.evaluate(() => { const a = document.getElementById('edit-axis'); a.value = 'x'; a.dispatchEvent(new Event('change')); });   // the axis lock (Cut X is gone)
   s = await view(rolled);
-  check('rolled, Cut X: the cut runs along the bar\'s own Y', s.axis === 'y', s.axis + ' ' + s.span);
+  check('rolled, Cut X: the cut runs along the plate\'s X - the bar\'s own Y, baked - span 30', s.axis === 'x' && Math.abs(s.span - 30) < 1e-4, s.axis + ' ' + s.span);
   await ends('rolled, Cut X', rolled);
   await page.evaluate(() => { const a = document.getElementById('edit-axis'); a.value = 'auto'; a.dispatchEvent(new Event('change')); });
 
