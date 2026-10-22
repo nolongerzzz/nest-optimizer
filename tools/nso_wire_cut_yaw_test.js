@@ -118,15 +118,22 @@ window.__splitAndMeasure = function (id) {
     const s = v.fromBufferAttribute(gp, i).applyMatrix4(Mw).sub(P).dot(n);
     pLo = Math.min(pLo, s); pHi = Math.max(pHi, s);
   }
+  /* The halves as Split hands them back in the piece's own frame: cutSplitAt.
+     It used to hook splitBothSides, which is the same thing only for a square
+     cut on the piece's own axis. A turned piece's square blade travels its
+     footprint's long side now (pose-bake: cutFrame's base turn), and then
+     splitBothSides cuts a copy turned into the cut frame, whose halves
+     cutSplitAt turns back - measuring those through the piece's matrix
+     measured them 15 degrees off. */
   let got = null;
-  const orig = window.splitBothSides;
-  window.splitBothSides = function () {
+  const orig = window.cutSplitAt;
+  window.cutSplitAt = function () {
     const r = orig.apply(this, arguments);
     got = { left: r.left.clone(), right: r.right.clone(), engine: r.engine };
     return r;
   };
   const before = state.models.map(x => x.id);
-  try { document.getElementById('btn-cut').click(); } finally { window.splitBothSides = orig; }
+  try { document.getElementById('btn-cut').click(); } finally { window.cutSplitAt = orig; }
   const status = document.getElementById('status').textContent;
   if (!got) return { status: status };
   const half = (geo, Mx) => {
@@ -240,10 +247,12 @@ withApp(async (page, logs) => {
       check(label + ', ' + nm + ' half: it runs out to one end of the piece and stops at the blade', toLo !== toHi,
         'piece ' + r.pLo.toFixed(3) + ' .. ' + r.pHi.toFixed(3) + ', half ' + h.lo.toFixed(3) + ' .. ' + h.hi.toFixed(3));
       if (!f) continue;
-      // The bar's long direction makes angle yaw with world X; the blade's
-      // normal is world X or Z, so the section is W x H over |cos| of the
-      // angle between them.
-      const ux = Math.cos(yaw * Math.PI / 180), uz = Math.sin(yaw * Math.PI / 180);
+      // The bar's long direction makes angle yaw with world X - rotateActiveModelY
+      // sends X to (cos, 0, -sin) - and the section is W x H over |cos| of
+      // the angle between it and the blade's normal. (The sign of uz did not
+      // matter while the normal was world X or Z; since pose-bake the square
+      // blade travels the turned bar's own length, and it does.)
+      const ux = Math.cos(yaw * Math.PI / 180), uz = -Math.sin(yaw * Math.PI / 180);
       const want = W * H / Math.abs(ux * r.n[0] + uz * r.n[2]);
       check(label + ', ' + nm + ' half: the cut face is the whole section the blade crosses',
         Math.abs(f.area - want) < 1e-3 * want, f.area.toFixed(3) + ' mm² for ' + want.toFixed(3) + ' mm²');

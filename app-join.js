@@ -2791,7 +2791,8 @@ function cutActiveModel(opts) {
   state.cutterOpen = true;
   removeCutHelper();
   state.previewMesh = null;
-  layoutAfterSplit(sourcePose, poseById, sourceId, modelA, modelB, plateAxis, stayA, stayB);
+  layoutAfterSplit(sourcePose, poseById, sourceId, modelA, modelB, plateAxis, stayA, stayB,
+                   info.base && !info.deg && !info.bevel ? info.normalWorld : null);
   state.cutterOpen = true;
   state.editId = null;
   removeCutHelper();

@@ -346,14 +346,15 @@
     var r = rotOf(e);
     var hit = frameCache.get(g);
     if (hit && hit.pos === pos && hit.version === pos.version && hit.count === pos.count && sameRot(hit.rot, r)) return hit.f;
-    var rect = narrowest(hullOf(g, r));
+    var hull = hullOf(g, r), rect = narrowest(hull);
     if (!rect) return null;
     var L = rect.ed >= rect.en ? rect.d : [-rect.d[1], rect.d[0]];
     var lenL = Math.max(rect.ed, rect.en), lenS = Math.min(rect.ed, rect.en);
     // canonical sense: the long side points +X (or +Z when square to X)
     if (L[0] < -1e-12 || (Math.abs(L[0]) <= 1e-12 && L[1] < 0)) L = [-L[0], -L[1]];
     var f = { long: [L[0], 0, L[1]], short: [-L[1], 0, L[0]], lengths: { long: lenL, short: lenS },
-              mid: rect.mid, square: !(lenL > 0) || (lenL - lenS) <= SQUARE_WITHIN * lenL };
+              mid: rect.mid, square: !(lenL > 0) || (lenL - lenS) <= SQUARE_WITHIN * lenL,
+              area: rect.area, hull: hull };
     frameCache.set(g, { pos: pos, version: pos.version, count: pos.count, rot: r, f: f });
     return f;
   }
@@ -374,40 +375,61 @@
     var e = mesh.matrixWorld.elements, f = frameUnder(mesh.geometry, e);
     if (!f) return null;
     var box = worldBox(mesh);
-    var L = exactSide(p.mesh ? p : null, mesh, f.long);
+    var r = squareToBody(placedOf(p, mesh), mesh, f) || f;
+    var L = vec(r.long);
     return {
       long: L, short: new three.Vector3(-L.z, 0, L.x), up: new three.Vector3(0, 1, 0),
-      lengths: { long: f.lengths.long, short: f.lengths.short, height: box.max.y - box.min.y },
-      centre: new three.Vector3(f.mid[0] + e[12], box.min.y, f.mid[1] + e[14]),
-      square: f.square
+      lengths: { long: r.lengths.long, short: r.lengths.short, height: box.max.y - box.min.y },
+      centre: new three.Vector3(r.mid[0] + e[12], box.min.y, r.mid[1] + e[14]),
+      square: r.square
     };
   }
-  /* A baked piece's vertices are Float32, so the side measured off them is
-     off its true line by up to ~1e-7 rad, and a run of actions each aimed by
-     it would walk. The piece's body axes (nsoPieceBodyQ, app-core.js: its
-     load axes where they point now) are exact: where one of their shadows lies
-     within SNAP_RAD of the measured side, modulo a quarter turn, the side IS
-     that line, taken exactly (canonical sense kept). Elsewhere the measured
-     side stands - nothing here can move the frame further than the noise. */
-  var SNAP_RAD = 1e-5;
-  function exactSide(p, mesh, L) {
-    var three = T(), out = vec(L);
-    if (!p || typeof window.nsoPieceBodyQ !== 'function') return out;
-    var q = window.nsoPieceBodyQ(p), best = null;
-    [[1, 0, 0], [0, 1, 0], [0, 0, 1]].forEach(function (b) {
+  function placedOf(p, mesh) {
+    if (p && p.mesh) return p;
+    var S = typeof state !== 'undefined' ? state : null;
+    return (S && S.placed) ? S.placed.find(function (q) { return q && q.mesh === mesh; }) || null : null;
+  }
+  /* SQUARE TO THE BODY FIRST. The narrowest rectangle is ill-defined where
+     the footprint is round or nearly square (a tube's shadow has one per facet,
+     at whatever angle each falls) and off by a hair where the geometry carries
+     a small turn nothing recorded (a Seat here bake, an imported part) - and a
+     tool that turns by the frame would turn the piece by that meaningless
+     angle. So the rectangle square to the piece's BODY axes (nsoPieceBodyQ,
+     app-core.js: its load axes where its turns have taken them - exact, never
+     measured) is tried first, along the shadow of each body axis that casts
+     one: when it is within BODY_TOL of the narrowest, it IS the frame, its
+     sides taken exactly. A piece the verbs turned, or never turned, therefore
+     reads its own axes bit for bit; only a piece whose body really lies across
+     its footprint is read off the hull. */
+  var BODY_TOL = 0.02;
+  function squareToBody(p, mesh, f) {
+    var three = T();
+    if (!three || !f.hull || !f.hull.length) return null;
+    var q = (p && typeof window.nsoPieceBodyQ === 'function') ? window.nsoPieceBodyQ(p) : mesh.quaternion.clone();
+    var best = null;
+    [[1, 0, 0], [0, 0, 1], [0, 1, 0]].forEach(function (b) {
       var a = new three.Vector3(b[0], b[1], b[2]).applyQuaternion(q);
-      a.y = 0;
-      if (a.lengthSq() < 0.25) return;                 // a steep axis casts too short a shadow to aim by
-      a.normalize();
-      [a, new three.Vector3(-a.z, 0, a.x)].forEach(function (c) {
-        var ang = Math.atan2(Math.abs(c.x * out.z - c.z * out.x), Math.abs(c.x * out.x + c.z * out.z));
-        if (ang < SNAP_RAD && (!best || ang < best.ang)) best = { ang: ang, c: c };
+      var l = Math.hypot(a.x, a.z);
+      if (l < 0.5) return;                              // a steep axis casts too short a shadow to square by
+      var d = [a.x / l, a.z / l];
+      var lo0 = Infinity, hi0 = -Infinity, lo1 = Infinity, hi1 = -Infinity;
+      f.hull.forEach(function (h) {
+        var s0 = h[0] * d[0] + h[1] * d[1], t = -h[0] * d[1] + h[1] * d[0];
+        if (s0 < lo0) lo0 = s0; if (s0 > hi0) hi0 = s0;
+        if (t < lo1) lo1 = t; if (t > hi1) hi1 = t;
       });
+      var area = (hi0 - lo0) * (hi1 - lo1);
+      if (!best || area < best.area - 1e-12) {
+        best = { d: d, ed: hi0 - lo0, en: hi1 - lo1, area: area,
+                 mid: [((lo0 + hi0) / 2) * d[0] - ((lo1 + hi1) / 2) * d[1], ((lo0 + hi0) / 2) * d[1] + ((lo1 + hi1) / 2) * d[0]] };
+      }
     });
-    if (!best) return out;
-    var c = best.c.clone();
-    if (c.dot(out) < 0) c.negate();
-    return c;
+    if (!best || !(best.area <= f.area * (1 + BODY_TOL) + 1e-12)) return null;
+    var L = best.ed >= best.en ? best.d : [-best.d[1], best.d[0]];
+    if (L[0] < -1e-12 || (Math.abs(L[0]) <= 1e-12 && L[1] < 0)) L = [-L[0], -L[1]];
+    var lenL = Math.max(best.ed, best.en), lenS = Math.min(best.ed, best.en);
+    return { long: [L[0], 0, L[1]], lengths: { long: lenL, short: lenS }, mid: best.mid,
+             square: !(lenL > 0) || (lenL - lenS) <= SQUARE_WITHIN * lenL };
   }
   function cloneFrame(f) {
     return { long: f.long.clone(), short: f.short.clone(), up: f.up.clone(),

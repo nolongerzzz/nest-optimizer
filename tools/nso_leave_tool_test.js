@@ -323,19 +323,26 @@ withApp(async (page, logs) => {
     await page.waitForTimeout(200);
     await page.click('#menu-rotate > summary');
     await page.waitForTimeout(200);
+    /* the turn is read off the piece's BODY: each 90 is baked into the
+       geometry when it ends (pose-bake), so rotY is 0 again after it */
     rotBefore = await page.evaluate(() => ({
-      rotY: state.placed[state.selectedIndex].rotY || 0, undo: state.undoStack.length, sel: state.selectedIndex
+      q: nsoPieceBodyQ(state.placed[state.selectedIndex]).toArray(), undo: state.undoStack.length, sel: state.selectedIndex
     }));
     await page.dblclick('#btn-rot-right');
     await page.waitForTimeout(250);
     const r = await page.evaluate(() => ({
-      rotY: state.placed[state.selectedIndex].rotY || 0, undo: state.undoStack.length,
+      q: nsoPieceBodyQ(state.placed[state.selectedIndex]).toArray(), undo: state.undoStack.length,
       menu: document.getElementById('menu-rotate').open,
       guide: (g => !!(g && g.children.length))(state.scene.getObjectByName('nso-rotate-handles'))
     }));
     await shot('rotate90-dblclick');
-    check('piece turned 180', Math.abs(r.rotY - rotBefore.rotY - Math.PI) < 1e-9,
-      ((r.rotY - rotBefore.rotY) * 180 / Math.PI).toFixed(3) + ' deg');
+    const turn = await page.evaluate(([a, b]) => {
+      const d = new THREE.Quaternion().fromArray(b).multiply(new THREE.Quaternion().fromArray(a).invert());
+      const s = Math.hypot(d.x, d.y, d.z);
+      return { deg: 2 * Math.atan2(s, Math.abs(d.w)) * 180 / Math.PI, up: s ? Math.abs(d.y) / s : 0 };
+    }, [rotBefore.q, r.q]);
+    check('piece turned 180', Math.abs(turn.deg - 180) < 1e-6 && Math.abs(turn.up - 1) < 1e-9,
+      turn.deg.toFixed(3) + ' deg about the vertical');
     check('nothing closed: Rotate menu and guide still up', r.menu && r.guide, JSON.stringify(r));
     check('two Undo steps, one per click', r.undo === rotBefore.undo + 2, rotBefore.undo + '->' + r.undo);
   }
@@ -348,11 +355,15 @@ withApp(async (page, logs) => {
     await page.click('#btn-undo');
     await page.waitForTimeout(250);
     const r = await page.evaluate((i) => ({
-      rotY: state.placed[i].rotY || 0, undo: state.undoStack.length
+      q: nsoPieceBodyQ(state.placed[i]).toArray(), undo: state.undoStack.length
     }), rotBefore.sel);
     await shot('undo-after-run');
-    check('two Undos put the turn back', Math.abs(r.rotY - rotBefore.rotY) < 1e-9 && r.undo === rotBefore.undo,
-      'rotY ' + r.rotY.toFixed(4) + ', undo ' + r.undo);
+    const off = await page.evaluate(([a, b]) => {
+      const d = new THREE.Quaternion().fromArray(b).multiply(new THREE.Quaternion().fromArray(a).invert());
+      return 2 * Math.atan2(Math.hypot(d.x, d.y, d.z), Math.abs(d.w)) * 180 / Math.PI;
+    }, [rotBefore.q, r.q]);
+    check('two Undos put the turn back', off < 1e-9 && r.undo === rotBefore.undo,
+      'off by ' + off.toExponential(1) + ' deg, undo ' + r.undo);
     await page.click('#btn-undo');
     await page.waitForTimeout(500);
     check('one more Undo takes back the Split',

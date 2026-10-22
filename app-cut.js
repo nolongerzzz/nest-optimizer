@@ -419,7 +419,9 @@ function getCutPlaneLocal(model) {
   // n, that is the coordinate `origin + mm` (square: the piece's own).
   const out = { axis: f.axis, plateAxis: f.plateAxis, plane: f.origin + mm, mm: mm, bbox: f.bbox, span: f.span,
                 t: mm / f.span, origin: f.origin, lo: f.lo, hi: f.hi, localBox: f.bbox,
-                deg: f.deg, bevel: f.bevel, turn: f.turn, frame: f.back };
+                deg: f.deg, bevel: f.bevel, turn: f.turn, frame: f.back, base: f.base || 0,
+                /* the travel line in the world, for parting the halves along it */
+                normalWorld: f.mesh ? f.normal.clone().transformDirection(f.mesh.matrixWorld) : null };
   if (f.turn) {
     const b = f.bbox, c = new THREE.Vector3(), box = new THREE.Box3();
     for (let i = 0; i < 8; i++) {
@@ -2604,7 +2606,7 @@ function cutCapSideX(model) {
   return nearMax >= nearMin ? 'max' : 'min';
 }
 
-function layoutAfterSplit(sourcePose, poseById, sourceId, modelA, modelB, axis, stayA, stayB) {
+function layoutAfterSplit(sourcePose, poseById, sourceId, modelA, modelB, axis, stayA, stayB, along) {
   if (!state.modelGroup) return;
   clearDisplayMeshes();
   state.placed = [];
@@ -2647,7 +2649,17 @@ function layoutAfterSplit(sourcePose, poseById, sourceId, modelA, modelB, axis, 
   let bOff = stayWorld(stayB, srcOri);
   let ax = aOff.x, az = aOff.z, bx = bOff.x, bz = bOff.z;
   const pad = SPLIT_VIEW_GAP_MM * 0.5;
-  if (axis === 'z') {
+  /* `along`: the cut's travel line on the plate, for a square cut across a
+     turned piece's length (cutFrame's base turn): the halves part along it,
+     away from the blade, as they part along the plate axis a square cut on a
+     piece lying square runs on. Null for every other cut, as before. */
+  const n = along ? new THREE.Vector3(along.x, 0, along.z) : null;
+  if (n && n.lengthSq() > 1e-12) {
+    n.normalize();
+    const dir = (bx - ax) * n.x + (bz - az) * n.z >= 0 ? 1 : -1;
+    ax -= dir * pad * n.x; az -= dir * pad * n.z;
+    bx += dir * pad * n.x; bz += dir * pad * n.z;
+  } else if (axis === 'z') {
     const dir = bz >= az ? 1 : -1;
     az -= dir * pad;
     bz += dir * pad;

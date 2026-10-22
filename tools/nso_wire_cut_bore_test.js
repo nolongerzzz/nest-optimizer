@@ -120,12 +120,16 @@ async function judgeHalves(page, label, r, wantEngine) {
   }
 }
 
-// Bore along file X -> display X (cut X); file Y -> display Z (cut Z);
-// file Z -> display Y, which only a rolled piece is cut along.
+// Bore along file X -> display X (cut X); file Z -> display Y, which only a
+// rolled piece is cut along. Re-pinned (pose-bake): the roll is baked into
+// the geometry when it ends, so the bore that was the piece's own Y now runs
+// along its (and the plate's) X, and the cut across it is named 'x'; the
+// halves, the annuli and the engine are judged the same. `name` keeps the
+// case's own label.
 const CASES = [
-  { k: 0, plate: 'x', roll: false, want: 'x' },
-  { k: 1, plate: 'z', roll: false, want: 'z' },
-  { k: 2, plate: 'x', roll: true, want: 'y' }
+  { k: 0, plate: 'x', roll: false, want: 'x', name: 'X' },
+  { k: 1, plate: 'z', roll: false, want: 'z', name: 'Z' },
+  { k: 2, plate: 'x', roll: true, want: 'x', name: 'Y' }
 ];
 
 withApp(async (page, logs) => {
@@ -135,8 +139,8 @@ withApp(async (page, logs) => {
   for (const c of CASES) {
     const id = await load(page, 'ring' + c.k + '.stl', ring(c.k));
     const r = await cutPiece(page, id, c.plate, c.roll);
-    check('ring ' + c.want.toUpperCase() + ': the cut ran along display ' + c.want.toUpperCase(), r.axis === c.want, 'axis ' + r.axis);
-    await judgeHalves(page, 'ring ' + c.want.toUpperCase(), r, 'raw');
+    check('ring ' + c.name + ': the cut ran along display ' + c.want.toUpperCase(), r.axis === c.want, 'axis ' + r.axis);
+    await judgeHalves(page, 'ring ' + c.name, r, 'raw');
   }
 
   console.log('\n=== 2. the ring after the real Extend button (8 -> 20 mm), on X, Z and (rolled) Y ===');
@@ -151,8 +155,8 @@ withApp(async (page, logs) => {
     const st = await statusOf(page);
     check('Extend ran: ' + st, /Extend done/.test(st) && /20\.000/.test(st));
     const r = await cutPiece(page, id, c.plate, c.roll);
-    check('extended ' + c.want.toUpperCase() + ': the cut ran along display ' + c.want.toUpperCase(), r.axis === c.want, 'axis ' + r.axis);
-    await judgeHalves(page, 'extended ' + c.want.toUpperCase(), r, 'raw');
+    check('extended ' + c.name + ': the cut ran along display ' + c.want.toUpperCase(), r.axis === c.want, 'axis ' + r.axis);
+    await judgeHalves(page, 'extended ' + c.name, r, 'raw');
   }
 
   console.log('\n=== 3. a piece with no raw data (cut on its display mesh, same engine) ===');
@@ -163,8 +167,8 @@ withApp(async (page, logs) => {
       m.rawTris = null; m.rawAxis = null; m.centerOffset = null;
     }, id);
     const r = await cutPiece(page, id, c.plate, c.roll);
-    check('no-raw ' + c.want.toUpperCase() + ': the cut ran along display ' + c.want.toUpperCase(), r.axis === c.want, 'axis ' + r.axis);
-    await judgeHalves(page, 'no-raw ' + c.want.toUpperCase(), r, 'display');
+    check('no-raw ' + c.name + ': the cut ran along display ' + c.want.toUpperCase(), r.axis === c.want, 'axis ' + r.axis);
+    await judgeHalves(page, 'no-raw ' + c.name, r, 'display');
   }
 
   console.log('\n=== 4. the closed box (fixtures/box_cavity_30.stl), through its sealed cavity, on X, Z and (rolled) Y ===');
@@ -172,7 +176,7 @@ withApp(async (page, logs) => {
     await page.evaluate(() => { if (state.cutterOpen) closeCutter(true); });
     const id = await loadSTL(page, path.join(ROOT, 'fixtures', 'box_cavity_30.stl'));
     const r = await cutPiece(page, id, c.plate, c.roll);
-    const tag = 'box ' + c.want.toUpperCase();
+    const tag = 'box ' + c.name;
     check(tag + ': the cut ran along display ' + c.want.toUpperCase(), r.axis === c.want, 'axis ' + r.axis);
     check(tag + ': two pieces, raw engine', r.halves.length === 2 && r.status.indexOf('[raw]') >= 0, r.status);
     const ai = { x: 0, y: 1, z: 2 }[r.axis];
@@ -201,7 +205,9 @@ withApp(async (page, logs) => {
     const id = await load(page, 'torn.stl', ring(2).slice(18));
     const n0 = await page.evaluate(() => state.models.length);
     const r = await cutPiece(page, id, 'x', true);
-    check('Split ran along display Y', r.axis === 'y', 'axis ' + r.axis);
+    /* re-pinned (pose-bake): the roll is baked, so the cut across the rolled
+       ring's bore is named by the plate's X (it was its own Y) */
+    check('Split ran across the rolled ring\'s bore (the plate\'s X)', r.axis === 'x', 'axis ' + r.axis);
     check('status says the cut was not made, in plain words', /^Cut not made: /.test(r.status) &&
       /piece is unchanged/.test(r.status) && !/rawCut|branch point|clipGeometrySide/.test(r.status), r.status);
     const isErr = await page.evaluate(() => {
