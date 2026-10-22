@@ -50,7 +50,10 @@
       as the card builds it is byte for byte the build before the stair
       (sha-256 of each object's soup, recorded at claude-wip 6f3354f at 60 deg
       and the same at a4ae142, the card's 35), and
-      no stair forms on it.
+      no stair forms on it. Built with trunkGrowth off: since supports-foot
+      every trunk gets a round trunk and its pad grows with it, which
+      support:foot holds - every part before, byte for byte, then the trunks
+      and the pads.
    8. THE REFUSAL, the card in Chromium at 60 deg (its default until #263): the arc's area
       - its top included - reads held; the three spots at its foot the plate
       cannot reach (over the part's own 2 mm base, past the 30 deg lean) are
@@ -415,7 +418,7 @@ async function cardRun() {
   console.log('\n=== 7. flat ceilings unchanged ===');
   {
     const coupon = readSTL(path.join(ROOT, 'fixtures', 'supports', 'top_clip_x2_coupon.stl'));
-    const c = await EXP.build(coupon);
+    const c = await EXP.build(coupon, { trunkGrowth: false });
     const got = {};
     c.objects.forEach(o => { got[o.name] = [sha(o.soup), o.soup.length / 9]; });
     check('the 2026-10-20 coupon as the card builds it is byte for byte the build before the stair',

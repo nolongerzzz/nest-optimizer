@@ -465,9 +465,11 @@ fs.mkdirSync(OUT, { recursive: true });
       const p = ST.planTree(piece, Object.assign({}, CARD, { beacons: bs }));
       T.plan += Date.now() - t;
       if (!p.ok) { console.log('  --    ' + label + ': the planner holds nothing here (' + p.reason + ')'); continue; }
-      /* the build as it was: for the time it took, and its feet */
+      /* the build as it was: for the time it took, and its feet - with the
+         card's trunks (supports-foot: the sheet's build grows them, and they
+         stand where they stood without it, so the feet stay comparable) */
       t = Date.now();
-      const tp0 = await GP.parts(p, {});
+      const tp0 = await GP.parts(p, { trunkGrowth: true });
       T.partsBare += Date.now() - t; t = Date.now();
       const w0 = await GP.weld(p, tp0, {});
       T.weldBare += Date.now() - t;

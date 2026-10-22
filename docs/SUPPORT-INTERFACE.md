@@ -150,7 +150,10 @@ printed in the same layers as the lines, and every line was an island. So now:
   `detect_thin_wall = 1` (the support set: docs/BAMBU-PROJECT-EXPORT.md);
   `sheetWidthMm` sets another width.
 - **The feet**: one shared first-layer pad per cluster of trunks, the trees on
-  one pad one support (docs/SUPPORT-GRIDPACK.md, *Feet*).
+  one pad one support (docs/SUPPORT-GRIDPACK.md, *Feet*); since supports-foot
+  each trunk stands on a round trunk that widens going down, flared onto its
+  pad, and the pad is drawn round the flare (docs/SUPPORT-GRIDPACK.md, *The
+  trunk*). Nothing above the trunk changes.
 - **The gap stays 0.18.**
 
 **The level.** A tip's sheet top is 0.18 mm under the lowest ceiling over its
