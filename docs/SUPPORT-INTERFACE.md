@@ -432,11 +432,12 @@ toolpath in segments of 2 mm or more. `support:audit` holds it (section 5).
   tree. Thinning it is a planner ticket.
 - The stair's tree merges through a crowd (`mergeThroughCrowd`): a leg may
   pass through, or graze, a member it does not join. The card keeps every
-  part its own shell, so nothing changes in print; but where a leg only
-  grazes, the weld - support:shells' reference - closes a sliver of void the
-  shells do not: the tilted box, z 6.10, one hole of 0.009 mm2 (1 check of
-  support:shells' 140). Held to the planner's usual rule instead, the stair's
-  tips merge nowhere (93 struts on the arc, 294 on the tilted box).
+  part its own shell, so nothing changes in print; where a leg only grazes,
+  the weld - support:shells' reference - closes a sliver of void the shells
+  do not (the tilted box, z 6.10, 0.009 mm2), and support:shells counts no
+  void under one bead's cross-section (0.08 mm2) as a hole. Held to the
+  planner's usual rule instead, the stair's tips merge nowhere (93 struts on
+  the arc, 294 on the tilted box).
 - G-scope's support row builds as before (no `interface`).
 
 ## 7. The stair: a sheet under a curved underside

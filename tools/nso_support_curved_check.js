@@ -48,7 +48,8 @@
       are support lines only.
    7. FLAT CEILINGS UNCHANGED: the 2026-10-20 coupon (top_clip_x2_coupon.stl)
       as the card builds it is byte for byte the build before the stair
-      (sha-256 of each object's soup, recorded at claude-wip 6f3354f), and
+      (sha-256 of each object's soup, recorded at claude-wip 6f3354f at 60 deg
+      and the same at a4ae142, the card's 35), and
       no stair forms on it.
    8. THE REFUSAL, the card in Chromium at 60 deg (its default until #263): the arc's area
       - its top included - reads held; the three spots at its foot the plate
@@ -89,7 +90,7 @@ const ANGLE = 35;
 const CARD = { skipList: [], angleDeg: ANGLE, occluders: [], style: 'tree', restOnModel: false, sideMm: 1.2 };
 const PARTS = { interface: true, foldSheets: false, footPads: 'shared' };
 const NAME = 'simple_overhang';
-/* the coupon as the card built it at claude-wip 6f3354f, before the stair:
+/* the coupon as the card built it at claude-wip 6f3354f (60 deg) and a4ae142 (35), before the stair:
    sha-256 (first 16 hex) of each object's Float32 soup */
 const COUPON_BEFORE = { 'top_clip_x2': ['b26160d6312caabd', 58], 'top_clip_x2 - support 1.1 (Tree)': ['6ac271882b107552', 27348] };
 
@@ -445,6 +446,17 @@ async function cardRun() {
   /* ---------------------------------------------------------------- export */
   const file = path.join(OUT, NAME + '_supports.3mf');
   await EXP.write(file, b.objects);
+  {
+    /* written through the Bambu project envelope (docs/BAMBU-PROJECT-EXPORT.md): Studio opens it as a project */
+    const zip = R3.openZip(new Uint8Array(fs.readFileSync(file))), dec = new TextDecoder();
+    const model = dec.decode(await zip.read('3D/3dmodel.model'));
+    const ms = zip.names().includes('Metadata/model_settings.config') ? dec.decode(await zip.read('Metadata/model_settings.config')) : '';
+    const meshes = zip.names().filter(n => /^3D\/Objects\/object_\d+\.model$/.test(n)).length;
+    const tw = (ms.match(/key="detect_thin_wall" value="1"/g) || []).length;
+    check('the export is a Bambu project: Studio\'s envelope, a mesh part an object, each support with its thin-wall overrides',
+      /<metadata name="Application">BambuStudio-[\d.]+<\/metadata>/.test(model) && meshes === b.objects.length && tw === b.objects.length - 1,
+      `${(model.match(/BambuStudio-[\d.]+/) || ['no Studio tag'])[0]}; ${meshes} object parts; detect_thin_wall on ${tw} of ${b.objects.length - 1} support(s)`);
+  }
   console.log('\n  wrote ' + path.relative(ROOT, file) + ` (${b.objects.length - 1} support object(s); open it in Bambu Studio as a PROJECT, its own supports off)`);
 
   console.log('\n' + (fail ? 'FAILED  ' : 'PASSED  ') + pass + ' of ' + (pass + fail) + (fail ? '\n  ' + FAILS.join('\n  ') : ''));

@@ -437,9 +437,10 @@
        nowhere and stood 93 struts on the plate; joining up to 8, or leaning
        45 deg, did not free it). Its legs may then pass through that member -
        support on support, kept as shells (shells(): the card's build, never
-       welded). FLAG: where a leg only grazes one, the weld (support:shells'
+       welded). Where a leg only grazes one, the weld (support:shells'
        reference) closes a sliver of void the shells do not - the tilted box,
-       z 6.10, 0.009 mm2. */
+       z 6.10, 0.009 mm2: under a bead's cross-section, which support:shells
+       does not count as a hole. */
     var crowd = !!opts.mergeThroughCrowd;
     out.branchTiltDeg = tiltDeg; out.latticeMm = L; out.plateZ = plateZ; out.restOnModel = rest;
     var obstacles = [rawTris].concat(opts.occluders || []);
