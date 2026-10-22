@@ -6555,3 +6555,30 @@ The four commits of this branch now sit on `claude-wip` 6f3354f.
 - **Conflicts:** two, both append-only. `package.json` gets the
   `export:bambu` weight note beside #259's; `HANDOFF.md` keeps both appends.
 - **Tags:** `nso-3mf.js` and `nso_support_interface.js` are `?v=bambu3`.
+
+### gcode3mf-packager: a G-code string in, a Bambu .gcode.3mf out (2026-10-22, Phase 2a of the export/print plan)
+
+Written on `claude/export-bambu-project` (#264, which changed `nso-3mf.js`),
+then moved onto `claude-wip` a4ae142 once #264 merged. The one conflict was
+`package.json`'s weights note (#263's `support:test` change): `claude-wip`'s line
+is kept, with the `gcode3mf:test` clause added.
+
+- **`nso-gcode3mf-write.js`** (`NSO_Gcode3mf`, browser + Node) writes the
+  reference `.gcode.3mf`'s 17 parts in its order, from a G-code string plus
+  the plate's metadata. The ZIP writer and CRC32 are imported from
+  `nso-3mf.js`; reading back uses `nso-3mf-read.js`. MD5 is implemented in
+  the file (`crypto.subtle` has none). No UI: `index.html` does not load it,
+  so it has no `?v=`.
+- **The G-code first.** Its HEADER_BLOCK, CONFIG_BLOCK and body give the
+  layers, time, weight, label ids, max_z, nozzle, filaments, bed, layer-1
+  footprints, filament changes and pauses; passed values only fill gaps.
+  `describe()` reports each field's source.
+- **Placeholders**, each pinned by the gate (docs/GCODE3MF-PACKAGER.md):
+  blank transparent thumbnails, `first_layer_time` 0, no `<warning>` lines,
+  `plate_1.json` ids = label ids and area = bbox area, `DesignerUserId`
+  empty.
+- **Gate:** `gcode3mf:test` (new, weight 3200) re-packages the reference:
+  nine parts byte-identical, `3dmodel.model` and `slice_info` identical but
+  the placeholders, footprints within 0.15 mm (0.01 worst), round trip
+  through `read()` and through G-scope's import (the same 26 233 moves).
+- **The real gate is the owner's:** print a re-packaged file on the A1 mini.
