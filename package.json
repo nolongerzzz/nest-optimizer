@@ -213,6 +213,7 @@
     "wire:nonsolid": "node tools/nso_wire_nonsolid_test.js",
     "export:roundtrip": "node tools/nso_export_roundtrip_test.js",
     "export:bambu": "node tools/3mf-test/bambu-project-check.js",
+    "gcode3mf:test": "node tools/3mf-test/gcode3mf-check.js",
     "fixtures:audit": "python3 tools/fixture_audit.py",
     "export:multi": "node tools/nso_multi_export_check.js",
     "tip:orient": "node tools/nso_tip_orient_test.js",
@@ -420,6 +421,7 @@
     "wire:nonsolid",
     "export:roundtrip",
     "export:bambu",
+    "gcode3mf:test",
     "fixtures:gate",
     "export:multi",
     "overlay:test",
@@ -616,7 +618,10 @@
     "run measures them:",
     "  export:bambu 550 (0.3s local x 1.7, rounded up; export-bambu-project, #264).",
     "  support:test 10050 (this table's 9750 for the old file, scaled by",
-    "  supports-angle-default's (#263) 13.6s / 13.2s for its new section 13)."
+    "  supports-angle-default's (#263) 13.6s / 13.2s for its new section 13).",
+    "  gcode3mf:test 3200 (1.83s on the cloud box x 1.7, rounded up: it",
+    "  re-packages the 1.6 MB reference .gcode.3mf several times and reads it",
+    "  back through G-scope's import; gcode3mf-packager, #270)."
   ],
   "testStepWeightsSource": "Tests #297-#305 SUMMARY tables, read 2026-10-22 (ci-stability): fresh, runner-normalised means of every shard - testStepWeightsNote has the method",
   "testStepWeights": {
@@ -730,6 +735,7 @@
     "wire:nonsolid": 21400,
     "export:roundtrip": 11150,
     "export:bambu": 550,
+    "gcode3mf:test": 3200,
     "fixtures:gate": 8250,
     "export:multi": 50150,
     "overlay:test": 3100,
