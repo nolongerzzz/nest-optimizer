@@ -135,12 +135,16 @@ Every support object carries one set: `NSO_SupportInterface.SHEET.slicerSettings
 | --- | --- | --- |
 | `wall_generator` | `classic` | the sheet's thin-wall pass (docs/SUPPORT-INTERFACE.md) |
 | `detect_thin_wall` | `1` | the sheet's thin-wall pass |
+| `sparse_infill_density` | `0%` | Studio fills a support object like a part; no sparse infill inside a trunk |
+| `wall_loops` | `1` | one loop round the trunk, so no internal solid infill is laid inside it either |
 
-Nothing else. Per-family tuning waits for a print.
+Nothing else (top / bottom shell layers stay at the profile's values). Per-family tuning waits for a print.
 
 `top_shell_layers 0` and `bottom_shell_layers 0` were in the set for the first
 print, and it failed from layer 1 (see *The owner's first open*). The set went
-back to these two, the ones the earlier successful print had. A shell
+back to those two, the ones the earlier successful print had; the filler keys
+(`sparse_infill_density`, `wall_loops`) were added on top of them for
+supports-no-infill. A shell
 override comes back only with a print behind it.
 
 The Supports card puts the set on each support model (`m.slicerSettings`), and
