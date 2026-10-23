@@ -393,7 +393,8 @@ right over the sheet that holds it.
   Each line of a support is also read against the layer under it - that
   layer as the footprint it holds (closed by 0.5 mm, as above), grown by
   half a line: the length of it over air, sampled every 0.1 mm, is the
-  path's `overhangMm`, and `P.sheet.overhangPaths` / `overhangMm` count them
+  path's `overhangMm`, each run of it over air one of its `overhangRuns`
+  (a span between what holds it), and `P.sheet.overhangPaths` / `overhangMm` count them
   by type. A line over air is what Bambu prints as an overhang wall when it
   slices a support as an object. Typing only: the G-code is the same.
 - **The host is credited.** Each of the host's overhang islands is cut,

@@ -1859,8 +1859,9 @@
          centre leaves the layer under it - that layer read as the footprint it
          holds (closed by closeMm, as above), grown by half a line - is over
          air there. Each path's length over air (p.overhangMm, sampled every
-         OVER_STEP_MM along it); a path with any is an overhang. Typing only:
-         the G-code is the same. */
+         OVER_STEP_MM along it) and its spans over air, run by run
+         (p.overhangRuns); a path with any is an overhang. Typing only: the
+         G-code is the same. */
       var airN = { 'Support': 0, 'Support transition': 0, 'Support interface': 0 }, airMm = { 'Support': 0, 'Support transition': 0, 'Support interface': 0 };
       P.layers.forEach(function (L, j) {
         if (!L.paths.length || j === 0) return;
@@ -1879,16 +1880,22 @@
           return inn;
         }
         L.paths.forEach(function (p) {
-          var pts = p.pts, m = p.closed ? pts.length : pts.length - 1, air = 0;
+          var pts = p.pts, m = p.closed ? pts.length : pts.length - 1, air = 0, runs = [], run = 0, first = null;
           for (var e = 0; e < m; e++) {
             var a = pts[e], b2 = pts[(e + 1) % pts.length], len = Math.hypot(b2[0] - a[0], b2[1] - a[1]);
             var ns = Math.max(1, Math.ceil(len / OVER_STEP_MM));
             for (var q = 0; q < ns; q++) {
               var t = (q + 0.5) / ns;
-              if (!onUnder(a[0] + (b2[0] - a[0]) * t, a[1] + (b2[1] - a[1]) * t)) air += len / ns;
+              if (!onUnder(a[0] + (b2[0] - a[0]) * t, a[1] + (b2[1] - a[1]) * t)) { air += len / ns; run += len / ns; }
+              else if (run > 0) { if (first == null) first = runs.length; runs.push(run); run = 0; }
+              else if (first == null) first = -1;
             }
           }
+          /* a closed path's last run goes on into its first, where both lie over air */
+          if (run > 0) { if (p.closed && first === 0 && runs.length) runs[0] += run; else runs.push(run); }
           p.overhangMm = air;
+          /* the spans over air, each a run of the path between the things under it */
+          p.overhangRuns = runs;
           if (air > 0) { airN[p.feature]++; airMm[p.feature] += air; }
         });
       });

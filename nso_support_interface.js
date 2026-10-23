@@ -2425,6 +2425,7 @@
     SHEET: { pitchMm: SHEET_PITCH_MM, roles: SHEET_ROLES.slice(), under: SHEET_UNDER, minRunMm: MIN_RUN_MM, cellMm: CELL_MM,
              sampleMm: SAMPLE_MM, lineAngles: LINE_ANGLES.slice(), fieldMm: FIELD_MM, levelEdgeMm: LEVEL_EDGE_MM,
              slicerSettings: Object.assign({}, SHEET_SLICER) },
+    STAIR: { tipMm: STAIR_TIP_MM, backMm: STAIR_BACK_MM },
     CAP: { riseMm: CAP_RISE_MM, minMm: CAP_MIN_MM, maxMm: CAP_MAX_MM, spaceMm: CAP_SPACE_MM, gapMaxMm: CAP_GAP_MAX_MM,
            tuckMm: CAP_TUCK_MM, partMm: CAP_PART_MM, bandMm: CAP_BAND_MM, foot: CAP_FOOT },
     sheet: sheet,
