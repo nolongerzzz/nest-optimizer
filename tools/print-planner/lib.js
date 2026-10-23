@@ -7,6 +7,13 @@ const path = require('path');
 
 const ROOT = path.join(__dirname, '..', '..');
 const SL = require(path.join(ROOT, 'nso_slicer.js'));
+const PLN = require(path.join(ROOT, 'nso-print-planner.js'));
+
+/** The engine's options for a template: what Studio's process profile says. */
+function engineFor(config) {
+  const e = PLN.engineOptions(config);
+  return SL.defaultsFor(e.nozzleMm, Object.assign({ emitGcode: false }, e.over));
+}
 const R = require(path.join(ROOT, 'nso-3mf-read.js'));
 const { readSTL } = require(path.join(ROOT, 'tools', 'nso_stl_io.js'));
 
@@ -54,21 +61,22 @@ const cache = {};
 
 /** Plate A: top_clip_x2 coupon with the Supports card's tree supports, as the
  *  owner's A1 mini slice (top_clip_x2_supports.gcode.3mf) has them. */
-async function plateA() {
-  if (cache.A) return cache.A;
+async function plateA(config) {
+  const ck = 'A' + (config ? 't' : '');
+  if (cache[ck]) return cache[ck];
   const PX = require(path.join(ROOT, 'tools', 'nso_supports_print_export.js'));
   const piece = readSTL(path.join(ROOT, 'fixtures', 'supports', 'top_clip_x2_coupon.stl'));
   const b = await PX.build(piece);
   const objs = b.objects.map((o, i) => i === 0 ? { name: o.name, soup: o.soup, key: 1, role: 'part' }
                                                 : { name: o.name, soup: o.soup, role: 'support', hostKey: 1 });
-  const res = SL.sliceObjects(objs, SL.defaultsFor(0.4, { layerMm: 0.2, firstLayerMm: 0.2, emitGcode: false }), await wasm());
-  return (cache.A = { res, objs });
+  const res = SL.sliceObjects(objs, config ? engineFor(config) : SL.defaultsFor(0.4, { layerMm: 0.2, firstLayerMm: 0.2, emitGcode: false }), await wasm());
+  return (cache[ck] = { res, objs });
 }
 
 /** Plate B: the Simple Overhang Test arc, moved to (cx, cy) on the bed, with
  *  NSO's supports when `supports`. */
-async function plateB(cx, cy, supports) {
-  const key = 'B' + cx + ',' + cy + (supports ? 's' : '');
+async function plateB(cx, cy, supports, config) {
+  const key = 'B' + cx + ',' + cy + (supports ? 's' : '') + (config ? 't' : '');
   if (cache[key]) return cache[key];
   const model = await R.parse3MF(new Uint8Array(fs.readFileSync(path.join(ROOT, 'fixtures', 'supports', 'simple_overhang.3mf'))));
   const soup = Array.from(model.objects[0].positions);
@@ -80,11 +88,11 @@ async function plateB(cx, cy, supports) {
     const b = await PX.build(new Float64Array(soup));
     b.objects.slice(1).forEach(o => objs.push({ name: o.name, soup: move(Array.from(o.soup)), role: 'support', hostKey: 1 }));
   }
-  const res = SL.sliceObjects(objs, SL.defaultsFor(0.4, { layerMm: 0.2, firstLayerMm: 0.2, emitGcode: false }), await wasm());
+  const res = SL.sliceObjects(objs, config ? engineFor(config) : SL.defaultsFor(0.4, { layerMm: 0.2, firstLayerMm: 0.2, emitGcode: false }), await wasm());
   return (cache[key] = { res, objs });
 }
 
-module.exports = { ROOT, SL, R, dec, text, readParts, a1Template, p1sTemplate, bambuSlice, printer, plateA, plateB, wasm };
+module.exports = { ROOT, SL, engineFor, R, dec, text, readParts, a1Template, p1sTemplate, bambuSlice, printer, plateA, plateB, wasm };
 
 /** A line-by-line scan of a G-code text: what the nozzle did, with the state a
  *  line carries (speed, acceleration, feature, layer, fan). Works on Bambu's
@@ -132,3 +140,59 @@ function scan(gcode) {
   return out;
 }
 module.exports.scan = scan;
+
+/** The print time a G-code text asks for, from its own F, M204 and moves: the
+ *  planner's own estimator (NSOPrintPlanner.estimateLines), so Studio's files
+ *  and the planner's are timed by one model. Seconds from the first
+ *  CHANGE_LAYER to the end block, and per layer. */
+function estimateGcode(gcode, opts) {
+  const PL = require(path.join(ROOT, 'nso-print-planner.js'));
+  opts = opts || {};
+  const all = gcode.split('\n');
+  const from = all.indexOf('; CHANGE_LAYER');
+  let to = all.indexOf('; MACHINE_END_GCODE_START');
+  if (to < 0) to = all.length;
+  const body = all.slice(from, to);
+  const e = PL.estimateLines(body, { jerk: opts.jerk || 9, accel: opts.accel || 6000 });
+  const starts = [];
+  body.forEach((l, i) => { if (l === '; CHANGE_LAYER') starts.push(i); });
+  const perLayer = starts.map((st, k) => {
+    const end = k + 1 < starts.length ? starts[k + 1] : body.length;
+    const t0 = st > 0 ? e.times[st - 1] : 0;
+    return e.times[end - 1] - t0;
+  });
+  return { seconds: e.seconds, perLayer };
+}
+module.exports.estimateGcode = estimateGcode;
+
+/** A G-code text by layer: for each layer its Z, and per object the features it
+ *  printed with their path length and extruded mm of filament. Bambu's and the
+ *  planner's files read the same way (OBJECT_ID, start printing object). */
+function layersOf(gcode) {
+  const lines = gcode.split('\n');
+  const out = [];
+  let cur = null, obj = null, feat = null, x = 0, y = 0, started = false;
+  for (let i = 0; i < lines.length; i++) {
+    const s = lines[i];
+    let m;
+    if (s === '; CHANGE_LAYER') { cur = { z: 0, objects: {} }; out.push(cur); started = true; obj = null; continue; }
+    if (s === '; MACHINE_END_GCODE_START') break;
+    if (!started) continue;
+    if ((m = /^; Z_HEIGHT: ([\d.]+)/.exec(s))) { cur.z = +m[1]; continue; }
+    if ((m = /^; OBJECT_ID: (\d+)/.exec(s))) { obj = m[1]; continue; }
+    if ((m = /^; start printing object, unique label id: (\d+)/.exec(s))) { obj = m[1]; continue; }
+    if ((m = /^; FEATURE: (.*)$/.exec(s))) { feat = m[1]; continue; }
+    if ((m = /^G[123] X(-?[\d.]+) Y(-?[\d.]+)(?: I\S+ J\S+)?(?: Z\S+)?(?: F\S+)?( E[\d.]+)?$/.exec(s))) {
+      const nx = +m[1], ny = +m[2];
+      if (m[2 + 1] && cur && feat && /E[\d.]+/.test(m[3])) {
+        const o = cur.objects[obj] || (cur.objects[obj] = {});
+        const f = o[feat] || (o[feat] = { len: 0, e: 0, n: 0 });
+        f.len += Math.hypot(nx - x, ny - y); f.e += +m[3].slice(2); f.n++;
+      }
+      x = nx; y = ny; continue;
+    }
+    if ((m = /^G[01] X(-?[\d.]+) Y(-?[\d.]+)/.exec(s))) { x = +m[1]; y = +m[2]; }
+  }
+  return out;
+}
+module.exports.layersOf = layersOf;

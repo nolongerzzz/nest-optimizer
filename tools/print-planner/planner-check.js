@@ -94,7 +94,7 @@ async function main() {
   // ===========================================================================
   section('2. Plate A (the coupon and its NSO supports): the plan');
   // ===========================================================================
-  const pa = await L.plateA();
+  const pa = await L.plateA(tpl);
   const res = pa.res;
   const PR = L.printer('a1mini-0.4');
   const P = PL.plan(res, { config: tpl, printer: PR });
@@ -281,7 +281,7 @@ async function main() {
   const BP = await L.bambuSlice('fixtures/supports/simple_overhang_p1s.gcode.3mf');
   check('the P1S blocks are a fresh freeze of the owner\'s P1S slice',
     JSON.stringify((await FZ.build('p1s-0.4')).frozen, null, 1) + '\n' === require('fs').readFileSync(path.join(ROOT, 'fixtures', 'print-planner', 'p1s-0.4', 'frozen.json'), 'utf8'));
-  const pb = await L.plateB(128, 128, false);
+  const pb = await L.plateB(128, 128, false, p1sCfg);
   const PP = PL.plan(pb.res, { config: p1sCfg, printer: PS });
   check('the arc plans for the P1S', PP.ok, PP.reason);
   const ppl = PP.gcode.split('\n'), bpl = BP.gcode.split('\n');
@@ -405,13 +405,13 @@ async function main() {
   check('...timelapse alone has the photo and no head_wrap_detect; the default has both and the spaghetti detector (' + g.filter(l => /^M981 /.test(l)).join(' / ') + ')',
     tlOnly.includes('; SKIPTYPE: timelapse') && !tlOnly.includes('; SKIPTYPE: head_wrap_detect') && g.includes('; SKIPTYPE: head_wrap_detect') && g.filter(l => /^M981 /.test(l)).length === 2);
   // single object: labels off, as Studio does
-  const pb1 = await L.plateB(90, 90, false);
+  const pb1 = await L.plateB(90, 90, false, tpl);
   const one = PL.plan(pb1.res, { config: tpl, printer: PR });
   const og1 = one.gcode.split('\n');
   check('one object on the plate: OBJECT_ID per layer, but no labelling - no M624 / M625, no "start printing object", no label id in the header (Studio\'s own arc slice has none either)',
     one.ok && !one.labelled && !og1.some(l => /^M62[45]/.test(l) || /printing object|model label id/.test(l)) && og1.filter(l => /^; OBJECT_ID: /.test(l)).length === one.stats.layers);
   // three objects: the arc with two NSO trees
-  const pb3 = await L.plateB(90, 90, true);
+  const pb3 = await L.plateB(90, 90, true, tpl);
   const tri = PL.plan(pb3.res, { config: tpl, printer: PR });
   const tg = tri.ok ? tri.gcode.split('\n') : [];
   const tmask = tg.filter(l => /^M624 /.test(l)).reduce((a, l) => { a[l] = (a[l] || 0) + 1; return a; }, {});
@@ -447,6 +447,147 @@ async function main() {
   const ppyBack = L.R.openZip(ppy.bytes);
   check('the P1S file: model id C12 from the owner\'s slice_info, and it imports (' + ppy.plan.stats.layers + ' layers)',
     /key="printer_model_id" value="C12"/.test(L.text(await ppyBack.read('Metadata/slice_info.config'))) && (await Lines.readSlicedGcode3MF(ppy.bytes, { name: 'p1s.gcode.3mf' })).parsed.moves.length > 10000);
+
+  // ===========================================================================
+  section('10. Against the owner\'s Bambu slices of the same plates');
+  // ===========================================================================
+  const FEATS = ['Outer wall', 'Inner wall', 'Overhang wall', 'Sparse infill', 'Internal solid infill', 'Top surface', 'Bottom surface', 'Bridge',
+    'Floating vertical shell', 'Gap infill', 'Support', 'Support interface', 'Support transition'];
+  const BAMBU_NAMES = new Set(FEATS);
+  const B1 = await L.bambuSlice('fixtures/supports/simple_overhang_bambu.gcode.3mf');
+  const pb1t = pb1;            // the arc alone, A1 mini (template-driven slice)
+  const P1 = PL.plan(pb1t.res, { config: tpl, printer: PR });
+  const pbP = await L.plateB(128, 128, false, p1sCfg);
+  const PPs = PL.plan(pbP.res, { config: p1sCfg, printer: PS });
+  const refs = [
+    { name: 'A  coupon + NSO supports, A1 mini', ref: A, ours: P, bIds: ['4044'], nIds: [ids[0]], tol: 0.011, cfg: tpl },
+    { name: 'B  arc, A1 mini (Studio\'s trees on it)', ref: B1, ours: P1, bIds: null, nIds: null, tol: 0.06, cfg: tpl },
+    { name: 'C  arc, P1S (Studio\'s trees on it)', ref: BP, ours: PPs, bIds: null, nIds: null, tol: 0.06, cfg: p1sCfg }
+  ];
+  const results = {};
+  for (const R of refs) {
+    const bl = L.layersOf(R.ref.gcode), nl = L.layersOf(R.ours.gcode);
+    const bIds = R.bIds || Object.keys(bl[3].objects), nIds = R.nIds || Object.keys(nl[3].objects);
+    const rows = {};
+    let aligned = 0, equal = 0;
+    nl.forEach(l => {
+      let best = -1, bd = 1e9;
+      bl.forEach((b, j) => { const d = Math.abs(b.z - l.z); if (d < bd) { bd = d; best = j; } });
+      if (bd > R.tol) return;
+      aligned++;
+      const bs = new Set(bIds.flatMap(id => Object.keys(bl[best].objects[id] || {}))), ns = new Set(nIds.flatMap(id => Object.keys(l.objects[id] || {})));
+      FEATS.forEach(f => { const r = rows[f] || (rows[f] = { both: 0, b: 0, n: 0 }); if (bs.has(f) && ns.has(f)) r.both++; else if (bs.has(f)) r.b++; else if (ns.has(f)) r.n++; });
+      if ([...bs].sort().join() === [...ns].sort().join()) equal++;
+    });
+    results[R.name] = { rows, aligned, equal, layers: nl.length, bLayers: bl.length };
+    console.log('\n  ' + R.name + ': ' + aligned + ' of NSO\'s ' + nl.length + ' layers matched by Z to Studio\'s ' + bl.length + '; the feature set is the same on ' + equal);
+    console.log('    ' + 'feature'.padEnd(26) + 'both'.padStart(6) + 'Studio only'.padStart(13) + 'NSO only'.padStart(10));
+    FEATS.forEach(f => { const r = rows[f]; if (r && r.both + r.b + r.n) console.log('    ' + f.padEnd(26) + String(r.both).padStart(6) + String(r.b).padStart(13) + String(r.n).padStart(10)); });
+  }
+  console.log('');
+  for (const R of refs) {
+    const r = results[R.name].rows;
+    const wallsAll = results[R.name].aligned === r['Outer wall'].both;
+    check(R.name.trim() + ': the outer wall is on every layer in both; the inner wall on all but ' + (r['Inner wall'].b + r['Inner wall'].n) + ' (' + r['Inner wall'].both + ')',
+      wallsAll && r['Inner wall'].b + r['Inner wall'].n <= 1, JSON.stringify(r['Inner wall']));
+    const fs = new Set(R.ours.layers.flatMap(l => l.features));
+    check('...every feature NSO writes is a name Studio\'s file has or one of our three support names', [...fs].every(f => BAMBU_NAMES.has(f) || f === 'Custom'), [...fs].join(', '));
+    const ts = r['Top surface'];
+    check('...a layer Studio gives a top surface, NSO does too (' + ts.both + ' of ' + (ts.both + ts.b) + ')', ts.both >= 0.85 * (ts.both + ts.b) || ts.both + ts.b === 0);
+  }
+  // how far the engine's own calls (solid or sparse, overhang or supported) are from Studio's - pinned so a change shows
+  const ra = results[refs[0].name], rb = results[refs[1].name];
+  check('PINNED, engine not planner: the coupon\'s body is solid infill in NSO where Studio keeps 15 % sparse (NSO solid-only ' + ra.rows['Internal solid infill'].n +
+    ' layers; same feature set on ' + ra.equal + ' of ' + ra.aligned + ' - the engine\'s narrow-sparse rule was fitted on 0.6 mm slices)',
+    ra.rows['Internal solid infill'].n >= 40 && ra.equal >= 10 && ra.equal <= 40, JSON.stringify(ra.rows['Internal solid infill']));
+  check('PINNED, engine not planner: the arc has no supports in this plan, so its slope is Overhang wall in NSO (' + rb.rows['Overhang wall'].n + ' layers) where Studio holds it up with trees; the engine makes no Gap infill (Studio: ' + rb.rows['Gap infill'].b + ' layers) and no Floating vertical shell (' + rb.rows['Floating vertical shell'].b + ')',
+    rb.rows['Gap infill'].n === 0 && rb.rows['Gap infill'].b > 100 && rb.rows['Floating vertical shell'].n === 0 && rb.rows['Overhang wall'].n >= 50);
+  check('the same arc, A1 and P1S: the engine gives one toolpath (the two plans have the same features on every layer), the printers differ in the blocks and speeds only',
+    JSON.stringify(results[refs[1].name].rows) === JSON.stringify(results[refs[2].name].rows));
+
+  // ---- speeds: the table
+  const topF = (gc, side) => {
+    const sc2 = L.scan(gc), out = {};
+    sc2.moves.forEach(m => {
+      if (m.layer === 0) return;
+      const o = out[m.feature] || (out[m.feature] = { f: 0, n: 0 });
+      o.f = Math.max(o.f, m.F); o.n++;
+    });
+    return out;
+  };
+  console.log('\n  fastest extruding speed per feature (F, mm/min), layers 2 up - Studio / NSO, and the template\'s own');
+  for (const R of refs) {
+    const bt = topF(R.ref.gcode), nt = topF(R.ours.gcode);
+    const SS = PL.settingsFrom(R.cfg);
+    const line = FEATS.filter(f => bt[f] || nt[f]).map(f => f.replace(' infill', '').replace(' surface', '').replace('Internal solid', 'Solid') + ' ' + (bt[f] ? bt[f].f.toFixed(0) : '-') + '/' + (nt[f] ? nt[f].f.toFixed(0) : '-')).join('  ');
+    console.log('    ' + R.name.slice(0, 1) + '  ' + line);
+    ['Outer wall', 'Inner wall'].forEach(f => {      // top surface and solid differ in the engine's one infill width (0.45 here, Studio's 0.42)
+      if (!(bt[f] && nt[f])) return;
+      check(R.name.slice(0, 1) + ': ' + f + ' tops out at the same speed in Studio\'s file and NSO\'s (' + bt[f].f.toFixed(1) + ' / ' + nt[f].f.toFixed(1) + ' mm/min)', near(bt[f].f, nt[f].f, 1), bt[f].f + ' vs ' + nt[f].f);
+    });
+    // nothing NSO writes is faster than the template permits
+    check(R.name.slice(0, 1) + ': no feature in NSO\'s file is faster than the template\'s speed (' + SS.speed.outer + ' outer, ' + SS.speed.inner + ' inner, ' + SS.speed.sparse + ' sparse mm/s) or the volumetric limit',
+      FEATS.every(f => !nt[f] || nt[f].f <= PL.featureSpeed(SS, f, false).v * 60 + 0.01));
+  }
+  // ---- temperatures
+  const temps = gc => { const t = new Set(); L.scan(gc).temps.forEach(x => t.add(x.code + ':' + x.s)); return [...t].sort().join(' '); };
+  for (const R of refs) {
+    const bt = temps(R.ref.gcode), nt = temps(R.ours.gcode);
+    check(R.name.slice(0, 1) + ': the same temperature commands as Studio\'s file (' + nt + ')', bt === nt, 'Studio ' + bt + '\n          NSO    ' + nt);
+  }
+  // ---- label blocks and M73, in Studio's files and in ours
+  const balanced = gc => {
+    const l = gc.split('\n');
+    const st = l.filter(x => /^; start printing object/.test(x)).length, sp = l.filter(x => /^; stop printing object/.test(x)).length;
+    const a = l.filter(x => /^M624 /.test(x)).length, b = l.filter(x => /^M625$/.test(x)).length;
+    return { st, sp, a, b, ok: st === sp && a === b && a >= st };
+  };
+  const mono = gc => { let p = -1, r = 1e9, ok = true, n = 0; gc.split('\n').forEach(l => { const m = /^M73 P(\d+) R(\d+)$/.exec(l); if (m) { n++; if (+m[1] < p || +m[2] > r) ok = false; p = +m[1]; r = +m[2]; } }); return { ok, n, last: p }; };
+  for (const R of refs) {
+    const bb = balanced(R.ref.gcode), nb = balanced(R.ours.gcode), bm = mono(R.ref.gcode), nm = mono(R.ours.gcode);
+    check(R.name.slice(0, 1) + ': label blocks balanced in both (Studio ' + bb.st + '/' + bb.sp + ', NSO ' + nb.st + '/' + nb.sp + '); M73 monotonic in both (Studio ' + bm.n + ' markers, NSO ' + nm.n + ')',
+      bb.ok && nb.ok && bm.ok && nm.ok && bm.last === 100 && nm.last === 100 && (bb.st === 0) === (nb.st === 0));
+  }
+  // ---- start and end blocks, arc on the A1 mini (single object)
+  const pStartB = noM73(slab(P1.gcode.split('\n'), 'M201 X20000 Y20000 Z1500 E5000', '; MACHINE_START_GCODE_END'));
+  const bStartB = noM73(slab(B1.gcode.split('\n'), 'M201 X20000 Y20000 Z1500 E5000', '; MACHINE_START_GCODE_END'));
+  const dB = diffs(pStartB, bStartB);
+  check('B: the A1 mini start block is Studio\'s for the arc too (' + pStartB.length + ' lines); only the bed-leveling box differs', dB && dB.length === 1 && /^\s*G29 A1 X/.test(dB[0][0]), dB ? JSON.stringify(dB) : pStartB.length + ' vs ' + bStartB.length);
+
+  // ===========================================================================
+  section('11. Time: the model, and the prediction in the file');
+  // ===========================================================================
+  const dur2 = s => { let t = 0; s.replace(/(\d+)([dhms])/g, (a, n, u) => { t += +n * { d: 86400, h: 3600, m: 60, s: 1 }[u]; return a; }); return t; };
+  const headOf = gc => { const m = /model printing time: (.*?); total estimated time: (.*)$/m.exec(gc); return { model: dur2(m[1]), total: dur2(m[2]) }; };
+  console.log('  Studio\'s prediction against the model run over Studio\'s own G-code (model printing time):');
+  const ratios = [];
+  for (const R of refs) {
+    const hb = headOf(R.ref.gcode), e = L.estimateGcode(R.ref.gcode, { jerk: PL.settingsFrom(R.cfg).jerk });
+    ratios.push(e.seconds / hb.model);
+    console.log('    ' + R.name.slice(0, 1) + '  Studio ' + hb.model + ' s   model ' + e.seconds.toFixed(0) + ' s   ratio ' + (e.seconds / hb.model).toFixed(3));
+  }
+  check('the time model is within 5 % of Studio\'s own prediction on all three of its slices (' + ratios.map(r => r.toFixed(3)).join(', ') + ')', ratios.every(r => Math.abs(r - 1) <= 0.05), ratios.join(','));
+  const eP = L.estimateGcode(P.gcode, { jerk: S.jerk });
+  check('the planner\'s own clock is the model run over the lines it wrote: ' + P.stats.seconds.body.toFixed(0) + ' s against ' + eP.seconds.toFixed(0) + ' s', near(P.stats.seconds.body, eP.seconds, 1));
+  check('the file\'s prediction, the header and slice_info agree: total ' + P.stats.seconds.total.toFixed(0) + ' s = start ' + P.stats.seconds.start + ' + model ' + P.stats.seconds.body.toFixed(0) + ' + end ' + P.stats.seconds.end,
+    near(P.stats.seconds.total, P.stats.seconds.start + P.stats.seconds.body + P.stats.seconds.end, 1e-6) && near(dur2(mt[2]), P.stats.seconds.total, 1) &&
+      new RegExp('key="prediction" value="' + Math.round(P.stats.seconds.total) + '"').test(si));
+  console.log('\n  NSO\'s plan against Studio\'s slice of the same plate (the toolpaths differ: supports, infill order):');
+  const pb3p = tri;                       // the arc with NSO's two trees, A1 mini
+  const pc3 = await L.plateB(128, 128, true, p1sCfg);
+  const tri2 = PL.plan(pc3.res, { config: p1sCfg, printer: PS });
+  [['A  coupon + supports', headOf(A.gcode), P, +bh['total filament length [mm] '.trim()] || +bh['total filament length [mm]'], +bh['total filament weight [g]']],
+   ['B  arc, A1 (NSO trees)', headOf(B1.gcode), pb3p, null, null], ['C  arc, P1S (NSO trees)', headOf(BP.gcode), tri2, null, null]].forEach(row => {
+    const hb = row[1], n = row[2].stats.seconds;
+    console.log('    ' + row[0].padEnd(26) + 'Studio total ' + String(hb.total).padStart(5) + ' s (model ' + String(hb.model).padStart(5) + ')   NSO total ' + n.total.toFixed(0).padStart(5) + ' s (model ' + n.body.toFixed(0).padStart(5) + ')   ' + ((n.total / hb.total - 1) * 100).toFixed(1).padStart(6) + ' %');
+  });
+  const aT = headOf(A.gcode).total, bT = headOf(B1.gcode).total;
+  check('NSO\'s predicted total is within 25 % of Studio\'s on the coupon and on the A1 arc (the toolpaths differ: ' + (P.stats.seconds.total / aT).toFixed(2) + ' and ' + (pb3p.stats.seconds.total / bT).toFixed(2) + ' of Studio\'s)',
+    Math.abs(P.stats.seconds.total / aT - 1) <= 0.25 && Math.abs(pb3p.stats.seconds.total / bT - 1) <= 0.25);
+  const bhA = {}; A.gcode.split('\n').slice(0, 16).forEach(l => { const m = /^; ([^:]+?)\s*:\s*(.*)$/.exec(l); if (m) bhA[m[1]] = m[2]; });
+  console.log('    filament, coupon: Studio ' + bhA['total filament length [mm]'] + ' mm / ' + bhA['total filament weight [g]'] + ' g   NSO ' + P.stats.filamentMm.toFixed(2) + ' mm / ' + P.stats.grams.toFixed(2) + ' g');
+  check('the header\'s filament is the extruded length plus the start block\'s purge (' + P.stats.bodyFilamentMm.toFixed(1) + ' + ' + PR.purgeMm + ' mm), the weight is its volume x density',
+    near(+hdr['total filament length [mm]'], P.stats.bodyFilamentMm + PR.purgeMm, 0.01) && near(+hdr['total filament weight [g]'], P.stats.filamentMm * Math.PI * 1.75 * 1.75 / 4 / 1000 * 1.24, 0.01));
 
   console.log('\n' + (fail ? 'FAILED  ' + fail + ' of ' + (pass + fail) : 'PASSED  all ' + pass));
   process.exit(fail ? 1 : 0);

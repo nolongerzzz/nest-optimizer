@@ -174,9 +174,42 @@
         auxPercent: num(config, 'additional_cooling_fan_speed', 0),
         closeAux: num(config, 'close_additional_fan_first_x_layers', 1)
       },
+      jerk: num(config, 'machine_max_jerk_x', 9),
       cooling: cool
     };
     return S;
+  }
+
+
+  /**
+   * The engine's options for a template: the nozzle, layer heights, line
+   * widths, walls, shells and infill the printer's process profile names, so
+   * the toolpath is cut the way Studio would cut it. Pass the result to
+   * sliceObjects() (via NSO_Slicer.defaultsFor(nozzle, over)). Not applied here:
+   * the planner takes whatever slice it is given.
+   * @returns {{nozzleMm, over}}  defaultsFor(nozzleMm, over)
+   */
+  function engineOptions(config) {
+    var pct = function (key, def) { var v = num(config, key, def * 100); return v / 100; };
+    var nozzle = num(config, 'nozzle_diameter', 0.4);
+    var over = {
+      layerMm: num(config, 'layer_height', 0.2),
+      firstLayerMm: num(config, 'initial_layer_print_height', 0.2),
+      outerWallWidthMm: num(config, 'outer_wall_line_width', 0.42),
+      innerWallWidthMm: num(config, 'inner_wall_line_width', 0.42),
+      infillWidthMm: num(config, 'sparse_infill_line_width', 0.42),
+      wallLoops: num(config, 'wall_loops', 2),
+      topShellLayers: num(config, 'top_shell_layers', 3),
+      bottomShellLayers: num(config, 'bottom_shell_layers', 3),
+      topShellThicknessMm: num(config, 'top_shell_thickness', 0),
+      bottomShellThicknessMm: num(config, 'bottom_shell_thickness', 0),
+      sparseDensity: pct('sparse_infill_density', 0.15),
+      sparsePattern: raw(config, 'sparse_infill_pattern') === 'grid' ? 'grid' : 'zigzag',
+      infillDirectionDeg: num(config, 'infill_direction', 45),
+      detectThinWall: num(config, 'detect_thin_wall', 0) === 1,
+      supportThresholdDeg: num(config, 'support_threshold_angle', 30)
+    };
+    return { nozzleMm: nozzle, over: over };
   }
 
   // ===========================================================================
@@ -237,14 +270,141 @@
   // ===========================================================================
 
   /** Seconds to cover `len` mm at `v` mm/s, starting and ending at rest, with
-   *  acceleration `a` mm/s^2. One trapezoid per path: a path is one chain of
-   *  short collinear-ish moves, so the machine never stops inside it. */
+   *  acceleration `a` mm/s^2. */
   function moveSeconds(len, v, a) {
     if (!(len > 0)) return 0;
     if (!(v > 0)) return 0;
     if (!(a > 0)) return len / v;
     var ramp = v * v / a;                 // distance of the up-and-down ramps together
     return len >= ramp ? len / v + v / a : 2 * Math.sqrt(len / a);
+  }
+
+  /**
+   * Seconds for a run of straight moves the machine takes without stopping:
+   * [{ l: length, ux, uy: direction, v: speed cap, a: acceleration }].
+   * The machine's own look-ahead, in the classic-jerk form: a corner is taken
+   * at the speed that changes the velocity vector by no more than `jerk`
+   * (jerk / |u1 - u2|, never above either move's speed), and the run starts
+   * and ends at `jerk` (or the move's speed if lower); acceleration limits each
+   * move's entry and exit both ways (backward then forward pass), and each move
+   * is then a trapezoid - or a triangle when it is too short to reach its cap.
+   */
+  function runSeconds(segs, jerk) {
+    var n = segs.length;
+    if (!n) return 0;
+    var j = new Array(n + 1), i;
+    j[0] = Math.min(segs[0].v, jerk);
+    j[n] = Math.min(segs[n - 1].v, jerk);
+    for (i = 1; i < n; i++) {
+      var p = segs[i - 1], q = segs[i];
+      var du = Math.hypot(p.ux - q.ux, p.uy - q.uy);
+      j[i] = Math.min(p.v, q.v, du > 1e-9 ? jerk / du : Infinity);
+    }
+    for (i = n - 1; i >= 0; i--) j[i] = Math.min(j[i], Math.sqrt(j[i + 1] * j[i + 1] + 2 * segs[i].a * segs[i].l));
+    for (i = 0; i < n; i++) j[i + 1] = Math.min(j[i + 1], Math.sqrt(j[i] * j[i] + 2 * segs[i].a * segs[i].l));
+    var t = 0;
+    for (i = 0; i < n; i++) {
+      var sg = segs[i], ve = j[i], vx = j[i + 1];
+      var vp = Math.sqrt((2 * sg.a * sg.l + ve * ve + vx * vx) / 2);
+      if (vp > sg.v) {
+        t += (sg.v - ve) / sg.a + (sg.v - vx) / sg.a +
+          (sg.l - (sg.v * sg.v - ve * ve) / (2 * sg.a) - (sg.v * sg.v - vx * vx) / (2 * sg.a)) / sg.v;
+      } else {
+        t += (vp - ve) / sg.a + (vp - vx) / sg.a;
+      }
+    }
+    return t;
+  }
+
+  /** One path at speed `v`: the look-ahead over its own corners. */
+  function itemSeconds(it, v, S) {
+    for (var i = 0; i < it.segs.length; i++) { it.segs[i].v = v; it.segs[i].a = it.a; }
+    return runSeconds(it.segs, S.jerk);
+  }
+
+  /** One straight travel. */
+  function travelSeconds(d, v, a, S) {
+    return d > 0 ? runSeconds([{ l: d, ux: 1, uy: 0, v: v, a: a }], S.jerk) : 0;
+  }
+
+
+  /**
+   * The print's time, line by line, from the G-code the planner itself wrote
+   * (and Studio's: the same function times both files - print:planner holds it
+   * to Studio's own prediction on three of its slices). F, M204 and the moves
+   * are read back; each run of XY moves goes through the look-ahead
+   * (runSeconds), anything that stops the machine (a Z-only move, a retraction
+   * on its own) ends the run. Arcs are cut to 0.3 mm chords.
+   * @param {string[]} lines
+   * @param {{jerk, zMax, accel}} o
+   * @returns {{seconds, times}} times[i]: seconds from the first line to the end of line i's move
+   */
+  function estimateLines(lines, o) {
+    o = o || {};
+    var jerk = o.jerk || 9, zMax = o.zMax || 30;
+    var F = 1000, A = o.accel || 6000, x = 0, y = 0, z = 0, t = 0;
+    var times = new Float64Array(lines.length);
+    var run = [], runLine = [];
+    function flush() {
+      if (!run.length) return;
+      var segs = run, t0 = t;
+      // the look-ahead over the run, with each move's end time kept
+      var n = segs.length, j = new Array(n + 1), i;
+      j[0] = Math.min(segs[0].v, jerk); j[n] = Math.min(segs[n - 1].v, jerk);
+      for (i = 1; i < n; i++) {
+        var p = segs[i - 1], q = segs[i], du = Math.hypot(p.ux - q.ux, p.uy - q.uy);
+        j[i] = Math.min(p.v, q.v, du > 1e-9 ? jerk / du : Infinity);
+      }
+      for (i = n - 1; i >= 0; i--) j[i] = Math.min(j[i], Math.sqrt(j[i + 1] * j[i + 1] + 2 * segs[i].a * segs[i].l));
+      for (i = 0; i < n; i++) j[i + 1] = Math.min(j[i + 1], Math.sqrt(j[i] * j[i] + 2 * segs[i].a * segs[i].l));
+      for (i = 0; i < n; i++) {
+        var sg = segs[i], ve = j[i], vx = j[i + 1], vp = Math.sqrt((2 * sg.a * sg.l + ve * ve + vx * vx) / 2);
+        t += vp > sg.v
+          ? (sg.v - ve) / sg.a + (sg.v - vx) / sg.a + (sg.l - (sg.v * sg.v - ve * ve) / (2 * sg.a) - (sg.v * sg.v - vx * vx) / (2 * sg.a)) / sg.v
+          : (vp - ve) / sg.a + (vp - vx) / sg.a;
+        times[runLine[i]] = t;
+      }
+      run = []; runLine = [];
+      return t0;
+    }
+    for (var li = 0; li < lines.length; li++) {
+      var s = lines[li], m;
+      if (typeof s !== 'string') { times[li] = t; continue; }
+      if (s.charCodeAt(0) === 77 && (m = /^M204 S(\d+)/.exec(s))) { A = +m[1]; times[li] = t; continue; }
+      if (!/^G[0123] /.test(s)) { times[li] = t; continue; }
+      var w = {};
+      s.replace(/([XYZEFIJP])(-?[\d.]+)/g, function (a, k, v) { w[k] = +v; return a; });
+      if (w.F !== undefined) F = w.F;
+      var v = Math.max(F / 60, 0.1), g = +s.charAt(1);
+      var nx = w.X !== undefined ? w.X : x, ny = w.Y !== undefined ? w.Y : y, nz = w.Z !== undefined ? w.Z : z;
+      var dxy = Math.hypot(nx - x, ny - y), dz = nz - z;
+      if (g === 2 || g === 3) {
+        var cx = x + (w.I || 0), cy = y + (w.J || 0), r = Math.hypot(w.I || 0, w.J || 0);
+        var full = w.X === undefined && w.Y === undefined;
+        var a0 = Math.atan2(y - cy, x - cx), a1 = full ? a0 : Math.atan2(ny - cy, nx - cx), sweep = a1 - a0;
+        if (g === 2) { while (sweep >= 1e-9) sweep -= 2 * Math.PI; if (full) sweep = -2 * Math.PI; }
+        else { while (sweep <= -1e-9) sweep += 2 * Math.PI; if (full) sweep = 2 * Math.PI; }
+        var cn = Math.max(1, Math.ceil(Math.abs(sweep) * r / 0.3)), px = x, py = y;
+        for (var k = 1; k <= cn; k++) {
+          var ang = a0 + sweep * k / cn, qx = cx + r * Math.cos(ang), qy = cy + r * Math.sin(ang);
+          var l2 = Math.hypot(qx - px, qy - py) + Math.abs(dz) / cn;
+          if (l2 > 1e-9) { run.push({ l: l2, ux: (qx - px) / l2, uy: (qy - py) / l2, v: v, a: A }); runLine.push(li); }
+          px = qx; py = qy;
+        }
+        x = nx; y = ny; z = nz;
+        continue;
+      }
+      if (dxy < 1e-9 && Math.abs(dz) < 1e-9) {
+        if (w.E !== undefined) { flush(); t += Math.abs(w.E) / v; }
+        times[li] = t; continue;
+      }
+      if (dxy < 1e-9) { flush(); t += Math.abs(dz) / Math.min(v, zMax); z = nz; times[li] = t; continue; }
+      var l = Math.hypot(dxy, dz);
+      run.push({ l: l, ux: (nx - x) / l, uy: (ny - y) / l, v: v, a: A }); runLine.push(li);
+      x = nx; y = ny; z = nz;
+    }
+    flush();
+    return { seconds: t, times: times };
   }
 
   // ===========================================================================
@@ -336,8 +496,13 @@
         var fs = featureSpeed(S, p.feature, first);
         var vCap = S.filament.maxVolumetric > 0 ? S.filament.maxVolumetric / bead.area : Infinity;
         var v = Math.min(fs.v, vCap);
+        var segs = [];
+        for (var q = 1; q < pts.length; q++) {
+          var sx = pts[q][0] - pts[q - 1][0], sy = pts[q][1] - pts[q - 1][1], sl = Math.hypot(sx, sy);
+          if (sl > 1e-9) segs.push({ l: sl, ux: sx / sl, uy: sy / sl, v: 0, a: 0 });
+        }
         items.push({
-          obj: oi, feature: p.feature, thin: !!p.thinWall, pts: pts, closed: !!p.closed,
+          obj: oi, feature: p.feature, thin: !!p.thinWall, pts: pts, closed: !!p.closed, segs: segs,
           bead: bead, vFeature: fs.v, vWipe: v, v: v, a: fs.a, len: pathLength(pts), rings: rings
         });
       });
@@ -381,8 +546,8 @@
         else if (mode === 'quality_first') v = Math.max(Math.min(minV, it.v), it.v * cap);
         else v = Math.min(it.v, Math.max(cap, Math.min(minV, it.v)));
       }
-      t += moveSeconds(it.len, v, it.a);
-      if (it.travel.d > 0) t += moveSeconds(it.travel.d, S.speed.travel, S.accel.travel);
+      t += itemSeconds(it, v, S);
+      if (it.travel.d > 0) t += travelSeconds(it.travel.d, S.speed.travel, S.accel.travel, S);
       if (it.travel.retract) t += 2 * S.retract.length / S.retract.speed;
     }
     return t;
@@ -580,6 +745,7 @@
     var F = S.filament, R = S.retract;
     var filA = Math.PI * F.diameter * F.diameter / 4;
 
+    if (res.objects.length > 64) return { ok: false, reason: 'M624\'s mask holds 64 objects; the plate has ' + res.objects.length };
     var box = firstLayerBox(res);
     if (!box) return { ok: false, reason: 'nothing prints on the first layer' };
     var bed = Pr.bed;
@@ -606,8 +772,8 @@
     var idList = ids.join(',');
 
     // ---- the writer: every line with the print's clock at that line
-    var W = { lines: [], times: [], clock: 0 };
-    var put = function (l) { W.lines.push(l); W.times.push(W.clock); };
+    var W = { lines: [] };
+    var put = function (l) { W.lines.push(l); };
     var st = { x: null, y: null, z: 0, fan: null, layerFan: null, aux: null, A: null, feature: null, lw: null, lh: null, retracted: false,
                openObj: -1, objId: -1, pending: null, extruded: 0 };
     /** M204 only when the acceleration changes, as Studio writes it. */
@@ -620,7 +786,6 @@
       put(m ? { at: +m[1] } : l);
     });
     thaw(Pr.afterStart, vals, flags).forEach(function (l) { put(l); });
-    W.clock = Pr.timing.startSeconds;
     var bodyFrom = W.lines.length;
 
     var layers = [];
@@ -646,7 +811,6 @@
     function spiral(zUp, first) {
       put('G17');
       put('G3 Z' + fx(zUp) + ' I' + fx(SPIRAL_R) + ' J0 P1  F' + fmt(travelV(first) * 60, 0));
-      W.clock += Math.abs(zUp - st.z) / 30 + 2 * Math.PI * SPIRAL_R / travelV(first);
     }
     /** The wipe and retraction that end the path pending in `st` (Studio writes
      *  them after the next marker, so a layer's last wipe follows CHANGE_LAYER). */
@@ -669,18 +833,15 @@
           spent += share;
         }
         put('; WIPE_END');
-        W.clock += wl / pd.it.vWipe;
         put('G1 E-' + fe(+(R.length - spent).toFixed(5)) + ' F' + fmt(R.speed * 60, 0));
       } else {
         put('G1 E-' + fe(R.length) + ' F' + fmt(R.speed * 60, 0));
       }
-      W.clock += R.length / R.speed;
       st.retracted = true;
     }
     function deretract() {
       if (!st.retracted) return;
       put('G1 E' + fe(R.length + R.restartExtra) + ' F' + fmt(R.deretractSpeed * 60, 0));
-      W.clock += (R.length + R.restartExtra) / R.deretractSpeed;
       st.retracted = false;
     }
     function emitHook(li, z) {
@@ -732,7 +893,7 @@
         });
       }
       var rec = { index: li, number: layerNo, z: pl.printZ, h: pl.h, seconds: cool.seconds, slowdownCap: cool.cap, fan: fan,
-                  features: [], items: items.length, clockFrom: W.clock };
+                  features: [], items: items.length, lineFrom: W.lines.length };
       layers.push(rec);
       var z = pl.printZ;
 
@@ -777,7 +938,6 @@
             put('G1 X' + fx(pt[0]) + ' Y' + fx(pt[1]) + ' F' + fmt(S.speed.firstTravel * 60, 0));
             if (R.hop > 0) put('G1 Z' + fx(z + R.hop));
             put('G1 Z' + fx(z));
-            W.clock += 0;
           } else {
             accel(S.accel.travel);
             if (R.hop > 0 && R.onLayerChange) {
@@ -789,7 +949,6 @@
               put('G1 X' + fx(pt[0]) + ' Y' + fx(pt[1]) + ' Z' + fx(z) + ' F' + fmt(S.speed.travel * 60, 0));
             }
           }
-          if (t.d > 0) W.clock += moveSeconds(t.d, travelV(first), travelA(first));
           deretract();
         } else {
           flushRetract();
@@ -815,8 +974,6 @@
             accel(t.d < 2 ? S.accel.short : travelA(first));
             put('G1 X' + fx(pt[0]) + ' Y' + fx(pt[1]) + ' F' + fmt(travelV(first) * 60, 0));
           }
-          if (t.d > 0) W.clock += moveSeconds(t.d, travelV(first), t.d < 2 && !t.retract ? S.accel.short : travelA(first));
-          if (t.hop) W.clock += 2 * R.hop / 30;
         }
         // ----- the path
         if (it.feature !== st.feature) {
@@ -844,7 +1001,6 @@
           x = tx; y = ty;
           lastPts.push([tx, ty]);
         }
-        W.clock += moveSeconds(it.len, it.v, it.a);
         st.x = x; st.y = y; st.z = z;
         st.pending = { it: it, lastPts: lastPts };
         if (bridgeFan && (k + 1 >= items.length || (items[k + 1].feature !== 'Bridge' && items[k + 1].feature !== 'Overhang wall'))) {
@@ -852,7 +1008,7 @@
         }
       });
       rec.features = Object.keys(featuresSeen);
-      rec.clockTo = W.clock;
+      rec.lineTo = W.lines.length;
       startPos = endPos;
     }
 
@@ -863,7 +1019,14 @@
     if (R.hop > 0) spiral(top + R.hop, false);
     closeObject();
     var bodyTo = W.lines.length;
-    var bodySeconds = W.clock - Pr.timing.startSeconds;
+    // the time, from the lines themselves
+    var est = estimateLines(W.lines.slice(bodyFrom, bodyTo), { jerk: S.jerk, accel: S.accel.def });
+    var bodySeconds = est.seconds;
+    var lineTime = function (i) { return Pr.timing.startSeconds + est.times[i - bodyFrom]; };
+    layers.forEach(function (rec) {
+      rec.clockFrom = rec.lineFrom > bodyFrom ? lineTime(rec.lineFrom - 1) : Pr.timing.startSeconds;
+      rec.clockTo = lineTime(rec.lineTo - 1);
+    });
 
     thaw(Pr.beforeEnd, vals, flags).forEach(function (l) { put(l); });
     thaw(Pr.end, vals, flags).forEach(function (l) { if (l.charAt(0) !== '@') put(l); });
@@ -913,7 +1076,7 @@
     for (var i = 0; i < W.lines.length; i++) {
       var ln = W.lines[i];
       if (typeof ln !== 'string') { emitMark(ln.at); continue; }
-      if (i >= bodyFrom && i < bodyTo && /^G[123] X/.test(ln)) emitMark(W.times[i]);
+      if (i >= bodyFrom && i < bodyTo && /^G[123] X/.test(ln)) emitMark(lineTime(i > bodyFrom ? i - 1 : i));
       outLines.push(ln);
     }
     outLines.push('M73 P100 R0');
@@ -973,11 +1136,14 @@
 
   return {
     settingsFrom: settingsFrom,
+    engineOptions: engineOptions,
     coolingValues: coolingValues,
     featureSpeed: featureSpeed,
     beadOf: beadOf,
     beadArea: beadArea,
     moveSeconds: moveSeconds,
+    runSeconds: runSeconds,
+    estimateLines: estimateLines,
     plan: plan,
     toGcode3mf: toGcode3mf,
     thaw: thaw,

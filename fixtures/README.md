@@ -266,3 +266,19 @@ per-layer angle histograms and line centres. See `docs/CROSSHATCH.md`.
   stretch (175 mm²) as overhang walls. `support:test` §13 holds the card's 35
   to that: the 10 - 30 deg steps, 259.06 mm², and the old 60 for comparison.
   See docs/SUPPORTS-CARD.md §0a.
+
+## print-planner/ - a printer's start and end G-code, frozen
+
+`print-planner/<printer>/frozen.json` is `machine_start_gcode`, `machine_end_gcode`,
+the filament start, the per-layer hooks and the CONFIG_BLOCK as Bambu Studio
+02.08.02.61 **expanded** them for the owner's own slice of the template plate
+(A1 mini 0.4: `supports/top_clip_x2_supports.gcode.3mf`; P1S 0.4:
+`supports/simple_overhang_p1s.gcode.3mf`), with a handful of tokens where the
+template computes a number from the plate. Written by
+`node tools/print-planner/freeze.js`; `npm run print:planner` requires the
+committed file to be a fresh freeze. See `docs/PRINT-PLANNER.md`.
+
+`supports/simple_overhang_bambu.gcode.3mf` (A1 mini) and
+`supports/simple_overhang_p1s.gcode.3mf` (P1S) are the owner's Studio slices of
+`supports/simple_overhang.3mf`, the Simple Overhang Test; the planner is held
+to both.

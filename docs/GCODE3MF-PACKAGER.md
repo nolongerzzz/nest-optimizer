@@ -11,7 +11,8 @@ project from a G-code string plus the plate's metadata. Two later phases hand
 their G-code here:
 
 - **Phase 2b (salvage)** cuts an existing file at layer N and re-sends it.
-- **Phase 4** is NSO's own print path.
+- **Phase 4** is NSO's own print path: `nso-print-planner.js`
+  (`docs/PRINT-PLANNER.md`) writes the G-code and calls this module.
 
 The module has no UI, no slicer and no printer link. It runs in the browser and
 in Node, like `nso-3mf.js`. It reuses that file's ZIP writer and CRC32
