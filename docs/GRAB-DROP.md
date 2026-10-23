@@ -4,15 +4,30 @@
 the seat is `app-seat-surface.js`'s (`NSO_seatPieceAt`). Checked by
 `grab:drop` (`tools/nso_grab_drop_drive_check.js`, 1280 x 800).
 
+**This is Lift's drop and nothing else's.** It was meant as #189's gesture -
+grab the piece Lift left in the air, drop it on the plate - and #190 made it
+part of every plate drag, where it climbed other pieces and the bed edge
+mid-drag, jumped pieces when they were released, and cost a scene raycast per
+pointer move. A plate drag is flat again (`docs/MOVE.md`); the grab is carried
+only by a piece **Lift** left in the air: `NSO_LIFT_PLATE.ownsDrop(piece)`, true
+while that piece is in the air (`liftY > 0`). app-core's `startMoveDrag` asks it
+at the press; no other press begins a grab. A lifted piece that has come down
+onto the bed is an ordinary piece (Move is flat); raise it again and it is
+Lift's again. (G-scope's second plate carries its pieces with this same code;
+that is its own gesture and is unchanged.)
+
+What the grab used to do on the plate, and where each job lives now: **stack a
+piece on another** -> Seat; **butt two pieces** -> Join; **attach** -> Connect.
+
 ## 1. Grab and drop
 
-Press on any piece and drag: it follows the pointer over the scene, the piece
+Press on a piece Lift left in the air and drag: it follows the pointer over the scene, the piece
 itself looked through. Where it is let go decides where it lands:
 
 | let go over | it lands |
 |---|---|
 | **a piece** | seated onto that surface at the point under the pointer, outside it, at the **Seat gap** (Join's slider, default -0.18 mm). This is Seat here's own seat - `NSO_seatPieceAt`, the same `NSO_SeatSurface.plan`, the same gap rule, the same refusals, the same paint scope. The piece a lifted feature came off is a piece like any other. |
-| **the plate** | on the plate at that point (To plate). This half is app-core's move drag as it always was: grid snap, the neighbour magnet, the fence lines, the Join flush-gap report. |
+| **the plate** | on the plate at that point (To plate): the piece comes down onto the bed as it is carried (app-core's move drag with the grid snap). |
 | **nothing** | where it was let go, in the air. It is still grabbable. |
 
 While it is carried it shows where it is going: over a piece it rests off the
@@ -25,14 +40,15 @@ line says what letting go will do.
 - **Escape** mid-drag puts it back exactly where it was picked up. Nothing
   goes on the Undo stack.
 - **Each drop is one Undo.** Into the air, or down onto the plate from the
-  air: the whole pose it was picked up in (`posePlaced`). Across the plate
-  from the plate: `movePlaced`, as before. Onto a piece: the seat's own step
+  air: the whole pose it was picked up in (`posePlaced`). A plain drag
+  of a piece on the plate is not this: `movePlaced`, `docs/MOVE.md`. Onto a piece: the seat's own step
   - a `posePlaced`, or `dropSeatReplace` (the soup and that pose together)
   when the seat has to turn the piece.
 - **A drop places; it never fuses.** Join stays the deliberate step.
 - **A click is still a click.** A press becomes a carry once the pointer has
   travelled 3 px (`nsoGrab.SLOP`); before that nothing moves. Without it a
   press on a floating piece would drop it on whatever is behind it.
+- Escape mid-carry puts it back (a flat Move drag has its own, `docs/MOVE.md`).
 - Move's nudges, the vertical slider and arrows are unchanged. Vertical
   placement still refuses a drag, and a position-locked piece is not grabbed.
 
@@ -91,18 +107,27 @@ a piece is `NSO_seatPieceAt`, whose scope is Seat here's - whole-piece on the
 carried piece, and only when the seat has to turn it
 (`docs/SEAT-SURFACE.md` §3).
 
-## 5. In the real app (`grab:drop`, 34 gates)
+## 5. In the real app (`grab:drop`)
 
 The hinge plate (`tools/nso_lift_plate_fixtures.js`'s `hinge()`: a 64 x 40
 slab, paper at 3 mm, two hinge halves - a leaf and two knuckles each). Lift
-half A: the box the plate drew it in, 3 mm over the plate's bottom, liftY
-saying so; it stays there. Carried over the parent's top: "Over
-"hinge-plate" - let go to seat ... at the Seat gap (-0.18 mm)", boxed green;
-let go: seated, clearance 0.180 mm measured on the surfaces, over the point it
-was let go at, still two pieces, one Undo; Ctrl+Z: back in the air where it
-was lifted. Half B onto the bed: liftY 0, bottom 0.2, one Undo. Carried over
-nothing: let go, position unchanged, floating, one Undo; the 3MF build writes
-its lowest Z at liftY; still grabbable; a press without a carry moves
-nothing. Escape mid-drag: back exactly, no Undo. Move nudge and Rotate 90° on
-the floating piece: bottom unchanged. To plate: down. A support piece:
-refused while carried and on release. Onto itself: refused.
+half A and half B: the box the plate drew each in, 3 mm over the plate's
+bottom, liftY saying so; they stay there. **Lift's drop:** half A carried
+over the parent's top: "Over "hinge-plate" - let go to seat ... at the Seat
+gap (-0.18 mm)", boxed green; let go: seated, clearance 0.180 mm measured on
+the surfaces, over the point it was let go at, still two pieces, one Undo;
+Ctrl+Z: back in the air where it was lifted. Half B carried over nothing: let
+go, position unchanged, floating, one Undo; the 3MF build writes its lowest Z
+at liftY; still grabbable; a press without a carry moves nothing. Escape
+mid-carry: back exactly, no Undo. Move nudge and Rotate 90 on the floating
+piece: bottom unchanged. A support piece: refused while carried and on
+release. Onto itself: refused. To plate: down. Half A, seated on the parent,
+carried onto the bed: "Set down on the plate, from N mm up", bottom on 0.2,
+one Undo; Ctrl+Z puts it back on the parent and it is still Lift's.
+**Flat Move:** half A, now an ordinary piece, dragged across the parent: no
+grab live, no helper in the scene, its height identical at every move, no ray
+on any pointer move or on the release; let go over the parent it lands there,
+overlapping, its bottom on 0.2 (it did not climb), one Undo. A small piece
+turned off-axis and raised 5 mm (not Lift's): the same flat drag keeps its
+height, Escape puts it back, and from the press to the release none of its
+vertices is read.

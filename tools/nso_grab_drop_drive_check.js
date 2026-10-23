@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-/* Grab and drop, and the floating state (app-grab-drop.js) - driven through
-   the REAL app in headless Chromium at 1280 x 800.
+/* A plate drag is flat (Move), and Lift's drop is the one grab (app-grab-drop.js) - driven
+   through the REAL app in headless Chromium at 1280 x 800.
 
      node tools/nso_grab_drop_drive_check.js                     exit 0 = every gate held
      node tools/nso_grab_drop_drive_check.js tools/grab-drop-out ...and keep the screenshots
@@ -14,15 +14,21 @@
 
      1. Lift a hinge half: it ends in the air (on the leftover slab, 3 mm
         over the bed) and stays there
-     2. grab it, drop it on the parent's top: seated there at the Seat gap,
-        clearance measured on the surfaces; ONE Undo puts it back in the air
-     3. the other half, dropped on the plate: on the plate
-     4. one dropped over nothing: it stays where it was let go, floating;
+     2. Lift's drop: grab it, drop it on the parent's top: seated there at the
+        Seat gap, clearance measured on the surfaces; ONE Undo puts it back in the air
+     3. the other half, dropped over nothing: it stays where it was let go, floating;
         the export writes it at that height
-     5. Escape mid-drag: back where it was, nothing on the Undo stack
-     6. a floating piece through Move's nudge and Rotate: its height kept
+     4. Escape mid-drag: back where it was, nothing on the Undo stack
+     5. a floating piece through Move's nudge and Rotate: its height kept
+     6. guards in words: onto a support piece, onto itself
      7. To plate brings it down
-     8. guards in words: onto a support piece, onto itself
+     8. half A, Lift's drop onto the plate: it rests on it, one Undo
+     9. Move is flat: an ordinary piece dragged across the parent (a plain drag, no
+        grab, no ray, no helper, its height never touched) lands where it is let go
+        with its lowest point on the plate, overlapping the parent, one Undo
+    10. a floating ordinary piece, turned: the same flat drag keeps its height; no
+        ray on a pointer move, no vertex read from the press to the release;
+        Escape puts it back
 */
 'use strict';
 
@@ -75,6 +81,28 @@ const parentPoint = (page, id, r) => page.evaluate(([id, r]) => {
   p.mesh.updateMatrixWorld(true);
   return p.mesh.localToWorld(new THREE.Vector3(r[0] - c.x, r[2] - c.y, -r[1] - c.z)).toArray();
 }, [id, r]);
+/* A screen point that lands on the piece (the first thing the ray meets), nearest the middle of where it is drawn. */
+const pointOn = (page, id) => page.evaluate(id => {
+  const p = state.placed.find(q => q && q.sourceId === id), r = state.renderer.domElement.getBoundingClientRect();
+  p.mesh.updateMatrixWorld(true); state.camera.updateMatrixWorld(true);
+  const bb = new THREE.Box3().setFromObject(p.mesh), lo = [Infinity, Infinity], hi = [-Infinity, -Infinity];
+  for (let i = 0; i < 8; i++) {
+    const v = new THREE.Vector3(i & 1 ? bb.max.x : bb.min.x, i & 2 ? bb.max.y : bb.min.y, i & 4 ? bb.max.z : bb.min.z).project(state.camera);
+    lo[0] = Math.min(lo[0], v.x); hi[0] = Math.max(hi[0], v.x); lo[1] = Math.min(lo[1], v.y); hi[1] = Math.max(hi[1], v.y);
+  }
+  const rc = new THREE.Raycaster(), cx = (lo[0] + hi[0]) / 2, cy = (lo[1] + hi[1]) / 2;
+  let best = null;
+  for (let a = 0; a <= 24; a++) for (let b = 0; b <= 24; b++) {
+    const x = lo[0] + (hi[0] - lo[0]) * a / 24, y = lo[1] + (hi[1] - lo[1]) * b / 24;
+    rc.setFromCamera({ x, y }, state.camera);
+    const h = rc.intersectObjects(state.modelGroup.children, false)[0];
+    if (!h || h.object !== p.mesh) continue;
+    if (r.top + (1 - y) / 2 * r.height < 140) continue;       // under the top bar a press never reaches the canvas
+    const d = Math.hypot(x - cx, y - cy);
+    if (!best || d < best.d) best = { d, x, y };
+  }
+  return best ? { x: r.left + (best.x + 1) / 2 * r.width, y: r.top + (1 - best.y) / 2 * r.height } : null;
+}, id);
 /* Press at screen point a, carry to b in steps, and (unless `hold`) let go. */
 async function carry(page, a, b, opts) {
   opts = opts || {};
@@ -169,27 +197,8 @@ withApp(async (page, logs) => {
   await carry(page, from, to);
   check('dropped there again for the rest of the run', Math.abs(await clearance(page, plateId, idA) - 0.18) < 1e-3);
 
-  /* =========================================== 3. the other, on the plate */
-  console.log('\n=== 3. half B, dropped on the plate ===');
-  const B0 = await piece(page, idB);
-  const bedPoint = await page.evaluate(id => {
-    const bb = new THREE.Box3().setFromObject(state.placed.find(q => q && q.sourceId === id).mesh);
-    return [bb.max.x + 25, 0, (bb.min.z + bb.max.z) / 2];
-  }, plateId);
-  const u3 = (await plateState(page)).undo;
-  await carry(page, await screenOf(page, leafTop(B0)), await screenOf(page, bedPoint), { hold: true });
-  const g3 = await grabState(page);
-  check('carried over the bed: it says it will set it down there', g3.mode === 'plate' && /^Over the plate - let go to set/.test(g3.status), g3.status);
-  await page.mouse.up();
-  await page.waitForTimeout(250);
-  const B1 = await piece(page, idB);
-  check('let go: on the plate - its bottom on the bed, liftY 0', Math.abs(B1.min[1] - 0.2) < 1e-6 && B1.liftY === 0, 'bottom ' + B1.min[1].toFixed(4));
-  check('...near the point it was let go at, clear of the parent', Math.abs(B1.x - bedPoint[0]) < 12 && B1.min[0] > (await piece(page, plateId)).max[0],
-    'x ' + B1.x.toFixed(2) + ' for ' + bedPoint[0].toFixed(2));
-  check('...one Undo step, said in words', (await plateState(page)).undo === u3 + 1 && /^Set down on the plate, from 3\.\d\d mm up/.test(await status(page)), await status(page));
-
-  /* ========================================= 4. over nothing: it floats */
-  console.log('\n=== 4. dropped over nothing: it stays where it was let go ===');
+  /* ========================================= 3. over nothing: it floats */
+  console.log('\n=== 3. half B, dropped over nothing: it stays where it was let go ===');
   await page.evaluate(id => {                // a low view: sky above the bed
     const p = state.placed.find(q => q && q.sourceId === id), c = new THREE.Box3().setFromObject(p.mesh).getCenter(new THREE.Vector3());
     state.controls.target.copy(c);
@@ -224,8 +233,8 @@ withApp(async (page, logs) => {
   await page.waitForTimeout(150);
   check('...a press and let go without carrying it moves nothing', samePlace(await piece(page, idB), B3, 1e-9) && (await plateState(page)).undo === u4 + 1);
 
-  /* ================================================= 5. Escape mid-drag */
-  console.log('\n=== 5. Escape mid-drag puts it back ===');
+  /* ================================================= 4. Escape mid-drag */
+  console.log('\n=== 4. Escape mid-drag puts it back ===');
   await carry(page, B3s, { x: B3s.x - 160, y: B3s.y + 140 }, { hold: true });
   const moved5 = await piece(page, idB);
   check('mid-drag it has moved', !samePlace(moved5, B3, 1e-3) && (await grabState(page)).active);
@@ -238,8 +247,8 @@ withApp(async (page, logs) => {
   await page.waitForTimeout(150);
   check('...and the release after it changes nothing', samePlace(await piece(page, idB), B3, 1e-9) && (await plateState(page)).undo === u4 + 1);
 
-  /* ================================= 6. nudge and Rotate keep the height */
-  console.log('\n=== 6. a floating piece through Move\'s nudge and Rotate ===');
+  /* ================================= 5. nudge and Rotate keep the height */
+  console.log('\n=== 5. a floating piece through Move\'s nudge and Rotate ===');
   await selectRow(page, idB);
   const h0 = (await piece(page, idB)).min[1];
   await page.click('#btn-nudge-right');
@@ -254,27 +263,20 @@ withApp(async (page, logs) => {
     'bottom ' + R6.min[1].toFixed(4) + ', body turned ' + !near(R6.body, N6.body, 1e-3));
   await closeTopMenus(page);
 
-  /* ======================================================= 7. To plate */
-  console.log('\n=== 7. To plate brings it down ===');
-  await page.click('#btn-to-plate');
-  const T7 = await piece(page, idB);
-  check('To plate: on the bed, liftY 0', Math.abs(T7.min[1] - 0.2) < 1e-6 && T7.liftY === 0, await status(page));
-  await closeTopMenus(page);
-
-  /* =================================================== 8. guards in words */
-  console.log('\n=== 8. guards: a support piece, itself ===');
+  /* =================================================== 6. guards in words */
+  console.log('\n=== 6. guards: a support piece, itself ===');
   await page.evaluate(ids => {               // both in view, from above and in front
     const bb = new THREE.Box3();
     ids.forEach(id => bb.union(new THREE.Box3().setFromObject(state.placed.find(q => q && q.sourceId === id).mesh)));
     const c = bb.getCenter(new THREE.Vector3()), span = Math.max(bb.max.x - bb.min.x, bb.max.z - bb.min.z);
     state.controls.target.copy(c);
-    state.camera.position.set(c.x, c.y + span * 1.2, c.z + span * 0.5);
+    state.camera.position.set(c.x, c.y + span * 1.7, c.z + span * 0.12);
     state.controls.update();
   }, [plateId, idB]);
   await page.waitForTimeout(250);
   await page.evaluate(id => { state.models.find(m => m.id === id).nsoSupport = { style: 'tree' }; }, plateId);
   const B8 = await piece(page, idB), u8 = (await plateState(page)).undo;
-  const B8s = await screenOf(page, [(B8.min[0] + B8.max[0]) / 2, B8.max[1], (B8.min[2] + B8.max[2]) / 2]);
+  const B8s = await pointOn(page, idB);
   await carry(page, B8s, await screenOf(page, await parentPoint(page, plateId, [50, 20, HG.paper])), { hold: true });
   const g8 = await grabState(page);
   check('over a support piece: refused before the drop, the target boxed red', g8.mode === 'piece' && /is a support piece - nothing is dropped onto a support/.test(g8.status) &&
@@ -290,6 +292,162 @@ withApp(async (page, logs) => {
   }, idB);
   check('onto itself: refused in words, nothing moved', self === 'onto itself' && /cannot be dropped onto itself/.test(await status(page)) &&
     samePlace(await piece(page, idB), B8, 1e-9) && (await plateState(page)).undo === u8, await status(page));
+
+/* ======================================================= 7. To plate */
+  console.log('\n=== 7. To plate brings it down ===');
+  await page.click('#btn-to-plate');
+  const T7 = await piece(page, idB);
+  check('To plate: on the bed, liftY 0', Math.abs(T7.min[1] - 0.2) < 1e-6 && T7.liftY === 0, await status(page));
+  await closeTopMenus(page);
+
+  /* ===================== 8. half A, Lift's drop onto the plate */
+  console.log('\n=== 8. half A (seated on the parent, still Lift\'s), dropped on the plate ===');
+  await frameOn(page, plateId, 1.1);
+  const A8 = await piece(page, idA);
+  const bedPoint = await page.evaluate(id => {
+    const bb = new THREE.Box3().setFromObject(state.placed.find(q => q && q.sourceId === id).mesh);
+    return [bb.max.x + 25, 0, (bb.min.z + bb.max.z) / 2];
+  }, plateId);
+  const u8b = (await plateState(page)).undo;
+  await carry(page, await screenOf(page, leafTop(A8)), await screenOf(page, bedPoint), { hold: true });
+  const g8b = await grabState(page);
+  check('carried over the bed: it says it will set it down there', g8b.mode === 'plate' && /^Over the plate - let go to set/.test(g8b.status), g8b.status);
+  await page.mouse.up();
+  await page.waitForTimeout(250);
+  const A8b = await piece(page, idA);
+  check('let go: on the plate - its bottom on the bed, liftY 0', Math.abs(A8b.min[1] - 0.2) < 1e-6 && A8b.liftY === 0, 'bottom ' + A8b.min[1].toFixed(4));
+  check('...near the point it was let go at, clear of the parent', Math.abs(A8b.x - bedPoint[0]) < 12 && A8b.min[0] > (await piece(page, plateId)).max[0],
+    'x ' + A8b.x.toFixed(2) + ' for ' + bedPoint[0].toFixed(2));
+  check('...one Undo step, said in words', (await plateState(page)).undo === u8b + 1 && /^Set down on the plate, from \d+\.\d\d mm up/.test(await status(page)), await status(page));
+  await ctrlZ(page);
+  check('one Ctrl+Z: back on the parent where the first drop left it', samePlace(await piece(page, idA), A8, 1e-6) && (await plateState(page)).undo === u8b);
+  check('...and still Lift\'s: grabbed again it is carried by the grab', await (async () => {
+    const at = await screenOf(page, leafTop(A8));
+    await page.mouse.move(at.x, at.y); await page.mouse.down(); await page.mouse.move(at.x + 8, at.y + 2); await page.waitForTimeout(80);
+    const on = await page.evaluate(() => nsoGrab.active());
+    await page.keyboard.press('Escape'); await page.mouse.up(); await page.waitForTimeout(120);
+    return on;
+  })());
+  await carry(page, await screenOf(page, leafTop(A8)), await screenOf(page, bedPoint));
+  check('...and set down on the plate again for the rest of the run', Math.abs((await piece(page, idA)).min[1] - 0.2) < 1e-6);
+
+  /* ================================= 9. Move is flat */
+  console.log('\n=== 9. Move is flat: an ordinary piece dragged across the parent ===');
+  const Pq = await piece(page, plateId);
+  await page.evaluate(([id, pid]) => {         // both in view, from above and in front
+    const bb = new THREE.Box3();
+    [id, pid].forEach(i => bb.union(new THREE.Box3().setFromObject(state.placed.find(q => q && q.sourceId === i).mesh)));
+    const c = bb.getCenter(new THREE.Vector3()), span = Math.max(bb.max.x - bb.min.x, bb.max.z - bb.min.z);
+    state.controls.target.copy(c);
+    state.camera.position.set(c.x, c.y + span * 1.1, c.z + span * 0.55);
+    state.controls.update();
+    state.camera.updateMatrixWorld(true);
+  }, [idA, plateId]);
+  await page.waitForTimeout(250);
+  const A9 = await piece(page, idA);
+  const pStart = await screenOf(page, [(A9.min[0] + A9.max[0]) / 2, A9.max[1], (A9.min[2] + A9.max[2]) / 2]);
+  const parentMid = [(Pq.min[0] + Pq.max[0]) / 2, Pq.max[1], (Pq.min[2] + Pq.max[2]) / 2];
+  const pEnd = await screenOf(page, [parentMid[0] - 6, Pq.max[1], parentMid[2]]);
+  const u9 = (await plateState(page)).undo;
+  await page.mouse.move(pStart.x, pStart.y);
+  await page.mouse.down();
+  await page.mouse.move(pStart.x + 1, pStart.y);
+  await page.evaluate(() => {                  // every ray the drag asks for, with who asked
+    window.__rc = [];
+    const R = THREE.Raycaster.prototype;
+    ['intersectObject', 'intersectObjects'].forEach(k => {
+      const o = R[k]; R['__orig_' + k] = o;
+      R[k] = function () { window.__rc.push(new Error().stack); return o.apply(this, arguments); };
+    });
+  });
+  const samples = [], N9 = 24;
+  for (let k = 1; k <= N9; k++) {
+    await page.mouse.move(pStart.x + (pEnd.x - pStart.x) * k / N9, pStart.y + (pEnd.y - pStart.y) * k / N9);
+    samples.push(await page.evaluate(([id, pid]) => {
+      const p = state.placed.find(q => q && q.sourceId === id), par = state.placed.find(q => q && q.sourceId === pid);
+      par.mesh.updateMatrixWorld(true);
+      const hit = new THREE.Raycaster(); hit.setFromCamera(state.pointer, state.camera);
+      return { y: p.mesh.position.y, liftY: p.liftY || 0, x: p.x, active: nsoGrab.active(),
+               helper: !!(nsoGrab.layer() && nsoGrab.layer().parent), overParent: hit.intersectObject(par.mesh, false).length > 0 };
+    }, [idA, plateId]));
+  }
+  const midStatus = await status(page);
+  await page.waitForTimeout(100);
+  await page.mouse.up();
+  await page.waitForTimeout(250);
+  const rays = await page.evaluate(() => {
+    const R = THREE.Raycaster.prototype;
+    ['intersectObject', 'intersectObjects'].forEach(k => { R[k] = R['__orig_' + k]; delete R['__orig_' + k]; });
+    return window.__rc;
+  });
+  const A9e = await piece(page, idA);
+  const y0 = A9.pos[1];
+  check('the pointer did cross the parent', samples.some(s => s.overParent), samples.filter(s => s.overParent).length + ' of ' + N9 + ' moves');
+  check('a plain drag: no grab live, no helper in the scene, at any move', samples.every(s => !s.active && !s.helper) && !/Over "hinge-plate"/.test(midStatus), midStatus);
+  check('its height is never touched mid-drag', samples.every(s => s.y === y0 && s.liftY === 0), 'y ' + y0.toFixed(4));
+  check('it follows the pointer across: x moves every step the pointer does', samples.every((s, k) => k === 0 || s.x < samples[k - 1].x + 1e-9) && samples[N9 - 1].x < A9.x - 20,
+    'x ' + A9.x.toFixed(1) + ' -> ' + samples[N9 - 1].x.toFixed(1));
+  check('no ray on a pointer move, none on the release', rays.filter(s => /dragMovePlaced|endMoveDrag|resolveDragPose|app-grab-drop/.test(s)).length === 0, rays.length + ' ray(s) at all');
+  const overlap = A9e.min[0] < Pq.max[0] && A9e.max[0] > Pq.min[0] && A9e.min[2] < Pq.max[2] && A9e.max[2] > Pq.min[2];
+  check('let go over the parent: it lands there, overlapping it - nothing checks', overlap, 'x ' + A9e.x.toFixed(1) + ', parent ' + Pq.min[0].toFixed(1) + '..' + Pq.max[0].toFixed(1));
+  check('...its lowest point on the plate: it did not climb onto the parent', Math.abs(A9e.min[1] - 0.2) < 1e-6 && A9e.liftY === 0, 'bottom ' + A9e.min[1].toFixed(4));
+  check('...one Undo step, said as a move', (await plateState(page)).undo === u9 + 1 && /^Moved model/.test(await status(page)), await status(page));
+  await ctrlZ(page);
+  check('one Ctrl+Z: back where it was picked up', samePlace(await piece(page, idA), A9, 1e-6) && (await plateState(page)).undo === u9);
+
+  /* ======== 10. a floating ordinary piece, turned: height kept, nothing read */
+  console.log('\n=== 10. a floating ordinary piece, turned: the flat drag keeps its height and reads nothing ===');
+  const bit = await loadSTL(page, path.join(ROOT, 'library', 'box_bit_12x8x8.stl'));
+  await page.evaluate(id => {                  // turned off-axis, 5 mm up: no shortcut for its bounds
+    const p = state.placed.find(q => q && q.sourceId === id);
+    p.rotY = 0.5; p.liftY = 5; applyMeshRotation(p); p.mesh.updateMatrixWorld(true);
+    state.selectedIndex = -1;
+  }, bit);
+  await frameOn(page, bit, 1.1);
+  const T0 = await piece(page, bit);
+  const tStart = await screenOf(page, [(T0.min[0] + T0.max[0]) / 2, T0.max[1], (T0.min[2] + T0.max[2]) / 2]);
+  const tEnd = await screenOf(page, [(T0.min[0] + T0.max[0]) / 2 + 14, T0.max[1], (T0.min[2] + T0.max[2]) / 2 + 9]);
+  const u10 = (await plateState(page)).undo;
+  await page.mouse.move(tStart.x, tStart.y);
+  await page.mouse.down();
+  await page.mouse.move(tStart.x + 1, tStart.y);
+  await page.evaluate(id => {                  // every read of the piece's vertices from here to the release
+    const a = state.placed.find(q => q && q.sourceId === id).mesh.geometry.attributes.position, arr = a.array;
+    window.__reads = 0;
+    Object.defineProperty(a, 'array', { get() { window.__reads++; return arr; }, configurable: true });
+  }, bit);
+  const ys = [];
+  for (let k = 1; k <= 16; k++) {
+    await page.mouse.move(tStart.x + (tEnd.x - tStart.x) * k / 16, tStart.y + (tEnd.y - tStart.y) * k / 16);
+    ys.push(await page.evaluate(id => state.placed.find(q => q && q.sourceId === id).mesh.position.y, bit));
+  }
+  const moved10 = await piece(page, bit);
+  check('mid-drag: it has moved across and its height has not', Math.hypot(moved10.x - T0.x, moved10.z - T0.z) > 5 && ys.every(y => y === T0.pos[1]), 'y ' + T0.pos[1].toFixed(4));
+  check('...a plain drag, not the grab', !(await page.evaluate(() => nsoGrab.active())));
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(150);
+  const E10 = await piece(page, bit);
+  check('Escape: back exactly where it was picked up, nothing on the Undo stack', samePlace(E10, T0, 1e-9) && near(E10.pos, T0.pos, 1e-9) && (await plateState(page)).undo === u10 && !(await page.evaluate(() => state.moveDragging)), await status(page));
+  await page.mouse.up();
+  await page.waitForTimeout(100);
+  await page.mouse.move(tStart.x, tStart.y);
+  await page.mouse.down();
+  await page.mouse.move(tStart.x + 1, tStart.y);
+  await page.evaluate(() => { window.__reads = 0; });
+  for (let k = 1; k <= 16; k++) await page.mouse.move(tStart.x + (tEnd.x - tStart.x) * k / 16, tStart.y + (tEnd.y - tStart.y) * k / 16);
+  await page.mouse.up();
+  await page.waitForTimeout(250);
+  const reads = await page.evaluate(() => window.__reads);
+  const T1 = await piece(page, bit);
+  check('press-to-release: the piece\'s vertices are not read - the pose bounds are the cache\'s', reads === 0, reads + ' read(s)');
+  check('let go: it keeps its height - lowest point 0.2 + liftY, liftY 5', Math.abs(T1.liftY - 5) < 1e-9 && Math.abs(T1.min[1] - 5.2) < 1e-4, 'bottom ' + T1.min[1].toFixed(4));
+  check('...one Undo step, said as a move', (await plateState(page)).undo === u10 + 1 && /^Moved model/.test(await status(page)), await status(page));
+  const probe = await page.evaluate(id => {    // the spy sees a scan when there is one
+    const p = state.placed.find(q => q && q.sourceId === id);
+    window.__reads = 0; nsoInvalidatePieceBounds(p); meshLocalBox3(p.mesh);
+    return window.__reads;
+  }, bit);
+  check('(control) the spy does see a vertex scan when the bounds are forgotten', probe > 0, probe + ' read(s)');
 
   const errs = logs.filter(l => /pageerror|\[error\]/.test(l) && !/favicon|404/.test(l));
   check('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));

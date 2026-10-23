@@ -63,6 +63,7 @@ merging its list by hand. The list below is generated.
 - [Local brush - freehand surface deformation (added 2026-09-18)](handoff/local-brush-freehand-surface-deformation.md)
 - [Mirror - exact reflection across one plane (2026-09-21)](handoff/mirror-exact-reflection-across-one-plane.md)
 - [Mold - a two-piece silicone mold from a piece (2026-10-16)](handoff/mold-a-two-piece-silicone-mold-from-a-piece.md)
+- [Move is flat; the grab is Lift's drop alone (2026-10-23)](handoff/move-flat.md)
 - [Multi-piece lock, the plate lock, and packing around a lock (2026-09-16)](handoff/multi-piece-lock-the-plate-lock-and-packing-around-a-lock.md)
 - [Multi-piece plate export, checked piece by piece (2026-09-16)](handoff/multi-piece-plate-export-checked-piece-by-piece.md)
 - [New stock - the Pottery Wheel's Ball, generalised (landed, `nso_stock.js`)](handoff/new-stock-the-pottery-wheels-ball-generalised.md)

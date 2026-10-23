@@ -17,9 +17,9 @@
      2. press Split to parts: two pieces, "hinge part 1" and "hinge part 2", in
         place (the union of their boxes is the original's box), the original gone,
         part 1 selected, the readout naming the result
-     3. grab part 2 - a part nobody selected - and drop it on the plate elsewhere:
-        it is a piece like any other (grabbed, carried, set down on the bed, one
-        Undo step), and part 1 never moved
+     3. drag part 2 - a part nobody selected - across the plate elsewhere: it is
+        a piece like any other (a flat Move drag, one Undo step), and part 1
+        never moved
      4. Undo the drop, then Undo the split: the original is back, bit for bit,
         selected */
 'use strict';
@@ -147,7 +147,7 @@ withApp(async (page, logs) => {
   await page.evaluate(() => { clearSelectionOutline(); });
   await shot(page, '2-split-two-parts-in-place');
 
-  console.log('\n=== 3. grab part 2 and drop it on the plate elsewhere ===');
+  console.log('\n=== 3. drag part 2 across the plate elsewhere (Move is flat) ===');
   const grab = await pointOn(page, P2);
   check('a point on part 2 can be pressed', !!grab, JSON.stringify(grab));
   const aim = [b2.max[0] + 30, 0.2, (b2.min[2] + b2.max[2]) / 2 + 22];
@@ -155,7 +155,7 @@ withApp(async (page, logs) => {
   const u3 = (await plateState(page)).undo;
   await carry(page, grab, to, { hold: true });
   const mid = await page.evaluate(() => ({ active: nsoGrab.active(), mode: nsoGrab.mode(), status: document.getElementById('status').textContent }));
-  check('part 2 is carried like any piece: the grab is live and says it will set it down on the plate', mid.active && mid.mode === 'plate' && /^Over the plate - let go to set/.test(mid.status), mid.status);
+  check('part 2 is carried like any piece: a flat plate drag (the grab is Lift\'s drop alone), no helper in the scene', !mid.active && mid.mode === null && !(await page.evaluate(() => !!(nsoGrab.layer() && nsoGrab.layer().parent))), JSON.stringify(mid));
   await shot(page, '3-part-2-mid-drag');
   await page.mouse.up();
   await page.waitForTimeout(350);

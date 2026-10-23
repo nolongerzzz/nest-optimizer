@@ -3,9 +3,14 @@
    After app-core.js (the move drag it rides on), app-seat-surface.js
    (NSO_seatPieceAt) and nso-helpers.js.
 
-   GRAB. A press on any piece and a drag (past SLOP pixels - a click is
-   still a click) carries it: it follows the pointer over the scene, the
-   piece itself looked through. Where it is let go decides where it lands:
+   LIFT'S DROP, AND NOTHING ELSE'S. A plate drag - Move, and any tool that
+   moves a piece on the plate without naming a surface - is flat: XY only,
+   the height settled once on release (app-core.js, docs/MOVE.md). This file
+   is the one gesture that is not: the grab of a piece Lift left in the air
+   (app-lift-plate.js ownsDrop; app-core's startMoveDrag asks at the press).
+   Dragged past SLOP pixels - a click is still a click - it follows the
+   pointer over the scene, the piece itself looked through. Where it is let
+   go decides where it lands:
 
      over a piece    it SEATS onto that surface at the point under the
                      pointer, outside it, at the Seat gap - Seat here's own
@@ -13,8 +18,8 @@
                      the same paint scope, the same refusals). The piece a
                      lifted feature came off is a piece like any other.
      over the plate  it lands on the plate at that point (To plate): the
-                     plate half of the drag is app-core's move drag, grid
-                     snap, neighbour magnet and fence lines included.
+                     plate half of the drag is app-core's move drag with the
+                     piece coming down onto the bed, grid snap included.
      over nothing    it stays where it was let go, in the air, and is still
                      grabbable.
 
@@ -38,7 +43,8 @@
    which is in the air whenever it stood on top of something.
 
    OTHER PLATES. The state machine above does not know it is on the main
-   plate. begin() takes an optional WORLD - the few things that differ: how
+   plate. (G-scope's plate carries its own pieces with this same code; that
+   is its own gesture, unchanged.) begin() takes an optional WORLD - the few things that differ: how
    the pointer becomes a ray, what is under it, where a piece's pose is read
    and put back, what a drop in the air and a drop onto a piece do. The
    default world (MAIN, below) is the main plate, unchanged. G-scope's second
