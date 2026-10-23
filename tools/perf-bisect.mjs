@@ -728,7 +728,8 @@ function metricOf(res, key) {
   if (key.startsWith('leaks.')) {
     const [, kind, count] = key.split('.');
     const k = res.leaks && res.leaks.byKind && res.leaks.byKind[kind];
-    return k && k.growth && k.growth[count] ? k.growth[count].perCycle : undefined;
+    const g = k && k.growth && k.growth[count];
+    return g ? (g.perCycleAfterFirst != null ? g.perCycleAfterFirst : g.perCycle) : undefined;
   }
   const m = res.timing && res.timing.metrics[key];
   return m ? m.median : undefined;
@@ -772,8 +773,12 @@ async function bisect(good, bad, metric, ch) {
 
 // ----------------------------------------------------------------------------------------------- report
 function medOf(res, k) { const m = res && res.timing && res.timing.metrics[k]; return m ? m.median : null; }
+function worstOf(res, k) { const m = res && res.timing && res.timing.metrics[k]; return m ? m.worst : null; }
 function naOf(res, probe) { return res && res.timing && res.timing.na && res.timing.na[probe] ? res.timing.na[probe].reason : null; }
-function probeOfKey(k) { return k.split('.')[0]; }
+const probeOfKey = k => k.split('.')[0];
+const cellNum = (x, unit) => fx(x, unit === 'fps' ? 2 : x != null && Math.abs(x) < 10 ? 2 : x != null && Math.abs(x) < 100 ? 1 : 0);
+const prName = c => (c.prs && c.prs.length ? 'PR ' + c.prs.map(n => '#' + n).join(' + ') : c.short + ' (a direct commit: ' + (c.subject || '').slice(0, 60) + ')');
+const readJson = f => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return null; } };
 
 function report(plan, ch) {
   const rs = plan.map(c => ({ c, r: loadResult(c) }));
@@ -781,18 +786,18 @@ function report(plan, ch) {
   const L = [];
   const anyStand = have.some(x => !x.r.vaseReal);
   const tag = anyStand ? ' (stand-in)' : '';
+  const col = x => x.c.short + (x.c.merge && x.c.prs.length ? '<br>#' + x.c.prs.join('+#') : '');
   L.push('# perf-bisect results', '');
-  L.push('Vase: ' + (anyStand ? '**stand-in** - the 1,000,000-triangle UV sphere from `nso_big_mesh_lib.js` (the real `tools/fixtures-local/boolean-vase.3mf` was not on this box). Every vase figure below is marked "stand-in".' : 'the real boolean-vase.3mf.'), '');
-  if (have[0]) L.push('Machine: ' + have[0].r.env.cpu + ' x' + have[0].r.env.cpus + ', ' + have[0].r.env.platform + ', Chromium ' + have[0].r.env.chromium + ', headless, flags `' + have[0].r.env.flags + '`, viewport ' + have[0].r.env.viewport + '. **Software GL** (swiftshader): a frame costs ~0.4 s per million triangles of main-thread time whatever the app does, so every "to next frame" / frames-per-second figure is inflated by the machine; compare commits to each other, and read the app-JS rows for the app\'s own cost.', '');
-  L.push('## 1. Pass 1: probe x commit (median of ' + RUNS + ' runs; the worst run in brackets)', '');
-  const head = ['probe' + tag].concat(have.map(x => x.c.short + (x.c.merge && x.c.prs.length ? ' #' + x.c.prs.join('+#') : '')));
-  L.push('| ' + head.join(' | ') + ' |', '|' + head.map(() => '---').join('|') + '|');
+  L.push('Vase: ' + (anyStand ? '**stand-in** - the 1,000,000-triangle UV sphere of `nso_big_mesh_lib.js` (the real `tools/fixtures-local/boolean-vase.3mf` was not on this box). Every vase figure is marked "stand-in".' : 'the real boolean-vase.3mf.'), '');
+  if (have[0]) L.push('Machine: ' + have[0].r.env.cpu + ' x' + have[0].r.env.cpus + ', ' + have[0].r.env.platform + ', Chromium ' + have[0].r.env.chromium + ', headless, flags `' + have[0].r.env.flags + '`, viewport ' + have[0].r.env.viewport + '. **Software GL** (swiftshader): a frame costs ~0.4 s per million triangles of main-thread time whatever the app does, so every "to next frame" and frames-per-second figure is inflated by the machine; compare commits to each other and read the app-JS rows for the app\'s own cost.', '');
+
+  L.push('## 1. Pass 1: probe x commit' + tag + ' - median of ' + RUNS + ' runs (worst run in brackets)', '');
+  L.push('| probe | ' + have.map(col).join(' | ') + ' |', '|---|' + have.map(() => '---').join('|') + '|');
   TIMING_LABELS.forEach(([k, lab, unit]) => {
     const cells = have.map(x => {
       const m = x.r.timing && x.r.timing.metrics[k];
-      if (m) return fx(m.median, unit === 'fps' ? 2 : m.median < 10 ? 2 : 0) + ' (' + fx(m.worst, unit === 'fps' ? 2 : m.worst < 10 ? 2 : 0) + ')';
-      const why = naOf(x.r, probeOfKey(k));
-      return why ? 'n/a' : '-';
+      if (m) return cellNum(m.median, unit) + ' (' + cellNum(m.worst, unit) + ')';
+      return naOf(x.r, probeOfKey(k)) ? 'n/a' : '-';
     });
     if (cells.every(c => c === '-')) return;
     L.push('| ' + lab + ' [' + unit + '] | ' + cells.join(' | ') + ' |');
@@ -803,36 +808,66 @@ function report(plan, ch) {
   reasons.forEach((cs, k) => L.push('- ' + k + ' - at ' + cs.join(', ')));
   if (!reasons.size) L.push('- none');
   L.push('');
-  // idle
+
+  const p2 = readJson(path.join(OUT, 'pass2.json')) || [];
+  L.push('## 2. Pass 2: regressions pinned to a single merge' + tag, '');
+  if (!p2.length) L.push('(no pass-2 results yet)', '');
+  else {
+    L.push('| merge | probe | before -> after | worst run before -> after | bisect trail |', '|---|---|---|---|---|');
+    p2.forEach(r => {
+      const cul = ch.find(c => c.short === r.culprit), bef = ch.find(c => c.short === r.before) || ch.find(c => c.pos === (cul ? cul.pos - 1 : -1));
+      const isLeak = r.metric.startsWith('leaks.');
+      const rc = cul && loadResult(cul), rb = bef && loadResult(bef);
+      const unit = isLeak ? (r.metric.endsWith('heapMB') ? ' MB/cycle' : ' /cycle') : ' ms';
+      const wr = isLeak ? 'n/a' : fx(worstOf(rb, r.metric), 2) + ' -> ' + fx(worstOf(rc, r.metric), 2);
+      if (r.error) { L.push('| - | ' + r.metric + ' | ' + r.error + ' | | |'); return; }
+      L.push('| ' + (cul ? prName(cul) + ' (' + cul.short + ')' : r.culprit) + ' | ' + r.metric + ' | ' + fx(r.beforeValue, 2) + ' -> ' + fx(r.afterValue, 2) + unit + ' | ' + wr + ' | ' + (r.trail || []).map(t => t.commit + ':' + (t.value == null ? 'n/a' : fx(t.value, 1)) + ' ' + t.side).join(', ') + ' |');
+    });
+    L.push('');
+  }
+
+  L.push('## 3. Leaks: growth per cycle after the first (least-squares over cycles 1..' + CYCLES + ')' + tag, '');
+  L.push('`F` = rises in every one of the ' + CYCLES + ' cycles; `w` = rises in every cycle after the first (the first is warm-up). Heap is after a forced GC, in MB.', '');
+  CYCLE_KINDS.forEach(kind => {
+    L.push('### ' + kind, '');
+    L.push('| per cycle | ' + have.map(col).join(' | ') + ' |', '|---|' + have.map(() => '---').join('|') + '|');
+    LEAK_KEYS.forEach(k => {
+      const cells = have.map(x => {
+        const e = x.r.leaks && x.r.leaks.byKind && x.r.leaks.byKind[kind];
+        if (!e) return '-';
+        if (e.na) return 'n/a';
+        const g = e.growth[k];
+        if (!g) return '-';
+        const v = g.perCycleAfterFirst != null ? g.perCycleAfterFirst : g.perCycle;
+        return fx(v, 2) + (g.risesEveryCycle ? ' F' : g.risesAfterWarmup ? ' w' : '');
+      });
+      L.push('| ' + k + ' | ' + cells.join(' | ') + ' |');
+    });
+    const nas = have.filter(x => { const e = x.r.leaks && x.r.leaks.byKind && x.r.leaks.byKind[kind]; return e && (e.na || e.partial); });
+    nas.forEach(x => { const e = x.r.leaks.byKind[kind]; L.push('', '- ' + x.c.short + ': ' + (e.na || ('stopped early - ' + e.partial))); });
+    L.push('');
+  });
+
   const b = have.find(x => x.c.sha === ch[0].sha), h = have.find(x => x.c.sha === ch[ch.length - 1].sha);
   if (b && h) {
-    L.push('## 4. Idle-frame cost, now vs. ' + b.c.short + tag, '');
-    L.push('| per frame, nothing happening for 5 s | ' + b.c.short + ' | ' + h.c.short + ' | change |', '|---|---|---|---|');
+    L.push('## 4. Idle-frame cost, ' + h.c.short + ' vs ' + b.c.short + tag, '');
+    L.push('Nothing happening for 5 s, vase and box on the plate. This sizes drawing only when something changes: every idle frame is a frame the app draws for nothing.', '');
+    L.push('| per frame | ' + b.c.short + ' | ' + h.c.short + ' | change |', '|---|---|---|---|');
     ['idle.jsMsPerFrame', 'idle.layoutMsPerFrame', 'idle.mainMsPerFrame', 'idle.fps', 'orbit.jsMsPerFrame', 'orbit.msPerFrame'].forEach(k => {
       const lab = (TIMING_LABELS.find(l => l[0] === k) || [])[1], x = medOf(b.r, k), y = medOf(h.r, k);
       L.push('| ' + lab + ' | ' + fx(x, 2) + ' | ' + fx(y, 2) + ' | ' + (x && y ? (y >= x ? '+' : '') + (100 * (y - x) / x).toFixed(0) + ' %' : 'n/a') + ' |');
     });
     L.push('');
   }
-  // leaks
-  L.push('## 3. Leaks: growth per cycle (least-squares slope over cycles 0..' + CYCLES + '), by commit', '');
-  const kinds = CYCLE_KINDS;
-  kinds.forEach(kind => {
-    L.push('### ' + kind, '');
-    const row = (k, lab) => {
-      const cells = have.map(x => {
-        const e = x.r.leaks && x.r.leaks.byKind && x.r.leaks.byKind[kind];
-        if (!e) return '-';
-        if (e.na) return 'n/a';
-        const g = e.growth[k];
-        return g ? fx(g.perCycle, k === 'heapMB' ? 2 : 2) + (g.risesEveryCycle ? ' **↑every**' : g.risesAfterWarmup ? ' ↑warm' : '') : '-';
-      });
-      return '| ' + lab + ' | ' + cells.join(' | ') + ' |';
-    };
-    L.push('| per cycle | ' + have.map(x => x.c.short).join(' | ') + ' |', '|---|' + have.map(() => '---').join('|') + '|');
-    LEAK_KEYS.forEach(k => L.push(row(k, k)));
-    L.push('');
-  });
+
+  L.push('## 5. The vase', '');
+  if (anyStand) {
+    const shas = [...new Set([BASE, ...p2.filter(r => !r.error).map(r => r.culprit), ...p2.filter(r => !r.error).map(r => r.before), HEAD].filter(Boolean))];
+    L.push('The **stand-in** was used (a 1,000,000-triangle UV sphere). To rerun the flagged commits with the real vase, put it at `tools/fixtures-local/boolean-vase.3mf` and run:', '',
+           '    npm run perf:bisect -- --commits ' + shas.join(',') + ' --out tools/perf-bisect-out/real', '');
+  } else L.push('The real vase was used.', '');
+  const self = path.join(OUT, 'selfcheck.md');
+  if (fs.existsSync(self)) L.push('## 6. Self-check', '', fs.readFileSync(self, 'utf8').split('\n').slice(0, 4).join('\n'), '(full table: selfcheck.md)', '');
   return L.join('\n');
 }
 
