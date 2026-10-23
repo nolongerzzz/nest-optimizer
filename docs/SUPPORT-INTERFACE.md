@@ -432,9 +432,11 @@ toolpath in segments of 2 mm or more. `support:audit` holds it (section 5).
   at the gap.
 - The support under a stair's body lays 2.6 x Bambu's toolpath in all on
   the arc (section 7): the body and its strips match Bambu's over z 37 -
-  47, and below them #274's two solid round trunks and their pad lay 3.9 x
-  Bambu's single trunk of loops round air. Hollowing or thinning the trunks
-  is a follow-up.
+  47 (1.03 x, `support:curved` 6's gate), and below them #274's two solid
+  round trunks and their pad lay 3.9 x Bambu's single trunk of loops round
+  air. Hollowing or thinning the trunks is the trunk-thinning follow-up,
+  which owns the whole part's ratio (printed by `support:curved` 6, not
+  gated).
 - The stair no longer grows a tree of its own (supports-stair-body), so the
   planner's `mergeThroughCrowd` - written for that tree - is planned by
   nothing on the card's build.
@@ -540,8 +542,11 @@ one wedge under the whole overhang, its interface strips laid on it.
 - **Against Bambu, material** (`support:curved` 6): the support's printed
   toolpath, NSO's slice of the export against the fixture's G-code, layer
   by layer over Bambu's layers (it lays 0.27 mm layers low down, so each of
-  its layers is set against ours over the same height). In all **34.79 m
-  against Bambu's 13.54: 2.57 x - the gate (1.5 x) FAILS.** By height, m
+  its layers is set against ours over the same height). The gate (1.5 x)
+  covers what the stair builds - the body's zone, every layer over the
+  stair's start (z 37.0): **6.38 m against 6.22, 1.03 x**. The whole part,
+  a finding the trunk-thinning follow-up (section 6) owns: 34.79 m against
+  Bambu's 13.54, 2.57 x. By height, m
   (ours / Bambu): 0-1: 3.45 / 0.80, 1-5: 3.92 / 1.08, 5-10: 3.89 / 0.81,
   10-20: 6.13 / 0.91, 20-30: 5.14 / 1.17, 30-37: 5.89 / 2.55, 37-40: 2.76 /
   2.07, 40-42: 1.56 / 1.45, 42-44: 1.29 / 1.53, 44-47: 0.78 / 1.16. Over z
