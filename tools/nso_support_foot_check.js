@@ -38,7 +38,8 @@
    5. THE GAP: every trunk's exact triangle distance to the piece, at least
       FEET.gapMm.
    6. NOTHING ABOVE THE TRUNK CHANGES, on the arc and the 2026-10-20 coupon:
-      built with trunkGrowth off the support is #265's byte for byte, and
+      built with trunkGrowth off the support is the build pinned (the
+      coupon's #265's, the arc's supports-stair-body's) byte for byte, and
       with it on the support is that build's every part, byte for byte, then
       the trunks, then the pads; the coupon's pads cover the pads before
       (every corner of the old outline inside the new, no area lost).
@@ -72,7 +73,8 @@ const GP = ctx.NSO_SupportGridpack, SI = ctx.NSO_SupportInterface, TH = ctx.NSO_
 const TRUNK = GP.TRUNK, FEET = GP.FEET;
 /* #265's builds (claude-wip b7076af + supports-curved-sheet a08bc6f), sha-256 (first 16 hex) of each
    support object's Float32 soup and its triangles; the coupon's is support:curved 7's */
-const BEFORE = { coupon: ['6ac271882b107552', 27348], arc: ['2320ee7613e8ef3f', 4968] };
+/* the arc's since supports-stair-body: its strips as wide as the part's step and a line (support:curved 2) */
+const BEFORE = { coupon: ['6ac271882b107552', 27348], arc: ['81577c65d9d7a031', 8748] };
 
 let pass = 0, fail = 0;
 const FAILS = [];
@@ -293,7 +295,7 @@ function splitObject(b, oi) {
   console.log('\n=== 6. nothing above the trunk changes ===');
   for (const [name, on, off] of [['arc', b, b0], ['coupon', c1, c0]]) {
     const o0 = off.objects[1];
-    check(`${name}: built with trunkGrowth off, the support is #265's byte for byte`,
+    check(`${name}: built with trunkGrowth off, the support is ${name === 'arc' ? 'supports-stair-body' : '#265'}'s byte for byte`,
       off.objects.length === 2 && sha(o0.soup) === BEFORE[name][0] && o0.soup.length / 9 === BEFORE[name][1], `${sha(o0.soup)} (${o0.soup.length / 9} tris)`);
     const s1 = splitObject(on, 0), s0 = splitObject(off, 0);
     check(`${name}: with trunks, every part before is there byte for byte, then the trunks, then the pads - and nothing else`,

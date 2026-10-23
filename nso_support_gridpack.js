@@ -2239,7 +2239,7 @@
                    minDistanceMm: L.minDistanceMm, solvedDropMm: L.solvedDropMm, stair: L.stair, held: L.held,
                    layers: L.layers.map(function (x) { return { role: x.role, angleDeg: x.angleDeg, z0: x.z0, z1: x.z1, lines: x.lines, lengthMm: x.lengthMm,
                                                                 widthMm: x.widthMm, overlapMm: x.overlapMm, beads: x.beads, advanceMm: x.advanceMm, tips: x.tips,
-                                                                linesMm: x.linesMm, loopMm: x.loopMm, pieces: (x.pieces || []).map(function (q) { return { kind: q.kind, sizeMm: q.sizeMm, areaMm2: q.areaMm2, perimMm: q.perimMm, caps: q.caps, lines: q.lines }; }), shortestMm: x.shortestMm, paths: x.paths }; }) };
+                                                                linesMm: x.linesMm, loopMm: x.loopMm, pitchMm: x.pitchMm, minDistanceMm: x.minDistanceMm, pieces: (x.pieces || []).map(function (q) { return { kind: q.kind, sizeMm: q.sizeMm, areaMm2: q.areaMm2, perimMm: q.perimMm, caps: q.caps, lines: q.lines }; }), shortestMm: x.shortestMm, paths: x.paths }; }) };
         })
       };
     }

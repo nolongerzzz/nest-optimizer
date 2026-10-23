@@ -450,7 +450,7 @@ toolpath in segments of 2 mm or more. `support:audit` holds it (section 5).
 `parts({ interface: true })` like every sheet. Gate: `npm run
 support:curved` (`tools/nso_support_curved_check.js`), which also
 writes the arc with its supports as the card exports them to
-`tools/supports-curved-out/simple_overhang_supports.3mf` (git-ignored) - open
+`tools/supports-stair-out/simple_overhang_supports.3mf` (git-ignored) - open
 it in Bambu Studio as a project and slice with its own supports off.
 27 checks.
 
@@ -499,7 +499,7 @@ strip's back edge sat up to 0.92 mm under the curve):
   the lowest layer whose band runs 0.6 of the longest and holds a tip, and
   where even one line would stand too far under the part (the arc's foot,
   ~45 deg: 0.6 - 0.8 mm), it starts higher.
-- **Width follows the band** (Bambu's: a loop alone - two lines - on most
+- **Width follows the band** (superseded by supports-stair-body, below) (Bambu's: a loop alone - two lines - on most
   layers, four only where the surface flattens): as many beads as keep the
   band's back edge within 0.55 mm of the part over it, built and measured -
   one line (0.40, the sheet's thin wall) where two would not, two beads
@@ -552,6 +552,37 @@ strip's back edge sat up to 0.92 mm under the curve):
   sheet's transition runs on while a layer repeats the footprint of the one
   over it. `slicer:supports` is still 26 of 26, `slicer:bambu` 58 of 58.
 - **Build time**: the arc's area ~6 s in node.
+
+**Round 3: each strip covers the part's step** (supports-stair-body). The
+round-3 print released clean and the foot held, but the top of the stair
+came loose: in Bambu's slice of our export each strip's leading line was an
+overhang wall in air (a strip advanced ~0.55 mm past the one below, more
+than a line), and the part's bars were dashed (our strips were narrower than
+the part's step over them). Now each strip is as wide as the part's step
+over it - the next layer's overhang advance - and one line (0.42), at least
+two lines, so the next strip's down-slope line lies on its up-slope line;
+its lines are the sheet's (0.40 at 0.84): two, a loop alone, or a loop and
+one serpentine inside it, tied at one point; kept to the outline and one
+line, the top strip covering all the part has left over it (spread to the
+outline: 3 lines at 0.88). The stair's own tree holds each strip's leading
+part as before (a tip every 5 mm or nearer).
+- On the arc: 45 strips, z 37.2 - 46.0: 2 lines on 38, 3 on 7; every one
+  0.27 mm or more wider than the part's step and a line, built, and 0.29 in
+  NSO's slice; the part over each 0.187 - 0.457 mm across its width where
+  the next strip is not over it, median 0.301; 89 tips; gap 0.181.
+- `typeSupports` reads every support line's overhang as a slicer types a
+  wall (docs/SLICER.md). **23 of the strips' 98 paths are over air in part**
+  (0.09 - 5.7 mm each, z 37.8 - 46): a strip's up-slope part beyond the strip
+  below is held by tips 5 mm apart, with air between them - the
+  `support:curved` 6 gate (no strip line over air) FAILS. Nothing under a
+  strip but the strip below and its tips can make it hold without strips
+  widening downward layer on layer.
+- The support's toolpath over the stair's start (z 37.2): 7.14 m against
+  Bambu's 6.22, 1.15 x (gate 1.5 x). The whole part, a finding the
+  trunk-thinning follow-up (section 6) owns: 42.01 m against 13.54, 3.10 x.
+- The stair's tree, planned on these strips, lands a trunk at (90, 92.5),
+  by the arc's base: the piece holds it to 11.36 mm at the plate against
+  Bambu's 12.35, and it does not flare there (`support:foot` 2 and 3).
 
 **The refusal on the arc** (`support:curved` 8). At the card's 60 deg the
 arc was "Area 1 · unreachable · no route to the plate · 70 spots" (63 in the
