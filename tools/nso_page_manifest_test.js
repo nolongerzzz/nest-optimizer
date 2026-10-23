@@ -49,6 +49,15 @@
     10. At 1280 x 800 the page has no <header> and no #btn-clear in its DOM,
         the viewport starts at the top of the window, and the top row and the
         pinned panel start at most 8 px below it.
+   11. Every ?v= on a page's local script / link is the first 8 hex of the
+        sha256 of the file it points at (tools/stamp-tags.mjs --check). Nobody
+        picks a tag by hand: run `npm run stamp` before you open the PR.
+   12. tools/test-weights.json and package.json agree: every testStep has a
+        {weight, note} entry and every entry names a script that is a testStep
+        (tools/test-weights-check.cjs, also `node tools/run-tests.mjs --check`).
+   13. docs/HANDOFF.md's generated list is every docs/handoff/*.md, current
+        (tools/handoff-index.mjs --check): a ticket adds its file and runs
+        `npm run handoff:index`.
    Each gate is run on a known-bad sample first, so a checker that has gone
    blind fails here instead of passing. */
 
@@ -392,6 +401,82 @@ console.log('index.html');
   check('every button in a column <details> is inside its .vp-menu-body', loose.length === 0,
     loose.length ? loose.length + ' loose' : '');
   for (const l of loose) console.log('       index.html:' + l.line + '  #' + l.id + ' is loose in #' + l.column);
+}
+
+// --- the ?v= tags are the files' hashes ---------------------------------------
+console.log('?v= tags');
+{
+  const os = require('os');
+  const { spawnSync } = require('child_process');
+  const stamp = path.join(ROOT, 'tools', 'stamp-tags.mjs');
+  const run = (root) => spawnSync(process.execPath, [stamp, '--check', '--root', root], { encoding: 'utf8' });
+  const sample = fs.mkdtempSync(path.join(os.tmpdir(), 'stamp-gate-'));
+  try {
+    fs.writeFileSync(path.join(sample, 'a.js'), 'var a = 1;\n');
+    const tag = require('crypto').createHash('sha256').update('var a = 1;\n').digest('hex').slice(0, 8);
+    const page = (v) => '<script src="a.js?v=' + v + '"></script>\n<!-- <script src="a.js?v=old"></script> -->\n';
+    fs.writeFileSync(path.join(sample, 'p.html'), page('picked-by-hand'));
+    const bad = run(sample);
+    check('a hand-picked tag is caught', bad.status === 1 && /a\.js/.test(bad.stdout), 'exit ' + bad.status);
+    fs.writeFileSync(path.join(sample, 'p.html'), page(tag));
+    const good = run(sample);
+    check('the file\'s own hash passes, and a tag in a comment is not looked at', good.status === 0, 'exit ' + good.status);
+    fs.writeFileSync(path.join(sample, 'p.html'), '<script src="gone.js?v=1"></script>');
+    check('a tag on a file that does not exist is caught', run(sample).status === 2);
+  } finally {
+    fs.rmSync(sample, { recursive: true, force: true });
+  }
+  const real = run(ROOT);
+  check('every ?v= in the repo\'s pages matches its file', real.status === 0,
+    real.status === 0 ? '' : 'run `npm run stamp`');
+  if (real.status !== 0) console.log((real.stdout + real.stderr).split('\n').map((l) => '       ' + l).join('\n'));
+}
+
+// --- the step weights agree with the scripts ------------------------------------
+console.log('tools/test-weights.json');
+{
+  const { problems } = require('./test-weights-check.cjs');
+  const pkg = { scripts: { a: 'x', b: 'x', c: 'x' }, testSteps: ['a', 'b'] };
+  const ok = { steps: { a: { weight: 5, note: '' }, b: { weight: 7, note: 'n' } } };
+  check('a table with one entry per step and a script for each is clean', problems(pkg, ok).length === 0, problems(pkg, ok).join('; '));
+  check('a step with no entry is caught', problems(pkg, { steps: { a: ok.steps.a } }).some((p) => /step "b" has no entry/.test(p)));
+  check('an entry with no script is caught', problems(pkg, { steps: { ...ok.steps, z: { weight: 1, note: '' } } }).some((p) => /entry "z" has no script/.test(p)));
+  check('an entry for a script outside testSteps is caught', problems(pkg, { steps: { ...ok.steps, c: { weight: 1, note: '' } } }).some((p) => /"c" is a script but not in testSteps/.test(p)));
+  check('a zero or missing weight is caught', problems(pkg, { steps: { a: { weight: 0, note: '' }, b: { note: '' } } }).length === 2);
+  let table = null, err = '';
+  try { table = JSON.parse(fs.readFileSync(path.join(ROOT, 'tools', 'test-weights.json'), 'utf8')); } catch (e) { err = e.message; }
+  check('tools/test-weights.json parses', !!table, err);
+  if (table) {
+    const real = problems(JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')), table);
+    check('every step has a weight and every weight a script', real.length === 0, real.length ? real.length + ' disagree' : '');
+    real.forEach((p) => console.log('       ' + p));
+  }
+}
+
+// --- the handoff index is current -------------------------------------------------
+console.log('docs/HANDOFF.md');
+{
+  const { spawnSync } = require('child_process');
+  const idx = path.join(ROOT, 'tools', 'handoff-index.mjs');
+  const r = spawnSync(process.execPath, [idx, '--check'], { encoding: 'utf8' });
+  check('the list of docs/handoff/*.md in HANDOFF.md is current', r.status === 0,
+    r.status === 0 ? r.stdout.trim() : 'run `npm run handoff:index`');
+  if (r.status !== 0) console.log('       ' + (r.stderr + r.stdout).trim());
+  // ...and the check on a known-bad tree: a ticket file the list does not name yet.
+  const os = require('os');
+  const sample = fs.mkdtempSync(path.join(os.tmpdir(), 'handoff-gate-'));
+  try {
+    fs.mkdirSync(path.join(sample, 'docs', 'handoff'), { recursive: true });
+    const index = path.join(sample, 'docs', 'HANDOFF.md');
+    fs.writeFileSync(index, '# Handoff\n\n<!-- handoff-index:start - x -->\n<!-- handoff-index:end -->\n');
+    fs.writeFileSync(path.join(sample, 'docs', 'handoff', 'a.md'), '## A ticket\n');
+    const run = (a) => spawnSync(process.execPath, [idx, ...a, '--root', sample], { encoding: 'utf8' });
+    check('a handoff file the list does not name is caught', run(['--check']).status === 1);
+    run([]);
+    check('...and the regenerated list passes, naming it', run(['--check']).status === 0 && /\[A ticket\]\(handoff\/a\.md\)/.test(fs.readFileSync(index, 'utf8')));
+  } finally {
+    fs.rmSync(sample, { recursive: true, force: true });
+  }
 }
 
 // --- column cards ----------------------------------------------------------

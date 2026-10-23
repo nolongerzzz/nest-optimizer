@@ -31,6 +31,10 @@ function check(name, cond, detail) {
   else { fail++; FAILS.push(name); console.log('  FAIL  ' + name + (detail ? '   ' + detail : '')); }
 }
 const read = f => fs.readFileSync(path.join(REPO, f), 'utf8');
+/* docs/HANDOFF.md is a preamble and an index now; its sections are docs/handoff/*.md.
+   The rule text these checks look for lives in one of them, so read them all. */
+const readHandoff = () => ['docs/HANDOFF.md', ...fs.readdirSync(path.join(REPO, 'docs', 'handoff')).sort().map(f => 'docs/handoff/' + f)]
+  .map(read).join('\n');
 
 /* The roster, as docs/HANDOFF.md states it. Adding a paint-aware feature means
    adding a row here as well as a label in its source - that is the point. */
@@ -101,7 +105,7 @@ for (const r of ROSTER) {
 
 console.log('\n== the rule itself is written down where the roster says ==');
 {
-  const h = read('docs/HANDOFF.md');
+  const h = readHandoff();
   check('HANDOFF carries the scoping rule', /###\s*Scoping — which faces a feature checks/.test(h));
   check('HANDOFF names both categories',
         /\*\*Whole-piece\*\*/.test(h) && /\*\*Sub-region\*\*/.test(h));
@@ -118,7 +122,7 @@ console.log('\n== the destructive tool reads the SELECT list, never the EXCLUDE 
 {
   const d = read('docs/PAINT-DELETE.md');
   const src = read('app-paint-delete.js');
-  const h = read('docs/HANDOFF.md');
+  const h = readHandoff();
   check('PAINT-DELETE declares the sub-region category', /PAINT SCOPE:\s*SUB-REGION/i.test(d));
   check('  ...and says the operand is the SELECT list, not the exclude list',
         /faceMask\.select/.test(d) && /exclude list cannot be the operand/i.test(d));

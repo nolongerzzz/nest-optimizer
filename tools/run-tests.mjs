@@ -46,6 +46,7 @@
  *   npm test
  *   node tools/run-tests.mjs            # same thing
  *   node tools/run-tests.mjs --list     # print the steps and exit
+ *   node tools/run-tests.mjs --check    # the step list and tools/test-weights.json agree; exit
  *   node tools/run-tests.mjs --shard=3/20 --timing-csv out.csv
  *                                        # one CI shard, a CSV row per step
  *   node tools/run-tests.mjs --shard-plan [n]
@@ -53,23 +54,35 @@
  *   node tools/run-tests.mjs --merge-timing <dir> --out timing.csv
  *                                        # the shards' CSVs as one, every step
  *   node tools/run-tests.mjs --weights-from a.csv[,b.csv] [--dry-run]
- *                                        # testStepWeights from CI's times
+ *                                        # tools/test-weights.json from CI's times
  *   node tools/run-tests.mjs --touching nso_slicer.js[,app-core.js]
  *                                        # the steps whose tests reach a file
  *
- * The last four are tools, not runs: they read package.json and the files,
+ * The last five are tools, not runs: they read package.json and the files,
  * and run no test. docs/TESTING.md has the why of each.
  */
 import { spawn } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
+import { createRequire } from 'node:module';
+import { formatWeights } from './migrate-test-weights.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
 const scripts = pkg.scripts || {};
 const allSteps = pkg.testSteps;
-const weights = pkg.testStepWeights || {};
+
+/* Step weights live in tools/test-weights.json, one {"weight", "note"} per step
+   (not in package.json: that file was the same three lines in every batch's
+   merge conflict). The runner needs only the numbers. */
+const WEIGHTS_FILE = join(ROOT, 'tools', 'test-weights.json');
+let weightTable = null;
+try { weightTable = JSON.parse(readFileSync(WEIGHTS_FILE, 'utf8')); } catch (e) {
+  console.error(`test runner: cannot read tools/test-weights.json - ${e.message}`);
+  process.exit(2);
+}
+const weights = Object.fromEntries(Object.entries(weightTable.steps || {}).map(([k, v]) => [k, v && v.weight]));
 
 const SELF = 'run-tests.mjs';
 
@@ -82,7 +95,7 @@ const SELF = 'run-tests.mjs';
    whole of defects:test, so the slowest shard - which is what CI actually
    waits for - would barely improve.
 
-   So the split is packed by measured cost. `testStepWeights` holds the
+   So the split is packed by measured cost. tools/test-weights.json holds the
    milliseconds each step took on a real run; anything absent from it (a suite
    added since that run) gets the median, which keeps a new step from being
    dropped or from distorting the packing. Longest-processing-time first, and
@@ -269,7 +282,7 @@ function mergeTiming() {
   if (unknown.length) console.log(`  ${unknown.length} row(s) name steps this package.json does not declare, kept at the end`);
 }
 
-/* WEIGHTS FROM CI - `--weights-from a.csv[,b.csv]` rewrites testStepWeights.
+/* WEIGHTS FROM CI - `--weights-from a.csv[,b.csv]` rewrites tools/test-weights.json.
 
    A weight is the mean of that step's PASSING rows across the files given -
    two runs' CSVs averaged is the method package.json's note has always asked
@@ -289,7 +302,7 @@ function mergeTiming() {
    shards'; each row is multiplied by typical / its shard's. A shard with
    fewer than three such rows is left as measured. The factors are printed.
 
-   It records what it read in testStepWeightsSource, so the table says where
+   It records what it read in the file's "source", so the table says where
    it came from without anyone remembering to edit the note. --dry-run prints
    the same report and writes nothing. */
 const SCALE_MIN_MS = 20000;
@@ -312,7 +325,7 @@ function weightsFrom() {
   }
   const rows = files.flatMap(readTimingCsv);
   const known = new Set(allSteps);
-  const old = pkg.testStepWeights || {};
+  const old = weights;
   const good = rows.filter((r) => known.has(r.step) && r.result === 'pass' && r.seconds >= 0);
 
   const runner = new Map();   // file + shard -> its passing rows
@@ -368,13 +381,15 @@ function weightsFrom() {
   if (kept.length) console.log(`  kept, no passing row (${kept.length}): ${few(kept)}`);
   if (ignored.length) console.log(`  ignored, not in testSteps: ${ignored.join(', ')}`);
 
-  if (process.argv.includes('--dry-run')) { console.log('  --dry-run: package.json not written'); return; }
-  pkg.testStepWeights = next;
-  pkg.testStepWeightsSource = `${files.map((f) => basename(f)).join(' + ')}, read ${new Date().toISOString().slice(0, 10)}` +
+  if (process.argv.includes('--dry-run')) { console.log('  --dry-run: tools/test-weights.json not written'); return; }
+  /* Weights change; each step's note, the file's prose and the step set stay. */
+  const steps = {};
+  for (const [name, w] of Object.entries(next)) steps[name] = { weight: w, note: (weightTable.steps[name] || {}).note || '' };
+  const source = `${files.map((f) => basename(f)).join(' + ')}, read ${new Date().toISOString().slice(0, 10)}` +
     ` by run-tests.mjs --weights-from: ${pass.size} steps measured (mean of passing rows, each shard scaled to the` +
     ` typical runner), ${kept.length} kept from before` + (kept.length ? ` (${few(kept)})` : '');
-  writeFileSync(join(ROOT, 'package.json'), JSON.stringify(pkg, null, 2) + '\n');
-  console.log(`  package.json written; check the packing with --shard-plan ${CI_SHARDS}`);
+  writeFileSync(WEIGHTS_FILE, formatWeights({ about: weightTable.about || [], source, steps }));
+  console.log(`  tools/test-weights.json written; check the packing with --shard-plan ${CI_SHARDS}`);
 }
 
 /* WHICH STEPS REACH A FILE - `--touching nso_slicer.js[,app-core.js]`.
@@ -642,6 +657,17 @@ async function main() {
     const worst = Math.max(...plan.map((b) => b.total)) / 1000;
     console.log(`\nheaviest shard ${worst.toFixed(0)} s of ${SHARD_BUDGET_S} s budget; ` +
       `${(plan.reduce((t, b) => t + b.total, 0) / 1000).toFixed(0)} s in all`);
+    return;
+  }
+
+  if (process.argv.includes('--check')) {
+    const bad = createRequire(import.meta.url)('./test-weights-check.cjs').problems(pkg, weightTable);
+    if (bad.length) {
+      console.error('test runner: tools/test-weights.json and package.json disagree\n');
+      bad.forEach((p) => console.error('  - ' + p));
+      process.exit(1);
+    }
+    console.log(`test runner: ${allSteps.length} steps, each with a weight and a script; ${Object.keys(weights).length} entries, none without one`);
     return;
   }
 
