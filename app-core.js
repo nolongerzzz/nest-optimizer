@@ -4459,13 +4459,14 @@ function exportSTLs() {
 
   try {
     const geo = buildCombinedGeometry();
+    const overlapNote = typeof nsoExportOverlapNote === 'function' ? nsoExportOverlapNote({ combined: geo }) : '';
     const buffer = geometryToBinarySTL(geo);
     const blob = new Blob([buffer], { type: 'application/octet-stream' });
     const plateName = getCurrentPlate().name.replace(/\s+/g, '_').replace(/[\/\\?%*:|"<>]/g, '');
     const filename = `nest_${plateName}_${state.placed.length}pcs.stl`;
 
     downloadBlob(blob, filename);
-    setStatus(`Downloaded ${filename}`);
+    setStatus(`Downloaded ${filename}${overlapNote}`);
   } catch (err) {
     console.error(err);
     setStatus('Export failed - check console', true);
@@ -5005,6 +5006,7 @@ function export3MF() {
 
   const plate = getCurrentPlate();
   const sceneJson = buildPlateSceneJson();
+  const overlapNote = typeof nsoExportOverlapNote === 'function' ? nsoExportOverlapNote({ objects }) : '';
   return window.NSO3MF.build3MF({ objects, profileId, plateName: plate.name, sceneJson })
     .then(result => {
       const blob = new Blob([result.bytes], { type: 'application/vnd.ms-package.3dmanufacturing-3dmodel+xml' });
@@ -5013,7 +5015,7 @@ function export3MF() {
       downloadBlob(blob, filename);
       const profile = window.NSOCoolingProfiles.getProfile(result.profileId);
       setStatus(`Downloaded ${filename} - cooling profile "${profile ? profile.label : result.profileId}" baked in` +
-                (result.scene ? ' - scene saved, reopen this file to get the plate back' : ''));
+                (result.scene ? ' - scene saved, reopen this file to get the plate back' : '') + overlapNote);
       return result;
     })
     .catch(err => {

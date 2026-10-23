@@ -757,3 +757,19 @@ case (a base feature + 2 captured parts) is the posts fixture's post A.
 - A part held by an already-captured part but not by the feature itself (a latch
   on the leaf that does not reach the knuckle's box) is not held: capture is by
   the feature's own box, not transitive.
+
+## 9. A whole shell (shells-as-pieces)
+
+When a piece is two or more parts and every part either crosses another or stands clear of the rest
+(`nso_shells.js` `owned`; `docs/SHELLS-AS-PIECES.md`), the piece is solids, not one surface, and Lift
+does not look for a face region in it. It runs no height map: the card says `2 shells found`, the
+readout `2 shells on box_closed (68 + 12 triangles), laid through each other. Hover one to see it; a
+click lifts that whole shell out as a piece - no cut, nothing else on the piece changes.`, hovering a
+face outlines the whole shell, and a click takes it out. The lifted shell is `<piece> - lifted 1`; every
+triangle of it and of what is left is the original's, bit for bit, and **neither moves** (the leftover is
+landed where it stood, as Split to parts lands its pieces). One Undo. What is left is read again - as a
+piece of one shell, the way it always was - on the next hover.
+
+Pieces of one shell, and pieces whose parts interleave (the print-in-place hinge of section 8, whose
+parts are free of each other but share space), are read exactly as before. `lift:test`, `lift:drive`,
+`lift:assembly` and the rest are untouched by it. Gates: `shells:test`, `shells:drive`.

@@ -422,23 +422,29 @@ withApp(async (page, logs) => {
   await disarm(page);
 
   /* ==================================================================== 9. a lone floating shell */
+  /* Shells as pieces (docs/SHELLS-AS-PIECES.md): a plate with a cube floating clear above it is two bodies, not a plate with a
+     detail on it. Lift reads it as shells - "2 shells found" - and a click takes the cube out whole. (Before that ticket
+     this section held the opposite: a cube nothing holds "can't be lifted".) */
   console.log('\n=== 9. a plate with a lone floating shell ===');
   await dropPieces(page, [postId]);
   const strayId = await loadSTL(page, STRAY_STL);
   const SSRC = await raw(page, strayId);
   const c9 = await armOn(page, strayId);
-  const p9 = await isl(page);
-  check('armed: "0 features found" - nothing holds the cube, so there is nothing to bring along', c9 === '0 features found' && p9.caught === 0 && p9.list.length === 1 && p9.list[0].s !== 'ok', c9 + ' ' + JSON.stringify(p9.list));
-  check('...and it says why in the read-out', /1 can't be lifted/.test(await readout(page)), await readout(page));
+  check('armed: "2 shells found" - the plate and the cube standing clear above it', c9 === '2 shells found' && /standing apart/.test(await readout(page)), c9 + ' | ' + await readout(page));
+  check('...no height map ran, so there are no features to bring anything along with', await page.evaluate(() => NSO_LIFT_PLATE.analysis() === null && NSO_LIFT_PLATE.shells().shells.map(s => s.tris).sort((x, y) => x - y)[0] === 12));
   await frameOn(page, strayId);
   const ST = rawTriNear(SSRC, 0, 14, 11.9, 12.1);
   const b9 = await plateState(page);
   await hoverTri(page, strayId, ST);
-  check('hovering the cube: "can\'t be lifted", and why', /^Lift: that can't be lifted - it is a separate part, joined to nothing, and no feature on the face holds it/.test(await readout(page)), await readout(page));
+  check('hovering the cube: the whole cube, and what a click does', /^Shell \d of 2: 12 triangles, standing apart from the rest - click to lift it out whole, no cut\./.test(await readout(page)), await readout(page));
   await clickTri(page, strayId, ST);
-  await page.waitForTimeout(250);
-  check('a click lifts nothing: no step, no piece, the plate bit for bit', (await plateState(page)).undo === b9.undo && (await plateState(page)).models.length === b9.models.length && sameSoup(await raw(page, strayId), SSRC));
+  await waitRead(page, /^Lifted shell/);
+  const a9 = await plateState(page), add9 = added(b9, a9);
+  check('a click lifts the cube whole: one piece of 12 triangles, one undo step', add9.length === 1 && add9[0].tris === 12 && a9.undo === b9.undo + 1, JSON.stringify(add9));
+  check('the plate is what was left: every other triangle, bit for bit', (await raw(page, strayId)).length === SSRC.length - 12 * 9);
   check('Strip stays off', (await card(page)).stripDisabled);
+  await ctrlZ(page);
+  check('one Ctrl+Z: the plate and the cube bit for bit', sameSoup(await raw(page, strayId), SSRC) && (await plateState(page)).models.length === b9.models.length);
   await disarm(page);
 
   const errs = logs.filter(l => /pageerror|\[error\]/.test(l) && !/favicon|404/.test(l));

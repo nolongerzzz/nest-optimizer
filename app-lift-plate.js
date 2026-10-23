@@ -80,6 +80,15 @@
  * Pick and Strip work as on a face - and a lift cuts along the surface and fills flush. Only a click reads
  * it (a read takes seconds on a big mesh); a hover never does, and the cursor off the piece keeps it.
  * Planar faces are read exactly as before.
+ *
+ * SHELLS (nso_shells.js, docs/SHELLS-AS-PIECES.md). A piece that is two solids laid through each other (box_closed:
+ * a tray and a lid; a vase and the handle shell through its body) or two bodies standing apart is not one surface
+ * to carve a face region out of. When the piece has two or more parts and EVERY one of them crosses another or
+ * stands clear of the rest (nso_shells.js `owned`), Lift reads it as shells and runs no height map at all: the
+ * card says "N shells found", hovering a face outlines its whole shell, a click takes that whole shell out as a
+ * piece - no cut, no face region - and every triangle of both pieces is as it was, where it stood (the leftover
+ * stays put too). Pieces of one shell, and pieces whose parts interleave (a print-in-place hinge), are read exactly
+ * as before.
  */
 /* global THREE, state, setStatus, addModel, placeModelMovable, pushUndo, applyMeshRotation,
           meshLocalBox3, nsoMaskCount, NSO_sculptCommitRaw, rawResultToDisplayGeometry,
@@ -98,6 +107,7 @@ var NSO_LIFT_PLATE = (function () {
   function LA() { return typeof window !== 'undefined' ? window.NSO_LiftAuto : null; }
   function LF() { return typeof window !== 'undefined' ? window.NSO_Lift : null; }
   function LS() { return typeof window !== 'undefined' && window.NSO_LiftCurved ? window.NSO_LiftCurved.surface : null; }
+  function SHM() { return typeof window !== 'undefined' ? window.NSO_Shells : null; }
   /** The engine that read analysis `a`: the surface's own, else Lift 2 / 3's. */
   function engineOf(a) { return a && a.engine === 'surface' ? LS() : LA(); }
   function $(id) { return typeof document !== 'undefined' ? document.getElementById(id) : null; }
@@ -108,6 +118,22 @@ var NSO_LIFT_PLATE = (function () {
   // =========================================================================
 
   var cache = new WeakMap();               // soup -> Map(read key -> r)
+  var shellMemo = new WeakMap();           // soup -> the shell read (below), once
+
+  /**
+   * The shell read of a soup, once: { shell: true, S, ms } when Lift reads the piece as shells (see the header), else
+   * { shell: false }. S is nso_shells.js's answer (shells, which cross which, which are inside which).
+   */
+  function shellRead(soup) {
+    if (!SHM()) return { shell: false, ms: 0 };          // the engine is not loaded: nothing is read, and nothing is remembered
+    var hit = soup && shellMemo.get(soup);
+    if (hit) return Object.assign({}, hit, { cached: true });
+    var t0 = Date.now(), r = null, out;
+    try { r = soup && soup.length >= 36 ? SHM().shells(soup) : null; } catch (err) { console.error('[lift]', err); }
+    out = r && r.ok && r.owned ? { shell: true, S: r, ms: Date.now() - t0 } : { shell: false, ms: Date.now() - t0 };
+    if (soup) shellMemo.set(soup, out);
+    return Object.assign({}, out, { cached: false });
+  }
 
   function nkey(n) { return n.map(function (x) { return x.toFixed(6); }).join(','); }
 
@@ -396,6 +422,7 @@ var NSO_LIFT_PLATE = (function () {
   var face = null;                          // the face under the cursor { key, n, area }; null = the top, the default
   var minH = null;
   var hoverId = -1;
+  var hoverShell = -1;                      // the shell under the cursor, when the piece is read as shells
   var hoverTri = -1;                        // the raw triangle under the cursor, from the hit
   var pending = new Set();                  // a Shift group, not yet lifted
   var stripOpen = false;
@@ -407,7 +434,9 @@ var NSO_LIFT_PLATE = (function () {
   function defaultMin() { return LF() ? LF().defaultMinHeight() : 0.42; }
   function modelOf(id) { return (state.models || []).find(function (m) { return m && m.id === id; }) || null; }
   function placedOf(id) { return (state.placed || []).find(function (p) { return p && p.sourceId === id; }) || null; }
-  function A() { return D && D.ok ? D.A : null; }
+  function A() { return D && D.ok ? (D.A || null) : null; }
+  /** The shell read when Lift reads the target as shells, else null. */
+  function SH() { return D && D.ok && D.shell ? D : null; }
 
   /** The card's line only: what the HUD must not repeat. */
   function sayCard(msg, bad) {
@@ -455,6 +484,8 @@ var NSO_LIFT_PLATE = (function () {
       face under the cursor. A face that has gone from the soup (a lift took
       its last stand, an Undo) falls back to the top. */
   function readTarget(m, p) {
+    var sr = shellRead(m.rawTris);
+    if (sr.shell) { face = null; return { ok: true, shell: true, S: sr.S, cached: sr.cached, ms: sr.ms }; }
     if (face) {
       var r = face.surf ? detectSurface(m.rawTris, face) : detectFace(m.rawTris, face);
       if (r.refused !== 'noface') return r;
@@ -476,6 +507,7 @@ var NSO_LIFT_PLATE = (function () {
     draw(); sync();
     if (!D.ok) return fail(D.reason);
     say(readout());
+    if (SH()) return { ok: true, shell: true, count: SH().S.parts, cached: D.cached, ms: D.ms };
     return { ok: true, count: offered(A(), minH).length, cached: D.cached, ms: D.ms };
   }
 
@@ -484,6 +516,7 @@ var NSO_LIFT_PLATE = (function () {
     if (!armed || targetId == null) { draw(); sync(); return; }
     var m = modelOf(targetId), p = placedOf(targetId);
     if (!m || !p) { targetId = null; D = null; face = null; clearHover(); draw(); sync(); return; }
+    if (D && D.lazy && D.soup === m.rawTris) { draw(); sync(); return; }       // still the piece a shell came off: read on the next hover
     D = readTarget(m, p);
     if (hoverId >= 0 && !(A() && A().islands[hoverId])) hoverId = -1;
     syncSlider(); draw(); sync();
@@ -493,6 +526,7 @@ var NSO_LIFT_PLATE = (function () {
     if (!armed) return 'Lift off.';
     if (targetId == null) return 'Lift: click a piece on the plate to find what stands on it.';
     if (!D || !D.ok) return D ? D.reason : '';
+    if (D.shell) return shellWords(modelOf(targetId), D.S);
     var m = modelOf(targetId), a = A(), gs = groups(a, minH), n = offered(a, minH).length;
     var parts = [];
     if (face && !a.islands.length) return 'Nothing stands out from this face.';
@@ -511,6 +545,15 @@ var NSO_LIFT_PLATE = (function () {
     if (pending.size) parts.push(pending.size + ' gathered - let go of Shift to lift ' + (pending.size === 1 ? 'it' : 'them') + ' in one step.');
     else if (n) parts.push('Hover a feature to see it; click lifts it, Shift-click gathers several. Or Strip.');
     return parts.join(' ');
+  }
+
+  /** The card's words for a piece read as shells: what it is made of, and what a click does. */
+  function shellWords(m, S) {
+    var parts = S.shells.filter(function (x) { return x.part; });
+    var crossing = parts.filter(function (x) { return x.crosses.length; }).length;
+    var how = crossing === parts.length ? 'laid through each other' : crossing ? 'some laid through each other, some standing apart' : 'standing apart';
+    return parts.length + ' shells on ' + (m ? m.name : 'the piece') + ' (' + parts.map(function (x) { return x.tris; }).join(' + ') + ' triangles), ' + how +
+      '. Hover one to see it; a click lifts that whole shell out as a piece - no cut, nothing else on the piece changes.';
   }
 
   function syncSlider() {
@@ -543,7 +586,7 @@ var NSO_LIFT_PLATE = (function () {
     if (panel) panel.hidden = !armed;
     var a = A(), n = offered(a, minH).length, asm = armed && targetId != null && D && D.ok ? assemblyWords(a, minH) : '';
     var c = $('lift-count');
-    if (c) c.textContent = !armed || targetId == null ? '—' : !D || !D.ok ? 'nothing read' :
+    if (c) c.textContent = !armed || targetId == null ? '—' : D && D.lazy ? 'not read yet' : !D || !D.ok ? 'nothing read' : SH() ? SH().S.parts + ' shells found' :
       n + ' feature' + (n === 1 ? '' : 's') + ' found' + (asm ? ' \u2014 ' + asm : '');
     var sb = $('btn-lift-strip');
     if (sb) sb.disabled = !(armed && n && !busy);
@@ -672,8 +715,43 @@ var NSO_LIFT_PLATE = (function () {
     return !!(m && m.rawTris && window.NSO_BVH && window.NSO_BVH.isBig(m.rawTris.length / 9));
   }
 
+  /** A piece Lift lifted a shell off is read again on the first pointer event that is over it, not before. */
+  function ensureRead(h) {
+    if (!(D && D.lazy) || !h || h.id !== targetId) return;
+    var m = modelOf(targetId), p = placedOf(targetId);
+    if (!m || !p) return;
+    D = readTarget(m, p);
+    syncSlider(); draw(); sync();
+    sayCard(readout(), !!(D && !D.ok));
+  }
+
+  /** The hover when the piece is read as shells: the whole shell under the cursor. */
+  function shellHoverAt(h) {
+    var sh = h && h.id === targetId ? shellAt(h.tri) : null;
+    hoverTri = sh ? h.tri : -1;
+    setHoverShell(sh ? sh.id : -1);
+  }
+
+  function setHoverShell(id) {
+    if (id === hoverShell) return;
+    hoverShell = id;
+    draw();
+    var d = SH(), r = $('lift-readout');
+    if (id >= 0 && d) {
+      var S = d.S.shells[id];
+      var txt = S.liftable
+        ? 'Shell ' + (id + 1) + ' of ' + d.S.n + ': ' + S.tris + ' triangles, ' +
+          (S.crosses.length ? 'laid through ' + S.crosses.map(function (c) { return 'shell ' + (c + 1); }).join(' and ') : 'standing apart from the rest') +
+          ' - click to lift it out whole, no cut.'
+        : 'Shell ' + (id + 1) + ' is a hollow inside shell ' + (S.insideOf + 1) + ' - it stays with the shell round it.';
+      if (r) { r.textContent = txt; r.classList.toggle('carve-bad', !S.liftable); }
+    } else if (armed && r) { r.textContent = lastMsg || readout(); r.classList.remove('carve-bad'); }
+  }
+
   function hoverAt(ev) {
     var h = hitAt(ev, true), id = -1;
+    ensureRead(h);
+    if (SH()) { shellHoverAt(h); return; }
     hoverTri = h && h.id === targetId ? h.tri : -1;
     /* Only a pointer over the viewport itself picks a face: crossing the
        card or a menu on the way to a button leaves the face as it was. */
@@ -749,7 +827,7 @@ var NSO_LIFT_PLATE = (function () {
       if (rr) { rr.textContent = lastMsg || readout(); rr.classList.remove('carve-bad'); }
     }
   }
-  function clearHover() { if (hoverId !== -1) { hoverId = -1; draw(); } }
+  function clearHover() { if (hoverId !== -1 || hoverShell !== -1) { hoverId = -1; hoverShell = -1; draw(); } }
 
   /** app-core's pointerdown asks this first (after Carve), as Carve's. */
   function takesClick(ev) {
@@ -762,6 +840,14 @@ var NSO_LIFT_PLATE = (function () {
       var idx = state.placed.indexOf(h.placed);
       if (idx >= 0 && typeof selectPlaced === 'function') selectPlaced(idx);
       target(h.id);
+      return true;
+    }
+    ensureRead(h);
+    if (SH()) {
+      var sh = shellAt(h.tri);
+      if (!sh) { say('Lift: nothing to lift there.'); return true; }
+      if (!sh.liftable) { fail('Lift: that is a hollow inside shell ' + (sh.insideOf + 1) + ' - it stays with the shell round it. Nothing changed.'); return true; }
+      setTimeout(function () { liftShell(sh.id, 'pick'); }, 0);
       return true;
     }
     var f = featureAt(h.tri);
@@ -889,69 +975,160 @@ var NSO_LIFT_PLATE = (function () {
       var r = engineOf(a).lift(m.rawTris, a, want, deps);
       if (!r.ok) return fail('Lift refused - nothing changed: ' + r.reason);
 
-      /* The pieces first, so a failure to add one leaves the plate alone. */
-      var added = [], names = [];
-      for (var i = 0; i < r.pieces.length; i++) {
-        var pc = r.pieces[i];
-        var name = (m.name || 'piece') + ' - lifted ' + (pc.id + 1);
-        var id = addModel(name, rawResultToDisplayGeometry(pc.soup), {
-          rawTris: pc.soup, rawAxis: 'zup', centerOffset: computeCenterOffsetFromRaw(pc.soup),
-          keepSelection: true, silent: true
-        });
-        if (id == null) {
-          takeOff(added);
-          return fail('Lift refused - nothing changed: feature ' + (pc.id + 1) + ' is too small to be a piece ' +
-            '(under 0.1 mm across one way)');
-        }
-        added.push(id); names.push(name);
-      }
-
-      var nCurved = r.pieces.filter(function (pc2) { return pc2.fill; }).length;
-      var where = nCurved ? (nCurved === want.length ? '' : 'flat where ' + (want.length - nCurved === 1 ? 'one' : 'some') + ' stood on a flat face, ') +
-        'the surface round ' + (want.length === 1 ? 'it' : 'them') + ' carried across where ' + (want.length === 1 ? 'it' : 'they') +
-        ' stood and welded to it at the rim' : 'flat where ' + (want.length === 1 ? 'it' : 'they') + ' stood';
-      var heldN = r.pieces.reduce(function (s2, pc3) { return s2 + (pc3.parts || 0); }, 0);
-      var txt = 'Lifted ' + r.pieces.length + ' feature' + (r.pieces.length === 1 ? '' : 's') + ' off ' + m.name +
-        (heldN ? ' with ' + capturedWords(heldN) + ' (still separate shells, gaps as they were)' : '') +
-        ' (' + r.volumes.pieces.toFixed(2) + ' mm³): it is ' + where + ', every other triangle as it was, and ' +
-        (r.pieces.length === 1 ? 'the new piece stays' : 'the new pieces stay') + ' where ' + (r.pieces.length === 1 ? 'it' : 'they') +
-        ' stood' + ' - grab ' + (r.pieces.length === 1 ? 'it' : 'one') + ' to drop it somewhere else. One Undo (Ctrl+Z) puts it all back.';
-      if (r.notes && r.notes.length) txt += ' Note: ' + r.notes.join('; ') + '.';
-      var before0 = state.undoStack.length;
-      if (typeof NSO_sculptCommitRaw !== 'function' || !NSO_sculptCommitRaw(m, r.plate, 'liftReplace', txt)) {
-        takeOff(added);
-        return fail('Lift refused - nothing changed: the commit was rejected');
-      }
-      var rep = state.undoStack.length > before0 ? state.undoStack.pop() : null;
-      pushUndo({ type: 'featureSwap', replace: rep, addedIds: added.slice(), removed: [], label: 'Undo: Lift reverted',
-        onUndone: afterUndo });
-
-      /* Each new piece exactly where it stood on the parent, as the parent
-         is drawn now (the commit rebuilt its mesh). */
-      var spots = [];
-      added.forEach(function (id2) {
-        var made = modelOf(id2);
-        var entry = placeModelMovable(made, placed.x, placed.z);
-        if (!entry) return;
-        spots.push(landInPlace(entry, made, m, placedOf(m.id)));
-      });
-      if (typeof renderModelList === 'function') renderModelList();
-      if (typeof updateOptimizeButton === 'function') updateOptimizeButton();
-      if (typeof updateEditSize === 'function') updateEditSize();
-      if (typeof updateAdjustUI === 'function') updateAdjustUI();
-
-      var up = spots.filter(function (s) { return s && s.liftY > 0; });
-      if (up.length === 1 && r.pieces.length === 1) {
-        txt += ' It is in the air, ' + f2(up[0].liftY) + ' mm over the bed, and stays there until dropped or sent To plate.';
-      } else if (up.length) {
-        txt += ' ' + (up.length === r.pieces.length ? 'They are' : up.length + ' are') +
-          ' in the air over the bed, and stay there until dropped or sent To plate.';
-      }
+      return finishLift(m, placed, r, { n: want.length, how: how });
+    } catch (err) {
+      console.error('[lift]', err);
+      return fail('Lift failed - nothing changed (' + ((err && err.message) || err) + ')');
+    } finally {
       busy = false;
-      refresh();
-      var left = offered(A(), minH).length;
-      say(txt + ' ' + left + ' feature' + (left === 1 ? '' : 's') + ' left on it.');
-      return { ok: true, lift: r, addedIds: added, names: names, hostId: m.id, spots: spots, how: how || 'pick', reason: txt };
+      sync();
+    }
+  }
+
+  /** The shared tail of a lift: the pieces added, the parent's soup replaced, one Undo step, each piece landed where it
+      stood. `r` is the engine's answer ({ pieces: [{ id, soup }], plate, volumes, notes }); ctx: { n, how, shell, snap }. */
+  function finishLift(m, placed, r, ctx) {
+    /* The pieces first, so a failure to add one leaves the plate alone. */
+    var added = [], names = [];
+    for (var i = 0; i < r.pieces.length; i++) {
+      var pc = r.pieces[i];
+      var name = (m.name || 'piece') + ' - lifted ' + (pc.id + 1);
+      var id = addModel(name, rawResultToDisplayGeometry(pc.soup), {
+        rawTris: pc.soup, rawAxis: 'zup', centerOffset: computeCenterOffsetFromRaw(pc.soup),
+        keepSelection: true, silent: true
+      });
+      if (id == null) {
+        takeOff(added);
+        return fail('Lift refused - nothing changed: feature ' + (pc.id + 1) + ' is too small to be a piece ' +
+          '(under 0.1 mm across one way)');
+      }
+      added.push(id); names.push(name);
+    }
+
+    var nCurved = r.pieces.filter(function (pc2) { return pc2.fill; }).length;
+    var where = nCurved ? (nCurved === ctx.n ? '' : 'flat where ' + (ctx.n - nCurved === 1 ? 'one' : 'some') + ' stood on a flat face, ') +
+      'the surface round ' + (ctx.n === 1 ? 'it' : 'them') + ' carried across where ' + (ctx.n === 1 ? 'it' : 'they') +
+      ' stood and welded to it at the rim' : 'flat where ' + (ctx.n === 1 ? 'it' : 'they') + ' stood';
+    var heldN = r.pieces.reduce(function (s2, pc3) { return s2 + (pc3.parts || 0); }, 0);
+    var txt = ctx.shell ? 'Lifted shell ' + (ctx.shell.id + 1) + ' of ' + m.name + ' out whole (' + ctx.shell.tris + ' triangles, ' +
+        r.volumes.pieces.toFixed(2) + ' mm\u00b3): no cut and no face region - every triangle of it and of what is left is as it was, and nothing moved. ' +
+        'One Undo (Ctrl+Z) puts it back.' :
+      'Lifted ' + r.pieces.length + ' feature' + (r.pieces.length === 1 ? '' : 's') + ' off ' + m.name +
+      (heldN ? ' with ' + capturedWords(heldN) + ' (still separate shells, gaps as they were)' : '') +
+      ' (' + r.volumes.pieces.toFixed(2) + ' mm³): it is ' + where + ', every other triangle as it was, and ' +
+      (r.pieces.length === 1 ? 'the new piece stays' : 'the new pieces stay') + ' where ' + (r.pieces.length === 1 ? 'it' : 'they') +
+      ' stood' + ' - grab ' + (r.pieces.length === 1 ? 'it' : 'one') + ' to drop it somewhere else. One Undo (Ctrl+Z) puts it all back.';
+    if (r.notes && r.notes.length) txt += ' Note: ' + r.notes.join('; ') + '.';
+    var before0 = state.undoStack.length;
+    if (typeof NSO_sculptCommitRaw !== 'function' || !NSO_sculptCommitRaw(m, r.plate, 'liftReplace', txt)) {
+      takeOff(added);
+      return fail('Lift refused - nothing changed: the commit was rejected');
+    }
+    var rep = state.undoStack.length > before0 ? state.undoStack.pop() : null;
+    pushUndo({ type: 'featureSwap', replace: rep, addedIds: added.slice(), removed: [], label: 'Undo: Lift reverted',
+      onUndone: ctx.snap ? function () { putBack(m.id, ctx.snap); afterUndo(); } : afterUndo });
+
+    /* Each new piece exactly where it stood on the parent, as the parent
+       is drawn now (the commit rebuilt its mesh). */
+    var spots = [];
+    if (ctx.snap) landShell(placedOf(m.id), m, ctx.snap);          // what is left stays where it stood
+    added.forEach(function (id2) {
+      var made = modelOf(id2);
+      var entry = placeModelMovable(made, placed.x, placed.z);
+      if (!entry) return;
+      spots.push(ctx.snap ? landShell(entry, made, ctx.snap) : landInPlace(entry, made, m, placedOf(m.id)));
+    });
+    if (typeof renderModelList === 'function') renderModelList();
+    if (typeof updateOptimizeButton === 'function') updateOptimizeButton();
+    if (typeof updateEditSize === 'function') updateEditSize();
+    if (typeof updateAdjustUI === 'function') updateAdjustUI();
+
+    var up = spots.filter(function (s) { return s && s.liftY > 0; });
+    if (up.length === 1 && r.pieces.length === 1) {
+      txt += ' It is in the air, ' + f2(up[0].liftY) + ' mm over the bed, and stays there until dropped or sent To plate.';
+    } else if (up.length) {
+      txt += ' ' + (up.length === r.pieces.length ? 'They are' : up.length + ' are') +
+        ' in the air over the bed, and stay there until dropped or sent To plate.';
+    }
+    busy = false;
+    if (ctx.shell) {
+      /* What is left is read again when it is next hovered or clicked, not now: reading a big piece is the expensive
+         part of Lift, and the shell is already out. */
+      D = { ok: false, lazy: true, soup: m.rawTris, reason: m.name + ' is read again when you hover it.' };
+      hoverId = -1; hoverShell = -1; pending = new Set();
+      draw(); sync();
+      say(txt);
+      return { ok: true, shell: ctx.shell.id, lift: r, addedIds: added, names: names, hostId: m.id, spots: spots, how: ctx.how || 'pick',
+               ms: Date.now() - ctx.t0, reason: txt };
+    }
+    refresh();
+    var left = offered(A(), minH).length;
+    say(txt + ' ' + left + ' feature' + (left === 1 ? '' : 's') + ' left on it.');
+    return { ok: true, lift: r, addedIds: added, names: names, hostId: m.id, spots: spots, how: ctx.how || 'pick', reason: txt };
+  }
+
+  // =========================================================================
+  // A whole shell: the shells read (see the header), one click, no cut
+  // =========================================================================
+
+  var POSE_KEYS = ['rotY', 'rotated', 'flipX', 'tipX', 'tipZ', 'tiltX', 'tiltZ'];
+
+  /** The shell under raw triangle `tri` of the target, or null. */
+  function shellAt(tri) {
+    var d = SH();
+    if (!d || !(tri >= 0)) return null;
+    var id = d.S.of[tri];
+    return id >= 0 ? d.S.shells[id] : null;
+  }
+
+  /** The parent as it stands before the commit rebuilds it: enough to put every piece back where the parent drew it. */
+  function snapOf(m, p) {
+    var host = { mesh: p.mesh, liftY: p.liftY || 0 };
+    POSE_KEYS.forEach(function (k) { host[k] = p[k]; });
+    return { host: host, centerOffset: m.centerOffset, bottom: meshLocalBox3(p.mesh).min.y,
+             x: p.x, z: p.z, liftY: p.liftY || 0, pos: p.mesh.position.clone(), quat: p.mesh.quaternion.clone() };
+  }
+
+  /** `entry` (a new piece, or the parent itself) where the parent drew `made`'s triangles: Split to parts' own landing. */
+  function landShell(entry, made, snap) {
+    var SPL = typeof window !== 'undefined' ? window.NSO_SPLIT_PARTS : null;
+    if (!entry) return null;
+    if (SPL && typeof SPL.landInPlace === 'function') return SPL.landInPlace(entry, made, { centerOffset: snap.centerOffset }, snap.host, snap.bottom);
+    return landInPlace(entry, made, { centerOffset: snap.centerOffset }, snap.host);
+  }
+
+  /** Undo of a shell lift: the parent's soup is back; put the parent back at the pose it had. */
+  function putBack(id, snap) {
+    var e = placedOf(id);
+    if (!e || !e.mesh) return;
+    e.x = snap.x; e.z = snap.z; e.liftY = snap.liftY;
+    e.mesh.position.copy(snap.pos);
+    e.mesh.quaternion.copy(snap.quat);
+    e.mesh.updateMatrixWorld(true);
+  }
+
+  /** Take shell `sid` of the target out as a piece. -> { ok, ... } like lift(). */
+  function liftShell(sid, how) {
+    if (busy) return { ok: false, reason: 'busy' };
+    var d = SH();
+    if (!armed || !d || targetId == null) return fail('Lift: arm Lift on a piece with shells first.');
+    var S = d.S.shells[sid];
+    if (!S) return fail('Lift: no such shell - nothing changed.');
+    if (!S.liftable) return fail('Lift: that shell is a hollow inside another - it stays with the shell round it. Nothing changed.');
+    var m = modelOf(targetId), placed = placedOf(targetId);
+    var refused = refusalFor(m, placed);
+    if (refused) return fail(refused);
+    var cur = readTarget(m, placed);
+    if (!cur.ok || !cur.shell || cur.S !== d.S) { D = cur; refresh(); return fail('Lift: "' + m.name + '" changed since it was read - read again, try once more. Nothing changed.'); }
+    busy = true;
+    clearHover();
+    try {
+      var t0 = Date.now(), keep = [], f;
+      for (f = 0; f < d.S.tris; f++) if (d.S.of[f] !== sid) keep.push(f);
+      if (!keep.length) return fail('Lift: that is the whole piece - nothing to take it out of. Nothing changed.');
+      var r = { ok: true, pieces: [{ id: 0, soup: SHM().extract(m.rawTris, S.faces) }], plate: SHM().extract(m.rawTris, keep),
+                volumes: { pieces: Math.abs(S.vol) }, notes: [] };
+      return finishLift(m, placed, r, { n: 1, how: how, shell: S, snap: snapOf(m, placed), t0: t0 });
     } catch (err) {
       console.error('[lift]', err);
       return fail('Lift failed - nothing changed (' + ((err && err.message) || err) + ')');
@@ -1083,14 +1260,29 @@ var NSO_LIFT_PLATE = (function () {
     if (!ensureLayer()) return;
     clearLayer();
     layer.visible = armed;
-    var a = A(), p = targetId != null ? placedOf(targetId) : null;
-    if (!armed || !a || !p || !p.mesh) return;
+    var a = A(), sd = SH(), p = targetId != null ? placedOf(targetId) : null;
+    if (!armed || !(a || sd) || !p || !p.mesh) return;
     var P = p.mesh.geometry.attributes.position.array;
     if (P.length !== modelOf(targetId).rawTris.length) return;
     p.mesh.updateMatrixWorld(true);
     layer.matrixAutoUpdate = false;
     layer.matrix.copy(p.mesh.matrixWorld);
     layer.matrixWorldNeedsUpdate = true;
+    if (sd) {
+      /* Read as shells: the shell under the cursor, filled and outlined (a shell too big to walk is stood for by the
+         triangle the cursor is on, as a big feature is). */
+      if (hoverShell >= 0 && sd.S.shells[hoverShell]) {
+        var S = sd.S.shells[hoverShell], okS = S.liftable;
+        if (bigTarget() && hoverTri >= 0 && S.tris > HOVER_WALK_MAX) {
+          layer.add(fill(P, [hoverTri], okS ? HOVER : 0xb91c1c, 0.8));
+          layer.add(lines(outlineOf(P, [hoverTri]), okS ? HOVER : 0xef4444, 1));
+        } else {
+          layer.add(fill(P, S.faces, okS ? HOVER : 0xb91c1c, 0.45));
+          layer.add(lines(outlineOf(P, S.faces), okS ? HOVER : 0xef4444, 1));
+        }
+      }
+      return;
+    }
     var off = offered(a, minH), all = [];
     if (face && face.surf) {
       if (!tint || tint.A !== a) { dropTint(); tint = { A: a, mesh: fill(P, a.region.tris, FACE, 0.3) }; }
@@ -1192,6 +1384,11 @@ var NSO_LIFT_PLATE = (function () {
     setHover: setHover,
     pending: function () { return Array.from(pending); },
     lift: lift,
+    liftShell: liftShell,
+    shellRead: shellRead,
+    shells: function () { return SH() ? SH().S : null; },
+    hoverShell: function () { return hoverShell; },
+    setHoverShell: setHoverShell,
     openStrip: openStrip,
     closeStrip: closeStrip,
     setStripGroup: setStripGroup,

@@ -119,7 +119,7 @@ var NSO_SPLIT_PARTS = (function () {
       return;
     }
     if (!work) {
-      var job = window.NSO_Work.run('split', ['nso_thickness.js', 'nso_hollow.js', 'nso_split_parts.js'],
+      var job = window.NSO_Work.run('split', ['nso_thickness.js', 'nso_hollow.js', 'nso_shells.js', 'nso_split_parts.js'],
         'NSO_SplitParts.analyse', [soup]);
       work = { soup: soup, job: job };
       var mine = work;
@@ -297,6 +297,7 @@ var NSO_SPLIT_PARTS = (function () {
       var up = spots.filter(function (s) { return s && s.liftY > 0; });
       var txt = 'Split ' + hostName + ' into ' + r.parts.length + ' parts: ' + names.map(function (n) { return '"' + n + '"'; }).join(', ') +
         ' - ' + r.parts.map(function (p) { return p.tris; }).join(' + ') + ' = ' + r.tris + ' triangles, every one as it was, each where it stood' +
+        (r.crossing ? ', ' + (r.crossing === 1 ? 'a shell' : r.crossing + ' shells') + ' that crossed another now a piece of its own' : '') +
         (r.cavities ? ', ' + (r.cavities === 1 ? 'a hollow' : r.cavities + ' hollows') + ' kept with the part it is in' : '') + '.' +
         (up.length ? ' ' + (up.length === r.parts.length ? 'They are' : up.length + ' are') + ' in the air over the bed' +
           (up.length === 1 ? ' (' + f2(up[0].liftY) + ' mm)' : '') + ', and stay there until dropped or sent To plate.' : '') +
@@ -354,6 +355,7 @@ var NSO_SPLIT_PARTS = (function () {
     refresh: refresh,
     read: function (soup) { return read(soup); },
     refusalFor: refusalFor,
+    landInPlace: landInPlace,        // Lift lands a shell it takes out of a piece the same way
     shown: function () { return shown; }
   };
 })();

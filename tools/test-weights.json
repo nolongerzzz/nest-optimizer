@@ -254,6 +254,8 @@
     "soften:holes": {"weight":19550,"note":""},
     "split:parts": {"weight":8800,"note":""},
     "split:parts-drive": {"weight":37250,"note":""},
+    "shells:test": {"weight":9000,"note":"estimate: 6 s on the cloud box x 1.7 (shells-as-pieces)"},
+    "shells:drive": {"weight":95000,"note":"estimate: 55 s on the cloud box x 1.7 (shells-as-pieces)"},
     "stock": {"weight":926,"note":""},
     "stock:canonical": {"weight":11900,"note":""},
     "stock:live": {"weight":68900,"note":""},

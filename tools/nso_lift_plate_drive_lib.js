@@ -121,7 +121,7 @@ async function armOn(page, id) {
   if (await page.evaluate(() => NSO_LIFT_PLATE.isArmed())) await page.click('#btn-lift');
   await selectRow(page, id);
   await page.click('#btn-lift');
-  await page.waitForFunction(() => /features? found|nothing read|—/.test(document.getElementById('lift-count').textContent), null, { timeout: 120000 });
+  await page.waitForFunction(() => /(features?|shells) found|nothing read|—/.test(document.getElementById('lift-count').textContent), null, { timeout: 120000 });
   return (await card(page)).count;
 }
 async function disarm(page) {
