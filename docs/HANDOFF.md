@@ -42,6 +42,7 @@ merging its list by hand. The list below is generated.
 - [Face select - the target, next to the paint (2026-09-16)](handoff/face-select-the-target-next-to-the-paint.md)
 - [Fatten - grow or shrink the cross-section, hold the length (2026-09-19)](handoff/fatten-grow-or-shrink-the-cross-section-hold-the-length.md)
 - [Feature fixtures - known functional features on one hull (2026-09-26)](handoff/feature-fixtures-known-functional-features-on-one-hull.md)
+- [Foam GUN - UI over foamBox (foam-gun-ui, 2026-10-23)](handoff/foam-gun-ui.md)
 - [G-scope - fused selections: one solid where runs touch (2026-09-26)](handoff/g-scope-fused-selections-one-solid-where-runs-touch.md)
 - [G-scope - one G-code tool, with line isolation, a layer slider and Crop (2026-09-25)](handoff/g-scope-one-g-code-tool-with-line-isolation-a-layer-slider-and.md)
 - [G-scope supports - overhang markers, point-click generation, per-support edit (2026-09-25)](handoff/g-scope-supports-overhang-markers-point-click-generation-per.md)
