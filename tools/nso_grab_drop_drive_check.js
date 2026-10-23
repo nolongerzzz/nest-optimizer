@@ -81,6 +81,28 @@ const parentPoint = (page, id, r) => page.evaluate(([id, r]) => {
   p.mesh.updateMatrixWorld(true);
   return p.mesh.localToWorld(new THREE.Vector3(r[0] - c.x, r[2] - c.y, -r[1] - c.z)).toArray();
 }, [id, r]);
+/* A screen point that lands on the piece (the first thing the ray meets), nearest the middle of where it is drawn. */
+const pointOn = (page, id) => page.evaluate(id => {
+  const p = state.placed.find(q => q && q.sourceId === id), r = state.renderer.domElement.getBoundingClientRect();
+  p.mesh.updateMatrixWorld(true); state.camera.updateMatrixWorld(true);
+  const bb = new THREE.Box3().setFromObject(p.mesh), lo = [Infinity, Infinity], hi = [-Infinity, -Infinity];
+  for (let i = 0; i < 8; i++) {
+    const v = new THREE.Vector3(i & 1 ? bb.max.x : bb.min.x, i & 2 ? bb.max.y : bb.min.y, i & 4 ? bb.max.z : bb.min.z).project(state.camera);
+    lo[0] = Math.min(lo[0], v.x); hi[0] = Math.max(hi[0], v.x); lo[1] = Math.min(lo[1], v.y); hi[1] = Math.max(hi[1], v.y);
+  }
+  const rc = new THREE.Raycaster(), cx = (lo[0] + hi[0]) / 2, cy = (lo[1] + hi[1]) / 2;
+  let best = null;
+  for (let a = 0; a <= 24; a++) for (let b = 0; b <= 24; b++) {
+    const x = lo[0] + (hi[0] - lo[0]) * a / 24, y = lo[1] + (hi[1] - lo[1]) * b / 24;
+    rc.setFromCamera({ x, y }, state.camera);
+    const h = rc.intersectObjects(state.modelGroup.children, false)[0];
+    if (!h || h.object !== p.mesh) continue;
+    if (r.top + (1 - y) / 2 * r.height < 140) continue;       // under the top bar a press never reaches the canvas
+    const d = Math.hypot(x - cx, y - cy);
+    if (!best || d < best.d) best = { d, x, y };
+  }
+  return best ? { x: r.left + (best.x + 1) / 2 * r.width, y: r.top + (1 - best.y) / 2 * r.height } : null;
+}, id);
 /* Press at screen point a, carry to b in steps, and (unless `hold`) let go. */
 async function carry(page, a, b, opts) {
   opts = opts || {};
@@ -248,13 +270,13 @@ withApp(async (page, logs) => {
     ids.forEach(id => bb.union(new THREE.Box3().setFromObject(state.placed.find(q => q && q.sourceId === id).mesh)));
     const c = bb.getCenter(new THREE.Vector3()), span = Math.max(bb.max.x - bb.min.x, bb.max.z - bb.min.z);
     state.controls.target.copy(c);
-    state.camera.position.set(c.x, c.y + span * 1.2, c.z + span * 0.5);
+    state.camera.position.set(c.x, c.y + span * 1.7, c.z + span * 0.12);
     state.controls.update();
   }, [plateId, idB]);
   await page.waitForTimeout(250);
   await page.evaluate(id => { state.models.find(m => m.id === id).nsoSupport = { style: 'tree' }; }, plateId);
   const B8 = await piece(page, idB), u8 = (await plateState(page)).undo;
-  const B8s = await screenOf(page, [(B8.min[0] + B8.max[0]) / 2, B8.max[1], (B8.min[2] + B8.max[2]) / 2]);
+  const B8s = await pointOn(page, idB);
   await carry(page, B8s, await screenOf(page, await parentPoint(page, plateId, [50, 20, HG.paper])), { hold: true });
   const g8 = await grabState(page);
   check('over a support piece: refused before the drop, the target boxed red', g8.mode === 'piece' && /is a support piece - nothing is dropped onto a support/.test(g8.status) &&
