@@ -544,12 +544,12 @@ one wedge under the whole overhang, its interface strips laid on it.
   against Bambu's 13.54: 2.57 x - the gate (1.5 x) FAILS.** By height, m
   (ours / Bambu): 0-1: 3.45 / 0.80, 1-5: 3.92 / 1.08, 5-10: 3.89 / 0.81,
   10-20: 6.13 / 0.91, 20-30: 5.14 / 1.17, 30-37: 5.89 / 2.55, 37-40: 2.76 /
-  2.07, 40-42: 1.56 / 1.45, 42-44: 1.29 / 1.53, 44-47: 0.78 / 1.16. From z
-  38 up every layer of ours lays less than Bambu's (z 42: 150 / 161 mm); the
-  excess is under the body - the pad and two solid trunks (NSO's slicer, as
-  Bambu slicing our object, prints each with two walls and sparse infill:
-  ~170 mm a layer at z 5 against Bambu's one trunk of loops, 52) and the
-  cones (z 30 - 37). Before this ticket: 44.0 m, 3.25 x, the stair's own
+  2.07, 40-42: 1.56 / 1.45, 42-44: 1.29 / 1.53, 44-47: 0.78 / 1.16. Over z
+  38 - 41.6 ours lays 1.1 - 1.25 x Bambu's a layer, from 41.8 up less (z 42:
+  150 / 161 mm); the excess is under the body - the pad and two solid trunks
+  (NSO's slicer, as Bambu slicing our object, prints each with two walls and
+  sparse infill: ~170 mm a layer at z 5 against Bambu's one trunk of loops,
+  52) and the cones (z 30 - 37). Before this ticket: 44.0 m, 3.25 x, the stair's own
   trees 22.5 m of it.
 - **Against Bambu, the interface** (`support:curved` 5): every one of
   Bambu's 23 interface layers (41.8 - 46.2) has a strip of ours at that z
