@@ -211,6 +211,10 @@
   var TRUNK_TIP_REACH_MM = 5;
   var TRUNK_SIDES = 32;        /* a trunk is a round solid of this many sides */
   var TRUNK_STEP_MM = 0.25;    /* the piece's distance is read up a trunk's axis this often */
+  var TRUNK_FOOT_CLEAR_MM = 3.86; /* a trunk's foot stands this far off the part's base on the first layer: Bambu's on
+                                    simple_overhang (its trunk's first-layer ring to the part's outer wall, edge to edge, 0.5 mm lines) */
+  var RELAND_STEP_MM = 0.5;    /* a landing moved off the part is tried this far apart, ... */
+  var RELAND_HEADINGS = 32;    /* ...in this many directions */
   var CAP_SIDES = 16;          /* a cap under the sheet: a round frustum of this many sides */
   var LEAN_TOL = 1e-4;          /* a face tilted exactly the lean limit is not a side face: float32 noise on its normal must not decide */
   var EAGERNESS = { strut: 0, tree: 1, 'gecko-hand': 1 };
@@ -2313,12 +2317,67 @@
       var top = cur.path[0][2] + (cur.kind === 'merge' || cur.kind === 'pickup' ? cur.side / 2 : 0);
       return { H: H, top: top, side: root.side, tips: null };
     }
+    /* A TRUNK'S LANDING, KEPT OFF THE PART (supports-stair-body): its
+       flared foot - the law's outer radius at the plate - stands
+       TRUNK_FOOT_CLEAR_MM off the part on the first layer, as Bambu's
+       does, and from there up to its stem's top the law fits TRUNK_KEEP_MM
+       off it everywhere, so the trunk flares to its full width. A landing
+       that does not is moved: the landing member's drop leans from the
+       point it falls from to the nearest point (RELAND_STEP_MM apart, in
+       RELAND_HEADINGS directions, no further than the plan's branch lean
+       allows from that height) where the trunk fits and the leaning leg is
+       clear. None found: it lands as planned (and growTrunks narrows it). */
+    var relanded = [], landProbes = null;
+    function reland(m, g) {
+      var e = m.path[m.path.length - 1], from = m.path.length > 1 ? m.path[m.path.length - 2] : null;
+      if (!from || !(e[2] <= p.plateZ + 1e-9)) return null;
+      var THr = TM(opts);
+      if (!THr) return null;
+      if (!landProbes) landProbes = [opts.rawTris || []].concat(opts.occluders || []).filter(function (sp) { return sp && sp.length >= 9; })
+        .map(function (sp) { return probeOf(THr, sp); }).filter(Boolean);
+      var ta = Math.tan(TRUNK_ANGLE_DEG * Math.PI / 180), tb = Math.tan(FLARE_ANGLE_DEG * Math.PI / 180), cosN = Math.cos(Math.PI / TRUNK_SIDES);
+      var z0 = p.plateZ + foot / 2, zf = p.plateZ + FLARE_MM, top = Math.min(g.top, from[2]);
+      var law = function (z) { return TRUNK_TIP_MM / 2 + ta * Math.max(0, g.H - z) + (z < zf ? tb * (zf - z) : 0); };
+      var zs = [];
+      for (var z = z0; z < top - 1e-9; z += 2 * TRUNK_STEP_MM) zs.push(z);
+      function fits(c) {
+        for (var k = 0; k < zs.length; k++) {
+          var zz = zs[k], need = law(zz) / cosN + (zz <= p.plateZ + foot + 1e-9 ? TRUNK_FOOT_CLEAR_MM : TRUNK_KEEP_MM);
+          for (var q = 0; q < landProbes.length; q++) {
+            var P0 = landProbes[q];
+            if (P0.inside && P0.inside([c[0], c[1], zz])) return false;
+            var hit = P0.nearest([c[0], c[1], zz], need + 0.01);
+            if (hit && hit.dist < need) return false;
+          }
+        }
+        return true;
+      }
+      if (fits(e)) return null;
+      var sMax = (from[2] - p.plateZ) * Math.tan((p.branchTiltDeg || 30) * Math.PI / 180);
+      for (var sd = RELAND_STEP_MM; sd <= sMax + 1e-9; sd += RELAND_STEP_MM) {
+        for (var hh = 0; hh < RELAND_HEADINGS; hh++) {
+          var th = 2 * Math.PI * hh / RELAND_HEADINGS, W = [e[0] + sd * Math.cos(th), e[1] + sd * Math.sin(th), e[2]];
+          if (probe.leg(from, W, m.side, 0, 0) >= 0) continue;
+          if (!fits(W)) continue;
+          return { path: m.path.slice(0, -1).concat([W]), from: e.slice(), to: W, mm: sd };
+        }
+      }
+      return null;
+    }
     function step(t) {
       var tr = p.trunks[t], parts = [], fingers = [];
       for (var i = 0; i < tr.members.length; i++) {
         var m = p.members[tr.members[i]];
         if (leftOut(m)) continue;
-        var ms = sh && m.beacon != null && sh.byBeacon[m.beacon] ? sh.member(m) : memberSolid(P, m, foot);
+        /* THE LANDING (TRUNKS): a trunk whose foot the part would stand
+           nearer than Bambu's lands further off it */
+        var landed = null, gw = null;
+        if (grow && foot && i === 0 && tr.landing === 'plate') {
+          gw = stemOf(tr, m);
+          if (m.beacon == null) landed = reland(m, gw);
+        }
+        var ms = landed ? memberSolid(P, m, foot, landed.path)
+          : sh && m.beacon != null && sh.byBeacon[m.beacon] ? sh.member(m) : memberSolid(P, m, foot);
         if (!ms.ok) return { ok: false, reason: ms.reason };
         m.points = ms.points;
         parts = parts.concat(ms.soups.map(function (x) { return { soup: x }; }));
@@ -2327,7 +2386,8 @@
              are drawn over every foot at once, in finish() (FEET) */
           var fp0 = footprintOf(ms.points[ms.points.length - 1], m.side);
           var ft = { key: t, trunk: t, c: fp0.c, r: fp0.r };
-          if (grow) ft.grow = stemOf(tr, m);
+          if (grow) ft.grow = gw;
+          if (landed) relanded.push({ trunk: t, from: landed.from, to: landed.to, mm: landed.mm, why: landed.why });
           feet.push(ft);
         }
         if (m.pad) {
@@ -2415,6 +2475,7 @@
           (stairOf[L.id] = stairOf[L.id] || []).push(T);
         });
         f2.feet.forEach(function (f) { feet.push({ key: base + f.trunk, trunk: base + f.trunk, c: f.c, r: f.r, grow: f.grow }); });
+        (f2.relanded || []).forEach(function (r) { relanded.push({ trunk: base + r.trunk, from: r.from, to: r.to, mm: r.mm, stair: L.id }); });
         stairLog.push({ level: L.id, wanted: L.stair.tips.length, held: p2.held != null ? p2.held : L.stair.tips.length - p2.unreachable.length,
                         unreachable: p2.unreachable.length, trunks: p2.trunks.length, members: p2.members.filter(function (m) { return !m.dead; }).length });
       });
@@ -2480,7 +2541,7 @@
       if (summ) summ.stairTrees = stairLog;
       return { ok: true, trunks: out, fingersDropped: droppedFingers, pads: pads, padGroups: padGroups, stairTrunks: stairTrunks,
                feet: feet.map(function (f) { return f.grow ? { trunk: f.trunk, c: f.c, r: f.r, grow: f.grow } : { trunk: f.trunk, c: f.c, r: f.r }; }),
-               trunkShells: trunks, sheet: summ };
+               trunkShells: trunks, sheet: summ, relanded: relanded };
     }
     return { ok: true, n: p.trunks.length, step: step, finish: finish };
   }
@@ -3142,7 +3203,7 @@
     _frustumSoup: frustumSoup,
     FEET: { layerMm: FOOT_LAYER_MM, clusterMm: FOOT_CLUSTER_MM, growMm: FOOT_GROW_MM, gapMm: FOOT_GAP_MM, cellMm: FOOT_CELL_MM, touchMm: FOOT_TOUCH_MM },
     TRUNK: { tipMm: TRUNK_TIP_MM, angleDeg: TRUNK_ANGLE_DEG, flareMm: FLARE_MM, flareAngleDeg: FLARE_ANGLE_DEG, share: TRUNK_SHARE,
-             keepMm: TRUNK_KEEP_MM, tipClearMm: TRUNK_TIP_CLEAR_MM, tipReachMm: TRUNK_TIP_REACH_MM, sides: TRUNK_SIDES },
+             keepMm: TRUNK_KEEP_MM, tipClearMm: TRUNK_TIP_CLEAR_MM, tipReachMm: TRUNK_TIP_REACH_MM, sides: TRUNK_SIDES, footClearMm: TRUNK_FOOT_CLEAR_MM },
     _memberSolid: function (m, foot, opts) { return memberSolid(PS(opts || {}), m, foot); },
     _phaseOf: phaseOf,
     foldSheets: function (tp, opts) { return foldSheets(tp, opts || {}); },

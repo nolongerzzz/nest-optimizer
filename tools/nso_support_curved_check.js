@@ -45,8 +45,9 @@
    6. NSO's SLICE of the export (the card's own slicer, detect_thin_wall on):
       every layer of the stair - its transition to its top - has its strip
       typed Support interface or Support transition; the support's lines
-      are support lines only; NO STRIP LINE OVER AIR, as typeSupports reads
-      a wall's overhang (the layer under, closed, grown half a line); each
+      are support lines only; NO STRIP SPAN over air LONGER THAN THE TIP
+      PITCH (5 mm), as typeSupports reads a wall's overhang (the layer under,
+      closed, grown half a line) - a strip spans between its tips; each
       strip as wide as the part's step and a line in the slice; the
       support's toolpath over the stair's start at most 1.5 x Bambu's there
       - the whole part's ratio and the tables by Bambu's layers and by
@@ -476,12 +477,16 @@ async function cardRun() {
       return (lay ? lay.paths : []).filter(pa => pa.pts.every(onIt));
     };
     const sp = strips.map(Ly => ({ Ly, paths: stripPaths(Ly) }));
-    const hung = sp.filter(x => x.paths.some(pa => pa.overhangMm > 0));
-    const nPaths = sp.reduce((a, x) => a + x.paths.length, 0);
-    check('EVERY STRIP SITS ON THE LAYER UNDER IT: none of its lines over air, as the slicer types a wall (typeSupports\' overhang: the layer under, closed, grown half a line)',
-      !hung.length && sp.every(x => x.paths.length >= 1),
-      `${nPaths} strip paths on ${strips.length} strips, ${hung.length} over air` + (hung.length ? ' at ' + hung.map(x => `${f2(x.Ly.z1)} (${f2(Math.max(...x.paths.map(pa => pa.overhangMm)))} mm)`).join(', ') : '') +
-      `; the support's other lines over air: ${Object.keys(ty.overhangPaths).map(k => `${k} ${ty.overhangPaths[k]} (${ty.overhangMm[k].toFixed(1)} mm)`).join(', ')}`);
+    /* a strip spans between the tips that hold it (round 3 printed that): no span of a strip's line over air
+       longer than the tip pitch (STAIR.tipMm, Bambu's branch distance) */
+    const PITCH_T = SI.STAIR.tipMm, nPaths = sp.reduce((a, x) => a + x.paths.length, 0);
+    const spans = [].concat(...sp.map(x => [].concat(...x.paths.map(pa => (pa.overhangRuns || []).map(l => ({ z: x.Ly.z1, l }))))));
+    const long = spans.filter(q => q.l > PITCH_T + 1e-6);
+    check(`NO STRIP SPAN LONGER THAN THE TIP PITCH: a strip's line over air (typeSupports' overhang: the layer under, closed, grown half a line) runs ${PITCH_T} mm or less between what holds it`,
+      !long.length && sp.every(x => x.paths.length >= 1),
+      `${nPaths} strip paths on ${strips.length} strips, ${spans.length} spans over air, longest ${f2(Math.max(0, ...spans.map(q => q.l)))} mm` +
+      (long.length ? '; longer at ' + long.map(q => `${f2(q.z)} (${f2(q.l)} mm)`).join(', ') : '') +
+      `; the support's lines over air: ${Object.keys(ty.overhangPaths).map(k => `${k} ${ty.overhangPaths[k]} (${ty.overhangMm[k].toFixed(1)} mm)`).join(', ')}`);
     /* each strip, in the slice, against the part's step over it: the extent across the slope of the points of the
        layer's lines that lie on the strip (a tip's column top beside it joins the strip's island in the slice) */
     const onStrip = Ly => {

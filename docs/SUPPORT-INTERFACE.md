@@ -571,18 +571,18 @@ part as before (a tip every 5 mm or nearer).
   NSO's slice; the part over each 0.187 - 0.457 mm across its width where
   the next strip is not over it, median 0.301; 89 tips; gap 0.181.
 - `typeSupports` reads every support line's overhang as a slicer types a
-  wall (docs/SLICER.md). **23 of the strips' 98 paths are over air in part**
-  (0.09 - 5.7 mm each, z 37.8 - 46): a strip's up-slope part beyond the strip
-  below is held by tips 5 mm apart, with air between them - the
-  `support:curved` 6 gate (no strip line over air) FAILS. Nothing under a
-  strip but the strip below and its tips can make it hold without strips
-  widening downward layer on layer.
+  wall, span by span (docs/SLICER.md). A strip spans between the tips that
+  hold it, as round 3 printed: no span of a strip's line over air longer
+  than the tip pitch (5 mm, `support:curved` 6) - on the arc 55 spans over
+  98 strip paths, the longest 3.38 mm.
 - The support's toolpath over the stair's start (z 37.2): 7.14 m against
   Bambu's 6.22, 1.15 x (gate 1.5 x). The whole part, a finding the
-  trunk-thinning follow-up (section 6) owns: 42.01 m against 13.54, 3.10 x.
-- The stair's tree, planned on these strips, lands a trunk at (90, 92.5),
-  by the arc's base: the piece holds it to 11.36 mm at the plate against
-  Bambu's 12.35, and it does not flare there (`support:foot` 2 and 3).
+  trunk-thinning follow-up (section 6) owns: 40.78 m against 13.54, 3.01 x.
+- The stair's tree, planned on these strips, landed a trunk at (90, 92.5) by
+  the arc's base, which held it to 11.36 mm at the plate (Bambu's 12.35):
+  trunks now land off the part as Bambu's do (docs/SUPPORT-GRIDPACK.md,
+  *The landing*) - on the arc two re-land, 2.0 and 4.5 mm, and every trunk
+  flares to full width.
 
 **The refusal on the arc** (`support:curved` 8). At the card's 60 deg the
 arc was "Area 1 · unreachable · no route to the plate · 70 spots" (63 in the

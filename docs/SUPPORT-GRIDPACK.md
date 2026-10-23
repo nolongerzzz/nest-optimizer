@@ -222,6 +222,20 @@ changes, byte for byte:
   0.25 mm up its axis: where the piece comes nearer it is narrower there
   (rings a millimetre apart), and it ends where it would be narrower than its
   own column.
+- **The landing** (supports-stair-body). Bambu's trunk foot on
+  simple_overhang stands 3.86 mm off the part's base on the first layer
+  (its first-layer ring to the part's outer wall, edge to edge, 0.5 mm
+  lines; `support:foot` 5b measures it): `TRUNK_FOOT_CLEAR_MM`. On the
+  card's build (trunks grown) a trunk whose flared foot would stand nearer,
+  or whose law would not fit `TRUNK_KEEP_MM` off the part up its stem, is
+  re-landed: the landing member's drop leans from the point it falls from to
+  the nearest point (0.5 mm apart, 32 directions, within the plan's branch
+  lean from that height) where the whole trunk fits and the leaning leg is
+  clear, and the trunk flares to full width there (`tp.relanded`). None
+  found: it lands as planned and is narrowed. On the arc two re-land (2.0
+  and 4.5 mm); on the coupon two (~1.7 mm), and its three trunks at x 82.5
+  find no landing within the lean and stay narrowed. Without trunk growth
+  (G-scope, `solid()`) nothing moves.
 - **Its pad** is the flared base's circle grown 4 mm (as before, from a
   larger circle), the base's inscribed circle always pad. A trunk that comes
   within 0.1 mm of another support's solid makes the two one support, as
