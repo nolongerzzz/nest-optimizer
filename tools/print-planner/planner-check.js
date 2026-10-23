@@ -201,10 +201,12 @@ async function main() {
   check('nozzle and bed from the template filament (' + S.temp.nozzleInitial + ' / ' + S.temp.bedInitial + ')',
     noz.some(t => t.s === S.temp.nozzleInitial) && bed.some(t => t.s === S.temp.bedInitial), JSON.stringify(sc.temps.slice(0, 4)));
   const fanByLayer = {};
-  sc.fans.forEach(f => { (fanByLayer[f.layer] = fanByLayer[f.layer] || []).push(f.s); });
+  const fansBody = sc.fans.slice(0, sc.fans.length && sc.fans[sc.fans.length - 1].s === 0 && sc.fans[sc.fans.length - 1].layer === sc.layerStarts.length - 1 ? -1 : undefined);   // the tail's M106 S0 is the end block's
+  fansBody.forEach(f => { (fanByLayer[f.layer] = fanByLayer[f.layer] || []).push(f.s); });
   const C = S.cooling;
   check('layer 1: fan off (close_fan_the_first_x_layers = ' + S.fan.closeFirst + ')', fanByLayer[0] && fanByLayer[0][0] === 0, JSON.stringify(fanByLayer[0]));
-  const layerFans = Object.keys(fanByLayer).filter(k => +k >= S.fan.closeFirst).map(k => fanByLayer[k][0]);
+  const ovS = Math.round(C.overhang_fan_speed * 255) / 100;
+  const layerFans = Object.keys(fanByLayer).filter(k => +k >= S.fan.closeFirst).flatMap(k => fanByLayer[k]).filter(v => v !== ovS);
   check('later layers: the fan is between fan_min_speed ' + C.fan_min_speed + ' % and fan_max_speed ' + C.fan_max_speed + ' % (NSO\'s keys)',
     layerFans.length > 10 && layerFans.every(v => v >= C.fan_min_speed * 2.55 - 0.01 && v <= C.fan_max_speed * 2.55 + 0.01),
     'min ' + Math.min(...layerFans) + ' max ' + Math.max(...layerFans));
@@ -238,7 +240,7 @@ async function main() {
   const plines = P.gcode.split('\n'), blines = A.gcode.split('\n');
   const slab = (ls, a, b) => { const i = ls.indexOf(a), j = ls.indexOf(b); return ls.slice(i, j + 1); };
   const noM73 = ls => ls.filter(l => !/^M73 P\d+ R\d+$/.test(l));
-  const pStart = slab(plines, 'M201 X20000 Y20000 Z1500 E5000', '; MACHINE_START_GCODE_END');
+  const pStart = noM73(slab(plines, 'M201 X20000 Y20000 Z1500 E5000', '; MACHINE_START_GCODE_END'));
   const bStart = noM73(slab(blines, 'M201 X20000 Y20000 Z1500 E5000', '; MACHINE_START_GCODE_END'));
   const diffs = (x, y) => { const d = []; x.forEach((l, i) => { if (l !== y[i]) d.push([l, y[i]]); }); return x.length === y.length ? d : null; };
   const dStart = diffs(pStart, bStart);
@@ -260,7 +262,7 @@ async function main() {
   hot.nozzle_temperature_initial_layer = ['230', '230']; hot.nozzle_temperature = ['225', '225'];
   hot.textured_plate_temp_initial_layer = ['70', '70'];
   const H = PL.plan(res, { config: hot, printer: PR });
-  const hs = slab(H.gcode.split('\n'), 'M201 X20000 Y20000 Z1500 E5000', '; MACHINE_START_GCODE_END');
+  const hs = noM73(slab(H.gcode.split('\n'), 'M201 X20000 Y20000 Z1500 E5000', '; MACHINE_START_GCODE_END'));
   const dHot = diffs(hs, pStart);
   const changed = dHot ? dHot.map(d => d[1].trim() + ' -> ' + d[0].trim()) : [];
   check('a hotter filament and bed change exactly the template\'s temperature lines (' + changed.length + ') and nothing else',
@@ -283,7 +285,7 @@ async function main() {
   const PP = PL.plan(pb.res, { config: p1sCfg, printer: PS });
   check('the arc plans for the P1S', PP.ok, PP.reason);
   const ppl = PP.gcode.split('\n'), bpl = BP.gcode.split('\n');
-  const psS = slab(ppl, 'M203 X500 Y500 Z20 E30', '; MACHINE_START_GCODE_END'), bsS = noM73(slab(bpl, 'M203 X500 Y500 Z20 E30', '; MACHINE_START_GCODE_END'));
+  const psS = noM73(slab(ppl, 'M203 X500 Y500 Z20 E30', '; MACHINE_START_GCODE_END')), bsS = noM73(slab(bpl, 'M203 X500 Y500 Z20 E30', '; MACHINE_START_GCODE_END'));
   const dS = diffs(psS, bsS);
   check('the P1S start block is Studio\'s, line for line (' + psS.length + ' lines); the bed-leveling box is the one line that differs',
     dS && dS.length === 1 && /^\s*G29 A X/.test(dS[0][0]), dS ? JSON.stringify(dS) : psS.length + ' vs ' + bsS.length);
@@ -292,6 +294,159 @@ async function main() {
   const topP = Math.max(...pb.res.objects[0].layers.filter(l => l.paths.length).map(l => l.printZ));
   check('...and its end block, but for the lift heights - which are this plate\'s (its last layer is ' + topP.toFixed(1) + ' mm: Studio\'s 48.8 as well, so none differ)',
     dE && dE.every(d => /^\s*G1 Z/.test(d[0])) && (near(topP, 48.8, 1e-6) ? dE.length === 0 : dE.length === 3), dE ? JSON.stringify(dE) : pe.length + ' vs ' + be.length);
+
+  // ===========================================================================
+  section('8. Markers, as Bambu writes them');
+  // ===========================================================================
+  const g = P.gcode.split('\n');
+  const at = (re, from) => { for (let i = from || 0; i < g.length; i++) if (typeof re === 'string' ? g[i] === re : re.test(g[i])) return i; return -1; };
+  const idx = {
+    h0: at('; HEADER_BLOCK_START'), h1: at('; HEADER_BLOCK_END'), c0: at('; CONFIG_BLOCK_START'), c1: at('; CONFIG_BLOCK_END'),
+    x0: at('; EXECUTABLE_BLOCK_START'), ms: at('; MACHINE_START_GCODE_END'), l0: at('; CHANGE_LAYER'), me: at('; MACHINE_END_GCODE_START'),
+    x1: at('; EXECUTABLE_BLOCK_END')
+  };
+  const lastLayer = g.lastIndexOf('; CHANGE_LAYER');
+  const ordered = [idx.h0, idx.h1, idx.c0, idx.c1, idx.x0, idx.ms, idx.l0, lastLayer, idx.me, idx.x1];
+  check('HEADER, CONFIG and EXECUTABLE blocks in Bambu\'s order: MACHINE_START_GCODE_END before layer 1, MACHINE_END_GCODE_START after the last layer',
+    ordered.every((v, i) => v >= 0 && (i === 0 || v > ordered[i - 1])), JSON.stringify(idx));
+  check('EXECUTABLE_BLOCK_END is the last thing in the file, after M73 P100 R0', g.filter(l => l).pop() === '; EXECUTABLE_BLOCK_END' && g[idx.x1 - 1] === 'M73 P100 R0');
+  const bg = A.gcode.split('\n');
+  const bIdx = n => bg.indexOf(n);
+  check('...the same order as the owner\'s own slice', ['; HEADER_BLOCK_START', '; HEADER_BLOCK_END', '; CONFIG_BLOCK_START', '; CONFIG_BLOCK_END', '; EXECUTABLE_BLOCK_START', '; MACHINE_START_GCODE_END', '; MACHINE_END_GCODE_START', '; EXECUTABLE_BLOCK_END']
+    .map(bIdx).every((v, i, a) => v >= 0 && (i === 0 || v > a[i - 1])));
+  // header
+  const hdr = {};
+  g.slice(idx.h0, idx.h1).forEach(l => { const m = /^; ([^:]+?)\s*:\s*(.*)$/.exec(l); if (m) hdr[m[1]] = m[2]; });
+  const bh = {};
+  bg.slice(bIdx('; HEADER_BLOCK_START'), bIdx('; HEADER_BLOCK_END')).forEach(l => { const m = /^; ([^:]+?)\s*:\s*(.*)$/.exec(l); if (m) bh[m[1]] = m[2]; });
+  check('the header has every field Studio\'s has, in its order', JSON.stringify(Object.keys(hdr)) === JSON.stringify(Object.keys(bh)), Object.keys(hdr).join(' | ') + '\n          ' + Object.keys(bh).join(' | '));
+  check('...with this plate\'s numbers: layers ' + hdr['total layer number'] + ', labels ' + hdr['model label id'] + ', max z ' + hdr.max_z_height,
+    +hdr['total layer number'] === res.planes.length && hdr['model label id'] === P.labels.map(l => l.id).join(',') && +hdr.max_z_height === +P.stats.maxZ.toFixed(2) &&
+      hdr.filament_density === bh.filament_density && hdr.filament_diameter === bh.filament_diameter);
+  const dur = s => { let t = 0; s.replace(/(\d+)([dhms])/g, (a, n, u) => { t += +n * { d: 86400, h: 3600, m: 60, s: 1 }[u]; return a; }); return t; };
+  const mt = /^(.*?); total estimated time: (.*)$/.exec(hdr['model printing time']);
+  check('...times written as "Xm Ys"; total = model + start + end (' + hdr['model printing time'] + ')', !!mt && /^(\d+h )?\d+m \d+s$/.test(mt[1].trim()) &&
+    Math.abs(dur(mt[1]) + 365 - dur(mt[2])) <= 2, hdr['model printing time']);
+  // config
+  const cfgOut = configBlock(P.gcode);
+  check('the CONFIG_BLOCK is Studio\'s, with NSO\'s cooling keys put in (slow_down_layer_time ' + cfgOut.slow_down_layer_time + ' against Studio\'s ' + cfgA.slow_down_layer_time + ')',
+    Object.keys(cfgOut).length === Object.keys(cfgA).length && cfgOut.slow_down_layer_time === '6,6' && cfgOut.fan_max_speed === '80,80' && cfgOut.outer_wall_speed === cfgA.outer_wall_speed &&
+      Object.keys(cfgA).filter(k => cfgOut[k] !== cfgA[k]).every(k => Object.prototype.hasOwnProperty.call(require(path.join(ROOT, 'nso-cooling-profiles.js')).DEFAULT_VALUES, k)),
+    Object.keys(cfgA).filter(k => cfgOut[k] !== cfgA[k]).join(', '));
+  // layers
+  const layerErrs = [];
+  let nl = 0;
+  g.forEach((l, i) => {
+    if (l !== '; CHANGE_LAYER') return;
+    nl++;
+    const z = res.planes[P.layers[nl - 1].index].printZ;
+    const win = g.slice(i, i + 40);
+    if (g[i + 1] !== '; Z_HEIGHT: ' + String(+z.toFixed(4))) layerErrs.push(nl + ' Z_HEIGHT ' + g[i + 1]);
+    if (!/^; LAYER_HEIGHT: 0\.2$/.test(g[i + 2])) layerErrs.push(nl + ' LAYER_HEIGHT ' + g[i + 2]);
+    if (!win.includes('; layer num/total_layer_count: ' + nl + '/' + P.layers.length)) layerErrs.push(nl + ' layer num');
+    if (!win.includes('M73 L' + nl)) layerErrs.push(nl + ' M73 L');
+    if (!win.includes('M991 S0 P' + (nl - 1) + ' ;notify layer change')) layerErrs.push(nl + ' M991');
+    if (!win.includes('; update layer progress')) layerErrs.push(nl + ' update');
+  });
+  check('every layer: CHANGE_LAYER, Z_HEIGHT, LAYER_HEIGHT, "layer num/total_layer_count: n/N", M73 L n, M991 S0 P n-1 (' + nl + ' layers)', nl === P.layers.length && layerErrs.length === 0, layerErrs.slice(0, 4).join('; '));
+  // M73 P/R
+  const m73 = []; g.forEach((l, i) => { const m = /^M73 P(\d+) R(\d+)$/.exec(l); if (m) m73.push([+m[1], +m[2], i]); });
+  check('M73 P/R is monotonic (P never down, R never up), starts at P0 and ends at P100 R0 (' + m73.length + ' markers)',
+    m73.length > 50 && m73[0][0] === 0 && m73[m73.length - 1][0] === 100 && m73[m73.length - 1][1] === 0 && m73.every((v, i) => i === 0 || (v[0] >= m73[i - 1][0] && v[1] <= m73[i - 1][1])),
+    JSON.stringify(m73.slice(0, 3)));
+  check('...R at the start is the total in whole minutes (' + m73[0][1] + ' min of ' + mt[2].trim() + ')', m73[0][1] === Math.floor(dur(mt[2]) / 60));
+  // objects: labels, masks, balance
+  const ids = P.labels.map(l => l.id);
+  let open = -1, bal = 0, outside = 0, wrongMask = 0, masks = {}, objStarts = 0;
+  const maskOf = i => PL.objectMask([i]);
+  const allM = PL.objectMask(ids.map((v, i) => i));
+  g.forEach((l, i) => {
+    let m;
+    if ((m = /^; start printing object, unique label id: (\d+)$/.exec(l))) {
+      if (open !== -1) bal = 99; open = +m[1]; objStarts++;
+      const mk = /^M624 (\S+)$/.exec(g[i + 1]);
+      if (!mk || mk[1] !== maskOf(ids.indexOf(open))) wrongMask++;
+      masks[g[i + 1]] = (masks[g[i + 1]] || 0) + 1;
+    } else if ((m = /^; stop printing object, unique label id: (\d+)$/.exec(l))) {
+      if (open !== +m[1] || g[i + 1] !== 'M625') bal = 99; open = -1;
+    } else if (/^G1 X\S+ Y\S+ E[\d.]+$/.test(l) && i > idx.l0 && i < idx.me && open === -1) {
+      outside++;
+    }
+  });
+  check('object blocks balanced: every "start printing object" has its stop + M625, none nested, none left open (' + objStarts + ' blocks)', objStarts > 100 && bal === 0 && open === -1, 'bal ' + bal);
+  check('...M624 carries the object\'s bit: ' + ids[0] + ' = ' + maskOf(0) + ', ' + ids[1] + ' = ' + maskOf(1) + ' (Studio\'s own: AQAAAAAAAAA= and AgAAAAAAAAA=)', wrongMask === 0 && maskOf(0) === 'AQAAAAAAAAA=' && maskOf(1) === 'AgAAAAAAAAA=' && allM === 'AwAAAAAAAAA=', JSON.stringify(masks));
+  check('...no extrusion outside an open block', outside === 0, outside + ' moves');
+  const hooksN = g.filter(l => l === '; SKIPTYPE: timelapse').length, ends = g.filter(l => /^; object ids of this layer\d+ end: /.test(l)).length, starts = g.filter(l => /^; object ids of layer \d+ start: /.test(l)).length;
+  check('the layer hook (timelapse + nozzle-clog) is in every layer, wrapped in the union mask ' + allM + ' (' + hooksN + ' hooks, ' + starts + ' / ' + ends + ' id lines)', hooksN === nl && starts === nl && ends === nl && g.filter(l => l === 'M624 ' + allM).length === nl);
+  const cnt = re => g.filter(l => re.test(l)).length;
+  check('WIPE_START / WIPE_END and SKIPPABLE_START / SKIPPABLE_END are balanced', cnt(/^; WIPE_START$/) === cnt(/^; WIPE_END$/) && cnt(/^; SKIPPABLE_START$/) === cnt(/^; SKIPPABLE_END$/) && cnt(/^; WIPE_START$/) > 1000);
+  // features: exact names, supports typed
+  const fset = new Set(g.filter(l => /^; FEATURE: /.test(l)).map(l => l.slice(11)));
+  const bset = new Set(bg.filter(l => /^; FEATURE: /.test(l)).map(l => l.slice(11)));
+  check('; FEATURE names are Bambu\'s, exactly: ' + [...fset].join(', '), [...fset].every(f => f === 'Custom' || bset.has(f) || SUPPORT_FEATURES.includes(f) || f === 'Gap infill'), [...fset].filter(f => !bset.has(f)).join(', '));
+  const role = ids.map((id, i) => res.objects[i].role);
+  const featuresBy = {};
+  let curObj = null;
+  g.forEach(l => {
+    let m;
+    if ((m = /^; OBJECT_ID: (\d+)$/.exec(l))) curObj = +m[1];
+    else if ((m = /^; FEATURE: (.*)$/.exec(l))) featuresBy[curObj + '|' + m[1]] = 1;
+  });
+  const supFeat = Object.keys(featuresBy).filter(k => role[ids.indexOf(+k.split('|')[0])] === 'support').map(k => k.split('|')[1]);
+  const partFeat = Object.keys(featuresBy).filter(k => role[ids.indexOf(+k.split('|')[0])] === 'part').map(k => k.split('|')[1]);
+  check('the support object\'s paths are Support / Support interface / Support transition and nothing else (never Overhang wall): ' + [...new Set(supFeat)].join(', '),
+    supFeat.length > 0 && supFeat.every(f => SUPPORT_FEATURES.includes(f)) && !partFeat.some(f => SUPPORT_FEATURES.includes(f)));
+  // hooks per profile
+  const bare = PL.plan(res, { config: tpl, printer: PR, hooks: { timelapse: false, clog: false, spaghetti: false } });
+  const og = bare.gcode.split('\n');
+  check('hooks per profile: with timelapse, clog and spaghetti off the file has no SKIPPABLE block, no M981, no per-layer union mask',
+    bare.ok && !og.includes('; SKIPPABLE_START') && !og.some(l => /^M981 /.test(l)) && !og.includes('M624 ' + allM));
+  const tlOnly = PL.plan(res, { config: tpl, printer: PR, hooks: { clog: false } }).gcode.split('\n');
+  check('...timelapse alone has the photo and no head_wrap_detect; the default has both and the spaghetti detector (' + g.filter(l => /^M981 /.test(l)).join(' / ') + ')',
+    tlOnly.includes('; SKIPTYPE: timelapse') && !tlOnly.includes('; SKIPTYPE: head_wrap_detect') && g.includes('; SKIPTYPE: head_wrap_detect') && g.filter(l => /^M981 /.test(l)).length === 2);
+  // single object: labels off, as Studio does
+  const pb1 = await L.plateB(90, 90, false);
+  const one = PL.plan(pb1.res, { config: tpl, printer: PR });
+  const og1 = one.gcode.split('\n');
+  check('one object on the plate: OBJECT_ID per layer, but no labelling - no M624 / M625, no "start printing object", no label id in the header (Studio\'s own arc slice has none either)',
+    one.ok && !one.labelled && !og1.some(l => /^M62[45]/.test(l) || /printing object|model label id/.test(l)) && og1.filter(l => /^; OBJECT_ID: /.test(l)).length === one.stats.layers);
+  // three objects: the arc with two NSO trees
+  const pb3 = await L.plateB(90, 90, true);
+  const tri = PL.plan(pb3.res, { config: tpl, printer: PR });
+  const tg = tri.ok ? tri.gcode.split('\n') : [];
+  const tmask = tg.filter(l => /^M624 /.test(l)).reduce((a, l) => { a[l] = (a[l] || 0) + 1; return a; }, {});
+  check('three objects (the arc and two trees): masks are bits 0, 1, 2 - ' + Object.keys(tmask).join(' ') + '; the hook\'s union is BwAAAAAAAAA=',
+    tri.ok && pb3.res.objects.length === 3 && tri.labelled && 'M624 AQAAAAAAAAA=' in tmask && 'M624 AgAAAAAAAAA=' in tmask && 'M624 BAAAAAAAAAA=' in tmask && 'M624 BwAAAAAAAAA=' in tmask && PL.objectMask([0, 1, 2]) === 'BwAAAAAAAAA=',
+    tri.ok ? JSON.stringify(tmask) : tri.reason);
+
+  // ===========================================================================
+  section('9. Structural: the .gcode.3mf, and G-scope\'s import of it');
+  // ===========================================================================
+  const G3 = require(path.join(ROOT, 'nso-gcode3mf-write.js'));
+  const W3 = require(path.join(ROOT, 'nso-3mf.js'));
+  const built = await PL.toGcode3mf(res, { config: tpl, printer: PR });
+  const back = await G3.read(built.bytes);
+  const refParts = A.zip.names();
+  const myZip = L.R.openZip(built.bytes);
+  check('the .gcode.3mf has the reference\'s parts, in its order (' + myZip.names().length + ')',
+    JSON.stringify(myZip.names().filter(n => !/^Auxiliaries/.test(n))) === JSON.stringify(refParts.filter(n => !/^Auxiliaries/.test(n))), myZip.names().join(', '));
+  check('plate_1.gcode.md5 is the G-code\'s MD5 and the G-code is the plan\'s, byte for byte', back && built.fields && require('crypto').createHash('md5').update(Buffer.from(P.gcode)).digest('hex').toUpperCase() === L.text(await myZip.read('Metadata/plate_1.gcode.md5')).trim() &&
+    L.text(await myZip.read('Metadata/plate_1.gcode')) === built.plan.gcode);
+  const ps = JSON.parse(L.text(await myZip.read('Metadata/project_settings.config')));
+  check('project_settings.config is the template with NSO\'s cooling keys on every slot (slow_down_layer_time ' + ps.slow_down_layer_time + ', fan_max_speed ' + ps.fan_max_speed + ')',
+    JSON.stringify(ps.slow_down_layer_time) === '["6","6"]' && JSON.stringify(ps.fan_max_speed) === '["80","80"]' && ps.outer_wall_speed[0] === '200' && ps.printer_model === 'Bambu Lab A1 mini');
+  const si = L.text(await myZip.read('Metadata/slice_info.config'));
+  check('slice_info: the printer (N1), the plan\'s prediction (' + built.plan.stats.seconds.total.toFixed(0) + ' s), the plate\'s objects by label',
+    /key="printer_model_id" value="N1"/.test(si) && new RegExp('key="prediction" value="' + Math.round(built.plan.stats.seconds.total) + '"').test(si) &&
+      built.plan.labels.every(l => si.includes('identify_id="' + l.id + '"')), si.slice(0, 300));
+  const imp = await Lines.readSlicedGcode3MF(built.bytes, { name: 'planned.gcode.3mf' });
+  const direct = Lines.parseGcode(built.plan.gcode);
+  check('G-scope\'s import route reads it: ' + imp.parsed.moves.length + ' moves in ' + imp.parsed.features.length + ' features, the same as parseGcode on the text, nothing assumed',
+    imp.parsed.moves.length === direct.moves.length && imp.parsed.features.length === direct.features.length && !imp.parsed.meta.assumed);
+  const ppy = await PL.toGcode3mf(pb.res, { config: p1sCfg, printer: PS });
+  const ppyBack = L.R.openZip(ppy.bytes);
+  check('the P1S file: model id C12 from the owner\'s slice_info, and it imports (' + ppy.plan.stats.layers + ' layers)',
+    /key="printer_model_id" value="C12"/.test(L.text(await ppyBack.read('Metadata/slice_info.config'))) && (await Lines.readSlicedGcode3MF(ppy.bytes, { name: 'p1s.gcode.3mf' })).parsed.moves.length > 10000);
 
   console.log('\n' + (fail ? 'FAILED  ' + fail + ' of ' + (pass + fail) : 'PASSED  all ' + pass));
   process.exit(fail ? 1 : 0);

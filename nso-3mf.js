@@ -956,6 +956,7 @@
     PART_NSO_SCENE: PART_NSO_SCENE,
     // The Bambu project envelope (docs/BAMBU-PROJECT-EXPORT.md)
     loadTemplate: loadTemplate,
+    overlayProjectSettings: overlayProjectSettings,
     identifyIds: identifyIds,
     TEMPLATE_DIR: TEMPLATE_DIR,
     DEFAULT_TEMPLATE: DEFAULT_TEMPLATE,

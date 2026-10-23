@@ -97,7 +97,7 @@ function scan(gcode) {
   for (let i = 0; i < lines.length && !done; i++) {
     const s = lines[i];
     let m;
-    if (s === '; MACHINE_END_GCODE_START') { done = true; break; }
+    if (s === '; MACHINE_END_GCODE_START' || (st.layer >= 0 && (s === '; FEATURE: Custom' || /^M981 S0 /.test(s)))) { done = true; break; }
     if (s.charCodeAt(0) === 59) {                       // ';'
       if ((m = /^; FEATURE: (.*)$/.exec(s))) st.feature = m[1];
       else if (s === '; CHANGE_LAYER') { st.layer++; out.layerStarts.push(i); }

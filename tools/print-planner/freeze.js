@@ -48,7 +48,7 @@ const OUT = path.join(ROOT, 'fixtures', 'print-planner');
    count]: the lines the regex matches (whole line) become the replacement. */
 const PRINTERS = {
   'a1mini-0.4': {
-    printer: 'Bambu Lab A1 mini', nozzle: '0.4', modelId: 'N1',
+    printer: 'Bambu Lab A1 mini', nozzle: '0.4',
     slice: 'fixtures/supports/top_clip_x2_supports.gcode.3mf',
     bed: { x: 180, y: 180, z: 180 },
     values: { nozzle: 220, nozzleT: 220, bed: 65 },
@@ -70,7 +70,7 @@ const PRINTERS = {
     ]
   },
   'p1s-0.4': {
-    printer: 'Bambu Lab P1S', nozzle: '0.4', modelId: null,
+    printer: 'Bambu Lab P1S', nozzle: '0.4',
     slice: 'fixtures/supports/simple_overhang_p1s.gcode.3mf',
     bed: { x: 256, y: 256, z: 256 },
     values: { nozzle: 220, nozzleT: 220, bed: 55 },
@@ -231,8 +231,11 @@ async function build(id) {
   }
   const purgeMm = +(+header['total filament length [mm] '.trim()] - bodySum).toFixed(2);
 
+  // the printer's model id: Studio writes it in slice_info.config, never in the G-code
+  const modelId = (/key="printer_model_id" value="([^"]+)"/.exec(L.text(slice.parts['Metadata/slice_info.config'])) || [])[1];
+  if (!modelId) throw new Error(id + ': no printer_model_id in the slice\'s slice_info.config');
   const frozen = {
-    id: id, printer: P.printer, nozzle: P.nozzle, modelId: P.modelId,
+    id: id, printer: P.printer, nozzle: P.nozzle, modelId: modelId,
     studio: header.BambuStudio || /^; BambuStudio ([\d.]+)/.exec(lines[1])[1],
     source: { file: P.slice, sha256: sha256(fs.readFileSync(path.join(ROOT, P.slice))) },
     bed: P.bed,

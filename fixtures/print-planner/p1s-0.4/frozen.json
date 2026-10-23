@@ -2,7 +2,7 @@
  "id": "p1s-0.4",
  "printer": "Bambu Lab P1S",
  "nozzle": "0.4",
- "modelId": null,
+ "modelId": "C12",
  "studio": "02.08.02.61",
  "source": {
   "file": "fixtures/supports/simple_overhang_p1s.gcode.3mf",

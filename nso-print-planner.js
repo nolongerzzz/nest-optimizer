@@ -50,6 +50,7 @@
 
   var node = typeof module === 'object' && module.exports;
   var Cooling = node ? require('./nso-cooling-profiles.js') : root.NSOCoolingProfiles;
+  var lazy = function (file, global) { return node ? require('./' + file) : root[global]; };
 
   var EPS = 1e-9;
   var RETRACT_DURING_WIPE = 0.95;      // Bambu wipes 0.76 of 0.8 and retracts the last 0.04 after (A1 mini slice)
@@ -168,7 +169,10 @@
         bedInitial: num(config, bedKey + '_initial_layer', num(config, bedKey, 60))
       },
       fan: {
-        closeFirst: num(config, 'close_fan_the_first_x_layers', 1)
+        closeFirst: num(config, 'close_fan_the_first_x_layers', 1),
+        aux: num(config, 'auxiliary_fan', 0) === 1,
+        auxPercent: num(config, 'additional_cooling_fan_speed', 0),
+        closeAux: num(config, 'close_additional_fan_first_x_layers', 1)
       },
       cooling: cool
     };
@@ -352,6 +356,7 @@
       var sameObj = prev && prev.obj === it.obj;
       var retract;
       if (!pos) retract = false;
+      else if (prev && !sameObj) retract = true;            // from one object to another: always
       else if (d < S.retract.minTravel - EPS) retract = false;
       else if (sameObj && travelInside(it.rings, pos, start)) retract = false;
       else retract = true;
@@ -477,14 +482,91 @@
     return isFinite(x0) ? { x: +x0.toFixed(4), y: +y0.toFixed(4), w: +(x1 - x0).toFixed(4), h: +(y1 - y0).toFixed(4) } : null;
   }
 
+
+  // ===========================================================================
+  // Markers, as Bambu writes them
+  // ===========================================================================
+
+  var B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  function base64(bytes) {
+    var s = '';
+    for (var i = 0; i < bytes.length; i += 3) {
+      var a = bytes[i], b = i + 1 < bytes.length ? bytes[i + 1] : 0, c = i + 2 < bytes.length ? bytes[i + 2] : 0;
+      s += B64.charAt(a >> 2) + B64.charAt(((a & 3) << 4) | (b >> 4)) +
+           (i + 1 < bytes.length ? B64.charAt(((b & 15) << 2) | (c >> 6)) : '=') +
+           (i + 2 < bytes.length ? B64.charAt(c & 63) : '=');
+    }
+    return s;
+  }
+
+  /**
+   * The mask M624 takes: one bit per object, by its place in the plate's label
+   * order, as a 64-bit little-endian integer in base64. Measured on the owner's
+   * two-object A1 mini slice: the first object is AQAAAAAAAAA=, the second
+   * AgAAAAAAAAA=, both of them AwAAAAAAAAA=. (The third follows the same law,
+   * BAAAAAAAAAA=; no Bambu slice with three objects is in the repo to confirm it.)
+   */
+  function objectMask(indexes) {
+    var bytes = [0, 0, 0, 0, 0, 0, 0, 0];
+    indexes.forEach(function (i) {
+      if (i < 0 || i > 63) throw new Error('object ' + i + ' does not fit M624\'s 64-bit mask');
+      bytes[i >> 3] |= 1 << (i & 7);
+    });
+    return base64(bytes);
+  }
+
+  /** Studio's "18m 34s" / "1h 2m 3s". */
+  function duration(sec) {
+    sec = Math.round(sec);
+    var d = Math.floor(sec / 86400), h = Math.floor(sec % 86400 / 3600), m = Math.floor(sec % 3600 / 60), s = sec % 60;
+    var out = [];
+    if (d) out.push(d + 'd');
+    if (d || h) out.push(h + 'h');
+    if (d || h || m) out.push(m + 'm');
+    out.push(s + 's');
+    return out.join(' ');
+  }
+
+  /** The per-layer hook (timelapse photo, nozzle-clog check) as Studio expands
+   *  time_lapse_gcode for this layer, from the printer's frozen variants. */
+  function hookLines(Pr, layerNo, z, cy, flags, wrap) {
+    var v = Pr.hooks.variants[Math.min(layerNo, 4)];
+    var tl = flags.timelapse !== false && v.timelapse.length, clog = flags.clog !== false && v.clog.length;
+    if (!tl && !clog) return [];
+    var zh = z + 0.4;
+    var sub = function (s) {
+      return s.replace(/\{ZH:3\}/g, zh.toFixed(3)).replace(/\{ZH\}/g, tnum(zh)).replace(/\{CY\}/g, tnum(cy));
+    };
+    var lines = [].concat(v.pre, tl ? v.timelapse : [], clog ? v.clog : [], v.post).map(sub);
+    return lines;
+  }
+
+  /** The CONFIG_BLOCK: Studio's own for this printer, with NSO's cooling keys put in. */
+  function configLines(Pr, S) {
+    var map = Cooling.resolveValues(S.coolingId);
+    return Pr.configBlock.map(function (l) {
+      var m = /^; ([^ =]+) = (.*)$/.exec(l);
+      if (!m || !Object.prototype.hasOwnProperty.call(map, m[1])) return l;
+      var slots = m[2].split(',').length;
+      var v = [];
+      for (var i = 0; i < slots; i++) v.push(map[m[1]]);
+      return '; ' + m[1] + ' = ' + v.join(',');
+    });
+  }
+
   // ===========================================================================
   // The plan
   // ===========================================================================
 
   /**
    * @param {object} res    sliceObjects() result
-   * @param {object} opts   { config, cooling }
-   * @returns {{ok, reason, gcode, layers, stats, settings}}
+   * @param {object} opts
+   *   config   the printer template's project settings (the object)
+   *   printer  the printer's frozen blocks (fixtures/print-planner/<id>/frozen.json)
+   *   cooling  a cooling profile id (default NSO's default) or the resolved keys
+   *   hooks    { spaghetti, timelapse, clog }: false leaves one out; default as the template
+   *   labelIds the objects' label ids (default 1001, 1002 ...)
+   * @returns {{ok, reason, gcode, layers, stats, settings, labels}}
    */
   function plan(res, opts) {
     opts = opts || {};
@@ -492,13 +574,11 @@
     if (!opts.config) return { ok: false, reason: 'the printer template\'s project settings (opts.config) are required' };
     if (!opts.printer) return { ok: false, reason: 'the printer\'s frozen start / end (opts.printer) is required' };
     var Pr = opts.printer;
-    var S = settingsFrom(opts.config, opts.cooling);
-    var F = S.filament;
+    var cooling = opts.cooling == null ? Cooling.DEFAULT_PROFILE_ID : opts.cooling;
+    var S = settingsFrom(opts.config, cooling);
+    S.coolingId = cooling;
+    var F = S.filament, R = S.retract;
     var filA = Math.PI * F.diameter * F.diameter / 4;
-    var out = [];
-    var layers = [];
-    var st = { x: null, y: null, z: 0, fan: null, feature: null, lw: null, F: null, A: null, extruded: 0, seconds: 0,
-               retracted: false };
 
     var box = firstLayerBox(res);
     if (!box) return { ok: false, reason: 'nothing prints on the first layer' };
@@ -507,28 +587,143 @@
       return { ok: false, reason: 'the first layer (' + box.x.toFixed(1) + ',' + box.y.toFixed(1) + ' to ' + (box.x + box.w).toFixed(1) +
         ',' + (box.y + box.h).toFixed(1) + ') is not on the ' + Pr.printer + '\'s ' + bed.x + ' x ' + bed.y + ' mm bed' };
     }
-    var lastPrinting = res.planes.length - 1;
-    while (lastPrinting > 0 && !res.objects.some(function (ob) { var Lr = ob.layers[lastPrinting]; return Lr && Lr.paths.length; })) lastPrinting--;
-    var top = res.planes[lastPrinting].printZ;
+    // the layers that print, in order
+    var printing = [];
+    for (var pi = 0; pi < res.planes.length; pi++) {
+      if (res.objects.some(function (ob) { var Lr = ob.layers[pi]; return Lr && Lr.paths.length; })) printing.push(pi);
+    }
+    var top = res.planes[printing[printing.length - 1]].printZ;
     if (top > bed.z) return { ok: false, reason: 'the print is ' + top.toFixed(1) + ' mm tall; the ' + Pr.printer + ' prints ' + bed.z + ' mm' };
     var vals = { nozzle: S.temp.nozzleInitial, nozzleT: S.temp.nozzle, bed: S.temp.bedInitial, box: box,
                  cy: box.y + box.h / 2, maxZ: top };
-    var flags = { spaghetti: !opts.hooks || opts.hooks.spaghetti !== false };
+    var hooks = opts.hooks || {};
+    var flags = { spaghetti: hooks.spaghetti !== false, timelapse: hooks.timelapse !== false, clog: hooks.clog !== false };
 
-    thaw(Pr.start, vals, flags).forEach(function (l) { if (l.charAt(0) !== '@') out.push(l); });
-    thaw(Pr.afterStart, vals, flags).forEach(function (l) { out.push(l); });
+    var nObj = res.objects.length;
+    var labelled = nObj > 1;                       // Studio labels objects when the plate has more than one
+    var ids = res.objects.map(function (o, i) { return opts.labelIds && opts.labelIds[i] != null ? opts.labelIds[i] : 1001 + i; });
+    var allMask = objectMask(res.objects.map(function (o, i) { return i; }));
+    var idList = ids.join(',');
 
+    // ---- the writer: every line with the print's clock at that line
+    var W = { lines: [], times: [], clock: 0 };
+    var put = function (l) { W.lines.push(l); W.times.push(W.clock); };
+    var st = { x: null, y: null, z: 0, fan: null, layerFan: null, aux: null, A: null, feature: null, lw: null, lh: null, retracted: false,
+               openObj: -1, objId: -1, pending: null, extruded: 0 };
+    /** M204 only when the acceleration changes, as Studio writes it. */
+    var accel = function (a) { var v = fmt(a, 0); if (st.A !== v) { put('M204 S' + v); st.A = v; } };
+    var travelV = function (first) { return first ? S.speed.firstTravel : S.speed.travel; };
+    var travelA = function (first) { return first ? S.accel.firstTravel : S.accel.travel; };
+
+    thaw(Pr.start, vals, flags).forEach(function (l) {
+      var m = /^@M73 (\d+)$/.exec(l);
+      put(m ? { at: +m[1] } : l);
+    });
+    thaw(Pr.afterStart, vals, flags).forEach(function (l) { put(l); });
+    W.clock = Pr.timing.startSeconds;
+    var bodyFrom = W.lines.length;
+
+    var layers = [];
     var startPos = null;
-    for (var li = 0; li < res.planes.length; li++) {
+    var layerNo = 0;
+    var totalLayers = printing.length;
+
+    function openObject(oi) {
+      if (st.objId !== oi) { put('; OBJECT_ID: ' + ids[oi]); st.objId = oi; }
+      if (labelled) {
+        put('; start printing object, unique label id: ' + ids[oi]);
+        put('M624 ' + objectMask([oi]));
+        st.openObj = oi;
+      }
+    }
+    function closeObject() {
+      if (labelled && st.openObj >= 0) {
+        put('; stop printing object, unique label id: ' + ids[st.openObj]);
+        put('M625');
+        st.openObj = -1;
+      }
+    }
+    function spiral(zUp, first) {
+      put('G17');
+      put('G3 Z' + fx(zUp) + ' I' + fx(SPIRAL_R) + ' J0 P1  F' + fmt(travelV(first) * 60, 0));
+      W.clock += Math.abs(zUp - st.z) / 30 + 2 * Math.PI * SPIRAL_R / travelV(first);
+    }
+    /** The wipe and retraction that end the path pending in `st` (Studio writes
+     *  them after the next marker, so a layer's last wipe follows CHANGE_LAYER). */
+    function flushRetract() {
+      var pd = st.pending;
+      if (!pd) return;
+      st.pending = null;
+      if (!pd.it.retractAfter || R.length <= 0) return;
+      if (R.wipe && R.wipeDistance > 0 && pd.lastPts.length > 1) {
+        put('; WIPE_START');
+        put('G1 F' + fmt(pd.it.vWipe * 60, 3));
+        accel(S.accel.def);
+        var wp = wipePath(pd.lastPts, R.wipeDistance);
+        var wl = pathLength(wp);
+        var spent = 0;
+        for (var q = 1; q < wp.length; q++) {
+          // what the file says, so the cycle sums to the retraction to the last digit
+          var share = +fe(R.length * RETRACT_DURING_WIPE * dist(wp[q - 1], wp[q]) / wl);
+          put('G1 X' + fx(wp[q][0]) + ' Y' + fx(wp[q][1]) + ' E-' + fe(share));
+          spent += share;
+        }
+        put('; WIPE_END');
+        W.clock += wl / pd.it.vWipe;
+        put('G1 E-' + fe(+(R.length - spent).toFixed(5)) + ' F' + fmt(R.speed * 60, 0));
+      } else {
+        put('G1 E-' + fe(R.length) + ' F' + fmt(R.speed * 60, 0));
+      }
+      W.clock += R.length / R.speed;
+      st.retracted = true;
+    }
+    function deretract() {
+      if (!st.retracted) return;
+      put('G1 E' + fe(R.length + R.restartExtra) + ' F' + fmt(R.deretractSpeed * 60, 0));
+      W.clock += (R.length + R.restartExtra) / R.deretractSpeed;
+      st.retracted = false;
+    }
+    function emitHook(li, z) {
+      var h = hookLines(Pr, layerNo, z, vals.cy, flags);
+      if (!h.length) return;
+      if (labelled && Pr.hooks.wrap) {
+        put('; object ids of layer ' + layerNo + ' start: ' + idList);
+        put('M624 ' + allMask);
+      }
+      h.forEach(function (l) { put(l); });
+      if (labelled && Pr.hooks.wrap) {
+        put('; object ids of this layer' + layerNo + ' end: ' + idList);
+        put('M625');
+      }
+    }
+    /** Where in the layer the hook goes: after the first run of walls (before the first
+     *  infill), else after the first object; -1 = before the layer's first path. */
+    function hookAfter(items) {
+      var n = items.length;
+      for (var k = 0; k + 1 < n; k++) {
+        if (WALL[items[k].feature] && !WALL[items[k + 1].feature]) return k;
+      }
+      for (var j = 0; j + 1 < n; j++) if (items[j + 1].obj !== items[0].obj) return j;
+      return n > 1 ? 0 : -1;
+    }
+
+    for (var pj = 0; pj < printing.length; pj++) {
+      var li = printing[pj];
       var pl = res.planes[li];
-      var first = li === 0;
+      var first = pj === 0;
+      var lastLayer = pj === printing.length - 1;
+      layerNo = pj + 1;
       var items = layerItems(res, li, S);
-      var lastLayer = li === lastPrinting;
-      if (!items.length) continue;
-      var endPos = planTravels(items, S, startPos, first ? true : S.retract.onLayerChange);
-      items[items.length - 1].retractAfter = lastLayer ? true : S.retract.onLayerChange;
+      var endPos = planTravels(items, S, startPos, first ? true : R.onLayerChange);
+      items[items.length - 1].retractAfter = lastLayer ? true : R.onLayerChange;
+      var hookAt = hookAfter(items);
+      if (hookAt >= 0) items[hookAt].retractAfter = true;
       var cool = coolLayer(items, S, first);
-      var fan = fanFor(S, li, cool.seconds);
+      var fan = fanFor(S, pj, cool.seconds);
+      // reduce_fan_stop_start_freq: a layer keeps the fan it has unless the new one is 2 % or more away
+      if (st.layerFan != null && pj >= S.fan.closeFirst + 1 && S.cooling.reduce_fan_stop_start_freq && Math.abs(fan - st.layerFan) < 2.55 * 2) fan = st.layerFan;
+      st.layerFan = fan;
+      var aux = auxFanFor(S, pj);
       if (cool.cap != null) {
         items.forEach(function (it) {
           if (it.feature === 'Bridge') return;
@@ -536,149 +731,244 @@
           else it.v = Math.min(it.v, Math.max(cool.cap, Math.min(S.cooling.slow_down_min_speed, it.v)));
         });
       }
-      var rec = { index: li, z: pl.printZ, h: pl.h, seconds: cool.seconds, slowdownCap: cool.cap, fan: fan,
-                  features: [], items: items.length };
+      var rec = { index: li, number: layerNo, z: pl.printZ, h: pl.h, seconds: cool.seconds, slowdownCap: cool.cap, fan: fan,
+                  features: [], items: items.length, clockFrom: W.clock };
       layers.push(rec);
-      emitLayer(out, items, li, pl, S, st, fan, filA, rec, first, lastLayer);
+      var z = pl.printZ;
+
+      // ----- the layer change
+      put('; CHANGE_LAYER');
+      put('; Z_HEIGHT: ' + fc(z, 4));
+      put('; LAYER_HEIGHT: ' + fc(pl.h, 4));
+      st.lh = pl.h;
+      if (first) {
+        put('G1 E-' + fe(R.length) + ' F' + fmt(R.speed * 60, 0));
+        st.retracted = true;
+      } else {
+        flushRetract();
+        closeObject();
+      }
+      put('; layer num/total_layer_count: ' + layerNo + '/' + totalLayers);
+      put('; update layer progress');
+      put('M73 L' + layerNo);
+      put('M991 S0 P' + (layerNo - 1) + ' ;notify layer change');
+      if (pj === 1) {
+        if (S.temp.nozzle !== S.temp.nozzleInitial) put('M104 S' + fmt(S.temp.nozzle, 0));
+        if (S.temp.bed !== S.temp.bedInitial) put('M140 S' + fmt(S.temp.bed, 0));
+      }
+      if (fan !== st.fan) { put(fanLine(fan)); st.fan = fan; }
+      if (S.fan.aux && aux !== st.aux) { put('M106 P2 S' + fc(aux, 2)); st.aux = aux; }
+      if (pj === 1) { put('; open powerlost recovery'); put('M1003 S1'); }
+      st.objId = -1;
+      var layerFan = fan;
+      var featuresSeen = {};
+      if (hookAt === -1) emitHook(li, z);
+
+      items.forEach(function (it, k) {
+        var t = it.travel;
+        var pt = it.pts[0];
+        var tFirst = first;
+        var prev = k ? items[k - 1] : null;
+        // ----- the boundary and the travel to this path
+        if (k === 0) {
+          openObject(it.obj);
+          if (first) {
+            accel(S.accel.firstTravel);
+            put('G1 X' + fx(pt[0]) + ' Y' + fx(pt[1]) + ' F' + fmt(S.speed.firstTravel * 60, 0));
+            if (R.hop > 0) put('G1 Z' + fx(z + R.hop));
+            put('G1 Z' + fx(z));
+            W.clock += 0;
+          } else {
+            accel(S.accel.travel);
+            if (R.hop > 0 && R.onLayerChange) {
+              var zUp = st.z + R.hop;
+              spiral(zUp, false);
+              put('G1 X' + fx(pt[0]) + ' Y' + fx(pt[1]) + ' Z' + fx(zUp) + ' F' + fmt(S.speed.travel * 60, 0));
+              put('G1 Z' + fx(z));
+            } else {
+              put('G1 X' + fx(pt[0]) + ' Y' + fx(pt[1]) + ' Z' + fx(z) + ' F' + fmt(S.speed.travel * 60, 0));
+            }
+          }
+          if (t.d > 0) W.clock += moveSeconds(t.d, travelV(first), travelA(first));
+          deretract();
+        } else {
+          flushRetract();
+          var atHop = false;
+          if (k - 1 === hookAt) {
+            // the hook: lift in a circle, close the object, the photo, open the object again
+            if (R.hop > 0) { spiral(z + R.hop, first); atHop = true; }
+            closeObject();
+            emitHook(li, z);
+            openObject(it.obj);
+          } else if (it.obj !== prev.obj) {
+            closeObject();
+            openObject(it.obj);
+          }
+          if (t.retract || atHop) {
+            accel(travelA(first));
+            if (atHop) put('G1 X' + fx(pt[0]) + ' Y' + fx(pt[1]) + ' F' + fmt(travelV(first) * 60, 0));
+            else if (t.hop) put('G1 X' + fx(pt[0]) + ' Y' + fx(pt[1]) + ' Z' + fx(z + R.hop) + ' F' + fmt(travelV(first) * 60, 0));
+            else put('G1 X' + fx(pt[0]) + ' Y' + fx(pt[1]) + ' F' + fmt(travelV(first) * 60, 0));
+            if (atHop || t.hop) put('G1 Z' + fx(z));
+            deretract();
+          } else {
+            accel(t.d < 2 ? S.accel.short : travelA(first));
+            put('G1 X' + fx(pt[0]) + ' Y' + fx(pt[1]) + ' F' + fmt(travelV(first) * 60, 0));
+          }
+          if (t.d > 0) W.clock += moveSeconds(t.d, travelV(first), t.d < 2 && !t.retract ? S.accel.short : travelA(first));
+          if (t.hop) W.clock += 2 * R.hop / 30;
+        }
+        // ----- the path
+        if (it.feature !== st.feature) {
+          put('; FEATURE: ' + it.feature);
+          st.feature = it.feature; st.lw = null;
+        }
+        if (Math.abs(st.lh - it.bead.h) > 1e-9) { put('; LAYER_HEIGHT: ' + fc(it.bead.h, 6)); st.lh = it.bead.h; }
+        if (st.lw !== it.bead.w) { put('; LINE_WIDTH: ' + fc(it.bead.w, 6)); st.lw = it.bead.w; }
+        featuresSeen[it.feature] = 1;
+        var bridgeFan = (it.feature === 'Bridge' || it.feature === 'Overhang wall') &&
+          S.cooling.enable_overhang_bridge_fan && pj >= S.fan.closeFirst;
+        var fanNow = bridgeFan ? Math.max(layerFan, Math.round(S.cooling.overhang_fan_speed * 255) / 100) : layerFan;
+        if (fanNow !== st.fan) { put(fanLine(fanNow)); st.fan = fanNow; }
+        put('G1 F' + fmt(it.v * 60, 3));
+        accel(it.a);
+        var x = pt[0], y = pt[1];
+        var lastPts = [it.pts[0]];
+        for (var m = 1; m < it.pts.length; m++) {
+          var tx = +fx(it.pts[m][0]), ty = +fx(it.pts[m][1]);
+          var d = Math.hypot(tx - x, ty - y);
+          if (!(d > 5e-4)) continue;
+          var e = it.bead.area * d / filA * F.flow;
+          put('G1 X' + fx(tx) + ' Y' + fx(ty) + ' E' + fe(e));
+          st.extruded += e;
+          x = tx; y = ty;
+          lastPts.push([tx, ty]);
+        }
+        W.clock += moveSeconds(it.len, it.v, it.a);
+        st.x = x; st.y = y; st.z = z;
+        st.pending = { it: it, lastPts: lastPts };
+        if (bridgeFan && (k + 1 >= items.length || (items[k + 1].feature !== 'Bridge' && items[k + 1].feature !== 'Overhang wall'))) {
+          put(fanLine(layerFan)); st.fan = layerFan;
+        }
+      });
+      rec.features = Object.keys(featuresSeen);
+      rec.clockTo = W.clock;
       startPos = endPos;
     }
-    thaw(Pr.beforeEnd, vals, flags).forEach(function (l) { out.push(l); });
-    thaw(Pr.end, vals, flags).forEach(function (l) { if (l.charAt(0) !== '@') out.push(l); });
-    // Until the Bambu CONFIG_BLOCK is written (the markers commit), the one key the importer needs
-    out.push('; CONFIG_BLOCK_START');
-    out.push('; filament_diameter = ' + F.diameter);
-    out.push('; CONFIG_BLOCK_END');
-    return {
-      ok: true, reason: '', gcode: out.join('\n') + '\n', layers: layers, settings: S,
-      stats: { filamentMm: st.extruded, layers: layers.length }
+
+    // ----- the last path: closed out the way a layer change would, then the lift
+    if (printing.length > 1) { put('; close powerlost recovery'); put('M1003 S0'); }
+    flushRetract();
+    accel(S.accel.travel);
+    if (R.hop > 0) spiral(top + R.hop, false);
+    closeObject();
+    var bodyTo = W.lines.length;
+    var bodySeconds = W.clock - Pr.timing.startSeconds;
+
+    thaw(Pr.beforeEnd, vals, flags).forEach(function (l) { put(l); });
+    thaw(Pr.end, vals, flags).forEach(function (l) { if (l.charAt(0) !== '@') put(l); });
+
+    // ----- the file
+    var totalSeconds = Pr.timing.startSeconds + bodySeconds + Pr.timing.endSeconds;
+    var lengthMm = st.extruded + (Pr.purgeMm || 0);
+    var volume = lengthMm * filA;
+    var density = parseFloat((/^; filament_density = ([\d.]+)/m.exec(Pr.configBlock.join('\n')) || [0, 1.24])[1]);
+    var cfgOf = function (k) { var m = new RegExp('^; ' + k + ' = (.*)$', 'm').exec(Pr.configBlock.join('\n')); return m ? m[1] : ''; };
+    var heights = res.objects.map(function (ob) {
+      var h = 0; ob.layers.forEach(function (Ly) { if (Ly.paths.length) h = Math.max(h, Ly.printZ); });
+      return h;
+    });
+    var head = ['; HEADER_BLOCK_START', '; BambuStudio ' + Pr.studio,
+      '; model printing time: ' + duration(bodySeconds) + '; total estimated time: ' + duration(totalSeconds),
+      '; total layer number: ' + totalLayers,
+      '; total filament length [mm] : ' + lengthMm.toFixed(2),
+      '; total filament volume [cm^3] : ' + volume.toFixed(2),              // mm^3 under Studio's label, as Studio writes it
+      '; total filament weight [g] : ' + (volume / 1000 * density).toFixed(2)];
+    if (labelled) {
+      head.push('; model label id: ' + idList);
+      head.push('; object max height: ' + heights.map(function (h) { return h.toFixed(2); }).join(','));
+    }
+    head.push('; filament_density: ' + cfgOf('filament_density'));
+    head.push('; filament_diameter: ' + cfgOf('filament_diameter'));
+    head.push('; max_z_height: ' + top.toFixed(2));
+    head.push('; filament: 1');
+    head.push('; support_material_on_wipe_tower: 0');
+    head.push('; HEADER_BLOCK_END');
+
+    var outLines = head.concat(['', '; CONFIG_BLOCK_START'], configLines(Pr, S), ['; CONFIG_BLOCK_END', '', '; EXECUTABLE_BLOCK_START']);
+    var mark = function (t) {
+      t = Math.min(t, totalSeconds);
+      return { p: Math.floor(100 * t / totalSeconds), r: Math.floor((totalSeconds - t) / 60) };
     };
+    var m0 = mark(0);
+    outLines.push('M73 P0 R' + m0.r);
+    var lastP = 0, lastR = m0.r;
+    var emitMark = function (t) {
+      var mk = mark(t);
+      var p = Math.max(lastP, mk.p), r = Math.min(lastR, mk.r);
+      if (p === lastP && r === lastR) return;
+      outLines.push('M73 P' + p + ' R' + r);
+      lastP = p; lastR = r;
+    };
+    for (var i = 0; i < W.lines.length; i++) {
+      var ln = W.lines[i];
+      if (typeof ln !== 'string') { emitMark(ln.at); continue; }
+      if (i >= bodyFrom && i < bodyTo && /^G[123] X/.test(ln)) emitMark(W.times[i]);
+      outLines.push(ln);
+    }
+    outLines.push('M73 P100 R0');
+    outLines.push('; EXECUTABLE_BLOCK_END');
+    outLines.push('');
+
+    return {
+      ok: true, reason: '', gcode: outLines.join('\n'), layers: layers, settings: S,
+      labels: ids.map(function (id, i) { return { id: id, name: res.objects[i].name, index: i, maxHeight: heights[i] }; }),
+      labelled: labelled,
+      stats: {
+        layers: totalLayers, maxZ: top, filamentMm: lengthMm, bodyFilamentMm: st.extruded, volumeMm3: volume,
+        grams: volume / 1000 * density, box: box,
+        seconds: { start: Pr.timing.startSeconds, body: bodySeconds, end: Pr.timing.endSeconds, total: totalSeconds }
+      }
+    };
+  }
+
+  // ===========================================================================
+  // The .gcode.3mf
+  // ===========================================================================
+
+  /**
+   * plan(), then the Bambu .gcode.3mf around it (nso-gcode3mf-write.js): the
+   * template's project settings with NSO's cooling keys on every filament slot,
+   * the objects named, the time and weight from the plan. Studio opens it as a
+   * project and sends it to the printer without slicing it.
+   * @returns {Promise<{bytes, plan, fields}>}
+   */
+  function toGcode3mf(res, opts) {
+    var P = plan(res, opts);
+    if (!P.ok) return Promise.reject(new Error(P.reason));
+    var G3 = lazy('nso-gcode3mf-write.js', 'NSO_Gcode3mf'), W3 = lazy('nso-3mf.js', 'NSO3MF');
+    if (!G3 || !W3) return Promise.reject(new Error('nso-gcode3mf-write.js and nso-3mf.js are required'));
+    var cooling = opts.cooling == null ? Cooling.DEFAULT_PROFILE_ID : opts.cooling;
+    var values = typeof cooling === 'object' ? cooling : Cooling.resolveValues(cooling);
+    var settings = W3.overlayProjectSettings(opts.config, values);
+    var first = P.layers[0];
+    return G3.writeDetailed({
+      gcode: P.gcode,
+      config: settings,
+      objects: P.labels.map(function (l) { return { identify_id: String(l.id), name: l.name }; }),
+      printer: { model_id: opts.printer.modelId, nozzle: opts.printer.nozzle },
+      estimate: { seconds: P.stats.seconds.total, grams: P.stats.grams, firstLayerSeconds: first.clockTo - first.clockFrom },
+      date: opts.date
+    }).then(function (w) { return { bytes: w.bytes, plan: P, fields: w.fields }; });
   }
 
   function fanLine(v) { return 'M106 S' + fc(v, 2); }
 
-  /** One layer's G-code. */
-  function emitLayer(out, items, li, pl, S, st, fan, filA, rec, first, lastLayer) {
-    var R = S.retract;
-    var hop = R.hop;
-    out.push('; CHANGE_LAYER');
-    out.push('; Z_HEIGHT: ' + fc(pl.printZ, 4));
-    out.push('; LAYER_HEIGHT: ' + fc(pl.h, 4));
-    st.lh = pl.h;
-    if (li === 1) {
-      if (S.temp.nozzle !== S.temp.nozzleInitial) out.push('M104 S' + fmt(S.temp.nozzle, 0));
-      if (S.temp.bed !== S.temp.bedInitial) out.push('M140 S' + fmt(S.temp.bed, 0));
-    }
-    if (fan !== st.fan) { out.push(fanLine(fan)); st.fan = fan; }
-    var layerFan = fan;
-    var featuresSeen = {};
-    var curObj = -1;
-
-    items.forEach(function (it, k) {
-      var t = it.travel;
-      var z = pl.printZ;
-      var pt = it.pts[0];
-      // ----- the travel to this path
-      if (k === 0) {
-        if (first) {
-          out.push('G1 E-' + fe(R.length) + ' F' + fmt(R.speed * 60, 0));
-          st.retracted = true;
-          out.push('M204 S' + fmt(S.accel.firstTravel, 0));
-          out.push('G1 X' + fx(pt[0]) + ' Y' + fx(pt[1]) + ' F' + fmt(S.speed.firstTravel * 60, 0));
-          if (hop > 0) out.push('G1 Z' + fx(z + hop));
-          out.push('G1 Z' + fx(z));
-        } else {
-          out.push('M204 S' + fmt(S.accel.travel, 0));
-          if (hop > 0 && R.onLayerChange) {
-            var zUp = st.z + hop;
-            out.push('G17');
-            out.push('G3 Z' + fx(zUp) + ' I' + fx(SPIRAL_R) + ' J0 P1  F' + fmt(S.speed.travel * 60, 0));
-            out.push('G1 X' + fx(pt[0]) + ' Y' + fx(pt[1]) + ' Z' + fx(zUp) + ' F' + fmt(S.speed.travel * 60, 0));
-          } else {
-            out.push('G1 X' + fx(pt[0]) + ' Y' + fx(pt[1]) + ' Z' + fx(z) + ' F' + fmt(S.speed.travel * 60, 0));
-          }
-          if (hop > 0 && R.onLayerChange) out.push('G1 Z' + fx(z));
-        }
-        if (st.retracted) { out.push('G1 E' + fe(R.length + R.restartExtra) + ' F' + fmt(R.deretractSpeed * 60, 0)); st.retracted = false; }
-      } else {
-        var prevZ = z;
-        if (t.retract) {
-          out.push('M204 S' + fmt(S.accel.travel, 0));
-          if (t.hop) out.push('G1 X' + fx(pt[0]) + ' Y' + fx(pt[1]) + ' Z' + fx(prevZ + hop) + ' F' + fmt(S.speed.travel * 60, 0));
-          else out.push('G1 X' + fx(pt[0]) + ' Y' + fx(pt[1]) + ' F' + fmt(S.speed.travel * 60, 0));
-          if (t.hop) out.push('G1 Z' + fx(prevZ));
-          out.push('G1 E' + fe(R.length + R.restartExtra) + ' F' + fmt(R.deretractSpeed * 60, 0));
-          st.retracted = false;
-        } else {
-          out.push('M204 S' + fmt(t.d < 2 ? S.accel.short : S.accel.travel, 0));
-          out.push('G1 X' + fx(pt[0]) + ' Y' + fx(pt[1]) + ' F' + fmt(S.speed.travel * 60, 0));
-        }
-      }
-      // ----- the path
-      if (it.obj !== curObj) { curObj = it.obj; }
-      if (it.feature !== st.feature) {
-        out.push('; FEATURE: ' + it.feature);
-        st.feature = it.feature; st.lw = null;
-      }
-      if (Math.abs(st.lh - it.bead.h) > 1e-9) { out.push('; LAYER_HEIGHT: ' + fc(it.bead.h, 6)); st.lh = it.bead.h; }
-      if (st.lw !== it.bead.w) { out.push('; LINE_WIDTH: ' + fc(it.bead.w, 6)); st.lw = it.bead.w; }
-      featuresSeen[it.feature] = 1;
-      var bridgeFan = (it.feature === 'Bridge' || it.feature === 'Overhang wall') &&
-        S.cooling.enable_overhang_bridge_fan && li >= S.fan.closeFirst;
-      var fanNow = bridgeFan ? Math.max(layerFan, Math.round(S.cooling.overhang_fan_speed * 255) / 100) : layerFan;
-      if (fanNow !== st.fan) { out.push(fanLine(fanNow)); st.fan = fanNow; }
-      out.push('G1 F' + fmt(it.v * 60, 3));
-      out.push('M204 S' + fmt(it.a, 0));
-      var x = pt[0], y = pt[1];
-      var lastPts = [it.pts[0]];
-      for (var m = 1; m < it.pts.length; m++) {
-        var tx = +fx(it.pts[m][0]), ty = +fx(it.pts[m][1]);
-        var d = Math.hypot(tx - x, ty - y);
-        if (!(d > 5e-4)) continue;
-        var e = it.bead.area * d / filA * S.filament.flow;
-        out.push('G1 X' + fx(tx) + ' Y' + fx(ty) + ' E' + fe(e));
-        st.extruded += e;
-        x = tx; y = ty;
-        lastPts.push([tx, ty]);
-      }
-      st.x = x; st.y = y; st.z = z;
-      // ----- the retraction after it
-      if (it.retractAfter) {
-        if (R.length > 0) {
-          if (R.wipe && R.wipeDistance > 0 && lastPts.length > 1) {
-            out.push('; WIPE_START');
-            out.push('G1 F' + fmt(it.vWipe * 60, 3));
-            out.push('M204 S' + fmt(S.accel.def, 0));
-            var wp = wipePath(lastPts, R.wipeDistance);
-            var wl = pathLength(wp);
-            var spent = 0;
-            for (var q = 1; q < wp.length; q++) {
-              // what the file says, so the cycle sums to the retraction to the last digit
-              var share = +fe(R.length * RETRACT_DURING_WIPE * dist(wp[q - 1], wp[q]) / wl);
-              out.push('G1 X' + fx(wp[q][0]) + ' Y' + fx(wp[q][1]) + ' E-' + fe(share));
-              spent += share;
-            }
-            out.push('; WIPE_END');
-            out.push('G1 E-' + fe(+(R.length - spent).toFixed(5)) + ' F' + fmt(R.speed * 60, 0));
-          } else {
-            out.push('G1 E-' + fe(R.length) + ' F' + fmt(R.speed * 60, 0));
-          }
-          st.retracted = true;
-        }
-      }
-      st.fan = fanNow;
-      if (bridgeFan && (k + 1 >= items.length || (items[k + 1].feature !== 'Bridge' && items[k + 1].feature !== 'Overhang wall'))) {
-        out.push(fanLine(layerFan)); st.fan = layerFan;
-      }
-    });
-    if (lastLayer) {
-      // the last path is wiped and retracted; lift off it before the end block
-      out.push('M204 S' + fmt(S.accel.travel, 0));
-      if (hop > 0) {
-        out.push('G17');
-        out.push('G3 Z' + fx(pl.printZ + hop) + ' I' + fx(SPIRAL_R) + ' J0 P1  F' + fmt(S.speed.travel * 60, 0));
-      }
-    }
-    rec.features = Object.keys(featuresSeen);
+  /** The auxiliary (chamber-side) fan on printers that have one: off for
+   *  close_additional_fan_first_x_layers, then additional_cooling_fan_speed %. */
+  function auxFanFor(S, layerIndex) {
+    if (!S.fan.aux || layerIndex < S.fan.closeAux) return 0;
+    return Math.round(S.fan.auxPercent * 255 / 100);
   }
 
   return {
@@ -689,8 +979,11 @@
     beadArea: beadArea,
     moveSeconds: moveSeconds,
     plan: plan,
+    toGcode3mf: toGcode3mf,
     thaw: thaw,
     firstLayerBox: firstLayerBox,
+    objectMask: objectMask,
+    duration: duration,
     SPIRAL_R: SPIRAL_R,
     RETRACT_DURING_WIPE: RETRACT_DURING_WIPE
   };
