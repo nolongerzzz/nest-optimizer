@@ -278,8 +278,15 @@ const hex8 = (n) => ('0000000' + (n >>> 0).toString(16)).slice(-8);
   check('the support object carries the support set on itself, in key order with its extruder (' +
         Object.keys(SI.SHEET.slicerSettings).join(', ') + ')',
     JSON.stringify(own(4)) === JSON.stringify(supportKeys), JSON.stringify(own(4)));
-  check('the support set is wall_generator classic and detect_thin_wall 1, nothing else (shells 0 failed on the print)',
-    JSON.stringify(SI.SHEET.slicerSettings) === JSON.stringify({ wall_generator: 'classic', detect_thin_wall: '1' }));
+  /* the four keys, by name and value, read back from the written project: the sheet's thin-wall pass and
+     supports-thinning's trunk (one loop round air). Top / bottom shell layers are not among them (bottom 0
+     failed a print, docs/BAMBU-PROJECT-EXPORT.md). */
+  const SUPPORT_SET = { wall_generator: 'classic', detect_thin_wall: '1', sparse_infill_density: '0%', wall_loops: '1' };
+  check('the support set is wall_generator classic, detect_thin_wall 1, sparse_infill_density 0% and wall_loops 1, nothing else (shells 0 failed on the print)',
+    JSON.stringify(SI.SHEET.slicerSettings) === JSON.stringify(SUPPORT_SET), JSON.stringify(SI.SHEET.slicerSettings));
+  check('...and the written project\'s support object lists exactly those four, each key and value as the object\'s metadata in model_settings.config',
+    Object.keys(SUPPORT_SET).every((k) => own(4).includes(k + '=' + SUPPORT_SET[k])) && own(4).length === 5 &&
+    !own(4).some((e) => /shell_layers/.test(e)), JSON.stringify(own(4)));
   check('the pieces without overrides carry only their extruder',
     JSON.stringify(own(2)) === '["extruder=1"]' && JSON.stringify(own(6)) === '["extruder=1"]', JSON.stringify([own(2), own(6)]));
   const plateHead = (x) => (x.match(/<plate>([\s\S]*?)<model_instance>/) || [])[1];

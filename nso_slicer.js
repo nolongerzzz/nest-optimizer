@@ -74,12 +74,15 @@
  * millimetres. Objects are dropped onto the plate together (one shift, their
  * relative placement kept) unless `dropToPlate: false`.
  *
- * OBJECTS. { name, soup, gapCloseMm?, role?, key?, hostKey?, detectThinWall? }. role is 'part'
+ * OBJECTS. { name, soup, gapCloseMm?, role?, key?, hostKey?, detectThinWall?, wallLoops?, sparseDensity? }. role is 'part'
  * (the default) or 'support'; a support names the part it holds by that
  * part's key (hostKey). With no support among them the slice is exactly what
  * it was before roles existed. detectThinWall (Detect thin wall, classic
  * walls) defaults to on for a support - every NSO support carries
- * detect_thin_wall = 1 - and to opts.detectThinWall (off) for a part.
+ * detect_thin_wall = 1 - and to opts.detectThinWall (off) for a part. wallLoops
+ * and sparseDensity are per-object too: a support takes CONSTANTS.supportObject's
+ * (wall_loops 1, sparse_infill_density 0: every NSO support carries both), a
+ * part opts.wallLoops and opts.sparseDensity.
  *
  * API
  *   CONSTANTS                          the measured defaults, each with its source
@@ -199,6 +202,14 @@
               '0.13 mm up as one pass (PR #256\'s reading of Bambu Studio\'s behaviour); narrower is nothing. supportsOn: every NSO support object carries detect_thin_wall = 1 ' +
               '(nso_support_interface.js SHEET.slicerSettings), so a support is sliced with it on'
     },
+    // --- the support object's other two overrides (supports-thinning) -------
+    supportObject: {
+      wallLoops: 1, sparseDensity: 0,
+      source: 'STATED, not measured: every NSO support object carries wall_loops = 1 and ' +
+              'sparse_infill_density = 0 (nso_support_interface.js SHEET.slicerSettings), so Bambu Studio prints ' +
+              'a trunk as one loop round air, as its own tree slim does, and a slicer here does the same. ' +
+              'Top / bottom shell layers stay the profile\'s: a pad is still solid bottom layers'
+    },
     // --- the flow model, shared with the importer ----------------------------
     flow: {
       filamentDiameterMm: 1.75,
@@ -217,6 +228,17 @@
     infillWallOverlap: 0.15, sliceClosingRadiusMm: 0.049, resolutionMm: 0.012, supportThresholdDeg: 30,
     onlyOneWallTop: true, minSparseAreaMm2: 15, detectThinWall: false
   };
+
+  /** The options one object is sliced with: opts, with its own wall loops and sparse density where it
+   *  has them (an object's, else a support's CONSTANTS.supportObject, else opts). The same object when
+   *  nothing differs, so a part, or a support with the options' own values, slices exactly as before. */
+  function objectOpts(ob, o) {
+    var sup = ob.role === 'support' ? CONSTANTS.supportObject : null;
+    var loops = ob.wallLoops != null ? ob.wallLoops : (sup ? sup.wallLoops : o.wallLoops);
+    var dens = ob.sparseDensity != null ? ob.sparseDensity : (sup ? sup.sparseDensity : o.sparseDensity);
+    if (loops === o.wallLoops && dens === o.sparseDensity) return o;
+    return Object.assign({}, o, { wallLoops: loops, sparseDensity: dens });
+  }
 
   function wallWidthFor(nozzle) {
     var d = (typeof nozzle === 'number' && nozzle > 0) ? nozzle : 0.4;
@@ -1388,11 +1410,14 @@
                  role: ob.role === 'support' ? 'support' : 'part', key: ob.key, hostKey: ob.hostKey,
                  thin: ob.detectThinWall != null ? !!ob.detectThinWall
                    : (ob.role === 'support' ? CONSTANTS.thinWall.supportsOn : !!o.detectThinWall),
+                 // the object's own walls and infill: a support's are CONSTANTS.supportObject's
+                 opts: objectOpts(ob, o),
                  layers: [] };
       });
 
       // Layers, object by object.
       perObject.forEach(function (P) {
+        var o = P.opts;                       // the options with this object's own walls and infill
         var S = P.S, n = planes.length;
         var sparsePrev = g.empty();
         for (var i = 0; i < n; i++) {

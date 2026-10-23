@@ -126,7 +126,7 @@ does not touch the wall stays (`plan.tight`).
 lands on the plate stands on a pad one first layer thick (0.2 mm,
 `opts.firstLayerMm`). Trunks whose feet stand within 6 mm (`FOOT_CLUSTER_MM`,
 single linkage) share ONE pad: the union of their footprints grown 4 mm
-(`FOOT_GROW_MM`), kept 0.2 mm (`FOOT_GAP_MM`) off the piece. Pads that would
+(`FOOT_GROW_MM`; 1.85 for a round trunk's, `TRUNK_PAD_MM`), kept 0.2 mm (`FOOT_GAP_MM`) off the piece. Pads that would
 touch (overlap, or part by less than 0.1 mm, `FOOT_TOUCH_MM`) are one pad, and
 every trunk on one pad is one support: on the 2026-10-20 print the first layers
 of two supports overlapped and Bambu Studio reported a path conflict between
@@ -212,13 +212,18 @@ changes, byte for byte:
 
 - **H** is the top of what the trunk holds up: its highest tip, or the top of
   the sheet or stair a tip of it is under.
-- **Under a stair's body** (supports-stair-body; docs/SUPPORT-INTERFACE.md
-  section 7): a tree that holds only a stair's tips keeps its landing member
-  (cut under the trunk's top) and its round trunk rises straight up its
-  axis to the body's bottom, H the stair's top - the body stands on it, 45
-  deg cones off each trunk's top. The stair grows no tree of its own any
-  more (`tp.stairTrunks` is empty). Under the arc: two trunks, both to z
-  28.4, H 46.0.
+- **Under a stair's body** (supports-stair-body; supports-thinning;
+  docs/SUPPORT-INTERFACE.md section 7): the trunks of the trees that hold only a
+  stair's tips - and a trunk of the stair's own where none reaches (the cone
+  rule: every point of the body's underside inside the 30 deg lean cone of a
+  trunk top, tops no lower than 0.7 of the underside's height) - rise at the
+  growth angle above to their own tops, H the stair's top; the body flares from
+  them at 30 deg. The trunk is a closed shell that stands by itself: the
+  planner's landing member under it is not built (it was a second shell inside
+  the trunk), only its foot is kept. A stair's own trunk is a `tp.stairTrunks`
+  entry (no member, no spot) numbered after the plan's, with a foot and a pad
+  like any other. The stair grows no tree of its own. Under the arc: three
+  trunks, to z 26.0, 26.6 and 26.0, H 46.0.
 - **How high.** From the pad up its STEM - the landing member, then at each
   merge the parent holding most of its tips - while the stem holds at least
   half of them: where the tree splits, the trunk ends. A taproot (a strut
@@ -228,25 +233,28 @@ changes, byte for byte:
   0.25 mm up its axis: where the piece comes nearer it is narrower there
   (rings a millimetre apart), and it ends where it would be narrower than its
   own column.
-- **Its pad** is the flared base's circle grown 4 mm (as before, from a
-  larger circle), the base's inscribed circle always pad. A trunk that comes
-  within 0.1 mm of another support's solid makes the two one support, as
-  pads too near to print apart do.
-- **Measured** (`support:foot`, 14 checks): on the arc (since
-  supports-stair-body), two trunks, to z 28.4 under the stair's body; at
-  each of Bambu's 93 trunk layers (z 0.48 - 25.02) every trunk of ours
-  standing there is wider than Bambu's, by 0.29 mm or more; one pad, 617.0
-  mm2 against Bambu's 201.4. The
-  coupon: 14 trunks, 5.35 - 6.70 mm at the plate, its pad 578.3 -> 695.7 mm2,
-  covering the old one. Built with trunkGrowth off the coupon is #265's bytes
-  and the arc supports-stair-body's (its stair's body on the trunks' landing
-  members alone); with it every part before is there byte for byte, then the
-  trunks, then the pads.
+- **Its pad** is the flared base's circle grown `TRUNK_PAD_MM` = 1.85 mm
+  (supports-thinning; 4 mm, `FOOT_GROW_MM`, until the foot held a print): Bambu's
+  first-layer ring on simple_overhang is 16.04 mm across a 12.35 mm trunk, 1.845
+  mm each side. The base's inscribed circle is always pad. A foot with no
+  round trunk keeps `FOOT_GROW_MM`. A trunk that comes within 0.1 mm of another
+  support's solid makes the two one support, as pads too near to print apart
+  do. `shareFeet`'s `opts.trunkPadMm` draws another margin (the suites draw
+  #274's 4 mm beside the new).
+- **Measured** (`support:foot`, 15 checks): on the arc (since
+  supports-thinning), THREE trunks, to z 26.0 - 26.6 into the stair's body; at
+  each of Bambu's 93 trunk layers (z 0.48 - 25.02) each is wider than
+  Bambu's, by 0.29 mm or more; one pad under the three at 1.85 mm of margin. The coupon: 14 trunks, 5.35 - 6.70 mm at
+  the plate, its pad 578.3 (before the trunks) -> 695.7 (4 mm) -> 516.5 mm2
+  (1.85), inside #274's and out to the base plus 1.85 wherever the piece does
+  not cut it. Built with trunkGrowth off the coupon is #265's bytes and the arc
+  supports-thinning's (one trunk's landing member and the body on it); with it
+  every part before is there byte for byte, then the trunks, then the pads
+  (the coupon's parts and trunks are #274's, 30,368 triangles; its pads 468 ->
+  536).
 - **Not changed**: G-scope's support row and every build without the sheet
   (`solid()` on its own, the suites that weigh members and pads) build as
-  before. NSO's slice of the arc's export lays more support a layer low down
-  (z 5: 205 mm against 42 before and Bambu's 52): Bambu's trunk is one or two
-  loops round air, ours is solid.
+  before.
 
 **Refusal.** Only a support point inside the piece (`lineInsideAt` along its
 own normal). Beside good points it is left out and named. If every point is
@@ -411,7 +419,8 @@ Nothing was re-pinned: every plan is the same JSON, byte for byte.
 
 - **FLAG** foot pad: 0.2 mm thick (the 0.2 mm layers the gaps here are sized
   for; `opts.firstLayerMm`), one per cluster of feet within 6 mm, the
-  footprints grown 4 mm, 0.2 mm off the piece (supports-print-1's numbers).
+  footprints grown 4 mm (a round trunk's pad: its base grown 1.85 mm,
+  supports-thinning), 0.2 mm off the piece (supports-print-1's numbers).
 - **FLAG** exposed-only keeps an overhang that has more of the same piece
   directly below it (supports-followups; docs/SUPPORT-BEACONS.md, *Exposed
   only*): a cap over a wide stem, a shelf over its base, an arch over its floor
@@ -427,8 +436,9 @@ Nothing was re-pinned: every plan is the same JSON, byte for byte.
 - **FLAG** square section everywhere (but the round trunk on the card's
   build); area cap 4 × s²; merges of up to 3.
 - **FLAG** the trunk (supports-foot): Bambu's law at 5.5 deg from a 2 mm top,
-  a 15 deg flare over 4 mm, up the stem while it holds half its tips; solid,
-  not Bambu's loops round air.
+  a 15 deg flare over 4 mm, up the stem while it holds half its tips; a loop
+  round air on the print since supports-thinning (the support set's
+  `wall_loops 1`, `sparse_infill_density 0%`), as Bambu's are.
 - **FLAG** pickup reach = 1.05 × the pitch; the stub's vertical last run is 2 × s.
 - **FLAG** resting pad: 0.4 mm, a 0.18 mm gap above the surface (a floating
   first layer, as slicers print support-on-model).

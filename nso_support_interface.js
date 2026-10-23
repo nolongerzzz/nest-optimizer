@@ -655,12 +655,16 @@
   /* what the sheet needs of the slicer, written on every support object
      (Metadata/model_settings.config): see LINE WIDTH */
   /* every support object's per-object overrides, one set for all of them
-     (docs/BAMBU-PROJECT-EXPORT.md): the sheet's thin-wall pass (above) and
-     nothing else. top / bottom_shell_layers 0 were tried and failed on the
-     owner's print: the 0.2 mm foot pads printed as a 15 % lattice, so 81 %
+     (docs/BAMBU-PROJECT-EXPORT.md): the sheet's thin-wall pass (above), and
+     supports-thinning's two: wall_loops 1 and sparse_infill_density 0, so a
+     trunk prints as Bambu's tree slim does - one loop round air - and the
+     pad as solid bottom layers (the profile's shell layers, bottom included,
+     are untouched: top / bottom_shell_layers 0 were tried and failed on the
+     owner's print, the 0.2 mm foot pads printed as a 15 % lattice, so 81 %
      of layer 2's support walls had no line under them and the trunks went to
-     spaghetti. Per-family tuning waits for a print. */
-  var SHEET_SLICER = { wall_generator: 'classic', detect_thin_wall: '1' };
+     spaghetti). The density is written as Studio writes a percent, "0%".
+     NSO's slicer reads the same two (nso_slicer.js CONSTANTS.supportObject). */
+  var SHEET_SLICER = { wall_generator: 'classic', detect_thin_wall: '1', sparse_infill_density: '0%', wall_loops: '1' };
   var CELL_MM = 0.1;           /* the footprint raster */
   var SAMPLE_MM = 0.05;        /* along a line */
   var LEVEL_TOL_MM = 0.01;
@@ -692,8 +696,9 @@
   var STAIR_STEP_MM = 0.03;    /* a band nearer the piece than the gap moves up the slope by this, at least */
   var STAIR_BODY_PITCH_MM = 1.7; /* the body's ribs this far apart: Bambu's support under simple_overhang, its plan area per mm of line (z 38 - 44: 1.61 - 1.82) */
   var STAIR_BODY_MIN_MM = 1;     /* a strip has a body behind it where this much room is left past its channel */
-  var STAIR_BODY_ON_MM = 0.15;   /* ...and its first layer lies this far inside its trunk's top (a cell's slack and a corner's mitre) */
   var STAIR_BODY_KEEP_MM = 0.35; /* the body keeps this far off the part beside it (Bambu's support_object_xy_distance) */
+  var STAIR_BODY_ON_MM = 0.15;   /* a cone's radius is read this far inside its trunk's top (a cell's slack and a corner's mitre) */
+  var STAIR_TRUNK_TOP_FRAC = 0.7; /* a trunk of the stair's body stands at least this share of its underside's height over the plate: Bambu's trunk on simple_overhang ends at 25.02 (support:foot), 0.69 of its 36.4, where it splits */
   var STAIR_SNAP_DEG = 2;       /* a fall this near one of the sheet's line angles takes it */
   var STAIR_REACH_MM = 3;      /* a strip lies only where the part's underside is this near over it */
   var STAIR_START = 0.6;       /* the stair starts where a strip first runs this share of the longest strip's length */
@@ -1759,14 +1764,17 @@
        to fewer lines spreads them, its loop's channel opening. The lowest
        strip stands on a transition, itself again a layer under it.
 
-       THE BODY (bodyOf). Under the strips, from the trunks of the trees that
-       hold only the stair's tips (nso_support_gridpack.js TRUNKS: they rise
-       to one height, the highest from which a 45 deg cone over each covers
-       the shadow under the transition) up to the top: every layer the
-       shadow of the underside over the stair's line, clipped to the part's
-       outline plus one line, kept STAIR_BODY_KEEP_MM off the part beside
-       it, within the trunks' cones, and a channel behind each strip. Each
-       layer is a loop round its outline and ribs up the slope inside,
+       THE BODY (bodyOf). Under the strips, from the top of the trunk of the
+       trees that hold only the stair's tips (nso_support_gridpack.js TRUNKS;
+       a trunk stands under each cone the body's underside needs) up to the
+       top: the trunk rises at its growth angle straight into the body's
+       underside - the lowest layer the shadow under the transition fills -
+       with no cone off its top, and every layer is the shadow of the
+       underside over the stair's line (the transition's top and the gap),
+       clipped to the part's outline plus one line, kept STAIR_BODY_KEEP_MM
+       off the part beside it, and a channel behind each strip. The bottom
+       layer spans from the trunk's top as the sheet spans between its tips.
+       Each layer is a loop round its outline and ribs up the slope inside,
        STAIR_BODY_PITCH_MM apart (Bambu's support, measured). No tree of
        its own, no caps: every tip of the plan on the curve is held by the
        body (mode 'drop'), and the planner's members over the trunks are
@@ -2226,22 +2234,21 @@
                lines: { angleDeg: phi, stair: true, slopeDeg: slopeDeg, droppedShare: 0, bare: 0, pieces: layers.length, tried: [] },
                stair: { slopeDeg: slopeDeg, angleDeg: phi, mLo: mLo, mTop: mTop, strips: mTop - mLo + 1, topMm: zTopStair, tips: [],
                         body: { pitchMm: body.pitchMm, layers: body.layers.length, zBottom: zBot, lineMm: zTopOf(mLo - 1) + o.gap,
-                                trunks: body.trunks, ribs: body.ribs, loops: body.loops, fails: body.fails,
+                                trunks: body.trunks, count: body.count, ribs: body.ribs, loops: body.loops, fails: body.fails,
                                 joined: joined.map(function (J) { return { zTop: J.res.zTop, zBase: J.res.zBase, tips: J.tips.length, layers: J.res.layers.length }; }) },
                         cutAbove: group.filter(function (t) { return t.stairM != null && t.stairM > mTop; }).length } };
 
-      /* THE BODY. The trees that hold only this stair's tips land their
-         trunks (nso_support_gridpack.js TRUNKS) under it; each trunk rises to
-         one height and the body stands on it, widening at 45 deg - half a line
-         a layer, so every layer's walls lie on the one under - until it fills
-         the shadow of the underside over the stair's line (the transition's
-         top and the gap), clipped to the part's outline plus one line, and
-         kept STAIR_BODY_KEEP_MM off the part beside it. Over the stair's
-         layers its front stands a channel behind each strip, so the body's
-         front wall lies one pitch behind the strip's back line: the next
-         strip's lines lie over the two of them. A layer of it is a loop round
-         its outline and ribs up the slope inside, STAIR_BODY_PITCH_MM apart
-         (Bambu's support, measured), each run from loop to loop. */
+      /* THE BODY. The tree that holds only this stair's tips lands its trunk
+         (nso_support_gridpack.js TRUNKS) under it; the trunk rises straight
+         into the body's underside and the body stands on its top, spanning
+         from it over the shadow of the underside over the stair's line (the
+         transition's top and the gap), clipped to the part's outline plus one
+         line, and kept STAIR_BODY_KEEP_MM off the part beside it. Over the
+         stair's layers its front stands a channel behind each strip, so the
+         body's front wall lies one pitch behind the strip's back line: the
+         next strip's lines lie over the two of them. A layer of it is a loop
+         round its outline and ribs up the slope inside, STAIR_BODY_PITCH_MM
+         apart (Bambu's support, measured), each run from loop to loop. */
       function bodyOf() {
         var axes = opts.trunkAxes || [], law = opts.trunkLaw || null;
         if (!law) return null;
@@ -2312,34 +2319,18 @@
           return M;
         }
         function cellXY(q) { var i = q % nx; return [ox + i * CELL_MM, oy + ((q - i) / nx) * CELL_MM]; }
-        /* THE LEGS' HEIGHT: one for all, the highest from which their cones
-           cover the shadow under the transition, a line to spare; lower for a
-           leg the piece stops first (its trunk's law and STAIR_BODY_KEEP_MM
-           round its axis, read on the raster every half millimetre) */
-        var full = shadow(zTopOf(mLo - 2)), Rstar = 0;
-        for (var q = 0; q < n; q++) {
-          if (!full[q]) continue;
-          var c = cellXY(q), dm = Infinity;
-          legs.forEach(function (a) { dm = Math.min(dm, Math.hypot(c[0] - a.c[0], c[1] - a.c[1])); });
-          Rstar = Math.max(Rstar, dm);
-        }
-        var zFull = zTopOf(mLo - 2) - o.layer, kTop = null, needs = [{ z: zFull, R: Rstar }];
-        /* ...and under each joined sheet, by its z_base */
-        joined.forEach(function (J) {
-          var Rj = 0;
-          for (var q = 0; q < n; q++) {
-            if (!(jUnder[q] < Infinity) || !near[q]) continue;
-            var c = cellXY(q), dm = Infinity;
-            legs.forEach(function (a) { dm = Math.min(dm, Math.hypot(c[0] - a.c[0], c[1] - a.c[1])); });
-            Rj = Math.max(Rj, dm);
-          }
-          needs.push({ z: J.res.zBase - o.layer, R: Rj });
-        });
-        for (var k = mLo - 3; k > 0; k--) {
-          var zt0 = zTopOf(k);
-          if (needs.every(function (nd) { return rLaw(zt0) + (nd.z - zt0) >= nd.R + bead; })) { kTop = k; break; }
-        }
-        if (kTop == null) return null;
+        /* THE BODY'S UNDERSIDE (supports-thinning): the lowest layer of the body is the one the shadow under the
+           transition fills (mLo - 2), or, under a flat sheet the body holds, the last layer whose top is within
+           the sheet's z_base. THE CONE RULE, read against the body: every point of that underside lies within the
+           lean cone of some trunk's top - the cone the body flares in from the top at the planner's lean limit
+           (30 deg off straight up, settled), so a layer lies on the one under it - and no trunk's top is lower
+           than STAIR_TRUNK_TOP_FRAC of the underside's height, where Bambu's trunk splits. The fewest trunks that do it: the plan's legs
+           first, the one covering most of what is left, then a trunk of its own on the plate (a stair trunk, built
+           beside the plan's) where none of them reaches. Each trunk rises to the highest top whose cone covers
+           the cells nearest to it. A leg the piece stops short of its top is not a candidate. */
+        var kU = mLo - 2;
+        joined.forEach(function (J) { kU = Math.min(kU, Math.floor((J.res.zBase - o.plateZ) / o.layer + 1e-9)); });
+        if (kU < 2) return null;
         function clearTo(a, kMax) {
           for (var k3 = 1; k3 <= kMax; k3++) {
             var z = zTopOf(k3), R = rLaw(z) / law.cosN + STAIR_BODY_KEEP_MM;
@@ -2353,25 +2344,94 @@
           }
           return kMax;
         }
-        var trunks = legs.map(function (a) {
-          var kt = clearTo(a, kTop);
-          return { tree: a.tree, c: a.c.slice(), k: kt, zTop: zTopOf(kt), r: rLaw(zTopOf(kt)) };
-        }).filter(function (t) { return t.k > 0; });
-        if (!trunks.length) return null;
+        var full = shadow(zTopOf(mLo - 2));
+        var Mb = kU === mLo - 2 ? full : shadow(zTopOf(kU));
+        var tanL = Math.tan(law.leanDeg * Math.PI / 180), zU = zTopOf(kU - 1);
+        var kMin = Math.ceil(STAIR_TRUNK_TOP_FRAC * (kU - 1) - 1e-6);
+        if (kMin > kU - 1) return null;
+        /* how far from a trunk whose top is layer k the cone reaches at the underside, less a line */
+        function reachAt(k) { return rLaw(zTopOf(k)) - STAIR_BODY_ON_MM + (zU - zTopOf(k)) * tanL - bead; }
+        /* three quarters of a millimetre of the reach is held back when the trunks are chosen: they are chosen on a millimetre
+           grid of the underside's cells, and each one's top is then read on every cell */
+        var rCover = reachAt(kMin) - 0.75, STEP = Math.round(1 / CELL_MM), need = [], candAll = [], allCells = [];
+        var Dout = dist(invert(Mb)), rIn = rLaw(zTopOf(kMin)) + 0.5;
+        for (var jb = 0; jb < ny; jb++) for (var ib = 0; ib < nx; ib++) {
+          var qb = jb * nx + ib;
+          if (!Mb[qb]) continue;
+          var cq = cellXY(qb);
+          allCells.push(cq);
+          if (jb % STEP === 0 && ib % STEP === 0) {
+            need.push(cq);
+            if (Dout[qb] * CELL_MM >= 0.6) candAll.push({ c: cq, deep: Dout[qb] * CELL_MM >= rIn });
+          }
+        }
+        legs = legs.map(function (a) { return { tree: a.tree, c: a.c.slice() }; }).filter(function (a) { return clearTo(a, kMin) >= kMin; });
+        var chosen = [], left = need.slice(), plan0 = legs.length, planKept = 0;
+        function within(a, c0) { return Math.hypot(c0[0] - a[0], c0[1] - a[1]) <= rCover; }
+        for (var guard = 0; guard < 24 && left.length; guard++) {
+          var bestLeg = null, bestGain = 0;
+          legs.forEach(function (a) {
+            if (a.used) return;
+            var g0 = left.filter(function (c0) { return within(a.c, c0); }).length;
+            if (g0 > bestGain || (g0 === bestGain && bestLeg && g0 > 0 && a.tree < bestLeg.tree)) { bestGain = g0; bestLeg = a; }
+          });
+          if (bestLeg) {
+            bestLeg.used = true; planKept++;
+            chosen.push({ tree: bestLeg.tree, c: bestLeg.c.slice(), extra: false });
+          } else {
+            /* a trunk of its own: the farthest uncovered cell first, then the cell near it that covers the most */
+            var far = null, farD = -1;
+            left.forEach(function (c0) {
+              var dn = Math.min.apply(null, chosen.map(function (t) { return Math.hypot(c0[0] - t.c[0], c0[1] - t.c[1]); }).concat([1e9]));
+              if (dn > farD) { farD = dn; far = c0; }
+            });
+            /* a cell whose whole top lies under the body first, then any cell the body's edge allows */
+            var ranked = candAll.filter(function (cd) { return Math.hypot(cd.c[0] - far[0], cd.c[1] - far[1]) <= rCover; }).map(function (cd) {
+              var c0 = cd.c, cov = left.filter(function (u0) { return Math.hypot(u0[0] - c0[0], u0[1] - c0[1]) <= rCover; });
+              return { c: c0, deep: cd.deep, gain: cov.length, mean: cov.reduce(function (a0, u0) { return a0 + Math.hypot(u0[0] - c0[0], u0[1] - c0[1]); }, 0) / Math.max(1, cov.length) };
+            }).sort(function (a1, b1) { return (b1.deep - a1.deep) || (b1.gain - a1.gain) || (a1.mean - b1.mean); });
+            var got = null;
+            for (var ri = 0; ri < ranked.length && ri < 150 && !got; ri++) {
+              beat();
+              if (clearTo({ c: ranked[ri].c }, kMin) >= kMin) got = ranked[ri];
+            }
+            if (!got) return null;
+            chosen.push({ tree: null, c: got.c.slice(), extra: true });
+          }
+          var lastT = chosen[chosen.length - 1];
+          left = left.filter(function (c0) { return !within(lastT.c, c0); });
+        }
+        if (left.length) return null;
+        /* each trunk's top: the highest layer whose cone covers the cells nearest to it */
+        chosen.forEach(function (t) { t.R = 0; });
+        allCells.forEach(function (c0) {
+          var bt = null, bd = Infinity;
+          chosen.forEach(function (t) { var d0 = Math.hypot(c0[0] - t.c[0], c0[1] - t.c[1]); if (d0 < bd) { bd = d0; bt = t; } });
+          bt.R = Math.max(bt.R, bd);
+        });
+        var trunks = chosen.map(function (t) {
+          var k = kU - 1;
+          while (k > kMin && reachAt(k) < t.R) k--;
+          while (k > kMin && clearTo(t, k) < k) k--;
+          return { tree: t.tree, extra: t.extra, c: t.c.slice(), k: k, zTop: zTopOf(k), r: rLaw(zTopOf(k)), coverMm: t.R };
+        });
+        if (trunks.some(function (t) { return !(reachAt(t.k) >= t.coverMm) || clearTo(t, t.k) < t.k; })) return null;
         var mB0 = Math.min.apply(null, trunks.map(function (t) { return t.k; })) + 1;
+        var count = { legs: plan0, kept: planKept, extra: trunks.filter(function (t) { return t.extra; }).length, rCoverMm: rCover + 0.75, underside: zU,
+                      trunks: trunks.map(function (t) { return { tree: t.tree, c: t.c, zTop: t.zTop, coverMm: t.coverMm, extra: t.extra }; }) };
         var P = STAIR_BODY_PITCH_MM, out = [], dmin = Infinity, nRibs = 0, nLoops = 0, bodyFails = [];
         for (var m = mB0; m <= mTop; m++) {
           beat();
           var zt = zTopOf(m), zb0 = zt - o.layer, M = m <= mLo - 2 ? (m === mLo - 2 ? full : shadow(zt)) : shadow(zt);
           if (m === mLo - 2) M = M.slice();
-          /* the legs' cones */
+          /* the trunks' lean cones: a layer flares from a trunk's top at the lean limit, so every wall lies on the one under */
           for (var q3 = 0; q3 < n; q3++) {
             if (!M[q3]) continue;
             var c3 = cellXY(q3), inCone = false;
             for (var t3 = 0; t3 < trunks.length && !inCone; t3++) {
               var T = trunks[t3];
               if (zb0 < T.zTop - 1e-9) continue;
-              if (Math.hypot(c3[0] - T.c[0], c3[1] - T.c[1]) <= T.r - STAIR_BODY_ON_MM + (zb0 - T.zTop)) inCone = true;
+              if (Math.hypot(c3[0] - T.c[0], c3[1] - T.c[1]) <= T.r - STAIR_BODY_ON_MM + (zb0 - T.zTop) * tanL) inCone = true;
             }
             if (!inCone) M[q3] = 0;
           }
@@ -2411,7 +2471,8 @@
         }
         if (!out.length) return null;
         return { layers: out, minD: dmin, pitchMm: P, zBottom: out[0].z0, ribs: nRibs, loops: nLoops, fails: bodyFails,
-                 trunks: trunks.map(function (t) { return { tree: t.tree, c: t.c, zTop: t.zTop, rMm: t.r }; }) };
+                 trunks: trunks.map(function (t) { return { tree: t.tree, extra: t.extra, c: t.c, zTop: t.zTop, rMm: t.r, coverMm: t.coverMm }; }),
+                 count: count };
 
         /* A LAYER OF THE BODY from its cells: the loop's centreline is the
            outline half a line in (the region opened by half a line, so no neck

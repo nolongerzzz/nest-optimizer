@@ -32,18 +32,21 @@
       faster than the trunk above it, layer on layer, onto the pad; the base
       lies inside the pad (no step from trunk to pad).
    4. THE PAD: sized to the trunk - in every direction the piece does not
-      cut it short, out to the flared base plus FEET.growMm; its area at
-      least Bambu's first layer under its trunk; the pads of trunks that
-      touch one pad (one support).
+      cut it short, out to the flared base plus FEET.trunkGrowMm (1.85 mm,
+      Bambu's measured: its first-layer ring 16.04 mm across a 12.35 mm
+      trunk; it was 4 mm until the foot held a print); its area at least
+      Bambu's first layer under its trunk; the pads of trunks that touch one
+      pad (one support).
    5. THE GAP: every trunk's exact triangle distance to the piece, at least
       FEET.gapMm.
    6. NOTHING ABOVE THE TRUNK CHANGES, on the arc and the 2026-10-20 coupon:
       built with trunkGrowth off the support is the build pinned (the
-      coupon's #265's; the arc's supports-stair-body's: its stair a body
-      on the plan's trunks since) byte for byte, and
+      coupon's #265's; the arc's supports-thinning's: the landing
+      members and the body on them) byte for byte, and
       with it on the support is that build's every part, byte for byte, then
-      the trunks, then the pads; the coupon's pads cover the pads before
-      (every corner of the old outline inside the new, no area lost).
+      the trunks, then the pads; the coupon's pads are #274's drawn with the
+      smaller margin and nothing else (the new outline inside the old, each
+      trunk's base grown by the margin inside the new).
    ============================================================ */
 'use strict';
 const fs = require('fs');
@@ -74,9 +77,10 @@ const GP = ctx.NSO_SupportGridpack, SI = ctx.NSO_SupportInterface, TH = ctx.NSO_
 const TRUNK = GP.TRUNK, FEET = GP.FEET;
 /* the builds with trunkGrowth off, sha-256 (first 16 hex) of each support object's Float32 soup and its
    triangles: the coupon's #265's (claude-wip b7076af + supports-curved-sheet a08bc6f; support:curved 7's);
-   the arc's supports-stair-body's - its stair a body on the plan's trunks since, the trunks' landing members
-   all that stands under it with them off */
-const BEFORE = { coupon: ['6ac271882b107552', 27348], arc: ['379c759080d3c132', 50572] };
+   the arc's supports-thinning's - the plan's two landing members, a trunk of its own, the body's 30 deg cones off
+   three trunks' tops (50572 tris at supports-stair-body, 379c759080d3c132, two trunks and 45 deg cones); the
+   layers from the body's underside up are #275's byte for byte, support:curved 4 */
+const BEFORE = { coupon: ['6ac271882b107552', 27348], arc: ['4f598080541234fb', 67728] };
 
 let pass = 0, fail = 0;
 const FAILS = [];
@@ -200,7 +204,7 @@ function splitObject(b, oi) {
   const b = await EXP.build(arc), b0 = await EXP.build(arc, { trunkGrowth: false });
   const c1 = await EXP.build(coupon), c0 = await EXP.build(coupon, { trunkGrowth: false });
   console.log(`built the arc and the coupon with and without trunks in ${Date.now() - t0} ms; ` +
-    `trunk law: ${TRUNK.tipMm} mm at the top, ${TRUNK.angleDeg} deg; flare ${TRUNK.flareAngleDeg} deg more over ${TRUNK.flareMm} mm; pad = base + ${FEET.growMm} mm`);
+    `trunk law: ${TRUNK.tipMm} mm at the top, ${TRUNK.angleDeg} deg; flare ${TRUNK.flareAngleDeg} deg more over ${TRUNK.flareMm} mm; pad = base + ${FEET.trunkGrowMm} mm (was ${FEET.growMm} at supports-foot)`);
 
   /* ------------------------------------------------------------------ 1 */
   console.log('\n=== 1. Bambu\'s trunk (tree slim, the fixture\'s G-code) ===');
@@ -269,14 +273,14 @@ function splitObject(b, oi) {
         const a = 2 * Math.PI * k / 72, r = reach(pd.poly, t.c, a);
         if (r < rb) outs.push(`trunk ${i + 1} at ${k * 5} deg: base ${f2(rb)}, pad ${f2(r)}`);
         const h = P.hitsAlong([t.c[0], t.c[1], 0.1], [Math.cos(a), Math.sin(a), 0], 40), piece = h.length ? h[0] : Infinity;
-        if (piece - FEET.gapMm - 0.4 < rb + FEET.growMm) { cut.push(k); continue; }
+        if (piece - FEET.gapMm - 0.4 < rb + FEET.trunkGrowMm) { cut.push(k); continue; }
         worst = Math.min(worst, r - rb);
-        if (r < rb + FEET.growMm - 0.15) less.push(`trunk ${i + 1} at ${k * 5} deg: ${f2(r - rb)} past the base`);
+        if (r < rb + FEET.trunkGrowMm - 0.15) less.push(`trunk ${i + 1} at ${k * 5} deg: ${f2(r - rb)} past the base`);
       }
       if (!(pd.areaMm2 >= B.padAreaMm2)) less.push(`trunk ${i + 1}'s pad ${pd.areaMm2.toFixed(1)} mm2`);
     });
     check('every trunk\'s flared base lies inside its pad (no step from trunk to pad)', !outs.length, outs.length ? outs.slice(0, 4).join('; ') : `${T.length} bases, 72 directions each`);
-    check(`each pad reaches its trunk's base plus ${FEET.growMm} mm wherever the piece does not cut it short, and covers at least Bambu's first layer`,
+    check(`each pad reaches its trunk's base plus ${FEET.trunkGrowMm} mm wherever the piece does not cut it short, and covers at least Bambu's first layer`,
       !less.length, (less.length ? less.slice(0, 4).join('; ') + '; ' : '') +
       `least ${f2(worst)} mm past the base (${cut.length} of ${72 * T.length} directions cut short by the piece); pad ${pads.map(q => q.areaMm2.toFixed(1)).join(', ')} mm2 against Bambu's ${B.padAreaMm2.toFixed(1)} mm2 (${f2(B.padD)} mm across)`);
   }
@@ -297,24 +301,56 @@ function splitObject(b, oi) {
   console.log('\n=== 6. nothing above the trunk changes ===');
   for (const [name, on, off] of [['arc', b, b0], ['coupon', c1, c0]]) {
     const o0 = off.objects[1];
-    check(`${name}: built with trunkGrowth off, the support is ${name === 'arc' ? 'supports-stair-body' : '#265'}'s byte for byte`,
+    check(`${name}: built with trunkGrowth off, the support is ${name === 'arc' ? 'supports-thinning\'s' : '#265\'s'} byte for byte`,
       off.objects.length === 2 && sha(o0.soup) === BEFORE[name][0] && o0.soup.length / 9 === BEFORE[name][1], `${sha(o0.soup)} (${o0.soup.length / 9} tris)`);
     const s1 = splitObject(on, 0), s0 = splitObject(off, 0);
-    check(`${name}: with trunks, every part before is there byte for byte, then the trunks, then the pads - and nothing else`,
-      on.sf.objects.length === off.sf.objects.length && sha(s1.solids) === sha(s0.solids) && s1.solids.length === s0.solids.length && s1.trunks.length > 0 &&
-      s1.trunkSoups.length === on.sf.trunks.filter(t => t.soup).length,
-      `${s1.solids.length / 9} tris as before (${sha(s1.solids)}), ${s1.trunkSoups.length} trunk(s) ${s1.trunks.length / 9} tris, pads ${s0.pads.length / 9} -> ${s1.pads.length / 9} tris`);
+    if (name === 'coupon') {
+      check(`${name}: with trunks, every part before is there byte for byte, then the trunks, then the pads - and nothing else`,
+        on.sf.objects.length === off.sf.objects.length && sha(s1.solids) === sha(s0.solids) && s1.solids.length === s0.solids.length && s1.trunks.length > 0 &&
+        s1.trunkSoups.length === on.sf.trunks.filter(t => t.soup).length,
+        `${s1.solids.length / 9} tris as before (${sha(s1.solids)}), ${s1.trunkSoups.length} trunk(s) ${s1.trunks.length / 9} tris, pads ${s0.pads.length / 9} -> ${s1.pads.length / 9} tris`);
+    } else {
+      /* the arc: a stair's trunk is a closed shell that stands by itself, so with trunks on, the landing member
+         under it (a square column inside it, a second shell) is not built: what is left of the parts before is
+         theirs byte for byte - the build's tail - and what is gone is nothing but those columns */
+      const cut = s0.solids.length - s1.solids.length, tail = s0.solids.slice(cut);
+      check(`${name}: with trunks, the parts before are there byte for byte but for the landing members inside the trunks (no second shell in a trunk), then the trunks, then the pads`,
+        on.sf.objects.length === off.sf.objects.length && cut > 0 && sha(tail) === sha(s1.solids) && s1.trunks.length > 0 &&
+        s1.trunkSoups.length === on.sf.trunks.filter(t => t.soup).length,
+        `${s1.solids.length / 9} tris as before (${sha(s1.solids)}), ${cut / 9} tris of landing member left out, ${s1.trunkSoups.length} trunk(s) ${s1.trunks.length / 9} tris, pads ${s0.pads.length / 9} -> ${s1.pads.length / 9} tris`);
+    }
   }
   {
-    const n = c1.sf.padOutlines, o = c0.sf.padOutlines, lost = [];
-    o.forEach((pd, i) => {
-      const nw = n.find(q => q.from.some(f => pd.from.some(g => g[0] === f[0] && g[1] === f[1])));
-      if (!nw) { lost.push(`pad ${i + 1}: gone`); return; }
-      const outside = pd.poly.filter(q => !inPoly(q, nw.poly) && Math.min(...nw.poly.map((a, k) => segDist(q, a, nw.poly[(k + 1) % nw.poly.length]))) > 0.11);
-      if (outside.length || nw.areaMm2 < pd.areaMm2) lost.push(`pad ${i + 1}: ${outside.length} corners outside, ${pd.areaMm2.toFixed(1)} -> ${nw.areaMm2.toFixed(1)} mm2`);
+    /* #274's pads (its 4 mm margin) drawn beside the new: the same trunks and the same raster, the margin alone differs */
+    const old274 = GP.shareFeet(c1.areas.map(a => ({ solids: a.sh.solids })), coupon, { plateZ: c1.areas[0].p.plateZ, trunkPadMm: FEET.growMm });
+    const n = c1.sf.padOutlines, o = old274.padOutlines, bad = [];
+    check('the coupon with #274\'s margin is #274\'s build: its pad 578.3 -> 695.7 mm2 over the same trunks',
+      old274.ok && o.length === 1 && Math.abs(o[0].areaMm2 - 695.71) < 0.05 && old274.trunks.length === c1.sf.trunks.length &&
+      old274.trunks.every((t, i) => !t.soup === !c1.sf.trunks[i].soup && (!t.soup || sha(t.soup) === sha(c1.sf.trunks[i].soup))), o.map(q => q.areaMm2.toFixed(1)).join(', '));
+    /* pads smaller by the margin change only: every corner of the new outline inside the old (a cell's slack), and
+       each trunk's base grown by the new margin inside the new outline wherever the piece does not cut it short */
+    const cellTol = 0.11;
+    n.forEach((pd, i) => {
+      const old = o.find(q => q.from.some(f => pd.from.some(g => g[0] === f[0] && g[1] === f[1])));
+      if (!old) { bad.push(`pad ${i + 1}: no old pad`); return; }
+      const outside = pd.poly.filter(q => !inPoly(q, old.poly) && Math.min(...old.poly.map((a, k) => segDist(q, a, old.poly[(k + 1) % old.poly.length]))) > cellTol);
+      if (outside.length) bad.push(`pad ${i + 1}: ${outside.length} corners outside #274's`);
     });
-    check('the coupon\'s pads are not smaller than before: every corner of each old outline inside the new one (a cell\'s slack), its area no less',
-      !lost.length && n.length <= o.length, lost.length ? lost.join('; ') : o.map((pd, i) => `${pd.areaMm2.toFixed(1)} -> ${(n[i] || {}).areaMm2 != null ? n[i].areaMm2.toFixed(1) : '-'} mm2`).join(', '));
+    const Pc = TH.prepare(coupon, {});
+    let short = 0, tried = 0;
+    c1.sf.trunks.filter(t => t.soup).forEach(t => {
+      const pd = n.find(q => q.from.some(f => f[0] === t.from[0] && f[1] === t.from[1]));
+      const rb = t.rings[0][1];
+      for (let k = 0; k < 36; k++) {
+        const a = 2 * Math.PI * k / 36, h = Pc.hitsAlong([t.c[0], t.c[1], 0.1], [Math.cos(a), Math.sin(a), 0], 40), piece = h.length ? h[0] : Infinity;
+        if (piece - FEET.gapMm - 0.4 < rb + FEET.trunkGrowMm) continue;
+        tried++;
+        if (!pd || reach(pd.poly, t.c, a) < rb + FEET.trunkGrowMm - 0.15) short++;
+      }
+    });
+    check(`the coupon's pads are smaller by the margin change only: inside #274's, and each trunk's base plus ${FEET.trunkGrowMm} mm inside them where the piece does not cut it`,
+      !bad.length && !short && n.length === o.length && n[0].areaMm2 < o[0].areaMm2, (bad.length ? bad.join('; ') + '; ' : '') +
+      `${o.map(q => q.areaMm2.toFixed(1)).join(', ')} -> ${n.map(q => q.areaMm2.toFixed(1)).join(', ')} mm2, ${short} of ${tried} directions short of the margin`);
     const ct = c1.sf.trunks;
     console.log('        the coupon\'s trunks: ' + ct.map(t => `[${t.c.map(v => v.toFixed(1)).join(',')}] ${t.rings ? f2(2 * t.rings[0][1]) + ' mm to z ' + f2(t.top) : t.why}`).join('; '));
   }
@@ -328,10 +364,11 @@ function splitObject(b, oi) {
     const z2 = R3.openZip(new Uint8Array(fs.readFileSync(file))), dec = new TextDecoder();
     const model = dec.decode(await z2.read('3D/3dmodel.model'));
     const ms = z2.names().includes('Metadata/model_settings.config') ? dec.decode(await z2.read('Metadata/model_settings.config')) : '';
-    const tw = (ms.match(/key="detect_thin_wall" value="1"/g) || []).length;
-    check('the export is a Bambu project: Studio\'s envelope, each support with its thin-wall overrides',
-      /<metadata name="Application">BambuStudio-[\d.]+<\/metadata>/.test(model) && tw === objects.length - 1,
-      `${(model.match(/BambuStudio-[\d.]+/) || ['no Studio tag'])[0]}; detect_thin_wall on ${tw} of ${objects.length - 1} support(s)`);
+    const keys = { wall_generator: 'classic', detect_thin_wall: '1', sparse_infill_density: '0%', wall_loops: '1' };
+    const tw = Object.keys(keys).map(k => (ms.match(new RegExp('key="' + k + '" value="' + keys[k] + '"', 'g')) || []).length);
+    check('the export is a Bambu project: Studio\'s envelope, each support with its four overrides (classic walls, thin walls, no sparse infill, one wall loop)',
+      /<metadata name="Application">BambuStudio-[\d.]+<\/metadata>/.test(model) && tw.every(c => c === objects.length - 1),
+      `${(model.match(/BambuStudio-[\d.]+/) || ['no Studio tag'])[0]}; ${Object.keys(keys).map((k, i) => k + ' on ' + tw[i]).join(', ')} of ${objects.length - 1} support(s)`);
   }
   console.log('\n  wrote ' + path.relative(ROOT, file) + ' (open it in Bambu Studio as a PROJECT, its own supports off)');
 

@@ -14,7 +14,7 @@
    across the overhang's width, moving up the curve as the layers rise.
 
      node tools/nso_support_curved_check.js      exit 0 = every gate held
-     (writes tools/supports-stair-out/simple_overhang_supports.3mf, the arc
+     (writes tools/supports-thin-out/simple_overhang_supports.3mf, the arc
       with its supports as the card exports it, to slice with Bambu's own
       supports off and print)
 
@@ -34,11 +34,17 @@
       0.35 or less.
    3. THE GAP: the whole support (stair, body, trunks) against the arc with
       the exact triangle distance: 0.18 mm or more.
-   4. THE BODY: no tree of its own (no stair tips, no stair trunks); every
-      tip of the plan on the curve held by the body, none built; one
-      support; it rests on the trunks (each rises to the body's bottom, its
-      first layer within the trunk's top); it never stands past the part's
-      outline in plan by more than a line.
+   4. THE BODY: no tree of its own (no stair tips, no stair trunk that holds a
+      spot); every tip of the plan on the curve held by the body, none built;
+      one support; it rests on the trunks (supports-thinning: each rises at its
+      growth angle to its top, the body's layer over it lies over that top, and
+      the layers flare from it at the 30 deg lean limit); it never stands past
+      the part's outline in plan by more than a line. THE CONE RULE, read
+      against the body: every point of the body's underside lies within the
+      lean cone of some trunk top, tops no lower than 0.7 of its height; on the
+      arc the plan's two trunks and one of the stair's own. The layers from
+      the underside up - the body, the transition and the strips - are #275's
+      (supports-stair-body, 2a64ab8) byte for byte.
    5. AGAINST BAMBU: every layer of Bambu's interface up to our top has a
       strip of ours at that z, over the same stretch of the curve; Bambu's
       support pitch under the overhang measured (plan area / Support line,
@@ -49,16 +55,18 @@
       OVER AIR, as typeSupports types a wall (the layer under, closed,
       grown half a line); each strip as wide as the part's step and a line
       in the slice; the body's interior pitch within 20 % of Bambu's; the
-      support's toolpath over the body's zone - over the stair's start, z
-      37.0 - at most 1.5 x Bambu's there; the whole part's ratio and the
-      table by Bambu's layers and by height printed, a finding, not a gate
-      (what is under the body is the trunks', owned by the trunk-thinning
-      follow-up, docs/SUPPORT-INTERFACE.md section 6).
+      support's toolpath at most 1.5 x Bambu's over the body's zone (over the
+      stair's start, z 37.0), over the whole part, and in each height band
+      z 0 - 1, 1 - 5, 5 - 10, 10 - 20, 20 - 30 (supports-thinning: the trunk
+      is a loop round air, one trunk, and the body stands on its top); the
+      table by Bambu's layers and by height printed.
    7. FLAT CEILINGS UNCHANGED: the 2026-10-20 coupon (top_clip_x2_coupon.stl)
       as the card builds it is byte for byte the build before the stair
       (sha-256 of each object's soup, recorded at claude-wip 6f3354f at 60 deg
       and the same at a4ae142, the card's 35) with trunkGrowth off, and
-      supports-foot's (#274, a951f8b) with its trunks on; no stair forms on it.
+      supports-foot's (#274, a951f8b) with its trunks on - above its pads: the
+      pads are drawn with 1.85 mm of margin since supports-thinning, not 4;
+      no stair forms on it.
    8. THE REFUSAL, the card in Chromium at 60 deg (its default until #263): the arc's area
       - its top included - reads held; the three spots at its foot the plate
       cannot reach (over the part's own 2 mm base, past the 30 deg lean) are
@@ -76,7 +84,7 @@ const vm = require('vm');
 const crypto = require('crypto');
 
 const ROOT = path.join(__dirname, '..');
-const OUT = path.join(ROOT, 'tools', 'supports-stair-out');
+const OUT = path.join(ROOT, 'tools', 'supports-thin-out');
 const FIXTURE = path.join(ROOT, 'fixtures', 'supports', 'simple_overhang.3mf');
 const BAMBU = path.join(ROOT, 'fixtures', 'supports', 'simple_overhang_bambu.gcode.3mf');
 const R3 = require(path.join(ROOT, 'nso-3mf-read.js'));
@@ -106,8 +114,14 @@ const NAME = 'simple_overhang';
 /* the coupon as the card built it at claude-wip 6f3354f (60 deg) and a4ae142 (35), before the stair:
    sha-256 (first 16 hex) of each object's Float32 soup */
 const COUPON_BEFORE = { 'top_clip_x2': ['b26160d6312caabd', 58], 'top_clip_x2 - support 1.1 (Tree)': ['6ac271882b107552', 27348] };
-/* ...and as the card builds it since supports-foot (its trunks grown), at #274's head a951f8b */
-const COUPON_FOOT = { 'top_clip_x2': ['b26160d6312caabd', 58], 'top_clip_x2 - support 1.1 (Tree)': ['386e1484a64f1fed', 30836] };
+/* the arc's stair layers from the body's underside up (z0 36.4: the body, then the transition and the strips) as
+   supports-stair-body built them, 2a64ab8: sha-256 (first 16 hex) of "role:z0:sha;..." over each group's layers
+   (a layer's sha is its soup's, below), and the layer counts */
+const STAIR_275 = { body: ['7ca0a8a142ab34ff', 46], strips: ['032fa5a8d50c30bc', 47] };
+/* ...and as the card builds it since supports-foot (its trunks grown), at #274's head a951f8b: the support's
+   parts and trunks - everything above the pads - are the same since (supports-thinning draws the pads
+   with 1.85 mm of margin, not 4: 468 triangles of pad became 536, and the whole object's sha moved with them) */
+const COUPON_FOOT = { 'top_clip_x2': ['b26160d6312caabd', 58], 'top_clip_x2 - support 1.1 (Tree)': ['a09bfd974b6ad0ac', 30368] };
 
 let pass = 0, fail = 0;
 const FAILS = [];
@@ -415,25 +429,60 @@ async function cardRun() {
   console.log('\n=== 4. the body ===');
   {
     const tips = S.tips, held = tips.filter(t => t.mode === 'drop');
-    check('no tree of its own: the stair plans no tip, and builds no tree a strip', !L.stair.tips.length && !(arc.tp.stairTrunks || []).length,
-      `${L.stair.tips.length} stair tips, ${(arc.tp.stairTrunks || []).length} stair trunks`);
+    check('no tree of its own: the stair plans no tip, and builds no tree a strip (a trunk of its own, where the plan\'s reach no further, is a trunk and holds no spot)',
+      !L.stair.tips.length && (arc.tp.stairTrunks || []).every(t => t.extra && !t.beacons.length && !t.members.length),
+      `${L.stair.tips.length} stair tips, ${(arc.tp.stairTrunks || []).length} trunk(s) of its own`);
     check('the plan\'s tips on the curve are held by the body, none built', held.length === arc.n && tips.every(t => t.mode === 'drop'),
       `${held.length} of ${arc.n} held`);
     check('...and the stair is one support with its trunks (the spots it holds are its)', arc.sh.solids.filter(x => x.sheets.length).length === 1 &&
       arc.sh.solids.find(x => x.sheets.length).beacons.length === arc.n && b.sf.objects.length === 1,
       `${arc.sh.solids.length} solid(s), ${b.sf.objects.length} support object(s); it holds ${arc.sh.solids.find(x => x.sheets.length).beacons.length} of ${arc.n} spots`);
-    /* the body rests on the trunks: each trunk it names is built to its foot, and the body's first layer stands on its top */
-    const bad = [], low = bodyL[0], sec0 = regionsOf(loopsOf(sliceAt(soups[L.layers.indexOf(low)], low.z0 + LAYER / 2)));
+    /* the body rests on the trunks: each trunk it names is built to its foot and rises at its growth angle to its
+       top, the body's first layer over it lies over that top, and its layers flare from the top at the lean limit */
+    const bad = [], low = bodyL[0], tanLean = Math.tan(30 * Math.PI / 180), zUnder = Math.max(...bodyL.filter(x => x.z0 <= B.count.underside + 1e-6).map(x => x.z0));
+    const secAt = z0 => regionsOf(loopsOf(sliceAt(soups[L.layers.indexOf(bodyL.find(x => Math.abs(x.z0 - z0) < 1e-6))], z0 + LAYER / 2)));
     B.trunks.forEach(t => {
       const T = b.sf.trunks.find(x => x.soup && Math.hypot(x.c[0] - t.c[0], x.c[1] - t.c[1]) < 1e-6);
       if (!T) { bad.push(`no trunk at ${t.c.map(f2)}`); return; }
       if (Math.abs(T.top - t.zTop) > 1e-6) bad.push(`trunk at ${t.c.map(f2)} to z ${f2(T.top)}, the body from ${f2(t.zTop)}`);
-      const R = sec0.find(P0 => inPoly(t.c, P0)), rTop = T.rings[T.rings.length - 1][1];
-      if (!R) bad.push(`the body's first layer is not over the trunk at ${t.c.map(f2)}`);
-      else if (Math.max(...R.map(q => Math.hypot(q[0] - t.c[0], q[1] - t.c[1]))) > rTop + 0.01) bad.push(`the body's first layer reaches past the trunk's top at ${t.c.map(f2)}`);
+      if (T.top < 0.7 * zUnder - 1e-6) bad.push(`trunk at ${t.c.map(f2)} ends at z ${f2(T.top)}, under 0.7 of the underside's ${f2(zUnder)}`);
+      const rTop = T.rings[T.rings.length - 1][1], R = secAt(t.zTop).find(P0 => inPoly(t.c, P0));
+      const core = rTop - 0.5;
+      /* the law: its inscribed radius 1 mm at the top of what it holds + tan 5.5 deg x the way down from H */
+      const rLaw = GP.TRUNK.tipMm / 2 + Math.tan(GP.TRUNK.angleDeg * Math.PI / 180) * (L.zTop - T.top);
+      if (Math.abs(rTop * Math.cos(Math.PI / GP.TRUNK.sides) - rLaw) > 1e-3) bad.push(`trunk at ${t.c.map(f2)}: ring ${f3(rTop)} at its top, the law's ${f3(rLaw)}`);
+      if (!R) bad.push(`the body's layer over the trunk at ${t.c.map(f2)} is not over its top`);
+      else if (![...Array(32)].every((_, k) => inPoly([t.c[0] + core * Math.cos(k * Math.PI / 16), t.c[1] + core * Math.sin(k * Math.PI / 16)], R))) bad.push(`the body's layer over the trunk at ${t.c.map(f2)} does not cover its top`);
     });
-    check('the body rests on the trunks (supports-foot): each rises to the body\'s bottom, and the body\'s first layer stands on its top',
-      !bad.length, bad.length ? bad.join('; ') : B.trunks.map(t => `[${t.c.map(f2).join(', ')}] to z ${f2(t.zTop)}, ${f2(2 * t.rMm)} mm across there`).join('; ') + `; then 45 deg up to the strips`);
+    /* THE CONE RULE, against the body: every point of the body's underside (the layer the shadow under the transition
+       fills) within the lean cone of some trunk top - r at the top, then 30 deg off upright the rest of the way up */
+    const under = secAt(zUnder), farOut = [];
+    let worstOut = 0;
+    under.forEach(P0 => P0.forEach(pt => {
+      const m0 = Math.min(...B.trunks.map(t => (t.rMm + (zUnder - t.zTop) * tanLean) - Math.hypot(pt[0] - t.c[0], pt[1] - t.c[1])));
+      const m1 = Math.max(...B.trunks.map(t => (t.rMm + (zUnder - t.zTop) * tanLean) - Math.hypot(pt[0] - t.c[0], pt[1] - t.c[1])));
+      worstOut = Math.min(worstOut === 0 ? Infinity : worstOut, m1);
+      if (m1 < -0.01) farOut.push(pt);
+    }));
+    check('THE CONE RULE, read against the body: every point of the body\'s underside lies within the 30 deg lean cone of some trunk top, and no trunk top is under 0.7 of its height (Bambu\'s trunk stands to 25.02 of 36.4)',
+      !farOut.length && B.trunks.length >= 2 && B.trunks.length <= 3 && B.trunks.every(t => t.zTop >= 0.7 * zUnder - 1e-6),
+      `underside z ${f2(zUnder)}: ${farOut.length} outline point(s) out; least margin ${f3(worstOut)} mm; ${B.trunks.length} trunks: ` +
+      B.trunks.map(t => `[${t.c.map(f2).join(', ')}] to z ${f2(t.zTop)}, covers ${f2(t.coverMm)} mm${t.extra ? ' (a trunk of its own)' : ''}`).join('; '));
+    check('the body rests on the trunks: each rises at its growth angle to its top, the body\'s layer over it lies over that top, and the layers flare from it at 30 deg',
+      !bad.length, bad.length ? bad.join('; ') : B.trunks.map(t => `[${t.c.map(f2).join(', ')}] to z ${f2(t.zTop)}, ${f2(2 * t.rMm)} mm across there`).join('; ') + `; the body from z ${f2(low.z0)} (${bodyL.length} layers)`);
+    /* THE TRUNK COUNT, as the rule reads it on the arc: the plan's two legs and a trunk of its own */
+    check('THE TRUNK COUNT: the plan\'s two trunks cover all but the arc\'s west side of the underside with tops at 0.7 of its height: one more, of its own, and its own tips none',
+      B.count.legs === 2 && B.count.kept === 2 && B.count.extra === 1 && b.sf.trunks.filter(x => x.soup).length === 3,
+      `${B.count.legs} plan legs, ${B.count.kept} kept, ${B.count.extra} of its own; a trunk at z ${f2(0.7 * zUnder)} covers ${f2(B.count.rCoverMm)} mm at the underside`);
+    /* ...and the layers above the body's underside are #275's, byte for byte */
+    {
+      const agg = list => crypto.createHash('sha256').update(list.map(x => `${x.role}:${x.z0.toFixed(4)}:${sha(soups[L.layers.indexOf(x)])}`).join(';')).digest('hex').slice(0, 16);
+      const above = L.layers.filter(x => x.z0 >= zUnder - 1e-6);
+      const bd = above.filter(x => x.role === 'body'), st = above.filter(x => x.role !== 'body');
+      check('the body from its underside, the transition and the strips are supports-stair-body\'s (#275, 2a64ab8) byte for byte',
+        bd.length === STAIR_275.body[1] && agg(bd) === STAIR_275.body[0] && st.length === STAIR_275.strips[1] && agg(st) === STAIR_275.strips[0],
+        `body ${bd.length} layers ${agg(bd)}, transition + strips ${st.length} layers ${agg(st)}; under them the cones are 30 deg (they were 45) off three trunks' tops (they were two)`);
+    }
     /* clipped to the part's outline plus one line: every point of its sections has the part over it within a line and a cell */
     let past = 0, n0 = 0;
     bodyL.forEach(Ly => {
@@ -583,21 +632,25 @@ async function cardRun() {
     console.log(`        support toolpath a layer, mm, Bambu's layers (z: ours / Bambu; ours summed over the same height):`);
     for (let i = 0; i < rowsM.length; i += 6) console.log('          ' + rowsM.slice(i, i + 6).map(q => `${q.z.toFixed(2).padStart(5)}: ${q.o.toFixed(0).padStart(4)} / ${q.b.toFixed(0).padStart(4)}`).join('   '));
     const bands = [[0, 1], [1, 5], [5, 10], [10, 20], [20, 30], [30, 37], [37, 40], [40, 42], [42, 44], [44, 47]];
-    console.log('        by height, m (ours / Bambu):  ' + bands.map(([a, c]) => {
-      const x = oz.filter(q => q > a && q <= c).reduce((s2, q) => s2 + ours.get(q.toFixed(2)), 0), y = bz.filter(q => q > a && q <= c).reduce((s2, q) => s2 + theirs.get(q.toFixed(2)), 0);
-      return `${a}-${c}: ${(x / 1000).toFixed(2)} / ${(y / 1000).toFixed(2)}`;
-    }).join(' | '));
-    /* THE GATE covers what this stair builds: the body's zone, every layer whose top lies over the stair's start
-       (its lowest strip's top). Under it stand the trunks (#274) and their pad - the whole part's ratio is a
-       FINDING, printed, not gated: the trunk-thinning follow-up (docs/SUPPORT-INTERFACE.md section 6: hollow or
-       thin the trunks, Bambu's being loops round air) owns it. */
+    const GATED = 5;       /* the first five bands (z 0 - 30) are gates: the trunks and their pad, each at most 1.5 x Bambu's */
+    const bandM = bands.map(([a, c]) => ({
+      a, c,
+      o: oz.filter(q => q > a && q <= c).reduce((s2, q) => s2 + ours.get(q.toFixed(2)), 0),
+      b: bz.filter(q => q > a && q <= c).reduce((s2, q) => s2 + theirs.get(q.toFixed(2)), 0) }));
+    console.log('        by height, m (ours / Bambu = ratio):');
+    bandM.forEach((q, i) => console.log(`          z ${String(q.a).padStart(2)} - ${String(q.c).padStart(2)}: ${(q.o / 1000).toFixed(2)} / ${(q.b / 1000).toFixed(2)} = ${(q.o / q.b).toFixed(2)} x${i < GATED ? '  (gate 1.50)' : ''}`));
+    /* THE BODY'S ZONE, every layer whose top lies over the stair's start (its lowest strip's top) */
     const z0 = strips[0].z1;
     const bO = oz.filter(q => q > z0 + 1e-6).reduce((a, q) => a + ours.get(q.toFixed(2)), 0);
     const bB = bz.filter(q => q > z0 + 1e-6).reduce((a, q) => a + theirs.get(q.toFixed(2)), 0);
-    console.log(`        finding, not a gate (owner: the trunk-thinning follow-up): the whole part, ours ${(tO / 1000).toFixed(2)} m, ` +
-      `Bambu's ${(tB / 1000).toFixed(2)} m: ${(tO / tB).toFixed(2)} x - the excess under the body, the trunks and their pad`);
     check(`SUPPORT MATERIAL over the body's zone (layers over the stair's start, z ${f2(z0)}) at most 1.5 x Bambu's there (toolpath, NSO's slice against the fixture's G-code)`,
       bO <= 1.5 * bB, `ours ${(bO / 1000).toFixed(2)} m, Bambu's ${(bB / 1000).toFixed(2)} m: ${(bO / bB).toFixed(2)} x`);
+    /* THE WHOLE PART (the gate #275 rescoped out), and the bands under the body */
+    check(`SUPPORT MATERIAL, the whole part, at most 1.5 x Bambu's (toolpath, NSO's slice of the export against the fixture's G-code)`,
+      tO <= 1.5 * tB, `ours ${(tO / 1000).toFixed(2)} m, Bambu's ${(tB / 1000).toFixed(2)} m: ${(tO / tB).toFixed(2)} x`);
+    const over = bandM.slice(0, GATED).filter(q => q.o > 1.5 * q.b);
+    check(`...and in each height band under the stair (z 0 - 30) at most 1.5 x Bambu's`, !over.length,
+      bandM.slice(0, GATED).map(q => `${q.a}-${q.c}: ${(q.o / q.b).toFixed(2)} x`).join(', ') + (over.length ? '; over at ' + over.map(q => `${q.a}-${q.c}`).join(', ') : ''));
   }
 
   /* ------------------------------------------------------------------ 7 */
@@ -610,9 +663,13 @@ async function cardRun() {
     check('the 2026-10-20 coupon as the card builds it is byte for byte the build before the stair',
       JSON.stringify(got) === JSON.stringify(COUPON_BEFORE), Object.keys(got).map(k => `${k}: ${got[k][0]} (${got[k][1]} tris)`).join('; '));
     const c1 = await EXP.build(coupon), got1 = {};
-    c1.objects.forEach(o => { got1[o.name] = [sha(o.soup), o.soup.length / 9]; });
-    check('...and with its trunks (the card\'s build) byte for byte supports-foot\'s (#274): a part with no curve does not change',
-      JSON.stringify(got1) === JSON.stringify(COUPON_FOOT), Object.keys(got1).map(k => `${k}: ${got1[k][0]} (${got1[k][1]} tris)`).join('; '));
+    c1.objects.forEach((o, i) => {
+      const pads = i ? c1.sf.objects[i - 1].padFloats : 0;
+      got1[o.name] = [sha(o.soup.subarray(0, o.soup.length - pads)), (o.soup.length - pads) / 9];
+    });
+    check('...and with its trunks (the card\'s build) supports-foot\'s (#274) byte for byte above its pads: a part with no curve does not change, its pads smaller by the margin change only (foot 6)',
+      JSON.stringify(got1) === JSON.stringify(COUPON_FOOT), Object.keys(got1).map(k => `${k}: ${got1[k][0]} (${got1[k][1]} tris)`).join('; ') +
+      `; pads ${c1.sf.objects.map(q => q.padFloats / 9).join(', ')} tris, ${c1.sf.padOutlines.map(q => q.areaMm2.toFixed(1)).join(', ')} mm2`);
     check('...and no stair forms on it: its two ceilings are four-layer sheets', c.areas.every(a => a.tp.sheet && a.tp.sheet.levels.every(x => !x.stair && x.layers.length === 4)),
       c.areas.map(a => a.tp.sheet.reason).join(' / '));
   }
@@ -681,10 +738,11 @@ async function cardRun() {
     const model = dec.decode(await zip.read('3D/3dmodel.model'));
     const ms = zip.names().includes('Metadata/model_settings.config') ? dec.decode(await zip.read('Metadata/model_settings.config')) : '';
     const meshes = zip.names().filter(n => /^3D\/Objects\/object_\d+\.model$/.test(n)).length;
-    const tw = (ms.match(/key="detect_thin_wall" value="1"/g) || []).length;
-    check('the export is a Bambu project: Studio\'s envelope, a mesh part an object, each support with its thin-wall overrides',
-      /<metadata name="Application">BambuStudio-[\d.]+<\/metadata>/.test(model) && meshes === b.objects.length && tw === b.objects.length - 1,
-      `${(model.match(/BambuStudio-[\d.]+/) || ['no Studio tag'])[0]}; ${meshes} object parts; detect_thin_wall on ${tw} of ${b.objects.length - 1} support(s)`);
+    const keys = { wall_generator: 'classic', detect_thin_wall: '1', sparse_infill_density: '0%', wall_loops: '1' };
+    const tw = Object.keys(keys).map(k => (ms.match(new RegExp('key="' + k + '" value="' + keys[k] + '"', 'g')) || []).length);
+    check('the export is a Bambu project: Studio\'s envelope, a mesh part an object, each support with its four overrides (classic walls, thin walls, no sparse infill, one wall loop)',
+      /<metadata name="Application">BambuStudio-[\d.]+<\/metadata>/.test(model) && meshes === b.objects.length && tw.every(c => c === b.objects.length - 1),
+      `${(model.match(/BambuStudio-[\d.]+/) || ['no Studio tag'])[0]}; ${meshes} object parts; ${Object.keys(keys).map((k, i) => k + ' on ' + tw[i]).join(', ')} of ${b.objects.length - 1} support(s)`);
   }
   console.log('\n  wrote ' + path.relative(ROOT, file) + ` (${b.objects.length - 1} support object(s); open it in Bambu Studio as a PROJECT, its own supports off)`);
 
