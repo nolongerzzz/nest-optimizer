@@ -363,20 +363,28 @@ right over the sheet that holds it.
   A support's TOP is the part of a layer lying under its host's section
   within gap (0.18 mm) + one layer, with nothing of the support over it.
   The layer's islands that reach under the host are closed by 0.5 mm, so a
-  layer of 0.84 mm-pitch lines reads as the footprint it holds, less its own
-  next layer grown by half a line. From each top
+  layer of 0.84 mm-pitch lines reads as the footprint it holds, less what
+  lies within 0.5 mm of its own next layer - but outside that layer's filled
+  outline, only what lies within a quarter line of it, opened by a quarter
+  line, where that part runs 2 mm or more under a SLOPED underside - the
+  first layer of the part over it covers under 90 % of it (a stair's band,
+  below; under the coupon's flat leg ceiling the tops of two tips cut at the
+  gap beside its sheet, 2.3 x 0.8 mm, read as a top without it: T T I I
+  became T I I I, slicer:bambu section 5). From each top
   the sheet is followed down island by island (each layer's lines cross the
   ones above): its top 2 layers are **Support interface**, the 2 under them
   **Support transition** (`nso_support_interface.js` SHEET_ROLES), and every
   other line of the object is **Support**. A STAIR (docs/SUPPORT-INTERFACE.md
-  section 7) is read by the same rule, with two allowances: a top may lie a
+  section 7) is read by the same rule, with two allowances (each only for a
+  top that runs 2 mm or more under a sloped underside, `supportSheet.stairRunMm`,
+  `stairCoverShare`): a top may lie a
   layer deeper under the host (`supportSheet.stairLayers`) where it lies
   outside its next layer's outline - a band whole beads wide stands its back
   edge up to 0.55 mm under the part; a flat sheet's I1 seen through a channel of
   I2 is inside it - and past its 2 + 2 layers the transition runs on while a
   layer repeats the footprint of the one over it (a steep stair stands
-  several layers alike). The next layer was grown by 0.5 mm, which hid each
-  strip's exposed edge under the next strip. The arc's stair: every one of
+  several layers alike). Grown by 0.5 mm, the next strip hid each strip's
+  exposed edge. The arc's stair: every one of
   its 46 layers' bands interface or transition; the clip coupon unchanged
   (`slicer:supports` 26 of 26). No wall, infill or overhang wall
   comes out of a support object: the same beads, one type, as Bambu prints

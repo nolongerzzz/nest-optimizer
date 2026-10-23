@@ -535,15 +535,18 @@ strip's back edge sat up to 0.92 mm under the curve):
   160 / 161, z 44: 90 / 135, z 46: 26 / 46 - up to 3.6 x Bambu's through the
   middle of the tree, where our planner merges later than Bambu's slim tree.
 - **NSO's slice** types every layer's band Support interface or Support
-  transition (42 and 16 layers of 46 hold each; the tree's columns beside
+  transition (45 and 17 layers of 46 hold each; the tree's columns beside
   them are Support), its lines support lines only (`support:curved` 6). Two
-  changes in `typeSupports` (`nso_slicer.js`, docs/SLICER.md): a top is what
-  its next layer does not cover grown by half a line (was by 0.5 mm, which
-  hid each strip's exposed edge under the next), a top may lie a layer
-  deeper under the host when it lies outside its next layer's outline (a
-  flat sheet's I1 seen through a channel of I2 is not), and past its 2 + 2
-  layers a sheet's transition runs on while a layer repeats the footprint of
-  the one over it. `slicer:supports` is still 26 of 26.
+  changes in `typeSupports` (`nso_slicer.js`, docs/SLICER.md): outside its
+  next layer's filled outline a top is what that layer does not cover grown
+  by a quarter line (0.5 mm everywhere hid each band's exposed edge under
+  the next band), and it may lie a layer deeper under the host - both only
+  where the part runs 2 mm or more under a sloped underside (the first layer
+  over it covers under 90 % of it: under the coupon's flat leg ceiling, the
+  tops of two tips beside its sheet read as a top otherwise and made its
+  T T I I read T I I I, slicer:bambu section 5); and past its 2 + 2 layers a
+  sheet's transition runs on while a layer repeats the footprint of the one
+  over it. `slicer:supports` is still 26 of 26, `slicer:bambu` 58 of 58.
 - **Build time**: the arc's area ~6 s in node.
 
 **The refusal on the arc** (`support:curved` 8). At the card's 60 deg the
