@@ -968,6 +968,14 @@ var NSO_LIFT_PLATE = (function () {
       piece's origin is the parent's moved by the difference of the two
       centres, carried through the parent's rotation. Its height above the
       bed is what it is - liftY records it, the floating state. */
+  /* LIFT'S DROP. A piece Lift leaves in the air is the one piece the grab
+     (app-grab-drop.js) carries: dragged, it rests on what it is let go over -
+     the plate, a piece, or nothing. app-core's move drag asks ownsDrop(p) at
+     the press; every other plate drag is flat. The piece is Lift's while it is
+     in the air (liftY > 0), and an ordinary piece once it is on the bed. */
+  var lifted = new WeakSet();
+  function ownsDrop(p) { return !!(p && lifted.has(p) && (p.liftY || 0) > 1e-6); }
+
   function landInPlace(entry, made, hostModel, host) {
     if (!host || !host.mesh) return null;
     ['rotY', 'rotated', 'flipX', 'tipX', 'tipZ', 'tiltX', 'tiltZ'].forEach(function (k) { entry[k] = host[k]; });
@@ -982,6 +990,7 @@ var NSO_LIFT_PLATE = (function () {
     entry.x = at.x; entry.z = at.z;
     var lift = meshLocalBox3(entry.mesh).min.y - 0.2;
     entry.liftY = lift > 1e-6 ? lift : 0;
+    if (entry.liftY > 0) lifted.add(entry);
     return { x: at.x, y: at.y, z: at.z, liftY: entry.liftY };
   }
 
@@ -1180,6 +1189,7 @@ var NSO_LIFT_PLATE = (function () {
     breakdown: breakdown,
     setArmed: setArmed,
     isArmed: function () { return armed; },
+    ownsDrop: ownsDrop,
     target: target,
     targetId: function () { return targetId; },
     analysis: A,

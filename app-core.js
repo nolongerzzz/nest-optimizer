@@ -45,7 +45,9 @@ const state = {
   cropAxis: null,        // Crop X / Crop Z (app-crop.js); null = as resolveAxis decides
   moveDragging: false,
   moveIndex: -1,
-  moveGrab: { x: 0, z: 0 },
+  moveGrab: { x: 0, z: 0, y: 0 },
+  moveGrabbing: false,      // Lift's drop (app-grab-drop.js) carries this drag
+  moveMoved: false,         // a flat drag has moved the piece: the release settles its height
   moveUndoFrom: null,
   rightPress: null,   // a right press not yet a pan or a click (onCanvasContextMenu)
   undoStack: [],
@@ -2804,11 +2806,16 @@ function startMoveDrag(idx, event) {
   state.moveIndex = idx;
   applyPlateGridVisibility();
   state.moveUndoFrom = { index: idx, x: p.x, z: p.z, meshY: p.mesh ? p.mesh.position.y : null };
-  /* Grab and drop (app-grab-drop.js): the pointer may carry the piece over
-     another piece or over nothing, and the release decides where it lands. */
-  if (typeof nsoGrab !== 'undefined') nsoGrab.begin(p, idx, event);
+  /* A plate drag is flat: XY only, nothing under the pointer is read. The one
+     exception is Lift's own drop (app-lift-plate.js): a piece Lift left in
+     the air, grabbed and carried, rests on what it is let go over
+     (app-grab-drop.js). Nothing else calls the grab. */
+  state.moveGrabbing = !!(typeof NSO_LIFT_PLATE !== 'undefined' && NSO_LIFT_PLATE.ownsDrop && NSO_LIFT_PLATE.ownsDrop(p) &&
+    typeof nsoGrab !== 'undefined' && nsoGrab.begin(p, idx, event));
+  state.moveMoved = false;
   state.moveGrab.x = p.x - hit.x;
   state.moveGrab.z = p.z - hit.z;
+  state.moveGrab.y = p.liftY || 0;      // the plane the grab was read on: the drag reads the pointer on the same one
   if (state.controls) state.controls.enabled = false;
   if (state.renderer && state.renderer.domElement) {
     state.renderer.domElement.style.cursor = 'grabbing';
@@ -2822,26 +2829,51 @@ function dragMovePlaced(event) {
   if (!state.moveDragging) return;
   const p = state.placed[state.moveIndex];
   if (!p) return;
-  // over another piece or over nothing, the grab places it; over the plate,
-  // this does, as it always has
-  if (typeof nsoGrab !== 'undefined' && nsoGrab.move(event)) return;
+  /* Lift's drop: over another piece or over nothing the grab places it; over
+     the plate it hands the pointer back, and the piece is set down there. */
+  if (state.moveGrabbing && nsoGrab.move(event)) return;
   setPointerFromEvent(event);
-  const hit = hitPlateXZ();
+  // a piece Lift's drop sets down is read on the bed; a flat drag on the plane it was grabbed on
+  const hit = hitPlateXZ(state.moveGrabbing ? 0 : state.moveGrab.y);
   if (!hit) return;
-  const fromX = p.x;
-  const fromZ = p.z;
   const nx = hit.x + state.moveGrab.x;
   const nz = hit.z + state.moveGrab.z;
-  resolveDragPose(p, state.moveIndex, fromX, fromZ, nx, nz);
-  reportJoinFlushGap();
+  if (state.moveGrabbing) { resolveDragPose(p, state.moveIndex, p.x, p.z, nx, nz); return; }
+  /* Flat: x and z, and nothing else. Height is not touched until the release,
+     and no geometry is read here - not a ray, not a box, not a vertex. */
+  const g = plateGridSnapXZ(nx, nz);
+  p.x = g.x;
+  p.z = g.z;
+  if (p.mesh) { p.mesh.position.x = g.x; p.mesh.position.z = g.z; }
+  state.moveMoved = true;
 }
+
+/* Escape mid-drag puts a flat drag back where it was picked up (Lift's drop
+   has its own, app-grab-drop.js): no Undo, nothing moved. */
+window.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || !state.moveDragging || state.moveGrabbing) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const p = state.placed[state.moveIndex], f = state.moveUndoFrom;
+  if (p && f) {
+    p.x = f.x;
+    p.z = f.z;
+    if (p.mesh) { p.mesh.position.x = f.x; p.mesh.position.z = f.z; }
+  }
+  state.moveMoved = false;
+  endMoveDrag();
+  setStatus('Put back - the piece is where it was picked up. Nothing changed.');
+}, true);
 
 function endMoveDrag() {
   if (!state.moveDragging) return;
   clearFenceLines();
   const idx = state.moveIndex;
   const from = state.moveUndoFrom;
+  const grabbing = state.moveGrabbing, flat = state.moveMoved;
   state.moveDragging = false;
+  state.moveGrabbing = false;
+  state.moveMoved = false;
   state.moveIndex = -1;
   state.moveUndoFrom = null;
   if (state.controls) {
@@ -2851,13 +2883,18 @@ function endMoveDrag() {
   if (state.renderer && state.renderer.domElement) {
     state.renderer.domElement.style.cursor = '';
   }
-  /* A drop onto a piece, into the air, or an Escape: the grab finished it,
-     its one Undo and its words included. */
-  const grab = (typeof nsoGrab !== 'undefined') ? nsoGrab.end() : null;
+  /* Lift's drop onto a piece, into the air, or an Escape: the grab finished
+     it, its one Undo and its words included. */
+  const grab = grabbing ? nsoGrab.end() : null;
   updateExportButton();
   if (grab && grab.handled) return;
   if (idx >= 0 && state.placed[idx] && from) {
     const p = state.placed[idx];
+    /* The one place height is settled after a flat drag: the piece's lowest
+       point on the plate (settlePlacedOnBed, nso-bounds.js), read once from
+       the pose bounds the piece already has - a translation never
+       invalidates them, so a piece that has not turned is not re-scanned. */
+    if (flat) settlePlacedOnBed(p);
     /* A press on a piece always starts a drag, so a plain click (or an
        Alt-click, which also re-aims the view) ends here too. Only a drag
        that really moved the piece - the same test that decides the undo
