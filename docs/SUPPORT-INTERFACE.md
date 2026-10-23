@@ -150,7 +150,10 @@ printed in the same layers as the lines, and every line was an island. So now:
   `detect_thin_wall = 1` (the support set: docs/BAMBU-PROJECT-EXPORT.md);
   `sheetWidthMm` sets another width.
 - **The feet**: one shared first-layer pad per cluster of trunks, the trees on
-  one pad one support (docs/SUPPORT-GRIDPACK.md, *Feet*).
+  one pad one support (docs/SUPPORT-GRIDPACK.md, *Feet*); since supports-foot
+  each trunk stands on a round trunk that widens going down, flared onto its
+  pad, and the pad is drawn round the flare (docs/SUPPORT-GRIDPACK.md, *The
+  trunk*). Nothing above the trunk changes.
 - **The gap stays 0.18.**
 
 **The level.** A tip's sheet top is 0.18 mm under the lowest ceiling over its
@@ -424,6 +427,143 @@ toolpath in segments of 2 mm or more. `support:audit` holds it (section 5).
 - No detection change (`nso_support_aim.js` untouched): the 45 deg chamfer
   under the clamp's ceiling was detected at the card's old 60 deg and held by
   side tips; at its 35 now, as Bambu at 30, it is left alone.
-- Sloped and curved ceilings get no stair-stepped sheet: a tip on one is a
-  level of its own, usually too narrow for a sheet, and is cut at the gap.
+- Sloped and curved ceilings get a STAIR (section 7) where their tips' levels
+  fail and they lie on one fall; a dome (no one fall) still has its tips cut
+  at the gap.
+- The stair's tree carries up to 3.6 x Bambu's toolpath through its middle
+  (section 7): the planner merges a crowd of tips later than Bambu's slim
+  tree. Thinning it is a planner ticket.
+- The stair's tree merges through a crowd (`mergeThroughCrowd`): a leg may
+  pass through, or graze, a member it does not join. The card keeps every
+  part its own shell, so nothing changes in print; where a leg only grazes,
+  the weld - support:shells' reference - closes a sliver of void the shells
+  do not (the tilted box, z 6.10, 0.009 mm2), and support:shells counts no
+  void under one bead's cross-section (0.08 mm2) as a hole. Held to the
+  planner's usual rule instead, the stair's tips merge nowhere (93 struts on
+  the arc, 294 on the tilted box).
 - G-scope's support row builds as before (no `interface`).
+
+## 7. The stair: a sheet under a curved underside
+
+`sheet()`'s THE STAIR (`nso_support_interface.js`), built through
+`parts({ interface: true })` like every sheet. Gate: `npm run
+support:curved` (`tools/nso_support_curved_check.js`), which also
+writes the arc with its supports as the card exports them to
+`tools/supports-curved-out/simple_overhang_supports.3mf` (git-ignored) - open
+it in Bambu Studio as a project and slice with its own supports off.
+27 checks.
+
+**The gap it closes.** The sheet's contract is for ceilings: one z, four
+layers. A curved underside has no single z: every tip on the arc of
+`fixtures/supports/simple_overhang.3mf` (the Simple Overhang Test) was a
+level of its own, too narrow for a sheet, and was cut at the gap - 40 bare
+tips under the curve, nothing between them.
+
+**The reference.** Bambu Studio's own tree on the same file
+(`fixtures/supports/simple_overhang_bambu.gcode.3mf`, tree slim, threshold
+30) builds a STAIRCASE OF RIBBONS, one a layer, z 41.8 - 46.2: an interface
+strip 1 - 2 lines wide (0.5 - 1 mm along the curve) across the overhang's
+whole width (10.32 mm lines), 22 - 33 mm of line a layer, 4 lines (46 - 48
+mm) where the surface flattens at the top; a transition strip beside it;
+each layer's strip ~0.55 mm further up the curve, so consecutive strips
+overlap; a few branch tips (4 - 23 mm of support a layer), not trees; 0.2
+of air to the part.
+
+**What is built** (the arc at 35 deg, the gate's build; supports-curved-sheet
+round 2 - the first round's grid strips, 1.68 - 2.52 mm across and resting
+on one another with five tips at the foot, were a cantilever: the stair's
+lean, 0.55 mm a 0.2 mm layer, ~70 deg off upright, was its load path, and a
+strip's back edge sat up to 0.92 mm under the curve):
+
+| what | z | here |
+| --- | --- | --- |
+| caps | to z_cap 37.00 | 2 of the plan's tips carry the transition: caps 3.75 and 2.00 mm, and 1 tip of the stair's own tree |
+| transition | 37.00 - 37.20 | the lowest band again, one layer under it |
+| bands | 37.20 - 46.20 | 45, one a layer, 9.75 mm along the arc: one line (0.40) on 23 of them, z 37.4 - 41.6, where the slope is 25 - 45 deg; two beads (0.84, a loop alone) on 22, z 41.8 - 46.2 |
+| the stair's tree | 46.2 - 0 | 89 tips, 1 - 2 a strip under each strip's leading part (5 mm or nearer along it), merged onto 2 trunks to the plate |
+| held | | the plan's 38 other tips on the curve: not built, nor any member that holds only them |
+
+- **Which tips.** The tips whose levels failed (one tip a level, or no piece
+  of 2 mm lines), 1.6 tip spacings or nearer one another, at least three,
+  their contacts on an underside whose fitted plane falls 3 - 70 deg and
+  spans two layers or more. A flat ceiling's tips are on levels that built,
+  so a ceiling never becomes a stair: its sheet is the four layers, byte for
+  byte (the coupon's build hashes the same as before, `support:curved` 7).
+- **Each layer's band** is laid where the gap puts it, not on a grid, so it
+  moves with the curve a layer at a time (0.2 - 1.1 mm on the arc): along
+  the arc's lines every 0.25 mm, its front edge is the first point up the
+  slope where the layer's column (the gap under it to the gap over it) is
+  clear of the piece and the underside is within 3 mm over it; the run of
+  those longest along the arc is the band, one region. The stair starts at
+  the lowest layer whose band runs 0.6 of the longest and holds a tip, and
+  where even one line would stand too far under the part (the arc's foot,
+  ~45 deg: 0.6 - 0.8 mm), it starts higher.
+- **Width follows the band** (Bambu's: a loop alone - two lines - on most
+  layers, four only where the surface flattens): as many beads as keep the
+  band's back edge within 0.55 mm of the part over it, built and measured -
+  one line (0.40, the sheet's thin wall) where two would not, two beads
+  (0.84: a slicer lays a two-bead band as its loop alone) where they do, and
+  three or more only where the band itself moves three beads a layer
+  (never, on the arc: its flattest layers move 1.1 mm). Every band's top
+  is **0.183 - 0.522 mm under the part across its whole width, median
+  0.337** (`support:curved` 2: 5,360 points, front edge, middle and back
+  edge, every 0.25 mm along) - the first round's grid strips were 0.23 -
+  0.92, median 0.48.
+- **What holds each strip.** A band lies over the band below only in part
+  (0 - 0.34 mm along the slope, median 0.07): its leading part, up the
+  slope, is held by TIPS, never by the stair's lean. Wherever that part is
+  half a line or wider - every strip, on the arc - a tip every 5 mm or
+  nearer along the strip (Bambu's tree_support_branch_distance; its own
+  tree puts ~1.4 branch tops under each of its strips, 29 over z 41.4 -
+  45.4), each set a quarter stretch along from the strip below's, its
+  column's down-slope face at the band's front edge (where the part comes
+  lowest) and its top the band's underside. The tips are the stair's own
+  tree: `nso_support_gridpack.js` plans them as beacons on each band's
+  underside (`plan(..., { mergeThroughCrowd: true })`: a member in a node's
+  way that cannot join no longer holds the merge up - a tip a layer apart
+  under every strip is crowded everywhere, and without it 184 tips merged
+  nowhere and stood 93 struts on the plate) and builds them after the plan's
+  trunks (`tp.stairTrunks`), joined to the stair's support. Each of the 89
+  tips is found built: a column top at the band's underside (`support:curved`
+  4).
+- **The gap is measured**: every band with the exact triangle distance
+  against the piece; one nearer than the gap moves up the slope and is built
+  again. The whole support: 0.181 mm.
+- **Against Bambu** (`support:curved` 5): every one of Bambu's 23 interface
+  layers (41.8 - 46.2) has a band of ours at that z over the same stretch of
+  the curve; ours start at 37.4 (the card's 35 deg flags more of the arc than
+  Bambu's 30 deg threshold). The support's printed toolpath a layer, NSO's
+  slice against Bambu's (all support features), mm: z 5: 42 / 52, z 15: 57 /
+  24, z 25: 112 / 31, z 35: 232 / 107, z 38: 265 / 154, z 40: 218 / 139, z 42:
+  160 / 161, z 44: 90 / 135, z 46: 26 / 46 - up to 3.6 x Bambu's through the
+  middle of the tree, where our planner merges later than Bambu's slim tree.
+- **NSO's slice** types every layer's band Support interface or Support
+  transition (45 and 17 layers of 46 hold each; the tree's columns beside
+  them are Support), its lines support lines only (`support:curved` 6). Two
+  changes in `typeSupports` (`nso_slicer.js`, docs/SLICER.md): outside its
+  next layer's filled outline a top is what that layer does not cover grown
+  by a quarter line (0.5 mm everywhere hid each band's exposed edge under
+  the next band), and it may lie a layer deeper under the host - both only
+  where the part runs 2 mm or more under a sloped underside (the first layer
+  over it covers under 90 % of it: under the coupon's flat leg ceiling, the
+  tops of two tips beside its sheet read as a top otherwise and made its
+  T T I I read T I I I, slicer:bambu section 5); and past its 2 + 2 layers a
+  sheet's transition runs on while a layer repeats the footprint of the one
+  over it. `slicer:supports` is still 26 of 26, `slicer:bambu` 58 of 58.
+- **Build time**: the arc's area ~6 s in node.
+
+**The refusal on the arc** (`support:curved` 8). At the card's 60 deg the
+arc was "Area 1 · unreachable · no route to the plate · 70 spots" (63 in the
+owner's frame) though the plate under the top is clear: the planner held 67
+of its spots, the top among them. Three it could not reach sit at the arc's
+foot, z 17.7 - 18.7: one on its 60 deg facet over the part's own 2 mm base
+(the base runs 12.8 mm on under it and 10 mm to either side; a 30 deg lean
+from there reaches 9.6), two on the engraved label's flanks over the arc's
+own upper face. They are honest refusals; the card's verdict was the bug:
+an area with one lost spot read unreachable whole, with its whole count. Now
+(`app-supports-card.js` `effective()`) an area the last build held in part
+gives its lost spots an area of their own, numbered after the rest: the
+arc reads held, and the row is "Area 3 · unreachable · no route to the plate
+· 3 spots", outlined and framed where they are. No new control, and a
+left-out area is still the one under the click.
+

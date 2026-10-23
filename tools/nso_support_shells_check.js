@@ -23,7 +23,13 @@
 //      third of the shortest edge), so the welded solid sits a micron or so
 //      off the parts it was made of - measured, 1.42 um on average over the
 //      outline of the wedge's foot layer, under 0.7 um everywhere else; the
-//      shells are the parts as built. A region whose islands
+//      shells are the parts as built. A VOID SMALLER THAN ONE BEAD'S
+//      CROSS-SECTION (VOID_MM2, 0.08 mm2: 0.42 x 0.2) is not counted as a
+//      hole: the weld closes such slivers where two parts only graze (a
+//      stair's own tree merges through a crowd - docs/SUPPORT-INTERFACE.md
+//      section 7 - and on the tilted box one leg grazes a member it does not
+//      join: z 6.10, 0.009 mm2), and no slicer lays a line round one; its
+//      area still counts in the difference. A region whose islands
 //      differ is named: the closing joins two islands less than 0.098 mm
 //      apart, and where the gap is within that micron of 0.098 the weld's
 //      copy and the exact one fall either side of it.
@@ -91,6 +97,7 @@ const CARD = { skipList: [], angleDeg: 35, occluders: [], style: 'tree', restOnM
    shells and its weld hold the same parts. The shared pads are held below
    (5. THE FEET ACROSS AREAS). */
 const PARTS = { interface: true, foldSheets: false };
+const VOID_MM2 = 0.08;   /* one bead's cross-section (0.42 x 0.2 mm): a smaller void is no hole a slicer prints round (see 2) */
 const XOR_MM2 = 1e-3, XOR_WIDTH_MM = 2e-3, EXTRUDE_REL = 1e-3, EXTRUDE_TOTAL_REL = 1e-2, FULL_SLICE_TRIS = 30000;
 
 const GROUPS = ['coupon', 'clamp', 'fixtures'];
@@ -185,10 +192,11 @@ function perimeter(g, cs) {
   return L;
 }
 /* islands and holes */
+/* islands / holes: a hole smaller than VOID_MM2 is not counted (see 2) */
 function topology(g, cs) {
   const polys = g.polys(cs);
   let outer = 0, holes = 0;
-  for (const p of polys) (SL.signedArea(p) > 0 ? outer++ : holes++);
+  for (const p of polys) { const a = SL.signedArea(p); if (a > 0) outer++; else if (-a >= VOID_MM2) holes++; }
   return outer + '/' + holes;
 }
 (async () => {

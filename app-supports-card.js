@@ -285,21 +285,38 @@ var NSO_SUPPORTS_CARD = (function () {
         normal: b.normal.slice(), need: b.need, region: regionOf.get(b), manual: false };
     });
     var left = {};
-    var next = (det.beaconRegions || []).length;
-    editsOf(m).ops.forEach(function (op) {
-      var w = localToUp(p, op.p);
-      if (op.op === 'add') {
-        var n = localDirToUp(p, op.n), best = null, bd = Infinity;
-        list.forEach(function (b) { var d = dist(pt(b), w); if (d < bd) { bd = d; best = b; } });
-        var side = n[2] > -0.5;
-        list.push({ key: 'm' + op.id, x: w[0], y: w[1], z: w[2], normal: n,
-          need: { kind: side ? 'side' : 'face', manual: true }, manual: true,
-          region: best && bd <= JOIN_PITCHES * pitch ? best.region : next++ });
-      } else if (op.op === 'exclude' || op.op === 'include') {
-        var near = null, nd = Infinity;
-        list.forEach(function (b) { var d = dist(pt(b), w); if (d < nd) { nd = d; near = b; } });
-        if (near && nd <= PICK_PITCHES * 1.5 * pitch) { if (op.op === 'exclude') left[near.region] = true; else delete left[near.region]; }
-      }
+    var next = (det.beaconRegions || []).length, ops = editsOf(m).ops;
+    ops.forEach(function (op, i) {
+      if (op.op !== 'add') return;
+      var w = localToUp(p, op.p), n = localDirToUp(p, op.n), best = null, bd = Infinity;
+      list.forEach(function (b) { var d = dist(pt(b), w); if (d < bd) { bd = d; best = b; } });
+      var side = n[2] > -0.5;
+      list.push({ key: 'm' + op.id, x: w[0], y: w[1], z: w[2], normal: n,
+        need: { kind: side ? 'side' : 'face', manual: true }, manual: true, op: i,
+        region: best && bd <= JOIN_PITCHES * pitch ? best.region : next++ });
+    });
+    /* AN AREA THE LAST BUILD HELD IN PART: the spots it could not reach are
+       an area of their own (numbered after the rest), so the area it held
+       reads held and the lost spots are named where they are - the arc's
+       top, held, was called "unreachable" for three spots at its foot. */
+    var lost = {}, kept = {}, un = memOf(S.hostId).unreach, mixed = {};
+    Object.keys(un).forEach(function (r) { un[r].forEach(function (k) { lost[k] = true; }); });
+    cardSupports(S.hostId).forEach(function (sp) { Object.keys(sp.nsoSupport.holds || {}).forEach(function (k) { kept[k] = true; }); });
+    list.forEach(function (b) {
+      var g = mixed[b.region] || (mixed[b.region] = { lost: 0, kept: 0 });
+      if (lost[b.key]) g.lost++; else if (kept[b.key]) g.kept++;
+    });
+    Object.keys(mixed).map(Number).sort(function (a, b) { return a - b; }).forEach(function (r) {
+      if (mixed[r].lost && mixed[r].kept) mixed[r].split = next++;
+    });
+    list.forEach(function (b) { var g = mixed[b.region]; if (g && g.split != null && lost[b.key]) b.region = g.split; });
+    /* left out and put back: the area of the spot nearest the click, as the
+       list stood then (the spots added before it) */
+    ops.forEach(function (op, i) {
+      if (op.op !== 'exclude' && op.op !== 'include') return;
+      var w = localToUp(p, op.p), near = null, nd = Infinity;
+      list.forEach(function (b) { if (b.manual && b.op > i) return; var d = dist(pt(b), w); if (d < nd) { nd = d; near = b; } });
+      if (near && nd <= PICK_PITCHES * 1.5 * pitch) { if (op.op === 'exclude') left[near.region] = true; else delete left[near.region]; }
     });
     var by = {};
     list.forEach(function (b) { (by[b.region] = by[b.region] || []).push(b); });

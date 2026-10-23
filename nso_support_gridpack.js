@@ -82,7 +82,10 @@
    trunk on its foot but draws no pad - shareFeet() draws them over several
    plans at once (the Supports card's areas). Nothing goes below the plate:
    the trunk ends half a layer inside its pad, and a last leg that would
-   lean onto the plate stops 1 mm short and drops straight.
+   lean onto the plate stops 1 mm short and drops straight. On the card's
+   build (opts.interface) every trunk on a foot also gets a round trunk
+   round its axis, wider going down and flared onto its pad, and the pad is
+   drawn round the flare (TRUNKS, below).
 
    LANDING. Plate first, always: straight down, else steered round the piece
    within the lean limit (STEER below). A member with no route to the plate:
@@ -125,7 +128,12 @@
          optionally with regionId and key) planned instead of detecting.
    Every plan.trunks[i] carries regionIds; every solid(plan).solids[i]
    carries beacons (ids), regionIds and landing.
-   parts(plan, { interface: true }) (and solid()): every tip that meets the
+   parts(plan, { interface: true }) (and solid()): a tip a STAIR holds by
+         itself (sheet()'s mode 'drop', docs/SUPPORT-INTERFACE.md section 7)
+         is not built, nor any member that holds only such tips; the tips the
+         stair's strips want are planned as a tree of their own and built
+         after the plan's trunks (tp.stairTrunks; trunk numbers past the
+         plan's); every other tip that meets the
          part ends in a flat cap 2.5 - 4 mm across under
          nso_support_interface.js's SHEET - 2 transition and 2 interface
          layers at 0.84 mm, each a loop and a serpentine inside it, on the
@@ -185,6 +193,18 @@
   var FOOT_CELL_MM = 0.05;     /* the raster a pad is drawn on: one cell */
   var FOOT_CELLS_MAX = 4e6;    /* ...coarsened to this many cells on a very wide field of feet */
   var FOOT_TOUCH_MM = 0.1;     /* pads that would part by less than this are one pad */
+  /* THE TRUNK (supports-foot, TRUNKS below): Bambu's tree slim law, 2 mm at the top of what a trunk holds up and
+     wider going down at a constant angle, then a flare onto the pad */
+  var TRUNK_TIP_MM = 2;        /* the law's diameter at the top (Bambu's tree_support_branch_diameter) */
+  var TRUNK_ANGLE_DEG = 5.5;   /* ...growing going down at this half-angle (Bambu's setting is 5; its slice of simple_overhang grows at 5.2) */
+  var FLARE_MM = 4;            /* the flare: over this much above the plate the trunk widens faster... */
+  var FLARE_ANGLE_DEG = 15;    /* ...by this half-angle more (Bambu's own bottom 4 mm on simple_overhang need 12.4) */
+  var TRUNK_SHARE = 0.5;       /* a trunk rises up its stem while the stem holds at least this share of the trunk's tips */
+  var TRUNK_KEEP_MM = 0.35;    /* a trunk keeps this far off the piece (Bambu's support_object_xy_distance) */
+  var TRUNK_TIP_CLEAR_MM = 4;  /* ...and ends this far under any tip within TRUNK_TIP_REACH_MM of it: under every cap, sheet and gap */
+  var TRUNK_TIP_REACH_MM = 5;
+  var TRUNK_SIDES = 32;        /* a trunk is a round solid of this many sides */
+  var TRUNK_STEP_MM = 0.25;    /* the piece's distance is read up a trunk's axis this often */
   var CAP_SIDES = 16;          /* a cap under the sheet: a round frustum of this many sides */
   var LEAN_TOL = 1e-4;          /* a face tilted exactly the lean limit is not a side face: float32 noise on its normal must not decide */
   var EAGERNESS = { strut: 0, tree: 1, 'gecko-hand': 1 };
@@ -426,6 +446,17 @@
     var plateZ = bc.detect.plateZ;
     var reach = (opts.pickupReachMm == null ? bc.pitchMm * 1.05 : +opts.pickupReachMm) * (eager > 0 ? 1 : 0);
     var rest = !!opts.restOnModel;
+    /* opts.mergeThroughCrowd: a member in a node's way that cannot join the
+       merge does not hold it up (a stair's own tree, a tip under every strip
+       a layer apart, is crowded everywhere: held to the usual rule it merged
+       nowhere and stood 93 struts on the plate; joining up to 8, or leaning
+       45 deg, did not free it). Its legs may then pass through that member -
+       support on support, kept as shells (shells(): the card's build, never
+       welded). Where a leg only grazes one, the weld (support:shells'
+       reference) closes a sliver of void the shells do not - the tilted box,
+       z 6.10, 0.009 mm2: under a bead's cross-section, which support:shells
+       does not count as a hole. */
+    var crowd = !!opts.mergeThroughCrowd;
     out.branchTiltDeg = tiltDeg; out.latticeMm = L; out.plateZ = plateZ; out.restOnModel = rest;
     var obstacles = [rawTris].concat(opts.occluders || []);
     /* One index per piece, built here once for the whole plan (or found, if
@@ -679,7 +710,7 @@
               for (var gi = 0; gi < group.length && !near; gi++) near = legNear(anchor(group[gi]), c.N, oa) < touch(group[gi].side, o.side);
               if (!near) continue;
               if (group.length < MAX_MERGE && oa[2] > zk + 1e-9 && hdist(oa, c.N) <= (oa[2] - zk) * tanT * eager + 1e-9) { group.push(o); grew = true; }
-              else ok = false;
+              else if (!crowd) ok = false;
             }
             if (!grew) break;
           }
@@ -888,6 +919,134 @@
      lands and how thick it is. */
   function footprintOf(c, side) { return { c: [c[0], c[1]], r: side * Math.SQRT1_2 }; }
 
+  /* =====================================================================
+     TRUNKS (supports-foot; docs/SUPPORT-GRIDPACK.md, *The trunk*)
+
+     The round-2 print of simple_overhang failed at the floor: a 37 mm tree
+     on a 2.4 mm column and a small round pad peeled off the plate when the
+     nozzle caught the stair; the tree itself held. Bambu's tree slim on the
+     same part stands on a trunk 12 mm across at the floor. So a trunk that
+     lands on the plate (the card's build: opts.interface) gets a round solid
+     of its own round its foot's axis, kept beside its column as one more
+     shell - nothing the planner built changes:
+
+       r(z) = TRUNK_TIP_MM / 2 + tan(TRUNK_ANGLE_DEG) x (H - z)
+              + tan(FLARE_ANGLE_DEG) x (FLARE_MM - z), below FLARE_MM
+
+     its inscribed radius at height z over the plate. H is the top of what
+     the trunk holds up: the highest of its tips, or of the sheet or stair it
+     carries (all of a stair's trunks are as tall as the stair). Bambu's own
+     law is the same with 5 deg and no H but its tips. The trunk rises from
+     the pad up its STEM - the landing member, then at each merge the parent
+     holding most of its tips - while the stem holds at least TRUNK_SHARE of
+     them: where the tree splits, the trunk ends. A taproot (a strut never
+     merged) is its own stem. It ends TRUNK_TIP_CLEAR_MM under every tip
+     within TRUNK_TIP_REACH_MM of it (any tree's, any area's: under every
+     cap, sheet, stair and gap), and keeps TRUNK_KEEP_MM off the piece, read
+     with the nearest-face probe every TRUNK_STEP_MM up its axis: where the
+     piece is nearer, the trunk is narrower there, and it ends where it would
+     be narrower than its own column.
+
+     The trunk's pad is drawn round its flared base (footprint r = the base's
+     outer radius), grown FOOT_GROW_MM as before: pads grow with the trunk.
+     ===================================================================== */
+  function revolveSoup(cx, cy, rings, n, phase) {
+    var nr = rings.length, out = new Float32Array((2 * n + 2 * n * (nr - 1)) * 9), w = 0, V = [];
+    for (var k = 0; k < nr; k++) {
+      var row = [];
+      for (var j = 0; j <= n; j++) {
+        var a = phase + 2 * Math.PI * (j % n) / n;
+        row.push([cx + rings[k][1] * Math.cos(a), cy + rings[k][1] * Math.sin(a), rings[k][0]]);
+      }
+      V.push(row);
+    }
+    function tri(a, b, c) {
+      out[w++] = a[0]; out[w++] = a[1]; out[w++] = a[2];
+      out[w++] = b[0]; out[w++] = b[1]; out[w++] = b[2];
+      out[w++] = c[0]; out[w++] = c[1]; out[w++] = c[2];
+    }
+    var lo = [cx, cy, rings[0][0]], hi = [cx, cy, rings[nr - 1][0]];
+    for (var q = 0; q < n; q++) {
+      tri(lo, V[0][q + 1], V[0][q]);
+      tri(hi, V[nr - 1][q], V[nr - 1][q + 1]);
+      for (var m = 0; m + 1 < nr; m++) {
+        tri(V[m][q], V[m][q + 1], V[m + 1][q + 1]);
+        tri(V[m][q], V[m + 1][q + 1], V[m + 1][q]);
+      }
+    }
+    return out;
+  }
+  /* Every foot with a trunk record (f.grow: { H, top, side, tips }) gets its
+     trunk: f.shell (the soup), f.grown (what was built, or why not), and its
+     footprint widened to the trunk's base (f.r, and f.core, the base's
+     inscribed radius: always pad). Feet without a record are left alone. */
+  function growTrunks(TH, obstacles, feet, plateZ, thick) {
+    var probes = obstacles.map(function (sp) { return probeOf(TH, sp); }).filter(Boolean);
+    var ta = Math.tan(TRUNK_ANGLE_DEG * Math.PI / 180), tb = Math.tan(FLARE_ANGLE_DEG * Math.PI / 180);
+    var cosN = Math.cos(Math.PI / TRUNK_SIDES), tips = [], seen = [];
+    feet.forEach(function (f) {
+      var T = f.grow && f.grow.tips;
+      if (T && seen.indexOf(T) < 0) { seen.push(T); tips = tips.concat(T); }
+    });
+    var zf = plateZ + FLARE_MM, z0 = plateZ + thick / 2;
+    feet.forEach(function (f, fi) {
+      var g = f.grow;
+      if (!g) return;
+      var cx = f.c[0], cy = f.c[1];
+      /* the law's inscribed radius at z, and the side's outer radius it is built at */
+      var law = function (z) { return TRUNK_TIP_MM / 2 + ta * Math.max(0, g.H - z) + (z < zf ? tb * (zf - z) : 0); };
+      var Rmax = law(z0) / cosN, top = g.top;
+      tips.forEach(function (q) {
+        if (Math.hypot(q[0] - cx, q[1] - cy) <= Rmax + TRUNK_TIP_REACH_MM) top = Math.min(top, q[2] - TRUNK_TIP_CLEAR_MM);
+      });
+      var rec = { c: [cx, cy], H: g.H, stemTop: g.top, top: top, rings: null, why: null };
+      f.grown = rec;
+      if (!(top > z0 + thick)) { rec.why = 'no height under its tips'; return; }
+      /* how far each height of the axis may reach before it comes within TRUNK_KEEP_MM of the piece, less the step's slack */
+      var zs = [], allow = [];
+      for (var z = z0; z < top - 1e-9; z += TRUNK_STEP_MM) zs.push(z);
+      zs.push(top);
+      zs.forEach(function (zz) {
+        var d = Infinity;
+        probes.forEach(function (P) {
+          if (P.inside && P.inside([cx, cy, zz])) { d = 0; return; }
+          var hit = P.nearest([cx, cy, zz], Rmax + TRUNK_KEEP_MM + 1);
+          if (hit && hit.dist < d) d = hit.dist;
+        });
+        allow.push(d - TRUNK_KEEP_MM - TRUNK_STEP_MM / 2);
+      });
+      var rings;
+      if (zs.every(function (zz, k) { return law(zz) / cosN <= allow[k]; })) {
+        rings = [[z0, law(z0) / cosN]];
+        if (zf > z0 + 1e-6 && zf < top - 1e-6) rings.push([zf, law(zf) / cosN]);
+        rings.push([top, law(top) / cosN]);
+      } else {
+        /* narrowed where the piece comes near: a ring a millimetre, each held
+           to the least room within a millimetre of it (so every height between
+           two rings is), ending under the first that would be narrower than
+           the trunk's own column */
+        rings = [];
+        var own = g.side / 2 / cosN;
+        for (var k = 0; k < zs.length; k += Math.round(1 / TRUNK_STEP_MM)) {
+          var zz = zs[k], room = Infinity;
+          for (var q = 0; q < zs.length; q++) if (Math.abs(zs[q] - zz) <= 1 + 1e-9) room = Math.min(room, allow[q]);
+          var R = Math.min(law(zz) / cosN, room);
+          if (R < own) break;
+          rings.push([zz, R]);
+        }
+        if (rings.length < 2) { rec.why = 'no room beside the piece'; return; }
+        rec.narrowed = true;
+      }
+      rec.rings = rings;
+      rec.top = rings[rings.length - 1][0];
+      var ph = ((GOLDEN_DEG * (fi + 1)) % (360 / TRUNK_SIDES)) * Math.PI / 180;
+      f.shell = revolveSoup(cx, cy, rings, TRUNK_SIDES, ph);
+      f.core = Math.max(f.r * Math.SQRT1_2, rings[0][1] * cosN);
+      f.r = Math.max(f.r, rings[0][1]);
+    });
+    return feet.filter(function (f) { return f.grown; }).map(function (f) { return f.grown; });
+  }
+
   /* Ear clipping of a simple polygon, counter-clockwise in, triangles out as
      index triples, or null when it will not triangulate (a self-touching
      outline): the caller then leaves that polygon alone. */
@@ -1093,7 +1252,7 @@
        some right at its square, and stays a split. */
     var probes = obstacles.map(function (sp) { return probeOf(TH, sp); }).filter(Boolean);
     function hemmedExactly(f) {
-      var rIn = f.r * Math.SQRT1_2, zs = [];
+      var rIn = f.core != null ? f.core : f.r * Math.SQRT1_2, zs = [];
       for (var zz = 0.02; zz <= thick + FOOT_GAP_MM + 1e-9; zz += 0.06) zs.push(plateZ + zz);
       for (var dr = 0.05; dr <= FOOT_GAP_MM + 1e-9; dr += 0.05) {
         for (var k2 = 0; k2 < 36; k2++) {
@@ -1142,7 +1301,7 @@
     function cy(jj) { return y0 + (jj + 0.5) * h; }
     var grow = new Uint8Array(N), core = new Int32Array(N).fill(-1), solid = new Uint8Array(N), block = new Uint8Array(N);
     feet.forEach(function (f, fi) {
-      var Rg = f.r + FOOT_GROW_MM, rg2 = Rg * Rg, rc = Math.max(h, f.r * Math.SQRT1_2 - h * (1 + Math.SQRT1_2)), rc2 = rc * rc, fx = f.c[0], fy = f.c[1];
+      var Rg = f.r + FOOT_GROW_MM, rg2 = Rg * Rg, rc = Math.max(h, (f.core != null ? f.core : f.r * Math.SQRT1_2) - h * (1 + Math.SQRT1_2)), rc2 = rc * rc, fx = f.c[0], fy = f.c[1];
       var i0 = Math.max(0, Math.floor((fx - Rg - x0) / h)), i1 = Math.min(nx - 1, Math.ceil((fx + Rg - x0) / h));
       var j0 = Math.max(0, Math.floor((fy - Rg - y0) / h)), j1 = Math.min(ny - 1, Math.ceil((fy + Rg - y0) / h));
       for (var jj = j0; jj <= j1; jj++) {
@@ -1436,11 +1595,18 @@
      (parts with footPads: 'shared' - every trunk standing on its foot, no pad
      drawn) and hands every area's shells here: the pads are drawn once, over
      every area's feet (footPads), and the supports that stand on one pad are
-     one support - whatever area they hold up.
-       builds: [{ solids: [{ soup, feet: [{ c, r }] }] }]   (shells() results)
+     one support - whatever area they hold up. A foot with a trunk record
+     (f.grow, the card's build) gets its trunk here first (TRUNKS: under every
+     area's tips), and its pad is drawn round the trunk's base; a trunk that
+     comes within FOOT_TOUCH_MM of another support's solid makes the two one
+     support, as pads too near to print apart do.
+       builds: [{ solids: [{ soup, feet: [{ c, r, grow }] }] }]   (shells() results)
        opts: plateZ, firstLayerMm, occluders, thickness
-       -> { ok, objects: [{ from: [[build, solid]...], soup, pads }], pads,
-            clusters, clustersSplit, hemmed, holesFilled, holesSlotted, reason } */
+       -> { ok, objects: [{ from: [[build, solid]...], soup, pads, trunks }], pads,
+            trunks: [{ from, c, H, stemTop, top, rings, why, soup }], padOutlines: [{ from, poly, areaMm2 }],
+            clusters, clustersSplit, hemmed, holesFilled, holesSlotted, reason }
+     An object's soup is its solids' soups in order, then its trunks, then
+     its pads. */
   function shareFeet(builds, piece, opts) {
     opts = opts || {};
     var TH = TM(opts);
@@ -1451,10 +1617,11 @@
       ((b && b.solids) || []).forEach(function (sd, si) {
         var key = bi + ':' + si;
         idOf[key] = ids.length; ids.push([bi, si]);
-        (sd.feet || []).forEach(function (f) { feet.push({ key: key, c: f.c, r: f.r }); });
+        (sd.feet || []).forEach(function (f) { feet.push(f.grow ? { key: key, c: f.c, r: f.r, grow: f.grow } : { key: key, c: f.c, r: f.r }); });
       });
     });
     var obstacles = [piece].concat(opts.occluders || []).filter(function (s) { return s && s.length >= 9; });
+    if (feet.some(function (f) { return f.grow; })) growTrunks(TH, obstacles, feet, plateZ, thick);
     var fp = footPads(TH, obstacles, feet, plateZ, thick);
     if (fp.failed.length) return { ok: false, reason: 'the feet: ' + fp.failed[0] };
     var par = ids.map(function (x, q) { return q; });
@@ -1463,14 +1630,49 @@
     fp.groups.forEach(function (g) {
       for (var q = 1; q < g.length; q++) { var a = find(idOf[g[0]]), b = find(idOf[g[q]]); if (a !== b) par[Math.max(a, b)] = Math.min(a, b); }
     });
+    /* a trunk within FOOT_TOUCH_MM of another support's solid: one support.
+       Read both ways - the solid's corners inside the trunk's section at
+       their height, and the trunk's corners near the solid - on the solids
+       whose boxes come that near */
+    var boxes = [];
+    feet.forEach(function (f) {
+      if (!f.shell) return;
+      var q = idOf[f.key], rg = f.grown.rings, R = rg[0][1] + FOOT_TOUCH_MM;
+      ids.forEach(function (id, k) {
+        if (find(k) === find(q)) return;
+        var sp = builds[id[0]].solids[id[1]].soup, bx = boxes[k] || (boxes[k] = bounds(sp));
+        if (bx.lo[0] > f.c[0] + R || bx.hi[0] < f.c[0] - R || bx.lo[1] > f.c[1] + R || bx.hi[1] < f.c[1] - R ||
+            bx.lo[2] > rg[rg.length - 1][0] + FOOT_TOUCH_MM || bx.hi[2] < rg[0][0] - FOOT_TOUCH_MM) return;
+        var near = false;
+        for (var v = 0; v < sp.length && !near; v += 3) {
+          var z = sp[v + 2];
+          if (z < rg[0][0] - FOOT_TOUCH_MM || z > rg[rg.length - 1][0] + FOOT_TOUCH_MM) continue;
+          var j = 0;
+          while (j + 2 < rg.length && rg[j + 1][0] < z) j++;
+          var a = rg[j], b = rg[Math.min(j + 1, rg.length - 1)], tt = b[0] > a[0] ? Math.max(0, Math.min(1, (z - a[0]) / (b[0] - a[0]))) : 0;
+          if (Math.hypot(sp[v] - f.c[0], sp[v + 1] - f.c[1]) <= a[1] + (b[1] - a[1]) * tt + FOOT_TOUCH_MM) near = true;
+        }
+        var P = near ? null : probeOf(TH, sp);
+        for (var w = 0; P && w < f.shell.length && !near; w += 3) {
+          var hit = P.nearest([f.shell[w], f.shell[w + 1], f.shell[w + 2]], FOOT_TOUCH_MM + 0.5);
+          if (hit && hit.dist < FOOT_TOUCH_MM) near = true;
+        }
+        if (near) { var A0 = find(q), B0 = find(k); par[Math.max(A0, B0)] = Math.min(A0, B0); }
+      });
+    });
     var groups = {}, order = [];
-    ids.forEach(function (id, q) { var r = find(q); if (!groups[r]) { groups[r] = { from: [], pads: [] }; order.push(r); } groups[r].from.push(id); });
+    ids.forEach(function (id, q) { var r = find(q); if (!groups[r]) { groups[r] = { from: [], pads: [], trunks: [] }; order.push(r); } groups[r].from.push(id); });
+    feet.forEach(function (f) { if (f.shell) groups[find(idOf[f.key])].trunks.push(f.shell); });
     fp.pads.forEach(function (pd) { groups[find(idOf[pd.keys[0]])].pads.push(pd.soup); });
     var objects = order.map(function (r) {
-      var g = groups[r], list = g.from.map(function (id) { return builds[id[0]].solids[id[1]].soup; }).concat(g.pads);
-      return { from: g.from, soup: joinAll(list), pads: g.pads.length };
+      var g = groups[r], list = g.from.map(function (id) { return builds[id[0]].solids[id[1]].soup; }).concat(g.trunks, g.pads);
+      return { from: g.from, soup: joinAll(list), pads: g.pads.length, trunks: g.trunks.length };
     });
-    return { ok: true, objects: objects, pads: fp.pads.length, clusters: fp.clusters.length, clustersSplit: fp.clustersSplit,
+    var trunks = feet.filter(function (f) { return f.grown; }).map(function (f) {
+      return Object.assign({ from: ids[idOf[f.key]], soup: f.shell || null, padR: f.r, padCore: f.core }, f.grown);
+    });
+    return { ok: true, objects: objects, pads: fp.pads.length, trunks: trunks,
+             padOutlines: fp.pads.map(function (pd) { return { from: pd.keys.map(function (k) { return ids[idOf[k]]; }), poly: pd.poly, areaMm2: pd.areaMm2 }; }), clusters: fp.clusters.length, clustersSplit: fp.clustersSplit,
              clustersHemmed: fp.clustersHemmed, hemmed: fp.hemmed, padsDropped: fp.padsDropped, holesFilled: fp.holesFilled, holesSlotted: fp.holesSlotted,
              reason: fp.pads.length + ' pad(s) under ' + fp.clusters.length + ' cluster(s) of feet' +
                (fp.padsDropped ? ' (' + fp.padsDropped + ' a trunk with no room for a pad, on its own end)' : '') +
@@ -1767,8 +1969,9 @@
         counts: plan.counts, reason: plan.reason, failed: plan.failed, tips: plan.tips, tipLog: tipLog, cap: plan.cap,
         levels: plan.levels.map(function (L) {
           return { id: L.id, zTop: L.zTop, zBase: L.zBase, zCap: L.zCap, tips: L.tips, caps: L.caps, lines: L.lines,
-                   minDistanceMm: L.minDistanceMm, solvedDropMm: L.solvedDropMm,
+                   minDistanceMm: L.minDistanceMm, solvedDropMm: L.solvedDropMm, stair: L.stair, held: L.held,
                    layers: L.layers.map(function (x) { return { role: x.role, angleDeg: x.angleDeg, z0: x.z0, z1: x.z1, lines: x.lines, lengthMm: x.lengthMm,
+                                                                widthMm: x.widthMm, overlapMm: x.overlapMm, beads: x.beads, advanceMm: x.advanceMm, tips: x.tips,
                                                                 linesMm: x.linesMm, loopMm: x.loopMm, pieces: (x.pieces || []).map(function (q) { return { kind: q.kind, sizeMm: q.sizeMm, areaMm2: q.areaMm2, perimMm: q.perimMm, caps: q.caps, lines: q.lines }; }), shortestMm: x.shortestMm, paths: x.paths }; }) };
         })
       };
@@ -1788,6 +1991,9 @@
        pad is drawn here - the caller draws them over several plans at once
        (shareFeet, the Supports card's areas) from tp.feet */
     var shared = opts.footPads === 'shared';
+    /* TRUNKS: on the card's build (the sheet's), every trunk on a foot gets
+       its round trunk; opts.trunkGrowth false (or true) says otherwise */
+    var grow = !!foot && (opts.trunkGrowth != null ? !!opts.trunkGrowth : !!opts.interface);
     var out = [], placed = [], droppedFingers = 0, shafts = [], feet = [];
     /* THE SHEET (opts.interface): every tip that meets the part is cut flat
        under nso_support_interface.js's sheet, or cut at the gap line, or (a
@@ -1808,10 +2014,43 @@
     }
     /* One trunk's parts: null once swept, { ok: false, reason } when a member
        would not sweep. */
+    /* A TIP A STAIR HOLDS (sheet()'s THE STAIR: mode 'drop') is not built,
+       and neither is a member that holds only such tips, nor a stub to one */
+    function dropped(b) { return !!(sh && b != null && sh.byBeacon[b] && sh.byBeacon[b].mode === 'drop'); }
+    function leftOut(m) { return !!(sh && m.beacons && m.beacons.length && m.beacons.every(dropped)); }
+    /* A trunk's record for growTrunks (TRUNKS): H, the top of what it holds
+       up - its highest tip, the top of the sheet or stair a tip of it is
+       under, or (a stair's own tree) opts.trunkTopMm - and its stem's top:
+       from the landing member up through the parent holding most of its
+       tips (the lower id on a tie) while that parent holds TRUNK_SHARE of them */
+    function stemOf(tr, root) {
+      var live = function (m) { return m.beacons.filter(function (b) { return !dropped(b); }).length; };
+      var H = opts.trunkTopMm != null ? +opts.trunkTopMm : -Infinity, n = live(root), cur = root;
+      tr.beacons.forEach(function (b) {
+        if (dropped(b)) return;
+        H = Math.max(H, p.beacons[b].p[2]);
+        var st = sh && sh.byBeacon[b];
+        if (st && st.mode === 'sheet' && st.zTop != null) H = Math.max(H, st.zTop);
+      });
+      for (;;) {
+        var best = null, bc = -1;
+        cur.parents.forEach(function (id) {
+          var q = p.members[id];
+          if (q.dead || leftOut(q)) return;
+          var c = live(q);
+          if (c > bc || (c === bc && id < best.id)) { bc = c; best = q; }
+        });
+        if (!best || bc < TRUNK_SHARE * n) break;
+        cur = best;
+      }
+      var top = cur.path[0][2] + (cur.kind === 'merge' || cur.kind === 'pickup' ? cur.side / 2 : 0);
+      return { H: H, top: top, side: root.side, tips: null };
+    }
     function step(t) {
       var tr = p.trunks[t], parts = [], fingers = [];
       for (var i = 0; i < tr.members.length; i++) {
         var m = p.members[tr.members[i]];
+        if (leftOut(m)) continue;
         var ms = sh && m.beacon != null && sh.byBeacon[m.beacon] ? sh.member(m) : memberSolid(P, m, foot);
         if (!ms.ok) return { ok: false, reason: ms.reason };
         m.points = ms.points;
@@ -1820,14 +2059,16 @@
           /* The foot: where the trunk stands, its own end square - the pads
              are drawn over every foot at once, in finish() (FEET) */
           var fp0 = footprintOf(ms.points[ms.points.length - 1], m.side);
-          feet.push({ key: t, trunk: t, c: fp0.c, r: fp0.r });
+          var ft = { key: t, trunk: t, c: fp0.c, r: fp0.r };
+          if (grow) ft.grow = stemOf(tr, m);
+          feet.push(ft);
         }
         if (m.pad) {
           var h = Math.max(2 * m.side, 2.82) / 2, a = m.path[m.path.length - 1];
           parts.push({ soup: boxSoup([a[0] - h, a[1] - h, m.pad.z0], [a[0] + h, a[1] + h, m.pad.z1]) });
         }
         p.stubs.forEach(function (s) {
-          if (s.member !== m.id) return;
+          if (s.member !== m.id || dropped(s.beacon)) return;
           /* Started AT the pickup point: it lies on the column's axis, inside
              both the column it leaves and the one below, and is no vertex of
              either. Run back a quarter side instead, the stub's start landed
@@ -1878,6 +2119,57 @@
       return null;
     }
     function finish() {
+      /* THE STAIR'S TREE (sheet()'s THE STAIR): the tips each strip's leading
+         part wants, planned as a tree of their own - a beacon on each strip's
+         underside, the piece the obstacle (a column 1.2 mm across meets the
+         strips under its own: support on support, one support) - and built
+         as trunks after the plan's, standing on feet with them. Its trunks
+         hold no spot of the card's; each is joined to its stair. */
+      var stairTrunks = [], stairOf = {}, stairLog = [];
+      if (sh) sh.plan.levels.forEach(function (L) {
+        if (!L.stair || !L.stair.tips || !L.stair.tips.length) return;
+        var p2 = plan(opts.rawTris, Object.assign({}, opts, {
+          beacons: L.stair.tips.map(function (w, i) { return { p: w.p, n: [0, 0, -1], key: 'stair' + L.id + '.' + i }; }),
+          skipList: [], style: p.style, sideMm: p.sideMm, restOnModel: false, mergeThroughCrowd: true,
+          interface: false, onProgress: null }));
+        if (!p2.ok) { stairLog.push({ level: L.id, wanted: L.stair.tips.length, held: 0, reason: p2.reason }); return; }
+        var sp2 = trunkStepper(p2, Object.assign({}, opts, { interface: false, footPads: 'shared', onProgress: null, trunkGrowth: grow, trunkTopMm: L.zTop }));
+        if (!sp2.ok) { stairLog.push({ level: L.id, wanted: L.stair.tips.length, held: 0, reason: sp2.reason }); return; }
+        for (var t2 = 0; t2 < sp2.n; t2++) { var r2 = sp2.step(t2); if (r2) { stairLog.push({ level: L.id, reason: r2.reason }); return; } }
+        var f2 = sp2.finish(), base = p.trunks.length + stairTrunks.length;
+        f2.trunks.forEach(function (x) {
+          var T = base + x.trunk;
+          out.push({ trunk: T, parts: x.parts, fingerParts: [], fingers: 0 });
+          stairTrunks.push({ beacons: [], landing: p2.trunks[x.trunk].landing, stair: L.id });
+          (stairOf[L.id] = stairOf[L.id] || []).push(T);
+        });
+        f2.feet.forEach(function (f) { feet.push({ key: base + f.trunk, trunk: base + f.trunk, c: f.c, r: f.r, grow: f.grow }); });
+        stairLog.push({ level: L.id, wanted: L.stair.tips.length, held: p2.held != null ? p2.held : L.stair.tips.length - p2.unreachable.length,
+                        unreachable: p2.unreachable.length, trunks: p2.trunks.length, members: p2.members.filter(function (m) { return !m.dead; }).length });
+      });
+      /* THE TRUNKS: every built tip, the plan's and the stair trees', is
+         one the trunks end under (here, and in shareFeet() over every area) */
+      var trunks = [];
+      if (grow) {
+        var tipZones = [];
+        p.trunks.forEach(function (tr) {
+          tr.members.forEach(function (id) {
+            var m = p.members[id];
+            if (m.beacon != null && !leftOut(m) && !dropped(m.beacon)) tipZones.push(m.path[0].slice());
+          });
+        });
+        var inTrunk = {};
+        p.trunks.forEach(function (tr) { tr.members.forEach(function (id) { inTrunk[id] = true; }); });
+        p.stubs.forEach(function (s) { if (inTrunk[s.member] && !dropped(s.beacon)) tipZones.push(s.to.slice()); });
+        if (sh) sh.plan.levels.forEach(function (L) { ((L.stair && L.stair.tips) || []).forEach(function (w) { tipZones.push(w.p.slice()); }); });
+        feet.forEach(function (f) { if (f.grow) f.grow.tips = tipZones; });
+      }
+      if (grow && feet.length && !shared) {
+        var THg = TM(opts);
+        if (!THg) return { ok: false, reason: 'nso_thickness.js is not loaded - the trunks keep off the piece with its probe' };
+        trunks = growTrunks(THg, [opts.rawTris || []].concat(opts.occluders || []).filter(function (s) { return s && s.length >= 9; }), feet, p.plateZ, foot);
+        feet.forEach(function (f) { if (f.shell) out[f.key].parts.push({ soup: f.shell, trunkShell: true }); });
+      }
       /* THE PADS (FEET): one per group of feet, each the first part of the
          lowest trunk standing on it - the others join it through the pad */
       var pads = { count: 0, clusters: 0, clustersSplit: 0, hemmed: 0, padsDropped: 0, holesFilled: 0, holesSlotted: 0, shared: shared }, padGroups = [];
@@ -1903,18 +2195,25 @@
         sh.plan.levels.forEach(function (L) {
           /* the trunks that carry its tips: what it is joined to */
           var carriers = [];
-          L.tips.forEach(function (ti) {
+          /* a stair is joined to the trunks it holds by itself as well: their spots are its */
+          L.tips.concat(L.held || []).forEach(function (ti) {
             var b = sh.plan.tips[ti].beacon;
             p.trunks.forEach(function (tr, k) { if (tr.beacons.indexOf(b) >= 0 && carriers.indexOf(k) < 0) carriers.push(k); });
           });
+          (stairOf[L.id] || []).forEach(function (T) { carriers.push(T); });
           out.push({ trunk: -1, sheet: L.id, carriers: carriers, parts: L.layers.map(function (x) { return { soup: x.soup, sheet: true }; }), fingers: 0 });
         });
       }
-      return { ok: true, trunks: out, fingersDropped: droppedFingers, pads: pads, padGroups: padGroups,
-               feet: feet.map(function (f) { return { trunk: f.trunk, c: f.c, r: f.r }; }), sheet: sh ? sh.summary() : null };
+      var summ = sh ? sh.summary() : null;
+      if (summ) summ.stairTrees = stairLog;
+      return { ok: true, trunks: out, fingersDropped: droppedFingers, pads: pads, padGroups: padGroups, stairTrunks: stairTrunks,
+               feet: feet.map(function (f) { return f.grow ? { trunk: f.trunk, c: f.c, r: f.r, grow: f.grow } : { trunk: f.trunk, c: f.c, r: f.r }; }),
+               trunkShells: trunks, sheet: summ };
     }
     return { ok: true, n: p.trunks.length, step: step, finish: finish };
   }
+  /* A trunk of the plan, or of a stair's own tree (numbered after the plan's) */
+  function trunkOf(p, tp, t) { return p.trunks[t] || ((tp && tp.stairTrunks) || [])[t - p.trunks.length]; }
   /* The parts of every trunk at once - the sync path solid() has always taken. */
   function trunkParts(p, opts) {
     var sp = trunkStepper(p, opts);
@@ -2024,7 +2323,7 @@
     var chain = Promise.resolve();
     var sheets = tp.trunks.filter(function (tr) { return tr.sheet != null; });
     tp.trunks.forEach(function (tr) {
-      if (tr.sheet != null) return;
+      if (tr.sheet != null || !tr.parts.length) return;
       var acc = null;
       tr.parts.forEach(function (part, k) {
         chain = chain.then(function () {
@@ -2149,6 +2448,9 @@
                 if (!u || !u.ok) throw new Error('sheet ' + sh.sheet + ' does not meet the tips it was built on: ' + ((u && u.reason) || 'no result'));
                 var fin = flatSplits(T._finishUnion(u.soup).soup), trunks = [], sh2 = [sh.sheet];
                 mine.forEach(function (g) { trunks = trunks.concat(g.soup.trunks); sh2 = sh2.concat(g.soup.sheets); });
+                /* a trunk a stair holds by itself has no parts and no solid of
+                   its own: its spots are the stair's (as shells() counts them) */
+                (sh.carriers || []).forEach(function (t) { if (trunks.indexOf(t) < 0 && !groups.some(function (g) { return g.soup.trunks.indexOf(t) >= 0; })) trunks.push(t); });
                 groups = groups.filter(function (g) { return mine.indexOf(g) < 0; });
                 groups.push({ ids: [], soup: { soup: fin, box: bounds(fin), trunks: trunks, sheets: sh2 } });
               });
@@ -2178,7 +2480,7 @@
         out.forEach(function (x) {
           var ids = [], lands = {};
           x.trunks.slice().sort(function (a, b) { return a - b; }).forEach(function (t) {
-            var tr = p.trunks[t];
+            var tr = trunkOf(p, tp, t);
             ids = ids.concat(tr.beacons); lands[tr.landing] = true;
           });
           x.beacons = ids;
@@ -2250,7 +2552,7 @@
       var soup = joinAll(list), ids = [], lands = {};
       var trunks = g.trunk.map(function (x) { return x.trunk; });
       trunks.slice().sort(function (a, b) { return a - b; }).forEach(function (t) {
-        var tr = p.trunks[t];
+        var tr = trunkOf(p, tp, t);
         ids = ids.concat(tr.beacons); lands[tr.landing] = true;
       });
       var ls = Object.keys(lands), mineT = {};
@@ -2258,7 +2560,7 @@
       return { soup: soup, box: bounds(soup), trunks: trunks, sheets: g.sheet.map(function (x) { return x.sheet; }), beacons: ids,
                regionIds: p.beacons ? regionIdsOf(p.beacons, ids) : [], landing: ls.length === 1 ? ls[0] : 'mixed',
                /* where its trunks stand: shareFeet() draws the pads from these when parts() drew none */
-               feet: (tp.feet || []).filter(function (f) { return mineT[f.trunk]; }).map(function (f) { return { c: f.c, r: f.r }; }) };
+               feet: (tp.feet || []).filter(function (f) { return mineT[f.trunk]; }).map(function (f) { return f.grow ? { c: f.c, r: f.r, grow: f.grow } : { c: f.c, r: f.r }; }) };
     });
     return { ok: true, soup: joinAll(solids.map(function (x) { return x.soup; })), solids: solids, shells: count,
              fingersDropped: tp.fingersDropped || 0, detached: 0, pads: tp.pads, sheet: tp.sheet || null,
@@ -2367,6 +2669,8 @@
     _footprintOf: footprintOf,
     _frustumSoup: frustumSoup,
     FEET: { layerMm: FOOT_LAYER_MM, clusterMm: FOOT_CLUSTER_MM, growMm: FOOT_GROW_MM, gapMm: FOOT_GAP_MM, cellMm: FOOT_CELL_MM, touchMm: FOOT_TOUCH_MM },
+    TRUNK: { tipMm: TRUNK_TIP_MM, angleDeg: TRUNK_ANGLE_DEG, flareMm: FLARE_MM, flareAngleDeg: FLARE_ANGLE_DEG, share: TRUNK_SHARE,
+             keepMm: TRUNK_KEEP_MM, tipClearMm: TRUNK_TIP_CLEAR_MM, tipReachMm: TRUNK_TIP_REACH_MM, sides: TRUNK_SIDES },
     _memberSolid: function (m, foot, opts) { return memberSolid(PS(opts || {}), m, foot); },
     _phaseOf: phaseOf,
     foldSheets: function (tp, opts) { return foldSheets(tp, opts || {}); },

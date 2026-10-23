@@ -92,7 +92,12 @@ in 25). The top_clip_x2 coupon and top_clip_x2 detect the same at 35 as at 60.
 **Every area is exactly one of the three**, so H + K + U is the number of areas:
 *held* - every spot in it is held from the plate or rests on the part;
 *unreachable* - the last build tried it and the plate could not reach at least
-one spot (never counted held); *unsupported* - left out, or the planner gave it
+one spot (never counted held) - and an area the last build held IN PART gives
+the spots it could not reach an area of their own, numbered after the rest, so
+the part it held reads held and the lost spots are outlined, counted and framed
+where they are (the arc of `fixtures/supports/simple_overhang.3mf`: 67 spots
+held, its top among them, and "Area 3 &middot; unreachable &middot; no route to
+the plate &middot; 3 spots" at its foot; docs/SUPPORT-INTERFACE.md section 7); *unsupported* - left out, or the planner gave it
 nothing, or a Remove took a support off it. The rows list the areas that are not
 held ("Area 3 &middot; unreachable &middot; no route to the plate &middot; 4 spots"); a click on a row **frames the area**
 (the camera keeps its direction and comes in on it). A piece with no beacons at
@@ -340,8 +345,9 @@ reports forever is stopped at the ceiling.
 - Leaving an area out after a build changes the line but not the plate: its
   supports stay until REGENERATE. (It then counts as unsupported.)
 - An area is "held" only when every spot in it is; one support removed by hand
-  makes it unsupported until REGENERATE. An area partly held and partly not
-  reachable counts as unreachable only. A detected spot is named by where it is
+  makes it unsupported until REGENERATE. An area the last build held in part
+  and could not reach in part is split: its lost spots are an area of their
+  own (unreachable), the rest is held - until the next build or REMOVE ALL. A detected spot is named by where it is
   (`d<x>,<y>,<z>`), not by its place in the list, so the supports already
   standing still find their spots when the angle changes the detected set.
 - The whole-piece build is only as fast as the planner: a piece with a very

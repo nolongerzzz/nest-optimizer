@@ -33,10 +33,11 @@
  *      added": the plate exactly as before, Undo with nothing new, the card
  *      live again, the bar gone; a REGENERATE that fails leaves the old
  *      supports standing.
- *   7  THE THREE COUNTS. Piece B: 2 areas, one the plate cannot reach: "held 1 -
- *      unsupported 0 - unreachable 1", a row for it under the readout, a click
- *      on the row frames the area. Leaving an area out before GENERATE counts it
- *      unsupported, with its row.
+ *   7  THE THREE COUNTS. Piece B: 2 areas; the plate reaches only the spots
+ *      by the tunnel's mouths, so the build splits the ceiling's lost middle
+ *      off as an area of its own (#265): "held 2 - unsupported 0 - unreachable
+ *      1", a row for it under the readout, a click on the row frames the area.
+ *      Leaving an area out before GENERATE counts it unsupported, with its row.
  *   8  SELECTING A PIECE while the card is open detects there at once (a click
  *      on the piece, or the app's own selection from the Pieces list).
  *   9  THE WEDGE (the piece that used to hang): detect on open, 10 areas at once
@@ -692,32 +693,42 @@ async function main() {
   c = await T.card();
   v = await T.view();
   const NB = (await T.sups()).length;
-  check('BUILT: "held 1 · unsupported 0 · unreachable 1" - the plate cannot reach the tunnel\'s ceiling',
-    [c.state, c.line, NB > 0], ['built', BUILT(NB, 1, 0, 1), true]);
+  /* The tunnel's ceiling (96 spots) is held only in part: the planner steers
+     out of the tunnel's mouths to the 24 spots by them and cannot reach the
+     72 between. An area the build held in part gives its lost spots an area
+     of their own (app-supports-card.js effective(), supports-curved-sheet,
+     #265 - an area read "unreachable" whole for its lost spots, the arc of
+     simple_overhang.3mf for three at its foot): the mouths read held, the
+     middle is Area 3, unreachable. Before #265 this section expected the
+     whole ceiling one unreachable area. */
+  check('BUILT: "held 2 · unsupported 0 · unreachable 1" - the plate cannot reach the tunnel ceiling\'s middle; the spots by its mouths are held',
+    [c.state, c.line, NB > 0], ['built', BUILT(NB, 2, 0, 1), true]);
   check('...the stats behind the line, and the three add up to every area', [v.stats.held, v.stats.unsupported, v.stats.unreachable, v.stats.held + v.stats.unsupported + v.stats.unreachable === v.areas.length],
-    [1, 0, 1, true]);
-  check('...the unreachable area stays outlined in red; the held one is white',
-    (await T.outlines()).areas.map((a) => [a.area, a.kind, a.colour]), [[0, 'on', 0xffffff], [1, 'red', 0xff2d2d]]);
+    [2, 0, 1, true]);
+  check('...the ceiling split where the build left off: its 24 spots by the mouths held, its 72 between an area of their own',
+    [v.areas.length, v.areas[1].count, v.areas[1].kind, v.areas[2].count, v.areas[2].kind], [3, 24, 'held', 72, 'unreachable']);
+  check('...the unreachable area stays outlined in red; the held ones are white',
+    (await T.outlines()).areas.map((a) => [a.area, a.kind, a.colour]), [[0, 'on', 0xffffff], [1, 'on', 0xffffff], [2, 'red', 0xff2d2d]]);
   check('...one row under the readout, for the area that needs a look', [c.rows.shown, c.rows.list.map((r) => [r.area, r.kind, r.text])],
-    [true, [[1, 'unreachable', 'Area 2 · unreachable · no route to the plate · ' + v.areas[1].count + ' spots']]]);
+    [true, [[2, 'unreachable', 'Area 3 · unreachable · no route to the plate · ' + v.areas[2].count + ' spots']]]);
   await T.hudClean('built, one unreachable');
-  const dist0 = (await T.areaInView(1)).dist;
+  const dist0 = (await T.areaInView(2)).dist;
   await T.look([0, 0, 0], [1, 1, 1], 400);                     // somewhere else, so the row has to bring it back
-  await page.click('#sup-rows button[data-area="1"]');
+  await page.click('#sup-rows button[data-area="2"]');
   await frames(page);
-  const fr = await T.areaInView(1);
+  const fr = await T.areaInView(2);
   check('a click on the row frames the area: its middle is in the middle of the view, and the camera has come in',
     [Math.abs(fr.x) < 0.1, Math.abs(fr.y) < 0.1, fr.dist < 200], [true, true, true]);
   await T.shot('12-row-framed.png');
   const dX = await T.undoDepth();
-  await page.evaluate(() => window.NSO_SUPPORTS_CARD.toggleArea(1));
+  await page.evaluate(() => window.NSO_SUPPORTS_CARD.toggleArea(2));
   await frames(page);
   c = await T.card();
-  check('leaving the unreachable area out after the build moves it to unsupported: held 1 · unsupported 1 · unreachable 0, row "left out"',
+  check('leaving the unreachable area out after the build moves it to unsupported: held 2 · unsupported 1 · unreachable 0, row "left out"',
     [c.line, c.rows.list.map((r) => [r.area, r.kind, r.text.includes('left out')]), (await T.outlines()).areas.map((a) => [a.area, a.kind]), await T.undoDepth()],
-    [BUILT(NB, 1, 1, 0), [[1, 'unsupported', true]], [[0, 'on'], [1, 'off']], dX + 1]);
+    [BUILT(NB, 2, 1, 0), [[2, 'unsupported', true]], [[0, 'on'], [1, 'on'], [2, 'off']], dX + 1]);
   await T.clickUndo();
-  check('Undo puts the red outline and the unreachable count back', [(await T.card()).line, (await T.outlines()).areas[1].kind], [BUILT(NB, 1, 0, 1), 'red']);
+  check('Undo puts the red outline and the unreachable count back', [(await T.card()).line, (await T.outlines()).areas[2].kind], [BUILT(NB, 2, 0, 1), 'red']);
   await T.oneStep('Remove all', () => page.click('#btn-sup-none'));
 
   /* An area left out BEFORE the build is unsupported too. */
