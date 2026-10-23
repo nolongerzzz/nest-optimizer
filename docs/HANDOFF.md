@@ -93,6 +93,7 @@ merging its list by hand. The list below is generated.
 - [Seat refuses a bit the target face cuts through (2026-09-17)](handoff/seat-refuses-a-bit-the-target-face-cuts-through.md)
 - [Seat with a gap (2026-09-16)](handoff/seat-with-a-gap.md)
 - [Seating side by side - the corner rays are inset (2026-09-17)](handoff/seating-side-by-side-the-corner-rays-are-inset.md)
+- [Shells as pieces - a shell that pierces another is a solid of its own](handoff/shells-as-pieces.md)
 - [Size — scale a piece to a real dimension (landed, `app-scale.js`)](handoff/size-scale-a-piece-to-a-real-dimension.md)
 - [Skin wrap + the double skin (2026-09-16)](handoff/skin-wrap-the-double-skin.md)
 - [Slice: the piece stays exportable while its slice is shown (2026-09-27)](handoff/slice-the-piece-stays-exportable-while-its-slice-is-shown.md)
