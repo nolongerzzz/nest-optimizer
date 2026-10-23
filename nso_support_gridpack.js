@@ -1831,7 +1831,8 @@
         var m = p.members[tr.members[0]], e = m && m.path && m.path.length ? m.path[m.path.length - 1] : null;
         return { tree: t, c: e ? [e[0], e[1]] : null, plate: tr.landing === 'plate' && !!e };
       }).filter(function (a) { return a.c; }),
-      trunkLaw: { tipMm: TRUNK_TIP_MM, tan: Math.tan(TRUNK_ANGLE_DEG * Math.PI / 180), cosN: Math.cos(Math.PI / TRUNK_SIDES) }
+      trunkLaw: { tipMm: TRUNK_TIP_MM, tan: Math.tan(TRUNK_ANGLE_DEG * Math.PI / 180), cosN: Math.cos(Math.PI / TRUNK_SIDES),
+                  leanDeg: p.branchTiltDeg, flareMm: FLARE_MM, flareTan: Math.tan(FLARE_ANGLE_DEG * Math.PI / 180) }
     });
     if (!plan.ok) return plan;
     /* a tip's clearance is read on its corners, edge middles and face

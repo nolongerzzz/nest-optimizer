@@ -698,9 +698,73 @@
   var STAIR_BODY_MIN_MM = 1;     /* a strip has a body behind it where this much room is left past its channel */
   var STAIR_BODY_ON_MM = 0.15;   /* ...and its first layer lies this far inside its trunk's top (a cell's slack and a corner's mitre) */
   var STAIR_BODY_KEEP_MM = 0.35; /* the body keeps this far off the part beside it (Bambu's support_object_xy_distance) */
+  /* THE TRUNK COUNT (trunkCount, below sheet()): the foot's first layer, where the trunks' base cones are read */
+  var TRUNK_BASE_Z_MM = 0.1;
   var STAIR_SNAP_DEG = 2;       /* a fall this near one of the sheet's line angles takes it */
   var STAIR_REACH_MM = 3;      /* a strip lies only where the part's underside is this near over it */
   var STAIR_START = 0.6;       /* the stair starts where a strip first runs this share of the longest strip's length */
+
+  /* =====================================================================
+     THE TRUNK COUNT (supports-thinning; docs/SUPPORT-INTERFACE.md section 7)
+
+     The trees that hold only a stair's tips each landed a round trunk
+     (nso_support_gridpack.js TRUNKS) under the body. Bambu's tree slim stands
+     one trunk under the same overhang. Two legs are ONE trunk when either
+
+       - their GROWTH CONES overlap below the body: the trunk's law (2 mm at
+         the top of what it holds, 5.5 deg going down, the flare over the
+         plate) puts the two circumscribed circles within each other's reach
+         at the foot - the widest the pair stand; or
+       - one's tips all lie inside the other's LEAN CONE: a spot is the
+         other's to hold when a leg leaning no more than the planner's limit
+         (30 deg off straight down, BRANCH_TILT_DEG, settled) from the spot
+         reaches the other's axis at or above the plate - the spot's plan
+         distance to the axis at most (its z over the plate) x tan 30.
+
+     A trunk is only its own when neither holds of it. Of a set that hold one
+     another the leg whose axis lies nearest the farthest spot of the
+     body's bottom stays (spanMm, the least), the one that absorbs the most
+     going first; ties by the tree's number. legs: [{ tree, c, tips: [[x, y,
+     z]], spanMm }]; K: { law: { tipMm, tan, cosN, leanDeg, flareMm,
+     flareTan }, plateZ, H }. -> { kept, merges: [{ tree, into, why }],
+     pairs: [{ a, b, distMm, overlapMm, aHoldsB, bHoldsA }] }.
+     ===================================================================== */
+  function trunkCount(legs, K) {
+    var law = K.law, tanL = Math.tan(law.leanDeg * Math.PI / 180), zf = K.plateZ + law.flareMm;
+    function rOuter(z) {
+      return (law.tipMm / 2 + law.tan * Math.max(0, K.H - z) + (z < zf ? law.flareTan * (zf - z) : 0)) / law.cosN;
+    }
+    var rb = rOuter(K.plateZ + TRUNK_BASE_Z_MM);
+    function holds(a, b) {
+      return b.tips.length > 0 && b.tips.every(function (q) {
+        return Math.hypot(q[0] - a.c[0], q[1] - a.c[1]) <= (q[2] - K.plateZ) * tanL + 1e-9;
+      });
+    }
+    var pairs = [];
+    var ab = legs.map(function (a, i) {
+      return legs.map(function (b, j) {
+        if (i === j) return { yes: true };
+        var d = Math.hypot(a.c[0] - b.c[0], a.c[1] - b.c[1]), ov = 2 * rb - d, h = holds(a, b);
+        if (j > i) pairs.push({ a: a.tree, b: b.tree, distMm: d, overlapMm: ov, aHoldsB: h, bHoldsA: holds(b, a) });
+        return { yes: ov > 0 || h, why: ov > 0 ? 'cones overlap' : 'lean cone' };
+      });
+    });
+    var left = legs.map(function (a, i) { return i; }), kept = [], merges = [];
+    while (left.length) {
+      var best = null, bestN = -1;
+      left.forEach(function (i) {
+        var nAbs = left.filter(function (j) { return ab[i][j].yes; }).length;
+        if (nAbs > bestN || (nAbs === bestN && (legs[i].spanMm < legs[best].spanMm - 1e-9 ||
+            (Math.abs(legs[i].spanMm - legs[best].spanMm) <= 1e-9 && legs[i].tree < legs[best].tree)))) { best = i; bestN = nAbs; }
+      });
+      kept.push(legs[best]);
+      left.filter(function (j) { return j !== best && ab[best][j].yes; }).forEach(function (j) {
+        merges.push({ tree: legs[j].tree, into: legs[best].tree, why: ab[best][j].why });
+      });
+      left = left.filter(function (j) { return j !== best && !ab[best][j].yes; });
+    }
+    return { kept: kept, merges: merges, pairs: pairs };
+  }
 
   function sheet(piece, stations, opts) {
     opts = opts || {};
@@ -2230,7 +2294,7 @@
                lines: { angleDeg: phi, stair: true, slopeDeg: slopeDeg, droppedShare: 0, bare: 0, pieces: layers.length, tried: [] },
                stair: { slopeDeg: slopeDeg, angleDeg: phi, mLo: mLo, mTop: mTop, strips: mTop - mLo + 1, topMm: zTopStair, tips: [],
                         body: { pitchMm: body.pitchMm, layers: body.layers.length, zBottom: zBot, lineMm: zTopOf(mLo - 1) + o.gap,
-                                trunks: body.trunks, ribs: body.ribs, loops: body.loops, fails: body.fails,
+                                trunks: body.trunks, count: body.count, ribs: body.ribs, loops: body.loops, fails: body.fails,
                                 joined: joined.map(function (J) { return { zTop: J.res.zTop, zBase: J.res.zBase, tips: J.tips.length, layers: J.res.layers.length }; }) },
                         cutAbove: group.filter(function (t) { return t.stairM != null && t.stairM > mTop; }).length } };
 
@@ -2254,6 +2318,7 @@
         var legs = axes.filter(function (a) { return a.plate && trees[a.tree]; });
         if (!legs.length) return null;
         var zLine = zTopOf(mLo - 1) + o.gap, H = zTopOf(mTop), n = nx * ny;
+        var allLegs = legs.length;
         var rLaw = function (z) { return law.tipMm / 2 + law.tan * Math.max(0, H - z); };
         var Rk = Math.ceil(STAIR_BODY_KEEP_MM / CELL_MM + 1e-9);
         /* the chamfer distance (cells) from every cell to the nearest set one */
@@ -2321,6 +2386,21 @@
            leg the piece stops first (its trunk's law and STAIR_BODY_KEEP_MM
            round its axis, read on the raster every half millimetre) */
         var full = shadow(zTopOf(mLo - 2)), Rstar = 0;
+        /* THE TRUNK COUNT: legs that hold one another are one trunk (trunkCount) - the nearest to the body's
+           farthest cell stays */
+        var legTips = {};
+        reach.forEach(function (t) {
+          var cl = columns[t.col];
+          if (cl && cl.tree != null && !treeOthers[cl.tree]) (legTips[cl.tree] = legTips[cl.tree] || []).push(t.contact);
+        });
+        legs = legs.map(function (a) { return { tree: a.tree, c: a.c.slice(), tips: legTips[a.tree] || [], spanMm: 0 }; });
+        for (var qs = 0; qs < n; qs++) {
+          if (!full[qs]) continue;
+          var cs = cellXY(qs);
+          legs.forEach(function (a) { a.spanMm = Math.max(a.spanMm, Math.hypot(cs[0] - a.c[0], cs[1] - a.c[1])); });
+        }
+        var count = trunkCount(legs, { law: law, plateZ: o.plateZ, H: H });
+        legs = count.kept;
         for (var q = 0; q < n; q++) {
           if (!full[q]) continue;
           var c = cellXY(q), dm = Infinity;
@@ -2415,7 +2495,9 @@
         }
         if (!out.length) return null;
         return { layers: out, minD: dmin, pitchMm: P, zBottom: out[0].z0, ribs: nRibs, loops: nLoops, fails: bodyFails,
-                 trunks: trunks.map(function (t) { return { tree: t.tree, c: t.c, zTop: t.zTop, rMm: t.r }; }) };
+                 trunks: trunks.map(function (t) { return { tree: t.tree, c: t.c, zTop: t.zTop, rMm: t.r }; }),
+                 count: { legs: allLegs, kept: legs.map(function (a) { return { tree: a.tree, c: a.c, spanMm: a.spanMm, tips: a.tips.length }; }),
+                          merges: count.merges, pairs: count.pairs } };
 
         /* A LAYER OF THE BODY from its cells: the loop's centreline is the
            outline half a line in (the region opened by half a line, so no neck
@@ -2715,6 +2797,7 @@
     CAP: { riseMm: CAP_RISE_MM, minMm: CAP_MIN_MM, maxMm: CAP_MAX_MM, spaceMm: CAP_SPACE_MM, gapMaxMm: CAP_GAP_MAX_MM,
            tuckMm: CAP_TUCK_MM, partMm: CAP_PART_MM, bandMm: CAP_BAND_MM, foot: CAP_FOOT },
     sheet: sheet,
+    trunkCount: trunkCount,
     cutPath: cutPath,
     finish: finish,
     minDistance: function (A, B, opts) { return minDistance(mod(opts, 'thickness', 'NSO_Thickness'), A, B, opts); },

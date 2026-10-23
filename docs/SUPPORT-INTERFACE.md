@@ -512,6 +512,26 @@ one wedge under the whole overhang, its interface strips laid on it.
   body's front wall, a channel behind each strip, which moves up the slope
   with it every layer and bridges the ribs under it (57 Support lines, 141
   mm; 2 typed interface at the flat top, 10.5 mm).
+- **THE TRUNK COUNT** (`trunkCount`, supports-thinning). The trees that hold
+  only the stair's tips each landed a round trunk; Bambu's tree slim stands
+  one under the same overhang. Two legs are **one trunk** when their growth
+  cones overlap below the body (the trunk's law puts the circumscribed circles
+  of their feet within reach of one another) or when one's tips all lie inside
+  the other's **lean cone** - a spot is the other's to hold when a leg leaning
+  no more than the planner's limit (30 deg off straight down, settled) from
+  the spot reaches the other's axis at or above the plate: its plan distance
+  to the axis at most its height over the plate x tan 30 deg. A trunk is only
+  its own when neither holds of it. Of legs that hold one another the one
+  nearest the body's farthest cell stays; the rest build nothing (their tips
+  are the body's, as all the stair's are). On the arc the two trunks (15.2
+  mm apart, 12.8 mm across at the plate: no overlap) are one: each tree's tips
+  lie inside the other's lean cone (the least margin, tree 0's tips against
+  the axis at y 110, is 0.74 mm; tree 1's against the axis at y 95, 8.96 mm),
+  and the axis at y 95 stays, 19.7 mm from the body's farthest cell against
+  the other's 24. Read as one trunk per spot the rule's other way round - the
+  cone's apex at the trunk's top, not the plate - the two would stand, and
+  the 5 - 10 mm band would lay 1.74 x Bambu's (two loops where Bambu has one).
+
 - **THE BODY** (`bodyOf`). The trees that hold only the stair's tips keep
   their landing member and grow their round trunk (TRUNKS) straight up to
   one height - the highest from which a 45 deg cone over each covers the
