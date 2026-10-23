@@ -213,16 +213,17 @@ changes, byte for byte:
 - **H** is the top of what the trunk holds up: its highest tip, or the top of
   the sheet or stair a tip of it is under.
 - **Under a stair's body** (supports-stair-body; supports-thinning;
-  docs/SUPPORT-INTERFACE.md section 7): a tree that holds only a stair's tips
-  keeps its landing member (cut under the trunk's top) and its round trunk
-  rises straight up its axis, at the growth angle above, into the body's
-  underside, H the stair's top. The body stands on its top and spans from it;
-  there is no cone. Trees that hold one another's tips are one trunk (the cone
-  rule, `NSO_SupportInterface.trunkCount`: growth cones overlapping below the
-  body, or one tree's tips all inside the other's 30 deg lean cone from the
-  plate); the rest build nothing, not even a landing member. The stair grows no
-  tree of its own (`tp.stairTrunks` is empty). Under the arc: one trunk, to z
-  36.4, H 46.0.
+  docs/SUPPORT-INTERFACE.md section 7): the trunks of the trees that hold only a
+  stair's tips - and a trunk of the stair's own where none reaches (the cone
+  rule: every point of the body's underside inside the 30 deg lean cone of a
+  trunk top, tops no lower than 0.7 of the underside's height) - rise at the
+  growth angle above to their own tops, H the stair's top; the body flares from
+  them at 30 deg. The trunk is a closed shell that stands by itself: the
+  planner's landing member under it is not built (it was a second shell inside
+  the trunk), only its foot is kept. A stair's own trunk is a `tp.stairTrunks`
+  entry (no member, no spot) numbered after the plan's, with a foot and a pad
+  like any other. The stair grows no tree of its own. Under the arc: three
+  trunks, to z 26.0, 26.6 and 26.0, H 46.0.
 - **How high.** From the pad up its STEM - the landing member, then at each
   merge the parent holding most of its tips - while the stem holds at least
   half of them: where the tree splits, the trunk ends. A taproot (a strut
@@ -241,10 +242,9 @@ changes, byte for byte:
   do. `shareFeet`'s `opts.trunkPadMm` draws another margin (the suites draw
   #274's 4 mm beside the new).
 - **Measured** (`support:foot`, 15 checks): on the arc (since
-  supports-thinning), ONE trunk, to z 36.4 into the stair's body; at
-  each of Bambu's 93 trunk layers (z 0.48 - 25.02) it is wider than
-  Bambu's, by 0.29 mm or more; one pad, 219.0 mm2 against Bambu's 201.4 (617.0
-  at 4 mm of margin, for two trunks). The coupon: 14 trunks, 5.35 - 6.70 mm at
+  supports-thinning), THREE trunks, to z 26.0 - 26.6 into the stair's body; at
+  each of Bambu's 93 trunk layers (z 0.48 - 25.02) each is wider than
+  Bambu's, by 0.29 mm or more; one pad under the three at 1.85 mm of margin. The coupon: 14 trunks, 5.35 - 6.70 mm at
   the plate, its pad 578.3 (before the trunks) -> 695.7 (4 mm) -> 516.5 mm2
   (1.85), inside #274's and out to the base plus 1.85 wherever the piece does
   not cut it. Built with trunkGrowth off the coupon is #265's bytes and the arc

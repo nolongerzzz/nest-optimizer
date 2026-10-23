@@ -697,73 +697,11 @@
   var STAIR_BODY_PITCH_MM = 1.7; /* the body's ribs this far apart: Bambu's support under simple_overhang, its plan area per mm of line (z 38 - 44: 1.61 - 1.82) */
   var STAIR_BODY_MIN_MM = 1;     /* a strip has a body behind it where this much room is left past its channel */
   var STAIR_BODY_KEEP_MM = 0.35; /* the body keeps this far off the part beside it (Bambu's support_object_xy_distance) */
-  /* THE TRUNK COUNT (trunkCount, below sheet()): the foot's first layer, where the trunks' base cones are read */
-  var TRUNK_BASE_Z_MM = 0.1;
+  var STAIR_BODY_ON_MM = 0.15;   /* a cone's radius is read this far inside its trunk's top (a cell's slack and a corner's mitre) */
+  var STAIR_TRUNK_TOP_FRAC = 0.7; /* a trunk of the stair's body stands at least this share of its underside's height over the plate: Bambu's trunk on simple_overhang ends at 25.02 (support:foot), 0.69 of its 36.4, where it splits */
   var STAIR_SNAP_DEG = 2;       /* a fall this near one of the sheet's line angles takes it */
   var STAIR_REACH_MM = 3;      /* a strip lies only where the part's underside is this near over it */
   var STAIR_START = 0.6;       /* the stair starts where a strip first runs this share of the longest strip's length */
-
-  /* =====================================================================
-     THE TRUNK COUNT (supports-thinning; docs/SUPPORT-INTERFACE.md section 7)
-
-     The trees that hold only a stair's tips each landed a round trunk
-     (nso_support_gridpack.js TRUNKS) under the body. Bambu's tree slim stands
-     one trunk under the same overhang. Two legs are ONE trunk when either
-
-       - their GROWTH CONES overlap below the body: the trunk's law (2 mm at
-         the top of what it holds, 5.5 deg going down, the flare over the
-         plate) puts the two circumscribed circles within each other's reach
-         at the foot - the widest the pair stand; or
-       - one's tips all lie inside the other's LEAN CONE: a spot is the
-         other's to hold when a leg leaning no more than the planner's limit
-         (30 deg off straight down, BRANCH_TILT_DEG, settled) from the spot
-         reaches the other's axis at or above the plate - the spot's plan
-         distance to the axis at most (its z over the plate) x tan 30.
-
-     A trunk is only its own when neither holds of it. Of a set that hold one
-     another the leg whose axis lies nearest the farthest spot of the
-     body's bottom stays (spanMm, the least), the one that absorbs the most
-     going first; ties by the tree's number. legs: [{ tree, c, tips: [[x, y,
-     z]], spanMm }]; K: { law: { tipMm, tan, cosN, leanDeg, flareMm,
-     flareTan }, plateZ, H }. -> { kept, merges: [{ tree, into, why }],
-     pairs: [{ a, b, distMm, overlapMm, aHoldsB, bHoldsA }] }.
-     ===================================================================== */
-  function trunkCount(legs, K) {
-    var law = K.law, tanL = Math.tan(law.leanDeg * Math.PI / 180), zf = K.plateZ + law.flareMm;
-    function rOuter(z) {
-      return (law.tipMm / 2 + law.tan * Math.max(0, K.H - z) + (z < zf ? law.flareTan * (zf - z) : 0)) / law.cosN;
-    }
-    var rb = rOuter(K.plateZ + TRUNK_BASE_Z_MM);
-    function holds(a, b) {
-      return b.tips.length > 0 && b.tips.every(function (q) {
-        return Math.hypot(q[0] - a.c[0], q[1] - a.c[1]) <= (q[2] - K.plateZ) * tanL + 1e-9;
-      });
-    }
-    var pairs = [];
-    var ab = legs.map(function (a, i) {
-      return legs.map(function (b, j) {
-        if (i === j) return { yes: true };
-        var d = Math.hypot(a.c[0] - b.c[0], a.c[1] - b.c[1]), ov = 2 * rb - d, h = holds(a, b);
-        if (j > i) pairs.push({ a: a.tree, b: b.tree, distMm: d, overlapMm: ov, aHoldsB: h, bHoldsA: holds(b, a) });
-        return { yes: ov > 0 || h, why: ov > 0 ? 'cones overlap' : 'lean cone' };
-      });
-    });
-    var left = legs.map(function (a, i) { return i; }), kept = [], merges = [];
-    while (left.length) {
-      var best = null, bestN = -1;
-      left.forEach(function (i) {
-        var nAbs = left.filter(function (j) { return ab[i][j].yes; }).length;
-        if (nAbs > bestN || (nAbs === bestN && (legs[i].spanMm < legs[best].spanMm - 1e-9 ||
-            (Math.abs(legs[i].spanMm - legs[best].spanMm) <= 1e-9 && legs[i].tree < legs[best].tree)))) { best = i; bestN = nAbs; }
-      });
-      kept.push(legs[best]);
-      left.filter(function (j) { return j !== best && ab[best][j].yes; }).forEach(function (j) {
-        merges.push({ tree: legs[j].tree, into: legs[best].tree, why: ab[best][j].why });
-      });
-      left = left.filter(function (j) { return j !== best && !ab[best][j].yes; });
-    }
-    return { kept: kept, merges: merges, pairs: pairs };
-  }
 
   function sheet(piece, stations, opts) {
     opts = opts || {};
@@ -1828,7 +1766,7 @@
 
        THE BODY (bodyOf). Under the strips, from the top of the trunk of the
        trees that hold only the stair's tips (nso_support_gridpack.js TRUNKS;
-       trees that hold one another's tips are one trunk, trunkCount) up to the
+       a trunk stands under each cone the body's underside needs) up to the
        top: the trunk rises at its growth angle straight into the body's
        underside - the lowest layer the shadow under the transition fills -
        with no cone off its top, and every layer is the shadow of the
@@ -2319,7 +2257,6 @@
         var legs = axes.filter(function (a) { return a.plate && trees[a.tree]; });
         if (!legs.length) return null;
         var zLine = zTopOf(mLo - 1) + o.gap, H = zTopOf(mTop), n = nx * ny;
-        var allLegs = legs.length;
         var rLaw = function (z) { return law.tipMm / 2 + law.tan * Math.max(0, H - z); };
         var Rk = Math.ceil(STAIR_BODY_KEEP_MM / CELL_MM + 1e-9);
         /* the chamfer distance (cells) from every cell to the nearest set one */
@@ -2384,10 +2321,13 @@
         function cellXY(q) { var i = q % nx; return [ox + i * CELL_MM, oy + ((q - i) / nx) * CELL_MM]; }
         /* THE BODY'S UNDERSIDE (supports-thinning): the lowest layer of the body is the one the shadow under the
            transition fills (mLo - 2), or, under a flat sheet the body holds, the last layer whose top is within
-           the sheet's z_base. The trunks rise at their growth angle straight to its bottom - no cone off their
-           tops - and the body's bottom spans between their tops: its loop and ribs (STAIR_BODY_PITCH_MM apart)
-           lie on the trunks' tops and bridge between them. A leg the piece stops short of that height builds
-           nothing. */
+           the sheet's z_base. THE CONE RULE, read against the body: every point of that underside lies within the
+           lean cone of some trunk's top - the cone the body flares in from the top at the planner's lean limit
+           (30 deg off straight up, settled), so a layer lies on the one under it - and no trunk's top is lower
+           than STAIR_TRUNK_TOP_FRAC of the underside's height, where Bambu's trunk splits. The fewest trunks that do it: the plan's legs
+           first, the one covering most of what is left, then a trunk of its own on the plate (a stair trunk, built
+           beside the plan's) where none of them reaches. Each trunk rises to the highest top whose cone covers
+           the cells nearest to it. A leg the piece stops short of its top is not a candidate. */
         var kU = mLo - 2;
         joined.forEach(function (J) { kU = Math.min(kU, Math.floor((J.res.zBase - o.plateZ) / o.layer + 1e-9)); });
         if (kU < 2) return null;
@@ -2404,34 +2344,97 @@
           }
           return kMax;
         }
-        legs = legs.filter(function (a) { return clearTo(a, kU - 1) >= kU - 1; });
-        if (!legs.length) return null;
         var full = shadow(zTopOf(mLo - 2));
-        /* THE TRUNK COUNT: legs that hold one another are one trunk (trunkCount) - the nearest to the body's
-           farthest cell stays */
-        var legTips = {};
-        reach.forEach(function (t) {
-          var cl = columns[t.col];
-          if (cl && cl.tree != null && !treeOthers[cl.tree]) (legTips[cl.tree] = legTips[cl.tree] || []).push(t.contact);
-        });
-        legs = legs.map(function (a) { return { tree: a.tree, c: a.c.slice(), tips: legTips[a.tree] || [], spanMm: 0 }; });
-        for (var qs = 0; qs < n; qs++) {
-          if (!full[qs]) continue;
-          var cs = cellXY(qs);
-          legs.forEach(function (a) { a.spanMm = Math.max(a.spanMm, Math.hypot(cs[0] - a.c[0], cs[1] - a.c[1])); });
+        var Mb = kU === mLo - 2 ? full : shadow(zTopOf(kU));
+        var tanL = Math.tan(law.leanDeg * Math.PI / 180), zU = zTopOf(kU - 1);
+        var kMin = Math.ceil(STAIR_TRUNK_TOP_FRAC * (kU - 1) - 1e-6);
+        if (kMin > kU - 1) return null;
+        /* how far from a trunk whose top is layer k the cone reaches at the underside, less a line */
+        function reachAt(k) { return rLaw(zTopOf(k)) - STAIR_BODY_ON_MM + (zU - zTopOf(k)) * tanL - bead; }
+        /* three quarters of a millimetre of the reach is held back when the trunks are chosen: they are chosen on a millimetre
+           grid of the underside's cells, and each one's top is then read on every cell */
+        var rCover = reachAt(kMin) - 0.75, STEP = Math.round(1 / CELL_MM), need = [], candAll = [], allCells = [];
+        var Dout = dist(invert(Mb)), rIn = rLaw(zTopOf(kMin)) + 0.5;
+        for (var jb = 0; jb < ny; jb++) for (var ib = 0; ib < nx; ib++) {
+          var qb = jb * nx + ib;
+          if (!Mb[qb]) continue;
+          var cq = cellXY(qb);
+          allCells.push(cq);
+          if (jb % STEP === 0 && ib % STEP === 0) {
+            need.push(cq);
+            if (Dout[qb] * CELL_MM >= 0.6) candAll.push({ c: cq, deep: Dout[qb] * CELL_MM >= rIn });
+          }
         }
-        var count = trunkCount(legs, { law: law, plateZ: o.plateZ, H: H });
-        legs = count.kept;
-        var trunks = legs.map(function (a) {
-          var zU = zTopOf(kU - 1);
-          return { tree: a.tree, c: a.c.slice(), k: kU - 1, zTop: zU, r: rLaw(zU) };
+        legs = legs.map(function (a) { return { tree: a.tree, c: a.c.slice() }; }).filter(function (a) { return clearTo(a, kMin) >= kMin; });
+        var chosen = [], left = need.slice(), plan0 = legs.length, planKept = 0;
+        function within(a, c0) { return Math.hypot(c0[0] - a[0], c0[1] - a[1]) <= rCover; }
+        for (var guard = 0; guard < 24 && left.length; guard++) {
+          var bestLeg = null, bestGain = 0;
+          legs.forEach(function (a) {
+            if (a.used) return;
+            var g0 = left.filter(function (c0) { return within(a.c, c0); }).length;
+            if (g0 > bestGain || (g0 === bestGain && bestLeg && g0 > 0 && a.tree < bestLeg.tree)) { bestGain = g0; bestLeg = a; }
+          });
+          if (bestLeg) {
+            bestLeg.used = true; planKept++;
+            chosen.push({ tree: bestLeg.tree, c: bestLeg.c.slice(), extra: false });
+          } else {
+            /* a trunk of its own: the farthest uncovered cell first, then the cell near it that covers the most */
+            var far = null, farD = -1;
+            left.forEach(function (c0) {
+              var dn = Math.min.apply(null, chosen.map(function (t) { return Math.hypot(c0[0] - t.c[0], c0[1] - t.c[1]); }).concat([1e9]));
+              if (dn > farD) { farD = dn; far = c0; }
+            });
+            /* a cell whose whole top lies under the body first, then any cell the body's edge allows */
+            var ranked = candAll.filter(function (cd) { return Math.hypot(cd.c[0] - far[0], cd.c[1] - far[1]) <= rCover; }).map(function (cd) {
+              var c0 = cd.c, cov = left.filter(function (u0) { return Math.hypot(u0[0] - c0[0], u0[1] - c0[1]) <= rCover; });
+              return { c: c0, deep: cd.deep, gain: cov.length, mean: cov.reduce(function (a0, u0) { return a0 + Math.hypot(u0[0] - c0[0], u0[1] - c0[1]); }, 0) / Math.max(1, cov.length) };
+            }).sort(function (a1, b1) { return (b1.deep - a1.deep) || (b1.gain - a1.gain) || (a1.mean - b1.mean); });
+            var got = null;
+            for (var ri = 0; ri < ranked.length && ri < 150 && !got; ri++) {
+              beat();
+              if (clearTo({ c: ranked[ri].c }, kMin) >= kMin) got = ranked[ri];
+            }
+            if (!got) return null;
+            chosen.push({ tree: null, c: got.c.slice(), extra: true });
+          }
+          var lastT = chosen[chosen.length - 1];
+          left = left.filter(function (c0) { return !within(lastT.c, c0); });
+        }
+        if (left.length) return null;
+        /* each trunk's top: the highest layer whose cone covers the cells nearest to it */
+        chosen.forEach(function (t) { t.R = 0; });
+        allCells.forEach(function (c0) {
+          var bt = null, bd = Infinity;
+          chosen.forEach(function (t) { var d0 = Math.hypot(c0[0] - t.c[0], c0[1] - t.c[1]); if (d0 < bd) { bd = d0; bt = t; } });
+          bt.R = Math.max(bt.R, bd);
         });
-        var mB0 = kU;
+        var trunks = chosen.map(function (t) {
+          var k = kU - 1;
+          while (k > kMin && reachAt(k) < t.R) k--;
+          while (k > kMin && clearTo(t, k) < k) k--;
+          return { tree: t.tree, extra: t.extra, c: t.c.slice(), k: k, zTop: zTopOf(k), r: rLaw(zTopOf(k)), coverMm: t.R };
+        });
+        if (trunks.some(function (t) { return !(reachAt(t.k) >= t.coverMm) || clearTo(t, t.k) < t.k; })) return null;
+        var mB0 = Math.min.apply(null, trunks.map(function (t) { return t.k; })) + 1;
+        var count = { legs: plan0, kept: planKept, extra: trunks.filter(function (t) { return t.extra; }).length, rCoverMm: rCover + 0.75, underside: zU,
+                      trunks: trunks.map(function (t) { return { tree: t.tree, c: t.c, zTop: t.zTop, coverMm: t.coverMm, extra: t.extra }; }) };
         var P = STAIR_BODY_PITCH_MM, out = [], dmin = Infinity, nRibs = 0, nLoops = 0, bodyFails = [];
         for (var m = mB0; m <= mTop; m++) {
           beat();
           var zt = zTopOf(m), zb0 = zt - o.layer, M = m <= mLo - 2 ? (m === mLo - 2 ? full : shadow(zt)) : shadow(zt);
           if (m === mLo - 2) M = M.slice();
+          /* the trunks' lean cones: a layer flares from a trunk's top at the lean limit, so every wall lies on the one under */
+          for (var q3 = 0; q3 < n; q3++) {
+            if (!M[q3]) continue;
+            var c3 = cellXY(q3), inCone = false;
+            for (var t3 = 0; t3 < trunks.length && !inCone; t3++) {
+              var T = trunks[t3];
+              if (zb0 < T.zTop - 1e-9) continue;
+              if (Math.hypot(c3[0] - T.c[0], c3[1] - T.c[1]) <= T.r - STAIR_BODY_ON_MM + (zb0 - T.zTop) * tanL) inCone = true;
+            }
+            if (!inCone) M[q3] = 0;
+          }
           /* over the stair: a channel round the strip (the transition's, a
              layer under the lowest) - in front of it, the part, or a flat
              sheet the body holds */
@@ -2468,9 +2471,8 @@
         }
         if (!out.length) return null;
         return { layers: out, minD: dmin, pitchMm: P, zBottom: out[0].z0, ribs: nRibs, loops: nLoops, fails: bodyFails,
-                 trunks: trunks.map(function (t) { return { tree: t.tree, c: t.c, zTop: t.zTop, rMm: t.r }; }),
-                 count: { legs: allLegs, kept: legs.map(function (a) { return { tree: a.tree, c: a.c, spanMm: a.spanMm, tips: a.tips.length }; }),
-                          merges: count.merges, pairs: count.pairs } };
+                 trunks: trunks.map(function (t) { return { tree: t.tree, extra: t.extra, c: t.c, zTop: t.zTop, rMm: t.r, coverMm: t.coverMm }; }),
+                 count: count };
 
         /* A LAYER OF THE BODY from its cells: the loop's centreline is the
            outline half a line in (the region opened by half a line, so no neck
@@ -2770,7 +2772,6 @@
     CAP: { riseMm: CAP_RISE_MM, minMm: CAP_MIN_MM, maxMm: CAP_MAX_MM, spaceMm: CAP_SPACE_MM, gapMaxMm: CAP_GAP_MAX_MM,
            tuckMm: CAP_TUCK_MM, partMm: CAP_PART_MM, bandMm: CAP_BAND_MM, foot: CAP_FOOT },
     sheet: sheet,
-    trunkCount: trunkCount,
     cutPath: cutPath,
     finish: finish,
     minDistance: function (A, B, opts) { return minDistance(mod(opts, 'thickness', 'NSO_Thickness'), A, B, opts); },

@@ -41,8 +41,8 @@
       FEET.gapMm.
    6. NOTHING ABOVE THE TRUNK CHANGES, on the arc and the 2026-10-20 coupon:
       built with trunkGrowth off the support is the build pinned (the
-      coupon's #265's; the arc's supports-thinning's: one trunk's landing
-      member and the body on it) byte for byte, and
+      coupon's #265's; the arc's supports-thinning's: the landing
+      members and the body on them) byte for byte, and
       with it on the support is that build's every part, byte for byte, then
       the trunks, then the pads; the coupon's pads are #274's drawn with the
       smaller margin and nothing else (the new outline inside the old, each
@@ -77,10 +77,10 @@ const GP = ctx.NSO_SupportGridpack, SI = ctx.NSO_SupportInterface, TH = ctx.NSO_
 const TRUNK = GP.TRUNK, FEET = GP.FEET;
 /* the builds with trunkGrowth off, sha-256 (first 16 hex) of each support object's Float32 soup and its
    triangles: the coupon's #265's (claude-wip b7076af + supports-curved-sheet a08bc6f; support:curved 7's);
-   the arc's supports-thinning's (commit 3) - one trunk's landing member, the body from z 36.4 on it and no cone
-   (50572 tris at supports-stair-body, 379c759080d3c132, with its two trunks and 40 layers of cone); the layers
-   from the body's underside up are #275's byte for byte, support:curved 4 */
-const BEFORE = { coupon: ['6ac271882b107552', 27348], arc: ['072e7c699adc168b', 14624] };
+   the arc's supports-thinning's - the plan's two landing members, a trunk of its own, the body's 30 deg cones off
+   three trunks' tops (50572 tris at supports-stair-body, 379c759080d3c132, two trunks and 45 deg cones); the
+   layers from the body's underside up are #275's byte for byte, support:curved 4 */
+const BEFORE = { coupon: ['6ac271882b107552', 27348], arc: ['4f598080541234fb', 67728] };
 
 let pass = 0, fail = 0;
 const FAILS = [];
@@ -301,13 +301,24 @@ function splitObject(b, oi) {
   console.log('\n=== 6. nothing above the trunk changes ===');
   for (const [name, on, off] of [['arc', b, b0], ['coupon', c1, c0]]) {
     const o0 = off.objects[1];
-    check(`${name}: built with trunkGrowth off, the support is ${name === 'arc' ? 'supports-thinning\'s (commit 3)' : '#265\'s'} byte for byte`,
+    check(`${name}: built with trunkGrowth off, the support is ${name === 'arc' ? 'supports-thinning\'s' : '#265\'s'} byte for byte`,
       off.objects.length === 2 && sha(o0.soup) === BEFORE[name][0] && o0.soup.length / 9 === BEFORE[name][1], `${sha(o0.soup)} (${o0.soup.length / 9} tris)`);
     const s1 = splitObject(on, 0), s0 = splitObject(off, 0);
-    check(`${name}: with trunks, every part before is there byte for byte, then the trunks, then the pads - and nothing else`,
-      on.sf.objects.length === off.sf.objects.length && sha(s1.solids) === sha(s0.solids) && s1.solids.length === s0.solids.length && s1.trunks.length > 0 &&
-      s1.trunkSoups.length === on.sf.trunks.filter(t => t.soup).length,
-      `${s1.solids.length / 9} tris as before (${sha(s1.solids)}), ${s1.trunkSoups.length} trunk(s) ${s1.trunks.length / 9} tris, pads ${s0.pads.length / 9} -> ${s1.pads.length / 9} tris`);
+    if (name === 'coupon') {
+      check(`${name}: with trunks, every part before is there byte for byte, then the trunks, then the pads - and nothing else`,
+        on.sf.objects.length === off.sf.objects.length && sha(s1.solids) === sha(s0.solids) && s1.solids.length === s0.solids.length && s1.trunks.length > 0 &&
+        s1.trunkSoups.length === on.sf.trunks.filter(t => t.soup).length,
+        `${s1.solids.length / 9} tris as before (${sha(s1.solids)}), ${s1.trunkSoups.length} trunk(s) ${s1.trunks.length / 9} tris, pads ${s0.pads.length / 9} -> ${s1.pads.length / 9} tris`);
+    } else {
+      /* the arc: a stair's trunk is a closed shell that stands by itself, so with trunks on, the landing member
+         under it (a square column inside it, a second shell) is not built: what is left of the parts before is
+         theirs byte for byte - the build's tail - and what is gone is nothing but those columns */
+      const cut = s0.solids.length - s1.solids.length, tail = s0.solids.slice(cut);
+      check(`${name}: with trunks, the parts before are there byte for byte but for the landing members inside the trunks (no second shell in a trunk), then the trunks, then the pads`,
+        on.sf.objects.length === off.sf.objects.length && cut > 0 && sha(tail) === sha(s1.solids) && s1.trunks.length > 0 &&
+        s1.trunkSoups.length === on.sf.trunks.filter(t => t.soup).length,
+        `${s1.solids.length / 9} tris as before (${sha(s1.solids)}), ${cut / 9} tris of landing member left out, ${s1.trunkSoups.length} trunk(s) ${s1.trunks.length / 9} tris, pads ${s0.pads.length / 9} -> ${s1.pads.length / 9} tris`);
+    }
   }
   {
     /* #274's pads (its 4 mm margin) drawn beside the new: the same trunks and the same raster, the margin alone differs */

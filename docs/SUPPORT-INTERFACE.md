@@ -434,8 +434,9 @@ toolpath in segments of 2 mm or more. `support:audit` holds it (section 5).
   fail and they lie on one fall; a dome (no one fall) still has its tips cut
   at the gap.
 - The support under a stair's body: supports-thinning brought it from 2.6 x
-  Bambu's toolpath (#275) to 0.97 x on the arc (section 7): one trunk, a loop
-  round air; no 45 deg cones; a pad of 1.85 mm of margin.
+  Bambu's toolpath (#275) to 1.84 x on the arc with the cone rule's three
+  trunks and 30 deg cones (0.97 x with one trunk and no cone, which leaves the
+  body cantilevered 19.7 mm past its trunk's top): section 7.
 - The stair no longer grows a tree of its own (supports-stair-body), so the
   planner's `mergeThroughCrowd` - written for that tree - is planned by
   nothing on the card's build.
@@ -449,7 +450,7 @@ support:curved` (`tools/nso_support_curved_check.js`), which also
 writes the arc with its supports as the card exports them to
 `tools/supports-thin-out/simple_overhang_supports.3mf` (git-ignored) - open
 it in Bambu Studio as a project and slice with its own supports off.
-43 checks.
+44 checks.
 
 **The gap it closes.** The sheet's contract is for ceilings: one z, four
 layers. A curved underside has no single z: every tip on the arc of
@@ -480,8 +481,8 @@ one wedge under the whole overhang, its interface strips laid on it.
 
 | what | z | here |
 | --- | --- | --- |
-| trunks | 0 - 36.4 | ONE (supports-thinning: the cone rule merges the plan's two; #274's law, H 46.0), rising at its growth angle straight into the body's underside, 3.85 mm across there |
-| the body | 36.4 - 45.6 | 46 layers: the shadow of the underside, a loop round each layer and ribs up the slope 1.7 mm apart; the first lies over the trunk's top and spans to the shadow's farthest cell, 19.7 mm away. #275's 40 layers of 45 deg cone (z 28.4 - 36.2) are gone |
+| trunks | 0 - 26.0 / 26.0 / 26.6 | THREE (supports-thinning, the cone rule): the plan's two, 15.2 mm apart, and a trunk of its own at (89.8, 107.3); #274's law, H 46.0; each 5.8 mm across at its top. Their landing members (a square column inside each, a second closed shell) are no longer built |
+| the body | 26.0 - 45.6 | 98 layers: 30 deg cones off the three tops (a layer lies on the one under it), then from z 36.4 the shadow of the underside - 46 layers, #275's byte for byte - a loop round each layer and ribs up the slope 1.7 mm apart |
 | transition | 36.6 - 36.8 | the lowest strip again, one layer under it |
 | strips | 36.8 - 46.0 | 46, one a layer: 2 lines (a loop alone) on 23, 3 on 2, 4 on 21, the top one spread to the outline (3 lines at 0.88) |
 | tips | | the plan's 40 on the curve held by the body; none built, no caps, no tree of the stair's own |
@@ -509,50 +510,44 @@ one wedge under the whole overhang, its interface strips laid on it.
   body's front wall, a channel behind each strip, which moves up the slope
   with it every layer and bridges the ribs under it (57 Support lines, 141
   mm; 2 typed interface at the flat top, 10.5 mm).
-- **THE TRUNK COUNT** (`trunkCount`, supports-thinning). The trees that hold
-  only the stair's tips each landed a round trunk; Bambu's tree slim stands
-  one under the same overhang. Two legs are **one trunk** when their growth
-  cones overlap below the body (the trunk's law puts the circumscribed circles
-  of their feet within reach of one another) or when one's tips all lie inside
-  the other's **lean cone** - a spot is the other's to hold when a leg leaning
-  no more than the planner's limit (30 deg off straight down, settled) from
-  the spot reaches the other's axis at or above the plate: its plan distance
-  to the axis at most its height over the plate x tan 30 deg. A trunk is only
-  its own when neither holds of it. Of legs that hold one another the one
-  nearest the body's farthest cell stays; the rest build nothing (their tips
-  are the body's, as all the stair's are). On the arc the two trunks (15.2
-  mm apart, 12.8 mm across at the plate: no overlap) are one: each tree's tips
-  lie inside the other's lean cone (the least margin, tree 0's tips against
-  the axis at y 110, is 0.74 mm; tree 1's against the axis at y 95, 8.96 mm),
-  and the axis at y 95 stays, 19.7 mm from the body's farthest cell against
-  the other's 24. Read as one trunk per spot the rule's other way round - the
-  cone's apex at the trunk's top, not the plate - the two would stand, and
-  the 5 - 10 mm band would lay 1.74 x Bambu's (two loops where Bambu has one).
-
-- **THE BODY** (`bodyOf`). The tree that holds only the stair's tips keeps its
-  landing member and grows its round trunk (TRUNKS) **straight up its axis, at
-  its growth angle, into the body's underside** - the bottom of the lowest
-  layer the shadow under the transition fills (z 36.4 on the arc, 3.85 mm
-  across there; under a flat sheet the body holds, the last layer within the
-  sheet's z_base). There is no cone off its top (#275 had 45 deg cones, half
-  a line a layer, so every wall lay on the one under it: 40 layers, z 28.4 -
-  36.2, 5.9 m of the 34.8). The body's bottom **spans** from the trunk's top
-  to the shadow's farthest cell as the sheet spans between its tips: a loop
-  round the layer's outline and ribs up the slope STAIR_BODY_PITCH_MM (1.7)
-  apart (Bambu's support, measured), each run from loop to loop, laid on the
-  trunk's top and bridging the rest. Each layer is the shadow of the
+- **THE CONE RULE, read against the body** (`bodyOf`, supports-thinning). The
+  trunks are not counted from the tips they hold (the first reading, which
+  merged the two plan trunks into one and left the body cantilevered 19.7 mm
+  past its top, 62 deg off upright). Every point of the body's underside - the
+  lowest layer the shadow under the transition fills, z 36.4 on the arc - lies
+  within the **lean cone** of some trunk's top: the cone the body flares in
+  from the top at the planner's lean limit, 30 deg off straight up (settled),
+  so a layer lies on the one under it. No trunk's top is lower than 0.7 of the
+  underside's height over the plate (Bambu's trunk on simple_overhang ends at
+  25.02 of 36.4 and splits, 0.69). The fewest trunks that do it: the plan's
+  legs first, the one covering the most of what is left, then **a trunk of its
+  own** on the plate (`tp.stairTrunks`: a round trunk, a foot and a pad, no
+  member, no spot) where none reaches. Each trunk rises to the highest top
+  whose cone covers the cells nearest to it; a trunk the piece stops short of
+  its top is not a candidate. A cone at 25.5 reaches 8.6 mm at the underside
+  (a line held back): the plan's two trunks leave the arc's middle west side
+  out, so there are **three** - the plan's at (90, 95) to z 26.0 and (92.5,
+  110) to 26.6, and one at (89.8, 107.3) to 26.0, 3.5 mm from the second so
+  their feet and cones overlap and print as one outline. Bambu's own slice on
+  this part is one trunk to z 25.02, which splits into arms and about five tips
+  over z 28 - 36.
+- **THE BODY** (`bodyOf`). Its layers from the underside up are #275's byte for
+  byte (`support:curved` 4); under it the layers are the shadow within the
+  trunks' 30 deg cones (#275's were 45 deg off two trunks' tops, 40 layers of
+  them, z 28.4 - 36.2). The tree that holds only the stair's tips keeps its
+  landing member's foot (where its trunk stands) and nothing of the member: a
+  stair's trunk is a closed shell that stands by itself, and the planner's
+  landing member under it - a 2.5 mm square column, x 88.7 - 91.3, y 93.7 -
+  96.3, z 0.1 - 13.7 on the arc, entirely inside the trunk - was a second
+  shell, load-bearing for nothing, and is gone. Each layer is the shadow of the
   underside over the stair's line (the transition's top and the gap), clipped
   to the part's outline plus one line, kept 0.35 mm off the part beside it
-  (Bambu's support_object_xy_distance), and a channel behind each strip. A leg
-  the piece stops short of the underside builds nothing. From the underside up
-  the layers are #275's byte for byte (`support:curved` 4). **The risk the print
-  reads**: on the arc the body's first layer lies on a 3.85 mm trunk top and
-  spans 19.7 mm; in NSO's slice 183.6 mm of its lines are over air (typeSupports'
-  overhang: the layer under, closed, grown half a line) in the first layer, 11.6
-  mm in the second, none in the third. Every layer measured with the exact
-  triangle distance: 0.180 mm or more for the whole support. No tree of its
-  own, no caps: every tip of the plan on the curve is held by the body (mode
-  'drop'), and the planner's members over the trunks are left out.
+  (Bambu's support_object_xy_distance), within the cones, and a channel behind
+  each strip; a loop round its outline and ribs up the slope 1.7 mm apart.
+  Every layer measured with the exact triangle distance: 0.180 mm or more for
+  the whole support. No tree of its own, no caps: every tip of the plan on the
+  curve is held by the body (mode 'drop'), and the planner's members over the
+  trunks are left out.
 - **Bambu's pitch** (`support:curved` 5, 6): its support under the overhang
   has no straight lines to space - it is branch loops - so its pitch is read
   as any pattern's: the plan area it stands in (a column clear of the part
@@ -574,24 +569,30 @@ one wedge under the whole overhang, its interface strips laid on it.
   by layer over Bambu's layers (it lays 0.27 mm layers low down, so each of
   its layers is set against ours over the same height). Three gates, each at
   most 1.5 x Bambu's: the body's zone (every layer over the stair's start, z
-  37.0: **6.38 m against 6.22, 1.03 x**), the whole part (**13.19 m against
-  13.54, 0.97 x**), and each height band under the stair. By height, m (ours /
-  Bambu = ratio), at #275, then after each supports-thinning commit (1 the
-  override, 2 one trunk, cones kept, 3 no cone, 4 the pad):
+  37.0: **6.38 m against 6.22, 1.03 x**, held), the whole part (**24.91 m
+  against 13.54, 1.84 x: not held**), and each height band under the stair
+  (0 - 1, 5 - 10, 10 - 20 and 20 - 30 not held). By height, m (ours / Bambu =
+  ratio), at #275, then after each supports-thinning commit (1 the override, 2
+  one trunk, 45 deg cones kept, 3 and 4 no cone and the pad), then the cone
+  rule as it stands:
 
-  | z | Bambu | #275 | + 1 | + 2 | + 3 | + 4 |
+  | z | Bambu | #275 | + 1 override | + 2 one trunk, 45 deg | + 3, 4 no cone, pad 1.85 (pushed, one trunk) | cone rule: 3 trunks, 30 deg |
   | --- | --- | --- | --- | --- | --- | --- |
-  | 0 - 1 | 0.80 | 3.45 (4.3 x) | 2.62 (3.3 x) | 1.36 (1.7 x) | 1.36 (1.7 x) | **1.08 (1.34 x)** |
-  | 1 - 5 | 1.08 | 3.92 (3.6 x) | 1.32 (1.2 x) | 0.66 (0.6 x) | 0.66 | **0.66 (0.61 x)** |
-  | 5 - 10 | 0.81 | 3.89 (4.8 x) | 1.42 (1.7 x) | 0.71 (0.9 x) | 0.71 | **0.71 (0.87 x)** |
-  | 10 - 20 | 0.91 | 6.13 (6.7 x) | 2.38 (2.6 x) | 1.56 (1.7 x) | 1.19 (1.3 x) | **1.19 (1.30 x)** |
-  | 20 - 30 | 1.17 | 5.14 (4.4 x) | 2.33 (2.0 x) | 5.51 (4.7 x) | 1.26 (1.1 x) | **1.26 (1.08 x)** |
-  | 30 - 37 | 2.55 | 5.89 (2.3 x) | 5.89 | 6.30 (2.5 x) | 1.91 (0.75 x) | **1.91 (0.75 x)** |
-  | 37 - 40 | 2.07 | 2.76 | 2.76 | 2.76 | 2.76 | 2.76 (1.33 x) |
-  | 40 - 42 | 1.45 | 1.56 | 1.56 | 1.56 | 1.56 | 1.56 (1.07 x) |
-  | 42 - 44 | 1.53 | 1.29 | 1.29 | 1.29 | 1.29 | 1.29 (0.85 x) |
-  | 44 - 47 | 1.16 | 0.78 | 0.78 | 0.78 | 0.78 | 0.78 (0.67 x) |
-  | all | 13.54 | 34.79 (2.57 x) | 22.35 (1.65 x) | 22.48 (1.66 x) | 13.48 (0.99 x) | **13.19 (0.97 x)** |
+  | 0 - 1 | 0.80 | 3.45 (4.3 x) | 2.62 (3.3 x) | 1.36 (1.7 x) | 1.08 (1.34 x) | 2.36 (2.94 x) |
+  | 1 - 5 | 1.08 | 3.92 (3.6 x) | 1.32 (1.2 x) | 0.66 (0.6 x) | 0.66 (0.61 x) | 1.48 (1.37 x) |
+  | 5 - 10 | 0.81 | 3.89 (4.8 x) | 1.42 (1.7 x) | 0.71 (0.9 x) | 0.71 (0.87 x) | 1.62 (1.99 x) |
+  | 10 - 20 | 0.91 | 6.13 (6.7 x) | 2.38 (2.6 x) | 1.56 (1.7 x) | 1.19 (1.30 x) | 2.78 (3.05 x) |
+  | 20 - 30 | 1.17 | 5.14 (4.4 x) | 2.33 (2.0 x) | 5.51 (4.7 x) | 1.26 (1.08 x) | 3.87 (3.31 x) |
+  | 30 - 37 | 2.55 | 5.89 (2.3 x) | 5.89 | 6.30 (2.5 x) | 1.91 (0.75 x) | 6.42 (2.51 x) |
+  | 37+ | 6.21 | 6.39 | 6.39 | 6.39 | 6.39 (1.03 x) | 6.39 (1.03 x) |
+  | all | 13.54 | 34.79 (2.57 x) | 22.35 (1.65 x) | 22.48 (1.66 x) | 13.19 (0.97 x) | 24.91 (1.84 x) |
+
+  **The cone rule's three trunks fail the 1.5 x gates** (whole part and bands
+  0 - 1, 5 - 10, 10 - 20, 20 - 30): each trunk is a loop as wide as Bambu's
+  single one (the diameter gate), so three stand where Bambu's one does, and
+  the 30 deg cones under the body are heavier than the one trunk's top was.
+  The one-trunk build (the fifth column) passes them, with the body's first
+  layer cantilevered 19.7 mm past its trunk's top.
 
   NSO's slicer prints a trunk narrower than about 5 mm across (an interior
   under 15 mm2, `minSparseAreaMm2`, its reading of Bambu's small-area infill) as

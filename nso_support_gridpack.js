@@ -2071,7 +2071,7 @@
     var bodyLegs = {};
     if (sh) sh.plan.levels.forEach(function (L) {
       var B = L.stair && L.stair.body;
-      if (B) B.trunks.forEach(function (bt) { bodyLegs[bt.tree] = { zTop: bt.zTop, H: L.zTop }; });
+      if (B) B.trunks.forEach(function (bt) { if (!bt.extra) bodyLegs[bt.tree] = { zTop: bt.zTop, H: L.zTop }; });
     });
     function step(t) {
       var tr = p.trunks[t], parts = [], fingers = [], leg = bodyLegs[t];
@@ -2083,7 +2083,10 @@
           : sh && m.beacon != null && sh.byBeacon[m.beacon] ? sh.member(m) : memberSolid(P, m, foot);
         if (!ms.ok) return { ok: false, reason: ms.reason };
         m.points = ms.points;
-        parts = parts.concat(ms.soups.map(function (x) { return { soup: x }; }));
+        /* a stair's trunk (grown, round) is a closed shell that stands by itself: the landing member under it, a
+           square column inside it, was a second shell and load-bearing for nothing - it keeps only where the
+           foot stands (supports-thinning) */
+        if (!(legOnly && grow)) parts = parts.concat(ms.soups.map(function (x) { return { soup: x }; }));
         if (foot && i === 0 && tr.landing === 'plate') {
           /* The foot: where the trunk stands, its own end square - the pads
              are drawn over every foot at once, in finish() (FEET) */
@@ -2148,8 +2151,22 @@
       return null;
     }
     function finish() {
-      /* a stair holds no tree of its own: its body stands on the plan's trunks */
-      var stairTrunks = [];
+      /* a stair holds no tree of its own: its body stands on the plan's trunks - and on a trunk of its own,
+         numbered after the plan's (trunkOf), where the body's underside lies out of reach of them all */
+      var stairTrunks = [], extraOf = [];
+      if (sh) sh.plan.levels.forEach(function (L) {
+        var B = L.stair && L.stair.body;
+        if (B) B.trunks.forEach(function (bt) {
+          if (!bt.extra) return;
+          var t = p.trunks.length + stairTrunks.length;
+          stairTrunks.push({ beacons: [], landing: 'plate', members: [], parents: [], extra: true, c: bt.c.slice() });
+          out.push({ trunk: t, parts: [], fingerParts: [], fingers: 0 });
+          var fp1 = footprintOf(bt.c, p.sideMm), ft1 = { key: t, trunk: t, c: fp1.c, r: fp1.r };
+          if (grow) ft1.grow = { H: L.zTop, top: bt.zTop, side: p.sideMm, tips: null };
+          feet.push(ft1);
+          extraOf.push({ level: L.id, t: t });
+        });
+      });
       /* THE TRUNKS: every built tip is one the trunks end under (here, and
          in shareFeet() over every area) */
       var trunks = [];
@@ -2203,6 +2220,7 @@
             var b = sh.plan.tips[ti].beacon;
             p.trunks.forEach(function (tr, k) { if (tr.beacons.indexOf(b) >= 0 && carriers.indexOf(k) < 0) carriers.push(k); });
           });
+          extraOf.forEach(function (x) { if (x.level === L.id) carriers.push(x.t); });
           out.push({ trunk: -1, sheet: L.id, carriers: carriers, parts: L.layers.map(function (x) { return { soup: x.soup, sheet: true }; }), fingers: 0 });
         });
       }
