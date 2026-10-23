@@ -29,8 +29,9 @@
  *      item's anchor vertices, so the fix finds the loops again on the piece as
  *      it stands. REPAIR is the existing control: it ticks #chk-seal-repair,
  *      clicks #btn-seal and puts the tick back - the same click, the same code,
- *      the same Undo entry and status line. THICKEN OUT types the mm into
- *      #inp-thicken-mm and clicks #btn-thicken-out. "Fix all" runs every
+ *      the same Undo entry and status line. THICKEN OUT hands the mm to
+ *      thickenSelectedModel (app-finish.js, the function the live Thicken
+ *      control's Set calls) for the whole piece. "Fix all" runs every
  *      item's own fix in the card's order (never the advisory gap). Each fix
  *      is one Undo.
  *
@@ -76,9 +77,9 @@
   var FIXED_MS = 1600;
   var LABEL_SCALE = 0.032;   // sprite, size-attenuation off: ~3.5% of the view height
 
-  var ACTION_LABEL = { 'btn-cap-open': 'Cap open faces', 'btn-seal': 'Seal', 'btn-solidify': 'Solidify', 'btn-thicken-out': 'Thicken out',
+  var ACTION_LABEL = { 'btn-cap-open': 'Cap open faces', 'btn-seal': 'Seal', 'btn-solidify': 'Solidify', 'btn-thicken-out': 'Thicken out', 'btn-thicken-set': 'Thicken',
                        patch: 'Patch', cap: 'Cap', bridge: 'Bridge', mergeShells: 'Merge shells' };
-  var ACTION_KINDS = { 'btn-cap-open': ['open'], 'btn-seal': ['open'], 'btn-solidify': ['open'], 'btn-thicken-out': ['thin'],
+  var ACTION_KINDS = { 'btn-cap-open': ['open'], 'btn-seal': ['open'], 'btn-solidify': ['open'], 'btn-thicken-out': ['thin'], 'btn-thicken-set': ['thin'],
                        patch: ['open'], cap: ['open'], bridge: ['open', 'gap'], mergeShells: ['pierce'] };
 
   var F = function () { return window.NSO_Findings; };
@@ -436,14 +437,12 @@
     if (chk) chk.checked = true;
     try { btn.click(); } finally { if (chk) chk.checked = was; }
   }
-  /* THICKEN OUT: the mm the finding needs goes into the Finish box and the
-     Finish button is clicked, then the box is put back as it was. */
+  /* THICKEN OUT: the mm the finding needs, baked by the same function the
+     live control's Set calls (thickenSelectedModel, app-finish.js), whole piece.
+     The control itself is a slider and a ghost now and arms on a click, so
+     this does not go through its buttons; runItem brackets it like Cap. */
   function runThicken(mm) {
-    var inp = $('inp-thicken-mm'), btn = $('btn-thicken-out');
-    if (!btn) return;
-    var was = inp ? inp.value : null;
-    if (inp) inp.value = String(mm);
-    try { btn.click(); } finally { if (inp && was != null) inp.value = was; }
+    if (typeof thickenSelectedModel === 'function') thickenSelectedModel('out', mm);
   }
 
   /* MERGE SHELLS: the piece's overlapping shells unioned into one solid, on the piece itself - the same merge
@@ -558,7 +557,9 @@
       if (!btn) return null;
       runWatched('btn-seal', item, runSealRepair);
     } else if (item.fix === 'thickenOut') {
-      runWatched('btn-thicken-out', item, function () { runThicken(item.mm); });
+      begin('btn-thicken-out');
+      if (pending) pending.item = item;
+      try { runThicken(item.mm); } finally { finish('btn-thicken-out'); }
     }
     return null;
   }
@@ -815,7 +816,7 @@
   function actionButton(ev) {
     var t = ev.target;
     if (!t || !t.closest) return null;
-    return t.closest('#btn-cap-open, #btn-seal, #btn-solidify, #btn-thicken-out');
+    return t.closest('#btn-cap-open, #btn-seal, #btn-solidify, #btn-thicken-set');
   }
   function worldProblems(items, host) {
     host.updateMatrixWorld(true);

@@ -155,15 +155,17 @@ withApp(async (page, logs) => {
   await page.evaluate(() => { const d = document.querySelector('.vp-finish-menu'); if (d) d.open = true;
     document.querySelectorAll('.vp-finish-menu .vp-sec').forEach(x => { x.open = true; }); });
 
-  console.log('\n=== 7. REGRESSION: the Thicken buttons still behave exactly as before ===');
+  console.log('\n=== 7. REGRESSION: Thicken (arm, Set) still behaves exactly as before ===');
   await select(page, sphereId);
   // Offset's whole claim is that wallKept is additive to Thicken. The sphere is the
   // sharpest case for that: it has no axis at all, so if the axis restriction
   // had leaked into Thicken's default path this is where it would show.
   {
     const b = await measure(page);
-    await page.fill('#inp-thicken-mm', '1.5');
+    // The Thicken buttons arm a live ghost now (app-thicken-live.js); Set bakes it,
+    // through the same thickenSelectedModel. The slider's default is 1.5.
     await page.click('#btn-thicken-out');
+    await page.click('#btn-thicken-set');
     await page.waitForFunction(() => /^Thicken out 1\.5 /.test(document.getElementById('status').textContent),
       null, { timeout: 60000 });
     const st = await statusOf(page);
@@ -188,8 +190,8 @@ withApp(async (page, logs) => {
     const boxId = await loadSTL(page, fx('box_open.stl'));
     await selectModel(page, boxId);
     const b = await measure(page);
-    await page.fill('#inp-thicken-mm', '1.5');
     await page.click('#btn-thicken-in');
+    await page.click('#btn-thicken-set');
     await page.waitForFunction(() => /^Thicken in 1\.5 /.test(document.getElementById('status').textContent),
       null, { timeout: 60000 });
     const st = await statusOf(page);

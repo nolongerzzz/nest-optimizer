@@ -2212,6 +2212,17 @@ select:focus, input:focus {
   -webkit-appearance: none;
   margin: 0;
 }
+.vp-menu-body .thick-spin .thick-read {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #e8eef6;
+  font-size: 11px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
 .thick-spin-arrows {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -3708,6 +3719,35 @@ button.ms-legend-btn:disabled { opacity: 0.4; cursor: default; }
 .foam-level-read { font-size: 11px; white-space: nowrap; }
 .foam-readout { margin: 0; color: #fdba74; }
 .foam-level-row label { font-size: 11px; }
+/* Hollow (app-hollow.js): the button and its wall box, then Hollow to safe min
+   on a row of its own. The box used to be the middle child of a Thicken row,
+   whose middle column is 24px: the native spin buttons filled the whole box and
+   a click on it stepped the number instead of focusing it. */
+.vp-row-hollow {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 72px);
+  align-items: stretch;
+  gap: 6px;
+}
+.vp-row-hollow .btn { padding: 2px 3px; min-width: 0; }
+/* Thicken (app-thicken-live.js): the panel under the Thicken out | mm | Thicken
+   in row, Foam's shape - slider, readout in words, Whole piece / Set / Cancel. */
+.thicken-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 0 2px;
+  border-top: 1px solid rgba(74, 222, 128, 0.35);
+}
+.thicken-panel[hidden] { display: none; }
+.thicken-panel .hint { margin: 0; }
+.thicken-level-row { grid-template-columns: 24px minmax(0, 1fr) 28px; gap: 4px; align-items: center; }
+.thicken-level-row input[type="range"] { width: 100%; min-width: 0; }
+.thicken-level-row label,
+.thicken-level-read { font-size: 11px; white-space: nowrap; }
+.thicken-readout { margin: 0; color: #86efac; }
+.thicken-readout.is-refused { color: #fca5a5; }
+#btn-thicken-out.is-on,
+#btn-thicken-in.is-on { border-color: #4ade80; box-shadow: inset 0 0 0 1px #4ade80; }
 /* ===== Findings card (app-findings.js) ====================================
    Docked at the viewport's right edge, under the top-right buttons; the
    script sets top/right from the Finish summary and steps left of Finish's

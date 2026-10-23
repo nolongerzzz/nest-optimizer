@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=73eb079a" />
+  <link rel="stylesheet" href="styles.css?v=a6ffca78" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -881,15 +881,31 @@
               </div>
             </div>
             <div class="vp-row vp-row-thicken">
-              <button id="btn-thicken-out" class="btn btn-secondary" type="button">Thicken out</button>
+              <button id="btn-thicken-out" class="btn btn-secondary" type="button" aria-pressed="false"
+                      title="Grow the OUTSIDE of the piece by the mm on the slider. The result shows live on the piece as a ghost - the wall growing out - and Set bakes exactly that. Click a face first and only that wall thickens; no face picked is the whole piece. Cancel drops it and leaves the piece alone.">Thicken out</button>
               <div class="thick-spin">
-                <input type="number" id="inp-thicken-mm" value="1.5" min="0.4" max="8" step="0.1" aria-label="Thicken mm">
+                <output id="thicken-read" class="thick-read" for="inp-thicken-mm" aria-label="Thicken mm">1.5</output>
                 <div class="thick-spin-arrows">
                   <button type="button" class="thick-arrow" data-thick-step="-1" aria-label="Less mm" title="Less">&#9662;</button>
                   <button type="button" class="thick-arrow" data-thick-step="1" aria-label="More mm" title="More">&#9652;</button>
                 </div>
               </div>
-              <button id="btn-thicken-in" class="btn btn-secondary" type="button">Thicken in</button>
+              <button id="btn-thicken-in" class="btn btn-secondary" type="button" aria-pressed="false"
+                      title="Grow the INSIDE walls (pocket, slot, cavity, bore) into their void by the mm on the slider, the outside untouched. Live ghost, then Set - the same control as Thicken out. Click an inside wall first to thicken just that one.">Thicken in</button>
+            </div>
+            <div id="thicken-panel" class="thicken-panel" hidden>
+              <p id="thicken-hint" class="hint">Click a face to thicken just that wall; with none picked it is the whole piece.</p>
+              <div class="vp-row thicken-level-row">
+                <label for="inp-thicken-mm">mm</label>
+                <input type="range" id="inp-thicken-mm" min="0.1" max="8" step="0.1" value="1.5" aria-label="Thicken mm">
+                <span id="thicken-level-read" class="thicken-level-read">1.5</span>
+              </div>
+              <p id="thicken-readout" class="cut-readout thicken-readout">&mdash;</p>
+              <div class="vp-row vp-row-triple">
+                <button id="btn-thicken-whole" class="btn btn-secondary" type="button" disabled title="Drop the picked wall and thicken the whole piece again.">Whole piece</button>
+                <button id="btn-thicken-set" class="btn btn-secondary" type="button" disabled title="Bake the ghost into the piece, exactly as shown. One Undo puts it back.">Set</button>
+                <button id="btn-thicken-cancel" class="btn btn-secondary" type="button" title="Drop the ghost and leave the piece exactly as it was.">Cancel</button>
+              </div>
             </div>
             <div class="vp-row vp-row-extend">
               <button id="btn-extend" class="btn btn-secondary" type="button"
@@ -1026,10 +1042,12 @@
                 <button id="btn-punch-cancel" class="btn btn-secondary" type="button" title="Put Punch away; the piece is unchanged.">Cancel</button>
               </div>
             </div>
-            <div class="vp-row vp-row-thicken">
+            <div class="vp-row vp-row-hollow">
               <button id="btn-hollow" class="btn btn-secondary" type="button"
                       title="Carve the interior out of a solid, following the outer surface inward and leaving a shell of the wall thickness in the box. Perpendicular distance, not a radial shrink, so a sloped wall comes out the thickness asked for. Refuses a wall under the nozzle-safety floor from nso_thickness.js, and refuses again if the wall it actually leaves measures under it. Outer surface untouched.">Hollow</button>
-              <input type="number" id="inp-hollow-mm" value="2" min="0.42" max="20" step="0.1" aria-label="Hollow wall thickness, mm">
+              <input type="number" id="inp-hollow-mm" value="2" min="0.4" max="20" step="0.1" aria-label="Hollow wall thickness, mm">
+            </div>
+            <div class="vp-row vp-row-full">
               <button id="btn-hollow-safe" class="btn btn-secondary" type="button"
                       title="Hollow back out to the SAFEST minimum wall rather than to the number in the box. For reversing a Thicken in: the wall goes back down, but it stops at the nozzle-safety floor even when the wall was thinner than that before. Restoring an unprintable wall because it used to be unprintable is not a restore.">Hollow to safe min</button>
             </div>
@@ -1848,7 +1866,7 @@
   <script src="app-stock.js?v=91def76f"></script>
   <script src="app-assemble.js?v=60984bfb"></script>
   <script src="app-sel-outline.js?v=42298564"></script>
-  <script src="app-join.js?v=7ab9ee67"></script>
+  <script src="app-join.js?v=def49d7e"></script>
   <script src="app-center-lock.js?v=e233ea0f"></script>
   <script src="app-oversize-washer.js?v=a445c3ff"></script>
   <script src="app-join-triple.js?v=95a9c48a"></script>
@@ -1859,6 +1877,7 @@
   <script src="app-punch.js?v=f7f8a6e2"></script>
   <script src="app-hollow.js?v=3395c555"></script>
   <script src="app-foam.js?v=33d5178e"></script>
+  <script src="app-thicken-live.js?v=9656a1a9"></script>
   <script src="app-seat-surface.js?v=55908323"></script>
   <script src="app-skin.js?v=cb03e88b"></script>
   <script src="app-skin-patch.js?v=42ac8ff6"></script>
@@ -1882,7 +1901,7 @@
   <script src="app-grab-drop.js?v=2bb09218"></script>
   <script src="app-defects.js?v=9f49a45d"></script>
   <!-- After app-defects.js, whose hooks and scan it uses. -->
-  <script src="app-findings.js?v=a03cb950"></script>
+  <script src="app-findings.js?v=a9a7a028"></script>
   <script src="app-patch.js?v=c837fc2d"></script>
   <script src="app-measure.js?v=d6f110a3"></script>
   <!-- The library write features. access first: it holds the gate, the
