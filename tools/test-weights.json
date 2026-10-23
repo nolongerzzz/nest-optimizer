@@ -123,6 +123,7 @@
     "foam:drive": {"weight":77350,"note":""},
     "foam:test": {"weight":23200,"note":"4200 + foam-gun's box gates, tools/nso_foam_box_test.js, 11.1s local x 1.7, rounded up; foam-gun, #273"},
     "gcode3mf:test": {"weight":3200,"note":"1.83s on the cloud box x 1.7, rounded up: it re-packages the 1.6 MB reference .gcode.3mf several times and reads it back through G-scope's import; gcode3mf-packager, #270"},
+    "print:planner": {"weight":42000,"note":"24 s on the cloud box x 1.7, rounded up: it slices the coupon and the Simple Overhang Test arc with the Supports card's trees, plans five G-code files and reads them against the owner's three Studio slices; print-planner-1"},
     "gcode:gscope": {"weight":46650,"note":""},
     "gcode:gscope-cornercam": {"weight":26800,"note":""},
     "gcode:gscope-normalcam": {"weight":86150,"note":""},

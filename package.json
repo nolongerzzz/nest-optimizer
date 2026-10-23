@@ -442,6 +442,7 @@
     "export:roundtrip",
     "export:bambu",
     "gcode3mf:test",
+    "print:planner",
     "fixtures:gate",
     "export:multi",
     "overlay:test",
