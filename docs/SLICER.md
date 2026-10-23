@@ -409,6 +409,16 @@ right over the sheet that holds it.
   `support for top_clip_x2: 6 tips, sheet at z 11.00–11.80` (the bottom of
   the sheet's lowest layer to its top). It never lists its own sheet as an
   overhang, because the sheet is held by design.
+- **A support object is one loop round air** (supports-thinning). Every NSO
+  support carries `wall_loops = 1` and `sparse_infill_density = 0` as well as
+  `detect_thin_wall = 1`, so a support object is sliced with one wall loop and
+  no sparse infill (`CONSTANTS.supportObject`, an object's own `wallLoops` /
+  `sparseDensity` override it, as `detectThinWall` does): a trunk is a loop
+  round air, as Bambu's tree slim prints one, and a pad is solid bottom
+  layers. Top / bottom shell layers stay the profile's (3 / 3 here, so the
+  first three layers over the plate are solid whatever stands on the pad; Bambu's
+  own tree prints its trunk's second and third layers as loops). A part is
+  unchanged.
 - **With no support in the slice, nothing changes.** The G-code is byte for
   byte what it was, and so is the report: no credit fields, the same words.
   This was checked against the pre-change slicer on the sphere, the 20 mm

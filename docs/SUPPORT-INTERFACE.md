@@ -358,8 +358,10 @@ geometry only (File > Import / Add, or "Import geometry only" on a plate that
 holds objects) - **open the export as a project**; the support object then
 shows the override badge in the object list. Since export-bambu-project the
 export IS Studio's project envelope (docs/BAMBU-PROJECT-EXPORT.md); the
-support set stays these two (top / bottom shells 0 were tried and failed on
-the print, docs/BAMBU-PROJECT-EXPORT.md). `npm run support:print-export`
+support set is these two and, since supports-thinning, `sparse_infill_density
+0%` and `wall_loops 1` (a trunk prints as a loop round air). Top / bottom
+shells 0 were tried and failed on the print, docs/BAMBU-PROJECT-EXPORT.md,
+and stay the profile's. `npm run support:print-export`
 writes the coupon as the card exports it, `top_clip_x2_supports.3mf` (a
 21.84 x 14.28 loop, the serpentine a pitch inside it joined at its start,
 25 / 25 / 16 / 25 lines, 40 caps of 2.50 mm; the leg 2.52 x 13.44). In the owner's

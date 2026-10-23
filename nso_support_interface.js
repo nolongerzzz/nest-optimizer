@@ -655,12 +655,16 @@
   /* what the sheet needs of the slicer, written on every support object
      (Metadata/model_settings.config): see LINE WIDTH */
   /* every support object's per-object overrides, one set for all of them
-     (docs/BAMBU-PROJECT-EXPORT.md): the sheet's thin-wall pass (above) and
-     nothing else. top / bottom_shell_layers 0 were tried and failed on the
-     owner's print: the 0.2 mm foot pads printed as a 15 % lattice, so 81 %
+     (docs/BAMBU-PROJECT-EXPORT.md): the sheet's thin-wall pass (above), and
+     supports-thinning's two: wall_loops 1 and sparse_infill_density 0, so a
+     trunk prints as Bambu's tree slim does - one loop round air - and the
+     pad as solid bottom layers (the profile's shell layers, bottom included,
+     are untouched: top / bottom_shell_layers 0 were tried and failed on the
+     owner's print, the 0.2 mm foot pads printed as a 15 % lattice, so 81 %
      of layer 2's support walls had no line under them and the trunks went to
-     spaghetti. Per-family tuning waits for a print. */
-  var SHEET_SLICER = { wall_generator: 'classic', detect_thin_wall: '1' };
+     spaghetti). The density is written as Studio writes a percent, "0%".
+     NSO's slicer reads the same two (nso_slicer.js CONSTANTS.supportObject). */
+  var SHEET_SLICER = { wall_generator: 'classic', detect_thin_wall: '1', sparse_infill_density: '0%', wall_loops: '1' };
   var CELL_MM = 0.1;           /* the footprint raster */
   var SAMPLE_MM = 0.05;        /* along a line */
   var LEVEL_TOL_MM = 0.01;

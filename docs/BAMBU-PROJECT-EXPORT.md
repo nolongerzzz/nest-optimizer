@@ -135,13 +135,21 @@ Every support object carries one set: `NSO_SupportInterface.SHEET.slicerSettings
 | --- | --- | --- |
 | `wall_generator` | `classic` | the sheet's thin-wall pass (docs/SUPPORT-INTERFACE.md) |
 | `detect_thin_wall` | `1` | the sheet's thin-wall pass |
+| `sparse_infill_density` | `0%` | supports-thinning: a trunk prints as Bambu's tree slim does, a loop round air, and is never filled. Written as Studio writes a percent |
+| `wall_loops` | `1` | supports-thinning: that loop is the only wall of a trunk (Bambu's tree: one or two loops round air) |
 
-Nothing else. Per-family tuning waits for a print.
+Nothing else. **Top and bottom shell layers stay the profile's** (3 / 3 on the
+A1 mini template): the pad is the bottom layers, solid. `export:bambu` lists the
+four keys by name and value and reads them back from the written
+`model_settings.config` (the support object's own metadata, with its extruder),
+and fails on any shell-layer key. Per-family tuning waits for a print.
 
 `top_shell_layers 0` and `bottom_shell_layers 0` were in the set for the first
 print, and it failed from layer 1 (see *The owner's first open*). The set went
-back to these two, the ones the earlier successful print had. A shell
-override comes back only with a print behind it.
+back to the two thin-wall keys, the ones the earlier successful print had; the
+two above are supports-thinning's, and the print is the gate for them
+(`wall_loops` / `sparse_infill_density` come out as a pair if the loop trunk
+fails at the foot or the body, and the rest of that ticket stays).
 
 The Supports card puts the set on each support model (`m.slicerSettings`), and
 both app exports carry it to the object's metadata.
