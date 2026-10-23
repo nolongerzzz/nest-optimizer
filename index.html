@@ -859,11 +859,19 @@
           <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-add" data-sec="add">
             <summary class="vp-bar-btn" title="Fill / Densify, Foam, Thicken out and in, Extend, Bridge, Close, Patch">Add</summary>
             <div class="vp-menu-body vp-finish">
-            <div class="vp-row vp-row-pair">
+            <div class="vp-row vp-row-triple">
               <button id="btn-fill" class="btn btn-secondary" type="button"
                       title="Fill a hollow piece's interior cavity solid - the inverse of Hollow. Drops the shells that bound enclosed cavities and touches nothing else, so the outer surface comes back exactly as it was. A captive separate solid is not a cavity and is never removed.">Fill / Densify</button>
               <button id="btn-foam" class="btn btn-secondary" type="button" aria-pressed="false"
                       title="Spray foam into a sealed hollow and watch it fill from the bottom up. The piece turns to a ghost, the hollow shows dark and the foam orange. Hold the mouse on the piece to spray, let go to pause; the Level slider sets it directly. Set turns the foam into solid mesh, bonded into the piece; Cancel leaves everything as it was. Only the hollow's own walls change. See docs/FOAM.md.">Foam</button>
+              <button id="btn-foam-gun" class="btn btn-secondary" type="button" aria-pressed="false"
+                      title="Foam gun: a box appears on the selected piece - drag its handles to place and size it. Aim at the piece inside the box and hold the mouse: the box's buried space fills from the bottom while you hold, and letting go sets it, as one Undo. Spray again to add more. Escape or Cancel takes the box away. See docs/FOAM.md.">GUN</button>
+            </div>
+            <div id="foam-gun-panel" class="foam-panel" hidden>
+              <p id="foam-gun-readout" class="cut-readout foam-readout">—</p>
+              <div class="vp-row">
+                <button id="btn-foam-gun-cancel" class="btn btn-secondary" type="button" title="Take the box away. Sprays already set stay set; Undo takes them back one at a time.">Cancel</button>
+              </div>
             </div>
             <div id="foam-panel" class="foam-panel" hidden>
               <p class="hint">Hold the mouse on the piece to spray. Let go to pause.</p>

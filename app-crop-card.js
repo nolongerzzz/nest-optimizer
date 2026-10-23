@@ -42,6 +42,13 @@
    takes it - and drawn in world space, world = (Px, Pz, -Py). A yaw about P's
    z is a rotation about world Y by the same angle.
 
+   LENT. The Foam GUN (app-foam.js, docs/FOAM.md section 11) borrows the Box: lend() puts
+   a fresh Box on the selected piece with the same handles, whether or not this card is
+   open, and release() gives back whatever shape the card had. While lent the card plans
+   nothing, the body does not slide (a press inside the box is the gun's), and Escape and
+   the selection are the borrower's. The borrower is told when the box moves (onChange)
+   and when the card takes the shape back (taken).
+
    PAINT SCOPE: none. Nothing is written to the original. */
 (function () {
   'use strict';
@@ -63,7 +70,9 @@
     outline: { id: null, mode: 'silhouette', tri: -1, d1: 0, d2: 0, z1: 0, z2: 0, fp: null, src: null, key: '' },
     plan: null, planText: '', seq: 0, timer: null, busy: false,
     expectSel: null,           // the copy just made: its selection is not a retarget
-    group: null, body: null, handles: [], drag: null, preview: null
+    group: null, body: null, handles: [], drag: null, preview: null,
+    lent: null,                // the borrower: { onChange(box), taken() }, while the Box is lent
+    kept: null                 // the card's own shape, set aside while lent
   };
 
   function $(id) { return document.getElementById(id); }
@@ -202,6 +211,7 @@
 
   function schedulePlan() {
     S.plan = null;
+    if (S.lent) return;                              // a lent Box is planned by nobody: the borrower asks the engine
     syncUI();
     if (S.timer) clearTimeout(S.timer);
     var t = target(), big = t && t.m.rawTris && typeof NSO_BoolConfig !== 'undefined' &&
@@ -461,11 +471,11 @@
 
   function rebuild() {
     removeGroup();
-    if (!live() || !S.shape || typeof THREE === 'undefined' || !state.scene) return;
+    if (!(live() || S.lent) || !S.shape || typeof THREE === 'undefined' || !state.scene) return;
     var t = target();
     if (!t) return;
     var g = new THREE.Group();
-    g.name = 'cropCardShape';
+    g.name = S.lent ? 'foamGunBox' : 'cropCardShape';
     buildBody(g);
     S.handles = handlesOf();
     S.handles.forEach(function (h) { g.add(buildHandle(h, S.drag && S.drag.id === h.id)); });
@@ -671,7 +681,7 @@
   }
 
   function onDown(ev) {
-    if (ev.button !== 0 || !live() || !S.shape || !state.renderer || !state.camera) return;
+    if (ev.button !== 0 || !(live() || S.lent) || !S.shape || !state.renderer || !state.camera) return;
     if (ev.target !== state.renderer.domElement) return;
     var t = target();
     if (!t) return;
@@ -684,7 +694,7 @@
       return;
     }
     var ray = setRay(ev);
-    if (S.body) {
+    if (S.body && !S.lent) {                         // lent: a press inside the box is not a slide
       S.group.updateMatrixWorld(true);
       var bh = state.raycaster.intersectObject(S.body, false)[0];
       if (bh) {
@@ -703,6 +713,7 @@
     rebuild();
     syncUI();
     schedulePlan();
+    if (S.lent && S.lent.onChange) S.lent.onChange(boxCopy());
   }
 
   /* ---- doing it ---------------------------------------------------------- */
@@ -738,6 +749,7 @@
   }
 
   function pick(kind) {
+    if (S.lent) lentTaken();                         // the card wants its own shape: the gun's box goes
     var t = target();
     if (!t) { say('Select a piece first, then pick a shape', true); syncUI(); return; }
     S.shape = kind; S.forId = t.m.id; setPreview(null); S.expectSel = null;
@@ -752,6 +764,7 @@
   /* The card follows the selection: a different piece picked puts the shape on
      that piece afresh; the copy CROP just made does not count. */
   function sync() {
+    if (S.lent) return;
     if (!live()) {
       if (S.shape) putAway(true);
       S.forId = null; S.expectSel = null;
@@ -771,10 +784,67 @@
     syncUI();
   }
 
+  /* ---- lending the Box --------------------------------------------------- */
+
+  function boxCopy() { return S.box ? { c: S.box.c.slice(), h: S.box.h.slice(), yaw: S.box.yaw } : null; }
+
+  /* The borrower is told the box is no longer its own (the card was handed another
+     shape, or the helper registry is closing sessions): it puts itself away, which
+     calls release(). */
+  function lentTaken() {
+    var l = S.lent;
+    if (l && l.taken) l.taken(); else release();
+  }
+
+  /* A fresh Box on the selected piece, centred and half its size, with the card's
+     handles. -> { ok, box } or { ok: false, reason }. */
+  function lend(who) {
+    if (S.lent) return { ok: false, reason: 'the Box is already lent' };
+    var t = target();
+    if (!t) return { ok: false, reason: 'Select a piece first' };
+    S.kept = S.shape ? {
+      shape: S.shape, forId: S.forId, plan: S.plan, expectSel: S.expectSel,
+      box: S.box && { c: S.box.c.slice(), h: S.box.h.slice(), yaw: S.box.yaw }
+    } : null;
+    S.lent = who || {};
+    S.shape = 'box'; S.forId = t.m.id; S.plan = null; S.drag = null; S.seq++;
+    if (S.timer) { clearTimeout(S.timer); S.timer = null; }
+    freshShape('box', t);
+    rebuild();
+    return { ok: true, box: boxCopy() };
+  }
+
+  /* Give the Box back: the card's own shape is put back as it was, or nothing. */
+  function release() {
+    if (!S.lent) return false;
+    S.lent = null; S.drag = null;
+    if (state.controls) state.controls.enabled = true;
+    removeGroup();
+    var k = S.kept;
+    S.kept = null; S.plan = null;
+    if (k) {
+      S.shape = k.shape; S.forId = k.forId; S.expectSel = k.expectSel;
+      if (k.box) S.box = k.box;
+      rebuild(); schedulePlan();
+    } else {
+      S.shape = null;
+    }
+    syncUI();
+    return true;
+  }
+
+  /* Does the pointer's ray pass through the lent box? */
+  function bodyHit(ev) {
+    if (!S.lent || !S.body || !S.group || !state.camera) return false;
+    setRay(ev);
+    S.group.updateMatrixWorld(true);
+    return state.raycaster.intersectObject(S.body, false).length > 0;
+  }
+
   /* ---- wiring ------------------------------------------------------------ */
 
   function onKey(ev) {
-    if (ev.key !== 'Escape' || !live() || !S.shape) return;
+    if (S.lent || ev.key !== 'Escape' || !live() || !S.shape) return;
     var el = ev.target;
     if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)) return;
     putAway(false);
@@ -806,8 +876,11 @@
   }
 
   if (typeof nsoHelpers !== 'undefined') nsoHelpers.owner('crop', {
-    live: function () { return live() && !!S.shape; },
-    close: function () { if (typeof closeCutter === 'function') closeCutter(false); },
+    live: function () { return (live() && !!S.shape) || !!S.lent; },
+    close: function () {
+      if (S.lent) lentTaken();
+      else if (typeof closeCutter === 'function') closeCutter(false);
+    },
     clear: removeGroup,
     refresh: function () { if (S.shape) rebuild(); }
   });
@@ -826,8 +899,12 @@
       if (S.shape !== 'box' || !S.box) return false;
       S.box.c = c.slice(); S.box.h = h.slice();
       rebuild(); schedulePlan();
+      if (S.lent && S.lent.onChange) S.lent.onChange(boxCopy());
       return true;
-    }
+    },
+    /* The Foam gun's loan of the Box (above). */
+    lend: lend, release: release, lent: function () { return !!S.lent; }, box: boxCopy, bodyHit: bodyHit,
+    refresh: function () { if (S.shape) rebuild(); }
   };
 
   if (typeof document !== 'undefined') {
