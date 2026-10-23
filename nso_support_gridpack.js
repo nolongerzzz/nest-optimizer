@@ -546,7 +546,7 @@
     opts = opts || {};
     var out = { ok: false, reason: '', stage: 'beacons', members: [], stubs: [], merges: [], pickups: [],
                 steered: [], nudged: [], tight: [], unreachable: [], resting: [], inside: [], held: 0 };
-    if (opts._feed) { out.offZone = []; out.zoneLanded = []; }
+    if (opts._feed) { out.offZone = []; out.zoneLanded = []; out.unmerged = []; }
     var A = SA(opts), T = ST(opts), say = progressOf(opts);
     if (!A || !T || typeof A.detectOverhangs !== 'function') {
       out.reason = 'nso_support_aim.js and nso_support_tree.js must be loaded'; return out;
@@ -773,6 +773,42 @@
       m.dead = true;
       m.beacons.forEach(function (id) { out.unreachable.push(id); });
     }
+    /* THE PLATE: a free member drops straight down - into a landing zone
+       when there are any (zoneLand); a merge or a pickup that then lands in
+       no zone is undone and its branches land alone (unmerge), so the zone
+       rule drops only a tip that no zone can take by itself. */
+    function landAt0(m) {
+      var a = anchor(m);
+      if (!Z || zoneOf(a) >= 0) { m.path.push([a[0], a[1], plateZ]); m.free = false; m.end = 'plate'; return; }
+      if (zoneLand(m)) return;
+      if (m.parents.length) { unmerge(m); return; }
+      m.free = false; m.end = 'none';
+      m.beacons.forEach(function (id) { out.offZone.push(id); });
+      drop(m);
+    }
+    function unmerge(m) {
+      m.dead = true; m.free = false; m.end = 'none';
+      out.unmerged.push({ member: m.id, kind: m.kind, parents: m.parents.slice() });
+      out.merges = out.merges.filter(function (x) { return x.member !== m.id; });
+      var stub = null;
+      if (m.kind === 'pickup') {
+        out.stubs.forEach(function (x) { if (x.member === m.id) stub = x; });
+        out.stubs = out.stubs.filter(function (x) { return x.member !== m.id; });
+        out.pickups = out.pickups.filter(function (x) { return x.member !== m.id; });
+      }
+      m.parents.forEach(function (id) {
+        var q = M[id];
+        q.path.pop(); q.free = true; q.end = null; q.child = -1; delete q.childSide;
+      });
+      m.parents.forEach(function (id) { landAt0(M[id]); });
+      /* the beacon the pickup's stub held starts a strut of its own */
+      if (stub) {
+        var b = out.beacons[stub.beacon], nm = newMember([b.p.slice()], 1, [b.id], 'beacon', s0);
+        nm.beacon = b.id;
+        if (!settle(nm)) drop(nm);
+        else if (nm.free) landAt0(nm);
+      }
+    }
     /* INTO A ZONE: a member whose drop would land in no landing zone leans
        from its anchor, within the lean limit, to the nearest point of a zone
        it can reach - its full lean then straight down, or one straight leg
@@ -949,12 +985,7 @@
       if (k === 0) {
         M.forEach(function (m) {
           if (!m.free || m.dead) return;
-          var a = anchor(m);
-          if (Z && zoneOf(a) < 0) {
-            if (!zoneLand(m)) { m.free = false; m.end = 'none'; m.beacons.forEach(function (id) { out.offZone.push(id); }); drop(m); }
-            return;
-          }
-          m.path.push([a[0], a[1], plateZ]); m.free = false; m.end = 'plate';
+          landAt0(m);
         });
       }
       say('planning', out.inside.length + next, nBeacons);
@@ -2376,7 +2407,11 @@
         f2.trunks.forEach(function (x) {
           var T = base + x.trunk;
           out.push({ trunk: T, parts: x.parts, fingerParts: [], fingers: 0 });
-          stairTrunks.push({ beacons: [], landing: p2.trunks[x.trunk].landing, stair: L.id });
+          var tr2 = p2.trunks[x.trunk];
+          /* path and pts: what members() names it by, and which of the stair's spots it carries */
+          stairTrunks.push({ beacons: [], landing: tr2.landing, stair: L.id,
+                             path: p2.members[tr2.root].path.map(function (q) { return q.slice(); }),
+                             pts: tr2.beacons.map(function (b) { return p2.beacons[b].p.slice(); }) });
           (stairOf[L.id] = stairOf[L.id] || []).push(T);
         });
         f2.feet.forEach(function (f) { feet.push({ key: base + f.trunk, trunk: base + f.trunk, c: f.c, r: f.r, grow: f.grow }); });
@@ -2437,7 +2472,7 @@
             p.trunks.forEach(function (tr, k) { if (tr.beacons.indexOf(b) >= 0 && carriers.indexOf(k) < 0) carriers.push(k); });
           });
           (stairOf[L.id] || []).forEach(function (T) { carriers.push(T); });
-          out.push({ trunk: -1, sheet: L.id, carriers: carriers, tips: L.tips.map(function (ti) { return sh.plan.tips[ti].beacon; }),
+          out.push({ trunk: -1, sheet: L.id, carriers: carriers, tips: L.tips.concat(L.held || []).map(function (ti) { return sh.plan.tips[ti].beacon; }),
                      parts: L.layers.map(function (x) { return { soup: x.soup, sheet: true }; }), fingers: 0 });
         });
       }
@@ -2893,6 +2928,8 @@
                  of the trunks on it; a sheet the tips under it. A held tip is
                  in exactly one trunk's carries; an unheld one is in
                  `unsupported` (unreachable, inside the piece, refused).
+                 A stair's own trunks are trunk members; each tip the stair
+                 holds by itself is carried by one of them (membersOf).
      id          a tip: its tip id. Anything else: its kind and a hash of what
                  it carries and where it runs (its polyline to 0.01 mm; a
                  pad's trunks; a sheet's top) - the same in every build of the
@@ -2912,14 +2949,19 @@
     return { from: [cx, cy, hi[2]], to: [cx, cy, lo[2]] };
   }
   function padMember(trunkIds, carries, soup) {
-    var ts = sortedIds(trunkIds), cs = sortedIds(carries), e = boxEnds([soup]);
+    var ts = sortedIds(trunkIds.filter(function (x) { return x != null; })), cs = sortedIds(carries), e = boxEnds([soup]);
     return { id: 'pad-' + hash32(ts.join(';')), kind: 'pad', from: e.from, to: e.to, carries: cs };
   }
   /* The plan's own members (tips, branches, trunks), and `ref`: id -> the
      polyline (top first) and side an erased member's keep-out is swept on. */
-  function planMembers(p) {
+  function planMembers(p, drop, away) {
     var res = { members: [], ref: {}, trunkIds: [], trunkCarries: [], unsupported: [] };
     if (!p || !p.beacons) return res;
+    drop = drop || {}; away = away || {};
+    /* a member that holds only tips a stair holds is not built (trunkStepper's
+       leftOut); a tip a stair's own trunks carry is not its plan trunk's */
+    var built = function (m) { return !(m.beacons.length && m.beacons.every(function (b) { return drop[b] != null; })); };
+    var mine = function (ids) { return ids.filter(function (b) { return !away[b]; }); };
     var tid = function (id) { return tidOf(p.beacons[id]); }, st = {};
     (p.stations || []).forEach(function (s) { st[s.beacon] = s; });
     function put(kind, m, pts, carries, side, tipTop) {
@@ -2930,16 +2972,20 @@
     }
     (p.trunks || []).forEach(function (tr) {
       var inTree = {};
+      var rootId = null, rootCarries = null;
       tr.members.forEach(function (mid) {
         inTree[mid] = true;
         var m = p.members[mid], pts = m.path;
-        var r = put(mid === tr.root ? 'trunk' : 'branch', m, pts, m.beacons, m.side, m.beacon != null);
-        if (mid === tr.root) { res.trunkIds.push(r.id); res.trunkCarries.push(r.carries); }
+        if (!built(m)) return;
+        var r = put(mid === tr.root ? 'trunk' : 'branch', m, pts, mine(m.beacons), m.side, m.beacon != null);
+        if (mid === tr.root) { rootId = r.id; rootCarries = r.carries; }
       });
-      (p.stubs || []).forEach(function (s) { if (inTree[s.member]) put('branch', null, [s.to, s.via, s.from], [s.beacon], s.side, true); });
+      res.trunkIds.push(rootId); res.trunkCarries.push(rootCarries || []);
+      (p.stubs || []).forEach(function (s) { if (inTree[s.member] && drop[s.beacon] == null) put('branch', null, [s.to, s.via, s.from], [s.beacon], s.side, true); });
       tr.beacons.slice().sort(function (a, b) { return a - b; }).forEach(function (b) {
         var s = st[b], id = tid(b);
-        var top = s ? s.contact : p.beacons[b].p, below = s ? s.from : top;
+        /* a tip a stair holds has no column: its member is its spot */
+        var top = s ? s.contact : p.beacons[b].p, below = s && drop[b] == null ? s.from : top;
         res.members.push({ id: id, kind: 'tip', from: top.slice(), to: below.slice(), carries: [id] });
       });
     });
@@ -2950,9 +2996,35 @@
   /* The build's members: the plan's, then every pad parts() drew and every
      sheet, from its parts (trunkParts' answer). */
   function membersOf(p, tp) {
-    var res = planMembers(p);
+    /* THE STAIR (tp.sheet's tips in mode 'drop'): each tip a stair holds by
+       itself is carried by ONE of that stair's own trunks - the one whose
+       spots on the strips come nearest it in plan (the lower number on a tie);
+       a stair whose tree was not built leaves its tips with their plan trunks */
+    var drop = {}, away = {}, byStair = {}, sts = (tp && tp.stairTrunks) || [], nT = p && p.trunks ? p.trunks.length : 0;
+    ((tp && tp.sheet && tp.sheet.tips) || []).forEach(function (t) { if (t.mode === 'drop') drop[t.beacon] = t.level; });
+    sts.forEach(function (x, k) { (byStair[x.stair] = byStair[x.stair] || []).push(k); });
+    var stairCarries = sts.map(function () { return []; });
+    Object.keys(drop).map(Number).sort(function (a, b) { return a - b; }).forEach(function (b) {
+      var ks = byStair[drop[b]];
+      if (!ks || !ks.length || !p.beacons[b]) return;
+      var q = p.beacons[b].p, best = -1, bd = Infinity;
+      ks.forEach(function (k) {
+        (sts[k].pts || []).forEach(function (w) { var d = Math.hypot(w[0] - q[0], w[1] - q[1]); if (d < bd - 1e-12) { bd = d; best = k; } });
+      });
+      if (best < 0) best = ks[0];
+      away[b] = true;
+      stairCarries[best].push(b);
+    });
+    var res = planMembers(p, drop, away);
     if (!tp || !tp.trunks) return res;
     var tid = function (id) { return tidOf(p.beacons[id]); };
+    /* a stair's own trunks: numbered after the plan's, as tp numbers them */
+    sts.forEach(function (x, k) {
+      var pts = x.path || [], cs = sortedIds(stairCarries[k].map(tid));
+      var id = memberId('trunk', cs, pts.length ? pts : [[0, 0, 0]]);
+      if (pts.length) res.members.push({ id: id, kind: 'trunk', from: pts[0].slice(), to: pts[pts.length - 1].slice(), carries: cs });
+      res.trunkIds[nT + k] = pts.length ? id : null; res.trunkCarries[nT + k] = cs;
+    });
     tp.trunks.forEach(function (e) {
       e.parts.forEach(function (q) {
         if (!q.pad) return;

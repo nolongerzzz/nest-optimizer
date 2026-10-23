@@ -16,7 +16,10 @@
 //      beacon; every tip that stayed on is where the auto build has it
 //   4. landing zones (the shelf): every trunk's centre inside a zone (its pad
 //      and flare may spill past the line); a zone out
-//      of reach reported, nothing forced into it
+//      of reach reported, nothing forced into it; a merge that lands in no
+//      zone undone, so every tip a zone takes alone is held
+//   4b. the stair (the arc): its own trunks have member ids; every tip it
+//      holds is carried by one of them
 //   5. excluded trunk (the coupon): the rebuild has no member with its id; its
 //      tips are carried by other trunks or reported unsupported; an excluded
 //      tip is not supported and not reported unsupported
@@ -195,6 +198,37 @@ function oneTrunkEach(sh) {
       p.held + p.unreachable.length + p.inside.length === shelfTips.length,
       `zones ${p.zones.map((z, i) => i + ': ' + z.trunks.length + ' trunk(s)').join(', ')}; empty ${JSON.stringify(p.zonesEmpty)}; ` +
       `${p.offZone.length} in reach of no zone; ${p.reason}`);
+    /* no tip is dropped by the zone rule that a zone takes alone: a merge (or
+       a pickup) that lands in no zone is undone and its branches land alone */
+    const alone = [];
+    for (const t of shelfTips) {
+      const a1 = GP.plan(SHELF, Object.assign({}, CARD, { feed: { mode: 'custom', tips: [t], landingZones: [ZA, ZB] } }));
+      alone.push(a1.ok && a1.held === 1);
+    }
+    const heldIds = new Set(byKind(zoned.sh, 'trunk').flatMap(x => x.carries));
+    const lost = shelfTips.filter((t, i) => alone[i] && !heldIds.has(GP.tipId([t.x, t.y, t.z], true)));
+    check('shelf: a merge that lands in no zone is undone and its branches land alone - every tip a zone takes alone is held',
+      p.unmerged.length > 0 && !lost.length && alone.some(x => x) && alone.some(x => !x),
+      `${alone.filter(x => x).length} of ${shelfTips.length} land alone, ${heldIds.size} held together; ${p.unmerged.length} merge(s) undone` +
+      (lost.length ? '; lost ' + lost.map(t => JSON.stringify(t)).join(' ') : ''));
+  }
+
+  /* ---- 4b. the stair: its own trunks named, the tips it holds carried by them ---- */
+  console.log('\n=== 4b. the stair: the arc ===');
+  const R3 = require(path.join(ROOT, 'nso-3mf-read.js'));
+  const ARC = new Float32Array((await R3.parse3MF(new Uint8Array(fs.readFileSync(path.join(ROOT, 'fixtures', 'supports', 'simple_overhang.3mf'))), { name: 'simple_overhang.3mf' })).objects[0].positions);
+  const arc = await build(ARC);
+  if (!arc.ok) check('arc: builds', false, arc.reason);
+  else {
+    const st = arc.tp.stairTrunks || [], held = arc.tp.sheet.tips.filter(t => t.mode === 'drop');
+    const nT = arc.p.trunks.length, stairIds = st.map((x, k) => arc.sh.solids.flatMap(sd => sd.feet).find(f => f.member && byKind(arc.sh, 'trunk').some(m => m.id === f.member && m.from.join() === x.path[0].join())));
+    const stairMembers = byKind(arc.sh, 'trunk').filter(m => st.some(x => x.path[0].join() === m.from.join() && x.path[x.path.length - 1].join() === m.to.join()));
+    const byStair = new Set(stairMembers.flatMap(m => m.carries));
+    const heldIds = held.map(t => GP.tipId(arc.p.beacons[t.beacon].p));
+    check('arc: the stair\'s own trunks have member ids, and every tip the stair holds is carried by one of them',
+      st.length > 0 && stairMembers.length === st.length && heldIds.length > 0 && heldIds.every(id => byStair.has(id)) &&
+      stairIds.every(Boolean) && heldIds.every(id => byKind(arc.sh, 'tip').some(t => t.id === id)),
+      `${st.length} stair trunk(s) (${stairMembers.map(m => m.id + ': ' + m.carries.length).join(', ')}), ${heldIds.length} tips held by the stair; plan trunks ${nT}, built ${byKind(arc.sh, 'trunk').length - st.length}`);
   }
 
   /* ---- 5. excluded ---- */
@@ -233,7 +267,8 @@ function oneTrunkEach(sh) {
   console.log('\n=== 6. members ===');
   for (const [label, a, piece, feed] of [['coupon, auto', base, COUPON, undefined],
                                           ['coupon, half off', half, COUPON, { mode: 'assisted', beaconsOff: off }],
-                                          ['shelf, zones', zoned, SHELF, { mode: 'custom', tips: shelfTips, landingZones: [ZA, ZB] }]]) {
+                                          ['shelf, zones', zoned, SHELF, { mode: 'custom', tips: shelfTips, landingZones: [ZA, ZB] }],
+                                          ['arc, a stair', arc, ARC, undefined]]) {
     if (!a.ok) continue;
     const b = await build(piece, feed);
     const ja = JSON.stringify(a.sh.members), jb = b.ok ? JSON.stringify(b.sh.members) : '';

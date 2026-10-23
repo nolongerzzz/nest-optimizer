@@ -461,11 +461,13 @@ opts.feed = {
 
 **No feed is today, byte for byte.** `opts.feed` absent, `null`, `{}`,
 `{ mode: 'auto' }` or `{ mode: 'auto', excluded: [] }` all take the old path
-(support:feed 1); every no-feed build of support:interface's pieces (coupon,
-clamp, shelf, tab - every area bare, with the sheet, and as the card builds it
-with shared feet; and the whole piece planned at once) hashed the same on
-claude-wip 9a95297's file and this one (measured before the rebase onto 1b45aec;
-not re-measured since).
+(support:feed 1). Measured side by side against claude-wip 1b45aec's file (the
+files it loads with it taken from 1b45aec too): every no-feed build of the
+coupon, the standing clamp, the shelf, the tab and the arc (its stair) - every
+area bare, with the sheet, and as the card builds it on shared feet, the pads
+by shareFeet, and the whole piece planned at once - 43 hashes, 43 the same (37
+builds with a solid; 6 areas of the arc's that hold nothing, empty both
+sides). The same run against 9a95297, before the rebase, was 32 of 32.
 
 **A tip id** names a spot: `b` + a detected beacon's point, `u` + a given
 tip's point as given, each coordinate to 0.01 mm (`NSO_SupportGridpack.tipId(p,
@@ -483,9 +485,12 @@ a flared foot is wider than a small zone). A member whose drop would land outsid
 leans from its anchor, within the lean limit, to the nearest point of a zone it
 can reach - its full lean then straight down, or one straight leg - clear of
 the piece and of every other tree's members; a merge or a pickup that would
-leave its member out of reach of every zone does not happen. A member that
-reaches no zone is not built: its tips are counted unreachable and listed in
-`plan.offZone`. `plan.zones[i].trunks` names the trunks in each zone and
+leave its member out of reach of every zone does not happen. **A merge or a
+pickup that then lands in no zone is undone** (its node taken off its
+branches; a pickup's stub's spot starts a strut of its own) **and its branches
+land alone**, each the same way (`plan.unmerged`): the zone rule drops only a
+tip that no zone takes by itself. A member of one tip that reaches no zone is
+not built: its tip is counted unreachable and listed in `plan.offZone`. `plan.zones[i].trunks` names the trunks in each zone and
 `plan.zonesEmpty` the zones nothing landed in - reported, nothing forced.
 A trunk resting on the part (`restOnModel`) is not on the plate and is not
 held to a zone.
@@ -517,21 +522,32 @@ The solids, the soups and the exported object are unchanged.
   at its top and at its bottom.
 - `carries`: every tip it holds up, sorted. A tip itself; a branch the tips
   above it; a trunk every tip of its tree; a pad the tips of the trunks on it; a
-  sheet the tips under it. **A held tip is in exactly one trunk's carries**; a
-  tip that is not held is in `unsupported` (unreachable, inside the piece,
-  refused).
+  sheet the tips under it (a stair: the tips it holds by itself too). **A held
+  tip is in exactly one trunk's carries**; a tip that is not held is in
+  `unsupported` (unreachable, inside the piece, refused).
+- **A stair** (docs/SUPPORT-INTERFACE.md section 7): its own trunks (`tp.stairTrunks`,
+  numbered after the plan's) are trunk members, and each tip the stair holds by
+  itself (mode `drop`) is carried by one of them - the one whose spots on the
+  strips come nearest it in plan, the lower number on a tie. Such a tip is still
+  a tip member (its spot; `from` = `to`), and is no longer in its plan trunk's
+  carries; a plan member that holds only such tips is not built and is not a
+  member (trunkStepper's leftOut). A stair whose own tree was not built leaves
+  its tips with their plan trunks.
 - `id`: a tip's is its tip id; anything else's is its kind and an FNV-1a hash
   of what it carries and where it runs (its polyline to 0.01 mm; a pad's
   trunks; a sheet's tips and top) - the same in every build of the same inputs,
   a new one wherever the member is not the same member.
 
-support:feed (23 checks): no inputs; custom on the clamp (one tip: one tree,
+support:feed (27 checks): no inputs; custom on the clamp (one tip: one tree,
 cut at the gap, 0.193 mm off the piece, its foot on the plate; two tips a
 beacon pitch apart: one sheet across them); assisted on the coupon with every
 other beacon off (no tip at an off beacon; every tip left on at its auto
-contact, to the bit); landing zones on the shelf; an excluded trunk and tip on
+contact, to the bit); landing zones on the shelf (a merge undone: every tip a
+zone takes alone is held); the arc's stair (its two trunks named, its 38 tips
+carried by them); an excluded trunk and tip on
 the coupon, and a member of the rebuild excluded in turn; members the same
-across two builds, every held tip in exactly one trunk; the card's build's pads named by shareFeet.
+across two builds, every held tip in exactly one trunk (the arc's stair
+included); the card's build's pads named by shareFeet.
 
 ## Paint scope: sub-region — inherited
 
