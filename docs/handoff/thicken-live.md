@@ -110,3 +110,16 @@ and `pick:release`; `app-findings.js` 6 steps (`findings:drive` is the one that
 presses Thicken); `app-join.js` 34; `index.html` / `styles.css` reach most of the
 drive checks (172 of 267 steps name `index.html`). Per the one-full-suite rule the
 batch's CI run is the full suite; this PR ran its own gates and `page:manifest`.
+
+### Screenshots
+
+`tools/thicken-live-out/`, made by `node tools/nso_thicken_live_shots.js` (the
+same clicks a person makes; box_open, 60 x 40 x 25, 2 mm walls):
+
+- ghost at a value: [out at 1.5](../../tools/thicken-live-out/1-ghost-out-1.5.png),
+  [out at 3](../../tools/thicken-live-out/2-ghost-out-3.png),
+  [in at 2](../../tools/thicken-live-out/3-ghost-in-2.png)
+- after Set: [Thicken in 2, baked](../../tools/thicken-live-out/4-after-set-in-2.png)
+- per-face: [+x wall picked, Thicken out 3](../../tools/thicken-live-out/5-per-face-out-picked.png),
+  [after Set: that wall only](../../tools/thicken-live-out/6-per-face-after-set.png),
+  [Thicken in, the cavity floor picked](../../tools/thicken-live-out/7-per-face-in-floor.png)
