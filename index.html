@@ -948,9 +948,17 @@
           <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-bit">
             <summary class="vp-bar-btn" title="Subtract B from A, Extract bit, Carve, Punch, Hollow, Lift, Split to parts">Subtract</summary>
             <div class="vp-menu-body vp-finish">
+            <details class="vp-sec" id="sub-sec-subtract">
+              <summary class="vp-sec-head" title="Subtract B from A">Subtract B from A</summary>
+              <div class="vp-sec-body">
             <div class="vp-row vp-row-full">
               <button id="btn-subtract" class="btn btn-secondary" type="button">Subtract B from A</button>
             </div>
+              </div>
+            </details>
+            <details class="vp-sec" id="sub-sec-extract">
+              <summary class="vp-sec-head" title="Extract bit, and Carve - the local blade">Extract bit</summary>
+              <div class="vp-sec-body">
             <div class="vp-row vp-row-full">
               <button id="btn-extract-bit" class="btn btn-secondary" type="button">Extract bit</button>
             </div>
@@ -971,6 +979,11 @@
               <label class="vp-clone" title="Spin the blade about the outward direction. 0 lays its sweep axis along the edge, which is what a chamfer wants."><span id="carve-roll-label">&deg;</span> <input type="number" id="carve-roll" value="0" min="-180" max="180" step="5"></label>
             </div>
             <div class="vp-row vp-row-full"><p id="carve-readout" class="carve-readout">&mdash;</p></div>
+              </div>
+            </details>
+            <details class="vp-sec" id="sub-sec-punch">
+              <summary class="vp-sec-head" title="Punch round holes">Punch</summary>
+              <div class="vp-sec-body">
             <!-- PUNCH (app-punch.js, nso_punch.js; docs/PUNCH.md): arm it, click a face - a
                  round hole straight through it or to a depth, normal to the face, alone,
                  in a grid or on a circle. A live ghost of every hole; the first hole's
@@ -1026,13 +1039,38 @@
                 <button id="btn-punch-cancel" class="btn btn-secondary" type="button" title="Put Punch away; the piece is unchanged.">Cancel</button>
               </div>
             </div>
-            <div class="vp-row vp-row-thicken">
+              </div>
+            </details>
+            <details class="vp-sec" id="sub-sec-hollow">
+              <summary class="vp-sec-head" title="Hollow out a solid, to the wall in the box; the slider shows the cavity live">Hollow</summary>
+              <div class="vp-sec-body">
+            <!-- HOLLOW (app-hollow.js, nso_hollow.js; docs/HOLLOW.md): the wall in the box
+                 is the number Hollow cuts to. The slider beside it is the same number: as it
+                 moves the piece turns to a ghost and the cavity it would cut shows inside
+                 (a coarse preview; Hollow itself runs the full pass). One control, bound by
+                 app-live-slider.js, which Thicken's live slider reuses. -->
+            <div class="vp-row vp-row-hollow">
               <button id="btn-hollow" class="btn btn-secondary" type="button"
                       title="Carve the interior out of a solid, following the outer surface inward and leaving a shell of the wall thickness in the box. Perpendicular distance, not a radial shrink, so a sloped wall comes out the thickness asked for. Refuses a wall under the nozzle-safety floor from nso_thickness.js, and refuses again if the wall it actually leaves measures under it. Outer surface untouched.">Hollow</button>
-              <input type="number" id="inp-hollow-mm" value="2" min="0.42" max="20" step="0.1" aria-label="Hollow wall thickness, mm">
+              <input type="number" id="inp-hollow-mm" value="2" min="0.42" max="20" step="0.1" aria-label="Hollow wall thickness, mm"
+                     title="The wall Hollow leaves, mm. The slider below is the same number.">
+            </div>
+            <div class="vp-row vp-row-full">
+              <label class="live-slider" for="inp-hollow-slider"
+                     title="Drag to see the cavity Hollow would cut: the piece turns to a ghost and the interior shows inside it. Nothing is cut until Hollow is pressed."><span>Wall</span>
+                <span id="hollow-slider-read">2 mm</span>
+                <input type="range" id="inp-hollow-slider" min="0.42" max="10" step="0.01" value="2" /></label>
+            </div>
+            <p id="hollow-readout" class="carve-readout">Drag the wall to see the cavity.</p>
+            <div class="vp-row vp-row-full">
               <button id="btn-hollow-safe" class="btn btn-secondary" type="button"
                       title="Hollow back out to the SAFEST minimum wall rather than to the number in the box. For reversing a Thicken in: the wall goes back down, but it stops at the nozzle-safety floor even when the wall was thinner than that before. Restoring an unprintable wall because it used to be unprintable is not a restore.">Hollow to safe min</button>
             </div>
+              </div>
+            </details>
+            <details class="vp-sec" id="sub-sec-lift">
+              <summary class="vp-sec-head" title="Lift features off a piece; Detach flange is part of Lift">Lift</summary>
+              <div class="vp-sec-body">
             <!-- LIFT (app-lift-plate.js, docs/LIFT.md section 7): arm it on a
                  selected piece; what stands on it is found once (the rolling
                  ball) and counted. Hover outlines a feature, a click lifts it,
@@ -1063,6 +1101,22 @@
               </div>
               <p id="lift-readout" class="carve-readout">&mdash;</p>
             </div>
+            <!-- DETACH (app-detach.js, nso_detach.js; docs/DETACH.md): a detected
+                 flange comes off the piece, capped flush on its own neck wall, and
+                 lands beside it as its own closed piece. It is part of Lift: it sits in the
+                 Lift section, id for id (it came from the Crop card first); Reattach, its other half, is in the Connect card. -->
+            <div class="detach-tools" id="detach-tools">
+            <div class="vp-row vp-row-full">
+              <button id="btn-detach" class="btn btn-secondary" type="button"
+                      title="Detach: find the flange on this piece and take it off. The piece is capped flush with its own neck wall, with nothing left of the flange and no gap to bridge. The flange lands beside it as its own closed piece. One Undo puts both back. Reattach (in Join) seats it somewhere else.">Detach flange</button>
+            </div>
+            <div class="vp-row vp-row-full"><p id="detach-readout" class="carve-readout">&mdash;</p></div>
+            </div>
+              </div>
+            </details>
+            <details class="vp-sec" id="sub-sec-split">
+              <summary class="vp-sec-head" title="Split a multi-part piece into one piece per part">Split to parts</summary>
+              <div class="vp-sec-body">
             <!-- SPLIT TO PARTS (app-split-parts.js, nso_split_parts.js): a piece made of
                  several shells - the print-in-place hinge after Lift, any imported
                  multi-body STL - becomes one piece per part, each where it stood.
@@ -1075,17 +1129,8 @@
               <span id="split-count" class="lift-count">&mdash;</span>
             </div>
             <div class="vp-row vp-row-full"><p id="split-readout" class="carve-readout">Select a piece to see how many parts it is.</p></div>
-            <!-- DETACH (app-detach.js, nso_detach.js; docs/DETACH.md): a detected
-                 flange comes off the piece, capped flush on its own neck wall, and
-                 lands beside it as its own closed piece. It moved here from the
-                 Crop card, id for id; Reattach, its other half, is in the Connect card. -->
-            <div class="detach-tools" id="detach-tools">
-            <div class="vp-row vp-row-full">
-              <button id="btn-detach" class="btn btn-secondary" type="button"
-                      title="Detach: find the flange on this piece and take it off. The piece is capped flush with its own neck wall, with nothing left of the flange and no gap to bridge. The flange lands beside it as its own closed piece. One Undo puts both back. Reattach (in Join) seats it somewhere else.">Detach flange</button>
-            </div>
-            <div class="vp-row vp-row-full"><p id="detach-readout" class="carve-readout">&mdash;</p></div>
-            </div>
+              </div>
+            </details>
             </div>
           </details>
           <details class="vp-menu vp-shell-menu vp-col-menu vp-group-start" id="menu-shape" data-sec="shape">
@@ -1857,7 +1902,8 @@
        geometry (nso_punch.js) before its card (app-punch.js). docs/PUNCH.md. -->
   <script src="nso_punch.js?v=867ffba8"></script>
   <script src="app-punch.js?v=f7f8a6e2"></script>
-  <script src="app-hollow.js?v=3395c555"></script>
+  <script src="app-live-slider.js?v=0bc4bb66"></script>
+  <script src="app-hollow.js?v=5a8e2bd8"></script>
   <script src="app-foam.js?v=33d5178e"></script>
   <script src="app-seat-surface.js?v=55908323"></script>
   <script src="app-skin.js?v=cb03e88b"></script>
