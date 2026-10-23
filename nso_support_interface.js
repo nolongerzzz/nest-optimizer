@@ -89,9 +89,10 @@
        2 transition and 2 interface layers at 0.84 mm, each a loop and a
        serpentine inside it, on the tips' flat caps (THE SHEET,
        below; docs/SUPPORT-INTERFACE.md) - and under a curved or sloped
-       underside a STAIR, one band a layer, each held by tips of its own
-       tree (THE STAIR; section 7). nso_support_gridpack.js parts()
-       builds it, and the caps, with opts.interface.
+       underside a STAIR, one strip a layer on a BODY that stands on the
+       plan's trunks (THE STAIR; section 7; opts.trunkAxes, opts.trunkLaw).
+       nso_support_gridpack.js parts() builds it, and the caps, with
+       opts.interface.
    cutPath(pts, cutZ, side, rise) -> a column (top first) cut flat at cutZ,
        standing straight up from `rise` (default: side) under the cut
    ============================================================ */
@@ -688,12 +689,14 @@
   var STAIR_MAX_DEG = 70;      /* ...over this, a wall */
   var STAIR_DV = 0.25;         /* a band's front edge is read every this along the stair's lines */
   var STAIR_JUMP_MM = 0.5;     /* ...and a run of them is one band while no step jumps further */
-  var STAIR_BACK_MM = 0.55;    /* a strip's back edge lies no further than this under the part */
   var STAIR_STEP_MM = 0.03;    /* a band nearer the piece than the gap moves up the slope by this, at least */
-  var STAIR_TIP_MM = 5;        /* a strip's leading part has a tip every this, or nearer, along it (Bambu's branch distance) */
+  var STAIR_BODY_PITCH_MM = 1.7; /* the body's ribs this far apart: Bambu's support under simple_overhang, its plan area per mm of line (z 38 - 44: 1.61 - 1.82) */
+  var STAIR_BODY_MIN_MM = 1;     /* a strip has a body behind it where this much room is left past its channel */
+  var STAIR_BODY_ON_MM = 0.15;   /* ...and its first layer lies this far inside its trunk's top (a cell's slack and a corner's mitre) */
+  var STAIR_BODY_KEEP_MM = 0.35; /* the body keeps this far off the part beside it (Bambu's support_object_xy_distance) */
   var STAIR_SNAP_DEG = 2;       /* a fall this near one of the sheet's line angles takes it */
-  var STAIR_REACH_MM = 3;
-  var STAIR_START = 0.6;       /* the stair starts where a strip first runs this share of the longest strip's length */      /* a strip lies only where the part's underside is this near over it */
+  var STAIR_REACH_MM = 3;      /* a strip lies only where the part's underside is this near over it */
+  var STAIR_START = 0.6;       /* the stair starts where a strip first runs this share of the longest strip's length */
 
   function sheet(piece, stations, opts) {
     opts = opts || {};
@@ -1735,39 +1738,50 @@
        Along A, every STAIR_DV, the band's front edge is the first u from
        down the slope where the field holds a line's width; the run of those
        longest along A is the band: ONE region.
-       ITS WIDTH FOLLOWS THE BAND (Bambu's: a loop alone, two lines, on most
-       layers; four only where the surface flattens): as many beads as keep
-       its back edge within STAIR_BACK_MM of the part over it - one line
-       (o.width, the sheet's thin wall) where two would not, two beads (a
-       0.84 band: a slicer prints it as its loop alone) where they do, three
-       or more only where the band itself moves three beads a layer - built
-       and measured, a bead less while the back edge is still too far under
-       the part. A layer so steep that one line stands too far under it is
-       below the stair (the arc's foot, ~45 deg). Each band is its
-       centreline along A, extruded its width, one layer high.
+       THE STAIR IS A BODY, NOT A STACK OF STRIPS (supports-stair-body).
+       Round 3's print released clean, but the top of the stair came loose:
+       each strip advanced ~0.55 mm past the one below - more than a line -
+       so Bambu printed every strip's leading line as an overhang wall in
+       air, and strips narrower than the part's step above them left the
+       part's own lines dashed. Bambu's own support there is one wedge under
+       the whole overhang, its strips laid on it.
 
-       WHAT HOLDS EACH STRIP. A strip lies over the strip below only in part
-       (the arc: 0 - 0.34 mm along the slope); the rest - its leading part,
-       up the slope - is held by TIPS, never by the stair's lean (0.55 mm a
-       0.2 mm layer is ~70 deg off upright): wherever that part is half a
-       line or wider, a tip every STAIR_TIP_MM or nearer along the strip
-       (Bambu's branch distance; its own tree puts ~1.4 branch tops under
-       each strip), each set a quarter stretch along from the strip
-       below's, its column's down-slope face at the strip's front edge and
-       its top the strip's underside. The tips are the stair's own tree:
-       nso_support_gridpack.js plans them (opts.mergeThroughCrowd) and builds
-       them with the stair, so the tree grows with the stair. The lowest
-       strip stands on a transition (itself again, a layer under it), the
-       transition on caps over the plan's tips under it (as the levels'
-       caps: cut along their own legs, narrowed until each keeps the gap,
-       never overlapping) and on tips of its own. Every other tip of the plan
-       on the curve is not built (mode 'drop'): its spot is held by the
-       stair, and the planner's members that hold only such tips are left
-       out (nso_support_gridpack.js).
+       THE STRIPS (planWidths). Each layer's strip is as wide as the part's
+       step over it - the next layer's advance - and one line more, and at
+       least two lines, so the next strip's lines all lie over this layer:
+       on this strip, or on the body's front wall a channel behind it, the
+       layer read as the footprint it holds grown half a line, as a slicer
+       reads it; where a strip widens going up, the ones under it widen
+       first. Its lines are the sheet's (o.width at o.pitch): two - a loop
+       alone - or a loop and one serpentine inside it, tied to the loop at
+       one point; the top strip covers all the part has left over it. A
+       strip keeps to the part's outline and one line: one the outline holds
+       to fewer lines spreads them, its loop's channel opening. The lowest
+       strip stands on a transition, itself again a layer under it.
 
-       THE GAP IS MEASURED: every band with exactDistance against the
+       THE BODY (bodyOf). Under the strips, from the trunks of the trees that
+       hold only the stair's tips (nso_support_gridpack.js TRUNKS: they rise
+       to one height, the highest from which a 45 deg cone over each covers
+       the shadow under the transition) up to the top: every layer the
+       shadow of the underside over the stair's line, clipped to the part's
+       outline plus one line, kept STAIR_BODY_KEEP_MM off the part beside
+       it, within the trunks' cones, and a channel behind each strip. Each
+       layer is a loop round its outline and ribs up the slope inside,
+       STAIR_BODY_PITCH_MM apart (Bambu's support, measured). No tree of
+       its own, no caps: every tip of the plan on the curve is held by the
+       body (mode 'drop'), and the planner's members over the trunks are
+       left out (nso_support_gridpack.js).
+
+       FLAT AND CURVED MEET. A flat sheet built beside the stair (a tip of
+       its level within STAIR_JOIN tip spacings of the stair's) is the
+       body's top where the part is flat: its tips are held, it loses its
+       caps, its four layers are listed with the stair's, and the body
+       stands under it to its z_base.
+
+       THE GAP IS MEASURED: every strip with exactDistance against the
        piece; one nearer than the gap moves up the slope (STAIR_STEP_MM at a
-       time) and is built again.
+       time) and is built again; a body layer nearer than the gap loses the
+       cells round its nearest point and is built again.
        =================================================================== */
     function buildStairs() {
       var pool = tips.filter(function (t) { return t.mode === 'gap' && t.why && t.why.indexOf('its level failed') === 0 && columns[t.col]; });
@@ -1820,6 +1834,19 @@
       /* the raster: every cell's inside intervals along its vertical ray */
       var mine = {};
       group.forEach(function (t) { mine[t.i] = true; });
+      /* FLAT AND CURVED MEET (THE BODY): a flat sheet built beside the stair
+         - a tip of its level within STAIR_JOIN tip spacings of one of the
+         stair's - is the body's top where the part is flat: its tips are the
+         stair's (held, no caps), and the body stands under its sheet */
+      var joined = levels.filter(function (L) {
+        return L.ok && !L.merged && L.res && L.tips.some(function (t) {
+          return t.mode === 'sheet' && group.some(function (u) { return Math.hypot(t.contact[0] - u.contact[0], t.contact[1] - u.contact[1]) <= STAIR_JOIN * spacing + 1e-9; });
+        });
+      });
+      var jTips = [];
+      joined.forEach(function (L) { L.tips.forEach(function (t) { if (t.mode === 'sheet') jTips.push(t); }); });
+      var reach = group.concat(jTips);
+      jTips.forEach(function (t) { mine[t.i] = true; });
       /* the field keeps half a line off any column the piece stands in (a
          line's square end, half a width times root 2, is the exact solve's
          to hold): the column already
@@ -1829,7 +1856,7 @@
          up it) */
       var D = H + 1, r = CELL_MM * Math.SQRT1_2 + 1e-3, pad = D + r + o.gap + 2 * CELL_MM;
       var lo = [Infinity, Infinity], hi = [-Infinity, -Infinity];
-      group.forEach(function (t) { for (var k = 0; k < 2; k++) { lo[k] = Math.min(lo[k], t.contact[k]); hi[k] = Math.max(hi[k], t.contact[k]); } });
+      reach.forEach(function (t) { for (var k = 0; k < 2; k++) { lo[k] = Math.min(lo[k], t.contact[k]); hi[k] = Math.max(hi[k], t.contact[k]); } });
       var ox = lo[0] - pad, oy = lo[1] - pad;
       var nx = Math.ceil((hi[0] - lo[0] + 2 * pad) / CELL_MM) + 1, ny = Math.ceil((hi[1] - lo[1] + 2 * pad) / CELL_MM) + 1;
       var iv = new Array(nx * ny), near = new Uint8Array(nx * ny);
@@ -1844,8 +1871,8 @@
             for (var h = 0; h + 1 < hs.length; h += 2) list.push(z0 + hs[h], z0 + hs[h + 1]);
           }
           iv[j0 * nx + i0] = list;
-          for (var g = 0; g < group.length; g++) {
-            if (Math.abs(group[g].contact[0] - x) <= D && Math.abs(group[g].contact[1] - y) <= D) { near[j0 * nx + i0] = 1; break; }
+          for (var g = 0; g < reach.length; g++) {
+            if (Math.abs(reach[g].contact[0] - x) <= D && Math.abs(reach[g].contact[1] - y) <= D) { near[j0 * nx + i0] = 1; break; }
           }
         }
       }
@@ -1865,6 +1892,20 @@
       var R0 = Math.ceil(r / CELL_MM), disc = [];
       for (var dj = -R0; dj <= R0; dj++) for (var di = -R0; di <= R0; di++) if (Math.hypot(di, dj) * CELL_MM <= r) disc.push([di, dj]);
       var zTopOf = function (m) { return o.plateZ + m * o.layer; };
+      /* each joined sheet's footprint: the cells its tips own (H round each,
+         as its level's raster reads them) - its stack stands there from
+         z_base to z_top; jUnder holds the lowest z_base over a cell, jNear
+         the same a line and the gap wider (a strip keeps off the stack) */
+      var jUnder = new Float32Array(nx * ny).fill(Infinity), jNear = new Float32Array(nx * ny).fill(Infinity), jTop = new Float32Array(nx * ny).fill(-Infinity);
+      joined.forEach(function (J) {
+        var zb = J.res.zBase, zt = J.res.zTop, gr = o.width + o.gap;
+        for (var q = 0; q < nx * ny; q++) {
+          var x = ox + (q % nx) * CELL_MM, y = oy + Math.floor(q / nx) * CELL_MM, dm = Infinity;
+          J.tips.forEach(function (t) { if (t.mode === 'sheet') dm = Math.min(dm, Math.max(Math.abs(t.contact[0] - x), Math.abs(t.contact[1] - y))); });
+          if (dm <= H) { jUnder[q] = Math.min(jUnder[q], zb); jTop[q] = Math.max(jTop[q], zt); }
+          if (dm <= H + gr) { jNear[q] = Math.min(jNear[q], zb); jTop[q] = Math.max(jTop[q], zt); }
+        }
+      });
       /* the field of the layer whose top is zTopOf(m): see EACH LAYER'S STRIP */
       function fieldFor(m, extra) {
         var zt = zTopOf(m), za = zt - o.layer - o.gap, zb = zt + o.gap, n = nx * ny;
@@ -1902,6 +1943,7 @@
           }
         });
         (extra || []).forEach(function (eb) { stamp(eb, eb, eb[2]); });
+        if (joined.length) for (var q3 = 0; q3 < n; q3++) if (fld[q3] && zb > jNear[q3] - o.gap && za < jTop[q3] + o.gap) fld[q3] = 0;
         return fld;
       }
       function fieldAt(fld, x, y) {
@@ -1964,55 +2006,138 @@
          while every layer has a band. A tip's layer is the lowest of the
          stair's whose band holds it. */
       var mLo = Infinity;
+      /* ...with the part close over its front: the median, along the band,
+         of the part's height over the front's first line, no more than the
+         gap and two layers */
+      function closeOver(m) {
+        var bd = lay[m].band, d = [];
+        bd.pts.forEach(function (pt) { var q = atUV(pt.f + o.width / 2, pt.v), h = firstHit(q[0], q[1], zTopOf(m), 5); if (isFinite(h)) d.push(h); });
+        d.sort(function (x, y) { return x - y; });
+        return d.length && d[d.length >> 1] <= o.gap + 2 * o.layer;
+      }
       for (var ml = mA; ml <= mB && !isFinite(mLo); ml++) {
         if (lay[ml].band && lay[ml].band.len >= STAIR_START * longest &&
-            group.some(function (t) { return bandHolds(ml, t.contact, o.width, 1); })) mLo = ml;
+            group.some(function (t) { return bandHolds(ml, t.contact, o.width, 1); }) && closeOver(ml)) mLo = ml;
       }
       if (!isFinite(mLo)) return null;
       var mTop = mLo;
       for (var m3 = mLo + 1; m3 <= mB && lay[m3].band; m3++) mTop = m3;
       if (mTop - mLo + 1 < 2) return null;
-      /* EACH STRIP'S WIDTH follows the band, not a grid: as many beads as keep
-         its back edge within STAIR_BACK_MM of the part over it - the part
-         rises (layer / advance) for every mm up the slope, the advance being
-         how far the band moves a layer - a line alone (o.width, the sheet's
-         thin wall) where two would not, two (a loop, as a slicer prints a
-         two-bead band) where they do, and more only where the band itself is
-         three beads or wider */
+      /* EACH STRIP covers the part's step above it: the next layer's advance
+         and one line more, so the next strip's lines all lie over this
+         layer's (THE STRIPS). Its lines are the sheet's (o.width at o.pitch):
+         two - a loop alone - where the advance is under a pitch less a line's
+         slack, more where it is wider, then a loop and one serpentine inside,
+         tied to it at one point. */
+      function frontOf(m, v) {
+        var bd = lay[m] && lay[m].band;
+        if (!bd) return null;
+        return frontAt(bd, Math.min(bd.v1, Math.max(bd.v0, v)));
+      }
+      /* how far the band moves from layer m to the next, along it: the 90th
+         percentile of the per-line advance (the top layer takes the one under) */
       function advanceAt(m) {
         var M2 = m < mTop ? m + 1 : m - 1, d = [];
-        lay[m].band.pts.forEach(function (pt) { var f2 = frontAt(lay[M2].band, pt.v); if (f2 != null) d.push(Math.abs(f2 - pt.f)); });
+        lay[m].band.pts.forEach(function (pt) {
+          var f2 = frontAt(lay[M2].band, pt.v), f1 = frontAt(lay[m].band, pt.v);
+          if (f2 != null && f1 != null) d.push(m < mTop ? f2 - f1 : f1 - f2);
+        });
         d.sort(function (x, y) { return x - y; });
-        return d.length ? Math.max(d[d.length >> 1], DU) : o.layer;
+        return d.length ? Math.max(d[Math.min(d.length - 1, Math.floor(0.9 * d.length))], DU) : o.layer;
       }
-      function widthAt(m) {
-        var a = advanceAt(m), wGap = (STAIR_BACK_MM - o.gap) * a / o.layer, n = Math.floor(wGap / bead + 1e-9);
-        if (n >= 3 && a < 3 * bead) n = 2;
-        n = Math.max(1, n);
-        return { n: n, W: n === 1 ? o.width : n * bead, a: a, fits: wGap >= o.width - 1e-9 };
+      function widthOf(n) { return (n - 1) * o.pitch + o.width; }
+      /* how far the part runs on over a band, up the slope from its front:
+         the median, along it, of the field's run from the front (the field
+         ends where the part over it does, a cell either side) - a strip, as
+         the body, keeps to the part's outline and one line more */
+      function roomAt(m) {
+        var bd = lay[m].band, r = [];
+        bd.pts.forEach(function (pt) {
+          var f = pt.f + (bd.shift || 0), u = f;
+          while (u + DU <= umax && fieldAt(lay[m].fld, atUV(u + DU, pt.v)[0], atUV(u + DU, pt.v)[1])) u += DU;
+          r.push(u - f + CELL_MM);
+        });
+        r.sort(function (x, y) { return x - y; });
+        return r.length ? r[r.length >> 1] : 0;
       }
-      /* where the slope is so steep that even one line stands its back edge
-         further than STAIR_BACK_MM under the part, the stair has not begun
-         (the arc's foot, ~45 deg: a line there is 0.6 - 0.8 mm under it) */
-      while (mTop - mLo + 1 > 2 && !widthAt(mLo).fits) mLo++;
-      /* a band built: its centreline along A, extruded W wide, one layer */
-      function bandBuild(m, z0, role, wd) {
-        var bd = lay[m].band, poly = [];
-        bd.pts.forEach(function (pt) { poly.push(atUV(pt.f + (bd.shift || 0) + wd.W / 2, pt.v)); });
-        /* points on the line between their neighbours (to a hundredth) go */
-        for (var k = poly.length - 2; k >= 1; k--) if (segDist2(poly[k], poly[k - 1], poly[k + 1]) < 0.01) poly.splice(k, 1);
-        var ex = RL.extrudeFlat([poly], { width: wd.W, height: o.layer, baseZ: z0 });
+      /* THE STRIPS' WIDTHS, planned from the top down. Each strip is at
+         least the part's step over it and one line (the advance and a bead);
+         and the next strip's back line must lie over this layer - on this
+         strip, or on the body's front wall a channel behind it, the layer read
+         as the footprint it holds grown half a line, as a slicer reads it
+         (REACH_ON past this strip's back edge; REACH_BARE where no body
+         stands behind it: at the top, where the part runs out) - so where a
+         strip widens going up, the ones under it widen first. Its lines are
+         the sheet's: the fewest from two up that make the width, as many as
+         the part's outline and one line hold; a strip the outline holds to
+         fewer lines spreads them to its width, its loop's channel opening. */
+      var CH = o.pitch - o.width, REACH_ON = CH + 1.5 * o.width + bead / 2 - 0.03, REACH_BARE = o.width / 2 + bead / 2 - 0.03;
+      var plan = {};
+      function planWidths() {
+        for (var m = mTop; m >= mLo; m--) {
+          /* the top strip: the step over it is all the part has left */
+          var room = roomAt(m) + bead, need = m === mTop ? room : adv[m] + bead, Wn = m < mTop ? plan[m + 1].W : 0;
+          if (m < mTop) {
+            var behind = room - (Math.max(need, adv[m] + Wn - REACH_ON) + CH) >= STAIR_BODY_MIN_MM;
+            need = Math.max(need, adv[m] + Wn - (behind ? REACH_ON : REACH_BARE));
+          }
+          var n = 2;
+          while (widthOf(n) < need - 1e-9 && widthOf(n + 1) <= room + 1e-9) n++;
+          var pt = o.pitch, W = widthOf(n);
+          if (W < need - 1e-9) { pt = (Math.min(need, Math.max(room, W)) - o.width) / (n - 1); W = (n - 1) * pt + o.width; }
+          plan[m] = { n: n, pitch: pt, W: W };
+          lines[m] = n;
+        }
+      }
+      function pitchAt(m, n) { return plan[m] && plan[m].n === n ? plan[m].pitch : o.pitch; }
+      /* a strip built: its loop round the band's outline and, from three lines
+         up, the serpentine inside it, both centrelines o.width / 2 in from the
+         outline; the serpentine starts on the loop's down-v end (the tie) and
+         keeps a pitch off the loop everywhere else */
+      function stripBuild(m, z0, role, n, pitch) {
+        var bd = lay[m].band, sh = bd.shift || 0, hw = o.width / 2, pt = pitch || o.pitch, W = (n - 1) * pt + o.width;
+        var va = bd.v0 + hw, vb = bd.v1 - hw;
+        if (!(vb - va > 2 * o.pitch)) return { ok: false, reason: 'the band is too short for its loop' };
+        var vs = [va];
+        bd.pts.forEach(function (pt) { if (pt.v > va + 1e-6 && pt.v < vb - 1e-6) vs.push(pt.v); });
+        vs.push(vb);
+        function at(k, v) { return atUV(frontAt(bd, v) + sh + hw + k * pt, v); }
+        function thin(poly) {
+          for (var k = poly.length - 2; k >= 1; k--) if (segDist2(poly[k], poly[k - 1], poly[k + 1]) < 0.01) poly.splice(k, 1);
+          return poly;
+        }
+        var front = thin(vs.map(function (v) { return at(0, v); }));
+        var back = thin(vs.map(function (v) { return at(n - 1, v); }).reverse());
+        /* the loop's down-v end, back to front, through each serpentine line's foot */
+        var foot = [];
+        for (var k = n - 2; k >= 1; k--) foot.push(at(k, va));
+        var loop = front.concat(back, foot, [front[0]]);
+        var paths = [loop], snake = null;
+        if (n >= 3) {
+          var lo = va + o.pitch, hi = vb - o.pitch, vi = vs.filter(function (v) { return v > lo + 1e-6 && v < hi - 1e-6; });
+          snake = [at(1, va)];
+          for (var k2 = 1; k2 <= n - 2; k2++) {
+            var run = [lo].concat(vi, [hi]), up = k2 % 2 === 1;
+            if (!up) run.reverse();
+            if (k2 === 1) run = run.slice(0);
+            run.forEach(function (v) { snake.push(at(k2, v)); });
+          }
+          snake = thin(snake);
+          paths.push(snake);
+        }
+        var ex = RL.extrudeFlat(paths, { width: o.width, height: o.layer, baseZ: z0 });
         if (!ex.ok) return { ok: false, reason: 'it would not extrude: ' + ex.reason };
+        var len = bd.len;
         return { ok: true, soup: ex.tris, layer: { role: role, angleDeg: phi, z0: z0, z1: z0 + o.layer,
-                 pieces: [{ kind: 'band', sizeMm: [bd.len, wd.W], areaMm2: bd.len * wd.W, perimMm: 2 * (bd.len + wd.W), caps: 0, lines: wd.n, loop: poly, snake: null }],
-                 loopMm: [bd.len, wd.W], lines: wd.n, linesMm: wd.n * bd.len, lengthMm: wd.n * bd.len, shortestMm: bd.len,
-                 paths: [poly], widthMm: wd.W, beads: wd.n, advanceMm: wd.a } };
+                 pieces: [{ kind: 'strip', sizeMm: [len, W], areaMm2: len * W, perimMm: 2 * (len + W), caps: 0, lines: n, loop: loop, snake: snake }],
+                 loopMm: [len, W], lines: n, linesMm: n * len, lengthMm: n * len, shortestMm: len,
+                 paths: paths, widthMm: W, beads: n, pitchMm: pt } };
       }
       /* THE GAP, MEASURED: against the piece's triangles near the stair (each
-         measure boxes every triangle it is handed); a band nearer than the gap
+         measure boxes every triangle it is handed); a strip nearer than the gap
          moves up the slope, a step at a time, and is built again */
-      var reachG = o.gap + 0.1, built = {}, minD = Infinity;
-      var zLoC = zTopOf(mA) - 3 * o.layer - o.capRise - 1, zHiC = zTopOf(mB) + 1;
+      var reachG = o.gap + 0.1, minD = Infinity, built = {};
+      var zLoC = o.plateZ - 1, zHiC = zTopOf(mB) + 1;
       var nearSoups = obstacles.map(function (B) {
         var keep = [];
         for (var i = 0; i < B.length; i += 9) {
@@ -2025,171 +2150,408 @@
         return new Float32Array(keep);
       }).filter(function (B) { return B.length >= 9; });
       function nearest(soup) {
-        var dmin = Infinity;
-        nearSoups.forEach(function (B) { dmin = Math.min(dmin, exactDistance(soup, B, reachG, beat).mm); });
-        return dmin;
+        var best = { mm: Infinity, at: null };
+        nearSoups.forEach(function (B) { var d = exactDistance(soup, B, reachG, beat); if (d.mm < best.mm) best = d; });
+        return best;
       }
-      function solveBand(m, z0, role, wd) {
+      function solveStrip(m, z0, role, n) {
         for (var it = 0; it < 16; it++) {
-          var b = bandBuild(m, z0, role, wd);
+          var b = stripBuild(m, z0, role, n, adv[m] != null ? pitchAt(m, n) : null);
           if (!b.ok) return b;
-          var d = nearest(b.soup);
+          var d = nearest(b.soup).mm;
           if (d >= o.gap - 1e-5) { b.minMm = d; return b; }
           lay[m].band.shift = (lay[m].band.shift || 0) + Math.max(STAIR_STEP_MM, o.gap - d);
         }
         return { ok: false, reason: 'the gap would not hold at z ' + (z0 + o.layer).toFixed(2) };
       }
-      /* how far under the part a built band's back edge lies: measured, up
-         from its top along its back edge (the estimate from the advance is a
-         layer's rounding off) */
-      function backGap(m, wd) {
-        var bd = lay[m].band, worst = 0;
-        bd.pts.forEach(function (pt) {
-          var q = atUV(pt.f + (bd.shift || 0) + wd.W, pt.v), h = firstHit(q[0], q[1], zTopOf(m), 5);
-          if (isFinite(h)) worst = Math.max(worst, h);
-        });
-        return worst;
-      }
-      var widths = {};
-      for (var m4 = mLo; m4 <= mTop; m4++) widths[m4] = widthAt(m4);
-      for (var m5 = mLo; m5 <= mTop; m5++) {
-        var sv = solveBand(m5, zTopOf(m5) - o.layer, 'interface', widths[m5]);
-        /* a band whose back edge lies too far under the part takes a bead
-           less; one line that still does is a layer the stair has not begun */
-        while (sv.ok && backGap(m5, widths[m5]) > STAIR_BACK_MM + 0.01 && widths[m5].n > 1) {
-          var n2 = widths[m5].n - 1;
-          widths[m5] = { n: n2, W: n2 === 1 ? o.width : n2 * bead, a: widths[m5].a, fits: true };
-          lay[m5].band.shift = 0;
-          sv = solveBand(m5, zTopOf(m5) - o.layer, 'interface', widths[m5]);
+      /* the strips: built, the gap solved (a band moves up the slope), and
+         their line counts read again from where the bands now lie - twice */
+      var lines = {}, adv = {};
+      /* the top: no strip runs past the part's outline and one line */
+      while (mTop - mLo + 1 > 2 && widthOf(2) > roomAt(mTop) + bead + 1e-9) mTop--;
+      for (var m4 = mLo; m4 <= mTop; m4++) adv[m4] = advanceAt(m4);
+      planWidths();
+      for (var pass = 0; pass < 2; pass++) {
+        for (var m5 = mLo; m5 <= mTop; m5++) {
+          var sv = solveStrip(m5, zTopOf(m5) - o.layer, 'interface', lines[m5]);
+          if (!sv.ok) { if (m5 - mLo >= 2) { mTop = m5 - 1; break; } return null; }
+          built[m5] = sv;
         }
-        if (sv.ok && m5 === mLo && mTop - mLo + 1 > 2 && backGap(m5, widths[m5]) > STAIR_BACK_MM + 0.01) { mLo++; continue; }
-        if (!sv.ok) { if (m5 - mLo >= 2) { mTop = m5 - 1; break; } return null; }
-        built[m5] = sv; minD = Math.min(minD, sv.minMm);
+        var was = JSON.stringify(plan);
+        for (var m6 = mLo; m6 <= mTop; m6++) adv[m6] = advanceAt(m6);
+        planWidths();
+        if (JSON.stringify(plan) === was) break;
+      }
+      for (var m7 = mLo; m7 <= mTop; m7++) {
+        if (!built[m7] || built[m7].layer.beads !== lines[m7] || Math.abs(built[m7].layer.pitchMm - pitchAt(m7, lines[m7])) > 1e-9) {
+          var sv2 = solveStrip(m7, zTopOf(m7) - o.layer, 'interface', lines[m7]);
+          if (!sv2.ok) return null;
+          built[m7] = sv2;
+        }
+        built[m7].layer.advanceMm = adv[m7];
+        minD = Math.min(minD, built[m7].minMm);
       }
       /* the transition: the lowest strip again, one layer under it */
-      var zCap = zTopOf(mLo) - 2 * o.layer;
-      var tb = bandBuild(mLo, zCap, 'transition', widths[mLo]);
+      var zTr = zTopOf(mLo) - 2 * o.layer;
+      var tb = stripBuild(mLo, zTr, 'transition', lines[mLo], pitchAt(mLo, lines[mLo]));
       if (!tb.ok) return null;
-      var dT = nearest(tb.soup);
+      var dT = nearest(tb.soup).mm;
       if (!(dT >= o.gap - 1e-5)) return null;
       minD = Math.min(minD, dT);
-      /* WHAT HOLDS EACH STRIP UP. A strip rests on the strip below where it
-         lies over it; the rest of it - its leading part, up the slope, half a
-         line or more wide - is held by a tip: every STAIR_TIP_MM or nearer
-         along it, its column's down-slope face at the strip's front edge (so
-         its top keeps the gap where the part comes lowest), its top the
-         strip's underside. The tips are planned as a tree of their own
-         (nso_support_gridpack.js), so the tree grows with the stair: the
-         stair's lean is never what holds it. The lowest strip stands on its
-         transition and the caps under it. */
-      var want = [], restMm = {};
-      /* where along a band its tips go: STAIR_TIP_MM apart or nearer, each
-         holding the stretch of band round it (a band L long has ceil(L /
-         STAIR_TIP_MM) tips, at the middles of equal stretches: 2 on the
-         arc's 9.75 mm), the next strip's set a quarter stretch along, the
-         one after a quarter back - so a column does not stand straight over
-         the one a layer below it (Bambu's own: ~1.4 tops a strip, 5 mm apart) */
-      function tipVs(bd, m) {
-        var nT = Math.max(1, Math.ceil(bd.len / STAIR_TIP_MM - 1e-9)), step = bd.len / nT, sh2 = [0, 0.25, 0, -0.25][m % 4] * step, out = [];
-        for (var k = 0; k < nT; k++) out.push(Math.min(bd.v1 - o.side / 2, Math.max(bd.v0 + o.side / 2, bd.v0 + (k + 0.5) * step + sh2)));
-        return out;
-      }
-      for (var m6 = mLo; m6 <= mTop; m6++) {
-        var bd6 = lay[m6].band, W6 = widths[m6].W, Wb = m6 > mLo ? widths[m6 - 1].W : 0, rs = [];
-        var under = m6 > mLo ? lay[m6 - 1].band : null;
-        bd6.pts.forEach(function (pt) {
-          var fb = frontAt(under, pt.v);
-          rs.push(fb == null ? 0 : Math.max(0, Math.min(fb + Wb, pt.f + (bd6.shift || 0) + W6) - Math.max(fb, pt.f + (bd6.shift || 0))));
-        });
-        rs.sort(function (x, y) { return x - y; });
-        restMm[m6] = rs[rs.length >> 1];
-        /* the lowest strip stands on its transition, the transition on the
-           carriers' caps and on tips of its own */
-        var zt = m6 === mLo ? zTopOf(mLo) - 2 * o.layer : zTopOf(m6) - o.layer;
-        tipVs(bd6, m6 - mLo).forEach(function (v) {
-          var f = frontAt(bd6, v), fb2 = frontAt(under, v);
-          var lo2 = fb2 == null ? f : Math.max(f, fb2 + Wb), hi2 = f + W6;
-          if (hi2 - lo2 < o.width / 2) return;
-          var c = Math.max((lo2 + hi2) / 2, f + o.side / 2), xy = atUV(c, v);
-          want.push({ p: [xy[0], xy[1], zt], strip: m6 });
-        });
-      }
-      /* THE CARRIERS of the lowest strip: the tips under it (a mm round its
-         band), each with its cap at z_cap */
-      var carriers = group.filter(function (t) { return bandHolds(mLo, t.contact, widths[mLo].W, 1); });
-      if (!carriers.length) return null;
-      carriers.forEach(function (t) {
-        var pts = columns[t.col].pts;
-        t.top = colAxisAt(pts, zCap); t.capFoot = colAxisAt(pts, zCap - o.capRise);
-      });
-      carriers.forEach(function (t) {
-        var nnTop = Infinity;
-        carriers.forEach(function (u) { if (u !== t) nnTop = Math.min(nnTop, Math.hypot(u.top[0] - t.top[0], u.top[1] - t.top[1])); });
-        var w = Math.min(o.capMax, Math.max(o.capMin, nnTop - CAP_SPACE_MM));
-        t.cap = { c: t.top.slice(), b: t.capFoot.slice(), w: w, z0: zCap - o.capRise, z1: zCap, footD: CAP_FOOT * o.side, band: CAP_BAND_MM, nnMm: nnTop, why: null, slidMm: 0 };
-      });
-      /* caps never overlap (THE CAPS) */
-      for (var pass2 = 0, moved = true; moved && pass2 < 8; pass2++) {
-        moved = false;
-        for (var ia = 0; ia < carriers.length; ia++) for (var ib = ia + 1; ib < carriers.length; ib++) {
-          var CA = carriers[ia].cap, CB = carriers[ib].cap, dd = Math.hypot(CA.c[0] - CB.c[0], CA.c[1] - CB.c[1]) - CAP_PART_MM;
-          if ((CA.w + CB.w) / 2 <= dd + 1e-9) continue;
-          var span = Math.max(dd, 0);
-          if (CA.w <= span) CB.w = 2 * span - CA.w; else if (CB.w <= span) CA.w = 2 * span - CB.w; else { CA.w = span; CB.w = span; }
-          CA.why = CB.why = 'held short of a neighbour ' + (dd + CAP_PART_MM).toFixed(2) + ' mm away'; moved = true;
-        }
-      }
-      /* every cap measured, narrowed until it keeps the gap */
-      carriers.forEach(function (t) {
-        for (var it2 = 0; it2 < 16 && t.cap; it2++) {
-          if (t.cap.w <= o.side + 1e-9) { t.cap = null; break; }
-          var hull = capHull(t.cap), bad = false;
-          nearSoups.forEach(function (B) { if (!bad && exactDistance(hull, B, o.gap + 0.1, beat, o.gap - 1e-5).under.length) bad = true; });
-          if (!bad) break;
-          t.cap.w = Math.max(o.side, t.cap.w - CAP_STEP_MM); t.cap.why = 'narrowed off the piece (measured)';
-        }
-        if (t.cap && t.cap.w <= o.side + 1e-9) t.cap = null;
-        if (!t.cap) { var cp = cutPath(columns[t.col].pts, zCap, o.side, o.side); t.top = [cp[0][0], cp[0][1]]; t.capWhy = 'no room for a cap: the column\'s own top'; }
-        else t.capWhy = t.cap.why;
-      });
-      /* a carrier with no cap stands its bare top at z_cap: measured too, and
-         one nearer the piece than the gap carries nothing */
-      carriers = carriers.filter(function (t) {
-        if (t.cap) return true;
-        var d2 = o.side * Math.SQRT2, hull = capHull({ c: t.top, b: t.top, w: d2, footD: d2, z0: zCap - o.side, z1: zCap, band: 0 }), bad = false;
-        nearSoups.forEach(function (B) { if (!bad && exactDistance(hull, B, o.gap + 0.1, beat, o.gap - 1e-5).under.length) bad = true; });
-        return !bad;
-      });
-      if (!carriers.length) return null;
-      /* the lowest strip's own tips keep off its carriers' caps and tops */
-      want = want.filter(function (w) {
-        if (w.strip !== mLo) return true;
-        return carriers.every(function (t) {
-          var r0 = (t.cap ? t.cap.w / 2 : o.side * Math.SQRT1_2) + o.side * Math.SQRT1_2 + CAP_PART_MM;
-          return Math.hypot(w.p[0] - t.top[0], w.p[1] - t.top[1]) > r0;
-        });
-      });
-      /* each tip's layer: the lowest strip of the stair whose band holds it */
-      group.forEach(function (t) {
-        t.stairM = null;
-        for (var m7 = mLo; m7 <= mTop; m7++) if (bandHolds(m7, t.contact, widths[m7].W, 1)) { t.stairM = m7; break; }
-      });
-      /* the stair, as a level: its layers bottom up, the transition first */
+      tb.minMm = dT;
+
+      /* THE BODY (see THE BODY): under every strip, from the trunks up */
+      var body = bodyOf();
+      if (!body) return null;
+      minD = Math.min(minD, body.minD);
+
+      /* the stair, as a level: the transition, the strips bottom up, then the body's layers bottom up */
       var layers = [tb.layer];
-      tb.layer.soup = tb.soup;
+      tb.layer.soup = tb.soup; tb.layer.minDistanceMm = dT;
       for (var m8 = mLo; m8 <= mTop; m8++) {
         var Ly = built[m8].layer;
-        Ly.soup = built[m8].soup; Ly.overlapMm = m8 > mLo ? restMm[m8] : null; Ly.minDistanceMm = built[m8].minMm;
-        Ly.tips = want.filter(function (w) { return w.strip === m8; }).length;
+        Ly.soup = built[m8].soup; Ly.minDistanceMm = built[m8].minMm;
         layers.push(Ly);
       }
+      body.layers.forEach(function (Lb) { layers.push(Lb); });
+      joined.forEach(function (J) { J.res.layers.forEach(function (Lj) { layers.push(Lj); }); });
       var zTopStair = zTopOf(mTop);
-      var held = group.filter(function (t) { return carriers.indexOf(t) < 0; });
-      return { group: group, carriers: carriers, held: held, zCap: zCap, zBase: zCap, zTop: zTopStair, layers: layers, minD: minD,
+      group.forEach(function (t) {
+        t.stairM = null;
+        for (var m9 = mLo; m9 <= mTop; m9++) if (bandHolds(m9, t.contact, widthOf(lines[m9]), 1)) { t.stairM = m9; break; }
+      });
+      var zBot = body.zBottom;
+      joined.forEach(function (J) { J.merged = true; });
+      return { group: group, carriers: [], held: reach.slice(), joined: joined, zCap: zBot, zBase: zBot, zTop: zTopStair, layers: layers, minD: minD,
                lines: { angleDeg: phi, stair: true, slopeDeg: slopeDeg, droppedShare: 0, bare: 0, pieces: layers.length, tried: [] },
-               stair: { slopeDeg: slopeDeg, angleDeg: phi, mLo: mLo, mTop: mTop, strips: mTop - mLo + 1, topMm: zTopStair,
-                        tips: want.map(function (w) { return { p: w.p, strip: w.strip - mLo }; }),
+               stair: { slopeDeg: slopeDeg, angleDeg: phi, mLo: mLo, mTop: mTop, strips: mTop - mLo + 1, topMm: zTopStair, tips: [],
+                        body: { pitchMm: body.pitchMm, layers: body.layers.length, zBottom: zBot, lineMm: zTopOf(mLo - 1) + o.gap,
+                                trunks: body.trunks, ribs: body.ribs, loops: body.loops, fails: body.fails,
+                                joined: joined.map(function (J) { return { zTop: J.res.zTop, zBase: J.res.zBase, tips: J.tips.length, layers: J.res.layers.length }; }) },
                         cutAbove: group.filter(function (t) { return t.stairM != null && t.stairM > mTop; }).length } };
+
+      /* THE BODY. The trees that hold only this stair's tips land their
+         trunks (nso_support_gridpack.js TRUNKS) under it; each trunk rises to
+         one height and the body stands on it, widening at 45 deg - half a line
+         a layer, so every layer's walls lie on the one under - until it fills
+         the shadow of the underside over the stair's line (the transition's
+         top and the gap), clipped to the part's outline plus one line, and
+         kept STAIR_BODY_KEEP_MM off the part beside it. Over the stair's
+         layers its front stands a channel behind each strip, so the body's
+         front wall lies one pitch behind the strip's back line: the next
+         strip's lines lie over the two of them. A layer of it is a loop round
+         its outline and ribs up the slope inside, STAIR_BODY_PITCH_MM apart
+         (Bambu's support, measured), each run from loop to loop. */
+      function bodyOf() {
+        var axes = opts.trunkAxes || [], law = opts.trunkLaw || null;
+        if (!law) return null;
+        var trees = {};
+        reach.forEach(function (t) { var cl = columns[t.col]; if (cl && cl.tree != null && !treeOthers[cl.tree]) trees[cl.tree] = true; });
+        var legs = axes.filter(function (a) { return a.plate && trees[a.tree]; });
+        if (!legs.length) return null;
+        var zLine = zTopOf(mLo - 1) + o.gap, H = zTopOf(mTop), n = nx * ny;
+        var rLaw = function (z) { return law.tipMm / 2 + law.tan * Math.max(0, H - z); };
+        var Rk = Math.ceil(STAIR_BODY_KEEP_MM / CELL_MM + 1e-9);
+        /* the chamfer distance (cells) from every cell to the nearest set one */
+        function dist(mask) {
+          var D = new Float32Array(n), BIG = 1e9, S2 = Math.SQRT2, i, j, q, d, e;
+          for (q = 0; q < n; q++) D[q] = mask[q] ? 0 : BIG;
+          for (j = 0; j < ny; j++) for (i = 0, q = j * nx; i < nx; i++, q++) {
+            d = D[q];
+            if (d === 0) continue;
+            if (i > 0 && (e = D[q - 1] + 1) < d) d = e;
+            if (j > 0) {
+              if ((e = D[q - nx] + 1) < d) d = e;
+              if (i > 0 && (e = D[q - nx - 1] + S2) < d) d = e;
+              if (i < nx - 1 && (e = D[q - nx + 1] + S2) < d) d = e;
+            }
+            D[q] = d;
+          }
+          for (j = ny - 1; j >= 0; j--) for (i = nx - 1, q = j * nx + nx - 1; i >= 0; i--, q--) {
+            d = D[q];
+            if (d === 0) continue;
+            if (i < nx - 1 && (e = D[q + 1] + 1) < d) d = e;
+            if (j < ny - 1) {
+              if ((e = D[q + nx] + 1) < d) d = e;
+              if (i < nx - 1 && (e = D[q + nx + 1] + S2) < d) d = e;
+              if (i > 0 && (e = D[q + nx - 1] + S2) < d) d = e;
+            }
+            D[q] = d;
+          }
+          return D;
+        }
+        /* the shadow at the layer whose top is zt: a cell whose column, from
+           the gap under the layer to the gap over it, holds nothing of the
+           piece, with the underside over it at or over the stair's line -
+           grown a line past the outline, kept off the piece beside it, and
+           near the stair's tips; less every other support's column */
+        function shadow(zt) {
+          var za = zt - o.layer - o.gap, zb = zt + o.gap, blk = new Uint8Array(n), cel = new Uint8Array(n);
+          for (var q = 0; q < n; q++) {
+            var L = iv[q], ce = Infinity, b = false;
+            for (var k = 0; k + 1 < L.length; k += 2) {
+              if (L[k] < zb && L[k + 1] > za) { b = true; break; }
+              if (L[k] >= zb && L[k] < ce) ce = L[k];
+            }
+            if (b) blk[q] = 1; else if (ce < Infinity && (ce >= zLine - 1e-9 || jUnder[q] < Infinity)) cel[q] = 1;
+          }
+          var dC = dist(cel), dB = dist(blk), M = new Uint8Array(n), grow = bead / CELL_MM + 1e-6;
+          for (var q2 = 0; q2 < n; q2++) if (dC[q2] <= grow && dB[q2] > Rk && near[q2] && !(zt > jNear[q2] + 1e-6 && za < jTop[q2])) M[q2] = 1;
+          foreign.forEach(function (cl) {
+            var rad = cl.side * Math.SQRT1_2 + COLUMN_CLEAR_MM + CELL_MM, p = cl.pts;
+            for (var k2 = 0; k2 < p.length; k2++) {
+              var A = p[k2], B = p[Math.min(k2 + 1, p.length - 1)];
+              if (Math.max(A[2], B[2]) + cl.side < za || Math.min(A[2], B[2]) - cl.side > zb) continue;
+              var i0 = Math.max(0, Math.floor((Math.min(A[0], B[0]) - rad - ox) / CELL_MM)), i1 = Math.min(nx - 1, Math.ceil((Math.max(A[0], B[0]) + rad - ox) / CELL_MM));
+              var j0 = Math.max(0, Math.floor((Math.min(A[1], B[1]) - rad - oy) / CELL_MM)), j1 = Math.min(ny - 1, Math.ceil((Math.max(A[1], B[1]) + rad - oy) / CELL_MM));
+              for (var jy = j0; jy <= j1; jy++) for (var ix = i0; ix <= i1; ix++) {
+                if (segDist2([ox + ix * CELL_MM, oy + jy * CELL_MM], A, B) <= rad) M[jy * nx + ix] = 0;
+              }
+            }
+          });
+          return M;
+        }
+        function cellXY(q) { var i = q % nx; return [ox + i * CELL_MM, oy + ((q - i) / nx) * CELL_MM]; }
+        /* THE LEGS' HEIGHT: one for all, the highest from which their cones
+           cover the shadow under the transition, a line to spare; lower for a
+           leg the piece stops first (its trunk's law and STAIR_BODY_KEEP_MM
+           round its axis, read on the raster every half millimetre) */
+        var full = shadow(zTopOf(mLo - 2)), Rstar = 0;
+        for (var q = 0; q < n; q++) {
+          if (!full[q]) continue;
+          var c = cellXY(q), dm = Infinity;
+          legs.forEach(function (a) { dm = Math.min(dm, Math.hypot(c[0] - a.c[0], c[1] - a.c[1])); });
+          Rstar = Math.max(Rstar, dm);
+        }
+        var zFull = zTopOf(mLo - 2) - o.layer, kTop = null, needs = [{ z: zFull, R: Rstar }];
+        /* ...and under each joined sheet, by its z_base */
+        joined.forEach(function (J) {
+          var Rj = 0;
+          for (var q = 0; q < n; q++) {
+            if (!(jUnder[q] < Infinity) || !near[q]) continue;
+            var c = cellXY(q), dm = Infinity;
+            legs.forEach(function (a) { dm = Math.min(dm, Math.hypot(c[0] - a.c[0], c[1] - a.c[1])); });
+            Rj = Math.max(Rj, dm);
+          }
+          needs.push({ z: J.res.zBase - o.layer, R: Rj });
+        });
+        for (var k = mLo - 3; k > 0; k--) {
+          var zt0 = zTopOf(k);
+          if (needs.every(function (nd) { return rLaw(zt0) + (nd.z - zt0) >= nd.R + bead; })) { kTop = k; break; }
+        }
+        if (kTop == null) return null;
+        function clearTo(a, kMax) {
+          for (var k3 = 1; k3 <= kMax; k3++) {
+            var z = zTopOf(k3), R = rLaw(z) / law.cosN + STAIR_BODY_KEEP_MM;
+            var i0 = Math.max(0, Math.floor((a.c[0] - R - ox) / CELL_MM)), i1 = Math.min(nx - 1, Math.ceil((a.c[0] + R - ox) / CELL_MM));
+            var j0 = Math.max(0, Math.floor((a.c[1] - R - oy) / CELL_MM)), j1 = Math.min(ny - 1, Math.ceil((a.c[1] + R - oy) / CELL_MM));
+            for (var jy = j0; jy <= j1; jy++) for (var ix = i0; ix <= i1; ix++) {
+              if (Math.hypot(ox + ix * CELL_MM - a.c[0], oy + jy * CELL_MM - a.c[1]) > R) continue;
+              var L = iv[jy * nx + ix];
+              for (var e = 0; e + 1 < L.length; e += 2) if (L[e] < z + o.layer && L[e + 1] > z - o.layer) return k3 - 2;
+            }
+          }
+          return kMax;
+        }
+        var trunks = legs.map(function (a) {
+          var kt = clearTo(a, kTop);
+          return { tree: a.tree, c: a.c.slice(), k: kt, zTop: zTopOf(kt), r: rLaw(zTopOf(kt)) };
+        }).filter(function (t) { return t.k > 0; });
+        if (!trunks.length) return null;
+        var mB0 = Math.min.apply(null, trunks.map(function (t) { return t.k; })) + 1;
+        var P = STAIR_BODY_PITCH_MM, out = [], dmin = Infinity, nRibs = 0, nLoops = 0, bodyFails = [];
+        for (var m = mB0; m <= mTop; m++) {
+          beat();
+          var zt = zTopOf(m), zb0 = zt - o.layer, M = m <= mLo - 2 ? (m === mLo - 2 ? full : shadow(zt)) : shadow(zt);
+          if (m === mLo - 2) M = M.slice();
+          /* the legs' cones */
+          for (var q3 = 0; q3 < n; q3++) {
+            if (!M[q3]) continue;
+            var c3 = cellXY(q3), inCone = false;
+            for (var t3 = 0; t3 < trunks.length && !inCone; t3++) {
+              var T = trunks[t3];
+              if (zb0 < T.zTop - 1e-9) continue;
+              if (Math.hypot(c3[0] - T.c[0], c3[1] - T.c[1]) <= T.r - STAIR_BODY_ON_MM + (zb0 - T.zTop)) inCone = true;
+            }
+            if (!inCone) M[q3] = 0;
+          }
+          /* over the stair: a channel round the strip (the transition's, a
+             layer under the lowest) - in front of it, the part, or a flat
+             sheet the body holds */
+          var ms = m >= mLo ? m : (m === mLo - 1 ? mLo : null);
+          if (ms != null) {
+            var Wd = built[ms].layer.widthMm + CH, sh = lay[ms].band.shift || 0;
+            for (var q4 = 0; q4 < n; q4++) {
+              if (!M[q4]) continue;
+              var c4 = cellXY(q4), f4 = frontOf(ms, vOf(c4)), u4 = uOf(c4);
+              if (f4 != null && u4 < f4 + sh + Wd && u4 > f4 + sh - CH) M[q4] = 0;
+            }
+          }
+          var res = null;
+          for (var it = 0; it < 6; it++) {
+            res = bodyLayer(M, zb0);
+            if (!res) break;
+            var d = nearest(res.soup);
+            res.minMm = d.mm;
+            if (d.mm >= o.gap - 1e-5) break;
+            /* nearer the piece than the gap: the cells round the nearest point go */
+            var rr = (o.gap + o.width) / CELL_MM;
+            for (var q5 = 0; q5 < n; q5++) {
+              if (!M[q5]) continue;
+              var c5 = cellXY(q5);
+              if (Math.hypot(c5[0] - d.at[0], c5[1] - d.at[1]) <= rr * CELL_MM) M[q5] = 0;
+            }
+            res = null;
+          }
+          if (!res) continue;
+          dmin = Math.min(dmin, res.minMm);
+          nRibs += res.ribs; nLoops += res.loops;
+          out.push({ role: 'body', angleDeg: phi, z0: zb0, z1: zt, soup: res.soup, paths: res.paths, ribs: res.ribs, loops: res.loops,
+                     areaMm2: res.areaMm2, lengthMm: res.lengthMm, widthMm: o.width, minDistanceMm: res.minMm, lines: res.ribs + res.loops });
+        }
+        if (!out.length) return null;
+        return { layers: out, minD: dmin, pitchMm: P, zBottom: out[0].z0, ribs: nRibs, loops: nLoops, fails: bodyFails,
+                 trunks: trunks.map(function (t) { return { tree: t.tree, c: t.c, zTop: t.zTop, rMm: t.r }; }) };
+
+        /* A LAYER OF THE BODY from its cells: the loop's centreline is the
+           outline half a line in (the region opened by half a line, so no neck
+           brings two walls within a line), ribs along B at multiples of P in
+           v, each from loop to loop */
+        function bodyLayer(M0, z0) {
+          var hw = o.width / 2 / CELL_MM, D0 = dist(invert(M0)), M2 = new Uint8Array(n);
+          for (var q6 = 0; q6 < n; q6++) M2[q6] = D0[q6] > hw ? 1 : 0;
+          var D1 = dist(invert(M2)), M3 = new Uint8Array(n);
+          for (var q7 = 0; q7 < n; q7++) M3[q7] = D1[q7] > hw ? 1 : 0;
+          var D2 = dist(M3);
+          for (var q8 = 0; q8 < n; q8++) M3[q8] = D2[q8] <= hw ? 1 : 0;
+          for (var q9 = 0; q9 < n; q9++) if (!M2[q9]) M3[q9] = 0;
+          var area = 0;
+          for (var qa = 0; qa < n; qa++) if (M0[qa]) area += CELL_MM * CELL_MM;
+          var loops = traceLoops(M3).map(function (lp) { return longEdges(lp, 1.1); }).filter(function (lp) { return lp.length >= 4 && Math.abs(polyArea(lp)) >= 4 * o.width * o.width; });
+          if (!loops.length) return null;
+          var soups = [], paths = [], len = 0;
+          loops.forEach(function (lp) {
+            var cl = lp.concat([lp[0]]);
+            var ex = RL.extrudeFlat([cl], { width: o.width, height: o.layer, baseZ: z0 });
+            /* a sharp corner's joint needs more: its edges longer again */
+            for (var kk = 2; !ex.ok && kk <= 4; kk++) {
+              var l2 = longEdges(lp, kk);
+              if (l2.length < 4) break;
+              cl = l2.concat([l2[0]]);
+              ex = RL.extrudeFlat([cl], { width: o.width, height: o.layer, baseZ: z0 });
+            }
+            if (ex.ok) soups.push(ex.tris);
+            else {
+              /* still refused: each edge its own shell (overlapping at the corners, as the card's parts do) */
+              bodyFails.push(ex.reason);
+              for (var s = 0; s + 1 < cl.length; s++) {
+                var e1 = RL.extrudeFlat([[cl[s], cl[s + 1]]], { width: o.width, height: o.layer, baseZ: z0 });
+                if (e1.ok) soups.push(e1.tris);
+              }
+            }
+            paths.push(cl);
+            for (var s2 = 0; s2 + 1 < cl.length; s2++) len += Math.hypot(cl[s2 + 1][0] - cl[s2][0], cl[s2 + 1][1] - cl[s2][1]);
+          });
+          /* the ribs */
+          var ribs = [], step = CELL_MM / 2;
+          for (var kv = Math.ceil(vmin / P); kv * P <= vmax; kv++) {
+            var v = kv * P, run = null;
+            for (var u = umin; u <= umax + step; u += step) {
+              /* a rib keeps a pitch off the loop's sides: it runs where the
+                 region holds a pitch either side of it */
+              var p = atUV(u, v), inn = u <= umax && maskAt(M3, p) && maskAt(M3, atUV(u, v - o.pitch)) && maskAt(M3, atUV(u, v + o.pitch));
+              if (inn && !run) run = [u, u];
+              else if (inn) run[1] = u;
+              else if (run) { if (run[1] - run[0] >= 2 * o.width) ribs.push([atUV(run[0], v), atUV(run[1], v)]); run = null; }
+            }
+          }
+          if (ribs.length) {
+            var er = RL.extrudeFlat(ribs, { width: o.width, height: o.layer, baseZ: z0 });
+            if (er.ok) soups.push(er.tris);
+            else ribs.forEach(function (rb) { var e2 = RL.extrudeFlat([rb], { width: o.width, height: o.layer, baseZ: z0 }); if (e2.ok) soups.push(e2.tris); });
+            ribs.forEach(function (rb) { paths.push(rb); len += Math.hypot(rb[1][0] - rb[0][0], rb[1][1] - rb[0][1]); });
+          }
+          return { soup: joinSoups(soups), paths: paths, ribs: ribs.length, loops: loops.length, areaMm2: area, lengthMm: len };
+        }
+        /* no edge of a loop shorter than a line and a tenth: a corner's
+           joint needs that much of each edge (nso_raster_lines.js
+           extrudeFlat's tight segment) - the vertex of the shortest edge
+           that sits nearer the line through its neighbours goes */
+        function longEdges(lp, k) {
+          var p = lp.slice(), minL = k * o.width;
+          for (var guard = 0; guard < lp.length && p.length > 4; guard++) {
+            var wi = -1, wl = minL;
+            for (var i = 0; i < p.length; i++) {
+              var a = p[i], b = p[(i + 1) % p.length], L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+              if (L < wl) { wl = L; wi = i; }
+            }
+            if (wi < 0) break;
+            var i1 = wi, i2 = (wi + 1) % p.length, N = p.length;
+            var d1 = segDist2(p[i1], p[(i1 - 1 + N) % N], p[(i1 + 1) % N]), d2 = segDist2(p[i2], p[(i2 - 1 + N) % N], p[(i2 + 1) % N]);
+            p.splice(d1 <= d2 ? i1 : i2, 1);
+          }
+          return p;
+        }
+        function invert(A) { var B = new Uint8Array(n); for (var q = 0; q < n; q++) B[q] = A[q] ? 0 : 1; return B; }
+        function maskAt(A, p) {
+          var i = Math.round((p[0] - ox) / CELL_MM), j = Math.round((p[1] - oy) / CELL_MM);
+          return i >= 0 && i < nx && j >= 0 && j < ny && A[j * nx + i] === 1;
+        }
+        function polyArea(P0) { var a = 0; for (var i = 0; i < P0.length; i++) { var p = P0[i], q = P0[(i + 1) % P0.length]; a += p[0] * q[1] - q[0] * p[1]; } return a / 2; }
+        /* a mask's outlines, outer and holes: the cell boundary walked edge
+           to edge (a cell is the square round its sample point), then the
+           staircase straightened (Douglas-Peucker, 0.6 of a cell) */
+        function traceLoops(A) {
+          var nextOf = new Map(), key = function (i, j) { return i + ',' + j; };
+          var has = function (i, j) { return i >= 0 && i < nx && j >= 0 && j < ny && A[j * nx + i] === 1; };
+          for (var j = 0; j < ny; j++) for (var i = 0; i < nx; i++) {
+            if (!has(i, j)) continue;
+            /* corners are (i, j) .. (i + 1, j + 1) in half-shifted cell units; counter-clockwise */
+            if (!has(i, j - 1)) push(key(i, j), [i + 1, j]);
+            if (!has(i + 1, j)) push(key(i + 1, j), [i + 1, j + 1]);
+            if (!has(i, j + 1)) push(key(i + 1, j + 1), [i, j + 1]);
+            if (!has(i - 1, j)) push(key(i, j + 1), [i, j]);
+          }
+          function push(k, to) { if (!nextOf.has(k)) nextOf.set(k, []); nextOf.get(k).push(to); }
+          var out2 = [];
+          nextOf.forEach(function (list, k0) {
+            while (list.length) {
+              var start = k0.split(',').map(Number), lp = [start], cur = list.pop(), guard = 0;
+              while (guard++ < 1e6) {
+                var kc = key(cur[0], cur[1]);
+                if (kc === k0) break;
+                lp.push(cur);
+                var nl = nextOf.get(kc);
+                if (!nl || !nl.length) { lp = null; break; }
+                cur = nl.pop();
+              }
+              if (lp && lp.length >= 4) out2.push(simplify(lp.map(function (c) { return [ox + (c[0] - 0.5) * CELL_MM, oy + (c[1] - 0.5) * CELL_MM]; }), 0.6 * CELL_MM));
+            }
+          });
+          return out2;
+        }
+        function simplify(pts, eps) {
+          var keep = new Uint8Array(pts.length); keep[0] = 1;
+          var far = 0, fd = -1;
+          for (var i = 1; i < pts.length; i++) { var dd = Math.hypot(pts[i][0] - pts[0][0], pts[i][1] - pts[0][1]); if (dd > fd) { fd = dd; far = i; } }
+          keep[far] = 1;
+          (function dp(a, b) {
+            if (b <= a + 1) return;
+            var bi = -1, bd = eps;
+            for (var i = a + 1; i < b; i++) { var dd = segDist2(pts[i], pts[a], pts[b]); if (dd > bd) { bd = dd; bi = i; } }
+            if (bi < 0) return;
+            keep[bi] = 1; dp(a, bi); dp(bi, b);
+          })(0, far);
+          (function dp2(a, b) {
+            if (b <= a + 1) return;
+            var bi = -1, bd = eps;
+            for (var i = a + 1; i < b; i++) { var dd = segDist2(pts[i % pts.length], pts[a], pts[b % pts.length]); if (dd > bd) { bd = dd; bi = i; } }
+            if (bi < 0) return;
+            keep[bi % pts.length] = 1; dp2(a, bi); dp2(bi, b);
+          })(far, pts.length);
+          return pts.filter(function (p, k) { return keep[k]; });
+        }
+      }
     }
 
     var stairsBuilt = opts.stairs === false ? [] : buildStairs();
@@ -2197,27 +2559,13 @@
       var L = { id: levels.length, first: st.zTop, tips: st.carriers, told: st.carriers.length, ok: true, stair: st,
                 res: { zTop: st.zTop, zBase: st.zBase, zCap: st.zCap, layers: st.layers, lines: st.lines }, minDistanceMm: st.minD };
       levels.push(L);
-      st.carriers.forEach(function (t) { t.mode = 'sheet'; t.level = L.id; t.why = null; t.carried = true; });
-      /* the tips above where the stair ends stay cut at the gap - unless that
-         cut would stand in a strip (a stair cut short under them), when the
-         stair holds them as well; the rest the stair holds */
+      /* every tip of the stair is held by its body: none is built, nor any
+         member that holds only such tips (nso_support_gridpack.js) */
       st.held.forEach(function (t) {
-        if (t.stairM != null && t.stairM <= st.stair.mTop) {
-          t.mode = 'drop'; t.level = L.id; t.cap = null; t.why = 'held by the stair: its strip rests on the strip below';
-          return;
-        }
-        if (t.stairM == null) return;
-        var top = cutPath(columns[t.col].pts, t.zu - o.gap, o.side)[0];
-        var hits = st.layers.some(function (Ly) {
-          if (Ly.z0 > top[2]) return false;
-          var reachTip = o.side * Math.SQRT1_2 + Ly.widthMm / 2 + 0.05;
-          return Ly.paths.some(function (pth) {
-            for (var q = 0; q + 1 < pth.length; q++) if (segDist2(top, pth[q], pth[q + 1]) <= reachTip) return true;
-            return false;
-          });
-        });
-        if (hits) { t.mode = 'drop'; t.level = L.id; t.cap = null; t.why = 'held by the stair: its cut would stand in a strip under it'; }
+        t.mode = 'drop'; t.level = L.id; t.cap = null; t.why = 'held by the stair\'s body';
       });
+      /* a flat sheet the body holds is the stair's: its layers are listed with it */
+      st.joined.forEach(function (J) { J.merged = true; });
     });
 
     /* the cut heights: a capped tip along its own leg, inside its cap (rise
@@ -2234,7 +2582,7 @@
         t.cutZ = t.zu - o.gap; t.cap = null;
       }
     });
-    var lv = levels.filter(function (L) { return L.ok; }).map(function (L) {
+    var lv = levels.filter(function (L) { return L.ok && !L.merged; }).map(function (L) {
       var mineTips = L.tips.filter(function (t) { return t.mode === 'sheet'; });
       var out = { id: L.id, zTop: L.res.zTop, zBase: L.res.zBase, zCap: L.res.zCap, tips: mineTips.map(function (t) { return t.i; }),
                caps: mineTips.filter(function (t) { return t.cap; }).map(function (t) { return { tip: t.i, c: t.cap.c, w: t.cap.w, nnMm: t.cap.nnMm }; }),
@@ -2251,7 +2599,7 @@
     return {
       ok: true, gapMm: o.gap, layerMm: o.layer, widthMm: o.width, pitchMm: o.pitch, epsMm: o.eps, tipSpacingMm: spacing,
       cap: { riseMm: o.capRise, minMm: o.capMin, maxMm: o.capMax, gapMaxMm: CAP_GAP_MAX_MM, tuckMm: CAP_TUCK_MM, foot: CAP_FOOT },
-      levels: lv, failed: levels.filter(function (L) { return !L.ok; }).map(function (L) { return { id: L.id, zTop: L.first, reason: L.reason }; }),
+      levels: lv, failed: levels.filter(function (L) { return !L.ok && !L.merged; }).map(function (L) { return { id: L.id, zTop: L.first, reason: L.reason }; }),
       tips: tips.map(function (t) {
         var cap = t.mode === 'sheet' && t.cap ? { c: t.cap.c, b: t.cap.b, w: t.cap.w, z0: t.cap.z0, z1: t.cap.z1, footD: t.cap.footD, band: t.cap.band, why: t.cap.why } : null;
         return { i: t.i, label: t.label, beacon: t.beacon, col: t.col, mode: t.mode, level: t.level, carried: t.mode === 'sheet' ? t.carried !== false : null,

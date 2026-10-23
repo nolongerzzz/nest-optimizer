@@ -211,8 +211,14 @@ changes, byte for byte:
 | `TRUNK_TIP_CLEAR_MM`, `TRUNK_TIP_REACH_MM` | 4, 5 | under any tip within 5 mm: under every cap (2 mm rise), the sheet and the gap |
 
 - **H** is the top of what the trunk holds up: its highest tip, or the top of
-  the sheet or stair a tip of it is under; a stair's own trees are as tall as
-  the stair. All three trunks under the arc are H 46.2.
+  the sheet or stair a tip of it is under.
+- **Under a stair's body** (supports-stair-body; docs/SUPPORT-INTERFACE.md
+  section 7): a tree that holds only a stair's tips keeps its landing member
+  (cut under the trunk's top) and its round trunk rises straight up its
+  axis to the body's bottom, H the stair's top - the body stands on it, 45
+  deg cones off each trunk's top. The stair grows no tree of its own any
+  more (`tp.stairTrunks` is empty). Under the arc: two trunks, both to z
+  28.4, H 46.0.
 - **How high.** From the pad up its STEM - the landing member, then at each
   merge the parent holding most of its tips - while the stem holds at least
   half of them: where the tree splits, the trunk ends. A taproot (a strut
@@ -226,14 +232,16 @@ changes, byte for byte:
   larger circle), the base's inscribed circle always pad. A trunk that comes
   within 0.1 mm of another support's solid makes the two one support, as
   pads too near to print apart do.
-- **Measured** (`support:foot`, 14 checks): on the arc, three trunks, 13.03 mm
-  across at the plate, to z 21.2, 26.2 and 33.0; at each of Bambu's 93 trunk
-  layers (z 0.48 - 25.02) every trunk of ours standing there is wider than
-  Bambu's, by 0.33 mm or more (12.69 against 12.35 at z 0.48, 6.08 against
-  5.75 at z 25.02); one pad, 614.2 mm2 against Bambu's 201.4. The
+- **Measured** (`support:foot`, 14 checks): on the arc (since
+  supports-stair-body), two trunks, to z 28.4 under the stair's body; at
+  each of Bambu's 93 trunk layers (z 0.48 - 25.02) every trunk of ours
+  standing there is wider than Bambu's, by 0.29 mm or more; one pad, 617.0
+  mm2 against Bambu's 201.4. The
   coupon: 14 trunks, 5.35 - 6.70 mm at the plate, its pad 578.3 -> 695.7 mm2,
-  covering the old one. Built with trunkGrowth off both are #265's bytes; with
-  it every part before is there byte for byte, then the trunks, then the pads.
+  covering the old one. Built with trunkGrowth off the coupon is #265's bytes
+  and the arc supports-stair-body's (its stair's body on the trunks' landing
+  members alone); with it every part before is there byte for byte, then the
+  trunks, then the pads.
 - **Not changed**: G-scope's support row and every build without the sheet
   (`solid()` on its own, the suites that weigh members and pads) build as
   before. NSO's slice of the arc's export lays more support a layer low down

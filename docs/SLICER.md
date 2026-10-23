@@ -376,11 +376,25 @@ right over the sheet that holds it.
   I2 is inside it - and past its 2 + 2 layers the transition runs on while a
   layer repeats the footprint of the one over it (a steep stair stands
   several layers alike). The next layer was grown by 0.5 mm, which hid each
-  strip's exposed edge under the next strip. The arc's stair: every one of
-  its 46 layers' bands interface or transition; the clip coupon unchanged
+  strip's exposed edge under the next strip. Since supports-stair-body each
+  strip is wider than the part's step over it, so the next strip covers all
+  of it but that step - at the arc's foot 0.2 mm, under a line: a stair's
+  top is what its next layer leaves of it, ungrown, opened only by
+  `supportSheet.stairOpenMm` (0.05 mm, a sliver); and from a stair's top
+  the strip is followed down only into an island that lies within the one
+  over it (grown a line, all but a tenth), not into the body behind it that
+  the strip's back edge grazes. The arc's stair: every one of its 47
+  layers' strips interface or transition; the clip coupon unchanged
   (`slicer:supports` 26 of 26). No wall, infill or overhang wall
   comes out of a support object: the same beads, one type, as Bambu prints
   support.
+- **Overhang, as a slicer types a wall** (`typeSupports`, supports-stair-body).
+  Each line of a support is also read against the layer under it - that
+  layer as the footprint it holds (closed by 0.5 mm, as above), grown by
+  half a line: the length of it over air, sampled every 0.1 mm, is the
+  path's `overhangMm`, and `P.sheet.overhangPaths` / `overhangMm` count them
+  by type. A line over air is what Bambu prints as an overhang wall when it
+  slices a support as an object. Typing only: the G-code is the same.
 - **The host is credited.** Each of the host's overhang islands is cut,
   layer by layer, by the closed tops of its supports within gap + one layer
   under it. The region carries `coveredMm2`, `coveredBy` (which support, how

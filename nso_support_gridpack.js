@@ -130,10 +130,11 @@
    carries beacons (ids), regionIds and landing.
    parts(plan, { interface: true }) (and solid()): a tip a STAIR holds by
          itself (sheet()'s mode 'drop', docs/SUPPORT-INTERFACE.md section 7)
-         is not built, nor any member that holds only such tips; the tips the
-         stair's strips want are planned as a tree of their own and built
-         after the plan's trunks (tp.stairTrunks; trunk numbers past the
-         plan's); every other tip that meets the
+         is not built, nor any member that holds only such tips: the stair's
+         body stands on the round trunks of the trees that hold only its
+         tips, each tree keeping its landing member and its trunk rising to
+         the body (tp.stairTrunks is empty since supports-stair-body: the
+         stair grows no tree of its own); every other tip that meets the
          part ends in a flat cap 2.5 - 4 mm across under
          nso_support_interface.js's SHEET - 2 transition and 2 interface
          layers at 0.84 mm, each a loop and a serpentine inside it, on the
@@ -447,8 +448,9 @@
     var reach = (opts.pickupReachMm == null ? bc.pitchMm * 1.05 : +opts.pickupReachMm) * (eager > 0 ? 1 : 0);
     var rest = !!opts.restOnModel;
     /* opts.mergeThroughCrowd: a member in a node's way that cannot join the
-       merge does not hold it up (a stair's own tree, a tip under every strip
-       a layer apart, is crowded everywhere: held to the usual rule it merged
+       merge does not hold it up (written for a stair's own tree - a tip
+       under every strip a layer apart, crowded everywhere - which the stair
+       no longer grows since supports-stair-body: held to the usual rule it merged
        nowhere and stood 93 struts on the plate; joining up to 8, or leaning
        45 deg, did not free it). Its legs may then pass through that member -
        support on support, kept as shells (shells(): the card's build, never
@@ -1822,7 +1824,14 @@
       layerMm: opts.layerMm, gapMm: opts.gapMm, pitchMm: opts.sheetPitchMm, angleDeg: opts.sheetAngleDeg, widthMm: opts.sheetWidthMm,
       capRiseMm: opts.capRiseMm, capMinMm: opts.capMinMm, capMaxMm: opts.capMaxMm,
       thickness: opts.thickness, crosshatch: opts.crosshatch, rasterLines: opts.rasterLines, beat: opts.beat,
-      progress: opts.sheetProgress
+      progress: opts.sheetProgress,
+      /* a stair's body stands on the round trunks of the trees that hold only
+         its tips (TRUNKS): where each lands, and the trunks' law */
+      trunkAxes: (p.trunks || []).map(function (tr, t) {
+        var m = p.members[tr.members[0]], e = m && m.path && m.path.length ? m.path[m.path.length - 1] : null;
+        return { tree: t, c: e ? [e[0], e[1]] : null, plate: tr.landing === 'plate' && !!e };
+      }).filter(function (a) { return a.c; }),
+      trunkLaw: { tipMm: TRUNK_TIP_MM, tan: Math.tan(TRUNK_ANGLE_DEG * Math.PI / 180), cosN: Math.cos(Math.PI / TRUNK_SIDES) }
     });
     if (!plan.ok) return plan;
     /* a tip's clearance is read on its corners, edge middles and face
@@ -1972,7 +1981,7 @@
                    minDistanceMm: L.minDistanceMm, solvedDropMm: L.solvedDropMm, stair: L.stair, held: L.held,
                    layers: L.layers.map(function (x) { return { role: x.role, angleDeg: x.angleDeg, z0: x.z0, z1: x.z1, lines: x.lines, lengthMm: x.lengthMm,
                                                                 widthMm: x.widthMm, overlapMm: x.overlapMm, beads: x.beads, advanceMm: x.advanceMm, tips: x.tips,
-                                                                linesMm: x.linesMm, loopMm: x.loopMm, pieces: (x.pieces || []).map(function (q) { return { kind: q.kind, sizeMm: q.sizeMm, areaMm2: q.areaMm2, perimMm: q.perimMm, caps: q.caps, lines: q.lines }; }), shortestMm: x.shortestMm, paths: x.paths }; }) };
+                                                                linesMm: x.linesMm, loopMm: x.loopMm, loops: x.loops, ribs: x.ribs, pitchMm: x.pitchMm, minDistanceMm: x.minDistanceMm, pieces: (x.pieces || []).map(function (q) { return { kind: q.kind, sizeMm: q.sizeMm, areaMm2: q.areaMm2, perimMm: q.perimMm, caps: q.caps, lines: q.lines }; }), shortestMm: x.shortestMm, paths: x.paths }; }) };
         })
       };
     }
@@ -2020,7 +2029,7 @@
     function leftOut(m) { return !!(sh && m.beacons && m.beacons.length && m.beacons.every(dropped)); }
     /* A trunk's record for growTrunks (TRUNKS): H, the top of what it holds
        up - its highest tip, the top of the sheet or stair a tip of it is
-       under, or (a stair's own tree) opts.trunkTopMm - and its stem's top:
+       under, or opts.trunkTopMm - and its stem's top:
        from the landing member up through the parent holding most of its
        tips (the lower id on a tie) while that parent holds TRUNK_SHARE of them */
     function stemOf(tr, root) {
@@ -2046,12 +2055,23 @@
       var top = cur.path[0][2] + (cur.kind === 'merge' || cur.kind === 'pickup' ? cur.side / 2 : 0);
       return { H: H, top: top, side: root.side, tips: null };
     }
+    /* A STAIR'S BODY stands on the round trunks of the trees that hold only
+       its tips (sheet()'s THE BODY): each such tree keeps its landing member,
+       cut under the trunk's top, and its trunk rises to that top, as tall as
+       the stair by its law */
+    var bodyLegs = {};
+    if (sh) sh.plan.levels.forEach(function (L) {
+      var B = L.stair && L.stair.body;
+      if (B) B.trunks.forEach(function (bt) { bodyLegs[bt.tree] = { zTop: bt.zTop, H: L.zTop }; });
+    });
     function step(t) {
-      var tr = p.trunks[t], parts = [], fingers = [];
+      var tr = p.trunks[t], parts = [], fingers = [], leg = bodyLegs[t];
       for (var i = 0; i < tr.members.length; i++) {
         var m = p.members[tr.members[i]];
-        if (leftOut(m)) continue;
-        var ms = sh && m.beacon != null && sh.byBeacon[m.beacon] ? sh.member(m) : memberSolid(P, m, foot);
+        var legOnly = leftOut(m) && leg && i === 0;
+        if (leftOut(m) && !legOnly) continue;
+        var ms = legOnly ? memberSolid(P, m, foot, m.path[0][2] > leg.zTop ? cleanPath(SIM(opts).cutPath(m.path, leg.zTop, m.side, m.side)) : m.path)
+          : sh && m.beacon != null && sh.byBeacon[m.beacon] ? sh.member(m) : memberSolid(P, m, foot);
         if (!ms.ok) return { ok: false, reason: ms.reason };
         m.points = ms.points;
         parts = parts.concat(ms.soups.map(function (x) { return { soup: x }; }));
@@ -2060,7 +2080,7 @@
              are drawn over every foot at once, in finish() (FEET) */
           var fp0 = footprintOf(ms.points[ms.points.length - 1], m.side);
           var ft = { key: t, trunk: t, c: fp0.c, r: fp0.r };
-          if (grow) ft.grow = stemOf(tr, m);
+          if (grow) ft.grow = leg ? { H: leg.H, top: leg.zTop, side: m.side, tips: null } : stemOf(tr, m);
           feet.push(ft);
         }
         if (m.pad) {
@@ -2119,36 +2139,10 @@
       return null;
     }
     function finish() {
-      /* THE STAIR'S TREE (sheet()'s THE STAIR): the tips each strip's leading
-         part wants, planned as a tree of their own - a beacon on each strip's
-         underside, the piece the obstacle (a column 1.2 mm across meets the
-         strips under its own: support on support, one support) - and built
-         as trunks after the plan's, standing on feet with them. Its trunks
-         hold no spot of the card's; each is joined to its stair. */
-      var stairTrunks = [], stairOf = {}, stairLog = [];
-      if (sh) sh.plan.levels.forEach(function (L) {
-        if (!L.stair || !L.stair.tips || !L.stair.tips.length) return;
-        var p2 = plan(opts.rawTris, Object.assign({}, opts, {
-          beacons: L.stair.tips.map(function (w, i) { return { p: w.p, n: [0, 0, -1], key: 'stair' + L.id + '.' + i }; }),
-          skipList: [], style: p.style, sideMm: p.sideMm, restOnModel: false, mergeThroughCrowd: true,
-          interface: false, onProgress: null }));
-        if (!p2.ok) { stairLog.push({ level: L.id, wanted: L.stair.tips.length, held: 0, reason: p2.reason }); return; }
-        var sp2 = trunkStepper(p2, Object.assign({}, opts, { interface: false, footPads: 'shared', onProgress: null, trunkGrowth: grow, trunkTopMm: L.zTop }));
-        if (!sp2.ok) { stairLog.push({ level: L.id, wanted: L.stair.tips.length, held: 0, reason: sp2.reason }); return; }
-        for (var t2 = 0; t2 < sp2.n; t2++) { var r2 = sp2.step(t2); if (r2) { stairLog.push({ level: L.id, reason: r2.reason }); return; } }
-        var f2 = sp2.finish(), base = p.trunks.length + stairTrunks.length;
-        f2.trunks.forEach(function (x) {
-          var T = base + x.trunk;
-          out.push({ trunk: T, parts: x.parts, fingerParts: [], fingers: 0 });
-          stairTrunks.push({ beacons: [], landing: p2.trunks[x.trunk].landing, stair: L.id });
-          (stairOf[L.id] = stairOf[L.id] || []).push(T);
-        });
-        f2.feet.forEach(function (f) { feet.push({ key: base + f.trunk, trunk: base + f.trunk, c: f.c, r: f.r, grow: f.grow }); });
-        stairLog.push({ level: L.id, wanted: L.stair.tips.length, held: p2.held != null ? p2.held : L.stair.tips.length - p2.unreachable.length,
-                        unreachable: p2.unreachable.length, trunks: p2.trunks.length, members: p2.members.filter(function (m) { return !m.dead; }).length });
-      });
-      /* THE TRUNKS: every built tip, the plan's and the stair trees', is
-         one the trunks end under (here, and in shareFeet() over every area) */
+      /* a stair holds no tree of its own: its body stands on the plan's trunks */
+      var stairTrunks = [];
+      /* THE TRUNKS: every built tip is one the trunks end under (here, and
+         in shareFeet() over every area) */
       var trunks = [];
       if (grow) {
         var tipZones = [];
@@ -2161,7 +2155,6 @@
         var inTrunk = {};
         p.trunks.forEach(function (tr) { tr.members.forEach(function (id) { inTrunk[id] = true; }); });
         p.stubs.forEach(function (s) { if (inTrunk[s.member] && !dropped(s.beacon)) tipZones.push(s.to.slice()); });
-        if (sh) sh.plan.levels.forEach(function (L) { ((L.stair && L.stair.tips) || []).forEach(function (w) { tipZones.push(w.p.slice()); }); });
         feet.forEach(function (f) { if (f.grow) f.grow.tips = tipZones; });
       }
       if (grow && feet.length && !shared) {
@@ -2200,19 +2193,17 @@
             var b = sh.plan.tips[ti].beacon;
             p.trunks.forEach(function (tr, k) { if (tr.beacons.indexOf(b) >= 0 && carriers.indexOf(k) < 0) carriers.push(k); });
           });
-          (stairOf[L.id] || []).forEach(function (T) { carriers.push(T); });
           out.push({ trunk: -1, sheet: L.id, carriers: carriers, parts: L.layers.map(function (x) { return { soup: x.soup, sheet: true }; }), fingers: 0 });
         });
       }
       var summ = sh ? sh.summary() : null;
-      if (summ) summ.stairTrees = stairLog;
       return { ok: true, trunks: out, fingersDropped: droppedFingers, pads: pads, padGroups: padGroups, stairTrunks: stairTrunks,
                feet: feet.map(function (f) { return f.grow ? { trunk: f.trunk, c: f.c, r: f.r, grow: f.grow } : { trunk: f.trunk, c: f.c, r: f.r }; }),
                trunkShells: trunks, sheet: summ };
     }
     return { ok: true, n: p.trunks.length, step: step, finish: finish };
   }
-  /* A trunk of the plan, or of a stair's own tree (numbered after the plan's) */
+  /* A trunk of the plan, or of tp.stairTrunks (numbered after the plan's; none since supports-stair-body) */
   function trunkOf(p, tp, t) { return p.trunks[t] || ((tp && tp.stairTrunks) || [])[t - p.trunks.length]; }
   /* The parts of every trunk at once - the sync path solid() has always taken. */
   function trunkParts(p, opts) {

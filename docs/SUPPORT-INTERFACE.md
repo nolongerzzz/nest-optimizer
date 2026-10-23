@@ -430,17 +430,14 @@ toolpath in segments of 2 mm or more. `support:audit` holds it (section 5).
 - Sloped and curved ceilings get a STAIR (section 7) where their tips' levels
   fail and they lie on one fall; a dome (no one fall) still has its tips cut
   at the gap.
-- The stair's tree carries up to 3.6 x Bambu's toolpath through its middle
-  (section 7): the planner merges a crowd of tips later than Bambu's slim
-  tree. Thinning it is a planner ticket.
-- The stair's tree merges through a crowd (`mergeThroughCrowd`): a leg may
-  pass through, or graze, a member it does not join. The card keeps every
-  part its own shell, so nothing changes in print; where a leg only grazes,
-  the weld - support:shells' reference - closes a sliver of void the shells
-  do not (the tilted box, z 6.10, 0.009 mm2), and support:shells counts no
-  void under one bead's cross-section (0.08 mm2) as a hole. Held to the
-  planner's usual rule instead, the stair's tips merge nowhere (93 struts on
-  the arc, 294 on the tilted box).
+- The support under a stair's body lays 2.6 x Bambu's toolpath in all on
+  the arc (section 7): the body and its strips match Bambu's over z 37 -
+  47, and below them #274's two solid round trunks and their pad lay 3.9 x
+  Bambu's single trunk of loops round air. Hollowing or thinning the trunks
+  is a follow-up.
+- The stair no longer grows a tree of its own (supports-stair-body), so the
+  planner's `mergeThroughCrowd` - written for that tree - is planned by
+  nothing on the card's build.
 - G-scope's support row builds as before (no `interface`).
 
 ## 7. The stair: a sheet under a curved underside
@@ -449,9 +446,9 @@ toolpath in segments of 2 mm or more. `support:audit` holds it (section 5).
 `parts({ interface: true })` like every sheet. Gate: `npm run
 support:curved` (`tools/nso_support_curved_check.js`), which also
 writes the arc with its supports as the card exports them to
-`tools/supports-curved-out/simple_overhang_supports.3mf` (git-ignored) - open
+`tools/supports-stair-out/simple_overhang_supports.3mf` (git-ignored) - open
 it in Bambu Studio as a project and slice with its own supports off.
-27 checks.
+39 checks.
 
 **The gap it closes.** The sheet's contract is for ceilings: one z, four
 layers. A curved underside has no single z: every tip on the arc of
@@ -469,85 +466,100 @@ each layer's strip ~0.55 mm further up the curve, so consecutive strips
 overlap; a few branch tips (4 - 23 mm of support a layer), not trees; 0.2
 of air to the part.
 
-**What is built** (the arc at 35 deg, the gate's build; supports-curved-sheet
-round 2 - the first round's grid strips, 1.68 - 2.52 mm across and resting
-on one another with five tips at the foot, were a cantilever: the stair's
-lean, 0.55 mm a 0.2 mm layer, ~70 deg off upright, was its load path, and a
-strip's back edge sat up to 0.92 mm under the curve):
+**Round 3: the stair came loose at its top** (supports-stair-body). The
+round-3 print released clean and the foot held, but the top of the stair
+came loose. Bambu's slice of our export showed two overhang-wall stairs: the
+part's own bars (expected) and our strips' leading edges - each strip
+advanced ~0.55 mm past the one below, more than a line, so Bambu printed its
+leading line as a wall in air - and the part's bars were dashed: our strips
+were narrower than the part's step above them. Bambu's own support there is
+one wedge under the whole overhang, its interface strips laid on it.
+
+**What is built now** (the arc at 35 deg, the gate's build):
 
 | what | z | here |
 | --- | --- | --- |
-| caps | to z_cap 37.00 | 2 of the plan's tips carry the transition: caps 3.75 and 2.00 mm, and 1 tip of the stair's own tree |
-| transition | 37.00 - 37.20 | the lowest band again, one layer under it |
-| bands | 37.20 - 46.20 | 45, one a layer, 9.75 mm along the arc: one line (0.40) on 23 of them, z 37.4 - 41.6, where the slope is 25 - 45 deg; two beads (0.84, a loop alone) on 22, z 41.8 - 46.2 |
-| the stair's tree | 46.2 - 0 | 89 tips, 1 - 2 a strip under each strip's leading part (5 mm or nearer along it), merged onto 2 trunks to the plate |
-| held | | the plan's 38 other tips on the curve: not built, nor any member that holds only them |
+| trunks | 0 - 28.4 | the plan's two (#274's law, H 46.0), each rising straight to the body's bottom |
+| the body | 28.4 - 45.6 | 86 layers: 45 deg cones off the two trunk tops, then the shadow of the underside, a loop round each layer and ribs up the slope 1.7 mm apart |
+| transition | 36.6 - 36.8 | the lowest strip again, one layer under it |
+| strips | 36.8 - 46.0 | 46, one a layer: 2 lines (a loop alone) on 23, 3 on 2, 4 on 21, the top one spread to the outline (3 lines at 0.88) |
+| tips | | the plan's 40 on the curve held by the body; none built, no caps, no tree of the stair's own |
 
-- **Which tips.** The tips whose levels failed (one tip a level, or no piece
-  of 2 mm lines), 1.6 tip spacings or nearer one another, at least three,
-  their contacts on an underside whose fitted plane falls 3 - 70 deg and
-  spans two layers or more. A flat ceiling's tips are on levels that built,
-  so a ceiling never becomes a stair: its sheet is the four layers, byte for
-  byte (the coupon's build hashes the same as before, `support:curved` 7).
-- **Each layer's band** is laid where the gap puts it, not on a grid, so it
-  moves with the curve a layer at a time (0.2 - 1.1 mm on the arc): along
-  the arc's lines every 0.25 mm, its front edge is the first point up the
-  slope where the layer's column (the gap under it to the gap over it) is
-  clear of the piece and the underside is within 3 mm over it; the run of
-  those longest along the arc is the band, one region. The stair starts at
-  the lowest layer whose band runs 0.6 of the longest and holds a tip, and
-  where even one line would stand too far under the part (the arc's foot,
-  ~45 deg: 0.6 - 0.8 mm), it starts higher.
-- **Width follows the band** (Bambu's: a loop alone - two lines - on most
-  layers, four only where the surface flattens): as many beads as keep the
-  band's back edge within 0.55 mm of the part over it, built and measured -
-  one line (0.40, the sheet's thin wall) where two would not, two beads
-  (0.84: a slicer lays a two-bead band as its loop alone) where they do, and
-  three or more only where the band itself moves three beads a layer
-  (never, on the arc: its flattest layers move 1.1 mm). Every band's top
-  is **0.183 - 0.522 mm under the part across its whole width, median
-  0.337** (`support:curved` 2: 5,360 points, front edge, middle and back
-  edge, every 0.25 mm along) - the first round's grid strips were 0.23 -
-  0.92, median 0.48.
-- **What holds each strip.** A band lies over the band below only in part
-  (0 - 0.34 mm along the slope, median 0.07): its leading part, up the
-  slope, is held by TIPS, never by the stair's lean. Wherever that part is
-  half a line or wider - every strip, on the arc - a tip every 5 mm or
-  nearer along the strip (Bambu's tree_support_branch_distance; its own
-  tree puts ~1.4 branch tops under each of its strips, 29 over z 41.4 -
-  45.4), each set a quarter stretch along from the strip below's, its
-  column's down-slope face at the band's front edge (where the part comes
-  lowest) and its top the band's underside. The tips are the stair's own
-  tree: `nso_support_gridpack.js` plans them as beacons on each band's
-  underside (`plan(..., { mergeThroughCrowd: true })`: a member in a node's
-  way that cannot join no longer holds the merge up - a tip a layer apart
-  under every strip is crowded everywhere, and without it 184 tips merged
-  nowhere and stood 93 struts on the plate) and builds them after the plan's
-  trunks (`tp.stairTrunks`), joined to the stair's support. Each of the 89
-  tips is found built: a column top at the band's underside (`support:curved`
-  4).
-- **The gap is measured**: every band with the exact triangle distance
-  against the piece; one nearer than the gap moves up the slope and is built
-  again. The whole support: 0.181 mm.
-- **Against Bambu** (`support:curved` 5): every one of Bambu's 23 interface
-  layers (41.8 - 46.2) has a band of ours at that z over the same stretch of
-  the curve; ours start at 37.4 (the card's 35 deg flags more of the arc than
-  Bambu's 30 deg threshold). The support's printed toolpath a layer, NSO's
-  slice against Bambu's (all support features), mm: z 5: 42 / 52, z 15: 57 /
-  24, z 25: 112 / 31, z 35: 232 / 107, z 38: 265 / 154, z 40: 218 / 139, z 42:
-  160 / 161, z 44: 90 / 135, z 46: 26 / 46 - up to 3.6 x Bambu's through the
-  middle of the tree, where our planner merges later than Bambu's slim tree.
-- **NSO's slice** types every layer's band Support interface or Support
-  transition (42 and 16 layers of 46 hold each; the tree's columns beside
-  them are Support), its lines support lines only (`support:curved` 6). Two
-  changes in `typeSupports` (`nso_slicer.js`, docs/SLICER.md): a top is what
-  its next layer does not cover grown by half a line (was by 0.5 mm, which
-  hid each strip's exposed edge under the next), a top may lie a layer
-  deeper under the host when it lies outside its next layer's outline (a
-  flat sheet's I1 seen through a channel of I2 is not), and past its 2 + 2
-  layers a sheet's transition runs on while a layer repeats the footprint of
-  the one over it. `slicer:supports` is still 26 of 26.
-- **Build time**: the arc's area ~6 s in node.
+- **THE STRIPS** (`planWidths`). Each strip is at least the part's step
+  over it - the next layer's overhang advance - and one line (0.42) wide,
+  and at least two lines; and the next strip's lines must all lie over this
+  layer - on this strip, or on the body's front wall a channel behind it,
+  the layer read as the footprint it holds grown half a line, as a slicer
+  reads it. So where a strip widens going up, the ones under it widen first
+  (the arc's flat top moves 1.1 - 1.2 mm a layer: four lines from z 41.8).
+  Its lines are the sheet's (0.40 at 0.84): two, a loop alone, or a loop and
+  one serpentine inside it, tied to the loop at one point. A strip keeps to
+  the part's outline and one line; the top strip covers all the part has
+  left over it, spreading its lines (the loop's channel opening) where the
+  outline holds it to fewer. Measured (`support:curved` 2, 6): every strip
+  0.47 mm or more wider than the part's step and a line, built and in NSO's
+  slice; the part over every strip 0.187 - 0.504 mm over it, median 0.303,
+  over 9,837 points across its width where the support's next layer is not
+  over it (under the next strip or the body the part lies 0.19 - 1.27 mm up,
+  but it is not what is over the strip there).
+- **NO STRIP LINE OVER AIR** (`support:curved` 6). `typeSupports` now reads
+  every support line against the layer under it as a slicer types a wall
+  (docs/SLICER.md): none of the 46 strips' lines is over air. What is: the
+  body's front wall, a channel behind each strip, which moves up the slope
+  with it every layer and bridges the ribs under it (57 Support lines, 141
+  mm; 2 typed interface at the flat top, 10.5 mm).
+- **THE BODY** (`bodyOf`). The trees that hold only the stair's tips keep
+  their landing member and grow their round trunk (TRUNKS) straight up to
+  one height - the highest from which a 45 deg cone over each covers the
+  shadow under the transition, a line to spare (z 28.4 on the arc, 5.39 mm
+  across there); the body's first layer lies on the trunk tops, each layer
+  over it widening half a line, so every wall lies on the one under it.
+  Each layer is the shadow of the underside over the stair's line (the
+  transition's top and the gap), clipped to the part's outline plus one
+  line, kept 0.35 mm off the part beside it (Bambu's
+  support_object_xy_distance), within the cones, a channel behind the strip:
+  a loop round its outline and ribs up the slope inside, each loop to loop,
+  STAIR_BODY_PITCH_MM (1.7) apart. Every layer measured with the exact
+  triangle distance: 0.180 mm or more for the whole support.
+- **Bambu's pitch** (`support:curved` 5, 6): its support under the overhang
+  has no straight lines to space - it is branch loops - so its pitch is read
+  as any pattern's: the plan area it stands in (a column clear of the part
+  from a layer and the gap under the layer's top to the gap over it, the
+  part over it) per mm of its Support line, z 38 - 44: median 1.71 mm (1.55
+  - 1.84; for parallel lines that is their pitch). Ours in NSO's slice:
+  1.70 mm between the body's lines up the slope, 0.4 % off.
+- **FLAT AND CURVED MEET** (`support:curved` 9). A flat sheet built beside
+  the stair (a tip of its level within 1.6 tip spacings of the stair's) is
+  the body's top where the part is flat: its four layers are listed with
+  the stair's, its tips are held (no caps), and the body stands under it to
+  its z_base. A shelf flat at z 20 for 10 mm, then rising 6 mm over 16: one
+  stair of 27 strips and the flat's sheet on one body from z 13.2, one
+  support; the body's top under the flat at z 19.0, the sheet from 19.02 (a
+  sheet's z is the gap under the part, not a layer's: a slicer prints it on
+  the body's top layer).
+- **Against Bambu, material** (`support:curved` 6): the support's printed
+  toolpath, NSO's slice of the export against the fixture's G-code, layer
+  by layer over Bambu's layers (it lays 0.27 mm layers low down, so each of
+  its layers is set against ours over the same height). In all **34.79 m
+  against Bambu's 13.54: 2.57 x - the gate (1.5 x) FAILS.** By height, m
+  (ours / Bambu): 0-1: 3.45 / 0.80, 1-5: 3.92 / 1.08, 5-10: 3.89 / 0.81,
+  10-20: 6.13 / 0.91, 20-30: 5.14 / 1.17, 30-37: 5.89 / 2.55, 37-40: 2.76 /
+  2.07, 40-42: 1.56 / 1.45, 42-44: 1.29 / 1.53, 44-47: 0.78 / 1.16. From z
+  38 up every layer of ours lays less than Bambu's (z 42: 150 / 161 mm); the
+  excess is under the body - the pad and two solid trunks (NSO's slicer, as
+  Bambu slicing our object, prints each with two walls and sparse infill:
+  ~170 mm a layer at z 5 against Bambu's one trunk of loops, 52) and the
+  cones (z 30 - 37). Before this ticket: 44.0 m, 3.25 x, the stair's own
+  trees 22.5 m of it.
+- **Against Bambu, the interface** (`support:curved` 5): every one of
+  Bambu's 23 interface layers (41.8 - 46.2) has a strip of ours at that z
+  over the same stretch of the curve; ours start at 37.0 (the card's 35 deg
+  flags more of the arc than Bambu's 30 deg threshold).
+- **NSO's slice** types every layer of the stair's strips Support interface
+  (47 layers, the transition with them) - `typeSupports`' stair top is what
+  the next layer leaves of a strip, ungrown (docs/SLICER.md).
+- **Build time**: the arc's area ~11 s in node (the body's 86 layers, each
+  measured).
 
 **The refusal on the arc** (`support:curved` 8). At the card's 60 deg the
 arc was "Area 1 · unreachable · no route to the plate · 70 spots" (63 in the
