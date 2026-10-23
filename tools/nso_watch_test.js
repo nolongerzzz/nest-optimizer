@@ -929,8 +929,19 @@ async function partH(page) {
   };
   const home = async () => page.evaluate(([b]) => { const pb = state.placed.find(q => q && q.sourceId === b); pb.liftY = 0; applyMeshRotation(pb); applyPlacedXZ(pb, 70, 40); }, [boxId]);
 
-  // a drop onto a piece: seats
+  /* The grab is Lift's drop alone (docs/MOVE.md): a plain drag over a piece draws
+     no helper at all. The rest of this section carries a piece the way Lift's is
+     carried, so the box stands in for a lifted one. */
   let from = await screenOf(await centre(boxId)), to = await screenOf(await top(hullId));
+  await press(from); await moveTo(from, to);
+  const flatMid = await helperState();
+  ok(flatMid.inScene === 0 && flatMid.named === 0, 'a plain drag over a piece draws no grab-drop helper', JSON.stringify(flatMid));
+  await page.mouse.up();
+  await page.waitForTimeout(150);
+  await page.evaluate(() => { window.__ownsDrop = NSO_LIFT_PLATE.ownsDrop; NSO_LIFT_PLATE.ownsDrop = () => true; });
+  await page.evaluate(([b]) => { const pb = state.placed.find(q => q && q.sourceId === b); pb.liftY = 0; applyMeshRotation(pb); applyPlacedXZ(pb, 70, 40); }, [boxId]);
+  // a drop onto a piece: seats
+  from = await screenOf(await centre(boxId)); to = await screenOf(await top(hullId));
   await press(from); await moveTo(from, to);
   const mid = await helperState();
   ok(mid.inScene === 1, 'carried over a piece, its target is boxed - the helper is in the scene and its tool is live', JSON.stringify(mid));
@@ -986,7 +997,7 @@ async function partH(page) {
   ok(neg.some(f => /grab-drop helper/.test(f.msg)), 'negative control: a grab-drop helper left behind is named by Watch', texts(neg));
   await page.evaluate(() => nsoHelpers.teardown('clear'));
   await quiet('grab-drop: after the negative control is swept');
-  await page.evaluate(() => NSOWatch.stop());
+  await page.evaluate(() => { NSO_LIFT_PLATE.ownsDrop = window.__ownsDrop; NSOWatch.stop(); });
 }
 
 withApp(async (page, logs) => {

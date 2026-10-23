@@ -518,7 +518,7 @@ list, Move, Join, Export, Remove - **exactly where it stood** (`landInPlace`:
 the parent's pose, the mesh where the parent drew those raw triangles). A
 feature on top of a slab is left resting on the leftover slab, in the air over
 the bed, and stays there - the floating state, `docs/GRAB-DROP.md` - until it
-is grabbed and dropped or sent To plate. (Until grab and drop it went onto
+is grabbed and dropped or sent To plate - the grab is Lift's alone, a plain Move drag is flat (`docs/MOVE.md`). (Until grab and drop it went onto
 free plate beside the parent, `nsoFreeSpot`.)
 One `featureSwap` Undo puts it all back. **Remove** (throw the features away)
 has no button on the plate; `NSO_LiftAuto.remove` is unchanged and

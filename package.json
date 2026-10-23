@@ -302,6 +302,7 @@
     "pull:test": "node tools/nso_pull_test.js",
     "pull:drive": "node tools/nso_pull_drive_check.js",
     "grab:drop": "node tools/nso_grab_drop_drive_check.js",
+    "move:bench": "node tools/nso_move_flat_bench.js",
     "grab:drop-shots": "node tools/nso_grab_drop_drive_check.js tools/grab-drop-out",
     "lift:assembly": "node tools/nso_lift_assembly_drive_check.js",
     "lift:assembly-shots": "node tools/nso_lift_assembly_drive_check.js tools/lift-assembly-out",
