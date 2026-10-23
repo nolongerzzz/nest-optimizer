@@ -16,11 +16,13 @@
  *
  * WHAT A SPLIT DOES. Each part becomes an ordinary piece named
  * "<piece> part 1" .. "<piece> part n" (Pieces list, Move, Join, Export,
- * Remove, grab and drop). It takes the original's pose and sits exactly where
+ * Remove). It takes the original's pose and sits exactly where
  * the original drew those triangles - every triangle bit for bit as it was -
  * so a part that was resting above the bed is left in the air (liftY, the
- * floating state app-grab-drop.js describes) until grabbed and dropped or sent
- * To plate. The original piece leaves the plate and the Pieces list. One
+ * floating state app-grab-drop.js describes) until sent To plate or lowered
+ * with Vertical placement. Move drags it flat (docs/MOVE.md); the grab that
+ * sets a piece down on what it is let go over is Lift's drop alone.
+ * The original piece leaves the plate and the Pieces list. One
  * 'featureSwap' Undo step (Mold's and Detach's) puts it back where it was in
  * both, and selects it again.
  *
