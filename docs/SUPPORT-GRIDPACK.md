@@ -299,6 +299,17 @@ at a time, with `opts.yieldFn` given a turn between trunks) then
 no callback and no `yieldFn` is the same bytes as before: it runs the sync
 `trunkParts`, which `parts()` shares with it, then `weld`.
 
+**A sheet's join, voids or no voids** (supports-stair-body). `weld()` joins
+each sheet's folded layers to the trunks that carry its tips and refuses a
+sheet that meets none of them. The kernel's test for "they met" is fewer
+parts out than in, and it counts every closed surface as a part - a void
+inside the solid too. A stair's strips stacked over the legs of its tree
+seal hairline slits between a leg and a strip: on the tilted box 45 voids of
+0.003 mm3 or less round ONE solid, read as 53 parts out of 4 + 1, "do not
+touch". Where the kernel says they do not touch, the result and both inputs
+are counted again as solids - connected surfaces of positive volume - and
+the join stands when that count fell.
+
 **Shells, no weld.** `shells(plan, parts)` is `solid()`'s answer with no
 boolean: every part (column, foot, stub, pad bridge and fill, each layer of the
 interface sheet) is kept as its own closed shell, and the parts are grouped into

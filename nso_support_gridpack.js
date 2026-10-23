@@ -2749,6 +2749,38 @@
         for (var j = 2; j < out.length; j += 3) if (out[j] === lo) out[j] = lo - d;
         return out;
       }
+      /* A UNION THAT MERGED, voids or no voids: the kernel's test (fewer
+         parts out than in) counts every closed surface of the result as a
+         part, a void inside the solid as well. A stair's strips stacked over
+         the legs of its tree seal hairline slits between a leg and a strip
+         (the tilted box: 45 voids of 0.003 mm3 or less round one solid; the
+         kernel read 53 parts out of 4 + 1 and said they did not touch). So
+         where the kernel says they do not touch, the pieces are counted
+         again as the solids they are - connected surfaces of positive volume
+         - in the result and in each input. */
+      function solidsIn(soup) {
+        var id = new Map(), par = [], vol = [];
+        function vk(i) { var k = soup[i] + ',' + soup[i + 1] + ',' + soup[i + 2]; if (!id.has(k)) { id.set(k, par.length); par.push(par.length); } return id.get(k); }
+        function fd(x) { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; }
+        var tri = [];
+        for (var i = 0; i < soup.length; i += 9) {
+          var a = vk(i), b = vk(i + 3), c = vk(i + 6);
+          par[fd(b)] = fd(a); par[fd(c)] = fd(a); tri.push(a);
+        }
+        for (var t = 0; t < tri.length; t++) {
+          var o = t * 9, r = fd(tri[t]);
+          vol[r] = (vol[r] || 0) + (soup[o] * (soup[o + 4] * soup[o + 8] - soup[o + 5] * soup[o + 7]) -
+            soup[o + 1] * (soup[o + 3] * soup[o + 8] - soup[o + 5] * soup[o + 6]) + soup[o + 2] * (soup[o + 3] * soup[o + 7] - soup[o + 4] * soup[o + 6])) / 6;
+        }
+        var n = 0;
+        vol.forEach(function (v) { if (v > 0) n++; });
+        return n;
+      }
+      function merged(r, a, b) {
+        if (r && r.ok) return true;
+        if (!r || !r.soup || !/do not touch/.test(r.reason || '')) return false;
+        return solidsIn(r.soup) < solidsIn(a) + solidsIn(b);
+      }
       function joinSheets() {
         var c3 = Promise.resolve();
         sheets.forEach(function (sh) {
@@ -2765,20 +2797,21 @@
                The parts (and so the card's export, and every slice) keep
                z_cap exact. */
             if (L.length > 1) L[0] = sunkBottom(L[0], SHEET_SINK_MM);
-            var folded = L.length === 1 ? Promise.resolve({ ok: true, soup: L[0], folded: true })
-              : U(joinAll(L.filter(function (x, k) { return k % 2 === 0; })), joinAll(L.filter(function (x, k) { return k % 2 === 1; })));
+            var Lev = L.length === 1 ? null : joinAll(L.filter(function (x, k) { return k % 2 === 0; })), Lod = L.length === 1 ? null : joinAll(L.filter(function (x, k) { return k % 2 === 1; }));
+            var folded = L.length === 1 ? Promise.resolve({ ok: true, soup: L[0], folded: true }) : U(Lev, Lod);
             return folded.then(function (r) {
-              if (!r || !r.ok) throw new Error('sheet ' + sh.sheet + ': its layers would not join: ' + ((r && r.reason) || 'no result'));
+              if (!(L.length === 1 || merged(r, Lev, Lod))) throw new Error('sheet ' + sh.sheet + ': its layers would not join: ' + ((r && r.reason) || 'no result'));
               /* the fold is cleaned with the join it goes into, once: the
                  cleanup walks every triangle, and the lattice is ~200k of them */
               var S = r.soup, carry = {};
               (sh.carriers || []).forEach(function (t) { carry[t] = true; });
               var mine = groups.filter(function (g) { return g.soup.trunks.some(function (t) { return carry[t]; }); });
               if (!mine.length) { S = T._finishUnion(S).soup; groups.push({ ids: [], soup: { soup: S, box: bounds(S), trunks: [], sheets: [sh.sheet] } }); return null; }
-              return U(joinAll(mine.map(function (g) { return g.soup.soup; })), S).then(function (u) {
+              var Am = joinAll(mine.map(function (g) { return g.soup.soup; }));
+              return U(Am, S).then(function (u) {
                 /* a sheet that meets none of its own tips would be placed in
                    mid-air: the build says so instead */
-                if (!u || !u.ok) throw new Error('sheet ' + sh.sheet + ' does not meet the tips it was built on: ' + ((u && u.reason) || 'no result'));
+                if (!merged(u, Am, S)) throw new Error('sheet ' + sh.sheet + ' does not meet the tips it was built on: ' + ((u && u.reason) || 'no result'));
                 var fin = flatSplits(T._finishUnion(u.soup).soup), trunks = [], sh2 = [sh.sheet];
                 mine.forEach(function (g) { trunks = trunks.concat(g.soup.trunks); sh2 = sh2.concat(g.soup.sheets); });
                 /* a trunk a stair holds by itself has no parts and no solid of
