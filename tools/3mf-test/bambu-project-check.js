@@ -278,8 +278,15 @@ const hex8 = (n) => ('0000000' + (n >>> 0).toString(16)).slice(-8);
   check('the support object carries the support set on itself, in key order with its extruder (' +
         Object.keys(SI.SHEET.slicerSettings).join(', ') + ')',
     JSON.stringify(own(4)) === JSON.stringify(supportKeys), JSON.stringify(own(4)));
-  check('the support set is wall_generator classic and detect_thin_wall 1, nothing else (shells 0 failed on the print)',
-    JSON.stringify(SI.SHEET.slicerSettings) === JSON.stringify({ wall_generator: 'classic', detect_thin_wall: '1' }));
+  check('the support set is wall_generator classic, detect_thin_wall 1, sparse_infill_density 0% and wall_loops 1, nothing else (shells 0 failed on the print)',
+    JSON.stringify(SI.SHEET.slicerSettings) === JSON.stringify({ wall_generator: 'classic', detect_thin_wall: '1', sparse_infill_density: '0%', wall_loops: '1' }));
+  /* the filler keys are read back from the written project, object by object:
+     on every support object, on no part object */
+  const fillerOf = (id) => ['sparse_infill_density=0%', 'wall_loops=1'].filter((k) => own(id).includes(k));
+  const fillerRows = objects.map((o, i) => ({ name: o.name, support: !!o.settings, got: fillerOf(2 * (i + 1)) }));
+  check('sparse_infill_density 0% and wall_loops 1 are on every support object and on no part object',
+    fillerRows.some((r) => r.support) && fillerRows.some((r) => !r.support) &&
+    fillerRows.every((r) => r.support ? r.got.length === 2 : r.got.length === 0), JSON.stringify(fillerRows));
   check('the pieces without overrides carry only their extruder',
     JSON.stringify(own(2)) === '["extruder=1"]' && JSON.stringify(own(6)) === '["extruder=1"]', JSON.stringify([own(2), own(6)]));
   const plateHead = (x) => (x.match(/<plate>([\s\S]*?)<model_instance>/) || [])[1];

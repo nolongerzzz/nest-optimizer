@@ -655,11 +655,15 @@
      (Metadata/model_settings.config): see LINE WIDTH */
   /* every support object's per-object overrides, one set for all of them
      (docs/BAMBU-PROJECT-EXPORT.md): the sheet's thin-wall pass (above) and
-     nothing else. top / bottom_shell_layers 0 were tried and failed on the
-     owner's print: the 0.2 mm foot pads printed as a 15 % lattice, so 81 %
-     of layer 2's support walls had no line under them and the trunks went to
-     spaghetti. Per-family tuning waits for a print. */
-  var SHEET_SLICER = { wall_generator: 'classic', detect_thin_wall: '1' };
+     the supports' own filler off (sparse_infill_density 0 %, wall_loops 1:
+     Bambu fills a support object like a part, sparse plus internal solid
+     inside every trunk and branch; Bambu's own tree slim prints a trunk as a
+     loop or two round air) and nothing else. top / bottom_shell_layers 0
+     were tried and failed on the owner's print: the 0.2 mm foot pads printed
+     as a 15 % lattice, so 81 % of layer 2's support walls had no line under
+     them and the trunks went to spaghetti. Per-family tuning waits for a
+     print. */
+  var SHEET_SLICER = { wall_generator: 'classic', detect_thin_wall: '1', sparse_infill_density: '0%', wall_loops: '1' };
   var CELL_MM = 0.1;           /* the footprint raster */
   var SAMPLE_MM = 0.05;        /* along a line */
   var LEVEL_TOL_MM = 0.01;
