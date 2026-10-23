@@ -424,7 +424,7 @@
     return out;
   }
   function itemSig(it) {
-    if (it.fix === 'sealRepair' || it.fix === 'thickenOut' || it.fix === 'mergeShells') return it.fix;
+    if (it.fix === 'sealRepair' || it.fix === 'thickenOut' || it.fix === 'mergeShells' || it.fix === 'splitShells') return it.fix;
     return it.fix + '|' + (it.anchors || []).map(function (a) { return a.map(function (x) { return x.toFixed(3); }).join(','); }).join(';');
   }
 
@@ -476,12 +476,60 @@
     return { ok: true, reason: txt, shells: sol.shells, tris: sol.soup.length / 9 };
   };
 
+  /* SPLIT SHELLS: each overlapping shell becomes a piece of its own, in place - the very split Split to parts
+     makes (app-split-parts.js), on the piece the card is about. The shells are solids laid through each other, so
+     none of them is changed: every triangle goes to the piece it was on, bit for bit, and the pieces sit where the
+     piece drew them. One Undo puts the one piece back. -> { ok, reason, addedIds, ... } (the split's own answer). */
+  window.nsoSplitShellsRun = function (modelId) {
+    var m = modelId != null ? modelById(modelId) : activeModel();
+    function say(t, bad) { if (typeof setStatus === 'function') setStatus(t, !!bad); return { ok: false, reason: t }; }
+    if (!m) return say('Split shells: select a piece first', true);
+    var SPL = window.NSO_SPLIT_PARTS;
+    if (!SPL || typeof SPL.split !== 'function') return say('Split shells needs app-split-parts.js', true);
+    var idx = (state.placed || []).findIndex(function (p) { return p && p.sourceId === m.id; });
+    if (idx < 0) return say('Split shells: put ' + m.name + ' on the plate first', true);
+    if (state.selectedIndex !== idx && typeof selectPlaced === 'function') selectPlaced(idx);
+    return SPL.split();
+  };
+
+  /* The card after a split: the piece it was about is gone, so it follows the first of the pieces (selected by the
+     split) and says, for every one of them, whether the finding is still there. */
+  function runSplitShells(item) {
+    var m = cur ? modelById(cur.modelId) : activeModel();
+    var label = 'Split shells', line = '';
+    var res = window.nsoSplitShellsRun(m ? m.id : null);
+    card.open = true;
+    if (!res || !res.ok) {
+      card.result = { action: label, changed: false, text: label + ' changed nothing on the piece.' + (res && res.reason ? ' It said: ' + res.reason : '') };
+      card.done = [{ ok: false, fix: item.fix, text: item.text + ' \u2014 ' + item.fixLabel, line: 'changed nothing' + (res && res.reason ? ': ' + res.reason : '') }];
+      render();
+      return res;
+    }
+    var rows = (res.addedIds || []).map(function (id) {
+      var pm = modelById(id), rep = null;
+      try { rep = window.NSO_Defects ? window.NSO_Defects.locate(pm.rawTris, {}) : null; } catch (e) { rep = null; }
+      var gone = !!rep && !rep.pierce && !rep.overlapShells;
+      return { ok: gone, fix: item.fix, text: pm.name,
+               line: rep ? (gone ? 'no overlapping shells, 0 piercing pairs - ' + rep.verdict : rep.pierce + ' piercing pair' + (rep.pierce === 1 ? '' : 's') + ' left - ' + rep.verdict) : 'not checked' };
+    });
+    if (typeof window.nsoDefectsRefresh === 'function') window.nsoDefectsRefresh();
+    window.nsoDefectsShow({ quiet: true });             // the first piece, as the card now shows it
+    var every = rows.length > 0 && rows.every(function (r) { return r.ok; });
+    card.result = { action: label, changed: true, fixed: every ? rows.length : 0,
+      text: label + ': ' + (res.names || []).length + ' pieces now (' + (res.names || []).join(', ') + '), each where it stood - ' +
+            (every ? 'the overlapping-shells finding is gone from every one of them.' : 'check each piece; some still read piercing pairs.') + ' One Undo puts the one piece back.' };
+    card.done = rows;
+    render();
+    return res;
+  }
+
   /* One item's own fix, on that finding only. CAP / PATCH / BRIDGE are
      bracketed here (the document-level watcher only knows the Finish
      buttons): the "before" is taken, nsoRepairRun runs, the "after" is read.
      MERGE SHELLS is bracketed the same way around an await (the kernel), so it
      hands back a promise. */
   function runItem(item) {
+    if (item.fix === 'splitShells') return runSplitShells(item);
     if (item.fix === 'mergeShells') {
       begin('mergeShells');
       if (pending) pending.item = item;
@@ -534,7 +582,7 @@
         var next = null, all = liveItems();
         for (var i = 0; i < all.length; i++) {
           var it = all[i].item;
-          if (all[i].row.advisory || tried[itemSig(it)]) continue;
+          if (all[i].row.advisory || it.manual || tried[itemSig(it)]) continue;
           next = it; break;
         }
         if (!next) break;
@@ -575,7 +623,7 @@
       res.classList.toggle('is-nochange', !card.result.changed);
     }
 
-    var items = liveItems().filter(function (x) { return !x.row.advisory; });
+    var items = liveItems().filter(function (x) { return !x.row.advisory && !x.item.manual; });
     var act = $('findings-actions');
     if (act) {
       act.hidden = !(items.length > 0);

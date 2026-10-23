@@ -229,7 +229,7 @@
   var TWO_LINES_MM = 2 * NOZZLE_MM;      // the thinnest wall that prints as two lines
 
   function mm1(x) { return (Math.round(x * 10) / 10).toFixed(1); }
-  var FIX_LABEL = { cap: 'CAP', patch: 'PATCH', bridge: 'BRIDGE', sealRepair: 'REPAIR', thickenOut: 'THICKEN OUT', mergeShells: 'MERGE SHELLS' };
+  var FIX_LABEL = { cap: 'CAP', patch: 'PATCH', bridge: 'BRIDGE', sealRepair: 'REPAIR', thickenOut: 'THICKEN OUT', mergeShells: 'MERGE SHELLS', splitShells: 'SPLIT SHELLS' };
 
   function keyOf(x, y, z) { return x.toFixed(4) + ',' + y.toFixed(4) + ',' + z.toFixed(4); }
 
@@ -370,10 +370,16 @@
         kind: 'pierce', problems: P.pierce,
         items: [{ kind: 'pierce', fix: 'mergeShells', fixLabel: FIX_LABEL.mergeShells, scope: 'whole piece',
                   problems: P.pierce.map(function (_, i) { return i; }),
-                  text: 'Overlapping shells, whole piece' }],
+                  text: 'Overlapping shells, whole piece' },
+                /* SPLIT SHELLS: the other way to read the same finding - each shell is a solid of its own, so each
+                   becomes a piece, in place (the same split as Split to parts). Never part of Fix all: it changes
+                   how many pieces there are, which only a person decides. */
+                { kind: 'pierce', fix: 'splitShells', fixLabel: FIX_LABEL.splitShells, scope: 'whole piece', manual: true,
+                  problems: P.pierce.map(function (_, i) { return i; }),
+                  text: 'Overlapping shells, each its own piece' }],
         title: plural(report.overlapShells, 'overlapping shell') + ', ' + plural(report.pierce, 'piercing pair') +
                ' - shells passing through each other',
-        meaning: 'The piece is closed shells laid through one another. A slicer fills the overlap; Crop, Join, Subtract and the other cuts and welds merge them for themselves. Merge shells makes them one solid on the piece.',
+        meaning: 'The piece is closed shells laid through one another. A slicer fills the overlap; Crop, Join, Subtract and the other cuts and welds merge them for themselves. Merge shells makes them one solid on the piece; Split shells makes each a piece of its own, where it stands.',
         handledBy: null
       });
     } else if (report.pierce) {
