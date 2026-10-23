@@ -1668,7 +1668,7 @@
     fp.pads.forEach(function (pd) { groups[find(idOf[pd.keys[0]])].pads.push(pd.soup); });
     var objects = order.map(function (r) {
       var g = groups[r], list = g.from.map(function (id) { return builds[id[0]].solids[id[1]].soup; }).concat(g.trunks, g.pads);
-      return { from: g.from, soup: joinAll(list), pads: g.pads.length, trunks: g.trunks.length };
+      return { from: g.from, soup: joinAll(list), pads: g.pads.length, trunks: g.trunks.length, padFloats: g.pads.reduce(function (a, x) { return a + x.length; }, 0) };
     });
     var trunks = feet.filter(function (f) { return f.grown; }).map(function (f) {
       return Object.assign({ from: ids[idOf[f.key]], soup: f.shell || null, padR: f.r, padCore: f.core }, f.grown);

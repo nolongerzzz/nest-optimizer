@@ -39,8 +39,8 @@
       FEET.gapMm.
    6. NOTHING ABOVE THE TRUNK CHANGES, on the arc and the 2026-10-20 coupon:
       built with trunkGrowth off the support is the build pinned (the
-      coupon's #265's; the arc's supports-stair-body's: its stair a body
-      on the plan's trunks since) byte for byte, and
+      coupon's #265's; the arc's supports-thinning's: one trunk's landing
+      member and the body on it) byte for byte, and
       with it on the support is that build's every part, byte for byte, then
       the trunks, then the pads; the coupon's pads cover the pads before
       (every corner of the old outline inside the new, no area lost).
@@ -74,9 +74,10 @@ const GP = ctx.NSO_SupportGridpack, SI = ctx.NSO_SupportInterface, TH = ctx.NSO_
 const TRUNK = GP.TRUNK, FEET = GP.FEET;
 /* the builds with trunkGrowth off, sha-256 (first 16 hex) of each support object's Float32 soup and its
    triangles: the coupon's #265's (claude-wip b7076af + supports-curved-sheet a08bc6f; support:curved 7's);
-   the arc's supports-stair-body's - its stair a body on the plan's trunks since, the trunks' landing members
-   all that stands under it with them off */
-const BEFORE = { coupon: ['6ac271882b107552', 27348], arc: ['379c759080d3c132', 50572] };
+   the arc's supports-thinning's (commit 3) - one trunk's landing member, the body from z 36.4 on it and no cone
+   (50572 tris at supports-stair-body, 379c759080d3c132, with its two trunks and 40 layers of cone); the layers
+   from the body's underside up are #275's byte for byte, support:curved 4 */
+const BEFORE = { coupon: ['6ac271882b107552', 27348], arc: ['072e7c699adc168b', 14624] };
 
 let pass = 0, fail = 0;
 const FAILS = [];
@@ -297,7 +298,7 @@ function splitObject(b, oi) {
   console.log('\n=== 6. nothing above the trunk changes ===');
   for (const [name, on, off] of [['arc', b, b0], ['coupon', c1, c0]]) {
     const o0 = off.objects[1];
-    check(`${name}: built with trunkGrowth off, the support is ${name === 'arc' ? 'supports-stair-body' : '#265'}'s byte for byte`,
+    check(`${name}: built with trunkGrowth off, the support is ${name === 'arc' ? 'supports-thinning\'s (commit 3)' : '#265\'s'} byte for byte`,
       off.objects.length === 2 && sha(o0.soup) === BEFORE[name][0] && o0.soup.length / 9 === BEFORE[name][1], `${sha(o0.soup)} (${o0.soup.length / 9} tris)`);
     const s1 = splitObject(on, 0), s0 = splitObject(off, 0);
     check(`${name}: with trunks, every part before is there byte for byte, then the trunks, then the pads - and nothing else`,

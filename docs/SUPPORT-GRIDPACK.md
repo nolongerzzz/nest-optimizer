@@ -212,13 +212,17 @@ changes, byte for byte:
 
 - **H** is the top of what the trunk holds up: its highest tip, or the top of
   the sheet or stair a tip of it is under.
-- **Under a stair's body** (supports-stair-body; docs/SUPPORT-INTERFACE.md
-  section 7): a tree that holds only a stair's tips keeps its landing member
-  (cut under the trunk's top) and its round trunk rises straight up its
-  axis to the body's bottom, H the stair's top - the body stands on it, 45
-  deg cones off each trunk's top. The stair grows no tree of its own any
-  more (`tp.stairTrunks` is empty). Under the arc: two trunks, both to z
-  28.4, H 46.0.
+- **Under a stair's body** (supports-stair-body; supports-thinning;
+  docs/SUPPORT-INTERFACE.md section 7): a tree that holds only a stair's tips
+  keeps its landing member (cut under the trunk's top) and its round trunk
+  rises straight up its axis, at the growth angle above, into the body's
+  underside, H the stair's top. The body stands on its top and spans from it;
+  there is no cone. Trees that hold one another's tips are one trunk (the cone
+  rule, `NSO_SupportInterface.trunkCount`: growth cones overlapping below the
+  body, or one tree's tips all inside the other's 30 deg lean cone from the
+  plate); the rest build nothing, not even a landing member. The stair grows no
+  tree of its own (`tp.stairTrunks` is empty). Under the arc: one trunk, to z
+  36.4, H 46.0.
 - **How high.** From the pad up its STEM - the landing member, then at each
   merge the parent holding most of its tips - while the stem holds at least
   half of them: where the tree splits, the trunk ends. A taproot (a strut
@@ -244,9 +248,7 @@ changes, byte for byte:
   trunks, then the pads.
 - **Not changed**: G-scope's support row and every build without the sheet
   (`solid()` on its own, the suites that weigh members and pads) build as
-  before. NSO's slice of the arc's export lays more support a layer low down
-  (z 5: 205 mm against 42 before and Bambu's 52): Bambu's trunk is one or two
-  loops round air, ours is solid.
+  before.
 
 **Refusal.** Only a support point inside the piece (`lineInsideAt` along its
 own normal). Beside good points it is left out and named. If every point is

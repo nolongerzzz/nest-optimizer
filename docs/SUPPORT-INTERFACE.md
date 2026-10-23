@@ -483,8 +483,8 @@ one wedge under the whole overhang, its interface strips laid on it.
 
 | what | z | here |
 | --- | --- | --- |
-| trunks | 0 - 28.4 | the plan's two (#274's law, H 46.0), each rising straight to the body's bottom |
-| the body | 28.4 - 45.6 | 86 layers: 45 deg cones off the two trunk tops, then the shadow of the underside, a loop round each layer and ribs up the slope 1.7 mm apart |
+| trunks | 0 - 36.4 | ONE (supports-thinning: the cone rule merges the plan's two; #274's law, H 46.0), rising at its growth angle straight into the body's underside, 3.85 mm across there |
+| the body | 36.4 - 45.6 | 46 layers: the shadow of the underside, a loop round each layer and ribs up the slope 1.7 mm apart; the first lies over the trunk's top and spans to the shadow's farthest cell, 19.7 mm away. #275's 40 layers of 45 deg cone (z 28.4 - 36.2) are gone |
 | transition | 36.6 - 36.8 | the lowest strip again, one layer under it |
 | strips | 36.8 - 46.0 | 46, one a layer: 2 lines (a loop alone) on 23, 3 on 2, 4 on 21, the top one spread to the outline (3 lines at 0.88) |
 | tips | | the plan's 40 on the curve held by the body; none built, no caps, no tree of the stair's own |
@@ -532,19 +532,30 @@ one wedge under the whole overhang, its interface strips laid on it.
   cone's apex at the trunk's top, not the plate - the two would stand, and
   the 5 - 10 mm band would lay 1.74 x Bambu's (two loops where Bambu has one).
 
-- **THE BODY** (`bodyOf`). The trees that hold only the stair's tips keep
-  their landing member and grow their round trunk (TRUNKS) straight up to
-  one height - the highest from which a 45 deg cone over each covers the
-  shadow under the transition, a line to spare (z 28.4 on the arc, 5.39 mm
-  across there); the body's first layer lies on the trunk tops, each layer
-  over it widening half a line, so every wall lies on the one under it.
-  Each layer is the shadow of the underside over the stair's line (the
-  transition's top and the gap), clipped to the part's outline plus one
-  line, kept 0.35 mm off the part beside it (Bambu's
-  support_object_xy_distance), within the cones, a channel behind the strip:
-  a loop round its outline and ribs up the slope inside, each loop to loop,
-  STAIR_BODY_PITCH_MM (1.7) apart. Every layer measured with the exact
-  triangle distance: 0.180 mm or more for the whole support.
+- **THE BODY** (`bodyOf`). The tree that holds only the stair's tips keeps its
+  landing member and grows its round trunk (TRUNKS) **straight up its axis, at
+  its growth angle, into the body's underside** - the bottom of the lowest
+  layer the shadow under the transition fills (z 36.4 on the arc, 3.85 mm
+  across there; under a flat sheet the body holds, the last layer within the
+  sheet's z_base). There is no cone off its top (#275 had 45 deg cones, half
+  a line a layer, so every wall lay on the one under it: 40 layers, z 28.4 -
+  36.2, 5.9 m of the 34.8). The body's bottom **spans** from the trunk's top
+  to the shadow's farthest cell as the sheet spans between its tips: a loop
+  round the layer's outline and ribs up the slope STAIR_BODY_PITCH_MM (1.7)
+  apart (Bambu's support, measured), each run from loop to loop, laid on the
+  trunk's top and bridging the rest. Each layer is the shadow of the
+  underside over the stair's line (the transition's top and the gap), clipped
+  to the part's outline plus one line, kept 0.35 mm off the part beside it
+  (Bambu's support_object_xy_distance), and a channel behind each strip. A leg
+  the piece stops short of the underside builds nothing. From the underside up
+  the layers are #275's byte for byte (`support:curved` 4). **The risk the print
+  reads**: on the arc the body's first layer lies on a 3.85 mm trunk top and
+  spans 19.7 mm; in NSO's slice 183.6 mm of its lines are over air (typeSupports'
+  overhang: the layer under, closed, grown half a line) in the first layer, 11.6
+  mm in the second, none in the third. Every layer measured with the exact
+  triangle distance: 0.180 mm or more for the whole support. No tree of its
+  own, no caps: every tip of the plan on the curve is held by the body (mode
+  'drop'), and the planner's members over the trunks are left out.
 - **Bambu's pitch** (`support:curved` 5, 6): its support under the overhang
   has no straight lines to space - it is branch loops - so its pitch is read
   as any pattern's: the plan area it stands in (a column clear of the part
