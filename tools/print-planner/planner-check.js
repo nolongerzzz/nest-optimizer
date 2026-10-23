@@ -96,7 +96,8 @@ async function main() {
   // ===========================================================================
   const pa = await L.plateA();
   const res = pa.res;
-  const P = PL.plan(res, { config: tpl });
+  const PR = L.printer('a1mini-0.4');
+  const P = PL.plan(res, { config: tpl, printer: PR });
   check('the plan is made', P.ok && P.gcode.length > 1e6, P.reason);
   const parsed = Lines.parseGcode(P.gcode);
   check('the file parses with NSOGcodeLines.parseGcode: every move\'s height and the E mode from the file, nothing assumed',
@@ -226,6 +227,71 @@ async function main() {
   const ePerMm = e0.e / e0.len;
   const wantE = stadium(e0.lw, e0.lh) / (Math.PI * 1.75 * 1.75 / 4) * S.filament.flow;
   check('an outer-wall move\'s E/mm is the stadium x 0.98 (' + ePerMm.toFixed(5) + ' against Bambu\'s own 0.03073)', near(ePerMm, wantE, 2e-4) && near(ePerMm, 0.03073, 3e-4), ePerMm + ' vs ' + wantE);
+
+  // ===========================================================================
+  section('7. Start and end: Studio\'s own expanded blocks, the plate\'s numbers put in');
+  // ===========================================================================
+  const FZ = require('./freeze.js');
+  const fresh = JSON.stringify((await FZ.build('a1mini-0.4')).frozen, null, 1) + '\n';
+  check('the frozen blocks are a fresh freeze of the owner\'s slice (node tools/print-planner/freeze.js)',
+    fresh === require('fs').readFileSync(path.join(ROOT, 'fixtures', 'print-planner', 'a1mini-0.4', 'frozen.json'), 'utf8'));
+  const plines = P.gcode.split('\n'), blines = A.gcode.split('\n');
+  const slab = (ls, a, b) => { const i = ls.indexOf(a), j = ls.indexOf(b); return ls.slice(i, j + 1); };
+  const noM73 = ls => ls.filter(l => !/^M73 P\d+ R\d+$/.test(l));
+  const pStart = slab(plines, 'M201 X20000 Y20000 Z1500 E5000', '; MACHINE_START_GCODE_END');
+  const bStart = noM73(slab(blines, 'M201 X20000 Y20000 Z1500 E5000', '; MACHINE_START_GCODE_END'));
+  const diffs = (x, y) => { const d = []; x.forEach((l, i) => { if (l !== y[i]) d.push([l, y[i]]); }); return x.length === y.length ? d : null; };
+  const dStart = diffs(pStart, bStart);
+  check('the machine start block is Studio\'s for the plate, line for line (' + pStart.length + ' lines)', dStart && dStart.length <= 1 && dStart.every(d => /^\s*G29 A1 X/.test(d[0])),
+    dStart ? JSON.stringify(dStart.slice(0, 4)) : pStart.length + ' vs ' + bStart.length);
+  check('...the one line that differs is the bed-leveling box: this plate\'s first layer, within 2 mm of Studio\'s (the owner\'s slice has an older support pad) (' + (dStart && dStart[0] ? dStart[0][0].trim() + ' against ' + dStart[0][1].trim() : 'none') + ')',
+    !dStart || !dStart[0] || (() => { const a = /X([\d.]+) Y([\d.]+) I([\d.]+) J([\d.]+)/.exec(dStart[0][0]), b = /X([\d.]+) Y([\d.]+) I([\d.]+) J([\d.]+)/.exec(dStart[0][1]);
+      return [1, 2, 3, 4].every(k => near(+a[k], +b[k], 2)); })());
+  const pEnd = slab(plines, '; MACHINE_END_GCODE_START', 'M17 R ; restore z current');
+  const bEnd = slab(blines, '; MACHINE_END_GCODE_START', 'M17 R ; restore z current');
+  const dEnd = diffs(pEnd, bEnd);
+  check('the end block is Studio\'s, line for line; only the head-lift heights and the safe-position Y differ (' + pEnd.length + ' lines)',
+    dEnd && dEnd.every(d => /^\s*G1 (Z|X0 Y)/.test(d[0])) && dEnd.length === 4, dEnd ? JSON.stringify(dEnd.slice(0, 4)) : pEnd.length + ' vs ' + bEnd.length);
+  const maxZ = res.planes[res.planes.length - 1].printZ;
+  check('...the lift is max_layer_z + 0.4 / + 100 / + 98 of THIS plate (' + maxZ.toFixed(1) + ')',
+    pEnd.includes('G1 Z' + String(+(maxZ + 0.4).toFixed(4)) + ' F900 ; lower z a little') && pEnd.includes('    G1 Z' + String(+(maxZ + 100).toFixed(4)) + ' F600') && pEnd.includes('    G1 Z' + String(+(maxZ + 98).toFixed(4))));
+  // temperatures: only the template's own expressions move
+  const hot = JSON.parse(JSON.stringify(tpl));
+  hot.nozzle_temperature_initial_layer = ['230', '230']; hot.nozzle_temperature = ['225', '225'];
+  hot.textured_plate_temp_initial_layer = ['70', '70'];
+  const H = PL.plan(res, { config: hot, printer: PR });
+  const hs = slab(H.gcode.split('\n'), 'M201 X20000 Y20000 Z1500 E5000', '; MACHINE_START_GCODE_END');
+  const dHot = diffs(hs, pStart);
+  const changed = dHot ? dHot.map(d => d[1].trim() + ' -> ' + d[0].trim()) : [];
+  check('a hotter filament and bed change exactly the template\'s temperature lines (' + changed.length + ') and nothing else',
+    dHot && changed.length === 8 && dHot.every(d => /^\s*(M140 S|M190 S|M109 S|M104 S)/.test(d[0])) &&
+      hs.includes('M140 S70') && hs.includes('M190 S70;set bed temp') && hs.includes('    M109 S230') && hs.includes('    M109 S210 ; drop nozzle temp, make filament shink a bit') &&
+      hs.includes('    M104 S190') && hs.includes('M109 S225') && hs.includes('M104 S230') &&
+      hs.includes('    M104 S220') && hs.includes('M104 S170'),
+    changed.join(' | '));
+  check('...the literals stay (flush at 220, 170 / 140 for the bed wait): they are the template\'s, not the filament\'s',
+    hs.includes('    M620.1 E F299.339 T220') && hs.includes('M109 S170') && hs.includes('M104 S140'));
+  const off = PL.plan(res, { config: tpl, printer: Object.assign({}, PR, { bed: { x: 60, y: 60, z: 180 } }) });
+  check("a plate that is not on the bed is refused, not clipped", !off.ok && /not on the Bambu Lab A1 mini/.test(off.reason), off.reason);
+
+  // ---- the P1S, from the owner's P1S slice of the bare arc
+  const PS = L.printer('p1s-0.4'), p1sCfg = await L.p1sTemplate();
+  const BP = await L.bambuSlice('fixtures/supports/simple_overhang_p1s.gcode.3mf');
+  check('the P1S blocks are a fresh freeze of the owner\'s P1S slice',
+    JSON.stringify((await FZ.build('p1s-0.4')).frozen, null, 1) + '\n' === require('fs').readFileSync(path.join(ROOT, 'fixtures', 'print-planner', 'p1s-0.4', 'frozen.json'), 'utf8'));
+  const pb = await L.plateB(128, 128, false);
+  const PP = PL.plan(pb.res, { config: p1sCfg, printer: PS });
+  check('the arc plans for the P1S', PP.ok, PP.reason);
+  const ppl = PP.gcode.split('\n'), bpl = BP.gcode.split('\n');
+  const psS = slab(ppl, 'M203 X500 Y500 Z20 E30', '; MACHINE_START_GCODE_END'), bsS = noM73(slab(bpl, 'M203 X500 Y500 Z20 E30', '; MACHINE_START_GCODE_END'));
+  const dS = diffs(psS, bsS);
+  check('the P1S start block is Studio\'s, line for line (' + psS.length + ' lines); the bed-leveling box is the one line that differs',
+    dS && dS.length === 1 && /^\s*G29 A X/.test(dS[0][0]), dS ? JSON.stringify(dS) : psS.length + ' vs ' + bsS.length);
+  const pe = slab(ppl, '; MACHINE_END_GCODE_START', 'M17 R ; restore z current'), be = slab(bpl, '; MACHINE_END_GCODE_START', 'M17 R ; restore z current');
+  const dE = diffs(pe, be);
+  const topP = Math.max(...pb.res.objects[0].layers.filter(l => l.paths.length).map(l => l.printZ));
+  check('...and its end block, but for the lift heights - which are this plate\'s (its last layer is ' + topP.toFixed(1) + ' mm: Studio\'s 48.8 as well, so none differ)',
+    dE && dE.every(d => /^\s*G1 Z/.test(d[0])) && (near(topP, 48.8, 1e-6) ? dE.length === 0 : dE.length === 3), dE ? JSON.stringify(dE) : pe.length + ' vs ' + be.length);
 
   console.log('\n' + (fail ? 'FAILED  ' + fail + ' of ' + (pass + fail) : 'PASSED  all ' + pass));
   process.exit(fail ? 1 : 0);

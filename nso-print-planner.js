@@ -420,6 +420,64 @@
   }
 
   // ===========================================================================
+  // The frozen blocks
+  // ===========================================================================
+
+  /** A number as the template writes it: 17, not 17.0000. */
+  function tnum(v) { return String(+(+v).toFixed(4)); }
+
+  /**
+   * A frozen block as lines of text with the plate's numbers put in
+   * (tools/print-planner/freeze.js says what each token is). There is no
+   * template language here: a block holds a handful of tokens, plus
+   *   { hook: 'spaghetti', line }          kept unless opts.spaghetti === false
+   *   { zTop: [..], zTopElse: [..], cap }  the end block's "lift the head" pair
+   * and "@M73 <seconds>" lines, which come through as they are for the caller
+   * to turn into M73 P/R once it knows the print's time.
+   * @param {Array} lines  a frozen start / afterStart / beforeEnd / end
+   * @param {object} v     { nozzle, nozzleT, bed, box:{x,y,w,h}, cy, maxZ }
+   */
+  function thaw(lines, v, opts) {
+    opts = opts || {};
+    var sub = function (s) {
+      return s
+        .replace(/\{N-20\}/g, tnum(v.nozzle - 20)).replace(/\{N-40\}/g, tnum(v.nozzle - 40))
+        .replace(/\{N\}/g, tnum(v.nozzle)).replace(/\{T\}/g, tnum(v.nozzleT)).replace(/\{B\}/g, tnum(v.bed))
+        .replace(/\{BX\}/g, tnum(v.box.x)).replace(/\{BY\}/g, tnum(v.box.y))
+        .replace(/\{BW\}/g, tnum(v.box.w)).replace(/\{BH\}/g, tnum(v.box.h))
+        .replace(/\{CY\}/g, tnum(v.cy))
+        .replace(/\{Z\+0\.4\}/g, tnum(v.maxZ + 0.4)).replace(/\{Z\+0\.5\}/g, tnum(v.maxZ + 0.5))
+        .replace(/\{Z\+100\}/g, tnum(v.maxZ + 100)).replace(/\{Z\+98\}/g, tnum(v.maxZ + 98));
+    };
+    var out = [];
+    lines.forEach(function (l) {
+      if (typeof l === 'string') out.push(sub(l));
+      else if (l.hook) { if (opts[l.hook] !== false) out.push(l.line); }
+      else if (l.zTop) (v.maxZ + 100 < l.cap ? l.zTop : l.zTopElse).forEach(function (z) { out.push(sub(z)); });
+      else throw new Error('unknown frozen element ' + JSON.stringify(l));
+    });
+    return out;
+  }
+
+  /** The first layer's box as Studio's bed-leveling line has it (G29 A X Y I J):
+   *  the first layer's beads, each widened by half its line width. */
+  function firstLayerBox(res) {
+    var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    res.objects.forEach(function (ob) {
+      var L = ob.layers[0];
+      if (!L) return;
+      L.paths.forEach(function (p) {
+        var hw = p.width / 2;
+        p.pts.forEach(function (q) {
+          if (q[0] - hw < x0) x0 = q[0] - hw; if (q[0] + hw > x1) x1 = q[0] + hw;
+          if (q[1] - hw < y0) y0 = q[1] - hw; if (q[1] + hw > y1) y1 = q[1] + hw;
+        });
+      });
+    });
+    return isFinite(x0) ? { x: +x0.toFixed(4), y: +y0.toFixed(4), w: +(x1 - x0).toFixed(4), h: +(y1 - y0).toFixed(4) } : null;
+  }
+
+  // ===========================================================================
   // The plan
   // ===========================================================================
 
@@ -432,6 +490,8 @@
     opts = opts || {};
     if (!res || !res.ok) return { ok: false, reason: 'nothing to plan: ' + (res && res.reason || 'no slice') };
     if (!opts.config) return { ok: false, reason: 'the printer template\'s project settings (opts.config) are required' };
+    if (!opts.printer) return { ok: false, reason: 'the printer\'s frozen start / end (opts.printer) is required' };
+    var Pr = opts.printer;
     var S = settingsFrom(opts.config, opts.cooling);
     var F = S.filament;
     var filA = Math.PI * F.diameter * F.diameter / 4;
@@ -440,17 +500,30 @@
     var st = { x: null, y: null, z: 0, fan: null, feature: null, lw: null, F: null, A: null, extruded: 0, seconds: 0,
                retracted: false };
 
-    out.push('M83');
-    out.push('G90');
-    out.push('M104 S' + fmt(S.temp.nozzleInitial, 0));
-    out.push('M140 S' + fmt(S.temp.bedInitial, 0));
+    var box = firstLayerBox(res);
+    if (!box) return { ok: false, reason: 'nothing prints on the first layer' };
+    var bed = Pr.bed;
+    if (box.x < 0 || box.y < 0 || box.x + box.w > bed.x || box.y + box.h > bed.y) {
+      return { ok: false, reason: 'the first layer (' + box.x.toFixed(1) + ',' + box.y.toFixed(1) + ' to ' + (box.x + box.w).toFixed(1) +
+        ',' + (box.y + box.h).toFixed(1) + ') is not on the ' + Pr.printer + '\'s ' + bed.x + ' x ' + bed.y + ' mm bed' };
+    }
+    var lastPrinting = res.planes.length - 1;
+    while (lastPrinting > 0 && !res.objects.some(function (ob) { var Lr = ob.layers[lastPrinting]; return Lr && Lr.paths.length; })) lastPrinting--;
+    var top = res.planes[lastPrinting].printZ;
+    if (top > bed.z) return { ok: false, reason: 'the print is ' + top.toFixed(1) + ' mm tall; the ' + Pr.printer + ' prints ' + bed.z + ' mm' };
+    var vals = { nozzle: S.temp.nozzleInitial, nozzleT: S.temp.nozzle, bed: S.temp.bedInitial, box: box,
+                 cy: box.y + box.h / 2, maxZ: top };
+    var flags = { spaghetti: !opts.hooks || opts.hooks.spaghetti !== false };
+
+    thaw(Pr.start, vals, flags).forEach(function (l) { if (l.charAt(0) !== '@') out.push(l); });
+    thaw(Pr.afterStart, vals, flags).forEach(function (l) { out.push(l); });
 
     var startPos = null;
     for (var li = 0; li < res.planes.length; li++) {
       var pl = res.planes[li];
       var first = li === 0;
       var items = layerItems(res, li, S);
-      var lastLayer = li === res.planes.length - 1;
+      var lastLayer = li === lastPrinting;
       if (!items.length) continue;
       var endPos = planTravels(items, S, startPos, first ? true : S.retract.onLayerChange);
       items[items.length - 1].retractAfter = lastLayer ? true : S.retract.onLayerChange;
@@ -469,9 +542,9 @@
       emitLayer(out, items, li, pl, S, st, fan, filA, rec, first, lastLayer);
       startPos = endPos;
     }
-    out.push('M104 S0');
-    out.push('M140 S0');
-    // Until the Bambu CONFIG_BLOCK is written (below), the one key the importer needs
+    thaw(Pr.beforeEnd, vals, flags).forEach(function (l) { out.push(l); });
+    thaw(Pr.end, vals, flags).forEach(function (l) { if (l.charAt(0) !== '@') out.push(l); });
+    // Until the Bambu CONFIG_BLOCK is written (the markers commit), the one key the importer needs
     out.push('; CONFIG_BLOCK_START');
     out.push('; filament_diameter = ' + F.diameter);
     out.push('; CONFIG_BLOCK_END');
@@ -597,6 +670,14 @@
         out.push(fanLine(layerFan)); st.fan = layerFan;
       }
     });
+    if (lastLayer) {
+      // the last path is wiped and retracted; lift off it before the end block
+      out.push('M204 S' + fmt(S.accel.travel, 0));
+      if (hop > 0) {
+        out.push('G17');
+        out.push('G3 Z' + fx(pl.printZ + hop) + ' I' + fx(SPIRAL_R) + ' J0 P1  F' + fmt(S.speed.travel * 60, 0));
+      }
+    }
     rec.features = Object.keys(featuresSeen);
   }
 
@@ -608,6 +689,8 @@
     beadArea: beadArea,
     moveSeconds: moveSeconds,
     plan: plan,
+    thaw: thaw,
+    firstLayerBox: firstLayerBox,
     SPIRAL_R: SPIRAL_R,
     RETRACT_DURING_WIPE: RETRACT_DURING_WIPE
   };

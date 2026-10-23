@@ -36,6 +36,17 @@ async function bambuSlice(rel) {
            config: JSON.parse(text(parts['Metadata/project_settings.config'])) };
 }
 
+/** A printer's frozen start / end (tools/print-planner/freeze.js wrote it). */
+function printer(id) {
+  return JSON.parse(fs.readFileSync(path.join(ROOT, 'fixtures', 'print-planner', id, 'frozen.json'), 'utf8'));
+}
+
+/** The P1S 0.4 settings: the owner's P1S slice carries the project it was sliced with. */
+async function p1sTemplate() {
+  const s = await bambuSlice('fixtures/supports/simple_overhang_p1s.gcode.3mf');
+  return s.config;
+}
+
 let kernel = null;
 async function wasm() { return kernel || (kernel = await SL.loadKernel()); }
 
@@ -73,7 +84,7 @@ async function plateB(cx, cy, supports) {
   return (cache[key] = { res, objs });
 }
 
-module.exports = { ROOT, SL, R, dec, text, readParts, a1Template, bambuSlice, plateA, plateB, wasm };
+module.exports = { ROOT, SL, R, dec, text, readParts, a1Template, p1sTemplate, bambuSlice, printer, plateA, plateB, wasm };
 
 /** A line-by-line scan of a G-code text: what the nozzle did, with the state a
  *  line carries (speed, acceleration, feature, layer, fan). Works on Bambu's
@@ -82,10 +93,11 @@ function scan(gcode) {
   const lines = gcode.split('\n');
   const st = { x: 0, y: 0, z: 0, F: 0, A: 0, feature: null, layer: -1, layerZ: 0, fan: 0, retracted: false, label: null, lw: 0, lh: 0 };
   const out = { moves: [], retracts: [], hops: [], fans: [], accels: new Set(), temps: [], layerStarts: [], tags: {} };
-  let inWipe = false;
-  for (let i = 0; i < lines.length; i++) {
+  let inWipe = false, done = false;
+  for (let i = 0; i < lines.length && !done; i++) {
     const s = lines[i];
     let m;
+    if (s === '; MACHINE_END_GCODE_START') { done = true; break; }
     if (s.charCodeAt(0) === 59) {                       // ';'
       if ((m = /^; FEATURE: (.*)$/.exec(s))) st.feature = m[1];
       else if (s === '; CHANGE_LAYER') { st.layer++; out.layerStarts.push(i); }
@@ -96,6 +108,7 @@ function scan(gcode) {
       else if (s === '; WIPE_END') inWipe = false;
       continue;
     }
+    if (st.layer < 0 && s.charCodeAt(0) !== 59) { if ((m = /^M(104|109|140|190) S(\d+)/.exec(s))) out.temps.push({ code: +m[1], s: +m[2], layer: -1, line: i }); continue; }
     if ((m = /^M204 S(\d+)/.exec(s))) { st.A = +m[1]; if (st.layer >= 0) out.accels.add(st.A); continue; }
     if ((m = /^M106 S([\d.]+)/.exec(s))) { st.fan = +m[1]; out.fans.push({ layer: st.layer, s: st.fan, line: i }); continue; }
     if ((m = /^M(104|109|140|190) S(\d+)/.exec(s))) { out.temps.push({ code: +m[1], s: +m[2], layer: st.layer, line: i }); continue; }
