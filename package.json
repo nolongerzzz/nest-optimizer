@@ -224,6 +224,7 @@
     "export:roundtrip": "node tools/nso_export_roundtrip_test.js",
     "export:bambu": "node tools/3mf-test/bambu-project-check.js",
     "gcode3mf:test": "node tools/3mf-test/gcode3mf-check.js",
+    "print:planner": "node tools/print-planner/planner-check.js",
     "fixtures:audit": "python3 tools/fixture_audit.py",
     "export:multi": "node tools/nso_multi_export_check.js",
     "tip:orient": "node tools/nso_tip_orient_test.js",
