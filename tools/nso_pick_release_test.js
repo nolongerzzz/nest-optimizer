@@ -15,7 +15,7 @@
    THE ROSTER, each driven the way a person does it - the button, real clicks
    on the canvas, the card's own Set - and read the same way after each step:
      Patch, Cap, Soften, Carve, Lift, Paint        (Add / Subtract / Surface)
-     Close, Bridge, Connect                        (the cards with a Set)
+     Close, Bridge, Connect, Thicken               (the cards with a Set)
      Punch                                         (Subtract: a card that stays armed)
    Cap has no button on the page today (btn-cap is not in index.html); its
    arm is capSelectedModel(), the function the button was wired to.
@@ -337,6 +337,22 @@ const ROSTER = [
         document.getElementById('connect-readout').classList.contains('is-bad')), d0, { timeout: 60000 });
     },
     isArmed: page => page.evaluate(() => !!(state.connect && state.connect.open)) },
+
+  // Thicken (app-thicken-live.js, Add): a live ghost, a click picks a wall, Set bakes it.
+  // It takes no press at all - a click is read on pointerup and a drag is the orbit's
+  // or the move's - so what this holds it to is that nothing is left claiming the
+  // pointer after Set, and after Escape.
+  { name: 'Thicken', file: () => fx('box_open.stl'),
+    arm: async page => { await page.click('#btn-thicken-in'); },
+    verb: async (page, id) => {
+      await lookDown(page, id);
+      const d0 = await undoDepth(page);
+      await clickAt(page, await topOf(page, id));           // the cavity floor: that wall only
+      await page.waitForFunction(() => { const i = nsoThickenLive.info(); return i && i.wall && i.ok; }, null, { timeout: 15000 });
+      await page.click('#btn-thicken-set');
+      await page.waitForFunction(d => state.undoStack.length > d && !nsoThickenLive.on(), d0, { timeout: 30000 });
+    },
+    isArmed: page => page.evaluate(() => nsoThickenLive.on()) },
 
   // Punch stays armed after PUNCH (the card waits for the next face), and its
   // handles take a press only on a hole or its ring - never on bare plate.
