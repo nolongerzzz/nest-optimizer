@@ -413,7 +413,8 @@ function installHelpers() {
     console.log('\n=== 5. verbs that never needed a solid have no check at all ===');
     {
       const ALLOW = ['nso_csg.js', 'nso-helpers.js', 'nso_crop.js', 'app-join.js', 'app-bridge.js', 'app-connect.js', 'app-carve.js', 'app-assemble.js',
-                     'app-detach.js', 'app-findings.js', 'app-punch.js'];   // Punch: one subtract, its piece merged first (docs/PUNCH.md)
+                     'app-detach.js', 'app-findings.js', 'app-punch.js',    // Punch: one subtract, its piece merged first (docs/PUNCH.md)
+                     'nso_foam.js'];   // foamBox: a piece whose shells overlap is merged for the operation first (docs/FOAM.md section 10)
       const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8').replace(/<!--[\s\S]*?-->/g, '');
       const loaded = [...html.matchAll(/<script src="([^"?]+)/g)].map(m => m[1]).filter(f => !/^https?:/.test(f) && fs.existsSync(path.join(ROOT, f)));
       const asks = loaded.filter(f => /\bnsoOverlap\b/.test(fs.readFileSync(path.join(ROOT, f), 'utf8')));
