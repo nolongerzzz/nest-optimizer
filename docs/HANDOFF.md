@@ -112,6 +112,7 @@ merging its list by hand. The list below is generated.
 - [Standing rule — the checker has one definition, and now it draws (added 2026-09-17)](handoff/standing-rule-the-checker-has-one-definition-and-now-it-draws.md)
 - [Stock live editing - the card adjusts its piece, the wheel's pattern (2026-09-19)](handoff/stock-live-editing-the-card-adjusts-its-piece-the-wheels-pattern.md)
 - [Stock shelf - the Stock card is one row of tiles, no fields (2026-10-17)](handoff/stock-shelf-the-stock-card-is-one-row-of-tiles-no-fields.md)
+- [SUBTRACT card - collapsing sections, one per tool; Detach flange under Lift; Hollow live (2026-10-23)](handoff/subtract-card.md)
 - [Support aim - find the overhang, then point one straight strut at it (2026-09-19)](handoff/support-aim-find-the-overhang-then-point-one-straight-strut-at.md)
 - [Support tree - a trunk that stops, and branches that finish the job](handoff/support-tree-a-trunk-that-stops-and-branches-that-finish-the-job.md)
 - [Supports angle default - 35, and Bambu's 30 is from horizontal too (2026-10-21)](handoff/supports-angle-default-35-and-bambus-30-is-from-horizontal-too.md)
