@@ -3202,10 +3202,8 @@ function setupUI() {
   if (btnSeal) btnSeal.addEventListener('click', sealSelectedModel);
   const btnSolidify = document.getElementById('btn-solidify');
   if (btnSolidify) btnSolidify.addEventListener('click', solidifySelectedModel);
-  const btnThickenOut = document.getElementById('btn-thicken-out');
-  if (btnThickenOut) btnThickenOut.addEventListener('click', thickenOutSelectedModel);
-  const btnThickenIn = document.getElementById('btn-thicken-in');
-  if (btnThickenIn) btnThickenIn.addEventListener('click', thickenInSelectedModel);
+  // Thicken out / in are wired by app-thicken-live.js now: the button arms a live
+  // ghost and Set bakes it (thickenSelectedModel, unchanged).
 
   const btnJoin = document.getElementById('btn-join');
   if (btnJoin) {

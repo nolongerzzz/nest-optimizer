@@ -3,13 +3,16 @@
      APP_URL=https://nolongerzzz.github.io/nest-wip/ node tools/nso_thicken_drive_check.js
 
    Same standard as tools/nso_skin_drive_check.js: every step is a click on
-   the shipped UI (the Finish menu opened, the mm box filled, the Thicken
-   button, Undo), and the file checked is the one the browser downloaded via
-   "Download selected STL", through tools/mesh_validate.py. The two checks
-   that are NOT clicks (painting a face, reading the raw-soup flag) are named
-   as such in their labels.
+   the shipped UI (the Add menu's Thicken out / Thicken in arming a live ghost,
+   the slider, Set, Cancel, a click on a face of the piece, Undo), and the file
+   checked is the one the browser downloaded via "Download selected STL",
+   through tools/mesh_validate.py. The checks that are NOT clicks (painting a
+   face, reading the raw-soup flag, reading what the ghost holds) are named as
+   such in their labels.
 
-   What it pins (the two live-test defects of 2026-09-16):
+   Sections 1-7 are the engine's own pins (the two live-test defects of
+   2026-09-16), now reached THROUGH the live control - a bake is Set after the
+   ghost, a refusal is the readout under the slider with Set greyed:
      1. no waffle - the triangle count does not change; a sphere's vertices
         all land on the offset radius; planar faces stay planar
      2. the right side, and only that side, moves - on the open box (2 mm
@@ -19,7 +22,18 @@
    plus: volume matches the analytic figure, watertight before and after,
    0 piercing, a solid with no pocket refuses "in" and pushes no undo, an
    offset bigger than the feature is refused with the piece unchanged, an
-   inward-wound STL still thickens outward, and paint stands it down. */
+   inward-wound STL still thickens outward, and paint stands it down.
+
+   Sections 8-12 are the live control itself (docs/handoff/thicken-live.md):
+     8.  the slider's ghost tracks the value - what the ghost holds is what
+         _thickenOffsetSoup returns at that number, and the piece is untouched
+     9.  Set bakes exactly the ghost - the piece's triangles are the ghost's,
+         bit for bit; one Undo
+     10. Cancel (and Escape, and the button again) leaves the piece alone
+     11. per-face - a click on a wall thickens that wall only, outer and inner;
+         a wall on the wrong side for the verb is refused in words
+     12. Hollow's number box takes a click and a typed number, and Hollow runs
+         on it */
 
 const fs = require('fs');
 const os = require('os');
@@ -88,11 +102,43 @@ async function download(page, label) {
   await dl.saveAs(file);
   return { file, v: meshValidate(file), tris: parseSTL(fs.readFileSync(file)) };
 }
+const setMm = (page, v) => page.evaluate(v => {
+  const s = document.getElementById('inp-thicken-mm');
+  s.value = String(v);
+  s.dispatchEvent(new Event('input', { bubbles: true })); s.dispatchEvent(new Event('change', { bubbles: true }));
+}, v);
+const live = page => page.evaluate(() => nsoThickenLive.info());
+const liveOn = page => page.evaluate(() => nsoThickenLive.on());
+const undoDepth = page => page.evaluate(() => state.undoStack.length);
+const rawOf = page => page.evaluate(() => Array.from(getActiveModel().rawTris));
+/* A slider position as the user's keys give it: Home, then the arrows. Every
+   press is a real keyboard event, so every one fires the slider's own input
+   and change. */
+async function slideTo(page, mm) {
+  await page.focus('#inp-thicken-mm');
+  await page.keyboard.press('Home');
+  const min = await page.evaluate(() => +document.getElementById('inp-thicken-mm').min);
+  const n = Math.round((mm - min) / 0.1);
+  for (let i = 0; i < n; i++) await page.keyboard.press('ArrowRight');
+  return page.evaluate(() => +document.getElementById('inp-thicken-mm').value);
+}
+/* Thicken through the live control: the button arms, the slider is set to mm,
+   Set bakes. A refusal is the readout (the ghost is up, Set is greyed) and is
+   returned in place of a status line; the control is left armed, so the next
+   call puts it away first. Programmatic slider moves fire input and change like
+   a user's would; section 8 is where the slider is driven by key and mouse. */
 async function thicken(page, mode, mm) {
-  await page.fill('#inp-thicken-mm', String(mm));
-  await page.evaluate(() => { document.getElementById('status').textContent = 'wait'; });
+  if (await liveOn(page)) await page.click('#btn-thicken-cancel');
+  await setMm(page, mm);
   await page.click('#btn-thicken-' + mode);
-  await page.waitForFunction(() => document.getElementById('status').textContent !== 'wait', null, { timeout: 120000 });
+  if (!(await liveOn(page))) return statusOf(page);          // stood down at arm time (paint)
+  const i = await live(page);
+  if (!i.ok || i.gateWhy) {
+    check('  ...Set is greyed while the ghost is refused', await page.isDisabled('#btn-thicken-set'));
+    return i.readout;
+  }
+  await page.click('#btn-thicken-set');
+  await page.waitForFunction(() => !nsoThickenLive.on(), null, { timeout: 120000 });
   return statusOf(page);
 }
 async function undo(page) { await page.click('#btn-undo'); await page.waitForTimeout(150); }
@@ -140,7 +186,7 @@ withApp(async (page, logs) => {
   {
     const id = await loadSTL(page, fx('box-20mm.stl')); await selectModel(page, id);
     const s = await thicken(page, 'in', 1.5);
-    check('Thicken in on a solid: refused, says every face is on the outside', /Thicken in 1.5 failed - no inner face/.test(s), s);
+    check('Thicken in on a solid: the ghost is refused, the readout says every face is on the outside', /Thicken in 1.5 mm refused - no inner face/.test(s), s);
     check('  ...and pushed no undo (button still disabled)', !(await page.isEnabled('#btn-undo')));
     const a = await download(page, 'cube_after_in');
     check('  ...piece unchanged: 12 tris, vol 8000', a.v.triangles === 12 && near(a.v.signed_volume, 8000, 1e-6), summary(a.v));
@@ -207,7 +253,7 @@ withApp(async (page, logs) => {
   {
     const id = await loadSTL(page, fx('hinge_knuckle_box.stl')); await selectModel(page, id);
     const s = await thicken(page, 'in', 1.5);
-    check('Thicken in 1.5: refused - bigger than the knuckle gaps', /would turn inside out\); piece unchanged/.test(s), s);
+    check('Thicken in 1.5: refused - bigger than the knuckle gaps', /Thicken in 1.5 mm refused - 1.5 mm is more than the feature it grows into \(\d+ face\(s\) would turn inside out\)/.test(s), s);
     check('  ...no undo pushed', !(await page.isEnabled('#btn-undo')));
     const a = await download(page, 'hinge_after_refusal');
     check('  ...piece unchanged: 730 tris, vol 636.10', a.v.triangles === 730 && near(a.v.signed_volume, 636.0955, 1e-3), summary(a.v));
@@ -242,11 +288,226 @@ withApp(async (page, logs) => {
     const b = await download(page, 'tape_before');
     check('tape before: 32862 tris, 2 nm edges, piercing pairs already present', b.v.triangles === 32862 && b.v.nonmanifold_edges === 2 && b.v.self_intersection.pierce > 0, summary(b.v));
     const s3 = await thicken(page, 'out', 0.3);
-    check('tape Thicken out 0.3: refused by the piercing gate (count may not rise), piece unchanged', /piercing pairs \d+→\d+\); piece unchanged/.test(s3), s3);
+    check('tape Thicken out 0.3: refused by the piercing gate (count may not rise), piece unchanged', /refused - the moved faces would cross the piece \(piercing pairs \d+→\d+\)/.test(s3), s3);
     const s4 = await thicken(page, 'in', 0.3);
-    check('tape Thicken in 0.3: no pocket with a sharp rim - refused, unchanged', /no inner face/.test(s4), s4);
+    check('tape Thicken in 0.3: no pocket with a sharp rim - refused, unchanged', /refused - no inner face/.test(s4), s4);
     const a = await download(page, 'tape_after');
     check('  ...download identical in count and volume to before', a.v.triangles === b.v.triangles && near(a.v.signed_volume, b.v.signed_volume, 1e-6), summary(a.v));
+  }
+
+  /* ---------------------------------------------------------------------
+     The live control. The page is at the harness's default size; the Add
+     card is open at the left, so the piece is framed to the right of it. */
+  const frameOn = (from) => page => page.evaluate(f => {
+    const m = getActiveModel(), ms = cutMeshOf(m);
+    ms.updateMatrixWorld(true);
+    const b = new THREE.Box3().setFromObject(ms), c = b.getCenter(new THREE.Vector3()), r = b.getSize(new THREE.Vector3()).length();
+    state.controls.target.copy(c);
+    state.camera.position.set(c.x + f[0] * r, c.y + f[1] * r, c.z + f[2] * r);
+    state.camera.lookAt(c); state.controls.update(); state.camera.updateMatrixWorld(true);
+    // slide the piece out from under the card: pan the view left so the piece sits right of it
+    const d = new THREE.Vector3().setFromMatrixColumn(state.camera.matrixWorld, 0).multiplyScalar(-r * 0.35);
+    state.controls.target.add(d); state.camera.position.add(d); state.controls.update(); state.camera.updateMatrixWorld(true);
+  }, from);
+  const frameCorner = frameOn([0.9, 0.7, 1.1]);        // from +x, above, and the front: sees the +x wall
+  const frameAbove = frameOn([0.05, 1.6, 0.35]);       // from straight above: sees the cavity floor
+  /* the screen point of a raw point on the active piece, through its mesh */
+  const screenOfRaw = (page, p) => page.evaluate(pt => {
+    const m = getActiveModel(), ms = cutMeshOf(m), f = nsoRawFrameOf(m);
+    const q = nsoLocalPointFromRaw(f, pt);
+    ms.updateMatrixWorld(true);
+    const v = new THREE.Vector3(q[0], q[1], q[2]).applyMatrix4(ms.matrixWorld).project(state.camera);
+    const r = state.renderer.domElement.getBoundingClientRect();
+    return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height };
+  }, p);
+  const realClick = async (page, at) => {
+    await page.mouse.move(at.x - 4, at.y - 4); await page.mouse.move(at.x, at.y);
+    await page.mouse.down(); await page.mouse.up(); await page.waitForTimeout(150);
+  };
+  const rawBox = page => page.evaluate(() => {
+    const r = getActiveModel().rawTris, lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    for (let i = 0; i < r.length; i += 3) for (let k = 0; k < 3; k++) { if (r[i + k] < lo[k]) lo[k] = r[i + k]; if (r[i + k] > hi[k]) hi[k] = r[i + k]; }
+    return { lo, hi, size: [0, 1, 2].map(k => hi[k] - lo[k]) };
+  });
+  const rawVolume = page => page.evaluate(() => _thickenSignedVolume(getActiveModel().rawTris));
+  const ghostState = page => page.evaluate(() => {
+    const m = getActiveModel(), ms = cutMeshOf(m), mt = ms.material, o = nsoThickenLive.objects();
+    return { opacity: mt.opacity, transparent: mt.transparent, depthWrite: mt.depthWrite, ghosted: !!ms.userData.skipXray,
+             helpers: nsoHelpers.live().filter(h => nsoHelpers.ownerOf(h) === 'thicken').length, group: !!o.group, panelHidden: document.getElementById('thicken-panel').hidden,
+             outOn: document.getElementById('btn-thicken-out').getAttribute('aria-pressed'), inOn: document.getElementById('btn-thicken-in').getAttribute('aria-pressed') };
+  });
+  /* what _thickenOffsetSoup (the engine, untouched) returns at this number on the piece as it is */
+  const engineAt = (page, mode, mm) => page.evaluate(([md, v]) => Array.from(_thickenOffsetSoup(getActiveModel().rawTris, md, v).soup), [mode, mm]);
+  const sameFloats = (a, b) => a && b && a.length === b.length && a.every((v, i) => v === b[i]);
+  const movedBox = page => page.evaluate(() => {
+    const g = nsoThickenLive.objects().moved.geometry; g.computeBoundingBox();
+    const sz = new THREE.Vector3(); g.boundingBox.getSize(sz); return [sz.x, sz.y, sz.z];
+  });
+
+  console.log('\n=== 8. the slider\'s ghost tracks the value (box_open, Thicken out) ===');
+  {
+    await page.click('#btn-clear-plate');                 // the box alone on the plate: a click on a wall is nobody else's
+    const id = await loadSTL(page, fx('box_open.stl')); await selectModel(page, id);
+    await frameCorner(page);
+    const before = await rawOf(page);
+    await page.evaluate(() => { window.__thickenRef = getActiveModel().rawTris; });
+    await setMm(page, 1.5);
+    await page.click('#btn-thicken-out');
+    const a = await ghostState(page);
+    check('the button arms it: panel open, Thicken out lit, the piece a ghost (opacity 0.2), one helper in the scene', !a.panelHidden && a.outOn === 'true' && a.inOn === 'false' && a.opacity === 0.2 && a.transparent && a.group && a.helpers === 1, JSON.stringify(a));
+    check('the slider\'s own readout (the old number box) says 1.5, the slider\'s number', (await page.textContent('#thicken-read')) === '1.5' && (await page.inputValue('#inp-thicken-mm')) === '1.5');
+    for (const v of [0.5, 1.5, 3]) {
+      const got = await slideTo(page, v);
+      const i = await live(page);
+      const eng = await engineAt(page, 'out', got);
+      check('slider at ' + v + ' (keys): the ghost IS what the engine returns at ' + got + ' (bit for bit, ' + eng.length + ' floats)', got === v && sameFloats(i.soup && Array.from(i.soup), eng));
+      const sz = await movedBox(page);
+      check('  ...the ghost\'s wall stands ' + v + ' mm out on every side: outer extent 60 + 2*' + v + ' x 40 + 2*' + v + ' (1e-3)', near(sz[0], 60 + 2 * v, 1e-3) && near(sz[2], 40 + 2 * v, 1e-3), sz.map(x => x.toFixed(3)).join(' x '));
+      check('  ...readout box says ' + v + ', words say 58 outer faces move', (await page.textContent('#thicken-read')) === String(v) && /^Thicken out [\d.]+ mm - 58 outer face\(s\) move, 10 held \(whole piece\)$/.test(i.readout), i.readout);
+    }
+    // the track, with a real mouse: wherever it lands, the ghost is what the engine says at that value
+    const box = await page.locator('#inp-thicken-mm').boundingBox();
+    await page.mouse.click(box.x + box.width * 0.62, box.y + box.height / 2);
+    const mv = await page.evaluate(() => +document.getElementById('inp-thicken-mm').value);
+    const mi = await live(page), me = await engineAt(page, 'out', mv);
+    check('a click on the track (' + mv + '): the ghost follows it', mv > 3 && mv < 8 && sameFloats(mi.soup && Array.from(mi.soup), me), mv);
+    // the arrows on the Thicken row step the same slider
+    await page.click('.thick-arrow[data-thick-step="-1"]');
+    const av = await page.evaluate(() => +document.getElementById('inp-thicken-mm').value);
+    const ai = await live(page);
+    check('the row\'s arrow steps the slider one 0.1 and the ghost follows', near(av, mv - 0.1, 1e-9) && near(ai.mm, av, 1e-9), mv + ' -> ' + av);
+    check('the piece is untouched all the while: same triangles object, no Undo step', await page.evaluate(() => getActiveModel().rawTris === window.__thickenRef) && sameFloats(await rawOf(page), before) && (await undoDepth(page)) === 0);
+    await page.click('#btn-thicken-cancel');
+  }
+
+  console.log('\n=== 9. Set bakes exactly the ghost ===');
+  {
+    await page.click('#btn-thicken-in');
+    const v = await slideTo(page, 2.0);
+    const i = await live(page);
+    const ghost = Array.from(i.soup), before = await rawOf(page);
+    check('Thicken in at 2.0: ghost up, 10 inner faces move', v === 2 && /Thicken in 2 mm - 10 inner face\(s\) move, 58 held/.test(i.readout), i.readout);
+    await page.click('#btn-thicken-set');
+    await page.waitForFunction(() => !nsoThickenLive.on(), null, { timeout: 30000 });
+    const baked = await rawOf(page);
+    check('Set: the piece\'s triangles ARE the ghost\'s, every one of ' + ghost.length + ' floats equal', sameFloats(baked, ghost));
+    check('  ...status is Thicken\'s own line', /^Thicken in 2 - 10 inner face\(s\) moved, 58 held; open 0→0, NM 0→0, piercing 0→0/.test(await statusOf(page)), await statusOf(page));
+    const gs9 = await ghostState(page), ut9 = await page.evaluate(() => state.undoStack.map(e => e.type));
+    check('  ...one Undo step, and the control is put away (panel shut, ghost gone, piece solid again)', ut9.length === 1 && ut9[0] === 'thickenReplace' &&
+          gs9.panelHidden && gs9.opacity === 1 && !gs9.transparent && gs9.helpers === 0 && !gs9.group && gs9.outOn === 'false' && gs9.inOn === 'false', JSON.stringify(ut9) + ' ' + JSON.stringify(gs9));
+    check('  ...baked 1.5 -> 2.0: cavity walls 2 -> 4 (volume 60000 - 52*32*21 = 25056, 1e-3)', near(await rawVolume(page), 25056, 1e-3), (await rawVolume(page)).toFixed(3));
+    await undo(page);
+    check('Undo: the original, bit for bit', sameFloats(await rawOf(page), before));
+  }
+
+  console.log('\n=== 10. Cancel leaves the piece alone ===');
+  {
+    await page.evaluate(() => { window.__thickenRef = getActiveModel().rawTris; });
+    const before = await rawOf(page), d0 = await undoDepth(page);
+    await page.click('#btn-thicken-out');
+    await slideTo(page, 3);
+    check('armed, slider at 3: the ghost is up', (await live(page)).mm === 3 && (await ghostState(page)).group);
+    await page.click('#btn-thicken-cancel');
+    const g = await ghostState(page);
+    check('Cancel: the piece is the same object with the same triangles, no Undo step', await page.evaluate(() => getActiveModel().rawTris === window.__thickenRef) && sameFloats(await rawOf(page), before) && (await undoDepth(page)) === d0);
+    check('  ...ghost gone, piece solid, panel shut, buttons unlit, nothing left in the scene', g.panelHidden && g.opacity === 1 && !g.transparent && g.helpers === 0 && !g.group && g.outOn === 'false', JSON.stringify(g));
+    check('  ...says so', /Thicken cancelled - nothing changed/.test(await statusOf(page)), await statusOf(page));
+    await page.click('#btn-thicken-in'); await page.keyboard.press('Escape');
+    check('Escape does the same', !(await liveOn(page)) && (await ghostState(page)).helpers === 0 && sameFloats(await rawOf(page), before));
+    await page.click('#btn-thicken-out'); await page.click('#btn-thicken-out');
+    check('the same button again does the same', !(await liveOn(page)) && sameFloats(await rawOf(page), before));
+    await page.click('#btn-thicken-out'); await page.click('#btn-thicken-in');
+    const sw = await live(page);
+    check('the other button switches verb and keeps the number: Thicken in at the same mm', sw && sw.mode === 'in' && sw.mm === (await page.evaluate(() => +document.getElementById('inp-thicken-mm').value)) && (await ghostState(page)).inOn === 'true');
+    await page.click('#btn-thicken-cancel');
+  }
+
+  console.log('\n=== 11. per-face: one wall, by a click ===');
+  {
+    await setMm(page, 1.5);
+    const bb = await rawBox(page), orig = await rawOf(page);
+    const mid = [(bb.lo[0] + bb.hi[0]) / 2, (bb.lo[1] + bb.hi[1]) / 2, (bb.lo[2] + bb.hi[2]) / 2];
+    // -- Thicken out, click the +x wall --
+    await frameCorner(page);
+    await page.click('#btn-thicken-out');
+    const whole = await live(page);
+    check('no face picked: the whole piece (58 faces move), Whole piece greyed', whole.wall === null && whole.moved === 58 && await page.isDisabled('#btn-thicken-whole'), whole.readout);
+    await realClick(page, await screenOfRaw(page, [bb.hi[0], mid[1], mid[2]]));
+    const w1 = await live(page);
+    check('a click on the +x wall picks it: one wall, and only its faces move (not the 58 of the whole piece)', w1.wall && w1.wall.count >= 2 && w1.moved === w1.wall.count && w1.moved < 10 && new RegExp('one wall: ' + w1.wall.count + ' triangle\\(s\\) picked').test(w1.readout), w1.readout);
+    check('  ...the wall is lit, Whole piece is live', await page.evaluate(() => !!nsoThickenLive.objects().wall) && !(await page.isDisabled('#btn-thicken-whole')));
+    await realClick(page, await screenOfRaw(page, [bb.hi[0], mid[1], mid[2]]));
+    const w2 = await live(page);
+    check('a click on the same wall again drops it: whole piece', w2.wall === null && w2.moved === 58, w2.readout);
+    await realClick(page, await screenOfRaw(page, [bb.hi[0], mid[1], mid[2]]));
+    await page.click('#btn-thicken-whole');
+    check('Whole piece does the same', (await live(page)).wall === null);
+    await realClick(page, await screenOfRaw(page, [bb.hi[0], mid[1], mid[2]]));
+    const ghostW = Array.from((await live(page)).soup);
+    await page.click('#btn-thicken-set');
+    await page.waitForFunction(() => !nsoThickenLive.on(), null, { timeout: 30000 });
+    const baked = await rawOf(page), nb = await rawBox(page);
+    check('Set: the piece is the ghost bit for bit; status names the wall', sameFloats(baked, ghostW) && new RegExp('^Thicken out 1.5 - ' + w1.wall.count + ' outer face\\(s\\) moved, ' + (68 - w1.wall.count) + ' held.*\\(one wall: ' + w1.wall.count + ' triangle\\(s\\) picked\\)').test(await statusOf(page)), await statusOf(page));
+    check('  ...ONLY the +x wall moved: x 60 -> 61.5, every other extent as it was (1e-5)', near(nb.hi[0], bb.hi[0] + 1.5, 1e-5) && near(nb.lo[0], bb.lo[0], 1e-5) && [1, 2].every(k => near(nb.lo[k], bb.lo[k], 1e-5) && near(nb.hi[k], bb.hi[k], 1e-5)), nb.size.join(' x '));
+    let moved = 0, stray = 0;
+    for (let i = 0; i < orig.length; i += 3) {
+      const d = [0, 1, 2].map(k => baked[i + k] - orig[i + k]);
+      if (Math.hypot(...d) > 1e-6) { moved++; if (!(near(orig[i], bb.hi[0], 1e-4) && near(d[0], 1.5, 1e-4) && near(d[1], 0, 1e-4) && near(d[2], 0, 1e-4))) stray++; }
+    }
+    check('  ...every vertex that moved was on the +x wall and moved straight out by 1.5 (' + moved + ' of ' + orig.length / 3 + ' corners; ' + stray + ' stray)', moved > 0 && stray === 0);
+    check('  ...volume 13632 + 40*25*1.5 = 15132 (1e-3)', near(await rawVolume(page), 15132, 1e-3), (await rawVolume(page)).toFixed(3));
+    await undo(page);
+    check('Undo: the original', sameFloats(await rawOf(page), orig));
+
+    // -- Thicken in, click the cavity floor from above --
+    await frameAbove(page);
+    await page.click('#btn-thicken-in');
+    await realClick(page, await screenOfRaw(page, [mid[0], mid[1], bb.lo[2] + 2]));
+    const f1 = await live(page);
+    check('Thicken in: a click down the open top picks the cavity floor - one wall, only its faces move', f1.wall && f1.wall.count >= 2 && f1.moved === f1.wall.count && f1.moved < 10, f1.readout);
+    await page.click('#btn-thicken-set');
+    await page.waitForFunction(() => !nsoThickenLive.on(), null, { timeout: 30000 });
+    const fb = await rawOf(page); let fm = 0, fstray = 0;
+    for (let i = 0; i < orig.length; i += 3) {
+      const d = [0, 1, 2].map(k => fb[i + k] - orig[i + k]);
+      if (Math.hypot(...d) > 1e-6) { fm++; if (!(near(orig[i + 2], bb.lo[2] + 2, 1e-4) && near(d[2], 1.5, 1e-4) && near(d[0], 0, 1e-4) && near(d[1], 0, 1e-4))) fstray++; }
+    }
+    check('  ...ONLY the floor moved: every vertex that moved was on the floor (z 2) and rose 1.5 (' + fm + ' corners, ' + fstray + ' stray)', fm > 0 && fstray === 0);
+    check('  ...volume 13632 + 56*36*1.5 = 16656 (1e-3); whole-piece Thicken in 1.5 is 22396.5, so this is one wall', near(await rawVolume(page), 16656, 1e-3), (await rawVolume(page)).toFixed(3));
+    check('  ...the outer bbox is untouched, 60 x 40 x 25', await rawBox(page).then(b => b.size.every((v, k) => near(v, [60, 40, 25][k], 1e-5))));
+    await undo(page);
+
+    // -- a wall on the wrong side for the verb: refused in words --
+    await page.click('#btn-thicken-out');
+    await realClick(page, await screenOfRaw(page, [mid[0], mid[1], bb.lo[2] + 2]));
+    const wr = await live(page);
+    check('Thicken out on the cavity floor: refused in words (the wall picked is on the inside), Set greyed, nothing baked', !wr.ok && /^Thicken out 1.5 mm refused - the wall you picked is on the inside/.test(wr.readout) && await page.isDisabled('#btn-thicken-set') && sameFloats(await rawOf(page), orig), wr.readout);
+    await page.click('#btn-thicken-whole');
+    check('  ...Whole piece brings the ghost back and Set with it', (await live(page)).ok && !(await page.isDisabled('#btn-thicken-set')));
+    await page.click('#btn-thicken-cancel');
+    check('every per-face step left no Undo step behind it but its own bake', (await undoDepth(page)) === 0);
+  }
+
+  console.log('\n=== 12. Hollow\'s number box ===');
+  {
+    const id = await loadSTL(page, fx('box-20mm.stl')); await selectModel(page, id);
+    await page.evaluate(() => { document.getElementById('menu-bit').open = true; });
+    const geo = await page.evaluate(() => { const r = document.getElementById('inp-hollow-mm').getBoundingClientRect(); return { w: r.width, h: r.height }; });
+    check('the box is a box: at least 48 px wide (it was the 24 px middle column of the Thicken row)', geo.w >= 48, geo.w + ' x ' + geo.h);
+    await page.click('#inp-hollow-mm');
+    check('a click on it focuses it and leaves the number alone (it stepped 2 -> 1.92 before)', (await page.inputValue('#inp-hollow-mm')) === '2' && (await page.evaluate(() => document.activeElement.id)) === 'inp-hollow-mm', await page.inputValue('#inp-hollow-mm'));
+    await page.keyboard.press('Control+A'); await page.keyboard.type('3');
+    check('typing a number lands in it: 3', (await page.inputValue('#inp-hollow-mm')) === '3');
+    await page.keyboard.press('ArrowUp');
+    check('its arrow keys step 0.1: 3.1', near(+(await page.inputValue('#inp-hollow-mm')), 3.1, 1e-9), await page.inputValue('#inp-hollow-mm'));
+    await page.fill('#inp-hollow-mm', '3');
+    await page.click('#btn-hollow');
+    await page.waitForFunction(() => /Hollow(ed| refused| failed)/.test(document.getElementById('status').textContent), null, { timeout: 60000 });
+    const hs = await statusOf(page);
+    check('Hollow runs on the box\'s number: "Hollowed to a 3 mm wall"', /^Hollowed to a 3 mm wall/.test(hs), hs);
+    check('  ...one Undo step', (await undoDepth(page)) === 1);
+    await undo(page);
+    check('  ...Hollow to safe min is on its own row, the full width, and still there', await page.evaluate(() => { const b = document.getElementById('btn-hollow-safe'), h = document.getElementById('btn-hollow'); return !!b && b.getBoundingClientRect().width > h.getBoundingClientRect().width && b.getBoundingClientRect().top > h.getBoundingClientRect().bottom - 1; }));
   }
 
   const errs = logs.filter(l => l.startsWith('[pageerror]'));

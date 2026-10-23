@@ -279,8 +279,9 @@ function buildPlan() {
   V(COL, 'Add', 'btn-foam-all', 'Foam: Fill it all', { pre: async x => { await hollowed(x); await x.click('btn-foam'); await x.wait(300); }, run: press(['btn-foam-all']) });
   V(COL, 'Add', 'btn-foam-set', 'Foam: Fill it all, Set', { pre: async x => { await hollowed(x); await x.click('btn-foam'); await x.wait(300); await x.click('btn-foam-all'); await x.wait(500); }, run: press(['btn-foam-set']) });
   V(COL, 'Add', 'btn-foam-cancel', 'Foam: Cancel', { pre: async x => { await hollowed(x); await x.click('btn-foam'); await x.wait(300); }, run: press(['btn-foam-cancel']) });
-  V(COL, 'Add', 'btn-thicken-out', 'Thicken out', { run: press(['btn-thicken-out']) });
-  V(COL, 'Add', 'btn-thicken-in', 'Thicken in', { run: press(['btn-thicken-in']) });
+  V(COL, 'Add', 'btn-thicken-out', 'Thicken out (arms the live ghost, then Set)', { run: press(['btn-thicken-out', 'btn-thicken-set']) });
+  V(COL, 'Add', 'btn-thicken-in', 'Thicken in (arms the live ghost, then Set)', { run: press(['btn-thicken-in', 'btn-thicken-set']) });
+  V(COL, 'Add', 'btn-thicken-cancel', 'Thicken: arm, then Cancel', { run: press(['btn-thicken-out', 'btn-thicken-cancel']) });
   V(COL, 'Add', 'btn-extend', 'Extend (read the length)', { run: press(['btn-extend']) });
   V(COL, 'Add', 'inp-extend-mm', 'Extend 3 mm', { run: async x => { await x.fill('inp-extend-mm', 3); await x.click('btn-extend'); } });
   V(COL, 'Add', 'btn-bridge-go', 'Bridge: two points, Set', { setup: 'two', run: async x => { await x.click('btn-bridge'); await x.pick(0, 0); await x.wait(200); await x.pick(1, 0); await x.wait(300); await x.click('btn-bridge-go'); } });
