@@ -14,7 +14,7 @@
    across the overhang's width, moving up the curve as the layers rise.
 
      node tools/nso_support_curved_check.js      exit 0 = every gate held
-     (writes tools/supports-stair-out/simple_overhang_supports.3mf, the arc
+     (writes tools/supports-thin-out/simple_overhang_supports.3mf, the arc
       with its supports as the card exports it, to slice with Bambu's own
       supports off and print)
 
@@ -63,7 +63,9 @@
       as the card builds it is byte for byte the build before the stair
       (sha-256 of each object's soup, recorded at claude-wip 6f3354f at 60 deg
       and the same at a4ae142, the card's 35) with trunkGrowth off, and
-      supports-foot's (#274, a951f8b) with its trunks on; no stair forms on it.
+      supports-foot's (#274, a951f8b) with its trunks on - above its pads: the
+      pads are drawn with 1.85 mm of margin since supports-thinning, not 4;
+      no stair forms on it.
    8. THE REFUSAL, the card in Chromium at 60 deg (its default until #263): the arc's area
       - its top included - reads held; the three spots at its foot the plate
       cannot reach (over the part's own 2 mm base, past the 30 deg lean) are
@@ -81,7 +83,7 @@ const vm = require('vm');
 const crypto = require('crypto');
 
 const ROOT = path.join(__dirname, '..');
-const OUT = path.join(ROOT, 'tools', 'supports-stair-out');
+const OUT = path.join(ROOT, 'tools', 'supports-thin-out');
 const FIXTURE = path.join(ROOT, 'fixtures', 'supports', 'simple_overhang.3mf');
 const BAMBU = path.join(ROOT, 'fixtures', 'supports', 'simple_overhang_bambu.gcode.3mf');
 const R3 = require(path.join(ROOT, 'nso-3mf-read.js'));
@@ -115,8 +117,10 @@ const COUPON_BEFORE = { 'top_clip_x2': ['b26160d6312caabd', 58], 'top_clip_x2 - 
    supports-stair-body built them, 2a64ab8: sha-256 (first 16 hex) of "role:z0:sha;..." over each group's layers
    (a layer's sha is its soup's, below), and the layer counts */
 const STAIR_275 = { body: ['7ca0a8a142ab34ff', 46], strips: ['032fa5a8d50c30bc', 47] };
-/* ...and as the card builds it since supports-foot (its trunks grown), at #274's head a951f8b */
-const COUPON_FOOT = { 'top_clip_x2': ['b26160d6312caabd', 58], 'top_clip_x2 - support 1.1 (Tree)': ['386e1484a64f1fed', 30836] };
+/* ...and as the card builds it since supports-foot (its trunks grown), at #274's head a951f8b: the support's
+   parts and trunks - everything above the pads - are the same since (supports-thinning draws the pads
+   with 1.85 mm of margin, not 4: 468 triangles of pad became 536, and the whole object's sha moved with them) */
+const COUPON_FOOT = { 'top_clip_x2': ['b26160d6312caabd', 58], 'top_clip_x2 - support 1.1 (Tree)': ['a09bfd974b6ad0ac', 30368] };
 
 let pass = 0, fail = 0;
 const FAILS = [];
@@ -650,9 +654,13 @@ async function cardRun() {
     check('the 2026-10-20 coupon as the card builds it is byte for byte the build before the stair',
       JSON.stringify(got) === JSON.stringify(COUPON_BEFORE), Object.keys(got).map(k => `${k}: ${got[k][0]} (${got[k][1]} tris)`).join('; '));
     const c1 = await EXP.build(coupon), got1 = {};
-    c1.objects.forEach(o => { got1[o.name] = [sha(o.soup), o.soup.length / 9]; });
-    check('...and with its trunks (the card\'s build) byte for byte supports-foot\'s (#274): a part with no curve does not change',
-      JSON.stringify(got1) === JSON.stringify(COUPON_FOOT), Object.keys(got1).map(k => `${k}: ${got1[k][0]} (${got1[k][1]} tris)`).join('; '));
+    c1.objects.forEach((o, i) => {
+      const pads = i ? c1.sf.objects[i - 1].padFloats : 0;
+      got1[o.name] = [sha(o.soup.subarray(0, o.soup.length - pads)), (o.soup.length - pads) / 9];
+    });
+    check('...and with its trunks (the card\'s build) supports-foot\'s (#274) byte for byte above its pads: a part with no curve does not change, its pads smaller by the margin change only (foot 6)',
+      JSON.stringify(got1) === JSON.stringify(COUPON_FOOT), Object.keys(got1).map(k => `${k}: ${got1[k][0]} (${got1[k][1]} tris)`).join('; ') +
+      `; pads ${c1.sf.objects.map(q => q.padFloats / 9).join(', ')} tris, ${c1.sf.padOutlines.map(q => q.areaMm2.toFixed(1)).join(', ')} mm2`);
     check('...and no stair forms on it: its two ceilings are four-layer sheets', c.areas.every(a => a.tp.sheet && a.tp.sheet.levels.every(x => !x.stair && x.layers.length === 4)),
       c.areas.map(a => a.tp.sheet.reason).join(' / '));
   }
@@ -721,10 +729,11 @@ async function cardRun() {
     const model = dec.decode(await zip.read('3D/3dmodel.model'));
     const ms = zip.names().includes('Metadata/model_settings.config') ? dec.decode(await zip.read('Metadata/model_settings.config')) : '';
     const meshes = zip.names().filter(n => /^3D\/Objects\/object_\d+\.model$/.test(n)).length;
-    const tw = (ms.match(/key="detect_thin_wall" value="1"/g) || []).length;
-    check('the export is a Bambu project: Studio\'s envelope, a mesh part an object, each support with its thin-wall overrides',
-      /<metadata name="Application">BambuStudio-[\d.]+<\/metadata>/.test(model) && meshes === b.objects.length && tw === b.objects.length - 1,
-      `${(model.match(/BambuStudio-[\d.]+/) || ['no Studio tag'])[0]}; ${meshes} object parts; detect_thin_wall on ${tw} of ${b.objects.length - 1} support(s)`);
+    const keys = { wall_generator: 'classic', detect_thin_wall: '1', sparse_infill_density: '0%', wall_loops: '1' };
+    const tw = Object.keys(keys).map(k => (ms.match(new RegExp('key="' + k + '" value="' + keys[k] + '"', 'g')) || []).length);
+    check('the export is a Bambu project: Studio\'s envelope, a mesh part an object, each support with its four overrides (classic walls, thin walls, no sparse infill, one wall loop)',
+      /<metadata name="Application">BambuStudio-[\d.]+<\/metadata>/.test(model) && meshes === b.objects.length && tw.every(c => c === b.objects.length - 1),
+      `${(model.match(/BambuStudio-[\d.]+/) || ['no Studio tag'])[0]}; ${meshes} object parts; ${Object.keys(keys).map((k, i) => k + ' on ' + tw[i]).join(', ')} of ${b.objects.length - 1} support(s)`);
   }
   console.log('\n  wrote ' + path.relative(ROOT, file) + ` (${b.objects.length - 1} support object(s); open it in Bambu Studio as a PROJECT, its own supports off)`);
 

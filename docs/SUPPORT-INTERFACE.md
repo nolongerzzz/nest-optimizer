@@ -255,7 +255,8 @@ gaps edge to edge 0.05-0.84 mm, never over 2 mm.
   72.3 mm, about 2.1 passes over each line). One pass is a slicer ticket
   (`nso_slicer.js`), not this one.
 - **Nothing above z_cap but the sheet** under any of its paths.
-- **Feet**: one pad per cluster, none split; pads 0.28 mm or more from the
+- **Feet** (a round trunk's pad is its base grown 1.85 mm since
+  supports-thinning, docs/SUPPORT-GRIDPACK.md): one pad per cluster, none split; pads 0.28 mm or more from the
   part. Below the zone the trunks are the planner's: area 1's nearest is
   0.1776 mm from the part, with and without the sheet (pre-existing: rails are
   kept 0.2 mm off on rays).
@@ -432,13 +433,9 @@ toolpath in segments of 2 mm or more. `support:audit` holds it (section 5).
 - Sloped and curved ceilings get a STAIR (section 7) where their tips' levels
   fail and they lie on one fall; a dome (no one fall) still has its tips cut
   at the gap.
-- The support under a stair's body lays 2.6 x Bambu's toolpath in all on
-  the arc (section 7): the body and its strips match Bambu's over z 37 -
-  47 (1.03 x, `support:curved` 6's gate), and below them #274's two solid
-  round trunks and their pad lay 3.9 x Bambu's single trunk of loops round
-  air. Hollowing or thinning the trunks is the trunk-thinning follow-up,
-  which owns the whole part's ratio (printed by `support:curved` 6, not
-  gated).
+- The support under a stair's body: supports-thinning brought it from 2.6 x
+  Bambu's toolpath (#275) to 0.97 x on the arc (section 7): one trunk, a loop
+  round air; no 45 deg cones; a pad of 1.85 mm of margin.
 - The stair no longer grows a tree of its own (supports-stair-body), so the
   planner's `mergeThroughCrowd` - written for that tree - is planned by
   nothing on the card's build.
@@ -450,9 +447,9 @@ toolpath in segments of 2 mm or more. `support:audit` holds it (section 5).
 `parts({ interface: true })` like every sheet. Gate: `npm run
 support:curved` (`tools/nso_support_curved_check.js`), which also
 writes the arc with its supports as the card exports them to
-`tools/supports-stair-out/simple_overhang_supports.3mf` (git-ignored) - open
+`tools/supports-thin-out/simple_overhang_supports.3mf` (git-ignored) - open
 it in Bambu Studio as a project and slice with its own supports off.
-39 checks.
+43 checks.
 
 **The gap it closes.** The sheet's contract is for ceilings: one z, four
 layers. A curved underside has no single z: every tip on the arc of
@@ -575,20 +572,33 @@ one wedge under the whole overhang, its interface strips laid on it.
 - **Against Bambu, material** (`support:curved` 6): the support's printed
   toolpath, NSO's slice of the export against the fixture's G-code, layer
   by layer over Bambu's layers (it lays 0.27 mm layers low down, so each of
-  its layers is set against ours over the same height). The gate (1.5 x)
-  covers what the stair builds - the body's zone, every layer over the
-  stair's start (z 37.0): **6.38 m against 6.22, 1.03 x**. The whole part,
-  a finding the trunk-thinning follow-up (section 6) owns: 34.79 m against
-  Bambu's 13.54, 2.57 x. By height, m
-  (ours / Bambu): 0-1: 3.45 / 0.80, 1-5: 3.92 / 1.08, 5-10: 3.89 / 0.81,
-  10-20: 6.13 / 0.91, 20-30: 5.14 / 1.17, 30-37: 5.89 / 2.55, 37-40: 2.76 /
-  2.07, 40-42: 1.56 / 1.45, 42-44: 1.29 / 1.53, 44-47: 0.78 / 1.16. Over z
-  38 - 41.6 ours lays 1.1 - 1.25 x Bambu's a layer, from 41.8 up less (z 42:
-  150 / 161 mm); the excess is under the body - the pad and two solid trunks
-  (NSO's slicer, as Bambu slicing our object, prints each with two walls and
-  sparse infill: ~170 mm a layer at z 5 against Bambu's one trunk of loops,
-  52) and the cones (z 30 - 37). Before this ticket: 44.0 m, 3.25 x, the stair's own
-  trees 22.5 m of it.
+  its layers is set against ours over the same height). Three gates, each at
+  most 1.5 x Bambu's: the body's zone (every layer over the stair's start, z
+  37.0: **6.38 m against 6.22, 1.03 x**), the whole part (**13.19 m against
+  13.54, 0.97 x**), and each height band under the stair. By height, m (ours /
+  Bambu = ratio), at #275, then after each supports-thinning commit (1 the
+  override, 2 one trunk, cones kept, 3 no cone, 4 the pad):
+
+  | z | Bambu | #275 | + 1 | + 2 | + 3 | + 4 |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | 0 - 1 | 0.80 | 3.45 (4.3 x) | 2.62 (3.3 x) | 1.36 (1.7 x) | 1.36 (1.7 x) | **1.08 (1.34 x)** |
+  | 1 - 5 | 1.08 | 3.92 (3.6 x) | 1.32 (1.2 x) | 0.66 (0.6 x) | 0.66 | **0.66 (0.61 x)** |
+  | 5 - 10 | 0.81 | 3.89 (4.8 x) | 1.42 (1.7 x) | 0.71 (0.9 x) | 0.71 | **0.71 (0.87 x)** |
+  | 10 - 20 | 0.91 | 6.13 (6.7 x) | 2.38 (2.6 x) | 1.56 (1.7 x) | 1.19 (1.3 x) | **1.19 (1.30 x)** |
+  | 20 - 30 | 1.17 | 5.14 (4.4 x) | 2.33 (2.0 x) | 5.51 (4.7 x) | 1.26 (1.1 x) | **1.26 (1.08 x)** |
+  | 30 - 37 | 2.55 | 5.89 (2.3 x) | 5.89 | 6.30 (2.5 x) | 1.91 (0.75 x) | **1.91 (0.75 x)** |
+  | 37 - 40 | 2.07 | 2.76 | 2.76 | 2.76 | 2.76 | 2.76 (1.33 x) |
+  | 40 - 42 | 1.45 | 1.56 | 1.56 | 1.56 | 1.56 | 1.56 (1.07 x) |
+  | 42 - 44 | 1.53 | 1.29 | 1.29 | 1.29 | 1.29 | 1.29 (0.85 x) |
+  | 44 - 47 | 1.16 | 0.78 | 0.78 | 0.78 | 0.78 | 0.78 (0.67 x) |
+  | all | 13.54 | 34.79 (2.57 x) | 22.35 (1.65 x) | 22.48 (1.66 x) | 13.48 (0.99 x) | **13.19 (0.97 x)** |
+
+  NSO's slicer prints a trunk narrower than about 5 mm across (an interior
+  under 15 mm2, `minSparseAreaMm2`, its reading of Bambu's small-area infill) as
+  solid infill: above z 29 the trunk lays 40 mm a layer, not a loop's 15 - the
+  print will say whether Studio does the same. Before the override NSO's slicer
+  printed each trunk with two walls and sparse infill (~170 mm a layer at z 5
+  for two against Bambu's one trunk, 52).
 - **Against Bambu, the interface** (`support:curved` 5): every one of
   Bambu's 23 interface layers (41.8 - 46.2) has a strip of ours at that z
   over the same stretch of the curve; ours start at 37.0 (the card's 35 deg

@@ -189,6 +189,7 @@
   var FOOT_LAYER_MM = 0.2;     /* a foot pad is one first layer thick (the 0.2 mm layers this file's gaps are sized for) */
   var FOOT_CLUSTER_MM = 6;     /* trunks whose feet stand this close (centre to centre, in plan) share one pad */
   var FOOT_GROW_MM = 4;        /* a pad is its trunks' footprints grown by this */
+  var TRUNK_PAD_MM = 1.85;     /* ...and a round trunk's pad (TRUNKS), its flared base grown by this: Bambu's tree slim stands on a first-layer ring 16.04 mm across a 12.35 mm trunk, 1.845 mm each side (supports-thinning; it was FOOT_GROW_MM until the foot held a print) */
   var FOOT_RUN_MM = 1;         /* a trunk that would land leaning stops this high and drops the rest straight */
   var FOOT_GAP_MM = 0.2;       /* a pad keeps this far off the piece (and what stands round it), the support gap and a hair */
   var FOOT_CELL_MM = 0.05;     /* the raster a pad is drawn on: one cell */
@@ -1193,6 +1194,8 @@
     return P;
   }
   function TM(o) { return (o && o.thickness) || (root && root.NSO_Thickness) || null; }
+  /* how far past its footprint a foot's pad reaches: a built round trunk's TRUNK_PAD_MM, any other foot's FOOT_GROW_MM */
+  function padGrow(f) { return f.shell ? (f.padMm != null ? f.padMm : TRUNK_PAD_MM) : FOOT_GROW_MM; }
   function footPads(TH, obstacles, feet, plateZ, thick) {
     var res = { pads: [], groups: [], clusters: [], clustersSplit: 0, hemmed: 0, padsDropped: 0, holesFilled: 0, holesSlotted: 0, cellMm: FOOT_CELL_MM, failed: [] };
     if (!feet.length) return res;
@@ -1213,7 +1216,9 @@
        feet (FOOT_CELLS_MAX) - one far foot made a small trunk's cells 0.13 mm
        and the raster's slack rang its foot round with "piece" that was not
        there - and cost a flood of every cell per hole. */
-    var GR = uf(nF), reach = 2 * (rMax + FOOT_GROW_MM) + FOOT_TOUCH_MM + 1;
+    var GR = uf(nF), rGrown = 0;
+    feet.forEach(function (f) { rGrown = Math.max(rGrown, f.r + padGrow(f)); });
+    var reach = 2 * rGrown + FOOT_TOUCH_MM + 1;
     for (i = 0; i < nF; i++) for (j = i + 1; j < nF; j++) {
       if (Math.abs(feet[i].c[0] - feet[j].c[0]) <= reach && Math.abs(feet[i].c[1] - feet[j].c[1]) <= reach &&
           Math.hypot(feet[i].c[0] - feet[j].c[0], feet[i].c[1] - feet[j].c[1]) <= reach) GR.join(i, j);
@@ -1294,7 +1299,8 @@
     /* the raster */
     var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     feet.forEach(function (f) { x0 = Math.min(x0, f.c[0] - f.r); x1 = Math.max(x1, f.c[0] + f.r); y0 = Math.min(y0, f.c[1] - f.r); y1 = Math.max(y1, f.c[1] + f.r); });
-    var mg = FOOT_GROW_MM + 6 * FOOT_CELL_MM;
+    var mg = 6 * FOOT_CELL_MM;
+    feet.forEach(function (f) { mg = Math.max(mg, padGrow(f) + 6 * FOOT_CELL_MM); });
     x0 -= mg; y0 -= mg; x1 += mg; y1 += mg;
     var h = Math.max(FOOT_CELL_MM, Math.sqrt((x1 - x0) * (y1 - y0) / FOOT_CELLS_MAX));
     res.cellMm = h;
@@ -1303,7 +1309,7 @@
     function cy(jj) { return y0 + (jj + 0.5) * h; }
     var grow = new Uint8Array(N), core = new Int32Array(N).fill(-1), solid = new Uint8Array(N), block = new Uint8Array(N);
     feet.forEach(function (f, fi) {
-      var Rg = f.r + FOOT_GROW_MM, rg2 = Rg * Rg, rc = Math.max(h, (f.core != null ? f.core : f.r * Math.SQRT1_2) - h * (1 + Math.SQRT1_2)), rc2 = rc * rc, fx = f.c[0], fy = f.c[1];
+      var Rg = f.r + padGrow(f), rg2 = Rg * Rg, rc = Math.max(h, (f.core != null ? f.core : f.r * Math.SQRT1_2) - h * (1 + Math.SQRT1_2)), rc2 = rc * rc, fx = f.c[0], fy = f.c[1];
       var i0 = Math.max(0, Math.floor((fx - Rg - x0) / h)), i1 = Math.min(nx - 1, Math.ceil((fx + Rg - x0) / h));
       var j0 = Math.max(0, Math.floor((fy - Rg - y0) / h)), j1 = Math.min(ny - 1, Math.ceil((fy + Rg - y0) / h));
       for (var jj = j0; jj <= j1; jj++) {
@@ -1624,6 +1630,8 @@
     });
     var obstacles = [piece].concat(opts.occluders || []).filter(function (s) { return s && s.length >= 9; });
     if (feet.some(function (f) { return f.grow; })) growTrunks(TH, obstacles, feet, plateZ, thick);
+    /* opts.trunkPadMm: a round trunk's pad margin, TRUNK_PAD_MM unless said (the suites draw #274's, 4 mm, beside it) */
+    if (opts.trunkPadMm != null) feet.forEach(function (f) { if (f.shell) f.padMm = +opts.trunkPadMm; });
     var fp = footPads(TH, obstacles, feet, plateZ, thick);
     if (fp.failed.length) return { ok: false, reason: 'the feet: ' + fp.failed[0] };
     var par = ids.map(function (x, q) { return q; });
@@ -2163,6 +2171,7 @@
         if (!THg) return { ok: false, reason: 'nso_thickness.js is not loaded - the trunks keep off the piece with its probe' };
         trunks = growTrunks(THg, [opts.rawTris || []].concat(opts.occluders || []).filter(function (s) { return s && s.length >= 9; }), feet, p.plateZ, foot);
         feet.forEach(function (f) { if (f.shell) out[f.key].parts.push({ soup: f.shell, trunkShell: true }); });
+        if (opts.trunkPadMm != null) feet.forEach(function (f) { if (f.shell) f.padMm = +opts.trunkPadMm; });
       }
       /* THE PADS (FEET): one per group of feet, each the first part of the
          lowest trunk standing on it - the others join it through the pad */
@@ -2660,7 +2669,7 @@
     _footPads: function (obstacles, feet, plateZ, thick, opts) { return footPads(TM(opts), obstacles, feet, plateZ, thick == null ? FOOT_LAYER_MM : thick); },
     _footprintOf: footprintOf,
     _frustumSoup: frustumSoup,
-    FEET: { layerMm: FOOT_LAYER_MM, clusterMm: FOOT_CLUSTER_MM, growMm: FOOT_GROW_MM, gapMm: FOOT_GAP_MM, cellMm: FOOT_CELL_MM, touchMm: FOOT_TOUCH_MM },
+    FEET: { layerMm: FOOT_LAYER_MM, clusterMm: FOOT_CLUSTER_MM, growMm: FOOT_GROW_MM, trunkGrowMm: TRUNK_PAD_MM, gapMm: FOOT_GAP_MM, cellMm: FOOT_CELL_MM, touchMm: FOOT_TOUCH_MM },
     TRUNK: { tipMm: TRUNK_TIP_MM, angleDeg: TRUNK_ANGLE_DEG, flareMm: FLARE_MM, flareAngleDeg: FLARE_ANGLE_DEG, share: TRUNK_SHARE,
              keepMm: TRUNK_KEEP_MM, tipClearMm: TRUNK_TIP_CLEAR_MM, tipReachMm: TRUNK_TIP_REACH_MM, sides: TRUNK_SIDES },
     _memberSolid: function (m, foot, opts) { return memberSolid(PS(opts || {}), m, foot); },
