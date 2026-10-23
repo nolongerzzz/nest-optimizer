@@ -431,6 +431,108 @@ Nothing was re-pinned: every plan is the same JSON, byte for byte.
   index `docs/CURVED-BRANCH.md` §2b names.
 - Out of scope, as asked: economics dials beyond L, curved legs, UI, GRISPR.
 
+## 7. Feed: the user's points (supports-custom-engine)
+
+```
+npm run support:feed    tools/nso_support_feed_check.js
+```
+
+The engine half of three ways to feed the planner; the card that picks one
+is the next ticket. The planner's behaviour is unchanged: a feed changes
+which tips it is handed, where a trunk may land, and what it must keep out
+of. `plan(rawTris, opts)` (and `NSO_SupportTree.planTree`, which calls it)
+takes one more option, every field optional:
+
+```
+opts.feed = {
+  mode:         'auto' | 'assisted' | 'custom'      (absent: auto)
+  tips:         [{ x, y, z }]      the user's tips, on the piece's underside
+  beaconsOff:   [tip ids]          assisted only: detected beacons not to plan
+  landingZones: [{ x, y, r }]      on the plate
+  excluded:     [ids]              from a previous build: the eraser
+}
+```
+
+| mode | the tips planned | takes |
+| --- | --- | --- |
+| **auto** | detection's beacons, as today | `excluded` only; anything else is refused by name |
+| **assisted** | detection's beacons (or `opts.beacons`, the card's area) less `beaconsOff`, plus `tips` | everything but nothing |
+| **custom** | `tips` only - no beacon grid (detection still runs for the plate) | everything but `beaconsOff` |
+
+**No feed is today, byte for byte.** `opts.feed` absent, `null`, `{}`,
+`{ mode: 'auto' }` or `{ mode: 'auto', excluded: [] }` all take the old path
+(support:feed 1); every no-feed build of support:interface's pieces (coupon,
+clamp, shelf, tab - every area bare, with the sheet, and as the card builds it
+with shared feet; and the whole piece planned at once) hashed the same on
+claude-wip 9a95297's file and this one (measured before the rebase onto 1b45aec;
+not re-measured since).
+
+**A tip id** names a spot: `b` + a detected beacon's point, `u` + a given
+tip's point as given, each coordinate to 0.01 mm (`NSO_SupportGridpack.tipId(p,
+given)`), so it is the same in every build that has the spot. **A given tip** is
+snapped to the nearest face of the piece within 1 mm and takes that face's
+normal; from there it is exactly a detected beacon at that spot - the same
+nudge, cap, sheet and gap. One on no face within 1 mm, or on a face turned up
+more than 0.26 (the card's own Shift-click rule), is refused, reported in
+`plan.feed.refused` and counted unsupported - never moved.
+
+**Landing zones.** When any is given, a trunk lands on the plate only where its
+CENTRE - the axis of its end - is inside a zone's circle; its pad and its
+flared trunk (supports-foot) may spill past the line (owner's rule, after #274:
+a flared foot is wider than a small zone). A member whose drop would land outside every zone
+leans from its anchor, within the lean limit, to the nearest point of a zone it
+can reach - its full lean then straight down, or one straight leg - clear of
+the piece and of every other tree's members; a merge or a pickup that would
+leave its member out of reach of every zone does not happen. A member that
+reaches no zone is not built: its tips are counted unreachable and listed in
+`plan.offZone`. `plan.zones[i].trunks` names the trunks in each zone and
+`plan.zonesEmpty` the zones nothing landed in - reported, nothing forced.
+A trunk resting on the part (`restOnModel`) is not on the plate and is not
+held to a zone.
+
+**The eraser.** `excluded` names tips (left out, as `beaconsOff` does - "don't
+support here": not built, and not reported unsupported either; listed in
+`plan.excluded.tips`) and the branches and trunks of a previous build. The
+plan is made, the members named are found in it by id, each one's polyline
+becomes a **keep-out** (swept at its own side, starting 5 mm down from a tip it
+held so that tip can lean away) that every leg of the next plan is tested
+against as the piece is - detection never sees it - and the plan is made again.
+So that member is not built; its tips are held by other members or reported
+unsupported. A member that exists only in a build made after an earlier
+erasure is found in the round after it. `plan.excluded` = `{ members, tips,
+notErased, unknown }`: a pad or a sheet is not erased on its own
+(`notErased`); an id that matches nothing is `unknown`.
+
+**Members.** `shells(plan, parts)` (the card's build) answers with `members`
+and `unsupported` beside the solids it always gave; `members(plan, parts)`
+gives the same for any plan; `shareFeet()` answers with its pads as members.
+The solids, the soups and the exported object are unchanged.
+
+```
+{ id, kind: 'tip' | 'branch' | 'trunk' | 'pad' | 'sheet', from, to, carries: [tip ids] }
+```
+
+- `from` / `to`: its top end and its bottom end. A tip's are its contact and
+  the point under it on its column; a pad's and a sheet's, the middle of its box
+  at its top and at its bottom.
+- `carries`: every tip it holds up, sorted. A tip itself; a branch the tips
+  above it; a trunk every tip of its tree; a pad the tips of the trunks on it; a
+  sheet the tips under it. **A held tip is in exactly one trunk's carries**; a
+  tip that is not held is in `unsupported` (unreachable, inside the piece,
+  refused).
+- `id`: a tip's is its tip id; anything else's is its kind and an FNV-1a hash
+  of what it carries and where it runs (its polyline to 0.01 mm; a pad's
+  trunks; a sheet's tips and top) - the same in every build of the same inputs,
+  a new one wherever the member is not the same member.
+
+support:feed (23 checks): no inputs; custom on the clamp (one tip: one tree,
+cut at the gap, 0.193 mm off the piece, its foot on the plate; two tips a
+beacon pitch apart: one sheet across them); assisted on the coupon with every
+other beacon off (no tip at an off beacon; every tip left on at its auto
+contact, to the bit); landing zones on the shelf; an excluded trunk and tip on
+the coupon, and a member of the rebuild excluded in turn; members the same
+across two builds, every held tip in exactly one trunk; the card's build's pads named by shareFeet.
+
 ## Paint scope: sub-region — inherited
 
 Points come from `NSO_SupportBeacons.detect` with `opts.skipList` passed through

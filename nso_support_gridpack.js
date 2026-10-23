@@ -128,6 +128,12 @@
          optionally with regionId and key) planned instead of detecting.
    Every plan.trunks[i] carries regionIds; every solid(plan).solids[i]
    carries beacons (ids), regionIds and landing.
+   opts.feed: the user's points - { mode: 'auto' | 'assisted' | 'custom',
+         tips, beaconsOff, landingZones, excluded } (THE FEED, below).
+         Absent, the plan is today's, byte for byte.
+   members(plan, parts)        -> { members: [{ id, kind, from, to, carries }],
+                                  unsupported }; shells() answers with both
+                                  (MEMBERS, below)
    parts(plan, { interface: true }) (and solid()): a tip a STAIR holds by
          itself (sheet()'s mode 'drop', docs/SUPPORT-INTERFACE.md section 7)
          is not built, nor any member that holds only such tips; the tips the
@@ -326,6 +332,129 @@
     return gridBeacons(rawTris, opts);
   }
 
+  /* =====================================================================
+     THE FEED - the user's points (opts.feed). docs/SUPPORT-GRIDPACK.md "Feed".
+     =====================================================================
+     Three ways to feed the planner; the card picks one. Absent (or
+     { mode: 'auto' } with nothing else) is today's plan, byte for byte.
+       auto      detection's beacons, as today. Takes only `excluded`.
+       assisted  detection's beacons (opts.beacons when given, as the card's
+                 area), less beaconsOff, plus tips; landingZones.
+       custom    no beacon grid: the tips given are every tip; landingZones.
+     opts.feed = { mode, tips: [{ x, y, z }], beaconsOff: [tip ids],
+                   landingZones: [{ x, y, r }], excluded: [member ids] }
+     A TIP ID names a spot: 'b' + its point (a detected beacon) or 'u' + the
+     point given (a tip of the user's), each coordinate to 0.01 mm - so the
+     id of a spot is the same in every build that has it. A given tip is
+     snapped to the nearest face of the piece within SNAP_MM and takes that
+     face's normal: from there it is planned as a detected beacon at that
+     spot is (the same nudge, cap, sheet and gap). One on no face within
+     SNAP_MM, or on a face turned up more than UP_MAX, is refused and
+     reported (plan.feed.refused), never moved. */
+  var SNAP_MM = 1;             /* a given tip this far off the piece is on no face */
+  var UP_MAX = 0.26;           /* a face turned up more than this holds nothing (app-supports-card.js's own figure) */
+  var KEEP_TRIM_MM = LATTICE_MM;   /* an erased member's keep-out starts this far down from a tip it held */
+  var FEED_MODES = { auto: true, assisted: true, custom: true };
+  function fmt2(v) { return (Math.round(v * 100) / 100).toFixed(2); }
+  function tipId(p, given) { return (given ? 'u' : 'b') + fmt2(p[0]) + ',' + fmt2(p[1]) + ',' + fmt2(p[2]); }
+  function tidOf(b) { return b.tid || tipId(b.p, false); }
+  /* FNV-1a, 32 bits: a member's id from what it is */
+  function hash32(s) {
+    var h = 0x811c9dc5;
+    for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+    return ('0000000' + h.toString(16)).slice(-8);
+  }
+  /* The feed, checked: null when it asks for nothing (today's plan), else
+     { mode, tips, off, zones, excluded } or { error }. */
+  function feedOf(opts) {
+    var f = opts && opts.feed;
+    if (f == null) return null;
+    if (typeof f !== 'object') return { error: 'opts.feed is not an object' };
+    var mode = f.mode == null ? 'auto' : String(f.mode);
+    if (!FEED_MODES[mode]) return { error: 'unknown feed mode ' + JSON.stringify(f.mode) + ' (auto, assisted or custom)' };
+    var tips = f.tips || [], off = f.beaconsOff || [], zones = f.landingZones || [], ex = f.excluded || [];
+    if (!Array.isArray(tips) || !Array.isArray(off) || !Array.isArray(zones) || !Array.isArray(ex)) {
+      return { error: 'feed.tips, beaconsOff, landingZones and excluded are lists' };
+    }
+    if (mode === 'auto' && (tips.length || off.length || zones.length)) {
+      return { error: 'feed mode auto takes no tips, beaconsOff or landingZones - say assisted or custom' };
+    }
+    if (mode === 'custom' && off.length) return { error: 'beaconsOff is for assisted: custom has no beacons to turn off' };
+    for (var i = 0; i < tips.length; i++) {
+      var t = tips[i];
+      if (!t || !isFinite(t.x) || !isFinite(t.y) || !isFinite(t.z)) return { error: 'feed.tips[' + i + '] is not { x, y, z }' };
+    }
+    for (i = 0; i < zones.length; i++) {
+      var z = zones[i];
+      if (!z || !isFinite(z.x) || !isFinite(z.y) || !(z.r > 0)) return { error: 'feed.landingZones[' + i + '] is not { x, y, r } with r > 0' };
+    }
+    if (mode === 'auto' && !ex.length) return null;
+    var offSet = {}, exSet = {};
+    off.forEach(function (id) { offSet[String(id)] = true; });
+    ex.forEach(function (id) { exSet[String(id)] = true; });
+    return { mode: mode, tips: tips, off: offSet, zones: zones.map(function (q) { return { x: +q.x, y: +q.y, r: +q.r }; }),
+             excluded: ex.map(String), exSet: exSet };
+  }
+  /* The nearest point of the piece to q, and its face's unit normal. */
+  function nearestFace(soup, q) {
+    var best = null;
+    for (var i = 0; i + 8 < soup.length; i += 9) {
+      var a = [soup[i], soup[i + 1], soup[i + 2]], b = [soup[i + 3], soup[i + 4], soup[i + 5]], c = [soup[i + 6], soup[i + 7], soup[i + 8]];
+      var n = unit(cross(sub(b, a), sub(c, a)));
+      if (!n) continue;
+      var x = closestOnTri(q, a, b, c), d = len(sub(q, x));
+      if (!best || d < best.d) best = { d: d, p: x, n: n };
+    }
+    return best;
+  }
+  /* Ericson's closest point on a triangle. */
+  function closestOnTri(p, a, b, c) {
+    var ab = sub(b, a), ac = sub(c, a), ap = sub(p, a), d1 = dot(ab, ap), d2 = dot(ac, ap);
+    if (d1 <= 0 && d2 <= 0) return a;
+    var bp = sub(p, b), d3 = dot(ab, bp), d4 = dot(ac, bp);
+    if (d3 >= 0 && d4 <= d3) return b;
+    var vc = d1 * d4 - d3 * d2;
+    if (vc <= 0 && d1 >= 0 && d3 <= 0) return add(a, mul(ab, d1 / (d1 - d3)));
+    var cp = sub(p, c), d5 = dot(ab, cp), d6 = dot(ac, cp);
+    if (d6 >= 0 && d5 <= d6) return c;
+    var vb = d5 * d2 - d1 * d6;
+    if (vb <= 0 && d2 >= 0 && d6 <= 0) return add(a, mul(ac, d2 / (d2 - d6)));
+    var va = d3 * d6 - d5 * d4;
+    if (va <= 0 && (d4 - d3) >= 0 && (d5 - d6) >= 0) return add(b, mul(sub(c, b), (d4 - d3) / ((d4 - d3) + (d5 - d6))));
+    var den = 1 / (va + vb + vc);
+    return add(a, add(mul(ab, vb * den), mul(ac, vc * den)));
+  }
+  /* The beacons a fed plan starts from: beaconsFor's (none in custom), less
+     the ones turned off or erased, plus the tips given. Each carries its tip
+     id (tid). Refused tips and the beacons left out are on the answer. */
+  function feedBeacons(rawTris, opts, F) {
+    var bc = beaconsFor(rawTris, F.mode === 'custom' ? Object.assign({}, opts, { beacons: [] }) : opts);
+    if (!bc.ok) return bc;
+    var list = [], off = [], erased = [], refused = [];
+    bc.beacons.forEach(function (b) {
+      var id = tipId(b.p, false);
+      if (F.off[id]) { off.push(id); return; }
+      if (F.exSet[id]) { erased.push(id); return; }
+      list.push(Object.assign({}, b, { tid: id }));
+    });
+    var seen = {};
+    F.tips.forEach(function (t) {
+      var q = [+t.x, +t.y, +t.z], id = tipId(q, true);
+      if (seen[id]) return;
+      seen[id] = true;
+      if (F.exSet[id]) { erased.push(id); return; }
+      var nf = nearestFace(rawTris, q);
+      if (!nf || nf.d > SNAP_MM) { refused.push({ tip: id, why: 'on no face of the piece within ' + SNAP_MM + ' mm' }); return; }
+      if (nf.n[2] > UP_MAX) { refused.push({ tip: id, why: 'on a face turned up: nothing hangs there' }); return; }
+      list.push({ p: nf.p.slice(), n: nf.n.slice(), regionId: t.regionId, key: t.key, source: 'given', tid: id });
+    });
+    list.forEach(function (b, i) { b.id = i; });
+    bc.beacons = list;
+    bc.feed = { mode: F.mode, off: off, erased: erased, refused: refused };
+    if (!list.length) { bc.ok = false; bc.reason = 'no tips to plan: ' + (refused.length ? refused.length + ' refused, ' : '') + (off.length + erased.length) + ' left out'; }
+    return bc;
+  }
+
   /* Which regions a set of beacon ids belongs to: sorted, distinct, the
      beacons' own regionId (undefined ones left out). */
   function regionIdsOf(beacons, ids) {
@@ -417,6 +546,7 @@
     opts = opts || {};
     var out = { ok: false, reason: '', stage: 'beacons', members: [], stubs: [], merges: [], pickups: [],
                 steered: [], nudged: [], tight: [], unreachable: [], resting: [], inside: [], held: 0 };
+    if (opts._feed) { out.offZone = []; out.zoneLanded = []; }
     var A = SA(opts), T = ST(opts), say = progressOf(opts);
     if (!A || !T || typeof A.detectOverhangs !== 'function') {
       out.reason = 'nso_support_aim.js and nso_support_tree.js must be loaded'; return out;
@@ -427,7 +557,9 @@
     out.style = style; out.eagerness = eager;
 
     say('detecting', null, null, true);
-    var bc = beaconsFor(rawTris, opts);
+    var F = opts._feed || null;
+    var bc = F ? feedBeacons(rawTris, opts, F) : beaconsFor(rawTris, opts);
+    if (F) out.feed = bc.feed || { mode: F.mode, off: [], erased: [], refused: [] };
     out.detect = bc.detect;
     if (!bc.ok) { out.reason = bc.reason; return out; }
     out.region = (bc.regions && bc.regions.length) ? bc.regions[0] : null;
@@ -459,6 +591,26 @@
     var crowd = !!opts.mergeThroughCrowd;
     out.branchTiltDeg = tiltDeg; out.latticeMm = L; out.plateZ = plateZ; out.restOnModel = rest;
     var obstacles = [rawTris].concat(opts.occluders || []);
+    /* an erased member's keep-out (the feed's `excluded`): in the way of every
+       leg, as the piece is - and nowhere else (detection never sees it) */
+    if (opts._keepOut && opts._keepOut.length) obstacles = obstacles.concat(opts._keepOut);
+    /* LANDING ZONES (the feed's): a trunk lands on the plate only where its
+       CENTRE - the axis of its end - is inside a zone's circle; its pad and
+       its flared trunk (TRUNKS) may spill past the line */
+    var Z = F && F.zones.length ? F.zones : null;
+    function zoneOf(q) {
+      if (!Z) return -1;
+      for (var zi = 0; zi < Z.length; zi++) if (Math.hypot(q[0] - Z[zi].x, q[1] - Z[zi].y) <= Z[zi].r + 1e-9) return zi;
+      return -1;
+    }
+    /* ...and a merge or a pickup that would leave its member out of reach of
+       every zone (its new anchor q) does not happen */
+    function zoneReach(q) {
+      for (var zi = 0; zi < Z.length; zi++) {
+        if (Math.hypot(q[0] - Z[zi].x, q[1] - Z[zi].y) - Z[zi].r <= (q[2] - plateZ) * tanT + 1e-9) return true;
+      }
+      return false;
+    }
     /* One index per piece, built here once for the whole plan (or found, if
        this soup was planned before and is unchanged: every value is checked,
        once, so an edit in place cannot leave a stale index behind). */
@@ -606,6 +758,7 @@
             if (best && D >= best.D) break;
             var W = [a[0] + u[0] * D * lean, a[1] + u[1] * D * lean, z];
             if (probe.leg(a, W, m.side, cap, 0) >= 0) break;          /* the leaning line itself is blocked */
+            if (k === 0 && Z && zoneOf(W) < 0) break;              /* on the plate, but in no landing zone */
             if (k === 0 || dropHit(W, m.side, 0) < 0) { best = { D: D, W: W, heading: hi, lean: STEER_LEANS[li] }; break; }
           }
         }
@@ -619,6 +772,66 @@
     function drop(m) {                     /* nothing built for it */
       m.dead = true;
       m.beacons.forEach(function (id) { out.unreachable.push(id); });
+    }
+    /* INTO A ZONE: a member whose drop would land in no landing zone leans
+       from its anchor, within the lean limit, to the nearest point of a zone
+       it can reach - its full lean then straight down, or one straight leg
+       to the plate - clear of the piece and of every other tree's members
+       (their columns' touch distance). Targets: each zone's nearest point to
+       the anchor, its centre, and 16 headings round its rim, nearest first.
+       A zone no member reaches stays empty, and is reported (plan.zones). */
+    function zoneLand(m) {
+      var a = anchor(m), cap = m.path.length === 1 ? m.tipCap : 0, H = a[2] - plateZ;
+      var mine = {}, q = [m.id];
+      while (q.length) { var id = q.pop(); if (mine[id]) continue; mine[id] = true; M[id].parents.forEach(function (pp) { q.push(pp); }); }
+      var T = [];
+      Z.forEach(function (z, zi) {
+        var rIn = z.r - 1e-6;
+        var c = [z.x, z.y], d0 = Math.hypot(a[0] - c[0], a[1] - c[1]);
+        if (d0 > 1e-9) T.push({ zi: zi, k: -1, p: [c[0] + (a[0] - c[0]) / d0 * rIn, c[1] + (a[1] - c[1]) / d0 * rIn] });
+        T.push({ zi: zi, k: 0, p: c });
+        for (var h = 0; h < STEER_HEADINGS; h++) {
+          var t = 2 * Math.PI * h / STEER_HEADINGS;
+          T.push({ zi: zi, k: h + 1, p: [c[0] + rIn * Math.cos(t), c[1] + rIn * Math.sin(t)] });
+        }
+      });
+      T.forEach(function (t) { t.d = Math.hypot(t.p[0] - a[0], t.p[1] - a[1]); });
+      T.sort(function (x, y) { return (x.d - y.d) || (x.zi - y.zi) || (x.k - y.k); });
+      function apart(legs) {
+        for (var i = 0; i < M.length; i++) {
+          var o = M[i];
+          if (o.dead || mine[o.id]) continue;
+          for (var j = 0; j + 1 < o.path.length; j++) {
+            for (var l = 0; l < legs.length; l++) if (segDist(legs[l][0], legs[l][1], o.path[j], o.path[j + 1]) < touch(m.side, o.side)) return false;
+          }
+        }
+        return true;
+      }
+      for (var i = 0; i < T.length; i++) {
+        beat();
+        var tg = T[i], P0 = [tg.p[0], tg.p[1], plateZ];
+        if (tg.d > H * tanT + 1e-9) break;              /* the rest are farther still */
+        var routes = [];
+        if (tg.d > 1e-9) {
+          var W = [tg.p[0], tg.p[1], a[2] - tg.d / tanT];
+          if (W[2] > plateZ + 1e-9) routes.push([W, P0]);
+        }
+        routes.push([P0]);
+        for (var r = 0; r < routes.length; r++) {
+          var pts = [a].concat(routes[r]), ok = true;
+          for (var s = 0; s + 1 < pts.length && ok; s++) {
+            ok = probe.leg(pts[s], pts[s + 1], m.side, s === 0 ? cap : 0, 0) < 0;
+          }
+          var legs = [];
+          for (s = 0; s + 1 < pts.length; s++) legs.push([pts[s], pts[s + 1]]);
+          if (!ok || !apart(legs)) continue;
+          routes[r].forEach(function (pt) { m.path.push(pt.slice()); });
+          m.free = false; m.end = 'plate';
+          out.zoneLanded.push({ member: m.id, zone: tg.zi, to: P0.slice() });
+          return true;
+        }
+      }
+      return false;
     }
 
     /* ---- the descent ---- */
@@ -646,6 +859,7 @@
              rises the last TIP_RISE_SIDES vertically, so its tip meets the
              face exactly as a strut's does. */
           var V = pick && [b.p[0], b.p[1], b.p[2] - TIP_RISE_SIDES * s0];
+          if (pick && Z && !zoneReach(pick.Q)) pick = null;
           if (pick && probe.leg(pick.Q, V, s0, 0, 0) < 0 && probe.leg(V, b.p, s0, 0, s0) < 0 &&
               probe.leg(anchor(pick.m), pick.Q, pick.m.side, pick.m.path.length === 1 ? pick.m.tipCap : 0, 0) < 0 &&
               dropHit(pick.Q, sideFor(s0, pick.m.count + 1), 0) < 0) {
@@ -716,6 +930,7 @@
           }
           if (!ok) return;
           count = group.reduce(function (n, m) { return n + m.count; }, 0); sc = sideFor(s0, count);
+          if (Z && !zoneReach(c.N)) return;
           if (dropHit(c.N, sc, 0) >= 0) return;
           for (var li = 0; li < group.length; li++) {
             var gm = group[li];
@@ -735,6 +950,10 @@
         M.forEach(function (m) {
           if (!m.free || m.dead) return;
           var a = anchor(m);
+          if (Z && zoneOf(a) < 0) {
+            if (!zoneLand(m)) { m.free = false; m.end = 'none'; m.beacons.forEach(function (id) { out.offZone.push(id); }); drop(m); }
+            return;
+          }
           m.path.push([a[0], a[1], plateZ]); m.free = false; m.end = 'plate';
         });
       }
@@ -763,6 +982,17 @@
       out.held += t.beacons.length;
     });
     out.toPlate = trunks.filter(function (t) { return t.landing === 'plate'; }).length;
+    if (Z) {
+      out.zones = Z.map(function (z) { return { x: z.x, y: z.y, r: z.r, trunks: [] }; });
+      trunks.forEach(function (t, ti) {
+        if (t.landing !== 'plate') return;
+        var m = M[t.root], e = m.path[m.path.length - 1], zi = zoneOf(e);
+        t.zone = zi;
+        if (zi >= 0) out.zones[zi].trunks.push(ti);
+      });
+      out.zonesEmpty = [];
+      out.zones.forEach(function (z, zi) { if (!z.trunks.length) out.zonesEmpty.push(zi); });
+    }
 
     /* Interface stations, in nso_support_interface.finish's shape. */
     out.stations = [];
@@ -788,7 +1018,8 @@
     var line = 'Holds ' + held + ' of ' + total + ' support point' + (total === 1 ? '' : 's');
     if (p.toPlate) line += ' on ' + p.toPlate + (p.toPlate === 1 ? ' trunk' : ' trunks') + ' to the plate';
     if (p.resting.length) parts.push(p.resting.length + ' resting on the part');
-    if (p.unreachable.length) parts.push(p.unreachable.length + ' unreachable from the plate');
+    if (p.unreachable.length) parts.push(p.unreachable.length + ' unreachable from the plate' +
+      (p.offZone && p.offZone.length ? ' (' + p.offZone.length + ' in reach of no landing zone)' : ''));
     if (p.inside.length) parts.push(p.inside.length + ' inside the piece, left out');
     return line + (parts.length ? '; ' + parts.join(', ') : '') + '.';
   }
@@ -1237,7 +1468,7 @@
     all.forEach(function (pd) {
       if (pd.hemmed) res.hemmed++;
       if (!pd.soup) { res.padsDropped++; return; }
-      res.pads.push({ keys: pd.feet.map(function (f) { return feet[f].key; }), poly: pd.poly, soup: pd.soup, areaMm2: pd.areaMm2, hemmed: pd.hemmed });
+      res.pads.push({ keys: pd.feet.map(function (f) { return feet[f].key; }), feet: pd.feet.slice(), poly: pd.poly, soup: pd.soup, areaMm2: pd.areaMm2, hemmed: pd.hemmed });
     });
     var sup = {};
     for (i = 0; i < nF; i++) (sup[SUP.find(i)] || (sup[SUP.find(i)] = [])).push(feet[i].key);
@@ -1612,12 +1843,12 @@
     var TH = TM(opts);
     if (!TH || typeof TH.prepare !== 'function') return { ok: false, reason: 'nso_thickness.js is not loaded - the pads are drawn with its probe' };
     var thick = opts.firstLayerMm == null ? FOOT_LAYER_MM : +opts.firstLayerMm, plateZ = opts.plateZ == null ? 0 : +opts.plateZ;
-    var ids = [], idOf = {}, feet = [];
+    var ids = [], idOf = {}, feet = [], footOf = [];
     (builds || []).forEach(function (b, bi) {
       ((b && b.solids) || []).forEach(function (sd, si) {
         var key = bi + ':' + si;
         idOf[key] = ids.length; ids.push([bi, si]);
-        (sd.feet || []).forEach(function (f) { feet.push(f.grow ? { key: key, c: f.c, r: f.r, grow: f.grow } : { key: key, c: f.c, r: f.r }); });
+        (sd.feet || []).forEach(function (f) { feet.push(f.grow ? { key: key, c: f.c, r: f.r, grow: f.grow } : { key: key, c: f.c, r: f.r }); footOf.push(f); });
       });
     });
     var obstacles = [piece].concat(opts.occluders || []).filter(function (s) { return s && s.length >= 9; });
@@ -1668,10 +1899,15 @@
       var g = groups[r], list = g.from.map(function (id) { return builds[id[0]].solids[id[1]].soup; }).concat(g.trunks, g.pads);
       return { from: g.from, soup: joinAll(list), pads: g.pads.length, trunks: g.trunks.length };
     });
+    /* every pad as a member (MEMBERS): it carries what its trunks carry */
+    var members = fp.pads.map(function (pd) {
+      return padMember(pd.feet.map(function (f) { return footOf[f].member; }).filter(function (x) { return x != null; }),
+                       [].concat.apply([], pd.feet.map(function (f) { return footOf[f].carries || []; })), pd.soup);
+    });
     var trunks = feet.filter(function (f) { return f.grown; }).map(function (f) {
       return Object.assign({ from: ids[idOf[f.key]], soup: f.shell || null, padR: f.r, padCore: f.core }, f.grown);
     });
-    return { ok: true, objects: objects, pads: fp.pads.length, trunks: trunks,
+    return { ok: true, objects: objects, members: members, pads: fp.pads.length, trunks: trunks,
              padOutlines: fp.pads.map(function (pd) { return { from: pd.keys.map(function (k) { return ids[idOf[k]]; }), poly: pd.poly, areaMm2: pd.areaMm2 }; }), clusters: fp.clusters.length, clustersSplit: fp.clustersSplit,
              clustersHemmed: fp.clustersHemmed, hemmed: fp.hemmed, padsDropped: fp.padsDropped, holesFilled: fp.holesFilled, holesSlotted: fp.holesSlotted,
              reason: fp.pads.length + ' pad(s) under ' + fp.clusters.length + ' cluster(s) of feet' +
@@ -2201,7 +2437,8 @@
             p.trunks.forEach(function (tr, k) { if (tr.beacons.indexOf(b) >= 0 && carriers.indexOf(k) < 0) carriers.push(k); });
           });
           (stairOf[L.id] || []).forEach(function (T) { carriers.push(T); });
-          out.push({ trunk: -1, sheet: L.id, carriers: carriers, parts: L.layers.map(function (x) { return { soup: x.soup, sheet: true }; }), fingers: 0 });
+          out.push({ trunk: -1, sheet: L.id, carriers: carriers, tips: L.tips.map(function (ti) { return sh.plan.tips[ti].beacon; }),
+                     parts: L.layers.map(function (x) { return { soup: x.soup, sheet: true }; }), fingers: 0 });
         });
       }
       var summ = sh ? sh.summary() : null;
@@ -2529,7 +2766,7 @@
     if (!p || !p.ok) return { ok: false, reason: (p && p.reason) || 'no plan' };
     if (!p.trunks.length) return { ok: true, soup: new Float32Array(0), solids: [], reason: p.reason, shells: 0 };
     if (!tp || !tp.ok) return { ok: false, reason: (tp && tp.reason) || 'no parts' };
-    var E = tp.trunks, parent = E.map(function (x, k) { return k; }), entryOf = {};
+    var E = tp.trunks, parent = E.map(function (x, k) { return k; }), entryOf = {}, MB = membersOf(p, tp);
     function find(x) { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; }
     function join(a, b) { a = find(a); b = find(b); if (a !== b) parent[Math.max(a, b)] = Math.min(a, b); }
     E.forEach(function (x, k) { if (x.sheet == null) entryOf[x.trunk] = k; });
@@ -2560,9 +2797,14 @@
       return { soup: soup, box: bounds(soup), trunks: trunks, sheets: g.sheet.map(function (x) { return x.sheet; }), beacons: ids,
                regionIds: p.beacons ? regionIdsOf(p.beacons, ids) : [], landing: ls.length === 1 ? ls[0] : 'mixed',
                /* where its trunks stand: shareFeet() draws the pads from these when parts() drew none */
-               feet: (tp.feet || []).filter(function (f) { return mineT[f.trunk]; }).map(function (f) { return f.grow ? { c: f.c, r: f.r, grow: f.grow } : { c: f.c, r: f.r }; }) };
+               feet: (tp.feet || []).filter(function (f) { return mineT[f.trunk]; }).map(function (f) {
+                 var o = f.grow ? { c: f.c, r: f.r, grow: f.grow } : { c: f.c, r: f.r };
+                 o.member = MB.trunkIds[f.trunk]; o.carries = MB.trunkCarries[f.trunk];
+                 return o;
+               }) };
     });
     return { ok: true, soup: joinAll(solids.map(function (x) { return x.soup; })), solids: solids, shells: count,
+             members: MB.members, unsupported: MB.unsupported,
              fingersDropped: tp.fingersDropped || 0, detached: 0, pads: tp.pads, sheet: tp.sheet || null,
              sheetsAlone: solids.filter(function (x) { return x.sheets.length && !x.trunks.length; }).length,
              reason: p.reason };
@@ -2636,9 +2878,164 @@
     });
   }
 
+  /* =====================================================================
+     MEMBERS - what a build is made of, each named, so the card can light
+     one, erase one (the feed's `excluded`) and plan again.
+     =====================================================================
+     members(plan, parts) -> { members, unsupported, ... }; shells() answers
+     with the same two, shareFeet() with its pads as members.
+       { id, kind: 'tip' | 'branch' | 'trunk' | 'pad' | 'sheet', from, to, carries }
+     from / to   its top end and its bottom end ([x, y, z]); a tip's are its
+                 contact and the point under it on its column, a pad's and a
+                 sheet's the middle of its box at its top and at its bottom
+     carries     the tip ids it holds up, sorted: a tip itself; a branch the
+                 tips above it; a trunk every tip of its tree; a pad every tip
+                 of the trunks on it; a sheet the tips under it. A held tip is
+                 in exactly one trunk's carries; an unheld one is in
+                 `unsupported` (unreachable, inside the piece, refused).
+     id          a tip: its tip id. Anything else: its kind and a hash of what
+                 it carries and where it runs (its polyline to 0.01 mm; a
+                 pad's trunks; a sheet's top) - the same in every build of the
+                 same inputs, a new one wherever it is not the same member.
+     ===================================================================== */
+  function ptKey(q) { return fmt2(q[0]) + ',' + fmt2(q[1]) + ',' + fmt2(q[2]); }
+  function memberId(kind, carries, pts) { return kind + '-' + hash32(carries.join(';') + '|' + pts.map(ptKey).join(';')); }
+  function sortedIds(list) {
+    var seen = {}, out = [];
+    list.forEach(function (x) { if (!seen[x]) { seen[x] = true; out.push(x); } });
+    return out.sort();
+  }
+  function boxEnds(soups) {
+    var lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    soups.forEach(function (sp) { var b = bounds(sp); for (var k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], b.lo[k]); hi[k] = Math.max(hi[k], b.hi[k]); } });
+    var cx = (lo[0] + hi[0]) / 2, cy = (lo[1] + hi[1]) / 2;
+    return { from: [cx, cy, hi[2]], to: [cx, cy, lo[2]] };
+  }
+  function padMember(trunkIds, carries, soup) {
+    var ts = sortedIds(trunkIds), cs = sortedIds(carries), e = boxEnds([soup]);
+    return { id: 'pad-' + hash32(ts.join(';')), kind: 'pad', from: e.from, to: e.to, carries: cs };
+  }
+  /* The plan's own members (tips, branches, trunks), and `ref`: id -> the
+     polyline (top first) and side an erased member's keep-out is swept on. */
+  function planMembers(p) {
+    var res = { members: [], ref: {}, trunkIds: [], trunkCarries: [], unsupported: [] };
+    if (!p || !p.beacons) return res;
+    var tid = function (id) { return tidOf(p.beacons[id]); }, st = {};
+    (p.stations || []).forEach(function (s) { st[s.beacon] = s; });
+    function put(kind, m, pts, carries, side, tipTop) {
+      var cs = sortedIds(carries.map(tid)), id = memberId(kind, cs, pts);
+      res.members.push({ id: id, kind: kind, from: pts[0].slice(), to: pts[pts.length - 1].slice(), carries: cs });
+      res.ref[id] = { kind: kind, pts: pts.map(function (q) { return q.slice(); }), side: side, tipTop: tipTop };
+      return { id: id, carries: cs };
+    }
+    (p.trunks || []).forEach(function (tr) {
+      var inTree = {};
+      tr.members.forEach(function (mid) {
+        inTree[mid] = true;
+        var m = p.members[mid], pts = m.path;
+        var r = put(mid === tr.root ? 'trunk' : 'branch', m, pts, m.beacons, m.side, m.beacon != null);
+        if (mid === tr.root) { res.trunkIds.push(r.id); res.trunkCarries.push(r.carries); }
+      });
+      (p.stubs || []).forEach(function (s) { if (inTree[s.member]) put('branch', null, [s.to, s.via, s.from], [s.beacon], s.side, true); });
+      tr.beacons.slice().sort(function (a, b) { return a - b; }).forEach(function (b) {
+        var s = st[b], id = tid(b);
+        var top = s ? s.contact : p.beacons[b].p, below = s ? s.from : top;
+        res.members.push({ id: id, kind: 'tip', from: top.slice(), to: below.slice(), carries: [id] });
+      });
+    });
+    res.unsupported = sortedIds((p.unreachable || []).concat(p.inside || []).map(tid)
+      .concat(((p.feed && p.feed.refused) || []).map(function (r) { return r.tip; })));
+    return res;
+  }
+  /* The build's members: the plan's, then every pad parts() drew and every
+     sheet, from its parts (trunkParts' answer). */
+  function membersOf(p, tp) {
+    var res = planMembers(p);
+    if (!tp || !tp.trunks) return res;
+    var tid = function (id) { return tidOf(p.beacons[id]); };
+    tp.trunks.forEach(function (e) {
+      e.parts.forEach(function (q) {
+        if (!q.pad) return;
+        res.members.push(padMember(q.keys.map(function (t) { return res.trunkIds[t]; }),
+          [].concat.apply([], q.keys.map(function (t) { return res.trunkCarries[t] || []; })), q.soup));
+      });
+    });
+    tp.trunks.forEach(function (e) {
+      if (e.sheet == null) return;
+      var cs = sortedIds((e.tips || []).map(tid)), ends = boxEnds(e.parts.map(function (q) { return q.soup; }));
+      res.members.push({ id: 'sheet-' + hash32(cs.join(';') + '|' + fmt2(ends.from[2])), kind: 'sheet', from: ends.from, to: ends.to, carries: cs });
+    });
+    return res;
+  }
+  function members(p, tp) {
+    var r = membersOf(p, tp);
+    return { members: r.members, unsupported: r.unsupported, excluded: (p && p.excluded) || null, zones: (p && p.zones) || null };
+  }
+
+  /* An erased member's keep-out: its polyline swept at its own side, a leg
+     at a time, starting KEEP_TRIM_MM down when its top is a tip (so the tip
+     is not inside it, and can lean away). */
+  function keepOutSoups(P, ref) {
+    var pts = ref.pts.map(function (q) { return q.slice(); });
+    if (ref.tipTop) {
+      var total = 0;
+      for (var i = 0; i + 1 < pts.length; i++) total += len(sub(pts[i + 1], pts[i]));
+      var trim = Math.min(KEEP_TRIM_MM, total / 2);
+      while (pts.length > 1 && trim > 1e-9) {
+        var L0 = len(sub(pts[1], pts[0]));
+        if (L0 <= trim) { trim -= L0; pts.shift(); continue; }
+        pts[0] = add(pts[0], mul(sub(pts[1], pts[0]), trim / L0));
+        trim = 0;
+      }
+    }
+    var out = [];
+    for (var k = 0; k + 1 < pts.length; k++) {
+      var u = unit(sub(pts[k + 1], pts[k]));
+      if (!u) continue;
+      var sw = P.sweep({ points: [pts[k], pts[k + 1]], profile: squareProfile(ref.side, 0), up: Math.abs(u[1]) > 0.9 ? [1, 0, 0] : [0, 1, 0] });
+      if (sw.ok) out.push(sw.tris);
+    }
+    return out;
+  }
+  /* A fed plan. The feed's `excluded` names tips (left out, as beaconsOff
+     does) and members of an earlier build: the plan is made, the members it
+     names are found in it by id, each becomes a keep-out (keepOutSoups) and
+     the plan is made again - so its tips are held by other members, or are
+     unsupported, and it is not built. A member that only exists in a plan
+     made without an earlier erasure is found in the round after it. A pad or
+     a sheet is not erased on its own: it is reported (excluded.notErased). */
+  function planFed(rawTris, opts, F) {
+    var P = PS(opts), keep = [], resolved = [], notErased = [], pending = [];
+    F.excluded.forEach(function (id) {
+      if (/^(trunk|branch)-/.test(id)) pending.push(id);
+      else if (/^(pad|sheet)-/.test(id)) notErased.push(id);
+    });
+    var p;
+    for (;;) {
+      p = plan(rawTris, Object.assign({}, opts, { _feed: F, _keepOut: keep }));
+      if (!p.ok || !pending.length) break;
+      var pm = planMembers(p), hit = pending.filter(function (id) { return pm.ref[id]; });
+      if (!hit.length) break;
+      if (!P || typeof P.sweep !== 'function') {
+        p = { ok: false, stage: 'feed', reason: 'nso_path_sweep.js is not loaded - an erased member\'s keep-out is swept with it' };
+        break;
+      }
+      hit.forEach(function (id) { keep = keep.concat(keepOutSoups(P, pm.ref[id])); resolved.push(id); });
+      pending = pending.filter(function (id) { return !pm.ref[id]; });
+    }
+    var erasedTips = (p.feed && p.feed.erased) || [];
+    p.excluded = { members: resolved, tips: erasedTips, notErased: notErased,
+                   unknown: pending.concat(F.excluded.filter(function (id) {
+                     return !/^(trunk|branch|pad|sheet)-/.test(id) && erasedTips.indexOf(id) < 0;
+                   })) };
+    return p;
+  }
+
   /* plan() keeps what solid() needs to clear gecko fingers. */
   function planSupport(rawTris, opts) {
-    var p = plan(rawTris, opts);
+    var F = feedOf(opts), p;
+    if (F && F.error) p = { ok: false, stage: 'feed', reason: F.error };
+    else p = F ? planFed(rawTris, opts, F) : plan(rawTris, opts);
     p.rawTris = rawTris;
     p.occluders = (opts && opts.occluders) || [];
     return p;
@@ -2658,6 +3055,9 @@
     parts: parts,
     weld: weld,
     shells: shells,
+    members: members,
+    tipId: function (p, given) { return tipId(p, !!given); },
+    FEED: { snapMm: SNAP_MM, upMax: UP_MAX, keepTrimMm: KEEP_TRIM_MM, modes: Object.keys(FEED_MODES) },
     buildUnits: buildUnits,
     describe: describe,
     _sideFor: sideFor,
