@@ -24,8 +24,7 @@ naming a surface does (it is the same drag).
 - **Escape** mid-drag puts the piece back where it was picked up. No Undo.
 - **One Undo** per drag that moved the piece (`movePlaced`: x, z and the mesh's
   height as it was). A press that does not move is a click.
-- The plate grid's **Snap to grid** still applies. The red neighbour fence lines
-  are drawn as before (section "Not changed" below).
+- The plate grid's **Snap to grid** still applies.
 
 ## What the drag no longer does
 
@@ -46,14 +45,33 @@ The jobs it did on the plate, and where they live now:
 | bring a piece in the air down onto the plate (let go over the bed) | **To plate**; or, for a piece Lift left in the air, Lift's drop |
 | leave a piece in the air where it was let go | Vertical placement (arrows, slider); a flat drag keeps whatever height the piece has |
 
+## The box over a piece during the drag
+
+With the Align menu open (and Join started, A and B picked, or Center lock's
+Pick target armed - none of them gates it), dragging a piece showed **a box
+over one other piece**: a green wireframe box (red over a support piece) round
+the piece under the pointer, and a dot at the point under it. That is
+`app-grab-drop.js`'s target helper (`drawTarget`), the "this is where it will
+seat" marker of the grab - drawn on every plate drag from #190, whatever tool
+was armed, as soon as the pointer crossed another piece. It is **gone from
+Move**; only Lift's drop draws it, and takes it out of the scene when the drop
+ends.
+
+What is still drawn during a Move drag, and is not that: **the neighbour fence
+lines** - a thin red rectangle on the bed round each other piece's footprint
+(`showFenceLines`, `app-core.js`), made once at the press from each piece's
+cached box and removed at the release. It marks where the others stand, so you
+can see them under or beside the piece you are carrying; it is not a check and
+walls nothing off (overlap is allowed). It stays; it is drawn whatever is
+armed, so Align has nothing to do with it.
+
 ## Not changed
 
 Move's nudge arrows, the vertical slider and arrows, Rotate, Tip, Tilt; the
 position lock (a locked piece does not start a drag); the Join session's flush
-readout after a drag (`reportJoinFlushGap`, once, on release - it was also run on
-every pointer move; that per-move run is gone, nothing checks geometry on a
-move); the red fence lines drawn round the other pieces' footprints while a
-piece is dragged (a plain outline, not a geometry check).
+readout after a drag (`reportJoinFlushGap`) - now run **once, on the release**;
+it also ran on every pointer move, walking the whole of the hull piece's
+triangles, and that per-move run is gone (nothing checks geometry on a move).
 
 ## Measured
 
