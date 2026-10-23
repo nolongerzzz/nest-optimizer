@@ -28,11 +28,14 @@
       a tilted box, and a baked piece posed again, against a brute-force pass.
       The old corner method is measured too, and is out by millimetres on the
       last one (so this cannot pass on a piece that never showed the bug).
-   2. Seat on a tilted corner through a real drop: the seat turns the piece and
-      bakes it, and the clearance it measures on the surfaces is the 0.18 mm
-      that was asked for (it was 1.2 - 3.8 mm out on a posed piece).
-   3. Drag it into the air: liftY is the true height over the bed, and the
-      Vertical slider reads it.
+   2. Seat on a tilted corner through a drop's seat: the seat turns the piece
+      and bakes it, and the clearance it measures on the surfaces is the 0.18 mm
+      that was asked for (it was 1.2 - 3.8 mm out on a posed piece). The plate
+      drag is flat since move-flat (#280) - only Lift's drop seats, and only a
+      piece Lift left in the air - so the seat is the one a drop makes
+      (app-grab-drop.js's seat: NSO_seatPieceAt, Drop's words and Undo).
+   3. Carry it flat, then raise it with Vertical: liftY is the true height over
+      the bed, and the Vertical slider reads it.
    4. To plate: the lowest vertex lands on the bed baseline, the status gives
       the true drop distance, the export's lowest point is 0, and a second
       press is a truthful "Already on the plate".
@@ -107,6 +110,19 @@ async function carry(page, a, b) {
   await page.waitForTimeout(250);
 }
 const status = page => page.evaluate(() => document.getElementById('status').textContent);
+/* A drop onto a piece, as app-grab-drop.js's seat makes it: NSO_seatPieceAt at the point let go
+   over, with Drop's words and its Undo. A plate drag no longer reaches it (move-flat, #280). */
+const dropSeat = (page, onto, id, point) => page.evaluate(([onto, id, point]) => {
+  const T = state.placed.find(q => q && q.sourceId === onto), p = state.placed.find(q => q && q.sourceId === id);
+  const nm = q => '"' + ((state.models.find(m => m.id === q.sourceId) || {}).name || 'piece') + '"';
+  const r = NSO_seatPieceAt(T, point, p, { undoType: 'dropSeatReplace' },
+    { verb: 'Drop', a: nm(T), b: nm(p), seated: 'Dropped onto ' + nm(T) + ': seated' });
+  if (r && r.ok && r.applied) {
+    if (typeof refreshOutline === 'function') refreshOutline(p);
+    setStatus(r.applied.status + '. One Undo (Ctrl+Z) puts it back.');
+  }
+  return !!(r && r.ok);
+}, [onto, id, point]);
 const centreOf = (page, id) => page.evaluate(id => {
   const p = state.placed.find(q => q && q.sourceId === id);
   const b = meshLocalBox3(p.mesh);
@@ -157,8 +173,7 @@ withApp(async (page, logs) => {
   const before = await measure(page, bit);
   check('the bit starts posed (its box is not centred on its origin\'s axes)', Math.abs(before.q[0]) + Math.abs(before.q[2]) > 0.05,
     JSON.stringify(before.q.map(v => +v.toFixed(3))));
-  const bitTop = await centreOf(page, bit);
-  await carry(page, await screenOf(page, bitTop), await screenOf(page, setup.corner));
+  await dropSeat(page, hull, bit, setup.corner);
   const seated = await status(page);
   const turned = /turned ([0-9.]+) degrees and baked into its own axes/.exec(seated);
   check('the drop seats and BAKES a turn into the piece\'s axes', !!turned && +turned[1] > 0.5, (seated.match(/turned.*axes/) || [seated])[0]);
@@ -171,13 +186,12 @@ withApp(async (page, logs) => {
     f3(s.oldMinY) + ' vs ' + f3(s.lo[1]));
 
   /* ------------------------------------------------ 3. drag it into the air */
-  console.log('\n=== 3. drag it into the air: liftY and Vertical read the true height ===');
-  const c1 = await centreOf(page, bit), p1 = await screenOf(page, c1);
-  await carry(page, p1, { x: p1.x + 30, y: 30 });
+  console.log('\n=== 3. carry it flat, raise it with Vertical: liftY and Vertical read the true height ===');
+  const c1 = await centreOf(page, bit), p1 = await screenOf(page, c1), up0 = s.liftY;
+  await carry(page, p1, { x: p1.x + 60, y: p1.y + 40 });
   s = await measure(page, bit);
-  check('it was let go over nothing and stays in the air', s.liftY > 20, 'liftY ' + f3(s.liftY));
-  check('in the air: liftY is the true height of the lowest vertex', near(s.liftY, s.lo[1] - BED, TOL),
-    'liftY ' + f3(s.liftY) + ' vs ' + f3(s.lo[1] - BED));
+  check('a flat drag off the hull keeps the height it was seated at', near(s.liftY, up0, 1e-6) && near(s.liftY, s.lo[1] - BED, TOL),
+    'liftY ' + f3(s.liftY) + ' (seated ' + f3(up0) + ') vs ' + f3(s.lo[1] - BED));
   await page.evaluate(id => {
     selectPlaced(state.placed.findIndex(q => q && q.sourceId === id));
     document.getElementById('menu-move').open = true;
@@ -185,6 +199,12 @@ withApp(async (page, logs) => {
     chk.checked = true; chk.dispatchEvent(new Event('change'));
   }, bit);
   await page.waitForTimeout(150);
+  await page.evaluate(() => { const sl = document.getElementById('move-vert-slider'); sl.value = '30'; sl.dispatchEvent(new Event('input')); });
+  await page.waitForTimeout(150);
+  s = await measure(page, bit);
+  check('Vertical raised it into the air', s.liftY > 20, 'liftY ' + f3(s.liftY));
+  check('in the air: liftY is the true height of the lowest vertex', near(s.liftY, s.lo[1] - BED, TOL),
+    'liftY ' + f3(s.liftY) + ' vs ' + f3(s.lo[1] - BED));
   const read = await page.evaluate(() => document.getElementById('move-vert-read').textContent);
   check('Vertical reads the true height', near(parseFloat(read), s.lo[1] - BED, 0.006), read + ' vs ' + f3(s.lo[1] - BED));
   await page.evaluate(() => { const chk = document.getElementById('chk-move-vertical'); chk.checked = false; chk.dispatchEvent(new Event('change')); });
@@ -308,7 +328,7 @@ withApp(async (page, logs) => {
     state.undoStack.length = 0; updateUndoBtn();
   }, [hull, bit]);
   const b0 = await measure(page, bit);
-  await carry(page, await screenOf(page, await centreOf(page, bit)), await screenOf(page, setup.corner));
+  await dropSeat(page, hull, bit, setup.corner);
   const seated2 = await status(page);
   check('the second drop seats and bakes too', /baked into its own axes/.test(seated2), seated2.slice(0, 120));
   const depthBefore = await page.evaluate(() => state.undoStack.length);
