@@ -46,7 +46,7 @@ const L = require('./nso_bridge_testlib.js');
 /* THREE STEPS, ONE FILE. The roster's rows are independent (each clears the plate and loads its own piece), so CI runs
    them as pick:release-edit / -paint-lift / -cards, ~70-85 s each here where the whole was ~216 s (374 s on CI). The
    baseline (0) and the closing no-page-errors check run in every one; no flag runs all ten rows. */
-const STEPS = { edit: 'Patch,Cap,Soften,Carve', 'paint-lift': 'Paint,Lift', cards: 'Close,Bridge,Connect,Punch' };
+const STEPS = { edit: 'Patch,Cap,Soften,Carve', 'paint-lift': 'Paint,Lift', cards: 'Close,Bridge,Connect,Punch,Supports' };
 const onlyArg = process.argv.find(a => a.startsWith('--only='));
 const STEP_ROWS = onlyArg ? STEPS[onlyArg.slice('--only='.length)] : null;
 if (onlyArg && !STEP_ROWS) { console.error('nso_pick_release_test: ' + onlyArg + ' is not --only=' + Object.keys(STEPS).join('|')); process.exit(2); }
