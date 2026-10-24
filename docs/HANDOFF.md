@@ -75,6 +75,7 @@ merging its list by hand. The list below is generated.
 - [Open ticket - G-scope renders on demand, not every frame (added 2026-09-26)](handoff/open-ticket-g-scope-renders-on-demand-not-every-frame.md)
 - [Output protocol](handoff/output-protocol.md)
 - [Parked ticket - re-vendor cth/ from click-test](handoff/parked-ticket-re-vendor-cth-from-click-test.md)
+- [perf-bisect - which merges made the app slower, and what grows in a session (2026-10-23)](handoff/perf-bisect.md)
 - [Photogrammetry upload onramp — validate a photo set before reconstructing it (2026-09-19)](handoff/photogrammetry-upload-onramp-validate-a-photo-set-before.md)
 - [Picture -> relief slab - Gen+ -> Picture (2026-10-12)](handoff/picture-relief-slab-gen-picture.md)
 - [Ping pong](handoff/ping-pong.md)
