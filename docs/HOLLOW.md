@@ -320,3 +320,37 @@ would read well under 1.5 mm somewhere on it, and it reads 1.500.
    the place the tool is pointed. A blade whose footprint reaches a thinner spot
    a few millimetres away is `cutClearance()`'s question, and that one is still
    a warning. The two are complementary and neither subsumes the other.
+
+---
+
+## 6. The live preview (subtract-card)
+
+Beside the wall box in SUBTRACT's Hollow section there is a slider
+(`inp-hollow-slider`) that writes the same number. While it moves, the piece
+turns to a ghost (Foam's treatment: translucent, depth-write off, `skipXray`)
+and the cavity Hollow would cut is drawn inside it in cyan. Nothing is cut until
+**Hollow** is pressed, and Hollow reads the box exactly as it always did.
+
+* **A coarser pass of the same engine.** The preview calls `hollow()` with
+  `stepsPerWall: 1.5` (the default is 3) and `verify: false` (no
+  measure-and-retry). On `box_hull_80x40x20-2.stl` that is 24 ms at a 4 mm wall,
+  200 ms at 2 mm and 700 ms at 1 mm, against 0.4 / 1.8 / 4.1 s for the full pass.
+  The shape is the same to within a sample; the wall Hollow then leaves is the
+  full pass's, measured. The readout says "Preview" and says Hollow runs the
+  full pass.
+* **It follows the drag at the pace it can keep** (`app-live-slider.js`): the
+  next preview waits as long as the last took, never under 60 ms, and only the
+  latest value is drawn. It runs on the main thread, so a very thin wall on a big
+  piece is a visible stutter, not a hang (limit 5 above, at half the cost).
+* **Refusals go in the readout, not the status line.** A wall under the nozzle
+  floor, a wall too thick to leave a cavity, an open piece, a painted piece: the
+  words are `hollow()`'s and `standDown()`'s own, shown under the slider, with no
+  preview drawn.
+* **It is a helper** (`nsoHelpers` owner `hollow-live`): never exported, never
+  selectable, never counted by Watch; closed on leave-tool, Clear / Clear plate,
+  an Undo past it (it redraws if the section is still showing it), a different
+  piece being chosen, the Hollow section shutting, and Hollow / Fill / Hollow to
+  safe min running.
+* **The control is shared.** `nsoLiveSlider.bind({slider, box, read, unit,
+  onLive})` is the slider-and-box pair with a throttled `onLive(value)`; Thicken's
+  live slider binds the same way and draws its own preview in `onLive`.
