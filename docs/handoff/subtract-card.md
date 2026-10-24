@@ -27,14 +27,17 @@ changes. Full write-up of the preview: **`docs/HOLLOW.md` §6**.
   (`nsoLiveSlider.bind({slider, box, read, unit, onLive})`), built here because
   thicken-live had not landed; Thicken's slider should bind to it and draw its
   own preview in `onLive`. The preview is an `nsoHelpers` owner (`hollow-live`).
-- **Gates:** new `subtract:card` (`tools/nso_subtract_card_drive_check.js`:
+- **Gates:** new `subtract:card` (a `driveSteps` step: it launches a browser) (`tools/nso_subtract_card_drive_check.js`:
   sections shut / open / independent, every control present and hit-testable in
   its section, the wall box, the live cavity, every way it closes, Lift / Punch /
   Detach still running); `shell:v3` gained the six-section gate and opens Lift's
   section before clicking Lift. `ui:shell`, `pick:release`, `page:manifest`
   unchanged and green. The drive tests that click SUBTRACT's controls were run
   (list in the PR).
-- **Screenshots:** `tools/subtract-card-out/` (collapsed, each section open, the
-  live cavity at 3 and 5 mm, Lift and Punch armed, and the card before).
+- **Screenshots** are not committed (`tools/subtract-card-out/` is git-ignored):
+  collapsed, each section open, the live cavity at 3 and 5 mm, Lift and Punch
+  armed, and the card before. They are on one page,
+  https://claude.ai/artifact/3Nf5CJc3u83xWU3hQnQv99, and
+  `node tools/nso_subtract_card_drive_check.js tools/subtract-card-out` redraws them.
 - **Tags / weights:** `npm run stamp`; `subtract:card` has an estimated weight
   in `tools/test-weights.json` until CI measures it.
