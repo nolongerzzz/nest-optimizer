@@ -291,6 +291,7 @@
     "support:beacons": {"weight":2100,"note":""},
     "support:canonical": {"weight":15550,"note":""},
     "support:curved": {"weight":46000,"note":"27s on the cloud box x 1.7, rounded up: the arc built at 35 deg, its slice, the coupon rebuilt, and the card in Chromium at 60 deg; supports-curved-sheet, #265"},
+    "support:custom": {"weight":196000,"note":"115s locally x 1.7, rounded up: the tilted box built in Auto, Assisted and Custom, circles drawn, tips clicked, a member erased; supports-custom-ui"},
     "support:exposed": {"weight":23900,"note":""},
     "support:feed": {"weight":51000,"note":"30s locally x 1.7, rounded up: the coupon, the clamp, the shelf and the arc built; supports-custom-engine"},
     "support:foot": {"weight":35000,"note":"20s on the cloud box x 1.7, rounded up: the arc and the coupon built with and without trunks, Bambu's G-code read, the export written; supports-foot"},

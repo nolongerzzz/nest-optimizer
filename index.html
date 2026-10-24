@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=029b5b18" />
+  <link rel="stylesheet" href="styles.css?v=73eb079a" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -810,6 +810,22 @@
             <div class="vp-menu-body vp-top-body sup-card" id="supports-card" data-state="pick">
               <p id="sup-count" class="bend-readout sup-count">Click a piece to see where it needs holding.</p>
               <div id="sup-progress" class="sup-progress" role="progressbar" aria-label="Building supports" aria-valuemin="0" aria-valuemax="100" hidden><div class="sup-progress-fill"></div></div>
+              <div class="sup-modes" role="group" aria-label="Where the supports start">
+                <button id="sup-mode-auto" class="sup-seg is-on" type="button" aria-pressed="true"
+                        title="The planner finds every hanging area and holds all of it. Nothing to place.">Auto</button>
+                <button id="sup-mode-assisted" class="sup-seg" type="button" aria-pressed="false"
+                        title="The detected spots show as points on the piece: click one to turn it off, or on. Circles on the plate say where the supports may land.">Assisted</button>
+                <button id="sup-mode-custom" class="sup-seg" type="button" aria-pressed="false"
+                        title="No detected spots: click the underside of the piece to place a tip, click a tip to take it away. Circles on the plate say where the supports may land.">Custom</button>
+              </div>
+              <div id="sup-tools" class="sup-tools" role="group" aria-label="What the pointer does" hidden>
+                <button id="sup-tool-tips" class="sup-seg is-on" type="button" aria-pressed="true"
+                        title="Work on the piece: the spots or tips. The view orbits as usual.">Tips</button>
+                <button id="sup-tool-circles" class="sup-seg" type="button" aria-pressed="false"
+                        title="Start drawing landing circles on the plate; press again (or Esc) to stop and orbit. Orbit to a good view first.">Circles</button>
+                <button id="sup-tool-erase" class="sup-seg" type="button" aria-pressed="false" disabled
+                        title="After a Generate: hover a built member to light it and what it holds up; click to remove it and plan again. Press again (or Esc) to stop.">Erase</button>
+              </div>
               <label class="vp-bend-field" for="sup-angle">Angle
                 <input type="number" id="sup-angle" value="35" min="1" max="89" step="1" aria-label="Overhang angle, degrees"
                        title="Faces within this many degrees of horizontal get support. Bambu Studio's threshold means the same thing, and its default is 30. A smaller angle finds only the flatter undersides; a larger one reaches steeper faces too. The outlines follow as you type."><span id="sup-angle-note" class="sup-angle-note">35&deg; &middot; Bambu 30&deg;</span></label>
@@ -817,7 +833,7 @@
                 <button id="btn-sup-all" class="btn btn-primary sup-go" type="button" disabled
                         title="Build supports for every outlined area. When the piece already has supports they are all replaced. One Undo puts it back. A build that cannot finish says why and adds nothing.">Generate</button>
                 <button id="btn-sup-none" class="btn btn-secondary" type="button" hidden disabled
-                        title="Take every support off this piece. The areas stay outlined. One Undo puts them back.">Remove all</button>
+                        title="Take every support off this piece. The areas stay outlined. In Assisted and Custom this also forgets the tips, spots turned off, circles and erasures. One Undo puts them back.">Remove all</button>
               </div>
               <ul id="sup-rows" class="sup-rows" hidden aria-label="Areas that need a look"></ul>
               <div class="vp-row vp-row-full">
@@ -835,7 +851,7 @@
                        title="The cross-section side of the struts, trunks and branches. Never below the nozzle's wall floor - the planner raises it if asked for less."><span>mm</span></label>
               <label class="vp-check" for="sup-rest" title="Off: every support stands on the plate, and a spot with no clear way down is left unreachable. On: such a spot may be held from a part below it.">
                 <input type="checkbox" id="sup-rest"> May rest on the part</label>
-              <p class="hint sup-hint">Click an outlined area to leave it out, or put it back. Shift-click the piece to add a spot. Click a support to pick it.</p>
+              <p id="sup-hint" class="hint sup-hint">Click an outlined area to leave it out, or put it back. Shift-click the piece to add a spot. Click a support to pick it.</p>
             </div>
           </details>
           <!-- ADD: what builds material onto a piece - Fill / Densify, Foam, Thicken,
@@ -1762,7 +1778,7 @@
   <!-- Every tool helper goes in and out of the scene through this registry. -->
   <script src="nso-helpers.js?v=9c476e39"></script>
   <script src="nso-bounds.js?v=778acac4"></script>
-  <script src="app-core.js?v=ad8941d6"></script>
+  <script src="app-core.js?v=7ccbdb78"></script>
 
 
 
@@ -1897,7 +1913,7 @@
   <script src="app-gscope-support.js?v=2397557a"></script>
   <!-- The Supports card on the main page: the same detection and planner,
        after app-core.js / app-join.js, whose ingest and soups it uses. -->
-  <script src="app-supports-card.js?v=90bb82c8"></script>
+  <script src="app-supports-card.js?v=86a29a27"></script>
   <script src="app-gscope-slice.js?v=a22783c4"></script>
   <!-- Lift: details off a face, the face left as it was round them. After
        nso_lift.js (Phase 1: a flat face), nso_lift_curved.js (Lift 3: the
