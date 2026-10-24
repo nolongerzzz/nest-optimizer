@@ -113,13 +113,14 @@ batch's CI run is the full suite; this PR ran its own gates and `page:manifest`.
 
 ### Screenshots
 
-`tools/thicken-live-out/`, made by `node tools/nso_thicken_live_shots.js` (the
-same clicks a person makes; box_open, 60 x 40 x 25, 2 mm walls):
+Not committed. `node tools/nso_thicken_live_shots.js` writes seven PNGs into
+`tools/thicken-live-out/` (git-ignored), with the same clicks a person makes, on
+`fixtures/box_open.stl` (60 x 40 x 25, 2 mm walls):
 
-- ghost at a value: [out at 1.5](../../tools/thicken-live-out/1-ghost-out-1.5.png),
-  [out at 3](../../tools/thicken-live-out/2-ghost-out-3.png),
-  [in at 2](../../tools/thicken-live-out/3-ghost-in-2.png)
-- after Set: [Thicken in 2, baked](../../tools/thicken-live-out/4-after-set-in-2.png)
-- per-face: [+x wall picked, Thicken out 3](../../tools/thicken-live-out/5-per-face-out-picked.png),
-  [after Set: that wall only](../../tools/thicken-live-out/6-per-face-after-set.png),
-  [Thicken in, the cavity floor picked](../../tools/thicken-live-out/7-per-face-in-floor.png)
+1. `1-ghost-out-1.5.png` - Thicken out at 1.5, the wall growing out
+2. `2-ghost-out-3.png` - the same at 3: the ghost follows the slider
+3. `3-ghost-in-2.png` - Thicken in at 2, the cavity walls closing in
+4. `4-after-set-in-2.png` - after Set: baked, ghost gone
+5. `5-per-face-out-picked.png` - the +x wall clicked, Thicken out 3: that wall alone
+6. `6-per-face-after-set.png` - after Set: only that wall grew
+7. `7-per-face-in-floor.png` - Thicken in with the cavity floor clicked from above
