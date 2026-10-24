@@ -310,6 +310,16 @@ touch". Where the kernel says they do not touch, the result and both inputs
 are counted again as solids - connected surfaces of positive volume - and
 the join stands when that count fell.
 
+**The carriers go in one at a time.** The solids a sheet meets are put through
+the kernel one by one (`stackUp`) before the sheet is added, not handed over
+as one soup of solids side by side. Solids that only graze ("do not touch")
+are not settled by being concatenated: with the sheet added, the kernel
+resolved a pocket between a stair tree's legs (0.12 mm2 at z 8.7, from z 7.3
+to the sheet at 10.3, a hair of 0.015 mm at its neck) with a 0.08 mm wall across
+it, which the separate shells do not have - 10 sections of the tilted box with
+one hole fewer than the shells (support:shells). One at a time the pocket
+comes through whole at every layer.
+
 **Shells, no weld.** `shells(plan, parts)` is `solid()`'s answer with no
 boolean: every part (column, foot, stub, pad bridge and fill, each layer of the
 interface sheet) is kept as its own closed shell, and the parts are grouped into
