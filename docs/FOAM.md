@@ -18,7 +18,7 @@ npm run foam:test     headless, two files:
                       (158 gates, ~11 s; --vase also times the 1.44M-triangle vase)
 npm run foam:drive    the real app in Chromium: click Foam, HOLD the mouse on the piece,
                       let go, the slider, Set, Undo, Fill it all, Cancel, choosing a hollow
-                      by a click in the ghost view, the refusals (36 gates, ~32 s)
+                      by a click in the ghost view, the refusals, and the GUN (sections 10-15) (70 gates, ~97 s)
 ```
 
 Both are in `npm test`.
@@ -29,7 +29,7 @@ Both are in `npm test`.
 a box, the way Extract bit is a cutter bounded by its bit. Given a piece and a box
 (Crop's Box: centre, size, yaw) it fills every bit of empty space in the box that is
 **buried** in the piece and welds to every face it meets. The Foam card below is its
-sealed-hollow case; the ADD card that sprays a box is the next ticket.
+sealed-hollow case; the ADD card that sprays a box is the GUN (§11).
 
 Fill / Densify (`nso_hollow.js` `fill`) stays exactly as it is: one click, every
 enclosed cavity gone, nothing to see. Foam is its visible, partial counterpart.
@@ -172,7 +172,7 @@ the skip list as a **required** input - `foam()` without one is refused - so
 
 - Freehand blobs (foam sprayed at a spot, not filling a hollow).
 - Filling open vessels from the Foam card - refused there in words. foamBox (§10)
-  fills them; its ADD card is the next ticket.
+  fills them; the GUN (§11) is its ADD card.
 - Thin-wall beef-up (foam to thicken a wall from inside).
 - A prompt on other tools ("this piece is hollow - foam it first?").
 
@@ -295,7 +295,7 @@ The vase is `tools/nso_foam_box_fixtures.js` `vase()`: a flared thin wall with a
 the butterfly vase's size (that file is not in the repository). About a third of the time is
 indexing (exact corners, edges), a third the reading of buried space, the rest the cut, the
 assembly and the closing census. Nothing is cached between calls yet: a held spray on a big piece
-should keep the void for its piece while the amount changes (the card's ticket).
+should keep the void for its piece while the amount changes (not done: the GUN, §11, calls foamBox as it is).
 
 ### Limits, stated
 
@@ -303,4 +303,56 @@ should keep the void for its piece while the amount changes (the card's ticket).
   merged (docs/WORK-AS-IS.md), and its sections' loops cross: it is refused if its buried space does
   not close, in words.
 - The amount is by height, not volume.
-- The engine has no preview of its own yet; the card's ticket draws the foam from `mesh`.
+- The engine has no preview of its own: the GUN (§11) draws the foam from `mesh`.
+
+## 11. The GUN: foamBox from the ADD column
+
+`app-foam.js` (the gun), `app-crop-card.js` (the loan of the Box), `index.html` (`#btn-foam-gun`,
+`#foam-gun-panel`). UI only: every number is foamBox's (§10). `tools/nso_foam_drive_check.js`
+sections 10-15 drive it in the real page and write three screenshots (box placed, mid-spray, set)
+to `tools/foam-gun-out/` (git-ignored: run `npm run foam:drive` to make them).
+
+| step | what happens |
+|---|---|
+| **GUN** (ADD, beside Foam) | Crop's Box appears on the selected piece, centred, half its size, with Crop's own six handles. There is no field. The Crop card is not opened. |
+| **handles** | They place and size the box exactly as in Crop: a handle drags its face, the opposite face stays. A press on a handle never orbits or moves the piece. The box's body does not slide (Crop's body-drag is off while the box is lent): a press inside it is the gun's. |
+| **hold** | A press that aims at the piece through the box - the ray passes through the box and meets the piece, so a box buried in the piece is aimed at through its wall - starts the spray. The amount rises 0 to 100 in 3 s of wall-clock time (`GUN_SECONDS`), foamBox is asked at the amount as it stands (one call at a time, the latest amount), and what it returns is drawn: the piece a ghost, the foam orange, from the bottom of the box's buried space up. A press anywhere else is the orbit's. |
+| **release** | foamBox is asked once more at exactly the amount reached and its `mesh` is committed through `NSO_sculptCommitRaw` (`foamReplace`): one Undo per spray, "Undo: Foam reverted". The ghost goes, the piece flashes, the box stays. |
+| **again** | The next spray takes the piece as it now is (the previous `mesh`) and its amount starts at 0 of what is left in the box: sprays stack. |
+| **Escape / Cancel** | The box goes. In the middle of a spray, nothing is set. Sprays already set stay; Undo takes them back one at a time. Another selection, leave-tool, Clear and the helper registry do the same. |
+
+**The readout** (`#foam-gun-readout`) is the volume foamBox returned for the spray (`addedVolume`),
+"+3,375 mm³", live while holding and after release, and nothing else: no percent, level, size or
+count. A refusal shows foamBox's own reason in its own words (the old Foam's "open to the outside"
+message is not asked on this path). The status line carries foamBox's `reason` for a set.
+
+**The foam on screen.** foamBox returns the piece with the foam welded in, every triangle clear of
+the foam bit for bit. The foam's skin is the difference of the two soups (what was welded away plus
+what was added), drawn clipped to the box's six faces and the level (`level`, the height in the box
+frame, which is the plate's up), so the remains of the walls the foam cut fall outside and what shows
+is the foam alone.
+
+**Foam and GUN swap.** One is on at a time: pressing Foam while the box is out takes the box away
+and runs Foam as it always has (sealed hollows, Level slider, Set); pressing GUN while Foam is on
+puts Foam away. Foam's button, panel and messages are unchanged. If the Crop card has a shape out
+when GUN is pressed, GUN borrows the Box and gives the card's shape back when it is done; picking
+a shape on the card while the box is out takes the box away.
+
+### Decisions the ticket left open
+
+| | decided |
+|---|---|
+| Foam while a box is out | swap (asked: the owner chose it) |
+| moving the box | by the handles only; the body does not slide, because a press inside it is the spray |
+| aim | the ray must pass through the box *and* meet the piece; outside that a press is the orbit's / the move drag's (a press on the piece outside the box still starts the usual move drag, as it does under Crop) |
+| speed | amount 0 to 100 in 3 s, like the old Foam's 3 s |
+| Escape mid-spray | sets nothing and takes the box away |
+| readout on a refusal | foamBox's reason, verbatim |
+| non-solid flag, paint | nothing added: foamBox decides (paint stands down per its skip list, in its words) |
+
+### Limits, stated
+
+- foamBox is not cached between calls (§10 Timings): a held spray on a piece of hundreds of
+  thousands of triangles redraws at foamBox's speed (one call at a time, so it never queues) and the
+  final amount is asked once more on release. The skin difference is a hash of every triangle.
+- The preview draws the foam as one orange surface; it does not show the buried space it does not fill.

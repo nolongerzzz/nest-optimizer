@@ -3712,7 +3712,8 @@ button.ms-legend-btn:disabled { opacity: 0.4; cursor: default; }
 .foam-hollows-head { font-size: 11px; opacity: 0.8; }
 .foam-hollow { text-align: left; }
 .foam-hollow.is-on,
-#btn-foam.is-on { border-color: #f08a24; box-shadow: inset 0 0 0 1px #f08a24; }
+#btn-foam.is-on,
+#btn-foam-gun.is-on { border-color: #f08a24; box-shadow: inset 0 0 0 1px #f08a24; }
 .foam-level-row { grid-template-columns: 36px minmax(0, 1fr) auto; gap: 4px; }
 .foam-level-row input[type="range"] { width: 100%; min-width: 0; }
 .foam-level-read { font-size: 11px; white-space: nowrap; }
