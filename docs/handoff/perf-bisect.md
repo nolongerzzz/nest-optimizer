@@ -24,10 +24,13 @@ objects, JS heap after a forced GC, undo stack, live `setInterval`s, document / 
     npm run perf:bisect -- --selfcheck               bba1993 and 1b45aec twice each; every probe within 10 %?
     npm run perf:bisect -- --commits <rev>,<rev>     any commits on the chain (e.g. to rerun with the real vase)
     npm run perf:bisect -- --report                  rebuild tools/perf-bisect-out/perf-bisect.md
+    npm run perf:bisect -- --profile drag --commits <rev>   a CDP CPU profile of one gesture (load|click|drag|lift) -> profile-<rev>-<gesture>.txt
 
 **The vase.** `tools/fixtures-local/boolean-vase.3mf` (git-ignored) when it is on the box; otherwise the
 1,000,000-triangle UV sphere of `nso_big_mesh_lib.js`, marked "stand-in" in every table. `--vase FILE` names
-another.
+another (the first run of this tool used the owner's `ButVase.3mf`, the 947,444-triangle vase of docs/BIG-MESH.md, through
+`--vase`). Options worth knowing: `--runs`, `--cycles`, `--kinds yaw+undo,...` (which leak cycles), `--bake seal|solidify`,
+`--out DIR`, `--force`.
 
 **Read this before trusting a frame figure.** Headless Chromium draws with software GL: ~0.4 s per million
 triangles of main-thread time per frame, however little JS runs. Every "to next frame" and frames-per-second

@@ -10,6 +10,7 @@
      node tools/perf-bisect.mjs --commits bba1993,1b45aec    measure these (any rev git understands)
      node tools/perf-bisect.mjs --bisect GOOD BAD --metric drag.vase.moveMs
      node tools/perf-bisect.mjs --report                     rebuild perf-bisect.md from what is in the out dir
+     node tools/perf-bisect.mjs --profile drag --commits 8780243   a CPU profile of one gesture (load|click|drag|lift) at a commit
 
    OPTIONS
      --probes load,click,drag,lift,idle,orbit,leaks   which probes (default: all; load always runs, it is the set-up)
@@ -656,6 +657,49 @@ function leakGrowth(samples) {
   return g;
 }
 
+// ----------------------------------------------------------------------------------------------- a profile of one gesture
+/* For a number that needs a cause: the same gesture, with the DevTools sampling profiler (1 ms) running, and the app's
+   functions it spent the time in - self time and time including callees - written to profile-<sha>-<gesture>.txt. */
+function summariseProfile(profile) {
+  const byId = new Map(profile.nodes.map(n => [n.id, n])), parent = new Map();
+  profile.nodes.forEach(n => (n.children || []).forEach(c => parent.set(c, n.id)));
+  const key = n => { const cf = n.callFrame, file = (cf.url || '').split('/').pop().split('?')[0]; return (cf.functionName || '(anonymous)') + ' @ ' + (file || '(native)') + ':' + (cf.lineNumber + 1); };
+  const self = new Map(), incl = new Map(); let total = 0, program = 0, idle = 0;
+  profile.samples.forEach((id, i) => {
+    const dt = (profile.timeDeltas[i] || 0) / 1000, n = byId.get(id), k = key(n);
+    total += dt;
+    if (k.startsWith('(program)')) { program += dt; return; }
+    if (k.startsWith('(idle)')) { idle += dt; return; }
+    self.set(k, (self.get(k) || 0) + dt);
+    const seen = new Set();
+    for (let cur = id; cur != null; cur = parent.get(cur)) { const kk = key(byId.get(cur)); if (!seen.has(kk)) { seen.add(kk); incl.set(kk, (incl.get(kk) || 0) + dt); } }
+  });
+  const top = (m, n) => [...m.entries()].filter(e => !e[0].startsWith('(root)')).sort((a, b) => b[1] - a[1]).slice(0, n).map(e => e[1].toFixed(0).padStart(9) + ' ms  ' + e[0]);
+  return ['sampled ' + total.toFixed(0) + ' ms: JS ' + (total - program - idle).toFixed(0) + ', (program) ' + program.toFixed(0) + ' (browser / GL), (idle) ' + idle.toFixed(0), '',
+          'SELF TIME', ...top(self, 14), '', 'INCLUDING CALLEES', ...top(incl, 22)].join('\n');
+}
+
+async function profileRun(browser, root, port, vase, gesture) {
+  const S = await openContext(browser, root, port);
+  try {
+    await S.cdp.send('Profiler.enable');
+    await S.cdp.send('Profiler.setSamplingInterval', { interval: 1000 });
+    const box = await loadOne(S, BOX, 'box');
+    let v;
+    const startP = () => S.cdp.send('Profiler.start');
+    const stopP = async () => (await S.cdp.send('Profiler.stop')).profile;
+    if (gesture === 'load') { await startP(); v = await loadOne(S, vase.file, 'vase'); return summariseProfile(await stopP()); }
+    v = await loadOne(S, vase.file, 'vase');
+    await arrange(S, [v.id, box.id]);
+    if (gesture === 'click') { await startP(); const r = await clickProbe(S, v.id); const p = await stopP(); return (r.na ? 'n/a: ' + r.reason + '\n' : 'click -> next frame ' + r.frameMs.toFixed(0) + ' ms\n') + summariseProfile(p); }
+    const c = await clickProbe(S, v.id);
+    if (c.na) return 'n/a: ' + c.reason;
+    if (gesture === 'drag') { await startP(); const r = await dragProbe(S, v.id, 'vase'); const p = await stopP(); return (r.na ? 'n/a: ' + r.reason + '\n' : 'drag: ' + r.moveMs.toFixed(2) + ' ms / move\n') + summariseProfile(p); }
+    if (gesture === 'lift') { await startP(); const r = await liftProbe(S, v.id); const p = await stopP(); return (r.na ? 'n/a: ' + r.reason + '\n' : 'lift arm -> ready ' + r.armMs.toFixed(0) + ' ms\n') + summariseProfile(p); }
+    return 'unknown gesture ' + gesture;
+  } finally { await S.ctx.close().catch(() => {}); }
+}
+
 // ----------------------------------------------------------------------------------------------- one commit
 function aggregate(runs) {
   const keys = new Set(); runs.forEach(r => Object.keys(r.values).forEach(k => keys.add(k)));
@@ -826,7 +870,7 @@ function report(plan, ch) {
   const tag = anyStand ? ' (stand-in)' : '';
   const col = x => x.c.short + (x.c.merge && x.c.prs.length ? '<br>#' + x.c.prs.join('+#') : '');
   L.push('# perf-bisect results', '');
-  L.push('Vase: ' + (anyStand ? '**stand-in** - the 1,000,000-triangle UV sphere of `nso_big_mesh_lib.js` (the real `tools/fixtures-local/boolean-vase.3mf` was not on this box). Every vase figure is marked "stand-in".' : 'the real boolean-vase.3mf.'), '');
+  L.push('Vase: ' + (anyStand ? '**stand-in** - the 1,000,000-triangle UV sphere of `nso_big_mesh_lib.js` (the real `tools/fixtures-local/boolean-vase.3mf` was not on this box). Every vase figure is marked "stand-in".' : 'the real file `' + (have[0] && have[0].r.vaseFile) + '` (' + ((have[0] && have[0].r.timing && have[0].r.timing.notes && have[0].r.timing.notes[0] && have[0].r.timing.notes[0].vaseTriangles) || '?') + ' triangles).'), '');
   if (have[0]) L.push('Machine: ' + have[0].r.env.cpu + ' x' + have[0].r.env.cpus + ', ' + have[0].r.env.platform + ', Chromium ' + have[0].r.env.chromium + ', headless, flags `' + have[0].r.env.flags + '`, viewport ' + have[0].r.env.viewport + '. **Software GL** (swiftshader): a frame costs ~0.4 s per million triangles of main-thread time whatever the app does, so every "to next frame" and frames-per-second figure is inflated by the machine; compare commits to each other and read the app-JS rows for the app\'s own cost.', '');
 
   L.push('## 1. Pass 1: probe x commit' + tag + ' - median of ' + RUNS + ' runs (worst run in brackets)', '');
@@ -903,9 +947,9 @@ function report(plan, ch) {
     const shas = [...new Set([BASE, ...p2.filter(r => !r.error).map(r => r.culprit), ...p2.filter(r => !r.error).map(r => r.before), HEAD].filter(Boolean))];
     L.push('The **stand-in** was used (a 1,000,000-triangle UV sphere). To rerun the flagged commits with the real vase, put it at `tools/fixtures-local/boolean-vase.3mf` and run:', '',
            '    npm run perf:bisect -- --commits ' + shas.join(',') + ' --out tools/perf-bisect-out/real', '');
-  } else L.push('The real vase was used.', '');
+  } else L.push('The real file was used: `' + (have[0] && have[0].r.vaseFile) + '`.', '');
   const self = path.join(OUT, 'selfcheck.md');
-  if (fs.existsSync(self)) L.push('## 6. Self-check', '', fs.readFileSync(self, 'utf8').split('\n').slice(0, 4).join('\n'), '(full table: selfcheck.md)', '');
+  if (fs.existsSync(self)) L.push('## 6. Self-check', '', fs.readFileSync(self, 'utf8').split('\n| commit')[0].replace('# perf-bisect self-check\n\n', ''), '(full table: selfcheck.md)', '');
   return L.join('\n');
 }
 
@@ -927,7 +971,7 @@ async function main() {
     console.log(md);
     return;
   }
-  if (flag('commits')) {
+  if (flag('commits') && !flag('profile')) {
     const list = opt('commits', '').split(',').filter(Boolean).map(r => resolve(r, ch));
     for (const c of list) await measureCommit(c, PROBES);
     return;
@@ -972,6 +1016,21 @@ async function main() {
     const md = '# perf-bisect self-check\n\n' + (bad.length ? 'These probes did NOT repeat within 10 %:\n\n' + bad.map(b => '- ' + b.join(' ')).join('\n') + '\n\n' : 'Every probe repeated within 10 %.\n\n') + lines.join('\n') + '\n';
     fs.writeFileSync(path.join(OUT, 'selfcheck.md'), md);
     console.log(md);
+    return;
+  }
+  if (flag('profile')) {
+    const g = opt('profile', null), list = opt('commits', '').split(',').filter(Boolean).map(r => resolve(r, ch));
+    for (const c of list) {
+      const wt = checkout(c.sha), srv = await serve(wt);
+      const browser = await chromium.launch({ executablePath: chromiumPath(), args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox', '--enable-precise-memory-info'] });
+      try {
+        log('profile', g, label(c));
+        const txt = await profileRun(browser, wt, srv.address().port, vaseFile(), g);
+        const f = path.join(OUT, 'profile-' + c.short + '-' + g + '.txt');
+        fs.writeFileSync(f, label(c) + ' - ' + c.subject + '\ngesture: ' + g + '\n\n' + txt + '\n');
+        console.log(fs.readFileSync(f, 'utf8'));
+      } finally { await browser.close().catch(() => {}); srv.close(); release(wt); }
+    }
     return;
   }
   if (flag('bisect')) {
