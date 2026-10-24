@@ -78,6 +78,7 @@
     "carve:test": {"weight":14500,"note":""},
     "cavity:thickwall": {"weight":89,"note":""},
     "centerlock:test": {"weight":21900,"note":""},
+    "ci:failures": {"weight":600,"note":"estimate: 0.3 s on the cloud box x 1.7, rounded up (ci-self-hosted)"},
     "close:test": {"weight":1550,"note":""},
     "connect:drive": {"weight":441350,"note":""},
     "connect:test": {"weight":15050,"note":""},
