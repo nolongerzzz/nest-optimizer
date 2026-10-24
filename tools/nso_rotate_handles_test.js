@@ -81,6 +81,16 @@ const fs = require('fs');
 const os = require('os');
 const { withApp, loadSTL, ROOT } = require('./nso_app_harness');
 
+/* TWO STEPS, ONE FILE. --only=ring runs 1-17 (the default bed), bed 18-26 (the P1S bed and what follows); no flag runs
+   both. CI runs them as rotate:handles-ring / -bed, ~105 s and ~80 s here where the whole was ~260 s (373 s on CI). The
+   setup above the sections and the closing no-page-errors check run in both. */
+const GROUPS = ['ring', 'bed'];
+const onlyArg = process.argv.find(a => a.startsWith('--only='));
+const ONLY = onlyArg ? onlyArg.slice('--only='.length) : null;
+if (ONLY !== null && !GROUPS.includes(ONLY)) { console.error('nso_rotate_handles_test: --only=' + ONLY + ' is not one of ' + GROUPS.join(', ')); process.exit(2); }
+const LAP_STEP = 3;
+const RUN = Object.fromEntries(GROUPS.map(g => [g, !ONLY || ONLY === g]));
+
 /* A closed box, x by y by z (z up, as an STL is), as a binary STL. */
 function writeBoxSTL(file, x, y, z) {
   const V = [[0, 0, 0], [x, 0, 0], [x, y, 0], [0, y, 0], [0, 0, z], [x, 0, z], [x, y, z], [0, y, z]];
@@ -193,6 +203,7 @@ withApp(async (page, logs) => {
   await page.waitForTimeout(150);
 
   /* ------------------------------------------------------------------ 1 */
+  if (RUN.ring) {
   console.log('\n=== 1. the math: every turn is about the plate\'s axis, from any pose ===');
   {
     const r = await page.evaluate(() => {
@@ -429,8 +440,10 @@ withApp(async (page, logs) => {
       await page.mouse.down();
       let maxSeen = 0, readouts = [];
       /* 366, not 362: from 0 the piece starts square, and 360 itself is then
-         a quarter turn the snap holds for 3° either side. */
-      for (let i = 1; i <= 366; i++) {
+         a quarter turn the snap holds for 3° either side. Three degrees a move: the 366 one-degree moves of a lap
+         (732 for the two laps) were 111 s of this step, and the lap's turns are all the app unwraps - it reads
+         the angle between one move and the next, and 3° still lands inside every detent's 3° window. */
+      for (let i = LAP_STEP; i <= 366; i += LAP_STEP) {
         const a = a0 + i * Math.PI / 180;
         await page.mouse.move(s.c.x + Math.cos(a) * R, s.c.y + Math.sin(a) * R);
         if (i % 30 === 0 || i >= 362) {
@@ -1226,6 +1239,8 @@ withApp(async (page, logs) => {
   }
 
   /* ----------------------------------------------------------------- 18 */
+  }
+  if (RUN.bed) {
   console.log('\n=== 18. a bigger bed, the same rings: P1S selected ===');
   {
     /* Switching the plate clears the plate's pieces (updatePlateInfo ->
@@ -2111,6 +2126,7 @@ withApp(async (page, logs) => {
     await page.evaluate(() => { window.nsoRotate.setRing('fb', false); window.nsoRotate.setRing('ss', false); });
   }
 
+  }
   const errs = logs.filter(l => l.startsWith('[pageerror]'));
   if (errs.length) { console.log('\npage errors:\n' + errs.join('\n')); fails++; }
   console.log('\n' + (fails ? fails + ' FAILED' : 'all gates held'));
