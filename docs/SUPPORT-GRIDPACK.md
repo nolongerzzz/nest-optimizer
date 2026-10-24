@@ -222,6 +222,20 @@ changes, byte for byte:
   0.25 mm up its axis: where the piece comes nearer it is narrower there
   (rings a millimetre apart), and it ends where it would be narrower than its
   own column.
+- **The landing** (supports-stair-body). Bambu's trunk foot on
+  simple_overhang stands 3.86 mm off the part's base on the first layer
+  (its first-layer ring to the part's outer wall, edge to edge, 0.5 mm
+  lines; `support:foot` 5b measures it): `TRUNK_FOOT_CLEAR_MM`. On the
+  card's build (trunks grown) a trunk whose flared foot would stand nearer,
+  or whose law would not fit `TRUNK_KEEP_MM` off the part up its stem, is
+  re-landed: the landing member's drop leans from the point it falls from to
+  the nearest point (0.5 mm apart, 32 directions, within the plan's branch
+  lean from that height) where the whole trunk fits and the leaning leg is
+  clear, and the trunk flares to full width there (`tp.relanded`). None
+  found: it lands as planned and is narrowed. On the arc two re-land (2.0
+  and 4.5 mm); on the coupon two (~1.7 mm), and its three trunks at x 82.5
+  find no landing within the lean and stay narrowed. Without trunk growth
+  (G-scope, `solid()`) nothing moves.
 - **Its pad** is the flared base's circle grown 4 mm (as before, from a
   larger circle), the base's inscribed circle always pad. A trunk that comes
   within 0.1 mm of another support's solid makes the two one support, as
@@ -284,6 +298,27 @@ at a time, with `opts.yieldFn` given a turn between trunks) then
 `weld(plan, parts, opts)` (the unions, with `yieldFn` after each). `solid` with
 no callback and no `yieldFn` is the same bytes as before: it runs the sync
 `trunkParts`, which `parts()` shares with it, then `weld`.
+
+**A sheet's join, voids or no voids** (supports-stair-body). `weld()` joins
+each sheet's folded layers to the trunks that carry its tips and refuses a
+sheet that meets none of them. The kernel's test for "they met" is fewer
+parts out than in, and it counts every closed surface as a part - a void
+inside the solid too. A stair's strips stacked over the legs of its tree
+seal hairline slits between a leg and a strip: on the tilted box 45 voids of
+0.003 mm3 or less round ONE solid, read as 53 parts out of 4 + 1, "do not
+touch". Where the kernel says they do not touch, the result and both inputs
+are counted again as solids - connected surfaces of positive volume - and
+the join stands when that count fell.
+
+**The carriers go in one at a time.** The solids a sheet meets are put through
+the kernel one by one (`stackUp`) before the sheet is added, not handed over
+as one soup of solids side by side. Solids that only graze ("do not touch")
+are not settled by being concatenated: with the sheet added, the kernel
+resolved a pocket between a stair tree's legs (0.12 mm2 at z 8.7, from z 7.3
+to the sheet at 10.3, a hair of 0.015 mm at its neck) with a 0.08 mm wall across
+it, which the separate shells do not have - 10 sections of the tilted box with
+one hole fewer than the shells (support:shells). One at a time the pocket
+comes through whole at every layer.
 
 **Shells, no weld.** `shells(plan, parts)` is `solid()`'s answer with no
 boolean: every part (column, foot, stub, pad bridge and fill, each layer of the

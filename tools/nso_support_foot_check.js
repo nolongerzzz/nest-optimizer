@@ -37,10 +37,17 @@
       touch one pad (one support).
    5. THE GAP: every trunk's exact triangle distance to the piece, at least
       FEET.gapMm.
+   5b. THE FOOT OFF THE PART'S BASE: Bambu's trunk foot stands
+      TRUNK.footClearMm off the part's base on the first layer (measured
+      here, its ring to the part's wall); on the arc every trunk's flared
+      foot stands that far off too, unnarrowed - the build re-lands a
+      trunk whose foot was nearer (supports-stair-body).
    6. NOTHING ABOVE THE TRUNK CHANGES, on the arc and the 2026-10-20 coupon:
-      built with trunkGrowth off the support is #265's byte for byte, and
-      with it on the support is that build's every part, byte for byte, then
-      the trunks, then the pads; the coupon's pads cover the pads before
+      built with trunkGrowth off the support is the build pinned (the
+      coupon's #265's, the arc's supports-stair-body's) byte for byte, and
+      with it on the support is that build's every part, byte for byte (but
+      the landing members re-landed off the part), then the trunks, then the
+      pads; the coupon's pads cover the pads before
       (every corner of the old outline inside the new, no area lost).
    ============================================================ */
 'use strict';
@@ -72,7 +79,8 @@ const GP = ctx.NSO_SupportGridpack, SI = ctx.NSO_SupportInterface, TH = ctx.NSO_
 const TRUNK = GP.TRUNK, FEET = GP.FEET;
 /* #265's builds (claude-wip b7076af + supports-curved-sheet a08bc6f), sha-256 (first 16 hex) of each
    support object's Float32 soup and its triangles; the coupon's is support:curved 7's */
-const BEFORE = { coupon: ['6ac271882b107552', 27348], arc: ['2320ee7613e8ef3f', 4968] };
+/* the arc's since supports-stair-body: its strips as wide as the part's step and a line (support:curved 2) */
+const BEFORE = { coupon: ['6ac271882b107552', 27348], arc: ['81577c65d9d7a031', 8748] };
 
 let pass = 0, fail = 0;
 const FAILS = [];
@@ -290,16 +298,59 @@ function splitObject(b, oi) {
   }
 
   /* ------------------------------------------------------------------ 6 */
+  console.log('\n=== 5b. the foot off the part\'s base ===');
+  {
+    /* Bambu's: its trunk's first-layer extrusions against the part's, edge to edge (its first-layer lines) */
+    const e1 = AUD.extrusions(gcode).filter(m => Math.abs(m.z - B.firstZ) < 1e-3);
+    const segs = l => [].concat(...l.map(m => { const q = m.pts || [[m.x0, m.y0], [m.x1, m.y1]], o = []; for (let i = 0; i + 1 < q.length; i++) o.push([q[i], q[i + 1]]); return o; }));
+    const ss = segs(e1.filter(m => /^Support/.test(m.feat || ''))).filter(sg => Math.hypot(sg[0][0] - B.rows[0].c[0], sg[0][1] - B.rows[0].c[1]) <= B.padD / 2 + 1);
+    const ps = segs(e1.filter(m => !/^Support/.test(m.feat || '')));
+    const segSeg = (a, b, c, d) => Math.min(segDist(a, c, d), segDist(b, c, d), segDist(c, a, b), segDist(d, a, b));
+    let bc = Infinity;
+    ss.forEach(a => ps.forEach(q => { bc = Math.min(bc, segSeg(a[0], a[1], q[0], q[1])); }));
+    bc -= B.lw0;
+    check(`Bambu's trunk foot stands ${f2(bc)} mm off the part's base on the first layer (its ring to the part's wall, edge to edge): TRUNK.footClearMm is that`,
+      Math.abs(bc - TRUNK.footClearMm) < 0.01, `measured ${f3(bc)}, built to ${TRUNK.footClearMm}`);
+    /* ours: every trunk's flared base at the plate against the part's section there */
+    const sec = sliceAt(arc, 0.1), short = [];
+    T.forEach((t, i) => {
+      const d = Math.min(...sec.map(sg => segDist(t.c, sg[0], sg[1]))) - t.rings[0][1];
+      if (d < TRUNK.footClearMm - 0.02 && t.narrowed) short.push(`trunk ${i + 1}: ${f2(d)} mm, narrowed`);
+      else if (d < TRUNK.footClearMm - 0.02) short.push(`trunk ${i + 1}: ${f2(d)} mm`);
+    });
+    const rl = (b.areas.find(a => a.tp && a.tp.relanded) || { tp: { relanded: [] } }).tp.relanded;
+    check(`on the arc every trunk's flared foot stands ${TRUNK.footClearMm} mm or more off the part's base, unnarrowed: the planner's landing moved off it where it was nearer`,
+      !short.length && T.every(t => !t.narrowed), (short.length ? short.join('; ') + '; ' : '') +
+      T.map(t => `[${t.c.map(f2).join(', ')}] ${f2(Math.min(...sec.map(sg => segDist(t.c, sg[0], sg[1]))) - t.rings[0][1])} mm`).join(', ') +
+      `; re-landed: ${rl.map(r => `[${r.from.slice(0, 2).map(f2).join(', ')}] -> [${r.to.slice(0, 2).map(f2).join(', ')}] (${f2(r.mm)} mm)`).join(', ') || 'none'}`);
+  }
+
   console.log('\n=== 6. nothing above the trunk changes ===');
   for (const [name, on, off] of [['arc', b, b0], ['coupon', c1, c0]]) {
     const o0 = off.objects[1];
-    check(`${name}: built with trunkGrowth off, the support is #265's byte for byte`,
+    check(`${name}: built with trunkGrowth off, the support is ${name === 'arc' ? 'supports-stair-body' : '#265'}'s byte for byte`,
       off.objects.length === 2 && sha(o0.soup) === BEFORE[name][0] && o0.soup.length / 9 === BEFORE[name][1], `${sha(o0.soup)} (${o0.soup.length / 9} tris)`);
     const s1 = splitObject(on, 0), s0 = splitObject(off, 0);
-    check(`${name}: with trunks, every part before is there byte for byte, then the trunks, then the pads - and nothing else`,
-      on.sf.objects.length === off.sf.objects.length && sha(s1.solids) === sha(s0.solids) && s1.solids.length === s0.solids.length && s1.trunks.length > 0 &&
-      s1.trunkSoups.length === on.sf.trunks.filter(t => t.soup).length,
-      `${s1.solids.length / 9} tris as before (${sha(s1.solids)}), ${s1.trunkSoups.length} trunk(s) ${s1.trunks.length / 9} tris, pads ${s0.pads.length / 9} -> ${s1.pads.length / 9} tris`);
+    /* part by part, trunk by trunk: the same bytes, but for the landing member of a trunk the build re-lands
+       off the part (its drop leans to the new foot: TRUNKS' landing, supports-stair-body) */
+    const odd = [];
+    let relands = 0;
+    on.areas.forEach((A, ai) => {
+      const B0 = off.areas[ai], moved = new Set(((A.tp && A.tp.relanded) || []).map(r => r.trunk));
+      relands += moved.size;
+      if (!A.tp || !B0 || !B0.tp) return;
+      A.tp.trunks.forEach((E, ei) => {
+        const F = B0.tp.trunks[ei];
+        if (!F || F.parts.length !== E.parts.length) { odd.push(`area ${ai + 1} entry ${ei}: ${F ? F.parts.length : 0} -> ${E.parts.length} parts`); return; }
+        const diff = E.parts.map((q, k) => sha(q.soup) === sha(F.parts[k].soup) ? -1 : k).filter(k => k >= 0);
+        if (!diff.length) return;
+        if (moved.has(E.trunk) && diff.every((k, j) => k === j) && diff.length <= 2) return;
+        odd.push(`area ${ai + 1} trunk ${E.trunk}: parts ${diff.join(', ')} differ`);
+      });
+    });
+    check(`${name}: with trunks, every part before is there byte for byte (but the landing members re-landed off the part), then the trunks, then the pads - and nothing else`,
+      !odd.length && on.sf.objects.length === off.sf.objects.length && s1.trunks.length > 0 && s1.trunkSoups.length === on.sf.trunks.filter(t => t.soup).length,
+      (odd.length ? odd.slice(0, 4).join('; ') + '; ' : '') + `${relands} landing(s) re-landed; ${s1.trunkSoups.length} trunk(s) ${s1.trunks.length / 9} tris, pads ${s0.pads.length / 9} -> ${s1.pads.length / 9} tris`);
   }
   {
     const n = c1.sf.padOutlines, o = c0.sf.padOutlines, lost = [];

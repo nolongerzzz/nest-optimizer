@@ -1705,6 +1705,7 @@
    * Writes P.host, P.footAt(i) (the closed layer, for the host's credit) and
    * P.sheet (the readout's numbers).
    */
+  var OVER_STEP_MM = 0.1;
   function typeSupports(g, perObject, planes, o, minOver) {
     var C = CONSTANTS.supportSheet;
     var NI = C.interfaceLayers, NT = C.transitionLayers, R = C.closeMm;
@@ -1854,6 +1855,50 @@
           counts[p.feature]++;
         });
       });
+      /* OVERHANG, as a slicer types a wall: a line of the support whose
+         centre leaves the layer under it - that layer read as the footprint it
+         holds (closed by closeMm, as above), grown by half a line - is over
+         air there. Each path's length over air (p.overhangMm, sampled every
+         OVER_STEP_MM along it) and its spans over air, run by run
+         (p.overhangRuns); a path with any is an overhang. Typing only: the
+         G-code is the same. */
+      var airN = { 'Support': 0, 'Support transition': 0, 'Support interface': 0 }, airMm = { 'Support': 0, 'Support transition': 0, 'Support interface': 0 };
+      P.layers.forEach(function (L, j) {
+        if (!L.paths.length || j === 0) return;
+        var under = g.polys(g.offset(P.footAt(j - 1), w / 2)).map(function (Pl) {
+          var b = [Infinity, Infinity, -Infinity, -Infinity];
+          Pl.forEach(function (q) { b[0] = Math.min(b[0], q[0]); b[1] = Math.min(b[1], q[1]); b[2] = Math.max(b[2], q[0]); b[3] = Math.max(b[3], q[1]); });
+          return { pl: Pl, b: b };
+        });
+        function onUnder(x, y) {
+          var inn = false;
+          for (var k = 0; k < under.length; k++) {
+            var u = under[k];
+            if (x < u.b[0] || x > u.b[2] || y < u.b[1] || y > u.b[3]) continue;
+            if (inside([u.pl], x, y)) inn = !inn;
+          }
+          return inn;
+        }
+        L.paths.forEach(function (p) {
+          var pts = p.pts, m = p.closed ? pts.length : pts.length - 1, air = 0, runs = [], run = 0, first = null;
+          for (var e = 0; e < m; e++) {
+            var a = pts[e], b2 = pts[(e + 1) % pts.length], len = Math.hypot(b2[0] - a[0], b2[1] - a[1]);
+            var ns = Math.max(1, Math.ceil(len / OVER_STEP_MM));
+            for (var q = 0; q < ns; q++) {
+              var t = (q + 0.5) / ns;
+              if (!onUnder(a[0] + (b2[0] - a[0]) * t, a[1] + (b2[1] - a[1]) * t)) { air += len / ns; run += len / ns; }
+              else if (run > 0) { if (first == null) first = runs.length; runs.push(run); run = 0; }
+              else if (first == null) first = -1;
+            }
+          }
+          /* a closed path's last run goes on into its first, where both lie over air */
+          if (run > 0) { if (p.closed && first === 0 && runs.length) runs[0] += run; else runs.push(run); }
+          p.overhangMm = air;
+          /* the spans over air, each a run of the path between the things under it */
+          p.overhangRuns = runs;
+          if (air > 0) { airN[p.feature]++; airMm[p.feature] += air; }
+        });
+      });
       var heldBy = Object.keys(held).map(function (k) { return held[k]; });
       P.sheet = {
         hostName: host ? host.name : (heldBy.length ? heldBy.map(function (Q) { return Q.name; }).join(', ') : null),
@@ -1862,7 +1907,9 @@
         tips: sheets.reduce(function (a, s) { return a + s.tips; }, 0),
         zLo: sheets.length ? Math.min.apply(null, sheets.map(function (s) { return s.zLo; })) : null,
         zHi: sheets.length ? Math.max.apply(null, sheets.map(function (s) { return s.zHi; })) : null,
-        pathCounts: counts
+        pathCounts: counts,
+        overhangPaths: airN,
+        overhangMm: airMm
       };
     });
   }

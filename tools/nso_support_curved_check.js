@@ -14,7 +14,7 @@
    across the overhang's width, moving up the curve as the layers rise.
 
      node tools/nso_support_curved_check.js      exit 0 = every gate held
-     (writes tools/supports-curved-out/simple_overhang_supports.3mf, the arc
+     (writes tools/supports-stair-out/simple_overhang_supports.3mf, the arc
       with its supports as the card exports it, to slice with Bambu's own
       supports off and print)
 
@@ -23,12 +23,13 @@
       above the top: the top strip within two layers of the highest point
       of the underside less the gap, and no strip past it.
    2. EACH STRIP, measured on the parts built (a cut at each layer's
-      middle): ONE region; its width follows the band - one line (0.40)
-      where two would stand its back edge too far under the part, two beads
-      (a loop alone, as a slicer prints a 0.84 band) where they do not, more
-      only where the band is three beads or wider; its top 0.18 - 0.55 mm
-      under the part across its whole width (front edge, middle and back
-      edge, every 0.25 mm along it), median 0.35 or less.
+      middle): ONE region; the sheet's lines (0.40 at 0.84) - two a loop
+      alone, three or more a loop and one serpentine inside, tied at one
+      point; at least the part's step over it (its section's up-slope edge
+      at the layer over the strip and the next, along the strip, the median)
+      and one line (0.42) wide (supports-stair-body); the part over it 0.18 -
+      0.55 mm across its width wherever the support's own next layer is not
+      over it, median 0.35 or less.
    3. THE GAP: the whole support (stair, caps, trees) against the arc with
       the exact triangle distance: 0.18 mm or more.
    4. WHAT HOLDS EACH STRIP: every strip whose leading part (not over the
@@ -40,12 +41,17 @@
       and tips. The plan's own tips on the curve are held by the stair and
       not built.
    5. AGAINST BAMBU: every layer of Bambu's interface up to our top has a
-      strip of ours at that z, over the same stretch of the curve; and the
-      support's printed toolpath, layer by layer, beside Bambu's (reported).
+      strip of ours at that z, over the same stretch of the curve.
    6. NSO's SLICE of the export (the card's own slicer, detect_thin_wall on):
       every layer of the stair - its transition to its top - has its strip
       typed Support interface or Support transition; the support's lines
-      are support lines only.
+      are support lines only; NO STRIP SPAN over air LONGER THAN THE TIP
+      PITCH (5 mm), as typeSupports reads a wall's overhang (the layer under,
+      closed, grown half a line) - a strip spans between its tips; each
+      strip as wide as the part's step and a line in the slice; the
+      support's toolpath over the stair's start at most 1.5 x Bambu's there
+      - the whole part's ratio and the tables by Bambu's layers and by
+      height printed, a finding the trunk-thinning follow-up owns.
    7. FLAT CEILINGS UNCHANGED: the 2026-10-20 coupon (top_clip_x2_coupon.stl)
       as the card builds it is byte for byte the build before the stair
       (sha-256 of each object's soup, recorded at claude-wip 6f3354f at 60 deg
@@ -66,7 +72,7 @@ const vm = require('vm');
 const crypto = require('crypto');
 
 const ROOT = path.join(__dirname, '..');
-const OUT = path.join(ROOT, 'tools', 'supports-curved-out');
+const OUT = path.join(ROOT, 'tools', 'supports-stair-out');
 const FIXTURE = path.join(ROOT, 'fixtures', 'supports', 'simple_overhang.3mf');
 const BAMBU = path.join(ROOT, 'fixtures', 'supports', 'simple_overhang_bambu.gcode.3mf');
 const R3 = require(path.join(ROOT, 'nso-3mf-read.js'));
@@ -142,6 +148,17 @@ function loopsOf(segs) {
     if (closed) polys.push(pts); else open++;
   }
   return { polys, open };
+}
+function segDist(p, a, b) {
+  const dx = b[0] - a[0], dy = b[1] - a[1], L2 = dx * dx + dy * dy;
+  const t = L2 > 0 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / L2)) : 0;
+  return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy);
+}
+function joinAll(list) {
+  const n = list.reduce((a, x) => a + x.length, 0), out = new Float32Array(n);
+  let w = 0;
+  list.forEach(x => { out.set(x, w); w += x.length; });
+  return out;
 }
 const areaOf = P => { let a = 0; for (let i = 0; i < P.length; i++) { const p = P[i], q = P[(i + 1) % P.length]; a += p[0] * q[1] - q[0] * p[1]; } return a / 2; };
 const inPoly = (p, P) => { let c = false; for (let i = 0, j = P.length - 1; i < P.length; j = i++) { const a = P[i], b = P[j];
@@ -255,46 +272,98 @@ async function cardRun() {
   const th = L.stair.angleDeg * Math.PI / 180, nrm = [-Math.sin(th), Math.cos(th)], dir = [Math.cos(th), Math.sin(th)];
   const uOf = q => q[0] * nrm[0] + q[1] * nrm[1], vOf = q => q[0] * dir[0] + q[1] * dir[1];
   const BEAD = TH.floorFor(0.4);
+  const nStrip = L.layers.length;
   const secs = L.layers.map((Ly, i) => {
     const sec = loopsOf(sliceAt(soups[i], (Ly.z0 + Ly.z1) / 2)), reg = regionsOf(sec);
     const us = reg.length ? reg[0].map(uOf) : [0], vs = reg.length ? reg[0].map(vOf) : [0];
-    return { Ly, sec, reg, u: [Math.min(...us), Math.max(...us)], v: [Math.min(...vs), Math.max(...vs)] };
+    /* its width across the slope, line by line along it (the front follows the curve): the median */
+    const ws = [];
+    if (reg.length) for (let v = Math.min(...vs) + 0.5; v <= Math.max(...vs) - 0.5; v += 0.25) {
+      const cr = [];
+      reg[0].forEach((a, k) => { const c = reg[0][(k + 1) % reg[0].length], va = vOf(a), vc = vOf(c);
+        if ((va - v) * (vc - v) <= 0 && va !== vc) cr.push(uOf(a) + (uOf(c) - uOf(a)) * (v - va) / (vc - va)); });
+      if (cr.length >= 2) ws.push(Math.max(...cr) - Math.min(...cr));
+    }
+    ws.sort((x, y) => x - y);
+    return { Ly, sec, reg, u: [Math.min(...us), Math.max(...us)], v: [Math.min(...vs), Math.max(...vs)], w: ws.length ? ws[ws.length >> 1] : 0 };
   });
   const badReg = secs.filter(s => s.reg.length !== 1 || s.sec.open);
-  check('every layer is ONE region, no chain left open', !badReg.length,
+  check('every strip is ONE region, no chain left open', !badReg.length,
     badReg.length ? badReg.map(s => `z ${f2(s.Ly.z1)}: ${s.reg.length} regions, ${s.sec.open} open`).join('; ') : `${secs.length} layers`);
-  const byW = {};
-  secs.forEach(s => { const w = f2(s.u[1] - s.u[0]); byW[w] = (byW[w] || 0) + 1; });
-  const wrong = strips.filter(Ly => !(Ly.beads === 1 ? Math.abs(Ly.widthMm - S.widthMm) < 1e-6 : Math.abs(Ly.widthMm - Ly.beads * BEAD) < 1e-6) ||
-    (Ly.beads >= 3 && Ly.advanceMm < 3 * BEAD - 1e-6));
-  check('each strip\'s width follows its band: one line (0.40), two beads (0.84, a loop alone), three or more only where the band is three beads wide',
-    !wrong.length && secs.every((s, i) => Math.abs(s.u[1] - s.u[0] - L.layers[i].widthMm) < 0.02),
-    Object.keys(byW).sort().map(w => `${w} mm x ${byW[w]}`).join(', ') + (wrong.length ? '; wrong at ' + wrong.map(x => f2(x.z1)).join(', ') : ''));
+  /* the sheet contract: two lines a loop alone; three or more a loop, then one serpentine inside, tied to it at one point */
+  const contract = [];
+  strips.forEach(Ly => {
+    const loop = Ly.paths[0], sn = Ly.paths[1] || null;
+    const dLoop = q => Math.min(...loop.slice(1).map((a, k) => segDist(q, loop[k], a)));
+    if (Ly.beads < 2) contract.push(`${f2(Ly.z1)}: ${Ly.beads} line(s)`);
+    else if (Ly.beads === 2 && sn) contract.push(`${f2(Ly.z1)}: a serpentine in a two-line strip`);
+    else if (Ly.beads >= 3 && (!sn || dLoop(sn[0]) > 1e-6 || sn.slice(2).some(q => dLoop(q) < Ly.pitchMm - 0.02))) contract.push(`${f2(Ly.z1)}: serpentine not tied at one point`);
+    if (Ly.pitchMm < PITCH - 1e-9 || Math.abs(Ly.widthMm - ((Ly.beads - 1) * Ly.pitchMm + S.widthMm)) > 1e-6) contract.push(`${f2(Ly.z1)}: ${f2(Ly.widthMm)} mm for ${Ly.beads} lines`);
+  });
+  const nb = {};
+  strips.forEach(x => { nb[x.beads] = (nb[x.beads] || 0) + 1; });
+  const spread = strips.filter(x => x.pitchMm > PITCH + 1e-9);
+  check(`each strip is the sheet's lines (${S.widthMm} at ${PITCH}): two a loop alone, three or more a loop and one serpentine inside it, tied at one point`,
+    !contract.length && secs.every((s, i) => Math.abs(s.w - L.layers[i].widthMm) < 0.02),
+    Object.keys(nb).map(k => `${k} lines x ${nb[k]}`).join(', ') + (spread.length ? `; spread to the outline at ${spread.map(x => `${f2(x.z1)} (${x.beads} lines at ${f2(x.pitchMm)})`).join(', ')}` : '') +
+      (contract.length ? '; ' + contract.slice(0, 4).join('; ') : '') + secs.filter((s, i) => Math.abs(s.w - L.layers[i].widthMm) >= 0.02).slice(0, 3).map(s => `; ${f2(s.Ly.z1)}: ${f2(s.w)} across, built ${f2(s.Ly.widthMm)}`).join(''));
   check('...and as long as the arc is wide, near enough (Bambu\'s lines: 10.32 mm)', secs.every(s => s.v[1] - s.v[0] >= 8.0),
     `${f2(Math.min(...secs.map(s => s.v[1] - s.v[0])))} - ${f2(Math.max(...secs.map(s => s.v[1] - s.v[0])))} mm`);
   check('the transition is the lowest strip again, one layer under it', trans.length === 1 && Math.abs(trans[0].z1 - strips[0].z0) < 1e-6 &&
     Math.abs(secs[0].u[0] - secs[1].u[0]) < 1e-3 && Math.abs(secs[0].u[1] - secs[1].u[1]) < 1e-3, `${f2(trans[0].z0)} - ${f2(trans[0].z1)}`);
-  /* how far under the part each strip's top lies, across its whole width */
-  const dists = [], worst = [];
-  strips.forEach(Ly => {
-    const pts = Ly.paths[0], Wd = Ly.widthMm, mine = [];
-    for (let i = 0; i + 1 < pts.length; i++) {
-      const n = Math.max(1, Math.ceil(Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]) / 0.25));
-      for (let k = 0; k <= n; k++) {
-        const x = pts[i][0] + (pts[i + 1][0] - pts[i][0]) * k / n, y = pts[i][1] + (pts[i + 1][1] - pts[i][1]) * k / n;
-        for (const du of [-Wd / 2, 0, Wd / 2]) {
-          const h = P.hitsAlong([x + nrm[0] * du, y + nrm[1] * du, Ly.z1], [0, 0, 1], 5);
-          if (h.length) mine.push(h[0]);
-        }
-      }
+  /* THE PART'S STEP over each strip: its section's up-slope edge (the part's own slice, over the strip's stretch)
+     at the layer over the strip and the next - the next layer's overhang advance */
+  /* the part's section's up-slope edge along the line v (its last crossing of the section's outline) */
+  const edgesAt = z => {
+    const segs = sliceAt(piece, z);
+    return v => {
+      let e = null;
+      segs.forEach(([a, c]) => {
+        const va = vOf(a), vc = vOf(c);
+        if ((va - v) * (vc - v) > 0 || va === vc) return;
+        const t = (v - va) / (vc - va), u = uOf(a) + (uOf(c) - uOf(a)) * t;
+        if (e == null || u > e) e = u;
+      });
+      return e;
+    };
+  };
+  /* the step, every 0.25 mm along the strip: the median (the arc's engraved labels are steps of their own) */
+  const stepOf = Ly => {
+    const sv = secs[L.layers.indexOf(Ly)], e1 = edgesAt(Ly.z1 + LAYER + LAYER / 2), e0 = edgesAt(Ly.z1 + LAYER / 2), d = [];
+    for (let v = sv.v[0] + 0.5; v <= sv.v[1] - 0.5; v += 0.25) { const a = e0(v), c = e1(v); if (a != null && c != null) d.push(Math.max(0, c - a)); }
+    d.sort((x, y) => x - y);
+    return d.length ? d[d.length >> 1] : 0;
+  };
+  const steps2 = strips.map(Ly => ({ z: Ly.z1, need: stepOf(Ly) + BEAD, w: secs[L.layers.indexOf(Ly)].w }));
+  const narrow = steps2.filter(q => q.w < q.need - 1e-3);
+  check('every strip is as wide as the part\'s step over it - the next layer\'s overhang advance - and one line (0.42) more, built',
+    !narrow.length, `step + line ${f2(Math.min(...steps2.map(q => q.need)))} - ${f2(Math.max(...steps2.map(q => q.need)))} mm, strips ${f2(Math.min(...steps2.map(q => q.w)))} - ${f2(Math.max(...steps2.map(q => q.w)))}; least spare ${f3(Math.min(...steps2.map(q => q.w - q.need)))}` +
+      (narrow.length ? '; narrow at ' + narrow.map(q => `${f2(q.z)} (${f2(q.w)} < ${f2(q.need)})`).join(', ') : ''));
+  /* THE GAP UNDER EACH STRIP: across its width (every 0.1 mm across, 0.25 along), the part over it - where
+     the support's own next layer is not (under the next strip or the body, the part is not what is over it) */
+  const footAt = z => regionsOf(loopsOf(sliceAt(joinAll(soups), z)));
+  const dists = [], all = [], worst = [];
+  let covered = 0;
+  strips.forEach((Ly, si) => {
+    const sv = secs[L.layers.indexOf(Ly)], nxt = footAt(Ly.z1 + LAYER / 2), mine = [];
+    const u0 = sv.u[0], u1 = sv.u[1];
+    for (let v = sv.v[0] + 0.25; v <= sv.v[1] - 0.25; v += 0.25) for (let u = u0 + 0.02; u <= u1 - 0.02 + 1e-9; u += 0.1) {
+      const x = u * nrm[0] + v * dir[0], y = u * nrm[1] + v * dir[1];
+      if (!sv.reg.some(R => inPoly([x, y], R))) continue;
+      const h = P.hitsAlong([x, y, Ly.z1], [0, 0, 1], 5);
+      if (!h.length) continue;
+      all.push(h[0]);
+      if (nxt.some(R => inPoly([x, y], R))) { covered++; continue; }
+      mine.push(h[0]);
     }
     dists.push(...mine);
-    worst.push({ z: Ly.z1, lo: Math.min(...mine), hi: Math.max(...mine) });
+    if (mine.length) worst.push({ z: Ly.z1, lo: Math.min(...mine), hi: Math.max(...mine) });
   });
-  dists.sort((x, y) => x - y);
+  dists.sort((x, y) => x - y); all.sort((x, y) => x - y);
   const med = dists[dists.length >> 1], out = worst.filter(w2 => w2.lo < GAP - 0.005 || w2.hi > 0.55 + 1e-3);
-  check('every strip\'s top lies 0.18 - 0.55 mm under the part across its whole width, median 0.35 or less',
-    !out.length && med <= 0.35, `${f3(dists[0])} - ${f3(dists[dists.length - 1])} mm over ${dists.length} points, median ${f3(med)}` +
+  check('the part over every strip lies 0.18 - 0.55 mm over it across its width, median 0.35 or less (where the next layer\'s support is not over it)',
+    !out.length && med <= 0.35 && worst.length === strips.length, `${f3(dists[0])} - ${f3(dists[dists.length - 1])} mm over ${dists.length} points, median ${f3(med)}; ` +
+      `${covered} more under the next layer (the strip's whole width, part over it: ${f3(all[0])} - ${f3(all[all.length - 1])}, median ${f3(all[all.length >> 1])})` +
       (out.length ? '; out at ' + out.map(w2 => `${f2(w2.z)} (${f2(w2.lo)}-${f2(w2.hi)})`).join(', ') : ''));
   const rests = strips.slice(1).map(x => x.overlapMm || 0);
   console.log(`        each strip over the one below: ${f2(Math.min(...rests))} - ${f2(Math.max(...rests))} mm along the slope (median ${f2(rests.slice().sort((x, y) => x - y)[rests.length >> 1])}); the rest of it its tips hold`);
@@ -397,21 +466,74 @@ async function cardRun() {
       if (!(it + tr)) plain.push(Ly.z1);
     });
     console.log('        moves by layer top:  ' + rows.join(' | '));
-    /* the support's printed toolpath, layer by layer, beside Bambu's own (reported, not gated) */
-    {
-      const zip = R3.openZip(new Uint8Array(fs.readFileSync(BAMBU)));
-      const bex = AUD.extrusions(new TextDecoder().decode(await zip.read('Metadata/plate_1.gcode'))).filter(m => /^Support/.test(m.feat || ''));
-      const mm = (list) => list.reduce((a, m) => a + (m.len || Math.hypot((m.x1 - m.x0) || 0, (m.y1 - m.y0) || 0)), 0);
-      const row = [5, 15, 25, 35, 38, 40, 42, 44, 46].map(z => {
-        const k = r.planes.findIndex(pl => Math.abs(pl.printZ - z) < 0.11);
-        const ours = mm(p.moves.filter(m => m.layer === k && m.objectId >= 1));
-        const bz = bex.length ? bex.reduce((a, m) => Math.abs(m.z - z) < Math.abs(a - z) ? m.z : a, bex[0].z) : z;
-        return `z ${z}: ours ${ours.toFixed(0)}, Bambu ${mm(bex.filter(m => m.z === bz)).toFixed(0)}`;
-      });
-      console.log('        support toolpath a layer, mm:  ' + row.join(' | '));
-    }
     check('every layer of the stair - its transition to its top - has its strip typed Support interface or Support transition (the tree\'s columns beside it are Support)',
       !plain.length, plain.length ? 'plain at ' + plain.map(f2).join(', ') : `${L.layers.length} layers; interface on ${rows.filter(x => /interface/.test(x)).length}, transition on ${rows.filter(x => /transition/.test(x)).length}`);
+    /* each strip's own lines in the slice: the paths of the stair's object at the strip's layer that lie on its
+       built outline (its loop, half a line and a hair either side) */
+    const SO = r.objects[stairObj], ty = SO.support;
+    const stripPaths = Ly => {
+      const k = r.planes.findIndex(pl => Math.abs(pl.printZ - Ly.z1) < 1e-3), lay = SO.layers[k], loop = Ly.paths[0];
+      const onIt = q => inPoly(q, loop) || Math.min(...loop.slice(1).map((a, j) => segDist(q, loop[j], a))) <= S.widthMm / 2 + 0.06;
+      return (lay ? lay.paths : []).filter(pa => pa.pts.every(onIt));
+    };
+    const sp = strips.map(Ly => ({ Ly, paths: stripPaths(Ly) }));
+    /* a strip spans between the tips that hold it (round 3 printed that): no span of a strip's line over air
+       longer than the tip pitch (STAIR.tipMm, Bambu's branch distance) */
+    const PITCH_T = SI.STAIR.tipMm, nPaths = sp.reduce((a, x) => a + x.paths.length, 0);
+    const spans = [].concat(...sp.map(x => [].concat(...x.paths.map(pa => (pa.overhangRuns || []).map(l => ({ z: x.Ly.z1, l }))))));
+    const long = spans.filter(q => q.l > PITCH_T + 1e-6);
+    check(`NO STRIP SPAN LONGER THAN THE TIP PITCH: a strip's line over air (typeSupports' overhang: the layer under, closed, grown half a line) runs ${PITCH_T} mm or less between what holds it`,
+      !long.length && sp.every(x => x.paths.length >= 1),
+      `${nPaths} strip paths on ${strips.length} strips, ${spans.length} spans over air, longest ${f2(Math.max(0, ...spans.map(q => q.l)))} mm` +
+      (long.length ? '; longer at ' + long.map(q => `${f2(q.z)} (${f2(q.l)} mm)`).join(', ') : '') +
+      `; the support's lines over air: ${Object.keys(ty.overhangPaths).map(k => `${k} ${ty.overhangPaths[k]} (${ty.overhangMm[k].toFixed(1)} mm)`).join(', ')}`);
+    /* each strip, in the slice, against the part's step over it: the extent across the slope of the points of the
+       layer's lines that lie on the strip (a tip's column top beside it joins the strip's island in the slice) */
+    const onStrip = Ly => {
+      const k = r.planes.findIndex(pl => Math.abs(pl.printZ - Ly.z1) < 1e-3), lay = SO.layers[k], loop = Ly.paths[0];
+      const onIt = q => inPoly(q, loop) || Math.min(...loop.slice(1).map((a, j) => segDist(q, loop[j], a))) <= S.widthMm / 2 + 0.06;
+      return [].concat(...(lay ? lay.paths : []).map(pa => pa.pts.filter(onIt)));
+    };
+    const thin = sp.map(x => {
+      const us = onStrip(x.Ly).map(uOf);
+      return { z: x.Ly.z1, w: us.length ? Math.max(...us) - Math.min(...us) + BEAD : 0, need: stepOf(x.Ly) + BEAD };
+    });
+    const nar = thin.filter(q => q.w < q.need - 1e-3);
+    check('...and as wide as the part\'s step over it and one line, in the slice (its lines\' extent across the slope and a line)',
+      !nar.length, `least spare ${f3(Math.min(...thin.map(q => q.w - q.need)))} mm` + (nar.length ? '; narrow at ' + nar.map(q => `${f2(q.z)} (${f2(q.w)} < ${f2(q.need)})`).join(', ') : ''));
+    /* THE MATERIAL: the support's printed toolpath, layer by layer, NSO's slice of the export against Bambu's
+       G-code (every Support feature), and in all */
+    const bex = AUD.extrusions(new TextDecoder().decode(await R3.openZip(new Uint8Array(fs.readFileSync(BAMBU))).read('Metadata/plate_1.gcode')))
+      .filter(m => /^Support/.test(m.feat || ''));
+    const ours = new Map(), theirs = new Map();
+    p.moves.forEach(m => { if (m.objectId >= 1 && m.e > 0) { const k = r.planes[m.layer].printZ.toFixed(2); ours.set(k, (ours.get(k) || 0) + m.length); } });
+    bex.forEach(m => { const k = m.z.toFixed(2); theirs.set(k, (theirs.get(k) || 0) + m.len); });
+    /* layer by layer, Bambu's: Bambu lays 0.27 mm layers low down and 0.2 up top, so each of its layers is set
+       against ours over the same height (ours whose tops lie over its last layer's top, to its own) */
+    const bz = [...theirs.keys()].map(Number).sort((a, c) => a - c), oz = [...ours.keys()].map(Number).sort((a, c) => a - c);
+    const tO = [...ours.values()].reduce((a, c) => a + c, 0), tB = [...theirs.values()].reduce((a, c) => a + c, 0);
+    const rowsM = bz.map((z, i) => {
+      const lo = i ? bz[i - 1] : -Infinity, hi = i === bz.length - 1 ? Infinity : z;
+      return { z, b: theirs.get(z.toFixed(2)), o: oz.filter(q => q > lo + 1e-6 && q <= hi + 1e-6).reduce((a, q) => a + ours.get(q.toFixed(2)), 0) };
+    });
+    console.log(`        support toolpath a layer, mm, Bambu's layers (z: ours / Bambu; ours summed over the same height):`);
+    for (let i = 0; i < rowsM.length; i += 6) console.log('          ' + rowsM.slice(i, i + 6).map(q => `${q.z.toFixed(2).padStart(5)}: ${q.o.toFixed(0).padStart(4)} / ${q.b.toFixed(0).padStart(4)}`).join('   '));
+    const bands = [[0, 1], [1, 5], [5, 10], [10, 20], [20, 30], [30, 37], [37, 40], [40, 42], [42, 44], [44, 47]];
+    console.log('        by height, m (ours / Bambu):  ' + bands.map(([a, c]) => {
+      const x = oz.filter(q => q > a && q <= c).reduce((s2, q) => s2 + ours.get(q.toFixed(2)), 0), y = bz.filter(q => q > a && q <= c).reduce((s2, q) => s2 + theirs.get(q.toFixed(2)), 0);
+      return `${a}-${c}: ${(x / 1000).toFixed(2)} / ${(y / 1000).toFixed(2)}`;
+    }).join(' | '));
+    /* THE GATE covers the stair's zone, every layer whose top lies over the stair's start (its lowest strip's
+       top). Under it stand the trunks (#274) and their pad: the whole part's ratio is a FINDING, printed, not
+       gated - the trunk-thinning follow-up (docs/SUPPORT-INTERFACE.md section 6: hollow or thin the trunks,
+       Bambu's being loops round air) owns it. */
+    const z0m = strips[0].z1;
+    const bO = oz.filter(q => q > z0m + 1e-6).reduce((a, q) => a + ours.get(q.toFixed(2)), 0);
+    const bB = bz.filter(q => q > z0m + 1e-6).reduce((a, q) => a + theirs.get(q.toFixed(2)), 0);
+    console.log(`        finding, not a gate (owner: the trunk-thinning follow-up): the whole part, ours ${(tO / 1000).toFixed(2)} m, ` +
+      `Bambu's ${(tB / 1000).toFixed(2)} m: ${(tO / tB).toFixed(2)} x`);
+    check(`SUPPORT MATERIAL over the stair's start (z ${f2(z0m)}) at most 1.5 x Bambu's there (toolpath, NSO's slice against the fixture's G-code)`,
+      bO <= 1.5 * bB, `ours ${(bO / 1000).toFixed(2)} m, Bambu's ${(bB / 1000).toFixed(2)} m: ${(bO / bB).toFixed(2)} x`);
   }
 
   /* ------------------------------------------------------------------ 7 */
