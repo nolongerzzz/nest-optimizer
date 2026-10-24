@@ -1328,9 +1328,14 @@ select:focus, input:focus {
 .vp-menu-body .btn-lift.is-armed { background: #facc15; color: #1a1d21; border-color: #facc15; font-weight: 600; }
 .lift-count { font-size: 11px; color: #94a3b8; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .lift-panel[hidden], .lift-strip[hidden] { display: none; }
-.lift-height { display: grid; grid-template-columns: 1fr auto; align-items: center; column-gap: 6px; font-size: 11px; color: #94a3b8;
+/* .live-slider is the label-and-range pair of a control whose slider drives a
+   live preview (app-live-slider.js): Hollow's wall now, Thicken's next. It is
+   Lift's height slider's layout, shared rather than copied. */
+.lift-height,
+.live-slider { display: grid; grid-template-columns: 1fr auto; align-items: center; column-gap: 6px; font-size: 11px; color: #94a3b8;
                 min-width: 0; margin: 2px 0; width: 100%; font-variant-numeric: tabular-nums; }
-.lift-height input { grid-column: 1 / -1; width: 100%; min-width: 0; margin: 2px 0 0; }
+.lift-height input,
+.live-slider input { grid-column: 1 / -1; width: 100%; min-width: 0; margin: 2px 0 0; }
 .lift-strip { margin: 4px 0; padding: 4px 6px; border: 1px solid rgba(255, 43, 214, 0.45); border-radius: 4px; }
 .lift-strip-row { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text); margin: 0 0 3px; cursor: pointer; }
 .lift-strip-row input { margin: 0; }
@@ -2115,20 +2120,23 @@ select:focus, input:focus {
    thicken row's three - that one is button / spinner / button and would drop
    this input into its 24px middle column. */
 .vp-row-extend,
-.vp-row-mirror {
+.vp-row-mirror,
+.vp-row-hollow {
   grid-template-columns: minmax(0, 1fr) minmax(0, 72px);
   align-items: stretch;
   gap: 6px;
 }
 .vp-row-extend .btn,
-.vp-row-mirror .btn {
+.vp-row-mirror .btn,
+.vp-row-hollow .btn {
   padding: 2px 3px;
   letter-spacing: -0.3px;
   white-space: nowrap;
   min-width: 0;
 }
 .vp-menu-body .vp-row-extend input[type="number"],
-.vp-menu-body .vp-row-mirror input[type="number"] {
+.vp-menu-body .vp-row-mirror input[type="number"],
+.vp-menu-body .vp-row-hollow input[type="number"] {
   min-height: 0;
   width: 100%;
   margin: 0;
@@ -2145,7 +2153,9 @@ select:focus, input:focus {
 .vp-menu-body .vp-row-extend input[type="number"]::-webkit-outer-spin-button,
 .vp-menu-body .vp-row-extend input[type="number"]::-webkit-inner-spin-button,
 .vp-menu-body .vp-row-mirror input[type="number"]::-webkit-outer-spin-button,
-.vp-menu-body .vp-row-mirror input[type="number"]::-webkit-inner-spin-button {
+.vp-menu-body .vp-row-mirror input[type="number"]::-webkit-inner-spin-button,
+.vp-menu-body .vp-row-hollow input[type="number"]::-webkit-outer-spin-button,
+.vp-menu-body .vp-row-hollow input[type="number"]::-webkit-inner-spin-button {
   -webkit-appearance: none;
   margin: 0;
 }
