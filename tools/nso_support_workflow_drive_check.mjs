@@ -79,12 +79,12 @@
  * a partition of the sections (RUN below, one `if` per block, and the sections
  * between them are in file order), and the closing two checks run in every
  * one. Measured locally, 404 s whole (179 checks):
- *     card      1-6    120 s   one page, one chain: 6 regenerates the supports 5 built
- *     counts    7, 8, 10  70 s
- *     builds    9, 11  111 s   the wedge and the clamp
- *     watchdog  12     102 s   90 s of it a real wait on the card's 60 s watchdog (6 has 60 s of its own)
- * The watchdog's waits are real time against the card's default constants (only
- * the ceiling can be set from the page), so they are not cut here.
+ *     card      1-6    115 s   one page, one chain: 6 regenerates the supports 5 built
+ *     counts    7, 8, 10  63 s
+ *     builds    9, 11   95 s   the wedge and the clamp
+ *     watchdog  12     102 s   (before the watchdog tests were scaled: 90 s of it a real wait,
+ *                              and 6 had 60 s of its own)
+ * The watchdog's waits are scaled (WD_MS below), so 6 and 12 are ~25 s and ~25 s.
  */
 import { chromium } from 'playwright';
 import { mkdir, readFile } from 'node:fs/promises';
@@ -117,6 +117,12 @@ const HEARTBEAT_MS = 200;
 const LATE_UNIT_LOOPS = 0.175;      // a beat held up by more work than this is late (was: a gap over 250 ms)
 const SILENCE_UNIT_LOOPS = 6.3;     // the most work between two messages (was: 2 s of silence; ~3.4 loops there)
 const FIRST_SECOND_LOOPS = 3.5;     // Building's "first second" (was 1 s)
+/* THE SILENCE TESTS RUN AT A SIXTH OF THE WATCHDOG. The card reads its limit when a build starts
+   (NSO_SUPPORTS_CARD.watchdogMs(ms), 0 puts the default back), so the tests that wait on it - section 6's planner
+   that never answers, section 12's that keeps talking - ran the real 60 s (and 90 s) on the clock, ~185 s of a
+   CI step doing nothing. They run at WD_MS now, with section 12's beat and length scaled the same (5 s : 60 s as
+   BEAT_MS : WD_MS), and the default is still asserted: 60000 on open (1) and again after the last of them (12). */
+const WD_MS = 10000, BEAT_MS = 1000, BEATS = 15;
 const SHOTS = join(ROOT, 'tools', 'supports-out');
 const W = 1280, H = 800;
 
@@ -661,7 +667,8 @@ async function main() {
   await T.idle();
   await T.failed('a planner that refuses', before, WHY);
 
-  /* The watchdog: a planner that never answers. */
+  /* A planner that never answers, at the default watchdog: the readout counts the seconds (the build is ended by
+     Escape at 13 s, before the 60 s watchdog); the watchdog itself is the next build's, at WD_MS. */
   await page.evaluate(() => window.NSO_SUPPORTS_CARD.setPlanner(() => new Promise(() => {})));
   before = await T.plate();
   const t0 = Date.now();
@@ -684,15 +691,22 @@ async function main() {
   console.log('       FINDING the readout said ' + shownS + ' s at ' + (at12.elRan === null ? '-' : at12.elRan.toFixed(1)) +
     ' s into the build on the page\'s clock (' + at12.el.toFixed(1) + ' s after the click began)');
   await T.shot('09-building-12s.png');
-  await T.idle(90000);
+  await page.keyboard.press('Escape');
+  await T.idle(20000);
+  /* The watchdog: the same planner, a limit a sixth of the default. */
+  await page.evaluate((ms) => window.NSO_SUPPORTS_CARD.watchdogMs(ms), WD_MS);
+  await T.lagProbe();
+  await page.click('#btn-sup-all');
+  await T.idle(WD_MS + 30000);
   const wd = await T.lagRead();
   await frames(page);
   console.log('       FINDING the watchdog stopped it ' + (wd.ran === null ? 'never' : wd.ran.toFixed(2) + ' s') + ' into the build on the page\'s clock (' +
     ((Date.now() - t0) / 1000).toFixed(1) + ' s here); the page\'s thread lagged ' + wd.lag.toFixed(2) + ' s at worst');
-  check('the watchdog stops a build that says nothing at 60 s (default), not before, and no later than the page\'s own lag allows (1 s + twice its worst)',
-    [wd.took !== null && wd.took >= 59.5, wd.ran !== null && wd.ran - 60 < 1 + 2 * wd.lag], [true, true]);
+  check('the watchdog stops a build that says nothing at its limit (' + WD_MS / 1000 + ' s here, the default is 60 s: read in 1 and 12), not before, and no later than the page\'s own lag allows (1 s + twice its worst)',
+    [wd.took !== null && wd.took >= WD_MS / 1000 - 0.5, wd.ran !== null && wd.ran - WD_MS / 1000 < 1 + 2 * wd.lag], [true, true]);
   check('...and the bar turns into the message: gone, the readout says "Could not build"', [(await T.card()).bar.shown, (await T.card()).line.startsWith('Could not build: ')], [false, true]);
-  c = await T.failed('a planner that never answers', before, 'the planner was still working after 60 s');
+  c = await T.failed('a planner that never answers', before, 'the planner was still working after ' + WD_MS / 1000 + ' s');
+  await page.evaluate(() => window.NSO_SUPPORTS_CARD.watchdogMs(0));
   check('...the old supports still stand', T.ids(await T.sups()), built1);
   await T.shot('10-timed-out.png');
 
@@ -1057,31 +1071,32 @@ async function main() {
   await page.click('#menu-supports > summary');
   await frames(page);
   const chatSpots = (await T.view()).beacons.length;
-  /* A planner that is slow but says so: a count every 5 s for 90 s, then its own refusal. */
-  await page.evaluate((n) => {
+  /* A planner that is slow but says so: a count every BEAT_MS for BEATS beats (longer than the watchdog), then its own refusal. */
+  await page.evaluate(([n, beat, beats, wd]) => {
+    window.NSO_SUPPORTS_CARD.watchdogMs(wd);
     window.NSO_SUPPORTS_CARD.setPlanner((soup, opts) => new Promise((resolve) => {
       let k = 0;
       const tick = setInterval(() => {
         k++;
         opts.onProgress({ phase: 'planning', done: Math.min(n - 1, k), total: n });
-        if (k >= 18) { clearInterval(tick); resolve({ ok: false, reason: 'slow but said so', inside: [] }); }
-      }, 5000);
+        if (k >= beats) { clearInterval(tick); resolve({ ok: false, reason: 'slow but said so', inside: [] }); }
+      }, beat);
     }));
-  }, chatSpots);
+  }, [chatSpots, BEAT_MS, BEATS, WD_MS]);
   before = await T.plate();
   await T.lagProbe();
   await page.click('#btn-sup-all');
-  await sleep(65000);
+  await sleep(WD_MS + 1000);
   c = await T.card();
-  check('a planner that posts every 5 s is still running at 65 s, past the 60 s watchdog: "Planning n / N", locked',
+  check('a planner that posts every ' + BEAT_MS / 1000 + ' s is still running at ' + (WD_MS + 1000) / 1000 + ' s, past the ' + WD_MS / 1000 + ' s watchdog: "Planning n / N", locked',
     [c.state, /^Planning \d+ \/ \d+ · \d+ %$/.test(c.line), c.locked], ['building', true, true]);
   await T.idle(60000);
   const p12 = await T.lagRead();
   await frames(page);
   console.log('       FINDING it ended ' + (p12.took === null ? 'never' : p12.took.toFixed(2) + ' s') + ' after the click, its last message at ' +
     (p12.lastMsg === null ? '-' : p12.lastMsg.toFixed(2) + ' s') + ' (' + p12.msgs + ' messages), the page\'s thread lagging ' + p12.lag.toFixed(2) + ' s at worst');
-  check('...and is not stopped: at 90 s it ends with its own answer, not the watchdog\'s - on its last message, within the page\'s own lag',
-    [p12.took !== null && p12.took >= 89, p12.endAfterMsg !== null && p12.endAfterMsg < 1 + 2 * p12.lag], [true, true]);
+  check('...and is not stopped: at ' + BEATS * BEAT_MS / 1000 + ' s it ends with its own answer, not the watchdog\'s - on its last message, within the page\'s own lag',
+    [p12.took !== null && p12.took >= BEATS * BEAT_MS / 1000 - 1, p12.endAfterMsg !== null && p12.endAfterMsg < 1 + 2 * p12.lag], [true, true]);
   await T.failed('...a planner that was slow but said so', before, 'slow but said so');
   /* The ceiling: a build that keeps reporting but never ends is stopped at it (here 8 s, by the seam). */
   await page.evaluate(() => {
@@ -1101,7 +1116,7 @@ async function main() {
   check('a build that keeps reporting but never ends is stopped at the ceiling, not before, and no later than the page\'s own lag allows',
     [pc.took !== null && pc.took >= 7.5, pc.ran !== null && pc.ran - 8 < 1 + 2 * pc.lag], [true, true]);
   await T.failed('...the runaway', before, 'the build was still running after 8 s');
-  check('...the ceiling is 10 min by default', await page.evaluate(() => [window.NSO_SUPPORTS_CARD.ceilingMs(0), window.NSO_SUPPORTS_CARD.watchdogMs()]), [600000, 60000]);
+  check('...the ceiling is 10 min by default', await page.evaluate(() => [window.NSO_SUPPORTS_CARD.ceilingMs(0), window.NSO_SUPPORTS_CARD.watchdogMs(0)]), [600000, 60000]);
   await page.evaluate(() => window.NSO_SUPPORTS_CARD.setPlanner(null));
   await page.close();
   }
