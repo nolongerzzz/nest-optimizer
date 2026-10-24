@@ -161,19 +161,46 @@ function kit() {
   K.fcStart = () => { K.fc = 0; K.fcOn = true; (function t() { if (!K.fcOn) return; K.fc++; requestAnimationFrame(t); })(); };
   K.fcStop = () => { K.fcOn = false; return K.fc; };
   K.placedOf = id => state.placed.find(q => q && q.sourceId === id);
-  K.top = id => {                          // where a press lands on the piece: its top, projected
+  /* Where a press lands on a piece. First choice is the piece's top, projected (what nso_move_flat_bench.js presses); if a
+     ray through that point does not hit the piece first (a vase's top is its opening), the nearest point of a grid over
+     the piece's screen box that does. `a` is the press, `e` the same point carried 40 mm toward the front of the plate. */
+  K.top = id => {
     const p = K.placedOf(id); p.mesh.updateMatrixWorld(true);
     const b = new THREE.Box3().setFromObject(p.mesh), c = b.getCenter(new THREE.Vector3());
     const r = state.renderer.domElement.getBoundingClientRect();
-    const proj = (x, y, z) => { const v = new THREE.Vector3(x, y, z).project(state.camera); return { x: r.left + (v.x * 0.5 + 0.5) * r.width, y: r.top + (-v.y * 0.5 + 0.5) * r.height }; };
-    return { a: proj(c.x, b.max.y, c.z), e: proj(c.x, b.max.y, c.z + 40), x0: p.x, z0: p.z, undo: state.undoStack.length };
+    const toScreen = v => { const q = v.clone().project(state.camera); return { x: r.left + (q.x * 0.5 + 0.5) * r.width, y: r.top + (-q.y * 0.5 + 0.5) * r.height }; };
+    const rc = new THREE.Raycaster(), ndc = new THREE.Vector2();
+    const ownerOf = o => { while (o && (!o.userData || o.userData.placedIndex == null) && o.parent) o = o.parent; return o && o.userData && o.userData.placedIndex != null ? state.placed[o.userData.placedIndex] : null; };
+    const hitAt = pt => {
+      ndc.set(((pt.x - r.left) / r.width) * 2 - 1, -((pt.y - r.top) / r.height) * 2 + 1);
+      rc.setFromCamera(ndc, state.camera);
+      const hs = rc.intersectObjects(state.modelGroup.children, true);
+      for (let i = 0; i < hs.length; i++) if (hs[i].faceIndex != null) return ownerOf(hs[i].object) === p ? hs[i].point.clone() : null;
+      return null;
+    };
+    const first = toScreen(new THREE.Vector3(c.x, b.max.y, c.z));
+    const cands = [first];
+    const xs = [], ys = [];
+    for (let i = 0; i < 8; i++) { const q = toScreen(new THREE.Vector3(i & 1 ? b.max.x : b.min.x, i & 2 ? b.max.y : b.min.y, i & 4 ? b.max.z : b.min.z)); xs.push(q.x); ys.push(q.y); }
+    const x0 = Math.max(r.left + 2, Math.min.apply(null, xs)), x1 = Math.min(r.right - 2, Math.max.apply(null, xs)), y0 = Math.max(r.top + 2, Math.min.apply(null, ys)), y1 = Math.min(r.bottom - 2, Math.max.apply(null, ys)), N = 11;
+    for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) cands.push({ x: x0 + (x1 - x0) * (i + 0.5) / N, y: y0 + (y1 - y0) * (j + 0.5) / N });
+    const rest = cands.slice(1).sort((u, v) => Math.hypot(u.x - first.x, u.y - first.y) - Math.hypot(v.x - first.x, v.y - first.y));
+    let a = null, P = null;
+    const onCanvas = pt => pt.x > r.left && pt.x < r.right && pt.y > r.top && pt.y < r.bottom && document.elementFromPoint(pt.x, pt.y) === state.renderer.domElement;   // not under the top row or a card
+    for (const pt of [first].concat(rest).filter(onCanvas)) { P = hitAt(pt); if (P) { a = pt; break; } }
+    if (!a) return { a: first, e: first, x0: p.x, z0: p.z, undo: state.undoStack.length, missed: true };
+    return { a, e: toScreen(P.clone().add(new THREE.Vector3(0, 0, 40))), x0: p.x, z0: p.z, undo: state.undoStack.length };
   };
   K.plateSpot = (x, z) => {
     const r = state.renderer.domElement.getBoundingClientRect(), v = new THREE.Vector3(x, 0, z).project(state.camera);
     return { x: r.left + (v.x * 0.5 + 0.5) * r.width, y: r.top + (-v.y * 0.5 + 0.5) * r.height };
   };
+  /* The camera stands at (0, 190, 150) x k, looking at the plate's centre. k is 1 for anything up to 100 mm across (the
+     stand-in is 60) and grows with the piece, so a 180 mm vase is in frame and not above the camera. */
+  K.k = 1;
+  K.fit = id => { const b = new THREE.Box3().setFromObject(K.placedOf(id).mesh), d = b.getSize(new THREE.Vector3()); K.k = Math.max(1, Math.max(d.x, d.y, d.z) / 100); return K.k; };
   K.view = () => {
-    state.controls.target.set(0, 0, 0); state.camera.position.set(0, 190, 150); state.camera.lookAt(0, 0, 0);
+    state.controls.target.set(0, 0, 0); state.camera.position.set(0, 190 * K.k, 150 * K.k); state.camera.lookAt(0, 0, 0);
     state.controls.update(); state.camera.updateMatrixWorld(true);
   };
   K.setXZ = (id, x, z) => { const p = K.placedOf(id); applyPlacedXZ(p, x, z); p.mesh.updateMatrixWorld(true); };
@@ -370,7 +397,7 @@ async function loadOne(S, file, what) {
 }
 
 async function arrange(S, ids) {
-  await S.page.evaluate(([v, b]) => { window.__pk.setXZ(v, -50, -20); window.__pk.setXZ(b, 50, -20); window.__pk.view(); }, ids);
+  await S.page.evaluate(([v, b]) => { window.__pk.setXZ(v, -50, -20); window.__pk.setXZ(b, 50, -20); window.__pk.fit(v); window.__pk.view(); }, ids);
   await sleep(2500);
 }
 
@@ -427,7 +454,10 @@ async function clickProbe(S, vaseId) {
   // ScriptDuration is read after the frame: it covers press, release, the click and the frame callbacks up to the frame
   const m1 = await cdpMetrics(cdp), c = await page.evaluate(() => window.__pk.cur);
   await page.evaluate(() => { window.__pk.cur = null; });
-  if (!(await selectedIs(page, vaseId))) return NA('click', 'the press at the top of the vase did not select it');
+  if (!(await selectedIs(page, vaseId))) {
+    const d = await page.evaluate(id => ({ sel: state.selectedIndex, ids: state.placed.map(p => p.sourceId), id }), vaseId);
+    return NA('click', 'the press at (' + pt.a.x.toFixed(0) + ', ' + pt.a.y.toFixed(0) + ')' + (pt.missed ? ' (no ray hit the vase first)' : '') + ' did not select the vase (selectedIndex ' + d.sel + ', pieces ' + d.ids.join(',') + ', vase ' + d.id + ')');
+  }
   return { frameMs: c.frame, jsMs: dMs(m0, m1, 'ScriptDuration'), mainMs: dMs(m0, m1, 'TaskDuration'), hoverJsMs: dMs(h0, h1, 'ScriptDuration') };
 }
 
@@ -587,13 +617,16 @@ async function leakRun(browser, root, port, vase, kind) {
     if (kind === 'select') ids.box = (await loadOne(S, BOX, 'box')).id;
     const v = await loadOne(S, vase.file, 'vase');
     ids.vase = v.id;
-    await S.page.evaluate(([v, b]) => { window.__pk.setXZ(v, b == null ? 0 : -50, -20); if (b != null) window.__pk.setXZ(b, 50, -20); window.__pk.view(); }, [v.id, ids.box == null ? null : ids.box]);
+    await S.page.evaluate(([v, b]) => { window.__pk.setXZ(v, b == null ? 0 : -50, -20); if (b != null) window.__pk.setXZ(b, 50, -20); window.__pk.fit(v); window.__pk.view(); }, [v.id, ids.box == null ? null : ids.box]);
     await sleep(2500);
     // the cycles that act on the selected piece start with it selected, by a real press
     if (kind !== 'select') {
       const pt = await S.page.evaluate(id => window.__pk.top(id), v.id);
       await S.page.mouse.click(pt.a.x, pt.a.y); await quiet(S.page);
-      if (!(await selectedIs(S.page, v.id))) return NA(kind, 'the press at the top of the vase did not select it');
+      if (!(await selectedIs(S.page, v.id))) {
+        const d = await S.page.evaluate(() => ({ sel: state.selectedIndex, k: window.__pk.k, cam: state.camera.position.toArray().map(Math.round) }));
+        return NA(kind, 'the press at (' + pt.a.x.toFixed(0) + ', ' + pt.a.y.toFixed(0) + ')' + (pt.missed ? ' (no ray hit the vase first)' : '') + ' did not select the vase (selectedIndex ' + d.sel + ', k ' + d.k + ', camera ' + d.cam + ')');
+      }
     }
     const samples = [Object.assign({ cycle: 0, wallMs: 0 }, await sampleNow(S))];
     for (let c = 1; c <= CYCLES; c++) {
