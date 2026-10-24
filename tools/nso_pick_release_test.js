@@ -17,6 +17,7 @@
      Patch, Cap, Soften, Carve, Lift, Paint        (Add / Subtract / Surface)
      Close, Bridge, Connect                        (the cards with a Set)
      Punch                                         (Subtract: a card that stays armed)
+     Supports                                      (Assisted: Circles started, a circle drawn, stopped; Erase after a build)
    Cap has no button on the page today (btn-cap is not in index.html); its
    arm is capSelectedModel(), the function the button was wired to.
 
@@ -57,6 +58,20 @@ function writeSTL(name, soup) {
   fs.writeFileSync(file, b);
   return file;
 }
+/* support:beacons' tilted box (40 x 30 x 10, underside at 30 deg): the Supports card has spots on it in Assisted. */
+function tiltedBoxSoup() {
+  const lo = [0, 0, 0], hi = [40, 30, 10], T = 30 * Math.PI / 180;
+  const v = [[lo[0], lo[1], lo[2]], [hi[0], lo[1], lo[2]], [hi[0], hi[1], lo[2]], [lo[0], hi[1], lo[2]],
+             [lo[0], lo[1], hi[2]], [hi[0], lo[1], hi[2]], [hi[0], hi[1], hi[2]], [lo[0], hi[1], hi[2]]];
+  const f = [[0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7], [0, 1, 5], [0, 5, 4], [1, 2, 6], [1, 6, 5], [2, 3, 7], [2, 7, 6], [3, 0, 4], [3, 4, 7]];
+  const out = [];
+  for (const t of f) for (const i of t) {
+    const q = v[i];
+    out.push(q[0] * Math.cos(T) - q[2] * Math.sin(T), q[1], q[0] * Math.sin(T) + q[2] * Math.cos(T));
+  }
+  return out;
+}
+const tiltedBox = () => writeSTL('tilted.stl', tiltedBoxSoup());
 const stockTube = () => writeSTL('tube.stl', NSO_Stock.revolve(NSO_Stock.profileTube(10, 8.4, 30), 96));
 const sphereSTL = nm => writeSTL(nm + '.stl', L.sphere([0, 0, 8], 8, 32, 16));
 
@@ -353,7 +368,64 @@ const ROSTER = [
       await page.click('#btn-punch-go');
       await page.waitForFunction(d => state.undoStack.length > d && !nsoPunchState().busy, d0, { timeout: 90000 });
     },
-    isArmed: page => page.evaluate(() => nsoPunchState().open) }
+    isArmed: page => page.evaluate(() => nsoPunchState().open) },
+
+  /* The Supports card's markers own the pointer only while their tool is on, and
+     the tool is a switch you stop: Circles draws on the plate (so a left-drag
+     there draws instead of orbiting), Erase waits for a member under the pointer
+     (so a drag on bare plate still orbits). Stopped by its button and by Escape,
+     the view orbits again. The armed reading is the card in Assisted with the
+     Tips tool, which leaves the plate to the view. */
+  { name: 'Supports', file: tiltedBox,
+    arm: async page => {
+      await page.evaluate(() => { const m = document.getElementById('menu-supports'); if (!m.open) m.open = true; });
+      await page.waitForFunction(() => window.NSO_SUPPORTS_CARD && window.NSO_SUPPORTS_CARD.isOpen() && window.NSO_SUPPORTS_CARD.view().beacons.length > 0, null, { timeout: 30000 });
+      await page.click('#sup-mode-assisted');
+      await page.waitForFunction(() => window.NSO_SUPPORTS_CARD.markers().points > 0, null, { timeout: 10000 });
+    },
+    verb: async (page, id) => {
+      const tool = () => page.evaluate(() => window.NSO_SUPPORTS_CARD.tool());
+      const cam = () => page.evaluate(() => state.camera.position.toArray());
+      // CIRCLES: with it on, a drag on bare plate draws a circle and the view stays put
+      await homeView(page); await frames(page, 4);
+      await page.click('#sup-tool-circles');
+      const bp = await barePlate(page);
+      check('Supports: a bare plate pixel to draw from', !!bp);
+      const c0 = await cam();
+      await page.mouse.move(bp.x, bp.y); await page.mouse.down();
+      for (let i = 1; i <= 8; i++) await page.mouse.move(bp.x + i * 6, bp.y + i);
+      await page.mouse.up(); await frames(page, 3);
+      const c1 = await cam();
+      check('Supports: Circles on - a left-drag on bare plate draws a circle and does not orbit',
+        [await page.evaluate(() => window.NSO_SUPPORTS_CARD.markers().zones.length), c0.every((v, i) => Math.abs(v - c1[i]) < 1e-3)], [1, true]);
+      // stopped by its button
+      await page.click('#sup-tool-circles');
+      check('Supports: the button stops Circles', await tool(), 'tips');
+      await reading(page, 'Supports Circles stopped by its button');
+      // stopped by Escape
+      await page.click('#sup-tool-circles');
+      await escape(page);
+      check('Supports: Escape stops Circles', await tool(), 'tips');
+      await reading(page, 'Supports Circles stopped by Escape');
+      // ERASE, after a build (the circle only drew a circle: it is taken off, so the plate can be reached): a drag on bare plate still orbits
+      await page.evaluate(() => window.NSO_SUPPORTS_CARD.removeZone(0));
+      await page.click('#btn-sup-all');
+      await page.waitForFunction(() => !window.NSO_SUPPORTS_CARD.busy(), null, { timeout: 120000 });
+      await page.waitForFunction(() => !document.getElementById('sup-tool-erase').disabled, null, { timeout: 10000 });
+      await page.click('#sup-tool-erase');
+      check('Supports: Erase is on after a build', await tool(), 'erase');
+      await reading(page, 'Supports Erase on');
+      await escape(page);
+      check('Supports: Escape stops Erase', await tool(), 'tips');
+      // the card closed: nothing is left claiming the plate
+      await page.click('#sup-tool-circles');
+      await page.evaluate(() => { document.getElementById('menu-supports').open = false; });
+      await frames(page, 3);
+      check('Supports: closing the card puts the markers away and the tool with them',
+        await page.evaluate(() => [window.NSO_SUPPORTS_CARD.tool(), !state.scene.getObjectByName('supportsCardZones'), state.renderer.domElement.style.cursor]), ['tips', true, '']);
+      await reading(page, 'Supports card closed');
+    },
+    isArmed: page => page.evaluate(() => window.NSO_SUPPORTS_CARD.isOpen() && window.NSO_SUPPORTS_CARD.mode() !== 'auto') }
 ];
 
 /* Two clicks, a sphere apiece, the camera free between them. */

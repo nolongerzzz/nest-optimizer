@@ -6,6 +6,7 @@ layer-view work (`docs/GCODE-SUPPORTS.md`); both call the same planner.
 
 ```
 npm run support:workflow    tools/nso_support_workflow_drive_check.mjs, headless Chromium at 1280 x 800
+npm run support:custom      tools/nso_support_custom_drive_check.mjs - Auto / Assisted / Custom (section 6)
 ```
 
 `support:card` (`tools/nso_support_card_drive_check.mjs`) drives the previous
@@ -378,6 +379,81 @@ reports forever is stopped at the ceiling.
   and the supports stay where they were; the card shows the new areas.
 - The app's own Remove deletes the model with the plate entry, and its Undo
   puts back the entry only (pre-existing, every piece).
+
+## 6. Auto, Assisted, Custom (supports-custom-ui)
+
+```
+npm run support:custom    tools/nso_support_custom_drive_check.mjs (79 checks)
+```
+
+A three-way switch at the top of the card chooses what the planner is fed
+(`opts.feed`, `docs/SUPPORT-GRIDPACK.md` section 7). The switch is a setting, like
+the angle: not an Undo step. Everything above this section is **Auto**, unchanged -
+Auto sends no feed at all (`support:custom` 1 reads the worker's message), and
+`support:workflow` is its proof.
+
+| | what shows on the piece | a click | feed sent |
+| --- | --- | --- | --- |
+| **Auto** | the outlined areas | an outline leaves the area out / puts it back; Shift-click adds a spot | none |
+| **Assisted** | the detected spots, as points drawn over the piece | a point turns that spot off (grey) or back on; Shift-click adds a spot as in Auto | `mode: 'assisted'`, `beaconsOff`, `landingZones`, `excluded` |
+| **Custom** | no spots: only the tips you place | the underside places a tip (a face that looks up is refused by name); a tip takes it away | `mode: 'custom'`, `tips`, `landingZones`, `excluded` |
+
+Assisted and Custom have no outlined areas (the areas are Auto's): a left-out
+area stays recorded on the piece and comes back in Auto. The readout counts
+what the planner will be given: "120 spots at 35&deg; on box &middot; 1 off &middot; 1 circle", "3 tips
+on box", "No tips yet on box". Once built, "Built: M supports &middot; held H &middot; unsupported K &middot;
+unreachable U" as in every mode; a spot that is off is not a tip and is in none of
+the counts.
+
+### The tools: one holds the pointer at a time
+
+Under the switch, in the two fed modes, a row of three: **Tips**, **Circles**,
+**Erase**. Tips is on by default and is the points on the piece. The other two are
+switches you start and stop (press again, or Escape): a tool's claim on the
+pointer ends when it is stopped, so the view orbits again (`pick:release`'s
+Supports row). That is the point of the split - **orbit to a good view first,
+then start Circles and draw from it**, then stop it to orbit.
+
+- **Markers own the pointer, like the rotate rings.** The points, the circles and
+  the eraser's light draw over everything (render order 900, depth test off), are
+  scene helpers that no ray can hit (`nso-helpers.js`), and are hit-tested by the
+  card on the press: a press on a point is not a press on the piece (it does not
+  select or move it). A press on nothing of theirs falls through to the view.
+- **Circles** (landing zones, on the plate - `landingZones`): with it on, a drag on
+  bare plate draws a circle (centre where the drag began, radius to where it ends;
+  under 1.5 mm it is a click and draws nothing), a drag on its edge resizes it, a
+  drag inside moves it, a click selects it (yellow) and Delete removes it. Each is
+  one Undo step. Off the plate a drag is the view's. The ray meets the plane through
+  the pieces, so a circle can be drawn under one. A circle nothing landed in after a
+  build turns red (`plan.zonesEmpty`, empty in every area planned).
+- **Erase** (after a build, Assisted and Custom): off until there is a build with
+  members. Hovering a built tip, branch or trunk lights it and everything it holds up
+  (the members whose `carries` are among its own and that sit above it: a tip, a
+  branch, a trunk; the sheet and the pads are never targets - the planner does not
+  erase those alone) - and **nothing is said anywhere**: no list, no readout, the
+  card's text and the status line do not change. A click puts its id in `excluded` and
+  the plan is made again: every support on the piece is replaced, one Undo step; a
+  build that cannot finish leaves the member where it was. The member is drawn from
+  its `from` / `to` ends, a straight line (a bent branch is lit straight).
+
+### What survives, what forgets
+
+Tips, spots turned off, circles and erasures are the piece's own (`model.nsoSupportFeed`:
+tips and off-spots in the piece's frame, circles in the plate's) and outlive a
+REGENERATE - the same members come back. **REMOVE ALL (the card's reset) and CLEAR
+PLATE forget them**; REMOVE ALL is one Undo step that puts them back. Spots added
+with Shift-click and areas left out are `nsoSupportEdits`, as before, and stay.
+
+### Known edges
+
+- The eraser's ids hash the member's path in the plate's frame: move the piece and
+  the ids are new ones, so earlier erasures no longer name anything.
+- The interface sheet adds its own carrier trunks (built by `parts()`, not in
+  `plan.trunks`); with circles drawn, a few of those can stand a pad's width or so
+  outside a circle (2 of 192 trunks, 1.7 mm, on the tilted box with one 19 mm circle).
+  The planner's own trunks are held to the zone (support:feed).
+- Switching mode with supports standing leaves them standing; their spots read
+  against the new mode's list until REGENERATE.
 
 ## Paint scope: sub-region (detection)
 
