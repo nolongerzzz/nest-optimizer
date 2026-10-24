@@ -57,6 +57,10 @@
  *                                        # tools/test-weights.json from CI's times
  *   node tools/run-tests.mjs --touching nso_slicer.js[,app-core.js]
  *                                        # the steps whose tests reach a file
+ *   node tools/run-tests.mjs --shard=3/20 --failures-out failures/shard-3.txt
+ *                                        # each failing step as a block, the moment it ends
+ *   node tools/run-tests.mjs --package list.json
+ *                                        # run the scripts/testSteps of that package.json-shaped file
  *
  * The last five are tools, not runs: they read package.json and the files,
  * and run no test. docs/TESTING.md has the why of each.
@@ -69,7 +73,11 @@ import { createRequire } from 'node:module';
 import { formatWeights } from './migrate-test-weights.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
+/* `--package <file>`: a package.json-shaped file ({scripts, testSteps}) to run in
+   place of package.json. Only ci:failures uses it, to run a throwaway list with
+   one failing step in it; a script in that file runs from the repo root all the same. */
+const pkgArg = argValue('package');
+const pkg = JSON.parse(readFileSync(pkgArg ? resolve(pkgArg) : join(ROOT, 'package.json'), 'utf8'));
 const scripts = pkg.scripts || {};
 const allSteps = pkg.testSteps;
 
@@ -611,11 +619,16 @@ function validate() {
   return bad;
 }
 
-function runStep(command) {
+/* The step running now, so a SIGINT / SIGTERM (the job step's timeout, or a
+   cancel) can report it as the step that was cut off. */
+let active = null;
+
+function runStep(command, name) {
   return new Promise((resolve) => {
     const started = Date.now();
     const child = spawn(command, { cwd: ROOT, shell: '/bin/sh' });
     let out = '';
+    active = { name, started, child, output: () => out };
     /* Echoed as it arrives so a long step shows progress and nothing is lost
        from the log, and kept so the recap can repeat a failure's output
        without the reader scrolling back past six passing suites. */
@@ -624,12 +637,60 @@ function runStep(command) {
     child.stderr.on('data', (d) => take(d.toString()));
     child.on('error', (err) => {
       take(`\n[runner] could not start: ${err.message}\n`);
+      active = null;
       resolve({ code: -1, signal: null, ms: Date.now() - started, out });
     });
     child.on('close', (code, signal) => {
+      active = null;
       resolve({ code: code === null ? -1 : code, signal, ms: Date.now() - started, out });
     });
   });
+}
+
+/* THE FAILURE REPORT - one block per failing step, printed the moment it ends.
+   A shard is ~12 minutes of steps; the step that failed in its first minute
+   should not be found by scrolling a 12-minute log after the other nineteen
+   shards finish. So the block goes to the log, to a `::error` annotation, and
+   (--failures-out) to a file the workflow puts on the run's summary page and
+   uploads as an artifact. The file is emptied at the start and a block is
+   appended as each failing step ends, so a shard that is cut off still leaves
+   the blocks of the steps that failed before it was. */
+const FAIL_LINE = /\bFAIL(?:ED)?\b(?!-SAFE)|\bnot ok\b/;
+const TAIL_LINES = 40;
+const MAX_FAIL_LINES = 500;
+
+/* A workflow command's message and property escapes (the `::error` line). */
+const esc = (s) => String(s).replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
+const escProp = (s) => esc(s).replace(/:/g, '%3A').replace(/,/g, '%2C');
+
+function failureBlock({ name, code, signal, interrupted, ms, out }, shardNo) {
+  const lines = out.replace(/\s+$/, '').split('\n');
+  const failing = lines.filter((l) => FAIL_LINE.test(l)).map((l) => l.trimEnd().slice(0, 400));
+  const result = interrupted
+    ? `stopped by ${interrupted} (the step's timeout, or a cancel)`
+    : `exit code ${code}${signal ? ` (signal ${signal})` : ''}`;
+  const block = [
+    `=== FAILED: ${name} (shard ${shardNo}) ===`,
+    `command: npm run ${name}`,
+    `result:  ${result}`,
+    `seconds: ${(ms / 1000).toFixed(1)}`,
+    failing.length ? `failing lines (${failing.length}):` : 'failing lines: none matched FAILED / not ok',
+    ...failing.slice(0, MAX_FAIL_LINES).map((l) => '  ' + l),
+    ...(failing.length > MAX_FAIL_LINES ? [`  ... ${failing.length - MAX_FAIL_LINES} more`] : []),
+    `last ${Math.min(TAIL_LINES, lines.length)} lines:`,
+    ...lines.slice(-TAIL_LINES).map((l) => '  ' + l),
+    `=== end ${name} ===`,
+    '',
+  ].join('\n');
+  const first = failing[0] || lines.filter((l) => l.trim()).pop() || result;
+  return { block, annotation: `::error title=${escProp(`shard ${shardNo}: ${name} failed`)}::${esc(first.trim())}` };
+}
+
+let failuresFile = null;
+function reportFailure(r, shardNo) {
+  const { block, annotation } = failureBlock(r, shardNo);
+  console.log('\n' + block + annotation);
+  if (failuresFile) appendFileSync(failuresFile, block + '\n');
 }
 
 const fmt = (ms) => (ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`);
@@ -687,14 +748,34 @@ async function main() {
     writeFileSync(csv, CSV_HEADER + '\n');
   }
 
+  const shardNo = shard ? shard.i : 1;
+  const failuresOut = argValue('failures-out');
+  if (failuresOut) {
+    mkdirSync(dirname(resolve(failuresOut)), { recursive: true });
+    writeFileSync(failuresOut, '');
+    failuresFile = failuresOut;
+  }
+  /* A timeout or cancel reaches this process as SIGINT, then SIGTERM; the step
+     it cut off is the one worth naming, and there is time to write it down. */
+  for (const sig of ['SIGINT', 'SIGTERM']) {
+    process.on(sig, () => {
+      if (active) {
+        active.child.kill('SIGKILL');
+        reportFailure({ name: active.name, code: -1, signal: null, interrupted: sig, ms: Date.now() - active.started, out: active.output() }, shardNo);
+      }
+      process.exit(sig === 'SIGINT' ? 130 : 143);
+    });
+  }
+
   const results = [];
   for (const [i, name] of declared.entries()) {
     const command = scripts[name];
     const label = `[${i + 1}/${declared.length}] ${name}`;
     console.log(`\n${'='.repeat(70)}\n${label}  $ ${command}\n${'='.repeat(70)}`);
-    const r = await runStep(command);
+    const r = await runStep(command, name);
     const ok = r.code === 0;
     results.push({ name, command, ok, ...r });
+    if (!ok) reportFailure({ name, ...r }, shardNo);
     if (csv) appendFileSync(csv, [name, shardLabel, (r.ms / 1000).toFixed(3), ok ? 'pass' : 'fail'].map(csvField).join(',') + '\n');
     console.log(`\n${label}  ${ok ? 'PASS' : 'FAIL'}` +
       `  exit=${r.code}${r.signal ? ` signal=${r.signal}` : ''}  ${fmt(r.ms)}`);

@@ -213,6 +213,8 @@
     "test": "node tools/run-tests.mjs",
     "test:par": "node tools/run-tests-parallel.mjs",
     "test:cached": "node tools/run-tests-cached.mjs",
+    "ci:failures": "node tools/ci-failures-check.mjs",
+    "ci:timing-merge": "node tools/ci-timing-merge-check.mjs",
     "test:cache-audit": "node tools/test-cache/audit.mjs",
     "test:cache-validate": "node tools/test-cache/validate.mjs",
     "open:fixtures": "node tools/nso_open_make_fixtures.js --check",
@@ -600,6 +602,8 @@
     "pathsweep:canonical",
     "watch:test",
     "photoset:test",
-    "photoset:drive"
+    "photoset:drive",
+    "ci:failures",
+    "ci:timing-merge"
   ]
 }

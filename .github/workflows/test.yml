@@ -10,9 +10,10 @@
 # They are claude-wip and claude-wip-next - the staging branch a batch of merges
 # is pushed to and run on before claude-wip is fast-forwarded to it.
 #
-# The optional `shard` input (1-20; default all) runs only that shard: the
-# re-run after a fix to one failing step, without paying for the other nineteen.
-# A one-shard run is not a full run - "npm test" then gates on that shard alone.
+# The optional `shard` input is `all` (the default) or the shard numbers to run,
+# comma-separated and without spaces: `7`, or `1,2,3,4`. That is the re-run after
+# a fix to one failing step, without paying for the other nineteen. A run that
+# names shards is not a full run - "npm test" then gates on those shards alone.
 #
 # This is the REQUIRED status check on main (Settings -> Branches -> branch
 # protection -> "Require status checks to pass before merging"). The check name
@@ -26,6 +27,19 @@
 # forever, blocking every merge. That is not a syntax or permissions problem and
 # it produces no error anywhere; it just silently does nothing. Keep this file on
 # main. A branch may carry a newer copy, but main must always have one.
+#
+# WHERE IT RUNS: THE CI_RUNNER SWITCH
+# The repo variable CI_RUNNER (Settings -> Secrets and variables -> Actions ->
+# Variables) picks the machines. Unset or empty: ubuntu-latest, as it always was.
+# `self-hosted`: the owner's laptop runners, labelled `nso`; the four that are
+# also labelled `main` take a full run and a dispatch that names two or more
+# shards (a comma in the `shard` input: `1,2,3,4`). A dispatch that names ONE
+# shard (`7`) asks for `nso` alone, so a re-run can use the two unlabelled
+# runners while the batch holds the four. pull_request events always run on
+# ubuntu-latest: the repo is public, and a pull request's code must never run
+# on a laptop. The "npm test"
+# gate job below always runs on ubuntu-latest - it runs no test, and a gate that
+# waited for a sleeping laptop would hold every PR.
 #
 # WHAT IT RUNS
 # The suite, in twenty parallel shards, through tools/run-tests.mjs. The suite
@@ -105,23 +119,29 @@ on:
   workflow_dispatch:
     inputs:
       shard:
-        description: 'Run only this shard (1-20); all runs the whole suite'
-        type: choice
+        description: 'all, or the shard numbers to run (1-20), comma-separated, no spaces: 7 or 1,2,3,4'
+        type: string
         required: false
         default: 'all'
-        options: ['all', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20']
 
 # One run per branch / PR. A superseded run is cancelled rather than left to burn
 # a runner. Note a cancelled run reads as "not passing" to branch protection
 # until the newer one finishes - that is intended.
+#
+# A dispatch that names shards has a group of its own, tests-<ref>-shards-<list>,
+# so it and the full run it was dispatched for do not cancel each other (a
+# one-shard re-run used to cancel the batch). Two dispatches of the same list do.
 concurrency:
-  group: tests-${{ github.head_ref || github.ref }}
+  group: tests-${{ github.head_ref || github.ref }}${{ github.event_name == 'workflow_dispatch' && inputs.shard != '' && inputs.shard != 'all' && format('-shards-{0}', inputs.shard) || '' }}
   cancel-in-progress: true
 
 jobs:
   shard:
     name: shard ${{ matrix.shard }} of 20
-    runs-on: ubuntu-latest
+    # See WHERE IT RUNS above. [self-hosted, nso, main] for a full run and for a
+    # dispatch with a comma in `shard`, [self-hosted, nso] for a dispatch that
+    # names one shard, ubuntu-latest for everything else, and for every pull_request.
+    runs-on: ${{ fromJSON(github.event_name != 'pull_request' && vars.CI_RUNNER == 'self-hosted' && (github.event_name == 'workflow_dispatch' && inputs.shard != '' && inputs.shard != 'all' && !contains(inputs.shard, ',') && '["self-hosted","nso"]' || '["self-hosted","nso","main"]') || '"ubuntu-latest"') }}
     # A shard is ~13 minutes on a typical runner (~674s of tests + setup).
     # 15 was set when a shard was ~4 minutes; Tests #231 and #233 were
     # cancelled at it, 25 held until #266, and 40 until #301 and #305, whose
@@ -140,8 +160,8 @@ jobs:
       # was written to remove.
       fail-fast: false
       matrix:
-        # Every shard, unless a dispatch asked for one (the `shard` input). Push and
-        # pull_request runs have no inputs, so they always get all twenty.
+        # Every shard, unless a dispatch named some (the `shard` input, `1,2,3,4`).
+        # Push and pull_request runs have no inputs, so they always get all twenty.
         shard: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.shard != '' && inputs.shard != 'all' && format('[{0}]', inputs.shard) || '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]') }}
 
     steps:
@@ -172,14 +192,61 @@ jobs:
       # CHROME_PATH - needed in the Claude web sandbox, where the shipped
       # Chromium predates the installed Playwright - is not needed or set here.
       - name: Install Playwright Chromium
+        if: runner.environment != 'self-hosted'
         run: npx playwright install --with-deps chromium
+
+      # On a laptop runner: no --with-deps (that is apt, and sudo), and the
+      # browser goes in this runner's own tool cache, so each of the four runners
+      # keeps its own copy and none races another to install. GITHUB_ENV carries
+      # the path to the steps after this one, which is where Playwright must look.
+      - name: Install Playwright Chromium (self-hosted)
+        if: runner.environment == 'self-hosted'
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.tool_cache }}/pw-browsers
+        run: |
+          echo "PLAYWRIGHT_BROWSERS_PATH=$PLAYWRIGHT_BROWSERS_PATH" >> "$GITHUB_ENV"
+          npx playwright install chromium
 
       # The step's own limit sits under the job's so a shard that runs long is
       # stopped here, with time left to upload what it measured, instead of the
       # whole job being cancelled around it.
       - name: Run this shard
         timeout-minutes: 57
-        run: node tools/run-tests.mjs --shard=${{ matrix.shard }}/20 --timing-csv timing/shard-${{ matrix.shard }}.csv
+        run: node tools/run-tests.mjs --shard=${{ matrix.shard }}/20 --timing-csv timing/shard-${{ matrix.shard }}.csv --failures-out failures/shard-${{ matrix.shard }}.txt
+
+      # A step that fails is already in the log, as a "=== FAILED: ..." block and
+      # an annotation, the minute it ends. This puts the same blocks on the run's
+      # summary page, and in an artifact, when the shard ends - and says so when
+      # the shard ended without naming a step (a setup step failed, the runner was
+      # lost, the 57 minutes ran out before the runner could write).
+      - name: Report this shard's failures
+        id: failures
+        if: always()
+        env:
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+          SHARD: ${{ matrix.shard }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          f="failures/shard-$SHARD.txt"
+          if [ ! -s "$f" ] && [ "$JOB_STATUS" != "success" ]; then
+            mkdir -p failures
+            echo "=== shard $SHARD ended $JOB_STATUS, and no step recorded a failure ===" > "$f"
+            echo "A setup step failed, the runner was lost, or the step's time ran out; the job log has it." >> "$f"
+          fi
+          if [ -s "$f" ]; then
+            rerun="Rerun this shard: Actions -> Tests -> Run workflow, branch $BRANCH, shard $SHARD."
+            echo "$rerun" >> "$f"
+            { echo "### Shard $SHARD: failures (artifact: failures-shard-$SHARD)"; echo '````'; sed '$d' "$f" | head -c 800000; echo '````'; echo "$rerun"; } >> "$GITHUB_STEP_SUMMARY"
+            echo "has=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload this shard's failures
+        if: always() && steps.failures.outputs.has == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: failures-shard-${{ matrix.shard }}
+          path: failures/shard-${{ matrix.shard }}.txt
+          retention-days: 30
 
       # Pass or fail, the times go up: a red shard's are the ones worth reading.
       - name: Upload this shard's step times
@@ -198,6 +265,7 @@ jobs:
   # failing one, and says less about why.
   test:
     name: npm test
+    # Always GitHub-hosted, whatever CI_RUNNER says: see WHERE IT RUNS above.
     runs-on: ubuntu-latest
     needs: shard
     if: always()
@@ -217,6 +285,8 @@ jobs:
           sparse-checkout: |
             package.json
             tools/run-tests.mjs
+            tools/migrate-test-weights.mjs
+            tools/test-weights.json
           sparse-checkout-cone-mode: false
 
       # No npm cache: the sparse checkout has no package-lock.json to key it on.
@@ -237,7 +307,12 @@ jobs:
       - name: Merge them into timing.csv
         continue-on-error: true
         run: |
-          node tools/run-tests.mjs --merge-timing timing --out timing.csv --shards 20 | tee timing-summary.txt
+          if ! node tools/run-tests.mjs --merge-timing timing --out timing.csv --shards 20 > timing-summary.txt 2>&1; then
+            cat timing-summary.txt
+            echo "timing merge failed - see the step's log" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          cat timing-summary.txt
           { echo '### Step times (artifact: timing)'; echo '```'; cat timing-summary.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload timing.csv
