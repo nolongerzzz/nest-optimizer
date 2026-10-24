@@ -25,15 +25,16 @@ changes. Full write-up of the preview: **`docs/HOLLOW.md` §6**.
   `nso_hollow.js` (1.5 samples to the wall, no re-measure); Hollow itself is
   unchanged and still reads the box. The control is `app-live-slider.js`
   (`nsoLiveSlider.bind({slider, box, read, unit, onLive})`), built here because
-  thicken-live had not landed; Thicken's slider should bind to it and draw its
-  own preview in `onLive`. The preview is an `nsoHelpers` owner (`hollow-live`).
+  thicken-live had not landed. #284 built Thicken's control on Foam's pattern
+  instead, so Hollow is the only user of this one for now; a later Thicken change
+  can bind to it and draw its own preview in `onLive`. The preview is an `nsoHelpers` owner (`hollow-live`).
 - **Gates:** new `subtract:card` (a `driveSteps` step: it launches a browser) (`tools/nso_subtract_card_drive_check.js`:
   sections shut / open / independent, every control present and hit-testable in
   its section, the wall box, the live cavity, every way it closes, Lift / Punch /
   Detach still running); `shell:v3` gained the six-section gate and opens Lift's
-  section before clicking Lift. `ui:shell`, `pick:release`, `page:manifest`
-  unchanged and green. The drive tests that click SUBTRACT's controls were run
-  (list in the PR).
+  section before clicking Lift. At the rebase onto `origin/claude-wip` (without
+  #284) the gate was the `testSteps` that `run-tests.mjs --touching` lists for
+  each changed file, plus `page:manifest`; the full suite is CI's.
 - **Screenshots** are not committed (`tools/subtract-card-out/` is git-ignored):
   collapsed, each section open, the live cavity at 3 and 5 mm, Lift and Punch
   armed, and the card before. They are on one page,
