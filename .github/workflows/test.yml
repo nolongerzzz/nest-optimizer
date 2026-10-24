@@ -12,8 +12,10 @@
 #
 # The optional `shard` input is `all` (the default) or the shard numbers to run,
 # comma-separated and without spaces: `7`, or `1,2,3,4`. That is the re-run after
-# a fix to one failing step, without paying for the other nineteen. A run that
+# a fix to one failing step, without paying for the other shards. A run that
 # names shards is not a full run - "npm test" then gates on those shards alone.
+# The `plan` job checks the input before any shard starts: a number outside
+# 1..SHARDS, a blank in the list, or a repeat fails there, by name.
 #
 # This is the REQUIRED status check on main (Settings -> Branches -> branch
 # protection -> "Require status checks to pass before merging"). The check name
@@ -42,35 +44,40 @@
 # waited for a sleeping laptop would hold every PR.
 #
 # WHAT IT RUNS
-# The suite, in twenty parallel shards, through tools/run-tests.mjs. The suite
-# list deliberately is NOT repeated here - package.json's "testSteps" is the
-# single definition, and a copy in this file would drift from it. Add a suite
-# there and CI picks it up with no change to this workflow: the runner packs it
-# into a shard on its own.
+# The suite's testSteps, in SHARDS parallel shards (the number at the top of
+# `env:` below, and nowhere else), through tools/run-tests.mjs. The suite list
+# deliberately is NOT repeated here - package.json's "testSteps" is the single
+# definition, and a copy in this file would drift from it. Add a suite there and
+# CI picks it up with no change to this workflow: the runner packs it into a
+# shard on its own.
 #
-# WHY TWENTY, AND WHY A PACKED SPLIT
+# THE STEPS THAT LAUNCH A BROWSER ARE NOT RUN HERE
+# A step that drives the real page in Chromium is in package.json's "driveSteps"
+# (ci-drives-out), not in "testSteps", and this workflow runs testSteps only.
+# They are run on purpose, by the audit-driver session: `npm run test:drives`,
+# the same runner with the same flags (docs/TESTING.md). Nine steps that launch
+# a browser for a section of mostly Node checks stay in testSteps - page:manifest
+# among them, which every ticket gates on - so Chromium is still installed below.
+#
+# WHY SHARDS, AND WHY A PACKED SPLIT
 # Measured, not guessed - on these runners (tools/test-weights.json "about"
-# has the method). The 261 steps are ~13,484s of work on a typical
-# ubuntu-latest runner and the shape is lopsided: the heaviest step is
-# support:shells-clamp (~467s) and dozens take under a second. Slicing the list
-# into equal-LENGTH pieces would leave one runner holding the heavy steps, so
-# the slowest shard - the only number CI waits on - would hardly move. The
-# runner packs by measured cost instead (tools/test-weights.json),
-# which lands all twenty shards at ~674s of tests (~13 min with setup on
-# a typical runner; about one runner in five is ~0.6x that).
+# has the method). The 138 testSteps are ~2,950s of work on a typical
+# ubuntu-latest runner and the shape is lopsided: the heaviest is ~190s and
+# dozens take under a second. Slicing the list into equal-LENGTH pieces would
+# leave one runner holding the heavy steps, so the slowest shard - the only
+# number CI waits on - would hardly move. The runner packs by measured cost
+# instead (tools/test-weights.json): at SHARDS = 8, every shard is ~369s of
+# tests, against the 700s budget (tools/run-tests.mjs SHARD_BUDGET_S);
+# `node tools/run-tests.mjs --shard-plan` reports it at the number below. When
+# a suite is added and the heaviest shard nears the budget, raise SHARDS - one
+# number, here - and nothing else in this file or the docs has to follow.
 #
-# Twenty since ci-shard-split. Ten before it: the wall clock was the heaviest
-# shard, and no shard count gets under the heaviest step - support:shells was
-# ~1,230s, gscope:speed ~650s, support:interface ~185s. They are now seven
-# steps (support:shells-coupon / -clamp / -fixtures, gscope:speed-orbit /
-# -drag, support:interface-clamp / -fixtures, each the old one's checks cut by
-# fixture or by gate, none dropped), the longest ~467s, and the shard
-# count is what the budget (tools/run-tests.mjs SHARD_BUDGET_S, 700s) divides
-# the suite by. Sixteen would pack to ~843s: over the budget.
+# (Before ci-drives-out the suite was 289 steps, ~13,880s, and needed twenty
+# shards to pack under the budget; the 151 browser steps were ~10,930s of it.)
 #
 # THE REQUIRED CHECK IS THE "npm test" JOB BELOW, NOT THE SHARDS
 # Branch protection on main requires a check called "npm test". A bare matrix
-# would report as "shard 1 of 20", "shard 2 of 20" and so on, and the required
+# would report as "shard 1 of 8", "shard 2 of 8" and so on, and the required
 # check would never report at all - the same silent forever-pending failure
 # this file warns about above. So the shards do the work and a final job named
 # "npm test" gates on all of them. Renaming that job breaks main's protection;
@@ -119,10 +126,20 @@ on:
   workflow_dispatch:
     inputs:
       shard:
-        description: 'all, or the shard numbers to run (1-20), comma-separated, no spaces: 7 or 1,2,3,4'
+        description: 'all, or the shard numbers to run (1 to SHARDS, set at the top of this file), comma-separated, no spaces: 7 or 1,2,3,4'
         type: string
         required: false
         default: 'all'
+
+# THE SHARD COUNT: THE ONE NUMBER
+# Every use of it reads this: the matrix (through the `plan` job: the strategy
+# block cannot read `env`), each --shard=i/N, the timing merge's --shards N, the
+# job names, and the check on the dispatch input. tools/run-tests.mjs and
+# tools/run-tests-parallel.mjs read it from this line for their default, so
+# `--shard-plan` and `npm run test:par` are at the same count. Keep it a bare
+# integer on its own line: they match `SHARDS: <digits>`.
+env:
+  SHARDS: 8
 
 # One run per branch / PR. A superseded run is cancelled rather than left to burn
 # a runner. Note a cancelled run reads as "not passing" to branch protection
@@ -136,18 +153,57 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The matrix, from SHARDS, and the dispatch input checked against it. Always
+  # ubuntu-latest, like the gate: it runs no test. If it fails no shard starts,
+  # and "npm test" below reports that as a failure, not as a skip.
+  plan:
+    name: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions: {}
+    outputs:
+      shards: ${{ steps.plan.outputs.shards }}
+      count: ${{ steps.plan.outputs.count }}
+    steps:
+      - name: Plan the shards
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT: ${{ inputs.shard }}
+        run: |
+          case "$SHARDS" in ''|*[!0-9]*|0) echo "SHARDS is '$SHARDS': it must be a positive integer"; exit 1;; esac
+          list=$(seq -s, 1 "$SHARDS")
+          if [ "$EVENT" = workflow_dispatch ] && [ -n "$INPUT" ] && [ "$INPUT" != all ]; then
+            case "$INPUT" in
+              *[!0-9,]*|,*|*,|*,,*) echo "shard input '$INPUT': use 'all' or shard numbers separated by commas, no spaces (7 or 1,2,3,4)"; exit 1;;
+            esac
+            seen=,
+            for n in $(echo "$INPUT" | tr ',' ' '); do
+              if [ "$n" -lt 1 ] || [ "$n" -gt "$SHARDS" ]; then
+                echo "shard input '$INPUT': $n is outside 1..$SHARDS (SHARDS, at the top of this file)"; exit 1
+              fi
+              case "$seen" in *",$n,"*) echo "shard input '$INPUT': $n is listed twice"; exit 1;; esac
+              seen="$seen$n,"
+            done
+            list=$INPUT
+          fi
+          echo "shards=[$list]" >> "$GITHUB_OUTPUT"
+          echo "count=$SHARDS" >> "$GITHUB_OUTPUT"
+          echo "shards: [$list] of $SHARDS"
+
   shard:
-    name: shard ${{ matrix.shard }} of 20
+    name: shard ${{ matrix.shard }} of ${{ needs.plan.outputs.count }}
+    needs: plan
     # See WHERE IT RUNS above. [self-hosted, nso, main] for a full run and for a
     # dispatch with a comma in `shard`, [self-hosted, nso] for a dispatch that
     # names one shard, ubuntu-latest for everything else, and for every pull_request.
     runs-on: ${{ fromJSON(github.event_name != 'pull_request' && vars.CI_RUNNER == 'self-hosted' && (github.event_name == 'workflow_dispatch' && inputs.shard != '' && inputs.shard != 'all' && !contains(inputs.shard, ',') && '["self-hosted","nso"]' || '["self-hosted","nso","main"]') || '"ubuntu-latest"') }}
-    # A shard is ~13 minutes on a typical runner (~674s of tests + setup).
+    # A shard is ~8 minutes on a typical runner (~369s of tests + setup).
     # 15 was set when a shard was ~4 minutes; Tests #231 and #233 were
     # cancelled at it, 25 held until #266, and 40 until #301 and #305, whose
     # shards 7 and 4 ran past it: eight shards had grown to ~1,725s of tests
     # each and support:shells went from ~190s to ~1,200s in one PR. 60 is a
-    # backstop, ~4.5x the packed shard: a shard that nears it means re-measure
+    # backstop, ~7x the packed shard: a shard that nears it means re-measure
     # the weights (the "timing" artifact, above), not raise this again.
     timeout-minutes: 60
     permissions:
@@ -155,14 +211,15 @@ jobs:
     env:
       NSO_LIBRARY_DIR: ${{ github.workspace }}/nest-library
     strategy:
-      # Every shard reports. One shard failing must not cancel the other nineteen -
+      # Every shard reports. One shard failing must not cancel the others -
       # that would put back exactly the blindness the failure-tolerant runner
       # was written to remove.
       fail-fast: false
       matrix:
-        # Every shard, unless a dispatch named some (the `shard` input, `1,2,3,4`).
-        # Push and pull_request runs have no inputs, so they always get all twenty.
-        shard: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.shard != '' && inputs.shard != 'all' && format('[{0}]', inputs.shard) || '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]') }}
+        # Every shard, unless a dispatch named some (the `shard` input, `1,2,3,4`):
+        # the `plan` job has already turned SHARDS and the input into the list.
+        # Push and pull_request runs have no inputs, so they always get all of them.
+        shard: ${{ fromJSON(needs.plan.outputs.shards) }}
 
     steps:
       - name: Check out
@@ -212,7 +269,7 @@ jobs:
       # whole job being cancelled around it.
       - name: Run this shard
         timeout-minutes: 57
-        run: node tools/run-tests.mjs --shard=${{ matrix.shard }}/20 --timing-csv timing/shard-${{ matrix.shard }}.csv --failures-out failures/shard-${{ matrix.shard }}.txt
+        run: node tools/run-tests.mjs --shard=${{ matrix.shard }}/${{ env.SHARDS }} --timing-csv timing/shard-${{ matrix.shard }}.csv --failures-out failures/shard-${{ matrix.shard }}.txt
 
       # A step that fails is already in the log, as a "=== FAILED: ..." block and
       # an annotation, the minute it ends. This puts the same blocks on the run's
@@ -267,7 +324,7 @@ jobs:
     name: npm test
     # Always GitHub-hosted, whatever CI_RUNNER says: see WHERE IT RUNS above.
     runs-on: ubuntu-latest
-    needs: shard
+    needs: [plan, shard]
     if: always()
     timeout-minutes: 5
     permissions:
@@ -307,7 +364,7 @@ jobs:
       - name: Merge them into timing.csv
         continue-on-error: true
         run: |
-          if ! node tools/run-tests.mjs --merge-timing timing --out timing.csv --shards 20 > timing-summary.txt 2>&1; then
+          if ! node tools/run-tests.mjs --merge-timing timing --out timing.csv --shards "$SHARDS" > timing-summary.txt 2>&1; then
             cat timing-summary.txt
             echo "timing merge failed - see the step's log" >> "$GITHUB_STEP_SUMMARY"
             exit 1
@@ -326,7 +383,11 @@ jobs:
 
       - name: Every shard passed
         run: |
-          echo "shards: ${{ needs.shard.result }}"
+          echo "plan: ${{ needs.plan.result }}, shards: ${{ needs.shard.result }}"
+          if [ "${{ needs.plan.result }}" != "success" ]; then
+            echo "the plan job failed, so no shard ran - open it for why (a bad shard input, or SHARDS)"
+            exit 1
+          fi
           if [ "${{ needs.shard.result }}" != "success" ]; then
             echo "at least one shard did not pass - open the shard jobs above for the failing steps"
             exit 1

@@ -3,6 +3,8 @@
     "Milliseconds per step: what each step takes on a TYPICAL GitHub runner",
     "(ubuntu-latest), the machine CI packs for. Only the shard packing in",
     "tools/run-tests.mjs reads them (run-tests-parallel.mjs prints their sum).",
+    "One table for both of package.json's lists, testSteps and driveSteps (the",
+    "steps that launch a browser): a step has an entry here whichever it is in.",
     "No test behaviour depends on them: a step missing from this table is packed",
     "at the median, not skipped - and that is not harmless, so new steps carry",
     "an estimate (last line) until a CI run measures them.",
