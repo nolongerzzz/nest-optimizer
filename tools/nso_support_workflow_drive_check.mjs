@@ -679,6 +679,11 @@ async function main() {
   check('3 s in: a planner that says nothing gets "Building…" with no seconds yet, locked, the bar up and sweeping with no percent',
     [c.state, c.line, c.locked, c.bar.shown, c.bar.indeterminate, c.bar.now], ['building', 'Building…', true, true, true, null]);
   await sleep(Math.max(0, 12500 - (Date.now() - t0)));
+  /* ...and 11.5 s into the BUILD, on the page's clock: the readout counts from when the card went busy, not from
+     the click, and on its own page (--only=card) the build can start 2.5 s after the click - read at 12.5 s from
+     the click that was 9.8 - 10.3 s of build, before the first tick past 10 s ("Building…", NaN). */
+  await page.waitForFunction(() => window.__lag && window.__lag.busy !== null && performance.now() - window.__lag.busy >= 11500,
+    null, { timeout: 30000 });
   /* The seconds against the page's own clock, read with the card: on a slow runner the read itself can land past
      13 s, which is the runner, not the counter. */
   c = await T.card();
