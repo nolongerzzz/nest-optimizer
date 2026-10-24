@@ -135,5 +135,6 @@ merging its list by hand. The list below is generated.
 - [Triple join - A-B-C in one press, two junctions, two gaps (2026-09-20)](handoff/triple-join-a-b-c-in-one-press-two-junctions-two-gaps.md)
 - [Tube edge - Flare and Roll on the open end of a tube (2026-10-14)](handoff/tube-edge-flare-and-roll-on-the-open-end-of-a-tube.md)
 - [UI cleanups - status panel, column menus on double-click, rotate screenshots (2026-10-13)](handoff/ui-cleanups-status-panel-column-menus-on-double-click-rotate.md)
+- [undo-dispose-yaw - a pose bake's geometry is disposed when nothing reachable names it (2026-10-24)](handoff/undo-dispose-yaw.md)
 - [Vertical stacking - Seat (support) from the bed, Align edges keeps the seat (2026-09-16)](handoff/vertical-stacking-seat-support-from-the-bed-align-edges-keeps.md)
 <!-- handoff-index:end -->
