@@ -2781,6 +2781,24 @@
         if (!r || !r.soup || !/do not touch/.test(r.reason || '')) return false;
         return solidsIn(r.soup) < solidsIn(a) + solidsIn(b);
       }
+      /* THE CARRIERS, one soup for the sheet to meet. Solids that only graze
+         (the union said "do not touch": a stair tree's legs round a pocket,
+         a hair apart) are put through the kernel ONE AT A TIME first, as a
+         soup of the four of them side by side would be read with its grazes
+         unsettled and, with the sheet added, resolved differently round a
+         slit than the solids are (the tilted box: a 0.08 mm wall laid across
+         a 0.12 mm2 pocket between the legs, z 7.3 - 10.3, that the shells
+         do not have). A result without a soup (the kernel refused) is the
+         solids side by side, as before. */
+      function stackUp(list) {
+        var acc = Promise.resolve(list[0]);
+        list.slice(1).forEach(function (s2) {
+          acc = acc.then(function (a2) {
+            return U(a2, s2).then(function (r) { return (r && r.soup && r.soup.length) ? r.soup : joinAll([a2, s2]); });
+          });
+        });
+        return acc;
+      }
       function joinSheets() {
         var c3 = Promise.resolve();
         sheets.forEach(function (sh) {
@@ -2807,7 +2825,7 @@
               (sh.carriers || []).forEach(function (t) { carry[t] = true; });
               var mine = groups.filter(function (g) { return g.soup.trunks.some(function (t) { return carry[t]; }); });
               if (!mine.length) { S = T._finishUnion(S).soup; groups.push({ ids: [], soup: { soup: S, box: bounds(S), trunks: [], sheets: [sh.sheet] } }); return null; }
-              var Am = joinAll(mine.map(function (g) { return g.soup.soup; }));
+              return stackUp(mine.map(function (g) { return g.soup.soup; })).then(function (Am) {
               return U(Am, S).then(function (u) {
                 /* a sheet that meets none of its own tips would be placed in
                    mid-air: the build says so instead */
@@ -2819,6 +2837,7 @@
                 (sh.carriers || []).forEach(function (t) { if (trunks.indexOf(t) < 0 && !groups.some(function (g) { return g.soup.trunks.indexOf(t) >= 0; })) trunks.push(t); });
                 groups = groups.filter(function (g) { return mine.indexOf(g) < 0; });
                 groups.push({ ids: [], soup: { soup: fin, box: bounds(fin), trunks: trunks, sheets: sh2 } });
+              });
               });
             }).then(between);
           });
