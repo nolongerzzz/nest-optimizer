@@ -32,10 +32,12 @@
 # The repo variable CI_RUNNER (Settings -> Secrets and variables -> Actions ->
 # Variables) picks the machines. Unset or empty: ubuntu-latest, as it always was.
 # `self-hosted`: the owner's laptop runners, labelled `nso`; the four that are
-# also labelled `main` take a full run, and a dispatch that names shards asks for
-# `nso` alone, so a re-run can use the two unlabelled runners while the batch
-# holds the four. pull_request events always run on ubuntu-latest: the repo is
-# public, and a pull request's code must never run on a laptop. The "npm test"
+# also labelled `main` take a full run and a dispatch that names two or more
+# shards (a comma in the `shard` input: `1,2,3,4`). A dispatch that names ONE
+# shard (`7`) asks for `nso` alone, so a re-run can use the two unlabelled
+# runners while the batch holds the four. pull_request events always run on
+# ubuntu-latest: the repo is public, and a pull request's code must never run
+# on a laptop. The "npm test"
 # gate job below always runs on ubuntu-latest - it runs no test, and a gate that
 # waited for a sleeping laptop would hold every PR.
 #
@@ -136,10 +138,10 @@ concurrency:
 jobs:
   shard:
     name: shard ${{ matrix.shard }} of 20
-    # See WHERE IT RUNS above. [self-hosted, nso, main] for a full run,
-    # [self-hosted, nso] for a dispatch that names shards, ubuntu-latest for
-    # everything else, and for every pull_request.
-    runs-on: ${{ fromJSON(github.event_name != 'pull_request' && vars.CI_RUNNER == 'self-hosted' && (github.event_name == 'workflow_dispatch' && inputs.shard != '' && inputs.shard != 'all' && '["self-hosted","nso"]' || '["self-hosted","nso","main"]') || '"ubuntu-latest"') }}
+    # See WHERE IT RUNS above. [self-hosted, nso, main] for a full run and for a
+    # dispatch with a comma in `shard`, [self-hosted, nso] for a dispatch that
+    # names one shard, ubuntu-latest for everything else, and for every pull_request.
+    runs-on: ${{ fromJSON(github.event_name != 'pull_request' && vars.CI_RUNNER == 'self-hosted' && (github.event_name == 'workflow_dispatch' && inputs.shard != '' && inputs.shard != 'all' && !contains(inputs.shard, ',') && '["self-hosted","nso"]' || '["self-hosted","nso","main"]') || '"ubuntu-latest"') }}
     # A shard is ~13 minutes on a typical runner (~674s of tests + setup).
     # 15 was set when a shard was ~4 minutes; Tests #231 and #233 were
     # cancelled at it, 25 held until #266, and 40 until #301 and #305, whose
@@ -283,6 +285,8 @@ jobs:
           sparse-checkout: |
             package.json
             tools/run-tests.mjs
+            tools/migrate-test-weights.mjs
+            tools/test-weights.json
           sparse-checkout-cone-mode: false
 
       # No npm cache: the sparse checkout has no package-lock.json to key it on.
@@ -303,7 +307,12 @@ jobs:
       - name: Merge them into timing.csv
         continue-on-error: true
         run: |
-          node tools/run-tests.mjs --merge-timing timing --out timing.csv --shards 20 | tee timing-summary.txt
+          if ! node tools/run-tests.mjs --merge-timing timing --out timing.csv --shards 20 > timing-summary.txt 2>&1; then
+            cat timing-summary.txt
+            echo "timing merge failed - see the step's log" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          cat timing-summary.txt
           { echo '### Step times (artifact: timing)'; echo '```'; cat timing-summary.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload timing.csv

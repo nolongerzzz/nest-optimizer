@@ -12,7 +12,8 @@ Variables).
 | unset / empty | any | `ubuntu-latest` (today's flow, unchanged) |
 | `self-hosted` | `pull_request` | `ubuntu-latest` (the repo is public) |
 | `self-hosted` | full run (push, or dispatch with `all`) | `[self-hosted, nso, main]` |
-| `self-hosted` | dispatch that names shards | `[self-hosted, nso]` |
+| `self-hosted` | dispatch with a comma in `shard` (`1,2,3,4`) | `[self-hosted, nso, main]` (ci-timing-merge) |
+| `self-hosted` | dispatch that names one shard (`7`) | `[self-hosted, nso]` (ci-timing-merge) |
 
 The "npm test" gate job is always `ubuntu-latest`. A push to `main` is a full run, so with
 `self-hosted` set it goes to the laptop; unset the variable to put it back.
@@ -62,22 +63,18 @@ of the four has its own browser and none races another to install. GitHub-hosted
 57-minute step and 60-minute job limits.
 
 **For the first test (A: 1,2,3,4 on the laptop, B: the same on ubuntu-latest).**
-- A dispatch that names shards asks for `[self-hosted, nso]`, not `main`. If the two unlabeled
-  runners also carry `nso` (the design says they do), the four jobs may land on any of the six
-  idle runners, including those two, so "four heavy shards on one laptop" holds only if all six
-  are on that machine. Check where each ran in the job's "Runner name".
+- *(Changed by ci-timing-merge.)* This PR sent every dispatch that named shards to
+  `[self-hosted, nso]`, so test A's four jobs could land on the two unlabeled runners too. A
+  dispatch with two or more shards (a comma in `shard`) now asks for `[self-hosted, nso, main]`,
+  the four `main` runners; only a one-shard dispatch asks for `nso` alone.
 - The step times to compare are the `timing-shard-1..4` artifacts. The merged `timing` artifact
-  from the "npm test" job is probably not produced at all: see below.
+  from the "npm test" job was not produced at all until ci-timing-merge: see below.
 - Steps that behave differently on the Mac: none known; this was written on a Linux cloud box
   and not run on one.
 
 **Found, not fixed (out of scope).**
-- The "npm test" job's `Merge them into timing.csv` step is `continue-on-error`, and has failed
-  silently since deff6aa moved the weights to `tools/test-weights.json`: its sparse checkout is
-  only `package.json` and `tools/run-tests.mjs`, and the runner now also imports
-  `tools/migrate-test-weights.mjs` and reads `tools/test-weights.json`
-  (`ERR_MODULE_NOT_FOUND`, reproduced locally with that checkout). The `timing` artifact is
-  missing as a result; the per-shard `timing-shard-N` ones are fine. The fix is two more lines in
-  the sparse-checkout list.
+- The "npm test" job's `Merge them into timing.csv` step had failed silently since deff6aa
+  (its sparse checkout lacked the two files the runner now needs). Fixed in ci-timing-merge, see
+  `ci-timing-merge.md`.
 - `--shard-plan 20` puts the heaviest shard at 706 s against the 700 s budget, with or without
   this change (it was 706 s on 274b8bd before it).
