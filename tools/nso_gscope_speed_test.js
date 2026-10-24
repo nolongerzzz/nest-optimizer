@@ -57,14 +57,17 @@
    NSO_GSCOPE_SPEED_ROOT=<a checkout> measures that tree with this script
    (an older commit, for the before / after).
 
-   TWO STEPS, ONE FILE. --only=orbit holds the frame and ratio gates (2a, 2b,
-   2c, 4) and --only=drag the drag and press gates (1, 3, 5, 6, 7 twice, and
-   the page-error check); no flag runs both. CI runs them as
-   gscope:speed-orbit and gscope:speed-drag - together 14 checks, the 14 of the
-   one run, none twice. Each opens the file and the small slice for itself, and
-   --only=drag orbits the file once as well: gate 5's longest pointermove is
-   the orbit's as much as the pull's. A page error in --only=orbit fails the
-   step without being a fifteenth check.
+   THREE STEPS, ONE FILE. --only=orbit holds the frame and ratio gates (2a, 2b,
+   2c, 4); --only=drag-small the small slice's drags (gate 1 three times, gate 7
+   for the slice - it never opens the 203k-move file); --only=drag-file the
+   file's (gate 1's tail, 3, 5, 6, gate 7 for the file, and the page-error
+   check). --only=drag is the last two together, and no flag runs all three. CI
+   runs gscope:speed-orbit, gscope:speed-drag-small and gscope:speed-drag-file -
+   together 14 checks, the 14 of the one run, none twice. Each opens what it
+   measures for itself, and --only=drag-file orbits the file once as well:
+   gate 5's longest pointermove is the orbit's as much as the pull's, so gate 5
+   is not cut further. A page error in a step without the page-error check
+   fails that step without being a fifteenth check.
 
      node tools/nso_gscope_speed_test.js [--full] [--only=orbit|drag]    exit 0 = every gate held */
 
@@ -83,11 +86,14 @@ const OUT = path.join(ROOT_HERE, 'tools', 'gscope-speed-out');
 const JSON_ONLY = process.argv.includes('--json');
 const onlyArg = process.argv.find(a => a.startsWith('--only='));
 const ONLY = onlyArg ? onlyArg.slice('--only='.length) : null;
-if (ONLY !== null && ONLY !== 'orbit' && ONLY !== 'drag') {
-  console.error('nso_gscope_speed_test: --only=' + ONLY + ' is not orbit or drag');
+if (ONLY !== null && !['orbit', 'drag', 'drag-small', 'drag-file'].includes(ONLY)) {
+  console.error('nso_gscope_speed_test: --only=' + ONLY + ' is not orbit, drag, drag-small or drag-file');
   process.exit(2);
 }
-const DO_ORBIT = !ONLY || ONLY === 'orbit', DO_DRAG = !ONLY || ONLY === 'drag';
+const DO_ORBIT = !ONLY || ONLY === 'orbit';
+const DO_DRAG_FILE = !ONLY || ONLY === 'drag' || ONLY === 'drag-file';        // the file's drags and presses (gates 1 tail, 3, 5, 6, 7 file)
+const DO_DRAG_SMALL = !ONLY || ONLY === 'drag' || ONLY === 'drag-small';      // the small slice's 60-move drags (gates 1, 7 small)
+const DO_DRAG = DO_DRAG_FILE || DO_DRAG_SMALL;
 const FULL = process.argv.includes('--full') || !!process.env.NSO_GSCOPE_SPEED_FULL || FILE === LOCAL;
 
 /* Gate 2c's floor: the small slice's orbit frame rate over tabletop's, on
@@ -362,6 +368,7 @@ withApp(async (page, logs) => {
   await page.waitForFunction(() => typeof state !== 'undefined' && state.ready === true, null, { timeout: 30000 });
   await page.setViewportSize({ width: 1280, height: 800 });
   fs.mkdirSync(OUT, { recursive: true });
+  const t0 = Date.now(), lap = (what) => say('  lap    ' + what + ' at ' + ((Date.now() - t0) / 1000).toFixed(0) + ' s');
   const R = { tree: TREE === ROOT_HERE ? 'this tree' : TREE, file: path.relative(ROOT_HERE, FILE), full: FULL };
 
   /* ---------------------------------------------------- orbit, both files, back to back
@@ -375,8 +382,8 @@ withApp(async (page, logs) => {
   }
 
   /* ---------------------------------------------------- the file: every main-thread number */
-  R.moves = await openSlice(page, FILE);
-  say('\n' + R.file + ' - ' + R.moves + ' moves, on ' + R.tree + (FULL ? ' (full: 60-move drags here too)' : ''));
+  if (DO_ORBIT || DO_DRAG_FILE) { R.moves = await openSlice(page, FILE); lap('the file open'); }
+  if (DO_ORBIT || DO_DRAG_FILE) say('\n' + R.file + ' - ' + R.moves + ' moves, on ' + R.tree + (FULL ? ' (full: 60-move drags here too)' : ''));
   if (DO_ORBIT) {
     await page.evaluate(() => window.__s.start());
     await page.waitForTimeout(1500);
@@ -384,11 +391,11 @@ withApp(async (page, logs) => {
   }
   /* gate 5 is read in calibration loops run in the page either side of the file's orbit, pull and
      plate 2 drag (tools/nso_pace.js), not milliseconds */
-  const cal0 = DO_DRAG ? await pace.inPage(page) : 0;
-  R.orbit = await orbit(page, 60);
+  const cal0 = DO_DRAG_FILE ? await pace.inPage(page) : 0;
+  if (DO_ORBIT || DO_DRAG_FILE) { R.orbit = await orbit(page, 60); lap('the file orbit'); }
 
   /* the selection pass: the pick, a hover, a click */
-  const pp = DO_DRAG ? await page.evaluate(() => window.__s.piecePx()) : null;
+  const pp = DO_DRAG_FILE ? await page.evaluate(() => window.__s.piecePx()) : null;
   R.piecePx = pp && pp.map(Math.round);
   if (pp) {
     await page.evaluate(([x, y]) => window.__s.pick(x, y, 3), pp);           // warm
@@ -406,21 +413,26 @@ withApp(async (page, logs) => {
     await page.evaluate(() => { NSO_MICROSCOPE.back(); if (NSO_MICROSCOPE.frame) NSO_MICROSCOPE.frame(); });
     await frames(page);
   }
-  if (DO_DRAG) {
+  if (DO_DRAG_FILE) {
+    lap('the pick, hover and click');
     R.pull = await pullDrive(page, FULL ? 60 : 10);
+    lap('the file pull');
     if (R.pull && R.pull.landed.pieces) R.plate2 = await plate2Drive(page, FULL ? 60 : 10, 5);
     R.cal = (cal0 + await pace.inPage(page)) / 2;
+    lap('the file plate 2 drag and presses');
   }
-  await page.screenshot({ path: path.join(OUT, 'speed-file.png') });
+  if (DO_ORBIT || DO_DRAG_FILE) await page.screenshot({ path: path.join(OUT, 'speed-file.png') });
 
   /* ---------------------------------------------------- the small committed slice again: its 60-move drags */
-  if (DO_DRAG) {
+  if (DO_DRAG_SMALL) {
     const moves = await openSlice(page, SMALL);
     if (!R.small) R.small = { file: path.basename(SMALL), moves: moves };
+    lap('the small slice open');
     R.small.pull = await pullDrive(page, 60);
+    lap('the small slice pull');
     if (R.small.pull && R.small.pull.landed.pieces) R.small.plate2 = await plate2Drive(page, 60);
   }
-  await page.screenshot({ path: path.join(OUT, 'speed-small.png') });
+  if (DO_ORBIT || DO_DRAG_SMALL) await page.screenshot({ path: path.join(OUT, 'speed-small.png') });
   R.pageErrors = logs.filter(l => /^\[pageerror\]/.test(l)).slice(0, 3);
   fs.writeFileSync(path.join(OUT, 'speed.json'), JSON.stringify(R, null, 1));
   if (JSON_ONLY) { console.log(JSON.stringify(R)); return; }
@@ -430,30 +442,30 @@ withApp(async (page, logs) => {
     p.ghostFrames + ' frames; release ' + p.releaseMs + ' ms';
   const p2Line = (q) => 'press ' + q.pressMs + ' ms; followed ' + q.followed + '/' + q.n + '; moves max ' + q.moveMax + ' ms; release ' + q.releaseMs + ' ms';
   if (DO_ORBIT) say('  idle   ' + R.idle.fps + ' fps; main viewport rendered ' + R.idle.mainRenders + 'x');
-  say('  orbit  ' + R.orbit.fps + ' fps on the box\'s software GPU (' + R.orbit.frameMs + ' ms/frame); main thread ' + R.orbit.cpuPerFrame + ' ms a frame; per pointermove ' +
+  if (R.orbit) say('  orbit  ' + R.orbit.fps + ' fps on the box\'s software GPU (' + R.orbit.frameMs + ' ms/frame); main thread ' + R.orbit.cpuPerFrame + ' ms a frame; per pointermove ' +
       JSON.stringify(R.orbit.ev.pointermove) + ' ms; main viewport rendered ' + R.orbit.mainRenders + 'x');
-  if (DO_DRAG) {
+  if (DO_DRAG_FILE) {
     say('  pick   ' + JSON.stringify(R.pick) + ' ms; hover per pointermove ' + JSON.stringify(R.hover) + ' ms; click (select + isolate) ' + R.click + ' ms');
     if (R.pull) say('  pull   ' + pullLine(R.pull));
     if (R.plate2) say('  plate2 ' + p2Line(R.plate2));
   }
-  say('\n' + R.small.file + ' - ' + R.small.moves + ' moves');
+  if (R.small) say('\n' + R.small.file + ' - ' + R.small.moves + ' moves');
   if (DO_ORBIT) say('  orbit  ' + R.small.orbit.fps + ' fps; main thread ' + R.small.orbit.cpuPerFrame + ' ms a frame; main viewport rendered ' + R.small.orbit.mainRenders + 'x');
-  if (DO_DRAG) {
+  if (DO_DRAG_SMALL) {
     if (R.small.pull) say('  pull   ' + pullLine(R.small.pull));
     if (R.small.plate2) say('  plate2 ' + p2Line(R.small.plate2));
   }
 
   say('\n=== gates ===');
   if (DO_DRAG) {
-    const follows = [['the small slice', R.small.pull, R.small.plate2]].concat(FULL ? [[path.basename(FILE), R.pull, R.plate2]] : []);
+    const follows = (DO_DRAG_SMALL ? [['the small slice', R.small.pull, R.small.plate2]] : []).concat(DO_DRAG_FILE && FULL ? [[path.basename(FILE), R.pull, R.plate2]] : []);
     follows.forEach(([nm, p, q]) => {
       check('1. drag follows the mouse (' + nm + '): the copy moved on >= 90 % of the 60 moves of the pull (plate 1, then across to plate 2)',
         p && p.followed >= 54, p && p.followed + '/60');
       check('1. ...and it landed on plate 2', p && p.landed.plate === 'take' && p.landed.pieces === 1, p && JSON.stringify(p.landed));
       check('1. ...and dragged on plate 2 it moved on >= 90 % of 60 moves', q && q.followed >= 54, q && q.followed + '/60');
     });
-    if (!FULL) check('1. on ' + path.basename(FILE) + ' too, every move of the ' + (R.pull ? R.pull.n : '?') + '-move pull and plate 2 drag after the first moved the piece',
+    if (DO_DRAG_FILE && !FULL) check('1. on ' + path.basename(FILE) + ' too, every move of the ' + (R.pull ? R.pull.n : '?') + '-move pull and plate 2 drag after the first moved the piece',
       R.pull && R.plate2 && R.pull.followed >= R.pull.n - 1 && R.plate2.followed >= R.plate2.n - 1, R.pull && R.plate2 && (R.pull.followed + '/' + R.pull.n + ', ' + R.plate2.followed + '/' + R.plate2.n));
   }
   if (DO_ORBIT) {
@@ -466,12 +478,12 @@ withApp(async (page, logs) => {
       ratio >= ORBIT_RATIO_MIN, ratio + ' (' + R.small.orbit.fps + ' / ' + R.orbit.fps + ' fps)');
     else say('  FINDING 2c is tabletop\'s reference; on ' + path.basename(FILE) + ' the ratio is ' + ratio + ', not gated');
   }
-  if (DO_DRAG) check('3. the selection pass (the pick under the pointer) <= 16 ms', R.pick && R.pick.max <= 16, JSON.stringify(R.pick));
+  if (DO_DRAG_FILE) check('3. the selection pass (the pick under the pointer) <= 16 ms', R.pick && R.pick.max <= 16, JSON.stringify(R.pick));
   if (DO_ORBIT) {
     const renders = R.idle.mainRenders + R.orbit.mainRenders + R.small.orbit.mainRenders;
     check('4. the main viewport does not render while G-scope covers it', renders === 0, renders + ' renders');
   }
-  if (DO_DRAG) {
+  if (DO_DRAG_FILE) {
     const worst = Math.max(R.orbit.ev.pointermove.max, R.pull ? R.pull.moveMaxAfterStart : 99, R.plate2 ? R.plate2.pressMedian : 99, R.plate2 ? R.plate2.moveMax : 99);
     /* a frame, 33 ms, was ~0.064 of a calibration loop on the box it was set on (one loop ~520 ms in the page there) */
     const MAX_LOOPS = 0.065, worstLoops = worst / R.cal;
@@ -481,13 +493,17 @@ withApp(async (page, logs) => {
     const perK = R.pull && R.pull.startMoveMs != null && R.pull.copied ? r1(R.pull.startMoveMs / (R.pull.copied / 1000)) : null;
     check('6. the move that makes the copy (12 triangles a move, built and drawn) at most half d7abbea\'s: <= 7.2 ms per thousand moves copied (d7abbea: 14.4)',
       perK != null && perK <= 7.2, R.pull && (R.pull.startMoveMs + ' ms for ' + R.pull.copied + ' moves - ' + perK + ' ms per thousand'));
-    [['the small slice', R.small.pull], [path.basename(FILE), R.pull]].forEach(([nm, p]) => {
+  }
+  if (DO_DRAG) {
+    [['the small slice', DO_DRAG_SMALL && R.small.pull], [path.basename(FILE), DO_DRAG_FILE && R.pull]].filter(([, p]) => p !== false).forEach(([nm, p]) => {
       const g = p && p.ghostFrames ? p.ghostFrames.split('/').map(Number) : [0, 0];
       check('7. the copy (the ghost) is drawn on every frame from the slop to the release (' + nm + ')', g[1] > 0 && g[0] === g[1], p && p.ghostFrames);
     });
+  }
+  if (DO_DRAG_FILE) {
     check('no page error', !R.pageErrors.length, R.pageErrors.join(' | '));
   } else if (R.pageErrors.length) {
-    // not a check of its own (the 14 stay 14): the drag step holds that line, and a page error here fails this step too
+    // not a check of its own (the 14 stay 14): drag-file holds that line, and a page error here fails this step too
     say('  FAIL page error (' + ONLY + ') - ' + R.pageErrors.join(' | '));
     fails++;
   }
