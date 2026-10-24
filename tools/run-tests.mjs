@@ -120,9 +120,12 @@ const CI_SHARDS = 20;
    60-minute timeout (about one runner in five ran #297-#305's steps in ~0.6 of
    the time, and none measurably slower than typical, so the headroom is for a
    runner sharing its cores and for drift between re-measures). `--shard-plan`
-   flags any shard over it. The heaviest single step is now support:shells-clamp
-   (467 s), so the floor is well under the budget; what holds the
-   budget is the shard count: the suite's seconds divided by it. */
+   flags any shard over it. The heaviest single step is now
+   gscope:speed-drag-file (~579 s; it opens the 203k-move file and drags two
+   copies of it under software GL - what render-on-demand would cut), then
+   support:shells-clamp-a1 (~305 s) and lift:plate (~281 s), so the floor is
+   under the budget; what holds the budget is the shard count: the suite's
+   seconds divided by it (ci-shard-split-2: 13,840 s, 692 s a shard). */
 const SHARD_BUDGET_S = 700;
 
 function shardPlan(n) {
