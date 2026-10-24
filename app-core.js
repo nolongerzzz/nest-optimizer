@@ -1797,6 +1797,7 @@ function clearPlateOnly() {
   // Every tool closed and every helper gone first, while the pieces they
   // were drawn on are still there to close against (nso-helpers.js).
   nsoHelpers.teardown('clear-plate');
+  if (window.NSO_SUPPORTS_CARD) NSO_SUPPORTS_CARD.forgetAll();   // the Supports card's tips, circles and erasures go with the pieces
   clearRedo();
   clearPlaced();
   removeCutHelper();

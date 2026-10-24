@@ -66,6 +66,22 @@
                  holds, ... }. G-scope sees it as a support (never a host);
                  its own row leaves card supports alone (supportsFor).
 
+   AUTO \u00b7 ASSISTED \u00b7 CUSTOM (docs/SUPPORTS-CARD.md section 6). A switch at the
+   top of the card feeds the planner's opts.feed (nso_support_gridpack.js,
+   docs/SUPPORT-GRIDPACK.md section 7). AUTO is everything above, unchanged:
+   no feed is sent. ASSISTED shows the detected spots as clickable points on
+   the piece (a click turns one off or on: off is not a tip). CUSTOM shows
+   none: a click on the piece's underside places a tip, a click on a tip takes
+   it away. Both take landing zones - circles on the plate - and, once built,
+   an ERASE tool. Three tools, one at a time, so that the pointer is only ever
+   claimed by what is switched on: TIPS (the default: the points on the
+   piece), CIRCLES (draw / resize / move / delete the zones; the plate is
+   drawn on, so orbit first, then switch it on, then switch it off to orbit
+   again) and ERASE (hover a built member and what it holds up lights; a click
+   removes it and the plan is made again). The user's points, circles and
+   erasures live on the piece (m.nsoSupportFeed, in its own frame, circles in
+   the plate's) and outlive a REGENERATE; REMOVE ALL and CLEAR PLATE forget them.
+
    FRAME. The piece's world soup, Z up, millimetres (meshToWorldSoup, then
    (x, -z, y)), as Bridge and G-scope read it. Edits are stored in the piece's
    own mesh frame, so they move with it.
@@ -98,6 +114,12 @@ var NSO_SUPPORTS_CARD = (function () {
   var PICK_PITCHES = 1.0;        // a click this close to a beacon is in that beacon's area
   var UP_MAX = 0.26;             // a face whose normal points up more than this (15 deg) holds nothing
   var ORDER = 30;                // over the piece and its outline
+  var MARK_ORDER = 900;          // the markers (spots, tips, circles, the eraser's light) draw over everything, as the rotate rings do
+  var PICK_PX = 9;               // a spot / a tip / a circle's edge is under the pointer within this many pixels
+  var ZONE_MIN_R = 1.5;          // a circle dragged smaller than this (mm) is a click, not a circle
+  var MODES = { auto: 'Auto', assisted: 'Assisted', custom: 'Custom' };
+  var TOOLS = { tips: true, circles: true, erase: true };
+  var OFF_TOL_MM = 0.3;          // a toggled-off spot is found again within this of where it was
   var WATCHDOG_MS = 60000;       // a build the planner has said nothing about for this long is stopped, and says so
   var CEILING_MS = 600000;       // a build still running at 10 min is stopped however it reports: a runaway
   var ELAPSED_FROM_MS = 10000;   // a build the planner has said nothing about counts seconds once it has run this long
@@ -137,7 +159,8 @@ var NSO_SUPPORTS_CARD = (function () {
     det: null, occ: {}, eff: null, layer: null, raf: 0, sig: '', mem: {}, msg: null,
     geo: null, angle: ANGLE_DEFAULT, angleTimer: 0,
     watchdogMs: WATCHDOG_MS, ceilingMs: CEILING_MS, planner: null, job: null, elapsed: 0,
-    prog: null, listeners: [], said: null
+    prog: null, listeners: [], said: null,
+    mode: 'auto', tool: 'tips', pts: null, zoneLayer: null, eraseLayer: null, hot: null, hover: null, sel: null, drag: null
   };
 
   function $(id) { return document.getElementById(id); }
@@ -258,9 +281,20 @@ var NSO_SUPPORTS_CARD = (function () {
     return m.nsoSupportEdits;
   }
   function memOf(id) {
-    if (!S.mem[id]) S.mem[id] = { unreach: {}, built: false };
+    if (!S.mem[id]) S.mem[id] = { unreach: {}, built: false, members: [], zonesEmpty: [] };
     return S.mem[id];
   }
+  /* What the user fed in, on the piece: tips and toggled-off spots in its own
+     frame (they ride along when it moves), circles in the plate's (x, y, r,
+     mm, Z up), and the ids the eraser has taken out. Kept across GENERATE;
+     REMOVE ALL and CLEAR PLATE forget it. */
+  function feedOf(m) {
+    if (!m.nsoSupportFeed) m.nsoSupportFeed = { tips: [], off: [], zones: [], erased: [], serial: 0 };
+    return m.nsoSupportFeed;
+  }
+  function feedCopy(f) { return f ? JSON.parse(JSON.stringify(f)) : null; }
+  function feedEmpty(f) { return !f || !(f.tips.length || f.off.length || f.zones.length || f.erased.length); }
+  function tipIdOf(q, given) { return window.NSO_SupportGridpack.tipId(q, given); }
 
   /*
    * The beacons the card shows and builds: the detected set, then the edits
@@ -280,14 +314,23 @@ var NSO_SUPPORTS_CARD = (function () {
     /* A detected beacon is named by where it is, not by its place in the list:
        a new angle detects a different set, and the supports already standing
        (and the spots a build could not reach) must still find their beacons. */
-    var list = (det.beacons || []).map(function (b) {
+    var custom = S.mode === 'custom', fed = S.mode !== 'auto', F = fed ? feedOf(m) : null;   // Auto never touches the piece's feed
+    /* CUSTOM has no detected spots: the tips are the only input. */
+    var list = custom ? [] : (det.beacons || []).map(function (b) {
       return { key: 'd' + b.x.toFixed(2) + ',' + b.y.toFixed(2) + ',' + b.z.toFixed(2), x: b.x, y: b.y, z: b.z,
         normal: b.normal.slice(), need: b.need, region: regionOf.get(b), manual: false };
     });
     var left = {};
-    var next = (det.beaconRegions || []).length, ops = editsOf(m).ops;
+    var next = custom ? 0 : (det.beaconRegions || []).length, ops = editsOf(m).ops;
+    /* A tip joins an area the way a manual spot does. */
+    if (custom) F.tips.forEach(function (t) {
+      var w = localToUp(p, t.p), n = localDirToUp(p, t.n), best = null, bd = Infinity;
+      list.forEach(function (b) { var d = dist(pt(b), w); if (d < bd) { bd = d; best = b; } });
+      list.push({ key: 'u' + t.id, x: w[0], y: w[1], z: w[2], normal: n, need: { kind: n[2] > -0.5 ? 'side' : 'face', tip: true },
+        manual: false, tip: true, tipId: t.id, region: best && bd <= JOIN_PITCHES * pitch ? best.region : next++ });
+    });
     ops.forEach(function (op, i) {
-      if (op.op !== 'add') return;
+      if (op.op !== 'add' || custom) return;
       var w = localToUp(p, op.p), n = localDirToUp(p, op.n), best = null, bd = Infinity;
       list.forEach(function (b) { var d = dist(pt(b), w); if (d < bd) { bd = d; best = b; } });
       var side = n[2] > -0.5;
@@ -313,18 +356,30 @@ var NSO_SUPPORTS_CARD = (function () {
     /* left out and put back: the area of the spot nearest the click, as the
        list stood then (the spots added before it) */
     ops.forEach(function (op, i) {
-      if (op.op !== 'exclude' && op.op !== 'include') return;
+      if (fed || (op.op !== 'exclude' && op.op !== 'include')) return;   // the areas are Auto's: a fed card works spot by spot
       var w = localToUp(p, op.p), near = null, nd = Infinity;
       list.forEach(function (b) { if (b.manual && b.op > i) return; var d = dist(pt(b), w); if (d < nd) { nd = d; near = b; } });
       if (near && nd <= PICK_PITCHES * 1.5 * pitch) { if (op.op === 'exclude') left[near.region] = true; else delete left[near.region]; }
     });
+    /* OFF: a spot the user turned off, or the eraser took out (a tip id the
+       planner was told to leave out). Not a tip: it is not built, not counted. */
+    if (fed) {
+      var gone = F.off.map(function (o) { return localToUp(p, o.p); }), erased = {};
+      F.erased.forEach(function (id) { erased[id] = true; });
+      list.forEach(function (b) {
+        b.id = tipIdOf(pt(b), !!b.tip);
+        if (erased[b.id]) { b.off = true; b.erased = true; }
+        else if (!b.tip && gone.some(function (w) { return dist(pt(b), w) <= OFF_TOL_MM; })) b.off = true;
+      });
+    }
     var by = {};
     list.forEach(function (b) { (by[b.region] = by[b.region] || []).push(b); });
     var regions = Object.keys(by).map(Number).sort(function (a, b) { return a - b; }).map(function (id) {
       var B = by[id], c = [0, 0, 0], n = [0, 0, 0];
       B.forEach(function (b) { for (var k = 0; k < 3; k++) { c[k] += pt(b)[k] / B.length; n[k] += b.normal[k]; } });
       var L = Math.hypot(n[0], n[1], n[2]) || 1;
-      return { id: id, beacons: B, point: c, normal: [n[0] / L, n[1] / L, n[2] / L], excluded: !!left[id] };
+      return { id: id, beacons: B, point: c, normal: [n[0] / L, n[1] / L, n[2] / L],
+        excluded: fed ? B.every(function (b) { return b.off; }) : !!left[id] };
     });
     return { beacons: list, regions: regions, pitch: pitch, origin: det.grid ? det.grid.origin : [0, 0], error: null };
   }
@@ -355,7 +410,7 @@ var NSO_SUPPORTS_CARD = (function () {
     });
     var un = memOf(S.hostId).unreach, lost = {}, out = {};
     Object.keys(un).forEach(function (r) { un[r].forEach(function (k) { lost[k] = true; }); });
-    eff.beacons.forEach(function (b) { out[b.key] = holds[b.key] || (lost[b.key] ? 'unreachable' : 'planned'); });
+    eff.beacons.forEach(function (b) { out[b.key] = b.off ? 'off' : holds[b.key] || (lost[b.key] ? 'unreachable' : 'planned'); });
     return out;
   }
   /* What one area is, over everything on the piece: HELD when every one of its
@@ -366,8 +421,9 @@ var NSO_SUPPORTS_CARD = (function () {
      exactly one of the three, so the three counts add up to every area. */
   function areaKind(rg, st) {
     if (rg.excluded) return 'unsupported';
-    if (rg.beacons.some(function (b) { return st[b.key] === 'unreachable'; })) return 'unreachable';
-    if (rg.beacons.every(function (b) { return st[b.key] === 'held' || st[b.key] === 'rest'; })) return 'held';
+    var on = rg.beacons.filter(function (b) { return st[b.key] !== 'off'; });     // a spot that is off is not a tip
+    if (on.some(function (b) { return st[b.key] === 'unreachable'; })) return 'unreachable';
+    if (on.every(function (b) { return st[b.key] === 'held' || st[b.key] === 'rest'; })) return 'held';
     return 'unsupported';
   }
   /* areas: not left out (what GENERATE would build); left: left out; the
@@ -386,9 +442,15 @@ var NSO_SUPPORTS_CARD = (function () {
       ' \u00b7 unsupported ' + a.unsupported + ' \u00b7 unreachable ' + a.unreachable;
   }
   function idleLine(a) {
-    var m = modelOf(S.hostId);
-    return plural(a.areas, 'hanging area', 'hanging areas') + ' at ' + S.angle + '\u00b0 on ' + (m ? m.name : 'the piece') +
-      (a.left ? ' \u00b7 ' + a.left + ' left out' : '');
+    var m = modelOf(S.hostId), name = m ? m.name : 'the piece';
+    if (S.mode === 'auto') {
+      return plural(a.areas, 'hanging area', 'hanging areas') + ' at ' + S.angle + '\u00b0 on ' + name +
+        (a.left ? ' \u00b7 ' + a.left + ' left out' : '');
+    }
+    var eff = S.eff, on = eff.beacons.filter(function (b) { return !b.off; }).length, off = eff.beacons.length - on, z = feedOf(m).zones.length;
+    var tail = (off ? ' \u00b7 ' + off + ' off' : '') + (z ? ' \u00b7 ' + plural(z, 'circle', 'circles') : '');
+    if (S.mode === 'custom') return (on ? plural(on, 'tip', 'tips') : 'No tips yet') + ' on ' + name + tail;
+    return plural(on, 'spot', 'spots') + ' at ' + S.angle + '\u00b0 on ' + name + tail;
   }
   var WHY = { unsupported: 'left out or skipped', unreachable: 'no route to the plate' };
   /* The rows under the BUILT line: every area that is not held, in order. */
@@ -502,8 +564,10 @@ var NSO_SUPPORTS_CARD = (function () {
 
   function draw() {
     dispose(S.layer); S.layer = null; S.geo = null;
+    dispose(S.pts); S.pts = null; dispose(S.zoneLayer); S.zoneLayer = null; dispose(S.eraseLayer); S.eraseLayer = null; S.hot = null;
     if (!S.open || S.hostId == null || !state.scene) return;
     var eff = S.eff;
+    if (S.mode !== 'auto') { if (eff && !eff.error) drawMarkers(eff); return; }    // a fed card has points, not outlined areas
     if (!eff || !eff.regions.length) return;
     var st = statesFor(eff), g = new THREE.Group(), width = markSize() * 0.6;
     g.name = 'supportsCardOverlay';
@@ -533,7 +597,7 @@ var NSO_SUPPORTS_CARD = (function () {
     if (S.hostId == null || !placedOf(S.hostId) || !S.eff) return 'pick';
     if (S.eff.error) return 'error';
     if (S.eff.measuring) return 'measuring';
-    if (!S.eff.beacons.length) return 'nothing';
+    if (!S.eff.beacons.length && S.mode !== 'custom') return 'nothing';     // Custom starts empty: the tips are the input
     if (S.busy) return 'building';
     return memOf(S.hostId).built ? 'built' : 'idle';
   }
@@ -598,8 +662,8 @@ var NSO_SUPPORTS_CARD = (function () {
     var head = $('sup-count'), card = $('supports-card');
     var hasHost = S.hostId != null && !!placedOf(S.hostId);
     var eff = S.eff, text, bad = false, cs = cardState(), a = null, st = null;
-    if (hasHost && eff && !eff.error && eff.beacons.length) { st = statesFor(eff); a = areaStats(eff, st); }
-    if (card) { card.dataset.state = cs; card.classList.toggle('is-locked', !!S.busy); }
+    if (hasHost && eff && !eff.error && (eff.beacons.length || S.mode === 'custom')) { st = statesFor(eff); a = areaStats(eff, st); }
+    if (card) { card.dataset.mode = S.mode; card.dataset.tool = S.tool; card.dataset.state = cs; card.classList.toggle('is-locked', !!S.busy); }
     document.body.classList.toggle('sup-card-open', !!S.open);
     if (S.msg) { text = S.msg.text; bad = !!S.msg.bad; }
     else if (cs === 'pick') text = 'Click a piece to see where it needs holding.';
@@ -626,7 +690,48 @@ var NSO_SUPPORTS_CARD = (function () {
     var ang = $('sup-angle');
     if (ang && document.activeElement !== ang && ang.value !== String(S.angle)) ang.value = String(S.angle);
     drawRows(cs === 'built' && st ? rowsFor(eff, st) : []);
+    syncSwitch(cs);
     paintBar();
+  }
+
+  /* THE SWITCH AND THE TOOLS. Auto \u00b7 Assisted \u00b7 Custom; under it, in the two
+     fed modes, the tool that holds the pointer: TIPS (the points on the piece),
+     CIRCLES (draw on the plate) or ERASE (after a build). One at a time; the
+     hint under the card says what the one that is on does. */
+  var HINT = {
+    assisted: 'Click a point to turn it off, or on. Shift-click the piece to add a spot. Then Circles: where the supports may land.',
+    custom: 'Click the underside of the piece to place a tip; click a tip to take it away. Then Circles: where the supports may land.',
+    circles: 'Drawing circles on the plate: drag to draw one, drag its edge to resize, drag inside to move, click one then Delete to remove it. Stop (Esc) to orbit.',
+    erase: 'Erasing: hover a built member to light it and what it holds; click to remove it. Stop (Esc) to go on.'
+  };
+  function syncSwitch(cs) {
+    var fed = S.mode !== 'auto', hasHost = S.hostId != null && !!placedOf(S.hostId);
+    Object.keys(MODES).forEach(function (k) {
+      var b = $('sup-mode-' + k);
+      if (b) { b.classList.toggle('is-on', S.mode === k); b.setAttribute('aria-pressed', S.mode === k ? 'true' : 'false'); b.disabled = !!S.busy; }
+    });
+    var tools = $('sup-tools');
+    if (tools) tools.hidden = !fed;
+    var canErase = fed && hasHost && eraseReady();
+    Object.keys(TOOLS).forEach(function (k) {
+      var b = $('sup-tool-' + k);
+      if (!b) return;
+      b.classList.toggle('is-on', S.tool === k);
+      b.setAttribute('aria-pressed', S.tool === k ? 'true' : 'false');
+      b.disabled = !!S.busy || !hasHost || (k === 'erase' && !canErase);
+    });
+    var hint = $('sup-hint');
+    if (hint) {
+      if (hint.dataset.auto == null) hint.dataset.auto = hint.textContent;
+      hint.textContent = !fed ? hint.dataset.auto : S.tool === 'tips' ? HINT[S.mode] : HINT[S.tool];
+    }
+    paintCursor();
+  }
+  function paintCursor() {
+    var cv = state.renderer && state.renderer.domElement;
+    if (!cv) return;
+    var want = !S.open || S.mode === 'auto' ? '' : S.tool === 'circles' ? 'crosshair' : (S.tool === 'erase' && S.hover) || (S.tool === 'tips' && S.hot != null) ? 'pointer' : '';
+    if (want || S.cursorSet) { cv.style.cursor = want; S.cursorSet = !!want; }
   }
 
   /* The short list under the readout: one row for every area that is not
@@ -689,7 +794,7 @@ var NSO_SUPPORTS_CARD = (function () {
     return poseKey(p) + '|' + others(S.hostId).map(function (q) { return q.sourceId + ':' + q.mesh.position.toArray().join(','); }).join(';') +
       '|' + supportsOf(S.hostId).map(function (q) { return q.id; }).join(',') + '|' + editsOf(m).ops.length +
       '|' + JSON.stringify(memOf(S.hostId).unreach).length + '|' + memOf(S.hostId).built + '|' + ((typeof nsoMaskCount === 'function') ? nsoMaskCount(m) : 0) +
-      '|' + S.angle;
+      '|' + S.angle + '|' + S.mode + '|' + (m.nsoSupportFeed ? JSON.stringify(m.nsoSupportFeed).length : 0);
   }
 
   /* ------------------------------------------------------------- picking */
@@ -838,13 +943,31 @@ var NSO_SUPPORTS_CARD = (function () {
      there is nothing to build (the planner refused it, or put every spot
      inside the piece), else { rid, t, keyOf, landingOf, unreach } - the plan,
      for building to take up. */
-  function planArea(job, D, rid, beacons, o, onProgress) {
+  /* The planner's feed for one area (opts.feed, docs/SUPPORT-GRIDPACK.md
+     section 7); null in Auto, which sends none. Assisted hands the area's
+     spots over as it always has and names the ones turned off; Custom hands
+     over the area's tips alone. Both carry the circles and the erasures. */
+  function feedFor(m, beacons, rid) {
+    if (S.mode === 'auto') return null;
+    var F = feedOf(m), feed = { mode: S.mode, landingZones: F.zones.map(function (z) { return { x: z.x, y: z.y, r: z.r }; }), excluded: F.erased.slice() };
+    if (S.mode === 'custom') {
+      feed.tips = beacons.filter(function (b) { return !b.off; }).map(function (b) { return { x: b.x, y: b.y, z: b.z, key: b.key, regionId: rid }; });
+    } else {
+      feed.beaconsOff = beacons.filter(function (b) { return b.off && !b.erased; }).map(function (b) { return b.id; });
+    }
+    return feed;
+  }
+  function planArea(job, D, rid, beacons, o, onProgress, feed) {
     var bs = beacons.map(function (b) { return { x: b.x, y: b.y, z: b.z, normal: b.normal, regionId: rid, key: b.key }; });
     var opts = Object.assign({}, D.opts, { beacons: bs, style: o.style, restOnModel: o.rest });
+    if (feed) opts.feed = feed;
+    if (feed && feed.mode === 'custom') delete opts.beacons;         // Custom plans its tips alone: no beacon list goes with them
     if (o.sideMm != null) opts.sideMm = o.sideMm;
     return planAway(job, D.soup, opts, onProgress).then(function (t) {
       if (!t || typeof t !== 'object') throw new Error('the planner gave no plan');
       var keyOf = function (id) { return t.beacons && t.beacons[id] ? t.beacons[id].key : null; };
+      /* every tip of the area left out (the eraser took the last one): nothing to build, and nothing wrong */
+      if (!t.ok && feed && /^no tips to plan/.test(t.reason || '')) return { result: { ok: true, rid: rid, solids: [], unreachable: [], members: [], zonesEmpty: null } };
       if (!t.ok) {
         var all = t.inside && t.inside.length ? beacons.map(function (b) { return b.key; }) : [];
         return { result: { ok: !!all.length, rid: rid, solids: [], unreachable: all, reason: t.reason } };
@@ -864,7 +987,8 @@ var NSO_SUPPORTS_CARD = (function () {
       x.beacons.forEach(function (id) { holds[a.keyOf(id)] = a.landingOf[id] === 'rest' ? 'rest' : 'held'; });
       return { soup: x.soup, keys: x.beacons.map(a.keyOf), holds: holds, landing: x.landing, regionIds: x.regionIds, feet: x.feet };
     });
-    return { ok: true, rid: a.rid, solids: solids, unreachable: a.unreach, sideMm: a.t.sideMm, plateZ: a.t.plateZ, reason: a.t.reason };
+    return { ok: true, rid: a.rid, solids: solids, unreachable: a.unreach, sideMm: a.t.sideMm, plateZ: a.t.plateZ, reason: a.t.reason,
+      members: u.members || [], zonesEmpty: a.t.zonesEmpty || null };
   }
 
   /* THE FEET, over every area at once (nso_support_gridpack.js shareFeet,
@@ -958,11 +1082,16 @@ var NSO_SUPPORTS_CARD = (function () {
     var m = modelOf(S.hostId), hostId = S.hostId;
     var ops = editsOf(m).ops.slice(), serial = editsOf(m).serial;
     var unreach = JSON.parse(JSON.stringify(memOf(hostId).unreach)), built = memOf(hostId).built;
+    var feed = feedCopy(m.nsoSupportFeed), members = memOf(hostId).members, zonesEmpty = memOf(hostId).zonesEmpty;
     return function () {
       var mm = modelOf(hostId);
       if (mm) mm.nsoSupportEdits = { ops: ops.slice(), serial: serial };
+      if (mm) mm.nsoSupportFeed = feedCopy(feed) || undefined;
       memOf(hostId).unreach = JSON.parse(JSON.stringify(unreach));
+      memOf(hostId).members = members; memOf(hostId).zonesEmpty = zonesEmpty;
       memOf(hostId).built = built;
+      S.sel = null; S.hover = null;
+      if (S.tool === 'erase' && !eraseReady()) S.tool = 'tips';
       if (S.selSupport != null && !modelOf(S.selSupport)) S.selSupport = null;
       if (S.open) refresh();
     };
@@ -1008,7 +1137,7 @@ var NSO_SUPPORTS_CARD = (function () {
    * card says "Could not build: <why> - nothing was added" (or "Build
    * cancelled - nothing was added") and is back in the state it was in before.
    */
-  function build() {
+  function build(pre) {
     if (S.busy) return Promise.resolve({ ok: false, reason: 'busy' });
     var host = placedOf(S.hostId), hm = modelOf(S.hostId), D = detect();
     if (D === PENDING) return Promise.resolve({ ok: false, reason: 'still measuring' });
@@ -1035,7 +1164,7 @@ var NSO_SUPPORTS_CARD = (function () {
       clearTimeout(job.timer);
       job.timer = setTimeout(function () { job.stop(late()); }, limit);
     }
-    var spots = regs.reduce(function (n, r) { return n + r.beacons.length; }, 0);
+    var spots = regs.reduce(function (n, r) { return n + r.beacons.filter(function (b) { return !b.off; }).length; }, 0);
     S.job = job; S.busy = true; S.msg = null; S.elapsed = 0; S.prog = null; sync();
     var guard = new Promise(function (go, stop) { job.stop = stop; });
     heard();
@@ -1070,7 +1199,7 @@ var NSO_SUPPORTS_CARD = (function () {
     regs.forEach(function (rg) {
       chain = chain.then(function () {
         if (job.dead) return null;
-        var at = settledBefore, mine = rg.beacons.length;
+        var at = settledBefore, mine = rg.beacons.filter(function (b) { return !b.off; }).length;
         settledBefore += mine;
         return planArea(job, D, rg.id, rg.beacons, o, function (m, sent) {
           /* Each area's planner starts with its own 'detecting'; note() drops
@@ -1078,7 +1207,7 @@ var NSO_SUPPORTS_CARD = (function () {
              build's, summed over the areas. */
           heard();
           note(job, m && m.phase === 'planning' ? { phase: 'planning', done: at + m.done, total: spots, own: mine, ownDone: m.done } : m, sent);
-        }).then(function (a) {
+        }, feedFor(hm, rg.beacons, rg.id)).then(function (a) {
           areas.push(a);
           return pause() || new Promise(function (go) { setTimeout(go, 0); });
         });
@@ -1122,17 +1251,22 @@ var NSO_SUPPORTS_CARD = (function () {
       var failed = results.filter(function (r) { return !r.ok; });
       if (failed.length) return { ok: false, reason: failed[0].reason || 'the planner refused' };
       try { results = shareFeet(results, D); } catch (err) { return { ok: false, reason: (err && err.message) || String(err) }; }
-      var undo = snapshot(), removed = [], added = [], n = 0, mem = memOf(hostId);
+      var undo = (pre && pre.undo) || snapshot(), removed = [], added = [], n = 0, mem = memOf(hostId);
       try {
         removed = removePieces(removeIds);
         mem.unreach = {};
+        /* a fed build names its members (the eraser's targets), and which
+           circles nothing landed in (empty in every area that was planned) */
+        mem.members = S.mode === 'auto' ? [] : [].concat.apply([], results.map(function (r) { return r.members || []; }));
+        var zl = results.map(function (r) { return r.zonesEmpty; }).filter(Boolean);
+        mem.zonesEmpty = S.mode === 'auto' || !zl.length ? [] : zl[0].filter(function (zi) { return zl.every(function (l) { return l.indexOf(zi) >= 0; }); });
         for (var i = 0; i < results.length; i++) {
           var r = results[i];
           mem.unreach[r.rid] = r.unreachable.slice();
           for (var k = 0; k < r.solids.length; k++) {
             var sd = r.solids[k];
             var meta = { card: true, hostSourceId: hostId, hostName: hm.name, regionId: r.rid, style: o.style,
-              sideMm: r.sideMm || o.sideMm, rest: o.rest, angleDeg: S.angle, keys: sd.keys, holds: sd.holds, landing: sd.landing };
+              sideMm: r.sideMm || o.sideMm, rest: o.rest, angleDeg: S.angle, mode: S.mode, keys: sd.keys, holds: sd.holds, landing: sd.landing };
             var pl = placeSolid(sd.soup, meta, host, D.minZ, hm.name + ' - support ' + (r.rid + 1) + '.' + (++n) + ' (' + STYLES[o.style] + ')');
             if (!pl.ok) throw new Error(pl.reason);
             added.push(pl.id);
@@ -1218,6 +1352,19 @@ var NSO_SUPPORTS_CARD = (function () {
     return { ok: true };
   }
   function onKey(ev) {
+    var typing = ev.target && /^(INPUT|SELECT|TEXTAREA)$/.test(ev.target.tagName);
+    if (S.open && !S.busy && S.mode !== 'auto' && !typing) {
+      if (ev.key === 'Escape' && (S.tool === 'circles' || S.tool === 'erase')) {      // stop the tool: the view orbits again
+        setTool(S.tool);
+        ev.preventDefault(); ev.stopImmediatePropagation();
+        return;
+      }
+      if ((ev.key === 'Delete' || ev.key === 'Backspace') && S.tool === 'circles' && S.sel != null && !S.drag) {
+        removeZone(S.sel);
+        ev.preventDefault(); ev.stopImmediatePropagation();
+        return;
+      }
+    }
     if (ev.key !== 'Escape' || !S.busy || !S.job) return;
     cancel();
     ev.preventDefault(); ev.stopImmediatePropagation();
@@ -1229,21 +1376,28 @@ var NSO_SUPPORTS_CARD = (function () {
   function takeOff(ids, label, reset) {
     if (S.busy || S.hostId == null) return { ok: false, reason: S.busy ? 'busy' : 'no piece' };
     var mem = memOf(S.hostId);
-    if (!ids.length && !(reset && (mem.built || Object.keys(mem.unreach).length))) return { ok: false, reason: 'nothing to take off' };
+    var fh = modelOf(S.hostId);
+    if (!ids.length && !(reset && (mem.built || Object.keys(mem.unreach).length || (fh && !feedEmpty(fh.nsoSupportFeed))))) return { ok: false, reason: 'nothing to take off' };
     var undo = snapshot();
     var removed = removePieces(ids);
-    if (reset) { mem.unreach = {}; mem.built = false; }
+    if (reset) {
+      mem.unreach = {}; mem.built = false; mem.members = []; mem.zonesEmpty = [];
+      var mh = modelOf(S.hostId);
+      if (mh) mh.nsoSupportFeed = undefined;                         // the card's reset: the user's points, circles and erasures go too
+      if (S.tool === 'erase') S.tool = 'tips';
+      S.sel = null;
+    }
     pushUndo({ type: 'supportSwap', removed: removed, addedIds: [], label: label, onUndone: undo });
     S.msg = null;
     afterCommit();
     return { ok: true, removed: ids.slice() };
   }
 
-  function generate() {
+  function generate(pre) {
     if (S.hostId == null) return Promise.resolve({ ok: false, reason: 'no piece' });
     S.eff = effective();
     if (S.eff.error || !S.eff.beacons.length) { refresh(); return Promise.resolve({ ok: false, reason: S.eff.error || 'nothing needs holding' }); }
-    return build();
+    return build(pre);
   }
   function removeAll() {
     if (S.hostId == null) return { ok: false, reason: 'no piece' };
@@ -1334,6 +1488,373 @@ var NSO_SUPPORTS_CARD = (function () {
     return { ok: true, key: 'm' + E.serial, region: b ? b.region : null };
   }
 
+
+  /* ------------------------------------------------------------- markers */
+
+  /* The spots (Assisted) or the tips (Custom), the circles, and the eraser's
+     light: drawn over everything (depth test off, MARK_ORDER), and they own the
+     pointer while their tool is on - hit-tested by the card on the press, as the
+     rotate rings are, and never by the scene (nsoHelpers.attach: no raycast). */
+  function mark(o) {
+    o.renderOrder = MARK_ORDER; o.userData.skipXray = true; o.frustumCulled = false;
+    if (typeof nsoHelpers !== 'undefined') nsoHelpers.attach(state.scene, o, 'supports-card'); else state.scene.add(o);
+    return o;
+  }
+  function dotMap(ring) {
+    var c = document.createElement('canvas'); c.width = c.height = 64;
+    var g = c.getContext('2d');
+    g.beginPath(); g.arc(32, 32, 28, 0, Math.PI * 2);
+    if (ring) { g.lineWidth = 9; g.strokeStyle = '#fff'; g.stroke(); g.beginPath(); g.arc(32, 32, 11, 0, Math.PI * 2); }
+    g.fillStyle = '#fff'; g.fill();
+    var t = new THREE.CanvasTexture(c);
+    return t;
+  }
+  var COL = { on: 0xf1f5f9, off: 0x566074, bad: 0xff2d2d, tip: 0xffb020, hot: 0xffe066, held: 0x86efac };
+  function spotColor(b, st) {
+    if (b.off) return COL.off;
+    if (st[b.key] === 'unreachable') return COL.bad;
+    return b.tip ? COL.tip : st[b.key] === 'held' || st[b.key] === 'rest' ? COL.held : COL.on;
+  }
+  function drawMarkers(eff) {
+    var st = statesFor(eff), n = eff.beacons.length, tips = S.mode === 'custom';
+    if (n) {
+      var pos = new Float32Array(n * 3), col = new Float32Array(n * 3), c = new THREE.Color();
+      eff.beacons.forEach(function (b, i) {
+        var v = upToView(pt(b));
+        pos[i * 3] = v.x; pos[i * 3 + 1] = v.y; pos[i * 3 + 2] = v.z;
+        c.setHex(spotColor(b, st)); col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
+      });
+      var geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      var pts = new THREE.Points(geo, new THREE.PointsMaterial({ size: tips ? 14 : 8, sizeAttenuation: false, vertexColors: true,
+        map: dotMap(tips), alphaTest: 0.25, transparent: true, depthTest: false, depthWrite: false }));
+      pts.name = 'supportsCardPoints';
+      pts.userData.keys = eff.beacons.map(function (b) { return b.key; });
+      S.pts = mark(pts);
+    }
+    drawZones();
+    drawErase();
+  }
+  /* The width the plate's circles are drawn at: about two pixels, wherever the camera is. */
+  function mmPerPx(v) {
+    var cam = state.camera, el = state.renderer && state.renderer.domElement;
+    if (!cam || !el) return 0.2;
+    return Math.max(1e-3, cam.position.distanceTo(v) * 2 * Math.tan((cam.fov || 45) * Math.PI / 360) / Math.max(1, el.clientHeight));
+  }
+  function drawZones() {
+    dispose(S.zoneLayer); S.zoneLayer = null;
+    var m = modelOf(S.hostId);
+    if (!S.open || S.mode === 'auto' || !m || !state.scene) return;
+    var F = feedOf(m), mem = memOf(S.hostId);
+    if (!F.zones.length) return;
+    var g = new THREE.Group();
+    g.name = 'supportsCardZones';
+    F.zones.forEach(function (z, i) {
+      var sel = S.tool === 'circles' && S.sel === i, empty = mem.built && mem.zonesEmpty.indexOf(i) >= 0;
+      var color = sel ? 0xfacc15 : empty ? 0xff2d2d : 0x38bdf8, w = mmPerPx(new THREE.Vector3(z.x, 0, -z.y)) * (sel ? 3 : 2);
+      var ring = new THREE.Mesh(new THREE.RingGeometry(Math.max(0.01, z.r - w), z.r + w, 72),
+        new THREE.MeshBasicMaterial({ color: color, side: THREE.DoubleSide, transparent: true, opacity: 0.95, depthTest: false, depthWrite: false }));
+      var disc = new THREE.Mesh(new THREE.CircleGeometry(z.r, 72),
+        new THREE.MeshBasicMaterial({ color: color, side: THREE.DoubleSide, transparent: true, opacity: sel ? 0.22 : 0.12, depthTest: false, depthWrite: false }));
+      [ring, disc].forEach(function (o) { o.rotation.x = -Math.PI / 2; o.position.set(z.x, 0.08, -z.y); o.renderOrder = MARK_ORDER; g.add(o); });
+    });
+    S.zoneLayer = mark(g);
+  }
+
+  /* -------------------------------------------- the points: spots and tips */
+
+  function edit(label, fn) {
+    var m = modelOf(S.hostId), host = placedOf(S.hostId);
+    if (!m || !host || S.busy) return { ok: false, reason: S.busy ? 'busy' : 'no piece' };
+    var undo = snapshot(), r = fn(feedOf(m), m, host);
+    if (r === false) return { ok: false, reason: 'nothing changed' };
+    pushEdit(undo, label);
+    S.msg = null;
+    refresh();
+    return Object.assign({ ok: true }, r && typeof r === 'object' ? r : {});
+  }
+  function spotByKey(key) { return S.eff && S.eff.beacons.find(function (b) { return b.key === key; }); }
+
+  /* ASSISTED: a click on a spot turns it off (it is not a tip) or back on. A
+     spot the eraser took out is put back the same way. */
+  function toggleSpot(key) {
+    if (S.mode !== 'assisted') return { ok: false, reason: 'not Assisted' };
+    var b = spotByKey(key);
+    if (!b) return { ok: false, reason: 'no such spot' };
+    return edit(b.off ? 'Undo: spot turned off again' : 'Undo: spot turned back on', function (F, m, host) {
+      var w = pt(b);
+      if (b.erased) { F.erased = F.erased.filter(function (id) { return id !== b.id; }); return { key: key, off: false }; }
+      if (b.off) {
+        F.off = F.off.filter(function (o) { return dist(localToUp(host, o.p), w) > OFF_TOL_MM; });
+        return { key: key, off: false };
+      }
+      F.off.push({ p: upToLocal(host, w) });
+      return { key: key, off: true };
+    });
+  }
+  /* CUSTOM: a click on the piece places a tip there, from the face's own
+     normal; refused on a face that looks up. */
+  function placeTip(p, n) {
+    if (S.mode !== 'custom') return { ok: false, reason: 'not Custom' };
+    if (n[2] > UP_MAX) {
+      S.msg = { text: 'That face looks up - nothing hangs from it. Click a side or the underside.', bad: true };
+      sync();
+      return { ok: false, reason: 'face looks up' };
+    }
+    return edit('Undo: tip taken away', function (F, m, host) {
+      var id = ++F.serial;
+      F.tips.push({ id: id, p: upToLocal(host, p), n: upDirToLocal(host, n) });
+      return { id: id };
+    });
+  }
+  function removeTip(id) {
+    if (S.mode !== 'custom') return { ok: false, reason: 'not Custom' };
+    return edit('Undo: tip put back', function (F) {
+      var k = F.tips.findIndex(function (t) { return t.id === id; });
+      if (k < 0) return false;
+      F.tips.splice(k, 1);
+      return { id: id };
+    });
+  }
+  /* The spot or tip under the pointer, in pixels: a tip before a spot. */
+  function spotAt(ev) {
+    if (!S.eff || !state.camera || !state.renderer) return null;
+    var el = state.renderer.domElement, r = el.getBoundingClientRect(), best = null, bd = Infinity, v = new THREE.Vector3();
+    state.camera.updateMatrixWorld();
+    S.eff.beacons.forEach(function (b) {
+      v.copy(upToView(pt(b))).project(state.camera);
+      if (v.z > 1 || v.z < -1) return;
+      var dx = r.left + (v.x * 0.5 + 0.5) * r.width - ev.clientX, dy = r.top + (-v.y * 0.5 + 0.5) * r.height - ev.clientY;
+      var d = Math.hypot(dx, dy) - (b.tip ? 4 : 0);
+      if (d <= PICK_PX && d < bd) { bd = d; best = b; }
+    });
+    return best;
+  }
+  function markerDown(ev) {
+    var b = spotAt(ev);
+    if (!b) return false;
+    if (S.mode === 'custom') removeTip(b.tipId); else toggleSpot(b.key);
+    return true;
+  }
+  function setHot(i) {
+    if (!S.pts || S.hot === i) return;
+    var col = S.pts.geometry.getAttribute('color'), st = statesFor(S.eff), c = new THREE.Color();
+    if (S.hot != null && S.eff.beacons[S.hot]) { c.setHex(spotColor(S.eff.beacons[S.hot], st)); col.setXYZ(S.hot, c.r, c.g, c.b); }
+    if (i != null) { c.setHex(COL.hot); col.setXYZ(i, c.r, c.g, c.b); }
+    col.needsUpdate = true;
+    S.hot = i;
+    paintCursor();
+  }
+
+  /* ------------------------------------------------------------- circles */
+
+  function zonesOf() { var m = modelOf(S.hostId); return m && S.mode !== 'auto' ? feedOf(m).zones : []; }
+  /* The pointer on the plate (Z up, mm), or null off the plate: the ray meets the
+     plane through the pieces, so a circle may be drawn under one. */
+  function plateAt(ev) {
+    if (!state.raycaster || !state.camera || !state.renderer) return null;
+    setPointerFromEvent(ev);
+    state.raycaster.setFromCamera(state.pointer, state.camera);
+    var hit = new THREE.Vector3();
+    if (!state.raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), hit)) return null;
+    var pl = typeof getCurrentPlate === 'function' ? getCurrentPlate() : null;
+    if (pl && (Math.abs(hit.x) > pl.w / 2 || Math.abs(hit.z) > pl.d / 2)) return null;
+    return { x: hit.x, y: -hit.z, v: hit };
+  }
+  function zoneAt(P) {
+    var zs = zonesOf(), tol = mmPerPx(P.v) * PICK_PX;
+    for (var i = zs.length - 1; i >= 0; i--) {
+      var d = Math.hypot(P.x - zs[i].x, P.y - zs[i].y);
+      if (Math.abs(d - zs[i].r) <= tol) return { i: i, edge: true };
+    }
+    for (i = zs.length - 1; i >= 0; i--) {
+      if (Math.hypot(P.x - zs[i].x, P.y - zs[i].y) < zs[i].r) return { i: i, edge: false };
+    }
+    return null;
+  }
+  /* The press, with CIRCLES on. On the plate it is ours: on a circle's edge it
+     resizes, inside a circle it moves (or, with no travel, selects) and on bare
+     plate it draws a new one from its centre. Off the plate it is the view's. */
+  function circleDown(ev) {
+    var m = modelOf(S.hostId), P = plateAt(ev);
+    if (!m || !P) return false;
+    var hit = zoneAt(P), F = feedOf(m), zs = F.zones;
+    var d = { undo: snapshot(), mode: hit ? (hit.edge ? 'size' : 'move') : 'new', i: hit ? hit.i : -1, from: P, was: hit ? Object.assign({}, zs[hit.i]) : null, moved: false, id: ev.pointerId };
+    if (hit) {
+      S.sel = hit.i;
+    } else {
+      S.sel = null;
+    }
+    S.drag = d;
+    window.addEventListener('pointermove', dragMove, true);
+    window.addEventListener('pointerup', dragUp, true);
+    drawZones(); sync();
+    return true;
+  }
+  function dragMove(ev) {
+    var d = S.drag, P = plateAt(ev) || (d && lastPlate);
+    if (!d || !P) return;
+    lastPlate = P;
+    var m = modelOf(S.hostId), zs = m ? feedOf(m).zones : null;
+    if (!zs) return;
+    var travel = Math.hypot(P.x - d.from.x, P.y - d.from.y);
+    if (travel < mmPerPx(P.v) * 3 && !d.moved) return;           // a click is not a drag
+    d.moved = true;
+    if (d.mode === 'new') {
+      var r = travel;
+      if (d.i < 0 && r >= ZONE_MIN_R) { zs.push({ x: d.from.x, y: d.from.y, r: r }); d.i = zs.length - 1; S.sel = d.i; }
+      else if (d.i >= 0) zs[d.i].r = Math.max(ZONE_MIN_R, r);
+    } else if (d.mode === 'size') {
+      zs[d.i].r = Math.max(ZONE_MIN_R, Math.hypot(P.x - zs[d.i].x, P.y - zs[d.i].y));
+    } else {
+      zs[d.i].x = d.was.x + (P.x - d.from.x);
+      zs[d.i].y = d.was.y + (P.y - d.from.y);
+    }
+    drawZones();
+  }
+  var lastPlate = null;
+  function endDrag() {
+    window.removeEventListener('pointermove', dragMove, true);
+    window.removeEventListener('pointerup', dragUp, true);
+    var d = S.drag; S.drag = null; lastPlate = null;
+    return d;
+  }
+  function dragUp() {
+    var d = endDrag();
+    if (!d) return;
+    var m = modelOf(S.hostId);
+    if (d.moved && m) {
+      pushEdit(d.undo, d.mode === 'new' ? 'Undo: circle taken away' : d.mode === 'size' ? 'Undo: circle back to its size' : 'Undo: circle back where it was');
+      S.msg = null;
+      refresh();
+    } else { drawZones(); sync(); }
+  }
+  function cancelDrag() {
+    var d = endDrag();
+    if (d) { d.undo(); }
+  }
+  function removeZone(i) {
+    return edit('Undo: circle put back', function (F) {
+      if (!F.zones[i]) return false;
+      F.zones.splice(i, 1);
+      S.sel = null;
+      return { zone: i };
+    });
+  }
+  /* A circle by number, for the page's own callers (tests, a script). */
+  function addZone(x, y, r) {
+    if (S.mode === 'auto') return { ok: false, reason: 'Auto takes no landing circles' };
+    if (!(r >= ZONE_MIN_R)) return { ok: false, reason: 'too small' };
+    return edit('Undo: circle taken away', function (F) { F.zones.push({ x: +x, y: +y, r: +r }); S.sel = F.zones.length - 1; return { zone: F.zones.length - 1 }; });
+  }
+
+  /* -------------------------------------------------------------- eraser */
+
+  function eraseReady() {
+    var mem = S.hostId != null ? memOf(S.hostId) : null;
+    return !!(mem && mem.built && mem.members.length && S.mode !== 'auto' && supportsOf(S.hostId).length);
+  }
+  var RANK = { tip: 0, sheet: 1, branch: 2, trunk: 3, pad: 4 };
+  /* A member and everything it holds up: the members whose carries are among
+     its own and that sit above it in the tree (a tip, a branch, a trunk; the
+     sheet under the part rides with what carries its tips). */
+  function litBy(id) {
+    var mem = memOf(S.hostId), M = mem.members.find(function (x) { return x.id === id; });
+    if (!M) return [];
+    var has = {};
+    M.carries.forEach(function (t) { has[t] = true; });
+    return mem.members.filter(function (x) {
+      if (x.id === id) return true;
+      return RANK[x.kind] < RANK[M.kind] && x.carries.length && x.carries.every(function (t) { return has[t]; });
+    });
+  }
+  /* The built member under the pointer: nearest, in pixels, to its line (its
+     two ends), within PICK_PX; a pad or a sheet is never one (the planner does
+     not erase those on their own). Ties go to the one nearer the camera. */
+  function memberAt(ev) {
+    if (!S.hostId || !state.camera || !state.renderer) return null;
+    var el = state.renderer.domElement, r = el.getBoundingClientRect(), best = null, bd = Infinity, bz = Infinity;
+    state.camera.updateMatrixWorld();
+    function px(q) {
+      var v = upToView(q).project(state.camera);
+      return [r.left + (v.x * 0.5 + 0.5) * r.width, r.top + (-v.y * 0.5 + 0.5) * r.height, v.z];
+    }
+    memOf(S.hostId).members.forEach(function (M) {
+      if (M.kind !== 'tip' && M.kind !== 'branch' && M.kind !== 'trunk') return;
+      var a = px(M.from), b = px(M.to), dx = b[0] - a[0], dy = b[1] - a[1], L2 = dx * dx + dy * dy;
+      var t = L2 ? Math.max(0, Math.min(1, ((ev.clientX - a[0]) * dx + (ev.clientY - a[1]) * dy) / L2)) : 0;
+      var d = Math.hypot(a[0] + dx * t - ev.clientX, a[1] + dy * t - ev.clientY), z = a[2] + (b[2] - a[2]) * t;
+      if (d > PICK_PX) return;
+      if (d < bd - 1.5 || (Math.abs(d - bd) <= 1.5 && z < bz)) { bd = d; bz = z; best = M.id; }
+    });
+    return best;
+  }
+  function drawErase() {
+    dispose(S.eraseLayer); S.eraseLayer = null;
+    if (!S.open || S.tool !== 'erase' || !S.hover || !state.scene) return;
+    var g = new THREE.Group(), mem = memOf(S.hostId);
+    g.name = 'supportsCardErase';
+    litBy(S.hover).forEach(function (M) {
+      var a = upToView(M.from), b = upToView(M.to), len = a.distanceTo(b);
+      if (len < 1e-6) return;
+      var hot = M.id === S.hover, rad = hot ? 0.9 : 0.6;
+      var cyl = new THREE.Mesh(new THREE.CylinderGeometry(rad, rad, len, 10, 1, false),
+        new THREE.MeshBasicMaterial({ color: hot ? 0xff7a1a : 0xffd27a, transparent: true, opacity: hot ? 0.95 : 0.85, depthTest: false, depthWrite: false }));
+      cyl.position.copy(a).add(b).multiplyScalar(0.5);
+      cyl.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), b.clone().sub(a).normalize());
+      cyl.renderOrder = MARK_ORDER + 1;
+      g.add(cyl);
+    });
+    S.eraseLayer = mark(g);
+  }
+  function hoverMember(id) {
+    if (S.hover === id) return;
+    S.hover = id;
+    drawErase();
+    paintCursor();
+  }
+  /* ERASE: the member is taken out and the plan made again - every support on
+     the piece replaced, one Undo. A build that cannot finish leaves the
+     member where it was. */
+  function eraseMember(id) {
+    var m = modelOf(S.hostId);
+    if (S.busy || !m || !eraseReady() || !memOf(S.hostId).members.some(function (x) { return x.id === id; })) return Promise.resolve({ ok: false, reason: 'nothing to erase' });
+    var undo = snapshot(), F = feedOf(m);
+    F.erased.push(id);
+    S.hover = null;
+    return generate({ undo: undo }).then(function (res) { if (!res.ok) undo(); return res; });
+  }
+
+  /* ----------------------------------------------- the switch and the tools */
+
+  function setMode(k) {
+    if (!MODES[k]) return { ok: false, reason: 'no such mode' };
+    if (S.busy) return { ok: false, reason: 'busy' };
+    cancelDrag();
+    S.mode = k; S.tool = 'tips'; S.sel = null; S.hover = null; S.msg = null;
+    refresh();
+    return { ok: true, mode: k };
+  }
+  function setTool(k) {
+    if (!TOOLS[k]) return { ok: false, reason: 'no such tool' };
+    if (S.busy || S.mode === 'auto') return { ok: false, reason: S.busy ? 'busy' : 'Auto has no tools' };
+    if (k === 'erase' && !eraseReady()) return { ok: false, reason: 'nothing built to erase' };
+    cancelDrag();
+    S.tool = k === S.tool && k !== 'tips' ? 'tips' : k;       // a tool that is on, pressed again, is stopped
+    S.sel = null; S.hover = null; S.msg = null;
+    draw(); sync();
+    return { ok: true, tool: S.tool };
+  }
+  /* CLEAR PLATE: the models stay in the list, and forget what was fed in. */
+  function forgetAll() {
+    cancelDrag();
+    (state.models || []).forEach(function (m) { if (m) m.nsoSupportFeed = undefined; });
+    Object.keys(S.mem).forEach(function (k) { S.mem[k].members = []; S.mem[k].zonesEmpty = []; });
+    S.tool = 'tips'; S.sel = null; S.hover = null;
+    if (S.open) refresh();
+  }
+
   /* --------------------------------------------------------- open, close */
 
   /* The piece the card should be on: the app's selection when it is a piece
@@ -1356,6 +1877,10 @@ var NSO_SUPPORTS_CARD = (function () {
       else if (w != null && w !== S.hostId && state.selectedIndex >= 0) pick(w);   // the app's selection moved: detect there
       else if (S.hostId == null && w != null) pick(w);
       else if (signature() !== S.sig) refresh();
+      else if (S.zoneLayer && state.camera) {
+        var cd = Math.round(state.camera.position.length() * 20);
+        if (cd !== S.camKey) { S.camKey = cd; drawZones(); }
+      }
     }
     S.raf = requestAnimationFrame(tick);
   }
@@ -1371,8 +1896,10 @@ var NSO_SUPPORTS_CARD = (function () {
     if (S.detJob) { S.detJob.job.cancel(); S.detJob = null; }
     if (S.job && S.job.stop) { var j = S.job; j.dead = true; j.stop(new Error('the card was closed')); }
     clearTimeout(S.angleTimer); S.angleTimer = 0;
+    cancelDrag();
     S.open = false; S.hostId = null; S.selSupport = null; S.msg = null; S.det = null; S.occ = {};
-    dispose(S.layer); S.layer = null;
+    S.tool = 'tips'; S.sel = null; S.hover = null; S.hot = null;
+    dispose(S.layer); S.layer = null; dispose(S.pts); S.pts = null; dispose(S.zoneLayer); S.zoneLayer = null; dispose(S.eraseLayer); S.eraseLayer = null;
     if (S.raf) cancelAnimationFrame(S.raf);
     S.raf = 0;
     sync();
@@ -1404,17 +1931,43 @@ var NSO_SUPPORTS_CARD = (function () {
 
   function onDown(ev) {
     if (!S.open || S.busy || ev.button !== 0 || !onCanvas(ev)) return;
+    var fed = S.mode !== 'auto', swallow = function () { ev.stopImmediatePropagation(); ev.preventDefault(); };
+    /* The markers own the pointer while their tool is on (a press on one is not
+       the view's); a press on nothing of theirs falls through, so the view
+       still orbits. CIRCLES owns the plate, and says so on the card: stop it to orbit. */
+    if (fed && S.tool === 'circles') { if (circleDown(ev)) swallow(); return; }
+    if (fed && S.tool === 'erase') {
+      var mid = memberAt(ev);
+      if (mid) { swallow(); eraseMember(mid); }
+      return;
+    }
+    if (fed && markerDown(ev)) { swallow(); return; }
     var h = hitAt(ev);
     if (!h) return;                                 // empty space: the view still orbits
     if (isSupport(h.id)) selectSupport(h.id);
     else if (h.id !== S.hostId) pick(h.id);
-    else if (ev.shiftKey) addBeacon(h.p, h.n);
+    else if (S.mode === 'custom') placeTip(h.p, h.n);       // a click on the piece is a tip
+    else if (ev.shiftKey) addBeacon(h.p, h.n);              // Auto and Assisted: a spot of your own
+    else if (fed) { if (S.selSupport != null || S.msg) { S.selSupport = null; S.msg = null; pick(S.hostId); } }
     else {
       var area = areaAt(ev);
       if (area != null) toggleArea(area);           // nothing builds on a click
       else if (S.selSupport != null || S.msg) { S.selSupport = null; S.msg = null; pick(S.hostId); }
     }
-    ev.stopImmediatePropagation(); ev.preventDefault();
+    swallow();
+  }
+
+  var hoverRaf = 0, lastMove = null;
+  function hoverAt(ev) {
+    if (S.tool === 'erase') { if (eraseReady()) hoverMember(memberAt(ev)); }
+    else if (S.tool === 'tips' && S.pts) { var b = spotAt(ev); setHot(b ? S.eff.beacons.indexOf(b) : null); }
+    return S.tool === 'erase' ? S.hover : S.hot;
+  }
+  function onMove(ev) {
+    if (!S.open || S.busy || S.mode === 'auto' || S.drag || !onCanvas(ev)) return;
+    lastMove = ev;
+    if (hoverRaf) return;
+    hoverRaf = requestAnimationFrame(function () { hoverRaf = 0; if (lastMove && S.open && !S.busy && !S.drag) hoverAt(lastMove); });
   }
 
   function wire() {
@@ -1428,10 +1981,21 @@ var NSO_SUPPORTS_CARD = (function () {
     on('btn-sup-remove', 'click', function () { removeSelected(); });
     on('sup-angle', 'input', function () { setAngle($('sup-angle').value, false); });
     on('sup-angle', 'change', function () { setAngle($('sup-angle').value, true); });
+    Object.keys(MODES).forEach(function (k) { on('sup-mode-' + k, 'click', function () { setMode(k); }); });
+    Object.keys(TOOLS).forEach(function (k) { on('sup-tool-' + k, 'click', function () { setTool(k); }); });
     window.addEventListener('pointerdown', onDown, true);
+    window.addEventListener('pointermove', onMove, true);
     window.addEventListener('keydown', onKey, true);
     sync();
   }
+  /* The markers are scene helpers (nso-helpers.js): put away on leave-tool and
+     Clear, redrawn after an Undo. */
+  if (typeof nsoHelpers !== 'undefined') nsoHelpers.owner('supports-card', {
+    live: function () { return S.open && S.mode !== 'auto'; },       // Auto draws what it always drew, and is left as it was
+    close: function () { var menu = $('menu-supports'); if (menu && menu.open) menu.open = false; else if (S.open) close(); },
+    clear: function () { dispose(S.pts); S.pts = null; dispose(S.zoneLayer); S.zoneLayer = null; dispose(S.eraseLayer); S.eraseLayer = null; },
+    refresh: function () { if (S.open) refresh(); }
+  });
   if (typeof document !== 'undefined') {
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire);
     else wire();
@@ -1477,9 +2041,9 @@ var NSO_SUPPORTS_CARD = (function () {
       var eff = S.eff || { beacons: [], regions: [], pitch: 3 };
       var st = S.hostId != null && eff.beacons.length ? statesFor(eff) : {};
       return {
-        host: S.hostId, state: cardState(), error: eff.error || null, pitch: eff.pitch, angle: S.angle,
+        host: S.hostId, state: cardState(), mode: S.mode, tool: S.tool, error: eff.error || null, pitch: eff.pitch, angle: S.angle,
         beacons: eff.beacons.map(function (b) {
-          return { key: b.key, p: pt(b), normal: b.normal, region: b.region, manual: b.manual, kind: b.need && b.need.kind, state: st[b.key] };
+          return { key: b.key, p: pt(b), normal: b.normal, region: b.region, manual: b.manual, kind: b.need && b.need.kind, state: st[b.key], off: !!b.off, tip: !!b.tip };
         }),
         areas: eff.regions.map(function (r) {
           return { id: r.id, count: r.beacons.length, point: r.point, normal: r.normal, excluded: !!r.excluded,
@@ -1491,7 +2055,53 @@ var NSO_SUPPORTS_CARD = (function () {
         count: ($('sup-count') || {}).textContent || ''
       };
     },
-    supports: function (hostId) { return supportsOf(hostId == null ? S.hostId : hostId); }
+    supports: function (hostId) { return supportsOf(hostId == null ? S.hostId : hostId); },
+
+    /** Auto, Assisted or Custom (a setting, like the angle: not an Undo step). */
+    mode: function (k) { if (k !== undefined) setMode(k); return S.mode; },
+    /** The tool that holds the pointer in a fed mode: 'tips', 'circles' or 'erase'; the one that is on, asked again, is stopped. */
+    tool: function (k) { if (k !== undefined) setTool(k); return S.tool; },
+    toggleSpot: toggleSpot,
+    placeTip: placeTip,
+    removeTip: removeTip,
+    addZone: addZone,
+    removeZone: removeZone,
+    selectZone: function (i) { S.sel = i == null ? null : i; drawZones(); sync(); return S.sel; },
+    /** Erase a built member by id (what a click on it does): the plan is made again. */
+    eraseMember: eraseMember,
+    /** The built members the eraser can hit, as the last build named them. */
+    members: function () { return memOf(S.hostId == null ? -1 : S.hostId).members.slice(); },
+    /** Where on the page (client pixels) a spot / tip / circle's edge is, for a real click. */
+    screenOf: function (kind, key) {
+      var el = state.renderer && state.renderer.domElement, r = el && el.getBoundingClientRect(), q = null;
+      if (!r || !state.camera) return null;
+      if (kind === 'spot' || kind === 'tip') { var b = spotByKey(key); q = b && upToView(pt(b)); }
+      else if (kind === 'zone') { var z = zonesOf()[key]; q = z && new THREE.Vector3(z.x, 0, -z.y); }
+      else if (kind === 'zone-edge') { var e = zonesOf()[key]; q = e && new THREE.Vector3(e.x + e.r, 0, -e.y); }
+      else if (kind === 'member') {
+        var M = memOf(S.hostId).members.find(function (x) { return x.id === key; });
+        q = M && upToView([(M.from[0] + M.to[0]) / 2, (M.from[1] + M.to[1]) / 2, (M.from[2] + M.to[2]) / 2]);
+      }
+      if (!q) return null;
+      state.camera.updateMatrixWorld();
+      var v = q.clone().project(state.camera);
+      return { x: r.left + (v.x * 0.5 + 0.5) * r.width, y: r.top + (-v.y * 0.5 + 0.5) * r.height };
+    },
+    /** What the markers show now: the spots / tips drawn, how many are off, the circles, which is selected, what the eraser has lit. */
+    markers: function () {
+      var eff = S.eff || { beacons: [] }, m = S.hostId != null ? modelOf(S.hostId) : null, F = m && m.nsoSupportFeed;
+      return {
+        mode: S.mode, tool: S.tool,
+        points: S.pts ? eff.beacons.length : 0, off: eff.beacons.filter(function (b) { return b.off; }).length,
+        tips: F ? F.tips.length : 0, zones: F ? F.zones.map(function (z) { return { x: z.x, y: z.y, r: z.r }; }) : [],
+        selected: S.sel, hot: S.hot != null && eff.beacons[S.hot] ? eff.beacons[S.hot].key : null,
+        erased: F ? F.erased.slice() : [], zonesEmpty: S.hostId != null ? memOf(S.hostId).zonesEmpty.slice() : [],
+        hover: S.hover, lit: S.hover && S.hostId != null ? litBy(S.hover).map(function (x) { return x.id; }) : [],
+        eraseLayer: S.eraseLayer ? S.eraseLayer.children.length : 0, eraseReady: S.hostId != null && eraseReady()
+      };
+    },
+    /** Forget every host's tips, toggles, circles and erasures (what CLEAR PLATE does). */
+    forgetAll: forgetAll
   };
 })();
 
