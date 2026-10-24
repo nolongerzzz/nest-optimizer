@@ -246,9 +246,9 @@ async function main() {
   const dStart = diffs(pStart, bStart);
   check('the machine start block is Studio\'s for the plate, line for line (' + pStart.length + ' lines)', dStart && dStart.length <= 1 && dStart.every(d => /^\s*G29 A1 X/.test(d[0])),
     dStart ? JSON.stringify(dStart.slice(0, 4)) : pStart.length + ' vs ' + bStart.length);
-  check('...the one line that differs is the bed-leveling box: this plate\'s first layer, within 2 mm of Studio\'s (the owner\'s slice has an older support pad) (' + (dStart && dStart[0] ? dStart[0][0].trim() + ' against ' + dStart[0][1].trim() : 'none') + ')',
-    !dStart || !dStart[0] || (() => { const a = /X([\d.]+) Y([\d.]+) I([\d.]+) J([\d.]+)/.exec(dStart[0][0]), b = /X([\d.]+) Y([\d.]+) I([\d.]+) J([\d.]+)/.exec(dStart[0][1]);
-      return [1, 2, 3, 4].every(k => near(+a[k], +b[k], 2)); })());
+  check('...the one line that differs is the bed-leveling box, and it is THIS plate\'s first layer: ' + (dStart && dStart[0] ? dStart[0][0].trim() : 'none') + ' (Studio\'s slice is of an older tree: ' + (dStart && dStart[0] ? dStart[0][1].trim() : '-') + ')',
+    !dStart || !dStart[0] || (() => { const a = /X([\d.]+) Y([\d.]+) I([\d.]+) J([\d.]+)/.exec(dStart[0][0]), bx = P.stats.box;
+      return near(+a[1], bx.x, 1e-4) && near(+a[2], bx.y, 1e-4) && near(+a[3], bx.w, 1e-4) && near(+a[4], bx.h, 1e-4); })());
   const pEnd = slab(plines, '; MACHINE_END_GCODE_START', 'M17 R ; restore z current');
   const bEnd = slab(blines, '; MACHINE_END_GCODE_START', 'M17 R ; restore z current');
   const dEnd = diffs(pEnd, bEnd);
@@ -415,8 +415,14 @@ async function main() {
   const tri = PL.plan(pb3.res, { config: tpl, printer: PR });
   const tg = tri.ok ? tri.gcode.split('\n') : [];
   const tmask = tg.filter(l => /^M624 /.test(l)).reduce((a, l) => { a[l] = (a[l] || 0) + 1; return a; }, {});
-  check('three objects (the arc and two trees): masks are bits 0, 1, 2 - ' + Object.keys(tmask).join(' ') + '; the hook\'s union is BwAAAAAAAAA=',
-    tri.ok && pb3.res.objects.length === 3 && tri.labelled && 'M624 AQAAAAAAAAA=' in tmask && 'M624 AgAAAAAAAAA=' in tmask && 'M624 BAAAAAAAAAA=' in tmask && 'M624 BwAAAAAAAAA=' in tmask && PL.objectMask([0, 1, 2]) === 'BwAAAAAAAAA=',
+  const nObj = pb3.res.objects.length;
+  const wantMasks = new Set();
+  for (let i = 0; i < nObj; i++) wantMasks.add('M624 ' + PL.objectMask([i]));
+  const unionM = 'M624 ' + PL.objectMask(Array.from({ length: nObj }, (v, i) => i));
+  check('the arc and its NSO trees (' + nObj + ' objects): M624 carries one bit per object, bits 0..' + (nObj - 1) + ', and the hook\'s union is all ' + nObj + ' - ' + Object.keys(tmask).join(' '),
+    tri.ok && nObj >= 2 && tri.labelled && Object.keys(tmask).every(k => wantMasks.has(k) || k === unionM) && [...wantMasks].every(k => k in tmask) && unionM in tmask &&
+      [...wantMasks].every(k => { const by = Buffer.from(k.slice(5), 'base64'); return by.length === 8 && by.reduce((n, v) => n + v.toString(2).split('1').length - 1, 0) === 1; }) &&
+      new Set([...wantMasks].map(k => k)).size === nObj,
     tri.ok ? JSON.stringify(tmask) : tri.reason);
 
   // ===========================================================================
