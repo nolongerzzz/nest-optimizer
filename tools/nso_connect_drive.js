@@ -54,6 +54,17 @@ const path = require('path');
 const { withApp, loadSTL, ROOT } = require('./nso_app_harness');
 const L = require('./nso_bridge_testlib.js');
 
+/* THREE STEPS, ONE FILE. --only=cards runs 1-9 (the two spheres), corners 10-11 (four boxes, Attach), draw 12; no
+   flag runs all. CI runs them as connect:drive-cards / -corners / -draw: the whole was ~246 s here (441 s on CI), a
+   step is the smallest thing a shard can be packed with. 10 and 12 each start from a bare plate; the closing
+   "no page errors" check runs in every one. Screenshots are skipped under CI (nothing reads them) unless --shots. */
+const GROUPS = ['cards', 'corners', 'draw'];
+const onlyArg = process.argv.find(a => a.startsWith('--only='));
+const ONLY = onlyArg ? onlyArg.slice('--only='.length) : null;
+if (ONLY !== null && !GROUPS.includes(ONLY)) { console.error('nso_connect_drive: --only=' + ONLY + ' is not one of ' + GROUPS.join(', ')); process.exit(2); }
+const RUN = Object.fromEntries(GROUPS.map(g => [g, !ONLY || ONLY === g]));
+const SHOTS_ON = process.argv.includes('--shots') || !process.env.CI;
+
 let fails = 0;
 const check = (name, cond, detail) => {
   console.log('  ' + (cond ? 'ok   ' : 'FAIL ') + name + (detail ? ' - ' + detail : ''));
@@ -61,7 +72,7 @@ const check = (name, cond, detail) => {
 };
 const OUT = path.join(ROOT, 'tools', 'connect-out');
 fs.mkdirSync(OUT, { recursive: true });
-const shot = async (page, name) => { await page.screenshot({ path: path.join(OUT, name + '.png') }); };
+const shot = async (page, name) => { if (!SHOTS_ON) return; await page.screenshot({ path: path.join(OUT, name + '.png') }); };
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'nso-connect-drive-'));
 
 /* ---- in-page helpers, installed once ---- */
@@ -221,6 +232,14 @@ const sameSnap = (a, b) => a.length === b.length && a.every(x => b.some(y => y.i
 withApp(async (page, logs) => {
   await page.evaluate(installHelpers);
 
+  /* used by more than one group (sections 2-3 and 11; 8 and 11), so declared above them */
+  const cp = Math.cos(50 * Math.PI / 180), sp = Math.sin(50 * Math.PI / 180);
+  const armed = () => page.evaluate(() => ({ open: !!state.connect.open, menu: document.getElementById('menu-connect').open,
+    hidden: document.getElementById('connect-panel').hidden, vis: document.getElementById('connect-panel').getBoundingClientRect().height > 0,
+    picks: !!(state.connect.a || state.connect.b), overlay: !!(state.connect.overlay && state.connect.overlay.parent),
+    ghost: !!(state.connect.ghost && state.connect.ghost.parent), line: !!(state.connect.line && state.connect.line.parent) }));
+
+  if (RUN.cards) {
   console.log('\n=== 1. the drop-down: between Crop and Join ===');
   const ui = await page.evaluate(() => {
     const m = document.getElementById('menu-connect'), crop = document.getElementById('menu-crop'), join = document.getElementById('menu-joins');
@@ -251,7 +270,6 @@ withApp(async (page, logs) => {
     await page.evaluate(() => document.querySelector('input[name="connect-result"]:checked').value === 'weld'));
   const cen = await page.evaluate(ids => ids.map(id => { const b = window.__cn.bounds(window.__cn.up(id)); return [(b.lo[0] + b.hi[0]) / 2, (b.lo[1] + b.hi[1]) / 2, (b.lo[2] + b.hi[2]) / 2]; }), ids);
   // On the sides that face each other and tip upward (50° up), so both are in sight from the front AND from the end.
-  const cp = Math.cos(50 * Math.PI / 180), sp = Math.sin(50 * Math.PI / 180);
   const pa = [cen[0][0] + 8 * cp, cen[0][1] + 0.3, cen[0][2] + 8 * sp], pb = [cen[1][0] - 8 * cp, cen[1][1] + 0.3, cen[1][2] + 8 * sp];
   const mid = [(pa[0] + pb[0]) / 2, (pa[1] + pb[1]) / 2, (pa[2] + pb[2]) / 2];
   const V1 = [mid[0], mid[2] + 45, -mid[1] + 25], AT = [mid[0], mid[2], -mid[1]];
@@ -486,10 +504,6 @@ withApp(async (page, logs) => {
   check('...and the column drop-down is shut with it', await page.evaluate(() => !document.getElementById('menu-connect').open));
 
   console.log('\n=== 8. no gate: the column button opens it armed; three ways shut ===');
-  const armed = () => page.evaluate(() => ({ open: !!state.connect.open, menu: document.getElementById('menu-connect').open,
-    hidden: document.getElementById('connect-panel').hidden, vis: document.getElementById('connect-panel').getBoundingClientRect().height > 0,
-    picks: !!(state.connect.a || state.connect.b), overlay: !!(state.connect.overlay && state.connect.overlay.parent),
-    ghost: !!(state.connect.ghost && state.connect.ghost.parent), line: !!(state.connect.line && state.connect.line.parent) }));
   await page.click('#menu-connect > summary');
   let A = await armed();
   check('one click on the column button: the real card is open and visible, the picks are live', A.menu && A.open && !A.hidden && A.vis, JSON.stringify(A));
@@ -644,6 +658,8 @@ withApp(async (page, logs) => {
   }
 
 
+  }
+  if (RUN.corners) {
   console.log('\n=== 10. the anchor is the point under the cursor: corners, Shift, and three in a row ===');
   {
     // a bare plate: four boxes, 40 mm apart in a row
@@ -888,6 +904,8 @@ withApp(async (page, logs) => {
     await shot(page, '09-attach');
   }
 
+  }
+  if (RUN.draw) {
   console.log('\n=== 12. DRAW: a real freehand drag - plate to plate, plate up onto a piece, Esc, the card stays armed ===');
   {
     // a bare plate, then one box
@@ -1026,6 +1044,7 @@ withApp(async (page, logs) => {
     check('Escape with nothing picked closes the card', !D.open && D.hidden);
   }
 
+  }
   const errs = logs.filter(l => /\[pageerror\]|\[error\]/.test(l) && !/favicon/.test(l));
   check('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
   console.log('\n' + (fails ? fails + ' FAILED' : 'all gates held') + '   (screenshots in tools/connect-out/)');

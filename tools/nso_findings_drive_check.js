@@ -43,6 +43,14 @@ const RL = require('./nso_repair_loop_lib.js');
 const SHOTS = path.join(__dirname, 'repair-out');      // git-ignored; the card on the shredded sphere, before and after Fix all
 
 const fx = f => path.join(ROOT, 'fixtures', f);
+
+/* TWO STEPS, ONE FILE. --only=card runs sections 1-8 (the card, the Finish menu, a bake); --only=fixes runs 9-9g (each
+   finding's own fix, one fixture each). CI runs them as findings:drive-card / -fixes, ~95 s and ~85 s here where the whole
+   was ~179 s (288 s on CI). No flag runs everything. */
+const onlyArg = process.argv.find(a => a.startsWith('--only='));
+const ONLY = onlyArg ? onlyArg.slice('--only='.length) : null;
+if (ONLY !== null && ONLY !== 'card' && ONLY !== 'fixes') { console.error('nso_findings_drive_check: --only=' + ONLY + ' is not card or fixes'); process.exit(2); }
+const RUN = { card: !ONLY || ONLY === 'card', fixes: !ONLY || ONLY === 'fixes' };
 let fails = 0;
 const check = (name, cond, detail) => {
   console.log('  ' + (cond ? 'ok   ' : 'FAIL ') + name + (detail !== undefined ? ' - ' + detail : ''));
@@ -111,6 +119,7 @@ withApp(async (page, logs) => {
   /* ---------------------------------------------------------------- *
    * 1-2. the rows and the rings, on the damage, open and repair fixtures
    * ---------------------------------------------------------------- */
+  if (RUN.card) {
   console.log('1. the card says what the check found, and nothing else');
   const CASES = [
     'damage/shape-sphere_holes-shredded.stl',
@@ -484,6 +493,8 @@ withApp(async (page, logs) => {
   /* ---------------------------------------------------------------- *
    * 9. the fix that fits
    * ---------------------------------------------------------------- */
+  }
+  if (RUN.fixes) {
   console.log('\n9. every finding names its own fix, runs it on that finding only, and re-scans');
   const rawSoup = (page, id) => page.evaluate(i => Array.from(getModelRawSoup(state.models.find(x => x.id === i))), id).then(a => new Float32Array(a));
   const undoDepth = page => page.evaluate(() => state.undoStack.length);
@@ -744,6 +755,7 @@ withApp(async (page, logs) => {
   const errs = logs.filter(l => l.startsWith('[pageerror]'));
   if (errs.length) { console.log('\npage errors:\n' + errs.join('\n')); fails += errs.length; }
 
+  }
   console.log('\n----------------------------------------------------------');
   console.log(fails ? 'FAIL (' + fails + ')' : 'PASS');
   process.exit(fails ? 1 : 0);
