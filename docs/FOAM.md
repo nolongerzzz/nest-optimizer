@@ -309,9 +309,8 @@ should keep the void for its piece while the amount changes (not done: the GUN, 
 
 `app-foam.js` (the gun), `app-crop-card.js` (the loan of the Box), `index.html` (`#btn-foam-gun`,
 `#foam-gun-panel`). UI only: every number is foamBox's (§10). `tools/nso_foam_drive_check.js`
-sections 10-15 drive it in the real page; screenshots in `tools/foam-gun-out/`
-([box placed](../tools/foam-gun-out/1-box-placed.png), [mid-spray](../tools/foam-gun-out/2-mid-spray.png),
-[set](../tools/foam-gun-out/3-set.png)).
+sections 10-15 drive it in the real page and write three screenshots (box placed, mid-spray, set)
+to `tools/foam-gun-out/` (git-ignored: run `npm run foam:drive` to make them).
 
 | step | what happens |
 |---|---|

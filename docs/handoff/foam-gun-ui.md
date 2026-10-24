@@ -20,10 +20,9 @@ Full description, decisions and limits: docs/FOAM.md section 11.
 - **Checks.** `foam:drive` sections 10-15 (GUN shows the box; the handles size it with
   a real mouse; hold fills, release sets, Undo restores; a second spray stacks; Escape
   and Cancel clear, Foam and GUN swap; box_closed fills with no flag, +46,166 mm³).
-  Screenshots written to `tools/foam-gun-out/`: [box placed](../../tools/foam-gun-out/1-box-placed.png),
-  [mid-spray](../../tools/foam-gun-out/2-mid-spray.png), [set](../../tools/foam-gun-out/3-set.png).
-  Run on this branch, not the full suite: `foam:drive`, `pick:release`, `page:manifest`,
-  the 21 steps `--touching app-foam.js` lists, and `wire:crop`, `crop:shapes`,
-  `crop:drive` for the Crop card. `pick:release`'s roster has no GUN row (the drive
+  Screenshots (box placed, mid-spray, set) are written to `tools/foam-gun-out/` by
+  `npm run foam:drive`; the folder is git-ignored, so they are not committed files.
+  Gate at the rebase onto 9c6230f: `page:manifest` plus the steps `run-tests.mjs --touching`
+  lists for each changed file; `foam:drive` is a drive, not part of the gate. `pick:release`'s roster has no GUN row (the drive
   checks the controls come back after a spray and after Escape).
 - `testStepWeights` `foam:drive` 77350 -> 165000 (97 s on this box with sections 10-15, x1.7).
