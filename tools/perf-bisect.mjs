@@ -548,6 +548,7 @@ async function timingRun(browser, root, port, vase, want) {
 
 // ----------------------------------------------------------------------------------------------- the leak cycles
 const CYCLE_KINDS = ['yaw+undo', 'bake+undo', 'cut-preview', 'select'];
+let ACTIVE_KINDS = opt('kinds', CYCLE_KINDS.join(',')).split(',').filter(k => CYCLE_KINDS.includes(k));   // a bisect step runs only the cycle it is chasing
 
 async function waitUndo(page, n, ms) {
   return page.waitForFunction(n => state.undoStack.length === n, n, { timeout: ms, polling: 100 }).then(() => true, () => false);
@@ -682,7 +683,8 @@ async function measureCommit(c, wantProbes, dir) {
   // what is already there is kept unless --force, so a resumed or widened run does only the missing probes
   const have = pr => !FORCE && prev.timing && prev.timing.probesDone && prev.timing.probesDone.includes(pr);
   const needTiming = ['click', 'drag', 'lift', 'idle', 'orbit'].some(p => want.has(p) && !have(p)) || (want.has('load') && !have('load'));
-  const needLeaks = want.has('leaks') && !(!FORCE && prev.leaks && prev.leaks.done);
+  const leakHave = k => !FORCE && prev.leaks && prev.leaks.byKind && prev.leaks.byKind[k] && !prev.leaks.byKind[k].partial;
+  const needLeaks = want.has('leaks') && ACTIVE_KINDS.some(k => !leakHave(k));
   if (!needTiming && !needLeaks) { log(label(c), 'already measured'); return prev; }
   log('==', label(c), '-', c.subject);
   const wt = checkout(c.sha);
@@ -722,8 +724,9 @@ async function measureCommit(c, wantProbes, dir) {
       saveResult(c, res, dir);
     }
     if (needLeaks) {
-      const leaks = { cycles: CYCLES, bake: BAKE, byKind: {}, done: false };
-      for (const kind of CYCLE_KINDS) {
+      const leaks = { cycles: CYCLES, bake: BAKE, byKind: Object.assign({}, prev.leaks && prev.leaks.byKind), done: false };
+      for (const kind of ACTIVE_KINDS) {
+        if (leakHave(kind)) continue;
         log('  leaks:', kind);
         try {
           const r = await leakRun(browser, wt, port, vase, kind);
@@ -732,7 +735,7 @@ async function measureCommit(c, wantProbes, dir) {
         } catch (e) { leaks.byKind[kind] = { na: 'error: ' + String(e && e.message || e).split('\n')[0] }; }
         saveResult(c, Object.assign({}, res, { leaks }), dir);
       }
-      leaks.done = true;
+      leaks.done = CYCLE_KINDS.every(k => leaks.byKind[k]);
       res.leaks = leaks;
       saveResult(c, res, dir);
     }
@@ -754,7 +757,8 @@ const TIMING_LABELS = [
   ['orbit.msPerFrame', 'Orbit: ms / frame', 'ms'], ['orbit.jsMsPerFrame', 'Orbit: app JS ms / frame', 'ms'], ['orbit.fps', 'Orbit: frames / s', 'fps']
 ];
 // the metrics the 20 % and 5 ms rule reads in pass 2 (fps is the same fact as ms / frame, so it is not a second trigger)
-const TRIGGER_KEYS = TIMING_LABELS.filter(l => l[2] === 'ms' && !/medMs$/.test(l[0])).map(l => l[0]);
+// load.box.* is left out: the self-check shows it scatters by tens of ms from run to run (a 12-triangle STL read off disk)
+const TRIGGER_KEYS = TIMING_LABELS.filter(l => l[2] === 'ms' && !/medMs$/.test(l[0]) && !/^load\.box\./.test(l[0])).map(l => l[0]);
 
 function metricOf(res, key) {
   if (!res) return undefined;
@@ -785,6 +789,7 @@ function leakKeysOf(res) {
 async function bisect(good, bad, metric, ch) {
   const trail = [];
   const probe = metric.startsWith('leaks.') ? 'leaks' : metric.split('.')[0];
+  if (probe === 'leaks') ACTIVE_KINDS = [metric.split('.')[1]];
   const measure = async c => { const r = await measureCommit(c, probe === 'leaks' ? ['leaks'] : ['load', probe]); return metricOf(r, metric); };
   const g = await measure(good), b = await measure(bad);
   if (g == null || b == null) return { metric, good: good.short, bad: bad.short, error: 'endpoint has no value for ' + metric + ' (good ' + g + ', bad ' + b + ')', trail };
@@ -987,11 +992,21 @@ async function main() {
       keys.forEach(k => { const x = metricOf(a, k), y = metricOf(b, k); if (moved(x, y, k)) flagged.push({ from: plan[i - 1], to: plan[i], key: k, a: x, b: y }); });
     }
     log('pass 2: ' + flagged.length + ' neighbour movements flagged');
+    /* one bisect per probe group per pair: the first key flagged in a group (frame before JS, geometries before heap) is
+       chased, the rest of the group is measured by the same runs and listed as "also moved" */
+    const groups = new Map();
+    flagged.forEach(f => {
+      const parts = f.key.split('.'), g = f.from.short + '>' + f.to.short + ' ' + parts.slice(0, parts[0] === 'leaks' || parts[0] === 'load' || parts[0] === 'drag' ? 2 : 1).join('.');
+      if (!groups.has(g)) groups.set(g, Object.assign({}, f, { also: [] })); else groups.get(g).also.push(f.key);
+    });
+    const todo = [...groups.values()];
+    if (flag('dry')) { todo.forEach(f => console.log(f.key.padEnd(34), f.from.short, '->', f.to.short, '(' + (f.to.pos - f.from.pos) + ' commits)', fx(f.a, 2), '->', fx(f.b, 2), f.also.length ? 'also ' + f.also.join(' ') : '')); return; }
     const results = [];
-    for (const f of flagged) {
-      if (f.to.pos - f.from.pos <= 1) { results.push({ metric: f.key, good: f.from.short, bad: f.to.short, culprit: f.to.short, culpritSubject: f.to.subject, prs: f.to.prs, merge: f.to.merge, beforeValue: f.a, afterValue: f.b, trail: [] }); continue; }
+    for (const f of todo) {
+      if (f.to.pos - f.from.pos <= 1) { results.push({ also: f.also, metric: f.key, good: f.from.short, bad: f.to.short, culprit: f.to.short, culpritSubject: f.to.subject, prs: f.to.prs, merge: f.to.merge, beforeValue: f.a, afterValue: f.b, trail: [] }); continue; }
       log('bisect', f.key, f.from.short, '->', f.to.short, fx(f.a, 2), '->', fx(f.b, 2));
       const r = await bisect(f.from, f.to, f.key, ch);
+      r.also = f.also; r.fromPass1 = { from: f.from.short, to: f.to.short };
       results.push(r);
       fs.writeFileSync(path.join(OUT, 'pass2.json'), JSON.stringify(results, null, 1));
     }
