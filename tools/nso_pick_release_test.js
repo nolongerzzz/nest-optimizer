@@ -42,6 +42,14 @@ const { withApp, loadSTL, selectModel, ROOT } = require('./nso_app_harness');
 const NSO_Stock = require('../nso_stock.js');
 const L = require('./nso_bridge_testlib.js');
 
+/* THREE STEPS, ONE FILE. The roster's rows are independent (each clears the plate and loads its own piece), so CI runs
+   them as pick:release-edit / -paint-lift / -cards, ~70-85 s each here where the whole was ~216 s (374 s on CI). The
+   baseline (0) and the closing no-page-errors check run in every one; no flag runs all ten rows. */
+const STEPS = { edit: 'Patch,Cap,Soften,Carve', 'paint-lift': 'Paint,Lift', cards: 'Close,Bridge,Connect,Punch' };
+const onlyArg = process.argv.find(a => a.startsWith('--only='));
+const STEP_ROWS = onlyArg ? STEPS[onlyArg.slice('--only='.length)] : null;
+if (onlyArg && !STEP_ROWS) { console.error('nso_pick_release_test: ' + onlyArg + ' is not --only=' + Object.keys(STEPS).join('|')); process.exit(2); }
+
 let fails = 0;
 const check = (name, cond, detail) => {
   console.log('  ' + (cond ? 'ok   ' : 'FAIL ') + name + (detail ? ' - ' + detail : ''));
@@ -405,9 +413,11 @@ withApp(async (page, logs) => {
   check('a bare drag orbits with no tool up', (await reading(page, 'baseline')) === 'ORBITED');
   await page.click('#btn-clear-plate');
 
+  if (!ROSTER.every(r => Object.values(STEPS).filter(v => v.split(',').includes(r.name)).length === 1) ||
+      Object.values(STEPS).join(',').split(',').length !== ROSTER.length) { console.error('nso_pick_release_test: every roster row belongs to exactly one step'); process.exit(2); }
   let n = 0;
-  // PICK_ONLY=Bridge,Connect runs just those rows (the roster is slow end to end).
-  const only = (process.env.PICK_ONLY || '').split(',').filter(Boolean);
+  // PICK_ONLY=Bridge,Connect runs just those rows (the roster is slow end to end); --only=<step> runs a CI step's rows.
+  const only = (STEP_ROWS || process.env.PICK_ONLY || '').split(',').filter(Boolean);
   for (const V of ROSTER.filter(r => !only.length || only.indexOf(r.name) >= 0)) {
     n++;
     console.log('\n=== ' + n + '. ' + V.name + ' ===');

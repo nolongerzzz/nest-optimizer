@@ -136,6 +136,15 @@ function install() {
   };
 }
 
+/* TWO STEPS, ONE FILE. --only=levels runs section 1 (3 positions x 3 zoom levels, in and out); --only=rest runs 2-5. CI
+   runs them as gcode:gscope-zoom-levels / -rest, ~125 s each here where the whole was ~245 s (280 s on CI). The slice
+   is opened, and the closing CDN and page-error checks run, in both. No flag runs everything. */
+const GROUPS = ['levels', 'rest'];
+const onlyArg = process.argv.find((a) => a.startsWith('--only='));
+const ONLY = onlyArg ? onlyArg.slice('--only='.length) : null;
+if (ONLY !== null && !GROUPS.includes(ONLY)) { console.error('gscope-zoom-drive-check: --only=' + ONLY + ' is not one of ' + GROUPS.join(', ')); process.exit(2); }
+const RUN = Object.fromEntries(GROUPS.map((g) => [g, !ONLY || ONLY === g]));
+
 async function main() {
   const served = await serveRoot();
   const browser = await chromium.launch(launchOpts());
@@ -224,9 +233,7 @@ async function main() {
   }
 
   // =======================================================================
-  console.log('\n--- 1. the point under the cursor holds: 3 positions x 3 zoom levels, in and out ---');
-  // =======================================================================
-  const LEVELS = [['close', D0 * 0.6], ['framed', D0], ['far', D0 * 3]];
+  /* the spots section 1 and section 2 both read */
   const r = await N(() => window.__gz.rect());
   const pref = [
     ['part, upper left', 'part', [r[0] + r[2] * 0.40, r[1] + r[3] * 0.38]],
@@ -234,6 +241,11 @@ async function main() {
     ['bed', 'bed', [r[0] + r[2] * 0.5, r[1] + r[3] * 0.95]],
   ];
   const centre = [r[0] + r[2] / 2, r[1] + r[3] / 2];
+
+  if (RUN.levels) {
+  console.log('\n--- 1. the point under the cursor holds: 3 positions x 3 zoom levels, in and out ---');
+  // =======================================================================
+  const LEVELS = [['close', D0 * 0.6], ['framed', D0], ['far', D0 * 3]];
   let worst = 0, worstRatio = 0, steps = 0;
   const kinds = new Set();
   for (const [lvName, D] of LEVELS) {
@@ -271,6 +283,8 @@ async function main() {
 
   lap();
   // =======================================================================
+  }
+  if (RUN.rest) {
   console.log('\n--- 2. what counts as under the cursor ---');
   // =======================================================================
   // Over nothing: high on the canvas the ray meets the bed plane past the grid.
@@ -479,6 +493,7 @@ async function main() {
 
   // =======================================================================
   lap();
+  }
   console.log('\n--- the build ---');
   // =======================================================================
   check('nothing hit the CDN unrouted', cdn.filter((s) => s.startsWith('UNROUTED')), []);

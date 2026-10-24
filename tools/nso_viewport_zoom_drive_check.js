@@ -28,9 +28,18 @@ const check = (name, cond, detail) => {
   console.log('  ' + (cond ? 'ok   ' : 'FAIL ') + name + (detail !== undefined ? ' - ' + detail : ''));
   if (!cond) fails++;
 };
+/* TWO STEPS, ONE FILE. --only=near runs section 1 at the two nearer zoom levels (60, 300 mm); --only=far runs it at
+   900 mm and sections 2-5. CI runs them as zoom:drive-near / -far, ~110 s each here where the whole was ~219 s (325 s
+   on CI): section 1 alone was 162 s. Each level covers a piece and the bare plane, so the coverage check holds in
+   both. No flag runs everything. */
+const onlyArg = process.argv.find(a => a.startsWith('--only='));
+const ONLY = onlyArg ? onlyArg.slice('--only='.length) : null;
+if (ONLY !== null && ONLY !== 'near' && ONLY !== 'far') { console.error('nso_viewport_zoom_drive_check: --only=' + ONLY + ' is not near or far'); process.exit(2); }
+const RUN = { far: !ONLY || ONLY === 'far' };
 const px = (a) => '(' + a[0].toFixed(2) + ', ' + a[1].toFixed(2) + ')';
 const dist2 = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
 const TOL_PX = 1;
+const WHEEL = 2;      // wheel steps each way in section 1
 
 withApp(async (page, logs) => {
   await page.setViewportSize({ width: 1400, height: 860 });
@@ -118,7 +127,7 @@ withApp(async (page, logs) => {
   console.log('\n=== 1. the point under the cursor stays under it (off the plate: its plate-edge anchor holds): 3 positions x 3 zoom levels, in and out ===');
   const box0 = await N(() => window.__z.boxTop());
   const boxBed = [box0[0], 0, box0[2]];
-  const LEVELS = [60, 300, 900];
+  const LEVELS = ONLY === 'near' ? [60, 300] : ONLY === 'far' ? [900] : [60, 300, 900];
   const kinds = new Set();
   let worst = 0, steps = 0;
   for (const D of LEVELS) {
@@ -151,9 +160,9 @@ withApp(async (page, logs) => {
         const home = u.a ? s0 : at;
         const sign = dir === 'in' ? -1 : 1;
         let drift = dist2(s0, home), farDrift = 0, ok = true, dOk = true, prevD = c0.d;
-        // three steps one way, three back
-        for (let i = 0; i < 6; i++) {
-          const way = i < 3 ? sign : -sign;
+        // two steps one way, two back (three and three before ci-shard-split-2: 108 wheel steps were 162 s of ~219 s)
+        for (let i = 0; i < 2 * WHEEL; i++) {
+          const way = i < WHEEL ? sign : -sign;
           const c = await wheelAt(at[0], at[1], 100 * way);
           const s = await N(p => window.__z.proj(p), anchorP);
           drift = Math.max(drift, dist2(s, home));
@@ -176,13 +185,14 @@ withApp(async (page, logs) => {
         }
         check(label + ': each step went the way of the wheel (in = closer)', dOk);
         const back = Math.hypot(...c1.pos.map((x, i) => x - c0.pos[i])) + Math.hypot(...c1.tgt.map((x, i) => x - c0.tgt[i]));
-        check(label + ': three back undo three forward (camera and target home to 1e-6 mm)', back < 1e-6, back.toExponential(2));
+        check(label + ': ' + WHEEL + ' back undo ' + WHEEL + ' forward (camera and target home to 1e-6 mm)', back < 1e-6, back.toExponential(2));
       }
     }
   }
   console.log('   ' + steps + ' wheel steps, worst ' + worst.toFixed(3) + ' px; under the cursor: ' + [...kinds].join(', '));
   check('the positions covered a piece and the bare plane', kinds.has('piece') && (kinds.has('plate') || kinds.has('ground')), [...kinds].join(', '));
 
+  if (RUN.far) {
   console.log('\n=== 2. a trackpad pinch (ctrl + wheel) takes the same path ===');
   await N(([t]) => window.__z.view(t, 300), [boxBed]);
   const cp0 = await settle();
@@ -310,6 +320,7 @@ withApp(async (page, logs) => {
   const mAlt = await gesture('Alt-click, Measure armed', { measure: true, alt: true });
   check('Measure armed, Alt-click: no "Moved model" status (as before)', !mAlt.saidMoved && mAlt.moved === 0, mAlt.status);
 
+  }
   const errs = logs.filter(l => /pageerror|\[error\]/.test(l));
   check('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
 

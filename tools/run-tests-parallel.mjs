@@ -57,8 +57,16 @@
  * question anyone can answer in a second, rather than something you have to
  * know to go and check with pgrep.
  *
+ * WHICH STEPS, AND HOW MANY SHARDS
+ * testSteps only, as `npm test` and CI do: the steps that launch a browser are
+ * in driveSteps and are run with `npm run test:drives` (docs/TESTING.md). The
+ * default shard count is CI's: SHARDS in .github/workflows/test.yml, the one
+ * place that number is written (the measurements above were at six shards, on
+ * the suite before the drives came out; the curve's shape is the box's, not the
+ * suite's).
+ *
  * Usage:
- *   node tools/run-tests-parallel.mjs                 # 6 shards, jobs = cores
+ *   node tools/run-tests-parallel.mjs                 # CI's shards, jobs = cores
  *   node tools/run-tests-parallel.mjs --shards=6 --jobs=4
  *   node tools/run-tests-parallel.mjs --status        # is a run alive?
  */
@@ -71,6 +79,19 @@ import { cpus } from 'node:os';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
 const declared = Array.isArray(pkg.testSteps) ? pkg.testSteps : [];
+
+/* SHARDS in .github/workflows/test.yml: the shard count CI runs, and so the
+   default here. (tools/run-tests.mjs reads the same line for --shard-plan.) */
+function ciShards() {
+  let t = '';
+  try { t = readFileSync(join(ROOT, '.github', 'workflows', 'test.yml'), 'utf8'); } catch { /* reported below */ }
+  const m = /^\s*SHARDS:\s*(\d+)\s*(?:#.*)?$/m.exec(t);
+  if (!m) {
+    console.error('run-tests-parallel: cannot read SHARDS from .github/workflows/test.yml - pass --shards=N');
+    process.exit(2);
+  }
+  return Number(m[1]);
+}
 
 const RUNDIR = join(ROOT, '.test-run');
 const STATUS = join(RUNDIR, 'status.json');
@@ -121,7 +142,7 @@ function reportStatus() {
 if (process.argv.includes('--status')) process.exit(reportStatus());
 
 /* ---- the run ---- */
-const shards = numArg('shards', 6);
+const shards = process.argv.some((x) => x.startsWith('--shards=')) ? numArg('shards', 1) : ciShards();
 const jobs = Math.min(numArg('jobs', Math.max(1, cpus().length)), shards);
 
 if (!declared.length) {

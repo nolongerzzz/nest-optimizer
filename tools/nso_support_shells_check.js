@@ -60,13 +60,20 @@
 //
 // The timing line is the card's build without the weld beside it with one.
 //
-// THREE STEPS, ONE FILE. `--only=coupon|clamp|fixtures` runs one group of the
-// pieces below - 5. holds the pieces of that group that have more than one
-// area - and no flag runs them all. CI runs the three as support:shells-coupon,
-// support:shells-clamp and support:shells-fixtures: the clamp's slices alone
-// were most of the old support:shells' ~1,229 s, and a step is the smallest
-// thing a shard can be packed with. The groups are a partition of PIECES
-// (asserted below), so the three steps hold exactly the checks of the one.
+// FIVE STEPS, ONE FILE. `--only=` runs one slice of the checks below and no
+// flag runs them all. CI runs five: support:shells-coupon, -fixtures, and the
+// clamp in three - the clamp's slices alone were most of the old support:shells'
+// ~1,229 s, and a step is the smallest thing a shard can be packed with.
+// The clamp has four areas (measured locally, 279 s: area 1 132 s, area 2 ~99 s,
+// areas 3-4 ~6 s, the feet across areas 42 s), so `clamp-a1` is its area 1,
+// `clamp-a234` its other three, and `clamp-feet` the one check (5.) that needs
+// every area's plan and none of their welds or slices; `clamp` is the three
+// together, by hand. The steps are a partition of the checks (asserted below:
+// STEPS), so the five hold exactly the checks of the one.
+//
+// THE CONTROL (3.) - the weld again with its parts unioned in another order,
+// sliced - only feeds a count in the detail text; nothing asserts it. It runs
+// on the `fixtures` pieces, where it is cheap, or anywhere with `--control`.
 
 const fs = require('fs');
 const path = require('path');
@@ -101,11 +108,31 @@ const VOID_MM2 = 0.08;   /* one bead's cross-section (0.42 x 0.2 mm): a smaller 
 const XOR_MM2 = 1e-3, XOR_WIDTH_MM = 2e-3, EXTRUDE_REL = 1e-3, EXTRUDE_TOTAL_REL = 1e-2, FULL_SLICE_TRIS = 30000;
 
 const GROUPS = ['coupon', 'clamp', 'fixtures'];
+/* what each --only= runs: the group's pieces, which of a piece's areas (by index) get the checks of 1.-4., and whether 5. runs.
+   5. needs every area's plan, so a step with it plans them all and builds only its own; a step without it plans only its own. */
+const ALL = () => true, NONE = () => false;
+const STEPS = {
+  coupon: { group: 'coupon', areas: ALL, feet: true },
+  clamp: { group: 'clamp', areas: ALL, feet: true },
+  'clamp-a1': { group: 'clamp', areas: (i) => i === 0, feet: false },
+  'clamp-a234': { group: 'clamp', areas: (i) => i > 0, feet: false },
+  'clamp-feet': { group: 'clamp', areas: NONE, feet: true },
+  fixtures: { group: 'fixtures', areas: ALL, feet: true }
+};
 const onlyArg = process.argv.find((a) => a.startsWith('--only='));
 const ONLY = onlyArg ? onlyArg.slice('--only='.length) : null;
-if (ONLY !== null && !GROUPS.includes(ONLY)) {
-  console.error('nso_support_shells_check: --only=' + ONLY + ' is not one of ' + GROUPS.join(', '));
+if (ONLY !== null && !STEPS[ONLY]) {
+  console.error('nso_support_shells_check: --only=' + ONLY + ' is not one of ' + Object.keys(STEPS).join(', '));
   process.exit(2);
+}
+const STEP = ONLY ? STEPS[ONLY] : { group: null, areas: ALL, feet: true };
+const CONTROL = process.argv.includes('--control') || !ONLY || STEP.group === 'fixtures';
+/* the clamp's three steps hold every area once and the feet once (up to 64 areas) */
+{
+  const parts = ['clamp-a1', 'clamp-a234', 'clamp-feet'].map((k) => STEPS[k]);
+  let ok = parts.filter((x) => x.feet).length === 1 && STEPS.clamp.feet;
+  for (let i = 0; i < 64; i++) ok = ok && parts.filter((x) => x.areas(i)).length === 1;
+  if (!ok) { console.error('nso_support_shells_check: clamp-a1, clamp-a234 and clamp-feet must hold each area and the feet exactly once'); process.exit(2); }
 }
 
 let pass = 0, fail = 0;
@@ -209,20 +236,23 @@ function topology(g, cs) {
 
   const shared = [];
   for (const [name, piece, group] of PIECES) {
-    if (ONLY && group !== ONLY) continue;
+    if (STEP.group && group !== STEP.group) continue;
     console.log('\n=== ' + name + ' ===');
     const det = SA.detectOverhangs(piece, { skipList: [], angleDeg: CARD.angleDeg, occluders: [] });
     if (!det.ok || !det.beaconRegions) { check(name + ': detects', false, det.reason); continue; }
     const plans = [];
     if (det.beaconRegions.length > 1) shared.push({ name, piece, plans });
     for (const rg of det.beaconRegions) {
+      const areaIx = det.beaconRegions.indexOf(rg);
       const label = name + ' area ' + (rg.id + 1);
+      if (!STEP.areas(areaIx) && !STEP.feet) continue;      // neither built here nor needed for 5.: not even planned
       const bs = rg.beacons.map(b => ({ x: b.x, y: b.y, z: b.z, normal: b.normal, regionId: rg.id, key: 'k' }));
       let t = Date.now();
       const p = ST.planTree(piece, Object.assign({}, CARD, { beacons: bs }));
       T.plan += Date.now() - t;
       if (!p.ok) { console.log('  --    ' + label + ': the planner holds nothing here (' + p.reason + ')'); continue; }
       plans.push(p);
+      if (!STEP.areas(areaIx)) continue;      // planned for 5., not built here
       t = Date.now();
       const tp = await GP.parts(p, PARTS);
       T.parts += Date.now() - t;
@@ -305,19 +335,19 @@ function topology(g, cs) {
       /* the CONTROL: the weld again with every trunk's parts unioned in another order (the first part first,
          the rest reversed) - two welds of the same parts, a micron apart where their unions cut */
       const tpR = Object.assign({}, tp, { trunks: tp.trunks.map((x) => x.sheet != null ? x : Object.assign({}, x, { parts: [x.parts[0]].concat(x.parts.slice(1).reverse()) })) });
-      const wR = await GP.weld(p, tpR, {});
+      const wR = CONTROL ? await GP.weld(p, tpR, {}) : null;
       /* the slices of every object - the shells, the weld, the control - side by side on workers (nso_slice_pool.js) */
       const flipsOf = (LA, LB) => { let n = 0; for (let i = 0; i < LA.length; i++) { const eb = LB[i].extruded; if (Math.abs(LA[i].extruded - eb) > EXTRUDE_REL * Math.max(eb, 1e-9)) n++; } return n; };
       let wallBad = 0, nl = 0, eA = 0, eB = 0, flipS = 0, flipC = 0, worstE = 0, sliced = true;
       const tS = Date.now();
       const jobs = [];
       for (const s of sh.solids) {
-        const ws = w.solids.find((x) => sig(x) === sig(s)), wr = wR.ok ? wR.solids.find((x) => sig(x) === sig(s)) : null;
-        if (!ws || !wr) { sliced = false; continue; }
-        jobs.push(Promise.all([slicePool.slice(s.soup), slicePool.slice(ws.soup), slicePool.slice(wr.soup)]));
+        const ws = w.solids.find((x) => sig(x) === sig(s)), wr = wR && wR.ok ? wR.solids.find((x) => sig(x) === sig(s)) : null;
+        if (!ws || (CONTROL && !wr)) { sliced = false; continue; }
+        jobs.push(Promise.all([slicePool.slice(s.soup), slicePool.slice(ws.soup), CONTROL ? slicePool.slice(wr.soup) : null]));
       }
       for (const [LA, LB, LC] of await Promise.all(jobs)) {
-        if (!LA || !LB || !LC || LA.length !== LB.length || LC.length !== LB.length) { sliced = false; continue; }
+        if (!LA || !LB || (CONTROL && !LC) || LA.length !== LB.length || (CONTROL && LC.length !== LB.length)) { sliced = false; continue; }
         for (let i = 0; i < LA.length; i++) {
           if (!LA[i].areaMm2 && !LB[i].areaMm2) continue;
           nl++;
@@ -326,18 +356,18 @@ function topology(g, cs) {
           eA += ea; eB += eb;
           worstE = Math.max(worstE, Math.abs(ea - eb) / Math.max(eb, 1e-9));
         }
-        flipS += flipsOf(LA, LB); flipC += flipsOf(LC, LB);
+        flipS += flipsOf(LA, LB); if (CONTROL) flipC += flipsOf(LC, LB);
       }
       const dTot = Math.abs(eA - eB) / Math.max(eB, 1e-9);
       check(label + ': sliced whole (walls, infill, solid layers), shells and weld print the same - every layer the same walls, the whole support\'s extrusion within ' + EXTRUDE_TOTAL_REL * 100 + ' %',
         sliced && nl > 0 && wallBad === 0 && dTot <= EXTRUDE_TOTAL_REL,
         nl + ' layers, ' + wallBad + ' with other walls; extruded ' + eA.toFixed(1) + ' mm against ' + eB.toFixed(1) + ' (' + (dTot * 100).toFixed(4) + ' %); ' +
-        flipS + ' layers differ by over ' + EXTRUDE_REL * 100 + ' % (worst ' + (worstE * 100).toFixed(2) + ' %) - ' + flipC +
-        ' between the weld and itself with its parts unioned in another order (' + (Date.now() - tS) + ' ms)');
+        flipS + ' layers differ by over ' + EXTRUDE_REL * 100 + ' % (worst ' + (worstE * 100).toFixed(2) + ' %) - ' + (CONTROL ? flipC +
+        ' between the weld and itself with its parts unioned in another order' : 'control not run (--control)') + ' (' + (Date.now() - tS) + ' ms)');
     }
   }
   /* 5. the feet across areas, as the card builds them */
-  for (const S of shared) {
+  for (const S of STEP.feet ? shared : []) {
     console.log('\n=== ' + S.name + ': the feet across its ' + S.plans.length + ' areas ===');
     const builds = [];
     for (const p of S.plans) {
