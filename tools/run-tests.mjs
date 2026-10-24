@@ -28,6 +28,15 @@
  * `scripts` and one name in `testSteps`, and .github/workflows/test.yml -
  * which deliberately does not list the suites - keeps working untouched.
  *
+ * A SECOND LIST: `driveSteps`
+ * The steps that launch a browser (a drive of the real page) are not in
+ * `testSteps`; they are in `driveSteps`, same shape, run the same way:
+ * `--list drives` (or `npm run test:drives`) takes every flag below (--shard,
+ * --timing-csv, --failures-out, --touching with --drives) and works on that
+ * list instead. Everyday testing - `npm test`, `npm run test:par`, the Tests
+ * workflow - runs `testSteps` only. docs/TESTING.md says which list a new
+ * step goes in.
+ *
  * COUNTING IS PART OF THE JOB
  * A runner that quietly skips a step is the bug it was written to prevent, so
  * the declared list is validated up front and the executed count is asserted
@@ -46,18 +55,21 @@
  *   npm test
  *   node tools/run-tests.mjs            # same thing
  *   node tools/run-tests.mjs --list     # print the steps and exit
+ *   node tools/run-tests.mjs --list drives            # run driveSteps, as `npm test` runs testSteps
+ *   node tools/run-tests.mjs --list drives --print    # print them instead
+ *   node tools/run-tests.mjs --list drives --only lift:drive   # one step, by name
  *   node tools/run-tests.mjs --check    # the step list and tools/test-weights.json agree; exit
- *   node tools/run-tests.mjs --shard=3/20 --timing-csv out.csv
+ *   node tools/run-tests.mjs --shard=3/8 --timing-csv out.csv
  *                                        # one CI shard, a CSV row per step
  *   node tools/run-tests.mjs --shard-plan [n]
- *                                        # the packing, n shards (CI's 20)
+ *                                        # the packing, n shards (test.yml's SHARDS)
  *   node tools/run-tests.mjs --merge-timing <dir> --out timing.csv
  *                                        # the shards' CSVs as one, every step
  *   node tools/run-tests.mjs --weights-from a.csv[,b.csv] [--dry-run]
  *                                        # tools/test-weights.json from CI's times
- *   node tools/run-tests.mjs --touching nso_slicer.js[,app-core.js]
+ *   node tools/run-tests.mjs --touching nso_slicer.js[,app-core.js] [--drives]
  *                                        # the steps whose tests reach a file
- *   node tools/run-tests.mjs --shard=3/20 --failures-out failures/shard-3.txt
+ *   node tools/run-tests.mjs --shard=3/8 --failures-out failures/shard-3.txt
  *                                        # each failing step as a block, the moment it ends
  *   node tools/run-tests.mjs --package list.json
  *                                        # run the scripts/testSteps of that package.json-shaped file
@@ -79,7 +91,18 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const pkgArg = argValue('package');
 const pkg = JSON.parse(readFileSync(pkgArg ? resolve(pkgArg) : join(ROOT, 'package.json'), 'utf8'));
 const scripts = pkg.scripts || {};
-const allSteps = pkg.testSteps;
+
+/* TWO LISTS, ONE RUNNER. `--list drives` (or `--drives`, for --touching) makes
+   driveSteps the list every mode below works on; anything else is testSteps.
+   A bare `--list` still prints the steps, as it always did. */
+const listArg = argValue('list');
+if (listArg && listArg !== 'tests' && listArg !== 'drives') {
+  console.error(`test runner: --list ${listArg} is not tests or drives`);
+  process.exit(2);
+}
+const onDrives = listArg === 'drives' || process.argv.includes('--drives');
+const listKey = onDrives ? 'driveSteps' : 'testSteps';
+const allSteps = pkg[listKey];
 
 /* Step weights live in tools/test-weights.json, one {"weight", "note"} per step
    (not in package.json: that file was the same three lines in every batch's
@@ -114,26 +137,35 @@ const SELF = 'run-tests.mjs';
    one shard, and `--shard-plan` prints the whole thing. Re-measure with
    `--shard-plan` after the suite grows and the weights drift. */
 
-/* CI's matrix size (.github/workflows/test.yml). Twenty since the three
-   steps that held the heaviest shard were split (support:shells, gscope:speed,
-   support:interface: ci-shard-split): the 261-step suite is ~13,484 s of
-   typical-runner time, and a wall clock of one shard's worth of it needs the
-   shards to be many and the steps in them small. Ten before that (eight were
-   ~1,725 s each on Tests #297-#305 and two ran past the 40-minute job
-   timeout), with support:shells alone ~1,229 s as the floor. */
-const CI_SHARDS = 20;
+/* CI's matrix size is SHARDS in .github/workflows/test.yml, the one place the
+   number is written; the matrix, every --shard=i/N and the timing merge's
+   --shards N all read it from there. This reads it too, when a mode needs a
+   default (--shard-plan with no n), so a plan is always at the count CI runs.
+   It is read on demand, not at start: the "npm test" job's sparse checkout has
+   no workflow file, and passes --shards itself. */
+function ciShards() {
+  let t = '';
+  try { t = readFileSync(join(ROOT, '.github', 'workflows', 'test.yml'), 'utf8'); } catch (e) { /* reported below */ }
+  const m = /^\s*SHARDS:\s*(\d+)\s*(?:#.*)?$/m.exec(t);
+  if (!m) {
+    console.error('test runner: cannot read SHARDS from .github/workflows/test.yml - give the count (--shard-plan N, --shards N)');
+    process.exit(2);
+  }
+  return Number(m[1]);
+}
 
 /* What a shard may weigh, in the weights' typical-runner seconds: 700 s is
    ~12 min of tests plus ~1.5 min of setup, about a fifth of the job's
    60-minute timeout (about one runner in five ran #297-#305's steps in ~0.6 of
    the time, and none measurably slower than typical, so the headroom is for a
    runner sharing its cores and for drift between re-measures). `--shard-plan`
-   flags any shard over it. The heaviest single step is now
-   gscope:speed-drag-file (~579 s; it opens the 203k-move file and drags two
-   copies of it under software GL - what render-on-demand would cut), then
-   support:shells-clamp-a1 (~305 s) and lift:plate (~281 s), so the floor is
-   under the budget; what holds the budget is the shard count: the suite's
-   seconds divided by it (ci-shard-split-2: 13,840 s, 692 s a shard). */
+   flags any shard over it. The same budget holds for either list. In testSteps
+   the heaviest step is tube:neck (~191 s), so the floor is far under it; in
+   driveSteps it is gscope:speed-drag-file (~579 s; it opens the 203k-move file
+   and drags two copies of it under software GL - what render-on-demand would
+   cut). What holds the budget is the shard count (SHARDS in test.yml): the
+   list's seconds divided by it (ci-drives-out: testSteps 2,949 s, 369 s a
+   shard at 8; before it, one list of 13,840 s, 692 s a shard at 20). */
 const SHARD_BUDGET_S = 700;
 
 function shardPlan(n) {
@@ -179,7 +211,32 @@ function parseShard(argv) {
 }
 
 const shard = parseShard(process.argv);
-const declared = shard ? shardPlan(shard.n)[shard.i - 1].steps : allSteps;
+let declared = shard ? shardPlan(shard.n)[shard.i - 1].steps : allSteps;
+
+/* `--only a,b`: just those steps of the list, in the list's order. One drive,
+   by name, without --shard (a shard is already a selection). A name the list
+   does not hold is refused, not skipped: a typo must not read as a pass. */
+const onlyArg = argValue('only');
+if (process.argv.includes('--only') && !onlyArg) {
+  console.error('test runner: --only <step>[,<step>]');
+  process.exit(2);
+}
+if (onlyArg) {
+  if (shard) {
+    console.error('test runner: --only and --shard both select steps; use one');
+    process.exit(2);
+  }
+  const names = onlyArg.split(',').map((x) => x.trim()).filter(Boolean);
+  const miss = names.filter((n) => !Array.isArray(allSteps) || !allSteps.includes(n));
+  if (miss.length) {
+    const otherKey = onDrives ? 'testSteps' : 'driveSteps', other = pkg[otherKey] || [];
+    const there = miss.filter((n) => other.includes(n));
+    console.error(`test runner: --only: not in ${listKey}: ${miss.join(', ')}` +
+      (there.length ? ` (${there.join(', ')} ${there.length > 1 ? 'are' : 'is'} in ${otherKey}${onDrives ? '' : ': add --list drives'})` : ''));
+    process.exit(2);
+  }
+  declared = allSteps.filter((n) => names.includes(n));
+}
 
 /* `--name value` or `--name=value`; null when absent. */
 function argValue(name) {
@@ -255,7 +312,7 @@ function mergeTiming() {
   }
   const rows = csvFilesIn(dir).flatMap(readTimingCsv);
   const ns = [...new Set(rows.map((r) => Number(r.shard.split('/')[1])).filter((x) => x > 0))];
-  const n = Number(argValue('shards')) || (ns.length === 1 ? ns[0] : CI_SHARDS);
+  const n = Number(argValue('shards')) || (ns.length === 1 ? ns[0] : ciShards());
   const planned = new Map();
   shardPlan(n).forEach((b, k) => b.steps.forEach((s) => planned.set(s, `${k + 1}/${n}`)));
 
@@ -390,7 +447,7 @@ function weightsFrom() {
     (c.n > 1 ? `  (mean of ${c.n})` : '')));
   const few = (a) => (a.length <= 12 ? a.join(', ') : `${a.slice(0, 12).join(', ')} and ${a.length - 12} more`);
   if (kept.length) console.log(`  kept, no passing row (${kept.length}): ${few(kept)}`);
-  if (ignored.length) console.log(`  ignored, not in testSteps: ${ignored.join(', ')}`);
+  if (ignored.length) console.log(`  ignored, not in ${listKey}: ${ignored.join(', ')}`);
 
   if (process.argv.includes('--dry-run')) { console.log('  --dry-run: tools/test-weights.json not written'); return; }
   /* Weights change; each step's note, the file's prose and the step set stay. */
@@ -400,7 +457,7 @@ function weightsFrom() {
     ` by run-tests.mjs --weights-from: ${pass.size} steps measured (mean of passing rows, each shard scaled to the` +
     ` typical runner), ${kept.length} kept from before` + (kept.length ? ` (${few(kept)})` : '');
   writeFileSync(WEIGHTS_FILE, formatWeights({ about: weightTable.about || [], source, steps }));
-  console.log(`  tools/test-weights.json written; check the packing with --shard-plan ${CI_SHARDS}`);
+  console.log(`  tools/test-weights.json written; check the packing with --shard-plan`);
 }
 
 /* WHICH STEPS REACH A FILE - `--touching nso_slicer.js[,app-core.js]`.
@@ -586,7 +643,7 @@ function touching() {
   });
 
   const users = reach.filter((f) => via.get(f));
-  console.log(`--touching ${targets.map(rel).join(', ')}: ${found.length} of ${allSteps.length} steps` +
+  console.log(`--touching ${targets.map(rel).join(', ')}: ${found.length} of ${allSteps.length} ${onDrives ? 'drive ' : ''}steps` +
     (users.length ? `, directly or through ${users.length} product file(s) that use it: ${users.map(rel).join(', ')}` : ''));
   const width = Math.max(0, ...found.map((x) => x.step.length));
   found.forEach((x) => console.log(`  ${x.step.padEnd(width)}  ${x.why}`));
@@ -597,26 +654,26 @@ function touching() {
 function validate() {
   const bad = [];
   if (!Array.isArray(declared) || declared.length === 0) {
-    bad.push('package.json "testSteps" must be a non-empty array of npm script names');
+    bad.push(`package.json "${listKey}" must be a non-empty array of npm script names`);
     return bad;
   }
   declared.forEach((name, i) => {
     if (typeof name !== 'string' || !name.trim()) {
-      bad.push(`testSteps[${i}] is not a script name`);
+      bad.push(`${listKey}[${i}] is not a script name`);
       return;
     }
     if (!(name in scripts)) {
-      bad.push(`testSteps[${i}] "${name}" is not in package.json "scripts"`);
+      bad.push(`${listKey}[${i}] "${name}" is not in package.json "scripts"`);
       return;
     }
     // Running the runner from inside the runner never terminates.
     if (name === 'test' || String(scripts[name]).includes(SELF)) {
-      bad.push(`testSteps[${i}] "${name}" runs this runner again (infinite recursion)`);
+      bad.push(`${listKey}[${i}] "${name}" runs this runner again (infinite recursion)`);
     }
   });
   const seen = new Set();
   declared.forEach((name, i) => {
-    if (seen.has(name)) bad.push(`testSteps[${i}] "${name}" is listed more than once`);
+    if (seen.has(name)) bad.push(`${listKey}[${i}] "${name}" is listed more than once`);
     seen.add(name);
   });
   return bad;
@@ -651,8 +708,8 @@ function runStep(command, name) {
 }
 
 /* THE FAILURE REPORT - one block per failing step, printed the moment it ends.
-   A shard is ~12 minutes of steps; the step that failed in its first minute
-   should not be found by scrolling a 12-minute log after the other nineteen
+   A shard is minutes of steps; the step that failed in its first minute
+   should not be found by scrolling the whole log after the other
    shards finish. So the block goes to the log, to a `::error` annotation, and
    (--failures-out) to a file the workflow puts on the run's summary page and
    uploads as an artifact. The file is emptied at the start and a block is
@@ -711,7 +768,7 @@ async function main() {
   if (process.argv.includes('--merge-timing')) return mergeTiming();
 
   if (process.argv.includes('--shard-plan')) {
-    const n = shard ? shard.n : Number(process.argv[process.argv.indexOf('--shard-plan') + 1]) || CI_SHARDS;
+    const n = shard ? shard.n : Number(process.argv[process.argv.indexOf('--shard-plan') + 1]) || ciShards();
     const plan = shardPlan(n);
     plan.forEach((b, k) => {
       const over = b.total / 1000 > SHARD_BUDGET_S ? `  OVER the ${SHARD_BUDGET_S} s budget` : '';
@@ -720,7 +777,7 @@ async function main() {
     });
     const worst = Math.max(...plan.map((b) => b.total)) / 1000;
     console.log(`\nheaviest shard ${worst.toFixed(0)} s of ${SHARD_BUDGET_S} s budget; ` +
-      `${(plan.reduce((t, b) => t + b.total, 0) / 1000).toFixed(0)} s in all`);
+      `${(plan.reduce((t, b) => t + b.total, 0) / 1000).toFixed(0)} s in all` + (onDrives ? ` (${listKey})` : ''));
     return;
   }
 
@@ -731,16 +788,17 @@ async function main() {
       bad.forEach((p) => console.error('  - ' + p));
       process.exit(1);
     }
-    console.log(`test runner: ${allSteps.length} steps, each with a weight and a script; ${Object.keys(weights).length} entries, none without one`);
+    const nT = (pkg.testSteps || []).length, nD = (pkg.driveSteps || []).length;
+    console.log(`test runner: ${nT} testSteps + ${nD} driveSteps, each in one list only, with a weight and a script; ${Object.keys(weights).length} entries, none without one`);
     return;
   }
 
-  if (process.argv.includes('--list')) {
+  if (process.argv.includes('--print') || (process.argv.includes('--list') && !listArg)) {
     declared.forEach((n, i) => console.log(`${i + 1}. ${n}  ->  ${scripts[n]}`));
     return;
   }
 
-  console.log(`test runner: ${declared.length} steps` +
+  console.log(`test runner: ${declared.length} ${onDrives ? 'drive steps' : 'steps'}` +
     (shard ? ` (shard ${shard.i}/${shard.n} of ${allSteps.length})` : '') +
     `, every step runs even if an earlier one fails\n`);
 

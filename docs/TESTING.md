@@ -3,13 +3,68 @@
 `npm test` is `tools/run-tests.mjs`: every step in package.json's
 `testSteps`, in order, uncached. It is the gate before any push
 ([TEST-CACHE.md](TEST-CACHE.md) is the local-only runner that skips steps).
-CI runs the same list in ten packed shards (`.github/workflows/test.yml`).
+CI runs the same list in `SHARDS` packed shards (`.github/workflows/test.yml`).
+
+## Two lists: `testSteps` and `driveSteps`
+
+package.json has two lists of step names. Each name is a script in `scripts`;
+the two lists together are every step, and a name is in one of them only.
+
+| list | what is in it | run by |
+|---|---|---|
+| `testSteps` | everything that does not launch a browser, plus the nine exceptions below | `npm test`, `npm run test:par`, `npm run test:cached`, the Tests workflow |
+| `driveSteps` | every step that launches a browser at run time | `npm run test:drives` (the audit-driver session) |
+
+**A step is a drive** when anything it runs imports playwright, launches
+chromium, or uses `tools/nso_app_harness.js` or `tools/cth-test/browser-lib.mjs`:
+the script, any other file in its command (`a && b`), a module it requires
+(however far down), or a script it reaches through `npm run`, `sh` or a spawn.
+A check that runs `withApp(...)` is a drive; so is one that only calls
+`chromium.launch` once at the end.
+
+**A new browser drive goes in `driveSteps`, with a `scripts` entry and a line
+in `tools/test-weights.json` like any step.** A new Node check goes in
+`testSteps`. `--check` (and `page:manifest`, gate 12) fail on a step in
+neither list, in both, or without a weight.
+
+**What stays in `testSteps` although it launches a browser.** The rule is
+that a step stays when most of its checks pass with no browser, or when every
+ticket gates on it. Nine steps do:
+
+| step | why it stays |
+|---|---|
+| `page:manifest` | every ticket gates on it; 54 of its 60 checks are Node |
+| `support:curved`, `export:roundtrip`, `export:multi` | named as mostly Node checks with a browser section |
+| `crop:engine` | 228 of 254 checks pass with the browser unavailable |
+| `skin:test` | 99 of 128 |
+| `tube:neck` | 199 of 290 (`nso_tube_neck_test.js && nso_tube_neck_drag_check.js`) |
+| `split:parts` | 32 of 52 |
+| `overlay:test` | 6 of 11 |
+
+Those counts were taken by running each step with the browser made
+unavailable and again with it; a step under half (`measure:test` 40 of 88,
+`carve:test` 47 of 108) is a drive. A step that is mostly a browser drive but
+has a Node section stays or goes by this count, not by the section's name.
+
+```
+npm run test:drives                              # every drive, in order
+node tools/run-tests.mjs --list drives --shard=2/8 --timing-csv out.csv
+node tools/run-tests.mjs --list drives --only lift:drive   # one drive, by name
+node tools/run-tests.mjs --list drives --print   # the list, run nothing
+node tools/run-tests.mjs --touching nso_lift.js --drives   # the drives that reach a file
+```
+
+`--list drives` runs `driveSteps` exactly as `npm test` runs `testSteps`:
+the same flags (`--shard`, `--timing-csv`, `--failures-out`, `--touching`),
+the same failure report, the same weights file. `--touching` lists from
+`testSteps` unless it has `--drives`. A bare `--list` still prints the
+`testSteps` and exits.
 
 The runner also has four modes that run no test. They read package.json and
 the files and answer a question about the suite:
 
 ```
-node tools/run-tests.mjs --shard-plan [n]                  # the packing, n shards (CI's 10)
+node tools/run-tests.mjs --shard-plan [n]                  # the packing, n shards (default: test.yml's SHARDS)
 node tools/run-tests.mjs --merge-timing <dir> --out timing.csv   # the shards' CSVs as one
 node tools/run-tests.mjs --weights-from a.csv[,b.csv] [--dry-run] # tools/test-weights.json from CI
 node tools/run-tests.mjs --touching nso_slicer.js[,app-core.js]   # the steps that reach a file
@@ -18,22 +73,23 @@ node tools/run-tests.mjs --touching nso_slicer.js[,app-core.js]   # the steps th
 ## Shards and weights
 
 A shard is packed by cost, not by count: `tools/test-weights.json` holds what each
-step takes on a **typical** GitHub runner, in milliseconds, and the steps
-are dealt longest-first onto the lightest shard. Every runner computes the
-same split from the same package.json. `--shard-plan` prints it, flags any
-shard over `SHARD_BUDGET_S` (1,200 s), and prints the heaviest shard. That
-number is the one CI waits on.
+step takes on a **typical** GitHub runner, in milliseconds (for both lists),
+and the steps are dealt longest-first onto the lightest shard. Every runner
+computes the same split from the same package.json. `--shard-plan` prints it,
+flags any shard over `SHARD_BUDGET_S` (700 s), and prints the heaviest shard.
+That number is the one CI waits on.
 
 The weights only steer the packing. No test reads them, and a step missing
 from the table is packed at the median weight, not skipped.
 
-As of ci-stability, the weights sum to ~13,800 s and the ten shards come to
-~1,381 s each. That is ~23 minutes of tests on a typical runner, against a
-60-minute job timeout. **No shard count meets the 1,200 s budget.**
-support:shells alone is ~1,229 s, so the shard that holds it is over the
-budget by that one step. Eleven shards pack to ~1,255 s; twelve leave
-support:shells alone on its shard and the rest at ~1,144 s. The budget is met
-only once support:shells is shorter or split.
+**The shard count is `SHARDS` in `.github/workflows/test.yml`**, one number
+in one place. The matrix, each `--shard=i/N`, the timing merge's `--shards N`,
+the job names and the check on the dispatch input's shard numbers all read it;
+`--shard-plan` and `npm run test:par` default to it. To change the count, change
+that line. As of ci-drives-out, `testSteps` is 138 steps, ~2,950 s, and
+eight shards pack to ~369 s each, against the 700 s budget. The 151
+`driveSteps` are ~10,930 s; `--list drives --shard-plan 20` packs them (at
+twenty shards the heaviest is the 579 s `gscope:speed-drag-file`).
 
 ## The timing CSV
 
@@ -116,7 +172,9 @@ $ node tools/run-tests.mjs --touching nso_slicer.js
   ...
 ```
 
-Use it to name a kickoff's gate list. A cross-cutting change keeps missing
+Use it to name a kickoff's gate list. It lists from `testSteps`; add
+`--drives` to list from `driveSteps` instead (a ticket that changes the page
+names both). A cross-cutting change keeps missing
 dependent tests: slicer:supports is obviously the slicer's, but
 gscope:select is not, and it goes red the first time CI runs the slice
 behind it. `--touching` reads the dependents off the files instead of
@@ -182,5 +240,5 @@ check(`the build under ${BUILD_LOOPS_MAX} loops`, r.loops < BUILD_LOOPS_MAX, `${
 A new check that times something uses one of these. One that would read
 `ms < N` is the pattern this replaced.
 - **`?v=` tags** are checked by `page:manifest` (gate 11): a tag that is not its file's hash fails it. The fix is always `npm run stamp`.
-- **Step weights** are `tools/test-weights.json`, one step per line, not package.json; `run-tests.mjs` reads it for shard packing, and `--check` (also `page:manifest` gate 12) fails on a step with no entry or an entry with no script.
+- **Step weights** are `tools/test-weights.json`, one step per line, not package.json; `run-tests.mjs` reads it for shard packing, and `--check` (also `page:manifest` gate 12) fails on a step (in `testSteps` or `driveSteps`) with no entry, an entry with no script, or a step in both lists.
 - **Handoff index:** `page:manifest` (gate 13) fails if the generated list in `docs/HANDOFF.md` is not every `docs/handoff/*.md`; the fix is `npm run handoff:index`.
