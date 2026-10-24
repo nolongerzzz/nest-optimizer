@@ -109,8 +109,8 @@ const HOLDS = {
                     'sup-rest', 'btn-sup-remove'],
   // SHAPE: Smooth · Bend · Reducer · Roll · Neck (Tube edge's three verbs)
   'menu-shape': ['btn-smooth', 'btn-bend', 'btn-tube-edge', 'bend-panel', 'te-panel', 'sel-te-verb'],
-  // ADD: Fill/Densify · Foam · Thicken out · Thicken in (shared mm) · Extend · Bridge
-  'menu-add': ['btn-fill', 'btn-foam', 'foam-panel', 'btn-thicken-out', 'inp-thicken-mm', 'btn-thicken-in',
+  // ADD: Fill/Densify · Foam · Thicken out · Thicken in (a live ghost: the slider, Set, Cancel in its panel) · Extend · Bridge
+  'menu-add': ['btn-fill', 'btn-foam', 'foam-panel', 'btn-thicken-out', 'btn-thicken-in', 'thicken-panel',
                'btn-extend', 'inp-extend-mm', 'btn-bridge', 'bridge-panel'],
   // SUBTRACT: Subtract B from A · Extract bit · Carve · Hollow · Hollow to safe min · Lift
   'menu-bit': ['btn-subtract', 'btn-extract-bit', 'btn-carve', 'carve-blade', 'carve-depth', 'btn-hollow', 'inp-hollow-mm',
@@ -215,6 +215,7 @@ const RETIRED = {
    is a failure, not a pass. */
 const OWN_STATE = {
   'move-vert-slider': 'Move > Vertical on',
+  'inp-thicken-mm': 'Thicken out / in armed (the slider is in the live panel)',
   'cooling-profile': 'Export format 3MF',
   'scale-length': 'a section the reader names', 'btn-scale-length': 'ditto', 'scale-width': 'ditto',
   'btn-scale-width': 'ditto', 'scale-height': 'ditto', 'btn-scale-height': 'ditto', 'scale-ring-outer': 'a ring',

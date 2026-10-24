@@ -127,6 +127,7 @@ merging its list by hand. The list below is generated.
 - [The reference raster was drawn at the wrong ANGLE (2026-09-18, same day)](handoff/the-reference-raster-was-drawn-at-the-wrong-angle.md)
 - [The wheel's wall floor - the vendoring is over, resolved at the merge](handoff/the-wheels-wall-floor-the-vendoring-is-over-resolved-at-the.md)
 - [Thicken in / out - one-sided planar offset (2026-09-16)](handoff/thicken-in-out-one-sided-planar-offset.md)
+- [Thicken in / out, live - a slider ghost, Set, per-face (2026-10-23)](handoff/thicken-live.md)
 - [To plate - put a piece back down on the bed, in one press (2026-09-20)](handoff/to-plate-put-a-piece-back-down-on-the-bed-in-one-press.md)
 - [Toolpath import - a sliced .gcode.3mf as real geometry](handoff/toolpath-import-a-sliced-gcode-3mf-as-real-geometry.md)
 - [Toolpath import - the entry point (2026-09-20)](handoff/toolpath-import-the-entry-point.md)
