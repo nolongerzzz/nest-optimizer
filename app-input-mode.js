@@ -232,6 +232,10 @@
       window.nsoFoam.cancel();
       left.push('foam');
     }
+    if (window.nsoFoamGun && window.nsoFoamGun.on()) {
+      window.nsoFoamGun.cancel();
+      left.push('foam gun');
+    }
     if (state.measureOn) {
       press('btn-measure');
       if (state.measureOn) state.measureOn = false;
