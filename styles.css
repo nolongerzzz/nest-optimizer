@@ -4384,6 +4384,19 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
 .sup-card .sup-go-row .btn { width: auto; min-width: 0; margin: 0; white-space: nowrap; text-transform: uppercase; }
 .sup-card .sup-go { padding: 11px 8px; font-size: 13px; font-weight: 700; letter-spacing: 0.06em; }
 .sup-card .sup-go-row .btn-secondary { padding: 11px 10px; font-size: 11px; letter-spacing: 0.04em; }
+/* Tune (Custom): four numbers in the card's own field style, in a collapsed group. */
+.sup-card .sup-tune .vp-bend-field { grid-template-columns: 78px minmax(0, 1fr) 22px; }
+.sup-card .sup-tune .vp-sec-head { margin-top: 2px; }
+.sup-card .sup-tune-count { margin-left: auto; font-weight: 400; letter-spacing: 0.02em; text-transform: none; color: #ffc83d; }
+.sup-card .sup-tune-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 6px; }
+.sup-card .sup-tune-row .btn { width: auto; margin: 0; padding: 4px 8px; font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase; }
+.sup-card .sup-tune-note { font-size: 10px; line-height: 1.25; color: #94a3b8; }
+.sup-card .sup-tune-note.is-stale { color: #ffc83d; }
+.sup-card .sup-tune-note.is-bad { color: #f87171; }
+.vp-menu-body .sup-tune .vp-bend-field input[type="number"].is-bad { border-color: #f87171; }
+/* A build the Tune fields no longer match: the readout dims, REGENERATE is outlined. */
+.sup-card .sup-count.is-stale { opacity: 0.6; color: #ffc83d; }
+.sup-card .sup-go.is-stale { box-shadow: 0 0 0 2px #ffc83d; }
 .sup-card.is-locked { pointer-events: none; }
 .sup-card.is-locked > :not(.sup-count):not(.sup-progress) { opacity: 0.7; }
 .sup-card .sup-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; max-height: 8.5em; overflow-y: auto; }

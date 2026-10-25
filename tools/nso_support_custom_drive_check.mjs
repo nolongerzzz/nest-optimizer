@@ -40,6 +40,19 @@
  *      orbits.
  *   8  Screenshots of all three modes and an erase-hover in tools/supports-custom-out/.
  *      No page errors.
+ *   9  TUNE (Custom only; docs/SUPPORTS-CARD.md section 7). Four numbers - trunk top, trunk
+ *      growth, lean limit, node spacing - in a section that opens collapsed, shows today's
+ *      defaults in the card's own field style, and is hidden in Auto and Assisted (the values
+ *      stay for when Custom comes back). Typing in a field rebuilds nothing: a build that no
+ *      longer matches the fields is STALE (readout dimmed and worded, REGENERATE outlined, the
+ *      summary counts the changed fields). REGENERATE builds with them: the feed carries
+ *      feed.knobs with only the fields that are not at their default (none at all when all four
+ *      are), and the plan the worker hands back echoes them (plan.knobs). DEFAULTS puts all
+ *      four back (stale again until REGENERATE). A field that is not a number is refused by name.
+ *      Undo, Escape and REMOVE ALL do what they did; none of them touches the fields.
+ *      Needs supports-knobs-1 (feed.knobs): the plan echo is read off the planner's reply.
+ *      `node tools/nso_support_custom_drive_check.mjs --only=tune` runs this section alone;
+ *      its screenshots go to tools/supports-custom-card-out/.
  */
 import { chromium } from 'playwright';
 import { mkdir } from 'node:fs/promises';
@@ -48,6 +61,8 @@ import { serveRoot, routeCdn, mkCheck, launchOpts, ROOT } from './cth-test/brows
 
 const check = mkCheck();
 const SHOTS = join(ROOT, 'tools', 'supports-custom-out');
+const SHOTS_TUNE = join(ROOT, 'tools', 'supports-custom-card-out');
+const ONLY_TUNE = process.argv.includes('--only=tune');
 const W = 1280, H = 800;
 
 function box(lo, hi) {
@@ -78,6 +93,7 @@ const frames = (page) => page.evaluate(() => new Promise((r) => requestAnimation
 
 async function main() {
   await mkdir(SHOTS, { recursive: true });
+  await mkdir(SHOTS_TUNE, { recursive: true });
   const served = await serveRoot();
   const browser = await chromium.launch(launchOpts());
   const errors = [];
@@ -90,8 +106,14 @@ async function main() {
     await page.addInitScript(() => {
       const Real = window.Worker;
       window.__sent = [];
+      window.__plans = [];
       window.Worker = function (url, o) {
         const w = new Real(url, o), pm = w.postMessage.bind(w);
+        /* what the planner hands back: only its knobs echo is kept (plan.knobs, absent when none were given) */
+        w.addEventListener('message', (ev) => {
+          const pl = ev.data && ev.data.plan;
+          if (pl) window.__plans.push({ knobs: pl.knobs ? JSON.parse(JSON.stringify(pl.knobs)) : null });
+        });
         w.postMessage = (m, t) => {
           if (m && m.opts && !m.plan) {
             window.__sent.push({ feed: m.opts.feed === undefined ? null : JSON.parse(JSON.stringify(m.opts.feed)), beacons: (m.opts.beacons || []).length });
@@ -112,7 +134,7 @@ async function main() {
     return page;
   }
 
-  const page = await freshPage();
+  let page = await freshPage();
   const card = () => page.evaluate(() => window.NSO_SUPPORTS_CARD);   // (never serialised; for readability below)
   void card;
   const V = () => page.evaluate(() => window.NSO_SUPPORTS_CARD.view());
@@ -206,6 +228,176 @@ async function main() {
     check(label, turned > 1e-3, expectOrbit);
     return turned;
   };
+
+  /* ===================================================================== 9. TUNE */
+  async function tuneSection() {
+    console.log('\n--- 9. tune (Custom) ---');
+    page = await freshPage();                      // every helper above reads `page`: they follow it
+    await page.evaluate(() => { document.getElementById('menu-supports').open = true; });
+    await page.waitForFunction(() => window.NSO_SUPPORTS_CARD.view().beacons.length > 0, null, { timeout: 30000 });
+    await frames(page);
+    const shotT = async (file) => { await frames(page); await page.screenshot({ path: join(SHOTS_TUNE, file) }); console.log('       tools/supports-custom-card-out/' + file); };
+    const IDS = { trunkTipMm: 'sup-knob-tip', trunkAngleDeg: 'sup-knob-growth', leanDeg: 'sup-knob-lean', nodeMm: 'sup-knob-node' };
+    const T = () => page.evaluate(() => window.NSO_SUPPORTS_CARD.tune());
+    const plans = () => page.evaluate(() => window.__plans.slice());
+    const sentN = async () => (await sent()).length;
+    const type = async (key, v) => { await page.fill('#' + IDS[key], String(v)); await frames(page); };
+    const dom = () => page.evaluate((IDS) => {
+      /* a closed <details> keeps its content's boxes: ask the browser whether it is rendered */
+      const $ = (id) => document.getElementById(id), shown = (e) => !!e && !e.hidden && e.checkVisibility() && e.getBoundingClientRect().width > 0;
+      const go = $('btn-sup-all'), head = $('sup-count');
+      return {
+        section: shown($('sup-tune')), open: $('sup-tune').open, head: $('sup-tune-head').firstChild.textContent, count: $('sup-tune-count').textContent,
+        fields: Object.values(IDS).map((id) => $(id).value), fieldsShown: Object.values(IDS).map((id) => shown($(id))),
+        fieldsOff: Object.values(IDS).map((id) => $(id).disabled),
+        defaults: { shown: shown($('sup-tune-defaults')), off: $('sup-tune-defaults').disabled },
+        note: $('sup-tune-note').textContent, readout: head.textContent, readoutStale: head.classList.contains('is-stale'),
+        cardStale: $('supports-card').dataset.stale, go: go.textContent, goStale: go.classList.contains('is-stale'), goOff: go.disabled
+      };
+    }, IDS);
+    const DEF = ['2', '5.5', '30', '5'];
+
+    // -- where it is, and what it shows
+    await click('#sup-mode-auto');
+    check('Auto: no Tune section', (await dom()).section, false);
+    await click('#sup-mode-assisted');
+    check('Assisted: no Tune section', (await dom()).section, false);
+    await click('#sup-mode-custom');
+    const d1 = await dom();
+    check('Custom: the Tune section is there and opens collapsed - its heading shows, the fields do not',
+      [d1.section, d1.open, d1.head, d1.fieldsShown], [true, false, 'Tune', [false, false, false, false]]);
+    await shotT('tune-closed.png');
+    await click('#sup-tune-head');
+    const d2 = await dom();
+    check('opened: four fields showing today\'s defaults (trunk top 2 mm, growth 5.5 deg, lean limit 30 deg, node spacing 5 mm)', [d2.open, d2.fields, d2.fieldsShown], [true, DEF, [true, true, true, true]]);
+    check('...nothing is changed: no count on the heading, Defaults is there and off, no note, the engine is told nothing', [d2.count, d2.defaults, d2.note, (await T()).given], ['', { shown: true, off: true }, '', null]);
+    const sty = await page.evaluate((ids) => {
+      const f = (id) => { const e = document.getElementById(id), c = getComputedStyle(e); return [e.parentElement.className, c.fontSize, c.borderTopWidth, c.borderTopColor, c.borderRadius, c.backgroundColor, c.color, c.paddingTop]; };
+      return { size: f('sup-size'), angle: f('sup-angle'), knobs: ids.map(f) };
+    }, Object.values(IDS));
+    check('...in the card\'s own field style (the label, the border, the type of Angle and Size)', [sty.knobs.every((k) => JSON.stringify(k) === JSON.stringify(sty.size)), sty.size[0], JSON.stringify(sty.angle) === JSON.stringify(sty.size)], [true, 'vp-bend-field', true]);
+    await shotT('tune-open.png');
+
+    // -- a build with the defaults sends no knobs
+    await sideView();
+    for (const q of await undersidePoints(3)) await clickAt(q);
+    await plateView();
+    await click('#sup-tool-circles');
+    await drag(await plateXY(cx + 4, cy), await plateXY(cx + 4 + 14, cy));
+    await click('#sup-tool-circles');
+    const s0 = await sentN(), p0 = (await plans()).length;
+    await click('#btn-sup-all'); await idle(); await frames(page);
+    const sA = (await sent()).slice(s0), pA = (await plans()).slice(p0);
+    check('GENERATE with all four at default: the feed carries no knobs, and the plan echoes none', [sA.length > 0, sA.every((x) => x.feed && x.feed.mode === 'custom' && !('knobs' in x.feed)), pA.length > 0 && pA.every((x) => x.knobs === null)], [true, true, true]);
+    const dB = await dom();
+    check('...the build stands, not stale: readout not dimmed, REGENERATE not outlined, the section says nothing', [dB.go, dB.readoutStale, dB.goStale, dB.cardStale, dB.note, (await T()).builtWith, (await T()).stale], ['Regenerate', false, false, '0', '', '', false]);
+    const builtA = await sups(), dep0 = await depth(), sN0 = await sentN();
+
+    // -- typing marks the build stale; nothing rebuilds
+    await type('trunkTipMm', 3);
+    const dC = await dom(), tC = await T();
+    check('a field changed from its default marks the build stale: readout dimmed and worded, REGENERATE outlined, the card flagged, "1 changed" on the heading, Defaults on',
+      [dC.readoutStale, dC.readout.includes('out of date'), dC.goStale, dC.cardStale, dC.count, dC.defaults.off, tC.stale], [true, true, true, '1', '1 changed', false, true]);
+    check('...the note under the fields says so', dC.note, 'Changed since the last build. Regenerate to build with it.');
+    await type('leanDeg', 20);
+    await new Promise((r) => setTimeout(r, 600));
+    check('...nothing rebuilds on typing: no planner call, the same supports, no Undo step', [await sentN(), await sups(), await depth()], [sN0, builtA, dep0]);
+    check('...the engine would be given only the two that moved', (await T()).given, { trunkTipMm: 3, leanDeg: 20 });
+    await shotT('tune-stale.png');
+
+    // -- REGENERATE is the set button
+    const s1 = await sentN(), p1 = (await plans()).length;
+    await oneStep('REGENERATE with Tune', async () => { await click('#btn-sup-all'); });
+    const sB = (await sent()).slice(s1), pB = (await plans()).slice(p1);
+    check('REGENERATE posts feed.knobs with the two changed fields and nothing else (the other two are absent)', [sB.length > 0, sB.every((x) => JSON.stringify(x.feed.knobs) === JSON.stringify({ trunkTipMm: 3, leanDeg: 20 }))], [true, true]);
+    check('...the plan\'s knobs echo them: trunk top 3, lean 20, the others at their constants, given and nonDefault the two',
+      [pB.length > 0, pB.every((x) => x.knobs && x.knobs.trunkTipMm === 3 && x.knobs.leanDeg === 20 && x.knobs.trunkAngleDeg === 5.5 && x.knobs.nodeMm === 5
+        && JSON.stringify(x.knobs.given) === JSON.stringify({ trunkTipMm: 3, leanDeg: 20 }) && JSON.stringify(x.knobs.nonDefault) === JSON.stringify({ trunkTipMm: 3, leanDeg: 20 }))], [true, true]);
+    const dD = await dom();
+    check('...the build now stands as built with them: not stale, the fields as typed, the heading still counts the two',
+      [dD.readoutStale, dD.goStale, dD.cardStale, dD.fields, dD.count, (await T()).builtWith], [false, false, '0', ['3', '5.5', '20', '5'], '2 changed', JSON.stringify({ trunkTipMm: 3, leanDeg: 20 })]);
+    check('...and the supports on the plate are new ones', (await sups()).some((id) => !builtA.includes(id)), true);
+    await shotT('tune-built.png');
+
+    // -- Defaults
+    const sN1 = await sentN(), dep1 = await depth();
+    await click('#sup-tune-defaults');
+    const dE = await dom(), tE = await T();
+    check('DEFAULTS puts all four back and shows them', [dE.fields, dE.count, dE.defaults.off, tE.given], [DEF, '', true, null]);
+    check('...and rebuilds nothing, is not an Undo step - but the standing build was made with Tune, so it is stale until REGENERATE', [await sentN(), await depth(), dE.readoutStale, dE.goStale, tE.stale], [sN1, dep1, true, true, true]);
+    const s2 = await sentN(), p2 = (await plans()).length;
+    await click('#btn-sup-all'); await idle(); await frames(page);
+    check('REGENERATE at the defaults sends no knobs again and the plan echoes none; not stale', [(await sent()).slice(s2).every((x) => !('knobs' in x.feed)), (await plans()).slice(p2).every((x) => x.knobs === null), (await T()).stale], [true, true, false]);
+
+    // -- a field that is not a number is refused by name, nothing built
+    await type('trunkAngleDeg', 0);
+    check('a growth of 0 is a number (a straight trunk)', [(await T()).invalid, (await T()).given], [null, { trunkAngleDeg: 0 }]);
+    await type('leanDeg', '');
+    const tI = await T();
+    check('an empty field is refused by name, in the note and the heading, and marked', [tI.invalid, (await dom()).note], ['Lean limit must be a number above 0.', 'Lean limit must be a number above 0.']);
+    await type('leanDeg', -5);
+    check('...so is a negative one', (await T()).invalid, 'Lean limit must be a number above 0.');
+    const sN2 = await sentN(), dep2 = await depth();
+    const refused = await page.evaluate(() => window.NSO_SUPPORTS_CARD.generate());
+    await frames(page);
+    check('REGENERATE with one refuses, names it in the readout, builds nothing', [refused.ok, (await line()).startsWith('Lean limit must be'), await sentN(), await depth()], [false, true, sN2, dep2]);
+    await click('#sup-tune-defaults');
+    check('DEFAULTS clears it', [(await T()).invalid, (await dom()).fields, (await line()).startsWith('Lean limit')], [null, DEF, false]);
+
+    // -- the mode hides it; the values stay
+    await type('trunkTipMm', 3);
+    await click('#sup-mode-assisted');
+    check('Assisted hides the section; the value stays', [(await dom()).section, (await T()).values.trunkTipMm, (await T()).shown], [false, 3, false]);
+    const s3 = await sentN(), p3 = (await plans()).length;
+    await click('#btn-sup-all'); await idle(); await frames(page);
+    const sAs = (await sent()).slice(s3);
+    check('...an Assisted GENERATE sends no knobs and the plan echoes none', [sAs.length > 0, sAs.every((x) => x.feed && x.feed.mode === 'assisted' && !('knobs' in x.feed)), (await plans()).slice(p3).every((x) => x.knobs === null)], [true, true, true]);
+    await click('#sup-mode-auto');
+    check('Auto hides it too', (await dom()).section, false);
+    await click('#sup-mode-custom');
+    const dF = await dom();
+    check('back in Custom the section is back as it was left (open), with trunk top 3 still in it', [dF.section, dF.open, dF.fields, dF.count], [true, true, ['3', '5.5', '30', '5'], '1 changed']);
+    check('...and the build standing (Assisted\'s) is stale against it', [dF.readoutStale, dF.goStale], [true, true]);
+
+    // -- Undo, Escape, REMOVE ALL
+    const s4 = await sentN();
+    await oneStep('REGENERATE in Custom with trunk top 3', async () => { await click('#btn-sup-all'); });
+    check('REGENERATE sends only trunk top', (await sent()).slice(s4).every((x) => x.feed.mode === 'custom' && JSON.stringify(x.feed.knobs) === JSON.stringify({ trunkTipMm: 3 })), true);
+    check('...built with it: not stale', [(await T()).stale, (await T()).builtWith], [false, JSON.stringify({ trunkTipMm: 3 })]);
+    await undo();
+    const tU = await T();
+    check('Undo puts the earlier build back and leaves the fields as they are (a setting, not a step); that build was made without the knob, so it is stale', [tU.values.trunkTipMm, tU.builtWith, tU.stale], [3, '', true]);
+    await oneStep('REGENERATE again', async () => { await click('#btn-sup-all'); });
+    const depE = await depth(), supE = await sups();
+    await page.evaluate(() => window.NSO_SUPPORTS_CARD.setPlanner(() => new Promise(() => {})));
+    await type('nodeMm', 8);
+    await click('#btn-sup-all');
+    await page.waitForFunction(() => window.NSO_SUPPORTS_CARD.busy(), null, { timeout: 5000 });
+    const dBusy = await dom();
+    check('while a build runs the fields and Defaults are off', [dBusy.fieldsOff, dBusy.defaults.off], [[true, true, true, true], true]);
+    await page.keyboard.press('Escape'); await frames(page); await frames(page);
+    const dEsc = await dom();
+    check('Escape stops it: nothing added, no Undo step, the fields kept, the build still stale',
+      [await page.evaluate(() => window.NSO_SUPPORTS_CARD.busy()), await depth(), await sups(), dEsc.fields, dEsc.fieldsOff, (await T()).stale], [false, depE, supE, ['3', '5.5', '30', '8'], [false, false, false, false], true]);
+    await page.evaluate(() => window.NSO_SUPPORTS_CARD.setPlanner(null));
+    await type('nodeMm', 5);
+    const depR = await depth();
+    await click('#btn-sup-none'); await frames(page);
+    const tR = await T();
+    check('REMOVE ALL: one Undo step, the fields stay, nothing stands so nothing is stale', [await depth(), tR.values.trunkTipMm, tR.builtWith, tR.stale, (await dom()).readoutStale], [depR + 1, 3, null, false, false]);
+    await undo();
+    check('...and Undo puts the build back, which is again as current as the fields', [(await sups()).length > 0, (await T()).builtWith, (await T()).stale], [true, JSON.stringify({ trunkTipMm: 3 }), false]);
+    await click('#sup-tune-defaults');
+    await shotT('tune-defaults.png');
+  }
+  if (ONLY_TUNE) {
+    await tuneSection();
+    check('no uncaught page errors', errors, []);
+    await browser.close();
+    served.srv.close();
+    console.log(`\nscreenshots: ${SHOTS_TUNE}`);
+    process.exit(check.report() ? 1 : 0);
+  }
 
   await page.evaluate(() => { document.getElementById('menu-supports').open = true; });
   await page.waitForFunction(() => window.NSO_SUPPORTS_CARD.view().beacons.length > 0, null, { timeout: 30000 });
@@ -500,6 +692,7 @@ async function main() {
   check('a press on a point, dragged, does not move the piece or change the selection (the point took the press)',
     [await page2.evaluate(() => state.placed[0].mesh.position.toArray()), await page2.evaluate(() => state.selectedIndex)], [pos0, sel0]);
   check('...it toggled the spot', await page2.evaluate(() => window.NSO_SUPPORTS_CARD.markers().off), 1);
+  await tuneSection();
   check('nothing hit the CDN unrouted', cdn.filter((x) => x.startsWith('UNROUTED')), []);
   check('no uncaught page errors', errors, []);
   await browser.close();
