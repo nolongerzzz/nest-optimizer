@@ -15,9 +15,9 @@
 //   3. assisted, every other beacon off on the coupon: no tip at an off
 //      beacon; every tip that stayed on is where the auto build has it
 //   4. landing zones (the shelf): every trunk's centre inside a zone (its pad
-//      and flare may spill past the line); a zone out
-//      of reach reported, nothing forced into it; a merge that lands in no
-//      zone undone, so every tip a zone takes alone is held
+//      and flare may spill past the line); a zone out of reach reported empty,
+//      nothing forced into it; no tip dropped - one no circle reaches is built
+//      and marked (plan.overLean, plan.suggested)
 //   4b. the stair (the arc): its own trunks have member ids; every tip it
 //      holds is carried by one of them
 //   5. excluded trunk (the coupon): the rebuild has no member with its id; its
@@ -25,6 +25,12 @@
 //      tip is not supported and not reported unsupported
 //   6. members: the same ids, in the same order, from two builds of the same
 //      inputs; every held tip in exactly one trunk's carries
+//   7. crowns (supports-thinning-1): one trunk to a circle; the 6-tip tree is
+//      1 > 3 > 6; an over-lean tip is built, marked, and given a spot inside the
+//      limit; an oval trunk carries a row of tips; every join inside Bambu's
+//      measured range (tools/nso_support_bambu_joins.js); the trunk at least
+//      Bambu's law at every height; one connected tree per circle; the trees
+//      for 1, 2, 3, 6, 12 tips and the arc's are printed
 
 const fs = require('fs');
 const path = require('path');
@@ -192,25 +198,27 @@ function oneTrunkEach(sh) {
       feet.length > 0 && feet.every(inside) && builtFeet && freeOut > 0 && p.held > 0,
       `${feet.length} trunk(s), held ${p.held} of ${shelfTips.length}; centres ${feet.map(f => f.e.slice(0, 2).map(f3).join(',')).join(' | ')}; ` +
       `the widest foot spills ${f3(spill)} mm past the line (allowed); with no zone ${freeOut} of ${free.p.trunks.length} stand outside it`);
-    check('shelf: the zone out of reach is reported empty, nothing forced into it; a tip in reach of no zone is reported, not built',
+    check('shelf: the zone out of reach is reported empty, nothing forced into it; no tip is dropped - none unreachable, none off every zone, every one held',
       p.zonesEmpty.length === 1 && p.zonesEmpty[0] === 1 && p.zones[1].trunks.length === 0 && p.zones[0].trunks.length === feet.length &&
-      p.offZone.length > 0 && p.offZone.every(id => zoned.sh.unsupported.indexOf(GP.tipId(p.beacons[id].p, true)) >= 0) &&
-      p.held + p.unreachable.length + p.inside.length === shelfTips.length,
-      `zones ${p.zones.map((z, i) => i + ': ' + z.trunks.length + ' trunk(s)').join(', ')}; empty ${JSON.stringify(p.zonesEmpty)}; ` +
-      `${p.offZone.length} in reach of no zone; ${p.reason}`);
-    /* no tip is dropped by the zone rule that a zone takes alone: a merge (or
-       a pickup) that lands in no zone is undone and its branches land alone */
+      p.offZone.length === 0 && p.unreachable.length === 0 && p.unmerged.length === 0 && p.held === shelfTips.length && zoned.sh.unsupported.length === 0,
+      `zones ${p.zones.map((z, i) => i + ': ' + z.trunks.length + ' trunk(s)').join(', ')}; empty ${JSON.stringify(p.zonesEmpty)}; held ${p.held} of ${shelfTips.length}; ${p.reason}`);
+    /* a tip no circle reaches within the lean is built, marked, and given a spot on the plate inside the limit */
+    const tanL = Math.tan(p.branchTiltDeg * Math.PI / 180), byId = {};
+    zoned.sh.members.forEach(m => { byId[m.id] = m; });
+    const spotsOk = p.suggested.length > 0 && p.suggested.every(sg => {
+      const m = byId[sg.forMember];
+      return m && Math.hypot(sg.x - m.from[0], sg.y - m.from[1]) <= (m.from[2] - p.plateZ) * tanL + 1e-6 && sg.leanDeg <= p.branchTiltDeg + 1e-6;
+    });
+    check('shelf: a tip no circle reaches within the lean is built and listed in plan.overLean; each has a suggested spot on the plate whose drop sits inside the lean limit',
+      p.overLean.length > 0 && p.suggested.length === p.overLean.length && p.overLean.every(o => byId[o.member] && o.leanDeg > p.branchTiltDeg) && spotsOk,
+      `${p.overLean.length} over the ${p.branchTiltDeg} deg limit (worst ${f3(Math.max(...p.overLean.map(o => o.leanDeg)))}); spots ${p.suggested.slice(0, 2).map(sg => `(${f3(sg.x)}, ${f3(sg.y)}) at ${f3(sg.leanDeg)} deg`).join('; ')}`);
+    /* every tip is built alone as well - no zone rule drops one */
     const alone = [];
     for (const t of shelfTips) {
       const a1 = GP.plan(SHELF, Object.assign({}, CARD, { feed: { mode: 'custom', tips: [t], landingZones: [ZA, ZB] } }));
-      alone.push(a1.ok && a1.held === 1);
+      alone.push(a1.ok && a1.held === 1 && a1.trunks.length === 1);
     }
-    const heldIds = new Set(byKind(zoned.sh, 'trunk').flatMap(x => x.carries));
-    const lost = shelfTips.filter((t, i) => alone[i] && !heldIds.has(GP.tipId([t.x, t.y, t.z], true)));
-    check('shelf: a merge that lands in no zone is undone and its branches land alone - every tip a zone takes alone is held',
-      p.unmerged.length > 0 && !lost.length && alone.some(x => x) && alone.some(x => !x),
-      `${alone.filter(x => x).length} of ${shelfTips.length} land alone, ${heldIds.size} held together; ${p.unmerged.length} merge(s) undone` +
-      (lost.length ? '; lost ' + lost.map(t => JSON.stringify(t)).join(' ') : ''));
+    check('shelf: every tip, alone with the circles, is built', alone.every(x => x), `${alone.filter(x => x).length} of ${shelfTips.length}`);
   }
 
   /* ---- 4b. the stair: its own trunks named, the tips it holds carried by them ---- */
@@ -307,6 +315,172 @@ function oneTrunkEach(sh) {
       Object.keys(held).length > 0 && Object.keys(held).every(id => n[id] === 1) && Object.keys(n).every(id => held[id]),
       `${sf.pads} pad(s), ${Object.keys(held).length} held tips over ${builds.length} area(s)`);
   }
+
+  /* ---- 7. crowns: one tree to a circle (supports-thinning-1) ---- */
+  console.log('\n=== 7. crowns: one trunk to a circle ===');
+  const JOINS = GP.JOINS, TR = GP.TRUNK, cosN = Math.cos(Math.PI / TR.sides);
+  /* 7a. the joins are Bambu's: the engine's table is the measuring tool's answer on the fixture */
+  {
+    const BJ = require('./nso_support_bambu_joins.js');
+    const m = BJ.summary([BJ.measure(path.join(ROOT, 'fixtures', 'supports', 'simple_overhang_bambu.gcode.3mf'))]);
+    const near = (a, b, tol) => Math.abs(a - b) <= tol;
+    check('the engine\'s JOINS table is what tools/nso_support_bambu_joins.js measures on simple_overhang_bambu.gcode.3mf (area ratio, branch angle, fan)',
+      near(m.ratioTotal.min, JOINS.areaRatio[0], 0.011) && near(m.ratioTotal.max, JOINS.areaRatio[1], 0.011) && near(m.branchAngleDeg.min, JOINS.angleDeg[0], 0.1) &&
+      near(m.branchAngleDeg.max, JOINS.angleDeg[1], 0.1) && near(m.fanDeg.min, JOINS.fanDeg[0], 0.1) && near(m.fanDeg.max, JOINS.fanDeg[1], 0.1) && m.joins >= 7,
+      `${m.joins} joins: area parent/children ${f3(m.ratioTotal.min)} - ${f3(m.ratioTotal.max)} (median ${f3(m.ratioTotal.median)}); branch angle ${f3(m.branchAngleDeg.min)} - ${f3(m.branchAngleDeg.max)} deg (median ${f3(m.branchAngleDeg.median)}, p90 ${f3(m.branchAngleDeg.p90)}); ` +
+      `fan ${f3(m.fanDeg.min)} - ${f3(m.fanDeg.max)}; parent / widest child ${f3(m.ratioWidest.min)} - ${f3(m.ratioWidest.max)}; trunk taper ${f3(m.taperHalfAngleDeg.median)} deg`);
+  }
+  const LEDGE = (zc, xe) => new Float32Array([].concat(box([0, 0, 0], [10, 10, zc + 4]), box([10, 0, zc], [xe, 10, zc + 4])));
+  const LAY = { 1: [[20, 5]], 2: [[18.5, 5], [21.5, 5]], 3: [[18.5, 3.5], [21.5, 3.5], [20, 7]],
+    6: [[17, 3.5], [20, 3.5], [23, 3.5], [17, 6.5], [20, 6.5], [23, 6.5]],
+    12: [[15.5, 2], [18.5, 2], [21.5, 2], [24.5, 2], [15.5, 5], [18.5, 5], [21.5, 5], [24.5, 5], [15.5, 8], [18.5, 8], [21.5, 8], [24.5, 8]] };
+  const SHAPE = { 1: '1>1', 2: '1>2', 3: '1>3', 6: '1>3>6', 12: '1>3>6>12' };
+  /* the parts of the tree and trunk, no sheet: one solid? (closed shells joined where they cross) */
+  function segTri(p, q, a, b, c) {
+    const d = [q[0] - p[0], q[1] - p[1], q[2] - p[2]], e1 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], e2 = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+    const h = [d[1] * e2[2] - d[2] * e2[1], d[2] * e2[0] - d[0] * e2[2], d[0] * e2[1] - d[1] * e2[0]], det = e1[0] * h[0] + e1[1] * h[1] + e1[2] * h[2];
+    if (Math.abs(det) < 1e-14) return false;
+    const f = 1 / det, sv = [p[0] - a[0], p[1] - a[1], p[2] - a[2]], u = f * (sv[0] * h[0] + sv[1] * h[1] + sv[2] * h[2]);
+    if (u < 0 || u > 1) return false;
+    const qv = [sv[1] * e1[2] - sv[2] * e1[1], sv[2] * e1[0] - sv[0] * e1[2], sv[0] * e1[1] - sv[1] * e1[0]], v = f * (d[0] * qv[0] + d[1] * qv[1] + d[2] * qv[2]);
+    if (v < 0 || u + v > 1) return false;
+    const t = f * (e2[0] * qv[0] + e2[1] * qv[1] + e2[2] * qv[2]);
+    return t >= 0 && t <= 1;
+  }
+  function boxOf(S) { const lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9]; for (let i = 0; i < S.length; i += 3) for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], S[i + k]); hi[k] = Math.max(hi[k], S[i + k]); } return { lo, hi }; }
+  function trisOf(S) { const o = []; for (let i = 0; i < S.length; i += 9) o.push([[S[i], S[i + 1], S[i + 2]], [S[i + 3], S[i + 4], S[i + 5]], [S[i + 6], S[i + 7], S[i + 8]]]); return o; }
+  function crosses(A, B, ba, bb) {
+    for (let k = 0; k < 3; k++) if (ba.lo[k] > bb.hi[k] + 1e-6 || bb.lo[k] > ba.hi[k] + 1e-6) return false;
+    const ta = trisOf(A), tb = trisOf(B), E = [[0, 1], [1, 2], [2, 0]];
+    for (const T of ta) for (const [i, j] of E) for (const U of tb) if (segTri(T[i], T[j], U[0], U[1], U[2])) return true;
+    for (const U of tb) for (const [i, j] of E) for (const T of ta) if (segTri(U[i], U[j], T[0], T[1], T[2])) return true;
+    /* one inside the other: a vertex of A inside B by a +x parity count */
+    const inside = (pt, S, bx) => { let n = 0; const far = [bx.hi[0] + 1, pt[1] + 1e-5, pt[2] + 2e-5]; for (const U of trisOf(S)) if (segTri(pt, far, U[0], U[1], U[2])) n++; return n % 2 === 1; };
+    return inside(ta[0][0], B, bb) || inside(tb[0][0], A, ba);
+  }
+  function solidsIn(soups) {
+    const bx = soups.map(boxOf), par = soups.map((x, i) => i), find = x => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
+    for (let i = 0; i < soups.length; i++) for (let j = i + 1; j < soups.length; j++) if (find(i) !== find(j) && crosses(soups[i], soups[j], bx[i], bx[j])) par[find(j)] = find(i);
+    return new Set(soups.map((x, i) => find(i))).size;
+  }
+  const treePartsOf = b => b.tp.trunks.filter(e => e.sheet == null).flatMap(e => e.parts.map(q => q.soup));
+  /* a join's numbers, from the crown's own record */
+  function joinsOf(c) {
+    const byM = {}; c.nodes.forEach(n => { byM[n.member] = n; });
+    const dir = (a, b) => { const d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], l = Math.hypot(...d); return d.map(v => v / l); };
+    const ang = (u, v) => Math.acos(Math.max(-1, Math.min(1, u[0] * v[0] + u[1] * v[1] + u[2] * v[2]))) * 180 / Math.PI;
+    const edge = n => { const pts = [n.pos].concat(n.mid ? [n.mid] : [], [n.to]); return { first: dir(pts[0], pts[1]), last: dir(pts[pts.length - 2], pts[pts.length - 1]) }; };
+    return c.nodes.filter(n => n.kind !== 'tip').map(n => {
+      const kids = n.kids.map(k => byM[k]), dp = n.kind === 'root' ? [0, 0, -1] : edge(n).first, kd = kids.map(k => edge(k).last);
+      const aK = kids.reduce((a, k) => a + (k.kind === 'tip' ? c.tipSide ** 2 : Math.PI * k.rBot * k.rBot), 0);
+      let fan = 0; for (let i = 0; i < kd.length; i++) for (let j = i + 1; j < kd.length; j++) fan = Math.max(fan, ang(kd[i], kd[j]));
+      return { root: n.kind === 'root', kids: kids.length, angles: kd.map(d => ang(d, dp)), fan, ratio: Math.PI * n.rTop * n.rTop / aK };
+    });
+  }
+  /* the oval's area at each of its rings against Bambu's law (a round trunk's, area for area) */
+  const lawR = (z, H, plateZ) => TR.tipMm / 2 + Math.tan(TR.angleDeg * Math.PI / 180) * Math.max(0, H - z) + (z < plateZ + TR.flareMm ? Math.tan(TR.flareAngleDeg * Math.PI / 180) * (plateZ + TR.flareMm - z) : 0);
+  function trunkVsLaw(b) {
+    let worst = Infinity, n = 0;
+    (b.tp.trunkShells || []).forEach(t => {
+      if (!t.rings) return;
+      t.rings.forEach(r => { const rs = r.length > 2 ? r[2] : r[1], area = Math.PI * r[1] * cosN * rs * cosN, lw = Math.PI * lawR(r[0], t.H, b.p.plateZ) ** 2; worst = Math.min(worst, area / lw); n++; });
+    });
+    return { worst, n };
+  }
+  const rows = [];
+  for (const N of [1, 2, 3, 6, 12]) {
+    const sel = LAY[N].map(q => ({ x: q[0], y: q[1], z: 26 })), ZC = { x: 20, y: 5, r: 4 };
+    const b = await build(LEDGE(26, 32), { mode: 'custom', tips: sel, landingZones: [ZC] });
+    if (!b.ok) { check(`${N} tip(s) on one circle: builds`, false, b.reason); continue; }
+    const p = b.p, c = p.crowns[0], J = joinsOf(c), mine = J.filter(j => !j.root), root = J.find(j => j.root);
+    const maxA = Math.max(0, ...J.flatMap(j => j.angles)), lw = trunkVsLaw(b), nTrunk = byKind(b.sh, 'trunk').length;
+    const tipsB = byKind(b.sh, 'tip').length, brB = byKind(b.sh, 'branch').length;
+    rows.push({ N, shape: c.shape, tips: tipsB, branches: brB, zTop: c.zTop, off: c.offCentreMm, k: c.oval.k, over: p.overLean.length, maxA, root: root && root.ratio });
+    const kidsOk = N === 6 ? (() => { const root0 = c.nodes.find(n => n.kind === 'root'); return root0.kids.length === 3 && root0.kids.every(k => c.nodes.find(n => n.member === k).kids.length === 2); })() : true;
+    check(`${N} tip(s) on one circle: exactly one trunk, shape ${SHAPE[N]}, every tip built, none left out`,
+      nTrunk === 1 && p.trunks.length === 1 && c.shape === SHAPE[N] && kidsOk && p.held === N && tipsB === N && b.sh.unsupported.length === 0 && p.offZone.length === 0 && p.unreachable.length === 0,
+      `trunks ${nTrunk}, ${c.shape}, tips ${tipsB}, branch members ${brB}, held ${p.held}`);
+    check(`${N} tip(s): every join inside Bambu's measured range - branch angle at most ${JOINS.angleDeg[1]} deg, area parent / children ${JOINS.areaRatio[0]} - ${JOINS.areaRatio[1]} (the root, which Bambu's law holds at least as wide, no less)`,
+      p.overLean.length === 0 && maxA <= JOINS.angleDeg[1] + 1e-6 && mine.every(j => j.ratio >= JOINS.areaRatio[0] - 1e-6 && j.ratio <= JOINS.areaRatio[1] + 1e-6) && (!root || root.ratio >= JOINS.areaRatio[0] - 1e-6),
+      `${J.length} join(s); widest angle ${f3(maxA)} deg; area ratios ${J.map(j => f3(j.ratio) + (j.root ? ' (root)' : '')).join(' ')}`);
+    check(`${N} tip(s): the trunk is at least Bambu's law at every height (area for area), standing on its circle's centre`,
+      lw.n > 0 && lw.worst >= 1 - 1e-6 && c.offCentreMm < 1e-9 && !c.tight && p.blocked.length === 0,
+      `${lw.n} rings, thinnest ${f3(lw.worst)} x the law; ${f3(c.offCentreMm)} mm off the centre; oval ${f3(c.oval.k)} : 1`);
+    const comps = solidsIn(treePartsOf(b));
+    check(`${N} tip(s): the tree is one connected solid`, comps === 1, `${comps} piece(s) from ${treePartsOf(b).length} shells`);
+  }
+  /* 7b. an over-lean tip is built, marked, and has a spot inside the limit; no tip is left out */
+  {
+    const LD = LEDGE(16, 45), near = [[18, 4], [20, 4], [22, 4], [18, 6], [20, 6], [22, 6]].map(q => ({ x: q[0], y: q[1], z: 16 })), far = { x: 43, y: 5, z: 16 };
+    const b = await build(LD, { mode: 'custom', tips: near.concat([far]), landingZones: [{ x: 20, y: 5, r: 3 }] });
+    if (!b.ok) check('over-lean case: builds', false, b.reason);
+    else {
+      const p = b.p, farId = GP.tipId([far.x, far.y, far.z], true), byId = {};
+      b.sh.members.forEach(m => { byId[m.id] = m; });
+      const tanL = Math.tan(p.branchTiltDeg * Math.PI / 180), mine = p.overLean.filter(o => o.tip === farId);
+      const spot = p.suggested.find(sg => mine.some(o => o.member === sg.forMember));
+      const m = spot && byId[spot.forMember];
+      check('over-lean: a tip far from its circle is built (a member of its own, carried by the circle\'s trunk), listed in plan.overLean, and no tip is left out',
+        byKind(b.sh, 'tip').some(t => t.id === farId) && byKind(b.sh, 'trunk').length === 1 && byKind(b.sh, 'trunk')[0].carries.indexOf(farId) >= 0 && mine.length > 0 && mine.every(o => o.leanDeg > p.branchTiltDeg) &&
+        p.held === 7 && b.sh.unsupported.length === 0 && p.offZone.length === 0,
+        `${p.overLean.length} member(s) over ${p.branchTiltDeg} deg, the far tip's at ${mine.length ? f3(mine[0].leanDeg) : '-'} deg; held ${p.held} of 7`);
+      check('over-lean: the engine suggests a spot on the plate whose drop from that member sits inside the lean limit (the engine\'s own reach, z x tan limit)',
+        !!spot && !!m && Math.hypot(spot.x - m.from[0], spot.y - m.from[1]) <= (m.from[2] - p.plateZ) * tanL + 1e-6 && spot.leanDeg <= p.branchTiltDeg + 1e-6 && p.suggested.length === p.overLean.length,
+        spot ? `(${f3(spot.x)}, ${f3(spot.y)}) for ${spot.forMember}: reach ${f3(Math.hypot(spot.x - m.from[0], spot.y - m.from[1]))} of ${f3((m.from[2] - p.plateZ) * tanL)} mm, ${f3(spot.leanDeg)} deg` : 'none');
+    }
+  }
+  /* 7c. an oval trunk carries a spread-out row of tips */
+  {
+    const row = [14, 17, 20, 23, 26, 29].map(x => ({ x: x, y: 5, z: 26 })), ZC = { x: 22, y: 5, r: 5 };
+    const b = await build(LEDGE(26, 36), { mode: 'custom', tips: row, landingZones: [ZC] });
+    if (!b.ok) check('oval: builds', false, b.reason);
+    else {
+      const c = b.p.crowns[0], t = b.tp.trunkShells[0], ang = ((c.oval.angDeg % 180) + 180) % 180;
+      check('oval: a row of tips 15 mm long along x is carried by an oval trunk, its long axis along the row, area kept (the same law as a round trunk)',
+        c.oval.k > 1.5 && (ang < 10 || ang > 170) && t && t.rings && t.rings[0][1] > t.rings[0][2] * 1.2 && trunkVsLaw(b).worst >= 1 - 1e-6 && c.offCentreMm < 1e-9,
+        `${f3(c.oval.k)} : 1 along ${f3(c.oval.angDeg)} deg (the row's spread ${f3(2 * c.oval.half)} mm); base ${t && t.rings ? f3(t.rings[0][1] * cosN * 2) + ' x ' + f3(t.rings[0][2] * cosN * 2) : '-'} mm; thinnest ${f3(trunkVsLaw(b).worst)} x the law`);
+    }
+  }
+  /* 7d. two circles, two trees; the eraser takes a branch (and the trunk) and the tree is split round it */
+  {
+    const sel = LAY[6].map(q => ({ x: q[0], y: q[1], z: 26 })), feed = { mode: 'custom', tips: sel, landingZones: [{ x: 20, y: 5, r: 4 }] };
+    const b0 = await build(LEDGE(26, 32), feed);
+    const pair = byKind(b0.sh, 'branch').find(m => m.carries.length === 2), trunk0 = byKind(b0.sh, 'trunk')[0];
+    for (const [label, victim] of [['a pair\'s branch', pair], ['the trunk', trunk0]]) {
+      const e = await build(LEDGE(26, 32), Object.assign({}, feed, { excluded: [victim.id] }));
+      check(`eraser: ${label} erased - its id is not built, the circle still holds all 6 tips on one trunk, split round it`,
+        e.ok && !e.sh.members.some(m => m.id === victim.id) && e.p.held === 6 && byKind(e.sh, 'trunk').length === 1 && e.sh.unsupported.length === 0 && e.p.excluded.members[0] === victim.id,
+        e.ok ? `held ${e.p.held}, ${e.p.crowns[0].shape}, trunk at ${e.p.crowns[0].axis.map(f3).join(', ')} (was ${b0.p.crowns[0].axis.map(f3).join(', ')}), ${e.p.blocked.length} blocked` : e.reason);
+    }
+    const two = await build(LEDGE(26, 44), { mode: 'custom', tips: LAY[6].map(q => ({ x: q[0], y: q[1], z: 26 })).concat(LAY[6].map(q => ({ x: q[0] + 12, y: q[1], z: 26 }))), landingZones: [{ x: 20, y: 5, r: 4 }, { x: 32, y: 5, r: 4 }] });
+    check('two circles, twelve tips: one trunk to each circle, each inside its own circle, every tip built',
+      two.ok && byKind(two.sh, 'trunk').length === 2 && two.p.crowns.length === 2 && two.p.crowns.every(c => c.shape === '1>3>6') && two.p.held === 12 && two.p.zones.every(z => z.trunks.length === 1),
+      two.ok ? two.p.crowns.map(c => `circle ${c.zone}: ${c.shape} at ${c.axis.map(f3).join(', ')} (${f3(c.offCentreMm)} off its centre)`).join('; ') : two.reason);
+  }
+  /* 7e. the arc: the stair's tips on one circle - one trunk, the stair grafted on it */
+  {
+    const held = arc.tp.sheet.tips.filter(t => t.mode === 'drop').map(t => { const q = arc.p.beacons[t.beacon].p; return { x: q[0], y: q[1], z: q[2] }; });
+    const ZC = { x: 90, y: 100, r: 5 }, b = await build(ARC, { mode: 'custom', tips: held, landingZones: [ZC] });
+    if (!b.ok) check('arc: builds', false, b.reason);
+    else {
+      const c = b.p.crowns[0], J = joinsOf(c), comps = solidsIn(treePartsOf(b)), mine = J.filter(j => !j.root);
+      rows.push({ N: held.length, shape: c.shape, tips: byKind(b.sh, 'tip').length, branches: byKind(b.sh, 'branch').length, zTop: c.zTop, off: c.offCentreMm, k: c.oval.k, over: b.p.overLean.length, maxA: Math.max(...J.flatMap(j => j.angles)), root: J.find(j => j.root).ratio, arc: true });
+      check(`arc: its ${held.length} stair tips on one circle - one trunk (the stair's own tree grafted on it), every tip built, one connected solid`,
+        byKind(b.sh, 'trunk').length === 1 && b.tp.stairTrunks.length === 0 && b.p.held === held.length && b.sh.unsupported.length === 0 && comps === 1 && b.tp.sheet.counts.drop > 0,
+        `trunks ${byKind(b.sh, 'trunk').length}, stair trunks ${b.tp.stairTrunks.length}, stair holds ${b.tp.sheet.counts.drop} tips on ${b.tp.sheet.levels.length} stair(s), ${comps} piece`);
+      check('arc: every join inside Bambu\'s measured range, the trunk at least its law, standing on the circle\'s centre',
+        mine.every(j => j.ratio >= JOINS.areaRatio[0] - 1e-6 && j.ratio <= JOINS.areaRatio[1] + 1e-6) && Math.max(...J.flatMap(j => j.angles)) <= JOINS.angleDeg[1] + 1e-6 && trunkVsLaw(b).worst >= 1 - 1e-6 && c.offCentreMm < 1e-9 && b.p.blocked.length === 0,
+        `${J.length} joins, widest ${f3(Math.max(...J.flatMap(j => j.angles)))} deg, area ratios ${f3(Math.min(...J.map(j => j.ratio)))} - ${f3(Math.max(...J.map(j => j.ratio)))}; trunk ${f3(trunkVsLaw(b).worst)} x the law; oval ${f3(c.oval.k)} : 1`);
+    }
+  }
+  /* the tree shapes */
+  console.log('\n  tree shapes (tips > per round of joins; the arc\'s are its stair tips):');
+  console.log('    tips  shape         tip cols  branches  top of trunk   off centre  oval    over lean  widest angle  root area ratio');
+  rows.forEach(r => console.log(`    ${String(r.N).padStart(4)}  ${r.shape.padEnd(12)}  ${String(r.tips).padStart(8)}  ${String(r.branches).padStart(8)}  ${f3(r.zTop).padStart(12)}  ${f3(r.off).padStart(10)}  ${f3(r.k).padStart(6)}  ${String(r.over).padStart(9)}  ${f3(r.maxA).padStart(12)}  ${r.root == null ? '-' : f3(r.root)}`));
+  /* the knobs: nothing new is wired in */
+  const KN = GP.crownKnobs({ crown: { ovalMax: 5, trunk: { angleDeg: 4 } } });
+  check('every crown value is an opts.crown knob with today\'s value as default', GP.crownKnobs({}).ovalMax === GP.CROWN.ovalMax && KN.ovalMax === 5 && KN.trunk.angleDeg === 4 && KN.trunk.tipMm === TR.tipMm && KN.areaRatio === GP.CROWN.areaRatio,
+    JSON.stringify(GP.crownKnobs({})).slice(0, 220));
 
   console.log('\n' + (fail ? `FAILED  ${fail} of ${pass + fail}` : `PASSED  all ${pass}`));
   if (fail) { console.log('  ' + FAILS.join('\n  ')); process.exit(1); }

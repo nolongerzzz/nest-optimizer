@@ -513,7 +513,7 @@ nudge, cap, sheet and gap. One on no face within 1 mm, or on a face turned up
 more than 0.26 (the card's own Shift-click rule), is refused, reported in
 `plan.feed.refused` and counted unsupported - never moved.
 
-**Landing zones.** When any is given, a trunk lands on the plate only where its
+**Landing zones (Auto and Assisted; Custom is section 8).** When any is given, a trunk lands on the plate only where its
 CENTRE - the axis of its end - is inside a zone's circle; its pad and its
 flared trunk (supports-foot) may spill past the line (owner's rule, after #274:
 a flared foot is wider than a small zone). A member whose drop would land outside every zone
@@ -583,6 +583,105 @@ carried by them); an excluded trunk and tip on
 the coupon, and a member of the rebuild excluded in turn; members the same
 across two builds, every held tip in exactly one trunk (the arc's stair
 included); the card's build's pads named by shareFeet.
+
+## 8. Crowns: one tree to a circle (supports-thinning-1)
+
+```
+npm run support:feed     tools/nso_support_feed_check.js      (section 7: 36 more checks)
+node tools/nso_support_bambu_joins.js                         Bambu's joins, measured
+node tools/nso_support_crown_export.js [x,y,r ...]            simple_overhang from Custom -> tools/supports-crown-out/
+```
+
+Engine only. Feed mode `custom` WITH landing circles builds each circle's tips as ONE tree: a trunk, branches that
+split by position, the tips on their columns. Auto, Assisted and Custom with no circle are untouched (no circle: the
+lattice descent of sections 2 - 7, as before). Only what is BELOW the tips changes: the tips, flat caps, transition and
+interface layers, sheet and strips are the interface's as ever, and the base pad, flare and the hollow core are not
+touched. The lean limit now MARKS, it does not refuse: in Custom no tip is unreachable, off every zone, or undone by a
+merge (`plan.offZone`, `unmerged`, `unreachable` stay empty; they remain Auto's and Assisted's).
+
+**Which circle.** The rule of section 7: the nearest circle the tip reaches within the lean (`leanReach(z) = (z - plateZ)
+x tan limit`, the one function the zone rule and the suggestion both use) with a clear route (the zone's targets, as
+`zoneLand` tries them); none: the nearest circle, and the connection says so.
+
+**The split** (`crownTopology`). The nearest tips pair up (the globally nearest pair first; an odd one out joins the
+nearest pair), the nearest pairs / nodes group up the same way, 2 or 3 to a join, until at most 3 are left: those are
+the trunk's branches. 6 tips: 3 pairs, a trunk with 3 branches (1 > 3 > 6); 12: 1 > 3 > 6 > 12; one tip: a straight
+trunk; two: one split.
+
+**Where the joins stand.** A join sits between its tips' centroid and the trunk's axis (the nearer the trunk, the
+nearer the axis), as high as the design lean lets it sit under its branches, never nearer than a cap or a ball needs
+(4 mm under a tip, 3 mm or 1.25 x its radius between joins). The design lean is half the widest angle Bambu's joins
+measure (23.9 deg), so no join bends past that angle; the lean LIMIT (`branchTiltDeg`, 30) is what marks. A join whose
+branches cannot reach it clear of the piece (the rail probe: the axis and 8 rails) is tried 1 - 8 mm round its place; a
+branch still through the piece takes one bend (a waypoint) up to 16 mm out. **A branch with no way round is NOT built -
+a trunk through the part is garbage - and is listed in `plan.blocked` with the tips it holds; those tips stay in
+`held`.** (Open: the ticket says nothing is left out; the rail probe says nothing goes through the part. They meet here.)
+
+**The trunk.** On the circle's centre, else the nearest point of the circle (0.5 mm, 32 headings) where a trunk of its
+width stands 0.35 mm off the piece and its foot 3.86 mm off the part's base (the foot check of section 2). No such point:
+the point that falls shortest, built narrowed (`crown.tight`). Its top is the first join. It is oval: its long axis is
+the spread of the tips it carries (the first axis of their plan positions), its aspect `k = half spread / radius`,
+between 1 and 3 and 1 when the spread is not at least 1.25 x its width; the AREA is the round trunk's - the law of section 2
+at every height, plus whatever the branches above need (`dR`) - so `a = r sqrt(k)`, `b = r / sqrt(k)`. Where the piece
+is near, the oval is first made less long (area kept) and only when round and still not fitting is it narrowed under the
+law. The branches off the trunk start along its long axis, where they are going. The trunk is `growTrunks`' (the card's
+build and `shareFeet`), its pad and flare as ever.
+
+**The thickness.** A join keeps its area: the parent's cross-section is the sum of its children's (Bambu's, below); a
+branch keeps its width between joins (Bambu's, below); the tips are the interface's 1.2 mm columns. A tip column ends in
+a ball at the join (radius of the parent); a branch is a round tube, 20 sides.
+
+**The stair.** Where the interface plans a stair under a curved underside (the arc), its own tree is planned as crowns on
+the same circles and GRAFTED onto the circle's trunk (its top branches enter the trunk where they are going, the trunk is
+as wide as both asked for): one trunk to a circle. A circle whose own tree is not built (the stair holds all its tips)
+carries the stair's tree on a trunk of its own.
+
+**Over lean.** A connection (a tip's column, a branch) over the limit is built as planned and listed:
+`plan.overLean = [{ member, tip, leanDeg }]` (member: the id the build gives it; tip: its first tip) and
+`plan.suggested = [{ x, y, forMember, leanDeg }]`: the plate point nearest the circle's axis where a drop from the
+member's top sits inside the limit (97 % of `leanReach`, a clear drop, else a nearby heading / shorter reach).
+The engine returns the data; nothing draws it. A member holding tips a stair holds is renamed by the build.
+
+**The eraser.** An erased member is a keep-out as before. Erasing a branch also forbids that join (the tips pair
+another way); erasing the trunk moves it to where the circle has room. `plan.excluded` as before.
+
+**Knobs.** Nothing new is a rule: `opts.crown = { areaRatio, tipDropMm, nodeDropMm, ovalMax, branchTaperDeg, rootFloorMm,
+designLeanDeg, nodeRings, searchStepMm, tubeSides, maxKids, nudgeTips, nudgeMarginMm, trunk: { tipMm, angleDeg, flareMm,
+flareAngleDeg } }` overrides any of them with today's values as the defaults (`GP.crownKnobs(opts)`, `plan.crownKnobs`);
+the lean limit is `opts.branchTiltDeg`. A tip is moved off a wall only where its column would touch it
+(`nudgeMarginMm` 0): the planner's own 0.2 mm margin moved 14 more of the arc's tips and its stair did not form.
+
+**Bambu's joins, measured** (`tools/nso_support_bambu_joins.js` on `simple_overhang_bambu.gcode.3mf`: each layer's
+support loops drawn on a 0.1 mm raster, filled, the islands linked layer to layer; 7 joins - the P1S slice of the same
+part is the same tree):
+
+| | min | median | p90 | max |
+|---|---|---|---|---|
+| parent area / sum of its children's | 0.972 | 0.989 | 1.02 | 1.089 |
+| branch angle (a child's direction against its parent's), deg | 4.0 | 15.3 | 36.7 | 47.7 |
+| fan between two children, deg | 25.2 | 29.1 | 42.5 | 50.0 |
+| parent / widest child (diameter) | 1.20 | 1.33 | 1.39 | 1.43 |
+| parent diameter, mm | 4.6 | 5.7 | 7.8 | 8.7 |
+| child diameter, mm | 3.1 | 4.1 | 6.1 | 7.3 |
+
+A trunk widens going down at 4.4 deg (the setting is 5); between joins a branch holds its width (-0.5 to -1.0 deg).
+The engine's `JOINS` is this table; `support:feed` re-measures and holds the two together.
+
+**Measured on the build** (`support:feed` section 7, the ledge 26 mm over the plate, one circle 4 mm in radius under it):
+
+| tips | shape | tip columns | branch members | trunk top z | off the circle's centre | oval | widest angle | root area ratio |
+|---|---|---|---|---|---|---|---|---|
+| 1 | 1>1 | 1 | 1 | 22.0 | 0 | 1.00 | 0 | 4.19 |
+| 2 | 1>2 | 2 | 2 | 22.0 | 0 | 1.08 | 13.4 | 2.09 |
+| 3 | 1>3 | 3 | 3 | 22.0 | 0 | 1.69 | 21.6 | 1.40 |
+| 6 | 1>3>6 | 6 | 9 | 18.2 | 0 | 1.71 | 21.2 | 1.12 |
+| 12 | 1>3>6>12 | 12 | 21 | 7.8 | 0 | 1.63 | 30.5 | 1.38 |
+| 37 (the arc's stair tips) | 1>2>4>9>18>37 | 37 | 11 | 13.7 | 0 | 2.62 | 30.9 | 1.01 |
+
+Every join but the root is at area ratio 1.000 (the arc's: up to 1.008). The ROOT's is above the band where the trunk law
+is wider than the tips need (small trees: 1 - 3 tips, and 12 on a tree this short): the trunk is held to Bambu's law at
+every height (never less, `support:feed`: thinnest 1.000 x the law), so there it is thicker than its branches by that
+much. 30.5 deg for 12 tips is a tree squeezed into 26 mm; the arc's stair tips stay inside 31.
 
 ## Paint scope: sub-region — inherited
 
