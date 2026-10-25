@@ -423,7 +423,9 @@
       var before = nowPlaced ? nowPlaced.length : 0;
       // A real File, so handleFiles reads it exactly as it reads a dropped
       // one - same reader, same name on the piece, same everything after.
-      handleFiles([new File([buf], name, { type: 'model/stl' })]);
+      // The second argument tells Import > Recent this came from the library,
+      // and which row, so it is remembered as that and not as a file.
+      handleFiles([new File([buf], name, { type: 'model/stl' })], { source: 'library', load: entry });
       // handleFiles reads the file asynchronously, so the piece is not on
       // the plate yet; seat it on the turn it arrives.
       waitForPlaced(before, name);
@@ -808,6 +810,11 @@
        browser actually lose the row. NOT a delete: it touches this page and
        nothing else. The repository side is app-library-delete.js's. */
     forget: forget,
+    /* Load one catalog entry onto the plate - what a row click does, for a
+       caller with no row (Import > Recent). */
+    load: function (entry) { loadOne(entry, null); },
+    /* Put the list away without touching the Import dropdown around it. */
+    close: function () { setOpen(false); },
     /* And the local half of a save. Same rule, same non-claim: it touches
        this page and nothing else. app-library-save.js calls it once the two
        commits have really landed. */

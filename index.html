@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=13acc9b0" />
+  <link rel="stylesheet" href="styles.css?v=f8f565b9" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -26,7 +26,7 @@
                Every control kept its id (tools/nso_shell_v3_test.js). -->
           <div class="vp-shell-row">
           <details class="vp-menu vp-top-menu vp-shell-menu" id="menu-import">
-            <summary class="vp-bar-btn" title="Bring a piece in: from a file on this computer, or from the library">Import</summary>
+            <summary class="vp-bar-btn" title="Bring a piece in: from a file on this computer, from the library, or one loaded earlier this session">Import</summary>
             <div class="vp-menu-body vp-top-body">
               <input type="file" id="file-input" accept=".stl,.3mf" multiple class="hidden-quiet" />
               <button id="btn-load-stl" class="vp-bar-btn" type="button"
@@ -36,6 +36,16 @@
               aria-haspopup="true" aria-expanded="false"
               title="Browse the piece library by category">From Library</button>
               <div id="library-list" class="library-list" role="menu" hidden
+              style="display:none"></div>
+              </div>
+              <!-- Recent: the loads of this session, newest first, file or library.
+                   Opens like From Library: a list dropping straight down under it
+                   (app-recent.js; the entries are NSORecent's, nso-recent.js). -->
+              <div class="vp-library">
+              <button id="btn-recent" class="vp-bar-btn" type="button"
+              aria-haspopup="true" aria-expanded="false"
+              title="Load again a piece you loaded earlier this session, from a file or from the library">Recent</button>
+              <div id="recent-list" class="library-list recent-list" role="menu" hidden
               style="display:none"></div>
               </div>
             </div>
@@ -338,7 +348,7 @@
             <button id="btn-delete-placed" class="vp-bar-btn" type="button" disabled
                     title="Delete the selected piece from the plate. One Undo puts it back.">⌫ Remove</button>
             <button id="btn-clear-plate" class="vp-bar-btn" type="button"
-                    title="Take every piece off the plate. The loaded pieces stay in the Pieces list.">Clear plate</button>
+                    title="Take every piece off the plate. The loaded pieces are in Import &gt; Recent.">Clear plate</button>
           </div>
           <div class="vp-shell-stack">
           <details class="vp-menu vp-top-menu vp-shell-menu" id="menu-export">
@@ -408,7 +418,7 @@
                 <p id="build-volume-warning" class="build-warning" hidden></p>
             </div>
             <div id="menu-pieces" class="vp-plate-sec">
-              <p class="vp-plate-head" title="The pieces loaded, and Clone">Pieces</p>
+              <p class="vp-plate-head" title="The pieces on the plate, and Clone">Pieces</p>
               <div id="model-list" class="model-list"></div>
               <div class="edit-row" style="margin-top:8px;align-items:center;gap:8px;flex-wrap:wrap;">
                 <label for="clone-count">Clone</label>
@@ -1543,7 +1553,7 @@
     <button type="button" id="ctx-export" class="ctx-item" role="menuitem" title="Open the Export card to download the selected piece as STL or 3MF" disabled>Export selected as&hellip;</button>
     <button type="button" id="ctx-export-plate" class="ctx-item" role="menuitem" title="Open the Export card to export the whole plate as STL or 3MF" disabled>Export plate</button>
     <div class="ctx-sep" role="separator"></div>
-    <button type="button" id="ctx-clear-plate" class="ctx-item" role="menuitem" title="Take every piece off the plate; the loaded pieces stay in the list" disabled>Clear plate</button>
+    <button type="button" id="ctx-clear-plate" class="ctx-item" role="menuitem" title="Take every piece off the plate; the loaded pieces are in Import &gt; Recent" disabled>Clear plate</button>
     <button type="button" id="ctx-delete" class="ctx-item ctx-danger" role="menuitem" disabled>Delete piece</button>
   </div>
 
@@ -1896,8 +1906,9 @@
   <script src="nso_relief.js?v=fe710fb1"></script>
   <!-- Every tool helper goes in and out of the scene through this registry. -->
   <script src="nso-helpers.js?v=9c476e39"></script>
+  <script src="nso-recent.js?v=f03d6f13"></script>
   <script src="nso-bounds.js?v=778acac4"></script>
-  <script src="app-core.js?v=41066d62"></script>
+  <script src="app-core.js?v=5b6396ba"></script>
 
 
 
@@ -2011,7 +2022,8 @@
   <script src="app-library-access.js?v=4724f9d4"></script>
   <script src="app-library-delete.js?v=0eb75f8f"></script>
   <script src="app-library-save.js?v=648528d6"></script>
-  <script src="app-library.js?v=a25c49d7"></script>
+  <script src="app-recent.js?v=ab76eeda"></script>
+  <script src="app-library.js?v=32e7df2e"></script>
   <script src="app-photoset.js?v=884f6a54"></script>
 
   <!-- Flange detection for G-scope's Flange tab. Pure; app-microscope.js

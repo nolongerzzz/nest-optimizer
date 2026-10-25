@@ -1548,7 +1548,12 @@ function zUpToYUp(geometry) {
 
 const IMPORT_EXT_RE = /\.(stl|3mf)$/i;
 
-function handleFiles(files) {
+/* `origin` is for a caller that fetched the bytes itself: the library passes
+   { source: 'library', load: <its catalog entry> } so Import > Recent files the
+   load under the library and can fetch the same file again. A file, a drop and
+   a Recent row of a file pass nothing. A piece is remembered once it has
+   actually come in, never for a file that failed to parse. */
+function handleFiles(files, origin) {
   const list = Array.from(files).filter(f => IMPORT_EXT_RE.test(f.name));
 
   if (!list.length) {
@@ -1572,7 +1577,9 @@ function handleFiles(files) {
           window.NSO_MICROSCOPE.openFile(file.name, e.target.result);
           return;
         }
-        import3MF(file.name, e.target.result);
+        import3MF(file.name, e.target.result).then(result => {
+          if (result && result.objects && result.objects.length) noteRecentLoad(file, origin);
+        });
         return;
       }
       try {
@@ -1580,7 +1587,9 @@ function handleFiles(files) {
         if (!geometry.attributes || !geometry.attributes.position) {
           throw new Error('Invalid geometry');
         }
-        addModelFromZUpGeometryAsync(file.name, geometry);
+        addModelFromZUpGeometryAsync(file.name, geometry).then(id => {
+          if (id != null) noteRecentLoad(file, origin);
+        });
       } catch (err) {
         console.error(err);
         setStatus(`Failed to load ${file.name}. Try re-exporting as binary STL.`, true);
@@ -1588,6 +1597,10 @@ function handleFiles(files) {
     };
     reader.readAsArrayBuffer(file);
   });
+}
+
+function noteRecentLoad(file, origin) {
+  if (window.NSORecent) window.NSORecent.noteLoad(file, origin);
 }
 
 /**
@@ -1903,7 +1916,7 @@ function clearPlateOnly() {
   state.cutterOpen = false;
   updateCutterUI();
   updateAdjustUI();
-  setStatus('Plate cleared - library models kept. Upload or Open cutter still work.');
+  setStatus('Plate cleared - the loaded pieces are in Import > Recent. Upload or Open cutter still work.');
 }
 
 function cloneSelectedModel(opts) {
@@ -1918,6 +1931,12 @@ function cloneSelectedModel(opts) {
   const src = getActiveModel();
   if (!src || !src.geometry) {
     setStatus('Select a model to clone', true);
+    return;
+  }
+  // Clone works on a piece that is on the plate; a loaded piece that was
+  // cleared off it is loaded again from Import > Recent.
+  if (!modelIsOnPlate(src)) {
+    setStatus('Select a piece on the plate to clone', true);
     return;
   }
   // The Clone button reads the count box; the right-click menu asks for one copy.
@@ -2059,11 +2078,41 @@ function previewModelOnPlate(geometry, size) {
   restoreCamera(cam);
 }
 
+/* THE PIECES CARD IS THE PLATE. A loaded piece that is not on the plate any
+   more (after Clear plate) is not a row here; Import > Recent is how it comes
+   back (app-recent.js). A model is on the plate when a placed piece comes from
+   it - or when it is the one piece the cutter is showing alone, which
+   showEditPreview draws with state.placed emptied. state.models itself is
+   untouched: this is only what the card, Quantity, Optimize and Clone read. */
+function modelIsOnPlate(m) {
+  if (!m) return false;
+  if (state.placed.some(p => p && p.sourceId === m.id)) return true;
+  const pv = state.previewMesh;
+  return !!(pv && pv.userData && pv.userData.editPreview && m.id === state.editId);
+}
+
+function modelsOnPlate() {
+  return state.models.filter(modelIsOnPlate);
+}
+
+/* Which rows the card was last drawn for. The card is redrawn when this
+   changes (updateAdjustUI asks), so a piece landing on the plate or leaving
+   it shows without every caller that moves one having to say so. */
+var piecesListSig = null;
+function syncPiecesList() {
+  const sig = modelsOnPlate().map(m => m.id).join(',');
+  if (sig === piecesListSig) return;
+  renderModelList();
+  updateOptimizeButton();
+}
+
 function renderModelList() {
   const el = document.getElementById('model-list');
   el.innerHTML = '';
+  const onPlate = modelsOnPlate();
+  piecesListSig = onPlate.map(m => m.id).join(',');
 
-  state.models.forEach(m => {
+  onPlate.forEach(m => {
     const row = document.createElement('div');
     let cls = 'model-item';
     if (m.id === state.editId) cls += ' active';
@@ -2161,7 +2210,7 @@ function renderModelList() {
 
 function updateOptimizeButton() {
   const btn = document.getElementById('btn-optimize');
-  if (btn) btn.disabled = state.models.length === 0;
+  if (btn) btn.disabled = modelsOnPlate().length === 0;
 }
 
 // ===================== Orientation =====================
@@ -2468,7 +2517,9 @@ function runOptimize() {
 
     function buildInstances(mode) {
       const instances = [];
-      for (const model of state.models) {
+      // Only what is on the plate: a piece that was cleared off it is in
+      // Import > Recent, not in this pack.
+      for (const model of modelsOnPlate()) {
         // Each locked copy of this model is already on the plate and stays
         // there, so the packer is asked for that many fewer.
         const want = Math.max(0, model.quantity - (heldPerModel.get(model.id) || 0));
@@ -2579,7 +2630,7 @@ function runOptimize() {
 
     // The held pieces are on the plate and count towards the plate, so every
     // readout below is over state.placed, not over the pieces just packed.
-    const totalRequested = state.models.reduce((s, m) => s + m.quantity, 0);
+    const totalRequested = modelsOnPlate().reduce((s, m) => s + m.quantity, 0);
     const onPlate = state.placed.filter(p => !p.overflow);
     const fitted = onPlate.length;
     const totalArea = plate.w * plate.d;
@@ -3802,7 +3853,7 @@ function updateAdjustUI() {
       if (el) el.disabled = !has;
     });
   const cloneBtn = document.getElementById('btn-clone');
-  if (cloneBtn) cloneBtn.disabled = !(has || getActiveModel());
+  if (cloneBtn) cloneBtn.disabled = !(has || modelIsOnPlate(getActiveModel()));
   const status = document.getElementById('adjust-status');
   if (status) {
     status.textContent = has
@@ -3817,6 +3868,8 @@ function updateAdjustUI() {
   if (typeof nsoPosLockRefresh === 'function') nsoPosLockRefresh();
   // The Check button names the selected piece, so it follows the selection.
   if (typeof nsoDefectsRefresh === 'function') nsoDefectsRefresh();
+  // Last: the Pieces card follows what is on the plate.
+  syncPiecesList();
 }
 
 function reindexPlacedMeshes() {
