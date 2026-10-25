@@ -74,3 +74,29 @@ ends in one: `<piece> - support 1.1 (Tree trunk1.2 angle3)`, so
 `supportLabel` still read it. The ticket's example had `lean30`; 30 is the
 default lean, so it is not named (only values that differ are). The card
 passing `plan.knobs.nonDefault` is the UI ticket's.
+
+**Cost of `support:feed` (cut after review of #294).** Section 7 reuses the
+coupon (`base`) and arc builds of sections 1-4b as its "no knobs" side, builds
+each piece once at all-default knobs (arc, tilted box, coupon; the tilted box
+also once with no knobs: it is in no earlier section) and reuses those builds
+wherever a later check needs them. Knob values run on the coupon, except
+trunkTipMm 1.2 which also runs on the arc (a stair's own trunks need it); all four
+at once is the coupon with lattice 4 (it doubles as the nodeMm check). The
+step is ~117 s here (sections 1-6 ~50 s; section 7 ~66 s, of which the four
+default-knob builds are ~37 s: the tilted box is ~12 s each, in `parts()`),
+weight 250000 -> 200000.
+
+**One-off runs, not in the step** (plan + `parts({interface: true, foldSheets:
+false})` + `shells`, `feed: { mode: 'assisted', knobs }`):
+
+- arc, leanDeg 95: 59 s, 21 trunks, 48 trunk records (plan time reported `lean`);
+  arc, trunkAngleDeg 60 and 89: 53 s each; arc, trunkAngleDeg 20: 38 s; the
+  default arc is ~10 s. Every shell closed throughout.
+- the tilted box leaves 146 of 216 trunks unbuilt at the defaults ("no height
+  under its tips"). With trunkTipMm 6 it leaves 158, and `problems` reports
+  exactly the 12 the default law builds (`12 of 216 trunk(s) not built that the
+  default law builds`); trunkTipMm 1.2 and trunkAngleDeg 0 report none; leanDeg 20
+  reports 48 of 78 with the "not compared with the default plan's" note.
+- the coupon's law sweep (trunkTipMm 8 / 16 / 30, trunkAngleDeg 30 / 45, 12 mm
+  at 20 deg) builds every trunk: the piece narrows a trunk, never fails one.
+- the weld and the slicer runs listed above.
