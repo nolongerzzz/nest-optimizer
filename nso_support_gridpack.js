@@ -129,7 +129,8 @@
    Every plan.trunks[i] carries regionIds; every solid(plan).solids[i]
    carries beacons (ids), regionIds and landing.
    opts.feed: the user's points - { mode: 'auto' | 'assisted' | 'custom',
-         tips, beaconsOff, landingZones, excluded } (THE FEED, below).
+         tips, beaconsOff, landingZones, excluded, knobs } (THE FEED, below;
+         knobs: { trunkTipMm, trunkAngleDeg, leanDeg, nodeMm }, THE KNOBS).
          Absent, the plan is today's, byte for byte.
    members(plan, parts)        -> { members: [{ id, kind, from, to, carries }],
                                   unsupported }; shells() answers with both
@@ -382,7 +383,8 @@
                  area), less beaconsOff, plus tips; landingZones.
        custom    no beacon grid: the tips given are every tip; landingZones.
      opts.feed = { mode, tips: [{ x, y, z }], beaconsOff: [tip ids],
-                   landingZones: [{ x, y, r }], excluded: [member ids] }
+                   landingZones: [{ x, y, r }], excluded: [member ids],
+                   knobs: { trunkTipMm, trunkAngleDeg, leanDeg, nodeMm } }   (THE KNOBS, below)
      A TIP ID names a spot: 'b' + its point (a detected beacon) or 'u' + the
      point given (a tip of the user's), each coordinate to 0.01 mm - so the
      id of a spot is the same in every build that has it. A given tip is
@@ -395,6 +397,33 @@
   var UP_MAX = 0.26;           /* a face turned up more than this holds nothing (app-supports-card.js's own figure) */
   var KEEP_TRIM_MM = LATTICE_MM;   /* an erased member's keep-out starts this far down from a tip it held */
   var FEED_MODES = { auto: true, assisted: true, custom: true };
+  /* THE KNOBS (opts.feed.knobs; an Assisted or Custom feed's "playground").
+     Four numbers the planner and the trunk builder have always had as
+     constants; given, they are read in every place the constant was:
+       trunkTipMm     TRUNK_TIP_MM     the trunk law's diameter at the top (growTrunks, reland, the TRUNK descriptor)
+       trunkAngleDeg  TRUNK_ANGLE_DEG  the half-angle it grows going down (the same three)
+       leanDeg        BRANCH_TILT_DEG  the lean limit (plan(), reland's reach)
+       nodeMm         LATTICE_MM       the node lattice L (plan(); the erased-member keep-out's trim)
+     Absent, the plan is today's, byte for byte. There is no floor and no
+     ceiling: a number must be finite and > 0 (trunkAngleDeg >= 0: 0 is a
+     straight trunk) and the geometry decides the rest. What a value breaks
+     is REPORTED (plan.knobs.problems), never clamped. The flare, the pad, the
+     interface and the hollow core are not knobs. */
+  var KNOB_KEYS = ['trunkTipMm', 'trunkAngleDeg', 'leanDeg', 'nodeMm'];
+  function knobsOf(k) {
+    if (k == null) return null;
+    if (typeof k !== 'object' || Array.isArray(k)) return { error: 'feed.knobs is not an object' };
+    var given = {}, n = 0, keys = Object.keys(k);
+    for (var i = 0; i < keys.length; i++) {
+      var key = keys[i], v = k[key];
+      if (KNOB_KEYS.indexOf(key) < 0) return { error: 'unknown knob ' + JSON.stringify(key) + ' (' + KNOB_KEYS.join(', ') + ')' };
+      if (v == null) continue;
+      if (typeof v !== 'number' || !isFinite(v)) return { error: 'feed.knobs.' + key + ' is not a finite number: ' + JSON.stringify(v) };
+      if (key === 'trunkAngleDeg' ? v < 0 : !(v > 0)) return { error: 'feed.knobs.' + key + ' must be ' + (key === 'trunkAngleDeg' ? '>= 0 (0 is a straight trunk)' : '> 0') + ', got ' + v };
+      given[key] = v; n++;
+    }
+    return n ? { given: given } : null;
+  }
   function fmt2(v) { return (Math.round(v * 100) / 100).toFixed(2); }
   function tipId(p, given) { return (given ? 'u' : 'b') + fmt2(p[0]) + ',' + fmt2(p[1]) + ',' + fmt2(p[2]); }
   function tidOf(b) { return b.tid || tipId(b.p, false); }
@@ -419,6 +448,9 @@
     if (mode === 'auto' && (tips.length || off.length || zones.length)) {
       return { error: 'feed mode auto takes no tips, beaconsOff or landingZones - say assisted or custom' };
     }
+    var kn = knobsOf(f.knobs);
+    if (kn && kn.error) return kn;
+    if (kn && mode === 'auto') return { error: 'feed mode auto takes no knobs - say assisted or custom' };
     if (mode === 'custom' && off.length) return { error: 'beaconsOff is for assisted: custom has no beacons to turn off' };
     for (var i = 0; i < tips.length; i++) {
       var t = tips[i];
@@ -433,7 +465,7 @@
     off.forEach(function (id) { offSet[String(id)] = true; });
     ex.forEach(function (id) { exSet[String(id)] = true; });
     return { mode: mode, tips: tips, off: offSet, zones: zones.map(function (q) { return { x: +q.x, y: +q.y, r: +q.r }; }),
-             excluded: ex.map(String), exSet: exSet };
+             excluded: ex.map(String), exSet: exSet, knobs: kn };
   }
   /* The nearest point of the piece to q, and its face's unit normal. */
   function nearestFace(soup, q) {
@@ -579,6 +611,42 @@
   function sideFor(base, count) { return base * Math.sqrt(Math.min(count, AREA_CAP)); }
   function nodeOf(x, g) { return g * Math.round(x / g); }
 
+  /* plan.knobs: the four values the plan and its trunks use (the ones not
+     given are the constants they replace), what was given, the given ones
+     that are not the default (the export names a support by these), and
+     problems - what a value makes of the plan, found here and, once the
+     solids are made, in shells(). Never a clamp: a value is used as given. */
+  function knobsEcho(given, tiltDeg, L, T) {
+    var k = { trunkTipMm: given.trunkTipMm != null ? given.trunkTipMm : TRUNK_TIP_MM,
+              trunkAngleDeg: given.trunkAngleDeg != null ? given.trunkAngleDeg : TRUNK_ANGLE_DEG,
+              leanDeg: tiltDeg, nodeMm: L, given: Object.assign({}, given), nonDefault: {}, problems: [] };
+    var dflt = { trunkTipMm: TRUNK_TIP_MM, trunkAngleDeg: TRUNK_ANGLE_DEG, leanDeg: T.BRANCH_TILT_DEG, nodeMm: LATTICE_MM };
+    KNOB_KEYS.forEach(function (key) { if (given[key] != null && given[key] !== dflt[key]) k.nonDefault[key] = given[key]; });
+    if (given.leanDeg != null && !(tiltDeg < 90)) k.problems.push({ kind: 'lean', knob: 'leanDeg', what: 'a lean of ' + tiltDeg + ' deg is a leg lying flat or climbing, not a lean off vertical: tan() is no reach' });
+    if (given.trunkAngleDeg != null && !(k.trunkAngleDeg < 90)) k.problems.push({ kind: 'angle', knob: 'trunkAngleDeg', what: 'a half-angle of ' + k.trunkAngleDeg + ' deg does not widen a trunk going down: tan() is no slope' });
+    return k;
+  }
+  /* A problem found once the solids are made (parts(), shells()): one of each kind in plan.knobs.problems, however often it is found. */
+  function knobProblem(p, kind, knob, what, count) {
+    var list = p.knobs.problems;
+    for (var i = list.length - 1; i >= 0; i--) if (list[i].kind === kind) list.splice(i, 1);
+    list.push({ kind: kind, knob: knob, what: what, count: count });
+  }
+  /* Edges not shared by exactly one triangle each way (corners to 1e-5 mm): 0 for a closed shell. */
+  function openEdges(soup) {
+    var E = {}, K = function (i) { return Math.round(soup[i] * 1e5) + ',' + Math.round(soup[i + 1] * 1e5) + ',' + Math.round(soup[i + 2] * 1e5); };
+    for (var t = 0; t + 8 < soup.length; t += 9) {
+      var k = [K(t), K(t + 3), K(t + 6)];
+      for (var e = 0; e < 3; e++) {
+        var a = k[e], b = k[(e + 1) % 3], fwd = a < b, ek = fwd ? a + '|' + b : b + '|' + a, r = E[ek] || (E[ek] = [0, 0]);
+        r[fwd ? 0 : 1]++;
+      }
+    }
+    var bad = 0;
+    for (var key in E) if (E[key][0] !== 1 || E[key][1] !== 1) bad++;
+    return bad;
+  }
+
   /* =====================================================================
      CROWNS (supports-thinning-1) - the custom feed's tree: ONE per landing circle
 
@@ -679,6 +747,11 @@
     if (!(style in EAGERNESS)) { out.reason = 'unknown support style ' + JSON.stringify(opts.style); return out; }
     var eager = opts.mergeEagerness == null ? EAGERNESS[style] : +opts.mergeEagerness;
     out.style = style; out.eagerness = eager;
+    /* the knobs (the feed's; a stair's own tree is handed its plan's as opts._knobs), each over the constant it replaces */
+    var KN = (opts._feed && opts._feed.knobs) || opts._knobs || null, kg = KN ? KN.given : {};
+    var tiltDeg = kg.leanDeg != null ? kg.leanDeg : (opts.branchTiltDeg == null ? T.BRANCH_TILT_DEG : +opts.branchTiltDeg);
+    var L = kg.nodeMm != null ? kg.nodeMm : (opts.latticeMm == null ? LATTICE_MM : +opts.latticeMm), g = L / 2;
+    if (KN) out.knobs = knobsEcho(kg, tiltDeg, L, T);
 
     say('detecting', null, null, true);
     var F = opts._feed || null;
@@ -696,9 +769,7 @@
     var s0 = strut.sideMm;
     out.sideMm = s0; out.floorMm = strut.floorMm;
     out.handSideMm = Math.max(A.STRUT_SIDE_DEFAULT_MM, strut.floorMm);
-    var tiltDeg = opts.branchTiltDeg == null ? T.BRANCH_TILT_DEG : +opts.branchTiltDeg;
     var tanT = Math.tan(tiltDeg * Math.PI / 180), cosT = Math.cos(tiltDeg * Math.PI / 180);
-    var L = opts.latticeMm == null ? LATTICE_MM : +opts.latticeMm, g = L / 2;
     var plateZ = bc.detect.plateZ;
     var reach = (opts.pickupReachMm == null ? bc.pitchMm * 1.05 : +opts.pickupReachMm) * (eager > 0 ? 1 : 0);
     var rest = !!opts.restOnModel;
@@ -1694,7 +1765,10 @@
      its inscribed radius at height z over the plate. H is the top of what
      the trunk holds up: the highest of its tips, or of the sheet or stair it
      carries (all of a stair's trunks are as tall as the stair). Bambu's own
-     law is the same with 5 deg and no H but its tips. The trunk rises from
+     law is the same with 5 deg and no H but its tips. The tip diameter and the
+     angle are the feed's knobs when it gives them (THE KNOBS): the foot's
+     record carries the law (grow.law), and growTrunks, the landing (reland)
+     and shareFeet all read it from there. The trunk rises from
      the pad up its STEM - the landing member, then at each merge the parent
      holding most of its tips - while the stem holds at least TRUNK_SHARE of
      them: where the tree splits, the trunk ends. A taproot (a strut never
@@ -1862,7 +1936,7 @@
      inscribed radius: always pad). Feet without a record are left alone. */
   function growTrunks(TH, obstacles, feet, plateZ, thick) {
     var probes = obstacles.map(function (sp) { return probeOf(TH, sp); }).filter(Boolean);
-    var ta = Math.tan(TRUNK_ANGLE_DEG * Math.PI / 180), tb = Math.tan(FLARE_ANGLE_DEG * Math.PI / 180);
+    var tb = Math.tan(FLARE_ANGLE_DEG * Math.PI / 180);
     var cosN = Math.cos(Math.PI / TRUNK_SIDES), tips = [], seen = [];
     feet.forEach(function (f) {
       var T = f.grow && f.grow.tips;
@@ -1873,14 +1947,16 @@
       var g = f.grow;
       if (!g) return;
       var cx = f.c[0], cy = f.c[1];
+      /* the law's inscribed radius at z, and the side's outer radius it is built at (the foot's own law: the knobs', when given) */
+      var tipMm = g.law ? g.law.tipMm : TRUNK_TIP_MM, ta = Math.tan((g.law ? g.law.angleDeg : TRUNK_ANGLE_DEG) * Math.PI / 180);
       if (g.crown) { growCrownTrunk(f, fi, g, probes, plateZ, thick, ta, tb, cosN, zf, z0); return; }
-      /* the law's inscribed radius at z, and the side's outer radius it is built at */
-      var law = function (z) { return TRUNK_TIP_MM / 2 + ta * Math.max(0, g.H - z) + (z < zf ? tb * (zf - z) : 0); };
+      var law = function (z) { return tipMm / 2 + ta * Math.max(0, g.H - z) + (z < zf ? tb * (zf - z) : 0); };
       var Rmax = law(z0) / cosN, top = g.top;
       tips.forEach(function (q) {
         if (Math.hypot(q[0] - cx, q[1] - cy) <= Rmax + TRUNK_TIP_REACH_MM) top = Math.min(top, q[2] - TRUNK_TIP_CLEAR_MM);
       });
       var rec = { c: [cx, cy], H: g.H, stemTop: g.top, top: top, rings: null, why: null };
+      if (g.law) rec.law = g.law;
       f.grown = rec;
       if (!(top > z0 + thick)) { rec.why = 'no height under its tips'; return; }
       /* how far each height of the axis may reach before it comes within TRUNK_KEEP_MM of the piece, less the step's slack */
@@ -2934,7 +3010,9 @@
         cur = best;
       }
       var top = cur.path[0][2] + (cur.kind === 'merge' || cur.kind === 'pickup' ? cur.side / 2 : 0);
-      return { H: H, top: top, side: root.side, tips: null };
+      var rec = { H: H, top: top, side: root.side, tips: null };
+      if (p.knobs) rec.law = { tipMm: p.knobs.trunkTipMm, angleDeg: p.knobs.trunkAngleDeg };   /* the knobs' law rides with the foot: growTrunks and shareFeet read it from there */
+      return rec;
     }
     /* A TRUNK'S LANDING, KEPT OFF THE PART (supports-stair-body): its
        flared foot - the law's outer radius at the plate - stands
@@ -2954,9 +3032,10 @@
       if (!THr) return null;
       if (!landProbes) landProbes = [opts.rawTris || []].concat(opts.occluders || []).filter(function (sp) { return sp && sp.length >= 9; })
         .map(function (sp) { return probeOf(THr, sp); }).filter(Boolean);
-      var ta = Math.tan(TRUNK_ANGLE_DEG * Math.PI / 180), tb = Math.tan(FLARE_ANGLE_DEG * Math.PI / 180), cosN = Math.cos(Math.PI / TRUNK_SIDES);
+      var tb = Math.tan(FLARE_ANGLE_DEG * Math.PI / 180), cosN = Math.cos(Math.PI / TRUNK_SIDES);
+      var tipMm = g.law ? g.law.tipMm : TRUNK_TIP_MM, ta = Math.tan((g.law ? g.law.angleDeg : TRUNK_ANGLE_DEG) * Math.PI / 180);
       var z0 = p.plateZ + foot / 2, zf = p.plateZ + FLARE_MM, top = Math.min(g.top, from[2]);
-      var law = function (z) { return TRUNK_TIP_MM / 2 + ta * Math.max(0, g.H - z) + (z < zf ? tb * (zf - z) : 0); };
+      var law = function (z) { return tipMm / 2 + ta * Math.max(0, g.H - z) + (z < zf ? tb * (zf - z) : 0); };
       var zs = [];
       for (var z = z0; z < top - 1e-9; z += 2 * TRUNK_STEP_MM) zs.push(z);
       function fits(c) {
@@ -3138,7 +3217,7 @@
         var p2o = Object.assign({}, opts, {
           beacons: L.stair.tips.map(function (w, i) { return { p: w.p, n: [0, 0, -1], key: 'stair' + L.id + '.' + i }; }),
           skipList: [], style: p.style, sideMm: p.sideMm, restOnModel: false, mergeThroughCrowd: true,
-          interface: false, onProgress: null });
+          interface: false, onProgress: null, _knobs: p.knobs ? { given: p.knobs.given } : null });
         /* a custom plan's stair is carried the way its tips are: one tree to a circle, on the circles' own feed. Where a
            circle's own tree is built, the stair's trunk stands on its axis (one trunk, as far as the part lets it) */
         var graftHost = {};
@@ -3209,7 +3288,25 @@
       if (grow && feet.length && !shared) {
         var THg = TM(opts);
         if (!THg) return { ok: false, reason: 'nso_thickness.js is not loaded - the trunks keep off the piece with its probe' };
-        trunks = growTrunks(THg, [opts.rawTris || []].concat(opts.occluders || []).filter(function (s) { return s && s.length >= 9; }), feet, p.plateZ, foot);
+        var obsG = [opts.rawTris || []].concat(opts.occluders || []).filter(function (s) { return s && s.length >= 9; });
+        /* the knobs' law only (the plan is the default's): the same feet under the default law, to tell what the law broke from what is not built today */
+        var nd = p.knobs ? p.knobs.nonDefault : null, byLaw = nd && (nd.trunkTipMm != null || nd.trunkAngleDeg != null) && nd.leanDeg == null && nd.nodeMm == null;
+        var feet0 = byLaw ? feet.map(function (f) { var q = { key: f.key, trunk: f.trunk, c: f.c.slice(), r: f.r }; if (f.grow) { q.grow = Object.assign({}, f.grow); delete q.grow.law; } return q; }) : null;
+        trunks = growTrunks(THg, obsG, feet, p.plateZ, foot);
+        if (p.knobs) {
+          var lost = feet.map(function (f, i) { return i; }).filter(function (i) { return feet[i].grown && feet[i].grown.why; });
+          /* no knob that moves the plan: what the default law builds is today's, and no problem of the knobs' */
+          if (feet0 && lost.length) { growTrunks(THg, obsG, feet0, p.plateZ, foot); lost = lost.filter(function (i) { return !(feet0[i].grown && feet0[i].grown.why); }); }
+          else if (!nd || !Object.keys(nd).length) lost = [];
+          if (lost.length) {
+            var why = {};
+            lost.forEach(function (i) { (why[feet[i].grown.why] = why[feet[i].grown.why] || []).push(feet[i].grown.c.map(fmt2).join(',')); });
+            knobProblem(p, 'trunk', null, lost.length + ' of ' + feet.length + ' trunk(s) not built' + (feet0 ? ' that the default law builds' : ' (not compared with the default plan\'s, which leaves some unbuilt too)') + ': ' +
+              Object.keys(why).map(function (w) {
+                return w + ' (' + why[w].slice(0, 3).join('; ') + (why[w].length > 3 ? '; ...' : '') + ')';
+              }).join(', '), lost.length);
+          }
+        }
         feet.forEach(function (f) { if (f.shell) out[f.key].parts.push({ soup: f.shell, trunkShell: true }); });
       }
       /* THE PADS (FEET): one per group of feet, each the first part of the
@@ -3661,6 +3758,12 @@
                  return o;
                }) };
     });
+    /* with knobs: a shell that is not closed would slice open (plan.knobs.problems) */
+    if (p.knobs) {
+      var open = 0;
+      E.forEach(function (x) { x.parts.forEach(function (q) { if (openEdges(q.soup)) open++; }); });
+      if (open) knobProblem(p, 'shell', null, open + ' of ' + count + ' shell(s) are not closed (open or non-manifold edges): they would slice open', open);
+    }
     return { ok: true, soup: joinAll(solids.map(function (x) { return x.soup; })), solids: solids, shells: count,
              members: MB.members, unsupported: MB.unsupported,
              fingersDropped: tp.fingersDropped || 0, detached: 0, pads: tp.pads, sheet: tp.sheet || null,
@@ -3871,12 +3974,12 @@
   /* An erased member's keep-out: its polyline swept at its own side, a leg
      at a time, starting KEEP_TRIM_MM down when its top is a tip (so the tip
      is not inside it, and can lean away). */
-  function keepOutSoups(P, ref) {
+  function keepOutSoups(P, ref, trimMm) {
     var pts = ref.pts.map(function (q) { return q.slice(); });
     if (ref.tipTop) {
       var total = 0;
       for (var i = 0; i + 1 < pts.length; i++) total += len(sub(pts[i + 1], pts[i]));
-      var trim = Math.min(KEEP_TRIM_MM, total / 2);
+      var trim = Math.min(trimMm == null ? KEEP_TRIM_MM : trimMm, total / 2);
       while (pts.length > 1 && trim > 1e-9) {
         var L0 = len(sub(pts[1], pts[0]));
         if (L0 <= trim) { trim -= L0; pts.shift(); continue; }
@@ -3917,7 +4020,7 @@
         break;
       }
       hit.forEach(function (id) {
-        keep = keep.concat(keepOutSoups(P, pm.ref[id])); resolved.push(id);
+        keep = keep.concat(keepOutSoups(P, pm.ref[id], F.knobs && F.knobs.given.nodeMm != null ? F.knobs.given.nodeMm : KEEP_TRIM_MM)); resolved.push(id);
         /* a crown's branch that holds more than one tip: that join is not made again - the tree is split round it */
         var rf = pm.ref[id];
         if (p.crowns && rf.kind === 'branch' && !rf.tipTop && rf.carries && rf.carries.length > 1) forbid.push(rf.carries.slice());
@@ -3980,6 +4083,12 @@
     _footprintOf: footprintOf,
     _frustumSoup: frustumSoup,
     FEET: { layerMm: FOOT_LAYER_MM, clusterMm: FOOT_CLUSTER_MM, growMm: FOOT_GROW_MM, gapMm: FOOT_GAP_MM, cellMm: FOOT_CELL_MM, touchMm: FOOT_TOUCH_MM },
+    /* TRUNK is the shipped law (the knobs' defaults); trunkLaw(plan) is the law that plan builds its trunks by: the feed's knobs over it */
+    trunkLaw: function (p) {
+      var k = p && p.knobs;
+      return { tipMm: k ? k.trunkTipMm : TRUNK_TIP_MM, angleDeg: k ? k.trunkAngleDeg : TRUNK_ANGLE_DEG, flareMm: FLARE_MM, flareAngleDeg: FLARE_ANGLE_DEG };
+    },
+    KNOBS: { keys: KNOB_KEYS.slice() },
     TRUNK: { tipMm: TRUNK_TIP_MM, angleDeg: TRUNK_ANGLE_DEG, flareMm: FLARE_MM, flareAngleDeg: FLARE_ANGLE_DEG, share: TRUNK_SHARE,
              keepMm: TRUNK_KEEP_MM, tipClearMm: TRUNK_TIP_CLEAR_MM, tipReachMm: TRUNK_TIP_REACH_MM, sides: TRUNK_SIDES, footClearMm: TRUNK_FOOT_CLEAR_MM },
     JOINS: JSON.parse(JSON.stringify(JOINS)),

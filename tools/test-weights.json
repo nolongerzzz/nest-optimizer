@@ -294,7 +294,7 @@
     "support:curved": {"weight":63000,"note":"37s on the cloud box x 1.7, rounded up: the arc built at 35 deg, its slice, the coupon rebuilt, and the card in Chromium at 60 deg; supports-curved-sheet, #265; re-timed at supports-stair-body"},
     "support:custom": {"weight":196000,"note":"115s locally x 1.7, rounded up: the tilted box built in Auto, Assisted and Custom, circles drawn, tips clicked, a member erased; supports-custom-ui"},
     "support:exposed": {"weight":23900,"note":""},
-    "support:feed": {"weight":57000,"note":"33s locally x 1.7, rounded up: the coupon, the clamp, the shelf and the arc built, the crowns (section 7: the ledge x 5 trees, the arc, Bambu's G-code measured); supports-thinning-1"},
+    "support:feed": {"weight":204000,"note":"~120s locally x 1.7, rounded up: the base step 30s (supports-custom-engine), + 3s for supports-thinning-1's crowns (section 7, measured 33s) + 87s for supports-knobs-1's knobs (section 8, measured 117s); merged, not re-timed"},
     "support:foot": {"weight":35000,"note":"20s on the cloud box x 1.7, rounded up: the arc and the coupon built with and without trunks, Bambu's G-code read, the export written; supports-foot"},
     "support:gridpack": {"weight":11350,"note":""},
     "support:index": {"weight":32300,"note":""},
