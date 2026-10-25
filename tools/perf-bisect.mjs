@@ -549,7 +549,11 @@ async function timingRun(browser, root, port, vase, want) {
 
 // ----------------------------------------------------------------------------------------------- the leak cycles
 const CYCLE_KINDS = ['yaw+undo', 'bake+undo', 'cut-preview', 'select'];
-let ACTIVE_KINDS = opt('kinds', CYCLE_KINDS.join(',')).split(',').filter(k => CYCLE_KINDS.includes(k));   // a bisect step runs only the cycle it is chasing
+/* Only with --kinds: the Redo and the new-action-after-Undo variants of the yaw cycle (the undo-dispose-yaw check).
+     yaw+undo+redo   Yaw, Undo, Redo, Undo; Redo must put back the very geometry the Yaw made (same uuid), never bake again
+     yaw+undo+yaw    Yaw, Undo, a NEW Yaw (the one that empties the redo line), Undo */
+const EXTRA_KINDS = ['yaw+undo+redo', 'yaw+undo+yaw'];
+let ACTIVE_KINDS = opt('kinds', CYCLE_KINDS.join(',')).split(',').filter(k => CYCLE_KINDS.includes(k) || EXTRA_KINDS.includes(k));   // a bisect step runs only the cycle it is chasing
 
 async function waitUndo(page, n, ms) {
   return page.waitForFunction(n => state.undoStack.length === n, n, { timeout: ms, polling: 100 }).then(() => true, () => false);
@@ -572,6 +576,27 @@ async function oneCycle(S, kind, ids) {
     await page.evaluate(() => window.__pk.closeMenus());
     await page.click('#btn-undo', { timeout: 300000 });
     if (!(await waitUndo(page, u, 120000))) return NA(kind, 'Undo did not take the Yaw back');
+  } else if (kind === 'yaw+undo+redo' || kind === 'yaw+undo+yaw') {
+    const u = await undoN();
+    const geo = () => page.evaluate(() => { const p = state.placed[state.selectedIndex]; return p && p.mesh ? p.mesh.geometry.uuid : null; });
+    const yaw = async () => {
+      await uiClick(page, '#btn-rot-left', 300000);
+      if (!(await waitUndo(page, u + 1, 120000))) return false;
+      await quiet(page);
+      await page.evaluate(() => window.__pk.closeMenus());
+      return true;
+    };
+    const undo = async () => { await page.click('#btn-undo', { timeout: 300000 }); return waitUndo(page, u, 120000); };
+    if (!(await yaw())) return NA(kind, 'Yaw pushed no undo step (#btn-rot-left disabled or did nothing)');
+    const turned = await geo();
+    if (!(await undo())) return NA(kind, 'Undo did not take the Yaw back');
+    if (kind === 'yaw+undo+redo') {
+      await page.click('#btn-redo', { timeout: 300000 });
+      if (!(await waitUndo(page, u + 1, 120000))) return NA(kind, 'Redo did not put the Yaw back');
+      await quiet(page);
+      if ((await geo()) !== turned) return NA(kind, 'Redo put back a different geometry from the one the Yaw made (a re-bake, or the wrong one)');
+    } else if (!(await yaw())) return NA(kind, 'the new Yaw pushed no undo step');
+    if (!(await undo())) return NA(kind, 'the last Undo did not take the Yaw back');
   } else if (kind === 'bake+undo') {
     const id = BAKE === 'solidify' ? '#btn-solidify' : '#btn-seal';
     const u = await undoN();
@@ -910,7 +935,7 @@ function report(plan, ch) {
 
   L.push('## 3. Leaks: growth per cycle after the first (least-squares over cycles 1..' + CYCLES + ')' + tag, '');
   L.push('`F` = rises in every one of the ' + CYCLES + ' cycles; `w` = rises in every cycle after the first (the first is warm-up). Heap is after a forced GC, in MB.', '');
-  CYCLE_KINDS.forEach(kind => {
+  CYCLE_KINDS.concat(EXTRA_KINDS.filter(k => have.some(x => x.r.leaks && x.r.leaks.byKind && x.r.leaks.byKind[k]))).forEach(kind => {
     L.push('### ' + kind, '');
     L.push('| per cycle | ' + have.map(col).join(' | ') + ' |', '|---|' + have.map(() => '---').join('|') + '|');
     LEAK_KEYS.forEach(k => {

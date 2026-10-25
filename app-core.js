@@ -119,10 +119,97 @@ function updateUndoBtn() {
   }
   if (typeof nsoCtxMenuRefresh === 'function') nsoCtxMenuRefresh();
 }
+/* ---- GEOMETRY LIFECYCLE ---------------------------------------------------
+   three.js keeps the renderer's state for every geometry it has drawn - the
+   GPU buffers, the bindings that hold its attribute arrays, its count in
+   renderer.info - until dispose() is called. The geometry OBJECT can be
+   collected and the arrays stay (measured: perf-bisect yaw+undo, +1 geometry
+   and ~65 MB a cycle on the vase). A geometry is disposed exactly when
+   nothing the user can still reach names it. Reachable is: the plate
+   (state.models, state.placed, with each piece's mesh and poseHome), whatever
+   is in the scene, every entry still on state.undoStack, every item on
+   state.redoStack (the entry and the plate snapshot taken before its Undo).
+
+   The moments a geometry stops being reachable are where entries leave the two
+   stacks. Each of those places hands nsoReleaseGeometries the geometries the
+   leaving entries named, AFTER the stacks hold what stays; it keeps any that
+   something still names and disposes the rest. Undo itself disposes nothing: the
+   geometry it takes off the piece is on state.redoStack.
+
+   poseHome.chain is a WeakSet and only answers "is this geometry one of the
+   run?" about the piece's current geometry, so it names nothing a geometry
+   needs to be kept for. Dispose is never fatal: a geometry drawn again after
+   it is uploaded again. */
+function nsoGeometriesNamed(root, into) {
+  const seen = new Set();
+  (function walk(v, depth) {
+    if (!v || typeof v !== 'object' || depth > 8 || seen.has(v)) return;
+    if (v.isBufferGeometry) { into.add(v); return; }
+    if (v.isObject3D) {
+      v.traverse(o => { if (o.geometry && o.geometry.isBufferGeometry) into.add(o.geometry); });
+      return;
+    }
+    seen.add(v);
+    if (Array.isArray(v)) {
+      if (v.length && typeof v[0] !== 'object') return;      // a list of numbers, not of things
+      v.forEach(x => walk(x, depth + 1));
+    } else {
+      const tag = Object.prototype.toString.call(v), proto = Object.getPrototypeOf(v);
+      if (tag === '[object Map]' || tag === '[object Set]') v.forEach(x => walk(x, depth + 1));
+      else if (proto === null || Object.getPrototypeOf(proto) === null) Object.keys(v).forEach(k => walk(v[k], depth + 1));   // a plain object, not a Vector3 or a Material
+    }
+  })(root, 0);
+  return into;
+}
+function nsoReleaseGeometries(candidates) {
+  const gone = new Set((candidates || []).filter(g => g && g.isBufferGeometry));
+  if (!gone.size) return 0;
+  const held = new Set();
+  nsoGeometriesNamed(state.models, held);
+  nsoGeometriesNamed(state.placed, held);
+  nsoGeometriesNamed(state.scene, held);
+  nsoGeometriesNamed(state.undoStack, held);
+  nsoGeometriesNamed(state.redoStack, held);
+  let n = 0;
+  gone.forEach(g => { if (!held.has(g) && typeof g.dispose === 'function') { g.dispose(); n++; } });
+  return n;
+}
+/* What a pose bake named: the geometry it took the piece off (entry.prevGeometry)
+   and the one it put on, which geoOf(index) reads off whatever shows the piece
+   after the bake - the plate snapshot of a redo item, or the live piece. */
+function nsoPoseBakeGeometries(entry, geoOf) {
+  const out = [];
+  if (!entry) return out;
+  if (entry.type === 'stepGroup') (entry.steps || []).forEach(s => out.push(...nsoPoseBakeGeometries(s, geoOf)));
+  else if (entry.type === 'poseBake') { out.push(entry.prevGeometry); if (geoOf) out.push(...[].concat(geoOf(entry.index))); }
+  return out;
+}
+/* The geometries a stack item named when it left: an undo entry on its own
+   (what it took the piece off), a redo item with its snapshot (and what it put on). */
+function nsoLeavingGeometries(items) {
+  const out = [];
+  (items || []).forEach(it => {
+    if (it && it.post) {
+      const post = it.post;
+      out.push(...nsoPoseBakeGeometries(it.entry, i => {
+        const e = post.placed && post.placed[i];
+        return e ? [e.geo, e.fields && e.fields.geometry] : [];
+      }));
+    } else out.push(...nsoPoseBakeGeometries(it, null));
+  });
+  return out;
+}
+/* The redo stack emptied: its items leave. Releases after the caller has
+   settled what stays on the stacks. */
+function nsoDropRedo() {
+  const left = state.redoStack;
+  state.redoStack = [];
+  return nsoLeavingGeometries(left);
+}
 function pushUndo(entry) {
   if (!entry || !entry.type) return;
   // A new action: what Undo had set aside can no longer be re-applied.
-  state.redoStack = [];
+  const leaving = nsoDropRedo();
   // A mesh swap and the paint on it belong to the same step: snapshot the
   // paint here so one Undo puts back both without every call site knowing.
   if (entry.prevMask === undefined && entry.modelId != null && typeof nsoMaskSnapshot === 'function') {
@@ -145,12 +232,14 @@ function pushUndo(entry) {
     if (ms) entry.prevSkin = ms.skin || null;
   }
   state.undoStack.push(entry);
-  if (state.undoStack.length > UNDO_MAX) state.undoStack.shift();
+  if (state.undoStack.length > UNDO_MAX) leaving.push(...nsoLeavingGeometries([state.undoStack.shift()]));
+  nsoReleaseGeometries(leaving);
   updateUndoBtn();
 }
 function clearUndo() {
+  const leaving = nsoLeavingGeometries(state.undoStack).concat(nsoDropRedo());
   state.undoStack = [];
-  state.redoStack = [];
+  nsoReleaseGeometries(leaving);
   updateUndoBtn();
 }
 /* The ops that undo by putting one piece's geometry back, and what each one
@@ -211,11 +300,15 @@ function undoLast() {
   if (typeof nsoHelpers !== 'undefined') nsoHelpers.afterUndo();
   if (top) {
     const expect = nsoWorldFingerprint();
-    if (top.onUndone || before.volatile || expect === fpBefore) state.redoStack = [];
-    else {
+    let leaving;
+    if (top.onUndone || before.volatile || expect === fpBefore) {
+      // not redoable: nothing is set aside, and what the Undo took off leaves with the old line
+      leaving = nsoDropRedo().concat(nsoLeavingGeometries([{ entry: top, post: before }]));
+    } else {
       state.redoStack.push({ entry: top, post: before, expect: expect });
-      if (state.redoStack.length > UNDO_MAX) state.redoStack.shift();
+      leaving = state.redoStack.length > UNDO_MAX ? nsoLeavingGeometries([state.redoStack.shift()]) : [];
     }
+    nsoReleaseGeometries(leaving);
     updateUndoBtn();
   }
   return r;
@@ -330,14 +423,18 @@ function nsoWorldRestore(snap) {
   if (typeof nsoPosLockRefresh === 'function') nsoPosLockRefresh();
 }
 function clearRedo() {
-  state.redoStack = [];
+  nsoReleaseGeometries(nsoDropRedo());
   updateUndoBtn();
 }
 /* Undo that is not the user's: a tool taking back its own live preview. It
    sets nothing aside for Redo. */
 function undoLastDiscard() {
+  const top = state.undoStack[state.undoStack.length - 1];
+  // a pose bake taken back for good: what it put on the piece leaves with the entry
+  const leaving = nsoPoseBakeGeometries(top, i => state.placed[i] && state.placed[i].mesh && state.placed[i].mesh.geometry);
   const r = undoLastStep();
   if (typeof nsoHelpers !== 'undefined') nsoHelpers.afterUndo();
+  nsoReleaseGeometries(leaving);
   return r;
 }
 function redoLast() {
@@ -353,7 +450,7 @@ function redoLast() {
   if (typeof removeFaceHelper === 'function') removeFaceHelper();
   nsoWorldRestore(r.post);
   state.undoStack.push(r.entry);
-  if (state.undoStack.length > UNDO_MAX) state.undoStack.shift();
+  if (state.undoStack.length > UNDO_MAX) nsoReleaseGeometries(nsoLeavingGeometries([state.undoStack.shift()]));
   updateUndoBtn();
   const say = REDO_LABEL[r.entry.type] ||
     (UNDO_REPLACE_LABEL[r.entry.type] || '').replace(/^Undo: /, '').replace(/ reverted$/, ' re-applied');

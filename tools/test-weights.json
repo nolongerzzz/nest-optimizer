@@ -330,6 +330,7 @@
     "tube:edges-drive": {"weight":57250,"note":""},
     "tube:neck": {"weight":190800,"note":""},
     "ui:shell": {"weight":26600,"note":""},
+    "undo:dispose": {"weight":600,"note":"estimate (undo-dispose-yaw): a Node-only vm check, ~0.1 s locally; one CI run measures it"},
     "undo:redo": {"weight":29000,"note":""},
     "wall:cut": {"weight":8150,"note":""},
     "wall:test": {"weight":7250,"note":""},
