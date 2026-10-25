@@ -584,6 +584,63 @@ the coupon, and a member of the rebuild excluded in turn; members the same
 across two builds, every held tip in exactly one trunk (the arc's stair
 included); the card's build's pads named by shareFeet.
 
+**Knobs** (supports-knobs-1: the supports playground). An Assisted or Custom
+feed may carry `knobs`, four numbers the planner and the trunk builder have
+always had as constants. Locked, and not knobs: the flare, the pad, the
+interface and the hollow core.
+
+```
+opts.feed.knobs = { trunkTipMm, trunkAngleDeg, leanDeg, nodeMm }     (each optional)
+```
+
+| knob | the constant | read in |
+| --- | --- | --- |
+| `trunkTipMm` (2) | `TRUNK_TIP_MM`: the trunk law's diameter at the top | `growTrunks` (the trunk builder, TRUNKS), `reland` (the landing's fit), the foot's `grow.law` that `shareFeet` reads, `trunkLaw(plan)` |
+| `trunkAngleDeg` (5.5) | `TRUNK_ANGLE_DEG`: the half-angle it grows going down | the same places |
+| `leanDeg` (30) | `BRANCH_TILT_DEG`: the lean limit | `plan()` (`tanT`/`cosT`: every leg, merge, pickup, steer, and the landing zones' reach), `reland`'s reach (`plan.branchTiltDeg`) |
+| `nodeMm` (5) | `LATTICE_MM`: the node lattice L, the branch-merge spacing | `plan()` (`g = L/2`: every merge node), the erased-member keep-out's trim (`keepOutSoups`, which was `KEEP_TRIM_MM = LATTICE_MM`) |
+
+The law is one object per trunk: `plan.knobs` holds it, `stemOf` copies it
+onto the trunk's record (`grow.law`), and `growTrunks`, `reland` and
+`shareFeet` read it from there - so the trunk, its landing and the pads drawn
+round its base agree, and a stair's own trees (planned with the same
+`_knobs`) too. `GP.TRUNK` stays the shipped law; `GP.trunkLaw(plan)` is the
+law a plan builds by.
+
+**No new minimums or maximums.** A knob is a finite number > 0
+(`trunkAngleDeg` >= 0: 0 is a straight trunk); anything else, an unknown
+knob, or knobs on Auto, is refused by name (`plan.stage` 'feed'). Beyond that
+the geometry decides, and a value is used as given - never clamped, no floor
+invented. What it makes of the plan is **reported**: `plan.knobs`
+
+```
+{ trunkTipMm, trunkAngleDeg, leanDeg, nodeMm,   the values used (a knob not given is its constant)
+  given,                                         the knobs the feed gave
+  nonDefault,                                    those that differ from the defaults: the export names a support by them
+  problems: [{ kind, knob, what, count }] }      plan time: 'lean' / 'angle' (90 deg or more: tan() is no reach / no slope);
+                                                 parts(): 'trunk' (built at the default law, not at this one - or, with a lean
+                                                 or node knob, not built: the default plan is not known here); shells(): 'shell'
+                                                 (not closed: it would slice open)
+```
+
+It is present only when the feed gives knobs: with none, the plan is
+today's, to the bit (support:feed 7).
+
+**The export** (`nso-3mf.js`): an object with `supportKnobs` (the plan's
+`knobs.nonDefault`) is written under its name plus the tag, in the order
+trunk, angle, lean, node: `supports trunk1.2 angle3`, or, inside the card's
+bracket, `<piece> - support 1.1 (Tree trunk1.2 angle3)` (the slicer audit and the
+slice panel read that name; the bracket keeps their patterns true). Defaults
+or none: the name as it was.
+
+support:feed section 7 holds all of it: none given and all four at their
+defaults build the same bytes on the coupon, the arc and the tilted box; a
+bad value is refused by name; trunkTipMm 1.2 thins the top of every trunk
+(coupon, arc) by the law's own figure; trunkAngleDeg 0 straightens them;
+leanDeg 15 / 45 and nodeMm 10 / 4 move the legs and the nodes where they say;
+all four reach the re-landing; what a value breaks is in `problems`; the
+export name.
+
 ## Paint scope: sub-region — inherited
 
 Points come from `NSO_SupportBeacons.detect` with `opts.skipList` passed through

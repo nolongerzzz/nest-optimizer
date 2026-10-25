@@ -255,9 +255,34 @@
     return s === '-0' ? '0' : s;
   }
 
-  /** The name an object is written under, in both the model and the settings part. */
+  var KNOB_TAGS = [['trunkTipMm', 'trunk'], ['trunkAngleDeg', 'angle'], ['leanDeg', 'lean'], ['nodeMm', 'node']];
+
+  /**
+   * "trunk1.2 angle3 lean30 node4": the support knobs that are NOT the
+   * defaults (nso_support_gridpack.js plan.knobs.nonDefault), in that order,
+   * so a print says what made it. '' when none is, and the name is as it
+   * always was.
+   */
+  function knobTag(k) {
+    if (!k || typeof k !== 'object') return '';
+    var parts = [];
+    KNOB_TAGS.forEach(function (t) {
+      var v = k[t[0]];
+      if (typeof v === 'number' && isFinite(v)) parts.push(t[1] + String(+v.toFixed(3)));
+    });
+    return parts.join(' ');
+  }
+
+  /**
+   * The name an object is written under, in both the model and the settings
+   * part. A support built with knobs (obj.supportKnobs) carries them: inside
+   * the closing bracket of "<piece> - support 1.1 (Tree)" so the name still
+   * reads as the card's ("... (Tree trunk1.2 angle3 lean30)"), else after it.
+   */
   function objectName(obj, i) {
-    return (obj && obj.name) || ('object_' + (i + 1));
+    var name = (obj && obj.name) || ('object_' + (i + 1)), tag = knobTag(obj && obj.supportKnobs);
+    if (!tag) return name;
+    return name.charAt(name.length - 1) === ')' ? name.slice(0, -1) + ' ' + tag + ')' : name + ' ' + tag;
   }
 
   // 3MF's production extension wants a UUID on every object, on <build> and on
@@ -831,7 +856,9 @@
 
   /**
    * @param {object} opts
-   * @param {{name:string, vertices:number[], triangles:number[], settings?:object, identifyId?:number}[]} opts.objects
+   * @param {{name:string, vertices:number[], triangles:number[], settings?:object, identifyId?:number, supportKnobs?:object}[]} opts.objects
+   *        supportKnobs: a support's non-default knobs (plan.knobs.nonDefault),
+   *        named in the object's name (knobTag);
    *        settings: the object's own slicer settings ({key: value}), written
    *        into Metadata/model_settings.config as its per-object override;
    *        identifyId: the instance's identify_id (derived when absent)
@@ -946,6 +973,8 @@
 
   return {
     build3MF: build3MF,
+    objectName: objectName,
+    knobTag: knobTag,
     indexTriangleSoup: indexTriangleSoup,
     buildZip: buildZip,
     crc32: crc32,

@@ -25,6 +25,13 @@
 //      tip is not supported and not reported unsupported
 //   6. members: the same ids, in the same order, from two builds of the same
 //      inputs; every held tip in exactly one trunk's carries
+//   7. knobs (feed.knobs { trunkTipMm, trunkAngleDeg, leanDeg, nodeMm }): none
+//      given = today's plan, and all four at their defaults builds the same
+//      bytes as none (the arc, the tilted box, the coupon); a value that is
+//      not a number > 0 is refused by name; trunkTipMm 1.2 thins the top of
+//      every trunk, trunkAngleDeg 0 makes a straight one; leanDeg and nodeMm
+//      move what they say; all four reach the re-landing; what a value
+//      breaks is in plan.knobs.problems; the export names the non-default ones
 
 const fs = require('fs');
 const path = require('path');
@@ -34,6 +41,7 @@ const crypto = require('crypto');
 const ROOT = path.join(__dirname, '..');
 const { readSTL } = require('./nso_stl_io.js');
 
+const NSO3MF = require(path.join(ROOT, 'nso-3mf.js'));
 const ctx = {
   Math, Map, Set, console, Array, Object, Number, String, JSON, isFinite, Promise, Date,
   Float32Array, Float64Array, Int32Array, Uint32Array, Uint8Array, Uint16Array, Int8Array, ArrayBuffer
@@ -306,6 +314,234 @@ function oneTrunkEach(sh) {
       sf.ok && sf.members.length === sf.pads && sf.members.every(m => m.kind === 'pad' && /^pad-/.test(m.id)) &&
       Object.keys(held).length > 0 && Object.keys(held).every(id => n[id] === 1) && Object.keys(n).every(id => held[id]),
       `${sf.pads} pad(s), ${Object.keys(held).length} held tips over ${builds.length} area(s)`);
+  }
+
+
+  /* ---- 7. knobs ---- */
+  console.log('\n=== 7. knobs: trunkTipMm, trunkAngleDeg, leanDeg, nodeMm ===');
+  let tiltedPiece = null, tiltedNone = null;
+  const kfeed = knobs => ({ mode: 'assisted', knobs });
+  const kb = (piece, knobs) => build(piece, kfeed(knobs));
+  const DEF4 = { trunkTipMm: 2, trunkAngleDeg: 5.5, leanDeg: 30, nodeMm: 5 };
+  /* the plan, less what a fed plan adds to its answer (feed, zones, the knobs' echo): what the planner decided */
+  const CORE = ['members', 'stubs', 'merges', 'pickups', 'steered', 'nudged', 'tight', 'unreachable', 'resting', 'inside', 'held', 'trunks',
+                'beacons', 'stations', 'branchTiltDeg', 'latticeMm', 'plateZ', 'pitchMm', 'reason'];
+  /* less what a fed plan adds to a beacon (tid), and what parts() writes into the plan's members and stubs (points, soup: where a trunk was re-landed) */
+  const planCore = p => JSON.stringify(CORE.map(k => p[k]), (k, v) => (k === 'tid' || k === 'points' || k === 'soup') ? undefined : v);
+  /* the built trunks: a knobs plan's feet also carry the law they were built by (grow.law) */
+  const builtKey = a => JSON.stringify([a.tp.feet, a.tp.relanded, a.tp.stairTrunks], (k, v) => k === 'law' ? undefined : v);
+  const lean = p => {
+    let w = 0;
+    for (const m of p.members) {
+      if (m.dead) continue;
+      for (let i = 0; i + 1 < m.path.length; i++) {
+        if (m.kind === 'side' && i === 0) continue;
+        const a = m.path[i], b = m.path[i + 1], h = Math.hypot(b[0] - a[0], b[1] - a[1]), dz = Math.abs(b[2] - a[2]);
+        if (h + dz > 1e-9) w = Math.max(w, Math.atan2(h, dz) * 180 / Math.PI);
+      }
+    }
+    for (const t of p.stubs) w = Math.max(w, Math.atan2(Math.hypot(t.to[0] - t.from[0], t.to[1] - t.from[1]), t.to[2] - t.from[2]) * 180 / Math.PI);
+    return w;
+  };
+  /* the trunks as built, against the law the plan says it builds by */
+  const cosN = Math.cos(Math.PI / GP.TRUNK.sides), tanDeg = d => Math.tan(d * Math.PI / 180);
+  function lawCheck(a) {
+    const law = GP.trunkLaw(a.p), recs = (a.tp.trunkShells || []).filter(r => r.rings);
+    let worst = 0, bound = 0, narrowed = 0;
+    for (const r of recs) {
+      for (const [z, R] of r.rings) {
+        const want = law.tipMm / 2 + tanDeg(law.angleDeg) * Math.max(0, r.H - z) +
+          (z < a.p.plateZ + law.flareMm ? tanDeg(law.flareAngleDeg) * (a.p.plateZ + law.flareMm - z) : 0);
+        if (r.narrowed) { narrowed++; if (R * cosN > want + 1e-9) bound++; } else worst = Math.max(worst, Math.abs(R * cosN - want));
+      }
+    }
+    return { recs, worst, bound, narrowed, n: recs.length - recs.filter(r => r.narrowed).length };
+  }
+  const topR = r => r.rings[r.rings.length - 1][1];
+  const atFoot = (list, r) => list.find(x => x.rings && Math.abs(x.c[0] - r.c[0]) < 1e-6 && Math.abs(x.c[1] - r.c[1]) < 1e-6);
+
+  /* 7a. none given: no knobs on the plan; all four at their defaults is the same build, byte for byte */
+  console.log('  -- none given, and all four at their defaults');
+  {
+    const TILT = (() => {
+      const T = 30 * Math.PI / 180, b = box([0, 0, 0], [40, 30, 10]), r = new Float32Array(b.length);
+      for (let i = 0; i < b.length; i += 3) { r[i] = b[i] * Math.cos(T) - b[i + 2] * Math.sin(T); r[i + 1] = b[i + 1]; r[i + 2] = b[i] * Math.sin(T) + b[i + 2] * Math.cos(T); }
+      let mz = Infinity;
+      for (let i = 2; i < r.length; i += 3) mz = Math.min(mz, r[i]);
+      for (let i = 2; i < r.length; i += 3) r[i] -= mz;
+      return r;
+    })();
+    const none = { coupon: base, arc, 'tilted box': await build(TILT) };
+    tiltedPiece = TILT; tiltedNone = none['tilted box'];
+    for (const [name, piece] of [['coupon', COUPON], ['arc', ARC], ['tilted box', TILT]]) {
+      const a = none[name], d = await kb(piece, DEF4);
+      if (!a.ok || !d.ok) { check(name + ': builds with and without knobs', false, (a.reason || '') + ' / ' + (d.reason || '')); continue; }
+      check(name + ': no knobs given - plan.knobs is absent' + (name === 'coupon' ? ', and a feed that gives knobs {} plans the same' : ''),
+        a.p.knobs === undefined && (name !== 'coupon' || (() => { const e = GP.plan(piece, Object.assign({}, CARD, { feed: kfeed({}) })); return e.ok && e.knobs === undefined && planCore(e) === planCore(a.p); })()),
+        'plan.knobs ' + typeof a.p.knobs);
+      check(name + ': all four at their defaults - the same plan, the same trunks, the same shells, the same members, to the bit',
+        planCore(a.p) === planCore(d.p) && builtKey(a) === builtKey(d) && sha(a.sh.soup) === sha(d.sh.soup) &&
+        JSON.stringify(a.sh.members) === JSON.stringify(d.sh.members) && a.sh.solids.length === d.sh.solids.length,
+        `${a.p.trunks.length} trunks, ${a.p.held} held, ${a.tp.relanded.length} re-landed; ${sha(d.sh.soup)} = ${sha(a.sh.soup)}`);
+      const k = d.p.knobs;
+      check(name + ': plan.knobs echoes the defaults, names nothing for the export, reports no problem',
+        k && ['trunkTipMm', 'trunkAngleDeg', 'leanDeg', 'nodeMm'].every(key => k[key] === DEF4[key]) && !Object.keys(k.nonDefault).length && !k.problems.length &&
+        d.p.branchTiltDeg === 30 && d.p.latticeMm === 5, JSON.stringify(k && { tip: k.trunkTipMm, angle: k.trunkAngleDeg, lean: k.leanDeg, node: k.nodeMm, nonDefault: k.nonDefault, problems: k.problems.length }));
+    }
+    check('the TRUNK descriptor is the shipped law; trunkLaw(plan) is the law a plan builds by',
+      GP.TRUNK.tipMm === 2 && GP.TRUNK.angleDeg === 5.5 && JSON.stringify(GP.trunkLaw(base.p)) === JSON.stringify({ tipMm: 2, angleDeg: 5.5, flareMm: GP.TRUNK.flareMm, flareAngleDeg: GP.TRUNK.flareAngleDeg }));
+  }
+
+  /* 7b. what is refused: a value that is not a number > 0 (trunkAngleDeg: >= 0), a knob there is not, knobs on Auto */
+  console.log('  -- refused by name');
+  {
+    const bad = [[{ trunkTipMm: 0 }, 'trunkTipMm'], [{ trunkTipMm: -1 }, 'trunkTipMm'], [{ trunkAngleDeg: -0.5 }, 'trunkAngleDeg'], [{ leanDeg: 0 }, 'leanDeg'],
+                 [{ leanDeg: NaN }, 'leanDeg'], [{ nodeMm: Infinity }, 'nodeMm'], [{ nodeMm: '4' }, 'nodeMm'], [{ lean: 20 }, '"lean"']];
+    const refused = bad.map(([kn, word]) => { const p = GP.plan(COUPON, Object.assign({}, CARD, { feed: kfeed(kn) })); return !p.ok && p.stage === 'feed' && p.reason.indexOf(word) >= 0; });
+    const auto = GP.plan(COUPON, Object.assign({}, CARD, { feed: { mode: 'auto', knobs: { leanDeg: 20 } } }));
+    check('a value that is not a finite number > 0, a knob that is not one of the four, knobs on Auto: refused, the reason names it',
+      refused.every(Boolean) && !auto.ok && auto.stage === 'feed' && /knobs/.test(auto.reason), refused.map(x => x ? 'ok' : 'NO').join(' ') + '; ' + auto.reason);
+    const a0 = GP.plan(COUPON, Object.assign({}, CARD, { feed: kfeed({ trunkAngleDeg: 0 }) }));
+    check('trunkAngleDeg 0 is a number the planner takes (a straight trunk)', a0.ok && a0.knobs.trunkAngleDeg === 0 && a0.knobs.nonDefault.trunkAngleDeg === 0, a0.reason);
+  }
+
+  /* 7c. trunkTipMm 1.2: a thinner top on every trunk, the plan unchanged */
+  console.log('  -- trunkTipMm 1.2');
+  const t12 = await kb(COUPON, { trunkTipMm: 1.2 }), t12a = await kb(ARC, { trunkTipMm: 1.2 }), ang0 = await kb(COUPON, { trunkAngleDeg: 0 });
+  for (const [name, a, ref] of [['coupon', t12, base], ['arc', t12a, arc]]) {
+    if (!a.ok) { check(name + ', trunkTipMm 1.2: builds', false, a.reason); continue; }
+    const L = lawCheck(a), L0 = lawCheck(ref);
+    const thinner = L.recs.filter(r => { const q = atFoot(L0.recs, r); return q && topR(r) < topR(q) - 1e-9; }).length;
+    const same = L.recs.filter(r => { const q = atFoot(L0.recs, r); return q && Math.abs(topR(r) - topR(q)) < 1e-9; });
+    const moved = L.recs.filter(r => !atFoot(L0.recs, r)).length;
+    check(name + ', trunkTipMm 1.2: the top of every trunk is thinner than the default\'s (or the same, where the piece narrows both) and every ring is the law\'s (or the piece\'s room)',
+      L.n > 0 && L.worst < 1e-9 && !L.bound && thinner + same.length + moved === L.recs.length && thinner > 0 && same.every(r => r.narrowed),
+      `${L.recs.length} trunks: ${thinner} thinner at the top, ${same.length} the same (narrowed by the piece), ${moved} stand elsewhere (re-landed); law off by ${L.worst.toExponential(1)}; ` +
+      `top diameters ${Math.min(...L.recs.map(r => topR(r) * cosN * 2)).toFixed(2)} - ${Math.max(...L.recs.map(r => topR(r) * cosN * 2)).toFixed(2)} mm`);
+    check(name + ', trunkTipMm 1.2: the plan is the plan - the law is the trunk\'s, not the planner\'s; plan.knobs and trunkLaw say 1.2',
+      planCore(a.p) === planCore(ref.p) && a.p.knobs.trunkTipMm === 1.2 && GP.trunkLaw(a.p).tipMm === 1.2 && JSON.stringify(a.p.knobs.nonDefault) === '{"trunkTipMm":1.2}',
+      JSON.stringify(a.p.knobs.nonDefault));
+  }
+
+  /* 7d. trunkAngleDeg 0: a straight trunk */
+  console.log('  -- trunkAngleDeg 0');
+  {
+    const a = ang0, L = lawCheck(a), L0 = lawCheck(base);
+    const straight = r => Math.abs(r.rings[1][1] - topR(r)) < 1e-9, free = L.recs.filter(r => !r.narrowed && r.rings.length >= 3);
+    check('coupon, trunkAngleDeg 0: every trunk the piece does not narrow stands as wide at its top as above its flare - straight; at the default none does',
+      a.ok && free.length > 0 && free.every(straight) && L.worst < 1e-9 && !L.bound &&
+      L0.recs.filter(r => !r.narrowed && r.rings.length >= 3).every(r => !straight(r)),
+      a.ok ? `${free.length} straight trunk(s), ${L.recs.length - free.length} narrowed or short; law off by ${L.worst.toExponential(1)}` : a.reason);
+    check('coupon, trunkAngleDeg 0: the plan is the plan', a.ok && planCore(a.p) === planCore(base.p) && GP.trunkLaw(a.p).angleDeg === 0);
+  }
+
+  /* 7e. leanDeg, nodeMm: what they say */
+  console.log('  -- leanDeg, nodeMm');
+  const l15 = await kb(COUPON, { leanDeg: 15 }), l45 = await kb(COUPON, { leanDeg: 45 }), n10 = await kb(COUPON, { nodeMm: 10 }), n4 = await kb(COUPON, { nodeMm: 4 });
+  {
+    const w0 = lean(base.p);
+    check('coupon, leanDeg 15 / 45: no leg leans past it, the plan says so; a shallower lean needs more trunks, a steeper one fewer',
+      l15.ok && l45.ok && lean(l15.p) <= 15 + 1e-6 && lean(l45.p) <= 45 + 1e-6 && lean(l45.p) > 30 + 1e-6 && w0 <= 30 + 1e-6 &&
+      l15.p.branchTiltDeg === 15 && l45.p.branchTiltDeg === 45 && l15.p.knobs.leanDeg === 15 &&
+      l15.p.trunks.length > base.p.trunks.length && l45.p.trunks.length < base.p.trunks.length,
+      l15.ok && l45.ok ? `worst leg ${lean(l15.p).toFixed(2)} / ${lean(l45.p).toFixed(2)} deg (default ${w0.toFixed(2)}); trunks ${l15.p.trunks.length} / ${l45.p.trunks.length} (default ${base.p.trunks.length})` : l15.reason);
+    const onLattice = (p, L) => p.merges.length > 0 && p.merges.every(m => m.node.slice(0, 2).every(v => Math.abs(v / (L / 2) - Math.round(v / (L / 2))) < 1e-9));
+    check('coupon, nodeMm 10 / 4: every merge node on that lattice (default 5), the plan says so, and the merges are not the default\'s',
+      n10.ok && n4.ok && onLattice(n10.p, 10) && onLattice(n4.p, 4) && n10.p.latticeMm === 10 && n4.p.knobs.nodeMm === 4 &&
+      JSON.stringify(n10.p.merges) !== JSON.stringify(base.p.merges) && n10.p.trunks.length !== base.p.trunks.length,
+      n10.ok && n4.ok ? `trunks ${n10.p.trunks.length} / ${n4.p.trunks.length} (default ${base.p.trunks.length}); merges ${n10.p.merges.length} / ${n4.p.merges.length} (default ${base.p.merges.length})` : n10.reason);
+  }
+
+  /* 7f. the re-landing reads all four */
+  console.log('  -- the re-landing path');
+  {
+    const rl = a => JSON.stringify(a.tp.relanded.map(r => [r.trunk, r.mm, r.to]));
+    const a0 = ang0, reach = (a, r) => { const m = a.p.members[a.p.trunks[r.trunk].root], f = m.path[m.path.length - 2]; return (f[2] - a.p.plateZ) * tanDeg(a.p.branchTiltDeg); };
+    const def = base;
+    check('coupon: the law reaches the re-landing - trunkTipMm 1.2 and trunkAngleDeg 0 re-land other trunks, the plan being the same',
+      t12.ok && a0.ok && rl(t12) !== rl(def) && rl(a0) !== rl(def) && planCore(t12.p) === planCore(def.p) && planCore(a0.p) === planCore(def.p),
+      `re-landed trunks: default ${def.tp.relanded.map(r => r.trunk)}; tip 1.2 ${t12.tp.relanded.map(r => r.trunk)}; angle 0 ${a0.tp.relanded.map(r => r.trunk)}`);
+    const worst = a => Math.max(0, ...a.tp.relanded.map(r => r.mm - reach(a, r)));
+    check('coupon: the lean reaches the re-landing - no trunk moves further than its lean allows from where it falls; at 45 deg some move past what 30 would allow',
+      l45.ok && l15.ok && worst(l45) <= 1e-9 && worst(def) <= 1e-9 && l45.tp.relanded.some(r => r.mm > (reach(l45, r) * tanDeg(30) / tanDeg(45)) + 1e-9) && l45.tp.relanded.length > 0,
+      `re-landed: lean 15 ${l15.tp.relanded.length}, 30 ${def.tp.relanded.length}, 45 ${l45.tp.relanded.length} (${l45.tp.relanded.map(r => r.mm + '/' + reach(l45, r).toFixed(1)).join(' ')} mm moved/allowed)`);
+    check('coupon: nodeMm reaches the re-landing through the plan it lands - other trunks, other trunks re-landed',
+      n10.ok && n4.ok && rl(n10) !== rl(def) && rl(n4) !== rl(def) && n10.tp.relanded.length > 0,
+      `re-landed trunks: default ${def.tp.relanded.map(r => r.trunk)}; node 10 ${n10.tp.relanded.map(r => r.trunk)}; node 4 ${n4.tp.relanded.map(r => r.trunk)}`);
+    const arcRl = a => a.tp.relanded.length + ':' + rl(a);
+    check('arc (a stair\'s own trunks too): the law reaches the re-landing - trunkTipMm 1.2 re-lands what the default does not (or elsewhere)',
+      t12a.ok && arc.ok && arc.tp.relanded.length > 0 && planCore(t12a.p) === planCore(arc.p) && arcRl(t12a) !== arcRl(arc),
+      `re-landed: default ${arc.tp.relanded.map(r => r.trunk + '@' + r.mm)}; tip 1.2 ${t12a.tp.relanded.map(r => r.trunk + '@' + r.mm)}`);
+  }
+
+  /* 7g. all four at once: every place agrees with itself */
+  console.log('  -- all four');
+  {
+    const K4 = { trunkTipMm: 1.2, trunkAngleDeg: 3, leanDeg: 20, nodeMm: 4 }, a = await kb(COUPON, K4);
+    if (!a.ok) check('coupon, all four: builds', false, a.reason);
+    else {
+      const L = lawCheck(a), k = a.p.knobs, law = GP.trunkLaw(a.p);
+      const onLattice = a.p.merges.length > 0 && a.p.merges.every(m => m.node.slice(0, 2).every(v => Math.abs(v / 2 - Math.round(v / 2)) < 1e-9));
+      const reachOk = a.tp.relanded.length > 0 && a.tp.relanded.every(r => { const m = a.p.members[a.p.trunks[r.trunk].root], f = m.path[m.path.length - 2]; return r.mm <= (f[2] - a.p.plateZ) * tanDeg(20) + 1e-9; });
+      check('coupon, all four given: plan.knobs echoes them; the trunks are built by that law, the legs lean no more, the nodes are on that lattice, the re-landing keeps to the lean',
+        k.trunkTipMm === 1.2 && k.trunkAngleDeg === 3 && k.leanDeg === 20 && k.nodeMm === 4 && law.tipMm === 1.2 && law.angleDeg === 3 &&
+        L.n > 0 && L.worst < 1e-9 && !L.bound && lean(a.p) <= 20 + 1e-6 && onLattice && reachOk && a.sh.ok && !k.problems.length,
+        `trunk ${law.tipMm} mm top at ${law.angleDeg} deg: law off by ${L.worst.toExponential(1)} over ${L.n} trunks; lean ${lean(a.p).toFixed(2)} deg; ${a.p.merges.length} merges on the 4 mm lattice; ${a.tp.relanded.length} re-landed; ${a.p.trunks.length} trunks`);
+      check('coupon, all four: the same inputs build the same bytes twice',
+        sha((await kb(COUPON, K4)).sh.soup) === sha(a.sh.soup), sha(a.sh.soup));
+    }
+  }
+
+  /* 7h. what a value breaks is reported, never clamped */
+  console.log('  -- what a value breaks');
+  {
+    const l95 = GP.plan(COUPON, Object.assign({}, CARD, { feed: kfeed({ leanDeg: 95 }) }));
+    const a90 = GP.plan(COUPON, Object.assign({}, CARD, { feed: kfeed({ trunkAngleDeg: 90 }) }));
+    check('leanDeg 95 and trunkAngleDeg 90 are used as given and reported (kind lean / angle) - not clamped',
+      l95.ok && l95.branchTiltDeg === 95 && l95.knobs.leanDeg === 95 && l95.knobs.problems.some(x => x.kind === 'lean') &&
+      a90.ok && a90.knobs.trunkAngleDeg === 90 && a90.knobs.problems.some(x => x.kind === 'angle'),
+      (l95.knobs ? l95.knobs.problems : []).concat(a90.knobs ? a90.knobs.problems : []).map(x => x.what).join(' | '));
+    const l05 = await kb(COUPON, { leanDeg: 0.5 });
+    const miss = l05.ok ? l05.p.knobs.problems.filter(x => x.kind === 'trunk') : [];
+    check('leanDeg 0.5: it plans, a tower to each tip, and the trunks that find no room beside the piece are reported - not built, not moved',
+      l05.ok && l05.p.branchTiltDeg === 0.5 && l05.p.trunks.length === l05.p.beacons.length && miss.length > 0 &&
+      miss.length === 1 && miss[0].count === (l05.tp.trunkShells || []).filter(r => r.why).length && !base.p.knobs,
+      l05.ok ? `${l05.p.trunks.length} trunks; ${miss.length ? miss[0].what : 'none reported'}` : l05.reason);
+    /* the tilted box leaves most of its trunks unbuilt at the defaults (no height under its tips): not a problem of the knobs */
+    const tdef = await kb(tiltedPiece, DEF4), t6 = await kb(tiltedPiece, { trunkTipMm: 6 });
+    const unb = a => (a.tp.trunkShells || []).filter(r => r.why).length, prob = a => a.p.knobs.problems.find(x => x.kind === 'trunk');
+    check('the tilted box leaves trunks unbuilt at the defaults - reported by none of the defaults\' knobs; a trunkTipMm 6 that unbuilds more reports just those',
+      tdef.ok && t6.ok && unb(tdef) > 0 && !prob(tdef) && prob(t6) && prob(t6).count > 0 && prob(t6).count < unb(t6) && unb(t6) - prob(t6).count >= unb(tdef) - 20,
+      tdef.ok && t6.ok ? `unbuilt: ${unb(tdef)} at the defaults, ${unb(t6)} at 6 mm; reported ${prob(t6) ? prob(t6).count : 0}: ${prob(t6) ? prob(t6).what.slice(0, 150) : ''}` : tdef.reason);
+    check('every shell of a knobs build is closed (they would slice open if not): none reported at 1.2 / 0 / 15 / 45 / 10',
+      [t12, l15, l45, n10, ang0].every(a => a.ok && !a.p.knobs.problems.some(x => x.kind === 'shell')),
+      'thin values leave closed shells; the weld and the slice were run by hand on the same builds (docs/handoff/supports-knobs-1.md)');
+  }
+
+  /* 7i. the export names a support by its non-default knobs */
+  console.log('  -- the export name');
+  {
+    const k = { trunkTipMm: 1.2, trunkAngleDeg: 3, leanDeg: 30 }, a = await kb(COUPON, k);
+    const nd = a.ok ? a.p.knobs.nonDefault : null;
+    check('plan.knobs.nonDefault is the values that differ from the defaults (lean 30 is one), and the name carries them in that order',
+      a.ok && JSON.stringify(nd) === '{"trunkTipMm":1.2,"trunkAngleDeg":3}' &&
+      NSO3MF.objectName({ name: 'supports', supportKnobs: nd }, 0) === 'supports trunk1.2 angle3' &&
+      NSO3MF.objectName({ name: 'supports', supportKnobs: { trunkTipMm: 1.2, trunkAngleDeg: 3, leanDeg: 20, nodeMm: 4.25 } }, 0) === 'supports trunk1.2 angle3 lean20 node4.25',
+      JSON.stringify(nd));
+    const card = 'top_clip_x2 - support 1.1 (Tree)';
+    check('the card\'s name keeps its shape (inside the bracket); no knobs, or only defaults, is the name as it was',
+      NSO3MF.objectName({ name: card, supportKnobs: nd }, 0) === 'top_clip_x2 - support 1.1 (Tree trunk1.2 angle3)' &&
+      NSO3MF.objectName({ name: card }, 0) === card && NSO3MF.objectName({ name: card, supportKnobs: {} }, 0) === card &&
+      NSO3MF.objectName({ name: card, supportKnobs: (await kb(COUPON, DEF4)).p.knobs.nonDefault }, 0) === card &&
+      / - support \d+\.\d+ \(/.test(NSO3MF.objectName({ name: card, supportKnobs: nd }, 0)));
+    const idx = NSO3MF.indexTriangleSoup(Array.from(a.sh.solids[0].soup));
+    const built = await NSO3MF.build3MF({ objects: [{ name: card, vertices: idx.vertices, triangles: idx.triangles, supportKnobs: nd }], plateName: 'Bambu A1 Mini' });
+    const back = await R3.parse3MF(built.bytes, { name: 'knobs.3mf' });
+    const plain = await NSO3MF.build3MF({ objects: [{ name: card, vertices: idx.vertices, triangles: idx.triangles }], plateName: 'Bambu A1 Mini' });
+    const backPlain = await R3.parse3MF(plain.bytes, { name: 'plain.3mf' });
+    check('the 3MF written for it reads back under that name; with no knobs, under the name as it was',
+      back.objects[0].name === 'top_clip_x2 - support 1.1 (Tree trunk1.2 angle3)' && backPlain.objects[0].name === card,
+      back.objects[0].name);
   }
 
   console.log('\n' + (fail ? `FAILED  ${fail} of ${pass + fail}` : `PASSED  all ${pass}`));
