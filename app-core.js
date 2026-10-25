@@ -1903,20 +1903,54 @@ function frameSelectedPiece() {
   setStatus('Camera: plate view');
 }
 
+/* CLEAR PLATE IS A WIPE. The pieces go off the plate AND out of state.models,
+   with everything that named them: the two stacks (an entry names a model, a
+   piece, a geometry that would be put back on a plate that is no longer
+   there), the edit, Join and cutter ids, the selection, the Supports card's
+   host. The geometries they held are released through nsoReleaseGeometries
+   (GEOMETRY LIFECYCLE above) once nothing names them. A piece comes back by
+   being loaded again - Import > From File, From Library or Recent - as a new
+   model. Clear plate is not undoable and never was: the Undo line is emptied,
+   not added to. Other callers of clearPlaced (a cut, Optimize, Join) re-place
+   pieces and keep state.models; only this function wipes it. Returns how many
+   geometries it disposed, for the check. */
 function clearPlateOnly() {
   // Every tool closed and every helper gone first, while the pieces they
   // were drawn on are still there to close against (nso-helpers.js).
   nsoHelpers.teardown('clear-plate');
-  if (window.NSO_SUPPORTS_CARD) NSO_SUPPORTS_CARD.forgetAll();   // the Supports card's tips, circles and erasures go with the pieces
-  clearRedo();
+  if (window.NSO_SUPPORTS_CARD) NSO_SUPPORTS_CARD.forgetAll();   // the Supports card's host, tips, circles and erasures go with the pieces
+  // Named before anything is dropped: the models, the plate, and what both stacks hold.
+  const leaving = new Set();
+  [state.models, state.placed, state.undoStack, state.redoStack].forEach(root => nsoGeometriesNamed(root, leaving));
   clearPlaced();
   removeCutHelper();
+  state.models = [];
+  state.undoStack = [];
+  state.redoStack = [];
+  state.editId = null;
+  state.cutT = 0.5;
   state.previewMesh = null;
   state.selectedIndex = -1;
+  state.moveIndex = -1;
+  state.moveDragging = false;
   state.cutterOpen = false;
+  state.cutTool = null;
+  state.cutDragging = false;
+  // Join keeps ids of its own (A is editId; B, the hull, C and their faces): its one reset
+  // (app-join.js) also drops the Center lock target picked on A. The stored face pick names a piece too.
+  if (typeof clearJoinSlots === 'function') clearJoinSlots();
+  else { state.joinPartnerId = null; state.joinThirdId = null; state.joinHullId = null; state.joinFaceA = state.joinFaceB = state.joinFaceC = null; }
+  if (typeof clearFacePick === 'function') clearFacePick();
+  // Nothing on the plate, the stacks or the scene names them now: what is left is disposed.
+  const released = nsoReleaseGeometries(Array.from(leaving));
+  updateUndoBtn();          // Undo and Redo both off, and the right-click menu follows
+  renderModelList();
+  updateOptimizeButton();
+  updateEditSize();
   updateCutterUI();
   updateAdjustUI();
   setStatus('Plate cleared - the loaded pieces are in Import > Recent. Upload or Open cutter still work.');
+  return released;
 }
 
 function cloneSelectedModel(opts) {

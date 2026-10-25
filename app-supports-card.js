@@ -1950,12 +1950,12 @@ var NSO_SUPPORTS_CARD = (function () {
     draw(); sync();
     return { ok: true, tool: S.tool };
   }
-  /* CLEAR PLATE: the models stay in the list, and forget what was fed in. */
+  /* CLEAR PLATE: the models are gone, so is everything the card kept about
+     them - the host, the tips, circles and erasures fed in, what was detected. */
   function forgetAll() {
     cancelDrag();
-    (state.models || []).forEach(function (m) { if (m) m.nsoSupportFeed = undefined; });
-    Object.keys(S.mem).forEach(function (k) { S.mem[k].members = []; S.mem[k].zonesEmpty = []; });
-    S.tool = 'tips'; S.sel = null; S.hover = null;
+    S.mem = {}; S.hostId = null; S.selSupport = null; S.det = null; S.eff = null; S.occ = {};
+    S.tool = 'tips'; S.sel = null; S.hover = null; S.hot = null;
     if (S.open) refresh();
   }
 
