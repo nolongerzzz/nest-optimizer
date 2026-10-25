@@ -243,7 +243,8 @@ async function main() {
     const sentN = async () => (await sent()).length;
     const type = async (key, v) => { await page.fill('#' + IDS[key], String(v)); await frames(page); };
     const dom = () => page.evaluate((IDS) => {
-      const $ = (id) => document.getElementById(id), shown = (e) => !!e && !e.hidden && e.getBoundingClientRect().width > 0;
+      /* a closed <details> keeps its content's boxes: ask the browser whether it is rendered */
+      const $ = (id) => document.getElementById(id), shown = (e) => !!e && !e.hidden && e.checkVisibility() && e.getBoundingClientRect().width > 0;
       const go = $('btn-sup-all'), head = $('sup-count');
       return {
         section: shown($('sup-tune')), open: $('sup-tune').open, head: $('sup-tune-head').firstChild.textContent, count: $('sup-tune-count').textContent,

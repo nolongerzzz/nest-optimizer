@@ -455,6 +455,59 @@ with Shift-click and areas left out are `nsoSupportEdits`, as before, and stay.
 - Switching mode with supports standing leaves them standing; their spots read
   against the new mode's list until REGENERATE.
 
+## 7. Tune: the planner's four knobs, in Custom (supports-custom-card)
+
+UI only (`app-supports-card.js`, `index.html`, `styles.css`). The feed's `knobs`
+(`docs/SUPPORT-GRIDPACK.md` section 7, supports-knobs-1) get a place on the card: a
+collapsed **Tune** section under *May rest on the part*, **Custom only**. Auto and
+Assisted are as they were (no section, no knobs in their feeds).
+
+| field (id) | knob | default | unit |
+| --- | --- | --- | --- |
+| Trunk top (`sup-knob-tip`) | `trunkTipMm` | 2 | mm |
+| Trunk growth (`sup-knob-growth`) | `trunkAngleDeg` | 5.5 | deg |
+| Lean limit (`sup-knob-lean`) | `leanDeg` | 30 | deg |
+| Node spacing (`sup-knob-node`) | `nodeMm` | 5 | mm |
+
+They are the card's own `vp-bend-field` rows, the style of Angle and Size. The
+heading counts the fields that are not at their default ("2 changed").
+
+- **REGENERATE is the Set button.** Typing builds nothing: the field is read at once
+  (`tune()`), and the card says the build is **stale** if it no longer matches what
+  the standing build was made with (`mem.builtKnobs`, kept with `built` and put back
+  by Undo): the readout dims and ends "out of date: Tune has changed", REGENERATE is
+  outlined, the section's note says so, `#supports-card[data-stale]` is `1`.
+  GENERATE/REGENERATE sends the values. Stale is "differs from the build", not "differs
+  from the default": typing a value and then back, or DEFAULTS after a default build,
+  is not stale.
+- **Absent at default.** The feed carries `knobs` with only the fields that differ
+  from the default, and no `knobs` key at all when none does (today's plan, to the
+  bit, by supports-knobs-1). Only a Custom feed carries them: an Assisted build
+  sends none even with fields changed, and Auto never has a feed.
+- **A field that is not a number** (empty, negative; the growth may be 0, the rest
+  must be above 0) is marked and named in the section's note; REGENERATE refuses
+  with the same words and builds nothing. No other limit: the planner reports what
+  a value breaks (`plan.knobs.problems`) and the card does not clamp.
+- **DEFAULTS** puts all four back (off when they are at default). Nothing rebuilds.
+- **Settings, not edits.** Like the angle and the size, the fields are the card's
+  (not the piece's): not an Undo step, kept when the mode leaves Custom (the section
+  is hidden, not emptied, and comes back as it was left, open or closed), kept by
+  REMOVE ALL, Undo, Redo and Escape. While a build runs the fields are off.
+- **The eraser** plans again with the fields as they stand, as any build does.
+
+Check: `node tools/nso_support_custom_drive_check.mjs` section 9 (a drive, not a
+`testStep`); `--only=tune` runs that section alone. Screenshots go to the
+git-ignored `tools/supports-custom-card-out/`.
+
+### Not done here
+
+- The export's name tag (`supportKnobs`, supports-knobs-1): the card does not yet
+  pass `plan.knobs.nonDefault` to it.
+- `plan.knobs.problems` (a lean at 90 deg, a trunk that did not build) is not
+  shown on the card.
+- The standing supports are not dimmed in the 3D view when stale; the card's
+  readout is.
+
 ## Paint scope: sub-region (detection)
 
 As G-scope's row: painted faces are the `skipList`, shifted into the world
