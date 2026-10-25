@@ -22,8 +22,9 @@ const check = (name, cond, detail) => {
    them. */
 const ROW = ['menu-import', 'menu-measure', 'menu-move', 'menu-rotate', 'menu-tip', 'menu-align',
              'menu-gen', 'btn-lock-pos', 'btn-plate-lock', 'btn-undo', 'btn-delete-placed', 'menu-export'];
-const COL = ['btn-microscope', 'menu-scale', 'menu-cut', 'menu-crop', 'menu-joins', 'menu-seat', 'menu-supports',
-             'menu-add', 'menu-bit', 'menu-shape', 'menu-paint', 'menu-surface', 'menu-sculpt', 'menu-repair'];
+const COL = ['menu-scale', 'menu-cut', 'menu-crop', 'menu-joins', 'menu-seat', 'menu-supports',
+             'menu-add', 'menu-bit', 'menu-shape', 'menu-paint', 'menu-surface', 'menu-sculpt', 'menu-slice',
+             'btn-microscope', 'menu-repair'];
 const MENUS = ROW.filter(id => id.startsWith('menu-')).concat(COL.filter(id => id.startsWith('menu-')));
 
 /* Every control that lived in the sidebar, and where it is now (Join and
@@ -120,7 +121,7 @@ withApp(async (page, logs) => {
     check('no row break or spacer is left in the bar', r.breaks === 0, r.breaks + ' found');
     const imp = r.row[0];
     check('the column starts under Import, at its x', Math.abs(r.col[0].x - imp.x) < 0.5 && r.col[0].y > imp.b,
-      'import x ' + imp.x + ', g-scope x ' + r.col[0].x);
+      'import x ' + imp.x + ', ' + r.col[0].id + ' x ' + r.col[0].x);
     check('the column runs top to bottom in the drawing\'s order',
       r.col.every((b, i) => Math.abs(b.x - imp.x) < 0.5 && (i === 0 || b.y > r.col[i - 1].b - 0.5)),
       r.col.map(b => b.id.replace('menu-', '') + '@' + Math.round(b.y)).join(' '));
