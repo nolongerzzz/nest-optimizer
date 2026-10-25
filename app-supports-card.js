@@ -82,6 +82,16 @@
    erasures live on the piece (m.nsoSupportFeed, in its own frame, circles in
    the plate's) and outlive a REGENERATE; REMOVE ALL and CLEAR PLATE forget them.
 
+   TUNE (Custom only). A collapsed section with four numbers - trunk top
+   (mm), trunk growth (deg), lean limit (deg), node spacing (mm) - the planner's
+   feed.knobs (docs/SUPPORT-GRIDPACK.md section 7), each starting at today's
+   value. They are card settings, like the angle and the size: not an Undo
+   step, not on the piece, kept when the mode changes away from Custom and when
+   REMOVE ALL runs. Nothing rebuilds as one is typed: a field that no longer
+   matches what the standing build was made with marks the build STALE (the
+   readout dims and says so) and REGENERATE is the set button. A field at its
+   default is not sent: with all four at default the feed has no knobs at all.
+
    FRAME. The piece's world soup, Z up, millimetres (meshToWorldSoup, then
    (x, -z, y)), as Bridge and G-scope read it. Edits are stored in the piece's
    own mesh frame, so they move with it.
@@ -119,6 +129,15 @@ var NSO_SUPPORTS_CARD = (function () {
   var ZONE_MIN_R = 1.5;          // a circle dragged smaller than this (mm) is a click, not a circle
   var MODES = { auto: 'Auto', assisted: 'Assisted', custom: 'Custom' };
   var TOOLS = { tips: true, circles: true, erase: true };
+  /* TUNE: the feed's knobs (nso_support_gridpack.js, THE KNOBS), today's values.
+     A knob is a finite number above 0; the trunk's growth may be 0 (a straight
+     trunk). The planner does not clamp them and neither does the card. */
+  var KNOBS = [
+    { key: 'trunkTipMm', id: 'sup-knob-tip', def: 2, word: 'Trunk top', zeroOk: false },
+    { key: 'trunkAngleDeg', id: 'sup-knob-growth', def: 5.5, word: 'Trunk growth', zeroOk: true },
+    { key: 'leanDeg', id: 'sup-knob-lean', def: 30, word: 'Lean limit', zeroOk: false },
+    { key: 'nodeMm', id: 'sup-knob-node', def: 5, word: 'Node spacing', zeroOk: false }
+  ];
   var OFF_TOL_MM = 0.3;          // a toggled-off spot is found again within this of where it was
   var WATCHDOG_MS = 60000;       // a build the planner has said nothing about for this long is stopped, and says so
   var CEILING_MS = 600000;       // a build still running at 10 min is stopped however it reports: a runaway
@@ -159,7 +178,7 @@ var NSO_SUPPORTS_CARD = (function () {
     det: null, occ: {}, eff: null, layer: null, raf: 0, sig: '', mem: {}, msg: null,
     geo: null, angle: ANGLE_DEFAULT, angleTimer: 0,
     watchdogMs: WATCHDOG_MS, ceilingMs: CEILING_MS, planner: null, job: null, elapsed: 0,
-    prog: null, listeners: [], said: null,
+    prog: null, listeners: [], said: null, knobs: {},
     mode: 'auto', tool: 'tips', pts: null, zoneLayer: null, eraseLayer: null, hot: null, hover: null, sel: null, drag: null
   };
 
@@ -281,7 +300,7 @@ var NSO_SUPPORTS_CARD = (function () {
     return m.nsoSupportEdits;
   }
   function memOf(id) {
-    if (!S.mem[id]) S.mem[id] = { unreach: {}, built: false, members: [], zonesEmpty: [] };
+    if (!S.mem[id]) S.mem[id] = { unreach: {}, built: false, members: [], zonesEmpty: [], builtKnobs: '' };
     return S.mem[id];
   }
   /* What the user fed in, on the piece: tips and toggled-off spots in its own
@@ -295,6 +314,36 @@ var NSO_SUPPORTS_CARD = (function () {
   function feedCopy(f) { return f ? JSON.parse(JSON.stringify(f)) : null; }
   function feedEmpty(f) { return !f || !(f.tips.length || f.off.length || f.zones.length || f.erased.length); }
   function tipIdOf(q, given) { return window.NSO_SupportGridpack.tipId(q, given); }
+
+  /* TUNE. S.knobs holds what the four fields say, as numbers (NaN for a field
+     that is empty or not a number); a knob not in it is at its default. */
+  function knobOk(K, v) { return typeof v === 'number' && isFinite(v) && (K.zeroOk ? v >= 0 : v > 0); }
+  function knobValue(K) { return K.key in S.knobs ? S.knobs[K.key] : K.def; }
+  function knobBad() {
+    var K = KNOBS.find(function (k) { return !knobOk(k, knobValue(k)); });
+    return K ? K.word + ' must be a number' + (K.zeroOk ? ', 0 or more.' : ' above 0.') : null;
+  }
+  /* The knobs a build sends: only those that differ from the default, or null
+     when none do (a feed with no knobs at all is today's plan). */
+  function knobsGiven() {
+    var out = null;
+    KNOBS.forEach(function (K) {
+      var v = knobValue(K);
+      if (knobOk(K, v) && v !== K.def) { out = out || {}; out[K.key] = v; }
+    });
+    return out;
+  }
+  /* What a build was made with, or what the fields say now, as one string: the
+     two are compared to tell a stale build. A field that is not a number reads
+     '?', so it never matches a build. Auto and Assisted send no knobs. */
+  function knobKey(given, bad) { return bad ? '?' + JSON.stringify(given) : given ? JSON.stringify(given) : ''; }
+  function knobsNow() { return S.mode === 'custom' ? knobKey(knobsGiven(), knobBad()) : ''; }
+  function knobsChanged() { return KNOBS.filter(function (K) { var v = knobValue(K); return !knobOk(K, v) || v !== K.def; }).length; }
+  function tuneStale() {
+    if (S.mode !== 'custom' || S.hostId == null) return false;
+    var mem = memOf(S.hostId);
+    return !!mem.built && mem.builtKnobs !== knobsNow();
+  }
 
   /*
    * The beacons the card shows and builds: the detected set, then the edits
@@ -663,7 +712,7 @@ var NSO_SUPPORTS_CARD = (function () {
     var hasHost = S.hostId != null && !!placedOf(S.hostId);
     var eff = S.eff, text, bad = false, cs = cardState(), a = null, st = null;
     if (hasHost && eff && !eff.error && (eff.beacons.length || S.mode === 'custom')) { st = statesFor(eff); a = areaStats(eff, st); }
-    if (card) { card.dataset.mode = S.mode; card.dataset.tool = S.tool; card.dataset.state = cs; card.classList.toggle('is-locked', !!S.busy); }
+    if (card) { card.dataset.mode = S.mode; card.dataset.tool = S.tool; card.dataset.state = cs; card.dataset.stale = hasHost && cs === 'built' && tuneStale() ? '1' : '0'; card.classList.toggle('is-locked', !!S.busy); }
     document.body.classList.toggle('sup-card-open', !!S.open);
     if (S.msg) { text = S.msg.text; bad = !!S.msg.bad; }
     else if (cs === 'pick') text = 'Click a piece to see where it needs holding.';
@@ -673,10 +722,12 @@ var NSO_SUPPORTS_CARD = (function () {
     else if (cs === 'building') text = progressLine();
     else if (cs === 'built') text = builtLine(a);
     else text = idleLine(a);
-    if (head) { head.textContent = text; head.classList.toggle('is-bad', bad); }
+    var stale = cs === 'built' && tuneStale();
+    if (stale && !S.msg) text += ' \u00b7 out of date: Tune has changed';
+    if (head) { head.textContent = text; head.classList.toggle('is-bad', bad); head.classList.toggle('is-stale', stale); }
     var en = function (id, on) { var e = $(id); if (e) e.disabled = !on || !!S.busy; };
     var go = $('btn-sup-all');
-    if (go) go.textContent = cs === 'building' ? buildingLine() : cs === 'built' ? 'Regenerate' : 'Generate';
+    if (go) { go.textContent = cs === 'building' ? buildingLine() : cs === 'built' ? 'Regenerate' : 'Generate'; go.classList.toggle('is-stale', stale); }
     en('btn-sup-all', (cs === 'idle' || cs === 'built') && a && a.areas > 0);
     var none = $('btn-sup-none'), rm = $('btn-sup-remove');
     var wasBuilt = hasHost && memOf(S.hostId).built && (cs === 'built' || cs === 'building');
@@ -691,7 +742,33 @@ var NSO_SUPPORTS_CARD = (function () {
     if (ang && document.activeElement !== ang && ang.value !== String(S.angle)) ang.value = String(S.angle);
     drawRows(cs === 'built' && st ? rowsFor(eff, st) : []);
     syncSwitch(cs);
+    syncTune(cs, stale);
     paintBar();
+  }
+
+  /* TUNE: shown in Custom only (hidden, not emptied: the values stay for when it
+     comes back, and so does whether it was open). The note under the fields
+     says what is true now - a field that is not a number, a build that is out of
+     date - and the summary counts the fields that are not at their default. */
+  function syncTune(cs, stale) {
+    var sec = $('sup-tune');
+    if (!sec) return;
+    sec.hidden = S.mode !== 'custom';
+    KNOBS.forEach(function (K) {
+      var e = $(K.id);
+      if (!e) return;
+      e.disabled = !!S.busy;
+      e.classList.toggle('is-bad', !knobOk(K, knobValue(K)));
+      e.setAttribute('aria-invalid', knobOk(K, knobValue(K)) ? 'false' : 'true');
+    });
+    var n = knobsChanged(), bad = knobBad(), note = $('sup-tune-note'), cnt = $('sup-tune-count'), df = $('sup-tune-defaults');
+    if (cnt) cnt.textContent = n ? n + ' changed' : '';
+    if (note) {
+      note.textContent = bad || (stale ? 'Changed since the last build. Regenerate to build with it.' : n && cs !== 'built' ? 'Generate builds with these.' : '');
+      note.classList.toggle('is-bad', !!bad);
+      note.classList.toggle('is-stale', !bad && !!stale);
+    }
+    if (df) df.disabled = !!S.busy || !n;
   }
 
   /* THE SWITCH AND THE TOOLS. Auto \u00b7 Assisted \u00b7 Custom; under it, in the two
@@ -832,7 +909,7 @@ var NSO_SUPPORTS_CARD = (function () {
     var st = $('sup-style'), sz = $('sup-size'), rs = $('sup-rest');
     var style = st && STYLES[st.value] ? st.value : 'tree';
     var size = sz ? parseFloat(sz.value) : NaN;
-    return { style: style, sideMm: isFinite(size) ? size : null, rest: !!(rs && rs.checked) };
+    return { style: style, sideMm: isFinite(size) ? size : null, rest: !!(rs && rs.checked), knobs: S.mode === 'custom' ? knobsGiven() : null };
   }
 
   /* THE PLANNER'S THREAD. planTree is one synchronous call that can run for
@@ -947,11 +1024,12 @@ var NSO_SUPPORTS_CARD = (function () {
      section 7); null in Auto, which sends none. Assisted hands the area's
      spots over as it always has and names the ones turned off; Custom hands
      over the area's tips alone. Both carry the circles and the erasures. */
-  function feedFor(m, beacons, rid) {
+  function feedFor(m, beacons, rid, knobs) {
     if (S.mode === 'auto') return null;
     var F = feedOf(m), feed = { mode: S.mode, landingZones: F.zones.map(function (z) { return { x: z.x, y: z.y, r: z.r }; }), excluded: F.erased.slice() };
     if (S.mode === 'custom') {
       feed.tips = beacons.filter(function (b) { return !b.off; }).map(function (b) { return { x: b.x, y: b.y, z: b.z, key: b.key, regionId: rid }; });
+      if (knobs) feed.knobs = Object.assign({}, knobs);       // Tune: only the fields that are not at their default
     } else {
       feed.beaconsOff = beacons.filter(function (b) { return b.off && !b.erased; }).map(function (b) { return b.id; });
     }
@@ -1082,14 +1160,14 @@ var NSO_SUPPORTS_CARD = (function () {
     var m = modelOf(S.hostId), hostId = S.hostId;
     var ops = editsOf(m).ops.slice(), serial = editsOf(m).serial;
     var unreach = JSON.parse(JSON.stringify(memOf(hostId).unreach)), built = memOf(hostId).built;
-    var feed = feedCopy(m.nsoSupportFeed), members = memOf(hostId).members, zonesEmpty = memOf(hostId).zonesEmpty;
+    var feed = feedCopy(m.nsoSupportFeed), members = memOf(hostId).members, zonesEmpty = memOf(hostId).zonesEmpty, builtKnobs = memOf(hostId).builtKnobs;
     return function () {
       var mm = modelOf(hostId);
       if (mm) mm.nsoSupportEdits = { ops: ops.slice(), serial: serial };
       if (mm) mm.nsoSupportFeed = feedCopy(feed) || undefined;
       memOf(hostId).unreach = JSON.parse(JSON.stringify(unreach));
       memOf(hostId).members = members; memOf(hostId).zonesEmpty = zonesEmpty;
-      memOf(hostId).built = built;
+      memOf(hostId).built = built; memOf(hostId).builtKnobs = builtKnobs;
       S.sel = null; S.hover = null;
       if (S.tool === 'erase' && !eraseReady()) S.tool = 'tips';
       if (S.selSupport != null && !modelOf(S.selSupport)) S.selSupport = null;
@@ -1207,7 +1285,7 @@ var NSO_SUPPORTS_CARD = (function () {
              build's, summed over the areas. */
           heard();
           note(job, m && m.phase === 'planning' ? { phase: 'planning', done: at + m.done, total: spots, own: mine, ownDone: m.done } : m, sent);
-        }, feedFor(hm, rg.beacons, rg.id)).then(function (a) {
+        }, feedFor(hm, rg.beacons, rg.id, o.knobs)).then(function (a) {
           areas.push(a);
           return pause() || new Promise(function (go) { setTimeout(go, 0); });
         });
@@ -1277,6 +1355,7 @@ var NSO_SUPPORTS_CARD = (function () {
         return { ok: false, reason: (err && err.message) || String(err), undone: true };
       }
       mem.built = true;
+      mem.builtKnobs = knobKey(S.mode === 'custom' ? o.knobs : null, false);
       pushUndo({ type: 'supportSwap', removed: removed, addedIds: added,
         label: removed.length ? 'Undo: supports on the piece put back as they were' : 'Undo: supports taken off', onUndone: undo });
       return { ok: true, added: added, removed: removed.map(function (x) { return x.placed.sourceId; }) };
@@ -1381,7 +1460,7 @@ var NSO_SUPPORTS_CARD = (function () {
     var undo = snapshot();
     var removed = removePieces(ids);
     if (reset) {
-      mem.unreach = {}; mem.built = false; mem.members = []; mem.zonesEmpty = [];
+      mem.unreach = {}; mem.built = false; mem.members = []; mem.zonesEmpty = []; mem.builtKnobs = '';
       var mh = modelOf(S.hostId);
       if (mh) mh.nsoSupportFeed = undefined;                         // the card's reset: the user's points, circles and erasures go too
       if (S.tool === 'erase') S.tool = 'tips';
@@ -1395,6 +1474,8 @@ var NSO_SUPPORTS_CARD = (function () {
 
   function generate(pre) {
     if (S.hostId == null) return Promise.resolve({ ok: false, reason: 'no piece' });
+    var badKnob = S.mode === 'custom' ? knobBad() : null;
+    if (badKnob) { S.msg = { text: badKnob, bad: true, knob: true }; sync(); return Promise.resolve({ ok: false, reason: badKnob }); }
     S.eff = effective();
     if (S.eff.error || !S.eff.beacons.length) { refresh(); return Promise.resolve({ ok: false, reason: S.eff.error || 'nothing needs holding' }); }
     return build(pre);
@@ -1836,6 +1917,29 @@ var NSO_SUPPORTS_CARD = (function () {
     refresh();
     return { ok: true, mode: k };
   }
+  /* TUNE: a field typed in is read at once and nothing is built - the card only
+     notes that the build is out of date. DEFAULTS puts all four back. Neither is
+     an Undo step: they are settings, as the angle is. */
+  function setKnob(key, v) {
+    var K = KNOBS.find(function (k) { return k.key === key; });
+    if (!K) return { ok: false, reason: 'no such knob' };
+    if (S.busy) return { ok: false, reason: 'busy' };
+    var n = typeof v === 'number' ? v : (String(v).trim() === '' ? NaN : Number(v));
+    if (n === K.def) delete S.knobs[key]; else S.knobs[key] = n;
+    var el = $(K.id);
+    if (el && document.activeElement !== el && el.value !== String(v)) el.value = String(v);
+    if (S.msg && S.msg.knob) S.msg = null;
+    sync();
+    return { ok: true, value: knobValue(K) };
+  }
+  function tuneDefaults() {
+    if (S.busy) return { ok: false, reason: 'busy' };
+    S.knobs = {};
+    KNOBS.forEach(function (K) { var e = $(K.id); if (e) e.value = String(K.def); });
+    if (S.msg && S.msg.knob) S.msg = null;
+    sync();
+    return { ok: true };
+  }
   function setTool(k) {
     if (!TOOLS[k]) return { ok: false, reason: 'no such tool' };
     if (S.busy || S.mode === 'auto') return { ok: false, reason: S.busy ? 'busy' : 'Auto has no tools' };
@@ -1981,6 +2085,8 @@ var NSO_SUPPORTS_CARD = (function () {
     on('btn-sup-remove', 'click', function () { removeSelected(); });
     on('sup-angle', 'input', function () { setAngle($('sup-angle').value, false); });
     on('sup-angle', 'change', function () { setAngle($('sup-angle').value, true); });
+    KNOBS.forEach(function (K) { on(K.id, 'input', function () { setKnob(K.key, $(K.id).value); }); });
+    on('sup-tune-defaults', 'click', function () { tuneDefaults(); });
     Object.keys(MODES).forEach(function (k) { on('sup-mode-' + k, 'click', function () { setMode(k); }); });
     Object.keys(TOOLS).forEach(function (k) { on('sup-tool-' + k, 'click', function () { setTool(k); }); });
     window.addEventListener('pointerdown', onDown, true);
@@ -2057,6 +2163,20 @@ var NSO_SUPPORTS_CARD = (function () {
     },
     supports: function (hostId) { return supportsOf(hostId == null ? S.hostId : hostId); },
 
+    /** Tune: the four values, which of them are not at their default (what a build sends as feed.knobs, or null), the standing build's, and whether it is out of date. */
+    tune: function () {
+      var mem = S.hostId != null ? memOf(S.hostId) : null;
+      return {
+        values: KNOBS.reduce(function (o, K) { o[K.key] = knobValue(K); return o; }, {}),
+        given: knobsGiven(), invalid: knobBad(), changed: knobsChanged(),
+        shown: !!($('sup-tune') && !$('sup-tune').hidden), open: !!($('sup-tune') && $('sup-tune').open),
+        builtWith: mem && mem.built ? mem.builtKnobs : null, stale: tuneStale()
+      };
+    },
+    /** Set one Tune field (what typing in it does): nothing is rebuilt. */
+    setKnob: setKnob,
+    /** Put all four Tune fields back to the defaults (the Defaults button). */
+    tuneDefaults: tuneDefaults,
     /** Auto, Assisted or Custom (a setting, like the angle: not an Undo step). */
     mode: function (k) { if (k !== undefined) setMode(k); return S.mode; },
     /** The tool that holds the pointer in a fed mode: 'tips', 'circles' or 'erase'; the one that is on, asked again, is stopped. */
