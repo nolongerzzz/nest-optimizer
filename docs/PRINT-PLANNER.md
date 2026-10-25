@@ -231,7 +231,7 @@ only: no Send, no printer link, no settings.
 - **Gate:** `npm run print:slice` (`tools/print-slice-check.js`): the plate with
   supports through `build()` -> a `.gcode.3mf` whose FEATURE lines carry Support,
   Support interface and Support transition, the packager's checks, the refusals,
-  the P1S, the markup and the load order. The browser drive of the card belongs to
+  the coupon on the P1S, the markup and the load order. The browser drive of the card belongs to
   the audit driver, not to `testSteps`.
 - **Not wired:** a settings panel; Send / a printer link; supports on the card (the
   Supports card is separate: Slice works on what is on the plate); a profile for the

@@ -177,13 +177,13 @@ async function main() {
   check('a plate taller than the printer is refused with the height', !tall.ok && /mm tall; the Bambu Lab A1 mini prints 5 mm/.test(tall.reason), tall.reason);
 
   // ===========================================================================
-  section('5. The P1S profile: its template, its frozen blocks, its bed');
+  section('5. The P1S profile: its template, its frozen blocks, its bed (the coupon)');
   // ===========================================================================
   const p1sPrinter = L.printer('p1s-0.4');
   const p1sCfg = await PRINT.readTemplate(new Uint8Array(fs.readFileSync(path.join(ROOT, pp.template))));
-  const pb = await L.plateB(128, 128, true, p1sCfg);                // the arc with NSO's trees, on the P1S bed
-  const p1sOut = await PRINT.build(PRINT.pieceObjects(asViewportPieces(pb.objs, p1sPrinter.bed), p1sPrinter.bed), { config: p1sCfg, printer: p1sPrinter });
-  check('the arc and its trees plan for the P1S, with supports', p1sOut.ok && SUPPORT_FEATURES.every(f => p1sOut.features.includes(f)), p1sOut.reason || p1sOut.features.join(', '));
+  // the coupon alone (no trees: they are the A1 mini run's), centred on the P1S's 256 mm bed; the arc with trees on the P1S is a one-off in the handoff note
+  const p1sOut = await PRINT.build(PRINT.pieceObjects(asViewportPieces(plate.objs.slice(0, 1), a1.bed), p1sPrinter.bed), { config: p1sCfg, printer: p1sPrinter });
+  check('the coupon plans for the P1S from the P1S template and blocks', p1sOut.ok && p1sOut.objects === 1 && p1sOut.stats.layers > 50, p1sOut.reason);
   if (p1sOut.ok) {
     const z2 = L.R.openZip(p1sOut.bytes);
     check('...the file is the P1S\'s (model id C12) and Studio-shaped (md5 of its G-code)',
