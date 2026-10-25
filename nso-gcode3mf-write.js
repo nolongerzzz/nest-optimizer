@@ -180,7 +180,7 @@
   function scanBody(text) {
     var lines = text.split('\n');
     var s = {
-      layers: 0, labelsSeen: [], layer1: {}, maxZ: 0,
+      layers: 0, labelsSeen: [], layer1: {}, layer1Unlabelled: null, maxZ: 0,
       filamentByLayer: [], loads: {}, unloads: {}, firstFilament: null,
       pauses: 0, supportFeature: false
     };
@@ -240,8 +240,11 @@
       if (v.Z != null) z = absXY ? v.Z : z + v.Z;
       var extruding = v.E != null && (relE ? v.E > 0 : true);
       if (extruding && z > s.maxZ) s.maxZ = z;
-      if (layer === 0 && label && extruding && (nx !== x || ny !== y)) {
-        var b = s.layer1[label] || (s.layer1[label] = [Infinity, Infinity, -Infinity, -Infinity]);
+      if (layer === 0 && extruding && (nx !== x || ny !== y)) {
+        // A one-object plate has no "start printing object" labels; its layer-1
+        // extrusion is kept apart and belongs to the one object.
+        var b = label ? (s.layer1[label] || (s.layer1[label] = [Infinity, Infinity, -Infinity, -Infinity]))
+          : (s.layer1Unlabelled || (s.layer1Unlabelled = [Infinity, Infinity, -Infinity, -Infinity]));
         widen(b, x, y); widen(b, nx, ny);
         if (m[1] === '2' || m[1] === '3') {
           var cx = x + (v.I || 0), cy = y + (v.J || 0), r = Math.hypot(x - cx, y - cy);
@@ -435,8 +438,9 @@
 
     // Layer-1 footprint per object (plate_1.json) and "outside".
     var all = [Infinity, Infinity, -Infinity, -Infinity];
+    var solo = !labels.length && d.objects.length === 1 ? body.layer1Unlabelled : null;
     d.bboxObjects = d.objects.map(function (o) {
-      var b = body.layer1[o.identify_id];
+      var b = body.layer1[o.identify_id] || solo;
       if (!b) return null;
       all = [Math.min(all[0], b[0]), Math.min(all[1], b[1]), Math.max(all[2], b[2]), Math.max(all[3], b[3])];
       return { area: (b[2] - b[0]) * (b[3] - b[1]), bbox: b.slice(), id: Number(o.identify_id), name: o.name };

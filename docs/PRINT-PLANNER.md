@@ -189,7 +189,7 @@ What Studio's file has that `toGcode()`'s text does not, and where each landed.
 | variable / adaptive layer height | not landed: the engine's layers are uniform |
 | seam placement, scarf joints, ironing, brim / skirt, pressure advance | not landed (the template has them off or `auto`) |
 | multi-filament, AMS | not landed: one filament |
-| one-object plates: `plate_1.json` footprints | **not landed - the packager** reads footprints from `start printing object` labels, which a one-object plate does not have |
+| one-object plates: `plate_1.json` footprints | **landed**: layer 1's extrusion is the footprint when the G-code has no labels (`docs/GCODE3MF-PACKAGER.md`) |
 | real thumbnails | not landed (placeholders, the packager's) |
 
 ## The Slice card (print-slice-main-plate)

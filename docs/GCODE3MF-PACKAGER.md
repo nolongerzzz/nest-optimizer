@@ -86,6 +86,11 @@ from it, and a passed value only fills a field the G-code lacks:
   - labels: `; start printing object, unique label id`
   - the footprint: each object's layer-1 extrusion, with every point widened
     by half its `; LINE_WIDTH` and arcs sampled
+    - a one-object plate has no `start printing object` labels (Studio writes
+      `; OBJECT_ID: <n>` at each layer start instead). When the G-code has no
+      labels and one object was passed, all of layer 1's extrusion (supports
+      included, as Studio's own bbox has them) is that object's footprint. With
+      several objects and no labels, no footprint is guessed.
   - filament changes: `M620 S<n>A`
   - pauses: `M400 U1`
   - support: `; FEATURE: Support`
@@ -109,7 +114,7 @@ pins each:
 | `slice_info` `first_layer_time`, `plate_1.json` `first_layer_time` | `0.000000` / `0`, unless `estimate.firstLayerSeconds` | its estimate (45.030609 on the reference) |
 | `slice_info` `<warning>` lines | none | its slicing warnings (the reference has two `not_support_traditional_timelapse`) |
 | `plate_1.json` `bbox_objects[].id` | the G-code label id | its runtime object id (4079/4080 against labels 4044/4066) |
-| `plate_1.json` `bbox_objects[].area` | the footprint's bbox area | the slice polygon's area (equal for the reference's rectangle; 658 against 578 for its tree support) |
+| `plate_1.json` `bbox_objects[].area` | the footprint's bbox area | the slice polygon's area (equal for the reference's rectangle; 658 against 578 for its tree support) ; 941 against 396.5 for the one-object fixture, whose bbox takes in its support) |
 | `3dmodel.model` `DesignerUserId` | empty | the signed-in user's id. That id belongs to the owner and is not NSO's to stamp into every file |
 | `slice_info` `enable_filament_dynamic_map`, `has_filament_switcher` | `false` | `false` on the reference |
 
@@ -166,6 +171,18 @@ and holds it to the reference:
    - Two writes are byte-identical.
    - Each of these is refused: no config, an object count that differs from
      the labels, and a printer with no model id on record and none passed.
+10. **One object** (`fixtures/supports/simple_overhang_bambu.gcode.3mf`, 360
+    layers, no labels in its G-code): re-packaged and held to Studio's file.
+    - Byte-identical: the same parts as in 3.
+    - `plate_1.json`: every field equal but the placeholders, the footprint within 0.15 mm (worst
+      0.021 mm), and the same placeholders (id 225 against Studio's 243, area).
+      With `estimate.firstLayerSeconds` passed, `first_layer_time` equals Studio's
+      float32 exactly.
+    - `slice_info.config`: line for line, except Studio's `<warning>` lines and
+      an extra `layer_filament_list filament_list="" layer_ranges="360 360"`
+      (Studio lists a 361st layer, the final lift, with no filament; NSO's reading stops at the 360 `CHANGE_LAYER`s).
+    - `3dmodel.model` carries the downloaded model's title, designer and
+      pictures, and the file's `Auxiliaries/` holds its pictures; neither is NSO's.
 
 The gate also ran once in Chromium during development, with the module loaded
 as a classic script beside `nso-3mf.js` and `nso-3mf-read.js`. It wrote the

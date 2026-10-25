@@ -30,6 +30,9 @@
  *      import route (NSOGcodeLines.readSlicedGcode3MF) reads the same
  *      toolpath out of the written file as out of the reference
  *   9. determinism and refusals
+ *  10. a one-object plate (fixtures/supports/simple_overhang_bambu.gcode.3mf,
+ *      no "start printing object" labels): plate_1.json's footprint from the
+ *      layer-1 extrusion, held to Studio's file part by part
  *
  * Exits non-zero on any failure.
  */
@@ -45,6 +48,7 @@ const G = require(path.join(ROOT, 'nso-gcode3mf-write.js'));
 const W = require(path.join(ROOT, 'nso-3mf.js'));
 const Lines = require(path.join(ROOT, 'nso-gcode-lines.js'));
 const REF = path.join(ROOT, 'fixtures', 'supports', 'top_clip_x2_supports.gcode.3mf');
+const REF1 = path.join(ROOT, 'fixtures', 'supports', 'simple_overhang_bambu.gcode.3mf');
 
 let pass = 0, fail = 0;
 function check(label, ok, detail) {
@@ -291,6 +295,51 @@ const keep = process.argv.indexOf('--keep') >= 0 ? process.argv[process.argv.ind
     config: config.replace('"printer_model": "Bambu Lab A1 mini"', '"printer_model": "Bambu Lab P1S"') }));
   check('a printer with no model id on record and none passed: refused', /model_id/.test(noModel || ''), noModel);
   check('the A1 mini needs none passed (N1, from the fixture)', G.describe(Object.assign({}, base, { printer: {} })).modelId === 'N1');
+
+  /* ---------- 10. a one-object plate ---------- */
+  console.log('\n--- 10. one object: no labels in the G-code ---');
+  const ref1 = readZip(fs.readFileSync(REF1));
+  const t1 = (p) => ref1.get(p).toString('utf8');
+  const gcode1 = t1(G.PART.gcode);
+  check('the fixture has no "start printing object" labels and no model label id (Studio writes the footprint anyway)',
+    !/start printing object/.test(gcode1) && !/model label id/.test(gcode1));
+  const base1 = { gcode: gcode1, config: t1(G.PART.projectSettings), date: t1(G.PART.model).match(/name="CreationDate">([^<]*)</)[1],
+    objects: [...t1(G.PART.sliceInfo).matchAll(/<object identify_id="([^"]*)" name="([^"]*)" skipped="([^"]*)"/g)]
+      .map((m) => ({ identify_id: m[1], name: m[2], skipped: m[3] === 'true' })), estimate: { firstLayerSeconds: 48.512542724609375 } };
+  const one = readZip(Buffer.from(await G.write(base1)));
+  const oneText = (p) => one.get(p).toString('utf8');
+  check('the reference\'s parts, in Studio\'s order, less its Auxiliaries (the model\'s own pictures)',
+    JSON.stringify([...one.keys()]) === JSON.stringify([...ref1.keys()].filter((k) => !/^Auxiliaries\//.test(k))));
+  for (const p of ['[Content_Types].xml', '_rels/.rels', G.PART.gcode, G.PART.md5, G.PART.projectSettings,
+    G.PART.modelSettings, G.PART.modelSettingsRels, G.PART.cutInfo, G.PART.filamentSequence]) {
+    check(p + ' byte-identical to Studio\'s', Buffer.compare(one.get(p), ref1.get(p)) === 0, JSON.stringify(oneText(p).slice(0, 200)));
+  }
+  const pj1 = JSON.parse(oneText(G.PART.plateJson)), rpj1 = JSON.parse(t1(G.PART.plateJson));
+  const o1 = pj1.bbox_objects[0], r1 = rpj1.bbox_objects[0];
+  check('plate_1.json: the reference\'s keys, in its order; one object, named',
+    JSON.stringify(Object.keys(pj1)) === JSON.stringify(Object.keys(rpj1)) && pj1.bbox_objects.length === 1 &&
+    JSON.stringify(Object.keys(o1)) === JSON.stringify(Object.keys(r1)) && o1.name === r1.name);
+  for (const k of ['bed_type', 'filament_colors', 'filament_ids', 'first_extruder', 'first_layer_time', 'is_seq_print', 'nozzle_diameter', 'version']) {
+    check('plate_1.json ' + k + ' = ' + JSON.stringify(rpj1[k]) + '', JSON.stringify(pj1[k]) === JSON.stringify(rpj1[k]), JSON.stringify(pj1[k]));
+  }
+  check('plate_1.json layer_height ' + r1.layer_height + ' (float32 0.2)', o1.layer_height === r1.layer_height, String(o1.layer_height));
+  check('plate_1.json bbox_all and the object\'s bbox are the layer-1 footprint, within 0.15 mm of Studio\'s (worst ' +
+    dev(o1.bbox, r1.bbox).toFixed(3) + ' mm), the support included as Studio has it',
+    near(o1.bbox, r1.bbox, 0.15) && JSON.stringify(pj1.bbox_all) === JSON.stringify(o1.bbox) && near(pj1.bbox_all, rpj1.bbox_all, 0.15),
+    JSON.stringify(o1.bbox));
+  check('plate_1.json placeholder: id is the passed identify_id (225; Studio writes its runtime id ' + r1.id + ')', o1.id === 225 && r1.id === 243);
+  check('plate_1.json placeholder: area is the footprint\'s bbox area (Studio writes the slice polygon\'s ' + r1.area.toFixed(2) + ')',
+    Math.abs(o1.area - (o1.bbox[2] - o1.bbox[0]) * (o1.bbox[3] - o1.bbox[1])) < 1e-9);
+  const si1 = oneText(G.PART.sliceInfo);
+  const refSi1 = t1(G.PART.sliceInfo).replace(/^ *<warning [^\n]*\n/gm, '').replace(/ *<layer_filament_list filament_list="" layer_ranges="360 360" \/>\n/, '');
+  check('slice_info.config: the reference\'s but for its <warning> lines and its empty-list layer 360 (Studio counts the lift after the last layer)',
+    si1 === refSi1, si1.split('\n').filter((l, i) => l !== refSi1.split('\n')[i]).join(' | '));
+  const m1 = oneText(G.PART.model), rm1 = t1(G.PART.model);
+  check('3dmodel.model: the header only, no meshes (Studio carries the downloaded model\'s title, designer and pictures)',
+    /BambuStudio-02\.08\.02\.61/.test(m1) && !/<mesh|<object/.test(m1) && /<build\/>/.test(rm1));
+  const two = G.describe(Object.assign({}, base, { gcode: gcode.replace(/^; start printing object, unique label id: \d+$/gm, '') }));
+  check('two objects without labels: no footprint is guessed (the lone-object rule is for one object only)', two.bboxObjects.length === 0);
+
 
   console.log('\n' + (fail ? 'FAILED  ' + fail + ' of ' + (pass + fail) : 'PASSED  all ' + pass));
   process.exit(fail ? 1 : 0);
