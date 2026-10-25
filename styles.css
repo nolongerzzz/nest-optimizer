@@ -3995,9 +3995,10 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
 .vp-shell-col > .vp-group-start {
   margin-top: calc(var(--shell-group-gap) - var(--shell-col-gap));
 }
-/* Check & repair on its own, pinned to the bottom over the view row, a
-   group gap above it; the free space falls above Check & repair. */
-.vp-shell-col > #menu-repair { margin-top: auto; }
+/* The bottom stack - Slice, G-scope, Check & repair - is pinned to the bottom
+   over the view row; the free space falls above Slice. Slice and G-scope are
+   one pair (the column's pitch); Check & repair keeps its group gap above it. */
+.vp-shell-col > #menu-slice { margin-top: auto; }
 .vp-shell-col > .vp-shell-view {
   display: flex;
   gap: var(--shell-col-gap);
@@ -4414,6 +4415,24 @@ body.sup-card-open #adjust-status { display: none; }
 .sup-card .sup-progress-fill { height: 100%; width: 0; border-radius: 3px; background: #e2e8f0; }
 .sup-card .sup-progress.is-indeterminate .sup-progress-fill { width: 35%; animation: sup-sweep 1.1s ease-in-out infinite; }
 @keyframes sup-sweep { from { transform: translateX(-100%); } to { transform: translateX(286%); } }
+
+/* The Slice card (app-print.js): the plate's printer, Slice, the stage and the
+   seconds while it runs, the readout, and the two actions. The Supports card's
+   rows and progress bar, so the two read alike. */
+.slice-card { display: flex; flex-direction: column; gap: 4px; min-width: 250px; }
+.slice-card [hidden] { display: none !important; }
+.slice-card .slice-profile { margin: 0; font-size: 11px; color: #e2e8f0; }
+.slice-card .slice-readout { margin: 0; font-size: 11px; color: #e2e8f0; }
+.slice-card .is-bad { color: #f87171; }
+.slice-card .sup-go-row { display: grid; grid-template-columns: minmax(0, 1fr); grid-auto-flow: column; grid-auto-columns: auto; gap: 4px; width: 100%; }
+.slice-card .sup-go-row .btn { width: auto; min-width: 0; margin: 0; white-space: nowrap; text-transform: uppercase; }
+.slice-card .sup-go { padding: 11px 8px; font-size: 13px; font-weight: 700; letter-spacing: 0.06em; }
+.slice-card .sup-go-row .btn-secondary { padding: 11px 10px; font-size: 11px; letter-spacing: 0.04em; }
+.slice-card .sup-progress { height: 6px; border-radius: 3px; overflow: hidden; background: rgba(148, 163, 184, 0.25); }
+.slice-card .sup-progress-fill { height: 100%; width: 0; border-radius: 3px; background: #e2e8f0; }
+.slice-card .sup-progress.is-indeterminate .sup-progress-fill { width: 35%; animation: sup-sweep 1.1s ease-in-out infinite; }
+.slice-card .slice-actions { display: flex; flex-direction: column; gap: 4px; }
+.slice-card .slice-actions .btn { width: 100%; margin: 0; }
 
 /* The Crop card (app-crop-card.js): the Shape row, one readout line, CROP, Cancel.
    The five shapes share the row; the buttons are small enough to stay on it. */

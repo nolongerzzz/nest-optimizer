@@ -8,9 +8,10 @@ References: `fixtures/supports/top_clip_x2_supports.gcode.3mf`, `simple_overhang
 ## Goal
 
 A `.gcode.3mf` that Bambu Studio opens as a project and sends to the printer
-**without slicing it again**. Engine only: no card, no UI, and no G-scope file
-loads the planner. `nso_slicer.js`'s `toGcode()` is unchanged - it is G-scope's
-own text (a toolpath to read), not a file to print.
+**without slicing it again**. The planner and the packager are engine: no G-scope
+file loads them. The one door to them is the left bar's Slice card
+(`app-print.js`, below). `nso_slicer.js`'s `toGcode()` is unchanged - it is
+G-scope's own text (a toolpath to read), not a file to print.
 
 ```
 sliceObjects()  ->  plan()  ->  gcode  ->  toGcode3mf()  ->  .gcode.3mf
@@ -191,7 +192,55 @@ What Studio's file has that `toGcode()`'s text does not, and where each landed.
 | one-object plates: `plate_1.json` footprints | **not landed - the packager** reads footprints from `start printing object` labels, which a one-object plate does not have |
 | real thumbnails | not landed (placeholders, the packager's) |
 
+## The Slice card (print-slice-main-plate)
+
+`app-print.js`, `#menu-slice`. A SLICE button in the left bar's bottom stack
+(Slice, G-scope, Check & repair, top to bottom) opens a card shaped like the other
+left-bar cards (a `details.vp-menu`, one open at a time). It is UI only and download
+only: no Send, no printer link, no settings.
+
+- **What it does.** Slices every piece on the plate, supports included, for the
+  plate's printer profile, and reads out layers, estimated time and filament grams.
+  Then **Export .gcode.3mf** downloads the packaged file and **Preview in G-scope**
+  opens that same file through G-scope's existing `.gcode.3mf` import
+  (`NSO_MICROSCOPE.openFile`), read-only, so the supports show as Support /
+  Support interface / Support transition. A plate the planner refuses (off the bed,
+  too tall, no first layer) shows the planner's reason in the card.
+- **The printer profile** is the plate picker's plate, read, not edited:
+  `a1mini` -> A1 mini 0.4 (`fixtures/bambu-templates/a1mini-0.4/project_test.3mf`,
+  `fixtures/print-planner/a1mini-0.4/frozen.json`); `a1` ("A1 / P1S / X1C 256") ->
+  P1S 0.4 (the project inside `fixtures/supports/simple_overhang_p1s.gcode.3mf`,
+  `fixtures/print-planner/p1s-0.4/frozen.json`). Any other plate has no profile and the
+  card says so. The template's values are used as they are. Print settings live
+  here, per printer profile; they never read or write G-scope's Slice settings.
+- **The plate becomes the engine's input** through G-scope's `plateObjects()` (a
+  read of the plate, not an edit of G-scope): each piece's Z-up soup, moved by half
+  the printer's bed (the viewport's plate is centred on 0,0, a bed starts at its
+  corner), a support carrying its host and `role: 'support'` (the engine types its
+  paths; the UI retypes nothing), a non-solid piece sliced with its open edges open.
+  The engine's options are the template's (`engineOptions(config)`).
+- **The slice runs on a worker** (it loads the engine files the page loaded, found
+  from the page's own `<script>` tags), so the page stays alive; the card shows the
+  stage ("Slicing 3 objects", "Writing the G-code and packing the file") and the
+  seconds, with no invented percent, and Cancel ends the worker.
+  `tools/nso_slice_pool.js` is the Node-only pool and is not used.
+- **Stale.** Export and Preview exist only for a slice of the plate as it stands; a
+  piece moved, added or removed, or another plate picked, greys them and says so.
+- **Static files.** The frozen blocks and the template are fetched when Slice is
+  pressed; a missing one says which path and that `fixtures/` must be served.
+- **Gate:** `npm run print:slice` (`tools/print-slice-check.js`): the plate with
+  supports through `build()` -> a `.gcode.3mf` whose FEATURE lines carry Support,
+  Support interface and Support transition, the packager's checks, the refusals,
+  the coupon on the P1S, the markup and the load order. The browser drive of the card belongs to
+  the audit driver, not to `testSteps`.
+- **Not wired:** a settings panel; Send / a printer link; supports on the card (the
+  Supports card is separate: Slice works on what is on the plate); a profile for the
+  Prusa, Ender and Custom plates.
+
 ## Owner test
+
+Open the downloaded file from the Slice card in Bambu Studio's preview: the supports
+show as support.
 
 After the PR: one small coupon on the A1 mini, watched; then the two-piece plate
 with NSO supports. Watch the first layer (a 0.42 mm line where Studio's is 0.5),

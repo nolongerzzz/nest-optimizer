@@ -10,9 +10,10 @@
    sits Clear plate, under Export Optimize. The panel holds the old Plate
    menu's Plate and Pieces bodies, pinned open: never a drop-down.
 
-   The left column, Import sharing the corner: G-scope, Scale, Cut, Crop,
+   The left column, Import sharing the corner: Scale, Cut, Crop,
    Join, Seat, Supports, Add, Subtract | Shape, Paint, Surface & edges,
-   Sculpt | Check & repair, on its own over the view row | X-ray (X),
+   Sculpt | Slice, G-scope (the bottom stack, pinned over the view row) |
+   Check & repair, on its own over the view row | X-ray (X),
    Eye (👁), ◎ pinned to the bottom.
 
    GATES
@@ -64,10 +65,11 @@ const PANEL = 'plate-panel';
 const PANEL_HOLDS = ['plate-select', 'custom-w', 'custom-d', 'custom-h', 'plate-grid-show', 'chk-plate-grid-snap',
                      'model-list', 'clone-count', 'btn-clone'];
 const GROUPS = [
-  [['btn-microscope', 'G-SCOPE'], ['menu-scale', 'SCALE'], ['menu-cut', 'CUT'], ['menu-crop', 'CROP'],
+  [['menu-scale', 'SCALE'], ['menu-cut', 'CUT'], ['menu-crop', 'CROP'],
    ['menu-connect', 'CONNECT'], ['menu-joins', 'JOIN'], ['menu-seat', 'SEAT'], ['menu-supports', 'SUPPORTS'], ['menu-add', 'ADD'],
    ['menu-bit', 'SUBTRACT']],
   [['menu-shape', 'SHAPE'], ['menu-paint', 'PAINT'], ['menu-surface', 'SURFACE & EDGES'], ['menu-sculpt', 'SCULPT']],
+  [['menu-slice', 'SLICE'], ['btn-microscope', 'G-SCOPE']],
   [['menu-repair', 'CHECK & REPAIR']],
   [['btn-xray', 'X-RAY'], ['btn-watch', 'EYE'], ['btn-frame-view', '◎']]
 ];
@@ -121,6 +123,8 @@ const HOLDS = {
                    'btn-skin-face', 'btn-skin-wrap', 'btn-skin-patch', 'btn-trace-raster', 'btn-texture'],
   // SCULPT: the Brush (Carve / Emboss / Smooth here); Carve the tool is in Subtract
   'menu-sculpt': ['btn-brush', 'sel-brush-mode', 'inp-brush-size', 'inp-brush-intensity', 'chk-brush-hard'],
+  // SLICE (app-print.js): the plate's printer, Slice (and Cancel while it runs), the readout, Export .gcode.3mf, Preview in G-scope
+  'menu-slice': ['slice-card', 'slice-profile', 'btn-slice-go', 'btn-slice-cancel', 'slice-readout', 'btn-slice-export', 'btn-slice-preview'],
   // CHECK & REPAIR: Check piece · Cap open faces · Repair · Seal · Non-solid · Solidify
   'menu-repair': ['btn-check-defects', 'btn-cap-open', 'chk-seal-repair', 'btn-seal', 'chk-non-solid', 'btn-solidify']
 };
@@ -400,22 +404,26 @@ withApp(async (page, logs) => {
     const imp = geo['menu-import'];
     const col = GROUPS.map(g => g.map(([id]) => Object.assign({ id }, geo[id])));
     const first = col[0][0];
-    check('the column starts under Import with G-scope, at its x', Math.abs(first.x - imp.x) < 0.5 && first.y > imp.b &&
-      first.y - imp.b < 8 && first.id === 'btn-microscope',
+    check('the column starts under Import with Scale, at its x', Math.abs(first.x - imp.x) < 0.5 && first.y > imp.b &&
+      first.y - imp.b < 8 && first.id === 'menu-scale',
       'import ' + Math.round(imp.x) + ',' + Math.round(imp.b) + ' ' + first.id + ' ' + Math.round(first.x) + ',' + Math.round(first.y));
-    const stacked = col.slice(0, 3).every(g => g.every(b => b.inCol && Math.abs(b.x - imp.x) < 0.5 && Math.abs(b.w - imp.w) < 0.5));
-    check('groups 1-3 are one stack under Import, Import\'s width', stacked,
-      col.slice(0, 3).map(g => g.map(b => Math.round(b.x) + '/' + Math.round(b.w)).join(' ')).join(' | '));
+    const stacked = col.slice(0, 4).every(g => g.every(b => b.inCol && Math.abs(b.x - imp.x) < 0.5 && Math.abs(b.w - imp.w) < 0.5));
+    check('groups 1-4 are one stack under Import, Import\'s width', stacked,
+      col.slice(0, 4).map(g => g.map(b => Math.round(b.x) + '/' + Math.round(b.w)).join(' ')).join(' | '));
     const pitches = [];
-    col.slice(0, 2).forEach(g => g.forEach((b, i) => { if (i) pitches.push(+(b.y - g[i - 1].y).toFixed(2)); }));
+    col.slice(0, 3).forEach(g => g.forEach((b, i) => { if (i) pitches.push(+(b.y - g[i - 1].y).toFixed(2)); }));
     check('a 36 px pitch inside each group', pitches.every(p => Math.abs(p - 36) < 0.5), pitches.join(' '));
     const gap12 = +(col[1][0].y - col[0][col[0].length - 1].b).toFixed(2);
     check('a 12 px gap between the make/edit and surface groups', Math.abs(gap12 - 12) < 0.5, String(gap12));
-    const view = col[3], repair = col[2][0], lastAbove = col[1][col[1].length - 1];
+    const view = col[4], repair = col[3][0], stack = col[2], lastAbove = col[1][col[1].length - 1];
     check('the view group (X, eye, ◎) is one row pinned to the bottom of the column',
       view.every(b => b.inCol && Math.abs(b.b - (geo._vp.bottom - 8)) < 0.5 && Math.abs(b.y - view[0].y) < 0.5) &&
       Math.abs(view[0].x - imp.x) < 0.5 && Math.abs(view[2].r - imp.r) < 0.5,
       view.map(b => b.id + '@' + Math.round(b.x) + ',' + Math.round(b.y) + '/' + Math.round(b.w)).join(' ') + '; viewport bottom ' + geo._vp.bottom);
+    check('the bottom stack is Slice then G-scope (the 36 px pitch), pinned under Sculpt, and Check & repair follows it a group gap lower',
+      stack.length === 2 && stack[0].id === 'menu-slice' && stack[1].id === 'btn-microscope' &&
+      Math.abs(stack[1].y - stack[0].y - 36) < 0.5 && Math.abs(repair.y - stack[1].b - 12) < 0.5 && stack[0].y - lastAbove.b >= 12 - 0.5,
+      'sculpt ends ' + Math.round(lastAbove.b) + ', ' + stack.map(b => b.id + ' ' + Math.round(b.y) + '..' + Math.round(b.b)).join(', ') + ', check & repair ' + Math.round(repair.y));
     check('Check & repair is on its own, directly above the view row (a group gap), well below Sculpt',
       Math.abs(view[0].y - repair.b - 12) < 0.5 && repair.y - lastAbove.b >= 12 - 0.5,
       'sculpt ends ' + Math.round(lastAbove.b) + ', check & repair ' + Math.round(repair.y) + '..' + Math.round(repair.b) +
@@ -672,7 +680,7 @@ withApp(async (page, logs) => {
     c = await clickFace(page, '#btn-microscope');
     await page.waitForTimeout(300);
     const g1 = await gs();
-    check('G-SCOPE (column slot 2) opens G-scope on the plate', c.ok && g1.open && g1.features.shown, JSON.stringify({ open: g1.open }));
+    check('G-SCOPE (column slot 2 of the bottom stack, under Slice) opens G-scope on the plate', c.ok && g1.open && g1.features.shown, JSON.stringify({ open: g1.open }));
     await page.evaluate(() => document.getElementById('btn-microscope').click());   // its own toggle shuts it
     const g1b = await page.evaluate(() => NSO_MICROSCOPE.isOpen());
     check('...and G-SCOPE shuts it again', g1b === false, String(g1b));

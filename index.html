@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=f8f85809" />
+  <link rel="stylesheet" href="styles.css?v=13acc9b0" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -417,22 +417,11 @@
               </div>
             </div>
           </section>
-          <!-- The column: G-scope under Import, then make/edit (Scale .. Subtract),
-               surface (Shape .. Sculpt), and at the bottom Check & repair on its own
+          <!-- The column: make/edit (Scale .. Subtract) under Import, surface
+               (Shape .. Sculpt), and at the bottom Slice, G-scope and Check & repair
                over the view row (X-ray, Eye, Frame). Shell v3: Add is new; Bend, Lift,
                Measure & check and Plate went - their contents are in the cards. -->
           <div class="vp-shell-col">
-          <!-- G-scope: the ONE G-code / microscope tool. It lays an inspector
-               OVER whatever is on the plate, the way X-ray acts on what is
-               already there; a sliced .gcode.3mf import (by content, not by
-               name) lands in it without a button press and puts nothing on
-               the plate. Selections leave only through Export or Crop.
-               The old G-code-onto-the-plate door (#btn-gcode) was merged
-               into this one. See docs/GCODE-MICROSCOPE.md, "G-scope". -->
-          <button id="btn-microscope" class="vp-bar-btn btn-gscope" type="button"
-                  aria-label="G-scope"
-                  title="G-scope: put the plate under the lens, or open an STL, a 3MF or a sliced .gcode.3mf. Colour per part or per slicer feature, a capture box, a layer-range slider, Normal or Slice view - then export what you isolated, or drag it onto the second plate.">G-scope</button>
-          <input type="file" id="ms-input" accept=".stl,.3mf" class="hidden-quiet" />
           <details class="vp-menu vp-top-menu vp-shell-menu" id="menu-scale">
             <summary class="vp-bar-btn" title="Read the piece's shape and size, then lengthen, shorten or scale it">Scale</summary>
             <div class="vp-menu-body vp-top-body" id="scale-card">
@@ -1428,6 +1417,45 @@
             </div>
             </div>
           </details>
+          <!-- SLICE: the plate sliced for its printer, and the file it makes
+               (app-print.js, docs/PRINT-PLANNER.md). It slices every piece on
+               the plate, supports included, with the shared engine and the print
+               planner, on a worker so the page stays alive; the card shows the
+               stage and the seconds, then layers, time and filament, and offers
+               the .gcode.3mf as a download or, read-only, in G-scope. The printer
+               is the plate's (read here, not edited); no setting lives here. -->
+          <details class="vp-menu vp-shell-menu vp-col-menu vp-group-start" id="menu-slice" data-sec="slice">
+            <summary class="vp-bar-btn" title="Slice the plate for its printer: every piece, supports included. Download the .gcode.3mf or look at it in G-scope.">Slice</summary>
+            <div class="vp-menu-body vp-top-body slice-card" id="slice-card">
+              <p id="slice-profile" class="bend-readout slice-profile" title="The printer profile of the plate picker's plate. Its values are used as they are.">&nbsp;</p>
+              <div class="sup-go-row">
+                <button id="btn-slice-go" class="btn btn-primary sup-go" type="button"
+                        title="Slice every piece on the plate, supports included, for this printer. The page stays usable while it runs.">Slice</button>
+                <button id="btn-slice-cancel" class="btn btn-secondary" type="button" hidden
+                        title="Stop slicing. Nothing is kept.">Cancel</button>
+              </div>
+              <div id="slice-progress" class="sup-progress is-indeterminate" role="progressbar" aria-label="Slicing" hidden><div class="sup-progress-fill"></div></div>
+              <p id="slice-stage" class="bend-readout" hidden></p>
+              <p id="slice-readout" class="bend-readout slice-readout" role="status">Press Slice to slice the plate.</p>
+              <div class="slice-actions">
+                <button id="btn-slice-export" class="btn btn-secondary" type="button" disabled
+                        title="Download the sliced plate as a Bambu .gcode.3mf: open it in Bambu Studio and print it without slicing it again.">Export .gcode.3mf</button>
+                <button id="btn-slice-preview" class="btn btn-secondary" type="button" disabled
+                        title="Open this same file in G-scope, read-only: the supports show as Support, Support interface and Support transition. Nothing is added to the plate.">Preview in G-scope</button>
+              </div>
+            </div>
+          </details>
+          <!-- G-scope: the ONE G-code / microscope tool. It lays an inspector
+               OVER whatever is on the plate, the way X-ray acts on what is
+               already there; a sliced .gcode.3mf import (by content, not by
+               name) lands in it without a button press and puts nothing on
+               the plate. Selections leave only through Export or Crop.
+               The old G-code-onto-the-plate door (#btn-gcode) was merged
+               into this one. See docs/GCODE-MICROSCOPE.md, "G-scope". -->
+          <button id="btn-microscope" class="vp-bar-btn btn-gscope" type="button"
+                  aria-label="G-scope"
+                  title="G-scope: put the plate under the lens, or open an STL, a 3MF or a sliced .gcode.3mf. Colour per part or per slicer feature, a capture box, a layer-range slider, Normal or Slice view - then export what you isolated, or drag it onto the second plate.">G-scope</button>
+          <input type="file" id="ms-input" accept=".stl,.3mf" class="hidden-quiet" />
           <!-- CHECK & REPAIR: on its own, pinned over the view row. -->
           <details class="vp-menu vp-shell-menu vp-col-menu vp-group-start" id="menu-repair" data-sec="repair">
             <summary class="vp-bar-btn" title="Check piece, Cap open faces, Seal, Non-solid, Solidify">Check &amp; repair</summary>
@@ -2008,6 +2036,15 @@
        after app-core.js / app-join.js, whose ingest and soups it uses. -->
   <script src="app-supports-card.js?v=14d4fbef"></script>
   <script src="app-gscope-slice.js?v=a22783c4"></script>
+  <!-- The Slice card (left bar): the plate sliced for its printer, the .gcode.3mf
+       it makes. The print planner and the packager are loaded here for it and for
+       its slice worker (which importScripts them from these tags); no G-scope file
+       uses them. After nso_slicer.js, nso-cooling-profiles.js, nso-3mf.js and
+       nso-3mf-read.js, which they read at load, and after app-microscope.js, whose
+       plate reader and G-code import it calls. See docs/PRINT-PLANNER.md. -->
+  <script src="nso-print-planner.js?v=e1c24c2b"></script>
+  <script src="nso-gcode3mf-write.js?v=3ade7b01"></script>
+  <script src="app-print.js?v=4a483492"></script>
   <!-- Lift: details off a face, the face left as it was round them. After
        nso_lift.js (Phase 1: a flat face), nso_lift_curved.js (Lift 3: the
        repair under a detail lifted off a curved base), nso_lift_auto.js
