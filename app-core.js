@@ -383,6 +383,16 @@ function nsoWorldSnapshot() {
   snap.cutT = state.cutT;
   return snap;
 }
+/* The snapshot keeps outline: null, so the restore below writes null over the live p.outline. The selOutline it
+   named is still parented on the mesh; left there, the refreshOutline after the restore has nothing to strip
+   and adds a second (every Redo, one more). Take it off the mesh and dispose it before the reference goes. */
+function nsoDropOutline(p) {
+  const o = p && p.outline;
+  if (!o) return;
+  if (o.parent) o.parent.remove(o);
+  if (o.geometry) o.geometry.dispose();
+  if (o.material) o.material.dispose();
+}
 function nsoWorldRestore(snap) {
   const keep = new Set(snap.placed.map(e => e.mesh).filter(Boolean));
   state.placed.forEach(p => {
@@ -392,6 +402,7 @@ function nsoWorldRestore(snap) {
   });
   state.models = snap.models.map(e => { nsoRestoreFields(e.ref, e.fields); return e.ref; });
   state.placed = snap.placed.map((e, i) => {
+    nsoDropOutline(e.ref);
     nsoRestoreFields(e.ref, e.fields);
     const p = e.ref;
     if (e.mesh) {

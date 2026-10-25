@@ -28,7 +28,8 @@
      6  an Undo that is not redoable (onUndone) disposes what it took off
      7  undoLastDiscard of a pose bake disposes what the bake put on
      8  UNDO_MAX: the entry that falls off the bottom disposes what only it named; poseHome's geometry stays
-     9  never a geometry that is shared by another piece, named by poseHome, or on screen */
+     9  never a geometry that is shared by another piece, named by poseHome, or on screen
+    11  Redo leaves ONE selOutline on the mesh (it was one more a Redo), and the outline it replaced is disposed */
 
 const fs = require('fs');
 const path = require('path');
@@ -44,6 +45,7 @@ const check = (name, cond, detail) => {
 
 // --- lift the app's code ------------------------------------------------------
 const core = fs.readFileSync(path.join(ROOT, 'app-core.js'), 'utf8');
+const selOutline = fs.readFileSync(path.join(ROOT, 'app-sel-outline.js'), 'utf8');   // the real refreshOutline lives here
 function fnSource(src, name) {
   const a = src.indexOf('function ' + name + '(');
   if (a < 0) throw new Error('no function ' + name + ' in app-core.js');
@@ -56,18 +58,28 @@ function fnSource(src, name) {
 }
 const LIFTED = ['updateUndoBtn', 'pushUndo', 'clearUndo', 'clearRedo', 'undoLast', 'undoLastDiscard', 'redoLast',
   'nsoGeometriesNamed', 'nsoReleaseGeometries', 'nsoPoseBakeGeometries', 'nsoLeavingGeometries', 'nsoDropRedo',
-  'nsoCopyFields', 'nsoRestoreFields', 'nsoWorldFingerprint', 'nsoWorldSnapshot', 'nsoWorldRestore', 'nsoUndoPoseBake'];
+  'nsoCopyFields', 'nsoRestoreFields', 'nsoWorldFingerprint', 'nsoWorldSnapshot', 'nsoDropOutline', 'nsoWorldRestore', 'nsoUndoPoseBake'];
 const UNDO_MAX = 5;     // the real one is 40; the trim is the same code at any size
 
+// every EdgesGeometry (the selection outline's) is counted like the others: made in order, dispose() counted
+const edgeGeos = [];
+class CountedEdges extends THREE.EdgesGeometry {
+  constructor(...a) {
+    super(...a);
+    const real = this.dispose.bind(this);
+    this.dispose = () => { disposed.set(this, (disposed.get(this) || 0) + 1); real(); };
+    edgeGeos.push(this);
+  }
+}
 const ctx = {
-  THREE, Math, console, Object, Array, Map, Set,
+  THREE: Object.assign({}, THREE, { EdgesGeometry: CountedEdges }), Math, console, Object, Array, Map, Set,
   document: { getElementById: () => null },
   setStatus: () => {},
   state: null
 };
 // what draws, lists or measures: nothing here decides what is disposed
 ['renderModelList', 'updateOptimizeButton', 'updateCutterUI', 'updateEditSize', 'updateAdjustUI', 'removeCutHelper',
-  'nsoInvalidatePlacedBounds', 'applyMeshRotation', 'applyPlacedXZ', 'restoreMeshY', 'refreshOutline', 'removeFaceHelper']
+  'nsoInvalidatePlacedBounds', 'applyMeshRotation', 'applyPlacedXZ', 'restoreMeshY', 'removeFaceHelper']
   .forEach(n => { ctx[n] = () => {}; });
 vm.createContext(ctx);
 vm.runInContext([
@@ -78,7 +90,10 @@ vm.runInContext([
   '  if (e.type === "stepGroup") { e.steps.slice().reverse().forEach(s => { state.undoStack.push(s); undoLastStep(); }); return; }',
   '  if (e.type === "poseBake") nsoUndoPoseBake(e); }',
   ...LIFTED.map(n => fnSource(core, n)),
-  'this.__app = { pushUndo, clearUndo, clearRedo, undoLast, undoLastDiscard, redoLast, nsoReleaseGeometries };'
+  // the selection outline, as app-sel-outline.js draws it (the big-piece worker path is not reached by a one-triangle piece)
+  'function isBig() { return false; }',
+  fnSource(selOutline, 'stripOutline'), fnSource(selOutline, 'refreshOutline'),
+  'this.__app = { pushUndo, clearUndo, clearRedo, undoLast, undoLastDiscard, redoLast, nsoReleaseGeometries, refreshOutline };'
 ].join('\n'), ctx, { filename: 'app-core.js (lifted)' });
 const app = ctx.__app;
 
@@ -99,7 +114,7 @@ const names = gs => gs.map(g => g.name).join(',') || '(none)';
 
 function plate(opts) {
   opts = opts || {};
-  disposed = new Map(); made = [];
+  disposed = new Map(); made = []; edgeGeos.length = 0;
   const group = new THREE.Group();
   const scene = new THREE.Scene();
   scene.add(group);
@@ -331,6 +346,49 @@ console.log('10  each holder, on its own');
   check('a pose bake inside a stepGroup: Undo keeps it for Redo', live(P) === P.g0 && times(g1) === 0 && P.state.redoStack.length === 1);
   app.clearRedo();
   check('... and disposes it when the redo line goes', times(g1) === 1 && times(P.g0) === 0);
+}
+
+// 11 ---------------------------------------------------------------------------
+console.log('11  Redo and the selection outline');
+{
+  const outlinesOn = mesh => mesh.children.filter(c => c.name === 'selOutline');
+  const sceneCount = P => { let n = 0; P.state.scene.traverse(() => n++); return n; };
+  const P = plate();
+  app.refreshOutline(P.p);                 // the piece is selected: its white edge is on the mesh
+  const o0 = P.p.outline;
+  check('the selected piece has one outline on the mesh', outlinesOn(P.mesh).length === 1 && o0 && o0.parent === P.mesh);
+  const g1 = yaw(P);
+  undo();
+  const o1 = P.p.outline;                  // Undo re-drew it for the piece it put back
+  check('Undo: one outline, the Yaw\'s one disposed (refreshOutline\'s own strip)', outlinesOn(P.mesh).length === 1 && o1 !== o0 && times(o0.geometry) === 1);
+  const objects = sceneCount(P);
+  redo();
+  const o2 = P.p.outline;
+  check('Redo: ONE outline on the mesh, not two', outlinesOn(P.mesh).length === 1, outlinesOn(P.mesh).length + ' on the mesh');
+  check('Redo: it is the live p.outline, and a new one (the snapshot holds none)', o2 && o2.parent === P.mesh && o2 !== o1);
+  check('Redo: the outline it replaced came off the mesh', o1.parent === null);
+  check('Redo: ... and its geometry is disposed, once; the new one is not', times(o1.geometry) === 1 && times(o2.geometry) === 0);
+  check('Redo still puts the SAME geometry back, with the same selection', live(P) === g1 && P.state.selectedIndex === 0);
+  check('Redo adds no scene object', sceneCount(P) === objects, objects + ' -> ' + sceneCount(P));
+  for (let i = 0; i < 10; i++) { undo(); redo(); }
+  check('ten more Undo / Redo cycles: still one outline on the mesh', outlinesOn(P.mesh).length === 1, outlinesOn(P.mesh).length + ' on the mesh');
+  check('... scene objects flat', sceneCount(P) === objects);
+  const heldEdges = edgeGeos.filter(g => times(g) === 0);
+  check('... and exactly one outline geometry undisposed (the live one)', heldEdges.length === 1 && heldEdges[0] === P.p.outline.geometry, heldEdges.length + ' undisposed of ' + edgeGeos.length);
+  check('no outline geometry disposed twice', edgeGeos.every(g => times(g) <= 1));
+  check('the pose geometries are untouched by all of it', made.filter(g => times(g)).length === 0, 'disposed: ' + names(made.filter(g => times(g))));
+}
+{
+  // a Redo whose snapshot selects nothing: the live outline still goes, and none comes back
+  const P = plate();
+  app.refreshOutline(P.p);
+  yaw(P);
+  undo();
+  const o1 = P.p.outline;
+  P.state.redoStack[0].post.selectedIndex = -1;
+  redo();
+  check('Redo to a plate with nothing selected: no outline on the mesh, the old one disposed',
+    P.mesh.children.filter(c => c.name === 'selOutline').length === 0 && o1.parent === null && times(o1.geometry) === 1 && !P.p.outline);
 }
 
 console.log(fails ? '\n' + fails + ' check(s) FAILED' : '\nall undo-dispose checks passed');
