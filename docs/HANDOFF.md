@@ -30,6 +30,7 @@ merging its list by hand. The list below is generated.
 - [CI on the owner's laptop runners, and a red shard that says what failed when it ends (ci-self-hosted, 2026-10-24)](handoff/ci-self-hosted.md)
 - [CI shard timeout - 15 -> 25 min, weights re-measured on the runners (2026-09-27)](handoff/ci-shard-timeout-15-25-min-weights-re-measured-on-the-runners.md)
 - [The merged timing artifact comes out again; a multi-shard dispatch runs on the `main` runners (ci-timing-merge, 2026-10-24)](handoff/ci-timing-merge.md)
+- [Clear plate is a wipe (2026-10-25)](handoff/clear-plate-wipe.md)
 - [Contact skin on a face + Seat against the skin's tips (2026-09-16)](handoff/contact-skin-on-a-face-seat-against-the-skins-tips.md)
 - [Crop card - pick a shape, drag it to size, CROP (2026-10-17)](handoff/crop-card-pick-a-shape-drag-it-to-size-crop.md)
 - [Crop engine - copy what a shape holds as a new piece (2026-10-17)](handoff/crop-engine-copy-what-a-shape-holds-as-a-new-piece.md)

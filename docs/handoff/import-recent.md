@@ -35,7 +35,7 @@ each caller saying so.
 - Clear plate's tooltip (and the right-click menu's, and its status line) say the
   loaded pieces are in Import > Recent.
 
-**Not done.** Clear plate still leaves the models in `state.models`, now with no
-row; a reload from Recent adds a new model beside the old one. Paths that lay out
-"every model" (`showAllModelsOnPlate`, `layoutUndoModels`) still read
-`state.models`.
+**Not done here, done after** ([Clear plate is a wipe](clear-plate-wipe.md)): Clear plate left
+the models in `state.models`, now with no row, so a reload from Recent added a new
+model beside the old one, and the paths that lay out "every model"
+(`showAllModelsOnPlate`, `layoutUndoModels`) brought them back.
