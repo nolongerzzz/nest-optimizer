@@ -1678,6 +1678,40 @@ function addModelFromZUpGeometryAsync(name, geometry, opts) {
 }
 
 /**
+ * Where a project file put its pieces, as plate-centred placements.
+ *
+ * `objects` are nso-3mf-read.js's, in the slicer's plate frame (front-left
+ * corner origin, Y away from the viewer, Z up). The mapping is
+ * buildPlacedObjects3MF's run backwards: Studio X = x + plate.w / 2 and
+ * Studio Y = -z + plate.d / 2, so x = X - w / 2 and z = d / 2 - Y, taken at the
+ * centre of each piece's footprint (a model is centred on its bounding box when
+ * it comes in, and a piece with no pose sits with that centre on x, z).
+ *
+ * @returns {{at: Array<{x:number,z:number}>|null, outside: number}}
+ *          at is null - and outside counts the pieces whose footprint is not
+ *          entirely on the plate - when any piece would not fit it
+ */
+function savedPlacements3MF(objects, plate) {
+  const SLACK = 0.01;                       // mm: a piece touching the bed edge fits
+  const at = [];
+  let outside = 0;
+  objects.forEach(obj => {
+    const p = obj.positions;
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (let i = 0; i + 2 < p.length; i += 3) {
+      if (p[i] < x0) x0 = p[i];
+      if (p[i] > x1) x1 = p[i];
+      if (p[i + 1] < y0) y0 = p[i + 1];
+      if (p[i + 1] > y1) y1 = p[i + 1];
+    }
+    const fits = x0 >= -SLACK && x1 <= plate.w + SLACK && y0 >= -SLACK && y1 <= plate.d + SLACK;
+    if (!fits) outside++;
+    at.push({ x: (x0 + x1) / 2 - plate.w / 2, z: plate.d / 2 - (y0 + y1) / 2 });
+  });
+  return { at: outside ? null : at, outside };
+}
+
+/**
  * 3MF import. nso-3mf-read.js pulls one triangle soup per build item out of the
  * archive (millimetres, Z up, transforms applied); each becomes its own model,
  * named from the file's own object names.
@@ -1687,10 +1721,12 @@ function addModelFromZUpGeometryAsync(name, geometry, opts) {
  *   an NSO scene block   Metadata/nso_scene.json, written by this app's own
  *                        export. The plate comes back as it was left: pose,
  *                        locks, seat gaps, skin, paint, the non-solid flags.
- *   anything else        geometry only, exactly as before - a file straight
- *                        from Bambu Studio or MakerWorld has no such part and
- *                        nothing here assumes one. A block this build cannot
- *                        read takes the same route, with a console warning.
+ *   anything else        geometry only - a file straight from Bambu Studio or
+ *                        MakerWorld has no such part and nothing here assumes
+ *                        one. A block this build cannot read takes the same
+ *                        route, with a console warning. Two or more objects
+ *                        land where the file has them (savedPlacements3MF), or
+ *                        side by side as for an STL when one would be off the plate.
  *
  * Print settings, materials and everything else in the archive are still
  * ignored on both routes.
@@ -1731,19 +1767,28 @@ function import3MF(filename, arrayBuffer) {
         }
       }
 
+      /* Two or more objects and no scene block: a project from Studio or
+         MakerWorld, with every piece already laid out on its plate. Each piece
+         keeps the XY the file gave it, unless one would fall off this plate -
+         then the whole set goes in as it always did. */
+      const kept = (!scene && result.objects.length > 1)
+        ? savedPlacements3MF(result.objects, getCurrentPlate()) : null;
       let loaded = 0;
       let chain = Promise.resolve();
-      result.objects.forEach(obj => {
+      result.objects.forEach((obj, i) => {
         chain = chain.then(() => {
           const geometry = new THREE.BufferGeometry();
           geometry.setAttribute('position', new THREE.BufferAttribute(obj.positions, 3));
-          return addModelFromZUpGeometryAsync(obj.name, geometry).then(id => { if (id) loaded++; });
+          return addModelFromZUpGeometryAsync(obj.name, geometry, kept && kept.at ? { at: kept.at[i] } : undefined)
+            .then(id => { if (id) loaded++; });
         });
       });
       return chain.then(() => {
         if (loaded > 1) {
           setStatus(`Loaded ${loaded} objects from ${filename}` +
-                    (result.application ? ` (${result.application})` : ''));
+                    (result.application ? ` (${result.application})` : '') +
+                    (kept ? (kept.at ? ' - each at its position in the file'
+                                     : ' - did not fit the plate at its saved positions; arranged inside it') : ''));
         } else if (!loaded) {
           setStatus(`${filename}: no usable geometry found`, true);
         }
@@ -1816,12 +1861,16 @@ function placeNewModel(id, name, options) {
     setStatus(`Loaded: ${name} (${size2.x.toFixed(0)}x${size2.y.toFixed(0)}x${size2.z.toFixed(0)} mm) - cutter open, slide red plane`);
   } else if (!options.keepSelection) {
     // Offset new uploads so they don't stack on existing plate pieces
-    let x = 0;
-    if (state.placed.length) {
+    let x = 0, z = 0;
+    if (options.at) {
+      // A 3MF import that keeps the file's own positions (savedPlacements3MF) says where.
+      x = options.at.x;
+      z = options.at.z;
+    } else if (state.placed.length) {
       const maxX = Math.max(...state.placed.map(p => p.x + (p.width || 0) / 2));
       x = maxX + size2.x / 2 + 4;
     }
-    placeModelMovable(model, x, 0);
+    placeModelMovable(model, x, z);
     setStatus(`Loaded: ${name} (${size2.x.toFixed(0)}x${size2.y.toFixed(0)}x${size2.z.toFixed(0)} mm) - drag to move, Open cutter, or Optimize`);
   }
 }
