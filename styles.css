@@ -4291,6 +4291,24 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
   font-size: 12px;
   pointer-events: auto;
 }
+/* + plate: the corner of the card, over the first section's header row; nothing else on the card moves. */
+.vp-plate-add {
+  position: absolute;
+  top: 5px;
+  right: 8px;
+  z-index: 1;
+  padding: 2px 8px;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.08);
+  color: #e8eef6;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+.vp-plate-add:hover:not(:disabled) { background: rgba(56, 189, 248, 0.22); border-color: rgba(56, 189, 248, 0.6); }
+.vp-plate-add:disabled { opacity: 0.4; cursor: default; }
 .vp-plate-sec { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .vp-plate-sec + .vp-plate-sec { padding-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.1); }
 .vp-plate-head {

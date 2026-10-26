@@ -170,6 +170,8 @@ function nsoReleaseGeometries(candidates) {
   nsoGeometriesNamed(state.scene, held);
   nsoGeometriesNamed(state.undoStack, held);
   nsoGeometriesNamed(state.redoStack, held);
+  // the beds that are not active (app-beds.js): their lists and both of their stacks
+  if (typeof NSO_BEDS !== 'undefined') NSO_BEDS.stashedRoots().forEach(r => nsoGeometriesNamed(r, held));
   let n = 0;
   gone.forEach(g => { if (!held.has(g) && typeof g.dispose === 'function') { g.dispose(); n++; } });
   return n;
@@ -297,6 +299,7 @@ function undoLast() {
   const before = top ? nsoWorldSnapshot() : null;
   const fpBefore = top ? nsoWorldFingerprint() : '';
   const r = undoLastStep();
+  if (r && r.refused) return r;     // a bed move that cannot be undone yet (app-beds.js): nothing happened
   if (typeof nsoHelpers !== 'undefined') nsoHelpers.afterUndo();
   if (top) {
     const expect = nsoWorldFingerprint();
@@ -943,6 +946,11 @@ function undoLastStep() {
     nsoUndoPoseBake(entry);
     return;
   }
+  if (entry.type === 'bedMoveOut' || entry.type === 'bedMoveIn') {
+    // A piece dragged from one bed onto another (app-beds.js): one half on each bed's line,
+    // either one puts it back.
+    return NSO_BEDS.undoMove(entry);
+  }
   if (entry.type === 'posePlaced') {
     const p = state.placed[entry.index];
     if (!p) return;
@@ -1143,6 +1151,12 @@ function wheelZoomAnchor(clientX, clientY) {
   const plate = getCurrentPlate() || { w: 180, d: 180 };
   const hw = (plate.w || 180) / 2 + WHEEL_ANCHOR_MARGIN_MM;
   const hd = (plate.d || 180) / 2 + WHEEL_ANCHOR_MARGIN_MM;
+  if (typeof NSO_BEDS !== 'undefined' && NSO_BEDS.count() > 1) {
+    // several beds: the nearest point of the whole layout (app-beds.js), the active bed standing at the origin
+    const L = NSO_BEDS.layoutBox(), m = WHEEL_ANCHOR_MARGIN_MM;
+    g.set(Math.min(L.maxx + m, Math.max(L.minx - m, g.x)), 0, Math.min(L.maxz + m, Math.max(L.minz - m, g.z)));
+    return g;
+  }
   g.set(Math.min(hw, Math.max(-hw, g.x)), 0, Math.min(hd, Math.max(-hd, g.z)));
   return g;
 }
@@ -1172,7 +1186,10 @@ function onViewportWheel(event) {
   const scale = Math.pow(0.95, Math.min(8, Math.abs(delta) * 0.01));
   const factor = delta < 0 ? scale : 1 / scale;
   const anchor = wheelZoomAnchor(event.clientX, event.clientY) || state.controls.target.clone();
-  dollyAbout(state.camera, state.controls, anchor, factor, WHEEL_ZOOM_MIN, WHEEL_ZOOM_MAX);
+  // the framing of a 3 x 2 block of beds stands farther back than the 1200 mm one plate is held to
+  const zoomMax = (typeof NSO_BEDS !== 'undefined' && NSO_BEDS.count() > 1)
+    ? Math.max(WHEEL_ZOOM_MAX, 1.6 * NSO_BEDS.frameView(state.camera).distance) : WHEEL_ZOOM_MAX;
+  dollyAbout(state.camera, state.controls, anchor, factor, WHEEL_ZOOM_MIN, zoomMax);
   if (leashOrbitTarget(state.camera, state.controls)) state.controls.update();
 }
 
@@ -1190,7 +1207,9 @@ const _leashShift = new THREE.Vector3();
 function leashOrbitTarget(camera, controls) {
   if (!camera || !controls) return false;
   const plate = getCurrentPlate() || { w: 180, d: 180 };
-  const reach = Math.hypot(plate.w || 180, plate.d || 180);
+  // one plate diagonal from the active bed's centre, plus how far the farthest other bed stands (app-beds.js)
+  const reach = Math.hypot(plate.w || 180, plate.d || 180) +
+    ((typeof NSO_BEDS !== 'undefined' && NSO_BEDS.count() > 1) ? NSO_BEDS.layoutReach() : 0);
   const t = controls.target;
   const r = t.length();
   if (!(r > reach)) return false;
@@ -1364,6 +1383,7 @@ function plateGridWantsVisible() {
 
 function applyPlateGridVisibility() {
   if (state.plateGrid) state.plateGrid.visible = plateGridWantsVisible();
+  if (typeof NSO_BEDS !== 'undefined' && NSO_BEDS.count() > 1) NSO_BEDS.setGridVisible(plateGridWantsVisible());
 }
 
 function holdPlateGridAuto(ms) {
@@ -1525,6 +1545,9 @@ function buildPlateMesh() {
     state.plateTicks.push(line);
   });
 
+  // More than one bed (app-beds.js): the others' floors and every label, built to this size
+  if (typeof NSO_BEDS !== 'undefined') NSO_BEDS.afterPlateBuilt();
+
   // Frame camera only once on first plate build - never on upload/cutter/rebuild
   if (state.controls && !state.cameraFramed) {
     framePlateHome();
@@ -1667,7 +1690,10 @@ function addModelFromZUpGeometryAsync(name, geometry, opts) {
   const id = addModelFromZUpGeometry(name, geometry, options);
   if (id == null) return Promise.resolve(id);
   const model = state.models.find(x => x.id === id);
-  return window.NSO_BVH.ensureGeometry(model.geometry).then(() => {
+  // Until it is placed the active bed may not change (app-beds.js busyReason): it lands on the bed it started on.
+  state.importsPending = (state.importsPending || 0) + 1;
+  const settled = () => { state.importsPending = Math.max(0, (state.importsPending || 1) - 1); };
+  return window.NSO_BVH.ensureGeometry(model.geometry).then(r => { settled(); return r; }, e => { settled(); throw e; }).then(() => {
     if (!wasSilent && state.models.indexOf(model) >= 0) {
       placeNewModel(id, name, options);
       setStatus(`Loaded: ${name} (${model.size.x.toFixed(0)}x${model.size.y.toFixed(0)}x${model.size.z.toFixed(0)} mm, ` +
@@ -1904,6 +1930,17 @@ function framePlateHome() {
   const plate = (typeof getCurrentPlate === 'function') ? getCurrentPlate() : { w: 180, d: 180 };
   const w = plate.w || 180;
   const d = plate.d || 180;
+  // more than one bed (app-beds.js): every bed in the frame, seen from the front like Bambu Studio's plate view
+  if (typeof NSO_BEDS !== 'undefined' && NSO_BEDS.count() > 1) {
+    const v = NSO_BEDS.frameView(state.camera);
+    state.camera.far = Math.max(state.camera.far, v.distance * 3);
+    state.camera.updateProjectionMatrix();
+    state.controls.target.set(v.target.x, v.target.y, v.target.z);
+    state.camera.position.set(v.position.x, v.position.y, v.position.z);
+    state.controls.update();
+    return;
+  }
+  if (state.camera.far > 2000) { state.camera.far = 2000; state.camera.updateProjectionMatrix(); }
   state.controls.target.set(0, 6, 0);
   state.camera.position.set(w * 1.08, Math.max(w, d) * 0.92, d * 1.18);
   state.controls.update();
@@ -1929,7 +1966,11 @@ function clearPlateOnly() {
   // Every tool closed and every helper gone first, while the pieces they
   // were drawn on are still there to close against (nso-helpers.js).
   nsoHelpers.teardown('clear-plate');
-  if (window.NSO_SUPPORTS_CARD) NSO_SUPPORTS_CARD.forgetAll();   // the Supports card's host, tips, circles and erasures go with the pieces
+  if (window.NSO_SUPPORTS_CARD) {
+    // the Supports card's host, tips, circles and erasures go with the pieces - this bed's, and not another's
+    if (typeof NSO_BEDS !== 'undefined' && NSO_BEDS.count() > 1 && NSO_SUPPORTS_CARD.forget) NSO_SUPPORTS_CARD.forget(state.models.map(m => m.id));
+    else NSO_SUPPORTS_CARD.forgetAll();
+  }
   // Named before anything is dropped: the models, the plate, and what both stacks hold.
   const leaving = new Set();
   [state.models, state.placed, state.undoStack, state.redoStack].forEach(root => nsoGeometriesNamed(root, leaving));
@@ -3099,6 +3140,12 @@ function endMoveDrag() {
     const wasUp = !!(pose && pose.liftY > 0);
     const moved = Math.abs(p.x - from.x) > 0.01 || Math.abs(p.z - from.z) > 0.01 ||
       (wasUp && Math.abs((p.liftY || 0) - pose.liftY) > 1e-6);
+    /* Let go over another bed (app-beds.js): the piece moves to it, keeping its pose, as one Undo step
+       on each bed's line. Over its own bed, or over no bed, it is the move it always was. */
+    if (moved && !wasUp && !grabbing && typeof NSO_BEDS !== 'undefined') {
+      const to = NSO_BEDS.dropTarget(p);
+      if (to >= 0 && NSO_BEDS.movePiece(idx, to, from)) return;
+    }
     if (moved) {
       if (wasUp) pushUndo(pose);
       else pushUndo({ type: 'movePlaced', index: from.index, x: from.x, z: from.z, meshY: from.meshY });
@@ -3209,6 +3256,7 @@ function onCanvasPointerUp(event) {
   endRightPress(event);
   // Orbit only while actively dragging the plate
   setOrbitFromPlate(false);
+  if (typeof NSO_BEDS !== 'undefined') NSO_BEDS.releasePress(event);
 }
 
 function setOrbitFromPlate(allow) {
@@ -3324,6 +3372,8 @@ function onCanvasContextMenu(event) {
 }
 
 function openCanvasContextMenu(event) {
+  // a right click on a bed that is not active makes it active first: Delete plate and the rest act on the active one
+  if (typeof NSO_BEDS !== 'undefined') NSO_BEDS.activateUnder(event);
   const idx = state.placed.length ? pickPlacedIndexFromEvent(event) : -1;
   /* A piece, or the bare plate: the menu has Undo, Redo, Export plate and Clear
      plate for the plate and greys the piece items on it. Off the plate, in the
@@ -3362,6 +3412,7 @@ function nsoCtxMenuRefresh() {
   on('ctx-export', piece);
   on('ctx-export-plate', state.placed.length > 0);
   on('ctx-clear-plate', state.placed.length > 0);
+  on('ctx-delete-plate', typeof NSO_BEDS !== 'undefined' && NSO_BEDS.canDelete());
   on('ctx-delete', piece);
   const mac = /Mac|iPhone|iPad/.test((typeof navigator !== 'undefined' && navigator.platform) || '');
   const key = (id, mac_, other) => { const el = document.getElementById(id); if (el) el.textContent = mac ? mac_ : other; };
@@ -3439,6 +3490,7 @@ function wireCtxMenu() {
   item('ctx-export', () => nsoCtxOpenExport('piece'));
   item('ctx-export-plate', () => nsoCtxOpenExport('plate'));
   item('ctx-clear-plate', () => clearPlateOnly());
+  item('ctx-delete-plate', () => NSO_BEDS.deleteActive());
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && !menu.classList.contains('hidden')) hideCtxMenu();
   }, true);
@@ -3808,6 +3860,10 @@ function onCanvasPointerDown(event) {
       return;
     }
   }
+
+  // A press on a bed that is not active is remembered: released as a click it makes that bed active
+  // (app-beds.js); dragged it orbits, as a press on the floor always did.
+  if (typeof NSO_BEDS !== 'undefined') NSO_BEDS.notePress(event);
 
   // Left-drag on plate OR empty background -> orbit (pieces still steal drag above)
   if (hitPlateSurface(event)) {

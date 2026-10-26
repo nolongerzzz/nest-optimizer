@@ -2957,6 +2957,8 @@ function updatePlateInfo() {
   if (state.ready) {
     buildPlateMesh();
     clearPlaced();
+    // the size is every bed's: the others' pieces come off the plate the same way (app-beds.js)
+    if (typeof NSO_BEDS !== 'undefined') NSO_BEDS.plateSizeChanged();
   }
 }
 

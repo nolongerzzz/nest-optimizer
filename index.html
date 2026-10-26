@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=f8f565b9" />
+  <link rel="stylesheet" href="styles.css?v=7e649cf0" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -384,6 +384,8 @@
                clear of it (styles.css, --plate-panel-w); the pieces list is the same
                #model-list renderModelList() fills, so it updates live. -->
           <section id="plate-panel" class="vp-plate-panel" aria-label="Plate and pieces">
+            <!-- + plate: the next bed, up to six (app-beds.js, docs/BEDS.md). Top-right corner of the card. -->
+            <button id="btn-add-plate" class="vp-plate-add" type="button" title="Add a plate (up to six)">+ plate</button>
             <div id="menu-plate" class="vp-plate-sec">
               <p class="vp-plate-head" title="Plate size, bed grid and snap">Plate</p>
                 <select id="plate-select">
@@ -1554,6 +1556,7 @@
     <button type="button" id="ctx-export-plate" class="ctx-item" role="menuitem" title="Open the Export card to export the whole plate as STL or 3MF" disabled>Export plate</button>
     <div class="ctx-sep" role="separator"></div>
     <button type="button" id="ctx-clear-plate" class="ctx-item" role="menuitem" title="Take every piece off the plate; the loaded pieces are in Import &gt; Recent" disabled>Clear plate</button>
+    <button type="button" id="ctx-delete-plate" class="ctx-item ctx-danger" role="menuitem" title="Remove this plate and its pieces; the next plate becomes active. No Undo. Needs more than one plate." disabled>Delete plate</button>
     <button type="button" id="ctx-delete" class="ctx-item ctx-danger" role="menuitem" disabled>Delete piece</button>
   </div>
 
@@ -1908,7 +1911,9 @@
   <script src="nso-helpers.js?v=9c476e39"></script>
   <script src="nso-recent.js?v=f03d6f13"></script>
   <script src="nso-bounds.js?v=778acac4"></script>
-  <script src="app-core.js?v=6b4cb580"></script>
+  <script src="app-core.js?v=28f045ee"></script>
+  <!-- Up to six plates (beds): the active one is state.models / state.placed, the rest are kept beside it. docs/BEDS.md. -->
+  <script src="app-beds.js?v=71b156d9"></script>
 
 
 
@@ -1978,7 +1983,7 @@
   <script src="app-stock.js?v=91def76f"></script>
   <script src="app-assemble.js?v=60984bfb"></script>
   <script src="app-sel-outline.js?v=42298564"></script>
-  <script src="app-join.js?v=def49d7e"></script>
+  <script src="app-join.js?v=e3b5d8d5"></script>
   <script src="app-center-lock.js?v=e233ea0f"></script>
   <script src="app-oversize-washer.js?v=a445c3ff"></script>
   <script src="app-join-triple.js?v=95a9c48a"></script>
@@ -2046,7 +2051,7 @@
   <script src="app-gscope-support.js?v=2397557a"></script>
   <!-- The Supports card on the main page: the same detection and planner,
        after app-core.js / app-join.js, whose ingest and soups it uses. -->
-  <script src="app-supports-card.js?v=0f2e1c4f"></script>
+  <script src="app-supports-card.js?v=48777d4f"></script>
   <script src="app-gscope-slice.js?v=a22783c4"></script>
   <!-- The Slice card (left bar): the plate sliced for its printer, the .gcode.3mf
        it makes. The print planner and the packager are loaded here for it and for
