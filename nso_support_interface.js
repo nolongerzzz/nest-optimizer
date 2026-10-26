@@ -2007,23 +2007,35 @@
       group.forEach(function (t) { for (var k = 0; k < 2; k++) { lo[k] = Math.min(lo[k], t.contact[k]); hi[k] = Math.max(hi[k], t.contact[k]); } });
       var ox = lo[0] - pad, oy = lo[1] - pad;
       var nx = Math.ceil((hi[0] - lo[0] + 2 * pad) / CELL_MM) + 1, ny = Math.ceil((hi[1] - lo[1] + 2 * pad) / CELL_MM) + 1;
-      var iv = new Array(nx * ny), near = new Uint8Array(nx * ny);
+      /* iv: each cell's intervals (z in, z out, ...), in one array: cell q's run from ivAt[q] to ivAt[q + 1] */
+      var near = new Uint8Array(nx * ny), ivAt = new Int32Array(nx * ny + 1), iv = new Float64Array(4096), ivN = 0;
       for (var j0 = 0; j0 < ny; j0++) {
         beat();
         for (var i0 = 0; i0 < nx; i0++) {
-          var x = ox + i0 * CELL_MM, y = oy + j0 * CELL_MM, list = [];
+          var x = ox + i0 * CELL_MM, y = oy + j0 * CELL_MM;
+          ivAt[j0 * nx + i0] = ivN;
           for (var pi = 0; pi < PPs.length; pi++) {
             var P = PPs[pi];
             if (x < P.lo[0] || x > P.hi[0] || y < P.lo[1] || y > P.hi[1]) continue;
             var z0 = P.lo[2] - 1, hs = P.hitsAlong([x, y, z0], [0, 0, 1], P.hi[2] - P.lo[2] + 2);
-            for (var h = 0; h + 1 < hs.length; h += 2) list.push(z0 + hs[h], z0 + hs[h + 1]);
-          }
-          iv[j0 * nx + i0] = list;
-          for (var g = 0; g < group.length; g++) {
-            if (Math.abs(group[g].contact[0] - x) <= D && Math.abs(group[g].contact[1] - y) <= D) { near[j0 * nx + i0] = 1; break; }
+            for (var h = 0; h + 1 < hs.length; h += 2) {
+              if (ivN + 2 > iv.length) { var grown = new Float64Array(iv.length * 2); grown.set(iv); iv = grown; }
+              iv[ivN++] = z0 + hs[h]; iv[ivN++] = z0 + hs[h + 1];
+            }
           }
         }
       }
+      ivAt[nx * ny] = ivN;
+      /* a cell is near when a tip of the group is within D of it on both axes: each tip marks the cells in a window a
+         cell wider than that, by the same test */
+      group.forEach(function (t) {
+        var cx = t.contact[0], cy = t.contact[1];
+        var ia = Math.max(0, Math.floor((cx - D - ox) / CELL_MM) - 1), ib = Math.min(nx - 1, Math.ceil((cx + D - ox) / CELL_MM) + 1);
+        var ja = Math.max(0, Math.floor((cy - D - oy) / CELL_MM) - 1), jb = Math.min(ny - 1, Math.ceil((cy + D - oy) / CELL_MM) + 1);
+        for (var jn = ja; jn <= jb; jn++) for (var in2 = ia; in2 <= ib; in2++) {
+          if (Math.abs(cx - (ox + in2 * CELL_MM)) <= D && Math.abs(cy - (oy + jn * CELL_MM)) <= D) near[jn * nx + in2] = 1;
+        }
+      });
       /* the columns the stair keeps off: every member of a tree that holds a
          tip outside this stair (a tree of the stair's tips alone is cut
          under its lowest strip, or left out) */
@@ -2041,16 +2053,24 @@
          strip is the gap's, and a strip moved up the slope is no further from it) */
       var rWall = Math.max(r, wallMm || 0), R0 = Math.ceil(rWall / CELL_MM), disc = [];
       for (var dj = -R0; dj <= R0; dj++) for (var di = -R0; di <= R0; di++) if (Math.hypot(di, dj) * CELL_MM <= rWall) disc.push([di, dj]);
+      /* the disc by rows: row dj holds the cells di from lo to hi (the disc's rows are unbroken) */
+      var discRows = [];
+      disc.forEach(function (c) {
+        var row = discRows.find(function (r) { return r[0] === c[1]; });
+        if (!row) discRows.push(row = [c[1], c[0], c[0], 0]);
+        row[1] = Math.min(row[1], c[0]); row[2] = Math.max(row[2], c[0]); row[3]++;
+      });
+      var discWhole = discRows.every(function (r) { return r[3] === r[2] - r[1] + 1; });
       var zTopOf = function (m) { return o.plateZ + m * o.layer; };
       /* the field of the layer whose top is zTopOf(m): see EACH LAYER'S STRIP */
       function fieldFor(m, extra) {
         var zt = zTopOf(m), za = zt - o.layer - o.gap, zb = zt + o.gap, n = nx * ny;
         var blk = new Uint8Array(n), fld = new Uint8Array(n);
         for (var q = 0; q < n; q++) {
-          var L = iv[q], ce = Infinity;
-          for (var k = 0; k + 1 < L.length; k += 2) {
-            if (L[k] < zb && L[k + 1] > za) { blk[q] = 1; break; }
-            if (L[k] >= zb && L[k] < ce) ce = L[k];
+          var ce = Infinity, kEnd = ivAt[q + 1];
+          for (var k = ivAt[q]; k + 1 < kEnd; k += 2) {
+            if (iv[k] < zb && iv[k + 1] > za) { blk[q] = 1; break; }
+            if (iv[k] >= zb && iv[k] < ce) ce = iv[k];
           }
           if (!blk[q] && ce - zb <= STAIR_REACH_MM) fld[q] = 1;
         }
@@ -2058,9 +2078,16 @@
           if (!blk[q2]) continue;
           var ci = q2 % nx, cj = (q2 - ci) / nx;
           if (ci > 0 && ci < nx - 1 && cj > 0 && cj < ny - 1 && blk[q2 - 1] && blk[q2 + 1] && blk[q2 - nx] && blk[q2 + nx]) continue;
-          for (var d = 0; d < disc.length; d++) {
-            var ii = ci + disc[d][0], jj = cj + disc[d][1];
-            if (ii >= 0 && ii < nx && jj >= 0 && jj < ny) fld[jj * nx + ii] = 0;
+          if (discWhole) {
+            for (var d = 0; d < discRows.length; d++) {
+              var jj = cj + discRows[d][0], ia = Math.max(0, ci + discRows[d][1]), ib = Math.min(nx - 1, ci + discRows[d][2]);
+              if (jj >= 0 && jj < ny && ia <= ib) fld.fill(0, jj * nx + ia, jj * nx + ib + 1);
+            }
+          } else {
+            for (var d2 = 0; d2 < disc.length; d2++) {
+              var ii2 = ci + disc[d2][0], jj2 = cj + disc[d2][1];
+              if (ii2 >= 0 && ii2 < nx && jj2 >= 0 && jj2 < ny) fld[jj2 * nx + ii2] = 0;
+            }
           }
         }
         function stamp(a, b, rad) {
