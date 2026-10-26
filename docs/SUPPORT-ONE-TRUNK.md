@@ -135,6 +135,13 @@ the option (the shipped Custom feed's bytes are the claude-wip's; `support:feed`
     stands on a wide foot gets none; with no slicer on the page the supports build as they did. Gates: `support:brim-card`, `support:onetrunk` (a brim object, 5+ loops,
     none on the part, no conflict).
 
+19. **The branches are one smooth body** (the owner's, on the fifth push: "get rid of the shoved sphere model ... make them round like this tube, that merge out of
+    the trunk and split from themselves with smooth flowing transitions instead of visible joints"). A crown's tip is a round post (of the square's area, 0.68 mm
+    radius), its leg and the crown's tubes and the top of the trunk are one body - a smooth union of capsules meshed by surface nets (`blobSoup`,
+    `docs/SUPPORT-GRIDPACK.md` "The smooth body"): no ball at a join, no square tube, the legs rising out of a shoulder of the trunk and running into one
+    another with a fillet of 0.25 mm. The exact post under each cap stays exact (the gap and the cap are measured on it). 12 - 55 k triangles a crown (the balls and
+    tubes: 3 - 16 k), the build 1 - 3 s longer per crown. Gates: `support:onetrunk` (a body to every crown: closed, outward-wound; the sideways clearance is 0.61 mm
+    least, the body carved back to keep the planner's 0.35 off the piece). The lattice's branches stay square.
 **The interface (`interfaceLayers`, `SHEET.densePitchMm`).** `sheet()` takes `interfaceLayers` (2 unless said): 2 transition
 layers and that many interface layers, the interface alternating across and along the sheet's A. The card's **Dense (Bambu)**
 interface is pitch **0.47 mm** (Bambu's 0.46: the strip's joins need a segment of 0.4665, and at 0.46 the stair under

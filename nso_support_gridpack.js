@@ -236,6 +236,11 @@
   var CROWN_NODE_DROP_MM = 3;       /* a branch runs at least this far between joins */
   var CROWN_OVAL_MAX = 3;           /* an oval trunk is at most this long against its width (area kept) */
   var CROWN_BRANCH_TAPER_DEG = 0;   /* between two joins a Bambu branch holds its width (its 30-layer stretches measure -0.5 to -1.0 deg); only the trunk widens, at JOINS.taperDeg and over the law */
+  var CROWN_STUB_SIDES = 20;          /* a crown tip's round stub: sides */
+  var CROWN_TRUNK_SINK_MM = 1;       /* ...the trunk stops this far under its top, inside the smooth body's shoulder */
+  var CROWN_BLOB_TRIS = 50000;        /* ...and no body is meshed finer than this many triangles allow */
+  var CROWN_BLEND_MM = 0.25;          /* the branches of a crown flow into one another and into the trunk: the smooth union's blend (crown.blendMm) */
+  var CROWN_BLOB_CELL_MM = 0.2;       /* ...meshed on a grid this fine (crown.blobCellMm) */
   var CROWN_TUBE_SIDES = 20;        /* a branch is a round tube of this many sides... */
   var CROWN_BALL_SEGS = 10;         /* ...and a join a ball of this many bands (twice that round) */
   var CROWN_ROOT_FLOOR_MM = FLARE_MM + 2;   /* the first join is at least this far over the plate: the flare stays in the trunk */
@@ -254,7 +259,8 @@
       nudgeTips: o.nudgeTips == null ? true : !!o.nudgeTips, nudgeMarginMm: pick(o.nudgeMarginMm, 0), maxKids: Math.max(2, Math.round(pick(o.maxKids, CROWN_MAX_KIDS))), areaRatio: pick(o.areaRatio, CROWN_AREA_RATIO), tipDropMm: pick(o.tipDropMm, CROWN_TIP_DROP_MM), nodeDropMm: pick(o.nodeDropMm, CROWN_NODE_DROP_MM),
       ovalMax: pick(o.ovalMax, CROWN_OVAL_MAX), branchTaperDeg: pick(o.branchTaperDeg, CROWN_BRANCH_TAPER_DEG), rootFloorMm: pick(o.rootFloorMm, CROWN_ROOT_FLOOR_MM),
       designLeanDeg: o.designLeanDeg == null ? null : +o.designLeanDeg, nodeRings: Array.isArray(o.nodeRings) ? o.nodeRings.slice() : CROWN_NODE_RINGS.slice(),
-      searchStepMm: pick(o.searchStepMm, CROWN_SEARCH_STEP_MM), tipRiseMm: pick(o.tipRiseMm, 0), tubeSides: Math.max(6, Math.round(pick(o.tubeSides, CROWN_TUBE_SIDES))),
+      searchStepMm: pick(o.searchStepMm, CROWN_SEARCH_STEP_MM), tipRiseMm: pick(o.tipRiseMm, 0),
+      smooth: o.smooth == null ? true : !!o.smooth, blendMm: pick(o.blendMm, CROWN_BLEND_MM), blobCellMm: pick(o.blobCellMm, CROWN_BLOB_CELL_MM), tubeSides: Math.max(6, Math.round(pick(o.tubeSides, CROWN_TUBE_SIDES))),
       trunk: { tipMm: pick(t.tipMm, TRUNK_TIP_MM), angleDeg: pick(t.angleDeg, TRUNK_ANGLE_DEG), flareMm: pick(t.flareMm, FLARE_MM), flareAngleDeg: pick(t.flareAngleDeg, FLARE_ANGLE_DEG), footClearMm: pick(t.footClearMm, TRUNK_FOOT_CLEAR_MM), uniformH: t.uniformH == null ? null : +t.uniformH, padGrowMm: t.padGrowMm == null ? null : +t.padGrowMm }
     };
   }
@@ -1707,6 +1713,12 @@
     return out;
   }
 
+  function roundProfile(r, n, phase) {
+    var out = [];
+    for (var k = 0; k < n; k++) { var a = (phase || 0) + 2 * Math.PI * k / n; out.push([r * Math.cos(a), r * Math.sin(a)]); }
+    return out;
+  }
+
   function cleanPath(pts) {
     var out = [];
     pts.forEach(function (p) { if (!out.length || len(sub(p, out[out.length - 1])) > 1e-6) out.push(p.slice()); });
@@ -1752,6 +1764,13 @@
       pts[nL - 1] = add(pts[nL - 1], mul(lastU, m.childSide / 4));
     }
     var first = unit(sub(pts[1], pts[0])), up = seed || (Math.abs(first[1]) > 0.9 ? [1, 0, 0] : [0, 1, 0]);
+    if (m.crownRound > 0 && pts.length >= 2) {
+      /* A CROWN'S TIP is a round post, and only its stub: the vertical rise under the cap, down to where the leg leans. The leg from
+         there to its join is the crown's smooth body (blobSoup), flowing into the post and into the join with no joint between. */
+      var stub = pts.length > 2 ? pts.slice(0, 2) : pts, rs = P.sweep({ points: stub, profile: roundProfile(m.crownRound, CROWN_STUB_SIDES, phaseOf(m.id + 1)), up: up });
+      if (!rs.ok) return { ok: false, reason: 'member ' + m.id + ' would not sweep: ' + rs.reason };
+      return { ok: true, soups: [rs.tris], points: pts, legPts: pts.length > 2 ? pts.slice(1) : null, round: true };
+    }
     var sw = P.sweep({ points: pts, profile: squareProfile(m.side, phaseOf(m.id + 1)), up: up });
     if (sw.ok) return { ok: true, soups: [sw.tris], points: pts };
     /* A mitre the sweep refuses (a leg shorter than the corner needs - a
@@ -1915,6 +1934,217 @@
       }
     }
     return out.subarray(0, w);
+  }
+
+  /* THE SMOOTH BODY OF A CROWN. Its branches are round and run into one another and into the trunk the way a bent tube does: no ball at a join, no
+     seam. The tree is a set of tapered capsules - each tube, each tip's leg from where it leans, the top of the trunk - and the surface is
+     the smooth union of their distance fields: d = -k ln(sum exp(-d_i / k)) over the paths that come within reach (one path is its own hard minimum over
+     its segments, so a bend is not a bead), meshed on a grid of `h` mm by SURFACE NETS (a vertex in each cell the surface crosses, the average of its
+     edge crossings; a quad over each edge that changes sign), every vertex then walked onto the surface along the field's gradient. Closed and outward-wound.
+     prims: [{ pts: [[x, y, z]...], r: [radius at each point], clip: { p, n } (optional: cut flat at the plane through p, nothing on the side n points to) }]; k: the blend, mm. Float32Array soup, empty if there is nothing. */
+  function blobSoup(prims, k, h, cut) {
+    /* cut: { zMax, away: function (x, y, z) -> the distance to what the body keeps off, keep } - the body is cut flat at zMax and carved back from `away` by `keep` */
+    if (!prims.length) return new Float32Array(0);
+    /* the cell is no finer than the body's size allows: its surface, as the capsules' (a path's length x its girth, its ends), at 2 triangles a cell, is held to
+       CROWN_BLOB_TRIS - a crown of 25 paths over 40 mm is 150 k triangles at 0.2 mm and a quarter of that at 0.35, and as smooth to the eye */
+    var area = 0;
+    prims.forEach(function (pr) {
+      for (var q = 0; q + 1 < pr.pts.length; q++) area += len(sub(pr.pts[q + 1], pr.pts[q])) * Math.PI * (pr.r[q] + pr.r[q + 1]);
+      area += 4 * Math.PI * pr.r[0] * pr.r[0];
+    });
+    h = Math.max(h, Math.sqrt(2 * area / CROWN_BLOB_TRIS));
+    var lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity], reach = 7 * k;
+    prims.forEach(function (pr) {
+      pr.box = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity];
+      pr.pts.forEach(function (q, i) {
+        for (var d = 0; d < 3; d++) {
+          pr.box[d] = Math.min(pr.box[d], q[d] - pr.r[i] - reach); pr.box[3 + d] = Math.max(pr.box[3 + d], q[d] + pr.r[i] + reach);
+          lo[d] = Math.min(lo[d], q[d] - pr.r[i] - 2 * h); hi[d] = Math.max(hi[d], q[d] + pr.r[i] + 2 * h);
+        }
+      });
+    });
+    var nx = Math.ceil((hi[0] - lo[0]) / h) + 1, ny = Math.ceil((hi[1] - lo[1]) / h) + 1, nz = Math.ceil((hi[2] - lo[2]) / h) + 1;
+    if (nx * ny * nz > 12e6) return new Float32Array(0);
+    function segD(px, py, pz, a, ra, b, rb) {
+      var ex = b[0] - a[0], ey = b[1] - a[1], ez = b[2] - a[2], ee = ex * ex + ey * ey + ez * ez;
+      var t = ee > 1e-18 ? ((px - a[0]) * ex + (py - a[1]) * ey + (pz - a[2]) * ez) / ee : 0;
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      var dx = px - a[0] - ex * t, dy = py - a[1] - ey * t, dz = pz - a[2] - ez * t;
+      return Math.sqrt(dx * dx + dy * dy + dz * dz) - (ra + (rb - ra) * t);
+    }
+    /* the field at a point from the paths in `cand` (every path whose box holds it, when not given) */
+    function base(px, py, pz, cand) {
+      var sum = 0, n = cand ? cand.length : prims.length;
+      for (var ii = 0; ii < n; ii++) {
+        var pr = cand ? cand[ii] : prims[ii], bx = pr.box;
+        if (!cand && (px < bx[0] || py < bx[1] || pz < bx[2] || px > bx[3] || py > bx[4] || pz > bx[5])) continue;
+        var d = Infinity;
+        for (var s = 0; s + 1 < pr.pts.length; s++) { var q = segD(px, py, pz, pr.pts[s], pr.r[s], pr.pts[s + 1], pr.r[s + 1]); if (q < d) d = q; }
+        if (pr.pts.length === 1) d = segD(px, py, pz, pr.pts[0], pr.r[0], pr.pts[0], pr.r[0]);
+        if (pr.clip) { var cd = (px - pr.clip.p[0]) * pr.clip.n[0] + (py - pr.clip.p[1]) * pr.clip.n[1] + (pz - pr.clip.p[2]) * pr.clip.n[2]; if (cd > d) d = cd; }
+        sum += Math.exp(-d / k);
+      }
+      return sum > 0 ? -k * Math.log(sum) : 1e3;
+    }
+    /* ...and the cut: flat at zMax, carved back from what the body keeps off (`away`, only asked where the surface is near) */
+    function carve(f, px, py, pz, useAway) {
+      if (!cut || f >= 1) return f;
+      if (cut.zMax != null && pz - cut.zMax > f) f = pz - cut.zMax;
+      if (useAway && cut.away && f < 0.6) { var da = cut.away(px, py, pz); if (cut.keep - da > f) f = cut.keep - da; }
+      return f;
+    }
+    /* the paths and the part's nearness, bucketed in 2 mm cubes: a node asks its own bucket only */
+    var BK = 2, bnx = Math.ceil((hi[0] - lo[0]) / BK) + 1, bny = Math.ceil((hi[1] - lo[1]) / BK) + 1, bnz = Math.ceil((hi[2] - lo[2]) / BK) + 1, buckets = new Array(bnx * bny * bnz), bNear = new Uint8Array(bnx * bny * bnz);
+    prims.forEach(function (pr) {
+      var i0 = Math.max(0, Math.floor((pr.box[0] - lo[0]) / BK)), i1 = Math.min(bnx - 1, Math.floor((pr.box[3] - lo[0]) / BK));
+      var j0 = Math.max(0, Math.floor((pr.box[1] - lo[1]) / BK)), j1 = Math.min(bny - 1, Math.floor((pr.box[4] - lo[1]) / BK));
+      var k0 = Math.max(0, Math.floor((pr.box[2] - lo[2]) / BK)), k1 = Math.min(bnz - 1, Math.floor((pr.box[5] - lo[2]) / BK));
+      for (var bk = k0; bk <= k1; bk++) for (var bj = j0; bj <= j1; bj++) for (var bi = i0; bi <= i1; bi++) { var bq = (bk * bny + bj) * bnx + bi; (buckets[bq] || (buckets[bq] = [])).push(pr); }
+    });
+    for (var bq2 = 0; bq2 < buckets.length; bq2++) {
+      if (!buckets[bq2]) continue;
+      if (!(cut && cut.away)) continue;
+      var bi2 = bq2 % bnx, bj2 = ((bq2 / bnx) | 0) % bny, bk2 = (bq2 / (bnx * bny)) | 0;
+      bNear[bq2] = cut.away(lo[0] + (bi2 + 0.5) * BK, lo[1] + (bj2 + 0.5) * BK, lo[2] + (bk2 + 0.5) * BK) < cut.keep + BK * 0.87 + 0.3 ? 1 : 0;
+    }
+    function field(px, py, pz) {
+      var bq = (Math.floor((pz - lo[2]) / BK) * bny + Math.floor((py - lo[1]) / BK)) * bnx + Math.floor((px - lo[0]) / BK), cand = buckets[bq];
+      return cand ? carve(base(px, py, pz, cand), px, py, pz, bNear[bq] === 1) : 1e3;
+    }
+    /* The field is sampled where the surface can be: on a coarse grid (a block = BLK cells) first, and a block whose eight corners all lie further from the
+       surface than its own diagonal (the field is 1-Lipschitz) is inside or outside throughout and is not sampled - only the blocks the surface crosses are. */
+    var BLK = 4, cnx = Math.ceil((nx - 1) / BLK) + 1, cny = Math.ceil((ny - 1) / BLK) + 1, cnz = Math.ceil((nz - 1) / BLK) + 1;
+    var CF = new Float32Array(cnx * cny * cnz), i, j, l, ci, cj, cl;
+    for (cl = 0; cl < cnz; cl++) for (cj = 0; cj < cny; cj++) for (ci = 0; ci < cnx; ci++)
+      CF[(cl * cny + cj) * cnx + ci] = field(lo[0] + Math.min(ci * BLK, nx - 1) * h, lo[1] + Math.min(cj * BLK, ny - 1) * h, lo[2] + Math.min(cl * BLK, nz - 1) * h);
+    var F = new Float32Array(nx * ny * nz), have = new Uint8Array(nx * ny * nz), act = new Uint8Array((cnx - 1) * (cny - 1) * (cnz - 1)), reachB = BLK * h * 0.87 + 0.05;
+    function blockCorner(bi, bj, bl, q) { return CF[((bl + ((q >> 2) & 1)) * cny + bj + ((q >> 1) & 1)) * cnx + bi + (q & 1)]; }
+    for (cl = 0; cl < cnz - 1; cl++) for (cj = 0; cj < cny - 1; cj++) for (ci = 0; ci < cnx - 1; ci++) {
+      var mn = Infinity, pos = 0;
+      for (var q0 = 0; q0 < 8; q0++) { var cfv = blockCorner(ci, cj, cl, q0); if (Math.abs(cfv) < mn) mn = Math.abs(cfv); if (cfv > 0) pos++; }
+      if (mn > reachB && (pos === 0 || pos === 8)) continue;
+      act[(cl * (cny - 1) + cj) * (cnx - 1) + ci] = 1;
+      for (l = cl * BLK; l <= Math.min((cl + 1) * BLK, nz - 1); l++) for (j = cj * BLK; j <= Math.min((cj + 1) * BLK, ny - 1); j++) for (i = ci * BLK; i <= Math.min((ci + 1) * BLK, nx - 1); i++) {
+        var ni0 = (l * ny + j) * nx + i;
+        if (have[ni0]) continue;
+        have[ni0] = 1; F[ni0] = field(lo[0] + i * h, lo[1] + j * h, lo[2] + l * h);
+      }
+    }
+    for (cl = 0; cl < cnz - 1; cl++) for (cj = 0; cj < cny - 1; cj++) for (ci = 0; ci < cnx - 1; ci++) {
+      if (act[(cl * (cny - 1) + cj) * (cnx - 1) + ci]) continue;
+      var sgn = blockCorner(ci, cj, cl, 0) > 0 ? 1 : -1;
+      for (l = cl * BLK; l <= Math.min((cl + 1) * BLK, nz - 1); l++) for (j = cj * BLK; j <= Math.min((cj + 1) * BLK, ny - 1); j++) for (i = ci * BLK; i <= Math.min((ci + 1) * BLK, nx - 1); i++) {
+        var ni1 = (l * ny + j) * nx + i;
+        if (!have[ni1]) { have[ni1] = 1; F[ni1] = sgn * reachB; }
+      }
+    }
+    /* the blocks the surface crosses, as a list of their cells' ranges */
+    var actList = [];
+    for (cl = 0; cl < cnz - 1; cl++) for (cj = 0; cj < cny - 1; cj++) for (ci = 0; ci < cnx - 1; ci++) if (act[(cl * (cny - 1) + cj) * (cnx - 1) + ci]) actList.push([ci, cj, cl]);
+    var cellV, verts, vcell, quads, CE = [[0, 1], [2, 3], [4, 5], [6, 7], [0, 2], [1, 3], [4, 6], [5, 7], [0, 4], [1, 5], [2, 6], [3, 7]];
+    function cv(ci, cj, cl) { return cellV[(cl * (ny - 1) + cj) * (nx - 1) + ci]; }
+    function walk(v, iters) {
+      var bq = (Math.max(0, Math.min(bnz - 1, Math.floor((v[2] - lo[2]) / BK))) * bny + Math.max(0, Math.min(bny - 1, Math.floor((v[1] - lo[1]) / BK)))) * bnx + Math.max(0, Math.min(bnx - 1, Math.floor((v[0] - lo[0]) / BK)));
+      var cand = buckets[bq] || [];    /* the paths whose reach covers this vertex's cube (a path further than its reach adds under a thousandth) */
+      /* the part is asked about only where the vertex is near it (most are far) */
+      var near = !!(cut && cut.away) && cut.away(v[0], v[1], v[2]) < cut.keep + 2 * h;
+      function f(x, y, z) { return carve(base(x, y, z, cand), x, y, z, near); }
+      for (var it = 0; it < (iters || 1); it++) {
+        var f0 = f(v[0], v[1], v[2]), e = h * 0.2;
+        var gx = (f(v[0] + e, v[1], v[2]) - f0) / e, gy = (f(v[0], v[1] + e, v[2]) - f0) / e, gz = (f(v[0], v[1], v[2] + e) - f0) / e;
+        var gg = gx * gx + gy * gy + gz * gz;
+        if (!(gg > 1e-12)) break;
+        var step = f0 / gg, mv = Math.abs(f0) / Math.sqrt(gg);
+        if (mv > h) step *= h / mv;
+        v[0] -= step * gx; v[1] -= step * gy; v[2] -= step * gz;
+      }
+      return v;
+    }
+    /* THE TOPOLOGY, made sure of: a vertex in each cell the surface crosses, a quad round each edge that changes sign. Where two sheets of the surface pass through one
+       cell (a neck thinner than the grid) the quads share an edge three or four ways - a mesh no boolean takes. The cells at such an edge are eroded (their inside
+       nodes taken out) and the surface found again, until every edge has its two faces; a body that cannot be made so is none (the crown is built the old way). */
+    function extract() {
+      cellV = new Int32Array((nx - 1) * (ny - 1) * (nz - 1)).fill(-1); verts = []; vcell = []; quads = [];
+      var broken = [];
+      actList.forEach(function (bk) {
+        for (var l = bk[2] * BLK; l < Math.min((bk[2] + 1) * BLK, nz - 1); l++) for (var j = bk[1] * BLK; j < Math.min((bk[1] + 1) * BLK, ny - 1); j++) for (var i = bk[0] * BLK; i < Math.min((bk[0] + 1) * BLK, nx - 1); i++) {
+          var c = [], neg = 0;
+          for (var q = 0; q < 8; q++) { var f = F[((l + ((q >> 2) & 1)) * ny + j + ((q >> 1) & 1)) * nx + i + (q & 1)]; c.push(f); if (f < 0) neg++; }
+          if (neg === 0 || neg === 8) continue;
+          var sx = 0, sy = 0, sz = 0, cnt = 0;
+          for (var e2 = 0; e2 < 12; e2++) {
+            var a = CE[e2][0], b = CE[e2][1];
+            if ((c[a] < 0) === (c[b] < 0)) continue;
+            var t = c[a] / (c[a] - c[b]);
+            var ax = a & 1, ay = (a >> 1) & 1, az = (a >> 2) & 1, bx2 = b & 1, by2 = (b >> 1) & 1, bz2 = (b >> 2) & 1;
+            sx += ax + (bx2 - ax) * t; sy += ay + (by2 - ay) * t; sz += az + (bz2 - az) * t; cnt++;
+          }
+          cellV[(l * (ny - 1) + j) * (nx - 1) + i] = verts.length;
+          vcell.push([i, j, l]);
+          verts.push([lo[0] + (i + sx / cnt) * h, lo[1] + (j + sy / cnt) * h, lo[2] + (l + sz / cnt) * h]);
+        }
+      });
+      var seen = new Uint8Array(nx * ny * nz);
+      actList.forEach(function (bk) {
+        for (var l = Math.max(1, bk[2] * BLK); l <= Math.min((bk[2] + 1) * BLK, nz - 2); l++) for (var j = Math.max(1, bk[1] * BLK); j <= Math.min((bk[1] + 1) * BLK, ny - 2); j++) for (var i = Math.max(1, bk[0] * BLK); i <= Math.min((bk[0] + 1) * BLK, nx - 2); i++) {
+          var nid = (l * ny + j) * nx + i;
+          if (seen[nid]) continue;
+          seen[nid] = 1;
+          var f0 = F[nid], in0 = f0 < 0, qs = [];
+          if (i + 1 < nx && (F[nid + 1] < 0) !== in0) qs.push([cv(i, j - 1, l - 1), cv(i, j, l - 1), cv(i, j, l), cv(i, j - 1, l)]);
+          if (j + 1 < ny && (F[nid + nx] < 0) !== in0) qs.push([cv(i - 1, j, l - 1), cv(i - 1, j, l), cv(i, j, l), cv(i, j, l - 1)]);
+          if (l + 1 < nz && (F[nid + nx * ny] < 0) !== in0) qs.push([cv(i - 1, j - 1, l), cv(i, j - 1, l), cv(i, j, l), cv(i - 1, j, l)]);
+          qs.forEach(function (qd) {
+            if (qd.some(function (v) { return v < 0; })) { broken.push(qd.filter(function (v) { return v >= 0; })); return; }
+            qd.push(!in0); quads.push(qd);
+          });
+        }
+      });
+      var em = new Map();
+      function tick(u, v) { var kk = u < v ? u * 4294967296 + v : v * 4294967296 + u, r = em.get(kk); if (!r) em.set(kk, r = { n: 0, u: u, v: v }); r.n++; }
+      quads.forEach(function (qd) { tick(qd[0], qd[1]); tick(qd[1], qd[2]); tick(qd[2], qd[0]); tick(qd[0], qd[2]); tick(qd[2], qd[3]); tick(qd[3], qd[0]); });
+      /* a diagonal (0-2) is in both triangles: it counts twice by design */
+      var bad = [];
+      em.forEach(function (r) { var diag = false; if (r.n !== 2) bad.push([r.u, r.v]); });
+      return bad.concat(broken);
+    }
+    var bads = null;
+    for (var attempt = 0; attempt < 8; attempt++) {
+      bads = extract();
+      if (!bads.length) break;
+      bads.forEach(function (vs) {
+        vs.forEach(function (vi) {
+          var cc = vcell[vi];
+          for (var q = 0; q < 8; q++) {
+            var ni = (cc[2] + ((q >> 2) & 1)) * ny * nx + (cc[1] + ((q >> 1) & 1)) * nx + cc[0] + (q & 1);
+            if (F[ni] < 0) F[ni] = 0.002;
+          }
+        });
+      });
+    }
+    if (bads.length || !verts.length) return new Float32Array(0);
+    /* the surface nets' small ripple, taken out: each vertex moves halfway to the mean of its neighbouring cells' vertices, and is walked back onto the surface */
+    for (var pass = 0; pass < 2; pass++) {
+      var nv = verts.map(function (v) { return v.slice(); });
+      for (var vi = 0; vi < verts.length; vi++) {
+        var cc = vcell[vi], ci2 = cc[0], cj2 = cc[1], cl2 = cc[2];
+        if (ci2 < 1 || cj2 < 1 || cl2 < 1 || ci2 > nx - 3 || cj2 > ny - 3 || cl2 > nz - 3) continue;
+        var ax = 0, ay = 0, az = 0, na = 0, nb = [cv(ci2 - 1, cj2, cl2), cv(ci2 + 1, cj2, cl2), cv(ci2, cj2 - 1, cl2), cv(ci2, cj2 + 1, cl2), cv(ci2, cj2, cl2 - 1), cv(ci2, cj2, cl2 + 1)];
+        for (var b2 = 0; b2 < 6; b2++) if (nb[b2] >= 0) { ax += verts[nb[b2]][0]; ay += verts[nb[b2]][1]; az += verts[nb[b2]][2]; na++; }
+        if (na < 2) continue;
+        var vv = verts[vi];
+        nv[vi] = [vv[0] + 0.5 * (ax / na - vv[0]), vv[1] + 0.5 * (ay / na - vv[1]), vv[2] + 0.5 * (az / na - vv[2])];
+      }
+      verts = nv;
+    }
+    verts.forEach(function (v) { walk(v, 2); });          /* ...every vertex onto the surface, along the field's gradient */
+    var out = [];
+    quads.forEach(function (qd) {
+      var A = verts[qd[0]], B = verts[qd[1]], C = verts[qd[2]], D = verts[qd[3]];
+      if (qd[4]) { var t2 = B; B = D; D = t2; }
+      out.push(A[0], A[1], A[2], B[0], B[1], B[2], C[0], C[1], C[2], A[0], A[1], A[2], C[0], C[1], C[2], D[0], D[1], D[2]);
+    });
+    return new Float32Array(out);
   }
 
   /* A CONVEX SOLID CUT AT A HEIGHT: what lies over z = zc is taken off and the cut closed with a cap (a tube, a ball, a post, a cap cone is each convex:
@@ -3211,8 +3441,9 @@
       return H;
     }
     function crownPhase(k, n) { return ((GOLDEN_DEG * (k + 1)) % (360 / n)) * Math.PI / 180; }
-    function stepCrown(t, tr) {
+    function stepCrown(t, tr, plain) {
       var parts = [], ci = tr.crown, cr = p.crowns[ci], TS = (p.crownKnobs && p.crownKnobs.tubeSides) || CROWN_TUBE_SIDES;
+      var CKn = p.crownKnobs || {}, smooth = CKn.smooth !== false && !plain, prims = [];
       var rootM = p.members[tr.root], rootKids = {};
       rootM.parents.forEach(function (id) { rootKids[id] = true; });
       for (var i = 0; i < tr.members.length; i++) {
@@ -3221,14 +3452,29 @@
         if (m.id === tr.root) continue;
         if (m.blocked) continue;            /* its way is through the piece: not built (plan.blocked says which, and what it holds) */
         if (m.beacon != null) {
+          m.crownRound = smooth ? m.side / Math.sqrt(Math.PI) : 0;      /* round, of the square's area */
           var ms = sh && sh.byBeacon[m.beacon] ? sh.member(m) : memberSolid(P, m, foot);
           if (!ms.ok) return { ok: false, reason: ms.reason };
           m.points = ms.points;
           parts = parts.concat(ms.soups.map(function (x) { return { soup: x }; }));
+          if (ms.round && ms.points.length >= 2) {
+            /* its whole post and leg, from its stub's top to its join: a primitive of the crown's body, cut flat a little under the stub's top and a hair
+               thinner along the stub (the stub's own surface is the one seen there); the bend where the post leans into its leg is a round joint of the same
+               radius, so the post runs into the leg with no crease */
+            var rt = m.crownRound, st0 = ms.points[0], st1 = ms.points[1], su = unit(sub(st0, st1)), sl = len(sub(st0, st1));
+            var lp = ms.points.map(function (q) { return q.slice(); });
+            prims.push({ pts: lp, r: lp.map(function (q, qi) { return qi === 0 ? rt - 0.04 : rt; }), clip: { p: add(st0, mul(su, -Math.min(0.3, sl * 0.5))), n: su } });
+          }
           continue;
         }
         var pts = m.path, R = m.radii;
         m.points = pts.map(function (q) { return q.slice(); });
+        if (smooth) {
+          var bp = pts.map(function (q) { return q.slice(); }), bn = bp.length;
+          if (rootKids[m.id]) bp[bn - 1] = add(bp[bn - 1], mul(unit(sub(bp[bn - 1], bp[bn - 2])), R[bn - 1]));
+          prims.push({ pts: bp, r: R.slice() });
+          continue;
+        }
         parts.push({ soup: ballSoup(pts[0], R[0], TS, crownPhase(m.id, TS)) });
         for (var s = 0; s + 1 < pts.length; s++) {
           var a = pts[s], b = pts[s + 1];
@@ -3238,17 +3484,35 @@
           if (s + 2 < pts.length) parts.push({ soup: ballSoup(pts[s + 1], R[s + 1], TS, crownPhase(m.id + 3 * s + 2, TS)) });
         }
       }
+      if (smooth && prims.length) {
+        /* the trunk's top, a shoulder the branches rise out of: a capsule on its axis, as wide as the trunk is there, its dome standing a little over the top */
+        var LWs = rootM.oval && rootM.oval.law, ax = rootM.path[0], zt = ax[2], rTr;
+        if (LWs) {
+          var Hs = LWs.uniformH != null ? p.plateZ + LWs.uniformH : tipTopOf(tr), tas = Math.tan(LWs.angleDeg * Math.PI / 180);
+          rTr = function (z) { return LWs.tipMm / 2 + tas * Math.max(0, Hs - z) + (rootM.oval.dR || 0); };
+        } else rTr = function () { return rootM.side / 2; };
+        var rTop = rTr(zt);
+        prims.push({ pts: [[ax[0], ax[1], zt - 3], [ax[0], ax[1], zt - 0.65 * rTop]], r: [rTr(zt - 3), rTr(zt - 0.65 * rTop)] });
+        var THc = TM(opts), keepR = TRUNK_KEEP_MM + 0.05, probesC = THc ? [opts.rawTris || []].concat(opts.occluders || []).filter(function (sp) { return sp && sp.length >= 9; })
+          .map(function (sp) { return probeOf(THc, sp); }).filter(Boolean) : [];
+        var cutB = { zMax: opts._clipZ != null ? opts._clipZ : null, keep: keepR,
+          away: probesC.length ? function (x, y, z) { var d = Infinity; for (var q = 0; q < probesC.length; q++) { var hit = probesC[q].nearest([x, y, z], keepR + 0.3); if (hit && hit.dist < d) d = hit.dist; } return d; } : null };
+        var blob = blobSoup(prims, CKn.blendMm || CROWN_BLEND_MM, CKn.blobCellMm || CROWN_BLOB_CELL_MM, cutB);
+        if (!blob.length) return stepCrown(t, tr, true);          /* a body no mesher could make closed: the crown is built the old way, balls and tubes */
+        parts.push({ soup: blob, smooth: true });
+      }
       /* the trunk: its foot, and (growTrunks) its body */
       if (foot && tr.landing === 'plate' && !(opts._graft && opts._graft[cr.zone] != null)) {
         var A0 = rootM.path[0], H = tipTopOf(tr), LW = rootM.oval.law || { tipMm: TRUNK_TIP_MM, angleDeg: TRUNK_ANGLE_DEG, flareMm: FLARE_MM, flareAngleDeg: FLARE_ANGLE_DEG };
         var Hlaw = LW.uniformH != null ? p.plateZ + LW.uniformH : H;
-        var gw = { H: H, top: A0[2], side: rootM.side, tips: null, crown: { ang: rootM.oval.ang, k: rootM.oval.k, dR: rootM.oval.dR, law: LW } };
+        var zTr = A0[2] - (smooth && prims.length ? CROWN_TRUNK_SINK_MM : 0);   /* the exact trunk stops a little under its top: the crown's smooth body is the shoulder over it */
+        var gw = { H: H, top: zTr, side: rootM.side, tips: null, crown: { ang: rootM.oval.ang, k: rootM.oval.k, dR: rootM.oval.dR, law: LW } };
         var aBase = LW.tipMm / 2 + Math.tan(LW.angleDeg * Math.PI / 180) * Math.max(0, Hlaw - p.plateZ) + Math.tan(LW.flareAngleDeg * Math.PI / 180) * LW.flareMm + rootM.oval.dR;
         var ft = { key: t, trunk: t, c: [A0[0], A0[1]], r: aBase * Math.sqrt(rootM.oval.k) / Math.cos(Math.PI / TRUNK_SIDES) };
         if (grow) ft.grow = gw;
         else {
           var lawF = function (z) { return LW.tipMm / 2 + Math.tan(LW.angleDeg * Math.PI / 180) * Math.max(0, Hlaw - z) + flareAt(z, p.plateZ + LW.flareMm, Math.tan(LW.flareAngleDeg * Math.PI / 180), LW.flareMm) + rootM.oval.dR; };
-          var cN = Math.cos(Math.PI / TRUNK_SIDES), kq = Math.sqrt(rootM.oval.k), zz0 = p.plateZ + foot / 2, rg = ringZs(zz0, p.plateZ + LW.flareMm, A0[2]);
+          var cN = Math.cos(Math.PI / TRUNK_SIDES), kq = Math.sqrt(rootM.oval.k), zz0 = p.plateZ + foot / 2, rg = ringZs(zz0, p.plateZ + LW.flareMm, zTr);
           parts.push({ soup: revolveSoup(A0[0], A0[1], rg.map(function (z) { return [z, lawF(z) * kq / cN, lawF(z) / kq / cN]; }), TRUNK_SIDES, crownPhase(t, TRUNK_SIDES), rootM.oval.ang), trunkShell: true });
         }
         feet.push(ft);
@@ -3366,7 +3630,7 @@
         }
         var p2 = plan(opts.rawTris, p2o);
         if (!p2.ok) { stairLog.push({ level: L.id, wanted: L.stair.tips.length, held: 0, reason: p2.reason }); return; }
-        var sp2 = trunkStepper(p2, Object.assign({}, opts, { interface: false, footPads: 'shared', onProgress: null, trunkGrowth: grow, trunkTopMm: L.zTop, _graft: p2o._graft || null }));
+        var sp2 = trunkStepper(p2, Object.assign({}, opts, { interface: false, footPads: 'shared', onProgress: null, trunkGrowth: grow, trunkTopMm: L.zTop, _clipZ: L.zTop, _graft: p2o._graft || null }));
         if (!sp2.ok) { stairLog.push({ level: L.id, wanted: L.stair.tips.length, held: 0, reason: sp2.reason }); return; }
         for (var t2 = 0; t2 < sp2.n; t2++) { var r2 = sp2.step(t2); if (r2) { stairLog.push({ level: L.id, reason: r2.reason }); return; } }
         var f2 = sp2.finish(), tmap = {};
@@ -3377,7 +3641,7 @@
             /* GRAFTED (a custom plan): the stair's branches join the circle's own trunk - one trunk to a circle. Its
                top branches enter the trunk where they are going, and the trunk is as wide as both asked for. */
             var he = out.filter(function (o) { return o.trunk === host; })[0], hf = feet.filter(function (f) { return f.trunk === host; })[0];
-            he.parts = he.parts.concat(x.parts.map(function (q) { return q.sheet || !q.soup ? q : Object.assign({}, q, { soup: clipConvexBelow(q.soup, L.zTop) }); }));
+            he.parts = he.parts.concat(x.parts.map(function (q) { return q.sheet || q.smooth || !q.soup ? q : Object.assign({}, q, { soup: clipConvexBelow(q.soup, L.zTop) }); }));
             if (hf && hf.grow && hf.grow.crown) {
               var cH = p.crowns[p.trunks[host].crown], g2 = hf.grow.crown;
               g2.areaR2 = (g2.areaR2 == null ? cH.rNeed * cH.rNeed : g2.areaR2) + zc.rNeed * zc.rNeed;
@@ -3390,7 +3654,7 @@
           }
           var T = p.trunks.length + stairTrunks.length;
           tmap[x.trunk] = T;
-          out.push({ trunk: T, parts: x.parts.map(function (q) { return q.sheet || !q.soup ? q : Object.assign({}, q, { soup: clipConvexBelow(q.soup, L.zTop) }); }), fingerParts: [], fingers: 0 });
+          out.push({ trunk: T, parts: x.parts.map(function (q) { return q.sheet || q.smooth || !q.soup ? q : Object.assign({}, q, { soup: clipConvexBelow(q.soup, L.zTop) }); }), fingerParts: [], fingers: 0 });
           /* path and pts: what members() names it by, and which of the stair's spots it carries */
           stairTrunks.push({ beacons: [], landing: tr2.landing, stair: L.id,
                              path: p2.members[tr2.root].path.map(function (q) { return q.slice(); }),
@@ -4519,6 +4783,7 @@
       return { tipMm: k ? k.trunkTipMm : TRUNK_TIP_MM, angleDeg: k ? k.trunkAngleDeg : TRUNK_ANGLE_DEG, flareMm: FLARE_MM, flareAngleDeg: FLARE_ANGLE_DEG };
     },
     KNOBS: { keys: KNOB_KEYS.slice() },
+    blobSoup: blobSoup,      /* the smooth body of a crown: blobSoup([{ pts, r }], blendMm, cellMm) -> soup */
     flareAt: flareAt,        /* the extra radius the flare gives a trunk at z: flareAt(z, plateZ + flareMm, tan(flareAngle), flareMm) */
     TRUNK: { tipMm: TRUNK_TIP_MM, angleDeg: TRUNK_ANGLE_DEG, flareMm: FLARE_MM, flareAngleDeg: FLARE_ANGLE_DEG, share: TRUNK_SHARE,
              keepMm: TRUNK_KEEP_MM, tipClearMm: TRUNK_TIP_CLEAR_MM, tipReachMm: TRUNK_TIP_REACH_MM, sides: TRUNK_SIDES, footClearMm: TRUNK_FOOT_CLEAR_MM },

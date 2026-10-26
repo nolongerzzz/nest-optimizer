@@ -319,6 +319,26 @@ const segLen = s => Math.hypot(s.x1 - s.x0, s.y1 - s.y0);
   check('a brim is built with every head\'s supports (its own object, role brim): 5 loops or more of Brim on the first layer and nothing else, none on the part, no conflict with the pads or the part',
     rows.every(r => r.brim && r.brim.loops >= 5 && r.brim.other === 0 && r.brim.partBrim === 0 && r.brim.conflicts === 0),
     rows.map(r => r.key + ' ' + (r.brim ? r.brim.loops + ' loops' : 'none')).join(', '));
+  /* THE BRANCHES: one smooth body to a crown (no ball at a join, no square tube): closed, outward-wound, and every crown has one */
+  function bodyOf(soup) {
+    const m = new Map(), key = (x, y, z) => Math.round(x * 1e4) + ',' + Math.round(y * 1e4) + ',' + Math.round(z * 1e4);
+    let vol = 0;
+    for (let i = 0; i < soup.length; i += 9) {
+      const P = [0, 1, 2].map(k => key(soup[i + 3 * k], soup[i + 3 * k + 1], soup[i + 3 * k + 2]));
+      for (let k = 0; k < 3; k++) { const a = P[k], b = P[(k + 1) % 3], e = a < b ? a + '|' + b : b + '|' + a, d = a < b ? 1 : -1, r = m.get(e) || { n: 0, d: 0 }; r.n++; r.d += d; m.set(e, r); }
+      vol += (soup[i] * (soup[i + 4] * soup[i + 8] - soup[i + 5] * soup[i + 7]) - soup[i + 1] * (soup[i + 3] * soup[i + 8] - soup[i + 5] * soup[i + 6]) + soup[i + 2] * (soup[i + 3] * soup[i + 7] - soup[i + 4] * soup[i + 6])) / 6;
+    }
+    let open = 0, bad = 0;
+    m.forEach(r => { if (r.n !== 2) open++; else if (r.d !== 0) bad++; });
+    return { open, bad, vol, tris: soup.length / 9 };
+  }
+  const bodies = rows.map(r => {
+    const out = { key: r.key, crowns: 0, smooth: [] };
+    r.b.areas.forEach(a => (a.tp.trunks || []).forEach(t => { out.crowns++; (t.parts || []).forEach(q => { if (q.smooth) out.smooth.push(bodyOf(q.soup)); }); }));
+    return out;
+  });
+  check('every crown\'s branches are one smooth body (no ball at a join): closed, outward-wound, a body to each crown', bodies.every(b => b.crowns > 0 && b.smooth.length >= 1 && b.smooth.length <= b.crowns + 1 && b.smooth.every(x => x.open === 0 && x.bad === 0 && x.vol > 0)),
+    bodies.map(b => b.key + ' ' + b.crowns + ' crown(s), ' + b.smooth.length + ' body(ies) open ' + b.smooth.map(x => x.open + '/' + x.bad + '/' + x.vol.toFixed(0)).join(',') + ', ' + b.smooth.map(x => x.tris + ' triangles').join(' + ')).join('; '));
   check('no support stands over the sheet\'s top (no speck in the air where the supports stop)', rows.every(r => r.over <= 0.05),
     rows.map(r => r.key + ' ' + f2(r.over)).join(', '));
   check('a sheet under a curved head stays where the part is near it: no more than 1.5 mm under the part over any cell of the plate, and its middle within 1.5 mm of the trunk\'s',

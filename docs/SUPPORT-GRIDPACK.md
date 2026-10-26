@@ -631,6 +631,20 @@ build and `shareFeet`), its pad and flare as ever.
 branch keeps its width between joins (Bambu's, below); the tips are the interface's 1.2 mm columns. A tip column ends in
 a ball at the join (radius of the parent); a branch is a round tube, 20 sides.
 
+**The smooth body** (supports-one-trunk, fourth round: "get rid of the shoved sphere model ... square tube branches ... round, like this tube, that merge out of
+the trunk and split from themselves with smooth flowing transitions instead of visible joints"). The crown's branches are no longer tubes with a ball at each
+join and square posts under them. Each tip is a round post of the square's area (`m.crownRound`) - only its stub, the vertical rise under the cap, exact (it is
+what the cap, the cut and the gap are measured on) - and everything from there down is ONE body, `blobSoup(prims, blendMm, blobCellMm, cut)`: the smooth union of
+the capsules of the tips' posts and legs (a bend a round joint of the post's own radius), the crown's tubes and the trunk's top (a capsule on its axis with a
+dome a little over the trunk, the exact trunk stopping `CROWN_TRUNK_SINK_MM` 1 mm under its top inside it). The union is the log-sum-exp of the paths'
+distance fields (`k` = `crown.blendMm`, 0.25: a fillet where two come within a few k, the paths themselves untouched; one polyline is its own hard minimum, so a bend is
+not a bead), meshed on a `crown.blobCellMm` (0.2 mm) grid by surface nets, smoothed twice and every vertex walked onto the surface along the field's gradient: outward-wound
+and closed. Where two sheets of the surface pass one cell (a neck thinner than the grid) the quads would share an edge three ways: the cells at such an edge are eroded and the
+surface found again until every edge has its two faces; a body that cannot be made so is none, and the crown is built the old way (`stepCrown(.., plain)`).
+The body is cut flat at a stair's top (`opts._clipZ`: no post stands over the strips) and carved back to keep 0.4 mm off the piece and what stands round it
+(`TRUNK_KEEP_MM`), so a fillet never closes a gap the planner left. `crown.smooth: false` is the balls and tubes as they were. The lattice's trunks and branches
+(the box off, the tilted box, a stair's lattice) are untouched: square posts, as before.
+
 **The stair.** Where the interface plans a stair under a curved underside (the arc), its own tree is planned as crowns on
 the same circles and GRAFTED onto the circle's trunk (its top branches enter the trunk where they are going, the trunk is
 as wide as both asked for): one trunk to a circle. A circle whose own tree is not built (the stair holds all its tips)
@@ -646,7 +660,7 @@ The engine returns the data; nothing draws it. A member holding tips a stair hol
 another way); erasing the trunk moves it to where the circle has room. `plan.excluded` as before.
 
 **Knobs.** Nothing new is a rule: `opts.crown = { areaRatio, tipDropMm, nodeDropMm, ovalMax, branchTaperDeg, rootFloorMm,
-designLeanDeg, nodeRings, searchStepMm, tubeSides, maxKids, nudgeTips, nudgeMarginMm, trunk: { tipMm, angleDeg, flareMm,
+designLeanDeg, nodeRings, searchStepMm, tubeSides, maxKids, nudgeTips, nudgeMarginMm, smooth, blendMm, blobCellMm, trunk: { tipMm, angleDeg, flareMm,
 flareAngleDeg } }` overrides any of them with today's values as the defaults (`GP.crownKnobs(opts)`, `plan.crownKnobs`);
 the lean limit is `opts.branchTiltDeg`. A tip is moved off a wall only where its column would touch it
 (`nudgeMarginMm` 0): the planner's own 0.2 mm margin moved 14 more of the arc's tips and its stair did not form.

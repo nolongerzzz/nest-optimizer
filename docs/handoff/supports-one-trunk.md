@@ -41,6 +41,11 @@ Branch `claude-wip`. Engine: `nso_support_gridpack.js` (`planOneTrunk`, `thinTip
   stem to 6 mm now (`rootFloorMm` 6). The speck over the stair's top is gone (`clipConvexBelow`). Items 15 - 17 in `docs/SUPPORT-ONE-TRUNK.md`.
 - **The brim** (fourth round): `NSO_Slicer` `brimType` (default 'none'; G-scope select auto; planner reads the project's `auto_brim`): 10 loops x 5 mm on the first layer round a tall part's foot, cut 0.02 mm edge-to-edge off the pad. `docs/SLICER.md` "The brim", `npm run slicer:brim`. Built with the supports by the card (**Brim round the foot** box, `brimStep`, a plate piece "- brim", role `brim` in the slicer; `support:brim-card`). Not done: inner brim, brim ears, shared brims; the plate-wide build has the same step per piece but no test of its own.
 
+**Fifth round: the branches** (the owner's: no balls, no square tubes, round branches flowing out of the trunk and into one another). `blobSoup` (surface nets of the smooth union
+of capsules; eroded at a pinch until manifold, else the old balls and tubes), the crown's tips round (`crownRound`, the exact stub under the cap), the exact trunk
+stopping 1 mm under its top. `docs/SUPPORT-GRIDPACK.md` "The smooth body", `docs/SUPPORT-ONE-TRUNK.md` 3.19. Not done: the lattice's branches (square) and the stair-less
+lattice trunks; the body is 12 - 55 k triangles a crown (cell 0.2 mm): `crown.blobCellMm` 0.25 is 0.64 x that, at a rougher surface.
+
 **OPEN for the owner**
 1. **Dense interface is unprinted.** The card defaults to Dense (Bambu's spacing 0.1: lines 0.47 mm apart, 3 interface layers).
    The 0.84 mm sheet was settled by the owner's own prints; Dense is built and sliced here, not printed. Interface > Open puts it back.
