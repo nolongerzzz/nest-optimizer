@@ -37,7 +37,9 @@ const TODAY = {        // sha256 of the support bytes of a single-piece Generate
                        // Re-pinned by supports-one-trunk: they were 7dc1d1f's (b1e08222e92a / 17be71520673 / af6e05895a2d, 584 / 440 / 424
                        // triangles); the card's Auto is the one-trunk build with the sheet of #301 since, and builds these three heads differently.
                        // Re-pinned again for the tapered base, the uniform trunk, the centred circle and the flat sheet's reach (supports-one-trunk, second and third rounds: the pad a hand wider, the trunk a trumpet)
-  'Support Negative Sphere2.stl': { sha: '632cd214c51c5199ef629662f6c480c931e651b39f72cd99d1dc865068a78658', triangles: 12532 },
+                       // Negative Sphere2 re-pinned by supports-footprint (632cd214c51c, 12532 triangles): the card asks for the sheet's outline, so its three
+                       // sheets stay on the rim they hold (41 % of them lay over the air before) - 9788 triangles. Circular and Sphere are as they were.
+  'Support Negative Sphere2.stl': { sha: 'a5af748eaf65f0df0592af26310c89da5d583acd40a2c4db330e9c1d7f51b3cb', triangles: 9788 },
   'Support Circular.stl': { sha: '5ceb75e00d346de3f2bb53b307f03d553828492f1a4600fdaee26dd3cf835cd2', triangles: 4292 },
   'Support Sphere.stl': { sha: '9169358ac3f23c523446f1df9a1475d2aa8dbfb8b0a452483b123c6fc31892d5', triangles: 5540 }
 };

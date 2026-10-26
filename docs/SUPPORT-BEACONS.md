@@ -242,6 +242,15 @@ and about the same as normal supports. The user's fixture STL and the two G-code
 files are in the ticket thread and aren't in the repository, so that figure
 hasn't been run here.
 
+## Footprint (supports-footprint)
+
+A beacon is a sample, and the cell it was found in is not the surface it holds: a spot found by a corner of its cell sits on the
+very edge and the rest of the cell is air. `detect()` can trace the surface itself, area by area (`opts.footprint === true`, or
+`opts.insetMm > 0`): `region.footprint = { loops, areaMm2, stepMm, insetMm }` - the loops of the surface's edge (outer
+counter-clockwise, a hole clockwise), found on the columns of the piece, not on the grid - and, with `opts.insetMm`, a face, gap or
+corner spot nearer the edge than that is moved in (`beacon.moved`, `beacon.clearMm`). Off by default, so the spots and the
+planners' pins are what they were; the Supports card asks for both. `docs/SUPPORT-FOOTPRINT.md`, `npm run support:footprint`.
+
 ## Stated, not measured
 
 | value | default | why |
