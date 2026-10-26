@@ -18,7 +18,7 @@
      2  highlights: on lights every piece (one outline each, none doubled); off, a single piece picked, pieces added
         or removed, the plate cleared, Undo, the card closed - every highlight gone, none left behind
      B  the readout in every mode, the angle, a piece's own left-out areas and fed tips
-     6  one piece selected, option off: the support bytes are today's (hashes taken on the unchanged card, 7dc1d1f)
+     6  one piece selected, option off: the support bytes are today's (hashes taken on the card as it is, supports-one-trunk; 7dc1d1f's are in the pins' comment)
      1  six real parts, option on: ONE bar ("Piece k of 6 ..."), one build, six pieces' supports, one Undo takes them all
      5  the gaps between supports of different pieces, and between supports and other pieces' bodies
      3  Escape, the watchdog, an exception: plate as it was, no Undo step; the ceiling is per piece, the watchdog is silence
@@ -33,10 +33,12 @@ const { soupMinDistance } = require('./nso_soup_distance.js');
 
 const { ROOT } = lib;
 const FIXTURE = path.join(ROOT, 'fixtures', 'supports', 'supp_ref.3mf');
-const TODAY = {        // sha256 of the support bytes of a single-piece Generate on 7dc1d1f's card (the plate: six parts, one picked)
-  'Support Negative Sphere2.stl': { sha: 'b1e08222e92adff0c18c1a7a13aeed73e3d8ee29bc80c7389c2c40acc5cb379a', triangles: 584 },
-  'Support Circular.stl': { sha: '17be71520673a0086cfa27b55ca92e3d54bcb9436c583affdc1fec02418c2700', triangles: 440 },
-  'Support Sphere.stl': { sha: 'af6e05895a2d64eda4d0c766edd15818fec6558179856e50e01a45d78230d08c', triangles: 424 }
+const TODAY = {        // sha256 of the support bytes of a single-piece Generate on the card as it is now (the plate: six parts, one picked).
+                       // Re-pinned by supports-one-trunk: they were 7dc1d1f's (b1e08222e92a / 17be71520673 / af6e05895a2d, 584 / 440 / 424
+                       // triangles); the card's Auto is the one-trunk build with the sheet of #301 since, and builds these three heads differently
+  'Support Negative Sphere2.stl': { sha: '78dbad5898fd4e342ae6d10e2fb6f7a616238598a99e0ae64f331ad5c0cc6f75', triangles: 12324 },
+  'Support Circular.stl': { sha: '3975fb83de738165377570a3cb4fccffce37e7097b913f520244979478aab65c', triangles: 7288 },
+  'Support Sphere.stl': { sha: 'e00b8c10706ce21edb544dbc05df74ad492f9f0170a1dc7a5343b0d81347c64f', triangles: 7976 }
 };
 const XY_DISTANCE = 0.35;      // the slice's support_object_xy_distance (nso_support_beacons.js SIDE_STANDOFF_MM, nso_support_gridpack.js TRUNK_KEEP_MM)
 const STRICT_GAP = process.env.NSO_STRICT_GAP === '1';
@@ -364,13 +366,13 @@ async function main() {
     app4.load(THREE_CLONES());
     app4.openCard(); app4.setPlateBox(true);
     const ids4 = app4.realIds(), b4 = world(app4);
-    app4.card.ceilingMs(4000);
+    app4.card.ceilingMs(12000);       // 4000 until supports-one-trunk: piece 1 (a head built the one-trunk way, dense) takes about 5 s in-thread, and the ceiling is per piece
     planner(app4, (soup, opts, real) => {
       const p = real(soup, opts);       // reports as it goes: the watchdog (60 s) is not the one that fires
       return pieceAt(app4, soup) === ids4[1] ? new Promise(() => {}) : Promise.resolve(p);       // piece 2 never finishes
     });
     const c = await app4.card.generate();
-    check('piece 2 runs past the ceiling (4 s here): the build stops and names the piece ("B was still running after 4 s")', c.ok === false && /^Could not build: B was still running after 4 s - nothing was added$/.test(app4.head()), app4.head());
+    check('piece 2 runs past the ceiling (12 s here): the build stops and names the piece ("B was still running after 12 s")', c.ok === false && /^Could not build: B was still running after 12 s - nothing was added$/.test(app4.head()), app4.head());
     check('...the plate as it was, no Undo step', same(world(app4), b4));
   }
 

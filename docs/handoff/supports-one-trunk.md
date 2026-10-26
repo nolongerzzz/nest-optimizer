@@ -35,3 +35,7 @@ Branch `claude-wip`. Engine: `nso_support_gridpack.js` (`planOneTrunk`, `thinTip
 6. **Environment:** `support:card` and `support:custom` were already red on claude-wip in this container (a page-state difference,
    checked on a clean worktree of 7dc1d1f: the same four and one lines fail there). `node_modules` had no `three`: `npm install --no-save
    three@0.147.0` and a link of the preinstalled Playwright into `node_modules` were needed to run the browser drives at all.
+7. **Re-pinned on merge with #303 (plate-wide):** `support:plate` section 6 pinned three single-piece builds to 7dc1d1f's bytes; the card's Auto is the
+   one-trunk build (with #301's sheet) now, so they are the new bytes (stable over two runs), and its ceiling test's 4 s is 12 s (a one-trunk head
+   takes ~5 s in-thread). A plate-wide build with the box ticked builds each piece the one-trunk way; the lattice fallback (a one-trunk build whose feet
+   ring the piece) is for a single piece's Generate only.
