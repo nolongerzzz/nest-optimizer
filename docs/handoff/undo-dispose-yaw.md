@@ -35,8 +35,9 @@ arrays, Vector3s, materials). `nsoLeavingGeometries(items)` says what a leaving 
 
 Undo itself disposes nothing: the geometry it takes off is the redo item's, so Redo puts back **the same geometry**
 (same uuid, no re-bake). Candidates are pose-bake geometries only (`nsoPoseBakeGeometries`, which also follows a
-`stepGroup`): **the Seal -> Undo leak (2 geometries a cycle, since bba1993) is not fixed here.** Its ticket adds its own
-entry types to `nsoPoseBakeGeometries` / `nsoLeavingGeometries` and reuses `nsoReleaseGeometries` as it stands.
+`stepGroup`): **the Seal -> Undo leak (2 geometries a cycle, since bba1993) is not fixed here** - it is fixed in
+[undo-dispose-seal](undo-dispose-seal.md), which adds its entry type to `nsoPoseBakeGeometries` / `nsoLeavingGeometries`
+and reuses `nsoReleaseGeometries` as it stands.
 
 **poseHome.chain is not a holder.** It is a `WeakSet` that answers "is this geometry one of the run?" about the piece's
 *current* geometry (`nsoPoseHomeHolds`), so it cannot name a geometry that is nowhere else. Counting it as one would keep
