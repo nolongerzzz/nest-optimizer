@@ -240,9 +240,9 @@ const segLen = s => Math.hypot(s.x1 - s.x0, s.y1 - s.y0);
   for (const k of Object.keys(parts)) {
     const piece = parts[k];
     const oldB = await PE.build(piece, null, RP.PROJECT_NAME[k].replace(/\.stl$/, ''), false);
-    const b = await PE.build(piece, null, RP.PROJECT_NAME[k].replace(/\.stl$/, ''), true);
+    const b = await PE.build(piece, null, RP.PROJECT_NAME[k].replace(/\.stl$/, ''), true, true);
     const objs = [{ name: 'part', soup: piece, key: 101, role: 'part' }]
-      .concat(b.objects.slice(1).map((x, i) => ({ name: x.name, soup: x.soup, key: 201 + i, role: 'support', hostKey: 101 })));
+      .concat(b.objects.slice(1).map((x, i) => ({ name: x.name, soup: x.soup, key: 201 + i, role: x.brim ? 'brim' : 'support', hostKey: 101 })));
     const r = SL.sliceObjects(objs, SLICE_OPTS, WASM);
     if (!r.ok) throw new Error(k + ': the slice failed: ' + r.reason);
     const lines = labelledLines(r);
@@ -270,6 +270,10 @@ const segLen = s => Math.hypot(s.x1 - s.x0, s.y1 - s.y0);
     const cen = sl.length ? [sl.reduce((a, l) => a + l.pts.reduce((s, q) => s + q[0], 0) / l.pts.length, 0) / sl.length, sl.reduce((a, l) => a + l.pts.reduce((s, q) => s + q[1], 0) / l.pts.length, 0) / sl.length] : null;
     row.off = trunkAxes.length && cen ? Math.min(...trunkAxes.map(t => Math.hypot(t[0] - cen[0], t[1] - cen[1]))) : null;
     row.notes = notes;
+    /* the brim built with the supports: its own object, sliced as the brim, on the first layer only, off the pads and the part */
+    const bo = r.objects.find(x => x.role === 'brim');
+    row.brim = bo ? { loops: bo.layers[0].paths.filter(p => p.feature === 'Brim').length, other: bo.layers.slice(1).reduce((n, L) => n + L.paths.length, 0) + bo.layers[0].paths.filter(p => p.feature !== 'Brim').length,
+      conflicts: r.conflicts.length, partBrim: r.objects.find(x => x.role === 'part').layers[0].paths.filter(p => p.feature === 'Brim').length } : null;
     const lv0 = [].concat(...b.areas.map(a => (a.tp.sheet && a.tp.sheet.levels) || []))[0];
     /* nothing stands over the sheet's top: no speck of support in the air above where the supports stop */
     const topZ = Math.max(...[].concat(...b.areas.map(a => (a.tp.sheet && a.tp.sheet.levels) || [])).map(L => L.zTop || 0));
@@ -312,6 +316,9 @@ const segLen = s => Math.hypot(s.x1 - s.x0, s.y1 - s.y0);
     padSpread.map(x => x.key + ' pad ' + f1(x.pad) + ' base ' + f1(x.base)).join(', '));
   check('the same trunk under every head: bases within 15 % of one another, and round', base.length > 0 && Math.max(...base) <= 1.15 * Math.min(...base) &&
     trunkRings.every(t => t.rings.length && Math.abs(t.rings[0][1] - t.rings[0][2]) < 0.2), 'bases ' + base.map(v => f1(2 * v)).join(' / ') + ' mm');
+  check('a brim is built with every head\'s supports (its own object, role brim): 5 loops or more of Brim on the first layer and nothing else, none on the part, no conflict with the pads or the part',
+    rows.every(r => r.brim && r.brim.loops >= 5 && r.brim.other === 0 && r.brim.partBrim === 0 && r.brim.conflicts === 0),
+    rows.map(r => r.key + ' ' + (r.brim ? r.brim.loops + ' loops' : 'none')).join(', '));
   check('no support stands over the sheet\'s top (no speck in the air where the supports stop)', rows.every(r => r.over <= 0.05),
     rows.map(r => r.key + ' ' + f2(r.over)).join(', '));
   check('a sheet under a curved head stays where the part is near it: no more than 1.5 mm under the part over any cell of the plate, and its middle within 1.5 mm of the trunk\'s',

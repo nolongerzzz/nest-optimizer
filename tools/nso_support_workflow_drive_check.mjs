@@ -265,7 +265,7 @@ async function main() {
     t.view = () => page.evaluate(() => window.NSO_SUPPORTS_CARD.view());
     t.idle = (ms = 120000) => page.waitForFunction(() => !window.NSO_SUPPORTS_CARD.busy(), null, { timeout: ms });
     t.undoDepth = () => page.evaluate(() => state.undoStack.length);
-    t.sups = () => page.evaluate(() => state.models.filter((m) => m.nsoSupport && state.placed.some((p) => p.sourceId === m.id))
+    t.sups = () => page.evaluate(() => state.models.filter((m) => m.nsoSupport && !m.nsoSupport.brim && state.placed.some((p) => p.sourceId === m.id))   // the brim built with them is not a support
       .map((m) => ({ id: m.id, area: m.nsoSupport.regionId })));
     t.ids = (list) => list.map((s) => s.id).sort((a, b) => a - b);
     /** The plate as a person would compare it: which pieces, where, and what Undo holds. */

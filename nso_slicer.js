@@ -1398,7 +1398,7 @@
         });
         return { name: ob.name || ('object ' + (oi + 1)), id: oi, mesh: sm, S: S, flipped: flipped,
                  nonSolid: ob.gapCloseMm === 0,
-                 role: ob.role === 'support' ? 'support' : 'part', key: ob.key, hostKey: ob.hostKey,
+                 role: ob.role === 'support' ? 'support' : ob.role === 'brim' ? 'brim' : 'part', key: ob.key, hostKey: ob.hostKey,
                  thin: ob.detectThinWall != null ? !!ob.detectThinWall
                    : (ob.role === 'support' ? CONSTANTS.thinWall.supportsOn : !!o.detectThinWall),
                  layers: [] };
@@ -1408,6 +1408,15 @@
       perObject.forEach(function (P) {
         var S = P.S, n = planes.length;
         var sparsePrev = g.empty();
+        if (P.role === 'brim') {
+          /* a brim built with the supports (brimFor): one layer, its section printed as the brim's own loops, nothing else */
+          for (var bi = 0; bi < n; bi++) {
+            var BL = { index: bi, printZ: planes[bi].printZ, h: planes[bi].h, paths: [], areaMm2: g.area(S[bi]), wallCount: 0 };
+            if (bi === 0 && !g.isEmpty(S[0])) { BL.paths = brimLoops(g, S[0], o, planes[0].h); BL.brimLoops = BL.paths.length; }
+            P.layers.push(BL);
+          }
+          return;
+        }
         for (var i = 0; i < n; i++) {
           var h = planes[i].h;
           var region = S[i];
@@ -1621,6 +1630,89 @@
   }
 
   /**
+   * A brim region's loops, printed as Bambu prints its brim: the region shrunk
+   * half a line, then a first-layer spacing at a time, every loop a path of
+   * feature 'Brim' - the outer boundary's loops first (outermost first), then
+   * the hole's. A ring 4.9 mm wide gives 5 + 5 = 10 loops.
+   */
+  function brimLoops(g, cs, o, h) {
+    var w = o.brimLineWidthMm > 0 ? o.brimLineWidthMm : o.nozzleMm * 1.25, sp = spacingOf(w, h), outer = [], inner = [];
+    for (var k = 0; k < 64; k++) {
+      var c = g.offset(cs, -(w / 2 + k * sp), 'Round');
+      if (g.isEmpty(c)) break;
+      g.polys(c).forEach(function (pl) { (signedArea(pl) > 0 ? outer : inner).push({ feature: 'Brim', width: w, closed: true, pts: pl }); });
+    }
+    return outer.concat(inner.reverse());
+  }
+
+  /** Does this part want a brim? 'outer' every part; 'auto' one tall for its foot. */
+  function brimWanted(o, heightMm, footMm2) {
+    if (!o.brimType || o.brimType === 'none') return false;
+    return o.brimType === 'outer' || heightMm / Math.sqrt(Math.max(footMm2, 1e-6)) >= o.brimAutoRatio;
+  }
+
+  /**
+   * THE BRIM AS A SOLID, for the supports card: the brim a part wants (brimWanted;
+   * `over` carries brimType 'auto' | 'outer' and the rest of the brim options) as one
+   * layer of material round its foot, built to be placed on the plate with the part's
+   * supports and sliced as role 'brim'. soup: the part (z up, anywhere), `avoid`: the
+   * soups it must stay off (the supports already built: their pads, other pieces);
+   * a brim stays brimSupportGapMm off each one's first layer. zPlate: the z the first
+   * layer stands on (the part's lowest point by default). Returns { ok, needed,
+   * soup (the ring's prism, one first layer thick), polys, areaMm2, loops } - needed
+   * false when the part stands on a wide foot.
+   */
+  function brimFor(soup, over, wasm, avoid, zPlate) {
+    var o = defaultsFor(over && over.nozzleMm, over);
+    if (!(o.brimWidthMm > 0)) return { ok: true, needed: false, reason: 'brim width 0' };
+    var g = geometry(wasm);
+    try {
+      var zMin = Infinity, zMax = -Infinity;
+      for (var i = 2; i < soup.length; i += 3) { if (soup[i] < zMin) zMin = soup[i]; if (soup[i] > zMax) zMax = soup[i]; }
+      var planes = slicePlanes(zMin, zMax, o);
+      if (!planes.length) return { ok: true, needed: false, reason: 'no first layer' };
+      function section0(sp) {
+        var sm = sliceMesh(sp, [{ index: 0, printZ: planes[0].printZ, sliceZ: planes[0].sliceZ - zMin + (function () { var m = Infinity; for (var q = 2; q < sp.length; q += 3) if (sp[q] < m) m = sp[q]; return m; })(), h: planes[0].h }], o);
+        var tot = 0;
+        sm.sections.forEach(function (sec) { sec.loops.forEach(function (l) { tot += signedArea(l); }); });
+        if (tot < 0) sm.sections.forEach(function (sec) { sec.loops.forEach(function (l) { l.reverse(); }); });
+        var cs = g.of(sm.sections[0].loops, 'Positive');
+        return g.simplify(o.sliceClosingRadiusMm > 0 && !g.isEmpty(cs) ? g.offset(g.offset(cs, o.sliceClosingRadiusMm, 'Miter'), -o.sliceClosingRadiusMm, 'Miter') : cs, o.resolutionMm);
+      }
+      var S0 = section0(soup);
+      if (g.isEmpty(S0)) return { ok: true, needed: false, reason: 'the part has no first layer' };
+      var outers = g.polys(S0).filter(function (p) { return signedArea(p) > 0; });
+      if (!brimWanted(o, zMax - zMin, g.area(S0))) return { ok: true, needed: false, reason: 'stands on a wide foot' };
+      var w = o.brimLineWidthMm > 0 ? o.brimLineWidthMm : o.nozzleMm * 1.25, gap = Math.max(0, o.brimObjectGapMm || 0);
+      var region = g.of(outers, 'Positive');
+      var ring = g.diff(g.offset(region, o.brimWidthMm, 'Round'), g.offset(region, gap, 'Round'));
+      var av = [];
+      (avoid || []).forEach(function (sp) {
+        if (!sp || sp.length < 9) return;
+        var lo = Infinity;
+        for (var q = 2; q < sp.length; q += 3) if (sp[q] < lo) lo = sp[q];
+        /* an avoided soup is cut where the first layer is: at the plate, not at its own lowest point (a part that does not stand on it has none) */
+        if (zPlate != null && lo > zPlate + planes[0].h) return;
+        var c = section0(sp);
+        if (!g.isEmpty(c)) av.push(c);
+      });
+      if (av.length) ring = g.diff(ring, g.offset(g.unionAll(av), o.brimSupportGapMm != null ? o.brimSupportGapMm : 0.02, 'Round'));
+      ring = g.dropSmall(ring, 1);
+      if (g.isEmpty(ring)) return { ok: true, needed: true, soup: new Float32Array(0), polys: [], areaMm2: 0, loops: 0, reason: 'no room for a brim' };
+      var z0 = zPlate != null ? zPlate : zMin, h = planes[0].h;
+      var polys = g.polys(ring), prism = new wasm.CrossSection(polys, 'Positive').extrude(h);
+      var mesh = prism.getMesh(), np = mesh.numProp, V = mesh.vertProperties, Tv = mesh.triVerts, out = new Float32Array(Tv.length * 3);
+      for (var t = 0; t < Tv.length; t++) {
+        out[t * 3] = V[Tv[t] * np]; out[t * 3 + 1] = V[Tv[t] * np + 1]; out[t * 3 + 2] = V[Tv[t] * np + 2] + z0;
+      }
+      try { prism.delete(); } catch (e) { /* freed */ }
+      return { ok: true, needed: true, soup: out, polys: polys, areaMm2: g.area(ring), loops: brimLoops(g, ring, o, h).length };
+    } finally {
+      g.free();
+    }
+  }
+
+  /**
    * THE BRIM. Round the first layer of a part (outer boundary only): loops
    * stepped one first-layer spacing apart from brimObjectGapMm out to
    * brimWidthMm (Bambu's six test heads: 10 loops of 0.5 mm line at 0.457
@@ -1637,15 +1729,14 @@
     if (N < 1) return;
     perObject.forEach(function (P) {
       if (P.role !== 'part' || !P.layers.length) return;
+      if (perObject.some(function (Q) { return Q.role === 'brim' && Q.hostKey != null && Q.hostKey === P.key; })) return;   // its brim is built, with its supports
       var S0 = P.S[0];
       if (!S0 || g.isEmpty(S0)) return;
       var outers = g.polys(S0).filter(function (p) { return signedArea(p) > 0; });
       if (!outers.length) return;
-      if (o.brimType === 'auto') {
-        var top = 0;
-        P.layers.forEach(function (L) { if (L.areaMm2 > 0 && L.printZ > top) top = L.printZ; });
-        if (!(top / Math.sqrt(Math.max(g.area(S0), 1e-6)) >= o.brimAutoRatio)) return;
-      }
+      var top = 0;
+      P.layers.forEach(function (L) { if (L.areaMm2 > 0 && L.printZ > top) top = L.printZ; });
+      if (!brimWanted(o, top, g.area(S0))) return;
       var region = g.of(outers, 'Positive');
       var others = [];
       perObject.forEach(function (Q) { if (Q !== P && Q.S[0] && !g.isEmpty(Q.S[0])) others.push(Q.S[0]); });
@@ -1791,7 +1882,7 @@
        width in whole beads), so the one a layer lands on can lie a layer
        further below it (C.stairLayers) */
     var stairH = (C.stairLayers || 0) * (planes.length ? planes[planes.length - 1].h : 0.2);
-    var parts = perObject.filter(function (Q) { return Q.role !== 'support'; });
+    var parts = perObject.filter(function (Q) { return Q.role === 'part'; });
     var n = planes.length;
     perObject.forEach(function (P) {
       if (P.role !== 'support') return;
@@ -2118,12 +2209,12 @@
       var hist = Object.keys(ob.wallCountHistogram).sort().map(function (k) {
         return k + ' wall' + (k === '1' ? '' : 's') + ' x' + ob.wallCountHistogram[k];
       }).join(', ');
-      var need = ob.role === 'support' ? null
+      var need = ob.role === 'support' || ob.role === 'brim' ? null
         : ob.overhang.filter(function (r) { return r.uncoveredMm2 == null || r.uncoveredMm2 > 0; }).length;
       var sp = ob.support;
       lines.push(ob.name + ': ' + hist + '; ' +
-        (need == null ? 'support for ' + (sp.hostName || 'no piece in this slice') + ', ' + sp.tips + ' tip(s), ' +
-          sp.sheets.length + ' sheet(s)' : need + ' support-need region(s)') +
+        (need == null ? (ob.role === 'brim' ? 'a brim, ' + (ob.layers[0].brimLoops || 0) + ' loop(s)' : 'support for ' + (sp.hostName || 'no piece in this slice') + ', ' + sp.tips + ' tip(s), ' +
+          sp.sheets.length + ' sheet(s)') : need + ' support-need region(s)') +
         (st.openChains ? '; ' + st.openChains + ' open section chain(s) - ' + st.closedByGap + ' closed across a gap, ' +
           st.droppedChains + ' dropped' : '') + (ob.flipped ? '; mesh was wound inside out - read reversed' : ''));
     });
@@ -2249,6 +2340,8 @@
     connect: connect,
     inside: inside,
     sliceObjects: sliceObjects,
+    brimFor: brimFor,
+    brimWanted: brimWanted,
     thinWalls: thinWalls,
     medialPaths: medialPaths,
     toGcode: toGcode,

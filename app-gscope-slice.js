@@ -187,7 +187,7 @@ var NSO_GSCOPE_SLICE = (function () {
       if (ns) flagged.push(o.name);
       var sup = supportOf(o);
       return { name: o.name, soup: o.positions, gapCloseMm: ns ? 0 : undefined, key: o.sourceId,
-               role: sup ? 'support' : 'part', hostKey: sup ? sup.hostSourceId : undefined };
+               role: sup ? (sup.brim ? 'brim' : 'support') : 'part', hostKey: sup ? sup.hostSourceId : undefined };
     });
     var source = { label: d.name, objects: d.objects, docSource: d.source, subtitle: d.subtitle };
     busy = true;

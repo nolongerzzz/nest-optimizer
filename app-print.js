@@ -113,7 +113,7 @@
         soup[i + 2] = p.soup[i + 2];
       }
       return { name: p.name, soup: soup, key: p.sourceId, gapCloseMm: p.nonSolid ? 0 : undefined,
-               role: p.support ? 'support' : 'part', hostKey: p.support ? p.hostSourceId : undefined };
+               role: p.support ? (p.brim ? 'brim' : 'support') : 'part', hostKey: p.support ? p.hostSourceId : undefined };
     });
   }
 
@@ -226,7 +226,7 @@
       var sup = m && m.nsoSupport ? m.nsoSupport : null;
       var placed = o.placedIndex != null ? state.placed[o.placedIndex] : null;
       var pm = placed && (state.models || []).find(function (x) { return x && x.id === placed.sourceId; });
-      return { name: o.name, soup: o.positions, sourceId: o.sourceId, support: !!sup, hostSourceId: sup ? sup.hostSourceId : undefined,
+      return { name: o.name, soup: o.positions, sourceId: o.sourceId, support: !!sup, brim: !!(sup && sup.brim), hostSourceId: sup ? sup.hostSourceId : undefined,
                nonSolid: !!(pm && typeof root.nsoNonSolid === 'function' && root.nsoNonSolid(pm)) };
     });
   }
@@ -392,7 +392,7 @@
       if (!r.ok) { setBusy(false); S.result = null; readout(r.reason, true); say('Slice: ' + r.reason, true); return; }
       S.result = r; S.sig = sig; S.pieces = pieces; S.profile = profile;
       setBusy(false);
-      var sup = pieces.filter(function (p) { return p.support; }).length;
+      var sup = pieces.filter(function (p) { return p.support && !p.brim; }).length;
       readout(describe(r) + ' - ' + pieces.length + ' object' + (pieces.length === 1 ? '' : 's') + (sup ? ' (' + sup + ' support' + (sup === 1 ? '' : 's') + ')' : ''), false);
       say('Sliced for the ' + profile.short + ': ' + describe(r));
       refresh();                          // a piece moved while it ran: the readout says so, and Export stays shut

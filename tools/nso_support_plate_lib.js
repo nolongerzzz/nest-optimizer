@@ -114,6 +114,8 @@ function makeApp(opts) {
     performance: { now: () => Date.now() }
   };
   ctx.window = ctx;
+  /* the slicer, for the brim the card builds (NSO_Slicer.brimFor): the host's own module, run in Node - its soups cross the vm's realm as typed arrays */
+  if (opts && opts.slicer) { ctx.NSO_Slicer = require(path.join(ROOT, 'nso_slicer.js')); dom.el('sup-brim').checked = true; }
   ['renderModelList', 'updateOptimizeButton', 'updateEditSize', 'updateAdjustUI', 'updateCutterUI', 'removeCutHelper', 'buildCutHelper', 'updateJoinUI']
     .forEach(n => { ctx[n] = () => {}; });
   const scene = new THREE.Scene(), group = new THREE.Group();

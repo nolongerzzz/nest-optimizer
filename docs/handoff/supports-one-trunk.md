@@ -39,7 +39,7 @@ Branch `claude-wip`. Engine: `nso_support_gridpack.js` (`planOneTrunk`, `thinTip
 - Pad down to a hand wider than the trunk (0.6 mm, `padGrowMm`); the trunk a curved trumpet, not a cone (`flareAt`, 21 deg, 4.5 mm); the lattice's
   trunks take the same curve (re-pinned: `support:everywhere`, `support:plate`). Oblique's thick bundle (the stair tree's joins at 4.5 - 8 mm) is a plain
   stem to 6 mm now (`rootFloorMm` 6). The speck over the stair's top is gone (`clipConvexBelow`). Items 15 - 17 in `docs/SUPPORT-ONE-TRUNK.md`.
-- **The brim** (fourth round): `NSO_Slicer` `brimType` (default 'none'; G-scope select auto; planner reads the project's `auto_brim`): 10 loops x 5 mm on the first layer round a tall part's foot, cut 0.02 mm edge-to-edge off the pad. `docs/SLICER.md` "The brim", `npm run slicer:brim`. Not done: inner brim, brim ears, shared brims.
+- **The brim** (fourth round): `NSO_Slicer` `brimType` (default 'none'; G-scope select auto; planner reads the project's `auto_brim`): 10 loops x 5 mm on the first layer round a tall part's foot, cut 0.02 mm edge-to-edge off the pad. `docs/SLICER.md` "The brim", `npm run slicer:brim`. Built with the supports by the card (**Brim round the foot** box, `brimStep`, a plate piece "- brim", role `brim` in the slicer; `support:brim-card`). Not done: inner brim, brim ears, shared brims; the plate-wide build has the same step per piece but no test of its own.
 
 **OPEN for the owner**
 1. **Dense interface is unprinted.** The card defaults to Dense (Bambu's spacing 0.1: lines 0.47 mm apart, 3 interface layers).

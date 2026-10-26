@@ -525,6 +525,14 @@ the print planner reads the project's own `brim_type` (`auto_brim` -> auto, `out
 `brim_width` and `brim_object_gap`. Gate: `npm run slicer:brim`. Not done: the inner brim of `outer_and_inner`, brim ears, a brim
 shared between neighbouring parts (two brims may overlap each other; neither enters a pad or another part's first layer).
 
+**A brim built with the supports** (the supports card, fourth round). `NSO_Slicer.brimFor(soup, over, wasm, avoid, zPlate)` returns the brim a part wants
+(`brimWanted`: auto = tall for its foot, outer = every part) as ONE solid layer: the ring from `brimObjectGapMm` to `brimWidthMm` round the first layer's outer
+boundary, less every `avoid` soup's first layer (the supports' pads, the other pieces) grown `brimSupportGapMm`, pieces under 1 mm2 dropped, extruded one
+first layer thick from `zPlate` - `{ ok, needed, soup, polys, areaMm2, loops }`, `needed: false` where the part stands on a wide foot. An object of **role
+'brim'** (with the part's `key` as its `hostKey`) is sliced as Brim and nothing else: its first layer's section, shrunk half a line and then a first-layer
+spacing at a time (`brimLoops`; a ring 4.9 mm wide gives 5 + 5 loops, a ring cut by the pad 5 racetrack loops of the same length), feature `Brim`; no walls, infill or
+supports typed on it, never a host; a part with a brim object of its own gets no `addBrims` brim.
+
 ## 7. Scope and complexity, as found
 
 - **The real work was measurement.** The textbook core is the smaller part.

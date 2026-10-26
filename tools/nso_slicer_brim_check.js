@@ -82,6 +82,21 @@ function distToPolys(x, y, polys) { let b = Infinity; for (const P of polys) for
   const flat = box(0, 0, 0, 40, 40, 5), tall = box(0, 0, 0, 5, 5, 30);
   check('a flat plate: no brim in auto, one in outer, none by default', count(flat, 'auto') === 0 && count(flat, 'outer') >= 10 && count(flat, undefined) === 0);
   check('a tall stem: a brim in auto, none off', count(tall, 'auto') >= 10 && count(tall, 'none') === 0);
+
+  console.log('\n=== 4. the brim as a solid (the supports card builds it with the supports) ===');
+  const pad = box(5.6, -2, 0, 12, 5, 0.2);                                  // a pad beside the stem, one first layer thick
+  const bf = SL.brimFor(tall, { brimType: 'auto' }, WASM, [pad], 0);
+  check('a tall stem: brimFor wants one, one first layer thick, off the pad and the stem', bf.ok && bf.needed && bf.soup.length > 0 && bf.areaMm2 > 40, bf.needed ? bf.areaMm2.toFixed(0) + ' mm2, ' + bf.soup.length / 9 + ' triangles' : bf.reason);
+  let z0 = Infinity, z1 = -Infinity;
+  for (let i = 2; i < bf.soup.length; i += 3) { z0 = Math.min(z0, bf.soup[i]); z1 = Math.max(z1, bf.soup[i]); }
+  check('...z 0 to 0.2', Math.abs(z0) < 1e-6 && Math.abs(z1 - 0.2) < 1e-6, z0 + ' - ' + z1);
+  const flatFor = SL.brimFor(flat, { brimType: 'auto' }, WASM, [], 0);
+  check('a flat plate: brimFor says it stands on its own foot', flatFor.ok && !flatFor.needed, flatFor.reason);
+  const rs = SL.sliceObjects([{ name: 'p', soup: tall, key: 1, role: 'part' }, { name: 'pad', soup: pad, key: 2, role: 'support', hostKey: 1 }, { name: 'brim', soup: bf.soup, key: 3, role: 'brim', hostKey: 1 }], SL.defaultsFor(0.4, { brimType: 'auto' }), WASM);
+  const bo = rs.objects.find(o => o.role === 'brim'), po = rs.objects.find(o => o.name === 'p');
+  check('sliced as role brim: its loops are Brim, on the first layer only; the part grows none of its own; no conflict',
+    bo.layers[0].paths.length >= 5 && bo.layers[0].paths.every(p => p.feature === 'Brim') && bo.layers.slice(1).every(L => !L.paths.length) &&
+    !po.layers[0].paths.some(p => p.feature === 'Brim') && rs.conflicts.length === 0, bo.layers[0].paths.length + ' loops, ' + rs.conflicts.length + ' conflicts');
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(2); });

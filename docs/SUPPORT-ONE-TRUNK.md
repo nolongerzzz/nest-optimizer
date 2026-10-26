@@ -128,6 +128,12 @@ the option (the shipped Custom feed's bytes are the claude-wip's; `support:feed`
     `brim_width` / `brim_object_gap`, G-scope's Slice settings have a **brim** select (auto by default), the toolpath reader colours and
     lists `Brim`. Measured on the six heads against the reference: 10 loops, 0.5 mm line, centres 0.35 - 4.46 mm off the outline, 245 - 278 mm
     a head (Bambu's 195 - 248), the brim 0.02 - 0.04 mm edge to edge from the pad's lines. Gate: `npm run slicer:brim`.
+    **Built with the supports (the owner's, after it: "add it into the supports generation card so it can get built with the supports"):** the card has a
+    **Brim round the foot** box (ticked, in every mode); after a piece's supports are built it asks `NSO_Slicer.brimFor` for the brim - off the pads and off the
+    pieces already built - and places it as one more plate piece, "<piece> - brim", labelled `nsoSupport.brim`, never counted as a support, taken off with the supports
+    on one Undo, exported with them (ten wall loops, no infill: `slicerSettings`) and sliced by G-scope and the print planner as role `brim` (feature `Brim`). A piece that
+    stands on a wide foot gets none; with no slicer on the page the supports build as they did. Gates: `support:brim-card`, `support:onetrunk` (a brim object, 5+ loops,
+    none on the part, no conflict).
 
 **The interface (`interfaceLayers`, `SHEET.densePitchMm`).** `sheet()` takes `interfaceLayers` (2 unless said): 2 transition
 layers and that many interface layers, the interface alternating across and along the sheet's A. The card's **Dense (Bambu)**

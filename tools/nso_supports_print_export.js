@@ -59,7 +59,7 @@ const PARTS = { interface: true, foldSheets: false, footPads: 'shared' };
 const NAME = 'top_clip_x2';
 
 /* the build at the card's defaults, its objects named as the card names them */
-async function build(piece, partsOver, name, one) {
+async function build(piece, partsOver, name, one, brim) {
   const pname = name || NAME;
   const t0 = Date.now();
   const det = SA.detectOverhangs(piece, { skipList: [], angleDeg: CARD.angleDeg, occluders: [] });
@@ -89,7 +89,15 @@ async function build(piece, partsOver, name, one) {
   areas.forEach((a, ai) => sf.objects.filter(o => o.from[0][0] === ai).forEach(o => {
     objects.push({ name: `${pname} - support ${a.rid + 1}.${++n} (Tree)`, soup: o.soup, settings: Object.assign({}, SI.SHEET.slicerSettings) });
   }));
-  return { areas, sf, ms, objects };
+  /* the card's brim (app-supports-card.js brimStep): one first layer round the foot of a part tall for it, off every pad */
+  let brimInfo = null;
+  if (brim) {
+    const SL = require('../nso_slicer.js'), wasm = await SL.loadKernel({});
+    brimInfo = SL.brimFor(piece, { brimType: 'auto' }, wasm, objects.slice(1).map(o => o.soup), plateZ);
+    if (brimInfo.ok && brimInfo.needed && brimInfo.soup.length)
+      objects.push({ name: `${pname} - brim`, soup: brimInfo.soup, brim: true, settings: { wall_generator: 'classic', detect_thin_wall: '0', wall_loops: '10', sparse_infill_density: '0%', top_shell_layers: '0', bottom_shell_layers: '1' } });
+  }
+  return { areas, sf, ms, objects, brim: brimInfo };
 }
 /* the 3MF's bytes: each object with its own settings, as the card's export writes them */
 async function write(file, objects) {

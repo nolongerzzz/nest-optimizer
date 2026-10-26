@@ -502,7 +502,7 @@ var NSO_SUPPORTS_CARD = (function () {
   }
   function cardSupports(hostId, regionId) {
     return supportsOf(hostId).filter(function (m) {
-      return m.nsoSupport.card && (regionId == null || m.nsoSupport.regionId === regionId);
+      return m.nsoSupport.card && !m.nsoSupport.brim && (regionId == null || m.nsoSupport.regionId === regionId);
     });
   }
 
@@ -873,7 +873,7 @@ var NSO_SUPPORTS_CARD = (function () {
     if (rm) rm.hidden = !wasBuilt;
     en('btn-sup-none', cs === 'built' && !wide);
     en('btn-sup-remove', cs === 'built' && !wide && S.selSupport != null && !!modelOf(S.selSupport));
-    ['sup-angle', 'sup-style', 'sup-size', 'sup-rest', 'sup-one', 'sup-interface'].forEach(function (id) { var e = $(id); if (e) e.disabled = !!S.busy; });
+    ['sup-angle', 'sup-style', 'sup-size', 'sup-rest', 'sup-one', 'sup-interface', 'sup-brim'].forEach(function (id) { var e = $(id); if (e) e.disabled = !!S.busy; });
     var note = $('sup-angle-note');
     if (note) note.textContent = S.angle + '\u00b0 \u00b7 Bambu ' + BAMBU_ANGLE + '\u00b0';
     var ang = $('sup-angle');
@@ -1092,8 +1092,8 @@ var NSO_SUPPORTS_CARD = (function () {
     var st = $('sup-style'), sz = $('sup-size'), rs = $('sup-rest');
     var style = st && STYLES[st.value] ? st.value : 'tree';
     var size = sz ? parseFloat(sz.value) : NaN;
-    var one = $('sup-one'), it = $('sup-interface');
-    return { style: style, sideMm: isFinite(size) ? size : null, rest: !!(rs && rs.checked), knobs: S.mode === 'custom' ? knobsGiven() : null,
+    var one = $('sup-one'), it = $('sup-interface'), br = $('sup-brim');
+    return { brim: !br || !!br.checked, style: style, sideMm: isFinite(size) ? size : null, rest: !!(rs && rs.checked), knobs: S.mode === 'custom' ? knobsGiven() : null,
       one: !one || !!one.checked, dense: !it || it.value !== 'open' };
   }
 
@@ -1355,6 +1355,8 @@ var NSO_SUPPORTS_CARD = (function () {
        go out on the support's object (NSO_SupportInterface.SHEET) */
     var SI = window.NSO_SupportInterface;
     if (SI && SI.SHEET && SI.SHEET.slicerSettings) m.slicerSettings = Object.assign({}, SI.SHEET.slicerSettings);
+    /* the brim is one layer of concentric walls: ten loops of the line, no infill, no top (Studio prints it as the brim it is) */
+    if (meta.brim) m.slicerSettings = { wall_generator: 'classic', detect_thin_wall: '0', wall_loops: '10', sparse_infill_density: '0%', top_shell_layers: '0', bottom_shell_layers: '1' };
     var entry = placeModelMovable(m, (b.lo[0] + b.hi[0]) / 2, -(b.lo[1] + b.hi[1]) / 2);
     entry.mesh.position.y = (b.lo[2] + b.hi[2]) / 2;
     entry.liftY = (hostPlaced.liftY || 0) + (b.lo[2] - hostMinZ);
@@ -1446,14 +1448,19 @@ var NSO_SUPPORTS_CARD = (function () {
     /* One frame and a tick first: the card and the bar are on screen before the planner starts. */
     var chain = new Promise(function (go) {
       requestAnimationFrame(function () { setTimeout(go, 0); });
-    }).then(function () { return runPiece(J, c, false); }).then(function (r) { pr = r; });
+    }).then(function () { return runPiece(J, c, false); }).then(function (r) {
+      pr = r;
+      if (job.dead) return null;
+      pr.s = settleResults(pr.areas, pr.builtOf, D);
+      return pr.s.ok ? brimStep(c, pr.s.results) : null;
+    });
 
     /* The one place the plate changes. Synchronous from the first removal to
        the Undo step, so nothing can interleave; on any failure inside it
        everything is put back and no step is recorded. */
     function commit() {
       if (job.dead) return { ok: false, reason: 'the build was stopped' };
-      var s = settleResults(pr.areas, pr.builtOf, D);
+      var s = pr.s || settleResults(pr.areas, pr.builtOf, D);
       if (!s.ok) return { ok: false, reason: s.reason };
       var results = s.results;
       var undo = (pre && pre.undo) || snapshot(), removed = [], added = [], mem = memOf(hostId);
@@ -1636,6 +1643,25 @@ var NSO_SUPPORTS_CARD = (function () {
     return chain.then(function () { return { areas: areas, builtOf: builtOf }; });
   }
 
+  /* THE BRIM (docs/SLICER.md "The brim"): built with the supports, one layer thick round the piece's foot, 5 mm, off every pad and every other
+     body (NSO_Slicer.brimFor: Bambu's ring round a tall thin stem, which meets the tree's pad and does not join it). It is one more solid of
+     the piece's first result, flagged brim: placed as a plate piece of its own (named "- brim", never counted as a support) and sliced
+     as role 'brim'. Resolves the words the card says, or null when there is nothing to say; never rejects: a build without a brim is
+     still a build. c: { D, o }, results: settleResults'. */
+  function brimStep(c, results) {
+    var SL = window.NSO_Slicer;
+    if (!c.o.brim || !SL || typeof SL.brimFor !== 'function' || typeof SL.loadKernel !== 'function') return Promise.resolve(null);
+    var live = results.filter(function (r) { return r.ok && r.solids.length; });
+    if (!live.length) return Promise.resolve(null);
+    var avoid = [].concat.apply([], live.map(function (r) { return r.solids.map(function (sd) { return sd.soup; }); })).concat((c.D.opts && c.D.opts.occluders) || []);
+    return SL.loadKernel({}).then(function (wasm) {
+      var r = SL.brimFor(c.D.soup, { brimType: 'auto' }, wasm, avoid, live[0].plateZ);
+      if (!r.ok || !r.needed || !r.soup.length) return { none: r.reason || 'no room' };
+      live[0].solids.push({ soup: r.soup, keys: [], holds: {}, landing: 'plate', regionIds: [], brim: true });
+      return { loops: r.loops, areaMm2: r.areaMm2 };
+    }).catch(function (err) { console.error('[supports card] brim', err); return null; });
+  }
+
   /* A piece's areas and what building made of them: its results (solids, feet shared) - or why the planner would not. */
   function settleResults(areas, builtOf, D) {
     var results = areas.map(function (a) {
@@ -1666,7 +1692,8 @@ var NSO_SUPPORTS_CARD = (function () {
         var sd = r.solids[k];
         var meta = { card: true, hostSourceId: c.hostId, hostName: c.hm.name, regionId: r.rid, style: o.style,
           sideMm: r.sideMm || o.sideMm, rest: o.rest, angleDeg: S.angle, mode: S.mode, keys: sd.keys, holds: sd.holds, landing: sd.landing };
-        var pl = placeSolid(sd.soup, meta, c.host, c.D.minZ, c.hm.name + ' - support ' + (r.rid + 1) + '.' + (++n) + ' (' + STYLES[o.style] + ')');
+        if (sd.brim) meta.brim = true;
+        var pl = placeSolid(sd.soup, meta, c.host, c.D.minZ, sd.brim ? c.hm.name + ' - brim' : c.hm.name + ' - support ' + (r.rid + 1) + '.' + (++n) + ' (' + STYLES[o.style] + ')');
         if (!pl.ok) throw new Error(pl.reason);
         added.push(pl.id);
       }
@@ -1731,8 +1758,10 @@ var NSO_SUPPORTS_CARD = (function () {
         return runPiece(J, cc, true).then(function (pr) {
           var s = settleResults(pr.areas, pr.builtOf, Dp);
           if (!s.ok) { refused.push({ id: c.hostId, name: c.hm.name, why: 'refused: ' + String(s.reason || 'no reason given').replace(/[.\s]+$/, '') }); return; }
-          built.push({ c: cc, results: s.results });
-          s.results.forEach(function (r) { r.solids.forEach(function (sd) { finals.push(sd.soup); }); });
+          return brimStep(cc, s.results).then(function () {
+            built.push({ c: cc, results: s.results });
+            s.results.forEach(function (r) { r.solids.forEach(function (sd) { finals.push(sd.soup); }); });
+          });
         });
       });
     });
