@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=f8f565b9" />
+  <link rel="stylesheet" href="styles.css?v=84aaeca6" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -803,7 +803,11 @@
                the result (held / unsupported / unreachable, a row for each
                area that needs a look) and offers REGENERATE, REMOVE ALL and
                REMOVE. G-scope's support row stays for layer-view work; both
-               call the same planner. -->
+               call the same planner.
+               With two or more pieces on the plate the card also offers
+               "Generate for plate" (#sup-plate): every piece is lit, the readout
+               counts pieces and hanging areas, and GENERATE builds the supports of
+               all of them in one go - one bar ("Piece 2 of 6 ..."), one Undo. -->
           <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-supports">
             <summary class="vp-bar-btn" title="Outline where a piece hangs in air, then generate the supports that hold it">Supports</summary>
             <div class="vp-menu-body vp-top-body sup-card" id="supports-card" data-state="pick">
@@ -828,6 +832,9 @@
               <label class="vp-bend-field" for="sup-angle">Angle
                 <input type="number" id="sup-angle" value="35" min="1" max="89" step="1" aria-label="Overhang angle, degrees"
                        title="Faces within this many degrees of horizontal get support. Bambu Studio's threshold means the same thing, and its default is 30. A smaller angle finds only the flatter undersides; a larger one reaches steeper faces too. The outlines follow as you type."><span id="sup-angle-note" class="sup-angle-note">35&deg; &middot; Bambu 30&deg;</span></label>
+              <label class="vp-check sup-plate" id="sup-plate-row" for="sup-plate" hidden
+                     title="With two or more pieces on the plate: light every piece, then Generate builds the supports for all of them in one go (each piece with its own left-out areas and tips), with one bar and one Undo. Switch it off, or click a piece, to work on one piece again.">
+                <input type="checkbox" id="sup-plate"> Generate for plate</label>
               <div class="sup-go-row">
                 <button id="btn-sup-all" class="btn btn-primary sup-go" type="button" disabled
                         title="Build supports for every outlined area. When the piece already has supports they are all replaced. One Undo puts it back. A build that cannot finish says why and adds nothing.">Generate</button>
@@ -2046,7 +2053,7 @@
   <script src="app-gscope-support.js?v=2397557a"></script>
   <!-- The Supports card on the main page: the same detection and planner,
        after app-core.js / app-join.js, whose ingest and soups it uses. -->
-  <script src="app-supports-card.js?v=0f2e1c4f"></script>
+  <script src="app-supports-card.js?v=12608fce"></script>
   <script src="app-gscope-slice.js?v=a22783c4"></script>
   <!-- The Slice card (left bar): the plate sliced for its printer, the .gcode.3mf
        it makes. The print planner and the packager are loaded here for it and for
