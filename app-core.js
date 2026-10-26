@@ -174,14 +174,18 @@ function nsoReleaseGeometries(candidates) {
   gone.forEach(g => { if (!held.has(g) && typeof g.dispose === 'function') { g.dispose(); n++; } });
   return n;
 }
-/* What a pose bake named: the geometry it took the piece off (entry.prevGeometry)
-   and the one it put on, which geoOf(index) reads off whatever shows the piece
-   after the bake - the plate snapshot of a redo item, or the live piece. */
-function nsoPoseBakeGeometries(entry, geoOf) {
+/* What a pose bake or a Seal named: the geometry it took the piece off
+   (entry.prevGeometry) and the one it put on, which geoOf(index) (a pose bake,
+   by placed index) or geoOfModel(modelId) (a Seal, by model) reads off whatever
+   shows the piece after the op - the plate snapshot of a redo item, or the live
+   piece. The other ops in UNDO_REPLACE_LABEL swap a geometry the same way and
+   still leak it; each joins the sealReplace test below once it is checked. */
+function nsoPoseBakeGeometries(entry, geoOf, geoOfModel) {
   const out = [];
   if (!entry) return out;
-  if (entry.type === 'stepGroup') (entry.steps || []).forEach(s => out.push(...nsoPoseBakeGeometries(s, geoOf)));
+  if (entry.type === 'stepGroup') (entry.steps || []).forEach(s => out.push(...nsoPoseBakeGeometries(s, geoOf, geoOfModel)));
   else if (entry.type === 'poseBake') { out.push(entry.prevGeometry); if (geoOf) out.push(...[].concat(geoOf(entry.index))); }
+  else if (entry.type === 'sealReplace') { out.push(entry.prevGeometry); if (geoOfModel) out.push(...[].concat(geoOfModel(entry.modelId))); }
   return out;
 }
 /* The geometries a stack item named when it left: an undo entry on its own
@@ -194,6 +198,11 @@ function nsoLeavingGeometries(items) {
       out.push(...nsoPoseBakeGeometries(it.entry, i => {
         const e = post.placed && post.placed[i];
         return e ? [e.geo, e.fields && e.fields.geometry] : [];
+      }, id => {
+        const g = [];
+        (post.models || []).forEach(e => { if (e.ref && e.ref.id === id) g.push(e.fields && e.fields.geometry); });
+        (post.placed || []).forEach(e => { if (e.fields && e.fields.sourceId === id) g.push(e.geo, e.fields.geometry); });
+        return g;
       }));
     } else out.push(...nsoPoseBakeGeometries(it, null));
   });
@@ -441,8 +450,11 @@ function clearRedo() {
    sets nothing aside for Redo. */
 function undoLastDiscard() {
   const top = state.undoStack[state.undoStack.length - 1];
-  // a pose bake taken back for good: what it put on the piece leaves with the entry
-  const leaving = nsoPoseBakeGeometries(top, i => state.placed[i] && state.placed[i].mesh && state.placed[i].mesh.geometry);
+  // a pose bake (or Seal) taken back for good: what it put on the piece leaves with the entry
+  const leaving = nsoPoseBakeGeometries(top, i => state.placed[i] && state.placed[i].mesh && state.placed[i].mesh.geometry, id => {
+    const m = state.models.find(x => x.id === id), p = state.placed.find(x => x && x.sourceId === id);
+    return [m && m.geometry, p && p.geometry, p && p.mesh && p.mesh.geometry];
+  });
   const r = undoLastStep();
   if (typeof nsoHelpers !== 'undefined') nsoHelpers.afterUndo();
   nsoReleaseGeometries(leaving);

@@ -29,7 +29,8 @@
      7  undoLastDiscard of a pose bake disposes what the bake put on
      8  UNDO_MAX: the entry that falls off the bottom disposes what only it named; poseHome's geometry stays
      9  never a geometry that is shared by another piece, named by poseHome, or on screen
-    11  Redo leaves ONE selOutline on the mesh (it was one more a Redo), and the outline it replaced is disposed */
+    11  Redo leaves ONE selOutline on the mesh (it was one more a Redo), and the outline it replaced is disposed
+   12  Seal -> Undo (2 geometries a cycle: the one Seal replaced, the one a new action dropped off the redo line) */
 
 const fs = require('fs');
 const path = require('path');
@@ -88,7 +89,14 @@ vm.runInContext([
   // undoLastStep is the real 600-line dispatcher; the one branch these steps reach is the pose bake's own Undo
   'function undoLastStep() { const e = state.undoStack.pop(); updateUndoBtn(); if (!e) return;',
   '  if (e.type === "stepGroup") { e.steps.slice().reverse().forEach(s => { state.undoStack.push(s); undoLastStep(); }); return; }',
-  '  if (e.type === "poseBake") nsoUndoPoseBake(e); }',
+  '  if (e.type === "poseBake") nsoUndoPoseBake(e);',
+  '  if (e.type === "sealReplace") sealUndo(e); }',
+  // the replace branch of the real dispatcher (app-core.js, UNDO_REPLACE_LABEL), down to the part that matters here:
+  // the old geometry goes back on the model and the piece, on a fresh mesh
+  'function sealUndo(e) { const m = state.models.find(x => x.id === e.modelId); m.geometry = e.prevGeometry;',
+  '  const p = state.placed.find(x => x && x.sourceId === m.id); state.modelGroup.remove(p.mesh);',
+  '  const mesh = new THREE.Mesh(m.geometry, new THREE.MeshStandardMaterial()); mesh.userData.placedIndex = state.placed.indexOf(p);',
+  '  state.modelGroup.add(mesh); p.mesh = mesh; p.geometry = m.geometry; }',
   ...LIFTED.map(n => fnSource(core, n)),
   // the selection outline, as app-sel-outline.js draws it (the big-piece worker path is not reached by a one-triangle piece)
   'function isBig() { return false; }',
@@ -389,6 +397,102 @@ console.log('11  Redo and the selection outline');
   redo();
   check('Redo to a plate with nothing selected: no outline on the mesh, the old one disposed',
     P.mesh.children.filter(c => c.name === 'selOutline').length === 0 && o1.parent === null && times(o1.geometry) === 1 && !P.p.outline);
+}
+
+// 12 ---------------------------------------------------------------------------
+console.log('12  Seal -> Undo');
+/* sealSelectedModel's bookkeeping (app-finish.js), no maths: an entry holding a CLONE of the piece's geometry (pushed
+   first, so it empties the redo line), a new geometry swapped onto model, piece and a fresh mesh, then the geometries
+   the piece showed before are released. Gate 12j reads the real call site for that last line. */
+function seal(P) {
+  const { m, p } = P;
+  const old = [m.geometry, p.geometry, p.mesh.geometry];
+  const clone = geo('C' + made.length);
+  app.pushUndo({ type: 'sealReplace', modelId: m.id, prevGeometry: clone, prevRawTris: m.rawTris, prevRawAxis: null,
+    prevCenterOffset: m.centerOffset, prevSize: { x: 1, y: 1, z: 1 } });
+  const ng = geo('N' + made.length);
+  m.geometry = ng;
+  P.group.remove(p.mesh);
+  const mesh = new THREE.Mesh(ng, new THREE.MeshStandardMaterial());
+  mesh.userData.placedIndex = P.state.placed.indexOf(p);
+  P.group.add(mesh);
+  p.mesh = mesh; p.geometry = ng; P.mesh = mesh;
+  app.nsoReleaseGeometries(old);
+  return { ng, clone };
+}
+{
+  const P = plate();
+  const s1 = seal(P);
+  check('12a Seal: the geometry it replaced is disposed, once; the new one and the clone are not', times(P.g0) === 1 && times(s1.ng) === 0 && times(s1.clone) === 0);
+  undo();
+  check('Undo puts the clone back on model, piece and mesh', P.m.geometry === s1.clone && P.p.geometry === s1.clone && P.p.mesh.geometry === s1.clone);
+  check('Undo disposes nothing more: what it took off is on the redo line', times(s1.ng) === 0 && times(s1.clone) === 0 && P.state.redoStack.length === 1);
+  const s2 = seal(P);
+  check('12b a new Seal after Undo: the first Seal\'s geometry leaves the redo line and is disposed, once', times(s1.ng) === 1);
+  check('... and the clone Undo put back, which this Seal replaces, is disposed, once', times(s1.clone) === 1);
+  check('... the live geometry and the new entry\'s clone are not', times(s2.ng) === 0 && times(s2.clone) === 0 && P.p.mesh.geometry === s2.ng);
+  check('no geometry disposed twice', made.every(g => times(g) <= 1));
+}
+{
+  const P = plate();
+  for (let i = 0; i < 10; i++) { seal(P); undo(); }
+  const stillHeld = made.filter(g => times(g) === 0);
+  check('12c ten Seal -> Undo cycles: 21 geometries made, 19 disposed', made.length === 21 && made.filter(g => times(g) === 1).length === 19, made.length + ' made');
+  check('what is not disposed: the one on screen and the one on the redo line', stillHeld.length === 2 && stillHeld.includes(P.p.mesh.geometry) && stillHeld.includes(P.state.redoStack[0].post.placed[0].geo), names(stillHeld));
+  check('no geometry disposed twice', made.every(g => times(g) <= 1));
+}
+{
+  const P = plate();
+  const s1 = seal(P);
+  undo();
+  const before = made.length;
+  redo();
+  check('12d Redo puts the SAME geometry back (no re-seal) and disposes nothing', P.p.mesh.geometry === s1.ng && P.m.geometry === s1.ng && made.length === before && times(s1.ng) === 0 && times(s1.clone) === 0);
+  undo(); redo(); undo();
+  check('Undo / Redo / Undo: the sealed geometry and the clone both survive', times(s1.ng) === 0 && times(s1.clone) === 0 && P.p.mesh.geometry === s1.clone);
+  app.clearRedo();
+  check('12e clearRedo disposes the sealed geometry, not the live clone', times(s1.ng) === 1 && times(s1.clone) === 0);
+}
+{
+  const P = plate();
+  const s1 = seal(P);
+  app.undoLastDiscard();
+  check('12f undoLastDiscard of a Seal: the sealed geometry is disposed, once; the clone is on screen and stays',
+    times(s1.ng) === 1 && times(s1.clone) === 0 && P.p.mesh.geometry === s1.clone && P.state.redoStack.length === 0);
+}
+{
+  const P = plate();
+  const s1 = seal(P);
+  P.state.undoStack[P.state.undoStack.length - 1].onUndone = () => {};
+  undo();
+  check('12g an Undo of a Seal that is not redoable disposes what it took off', times(s1.ng) === 1 && times(s1.clone) === 0 && P.state.redoStack.length === 0);
+}
+{
+  const P = plate();
+  const firstClone = seal(P).clone;
+  for (let i = 1; i < UNDO_MAX; i++) seal(P);
+  check('a full stack of Seals disposes only what each Seal replaced', times(firstClone) === 0 && P.state.undoStack.length === UNDO_MAX);
+  seal(P);                                 // the first entry falls off the bottom: it held the only name of its clone
+  check('12h UNDO_MAX: the entry that falls off the bottom disposes its clone, once', times(firstClone) === 1 && P.state.undoStack.length === UNDO_MAX);
+  check('... and nothing on screen', times(P.p.mesh.geometry) === 0 && P.state.undoStack.every(e => times(e.prevGeometry) === 0));
+}
+{
+  const P = plate({ second: true });
+  seal(P);                                 // piece 0 seals; piece 1 still draws G0
+  check('12i the geometry another piece still draws is not disposed by the swap', times(P.g0) === 0 && P.state.placed[1].mesh.geometry === P.g0);
+}
+{
+  const P = plate();
+  P.p.poseHome = { chain: new WeakSet(), geometry: P.g0 };
+  seal(P);
+  check('... nor the one a poseHome names', times(P.g0) === 0);
+}
+{
+  const src = fs.readFileSync(path.join(ROOT, 'app-finish.js'), 'utf8');
+  const a = src.indexOf('function sealSelectedModel('), b = src.indexOf('\nfunction ', a + 10);
+  const body = src.slice(a, b);
+  const swap = body.indexOf('placedEntry.geometry = m.geometry;'), rel = body.indexOf('nsoReleaseGeometries(replacedGeos)');
+  check('12j sealSelectedModel releases what the piece showed, after the swap and the new mesh', a > 0 && swap > 0 && rel > swap && /replacedGeos = \[m\.geometry\]/.test(body) && body.indexOf('replacedGeos = [m.geometry]') < body.indexOf('m.geometry = newGeo'));
 }
 
 console.log(fails ? '\n' + fails + ' check(s) FAILED' : '\nall undo-dispose checks passed');

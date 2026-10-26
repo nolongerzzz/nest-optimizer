@@ -2025,6 +2025,9 @@ function sealSelectedModel() {
   const size2 = new THREE.Vector3();
   newGeo.boundingBox.getSize(size2);
 
+  // The geometry the piece shows now is replaced below; the entry holds a clone of it, so it leaves
+  // with this swap (GEOMETRY LIFECYCLE, app-core.js).
+  const replacedGeos = [m.geometry];
   m.geometry = newGeo;
   if (usingRaw) {
     m.rawTris = working;
@@ -2036,6 +2039,7 @@ function sealSelectedModel() {
   const placedEntry = state.placed.find(p => p && p.sourceId === m.id);
   if (placedEntry) {
     const px = placedEntry.x, pz = placedEntry.z;
+    replacedGeos.push(placedEntry.geometry, placedEntry.mesh && placedEntry.mesh.geometry);
     if (placedEntry.mesh && state.modelGroup) {
       state.modelGroup.remove(placedEntry.mesh);
       if (placedEntry.mesh.material) {
@@ -2059,6 +2063,7 @@ function sealSelectedModel() {
     settlePlacedOnBed(placedEntry);
     if (typeof nsoReseatPlacedPose === 'function') nsoReseatPlacedPose(placedEntry);   // bake is in the piece's own frame: its pose still stands
   }
+  nsoReleaseGeometries(replacedGeos);   // keeps any a pose home, another piece or an entry still names
 
   let openAfter = null;
   try { openAfter = openBoundaryEdges(working).length; } catch (e) {}
