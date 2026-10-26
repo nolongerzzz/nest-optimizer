@@ -81,9 +81,8 @@ the option (the shipped Custom feed's bytes are the claude-wip's; `support:feed`
    third point at every 2 mm instead of every point at every 0.5.
 
 11. **THE TAPERED BASE, on every trunk (the owner's, after the first push: "if it's a straight stick, even with the pad, it can pop off
-    during print").** A trunk is a cone onto its pad, never a post: `FLARE_MM` 4.5 and `FLARE_ANGLE_DEG` 27 (was 4 and 15) - over its
-    bottom 4.5 mm the trunk widens 27 deg a side more than its 5.5 deg law, 2.3 mm a side, so the base is 4.6 mm wider across than the
-    stem at 4.5 mm. This is the constant of the lattice's trunks as well as the crown's (`support:feed`, `support:foot`,
+    during print").** A trunk is a cone onto its pad, never a post: `FLARE_MM` 4.5 and `FLARE_ANGLE_DEG` 21 (was 4 and 15), as a curve (item 15) - over its
+    bottom 4.5 mm the trunk widens 1.7 mm a side more than its 5.5 deg law at the plate. This is the constant of the lattice's trunks as well as the crown's (`support:feed`, `support:foot`,
     `support:everywhere`'s two fixture hashes and `support:plate`'s three were re-pinned for it). A trunk the piece leaves no room
     for - the one that used to stand as a cylinder at whatever width the wall allowed (Oblique's stood 9.8 mm across from top to
     bottom) - is held under the same cone from its base up (`taperBase`): it narrows going up by the flare's angle over the flare,
@@ -91,7 +90,7 @@ the option (the shipped Custom feed's bytes are the claude-wip's; `support:feed`
     as it is at the flare's top, widening all the way down. The reland's foot clearance asks 0.3 mm over (`RELAND_SLACK_MM`): a
     trunk grown round the landing a hair off it came 0.15 mm short of Bambu's 3.86 at the wider flare on the arc.
 12. **The same trunk under every head (the owner's: "more uniform trunk sizes").** The crown's trunk follows one law for every
-    head (`crown.trunk.uniformH` 10 mm, tip 2.8 mm, round: `ovalMax` 1): 9.3 mm across at the plate, 3.8 mm at the flare's top, on
+    head (`crown.trunk.uniformH` 10 mm, tip 2.8 mm, round: `ovalMax` 1): 8.0 mm across at the plate, 3.9 mm at the flare's top, on
     all six heads, where it was 8.6 - 10.9 mm (a function of the head's height and the area its tips asked for) and an oval 1.5 : 1
     under the taller ones. The area rule (a trunk as wide as its tips carry) is no longer sized to the tips; the tips are 2 mm
     columns a few millimetres apart and the uniform stem (3.8 mm) is wider than every tree the six heads grow. Gated: bases within
@@ -107,6 +106,22 @@ the option (the shipped Custom feed's bytes are the claude-wip's; `support:feed`
     under the reach is built again without it, so the Negative Spheres' rim sheets (a ring round a cavity) are what they were.
     This is a **flat plate with a reach**, not Bambu's conforming shell (section 5: still open).
     A flat head is unaffected: Base's sheet is 0.18 mm under the part over every cell.
+
+15. **The pad is a hand wider than the trunk, and the trunk is a trumpet (the owner's, second round, off Bambu's pad round a model's stem).**
+    The crown trunk's pad is grown 0.6 mm round its base (`crown.trunk.padGrowMm`; `FOOT_GROW_MM` is 4 for every other foot, as the
+    owner's prints settled it): 9.4 mm across on the 8.0 mm base, where it was 16 - 17 mm. The base stands inside the pad's edge and
+    narrows from there on a curve (`flareAt`, the square of the way up: steep at the plate, tangent to the stem at 4.5 mm) through
+    six rings (`ringZs`), so the trunk is mostly stem and there is no visible joint. Gated (`support:onetrunk`). The model's own brim
+    (Bambu's blue ring round a stem) is not drawn by NSO; the pad keeps FOOT_GAP_MM 0.2 mm off the piece and what stands round it, so
+    a brim of the model's meets the pad's edge there and does not join it.
+16. **The stem stands to 6 mm before the tree branches** (`crown.rootFloorMm` 6, was 4.5; a head whose lowest tip is lower roots as high as
+    the tip's drop allows, 5.8 mm under Oblique's and Circular's 9.0). The 42-tip tree under Oblique's stair had been a bundle of
+    joins 6 - 10 mm across from 4.5 up to 8 mm (the "abnormally thick trunk" next to the other heads' 4 mm stems); it is a ball of
+    branches on a plain stem now. Branch radii are capped at the uniform trunk's (`capR`): none is thicker than the stem it joins.
+17. **A stair tree's posts end at the stair's top** (`clipConvexBelow`). A leaning post of the stair's own tree stood 0.4 - 0.6 mm
+    over the top strip at the stair's high end: two specks of 1.4 and 0.5 mm of line in the slice at z 12.4 and 12.6, floating over
+    where the supports stop (the owner's circle). Each part of a stair tree (tube, ball, post - convex) is cut at the stair's top and
+    capped. Gated: no support stands over the highest sheet's top.
 
 **The interface (`interfaceLayers`, `SHEET.densePitchMm`).** `sheet()` takes `interfaceLayers` (2 unless said): 2 transition
 layers and that many interface layers, the interface alternating across and along the sheet's A. The card's **Dense (Bambu)**

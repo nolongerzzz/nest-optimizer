@@ -206,7 +206,7 @@
   var TRUNK_TIP_MM = 2;        /* the law's diameter at the top (Bambu's tree_support_branch_diameter) */
   var TRUNK_ANGLE_DEG = 5.5;   /* ...growing going down at this half-angle (Bambu's setting is 5; its slice of simple_overhang grows at 5.2) */
   var FLARE_MM = 4.5;            /* the flare: over this much above the plate the trunk widens faster... */
-  var FLARE_ANGLE_DEG = 27;    /* ...by this half-angle more (Bambu's own bottom 4 mm on simple_overhang need 12.4) */
+  var FLARE_ANGLE_DEG = 21;    /* ...by this half-angle more (Bambu's own bottom 4 mm on simple_overhang need 12.4) */
   var TRUNK_SHARE = 0.5;       /* a trunk rises up its stem while the stem holds at least this share of the trunk's tips */
   var TRUNK_KEEP_MM = 0.35;    /* a trunk keeps this far off the piece (Bambu's support_object_xy_distance) */
   var TRUNK_TIP_CLEAR_MM = 4;  /* ...and ends this far under any tip within TRUNK_TIP_REACH_MM of it: under every cap, sheet and gap */
@@ -255,7 +255,7 @@
       ovalMax: pick(o.ovalMax, CROWN_OVAL_MAX), branchTaperDeg: pick(o.branchTaperDeg, CROWN_BRANCH_TAPER_DEG), rootFloorMm: pick(o.rootFloorMm, CROWN_ROOT_FLOOR_MM),
       designLeanDeg: o.designLeanDeg == null ? null : +o.designLeanDeg, nodeRings: Array.isArray(o.nodeRings) ? o.nodeRings.slice() : CROWN_NODE_RINGS.slice(),
       searchStepMm: pick(o.searchStepMm, CROWN_SEARCH_STEP_MM), tipRiseMm: pick(o.tipRiseMm, 0), tubeSides: Math.max(6, Math.round(pick(o.tubeSides, CROWN_TUBE_SIDES))),
-      trunk: { tipMm: pick(t.tipMm, TRUNK_TIP_MM), angleDeg: pick(t.angleDeg, TRUNK_ANGLE_DEG), flareMm: pick(t.flareMm, FLARE_MM), flareAngleDeg: pick(t.flareAngleDeg, FLARE_ANGLE_DEG), footClearMm: pick(t.footClearMm, TRUNK_FOOT_CLEAR_MM), uniformH: t.uniformH == null ? null : +t.uniformH }
+      trunk: { tipMm: pick(t.tipMm, TRUNK_TIP_MM), angleDeg: pick(t.angleDeg, TRUNK_ANGLE_DEG), flareMm: pick(t.flareMm, FLARE_MM), flareAngleDeg: pick(t.flareAngleDeg, FLARE_ANGLE_DEG), footClearMm: pick(t.footClearMm, TRUNK_FOOT_CLEAR_MM), uniformH: t.uniformH == null ? null : +t.uniformH, padGrowMm: t.padGrowMm == null ? null : +t.padGrowMm }
     };
   }
 
@@ -1150,7 +1150,7 @@
       var forbid = null;
       if (opts._forbid && opts._forbid.length) { forbid = {}; opts._forbid.forEach(function (ids) { forbid[ids.slice().sort().join(';')] = true; }); }
       out.crowns = []; out.overLean = []; out.suggested = []; out.blocked = [];
-      function law(z, H) { if (CK.trunk.uniformH != null) H = plateZ + CK.trunk.uniformH; return CK.trunk.tipMm / 2 + taD * Math.max(0, H - z) + (z < zf ? tbD * (zf - z) : 0); }
+      function law(z, H) { if (CK.trunk.uniformH != null) H = plateZ + CK.trunk.uniformH; return CK.trunk.tipMm / 2 + taD * Math.max(0, H - z) + flareAt(z, zf, tbD, CK.trunk.flareMm); }
 
       /* ---- 1. the tips, moved off a wall ---- */
       var tips = live.map(function (b) {
@@ -1298,6 +1298,9 @@
           var zTop = zOf[root.id];
           rootKids.forEach(function (cid) { S[cid][2] = zTop; });
           /* the thickness: area kept at a join, widening going down */
+          /* the uniform trunk (crown.trunk.uniformH): no branch is thicker than the trunk it joins - a stair's forty tips on one root made a
+             tube 8 mm across over a 4 mm stem (the owner: "abnormally thick compared to the others") */
+          var capR = CK.trunk.uniformH != null ? law(zTop, Hmax) : Infinity;
           var rTop = {}, rBot = {}, Abot = {}, rootA = 0;
           order.forEach(function (n) {
             if (n.leaf) { rTop[n.id] = rBot[n.id] = Math.sqrt(tipArea / Math.PI); Abot[n.id] = tipArea; return; }
@@ -1305,8 +1308,8 @@
             n.kids.forEach(function (cid) { A0 += Abot[cid]; });
             A0 *= CK.areaRatio;
             if (n.root) { rootA = A0; return; }
-            rTop[n.id] = Math.sqrt(A0 / Math.PI);
-            rBot[n.id] = rTop[n.id] + taB * (zOf[n.id] - zOf[n.parent]);
+            rTop[n.id] = Math.min(Math.sqrt(A0 / Math.PI), capR);
+            rBot[n.id] = Math.min(rTop[n.id] + taB * (zOf[n.id] - zOf[n.parent]), capR);
             Abot[n.id] = Math.PI * rBot[n.id] * rBot[n.id];
           });
           var rNeed = Math.sqrt(rootA / Math.PI), lawTop = law(zTop, Hmax), rEqTop = CK.trunk.uniformH != null ? lawTop : Math.max(lawTop, rNeed), k = ovalK(rEqTop);
@@ -1914,6 +1917,59 @@
     return out.subarray(0, w);
   }
 
+  /* A CONVEX SOLID CUT AT A HEIGHT: what lies over z = zc is taken off and the cut closed with a cap (a tube, a ball, a post, a cap cone is each convex:
+     the cut is one convex polygon). Triangles over the plane go; those across it are clipped; the cut's points, ordered round their
+     middle, are the cap. A soup wholly under the plane is returned as it was. Used on a stair's own tree: a leaning post ends where
+     the strips' top is, not 0.5 mm over it in the air (a speck in the slice, the owner's "stray piece floating above where supports stop"). */
+  function clipConvexBelow(soup, zc) {
+    var n = soup.length / 9, over = false, i;
+    for (i = 0; i < soup.length; i += 3) if (soup[i + 2] > zc + 1e-6) { over = true; break; }
+    if (!over) return soup;
+    var out = [], cut = [];
+    function put(a, b, c) { out.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]); }
+    function at(a, b) { var t = (zc - a[2]) / (b[2] - a[2]); return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, zc]; }
+    for (i = 0; i < n; i++) {
+      var v = [[soup[9 * i], soup[9 * i + 1], soup[9 * i + 2]], [soup[9 * i + 3], soup[9 * i + 4], soup[9 * i + 5]], [soup[9 * i + 6], soup[9 * i + 7], soup[9 * i + 8]]];
+      var inn = v.map(function (q) { return q[2] <= zc + 1e-6; }), k = inn.filter(Boolean).length;
+      if (k === 3) { put(v[0], v[1], v[2]); continue; }
+      if (k === 0) continue;
+      /* rotate so the odd vertex is v[0] */
+      var odd = k === 1 ? inn.indexOf(true) : inn.indexOf(false), a = v[odd], b = v[(odd + 1) % 3], c = v[(odd + 2) % 3];
+      if (k === 1) { var p1 = at(a, b), p2 = at(a, c); put(a, p1, p2); cut.push(p1, p2); }
+      else { var q1 = at(b, a), q2 = at(c, a); put(b, c, q2); put(b, q2, q1); cut.push(q1, q2); }
+    }
+    if (cut.length >= 3) {
+      var cx = 0, cy = 0;
+      cut.forEach(function (q) { cx += q[0] / cut.length; cy += q[1] / cut.length; });
+      var ring = cut.slice().sort(function (p, q) { return Math.atan2(p[1] - cy, p[0] - cx) - Math.atan2(q[1] - cy, q[0] - cx); });
+      var uniq = [];
+      ring.forEach(function (q) { var l = uniq[uniq.length - 1]; if (!l || Math.hypot(q[0] - l[0], q[1] - l[1]) > 1e-6) uniq.push(q); });
+      for (i = 1; i + 1 < uniq.length; i++) put([cx, cy, zc], uniq[i + 1], uniq[i]);          /* up-facing: counter-clockwise from above */
+      if (uniq.length > 2) put([cx, cy, zc], uniq[1], uniq[0]);
+    }
+    return new Float32Array(out);
+  }
+
+  /* THE FLARE'S CURVE: the extra radius a trunk has over its law under FLARE_MM is a trumpet, not a cone - tb x flareMm at the plate,
+     falling with the square of the way up to the stem, which it meets at the stem's own slope: no visible joint where the base ends
+     and the trunk begins, and a trunk that is mostly trunk (the owner's, on the first cone) */
+  function flareAt(z, zf, tb, fm) {
+    if (!(z < zf)) return 0;
+    var u = (zf - z) / fm;
+    return tb * fm * u * u;
+  }
+  /* the heights a trunk's rings stand at over its flare: the bottom, FLARE_RINGS between, the flare's top, the top */
+  var FLARE_RINGS = 6;
+  function ringZs(z0, zf, top) {
+    var out = [z0];
+    if (zf > z0 + 1e-6 && zf < top - 1e-6) {
+      for (var i = 1; i < FLARE_RINGS; i++) out.push(z0 + (zf - z0) * i / FLARE_RINGS);
+      out.push(zf);
+    }
+    out.push(top);
+    return out;
+  }
+
   /* THE TAPERED BASE, kept where the piece leaves no room for the law's own: a trunk that stood a straight stick up from its
      pad (its room the same at every height) can pop off the plate in the print. Rings [z, r] or [z, a, b], bottom first, are
      held under a cone that starts at the bottom ring - FLARE_ANGLE_DEG a side over the flare's height (zf), the law's own
@@ -1935,7 +1991,7 @@
     if (LW) { ta = Math.tan(LW.angleDeg * Math.PI / 180); tb = Math.tan(LW.flareAngleDeg * Math.PI / 180); zf = plateZ + LW.flareMm; }
     var tipMm = LW ? LW.tipMm : TRUNK_TIP_MM;
     var Hl = LW && LW.uniformH != null ? plateZ + LW.uniformH : g.H;
-    var law = function (z) { return tipMm / 2 + ta * Math.max(0, Hl - z) + (z < zf ? tb * (zf - z) : 0) + cr.dR; };
+    var law = function (z) { return tipMm / 2 + ta * Math.max(0, Hl - z) + flareAt(z, zf, tb, LW ? LW.flareMm : FLARE_MM) + cr.dR; };
     var rec = { c: [cx, cy], H: g.H, stemTop: g.top, top: top, rings: null, why: null, crown: true, k: cr.k, ang: cr.ang };
     f.grown = rec;
     var zs = [];
@@ -1978,9 +2034,7 @@
     var rings;
     if (useK != null) {
       var kk = Math.sqrt(useK);
-      rings = [[zs[0], law(zs[0]) * kk / cosN, law(zs[0]) / kk / cosN]];
-      if (zf > zs[0] + 1e-6 && zf < top - 1e-6) rings.push([zf, law(zf) * kk / cosN, law(zf) / kk / cosN]);
-      rings.push([top, law(top) * kk / cosN, law(top) / kk / cosN]);
+      rings = ringZs(zs[0], zf, top).map(function (zr) { return [zr, law(zr) * kk / cosN, law(zr) / kk / cosN]; });
       rec.k = useK;
     } else {
       /* round, and narrowed where the piece comes near: a ring a millimetre, each held to the least room within a millimetre
@@ -2026,7 +2080,7 @@
       /* the law's inscribed radius at z, and the side's outer radius it is built at (the foot's own law: the knobs', when given) */
       var tipMm = g.law ? g.law.tipMm : TRUNK_TIP_MM, ta = Math.tan((g.law ? g.law.angleDeg : TRUNK_ANGLE_DEG) * Math.PI / 180);
       if (g.crown) { growCrownTrunk(f, fi, g, probes, plateZ, thick, ta, tb, cosN, zf, z0); return; }
-      var law = function (z) { return tipMm / 2 + ta * Math.max(0, g.H - z) + (z < zf ? tb * (zf - z) : 0); };
+      var law = function (z) { return tipMm / 2 + ta * Math.max(0, g.H - z) + flareAt(z, zf, tb, FLARE_MM); };
       var Rmax = law(z0) / cosN, top = g.top;
       tips.forEach(function (q) {
         if (Math.hypot(q[0] - cx, q[1] - cy) <= Rmax + TRUNK_TIP_REACH_MM) top = Math.min(top, q[2] - TRUNK_TIP_CLEAR_MM);
@@ -2050,9 +2104,7 @@
       });
       var rings;
       if (zs.every(function (zz, k) { return law(zz) / cosN <= allow[k]; })) {
-        rings = [[z0, law(z0) / cosN]];
-        if (zf > z0 + 1e-6 && zf < top - 1e-6) rings.push([zf, law(zf) / cosN]);
-        rings.push([top, law(top) / cosN]);
+        rings = ringZs(z0, zf, top).map(function (zr) { return [zr, law(zr) / cosN]; });
       } else {
         /* narrowed where the piece comes near: a ring a millimetre, each held
            to the least room within a millimetre of it (so every height between
@@ -2225,6 +2277,12 @@
     return P;
   }
   function TM(o) { return (o && o.thickness) || (root && root.NSO_Thickness) || null; }
+  /* how far a foot's pad is grown past its trunk's base: FOOT_GROW_MM, or - the crown's trunk, with its own law (crown.trunk.padGrowMm) - that:
+     a pad a hand wider than the trunk, the way Bambu's is round a model's stem (the owner's, on the first cone) */
+  function padGrowOf(f) {
+    var law = f.grow && f.grow.crown && f.grow.crown.law;
+    return law && law.padGrowMm != null ? Math.min(FOOT_GROW_MM, law.padGrowMm) : FOOT_GROW_MM;
+  }
   function footPads(TH, obstacles, feet, plateZ, thick) {
     var res = { pads: [], groups: [], clusters: [], clustersSplit: 0, hemmed: 0, padsDropped: 0, holesFilled: 0, holesSlotted: 0, cellMm: FOOT_CELL_MM, failed: [] };
     if (!feet.length) return res;
@@ -2326,7 +2384,7 @@
     /* the raster */
     var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     feet.forEach(function (f) { x0 = Math.min(x0, f.c[0] - f.r); x1 = Math.max(x1, f.c[0] + f.r); y0 = Math.min(y0, f.c[1] - f.r); y1 = Math.max(y1, f.c[1] + f.r); });
-    var mg = FOOT_GROW_MM + 6 * FOOT_CELL_MM;
+    var mg = FOOT_GROW_MM + 6 * FOOT_CELL_MM;   /* (the widest a pad grows: a foot's own padGrow is never more) */
     x0 -= mg; y0 -= mg; x1 += mg; y1 += mg;
     var h = Math.max(FOOT_CELL_MM, Math.sqrt((x1 - x0) * (y1 - y0) / FOOT_CELLS_MAX));
     res.cellMm = h;
@@ -2335,7 +2393,7 @@
     function cy(jj) { return y0 + (jj + 0.5) * h; }
     var grow = new Uint8Array(N), core = new Int32Array(N).fill(-1), solid = new Uint8Array(N), block = new Uint8Array(N);
     feet.forEach(function (f, fi) {
-      var Rg = f.r + FOOT_GROW_MM, rg2 = Rg * Rg, rc = Math.max(h, (f.core != null ? f.core : f.r * Math.SQRT1_2) - h * (1 + Math.SQRT1_2)), rc2 = rc * rc, fx = f.c[0], fy = f.c[1];
+      var Rg = f.r + padGrowOf(f), rg2 = Rg * Rg, rc = Math.max(h, (f.core != null ? f.core : f.r * Math.SQRT1_2) - h * (1 + Math.SQRT1_2)), rc2 = rc * rc, fx = f.c[0], fy = f.c[1];
       var i0 = Math.max(0, Math.floor((fx - Rg - x0) / h)), i1 = Math.min(nx - 1, Math.ceil((fx + Rg - x0) / h));
       var j0 = Math.max(0, Math.floor((fy - Rg - y0) / h)), j1 = Math.min(ny - 1, Math.ceil((fy + Rg - y0) / h));
       for (var jj = j0; jj <= j1; jj++) {
@@ -3112,7 +3170,7 @@
       var tb = Math.tan(FLARE_ANGLE_DEG * Math.PI / 180), cosN = Math.cos(Math.PI / TRUNK_SIDES);
       var tipMm = g.law ? g.law.tipMm : TRUNK_TIP_MM, ta = Math.tan((g.law ? g.law.angleDeg : TRUNK_ANGLE_DEG) * Math.PI / 180);
       var z0 = p.plateZ + foot / 2, zf = p.plateZ + FLARE_MM, top = Math.min(g.top, from[2]);
-      var law = function (z) { return tipMm / 2 + ta * Math.max(0, g.H - z) + (z < zf ? tb * (zf - z) : 0); };
+      var law = function (z) { return tipMm / 2 + ta * Math.max(0, g.H - z) + flareAt(z, zf, tb, FLARE_MM); };
       var zs = [];
       for (var z = z0; z < top - 1e-9; z += 2 * TRUNK_STEP_MM) zs.push(z);
       function fits(c) {
@@ -3189,10 +3247,8 @@
         var ft = { key: t, trunk: t, c: [A0[0], A0[1]], r: aBase * Math.sqrt(rootM.oval.k) / Math.cos(Math.PI / TRUNK_SIDES) };
         if (grow) ft.grow = gw;
         else {
-          var lawF = function (z) { return LW.tipMm / 2 + Math.tan(LW.angleDeg * Math.PI / 180) * Math.max(0, Hlaw - z) + (z < p.plateZ + LW.flareMm ? Math.tan(LW.flareAngleDeg * Math.PI / 180) * (p.plateZ + LW.flareMm - z) : 0) + rootM.oval.dR; };
-          var cN = Math.cos(Math.PI / TRUNK_SIDES), kq = Math.sqrt(rootM.oval.k), zz0 = p.plateZ + foot / 2, rg = [zz0];
-          if (p.plateZ + LW.flareMm > zz0 + 1e-6 && p.plateZ + LW.flareMm < A0[2] - 1e-6) rg.push(p.plateZ + LW.flareMm);
-          rg.push(A0[2]);
+          var lawF = function (z) { return LW.tipMm / 2 + Math.tan(LW.angleDeg * Math.PI / 180) * Math.max(0, Hlaw - z) + flareAt(z, p.plateZ + LW.flareMm, Math.tan(LW.flareAngleDeg * Math.PI / 180), LW.flareMm) + rootM.oval.dR; };
+          var cN = Math.cos(Math.PI / TRUNK_SIDES), kq = Math.sqrt(rootM.oval.k), zz0 = p.plateZ + foot / 2, rg = ringZs(zz0, p.plateZ + LW.flareMm, A0[2]);
           parts.push({ soup: revolveSoup(A0[0], A0[1], rg.map(function (z) { return [z, lawF(z) * kq / cN, lawF(z) / kq / cN]; }), TRUNK_SIDES, crownPhase(t, TRUNK_SIDES), rootM.oval.ang), trunkShell: true });
         }
         feet.push(ft);
@@ -3321,7 +3377,7 @@
             /* GRAFTED (a custom plan): the stair's branches join the circle's own trunk - one trunk to a circle. Its
                top branches enter the trunk where they are going, and the trunk is as wide as both asked for. */
             var he = out.filter(function (o) { return o.trunk === host; })[0], hf = feet.filter(function (f) { return f.trunk === host; })[0];
-            he.parts = he.parts.concat(x.parts);
+            he.parts = he.parts.concat(x.parts.map(function (q) { return q.sheet || !q.soup ? q : Object.assign({}, q, { soup: clipConvexBelow(q.soup, L.zTop) }); }));
             if (hf && hf.grow && hf.grow.crown) {
               var cH = p.crowns[p.trunks[host].crown], g2 = hf.grow.crown;
               g2.areaR2 = (g2.areaR2 == null ? cH.rNeed * cH.rNeed : g2.areaR2) + zc.rNeed * zc.rNeed;
@@ -3334,7 +3390,7 @@
           }
           var T = p.trunks.length + stairTrunks.length;
           tmap[x.trunk] = T;
-          out.push({ trunk: T, parts: x.parts, fingerParts: [], fingers: 0 });
+          out.push({ trunk: T, parts: x.parts.map(function (q) { return q.sheet || !q.soup ? q : Object.assign({}, q, { soup: clipConvexBelow(q.soup, L.zTop) }); }), fingerParts: [], fingers: 0 });
           /* path and pts: what members() names it by, and which of the stair's spots it carries */
           stairTrunks.push({ beacons: [], landing: tr2.landing, stair: L.id,
                              path: p2.members[tr2.root].path.map(function (q) { return q.slice(); }),
@@ -4149,7 +4205,7 @@
   var ONE = {
     coverMm: 3.3,         /* every beacon is within this of a tip: a cap (up to 2 mm out) and the sheet's field (1.25 mm) reach 3.25 */
     clusterMm: 12,        /* a cluster's tips lie within this of its centre: one trunk feeds a canopy of about this radius (Bambu's own, 14 mm across; 12 left the fewest over-lean members on a 40 x 30 mm slab: 5 trunks, against 8 at 9 and 3 at 15) */
-    crown: { tipDropMm: 3.2, nodeDropMm: 2, rootFloorMm: 4.5, ovalMax: 1, trunk: { tipMm: 2.8, uniformH: 10 } },   /* a canopy is 3.2 mm of straight tip, then joins 2 mm apart, on a trunk that stands 4.5 mm clear of the plate (its flare is 4.5) */
+    crown: { tipDropMm: 3.2, nodeDropMm: 2, rootFloorMm: 6, ovalMax: 1, trunk: { tipMm: 2.8, uniformH: 10, padGrowMm: 0.6 } },   /* a canopy is 3.2 mm of straight tip, then joins 2 mm apart, on a trunk that stands 6 mm clear of the plate (its flare is 4.5, curved, and the stem above it plain) */
     lowMm: 4,             /* a spot this near the plate (the low edge of a tipped part) is on the first layers: nothing is stood under it, and it is held by the plate */
     minTips: 3,           /* an area of three spots or more keeps three tips at least: a curved underside is a stair only from three (nso_support_interface.js STAIR_MIN_TIPS) */
     zWindowMm: 4,         /* tips more than this apart in height (gap to the next tip up) are not served by one trunk */
@@ -4463,6 +4519,7 @@
       return { tipMm: k ? k.trunkTipMm : TRUNK_TIP_MM, angleDeg: k ? k.trunkAngleDeg : TRUNK_ANGLE_DEG, flareMm: FLARE_MM, flareAngleDeg: FLARE_ANGLE_DEG };
     },
     KNOBS: { keys: KNOB_KEYS.slice() },
+    flareAt: flareAt,        /* the extra radius the flare gives a trunk at z: flareAt(z, plateZ + flareMm, tan(flareAngle), flareMm) */
     TRUNK: { tipMm: TRUNK_TIP_MM, angleDeg: TRUNK_ANGLE_DEG, flareMm: FLARE_MM, flareAngleDeg: FLARE_ANGLE_DEG, share: TRUNK_SHARE,
              keepMm: TRUNK_KEEP_MM, tipClearMm: TRUNK_TIP_CLEAR_MM, tipReachMm: TRUNK_TIP_REACH_MM, sides: TRUNK_SIDES, footClearMm: TRUNK_FOOT_CLEAR_MM },
     JOINS: JSON.parse(JSON.stringify(JOINS)),

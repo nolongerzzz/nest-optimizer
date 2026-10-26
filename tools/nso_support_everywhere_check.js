@@ -299,8 +299,8 @@ const POSES = [[0, 0], [45, 0], [0, 15], [45, 15]];
 
 /* the supports of the flat pieces, hashed on the engine as it stood before this ticket (claude-wip 413be05), re-pinned when every trunk got the tapered base (supports-one-trunk: flare 4.5 mm at 27 deg, was 4 mm at 15) */
 const FLAT_HASH = {
-  top_clip_x2_coupon: { file: 'fixtures/supports/top_clip_x2_coupon.stl', hash: '03b65cb7c4e48072', objects: 1 },
-  top_clip_x2:        { file: 'fixtures/supports/top_clip_x2.stl', hash: 'aff5de82346aacf7', objects: 2 }
+  top_clip_x2_coupon: { file: 'fixtures/supports/top_clip_x2_coupon.stl', hash: 'dd44296b14d12c63', objects: 1 },
+  top_clip_x2:        { file: 'fixtures/supports/top_clip_x2.stl', hash: 'fdfd0e704eac379b', objects: 2 }
 };
 const TAPE_HASH = 'fb53cfefd9e4a9a6';
 function lowered(s) {

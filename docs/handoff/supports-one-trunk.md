@@ -35,6 +35,12 @@ Branch `claude-wip`. Engine: `nso_support_gridpack.js` (`planOneTrunk`, `thinTip
   layer, 0.2 mm, against a gap of 0.18 mm). Gated in `support:onetrunk` (taper, uniformity, curved-head gap and centring).
 - **Still not Bambu's conforming shell**: a curved head's sheet is a plate with a reach (OPEN 2).
 
+**Third round (the owner's, on the second push)**
+- Pad down to a hand wider than the trunk (0.6 mm, `padGrowMm`); the trunk a curved trumpet, not a cone (`flareAt`, 21 deg, 4.5 mm); the lattice's
+  trunks take the same curve (re-pinned: `support:everywhere`, `support:plate`). Oblique's thick bundle (the stair tree's joins at 4.5 - 8 mm) is a plain
+  stem to 6 mm now (`rootFloorMm` 6). The speck over the stair's top is gone (`clipConvexBelow`). Items 15 - 17 in `docs/SUPPORT-ONE-TRUNK.md`.
+- Not done: NSO draws no brim round the model's stem; the "brim meets the pad and does not join" is the pad's 0.2 mm off the piece.
+
 **OPEN for the owner**
 1. **Dense interface is unprinted.** The card defaults to Dense (Bambu's spacing 0.1: lines 0.47 mm apart, 3 interface layers).
    The 0.84 mm sheet was settled by the owner's own prints; Dense is built and sliced here, not printed. Interface > Open puts it back.

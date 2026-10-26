@@ -271,6 +271,11 @@ const segLen = s => Math.hypot(s.x1 - s.x0, s.y1 - s.y0);
     row.off = trunkAxes.length && cen ? Math.min(...trunkAxes.map(t => Math.hypot(t[0] - cen[0], t[1] - cen[1]))) : null;
     row.notes = notes;
     const lv0 = [].concat(...b.areas.map(a => (a.tp.sheet && a.tp.sheet.levels) || []))[0];
+    /* nothing stands over the sheet's top: no speck of support in the air above where the supports stop */
+    const topZ = Math.max(...[].concat(...b.areas.map(a => (a.tp.sheet && a.tp.sheet.levels) || [])).map(L => L.zTop || 0));
+    let maxZ = -Infinity;
+    for (let i = 2; i < b.objects[1].soup.length; i += 3) if (b.objects[1].soup[i] > maxZ) maxZ = b.objects[1].soup[i];
+    row.over = maxZ - topZ;
     row.maxGap = lv0 && lv0.zTop != null ? sheetGapMax(piece, b.objects[1].soup, lv0.zTop) : null;
     rows.push(row);
     console.log('        ' + k.padEnd(12) + String(row.trunks).padStart(3) + ' (' + row.trunksBefore + ')' + String(row.tips).padStart(9) + String(row.spots - row.unsupported).padStart(4) + '/' + String(row.spots).padEnd(4) +
@@ -290,12 +295,25 @@ const segLen = s => Math.hypot(s.x1 - s.x0, s.y1 - s.y0);
   const trunkRings = [].concat(...rows.map(r => (r.b.sf.trunks || []).map(t => ({ key: r.key, rings: t.rings || [] }))));
   const rad = ring => Math.max(ring[1], ring[2] == null ? 0 : ring[2]);
   const base = trunkRings.map(t => t.rings.length ? rad(t.rings[0]) : 0);
-  const tops = trunkRings.map(t => t.rings.length > 1 ? rad(t.rings[1]) : Infinity);
+  /* the ring at the flare's top (the flare is a curve now: rings between the plate and it) */
+  const tops = trunkRings.map(t => { const q = t.rings.find(r => Math.abs(r[0] - GP.TRUNK.flareMm) < 0.15); return q ? rad(q) : (t.rings.length > 1 ? rad(t.rings[t.rings.length - 1]) : Infinity); });
   check('every trunk is tapered: its base at least 1.4 x as wide as it is at the flare\'s top (' + GP.TRUNK.flareMm + ' mm), widening all the way down',
     trunkRings.length > 0 && trunkRings.every((t, i) => t.rings.length > 1 && base[i] >= 1.4 * tops[i] && t.rings.every((q, j) => j === 0 || rad(q) <= rad(t.rings[j - 1]) + 1e-9)),
     trunkRings.map((t, i) => t.key + ' ' + f1(2 * base[i]) + ' -> ' + f1(2 * tops[i]) + ' mm').join(', '));
+  /* the pad: a hand wider than the trunk's base (Bambu's is round the model's stem), not a plate; the base stands inside its edge */
+  const padSpread = rows.map(r => {
+    const t = (r.b.sf.trunks || [])[0], po = (r.b.sf.padOutlines || [])[0];
+    if (!t || !po) return null;
+    const xs = po.poly.map(q => q[0]), ys = po.poly.map(q => q[1]);
+    return { key: r.key, pad: Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)), base: 2 * t.padR };
+  }).filter(Boolean);
+  check('the pad is a hand wider than the trunk\'s base: no more than 1.6 mm wider across (0.6 round it), the base inside its edge',
+    padSpread.length > 0 && padSpread.every(x => x.pad >= x.base - 1e-6 && x.pad - x.base <= 1.6 + 1e-6),
+    padSpread.map(x => x.key + ' pad ' + f1(x.pad) + ' base ' + f1(x.base)).join(', '));
   check('the same trunk under every head: bases within 15 % of one another, and round', base.length > 0 && Math.max(...base) <= 1.15 * Math.min(...base) &&
     trunkRings.every(t => t.rings.length && Math.abs(t.rings[0][1] - t.rings[0][2]) < 0.2), 'bases ' + base.map(v => f1(2 * v)).join(' / ') + ' mm');
+  check('no support stands over the sheet\'s top (no speck in the air where the supports stop)', rows.every(r => r.over <= 0.05),
+    rows.map(r => r.key + ' ' + f2(r.over)).join(', '));
   check('a sheet under a curved head stays where the part is near it: no more than 1.5 mm under the part over any cell of the plate, and its middle within 1.5 mm of the trunk\'s',
     rows.filter(r => r.key === 'circular' || r.key === 'sphere').every(r => r.maxGap != null && r.maxGap <= 1.5 && r.off <= 1.5),
     rows.filter(r => r.key === 'circular' || r.key === 'sphere').map(r => r.key + ' gap ' + (r.maxGap == null ? '-' : f2(r.maxGap)) + ' off ' + (r.off == null ? '-' : f1(r.off))).join(', '));

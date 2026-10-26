@@ -387,7 +387,7 @@ function oneTrunkEach(sh) {
     });
   }
   /* the oval's area at each of its rings against Bambu's law (a round trunk's, area for area) */
-  const lawR = (z, H, plateZ) => TR.tipMm / 2 + Math.tan(TR.angleDeg * Math.PI / 180) * Math.max(0, H - z) + (z < plateZ + TR.flareMm ? Math.tan(TR.flareAngleDeg * Math.PI / 180) * (plateZ + TR.flareMm - z) : 0);
+  const lawR = (z, H, plateZ) => TR.tipMm / 2 + Math.tan(TR.angleDeg * Math.PI / 180) * Math.max(0, H - z) + GP.flareAt(z, plateZ + TR.flareMm, Math.tan(TR.flareAngleDeg * Math.PI / 180), TR.flareMm);
   function trunkVsLaw(b) {
     let worst = Infinity, n = 0;
     (b.tp.trunkShells || []).forEach(t => {
@@ -526,7 +526,7 @@ function oneTrunkEach(sh) {
       for (const r of recs) {
         for (const [z, R] of r.rings) {
           const want = law.tipMm / 2 + tanDeg(law.angleDeg) * Math.max(0, r.H - z) +
-            (z < a.p.plateZ + law.flareMm ? tanDeg(law.flareAngleDeg) * (a.p.plateZ + law.flareMm - z) : 0);
+            GP.flareAt(z, a.p.plateZ + law.flareMm, tanDeg(law.flareAngleDeg), law.flareMm);
           if (r.narrowed) { narrowed++; if (R * cosN > want + 1e-9) bound++; } else worst = Math.max(worst, Math.abs(R * cosN - want));
         }
       }
@@ -601,7 +601,8 @@ function oneTrunkEach(sh) {
     console.log('  -- trunkAngleDeg 0');
     {
       const a = ang0, L = lawCheck(a), L0 = lawCheck(base);
-      const straight = r => Math.abs(r.rings[1][1] - topR(r)) < 1e-9, free = L.recs.filter(r => !r.narrowed && r.rings.length >= 3);
+      const atFlare = r => (r.rings.find(q => Math.abs(q[0] - (r.rings[0][0] - 0.1 + GP.TRUNK.flareMm)) < 0.05) || r.rings[1])[1];   /* the ring at the flare's top: the flare is a curve of rings now */
+      const straight = r => Math.abs(atFlare(r) - topR(r)) < 1e-9, free = L.recs.filter(r => !r.narrowed && r.rings.length >= 3);
       check('coupon, trunkAngleDeg 0: every trunk the piece does not narrow stands as wide at its top as above its flare - straight; at the default none does',
         a.ok && free.length > 0 && free.every(straight) && L.worst < 1e-9 && !L.bound &&
         L0.recs.filter(r => !r.narrowed && r.rings.length >= 3).every(r => !straight(r)),
