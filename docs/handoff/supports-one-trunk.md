@@ -3,7 +3,7 @@ Branch `claude-wip`. Engine: `nso_support_gridpack.js` (`planOneTrunk`, `thinTip
 `insideSigned`, crown knobs `tipRiseMm` / `trunk.footClearMm` / per-zone `maxKids`, `ONE`), `nso_support_interface.js`
 (`interfaceLayers`, `SHEET.densePitchMm`, the strip-length test), `nso_slicer.js` (`supportInterfaceLayers`). Card:
 `app-supports-card.js` + `index.html` (the **One trunk per cluster** box, the **Interface** select, `groupAreas`). Gate:
-`npm run support:onetrunk`. Docs: `docs/SUPPORT-ONE-TRUNK.md` (the whole story and the table), `docs/SUPPORTS-CARD.md` section 8.
+`npm run support:onetrunk`. Docs: `docs/SUPPORT-ONE-TRUNK.md` (the whole story and the table), `docs/SUPPORTS-CARD.md` section 9.
 
 - **Why #301 "came back further":** it laid sheets and stairs under every tip and left the tree (its own table: "trunk count
   unchanged"), so the six reference heads still stood 6 / 23 / 3 / 3 / 6 / 3 trunks of square posts where Bambu stands one.

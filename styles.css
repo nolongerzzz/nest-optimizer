@@ -4421,6 +4421,8 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
 .sup-card .sup-row:hover { background: rgba(148, 163, 184, 0.22); }
 .sup-card .sup-row-unreachable { border-left: 3px solid #ff2d2d; }
 .sup-card .sup-row-unsupported { border-left: 3px solid #7b8494; }
+/* .vp-check is display: flex, which beats [hidden]: the plate option is offered only with two or more pieces. */
+.sup-card .sup-plate[hidden] { display: none; }
 /* The card's readout is the one place it speaks: while Supports is open the
    build tag ("HUD inside7") is not drawn over the plate. */
 body.sup-card-open #adjust-status { display: none; }

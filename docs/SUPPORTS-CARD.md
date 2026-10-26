@@ -508,7 +508,7 @@ git-ignored `tools/supports-custom-card-out/`.
 - The standing supports are not dimmed in the 3D view when stale; the card's
   readout is.
 
-## 8. One trunk, and the interface (supports-one-trunk)
+## 9. One trunk, and the interface (supports-one-trunk)
 
 Two controls under Style / Size / May rest on the part, both settings (not Undo steps), both disabled while a build runs:
 
@@ -519,6 +519,67 @@ Two controls under Style / Size / May rest on the part, both settings (not Undo 
 
 Straight strut and Gecko-hand are one post (or hand) a spot by definition and are never one trunk. Assisted and Custom
 send their feeds as before and are not one trunk; their sheets stay Open (a hand-placed row of three tips formed no sheet at 0.47 mm in `support:custom`, where it forms one at 0.84).
+## 8. Generate for plate (supports-plate-wide)
+
+UI and orchestration only (`app-supports-card.js`, `index.html`, `styles.css`); the engine is not
+changed. With two or more pieces on the plate the card offers **Generate for plate** (`#sup-plate`,
+under the Angle). It is an option, not a "nothing selected" trigger: with nothing selected the card
+is as it was ("Click a piece to see where it needs holding").
+
+- **On.** Every real (non-support) piece is lit as a selection is (the red tint and the white outline,
+  one outline per piece, drawn by the app's own `refreshOutline` into the piece's `p.outline` slot, so
+  `clearSelectionOutline`, `selectPlaced` and the undo restore already take it down), none is selected,
+  and every piece is detected. The readout: **"6 pieces · 8 hanging areas at 35°"** (Assisted counts
+  spots, Custom tips). The angle is the card's, editable as ever; the tools row is not shown. The
+  option is not shown with one piece.
+- **GENERATE** loops the piece's build (`runPiece`, `settleResults`, `placeResults`: the single build
+  is these three plus `startJob` / `finishJob`) over the pieces in plate order, each with its own
+  remembered state (areas left out, tips, circles, erasures - `asHost` points the card at each piece
+  and calls its own `effective`, `snapshot`, ...). Style, Size, "May rest" and the angle are the card's.
+  ONE bar: **"Piece 2 of 6 · Planning 142 / 344 · 21 %"** - the counts are the piece's, the percent is
+  the plate's (a piece's share is its spots over the plate's; 100 only on the last piece's last unit).
+- **The plate is touched once**, at the very end (`buildWide`'s `commit`): every built piece's old
+  supports off, the new ones on, ONE `supportSwap` Undo step. Escape, the watchdog or an exception
+  ends everything with the plate as it was and no step. **REGENERATE** replaces every piece's supports.
+  A piece with nothing hanging, with every area left out, or one the planner refuses (its answer is
+  "not ok" and names no spot inside the part) is reported in a row and does not stop the others;
+  a piece whose areas the plate cannot reach (`inside`) is built with those spots unreachable. Pieces
+  not built keep the supports they had.
+- **Built:** "Built: M supports on K pieces · held H · unsupported U · unreachable R" and a row per piece
+  that needs a look ("Support Oblique · unreachable 1", "Box · no hanging area", "B · refused: ...").
+  A click on a row selects and frames that piece - which is a single piece picked, so the option goes off
+  and the card is on that piece. REMOVE ALL / REMOVE stay per piece.
+- **Off.** Switching the option off puts the card back on the piece it was on (if one was);
+  a piece picked, added or removed, the plate cleared, an Undo that restores the plate, and the card
+  closing all end the option and take the highlight with it (`wideHolds`: the highlight *is* the option,
+  checked every frame). The Undo of a plate build also ends it.
+- **Watchdog and ceiling.** The watchdog is silence, as before: 60 s with no message from the planner,
+  every message starting it again, so the plate's total time does not matter. The 10 min ceiling is
+  per piece: `startJob`'s `arm()` is called again as each piece begins (and the message names the
+  piece: "B was still running after 10 min"); it is not a limit on the plate.
+- **Pieces do not touch.** Each piece is planned with the supports the earlier pieces of the run built
+  added to its occluders (`D.opts.occluders`, the option detection and the planner already take for the
+  other pieces' *bodies*, shareFeet's included), so a later piece's trunks, feet and pads are routed
+  round them. Order is plate order.
+
+### Measured: the gaps
+
+On `fixtures/supports/supp_ref.3mf` (six parts, laid out as an import lays them: a row, 4 mm apart):
+
+| | supports vs other pieces' bodies | supports of different pieces |
+| --- | --- | --- |
+| six single-piece builds, one after another (no occluders) | 2.973 mm | **0.000 mm** (five neighbouring pairs touch, on the first layer) |
+| Generate for plate (earlier supports as occluders) | 2.973 mm | **0.293 mm** (five pairs, 0.293 - 0.309) |
+
+The slice's `support_object_xy_distance` is 0.35 mm. The occluder option stops the supports touching, and
+holds them well clear of every body, but the pads keep only `FOOT_GAP_MM` = 0.2 mm (plus the raster's
+slack) off an occluder (`nso_support_gridpack.js`): **0.293 mm is short of 0.35 mm, and getting there is
+an engine change** (that constant, or the pad raster's keep-off), so it is its own ticket and was not made
+here. `tools/nso_support_plate_test.js` prints it as `KNOWN-GAP`; `NSO_STRICT_GAP=1` makes it a failure.
+
+Check: `npm run support:plate` (`tools/nso_support_plate_test.js`, Node only, ~4 min: the card file itself
+run in a vm with the real engine; `tools/nso_support_plate_lib.js`). `NSO_PLATE_QUICK=1` skips the
+six-part build for development. No browser step.
 
 ## Paint scope: sub-region (detection)
 
