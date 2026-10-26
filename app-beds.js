@@ -40,6 +40,8 @@ var NSO_BEDS = (function () {
   var bedSeq = 0, moveSeq = 0;
   var pressed = null;              // a left press that started on a bed that is not active
   var activeLabel = null;          // the active bed's label, in the scene at the origin
+  var refused = false;             // the last movePiece said no, in words, and that is what the status line should keep
+  var sized = null, resized = false;   // the plate size the floors were last built to, and whether it has just changed
 
   function say(msg, err) { if (typeof setStatus === 'function') setStatus(msg, !!err); }
 
@@ -211,6 +213,9 @@ var NSO_BEDS = (function () {
   /* buildPlateMesh has just built the active bed's floor at the origin. Rebuild everyone else's, and the
      labels, which exist only while there is more than one bed. */
   function afterPlateBuilt() {
+    var p0 = plate();
+    if (sized && (sized.w !== p0.w || sized.d !== p0.d)) resized = true;
+    sized = { w: p0.w, d: p0.d };
     if (activeLabel) {
       if (activeLabel.parent) activeLabel.parent.remove(activeLabel);
       disposeTree(activeLabel);
@@ -233,6 +238,8 @@ var NSO_BEDS = (function () {
       if (i === active) return;
       groupsOf(b);
       b.floor = buildFloor(i);
+      b.grids = [];
+      b.floor.traverse(function (n) { if (n.userData && n.userData.plateGrid) b.grids.push(n); });
       b.group.add(b.floor);
     });
     layoutGroups();
@@ -242,8 +249,8 @@ var NSO_BEDS = (function () {
 
   function setGridVisible(on) {
     beds.forEach(function (b, i) {
-      if (i === active || !b.floor) return;
-      b.floor.traverse(function (n) { if (n.userData && n.userData.plateGrid) n.visible = on; });
+      if (i === active || !b.grids) return;
+      b.grids.forEach(function (n) { n.visible = on; });
     });
   }
 
@@ -269,8 +276,10 @@ var NSO_BEDS = (function () {
       return 'A boolean is still running - wait for it, or press Escape, before changing plate.';
     if (typeof NSO_SUPPORTS_CARD !== 'undefined' && NSO_SUPPORTS_CARD.busy && NSO_SUPPORTS_CARD.busy())
       return 'Supports are still building - wait for them, or press Escape, before changing plate.';
+    if (typeof NSO_CSG !== 'undefined' && NSO_CSG.loading && NSO_CSG.loading())
+      return 'The boolean kernel is still loading - wait for it before changing plate.';
     if (state.importsPending > 0)
-      return 'A big piece is still being indexed - wait for it before changing plate.';
+      return 'A file is still being read or a big piece indexed - wait for it before changing plate.';
     return null;
   }
 
@@ -401,6 +410,8 @@ var NSO_BEDS = (function () {
   /* A plate size change clears the plate (updatePlateInfo); it applies to every bed, each wiped the way the
      active one is: the pieces come off, the models stay. */
   function plateSizeChanged() {
+    if (!resized) return;             // the same size again (a 3MF restoring its plate preset): the other beds are left alone
+    resized = false;
     beds.forEach(function (b, i) {
       if (i === active || !b.placed) return;
       b.placed.forEach(function (p) {
@@ -424,13 +435,14 @@ var NSO_BEDS = (function () {
     if (beds.length < 2 || !state.renderer || !state.camera) return -1;
     setPointerFromEvent(event);
     state.raycaster.setFromCamera(state.pointer, state.camera);
-    var targets = [state.plateMesh];
+    var targets = [state.plateMesh, state.modelGroup];
     beds.forEach(function (b, i) { if (i !== active && b.group) targets.push(b.group); });
     var hits = state.raycaster.intersectObjects(targets.filter(Boolean), true);
     for (var h = 0; h < hits.length; h++) {
       var o = hits[h].object;
       if (o === state.plateMesh) return active;
       for (var n = o; n; n = n.parent) {
+        if (n === state.modelGroup) return active;
         for (var j = 0; j < beds.length; j++) if (beds[j].group === n) return j;
       }
     }
@@ -467,8 +479,11 @@ var NSO_BEDS = (function () {
 
   /* The bed a flat drag was dropped over: the one the piece's own origin (p.x, p.z) is over, other than the
      active bed; -1 when it is over the active bed or over no bed. */
-  function dropTarget(p) {
+  function dropTarget(p, from) {
     if (beds.length < 2 || !p) return -1;
+    var pl = plate();
+    // a piece that started off its own bed (placed past the edge, say) is being moved about, not carried off it
+    if (from && (Math.abs(from.x) > pl.w / 2 || Math.abs(from.z) > pl.d / 2)) return -1;
     return bedAt(p.x, p.z);
   }
 
@@ -495,13 +510,31 @@ var NSO_BEDS = (function () {
     return state.placed.indexOf(p);
   }
 
+  /* A piece that cannot go alone: another piece on this bed is the same model (a quantity of several), it has
+     supports (their own pieces, tied to it by id), or it is a support. They stay together, so none is moved. */
+  function moveRefusal(p, m) {
+    if (!m) return null;
+    var name = p.name || m.name || 'This piece';
+    if (state.placed.some(function (q) { return q !== p && q.sourceId === p.sourceId; }))
+      return name + ' has copies of the same model on this plate - it stays here (a model moves between plates whole).';
+    if (m.nsoSupport) return name + ' is a support - supports stay with the piece they hold up.';
+    if (state.models.some(function (x) { return x.nsoSupport && x.nsoSupport.hostSourceId === m.id; }))
+      return name + ' has supports on this plate - remove them first, or they would be left holding up nothing.';
+    return null;
+  }
+
   /* The piece at index idx of the active bed, dropped over bed `to`: it keeps its pose, lands on that bed's
      floor where it was let go, joins that bed's Pieces list and that bed becomes active. `from` is the pose
      it was picked up in. Two Undo entries, one on each bed's line (see the head of this file). */
   function movePiece(idx, to, from) {
     var p = state.placed[idx], T = beds[to], S = beds[active];
+    refused = false;
     if (!p || !p.mesh || !T || !S || T === S) return false;
     var m = p.sourceId != null ? state.models.find(function (x) { return x.id === p.sourceId; }) || null : null;
+    var why = busyReason();
+    if (why) { say(why, true); refused = true; return false; }
+    var tied = moveRefusal(p, m);
+    if (tied) { say(tied, true); refused = true; return false; }
     var off = offsetOf(to);
     var tx = p.x - off.x, tz = p.z - off.z;
     var id = ++moveSeq;
@@ -535,6 +568,13 @@ var NSO_BEDS = (function () {
      is just dropped (it can no longer be undone). */
   function undoMove(entry) {
     var isIn = entry.type === 'bedMoveIn';
+    var why = busyReason();
+    if (why) {
+      state.undoStack.push(entry);
+      updateUndoBtn();
+      say(why, true);
+      return { refused: true };
+    }
     var other = bedById(isIn ? entry.fromBed : entry.toBed);
     var partner = isIn ? 'bedMoveOut' : 'bedMoveIn';
     var at = -1;
@@ -555,6 +595,7 @@ var NSO_BEDS = (function () {
       say('Undo the later steps on Plate ' + (indexOfBed(other) + 1) + ' first - the move is under them.', true);
       return { refused: true };
     }
+    closeEverything('plate-move');
     var partnerEntry = other.undoStack.pop();
     var out = isIn ? partnerEntry : entry;
     var S = isIn ? other : beds[active];
@@ -625,7 +666,7 @@ var NSO_BEDS = (function () {
   return {
     MAX: MAX_BEDS,
     count: count, activeIndex: activeIndex, activeNumber: activeNumber, canDelete: canDelete,
-    add: add, activate: activate, deleteActive: deleteActive, movePiece: movePiece, undoMove: undoMove,
+    add: add, activate: activate, deleteActive: deleteActive, movePiece: movePiece, refused: function () { return refused; }, undoMove: undoMove,
     afterPlateBuilt: afterPlateBuilt, setGridVisible: setGridVisible, plateSizeChanged: plateSizeChanged,
     layoutBox: layoutBox, frameView: frameView, layoutReach: layoutReach, offsetOf: offsetOf, bedAt: bedAt,
     pickBed: pickBed, notePress: notePress, releasePress: releasePress, activateUnder: activateUnder,

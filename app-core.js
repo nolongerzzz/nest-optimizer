@@ -1596,8 +1596,13 @@ function handleFiles(files, origin) {
   }
 
   list.forEach(file => {
+    /* The file is read, parsed and placed some turns later. Until then the active bed may not change
+       (app-beds.js busyReason): the piece lands on the bed it was loaded onto. */
+    state.importsPending = (state.importsPending || 0) + 1;
+    let settled = false;
+    const settle = () => { if (!settled) { settled = true; state.importsPending = Math.max(0, (state.importsPending || 1) - 1); } };
     const reader = new FileReader();
-    reader.onerror = () => setStatus(`Could not read ${file.name}`, true);
+    reader.onerror = () => { settle(); setStatus(`Could not read ${file.name}`, true); };
     reader.onload = (e) => {
       if (/\.3mf$/i.test(file.name)) {
         // A sliced project carries a toolpath (`Metadata/plate_N.gcode`) and
@@ -1608,12 +1613,13 @@ function handleFiles(files, origin) {
         // extension, and a slice renamed to `plate.3mf` used to fall through
         // to import3MF and fail with "No objects found in this 3MF".
         if (window.NSO_MICROSCOPE && window.NSO_MICROSCOPE.isSliced(e.target.result)) {
+          settle();
           window.NSO_MICROSCOPE.openFile(file.name, e.target.result);
           return;
         }
         import3MF(file.name, e.target.result).then(result => {
           if (result && result.objects && result.objects.length) noteRecentLoad(file, origin);
-        });
+        }).then(settle, settle);
         return;
       }
       try {
@@ -1623,8 +1629,9 @@ function handleFiles(files, origin) {
         }
         addModelFromZUpGeometryAsync(file.name, geometry).then(id => {
           if (id != null) noteRecentLoad(file, origin);
-        });
+        }).then(settle, settle);
       } catch (err) {
+        settle();
         console.error(err);
         setStatus(`Failed to load ${file.name}. Try re-exporting as binary STL.`, true);
       }
@@ -3138,20 +3145,22 @@ function endMoveDrag() {
        its Undo is the whole pose it was picked up in. */
     const pose = grab && grab.from;
     const wasUp = !!(pose && pose.liftY > 0);
+    let refusedMove = false;
     const moved = Math.abs(p.x - from.x) > 0.01 || Math.abs(p.z - from.z) > 0.01 ||
       (wasUp && Math.abs((p.liftY || 0) - pose.liftY) > 1e-6);
     /* Let go over another bed (app-beds.js): the piece moves to it, keeping its pose, as one Undo step
        on each bed's line. Over its own bed, or over no bed, it is the move it always was. */
     if (moved && !wasUp && !grabbing && typeof NSO_BEDS !== 'undefined') {
-      const to = NSO_BEDS.dropTarget(p);
+      const to = NSO_BEDS.dropTarget(p, from);
       if (to >= 0 && NSO_BEDS.movePiece(idx, to, from)) return;
+      refusedMove = to >= 0 && NSO_BEDS.refused();     // it said why it would not: the line below must not talk over it
     }
     if (moved) {
       if (wasUp) pushUndo(pose);
       else pushUndo({ type: 'movePlaced', index: from.index, x: from.x, z: from.z, meshY: from.meshY });
     }
     if (moved && wasUp) setStatus('Set down on the plate, from ' + pose.liftY.toFixed(2) + ' mm up. One Undo (Ctrl+Z) puts it back.');
-    else if (!reportJoinFlushGap() && moved) setStatus('Moved model #' + (idx + 1));
+    else if (!refusedMove && !reportJoinFlushGap() && moved) setStatus('Moved model #' + (idx + 1));
   }
 }
 

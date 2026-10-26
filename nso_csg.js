@@ -59,14 +59,17 @@ var NSO_CSG_URL = 'https://cdn.jsdelivr.net/npm/manifold-3d@3.5.3/manifold.js';
 
 var NSO_CSG = (function () {
   var _wasmPromise = null;
+  var _loading = false;    // the first load is a download the page can be clicked through (app-beds.js reads it)
 
   function load() {
     if (!_wasmPromise) {
+      _loading = true;
       _wasmPromise = import(NSO_CSG_URL)
         .then(function (mod) { return (mod.default || mod)(); })
-        .then(function (wasm) { wasm.setup(); return wasm; })
+        .then(function (wasm) { wasm.setup(); _loading = false; return wasm; })
         .catch(function (err) {
           _wasmPromise = null; // don't cache a permanent failure -- allow retry next call
+          _loading = false;
           throw err;
         });
     }
@@ -186,6 +189,7 @@ var NSO_CSG = (function () {
 
   return {
     load: load,
+    loading: function () { return _loading; },
     soupToManifold: soupToManifold,
     manifoldToSoup: manifoldToSoup,
     buildCutVolume: buildCutVolume

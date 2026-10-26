@@ -55,9 +55,14 @@ camera by the step the beds move.
   `NSO_BEDS.pickBed(event)` lists every bed (the active floor, each other bed's floor, label and pieces) and says which.
   `notePress` / `releasePress` (called from `onCanvasPointerDown` / `onCanvasPointerUp`) turn a click on another bed
   into an activation.
+- **A piece moves whole or not at all.** A piece with copies of its model on the plate (quantity), with supports, or
+  that is a support is not moved between beds - they are tied by id and would be split - and the status line says so.
+  A piece that started off its own bed (placed past the edge) is not carried to another by a nudge.
 - **Busy.** A job that will put its result onto "the plate" when it finishes must finish on the bed it started on, so
   nothing switches (or adds, or deletes) while `NSO_BoolBusy.active()`, `NSO_SUPPORTS_CARD.busy()`, `state.importsPending`
-  (a big piece waiting for its tree, `addModelFromZUpGeometryAsync`) or a drag is running; the status line says why.
+  (a file being read, parsed or fetched - `handleFiles`, the Library row - or a big piece waiting for its tree), the boolean
+  kernel's first download (`NSO_CSG.loading()`) or a drag is running; the status line says why. Moving a piece between
+  beds and Undo of that move obey the same rule.
 - **Geometry lifecycle.** `nsoReleaseGeometries` also reads the inactive beds' lists and both stacks
   (`NSO_BEDS.stashedRoots()`), so a geometry only another bed names is never disposed.
 - **Supports card.** Its memory is keyed by piece id, so another bed's pieces keep theirs; Clear plate / Delete plate

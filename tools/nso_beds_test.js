@@ -501,5 +501,86 @@ console.log('10  busy');
   check('and it switches when nothing is running', B.activate(1) === true && B.activeNumber() === 2);
 }
 
+
+// 10b --------------------------------------------------------------------------------
+console.log('10b busy, for a move and its Undo; the kernel\'s first load');
+{
+  const s = setup();
+  const a = piece(s, 'a', 0, 0), keep = piece(s, 'keep', -40, 30);
+  B.add(); B.activate(0);
+  const off = B.offsetOf(1);
+  const drag = (idx, x, z) => {
+    s.selectedIndex = idx; s.moveDragging = true; s.moveIndex = idx; s.moveMoved = true; s.moveUndoFrom = { index: idx, x: s.placed[idx].x, z: s.placed[idx].z, meshY: 5.3 };
+    s.placed[idx].x = x; s.placed[idx].z = z; s.placed[idx].mesh.position.set(x, 5.3, z);
+    app.endMoveDrag();
+  };
+  ctx.__supportsBusy = true;
+  drag(0, off.x, off.z);
+  check('a drop over another bed while Supports build is the ordinary move: the piece stays, nothing moved bed',
+    B.activeNumber() === 1 && names() === 'a,keep' && s.undoStack.length === 1 && s.undoStack[0].type === 'movePlaced' && /Supports are still building/.test(status[status.length - 1]), rows());
+  ctx.__supportsBusy = false;
+  app.undoLast();
+  drag(0, off.x, off.z);                              // now it goes
+  check('(the same drop goes through when nothing runs)', B.activeNumber() === 2 && names() === 'a');
+  ctx.__supportsBusy = true;
+  const before = rows();
+  app.undoLast();
+  check('Undo of a move waits while a job runs: nothing moved, the entry kept', rows() === before && B.activeNumber() === 2 && /Supports are still building/.test(status[status.length - 1]), rows());
+  ctx.__supportsBusy = false;
+  ctx.NSO_CSG = { loading: () => true };
+  check('no switch while the boolean kernel is first loading', B.activate(0) === false && /kernel/.test(status[status.length - 1]));
+  ctx.NSO_CSG = undefined;
+  calls.length = 0;
+  app.undoLast();
+  check('Undo of a move closes every tool first, as a switch does', B.activeNumber() === 1 && calls.includes('teardown:plate-move') && names() === 'a,keep', calls.join(',') + ' ' + names());
+}
+
+// 11 ---------------------------------------------------------------------------------
+console.log('11 a plate size change');
+{
+  const s = setup();
+  piece(s, 'a', 0, 0);
+  B.add(); piece(s, 'b', 0, 0);
+  const upd = () => { app.buildPlateMesh(); app.clearPlaced(); B.plateSizeChanged(); };   // updatePlateInfo, as app-join.js runs it
+  upd();
+  check('the same size again takes the active bed\'s pieces off (as it always did) and leaves the other bed alone', s.placed.length === 0 && /1:1p/.test(rows()), rows());
+  s.plate = 'prusa';
+  upd();
+  check('a new size takes the pieces off every bed (the models stay)', /1:0p/.test(rows()) && B.info().every(b => b.placed === 0) && B.info()[0].models === 1, rows());
+  const w = s.scene.children.find(c => c.name === 'nsoBed:1');
+  check('and the floors are the new size', w && w.children[1].children[0].geometry.parameters.width === 250);
+}
+
+// 12 ---------------------------------------------------------------------------------
+console.log('12 what cannot be moved alone');
+{
+  const s = setup();
+  const twin = piece(s, 'twin', 0, 0);
+  const copy = piece(s, 'copy', 20, 0); copy.p.sourceId = twin.m.id;                 // a second placed entry of the same model
+  const host = piece(s, 'host', -30, 20), sup = piece(s, 'sup', -30, 40);
+  sup.m.nsoSupport = { card: true, hostSourceId: host.m.id };
+  const plain = piece(s, 'plain', 30, -30);
+  B.add(); B.activate(0);
+  const off = B.offsetOf(1);
+  const drop = (name, x, z, from) => {
+    const i = s.placed.findIndex(p => p.name === name);
+    const f = from || { x: s.placed[i].x, z: s.placed[i].z };
+    s.selectedIndex = i; s.moveDragging = true; s.moveIndex = i; s.moveMoved = true; s.moveUndoFrom = { index: i, x: f.x, z: f.z, meshY: 5.3 };
+    s.placed[i].x = x; s.placed[i].z = z; s.placed[i].mesh.position.set(x, 5.3, z);
+    app.endMoveDrag();
+  };
+  drop('twin', off.x, off.z);
+  check('a model with another copy on the plate stays, and says why', B.activeNumber() === 1 && /copies of the same model/.test(status[status.length - 1]), status[status.length - 1]);
+  drop('host', off.x, off.z);
+  check('a piece with supports stays', B.activeNumber() === 1 && /has supports/.test(status[status.length - 1]), status[status.length - 1]);
+  drop('sup', off.x, off.z);
+  check('a support stays', B.activeNumber() === 1 && /is a support/.test(status[status.length - 1]), status[status.length - 1]);
+  // a piece that began past its own bed's edge (placed there) is moved about, not carried off it
+  drop('plain', off.x, off.z, { x: off.x - 20, z: 0 });
+  check('a piece that started off its own bed is not carried to another by a nudge', B.activeNumber() === 1 && names().includes('plain'), rows());
+  drop('plain', off.x, off.z, { x: 30, z: -30 });
+  check('one that started on its bed is', B.activeNumber() === 2 && names() === 'plain', rows());
+}
+
 console.log(fails ? '\n' + fails + ' check(s) FAILED' : '\nall beds checks passed');
 process.exit(fails ? 1 : 0);

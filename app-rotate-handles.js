@@ -774,6 +774,7 @@
     var mine = holdIntact();
     dropHold();
     if (!mine) return;          // something else has already re-placed it
+    if (!state.placed || state.placed.indexOf(h.p) < 0) return;   // its plate is not the active one any more (app-beds.js)
     if (typeof applyMeshRotation === 'function') applyMeshRotation(h.p);
     if (typeof nsoBakePlacedPose === 'function') nsoBakePlacedPose(h.p);
     if (typeof refreshOutline === 'function') refreshOutline(h.p);
