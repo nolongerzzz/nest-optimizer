@@ -133,6 +133,7 @@ merging its list by hand. The list below is generated.
 - [Supports print 1 - flat caps, two interface layers, one foot per cluster (2026-10-20)](handoff/supports-print-1-flat-caps-two-interface-layers-one-foot-per.md)
 - [Supports sheet everywhere - a sheet under every tip, at any yaw and tip (2026-10-26)](handoff/supports-sheet-everywhere.md)
 - [Supports stair body - each strip covers the part's step (2026-10-24)](handoff/supports-stair-body.md)
+- [Supports stair speed - the stair's build, same supports faster (2026-10-26)](handoff/supports-stair-speed.md)
 - [Supports thinning 1 - one tree to a circle (2026-10-25)](handoff/supports-thinning-1-one-tree-to-a-circle.md)
 - [The crosshatch welds when stacked - one direction per layer (2026-09-18, same day)](handoff/the-crosshatch-welds-when-stacked-one-direction-per-layer.md)
 - [The Microscope view - the reference tool, with a way in and a way out (2026-09-20)](handoff/the-microscope-view-the-reference-tool-with-a-way-in-and-a-way.md)

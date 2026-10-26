@@ -186,50 +186,56 @@
      ceiling at exactly the gap is the sampler's worst case (no bound prunes
      it) and this one's best (two big triangles). */
   function exactDistance(A, B, reach, beat, under) {
-    var cell = Math.max(1, reach * 4), grid = new Map(), BT = [];
-    function key(i, j, k) { return i + ',' + j + ',' + k; }
-    function triAt(S, o) { return [[S[o], S[o + 1], S[o + 2]], [S[o + 3], S[o + 4], S[o + 5]], [S[o + 6], S[o + 7], S[o + 8]]]; }
-    function boxOf(T) {
-      return { lo: [Math.min(T[0][0], T[1][0], T[2][0]), Math.min(T[0][1], T[1][1], T[2][1]), Math.min(T[0][2], T[1][2], T[2][2])],
-               hi: [Math.max(T[0][0], T[1][0], T[2][0]), Math.max(T[0][1], T[1][1], T[2][1]), Math.max(T[0][2], T[1][2], T[2][2])] };
-    }
-    for (var o = 0; o < B.length; o += 9) {
-      var T = triAt(B, o), bx = boxOf(T), id = BT.length;
-      BT.push({ T: T, lo: bx.lo, hi: bx.hi, mark: -1 });
-      var n0 = Math.floor(bx.lo[0] / cell), n1 = Math.floor(bx.hi[0] / cell), m0 = Math.floor(bx.lo[1] / cell), m1 = Math.floor(bx.hi[1] / cell);
-      var k0 = Math.floor(bx.lo[2] / cell), k1 = Math.floor(bx.hi[2] / cell);
-      if ((n1 - n0 + 1) * (m1 - m0 + 1) * (k1 - k0 + 1) > 4096) { (grid.get('big') || grid.set('big', []).get('big')).push(id); continue; }
-      for (var i = n0; i <= n1; i++) for (var j = m0; j <= m1; j++) for (var k = k0; k <= k1; k++) {
-        var kk = key(i, j, k); if (!grid.has(kk)) grid.set(kk, []); grid.get(kk).push(id);
-      }
-    }
-    var big = grid.get('big') || [], best = { mm: Infinity, at: null, topZ: null, pairs: 0 };
+    var P = exactPrepared(B, reach);
+    var cell = P.cell, big = P.big, BTt = P.T, BB = P.bb, mark = P.mark;
+    var best = { mm: Infinity, at: null, topZ: null, pairs: 0 };
     /* under: every triangle of A nearer B than it, by index (best.under) -
        pruned at `under`, not at the best so far */
     var collect = under == null ? null : [];
+    var cand = P.cand;
     for (var a = 0, ai = 0; a < A.length; a += 9, ai++) {
       if (beat && (ai & 1023) === 0) beat();
-      var TA = triAt(A, a), ba = boxOf(TA), lim = collect ? under : Math.min(best.mm, reach), dA = Infinity;
-      var cands = big.slice();
-      for (var i2 = Math.floor((ba.lo[0] - lim) / cell); i2 <= Math.floor((ba.hi[0] + lim) / cell); i2++)
-        for (var j2 = Math.floor((ba.lo[1] - lim) / cell); j2 <= Math.floor((ba.hi[1] + lim) / cell); j2++)
-          for (var k2 = Math.floor((ba.lo[2] - lim) / cell); k2 <= Math.floor((ba.hi[2] + lim) / cell); k2++) {
-            var L = grid.get(key(i2, j2, k2)); if (L) cands = cands.concat(L);
+      var ax0 = A[a], ax1 = A[a + 1], ax2 = A[a + 2], ay0 = A[a + 3], ay1 = A[a + 4], ay2 = A[a + 5], az0 = A[a + 6], az1 = A[a + 7], az2 = A[a + 8];
+      var balo0 = Math.min(ax0, ay0, az0), balo1 = Math.min(ax1, ay1, az1), balo2 = Math.min(ax2, ay2, az2);
+      var bahi0 = Math.max(ax0, ay0, az0), bahi1 = Math.max(ax1, ay1, az1), bahi2 = Math.max(ax2, ay2, az2);
+      var lim = collect ? under : Math.min(best.mm, reach), dA = Infinity, stamp = ++P.stamp;
+      /* the candidates in the order the grid holds them: the big triangles, then each cell's (a triangle in several
+         cells is tried at its first) */
+      var nc = 0;
+      for (var q = 0; q < big.length; q++) { if (nc === cand.length) cand = P.cand = growInt32(cand); cand[nc++] = big[q]; }
+      for (var i2 = Math.floor((balo0 - lim) / cell); i2 <= Math.floor((bahi0 + lim) / cell); i2++)
+        for (var j2 = Math.floor((balo1 - lim) / cell); j2 <= Math.floor((bahi1 + lim) / cell); j2++)
+          for (var k2 = Math.floor((balo2 - lim) / cell); k2 <= Math.floor((bahi2 + lim) / cell); k2++) {
+            var L = exactCell(P, i2, j2, k2);
+            if (L) for (var q2 = 0; q2 < L.length; q2++) { if (nc === cand.length) cand = P.cand = growInt32(cand); cand[nc++] = L[q2]; }
           }
-      for (var c = 0; c < cands.length; c++) {
-        var b = BT[cands[c]];
-        if (b.mark === ai) continue;
-        b.mark = ai;
-        var g = Math.hypot(Math.max(0, ba.lo[0] - b.hi[0], b.lo[0] - ba.hi[0]), Math.max(0, ba.lo[1] - b.hi[1], b.lo[1] - ba.hi[1]),
-                           Math.max(0, ba.lo[2] - b.hi[2], b.lo[2] - ba.hi[2]));
-        if (g > (collect ? under : Math.min(best.mm, reach))) continue;
+      /* the bound a candidate is held to, and its square either way */
+      var bound = collect ? under : Math.min(best.mm, reach), b2 = bound * bound, b2hi = b2 * (1 + 1e-9), b2lo = b2 * (1 - 1e-9);
+      for (var c = 0; c < nc; c++) {
+        var id = cand[c];
+        if (mark[id] === stamp) continue;
+        mark[id] = stamp;
+        var o6 = id * 6;
+        /* the gap between the two boxes on each axis: max(0, a.lo - b.hi, b.lo - a.hi) */
+        var gx = 0, gy = 0, gz = 0, t0 = balo0 - BB[o6 + 3], t1 = BB[o6] - bahi0;
+        if (t0 > gx) gx = t0; if (t1 > gx) gx = t1;
+        t0 = balo1 - BB[o6 + 4]; t1 = BB[o6 + 1] - bahi1;
+        if (t0 > gy) gy = t0; if (t1 > gy) gy = t1;
+        t0 = balo2 - BB[o6 + 5]; t1 = BB[o6 + 2] - bahi2;
+        if (t0 > gz) gz = t0; if (t1 > gz) gz = t1;
+        var sq = gx * gx + gy * gy + gz * gz;
+        /* g = hypot(gx, gy, gz) > bound: settled on the squares where they are far apart, by the hypot itself where
+           they are not (a square sum and a hypot agree to 1e-15) */
+        if (sq > b2hi) continue;
+        if (!(sq < b2lo) && Math.hypot(gx, gy, gz) > bound) continue;
         best.pairs++;
-        var d = triTri(TA, b.T);
+        var d = triTriFlat(ax0, ax1, ax2, ay0, ay1, ay2, az0, az1, az2, BTt, id * 9);
         if (d < dA) dA = d;
         if (d < best.mm) {
           best.mm = d;
-          best.at = [(TA[0][0] + TA[1][0] + TA[2][0]) / 3, (TA[0][1] + TA[1][1] + TA[2][1]) / 3, (TA[0][2] + TA[1][2] + TA[2][2]) / 3];
-          best.topZ = ba.hi[2]; best.lowZ = ba.lo[2];
+          best.at = [(ax0 + ay0 + az0) / 3, (ax1 + ay1 + az1) / 3, (ax2 + ay2 + az2) / 3];
+          best.topZ = bahi2; best.lowZ = balo2;
+          if (!collect) { bound = Math.min(best.mm, reach); b2 = bound * bound; b2hi = b2 * (1 + 1e-9); b2lo = b2 * (1 - 1e-9); }
         }
       }
       if (collect && dA < under) collect.push(ai);
@@ -237,6 +243,185 @@
     if (best.mm > reach) best.mm = Infinity;
     if (collect) best.under = collect;
     return best;
+  }
+  function growInt32(a) { var n = new Int32Array(Math.max(1024, a.length * 2)); n.set(a); return n; }
+
+  /* The stair's raster loops, out of stairOf: the same arithmetic on typed arrays handed in, in functions of their own
+     (inside stairOf's closures they ran forty times slower). */
+
+  /* a layer's cells: blk where an interval of the piece meets the layer's window (za, zb) - the layer and the gap over
+     and under it; fld where nothing does and the piece's next underside is within reach over it. Cell q's intervals
+     are iv[ivAt[q]] .. iv[ivAt[q + 1]] (in, out, in, out ...). */
+  function stairBlocks(ivAt, iv, n, za, zb, reach, blk, fld) {
+    var INF = Infinity;     /* a global is a lookup through the sandbox where this runs in a vm context: once, not per cell */
+    for (var q = 0; q < n; q++) {
+      var ce = INF, kEnd = ivAt[q + 1];
+      for (var k = ivAt[q]; k + 1 < kEnd; k += 2) {
+        if (iv[k] < zb && iv[k + 1] > za) { blk[q] = 1; break; }
+        if (iv[k] >= zb && iv[k] < ce) ce = iv[k];
+      }
+      if (!blk[q] && ce - zb <= reach) fld[q] = 1;
+    }
+  }
+  /* the field kept off every blocked cell that has an open neighbour: rows = [dj, di from, di to] of the disc, or its
+     cells (di, dj) where a row is broken */
+  function stairHalo(blk, fld, nx, ny, rows, whole, cells) {
+    var n = nx * ny, max = Math.max, min = Math.min;
+    for (var q2 = 0; q2 < n; q2++) {
+      if (!blk[q2]) continue;
+      var ci = q2 % nx, cj = (q2 - ci) / nx;
+      if (ci > 0 && ci < nx - 1 && cj > 0 && cj < ny - 1 && blk[q2 - 1] && blk[q2 + 1] && blk[q2 - nx] && blk[q2 + nx]) continue;
+      if (whole) {
+        for (var d = 0; d < rows.length; d += 3) {
+          var jj = cj + rows[d], ia = max(0, ci + rows[d + 1]), ib = min(nx - 1, ci + rows[d + 2]);
+          if (jj >= 0 && jj < ny && ia <= ib) fld.fill(0, jj * nx + ia, jj * nx + ib + 1);
+        }
+      } else {
+        for (var d2 = 0; d2 < cells.length; d2 += 2) {
+          var ii2 = ci + cells[d2], jj2 = cj + cells[d2 + 1];
+          if (ii2 >= 0 && ii2 < nx && jj2 >= 0 && jj2 < ny) fld[jj2 * nx + ii2] = 0;
+        }
+      }
+    }
+  }
+  /* along one level line (at v) of a band's frame, the first u from down the slope where the field holds a line's
+     width and the cell is near a tip; null where none does */
+  function stairFront(fld, near, nx, ny, ox, oy, umin, umax, width, DU, nrm0, nrm1, dir0, dir1, v) {
+    var vd0 = v * dir0, vd1 = v * dir1, round = Math.round, cellMm = CELL_MM;
+    for (var u = umin; u <= umax - width; u += DU) {
+      var px = u * nrm0 + vd0, py = u * nrm1 + vd1;
+      var i = round((px - ox) / cellMm), j = round((py - oy) / cellMm);
+      if (!(i >= 0 && i < nx && j >= 0 && j < ny && fld[j * nx + i] === 1)) continue;
+      var u2 = u + width, qx = u2 * nrm0 + vd0, qy = u2 * nrm1 + vd1;
+      var i2 = round((qx - ox) / cellMm), j2 = round((qy - oy) / cellMm);
+      if (!(i2 >= 0 && i2 < nx && j2 >= 0 && j2 < ny && fld[j2 * nx + i2] === 1)) continue;
+      if (near[j * nx + i] === 1) return u;
+    }
+    return null;
+  }
+
+  /* B's side of exactDistance: its triangles' boxes on a grid of cells max(1, 4 reach) wide. It depends on B and the
+     cell alone, so a caller that measures many soups against the same B builds it once (exactPrep) and hands the
+     handle where B goes; a soup handed bare is prepared for the one call. */
+  var EXACT_OFF = 65536, EXACT_M = 131072;
+  function exactPrep(B, reach) {
+    var cell = Math.max(1, reach * 4), n = (B.length / 9) | 0;
+    var T = new Float64Array(n * 9), lo = new Float64Array(n * 3), hi = new Float64Array(n * 3), bb = new Float64Array(n * 6), rng = new Int32Array(n * 6), isBig = new Uint8Array(n);
+    var numeric = isFinite(cell), big = [];
+    for (var id = 0; id < n; id++) {
+      var o = id * 9, o3 = id * 3;
+      for (var k = 0; k < 9; k++) T[o + k] = B[o + k];
+      for (var ax = 0; ax < 3; ax++) {
+        lo[o3 + ax] = Math.min(T[o + ax], T[o + 3 + ax], T[o + 6 + ax]);
+        hi[o3 + ax] = Math.max(T[o + ax], T[o + 3 + ax], T[o + 6 + ax]);
+      }
+      for (var q6 = 0; q6 < 3; q6++) { bb[id * 6 + q6] = lo[o3 + q6]; bb[id * 6 + 3 + q6] = hi[o3 + q6]; }
+      var n0 = Math.floor(lo[o3] / cell), n1 = Math.floor(hi[o3] / cell), m0 = Math.floor(lo[o3 + 1] / cell), m1 = Math.floor(hi[o3 + 1] / cell);
+      var k0 = Math.floor(lo[o3 + 2] / cell), k1 = Math.floor(hi[o3 + 2] / cell);
+      if ((n1 - n0 + 1) * (m1 - m0 + 1) * (k1 - k0 + 1) > 4096) { isBig[id] = 1; big.push(id); continue; }
+      rng[id * 6] = n0; rng[id * 6 + 1] = n1; rng[id * 6 + 2] = m0; rng[id * 6 + 3] = m1; rng[id * 6 + 4] = k0; rng[id * 6 + 5] = k1;
+      /* a number names the cell while every index lies within +-EXACT_OFF; past that the cell keeps its string */
+      if (!(n0 > -EXACT_OFF && n1 < EXACT_OFF && m0 > -EXACT_OFF && m1 < EXACT_OFF && k0 > -EXACT_OFF && k1 < EXACT_OFF)) numeric = false;
+    }
+    var grid = new Map();
+    for (var id2 = 0; id2 < n; id2++) {
+      if (isBig[id2]) continue;
+      for (var i = rng[id2 * 6]; i <= rng[id2 * 6 + 1]; i++) for (var j = rng[id2 * 6 + 2]; j <= rng[id2 * 6 + 3]; j++) for (var kk = rng[id2 * 6 + 4]; kk <= rng[id2 * 6 + 5]; kk++) {
+        var key = numeric ? ((i + EXACT_OFF) * EXACT_M + (j + EXACT_OFF)) * EXACT_M + (kk + EXACT_OFF) : i + ',' + j + ',' + kk;
+        var L = grid.get(key);
+        if (!L) { L = []; grid.set(key, L); }
+        L.push(id2);
+      }
+    }
+    return { src: B, cell: cell, numeric: numeric, grid: grid, big: big, T: T, bb: bb, mark: new Float64Array(n), stamp: 0, cand: new Int32Array(1024) };
+  }
+  function exactPrepared(B, reach) {
+    if (B && B.grid && B.T) {
+      if (B.cell === Math.max(1, reach * 4)) return B;
+      B = B.src;
+    }
+    return exactPrep(B, reach);
+  }
+  function exactCell(P, i, j, k) {
+    if (!P.numeric) return P.grid.get(i + ',' + j + ',' + k);
+    if (!(i > -EXACT_OFF && i < EXACT_OFF && j > -EXACT_OFF && j < EXACT_OFF && k > -EXACT_OFF && k < EXACT_OFF)) return undefined;
+    return P.grid.get(((i + EXACT_OFF) * EXACT_M + (j + EXACT_OFF)) * EXACT_M + (k + EXACT_OFF));
+  }
+
+  /* The pair distance as ptTri / segSeg / triTri below have it, on plain numbers: the same closest points by the same
+     formulas, and the hypot of the same differences. The running minimum is TT_MIN; a candidate whose squared length is
+     past it by more than a part in 1e9 cannot be nearer (a hypot and a square sum agree to 1e-15) and is not hypotted. */
+  var TT_MIN = Infinity, TT_MIN2 = Infinity;
+  function ttConsider(dx, dy, dz) {
+    var sq = dx * dx + dy * dy + dz * dz;
+    if (sq !== sq) { TT_MIN = NaN; TT_MIN2 = NaN; return; }
+    if (sq > TT_MIN2 * (1 + 1e-9)) return;
+    var h = Math.hypot(dx, dy, dz);
+    if (h < TT_MIN) { TT_MIN = h; TT_MIN2 = h * h; }
+  }
+  function ptTriFlat(px, py, pz, ax, ay, az, bx, by, bz, cx, cy, cz) {
+    var abx = bx - ax, aby = by - ay, abz = bz - az, acx = cx - ax, acy = cy - ay, acz = cz - az, apx = px - ax, apy = py - ay, apz = pz - az;
+    var d1 = abx * apx + aby * apy + abz * apz, d2 = acx * apx + acy * apy + acz * apz;
+    if (d1 <= 0 && d2 <= 0) return ttConsider(px - ax, py - ay, pz - az);
+    var bpx = px - bx, bpy = py - by, bpz = pz - bz, d3 = abx * bpx + aby * bpy + abz * bpz, d4 = acx * bpx + acy * bpy + acz * bpz;
+    if (d3 >= 0 && d4 <= d3) return ttConsider(px - bx, py - by, pz - bz);
+    var vc = d1 * d4 - d3 * d2;
+    if (vc <= 0 && d1 >= 0 && d3 <= 0) { var v = d1 / (d1 - d3); return ttConsider(px - (ax + abx * v), py - (ay + aby * v), pz - (az + abz * v)); }
+    var cpx = px - cx, cpy = py - cy, cpz = pz - cz, d5 = abx * cpx + aby * cpy + abz * cpz, d6 = acx * cpx + acy * cpy + acz * cpz;
+    if (d6 >= 0 && d5 <= d6) return ttConsider(px - cx, py - cy, pz - cz);
+    var vb = d5 * d2 - d1 * d6;
+    if (vb <= 0 && d2 >= 0 && d6 <= 0) { var w = d2 / (d2 - d6); return ttConsider(px - (ax + acx * w), py - (ay + acy * w), pz - (az + acz * w)); }
+    var va = d3 * d6 - d5 * d4;
+    if (va <= 0 && (d4 - d3) >= 0 && (d5 - d6) >= 0) {
+      var w2 = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+      return ttConsider(px - (bx + (cx - bx) * w2), py - (by + (cy - by) * w2), pz - (bz + (cz - bz) * w2));
+    }
+    var den = 1 / (va + vb + vc), v2 = vb * den, w3 = vc * den;
+    return ttConsider(px - (ax + abx * v2 + acx * w3), py - (ay + aby * v2 + acy * w3), pz - (az + abz * v2 + acz * w3));
+  }
+  function segSegFlat(p1x, p1y, p1z, q1x, q1y, q1z, p2x, p2y, p2z, q2x, q2y, q2z) {
+    /* the two segments' boxes are a lower bound on how near they come: past the running minimum by more than the
+       rounding of the closest points (they lie on the segments), the pair cannot be the minimum and is not solved */
+    if (TT_MIN2 < Infinity) {
+      var l1 = p1x < q1x ? p1x : q1x, h1 = p1x < q1x ? q1x : p1x, l2 = p2x < q2x ? p2x : q2x, h2 = p2x < q2x ? q2x : p2x;
+      var gx = (l1 > l2 ? l1 : l2) - (h1 < h2 ? h1 : h2);
+      l1 = p1y < q1y ? p1y : q1y; h1 = p1y < q1y ? q1y : p1y; l2 = p2y < q2y ? p2y : q2y; h2 = p2y < q2y ? q2y : p2y;
+      var gy = (l1 > l2 ? l1 : l2) - (h1 < h2 ? h1 : h2);
+      l1 = p1z < q1z ? p1z : q1z; h1 = p1z < q1z ? q1z : p1z; l2 = p2z < q2z ? p2z : q2z; h2 = p2z < q2z ? q2z : p2z;
+      var gz = (l1 > l2 ? l1 : l2) - (h1 < h2 ? h1 : h2);
+      var g2 = (gx > 0 ? gx * gx : 0) + (gy > 0 ? gy * gy : 0) + (gz > 0 ? gz * gz : 0);
+      if (g2 > TT_MIN2 * (1 + 1e-6) + 1e-12) return;
+    }
+    var d1x = q1x - p1x, d1y = q1y - p1y, d1z = q1z - p1z, d2x = q2x - p2x, d2y = q2y - p2y, d2z = q2z - p2z, rx = p1x - p2x, ry = p1y - p2y, rz = p1z - p2z;
+    var a = d1x * d1x + d1y * d1y + d1z * d1z, e = d2x * d2x + d2y * d2y + d2z * d2z, f = d2x * rx + d2y * ry + d2z * rz, s, t;
+    if (a <= 1e-18 && e <= 1e-18) return ttConsider(p1x - p2x, p1y - p2y, p1z - p2z);
+    if (a <= 1e-18) { s = 0; t = Math.min(1, Math.max(0, f / e)); }
+    else {
+      var c = d1x * rx + d1y * ry + d1z * rz;
+      if (e <= 1e-18) { t = 0; s = Math.min(1, Math.max(0, -c / a)); }
+      else {
+        var b = d1x * d2x + d1y * d2y + d1z * d2z, den = a * e - b * b;
+        s = den !== 0 ? Math.min(1, Math.max(0, (b * f - c * e) / den)) : 0;
+        t = (b * s + f) / e;
+        if (t < 0) { t = 0; s = Math.min(1, Math.max(0, -c / a)); }
+        else if (t > 1) { t = 1; s = Math.min(1, Math.max(0, (b - c) / a)); }
+      }
+    }
+    return ttConsider((p1x + d1x * s) - (p2x + d2x * t), (p1y + d1y * s) - (p2y + d2y * t), (p1z + d1z * s) - (p2z + d2z * t));
+  }
+  /* A's corners (x, y, z of each: a0 a1 a2 are the x's) against the triangle at T[o] */
+  function triTriFlat(a0, a1, a2, b0, b1, b2, c0, c1, c2, T, o) {
+    /* A = [[a0, a1, a2], [b0, b1, b2], [c0, c1, c2]]: read as the corners' x, y, z */
+    var Ax = a0, Ay = a1, Az = a2, Bx = b0, By = b1, Bz = b2, Cx = c0, Cy = c1, Cz = c2;
+    var Px = T[o], Py = T[o + 1], Pz = T[o + 2], Qx = T[o + 3], Qy = T[o + 4], Qz = T[o + 5], Rx = T[o + 6], Ry = T[o + 7], Rz = T[o + 8];
+    TT_MIN = Infinity; TT_MIN2 = Infinity;
+    ptTriFlat(Ax, Ay, Az, Px, Py, Pz, Qx, Qy, Qz, Rx, Ry, Rz); ptTriFlat(Px, Py, Pz, Ax, Ay, Az, Bx, By, Bz, Cx, Cy, Cz);
+    ptTriFlat(Bx, By, Bz, Px, Py, Pz, Qx, Qy, Qz, Rx, Ry, Rz); ptTriFlat(Qx, Qy, Qz, Ax, Ay, Az, Bx, By, Bz, Cx, Cy, Cz);
+    ptTriFlat(Cx, Cy, Cz, Px, Py, Pz, Qx, Qy, Qz, Rx, Ry, Rz); ptTriFlat(Rx, Ry, Rz, Ax, Ay, Az, Bx, By, Bz, Cx, Cy, Cz);
+    segSegFlat(Ax, Ay, Az, Bx, By, Bz, Px, Py, Pz, Qx, Qy, Qz); segSegFlat(Ax, Ay, Az, Bx, By, Bz, Qx, Qy, Qz, Rx, Ry, Rz); segSegFlat(Ax, Ay, Az, Bx, By, Bz, Rx, Ry, Rz, Px, Py, Pz);
+    segSegFlat(Bx, By, Bz, Cx, Cy, Cz, Px, Py, Pz, Qx, Qy, Qz); segSegFlat(Bx, By, Bz, Cx, Cy, Cz, Qx, Qy, Qz, Rx, Ry, Rz); segSegFlat(Bx, By, Bz, Cx, Cy, Cz, Rx, Ry, Rz, Px, Py, Pz);
+    segSegFlat(Cx, Cy, Cz, Ax, Ay, Az, Px, Py, Pz, Qx, Qy, Qz); segSegFlat(Cx, Cy, Cz, Ax, Ay, Az, Qx, Qy, Qz, Rx, Ry, Rz); segSegFlat(Cx, Cy, Cz, Ax, Ay, Az, Rx, Ry, Rz, Px, Py, Pz);
+    return TT_MIN;
   }
   function dot3(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
   function sub3(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
@@ -756,6 +941,13 @@
     var flatMax = opts.flatGapMaxMm == null ? null : +opts.flatGapMaxMm, reachMemo = new Map();
     var ROLES = ['transition', 'transition'];
     for (var ri = 0; ri < nI; ri++) ROLES.push('interface');
+    /* each obstacle's side of exactDistance, built once for the cell the reach asks for */
+    var obsEx = [];
+    function exactVs(i, reach) {
+      var h = obsEx[i];
+      if (!h || h.cell !== Math.max(1, reach * 4)) h = obsEx[i] = exactPrep(obstacles[i], reach);
+      return h;
+    }
     var NL = ROLES.length, stackH = NL * o.layer;
     /* how far under the cap's top a capped column ends: CAP_TUCK and half its
        diagonal - and the cap rises at least that and CAP_TUCK again, so the
@@ -1355,8 +1547,8 @@
           var hulls = pending.map(function (t) { return capHull(t.cap); }), first = [], nT = 0;
           hulls.forEach(function (hs) { first.push(nT); nT += hs.length / 9; });
           var soupC = joinSoups(hulls), near = {};
-          obstacles.forEach(function (B) {
-            exactDistance(soupC, B, o.gap + 0.1, beat, o.gap - 1e-5).under.forEach(function (ai) {
+          obstacles.forEach(function (B, bi) {
+            exactDistance(soupC, exactVs(bi, o.gap + 0.1), o.gap + 0.1, beat, o.gap - 1e-5).under.forEach(function (ai) {
               var lo2 = 0, hi2 = first.length - 1;
               while (lo2 < hi2) { var md = (lo2 + hi2 + 1) >> 1; if (first[md] <= ai) lo2 = md; else hi2 = md - 1; }
               near[lo2] = true;
@@ -1724,8 +1916,8 @@
         if (!res.ok) { L.ok = false; L.reason = res.reason; break; }
         var soup = joinSoups(res.layers.map(function (x) { return x.soup; }));
         var dmin = Infinity, at = null, atTop = null;
-        obstacles.forEach(function (B) {
-          var d = exactDistance(soup, B, reach, beat);
+        obstacles.forEach(function (B, bi) {
+          var d = exactDistance(soup, exactVs(bi, reach), reach, beat);
           if (d.mm < dmin) { dmin = d.mm; at = d.at; atTop = d.topZ; }
         });
         if (dmin >= o.gap - 1e-5) {
@@ -1925,23 +2117,35 @@
       group.forEach(function (t) { for (var k = 0; k < 2; k++) { lo[k] = Math.min(lo[k], t.contact[k]); hi[k] = Math.max(hi[k], t.contact[k]); } });
       var ox = lo[0] - pad, oy = lo[1] - pad;
       var nx = Math.ceil((hi[0] - lo[0] + 2 * pad) / CELL_MM) + 1, ny = Math.ceil((hi[1] - lo[1] + 2 * pad) / CELL_MM) + 1;
-      var iv = new Array(nx * ny), near = new Uint8Array(nx * ny);
+      /* iv: each cell's intervals (z in, z out, ...), in one array: cell q's run from ivAt[q] to ivAt[q + 1] */
+      var near = new Uint8Array(nx * ny), ivAt = new Int32Array(nx * ny + 1), iv = new Float64Array(4096), ivN = 0;
       for (var j0 = 0; j0 < ny; j0++) {
         beat();
         for (var i0 = 0; i0 < nx; i0++) {
-          var x = ox + i0 * CELL_MM, y = oy + j0 * CELL_MM, list = [];
+          var x = ox + i0 * CELL_MM, y = oy + j0 * CELL_MM;
+          ivAt[j0 * nx + i0] = ivN;
           for (var pi = 0; pi < PPs.length; pi++) {
             var P = PPs[pi];
             if (x < P.lo[0] || x > P.hi[0] || y < P.lo[1] || y > P.hi[1]) continue;
             var z0 = P.lo[2] - 1, hs = P.hitsAlong([x, y, z0], [0, 0, 1], P.hi[2] - P.lo[2] + 2);
-            for (var h = 0; h + 1 < hs.length; h += 2) list.push(z0 + hs[h], z0 + hs[h + 1]);
-          }
-          iv[j0 * nx + i0] = list;
-          for (var g = 0; g < group.length; g++) {
-            if (Math.abs(group[g].contact[0] - x) <= D && Math.abs(group[g].contact[1] - y) <= D) { near[j0 * nx + i0] = 1; break; }
+            for (var h = 0; h + 1 < hs.length; h += 2) {
+              if (ivN + 2 > iv.length) { var grown = new Float64Array(iv.length * 2); grown.set(iv); iv = grown; }
+              iv[ivN++] = z0 + hs[h]; iv[ivN++] = z0 + hs[h + 1];
+            }
           }
         }
       }
+      ivAt[nx * ny] = ivN;
+      /* a cell is near when a tip of the group is within D of it on both axes: each tip marks the cells in a window a
+         cell wider than that, by the same test */
+      group.forEach(function (t) {
+        var cx = t.contact[0], cy = t.contact[1];
+        var ia = Math.max(0, Math.floor((cx - D - ox) / CELL_MM) - 1), ib = Math.min(nx - 1, Math.ceil((cx + D - ox) / CELL_MM) + 1);
+        var ja = Math.max(0, Math.floor((cy - D - oy) / CELL_MM) - 1), jb = Math.min(ny - 1, Math.ceil((cy + D - oy) / CELL_MM) + 1);
+        for (var jn = ja; jn <= jb; jn++) for (var in2 = ia; in2 <= ib; in2++) {
+          if (Math.abs(cx - (ox + in2 * CELL_MM)) <= D && Math.abs(cy - (oy + jn * CELL_MM)) <= D) near[jn * nx + in2] = 1;
+        }
+      });
       /* the columns the stair keeps off: every member of a tree that holds a
          tip outside this stair (a tree of the stair's tips alone is cut
          under its lowest strip, or left out) */
@@ -1959,28 +2163,24 @@
          strip is the gap's, and a strip moved up the slope is no further from it) */
       var rWall = Math.max(r, wallMm || 0), R0 = Math.ceil(rWall / CELL_MM), disc = [];
       for (var dj = -R0; dj <= R0; dj++) for (var di = -R0; di <= R0; di++) if (Math.hypot(di, dj) * CELL_MM <= rWall) disc.push([di, dj]);
+      /* the disc by rows: row dj holds the cells di from lo to hi (the disc's rows are unbroken) */
+      var discRows = [];
+      disc.forEach(function (c) {
+        var row = discRows.find(function (r) { return r[0] === c[1]; });
+        if (!row) discRows.push(row = [c[1], c[0], c[0], 0]);
+        row[1] = Math.min(row[1], c[0]); row[2] = Math.max(row[2], c[0]); row[3]++;
+      });
+      var discWhole = discRows.every(function (r) { return r[3] === r[2] - r[1] + 1; });
+      var discRowsFlat = new Int32Array(discRows.length * 3), discFlat = new Int32Array(disc.length * 2);
+      discRows.forEach(function (r, k) { discRowsFlat[k * 3] = r[0]; discRowsFlat[k * 3 + 1] = r[1]; discRowsFlat[k * 3 + 2] = r[2]; });
+      disc.forEach(function (c, k) { discFlat[k * 2] = c[0]; discFlat[k * 2 + 1] = c[1]; });
       var zTopOf = function (m) { return o.plateZ + m * o.layer; };
       /* the field of the layer whose top is zTopOf(m): see EACH LAYER'S STRIP */
       function fieldFor(m, extra) {
         var zt = zTopOf(m), za = zt - o.layer - o.gap, zb = zt + o.gap, n = nx * ny;
         var blk = new Uint8Array(n), fld = new Uint8Array(n);
-        for (var q = 0; q < n; q++) {
-          var L = iv[q], ce = Infinity;
-          for (var k = 0; k + 1 < L.length; k += 2) {
-            if (L[k] < zb && L[k + 1] > za) { blk[q] = 1; break; }
-            if (L[k] >= zb && L[k] < ce) ce = L[k];
-          }
-          if (!blk[q] && ce - zb <= STAIR_REACH_MM) fld[q] = 1;
-        }
-        for (var q2 = 0; q2 < n; q2++) {
-          if (!blk[q2]) continue;
-          var ci = q2 % nx, cj = (q2 - ci) / nx;
-          if (ci > 0 && ci < nx - 1 && cj > 0 && cj < ny - 1 && blk[q2 - 1] && blk[q2 + 1] && blk[q2 - nx] && blk[q2 + nx]) continue;
-          for (var d = 0; d < disc.length; d++) {
-            var ii = ci + disc[d][0], jj = cj + disc[d][1];
-            if (ii >= 0 && ii < nx && jj >= 0 && jj < ny) fld[jj * nx + ii] = 0;
-          }
-        }
+        stairBlocks(ivAt, iv, n, za, zb, STAIR_REACH_MM, blk, fld);
+        stairHalo(blk, fld, nx, ny, discRowsFlat, discWhole, discFlat);
         function stamp(a, b, rad) {
           var i0 = Math.max(0, Math.floor((Math.min(a[0], b[0]) - rad - ox) / CELL_MM)), i1 = Math.min(nx - 1, Math.ceil((Math.max(a[0], b[0]) + rad - ox) / CELL_MM));
           var j0 = Math.max(0, Math.floor((Math.min(a[1], b[1]) - rad - oy) / CELL_MM)), j1 = Math.min(ny - 1, Math.ceil((Math.max(a[1], b[1]) + rad - oy) / CELL_MM));
@@ -2017,11 +2217,7 @@
       function bandOf(fld) {
         var pts = [];
         for (var v = vmin; v <= vmax + 1e-9; v += STAIR_DV) {
-          var f = null;
-          for (var u = umin; u <= umax - o.width; u += DU) {
-            var p = atUV(u, v), q = atUV(u + o.width, v);
-            if (fieldAt(fld, p[0], p[1]) && fieldAt(fld, q[0], q[1]) && fieldAt(near, p[0], p[1])) { f = u; break; }
-          }
+          var f = stairFront(fld, near, nx, ny, ox, oy, umin, umax, o.width, DU, F.nrm[0], F.nrm[1], F.dir[0], F.dir[1], v);
           pts.push({ v: v, f: f });
         }
         var best = null, cur = [];
@@ -2201,9 +2397,10 @@
         }
         return new Float32Array(keep);
       }).filter(function (B) { return B.length >= 9; });
+      var nearPreps = nearSoups.map(function (B) { return exactPrep(B, reachG); });
       function nearest(soup) {
         var dmin = Infinity;
-        nearSoups.forEach(function (B) { dmin = Math.min(dmin, exactDistance(soup, B, reachG, beat).mm); });
+        nearPreps.forEach(function (B) { dmin = Math.min(dmin, exactDistance(soup, B, reachG, beat).mm); });
         return dmin;
       }
       /* SIDEWAYS, MEASURED: the piece cut at a layer's middle (the outline as oriented segments, its inside on the left),
@@ -2406,7 +2603,7 @@
         for (var it2 = 0; it2 < 16 && t.cap; it2++) {
           if (t.cap.w <= o.side + 1e-9) { t.cap = null; break; }
           var hull = capHull(t.cap), bad = false;
-          nearSoups.forEach(function (B) { if (!bad && exactDistance(hull, B, o.gap + 0.1, beat, o.gap - 1e-5).under.length) bad = true; });
+          nearPreps.forEach(function (B) { if (!bad && exactDistance(hull, B, o.gap + 0.1, beat, o.gap - 1e-5).under.length) bad = true; });
           if (!bad) break;
           t.cap.w = Math.max(o.side, t.cap.w - CAP_STEP_MM); t.cap.why = 'narrowed off the piece (measured)';
         }
@@ -2419,7 +2616,7 @@
       carriers = carriers.filter(function (t) {
         if (t.cap) return true;
         var d2 = o.side * Math.SQRT2, hull = capHull({ c: t.top, b: t.top, w: d2, footD: d2, z0: zCap - o.side, z1: zCap, band: 0 }), bad = false;
-        nearSoups.forEach(function (B) { if (!bad && exactDistance(hull, B, o.gap + 0.1, beat, o.gap - 1e-5).under.length) bad = true; });
+        nearPreps.forEach(function (B) { if (!bad && exactDistance(hull, B, o.gap + 0.1, beat, o.gap - 1e-5).under.length) bad = true; });
         return !bad;
       });
       if (!carriers.length) return null;
