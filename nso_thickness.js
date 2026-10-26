@@ -1226,6 +1226,11 @@
 
     /* Inside the occupied range the widening is bounded by that range, so it
        terminates whether or not the caller gave a distance. */
+    /* A triangle lies in every cell its box touches, and the rings meet it once a cell: it is measured once a query (the
+       ray walks' own stamp). The same distance twice never beats itself (`<`), so the first found is still the answer. */
+    var mark = G.mark || (G.mark = new Int32Array(tris.length));
+    if (G.stamp >= 2147483646) { mark.fill(0); G.stamp = 0; }
+    var stamp = ++G.stamp;
     var extent = Math.max(G.hiCell[0] - G.loCell[0], G.hiCell[1] - G.loCell[1],
                           G.hiCell[2] - G.loCell[2]) + 3;
     var ringCap = isFinite(cap) ? Math.min(extent, Math.ceil(cap * invC) + 2) : extent;
@@ -1245,6 +1250,8 @@
             found = true;
             for (var i = 0; i < bucket.length; i++) {
               var f = bucket[i];
+              if (mark[f] === stamp) continue;
+              mark[f] = stamp;
               var d2v = closestD2Flat(tv, f * 15, p0, p1, p2);
               if (d2v < best) { best = d2v; bestF = f; }
             }

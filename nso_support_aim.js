@@ -654,8 +654,41 @@
     if (ix === undefined || (ix && (ix.len !== soup.length || ix.sample !== sampleOf(soup)))) ix = undefined;
     if (ix && verify && ix.full !== fullOf(soup)) ix = undefined;
     if (ix === undefined) {
-      ix = buildBVH(soup);
+      ix = indexByContent(soup);
       indexCache.set(soup, ix);
+    }
+    return ix;
+  }
+
+  /* THE SAME NUMBERS IN A NEW ARRAY ARE THE SAME INDEX. The worker is handed the piece and every occluder in a structured
+     clone with each message - an array no per-array cache can know - and the tree, the fan (crossPrep) and the winding terms
+     hung off it are a function of the numbers alone (nothing in an index holds the array), so one built for these numbers
+     serves any array that holds them. Kept by length and two 32-bit hashes of the numbers' bits; the most recent soups up
+     to INDEX_CACHE_TRIS triangles in all, none over INDEX_CACHE_ONE (it would push the rest out). */
+  var INDEX_CACHE_TRIS = 600000, INDEX_CACHE_ONE = 200000;
+  var contentIndex = new Map(), contentIndexTris = 0;
+  var hashF64 = new Float64Array(1), hashU32 = new Uint32Array(hashF64.buffer);
+  function contentKey(soup) {
+    var h1 = 0x811c9dc5 | 0, h2 = 0x9e3779b9 | 0, n = soup.length;
+    for (var i = 0; i < n; i++) {
+      hashF64[0] = soup[i];
+      h1 = Math.imul(h1 ^ hashU32[0], 16777619); h1 = Math.imul(h1 ^ hashU32[1], 16777619);
+      h2 = Math.imul(h2 + hashU32[0], 0x85ebca6b) ^ (h2 >>> 15); h2 = Math.imul(h2 + hashU32[1], 0xc2b2ae35) ^ (h2 >>> 13);
+    }
+    return n + ':' + (h1 >>> 0).toString(36) + ':' + (h2 >>> 0).toString(36);
+  }
+  function indexByContent(soup) {
+    var nTri = (soup.length / 9) | 0;
+    if (nTri > INDEX_CACHE_ONE) return buildBVH(soup);
+    var key = contentKey(soup), hit = contentIndex.get(key);
+    if (hit) { contentIndex.delete(key); contentIndex.set(key, hit); return hit.ix; }          // most recent last
+    var ix = buildBVH(soup);
+    if (ix) {
+      contentIndex.set(key, { ix: ix, n: nTri }); contentIndexTris += nTri;
+      for (var it = contentIndex.keys(); contentIndexTris > INDEX_CACHE_TRIS; ) {
+        var old = it.next().value;
+        contentIndexTris -= contentIndex.get(old).n; contentIndex.delete(old);
+      }
     }
     return ix;
   }
