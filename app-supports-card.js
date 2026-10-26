@@ -735,7 +735,7 @@ var NSO_SUPPORTS_CARD = (function () {
     if (rm) rm.hidden = !wasBuilt;
     en('btn-sup-none', cs === 'built');
     en('btn-sup-remove', cs === 'built' && S.selSupport != null && !!modelOf(S.selSupport));
-    ['sup-angle', 'sup-style', 'sup-size', 'sup-rest'].forEach(function (id) { var e = $(id); if (e) e.disabled = !!S.busy; });
+    ['sup-angle', 'sup-style', 'sup-size', 'sup-rest', 'sup-one'].forEach(function (id) { var e = $(id); if (e) e.disabled = !!S.busy; });
     var note = $('sup-angle-note');
     if (note) note.textContent = S.angle + '\u00b0 \u00b7 Bambu ' + BAMBU_ANGLE + '\u00b0';
     var ang = $('sup-angle');
@@ -909,7 +909,9 @@ var NSO_SUPPORTS_CARD = (function () {
     var st = $('sup-style'), sz = $('sup-size'), rs = $('sup-rest');
     var style = st && STYLES[st.value] ? st.value : 'tree';
     var size = sz ? parseFloat(sz.value) : NaN;
-    return { style: style, sideMm: isFinite(size) ? size : null, rest: !!(rs && rs.checked), knobs: S.mode === 'custom' ? knobsGiven() : null };
+    var one = $('sup-one');
+    return { style: style, sideMm: isFinite(size) ? size : null, rest: !!(rs && rs.checked), knobs: S.mode === 'custom' ? knobsGiven() : null,
+      one: !one || !!one.checked };
   }
 
   /* THE PLANNER'S THREAD. planTree is one synchronous call that can run for
@@ -1016,6 +1018,31 @@ var NSO_SUPPORTS_CARD = (function () {
     });
   }
 
+  /* ONE TRUNK ACROSS SMALL AREAS. Bambu stands one trunk under a head whose underside it finds in pieces (a flat rim round a
+     cavity is three or four little areas): so Auto with one trunk plans areas together while their spots lie within a
+     canopy's radius of one another and within a few mm of height (ONE_CLUSTER_MM, ONE_BAND_MM; the planner's own, docs/
+     SUPPORT-ONE-TRUNK.md). Each area still has its own answer, outline and status; the group's support is the first area's. */
+  var ONE_CLUSTER_MM = 9, ONE_BAND_MM = 4;
+  function groupAreas(regs, o) {
+    if (S.mode !== 'auto' || !o.one || o.style !== 'tree') return regs.map(function (r) { return [r]; });
+    function pts(g) { return [].concat.apply([], g.map(function (r) { return r.beacons.filter(function (b) { return !b.off; }); })); }
+    function fits(list) {
+      if (!list.length) return true;
+      var cx = 0, cy = 0, lo = Infinity, hi = -Infinity, r = 0;
+      list.forEach(function (b) { cx += b.x / list.length; cy += b.y / list.length; lo = Math.min(lo, b.z); hi = Math.max(hi, b.z); });
+      list.forEach(function (b) { r = Math.max(r, Math.hypot(b.x - cx, b.y - cy)); });
+      return r <= ONE_CLUSTER_MM && hi - lo <= ONE_BAND_MM;
+    }
+    var left = regs.slice(), out = [];
+    while (left.length) {
+      var g = [left.shift()];
+      for (var i = 0; i < left.length;) {
+        if (fits(pts(g.concat([left[i]])))) g.push(left.splice(i, 1)[0]); else i++;
+      }
+      out.push(g);
+    }
+    return out;
+  }
   /* One area through the planner: the PLANNING step. Resolves { result } when
      there is nothing to build (the planner refused it, or put every spot
      inside the piece), else { rid, t, keyOf, landingOf, unreach } - the plan,
@@ -1036,8 +1063,11 @@ var NSO_SUPPORTS_CARD = (function () {
     return feed;
   }
   function planArea(job, D, rid, beacons, o, onProgress, feed) {
-    var bs = beacons.map(function (b) { return { x: b.x, y: b.y, z: b.z, normal: b.normal, regionId: rid, key: b.key }; });
+    var bs = beacons.map(function (b) { return { x: b.x, y: b.y, z: b.z, normal: b.normal, regionId: b.rid != null ? b.rid : rid, key: b.key }; });
     var opts = Object.assign({}, D.opts, { beacons: bs, style: o.style, restOnModel: o.rest });
+    /* AUTO builds as Bambu's tree slim does: ONE trunk to a cluster of tips (nso_support_gridpack.js planOneTrunk,
+       docs/SUPPORT-ONE-TRUNK.md). Straight struts are one post a spot by definition, and the gecko hand is the lattice's. */
+    if (!feed && o.one && o.style === 'tree') opts.oneTrunk = true;
     if (feed) opts.feed = feed;
     if (feed && feed.mode === 'custom') delete opts.beacons;         // Custom plans its tips alone: no beacon list goes with them
     if (o.sideMm != null) opts.sideMm = o.sideMm;
@@ -1274,18 +1304,23 @@ var NSO_SUPPORTS_CARD = (function () {
 
     /* 1. PLANNING (detecting, then beacons settled), area by area. */
     var settledBefore = 0;
-    regs.forEach(function (rg) {
+    groupAreas(regs, o).forEach(function (grp) {
+      var rg = grp[0], beacons = grp.length === 1 ? rg.beacons : [].concat.apply([], grp.map(function (g) {
+        return g.beacons.map(function (b) { return Object.assign({}, b, { rid: g.id }); });
+      }));
+      /* the areas a group takes in are planned with its first: they get an empty, ok answer of their own, so every area has one */
+      grp.slice(1).forEach(function (g) { chain = chain.then(function () { areas.push({ result: { ok: true, rid: g.id, solids: [], unreachable: [], members: [], zonesEmpty: null } }); }); });
       chain = chain.then(function () {
         if (job.dead) return null;
-        var at = settledBefore, mine = rg.beacons.filter(function (b) { return !b.off; }).length;
+        var at = settledBefore, mine = beacons.filter(function (b) { return !b.off; }).length;
         settledBefore += mine;
-        return planArea(job, D, rg.id, rg.beacons, o, function (m, sent) {
+        return planArea(job, D, rg.id, beacons, o, function (m, sent) {
           /* Each area's planner starts with its own 'detecting'; note() drops
              it once the build is past that phase. The counts are this
              build's, summed over the areas. */
           heard();
           note(job, m && m.phase === 'planning' ? { phase: 'planning', done: at + m.done, total: spots, own: mine, ownDone: m.done } : m, sent);
-        }, feedFor(hm, rg.beacons, rg.id, o.knobs)).then(function (a) {
+        }, feedFor(hm, beacons, rg.id, o.knobs)).then(function (a) {
           areas.push(a);
           return pause() || new Promise(function (go) { setTimeout(go, 0); });
         });
