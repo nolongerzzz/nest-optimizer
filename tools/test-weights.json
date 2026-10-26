@@ -296,7 +296,7 @@
     "support:canonical": {"weight":15550,"note":""},
     "support:curved": {"weight":63000,"note":"37s on the cloud box x 1.7, rounded up: the arc built at 35 deg, its slice, the coupon rebuilt, and the card in Chromium at 60 deg; supports-curved-sheet, #265; re-timed at supports-stair-body"},
     "support:custom": {"weight":196000,"note":"115s locally x 1.7, rounded up: the tilted box built in Auto, Assisted and Custom, circles drawn, tips clicked, a member erased; supports-custom-ui"},
-    "support:everywhere": {"weight":130000,"note":"~75s locally x 1.7, rounded up: the reference read, 24 builds of six small pieces in four poses each sliced, and the flat coupon and top_clip_x2 hashed; supports-sheet-everywhere"},
+    "support:everywhere": {"weight":520000,"note":"~5 min locally x 1.7, rounded up: the reference read, 24 builds of the six real parts in four poses each sliced and measured for sideways clearance, four .3mf written, and the flat coupon and top_clip_x2 hashed; supports-sheet-everywhere"},
     "support:exposed": {"weight":23900,"note":""},
     "support:feed": {"weight":204000,"note":"~120s locally x 1.7, rounded up: the base step 30s (supports-custom-engine), + 3s for supports-thinning-1's crowns (section 7, measured 33s) + 87s for supports-knobs-1's knobs (section 8, measured 117s); merged, not re-timed"},
     "support:foot": {"weight":35000,"note":"20s on the cloud box x 1.7, rounded up: the arc and the coupon built with and without trunks, Bambu's G-code read, the export written; supports-foot"},

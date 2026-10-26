@@ -277,9 +277,19 @@ per-layer angle histograms and line centres. See `docs/CROSSHATCH.md`.
   parts are not in it. It is the reference for where Bambu lays its transition
   and interface layers, and under which surfaces, whichever way they face:
   `support:everywhere` reads it (Support transition / Support interface
-  features, per surface: height, footprint, layers) and
-  `tools/nso_support_ref_pieces.js` rebuilds the six heads from the G-code's
-  own walls. See docs/SUPPORT-INTERFACE.md section 8.
+  features, per surface: height, footprint, layers), part by part, matching
+  each part to its place on the plate. See docs/SUPPORT-INTERFACE.md section 8.
+- supp_ref.3mf — the owner's Bambu Studio PROJECT of the same six parts (20,572
+  triangles; Support Base, Support Oblique, Support Circular, Support Sphere,
+  Support Negative Sphere, Support Negative Sphere2, at their places on the
+  plate), the meshes the slice above was made from. Slice and project share a
+  frame (a part's walls in the G-code lie 0.2 - 0.4 mm inside its mesh at the
+  same x, y). Several parts are overlapping shells (`mesh_validate` fails for
+  five); the planner works on them as they are.
+  `tools/nso_support_ref_pieces.js` reads the six meshes from it. (Its first
+  version, #301, held stand-ins fitted to the G-code's walls, because only the
+  slice had been attached; they are gone.) The settings are the slice's:
+  tree_slim, support_object_xy_distance 0.35, 3 interface layers, 0.2 gap.
 
 ## print-planner/ - a printer's start and end G-code, frozen
 

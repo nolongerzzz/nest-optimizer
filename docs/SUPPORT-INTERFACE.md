@@ -601,8 +601,9 @@ left-out area is still the one under the click.
 
 ## 8. Everywhere: a sheet under every tip that meets the part, at any yaw and tip (supports-sheet-everywhere)
 
-Gate: `npm run support:everywhere` (`tools/nso_support_everywhere_check.js`, 23 checks, ~75 s).
-Reference: `fixtures/supports/tree_slimsupports.gcode.3mf`; pieces: `tools/nso_support_ref_pieces.js`.
+Gate: `npm run support:everywhere` (`tools/nso_support_everywhere_check.js`, 28 checks, ~5 min).
+Reference: `fixtures/supports/tree_slimsupports.gcode.3mf` (Bambu's slice); the six real parts:
+`fixtures/supports/supp_ref.3mf` (the owner's project), read by `tools/nso_support_ref_pieces.js`.
 
 **The bug.** The card's GENERATE builds a sheet where the underside has a level (a flat
 ceiling) or a stair (a slope or curve). Tip the flat tape 15 deg, or yaw it 45 and tip it
@@ -625,6 +626,8 @@ kept off (`STAIR_WALL_MM`) restores the tip marks of the stair that stands.
 the last resort: a level of its own (tips within `LATE_TOL_MM` 0.2 of one another, else each
 alone), for one tip a sheet of one piece round its cap, the same four layers at the gap under the
 lowest ceiling over its cell (sunk a few hundredths when the tip stands on a vertex, `LONE_SINKS`).
+A last-resort sheet keeps the sheet contract's 2 mm line (`MIN_RUN_MM`): a piece three cells across has T lines
+of 0.84 mm, which only the coupon's leg is allowed; `support:interface-clamp` (the standing clamp) holds every sheet to it.
 A tip with room for its column and not for a cap (a ceiling rising from the plate) is cut flat
 under the stack, no cap (`LOW_ROOM_MM`). Both act only on tips bare today, so a piece with none is
 byte for byte what it was (the coupon, `top_clip_x2` and the library tape flat, hashed).
@@ -633,42 +636,72 @@ byte for byte what it was (the coupon, `top_clip_x2` and the library tape flat, 
 (one line a reason: how many tips, why, where) say every tip without a sheet, and the side tips.
 The card does not show them yet (its "Built:" line is asserted whole by the drives).
 
-**The reference.** Six parts in Bambu's slice, each a 17 mm head on a stem (the file holds the
-G-code only; ours are rebuilt from its walls: the underside of each read off the first solid layer
-over every cell). Where Bambu lays its layers, read with the Support transition / Support
-interface features:
+**The reference.** Six parts in Bambu's slice, each a 17 mm head on a stem. The first version of
+this section (#301) rebuilt them from the G-code's walls, because only the slice had been attached;
+they were fits, not the parts. The project is in `fixtures/supports/supp_ref.3mf` now and the gate
+plans against its six meshes, matched to the slice by name and by position (the slice's walls lie
+0.2 - 0.6 mm inside the mesh, at the same x, y). `tools/nso_support_ref_pieces.js` is the same file,
+rewritten to read them: the stand-in heightfields are gone, not kept beside it. Where Bambu lays its
+layers, read with the Support transition / Support interface features, and what ours lays on the
+flat part (`support:everywhere` section 2):
 
-| part | surface | z first T - last I | T | I | footprint mm |
-| --- | --- | --- | --- | --- | --- |
-| Base | flat, z 15.0 | 13.70 - 14.80 | 2 | 3 | 13.9 x 12.9 |
-| Oblique | a plane, 24 deg | 7.69 - 12.20 | 19 | 20 | 13.9 x 12.4 |
-| Circular | a dome | 7.69 - 9.40 | 5 | 6 | 6.9 x 7.1 |
-| Sphere | a ball | 8.49 - 10.00 | 4 | 5 | 5.1 x 5.2 |
-| Negative Sphere | rim, flat z 10.6 | 9.30 - 10.40 | 2 | 3 | 12.7 x 11.8 |
-| | cavity apex | 13.00 - 14.20 | 3 | 4 | 2.9 x 3.1 |
-| Negative Sphere2 | rim | 9.30 - 10.40 | 2 | 3 | 13.5 x 10.6 |
-| | cavity apex | 13.80 - 15.20 | 4 | 5 | 3.9 x 4.2 |
+| part | surface | Bambu: z first T - last I | T | I | footprint mm | ours (flat): z | T | I | footprint mm |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Base | flat | 13.70 - 14.80 | 2 | 3 | 13.9 x 12.9 | 14.20 - 14.80 | 2 | 2 | 14.0 x 11.6 |
+| Oblique | a plane | 7.69 - 12.20 | 19 | 20 | 13.9 x 12.4 | 8.40 - 12.20 | 4 | 17 | 13.8 x 12.4 |
+| Circular | a dome | 7.69 - 9.40 | 5 | 6 | 6.9 x 7.1 | yaw 45: 8.20 - 8.80; flat: one lone sheet, 0.40 - 9.20 | 2 | 2 | 5.9 x 5.0 |
+| Sphere | a ball | 8.49 - 10.00 | 4 | 5 | 5.1 x 5.2 | yaw 45: 8.80 - 9.40; flat: one lone sheet, 0.40 - 10.60 | 2 | 2 | 5.0 x 5.0 |
+| Negative Sphere | rim | 9.30 - 10.40 | 2 | 3 | 12.7 x 11.8 | 9.80 - 10.40 | 2 | 2 | 13.3 x 12.0 |
+| | cavity apex | 13.00 - 14.20 | 3 | 4 | 2.9 x 3.1 | (yaw 45: 13.40 - 14.00) | 2 | 2 | 2.2 x 2.1 |
+| Negative Sphere2 | rim | 9.30 - 10.40 | 2 | 3 | 13.5 x 10.6 | yaw 45: 9.80 - 10.40 | 2 | 2 | 11.7 x 11.0 |
+| | cavity apex | 13.80 - 15.20 | 4 | 5 | 3.9 x 4.2 | none (flat: its tips are held by the rim's sheet or named) | | | |
 
 Bambu lays a transition AND an interface strip on every layer along a slope (Oblique: 19 and 20);
 ours is the stair of section 7 (an interface strip a layer, one transition under the lowest) and
 the flat sheet's T1 T2 I1 I2: the reference decides where and on which surfaces, not layer counts.
+(Where a tip has a lone sheet the slicer types its column as transition: the flat Sphere's 50 T lines, the flat Circular's 43.)
 
-**Measured** (`support:everywhere` section 2; tips with a sheet by NSO's slicer labels, of all tips):
+**Measured** (`support:everywhere` section 2; tips with a sheet by NSO's slicer labels, of all tips;
+the rest of the tips are in the plan's `bare` / `uncarried` lists, with a reason, or are side tips):
 
-| piece | flat | yaw 45 | tip 15 | yaw 45 + tip 15 |
+| part | flat | yaw 45 | tip 15 | yaw 45 + tip 15 |
 | --- | --- | --- | --- | --- |
-| base | 20 of 20 | 14 of 14 | 20 of 21 | 15 of 18 |
-| oblique | 20 of 20 | 14 of 14 | 18 of 19 | 16 of 19 |
-| circular | 1 of 1 | 3 of 4 | 4 of 5 | 5 of 8 |
-| sphere | 4 of 4 | 4 of 4 | 4 of 4 | 5 of 8 |
-| negsphere | 15 of 15 | 8 of 8 | 5 of 7 | 10 of 14 |
-| negsphere2 | 7 of 7 | 1 of 1 | 1 of 2 | 8 of 11 |
+| base | 20 of 20 | 16 of 16 | 20 of 23 | 16 of 19 |
+| oblique | 20 of 20 | 12 of 12 | 16 of 19 | 13 of 16 |
+| circular | 4 of 5 | 4 of 4 | 3 of 7 | 4 of 7 |
+| sphere | 2 of 2 | 4 of 4 | 4 of 4 | 4 of 7 |
+| negsphere | 15 of 15 | 11 of 12 | 6 of 9 | 6 of 9 |
+| negsphere2 | 3 of 3 | 3 of 3 | 8 of 11 | 9 of 13 |
 
-(Before: base 20 / 14 / 0 / 0, oblique 0 / 0 / 0 / 0.) The tips left are named: "no room for the
-stack and its cap above the plate" (a tipped piece's low edge: under about 1.9 mm there is no
-column to put a sheet on), "no piece of 2 mm lines carries two caps" (a tip beside a built sheet's
-edge or among close columns), and a side tip's face. Every sheet and stair keeps the gap: 0.18 mm
-at the nearest point (a lone tip's sheet up to 0.28).
+(Before this ticket: oblique 0 / 0 / 0 / 0 tipped; the real parts had not been planned.) Tips left
+are named: "no room for the stack and its cap above the plate" (a tipped piece's low edge: under
+about 1.9 mm there is no column to put a sheet on), "no piece of 2 mm lines carries two caps" (a
+tip beside a built sheet's edge or among close columns), "its sheet lies too far under it" (a tip a
+stair or a last-resort sheet holds from more than `HELD_TOP_MM` / `HELD_FLAT_MM` away: the flank
+keeps the lines 0.35 mm back) and a side tip's face. The tipped domes (Circular, the Negative
+Spheres) still leave 3 - 6 tips each; they are named, not covered. Every sheet and stair keeps the
+gap: 0.18 mm at the nearest point (a lone tip's sheet up to 0.27).
+
+**Sideways clearance.** The slice's `support_object_xy_distance` is 0.35: in every layer every
+support line keeps 0.35 mm from the part's lines (centre to centre; the gate measures the slice's
+own paths, layer by layer, support line against part line). The gap is a distance to the SURFACE,
+which a strip lying wholly inside the part passes; the stair's top strips did exactly that. A strip
+is now also cut against the part's outline at its layer (`sectionAt` / `sideShort` in
+`nso_support_interface.js`: the piece's section as oriented segments, every centreline sampled for
+inside and distance; `XY_CLEAR_MM` less half a line), and moves up the slope, or ends the stair,
+like a strip the gap would not hold for. Smallest distance over the 24 poses on the real parts:
+**0.00 mm before** (oblique tip 15: 3 layers, z 10.2 - 10.6, a transition and two interface strips
+inside the part; negsphere yaw 45 + tip 15: 1 layer, z 12.6) **and 0.41 mm after** (negsphere2
+yaw 45 + tip 15, z 10.8); no pose has a layer under 0.35. (On the stand-ins of #301, base at yaw 45
++ tip 15 showed 0.01 mm at z 14.6 and 14.8; the real base does not.) The gate leaves out of the part's
+lines a line of infill that crosses a wall of the same part: the slicer here joins two runs of infill
+straight across a hole, which no slicer prints.
+
+**Files for Bambu Studio.** The gate writes one .3mf a pose, with all six real parts at the places
+the project gives them and their supports inside the 180 x 180 bed, to `tools/supports-everywhere-out/`
+(not committed): `supp_ref_flat.3mf`, `supp_ref_yaw45.3mf`, `supp_ref_tip15.3mf`,
+`supp_ref_yaw45_tip15.3mf`. Slice them in Studio (tree_slim, xy distance 0.35): "Conflicts of gcode
+paths" should not appear.
 
 **Found, not fixed.** The flat sheet's result depends on where the piece stands on the plate: the
 library tape yawed 45 and left where it was has all 396 tips under one sheet; the same piece

@@ -27,7 +27,7 @@
    Slice any in Bambu Studio, save the .gcode.3mf, and read the sheet with
      node tools/nso_slicer_audit.js --sheet sliced.gcode.3mf --export tools/supports-print-out/top_clip_x2_supports.3mf
 
-   API (require): build(piece, partsOver) -> { areas, sf, ms, objects } - the
+   API (require): build(piece, partsOver, name) -> { areas, sf, ms, objects } - the
    same build, PARTS_OPTS overridden by partsOver (e.g. { sheetWidthMm: 0.43 });
    slicer:bambu slices it.
    ============================================================ */
@@ -59,7 +59,8 @@ const PARTS = { interface: true, foldSheets: false, footPads: 'shared' };
 const NAME = 'top_clip_x2';
 
 /* the build at the card's defaults, its objects named as the card names them */
-async function build(piece, partsOver) {
+async function build(piece, partsOver, name) {
+  const pname = name || NAME;
   const t0 = Date.now();
   const det = SA.detectOverhangs(piece, { skipList: [], angleDeg: CARD.angleDeg, occluders: [] });
   if (!det.ok) throw new Error(det.reason);
@@ -79,9 +80,9 @@ async function build(piece, partsOver) {
   const ms = Date.now() - t0;
   /* the card's names: "<piece> - support <area>.<n> (Tree)", n counting on over the build */
   let n = 0;
-  const objects = [{ name: NAME, soup: piece }];
+  const objects = [{ name: pname, soup: piece }];
   areas.forEach((a, ai) => sf.objects.filter(o => o.from[0][0] === ai).forEach(o => {
-    objects.push({ name: `${NAME} - support ${a.rid + 1}.${++n} (Tree)`, soup: o.soup, settings: Object.assign({}, SI.SHEET.slicerSettings) });
+    objects.push({ name: `${pname} - support ${a.rid + 1}.${++n} (Tree)`, soup: o.soup, settings: Object.assign({}, SI.SHEET.slicerSettings) });
   }));
   return { areas, sf, ms, objects };
 }
