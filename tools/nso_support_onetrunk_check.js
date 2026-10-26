@@ -1,0 +1,292 @@
+#!/usr/bin/env node
+/* ============================================================
+   tools/nso_support_onetrunk_check.js - supports-one-trunk: Auto supports grown the way
+   Bambu's tree slim grows them, measured on Bambu's own six test heads.   (npm run support:onetrunk)
+
+   The ticket (the owner's, after #301): make the supports look and work as Bambu's do - ONE trunk
+   where it can be one, the transition and the interface laid across a number of surfaces as Bambu
+   lays them. #301 laid a sheet under every surface and left the tree as it was: six trunks and a
+   lattice of square posts under a head Bambu holds up with one. This file is that comparison, run:
+
+   1. THE REFERENCE (fixtures/supports/tree_slimsupports.gcode.3mf, Bambu Studio, A1 mini, tree slim,
+      read with tools/nso_slicer_audit.js): per part, how many trunks stand on the plate, where the
+      trunk stands against the middle of its interface, and the support toolpath.
+   2. OURS, the six real parts (tools/nso_support_ref_pieces.js, flat) built as the card builds in
+      Auto with its ONE TRUNK box ticked (opts.oneTrunk, areas grouped by
+      NSO_SupportGridpack.oneTrunkGroups), and as it built before (box off), then SLICED with NSO_Slicer
+      (whose typeSupports labels each line Support / transition / interface).
+   3. THE GATES: one trunk to a part (Bambu's own count); no more trunks than before anywhere; every spot
+      of every area held (a thinned spot through the tip beside it) or named; the trunk stands under the
+      sheet (within 3 mm in plan: Bambu's stands within 1.5); the gap 0.18 mm and the sideways 0.35 mm
+      keep; a sheet or a stair under each surface Bambu has one under, that ours reaches.
+   Findings, not gates, are printed: the surfaces ours does not lay a sheet on, and the toolpath against
+   Bambu's.
+
+     node tools/nso_support_onetrunk_check.js             all six parts
+     node tools/nso_support_onetrunk_check.js base,oblique    some
+     node tools/nso_support_onetrunk_check.js --export    + tools/supports-onetrunk-out/supp_ref_onetrunk.3mf for Studio
+   ============================================================ */
+'use strict';
+
+const fs = require('fs');
+const path = require('path');
+
+const ROOT = path.join(__dirname, '..');
+const RP = require('./nso_support_ref_pieces.js');
+const PE = require('./nso_supports_print_export.js');
+const AUDIT = require('./nso_slicer_audit.js');
+const R3 = require('../nso-3mf-read.js');
+const SL = require('../nso_slicer.js');
+
+const REF_FILE = path.join(ROOT, 'fixtures', 'supports', 'tree_slimsupports.gcode.3mf');
+const GAP = 0.18, XY_MM = 0.35;
+const args = process.argv.slice(2);
+const EXPORT = args.includes('--export');
+const ONLY = (args.find(a => !a.startsWith('--')) || '').split(',').filter(Boolean);
+const OUT = path.join(ROOT, 'tools', 'supports-onetrunk-out');
+const SLICE_OPTS = SL.defaultsFor(0.4, { supportInterfaceLayers: 3 });   /* the dense sheet's three interface layers */
+
+let pass = 0, fail = 0;
+function check(name, cond, detail) {
+  if (cond) { pass++; console.log('  ok    ' + name + (detail ? '   ' + detail : '')); }
+  else { fail++; console.log('  FAIL  ' + name + (detail ? '   ' + detail : '')); }
+}
+const f1 = v => v.toFixed(1), f2 = v => v.toFixed(2);
+
+/* ---------------------------------------------------------------- helpers shared with support:everywhere's reading of a slice */
+function groupsOf(layers) {
+  const gs = [];
+  for (const L of layers) {
+    let g = gs.find(q => L.z - q.zTop <= 0.6 && L.z >= q.zTop - 1e-9 &&
+      !(L.bb[0] > q.bb[2] + 0.5 || L.bb[2] < q.bb[0] - 0.5 || L.bb[1] > q.bb[3] + 0.5 || L.bb[3] < q.bb[1] - 0.5));
+    if (!g) { g = { zTop: L.z, z0: L.z, bb: L.bb.slice(), T: [], I: [] }; gs.push(g); }
+    g.zTop = Math.max(g.zTop, L.z); g.z0 = Math.min(g.z0, L.z);
+    g.bb = [Math.min(g.bb[0], L.bb[0]), Math.min(g.bb[1], L.bb[1]), Math.max(g.bb[2], L.bb[2]), Math.max(g.bb[3], L.bb[3])];
+    (L.feat === 'Support transition' ? g.T : g.I).push(L.z);
+  }
+  return gs.map(g => ({ z0: g.z0, z1: g.zTop, T: g.T.length, I: g.I.length, w: g.bb[2] - g.bb[0], d: g.bb[3] - g.bb[1], bb: g.bb }));
+}
+function surfacesOf(rows) {            /* rows: { z, feat, pts: [[x, y]] } */
+  const by = new Map();
+  for (const l of rows) {
+    const k = l.z.toFixed(3) + '|' + l.feat, r = by.get(k) || { z: l.z, feat: l.feat, bb: [Infinity, Infinity, -Infinity, -Infinity] };
+    for (const q of l.pts) r.bb = [Math.min(r.bb[0], q[0]), Math.min(r.bb[1], q[1]), Math.max(r.bb[2], q[0]), Math.max(r.bb[3], q[1])];
+    by.set(k, r);
+  }
+  return groupsOf([...by.values()].sort((a, b) => a.z - b.z || (a.feat < b.feat ? -1 : 1)));
+}
+function labelledLines(r) {
+  const out = [];
+  for (const ob of r.objects) {
+    if (ob.role !== 'support') continue;
+    for (const L of ob.layers) for (const p of (L.paths || [])) {
+      out.push({ z: L.printZ, feat: p.feature, pts: p.pts, closed: !!p.closed });
+    }
+  }
+  return out;
+}
+function pathLen(l) {
+  let n = 0;
+  for (let i = 0; i + 1 < l.pts.length; i++) n += Math.hypot(l.pts[i + 1][0] - l.pts[i][0], l.pts[i + 1][1] - l.pts[i][1]);
+  if (l.closed && l.pts.length > 2) n += Math.hypot(l.pts[0][0] - l.pts[l.pts.length - 1][0], l.pts[0][1] - l.pts[l.pts.length - 1][1]);
+  return n;
+}
+/* the sideways clearance of support lines to the part's, as support:everywhere reads it */
+function segSegDist(ax, ay, bx, by, cx, cy, dx, dy) {
+  const o = (px, py, qx, qy, rx, ry) => (qx - px) * (ry - py) - (qy - py) * (rx - px);
+  const o1 = o(ax, ay, bx, by, cx, cy), o2 = o(ax, ay, bx, by, dx, dy), o3 = o(cx, cy, dx, dy, ax, ay), o4 = o(cx, cy, dx, dy, bx, by);
+  if (((o1 > 0) !== (o2 > 0)) && ((o3 > 0) !== (o4 > 0))) return 0;
+  const pd = (px, py, x1, y1, x2, y2) => {
+    const ex = x2 - x1, ey = y2 - y1, ee = ex * ex + ey * ey;
+    let t = ee > 1e-18 ? ((px - x1) * ex + (py - y1) * ey) / ee : 0;
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(px - x1 - t * ex, py - y1 - t * ey);
+  };
+  return Math.min(pd(ax, ay, cx, cy, dx, dy), pd(bx, by, cx, cy, dx, dy), pd(cx, cy, ax, ay, bx, by), pd(dx, dy, ax, ay, bx, by));
+}
+function segsOf(paths) {
+  const out = [];
+  for (const p of paths) {
+    const P = p.pts;
+    for (let i = 0; i + 1 < P.length; i++) out.push([P[i][0], P[i][1], P[i + 1][0], P[i + 1][1], p.feature]);
+    if (p.closed && P.length > 2) out.push([P[P.length - 1][0], P[P.length - 1][1], P[0][0], P[0][1], p.feature]);
+  }
+  return out;
+}
+function minClearance(r) {
+  const part = r.objects.find(o => o.role !== 'support'), sups = r.objects.filter(o => o.role === 'support');
+  let best = { mm: Infinity, z: null };
+  const CS = 2, key = (i, k) => i + ',' + k;
+  part.layers.forEach((PL, j) => {
+    let ps = segsOf(PL.paths || []);
+    if (!ps.length) return;
+    const walls = ps.filter(s => /wall/i.test(s[4])), crosses = (a, b) => {
+      const o = (p, q, rr) => (q[0] - p[0]) * (rr[1] - p[1]) - (q[1] - p[1]) * (rr[0] - p[0]);
+      const A = [a[0], a[1]], B = [a[2], a[3]], C = [b[0], b[1]], D = [b[2], b[3]];
+      return (o(A, B, C) > 0) !== (o(A, B, D) > 0) && (o(C, D, A) > 0) !== (o(C, D, B) > 0);
+    };
+    ps = ps.filter(s => /wall/i.test(s[4]) || !/infill/i.test(s[4]) || !walls.some(w => crosses(s, w)));
+    const grid = new Map();
+    ps.forEach((s, idx) => {
+      const x0 = Math.floor(Math.min(s[0], s[2]) / CS), x1 = Math.floor(Math.max(s[0], s[2]) / CS);
+      const y0 = Math.floor(Math.min(s[1], s[3]) / CS), y1 = Math.floor(Math.max(s[1], s[3]) / CS);
+      for (let i = x0; i <= x1; i++) for (let k = y0; k <= y1; k++) { const kk = key(i, k); if (!grid.has(kk)) grid.set(kk, []); grid.get(kk).push(idx); }
+    });
+    for (const so of sups) {
+      const SLy = so.layers[j];
+      if (!SLy || !SLy.paths) continue;
+      for (const q of segsOf(SLy.paths)) {
+        const x0 = Math.floor((Math.min(q[0], q[2]) - 1) / CS), x1 = Math.floor((Math.max(q[0], q[2]) + 1) / CS);
+        const y0 = Math.floor((Math.min(q[1], q[3]) - 1) / CS), y1 = Math.floor((Math.max(q[1], q[3]) + 1) / CS);
+        const seen = new Set();
+        for (let i = x0; i <= x1; i++) for (let k = y0; k <= y1; k++) {
+          const l = grid.get(key(i, k));
+          if (!l) continue;
+          for (const idx of l) {
+            if (seen.has(idx)) continue;
+            seen.add(idx);
+            const s = ps[idx], d = segSegDist(q[0], q[1], q[2], q[3], s[0], s[1], s[2], s[3]);
+            if (d < best.mm) best = { mm: d, z: PL.printZ };
+          }
+        }
+      }
+    }
+  });
+  return best;
+}
+
+/* ---------------------------------------------------------------- 1. the reference */
+/* connected pieces of the Support lines on one layer: segments whose ends lie within `r` of one another */
+function islands(segs, r) {
+  const n = segs.length, par = segs.map((_, i) => i);
+  const find = i => { while (par[i] !== i) { par[i] = par[par[i]]; i = par[i]; } return i; };
+  for (let a = 0; a < n; a++) for (let b = a + 1; b < n; b++) {
+    const A = segs[a], B = segs[b];
+    if (segSegDist(A.x0, A.y0, A.x1, A.y1, B.x0, B.y0, B.x1, B.y1) <= r) par[find(a)] = find(b);
+  }
+  const g = new Map();
+  segs.forEach((s, i) => { const k = find(i); if (!g.has(k)) g.set(k, []); g.get(k).push(s); });
+  return [...g.values()];
+}
+const segLen = s => Math.hypot(s.x1 - s.x0, s.y1 - s.y0);
+
+(async () => {
+  const WASM = await SL.loadKernel({});
+  const zip = R3.openZip(new Uint8Array(fs.readFileSync(REF_FILE)));
+  const gname = zip.names().find(n => /plate_\d+\.gcode$/.test(n));
+  const dec = new TextDecoder();
+  const gcode = dec.decode(await zip.read(gname));
+  const names = AUDIT.sliceNames(dec.decode(await zip.read('Metadata/slice_info.config')));
+  const nm = {};
+  Object.keys(names).forEach(id => { nm[id] = names[id].replace(/^Support /, '').replace(/\.stl$/, '').replace(/ /g, '').replace(/^Negative/, 'Neg'); });
+  const keyOf = { Base: 'base', Oblique: 'oblique', Circular: 'circular', Sphere: 'sphere', NegSphere: 'negsphere', NegSphere2: 'negsphere2' };
+
+  console.log('\n=== 1. the reference: what Bambu stands under each head ===');
+  const mv = AUDIT.extrusions(gcode), ref = {};
+  for (const id of Object.keys(nm)) {
+    const key = keyOf[nm[id]];
+    const mine = mv.filter(m => +m.obj === +id && /^Support/.test(m.feat || ''));
+    /* the trunks: the islands of Support line on the layers just above the first (a stray dot of one line is not one) */
+    const low = mine.filter(m => m.feat === 'Support' && m.z > 0.35 && m.z < 1.3 && segLen(m) > 0.3);
+    const byZ = new Map();
+    low.forEach(m => { const k = m.z.toFixed(2); if (!byZ.has(k)) byZ.set(k, []); byZ.get(k).push(m); });
+    let trunks = 0, foot = null;
+    for (const segs of byZ.values()) {
+      const isl = islands(segs, 0.9).filter(g => g.reduce((a, s) => a + segLen(s), 0) > 5);
+      if (isl.length > trunks) trunks = isl.length;
+      if (!foot && isl.length) { const pts = [].concat(...isl.map(g => g.map(s => [s.x0, s.y0]))); foot = [pts.reduce((a, p) => a + p[0], 0) / pts.length, pts.reduce((a, p) => a + p[1], 0) / pts.length]; }
+    }
+    const sheetL = mine.filter(m => m.feat !== 'Support');
+    const cen = sheetL.length ? [sheetL.reduce((a, m) => a + (m.x0 + m.x1) / 2, 0) / sheetL.length, sheetL.reduce((a, m) => a + (m.y0 + m.y1) / 2, 0) / sheetL.length] : null;
+    const toolpath = mine.reduce((a, m) => a + segLen(m), 0);
+    ref[key] = { name: nm[id], trunks, foot, cen, off: foot && cen ? Math.hypot(foot[0] - cen[0], foot[1] - cen[1]) : null, toolpath };
+    console.log('        ' + nm[id].padEnd(11) + ' trunks ' + trunks + '   foot-to-interface-centre ' + (ref[key].off == null ? '-' : f2(ref[key].off)) + ' mm   support toolpath ' + (toolpath / 1000).toFixed(2) + ' m');
+  }
+  check('Bambu stands one trunk under a head, two under NegSphere2 (its rim is two pieces apart)', Object.keys(ref).length === 6 && Object.values(ref).every(r => r.trunks === 1 || (r.name === 'NegSphere2' && r.trunks === 2)),
+    Object.values(ref).map(r => r.name + ' ' + r.trunks).join(', '));
+
+  /* ---------------------------------------------------------------- 2. ours */
+  console.log('\n=== 2. ours: the card\'s Auto, the six real parts, flat ===');
+  console.log('        part         trunks (before)  tips  held  surfaces ours (z first T .. last I, T, I, footprint)            gap     sideways   toolpath');
+  const parts = {};
+  for (const k of RP.NAMES) if (!ONLY.length || ONLY.includes(k)) parts[k] = await RP.build(k);
+  const rows = [];
+  for (const k of Object.keys(parts)) {
+    const piece = parts[k];
+    const oldB = await PE.build(piece, null, RP.PROJECT_NAME[k].replace(/\.stl$/, ''), false);
+    const b = await PE.build(piece, null, RP.PROJECT_NAME[k].replace(/\.stl$/, ''), true);
+    const objs = [{ name: 'part', soup: piece, key: 101, role: 'part' }]
+      .concat(b.objects.slice(1).map((x, i) => ({ name: x.name, soup: x.soup, key: 201 + i, role: 'support', hostKey: 101 })));
+    const r = SL.sliceObjects(objs, SLICE_OPTS, WASM);
+    if (!r.ok) throw new Error(k + ': the slice failed: ' + r.reason);
+    const lines = labelledLines(r);
+    const trunksOf = B => B.areas.reduce((n, a) => n + (a.sh.members || []).filter(m => m.kind === 'trunk').length, 0);
+    const row = { key: k, b, oldB, trunks: trunksOf(b), trunksBefore: trunksOf(oldB), clr: minClearance(r), ms: b.ms };
+    /* tips: every beacon of every area is a tip that is built, a spot a tip beside it holds, or named */
+    let tips = 0, spots = 0, covered = 0, unsupported = 0, notes = 0;
+    for (const a of b.areas) {
+      const p = a.p, S = a.tp.sheet;
+      tips += p.oneTrunk ? p.oneTrunk.tips : p.beacons.length;
+      spots += p.oneTrunk ? p.oneTrunk.beacons : p.beacons.length;
+      covered += p.oneTrunk ? p.oneTrunk.thinned : 0;
+      unsupported += (a.sh.unsupported || []).length + (p.unreachable || []).length + (p.inside || []).length;
+      if (S) notes += (S.notes || []).length;
+    }
+    row.tips = tips; row.spots = spots; row.covered = covered; row.unsupported = unsupported;
+    row.surfaces = surfacesOf(lines.filter(l => l.feat === 'Support interface' || l.feat === 'Support transition'));
+    row.toolpath = lines.reduce((a, l) => a + pathLen(l), 0);
+    const gaps = [];
+    b.areas.forEach(a => ((a.tp.sheet && a.tp.sheet.levels) || []).forEach(L => { if (L.minDistanceMm != null && isFinite(L.minDistanceMm)) gaps.push(L.minDistanceMm); }));
+    row.gap = gaps.length ? Math.min(...gaps) : null;
+    /* the trunk against the middle of its sheet, in plan */
+    const trunkAxes = [].concat(...b.areas.map(a => (a.p.crowns || []).map(c => c.axis)));
+    const sl = lines.filter(l => l.feat === 'Support interface' || l.feat === 'Support transition');
+    const cen = sl.length ? [sl.reduce((a, l) => a + l.pts.reduce((s, q) => s + q[0], 0) / l.pts.length, 0) / sl.length, sl.reduce((a, l) => a + l.pts.reduce((s, q) => s + q[1], 0) / l.pts.length, 0) / sl.length] : null;
+    row.off = trunkAxes.length && cen ? Math.min(...trunkAxes.map(t => Math.hypot(t[0] - cen[0], t[1] - cen[1]))) : null;
+    row.notes = notes;
+    rows.push(row);
+    console.log('        ' + k.padEnd(12) + String(row.trunks).padStart(3) + ' (' + row.trunksBefore + ')' + String(row.tips).padStart(9) + String(row.spots - row.unsupported).padStart(4) + '/' + String(row.spots).padEnd(4) +
+      (row.surfaces.length ? row.surfaces.map(g => `z ${f2(g.z0)}-${f2(g.z1)} T${g.T} I${g.I} ${f1(g.w)}x${f1(g.d)}`).join(' | ') : 'none').padEnd(60) +
+      (row.gap == null ? '-' : f2(row.gap)).padEnd(8) + (row.clr.mm < Infinity ? f2(row.clr.mm) : '-').padEnd(10) + (row.toolpath / 1000).toFixed(2) + ' m (Bambu ' + (ref[k].toolpath / 1000).toFixed(2) + ')   ' + (row.ms / 1000).toFixed(1) + ' s');
+  }
+
+  /* ---------------------------------------------------------------- 3. gates */
+  console.log('\n=== 3. the gates ===');
+  check('no more trunks under a head than Bambu stands (ONE, where the box is ticked)', rows.every(r => r.trunks <= ref[r.key].trunks), rows.map(r => r.key + ' ' + r.trunks + ' (Bambu ' + ref[r.key].trunks + ')').join(', '));
+  check('...and never more trunks than the box off builds', rows.every(r => r.trunks <= r.trunksBefore), rows.map(r => r.key + ' ' + r.trunks + '/' + r.trunksBefore).join(', '));
+  check('every spot of every area is held - by a tip of its own, or by the tip it lies beside (within the sheet\'s reach) - or named', rows.every(r => r.unsupported === 0),
+    rows.map(r => r.key + ' ' + (r.spots - r.unsupported) + '/' + r.spots + ' (' + r.covered + ' by a neighbouring tip)').join(', '));
+  check('the trunk stands under its sheet: its axis within 3 mm of the middle of the transition and interface lines in plan (Bambu\'s: ' +
+    Object.values(ref).map(x => f1(x.off)).join(' / ') + ')', rows.every(r => r.off != null && r.off <= 3), rows.map(r => r.key + ' ' + (r.off == null ? '-' : f1(r.off))).join(', '));
+  check('the gap holds on every sheet and stair: 0.18 mm to the part, at the nearest point', rows.every(r => r.gap == null || r.gap >= GAP - 1e-5),
+    'least ' + f2(Math.min(...rows.map(r => r.gap == null ? Infinity : r.gap))) + ' mm');
+  check('SIDEWAYS: every support line keeps ' + XY_MM + ' mm from the part\'s lines in every layer of the slice (the slice\'s support_object_xy_distance)',
+    rows.every(r => r.clr.mm >= XY_MM), 'least ' + f2(Math.min(...rows.map(r => r.clr.mm))) + ' mm');
+  check('every part has a transition and an interface under it (a sheet, or a stair)', rows.every(r => r.surfaces.length >= 1 && r.surfaces.every(s => s.T >= 1 && s.I >= 1)),
+    rows.map(r => r.key + ' ' + r.surfaces.length).join(', '));
+  /* the surfaces Bambu lays a sheet on at the same height as ours: its top within 0.6 mm */
+  const REFTOP = { base: [14.80], oblique: [12.20], circular: [9.40], sphere: [10.00], negsphere: [10.40, 14.20], negsphere2: [10.40, 15.20] };
+  for (const r of rows) {
+    const mine = r.surfaces.map(s => s.z1), want = REFTOP[r.key];
+    const hit = want.map(w => mine.some(m => Math.abs(m - w) <= 0.8));
+    check(r.key + ': a sheet at the height Bambu has its interface top (' + want.join(' / ') + ')', hit[0], 'ours ' + (mine.map(f2).join(' / ') || 'none') +
+      (hit.every(Boolean) ? '' : '   - not laid: ' + want.filter((w, i) => !hit[i]).join(', ') + ' (finding)'));
+  }
+  console.log('\n        findings: toolpath ours / Bambu: ' + rows.map(r => r.key + ' ' + (r.toolpath / ref[r.key].toolpath).toFixed(2) + 'x').join(', '));
+
+  if (EXPORT) {
+    fs.mkdirSync(OUT, { recursive: true });
+    const objects = [];
+    let n = 0;
+    for (const r of rows) {
+      objects.push({ name: RP.PROJECT_NAME[r.key].replace(/\.stl$/, ''), soup: r.b.objects[0].soup });
+      r.b.objects.slice(1).forEach(o => objects.push(o));
+      n++;
+    }
+    const file = path.join(OUT, 'supp_ref_onetrunk.3mf');
+    await PE.write(file, objects);
+    console.log('  wrote ' + path.relative(ROOT, file) + ' (' + n + ' parts)');
+  }
+  console.log('\n' + pass + ' passed, ' + fail + ' failed');
+  process.exit(fail ? 1 : 0);
+})().catch(e => { console.error(e); process.exit(1); });

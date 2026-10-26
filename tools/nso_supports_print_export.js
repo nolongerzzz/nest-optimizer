@@ -59,19 +59,24 @@ const PARTS = { interface: true, foldSheets: false, footPads: 'shared' };
 const NAME = 'top_clip_x2';
 
 /* the build at the card's defaults, its objects named as the card names them */
-async function build(piece, partsOver, name) {
+async function build(piece, partsOver, name, one) {
   const pname = name || NAME;
   const t0 = Date.now();
   const det = SA.detectOverhangs(piece, { skipList: [], angleDeg: CARD.angleDeg, occluders: [] });
   if (!det.ok) throw new Error(det.reason);
   const areas = [];
   let plateZ = 0;
-  for (const rg of det.beaconRegions) {
-    const bs = rg.beacons.map(b => ({ x: b.x, y: b.y, z: b.z, normal: b.normal, regionId: rg.id, key: 'k' }));
-    const p = ST.planTree(piece, Object.assign({}, CARD, { beacons: bs }));
+  /* one: the card's Auto with ONE TRUNK (opts.oneTrunk): the areas the planner says one trunk can feed are planned in one
+     call, as the card plans them (NSO_SupportGridpack.oneTrunkGroups) */
+  const groups = one ? GP.oneTrunkGroups(det.beaconRegions.map(r => ({ id: r.id, pts: r.beacons }))).map(g => g.map(i => det.beaconRegions[i]))
+    : det.beaconRegions.map(r => [r]);
+  for (const grp of groups) {
+    const rg = grp[0];
+    const bs = [].concat(...grp.map(g => g.beacons.map(b => ({ x: b.x, y: b.y, z: b.z, normal: b.normal, regionId: g.id, key: 'k' }))));
+    const p = ST.planTree(piece, Object.assign({}, CARD, { beacons: bs }, one ? { oneTrunk: true } : {}));
     if (!p.ok) { console.log(`area ${rg.id + 1}: ${p.reason}`); continue; }
     plateZ = p.plateZ;
-    const tp = await GP.parts(p, Object.assign({}, PARTS, partsOver || {}));
+    const tp = await GP.parts(p, Object.assign({}, PARTS, one ? { sheetPitchMm: SI.SHEET.densePitchMm, interfaceLayers: SI.SHEET.denseInterfaceLayers } : {}, partsOver || {}));
     if (!tp.ok) throw new Error(`area ${rg.id + 1}: ${tp.reason}`);
     areas.push({ rid: rg.id, p, tp, sh: GP.shells(p, tp) });
   }

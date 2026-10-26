@@ -852,6 +852,11 @@
                 <input type="checkbox" id="sup-rest"> May rest on the part</label>
               <label class="vp-check" for="sup-one" title="On (Auto, Tree): the way Bambu's tree slim grows - a tip every 5 mm, a sheet between them, one trunk to a cluster of tips. Off: a tip on every spot of the 3 mm grid and as many trunks as the grid needs.">
                 <input type="checkbox" id="sup-one" checked> One trunk per cluster</label>
+              <label class="vp-bend-field" for="sup-interface">Interface
+                <select id="sup-interface" class="vp-select" title="Dense, in the one-trunk build: the transition and interface lines lie 0.47 mm apart (Bambu's interface spacing 0.1 lays them 0.46 apart) and there are 3 interface layers. Open (and every other build): 0.84 mm apart and 2, the pitch the first prints were made with.">
+                  <option value="dense" selected>Dense (Bambu)</option>
+                  <option value="open">Open</option>
+                </select></label>
               <details class="vp-sec sup-tune" id="sup-tune" hidden>
                 <summary class="vp-sec-head" id="sup-tune-head" title="Custom only: the numbers the planner builds its trees by. Nothing rebuilds as you type; Regenerate builds with them.">Tune<span id="sup-tune-count" class="sup-tune-count"></span></summary>
                 <div class="vp-sec-body">
@@ -1885,7 +1890,7 @@
        merged pairwise on a node lattice, plate first. planTree above is
        this; it needs nso_support_tree.js's contactPoints and union. See
        docs/SUPPORT-GRIDPACK.md. -->
-  <script src="nso_support_gridpack.js?v=37460102"></script>
+  <script src="nso_support_gridpack.js?v=e942ce4d"></script>
   <script src="nso_exif.js?v=22458ef3"></script>
   <script src="nso_photoset.js?v=0974faf1"></script>
   <script src="nso-cooling-profiles.js"></script>
@@ -1895,7 +1900,7 @@
   <script src="nso-surface-grid.js?v=c0d97583"></script>
   <script src="nso-gcode-lines.js?v=c294e538"></script>
   <script src="nso-gcode-solid.js?v=ac1a4f02"></script>
-  <script src="nso_slicer.js?v=14a0291a"></script>
+  <script src="nso_slicer.js?v=69e3313a"></script>
   <script src="nso_raster_lines.js?v=461ca449"></script>
   <!-- The support interface: the crosshatch's one-direction layers, and the
        sheet a support tree's tips carry under the part (flat caps on the
@@ -1904,7 +1909,7 @@
        line section both use. The Supports card's build worker loads them too. See
        docs/SUPPORT-INTERFACE.md. -->
   <script src="nso_crosshatch.js?v=c1b24917"></script>
-  <script src="nso_support_interface.js?v=bba8636b"></script>
+  <script src="nso_support_interface.js?v=444bc4ab"></script>
   <script src="nso_relief.js?v=fe710fb1"></script>
   <!-- Every tool helper goes in and out of the scene through this registry. -->
   <script src="nso-helpers.js?v=9c476e39"></script>
@@ -2048,7 +2053,7 @@
   <script src="app-gscope-support.js?v=2397557a"></script>
   <!-- The Supports card on the main page: the same detection and planner,
        after app-core.js / app-join.js, whose ingest and soups it uses. -->
-  <script src="app-supports-card.js?v=0f2e1c4f"></script>
+  <script src="app-supports-card.js?v=2f7d5554"></script>
   <script src="app-gscope-slice.js?v=a22783c4"></script>
   <!-- The Slice card (left bar): the plate sliced for its printer, the .gcode.3mf
        it makes. The print planner and the packager are loaded here for it and for

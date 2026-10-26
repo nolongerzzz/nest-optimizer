@@ -648,6 +648,10 @@
        stair's own tree) and its layers its transition then one band a
        layer (role 'interface', widthMm, beads, advanceMm, overlapMm, tips)
      =================================================================== */
+  /* Bambu's dense interface (support_interface_spacing 0.1 at a 0.42 line): its lines lie 0.46 mm apart on every transition and interface
+     layer of the reference slice (docs/SUPPORT-ONE-TRUNK.md). 0.47 here: the strip's joins need a segment of 0.4665 mm, and at 0.46 the
+     stair under a tilted plane would not build. */
+  var SHEET_DENSE_PITCH_MM = 0.47;
   var SHEET_PITCH_MM = 0.84;   /* the reference's interface pitch (0.42 line + 0.42 channel) */
   var SHEET_ROLES = ['transition', 'transition', 'interface', 'interface'];
   var SHEET_UNDER = 0.95;      /* a line is this much of a bead, to the 0.01 mm: see LINE WIDTH */
@@ -742,7 +746,13 @@
     var columns = opts.columns || [];
     var obstacles = [piece].concat(opts.occluders || []).filter(function (s) { return s && s.length >= 9; });
     var PPs = obstacles.map(function (s) { return prepared(TH, s); });
-    var NL = SHEET_ROLES.length, stackH = NL * o.layer;
+    /* the layers of a sheet: two of transition and as many of interface as asked (opts.interfaceLayers, 2 unless said: the clamp's
+       reference; Bambu's own top interface layers are 3 in the six-heads reference). The interface layers alternate across and
+       along the sheet's A from the first, as the reference's do. */
+    var nI = opts.interfaceLayers == null ? 2 : Math.max(1, Math.min(6, Math.round(+opts.interfaceLayers)));
+    var ROLES = ['transition', 'transition'];
+    for (var ri = 0; ri < nI; ri++) ROLES.push('interface');
+    var NL = ROLES.length, stackH = NL * o.layer;
     /* how far under the cap's top a capped column ends: CAP_TUCK and half its
        diagonal - and the cap rises at least that and CAP_TUCK again, so the
        column always ends inside its cap's height (a strut of 2.7 mm or more,
@@ -1644,7 +1654,7 @@
                  loopSegsA: segsAlong(pc.loop, true), loopSegsB: segsAlong(pc.loop, false) };
       });
       for (var lk = 0; lk < NL; lk++) {
-        var alongA = lk !== 2, paths = [], segs = [], soups = [], nLines = 0, lineMm = 0, shortest = Infinity, loopMm = 0, pieces = [];
+        var alongA = lk < 2 || (lk - 2) % 2 === 1, paths = [], segs = [], soups = [], nLines = 0, lineMm = 0, shortest = Infinity, loopMm = 0, pieces = [];
         for (var pi = 0; pi < plan.length; pi++) {
           var pc = plan[pi], lines = alongA ? pc.linesA : pc.linesB, snake = alongA ? pc.snakeA : pc.snakeB;
           lines.forEach(function (l) {
@@ -1671,7 +1681,7 @@
           if (!ex.ok) return { ok: false, reason: 'layer ' + (lk + 1) + ', piece ' + (pj + 1) + ' would not extrude: ' + ex.reason };
           soups.push(ex.tris);
         }
-        built.push({ role: SHEET_ROLES[lk], angleDeg: alongA ? best.angleDeg : (best.angleDeg + 90) % 180, z0: zb, z1: zb + o.layer,
+        built.push({ role: ROLES[lk], angleDeg: alongA ? best.angleDeg : (best.angleDeg + 90) % 180, z0: zb, z1: zb + o.layer,
                      pieces: pieces, loopMm: pieces[0].sizeMm.slice(), lines: nLines, linesMm: lineMm, lengthMm: loopMm + lineMm,
                      shortestMm: shortest, paths: paths, soup: joinSoups(soups) });
       }
@@ -2101,7 +2111,9 @@
       function stripBuild(m, z0, role, wd, neat) {   /* neat: the tolerance the front is straightened to, mm */
         var bd = lay[m].band, sh = bd.shift || 0, hw = o.width / 2, n = wd.n, pt = wd.pitch, W = wd.W;
         var va = bd.v0 + hw, vb = bd.v1 - hw;
-        if (!(vb - va > 2 * pt)) return { ok: false, reason: 'the band is too short for its loop' };
+        /* a strip's lines are spread to cover the part's step (planWidth), more than a pitch apart when two lines at the pitch fall short;
+           the loop's turn needs its own pitch, not the spread */
+        if (!(vb - va > 2 * Math.min(pt, o.pitch))) return { ok: false, reason: 'the band is too short for its loop' };
         var vs = [va], fAt = function (v) { return frontAt(bd, v); };
         if (neat) {
           /* the front as a few straight runs: a raster steps by a cell, and on a tilted or turned band the steps are
@@ -2637,7 +2649,7 @@
       notes: notes,
       reason: (function () {
         var nSt = lv.filter(function (L) { return L.stair; }), nFl = lv.length - nSt.length;
-        return nFl + ' sheet(s) of 4 layers (2 transition, 2 interface), each a loop and a serpentine, at ' + o.pitch + ' mm' +
+        return nFl + ' sheet(s) of ' + (2 + nI) + ' layers (2 transition, ' + nI + ' interface), each a loop and a serpentine, at ' + o.pitch + ' mm' +
           (nSt.length ? ', ' + nSt.length + ' stair(s) of ' + nSt.map(function (L) { return L.stair.strips; }).join(' + ') + ' strips' : '') +
           ' on ' + counts.caps + ' cap(s) over ' + counts.sheet +
           ' tip(s); ' + (counts.drop ? counts.drop + ' tip(s) held by a stair, ' : '') + counts.gap + ' tip(s) cut at the gap, ' + counts.side + ' side tip(s) held off the face';
@@ -2733,7 +2745,7 @@
 
   var api = {
     DEFAULTS: { gapMm: GAP_MM, layerMm: LAYER_MM, pitchMm: PITCH_MM, repeats: REPEATS, epsMm: EPS_MM },
-    SHEET: { pitchMm: SHEET_PITCH_MM, roles: SHEET_ROLES.slice(), under: SHEET_UNDER, minRunMm: MIN_RUN_MM, cellMm: CELL_MM,
+    SHEET: { pitchMm: SHEET_PITCH_MM, densePitchMm: SHEET_DENSE_PITCH_MM, denseInterfaceLayers: 3, roles: SHEET_ROLES.slice(), under: SHEET_UNDER, minRunMm: MIN_RUN_MM, cellMm: CELL_MM,
              sampleMm: SAMPLE_MM, lineAngles: LINE_ANGLES.slice(), fieldMm: FIELD_MM, levelEdgeMm: LEVEL_EDGE_MM,
              slicerSettings: Object.assign({}, SHEET_SLICER) },
     STAIR: { tipMm: STAIR_TIP_MM, backMm: STAIR_BACK_MM },

@@ -168,6 +168,16 @@ var NSO_SUPPORTS_CARD = (function () {
      one shell (the booleans merge a piece's shells for themselves: the
      overlap merge in nso-helpers.js). */
   var PARTS_OPTS = { interface: true, foldSheets: false, footPads: 'shared' };
+  /* The sheet's line pitch and its interface layers are the build's own: DENSE is Bambu's (support_interface_spacing 0.1: lines
+     0.46 mm apart, and 3 interface layers over the 2 of transition, as the reference slice lays every head); OPEN is the 0.84 mm
+     and 2 + 2 layers the first prints were made with. */
+  function oneTrunkOn(o) { return S.mode === 'auto' && !!o.one && o.style === 'tree' && !o.rest; }
+  function partsOptsOf(o) {
+    /* Dense belongs to the one-trunk build: its sheet is planned over the thinned tips the reference's is. A hand-placed row of three
+       tips (Custom) did not form a sheet at 0.47 mm that it forms at 0.84 (support:custom), so the other builds stay Open. */
+    var SI = window.NSO_SupportInterface, dense = !!o && o.dense !== false && oneTrunkOn(o);
+    return dense && SI && SI.SHEET && SI.SHEET.densePitchMm ? Object.assign({}, PARTS_OPTS, { sheetPitchMm: SI.SHEET.densePitchMm, interfaceLayers: SI.SHEET.denseInterfaceLayers }) : Object.assign({}, PARTS_OPTS);
+  }
   /* The card's state when the picked piece has no beacons at all. Detection
      only asks what hangs in air; a tall, thin piece that may sway as it
      prints is a different question, not asked yet, and the words say so. */
@@ -735,7 +745,7 @@ var NSO_SUPPORTS_CARD = (function () {
     if (rm) rm.hidden = !wasBuilt;
     en('btn-sup-none', cs === 'built');
     en('btn-sup-remove', cs === 'built' && S.selSupport != null && !!modelOf(S.selSupport));
-    ['sup-angle', 'sup-style', 'sup-size', 'sup-rest', 'sup-one'].forEach(function (id) { var e = $(id); if (e) e.disabled = !!S.busy; });
+    ['sup-angle', 'sup-style', 'sup-size', 'sup-rest', 'sup-one', 'sup-interface'].forEach(function (id) { var e = $(id); if (e) e.disabled = !!S.busy; });
     var note = $('sup-angle-note');
     if (note) note.textContent = S.angle + '\u00b0 \u00b7 Bambu ' + BAMBU_ANGLE + '\u00b0';
     var ang = $('sup-angle');
@@ -909,9 +919,9 @@ var NSO_SUPPORTS_CARD = (function () {
     var st = $('sup-style'), sz = $('sup-size'), rs = $('sup-rest');
     var style = st && STYLES[st.value] ? st.value : 'tree';
     var size = sz ? parseFloat(sz.value) : NaN;
-    var one = $('sup-one');
+    var one = $('sup-one'), it = $('sup-interface');
     return { style: style, sideMm: isFinite(size) ? size : null, rest: !!(rs && rs.checked), knobs: S.mode === 'custom' ? knobsGiven() : null,
-      one: !one || !!one.checked };
+      one: !one || !!one.checked, dense: !it || it.value !== 'open' };
   }
 
   /* THE PLANNER'S THREAD. planTree is one synchronous call that can run for
@@ -1001,7 +1011,7 @@ var NSO_SUPPORTS_CARD = (function () {
     if (job.worker === undefined) job.worker = startWorker();
     var GP = window.NSO_SupportGridpack;
     if (!job.worker) {
-      return GP.parts(plan, Object.assign({ onProgress: onProgress, yieldFn: yieldFn }, PARTS_OPTS)).then(function (tp) {
+      return GP.parts(plan, Object.assign({ onProgress: onProgress, yieldFn: yieldFn }, job.parts || PARTS_OPTS)).then(function (tp) {
         return tp && tp.ok ? GP.shells(plan, tp) : tp;
       });
     }
@@ -1014,34 +1024,19 @@ var NSO_SUPPORTS_CARD = (function () {
       };
       w.onerror = function (e) { reject(new Error((e && e.message) || 'the planner stopped')); };
       /* A plan from the worker comes back without the piece (rawTris null), and the worker puts its own copy back. */
-      w.postMessage({ id: id, plan: plan, opts: Object.assign({}, PARTS_OPTS) });
+      w.postMessage({ id: id, plan: plan, opts: Object.assign({}, job.parts || PARTS_OPTS) });
     });
   }
 
   /* ONE TRUNK ACROSS SMALL AREAS. Bambu stands one trunk under a head whose underside it finds in pieces (a flat rim round a
-     cavity is three or four little areas): so Auto with one trunk plans areas together while their spots lie within a
-     canopy's radius of one another and within a few mm of height (ONE_CLUSTER_MM, ONE_BAND_MM; the planner's own, docs/
-     SUPPORT-ONE-TRUNK.md). Each area still has its own answer, outline and status; the group's support is the first area's. */
-  var ONE_CLUSTER_MM = 9, ONE_BAND_MM = 4;
+     cavity is three or four little areas): so Auto with one trunk plans areas together while the planner says one trunk can
+     feed them (NSO_SupportGridpack.oneTrunkGroups, docs/SUPPORT-ONE-TRUNK.md). Each area still has its own answer, outline and
+     status; the group's support is the first area's. */
   function groupAreas(regs, o) {
-    if (S.mode !== 'auto' || !o.one || o.style !== 'tree') return regs.map(function (r) { return [r]; });
-    function pts(g) { return [].concat.apply([], g.map(function (r) { return r.beacons.filter(function (b) { return !b.off; }); })); }
-    function fits(list) {
-      if (!list.length) return true;
-      var cx = 0, cy = 0, lo = Infinity, hi = -Infinity, r = 0;
-      list.forEach(function (b) { cx += b.x / list.length; cy += b.y / list.length; lo = Math.min(lo, b.z); hi = Math.max(hi, b.z); });
-      list.forEach(function (b) { r = Math.max(r, Math.hypot(b.x - cx, b.y - cy)); });
-      return r <= ONE_CLUSTER_MM && hi - lo <= ONE_BAND_MM;
-    }
-    var left = regs.slice(), out = [];
-    while (left.length) {
-      var g = [left.shift()];
-      for (var i = 0; i < left.length;) {
-        if (fits(pts(g.concat([left[i]])))) g.push(left.splice(i, 1)[0]); else i++;
-      }
-      out.push(g);
-    }
-    return out;
+    var GP = window.NSO_SupportGridpack;
+    if (!oneTrunkOn(o) || !GP || typeof GP.oneTrunkGroups !== 'function') return regs.map(function (r) { return [r]; });
+    var groups = GP.oneTrunkGroups(regs.map(function (r) { return { id: r.id, pts: r.beacons.filter(function (b) { return !b.off; }) }; }));
+    return groups.map(function (g) { return g.map(function (i) { return regs[i]; }); });
   }
   /* One area through the planner: the PLANNING step. Resolves { result } when
      there is nothing to build (the planner refused it, or put every spot
@@ -1066,8 +1061,9 @@ var NSO_SUPPORTS_CARD = (function () {
     var bs = beacons.map(function (b) { return { x: b.x, y: b.y, z: b.z, normal: b.normal, regionId: b.rid != null ? b.rid : rid, key: b.key }; });
     var opts = Object.assign({}, D.opts, { beacons: bs, style: o.style, restOnModel: o.rest });
     /* AUTO builds as Bambu's tree slim does: ONE trunk to a cluster of tips (nso_support_gridpack.js planOneTrunk,
-       docs/SUPPORT-ONE-TRUNK.md). Straight struts are one post a spot by definition, and the gecko hand is the lattice's. */
-    if (!feed && o.one && o.style === 'tree') opts.oneTrunk = true;
+       docs/SUPPORT-ONE-TRUNK.md). Straight struts are one post a spot by definition, the gecko hand is the lattice's, and a support
+       that may rest on the part has legs the one-trunk crown does not make (it stands on the plate only). */
+    if (!feed && oneTrunkOn(o)) opts.oneTrunk = true;
     if (feed) opts.feed = feed;
     if (feed && feed.mode === 'custom') delete opts.beacons;         // Custom plans its tips alone: no beacon list goes with them
     if (o.sideMm != null) opts.sideMm = o.sideMm;
@@ -1094,6 +1090,17 @@ var NSO_SUPPORTS_CARD = (function () {
       var holds = {};
       x.beacons.forEach(function (id) { holds[a.keyOf(id)] = a.landingOf[id] === 'rest' ? 'rest' : 'held'; });
       return { soup: x.soup, keys: x.beacons.map(a.keyOf), holds: holds, landing: x.landing, regionIds: x.regionIds, feet: x.feet };
+    });
+    /* ONE TRUNK: a spot the planner thinned away is held through the tip it lies beside (plan.oneTrunk.covered), and is said held
+       with that tip's own landing - it is part of the same support */
+    ((a.t.oneTrunk && a.t.oneTrunk.covered) || []).forEach(function (cv) {
+      solids.forEach(function (sd) {
+        if (sd.holds[cv.byKey] && !sd.holds[cv.key]) { sd.holds[cv.key] = sd.holds[cv.byKey]; sd.keys.push(cv.key); }
+      });
+    });
+    /* ...and a spot on the plate's first layers (the low edge of a tipped part) is held by the plate: said held, with the first support */
+    ((a.t.oneTrunk && a.t.oneTrunk.onPlate) || []).forEach(function (op) {
+      if (solids.length && !solids[0].holds[op.key]) { solids[0].holds[op.key] = 'held'; solids[0].keys.push(op.key); }
     });
     return { ok: true, rid: a.rid, solids: solids, unreachable: a.unreach, sideMm: a.t.sideMm, plateZ: a.t.plateZ, reason: a.t.reason,
       members: u.members || [], zonesEmpty: a.t.zonesEmpty || null };
@@ -1251,6 +1258,7 @@ var NSO_SUPPORTS_CARD = (function () {
     if (D === PENDING) return Promise.resolve({ ok: false, reason: 'still measuring' });
     if (!host || !D || D.error) return Promise.resolve({ ok: false, reason: D ? D.error : 'no piece' });
     var eff = S.eff = effective(), o = cardOpts(), hostId = S.hostId;
+    if (pre && pre.lattice) o.one = false;                             // the retry below: the one-trunk build's feet ringed the piece
     var regs = eff.regions.filter(function (r) { return !r.excluded; });
     var removeIds = supportsOf(hostId).map(function (m) { return m.id; });
     if (!regs.length) {
@@ -1258,7 +1266,7 @@ var NSO_SUPPORTS_CARD = (function () {
       sync();
       return Promise.resolve({ ok: false, reason: 'nothing to build' });
     }
-    var job = { seq: 0, dead: false, t0: Date.now(), heard: Date.now(), worker: undefined, sentSoup: false, stop: null, timer: 0, ceiling: 0, clock: 0, rank: -1 };
+    var job = { parts: partsOptsOf(o), seq: 0, dead: false, t0: Date.now(), heard: Date.now(), worker: undefined, sentSoup: false, stop: null, timer: 0, ceiling: 0, clock: 0, rank: -1 };
     var limit = S.watchdogMs, secs = Math.round(limit / 100) / 10, cap = S.ceilingMs;
     function late() { var e = new Error('the planner was still working after ' + secs + ' s'); e.timeout = true; return e; }
     function runaway() {
@@ -1335,7 +1343,7 @@ var NSO_SUPPORTS_CARD = (function () {
          refused counts: its spots are named unreachable or inside). */
       note(job, { phase: 'planning', done: spots, total: spots, own: spots, ownDone: spots });
       var live = areas.filter(function (a) { return a.t; });
-      var units = live.map(function (a) { return gp().buildUnits(a.t, PARTS_OPTS); });
+      var units = live.map(function (a) { return gp().buildUnits(a.t, job.parts || PARTS_OPTS); });
       var total = units.reduce(function (n, k) { return n + k; }, 0), before = 0, next = Promise.resolve();
       live.forEach(function (a, k) {
         next = next.then(function () {
@@ -1413,6 +1421,15 @@ var NSO_SUPPORTS_CARD = (function () {
     }
     return Promise.race([work, guard]).then(function (res) {
       over();
+      /* ONE TRUNK'S FEET ARE FAT (a trunk is as wide at the plate as its height asks, 18 mm for the 72 mm clamp) and nine of them stood
+         round the clamp's post: the pad round the piece could not be opened to the outside. The lattice builds the same piece (its feet
+         are not that big), so the card builds it again that way, and says so. Nothing was added by the first try. */
+      if (!res.ok && !(pre && pre.lattice) && oneTrunkOn(o) && /could not be opened to the outside/.test(res.reason || '')) {
+        return build({ undo: pre && pre.undo, lattice: true }).then(function (r2) {
+          if (r2 && r2.ok) { S.msg = { text: 'One trunk\'s feet ringed the piece, so it is built with the lattice', bad: false }; sync(); }
+          return r2;
+        });
+      }
       if (!res.ok) return fail(res.reason, res.undone);
       afterCommit();
       return { ok: true, added: res.added, removed: res.removed,

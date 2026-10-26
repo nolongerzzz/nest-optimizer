@@ -184,6 +184,7 @@
   var MAX_MERGE = 3;           /* members meeting at one node: pairwise, or three when one stands in the way */            /* a merged section tops out at 4 x the strut area (FLAG) */
   var CLEAR_MM = 0.2;          /* rails are tested this far outside the section */
   var STEER_HEADINGS = 16;
+  var STEER_STEP_MM = 5;       /* a leaning route is tried leaning this much further down at a time (twice the node lattice's z step, L/2: the test is a gate, not a planner) */
   var STEER_LEANS = [1, 0.5];
   var RAY_EPS = 1e-3;
   var PAD_LAYERS_MM = 0.4;     /* a resting foot: two 0.2 mm layers */
@@ -1313,10 +1314,21 @@
         }
         /* how far a round trunk of the law's width (area kept) on (Ax, Ay) falls short of standing clear of the piece and
            what is erased, its foot as far off as Bambu's: 0 when it fits */
-        function trunkGap(sol, stopAt) {
-          var cx = sol.A[0], cy = sol.A[1], top = sol.zTop, PR = probesTH(), z0 = plateZ + foot / 2, worst = 0;
-          for (var z = z0; ; z += 2 * TRUNK_STEP_MM) {
-            var zz = Math.min(z, top), need = (law(zz, Hmax) + sol.dR) / cosN + (zz <= plateZ + foot + 1e-9 ? CK.trunk.footClearMm : TRUNK_KEEP_MM);
+        function trunkGap(sol, stopAt, coarse) {
+          var cx = sol.A[0], cy = sol.A[1], top = sol.zTop, PR = probesTH(), z0 = plateZ + foot / 2, worst = 0, zl = [];
+          for (var z = z0; ; z += (coarse ? 8 : 2) * TRUNK_STEP_MM) { zl.push(Math.min(z, top)); if (z >= top) break; }
+          /* the heights in an order that finds a trunk that does not fit early: the top (under the part), the foot, then the halves
+             between (a tall trunk's room is won or lost at a few heights; read bottom to top, a candidate that fails at the head cost
+             the whole stem first: 33 s of the clamp's 60-tip plan) */
+          var order = [zl.length - 1], seen = {};
+          seen[zl.length - 1] = 1;
+          if (!seen[0]) { seen[0] = 1; order.push(0); }
+          for (var st = Math.max(1, Math.floor((zl.length - 1) / 2)); ; st = Math.floor(st / 2)) {
+            for (var k0 = st; k0 < zl.length - 1; k0 += st) if (!seen[k0]) { seen[k0] = 1; order.push(k0); }
+            if (st <= 1) break;
+          }
+          for (var oi = 0; oi < order.length; oi++) {
+            var zz = zl[order[oi]], need = (law(zz, Hmax) + sol.dR) / cosN + (zz <= plateZ + foot + 1e-9 ? CK.trunk.footClearMm : TRUNK_KEEP_MM);
             for (var q = 0; q < PR.length; q++) {
               if (insideSigned(PR[q], [cx, cy, zz])) { worst = Math.max(worst, need + 1); }
               else {
@@ -1325,7 +1337,6 @@
               }
               if (stopAt && worst > 0) return worst;
             }
-            if (zz >= top) break;
           }
           if (!PR.length && probe.leg([cx, cy, top], [cx, cy, plateZ], (law(plateZ + CK.trunk.flareMm, Hmax) + sol.dR) * Math.SQRT2, 0, 0) >= 0) worst = 1;
           return worst;
@@ -1348,8 +1359,11 @@
         if (!sol) {
           /* it fits nowhere in the circle: the trunk is built all the same, where it falls shortest of room (the centre on a tie) */
           var bestGap = Infinity;
-          cands.forEach(function (c0) {
-            var s2 = solve(c0[0], c0[1]), gp = trunkGap(s2, false);
+          cands.forEach(function (c0, k0) {
+            /* nowhere fits, so where it falls shortest is a search over every point of the circle at every height: 33 s for the clamp's nine
+               trunks. Every third point, every 2 mm of height (coarse), finds the same place to within the circle's own step. */
+            if (k0 % 3) return;
+            var s2 = solve(c0[0], c0[1]), gp = trunkGap(s2, false, true);
             if (gp < bestGap - 1e-9) { bestGap = gp; sol = s2; }
           });
         }
@@ -2831,7 +2845,7 @@
     var ss = sheetStations(p), cols = ss.cols, sts = ss.sts;
     var plan = SI.sheet(opts.rawTris, sts, {
       columns: cols, sideMm: p.sideMm, plateZ: p.plateZ, footMm: foot, occluders: opts.occluders,
-      layerMm: opts.layerMm, gapMm: opts.gapMm, pitchMm: opts.sheetPitchMm, angleDeg: opts.sheetAngleDeg, widthMm: opts.sheetWidthMm,
+      layerMm: opts.layerMm, gapMm: opts.gapMm, pitchMm: opts.sheetPitchMm, angleDeg: opts.sheetAngleDeg, widthMm: opts.sheetWidthMm, interfaceLayers: opts.interfaceLayers,
       capRiseMm: opts.capRiseMm, capMinMm: opts.capMinMm, capMaxMm: opts.capMaxMm,
       thickness: opts.thickness, crosshatch: opts.crosshatch, rasterLines: opts.rasterLines, beat: opts.beat,
       progress: opts.sheetProgress
@@ -4116,9 +4130,12 @@
      ===================================================================== */
   var ONE = {
     coverMm: 3.3,         /* every beacon is within this of a tip: a cap (up to 2 mm out) and the sheet's field (1.25 mm) reach 3.25 */
-    clusterMm: 9,         /* a cluster's tips lie within this of its centre: one trunk feeds a canopy of about this radius (Bambu's, 14 mm across) */
-    crown: { tipDropMm: 3.2, nodeDropMm: 2, rootFloorMm: 4.5 },   /* a canopy is 3.2 mm of straight tip, then joins 2 mm apart, on a trunk that stands 4.5 mm clear of the plate (its flare is 4) */
+    clusterMm: 12,        /* a cluster's tips lie within this of its centre: one trunk feeds a canopy of about this radius (Bambu's own, 14 mm across; 12 left the fewest over-lean members on a 40 x 30 mm slab: 5 trunks, against 8 at 9 and 3 at 15) */
+    crown: { tipDropMm: 3.2, nodeDropMm: 2, rootFloorMm: 4.5, ovalMax: 1.5 },   /* a canopy is 3.2 mm of straight tip, then joins 2 mm apart, on a trunk that stands 4.5 mm clear of the plate (its flare is 4) */
+    lowMm: 4,             /* a spot this near the plate (the low edge of a tipped part) is on the first layers: nothing is stood under it, and it is held by the plate */
+    minTips: 3,           /* an area of three spots or more keeps three tips at least: a curved underside is a stair only from three (nso_support_interface.js STAIR_MIN_TIPS) */
     zWindowMm: 4,         /* tips more than this apart in height (gap to the next tip up) are not served by one trunk */
+    lostRounds: 2,        /* a spot no branch reaches is left out and the tips planned again, this many times at most */
     splitRounds: 3,       /* a cluster with a branch that has no way round the piece is split, this many times at most */
     splitFactor: 0.6,     /* ...to this share of its radius */
     circleMm: 6,          /* the landing circle the trunk may stand in, round the cluster's centre */
@@ -4188,6 +4205,31 @@
     });
     return bands;
   }
+  /* WHICH AREAS ONE TRUNK SERVES. Bambu finds a rim round a cavity in pieces - three or four little areas - and stands one
+     trunk under all of them. areas: [{ id, pts: [{ x, y, z }] }], in the order they are built; -> [[area index, ...], ...]. An
+     area joins the group before it while the group's spots (all of them) lie within clusterMm of their centroid and within
+     zWindowMm of height - the canopy one trunk can feed. The card plans a group in one call (its first area's), and every
+     area of it keeps its own outline, status and answer. */
+  function oneTrunkGroups(areas, opts) {
+    var ck = Object.assign({}, ONE, (opts && typeof opts === 'object') ? opts : {});
+    function fits(list) {
+      if (!list.length) return true;
+      var cx = 0, cy = 0, lo = Infinity, hi = -Infinity, r = 0;
+      list.forEach(function (b) { cx += b.x / list.length; cy += b.y / list.length; lo = Math.min(lo, b.z); hi = Math.max(hi, b.z); });
+      list.forEach(function (b) { r = Math.max(r, Math.hypot(b.x - cx, b.y - cy)); });
+      return r <= ck.clusterMm + 1e-9 && hi - lo <= ck.zWindowMm + 1e-9;
+    }
+    var left = areas.map(function (a, i) { return i; }), out = [];
+    while (left.length) {
+      var g = [left.shift()], pts = areas[g[0]].pts.slice();
+      for (var i = 0; i < left.length;) {
+        var cand = pts.concat(areas[left[i]].pts);
+        if (fits(cand)) { g.push(left.splice(i, 1)[0]); pts = cand; } else i++;
+      }
+      out.push(g);
+    }
+    return out;
+  }
   function planOneTrunk(rawTris, opts) {
     var bc = beaconsFor(rawTris, opts);
     if (!bc.ok || !bc.beacons.length) return null;                      /* the ordinary plan says why, in its own words */
@@ -4201,77 +4243,140 @@
       if (!byArea[k]) { byArea[k] = []; order.push(k); }
       byArea[k].push(b);
     });
-    /* 1. every area thinned to the tips the sheet can carry; the rest are covered by the nearest */
-    var chosen = [], covered = [], thinned = 0;
-    order.forEach(function (k) {
-      var list = byArea[k], pick = thinTips(list, ck.coverMm, Math.min(2, list.length)), isTip = {}, mine = [];
-      pick.forEach(function (i) { isTip[i] = true; mine.push(list[i]); });
-      list.forEach(function (b, i) {
-        if (isTip[i]) return;
-        var by = null, bd = Infinity;
-        mine.forEach(function (c) { var d = Math.hypot(b.p[0] - c.p[0], b.p[1] - c.p[1]); if (d < bd) { bd = d; by = c; } });
-        covered.push({ beacon: b.id, key: b.key, regionId: b.regionId, p: b.p.slice(), by: by.id, byKey: by.key, mm: bd });
-        thinned++;
-      });
-      mine.forEach(function (b) { chosen.push(b); });
-    });
-    /* 2. the tips of every area, in bands of height, clustered; a cluster whose canopy has a branch with no way round the
-       piece (plan.blocked) is split smaller and planned again - a tip is never left without its branch */
-    var clusters = [];
-    zBands(chosen, ck.zWindowMm).forEach(function (band) {
-      clusterTips(band.map(function (i) { return chosen[i]; }), ck.clusterMm).forEach(function (g) { clusters.push({ tips: g.map(function (j) { return chosen[band[j]]; }), r: ck.clusterMm }); });
-    });
-    var p = null, rounds = 0;
-    for (;;) {
-      var tips = [], zones = [];
-      clusters.forEach(function (c) {
-        /* the circle stands under the tips' centroid - weighted toward the higher tips when a first plan had a branch with no way
-           round (c.bias): under a slope the room is under its high end, and a branch can climb from there to a lower tip, where a
-           branch from under the low end meets the underside rising over it */
-        var cx = 0, cy = 0, wsum = 0, zlo = Math.min.apply(null, c.tips.map(function (b) { return b.p[2]; }));
-        c.tips.forEach(function (b) { var w = c.bias ? Math.pow(b.p[2] - zlo + 0.5, c.bias) : 1; cx += b.p[0] * w; cy += b.p[1] * w; wsum += w; });
-        /* ...and as many branches to a join as the head's height asks: a squat head has no room for a join under a join (a
-           branch from a join 0.5 mm under its tips leans along the underside it should clear), so its tips go to the trunk's top
-           in as few levels as the room allows - a flat umbrella - and a tall head keeps Bambu's pairs (2 - 3 to a join) */
-        var room = zlo - ck.crown.rootFloorMm - ck.crown.tipDropMm, allowed = Math.max(0, Math.floor(room / ck.crown.nodeDropMm + 1e-9)), K = 3, mm = c.tips.length, rds = 0;
-        for (K = 3; K < c.tips.length; K++) {
-          mm = c.tips.length; rds = 0;
-          while (mm > K) { mm = Math.max(1, Math.floor(mm / 2)); rds++; }
-          if (rds <= allowed) break;
+    /* a spot whose tip no branch can reach round the piece, even alone (plan.blocked left after every split) has no route to the
+       plate: it is not built, and is the plan's unreachable - the same word the lattice planner gives it. The pool is thinned
+       again without it, so the spots beside it stand tips of their own. */
+    var lost = {}, nLost = 0, p = null, chosen, covered, thinned, clusters, rounds, onPlate = [], plateZ1 = bc.detect && bc.detect.plateZ != null ? bc.detect.plateZ : 0;
+    bc.beacons.forEach(function (b) { if (b.p[2] - plateZ1 < ck.lowMm) { lost[b.id] = 'plate'; onPlate.push({ beacon: b.id, key: b.key, regionId: b.regionId, p: b.p.slice() }); } });
+    /* A SPOT WITH NO ROUTE DOWN stands no tip, and is not covered by one beside it: a spot over the part's own base, or the middle of
+       a tunnel's ceiling, has a neighbour within the sheet's reach whose column reaches the plate, but the sheet does not lie under
+       the spot because of that. A route is a straight leg to the plate or a leaning one (the limit's lean, 16 headings, the whole
+       reach and half of it), clear of the piece as every leg of the planner is, at the LATTICE planner's lean limit (30 deg, not the
+       canopy's 50: "no route to the plate" means what it always meant). Such a spot is the plan's unreachable. */
+    (function () {
+      var A0 = SA(opts), st = A0 && A0.buildStrut ? A0.buildStrut(opts) : null, plateZ0 = bc.detect && bc.detect.plateZ;
+      if (!st || !st.ok || plateZ0 == null) return;
+      var pr = makeProbe(A0, [rawTris].concat(opts.occluders || [])), tanL = Math.tan((opts.branchTiltDeg == null ? ST(opts).BRANCH_TILT_DEG : +opts.branchTiltDeg) * Math.PI / 180) * 0.97, side = st.sideMm;
+      /* the route a tip at `at` has down: straight, leaning to the plate, or leaning a while and then straight (the lattice planner's
+         steer: the leaning line walked down a node's height at a time, a clear leg and a clear drop at each) */
+      function routeDown(at, straightOnly) {
+        var H = at[2] - plateZ0, tip = [at[0], at[1], at[2] - 0.01];
+        if (!(H > side)) return true;                                      /* on the plate's own layer: nothing under it to ask */
+        if (pr.leg(tip, [tip[0], tip[1], plateZ0], side, side, 0) < 0) return true;
+        if (straightOnly) return false;
+        for (var f = 0; f < 2; f++) {
+          for (var h = 0; h < STEER_HEADINGS; h++) {
+            var th = 2 * Math.PI * h / STEER_HEADINGS, ux = Math.cos(th), uy = Math.sin(th), tl = tanL * (f ? 0.5 : 1);
+            for (var dz = STEER_STEP_MM; dz < H - 1e-9; dz += STEER_STEP_MM) {
+              var q = [tip[0] + ux * dz * tl, tip[1] + uy * dz * tl, tip[2] - dz];
+              if (pr.leg(tip, q, side, side, 0) >= 0) break;                /* the leaning line is blocked from here down */
+              if (pr.leg(q, [q[0], q[1], plateZ0], side, 0, 0) < 0) return true;
+            }
+            if (pr.leg(tip, [tip[0] + ux * H * tl, tip[1] + uy * H * tl, plateZ0], side, side, 0) < 0) return true;
+          }
         }
-        zones.push({ x: cx / wsum, y: cy / wsum, r: ck.circleMm, maxKids: Math.max(3, Math.min(K, c.tips.length)) });
-        c.tips.forEach(function (b) { tips.push({ x: b.p[0], y: b.p[1], z: b.p[2], regionId: b.regionId, key: b.key, beaconId: b.id }); });
+        return false;
+      }
+      bc.beacons.forEach(function (b) {
+        if (b.p[2] - plateZ0 < ck.lowMm) return;                           /* on the plate's first layers: held by the plate (below) */
+        var ok = routeDown(b.p);
+        /* a tip against a wall is moved off it along its face, as the lattice planner moves one (NUDGE_STEPS of the strut's side) */
+        for (var si = 0; si < NUDGE_STEPS.length && !ok && b.n[2] < -1e-6; si++) {
+          for (var h0 = 0; h0 < STEER_HEADINGS && !ok; h0++) {
+            var t0 = 2 * Math.PI * h0 / STEER_HEADINGS, dd = NUDGE_STEPS[si] * side, dx = Math.cos(t0) * dd, dy = Math.sin(t0) * dd;
+            ok = routeDown([b.p[0] + dx, b.p[1] + dy, b.p[2] - (b.n[0] * dx + b.n[1] * dy) / b.n[2]], true);   /* a nudged tip: a straight drop (the leaning search is the spot's own, once) */
+          }
+        }
+        if (!ok) { lost[b.id] = true; nLost++; }
       });
-      var o2 = Object.assign({}, opts, {
-        feed: { mode: 'custom', tips: tips, landingZones: zones },
-        crown: Object.assign({ tipRiseMm: ck.tipRiseMm, designLeanDeg: ck.designLeanDeg }, ck.crown || {}, opts.crown || {}, { trunk: Object.assign({ footClearMm: ck.footClearMm }, (opts.crown && opts.crown.trunk) || {}) }),
-        branchTiltDeg: opts.branchTiltDeg == null ? ck.tiltDeg : opts.branchTiltDeg,
-        beacons: undefined, oneTrunk: undefined
+    })();
+    for (var outer = 0; outer <= ck.lostRounds; outer++) {
+      /* 1. every area thinned to the tips the sheet can carry; the rest are covered by the nearest */
+      chosen = []; covered = []; thinned = 0;
+      order.forEach(function (k) {
+        var pool = byArea[k].filter(function (b) { return !lost[b.id]; });
+        if (!pool.length) return;
+        var pick = thinTips(pool, ck.coverMm, Math.min(ck.minTips, pool.length)), isTip = {}, mine = [];
+        pick.forEach(function (i) { isTip[i] = true; mine.push(pool[i]); });
+        pool.forEach(function (b, i) {
+          if (isTip[i]) return;
+          var by = null, bd = Infinity;
+          mine.forEach(function (c) { var d = Math.hypot(b.p[0] - c.p[0], b.p[1] - c.p[1]); if (d < bd) { bd = d; by = c; } });
+          covered.push({ beacon: b.id, key: b.key, regionId: b.regionId, p: b.p.slice(), by: by.id, byKey: by.key, mm: bd });
+          thinned++;
+        });
+        mine.forEach(function (b) { chosen.push(b); });
       });
-      var F2 = feedOf(o2);
-      if (F2 && F2.error) return { ok: false, stage: 'feed', reason: F2.error };
-      p = planFed(rawTris, o2, F2);
-      if (!p.ok || !p.blocked || !p.blocked.length || rounds >= ck.splitRounds) break;
-      /* the crown (its zone) of each blocked branch splits; the others stand */
-      var bad = {};
-      p.blocked.forEach(function (bl) { var cr = p.crowns[bl.crown]; if (cr) bad[cr.zone] = true; });
-      var next = [], split = false;
-      clusters.forEach(function (c, zi) {
-        if (!bad[zi] || c.tips.length < 2) { next.push(c); return; }
-        if (!c.bias) { c.bias = 1; next.push(c); split = true; return; }          /* first: the trunk moved toward the high end */
-        var r2 = c.r * ck.splitFactor;
-        var gs = clusterTips(c.tips, r2);
-        if (gs.length < 2) gs = clusterTips(c.tips, 0.5 * Math.max.apply(null, c.tips.map(function (b) { return Math.hypot(b.p[0] - zones[zi].x, b.p[1] - zones[zi].y); })));
-        if (gs.length < 2) { next.push(c); return; }
-        split = true;
-        gs.forEach(function (g) { next.push({ tips: g.map(function (j) { return c.tips[j]; }), r: r2 }); });
+      if (!chosen.length) return null;                                     /* nothing left to stand: the ordinary plan says why */
+      /* 2. the tips of every area, in bands of height, clustered; a cluster whose canopy has a branch with no way round the
+         piece (plan.blocked) is split smaller and planned again - a tip is never left without its branch */
+      clusters = [];
+      zBands(chosen, ck.zWindowMm).forEach(function (band) {
+        clusterTips(band.map(function (i) { return chosen[i]; }), ck.clusterMm).forEach(function (g) { clusters.push({ tips: g.map(function (j) { return chosen[band[j]]; }), r: ck.clusterMm }); });
       });
-      if (!split) break;
-      clusters = next; rounds++;
+      rounds = 0;
+      for (;;) {
+        var tips = [], zones = [];
+        clusters.forEach(function (c) {
+          /* the circle stands under the tips' centroid - weighted toward the higher tips when a first plan had a branch with no way
+             round (c.bias): under a slope the room is under its high end, and a branch can climb from there to a lower tip, where a
+             branch from under the low end meets the underside rising over it */
+          var cx = 0, cy = 0, wsum = 0, zlo = Math.min.apply(null, c.tips.map(function (b) { return b.p[2]; }));
+          c.tips.forEach(function (b) { var w = c.bias ? Math.pow(b.p[2] - zlo + 0.5, c.bias) : 1; cx += b.p[0] * w; cy += b.p[1] * w; wsum += w; });
+          /* ...and as many branches to a join as the head's height asks: a squat head has no room for a join under a join (a
+             branch from a join 0.5 mm under its tips leans along the underside it should clear), so its tips go to the trunk's top
+             in as few levels as the room allows - a flat umbrella - and a tall head keeps Bambu's pairs (2 - 3 to a join) */
+          var room = zlo - ck.crown.rootFloorMm - ck.crown.tipDropMm, allowed = Math.max(0, Math.floor(room / ck.crown.nodeDropMm + 1e-9)), K = 3, mm = c.tips.length, rds = 0;
+          for (K = 3; K < c.tips.length; K++) {
+            mm = c.tips.length; rds = 0;
+            while (mm > K) { mm = Math.max(1, Math.floor(mm / 2)); rds++; }
+            if (rds <= allowed) break;
+          }
+          zones.push({ x: cx / wsum, y: cy / wsum, r: ck.circleMm, maxKids: Math.max(3, Math.min(K, c.tips.length)) });
+          c.tips.forEach(function (b) { tips.push({ x: b.p[0], y: b.p[1], z: b.p[2], regionId: b.regionId, key: b.key, beaconId: b.id }); });
+        });
+        var o2 = Object.assign({}, opts, {
+          feed: { mode: 'custom', tips: tips, landingZones: zones },
+          crown: Object.assign({ tipRiseMm: ck.tipRiseMm, designLeanDeg: ck.designLeanDeg }, ck.crown || {}, opts.crown || {}, { trunk: Object.assign({ footClearMm: ck.footClearMm }, (opts.crown && opts.crown.trunk) || {}) }),
+          branchTiltDeg: opts.branchTiltDeg == null ? ck.tiltDeg : opts.branchTiltDeg,
+          beacons: undefined, oneTrunk: undefined
+        });
+        var F2 = feedOf(o2);
+        if (F2 && F2.error) return { ok: false, stage: 'feed', reason: F2.error };
+        p = planFed(rawTris, o2, F2);
+        if (!p.ok || !p.blocked || !p.blocked.length || rounds >= ck.splitRounds) break;
+        /* the crown (its zone) of each blocked branch splits; the others stand */
+        var bad = {};
+        p.blocked.forEach(function (bl) { var cr = p.crowns[bl.crown]; if (cr) bad[cr.zone] = true; });
+        var next = [], split = false;
+        clusters.forEach(function (c, zi) {
+          if (!bad[zi] || c.tips.length < 2) { next.push(c); return; }
+          if (!c.bias) { c.bias = 1; next.push(c); split = true; return; }          /* first: the trunk moved toward the high end */
+          var r2 = c.r * ck.splitFactor;
+          var gs = clusterTips(c.tips, r2);
+          if (gs.length < 2) gs = clusterTips(c.tips, 0.5 * Math.max.apply(null, c.tips.map(function (b) { return Math.hypot(b.p[0] - zones[zi].x, b.p[1] - zones[zi].y); })));
+          if (gs.length < 2) { next.push(c); return; }
+          split = true;
+          gs.forEach(function (g) { next.push({ tips: g.map(function (j) { return c.tips[j]; }), r: r2 }); });
+        });
+        if (!split) break;
+        clusters = next; rounds++;
+      }
+      if (!p.ok || !p.blocked || !p.blocked.length || outer >= ck.lostRounds) break;
+      var byTid = {}, found = 0;
+      chosen.forEach(function (b) { byTid[tipId(b.p, true)] = b; });
+      p.blocked.forEach(function (bl) { (bl.tips || []).forEach(function (tid) { var b = byTid[tid]; if (b && !lost[b.id]) { lost[b.id] = true; nLost++; found++; } }); });
+      if (!found) break;
     }
     if (p.ok) {
+      /* the lost spots, as unreachable beacons of the plan (its beacons list is the card's key for every id it answers with) */
+      Object.keys(lost).filter(function (id) { return lost[id] === true; }).map(Number).sort(function (x, y) { return x - y; }).forEach(function (id) {
+        var b = bc.beacons[id], at = p.beacons.length;
+        p.beacons.push({ id: at, p: b.p.slice(), n: b.n.slice(), regionId: b.regionId, key: b.key, source: b.source || 'given', tid: tipId(b.p, true) });
+        p.unreachable.push(at);
+      });
       p.oneTrunk = { coverMm: ck.coverMm, areas: order.length, clusters: clusters.map(function (c) { return { tips: c.tips.length, radiusMm: c.r }; }),
-                     tips: chosen.length, beacons: bc.beacons.length, thinned: thinned, covered: covered, splits: rounds };
+                     tips: chosen.length, beacons: bc.beacons.length, thinned: thinned, covered: covered, onPlate: onPlate, splits: rounds, lost: nLost };
       p.reason = p.reason + (thinned ? ' ' + thinned + ' more spot(s) of the ' + bc.beacons.length + ' lie within ' + ck.coverMm + ' mm of a tip and are held through it.' : '');
     }
     return p;
@@ -4299,6 +4404,8 @@
     STEER_HEADINGS: STEER_HEADINGS, STEER_LEANS: STEER_LEANS.slice(),
     gridBeacons: gridBeacons,
     plan: planSupport,
+    oneTrunkGroups: oneTrunkGroups,
+    ONE_TRUNK: JSON.parse(JSON.stringify(ONE)),
     solid: solid,
     parts: parts,
     weld: weld,

@@ -221,6 +221,10 @@ async function cardRun() {
     await page.click('#menu-supports > summary');
     /* 60 deg, set, not left to the default: #263 makes the card's default 35 */
     await page.evaluate(id => { NSO_SUPPORTS_CARD.pick(id); NSO_SUPPORTS_CARD.angle(60); }, id);
+    /* this section is the card's verdict on the lattice planner's lost spots (30 deg lean: the three at the arc's foot); the
+       one-trunk Auto (supports-one-trunk, lean 50 deg) reaches one more of them, so the box is off here and its own gate is
+       support:onetrunk */
+    await page.evaluate(() => { const e = document.getElementById('sup-one'); if (e) e.checked = false; });
     await page.waitForFunction(() => NSO_SUPPORTS_CARD.view().areas.length > 0, null, { timeout: 60000 });
     const before = await page.evaluate(() => NSO_SUPPORTS_CARD.view());
     await page.evaluate(() => NSO_SUPPORTS_CARD.generate());

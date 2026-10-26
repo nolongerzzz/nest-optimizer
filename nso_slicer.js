@@ -277,6 +277,7 @@
       // A support object (role 'support') holds its host where its top lies
       // within this gap + one layer under the host's underside.
       supportGapMm: CONSTANTS.supportGap.designMm,
+      supportInterfaceLayers: null,        // null -> CONSTANTS.supportSheet.interfaceLayers (2); a sheet of more says so
       weldMm: 1e-4,
       dropToPlate: true,
       filamentDiameterMm: CONSTANTS.flow.filamentDiameterMm,
@@ -1708,7 +1709,7 @@
   var OVER_STEP_MM = 0.1;
   function typeSupports(g, perObject, planes, o, minOver) {
     var C = CONSTANTS.supportSheet;
-    var NI = C.interfaceLayers, NT = C.transitionLayers, R = C.closeMm;
+    var NI = o.supportInterfaceLayers != null ? o.supportInterfaceLayers : C.interfaceLayers, NT = C.transitionLayers, R = C.closeMm;   /* o.supportInterfaceLayers: a sheet built with more (sheet() opts.interfaceLayers) */
     var gap = o.supportGapMm, w = o.outerWallWidthMm;
     /* a top may lie a layer further under the host than a sheet does: a
        stair's band stands its back edge up to 0.55 mm under the part (its

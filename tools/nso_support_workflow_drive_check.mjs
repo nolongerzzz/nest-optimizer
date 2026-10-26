@@ -241,7 +241,10 @@ async function main() {
   const expected = /planner exploded|planner threw at once/;
   let cdn = [];
 
-  async function freshPage(files) {
+  /* `lattice`: the card's ONE TRUNK box off. Sections 7 - 9 pin the lattice planner's counts (the tunnel's 72 unreachable spots, the
+     wedge's held areas): one trunk (the default, which sections 1 - 6 and 10 - 12 drive) reaches with Bambu's 50 deg canopy and
+     holds spots through a neighbouring tip, so its counts are its own (support:onetrunk). */
+  async function freshPage(files, lattice) {
     const page = await browser.newPage({ viewport: { width: W, height: H } });
     cdn = cdn.concat(routeCdn(page));
     page.on('pageerror', (e) => errors.push(String(e)));
@@ -251,6 +254,7 @@ async function main() {
     await page.waitForFunction(() => !!window.NSO_SUPPORTS_CARD, null, { timeout: 30000 });
     await page.evaluate((fs) => handleFiles(fs.map(([n, a]) => new File([new Uint8Array(a)], n))), files);
     await page.waitForFunction((n) => state.models.length === n && state.placed.length === n, files.length, { timeout: 30000 });
+    if (lattice) await page.evaluate(() => { const e = document.getElementById('sup-one'); if (e) e.checked = false; });
     return page;
   }
 
@@ -610,6 +614,10 @@ async function main() {
   await T.hudClean('built');
   check('...every spot is held, the area is still outlined in white', [(await T.view()).beacons.every((b) => b.state === 'held'), (await T.outlines()).areas.map((a) => a.kind)], [true, ['on']]);
   check('...the supports are card supports of area 0', s.length > 0 && (await page.evaluate(() => state.models.filter((m) => m.nsoSupport).every((m) => m.nsoSupport.card && m.nsoSupport.regionId === 0))), true);
+  /* ONE TRUNK is the default: the tilted box's area (120 spots, 40 x 30 mm at 30 deg) is held by a few tips and ONE support, every spot
+     of it held (those the thinned tips do not stand are held through the tip beside them) */
+  check('ONE TRUNK (the box is ticked): the area is held by one support, where the lattice stands several',
+    [N, await page.evaluate(() => document.getElementById('sup-one').checked)], [1, true]);
   await T.shot('06-built.png');
 
   await T.oneStep('Regenerate', () => page.click('#btn-sup-all'));
@@ -727,7 +735,7 @@ async function main() {
   // =======================================================================
   console.log('\n--- 7. the three counts: held / unsupported / unreachable ---');
   // =======================================================================
-  page = await freshPage([['with-tunnel.stl', WITH_TUNNEL]]);
+  page = await freshPage([['with-tunnel.stl', WITH_TUNNEL]], true);
   T = tools(page);
   const bId = await page.evaluate(() => state.placed[0].sourceId);
   await page.click('#menu-supports > summary');
@@ -795,7 +803,7 @@ async function main() {
   console.log('\n--- 8. selecting a piece while the card is open detects there ---');
   // =======================================================================
   const TUNNEL_ONLY = stl(tunnelBlock(0, 40, 30));
-  page = await freshPage([['tilted.stl', TILTED], ['tunnel.stl', TUNNEL_ONLY]]);
+  page = await freshPage([['tilted.stl', TILTED], ['tunnel.stl', TUNNEL_ONLY]], true);
   T = tools(page);
   const ids = await page.evaluate(() => state.placed.map((p) => p.sourceId));
   await page.evaluate(() => selectPlaced(-1));
@@ -834,7 +842,7 @@ async function main() {
   console.log('\n--- 9. the wedge: library/v9_mirror_factory.stl ---');
   // =======================================================================
   const WEDGE = Array.from(await readFile(join(ROOT, 'library', 'v9_mirror_factory.stl')));
-  page = await freshPage([['v9_mirror_factory.stl', WEDGE]]);
+  page = await freshPage([['v9_mirror_factory.stl', WEDGE]], true);
   T = tools(page);
   const wId = await page.evaluate(() => state.placed[0].sourceId);
   await T.lookAtPiece(wId, [0.3, -1, 0.9], 330);

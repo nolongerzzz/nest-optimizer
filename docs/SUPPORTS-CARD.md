@@ -508,6 +508,18 @@ git-ignored `tools/supports-custom-card-out/`.
 - The standing supports are not dimmed in the 3D view when stale; the card's
   readout is.
 
+## 8. One trunk, and the interface (supports-one-trunk)
+
+Two controls under Style / Size / May rest on the part, both settings (not Undo steps), both disabled while a build runs:
+
+| control | on | off |
+| --- | --- | --- |
+| **One trunk per cluster** (default on) | **Auto, Tree, not "may rest on the part"**: the planner is sent `opts.oneTrunk` (no feed): tips every ~5 mm, one trunk to a cluster, a canopy, the sheet between (`docs/SUPPORT-ONE-TRUNK.md`). Areas one trunk can feed are planned in one call (`NSO_SupportGridpack.oneTrunkGroups`); each keeps its outline, status and answer, the group's support is the first area's. A spot a thinned tip holds is said **held**, with that tip's landing. | the lattice planner of `SUPPORT-GRIDPACK.md` section 2, a tip on every spot of the 3 mm grid, as it was |
+| **Interface** Dense (Bambu) / Open | **Dense** (default), **in the one-trunk build**: the sheet's lines 0.47 mm apart and 3 interface layers over the 2 of transition (`partsOptsOf`: `sheetPitchMm`, `interfaceLayers`) - Bambu's `support_interface_spacing` 0.1 | **Open**: 0.84 mm, 2 + 2, the first prints'. Every other build (box off, Assisted, Custom, Straight strut, Gecko-hand, may rest on the part) is Open whatever the select says |
+
+Straight strut and Gecko-hand are one post (or hand) a spot by definition and are never one trunk. Assisted and Custom
+send their feeds as before and are not one trunk; their sheets stay Open (a hand-placed row of three tips formed no sheet at 0.47 mm in `support:custom`, where it forms one at 0.84).
+
 ## Paint scope: sub-region (detection)
 
 As G-scope's row: painted faces are the `skipList`, shifted into the world
