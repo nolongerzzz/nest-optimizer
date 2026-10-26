@@ -89,6 +89,7 @@
     "bridge:test": {"weight":1100,"note":""},
     "brush": {"weight":5250,"note":""},
     "bvh:test": {"weight":3600,"note":""},
+    "recent:store": {"weight":300,"note":"Node only, a few ms of checks; node start-up dominates"},
     "camera:leash": {"weight":224,"note":""},
     "carve:drag": {"weight":103600,"note":""},
     "carve:test": {"weight":14500,"note":""},

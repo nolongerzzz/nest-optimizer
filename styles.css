@@ -409,7 +409,8 @@ select:focus, input:focus {
    then bound the whole thing against the viewport, once, instead of two
    scroll boxes nested inside one another. The chrome goes too: a panel
    inside a panel drew a second border and a second shadow. */
-.vp-top-body .library-list {
+.vp-top-body .library-list,
+.vp-top-body .recent-list {
   position: static;
   width: 100%;
   min-width: 0;
@@ -459,7 +460,8 @@ select:focus, input:focus {
   display: inline-flex;
 }
 
-#btn-library[aria-expanded="true"] {
+#btn-library[aria-expanded="true"],
+#btn-recent[aria-expanded="true"] {
   border-color: #38bdf8;
   color: #fff;
 }
@@ -587,6 +589,19 @@ select:focus, input:focus {
   font-variant-numeric: tabular-nums;
 }
 .library-sec[open] > .vp-sec-head > .library-sec-count { color: #94a3b8; }
+
+/* Import > Recent: each row says where the piece came from, and an empty
+   list says so in place of a row. Rows are the library's own (.library-item). */
+.recent-src {
+  flex: none;
+  font-size: 10px;
+  color: #64748b;
+}
+.recent-empty {
+  padding: 5px 8px;
+  font-size: 12px;
+  color: #64748b;
+}
 
 .library-item.is-loading {
   opacity: 0.55;
