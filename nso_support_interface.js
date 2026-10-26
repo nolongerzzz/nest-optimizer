@@ -1832,7 +1832,7 @@
           var st2 = stairOf(groups[k], STAIR_WALL_MM);
           if (st2 && heldBy(st2) > heldBy(st)) st = st2;
         }
-        if (st) out.push(st);
+        if (st) { st.snap.forEach(function (x) { x.t.stairM = x.stairM; x.t.top = x.top; x.t.capFoot = x.capFoot; x.t.cap = x.cap; x.t.capWhy = x.capWhy; }); out.push(st); }
       });
       return out;
     }
@@ -2009,6 +2009,8 @@
         /* ends: a tip a mm or less past either end of the band is held by its last line */
         if (ends && bd) v = Math.min(bd.v1, Math.max(bd.v0, v));
         var f = frontAt(bd, v);
+        /* the strip is drawn one shift further up the slope than the band's front reads (stripBuild adds it again) */
+        if (f != null && bd) f += bd.shift || 0;
         return f != null && uOf(p) >= f - a && uOf(p) <= f + W + a && (!ends || Math.abs(vOf(p) - v) <= a);
       }
       /* THE STAIR'S START: the lowest layer whose band runs at least
@@ -2338,7 +2340,9 @@
       }
       var zTopStair = zTopOf(mTop);
       var held = group.filter(function (t) { return carriers.indexOf(t) < 0; });
-      return { group: group, carriers: carriers, held: held, zCap: zCap, zBase: zCap, zTop: zTopStair, layers: layers, minD: minD,
+      /* the tips' own marks (stairOf writes them on the shared tips, and may run twice over a group) */
+      var snap = group.map(function (t) { return { t: t, stairM: t.stairM, top: t.top, capFoot: t.capFoot, cap: t.cap, capWhy: t.capWhy }; });
+      return { snap: snap, group: group, carriers: carriers, held: held, zCap: zCap, zBase: zCap, zTop: zTopStair, layers: layers, minD: minD,
                lines: { angleDeg: phi, stair: true, slopeDeg: slopeDeg, droppedShare: 0, bare: 0, pieces: layers.length, tried: [] },
                stair: { slopeDeg: slopeDeg, angleDeg: phi, mLo: mLo, mTop: mTop, strips: mTop - mLo + 1, topMm: zTopStair,
                         tips: want.map(function (w) { return { p: w.p, strip: w.strip - mLo }; }),
