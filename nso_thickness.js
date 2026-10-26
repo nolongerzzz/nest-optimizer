@@ -1306,10 +1306,46 @@
     return best === null ? null : { t: best, face: bestU };
   }
 
-  /* Pay the weld and the grid once. Everything hung off the result is a walk. */
+  /* Pay the weld and the grid once. Everything hung off the result is a walk.
+
+     ONE PROBE PER MESH, WHOEVER ASKS. The probe is a function of the mesh's numbers and the resolved options and of nothing
+     else (it keeps no reference to rawTris), so it is kept by CONTENT: two callers with the same mesh (the sheet's and the
+     gridpack's, which each kept a probe of their own per array) share one, and so do the copies a worker is handed - every
+     message is a structured clone, a new array no per-array cache can recognise, and the supports' build re-welded the piece
+     and every occluder on each (113 prepares of 11 meshes on the six-part plate: half its time). The key is the length and two
+     32-bit hashes of the numbers' bits. The cache holds the most recent meshes up to PROBE_CACHE_TRIS triangles in all; a mesh
+     over PROBE_CACHE_ONE is not kept (it would push the rest out, and a mesh that size is a worker's). */
+  var PROBE_CACHE_TRIS = 600000, PROBE_CACHE_ONE = 200000;
+  var probeCache = new Map(), probeCacheTris = 0;
+  var hashF64 = new Float64Array(1), hashU32 = new Uint32Array(hashF64.buffer);
+  function contentKey(rawTris) {
+    var h1 = 0x811c9dc5 | 0, h2 = 0x9e3779b9 | 0, n = rawTris.length;
+    for (var i = 0; i < n; i++) {
+      hashF64[0] = rawTris[i];
+      h1 = Math.imul(h1 ^ hashU32[0], 16777619); h1 = Math.imul(h1 ^ hashU32[1], 16777619);
+      h2 = Math.imul(h2 + hashU32[0], 0x85ebca6b) ^ (h2 >>> 15); h2 = Math.imul(h2 + hashU32[1], 0xc2b2ae35) ^ (h2 >>> 13);
+    }
+    return n + ':' + (h1 >>> 0).toString(36) + ':' + (h2 >>> 0).toString(36);
+  }
   function prepare(rawTris, opts) {
     var o = resolveOpts(opts);
     if (!rawTris || rawTris.length < 9) return null;
+    var nTri = (rawTris.length / 9) | 0;
+    if (nTri > PROBE_CACHE_ONE) return prepareFresh(rawTris, o);
+    var key = contentKey(rawTris) + '|' + o.nozzle + ',' + o.minWall + ',' + o.probe + ',' + o.weldTol + ',' + o.eps + ',' + o.maxExamples;
+    var hit = probeCache.get(key);
+    if (hit) { probeCache.delete(key); probeCache.set(key, hit); return hit.P; }       // most recent last
+    var P = prepareFresh(rawTris, o);
+    if (P) {
+      probeCache.set(key, { P: P, n: nTri }); probeCacheTris += nTri;
+      for (var it = probeCache.keys(); probeCacheTris > PROBE_CACHE_TRIS; ) {
+        var old = it.next().value;
+        probeCacheTris -= probeCache.get(old).n; probeCache.delete(old);
+      }
+    }
+    return P;
+  }
+  function prepareFresh(rawTris, o) {
     var idx = indexSoup(rawTris, o.weldTol);
     var tris = idx.tris, vids = idx.vids;
     if (!tris.length) return null;
