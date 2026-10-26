@@ -1203,6 +1203,18 @@
     }
     var tv = trisFlat(G, tris), p0 = point[0], p1 = point[1], p2 = point[2];
     if (outside) {
+      /* A BOUNDED QUERY FROM AFAR ANSWERS FROM THE BOX. The occupied cells' box is a lower bound on every triangle's
+         distance, so a point further from it than the caller's bound has nothing to find and the O(n) sweep is not run
+         (the supports' cap-clearance asks every sample of every cap of every other piece's body: 88% of a plate's build). */
+      if (isFinite(cap)) {
+        var far2 = 0;
+        for (var qa = 0; qa < 3; qa++) {
+          var boxLo = G.loCell[qa] * cell, boxHi = (G.hiCell[qa] + 1) * cell, pv = point[qa];
+          var gap = pv < boxLo ? boxLo - pv : (pv > boxHi ? pv - boxHi : 0);
+          far2 += gap * gap;
+        }
+        if (far2 > (cap + 1e-6) * (cap + 1e-6)) return null;
+      }
       for (var lf = 0; lf < tris.length; lf++) {
         var ld = closestD2Flat(tv, lf * 15, p0, p1, p2);
         if (ld < best) { best = ld; bestF = lf; }
