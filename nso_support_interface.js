@@ -703,6 +703,8 @@
   var STAIR_WALL_MM = 0.56;    /* the stair asked again keeps its strips this far off the piece's walls: the gap, a line's corner, a cell */
   var LATE_TOL_MM = 0.2;       /* tips left over agree on a level to this: under half a layer, the sheet at the lowest ceiling of them */
   var LONE_MAX_TIPS = 3;       /* ...for a level of this many tips or fewer (a row of them has no field to find that way) */
+  var STAIR_HOLD_MM = 1.5;     /* a stair holds a tip a strip of it lies this near in plan... */
+  var STAIR_UNDER_MM = 1.2;    /* ...and no further under the tip's contact than this (the stack, the gap and a strip's step) */
   var STAIR_ROUNDS = 4;        /* the tips a stair leaves are asked for a stair again, this many times at most */
   var STAIR_CUTS = 6;          /* a stair is cut short by the gap at most this many times */
   var STAIR_FRONT_RUN = 0.8;   /* ...its front no steeper than this, mm up the slope per mm along it */
@@ -2351,6 +2353,22 @@
 
     var stairsBuilt = [];
     function applyStair(st) {
+      /* A STAIR HOLDS A TIP ONLY WHERE IT IS: a strip of it within STAIR_HOLD_MM of the tip in plan, with its top no more than
+         STAIR_UNDER_MM under the tip's contact. On a steep underside (the wall of a cavity) the plan says a strip holds a
+         tip the strip is millimetres below; that tip is left to the next round and the last resort, and named if no sheet fits */
+      var reaches = function (t) {
+        return st.layers.some(function (Ly) {
+          if (Ly.z1 > t.contact[2] + 0.05 || Ly.z1 < t.contact[2] - STAIR_UNDER_MM) return false;
+          return Ly.paths.some(function (pth) {
+            for (var q = 0; q + 1 < pth.length; q++) if (segDist2(t.contact, pth[q], pth[q + 1]) <= STAIR_HOLD_MM) return true;
+            return false;
+          });
+        });
+      };
+      st.carriers = st.carriers.filter(function (t) { return reaches(t); });
+      st.held = st.held.filter(function (t) { return t.stairM == null || reaches(t); });
+      /* a stair whose lowest strip no tip reaches would stand on nothing */
+      if (!st.carriers.length) return false;
       var L = { id: levels.length, first: st.zTop, tips: st.carriers, told: st.carriers.length, ok: true, stair: st,
                 res: { zTop: st.zTop, zBase: st.zBase, zCap: st.zCap, layers: st.layers, lines: st.lines }, minDistanceMm: st.minD };
       levels.push(L);
@@ -2375,6 +2393,7 @@
         });
         if (hits) { t.mode = 'drop'; t.level = L.id; t.cap = null; t.why = 'held by the stair: its cut would stand in a strip under it'; }
       });
+      return true;
     }
 
 
@@ -2385,7 +2404,9 @@
       for (var rnd = 0; rnd < STAIR_ROUNDS; rnd++) {
         var found = buildStairs();
         if (!found.length) break;
-        found.forEach(function (st) { stairsBuilt.push(st); applyStair(st); });
+        var applied = 0;
+        found.forEach(function (st) { if (applyStair(st) !== false) { stairsBuilt.push(st); applied++; } });
+        if (!applied) break;
       }
     }
 
