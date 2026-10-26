@@ -599,3 +599,82 @@ arc reads held, and the row is "Area 3 · unreachable · no route to the plate
 · 3 spots", outlined and framed where they are. No new control, and a
 left-out area is still the one under the click.
 
+## 8. Everywhere: a sheet under every tip that meets the part, at any yaw and tip (supports-sheet-everywhere)
+
+Gate: `npm run support:everywhere` (`tools/nso_support_everywhere_check.js`, 23 checks, ~75 s).
+Reference: `fixtures/supports/tree_slimsupports.gcode.3mf`; pieces: `tools/nso_support_ref_pieces.js`.
+
+**The bug.** The card's GENERATE builds a sheet where the underside has a level (a flat
+ceiling) or a stair (a slope or curve). Tip the flat tape 15 deg, or yaw it 45 and tip it
+15, and no level and no stair formed: every tip stood as a bare pillar, said nowhere. The path
+was `sheet()`'s THE STAIR (`nso_support_interface.js`), failing four ways, each silently:
+
+| what failed | what happens now |
+| --- | --- |
+| a strip would not extrude (a front read off a 0.1 mm raster steps by a cell: stubs shorter than the joins at their ends need, or lines of the strip within a line width) | the same strip is drawn on its front straightened (`STAIR_NEAT_MM` 0.06 / 0.15 / 0.3) and no steeper than 0.8 up the slope per mm along it; tried only when the plain one would not extrude, so every stair that built builds as it did |
+| one strip the gap would not hold for (a wall of the part beside it: the tipped stem) dropped the WHOLE stair (`return null`) | the strip loses its back lines down to two; if it still fails the stair ends under it (`STAIR_CUTS`), widths planned again; the tips above are the next round's |
+| the tips a stair left were never asked again | the stair repeats on them (`STAIR_ROUNDS` 4) |
+| tips were joined at 1.6 median spacings: a 3 mm lattice with a 1.5 mm rim round it has a median of 1.5, and no 3 mm neighbour joined | a tip's own nearest-neighbour spacing counts where it is wider |
+
+And three more: a tip is **held by a stair** only where a strip of it is (within 1.5 mm in plan,
+no more than 1.2 mm under the tip's contact; a stair that reaches no tip is not built); a tip a
+mm past a strip's end is held by its last line; the retry that asks a stair again with the walls
+kept off (`STAIR_WALL_MM`) restores the tip marks of the stair that stands.
+
+**What is new for what is still bare.** After the levels and the stairs, a tip with nothing gets
+the last resort: a level of its own (tips within `LATE_TOL_MM` 0.2 of one another, else each
+alone), for one tip a sheet of one piece round its cap, the same four layers at the gap under the
+lowest ceiling over its cell (sunk a few hundredths when the tip stands on a vertex, `LONE_SINKS`).
+A tip with room for its column and not for a cap (a ceiling rising from the plate) is cut flat
+under the stack, no cap (`LOW_ROOM_MM`). Both act only on tips bare today, so a piece with none is
+byte for byte what it was (the coupon, `top_clip_x2` and the library tape flat, hashed).
+
+**None is silent.** `tp.sheet.bare` ([{ i, beacon, contact, why }]), `.uncarried` and `.notes`
+(one line a reason: how many tips, why, where) say every tip without a sheet, and the side tips.
+The card does not show them yet (its "Built:" line is asserted whole by the drives).
+
+**The reference.** Six parts in Bambu's slice, each a 17 mm head on a stem (the file holds the
+G-code only; ours are rebuilt from its walls: the underside of each read off the first solid layer
+over every cell). Where Bambu lays its layers, read with the Support transition / Support
+interface features:
+
+| part | surface | z first T - last I | T | I | footprint mm |
+| --- | --- | --- | --- | --- | --- |
+| Base | flat, z 15.0 | 13.70 - 14.80 | 2 | 3 | 13.9 x 12.9 |
+| Oblique | a plane, 24 deg | 7.69 - 12.20 | 19 | 20 | 13.9 x 12.4 |
+| Circular | a dome | 7.69 - 9.40 | 5 | 6 | 6.9 x 7.1 |
+| Sphere | a ball | 8.49 - 10.00 | 4 | 5 | 5.1 x 5.2 |
+| Negative Sphere | rim, flat z 10.6 | 9.30 - 10.40 | 2 | 3 | 12.7 x 11.8 |
+| | cavity apex | 13.00 - 14.20 | 3 | 4 | 2.9 x 3.1 |
+| Negative Sphere2 | rim | 9.30 - 10.40 | 2 | 3 | 13.5 x 10.6 |
+| | cavity apex | 13.80 - 15.20 | 4 | 5 | 3.9 x 4.2 |
+
+Bambu lays a transition AND an interface strip on every layer along a slope (Oblique: 19 and 20);
+ours is the stair of section 7 (an interface strip a layer, one transition under the lowest) and
+the flat sheet's T1 T2 I1 I2: the reference decides where and on which surfaces, not layer counts.
+
+**Measured** (`support:everywhere` section 2; tips with a sheet by NSO's slicer labels, of all tips):
+
+| piece | flat | yaw 45 | tip 15 | yaw 45 + tip 15 |
+| --- | --- | --- | --- | --- |
+| base | 20 of 20 | 14 of 14 | 20 of 21 | 15 of 18 |
+| oblique | 20 of 20 | 14 of 14 | 18 of 19 | 16 of 19 |
+| circular | 1 of 1 | 3 of 4 | 4 of 5 | 5 of 8 |
+| sphere | 4 of 4 | 4 of 4 | 4 of 4 | 5 of 8 |
+| negsphere | 15 of 15 | 8 of 8 | 5 of 7 | 10 of 14 |
+| negsphere2 | 7 of 7 | 1 of 1 | 1 of 2 | 8 of 11 |
+
+(Before: base 20 / 14 / 0 / 0, oblique 0 / 0 / 0 / 0.) The tips left are named: "no room for the
+stack and its cap above the plate" (a tipped piece's low edge: under about 1.9 mm there is no
+column to put a sheet on), "no piece of 2 mm lines carries two caps" (a tip beside a built sheet's
+edge or among close columns), and a side tip's face. Every sheet and stair keeps the gap: 0.18 mm
+at the nearest point (a lone tip's sheet up to 0.28).
+
+**Found, not fixed.** The flat sheet's result depends on where the piece stands on the plate: the
+library tape yawed 45 and left where it was has all 396 tips under one sheet; the same piece
+centred has 291 and 105 beside the sheet's diagonal edges, "no line of the sheet reaches it" (the
+build at claude-wip 413be05 does the same). Fixing it changes the flat sheet; it is named, not
+covered. `fixtures/supports/clamp_body.stl` (not flat: it has a stair and bare tips) changes with
+this ticket. The G-scope support row (`app-gscope-support.js`) calls `solid()` without
+`interface` and builds no sheet at all; `solid()` with it welds the sheet (11 s for a 20-tip head).
+
