@@ -126,6 +126,7 @@ merging its list by hand. The list below is generated.
 - [Supports custom UI - Auto / Assisted / Custom on the card (2026-10-24)](handoff/supports-custom-ui-auto-assisted-custom-on-the-supports-card.md)
 - [Supports knobs 1 - the supports playground: four knobs on Custom/Assisted (2026-10-25)](handoff/supports-knobs-1.md)
 - [Supports export without inner filler (2026-10-23)](handoff/supports-no-infill.md)
+- [supports-plate-wide - Supports card: Generate for plate (2026-10-26)](handoff/supports-plate-wide.md)
 - [Supports print 1 - flat caps, two interface layers, one foot per cluster (2026-10-20)](handoff/supports-print-1-flat-caps-two-interface-layers-one-foot-per.md)
 - [Supports stair body - each strip covers the part's step (2026-10-24)](handoff/supports-stair-body.md)
 - [Supports thinning 1 - one tree to a circle (2026-10-25)](handoff/supports-thinning-1-one-tree-to-a-circle.md)
