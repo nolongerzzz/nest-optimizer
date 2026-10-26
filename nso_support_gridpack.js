@@ -2932,7 +2932,7 @@
     function summary() {
       return {
         gapMm: plan.gapMm, layerMm: plan.layerMm, widthMm: plan.widthMm, pitchMm: plan.pitchMm, tipSpacingMm: plan.tipSpacingMm,
-        counts: plan.counts, reason: plan.reason, failed: plan.failed, tips: plan.tips, tipLog: tipLog, cap: plan.cap,
+        counts: plan.counts, reason: plan.reason, failed: plan.failed, tips: plan.tips, bare: plan.bare, notes: plan.notes, tipLog: tipLog, cap: plan.cap,
         levels: plan.levels.map(function (L) {
           return { id: L.id, zTop: L.zTop, zBase: L.zBase, zCap: L.zCap, tips: L.tips, caps: L.caps, lines: L.lines,
                    minDistanceMm: L.minDistanceMm, solvedDropMm: L.solvedDropMm, stair: L.stair, held: L.held,

@@ -266,6 +266,20 @@ per-layer angle histograms and line centres. See `docs/CROSSHATCH.md`.
   stretch (175 mm²) as overhang walls. `support:test` §13 holds the card's 35
   to that: the 10 - 30 deg steps, 259.06 mm², and the old 60 for comparison.
   See docs/SUPPORTS-CARD.md §0a.
+- tree_slimsupports.gcode.3mf — the owner's Bambu Studio slice (02.08.02.61,
+  A1 mini, 0.4 nozzle, 0.2 mm layers, support_type tree(auto), support_style
+  tree_slim, threshold 30, top Z distance 0.2, 3 top interface layers) of
+  "Support Test" (designer ecgvsf, MakerWorld, Standard Digital File License):
+  six 17 mm test parts, each a square head turned 45 deg on a 4.5 mm stem -
+  Base (a flat underside), Oblique (a tilted plane), Circular (a dome), Sphere
+  (a ball), Negative Sphere and Negative Sphere2 (a flat rim round a dome-shaped
+  cavity, two depths). G-code and settings only, as the other slices here: the
+  parts are not in it. It is the reference for where Bambu lays its transition
+  and interface layers, and under which surfaces, whichever way they face:
+  `support:everywhere` reads it (Support transition / Support interface
+  features, per surface: height, footprint, layers) and
+  `tools/nso_support_ref_pieces.js` rebuilds the six heads from the G-code's
+  own walls. See docs/SUPPORT-INTERFACE.md section 8.
 
 ## print-planner/ - a printer's start and end G-code, frozen
 
