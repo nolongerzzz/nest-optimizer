@@ -52,6 +52,7 @@ merging its list by hand. The list below is generated.
 - [G-scope supports - overhang markers, point-click generation, per-support edit (2026-09-25)](handoff/g-scope-supports-overhang-markers-point-click-generation-per.md)
 - [Grab and drop; floating is a state; Lift lands in place (2026-10-15)](handoff/grab-and-drop-floating-is-a-state-lift-lands-in-place.md)
 - [Grispr - per-object fan control (G-code post-process, NOT wired in)](handoff/grispr-per-object-fan-control.md)
+- [import-keep-positions - a Studio project lands where its file has it (2026-10-26)](handoff/import-keep-positions-a-studio-project-lands-where-its-file-has-it.md)
 - [Import > Recent, and the Pieces card is the plate (2026-10-25)](handoff/import-recent.md)
 - [In-house slicer - real layers, walls, infill, overhang calls; G-scope Slice (2026-09-27)](handoff/in-house-slicer-real-layers-walls-infill-overhang-calls-g-scope.md)
 - [Inside corners — the corners8 setback in a pocket (landed, `nso_inside_corners.js`)](handoff/inside-corners-the-corners8-setback-in-a-pocket.md)
