@@ -73,12 +73,40 @@ the option (the shipped Custom feed's bytes are the claude-wip's; `support:feed`
    (`plan.unreachable`) and the spots beside it get tips of their own.
 
 9. **Trunks are round-ish and the pad can still be refused.** A trunk is as wide at the plate as its height asks (18 mm for the
-   72 mm clamp), and `ovalMax` is 1.5 here (the custom feed's 3 made 31 mm ovals under the clamp). Nine trunks still ring the
+   72 mm clamp), and `ovalMax` is 1 here - round (11 - 12 below; the custom feed's 3 made 31 mm ovals under the clamp). Nine trunks still ring the
    clamp's post at some oval settings and `shareFeet` refuses the pad ("could not be opened to the outside"); the card then builds
    that piece again with the lattice and says so (`build({ lattice: true })`). Nothing was added by the first try.
 10. **Cost.** The one-trunk build of the clamp is 39 s here against the lattice's 87 s on this branch (63 s on claude-wip before
    #301's sheet code); the trunk's room search is the hot loop (`trunkGap`), and where nothing fits the circle it now looks every
    third point at every 2 mm instead of every point at every 0.5.
+
+11. **THE TAPERED BASE, on every trunk (the owner's, after the first push: "if it's a straight stick, even with the pad, it can pop off
+    during print").** A trunk is a cone onto its pad, never a post: `FLARE_MM` 4.5 and `FLARE_ANGLE_DEG` 27 (was 4 and 15) - over its
+    bottom 4.5 mm the trunk widens 27 deg a side more than its 5.5 deg law, 2.3 mm a side, so the base is 4.6 mm wider across than the
+    stem at 4.5 mm. This is the constant of the lattice's trunks as well as the crown's (`support:feed`, `support:foot`,
+    `support:everywhere`'s two fixture hashes and `support:plate`'s three were re-pinned for it). A trunk the piece leaves no room
+    for - the one that used to stand as a cylinder at whatever width the wall allowed (Oblique's stood 9.8 mm across from top to
+    bottom) - is held under the same cone from its base up (`taperBase`): it narrows going up by the flare's angle over the flare,
+    the law's above it, never under the trunk's own column. `support:onetrunk` gates it: every trunk's base at least 1.4 x as wide
+    as it is at the flare's top, widening all the way down. The reland's foot clearance asks 0.3 mm over (`RELAND_SLACK_MM`): a
+    trunk grown round the landing a hair off it came 0.15 mm short of Bambu's 3.86 at the wider flare on the arc.
+12. **The same trunk under every head (the owner's: "more uniform trunk sizes").** The crown's trunk follows one law for every
+    head (`crown.trunk.uniformH` 10 mm, tip 2.8 mm, round: `ovalMax` 1): 9.3 mm across at the plate, 3.8 mm at the flare's top, on
+    all six heads, where it was 8.6 - 10.9 mm (a function of the head's height and the area its tips asked for) and an oval 1.5 : 1
+    under the taller ones. The area rule (a trunk as wide as its tips carry) is no longer sized to the tips; the tips are 2 mm
+    columns a few millimetres apart and the uniform stem (3.8 mm) is wider than every tree the six heads grow. Gated: bases within
+    15 % of one another and round. Still shorter than the law where the piece is near (`narrowed`), and then a cone (11).
+13. **The trunk stands under the middle of the head.** The cluster's circle is the centroid of its tips *and of the spots they hold or
+    the wall took* within `centreReachMm` 5 of a tip, not of the tips alone: a dome whose far side stands against a post
+    (Circular: the pole, west and south tips are reachable; east and north are not) had its trunk 1.4 mm off the pole, and
+    its sheet 2.3 mm off; now 0.6 and 0.3 mm. Gated for Circular and Sphere: trunk within 1.5 mm of the sheet's middle.
+14. **A flat sheet under a curved head stays where the part is near** (`flatGapMaxMm`, the card's Dense: `SHEET.denseFlatGapMaxMm` 0.9).
+    A level's field - where a line's centre may lie - stops where the part's underside is more than 0.9 mm over the sheet's top.
+    The flat plate under Circular's pole had been 7.3 mm across with the dome 2.65 mm over its rim ("a visible gap", the owner's
+    third photo); it is now 5.4 mm across with the dome 1.1 mm over its rim at most (Sphere 1.3 mm). A level that has no piece
+    under the reach is built again without it, so the Negative Spheres' rim sheets (a ring round a cavity) are what they were.
+    This is a **flat plate with a reach**, not Bambu's conforming shell (section 5: still open).
+    A flat head is unaffected: Base's sheet is 0.18 mm under the part over every cell.
 
 **The interface (`interfaceLayers`, `SHEET.densePitchMm`).** `sheet()` takes `interfaceLayers` (2 unless said): 2 transition
 layers and that many interface layers, the interface alternating across and along the sheet's A. The card's **Dense (Bambu)**
@@ -114,7 +142,7 @@ are read off the top (14.80, 12.20, 10.40) and not where they are read off the b
 - **Layer heights.** Bambu's support layers here are 0.275 mm (`independent_support_layer_height`), so its 2 + 3 layers are 1.375
   mm; ours stay on the 0.2 mm grid (2 + 3 = 1.0 mm).
 - **Curved heads** (Circular, Sphere): Bambu's interface is a conforming shell 7 mm across at the dome's ring (z 7.7 - 9.4 for
-  Circular, 11 layers); ours is a flat plate under the pole's level (8.0 - 8.8) with two or three tips. A curved head with only
+  Circular, 11 layers); ours is a flat plate under the pole's level (8.0 - 8.8) with two or three tips, held to where the dome is within 0.9 mm of it (3.14: 1.1 mm at the rim at most, not 2.65). A curved head with only
   a few tips is a flat sheet, not a stair (`STAIR_MIN_TIPS` 3, and its tips on levels that failed).
 - **The apex of the Negative Spheres** (Bambu's second surface, z 13.0 - 15.2, 3 - 4 mm across): detection finds the rim only.
 - **Branches up a dome's flank** (Bambu holds the steeper part of the Circular and Sphere flank with bare tips): not built.

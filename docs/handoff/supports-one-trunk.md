@@ -20,6 +20,21 @@ Branch `claude-wip`. Engine: `nso_support_gridpack.js` (`planOneTrunk`, `thinTip
   claude-wip's (`support:feed`, `support:gridpack`, `support:exposed`, `support:foot`, `tree:*`, `support:interface-*`, `support:shells-*`, `support:everywhere`, `slicer:*`, `support:curved`, `support:workflow-card/counts/builds` all green; `support:card` and `support:custom` red as on claude-wip).
   The sheet's default pitch (0.84) and layers (2 + 2) are unchanged in the engine; the card sends Dense (0.47, 2 + 3) for the one-trunk build only. `support:curved` and the workflow drives' count sections (7 - 9) run with the box off: they pin the lattice's counts.
 
+**Second round (the owner's notes on the first push, 2026-10-26)**
+- **Every trunk is a cone onto its pad, not a stick** (`FLARE_MM` 4.5 / `FLARE_ANGLE_DEG` 27, was 4 / 15; a room-limited trunk is held under the same
+  cone by `taperBase`). Global: the lattice's trunks too, so `support:everywhere`'s two fixture hashes and `support:plate`'s three are re-pinned and
+  `support:feed`'s two re-landing assertions no longer need the 10 mm / 4 mm lattice to re-land on the coupon (the default's does). The reland keeps the
+  foot 0.3 mm over Bambu's 3.86 (`RELAND_SLACK_MM`). Written in `docs/SUPPORT-GRIDPACK.md` (the law's table) and `docs/SUPPORT-ONE-TRUNK.md` 3.11.
+- **The same trunk under every head**: 9.3 mm at the plate, 3.8 mm at the flare's top on all six (`crown.trunk.uniformH`, round: `ovalMax` 1).
+- **A real bug found on the way**: `growCrownTrunk` still used the parity `inside()`, so under Circular (a head on a wedge) every point on the axis read
+  as inside the part and the trunk was narrowed to its 2 mm floor: a straight 2 mm stick 5 mm high under a 7 mm pad - the owner's "straight stick, even
+  with the pad". It uses `insideSigned` now, as the planner's room test does.
+- **Alignment**: the cluster's circle stands under the centroid of the tips AND the spots they hold or a wall took (`centreReachMm`); a flat sheet under a
+  curved head stays where the part is within 0.9 mm of it (`flatGapMaxMm`, the card's Dense only). Circular's sheet 2.3 mm off the pole is 0.3, the dome 2.65 mm
+  over its rim is 1.1; Sphere's 1.75 is 1.3. Base's sheet is 0.18 mm under the part over every cell (the flat head's "no gap" is the slice's
+  layer, 0.2 mm, against a gap of 0.18 mm). Gated in `support:onetrunk` (taper, uniformity, curved-head gap and centring).
+- **Still not Bambu's conforming shell**: a curved head's sheet is a plate with a reach (OPEN 2).
+
 **OPEN for the owner**
 1. **Dense interface is unprinted.** The card defaults to Dense (Bambu's spacing 0.1: lines 0.47 mm apart, 3 interface layers).
    The 0.84 mm sheet was settled by the owner's own prints; Dense is built and sliced here, not printed. Interface > Open puts it back.

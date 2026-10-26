@@ -750,6 +750,10 @@
        reference; Bambu's own top interface layers are 3 in the six-heads reference). The interface layers alternate across and
        along the sheet's A from the first, as the reference's do. */
     var nI = opts.interfaceLayers == null ? 2 : Math.max(1, Math.min(6, Math.round(+opts.interfaceLayers)));
+    /* THE FLAT SHEET'S REACH (opts.flatGapMaxMm, null: no limit): a level's field stops where the part's underside is further than
+       this over the sheet's top. A flat sheet under a dome, a ball, a bowl reaches round it as far as its caps and the field go and
+       leaves a gap that grows to millimetres at its rim; held to a reach, it is a plate under the pole, with the gap it has there. */
+    var flatMax = opts.flatGapMaxMm == null ? null : +opts.flatGapMaxMm, reachMemo = new Map();
     var ROLES = ['transition', 'transition'];
     for (var ri = 0; ri < nI; ri++) ROLES.push('interface');
     var NL = ROLES.length, stackH = NL * o.layer;
@@ -1383,6 +1387,12 @@
         }
       }
       function carrierOf(t) { return t.cap ? { c: t.cap.c, r: t.cap.w / 2 } : { c: t.top, r: o.side / 2 }; }
+      var reachCache = flatMax == null || L.tips.length < 2 ? null : reachMemo, reachZ = L.first.toFixed(2);
+      function inReach(x, y) {
+        var kq = Math.round(x / 0.25) + ',' + Math.round(y / 0.25) + ',' + reachZ, v = reachCache.get(kq);
+        if (v === undefined) { v = isFinite(firstHit(x, y, L.first + 0.01, o.gap + flatMax)); reachCache.set(kq, v); }
+        return v;
+      }
       live.forEach(function (t) {
         var cr = carrierOf(t), rr = cr.r + (L.lone ? Math.max(FIELD_MM, LONE_FIELD_MM - cr.r) : FIELD_MM);
         var i0 = Math.max(0, Math.floor((cr.c[0] - rr - ox) / CELL_MM)), i1 = Math.min(nx - 1, Math.ceil((cr.c[0] + rr - ox) / CELL_MM));
@@ -1390,7 +1400,7 @@
         for (var jf = j0; jf <= j1; jf++) for (var iff = i0; iff <= i1; iff++) {
           var qf = jf * nx + iff, kf = own[qf];
           if (!free[qf] || edge[qf] || (kf >= 0 && tips[kf].level !== L.id)) continue;
-          if (Math.hypot(ox + iff * CELL_MM - cr.c[0], oy + jf * CELL_MM - cr.c[1]) <= rr) field[qf] = 1;
+          if (Math.hypot(ox + iff * CELL_MM - cr.c[0], oy + jf * CELL_MM - cr.c[1]) <= rr && (!reachCache || inReach(ox + iff * CELL_MM, oy + jf * CELL_MM))) field[qf] = 1;
         }
       });
       function fieldAt(x, y) {
@@ -1696,10 +1706,21 @@
       L.zTop = L.first;
       var sunk = 0;
       for (var it = 0; it < 8 + LONE_SINKS.length; it++) {
-        var res = buildLevel(L, opts.angleDeg);
+        var res;
+        if (flatMax != null && L.tips.length >= 2) {
+          /* the level as it was first (never worse for it: a level that has no piece costs what it always did), then with the reach;
+             the reach's piece is the one kept where it has one, else the level is built as it was again, the tips' marks being its */
+          var keepReach = flatMax;
+          flatMax = null; res = buildLevel(L, opts.angleDeg); flatMax = keepReach;
+          if (res.ok) {
+            var reached = buildLevel(L, opts.angleDeg);
+            if (reached.ok) res = reached; else { flatMax = null; res = buildLevel(L, opts.angleDeg); flatMax = keepReach; }
+          }
+        } else res = buildLevel(L, opts.angleDeg);
         /* a lone tip at the lowest point of its piece (a vertex, a ridge) has the ceiling lower than any sample of its
            cell a few hundredths away: that is a ceiling in the stack, and no field. The sheet goes lower until it has one. */
         if (!res.ok && L.lone && L.tips.length <= LONE_MAX_TIPS && sunk < LONE_SINKS.length) { L.zTop = L.first - LONE_SINKS[sunk++]; continue; }
+        /* the flat sheet's reach left it no piece (a ring round a cavity, a rim): the level is asked again without it */
         if (!res.ok) { L.ok = false; L.reason = res.reason; break; }
         var soup = joinSoups(res.layers.map(function (x) { return x.soup; }));
         var dmin = Infinity, at = null, atTop = null;
@@ -2745,7 +2766,7 @@
 
   var api = {
     DEFAULTS: { gapMm: GAP_MM, layerMm: LAYER_MM, pitchMm: PITCH_MM, repeats: REPEATS, epsMm: EPS_MM },
-    SHEET: { pitchMm: SHEET_PITCH_MM, densePitchMm: SHEET_DENSE_PITCH_MM, denseInterfaceLayers: 3, roles: SHEET_ROLES.slice(), under: SHEET_UNDER, minRunMm: MIN_RUN_MM, cellMm: CELL_MM,
+    SHEET: { pitchMm: SHEET_PITCH_MM, densePitchMm: SHEET_DENSE_PITCH_MM, denseInterfaceLayers: 3, denseFlatGapMaxMm: 0.9, roles: SHEET_ROLES.slice(), under: SHEET_UNDER, minRunMm: MIN_RUN_MM, cellMm: CELL_MM,
              sampleMm: SAMPLE_MM, lineAngles: LINE_ANGLES.slice(), fieldMm: FIELD_MM, levelEdgeMm: LEVEL_EDGE_MM,
              slicerSettings: Object.assign({}, SHEET_SLICER) },
     STAIR: { tipMm: STAIR_TIP_MM, backMm: STAIR_BACK_MM },

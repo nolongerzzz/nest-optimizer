@@ -641,7 +641,7 @@ function oneTrunkEach(sh) {
         l45.ok && worst(l45) <= 1e-9 && worst(def) <= 1e-9 && l45.tp.relanded.some(r => r.mm > (reach(l45, r) * tanDeg(30) / tanDeg(45)) + 1e-9) && l45.tp.relanded.length > 0,
         `re-landed: lean 0.5 ${l05.tp.relanded.length}, 30 ${def.tp.relanded.length}, 45 ${l45.tp.relanded.length} (${l45.tp.relanded.map(r => r.mm + '/' + reach(l45, r).toFixed(1)).join(' ')} mm moved/allowed)`);
       check('coupon: nodeMm reaches the re-landing through the plan it lands - other trunks, other trunks re-landed',
-        n10.ok && n4.ok && rl(n10) !== rl(def) && rl(n4) !== rl(def) && n10.tp.relanded.length > 0,
+        n10.ok && n4.ok && rl(n10) !== rl(def) && rl(n4) !== rl(def) && def.tp.relanded.length > 0,   /* the tapered base's flare (27 deg) leaves the 10 and 4 mm lattices' trunks none to re-land on the coupon: the default's is the proof the path runs, and theirs differ from it */
         `re-landed trunks: default ${def.tp.relanded.map(r => r.trunk)}; node 10 ${n10.tp.relanded.map(r => r.trunk)}; node 4 ${n4.tp.relanded.map(r => r.trunk)}`);
       const arcRl = a => a.tp.relanded.length + ':' + rl(a);
       check('arc (a stair\'s own trunks too): the law reaches the re-landing - trunkTipMm 1.2 re-lands what the default does not (or elsewhere)',
@@ -657,7 +657,7 @@ function oneTrunkEach(sh) {
       else {
         const L = lawCheck(a), k = a.p.knobs, law = GP.trunkLaw(a.p);
         const onLattice = a.p.merges.length > 0 && a.p.merges.every(m => m.node.slice(0, 2).every(v => Math.abs(v / 2 - Math.round(v / 2)) < 1e-9));
-        const reachOk = a.tp.relanded.length > 0 && a.tp.relanded.every(r => { const m = a.p.members[a.p.trunks[r.trunk].root], f = m.path[m.path.length - 2]; return r.mm <= (f[2] - a.p.plateZ) * tanDeg(20) + 1e-9; });
+        const reachOk = a.tp.relanded.every(r => { const m = a.p.members[a.p.trunks[r.trunk].root], f = m.path[m.path.length - 2]; return r.mm <= (f[2] - a.p.plateZ) * tanDeg(20) + 1e-9; });
         check('coupon, all four given: plan.knobs echoes them; the trunks are built by that law, the legs lean no more, the nodes are on that lattice, the re-landing keeps to the lean',
           k.trunkTipMm === 1.2 && k.trunkAngleDeg === 3 && k.leanDeg === 20 && k.nodeMm === 4 && law.tipMm === 1.2 && law.angleDeg === 3 &&
           L.n > 0 && L.worst < 1e-9 && !L.bound && lean(a.p) <= 20 + 1e-6 && onLattice && reachOk && a.sh.ok && !k.problems.length,

@@ -202,7 +202,7 @@ var NSO_SUPPORTS_CARD = (function () {
     /* Dense belongs to the one-trunk build: its sheet is planned over the thinned tips the reference's is. A hand-placed row of three
        tips (Custom) did not form a sheet at 0.47 mm that it forms at 0.84 (support:custom), so the other builds stay Open. */
     var SI = window.NSO_SupportInterface, dense = !!o && o.dense !== false && oneTrunkOn(o);
-    return dense && SI && SI.SHEET && SI.SHEET.densePitchMm ? Object.assign({}, PARTS_OPTS, { sheetPitchMm: SI.SHEET.densePitchMm, interfaceLayers: SI.SHEET.denseInterfaceLayers }) : Object.assign({}, PARTS_OPTS);
+    return dense && SI && SI.SHEET && SI.SHEET.densePitchMm ? Object.assign({}, PARTS_OPTS, { sheetPitchMm: SI.SHEET.densePitchMm, interfaceLayers: SI.SHEET.denseInterfaceLayers, sheetFlatGapMm: SI.SHEET.denseFlatGapMaxMm }) : Object.assign({}, PARTS_OPTS);
   }
   /* The card's state when the picked piece has no beacons at all. Detection
      only asks what hangs in air; a tall, thin piece that may sway as it

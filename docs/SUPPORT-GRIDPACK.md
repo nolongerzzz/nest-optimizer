@@ -199,13 +199,13 @@ axis, kept as one more shell beside its column - nothing the planner built
 changes, byte for byte:
 
     r(z) = 1 mm + tan 5.5 deg x (H - z)                    (its inscribed radius)
-         + tan 15 deg x (4 mm - z), under 4 mm              (the flare)
+         + tan 27 deg x (4.5 mm - z), under 4.5 mm          (the flare)
 
 | | value | why |
 | --- | --- | --- |
 | `TRUNK_TIP_MM` | 2 | Bambu's tree_support_branch_diameter: the law's diameter at H |
 | `TRUNK_ANGLE_DEG` | 5.5 | Bambu's setting is 5, and its slice of simple_overhang grows at 5.2 (read against a 2 mm top at our H, 46.2); 5.5 holds every layer of its trunk with 0.33 mm to spare |
-| `FLARE_MM`, `FLARE_ANGLE_DEG` | 4, 15 | Bambu's trunk widens faster over its bottom 3.8 mm (12.35 at 0.48 against its law's 10.13); covering it takes 12.4 deg more over 4 mm |
+| `FLARE_MM`, `FLARE_ANGLE_DEG` | 4.5, 27 | THE TAPERED BASE, on every trunk (supports-one-trunk, the owner's: "if it's a straight stick, even with the pad, it can pop off during print"). Bambu's trunk widens faster over its bottom 3.8 mm (12.35 at 0.48 against its law's 10.13: 12.4 deg more over 4 mm covers it); ours widens 27 deg a side more over 4.5 mm - 2.3 mm a side, the trunk's base 4.6 mm wider across than its top - a cone onto the pad, not a post on it (was 4 mm and 15 deg: 1.1 mm a side). A trunk the piece leaves no room for (`narrowed`) is held under the same cone from its base up (`taperBase`): never a cylinder |
 | `TRUNK_SHARE` | 0.5 | the trunk rises up its stem while the stem holds half its tips |
 | `TRUNK_KEEP_MM` | 0.35 | off the piece (Bambu's support_object_xy_distance) |
 | `TRUNK_TIP_CLEAR_MM`, `TRUNK_TIP_REACH_MM` | 4, 5 | under any tip within 5 mm: under every cap (2 mm rise), the sheet and the gap |

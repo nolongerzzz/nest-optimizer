@@ -37,6 +37,7 @@ const PE = require('./nso_supports_print_export.js');
 const AUDIT = require('./nso_slicer_audit.js');
 const R3 = require('../nso-3mf-read.js');
 const SL = require('../nso_slicer.js');
+const GP = require('../nso_support_gridpack.js');
 
 const REF_FILE = path.join(ROOT, 'fixtures', 'supports', 'tree_slimsupports.gcode.3mf');
 const GAP = 0.18, XY_MM = 0.35;
@@ -155,6 +156,31 @@ function minClearance(r) {
   return best;
 }
 
+
+/* how far under the part a sheet's top is, over every cell of it: a vertical ray from each top face of the support's soup (the
+   faces at z) up to the part's first face above - the worst of them, mm */
+function sheetGapMax(piece, supSoup, z) {
+  const T = [];
+  for (let i = 0; i + 8 < piece.length; i += 9) if (Math.max(piece[i + 2], piece[i + 5], piece[i + 8]) > z) T.push(i);
+  let worst = null;
+  for (let i = 0; i + 8 < supSoup.length; i += 9) {
+    if (Math.abs(supSoup[i + 2] - z) > 0.02 || Math.abs(supSoup[i + 5] - z) > 0.02 || Math.abs(supSoup[i + 8] - z) > 0.02) continue;
+    const x = (supSoup[i] + supSoup[i + 3] + supSoup[i + 6]) / 3, y = (supSoup[i + 1] + supSoup[i + 4] + supSoup[i + 7]) / 3;
+    let best = Infinity;
+    for (const k of T) {
+      const ax = piece[k], ay = piece[k + 1], bx = piece[k + 3], by = piece[k + 4], cx = piece[k + 6], cy = piece[k + 7];
+      const d = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy);
+      if (Math.abs(d) < 1e-12) continue;
+      const l1 = ((by - cy) * (x - cx) + (cx - bx) * (y - cy)) / d, l2 = ((cy - ay) * (x - cx) + (ax - cx) * (y - cy)) / d, l3 = 1 - l1 - l2;
+      if (l1 < 0 || l2 < 0 || l3 < 0) continue;
+      const zz = l1 * piece[k + 2] + l2 * piece[k + 5] + l3 * piece[k + 8];
+      if (zz > z + 0.001 && zz - z < best) best = zz - z;
+    }
+    if (isFinite(best) && (worst == null || best > worst)) worst = best;
+  }
+  return worst;
+}
+
 /* ---------------------------------------------------------------- 1. the reference */
 /* connected pieces of the Support lines on one layer: segments whose ends lie within `r` of one another */
 function islands(segs, r) {
@@ -244,6 +270,8 @@ const segLen = s => Math.hypot(s.x1 - s.x0, s.y1 - s.y0);
     const cen = sl.length ? [sl.reduce((a, l) => a + l.pts.reduce((s, q) => s + q[0], 0) / l.pts.length, 0) / sl.length, sl.reduce((a, l) => a + l.pts.reduce((s, q) => s + q[1], 0) / l.pts.length, 0) / sl.length] : null;
     row.off = trunkAxes.length && cen ? Math.min(...trunkAxes.map(t => Math.hypot(t[0] - cen[0], t[1] - cen[1]))) : null;
     row.notes = notes;
+    const lv0 = [].concat(...b.areas.map(a => (a.tp.sheet && a.tp.sheet.levels) || []))[0];
+    row.maxGap = lv0 && lv0.zTop != null ? sheetGapMax(piece, b.objects[1].soup, lv0.zTop) : null;
     rows.push(row);
     console.log('        ' + k.padEnd(12) + String(row.trunks).padStart(3) + ' (' + row.trunksBefore + ')' + String(row.tips).padStart(9) + String(row.spots - row.unsupported).padStart(4) + '/' + String(row.spots).padEnd(4) +
       (row.surfaces.length ? row.surfaces.map(g => `z ${f2(g.z0)}-${f2(g.z1)} T${g.T} I${g.I} ${f1(g.w)}x${f1(g.d)}`).join(' | ') : 'none').padEnd(60) +
@@ -258,6 +286,19 @@ const segLen = s => Math.hypot(s.x1 - s.x0, s.y1 - s.y0);
     rows.map(r => r.key + ' ' + (r.spots - r.unsupported) + '/' + r.spots + ' (' + r.covered + ' by a neighbouring tip)').join(', '));
   check('the trunk stands under its sheet: its axis within 3 mm of the middle of the transition and interface lines in plan (Bambu\'s: ' +
     Object.values(ref).map(x => f1(x.off)).join(' / ') + ')', rows.every(r => r.off != null && r.off <= 3), rows.map(r => r.key + ' ' + (r.off == null ? '-' : f1(r.off))).join(', '));
+  /* THE TAPERED BASE, and the same trunk under every head: no straight stick (it can pop off the plate in the print) */
+  const trunkRings = [].concat(...rows.map(r => (r.b.sf.trunks || []).map(t => ({ key: r.key, rings: t.rings || [] }))));
+  const rad = ring => Math.max(ring[1], ring[2] == null ? 0 : ring[2]);
+  const base = trunkRings.map(t => t.rings.length ? rad(t.rings[0]) : 0);
+  const tops = trunkRings.map(t => t.rings.length > 1 ? rad(t.rings[1]) : Infinity);
+  check('every trunk is tapered: its base at least 1.4 x as wide as it is at the flare\'s top (' + GP.TRUNK.flareMm + ' mm), widening all the way down',
+    trunkRings.length > 0 && trunkRings.every((t, i) => t.rings.length > 1 && base[i] >= 1.4 * tops[i] && t.rings.every((q, j) => j === 0 || rad(q) <= rad(t.rings[j - 1]) + 1e-9)),
+    trunkRings.map((t, i) => t.key + ' ' + f1(2 * base[i]) + ' -> ' + f1(2 * tops[i]) + ' mm').join(', '));
+  check('the same trunk under every head: bases within 15 % of one another, and round', base.length > 0 && Math.max(...base) <= 1.15 * Math.min(...base) &&
+    trunkRings.every(t => t.rings.length && Math.abs(t.rings[0][1] - t.rings[0][2]) < 0.2), 'bases ' + base.map(v => f1(2 * v)).join(' / ') + ' mm');
+  check('a sheet under a curved head stays where the part is near it: no more than 1.5 mm under the part over any cell of the plate, and its middle within 1.5 mm of the trunk\'s',
+    rows.filter(r => r.key === 'circular' || r.key === 'sphere').every(r => r.maxGap != null && r.maxGap <= 1.5 && r.off <= 1.5),
+    rows.filter(r => r.key === 'circular' || r.key === 'sphere').map(r => r.key + ' gap ' + (r.maxGap == null ? '-' : f2(r.maxGap)) + ' off ' + (r.off == null ? '-' : f1(r.off))).join(', '));
   check('the gap holds on every sheet and stair: 0.18 mm to the part, at the nearest point', rows.every(r => r.gap == null || r.gap >= GAP - 1e-5),
     'least ' + f2(Math.min(...rows.map(r => r.gap == null ? Infinity : r.gap))) + ' mm');
   check('SIDEWAYS: every support line keeps ' + XY_MM + ' mm from the part\'s lines in every layer of the slice (the slice\'s support_object_xy_distance)',

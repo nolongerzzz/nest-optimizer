@@ -35,10 +35,11 @@ const { ROOT } = lib;
 const FIXTURE = path.join(ROOT, 'fixtures', 'supports', 'supp_ref.3mf');
 const TODAY = {        // sha256 of the support bytes of a single-piece Generate on the card as it is now (the plate: six parts, one picked).
                        // Re-pinned by supports-one-trunk: they were 7dc1d1f's (b1e08222e92a / 17be71520673 / af6e05895a2d, 584 / 440 / 424
-                       // triangles); the card's Auto is the one-trunk build with the sheet of #301 since, and builds these three heads differently
-  'Support Negative Sphere2.stl': { sha: '78dbad5898fd4e342ae6d10e2fb6f7a616238598a99e0ae64f331ad5c0cc6f75', triangles: 12324 },
-  'Support Circular.stl': { sha: '3975fb83de738165377570a3cb4fccffce37e7097b913f520244979478aab65c', triangles: 7288 },
-  'Support Sphere.stl': { sha: 'e00b8c10706ce21edb544dbc05df74ad492f9f0170a1dc7a5343b0d81347c64f', triangles: 7976 }
+                       // triangles); the card's Auto is the one-trunk build with the sheet of #301 since, and builds these three heads differently.
+                       // Re-pinned again for the tapered base, the uniform trunk, the centred circle and the flat sheet's reach (supports-one-trunk, second round)
+  'Support Negative Sphere2.stl': { sha: 'a1a3888a027dee29cf38f058eda5345c50566126728bec7ff904e03b6d2a56a4', triangles: 12332 },
+  'Support Circular.stl': { sha: '20b1f1e6525c2f097225cbe0760c88f1f56c1729c4d767bc50befbcb7eec9faa', triangles: 5776 },
+  'Support Sphere.stl': { sha: 'ecf903f39fb5615df8990557ac0fd6e94637408ee2e5b177a8e04987cb6d1aa6', triangles: 5412 }
 };
 const XY_DISTANCE = 0.35;      // the slice's support_object_xy_distance (nso_support_beacons.js SIDE_STANDOFF_MM, nso_support_gridpack.js TRUNK_KEEP_MM)
 const STRICT_GAP = process.env.NSO_STRICT_GAP === '1';

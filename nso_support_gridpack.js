@@ -205,8 +205,8 @@
      wider going down at a constant angle, then a flare onto the pad */
   var TRUNK_TIP_MM = 2;        /* the law's diameter at the top (Bambu's tree_support_branch_diameter) */
   var TRUNK_ANGLE_DEG = 5.5;   /* ...growing going down at this half-angle (Bambu's setting is 5; its slice of simple_overhang grows at 5.2) */
-  var FLARE_MM = 4;            /* the flare: over this much above the plate the trunk widens faster... */
-  var FLARE_ANGLE_DEG = 15;    /* ...by this half-angle more (Bambu's own bottom 4 mm on simple_overhang need 12.4) */
+  var FLARE_MM = 4.5;            /* the flare: over this much above the plate the trunk widens faster... */
+  var FLARE_ANGLE_DEG = 27;    /* ...by this half-angle more (Bambu's own bottom 4 mm on simple_overhang need 12.4) */
   var TRUNK_SHARE = 0.5;       /* a trunk rises up its stem while the stem holds at least this share of the trunk's tips */
   var TRUNK_KEEP_MM = 0.35;    /* a trunk keeps this far off the piece (Bambu's support_object_xy_distance) */
   var TRUNK_TIP_CLEAR_MM = 4;  /* ...and ends this far under any tip within TRUNK_TIP_REACH_MM of it: under every cap, sheet and gap */
@@ -216,6 +216,7 @@
   var TRUNK_FOOT_CLEAR_MM = 3.86; /* a trunk's foot stands this far off the part's base on the first layer: Bambu's on
                                     simple_overhang (its trunk's first-layer ring to the part's outer wall, edge to edge, 0.5 mm lines) */
   var RELAND_STEP_MM = 0.5;    /* a landing moved off the part is tried this far apart, ... */
+  var RELAND_SLACK_MM = 0.3;   /* ...and the foot's clearance is asked this much over (the trunk is grown round the landing, a hair off it: the wider the flare, the more it shows) */
   var RELAND_HEADINGS = 32;    /* ...in this many directions */
   var CAP_SIDES = 16;          /* a cap under the sheet: a round frustum of this many sides */
   var LEAN_TOL = 1e-4;          /* a face tilted exactly the lean limit is not a side face: float32 noise on its normal must not decide */
@@ -254,7 +255,7 @@
       ovalMax: pick(o.ovalMax, CROWN_OVAL_MAX), branchTaperDeg: pick(o.branchTaperDeg, CROWN_BRANCH_TAPER_DEG), rootFloorMm: pick(o.rootFloorMm, CROWN_ROOT_FLOOR_MM),
       designLeanDeg: o.designLeanDeg == null ? null : +o.designLeanDeg, nodeRings: Array.isArray(o.nodeRings) ? o.nodeRings.slice() : CROWN_NODE_RINGS.slice(),
       searchStepMm: pick(o.searchStepMm, CROWN_SEARCH_STEP_MM), tipRiseMm: pick(o.tipRiseMm, 0), tubeSides: Math.max(6, Math.round(pick(o.tubeSides, CROWN_TUBE_SIDES))),
-      trunk: { tipMm: pick(t.tipMm, TRUNK_TIP_MM), angleDeg: pick(t.angleDeg, TRUNK_ANGLE_DEG), flareMm: pick(t.flareMm, FLARE_MM), flareAngleDeg: pick(t.flareAngleDeg, FLARE_ANGLE_DEG), footClearMm: pick(t.footClearMm, TRUNK_FOOT_CLEAR_MM) }
+      trunk: { tipMm: pick(t.tipMm, TRUNK_TIP_MM), angleDeg: pick(t.angleDeg, TRUNK_ANGLE_DEG), flareMm: pick(t.flareMm, FLARE_MM), flareAngleDeg: pick(t.flareAngleDeg, FLARE_ANGLE_DEG), footClearMm: pick(t.footClearMm, TRUNK_FOOT_CLEAR_MM), uniformH: t.uniformH == null ? null : +t.uniformH }
     };
   }
 
@@ -1149,7 +1150,7 @@
       var forbid = null;
       if (opts._forbid && opts._forbid.length) { forbid = {}; opts._forbid.forEach(function (ids) { forbid[ids.slice().sort().join(';')] = true; }); }
       out.crowns = []; out.overLean = []; out.suggested = []; out.blocked = [];
-      function law(z, H) { return CK.trunk.tipMm / 2 + taD * Math.max(0, H - z) + (z < zf ? tbD * (zf - z) : 0); }
+      function law(z, H) { if (CK.trunk.uniformH != null) H = plateZ + CK.trunk.uniformH; return CK.trunk.tipMm / 2 + taD * Math.max(0, H - z) + (z < zf ? tbD * (zf - z) : 0); }
 
       /* ---- 1. the tips, moved off a wall ---- */
       var tips = live.map(function (b) {
@@ -1308,7 +1309,7 @@
             rBot[n.id] = rTop[n.id] + taB * (zOf[n.id] - zOf[n.parent]);
             Abot[n.id] = Math.PI * rBot[n.id] * rBot[n.id];
           });
-          var rNeed = Math.sqrt(rootA / Math.PI), lawTop = law(zTop, Hmax), rEqTop = Math.max(lawTop, rNeed), k = ovalK(rEqTop);
+          var rNeed = Math.sqrt(rootA / Math.PI), lawTop = law(zTop, Hmax), rEqTop = CK.trunk.uniformH != null ? lawTop : Math.max(lawTop, rNeed), k = ovalK(rEqTop);
           return { A: [Ax, Ay], P: P, S: S, z: zOf, zTop: zTop, rTop: rTop, rBot: rBot, rNeed: rNeed, lawTop: lawTop, rEqTop: rEqTop,
                    dR: rEqTop - lawTop, k: k, a: rEqTop * Math.sqrt(k), b: rEqTop / Math.sqrt(k) };
         }
@@ -1913,6 +1914,19 @@
     return out.subarray(0, w);
   }
 
+  /* THE TAPERED BASE, kept where the piece leaves no room for the law's own: a trunk that stood a straight stick up from its
+     pad (its room the same at every height) can pop off the plate in the print. Rings [z, r] or [z, a, b], bottom first, are
+     held under a cone that starts at the bottom ring - FLARE_ANGLE_DEG a side over the flare's height (zf), the law's own
+     angle above it - and never under floor (the trunk's own column). A ring already narrower is left alone. */
+  function taperBase(rings, floor, zf) {
+    var z0 = rings[0][0], tf = Math.tan(FLARE_ANGLE_DEG * Math.PI / 180) + Math.tan(TRUNK_ANGLE_DEG * Math.PI / 180), ta = Math.tan(TRUNK_ANGLE_DEG * Math.PI / 180);
+    var base = rings[0].slice(1);
+    for (var i = 1; i < rings.length; i++) {
+      var dz = rings[i][0] - z0, drop = dz <= zf - z0 ? tf * dz : tf * (zf - z0) + ta * (dz - (zf - z0));
+      for (var j = 1; j < rings[i].length; j++) rings[i][j] = Math.max(Math.min(floor, rings[i][j]), Math.min(rings[i][j], base[j - 1] - drop));
+    }
+  }
+
   /* A CROWN's trunk (CROWNS): the law's body - area kept - made oval along the spread of its tips, as long as the piece
      leaves room: where it comes near, the oval is first made less long (area kept), and only when it is round and still
      does not fit is it narrowed under the law (never under the 2 mm of the law's top). g.crown: { ang, k, dR }. */
@@ -1920,7 +1934,8 @@
     var cr = g.crown, cx = f.c[0], cy = f.c[1], top = Math.max(g.top, z0 + 2 * thick), LW = cr.law;
     if (LW) { ta = Math.tan(LW.angleDeg * Math.PI / 180); tb = Math.tan(LW.flareAngleDeg * Math.PI / 180); zf = plateZ + LW.flareMm; }
     var tipMm = LW ? LW.tipMm : TRUNK_TIP_MM;
-    var law = function (z) { return tipMm / 2 + ta * Math.max(0, g.H - z) + (z < zf ? tb * (zf - z) : 0) + cr.dR; };
+    var Hl = LW && LW.uniformH != null ? plateZ + LW.uniformH : g.H;
+    var law = function (z) { return tipMm / 2 + ta * Math.max(0, Hl - z) + (z < zf ? tb * (zf - z) : 0) + cr.dR; };
     var rec = { c: [cx, cy], H: g.H, stemTop: g.top, top: top, rings: null, why: null, crown: true, k: cr.k, ang: cr.ang };
     f.grown = rec;
     var zs = [];
@@ -1931,7 +1946,7 @@
     var dAx = zs.map(function (zz) {
       var d = Infinity;
       probes.forEach(function (P) {
-        if (P.inside && P.inside([cx, cy, zz])) { d = 0; return; }
+        if (insideSigned(P, [cx, cy, zz])) { d = 0; return; }
         var hit = P.nearest([cx, cy, zz], law(zs[0]) * Math.sqrt(cr.k) / cosN + TRUNK_KEEP_MM + 3);
         if (hit && hit.dist < d) d = hit.dist;
       });
@@ -1945,7 +1960,7 @@
       for (var j = 0; j < M; j++) {
         var t = 2 * Math.PI * j / M, ex = a * Math.cos(t), ey = b * Math.sin(t), pt = [cx + ex * ca - ey * sa, cy + ex * sa + ey * ca, zs[q]];
         for (var w = 0; w < probes.length; w++) {
-          if (probes[w].inside && probes[w].inside(pt)) return false;
+          if (insideSigned(probes[w], pt)) return false;
           var hit = probes[w].nearest(pt, TRUNK_KEEP_MM + slack + 0.01);
           if (hit && hit.dist < TRUNK_KEEP_MM + slack) return false;
         }
@@ -1979,6 +1994,7 @@
         rings.push([zs[q2], R, R]);
       }
       if (rings[rings.length - 1][0] < top - 1e-6) { var Rt = Math.max(floorR, Math.min(law(top) / cosN, dAx[zs.length - 1] - TRUNK_KEEP_MM - slack)); rings.push([top, Rt, Rt]); }
+      taperBase(rings, floorR, zf);
       rec.narrowed = true; rec.k = 1;
     }
     rec.rings = rings;
@@ -2052,6 +2068,7 @@
           rings.push([zz, R]);
         }
         if (rings.length < 2) { rec.why = 'no room beside the piece'; return; }
+        taperBase(rings, own, zf);
         rec.narrowed = true;
       }
       rec.rings = rings;
@@ -2845,7 +2862,7 @@
     var ss = sheetStations(p), cols = ss.cols, sts = ss.sts;
     var plan = SI.sheet(opts.rawTris, sts, {
       columns: cols, sideMm: p.sideMm, plateZ: p.plateZ, footMm: foot, occluders: opts.occluders,
-      layerMm: opts.layerMm, gapMm: opts.gapMm, pitchMm: opts.sheetPitchMm, angleDeg: opts.sheetAngleDeg, widthMm: opts.sheetWidthMm, interfaceLayers: opts.interfaceLayers,
+      layerMm: opts.layerMm, gapMm: opts.gapMm, pitchMm: opts.sheetPitchMm, angleDeg: opts.sheetAngleDeg, widthMm: opts.sheetWidthMm, interfaceLayers: opts.interfaceLayers, flatGapMaxMm: opts.sheetFlatGapMm,
       capRiseMm: opts.capRiseMm, capMinMm: opts.capMinMm, capMaxMm: opts.capMaxMm,
       thickness: opts.thickness, crosshatch: opts.crosshatch, rasterLines: opts.rasterLines, beat: opts.beat,
       progress: opts.sheetProgress
@@ -3100,7 +3117,7 @@
       for (var z = z0; z < top - 1e-9; z += 2 * TRUNK_STEP_MM) zs.push(z);
       function fits(c) {
         for (var k = 0; k < zs.length; k++) {
-          var zz = zs[k], need = law(zz) / cosN + (zz <= p.plateZ + foot + 1e-9 ? (p.footClearMm != null ? p.footClearMm : TRUNK_FOOT_CLEAR_MM) : TRUNK_KEEP_MM);
+          var zz = zs[k], need = law(zz) / cosN + (zz <= p.plateZ + foot + 1e-9 ? (p.footClearMm != null ? p.footClearMm : TRUNK_FOOT_CLEAR_MM) + RELAND_SLACK_MM : TRUNK_KEEP_MM);
           for (var q = 0; q < landProbes.length; q++) {
             var P0 = landProbes[q];
             if (P0.inside && P0.inside([c[0], c[1], zz])) return false;
@@ -3166,12 +3183,13 @@
       /* the trunk: its foot, and (growTrunks) its body */
       if (foot && tr.landing === 'plate' && !(opts._graft && opts._graft[cr.zone] != null)) {
         var A0 = rootM.path[0], H = tipTopOf(tr), LW = rootM.oval.law || { tipMm: TRUNK_TIP_MM, angleDeg: TRUNK_ANGLE_DEG, flareMm: FLARE_MM, flareAngleDeg: FLARE_ANGLE_DEG };
+        var Hlaw = LW.uniformH != null ? p.plateZ + LW.uniformH : H;
         var gw = { H: H, top: A0[2], side: rootM.side, tips: null, crown: { ang: rootM.oval.ang, k: rootM.oval.k, dR: rootM.oval.dR, law: LW } };
-        var aBase = LW.tipMm / 2 + Math.tan(LW.angleDeg * Math.PI / 180) * Math.max(0, H - p.plateZ) + Math.tan(LW.flareAngleDeg * Math.PI / 180) * LW.flareMm + rootM.oval.dR;
+        var aBase = LW.tipMm / 2 + Math.tan(LW.angleDeg * Math.PI / 180) * Math.max(0, Hlaw - p.plateZ) + Math.tan(LW.flareAngleDeg * Math.PI / 180) * LW.flareMm + rootM.oval.dR;
         var ft = { key: t, trunk: t, c: [A0[0], A0[1]], r: aBase * Math.sqrt(rootM.oval.k) / Math.cos(Math.PI / TRUNK_SIDES) };
         if (grow) ft.grow = gw;
         else {
-          var lawF = function (z) { return LW.tipMm / 2 + Math.tan(LW.angleDeg * Math.PI / 180) * Math.max(0, H - z) + (z < p.plateZ + LW.flareMm ? Math.tan(LW.flareAngleDeg * Math.PI / 180) * (p.plateZ + LW.flareMm - z) : 0) + rootM.oval.dR; };
+          var lawF = function (z) { return LW.tipMm / 2 + Math.tan(LW.angleDeg * Math.PI / 180) * Math.max(0, Hlaw - z) + (z < p.plateZ + LW.flareMm ? Math.tan(LW.flareAngleDeg * Math.PI / 180) * (p.plateZ + LW.flareMm - z) : 0) + rootM.oval.dR; };
           var cN = Math.cos(Math.PI / TRUNK_SIDES), kq = Math.sqrt(rootM.oval.k), zz0 = p.plateZ + foot / 2, rg = [zz0];
           if (p.plateZ + LW.flareMm > zz0 + 1e-6 && p.plateZ + LW.flareMm < A0[2] - 1e-6) rg.push(p.plateZ + LW.flareMm);
           rg.push(A0[2]);
@@ -3307,7 +3325,7 @@
             if (hf && hf.grow && hf.grow.crown) {
               var cH = p.crowns[p.trunks[host].crown], g2 = hf.grow.crown;
               g2.areaR2 = (g2.areaR2 == null ? cH.rNeed * cH.rNeed : g2.areaR2) + zc.rNeed * zc.rNeed;
-              g2.dR = Math.max(g2.dR, Math.sqrt(g2.areaR2) - cH.lawTop);
+              if (g2.law && g2.law.uniformH != null) g2.dR = 0; else g2.dR = Math.max(g2.dR, Math.sqrt(g2.areaR2) - cH.lawTop);
               g2.k = Math.max(g2.k, zc.oval.k);
               hf.grow.H = Math.max(hf.grow.H, L.zTop);
             }
@@ -4131,10 +4149,11 @@
   var ONE = {
     coverMm: 3.3,         /* every beacon is within this of a tip: a cap (up to 2 mm out) and the sheet's field (1.25 mm) reach 3.25 */
     clusterMm: 12,        /* a cluster's tips lie within this of its centre: one trunk feeds a canopy of about this radius (Bambu's own, 14 mm across; 12 left the fewest over-lean members on a 40 x 30 mm slab: 5 trunks, against 8 at 9 and 3 at 15) */
-    crown: { tipDropMm: 3.2, nodeDropMm: 2, rootFloorMm: 4.5, ovalMax: 1.5 },   /* a canopy is 3.2 mm of straight tip, then joins 2 mm apart, on a trunk that stands 4.5 mm clear of the plate (its flare is 4) */
+    crown: { tipDropMm: 3.2, nodeDropMm: 2, rootFloorMm: 4.5, ovalMax: 1, trunk: { tipMm: 2.8, uniformH: 10 } },   /* a canopy is 3.2 mm of straight tip, then joins 2 mm apart, on a trunk that stands 4.5 mm clear of the plate (its flare is 4.5) */
     lowMm: 4,             /* a spot this near the plate (the low edge of a tipped part) is on the first layers: nothing is stood under it, and it is held by the plate */
     minTips: 3,           /* an area of three spots or more keeps three tips at least: a curved underside is a stair only from three (nso_support_interface.js STAIR_MIN_TIPS) */
     zWindowMm: 4,         /* tips more than this apart in height (gap to the next tip up) are not served by one trunk */
+    centreReachMm: 5,     /* a spot within this of a cluster's tip counts toward where the cluster's trunk stands (covered ones, and the ones a wall took) */
     lostRounds: 2,        /* a spot no branch reaches is left out and the tips planned again, this many times at most */
     splitRounds: 3,       /* a cluster with a branch that has no way round the piece is split, this many times at most */
     splitFactor: 0.6,     /* ...to this share of its radius */
@@ -4323,6 +4342,20 @@
              branch from under the low end meets the underside rising over it */
           var cx = 0, cy = 0, wsum = 0, zlo = Math.min.apply(null, c.tips.map(function (b) { return b.p[2]; }));
           c.tips.forEach(function (b) { var w = c.bias ? Math.pow(b.p[2] - zlo + 0.5, c.bias) : 1; cx += b.p[0] * w; cy += b.p[1] * w; wsum += w; });
+          /* the trunk stands under the middle of the HEAD, not of the tips that happened to be reachable: the spots the thinning
+             covered and the ones lost to a wall, each to its nearest tip within centreReachMm, count as the tip they belong to
+             (a dome whose far side stands against a post: its pole, not the near ring, is where its trunk is) */
+          if (!c.bias) {
+            bc.beacons.forEach(function (b) {
+              if (c.tips.indexOf(b) >= 0 || b.regionId !== c.tips[0].regionId) return;
+              var bt = null, bd = Infinity;
+              c.tips.forEach(function (t) { var d = Math.hypot(b.p[0] - t.p[0], b.p[1] - t.p[1]); if (d < bd) { bd = d; bt = t; } });
+              if (bd > ck.centreReachMm) return;
+              var other = false;
+              clusters.forEach(function (c2) { if (c2 !== c) c2.tips.forEach(function (t2) { if (Math.hypot(b.p[0] - t2.p[0], b.p[1] - t2.p[1]) < bd - 1e-9) other = true; }); });
+              if (!other) { cx += b.p[0]; cy += b.p[1]; wsum += 1; }
+            });
+          }
           /* ...and as many branches to a join as the head's height asks: a squat head has no room for a join under a join (a
              branch from a join 0.5 mm under its tips leans along the underside it should clear), so its tips go to the trunk's top
              in as few levels as the room allows - a flat umbrella - and a tall head keeps Bambu's pairs (2 - 3 to a join) */
@@ -4337,7 +4370,7 @@
         });
         var o2 = Object.assign({}, opts, {
           feed: { mode: 'custom', tips: tips, landingZones: zones },
-          crown: Object.assign({ tipRiseMm: ck.tipRiseMm, designLeanDeg: ck.designLeanDeg }, ck.crown || {}, opts.crown || {}, { trunk: Object.assign({ footClearMm: ck.footClearMm }, (opts.crown && opts.crown.trunk) || {}) }),
+          crown: Object.assign({ tipRiseMm: ck.tipRiseMm, designLeanDeg: ck.designLeanDeg }, ck.crown || {}, opts.crown || {}, { trunk: Object.assign({ footClearMm: ck.footClearMm }, (ck.crown && ck.crown.trunk) || {}, (opts.crown && opts.crown.trunk) || {}) }),
           branchTiltDeg: opts.branchTiltDeg == null ? ck.tiltDeg : opts.branchTiltDeg,
           beacons: undefined, oneTrunk: undefined
         });
