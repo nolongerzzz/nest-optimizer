@@ -253,23 +253,6 @@
     }
     var cell = Math.max(diagSum / (n || 1), 1e-9);
     var invC = 1 / cell;
-    var grid = new Map();
-    for (var g = 0; g < n; g++) {
-      var b = boxes[g];
-      var x0 = Math.floor(b[0][0] * invC), x1 = Math.floor(b[1][0] * invC);
-      var y0 = Math.floor(b[0][1] * invC), y1 = Math.floor(b[1][1] * invC);
-      var z0 = Math.floor(b[0][2] * invC), z1 = Math.floor(b[1][2] * invC);
-      for (var ix = x0; ix <= x1; ix++) {
-        for (var iy = y0; iy <= y1; iy++) {
-          for (var iz = z0; iz <= z1; iz++) {
-            var k = ix + ',' + iy + ',' + iz;
-            var bucket = grid.get(k);
-            if (!bucket) { bucket = []; grid.set(k, bucket); }
-            bucket.push(g);
-          }
-        }
-      }
-    }
     /* The occupied cell range, so a closest-point search with no caller bound
        still has one. Costs one pass over the boxes and nothing at query time. */
     var loCell = [Infinity, Infinity, Infinity], hiCell = [-Infinity, -Infinity, -Infinity];
@@ -281,7 +264,115 @@
       }
     }
     if (!n) { loCell = [0, 0, 0]; hiCell = [0, 0, 0]; }
-    return { grid: grid, cell: cell, invC: invC, boxes: boxes, loCell: loCell, hiCell: hiCell };
+    /* A bucket is found by a number, not a string: (x - lo) * sy + (y - lo)) * sz + (z - lo), over the occupied range
+       (every bucket lies in it, so a cell outside it is empty without a lookup). A range too wide for the number to
+       be exact keeps the string key. */
+    var sy = hiCell[1] - loCell[1] + 1, sz = hiCell[2] - loCell[2] + 1;
+    var numeric = (hiCell[0] - loCell[0] + 1) * sy * sz < 4503599627370496;
+    var grid = new Map();
+    for (var g = 0; g < n; g++) {
+      var b = boxes[g];
+      var x0 = Math.floor(b[0][0] * invC), x1 = Math.floor(b[1][0] * invC);
+      var y0 = Math.floor(b[0][1] * invC), y1 = Math.floor(b[1][1] * invC);
+      var z0 = Math.floor(b[0][2] * invC), z1 = Math.floor(b[1][2] * invC);
+      for (var ix = x0; ix <= x1; ix++) {
+        for (var iy = y0; iy <= y1; iy++) {
+          for (var iz = z0; iz <= z1; iz++) {
+            var k = numeric ? ((ix - loCell[0]) * sy + (iy - loCell[1])) * sz + (iz - loCell[2]) : ix + ',' + iy + ',' + iz;
+            var bucket = grid.get(k);
+            if (!bucket) { bucket = []; grid.set(k, bucket); }
+            bucket.push(g);
+          }
+        }
+      }
+    }
+    return { grid: grid, cell: cell, invC: invC, boxes: boxes, loCell: loCell, hiCell: hiCell, numeric: numeric, sy: sy, sz: sz, tv: null, mark: null, stamp: 0 };
+  }
+
+  /* The bucket of triangles at a cell, or undefined. */
+  function cellAt(G, ix, iy, iz) {
+    var lo = G.loCell, hi = G.hiCell;
+    if (!G.numeric) return G.cellAt(G, ix, iy, iz);
+    if (ix < lo[0] || ix > hi[0] || iy < lo[1] || iy > hi[1] || iz < lo[2] || iz > hi[2]) return undefined;
+    return G.grid.get(((ix - lo[0]) * G.sy + (iy - lo[1])) * G.sz + (iz - lo[2]));
+  }
+
+  /* Each triangle's corners and two edges as plain numbers (a, b, c, b - a, c - a), for the walks below: the same
+     arithmetic as rayTri and closestOnTri on the same numbers, without a vector made per triangle per query. */
+  function trisFlat(G, tris) {
+    if (G.tv) return G.tv;
+    var tv = new Float64Array(tris.length * 15);
+    for (var t = 0; t < tris.length; t++) {
+      var a = tris[t][0], b = tris[t][1], c = tris[t][2], o = t * 15;
+      tv[o] = a[0]; tv[o + 1] = a[1]; tv[o + 2] = a[2];
+      tv[o + 3] = b[0]; tv[o + 4] = b[1]; tv[o + 5] = b[2];
+      tv[o + 6] = c[0]; tv[o + 7] = c[1]; tv[o + 8] = c[2];
+      tv[o + 9] = b[0] - a[0]; tv[o + 10] = b[1] - a[1]; tv[o + 11] = b[2] - a[2];
+      tv[o + 12] = c[0] - a[0]; tv[o + 13] = c[1] - a[1]; tv[o + 14] = c[2] - a[2];
+    }
+    return (G.tv = tv);
+  }
+  /* rayTri on the flat numbers: the same operations in the same order, so the same t to the last bit */
+  function rayTriFlat(tv, o, ox, oy, oz, d0, d1, d2, eps) {
+    var e1x = tv[o + 9], e1y = tv[o + 10], e1z = tv[o + 11], e2x = tv[o + 12], e2y = tv[o + 13], e2z = tv[o + 14];
+    var px = d1 * e2z - d2 * e2y, py = d2 * e2x - d0 * e2z, pz = d0 * e2y - d1 * e2x;
+    var det = e1x * px + e1y * py + e1z * pz;
+    if (det > -1e-14 && det < 1e-14) return null;
+    var inv = 1.0 / det;
+    var sx = ox - tv[o], sy = oy - tv[o + 1], sz = oz - tv[o + 2];
+    var u = (sx * px + sy * py + sz * pz) * inv;
+    if (u < -eps || u > 1.0 + eps) return null;
+    var qx = sy * e1z - sz * e1y, qy = sz * e1x - sx * e1z, qz = sx * e1y - sy * e1x;
+    var v = (d0 * qx + d1 * qy + d2 * qz) * inv;
+    if (v < -eps || u + v > 1.0 + eps) return null;
+    var t = (e2x * qx + e2y * qy + e2z * qz) * inv;
+    return t > eps ? t : null;
+  }
+  /* the squared distance from p to the closest point of triangle f: closestOnTri's branches and arithmetic, and
+     dist2 of the point it returns, without making the point */
+  function closestD2Flat(tv, o, px, py, pz) {
+    var ax = tv[o], ay = tv[o + 1], az = tv[o + 2];
+    var abx = tv[o + 9], aby = tv[o + 10], abz = tv[o + 11], acx = tv[o + 12], acy = tv[o + 13], acz = tv[o + 14];
+    var apx = px - ax, apy = py - ay, apz = pz - az;
+    var d1 = abx * apx + aby * apy + abz * apz, d2 = acx * apx + acy * apy + acz * apz;
+    var qx, qy, qz;
+    if (d1 <= 0 && d2 <= 0) { qx = ax; qy = ay; qz = az; }
+    else {
+      var bx = tv[o + 3], by = tv[o + 4], bz = tv[o + 5];
+      var bpx = px - bx, bpy = py - by, bpz = pz - bz;
+      var d3 = abx * bpx + aby * bpy + abz * bpz, d4 = acx * bpx + acy * bpy + acz * bpz;
+      if (d3 >= 0 && d4 <= d3) { qx = bx; qy = by; qz = bz; }
+      else {
+        var vc = d1 * d4 - d3 * d2;
+        if (vc <= 0 && d1 >= 0 && d3 <= 0) {
+          var v1 = d1 / (d1 - d3);
+          qx = ax + v1 * abx; qy = ay + v1 * aby; qz = az + v1 * abz;
+        } else {
+          var cx = tv[o + 6], cy = tv[o + 7], cz = tv[o + 8];
+          var cpx = px - cx, cpy = py - cy, cpz = pz - cz;
+          var d5 = abx * cpx + aby * cpy + abz * cpz, d6 = acx * cpx + acy * cpy + acz * cpz;
+          if (d6 >= 0 && d5 <= d6) { qx = cx; qy = cy; qz = cz; }
+          else {
+            var vb = d5 * d2 - d1 * d6;
+            if (vb <= 0 && d2 >= 0 && d6 <= 0) {
+              var w1 = d2 / (d2 - d6);
+              qx = ax + w1 * acx; qy = ay + w1 * acy; qz = az + w1 * acz;
+            } else {
+              var va = d3 * d6 - d5 * d4;
+              if (va <= 0 && (d4 - d3) >= 0 && (d5 - d6) >= 0) {
+                var w2 = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+                qx = bx + w2 * (cx - bx); qy = by + w2 * (cy - by); qz = bz + w2 * (cz - bz);
+              } else {
+                var den = 1 / (va + vb + vc), vv = vb * den, ww = vc * den;
+                qx = ax + abx * vv + acx * ww; qy = ay + aby * vv + acy * ww; qz = az + abz * vv + acz * ww;
+              }
+            }
+          }
+        }
+      }
+    }
+    var dx = px - qx, dy = py - qy, dz = pz - qz;
+    return dx * dx + dy * dy + dz * dz;
   }
 
   /* ------------------------------------------------------- 3D probe: a mesh */
@@ -359,7 +450,7 @@
       var mine = vids[f];
       while (entry <= o.probe) {
         if (best !== null && entry > best) break;
-        var cellList = grid.get(ci[0] + ',' + ci[1] + ',' + ci[2]);
+        var cellList = cellAt(G, ci[0], ci[1], ci[2]);
         if (cellList) {
           for (var ii = 0; ii < cellList.length; ii++) {
             var u = cellList[ii];
@@ -424,15 +515,19 @@
         step[a] = -1; tMax[a] = (ci[a] * cell - orig[a]) / d[a]; tDelta[a] = -cell / d[a];
       }
     }
-    var hits = [], seen = new Set(), entry = 0;
+    var hits = [], entry = 0;
+    /* a triangle met in an earlier cell of this walk is not tried again: its stamp is this walk's */
+    var tv = trisFlat(G, tris), mark = G.mark || (G.mark = new Int32Array(tris.length));
+    if (G.stamp >= 2147483646) { mark.fill(0); G.stamp = 0; }
+    var stamp = ++G.stamp, o0 = orig[0], o1 = orig[1], o2 = orig[2], d0 = d[0], d1 = d[1], d2 = d[2];
     while (entry <= maxT) {
-      var bucket = grid.get(ci[0] + ',' + ci[1] + ',' + ci[2]);
+      var bucket = cellAt(G, ci[0], ci[1], ci[2]);
       if (bucket) {
         for (var i = 0; i < bucket.length; i++) {
           var u = bucket[i];
-          if (seen.has(u)) continue;
-          seen.add(u);
-          var t = rayTri(orig, d, tris[u], eps);
+          if (mark[u] === stamp) continue;
+          mark[u] = stamp;
+          var t = rayTriFlat(tv, u * 15, o0, o1, o2, d0, d1, d2, eps);
           if (t !== null && t <= maxT) hits.push(t);
         }
       }
@@ -1026,12 +1121,13 @@
     for (var ax = 0; ax < 3; ax++) {
       if (cell0[ax] < G.loCell[ax] - 1 || cell0[ax] > G.hiCell[ax] + 1) { outside = true; break; }
     }
+    var tv = trisFlat(G, tris), p0 = point[0], p1 = point[1], p2 = point[2];
     if (outside) {
       for (var lf = 0; lf < tris.length; lf++) {
-        var lq = closestOnTri(point, tris[lf]);
-        var ld = dist2(point, lq);
-        if (ld < best) { best = ld; bestF = lf; bestP = lq; }
+        var ld = closestD2Flat(tv, lf * 15, p0, p1, p2);
+        if (ld < best) { best = ld; bestF = lf; }
       }
+      if (bestF >= 0) bestP = closestOnTri(point, tris[bestF]);
       if (bestF < 0 || (isFinite(cap) && Math.sqrt(best) > cap)) return null;
       return { face: bestF, point: bestP, dist: Math.sqrt(best) };
     }
@@ -1048,18 +1144,17 @@
       var found = false;
       for (var ix = bx - ring; ix <= bx + ring; ix++) {
         for (var iy = by - ring; iy <= by + ring; iy++) {
-          for (var iz = bz - ring; iz <= bz + ring; iz++) {
-            /* Only the shell of the box; the interior was done last ring. */
-            if (ring > 0 &&
-                Math.abs(ix - bx) !== ring && Math.abs(iy - by) !== ring && Math.abs(iz - bz) !== ring) continue;
-            var bucket = grid.get(ix + ',' + iy + ',' + iz);
+          /* Only the shell of the box; the interior was done last ring: in a row that is not on a face of x or y,
+             the two cells at z - ring and z + ring, in that order. */
+          var zstep = (ring === 0 || Math.abs(ix - bx) === ring || Math.abs(iy - by) === ring) ? 1 : 2 * ring;
+          for (var iz = bz - ring; iz <= bz + ring; iz += zstep) {
+            var bucket = cellAt(G, ix, iy, iz);
             if (!bucket) continue;
             found = true;
             for (var i = 0; i < bucket.length; i++) {
               var f = bucket[i];
-              var q = closestOnTri(point, tris[f]);
-              var d2v = dist2(point, q);
-              if (d2v < best) { best = d2v; bestF = f; bestP = q; }
+              var d2v = closestD2Flat(tv, f * 15, p0, p1, p2);
+              if (d2v < best) { best = d2v; bestF = f; }
             }
           }
         }
@@ -1071,6 +1166,7 @@
     /* A bounded search that found nothing within its bound answers "not within
        maxDist", which is a real answer and not a failure to look. */
     if (bestF < 0) return null;
+    bestP = closestOnTri(point, tris[bestF]);
     return { face: bestF, point: bestP, dist: Math.sqrt(best) };
   }
 
@@ -1093,7 +1189,7 @@
     var best = null, bestU = null, seen = new Set(), entry = 0;
     while (entry <= maxT) {
       if (best !== null && entry > best) break;
-      var bucket = grid.get(ci[0] + ',' + ci[1] + ',' + ci[2]);
+      var bucket = cellAt(G, ci[0], ci[1], ci[2]);
       if (bucket) {
         for (var i = 0; i < bucket.length; i++) {
           var u = bucket[i];
