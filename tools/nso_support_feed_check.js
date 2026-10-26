@@ -149,8 +149,9 @@ function oneTrunkEach(sh) {
     const tipLog = one.tp.sheet.tips[0], d = SI.exactDistance(one.sh.soup, CLAMP, { reach: 1 }).mm;
     check('clamp, one custom tip: one tree, holding it', p.trunks.length === 1 && one.sh.solids.length === 1 && p.held === 1 && !p.detect.beacons,
       `${p.trunks.length} trunk(s), ${one.sh.solids.length} solid(s), held ${p.held}; tip ${JSON.stringify(tipAt(pair[0]))}`);
-    check(`clamp, one custom tip: the tip at the gap - cut at the gap line, the support ${GAP} mm (+0.02) off the piece`,
-      tipLog.mode === 'gap' && d >= GAP - 1e-4 && d <= GAP + 0.02, `${tipLog.mode} (${tipLog.why}); nearest ${f3(d)} mm`);
+    /* supports-sheet-everywhere: a tip alone was cut at the gap line with nothing between; it now has a sheet of its own (the last resort) */
+    check(`clamp, one custom tip: the tip has a sheet of its own under it, the support ${GAP} mm (+0.02) off the piece`,
+      tipLog.mode === 'sheet' && d >= GAP - 1e-4 && d <= GAP + 0.02, `${tipLog.mode} (${tipLog.why}); nearest ${f3(d)} mm`);
     check('clamp, one custom tip: its foot on the plate', root.end === 'plate' && Math.abs(end[2] - p.plateZ) < 1e-9 && one.tp.feet.length === 1,
       `end ${end.map(f3).join(', ')}, plate ${p.plateZ}; ${one.tp.feet.length} foot`);
   }
