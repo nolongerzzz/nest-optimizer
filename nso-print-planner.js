@@ -207,7 +207,11 @@
       sparsePattern: raw(config, 'sparse_infill_pattern') === 'grid' ? 'grid' : 'zigzag',
       infillDirectionDeg: num(config, 'infill_direction', 45),
       detectThinWall: num(config, 'detect_thin_wall', 0) === 1,
-      supportThresholdDeg: num(config, 'support_threshold_angle', 30)
+      supportThresholdDeg: num(config, 'support_threshold_angle', 30),
+      // the project's own brim: auto_brim (a tall thin part gets one), outer_only / outer_and_inner (every part), no_brim
+      brimType: ({ auto_brim: 'auto', outer_only: 'outer', outer_and_inner: 'outer', no_brim: 'none' })[raw(config, 'brim_type')] || 'none',
+      brimWidthMm: num(config, 'brim_width', 5),
+      brimObjectGapMm: num(config, 'brim_object_gap', 0.1)
     };
     return { nozzleMm: nozzle, over: over };
   }

@@ -307,6 +307,7 @@
     "support:inside": {"weight":850,"note":""},
     "support:interface-clamp": {"weight":170600,"note":""},
     "support:interface-fixtures": {"weight":27750,"note":""},
+    "slicer:brim": {"weight":60000,"note":"~30 s locally x 1.7: the six one-trunk builds sliced with brimType auto and the brim read against the reference; supports-one-trunk"},
     "support:onetrunk": {"weight":150000,"note":"~1.5 min locally x 1.7, rounded up: the reference read, the six real parts built twice (box off, one trunk) and the one-trunk builds sliced and measured; supports-one-trunk"},
     "support:plate": {"weight":240000,"note":"estimate (supports-plate-wide): Node only; the six real parts of supp_ref.3mf planned and built in-thread, about two minutes of the real engine, plus ~40 s of smaller builds; one CI run measures it"},
     "support:shells-clamp-a1": {"weight":305000,"note":"estimate (ci-shard-split-2): local time on the cloud box x support:shells-clamp's CI-over-local, 467 s / 279 s = 1.67. 182 s local: area 1 (126 trunks) - plan, parts, weld, layers; the whole-slice check is skipped there (over 30000 tris)."},

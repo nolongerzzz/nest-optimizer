@@ -719,6 +719,7 @@
     'Support interface':       0xff9d4d,
     'Support transition':      0xffc98a,
     'Top surface':             0xc9c9c9,
+    'Brim':                    0x2f5fb8,
     'Custom':                  0x999999,
     'Travel':                  0xffffff
   };

@@ -96,7 +96,7 @@ var NSO_GSCOPE_SLICE = (function () {
   // default (nso_slicer.js defaultsFor). Walls 2, 15 % grid and support below
   // 30 degrees are the same Bambu profile's, whatever the nozzle.
   var PRINTER_SLICE = { a1mini: { nozzle: 0.4, layer: 0.2 } };
-  var SLICE_REST = { walls: 2, density: 15, pattern: 'grid', angle: 30 };
+  var SLICE_REST = { walls: 2, density: 15, pattern: 'grid', angle: 30, brim: 'auto' };
 
   /** { printer, nozzle, layer } for the plate's printer, read as it is now. */
   function profileDefaults() {
@@ -117,6 +117,7 @@ var NSO_GSCOPE_SLICE = (function () {
     set('ms-slice-density', SLICE_REST.density);
     set('ms-slice-pattern', SLICE_REST.pattern);
     set('ms-slice-angle', SLICE_REST.angle);
+    set('ms-slice-brim', SLICE_REST.brim);
     return d;
   }
 
@@ -139,6 +140,8 @@ var NSO_GSCOPE_SLICE = (function () {
     };
     var pat = $('ms-slice-pattern');
     if (pat && pat.value) over.sparsePattern = pat.value;
+    var brim = $('ms-slice-brim');
+    over.brimType = brim && brim.value ? brim.value : SLICE_REST.brim;
     return { nozzleMm: nozzle, over: over };
   }
 

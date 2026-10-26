@@ -3223,7 +3223,7 @@ var NSO_MICROSCOPE = (function () {
 
   var FEATURE_ORDER = ['Outer wall', 'Inner wall', 'Overhang wall', 'Sparse infill', 'Internal solid infill',
     'Top surface', 'Bottom surface', 'Bridge', 'Gap infill', 'Support', 'Support interface', 'Support transition', 'Floating vertical shell',
-    'Custom', 'Travel'];
+    'Brim', 'Custom', 'Travel'];
 
   /** [{ name, count }] - the line types of the document shown, in Bambu's order. */
   function featureCounts() {

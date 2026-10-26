@@ -103,7 +103,7 @@ async function main() {
   check('the file parses with NSOGcodeLines.parseGcode: every move\'s height and the E mode from the file, nothing assumed',
     parsed.moves.length > 20000 && !parsed.meta.assumed, parsed.warnings.join('; '));
   const names = parsed.features.map(g => g.name).sort();
-  const isBambuName = n => /^(Outer wall|Inner wall|Overhang wall|Sparse infill|Internal solid infill|Top surface|Bottom surface|Bridge|Gap infill|Floating vertical shell|Support|Support interface|Support transition)$/.test(n);
+  const isBambuName = n => /^(Outer wall|Inner wall|Overhang wall|Sparse infill|Internal solid infill|Top surface|Bottom surface|Bridge|Gap infill|Floating vertical shell|Support|Support interface|Support transition|Brim)$/.test(n);
   check('every feature is a name Bambu writes', names.every(isBambuName), names.join(', '));
   const sup = res.objects.filter(o => o.role === 'support');
   const supFeatures = new Set();
@@ -383,7 +383,7 @@ async function main() {
   // features: exact names, supports typed
   const fset = new Set(g.filter(l => /^; FEATURE: /.test(l)).map(l => l.slice(11)));
   const bset = new Set(bg.filter(l => /^; FEATURE: /.test(l)).map(l => l.slice(11)));
-  check('; FEATURE names are Bambu\'s, exactly: ' + [...fset].join(', '), [...fset].every(f => f === 'Custom' || bset.has(f) || SUPPORT_FEATURES.includes(f) || f === 'Gap infill'), [...fset].filter(f => !bset.has(f)).join(', '));
+  check('; FEATURE names are Bambu\'s, exactly: ' + [...fset].join(', '), [...fset].every(f => f === 'Custom' || f === 'Brim' || bset.has(f) || SUPPORT_FEATURES.includes(f) || f === 'Gap infill'), [...fset].filter(f => !bset.has(f)).join(', '));
   const role = ids.map((id, i) => res.objects[i].role);
   const featuresBy = {};
   let curObj = null;
@@ -497,7 +497,7 @@ async function main() {
     check(R.name.trim() + ': the outer wall is on every layer in both; the inner wall on all but ' + (r['Inner wall'].b + r['Inner wall'].n) + ' (' + r['Inner wall'].both + ')',
       wallsAll && r['Inner wall'].b + r['Inner wall'].n <= 1, JSON.stringify(r['Inner wall']));
     const fs = new Set(R.ours.layers.flatMap(l => l.features));
-    check('...every feature NSO writes is a name Studio\'s file has or one of our three support names', [...fs].every(f => BAMBU_NAMES.has(f) || f === 'Custom'), [...fs].join(', '));
+    check('...every feature NSO writes is a name Studio\'s file has or one of our three support names', [...fs].every(f => BAMBU_NAMES.has(f) || f === 'Custom' || f === 'Brim'), [...fs].join(', '));
     const ts = r['Top surface'];
     check('...a layer Studio gives a top surface, NSO does too (' + ts.both + ' of ' + (ts.both + ts.b) + ')', ts.both >= 0.85 * (ts.both + ts.b) || ts.both + ts.b === 0);
   }

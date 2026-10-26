@@ -1711,6 +1711,12 @@
                 <label class="ms-note" for="ms-slice-angle" style="margin:0">support below
                   <input type="number" id="ms-slice-angle" value="30" min="1" max="89" step="1"
                          title="Printable angle off the plate. 30 is the real Bambu profile's support_threshold_angle; auto-aim uses 45" />&deg;</label>
+                <label class="ms-note" for="ms-slice-brim" style="margin:0">brim
+                  <select id="ms-slice-brim" style="width:auto" title="A brim round the first layer, 5 mm, 0.1 mm off the wall (Bambu's auto_brim: a part that is tall for its foot - the stem of a chalice, a tower - gets one). It stays off a support's pad: it meets it and does not join it.">
+                    <option value="auto" selected>auto</option>
+                    <option value="outer">every part</option>
+                    <option value="none">off</option>
+                  </select></label>
               </div>
               <p class="ms-note" id="ms-slice-settings-note">From the plate's printer profile. They take effect on the next slice: Normal, then Slice again.</p>
             </div>
@@ -1908,9 +1914,9 @@
   <script src="nso-3mf-read.js?v=28d79bcf"></script>
   <script src="nso-3mf-scene.js?v=abb8f614"></script>
   <script src="nso-surface-grid.js?v=c0d97583"></script>
-  <script src="nso-gcode-lines.js?v=c294e538"></script>
+  <script src="nso-gcode-lines.js?v=f9dd974d"></script>
   <script src="nso-gcode-solid.js?v=ac1a4f02"></script>
-  <script src="nso_slicer.js?v=69e3313a"></script>
+  <script src="nso_slicer.js?v=f228d5f1"></script>
   <script src="nso_raster_lines.js?v=461ca449"></script>
   <!-- The support interface: the crosshatch's one-direction layers, and the
        sheet a support tree's tips carry under the part (flat caps on the
@@ -2051,7 +2057,7 @@
   <!-- Handle, bracket, lid and hinge detection for G-scope's Parts list, one
        row each under the Flange row. Pure. docs/GSCOPE-FEATURES.md. -->
   <script src="nso_face_features.js?v=53ee4b23"></script>
-  <script src="app-microscope.js?v=5f2e5aa4"></script>
+  <script src="app-microscope.js?v=1d33ffd5"></script>
   <!-- Detach / Reattach (Cut menu): cap a detected flange's hull on its own
        wall, lift the flange out as a piece, seat it elsewhere with Attach's
        seat. After nso_flange.js, app-crop.js, nso_assemble.js, app-assemble.js
@@ -2066,14 +2072,14 @@
   <!-- The Supports card on the main page: the same detection and planner,
        after app-core.js / app-join.js, whose ingest and soups it uses. -->
   <script src="app-supports-card.js?v=e10986cf"></script>
-  <script src="app-gscope-slice.js?v=a22783c4"></script>
+  <script src="app-gscope-slice.js?v=b6e126e0"></script>
   <!-- The Slice card (left bar): the plate sliced for its printer, the .gcode.3mf
        it makes. The print planner and the packager are loaded here for it and for
        its slice worker (which importScripts them from these tags); no G-scope file
        uses them. After nso_slicer.js, nso-cooling-profiles.js, nso-3mf.js and
        nso-3mf-read.js, which they read at load, and after app-microscope.js, whose
        plate reader and G-code import it calls. See docs/PRINT-PLANNER.md. -->
-  <script src="nso-print-planner.js?v=e1c24c2b"></script>
+  <script src="nso-print-planner.js?v=6aba9121"></script>
   <script src="nso-gcode3mf-write.js?v=cdfa15b4"></script>
   <script src="app-print.js?v=4a483492"></script>
   <!-- Lift: details off a face, the face left as it was round them. After

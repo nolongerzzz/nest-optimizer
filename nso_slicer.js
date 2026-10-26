@@ -277,6 +277,19 @@
       // A support object (role 'support') holds its host where its top lies
       // within this gap + one layer under the host's underside.
       supportGapMm: CONSTANTS.supportGap.designMm,
+      // A brim round a part's first layer (Bambu's brim_type / brim_width /
+      // brim_object_gap: auto_brim, 5, 0.1 in the A1 mini and P1S profiles).
+      // 'none' | 'auto' | 'outer'. Auto brims a part that is tall for its foot
+      // (height over the root of its first layer's area at least
+      // brimAutoRatio): the stem of a chalice, a tower. The brim stays
+      // brimSupportGapMm off the first layer of every other object (a support's
+      // pad): it meets the pad and does not join it. Off unless asked.
+      brimType: 'none',
+      brimWidthMm: 5,
+      brimObjectGapMm: 0.1,
+      brimLineWidthMm: null,               // null -> 1.25 x the nozzle (Bambu's first-layer line, 0.5 mm at 0.4)
+      brimAutoRatio: 2,
+      brimSupportGapMm: 0.02,
       supportInterfaceLayers: null,        // null -> CONSTANTS.supportSheet.interfaceLayers (2); a sheet of more says so
       weldMm: 1e-4,
       dropToPlate: true,
@@ -1531,6 +1544,8 @@
         }
       });
 
+      addBrims(g, perObject, planes, o);
+
       // --- overhang regions in 3D, per object: layer islands linked upward
       // --- conflicts: two objects printing into the same place on one layer.
       // Beads reach exactly to the section outline (the outer wall sits half
@@ -1603,6 +1618,66 @@
     } finally {
       g.free();
     }
+  }
+
+  /**
+   * THE BRIM. Round the first layer of a part (outer boundary only): loops
+   * stepped one first-layer spacing apart from brimObjectGapMm out to
+   * brimWidthMm (Bambu's six test heads: 10 loops of 0.5 mm line at 0.457
+   * spacing, the first 0.1 mm off the wall, the outermost printed first). Each
+   * loop is cut where it would come within half a line of another object's first
+   * layer - the support's pad - so brim and pad touch at the edges and never
+   * join; a run shorter than a millimetre is dropped. Printed before everything
+   * else on the first layer, as feature 'Brim'.
+   */
+  function addBrims(g, perObject, planes, o) {
+    if (!o.brimType || o.brimType === 'none' || !(o.brimWidthMm > 0)) return;
+    var w = o.brimLineWidthMm > 0 ? o.brimLineWidthMm : o.nozzleMm * 1.25, gap = Math.max(0, o.brimObjectGapMm || 0);
+    var sp = spacingOf(w, planes[0].h), N = Math.floor((o.brimWidthMm - gap - w) / sp + 1e-9) + 1;
+    if (N < 1) return;
+    perObject.forEach(function (P) {
+      if (P.role !== 'part' || !P.layers.length) return;
+      var S0 = P.S[0];
+      if (!S0 || g.isEmpty(S0)) return;
+      var outers = g.polys(S0).filter(function (p) { return signedArea(p) > 0; });
+      if (!outers.length) return;
+      if (o.brimType === 'auto') {
+        var top = 0;
+        P.layers.forEach(function (L) { if (L.areaMm2 > 0 && L.printZ > top) top = L.printZ; });
+        if (!(top / Math.sqrt(Math.max(g.area(S0), 1e-6)) >= o.brimAutoRatio)) return;
+      }
+      var region = g.of(outers, 'Positive');
+      var others = [];
+      perObject.forEach(function (Q) { if (Q !== P && Q.S[0] && !g.isEmpty(Q.S[0])) others.push(Q.S[0]); });
+      var forb = others.length ? g.polys(g.offset(g.unionAll(others), w / 2 + (o.brimSupportGapMm || 0))) : [];
+      var out = [];
+      for (var k = N - 1; k >= 0; k--) {                          // the outermost first
+        g.polys(g.offset(region, gap + w / 2 + k * sp, 'Round')).forEach(function (loop) {
+          if (signedArea(loop) <= 0) return;                  // a pinched-off pocket is not brimmed
+          var pts = [], flags = [], STEP = 0.2, m = loop.length;
+          for (var i = 0; i < m; i++) {
+            var a = loop[i], b = loop[(i + 1) % m], len = Math.hypot(b[0] - a[0], b[1] - a[1]), n = Math.max(1, Math.ceil(len / STEP));
+            for (var t = 0; t < n; t++) {
+              var x = a[0] + (b[0] - a[0]) * t / n, y = a[1] + (b[1] - a[1]) * t / n;
+              pts.push([x, y]); flags.push(forb.length ? inside(forb, x, y) : false);
+            }
+          }
+          var first = flags.indexOf(true);
+          if (first < 0) { out.push({ feature: 'Brim', width: w, closed: true, pts: loop }); return; }
+          var runs = [], cur = null, np = pts.length;
+          for (var j = 1; j <= np; j++) {
+            var idx = (first + j) % np;
+            if (!flags[idx]) { if (!cur) { cur = []; runs.push(cur); } cur.push(pts[idx]); } else cur = null;
+          }
+          runs.forEach(function (r) {
+            if (r.length * STEP >= 1) out.push({ feature: 'Brim', width: w, closed: false, pts: r });
+          });
+        });
+      }
+      var L0 = P.layers[0];
+      L0.paths = out.concat(L0.paths);
+      L0.brimLoops = N;
+    });
   }
 
   /**

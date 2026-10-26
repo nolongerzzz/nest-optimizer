@@ -509,6 +509,22 @@ classic semantics, not Arachne: one fixed width, no variable bead.
 
 ---
 
+### The brim (supports-one-trunk, third round)
+
+`brimType` ('none' by default; 'auto' | 'outer'), `brimWidthMm` 5, `brimObjectGapMm` 0.1, `brimLineWidthMm` (null: 1.25 x the nozzle,
+Bambu's 0.5 first-layer line), `brimAutoRatio` 2, `brimSupportGapMm` 0.02. Read off the six heads of
+`fixtures/supports/tree_slimsupports.gcode.3mf` (A1 mini, `brim_type = auto_brim`, `brim_width = 5`, `brim_object_gap = 0.1`): on the first
+layer only, round the part's outer boundary, 10 loops of a 0.5 mm line at the stadium spacing 0.457, the first 0.1 mm off the wall
+(centres 0.35 mm off the outline), the outermost 4.46 mm, printed outermost first and before everything else on the layer, as feature
+`Brim` (G-code `; FEATURE: Brim`). Each loop is cut where it would come within half a line (+ 0.02 mm) of another object's first layer -
+a support's pad - so the brim and the pad touch edge to edge (Bambu's: 0 - 0.05 mm) and never join; a run under 1 mm is dropped. Auto
+brims a part that is tall for its foot (height over the root of the first layer's area at least 2: the stem of a chalice, a tower).
+The brim is a tall thin part's added hold, the way the tree's pad is the support's: for these heads it is all that holds the stem
+when the pad is a hand wider than the trunk. G-scope's Slice settings carry a **brim** select (auto / every part / off, auto at rest);
+the print planner reads the project's own `brim_type` (`auto_brim` -> auto, `outer_only` / `outer_and_inner` -> outer, `no_brim` -> none),
+`brim_width` and `brim_object_gap`. Gate: `npm run slicer:brim`. Not done: the inner brim of `outer_and_inner`, brim ears, a brim
+shared between neighbouring parts (two brims may overlap each other; neither enters a pad or another part's first layer).
+
 ## 7. Scope and complexity, as found
 
 - **The real work was measurement.** The textbook core is the smaller part.

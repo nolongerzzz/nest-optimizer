@@ -112,8 +112,7 @@ the option (the shipped Custom feed's bytes are the claude-wip's; `support:feed`
     owner's prints settled it): 9.4 mm across on the 8.0 mm base, where it was 16 - 17 mm. The base stands inside the pad's edge and
     narrows from there on a curve (`flareAt`, the square of the way up: steep at the plate, tangent to the stem at 4.5 mm) through
     six rings (`ringZs`), so the trunk is mostly stem and there is no visible joint. Gated (`support:onetrunk`). The model's own brim
-    (Bambu's blue ring round a stem) is not drawn by NSO; the pad keeps FOOT_GAP_MM 0.2 mm off the piece and what stands round it, so
-    a brim of the model's meets the pad's edge there and does not join it.
+    (Bambu's blue ring round a stem) is item 18.
 16. **The stem stands to 6 mm before the tree branches** (`crown.rootFloorMm` 6, was 4.5; a head whose lowest tip is lower roots as high as
     the tip's drop allows, 5.8 mm under Oblique's and Circular's 9.0). The 42-tip tree under Oblique's stair had been a bundle of
     joins 6 - 10 mm across from 4.5 up to 8 mm (the "abnormally thick trunk" next to the other heads' 4 mm stems); it is a ball of
@@ -122,6 +121,13 @@ the option (the shipped Custom feed's bytes are the claude-wip's; `support:feed`
     over the top strip at the stair's high end: two specks of 1.4 and 0.5 mm of line in the slice at z 12.4 and 12.6, floating over
     where the supports stop (the owner's circle). Each part of a stair tree (tube, ball, post - convex) is cut at the stair's top and
     capped. Gated: no support stands over the highest sheet's top.
+
+18. **The brim** (the owner's, on the third push: "I don't see the brim work covered here"). Bambu rings each model's stem with a `Brim` of
+    10 loops, 5 mm wide, on the first layer, and the tree's pad meets it without joining; NSO had none. `NSO_Slicer` now has it
+    (`brimType` 'none' | 'auto' | 'outer', `addBrims`; docs/SLICER.md "The brim"), the print planner reads the project's `brim_type` /
+    `brim_width` / `brim_object_gap`, G-scope's Slice settings have a **brim** select (auto by default), the toolpath reader colours and
+    lists `Brim`. Measured on the six heads against the reference: 10 loops, 0.5 mm line, centres 0.35 - 4.46 mm off the outline, 245 - 278 mm
+    a head (Bambu's 195 - 248), the brim 0.02 - 0.04 mm edge to edge from the pad's lines. Gate: `npm run slicer:brim`.
 
 **The interface (`interfaceLayers`, `SHEET.densePitchMm`).** `sheet()` takes `interfaceLayers` (2 unless said): 2 transition
 layers and that many interface layers, the interface alternating across and along the sheet's A. The card's **Dense (Bambu)**
