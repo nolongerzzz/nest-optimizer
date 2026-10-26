@@ -252,7 +252,7 @@
       nudgeTips: o.nudgeTips == null ? true : !!o.nudgeTips, nudgeMarginMm: pick(o.nudgeMarginMm, 0), maxKids: Math.max(2, Math.round(pick(o.maxKids, CROWN_MAX_KIDS))), areaRatio: pick(o.areaRatio, CROWN_AREA_RATIO), tipDropMm: pick(o.tipDropMm, CROWN_TIP_DROP_MM), nodeDropMm: pick(o.nodeDropMm, CROWN_NODE_DROP_MM),
       ovalMax: pick(o.ovalMax, CROWN_OVAL_MAX), branchTaperDeg: pick(o.branchTaperDeg, CROWN_BRANCH_TAPER_DEG), rootFloorMm: pick(o.rootFloorMm, CROWN_ROOT_FLOOR_MM),
       designLeanDeg: o.designLeanDeg == null ? null : +o.designLeanDeg, nodeRings: Array.isArray(o.nodeRings) ? o.nodeRings.slice() : CROWN_NODE_RINGS.slice(),
-      searchStepMm: pick(o.searchStepMm, CROWN_SEARCH_STEP_MM), tubeSides: Math.max(6, Math.round(pick(o.tubeSides, CROWN_TUBE_SIDES))),
+      searchStepMm: pick(o.searchStepMm, CROWN_SEARCH_STEP_MM), tipRiseMm: pick(o.tipRiseMm, 0), tubeSides: Math.max(6, Math.round(pick(o.tubeSides, CROWN_TUBE_SIDES))),
       trunk: { tipMm: pick(t.tipMm, TRUNK_TIP_MM), angleDeg: pick(t.angleDeg, TRUNK_ANGLE_DEG), flareMm: pick(t.flareMm, FLARE_MM), flareAngleDeg: pick(t.flareAngleDeg, FLARE_ANGLE_DEG) }
     };
   }
@@ -1346,7 +1346,13 @@
         var mOf = {}, kidsOf = {};
         function pathOf(e) {
           var pts = [];
-          if (e.tip) { pts.push(e.tip.p.slice()); if (e.tip.side) pts.push(e.tip.attach.slice()); } else pts.push(e.from.slice());
+          if (e.tip) {
+            pts.push(e.tip.p.slice()); if (e.tip.side) pts.push(e.tip.attach.slice());
+            /* a tip stands straight for its cap's rise before it leans to its join: legs that lean from the contact cross the
+               cap's height closer than their tips stand, and no cap fits (the pickup's vertical last run, TIP_RISE_SIDES) */
+            var rise = Math.min(CK.tipRiseMm, e.from[2] - e.to[2] - 0.5), pa = e.tip.attach;
+            if (rise > 0.25 && hdist(pa, e.to) > 1e-6) pts.push([pa[0], pa[1], pa[2] - rise]);
+          } else pts.push(e.from.slice());
           if (e.mid) pts.push(e.mid.slice());
           pts.push(e.to.slice());
           return pts;
