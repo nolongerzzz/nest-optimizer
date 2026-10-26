@@ -246,6 +246,60 @@
   }
   function growInt32(a) { var n = new Int32Array(Math.max(1024, a.length * 2)); n.set(a); return n; }
 
+  /* The stair's raster loops, out of stairOf: the same arithmetic on typed arrays handed in, in functions of their own
+     (inside stairOf's closures they ran forty times slower). */
+
+  /* a layer's cells: blk where an interval of the piece meets the layer's window (za, zb) - the layer and the gap over
+     and under it; fld where nothing does and the piece's next underside is within reach over it. Cell q's intervals
+     are iv[ivAt[q]] .. iv[ivAt[q + 1]] (in, out, in, out ...). */
+  function stairBlocks(ivAt, iv, n, za, zb, reach, blk, fld) {
+    var INF = Infinity;     /* a global is a lookup through the sandbox where this runs in a vm context: once, not per cell */
+    for (var q = 0; q < n; q++) {
+      var ce = INF, kEnd = ivAt[q + 1];
+      for (var k = ivAt[q]; k + 1 < kEnd; k += 2) {
+        if (iv[k] < zb && iv[k + 1] > za) { blk[q] = 1; break; }
+        if (iv[k] >= zb && iv[k] < ce) ce = iv[k];
+      }
+      if (!blk[q] && ce - zb <= reach) fld[q] = 1;
+    }
+  }
+  /* the field kept off every blocked cell that has an open neighbour: rows = [dj, di from, di to] of the disc, or its
+     cells (di, dj) where a row is broken */
+  function stairHalo(blk, fld, nx, ny, rows, whole, cells) {
+    var n = nx * ny, max = Math.max, min = Math.min;
+    for (var q2 = 0; q2 < n; q2++) {
+      if (!blk[q2]) continue;
+      var ci = q2 % nx, cj = (q2 - ci) / nx;
+      if (ci > 0 && ci < nx - 1 && cj > 0 && cj < ny - 1 && blk[q2 - 1] && blk[q2 + 1] && blk[q2 - nx] && blk[q2 + nx]) continue;
+      if (whole) {
+        for (var d = 0; d < rows.length; d += 3) {
+          var jj = cj + rows[d], ia = max(0, ci + rows[d + 1]), ib = min(nx - 1, ci + rows[d + 2]);
+          if (jj >= 0 && jj < ny && ia <= ib) fld.fill(0, jj * nx + ia, jj * nx + ib + 1);
+        }
+      } else {
+        for (var d2 = 0; d2 < cells.length; d2 += 2) {
+          var ii2 = ci + cells[d2], jj2 = cj + cells[d2 + 1];
+          if (ii2 >= 0 && ii2 < nx && jj2 >= 0 && jj2 < ny) fld[jj2 * nx + ii2] = 0;
+        }
+      }
+    }
+  }
+  /* along one level line (at v) of a band's frame, the first u from down the slope where the field holds a line's
+     width and the cell is near a tip; null where none does */
+  function stairFront(fld, near, nx, ny, ox, oy, umin, umax, width, DU, nrm0, nrm1, dir0, dir1, v) {
+    var vd0 = v * dir0, vd1 = v * dir1, round = Math.round, cellMm = CELL_MM;
+    for (var u = umin; u <= umax - width; u += DU) {
+      var px = u * nrm0 + vd0, py = u * nrm1 + vd1;
+      var i = round((px - ox) / cellMm), j = round((py - oy) / cellMm);
+      if (!(i >= 0 && i < nx && j >= 0 && j < ny && fld[j * nx + i] === 1)) continue;
+      var u2 = u + width, qx = u2 * nrm0 + vd0, qy = u2 * nrm1 + vd1;
+      var i2 = round((qx - ox) / cellMm), j2 = round((qy - oy) / cellMm);
+      if (!(i2 >= 0 && i2 < nx && j2 >= 0 && j2 < ny && fld[j2 * nx + i2] === 1)) continue;
+      if (near[j * nx + i] === 1) return u;
+    }
+    return null;
+  }
+
   /* B's side of exactDistance: its triangles' boxes on a grid of cells max(1, 4 reach) wide. It depends on B and the
      cell alone, so a caller that measures many soups against the same B builds it once (exactPrep) and hands the
      handle where B goes; a soup handed bare is prepared for the one call. */
@@ -2061,35 +2115,16 @@
         row[1] = Math.min(row[1], c[0]); row[2] = Math.max(row[2], c[0]); row[3]++;
       });
       var discWhole = discRows.every(function (r) { return r[3] === r[2] - r[1] + 1; });
+      var discRowsFlat = new Int32Array(discRows.length * 3), discFlat = new Int32Array(disc.length * 2);
+      discRows.forEach(function (r, k) { discRowsFlat[k * 3] = r[0]; discRowsFlat[k * 3 + 1] = r[1]; discRowsFlat[k * 3 + 2] = r[2]; });
+      disc.forEach(function (c, k) { discFlat[k * 2] = c[0]; discFlat[k * 2 + 1] = c[1]; });
       var zTopOf = function (m) { return o.plateZ + m * o.layer; };
       /* the field of the layer whose top is zTopOf(m): see EACH LAYER'S STRIP */
       function fieldFor(m, extra) {
         var zt = zTopOf(m), za = zt - o.layer - o.gap, zb = zt + o.gap, n = nx * ny;
         var blk = new Uint8Array(n), fld = new Uint8Array(n);
-        for (var q = 0; q < n; q++) {
-          var ce = Infinity, kEnd = ivAt[q + 1];
-          for (var k = ivAt[q]; k + 1 < kEnd; k += 2) {
-            if (iv[k] < zb && iv[k + 1] > za) { blk[q] = 1; break; }
-            if (iv[k] >= zb && iv[k] < ce) ce = iv[k];
-          }
-          if (!blk[q] && ce - zb <= STAIR_REACH_MM) fld[q] = 1;
-        }
-        for (var q2 = 0; q2 < n; q2++) {
-          if (!blk[q2]) continue;
-          var ci = q2 % nx, cj = (q2 - ci) / nx;
-          if (ci > 0 && ci < nx - 1 && cj > 0 && cj < ny - 1 && blk[q2 - 1] && blk[q2 + 1] && blk[q2 - nx] && blk[q2 + nx]) continue;
-          if (discWhole) {
-            for (var d = 0; d < discRows.length; d++) {
-              var jj = cj + discRows[d][0], ia = Math.max(0, ci + discRows[d][1]), ib = Math.min(nx - 1, ci + discRows[d][2]);
-              if (jj >= 0 && jj < ny && ia <= ib) fld.fill(0, jj * nx + ia, jj * nx + ib + 1);
-            }
-          } else {
-            for (var d2 = 0; d2 < disc.length; d2++) {
-              var ii2 = ci + disc[d2][0], jj2 = cj + disc[d2][1];
-              if (ii2 >= 0 && ii2 < nx && jj2 >= 0 && jj2 < ny) fld[jj2 * nx + ii2] = 0;
-            }
-          }
-        }
+        stairBlocks(ivAt, iv, n, za, zb, STAIR_REACH_MM, blk, fld);
+        stairHalo(blk, fld, nx, ny, discRowsFlat, discWhole, discFlat);
         function stamp(a, b, rad) {
           var i0 = Math.max(0, Math.floor((Math.min(a[0], b[0]) - rad - ox) / CELL_MM)), i1 = Math.min(nx - 1, Math.ceil((Math.max(a[0], b[0]) + rad - ox) / CELL_MM));
           var j0 = Math.max(0, Math.floor((Math.min(a[1], b[1]) - rad - oy) / CELL_MM)), j1 = Math.min(ny - 1, Math.ceil((Math.max(a[1], b[1]) + rad - oy) / CELL_MM));
@@ -2126,11 +2161,7 @@
       function bandOf(fld) {
         var pts = [];
         for (var v = vmin; v <= vmax + 1e-9; v += STAIR_DV) {
-          var f = null;
-          for (var u = umin; u <= umax - o.width; u += DU) {
-            var p = atUV(u, v), q = atUV(u + o.width, v);
-            if (fieldAt(fld, p[0], p[1]) && fieldAt(fld, q[0], q[1]) && fieldAt(near, p[0], p[1])) { f = u; break; }
-          }
+          var f = stairFront(fld, near, nx, ny, ox, oy, umin, umax, o.width, DU, F.nrm[0], F.nrm[1], F.dir[0], F.dir[1], v);
           pts.push({ v: v, f: f });
         }
         var best = null, cur = [];
