@@ -83,6 +83,7 @@ merging its list by hand. The list below is generated.
 - [Picture -> relief slab - Gen+ -> Picture (2026-10-12)](handoff/picture-relief-slab-gen-picture.md)
 - [Ping pong](handoff/ping-pong.md)
 - [Plate reference grid + grid-snap (landed, `app-core.js`)](handoff/plate-reference-grid-grid-snap.md)
+- [plates-main - up to six plates, one active, every tool on the active one (2026-10-26)](handoff/plates-main.md)
 - [Pose bake - every pose action is complete when it ends (2026-10-21)](handoff/pose-bake-every-pose-action-is-complete-when-it-ends.md)
 - [Position lock (2026-09-16)](handoff/position-lock.md)
 - [Pottery Wheel - throw a vessel on an axis](handoff/pottery-wheel-throw-a-vessel-on-an-axis.md)

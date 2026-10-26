@@ -2450,6 +2450,21 @@ var NSO_SUPPORTS_CARD = (function () {
     return { ok: true, on: false };
   }
 
+  /* DELETE PLATE / CLEAR PLATE with other beds standing (app-beds.js): forget the named pieces' tips, circles,
+     erasures and detection, and the host if it is one of them. Another bed's pieces keep theirs. */
+  function forget(ids) {
+    var gone = {};
+    (ids || []).forEach(function (id) { gone[id] = true; });
+    cancelDrag();
+    Object.keys(S.mem).forEach(function (k) { if (gone[k]) delete S.mem[k]; });
+    Object.keys(S.occ).forEach(function (k) { if (gone[k]) delete S.occ[k]; });
+    if (S.hostId != null && gone[S.hostId]) {
+      S.hostId = null; S.selSupport = null; S.det = null; S.eff = null;
+      S.tool = 'tips'; S.sel = null; S.hover = null; S.hot = null;
+    } else if (S.selSupport != null && gone[S.selSupport]) S.selSupport = null;
+    if (S.open) refresh();
+  }
+
   /* --------------------------------------------------------- open, close */
 
   /* The piece the card should be on: the app's selection when it is a piece
@@ -2743,7 +2758,9 @@ var NSO_SUPPORTS_CARD = (function () {
       };
     },
     /** Forget every host's tips, toggles, circles and erasures (what CLEAR PLATE does). */
-    forgetAll: forgetAll
+    forgetAll: forgetAll,
+    /** Forget only these pieces (ids): what CLEAR PLATE does when other plates stand beside the one cleared. */
+    forget: forget
   };
 })();
 

@@ -31,7 +31,7 @@ const check = (name, cond, detail) => {
   if (!cond) fails++;
 };
 const fx = f => path.join(ROOT, 'fixtures', f);
-const ITEMS = ['ctx-undo', 'ctx-redo', 'ctx-clone', 'ctx-mirror', 'ctx-export', 'ctx-export-plate', 'ctx-clear-plate', 'ctx-delete'];
+const ITEMS = ['ctx-undo', 'ctx-redo', 'ctx-clone', 'ctx-mirror', 'ctx-export', 'ctx-export-plate', 'ctx-clear-plate', 'ctx-delete-plate', 'ctx-delete'];
 
 withApp(async (page, logs) => {
   await page.setViewportSize({ width: 1400, height: 860 });
@@ -45,7 +45,7 @@ withApp(async (page, logs) => {
       return [r.left + (p.x * 0.5 + 0.5) * r.width, r.top + (-p.y * 0.5 + 0.5) * r.height];
     };
     H.open = () => !document.getElementById('ctx-menu').classList.contains('hidden');
-    H.off = () => Object.fromEntries(['ctx-undo', 'ctx-redo', 'ctx-clone', 'ctx-mirror', 'ctx-export', 'ctx-export-plate', 'ctx-clear-plate', 'ctx-delete']
+    H.off = () => Object.fromEntries(['ctx-undo', 'ctx-redo', 'ctx-clone', 'ctx-mirror', 'ctx-export', 'ctx-export-plate', 'ctx-clear-plate', 'ctx-delete-plate', 'ctx-delete']
       .map(id => [id, document.getElementById(id).disabled]));
     /* a point on bare plate: on the plate, on no piece, clear of the buttons */
     H.barePlate = () => {
@@ -77,10 +77,10 @@ withApp(async (page, logs) => {
   check('the items, in order', JSON.stringify(await N(() => Array.from(document.querySelectorAll('#ctx-menu .ctx-item')).map(b => b.id)))
     === JSON.stringify(ITEMS));
   check('the labels', JSON.stringify(await N(() => Array.from(document.querySelectorAll('#ctx-menu .ctx-item')).map(b => b.firstElementChild && b.children.length ? b.firstElementChild.textContent : b.textContent)))
-    === JSON.stringify(['Undo', 'Redo', 'Clone', 'Mirror across X', 'Export selected as…', 'Export plate', 'Clear plate', 'Delete piece']));
+    === JSON.stringify(['Undo', 'Redo', 'Clone', 'Mirror across X', 'Export selected as…', 'Export plate', 'Clear plate', 'Delete plate', 'Delete piece']));
   check('two separators: after Redo and after Export plate', await N(() => {
     const kids = Array.from(document.getElementById('ctx-menu').children).map(e => e.classList.contains('ctx-sep') ? '-' : e.id);
-    return kids.join() === 'ctx-undo,ctx-redo,-,ctx-clone,ctx-mirror,ctx-export,ctx-export-plate,-,ctx-clear-plate,ctx-delete';
+    return kids.join() === 'ctx-undo,ctx-redo,-,ctx-clone,ctx-mirror,ctx-export,ctx-export-plate,-,ctx-clear-plate,ctx-delete-plate,ctx-delete';
   }));
   check('the piece is selected', (await N(() => state.selectedIndex)) === 0);
   let off = await N(() => window.__c.off());

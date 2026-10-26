@@ -399,6 +399,15 @@
       row._libBusy = true;
       row.classList.add('is-loading');
     }
+    /* The row's file is fetched, read, placed and seated over the next turns, onto the plate that is active
+       now: the active plate may not change meanwhile (app-beds.js busyReason). */
+    var held = true;
+    if (typeof state !== 'undefined') state.importsPending = (state.importsPending || 0) + 1;
+    var release = function () {
+      if (!held) return;
+      held = false;
+      if (typeof state !== 'undefined') state.importsPending = Math.max(0, (state.importsPending || 1) - 1);
+    };
     var done = function () {
       if (!row) return;
       row._libBusy = false;
@@ -407,6 +416,7 @@
     var fail = function (why) {
       console.warn('[library] ' + name + ': ' + why);
       say('Library load failed - ' + name, true);
+      release();
       done();
     };
     say('Loading ' + name + '…');
@@ -428,7 +438,7 @@
       handleFiles([new File([buf], name, { type: 'model/stl' })], { source: 'library', load: entry });
       // handleFiles reads the file asynchronously, so the piece is not on
       // the plate yet; seat it on the turn it arrives.
-      waitForPlaced(before, name);
+      waitForPlaced(before, name, release);
       done();
     }).catch(function (err) {
       fail(err && err.message ? err.message : String(err));
@@ -438,8 +448,9 @@
   /* handleFiles hands the file to a FileReader, so the piece lands a turn or
      two later. Watch for it rather than guessing a delay, give up quietly if
      it never arrives - handleFiles has already said why in that case. */
-  function waitForPlaced(before, name) {
+  function waitForPlaced(before, name, release) {
     var tries = 0;
+    var end = function () { if (release) release(); };
     var tick = function () {
       var placed = placedList();
       var now = placed ? placed.length : 0;
@@ -451,9 +462,11 @@
           ok = false;
         }
         if (!ok) say('Library placed stacked', true);
+        end();
         return;
       }
       if (++tries < 240) setTimeout(tick, 25);
+      else end();
     };
     setTimeout(tick, 0);
   }
