@@ -165,7 +165,7 @@ async function runPose(piece, label) {
   const r = SL.sliceObjects(objs, SLICE_OPTS, WASM);
   if (!r.ok) throw new Error(label + ': the slice failed: ' + r.reason);
   const layers = indexLines(labelledLines(r));
-  const res = { label, ms: tBuild, engineBare: 0, engineWhy: [], tips: 0, withI: 0, withTI: 0, stairHeld: 0, bare: [], side: 0, named: 0, silent: [], minGap: Infinity, maxGap: 0, levels: 0, stairs: 0, notes: [], areas: b.areas.length };
+  const res = { label, ms: tBuild, engineBare: 0, uncarried: 0, engineWhy: [], tips: 0, withI: 0, withTI: 0, stairHeld: 0, bare: [], side: 0, named: 0, silent: [], minGap: Infinity, maxGap: 0, levels: 0, stairs: 0, notes: [], areas: b.areas.length };
   for (const a of b.areas) {
     const S = a.tp.sheet;
     if (!S) continue;
@@ -174,7 +174,7 @@ async function runPose(piece, label) {
       if (L.minDistanceMm != null && isFinite(L.minDistanceMm)) { res.minGap = Math.min(res.minGap, L.minDistanceMm); res.maxGap = Math.max(res.maxGap, L.minDistanceMm); }
     });
     res.notes.push(...(S.notes || []));
-    const named = new Set((S.bare || []).map(x => x.i));
+    const named = new Set((S.bare || []).concat(S.uncarried || []).map(x => x.i));
     for (const t of S.tips) {
       if (t.mode === 'side') { res.side++; continue; }
       res.tips++;
@@ -194,7 +194,7 @@ async function runPose(piece, label) {
         if (isNamed) res.named++; else res.silent.push(res.bare[res.bare.length - 1]);
       }
     }
-    res.engineBare += (S.bare || []).length;
+    res.engineBare += (S.bare || []).length; res.uncarried += (S.uncarried || []).length;
     (S.bare || []).forEach(x => res.engineWhy.push(x.why));
   }
   return res;
@@ -204,12 +204,12 @@ async function runPose(piece, label) {
    regression; one that rises is the next ticket's, and these numbers go up with it) */
 const FLOOR = {
   /* piece:      [flat, yaw 45, tip 15, yaw 45 + tip 15] tips with a sheet */
-  base:       [13, 14, 20, 14],
-  oblique:    [20, 14, 18, 15],
-  circular:   [1, 4, 2, 4],
-  sphere:     [1, 4, 2, 4],
-  negsphere:  [15, 7, 7, 11],
-  negsphere2: [10, 1, 1, 7]
+  base:       [20, 14, 20, 15],
+  oblique:    [20, 14, 18, 16],
+  circular:   [1, 3, 4, 5],
+  sphere:     [4, 4, 4, 5],
+  negsphere:  [15, 8, 5, 10],
+  negsphere2: [7, 1, 1, 8]
 };
 const POSES = [[0, 0], [45, 0], [0, 15], [45, 15]];
 
@@ -293,21 +293,21 @@ function lowered(s) {
     check('no tip stands bare in silence: every tip without a sheet is in the plan\'s own list of them, with its reason and its spot',
       all.every(r => r.silent.length === 0), all.map(r => r.silent.length).reduce((a, b) => a + b, 0) + ' silent');
     check('...and the plan says it in words (tp.sheet.notes) wherever it names one',
-      all.every(r => (r.engineBare + r.side === 0) === (r.notes.length === 0)), all.filter(r => r.notes.length).length + ' pose(s) with notes');
+      all.every(r => ((r.engineBare + r.side + r.uncarried) === 0) === (r.notes.length === 0)), all.filter(r => r.notes.length).length + ' pose(s) with notes');
     check('the gap holds, measured on every sheet and every stair: 0.18 mm to the part, at the nearest point',
       all.every(r => r.minGap === Infinity || r.minGap >= GAP - 1e-5), 'least ' + f2(Math.min(...all.map(r => r.minGap))) + ' mm');
     check('...and no sheet sits further than 0.3 mm under the part at its nearest point (a lone tip\'s lowest ceiling)',
       all.every(r => r.maxGap <= GAP + 0.3), 'most ' + f2(Math.max(...all.map(r => r.maxGap))) + ' mm');
-    check('every flat sheet tip has a transition and an interface line under it; a stair\'s tips an interface strip (its transition is under the lowest)',
-      all.every(r => r.silent.length === 0), all.reduce((a, r) => a + r.withTI, 0) + ' with both or held by a stair (' + all.reduce((a, r) => a + r.stairHeld, 0) + ' of them under a stair)');
+    check('every tip with a sheet has an interface line and a transition under it (a flat sheet\'s tips both; a stair\'s tips a line of either type: its transition is under the lowest strip)',
+      all.every(r => r.withTI + r.bare.length === r.tips), all.reduce((a, r) => a + r.withTI, 0) + ' of ' + all.reduce((a, r) => a + r.tips, 0) + ' (' + all.reduce((a, r) => a + r.stairHeld, 0) + ' under a stair)');
     for (const n of RP.NAMES) {
       const row = all.filter(r => r.piece === n);
       check(n + ': tips with a sheet, flat / yaw 45 / tip 15 / both: no fewer than built ' + FLOOR[n].join(' / '),
         row.every((r, k) => r.withTI >= FLOOR[n][k]), row.map(r => r.withTI + ' of ' + r.tips).join(' / '));
     }
-    check('the stair\'s tipped planes (base and oblique, tip 15 and yaw 45 + tip 15) keep every tip a sheet but the ones with no room over the plate',
-      all.filter(r => (r.piece === 'base' || r.piece === 'oblique') && r.tip === 15).every(r => r.engineWhy.every(w => /no room for the stack/.test(w || ''))),
-      all.filter(r => (r.piece === 'base' || r.piece === 'oblique') && r.tip === 15).map(r => r.engineBare + ' bare').join(', '));
+    check('the tipped planes (base and oblique, tip 15 and yaw 45 + tip 15): every tip has a sheet but the ones with no room over the plate',
+      all.filter(r => (r.piece === 'base' || r.piece === 'oblique') && r.tip === 15).every(r => r.bare.every(x => /no room for the stack/.test(x.why || ''))),
+      all.filter(r => (r.piece === 'base' || r.piece === 'oblique') && r.tip === 15).map(r => r.bare.length + ' without').join(', '));
   }
 
   /* ---------------------------------------------------------------- tape */

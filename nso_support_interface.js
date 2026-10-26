@@ -2489,6 +2489,9 @@
     });
     var notes = [], byWhy = {};
     bare.forEach(function (b) { (byWhy[b.why] = byWhy[b.why] || []).push(b); });
+    /* a tip under the sheet that carries nothing (no T line lies on its cap) is said as well: it holds the ceiling by the sheet's lines */
+    var uncarried = tips.filter(function (t) { return t.mode === 'sheet' && t.carried === false; }).map(function (t) { return { i: t.i, beacon: t.beacon, label: t.label, contact: t.contact.slice(), why: 'under the sheet, carrying nothing: no T line lies on its cap' }; });
+    uncarried.forEach(function (b) { (byWhy[b.why] = byWhy[b.why] || []).push(b); });
     /* a side tip leaves a face steeper than the lean limit sideways and is held off it (said, never counted bare) */
     tips.filter(function (t) { return t.mode === 'side'; }).forEach(function (t) {
       (byWhy['a side tip: its face is too steep for a sheet, held off the face'] = byWhy['a side tip: its face is too steep for a sheet, held off the face'] || []).push({ contact: t.contact });
@@ -2511,6 +2514,7 @@
       /* THE TIPS LEFT WITHOUT A SHEET, NAMED. A tip that meets the part and has no sheet under it is never silent: where
          it stands, and why none could be built - in words, one line a reason */
       bare: bare,
+      uncarried: uncarried,
       notes: notes,
       reason: (function () {
         var nSt = lv.filter(function (L) { return L.stair; }), nFl = lv.length - nSt.length;
