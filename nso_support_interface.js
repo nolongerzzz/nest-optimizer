@@ -380,6 +380,18 @@
     return ttConsider(px - (ax + abx * v2 + acx * w3), py - (ay + aby * v2 + acy * w3), pz - (az + abz * v2 + acz * w3));
   }
   function segSegFlat(p1x, p1y, p1z, q1x, q1y, q1z, p2x, p2y, p2z, q2x, q2y, q2z) {
+    /* the two segments' boxes are a lower bound on how near they come: past the running minimum by more than the
+       rounding of the closest points (they lie on the segments), the pair cannot be the minimum and is not solved */
+    if (TT_MIN2 < Infinity) {
+      var l1 = p1x < q1x ? p1x : q1x, h1 = p1x < q1x ? q1x : p1x, l2 = p2x < q2x ? p2x : q2x, h2 = p2x < q2x ? q2x : p2x;
+      var gx = (l1 > l2 ? l1 : l2) - (h1 < h2 ? h1 : h2);
+      l1 = p1y < q1y ? p1y : q1y; h1 = p1y < q1y ? q1y : p1y; l2 = p2y < q2y ? p2y : q2y; h2 = p2y < q2y ? q2y : p2y;
+      var gy = (l1 > l2 ? l1 : l2) - (h1 < h2 ? h1 : h2);
+      l1 = p1z < q1z ? p1z : q1z; h1 = p1z < q1z ? q1z : p1z; l2 = p2z < q2z ? p2z : q2z; h2 = p2z < q2z ? q2z : p2z;
+      var gz = (l1 > l2 ? l1 : l2) - (h1 < h2 ? h1 : h2);
+      var g2 = (gx > 0 ? gx * gx : 0) + (gy > 0 ? gy * gy : 0) + (gz > 0 ? gz * gz : 0);
+      if (g2 > TT_MIN2 * (1 + 1e-6) + 1e-12) return;
+    }
     var d1x = q1x - p1x, d1y = q1y - p1y, d1z = q1z - p1z, d2x = q2x - p2x, d2y = q2y - p2y, d2z = q2z - p2z, rx = p1x - p2x, ry = p1y - p2y, rz = p1z - p2z;
     var a = d1x * d1x + d1y * d1y + d1z * d1z, e = d2x * d2x + d2y * d2y + d2z * d2z, f = d2x * rx + d2y * ry + d2z * rz, s, t;
     if (a <= 1e-18 && e <= 1e-18) return ttConsider(p1x - p2x, p1y - p2y, p1z - p2z);

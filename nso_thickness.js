@@ -505,6 +505,7 @@
      clearance check needs to know where the material ENDS, not just where the
      next surface is. */
   function allHits(G, tris, orig, d, maxT, eps) {
+    if (G.numeric && d[0] === 0 && d[1] === 0 && d[2] === 1) return allHitsUp(G, tris, orig, maxT, eps);
     var cell = G.cell, invC = G.invC, grid = G.grid;
     var ci = [Math.floor(orig[0] * invC), Math.floor(orig[1] * invC), Math.floor(orig[2] * invC)];
     var step = [0, 0, 0], tMax = [Infinity, Infinity, Infinity], tDelta = [Infinity, Infinity, Infinity];
@@ -537,6 +538,85 @@
       ci[k] += step[k];
       tMax[k] += tDelta[k];
     }
+    return finishHits(hits);
+  }
+
+
+  /* A ray straight up. The cells it passes depend on its start height and its length alone - the walk is the general
+     one's, down one column - and the triangles it meets are the column's: a caller that sends rays up from one height
+     over a raster (the support sheet's stair) has the column's cells found once and used by every ray in it. The
+     triangle test is rayTri's on d = (0, 0, 1) - the same operations, so the same t - with the two barycentric tests
+     made before the height is. */
+  function upFlat(G, tv, n) {
+    if (G.up) return G.up;
+    var up = new Float64Array(n * 4);
+    for (var t = 0; t < n; t++) {
+      var o = t * 15, e1x = tv[o + 9], e1y = tv[o + 10], e1z = tv[o + 11], e2x = tv[o + 12], e2y = tv[o + 13], e2z = tv[o + 14];
+      var px = 0 * e2z - 1 * e2y, py = 1 * e2x - 0 * e2z, pz = 0 * e2y - 0 * e2x;
+      var det = e1x * px + e1y * py + e1z * pz;
+      up[t * 4] = det; up[t * 4 + 1] = 1.0 / det; up[t * 4 + 2] = px; up[t * 4 + 3] = py;
+    }
+    return (G.up = up);
+  }
+  function allHitsUp(G, tris, orig, maxT, eps) {
+    var cell = G.cell, invC = G.invC, ox = orig[0], oy = orig[1], oz = orig[2];
+    var tv = trisFlat(G, tris), up = upFlat(G, tv, tris.length), mark = G.mark || (G.mark = new Int32Array(tris.length));
+    if (G.stamp >= 2147483646) { mark.fill(0); G.stamp = 0; }
+    var stamp = ++G.stamp, hits = [];
+    var cx = Math.floor(ox * invC), cy = Math.floor(oy * invC), lo = G.loCell, hi = G.hiCell;
+    var seq, again = G.upZ === oz && G.upMax === maxT && G.upSeq !== null && G.upSeq !== undefined;
+    if (again) seq = G.upSeq;
+    else {
+      /* the general walk's cells: tMax steps by a cell from the first boundary above, until it passes maxT */
+      seq = [];
+      var iz = Math.floor(oz * invC), tM = ((iz + 1) * cell - oz) / 1, entry = 0;
+      while (entry <= maxT) {
+        seq.push(iz);
+        if (tM - tM !== 0) break;
+        entry = tM; iz += 1; tM += cell;
+      }
+      G.upZ = oz; G.upMax = maxT; G.upSeq = seq; G.upCols = null;
+    }
+    var inColumn = cx >= lo[0] && cx <= hi[0] && cy >= lo[1] && cy <= hi[1];
+    if (inColumn) {
+      var list;
+      if (again) {
+        var cols = G.upCols || (G.upCols = new Map()), key = (cx - lo[0]) * G.sy + (cy - lo[1]);
+        list = cols.get(key);
+        if (list === undefined) {
+          list = [];
+          for (var q = 0; q < seq.length; q++) { var b0 = cellAt(G, cx, cy, seq[q]); if (b0) list.push(b0); }
+          cols.set(key, list);
+        }
+      } else {
+        list = [];
+        for (var q2 = 0; q2 < seq.length; q2++) { var b1 = cellAt(G, cx, cy, seq[q2]); if (b1) list.push(b1); }
+      }
+      for (var l = 0; l < list.length; l++) {
+        var bucket = list[l];
+        for (var i = 0; i < bucket.length; i++) {
+          var u = bucket[i];
+          if (mark[u] === stamp) continue;
+          mark[u] = stamp;
+          var o = u * 15, u4 = u * 4, det = up[u4];
+          if (det > -1e-14 && det < 1e-14) continue;
+          var inv = up[u4 + 1], sx = ox - tv[o], sy = oy - tv[o + 1];
+          var bu = (sx * up[u4 + 2] + sy * up[u4 + 3]) * inv;
+          if (bu < -eps || bu > 1.0 + eps) continue;
+          var e1x = tv[o + 9], e1y = tv[o + 10], e1z = tv[o + 11];
+          var bv = (sx * e1y - sy * e1x) * inv;
+          if (bv < -eps || bu + bv > 1.0 + eps) continue;
+          var sz = oz - tv[o + 2], qx = sy * e1z - sz * e1y, qy = sz * e1x - sx * e1z, qz = sx * e1y - sy * e1x;
+          var t = (tv[o + 12] * qx + tv[o + 13] * qy + tv[o + 14] * qz) * inv;
+          if (t > eps && t <= maxT) hits.push(t);
+        }
+      }
+    }
+    return finishHits(hits);
+  }
+
+  /* the hits of a walk, sorted, coincident ones merged */
+  function finishHits(hits) {
     hits.sort(function (x, y) { return x - y; });
     /* Collapse coincident hits. A ray that passes exactly through the diagonal
        two triangles of a quad share crosses the surface ONCE but records two
