@@ -266,6 +266,30 @@ per-layer angle histograms and line centres. See `docs/CROSSHATCH.md`.
   stretch (175 mm²) as overhang walls. `support:test` §13 holds the card's 35
   to that: the 10 - 30 deg steps, 259.06 mm², and the old 60 for comparison.
   See docs/SUPPORTS-CARD.md §0a.
+- tree_slimsupports.gcode.3mf — the owner's Bambu Studio slice (02.08.02.61,
+  A1 mini, 0.4 nozzle, 0.2 mm layers, support_type tree(auto), support_style
+  tree_slim, threshold 30, top Z distance 0.2, 3 top interface layers) of
+  "Support Test" (designer ecgvsf, MakerWorld, Standard Digital File License):
+  six 17 mm test parts, each a square head turned 45 deg on a 4.5 mm stem -
+  Base (a flat underside), Oblique (a tilted plane), Circular (a dome), Sphere
+  (a ball), Negative Sphere and Negative Sphere2 (a flat rim round a dome-shaped
+  cavity, two depths). G-code and settings only, as the other slices here: the
+  parts are not in it. It is the reference for where Bambu lays its transition
+  and interface layers, and under which surfaces, whichever way they face:
+  `support:everywhere` reads it (Support transition / Support interface
+  features, per surface: height, footprint, layers), part by part, matching
+  each part to its place on the plate. See docs/SUPPORT-INTERFACE.md section 8.
+- supp_ref.3mf — the owner's Bambu Studio PROJECT of the same six parts (20,572
+  triangles; Support Base, Support Oblique, Support Circular, Support Sphere,
+  Support Negative Sphere, Support Negative Sphere2, at their places on the
+  plate), the meshes the slice above was made from. Slice and project share a
+  frame (a part's walls in the G-code lie 0.2 - 0.4 mm inside its mesh at the
+  same x, y). Several parts are overlapping shells (`mesh_validate` fails for
+  five); the planner works on them as they are.
+  `tools/nso_support_ref_pieces.js` reads the six meshes from it. (Its first
+  version, #301, held stand-ins fitted to the G-code's walls, because only the
+  slice had been attached; they are gone.) The settings are the slice's:
+  tree_slim, support_object_xy_distance 0.35, 3 interface layers, 0.2 gap.
 
 ## print-planner/ - a printer's start and end G-code, frozen
 
