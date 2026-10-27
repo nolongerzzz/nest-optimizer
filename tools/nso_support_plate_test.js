@@ -41,9 +41,9 @@ const TODAY = {        // sha256 of the support bytes of a single-piece Generate
                        // sheets stay on the rim they hold (41 % of them lay over the air before); then the crown's branches one smooth body (supports-one-trunk, fifth round): all three re-pinned.
                        // The Negative Sphere2 again (supports-footprint, the finer look): its apex surface (z 15, 9 spots in one area) was never detected, it is now - so a fourth area,
                        // a sheet laid over it, and the fill (the sheets reach the footprint): 16644 -> 23352 triangles on the lighter crowns (20332 -> 28884 on the ones before). Circular and Sphere are the same bytes.
-  'Support Negative Sphere2.stl': { sha: '7cccdebaa3bb08c217a24e8142852ba070c19316f999158c0f55e4a41103da82', triangles: 23352 },
-  'Support Circular.stl': { sha: '9794a06d5355433aace3f796d1574f6af2b9f295fe170db31b08aac20b0b4f80', triangles: 9520 },
-  'Support Sphere.stl': { sha: 'fb4df3dfa35dbf21627b42e32a677a30bb6a0329d1ad5c2143781abeec1b1056', triangles: 9760 }
+  'Support Negative Sphere2.stl': { sha: '7fc52d277ca961a81dc6e4069aa95c61cfe471d82af668da3fcddaa74d21b671', triangles: 21192 },
+  'Support Circular.stl': { sha: 'a2798aa2e3edc2594bca6b8dfd197fd2d72d16e13e1a2249e00a65670590b570', triangles: 9460 },
+  'Support Sphere.stl': { sha: 'fe4a2129b360702d416b303e9ee9a88ae9418f459264e92d83bd5f48da3206dc', triangles: 8928 }
 };
 const XY_DISTANCE = 0.35;      // the slice's support_object_xy_distance (nso_support_beacons.js SIDE_STANDOFF_MM, nso_support_gridpack.js TRUNK_KEEP_MM)
 const STRICT_GAP = process.env.NSO_STRICT_GAP === '1';

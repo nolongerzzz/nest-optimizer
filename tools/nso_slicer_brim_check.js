@@ -50,7 +50,7 @@ function distToPolys(x, y, polys) { let b = Infinity; for (const P of polys) for
     const piece = await RP.build(k);
     const b = await PE.build(piece, null, RP.PROJECT_NAME[k].replace(/\.stl$/, ''), true);
     const objs = [{ name: 'part', soup: piece, key: 101, role: 'part' }].concat(b.objects.slice(1).map((x, i) => ({ name: x.name, soup: x.soup, key: 201 + i, role: 'support', hostKey: 101 })));
-    const r = SL.sliceObjects(objs, SL.defaultsFor(0.4, { supportInterfaceLayers: 3, brimType: 'auto' }), WASM);
+    const r = SL.sliceObjects(objs, SL.defaultsFor(0.4, { supportInterfaceLayers: 2, brimType: 'auto' }), WASM);
     const part = r.objects.find(o => o.role === 'part'), L0 = part.layers[0];
     const brim = L0.paths.filter(p => p.feature === 'Brim');
     const others = part.layers.slice(1).some(L => L.paths.some(p => p.feature === 'Brim'));

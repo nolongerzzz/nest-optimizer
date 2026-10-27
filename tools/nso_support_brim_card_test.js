@@ -42,7 +42,7 @@ const check = (n, c, d) => { if (c) { pass++; console.log('  ok    ' + n + (d ? 
     /* 3. the slice, as G-scope hands it */
     const part = app.soupOf(ids[0]);
     const objects = [{ name: 'part', soup: part, key: 1, role: 'part' }].concat(sups.map((m, i) => ({ name: m.name, soup: app.soupOf(m.id), key: 10 + i, role: m.nsoSupport.brim ? 'brim' : 'support', hostKey: 1 })));
-    const r = SL.sliceObjects(objects, SL.defaultsFor(0.4, { supportInterfaceLayers: 3, brimType: 'auto' }), WASM);
+    const r = SL.sliceObjects(objects, SL.defaultsFor(0.4, { supportInterfaceLayers: 2, brimType: 'auto' }), WASM);
     const bo = r.objects.find(o => o.role === 'brim');
     check('sliced: the brim piece is Brim lines on the first layer, the part grows none, no conflict',
       bo && bo.layers[0].paths.length >= 5 && bo.layers[0].paths.every(p => p.feature === 'Brim') && !r.objects[0].layers[0].paths.some(p => p.feature === 'Brim') && r.conflicts.length === 0,

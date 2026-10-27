@@ -3477,13 +3477,22 @@
           var ms = sh && sh.byBeacon[m.beacon] ? sh.member(m) : memberSolid(P, m, foot);
           if (!ms.ok) return { ok: false, reason: ms.reason };
           m.points = ms.points;
-          parts = parts.concat(ms.soups.map(function (x) { return { soup: x }; }));
+          var twig = smooth && opts._stairTree && ms.round;     /* a stair's tip is a twig of the smooth body: no exact post, no flat stub end */
+          if (!twig) parts = parts.concat(ms.soups.map(function (x) { return { soup: x }; }));
           if (ms.round && ms.points.length >= 2) {
             /* its whole post and leg, from its stub's top to its join: a primitive of the crown's body, cut flat a little under the stub's top and a hair
                thinner along the stub (the stub's own surface is the one seen there); the bend where the post leans into its leg is a round joint of the same
                radius, so the post runs into the leg with no crease */
             var rt = m.crownRound, st0 = ms.points[0], st1 = ms.points[1], su = unit(sub(st0, st1)), sl = len(sub(st0, st1));
             var lp = ms.points.map(function (q) { return q.slice(); });
+            if (twig) {
+              /* the twig narrows to the tip and dies a hair into the strip over it: its top is cut flat there, its radius running from the tip's down to the leg's
+                 at the bend, so the post is a taper of the branch it leaves, not a cylinder stood on it */
+              var rTip = Math.max(0.4, 0.62 * rt), hair = 0.18;
+              var tw = [add(st0, mul(su, hair))], rr = [rTip];
+              for (var qi = 1; qi < lp.length; qi++) { tw.push(lp[qi]); rr.push(rt); }
+              prims.push({ pts: tw, r: rr, clip: { p: add(st0, mul(su, hair)), n: su } });
+            } else
             prims.push({ pts: lp, r: lp.map(function (q, qi) { return qi === 0 ? rt - 0.04 : rt; }), clip: { p: add(st0, mul(su, -Math.min(0.3, sl * 0.5))), n: su } });
           }
           continue;
@@ -3655,7 +3664,7 @@
         }
         var p2 = plan(opts.rawTris, p2o);
         if (!p2.ok) { stairLog.push({ level: L.id, wanted: L.stair.tips.length, held: 0, reason: p2.reason }); return; }
-        var sp2 = trunkStepper(p2, Object.assign({}, opts, { interface: false, footPads: 'shared', onProgress: null, trunkGrowth: grow, trunkTopMm: L.zTop, _clipZ: L.zTop, _graft: p2o._graft || null }));
+        var sp2 = trunkStepper(p2, Object.assign({}, opts, { interface: false, footPads: 'shared', onProgress: null, trunkGrowth: grow, trunkTopMm: L.zTop, _clipZ: L.zTop, _graft: p2o._graft || null, _stairTree: true }));
         if (!sp2.ok) { stairLog.push({ level: L.id, wanted: L.stair.tips.length, held: 0, reason: sp2.reason }); return; }
         for (var t2 = 0; t2 < sp2.n; t2++) { var r2 = sp2.step(t2); if (r2) { stairLog.push({ level: L.id, reason: r2.reason }); return; } }
         var f2 = sp2.finish(), tmap = {};
@@ -3698,7 +3707,7 @@
                         unreachable: p2.unreachable.length, trunks: p2.trunks.length, members: p2.members.filter(function (m) { return !m.dead; }).length,
                         maxLeanDeg: p2.members.reduce(function (mx, m) {
                           if (m.dead || !m.path) return mx;
-                          for (var qi = 0; qi + 1 < m.path.length; qi++) { var dz = Math.abs(m.path[qi + 1][2] - m.path[qi][2]), dh = Math.hypot(m.path[qi + 1][0] - m.path[qi][0], m.path[qi + 1][1] - m.path[qi][1]); if (dz + dh > 1e-6) mx = Math.max(mx, Math.atan2(dh, dz) * 180 / Math.PI); }
+                          for (var qi = 0; qi + 1 < m.path.length; qi++) { var dz = Math.abs(m.path[qi + 1][2] - m.path[qi][2]), dh = Math.hypot(m.path[qi + 1][0] - m.path[qi][0], m.path[qi + 1][1] - m.path[qi][1]); if (dz + dh > 1.5) mx = Math.max(mx, Math.atan2(dh, dz) * 180 / Math.PI); }
                           return mx;
                         }, 0) });
       });

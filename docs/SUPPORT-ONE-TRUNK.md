@@ -37,7 +37,7 @@ interface engine (merged in) and does the other half.
   where NSO's grid put 20.
 - The canopy leans up to 45 deg (`tree_support_branch_angle`; its joins measure 47.7). The sheet carries what lies between tips.
 - The interface lines lie **0.46 mm apart** on every transition and interface layer (`support_interface_spacing` 0.1 at a
-  0.42 line: a nearly solid plate), alternating 45 / 135 deg; 2 transition and 3 interface layers.
+  0.42 line: a nearly solid plate), alternating 45 / 135 deg; 2 transition and 2 interface layers (the owner's call after the first Dense: three was one too many).
   NSO's sheet had been 0.84 mm (the clamp reference, interface spacing 0.5), two interface layers.
 
 ## 3. What is built
@@ -185,10 +185,19 @@ the option (the shipped Custom feed's bytes are the claude-wip's; `support:feed`
     carried the whole island). One layer of the Oblique's plan, ours
     against Bambu's (z 9 - 11): a hatched interface band along the contour, a transition line along its low side, the Support beside it. `support:onetrunk`:
     "the tree runs up with the sheet" (Support to within 1.5 mm of the sheet's top, the Oblique's to its last layer) and "a trunk is hollow".
+23. **Interface 2 + transition 2, and the twigs that hold its edge** (the owner's: "interface=2layers / transition=2layers / branches need to fully support perimeter of transition,
+    or interface edge will sag... remove any flat branch stubends from within tree... smooth out the cylinder tops into micro branches that all flow smoothly off of one of the
+    connecting branches and dies at the transition"). The Dense sheet is four layers deep, so a stair's strip reaches `nInterface + 2` layers (`stackN` 4 on the Oblique). The tips
+    of a stair are no longer rows of posts: `stairOf` lays its strips' plan footprint on a 0.25 mm grid, takes a chamfer depth from its outline, and puts a tip every >= 2.5 mm
+    round the outline 0.6 mm inside it (`STAIR_PERIM_MM`, `STAIR_PERIM_IN_MM`), then farthest-point tips inside wherever the footprint is more than 3.8 mm from one
+    (`STAIR_FILL_MM`): 13 on the Oblique (12 round the edge, 1 inside), the farthest outline cell 2.06 mm from a tip (`stair.perimGapMm`), every tip a leg of the stair's own tree
+    (no `leg: false` posts). In the crown (`stepCrown`) a stair-tree tip (`opts._stairTree`) has no exact stub: its prim in the smooth body is a cone from the leg's radius at the
+    bend to 0.62 of it at the tip, cut flat 0.18 mm into the strip, so the twig leaves the branch it hangs from and dies in the transition. `support:onetrunk`: "a stair's tips
+    are twigs along its perimeter" (every tip a leg, no outline cell more than 3.0 mm from a tip).
 **The interface (`interfaceLayers`, `SHEET.densePitchMm`).** `sheet()` takes `interfaceLayers` (2 unless said): 2 transition
 layers and that many interface layers, the interface alternating across and along the sheet's A. The card's **Dense (Bambu)**
 interface is pitch **0.47 mm** (Bambu's 0.46: the strip's joins need a segment of 0.4665, and at 0.46 the stair under
-the tilted plane did not build) and **3 interface layers**; **Open** is 0.84 mm and 2 + 2 as before. The card's default is
+the tilted plane did not build) and **2 interface layers** over 2 of transition (`SHEET.denseInterfaceLayers`); **Open** is 0.84 mm, the same 2 + 2. The card's default is
 Dense **in the one-trunk build only**: a hand-placed row of three tips (Custom, `support:custom`) formed no sheet at 0.47 mm where it forms one at 0.84, so every other build stays Open. The slicer's labelling takes `supportInterfaceLayers` (default 2) to read a 3-layer sheet.
 
 ## 4. Measured (`support:onetrunk`, the six real parts, flat)

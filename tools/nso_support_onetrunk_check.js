@@ -48,7 +48,7 @@ const EXPORT = args.includes('--export');
 const OUTLINE = !args.includes('--as-it-was');
 const ONLY = (args.find(a => !a.startsWith('--')) || '').split(',').filter(Boolean);
 const OUT = path.join(ROOT, 'tools', 'supports-onetrunk-out');
-const SLICE_OPTS = SL.defaultsFor(0.4, { supportInterfaceLayers: 3 });   /* the dense sheet's three interface layers */
+const SLICE_OPTS = SL.defaultsFor(0.4, { supportInterfaceLayers: 2 });   /* the dense sheet's two interface layers */
 
 let pass = 0, fail = 0;
 function check(name, cond, detail) {
@@ -267,7 +267,7 @@ const segLen = s => Math.hypot(s.x1 - s.x0, s.y1 - s.y0);
     /* what the slice makes of the tree: Support runs up beside the sheet (as Bambu's does, to within a layer or two of the sheet's top), and a trunk is one wall (hollow) */
     const supL = lines.filter(l => l.feat === 'Support'), tiL = lines.filter(l => l.feat !== 'Support');
     row.supTop = supL.length ? Math.max(...supL.map(l => l.z)) : 0; row.tiTop = tiL.length ? Math.max(...tiL.map(l => l.z)) : 0;
-    /* how many layers of interface and transition lie over each 0.2 mm cell of the plan: a flat sheet is 5 (3 + 2); a stair, stepped on the slope, no deeper */
+    /* how many layers of interface and transition lie over each 0.2 mm cell of the plan: a flat sheet is 4 (2 + 2); a stair, stepped on the slope, no deeper */
     {
       const cell = new Map(), CS = 0.2;
       const byZ = new Map();
@@ -377,29 +377,24 @@ const segLen = s => Math.hypot(s.x1 - s.x0, s.y1 - s.y0);
   });
   check('every crown\'s branches are one smooth body (no ball at a join): closed, outward-wound, a body to each crown', bodies.every(b => b.crowns > 0 && b.smooth.length >= 1 && b.smooth.length <= b.crowns + 1 && b.smooth.every(x => x.open === 0 && x.bad === 0 && x.vol > 0)),
     bodies.map(b => b.key + ' ' + b.crowns + ' crown(s), ' + b.smooth.length + ' body(ies) open ' + b.smooth.map(x => x.open + '/' + x.bad + '/' + x.vol.toFixed(0)).join(',') + ', ' + b.smooth.map(x => x.tris + ' triangles').join(' + ')).join('; '));
-  /* THE STAIR'S LEGS: a stair's tips are rows of posts that climb the slope, one blade to a row, held by a leg every
-     SHEET.denseStairLegMm along it - not a leg to every post (42 tips of the Oblique were 42 legs and one fat crown) */
+  /* THE STAIR'S PERIMETER: a stair's tips are twigs along the outline of its strips (the lowest transition layer's edge is held all round, or it sags),
+     every one a leg of the stair's own tree, a few more inside where the footprint is wide */
   const stairRows = rows.map(r => {
-    const out = { key: r.key, tips: 0, legs: 0, far: 0, members: 0, ok: true };
+    const out = { key: r.key, tips: 0, nonLeg: 0, gap: 0, members: 0, ok: true };
     r.b.areas.forEach(a => {
       ((a.tp.sheet && a.tp.sheet.levels) || []).filter(L => L.stair && L.stair.tips).forEach(L => {
-        const legs = L.stair.tips.filter(w => w.leg !== false), posts = L.stair.tips.filter(w => w.leg === false);
-        out.tips += L.stair.tips.length; out.legs += legs.length;
-        posts.forEach(w => { const d = Math.min(...legs.map(q => Math.hypot(q.p[0] - w.p[0], q.p[1] - w.p[1]))); out.far = Math.max(out.far, d); });
-        /* ...and none of them floats: every group of posts that overlap one another has a leg among them */
-        const T = L.stair.tips, par = T.map((_, i) => i), fnd = i => par[i] === i ? i : (par[i] = fnd(par[i])), held = {};
-        for (let i = 0; i < T.length; i++) for (let j = i + 1; j < T.length; j++) if (Math.hypot(T[i].p[0] - T[j].p[0], T[i].p[1] - T[j].p[1]) <= 1.3 && Math.abs(T[i].p[2] - T[j].p[2]) < 2.4) par[fnd(i)] = fnd(j);
-        T.forEach((w, i) => { if (w.leg !== false) held[fnd(i)] = true; });
-        out.floating = (out.floating || 0) + T.filter((w, i) => !held[fnd(i)]).length;
+        out.tips += L.stair.tips.length; out.nonLeg += L.stair.tips.filter(w => w.leg === false).length;
+        out.gap = Math.max(out.gap, L.stair.perimGapMm == null ? Infinity : L.stair.perimGapMm);
         const tr = ((a.tp.sheet && a.tp.sheet.stairTrees) || (a.tp.stairTrees) || []).find(t => t.level === L.id);
         if (tr) out.members += tr.members;
-        if (legs.length > Math.max(3, Math.ceil(L.stair.tips.length / 3)) || out.far > 0.65 * SI.SHEET.denseStairLegMm + 0.7 || (tr && tr.unreachable) || out.floating) out.ok = false;
+        if (tr && tr.unreachable) out.ok = false;
       });
     });
+    if (out.nonLeg || !(out.gap <= 3.0)) out.ok = false;
     return out;
   }).filter(x => x.tips);
-  check('a stair\'s tips are a few legs under rows of posts: no more than a third of its tips are legs, every other post is within ' + f2(0.65 * SI.SHEET.denseStairLegMm + 0.7) + ' mm of one, and no post floats (each group of overlapping posts has a leg)',
-    stairRows.length >= 1 && stairRows.every(x => x.ok), stairRows.map(x => x.key + ' ' + x.legs + ' legs of ' + x.tips + ' tips (farthest post ' + f2(x.far) + ' mm), ' + x.members + ' crown members, ' + (x.floating || 0) + ' floating').join(', '));
+  check('a stair\'s tips are twigs along its perimeter: every tip a leg of the stair\'s tree, no outline cell of its strips farther than 3.0 mm from a tip',
+    stairRows.length >= 1 && stairRows.every(x => x.ok), stairRows.map(x => x.key + ' ' + x.tips + ' tips (' + x.nonLeg + ' not legs), outline gap ' + f2(x.gap) + ' mm, ' + x.members + ' crown members').join(', '));
   /* THE LEAN: no branch that is built lies nearly flat (the owner's, off the Oblique: "comes off the trunk at a 90 ... won't print"): a leg of the plan's
      that a stair does not hold is under CROWN_LEAN_HARD_DEG, and a stair's own tree holds the lean limit (50 deg) */
   const leans = rows.map(r => {
@@ -422,8 +417,8 @@ const segLen = s => Math.hypot(s.x1 - s.x0, s.y1 - s.y0);
     leans.every(x => x.hostMax <= 75 + 0.5 && x.stairMax <= 50 + 0.5), leans.map(x => x.key + ' ' + f1(x.hostMax) + (x.stairMax ? ' / stair ' + f1(x.stairMax) : '')).join(', '));
   check('the tree runs up with the sheet: a line of Support within 1.5 mm of the top of the interface and transition (under a stair, Support beside every strip; the oblique\'s stair stands 4.2 mm)',
     rows.every(r => r.tiTop - r.supTop <= 1.5 + 1e-9), rows.map(r => r.key + ' Support to ' + f2(r.supTop) + ', sheet to ' + f2(r.tiTop)).join(', '));
-  check('the sheet is as deep as a flat one wherever it lies: over 90 % of the plan, no more than 6 layers of interface and transition (a flat sheet is 5), the stair as much as the flat heads',
-    rows.every(r => r.stackP90 <= 6), rows.map(r => r.key + ' p90 ' + r.stackP90 + ' max ' + r.stackMax).join(', '));
+  check('the sheet is as deep as a flat one wherever it lies: over 90 % of the plan, no more than 5 layers of interface and transition (a flat sheet is 4), the stair as much as the flat heads',
+    rows.every(r => r.stackP90 <= 5), rows.map(r => r.key + ' p90 ' + r.stackP90 + ' max ' + r.stackMax).join(', '));
   check('a trunk is hollow: at 3 mm its lines are one wall round it (their length no more than 1.5 x the circle of its width), no infill inside',
     rows.every(r => r.wallRatio == null || r.wallRatio <= 1.5), rows.map(r => r.key + ' ' + (r.wallRatio == null ? '-' : r.wallRatio.toFixed(2))).join(', '));
   check('no support stands over the sheet\'s top (no speck in the air where the supports stop)', rows.every(r => r.over <= 0.05),
