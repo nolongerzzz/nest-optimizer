@@ -204,7 +204,8 @@
       source: 'the two overrides every NSO support object carries in the Bambu project export (nso_support_interface.js SHEET.slicerSettings: ' +
               'wall_loops = 1, sparse_infill_density = 0%; docs/handoff/supports-no-infill.md) - a support is sliced with them on, as thinWall.supportsOn. Its shells: none on top (a ' +
               'trunk that narrows going up has a hair-thin top ring on every layer, which this slicer fills and Bambu does not: the trunk read as filled) and the first layer ' +
-              'solid underneath (the pad), the one layer under a branch that leans out a bridge'
+              'solid underneath (the pad), the one layer under a branch that leans out a bridge; no sparse island or narrow strip is printed solid (a trunk is a wall round a ' +
+              'hollow, whatever its size)'
     },
     // --- the flow model, shared with the importer ----------------------------
     flow: {
@@ -1418,7 +1419,7 @@
         var sparsePrev = g.empty();
         /* A SUPPORT IS HOLLOW, as its export says (SHEET.slicerSettings: wall_loops 1, sparse_infill_density 0%) and as Bambu's own tree is: one wall
            round the trunk and no filler inside it. The shells (the first layers, the top under a sheet) stay the profile's. */
-        var oS = P.role === 'support' ? Object.assign({}, o, { wallLoops: CONSTANTS.supportWalls.loops, sparseDensity: CONSTANTS.supportWalls.sparseDensity }) : o;
+        var oS = P.role === 'support' ? Object.assign({}, o, { wallLoops: CONSTANTS.supportWalls.loops, sparseDensity: CONSTANTS.supportWalls.sparseDensity, narrowSparseMm: 0, minSparseAreaMm2: 0 }) : o;
         var TT = P.role === 'support' ? CONSTANTS.supportWalls.topShellLayers : T, BB = P.role === 'support' ? CONSTANTS.supportWalls.bottomShellLayers : B;
         if (P.role === 'brim') {
           /* a brim built with the supports (brimFor): one layer, its section printed as the brim's own loops, nothing else */
@@ -1492,15 +1493,15 @@
           // supportwithinsupport's ribs) came out solid, 1.0 mm strips (over the
           // tabletop's leg arms) came out sparse; 1.7 x spacing = 0.944 mm at
           // 0.62 / 0.3 sits inside that bracket (docs/SLICER.md section 3).
-          var narrowR = (o.narrowSparseMm != null ? o.narrowSparseMm : 1.7 * spacingOf(o.infillWidthMm, h)) / 2;
+          var narrowR = (oS.narrowSparseMm != null ? oS.narrowSparseMm : 1.7 * spacingOf(o.infillWidthMm, h)) / 2;
           if (narrowR > 0 && !g.isEmpty(sparse)) {
             var opened = g.offset(g.offset(sparse, -narrowR), narrowR);
             var narrow = g.diff(sparse, opened);
             if (g.area(narrow) > 1e-6) { solid = g.union(solid, narrow); sparse = g.inter(sparse, opened); }
           }
           // a sparse island too small to hold infill is printed solid
-          if (o.minSparseAreaMm2 > 0) {
-            var small = g.unionAll(g.parts(sparse).filter(function (p) { return p.area() < o.minSparseAreaMm2; }));
+          if (oS.minSparseAreaMm2 > 0) {
+            var small = g.unionAll(g.parts(sparse).filter(function (p) { return p.area() < oS.minSparseAreaMm2; }));
             if (!g.isEmpty(small)) { solid = g.union(solid, small); sparse = g.diff(sparse, small); }
           }
           var top = g.inter(solid, g.diff(region, above));
