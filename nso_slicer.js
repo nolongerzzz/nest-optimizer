@@ -2061,19 +2061,25 @@
         if (!L.paths.length) return;
         var zi = zones[j].i.length ? g.polys(g.offset(g.unionAll(zones[j].i), w / 2)) : [];
         var zt = zones[j].t.length ? g.polys(g.offset(g.unionAll(zones[j].t), w / 2)) : [];
-        /* a layer that holds a stair's strip: whatever zone touches it - a strip's front seen as a flat top, a post one island with it - is held to the part's
-           nearness (a flat sheet's islands are held to it only where no stair is) */
-        var stairAt = zones[j].is.length > 0 || zones[j].ts.length > 0;
-        var zis = (stairAt ? zones[j].is.concat(zones[j].i) : zones[j].is).length ? g.polys(g.offset(g.unionAll(stairAt ? zones[j].is.concat(zones[j].i) : zones[j].is), w / 2)) : [];
-        var zts = (stairAt ? zones[j].ts.concat(zones[j].t) : zones[j].ts).length ? g.polys(g.offset(g.unionAll(stairAt ? zones[j].ts.concat(zones[j].t) : zones[j].ts), w / 2)) : [];
-        if (stairAt) { zi = []; zt = []; }
+        /* a zone that touches a stair's strip - a strip's front seen as a flat top, a post one island with it - is held to the part's nearness with the stair's
+           (a flat sheet's islands elsewhere on the layer are not: a dome's flat sheet lies up to its reach under the part) */
+        var stairU = (zones[j].is.length || zones[j].ts.length) ? g.unionAll(zones[j].is.concat(zones[j].ts)) : null;
+        var flatI = [], flatT = [], stI = zones[j].is.slice(), stT = zones[j].ts.slice();
+        function touchesStair(cs) { return !!stairU && g.area(g.inter(cs, stairU)) > 1e-6; }
+        zones[j].i.forEach(function (cs) { (touchesStair(cs) ? stI : flatI).push(cs); });
+        zones[j].t.forEach(function (cs) { (touchesStair(cs) ? stT : flatT).push(cs); });
+        var stairAt = stI.length > 0 || stT.length > 0;
+        var zis = stI.length ? g.polys(g.offset(g.unionAll(stI), w / 2)) : [];
+        var zts = stT.length ? g.polys(g.offset(g.unionAll(stT), w / 2)) : [];
+        zi = flatI.length ? g.polys(g.offset(g.unionAll(flatI), w / 2)) : [];
+        zt = flatT.length ? g.polys(g.offset(g.unionAll(flatT), w / 2)) : [];
         var hI = null, hT = null;
         /* THE SHEET IS LINES, NOT A WALL (the support is hollow, above): where a layer is the sheet's - interface or transition, the zone a flat sheet's islands or a
            stair's strips make, the stair's held to the part's nearness - its region is filled solid, as Bambu lays its interface, inside the one wall the support
            has. The tree under the sheet stays hollow. */
         if (zi.length || zt.length || zis.length || zts.length) {
-          var zc = stairAt ? [] : zones[j].i.concat(zones[j].t);
-          var zcs = stairAt ? zones[j].is.concat(zones[j].ts, zones[j].i, zones[j].t) : zones[j].is.concat(zones[j].ts);
+          var zc = flatI.concat(flatT);
+          var zcs = stI.concat(stT);
           var sheetCs = zc.length ? g.unionAll(zc) : g.empty();
           if (zcs.length) {
             var hostD = overAt(j, dTr);
