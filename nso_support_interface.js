@@ -902,6 +902,9 @@
   var STAIR_BACK_MM = 0.55;    /* a strip's back edge lies no further than this under the part */
   var STAIR_STEP_MM = 0.03;    /* a band nearer the piece than the gap moves up the slope by this, at least */
   var STAIR_LEG_MM = 4.5;      /* a row of a stair's posts has a leg every this along it (opts.stairLegMm, the card's Dense: a blade of posts, a tree leg to each stretch); null: a leg to every post */
+  var STAIR_PERIM_MM = 2.5;    /* the tips of a Dense stair stand along the outline of its sheet this far apart at the most... */
+  var STAIR_PERIM_IN_MM = 0.6; /* ...this far in from its edge (under the transition, not under its rim) */
+  var STAIR_FILL_MM = 3.8;     /* ...and inside it wherever none is nearer than this */
   var STAIR_ROW_MM = 2.4;      /* a post joins the row whose last post is this near it in plan, or nearer... */
   var STAIR_ROW_GAP = 3;       /* ...and no more than this many strips under it */
   var STAIR_TIP_MM = 5;        /* a strip's leading part has a tip every this, or nearer, along it (Bambu's branch distance) */
@@ -3270,7 +3273,7 @@
         /* the lowest strip stands on its transition, the transition on the
            carriers' caps and on tips of its own */
         var zt = m6 === mLo ? zTopOf(mLo) - 2 * o.layer : zTopOf(m6) - o.layer;
-        tipVs(bd6, m6 - mLo).forEach(function (v) {
+        if (!stackN) tipVs(bd6, m6 - mLo).forEach(function (v) {
           var f = frontAt(bd6, v), fb2 = frontAt(under, v);
           var lo2 = fb2 == null ? f : Math.max(f, fb2 + Wb), hi2 = f + W6;
           /* a strip whose leading part (the median along it) is half a line
@@ -3280,6 +3283,76 @@
           var c = Math.max((lo2 + hi2) / 2, f + o.side / 2), xy = atUV(c, v);
           want.push({ p: [xy[0], xy[1], zt], strip: m6 });
         });
+      }
+      /* THE SHEET'S PERIMETER (opts.stairLegMm, the card's Dense): a sheet of 2 + 2 layers is held where it ends. A tip on every strip's lead edge is a
+         picket fence (42 on the Oblique, a blade of posts under each row); the sheet's edge is what sags, and the sheet bridges what lies inside it. So the
+         tips stand along the outline of the sheet - the footprint of its strips, the lowest layer at each point - every STAIR_PERIM_MM, 0.6 mm in from the
+         edge, each at the underside of the lowest strip over it; and inside it, where no tip is within STAIR_FILL_MM. Each is the end of a twig off a branch
+         (nso_support_gridpack.js): a tip whose top dies at the transition. */
+      var perimGap = null;
+      if (stackN) {
+        var CS = 0.25, uLo = Infinity, uHi = -Infinity, vLo = Infinity, vHi = -Infinity;
+        for (var mq = mLo; mq <= mTop; mq++) {
+          var bq = lay[mq].band;
+          vLo = Math.min(vLo, bq.v0); vHi = Math.max(vHi, bq.v1);
+          bq.pts.forEach(function (pt) { uLo = Math.min(uLo, pt.f + (bq.shift || 0)); uHi = Math.max(uHi, pt.f + (bq.shift || 0) + widths[mq].W); });
+        }
+        var nU = Math.ceil((uHi - uLo) / CS) + 3, nV = Math.ceil((vHi - vLo) / CS) + 3, cellM = new Int16Array(nU * nV).fill(-1);
+        function lowestOver(u, v) {
+          for (var m8 = mLo; m8 <= mTop; m8++) {
+            var bd8 = lay[m8].band, f8 = frontAt(bd8, v);
+            if (f8 == null) continue;
+            f8 += bd8.shift || 0;
+            if (u >= f8 - 1e-9 && u <= f8 + widths[m8].W + 1e-9) return m8;
+          }
+          return -1;
+        }
+        for (var iu = 0; iu < nU; iu++) for (var iv = 0; iv < nV; iv++) cellM[iu * nV + iv] = lowestOver(uLo + (iu - 1) * CS, vLo + (iv - 1) * CS);
+        /* depth of a cell inside the footprint: the distance (4-neighbour chamfer, in cells) to the nearest cell outside it */
+        var dep = new Float32Array(nU * nV).fill(0), changed2 = true;
+        for (var ic = 0; ic < nU * nV; ic++) dep[ic] = cellM[ic] >= 0 ? 1e3 : 0;
+        for (var pass3 = 0; pass3 < 200 && changed2; pass3++) {
+          changed2 = false;
+          for (var ju = 0; ju < nU; ju++) for (var jv = 0; jv < nV; jv++) {
+            var ix = ju * nV + jv;
+            if (dep[ix] === 0) continue;
+            var best2 = dep[ix];
+            if (ju === 0 || jv === 0 || ju === nU - 1 || jv === nV - 1) best2 = 1;
+            else best2 = Math.min(best2, dep[ix - nV] + 1, dep[ix + nV] + 1, dep[ix - 1] + 1, dep[ix + 1] + 1);
+            if (best2 < dep[ix]) { dep[ix] = best2; changed2 = true; }
+          }
+        }
+        var inset = Math.max(1, Math.round(STAIR_PERIM_IN_MM / CS)), cand = [];
+        for (var ju2 = 0; ju2 < nU; ju2++) for (var jv2 = 0; jv2 < nV; jv2++) if (dep[ju2 * nV + jv2] >= inset && dep[ju2 * nV + jv2] <= inset + 1) cand.push({ u: uLo + (ju2 - 1) * CS, v: vLo + (jv2 - 1) * CS, m: cellM[ju2 * nV + jv2] });
+        var cu = 0, cv = 0;
+        cand.forEach(function (c) { cu += c.u / cand.length; cv += c.v / cand.length; });
+        cand.sort(function (a, b) { return Math.atan2(a.v - cv, a.u - cu) - Math.atan2(b.v - cv, b.u - cu); });
+        var chosen = [];
+        cand.forEach(function (c) { if (chosen.every(function (q) { return Math.hypot(q.u - c.u, q.v - c.v) >= STAIR_PERIM_MM; })) chosen.push(c); });
+        /* inside: the cell furthest from every tip while one is further than STAIR_FILL_MM, under the footprint by more than the inset */
+        for (var guard2 = 0; guard2 < 40; guard2++) {
+          var far = null, farD = STAIR_FILL_MM;
+          for (var ju3 = 0; ju3 < nU; ju3++) for (var jv3 = 0; jv3 < nV; jv3++) {
+            if (dep[ju3 * nV + jv3] < inset) continue;
+            var uu = uLo + (ju3 - 1) * CS, vv = vLo + (jv3 - 1) * CS, dn = Infinity;
+            for (var qq = 0; qq < chosen.length; qq++) dn = Math.min(dn, Math.hypot(chosen[qq].u - uu, chosen[qq].v - vv));
+            if (dn > farD) { farD = dn; far = { u: uu, v: vv, m: cellM[ju3 * nV + jv3] }; }
+          }
+          if (!far) break;
+          chosen.push(far);
+        }
+        chosen.forEach(function (c) {
+          var xy = atUV(c.u, c.v);
+          want.push({ p: [xy[0], xy[1], c.m === mLo ? zTopOf(mLo) - 2 * o.layer : zTopOf(c.m) - o.layer], strip: c.m });
+        });
+        /* the longest stretch of the outline between two tips, as the owner reads it ("fully support the perimeter"): from every outline cell to its nearest tip */
+        perimGap = 0;
+        for (var ju4 = 0; ju4 < nU; ju4++) for (var jv4 = 0; jv4 < nV; jv4++) {
+          if (dep[ju4 * nV + jv4] !== 1) continue;
+          var uo = uLo + (ju4 - 1) * CS, vo = vLo + (jv4 - 1) * CS, dm = Infinity;
+          for (var q5 = 0; q5 < chosen.length; q5++) dm = Math.min(dm, Math.hypot(chosen[q5].u - uo, chosen[q5].v - vo));
+          perimGap = Math.max(perimGap, dm);
+        }
       }
       /* THE CARRIERS of the lowest strip: the tips under it (a mm round its
          band), each with its cap at z_cap */
@@ -3362,48 +3435,7 @@
           return Math.hypot(w.p[0] - t.top[0], w.p[1] - t.top[1]) > r0;
         });
       });
-      /* THE LEGS: the tips down a stair are a few rows, each a run of posts that climb the slope with the strips (the posts of
-         neighbouring strips stand about a strip's advance apart and overlap - a row of them is one ramp-topped blade),
-         and a blade needs a leg every STAIR_LEG_MM, not a leg a post. Each tip joins the row whose last post is nearest
-         (no further than STAIR_ROW_MM, no more than STAIR_ROW_GAP strips back); a row of length L is held by round(L /
-         STAIR_LEG_MM) legs, at the middles of equal stretches, each the post nearest it. The other posts are built as posts
-         (tips with .leg false) standing on their neighbours in the row. The lowest strip's tips each keep their leg: they
-         stand on the transition's carriers. */
-      var rows = [];
-      if (legMm) want.forEach(function (w) {
-        var best = null, bd = STAIR_ROW_MM;
-        rows.forEach(function (r) {
-          var last = r.tips[r.tips.length - 1];
-          if (w.strip - last.strip > STAIR_ROW_GAP || w.strip === last.strip) return;
-          var d = Math.hypot(w.p[0] - last.p[0], w.p[1] - last.p[1]);
-          if (d <= bd) { bd = d; best = r; }
-        });
-        if (!best) { best = { tips: [] }; rows.push(best); }
-        best.tips.push(w);
-      });
-      if (legMm) rows.forEach(function (r) {
-        var acc = [0];
-        for (var q = 1; q < r.tips.length; q++) acc.push(acc[q - 1] + Math.hypot(r.tips[q].p[0] - r.tips[q - 1].p[0], r.tips[q].p[1] - r.tips[q - 1].p[1]));
-        var Lr = acc[acc.length - 1], nLeg = Math.max(1, Math.round(Lr / legMm));
-        r.tips.forEach(function (w) { w.leg = false; });
-        for (var k = 0; k < nLeg; k++) {
-          var at = (k + 0.5) * Lr / nLeg, bi = 0;
-          for (var q2 = 1; q2 < acc.length; q2++) if (Math.abs(acc[q2] - at) < Math.abs(acc[bi] - at)) bi = q2;
-          r.tips[bi].leg = true;
-        }
-      });
-      want.forEach(function (w) { if (w.strip === mLo || !legMm) w.leg = true; });
-      /* a post stands on its neighbours where they overlap it (in plan, under a post's width, and within its height): a post, or a
-         few of them, with no leg among those it touches is a floating piece, and takes a leg of its own */
-      if (legMm) {
-        var par = want.map(function (w, i) { return i; }), fnd = function (a) { while (par[a] !== a) a = par[a] = par[par[a]]; return a; }, touch = 0.9 * o.side * 2 / Math.sqrt(Math.PI);
-        for (var ia = 0; ia < want.length; ia++) for (var ib = ia + 1; ib < want.length; ib++) {
-          if (Math.hypot(want[ia].p[0] - want[ib].p[0], want[ia].p[1] - want[ib].p[1]) <= touch && Math.abs(want[ia].p[2] - want[ib].p[2]) < 2.4) par[fnd(ia)] = fnd(ib);
-        }
-        var held = {};
-        want.forEach(function (w, i) { if (w.leg) held[fnd(i)] = true; });
-        want.forEach(function (w, i) { var r = fnd(i); if (!held[r]) { w.leg = true; held[r] = true; } });
-      }
+      want.forEach(function (w) { w.leg = true; });
       /* each tip's layer: the lowest strip of the stair whose band holds it */
       group.forEach(function (t) {
         t.stairM = null;
@@ -3424,7 +3456,7 @@
       var snap = group.map(function (t) { return { t: t, stairM: t.stairM, top: t.top, capFoot: t.capFoot, cap: t.cap, capWhy: t.capWhy }; });
       return { snap: snap, group: group, carriers: carriers, held: held, zCap: zCap, zBase: zCap, zTop: zTopStair, layers: layers, minD: minD,
                lines: { angleDeg: phi, stair: true, slopeDeg: slopeDeg, droppedShare: 0, bare: 0, pieces: layers.length, tried: [] },
-               stair: { slopeDeg: slopeDeg, angleDeg: phi, mLo: mLo, mTop: mTop, strips: mTop - mLo + 1, topMm: zTopStair,
+               stair: { slopeDeg: slopeDeg, angleDeg: phi, mLo: mLo, mTop: mTop, strips: mTop - mLo + 1, topMm: zTopStair, perimGapMm: perimGap,
                         tips: want.map(function (w) { return { p: w.p, strip: w.strip - mLo, leg: w.leg !== false }; }),
                         cutAbove: group.filter(function (t) { return t.stairM != null && t.stairM > mTop; }).length } };
     }
@@ -3741,7 +3773,7 @@
 
   var api = {
     DEFAULTS: { gapMm: GAP_MM, layerMm: LAYER_MM, pitchMm: PITCH_MM, repeats: REPEATS, epsMm: EPS_MM },
-    SHEET: { pitchMm: SHEET_PITCH_MM, densePitchMm: SHEET_DENSE_PITCH_MM, denseInterfaceLayers: 3, denseFlatGapMaxMm: 0.9, denseStairLegMm: STAIR_LEG_MM, roles: SHEET_ROLES.slice(), under: SHEET_UNDER, minRunMm: MIN_RUN_MM, cellMm: CELL_MM,
+    SHEET: { pitchMm: SHEET_PITCH_MM, densePitchMm: SHEET_DENSE_PITCH_MM, denseInterfaceLayers: 2, denseFlatGapMaxMm: 0.9, denseStairLegMm: STAIR_LEG_MM, roles: SHEET_ROLES.slice(), under: SHEET_UNDER, minRunMm: MIN_RUN_MM, cellMm: CELL_MM,
              sampleMm: SAMPLE_MM, lineAngles: LINE_ANGLES.slice(), fieldMm: FIELD_MM, levelEdgeMm: LEVEL_EDGE_MM,
              slicerSettings: Object.assign({}, SHEET_SLICER) },
     STAIR: { tipMm: STAIR_TIP_MM, backMm: STAIR_BACK_MM },

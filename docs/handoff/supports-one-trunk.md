@@ -67,7 +67,7 @@ layers deep (`planWidth`), G-scope's Slice reads the sheet's interface layers of
 interface 1.5 k, transition 1.9 k (the owner's G-scope showed 15.2 k / 1.6 k / 1.5 k for the plate before this push; the card run in Node here gives different counts for the same plate and was not reproduced to match).
 
 **OPEN for the owner**
-1. **Dense interface is unprinted.** The card defaults to Dense (Bambu's spacing 0.1: lines 0.47 mm apart, 3 interface layers).
+1. **Dense interface is unprinted.** The card defaults to Dense (Bambu's spacing 0.1: lines 0.47 mm apart, 2 interface layers over 2 of transition).
    The 0.84 mm sheet was settled by the owner's own prints; Dense is built and sliced here, not printed. Interface > Open puts it back.
 2. **Curved heads** (Circular, Sphere) get a flat plate under the pole (z 8.0 - 8.8 against Bambu's conforming shell to 9.4); the
    Negative Spheres' apex surface (Bambu: z 13.0 - 15.2) is not detected. Details in `docs/SUPPORT-ONE-TRUNK.md` section 5.
@@ -85,3 +85,8 @@ interface 1.5 k, transition 1.9 k (the owner's G-scope showed 15.2 k / 1.6 k / 1
    one-trunk build (with #301's sheet) now, so they are the new bytes (stable over two runs), and its ceiling test's 4 s is 12 s (a one-trunk head
    takes ~5 s in-thread). A plate-wide build with the box ticked builds each piece the one-trunk way; the lattice fallback (a one-trunk build whose feet
    ring the piece) is for a single piece's Generate only.
+
+**Ninth push (interface 2 + transition 2, perimeter twigs).** Dense is 2 interface layers (`denseInterfaceLayers`), the slicer's `NI`/`NT` 2/2. A stair's tips are twigs along the
+outline of its strips (`stairOf`: `STAIR_PERIM_MM` 2.5, `STAIR_PERIM_IN_MM` 0.6, `STAIR_FILL_MM` 3.8; `stair.perimGapMm`), all legs of the stair's own tree; in `stepCrown` a
+`_stairTree` tip is a cone of the smooth body cut 0.18 mm into the strip (no exact stub). The row/leg constants (`STAIR_ROW_MM`, `STAIR_ROW_GAP`) and `fillTips` posts are unused for Dense.
+Gates moved: `support:onetrunk` (stair perimeter gate, depth <= 5, options 2 layers), brim check/card test (2 layers), plate pins re-taken.
