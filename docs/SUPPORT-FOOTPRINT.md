@@ -202,3 +202,47 @@ where the grid put them and the sheets' bytes):
 - Everything with the options off is byte for byte what it was: `support:index` (its plan hash is why `footprint` is only added when asked),
   `support:everywhere` (its fixture hashes), `support:feed`, `support:gridpack`, `support:exposed`, `support:interface-fixtures`,
   `support:shells-coupon`, `tree:interface`, `slicer:supports`, `slicer:brim` all pass unchanged.
+
+## 8. The plate, measured: time and coverage (2026-10-27, after the finer look)
+
+Two tools: `npm run support:coverage` (`tools/nso_support_coverage_check.js`: the six heads built as a plate in the card's own code, aligned and turned about z,
+each footprint read for **support just under it**: a face of the stack 0.02 - 1.5 mm below the surface) and `node tools/nso_support_plate_browser_time.mjs` (the
+same plate in headless Chromium, the real worker, the clock on GENERATE).
+
+**Time** (this box; the old commit is 1eec7de, before the outline and the beacon work). The plate, node / browser, seconds:
+
+| | node, aligned | node, turned | browser, aligned |
+|---|---|---|---|
+| 1eec7de | 15.4 | 17.5 | 12.5 |
+| upstream's tip with the outline (6112b2c) | 22.4 | 24.6 | 19.0 |
+| with the finer look and the fill (d95855f) | 36 | 45 | 24.4 |
+| now (the geometry queries kept by their arguments; same bytes) | 30 | 44 | 22.5 |
+| outline off, seeds off (the sheet as it was) | 18.0 | | 15.1 |
+
+The outline (`sheetPerimeter`) is about 3.4 s of the browser's plate and the finer look 4.5 s (10 s and 8.6 s in node). Both are paid in **one place**: the last-resort
+sheets (`lateTry`, nso_support_interface.js): a tip no level or stair carried gets a level of its own, tried down to eleven times (`LONE_SINKS`), and with the outline each try
+is the old way, the outline, and its growth steps. On the turned plate that is 28 levels and 30 of its 44 seconds, 23 of them ending in no sheet at all. The tips that go there are the
+Negative Spheres' rims (a ring about 1 mm wide: the sheet's pieces need 2 mm lines), their apexes, and the domes' outer tips. Nothing here is a bug in the finer look: it is the cost of asking
+for a sheet where none fits. What was done: `hitIn` / `firstHit` / `inside` / `nearestPt` and `markInside`'s rays are kept by their arguments (a level is built several times); same bytes, 36 -> 30 s aligned.
+
+**Coverage** (`support:coverage`, the share of each footprint with support under it):
+
+| head | 1eec7de | now, aligned | now, turned (20, 35, 12, 28, 40, 8 deg) |
+|---|---|---|---|
+| Base | 88 % | 88 % | 88 % |
+| Oblique | 94 % | 92 % | **12 %** |
+| Circular | 35 % | 35 % | 61 % |
+| Sphere | 64 % | 64 % | 61 % |
+| Negative Sphere | 37 % | 61 % | 41 % |
+| Negative Sphere2 | 34 % | 50 % | 41 % |
+
+The finer look and the fill are what raised the Base (71 -> 88 % on upstream's tip) and the Negative Spheres. What is **open**, and was before:
+- **The Oblique's stair stands at two angles only** (0 and 75 deg; 15 - 60 and 90 turn it to 7 - 39 %, on the old commit too: `tools/nso_support_coverage_check.js` finding, and the card's
+  plate with turned pieces shows it): the stair's lines follow the sheet's line angles (`STAIR_SNAP_DEG`). A plate whose pieces are turned is the usual plate.
+- **A dome (Circular, Sphere, the Negative Spheres' apex) is one flat patch at its lowest tip's height**: the rest of the surface rises out of the flat sheet's 0.9 mm reach; the planner
+  still calls those spots held "through" a tip within 3.3 mm in plan (`ONE.coverMm`), whatever their height. Bambu steps its interface up the dome in rings.
+- **A ring or a crescent 1 mm wide** (the Negative Spheres' rims) takes no piece of the sheet; its tips get a last-resort square that hangs out over the air (the outline's growth steps), or nothing.
+  Leaving a tip on a footprint narrower than 1.8 mm a plain tip (no last-resort sheet) was tried: the plate 45 -> 33 s turned, 32 -> 25 s aligned, the Negative Sphere aligned 61 -> 33 %. Not shipped: it is a trade
+  of interface for time, and the rim is the part's own thinnest.
+- The Negative Spheres' apex sits in a closed cavity on the stem: one crest spot is "unreachable" (nothing comes up to it from the plate); the card says so.
+

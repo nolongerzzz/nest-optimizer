@@ -1032,27 +1032,51 @@
       levels.forEach(function (L) { d += L.told || 0; });
       try { tell(d, nTips); } catch (err) { /* a listener must not stop the sheet */ }
     }
+    /* the queries below are asked again and again with the same numbers - a level is built several times (the old way, the outline, its
+       steps) and a cap's rim is tried at the same places - and the piece does not move: each answer is kept by its arguments */
+    var qHit = new Map(), qFirst = new Map(), qIn = new Map(), qNear = new Map(), qRay = new Map();
     function hitIn(x, y, z0, z1) {
-      for (var i = 0; i < PPs.length; i++) if (PPs[i].hitsAlong([x, y, z0], [0, 0, 1], z1 - z0).length) return true;
-      return false;
+      var k = x + ',' + y + ',' + z0 + ',' + z1, v = qHit.get(k);
+      if (v === undefined) {
+        v = false;
+        for (var i = 0; i < PPs.length && !v; i++) if (PPs[i].hitsAlong([x, y, z0], [0, 0, 1], z1 - z0).length) v = true;
+        qHit.set(k, v);
+      }
+      return v;
     }
     function firstHit(x, y, z0, len) {
-      var best = Infinity;
-      for (var i = 0; i < PPs.length; i++) {
-        var hs = PPs[i].hitsAlong([x, y, z0], [0, 0, 1], len);
-        if (hs.length && hs[0] < best) best = hs[0];
+      var k = x + ',' + y + ',' + z0 + ',' + len, best = qFirst.get(k);
+      if (best === undefined) {
+        best = Infinity;
+        for (var i = 0; i < PPs.length; i++) {
+          var hs = PPs[i].hitsAlong([x, y, z0], [0, 0, 1], len);
+          if (hs.length && hs[0] < best) best = hs[0];
+        }
+        qFirst.set(k, best);
       }
       return best;
     }
-    function inside(p) { for (var i = 0; i < PPs.length; i++) if (PPs[i].inside(p)) return true; return false; }
+    function inside(p) {
+      var k = p[0] + ',' + p[1] + ',' + p[2], v = qIn.get(k);
+      if (v === undefined) {
+        v = false;
+        for (var i = 0; i < PPs.length && !v; i++) if (PPs[i].inside(p)) v = true;
+        qIn.set(k, v);
+      }
+      return v;
+    }
     function nearestMm(p, r) {
       var best = Infinity;
       for (var i = 0; i < PPs.length; i++) { var nr = PPs[i].nearest(p, r); if (nr && nr.dist < best) best = nr.dist; }
       return best;
     }
     function nearestPt(p, r) {
-      var best = null;
-      for (var i = 0; i < PPs.length; i++) { var nr = PPs[i].nearest(p, r); if (nr && (!best || nr.dist < best.dist)) best = nr; }
+      var k = p[0] + ',' + p[1] + ',' + p[2] + ',' + r, best = qNear.get(k);
+      if (best === undefined) {
+        best = null;
+        for (var i = 0; i < PPs.length; i++) { var nr = PPs[i].nearest(p, r); if (nr && (!best || nr.dist < best.dist)) best = nr; }
+        qNear.set(k, best);
+      }
       return best;
     }
 
@@ -1300,9 +1324,10 @@
         for (var jr = 0; jr < ny; jr++, beat(), rowRead()) markInside(oy + jr * CELL_MM, zh, function (i0) { hit[jr * nx + i0] = 1; });
       }
       function markInside(y, z, mark) {
-        PPs.forEach(function (P) {
+        PPs.forEach(function (P, pi) {
           if (y < P.lo[1] || y > P.hi[1] || z < P.lo[2] || z > P.hi[2]) return;
-          var x0 = P.lo[0] - 1, hs = P.hitsAlong([x0, y, z], [1, 0, 0], P.hi[0] - x0 + 1);
+          var x0 = P.lo[0] - 1, kr = pi + ',' + y + ',' + z, hs = qRay.get(kr);
+          if (hs === undefined) { hs = P.hitsAlong([x0, y, z], [1, 0, 0], P.hi[0] - x0 + 1); qRay.set(kr, hs); }
           for (var h = 0; h + 1 < hs.length; h += 2) {
             var xa = x0 + hs[h], xb = x0 + hs[h + 1];
             for (var ii = Math.max(0, Math.floor((xa - ox) / CELL_MM)); ii < nx && ox + ii * CELL_MM <= xb; ii++) {
