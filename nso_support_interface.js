@@ -866,11 +866,13 @@
   var FILL_REACH_MM = 1.2;     /* ...wherever the part is this near over the stack's top (the legacy field, a cap and 1.25 mm, needs no such reach) */
   var CONC_CUSHION_MM = 0.08;      /* the opened level set keeps its walls this much more than a line width apart (what the cleaning of a loop moves them by: the extrusion refuses an overlap) */
   var CONC_SIMPLIFY_MM = 0.015;    /* a loop's points within this of the line between their neighbours go */
-  var REGION_MARGIN_MM = 0.1;     /* the region plate's cells lie this far in from the footprint's edge; its first loop is the edge of that, so the wall (centre ~0.15 mm in, a half line either side) stays inside the footprint */
+  var REGION_MARGIN_MM = 0.02;    /* the region plate's cells lie this far in from the footprint's edge (the face's own edge: the plate may run to it; it was 0.1, which left a band 0.15 mm wide bare all round a 1 - 2 mm rim and the tails of the Negative Spheres' patches); its first loop is the edge of that, a wall's centre ~0.1 mm in */
+  var REGION_HOLE_FILL_MM2 = 3;   /* a hole in a footprint under this area is laid over, not round (see shellPass) */
   var REGION_FLAT_MM = 0.3;       /* a footprint whose height (2nd to 98th percentile) varies by no more than this is one flat face: the plate is one level at its lowest height */
   var SHELL_START_MM = 1.2;        /* the height rays start under the footprint's lowest spot: the underside may be lower than any spot of it */
   var REGION_PLANE_SHARE = 0.25;  /* ...or, on a big range, within this share of the range (a plane's residual is a few percent of its height, a dome's a quarter) */
   var REGION_PLANE_MM = 0.15;     /* ...and a footprint whose surface lies within this of one plane that leans 3 - 70 deg is a stair's, not the plate's */
+  var THIN_NARROW_MM = -0.02;     /* ...a half line and this much in from the sliver's edge (a negative number is room; 0.06 let a bead be wider than a 0.3 mm tail by that much each side and gained nothing measurable) */
   var THIN_MIN_MM = 0.6;         /* a thin bead (a line along a sliver the outline and the hatch left bare) shorter than this is a speck of the skeleton */
   var THIN_CLEAR_MM = 0.06;       /* ...stands a line and this far (centre to centre) from every path laid, so no two lines meet except at a node */
   var THIN_SIMPLIFY_MM = 0.06;    /* ...its skeleton's staircase cleaned to this */
@@ -1099,7 +1101,7 @@
      gap from every path already laid are thinned to one pixel (Zhang - Suen), traced into open polylines, and cleaned (Douglas - Peucker, no
      segment shorter than THIN_SEG_MM). Each returned polyline is one bead along the middle of its sliver. */
   function thinLines(M, nx, ny, ox, oy, cellMm, widthMm, loops, lines, minLenMm) {
-    var N = nx * ny, dist = edtCells(M, nx, ny), need = (widthMm / 2 + 0.02) / cellMm + 0.5, avoid = widthMm + THIN_CLEAR_MM, T = new Uint8Array(N), any = false, q;
+    var N = nx * ny, dist = edtCells(M, nx, ny), need = (widthMm / 2 - THIN_NARROW_MM) / cellMm + 0.5, avoid = widthMm + THIN_CLEAR_MM, T = new Uint8Array(N), any = false, q;
     for (q = 0; q < N; q++) if (dist[q] >= need) { T[q] = 1; any = true; }
     if (!any) return [];
     /* the cells a laid path occupies: the distance from them says where a new bead may stand */
@@ -1495,11 +1497,18 @@
       /* the small footprints first: their tips are counted (the card's Building starts moving) before the large one is done */
       feet.map(function (f, fi) { return fi; }).sort(function (a, b) { return (feet[a].box[2] - feet[a].box[0]) * (feet[a].box[3] - feet[a].box[1]) - (feet[b].box[2] - feet[b].box[0]) * (feet[b].box[3] - feet[b].box[1]); }).forEach(function (fi) {
         var f = feet[fi];
+        /* a hole in the footprint smaller than REGION_HOLE_FILL_MM2 is part of the surface (the crest of a cavity's apex: a cone 0.2 - 0.4 mm over its rim, a
+           square millimetre or two the detector traces as a hole, and Bambu holds): the plate is laid over it */
+        var plateLoops = f.loops.filter(function (Lp) {
+          var a = 0;
+          for (var q0 = 0; q0 < Lp.length; q0++) { var u0 = Lp[q0], v0 = Lp[(q0 + 1) % Lp.length]; a += u0[0] * v0[1] - v0[0] * u0[1]; }
+          return !(a < 0 && -a / 2 < REGION_HOLE_FILL_MM2);                   /* the detector's holes run clockwise */
+        });
         function inFoot(x, y) {
           if (x < f.box[0] || x > f.box[2] || y < f.box[1] || y > f.box[3]) return false;
           var inn = false;
-          for (var li = 0; li < f.loops.length; li++) {
-            var Lp = f.loops[li];
+          for (var li = 0; li < plateLoops.length; li++) {
+            var Lp = plateLoops[li];
             for (var q = 0, w = Lp.length - 1; q < Lp.length; w = q++) if ((Lp[q][1] > y) !== (Lp[w][1] > y) && x < (Lp[w][0] - Lp[q][0]) * (y - Lp[q][1]) / (Lp[w][1] - Lp[q][1]) + Lp[q][0]) inn = !inn;
           }
           return inn;

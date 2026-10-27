@@ -42,10 +42,10 @@ const TODAY = {        // sha256 of the support bytes of a single-piece Generate
                        // The Negative Sphere2 again (supports-footprint, the finer look): its apex surface (z 15, 9 spots in one area) was never detected, it is now - so a fourth area,
                        // a sheet laid over it, and the fill (the sheets reach the footprint): 16644 -> 23352 triangles on the lighter crowns (20332 -> 28884 on the ones before). Circular and Sphere are the same bytes.
                        // The region plate (supports-footprint, third round, docs/SUPPORT-FOOTPRINT.md section 9): the card lays the interface and the transition from each footprint and the surface's height, layer by layer;
-                       // the Negative Sphere2 / Circular / Sphere re-pinned (23728 / 13696 / 12944 triangles on upstream's 2 transition + 2 interface stack, with the thin beads and the lighter smoothing of section 10; the plates are hatch and loops at 0.5 mm, the sheets were fewer lines).
-  'Support Negative Sphere2.stl': { sha: '701dc1ec6c32c97226ab8c2c7240569967a02853e9c9d444f9c4fb06ecf66878', triangles: 23728 },
-  'Support Circular.stl': { sha: 'ef24be75f16efd76b2279845a656cbdafd1fe150eea164aa5fd04f218e8651c5', triangles: 13696 },
-  'Support Sphere.stl': { sha: 'bcce35839f89e644d081f606eee3b1115ca308bb0aa02e37957156ac1585dd36', triangles: 12944 }
+                       // the Negative Sphere2 / Circular / Sphere re-pinned (30392 / 14904 / 14728 triangles on upstream's 2 transition + 2 interface stack, with the thin beads and the lighter smoothing of section 10, and the plate run to the face's edge (section 11); the plates are hatch and loops at 0.5 mm, the sheets were fewer lines).
+  'Support Negative Sphere2.stl': { sha: '442633ceb89229be33f2fc4305399560c6a4d4a419b7f91f0d369688620e0743', triangles: 30392 },
+  'Support Circular.stl': { sha: 'ea48d39e240155b0f2405a8412170eabe18fea495452a0c4862990f688c32ffe', triangles: 14904 },
+  'Support Sphere.stl': { sha: '1faf1ac3617ace3f19b1cfe2abb6a881762d38cd5ee2006a13b802eef20272ed', triangles: 14728 }
 };
 const XY_DISTANCE = 0.35;      // the slice's support_object_xy_distance (nso_support_beacons.js SIDE_STANDOFF_MM, nso_support_gridpack.js TRUNK_KEEP_MM)
 const STRICT_GAP = process.env.NSO_STRICT_GAP === '1';

@@ -294,7 +294,7 @@ now moves its share by 11 points or less (the plate follows the surface; the sta
 **Gates.** `support:region` (`tools/nso_support_region_test.js`): the geometry on rasters of known answer (the exact distance, a circle's level set, the smoothed mask, the plate of a rectangle:
 one loop, a hatch flush on its lattice at 45 and 135 deg, never nearer the loop than a line, the strip too thin for a hatch, the speck, the disk's concentric rings) and that the extrusion takes every layer.
 `support:coverage`: floors per head, aligned and turned, the turn moving no head but the Oblique by more than 15 points, and ceilings on the plate's seconds. `support:plate` section 6 is re-pinned
-for the three single-piece builds the region plate changes (Negative Sphere2 23728, Circular 13696, Sphere 12944 triangles (on the 2 + 2 stack, with section 10's thin beads)). Everything else is unchanged with the option off.
+for the three single-piece builds the region plate changes (Negative Sphere2 30392, Circular 14904, Sphere 14728 triangles (on the 2 + 2 stack, with sections 10 and 11)). Everything else is unchanged with the option off.
 
 **Not done, and named.**
 - **A rim or a crescent under about 0.7 mm** is still bare: a bead needs the region a half line and a gap in from its edge on both sides, and the footprint's own 0.1 mm margin comes
@@ -344,3 +344,33 @@ are what is needed.
 **Not done.** The remaining 36 % of the painted points are slivers under about 0.6 mm: a bead does not fit a footprint that narrow with the margin the plate keeps. The brush's reach on a steep flank
 (its `zl`, `zh` are a stroke's heights plus a margin: a flank steeper than about 50 deg under a big brush takes a first hit from another face) was not measured; the Oblique's stair is the stair's and a painted
 region on a planar slope is still handed to it. Paint is not drawn on the plate view (one piece at a time, as the tips are), and is kept per piece across Generate, not across CLEAR PLATE.
+
+## 11. The spheres against Bambu's own slice: the plate runs to the face's edge (2026-10-27, sixth round)
+
+"The latest auto builds are getting better without the paint. Let's push the additional detection needed to finish the spheres, as flat and oblique are almost perfect now."
+First the question: what does Bambu hold, and what do we? `tools/nso_support_reach_check.js` (`npm run support:reach`) reads Bambu's slice of the six reference heads
+(`fixtures/supports/tree_slimsupports.gcode.3mf`: the same six heads and 55553 moves as the supp_ref slice) the same way for both: the part's down-facing surface in 0.25 mm cells binned by tilt;
+Bambu holds a cell when an interface or transition line of its stands within 0.5 mm in plan, on a layer 0.05 - 1.8 mm under it; the card holds it when a face of its support is 0.02 - 1.5 mm under the
+cell or one within 0.5 mm is (the same dilation: a pitch of 0.5 mm with 0.4 mm lines leaves 0.1 mm between, and a cell centre sampled in the gap is not bare). The card at 35 deg / Bambu:
+
+| tilt band | 0 - 20 | 20 - 35 | 35 - 50 | 50 - 65 | 65 - 80 |
+|---|---|---|---|---|---|
+| Circular | 93 / 93 | 100 / 93 | 35 / 21 | 0 / 0 | 0 / 0 |
+| Sphere | 85 / 85 | 100 / 96 | 56 / 1 | 0 / 0 | 0 / 0 |
+| Negative Sphere | 97 / 97 | 100 / 69 | 73 / 32 | 53 / 32 | 98 / 63 |
+| Negative Sphere2 | 80 / 89 | 100 / 61 | 32 / 1 | 3 / 0 | 45 / 31 |
+| Base, Oblique | 99 / 100, 98 / 100 | 99 / 100 | | | |
+
+**So the spheres are at Bambu's own reach**: Bambu holds a dome to 35 deg and no further (the Sphere 35 - 50 deg: 1 %), the Negative Spheres' flat faces 97 / 89 % and their cavity walls in part; the card holds the
+same or more in every band but one (the Negative Sphere2's flat face, 80 against 89). **Detection is not what is missing**: the flat surface outside every footprint that Bambu holds and the card does not is 0.0 - 0.3 mm2
+a head (the apex crests, 1 - 1.6 mm2 each, are traced as a hole in the apex's footprint and sit within 0.5 mm of its plate). The strict reading (a face under the cell itself, no dilation) was the misleading one: a 0.5 mm hatch
+pitch is 80 % of its own area to the cell.
+
+What was left, then, was the plate's edge. `REGION_MARGIN_MM` was 0.1: the plate's cells lay 0.1 mm in from the footprint's edge and its first loop 0.1 more, so a band 0.15 mm wide was bare all round a rim 1 - 2 mm wide
+and the bare cells were two thirds of the rim's perimeter (`flat_gap`: of the Negative Sphere's 14 mm2 of bare flat face, 11 were within 0.5 mm of the face's edge). The footprint's edge is the face's own edge, a plate may run to it:
+**0.02**. Strict coverage (`support:coverage`, aligned): Base 84 -> 89, Circular 90 -> 99, Sphere 97 -> 98, Negative Sphere 75 -> 83, Negative Sphere2 71 -> 77; at 30 deg: Circular 94 -> 97, Sphere 89 -> 94, Negative Sphere 60 -> 76.
+With the margin gone the brush of section 10 has little left to add on these heads (the bare points that were 80 are 51; `support:paint` now holds that a stroke never makes it worse).
+A hole in a footprint under 3 mm2 (`REGION_HOLE_FILL_MM2`) is laid over by the plate: the crest of a cavity's apex is a cone 0.2 - 0.4 mm over its rim that the detector traces as a hole (Negative Sphere 80 -> 83).
+
+**What is left.** The Negative Sphere2's flat face (80 against 89): the three corner patches' tails, 0.3 - 0.5 mm wide, where a 0.4 mm bead does not fit (`THIN_NARROW_MM` 0.06 was tried: no gain). The brush covers them where
+the footprint is wide enough; the rest is the bead's width. Turning a head moves its share by up to 20 points (the Circular 99 aligned, 80 turned: the columns of its other tips cross its plate - `carve` - and the planner's choice of tips follows the grid).

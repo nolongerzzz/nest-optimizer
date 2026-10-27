@@ -313,6 +313,7 @@
     "support:coverage": {"weight":210000,"note":"~1.3 min locally x 1.7, rounded up: the six reference heads built as a plate twice (aligned, then turned about z) and each footprint read for support under it; supports-footprint"},
     "support:region": {"weight":4000,"note":"the region plate's geometry on rasters (distance, level sets, smoothing, the plate of a region, its extrusion); well under a second locally; supports-footprint"},
     "support:paint": {"weight":60000,"note":"the Negative Sphere built, painted over where it is bare and built again (about 10 s), and the Circular with the raft off and on; supports-footprint"},
+    "support:reach": {"weight":120000,"note":"the six heads built as a plate (~16 s) and read against Bambu's own slice, band by band, with an alignment search per head (~40 s locally x 2); supports-footprint"},
     "support:paint-drive": {"weight":90000,"note":"headless Chromium: the supp_ref plate loaded, the Negative Sphere painted with real pointer events, built once; ~25 s locally x 3, estimate; supports-footprint"},
     "support:onetrunk": {"weight":150000,"note":"~1.5 min locally x 1.7, rounded up: the reference read, the six real parts built twice (box off, one trunk) and the one-trunk builds sliced and measured; supports-one-trunk"},
     "support:plate": {"weight":240000,"note":"estimate (supports-plate-wide): Node only; the six real parts of supp_ref.3mf planned and built in-thread, about two minutes of the real engine, plus ~40 s of smaller builds; one CI run measures it"},

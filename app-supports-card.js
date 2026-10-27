@@ -982,7 +982,7 @@ var NSO_SUPPORTS_CARD = (function () {
     circles: 'Drawing circles on the plate: drag to draw one, drag its edge to resize, drag inside to move, click one then Delete to remove it. Stop (Esc) to orbit.',
     erase: 'Erasing: hover a built member to light it and what it holds; click to remove it. Stop (Esc) to go on.',
     plate: 'Every piece is lit. Generate builds supports for all of them in one go; one Undo takes them all back. Click a piece to work on it alone.',
-    paint: 'Painting: drag over the piece where supports are missing - each stroke asks for tips and a raft right under it, one Undo each. Press Paint again (or Esc) to orbit.'
+    paint: 'Painting: drag over the piece where supports are missing - each stroke asks for tips and a raft right under it, one Undo each. Orbit by dragging off the piece, or with Alt held; press Paint again (or Esc) to put the brush down.'
   };
   function syncSwitch(cs) {
     var fed = S.mode !== 'auto', hasHost = S.hostId != null && !!placedOf(S.hostId);
@@ -2264,6 +2264,7 @@ var NSO_SUPPORTS_CARD = (function () {
     var st = S.stroke;
     S.stroke = null;
     if (!st || !st.pts.length) { drawPaint(); return null; }
+    S.noClickUntil = Date.now() + 400;                     // the click the browser sends after this release is the stroke's, not the app's: it would pick or drop a piece
     return commitStroke(st.pts, st.r);
   }
   /* a stroke by number, for the page's own callers (tests, a script): [{ p: [x, y, z], n: [nx, ny, nz] }] in Z up, the brush's radius in mm */
@@ -2884,7 +2885,7 @@ var NSO_SUPPORTS_CARD = (function () {
       return;
     }
     /* THE BRUSH owns a press on the piece (a drag paints; the view does not orbit); a press anywhere else is the view's */
-    if (S.paint) {
+    if (S.paint && !ev.altKey) {                          // Alt held: the press is the view's, over the piece too (orbit without putting the brush down)
       var hp = hitDown(ev);
       if (hp) {
         S.stroke = { pts: [], last: null, r: brushR() };
@@ -2959,6 +2960,7 @@ var NSO_SUPPORTS_CARD = (function () {
     window.addEventListener('pointerdown', onDown, true);
     window.addEventListener('pointermove', onMove, true);
     window.addEventListener('pointerup', function () { if (S.stroke) endStroke(); }, true);
+    window.addEventListener('click', function (ev) { if (S.noClickUntil && Date.now() < S.noClickUntil && S.paint) { S.noClickUntil = 0; ev.stopImmediatePropagation(); ev.preventDefault(); } }, true);
     window.addEventListener('pointercancel', function () { if (S.stroke) { S.stroke = null; drawPaint(); } }, true);
     on('sup-paint', 'click', function () { setPaint(!S.paint); });
     on('sup-paint-clear', 'click', function () { clearPaint(); });

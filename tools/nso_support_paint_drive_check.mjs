@@ -58,7 +58,7 @@ async function main() {
   check('Paint is pressed, the hint says so, the cursor is a crosshair', [u.pressed, /^Painting/.test(u.hint), u.cursor], ['true', true, 'crosshair']);
   /* a run of the piece along one screen row where the ray, through the piece if need be, meets a face the card calls hanging (normal below -cos 35 deg): the brush paints
      the underside the outline shows through the piece, from above */
-  const drag = await page.evaluate((id) => {
+  const findRun = () => page.evaluate((id) => {
     const p = state.placed.find((q) => q.sourceId === id), cv = state.renderer.domElement, r = cv.getBoundingClientRect();
     const hits = [];
     for (let y = 0.05; y < 0.95; y += 0.012) for (let x = 0.05; x < 0.95; x += 0.012) {
@@ -77,6 +77,7 @@ async function main() {
     const best = Object.values(byRow).sort((a, b) => b.length - a.length)[0].sort((a, b) => a.cx - b.cx);
     return { a: best[0], b: best[best.length - 1], n: best.length };
   }, hostId);
+  const drag = await findRun();
   check('a run of the piece\'s side is in view to paint on', !!drag && drag.n >= 2, true);
   if (drag) {
     await page.mouse.move(drag.a.cx, drag.a.cy);
@@ -90,6 +91,7 @@ async function main() {
     check('while the button was down the stroke was drawn (translucent dots over the piece)', during, true);
     check('one stroke, one Undo step, and it asked for spots', [u.count, u.undo - undo0, u.spots > spots0], [1, 1, true]);
     check('Clear paint is on now; the dots stay when the button is up', [u.clearOn, await page.evaluate(() => !!state.scene.getObjectByName('supportsCardPaint'))], [true, true]);
+    check('the brush stays armed after the stroke (pressed, the hint still says painting)', [u.pressed, /^Painting/.test(u.hint)], ['true', true]);
     if (SHOTS_ON) { await page.screenshot({ path: join(SHOTS, 'paint-stroke.png') }); console.log('       paint-stroke.png'); }
   }
 
@@ -103,6 +105,30 @@ async function main() {
   const cam1 = await page.evaluate(() => state.camera.position.toArray().map((v) => +v.toFixed(3)));
   u = await ui();
   check('a drag that starts off the piece paints nothing and the view orbits', [u.count, JSON.stringify(cam1) !== JSON.stringify(cam0)], [drag ? 1 : 0, true]);
+  check('...and after the orbit the brush is still armed', [u.pressed, /^Painting/.test(u.hint)], ['true', true]);
+  const drag2 = await findRun();
+  if (drag2) {
+    await page.mouse.move(drag2.a.cx, drag2.a.cy);
+    await page.mouse.down();
+    for (let k = 1; k <= 12; k++) await page.mouse.move(drag2.a.cx + (drag2.b.cx - drag2.a.cx) * k / 12, drag2.a.cy + (drag2.b.cy - drag2.a.cy) * k / 12);
+    await page.mouse.up();
+    await frames(page);
+    u = await ui();
+  }
+  check('...and a second drag over the piece, found again after the orbit, paints a second stroke', [!!drag2, u.count], [true, 2]);
+  const drag3 = await findRun();
+  if (drag3) {
+    const n0 = u.count;
+    await page.keyboard.down('Alt');
+    await page.mouse.move(drag3.a.cx, drag3.a.cy);
+    await page.mouse.down();
+    for (let k = 1; k <= 8; k++) await page.mouse.move(drag3.a.cx + (drag3.b.cx - drag3.a.cx) * k / 8, drag3.a.cy + (drag3.b.cy - drag3.a.cy) * k / 8);
+    await page.mouse.up();
+    await page.keyboard.up('Alt');
+    await frames(page);
+    u = await ui();
+    check('Alt held, a drag over the piece is the view\'s: no stroke, and the brush stays armed', [u.count, u.pressed], [n0, 'true']);
+  }
   await page.keyboard.press('Escape');
   u = await ui();
   check('Escape puts the brush down (not pressed, the hint is the card\'s again)', [u.pressed, /^Painting/.test(u.hint || '')], ['false', false]);
