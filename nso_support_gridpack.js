@@ -238,9 +238,9 @@
   var CROWN_BRANCH_TAPER_DEG = 0;   /* between two joins a Bambu branch holds its width (its 30-layer stretches measure -0.5 to -1.0 deg); only the trunk widens, at JOINS.taperDeg and over the law */
   var CROWN_STUB_SIDES = 20;          /* a crown tip's round stub: sides */
   var CROWN_TRUNK_SINK_MM = 1;       /* ...the trunk stops this far under its top, inside the smooth body's shoulder */
-  var CROWN_BLOB_TRIS = 50000;        /* ...and no body is meshed finer than this many triangles allow */
+  var CROWN_BLOB_TRIS = 24000;        /* ...and no body is meshed finer than this many triangles allow */
   var CROWN_BLEND_MM = 0.25;          /* the branches of a crown flow into one another and into the trunk: the smooth union's blend (crown.blendMm) */
-  var CROWN_BLOB_CELL_MM = 0.2;       /* ...meshed on a grid this fine (crown.blobCellMm) */
+  var CROWN_BLOB_CELL_MM = 0.25;      /* ...meshed on a grid this fine (crown.blobCellMm) */
   var CROWN_TUBE_SIDES = 20;        /* a branch is a round tube of this many sides... */
   var CROWN_BALL_SEGS = 10;         /* ...and a join a ball of this many bands (twice that round) */
   var CROWN_ROOT_FLOOR_MM = FLARE_MM + 2;   /* the first join is at least this far over the plate: the flare stays in the trunk */
@@ -3150,7 +3150,7 @@
     var ss = sheetStations(p), cols = ss.cols, sts = ss.sts;
     var plan = SI.sheet(opts.rawTris, sts, {
       columns: cols, sideMm: p.sideMm, plateZ: p.plateZ, footMm: foot, occluders: opts.occluders,
-      layerMm: opts.layerMm, gapMm: opts.gapMm, pitchMm: opts.sheetPitchMm, angleDeg: opts.sheetAngleDeg, widthMm: opts.sheetWidthMm, interfaceLayers: opts.interfaceLayers, flatGapMaxMm: opts.sheetFlatGapMm, perimeter: opts.sheetPerimeter, footprints: opts.sheetFootprints,
+      layerMm: opts.layerMm, gapMm: opts.gapMm, pitchMm: opts.sheetPitchMm, angleDeg: opts.sheetAngleDeg, widthMm: opts.sheetWidthMm, interfaceLayers: opts.interfaceLayers, flatGapMaxMm: opts.sheetFlatGapMm, stairLegMm: opts.sheetStairLegMm, perimeter: opts.sheetPerimeter, footprints: opts.sheetFootprints,
       capRiseMm: opts.capRiseMm, capMinMm: opts.capMinMm, capMaxMm: opts.capMaxMm,
       thickness: opts.thickness, crosshatch: opts.crosshatch, rasterLines: opts.rasterLines, beat: opts.beat,
       progress: opts.sheetProgress
@@ -3612,8 +3612,11 @@
       var stairTrunks = [], stairOf = {}, stairLog = [];
       if (sh) sh.plan.levels.forEach(function (L) {
         if (!L.stair || !L.stair.tips || !L.stair.tips.length) return;
+        /* a row of posts that climb the slope is held by a leg every STAIR_LEG_MM (sheet()'s THE LEGS): the tips with a leg are the tree's beacons;
+           the others are round posts standing on their row, built below - the row is one blade, its legs the tree's */
+        var legTips = L.stair.tips.filter(function (w) { return w.leg !== false; }), fillTips = L.stair.tips.filter(function (w) { return w.leg === false; });
         var p2o = Object.assign({}, opts, {
-          beacons: L.stair.tips.map(function (w, i) { return { p: w.p, n: [0, 0, -1], key: 'stair' + L.id + '.' + i }; }),
+          beacons: legTips.map(function (w, i) { return { p: w.p, n: [0, 0, -1], key: 'stair' + L.id + '.' + i }; }),
           skipList: [], style: p.style, sideMm: p.sideMm, restOnModel: false, mergeThroughCrowd: true,
           interface: false, onProgress: null, _knobs: p.knobs ? { given: p.knobs.given } : null });
         /* a custom plan's stair is carried the way its tips are: one tree to a circle, on the circles' own feed. Where a
@@ -3634,6 +3637,12 @@
         if (!sp2.ok) { stairLog.push({ level: L.id, wanted: L.stair.tips.length, held: 0, reason: sp2.reason }); return; }
         for (var t2 = 0; t2 < sp2.n; t2++) { var r2 = sp2.step(t2); if (r2) { stairLog.push({ level: L.id, reason: r2.reason }); return; } }
         var f2 = sp2.finish(), tmap = {};
+        if (fillTips.length && f2.trunks.length) {
+          var rPost = p.sideMm / Math.sqrt(Math.PI), rise = (p.crownKnobs && p.crownKnobs.tipRiseMm) || 2.6;
+          fillTips.forEach(function (w, i) {
+            f2.trunks[0].parts.push({ soup: tubeSoup([w.p[0], w.p[1], w.p[2] - rise], rPost, w.p.slice(), rPost, CROWN_STUB_SIDES, crownPhase(i + 1000, CROWN_STUB_SIDES)), stairPost: true });
+          });
+        }
         f2.trunks.forEach(function (x) {
           var tr2 = p2.trunks[x.trunk], zc = tr2.crown != null && p2.crowns ? p2.crowns[tr2.crown] : null;
           var host = zc && graftHost[zc.zone] != null ? graftHost[zc.zone] : null;
@@ -3663,7 +3672,7 @@
         });
         f2.feet.forEach(function (f) { if (tmap[f.trunk] != null) feet.push({ key: tmap[f.trunk], trunk: tmap[f.trunk], c: f.c, r: f.r, grow: f.grow }); });
         (f2.relanded || []).forEach(function (r) { if (tmap[r.trunk] != null) relanded.push({ trunk: tmap[r.trunk], from: r.from, to: r.to, mm: r.mm, stair: L.id }); });
-        stairLog.push({ level: L.id, wanted: L.stair.tips.length, held: p2.held != null ? p2.held : L.stair.tips.length - p2.unreachable.length,
+        stairLog.push({ level: L.id, wanted: L.stair.tips.length, held: (p2.held != null ? p2.held : legTips.length - p2.unreachable.length) + fillTips.length,
                         unreachable: p2.unreachable.length, trunks: p2.trunks.length, members: p2.members.filter(function (m) { return !m.dead; }).length });
       });
       /* THE TRUNKS: every built tip, the plan's and the stair trees', is

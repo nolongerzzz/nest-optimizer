@@ -35,7 +35,7 @@ Gate: `npm run support:footprint` (`tools/nso_support_footprint_check.js`, ~1.5 
   footprint, 0 mm2 outside the part), for levels of 16 tips or fewer; a rim too thin falls back to the outline as before. (3) `bestRect` counts a rectangle's
   caps by a closed form (same bytes, a large level 3x faster). Measured: `support:footprint` 48 / 48 (new: ledge x12 alignments, finer-look coverage, THE FILL, THE
   APEX), `support:onetrunk` 21 / 21 (the pad gate reads a shared pad against all its trunks), `support:workflow` card 80, counts 48, builds 46 (clamp 101.9 loops,
-  wedge 43, quiet gap 4.0). **Re-pinned** in `support:plate`: Negative Sphere2 28884 triangles `6e68f498e083`; the apex is a fourth area (`3 pieces · 8 hanging areas`, 4 a piece,
+  wedge 43, quiet gap 4.0). **Re-pinned** in `support:plate`: Negative Sphere2 23352 triangles `7cccdebaa3bb`; the apex is a fourth area (`3 pieces · 8 hanging areas`, 4 a piece,
   `5 pieces · 16`, Cave unreachable 4) and each built Negative Sphere2 shows "unreachable 1" - one crest spot of the apex the planner leaves (3 tips hold 8 of 9).
 - **Not done:** the sheet is on the part and near-fills it (Base 81 %, the rectilinear pieces stop short of the rounded corners; levels over 16 tips are not filled); a rim thinner than the 2 mm lines still gets a piece
   reaching up to 1.2 mm out; a stair is not held to the outline; a tip too near a corner for its own sheet gets the least piece that fits; G-scope's markers

@@ -189,7 +189,7 @@ where the grid put them and the sheets' bytes):
 - `support:plate` section 6: Negative Sphere2's single-piece Generate is 9788 triangles (632cd214c51c, 12532 before), sha `a5af748eaf65` - its three
   sheets keep to the rim; Circular and Sphere are the bytes they were (the outline changes nothing under a dome that it did not already hold). Stable over
   two runs.
-- `support:plate`, the finer look: Negative Sphere2 single-piece Generate is 28884 triangles, sha `6e68f498e083` (20332, `de7702163137` before): its apex is a fourth area
+- `support:plate`, the finer look: Negative Sphere2 single-piece Generate is 23352 triangles, sha `7cccdebaa3bb` (16644, `90b737411a3d` before, on the lighter crowns): its apex is a fourth area
   with a sheet, and the sheets are filled; Circular and Sphere are the bytes they were. The plate's readouts move with the apex: `3 pieces · 8 hanging areas` (6),
   4 areas a piece (3), `5 pieces · 16 hanging areas` (12), the unreachable Cave 4 (3), and each built Negative Sphere2 has one apex spot unreachable ("Good1 · unreachable 1").
   Stable over two runs.

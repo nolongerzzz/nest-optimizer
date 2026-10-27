@@ -38,6 +38,7 @@ const AUDIT = require('./nso_slicer_audit.js');
 const R3 = require('../nso-3mf-read.js');
 const SL = require('../nso_slicer.js');
 const GP = require('../nso_support_gridpack.js');
+const SI = require('../nso_support_interface.js');
 
 const REF_FILE = path.join(ROOT, 'fixtures', 'supports', 'tree_slimsupports.gcode.3mf');
 const GAP = 0.18, XY_MM = 0.35;
@@ -346,6 +347,29 @@ const segLen = s => Math.hypot(s.x1 - s.x0, s.y1 - s.y0);
   });
   check('every crown\'s branches are one smooth body (no ball at a join): closed, outward-wound, a body to each crown', bodies.every(b => b.crowns > 0 && b.smooth.length >= 1 && b.smooth.length <= b.crowns + 1 && b.smooth.every(x => x.open === 0 && x.bad === 0 && x.vol > 0)),
     bodies.map(b => b.key + ' ' + b.crowns + ' crown(s), ' + b.smooth.length + ' body(ies) open ' + b.smooth.map(x => x.open + '/' + x.bad + '/' + x.vol.toFixed(0)).join(',') + ', ' + b.smooth.map(x => x.tris + ' triangles').join(' + ')).join('; '));
+  /* THE STAIR'S LEGS: a stair's tips are rows of posts that climb the slope, one blade to a row, held by a leg every
+     SHEET.denseStairLegMm along it - not a leg to every post (42 tips of the Oblique were 42 legs and one fat crown) */
+  const stairRows = rows.map(r => {
+    const out = { key: r.key, tips: 0, legs: 0, far: 0, members: 0, ok: true };
+    r.b.areas.forEach(a => {
+      ((a.tp.sheet && a.tp.sheet.levels) || []).filter(L => L.stair && L.stair.tips).forEach(L => {
+        const legs = L.stair.tips.filter(w => w.leg !== false), posts = L.stair.tips.filter(w => w.leg === false);
+        out.tips += L.stair.tips.length; out.legs += legs.length;
+        posts.forEach(w => { const d = Math.min(...legs.map(q => Math.hypot(q.p[0] - w.p[0], q.p[1] - w.p[1]))); out.far = Math.max(out.far, d); });
+        /* ...and none of them floats: every group of posts that overlap one another has a leg among them */
+        const T = L.stair.tips, par = T.map((_, i) => i), fnd = i => par[i] === i ? i : (par[i] = fnd(par[i])), held = {};
+        for (let i = 0; i < T.length; i++) for (let j = i + 1; j < T.length; j++) if (Math.hypot(T[i].p[0] - T[j].p[0], T[i].p[1] - T[j].p[1]) <= 1.3 && Math.abs(T[i].p[2] - T[j].p[2]) < 2.4) par[fnd(i)] = fnd(j);
+        T.forEach((w, i) => { if (w.leg !== false) held[fnd(i)] = true; });
+        out.floating = (out.floating || 0) + T.filter((w, i) => !held[fnd(i)]).length;
+        const tr = ((a.tp.sheet && a.tp.sheet.stairTrees) || (a.tp.stairTrees) || []).find(t => t.level === L.id);
+        if (tr) out.members += tr.members;
+        if (legs.length > Math.max(3, Math.ceil(L.stair.tips.length / 3)) || out.far > 0.65 * SI.SHEET.denseStairLegMm + 0.7 || (tr && tr.unreachable) || out.floating) out.ok = false;
+      });
+    });
+    return out;
+  }).filter(x => x.tips);
+  check('a stair\'s tips are a few legs under rows of posts: no more than a third of its tips are legs, every other post is within ' + f2(0.65 * SI.SHEET.denseStairLegMm + 0.7) + ' mm of one, and no post floats (each group of overlapping posts has a leg)',
+    stairRows.length >= 1 && stairRows.every(x => x.ok), stairRows.map(x => x.key + ' ' + x.legs + ' legs of ' + x.tips + ' tips (farthest post ' + f2(x.far) + ' mm), ' + x.members + ' crown members, ' + (x.floating || 0) + ' floating').join(', '));
   check('no support stands over the sheet\'s top (no speck in the air where the supports stop)', rows.every(r => r.over <= 0.05),
     rows.map(r => r.key + ' ' + f2(r.over)).join(', '));
   check('a sheet under a curved head stays where the part is near it: no more than 1.5 mm under the part over any cell of the plate, and its middle within 1.5 mm of the trunk\'s',
