@@ -198,6 +198,12 @@
               '0.13 mm up as one pass (PR #256\'s reading of Bambu Studio\'s behaviour); narrower is nothing. supportsOn: every NSO support object carries detect_thin_wall = 1 ' +
               '(nso_support_interface.js SHEET.slicerSettings), so a support is sliced with it on'
     },
+    // --- a support is hollow: the export's own overrides ---------------------
+    supportWalls: {
+      loops: 1, sparseDensity: 0,
+      source: 'the two overrides every NSO support object carries in the Bambu project export (nso_support_interface.js SHEET.slicerSettings: ' +
+              'wall_loops = 1, sparse_infill_density = 0%; docs/handoff/supports-no-infill.md) - a support is sliced with them on, as thinWall.supportsOn'
+    },
     // --- the flow model, shared with the importer ----------------------------
     flow: {
       filamentDiameterMm: 1.75,
@@ -1408,6 +1414,9 @@
       perObject.forEach(function (P) {
         var S = P.S, n = planes.length;
         var sparsePrev = g.empty();
+        /* A SUPPORT IS HOLLOW, as its export says (SHEET.slicerSettings: wall_loops 1, sparse_infill_density 0%) and as Bambu's own tree is: one wall
+           round the trunk and no filler inside it. The shells (the first layers, the top under a sheet) stay the profile's. */
+        var oS = P.role === 'support' ? Object.assign({}, o, { wallLoops: CONSTANTS.supportWalls.loops, sparseDensity: CONSTANTS.supportWalls.sparseDensity }) : o;
         if (P.role === 'brim') {
           /* a brim built with the supports (brimFor): one layer, its section printed as the brim's own loops, nothing else */
           for (var bi = 0; bi < n; bi++) {
@@ -1429,7 +1438,7 @@
           // Detect thin wall: the thin islands come out of the region and
           // print as their centre passes; with none, the region is as it was
           var thin = P.thin ? thinWalls(g, region, o) : null;
-          var per = perimeters(g, thin ? thin.rest : region, h, o, o.onlyOneWallTop ? above : null);
+          var per = perimeters(g, thin ? thin.rest : region, h, oS, oS.onlyOneWallTop ? above : null);
           L.wallCount = per.wallCount;
           L.wallLoopsByDepth = per.loops.map(function (lp) { return g.polys(lp.cs).length; });
 
@@ -1532,7 +1541,7 @@
           solidFill(topOnly, 'Top surface');
           solidFill(internal, 'Internal solid infill');
 
-          if (!g.isEmpty(sparse) && o.sparseDensity > 0) {
+          if (!g.isEmpty(sparse) && oS.sparseDensity > 0) {
             var sp = g.polys(sparse);
             var fams, lineSp;
             if (o.sparsePattern === 'grid') {
@@ -1927,9 +1936,8 @@
          of it is, where that part lies under a slope (sloped(): a stair's next band stands
          a little up the slope, and closeMm of it hid the band's exposed
          edge) */
-      function exposed(i, over) {
-        var a = topUnder(i, over, P.footAt(i + 1), R), b = sloped(topUnder(i, over, filled(P.footAt(i + 1)), w / 4, w / 4), i);
-        return a && b ? g.union(a, b) : a || b;
+      function exposedParts(i, over) {
+        return { a: topUnder(i, over, P.footAt(i + 1), R), b: sloped(topUnder(i, over, filled(P.footAt(i + 1)), w / 4, w / 4), i) };
       }
       /* of a stair's tops (the two allowances: against a quarter line of the
          next layer and opened by a quarter line, as a band one line wide
@@ -1964,11 +1972,13 @@
         });
         return over;
       }
+      var topsF = [], topsS = [];
       for (var i = 0; i < n; i++) {
-        tops.push(null);
+        tops.push(null); topsF.push(null); topsS.push(null);
         if (g.isEmpty(P.S[i])) continue;
         var over = overAt(i, gap);
-        var t = over.length ? exposed(i, over) : null;
+        var ep = over.length ? exposedParts(i, over) : { a: null, b: null };
+        var t = ep.a && ep.b ? g.union(ep.a, ep.b) : ep.a || ep.b, tS = ep.b;
         /* A STAIR'S STRIP (C.stairLayers): a band whole beads wide, so the
            one a layer of the part lands on can lie a layer further
            under it than a sheet does - a top there too, where it is OUTSIDE
@@ -1978,21 +1988,34 @@
           var deep = overAt(i, gap + stairH);
           if (deep.length > over.length) {
             var t2 = sloped(topUnder(i, deep, filled(P.footAt(i + 1)), w / 4, w / 4), i);
-            if (t2) { t = t ? g.union(t, t2) : t2; over = deep; }
+            if (t2) { t = t ? g.union(t, t2) : t2; tS = tS ? g.union(tS, t2) : t2; over = deep; }
           }
         }
         if (!t) continue;
-        tops[i] = t;
+        tops[i] = t; topsS[i] = tS;
+        topsF[i] = ep.a;
         over.forEach(function (x) { if (!g.isEmpty(g.inter(x.cs, t))) held[x.Q.id] = x.Q; });
       }
       // Each top down through its stack: a layer's islands that overlap the
       // sheet's islands on the layer above are the sheet's (each layer's lines
       // cross the ones above), for NI + NT layers; the islands under the last
       // that overlap it are its tips.
-      var zones = P.layers.map(function () { return { i: [], t: [] }; });
+      var reachMm = gap + (NI + NT + 2) * (planes.length ? planes[planes.length - 1].h : 0.2);
+      function underPart(j, U) {
+        var over = overAt(j, reachMm);
+        if (!over.length) return false;
+        var H = g.unionAll(over.map(function (x) { return x.cs; })), a = g.area(U);
+        return a > 0 && g.area(g.inter(U, H)) >= 0.5 * a;
+      }
+      var zones = P.layers.map(function () { return { i: [], t: [], is: [], ts: [] }; });
       var sheets = [];
-      tops.forEach(function (t, i0) {
-        if (!t) return;
+      tops.forEach(function (tAll, i0) {
+        if (!tAll) return;
+        var lowest = i0, tipsN = 0, mLast = 0;
+        /* a flat sheet's top and a stair's strip are walked down apart: the stair's zones are held to the part's nearness below (STAIR ZONES) */
+        [{ cs: topsF[i0], stair: false }, { cs: topsS[i0], stair: true }].forEach(function (comp) {
+        var t = comp.cs;
+        if (!t || g.isEmpty(t)) return;
         var lvl = g.parts(P.S[i0]).filter(function (p) { return !g.isEmpty(g.inter(p, t)); });
         var lo = i0, m = 0, prevFoot = null;
         /* past NI + NT the transition runs on while a layer repeats the
@@ -2002,25 +2025,92 @@
         for (; lvl.length; m++) {
           var j = i0 - m, U = g.unionAll(lvl), foot = g.offset(g.offset(U, R), -R);
           if (m >= NI + NT && !(prevFoot && g.area(g.diff(foot, prevFoot)) + g.area(g.diff(prevFoot, foot)) <= w * w)) break;
-          (m < NI ? zones[j].i : zones[j].t).push(U);
+          /* ...and only while it lies under the part: a column or a crown's body stands the same layer after layer, and is the tree under
+             the sheet, not the sheet - Support, as Bambu's tree is, where the stair's strips stand alike on a steep wall only within reach */
+          if (m >= NI + NT && !underPart(j, U)) break;
+          (comp.stair ? (m < NI ? zones[j].is : zones[j].ts) : (m < NI ? zones[j].i : zones[j].t)).push(U);
           lo = j; prevFoot = foot;
           if (j - 1 < 0) { lvl = []; break; }
           lvl = g.parts(P.S[j - 1]).filter(function (p) { return g.area(g.inter(p, U)) > 1e-6; });
         }
-        sheets.push({ topLayer: i0, zLo: planes[lo].printZ - planes[lo].h, zHi: planes[i0].printZ,
-                      areaMm2: g.area(t), tips: m >= NI + NT ? lvl.length : 0 });
+        lowest = Math.min(lowest, lo); mLast = Math.max(mLast, m); tipsN = Math.max(tipsN, m >= NI + NT ? lvl.length : 0);
+        });
+        sheets.push({ topLayer: i0, zLo: planes[lowest].printZ - planes[lowest].h, zHi: planes[i0].printZ,
+                      areaMm2: g.area(tAll), tips: tipsN });
       });
       var counts = { 'Support': 0, 'Support transition': 0, 'Support interface': 0 };
+      /* STAIR ZONES. A stair's strips stand beside the posts that hold them, and a post is one island with the strip it touches (a row of posts is
+         one blade): the zone of a stair's strip, walked down by islands, took the whole blade with it. A stair's zone holds only where the part is
+         over the line within the stack's own depth - the interface layers and the transition under them, and a layer for the strip's back edge, as
+         Bambu types what lies under its overhang - so a column further down is the tree under the sheet: Support. A flat sheet keeps its islands
+         (a dome's flat sheet lies up to its reach under the part at the rim, and is all sheet). A path that is part sheet and part tree is split
+         where its type changes (a loop of a strip with a post's wall on it is an interface run and a support run). */
+      var hIm = P.layers.length ? planes[planes.length - 1].h : 0.2;
+      var dIn = gap + (NI - 1) * hIm + stairH + 0.05, dTr = gap + (NI + NT - 1) * hIm + stairH + 0.05;
+      function hostPolys(j, d) {
+        var over = overAt(j, d);
+        return over.length ? g.polys(g.unionAll(over.map(function (x) { return x.cs; }))) : [];
+      }
+      function inPolys(polys, x, y) { return polys.length ? inside(polys, x, y) : false; }
+      var SPLIT_MIN_MM = 0.6;
       P.layers.forEach(function (L, j) {
         if (!L.paths.length) return;
         var zi = zones[j].i.length ? g.polys(g.offset(g.unionAll(zones[j].i), w / 2)) : [];
         var zt = zones[j].t.length ? g.polys(g.offset(g.unionAll(zones[j].t), w / 2)) : [];
+        var zis = zones[j].is.length ? g.polys(g.offset(g.unionAll(zones[j].is), w / 2)) : [];
+        var zts = zones[j].ts.length ? g.polys(g.offset(g.unionAll(zones[j].ts), w / 2)) : [];
+        var hI = null, hT = null;
+        function labelAt(x, y) {
+          if (zi.length && inside(zi, x, y)) return 'Support interface';
+          if (zt.length && inside(zt, x, y)) return 'Support transition';
+          if (zis.length || zts.length) {
+            if (!hT) { hI = hostPolys(j, dIn); hT = hostPolys(j, dTr); }
+            if (zis.length && inside(zis, x, y) && inPolys(hI, x, y)) return 'Support interface';
+            if ((zis.length && inside(zis, x, y) || zts.length && inside(zts, x, y)) && inPolys(hT, x, y)) return 'Support transition';
+          }
+          return 'Support';
+        }
+        var out = [];
         L.paths.forEach(function (p) {
-          var si = zi.length ? shareInside(p, zi) : 0;
-          var st = zt.length && si < 0.5 ? shareInside(p, zt) : 0;
-          p.feature = si >= 0.5 ? 'Support interface' : (si + st >= 0.5 ? 'Support transition' : 'Support');
-          counts[p.feature]++;
+          var pts = p.pts, np = pts.length, m = p.closed ? np : np - 1;
+          if (m < 1) { p.feature = 'Support'; out.push(p); counts[p.feature]++; return; }
+          /* the path's segments, each typed at its middle (a long one at three places, the majority) */
+          var lab = [], len = [];
+          for (var e = 0; e < m; e++) {
+            var a = pts[e], b = pts[(e + 1) % np], l = Math.hypot(b[0] - a[0], b[1] - a[1]);
+            len.push(l);
+            if (!(zi.length || zt.length || zis.length || zts.length)) { lab.push('Support'); continue; }
+            var votes = {}, ks = l > 0.5 ? [1 / 6, 0.5, 5 / 6] : [0.5];
+            ks.forEach(function (k) { var q = labelAt(a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k); votes[q] = (votes[q] || 0) + 1; });
+            lab.push(Object.keys(votes).sort(function (u, v) { return votes[v] - votes[u]; })[0]);
+          }
+          /* a run shorter than SPLIT_MIN_MM is its neighbour's (a flicker where a wall crosses the zone's edge) */
+          var runs = [];
+          lab.forEach(function (q, e) { var r = runs[runs.length - 1]; if (r && r.f === q) { r.to = e; r.l += len[e]; } else runs.push({ f: q, from: e, to: e, l: len[e] }); });
+          if (p.closed && runs.length > 1 && runs[0].f === runs[runs.length - 1].f) { var lastR = runs.pop(); runs[0].from = lastR.from - m; runs[0].l += lastR.l; }
+          for (var guard = 0; guard < 8 && runs.length > 1; guard++) {
+            var ri = -1, mn = SPLIT_MIN_MM;
+            runs.forEach(function (r, q) { if (r.l < mn) { mn = r.l; ri = q; } });
+            if (ri < 0) break;
+            var prevR = runs[(ri + runs.length - 1) % runs.length], nextR = runs[(ri + 1) % runs.length], take = prevR.l >= nextR.l ? prevR : nextR;
+            runs[ri].f = take.f;
+            var merged = [];
+            runs.forEach(function (r) { var q = merged[merged.length - 1]; if (q && q.f === r.f) { q.to = r.to; q.l += r.l; } else merged.push({ f: r.f, from: r.from, to: r.to, l: r.l }); });
+            if (p.closed && merged.length > 1 && merged[0].f === merged[merged.length - 1].f) { var lm = merged.pop(); merged[0].from = lm.from - m; merged[0].l += lm.l; }
+            runs = merged;
+          }
+          if (runs.length <= 1) { p.feature = runs.length ? runs[0].f : 'Support'; out.push(p); counts[p.feature]++; return; }
+          runs.forEach(function (r) {
+            var piece = [], from = r.from, to = r.to;
+            for (var e2 = from; e2 <= to; e2++) { var idx = ((e2 % np) + np) % np; piece.push(pts[idx]); }
+            piece.push(pts[(((to + 1) % np) + np) % np]);
+            var np2 = {};
+            Object.keys(p).forEach(function (kk) { np2[kk] = p[kk]; });
+            np2.pts = piece; np2.closed = false; np2.feature = r.f;
+            out.push(np2); counts[r.f]++;
+          });
         });
+        L.paths = out;
       });
       /* OVERHANG, as a slicer types a wall: a line of the support whose
          centre leaves the layer under it - that layer read as the footprint it

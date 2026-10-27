@@ -245,6 +245,7 @@
   var CROWN_BALL_SEGS = 10;         /* ...and a join a ball of this many bands (twice that round) */
   var CROWN_ROOT_FLOOR_MM = FLARE_MM + 2;   /* the first join is at least this far over the plate: the flare stays in the trunk */
   var CROWN_NODE_RINGS = [1, 2, 3, 4.5, 6, 8];   /* a join that its branches cannot reach clear is tried this far off its place, in STEER_HEADINGS directions */
+  var LEAN_FLOOR_MM = 1.5;          /* a join or a leg's end lowered to hold the lean limit stands no lower than this over the plate */
   var CROWN_SEARCH_STEP_MM = 0.5;   /* a trunk moved off the centre of its circle is tried this far apart, in RELAND_HEADINGS directions */
 
   /* THE CROWN'S KNOBS: every value above is a DEFAULT, none a rule. opts.crown = { areaRatio, tipDropMm, nodeDropMm, ovalMax,
@@ -1148,6 +1149,7 @@
       /* the lean a branch is DESIGNED to: half the widest angle Bambu's joins measure, so that a branch and the one it
          joins never bend past it (the limit itself, tiltDeg, is what marks) */
       var tanD = Math.tan((CK.designLeanDeg != null ? CK.designLeanDeg : Math.min(tiltDeg, JOINS.angleDeg[1] / 2)) * Math.PI / 180);
+      var tanLim = Math.tan(tiltDeg * Math.PI / 180);
       var thProbes = null;
       function probesTH() {
         if (!thProbes) thProbes = TH && typeof TH.prepare === 'function' ? obstacles.filter(function (sp) { return sp && sp.length >= 9; }).map(function (sp) { return probeOf(TH, sp); }).filter(Boolean) : [];
@@ -1273,7 +1275,11 @@
                 var minDrop = c.leaf ? CK.tipDropMm : Math.max(CK.nodeDropMm, 1.25 * rTipOf(c.tips.length));
                 base = Math.min(base, zOf[cid] - Math.max(h / tanD, minDrop)); mn = Math.min(mn, zOf[cid]);
               });
-              return Math.min(Math.max(base, floor), mn - 0.5);
+              /* a join stands no higher than its branches' lean (the limit, tiltDeg) lets it: a leg of 80 deg that the floor under the joins made is a
+                 bar that will not print (the owner: "comes off the trunk at a 90"). The root's own legs are lowered one by one below (S). */
+              var zLn = Infinity;
+              if (!n.root) n.kids.forEach(function (cid) { zLn = Math.min(zLn, zOf[cid] - (nodes[cid].leaf ? CK.tipRiseMm : 0) - hdist(P[cid], lat) / tanLim); });
+              return Math.min(Math.max(base, floor), mn - 0.5, Math.max(zLn, plateZ + LEAN_FLOOR_MM));
             }
             if (n.root || !check) { zOf[n.id] = zAt(P[n.id]); if (!n.root) P[n.id][2] = zOf[n.id]; return; }
             /* against the piece (and what is erased): the join stands where its branches reach it clear - at its place, else
@@ -1302,7 +1308,10 @@
             P[n.id][2] = zOf[n.id];
           });
           var zTop = zOf[root.id];
-          rootKids.forEach(function (cid) { S[cid][2] = zTop; });
+          rootKids.forEach(function (cid) {
+            /* a root's leg that would lean past the limit meets the trunk lower, where it is going: its end is inside the trunk's body */
+            S[cid][2] = Math.min(zTop, Math.max(zOf[cid] - (nodes[cid].leaf ? CK.tipRiseMm : 0) - hdist(P[cid], S[cid]) / tanLim, plateZ + LEAN_FLOOR_MM));
+          });
           /* the thickness: area kept at a join, widening going down */
           /* the uniform trunk (crown.trunk.uniformH): no branch is thicker than the trunk it joins - a stair's forty tips on one root made a
              tube 8 mm across over a 4 mm stem (the owner: "abnormally thick compared to the others") */
@@ -1943,7 +1952,7 @@
      edge crossings; a quad over each edge that changes sign), every vertex then walked onto the surface along the field's gradient. Closed and outward-wound.
      prims: [{ pts: [[x, y, z]...], r: [radius at each point], clip: { p, n } (optional: cut flat at the plane through p, nothing on the side n points to) }]; k: the blend, mm. Float32Array soup, empty if there is nothing. */
   function blobSoup(prims, k, h, cut) {
-    /* cut: { zMax, away: function (x, y, z) -> the distance to what the body keeps off, keep } - the body is cut flat at zMax and carved back from `away` by `keep` */
+    /* cut: { zMax, zMin (the plate: no body stands under it), away: function (x, y, z) -> the distance to what the body keeps off, keep } - the body is cut flat at zMax and carved back from `away` by `keep` */
     if (!prims.length) return new Float32Array(0);
     /* the cell is no finer than the body's size allows: its surface, as the capsules' (a path's length x its girth, its ends), at 2 triangles a cell, is held to
        CROWN_BLOB_TRIS - a crown of 25 paths over 40 mm is 150 k triangles at 0.2 mm and a quarter of that at 0.35, and as smooth to the eye */
@@ -1990,6 +1999,7 @@
     function carve(f, px, py, pz, useAway) {
       if (!cut || f >= 1) return f;
       if (cut.zMax != null && pz - cut.zMax > f) f = pz - cut.zMax;
+      if (cut.zMin != null && cut.zMin - pz > f) f = cut.zMin - pz;
       if (useAway && cut.away && f < 0.6) { var da = cut.away(px, py, pz); if (cut.keep - da > f) f = cut.keep - da; }
       return f;
     }
@@ -3492,10 +3502,11 @@
           rTr = function (z) { return LWs.tipMm / 2 + tas * Math.max(0, Hs - z) + (rootM.oval.dR || 0); };
         } else rTr = function () { return rootM.side / 2; };
         var rTop = rTr(zt);
-        prims.push({ pts: [[ax[0], ax[1], zt - 3], [ax[0], ax[1], zt - 0.65 * rTop]], r: [rTr(zt - 3), rTr(zt - 0.65 * rTop)] });
+        var zSh = Math.max(zt - 3, p.plateZ + 0.5 * rTop);        /* a join that a lean limit brought down to the flare: its shoulder starts above the plate */
+        prims.push({ pts: [[ax[0], ax[1], zSh], [ax[0], ax[1], Math.max(zSh + 0.2, zt - 0.65 * rTop)]], r: [rTr(zSh), rTr(Math.max(zSh + 0.2, zt - 0.65 * rTop))] });
         var THc = TM(opts), keepR = TRUNK_KEEP_MM + 0.05, probesC = THc ? [opts.rawTris || []].concat(opts.occluders || []).filter(function (sp) { return sp && sp.length >= 9; })
           .map(function (sp) { return probeOf(THc, sp); }).filter(Boolean) : [];
-        var cutB = { zMax: opts._clipZ != null ? opts._clipZ : null, keep: keepR,
+        var cutB = { zMax: opts._clipZ != null ? opts._clipZ : null, zMin: p.plateZ, keep: keepR,
           away: probesC.length ? function (x, y, z) { var d = Infinity; for (var q = 0; q < probesC.length; q++) { var hit = probesC[q].nearest([x, y, z], keepR + 0.3); if (hit && hit.dist < d) d = hit.dist; } return d; } : null };
         var blob = blobSoup(prims, CKn.blendMm || CROWN_BLEND_MM, CKn.blobCellMm || CROWN_BLOB_CELL_MM, cutB);
         if (!blob.length) return stepCrown(t, tr, true);          /* a body no mesher could make closed: the crown is built the old way, balls and tubes */
