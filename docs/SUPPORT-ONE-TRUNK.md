@@ -193,7 +193,7 @@ the option (the shipped Custom feed's bytes are the claude-wip's; `support:feed`
     (`STAIR_FILL_MM`): 13 on the Oblique (12 round the edge, 1 inside), the farthest outline cell 2.06 mm from a tip (`stair.perimGapMm`), every tip a leg of the stair's own tree
     (no `leg: false` posts). In the crown (`stepCrown`) a stair-tree tip (`opts._stairTree`) has no exact stub: its prim in the smooth body is a cone from the leg's radius at the
     bend to 0.62 of it at the tip, cut flat 0.18 mm into the strip, so the twig leaves the branch it hangs from and dies in the transition. `support:onetrunk`: "a stair's tips
-    are twigs along its perimeter" (every tip a leg, no outline cell more than 3.0 mm from a tip).
+    are twigs along its perimeter" (every tip a leg, no outline cell more than 3.0 mm from a tip). The slicer's stair transition depth is `gap` + 3 layers + 0.35 mm (was 0.1): a layer's footprint ends 0.5 mm past the 0.1 mark, and its outline wall there was Support where Bambu has its transition line beside the interface ribbon; at 0.35 the layer view matches Bambu's (interface ribbon, transition line beside it, Support beyond), the stack counting up to 6 at p90 on the Oblique.
 **The interface (`interfaceLayers`, `SHEET.densePitchMm`).** `sheet()` takes `interfaceLayers` (2 unless said): 2 transition
 layers and that many interface layers, the interface alternating across and along the sheet's A. The card's **Dense (Bambu)**
 interface is pitch **0.47 mm** (Bambu's 0.46: the strip's joins need a segment of 0.4665, and at 0.46 the stair under

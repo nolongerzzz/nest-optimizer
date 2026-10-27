@@ -417,8 +417,8 @@ const segLen = s => Math.hypot(s.x1 - s.x0, s.y1 - s.y0);
     leans.every(x => x.hostMax <= 75 + 0.5 && x.stairMax <= 50 + 0.5), leans.map(x => x.key + ' ' + f1(x.hostMax) + (x.stairMax ? ' / stair ' + f1(x.stairMax) : '')).join(', '));
   check('the tree runs up with the sheet: a line of Support within 1.5 mm of the top of the interface and transition (under a stair, Support beside every strip; the oblique\'s stair stands 4.2 mm)',
     rows.every(r => r.tiTop - r.supTop <= 1.5 + 1e-9), rows.map(r => r.key + ' Support to ' + f2(r.supTop) + ', sheet to ' + f2(r.tiTop)).join(', '));
-  check('the sheet is as deep as a flat one wherever it lies: over 90 % of the plan, no more than 5 layers of interface and transition (a flat sheet is 4), the stair as much as the flat heads',
-    rows.every(r => r.stackP90 <= 5), rows.map(r => r.key + ' p90 ' + r.stackP90 + ' max ' + r.stackMax).join(', '));
+  check('the sheet is as deep as a flat one wherever it lies: over 90 % of the plan, no more than 6 layers of interface and transition (a flat sheet is 4; the transition ribbon, a line beside each layer interface as in Bambu, overlaps the neighbour layers by a cell), the stair no deeper than that',
+    rows.every(r => r.stackP90 <= 6), rows.map(r => r.key + ' p90 ' + r.stackP90 + ' max ' + r.stackMax).join(', '));
   check('a trunk is hollow: at 3 mm its lines are one wall round it (their length no more than 1.5 x the circle of its width), no infill inside',
     rows.every(r => r.wallRatio == null || r.wallRatio <= 1.5), rows.map(r => r.key + ' ' + (r.wallRatio == null ? '-' : r.wallRatio.toFixed(2))).join(', '));
   check('no support stands over the sheet\'s top (no speck in the air where the supports stop)', rows.every(r => r.over <= 0.05),
