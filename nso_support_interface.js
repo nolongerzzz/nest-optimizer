@@ -864,6 +864,15 @@
   var PERIM_GROW_MM = [0, -0.3, -0.6, -0.9, -1.2];   /* a rim too thin for the sheet's 2 mm lines: the outline taken to its edge, then out past it by this much (a negative margin), the least that gives a sheet */
   var FILL_MM = 3;             /* THE FILL: with the contact surface's footprint (opts.footprints) a level's field runs this far past a cap's rim, to the footprint's edge and no further... */
   var FILL_REACH_MM = 1.2;     /* ...wherever the part is this near over the stack's top (the legacy field, a cap and 1.25 mm, needs no such reach) */
+  var CONC_CUSHION_MM = 0.08;      /* the opened level set keeps its walls this much more than a line width apart (what the cleaning of a loop moves them by: the extrusion refuses an overlap) */
+  var CONC_SIMPLIFY_MM = 0.015;    /* a loop's points within this of the line between their neighbours go */
+  var REGION_MARGIN_MM = 0.1;     /* the region plate's cells lie this far in from the footprint's edge; its first loop is the edge of that, so the wall (centre ~0.15 mm in, a half line either side) stays inside the footprint */
+  var REGION_FLAT_MM = 0.3;       /* a footprint whose height (2nd to 98th percentile) varies by no more than this is one flat face: the plate is one level at its lowest height */
+  var SHELL_START_MM = 1.2;        /* the height rays start under the footprint's lowest spot: the underside may be lower than any spot of it */
+  var REGION_PLANE_SHARE = 0.25;  /* ...or, on a big range, within this share of the range (a plane's residual is a few percent of its height, a dome's a quarter) */
+  var REGION_PLANE_MM = 0.15;     /* ...and a footprint whose surface lies within this of one plane that leans 3 - 70 deg is a stair's, not the plate's */
+  var REGION_MIN_LOOP_MM = 2.4;   /* a loop of the region plate shorter than this is a speck of the level set (a medial axis's end), not a line */
+  var FILL_FLAT_MM = 2.4;      /* the region plate (and the fill) is for a footprint whose height range (its spots', and 1.6 mm of padding) is no more than this: a face of one height, not a slope or a dome */
   var FILL_MAX_TIPS = 16;      /* ...for a level of this many tips or fewer: a few tips on a wide surface is what it is for; a level of dozens already stands across its surface, and the filled build of the clamp's 54-tip level costs 5.5 s for next to nothing (+0.5 % of the support) */
   var PERIM_NEAR_MM = 3.6;     /* a level none of whose tips is this near the part's edge (a cap's 2 mm, the field's 1.25, the margin) is built as it always was: the outline cannot reach it */
   var PERIM_MARGIN_MM = 0.2;   /* ...and this far in from where it stops, a line's centre: its edge (0.2) ends on the outline, not over the air beyond it */
@@ -919,6 +928,237 @@
   var STAIR_STUB_MM = 0.45;    /* ...with no corner nearer the loop's ends than this */
   var STAIR_START = 0.6;       /* the stair starts where a strip first runs this share of the longest strip's length */      /* a strip lies only where the part's underside is this near over it */
 
+  /* =====================================================================
+     THE REGION PLATE'S GEOMETRY (docs/SUPPORT-FOOTPRINT.md section 9): a region on a raster - the footprint's cells that a stack may stand in - as
+     the closed loops a plate of concentric lines is printed in. Pure functions of typed arrays: the distance to the region's edge, the level sets
+     of it (marching squares, linear along an edge), and the polyline cleaned. A level set is OPENED first (what is thinner than a line and its gap
+     goes), so no two walls of a layer are nearer than the line width: the extrusion refuses an overlap.
+     ===================================================================== */
+  /* the Euclidean distance, in cells, from each cell of mask (1) to the nearest cell that is 0 (Felzenszwalb - Huttenlocher); 0 on a 0 cell. The
+     raster's frame is not a zero: the caller leaves a margin of them. */
+  function edtCells(mask, nx, ny) {
+    var BIG = 1e12, n = Math.max(nx, ny), f = new Float64Array(n), d = new Float64Array(n), v = new Int32Array(n), z = new Float64Array(n + 1);
+    var g = new Float64Array(nx * ny), out = new Float32Array(nx * ny), i, j;
+    function pass(len) {
+      var k = 0;
+      v[0] = 0; z[0] = -BIG; z[1] = BIG;
+      for (var q = 1; q < len; q++) {
+        var sx;
+        for (;;) {
+          sx = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+          if (sx > z[k] || k === 0) break;
+          k--;
+        }
+        if (sx > z[k]) { k++; v[k] = q; z[k] = sx; z[k + 1] = BIG; } else { v[k] = q; z[k] = -BIG; z[k + 1] = BIG; }
+      }
+      k = 0;
+      for (var q2 = 0; q2 < len; q2++) {
+        while (z[k + 1] < q2) k++;
+        d[q2] = (q2 - v[k]) * (q2 - v[k]) + f[v[k]];
+      }
+    }
+    for (i = 0; i < nx; i++) {
+      for (j = 0; j < ny; j++) f[j] = mask[j * nx + i] ? BIG : 0;
+      pass(ny);
+      for (j = 0; j < ny; j++) g[j * nx + i] = d[j];
+    }
+    for (j = 0; j < ny; j++) {
+      for (i = 0; i < nx; i++) f[i] = g[j * nx + i];
+      pass(nx);
+      for (i = 0; i < nx; i++) out[j * nx + i] = d[i] >= BIG / 2 ? 1e6 : Math.sqrt(d[i]);
+    }
+    return out;
+  }
+  /* the closed loops of {val > level} on the raster: polylines of [i, j] in cells, the first point repeated; marching squares, the crossing found
+     along its edge by linear interpolation (a saddle is read by the cell's mean) */
+  var MS_TABLE = [null, [[3, 0]], [[0, 1]], [[3, 1]], [[1, 2]], null, [[0, 2]], [[3, 2]], [[2, 3]], [[0, 2]], null, [[1, 2]], [[1, 3]], [[0, 1]], [[3, 0]], null];
+  function isoLoops(val, nx, ny, level) {
+    var adj = new Map(), pos = new Map();
+    function edgeId(e, i, j) {      /* 0 bottom (i,j)-(i+1,j), 1 right (i+1,j)-(i+1,j+1), 2 top (i,j+1)-(i+1,j+1), 3 left (i,j)-(i,j+1) */
+      if (e === 0) return 2 * (j * nx + i);
+      if (e === 1) return 2 * (j * nx + i + 1) + 1;
+      if (e === 2) return 2 * ((j + 1) * nx + i);
+      return 2 * (j * nx + i) + 1;
+    }
+    function at(e, i, j) {
+      var id = edgeId(e, i, j), p = pos.get(id);
+      if (p) return id;
+      var ia = i, ja = j, ib = i, jb = j;
+      if (e === 0) { ib = i + 1; } else if (e === 1) { ia = i + 1; ib = i + 1; jb = j + 1; } else if (e === 2) { ja = j + 1; ib = i + 1; jb = j + 1; } else { jb = j + 1; }
+      var va = val[ja * nx + ia], vb = val[jb * nx + ib], t = vb === va ? 0.5 : (level - va) / (vb - va);
+      pos.set(id, [ia + (ib - ia) * t, ja + (jb - ja) * t]);
+      return id;
+    }
+    function link(a, b) {
+      if (!adj.has(a)) adj.set(a, []);
+      if (!adj.has(b)) adj.set(b, []);
+      adj.get(a).push(b); adj.get(b).push(a);
+    }
+    for (var j = 0; j + 1 < ny; j++) for (var i = 0; i + 1 < nx; i++) {
+      var va = val[j * nx + i] > level, vb = val[j * nx + i + 1] > level, vc = val[(j + 1) * nx + i + 1] > level, vd = val[(j + 1) * nx + i] > level;
+      var cs = (va ? 1 : 0) | (vb ? 2 : 0) | (vc ? 4 : 0) | (vd ? 8 : 0);
+      if (cs === 0 || cs === 15) continue;
+      var segs;
+      if (cs === 5 || cs === 10) {
+        var mid = (val[j * nx + i] + val[j * nx + i + 1] + val[(j + 1) * nx + i + 1] + val[(j + 1) * nx + i]) / 4 > level;
+        if (cs === 5) segs = mid ? [[0, 1], [2, 3]] : [[3, 0], [1, 2]];
+        else segs = mid ? [[3, 0], [1, 2]] : [[0, 1], [2, 3]];
+      } else segs = MS_TABLE[cs];
+      for (var s = 0; s < segs.length; s++) link(at(segs[s][0], i, j), at(segs[s][1], i, j));
+    }
+    var loops = [], seen = new Set();
+    adj.forEach(function (_, start) {
+      if (seen.has(start)) return;
+      var ring = [], cur = start, prev = -1;
+      for (;;) {
+        seen.add(cur); ring.push(pos.get(cur));
+        var nb = adj.get(cur), nx2 = nb[0] === prev && nb.length > 1 ? nb[1] : nb[0];
+        if (nb.length === 2 && nb[0] === nb[1]) nx2 = nb[0];
+        if (nx2 === undefined || seen.has(nx2)) break;
+        prev = cur; cur = nx2;
+      }
+      if (ring.length >= 3) { ring.push(ring[0].slice()); loops.push(ring); }
+    });
+    return loops;
+  }
+  /* a closed ring made fit for the extrusion: every segment at least as long as the joins at its two ends need (a join of turn t eats half a width times
+     tan(t / 2) of each segment it ends), by merging the vertex of the least turn of a segment that is too short into its neighbours; null when the
+     ring cannot be made so (fewer than 3 points, or a turn so sharp no length serves) */
+  function fitRing(ring, halfW) {
+    var pts = ring.slice(0, -1);
+    function turn(i) {
+      var n = pts.length, a = pts[(i + n - 1) % n], b = pts[i], c = pts[(i + 1) % n];
+      var ux = b[0] - a[0], uy = b[1] - a[1], vx = c[0] - b[0], vy = c[1] - b[1], lu = Math.hypot(ux, uy), lv = Math.hypot(vx, vy);
+      if (lu < 1e-9 || lv < 1e-9) return Math.PI;
+      return Math.acos(Math.max(-1, Math.min(1, (ux * vx + uy * vy) / (lu * lv))));
+    }
+    function eat(i) { var t = turn(i); return t > Math.PI * 0.8 ? Infinity : halfW * Math.tan(t / 2); }
+    for (var guard = 0; guard < 4000 && pts.length >= 3; guard++) {
+      var n = pts.length, bad = -1, worst = 0;
+      for (var i = 0; i < n; i++) {
+        var j = (i + 1) % n, len = Math.hypot(pts[j][0] - pts[i][0], pts[j][1] - pts[i][1]), need = eat(i) + eat(j) + 0.02;
+        if (len < need && need - len > worst) { worst = need - len; bad = i; }
+      }
+      if (bad < 0) { pts.push(pts[0].slice()); return pts; }
+      var b2 = (bad + 1) % n, drop = turn(bad) <= turn(b2) ? bad : b2;
+      if (!isFinite(eat(drop)) && !isFinite(eat(drop === bad ? b2 : bad))) return null;
+      pts.splice(drop, 1);
+    }
+    return null;
+  }
+  /* THE CONCENTRIC LOOPS of a region (the mask's 1 cells, a raster of nx x ny cells of cellMm with its [0, 0] at (ox, oy)): the level sets of the distance
+     to its edge, the first a tenth of a mm in, then a pitch apart, each opened by half a line and its gap so no two walls are nearer than a line width,
+     each cleaned to what the extrusion takes; as { ring: [[x, y], ... closed], lenMm, level }. How a raft is laid, and Bambu's interface. */
+  function concentricLoops(M, nx, ny, ox, oy, cellMm, pitchMm, widthMm, minLoopMm, maxLevels) {
+    var N = nx * ny, dist = edtCells(M, nx, ny), dmax = 0, loops = [];
+    for (var qd = 0; qd < N; qd++) if (dist[qd] > dmax) dmax = dist[qd];
+    var half = (widthMm + CONC_CUSHION_MM) / 2 / cellMm;
+    for (var lv = 0; !maxLevels || lv < maxLevels; lv++) {
+      var lev = 0.5 + 0.1 / cellMm + lv * pitchMm / cellMm;                     /* cells: half a cell to the edge itself, then a tenth of a mm in, then a pitch each */
+      if (lev > dmax) break;
+      var T = new Uint8Array(N);
+      for (var qt = 0; qt < N; qt++) T[qt] = dist[qt] >= lev ? 1 : 0;
+      var e = edtCells(T, nx, ny), core = new Uint8Array(N), any = false;
+      for (var qc = 0; qc < N; qc++) { if (T[qc] && e[qc] - 0.5 >= half - 1e-9) { core[qc] = 0; any = true; } else core[qc] = 1; }     /* 0 = a cell the opened set stands on */
+      if (!any) break;
+      var gd = edtCells(core, nx, ny), h = new Float32Array(N);
+      for (var qh = 0; qh < N; qh++) h[qh] = half + 0.5 - gd[qh];
+      isoLoops(h, nx, ny, 0).forEach(function (ring) {
+        var mm = ring.map(function (p) { return [ox + p[0] * cellMm, oy + p[1] * cellMm]; });
+        var sr = simplifyRing(mm, CONC_SIMPLIFY_MM), len = 0;
+        sr = sr && fitRing(sr, widthMm / 2);
+        if (!sr) return;
+        for (var k = 1; k < sr.length; k++) len += Math.hypot(sr[k][0] - sr[k - 1][0], sr[k][1] - sr[k - 1][1]);
+        if (len >= minLoopMm) loops.push({ ring: sr, lenMm: len, level: lv });
+      });
+    }
+    return loops;
+  }
+  /* THE PLATE OF A REGION, as Bambu lays a raft and its interface: an outline loop hugging the region's edge, and inside it a hatch at hatchDeg (the
+     caller alternates it layer by layer), the lines a pitch apart on a lattice fixed in the plane (so two layers of one direction stack line on line),
+     each running to a line's gap short of the loop - the loops and the lines are separate paths, never touching, which the extrusion takes. A region too
+     thin for a hatch inside its loop (nothing left a hatch-line's gap and a half inside it) is laid in concentric loops as it is. Returns
+     { loops: [{ ring, lenMm }], lines: [[[x0, y0], [x1, y1]], ...] }. */
+  function plateOfRegion(M, nx, ny, ox, oy, cellMm, pitchMm, widthMm, hatchDeg, minLoopMm, minLineMm) {
+    var N = nx * ny, outline = concentricLoops(M, nx, ny, ox, oy, cellMm, pitchMm, widthMm, minLoopMm, 1);
+    if (!outline.length) return { loops: [], lines: [] };
+    var edgeIn = 0.1 + widthMm + 0.1;      /* the hatch starts this far in from the edge: the outline's centre, then a line and a gap */
+    var dist = edtCells(M, nx, ny), H = new Uint8Array(N), any = false;
+    for (var q = 0; q < N; q++) if (dist[q] >= edgeIn / cellMm + 0.5) { H[q] = 1; any = true; }
+    if (!any) return { loops: concentricLoops(M, nx, ny, ox, oy, cellMm, pitchMm, widthMm, minLoopMm), lines: [] };      /* too thin for a hatch: all its loops */
+    var th = hatchDeg * Math.PI / 180, ux = Math.cos(th), uy = Math.sin(th), nxv = -uy, nyv = ux, lines = [];
+    var cmin = Infinity, cmax = -Infinity, tmin = Infinity, tmax = -Infinity;
+    for (var j = 0; j < ny; j++) for (var i = 0; i < nx; i++) if (H[j * nx + i]) {
+      var x = ox + i * cellMm, y = oy + j * cellMm, c = x * nxv + y * nyv, t = x * ux + y * uy;
+      if (c < cmin) cmin = c; if (c > cmax) cmax = c; if (t < tmin) tmin = t; if (t > tmax) tmax = t;
+    }
+    var step = cellMm / 2;
+    function inH(x, y) {
+      var ii = Math.round((x - ox) / cellMm), jj = Math.round((y - oy) / cellMm);
+      return ii >= 0 && ii < nx && jj >= 0 && jj < ny && H[jj * nx + ii] === 1;
+    }
+    for (var k = Math.ceil(cmin / pitchMm); k * pitchMm <= cmax; k++) {
+      var cc = k * pitchMm, run = null;
+      for (var tt = tmin - 4 * step; tt <= tmax + 4 * step; tt += step) {
+        var px = cc * nxv + tt * ux, py = cc * nyv + tt * uy, on = inH(px, py);
+        if (on && !run) run = [tt, tt];
+        else if (on) run[1] = tt;
+        else if (run) { if (run[1] - run[0] >= minLineMm) lines.push([[cc * nxv + run[0] * ux, cc * nyv + run[0] * uy], [cc * nxv + run[1] * ux, cc * nyv + run[1] * uy]]); run = null; }
+      }
+      if (run && run[1] - run[0] >= minLineMm) lines.push([[cc * nxv + run[0] * ux, cc * nyv + run[0] * uy], [cc * nxv + run[1] * ux, cc * nyv + run[1] * uy]]);
+    }
+    return { loops: outline, lines: lines };
+  }
+  /* a mask with its edge smoothed: three box blurs of radius r cells (about a gaussian of 0.9 r) and the 0.5 level; a stepped edge (the height map's
+     layers) and its spikes become a curve a loop can follow. The mask's own cells never grow past the blur: nothing is added more than r cells out. */
+  function smoothMask(M, nx, ny, r) {
+    var N = nx * ny, a = new Float32Array(N), b = new Float32Array(N), i, j, p, k, w = 2 * r + 1;
+    for (i = 0; i < N; i++) a[i] = M[i] ? 1 : 0;
+    for (p = 0; p < 3; p++) {
+      for (j = 0; j < ny; j++) {
+        var acc = 0;
+        for (i = -r; i < nx + r; i++) {
+          if (i + r < nx) acc += i + r >= 0 ? a[j * nx + i + r] : 0;
+          if (i - r - 1 >= 0 && i - r - 1 < nx) acc -= a[j * nx + i - r - 1];
+          if (i >= 0 && i < nx) b[j * nx + i] = acc / w;
+        }
+      }
+      for (i = 0; i < nx; i++) {
+        var acc2 = 0;
+        for (j = -r; j < ny + r; j++) {
+          if (j + r < ny) acc2 += j + r >= 0 ? b[(j + r) * nx + i] : 0;
+          if (j - r - 1 >= 0 && j - r - 1 < ny) acc2 -= b[(j - r - 1) * nx + i];
+          if (j >= 0 && j < ny) a[j * nx + i] = acc2 / w;
+        }
+      }
+    }
+    var out = new Uint8Array(N);
+    for (k = 0; k < N; k++) out[k] = a[k] >= 0.5 ? 1 : 0;
+    return out;
+  }
+  /* a closed polyline with the points that lie within eps of the line between their neighbours dropped (Douglas - Peucker, the ring cut at two far points) */
+  function simplifyRing(ring, eps) {
+    var pts = ring.slice(0, -1), n = pts.length;
+    if (n < 4) return ring;
+    function dp(a, b, keep) {
+      var best = -1, bi = -1, ax = pts[a][0], ay = pts[a][1], bx = pts[b % n][0], by = pts[b % n][1], dx = bx - ax, dy = by - ay, L2 = dx * dx + dy * dy;
+      for (var i = a + 1; i < b; i++) {
+        var px = pts[i % n][0] - ax, py = pts[i % n][1] - ay, t = L2 > 1e-18 ? Math.max(0, Math.min(1, (px * dx + py * dy) / L2)) : 0, ex = px - t * dx, ey = py - t * dy, dd = ex * ex + ey * ey;
+        if (dd > best) { best = dd; bi = i; }
+      }
+      if (best > eps * eps) { keep[bi % n] = true; dp(a, bi, keep); dp(bi, b, keep); }
+    }
+    var far = 0, fd = -1;
+    for (var k = 1; k < n; k++) { var dd2 = Math.hypot(pts[k][0] - pts[0][0], pts[k][1] - pts[0][1]); if (dd2 > fd) { fd = dd2; far = k; } }
+    var keep = {}; keep[0] = true; keep[far] = true;
+    dp(0, far, keep); dp(far, n, keep);
+    var out = [];
+    for (var q = 0; q < n; q++) if (keep[q]) out.push(pts[q]);
+    if (out.length < 3) return ring;
+    out.push(out[0].slice());
+    return out;
+  }
+
   function sheet(piece, stations, opts) {
     opts = opts || {};
     var TH = mod(opts, 'thickness', 'NSO_Thickness');
@@ -953,12 +1193,12 @@
     /* THE PART'S OUTLINE (opts.perimeter, off unless true: the card asks): a cap or a line of the sheet lies where the part is over it, not out over
        the air past the part's edge - a tip standing at the edge of the surface (a rim's corner) had a cap and a field that hung off it
        (docs/SUPPORT-FOOTPRINT.md). A level that has no sheet inside the outline is built again without it, as it was. */
-    var fillOn = false, wantPerim = opts.perimeter === true, perimOn = wantPerim, perimMargin = PERIM_MARGIN_MM, perimMemo = new Map();
+    var regionOn = false, regionWanted = opts.regionPlate === true, fillOn = false, wantPerim = opts.perimeter === true, perimOn = wantPerim, perimMargin = PERIM_MARGIN_MM, perimMemo = new Map();
     /* is the part over (x, y), within the reach, from a stack's top up? (the cell a sample falls in, read once) */
     /* THE CONTACT SURFACE'S OWN OUTLINE (opts.footprints, from nso_support_beacons.js footprintsOf: the areas' footprints): where the card has it,
        "the part is over (x, y)" is "(x, y) is on the surface a stack of this height holds" - the loops, not a silhouette - and the field fills it
        (THE FILL), whatever the tips that were planned for it. */
-    var feet = (wantPerim && Array.isArray(opts.footprints) && opts.footprints.length) ? opts.footprints.map(function (f) {
+    var feet = ((wantPerim || regionWanted) && Array.isArray(opts.footprints) && opts.footprints.length) ? opts.footprints.map(function (f) {
       var b = [Infinity, Infinity, -Infinity, -Infinity];
       f.loops.forEach(function (L) { L.forEach(function (q) { b[0] = Math.min(b[0], q[0]); b[1] = Math.min(b[1], q[1]); b[2] = Math.max(b[2], q[0]); b[3] = Math.max(b[3], q[1]); }); });
       return { zl: f.zl, zh: f.zh, loops: f.loops, box: b };
@@ -1023,10 +1263,13 @@
        progress (the card's build worker) is never silent for long */
     var beat = typeof opts.beat === 'function' ? opts.beat : function () {};
     var tell = typeof opts.progress === 'function' ? opts.progress : null, nTips = 0, settled = 0, levels = [];
-    function told() {
+    var toldLast = 0;
+    function told(extra) {
       if (!tell) return;
-      var d = settled;
+      var d = settled + (extra || 0);
       levels.forEach(function (L) { d += L.told || 0; });
+      d = Math.min(nTips, Math.max(d, toldLast));                /* never down: a plate that is dropped after some of its tips were said done does not take the count back */
+      toldLast = d;
       try { tell(d, nTips); } catch (err) { /* a listener must not stop the sheet */ }
     }
     /* the queries below are asked again and again with the same numbers - a level is built several times (the old way, the outline, its
@@ -1118,10 +1361,242 @@
     var tipOfCol = {};
     tips.forEach(function (t) { tipOfCol[t.col] = t; });
 
+    /* =====================================================================
+       THE REGION PLATE (opts.regionPlate, docs/SUPPORT-FOOTPRINT.md section 9): where the card knows a surface's footprint (opts.footprints), the
+       interface and the transition under it are laid from the footprint and the surface's height alone, not from the tips: for every print layer the
+       cells whose stack (the transition layers under the interface layers, one stack of NL layers) takes that layer - a column's stack ends the gap under
+       the surface - an outline loop hugging the region's edge and a hatch inside it, alternating 45 / 135 deg, as Bambu lays a raft and its interface.
+       A flat face is one level; a dome or a curve grows and shrinks layer by layer. The tips inside the footprint stand under it, each cut to the
+       plate's bottom where it is. A footprint that is one planar slope (a stair's: STAIR_MIN_DEG) is left to the stair. Checked as a sheet is (the exact
+       distance to the part, the other columns); a plate that fails any is not built and the footprint goes the ordinary way.
+       ===================================================================== */
+    var shellLevels = [];
+    function shellPass() {
+      if (!regionWanted || !feet)return;
+      var CELLS = 0.1, MARGIN = REGION_MARGIN_MM;
+      /* the small footprints first: their tips are counted (the card's Building starts moving) before the large one is done */
+      feet.map(function (f, fi) { return fi; }).sort(function (a, b) { return (feet[a].box[2] - feet[a].box[0]) * (feet[a].box[3] - feet[a].box[1]) - (feet[b].box[2] - feet[b].box[0]) * (feet[b].box[3] - feet[b].box[1]); }).forEach(function (fi) {
+        var f = feet[fi];
+        function inFoot(x, y) {
+          if (x < f.box[0] || x > f.box[2] || y < f.box[1] || y > f.box[3]) return false;
+          var inn = false;
+          for (var li = 0; li < f.loops.length; li++) {
+            var Lp = f.loops[li];
+            for (var q = 0, w = Lp.length - 1; q < Lp.length; w = q++) if ((Lp[q][1] > y) !== (Lp[w][1] > y) && x < (Lp[w][0] - Lp[q][0]) * (y - Lp[q][1]) / (Lp[w][1] - Lp[q][1]) + Lp[q][0]) inn = !inn;
+          }
+          return inn;
+        }
+        var mine = cand.filter(function (t) { return t.mode === 'sheet' && !t.shell && t.contact[2] >= f.zl - 0.5 && t.contact[2] <= f.zh + 1.5 && inFoot(t.contact[0], t.contact[1]); });
+        if (!mine.length)return;
+        var ox = f.box[0] - 1, oy = f.box[1] - 1, nx = Math.ceil((f.box[2] - f.box[0] + 2) / CELLS) + 1, ny = Math.ceil((f.box[3] - f.box[1] + 2) / CELLS) + 1, N = nx * ny;
+        /* the surface's height over the footprint, read on a 0.2 mm lattice and kept by the nearest */
+        var S = new Float32Array(N).fill(NaN), fp = new Uint8Array(N), STEP = 2, zs = [];
+        for (var j0 = 0; j0 < ny; j0 += STEP, beat()) for (var i0 = 0; i0 < nx; i0 += STEP) {
+          var x0 = ox + i0 * CELLS, y0 = oy + j0 * CELLS;
+          if (!inFoot(x0, y0)) continue;
+          var zStart = f.zl - SHELL_START_MM;
+          var h = firstHit(x0, y0, zStart, f.zh - zStart + 3);
+          if (isFinite(h) && zStart + h <= f.zh + 1.0) { S[j0 * nx + i0] = zStart + h; fp[j0 * nx + i0] = 1; zs.push(zStart + h); }     /* a hit far above the footprint is a stem's or another face's, not its underside */
+        }
+        told(Math.round(0.1 * mine.length));          /* the setup is told as it goes (a footprint's first second is not a still bar): a tenth after the surface is read, */
+        if (zs.length < 30) return;
+        zs.sort(function (a, b) { return a - b; });
+        var zLoQ = zs[Math.floor(zs.length * 0.02)], zHiQ = zs[Math.floor(zs.length * 0.98)], range = zHiQ - zLoQ;
+        if (range > REGION_FLAT_MM) {
+          /* a plane (a stair's) stays the stair's; a curve is the plate's */
+          var sx = 0, sy = 0, sz = 0, cnt = 0, pts = [];
+          for (var jp = 0; jp < ny; jp += STEP) for (var ip = 0; ip < nx; ip += STEP) if (fp[jp * nx + ip]) { pts.push([ox + ip * CELLS, oy + jp * CELLS, S[jp * nx + ip]]); sx += pts[pts.length - 1][0]; sy += pts[pts.length - 1][1]; sz += pts[pts.length - 1][2]; cnt++; }
+          var mx = sx / cnt, my = sy / cnt, mz = sz / cnt, sxx = 0, sxy = 0, syy = 0, sxz = 0, syz = 0;
+          pts.forEach(function (p) { var a = p[0] - mx, b = p[1] - my, c = p[2] - mz; sxx += a * a; sxy += a * b; syy += b * b; sxz += a * c; syz += b * c; });
+          var det = sxx * syy - sxy * sxy, resid = 0;
+          if (Math.abs(det) > 1e-9) {
+            var ga = (sxz * syy - syz * sxy) / det, gb = (syz * sxx - sxz * sxy) / det;
+            pts.forEach(function (p) { resid = Math.max(resid, Math.abs(p[2] - mz - ga * (p[0] - mx) - gb * (p[1] - my))); });
+            var slopeDeg = Math.atan(Math.hypot(ga, gb)) * 180 / Math.PI;
+            if (resid <= Math.max(REGION_PLANE_MM, REGION_PLANE_SHARE * range) && slopeDeg >= STAIR_MIN_DEG && slopeDeg <= STAIR_MAX_DEG) return;
+          }
+        }
+        /* fill the lattice's cells; a flat face takes its lowest height */
+        for (var jf = 0; jf < ny; jf++) for (var iff = 0; iff < nx; iff++) {
+          var q0 = jf * nx + iff;
+          if (fp[q0]) continue;
+          var xf = ox + iff * CELLS, yf = oy + jf * CELLS;
+          if (!inFoot(xf, yf)) continue;
+          var ia = iff - (iff % STEP), ja = jf - (jf % STEP), best = NaN;
+          for (var dj = 0; dj <= STEP; dj += STEP) for (var di = 0; di <= STEP; di += STEP) {
+            var qa = Math.min(ny - 1, ja + dj) * nx + Math.min(nx - 1, ia + di);
+            if (fp[qa] === 1 && (isNaN(best) || S[qa] < best)) best = S[qa];      /* the lowest of the four lattice heights round it: never over the surface */
+          }
+          if (!isNaN(best)) { S[q0] = best; fp[q0] = 2; }
+        }
+        for (var q1 = 0; q1 < N; q1++) if (fp[q1] === 1) fp[q1] = 1;
+        var inRegion = new Uint8Array(N);
+        for (var q2 = 0; q2 < N; q2++) inRegion[q2] = fp[q2] && !isNaN(S[q2]) ? 1 : 0;
+        if (range <= REGION_FLAT_MM) for (var q3 = 0; q3 < N; q3++) if (inRegion[q3]) S[q3] = zs[0];
+        told(Math.round(0.3 * mine.length));          /* three tenths after the fill, */
+        var dEdge = edtCells(inRegion, nx, ny), usable = new Uint8Array(N), nUse = 0;
+        for (var q4 = 0; q4 < N; q4++) if (inRegion[q4] && (dEdge[q4] - 0.5) * CELLS >= MARGIN) { usable[q4] = 1; nUse++; }
+        if (nUse * CELLS * CELLS < 4)return;
+        /* the other columns - every one this footprint's tips do not stand - keep their clearance from the plate, wherever they pass through its height */
+        var carriers = {};
+        mine.forEach(function (t) { carriers[t.col] = true; });
+        function carve(radTest) {
+          columns.forEach(function (col, ci) {
+            if (carriers[ci] || !col || !col.pts || !col.pts.length)return;
+            if (tipOfCol[ci] && tipOfCol[ci].mode === 'drop')return;
+            var rad = col.side * Math.SQRT1_2 + COLUMN_CLEAR_MM + o.width / 2;
+            var cb = [Infinity, Infinity, -Infinity, -Infinity];
+            col.pts.forEach(function (q) { cb[0] = Math.min(cb[0], q[0]); cb[1] = Math.min(cb[1], q[1]); cb[2] = Math.max(cb[2], q[0]); cb[3] = Math.max(cb[3], q[1]); });
+            if (cb[0] - rad > f.box[2] || cb[2] + rad < f.box[0] || cb[1] - rad > f.box[3] || cb[3] + rad < f.box[1])return;
+            for (var k = 0; k + 1 < Math.max(2, col.pts.length); k++) {
+              var a = col.pts[k], b = col.pts[Math.min(k + 1, col.pts.length - 1)];
+              if (Math.min(a[2], b[2]) - col.side > f.zh + 1.5) continue;
+              if (Math.max(a[2], b[2]) + col.side < zLoQ - stackH - o.gap) continue;
+              var x0c = Math.min(a[0], b[0]) - rad, x1c = Math.max(a[0], b[0]) + rad, y0c = Math.min(a[1], b[1]) - rad, y1c = Math.max(a[1], b[1]) + rad;
+              var ic0 = Math.max(0, Math.floor((x0c - ox) / CELLS)), ic1 = Math.min(nx - 1, Math.ceil((x1c - ox) / CELLS)), jc0 = Math.max(0, Math.floor((y0c - oy) / CELLS)), jc1 = Math.min(ny - 1, Math.ceil((y1c - oy) / CELLS));
+              var ex = b[0] - a[0], ey = b[1] - a[1], ee = ex * ex + ey * ey;
+              for (var jc = jc0; jc <= jc1; jc++) for (var ic = ic0; ic <= ic1; ic++) {
+                var qc = jc * nx + ic;
+                if (!usable[qc]) continue;
+                var px = ox + ic * CELLS - a[0], py = oy + jc * CELLS - a[1], fr = ee > 1e-18 ? Math.max(0, Math.min(1, (px * ex + py * ey) / ee)) : 0;
+                if (Math.hypot(px - fr * ex, py - fr * ey) <= rad) usable[qc] = 0;
+              }
+            }
+          });
+        }
+        carve();
+        /* every column's stack: its top layer m (the top at or under the surface less the gap), NL layers deep; layers counted from the lowest column's top */
+        /* under a slope the gap is the perpendicular one: a column is held gap / cos(tilt) under the surface (the local slope, from the lattice's 0.2 mm steps) */
+        var gapAt = new Float32Array(N);
+        for (var qg2 = 0; qg2 < N; qg2++) {
+          if (!inRegion[qg2]) continue;
+          var gi = qg2 % nx, gj = (qg2 - gi) / nx, gmax = 0;
+          for (var dg = 0; dg < 4; dg++) {
+            var gi2 = gi + (dg === 0 ? 2 : dg === 1 ? -2 : 0), gj2 = gj + (dg === 2 ? 2 : dg === 3 ? -2 : 0);
+            if (gi2 < 0 || gi2 >= nx || gj2 < 0 || gj2 >= ny || !inRegion[gj2 * nx + gi2]) continue;
+            gmax = Math.max(gmax, Math.abs(S[qg2] - S[gj2 * nx + gi2]) / (2 * CELLS));
+          }
+          gapAt[qg2] = o.gap * Math.sqrt(1 + gmax * gmax) + 0.05 + 0.05 * gmax;
+        }
+        var A = zs[0] - o.gap, m = new Int32Array(N).fill(-99999), mmin = 1e9, mmax = -1e9;
+        for (var q5 = 0; q5 < N; q5++) {
+          if (!usable[q5]) continue;
+          m[q5] = Math.floor((S[q5] - (range <= REGION_FLAT_MM ? o.gap : gapAt[q5]) - A) / o.layer + 1e-9) - 1;
+          if (m[q5] < mmin) mmin = m[q5]; if (m[q5] > mmax) mmax = m[q5];
+        }
+        if (mmin > mmax)return;
+        /* THE PART'S OWN WALLS beside the plate (a stem, a tab hanging below the face): a vertical wall is no face a vertical ray meets, so the cells round
+           the region are read at the stack's heights for being inside the piece, and the plate keeps its clearance - the gap, a half line - from them */
+        (function () {
+          var clear = o.gap + o.width / 2 + 0.03, Rw = Math.ceil((clear + 0.5) / CELLS), blocked = new Uint8Array(N), anyB = false;
+          var dNear = edtCells((function () { var inv = new Uint8Array(N); for (var q = 0; q < N; q++) inv[q] = usable[q] ? 0 : 1; return inv; })(), nx, ny);
+          /* the stack height beside the region: each ring cell takes it from a neighbour nearer in, one cell a pass */
+          var mNear = new Int32Array(N).fill(-99999);
+          for (var qn = 0; qn < N; qn++) if (usable[qn]) mNear[qn] = m[qn];
+          for (var pass = 0; pass < Rw; pass++) {
+            var prev = mNear.slice();
+            for (var jn = 1; jn < ny - 1; jn++) for (var inn = 1; inn < nx - 1; inn++) {
+              var qq2 = jn * nx + inn;
+              if (prev[qq2] !== -99999) continue;
+              var v2 = prev[qq2 - 1] !== -99999 ? prev[qq2 - 1] : prev[qq2 + 1] !== -99999 ? prev[qq2 + 1] : prev[qq2 - nx] !== -99999 ? prev[qq2 - nx] : prev[qq2 + nx];
+              if (v2 !== -99999) mNear[qq2] = v2;
+            }
+          }
+          for (var jw = 0; jw < ny; jw++, beat()) for (var iw = 0; iw < nx; iw++) {
+            var qw = jw * nx + iw;
+            if (usable[qw] || dNear[qw] * CELLS > clear) continue;                /* a wall further than the clearance from every cell of the plate takes none of it */
+            var mw = mNear[qw];
+            if (mw === -99999) continue;
+            var zB = A + (mw - NL + 1) * o.layer, zT = A + (mw + 1) * o.layer, xw = ox + iw * CELLS, yw = oy + jw * CELLS;
+            /* a point of the part within the clearance, level with the stack's bottom or middle (the face above is further than that from either) */
+            if (nearestMm([xw, yw, (zB + zT) / 2], clear + 0.02) < clear) { blocked[qw] = 1; anyB = true; }
+          }
+          if (!anyB)return;
+          var dB = edtCells((function () { var inv = new Uint8Array(N); for (var q = 0; q < N; q++) inv[q] = blocked[q] ? 0 : 1; return inv; })(), nx, ny);
+          for (var q8 = 0; q8 < N; q8++) if (usable[q8] && dB[q8] * CELLS < clear) usable[q8] = 0;
+        })();
+        told(Math.round(0.5 * mine.length));          /* half once the walls stand; the layers carry it from there to 95 % */
+        mmin = 1e9; mmax = -1e9;
+        for (var q9 = 0; q9 < N; q9++) if (usable[q9]) { if (m[q9] < mmin) mmin = m[q9]; if (m[q9] > mmax) mmax = m[q9]; }
+        if (mmin > mmax)return;
+        /* the tips this plate carries: where the plate is under the tip's contact */
+        var carry = mine.filter(function (t) {
+          var ic = Math.round((t.contact[0] - ox) / CELLS), jc = Math.round((t.contact[1] - oy) / CELLS);
+          var low = null;
+          for (var dj2 = -2; dj2 <= 2; dj2++) for (var di2 = -2; di2 <= 2; di2++) { var qq = (jc + dj2) * nx + ic + di2; if (ic + di2 >= 0 && ic + di2 < nx && jc + dj2 >= 0 && jc + dj2 < ny && usable[qq] && (low === null || m[qq] < low)) low = m[qq]; }
+          if (low === null) return false;
+          t.shellM = low;                       /* the lowest stack within 0.2 mm of the tip: its column always reaches */
+          return true;
+        });
+        if (!carry.length)return;
+        var layersOut = [], soups = [], soupsLoops = [], failed = null, totalLen = 0;
+        for (var n = mmin - NL + 1; n <= mmax && !failed; n++, beat()) {
+          told(Math.floor(carry.length * (0.5 + 0.45 * (n - (mmin - NL + 1)) / Math.max(1, mmax - (mmin - NL + 1) + 1))));
+          var Mk = new Uint8Array(N), any = false;
+          for (var q6 = 0; q6 < N; q6++) if (usable[q6] && n <= m[q6] && n >= m[q6] - NL + 1) { Mk[q6] = 1; any = true; }
+          if (!any) continue;
+          var Mraw = Mk;
+          var zb = A + n * o.layer, pl = null, paths = null, ex2 = null;
+          for (var tryN = 0; tryN < 5; tryN++) {
+            /* a layer the extrusion refuses is asked again with more room between its walls, then as its loops alone */
+            beat();
+            /* the layer's region cropped to its own box (and a margin for the blur and the opening): the distance transforms run over that, not the whole footprint */
+            var cI0 = nx, cI1 = -1, cJ0 = ny, cJ1 = -1;
+            for (var qb = 0; qb < N; qb++) if (Mraw[qb]) { var bi = qb % nx, bj = (qb - bi) / nx; if (bi < cI0) cI0 = bi; if (bi > cI1) cI1 = bi; if (bj < cJ0) cJ0 = bj; if (bj > cJ1) cJ1 = bj; }
+            cI0 = Math.max(0, cI0 - 14); cJ0 = Math.max(0, cJ0 - 14); cI1 = Math.min(nx - 1, cI1 + 14); cJ1 = Math.min(ny - 1, cJ1 + 14);
+            var cnx = cI1 - cI0 + 1, cny = cJ1 - cJ0 + 1, Mcrop = new Uint8Array(cnx * cny);
+            for (var cj = 0; cj < cny; cj++) for (var ci2 = 0; ci2 < cnx; ci2++) Mcrop[cj * cnx + ci2] = Mraw[(cJ0 + cj) * nx + cI0 + ci2];
+            Mk = smoothMask(Mcrop, cnx, cny, 2 + Math.min(tryN, 3));                 /* a layer the extrusion refuses is traced again from a smoother mask */
+            pl = plateOfRegion(Mk, cnx, cny, ox + cI0 * CELLS, oy + cJ0 * CELLS, CELLS, o.pitch + 0.03 + 0.04 * Math.min(tryN, 2), o.width + 0.03 * Math.min(tryN, 2), (n % 2 ? 135 : 45), REGION_MIN_LOOP_MM, 0.9 + 0.4 * tryN);
+            if (tryN >= 2) pl.lines = [];
+            if (tryN === 3) { var longest = 0; pl.loops.forEach(function (l) { longest = Math.max(longest, l.lenMm); }); pl.loops = pl.loops.filter(function (l) { return l.lenMm >= Math.min(longest, 8); }); }
+            if (tryN === 4) { var lg = null; pl.loops.forEach(function (l) { if (!lg || l.lenMm > lg.lenMm) lg = l; }); pl.loops = lg ? [lg] : []; }
+            if (!pl.loops.length) break;
+            paths = pl.loops.map(function (l) { return l.ring; }).concat(pl.lines);
+            ex2 = RL.extrudeFlat(paths, { width: o.width, height: o.layer, baseZ: zb });
+            if (ex2.ok) break;
+          }
+          var exLoops = ex2 && ex2.ok && pl.lines.length ? RL.extrudeFlat(pl.loops.map(function (l) { return l.ring; }), { width: o.width, height: o.layer, baseZ: zb }) : ex2;
+          if (!pl.loops.length) continue;
+          if (!ex2.ok) { failed = 'layer ' + n + ' would not extrude: ' + ex2.reason; break; }
+          var len = 0, lo = [Infinity, Infinity], hi = [-Infinity, -Infinity], area = 0;
+          pl.loops.forEach(function (l) { len += l.lenMm; });
+          pl.lines.forEach(function (l) { len += Math.hypot(l[1][0] - l[0][0], l[1][1] - l[0][1]); });
+          paths.forEach(function (pa) { pa.forEach(function (q) { lo[0] = Math.min(lo[0], q[0]); lo[1] = Math.min(lo[1], q[1]); hi[0] = Math.max(hi[0], q[0]); hi[1] = Math.max(hi[1], q[1]); }); });
+          for (var q7 = 0; q7 < N; q7++) area += Mraw[q7];
+          area *= CELLS * CELLS; totalLen += len;
+          var piece = { kind: 'region', sizeMm: [hi[0] - lo[0], hi[1] - lo[1]], areaMm2: area, perimMm: len, caps: carry.length, lines: pl.lines.length + pl.loops.length, loop: paths[0], snake: [] };
+          layersOut.push({ role: n - (mmin - NL + 1) < 2 ? 'transition' : 'interface', angleDeg: n % 2 ? 135 : 45, z0: zb, z1: zb + o.layer, pieces: [piece], loopMm: piece.sizeMm.slice(), lines: piece.lines, linesMm: len, lengthMm: len,
+                          shortestMm: 0, paths: paths, soup: ex2.tris });
+          soups.push(ex2.tris); soupsLoops.push(exLoops && exLoops.ok ? exLoops.tris : ex2.tris);
+        }
+        if (failed || !layersOut.length) return;
+        /* the plate against the part: no nearer than the gap (a stem beside it, a wall) */
+        /* the loops, not the hatch: a hatch line ends a line and a gap short of them and lies level with them, so it is no nearer the part */
+        var soupAll = joinSoups(soupsLoops), dmin = Infinity, rch = o.gap + 0.1;
+        for (var bi = 0; bi < obstacles.length; bi++) { var dd = exactDistance(soupAll, exactVs(bi, rch), rch, beat); if (dd.mm < dmin) dmin = dd.mm; }
+        if (dmin < o.gap - 1e-5) return;
+        var zBaseMin = A + (mmin - NL + 1) * o.layer, zTopMax = A + (mmax + 1) * o.layer;
+        var L = { id: levels.length, first: zTopMax, tips: carry, told: carry.length, ok: true, shell: true, minDistanceMm: dmin,
+                  res: { zTop: zTopMax, zBase: zBaseMin, zCap: zBaseMin, layers: layersOut, uncrossed: [], region: true,
+                         lines: { angleDeg: 0, droppedShare: 0, bare: 0, pieces: layersOut.length, tried: [] } } };
+        levels.push(L); shellLevels.push(L);
+        settled += carry.length; L.told = 0; told();                    /* the tips this plate carries are done: said now, not when every footprint has been read */
+        carry.forEach(function (t) {
+          var mm = t.shellM;
+          t.shell = true; t.mode = 'sheet'; t.level = L.id; t.why = null; t.carried = true; t.cap = null; t.capWhy = 'no cap: the region plate lies on the tip itself';
+          t.shellB = A + (mm - NL + 1) * o.layer; t.zTop = A + (mm + 1) * o.layer; t.zBase = t.shellB;
+          t.top = bareShellTop(t, t.shellB);
+        });
+      });
+    }
+    function bareShellTop(t, z) { var cp = cutPath(columns[t.col].pts, z, o.side, o.side); return [cp[0][0], cp[0][1]]; }
+    shellPass();
+
     /* ---- levels ---- */
-    cand.filter(function (t) { return t.mode === 'sheet'; }).sort(function (a, b) { return a.zTop - b.zTop; }).forEach(function (t) {
+    cand.filter(function (t) { return t.mode === 'sheet' && !t.shell; }).sort(function (a, b) { return a.zTop - b.zTop; }).forEach(function (t) {
       var L = levels[levels.length - 1];
-      if (!L || t.zTop - L.first > LEVEL_TOL_MM) { L = { id: levels.length, first: t.zTop, tips: [], told: 0 }; levels.push(L); }
+      if (!L || L.shell || t.zTop - L.first > LEVEL_TOL_MM) { L = { id: levels.length, first: t.zTop, tips: [], told: 0 }; levels.push(L); }     /* never a region plate's level: it holds its own tips */
       L.tips.push(t); t.level = L.id;
     });
     /* a tip on no level (no room for the stack) is settled already */
@@ -1673,11 +2148,72 @@
         }
       }
       function carrierOf(t) { return t.cap ? { c: t.cap.c, r: t.cap.w / 2 } : { c: t.top, r: o.side / 2 }; }
+      /* THE REGION PLATE (opts.regionPlate, docs/SUPPORT-FOOTPRINT.md section 9). The field is a region, not a sheet's pieces: its components that a cap
+         or a bare top stands on are laid in concentric lines - the level sets of the distance to the region's edge, a pitch apart, each opened by
+         half a line and its gap so no two walls overlap - the same loops in every layer of the stack (T1, T2, I1..), over the caps. A ring round a
+         cavity is two loops; a crescent is its own; a flat footprint is filled to its edge. Nothing here is 2 mm lines or rectangles. */
+      function regionBuild() {
+        var N = nx * ny, lab = new Int32Array(N).fill(-1), ncomp = 0;
+        for (var s0 = 0; s0 < N; s0++) {
+          if (!field[s0] || lab[s0] >= 0) continue;
+          var st = [s0]; lab[s0] = ncomp;
+          while (st.length) {
+            var q = st.pop(), qi = q % nx, qj = (q - qi) / nx;
+            if (qi > 0 && field[q - 1] && lab[q - 1] < 0) { lab[q - 1] = ncomp; st.push(q - 1); }
+            if (qi < nx - 1 && field[q + 1] && lab[q + 1] < 0) { lab[q + 1] = ncomp; st.push(q + 1); }
+            if (qj > 0 && field[q - nx] && lab[q - nx] < 0) { lab[q - nx] = ncomp; st.push(q - nx); }
+            if (qj < ny - 1 && field[q + nx] && lab[q + nx] < 0) { lab[q + nx] = ncomp; st.push(q + nx); }
+          }
+          ncomp++;
+        }
+        /* a component stands on a cap (or a bare top) when a cell of it lies under the cap's disc */
+        var carried = {}, tipCarried = {};
+        live.forEach(function (t) {
+          var cr = carrierOf(t), rad = cr.r + 0.15;
+          var i0 = Math.max(0, Math.floor((cr.c[0] - rad - ox) / CELL_MM)), i1 = Math.min(nx - 1, Math.ceil((cr.c[0] + rad - ox) / CELL_MM));
+          var j0 = Math.max(0, Math.floor((cr.c[1] - rad - oy) / CELL_MM)), j1 = Math.min(ny - 1, Math.ceil((cr.c[1] + rad - oy) / CELL_MM));
+          for (var jj = j0; jj <= j1; jj++) for (var ii = i0; ii <= i1; ii++) {
+            var qq = jj * nx + ii;
+            if (lab[qq] >= 0 && Math.hypot(ox + ii * CELL_MM - cr.c[0], oy + jj * CELL_MM - cr.c[1]) <= rad) { carried[lab[qq]] = true; tipCarried[t.i] = true; }
+          }
+        });
+        if (!Object.keys(carried).length) return { ok: false, reason: 'no region of the footprint lies under a cap of this level' };
+        var M = new Uint8Array(N);
+        for (var qm = 0; qm < N; qm++) if (lab[qm] >= 0 && carried[lab[qm]]) M[qm] = 1;
+        var loops = concentricLoops(M, nx, ny, ox, oy, CELL_MM, o.pitch, o.width, REGION_MIN_LOOP_MM);
+        if (!loops.length) return { ok: false, reason: 'the region leaves no loop of a line\'s width' };
+        var uncrossed = live.filter(function (t) { return !tipCarried[t.i]; });
+        if (live.length - uncrossed.length < 1) return { ok: false, reason: 'no cap of this level has a line over it' };
+        var paths = loops.map(function (lp) { return lp.ring; }), lenTot = 0, lo2 = [Infinity, Infinity], hi2 = [-Infinity, -Infinity], areaMm2 = 0;
+        loops.forEach(function (lp) { lenTot += lp.lenMm; lp.ring.forEach(function (p) { lo2[0] = Math.min(lo2[0], p[0]); lo2[1] = Math.min(lo2[1], p[1]); hi2[0] = Math.max(hi2[0], p[0]); hi2[1] = Math.max(hi2[1], p[1]); }); });
+        for (var qa = 0; qa < N; qa++) if (M[qa]) areaMm2 += CELL_MM * CELL_MM;
+        var built = [];
+        for (var lk = 0; lk < NL; lk++) {
+          var zb = zBase + lk * o.layer, ex = RL.extrudeFlat(paths, { width: o.width, height: o.layer, baseZ: zb });
+          if (!ex.ok) return { ok: false, reason: 'layer ' + (lk + 1) + ' of the region would not extrude: ' + ex.reason };
+          var piece = { kind: 'region', sizeMm: [hi2[0] - lo2[0], hi2[1] - lo2[1]], areaMm2: areaMm2, perimMm: lenTot, caps: live.length - uncrossed.length, lines: loops.length, loop: paths[0], snake: [] };
+          built.push({ role: ROLES[lk], angleDeg: 0, z0: zb, z1: zb + o.layer, pieces: [piece], loopMm: piece.sizeMm.slice(), lines: loops.length, linesMm: lenTot, lengthMm: lenTot,
+                       shortestMm: Math.min.apply(null, loops.map(function (lp) { return lp.lenMm; })), paths: paths, soup: ex.tris });
+        }
+        return { ok: true, zTop: zTop, zBase: zBase, zCap: zCap, layers: built, uncrossed: uncrossed, region: true,
+                 lines: { angleDeg: 0, droppedShare: 0, bare: uncrossed.length, pieces: 1, tried: [] } };
+      }
       var reachCache = flatMax == null || L.tips.length < 2 ? null : reachMemo, reachZ = L.first.toFixed(2);
       function inReach(x, y) {
         var kq = Math.round(x / 0.25) + ',' + Math.round(y / 0.25) + ',' + reachZ, v = reachCache.get(kq);
         if (v === undefined) { v = isFinite(firstHit(x, y, L.first + 0.01, o.gap + flatMax)); reachCache.set(kq, v); }
         return v;
+      }
+      if (regionOn) {
+        /* THE REGION PLATE: the field is the footprint itself - every cell of it a stack may stand in (free, off another level's cells, the part within
+           reach over the stack's top, and 0.2 mm in from the footprint's edge) - not what the caps' discs reach */
+        for (var jg = 0; jg < ny; jg++) for (var ig = 0; ig < nx; ig++) {
+          var qg = jg * nx + ig, kg = own[qg];
+          if (!free[qg] || edge[qg] || (kg >= 0 && tips[kg].level !== L.id)) continue;
+          var xg = ox + ig * CELL_MM, yg = oy + jg * CELL_MM;
+          if (inPerim(xg, yg) && fillReach(xg, yg, zTop)) field[qg] = 1;
+        }
+        return regionBuild();
       }
       live.forEach(function (t) {
         var cr = carrierOf(t), rr0 = cr.r + (L.lone ? Math.max(FIELD_MM, LONE_FIELD_MM - cr.r) : FIELD_MM), rr = feet && perimOn && fillOn ? Math.max(rr0, cr.r + FILL_MM) : rr0;
@@ -2002,6 +2538,18 @@
       }
       return false;
     }
+    function feetFlat(L) {
+      for (var ti = 0; ti < L.tips.length; ti++) {
+        var t = L.tips[ti];
+        if (t.mode !== 'sheet') continue;
+        for (var fi = 0; fi < feet.length; fi++) {
+          var f = feet[fi];
+          if (t.contact[0] < f.box[0] - 0.5 || t.contact[0] > f.box[2] + 0.5 || t.contact[1] < f.box[1] - 0.5 || t.contact[1] > f.box[3] + 0.5 || t.contact[2] < f.zl - 0.5 || t.contact[2] > f.zh + 1.5) continue;
+          if (f.zh - f.zl > FILL_FLAT_MM) return false;
+        }
+      }
+      return true;
+    }
     if (wantPerim) {
       var buildLevelInside = buildLevel;
       buildLevel = function (L, angleForced) {
@@ -2009,6 +2557,14 @@
         try {
           perimOn = false;
           var plain = buildLevelInside(L, angleForced);                      /* the old way */
+          if (!plain.ok && regionWanted && feet && feetFlat(L)) {
+            /* THE REGION PLATE where the sheet has no piece (a rim, a ring round a cavity): the footprint is laid in loops, over the level's caps */
+            regionOn = true; perimOn = true; fillOn = true;
+            var rp = buildLevelInside(L, angleForced);
+            regionOn = false; fillOn = false;
+            if (rp.ok) { L.perim = { marginMm: perimMargin, region: true }; return rp; }
+            perimOn = false;
+          }
           if (!plain.ok || !levelNearEdge(L)) return plain;
           perimOn = true;
           /* THE FILL first, where the footprints are known: the field runs to the surface's edge. A rim too thin to fill (the sheet's 2 mm lines)
@@ -2099,7 +2655,7 @@
       L.told = L.tips.length;
       told();
     }
-    levels.forEach(solveLevel);
+    levels.forEach(function (L) { if (!L.shell) solveLevel(L); });                /* a region plate is built whole, above: it is not a sheet's level to solve */
 
     /* ===================================================================
        THE STAIR - a sheet under a curved or sloped underside
@@ -3017,6 +3573,7 @@
     tips.forEach(function (t) {
       if (t.mode === 'sheet') {
         var L = levels[t.level];
+        if (L.shell) { t.zTop = t.zTop; t.zBase = t.shellB; t.cutZ = t.shellB; t.rise = o.side; return; }
         t.zTop = L.res.zTop; t.zBase = L.res.zBase;
         t.cutZ = t.cap ? L.res.zCap - sink : L.res.zCap;
         t.rise = t.cap ? 0 : o.side;
@@ -3191,6 +3748,7 @@
     CAP: { riseMm: CAP_RISE_MM, minMm: CAP_MIN_MM, maxMm: CAP_MAX_MM, spaceMm: CAP_SPACE_MM, gapMaxMm: CAP_GAP_MAX_MM,
            tuckMm: CAP_TUCK_MM, partMm: CAP_PART_MM, bandMm: CAP_BAND_MM, foot: CAP_FOOT },
     sheet: sheet,
+    region: { edtCells: edtCells, isoLoops: isoLoops, simplifyRing: simplifyRing, fitRing: fitRing, concentricLoops: concentricLoops, plateOfRegion: plateOfRegion, smoothMask: smoothMask },     /* the region plate's geometry (docs/SUPPORT-FOOTPRINT.md section 9) */
     cutPath: cutPath,
     finish: finish,
     minDistance: function (A, B, opts) { return minDistance(mod(opts, 'thickness', 'NSO_Thickness'), A, B, opts); },

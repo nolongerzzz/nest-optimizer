@@ -13,9 +13,11 @@
    Built the way the card builds a plate (tools/nso_support_plate_lib.js: the card's own file in a vm), so the occluders of the other pieces are
    in the build: the same head costs more on a plate than alone. The seconds are printed with it (support:plate's gate 1 is the same build).
 
-   Gates are floors for what the build holds today on the heads that hold it (the Base, the Oblique where the stair stands). The rest are
-   FINDINGS: the Circular, the Sphere and the Negative Spheres' domes and rims, and the Oblique turned off the two angles its stair stands at
-   (0 and 75 deg: the stair's lines follow the sheet's line angles), are reported and not held. */
+   Gates are floors for what the build holds today (the card lays the region plate, docs/SUPPORT-FOOTPRINT.md section 9: the interface and the
+   transition from each footprint and the surface's height, so the share does not depend on how the piece is turned): the Base, the Circular, the
+   Sphere and the Negative Spheres, aligned and turned, and that turning moves none of them by more than 15 points; the Oblique where its stair
+   stands, and a ceiling on the plate's seconds. The one FINDING left is the Oblique turned off the two angles its stair stands at (0 and 75 deg:
+   the stair's lines follow the sheet's line angles); it is the stair's, not the region plate's, and is reported and not held. */
 'use strict';
 const path = require('path');
 const lib = require('./nso_support_plate_lib.js');
@@ -115,13 +117,22 @@ async function plate(objs, yaws) {
   for (const k of Object.keys(a.rows)) console.log('        ' + k.padEnd(18) + 'held ' + a.rows[k].pct.toFixed(0).padStart(3) + ' %   of ' + a.rows[k].mm2.toFixed(0) + ' mm2 of footprint');
   check('the Base: 80 % or more of its footprint has support under it', a.rows.Base.pct >= 80, a.rows.Base.pct.toFixed(0) + ' %');
   check('the Oblique (its stair stands at this angle): 85 % or more', a.rows.Oblique.pct >= 85, a.rows.Oblique.pct.toFixed(0) + ' %');
+  const FLOOR_ALIGNED = { Circular: 80, Sphere: 90, 'Negative Sphere': 60, 'Negative Sphere2': 62 };
+  for (const k of Object.keys(FLOOR_ALIGNED)) check('the ' + k + ' (the region plate): ' + FLOOR_ALIGNED[k] + ' % or more', a.rows[k].pct >= FLOOR_ALIGNED[k], a.rows[k].pct.toFixed(0) + ' %');
+  check('the plate built in 45 s or less (this box 15; the runner is about 1.7 times slower; the plate was 36 s before the region plate)', a.secs <= 45, a.secs.toFixed(1) + ' s');
 
   console.log('\n=== 2. the same plate, the heads turned about z by ' + TURNED.join(', ') + ' deg ===');
   const b = await plate(objs, TURNED);
   console.log('        ' + b.head + '   (' + b.secs.toFixed(1) + ' s)');
   for (const k of Object.keys(b.rows)) console.log('        ' + k.padEnd(18) + 'held ' + b.rows[k].pct.toFixed(0).padStart(3) + ' %   (aligned ' + a.rows[k].pct.toFixed(0) + ' %)');
   check('the Base, turned: 80 % or more', b.rows.Base.pct >= 80, b.rows.Base.pct.toFixed(0) + ' %');
-  finding('Circular / Sphere / Negative Sphere / Negative Sphere2 / Oblique, turned', ['Circular', 'Sphere', 'Negative Sphere', 'Negative Sphere2', 'Oblique'].map(k => k + ' ' + b.rows[k].pct.toFixed(0) + ' %').join(', '));
+  const FLOOR_TURNED = { Circular: 70, Sphere: 90, 'Negative Sphere': 55, 'Negative Sphere2': 60 };
+  for (const k of Object.keys(FLOOR_TURNED)) check('the ' + k + ', turned: ' + FLOOR_TURNED[k] + ' % or more', b.rows[k].pct >= FLOOR_TURNED[k], b.rows[k].pct.toFixed(0) + ' %');
+  check('turning moves no head but the Oblique by more than 15 points (the region plate follows the surface, not the lines\' angle)',
+    ['Base', 'Circular', 'Sphere', 'Negative Sphere', 'Negative Sphere2'].every(k => Math.abs(b.rows[k].pct - a.rows[k].pct) <= 15),
+    ['Base', 'Circular', 'Sphere', 'Negative Sphere', 'Negative Sphere2'].map(k => k + ' ' + (b.rows[k].pct - a.rows[k].pct).toFixed(0)).join(', '));
+  check('the turned plate built in 60 s or less', b.secs <= 60, b.secs.toFixed(1) + ' s');
+  finding('the Oblique, turned (its stair stands at 0 and 75 deg only)', 'Oblique ' + b.rows.Oblique.pct.toFixed(0) + ' %');
   finding('the turned plate against the aligned one', b.secs.toFixed(1) + ' s against ' + a.secs.toFixed(1) + ' s');
 
   console.log('\n' + pass + ' passed, ' + fail + ' failed');

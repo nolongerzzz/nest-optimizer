@@ -157,6 +157,7 @@ where the grid put them and the sheets' bytes):
 | `sheet` `perimeter` | off | on (`PARTS_OPTS.sheetPerimeter`) |
 | `detect` `seedPitchMm` | 0 (no finer look) | 1 mm (`detectOverhangs` `beaconSeedMm`, `SEED_PITCH_PRODUCT_MM`) |
 | `sheet` `footprints` | none (the fill needs `perimeter` and these) | on: `footprintsOf(det.beaconRegions)` (`PARTS_OPTS.sheetFootprints`, set in `runPiece`) |
+| `sheet` `regionPlate` | off | on (`PARTS_OPTS.sheetRegionPlate`; needs `footprints`; section 9) |
 
 `tools/nso_supports_print_export.js` `build(piece, partsOver, name, one, brim, outline)` takes the card's as its sixth argument: `true` is all four (`inset`, `seed`,
 `perimeter`, `fill`), `'perimeter'` / `'inset'` the first versions, or an object of them; `support:onetrunk` and `support:footprint` use it.
@@ -203,7 +204,7 @@ where the grid put them and the sheets' bytes):
   `support:everywhere` (its fixture hashes), `support:feed`, `support:gridpack`, `support:exposed`, `support:interface-fixtures`,
   `support:shells-coupon`, `tree:interface`, `slicer:supports`, `slicer:brim` all pass unchanged.
 
-## 8. The plate, measured: time and coverage (2026-10-27, after the finer look)
+## 8. The plate, measured: time and coverage (2026-10-27, after the finer look; the region plate of section 9 supersedes the open items below)
 
 Two tools: `npm run support:coverage` (`tools/nso_support_coverage_check.js`: the six heads built as a plate in the card's own code, aligned and turned about z,
 each footprint read for **support just under it**: a face of the stack 0.02 - 1.5 mm below the surface) and `node tools/nso_support_plate_browser_time.mjs` (the
@@ -246,3 +247,62 @@ The finer look and the fill are what raised the Base (71 -> 88 % on upstream's t
   of interface for time, and the rim is the part's own thinnest.
 - The Negative Spheres' apex sits in a closed cavity on the stem: one crest spot is "unreachable" (nothing comes up to it from the plate); the card says so.
 
+
+## 9. The region plate: the interface laid from the footprint, not from the tips (2026-10-27, third round)
+
+**Why.** Sections 6 and 8 end the same way: the sheet is built from the *tips* (caps, a field round each, levels of tips, a lone-tip last resort), so what it covers is
+what the tips reach, and on a dome, a curve or a rim it covers a third of the surface at the cost of eleven tries per lone tip. Bambu does not work from tips. Read
+layer by layer, its interface and its transition look like a **raft grown on the surface**: for every print layer, the cells whose stack takes that layer; an outline loop
+hugging the region's edge, and a hatch inside it turning 45 / 135 deg a layer; on a dome the plate grows and shrinks layer by layer. So the generator takes a **region**
+(the footprint's cells, their height) and nothing else; where the region comes from (the detector's footprint today, a painted mask tomorrow) is not its business.
+
+**What it does** (`nso_support_interface.js`, `shellPass()` in `sheet()`; on with `opts.regionPlate`, the card's `PARTS_OPTS.sheetRegionPlate`, needs `footprints`):
+1. For each footprint (the smallest first, so the bar moves early), the surface's height is read on a 0.2 mm lattice (`firstHit` upward from `zl - SHELL_START_MM`), filled
+   to the 0.1 mm raster by the lowest of the four neighbours (never over the surface), and a footprint whose 2nd - 98th percentile varies by at most `REGION_FLAT_MM`
+   (0.3 mm) is **one flat face** at its lowest height. A footprint that is one planar slope of 3 - 70 deg (within `REGION_PLANE_MM` / `REGION_PLANE_SHARE` of one plane) is a
+   **stair's** and is left to the stair: the Oblique is untouched.
+2. The usable cells are the footprint's, `REGION_MARGIN_MM` (0.1 mm) in from its edge, less the **other columns** (every column the footprint's tips do not stand keeps the same
+   clearance from the plate as from a sheet) and less the **part's own walls** beside it (a stem, a tab: read at the stack's heights, clear of the gap and a half line).
+3. Every usable cell has a **stack** of `NL` = 5 layers (2 transition, 3 interface: `SHEET_ROLES`) whose top is the surface less the gap, quantised to the layers; under a slope the gap
+   is the perpendicular one (`gap / cos(tilt)` from the lattice's local slope). A flat face is one level; a dome is a stack per cell, so the plate steps up it.
+4. For each print layer `n`, the mask of cells whose stack contains `n` is cropped, smoothed (`smoothMask`, the height map's steps go) and laid by `plateOfRegion`: **an outline loop**
+   (the first concentric loop of the distance to the edge, `concentricLoops`, opened by half a line and its gap so no two walls are nearer than a line) and **a hatch** at 45 or 135 deg,
+   a pitch (the sheet's dense 0.47 + 0.03 mm) apart on a lattice fixed in the plane (two layers of one direction stack line on line: *flush*), each line running a line's gap short of the loop. A region too thin
+   for a hatch (nothing left inside the loop and a gap) is laid in concentric loops alone. Every layer is extruded (`extrudeFlat`: no overlap, no short segment: `fitRing` makes a loop fit,
+   and a layer the extrusion refuses is asked again from a smoother mask, then with more room, then as its loops alone).
+5. The plate is **checked as a sheet is**: the exact distance to the part and to the other pieces (`minDistanceMm >= gap`), and a plate that fails is not built, the footprint goes the ordinary way.
+   The tips inside the footprint stand under it as **carriers** cut to the plate's bottom (`shellB`): no cap, no sheet of their own (`capWhy: 'no cap: the region plate lies on the tip itself'`).
+
+The progress bar is told as the plate goes (a tenth after the surface is read, three tenths after the fill, half when the walls stand, then by layer), because the first footprint costs about two seconds
+and the card's "Building moves within its first 3.5 loops" gate (`support:workflow-builds`) would otherwise read it as a still bar.
+
+**Measured** (this box; `support:coverage` and `support:plate`, the six heads on the plate, the card's own code):
+
+| | before (section 8, `d95855f`+) | region plate |
+|---|---|---|
+| plate, node, aligned / turned | 30 s / 44 s | **15.3 s / 20.7 s** |
+| Base, aligned / turned | 88 % / 88 % | 83 % / 86 % |
+| Circular | 35 % / 61 % | **88 % / 78 %** |
+| Sphere | 64 % / 61 % | **98 % / 98 %** |
+| Negative Sphere | 61 % / 41 % | **68 % / 64 %** |
+| Negative Sphere2 | 50 % / 41 % | **71 % / 70 %** |
+| Oblique (stair untouched) | 92 % / 12 % | 94 % / 12 % |
+
+The time is the point of the second half of the ticket: the lone-tip tries (`lateTry`, `LONE_SINKS`) are not asked of a tip a plate carries, which is where section 8's 30 of 44 seconds went. Turning a head
+now moves its share by 10 points or less (the plate follows the surface; the stair's lines follow the sheet's angles, which is why the Oblique alone still drops).
+
+**Gates.** `support:region` (`tools/nso_support_region_test.js`): the geometry on rasters of known answer (the exact distance, a circle's level set, the smoothed mask, the plate of a rectangle:
+one loop, a hatch flush on its lattice at 45 and 135 deg, never nearer the loop than a line, the strip too thin for a hatch, the speck, the disk's concentric rings) and that the extrusion takes every layer.
+`support:coverage`: floors per head, aligned and turned, the turn moving no head but the Oblique by more than 15 points, and ceilings on the plate's seconds. `support:plate` section 6 is re-pinned
+for the three single-piece builds the region plate changes (Negative Sphere2 27568, Circular 14128, Sphere 15152 triangles). Everything else is unchanged with the option off.
+
+**Not done, and named.**
+- **A rim or a crescent under about 1 mm** gets its outline loop and no hatch (a plate of loops alone); the thinnest are dropped (`REGION_MIN_LOOP_MM`). The Negative Spheres' remaining 30 % is mostly these.
+- **The stair (Oblique)** is not touched; it is being reworked on its own, and a region that is one planar slope is handed to it (`STAIR_MIN_DEG` .. `STAIR_MAX_DEG`).
+- **A painted region** is the same generator with a mask in place of the footprint; the card has no paint tool for it yet. The generator takes a raster and a height per cell, so a mask drawn on the surface needs
+  only to be rasterised and handed to `shellPass`'s per-footprint step.
+- **Printability is not tested.** The plate is held to the slicer's own rules (Bambu's typing closes gaps of 0.5 mm radius and fills the sheet's zones itself; the plate's lines are 0.4 mm apart in the same way the
+  sheet's are), but no print has been made from it.
+- **The Base is 5 points under section 8's 88 %** (83 aligned, 86 turned; the same plate with `sheetRegionPlate` off measures 88 again, so it is the region plate's). Of the 71 samples of its footprint with no support
+  under them (of 424), a quarter lie within 0.13 mm of the footprint's edge (the plate's margin: its cells start 0.1 mm in and its wall is a line wide) and the other quarter lie 0.7 - 4 mm in, where the clearance of
+  another column or the part's own wall takes cells out of the plate. Not traced further; the Base is a flat face and a plate should hold it whole.

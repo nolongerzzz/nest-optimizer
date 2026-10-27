@@ -53,3 +53,13 @@ Gate: `npm run support:footprint` (`tools/nso_support_footprint_check.js`, ~1.5 
   `tools/nso_support_plate_browser_time.mjs`. **Open and not mine to pick:** the Oblique's stair only stands at 0 and 75 deg; a dome is one flat patch; a 1 mm rim has no sheet. The thin-tip option
   (45 -> 33 s turned, interface lost on the rims) was measured and not shipped.
 
+- **Fourth round, the region plate (2026-10-27, after "the interface generator driven by a region, not by tips"):** `opts.regionPlate` (card: `PARTS_OPTS.sheetRegionPlate`, with
+  `footprints`) lays the transition and the interface from each footprint and the surface's height, layer by layer: an outline loop and a 45 / 135 deg hatch, the plate stepping up a dome,
+  the tips inside the footprint carriers cut to the plate's bottom (`shellPass()` in `nso_support_interface.js`; geometry in `api.region`: `edtCells`, `isoLoops`, `concentricLoops`,
+  `plateOfRegion`, `smoothMask`, `fitRing`). A footprint that is one planar slope is the stair's and untouched (the Oblique is being reworked by its owner). Measured
+  (`support:coverage`, six heads on the plate): **15.3 s aligned / 20.7 s turned** (30 / 44 before); coverage Circular 35 -> 88 %, Sphere 64 -> 98 %, Negative Sphere 61 -> 68 %, Negative Sphere2 50 -> 71 %,
+  turned within 10 points of aligned; the **Base 88 -> 83 %** (not traced further), the Oblique unchanged (94 aligned, 12 turned: the stair). Gates: new `support:region` (28), `support:coverage`
+  floors + rotation + seconds, `support:plate` section 6 re-pinned (Negative Sphere2 27568, Circular 14128, Sphere 15152 triangles; stable over three runs), `support:workflow-builds` 46 / 46
+  (the plate tells the bar as it goes: the clamp's first-3.5-loops gate). Everything with the option off is byte for byte as it was. `support:custom` is red at the claude-wip too (the
+  circles check; same on a clean checkout). **Not done:** a rim under about 1 mm is loops without a hatch; a painted region (same generator, a mask for the footprint: no tool yet); printability is untested
+  (no print made). Details: `docs/SUPPORT-FOOTPRINT.md` section 9.
