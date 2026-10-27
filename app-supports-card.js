@@ -313,7 +313,7 @@ var NSO_SUPPORTS_CARD = (function () {
     if (S.det && S.det.key === key) return S.det;
     var soup = worldUp(p.mesh), sk = skipListFor(m, p, soup);
     /* beaconInsetMm: a spot stands at least this far in from the edge of the surface it holds (docs/SUPPORT-FOOTPRINT.md) */
-    var SBm = window.NSO_SupportBeacons, opts = { skipList: sk.list, angleDeg: S.angle, occluders: occ.map(occluderSoup), beaconInsetMm: SBm && SBm.INSET_PRODUCT_MM || 0 };
+    var SBm = window.NSO_SupportBeacons, opts = { skipList: sk.list, angleDeg: S.angle, occluders: occ.map(occluderSoup), beaconInsetMm: SBm && SBm.INSET_PRODUCT_MM || 0, beaconSeedMm: SBm && SBm.SEED_PITCH_PRODUCT_MM || 0 };
     /* A BIG piece is read in a worker (detection is 10 s of JS on the vase, and
        the card used to freeze the page for all of it on opening). The card
        says "measuring…" and redraws when the read comes back. */
@@ -1624,6 +1624,8 @@ var NSO_SUPPORTS_CARD = (function () {
   function runPiece(J, c, keep) {
     var job = J.job, hm = c.hm, D = c.D, o = c.o, regs = c.regs, spots = c.spots, areas = [], builtOf = [], chain = Promise.resolve();
     job.parts = partsOptsOf(o);                       // this piece's sheet: Dense in the one-trunk build, Open in every other
+    /* the sheet fills the contact surface the detector traced (docs/SUPPORT-FOOTPRINT.md), whatever tips were planned for it */
+    if (D && D.det && window.NSO_SupportBeacons && window.NSO_SupportBeacons.footprintsOf) job.parts.sheetFootprints = window.NSO_SupportBeacons.footprintsOf(D.det.beaconRegions);
     var gp = function () { return window.NSO_SupportGridpack; };
 
     /* 1. PLANNING (detecting, then beacons settled), area by area. */

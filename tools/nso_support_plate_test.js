@@ -39,7 +39,9 @@ const TODAY = {        // sha256 of the support bytes of a single-piece Generate
                        // Re-pinned again for the tapered base, the uniform trunk, the centred circle and the flat sheet's reach (supports-one-trunk, second and third rounds: the pad a hand wider, the trunk a trumpet)
                        // Negative Sphere2 re-pinned by supports-footprint (632cd214c51c, 12532 triangles): the card asks for the sheet's outline, so its three
                        // sheets stay on the rim they hold (41 % of them lay over the air before); then the crown's branches one smooth body (supports-one-trunk, fifth round): all three re-pinned.
-  'Support Negative Sphere2.stl': { sha: 'de7702163137e8402ce25726761697d2c23fa9db0bd0b564a5492240c28f361c', triangles: 20332 },
+                       // The Negative Sphere2 again (supports-footprint, the finer look): its apex surface (z 15, 9 spots in one area) was never detected, it is now - so a fourth area,
+                       // a sheet laid over it, and the fill (the sheets reach the footprint): 20332 -> 28884 triangles. Circular and Sphere are the same bytes.
+  'Support Negative Sphere2.stl': { sha: '6e68f498e08317c120523f62c1102118c4dda5172f4a56bb495d3592b7139ea1', triangles: 28884 },
   'Support Circular.stl': { sha: 'd91e8e033e3018fd677a06ecfcf40e86e6e75e9c2bb634e8d802ea37ee6d8782', triangles: 12376 },
   'Support Sphere.stl': { sha: 'd8fdd356955ed7243023c6cba57b06ba19129fc2d4416c3333b1f3509cc9e85c', triangles: 12160 }
 };
@@ -90,7 +92,7 @@ async function main() {
     app.openCard();
     check('one piece on the plate: the option is not shown', app.el('sup-plate-row').hidden === true);
     check('one piece: switching it on is refused', app.card.plate(true).ok === false && app.card.plate() === false);
-    check('one piece: the card is on it as today', /1 hanging area|3 hanging areas/.test(app.head()), app.head());
+    check('one piece: the card is on it as today', /1 hanging area|3 hanging areas|4 hanging areas/.test(app.head()), app.head());
     app.load([clone(NS2, 'Second')]);
     app.frame();
     check('a second piece is added: the option appears', app.el('sup-plate-row').hidden === false);
@@ -184,9 +186,9 @@ async function main() {
     const app = lib.makeApp();
     const ids = app.load([clone(NS2, 'A'), clone(NS2, 'B'), lib.shape('Box', lib.boxSoup(0, 0, 0, 12, 12, 10))]);
     app.openCard(); app.setPlateBox(true);
-    check('Auto: "3 pieces · 6 hanging areas at 35°"', app.head() === '3 pieces · 6 hanging areas at 35°', app.head());
+    check('Auto: "3 pieces · 8 hanging areas at 35°" (4 on each of the two Negative Sphere2: the apex is an area since the finer look)', app.head() === '3 pieces · 8 hanging areas at 35°', app.head());
     const v = app.card.plateView();
-    check('...per piece: 3, 3 and 0 areas', same(v.pieces.map(p => p.areas), [3, 3, 0]), JSON.stringify(v.pieces.map(p => p.areas)));
+    check('...per piece: 4, 4 and 0 areas', same(v.pieces.map(p => p.areas), [4, 4, 0]), JSON.stringify(v.pieces.map(p => p.areas)));
     app.card.mode('assisted');
     check('Assisted: the readout counts spots', /^3 pieces · \d+ spots at 35°$/.test(app.head()) && app.card.plate() === true, app.head());
     app.card.mode('custom');
@@ -196,7 +198,7 @@ async function main() {
     app.card.angle(60);
     check('the angle is the card\'s, editable: 60° re-detects every piece', /^3 pieces · \d+ hanging areas? at 60°$/.test(app.head()) && app.card.angle() === 60, app.head());
     app.card.angle(35);
-    check('...and 35° again gives the first reading', app.head() === '3 pieces · 6 hanging areas at 35°');
+    check('...and 35° again gives the first reading', app.head() === '3 pieces · 8 hanging areas at 35°');
     check('Generate is on; Remove all / Remove are not on the plate', app.el('btn-sup-all').disabled === false && app.el('btn-sup-none').hidden === true && app.el('btn-sup-remove').hidden === true);
 
     // a piece's own left-out area is remembered: A has one area left out
@@ -206,7 +208,7 @@ async function main() {
     app.card.toggleArea(area0);
     app.card.pick(null); app.state.selectedIndex = -1; app.ctx.clearSelectionOutline();
     app.setPlateBox(true);
-    check('A had an area left out: the plate says so ("1 left out") and counts 5', app.head() === '3 pieces · 5 hanging areas at 35° · 1 left out', app.head());
+    check('A had an area left out: the plate says so ("1 left out") and counts 7', app.head() === '3 pieces · 7 hanging areas at 35° · 1 left out', app.head());
   }
 
   // 6 ----------------------------------------------------------------------------------------------------------
@@ -436,7 +438,7 @@ async function main() {
     app.load([lib.shape('Box', lib.boxSoup(0, 0, 0, 12, 12, 10)), clone(NS2, 'Cave'), clone(NS2, 'Refused'), clone(NS2, 'Good1'), clone(NS2, 'Good2')]);
     app.openCard(); app.setPlateBox(true);
     const ids = app.realIds(), idOf = n => ids[['Box', 'Cave', 'Refused', 'Good1', 'Good2'].indexOf(n)];
-    check('readout: "5 pieces · 12 hanging areas at 35°" (the box has none)', app.head() === '5 pieces · 12 hanging areas at 35°', app.head());
+    check('readout: "5 pieces · 16 hanging areas at 35°" (the box has none)', app.head() === '5 pieces · 16 hanging areas at 35°', app.head());
     planner(app, (soup, opts, real) => {
       const id = pieceAt(app, soup);
       if (id === idOf('Cave')) return Promise.resolve({ ok: false, reason: 'no route to the plate', inside: [0] });        // the planner's own answer for a spot nothing reaches
@@ -444,14 +446,15 @@ async function main() {
       return Promise.resolve(real(soup, opts));
     });
     const r = await app.card.generate();
-    check('the build goes through: two pieces built', r.ok === true && /^Built: 2 supports on 2 pieces · held 6 · unsupported 3 · unreachable 3$/.test(app.head()), app.head());
+    check('the build goes through: two pieces built', r.ok === true && /^Built: 2 supports on 2 pieces · held 8 · unsupported 4 · unreachable 6$/.test(app.head()), app.head());
     check('Good1 and Good2 have their supports; Box, Cave and Refused have none', app.supportsOf(idOf('Good1')).length === 1 && app.supportsOf(idOf('Good2')).length === 1 &&
       ['Box', 'Cave', 'Refused'].every(n => app.supportsOf(idOf(n)).length === 0));
     const rows = app.rows().map(x => x.text);
     check('the box\'s row: "Box · no hanging area"', rows.includes('Box · no hanging area'), rows.join(' | '));
-    check('the unreachable piece\'s row: "Cave · unreachable 3"', rows.includes('Cave · unreachable 3'), rows.join(' | '));
+    check('the unreachable piece\'s row: "Cave · unreachable 4"', rows.includes('Cave · unreachable 4'), rows.join(' | '));
     check('the refused piece\'s row: "Refused · refused: the planner refused this piece"', rows.includes('Refused · refused: the planner refused this piece'), rows.join(' | '));
-    check('three rows, no row for the two that built', rows.length === 3);
+    /* Good1 and Good2 each keep one crest spot of the apex that the planner cannot reach (3 tips hold 8 of the 9) - their rows say so */
+    check('five rows: Box, Cave and Refused, and the two that built, one apex spot each unreachable', rows.length === 5 && rows.includes('Good1 · unreachable 1') && rows.includes('Good2 · unreachable 1'), rows.join(' | '));
     check('ONE Undo step', app.state.undoStack.length === 1);
     // a row: click selects and frames that piece
     const row = app.rows().find(x => x.text.startsWith('Cave'));
@@ -492,13 +495,13 @@ async function main() {
     app.card.toggleArea(out);
     app.card.pick(null); app.state.selectedIndex = -1; app.ctx.clearSelectionOutline();
     app.setPlateBox(true);
-    check('A has one area left out: "2 pieces · 5 hanging areas at 35° · 1 left out"', app.head() === '2 pieces · 5 hanging areas at 35° · 1 left out', app.head());
+    check('A has one area left out: "2 pieces · 7 hanging areas at 35° · 1 left out"', app.head() === '2 pieces · 7 hanging areas at 35° · 1 left out', app.head());
     const r = await app.card.generate();
     const held = list => list.reduce((o, m) => Object.assign(o, m.nsoSupport.holds), {});
     const a = held(app.supportsOf(ids[0])), b = held(app.supportsOf(ids[1]));
     check('built: A\'s supports hold nothing of its left-out area (' + outKeys.length + ' spots), but its other areas', r.ok && outKeys.length > 0 && outKeys.every(k => !(k in a)) && Object.keys(a).length > 0, Object.keys(a).length + ' spots held');
     check('...B\'s supports hold all three of its areas', Object.keys(b).length > Object.keys(a).length);
-    check('A\'s row: "A · unsupported 1"; B has none', app.rows().map(x => x.text).join('|') === 'A · unsupported 1', app.rows().map(x => x.text).join('|'));
+    check('A\'s row: "A · unreachable 1 · unsupported 1"; B\'s: "B · unreachable 1" (the apex\'s crest spot)', app.rows().map(x => x.text).join('|') === 'A · unreachable 1 · unsupported 1|B · unreachable 1', app.rows().map(x => x.text).join('|'));
     app.undo();
 
     // fed tips: A has a tip of its own (Custom), B has none

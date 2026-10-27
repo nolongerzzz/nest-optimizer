@@ -28,7 +28,16 @@ Gate: `npm run support:footprint` (`tools/nso_support_footprint_check.js`, ~1.5 
   (88.6 of the gate's 105 calibration loops; 65.5 before), the wedge 8.8 s against 5.9 s. The first version asked every level for the outline and cost
   83 s on the clamp: the old way is built first now, and the outline only for a level with a tip within 3.6 mm of the part's edge
   (`PERIM_NEAR_MM`). If the gate is ever tight, that is the knob (and `PERIM_GROW_MM`'s five steps).
-- **Not done:** the sheet is on the part, it does not fill it (Base's covers ~2/3 of its footprint); a rim thinner than the 2 mm lines still gets a piece
+- **Second round, "the interfaces follow the surface" (2026-10-27):** (1) the **finer look** - `opts.seedPitchMm` (card: 1 mm): after the footprints, `detect` samples
+  again at 1 mm and a surface no footprint holds becomes a seed beacon of an area of its own (a 0.6 mm ledge: found in 12 of 12 grid alignments, 5 of 12 before;
+  the Negative Spheres' apex, never detected, is an area with a sheet now; nothing seeded on the four heads, the clamp or the wedge). (2) the **fill** - the card
+  passes `footprintsOf(regions)` as `sheetFootprints`: a level's field runs 3 mm past a cap's rim to the footprint's edge (Base's sheet 72 % -> 81 % of its
+  footprint, 0 mm2 outside the part), for levels of 16 tips or fewer; a rim too thin falls back to the outline as before. (3) `bestRect` counts a rectangle's
+  caps by a closed form (same bytes, a large level 3x faster). Measured: `support:footprint` 48 / 48 (new: ledge x12 alignments, finer-look coverage, THE FILL, THE
+  APEX), `support:onetrunk` 21 / 21 (the pad gate reads a shared pad against all its trunks), `support:workflow` card 80, counts 48, builds 46 (clamp 101.9 loops,
+  wedge 43, quiet gap 4.0). **Re-pinned** in `support:plate`: Negative Sphere2 28884 triangles `6e68f498e083`; the apex is a fourth area (`3 pieces · 8 hanging areas`, 4 a piece,
+  `5 pieces · 16`, Cave unreachable 4) and each built Negative Sphere2 shows "unreachable 1" - one crest spot of the apex the planner leaves (3 tips hold 8 of 9).
+- **Not done:** the sheet is on the part and near-fills it (Base 81 %, the rectilinear pieces stop short of the rounded corners; levels over 16 tips are not filled); a rim thinner than the 2 mm lines still gets a piece
   reaching up to 1.2 mm out; a stair is not held to the outline; a tip too near a corner for its own sheet gets the least piece that fits; G-scope's markers
   and hand-placed spots keep their cells. Details in `docs/SUPPORT-FOOTPRINT.md` section 6.
 - **Drives run** (alone, headless Chromium): `support:workflow` card 80 / 80, counts 48 / 48 (the tunnel ceiling's 24 / 72 is 28 / 68, re-pinned with the

@@ -1220,7 +1220,7 @@
     }
     var b = SB.detect(rawTris, {
       pitch: opts.beaconPitch, angleDeg: angleDeg, plateZ: plateZ, minDropMm: minDrop,
-      skipList: skipList, occluders: occluders, planeTol: planeTol, bridgeMm: opts.bridgeMm, insetMm: opts.beaconInsetMm
+      skipList: skipList, occluders: occluders, planeTol: planeTol, bridgeMm: opts.bridgeMm, insetMm: opts.beaconInsetMm, seedPitchMm: opts.beaconSeedMm
     });
     out.beaconsReason = b.reason;
     if (!b.ok) return null;
@@ -1242,6 +1242,7 @@
   // opts.beacons     false to skip the beacon grid (nso_support_beacons.js)
   // opts.beaconPitch the grid's pitch, default 3 mm
   // opts.bridgeMm    the bridgeable span the grid uses, default 5 mm
+  // opts.beaconSeedMm   a second, finer look at this pitch for the surfaces the grid stepped over (nso_support_beacons.js seedPitchMm); default off
   // opts.beaconInsetMm  the beacons are kept this far in from the edge of the surface they
   //                  hold (nso_support_beacons.js insetMm); default 0, the spots stay where the grid put them
   function detectOverhangs(rawTris, opts) {

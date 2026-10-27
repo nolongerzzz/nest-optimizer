@@ -307,15 +307,20 @@ const segLen = s => Math.hypot(s.x1 - s.x0, s.y1 - s.y0);
     trunkRings.length > 0 && trunkRings.every((t, i) => t.rings.length > 1 && base[i] >= 1.4 * tops[i] && t.rings.every((q, j) => j === 0 || rad(q) <= rad(t.rings[j - 1]) + 1e-9)),
     trunkRings.map((t, i) => t.key + ' ' + f1(2 * base[i]) + ' -> ' + f1(2 * tops[i]) + ' mm').join(', '));
   /* the pad: a hand wider than the trunk's base (Bambu's is round the model's stem), not a plate; the base stands inside its edge */
+  /* a pad may hold several trunks (a head with a second surface, e.g. a Negative Sphere's apex): it is judged against the
+     bases of the trunks it holds, together (their bounding box), not against the first alone */
   const padSpread = rows.map(r => {
-    const t = (r.b.sf.trunks || [])[0], po = (r.b.sf.padOutlines || [])[0];
-    if (!t || !po) return null;
+    const po = (r.b.sf.padOutlines || [])[0];
+    const held = (r.b.sf.trunks || []).filter(t => po && (po.from || []).some(f => f[0] === t.from[0] && f[1] === t.from[1]));
+    if (!held.length || !po) return null;
     const xs = po.poly.map(q => q[0]), ys = po.poly.map(q => q[1]);
-    return { key: r.key, pad: Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)), base: 2 * t.padR };
+    const bx = held.map(t => [t.c[0] - t.padR, t.c[0] + t.padR]), by = held.map(t => [t.c[1] - t.padR, t.c[1] + t.padR]);
+    const baseW = Math.max(Math.max(...bx.map(q => q[1])) - Math.min(...bx.map(q => q[0])), Math.max(...by.map(q => q[1])) - Math.min(...by.map(q => q[0])));
+    return { key: r.key, pad: Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)), base: held.length === 1 ? 2 * held[0].padR : baseW, n: held.length };
   }).filter(Boolean);
   check('the pad is a hand wider than the trunk\'s base: no more than 1.6 mm wider across (0.6 round it), the base inside its edge',
     padSpread.length > 0 && padSpread.every(x => x.pad >= x.base - 1e-6 && x.pad - x.base <= 1.6 + 1e-6),
-    padSpread.map(x => x.key + ' pad ' + f1(x.pad) + ' base ' + f1(x.base)).join(', '));
+    padSpread.map(x => x.key + ' pad ' + f1(x.pad) + ' base ' + f1(x.base) + (x.n > 1 ? ' (' + x.n + ' trunks)' : '')).join(', '));
   check('the same trunk under every head: bases within 15 % of one another, and round', base.length > 0 && Math.max(...base) <= 1.15 * Math.min(...base) &&
     trunkRings.every(t => t.rings.length && Math.abs(t.rings[0][1] - t.rings[0][2]) < 0.2), 'bases ' + base.map(v => f1(2 * v)).join(' / ') + ' mm');
   check('a brim is built with every head\'s supports (its own object, role brim): 5 loops or more of Brim on the first layer and nothing else, none on the part, no conflict with the pads or the part',

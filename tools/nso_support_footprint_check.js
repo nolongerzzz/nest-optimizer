@@ -139,6 +139,31 @@ console.log('\n=== 1b. a flat cap on a stem: the spots stand in from the edge, a
   check('inset 0 (the default) leaves every spot where the grid put it', d0.counts.moved === 0 && d0.beacons.every(b => !b.moved));
 }
 
+/* ---------------------------------------------------------------- 1c. the grid steps over a thin surface; the finer look does not */
+console.log('\n=== 1c. a thin ledge: found in every alignment of the grid once the finer look is on ===');
+{
+  const boxS = (lo, hi) => {
+    const v = [[lo[0], lo[1], lo[2]], [hi[0], lo[1], lo[2]], [hi[0], hi[1], lo[2]], [lo[0], hi[1], lo[2]], [lo[0], lo[1], hi[2]], [hi[0], lo[1], hi[2]], [hi[0], hi[1], hi[2]], [lo[0], hi[1], hi[2]]];
+    const f = [[0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7], [0, 1, 5], [0, 5, 4], [1, 2, 6], [1, 6, 5], [2, 3, 7], [2, 7, 6], [3, 0, 4], [3, 4, 7]], o = [];
+    for (const t of f) for (const i of t) o.push(...v[i]);
+    return o;
+  };
+  /* a wall 20 x D x 30 with a 1.5 mm ledge w wide on its +y face at z 12 (the underside hangs over air); D walks the ledge across the grid */
+  const ledgeSoup = (w, D) => new Float32Array([...boxS([0, 0, 0], [20, D, 30]), ...boxS([0, D, 12], [20, D + w, 13.5])]);
+  for (const w of [0.6, 1, 2]) {
+    let plain = 0, seeded = 0, area = 1e9, n = 0;
+    for (let off = 0; off < 3; off += 0.25) {
+      n++;
+      const soup = ledgeSoup(w, 6 + off), at12 = d => d.beacons.some(b => Math.abs(b.z - 12) < 0.5);
+      if (at12(SB.detect(soup, { pitch: 3, angleDeg: 35, skipList: [], footprint: true }))) plain++;
+      const d = SB.detect(soup, { pitch: 3, angleDeg: 35, skipList: [], footprint: true, seedPitchMm: SB.SEED_PITCH_PRODUCT_MM });
+      if (at12(d)) seeded++;
+      area = Math.min(area, d.regions.filter(R => Math.abs(R.min[2] - 12) < 0.5).reduce((a, R) => a + (R.footprint ? R.footprint.areaMm2 : 0), 0));
+    }
+    check('a ' + w + ' mm ledge, ' + n + ' alignments: the grid alone finds it in ' + plain + (w < 1.5 ? ' (the fault)' : '') + '; with the finer look in ' + seeded, seeded === n && (w >= 1.5 || plain < n), 'least footprint ' + f1(area) + ' mm2 of ' + f1(w * 20));
+  }
+}
+
 /* ---------------------------------------------------------------- 2. the six real heads against Bambu's interface */
 /* the region Bambu's interface and transition lines make: each line's samples grown 0.3 mm and the result shrunk by as much (a closing) */
 async function bambuRegions() {
@@ -198,6 +223,27 @@ async function bambuRegions() {
     const k = 'base', a0 = rows[k].fp, d = SB.detect(RP.pose(heads[k], 37, 0), { pitch: 3, angleDeg: 30, skipList: [], footprint: true });
     check('base turned 37 deg about the vertical: the same area (3 %)', within(footArea(d), a0, 0.03), f1(footArea(d)) + ' / ' + f1(a0));
   }
+  /* THE FINER LOOK on the real heads: what a 0.5 mm grid flags that the 3 mm grid's footprints do not hold (the Negative Spheres' apex, where Bambu lays a second interface) */
+  {
+    const missOf = (soup, seed) => {
+      const coarse = SB.detect(soup, { pitch: 3, angleDeg: 35, skipList: [], footprint: true, seedPitchMm: seed }), fine = SB.detect(soup, { pitch: 0.5, angleDeg: 35, skipList: [] });
+      const cells = new Map();
+      fine.beacons.forEach(b => { if (b.need.kind === 'face' || b.need.kind === 'gap' || (b.need.kind === 'edge' && b.need.corner)) cells.set(b.cell.join(','), b); });
+      let miss = 0;
+      cells.forEach(b => { if (!coarse.regions.some(R => R.footprint && R.footprint.loops.reduce((a, L) => a + (inLoop(b.x, b.y, L) ? 1 : 0), 0) % 2 === 1)) miss++; });
+      return { share: cells.size ? miss / cells.size : 0, apex: coarse.beacons.filter(b => b.z > 12).length, seeded: seed ? coarse.counts.seeded : 0, n: coarse.beacons.length };
+    };
+    for (const k of RP.NAMES) {
+      const a = missOf(heads[k], 0), b = missOf(heads[k], SB.SEED_PITCH_PRODUCT_MM);
+      if (k === 'negsphere' || k === 'negsphere2') {
+        check(k + ': the grid misses ' + (100 * a.share).toFixed(0) + ' % of what a 0.5 mm grid flags and holds no apex (' + a.apex + ' spots over z 12); the finer look misses ' + (100 * b.share).toFixed(0) + ' % and holds the apex (' + b.apex + ')',
+          a.share > 0.15 && a.apex === 0 && b.share <= 0.1 && b.apex >= 3, b.seeded + ' seeded');
+      } else {
+        check(k + ': the finer look changes nothing (no seed, the same spots)', b.seeded === 0 && b.n === a.n, a.n + ' spots');
+      }
+    }
+  }
+
   /* the spots, kept in: an area of flat faces (Base, the Negative Spheres' rims) moves them in; one with a tilted or a curved face keeps them at the grid's points */
   const IN = 1;
   for (const k of RP.NAMES) {
@@ -244,22 +290,31 @@ async function bambuRegions() {
     return { area, out, far };
   }
   let totA = 0, totO = 0, totA0 = 0, totO0 = 0, farMax = 0;
-  const tipsIn = [];
+  let fillRow = null; const apexLevels = {};
   for (const k of RP.NAMES) {
     const piece = await RP.build(k);
-    const b = await PE.build(piece, null, RP.PROJECT_NAME[k].replace(/\.stl$/, ''), true, false, true), b0 = await PE.build(piece, null, RP.PROJECT_NAME[k].replace(/\.stl$/, ''), true, false, false);
+    const b = await PE.build(piece, null, RP.PROJECT_NAME[k].replace(/\.stl$/, ''), true, false, true), bNoFill = k === 'base' ? await PE.build(piece, null, 'base', true, false, { inset: 1, perimeter: 1 }) : null, b0 = await PE.build(piece, null, RP.PROJECT_NAME[k].replace(/\.stl$/, ''), true, false, false);
     const o = outside(piece, b), o0 = outside(piece, b0);
     totA += o.area; totO += o.out; totA0 += o0.area; totO0 += o0.out; farMax = Math.max(farMax, o.far);
     console.log('        ' + k.padEnd(11) + 'stack and caps ' + f1(o.area).padStart(6) + ' mm2, outside the part ' + f1(o.out).padStart(5) + ' (' + (o.area ? (100 * o.out / o.area).toFixed(0) : 0) + ' %), at most ' + f2(o.far) + ' mm out     before: ' +
       f1(o0.area).padStart(6) + ' mm2, ' + f1(o0.out).padStart(5) + ' out (' + (o0.area ? (100 * o0.out / o0.area).toFixed(0) : 0) + ' %)');
     const det = SB.detect(piece, { pitch: 3, angleDeg: 35, skipList: [], footprint: true, insetMm: 1 });
-    for (const a of b.areas) for (const t of a.tp.sheet.tips) { if (t.mode === 'sheet') tipsIn.push(k); }
+    /* THE FILL: the sheet's top layer against the footprint it lies under; the apex: a level of the sheet at the second surface's height */
+    const topArea = bb => bb.areas.reduce((n, a) => n + a.tp.sheet.levels.reduce((m, L) => m + L.layers[0].pieces.reduce((q, pc) => q + pc.areaMm2, 0), 0), 0);   /* the plan the sheet's pieces enclose */
+    if (k === 'base') {
+      const det0 = SB.detect(piece, { pitch: 3, angleDeg: 35, skipList: [], footprint: true });
+      fillRow = { top: topArea(b), topNoFill: topArea(bNoFill), foot: footArea(det0) };
+    }
+    if (k === 'negsphere' || k === 'negsphere2') apexLevels[k] = b.areas.reduce((n, a) => n + a.tp.sheet.levels.filter(L => L.zTop > 12).length, 0);
     void det;
   }
   check('the sheet lies under the part: no more than 12 % of its top outside the part\'s plan, over the six heads (before: ' + (100 * totO0 / totA0).toFixed(0) + ' %)', totO <= 0.12 * totA,
     f1(totO) + ' of ' + f1(totA) + ' mm2 = ' + (100 * totO / totA).toFixed(0) + ' %');
   check('...and where it is out, never more than 1.3 mm', farMax <= 1.3 + 1e-9, f2(farMax) + ' mm');
   check('...and a good deal less than the build without the outline', totO < 0.5 * totO0, f1(totO) + ' vs ' + f1(totO0) + ' mm2');
+  check('THE FILL: the Base\'s sheet (the plan its pieces enclose) fills the footprint it lies under: 78 % or more of it (its rectilinear pieces stop short of the rounded corners, and a line keeps 0.2 mm in) (before: ' + (100 * fillRow.topNoFill / fillRow.foot).toFixed(0) + ' %)',
+    fillRow.top >= 0.78 * fillRow.foot, f1(fillRow.top) + ' of ' + f1(fillRow.foot) + ' mm2 = ' + (100 * fillRow.top / fillRow.foot).toFixed(0) + ' %');
+  check('THE APEX: each Negative Sphere has a sheet laid at its second surface (a level of the sheet over z 12)', apexLevels.negsphere >= 1 && apexLevels.negsphere2 >= 1, JSON.stringify(apexLevels));
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

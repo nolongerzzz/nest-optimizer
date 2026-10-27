@@ -249,7 +249,12 @@ very edge and the rest of the cell is air. `detect()` can trace the surface itse
 `opts.insetMm > 0`): `region.footprint = { loops, areaMm2, stepMm, insetMm }` - the loops of the surface's edge (outer
 counter-clockwise, a hole clockwise), found on the columns of the piece, not on the grid - and, with `opts.insetMm`, a face, gap or
 corner spot nearer the edge than that is moved in (`beacon.moved`, `beacon.clearMm`). Off by default, so the spots and the
-planners' pins are what they were; the Supports card asks for both. `docs/SUPPORT-FOOTPRINT.md`, `npm run support:footprint`.
+planners' pins are what they were; the Supports card asks for both. A third option, `opts.seedPitchMm` (the card: 1 mm), is a **finer look**: the grid
+steps over what is narrower than its pitch (a 0.6 mm ledge in 5 of 12 alignments, a Negative Sphere's 3 - 4 mm apex not at all), so after the footprints are
+traced `detect()` samples again at that pitch and a surface that needs holding (and hangs 2 mm or more) that no footprint holds becomes a **seed** beacon
+(`need.seeded`; `counts.seeded`) of an area of its own - unless it lies within 3 mm of a footprint at its height, which is the grid's own rim. Nothing is
+seeded on the four heads, the clamp or the wedge. `NSO_SupportBeacons.footprintsOf(regions)` gives the loops as plain data for the sheet's fill.
+`docs/SUPPORT-FOOTPRINT.md`, `npm run support:footprint`.
 
 ## Stated, not measured
 

@@ -166,6 +166,11 @@
   var INSET_PRODUCT_MM = 1;          /* what the Supports card asks (opts.insetMm): a spot stands at least this far in from the edge of the surface it holds, so a column (1.2 mm) and the lines round it stay on the part. Off (0) unless asked: the planner suites pin the spots where the grid put them */
   var FOOT_TOL_MM = 0.4;             /* the footprint: the flood's first step from a spot may find the surface this far (plus a step's climb) from the spot's own height; each later step, an eighth of it plus the step's climb */
   var FLAT_NZ = Math.cos(3 * Math.PI / 180);   /* a face is flat, for moving a spot in it, within 3 deg of the plate */
+  var SEED_PITCH_MM = 1;             /* what the Supports card asks (opts.seedPitchMm): a second, finer look for the surfaces the grid stepped over */
+  var SEED_MARGIN_MM = 0.6;          /* a fine hit this near a footprint is that footprint's edge, not a surface of its own */
+  var SEED_MIN_DROP_MM = 2;          /* a seed has this much air under it at least: a face within a couple of mm of the plate is held by the first layers (the planner stands nothing under it) */
+  var SEED_NEAR_MM = 3;              /* ...and it is no more than the rest of a surface the grid already holds: a seeded surface within this far of a footprint at its height is that surface's own far edge (a crescent of rim), held by the spots and the sheet there */
+  var SEED_MIN_AREA_MM2 = 1.5;       /* a seeded area whose footprint is smaller than this is not held (Bambu leaves such specks bare) */
   var FOOT_STEP_MM = 0.25;           /* the footprint's sample step (a cell is pitch / round(pitch / step) of it) */
   var SAME_Z_MM = 1e-4;              /* two hits this close on one ray are one crossing */
   var HIT_EPS_MM = 1e-3;
@@ -792,8 +797,8 @@
        its distance to the edge. Only the surface spots (face, gap and a corner
        'edge') have a footprint; a crease, a tip and a side spot keep their
        cell and are left where they are. */
-    function footprints(regions) {
-      var inset = (opts.insetMm == null) ? 0 : +opts.insetMm;
+    function footprints(regions, insetArg) {
+      var inset = insetArg != null ? insetArg : (opts.insetMm == null) ? 0 : +opts.insetMm;
       var sub = Math.max(2, Math.round(pitch / FOOT_STEP_MM)), fs = pitch / sub;
       var moved = 0;
       function isSurface(b) {
@@ -1032,12 +1037,107 @@
       });
     }
 
+
+    /* ---- THE FINER LOOK. A grid of `pitch` mm steps over a surface narrower than itself: the Negative Spheres' apex (3 - 4 mm across, which
+       Bambu lays a second interface on) falls between the samples at 3 mm and is found from 2.5 mm; a ledge under 1.5 mm is found in some
+       alignments of the grid and not in others. So (opts.seedPitchMm, the card asks 1) the piece is read again at that pitch, and a hit
+       that is no part of the surface an area of the grid already holds - outside every footprint (and the margin round it), at that height -
+       is a SEED: one a coarse cell and height is added to the beacons (need.seeded), and the areas and their footprints are made again, so
+       the flood from a seed traces the whole of its surface. A seeded surface is traced on its own and kept only if a disc SEED_MIN_WIDTH_MM wide fits in it (and it is no speck): a thinner crescent is left as the grid had it.
+       The grid's own spots are not moved, taken away or added to wherever they hold. ---- */
+    function seedMissed(regions, sp) {
+      var fine = detect(rawTris, Object.assign({}, opts, { pitch: sp, seedPitchMm: 0, footprint: false, insetMm: 0 }));
+      if (!fine.ok) return 0;
+      function surf(b) { var k = b.need.kind; return k === 'face' || k === 'gap' || (k === 'edge' && b.need.corner); }
+      var fp = regions.filter(function (R) { return R.footprint; }).map(function (R) {
+        var zl = Infinity, zh = -Infinity, segs = [];
+        R.beacons.forEach(function (b) { if (b.z < zl) zl = b.z; if (b.z > zh) zh = b.z; });      /* a dome's rim is its highest and its pole its lowest: the spots too */
+        R.footprint.loops.forEach(function (L) {
+          for (var q = 0; q < L.length; q++) {
+            var u = L[q], v = L[(q + 1) % L.length];
+            if (u[2] < zl) zl = u[2]; if (u[2] > zh) zh = u[2];
+            segs.push([u[0], u[1], v[0], v[1]]);
+          }
+        });
+        return { loops: R.footprint.loops, zl: zl - 0.8, zh: zh + 0.8, segs: segs };
+      });
+      function insideLoops(F, x, y) {
+        var inn = false;
+        F.loops.forEach(function (L) {
+          for (var q = 0, w = L.length - 1; q < L.length; w = q++) {
+            if ((L[q][1] > y) !== (L[w][1] > y) && x < (L[w][0] - L[q][0]) * (y - L[q][1]) / (L[w][1] - L[q][1]) + L[q][0]) inn = !inn;
+          }
+        });
+        return inn;
+      }
+      function edgeD(F, x, y) {
+        var best = Infinity;
+        for (var q = 0; q < F.segs.length; q++) {
+          var s2 = F.segs[q], dx = s2[2] - s2[0], dy = s2[3] - s2[1], l2 = dx * dx + dy * dy;
+          var t = l2 > 0 ? Math.max(0, Math.min(1, ((x - s2[0]) * dx + (y - s2[1]) * dy) / l2)) : 0;
+          var d = Math.hypot(x - s2[0] - t * dx, y - s2[1] - t * dy);
+          if (d < best) best = d;
+        }
+        return best;
+      }
+      var kept = {}, added = 0, cands = [], sr;
+      fine.beacons.forEach(function (b) {
+        if (!surf(b) || !(b.need.gapBelow >= SEED_MIN_DROP_MM)) return;
+        for (var f = 0; f < fp.length; f++) {
+          var F = fp[f];
+          if (b.z < F.zl || b.z > F.zh) continue;
+          if (insideLoops(F, b.x, b.y) || edgeD(F, b.x, b.y) <= SEED_MARGIN_MM) return;
+        }
+        var ci = Math.floor((b.x - origin[0]) / pitch), cj = Math.floor((b.y - origin[1]) / pitch);
+        if (ci < 0 || cj < 0 || ci >= nx || cj >= ny) return;
+        var key = ci + ',' + cj + ',' + Math.round(b.z / sp);
+        if (kept[key]) return;
+        kept[key] = true;
+        var need = {};
+        for (var nk in b.need) if (Object.prototype.hasOwnProperty.call(b.need, nk)) need[nk] = b.need[nk];
+        need.seeded = true;
+        cands.push({ x: b.x, y: b.y, z: b.z, normal: b.normal, need: need, cell: [ci, cj], tri: b.tri });
+      });
+      if (!cands.length) return 0;
+      /* each seeded surface is traced on its own and judged below: not a speck, and not the rest of a surface the grid already holds */
+      /* by height first (a rim and the apex over it are two surfaces whatever regionsOf joins), then by place */
+      var byZ = {};
+      cands.forEach(function (c) { var kz = Math.round(c.z / 1.5); (byZ[kz] = byZ[kz] || []).push(c); });
+      Object.keys(byZ).forEach(function (kz) {
+        footprints(sr = regionsOf(byZ[kz], out.grid), 0);
+        sr.forEach(function (R) {
+          if (!R.footprint || R.footprint.areaMm2 < SEED_MIN_AREA_MM2) return;
+          var near = R.beacons.some(function (b) {
+            for (var f = 0; f < fp.length; f++) { if (b.z >= fp[f].zl && b.z <= fp[f].zh && edgeD(fp[f], b.x, b.y) <= SEED_NEAR_MM) return true; }
+            return false;
+          });
+          if (near) return;
+          R.beacons.forEach(function (b) { beacons.push(b); added++; });
+        });
+      });
+      return added;
+    }
     out.ok = true;
     out.beacons = beacons;
     out.regions = regionsOf(beacons, out.grid);
-    if (opts.footprint === true || +opts.insetMm > 0) {
+    var seedPitch = +opts.seedPitchMm || 0;
+    var wantFoot = opts.footprint === true || +opts.insetMm > 0 || seedPitch > 0;
+    if (wantFoot) {
       var fcounts = {}, fk;
       for (fk in counts) if (Object.prototype.hasOwnProperty.call(counts, fk)) fcounts[fk] = counts[fk];
+      if (seedPitch > 0 && seedPitch < pitch) {
+        footprints(out.regions, 0);                         /* where the grid's spots already hold: the coverage the finer look is read against */
+        counts.seeded = seedMissed(out.regions, seedPitch);
+        if (counts.seeded) {
+          /* a seeded surface is an area of its own, by height: the rim the grid held and the apex over it are planned as they were and as two */
+          var held = beacons.filter(function (b) { return !b.need.seeded; }), seeds = {}, regs = held.length ? regionsOf(held, out.grid) : [];
+          beacons.forEach(function (b) { if (b.need.seeded) { var kz = Math.round(b.z / 1.5); (seeds[kz] = seeds[kz] || []).push(b); } });
+          Object.keys(seeds).forEach(function (kz) { regs = regs.concat(regionsOf(seeds[kz], out.grid)); });
+          regs.sort(function (a, b2) { return b2.count - a.count; });
+          regs.forEach(function (R, ri) { R.id = ri; });
+          out.regions = regs;
+        }
+      }
       footprints(out.regions);
       for (fk in fcounts) if (Object.prototype.hasOwnProperty.call(fcounts, fk)) counts[fk] = fcounts[fk];   /* sampling asks needOf of columns that are no beacon's: not counted */
     }
@@ -1113,6 +1213,22 @@
     return regions;
   }
 
+  /* The areas' footprints as the sheet reads them (opts.footprints of nso_support_interface.js sheet()): plain data, [{ zl, zh, loops: [[[x, y], ...]] }],
+     zl .. zh the heights of the area's spots and its edge. Areas with no footprint (a crease, a tip) are left out. */
+  function footprintsOf(regions) {
+    var out = [];
+    (regions || []).forEach(function (R) {
+      if (!R.footprint) return;
+      var zl = Infinity, zh = -Infinity;
+      R.beacons.forEach(function (b) { if (b.z < zl) zl = b.z; if (b.z > zh) zh = b.z; });
+      var loops = R.footprint.loops.map(function (L) {
+        return L.map(function (q) { if (q[2] < zl) zl = q[2]; if (q[2] > zh) zh = q[2]; return [q[0], q[1]]; });
+      });
+      out.push({ zl: zl, zh: zh, loops: loops });
+    });
+    return out;
+  }
+
   var api = {
     PITCH_DEFAULT_MM: PITCH_DEFAULT_MM,
     ANGLE_DEFAULT_DEG: ANGLE_DEFAULT_DEG,
@@ -1124,7 +1240,9 @@
     RIDGE_REACH_MM: RIDGE_REACH_MM,
     CREASE_MIN_DEG: CREASE_MIN_DEG,
     INSET_PRODUCT_MM: INSET_PRODUCT_MM,
+    SEED_PITCH_PRODUCT_MM: SEED_PITCH_MM,
     detect: detect,
+    footprintsOf: footprintsOf,
     regionsOf: regionsOf
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

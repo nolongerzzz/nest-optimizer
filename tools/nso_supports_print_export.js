@@ -62,8 +62,12 @@ const NAME = 'top_clip_x2';
 async function build(piece, partsOver, name, one, brim, outline) {
   const pname = name || NAME;
   const t0 = Date.now();
-  /* outline: the card's own (docs/SUPPORT-FOOTPRINT.md) - the spots kept in from the edge of the surface, the sheet and its caps kept to the part */
-  const det = SA.detectOverhangs(piece, { skipList: [], angleDeg: CARD.angleDeg, occluders: [], beaconInsetMm: outline && outline !== 'perimeter' ? ctx.NSO_SupportBeacons.INSET_PRODUCT_MM : 0 });
+  /* outline: the card's own (docs/SUPPORT-FOOTPRINT.md) - true: the spots kept in from the edge of the surface (inset), a finer look for the surfaces the grid
+     stepped over (seed), the sheet and its caps kept to the part (perimeter) and the sheet filling the footprint (fill). An object { inset, seed, perimeter, fill }
+     asks for some of them; 'perimeter' and 'inset' are the two early single options. */
+  const OL = outline === true ? { inset: 1, seed: 1, perimeter: 1, fill: 1 } : outline === 'perimeter' ? { perimeter: 1 } : outline === 'inset' ? { inset: 1 } : (outline && typeof outline === 'object') ? outline : {};
+  const SBM = ctx.NSO_SupportBeacons;
+  const det = SA.detectOverhangs(piece, { skipList: [], angleDeg: CARD.angleDeg, occluders: [], beaconInsetMm: OL.inset ? SBM.INSET_PRODUCT_MM : 0, beaconSeedMm: OL.seed ? SBM.SEED_PITCH_PRODUCT_MM : 0 });
   if (!det.ok) throw new Error(det.reason);
   const areas = [];
   let plateZ = 0;
@@ -77,7 +81,7 @@ async function build(piece, partsOver, name, one, brim, outline) {
     const p = ST.planTree(piece, Object.assign({}, CARD, { beacons: bs }, one ? { oneTrunk: true } : {}));
     if (!p.ok) { console.log(`area ${rg.id + 1}: ${p.reason}`); continue; }
     plateZ = p.plateZ;
-    const tp = await GP.parts(p, Object.assign({}, PARTS, one ? { sheetPitchMm: SI.SHEET.densePitchMm, interfaceLayers: SI.SHEET.denseInterfaceLayers, sheetFlatGapMm: SI.SHEET.denseFlatGapMaxMm } : {}, outline && outline !== 'inset' ? { sheetPerimeter: true } : {}, partsOver || {}));
+    const tp = await GP.parts(p, Object.assign({}, PARTS, one ? { sheetPitchMm: SI.SHEET.densePitchMm, interfaceLayers: SI.SHEET.denseInterfaceLayers, sheetFlatGapMm: SI.SHEET.denseFlatGapMaxMm } : {}, OL.perimeter ? { sheetPerimeter: true } : {}, OL.fill ? { sheetFootprints: SBM.footprintsOf(det.beaconRegions) } : {}, partsOver || {}));
     if (!tp.ok) throw new Error(`area ${rg.id + 1}: ${tp.reason}`);
     areas.push({ rid: rg.id, p, tp, sh: GP.shells(p, tp) });
   }

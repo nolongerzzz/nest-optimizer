@@ -862,6 +862,9 @@
   var FIELD_MM = 1.25;         /* the caps dilated this far are the sheet's field: caps CAP_GAP_MAX_MM apart meet in it (see THE FIELD) */
   var PERIM_REACH_MM = 6;      /* THE PART'S OUTLINE: a level's field and its caps lie only where the part is over the stack's top within this far (a flat sheet's own, shorter reach, opts.flatGapMaxMm, is the field's besides) */
   var PERIM_GROW_MM = [0, -0.3, -0.6, -0.9, -1.2];   /* a rim too thin for the sheet's 2 mm lines: the outline taken to its edge, then out past it by this much (a negative margin), the least that gives a sheet */
+  var FILL_MM = 3;             /* THE FILL: with the contact surface's footprint (opts.footprints) a level's field runs this far past a cap's rim, to the footprint's edge and no further... */
+  var FILL_REACH_MM = 1.2;     /* ...wherever the part is this near over the stack's top (the legacy field, a cap and 1.25 mm, needs no such reach) */
+  var FILL_MAX_TIPS = 16;      /* ...for a level of this many tips or fewer: a few tips on a wide surface is what it is for; a level of dozens already stands across its surface, and the filled build of the clamp's 54-tip level costs 5.5 s for next to nothing (+0.5 % of the support) */
   var PERIM_NEAR_MM = 3.6;     /* a level none of whose tips is this near the part's edge (a cap's 2 mm, the field's 1.25, the margin) is built as it always was: the outline cannot reach it */
   var PERIM_MARGIN_MM = 0.2;   /* ...and this far in from where it stops, a line's centre: its edge (0.2) ends on the outline, not over the air beyond it */
   var COLUMN_CLEAR_MM = 0.2;   /* the sheet and its caps keep this far off another support's column */
@@ -946,11 +949,40 @@
     /* THE PART'S OUTLINE (opts.perimeter, off unless true: the card asks): a cap or a line of the sheet lies where the part is over it, not out over
        the air past the part's edge - a tip standing at the edge of the surface (a rim's corner) had a cap and a field that hung off it
        (docs/SUPPORT-FOOTPRINT.md). A level that has no sheet inside the outline is built again without it, as it was. */
-    var wantPerim = opts.perimeter === true, perimOn = wantPerim, perimMargin = PERIM_MARGIN_MM, perimMemo = new Map();
+    var fillOn = false, wantPerim = opts.perimeter === true, perimOn = wantPerim, perimMargin = PERIM_MARGIN_MM, perimMemo = new Map();
     /* is the part over (x, y), within the reach, from a stack's top up? (the cell a sample falls in, read once) */
+    /* THE CONTACT SURFACE'S OWN OUTLINE (opts.footprints, from nso_support_beacons.js footprintsOf: the areas' footprints): where the card has it,
+       "the part is over (x, y)" is "(x, y) is on the surface a stack of this height holds" - the loops, not a silhouette - and the field fills it
+       (THE FILL), whatever the tips that were planned for it. */
+    var feet = (wantPerim && Array.isArray(opts.footprints) && opts.footprints.length) ? opts.footprints.map(function (f) {
+      var b = [Infinity, Infinity, -Infinity, -Infinity];
+      f.loops.forEach(function (L) { L.forEach(function (q) { b[0] = Math.min(b[0], q[0]); b[1] = Math.min(b[1], q[1]); b[2] = Math.max(b[2], q[0]); b[3] = Math.max(b[3], q[1]); }); });
+      return { zl: f.zl, zh: f.zh, loops: f.loops, box: b };
+    }) : null;
+    function inFeet(x, y, zc) {
+      for (var fi = 0; fi < feet.length; fi++) {
+        var f = feet[fi];
+        if (zc < f.zl - 0.5 || zc > f.zh + 1.5 || x < f.box[0] || x > f.box[2] || y < f.box[1] || y > f.box[3]) continue;
+        var inn = false;
+        for (var li = 0; li < f.loops.length; li++) {
+          var L = f.loops[li];
+          for (var q = 0, w = L.length - 1; q < L.length; w = q++) {
+            if ((L[q][1] > y) !== (L[w][1] > y) && x < (L[w][0] - L[q][0]) * (y - L[q][1]) / (L[w][1] - L[q][1]) + L[q][0]) inn = !inn;
+          }
+        }
+        if (inn) return true;
+      }
+      return false;
+    }
     function perimOver(x, y, zTop) {
-      var kq = Math.round(x / CELL_MM) + ',' + Math.round(y / CELL_MM) + ',' + zTop.toFixed(3), v = perimMemo.get(kq);
-      if (v === undefined) { v = isFinite(firstHit(x, y, zTop + 0.01, o.gap + PERIM_REACH_MM)); perimMemo.set(kq, v); }
+      var byFeet = feet && fillOn, kq = Math.round(x / CELL_MM) + ',' + Math.round(y / CELL_MM) + ',' + zTop.toFixed(3) + (byFeet ? 'f' : ''), v = perimMemo.get(kq);
+      if (v === undefined) { v = byFeet ? inFeet(x, y, zTop + o.gap) : isFinite(firstHit(x, y, zTop + 0.01, o.gap + PERIM_REACH_MM)); perimMemo.set(kq, v); }
+      return v;
+    }
+    var fillMemo = new Map();
+    function fillReach(x, y, zTop) {
+      var kq = Math.round(x / CELL_MM) + ',' + Math.round(y / CELL_MM) + ',' + zTop.toFixed(3), v = fillMemo.get(kq);
+      if (v === undefined) { v = isFinite(firstHit(x, y, zTop + 0.01, o.gap + FILL_REACH_MM)); fillMemo.set(kq, v); }
       return v;
     }
     var ROLES = ['transition', 'transition'];
@@ -1619,13 +1651,15 @@
         return v;
       }
       live.forEach(function (t) {
-        var cr = carrierOf(t), rr = cr.r + (L.lone ? Math.max(FIELD_MM, LONE_FIELD_MM - cr.r) : FIELD_MM);
+        var cr = carrierOf(t), rr0 = cr.r + (L.lone ? Math.max(FIELD_MM, LONE_FIELD_MM - cr.r) : FIELD_MM), rr = feet && perimOn && fillOn ? Math.max(rr0, cr.r + FILL_MM) : rr0;
         var i0 = Math.max(0, Math.floor((cr.c[0] - rr - ox) / CELL_MM)), i1 = Math.min(nx - 1, Math.ceil((cr.c[0] + rr - ox) / CELL_MM));
         var j0 = Math.max(0, Math.floor((cr.c[1] - rr - oy) / CELL_MM)), j1 = Math.min(ny - 1, Math.ceil((cr.c[1] + rr - oy) / CELL_MM));
         for (var jf = j0; jf <= j1; jf++) for (var iff = i0; iff <= i1; iff++) {
           var qf = jf * nx + iff, kf = own[qf];
           if (!free[qf] || edge[qf] || (kf >= 0 && tips[kf].level !== L.id)) continue;
-          if (Math.hypot(ox + iff * CELL_MM - cr.c[0], oy + jf * CELL_MM - cr.c[1]) <= rr && (!reachCache || inReach(ox + iff * CELL_MM, oy + jf * CELL_MM)) && (!perimOn || inPerim(ox + iff * CELL_MM, oy + jf * CELL_MM))) field[qf] = 1;
+          var dcap = Math.hypot(ox + iff * CELL_MM - cr.c[0], oy + jf * CELL_MM - cr.c[1]);
+          if (dcap <= rr && (!reachCache || inReach(ox + iff * CELL_MM, oy + jf * CELL_MM)) && (!perimOn || inPerim(ox + iff * CELL_MM, oy + jf * CELL_MM)) &&
+              (dcap <= rr0 || fillReach(ox + iff * CELL_MM, oy + jf * CELL_MM, zTop))) field[qf] = 1;
         }
       });
       function fieldAt(x, y) {
@@ -1710,16 +1744,6 @@
         });
         return { F: F, K: K, J: J, k0: k0, j0: j0, P: P, cell: cell, comp: comp, comps: comps, spans: spans };
       }
-      /* the caps a set of cells carries: a line along A of it - between two
-         of its cells or on its edge - across the cap */
-      function capsOf(G, has) {
-        var out = {};
-        G.spans.forEach(function (sp) {
-          if (sp.kl > sp.kh || sp.j < 0 || sp.j >= G.J) return;
-          for (var k = Math.max(0, sp.kl); k <= Math.min(G.K, sp.kh); k++) if (has(k - 1, sp.j) || has(k, sp.j)) { out[sp.t.i] = true; return; }
-        });
-        return out;
-      }
       /* the largest rectangle of a piece that carries the most of its caps */
       function bestRect(G, has, cellsOf) {
         var ks = cellsOf.map(function (q) { return (q / G.J) | 0; }), js = cellsOf.map(function (q) { return q % G.J; });
@@ -1735,8 +1759,14 @@
             if (!iv.length) break;
             if (cb - ca + 1 < MINC) continue;
             iv.forEach(function (I) {
-              var inR = function (k, j) { return k >= ca && k <= cb && j >= I[0] && j < I[1]; };
-              var n = Object.keys(capsOf(G, inR)).length, area = (cb - ca + 1) * (I[1] - I[0]);
+              /* capsOf(G, inR) for the rectangle ca..cb x I, counted without building it: a cap is carried when its row is in I and some column of
+                 its lines meets a cell of the rectangle on either side (k - 1 or k), i.e. k in ca..cb + 1 */
+              var n = 0, area = (cb - ca + 1) * (I[1] - I[0]);
+              for (var si = 0; si < G.spans.length; si++) {
+                var sp = G.spans[si];
+                if (sp.kl > sp.kh || sp.j < 0 || sp.j >= G.J || sp.j < I[0] || sp.j >= I[1]) continue;
+                if (Math.max(0, sp.kl, ca) <= Math.min(G.K, sp.kh, cb + 1)) n++;
+              }
               if (!best || n > best.n || (n === best.n && area > best.area)) best = { n: n, area: area, ca: ca, cb: cb, ja: I[0], jb: I[1] };
             });
           }
@@ -1952,12 +1982,20 @@
           var plain = buildLevelInside(L, angleForced);                      /* the old way */
           if (!plain.ok || !levelNearEdge(L)) return plain;
           perimOn = true;
+          /* THE FILL first, where the footprints are known: the field runs to the surface's edge. A rim too thin to fill (the sheet's 2 mm lines)
+             fails it, and the level is built as the outline alone builds it, below: a filled piece out over a thin rim is the fault. */
+          if (feet && L.tips.length <= FILL_MAX_TIPS) {
+            fillOn = true;
+            var rf = buildLevelInside(L, angleForced);
+            fillOn = false;
+            if (rf.ok) { L.perim = { marginMm: perimMargin, fill: true }; return rf; }
+          }
           var r = buildLevelInside(L, angleForced), used = { marginMm: perimMargin }, first = r.ok ? null : r.reason;
           for (var mi = 0; mi < PERIM_GROW_MM.length && !r.ok; mi++) { perimMargin = PERIM_GROW_MM[mi]; r = buildLevelInside(L, angleForced); used = { marginMm: perimMargin }; }
           if (!r.ok) { perimOn = false; r = buildLevelInside(L, angleForced); used = { marginMm: null, why: first }; }     /* again: a build leaves its marks on the tips */
           L.perim = used;
           return r;
-        } finally { perimMargin = keep; perimOn = true; }
+        } finally { perimMargin = keep; perimOn = true; fillOn = false; }
       };
     }
     rebucket();
