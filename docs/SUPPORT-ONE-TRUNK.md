@@ -159,6 +159,18 @@ the option (the shipped Custom feed's bytes are the claude-wip's; `support:feed`
     the sheet's own bodies at the blob's cell 0.25 mm and budget 24 k triangles (`CROWN_BLOB_CELL_MM`, `CROWN_BLOB_TRIS`; the owner's Studio view of Bambu's
     Oblique is three columns off one trunk). The legacy plain stair (Open, Assisted, Custom: no `stairLegMm`) is byte for byte as before.
     Gate: `support:onetrunk` (a stair's legs are no more than a third of its tips and no post is further than 3.6 mm in plan from one).
+21. **No branch lies flat; a cap stays under the part; a support is hollow** (the owner's, running the original `supp_ref` again: "this branch that comes off the
+    trunk at a 90 definitely won't print + the tip is sticking out from beyond the model contact point ... revise any branches like that, so they stay within
+    the contact points unless reaching up to another point above"). *The branch.* The crown's joins stood no lower than `rootFloorMm` (6 mm: the stem), and where the
+    tips were low and spread (a 17 mm head) that floor beat the lean: the Oblique's lowest tip hung on a leg of 83 deg from vertical, its stair's tree on legs of
+    75 - 80 deg. A leg over `crown.leanHardDeg` (75) is now brought down to the lean limit (`branchTiltDeg`, 50): its join stands lower, or its end meets the
+    trunk lower, inside its body, where it is going (`LEAN_FLOOR_MM` 1.5 over the plate at the least). A stair's own tree (`_stairTree`) holds 50 throughout. The
+    legs between (the plan's 60 - 70 deg ones on the other heads) are as they were - changing them moved Circular's sheet (its tips' tops moved, and one tip
+    lost its piece). Gate: `support:onetrunk` ("no built branch lies flat": the plan's legs under 75, a stair's tree under 50). *The tip.* A stair's lowest tip
+    stands on the slope's edge; its 4 mm cap hung 2 mm off the part. With `opts.perimeter` a cap whose rim is not all under the part is moved in (1.5 mm at
+    most) and then narrowed (`CAP_IN_MM`); what is left over the edge is the strips' corner at the part's rounded corner (up to 0.9 mm, not trimmed).
+    *The crown below the plate:* a join brought down to the flare put the trunk's shoulder under the plate (z -3.8): the body is cut at the plate (`cut.zMin`).
+    *Hollow and the labels:* `docs/SLICER.md` "A support is hollow" and "A stair's posts are Support".
 **The interface (`interfaceLayers`, `SHEET.densePitchMm`).** `sheet()` takes `interfaceLayers` (2 unless said): 2 transition
 layers and that many interface layers, the interface alternating across and along the sheet's A. The card's **Dense (Bambu)**
 interface is pitch **0.47 mm** (Bambu's 0.46: the strip's joins need a segment of 0.4665, and at 0.46 the stair under

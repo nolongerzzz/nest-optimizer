@@ -875,6 +875,7 @@
   var CAP_MAX_MM = 4;          /* ...and at most */
   var CAP_SPACE_MM = 0.5;      /* where there is room, a cap leaves this much air to its nearest neighbour */
   var CAP_GAP_MAX_MM = 2;      /* the most air between a cap and its nearest neighbour (CAP_MAX_MM caps on tips 6 mm apart) */
+  var CAP_IN_MM = 1.5;         /* a cap hanging off the part's edge is moved in this far at most before it is narrowed */
   var CAP_STEP_MM = 0.25;      /* a cap too near the piece or another support narrows by this */
   var CAP_FOOT = 0.9;          /* the cap's foot across, as a share of the column's side: inside its square however either is turned */
   var CAP_TUCK_MM = 0.1;       /* the column under a cap ends this far (and half its diagonal) inside it: no face of the two shares a plane */
@@ -2710,6 +2711,30 @@
           CA.why = CB.why = 'held short of a neighbour ' + (dd + CAP_PART_MM).toFixed(2) + ' mm away'; moved = true;
         }
       }
+      /* THE CAPS KEEP TO THE PART (opts.perimeter, the card asks): a cap stands where the part is over it, not out over the air past the part's edge
+         (a stair's lowest tip stands at the end of the slope, on the edge: its 4 mm cap hung 2 mm off it - the owner's picture). A cap whose rim
+         is not all under the part is moved in (CAP_IN_MM at most, in 16 directions, the least first), else narrowed a step, down to the tip's own
+         width; a tip whose column top is not under the part either keeps its bare top. */
+      if (wantPerim) carriers.forEach(function (t) {
+        var cp = t.cap;
+        if (!cp) return;
+        function rimOver(cx, cy, w) {
+          for (var a = 0; a < 16; a++) if (!perimOver(cx + w / 2 * Math.cos(Math.PI * a / 8), cy + w / 2 * Math.sin(Math.PI * a / 8), zCap)) return false;
+          return perimOver(cx, cy, zCap);
+        }
+        var c0 = cp.c.slice(), w0 = cp.w, fit = null;
+        for (var w = w0; w > o.side + 1e-9 && !fit; w = Math.max(o.side, w - CAP_STEP_MM)) {
+          for (var d = 0; d <= CAP_IN_MM + 1e-9 && !fit; d += d === 0 ? 0.25 : 0.25) {
+            for (var a2 = 0; a2 < (d === 0 ? 1 : 16) && !fit; a2++) {
+              var cx = c0[0] + d * Math.cos(Math.PI * a2 / 8), cy = c0[1] + d * Math.sin(Math.PI * a2 / 8);
+              if (rimOver(cx, cy, w)) fit = { c: [cx, cy, c0[2]], w: w, moved: d };
+            }
+          }
+          if (w <= o.side + 1e-9) break;
+        }
+        if (!fit) { t.cap = null; t.capWhy = 'no room under the part for a cap: the column\'s own top'; return; }
+        if (fit.moved > 0 || fit.w < w0 - 1e-9) { cp.c = fit.c; cp.w = fit.w; cp.why = 'kept to the part: ' + (fit.moved > 0 ? 'moved in ' + fit.moved.toFixed(2) + ' mm' : '') + (fit.w < w0 - 1e-9 ? ' narrowed to ' + fit.w.toFixed(2) : ''); }
+      });
       /* every cap measured, narrowed until it keeps the gap */
       carriers.forEach(function (t) {
         for (var it2 = 0; it2 < 16 && t.cap; it2++) {
