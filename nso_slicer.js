@@ -2050,7 +2050,7 @@
          (a dome's flat sheet lies up to its reach under the part at the rim, and is all sheet). A path that is part sheet and part tree is split
          where its type changes (a loop of a strip with a post's wall on it is an interface run and a support run). */
       var hIm = P.layers.length ? planes[planes.length - 1].h : 0.2;
-      var dIn = gap + (NI - 1) * hIm + stairH + 0.05, dTr = gap + (NI + NT - 1) * hIm + stairH + 0.05;
+      var dIn = gap + (NI - 1) * hIm + 0.1, dTr = gap + (NI + NT - 1) * hIm + 0.1;
       function hostPolys(j, d) {
         var over = overAt(j, d);
         return over.length ? g.polys(g.unionAll(over.map(function (x) { return x.cs; }))) : [];
@@ -2061,16 +2061,19 @@
         if (!L.paths.length) return;
         var zi = zones[j].i.length ? g.polys(g.offset(g.unionAll(zones[j].i), w / 2)) : [];
         var zt = zones[j].t.length ? g.polys(g.offset(g.unionAll(zones[j].t), w / 2)) : [];
-        var zis = zones[j].is.length ? g.polys(g.offset(g.unionAll(zones[j].is), w / 2)) : [];
-        var zts = zones[j].ts.length ? g.polys(g.offset(g.unionAll(zones[j].ts), w / 2)) : [];
+        /* a layer that holds a stair's strip: whatever zone touches it - a strip's front seen as a flat top, a post one island with it - is held to the part's
+           nearness (a flat sheet's islands are held to it only where no stair is) */
+        var stairAt = zones[j].is.length > 0 || zones[j].ts.length > 0;
+        var zis = (stairAt ? zones[j].is.concat(zones[j].i) : zones[j].is).length ? g.polys(g.offset(g.unionAll(stairAt ? zones[j].is.concat(zones[j].i) : zones[j].is), w / 2)) : [];
+        var zts = (stairAt ? zones[j].ts.concat(zones[j].t) : zones[j].ts).length ? g.polys(g.offset(g.unionAll(stairAt ? zones[j].ts.concat(zones[j].t) : zones[j].ts), w / 2)) : [];
+        if (stairAt) { zi = []; zt = []; }
         var hI = null, hT = null;
         /* THE SHEET IS LINES, NOT A WALL (the support is hollow, above): where a layer is the sheet's - interface or transition, the zone a flat sheet's islands or a
            stair's strips make, the stair's held to the part's nearness - its region is filled solid, as Bambu lays its interface, inside the one wall the support
            has. The tree under the sheet stays hollow. */
         if (zi.length || zt.length || zis.length || zts.length) {
-          var zc = [];
-          zones[j].i.concat(zones[j].t).forEach(function (cs) { zc.push(cs); });
-          var zcs = zones[j].is.concat(zones[j].ts);
+          var zc = stairAt ? [] : zones[j].i.concat(zones[j].t);
+          var zcs = stairAt ? zones[j].is.concat(zones[j].ts, zones[j].i, zones[j].t) : zones[j].is.concat(zones[j].ts);
           var sheetCs = zc.length ? g.unionAll(zc) : g.empty();
           if (zcs.length) {
             var hostD = overAt(j, dTr);
