@@ -351,15 +351,20 @@ const segLen = s => Math.hypot(s.x1 - s.x0, s.y1 - s.y0);
         const legs = L.stair.tips.filter(w => w.leg !== false), posts = L.stair.tips.filter(w => w.leg === false);
         out.tips += L.stair.tips.length; out.legs += legs.length;
         posts.forEach(w => { const d = Math.min(...legs.map(q => Math.hypot(q.p[0] - w.p[0], q.p[1] - w.p[1]))); out.far = Math.max(out.far, d); });
+        /* ...and none of them floats: every group of posts that overlap one another has a leg among them */
+        const T = L.stair.tips, par = T.map((_, i) => i), fnd = i => par[i] === i ? i : (par[i] = fnd(par[i])), held = {};
+        for (let i = 0; i < T.length; i++) for (let j = i + 1; j < T.length; j++) if (Math.hypot(T[i].p[0] - T[j].p[0], T[i].p[1] - T[j].p[1]) <= 1.3 && Math.abs(T[i].p[2] - T[j].p[2]) < 2.4) par[fnd(i)] = fnd(j);
+        T.forEach((w, i) => { if (w.leg !== false) held[fnd(i)] = true; });
+        out.floating = (out.floating || 0) + T.filter((w, i) => !held[fnd(i)]).length;
         const tr = ((a.tp.sheet && a.tp.sheet.stairTrees) || (a.tp.stairTrees) || []).find(t => t.level === L.id);
         if (tr) out.members += tr.members;
-        if (legs.length > Math.max(3, Math.ceil(L.stair.tips.length / 3)) || out.far > 0.65 * SI.SHEET.denseStairLegMm + 0.7 || (tr && tr.unreachable)) out.ok = false;
+        if (legs.length > Math.max(3, Math.ceil(L.stair.tips.length / 3)) || out.far > 0.65 * SI.SHEET.denseStairLegMm + 0.7 || (tr && tr.unreachable) || out.floating) out.ok = false;
       });
     });
     return out;
   }).filter(x => x.tips);
-  check('a stair\'s tips are a few legs under rows of posts: no more than a third of its tips are legs, and every other post is within ' + f2(0.65 * SI.SHEET.denseStairLegMm + 0.7) + ' mm of one',
-    stairRows.length >= 1 && stairRows.every(x => x.ok), stairRows.map(x => x.key + ' ' + x.legs + ' legs of ' + x.tips + ' tips (farthest post ' + f2(x.far) + ' mm), ' + x.members + ' crown members').join(', '));
+  check('a stair\'s tips are a few legs under rows of posts: no more than a third of its tips are legs, every other post is within ' + f2(0.65 * SI.SHEET.denseStairLegMm + 0.7) + ' mm of one, and no post floats (each group of overlapping posts has a leg)',
+    stairRows.length >= 1 && stairRows.every(x => x.ok), stairRows.map(x => x.key + ' ' + x.legs + ' legs of ' + x.tips + ' tips (farthest post ' + f2(x.far) + ' mm), ' + x.members + ' crown members, ' + (x.floating || 0) + ' floating').join(', '));
   check('no support stands over the sheet\'s top (no speck in the air where the supports stop)', rows.every(r => r.over <= 0.05),
     rows.map(r => r.key + ' ' + f2(r.over)).join(', '));
   check('a sheet under a curved head stays where the part is near it: no more than 1.5 mm under the part over any cell of the plate, and its middle within 1.5 mm of the trunk\'s',

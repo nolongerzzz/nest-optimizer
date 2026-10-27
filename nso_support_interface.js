@@ -2733,6 +2733,17 @@
         }
       });
       want.forEach(function (w) { if (w.strip === mLo || !legMm) w.leg = true; });
+      /* a post stands on its neighbours where they overlap it (in plan, under a post's width, and within its height): a post, or a
+         few of them, with no leg among those it touches is a floating piece, and takes a leg of its own */
+      if (legMm) {
+        var par = want.map(function (w, i) { return i; }), fnd = function (a) { while (par[a] !== a) a = par[a] = par[par[a]]; return a; }, touch = 0.9 * o.side * 2 / Math.sqrt(Math.PI);
+        for (var ia = 0; ia < want.length; ia++) for (var ib = ia + 1; ib < want.length; ib++) {
+          if (Math.hypot(want[ia].p[0] - want[ib].p[0], want[ia].p[1] - want[ib].p[1]) <= touch && Math.abs(want[ia].p[2] - want[ib].p[2]) < 2.4) par[fnd(ia)] = fnd(ib);
+        }
+        var held = {};
+        want.forEach(function (w, i) { if (w.leg) held[fnd(i)] = true; });
+        want.forEach(function (w, i) { var r = fnd(i); if (!held[r]) { w.leg = true; held[r] = true; } });
+      }
       /* each tip's layer: the lowest strip of the stair whose band holds it */
       group.forEach(function (t) {
         t.stairM = null;
