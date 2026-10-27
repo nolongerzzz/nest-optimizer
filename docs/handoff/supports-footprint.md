@@ -46,3 +46,10 @@ Gate: `npm run support:footprint` (`tools/nso_support_footprint_check.js`, ~1.5 
 - **Environment:** `node_modules` needs `three` (`npm install --no-save three@0.147.0`) and, for the `.mjs` drives, a link to the preinstalled Playwright
   (`ln -s /opt/node-tools/node_modules/playwright node_modules/playwright`, and `playwright-core` beside it). Do NOT `npm install` playwright: it is
   1.56.1, wants a browser build this box lacks, and shadows the one that works.
+- **Third round, the plate measured (2026-10-27):** the owner's report was the plate taking 1:50 (21 s before the beacon work) and its interfaces "nowhere close". Measured, in
+  `docs/SUPPORT-FOOTPRINT.md` section 8: node 15 -> 36 s, browser here 12.5 -> 24.4 s; the outline and the finer look are about 7.4 s of the browser's 24 s and the rest is upstream's;
+  all of mine is in the last-resort sheets (`lateTry`). Shipped, same bytes: the geometry queries kept by their arguments (36 -> 30 s node). Tools: `npm run support:coverage` (the share of each
+  footprint with support under it: Base 88, Oblique 92 aligned / **12 turned**, Circular 35, Sphere 64, Negative Sphere 61, Negative Sphere2 50) and
+  `tools/nso_support_plate_browser_time.mjs`. **Open and not mine to pick:** the Oblique's stair only stands at 0 and 75 deg; a dome is one flat patch; a 1 mm rim has no sheet. The thin-tip option
+  (45 -> 33 s turned, interface lost on the rims) was measured and not shipped.
+
