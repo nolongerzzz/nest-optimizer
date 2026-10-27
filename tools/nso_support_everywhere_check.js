@@ -291,8 +291,10 @@ async function runPose(piece, label, name) {
    regression; one that rises is the next ticket's, and these numbers go up with it) */
 const FLOOR = {
   /* piece:      [flat, yaw 45, tip 15, yaw 45 + tip 15] tips with a sheet */
-  base: [20, 16, 20, 16], oblique: [20, 12, 16, 13], circular: [4, 4, 3, 4], sphere: [2, 4, 4, 4], negsphere: [15, 11, 6, 6], negsphere2: [3, 3, 8, 9]
+  base: [20, 16, 20, 16], oblique: [20, 12, 16, 13], circular: [4, 4, 3, 4], sphere: [2, 4, 4, 4], negsphere: [15, 11, 6, 6], negsphere2: [3, 3, 7, 9]
 };
+/* negsphere2 tip 15: 8 -> 7 when a stair's posts were typed as Support (nso_slicer.js STAIR ZONES): the eighth was a tip the plan itself names bare (its level failed),
+   counted for the stair's lines beside it that were typed interface; the plan's own list of bare tips (checked below) is unchanged */
 const POSES = [[0, 0], [45, 0], [0, 15], [45, 15]];
 
 /* ------------------------------------------------------------------ 4 */

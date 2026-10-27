@@ -55,6 +55,13 @@ every crown is lighter: the three plate pins were re-taken (NegSphere2 16644, Ci
 Not printed: a blade's posts stand on their neighbours (0.5 - 0.9 mm apart, overlapping) and a post is up to 2.2 mm in plan from its leg - the same lean as the stair's own strips,
 but unprinted. `STAIR_LEG_MM` is the knob (3.2 is 3 legs to a blade). `docs/SUPPORT-ONE-TRUNK.md` 3.20.
 
+**Seventh round: the Oblique in G-scope** (the owner ran `supp_ref` through the card and read the Oblique against Bambu's: interface and transition "way too many
+layers, and intermixed", the support stopping level under the stair instead of running up to the interface, supports no longer hollow, one branch off the trunk at
+90 deg with its tip over the part's edge). Fixed: the slicer types a stair's posts as Support (STAIR ZONES) and slices supports hollow (`supportWalls`); legs over
+75 deg are brought to 50 (`leanHardDeg`; a stair's tree holds 50); a stair's lowest cap is kept under the part; the stair crown no longer dips under the plate.
+`docs/SUPPORT-ONE-TRUNK.md` 3.21, `docs/SLICER.md`. `support:everywhere`'s negsphere2 tip-15 floor is 7 (was 8): the eighth was a tip the plan names bare, counted
+for the stair's lines beside it. Not done: the strips' corner past the part's rounded corner (<= 0.9 mm); legs of 60 - 70 deg on the other heads (printed as they are).
+
 **OPEN for the owner**
 1. **Dense interface is unprinted.** The card defaults to Dense (Bambu's spacing 0.1: lines 0.47 mm apart, 3 interface layers).
    The 0.84 mm sheet was settled by the owner's own prints; Dense is built and sliced here, not printed. Interface > Open puts it back.

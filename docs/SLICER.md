@@ -389,6 +389,17 @@ right over the sheet that holds it.
   (`slicer:supports` 26 of 26). No wall, infill or overhang wall
   comes out of a support object: the same beads, one type, as Bambu prints
   support.
+- **A support is hollow** (`CONSTANTS.supportWalls`, supports-one-trunk sixth round). A support object is sliced with the two overrides its export
+  carries (`SHEET.slicerSettings`: `wall_loops` 1, `sparse_infill_density` 0 %), as `thinWall.supportsOn` carries the third: one wall round a trunk, no
+  filler inside it - as Bambu's own tree is - and the profile's shells (the first layers, the top under a sheet). Before, G-scope sliced a trunk with
+  two walls and an infill line, and read it as filled.
+- **A stair's posts are Support** (`typeSupports`, STAIR ZONES, supports-one-trunk sixth round). A stair's tips are posts under its strips, a row of
+  them one blade; at a layer a post is one island with the strip it touches, so walking the strip's zone down by islands took the whole blade for the
+  sheet (the Oblique's slab hung orange fins, and its Support stopped flat under the first strip). A stair's zones now hold only where the part is over
+  the line within the stack's own depth (`gap` + the interface and transition layers + one layer for a strip's back edge): the 3 + 2 layers under the
+  part are interface and transition, a column further down is Support, and a path that is part strip and part post is split where its type changes.
+  A flat sheet's islands are untouched (a dome's flat sheet lies up to its reach under the part at the rim and is all sheet). The Oblique now reads,
+  layer by layer, as Bambu's does: Support, transition and interface in the same layer, the Support running up beside the stair.
 - **Overhang, as a slicer types a wall** (`typeSupports`, supports-stair-body).
   Each line of a support is also read against the layer under it - that
   layer as the footprint it holds (closed by 0.5 mm, as above), grown by
