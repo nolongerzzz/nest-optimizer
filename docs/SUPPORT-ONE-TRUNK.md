@@ -42,6 +42,8 @@ interface engine (merged in) and does the other half.
 
 ## 3. What is built
 
+**Tree is the one-trunk build.** Style Tree in Auto always builds this way (the owner's: "any time tree is selected, that's what builds. the lattice is for straight strut mode"); the card's *One trunk per cluster* box is hidden. Straight strut stays the lattice; Gecko-hand is a first concept, not yet this build; Assisted and Custom keep their fed builds.
+
 **`opts.oneTrunk` (Auto, style Tree; with "may rest on the part" the card runs it first and plans what it could not reach again with the resting lattice)** - `planOneTrunk`, then the crown planner of section 8
 of `SUPPORT-GRIDPACK.md` (the custom feed's "one tree to a circle") with these changes, none of them reachable without
 the option (the shipped Custom feed's bytes are the claude-wip's; `support:feed` still passes):
