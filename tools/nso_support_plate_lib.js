@@ -71,7 +71,9 @@ function makeDom() {
   for (const id of ['sup-count', 'supports-card', 'sup-progress', 'btn-sup-all', 'btn-sup-none', 'btn-sup-remove', 'sup-angle', 'sup-angle-note',
     'sup-style', 'sup-size', 'sup-rest', 'sup-rows', 'sup-hint', 'sup-tools', 'sup-tune', 'sup-tune-note', 'sup-tune-count', 'sup-tune-defaults',
     'sup-knob-tip', 'sup-knob-growth', 'sup-knob-lean', 'sup-knob-node', 'sup-plate', 'sup-plate-row', 'status', 'menu-supports',
-    'sup-mode-auto', 'sup-mode-assisted', 'sup-mode-custom', 'sup-tool-tips', 'sup-tool-circles', 'sup-tool-erase']) el(id);
+    'sup-mode-auto', 'sup-mode-assisted', 'sup-mode-custom', 'sup-tool-tips', 'sup-tool-circles', 'sup-tool-erase',
+    'sup-raft', 'sup-paint', 'sup-paint-row', 'sup-paint-clear', 'sup-brush']) el(id);
+  els['sup-raft'].checked = true; els['sup-brush'].value = '4';
   els['sup-progress'].firstElementChild = new El('sup-progress-fill');
   els['sup-progress'].hidden = true;
   els['sup-angle'].value = '35'; els['sup-style'].value = 'tree'; els['sup-size'].value = '1.2';

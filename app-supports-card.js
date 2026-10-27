@@ -148,7 +148,16 @@ var NSO_SUPPORTS_CARD = (function () {
   var ANGLE_DEBOUNCE_MS = 220;   // typing "3" on the way to "30" does not detect at 3
   var JOIN_PITCHES = 1.5;        // a manual beacon this close to a region joins it (the grid's own z rule)
   var PICK_PITCHES = 1.0;        // a click this close to a beacon is in that beacon's area
-  var UP_MAX = 0.26;             // a face whose normal points up more than this (15 deg) holds nothing
+  /* PAINT (docs/SUPPORT-FOOTPRINT.md section 10): a stroke over the piece asks for supports where it goes. Its samples are kept 0.5 mm apart on the surface; it asks
+     for a spot every 2 mm along it (a spot joins the area of the nearest one as a manual spot does, or starts an area), and the cells the brush covered that no
+     detected footprint holds are a footprint of their own for the raft - laid to the brush's edge. A footprint painted over keeps its plate to its edge too. */
+  var PAINT_R_DEFAULT = 2;       // the brush's radius, mm (the Brush field is its diameter)
+  var PAINT_STEP_MM = 0.5;
+  var PAINT_SPOT_MM = 2;
+  var PAINT_MARGIN_MM = 0.02;
+  var PAINT_MAX = 6000;          // samples in one stroke
+  var PAINT_COL = 0xe879f9;
+  var UP_MAX = 0.26;            // a face whose normal points up more than this (15 deg) holds nothing
   var ORDER = 30;                // over the piece and its outline
   var MARK_ORDER = 900;          // the markers (spots, tips, circles, the eraser's light) draw over everything, as the rotate rings do
   var PICK_PX = 9;               // a spot / a tip / a circle's edge is under the pointer within this many pixels
@@ -203,7 +212,11 @@ var NSO_SUPPORTS_CARD = (function () {
     /* Dense belongs to the one-trunk build: its sheet is planned over the thinned tips the reference's is. A hand-placed row of three
        tips (Custom) did not form a sheet at 0.47 mm that it forms at 0.84 (support:custom), so the other builds stay Open. */
     var SI = window.NSO_SupportInterface, dense = !!o && o.dense !== false && oneTrunkOn(o);
-    return dense && SI && SI.SHEET && SI.SHEET.densePitchMm ? Object.assign({}, PARTS_OPTS, { sheetPitchMm: SI.SHEET.densePitchMm, interfaceLayers: SI.SHEET.denseInterfaceLayers, sheetFlatGapMm: SI.SHEET.denseFlatGapMaxMm, sheetStairLegMm: SI.SHEET.denseStairLegMm }) : Object.assign({}, PARTS_OPTS);
+    var out = dense && SI && SI.SHEET && SI.SHEET.densePitchMm ? Object.assign({}, PARTS_OPTS, { sheetPitchMm: SI.SHEET.densePitchMm, interfaceLayers: SI.SHEET.denseInterfaceLayers, sheetFlatGapMm: SI.SHEET.denseFlatGapMaxMm, sheetStairLegMm: SI.SHEET.denseStairLegMm }) : Object.assign({}, PARTS_OPTS);
+    /* RAFT (the card's switch): the interface and the transition laid from each footprint and its height, layer by layer, the way a raft grows;
+       off, the sheet is built from the tips alone, as it was before the region plate (docs/SUPPORT-FOOTPRINT.md section 9) */
+    if (o && o.raft === false) out.sheetRegionPlate = false;
+    return out;
   }
   /* The card's state when the picked piece has no beacons at all. Detection
      only asks what hangs in air; a tall, thin piece that may sway as it
@@ -216,6 +229,7 @@ var NSO_SUPPORTS_CARD = (function () {
     geo: null, angle: ANGLE_DEFAULT, angleTimer: 0,
     watchdogMs: WATCHDOG_MS, ceilingMs: CEILING_MS, planner: null, job: null, elapsed: 0,
     prog: null, listeners: [], said: null, knobs: {},
+    paint: false, stroke: null, paintLayer: null,
     mode: 'auto', tool: 'tips', pts: null, zoneLayer: null, eraseLayer: null, hot: null, hover: null, sel: null, drag: null,
     /* GENERATE FOR PLATE: on/off; the pieces it was switched on for; the pieces lit (the outline each one holds); what
        each was last detected as; the piece the card was on before; what the plate reads now; the run's place on the bar;
@@ -445,6 +459,17 @@ var NSO_SUPPORTS_CARD = (function () {
       list.push({ key: 'm' + op.id, x: w[0], y: w[1], z: w[2], normal: n,
         need: { kind: side ? 'side' : 'face', manual: true }, manual: true, op: i,
         region: best && bd <= JOIN_PITCHES * pitch ? best.region : next++ });
+    });
+    /* PAINT: a stroke asks for a spot every PAINT_SPOT_MM along it, on the faces that do not look up; each joins the area of the nearest spot as a
+       manual one does, or starts an area of its own. In Custom they are tips. */
+    ops.forEach(function (op, i) {
+      if (op.op !== 'paint') return;
+      paintSpotsOf(op, p).forEach(function (s, k) {
+        var best = null, bd = Infinity;
+        list.forEach(function (b) { var d = dist(pt(b), s.w); if (d < bd) { bd = d; best = b; } });
+        list.push({ key: 'p' + op.id + '.' + k, x: s.w[0], y: s.w[1], z: s.w[2], normal: s.n, need: { kind: s.n[2] > -0.5 ? 'side' : 'face', manual: true, paint: true },
+          manual: true, paint: true, op: i, tip: custom, region: best && bd <= JOIN_PITCHES * pitch ? best.region : next++ });
+      });
     });
     /* AN AREA THE LAST BUILD HELD IN PART: the spots it could not reach are
        an area of their own (numbered after the rest), so the area it held
@@ -772,7 +797,8 @@ var NSO_SUPPORTS_CARD = (function () {
     return g;
   }
 
-  function draw() {
+  function draw() { drawAreas(); drawPaint(); }
+  function drawAreas() {
     dispose(S.layer); S.layer = null; S.geo = null;
     dispose(S.pts); S.pts = null; dispose(S.zoneLayer); S.zoneLayer = null; dispose(S.eraseLayer); S.eraseLayer = null; S.hot = null;
     if (!S.open || S.hostId == null || !state.scene) return;
@@ -907,7 +933,7 @@ var NSO_SUPPORTS_CARD = (function () {
     if (rm) rm.hidden = !wasBuilt;
     en('btn-sup-none', cs === 'built' && !wide);
     en('btn-sup-remove', cs === 'built' && !wide && S.selSupport != null && !!modelOf(S.selSupport));
-    ['sup-angle', 'sup-style', 'sup-size', 'sup-rest', 'sup-one', 'sup-interface', 'sup-brim'].forEach(function (id) { var e = $(id); if (e) e.disabled = !!S.busy; });
+    ['sup-angle', 'sup-style', 'sup-size', 'sup-rest', 'sup-one', 'sup-interface', 'sup-brim', 'sup-raft'].forEach(function (id) { var e = $(id); if (e) e.disabled = !!S.busy; });
     var note = $('sup-angle-note');
     if (note) note.textContent = S.angle + '\u00b0 \u00b7 Bambu ' + BAMBU_ANGLE + '\u00b0';
     var ang = $('sup-angle');
@@ -953,7 +979,8 @@ var NSO_SUPPORTS_CARD = (function () {
     custom: 'Click the underside of the piece to place a tip; click a tip to take it away. Then Circles: where the supports may land.',
     circles: 'Drawing circles on the plate: drag to draw one, drag its edge to resize, drag inside to move, click one then Delete to remove it. Stop (Esc) to orbit.',
     erase: 'Erasing: hover a built member to light it and what it holds; click to remove it. Stop (Esc) to go on.',
-    plate: 'Every piece is lit. Generate builds supports for all of them in one go; one Undo takes them all back. Click a piece to work on it alone.'
+    plate: 'Every piece is lit. Generate builds supports for all of them in one go; one Undo takes them all back. Click a piece to work on it alone.',
+    paint: 'Painting: drag over the piece where supports are missing - each stroke asks for tips and a raft right under it, one Undo each. Press Paint again (or Esc) to orbit.'
   };
   function syncSwitch(cs) {
     var fed = S.mode !== 'auto', hasHost = S.hostId != null && !!placedOf(S.hostId);
@@ -974,14 +1001,19 @@ var NSO_SUPPORTS_CARD = (function () {
     var hint = $('sup-hint');
     if (hint) {
       if (hint.dataset.auto == null) hint.dataset.auto = hint.textContent;
-      hint.textContent = S.wide ? HINT.plate : !fed ? hint.dataset.auto : S.tool === 'tips' ? HINT[S.mode] : HINT[S.tool];
+      hint.textContent = S.wide ? HINT.plate : S.paint ? HINT.paint : !fed ? hint.dataset.auto : S.tool === 'tips' ? HINT[S.mode] : HINT[S.tool];
     }
+    var pb = $('sup-paint'), pc = $('sup-paint-clear'), pr = $('sup-paint-row');
+    if (pr) pr.hidden = !!S.wide || !S.open;
+    if (pb) { pb.classList.toggle('is-on', !!S.paint); pb.setAttribute('aria-pressed', S.paint ? 'true' : 'false'); pb.disabled = !!S.busy || !hasHost || !!S.wide; }
+    if (pc) pc.disabled = !!S.busy || !hasHost || !paintCount();
+    var pbr = $('sup-brush'); if (pbr) pbr.disabled = !!S.busy;
     paintCursor();
   }
   function paintCursor() {
     var cv = state.renderer && state.renderer.domElement;
     if (!cv) return;
-    var want = !S.open || S.mode === 'auto' ? '' : S.tool === 'circles' ? 'crosshair' : (S.tool === 'erase' && S.hover) || (S.tool === 'tips' && S.hot != null) ? 'pointer' : '';
+    var want = !S.open ? '' : S.paint ? 'crosshair' : S.mode === 'auto' ? '' : S.tool === 'circles' ? 'crosshair' : (S.tool === 'erase' && S.hover) || (S.tool === 'tips' && S.hot != null) ? 'pointer' : '';
     if (want || S.cursorSet) { cv.style.cursor = want; S.cursorSet = !!want; }
   }
 
@@ -1126,8 +1158,8 @@ var NSO_SUPPORTS_CARD = (function () {
     var st = $('sup-style'), sz = $('sup-size'), rs = $('sup-rest');
     var style = st && STYLES[st.value] ? st.value : 'tree';
     var size = sz ? parseFloat(sz.value) : NaN;
-    var one = $('sup-one'), it = $('sup-interface'), br = $('sup-brim');
-    return { brim: !br || !!br.checked, style: style, sideMm: isFinite(size) ? size : null, rest: !!(rs && rs.checked), knobs: S.mode === 'custom' ? knobsGiven() : null,
+    var one = $('sup-one'), it = $('sup-interface'), br = $('sup-brim'), rf = $('sup-raft');
+    return { brim: !br || !!br.checked, raft: !rf || !!rf.checked, style: style, sideMm: isFinite(size) ? size : null, rest: !!(rs && rs.checked), knobs: S.mode === 'custom' ? knobsGiven() : null,
       one: !one || !!one.checked, dense: !it || it.value !== 'open' };
   }
 
@@ -1626,6 +1658,8 @@ var NSO_SUPPORTS_CARD = (function () {
     job.parts = partsOptsOf(o);                       // this piece's sheet: Dense in the one-trunk build, Open in every other
     /* the sheet fills the contact surface the detector traced (docs/SUPPORT-FOOTPRINT.md), whatever tips were planned for it */
     if (D && D.det && window.NSO_SupportBeacons && window.NSO_SupportBeacons.footprintsOf) job.parts.sheetFootprints = window.NSO_SupportBeacons.footprintsOf(D.det.beaconRegions);
+    /* ...and the paint: the cells the brush covered, laid to its edge (paintFootprints) */
+    if (job.parts.sheetRegionPlate && c.hm && paintOps(c.hm).length) job.parts.sheetFootprints = paintFootprints(c.hm, c.host, job.parts.sheetFootprints || []);
     var gp = function () { return window.NSO_SupportGridpack; };
 
     /* 1. PLANNING (detecting, then beacons settled), area by area. */
@@ -1900,6 +1934,11 @@ var NSO_SUPPORTS_CARD = (function () {
   }
   function onKey(ev) {
     var typing = ev.target && /^(INPUT|SELECT|TEXTAREA)$/.test(ev.target.tagName);
+    if (S.open && !S.busy && S.paint && ev.key === 'Escape' && !typing) {          // a stroke in the air is dropped, then the brush is put down
+      if (S.stroke) { S.stroke = null; drawPaint(); } else setPaint(false);
+      ev.preventDefault(); ev.stopImmediatePropagation();
+      return;
+    }
     if (S.open && !S.busy && S.mode !== 'auto' && !typing) {
       if (ev.key === 'Escape' && (S.tool === 'circles' || S.tool === 'erase')) {      // stop the tool: the view orbits again
         setTool(S.tool);
@@ -2054,6 +2093,185 @@ var NSO_SUPPORTS_CARD = (function () {
     return { ok: true, key: 'm' + E.serial, region: b ? b.region : null };
   }
 
+
+  /* ---------------------------------------------------------------- paint */
+
+  function paintOps(m) { return m ? editsOf(m).ops.filter(function (o) { return o.op === 'paint'; }) : []; }
+  function paintCount() { return paintOps(modelOf(S.hostId)).length; }
+  function brushR() {
+    var e = $('sup-brush'), v = e ? parseFloat(e.value) : NaN;
+    return v > 0 ? Math.min(10, Math.max(0.4, v / 2)) : PAINT_R_DEFAULT;
+  }
+  /* the spots a stroke asks for: its samples thinned to PAINT_SPOT_MM, the faces that look up left out; [{ w: Z-up point, n: Z-up normal }] */
+  function paintSpotsOf(op, p) {
+    var out = [];
+    (op.pts || []).forEach(function (s) {
+      var n = localDirToUp(p, s.n);
+      if (n[2] > UP_MAX) return;
+      var w = localToUp(p, s.p);
+      for (var k = 0; k < out.length; k++) if (dist(out[k].w, w) < PAINT_SPOT_MM) return;
+      out.push({ w: w, n: n });
+    });
+    return out;
+  }
+  /* The footprints the raft is laid on, with the paint in them: a detected footprint the brush went over keeps its plate to its edge
+     (marginMm); the cells the brush covered that no detected footprint holds are footprints of their own (zl, zh from the stroke's heights and
+     the brush's reach), traced from the covered cells as the raft traces its layers. */
+  function paintFootprints(m, host, fps) {
+    var SI = window.NSO_SupportInterface, R = SI && SI.region, pts = [], CELL = 0.2;
+    if (!R || !m || !host) return fps;
+    paintOps(m).forEach(function (op) {
+      (op.pts || []).forEach(function (s) {
+        var n = localDirToUp(host, s.n);
+        if (n[2] > UP_MAX) return;
+        var w = localToUp(host, s.p);
+        pts.push([w[0], w[1], w[2], op.r || PAINT_R_DEFAULT]);
+      });
+    });
+    if (!pts.length) return fps;
+    var inLoops = function (loops, x, y) {
+      var inn = false;
+      for (var li = 0; li < loops.length; li++) {
+        var L = loops[li];
+        for (var q = 0, w = L.length - 1; q < L.length; w = q++) if ((L[q][1] > y) !== (L[w][1] > y) && x < (L[w][0] - L[q][0]) * (y - L[q][1]) / (L[w][1] - L[q][1]) + L[q][0]) inn = !inn;
+      }
+      return inn;
+    };
+    var out = fps.map(function (f) {
+      var painted = pts.some(function (q) { return q[2] >= f.zl - 0.5 && q[2] <= f.zh + 1.5 && inLoops(f.loops, q[0], q[1]); });
+      return painted ? Object.assign({}, f, { marginMm: PAINT_MARGIN_MM }) : f;
+    });
+    var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    pts.forEach(function (q) { x0 = Math.min(x0, q[0] - q[3]); y0 = Math.min(y0, q[1] - q[3]); x1 = Math.max(x1, q[0] + q[3]); y1 = Math.max(y1, q[1] + q[3]); });
+    var ox = x0 - 2 * CELL, oy = y0 - 2 * CELL, nx = Math.ceil((x1 - ox) / CELL) + 3, ny = Math.ceil((y1 - oy) / CELL) + 3, N = nx * ny, M = new Uint8Array(N);
+    if (N > 4e6) return out;                                      // a stroke across the whole plate: not a region to trace
+    pts.forEach(function (q) {
+      var rc = Math.ceil(q[3] / CELL), ci = Math.round((q[0] - ox) / CELL), cj = Math.round((q[1] - oy) / CELL);
+      for (var dj = -rc; dj <= rc; dj++) for (var di = -rc; di <= rc; di++) {
+        if (Math.hypot(di, dj) * CELL > q[3]) continue;
+        var k = (cj + dj) * nx + ci + di;
+        if (k >= 0 && k < N) M[k] = 1;
+      }
+    });
+    for (var cj2 = 0; cj2 < ny; cj2++) for (var ci2 = 0; ci2 < nx; ci2++) {
+      var k2 = cj2 * nx + ci2;
+      if (!M[k2]) continue;
+      var xx = ox + ci2 * CELL, yy = oy + cj2 * CELL;
+      for (var fi = 0; fi < fps.length; fi++) if (inLoops(fps[fi].loops, xx, yy)) { M[k2] = 0; break; }
+    }
+    /* the pieces of what is left, each with the heights of the strokes that touch it */
+    var lab = new Int32Array(N), comps = [];
+    for (var s0 = 0; s0 < N; s0++) {
+      if (!M[s0] || lab[s0]) continue;
+      var id = comps.length + 1, stack = [s0], cells = 0;
+      lab[s0] = id;
+      while (stack.length) {
+        var c = stack.pop(); cells++;
+        var cx = c % nx;
+        [c - 1, c + 1, c - nx, c + nx].forEach(function (d) {
+          if (d < 0 || d >= N || M[d] === 0 || lab[d]) return;
+          if ((d === c - 1 && cx === 0) || (d === c + 1 && cx === nx - 1)) return;
+          lab[d] = id; stack.push(d);
+        });
+      }
+      comps.push({ id: id, cells: cells, zl: Infinity, zh: -Infinity });
+    }
+    pts.forEach(function (q) {
+      var ci = Math.round((q[0] - ox) / CELL), cj = Math.round((q[1] - oy) / CELL), rc = Math.ceil(q[3] / CELL), seen = {};
+      for (var dj = -rc; dj <= rc; dj++) for (var di = -rc; di <= rc; di++) {
+        var k = (cj + dj) * nx + ci + di;
+        if (k < 0 || k >= N || !lab[k] || seen[lab[k]]) continue;
+        seen[lab[k]] = 1;
+        var cp = comps[lab[k] - 1], reach = q[3] * 1.2 + 0.3;
+        cp.zl = Math.min(cp.zl, q[2] - reach); cp.zh = Math.max(cp.zh, q[2] + reach);
+      }
+    });
+    comps.forEach(function (cp) {
+      if (cp.cells * CELL * CELL < 1 || !isFinite(cp.zl)) return;
+      var Mc = new Uint8Array(N);
+      for (var q = 0; q < N; q++) if (lab[q] === cp.id) Mc[q] = 1;
+      var loops = R.isoLoops(R.edtCells(Mc, nx, ny), nx, ny, 0.5).map(function (ring) {
+        return ring.map(function (v) { return [ox + v[0] * CELL, oy + v[1] * CELL]; });
+      }).filter(function (L) { return L.length >= 4; });
+      if (loops.length) out.push({ zl: cp.zl, zh: cp.zh, loops: loops, marginMm: PAINT_MARGIN_MM, painted: true });
+    });
+    return out;
+  }
+
+  function setPaint(on) {
+    if (on && (S.hostId == null || !placedOf(S.hostId) || S.wide)) return { ok: false, reason: S.wide ? 'on the plate: pick one piece' : 'no piece' };
+    S.paint = !!on;
+    if (!on) S.stroke = null;
+    if (on && (S.tool === 'circles' || S.tool === 'erase')) { endDragQuiet(); S.tool = 'tips'; }
+    sync();
+    drawPaint();
+    return { ok: true, on: S.paint };
+  }
+  function endDragQuiet() { if (S.drag) cancelDrag(); }
+  function round3(v) { return Math.round(v * 1000) / 1000; }
+  function addStrokePoint(h) {
+    var st = S.stroke, host = placedOf(S.hostId);
+    if (!st || !host || h.id !== S.hostId || st.pts.length >= PAINT_MAX) return;
+    var l = upToLocal(host, h.p);
+    if (st.last && Math.hypot(l[0] - st.last[0], l[1] - st.last[1], l[2] - st.last[2]) < PAINT_STEP_MM) return;
+    st.last = l;
+    st.pts.push({ p: l.map(round3), n: upDirToLocal(host, h.n).map(round3) });
+  }
+  function commitStroke(pts, r) {
+    var m = modelOf(S.hostId);
+    if (!m || !pts.length) return { ok: false, reason: 'nothing painted' };
+    var undo = snapshot(), E = editsOf(m);
+    E.ops.push({ op: 'paint', id: ++E.serial, r: r, pts: pts });
+    pushEdit(undo, 'Undo: painted area taken away');
+    S.msg = null;
+    refresh();
+    return { ok: true, id: E.serial };
+  }
+  function endStroke() {
+    var st = S.stroke;
+    S.stroke = null;
+    if (!st || !st.pts.length) { drawPaint(); return null; }
+    return commitStroke(st.pts, st.r);
+  }
+  /* a stroke by number, for the page's own callers (tests, a script): [{ p: [x, y, z], n: [nx, ny, nz] }] in Z up, the brush's radius in mm */
+  function paintStroke(list, r) {
+    var host = placedOf(S.hostId);
+    if (!host || !modelOf(S.hostId)) return { ok: false, reason: 'no piece' };
+    S.stroke = { pts: [], last: null, r: r > 0 ? +r : PAINT_R_DEFAULT };
+    list.forEach(function (s) { addStrokePoint({ id: S.hostId, p: s.p, n: s.n }); });
+    return endStroke() || { ok: false, reason: 'nothing painted' };
+  }
+  function clearPaint() {
+    var m = modelOf(S.hostId);
+    if (!m || !paintCount()) return { ok: false, reason: 'no paint' };
+    var undo = snapshot(), E = editsOf(m);
+    E.ops = E.ops.filter(function (o) { return o.op !== 'paint'; });
+    pushEdit(undo, 'Undo: paint put back');
+    refresh();
+    return { ok: true };
+  }
+  /* the paint, drawn over the piece: one translucent dot for every sample, the size of the brush */
+  function drawPaint() {
+    dispose(S.paintLayer); S.paintLayer = null;
+    var m = modelOf(S.hostId), host = placedOf(S.hostId);
+    if (!S.open || S.wide || !m || !host || !state.scene || typeof THREE === 'undefined') return;
+    var items = [];
+    paintOps(m).forEach(function (op) { (op.pts || []).forEach(function (s) { items.push([s.p, op.r || PAINT_R_DEFAULT]); }); });
+    if (S.stroke) S.stroke.pts.forEach(function (s) { items.push([s.p, S.stroke.r]); });
+    if (!items.length) return;
+    var cam = state.camera, k = 1 / Math.tan(((cam && cam.fov) || 45) * Math.PI / 360), pos = new Float32Array(items.length * 3), r = 0;
+    items.forEach(function (it, i) {
+      var v = host.mesh.localToWorld(new THREE.Vector3(it[0][0], it[0][1], it[0][2]));
+      pos[i * 3] = v.x; pos[i * 3 + 1] = v.y; pos[i * 3 + 2] = v.z;
+      r = Math.max(r, it[1]);
+    });
+    var geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    var pts = new THREE.Points(geo, new THREE.PointsMaterial({ size: 2 * r * k, sizeAttenuation: true, color: PAINT_COL, map: dotMap(false), alphaTest: 0.25,
+      transparent: true, opacity: 0.4, depthTest: false, depthWrite: false }));
+    pts.name = 'supportsCardPaint';
+    S.paintLayer = mark(pts);
+  }
 
   /* ------------------------------------------------------------- markers */
 
@@ -2430,6 +2648,7 @@ var NSO_SUPPORTS_CARD = (function () {
     if (S.busy || S.mode === 'auto') return { ok: false, reason: S.busy ? 'busy' : 'Auto has no tools' };
     if (k === 'erase' && !eraseReady()) return { ok: false, reason: 'nothing built to erase' };
     cancelDrag();
+    S.paint = false; S.stroke = null;                          // one thing holds the pointer at a time
     S.tool = k === S.tool && k !== 'tips' ? 'tips' : k;       // a tool that is on, pressed again, is stopped
     S.sel = null; S.hover = null; S.msg = null;
     draw(); sync();
@@ -2440,7 +2659,7 @@ var NSO_SUPPORTS_CARD = (function () {
   function forgetAll() {
     cancelDrag();
     S.mem = {}; S.hostId = null; S.selSupport = null; S.det = null; S.dets = {}; S.eff = null; S.occ = {};
-    S.tool = 'tips'; S.sel = null; S.hover = null; S.hot = null;
+    S.tool = 'tips'; S.sel = null; S.hover = null; S.hot = null; S.paint = false; S.stroke = null;
     /* the pieces are gone and so are their meshes, outline and all: nothing to take down, only the option to end */
     S.wide = false; S.wideIds = []; S.wideView = null; S.wideNotes = {}; S.wideFrom = null; S.lit = []; S.run = null;
     if (S.open) refresh();
@@ -2590,8 +2809,8 @@ var NSO_SUPPORTS_CARD = (function () {
     cancelDrag();
     if (S.wide) { S.wide = false; S.wideIds = []; S.wideView = null; S.wideNotes = {}; S.wideFrom = null; S.run = null; unlight(); }
     S.open = false; S.hostId = null; S.selSupport = null; S.msg = null; S.det = null; S.dets = {}; S.occ = {};
-    S.tool = 'tips'; S.sel = null; S.hover = null; S.hot = null;
-    dispose(S.layer); S.layer = null; dispose(S.pts); S.pts = null; dispose(S.zoneLayer); S.zoneLayer = null; dispose(S.eraseLayer); S.eraseLayer = null;
+    S.tool = 'tips'; S.sel = null; S.hover = null; S.hot = null; S.paint = false; S.stroke = null;
+    dispose(S.layer); S.layer = null; dispose(S.pts); S.pts = null; dispose(S.zoneLayer); S.zoneLayer = null; dispose(S.eraseLayer); S.eraseLayer = null; dispose(S.paintLayer); S.paintLayer = null;
     if (S.raf) cancelAnimationFrame(S.raf);
     S.raf = 0;
     sync();
@@ -2629,6 +2848,17 @@ var NSO_SUPPORTS_CARD = (function () {
       if (hw && !isSupport(hw.id)) { pick(hw.id); swallow(); }
       return;
     }
+    /* THE BRUSH owns a press on the piece (a drag paints; the view does not orbit); a press anywhere else is the view's */
+    if (S.paint) {
+      var hp = hitAt(ev);
+      if (hp && hp.id === S.hostId && !isSupport(hp.id)) {
+        S.stroke = { pts: [], last: null, r: brushR() };
+        addStrokePoint(hp);
+        drawPaint();
+        swallow();
+      }
+      return;
+    }
     /* The markers own the pointer while their tool is on (a press on one is not
        the view's); a press on nothing of theirs falls through, so the view
        still orbits. CIRCLES owns the plate, and says so on the card: stop it to orbit. */
@@ -2660,7 +2890,15 @@ var NSO_SUPPORTS_CARD = (function () {
     else if (S.tool === 'tips' && S.pts) { var b = spotAt(ev); setHot(b ? S.eff.beacons.indexOf(b) : null); }
     return S.tool === 'erase' ? S.hover : S.hot;
   }
+  var paintRaf = 0;
   function onMove(ev) {
+    if (S.stroke) {                                       // the brush is down: every sample the pointer made since the last event, on the piece
+      if (!S.open || S.busy || !onCanvas(ev)) return;
+      var evs = typeof ev.getCoalescedEvents === 'function' ? ev.getCoalescedEvents() : null;
+      (evs && evs.length ? evs : [ev]).forEach(function (e) { var h = hitAt(e); if (h) addStrokePoint(h); });
+      if (!paintRaf) paintRaf = requestAnimationFrame(function () { paintRaf = 0; if (S.stroke) drawPaint(); });
+      return;
+    }
     if (!S.open || S.busy || S.mode === 'auto' || S.drag || !onCanvas(ev)) return;
     lastMove = ev;
     if (hoverRaf) return;
@@ -2685,15 +2923,19 @@ var NSO_SUPPORTS_CARD = (function () {
     Object.keys(TOOLS).forEach(function (k) { on('sup-tool-' + k, 'click', function () { setTool(k); }); });
     window.addEventListener('pointerdown', onDown, true);
     window.addEventListener('pointermove', onMove, true);
+    window.addEventListener('pointerup', function () { if (S.stroke) endStroke(); }, true);
+    window.addEventListener('pointercancel', function () { if (S.stroke) { S.stroke = null; drawPaint(); } }, true);
+    on('sup-paint', 'click', function () { setPaint(!S.paint); });
+    on('sup-paint-clear', 'click', function () { clearPaint(); });
     window.addEventListener('keydown', onKey, true);
     sync();
   }
   /* The markers are scene helpers (nso-helpers.js): put away on leave-tool and
      Clear, redrawn after an Undo. */
   if (typeof nsoHelpers !== 'undefined') nsoHelpers.owner('supports-card', {
-    live: function () { return S.open && S.mode !== 'auto' && !S.wide; },       // Auto draws what it always drew, and is left as it was; the plate has no points
+    live: function () { return S.open && !S.wide && (S.mode !== 'auto' || S.paint || !!S.paintLayer); },       // Auto draws what it always drew, and is left as it was (but for the paint); the plate has no points
     close: function () { var menu = $('menu-supports'); if (menu && menu.open) menu.open = false; else if (S.open) close(); },
-    clear: function () { dispose(S.pts); S.pts = null; dispose(S.zoneLayer); S.zoneLayer = null; dispose(S.eraseLayer); S.eraseLayer = null; },
+    clear: function () { dispose(S.pts); S.pts = null; dispose(S.zoneLayer); S.zoneLayer = null; dispose(S.eraseLayer); S.eraseLayer = null; dispose(S.paintLayer); S.paintLayer = null; },
     refresh: function () { if (S.open) refresh(); }
   });
   if (typeof document !== 'undefined') {
@@ -2714,6 +2956,11 @@ var NSO_SUPPORTS_CARD = (function () {
     selected: function () { return S.selSupport; },
     removeSelected: removeSelected,
     addBeacon: addBeacon,
+    /** The brush: on / off (no argument: is it on). paintStroke([{ p, n }], r) paints one stroke in Z up; clearPaint takes it all off; paintCount counts the strokes. */
+    paint: function (on) { return on === undefined ? S.paint : setPaint(on); },
+    paintStroke: paintStroke,
+    clearPaint: clearPaint,
+    paintCount: paintCount,
     busy: function () { return S.busy; },
     /** The angle detection runs at (degrees); setting one re-detects at once. */
     angle: function (v) { if (v !== undefined) setAngle(v, true); return S.angle; },

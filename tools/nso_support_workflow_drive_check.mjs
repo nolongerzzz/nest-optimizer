@@ -481,9 +481,11 @@ async function main() {
     [c.go, c.removeAll.shown, c.remove.shown, c.controls, c.locked, c.rows.shown], [{ text: 'Generate', on: true }, false, false, [true, true, true, true], false, false]);
   check('...nothing is built and nothing was added to Undo', [(await T.sups()).length, await T.undoDepth()], [0, 0]);
   check('...the card sits wholly inside the 1280 x 800 window', c.inside, true);
-  check('the Paint disclosure is gone: no Paint row, button, mode picker or word on the card',
+  /* the old G-scope Paint disclosure (More, its button and its mode picker) is gone; the card's own brush (supports-footprint, section 10) is the one Paint there is:
+     a row of Paint, a diameter and Clear paint, beside the Raft interface box (support:paint-drive drives it) */
+  check('the Paint disclosure is gone: no More, no Paint button or mode picker of G-scope\'s; the brush row and the Raft box are the card\'s own',
     await page.evaluate(() => [!!document.getElementById('sup-more'), !!document.getElementById('btn-sup-paint'), !!document.getElementById('sel-sup-paint'),
-      /paint/i.test(document.getElementById('supports-card').textContent)]), [false, false, false, false]);
+      !!document.getElementById('sup-paint') && !!document.getElementById('sup-paint-clear') && !!document.getElementById('sup-brush') && !!document.getElementById('sup-raft')]), [false, false, false, true]);
   await T.hudClean('idle');
   ol = await T.outlines();
   const rows = new Set(v.beacons.map((b) => b.p[1].toFixed(3))).size, cols = v.beacons.length / rows;

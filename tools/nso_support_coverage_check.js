@@ -71,8 +71,8 @@ const turn = (positions, deg) => {
   return out;
 };
 /* the share of the piece's footprint with support just under it */
-function share(body, support) {
-  const det = SB.detect(body, { pitch: 3, angleDeg: ANGLE, skipList: [], footprint: true, seedPitchMm: SB.SEED_PITCH_PRODUCT_MM || 1, insetMm: SB.INSET_PRODUCT_MM || 1 });
+function share(body, support, angle) {
+  const det = SB.detect(body, { pitch: 3, angleDeg: angle || ANGLE, skipList: [], footprint: true, seedPitchMm: SB.SEED_PITCH_PRODUCT_MM || 1, insetMm: SB.INSET_PRODUCT_MM || 1 });
   let total = 0, held = 0;
   det.regions.forEach(R => {
     if (!R.footprint || !R.beacons || !R.beacons.length) return;
@@ -90,11 +90,12 @@ function share(body, support) {
   return { total, held, pct: total ? 100 * held / total : 0, mm2: total * STEP * STEP };
 }
 
-async function plate(objs, yaws) {
+async function plate(objs, yaws, angle) {
   const parts = objs.map((o, i) => yaws ? Object.assign({}, o, { positions: turn(o.positions, yaws[i % yaws.length]) }) : o);
   const app = lib.makeApp();
   const ids = app.load(parts);
   app.openCard();
+  if (angle) app.card.angle(angle);
   app.setPlateBox(true);
   const t0 = Date.now();
   app.click('btn-sup-all');
@@ -104,7 +105,7 @@ async function plate(objs, yaws) {
   const rows = {};
   ids.forEach((id, i) => {
     const sup = [].concat(...app.supportsOf(id).map(m => Array.from(app.soupOf(m.id))));
-    rows[objs[i].name.replace(/^Support |\.stl$/g, '')] = share(Float32Array.from(app.soupOf(id)), Float32Array.from(sup));
+    rows[objs[i].name.replace(/^Support |\.stl$/g, '')] = share(Float32Array.from(app.soupOf(id)), Float32Array.from(sup), angle);
   });
   return { secs, head: app.head(), rows };
 }
@@ -117,7 +118,7 @@ async function plate(objs, yaws) {
   for (const k of Object.keys(a.rows)) console.log('        ' + k.padEnd(18) + 'held ' + a.rows[k].pct.toFixed(0).padStart(3) + ' %   of ' + a.rows[k].mm2.toFixed(0) + ' mm2 of footprint');
   check('the Base: 80 % or more of its footprint has support under it', a.rows.Base.pct >= 80, a.rows.Base.pct.toFixed(0) + ' %');
   check('the Oblique (its stair stands at this angle): 85 % or more', a.rows.Oblique.pct >= 85, a.rows.Oblique.pct.toFixed(0) + ' %');
-  const FLOOR_ALIGNED = { Circular: 80, Sphere: 90, 'Negative Sphere': 60, 'Negative Sphere2': 62 };
+  const FLOOR_ALIGNED = { Circular: 85, Sphere: 92, 'Negative Sphere': 70, 'Negative Sphere2': 65 };
   for (const k of Object.keys(FLOOR_ALIGNED)) check('the ' + k + ' (the region plate): ' + FLOOR_ALIGNED[k] + ' % or more', a.rows[k].pct >= FLOOR_ALIGNED[k], a.rows[k].pct.toFixed(0) + ' %');
   check('the plate built in 45 s or less (this box 15; the runner is about 1.7 times slower; the plate was 36 s before the region plate)', a.secs <= 45, a.secs.toFixed(1) + ' s');
 
@@ -126,12 +127,18 @@ async function plate(objs, yaws) {
   console.log('        ' + b.head + '   (' + b.secs.toFixed(1) + ' s)');
   for (const k of Object.keys(b.rows)) console.log('        ' + k.padEnd(18) + 'held ' + b.rows[k].pct.toFixed(0).padStart(3) + ' %   (aligned ' + a.rows[k].pct.toFixed(0) + ' %)');
   check('the Base, turned: 80 % or more', b.rows.Base.pct >= 80, b.rows.Base.pct.toFixed(0) + ' %');
-  const FLOOR_TURNED = { Circular: 70, Sphere: 90, 'Negative Sphere': 55, 'Negative Sphere2': 60 };
+  const FLOOR_TURNED = { Circular: 72, Sphere: 92, 'Negative Sphere': 62, 'Negative Sphere2': 62 };
   for (const k of Object.keys(FLOOR_TURNED)) check('the ' + k + ', turned: ' + FLOOR_TURNED[k] + ' % or more', b.rows[k].pct >= FLOOR_TURNED[k], b.rows[k].pct.toFixed(0) + ' %');
   check('turning moves no head but the Oblique by more than 15 points (the region plate follows the surface, not the lines\' angle)',
     ['Base', 'Circular', 'Sphere', 'Negative Sphere', 'Negative Sphere2'].every(k => Math.abs(b.rows[k].pct - a.rows[k].pct) <= 15),
     ['Base', 'Circular', 'Sphere', 'Negative Sphere', 'Negative Sphere2'].map(k => k + ' ' + (b.rows[k].pct - a.rows[k].pct).toFixed(0)).join(', '));
   check('the turned plate built in 60 s or less', b.secs <= 60, b.secs.toFixed(1) + ' s');
+  console.log('\n=== 3. at 30 deg (Bambu\'s own threshold, and what the card is often set to), aligned ===');
+  const c = await plate(objs, null, 30);
+  console.log('        ' + c.head + '   (' + c.secs.toFixed(1) + ' s)');
+  for (const k of Object.keys(c.rows)) console.log('        ' + k.padEnd(18) + 'held ' + c.rows[k].pct.toFixed(0).padStart(3) + ' %   of ' + c.rows[k].mm2.toFixed(0) + ' mm2 of footprint');
+  const FLOOR_30 = { Base: 80, Circular: 85, Sphere: 80, 'Negative Sphere': 55, 'Negative Sphere2': 62, Oblique: 85 };
+  for (const k of Object.keys(FLOOR_30)) check('at 30 deg the ' + k + ': ' + FLOOR_30[k] + ' % or more', c.rows[k].pct >= FLOOR_30[k], c.rows[k].pct.toFixed(0) + ' %');
   finding('the Oblique, turned (its stair stands at 0 and 75 deg only)', 'Oblique ' + b.rows.Oblique.pct.toFixed(0) + ' %');
   finding('the turned plate against the aligned one', b.secs.toFixed(1) + ' s against ' + a.secs.toFixed(1) + ' s');
 

@@ -871,7 +871,12 @@
   var SHELL_START_MM = 1.2;        /* the height rays start under the footprint's lowest spot: the underside may be lower than any spot of it */
   var REGION_PLANE_SHARE = 0.25;  /* ...or, on a big range, within this share of the range (a plane's residual is a few percent of its height, a dome's a quarter) */
   var REGION_PLANE_MM = 0.15;     /* ...and a footprint whose surface lies within this of one plane that leans 3 - 70 deg is a stair's, not the plate's */
-  var REGION_MIN_LOOP_MM = 2.4;   /* a loop of the region plate shorter than this is a speck of the level set (a medial axis's end), not a line */
+  var THIN_MIN_MM = 0.6;         /* a thin bead (a line along a sliver the outline and the hatch left bare) shorter than this is a speck of the skeleton */
+  var THIN_CLEAR_MM = 0.06;       /* ...stands a line and this far (centre to centre) from every path laid, so no two lines meet except at a node */
+  var THIN_SIMPLIFY_MM = 0.06;    /* ...its skeleton's staircase cleaned to this */
+  var THIN_SEG_MM = 0.6;          /* ...no segment of it shorter than this */
+  var HATCH_MIN_SHARE = 0.6;     /* a hatch whose lines (times the pitch) fill less than this share of the room inside its outline is given up for concentric loops */
+  var REGION_MIN_LOOP_MM = 2.4;  /* a loop of the region plate shorter than this is a speck of the level set (a medial axis's end), not a line */
   var FILL_FLAT_MM = 2.4;      /* the region plate (and the fill) is for a footprint whose height range (its spots', and 1.6 mm of padding) is no more than this: a face of one height, not a slope or a dome */
   var FILL_MAX_TIPS = 16;      /* ...for a level of this many tips or fewer: a few tips on a wide surface is what it is for; a level of dozens already stands across its surface, and the filled build of the clamp's 54-tip level costs 5.5 s for next to nothing (+0.5 % of the support) */
   var PERIM_NEAR_MM = 3.6;     /* a level none of whose tips is this near the part's edge (a cap's 2 mm, the field's 1.25, the margin) is built as it always was: the outline cannot reach it */
@@ -1085,6 +1090,109 @@
      thin for a hatch inside its loop (nothing left a hatch-line's gap and a half inside it) is laid in concentric loops as it is. Returns
      { loops: [{ ring, lenMm }], lines: [[[x0, y0], [x1, y1]], ...] }. */
   function plateOfRegion(M, nx, ny, ox, oy, cellMm, pitchMm, widthMm, hatchDeg, minLoopMm, minLineMm) {
+    var pl = plateOfRegionCore(M, nx, ny, ox, oy, cellMm, pitchMm, widthMm, hatchDeg, minLoopMm, minLineMm);
+    pl.thin = thinLines(M, nx, ny, ox, oy, cellMm, widthMm, pl.loops, pl.lines, THIN_MIN_MM);
+    return pl;
+  }
+  /* THE THIN PARTS of a region: what the outline's opening and the hatch leave bare where the region is a bead wide and no more (a rim's crescent, a
+     tapering end). The bead's centre may lie anywhere a half line in from the region's edge, so the cells that are that far in and a line and a
+     gap from every path already laid are thinned to one pixel (Zhang - Suen), traced into open polylines, and cleaned (Douglas - Peucker, no
+     segment shorter than THIN_SEG_MM). Each returned polyline is one bead along the middle of its sliver. */
+  function thinLines(M, nx, ny, ox, oy, cellMm, widthMm, loops, lines, minLenMm) {
+    var N = nx * ny, dist = edtCells(M, nx, ny), need = (widthMm / 2 + 0.02) / cellMm + 0.5, avoid = widthMm + THIN_CLEAR_MM, T = new Uint8Array(N), any = false, q;
+    for (q = 0; q < N; q++) if (dist[q] >= need) { T[q] = 1; any = true; }
+    if (!any) return [];
+    /* the cells a laid path occupies: the distance from them says where a new bead may stand */
+    var P = new Uint8Array(N).fill(1), laid = false;
+    function mark(a, b) {
+      var len = Math.hypot(b[0] - a[0], b[1] - a[1]), n = Math.max(1, Math.ceil(len / (cellMm * 0.5)));
+      for (var k = 0; k <= n; k++) {
+        var ci = Math.round((a[0] + (b[0] - a[0]) * k / n - ox) / cellMm), cj = Math.round((a[1] + (b[1] - a[1]) * k / n - oy) / cellMm);
+        if (ci >= 0 && ci < nx && cj >= 0 && cj < ny) { P[cj * nx + ci] = 0; laid = true; }
+      }
+    }
+    loops.forEach(function (l) { for (var k = 1; k < l.ring.length; k++) mark(l.ring[k - 1], l.ring[k]); });
+    lines.forEach(function (l) { mark(l[0], l[1]); });
+    if (laid) { var dp = edtCells(P, nx, ny); for (q = 0; q < N; q++) if (T[q] && dp[q] * cellMm < avoid) T[q] = 0; }
+    /* Zhang - Suen thinning; the raster's frame is 0 (the caller's margin) */
+    var S = T, changed = true, passes = 0, idx = [];
+    for (q = 0; q < N; q++) if (S[q]) idx.push(q);
+    if (!idx.length) return [];
+    while (changed && passes++ < 60) {
+      changed = false;
+      for (var step = 0; step < 2; step++) {
+        var kill = [];
+        for (var ii = 0; ii < idx.length; ii++) {
+          var p = idx[ii];
+          if (!S[p]) continue;
+          var x = p % nx, y = (p - x) / nx;
+          if (x < 1 || y < 1 || x > nx - 2 || y > ny - 2) { kill.push(p); continue; }
+          var p2 = S[p - nx], p3 = S[p - nx + 1], p4 = S[p + 1], p5 = S[p + nx + 1], p6 = S[p + nx], p7 = S[p + nx - 1], p8 = S[p - 1], p9 = S[p - nx - 1];
+          var B = p2 + p3 + p4 + p5 + p6 + p7 + p8 + p9;
+          if (B < 2 || B > 6) continue;
+          var Ac = (!p2 && p3) + (!p3 && p4) + (!p4 && p5) + (!p5 && p6) + (!p6 && p7) + (!p7 && p8) + (!p8 && p9) + (!p9 && p2);
+          if (Ac !== 1) continue;
+          if (step === 0 ? (p2 * p4 * p6 === 0 && p4 * p6 * p8 === 0) : (p2 * p4 * p8 === 0 && p2 * p6 * p8 === 0)) kill.push(p);
+        }
+        if (kill.length) { changed = true; kill.forEach(function (k) { S[k] = 0; }); }
+      }
+      idx = idx.filter(function (k) { return S[k]; });
+    }
+    if (!idx.length) return [];
+    /* trace: from each end first, then from whatever is left (a loop, a junction's other arms) */
+    var NB = [-1, 1, -nx, nx, -nx - 1, -nx + 1, nx - 1, nx + 1], seen = new Uint8Array(N), paths = [];
+    function deg(k) { var d = 0; for (var e = 0; e < 8; e++) if (S[k + NB[e]]) d++; return d; }
+    function junctionNear(k, not) { for (var e = 0; e < 8; e++) { var c = k + NB[e]; if (c !== not && S[c] && deg(c) >= 3) return c; } return -1; }
+    function walk(start) {
+      var path = [start], cur = start, j0 = deg(start) >= 3 ? -1 : junctionNear(start, -1);
+      seen[start] = 1;
+      if (j0 >= 0) path.unshift(j0);                           /* an arm leaves its junction's own pixel, so two lines meet at one node */
+      for (;;) {
+        var nxt = -1;
+        for (var e = 0; e < 8 && nxt < 0; e++) { var c = cur + NB[e]; if (S[c] && !seen[c]) nxt = c; }
+        if (nxt < 0) { var j1 = junctionNear(cur, j0); if (j1 >= 0 && path.length > 2) path.push(j1); break; }
+        seen[nxt] = 1; path.push(nxt); cur = nxt;
+        if (deg(nxt) >= 3) break;                            /* a junction ends the arm; the other arms start from it */
+      }
+      return path;
+    }
+    function unseenDeg(k) { var d = 0; for (var e = 0; e < 8; e++) if (S[k + NB[e]] && !seen[k + NB[e]]) d++; return d; }
+    var ends = idx.filter(function (k) { return deg(k) <= 1; });
+    ends.forEach(function (k) { if (!seen[k]) paths.push(walk(k)); });
+    for (var rounds = 0; rounds < 4; rounds++) idx.forEach(function (k) { if (!seen[k] && unseenDeg(k) <= 1) paths.push(walk(k)); });
+    idx.forEach(function (k) { if (!seen[k]) paths.push(walk(k)); });
+    var out = [];
+    paths.forEach(function (pp) {
+      var pts = pp.map(function (k) { var x = k % nx, y = (k - x) / nx; return [ox + x * cellMm, oy + y * cellMm]; });
+      pts = simplifyPath(pts, THIN_SIMPLIFY_MM);
+      for (var g = 0; g < 50 && pts.length > 2; g++) {              /* no segment shorter than the extrusion takes: its end vertex goes */
+        var bad = -1;
+        for (var s = 0; s + 1 < pts.length; s++) if (Math.hypot(pts[s + 1][0] - pts[s][0], pts[s + 1][1] - pts[s][1]) < THIN_SEG_MM) { bad = s; break; }
+        if (bad < 0) break;
+        pts.splice(bad + 1 < pts.length - 1 ? bad + 1 : bad, 1);
+      }
+      var len = 0;
+      for (var s2 = 1; s2 < pts.length; s2++) len += Math.hypot(pts[s2][0] - pts[s2 - 1][0], pts[s2][1] - pts[s2 - 1][1]);
+      if (pts.length >= 2 && len >= minLenMm) out.push(pts);
+    });
+    return out;
+  }
+  /* an open polyline with the points within eps of the line between their neighbours dropped (Douglas - Peucker) */
+  function simplifyPath(pts, eps) {
+    if (pts.length < 3) return pts.slice();
+    var keep = new Uint8Array(pts.length), stack = [[0, pts.length - 1]];
+    keep[0] = keep[pts.length - 1] = 1;
+    while (stack.length) {
+      var se = stack.pop(), a = pts[se[0]], b = pts[se[1]], dx = b[0] - a[0], dy = b[1] - a[1], dd = Math.hypot(dx, dy) || 1e-9, worst = -1, wi = -1;
+      for (var i = se[0] + 1; i < se[1]; i++) {
+        var d = Math.abs((pts[i][0] - a[0]) * dy - (pts[i][1] - a[1]) * dx) / dd;
+        if (d > worst) { worst = d; wi = i; }
+      }
+      if (worst > eps) { keep[wi] = 1; stack.push([se[0], wi], [wi, se[1]]); }
+    }
+    return pts.filter(function (p, i) { return keep[i]; });
+  }
+  function plateOfRegionCore(M, nx, ny, ox, oy, cellMm, pitchMm, widthMm, hatchDeg, minLoopMm, minLineMm) {
     var N = nx * ny, outline = concentricLoops(M, nx, ny, ox, oy, cellMm, pitchMm, widthMm, minLoopMm, 1);
     if (!outline.length) return { loops: [], lines: [] };
     var edgeIn = 0.1 + widthMm + 0.1;      /* the hatch starts this far in from the edge: the outline's centre, then a line and a gap */
@@ -1112,6 +1220,11 @@
       }
       if (run && run[1] - run[0] >= minLineMm) lines.push([[cc * nxv + run[0] * ux, cc * nyv + run[0] * uy], [cc * nxv + run[1] * ux, cc * nyv + run[1] * uy]]);
     }
+    /* a region the hatch mostly misses (a ring a couple of mm wide: its lines are cut short of the minimum, or never fit) is laid in concentric loops instead */
+    var hCells = 0, lineLen = 0;
+    for (var qh = 0; qh < N; qh++) hCells += H[qh];
+    lines.forEach(function (l) { lineLen += Math.hypot(l[1][0] - l[0][0], l[1][1] - l[0][1]); });
+    if (lineLen * pitchMm < HATCH_MIN_SHARE * hCells * cellMm * cellMm) return { loops: concentricLoops(M, nx, ny, ox, oy, cellMm, pitchMm, widthMm, minLoopMm), lines: [] };
     return { loops: outline, lines: lines };
   }
   /* a mask with its edge smoothed: three box blurs of radius r cells (about a gaussian of 0.9 r) and the 0.5 level; a stepped edge (the height map's
@@ -1206,7 +1319,7 @@
     var feet = ((wantPerim || regionWanted) && Array.isArray(opts.footprints) && opts.footprints.length) ? opts.footprints.map(function (f) {
       var b = [Infinity, Infinity, -Infinity, -Infinity];
       f.loops.forEach(function (L) { L.forEach(function (q) { b[0] = Math.min(b[0], q[0]); b[1] = Math.min(b[1], q[1]); b[2] = Math.max(b[2], q[0]); b[3] = Math.max(b[3], q[1]); }); });
-      return { zl: f.zl, zh: f.zh, loops: f.loops, box: b };
+      return { zl: f.zl, zh: f.zh, loops: f.loops, box: b, marginMm: typeof f.marginMm === 'number' ? f.marginMm : null };   /* marginMm: a footprint the user painted over keeps the plate to the edge */
     }) : null;
     function inFeet(x, y, zc) {
       for (var fi = 0; fi < feet.length; fi++) {
@@ -1440,8 +1553,9 @@
         if (range <= REGION_FLAT_MM) for (var q3 = 0; q3 < N; q3++) if (inRegion[q3]) S[q3] = zs[0];
         told(Math.round(0.3 * mine.length));          /* three tenths after the fill, */
         var dEdge = edtCells(inRegion, nx, ny), usable = new Uint8Array(N), nUse = 0;
-        for (var q4 = 0; q4 < N; q4++) if (inRegion[q4] && (dEdge[q4] - 0.5) * CELLS >= MARGIN) { usable[q4] = 1; nUse++; }
-        if (nUse * CELLS * CELLS < 4)return;
+        var margin = f.marginMm != null ? f.marginMm : MARGIN;
+        for (var q4 = 0; q4 < N; q4++) if (inRegion[q4] && (dEdge[q4] - 0.5) * CELLS >= margin) { usable[q4] = 1; nUse++; }
+        if (nUse * CELLS * CELLS < (f.marginMm != null ? 0.8 : 4))return;               /* a region the user painted may be small */
         /* the other columns - every one this footprint's tips do not stand - keep their clearance from the plate, wherever they pass through its height */
         var carriers = {};
         mine.forEach(function (t) { carriers[t.col] = true; });
@@ -1551,26 +1665,28 @@
             cI0 = Math.max(0, cI0 - 14); cJ0 = Math.max(0, cJ0 - 14); cI1 = Math.min(nx - 1, cI1 + 14); cJ1 = Math.min(ny - 1, cJ1 + 14);
             var cnx = cI1 - cI0 + 1, cny = cJ1 - cJ0 + 1, Mcrop = new Uint8Array(cnx * cny);
             for (var cj = 0; cj < cny; cj++) for (var ci2 = 0; ci2 < cnx; ci2++) Mcrop[cj * cnx + ci2] = Mraw[(cJ0 + cj) * nx + cI0 + ci2];
-            Mk = smoothMask(Mcrop, cnx, cny, 2 + Math.min(tryN, 3));                 /* a layer the extrusion refuses is traced again from a smoother mask */
+            Mk = smoothMask(Mcrop, cnx, cny, 1 + Math.min(tryN, 3));                 /* a layer the extrusion refuses is traced again from a smoother mask */
             pl = plateOfRegion(Mk, cnx, cny, ox + cI0 * CELLS, oy + cJ0 * CELLS, CELLS, o.pitch + 0.03 + 0.04 * Math.min(tryN, 2), o.width + 0.03 * Math.min(tryN, 2), (n % 2 ? 135 : 45), REGION_MIN_LOOP_MM, 0.9 + 0.4 * tryN);
+            if (tryN >= 1) pl.thin = [];                                       /* the thin beads go first when a layer is refused: the loops and the hatch are the plate */
             if (tryN >= 2) pl.lines = [];
             if (tryN === 3) { var longest = 0; pl.loops.forEach(function (l) { longest = Math.max(longest, l.lenMm); }); pl.loops = pl.loops.filter(function (l) { return l.lenMm >= Math.min(longest, 8); }); }
             if (tryN === 4) { var lg = null; pl.loops.forEach(function (l) { if (!lg || l.lenMm > lg.lenMm) lg = l; }); pl.loops = lg ? [lg] : []; }
-            if (!pl.loops.length) break;
-            paths = pl.loops.map(function (l) { return l.ring; }).concat(pl.lines);
+            if (!pl.loops.length && !pl.thin.length) break;
+            paths = pl.loops.map(function (l) { return l.ring; }).concat(pl.lines, pl.thin);
             ex2 = RL.extrudeFlat(paths, { width: o.width, height: o.layer, baseZ: zb });
             if (ex2.ok) break;
           }
-          var exLoops = ex2 && ex2.ok && pl.lines.length ? RL.extrudeFlat(pl.loops.map(function (l) { return l.ring; }), { width: o.width, height: o.layer, baseZ: zb }) : ex2;
-          if (!pl.loops.length) continue;
+          var exLoops = ex2 && ex2.ok && pl.lines.length ? RL.extrudeFlat(pl.loops.map(function (l) { return l.ring; }).concat(pl.thin), { width: o.width, height: o.layer, baseZ: zb }) : ex2;
+          if (!pl.loops.length && !pl.thin.length) continue;
           if (!ex2.ok) { failed = 'layer ' + n + ' would not extrude: ' + ex2.reason; break; }
           var len = 0, lo = [Infinity, Infinity], hi = [-Infinity, -Infinity], area = 0;
           pl.loops.forEach(function (l) { len += l.lenMm; });
           pl.lines.forEach(function (l) { len += Math.hypot(l[1][0] - l[0][0], l[1][1] - l[0][1]); });
+          pl.thin.forEach(function (pp) { for (var k = 1; k < pp.length; k++) len += Math.hypot(pp[k][0] - pp[k - 1][0], pp[k][1] - pp[k - 1][1]); });
           paths.forEach(function (pa) { pa.forEach(function (q) { lo[0] = Math.min(lo[0], q[0]); lo[1] = Math.min(lo[1], q[1]); hi[0] = Math.max(hi[0], q[0]); hi[1] = Math.max(hi[1], q[1]); }); });
           for (var q7 = 0; q7 < N; q7++) area += Mraw[q7];
           area *= CELLS * CELLS; totalLen += len;
-          var piece = { kind: 'region', sizeMm: [hi[0] - lo[0], hi[1] - lo[1]], areaMm2: area, perimMm: len, caps: carry.length, lines: pl.lines.length + pl.loops.length, loop: paths[0], snake: [] };
+          var piece = { kind: 'region', sizeMm: [hi[0] - lo[0], hi[1] - lo[1]], areaMm2: area, perimMm: len, caps: carry.length, lines: pl.lines.length + pl.loops.length + pl.thin.length, loop: paths[0], snake: [] };
           layersOut.push({ role: n - (mmin - NL + 1) < 2 ? 'transition' : 'interface', angleDeg: n % 2 ? 135 : 45, z0: zb, z1: zb + o.layer, pieces: [piece], loopMm: piece.sizeMm.slice(), lines: piece.lines, linesMm: len, lengthMm: len,
                           shortestMm: 0, paths: paths, soup: ex2.tris });
           soups.push(ex2.tris); soupsLoops.push(exLoops && exLoops.ok ? exLoops.tris : ex2.tris);

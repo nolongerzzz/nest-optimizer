@@ -129,5 +129,27 @@ console.log('\n=== 5. concentricLoops: a disk is rings a pitch apart, none touch
   check('the extrusion takes the rings', ex.ok, ex.ok ? loops.length + ' rings' : ex.reason);
 }
 
+console.log('\n=== 6. the thin parts: a bead along a sliver the outline cannot open ===');
+{
+  const g = raster(30, 0.5, (x, y) => x >= 0 && x <= 30 && y >= 0 && y <= 0.5);
+  const p = R.plateOfRegion(g.M, g.nx, g.ny, g.ox, g.oy, CELL, PITCH, WIDTH, 45, MINLOOP, MINLINE);
+  check('a strip 0.5 mm wide: no loop opens in it, one bead runs along its middle', p.loops.length === 0 && p.thin.length === 1, p.loops.length + ' loops, ' + p.thin.length + ' beads');
+  const b = p.thin[0] || [[0, 0], [0, 0]];
+  check('...end to end (at least 27 of its 30 mm)', Math.abs(b[b.length - 1][0] - b[0][0]) >= 27, Math.abs(b[b.length - 1][0] - b[0][0]).toFixed(1) + ' mm');
+  check('...along the middle (0.25 mm up, within 0.08)', b.every((q) => Math.abs(q[1] - 0.25) <= 0.08), b.map((q) => q[1].toFixed(2)).join(' '));
+  const ex = RL.extrudeFlat(p.thin, { width: WIDTH, height: 0.2, baseZ: 0 });
+  check('...and the extrusion takes it', ex.ok, ex.ok ? '' : ex.reason);
+}
+{
+  const g = raster(20, 20, (x, y) => { const r = Math.hypot(x - 10, y - 10); return r <= 6 && r >= 4.3; });
+  const p = R.plateOfRegion(g.M, g.nx, g.ny, g.ox, g.oy, CELL, PITCH, WIDTH, 45, MINLOOP, MINLINE);
+  const paths = p.loops.map((l) => l.ring).concat(p.lines, p.thin);
+  const ex = RL.extrudeFlat(paths, { width: WIDTH, height: 0.2, baseZ: 0 });
+  check('a ring 1.7 mm wide: loops and beads, and the extrusion takes them', paths.length >= 2 && ex.ok, p.loops.length + ' loops, ' + p.thin.length + ' beads' + (ex.ok ? '' : ' - ' + ex.reason));
+  check('...every centre line inside the ring (radius 4.3 - 6)', paths.every((pa) => pa.every((q) => { const r = Math.hypot(q[0] - 10, q[1] - 10); return r >= 4.3 && r <= 6; })));
+  check('...the beads (not the loops) stand a half line in from either edge (radius 4.5 - 5.8)', p.thin.every((bd) => bd.every((q) => { const r = Math.hypot(q[0] - 10, q[1] - 10); return r >= 4.3 + WIDTH / 2 - 0.01 && r <= 6 - WIDTH / 2 + 0.01; })));
+  check('...and a bead is a line and a gap from every loop (centre to centre 0.45 mm or more)', p.thin.every((bd) => bd.every((q) => p.loops.every((l) => nearestToRing(l.ring, q[0], q[1]) >= WIDTH + 0.05))));
+}
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

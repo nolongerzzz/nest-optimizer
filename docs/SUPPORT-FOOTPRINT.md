@@ -294,10 +294,11 @@ now moves its share by 11 points or less (the plate follows the surface; the sta
 **Gates.** `support:region` (`tools/nso_support_region_test.js`): the geometry on rasters of known answer (the exact distance, a circle's level set, the smoothed mask, the plate of a rectangle:
 one loop, a hatch flush on its lattice at 45 and 135 deg, never nearer the loop than a line, the strip too thin for a hatch, the speck, the disk's concentric rings) and that the extrusion takes every layer.
 `support:coverage`: floors per head, aligned and turned, the turn moving no head but the Oblique by more than 15 points, and ceilings on the plate's seconds. `support:plate` section 6 is re-pinned
-for the three single-piece builds the region plate changes (Negative Sphere2 23772, Circular 13708, Sphere 13792 triangles (on the 2 + 2 stack)). Everything else is unchanged with the option off.
+for the three single-piece builds the region plate changes (Negative Sphere2 23728, Circular 13696, Sphere 12944 triangles (on the 2 + 2 stack, with section 10's thin beads)). Everything else is unchanged with the option off.
 
 **Not done, and named.**
-- **A rim or a crescent under about 1 mm** gets its outline loop and no hatch (a plate of loops alone); the thinnest are dropped (`REGION_MIN_LOOP_MM`). The Negative Spheres' remaining 30 % is mostly these.
+- **A rim or a crescent under about 0.7 mm** is still bare: a bead needs the region a half line and a gap in from its edge on both sides, and the footprint's own 0.1 mm margin comes
+  off first. The Negative Spheres' remaining 25 - 40 % is mostly these (the bowl's rim is a ring that tapers to a sliver at its far side); the brush below reaches them.
 - **The stair (Oblique)** is not touched; it is being reworked on its own, and a region that is one planar slope is handed to it (`STAIR_MIN_DEG` .. `STAIR_MAX_DEG`).
 - **A painted region** is the same generator with a mask in place of the footprint; the card has no paint tool for it yet. The generator takes a raster and a height per cell, so a mask drawn on the surface needs
   only to be rasterised and handed to `shellPass`'s per-footprint step.
@@ -306,3 +307,31 @@ for the three single-piece builds the region plate changes (Negative Sphere2 237
 - **The Base is 5 points under section 8's 88 %** (83 aligned, 86 turned; the same plate with `sheetRegionPlate` off measures 88 again, so it is the region plate's). Of the 71 samples of its footprint with no support
   under them (of 424), a quarter lie within 0.13 mm of the footprint's edge (the plate's margin: its cells start 0.1 mm in and its wall is a line wide) and the other quarter lie 0.7 - 4 mm in, where the clearance of
   another column or the part's own wall takes cells out of the plate. Not traced further; the Base is a flat face and a plate should hold it whole.
+
+## 10. Thin beads, the hatch given up, the paint brush and the raft switch (2026-10-27, fifth round)
+
+The owner's report on the live card (angle 30): "the interfaces look much better... still not reaching the spheres", then "add a raft in the card as well... a supports-on-demand paint
+brush would help fill in some of the gaps". Is it detection or the supports? **The supports.** `tools/nso_support_coverage_check.js`'s samples are the *detected* footprint, and the
+bare ones are inside it; and of the surface that faces down within 30 deg and is open to the plate, the detector's footprints hold 100 / 97 / 96 / 84 / 97 / 90 % (Base, Circular, Negative Sphere,
+Negative Sphere2, Oblique, Sphere: the misses are the Negative Sphere2's apex seeds and the crest). At 30 deg the build held the Sphere 82 %, the Negative Sphere 55 %.
+
+**What was wrong in the plate for the bowls.** The Negative Sphere's contact surface at the bowl is a ring about 2 mm wide that tapers to under 1 mm. Three things took lines away:
+the layer mask was smoothed by 2 cells (0.2 mm) three times, which erases a strip under about 0.6 mm; the outline's opening needs about 0.9 mm for a loop on each side; and a hatch laid in a narrow
+ring is cut into stubs under the least line (0.9 mm) and dropped. Now: (1) the mask is smoothed by 1 cell (more only when a layer is refused); (2) a region whose hatch lines fill less than 60 % of the room
+inside its outline (`HATCH_MIN_SHARE`) is laid in concentric loops instead; (3) **thin beads** (`thinLines`): the cells a half line in from the region's edge and a line and 0.06 mm from every path
+laid are thinned to one pixel (Zhang - Suen), traced into open polylines, cleaned (Douglas - Peucker, no segment under 0.6 mm), and each is one bead along its sliver - extruded with the loops, dropped first when a layer is refused.
+Measured (`support:coverage`, aligned / turned, then at 30 deg): Negative Sphere 67 -> 75 % (30 deg: 55 -> 60), Circular 88 -> 90, Base 83 -> 84, Sphere at 30 deg 82 -> 89; the Circular turned is 78 against 90 aligned (the floor 72).
+
+**The raft switch** (`#sup-raft`, on): `partsOptsOf(o).sheetRegionPlate`. Off is the sheet from the tips alone; on the Circular's dome it holds 50 % against the raft's 99 %.
+
+**The brush** (`app-supports-card.js`, the Paint row; docs/SUPPORTS-CARD.md "The brush and the raft"): a stroke is an op of the piece's edits; `effective()` turns it into spots every 2 mm (`PAINT_SPOT_MM`) and
+`paintFootprints()` into footprints for the raft: the brush's cells (0.2 mm raster) less every detected footprint, each piece traced (`api.region.isoLoops` of its distance) with the stroke's heights
+(`zl`, `zh` the samples' less / plus 1.2 x the brush's radius and 0.3 mm), `marginMm: 0.02`; a detected footprint a stroke went over keeps `marginMm: 0.02` for the usual 0.1 (`shellPass` reads it), and a painted
+region may be as small as 0.8 mm2 (4 for a detected one). Every check the raft has still stands - the exact distance to the part (`dmin >= gap`), the other columns, the part's own walls - so **a painted region
+never crosses the line**; what the planner cannot reach, the card still says unreachable. `support:paint` (`tools/nso_support_paint_test.js`): the Negative Sphere at 30 deg built, its 80 bare footprint samples painted over in twelve strokes (brush radius 0.8 mm), built again:
+**0 of the 80 held before, 51 after** (64 %), the footprint 127 -> 149 of 207 samples, no support face within the gap of the surface at any painted point, each stroke and Clear one Undo step; and the raft switch on the Circular (99 against 50 %).
+The pointer path (drag raycast, the dots, Escape) is not exercised by a drive check; the node test drives the same ops through `paintStroke`.
+
+**Not done.** The remaining 36 % of the painted points are slivers under about 0.6 mm: a bead does not fit a footprint that narrow with the margin the plate keeps. The brush's reach on a steep flank
+(its `zl`, `zh` are a stroke's heights plus a margin: a flank steeper than about 50 deg under a big brush takes a first hit from another face) was not measured; the Oblique's stair is the stair's and a painted
+region on a planar slope is still handed to it. Paint is not drawn on the plate view (one piece at a time, as the tips are), and is kept per piece across Generate, not across CLEAR PLATE.

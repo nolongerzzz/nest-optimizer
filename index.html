@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=fe6710e3" />
+  <link rel="stylesheet" href="styles.css?v=24f87653" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -831,6 +831,14 @@
                 <button id="sup-tool-erase" class="sup-seg" type="button" aria-pressed="false" disabled
                         title="After a Generate: hover a built member to light it and what it holds up; click to remove it and plan again. Press again (or Esc) to stop.">Erase</button>
               </div>
+              <div id="sup-paint-row" class="sup-tools sup-paint-row" role="group" aria-label="Paint where supports are missing" hidden>
+                <button id="sup-paint" class="sup-seg" type="button" aria-pressed="false" disabled
+                        title="Drag a brush over the piece where the supports do not reach: each stroke asks for tips right under it and lays the raft up to the surface, to the brush's edge, stopping at the gap. One Undo each. Press again (or Esc) to orbit.">Paint</button>
+                <label class="sup-brush" for="sup-brush" title="The brush's diameter, mm.">
+                  <input type="number" id="sup-brush" value="4" min="0.8" max="20" step="0.5" aria-label="Brush diameter, mm"><span>mm</span></label>
+                <button id="sup-paint-clear" class="sup-seg" type="button" disabled
+                        title="Take all the paint off this piece. One Undo puts it back.">Clear paint</button>
+              </div>
               <label class="vp-bend-field" for="sup-angle">Angle
                 <input type="number" id="sup-angle" value="35" min="1" max="89" step="1" aria-label="Overhang angle, degrees"
                        title="Faces within this many degrees of horizontal get support. Bambu Studio's threshold means the same thing, and its default is 30. A smaller angle finds only the flatter undersides; a larger one reaches steeper faces too. The outlines follow as you type."><span id="sup-angle-note" class="sup-angle-note">35&deg; &middot; Bambu 30&deg;</span></label>
@@ -863,6 +871,8 @@
                 <input type="checkbox" id="sup-one" checked> One trunk per cluster</label>
               <label class="vp-check" for="sup-brim" title="A brim round the piece's foot, built with its supports and sliced as Brim: 5 mm, 10 loops of a 0.5 mm line, 0.1 mm off the wall, one first layer thick - the way Bambu rings the stem of a tall thin piece. It stays off the supports' pads: it meets them and does not join them. Only a piece that is tall for its foot gets one (a flat part stands on its own).">
                 <input type="checkbox" id="sup-brim" checked> Brim round the foot</label>
+              <label class="vp-check" for="sup-raft" title="On: the interface and the transition under each hanging surface are laid from the surface itself, layer by layer, the way a raft grows: an outline loop hugging the edge and a hatch inside it, stepping up a dome - so the supports reach the whole surface and not only the tips. Off: the sheet is built from the tips alone.">
+                <input type="checkbox" id="sup-raft" checked> Raft interface</label>
               <label class="vp-bend-field" for="sup-interface">Interface
                 <select id="sup-interface" class="vp-select" title="Dense, in the one-trunk build: the transition and interface lines lie 0.47 mm apart (Bambu's interface spacing 0.1 lays them 0.46 apart) and there are 3 interface layers. Open (and every other build): 0.84 mm apart and 2, the pitch the first prints were made with.">
                   <option value="dense" selected>Dense (Bambu)</option>
@@ -1927,7 +1937,7 @@
        line section both use. The Supports card's build worker loads them too. See
        docs/SUPPORT-INTERFACE.md. -->
   <script src="nso_crosshatch.js?v=c1b24917"></script>
-  <script src="nso_support_interface.js?v=8a2fd9bb"></script>
+  <script src="nso_support_interface.js?v=a89fd6ec"></script>
   <script src="nso_relief.js?v=fe710fb1"></script>
   <!-- Every tool helper goes in and out of the scene through this registry. -->
   <script src="nso-helpers.js?v=9c476e39"></script>
@@ -2073,7 +2083,7 @@
   <script src="app-gscope-support.js?v=2397557a"></script>
   <!-- The Supports card on the main page: the same detection and planner,
        after app-core.js / app-join.js, whose ingest and soups it uses. -->
-  <script src="app-supports-card.js?v=eaa3c91e"></script>
+  <script src="app-supports-card.js?v=a9a28565"></script>
   <script src="app-gscope-slice.js?v=5f7c637f"></script>
   <!-- The Slice card (left bar): the plate sliced for its printer, the .gcode.3mf
        it makes. The print planner and the packager are loaded here for it and for

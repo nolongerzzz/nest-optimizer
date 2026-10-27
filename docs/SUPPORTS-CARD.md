@@ -443,6 +443,20 @@ then start Circles and draw from it**, then stop it to orbit.
   build that cannot finish leaves the member where it was. The member is drawn from
   its `from` / `to` ends, a straight line (a bent branch is lit straight).
 
+### The brush and the raft (supports-footprint, section 10 of docs/SUPPORT-FOOTPRINT.md)
+
+Two additions that work in every mode, Auto included:
+
+- **Paint** (a row under the switch: Paint, a brush diameter in mm, Clear paint): the brush holds the pointer while it is on (press again, or Escape, to orbit),
+  and a drag **over the picked piece** paints; a press anywhere else is the view's. Each stroke is one Undo step, kept as an op of the piece's edits
+  (`m.nsoSupportEdits`, `{ op: 'paint', id, r, pts }`, in the piece's frame: it rides along when the piece moves). What a stroke asks for: a spot every 2 mm along it
+  on the faces that do not look up (a spot joins the area of the nearest one as a manual spot does, or starts an area; in Custom they are tips), and the cells the
+  brush covered that no detected footprint holds become a footprint of their own for the raft, laid to the brush's edge. A detected footprint it went over keeps
+  its plate to its edge (`marginMm` 0.02 for 0.1). The painted dots draw over the piece (translucent, the brush's size). Clear paint takes all off, one Undo.
+  `card.paintStroke([{ p, n }], r)`, `card.paint(on)`, `card.clearPaint()`, `card.paintCount()` are the page's own calls (tests, a script).
+- **Raft interface** (a checkbox, on): the interface and the transition laid from each footprint and its height, layer by layer - the region plate. Off, the sheet is
+  built from the tips alone, as it was before the region plate.
+
 ### What survives, what forgets
 
 Tips, spots turned off, circles and erasures are the piece's own (`model.nsoSupportFeed`:

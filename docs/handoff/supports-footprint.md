@@ -59,7 +59,16 @@ Gate: `npm run support:footprint` (`tools/nso_support_footprint_check.js`, ~1.5 
   `plateOfRegion`, `smoothMask`, `fitRing`). A footprint that is one planar slope is the stair's and untouched (the Oblique is being reworked by its owner). Measured
   (`support:coverage`, six heads on the plate): **15.6 s aligned / 19.1 s turned** (30 / 44 before); coverage Circular 35 -> 88 %, Sphere 64 -> 98 %, Negative Sphere 61 -> 67 %, Negative Sphere2 50 -> 70 %,
   turned within 11 points of aligned; the **Base 88 -> 83 %** (not traced further), the Oblique unchanged (94 aligned, 12 turned: the stair). Gates: new `support:region` (28), `support:coverage`
-  floors + rotation + seconds, `support:plate` section 6 re-pinned (Negative Sphere2 23772, Circular 13708, Sphere 13792 triangles on upstream's 2 + 2 stack), `support:workflow-builds` 46 / 46
+  floors + rotation + seconds, `support:plate` section 6 re-pinned (Negative Sphere2 23728, Circular 13696, Sphere 12944 triangles on upstream's 2 + 2 stack, with the fifth round's thin beads), `support:workflow-builds` 46 / 46
   (the plate tells the bar as it goes: the clamp's first-3.5-loops gate). Everything with the option off is byte for byte as it was. `support:custom` is red at the claude-wip too (the
   circles check; same on a clean checkout). **Not done:** a rim under about 1 mm is loops without a hatch; a painted region (same generator, a mask for the footprint: no tool yet); printability is untested
   (no print made). Details: `docs/SUPPORT-FOOTPRINT.md` section 9.
+- **Fifth round, the bowls, the raft switch and the brush (2026-10-27):** the owner's screenshot (angle 30): "the interfaces look much better... still not reaching the spheres", then "add a raft in the card... a
+  supports-on-demand paint brush". **Detection or supports? Supports:** the detector's footprints hold 84 - 100 % of the surface that faces down within 30 deg and is open to the plate; what was bare was inside them
+  (the Negative Sphere's bowl is a ring 2 mm wide that tapers to a sliver). Shipped: (1) the layer mask smoothed by 1 cell, not 2; a hatch that fills under 60 % of its outline's room is given up for concentric loops; **thin beads**
+  (`thinLines`: skeleton of the cells a half line in and clear of every path, one bead along each sliver) - Negative Sphere 67 -> 75 % at 35 deg (55 -> 60 at 30), Circular 88 -> 90, Sphere at 30 deg 82 -> 89. (2) **Raft interface** box
+  (`#sup-raft`, on; off = the sheet from the tips alone: the Circular's dome 50 % against 99 %). (3) **The brush** (Paint row: Paint, diameter, Clear paint; every mode): strokes are ops of the piece's edits, spots every 2 mm
+  + footprints for the raft (`paintFootprints`, `marginMm` 0.02); every check of the raft still holds, so it does not cross the line. `support:paint`: the Negative Sphere's 80 bare points painted over, 0 held before, 51 after.
+  New gates: `support:paint` (node), `support:paint-drive` (real pointer events in Chromium), `support:region` 36, `support:coverage` section 3 at 30 deg and raised floors; `support:plate` re-pinned (Negative Sphere2 23728,
+  Circular 13696, Sphere 12944); `support:workflow-card`'s "Paint disclosure is gone" now names G-scope's and finds the card's own brush. `support:custom` is red at HEAD too (the circles check). **Not done:** a sliver under
+  about 0.6 mm (36 % of the painted points); the brush's reach on a very steep flank; the pointer path is driven on the Negative Sphere's side only. Details: `docs/SUPPORT-FOOTPRINT.md` section 10.
