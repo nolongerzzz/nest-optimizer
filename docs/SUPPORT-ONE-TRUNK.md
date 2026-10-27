@@ -142,6 +142,23 @@ the option (the shipped Custom feed's bytes are the claude-wip's; `support:feed`
     another with a fillet of 0.25 mm. The exact post under each cap stays exact (the gap and the cap are measured on it). 12 - 55 k triangles a crown (the balls and
     tubes: 3 - 16 k), the build 1 - 3 s longer per crown. Gates: `support:onetrunk` (a body to every crown: closed, outward-wound; the sideways clearance is 0.61 mm
     least, the body carved back to keep the planner's 0.35 off the piece). The lattice's branches stay square.
+20. **A stair's tips are a few legs under blades, not a leg a post** (the owner's, on the sixth push, off the tall Oblique: "separate the mass into clear
+    distinct branches and dial in the tips ... first it was a fat trunk and now it's a fat crown. Why is that piece wanting more than the others?").
+    *Why the Oblique wants more.* Every other head is a sheet: one level, one cap under each of 3 - 8 tips, and a crown of 3 - 8 legs. The Oblique's
+    underside leans 20.7 deg, so it is a **stair** of 18 strips (the underside climbs 0.2 mm a layer, so each strip stands 0.53 mm up the slope from the one
+    below), and a strip over the one below it is held at its leading part by a tip every 5 mm (docs/SUPPORT-INTERFACE.md, the stair's tree): 18 strips x 2 - 3
+    tips = 42 tips, where the others have 3 - 8. The plan's own 8 tips cost nothing (7 are held by the stair); the 42 were the whole crown, and each had a
+    leg, so the crown had to take 42 legs inside a footprint of 10 x 8 mm - one mass. The taller the piece, the longer that mass (the owner stretched it to
+    40 mm: a crown 13 - 35 mm). *What is built now* (`opts.stairLegMm`, the card's Dense: `SHEET.denseStairLegMm` 4.5): the tips of neighbouring strips stand
+    on the same three lines across the slope (the quarter-stretch stagger of the plain stair is off), a post a strip over the one below, 0.5 - 0.9 mm along,
+    overlapping - each line is one ramp-topped **blade** of posts, 8 - 10 mm long. A blade is held by a leg every 4.5 mm, at the middle of equal stretches
+    (`round(L / 4.5)`, 2 on a 9.6 mm blade), the post nearest each; the posts between are built as round posts of the tip's own radius on the blade (they
+    stand on their neighbours as the stair's strips do: the gap and the cap are as for every tip) and have no leg. The lowest strip's tips keep theirs.
+    The Oblique's stair tree: 42 tips = 7 legs + 35 posts, 81 crown members = 11, three branches off the trunk's fork reaching the three blades, each
+    splitting once; the stair's crown body 15.1 k -> 9.9 k triangles (the whole Oblique supports 50.4 k -> 42.7 k; the rest is the interface layers, 22.7 k),
+    the sheet's own bodies at the blob's cell 0.25 mm and budget 24 k triangles (`CROWN_BLOB_CELL_MM`, `CROWN_BLOB_TRIS`; the owner's Studio view of Bambu's
+    Oblique is three columns off one trunk). The legacy plain stair (Open, Assisted, Custom: no `stairLegMm`) is byte for byte as before.
+    Gate: `support:onetrunk` (a stair's legs are no more than a third of its tips and no post is further than 3.6 mm in plan from one).
 **The interface (`interfaceLayers`, `SHEET.densePitchMm`).** `sheet()` takes `interfaceLayers` (2 unless said): 2 transition
 layers and that many interface layers, the interface alternating across and along the sheet's A. The card's **Dense (Bambu)**
 interface is pitch **0.47 mm** (Bambu's 0.46: the strip's joins need a segment of 0.4665, and at 0.46 the stair under

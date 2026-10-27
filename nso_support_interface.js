@@ -888,6 +888,9 @@
   var STAIR_JUMP_MM = 0.5;     /* ...and a run of them is one band while no step jumps further */
   var STAIR_BACK_MM = 0.55;    /* a strip's back edge lies no further than this under the part */
   var STAIR_STEP_MM = 0.03;    /* a band nearer the piece than the gap moves up the slope by this, at least */
+  var STAIR_LEG_MM = 4.5;      /* a row of a stair's posts has a leg every this along it (opts.stairLegMm, the card's Dense: a blade of posts, a tree leg to each stretch); null: a leg to every post */
+  var STAIR_ROW_MM = 2.4;      /* a post joins the row whose last post is this near it in plan, or nearer... */
+  var STAIR_ROW_GAP = 3;       /* ...and no more than this many strips under it */
   var STAIR_TIP_MM = 5;        /* a strip's leading part has a tip every this, or nearer, along it (Bambu's branch distance) */
   var STAIR_SNAP_DEG = 2;       /* a fall this near one of the sheet's line angles takes it */
   var STAIR_REACH_MM = 3;
@@ -2604,15 +2607,18 @@
          (nso_support_gridpack.js), so the tree grows with the stair: the
          stair's lean is never what holds it. The lowest strip stands on its
          transition and the caps under it. */
-      var want = [], restMm = {};
+      var want = [], restMm = {}, legMm = opts.stairLegMm == null ? 0 : +opts.stairLegMm;
       /* where along a band its tips go: STAIR_TIP_MM apart or nearer, each
          holding the stretch of band round it (a band L long has ceil(L /
          STAIR_TIP_MM) tips, at the middles of equal stretches: 2 on the
          arc's 9.75 mm), the next strip's set a quarter stretch along, the
          one after a quarter back - so a column does not stand straight over
-         the one a layer below it (Bambu's own: ~1.4 tops a strip, 5 mm apart) */
+         the one a layer below it (Bambu's own: ~1.4 tops a strip, 5 mm apart);
+         with a leg length (opts.stairLegMm) the same places on every strip:
+         the posts of a column climb the slope one over the next and overlap,
+         a ramp-topped blade that the legs hold */
       function tipVs(bd, m) {
-        var nT = Math.max(1, Math.ceil(bd.len / STAIR_TIP_MM - 1e-9)), step = bd.len / nT, sh2 = [0, 0.25, 0, -0.25][m % 4] * step, out = [];
+        var nT = Math.max(1, Math.ceil(bd.len / STAIR_TIP_MM - 1e-9)), step = bd.len / nT, sh2 = legMm ? 0 : [0, 0.25, 0, -0.25][m % 4] * step, out = [];
         for (var k = 0; k < nT; k++) out.push(Math.min(bd.v1 - o.side / 2, Math.max(bd.v0 + o.side / 2, bd.v0 + (k + 0.5) * step + sh2)));
         return out;
       }
@@ -2696,6 +2702,37 @@
           return Math.hypot(w.p[0] - t.top[0], w.p[1] - t.top[1]) > r0;
         });
       });
+      /* THE LEGS: the tips down a stair are a few rows, each a run of posts that climb the slope with the strips (the posts of
+         neighbouring strips stand about a strip's advance apart and overlap - a row of them is one ramp-topped blade),
+         and a blade needs a leg every STAIR_LEG_MM, not a leg a post. Each tip joins the row whose last post is nearest
+         (no further than STAIR_ROW_MM, no more than STAIR_ROW_GAP strips back); a row of length L is held by round(L /
+         STAIR_LEG_MM) legs, at the middles of equal stretches, each the post nearest it. The other posts are built as posts
+         (tips with .leg false) standing on their neighbours in the row. The lowest strip's tips each keep their leg: they
+         stand on the transition's carriers. */
+      var rows = [];
+      if (legMm) want.forEach(function (w) {
+        var best = null, bd = STAIR_ROW_MM;
+        rows.forEach(function (r) {
+          var last = r.tips[r.tips.length - 1];
+          if (w.strip - last.strip > STAIR_ROW_GAP || w.strip === last.strip) return;
+          var d = Math.hypot(w.p[0] - last.p[0], w.p[1] - last.p[1]);
+          if (d <= bd) { bd = d; best = r; }
+        });
+        if (!best) { best = { tips: [] }; rows.push(best); }
+        best.tips.push(w);
+      });
+      if (legMm) rows.forEach(function (r) {
+        var acc = [0];
+        for (var q = 1; q < r.tips.length; q++) acc.push(acc[q - 1] + Math.hypot(r.tips[q].p[0] - r.tips[q - 1].p[0], r.tips[q].p[1] - r.tips[q - 1].p[1]));
+        var Lr = acc[acc.length - 1], nLeg = Math.max(1, Math.round(Lr / legMm));
+        r.tips.forEach(function (w) { w.leg = false; });
+        for (var k = 0; k < nLeg; k++) {
+          var at = (k + 0.5) * Lr / nLeg, bi = 0;
+          for (var q2 = 1; q2 < acc.length; q2++) if (Math.abs(acc[q2] - at) < Math.abs(acc[bi] - at)) bi = q2;
+          r.tips[bi].leg = true;
+        }
+      });
+      want.forEach(function (w) { if (w.strip === mLo || !legMm) w.leg = true; });
       /* each tip's layer: the lowest strip of the stair whose band holds it */
       group.forEach(function (t) {
         t.stairM = null;
@@ -2717,7 +2754,7 @@
       return { snap: snap, group: group, carriers: carriers, held: held, zCap: zCap, zBase: zCap, zTop: zTopStair, layers: layers, minD: minD,
                lines: { angleDeg: phi, stair: true, slopeDeg: slopeDeg, droppedShare: 0, bare: 0, pieces: layers.length, tried: [] },
                stair: { slopeDeg: slopeDeg, angleDeg: phi, mLo: mLo, mTop: mTop, strips: mTop - mLo + 1, topMm: zTopStair,
-                        tips: want.map(function (w) { return { p: w.p, strip: w.strip - mLo }; }),
+                        tips: want.map(function (w) { return { p: w.p, strip: w.strip - mLo, leg: w.leg !== false }; }),
                         cutAbove: group.filter(function (t) { return t.stairM != null && t.stairM > mTop; }).length } };
     }
 
@@ -3032,7 +3069,7 @@
 
   var api = {
     DEFAULTS: { gapMm: GAP_MM, layerMm: LAYER_MM, pitchMm: PITCH_MM, repeats: REPEATS, epsMm: EPS_MM },
-    SHEET: { pitchMm: SHEET_PITCH_MM, densePitchMm: SHEET_DENSE_PITCH_MM, denseInterfaceLayers: 3, denseFlatGapMaxMm: 0.9, roles: SHEET_ROLES.slice(), under: SHEET_UNDER, minRunMm: MIN_RUN_MM, cellMm: CELL_MM,
+    SHEET: { pitchMm: SHEET_PITCH_MM, densePitchMm: SHEET_DENSE_PITCH_MM, denseInterfaceLayers: 3, denseFlatGapMaxMm: 0.9, denseStairLegMm: STAIR_LEG_MM, roles: SHEET_ROLES.slice(), under: SHEET_UNDER, minRunMm: MIN_RUN_MM, cellMm: CELL_MM,
              sampleMm: SAMPLE_MM, lineAngles: LINE_ANGLES.slice(), fieldMm: FIELD_MM, levelEdgeMm: LEVEL_EDGE_MM,
              slicerSettings: Object.assign({}, SHEET_SLICER) },
     STAIR: { tipMm: STAIR_TIP_MM, backMm: STAIR_BACK_MM },
