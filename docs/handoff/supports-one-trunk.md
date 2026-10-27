@@ -90,3 +90,6 @@ interface 1.5 k, transition 1.9 k (the owner's G-scope showed 15.2 k / 1.6 k / 1
 outline of its strips (`stairOf`: `STAIR_PERIM_MM` 2.5, `STAIR_PERIM_IN_MM` 0.6, `STAIR_FILL_MM` 3.8; `stair.perimGapMm`), all legs of the stair's own tree; in `stepCrown` a
 `_stairTree` tip is a cone of the smooth body cut 0.18 mm into the strip (no exact stub). The row/leg constants (`STAIR_ROW_MM`, `STAIR_ROW_GAP`) and `fillTips` posts are unused for Dense.
 Gates moved: `support:onetrunk` (stair perimeter gate, depth <= 5, options 2 layers), brim check/card test (2 layers), plate pins re-taken.
+
+**Tenth push (the stair's high edge).** `STAIR_PERIM_TOP_MM` 4.0 (perimeter tip spacing grows from 2.5 at the stair low end to 4.0 at its top: Oblique 13 tips -> 10) and `STAIR_TOP_REACH_MM` 1.1
+(the top strips' room is read with a field 1.1 mm deep, so they stop where the underside curves away: 17 strips, top 12.0). See SUPPORT-ONE-TRUNK 3.24.
