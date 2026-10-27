@@ -46,6 +46,15 @@ of capsules; eroded at a pinch until manifold, else the old balls and tubes), th
 stopping 1 mm under its top. `docs/SUPPORT-GRIDPACK.md` "The smooth body", `docs/SUPPORT-ONE-TRUNK.md` 3.19. Not done: the lattice's branches (square) and the stair-less
 lattice trunks; the body is 12 - 55 k triangles a crown (cell 0.2 mm): `crown.blobCellMm` 0.25 is 0.64 x that, at a rougher surface.
 
+**Sixth round: the Oblique's crown** (the owner's, on the tall Oblique: "separate the mass into clear distinct branches and dial in the tips ... why is that piece wanting more
+than the others?"). The Oblique is the one head with a sloped underside, so it is a stair of 18 strips, and the stair's tree asked for a tip every 5 mm of every strip: 42 tips,
+a leg each, one mass. Now (`opts.stairLegMm` = the card's Dense, `SHEET.denseStairLegMm` 4.5) the stair's tips stand on the same lines on every strip, a row of them is one blade of
+posts, and a blade has a leg every 4.5 mm: 7 legs and 35 round posts on their blades, a crown of 11 members (was 81) that reads as a trunk splitting in three. The Oblique's supports
+50.4 k -> 42.7 k triangles (the stair's body 15.1 k -> 9.9 k; 22.7 k of the rest are the interface layers). `CROWN_BLOB_CELL_MM` 0.25 and `CROWN_BLOB_TRIS` 24 k (was 0.2 / 50 k), so
+every crown is lighter: the three plate pins were re-taken (NegSphere2 16644, Circular 9520, Sphere 9760 triangles). The plain stair (Open, Assisted, Custom) is untouched.
+Not printed: a blade's posts stand on their neighbours (0.5 - 0.9 mm apart, overlapping) and a post is up to 2.2 mm in plan from its leg - the same lean as the stair's own strips,
+but unprinted. `STAIR_LEG_MM` is the knob (3.2 is 3 legs to a blade). `docs/SUPPORT-ONE-TRUNK.md` 3.20.
+
 **OPEN for the owner**
 1. **Dense interface is unprinted.** The card defaults to Dense (Bambu's spacing 0.1: lines 0.47 mm apart, 3 interface layers).
    The 0.84 mm sheet was settled by the owner's own prints; Dense is built and sliced here, not printed. Interface > Open puts it back.
