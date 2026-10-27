@@ -56,6 +56,41 @@ function samplesOf(body, support) {
 }
 const heldAt = (support, pts) => pts.filter(p => hitsAt(support, p.x, p.y).some(z => z < p.z - UNDER_MIN && z > p.z - UNDER_MAX)).length;
 const crossing = (support, pts) => pts.filter(p => hitsAt(support, p.x, p.y).some(z => z > p.z - (GAP - 0.03) && z < p.z + 0.01)).length;
+
+/* the first face under (x, y) with its normal's z: [{ z, nz }] low to high */
+function hitsNz(soup, x, y) {
+  const out = [];
+  for (let i = 0; i < soup.length; i += 9) {
+    const ax = soup[i], ay = soup[i + 1], az = soup[i + 2], bx = soup[i + 3], by = soup[i + 4], bz = soup[i + 5], cx = soup[i + 6], cy = soup[i + 7], cz = soup[i + 8];
+    if (x < Math.min(ax, bx, cx) || x > Math.max(ax, bx, cx) || y < Math.min(ay, by, cy) || y > Math.max(ay, by, cy)) continue;
+    const den = (bx - ax) * (cy - ay) - (cx - ax) * (by - ay);
+    if (Math.abs(den) < 1e-12) continue;
+    const u = ((x - ax) * (cy - ay) - (cx - ax) * (y - ay)) / den, v = ((bx - ax) * (y - ay) - (x - ax) * (by - ay)) / den;
+    if (u < -1e-9 || v < -1e-9 || u + v > 1 + 1e-9) continue;
+    const nx = (by - ay) * (cz - az) - (bz - az) * (cy - ay), ny = (bz - az) * (cx - ax) - (bx - ax) * (cz - az), nz = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+    out.push({ z: az + u * (bz - az) + v * (cz - az), n: [nx, ny, nz].map(q => q / (Math.hypot(nx, ny, nz) || 1)) });
+  }
+  return out.sort((a, b) => a.z - b.z);
+}
+/* is the point inside the closed body? (parity along three slightly tilted rays, two of three agreeing) */
+function insideBody(soup, o) {
+  const cross = (d) => {
+    let n = 0;
+    for (let i = 0; i < soup.length; i += 9) {
+      const e1 = [soup[i + 3] - soup[i], soup[i + 4] - soup[i + 1], soup[i + 5] - soup[i + 2]], e2 = [soup[i + 6] - soup[i], soup[i + 7] - soup[i + 1], soup[i + 8] - soup[i + 2]];
+      const px = d[1] * e2[2] - d[2] * e2[1], py = d[2] * e2[0] - d[0] * e2[2], pz = d[0] * e2[1] - d[1] * e2[0], det = e1[0] * px + e1[1] * py + e1[2] * pz;
+      if (Math.abs(det) < 1e-12) continue;
+      const tx = o[0] - soup[i], ty = o[1] - soup[i + 1], tz = o[2] - soup[i + 2], u = (tx * px + ty * py + tz * pz) / det;
+      if (u < 0 || u > 1) continue;
+      const qx = ty * e1[2] - tz * e1[1], qy = tz * e1[0] - tx * e1[2], qz = tx * e1[1] - ty * e1[0], v = (d[0] * qx + d[1] * qy + d[2] * qz) / det;
+      if (v < 0 || u + v > 1) continue;
+      if ((e2[0] * qx + e2[1] * qy + e2[2] * qz) / det > 0) n++;
+    }
+    return n % 2 === 1;
+  };
+  return [[1, 0.013, 0.007], [0.011, 1, 0.017], [0.019, 0.005, 1]].filter(cross).length >= 2;
+}
+const insideCount = (support, body) => { let n = 0; for (let i = 0; i < support.length; i += 63) if (insideBody(body, [(support[i] + support[i + 3] + support[i + 6]) / 3, (support[i + 1] + support[i + 4] + support[i + 7]) / 3, (support[i + 2] + support[i + 5] + support[i + 8]) / 3])) n++; return n; };
 const supportOf = (app, id) => Float32Array.from([].concat(...app.supportsOf(id).map(m => Array.from(app.soupOf(m.id)))));
 
 (async () => {
@@ -123,6 +158,34 @@ const supportOf = (app, id) => Float32Array.from([].concat(...app.supportsOf(id)
   console.log('        Circular: raft on ' + on.tris + ' triangles, ' + share(on).toFixed(0) + ' % held; off ' + off.tris + ' triangles, ' + share(off).toFixed(0) + ' % held');
   check('both build', on.ok && off.ok);
   check('the raft holds more of the dome than the sheet from the tips alone (10 points or more)', share(on) >= share(off) + 10, share(on).toFixed(0) + ' against ' + share(off).toFixed(0));
+
+  console.log('\n=== 5. everything that hangs painted over, on each head: nothing worse, nothing through the part ===');
+  const HANG = -Math.cos(ANGLE * Math.PI / 180);
+  const FLOOR = { 'Support Sphere.stl': true, 'Support Negative Sphere.stl': true };      // the other two are findings (below)
+  for (const nm of ['Support Sphere.stl', 'Support Circular.stl', 'Support Negative Sphere.stl', 'Support Negative Sphere2.stl']) {
+    for (const style of ['tree', 'strut']) {
+      const a = lib.makeApp();
+      const idh = a.load([objs2.find(x => x.name === nm)]);
+      a.openCard(); a.card.angle(ANGLE); a.card.pick(idh[0]);
+      a.el('sup-style').value = style;
+      const bodyH = Float32Array.from(a.soupOf(idh[0]));
+      await a.card.generate();
+      const before = samplesOf(bodyH, supportOf(a, idh[0])), inBefore = insideCount(supportOf(a, idh[0]), bodyH);
+      let lo = [1e9, 1e9], hi = [-1e9, -1e9];
+      for (let k = 0; k < bodyH.length; k += 3) { lo = [Math.min(lo[0], bodyH[k]), Math.min(lo[1], bodyH[k + 1])]; hi = [Math.max(hi[0], bodyH[k]), Math.max(hi[1], bodyH[k + 1])]; }
+      for (let y = lo[1]; y <= hi[1]; y += 1.5) {
+        const st = [];
+        for (let x = lo[0]; x <= hi[0]; x += 0.6) { const h = hitsNz(bodyH, x, y).find(q => q.n[2] <= HANG); if (h && h.z > 0.5) st.push({ p: [x, y, h.z], n: h.n }); }
+        if (st.length) a.card.paintStroke(st, 2);
+      }
+      await a.card.generate();
+      const after = samplesOf(bodyH, supportOf(a, idh[0])), inAfter = insideCount(supportOf(a, idh[0]), bodyH);
+      const sh = (r) => 100 * r.filter(q => q.held).length / Math.max(1, r.length);
+      console.log('        ' + nm.replace(/^Support |\.stl$/g, '').padEnd(17) + style.padEnd(6) + 'held ' + sh(before).toFixed(0) + ' -> ' + sh(after).toFixed(0) + ' %   support inside the part: ' + inBefore + ' -> ' + inAfter);
+      check(nm.replace(/^Support |\.stl$/g, '') + ' (' + style + '): painting everything puts no more support inside the part than there was', inAfter <= inBefore, inBefore + ' -> ' + inAfter);
+      if (style === 'tree' && FLOOR[nm]) check(nm.replace(/^Support |\.stl$/g, '') + ': painting everything holds no less of its footprint (3 points)', sh(after) >= sh(before) - 3, sh(before).toFixed(0) + ' -> ' + sh(after).toFixed(0));
+    }
+  }
 
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);

@@ -56,24 +56,25 @@ async function main() {
   await page.click('#sup-paint');
   u = await ui();
   check('Paint is pressed, the hint says so, the cursor is a crosshair', [u.pressed, /^Painting/.test(u.hint), u.cursor], ['true', true, 'crosshair']);
-  /* two points on the piece's side (a wall hangs from nothing, so it is a face the brush may ask supports for), found by casting rays at the host's mesh */
+  /* a run of the piece along one screen row where the ray, through the piece if need be, meets a face the card calls hanging (normal below -cos 35 deg): the brush paints
+     the underside the outline shows through the piece, from above */
   const drag = await page.evaluate((id) => {
     const p = state.placed.find((q) => q.sourceId === id), cv = state.renderer.domElement, r = cv.getBoundingClientRect();
     const hits = [];
     for (let y = 0.05; y < 0.95; y += 0.012) for (let x = 0.05; x < 0.95; x += 0.012) {
       state.pointer.set(x * 2 - 1, -(y * 2 - 1));
       state.raycaster.setFromCamera(state.pointer, state.camera);
-      const h = state.raycaster.intersectObject(p.mesh, false)[0];
-      if (!h || !h.face) continue;
-      const n = h.face.normal.clone().transformDirection(p.mesh.matrixWorld);
-      if (Math.abs(n.y) < 0.35) hits.push({ cx: r.left + x * r.width, cy: r.top + y * r.height, x, y });     // the view's y is Z up
+      const mats = [].concat(p.mesh.material), was = mats.map((m) => m.side);
+      mats.forEach((m) => { m.side = THREE.DoubleSide; });
+      const all = state.raycaster.intersectObject(p.mesh, false);
+      mats.forEach((m, k) => { m.side = was[k]; });
+      const h = all.find((q) => q.face && q.face.normal.clone().transformDirection(p.mesh.matrixWorld).y <= -0.83);      // the view's y is Z up
+      if (h) hits.push({ cx: r.left + x * r.width, cy: r.top + y * r.height });
     }
     if (hits.length < 4) return null;
-    hits.sort((a, b) => a.cx - b.cx || a.cy - b.cy);
-    // the longest run along one screen row of side faces
     const byRow = {};
     hits.forEach((h) => { (byRow[h.cy.toFixed(0)] = byRow[h.cy.toFixed(0)] || []).push(h); });
-    const best = Object.values(byRow).sort((a, b) => b.length - a.length)[0];
+    const best = Object.values(byRow).sort((a, b) => b.length - a.length)[0].sort((a, b) => a.cx - b.cx);
     return { a: best[0], b: best[best.length - 1], n: best.length };
   }, hostId);
   check('a run of the piece\'s side is in view to paint on', !!drag && drag.n >= 2, true);

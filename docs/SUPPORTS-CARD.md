@@ -448,7 +448,8 @@ then start Circles and draw from it**, then stop it to orbit.
 Two additions that work in every mode, Auto included:
 
 - **Paint** (a row under the switch: Paint, a brush diameter in mm, Clear paint): the brush holds the pointer while it is on (press again, or Escape, to orbit),
-  and a drag **over the picked piece** paints; a press anywhere else is the view's. Each stroke is one Undo step, kept as an op of the piece's edits
+  and a drag **over the picked piece** paints (the brush takes the first face along the pointer's ray, through the piece if need be, that the card calls hanging at its
+  angle - so a stroke over the top of the piece, seen from above, paints the underside the outline shows through it); a press that meets no such face is the view's. Each stroke is one Undo step, kept as an op of the piece's edits
   (`m.nsoSupportEdits`, `{ op: 'paint', id, r, pts }`, in the piece's frame: it rides along when the piece moves). What a stroke asks for: a spot every 2 mm along it
   on the faces that do not look up (a spot joins the area of the nearest one as a manual spot does, or starts an area; in Custom they are tips), and the cells the
   brush covered that no detected footprint holds become a footprint of their own for the raft, laid to the brush's edge. A detected footprint it went over keeps

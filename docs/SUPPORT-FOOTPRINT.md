@@ -332,6 +332,15 @@ never crosses the line**; what the planner cannot reach, the card still says unr
 **0 of the 80 held before, 51 after** (64 %), the footprint 127 -> 149 of 207 samples, no support face within the gap of the surface at any painted point, each stroke and Clear one Undo step; and the raft switch on the Circular (99 against 50 %).
 The pointer path (drag raycast, the dots, Escape) is not exercised by a drive check; the node test drives the same ops through `paintStroke`.
 
+**What the first version did wrong (reported from the live card).** The brush took the first face the ray met, so a stroke from above painted the visible top and the walls, a blob the stencil-less
+dots drew opaque, and the spots it asked for sat on faces that hold nothing (walls, up-facing rims: 3 - 5 of them came back unreachable and the build grew by a third); and a stroke over a steep flank gave
+a raft footprint the extrusion could not follow (a layer's band on a 55 deg flank is 0.8 mm / tan(55) = 0.56 mm wide). Now: the ray is cast with the material double-sided (the faces that hang are
+the mesh's back faces from above, which a ray otherwise passes), the first hanging face is the hit, `paintNz()` limits it to the card's angle (normal below -cos(angle), 20 - 60 deg), and the dots
+are one translucent layer (stencil). A strut through the model, reported with "paint and raft": **not reproduced** - about two dozen builds of the Negative Spheres, the paint from four sides and the old face
+filter, tree and strut and gecko-hand, one piece and the plate, with the raft on and off, none had a support triangle inside any body (`support:paint` section 5 now holds that, sampling every seventh
+triangle of the support against all three parity rays), and the straight-strut style has one sampled triangle at the Negative Sphere2's apex tip (z 16) inside the part's surface with nothing painted at all (a tip touching the face it holds). If it happens, the piece, the style and the strokes
+are what is needed.
+
 **Not done.** The remaining 36 % of the painted points are slivers under about 0.6 mm: a bead does not fit a footprint that narrow with the margin the plate keeps. The brush's reach on a steep flank
 (its `zl`, `zh` are a stroke's heights plus a margin: a flank steeper than about 50 deg under a big brush takes a first hit from another face) was not measured; the Oblique's stair is the stair's and a painted
 region on a planar slope is still handed to it. Paint is not drawn on the plate view (one piece at a time, as the tips are), and is kept per piece across Generate, not across CLEAR PLATE.

@@ -157,6 +157,8 @@ var NSO_SUPPORTS_CARD = (function () {
   var PAINT_MARGIN_MM = 0.02;
   var PAINT_MAX = 6000;          // samples in one stroke
   var PAINT_COL = 0xe879f9;
+  /* a stroke asks for supports only on the faces the card calls hanging at its angle (a face's normal below -cos(angle)): the raft's layers step up a slope that gentle, a steeper flank is the stair's */
+  function paintNz() { return -Math.cos(Math.max(20, Math.min(60, S.angle)) * Math.PI / 180); }
   var UP_MAX = 0.26;            // a face whose normal points up more than this (15 deg) holds nothing
   var ORDER = 30;                // over the piece and its outline
   var MARK_ORDER = 900;          // the markers (spots, tips, circles, the eraser's light) draw over everything, as the rotate rings do
@@ -2107,7 +2109,7 @@ var NSO_SUPPORTS_CARD = (function () {
     var out = [];
     (op.pts || []).forEach(function (s) {
       var n = localDirToUp(p, s.n);
-      if (n[2] > UP_MAX) return;
+      if (n[2] > paintNz()) return;
       var w = localToUp(p, s.p);
       for (var k = 0; k < out.length; k++) if (dist(out[k].w, w) < PAINT_SPOT_MM) return;
       out.push({ w: w, n: n });
@@ -2123,7 +2125,7 @@ var NSO_SUPPORTS_CARD = (function () {
     paintOps(m).forEach(function (op) {
       (op.pts || []).forEach(function (s) {
         var n = localDirToUp(host, s.n);
-        if (n[2] > UP_MAX) return;
+        if (n[2] > paintNz()) return;
         var w = localToUp(host, s.p);
         pts.push([w[0], w[1], w[2], op.r || PAINT_R_DEFAULT]);
       });
@@ -2198,6 +2200,26 @@ var NSO_SUPPORTS_CARD = (function () {
     return out;
   }
 
+  /* The brush's hit: the first face along the pointer's ray, through the piece if need be, that the card calls hanging (paintNz) - so a stroke over the
+     top of the piece, from above, paints the underside the card outlines through it, as the outline is seen. Null when the ray meets no such face. */
+  function hitDown(ev) {
+    var host = placedOf(S.hostId);
+    if (!host || !host.mesh || !state.raycaster || !state.camera || !state.renderer) return null;
+    setPointerFromEvent(ev);
+    state.raycaster.setFromCamera(state.pointer, state.camera);
+    /* from above, the faces that hang are the back faces of the mesh, which a ray does not meet unless the material is double-sided for the cast */
+    var mats = [].concat(host.mesh.material || []), was = mats.map(function (m) { return m.side; });
+    mats.forEach(function (m) { m.side = THREE.DoubleSide; });
+    var hits = state.raycaster.intersectObject(host.mesh, false);
+    mats.forEach(function (m, k) { m.side = was[k]; });
+    for (var i = 0; i < hits.length; i++) {
+      var h = hits[i];
+      if (!h.face) continue;
+      var n = viewToUp(h.face.normal.clone().transformDirection(h.object.matrixWorld));
+      if (n[2] <= paintNz()) return { placed: host, id: host.sourceId, p: viewToUp(h.point), n: n };
+    }
+    return null;
+  }
   function setPaint(on) {
     if (on && (S.hostId == null || !placedOf(S.hostId) || S.wide)) return { ok: false, reason: S.wide ? 'on the plate: pick one piece' : 'no piece' };
     S.paint = !!on;
@@ -2268,7 +2290,9 @@ var NSO_SUPPORTS_CARD = (function () {
     var geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     var pts = new THREE.Points(geo, new THREE.PointsMaterial({ size: 2 * r * k, sizeAttenuation: true, color: PAINT_COL, map: dotMap(false), alphaTest: 0.25,
-      transparent: true, opacity: 0.4, depthTest: false, depthWrite: false }));
+      transparent: true, opacity: 0.4, depthTest: false, depthWrite: false,
+      /* one layer: a pixel is painted once however many dots cover it (the stencil), so the paint stays a translucent stain and not an opaque blob */
+      stencilWrite: true, stencilRef: 1, stencilFunc: THREE.NotEqualStencilFunc, stencilFail: THREE.KeepStencilOp, stencilZFail: THREE.KeepStencilOp, stencilZPass: THREE.ReplaceStencilOp }));
     pts.name = 'supportsCardPaint';
     S.paintLayer = mark(pts);
   }
@@ -2850,8 +2874,8 @@ var NSO_SUPPORTS_CARD = (function () {
     }
     /* THE BRUSH owns a press on the piece (a drag paints; the view does not orbit); a press anywhere else is the view's */
     if (S.paint) {
-      var hp = hitAt(ev);
-      if (hp && hp.id === S.hostId && !isSupport(hp.id)) {
+      var hp = hitDown(ev);
+      if (hp) {
         S.stroke = { pts: [], last: null, r: brushR() };
         addStrokePoint(hp);
         drawPaint();
@@ -2895,7 +2919,7 @@ var NSO_SUPPORTS_CARD = (function () {
     if (S.stroke) {                                       // the brush is down: every sample the pointer made since the last event, on the piece
       if (!S.open || S.busy || !onCanvas(ev)) return;
       var evs = typeof ev.getCoalescedEvents === 'function' ? ev.getCoalescedEvents() : null;
-      (evs && evs.length ? evs : [ev]).forEach(function (e) { var h = hitAt(e); if (h) addStrokePoint(h); });
+      (evs && evs.length ? evs : [ev]).forEach(function (e) { var h = hitDown(e); if (h) addStrokePoint(h); });
       if (!paintRaf) paintRaf = requestAnimationFrame(function () { paintRaf = 0; if (S.stroke) drawPaint(); });
       return;
     }
