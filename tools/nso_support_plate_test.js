@@ -42,10 +42,10 @@ const TODAY = {        // sha256 of the support bytes of a single-piece Generate
                        // The Negative Sphere2 again (supports-footprint, the finer look): its apex surface (z 15, 9 spots in one area) was never detected, it is now - so a fourth area,
                        // a sheet laid over it, and the fill (the sheets reach the footprint): 16644 -> 23352 triangles on the lighter crowns (20332 -> 28884 on the ones before). Circular and Sphere are the same bytes.
                        // The region plate (supports-footprint, third round, docs/SUPPORT-FOOTPRINT.md section 9): the card lays the interface and the transition from each footprint and the surface's height, layer by layer;
-                       // the Negative Sphere2 / Circular / Sphere re-pinned (27568 / 14128 / 15152 triangles; the plates are hatch and loops at 0.5 mm, the sheets were fewer lines).
-  'Support Negative Sphere2.stl': { sha: 'c422cf2c86b037ae91cb7a12b58c96da8eabba778420086bbe81b20dae4988a1', triangles: 27568 },
-  'Support Circular.stl': { sha: '7a168c99096500a48158f3ac29d127b5656ca2b1748bd8cc4fb1e08d49b6eae2', triangles: 14128 },
-  'Support Sphere.stl': { sha: 'fec7fa4109f51d894cc7885ce4328ca15454f78a84b59381ad2465e103617bca', triangles: 15152 }
+                       // the Negative Sphere2 / Circular / Sphere re-pinned (23772 / 13708 / 13792 triangles on upstream's 2 transition + 2 interface stack; the plates are hatch and loops at 0.5 mm, the sheets were fewer lines).
+  'Support Negative Sphere2.stl': { sha: 'b06d8cf1efb0f755d6f1187c414551ef733c90d2f23e43ec59332a4860433889', triangles: 23772 },
+  'Support Circular.stl': { sha: '9877645c480df35043271e56f0f24242c6de6ee709b41d77c37aa245b526bf7d', triangles: 13708 },
+  'Support Sphere.stl': { sha: '7a470def2693e69cff68fca4de0cef85616072ff65425ea06242ad0ecb7051d1', triangles: 13792 }
 };
 const XY_DISTANCE = 0.35;      // the slice's support_object_xy_distance (nso_support_beacons.js SIDE_STANDOFF_MM, nso_support_gridpack.js TRUNK_KEEP_MM)
 const STRICT_GAP = process.env.NSO_STRICT_GAP === '1';

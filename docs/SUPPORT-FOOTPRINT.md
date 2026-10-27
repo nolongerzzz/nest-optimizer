@@ -263,7 +263,7 @@ hugging the region's edge, and a hatch inside it turning 45 / 135 deg a layer; o
    **stair's** and is left to the stair: the Oblique is untouched.
 2. The usable cells are the footprint's, `REGION_MARGIN_MM` (0.1 mm) in from its edge, less the **other columns** (every column the footprint's tips do not stand keeps the same
    clearance from the plate as from a sheet) and less the **part's own walls** beside it (a stem, a tab: read at the stack's heights, clear of the gap and a half line).
-3. Every usable cell has a **stack** of `NL` = 5 layers (2 transition, 3 interface: `SHEET_ROLES`) whose top is the surface less the gap, quantised to the layers; under a slope the gap
+3. Every usable cell has a **stack** of `NL` layers (the card's Dense: 2 transition under 2 interface, `SHEET_ROLES`; it was 2 + 3 until upstream's "interface 2 + transition 2") whose top is the surface less the gap, quantised to the layers; under a slope the gap
    is the perpendicular one (`gap / cos(tilt)` from the lattice's local slope). A flat face is one level; a dome is a stack per cell, so the plate steps up it.
 4. For each print layer `n`, the mask of cells whose stack contains `n` is cropped, smoothed (`smoothMask`, the height map's steps go) and laid by `plateOfRegion`: **an outline loop**
    (the first concentric loop of the distance to the edge, `concentricLoops`, opened by half a line and its gap so no two walls are nearer than a line) and **a hatch** at 45 or 135 deg,
@@ -280,21 +280,21 @@ and the card's "Building moves within its first 3.5 loops" gate (`support:workfl
 
 | | before (section 8, `d95855f`+) | region plate |
 |---|---|---|
-| plate, node, aligned / turned | 30 s / 44 s | **15.3 s / 20.7 s** |
+| plate, node, aligned / turned | 30 s / 44 s | **15.6 s / 19.1 s** |
 | Base, aligned / turned | 88 % / 88 % | 83 % / 86 % |
-| Circular | 35 % / 61 % | **88 % / 78 %** |
+| Circular | 35 % / 61 % | **88 % / 77 %** |
 | Sphere | 64 % / 61 % | **98 % / 98 %** |
-| Negative Sphere | 61 % / 41 % | **68 % / 64 %** |
-| Negative Sphere2 | 50 % / 41 % | **71 % / 70 %** |
+| Negative Sphere | 61 % / 41 % | **67 % / 64 %** |
+| Negative Sphere2 | 50 % / 41 % | **70 % / 70 %** |
 | Oblique (stair untouched) | 92 % / 12 % | 94 % / 12 % |
 
 The time is the point of the second half of the ticket: the lone-tip tries (`lateTry`, `LONE_SINKS`) are not asked of a tip a plate carries, which is where section 8's 30 of 44 seconds went. Turning a head
-now moves its share by 10 points or less (the plate follows the surface; the stair's lines follow the sheet's angles, which is why the Oblique alone still drops).
+now moves its share by 11 points or less (the plate follows the surface; the stair's lines follow the sheet's angles, which is why the Oblique alone still drops).
 
 **Gates.** `support:region` (`tools/nso_support_region_test.js`): the geometry on rasters of known answer (the exact distance, a circle's level set, the smoothed mask, the plate of a rectangle:
 one loop, a hatch flush on its lattice at 45 and 135 deg, never nearer the loop than a line, the strip too thin for a hatch, the speck, the disk's concentric rings) and that the extrusion takes every layer.
 `support:coverage`: floors per head, aligned and turned, the turn moving no head but the Oblique by more than 15 points, and ceilings on the plate's seconds. `support:plate` section 6 is re-pinned
-for the three single-piece builds the region plate changes (Negative Sphere2 27568, Circular 14128, Sphere 15152 triangles). Everything else is unchanged with the option off.
+for the three single-piece builds the region plate changes (Negative Sphere2 23772, Circular 13708, Sphere 13792 triangles (on the 2 + 2 stack)). Everything else is unchanged with the option off.
 
 **Not done, and named.**
 - **A rim or a crescent under about 1 mm** gets its outline loop and no hatch (a plate of loops alone); the thinnest are dropped (`REGION_MIN_LOOP_MM`). The Negative Spheres' remaining 30 % is mostly these.
