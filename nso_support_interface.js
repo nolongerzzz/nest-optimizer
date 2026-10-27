@@ -893,7 +893,8 @@
   var STAIR_BACK_MM = 0.55;    /* a strip's back edge lies no further than this under the part */
   var STAIR_STEP_MM = 0.03;    /* a band nearer the piece than the gap moves up the slope by this, at least */
   var STAIR_LEG_MM = 4.5;      /* a row of a stair's posts has a leg every this along it (opts.stairLegMm, the card's Dense: a blade of posts, a tree leg to each stretch); null: a leg to every post */
-  var STAIR_PERIM_MM = 2.5;    /* the tips of a Dense stair stand along the outline of its sheet this far apart at the most... */
+  var STAIR_PERIM_MM = 2.5;    /* the tips of a Dense stair stand along the outline of its sheet this far apart at the most, at its low end... */
+  var STAIR_PERIM_TOP_MM = 4.0; /* ...and this far apart at its high end, where a tip is a long leg from the crown (the spacing grows with the strip a tip stands under) */
   var STAIR_PERIM_IN_MM = 0.6; /* ...this far in from its edge (under the transition, not under its rim) */
   var STAIR_FILL_MM = 3.8;     /* ...and inside it wherever none is nearer than this */
   var STAIR_ROW_MM = 2.4;      /* a post joins the row whose last post is this near it in plan, or nearer... */
@@ -901,6 +902,7 @@
   var STAIR_TIP_MM = 5;        /* a strip's leading part has a tip every this, or nearer, along it (Bambu's branch distance) */
   var STAIR_SNAP_DEG = 2;       /* a fall this near one of the sheet's line angles takes it */
   var STAIR_REACH_MM = 3;
+  var STAIR_TOP_REACH_MM = 1.1; /* a Dense stair's top strip covers the part only where it is this near over the strip's top (a stack and a bit): not into the fillet where it curves up to its wall */
   var STAIR_NEAT_MM = [0.06, 0.15, 0.3];   /* a strip whose front would not extrude is drawn on its front straightened to these, in turn (mm) */
   var LONE_SINKS = [0.03, 0.06, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.6];   /* a lone tip's sheet with no field is tried again this far lower, in turn (mm) */
   var STAIR_WALL_MM = 0.56;    /* the stair asked again keeps its strips this far off the piece's walls: the gap, a line's corner, a cell */
@@ -2314,10 +2316,10 @@
       disc.forEach(function (c, k) { discFlat[k * 2] = c[0]; discFlat[k * 2 + 1] = c[1]; });
       var zTopOf = function (m) { return o.plateZ + m * o.layer; };
       /* the field of the layer whose top is zTopOf(m): see EACH LAYER'S STRIP */
-      function fieldFor(m, extra) {
+      function fieldFor(m, extra, reach) {
         var zt = zTopOf(m), za = zt - o.layer - o.gap, zb = zt + o.gap, n = nx * ny;
         var blk = new Uint8Array(n), fld = new Uint8Array(n);
-        stairBlocks(ivAt, iv, n, za, zb, STAIR_REACH_MM, blk, fld);
+        stairBlocks(ivAt, iv, n, za, zb, reach || STAIR_REACH_MM, blk, fld);
         stairHalo(blk, fld, nx, ny, discRowsFlat, discWhole, discFlat);
         function stamp(a, b, rad) {
           var i0 = Math.max(0, Math.floor((Math.min(a[0], b[0]) - rad - ox) / CELL_MM)), i1 = Math.min(nx - 1, Math.ceil((Math.max(a[0], b[0]) + rad - ox) / CELL_MM));
@@ -2444,9 +2446,11 @@
          ends where the part over it does, a cell either side) */
       function roomAt(m) {
         var bd = lay[m].band, r = [];
+        if (opts.stairLegMm && !lay[m].fldT) lay[m].fldT = fieldFor(m, null, STAIR_TOP_REACH_MM);
+        var fR = opts.stairLegMm ? lay[m].fldT : lay[m].fld;
         bd.pts.forEach(function (pt) {
           var f = pt.f + (bd.shift || 0), u = f;
-          while (u + DU <= umax && fieldAt(lay[m].fld, atUV(u + DU, pt.v)[0], atUV(u + DU, pt.v)[1])) u += DU;
+          while (u + DU <= umax && fieldAt(fR, atUV(u + DU, pt.v)[0], atUV(u + DU, pt.v)[1])) u += DU;
           r.push(u - f + CELL_MM);
         });
         r.sort(function (x, y) { return x - y; });
@@ -2468,8 +2472,8 @@
         return d.length ? Math.max(d[d.length >> 1], 0) : null;
       }
       function planWidth(m) {
-        var a = advanceAt(m), room = roomAt(m) + bead, sr = stackN ? stackReach(m) : null;
-        var need = m === mTop ? room : (stackN ? Math.min(room, (sr != null ? sr : (stackN - 1) * a) + bead) : a + bead), n = 2;
+        var a = advanceAt(m), bd0 = stackN ? 0 : bead, room = roomAt(m) + bd0, sr = stackN ? stackReach(m) : null;
+        var need = m === mTop ? room : (stackN ? Math.min(room, (sr != null ? sr : (stackN - 1) * a) + bd0) : a + bead), n = 2;
         while (widthOf(n) < need - 1e-9 && widthOf(n + 1) <= room + 1e-9) n++;
         var pt = o.pitch;
         if (widthOf(n) < need - 1e-9) pt = (Math.min(need, Math.max(room, widthOf(n))) - o.width) / (n - 1);
@@ -2772,7 +2776,9 @@
         cand.forEach(function (c) { cu += c.u / cand.length; cv += c.v / cand.length; });
         cand.sort(function (a, b) { return Math.atan2(a.v - cv, a.u - cu) - Math.atan2(b.v - cv, b.u - cu); });
         var chosen = [];
-        cand.forEach(function (c) { if (chosen.every(function (q) { return Math.hypot(q.u - c.u, q.v - c.v) >= STAIR_PERIM_MM; })) chosen.push(c); });
+        var spanM = Math.max(1, mTop - mLo);
+        function perimAt(c) { return STAIR_PERIM_MM + (STAIR_PERIM_TOP_MM - STAIR_PERIM_MM) * Math.max(0, Math.min(1, (c.m - mLo) / spanM)); }
+        cand.forEach(function (c) { if (chosen.every(function (q) { return Math.hypot(q.u - c.u, q.v - c.v) >= Math.min(perimAt(c), perimAt(q)); })) chosen.push(c); });
         /* inside: the cell furthest from every tip while one is further than STAIR_FILL_MM, under the footprint by more than the inset */
         for (var guard2 = 0; guard2 < 40; guard2++) {
           var far = null, farD = STAIR_FILL_MM;
