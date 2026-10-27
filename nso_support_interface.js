@@ -2424,8 +2424,14 @@
         r.sort(function (x, y) { return x - y; });
         return r.length ? r[r.length >> 1] : 0;
       }
+      /* A STRIP AS DEEP AS BAMBU'S STACK (opts.stairLegMm, the card's Dense). Bambu's interface is a sheet of 3 interface and 2 transition layers
+         under the part, following it: at every point under the part, the five layers under the gap. A stair's strip is one layer of that sheet: as wide as
+         five advances and a bead (3.1 mm on the Oblique), so that the strips stand five deep wherever they lie, its front 3 layers deep interface and the
+         two under them transition - and what lies below them is the tree. A strip as wide as one advance and a bead (the Open stair's) stands one or
+         two deep, and everything under it that touches it was read as part of it. */
+      var stackN = opts.stairLegMm ? nI + 2 : 0;
       function planWidth(m) {
-        var a = advanceAt(m), room = roomAt(m) + bead, need = m === mTop ? room : a + bead, n = 2;
+        var a = advanceAt(m), room = roomAt(m) + bead, need = m === mTop ? room : (stackN ? Math.min(room, stackN * a + bead) : a + bead), n = 2;
         while (widthOf(n) < need - 1e-9 && widthOf(n + 1) <= room + 1e-9) n++;
         var pt = o.pitch;
         if (widthOf(n) < need - 1e-9) pt = (Math.min(need, Math.max(room, widthOf(n))) - o.width) / (n - 1);

@@ -1729,6 +1729,7 @@ var NSO_SUPPORTS_CARD = (function () {
         var meta = { card: true, hostSourceId: c.hostId, hostName: c.hm.name, regionId: r.rid, style: o.style,
           sideMm: r.sideMm || o.sideMm, rest: o.rest, angleDeg: S.angle, mode: S.mode, keys: sd.keys, holds: sd.holds, landing: sd.landing };
         if (sd.brim) meta.brim = true;
+        meta.interfaceLayers = partsOptsOf(o).interfaceLayers || 2;      /* how many interface layers its sheet has: the slicer reads a 3-layer sheet as one */
         var pl = placeSolid(sd.soup, meta, c.host, c.D.minZ, sd.brim ? c.hm.name + ' - brim' : c.hm.name + ' - support ' + (r.rid + 1) + '.' + (++n) + ' (' + STYLES[o.style] + ')');
         if (!pl.ok) throw new Error(pl.reason);
         added.push(pl.id);

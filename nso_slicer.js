@@ -200,9 +200,11 @@
     },
     // --- a support is hollow: the export's own overrides ---------------------
     supportWalls: {
-      loops: 1, sparseDensity: 0,
+      loops: 1, sparseDensity: 0, topShellLayers: 0, bottomShellLayers: 1,
       source: 'the two overrides every NSO support object carries in the Bambu project export (nso_support_interface.js SHEET.slicerSettings: ' +
-              'wall_loops = 1, sparse_infill_density = 0%; docs/handoff/supports-no-infill.md) - a support is sliced with them on, as thinWall.supportsOn'
+              'wall_loops = 1, sparse_infill_density = 0%; docs/handoff/supports-no-infill.md) - a support is sliced with them on, as thinWall.supportsOn. Its shells: none on top (a ' +
+              'trunk that narrows going up has a hair-thin top ring on every layer, which this slicer fills and Bambu does not: the trunk read as filled) and the first layer ' +
+              'solid underneath (the pad), the one layer under a branch that leans out a bridge'
     },
     // --- the flow model, shared with the importer ----------------------------
     flow: {
@@ -1417,6 +1419,7 @@
         /* A SUPPORT IS HOLLOW, as its export says (SHEET.slicerSettings: wall_loops 1, sparse_infill_density 0%) and as Bambu's own tree is: one wall
            round the trunk and no filler inside it. The shells (the first layers, the top under a sheet) stay the profile's. */
         var oS = P.role === 'support' ? Object.assign({}, o, { wallLoops: CONSTANTS.supportWalls.loops, sparseDensity: CONSTANTS.supportWalls.sparseDensity }) : o;
+        var TT = P.role === 'support' ? CONSTANTS.supportWalls.topShellLayers : T, BB = P.role === 'support' ? CONSTANTS.supportWalls.bottomShellLayers : B;
         if (P.role === 'brim') {
           /* a brim built with the supports (brimFor): one layer, its section printed as the brim's own loops, nothing else */
           for (var bi = 0; bi < n; bi++) {
@@ -1473,11 +1476,11 @@
           // --- shells (top / bottom solid) and sparse
           var inner = per.infillRegion;
           var cover = null;
-          for (var k = 1; k <= T; k++) {
+          for (var k = 1; k <= TT; k++) {
             var up = i + k < n ? S[i + k] : g.empty();
             cover = cover ? g.inter(cover, up) : up;
           }
-          for (var kb = 1; kb <= B; kb++) {
+          for (var kb = 1; kb <= BB; kb++) {
             var dn = i - kb >= 0 ? S[i - kb] : g.empty();
             cover = cover ? g.inter(cover, dn) : dn;
           }
@@ -2060,6 +2063,29 @@
         var zis = zones[j].is.length ? g.polys(g.offset(g.unionAll(zones[j].is), w / 2)) : [];
         var zts = zones[j].ts.length ? g.polys(g.offset(g.unionAll(zones[j].ts), w / 2)) : [];
         var hI = null, hT = null;
+        /* THE SHEET IS LINES, NOT A WALL (the support is hollow, above): where a layer is the sheet's - interface or transition, the zone a flat sheet's islands or a
+           stair's strips make, the stair's held to the part's nearness - its region is filled solid, as Bambu lays its interface, inside the one wall the support
+           has. The tree under the sheet stays hollow. */
+        if (zi.length || zt.length || zis.length || zts.length) {
+          var zc = [];
+          zones[j].i.concat(zones[j].t).forEach(function (cs) { zc.push(cs); });
+          var zcs = zones[j].is.concat(zones[j].ts);
+          var sheetCs = zc.length ? g.unionAll(zc) : g.empty();
+          if (zcs.length) {
+            var hostD = overAt(j, dTr);
+            var stairCs = g.unionAll(zcs);
+            if (hostD.length) stairCs = g.inter(stairCs, g.unionAll(hostD.map(function (x) { return x.cs; })));
+            sheetCs = g.isEmpty(sheetCs) ? stairCs : g.union(sheetCs, stairCs);
+          }
+          var inSheet = g.isEmpty(sheetCs) ? g.empty() : g.offset(g.inter(P.S[j], sheetCs), -(o.outerWallWidthMm * 1.0));
+          if (!g.isEmpty(inSheet)) {
+            var wI = o.infillWidthMm, sI = spacingOf(wI, P.layers[j].h || 0.2), aD = (o.infillDirectionDeg || 45) * Math.PI / 180, aJ = (j % 2 === 0) ? aD : aD + Math.PI / 2;
+            var hullS = g.polys(g.offset(inSheet, wI / 2 + 1e-4));
+            connect(scanFill(g.polys(inSheet), aJ, sI, 0), 3 * sI, hullS).forEach(function (pth) {
+              L.paths.push({ feature: 'Support', width: wI, closed: false, pts: pth.pts, sheetFill: true });
+            });
+          }
+        }
         function labelAt(x, y) {
           if (zi.length && inside(zi, x, y)) return 'Support interface';
           if (zt.length && inside(zt, x, y)) return 'Support transition';

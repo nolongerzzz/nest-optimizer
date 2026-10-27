@@ -181,6 +181,10 @@ var NSO_GSCOPE_SLICE = (function () {
 
     var po = panelOpts();
     var opts = SL().defaultsFor(po.nozzleMm, Object.assign({}, po.over, optsOver || {}));
+    /* a sheet of more interface layers than the slicer's default says so (the card's Dense: 3): the slicer types its top 3 layers interface */
+    var ni = 0;
+    d.objects.forEach(function (o) { var su = supportOf(o); if (su && su.interfaceLayers > ni) ni = su.interfaceLayers; });
+    if (ni > 2 && !(optsOver && optsOver.supportInterfaceLayers != null)) opts.supportInterfaceLayers = ni;
     var flagged = [];
     var objects = d.objects.map(function (o) {
       var ns = nonSolidOf(o);
