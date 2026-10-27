@@ -12,7 +12,7 @@
  *
  *   1  DETECT FIRST. Opening the card on a plate with one piece detects at
  *      once: "1 hanging area at 35 deg on <piece>", the area outlined (one outline of
- *      44 edges, not a grid), nothing generated, nothing in Undo; GENERATE on;
+ *      the face's own edge, not a grid of cells), nothing generated, nothing in Undo; GENERATE on;
  *      the Paint disclosure is gone; the green build tag and the HUD's copy of
  *      the readout are not drawn.
  *   2  THE ANGLE is editable on the card and re-detects as it changes: 25 deg
@@ -488,8 +488,11 @@ async function main() {
   ol = await T.outlines();
   const rows = new Set(v.beacons.map((b) => b.p[1].toFixed(3))).size, cols = v.beacons.length / rows;
   check('the face is 12 x 10 spots', [cols, rows], [12, 10]);
-  check('the area is outlined once, faint white, on the surface: one outline of its 44 edge segments (not a grid), no dots, no badges',
-    [ol.kids, ol.allMeshes, ol.areas.map((a) => [a.area, a.kind, a.colour, a.opacity < 0.6, a.verts])], [1, true, [[0, 'on', 0xffffff, true, 2 * (cols + rows) * 6]]]);
+  /* the outline is the face's own edge (region.footprint, docs/SUPPORT-FOOTPRINT.md), a handful of segments - it was the 44 edges of the 12 x 10 cells */
+  const edges = v.areas[0].outlineEdges;
+  check('the area is outlined once, faint white, on the surface: one outline of the face\'s own edge (a handful of segments, not the 44 edges of its grid cells), no dots, no badges',
+    [ol.kids, ol.allMeshes, ol.areas.map((a) => [a.area, a.kind, a.colour, a.opacity < 0.6, a.verts === 6 * edges]), v.areas[0].footprint, edges >= 4 && edges <= 12],
+    [1, true, [[0, 'on', 0xffffff, true, true]], true, true]);
   await T.shot('01-detected-on-open.png');
 
   // =======================================================================
@@ -751,8 +754,8 @@ async function main() {
   v = await T.view();
   const NB = (await T.sups()).length;
   /* The tunnel's ceiling (96 spots) is held only in part: the planner steers
-     out of the tunnel's mouths to the 24 spots by them and cannot reach the
-     72 between. An area the build held in part gives its lost spots an area
+     out of the tunnel's mouths to the 28 spots by them and cannot reach the
+     68 between. An area the build held in part gives its lost spots an area
      of their own (app-supports-card.js effective(), supports-curved-sheet,
      #265 - an area read "unreachable" whole for its lost spots, the arc of
      simple_overhang.3mf for three at its foot): the mouths read held, the
@@ -762,8 +765,11 @@ async function main() {
     [c.state, c.line, NB > 0], ['built', BUILT(NB, 2, 0, 1), true]);
   check('...the stats behind the line, and the three add up to every area', [v.stats.held, v.stats.unsupported, v.stats.unreachable, v.stats.held + v.stats.unsupported + v.stats.unreachable === v.areas.length],
     [2, 0, 1, true]);
-  check('...the ceiling split where the build left off: its 24 spots by the mouths held, its 72 between an area of their own',
-    [v.areas.length, v.areas[1].count, v.areas[1].kind, v.areas[2].count, v.areas[2].kind], [3, 24, 'held', 72, 'unreachable']);
+  /* 28 and 68 (24 and 72 before supports-footprint): the ceiling is a flat area, so the card moves its spots 0.5 mm from the bore's walls and
+     from the mouths' edge in to 1 mm (beaconInsetMm); the planner's lean limit is a sharp cutoff, and four more of the spots by the mouths now
+     meet it. The 96 are the same 96. */
+  check('...the ceiling split where the build left off: its 28 spots by the mouths held, its 68 between an area of their own',
+    [v.areas.length, v.areas[1].count, v.areas[1].kind, v.areas[2].count, v.areas[2].kind], [3, 28, 'held', 68, 'unreachable']);
   check('...the unreachable area stays outlined in red; the held ones are white',
     (await T.outlines()).areas.map((a) => [a.area, a.kind, a.colour]), [[0, 'on', 0xffffff], [1, 'on', 0xffffff], [2, 'red', 0xff2d2d]]);
   check('...one row under the readout, for the area that needs a look', [c.rows.shown, c.rows.list.map((r) => [r.area, r.kind, r.text])],

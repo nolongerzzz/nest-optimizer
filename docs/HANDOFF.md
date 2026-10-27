@@ -126,6 +126,7 @@ merging its list by hand. The list below is generated.
 - [Supports custom card - the Tune section (2026-10-25)](handoff/supports-custom-card.md)
 - [Supports custom engine - the planner takes the user's points (2026-10-23)](handoff/supports-custom-engine-the-planner-takes-the-users-points.md)
 - [Supports custom UI - Auto / Assisted / Custom on the card (2026-10-24)](handoff/supports-custom-ui-auto-assisted-custom-on-the-supports-card.md)
+- [Supports footprint - the beacons' outline is the surface's own edge (2026-10-26)](handoff/supports-footprint.md)
 - [Supports knobs 1 - the supports playground: four knobs on Custom/Assisted (2026-10-25)](handoff/supports-knobs-1.md)
 - [Supports export without inner filler (2026-10-23)](handoff/supports-no-infill.md)
 - [Supports one trunk - Auto grown the way Bambu's tree slim grows (2026-10-26)](handoff/supports-one-trunk.md)

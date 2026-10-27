@@ -309,6 +309,7 @@
     "support:interface-fixtures": {"weight":27750,"note":""},
     "support:brim-card": {"weight":60000,"note":"~25 s locally x 1.7, rounded up: the card run in Node with the slicer on Base and Circular - generate, the brim piece, slice, Undo, unticked; supports-one-trunk"},
     "slicer:brim": {"weight":60000,"note":"~30 s locally x 1.7: the six one-trunk builds sliced with brimType auto and the brim read against the reference; supports-one-trunk"},
+    "support:footprint": {"weight":130000,"note":"~1.2 min locally x 1.7, rounded up: the six real parts' footprints against the reference G-code (5 s), then the six built twice (the card's one-trunk Auto with the outline on, and as it was); supports-footprint"},
     "support:onetrunk": {"weight":150000,"note":"~1.5 min locally x 1.7, rounded up: the reference read, the six real parts built twice (box off, one trunk) and the one-trunk builds sliced and measured; supports-one-trunk"},
     "support:plate": {"weight":240000,"note":"estimate (supports-plate-wide): Node only; the six real parts of supp_ref.3mf planned and built in-thread, about two minutes of the real engine, plus ~40 s of smaller builds; one CI run measures it"},
     "support:shells-clamp-a1": {"weight":305000,"note":"estimate (ci-shard-split-2): local time on the cloud box x support:shells-clamp's CI-over-local, 467 s / 279 s = 1.67. 182 s local: area 1 (126 trunks) - plan, parts, weld, layers; the whole-slice check is skipped there (over 30000 tris)."},

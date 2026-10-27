@@ -14,11 +14,15 @@ card - All / None, region badges, dots - and is superseded by `support:workflow`
 It is out of `testSteps`; the file stays until someone deletes it.
 
 No dots on the mesh. Each **hanging area** - one region of the beacon grid
-(`docs/SUPPORT-BEACONS.md`) - is outlined faintly on the surface: the edges of
-its grid cells that no other cell of the area shares. An outline, not a grid.
+(`docs/SUPPORT-BEACONS.md`) - is outlined faintly on the surface: the edge of
+the surface its spots hold, traced on the piece (`region.footprint`,
+`docs/SUPPORT-FOOTPRINT.md`) - not the edges of the grid cells the spots were
+found in, which at a rim are mostly air. An outline, not a grid.
 It is drawn through the piece (an overhang's underside is rarely the face in
-view) and a click is read against the outlined cells along the ray, so an
-underside area can be clicked from above.
+view) and a click is read against the outline along the ray (the ray meets the
+plane of one of the area's spots, inside the loops), so an underside area can be
+clicked from above. A spot the footprint does not hold (a crease, a tip, a side
+spot, one placed by hand) keeps its cell.
 
 ## 0. Detect first
 
@@ -337,9 +341,12 @@ reports forever is stopped at the ceiling.
 
 ## 5. Flags
 
-- The outline follows the beacon grid's cells (lattice-aligned, 3 mm), not the
-  face: where a straight edge falls inside the outermost cells the outline can
-  pass it by up to half a pitch.
+- The outline is the surface's own edge (`docs/SUPPORT-FOOTPRINT.md`), to 0.01 mm on
+  a plane; it used to follow the beacon grid's cells and pass the face by up to a
+  whole cell. The card asks the detector for it and for the spots to stand 1 mm
+  in from it (`beaconInsetMm`), and the build for the sheet and its caps to stay
+  under the part (`sheetPerimeter`). An area a build split draws the first part's
+  whole outline and the rest in cells.
 - An area is a region of the beacon grid. A manual spot too far from any area
   starts one of its own. A left-out area is remembered by the position of one
   of its spots, in the piece's own frame, so it follows the piece when it moves.

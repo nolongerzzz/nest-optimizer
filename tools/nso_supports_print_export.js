@@ -59,10 +59,11 @@ const PARTS = { interface: true, foldSheets: false, footPads: 'shared' };
 const NAME = 'top_clip_x2';
 
 /* the build at the card's defaults, its objects named as the card names them */
-async function build(piece, partsOver, name, one, brim) {
+async function build(piece, partsOver, name, one, brim, outline) {
   const pname = name || NAME;
   const t0 = Date.now();
-  const det = SA.detectOverhangs(piece, { skipList: [], angleDeg: CARD.angleDeg, occluders: [] });
+  /* outline: the card's own (docs/SUPPORT-FOOTPRINT.md) - the spots kept in from the edge of the surface, the sheet and its caps kept to the part */
+  const det = SA.detectOverhangs(piece, { skipList: [], angleDeg: CARD.angleDeg, occluders: [], beaconInsetMm: outline && outline !== 'perimeter' ? ctx.NSO_SupportBeacons.INSET_PRODUCT_MM : 0 });
   if (!det.ok) throw new Error(det.reason);
   const areas = [];
   let plateZ = 0;
@@ -76,7 +77,7 @@ async function build(piece, partsOver, name, one, brim) {
     const p = ST.planTree(piece, Object.assign({}, CARD, { beacons: bs }, one ? { oneTrunk: true } : {}));
     if (!p.ok) { console.log(`area ${rg.id + 1}: ${p.reason}`); continue; }
     plateZ = p.plateZ;
-    const tp = await GP.parts(p, Object.assign({}, PARTS, one ? { sheetPitchMm: SI.SHEET.densePitchMm, interfaceLayers: SI.SHEET.denseInterfaceLayers, sheetFlatGapMm: SI.SHEET.denseFlatGapMaxMm } : {}, partsOver || {}));
+    const tp = await GP.parts(p, Object.assign({}, PARTS, one ? { sheetPitchMm: SI.SHEET.densePitchMm, interfaceLayers: SI.SHEET.denseInterfaceLayers, sheetFlatGapMm: SI.SHEET.denseFlatGapMaxMm } : {}, outline && outline !== 'inset' ? { sheetPerimeter: true } : {}, partsOver || {}));
     if (!tp.ok) throw new Error(`area ${rg.id + 1}: ${tp.reason}`);
     areas.push({ rid: rg.id, p, tp, sh: GP.shells(p, tp) });
   }

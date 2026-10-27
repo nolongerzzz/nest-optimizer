@@ -193,7 +193,8 @@ var NSO_SUPPORTS_CARD = (function () {
      different (support:shells); nothing on the plate needs a support to be
      one shell (the booleans merge a piece's shells for themselves: the
      overlap merge in nso-helpers.js). */
-  var PARTS_OPTS = { interface: true, foldSheets: false, footPads: 'shared' };
+  /* sheetPerimeter: the sheet and its caps keep to where the part is over them, not out over the air past its edge */
+  var PARTS_OPTS = { interface: true, foldSheets: false, footPads: 'shared', sheetPerimeter: true };
   /* The sheet's line pitch and its interface layers are the build's own: DENSE is Bambu's (support_interface_spacing 0.1: lines
      0.46 mm apart, and 3 interface layers over the 2 of transition, as the reference slice lays every head); OPEN is the 0.84 mm
      and 2 + 2 layers the first prints were made with. */
@@ -311,7 +312,8 @@ var NSO_SUPPORTS_CARD = (function () {
     var key = poseKey(p) + '#' + occ.map(poseKey).join('#') + '#' + ((typeof nsoMaskCount === 'function') ? nsoMaskCount(m) : 0) + '@' + S.angle;
     if (S.det && S.det.key === key) return S.det;
     var soup = worldUp(p.mesh), sk = skipListFor(m, p, soup);
-    var opts = { skipList: sk.list, angleDeg: S.angle, occluders: occ.map(occluderSoup) };
+    /* beaconInsetMm: a spot stands at least this far in from the edge of the surface it holds (docs/SUPPORT-FOOTPRINT.md) */
+    var SBm = window.NSO_SupportBeacons, opts = { skipList: sk.list, angleDeg: S.angle, occluders: occ.map(occluderSoup), beaconInsetMm: SBm && SBm.INSET_PRODUCT_MM || 0 };
     /* A BIG piece is read in a worker (detection is 10 s of JS on the vase, and
        the card used to freeze the page for all of it on opening). The card
        says "measuring…" and redraws when the read comes back. */
@@ -484,7 +486,9 @@ var NSO_SUPPORTS_CARD = (function () {
       var B = by[id], c = [0, 0, 0], n = [0, 0, 0];
       B.forEach(function (b) { for (var k = 0; k < 3; k++) { c[k] += pt(b)[k] / B.length; n[k] += b.normal[k]; } });
       var L = Math.hypot(n[0], n[1], n[2]) || 1;
+      var dr = (det.beaconRegions || [])[id];
       return { id: id, beacons: B, point: c, normal: [n[0] / L, n[1] / L, n[2] / L],
+        fp: !custom && dr && dr.footprint ? dr.footprint : null,      // the detector's outline of the surface (an area a build split has none of its own)
         excluded: fed ? B.every(function (b) { return b.off; }) : !!left[id] };
     });
     return { beacons: list, regions: regions, pitch: pitch, origin: det.grid ? det.grid.origin : [0, 0], error: null };
@@ -673,6 +677,25 @@ var NSO_SUPPORTS_CARD = (function () {
    */
   function geometryOf(rg, eff) {
     var pitch = eff.pitch, ox = eff.origin[0], oy = eff.origin[1], seen = {}, count = {}, grid = [], cells = [], segs = [];
+    /* THE AREA'S OWN OUTLINE (rg.fp, from the detector: docs/SUPPORT-FOOTPRINT.md): the edge of the surface the spots hold, traced on
+       the piece, not the edges of the grid cells they were found in - a cell at the rim of a surface is mostly air, and its outline
+       hung over the edge. A spot the footprint does not cover (a crease, a tip, a side spot, one placed by hand) keeps its cell. */
+    var fp = rg.fp || null, planes = [];
+    if (fp) {
+      var surf = rg.beacons.filter(function (b) { return !b.manual && !b.tip && b.need && (b.need.kind === 'face' || b.need.kind === 'gap' || (b.need.kind === 'edge' && b.need.corner)); });
+      if (surf.length) {
+        surf.forEach(function (b) { planes.push({ p: [b.x, b.y, b.z], n: b.normal }); });
+        fp.loops.forEach(function (L) {
+          for (var q = 0; q < L.length; q++) {
+            var a = L[q], e = L[(q + 1) % L.length], mx = (a[0] + e[0]) / 2, my = (a[1] + e[1]) / 2, nb = null, nd = Infinity;
+            surf.forEach(function (b) { var d = Math.hypot(b.x - mx, b.y - my); if (d < nd) { nd = d; nb = b; } });
+            var dx = e[0] - a[0], dy = e[1] - a[1], dl = Math.hypot(dx, dy) || 1;
+            /* the surface lies on the left of travel: the ribbon is laid toward it */
+            segs.push([a, e, nb.normal, [mx - dy / dl, my + dx / dl, (a[2] + e[2]) / 2]]);
+          }
+        });
+      } else fp = null;
+    }
     function ek(i0, j0, i1, j1) { return i0 < i1 || (i0 === i1 && j0 < j1) ? i0 + ',' + j0 + ',' + i1 + ',' + j1 : i1 + ',' + j1 + ',' + i0 + ',' + j0; }
     function lift(b, x, y) {
       var n = b.normal;
@@ -683,6 +706,7 @@ var NSO_SUPPORTS_CARD = (function () {
     }
     rg.beacons.forEach(function (b) {
       var n = b.normal;
+      if (fp && !b.manual && !b.tip && b.need && (b.need.kind === 'face' || b.need.kind === 'gap' || (b.need.kind === 'edge' && b.need.corner))) return;   // the outline above
       if (Math.abs(n[2]) < 0.3) {
         var u = Math.abs(n[2]) < 0.9 ? [-n[1], n[0], 0] : [1, 0, 0], L = Math.hypot(u[0], u[1], u[2]);
         u = [u[0] / L, u[1] / L, u[2] / L];
@@ -711,7 +735,17 @@ var NSO_SUPPORTS_CARD = (function () {
         segs.push([lift(c.b, ox + e[0] * pitch, oy + e[1] * pitch), lift(c.b, ox + e[2] * pitch, oy + e[3] * pitch), c.b.normal, mid]);
       });
     });
-    return { cells: cells, segs: segs };
+    return { cells: cells, segs: segs, fp: fp, planes: planes };
+  }
+  /* is (x, y) inside a footprint: the loops' even-odd (an outer loop and a hole in it) */
+  function inFootprint(fp, x, y) {
+    var inn = false;
+    fp.loops.forEach(function (L) {
+      for (var q = 0, w = L.length - 1; q < L.length; w = q++) {
+        if ((L[q][1] > y) !== (L[w][1] > y) && x < (L[w][0] - L[q][0]) * (y - L[q][1]) / (L[w][1] - L[q][1]) + L[q][0]) inn = !inn;
+      }
+    });
+    return inn;
   }
 
   /* Segments as thin ribbons lying on the surface (a 1 px line would vanish
@@ -1973,8 +2007,18 @@ var NSO_SUPPORTS_CARD = (function () {
     setPointerFromEvent(ev);
     state.raycaster.setFromCamera(state.pointer, state.camera);
     var ray = state.raycaster.ray, best = null, bd = Infinity, hit = new THREE.Vector3();
+    var ro = viewToUp(ray.origin), rd = viewToUp(ray.direction);       // the same ray, Z up (a rotation: distances along it are the same)
     Object.keys(S.geo).forEach(function (id) {
-      S.geo[id].cells.forEach(function (c) {
+      var gf = S.geo[id];
+      /* an area with an outline of its own is hit where the ray meets the plane of one of its spots inside that outline */
+      if (gf.fp) gf.planes.forEach(function (pl) {
+        var den = pl.n[0] * rd[0] + pl.n[1] * rd[1] + pl.n[2] * rd[2];
+        if (Math.abs(den) < 1e-6) return;
+        var t = (pl.n[0] * (pl.p[0] - ro[0]) + pl.n[1] * (pl.p[1] - ro[1]) + pl.n[2] * (pl.p[2] - ro[2])) / den;
+        if (t < 0 || t >= bd) return;
+        if (inFootprint(gf.fp, ro[0] + t * rd[0], ro[1] + t * rd[1])) { bd = t; best = Number(id); }
+      });
+      gf.cells.forEach(function (c) {
         var q = c.quad.map(upToView);
         var at = ray.intersectTriangle(q[0], q[1], q[2], false, hit) || ray.intersectTriangle(q[0], q[2], q[3], false, hit);
         if (at) { var d = at.distanceTo(ray.origin); if (d < bd) { bd = d; best = Number(id); } }
@@ -2700,6 +2744,7 @@ var NSO_SUPPORTS_CARD = (function () {
         }),
         areas: eff.regions.map(function (r) {
           return { id: r.id, count: r.beacons.length, point: r.point, normal: r.normal, excluded: !!r.excluded,
+            footprint: !!(S.geo && S.geo[r.id] && S.geo[r.id].fp), outlineEdges: S.geo && S.geo[r.id] ? S.geo[r.id].segs.length : null,
             kind: S.hostId != null && eff.beacons.length ? areaKind(r, st) : null,
             built: r.beacons.some(function (b) { return st[b.key] === 'held' || st[b.key] === 'rest'; }) };
         }),

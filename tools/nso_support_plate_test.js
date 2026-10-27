@@ -36,8 +36,10 @@ const FIXTURE = path.join(ROOT, 'fixtures', 'supports', 'supp_ref.3mf');
 const TODAY = {        // sha256 of the support bytes of a single-piece Generate on the card as it is now (the plate: six parts, one picked).
                        // Re-pinned by supports-one-trunk: they were 7dc1d1f's (b1e08222e92a / 17be71520673 / af6e05895a2d, 584 / 440 / 424
                        // triangles); the card's Auto is the one-trunk build with the sheet of #301 since, and builds these three heads differently.
-                       // Re-pinned again for the tapered base, the uniform trunk, the centred circle and the flat sheet's reach (supports-one-trunk, second and third rounds: the pad a hand wider, the trunk a trumpet; fourth: the crown's branches one smooth body)
-  'Support Negative Sphere2.stl': { sha: '60d373a7189189fd151aa61986125f8b7955782e73f7eeb6e2bd491632bb1cf6', triangles: 23076 },
+                       // Re-pinned again for the tapered base, the uniform trunk, the centred circle and the flat sheet's reach (supports-one-trunk, second and third rounds: the pad a hand wider, the trunk a trumpet)
+                       // Negative Sphere2 re-pinned by supports-footprint (632cd214c51c, 12532 triangles): the card asks for the sheet's outline, so its three
+                       // sheets stay on the rim they hold (41 % of them lay over the air before); then the crown's branches one smooth body (supports-one-trunk, fifth round): all three re-pinned.
+  'Support Negative Sphere2.stl': { sha: 'de7702163137e8402ce25726761697d2c23fa9db0bd0b564a5492240c28f361c', triangles: 20332 },
   'Support Circular.stl': { sha: 'd91e8e033e3018fd677a06ecfcf40e86e6e75e9c2bb634e8d802ea37ee6d8782', triangles: 12376 },
   'Support Sphere.stl': { sha: 'd8fdd356955ed7243023c6cba57b06ba19129fc2d4416c3333b1f3509cc9e85c', triangles: 12160 }
 };

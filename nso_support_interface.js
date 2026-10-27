@@ -860,6 +860,10 @@
   var MIN_RUN_MM = 2;          /* a line shorter than this is not kept: no printed segment under 2 mm */
   var LEVEL_EDGE_MM = 0.25;    /* runs of two levels stop this far apart */
   var FIELD_MM = 1.25;         /* the caps dilated this far are the sheet's field: caps CAP_GAP_MAX_MM apart meet in it (see THE FIELD) */
+  var PERIM_REACH_MM = 6;      /* THE PART'S OUTLINE: a level's field and its caps lie only where the part is over the stack's top within this far (a flat sheet's own, shorter reach, opts.flatGapMaxMm, is the field's besides) */
+  var PERIM_GROW_MM = [0, -0.3, -0.6, -0.9, -1.2];   /* a rim too thin for the sheet's 2 mm lines: the outline taken to its edge, then out past it by this much (a negative margin), the least that gives a sheet */
+  var PERIM_NEAR_MM = 3.6;     /* a level none of whose tips is this near the part's edge (a cap's 2 mm, the field's 1.25, the margin) is built as it always was: the outline cannot reach it */
+  var PERIM_MARGIN_MM = 0.2;   /* ...and this far in from where it stops, a line's centre: its edge (0.2) ends on the outline, not over the air beyond it */
   var COLUMN_CLEAR_MM = 0.2;   /* the sheet and its caps keep this far off another support's column */
   var LOW_ROOM_MM = 0.5;       /* a tip with no room for a cap is cut flat under the stack where its column stands this much clear of the foot */
   var ROOM_MM = 0.5;           /* a cut tip keeps this much of itself above the foot */
@@ -939,6 +943,16 @@
        this over the sheet's top. A flat sheet under a dome, a ball, a bowl reaches round it as far as its caps and the field go and
        leaves a gap that grows to millimetres at its rim; held to a reach, it is a plate under the pole, with the gap it has there. */
     var flatMax = opts.flatGapMaxMm == null ? null : +opts.flatGapMaxMm, reachMemo = new Map();
+    /* THE PART'S OUTLINE (opts.perimeter, off unless true: the card asks): a cap or a line of the sheet lies where the part is over it, not out over
+       the air past the part's edge - a tip standing at the edge of the surface (a rim's corner) had a cap and a field that hung off it
+       (docs/SUPPORT-FOOTPRINT.md). A level that has no sheet inside the outline is built again without it, as it was. */
+    var wantPerim = opts.perimeter === true, perimOn = wantPerim, perimMargin = PERIM_MARGIN_MM, perimMemo = new Map();
+    /* is the part over (x, y), within the reach, from a stack's top up? (the cell a sample falls in, read once) */
+    function perimOver(x, y, zTop) {
+      var kq = Math.round(x / CELL_MM) + ',' + Math.round(y / CELL_MM) + ',' + zTop.toFixed(3), v = perimMemo.get(kq);
+      if (v === undefined) { v = isFinite(firstHit(x, y, zTop + 0.01, o.gap + PERIM_REACH_MM)); perimMemo.set(kq, v); }
+      return v;
+    }
     var ROLES = ['transition', 'transition'];
     for (var ri = 0; ri < nI; ri++) ROLES.push('interface');
     /* each obstacle's side of exactDistance, built once for the cell the reach asks for */
@@ -1217,6 +1231,14 @@
       var ox = lo[0] - pad, oy = lo[1] - pad;
       var nx = Math.ceil((hi[0] - lo[0] + 2 * pad) / CELL_MM) + 1, ny = Math.ceil((hi[1] - lo[1] + 2 * pad) / CELL_MM) + 1;
       var z0 = zBase - o.gap, z1 = zTop + o.gap - 1e-4;
+      /* THE PART'S OUTLINE: is the part over (x, y), within the reach, from the stack's top up? */
+      function overAt(x, y) { return perimOver(x, y, zTop); }
+      function inPerim(x, y) {
+        var m = perimMargin;
+        if (m > 0) return overAt(x, y) && overAt(x - m, y) && overAt(x + m, y) && overAt(x, y - m) && overAt(x, y + m);
+        if (m === 0) return overAt(x, y);
+        return overAt(x, y) || overAt(x + m, y) || overAt(x - m, y) || overAt(x, y + m) || overAt(x, y - m);     /* the outline grown by |m| */
+      }
       /* 1: the piece is in the column. A vertical ray sees every face the
          column crosses except a vertical one, which it runs parallel to: a
          WALL. So the inside is read as well, on horizontal rays along each
@@ -1366,6 +1388,17 @@
       }
       function capFoul(t, c, w) {
         var f = t.capFoot, Rc = w / 2, rb = CAP_FOOT * o.side / 2, aim = o.gap + Rc * (1 - Math.cos(Math.PI / CAP_SIDES)) + 0.003;
+        /* a cap does not hang off the part: its rim stays where the part is over it. One that does slides toward its centre, and narrows
+           when it can slide no further (the caller's loop). Asked first: it is the cheap question, and the answer is most of the work */
+        if (perimOn) {
+          for (var hs2 = 0; hs2 < CAP_SIDES; hs2++) {
+            var han = 2 * Math.PI * hs2 / CAP_SIDES, hx = c[0] + Rc * Math.cos(han), hy = c[1] + Rc * Math.sin(han);
+            if (!inPerim(hx, hy)) {
+              var hdx = c[0] - hx, hdy = c[1] - hy, hl = Math.hypot(hdx, hdy);
+              return { push: hl > 1e-9 ? [hdx / hl * CAP_STEP_MM / 2, hdy / hl * CAP_STEP_MM / 2] : null };
+            }
+          }
+        }
         function at(s) { return [f[0] + (c[0] - f[0]) * s, f[1] + (c[1] - f[1]) * s]; }
         /* [z, centre, radius]: the top, half way in on it, half way up, the foot */
         var rings = [[zCap, c, Rc], [zCap, c, Rc / 2], [zCap - o.capRise / 2, at(0.5), (Rc + rb) / 2], [zCap - o.capRise, f, rb]];
@@ -1592,7 +1625,7 @@
         for (var jf = j0; jf <= j1; jf++) for (var iff = i0; iff <= i1; iff++) {
           var qf = jf * nx + iff, kf = own[qf];
           if (!free[qf] || edge[qf] || (kf >= 0 && tips[kf].level !== L.id)) continue;
-          if (Math.hypot(ox + iff * CELL_MM - cr.c[0], oy + jf * CELL_MM - cr.c[1]) <= rr && (!reachCache || inReach(ox + iff * CELL_MM, oy + jf * CELL_MM))) field[qf] = 1;
+          if (Math.hypot(ox + iff * CELL_MM - cr.c[0], oy + jf * CELL_MM - cr.c[1]) <= rr && (!reachCache || inReach(ox + iff * CELL_MM, oy + jf * CELL_MM)) && (!perimOn || inPerim(ox + iff * CELL_MM, oy + jf * CELL_MM))) field[qf] = 1;
         }
       });
       function fieldAt(x, y) {
@@ -1892,6 +1925,41 @@
                         tried: tried.map(function (x) { return { angleDeg: x.angleDeg, droppedShare: x.droppedShare, bare: x.bare }; }) } };
     }
 
+    /* THE OUTLINE, PER LEVEL. A level none of whose tips stands near the part's edge (PERIM_NEAR_MM) is built as it always was: the outline
+       cannot reach it. For one that does, the old way is tried first, and if it fails the outline is not why: the level fails as it did, at the
+       cost of the one build (the outline only takes field away; on the six heads and the clamp no level the old way cannot build was built
+       with it). Otherwise the level is built with the outline, 0.2 mm in from the part's edge; where that leaves nothing of it (a rim thinner
+       than the sheet's 2 mm lines) with the outline to the edge, then grown out past it a little at a time (PERIM_GROW_MM), and only then as it
+       always was. L.perim says which: { marginMm } (positive: in from the edge; 0: to it; negative: out past it) or { marginMm: null, why } */
+    function levelNearEdge(L) {
+      var zT = L.zTop;
+      for (var ti = 0; ti < L.tips.length; ti++) {
+        var t = L.tips[ti];
+        if (t.mode !== 'sheet') continue;
+        for (var ka = 0; ka < 16; ka++) {
+          var an = 2 * Math.PI * ka / 16;
+          for (var rr = 0.25; rr <= PERIM_NEAR_MM + 1e-9; rr += 0.25) if (!perimOver(t.contact[0] + rr * Math.cos(an), t.contact[1] + rr * Math.sin(an), zT)) return true;
+        }
+      }
+      return false;
+    }
+    if (wantPerim) {
+      var buildLevelInside = buildLevel;
+      buildLevel = function (L, angleForced) {
+        var keep = perimMargin;
+        try {
+          perimOn = false;
+          var plain = buildLevelInside(L, angleForced);                      /* the old way */
+          if (!plain.ok || !levelNearEdge(L)) return plain;
+          perimOn = true;
+          var r = buildLevelInside(L, angleForced), used = { marginMm: perimMargin }, first = r.ok ? null : r.reason;
+          for (var mi = 0; mi < PERIM_GROW_MM.length && !r.ok; mi++) { perimMargin = PERIM_GROW_MM[mi]; r = buildLevelInside(L, angleForced); used = { marginMm: perimMargin }; }
+          if (!r.ok) { perimOn = false; r = buildLevelInside(L, angleForced); used = { marginMm: null, why: first }; }     /* again: a build leaves its marks on the tips */
+          L.perim = used;
+          return r;
+        } finally { perimMargin = keep; perimOn = true; }
+      };
+    }
     rebucket();
     var reach = o.gap + 0.1;
     function solveLevel(L) {
@@ -2810,6 +2878,7 @@
       var out = { id: L.id, zTop: L.res.zTop, zBase: L.res.zBase, zCap: L.res.zCap, tips: mineTips.map(function (t) { return t.i; }),
                caps: mineTips.filter(function (t) { return t.cap; }).map(function (t) { return { tip: t.i, c: t.cap.c, w: t.cap.w, nnMm: t.cap.nnMm }; }),
                layers: L.res.layers, lines: L.res.lines, minDistanceMm: L.minDistanceMm, solvedDropMm: L.solvedDropMm || 0 };
+      if (wantPerim) out.outline = L.perim || null;
       /* a stair: the tips it holds by itself, and its shape */
       if (L.stair) {
         out.stair = L.stair.stair;

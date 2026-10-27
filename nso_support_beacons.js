@@ -163,6 +163,10 @@
   var RIDGE_GAP_MM = 3;              /* less room than this below: no support from below */
   var RIDGE_REACH_MM = 3;            /* a rib longer than this is an overhang, not a rib */
   var CREASE_MIN_DEG = 30;           /* faces closer than this are one curved surface */
+  var INSET_PRODUCT_MM = 1;          /* what the Supports card asks (opts.insetMm): a spot stands at least this far in from the edge of the surface it holds, so a column (1.2 mm) and the lines round it stay on the part. Off (0) unless asked: the planner suites pin the spots where the grid put them */
+  var FOOT_TOL_MM = 0.4;             /* the footprint: the flood's first step from a spot may find the surface this far (plus a step's climb) from the spot's own height; each later step, an eighth of it plus the step's climb */
+  var FLAT_NZ = Math.cos(3 * Math.PI / 180);   /* a face is flat, for moving a spot in it, within 3 deg of the plate */
+  var FOOT_STEP_MM = 0.25;           /* the footprint's sample step (a cell is pitch / round(pitch / step) of it) */
   var SAME_Z_MM = 1e-4;              /* two hits this close on one ray are one crossing */
   var HIT_EPS_MM = 1e-3;
   var FAN_AZIMUTHS = 16;             /* exposed-only fan: headings round a blocked spot's normal... */
@@ -762,9 +766,281 @@
       if (lowest) addFeature(vpos[vi], [0, 0, -1], 'tip', 0);
     }
 
+
+    /* ---- THE FOOTPRINT: where each area's surface really is, edge to edge ----
+       A beacon is a sample on a grid; the surface it holds is not a stack of
+       grid cells. Round its edge the cells hang out over the air (a spot found
+       by a corner of its cell, the cell mostly empty), and a support stood on
+       such a spot, or a sheet laid on such a cell, hangs off the part. So each
+       area (region) gets the outline of the surface itself: the grid is sampled
+       at FOOT_STEP_MM, a flood from the area's own spots walks out over the
+       samples while a column of the piece crosses where the surface goes on
+       (no further from the last sample's height than a face that needs holding
+       can climb in one step, and the crossing needs holding - the same test as
+       a beacon's), the boundary is traced (marching squares) and each of its
+       crossings found by bisection on the columns themselves. Cells whose eight
+       neighbours all have a centre spot are whole and are not sampled.
+       region.footprint = { loops: [[[x, y, z], ...], ...] (outer loops
+         counter-clockwise, holes clockwise: the surface lies on the left of
+         travel), areaMm2, stepMm, insetMm }
+       Then, where opts.insetMm is asked (the card asks 1 mm; default 0, the spots stay where the grid put them), a spot of a FLAT area
+       (every face of it within 3 deg of the plate: a tilted or curved face keeps its spots at the grid's own points, which its stair
+       and its flat sheet's reach are laid on) nearer the edge than that is moved
+       in to the nearest sampled point that is not, or to the point farthest
+       from the edge it can reach (a rim thinner than two insets): z, normal and
+       triangle taken from the column there, b.moved = { from, mm }, b.clearMm
+       its distance to the edge. Only the surface spots (face, gap and a corner
+       'edge') have a footprint; a crease, a tip and a side spot keep their
+       cell and are left where they are. */
+    function footprints(regions) {
+      var inset = (opts.insetMm == null) ? 0 : +opts.insetMm;
+      var sub = Math.max(2, Math.round(pitch / FOOT_STEP_MM)), fs = pitch / sub;
+      var moved = 0;
+      function isSurface(b) {
+        var k = b.need.kind;
+        return k === 'face' || k === 'gap' || (k === 'edge' && b.need.corner);
+      }
+      for (var ri = 0; ri < regions.length; ri++) {
+        var R = regions[ri], refs = R.beacons.filter(isSurface);
+        R.footprint = null;
+        if (!refs.length) continue;
+        var cellRefs = new Map(), minI = Infinity, minJ = Infinity, maxI = -Infinity, maxJ = -Infinity, bi;
+        for (bi = 0; bi < refs.length; bi++) {
+          var ci = refs[bi].cell[0], cj = refs[bi].cell[1], ck = cj * nx + ci;
+          if (!cellRefs.has(ck)) cellRefs.set(ck, []);
+          cellRefs.get(ck).push(refs[bi]);
+          if (ci < minI) minI = ci; if (ci > maxI) maxI = ci;
+          if (cj < minJ) minJ = cj; if (cj > maxJ) maxJ = cj;
+        }
+        /* the node grid: cells minI-2 .. maxI+2 (one ring of cells the surface may reach into, one of nodes that are off) */
+        var I0 = minI - 2, J0 = minJ - 2, CI = maxI - minI + 5, CJ = maxJ - minJ + 5, W = CI * sub + 1, Hh = CJ * sub + 1;
+        function nodeX(a) { return origin[0] + (I0 * sub + a) * fs; }
+        function nodeY(b) { return origin[1] + (J0 * sub + b) * fs; }
+        function cellHas(i, j) { return i >= 0 && j >= 0 && i < nx && j < ny && cellRefs.has(j * nx + i); }
+        /* the surface's crossing at (x, y) that continues a surface last seen at zRef (tol: how far it may have moved): the
+           column's crossing that needs holding nearest zRef, or null. A face that needs holding is no steeper than angleDeg, so
+           over one step the surface climbs no more than step * tan(angleDeg), and a curved surface is followed where a plane
+           through a beacon would be left behind. */
+        function patchNear(x, y, zRef, tol) {
+          var col = column(x, y), best = null, bd = tol + 1e-9;
+          for (var k = 0; k < col.length; k++) {
+            var nd = needOf(col[k]);
+            if (!nd || nd.need.kind === 'ridge') continue;
+            var d = Math.abs(col[k].z - zRef);
+            if (d <= bd) { bd = d; best = col[k]; }
+          }
+          return best;
+        }
+        var tanA = Math.min(1, Math.tan(angleDeg * Math.PI / 180));
+        function stepTol(dist) { return dist * tanA + FOOT_TOL_MM / 8; }
+        /* nodes: 0 unknown, 1 on, 2 off */
+        var state = new Uint8Array(W * Hh), zs = new Float64Array(W * Hh);
+        function centred(i, j) {                                   /* the cell's centre is on the surface (a corner spot is the edge of one) */
+          var L = i >= 0 && j >= 0 && i < nx && j < ny ? cellRefs.get(j * nx + i) : null;
+          if (L) for (var q = 0; q < L.length; q++) if (!L[q].need.corner) return true;
+          return false;
+        }
+        function whole(i, j) {
+          if (!centred(i, j)) return false;
+          for (var dj = -1; dj <= 1; dj++) for (var di = -1; di <= 1; di++) if ((di || dj) && !centred(i + di, j + dj)) return false;
+          return true;
+        }
+        /* the cells a node touches (up to four) */
+        function cellsOfNode(a, b, fn) {
+          var ca = I0 + Math.floor(a / sub), cb = J0 + Math.floor(b / sub);
+          for (var dj = (b % sub === 0 ? -1 : 0); dj <= 0; dj++) for (var di = (a % sub === 0 ? -1 : 0); di <= 0; di++) fn(ca + di, cb + dj);
+        }
+        function ringed(a, b) {
+          var yes = false;
+          cellsOfNode(a, b, function (qi, qj) { for (var ej = -1; ej <= 1; ej++) for (var ei = -1; ei <= 1; ei++) if (cellHas(qi + ei, qj + ej)) yes = true; });
+          return yes;
+        }
+        function isWhole(a, b) {
+          var yes = false;
+          cellsOfNode(a, b, function (qi, qj) { if (whole(qi, qj)) yes = true; });
+          return yes;
+        }
+        function liftOf(x, y, bc) { return bc.z - (bc.normal[0] * (x - bc.x) + bc.normal[1] * (y - bc.y)) / bc.normal[2]; }
+        /* flood: the beacons' own nodes, the whole cells, then outward over the columns while the surface goes on */
+        var queue = [], qh = 0;
+        function setOn(k, z) { state[k] = 1; zs[k] = z; queue.push(k); }
+        function nodeOfPoint(x, y) { return [Math.round((x - nodeX(0)) / fs), Math.round((y - nodeY(0)) / fs)]; }
+        for (bi = 0; bi < refs.length; bi++) {
+          var nn = nodeOfPoint(refs[bi].x, refs[bi].y);
+          if (nn[0] < 1 || nn[1] < 1 || nn[0] > W - 2 || nn[1] > Hh - 2) continue;
+          var kk = nn[1] * W + nn[0];
+          if (state[kk] === 1) continue;
+          var sd = patchNear(nodeX(nn[0]), nodeY(nn[1]), refs[bi].z, FOOT_TOL_MM + fs * tanA);
+          if (sd) setOn(kk, sd.z);
+        }
+        for (var wb = 1; wb < Hh - 1; wb++) for (var wa = 1; wa < W - 1; wa++) {
+          var wk = wb * W + wa;
+          if (state[wk] !== 1 && isWhole(wa, wb)) {
+            var wl = null, wd = Infinity;
+            cellsOfNode(wa, wb, function (qi, qj) { var L = qi >= 0 && qj >= 0 && qi < nx && qj < ny ? cellRefs.get(qj * nx + qi) : null; if (L) for (var q = 0; q < L.length; q++) { var d = Math.hypot(L[q].x - nodeX(wa), L[q].y - nodeY(wb)); if (d < wd) { wd = d; wl = L[q]; } } });
+            if (wl) setOn(wk, liftOf(nodeX(wa), nodeY(wb), wl));
+          }
+        }
+        while (qh < queue.length) {
+          var ck = queue[qh++], ca2 = ck % W, cb2 = (ck - ca2) / W;
+          var nbs = [[ca2 - 1, cb2], [ca2 + 1, cb2], [ca2, cb2 - 1], [ca2, cb2 + 1]];
+          for (var ni = 0; ni < 4; ni++) {
+            var na2 = nbs[ni][0], nb2 = nbs[ni][1];
+            if (na2 < 1 || nb2 < 1 || na2 > W - 2 || nb2 > Hh - 2) continue;
+            var nk = nb2 * W + na2;
+            if (state[nk] === 1) continue;
+            if (!ringed(na2, nb2)) { state[nk] = 2; continue; }
+            var pn = patchNear(nodeX(na2), nodeY(nb2), zs[ck], stepTol(fs));
+            if (pn) setOn(nk, pn.z); else state[nk] = 2;
+          }
+        }
+        function nodeAt(a, b) { return state[b * W + a] === 1; }
+
+        /* marching squares, each crossing refined on the columns */
+        var cross = new Map();
+        function crossing(a0, b0, a1, b1) {
+          var id = (b0 === b1 ? 0 : 1) + 2 * (Math.min(b0, b1) * W + Math.min(a0, a1)), v = cross.get(id);
+          if (v) return v;
+          var on0 = nodeAt(a0, b0), pa0 = on0 ? [a0, b0] : [a1, b1], pb0 = on0 ? [a1, b1] : [a0, b0];
+          var xa = nodeX(pa0[0]), ya = nodeY(pa0[1]), xb = nodeX(pb0[0]), yb = nodeY(pb0[1]);
+          var za = zs[pa0[1] * W + pa0[0]], zr = za, lo2 = 0, hi2 = 1;
+          for (var it = 0; it < 6; it++) {
+            var mid = (lo2 + hi2) / 2, pm = patchNear(xa + (xb - xa) * mid, ya + (yb - ya) * mid, zr, stepTol(mid * fs));
+            if (pm) { lo2 = mid; za = pm.z; } else hi2 = mid;
+          }
+          var tt = (lo2 + hi2) / 2;
+          v = { id: id, p: [xa + (xb - xa) * tt, ya + (yb - ya) * tt, za], next: [] };
+          cross.set(id, v);
+          return v;
+        }
+        function link(u, v) { u.next.push(v); v.next.push(u); }
+        for (var sb = 0; sb + 1 < Hh; sb++) for (var sa = 0; sa + 1 < W; sa++) {
+          var c0 = nodeAt(sa, sb), c1 = nodeAt(sa + 1, sb), c2 = nodeAt(sa + 1, sb + 1), c3 = nodeAt(sa, sb + 1);
+          var cs = (c0 ? 1 : 0) | (c1 ? 2 : 0) | (c2 ? 4 : 0) | (c3 ? 8 : 0);
+          if (cs === 0 || cs === 15) continue;
+          var e0 = function () { return crossing(sa, sb, sa + 1, sb); }, e1 = function () { return crossing(sa + 1, sb, sa + 1, sb + 1); },
+              e2 = function () { return crossing(sa, sb + 1, sa + 1, sb + 1); }, e3 = function () { return crossing(sa, sb, sa, sb + 1); };
+          switch (cs) {
+            case 1: case 14: link(e3(), e0()); break;
+            case 2: case 13: link(e0(), e1()); break;
+            case 3: case 12: link(e3(), e1()); break;
+            case 4: case 11: link(e1(), e2()); break;
+            case 5: link(e3(), e0()); link(e1(), e2()); break;
+            case 6: case 9: link(e0(), e2()); break;
+            case 7: case 8: link(e3(), e2()); break;
+            case 10: link(e0(), e1()); link(e2(), e3()); break;
+          }
+        }
+        /* the loops */
+        var loops = [], seen = new Set();
+        cross.forEach(function (st0) {
+          if (seen.has(st0.id) || st0.next.length !== 2) return;
+          var loop = [], cur = st0, prev = null;
+          for (;;) {
+            seen.add(cur.id); loop.push(cur.p);
+            var nxt = cur.next[0] === prev ? cur.next[1] : cur.next[0];
+            if (cur.next[0] === prev && cur.next[1] === prev) nxt = cur.next[0];
+            if (nxt === st0 || seen.has(nxt.id)) break;
+            prev = cur; cur = nxt;
+          }
+          if (loop.length >= 3) loops.push(loop);
+        });
+        function areaOf(L) { var a = 0; for (var q = 0; q < L.length; q++) { var u = L[q], v = L[(q + 1) % L.length]; a += u[0] * v[1] - v[0] * u[1]; } return a / 2; }
+        function inLoop(pt2, L) {
+          var inn = false;
+          for (var q = 0, w = L.length - 1; q < L.length; w = q++) {
+            if ((L[q][1] > pt2[1]) !== (L[w][1] > pt2[1]) && pt2[0] < (L[w][0] - L[q][0]) * (pt2[1] - L[q][1]) / (L[w][1] - L[q][1]) + L[q][0]) inn = !inn;
+          }
+          return inn;
+        }
+        /* drop the collinear vertices, orient by nesting: outer counter-clockwise, a hole clockwise */
+        loops = loops.map(function (L) {
+          var out2 = [];
+          for (var q = 0; q < L.length; q++) {
+            var a = L[(q + L.length - 1) % L.length], b = L[q], c = L[(q + 1) % L.length];
+            var cr = (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]);
+            if (Math.abs(cr) > 1e-5 * Math.max(1, Math.hypot(c[0] - a[0], c[1] - a[1]))) out2.push(b);
+          }
+          return out2.length >= 3 ? out2 : L;
+        });
+        var depthOf = loops.map(function (L, q) {
+          var d = 0;
+          for (var w = 0; w < loops.length; w++) if (w !== q && inLoop(L[0], loops[w])) d++;
+          return d;
+        });
+        var area = 0;
+        loops = loops.map(function (L, q) {
+          var ar = areaOf(L), wantCcw = depthOf[q] % 2 === 0;
+          area += Math.abs(ar) * (wantCcw ? 1 : -1);
+          return (ar > 0) === wantCcw ? L : L.slice().reverse();
+        });
+        R.footprint = { loops: loops, areaMm2: area, stepMm: fs, insetMm: inset };
+        /* only a FLAT area keeps its spots in: a spot moves in its plane and its height is the same. An area with a tilted or a curved
+           face keeps them at the grid's own points - the stair under a tilted plane and a flat sheet's reach under a dome are laid on
+           tips there, and a spot moved along a slope changes the height the levels are read at (Oblique's stair became five bare tips) */
+        var flatArea = refs.every(function (b) { return -b.normal[2] >= FLAT_NZ; });
+
+        /* the edge: segments of every loop, for the distance to it */
+        var segs = [];
+        loops.forEach(function (L) { for (var q = 0; q < L.length; q++) { var u = L[q], v = L[(q + 1) % L.length]; segs.push([u[0], u[1], v[0], v[1]]); } });
+        function edgeDist(x, y) {
+          var best = Infinity;
+          for (var q = 0; q < segs.length; q++) {
+            var s2 = segs[q], dx = s2[2] - s2[0], dy = s2[3] - s2[1], l2 = dx * dx + dy * dy;
+            var t = l2 > 0 ? Math.max(0, Math.min(1, ((x - s2[0]) * dx + (y - s2[1]) * dy) / l2)) : 0;
+            var d = Math.hypot(x - s2[0] - t * dx, y - s2[1] - t * dy);
+            if (d < best) best = d;
+          }
+          return best;
+        }
+        for (bi = 0; bi < refs.length; bi++) {
+          var B = refs[bi];
+          if (!(inset > 0)) continue;                                  /* the spots are left alone: no field is added to them */
+          B.clearMm = edgeDist(B.x, B.y);
+          if (B.clearMm >= inset - 0.05 || !flatArea) continue;
+          /* the nearest sampled point at least `inset` from the edge, else the one farthest from it, within a pitch */
+          var bestN = null, bestKey = null, a0n = Math.floor((B.x - nodeX(0)) / fs), b0n = Math.floor((B.y - nodeY(0)) / fs), rN = Math.ceil(pitch / fs);
+          for (var qb = Math.max(1, b0n - rN); qb <= Math.min(Hh - 2, b0n + rN); qb++) for (var qa = Math.max(1, a0n - rN); qa <= Math.min(W - 2, a0n + rN); qa++) {
+            if (state[qb * W + qa] !== 1) continue;
+            var qx = nodeX(qa), qy = nodeY(qb), dd = Math.hypot(qx - B.x, qy - B.y);
+            if (dd > pitch) continue;
+            var cl = edgeDist(qx, qy), keyc = [Math.min(cl, inset), -dd];
+            if (!bestKey || keyc[0] > bestKey[0] + 1e-9 || (Math.abs(keyc[0] - bestKey[0]) <= 1e-9 && keyc[1] > bestKey[1])) { bestKey = keyc; bestN = [qa, qb, cl, dd]; }
+          }
+          if (!bestN || !(bestN[2] > B.clearMm + 0.1)) continue;
+          var nxp = nodeX(bestN[0]), nyp = nodeY(bestN[1]), pm2 = patchNear(nxp, nyp, zs[bestN[1] * W + bestN[0]], 0.05);
+          if (!pm2) continue;
+          var from = [B.x, B.y, B.z];
+          B.x = nxp; B.y = nyp; B.z = pm2.z;
+          B.normal = pm2.T.n.slice(); B.tri = pm2.T.idx;
+          B.need.gapBelow = pm2.gap; B.need.below = pm2.below;
+          B.need.angle = Math.acos(Math.min(1, Math.max(-1, -B.normal[2]))) * 180 / Math.PI;
+          B.moved = { from: from, mm: bestN[3] };
+          B.clearMm = bestN[2];
+          moved++;
+        }
+      }
+      counts.moved = moved;
+      /* regions' summaries follow their beacons */
+      if (moved) regions.forEach(function (R) {
+        var c = [0, 0, 0], mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+        R.beacons.forEach(function (b) {
+          var p = [b.x, b.y, b.z];
+          for (var a = 0; a < 3; a++) { c[a] += p[a] / R.beacons.length; if (p[a] < mn[a]) mn[a] = p[a]; if (p[a] > mx[a]) mx[a] = p[a]; }
+        });
+        R.point = c; R.min = mn; R.max = mx; R.spanMm = Math.max(mx[0] - mn[0], mx[1] - mn[1]);
+      });
+    }
+
     out.ok = true;
     out.beacons = beacons;
     out.regions = regionsOf(beacons, out.grid);
+    if (opts.footprint === true || +opts.insetMm > 0) {
+      var fcounts = {}, fk;
+      for (fk in counts) if (Object.prototype.hasOwnProperty.call(counts, fk)) fcounts[fk] = counts[fk];
+      footprints(out.regions);
+      for (fk in fcounts) if (Object.prototype.hasOwnProperty.call(fcounts, fk)) counts[fk] = fcounts[fk];   /* sampling asks needOf of columns that are no beacon's: not counted */
+    }
     out.angleDeg = angleDeg;
     out.plateZ = plateZ;
     out.minDropMm = minDrop;
@@ -847,6 +1123,7 @@
     RIDGE_GAP_MM: RIDGE_GAP_MM,
     RIDGE_REACH_MM: RIDGE_REACH_MM,
     CREASE_MIN_DEG: CREASE_MIN_DEG,
+    INSET_PRODUCT_MM: INSET_PRODUCT_MM,
     detect: detect,
     regionsOf: regionsOf
   };

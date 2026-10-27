@@ -43,6 +43,8 @@ const REF_FILE = path.join(ROOT, 'fixtures', 'supports', 'tree_slimsupports.gcod
 const GAP = 0.18, XY_MM = 0.35;
 const args = process.argv.slice(2);
 const EXPORT = args.includes('--export');
+/* the card's own build: the spots kept 1 mm in from the edge of the surface and the sheet and its caps kept to the part (docs/SUPPORT-FOOTPRINT.md); --as-it-was builds it without */
+const OUTLINE = !args.includes('--as-it-was');
 const ONLY = (args.find(a => !a.startsWith('--')) || '').split(',').filter(Boolean);
 const OUT = path.join(ROOT, 'tools', 'supports-onetrunk-out');
 const SLICE_OPTS = SL.defaultsFor(0.4, { supportInterfaceLayers: 3 });   /* the dense sheet's three interface layers */
@@ -240,7 +242,7 @@ const segLen = s => Math.hypot(s.x1 - s.x0, s.y1 - s.y0);
   for (const k of Object.keys(parts)) {
     const piece = parts[k];
     const oldB = await PE.build(piece, null, RP.PROJECT_NAME[k].replace(/\.stl$/, ''), false);
-    const b = await PE.build(piece, null, RP.PROJECT_NAME[k].replace(/\.stl$/, ''), true, true);
+    const b = await PE.build(piece, null, RP.PROJECT_NAME[k].replace(/\.stl$/, ''), true, true, OUTLINE);
     const objs = [{ name: 'part', soup: piece, key: 101, role: 'part' }]
       .concat(b.objects.slice(1).map((x, i) => ({ name: x.name, soup: x.soup, key: 201 + i, role: x.brim ? 'brim' : 'support', hostKey: 101 })));
     const r = SL.sliceObjects(objs, SLICE_OPTS, WASM);
