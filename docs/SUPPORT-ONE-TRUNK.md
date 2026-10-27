@@ -42,7 +42,7 @@ interface engine (merged in) and does the other half.
 
 ## 3. What is built
 
-**`opts.oneTrunk` (Auto, style Tree, not "may rest on the part")** - `planOneTrunk`, then the crown planner of section 8
+**`opts.oneTrunk` (Auto, style Tree; with "may rest on the part" the card runs it first and plans what it could not reach again with the resting lattice)** - `planOneTrunk`, then the crown planner of section 8
 of `SUPPORT-GRIDPACK.md` (the custom feed's "one tree to a circle") with these changes, none of them reachable without
 the option (the shipped Custom feed's bytes are the claude-wip's; `support:feed` still passes):
 

@@ -170,6 +170,7 @@ function makeApp(opts) {
     openCard() { dom.el('menu-supports').open = true; dom.el('menu-supports').fire('toggle'); },
     closeCard() { dom.el('menu-supports').open = false; dom.el('menu-supports').fire('toggle'); },
     click(id) { dom.el(id).fire('click'); },
+    setBox(id, on) { dom.el(id).checked = !!on; dom.el(id).fire('change'); },
     setPlateBox(on) { dom.el('sup-plate').checked = !!on; dom.el('sup-plate').fire('change'); },
     key(k) {
       (winListeners.keydown || []).slice().forEach(fn => fn({ key: k, target: { tagName: 'BODY' }, preventDefault() {}, stopImmediatePropagation() {} }));

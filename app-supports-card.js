@@ -209,7 +209,7 @@ var NSO_SUPPORTS_CARD = (function () {
   /* The sheet's line pitch and its interface layers are the build's own: DENSE is Bambu's (support_interface_spacing 0.1: lines
      0.46 mm apart, and 3 interface layers over the 2 of transition, as the reference slice lays every head); OPEN is the 0.84 mm
      and 2 + 2 layers the first prints were made with. */
-  function oneTrunkOn(o) { return S.mode === 'auto' && !!o.one && o.style === 'tree' && !o.rest; }
+  function oneTrunkOn(o) { return S.mode === 'auto' && !!o.one && o.style === 'tree'; }
   function partsOptsOf(o) {
     /* Dense belongs to the one-trunk build: its sheet is planned over the thinned tips the reference's is. A hand-placed row of three
        tips (Custom) did not form a sheet at 0.47 mm that it forms at 0.84 (support:custom), so the other builds stay Open. */
@@ -1298,13 +1298,14 @@ var NSO_SUPPORTS_CARD = (function () {
     }
     return feed;
   }
-  function planArea(job, D, rid, beacons, o, onProgress, feed) {
+  function planArea(job, D, rid, beacons, o, onProgress, feed, legacy) {
     var bs = beacons.map(function (b) { return { x: b.x, y: b.y, z: b.z, normal: b.normal, regionId: b.rid != null ? b.rid : rid, key: b.key }; });
     var opts = Object.assign({}, D.opts, { beacons: bs, style: o.style, restOnModel: o.rest });
     /* AUTO builds as Bambu's tree slim does: ONE trunk to a cluster of tips (nso_support_gridpack.js planOneTrunk,
        docs/SUPPORT-ONE-TRUNK.md). Straight struts are one post a spot by definition, the gecko hand is the lattice's, and a support
-       that may rest on the part has legs the one-trunk crown does not make (it stands on the plate only). */
-    if (!feed && oneTrunkOn(o)) opts.oneTrunk = true;
+       that may rest on the part has legs the one-trunk crown does not make (it stands on the plate only): with "may rest" the one-trunk
+       build runs first, and the spots it could not reach (legacy) are planned again alone, with the lattice that may rest on the part. */
+    if (!feed && !legacy && oneTrunkOn(o)) opts.oneTrunk = true;
     if (feed) opts.feed = feed;
     if (feed && feed.mode === 'custom') delete opts.beacons;         // Custom plans its tips alone: no beacon list goes with them
     if (o.sideMm != null) opts.sideMm = o.sideMm;
@@ -1684,7 +1685,17 @@ var NSO_SUPPORTS_CARD = (function () {
           note(job, m && m.phase === 'planning' ? { phase: 'planning', done: at + m.done, total: spots, own: mine, ownDone: m.done } : m, sent);
         }, feedFor(hm, beacons, rg.id, o.knobs)).then(function (a) {
           areas.push(a);
-          return J.pause() || new Promise(function (go) { setTimeout(go, 0); });
+          /* MAY REST ON THE PART: the one-trunk build stands on the plate only; what it could not reach is asked of the lattice that may rest on the part */
+          var left = o.rest && oneTrunkOn(o) && a.t && a.unreach ? beacons.filter(function (b) { return !b.off && a.unreach.indexOf(b.key) >= 0; }) : [];
+          if (!left.length) return J.pause() || new Promise(function (go) { setTimeout(go, 0); });
+          return planArea(job, D, rg.id, left, o, null, null, true).then(function (a2) {
+            if (a2 && a2.t) {
+              a.unreach = a.unreach.filter(function (k) { return a2.unreach.indexOf(k) >= 0; });
+              a2.unreach = a.unreach.slice();
+              areas.push(a2);
+            }
+            return J.pause() || new Promise(function (go) { setTimeout(go, 0); });
+          });
         });
       });
     });
