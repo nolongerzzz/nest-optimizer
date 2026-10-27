@@ -365,6 +365,26 @@ const segLen = s => Math.hypot(s.x1 - s.x0, s.y1 - s.y0);
   }).filter(x => x.tips);
   check('a stair\'s tips are a few legs under rows of posts: no more than a third of its tips are legs, every other post is within ' + f2(0.65 * SI.SHEET.denseStairLegMm + 0.7) + ' mm of one, and no post floats (each group of overlapping posts has a leg)',
     stairRows.length >= 1 && stairRows.every(x => x.ok), stairRows.map(x => x.key + ' ' + x.legs + ' legs of ' + x.tips + ' tips (farthest post ' + f2(x.far) + ' mm), ' + x.members + ' crown members, ' + (x.floating || 0) + ' floating').join(', '));
+  /* THE LEAN: no branch that is built lies nearly flat (the owner's, off the Oblique: "comes off the trunk at a 90 ... won't print"): a leg of the plan's
+     that a stair does not hold is under CROWN_LEAN_HARD_DEG, and a stair's own tree holds the lean limit (50 deg) */
+  const leans = rows.map(r => {
+    let hostMax = 0, stairMax = 0;
+    r.b.areas.forEach(a => {
+      const held = {};
+      ((a.tp.sheet && a.tp.sheet.tips) || []).forEach(t => { if (t.mode === 'drop') held[t.beacon] = true; });
+      (a.p.members || []).forEach(m => {
+        if (m.dead || m.kind === 'trunk' || !m.path || (m.beacons && m.beacons.length && m.beacons.every(bk => held[bk]))) return;
+        for (let i = 0; i + 1 < m.path.length; i++) {
+          const dz = Math.abs(m.path[i + 1][2] - m.path[i][2]), dh = Math.hypot(m.path[i + 1][0] - m.path[i][0], m.path[i + 1][1] - m.path[i][1]);
+          if (dz + dh > 1e-6) hostMax = Math.max(hostMax, Math.atan2(dh, dz) * 180 / Math.PI);
+        }
+      });
+      ((a.tp.sheet && a.tp.sheet.stairTrees) || []).forEach(t => { stairMax = Math.max(stairMax, t.maxLeanDeg || 0); });
+    });
+    return { key: r.key, hostMax, stairMax };
+  });
+  check('no built branch lies flat: the plan\'s legs under 75 deg from vertical, a stair\'s own tree under 50',
+    leans.every(x => x.hostMax <= 75 + 0.5 && x.stairMax <= 50 + 0.5), leans.map(x => x.key + ' ' + f1(x.hostMax) + (x.stairMax ? ' / stair ' + f1(x.stairMax) : '')).join(', '));
   check('no support stands over the sheet\'s top (no speck in the air where the supports stop)', rows.every(r => r.over <= 0.05),
     rows.map(r => r.key + ' ' + f2(r.over)).join(', '));
   check('a sheet under a curved head stays where the part is near it: no more than 1.5 mm under the part over any cell of the plate, and its middle within 1.5 mm of the trunk\'s',
