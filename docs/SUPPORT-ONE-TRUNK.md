@@ -171,6 +171,20 @@ the option (the shipped Custom feed's bytes are the claude-wip's; `support:feed`
     most) and then narrowed (`CAP_IN_MM`); what is left over the edge is the strips' corner at the part's rounded corner (up to 0.9 mm, not trimmed).
     *The crown below the plate:* a join brought down to the flare put the trunk's shoulder under the plate (z -3.8): the body is cut at the plate (`cut.zMin`).
     *Hollow and the labels:* `docs/SLICER.md` "A support is hollow" and "A stair's posts are Support".
+22. **The stair is Bambu's sheet: five layers deep, and everything under it is the tree** (the owner's, with Bambu's own toolpath of the Oblique's interface: "this is how the
+    toolpath for the stepped interface on the oblique should look. everything below this should be classified as support, and be part of the tree/branch/tips").
+    Bambu's interface is a sheet 3 interface and 2 transition layers deep that follows the underside; at every point under the part, five layers. A stair's strip
+    was one advance and a bead wide (1.3 mm): at a point two layers stood, and the posts and legs under them were read as part of the sheet. With Dense
+    (`stairLegMm`) a strip reaches from its front to the front of the strip `nInterface + 1` layers up, and a bead (2.5 mm on the Oblique, `stackReach`): five deep
+    at every point, the three under the gap interface, the two under them transition (the slicer's STAIR ZONES: within `gap` + 2 layers + 0.1 mm of the part,
+    and within `gap` + 4 layers + 0.1 mm), and what lies deeper - the blades' posts, the legs, the branches - Support. (A strip as wide as the advance of its
+    first layer, 2.1 mm where the part's rounded low edge runs out, made the lowest strip 8.8 mm of flat plate: it is the reach, not the advance.) The owner's
+    second look: "the oblique interface should be the same size layer wise as the flat interface. Just stepped in a diagonal pose. No wedge. No flat horizontal
+    bleedout into the support branches": over the Oblique's plan the interface and transition stand 5 deep (p90 5, 6 by the check's own counting), a flat head's 5;
+    a layer that holds a stair's strip holds every zone on it to the part's nearness (a post is one island with its strip, and a flat top read on the strip's front
+    carried the whole island). One layer of the Oblique's plan, ours
+    against Bambu's (z 9 - 11): a hatched interface band along the contour, a transition line along its low side, the Support beside it. `support:onetrunk`:
+    "the tree runs up with the sheet" (Support to within 1.5 mm of the sheet's top, the Oblique's to its last layer) and "a trunk is hollow".
 **The interface (`interfaceLayers`, `SHEET.densePitchMm`).** `sheet()` takes `interfaceLayers` (2 unless said): 2 transition
 layers and that many interface layers, the interface alternating across and along the sheet's A. The card's **Dense (Bambu)**
 interface is pitch **0.47 mm** (Bambu's 0.46: the strip's joins need a segment of 0.4665, and at 0.46 the stair under

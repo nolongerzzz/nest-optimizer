@@ -61,6 +61,10 @@ layers, and intermixed", the support stopping level under the stair instead of r
 75 deg are brought to 50 (`leanHardDeg`; a stair's tree holds 50); a stair's lowest cap is kept under the part; the stair crown no longer dips under the plate.
 `docs/SUPPORT-ONE-TRUNK.md` 3.21, `docs/SLICER.md`. `support:everywhere`'s negsphere2 tip-15 floor is 7 (was 8): the eighth was a tip the plan names bare, counted
 for the stair's lines beside it. Not done: the strips' corner past the part's rounded corner (<= 0.9 mm); legs of 60 - 70 deg on the other heads (printed as they are).
+Eighth push (same round, the owner's second look): a trunk was still read as filled (a sparse island under the profile's 15 mm2 and a tapering trunk's top ring were printed
+solid: now none), the sheet's layers are filled where the slicer finds them (a hollow region would otherwise have left a strip an outline), a Dense stair's strips are five
+layers deep (`planWidth`), G-scope's Slice reads the sheet's interface layers off the support (`nsoSupport.interfaceLayers`). The Oblique's slice: Support 30 k -> 22.9 k moves,
+interface 1.5 k, transition 1.9 k (the owner's G-scope showed 15.2 k / 1.6 k / 1.5 k for the plate before this push; the card run in Node here gives different counts for the same plate and was not reproduced to match).
 
 **OPEN for the owner**
 1. **Dense interface is unprinted.** The card defaults to Dense (Bambu's spacing 0.1: lines 0.47 mm apart, 3 interface layers).

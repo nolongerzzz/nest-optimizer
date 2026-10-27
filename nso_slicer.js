@@ -200,9 +200,12 @@
     },
     // --- a support is hollow: the export's own overrides ---------------------
     supportWalls: {
-      loops: 1, sparseDensity: 0,
+      loops: 1, sparseDensity: 0, topShellLayers: 0, bottomShellLayers: 1,
       source: 'the two overrides every NSO support object carries in the Bambu project export (nso_support_interface.js SHEET.slicerSettings: ' +
-              'wall_loops = 1, sparse_infill_density = 0%; docs/handoff/supports-no-infill.md) - a support is sliced with them on, as thinWall.supportsOn'
+              'wall_loops = 1, sparse_infill_density = 0%; docs/handoff/supports-no-infill.md) - a support is sliced with them on, as thinWall.supportsOn. Its shells: none on top (a ' +
+              'trunk that narrows going up has a hair-thin top ring on every layer, which this slicer fills and Bambu does not: the trunk read as filled) and the first layer ' +
+              'solid underneath (the pad), the one layer under a branch that leans out a bridge; no sparse island or narrow strip is printed solid (a trunk is a wall round a ' +
+              'hollow, whatever its size)'
     },
     // --- the flow model, shared with the importer ----------------------------
     flow: {
@@ -1416,7 +1419,8 @@
         var sparsePrev = g.empty();
         /* A SUPPORT IS HOLLOW, as its export says (SHEET.slicerSettings: wall_loops 1, sparse_infill_density 0%) and as Bambu's own tree is: one wall
            round the trunk and no filler inside it. The shells (the first layers, the top under a sheet) stay the profile's. */
-        var oS = P.role === 'support' ? Object.assign({}, o, { wallLoops: CONSTANTS.supportWalls.loops, sparseDensity: CONSTANTS.supportWalls.sparseDensity }) : o;
+        var oS = P.role === 'support' ? Object.assign({}, o, { wallLoops: CONSTANTS.supportWalls.loops, sparseDensity: CONSTANTS.supportWalls.sparseDensity, narrowSparseMm: 0, minSparseAreaMm2: 0 }) : o;
+        var TT = P.role === 'support' ? CONSTANTS.supportWalls.topShellLayers : T, BB = P.role === 'support' ? CONSTANTS.supportWalls.bottomShellLayers : B;
         if (P.role === 'brim') {
           /* a brim built with the supports (brimFor): one layer, its section printed as the brim's own loops, nothing else */
           for (var bi = 0; bi < n; bi++) {
@@ -1473,11 +1477,11 @@
           // --- shells (top / bottom solid) and sparse
           var inner = per.infillRegion;
           var cover = null;
-          for (var k = 1; k <= T; k++) {
+          for (var k = 1; k <= TT; k++) {
             var up = i + k < n ? S[i + k] : g.empty();
             cover = cover ? g.inter(cover, up) : up;
           }
-          for (var kb = 1; kb <= B; kb++) {
+          for (var kb = 1; kb <= BB; kb++) {
             var dn = i - kb >= 0 ? S[i - kb] : g.empty();
             cover = cover ? g.inter(cover, dn) : dn;
           }
@@ -1489,15 +1493,15 @@
           // supportwithinsupport's ribs) came out solid, 1.0 mm strips (over the
           // tabletop's leg arms) came out sparse; 1.7 x spacing = 0.944 mm at
           // 0.62 / 0.3 sits inside that bracket (docs/SLICER.md section 3).
-          var narrowR = (o.narrowSparseMm != null ? o.narrowSparseMm : 1.7 * spacingOf(o.infillWidthMm, h)) / 2;
+          var narrowR = (oS.narrowSparseMm != null ? oS.narrowSparseMm : 1.7 * spacingOf(o.infillWidthMm, h)) / 2;
           if (narrowR > 0 && !g.isEmpty(sparse)) {
             var opened = g.offset(g.offset(sparse, -narrowR), narrowR);
             var narrow = g.diff(sparse, opened);
             if (g.area(narrow) > 1e-6) { solid = g.union(solid, narrow); sparse = g.inter(sparse, opened); }
           }
           // a sparse island too small to hold infill is printed solid
-          if (o.minSparseAreaMm2 > 0) {
-            var small = g.unionAll(g.parts(sparse).filter(function (p) { return p.area() < o.minSparseAreaMm2; }));
+          if (oS.minSparseAreaMm2 > 0) {
+            var small = g.unionAll(g.parts(sparse).filter(function (p) { return p.area() < oS.minSparseAreaMm2; }));
             if (!g.isEmpty(small)) { solid = g.union(solid, small); sparse = g.diff(sparse, small); }
           }
           var top = g.inter(solid, g.diff(region, above));
@@ -2046,7 +2050,7 @@
          (a dome's flat sheet lies up to its reach under the part at the rim, and is all sheet). A path that is part sheet and part tree is split
          where its type changes (a loop of a strip with a post's wall on it is an interface run and a support run). */
       var hIm = P.layers.length ? planes[planes.length - 1].h : 0.2;
-      var dIn = gap + (NI - 1) * hIm + stairH + 0.05, dTr = gap + (NI + NT - 1) * hIm + stairH + 0.05;
+      var dIn = gap + (NI - 1) * hIm + 0.25, dTr = gap + (NI + NT - 1) * hIm + 0.1;
       function hostPolys(j, d) {
         var over = overAt(j, d);
         return over.length ? g.polys(g.unionAll(over.map(function (x) { return x.cs; }))) : [];
@@ -2057,9 +2061,41 @@
         if (!L.paths.length) return;
         var zi = zones[j].i.length ? g.polys(g.offset(g.unionAll(zones[j].i), w / 2)) : [];
         var zt = zones[j].t.length ? g.polys(g.offset(g.unionAll(zones[j].t), w / 2)) : [];
-        var zis = zones[j].is.length ? g.polys(g.offset(g.unionAll(zones[j].is), w / 2)) : [];
-        var zts = zones[j].ts.length ? g.polys(g.offset(g.unionAll(zones[j].ts), w / 2)) : [];
+        /* a zone that touches a stair's strip - a strip's front seen as a flat top, a post one island with it - is held to the part's nearness with the stair's
+           (a flat sheet's islands elsewhere on the layer are not: a dome's flat sheet lies up to its reach under the part) */
+        var stairU = (zones[j].is.length || zones[j].ts.length) ? g.unionAll(zones[j].is.concat(zones[j].ts)) : null;
+        var flatI = [], flatT = [], stI = zones[j].is.slice(), stT = zones[j].ts.slice();
+        function touchesStair(cs) { return !!stairU && g.area(g.inter(cs, stairU)) > 1e-6; }
+        zones[j].i.forEach(function (cs) { (touchesStair(cs) ? stI : flatI).push(cs); });
+        zones[j].t.forEach(function (cs) { (touchesStair(cs) ? stT : flatT).push(cs); });
+        var stairAt = stI.length > 0 || stT.length > 0;
+        var zis = stI.length ? g.polys(g.offset(g.unionAll(stI), w / 2)) : [];
+        var zts = stT.length ? g.polys(g.offset(g.unionAll(stT), w / 2)) : [];
+        zi = flatI.length ? g.polys(g.offset(g.unionAll(flatI), w / 2)) : [];
+        zt = flatT.length ? g.polys(g.offset(g.unionAll(flatT), w / 2)) : [];
         var hI = null, hT = null;
+        /* THE SHEET IS LINES, NOT A WALL (the support is hollow, above): where a layer is the sheet's - interface or transition, the zone a flat sheet's islands or a
+           stair's strips make, the stair's held to the part's nearness - its region is filled solid, as Bambu lays its interface, inside the one wall the support
+           has. The tree under the sheet stays hollow. */
+        if (zi.length || zt.length || zis.length || zts.length) {
+          var zc = flatI.concat(flatT);
+          var zcs = stI.concat(stT);
+          var sheetCs = zc.length ? g.unionAll(zc) : g.empty();
+          if (zcs.length) {
+            var hostD = overAt(j, dTr);
+            var stairCs = g.unionAll(zcs);
+            if (hostD.length) stairCs = g.inter(stairCs, g.unionAll(hostD.map(function (x) { return x.cs; })));
+            sheetCs = g.isEmpty(sheetCs) ? stairCs : g.union(sheetCs, stairCs);
+          }
+          var inSheet = g.isEmpty(sheetCs) ? g.empty() : g.offset(g.inter(P.S[j], sheetCs), -(o.outerWallWidthMm * 1.0));
+          if (!g.isEmpty(inSheet)) {
+            var wI = o.infillWidthMm, sI = spacingOf(wI, P.layers[j].h || 0.2), aD = (o.infillDirectionDeg || 45) * Math.PI / 180, aJ = (j % 2 === 0) ? aD : aD + Math.PI / 2;
+            var hullS = g.polys(g.offset(inSheet, wI / 2 + 1e-4));
+            connect(scanFill(g.polys(inSheet), aJ, sI, 0), 3 * sI, hullS).forEach(function (pth) {
+              L.paths.push({ feature: 'Support', width: wI, closed: false, pts: pth.pts, sheetFill: true });
+            });
+          }
+        }
         function labelAt(x, y) {
           if (zi.length && inside(zi, x, y)) return 'Support interface';
           if (zt.length && inside(zt, x, y)) return 'Support transition';

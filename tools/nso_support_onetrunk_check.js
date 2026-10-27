@@ -264,6 +264,36 @@ const segLen = s => Math.hypot(s.x1 - s.x0, s.y1 - s.y0);
     row.tips = tips; row.spots = spots; row.covered = covered; row.unsupported = unsupported;
     row.surfaces = surfacesOf(lines.filter(l => l.feat === 'Support interface' || l.feat === 'Support transition'));
     row.toolpath = lines.reduce((a, l) => a + pathLen(l), 0);
+    /* what the slice makes of the tree: Support runs up beside the sheet (as Bambu's does, to within a layer or two of the sheet's top), and a trunk is one wall (hollow) */
+    const supL = lines.filter(l => l.feat === 'Support'), tiL = lines.filter(l => l.feat !== 'Support');
+    row.supTop = supL.length ? Math.max(...supL.map(l => l.z)) : 0; row.tiTop = tiL.length ? Math.max(...tiL.map(l => l.z)) : 0;
+    /* how many layers of interface and transition lie over each 0.2 mm cell of the plan: a flat sheet is 5 (3 + 2); a stair, stepped on the slope, no deeper */
+    {
+      const cell = new Map(), CS = 0.2;
+      const byZ = new Map();
+      tiL.forEach(l => { const k = l.z.toFixed(2); (byZ.get(k) || byZ.set(k, []).get(k)).push(l); });
+      byZ.forEach(ls => {
+        const seen = new Set();
+        ls.forEach(l => {
+          const P = l.pts, n = l.closed ? P.length : P.length - 1;
+          for (let e = 0; e < n; e++) {
+            const a = P[e], b = P[(e + 1) % P.length], len = Math.hypot(b[0] - a[0], b[1] - a[1]), ns = Math.max(1, Math.ceil(len / 0.1));
+            for (let q = 0; q <= ns; q++) {
+              const x = Math.round((a[0] + (b[0] - a[0]) * q / ns) / CS), y = Math.round((a[1] + (b[1] - a[1]) * q / ns) / CS);
+              for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) seen.add((x + dx) + ',' + (y + dy));
+            }
+          }
+        });
+        seen.forEach(k => cell.set(k, (cell.get(k) || 0) + 1));
+      });
+      const vs = [...cell.values()].sort((u, v) => u - v);
+      row.stackP90 = vs.length ? vs[Math.floor(0.9 * (vs.length - 1))] : 0; row.stackMax = vs.length ? vs[vs.length - 1] : 0;
+    }
+    const at3 = supL.filter(l => Math.abs(l.z - 3.0) < 0.11);
+    if (at3.length) {
+      const xs = [].concat(...at3.map(l => l.pts.map(q => q[0]))), ys = [].concat(...at3.map(l => l.pts.map(q => q[1])));
+      row.wallRatio = at3.reduce((a, l) => a + pathLen(l), 0) / (Math.PI * ((Math.max(...xs) - Math.min(...xs)) + (Math.max(...ys) - Math.min(...ys))) / 2);
+    }
     const gaps = [];
     b.areas.forEach(a => ((a.tp.sheet && a.tp.sheet.levels) || []).forEach(L => { if (L.minDistanceMm != null && isFinite(L.minDistanceMm)) gaps.push(L.minDistanceMm); }));
     row.gap = gaps.length ? Math.min(...gaps) : null;
@@ -390,6 +420,12 @@ const segLen = s => Math.hypot(s.x1 - s.x0, s.y1 - s.y0);
   });
   check('no built branch lies flat: the plan\'s legs under 75 deg from vertical, a stair\'s own tree under 50',
     leans.every(x => x.hostMax <= 75 + 0.5 && x.stairMax <= 50 + 0.5), leans.map(x => x.key + ' ' + f1(x.hostMax) + (x.stairMax ? ' / stair ' + f1(x.stairMax) : '')).join(', '));
+  check('the tree runs up with the sheet: a line of Support within 1.5 mm of the top of the interface and transition (under a stair, Support beside every strip; the oblique\'s stair stands 4.2 mm)',
+    rows.every(r => r.tiTop - r.supTop <= 1.5 + 1e-9), rows.map(r => r.key + ' Support to ' + f2(r.supTop) + ', sheet to ' + f2(r.tiTop)).join(', '));
+  check('the sheet is as deep as a flat one wherever it lies: over 90 % of the plan, no more than 6 layers of interface and transition (a flat sheet is 5), the stair as much as the flat heads',
+    rows.every(r => r.stackP90 <= 6), rows.map(r => r.key + ' p90 ' + r.stackP90 + ' max ' + r.stackMax).join(', '));
+  check('a trunk is hollow: at 3 mm its lines are one wall round it (their length no more than 1.5 x the circle of its width), no infill inside',
+    rows.every(r => r.wallRatio == null || r.wallRatio <= 1.5), rows.map(r => r.key + ' ' + (r.wallRatio == null ? '-' : r.wallRatio.toFixed(2))).join(', '));
   check('no support stands over the sheet\'s top (no speck in the air where the supports stop)', rows.every(r => r.over <= 0.05),
     rows.map(r => r.key + ' ' + f2(r.over)).join(', '));
   check('a sheet under a curved head stays where the part is near it: no more than 1.5 mm under the part over any cell of the plate, and its middle within 1.5 mm of the trunk\'s',

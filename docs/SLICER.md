@@ -391,12 +391,18 @@ right over the sheet that holds it.
   support.
 - **A support is hollow** (`CONSTANTS.supportWalls`, supports-one-trunk sixth round). A support object is sliced with the two overrides its export
   carries (`SHEET.slicerSettings`: `wall_loops` 1, `sparse_infill_density` 0 %), as `thinWall.supportsOn` carries the third: one wall round a trunk, no
-  filler inside it - as Bambu's own tree is - and the profile's shells (the first layers, the top under a sheet). Before, G-scope sliced a trunk with
-  two walls and an infill line, and read it as filled.
+  filler inside it - as Bambu's own tree is. Its shells are none on top and the first layer underneath (`topShellLayers` 0, `bottomShellLayers` 1: the pad, and
+  one layer of bridge under a branch that leans out), and no sparse island or narrow strip is printed solid (`narrowSparseMm`, `minSparseAreaMm2` 0): a trunk
+  3 - 5 mm across has a sparse island of 10 mm2, under the profile's minimum, which was printed solid, and a tapering trunk has a hair-thin top ring on every
+  layer - both read as a filled trunk. Before, G-scope sliced a trunk with two walls and a layer of solid fill. `support:onetrunk`: at 3 mm a trunk's lines
+  are one wall (1.0 x the circle of its width, was 3.3).
+- **The sheet is filled** (supports-one-trunk seventh round). The sheet's own layers - a flat sheet's, a stair's strips - are the one thing in a support that
+  is solid: where `typeSupports` finds a layer's region in the sheet's zone (below), it is filled with solid lines inside the one wall, as Bambu lays its
+  interface. The tree under it is not. G-scope's Slice reads the sheet's interface layers off the support (`nsoSupport.interfaceLayers`, the card's Dense: 3).
 - **A stair's posts are Support** (`typeSupports`, STAIR ZONES, supports-one-trunk sixth round). A stair's tips are posts under its strips, a row of
   them one blade; at a layer a post is one island with the strip it touches, so walking the strip's zone down by islands took the whole blade for the
   sheet (the Oblique's slab hung orange fins, and its Support stopped flat under the first strip). A stair's zones now hold only where the part is over
-  the line within the stack's own depth (`gap` + the interface and transition layers + one layer for a strip's back edge): the 3 + 2 layers under the
+  the line within the stack's own depth (`gap` + the interface layers - 1, + 0.25 mm for the interface; + the transition layers, + 0.1 mm for the transition), and so does every zone on a layer that holds a stair's strip: the 3 + 2 layers under the
   part are interface and transition, a column further down is Support, and a path that is part strip and part post is split where its type changes.
   A flat sheet's islands are untouched (a dome's flat sheet lies up to its reach under the part at the rim and is all sheet). The Oblique now reads,
   layer by layer, as Bambu's does: Support, transition and interface in the same layer, the Support running up beside the stair.
