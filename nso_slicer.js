@@ -2050,7 +2050,7 @@
          (a dome's flat sheet lies up to its reach under the part at the rim, and is all sheet). A path that is part sheet and part tree is split
          where its type changes (a loop of a strip with a post's wall on it is an interface run and a support run). */
       var hIm = P.layers.length ? planes[planes.length - 1].h : 0.2;
-      var dIn = gap + (NI - 1) * hIm + 0.1, dTr = gap + (NI + NT - 1) * hIm + 0.1;
+      var dIn = gap + (NI - 1) * hIm + 0.25, dTr = gap + (NI + NT - 1) * hIm + 0.1;
       function hostPolys(j, d) {
         var over = overAt(j, d);
         return over.length ? g.polys(g.unionAll(over.map(function (x) { return x.cs; }))) : [];
