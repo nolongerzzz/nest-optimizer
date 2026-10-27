@@ -335,8 +335,8 @@ The pointer path (drag raycast, the dots, Escape) is not exercised by a drive ch
 **What the first version did wrong (reported from the live card).** The brush took the first face the ray met, so a stroke from above painted the visible top and the walls, a blob the stencil-less
 dots drew opaque, and the spots it asked for sat on faces that hold nothing (walls, up-facing rims: 3 - 5 of them came back unreachable and the build grew by a third); and a stroke over a steep flank gave
 a raft footprint the extrusion could not follow (a layer's band on a 55 deg flank is 0.8 mm / tan(55) = 0.56 mm wide). Now: the ray is cast with the material double-sided (the faces that hang are
-the mesh's back faces from above, which a ray otherwise passes), the first hanging face is the hit, `paintNz()` limits it to the card's angle (normal below -cos(angle), 20 - 60 deg), and the dots
-are one translucent layer (stencil). A strut through the model, reported with "paint and raft": **not reproduced** - about two dozen builds of the Negative Spheres, the paint from four sides and the old face
+the mesh's back faces from above, which a ray otherwise passes), the first hanging face is the hit, `paintNz()` limits it to the card's angle (normal below -cos(angle), 20 - 60 deg), and the paint
+is a stain on the faces the brush covered (below). A strut through the model, reported with "paint and raft": **not reproduced** - about two dozen builds of the Negative Spheres, the paint from four sides and the old face
 filter, tree and strut and gecko-hand, one piece and the plate, with the raft on and off, none had a support triangle inside any body (`support:paint` section 5 now holds that, sampling every seventh
 triangle of the support against all three parity rays), and the straight-strut style has one sampled triangle at the Negative Sphere2's apex tip (z 16) inside the part's surface with nothing painted at all (a tip touching the face it holds). If it happens, the piece, the style and the strokes
 are what is needed.
@@ -374,3 +374,6 @@ A hole in a footprint under 3 mm2 (`REGION_HOLE_FILL_MM2`) is laid over by the p
 
 **What is left.** The Negative Sphere2's flat face (80 against 89): the three corner patches' tails, 0.3 - 0.5 mm wide, where a 0.4 mm bead does not fit (`THIN_NARROW_MM` 0.06 was tried: no gain). The brush covers them where
 the footprint is wide enough; the rest is the bead's width. Turning a head moves its share by up to 20 points (the Circular 99 aligned, 80 turned: the columns of its other tips cross its plate - `carve` - and the planner's choice of tips follows the grid).
+
+**The stain (seventh round).** The brush's paint was drawn as screen-facing discs at the samples, floating over the piece and blurring where it applied. It is the piece's own triangles now (cut to 1 mm so the stain
+follows the brush's edge across a flat face): the hanging ones within a brush radius of a sample, lifted 0.03 mm, solid on the face (hidden when the face is behind the piece) and faint through it, redrawn when the piece moves.

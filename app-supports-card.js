@@ -2285,28 +2285,88 @@ var NSO_SUPPORTS_CARD = (function () {
     return { ok: true };
   }
   /* the paint, drawn over the piece: one translucent dot for every sample, the size of the brush */
+  /* the host's triangles for the stain, in the piece's own frame: the big ones cut until no edge is over 1 mm (so a stain can follow a brush's edge across a flat
+     face), each with its centre and its normal; kept while the mesh is the same */
+  function stainTris(host) {
+    var geo = host.mesh.geometry, c = S.stainCache;
+    if (c && c.geo === geo && c.count === geo.attributes.position.count) return c;
+    var pos = geo.attributes.position, idx = geo.index, nT = idx ? idx.count / 3 : pos.count / 3, out = [], MAXE = 1.0, cap = 600000;
+    function vert(i) { return [pos.getX(i), pos.getY(i), pos.getZ(i)]; }
+    function push(a, b, d, depth) {
+      var e0 = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]), e1 = Math.hypot(d[0] - b[0], d[1] - b[1], d[2] - b[2]), e2 = Math.hypot(a[0] - d[0], a[1] - d[1], a[2] - d[2]);
+      if (depth < 6 && Math.max(e0, e1, e2) > MAXE && out.length < cap) {
+        var ab = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2], bd = [(b[0] + d[0]) / 2, (b[1] + d[1]) / 2, (b[2] + d[2]) / 2], da = [(d[0] + a[0]) / 2, (d[1] + a[1]) / 2, (d[2] + a[2]) / 2];
+        push(a, ab, da, depth + 1); push(ab, b, bd, depth + 1); push(da, bd, d, depth + 1); push(ab, bd, da, depth + 1);
+        return;
+      }
+      var ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = d[0] - a[0], vy = d[1] - a[1], vz = d[2] - a[2];
+      var nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx, L = Math.hypot(nx, ny, nz) || 1;
+      out.push({ v: [a, b, d], c: [(a[0] + b[0] + d[0]) / 3, (a[1] + b[1] + d[1]) / 3, (a[2] + b[2] + d[2]) / 3], n: [nx / L, ny / L, nz / L] });
+    }
+    for (var t = 0; t < nT; t++) {
+      var i0 = idx ? idx.getX(t * 3) : t * 3, i1 = idx ? idx.getX(t * 3 + 1) : t * 3 + 1, i2 = idx ? idx.getX(t * 3 + 2) : t * 3 + 2;
+      push(vert(i0), vert(i1), vert(i2), 0);
+    }
+    S.stainCache = { geo: geo, count: pos.count, tris: out };
+    return S.stainCache;
+  }
+  /* THE STAIN: the paint is drawn ON the faces the brush covered - the piece's own triangles, lifted 0.03 mm, those within a brush radius of a sample that hang (a wall or a
+     top face under the brush is not painted: it asks for nothing) - and not as discs in the air over it: where the brush went is where the stain is. Twice: solid on the
+     face (hidden when the face is behind the piece, from above), and faint through the piece, so a stroke over the top of the piece shows the underside it painted. */
   function drawPaint() {
     dispose(S.paintLayer); S.paintLayer = null;
     var m = modelOf(S.hostId), host = placedOf(S.hostId);
-    if (!S.open || S.wide || !m || !host || !state.scene || typeof THREE === 'undefined') return;
+    if (!S.open || S.wide || !m || !host || !host.mesh || !host.mesh.geometry || !state.scene || typeof THREE === 'undefined') return;
     var items = [];
     paintOps(m).forEach(function (op) { (op.pts || []).forEach(function (s) { items.push([s.p, op.r || PAINT_R_DEFAULT]); }); });
     if (S.stroke) S.stroke.pts.forEach(function (s) { items.push([s.p, S.stroke.r]); });
     if (!items.length) return;
-    var cam = state.camera, k = 1 / Math.tan(((cam && cam.fov) || 45) * Math.PI / 360), pos = new Float32Array(items.length * 3), r = 0;
+    host.mesh.updateMatrixWorld(true);
+    var E = host.mesh.matrixWorld.elements, sc = Math.hypot(E[0], E[1], E[2]) || 1, nzMax = paintNz();
+    var rMax = 0;
+    items.forEach(function (it) { rMax = Math.max(rMax, it[1]); });
+    var cell = Math.max(0.5, rMax), grid = new Map();
     items.forEach(function (it, i) {
-      var v = host.mesh.localToWorld(new THREE.Vector3(it[0][0], it[0][1], it[0][2]));
-      pos[i * 3] = v.x; pos[i * 3 + 1] = v.y; pos[i * 3 + 2] = v.z;
-      r = Math.max(r, it[1]);
+      var k = Math.floor(it[0][0] / cell) + ',' + Math.floor(it[0][1] / cell) + ',' + Math.floor(it[0][2] / cell);
+      if (!grid.has(k)) grid.set(k, []);
+      grid.get(k).push(i);
     });
+    var tris = stainTris(host).tris, pos = [], LIFT = 0.03;
+    for (var t = 0; t < tris.length; t++) {
+      var tr = tris[t];
+      /* hanging: the normal's Z-up component (the view's y) under the card's limit */
+      var wy = (E[1] * tr.n[0] + E[5] * tr.n[1] + E[9] * tr.n[2]) / sc;
+      if (wy > nzMax) continue;
+      var cx = Math.floor(tr.c[0] / cell), cy = Math.floor(tr.c[1] / cell), cz = Math.floor(tr.c[2] / cell), hit = false;
+      for (var dx = -1; dx <= 1 && !hit; dx++) for (var dy = -1; dy <= 1 && !hit; dy++) for (var dz = -1; dz <= 1 && !hit; dz++) {
+        var lst = grid.get((cx + dx) + ',' + (cy + dy) + ',' + (cz + dz));
+        if (!lst) continue;
+        for (var q = 0; q < lst.length; q++) {
+          var it2 = items[lst[q]], p = it2[0], r2 = it2[1] * it2[1];
+          var d0 = (tr.c[0] - p[0]) * (tr.c[0] - p[0]) + (tr.c[1] - p[1]) * (tr.c[1] - p[1]) + (tr.c[2] - p[2]) * (tr.c[2] - p[2]);
+          if (d0 <= r2) { hit = true; break; }
+        }
+      }
+      if (!hit) continue;
+      for (var k2 = 0; k2 < 3; k2++) pos.push(tr.v[k2][0] + tr.n[0] * LIFT, tr.v[k2][1] + tr.n[1] * LIFT, tr.v[k2][2] + tr.n[2] * LIFT);
+    }
+    if (!pos.length) return;
     var geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    var pts = new THREE.Points(geo, new THREE.PointsMaterial({ size: 2 * r * k, sizeAttenuation: true, color: PAINT_COL, map: dotMap(false), alphaTest: 0.25,
-      transparent: true, opacity: 0.4, depthTest: false, depthWrite: false,
-      /* one layer: a pixel is painted once however many dots cover it (the stencil), so the paint stays a translucent stain and not an opaque blob */
-      stencilWrite: true, stencilRef: 1, stencilFunc: THREE.NotEqualStencilFunc, stencilFail: THREE.KeepStencilOp, stencilZFail: THREE.KeepStencilOp, stencilZPass: THREE.ReplaceStencilOp }));
-    pts.name = 'supportsCardPaint';
-    S.paintLayer = mark(pts);
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3));
+    var g = new THREE.Group();
+    g.name = 'supportsCardPaint';
+    function layer(opacity, depthTest, order) {
+      var mat = new THREE.MeshBasicMaterial({ color: PAINT_COL, side: THREE.DoubleSide, transparent: true, opacity: opacity, depthTest: depthTest, depthWrite: false,
+        polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+      var mesh = new THREE.Mesh(geo, mat);
+      mesh.matrixAutoUpdate = false; mesh.matrix.copy(host.mesh.matrixWorld); mesh.matrixWorldNeedsUpdate = true;
+      mesh.renderOrder = order; mesh.userData.skipXray = true; mesh.frustumCulled = false;
+      return mesh;
+    }
+    g.add(layer(0.16, false, MARK_ORDER), layer(0.6, true, MARK_ORDER + 1));
+    S.paintMat = E.join(',');
+    S.paintLayer = g;
+    if (typeof nsoHelpers !== 'undefined') nsoHelpers.attach(state.scene, g, 'supports-card'); else state.scene.add(g);
   }
 
   /* ------------------------------------------------------------- markers */
@@ -2822,6 +2882,7 @@ var NSO_SUPPORTS_CARD = (function () {
         else if (w != null && w !== S.hostId && state.selectedIndex >= 0) pick(w);   // the app's selection moved: detect there
         else if (S.hostId == null && w != null) pick(w);
         else if (signature() !== S.sig) refresh();
+        else if (S.paintLayer && placedOf(S.hostId) && placedOf(S.hostId).mesh && placedOf(S.hostId).mesh.matrixWorld.elements.join(',') !== S.paintMat) drawPaint();
         else if (S.zoneLayer && state.camera) {
           var cd = Math.round(state.camera.position.length() * 20);
           if (cd !== S.camKey) { S.camKey = cd; drawZones(); }
