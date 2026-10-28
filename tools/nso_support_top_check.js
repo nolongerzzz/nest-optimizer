@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /* WHERE THE SUPPORT STOPS, AGAINST BAMBU'S OWN SLICE.
-     node tools/nso_support_top_check.js                 the card's default build (raft off) of the six reference heads, sliced
-     node tools/nso_support_top_check.js --raft          the same with the Raft interface on
+     node tools/nso_support_top_check.js                 the card's Auto build of the six reference heads (the platform on), sliced
+     node tools/nso_support_top_check.js --no-plate      the old tips-only sheet (the platform off: no longer what Auto builds)
      node tools/nso_support_top_check.js --only=circular,sphere
      npm run support:top
 
@@ -29,7 +29,7 @@ const G = require(path.join(ROOT, 'nso-gcode-lines.js'));
 const M = require(path.join(ROOT, 'nso_gscope_measure.js'));
 
 const args = process.argv.slice(2);
-const RAFT = args.includes('--raft'), REPORT = args.includes('--report');
+const NOPLATE = args.includes('--no-plate'), RAFT = !NOPLATE, REPORT = args.includes('--report');
 const ONLY = (args.find(a => a.startsWith('--only=')) || '').slice(7).split(',').filter(Boolean);
 const REF = path.join(ROOT, 'fixtures', 'supports', 'tree_slimsupports.gcode.3mf');
 const KEYS = RP.NAMES.filter(k => !ONLY.length || ONLY.includes(k));
@@ -65,7 +65,7 @@ async function ours(WASM, key) {
 }
 
 (async () => {
-  console.log('support top vs the top overhang-wall layer - ' + (RAFT ? 'Raft interface ON' : 'the card\'s default, raft OFF') + (REPORT ? ' (report only)' : ''));
+  console.log('support top vs the top overhang-wall layer - ' + (RAFT ? 'the card\'s Auto: the platform on, whatever the Raft box says' : 'the platform OFF (--no-plate)') + (REPORT ? ' (report only)' : ''));
   const ref = await bambu();
   const byName = {};
   ref.forEach(r => { byName[r.head] = r; });

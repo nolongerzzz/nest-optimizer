@@ -158,7 +158,9 @@ const supportOf = (app, id) => Float32Array.from([].concat(...app.supportsOf(id)
   const share = (r) => 100 * r.held.filter(s => s.held).length / Math.max(1, r.held.length);
   console.log('        Circular: raft on ' + on.tris + ' triangles, ' + share(on).toFixed(0) + ' % held; off ' + off.tris + ' triangles, ' + share(off).toFixed(0) + ' % held');
   check('both build', on.ok && off.ok);
-  check('the raft holds more of the dome than the sheet from the tips alone (10 points or more)', share(on) >= share(off) + 10, share(on).toFixed(0) + ' against ' + share(off).toFixed(0));
+  /* Auto (the one-trunk tree) lays the platform whatever the box says (the owner, Oct 28: the platform is the tree's own; raft is a type of its own) */
+  check('Auto builds the same plate with the Raft box off as on', on.tris === off.tris, on.tris + ' against ' + off.tris);
+  check('...and it holds the dome (90 % or more) with the box off', share(off) >= 90, share(off).toFixed(0) + ' %');
 
   console.log('\n=== 5. everything that hangs painted over, on each head: nothing worse, nothing through the part ===');
   const HANG = -Math.cos(ANGLE * Math.PI / 180);

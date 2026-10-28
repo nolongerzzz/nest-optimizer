@@ -879,6 +879,9 @@
   var THIN_SEG_MM = 0.6;          /* ...no segment of it shorter than this */
   var EDGE_HATCH_HALF_MM = 1.0;  /* ... and only where the region is 2 mm across somewhere: a strip a line or two wide is one bead along it, not lines across it */
   var EDGE_HATCH_SHARE = 0.3;   /* a narrow region is laid in lines alone, edge to edge, when they hold at least this share of it (lines x pitch over its area) */
+  var RING_LINE_MIN_MM = 0.5;     /* ...with lines down to this long inside it (the corners of the ring are a gap a line or two across) */
+  var RING_MIN_AREA_MM2 = 20;      /* ...in a region of at least this area (a ring round a cavity, a trunk's cut and all: its outline may be one loop or two) */
+  var RING_OUTLINE_GAIN = 1.25;  /* a ring's outline and what hatch fits inside it is kept over the edge-to-edge lines when it lays this many times their length */
   var HATCH_MIN_SHARE = 0.6;     /* a hatch whose lines (times the pitch) fill less than this share of the room inside its outline is given up for concentric loops */
   var REGION_MIN_LOOP_MM = 2.4;  /* a loop of the region plate shorter than this is a speck of the level set (a medial axis's end), not a line */
   var FILL_FLAT_MM = 2.4;      /* the region plate (and the fill) is for a footprint whose height range (its spots', and 1.6 mm of padding) is no more than this: a face of one height, not a slope or a dome */
@@ -1331,7 +1334,17 @@
       var Hw = new Uint8Array(N);
       for (var qw = 0; qw < N; qw++) if (dist[qw] >= (widthMm / 2 + 0.03) / cellMm + 0.5) Hw[qw] = 1;
       var wide = hatchOver(Hw, Math.max(0.5, minLineMm * 0.6));
-      if (dMax * cellMm >= EDGE_HATCH_HALF_MM && wide.length >= 3 && lenOf(wide) * pitchMm >= EDGE_HATCH_SHARE * mCells * cellMm * cellMm) return { loops: [], lines: wide };
+      var wideOk = dMax * cellMm >= EDGE_HATCH_HALF_MM && wide.length >= 3 && lenOf(wide) * pitchMm >= EDGE_HATCH_SHARE * mCells * cellMm * cellMm;
+      /* A RING of narrow bands and wide corners (a flat face round a cavity): its outline loops hold the bands, the hatch inside them the corners, on EVERY
+         layer. Which of this and the edge-to-edge lines the share test above left was the hatch's angle, so the layers turned each other's way (55 % of the
+         face held on one, 70 on the next, the lines of the other crossing a band they cannot fit); the one that lays more line is kept, this when it lays
+         RING_OUTLINE_GAIN times what the lines alone do. */
+      if (any && mCells * cellMm * cellMm >= RING_MIN_AREA_MM2) {          /* a big region that is narrow everywhere (a small patch keeps the lines edge to edge) */
+        var inner = hatchOver(H, RING_LINE_MIN_MM), lenOut = lenOf(inner);
+        outline.forEach(function (lp) { lenOut += lp.lenMm; });
+        if (inner.length && (!wideOk || lenOut >= RING_OUTLINE_GAIN * lenOf(wide))) return { loops: outline, lines: inner };
+      }
+      if (wideOk) return { loops: [], lines: wide };
       return { loops: concentricLoops(M, nx, ny, ox, oy, cellMm, pitchMm, widthMm, minLoopMm), lines: [] };
     }
     return { loops: outline, lines: lines };
