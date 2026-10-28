@@ -612,8 +612,7 @@ var NSO_MICROSCOPE = (function () {
   // what the capture box catches and what a line pick lands on are the same
   // moves either way, so switching back and forth never loses a selection.
   var renderMode = 'toolpath';
-  // Toolpath view only: also fill every extrusion move out to its real width (a flat
-  // ribbon under the line), the way Bambu Studio draws a slice. View state, like renderMode.
+  // Toolpath view only: also draw every extrusion move as a bead at its real width and height (under the line), the way Bambu Studio draws a slice. View state, like renderMode.
   var trueWidth = true;
   // Isolate's state, kept apart from what is drawn. Isolated: the selection
   // alone, drawn as-is (applyDisplay).
@@ -2601,7 +2600,7 @@ var NSO_MICROSCOPE = (function () {
         v.overviewMeshes[feature] = mesh;
         v.overviewGroup.add(mesh);
         if (trueWidth && renderMode !== 'solid' && !isTravel) {
-          var rb = ribbonMesh(segs, colorForGroup(feature, gi));
+          var rb = beadMesh(segs, colorForGroup(feature, gi));
           if (rb) { rb.userData.feature = feature; v.overviewGroup.add(rb); }
         }
       });
@@ -3205,7 +3204,7 @@ var NSO_MICROSCOPE = (function () {
       v.solidMeshes[name].visible = !rowOff(name) && !detail;
     });
     v.overviewGroup.children.forEach(function (c) {
-      if (c.userData.ribbon) c.visible = !rowOff(c.userData.feature) && !detail;
+      if (c.userData.bead) c.visible = !rowOff(c.userData.feature) && !detail;
     });
     v.detailGroup.children.forEach(function (mesh) {
       mesh.visible = !rowOff(mesh.userData.feature);
@@ -3632,7 +3631,7 @@ var NSO_MICROSCOPE = (function () {
         mesh.userData.feature = feature;
         v.detailGroup.add(mesh);
         if (trueWidth && feature !== 'Travel') {
-          var rb = ribbonMesh(byFeature[feature], colourOf(feature));
+          var rb = beadMesh(byFeature[feature], colourOf(feature));
           if (rb) { rb.userData.feature = feature; v.detailGroup.add(rb); }
         }
       });
@@ -3668,37 +3667,84 @@ var NSO_MICROSCOPE = (function () {
   }
 
   /**
-   * Extrusion moves as flat ribbons at their real width, in view space: the
-   * bead's top face, two triangles a move, lit flat. Drawn beneath the move's
-   * own line (pushed back by a polygon offset, so the line wins where they meet)
-   * to read how neighbouring beads lie and touch. Not pickable: a pick is the
-   * line's.
+   * Extrusion moves as beads, in view space, the way Bambu Studio draws a slice:
+   * each bead a hexagonal section (a flat top, widest at mid-height, its bottom
+   * resting on the layer below) `width` across and `height` tall, top at the
+   * nozzle Z. Moves the nozzle printed without stopping (the parser's `run`,
+   * consecutive in the file, end to start) are one swept body whose joints are
+   * mitred, so a corner has no notch; a bead that stops, or turns back by more
+   * than 100 degrees (an infill turnaround), ends in a point instead. One indexed
+   * mesh a feature, built for looking at - not the solid Export writes
+   * (NSOGcodeSolid). Drawn beneath the move's own line (pushed back by a polygon
+   * offset, so the line wins where they meet). Not pickable: a pick is the line's.
    */
-  function ribbonMesh(segs, color) {
-    var n = 0, i;
-    for (i = 0; i < segs.length; i++) if (segs[i].w > 0) n++;
-    if (!n) return null;
-    var out = new Float32Array(n * 18), w = 0, cx = doc.cx, cy = doc.cy;
-    for (i = 0; i < segs.length; i++) {
-      var s = segs[i];
-      if (!(s.w > 0)) continue;
-      var dx = s.x1 - s.x0, dy = s.y1 - s.y0, len = Math.sqrt(dx * dx + dy * dy);
-      if (!(len > 1e-9)) { n--; continue; }
-      var hw = s.w / 2, px = -dy / len * hw, py = dx / len * hw;
-      // (x, y, z) -> (x - cx, z, -(y - cy)); corners a,b at the start, c,d at the end
-      var ax = s.x0 - px - cx, ay = -(s.y0 - py - cy), bx = s.x0 + px - cx, by = -(s.y0 + py - cy);
-      var ex = s.x1 + px - cx, ey = -(s.y1 + py - cy), fx = s.x1 - px - cx, fy = -(s.y1 - py - cy);
-      out[w++] = ax; out[w++] = s.z; out[w++] = ay;  out[w++] = bx; out[w++] = s.z; out[w++] = by;  out[w++] = ex; out[w++] = s.z; out[w++] = ey;
-      out[w++] = ax; out[w++] = s.z; out[w++] = ay;  out[w++] = ex; out[w++] = s.z; out[w++] = ey;  out[w++] = fx; out[w++] = s.z; out[w++] = fy;
+  var BEAD_PROFILE = [[-1, -0.5], [-0.55, 0], [0.55, 0], [1, -0.5], [0.55, -1], [-0.55, -1]];   // (across, down) in half-widths / heights
+  var BEAD_TURN_BREAK = -0.17;      // cos 100 deg: a sharper turn than this ends the bead
+  var BEAD_TIP = 0.6;               // a point's length, in half-widths
+
+  function beadMesh(segs, color) {
+    var P = BEAD_PROFILE, NP = P.length, cx = doc.cx, cy = doc.cy;
+    var pos = new Float32Array(segs.length * 14 * 3), idx = new Uint32Array(segs.length * 72);
+    var nv = 0, ni = 0;
+
+    function vert(x, y, z) { pos[nv * 3] = x - cx; pos[nv * 3 + 1] = z; pos[nv * 3 + 2] = -(y - cy); return nv++; }
+
+    function emit(ch) {
+      var m = ch.length, first = nv, k, j;
+      for (k = 0; k <= m; k++) {
+        var a = k > 0 ? ch[k - 1] : null, b = k < m ? ch[k] : null;
+        var s0 = b || a, px = k < m ? b.x0 : a.x1, py = k < m ? b.y0 : a.y1;
+        var mx, my, scale = 1, w, h;
+        if (a && b) {
+          mx = -(a.uy + b.uy); my = a.ux + b.ux;
+          var l = Math.sqrt(mx * mx + my * my) || 1;
+          mx /= l; my /= l;
+          scale = 1 / Math.max(0.5, mx * -a.uy + my * a.ux);
+          w = (a.w + b.w) / 2; h = (a.h + b.h) / 2;
+        } else { mx = -s0.uy; my = s0.ux; w = s0.w; h = s0.h; }
+        var hw = w / 2 * scale;
+        for (j = 0; j < NP; j++) vert(px + mx * P[j][0] * hw, py + my * P[j][0] * hw, s0.z + P[j][1] * h);
+      }
+      for (k = 0; k < m; k++) {
+        var r0 = first + k * NP, r1 = r0 + NP;
+        for (j = 0; j < NP; j++) {
+          var j2 = (j + 1) % NP;
+          idx[ni++] = r0 + j; idx[ni++] = r0 + j2; idx[ni++] = r1 + j2;
+          idx[ni++] = r0 + j; idx[ni++] = r1 + j2; idx[ni++] = r1 + j;
+        }
+      }
+      // a point at each end of the bead
+      var f = ch[0], l0 = ch[m - 1], tip;
+      tip = vert(f.x0 - f.ux * f.w * BEAD_TIP / 2, f.y0 - f.uy * f.w * BEAD_TIP / 2, f.z - f.h / 2);
+      for (j = 0; j < NP; j++) { idx[ni++] = tip; idx[ni++] = first + (j + 1) % NP; idx[ni++] = first + j; }
+      var last = first + m * NP;
+      tip = vert(l0.x1 + l0.ux * l0.w * BEAD_TIP / 2, l0.y1 + l0.uy * l0.w * BEAD_TIP / 2, l0.z - l0.h / 2);
+      for (j = 0; j < NP; j++) { idx[ni++] = tip; idx[ni++] = last + j; idx[ni++] = last + (j + 1) % NP; }
     }
-    if (!w) return null;
+
+    var ch = [], prev = null, any = false;
+    for (var i = 0; i < segs.length; i++) {
+      var sg = segs[i], mv = sg.mv;
+      var dx = sg.x1 - sg.x0, dy = sg.y1 - sg.y0, len = Math.sqrt(dx * dx + dy * dy);
+      if (!(len > 1e-9) || !(mv.width > 0) || !(mv.height > 0)) continue;
+      var u = { x0: sg.x0, y0: sg.y0, x1: sg.x1, y1: sg.y1, z: sg.z, w: mv.width, h: mv.height, ux: dx / len, uy: dy / len, mv: mv };
+      var joins = prev && prev.mv.run != null && prev.mv.run === mv.run && mv.index === prev.mv.index + 1 &&
+        Math.abs(u.x0 - prev.x1) < 1e-6 && Math.abs(u.y0 - prev.y1) < 1e-6 && u.z === prev.z &&
+        prev.ux * u.ux + prev.uy * u.uy >= BEAD_TURN_BREAK;
+      if (!joins && ch.length) { emit(ch); ch = []; }
+      ch.push(u); prev = u; any = true;
+    }
+    if (ch.length) emit(ch);
+    if (!any) return null;
     var geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(w === out.length ? out : out.slice(0, w), 3));
-    var mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
-      color: new THREE.Color(color).multiplyScalar(0.7), side: THREE.DoubleSide,
-      polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1
+    geo.setAttribute('position', new THREE.BufferAttribute(pos.slice(0, nv * 3), 3));
+    geo.setIndex(new THREE.BufferAttribute(idx.slice(0, ni), 1));
+    // the scene's ambient light is 1.0 (solidMeshes), so the base colour comes down to leave the directional light room to shade the faces apart
+    var mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+      color: new THREE.Color(color).multiplyScalar(0.6), metalness: 0.05, roughness: 0.5, flatShading: true,
+      side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1
     }));
-    mesh.userData.ribbon = true;
+    mesh.userData.bead = true;
     mesh.raycast = function () {};
     return mesh;
   }
@@ -4820,7 +4866,7 @@ var NSO_MICROSCOPE = (function () {
     var rd = $('ms-render-read');
     if (rd) {
       if (!isPath) rd.textContent = 'Flip the switch to Slice to draw the slice as a toolpath or as a solid.';
-      else if (renderMode !== 'solid') rd.textContent = trueWidth ? 'Each move drawn at its real width, with its line down the middle; a small selection is highlighted as its flat beads.' : 'Each move drawn as a line; a small selection is highlighted as its flat beads.';
+      else if (renderMode !== 'solid') rd.textContent = trueWidth ? 'Each move drawn as a bead at its real width and height, with its line on top; a small selection is highlighted as its flat beads.' : 'Each move drawn as a line; a small selection is highlighted as its flat beads.';
       else if (view && view.solidBuilt) rd.textContent = 'Shown: ' + describeSolid(view.solidBuilt.stats) + '.';
       else rd.textContent = 'Nothing shown.';
     }
