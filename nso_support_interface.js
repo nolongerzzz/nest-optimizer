@@ -1604,7 +1604,7 @@
             if (gi2 < 0 || gi2 >= nx || gj2 < 0 || gj2 >= ny || !inRegion[gj2 * nx + gi2]) continue;
             gmax = Math.max(gmax, Math.abs(S[qg2] - S[gj2 * nx + gi2]) / (2 * CELLS));
           }
-          gapAt[qg2] = o.gap * Math.sqrt(1 + gmax * gmax) + 0.05 + 0.05 * gmax;
+          gapAt[qg2] = o.gap * Math.sqrt(1 + gmax * gmax) + 0.03 + (o.width / 2 + 0.03) * gmax;   /* a bead is a line wide: on a slope its downhill edge stands lower than its middle */
         }
         var A = zs[0] - o.gap, m = new Int32Array(N).fill(-99999), mmin = 1e9, mmax = -1e9;
         for (var q5 = 0; q5 < N; q5++) {

@@ -294,7 +294,7 @@ now moves its share by 11 points or less (the plate follows the surface; the sta
 **Gates.** `support:region` (`tools/nso_support_region_test.js`): the geometry on rasters of known answer (the exact distance, a circle's level set, the smoothed mask, the plate of a rectangle:
 one loop, a hatch flush on its lattice at 45 and 135 deg, never nearer the loop than a line, the strip too thin for a hatch, the speck, the disk's concentric rings) and that the extrusion takes every layer.
 `support:coverage`: floors per head, aligned and turned, the turn moving no head but the Oblique by more than 15 points, and ceilings on the plate's seconds. `support:plate` section 6 is re-pinned
-for the three single-piece builds the region plate changes (Negative Sphere2 30392, Circular 14904, Sphere 14728 triangles (on the 2 + 2 stack, with sections 10 and 11)). Everything else is unchanged with the option off.
+for the three single-piece builds the region plate changes (Negative Sphere2 29992, Circular 13484, Sphere 14272 triangles (on the 2 + 2 stack, with sections 10 and 11)). Everything else is unchanged with the option off.
 
 **Not done, and named.**
 - **A rim or a crescent under about 0.7 mm** is still bare: a bead needs the region a half line and a gap in from its edge on both sides, and the footprint's own 0.1 mm margin comes
@@ -377,3 +377,35 @@ the footprint is wide enough; the rest is the bead's width. Turning a head moves
 
 **The stain (seventh round).** The brush's paint was drawn as screen-facing discs at the samples, floating over the piece and blurring where it applied. It is the piece's own triangles now (cut to 1 mm so the stain
 follows the brush's edge across a flat face): the hanging ones within a brush radius of a sample, lifted 0.03 mm, solid on the face (hidden when the face is behind the piece) and faint through it, redrawn when the piece moves.
+
+## 12. The owner's slice of the card's supports, and where Bambu's 30 really reaches (2026-10-27, seventh round)
+
+The owner sliced a plate of the six heads with the card's supports in Bambu Studio (`6_pieces - A1 mini.gcode.3mf`, angle 30) and sent it back. Read against Bambu's own slice of the same heads
+(`tree_slimsupports.gcode.3mf`, tree slim, its own supports), feature by feature, in mm of path (Bambu's own / the card's):
+
+| head | Overhang wall | Bridge | Support interface | Support transition | Support |
+|---|---|---|---|---|---|
+| Base | 66 / 64 | 396 / 412 | 777 / 386 | 528 / 386 | 2128 / 1449 |
+| Circular | 44 / **167** | 216 / 222 | 279 / 123 | 189 / 87 | 2427 / 720 |
+| Negative Sphere | 95 / **176** | 303 / 242 | 479 / 166 | 338 / 152 | 2353 / 1300 |
+| Negative Sphere2 | 84 / **165** | 261 / 227 | 437 / 129 | 304 / 137 | 3039 / 1323 |
+| Oblique | 187 / 203 | 208 / 228 | 851 / 646 | 469 / 300 | 2923 / 1429 |
+| Sphere | 40 / **117** | 216 / 223 | 198 / 65 | 110 / 44 | 1432 / 700 |
+
+(the interface and transition columns are what the slicer types our plate lines as - it re-types them by geometry - and are not a coverage figure). The one that is: **Overhang wall**, the model's own perimeters printed
+over air. Base and Oblique match; the four heads with a dome or a cavity have two to four times Bambu's, at the layers over the dome's flank (the Circular at z 10 - 11: 101 mm against 1) and over the cavity's apex (the Negative Sphere2 at z 14: 62 against 0).
+
+**Why: the card's angle is not Bambu's.** The card reads its angle as the surface's tilt from flat, and the owner ran 30; the docs (section 0a of SUPPORTS-CARD.md) had it that Bambu's 30 means the same. Reading every support
+line of Bambu's slice (the tips' own base lines, not only the interface and the transition) under the part's down-facing cells by tilt, Bambu holds: a dome 98 - 100 % to 35 deg, **79 - 83 % at 35 - 40, 35 - 42 % at 40 - 45, 3 - 14 % at 45 - 50, nothing beyond**.
+Its threshold of 30 is a cut at about 42 deg of tilt from flat (the support's own expansion carries it past the 30 / 60 the slope arithmetic gives, and the base lines fill what the tips' sheet does not).
+The card at 30 reaches 30. **At 40 the card holds at least what Bambu holds in every band to 45 deg** (the card at 40, all of Bambu's support lines, both dilated 0.5 mm; the share of the surface held at 20 - 30 / 30 - 35 / 35 - 40 / 40 - 45 deg, the card then Bambu):
+Circular 100 / 100 / 100 / 99 against 100 / 98 / 79 / 35; Sphere 100 / 100 / 100 / 100 against 100 / 99 / 83 / 42; Negative Sphere 100 / 100 / 100 / 100 against 89 / 41 / 23 / 40; Negative Sphere2 100 / 100 / 100 / 84 against 98 / 82 / 60 / 12.
+The card holds a little more than Bambu from 40 to 45 deg (its stair at the footprint's edge), which is the safe side.
+The card's default stays 35 (its plan hashes and counts are pinned there) and its label still says Bambu 30; **40 is the setting that reads like Bambu's 30**.
+
+**What the 38 - 40 deg builds broke, and the fix.** At 38 deg and over the Negative Sphere2's three flat patches, its cavity's wall and its apex are one footprint that rises 5 mm; its plate was built (11 layers) and then thrown away by the plate's own check against the part (`dmin`
+0.1796 against the gap 0.18): the bead's downhill edge on a 20 deg slope stands 0.04 mm lower than the cell's centre that the stack's gap was read for. The footprint then went the ordinary way and the flat face held 28 %.
+`gapAt` now counts the bead's half width on the slope (`gap / cos + 0.03 + (width / 2 + 0.03) * slope`): 81 % at 36, 38 and 40 deg alike. `support:coverage` section 4 holds the plate at 40 (floors Base 85, Circular 85, Sphere 88, Negative Sphere 68, Negative Sphere2 52, Oblique 85).
+
+**Left.** The Sphere's and the Circular's flat 0 - 20 deg (85 / 93 % against Bambu's 99): the pole's last millimetre inside the innermost loop, too small for a bead; the Negative Sphere2's patches' tails (section 11).
+**Not measured here:** Bambu's overhang-wall mm on a slice of the card's supports at 40 - there is no Bambu Studio in this box; the slice above is the owner's. A slice at 40 would settle whether the dome heads' overhang wall comes down to Bambu's.

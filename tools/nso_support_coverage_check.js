@@ -139,6 +139,13 @@ async function plate(objs, yaws, angle) {
   for (const k of Object.keys(c.rows)) console.log('        ' + k.padEnd(18) + 'held ' + c.rows[k].pct.toFixed(0).padStart(3) + ' %   of ' + c.rows[k].mm2.toFixed(0) + ' mm2 of footprint');
   const FLOOR_30 = { Base: 85, Circular: 90, Sphere: 88, 'Negative Sphere': 68, 'Negative Sphere2': 68, Oblique: 85 };
   for (const k of Object.keys(FLOOR_30)) check('at 30 deg the ' + k + ': ' + FLOOR_30[k] + ' % or more', c.rows[k].pct >= FLOOR_30[k], c.rows[k].pct.toFixed(0) + ' %');
+  console.log('\n=== 4. at 40 deg (where Bambu\'s own 30 reaches: tools/nso_support_reach_check.js), aligned ===');
+  const d40 = await plate(objs, null, 40);
+  console.log('        ' + d40.head + '   (' + d40.secs.toFixed(1) + ' s)');
+  for (const k of Object.keys(d40.rows)) console.log('        ' + k.padEnd(18) + 'held ' + d40.rows[k].pct.toFixed(0).padStart(3) + ' %   of ' + d40.rows[k].mm2.toFixed(0) + ' mm2 of footprint');
+  /* the footprints of a Negative Sphere merge at 38 deg and over into one that rises over the cavity's wall: its plate stands on slopes, and was dropped (the Negative Sphere2 held 28 %) when a bead's downhill edge was not counted in the gap */
+  const FLOOR_40 = { Base: 85, Circular: 85, Sphere: 88, 'Negative Sphere': 68, 'Negative Sphere2': 52, Oblique: 85 };
+  for (const k of Object.keys(FLOOR_40)) check('at 40 deg the ' + k + ': ' + FLOOR_40[k] + ' % or more', d40.rows[k].pct >= FLOOR_40[k], d40.rows[k].pct.toFixed(0) + ' %');
   finding('the Oblique, turned (its stair stands at 0 and 75 deg only)', 'Oblique ' + b.rows.Oblique.pct.toFixed(0) + ' %');
   finding('the turned plate against the aligned one', b.secs.toFixed(1) + ' s against ' + a.secs.toFixed(1) + ' s');
 
