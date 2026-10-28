@@ -1990,7 +1990,7 @@
           for (var n = 0; n < ks.length; n++) {
             var cov = 0;
             hosts.forEach(function (Q) { if (!g.isEmpty(Q.S[ks[n]])) cov += g.area(g.inter(pc, Q.S[ks[n]])); });
-            if (cov > 1e-6) return cov / A < C.stairCoverShare;
+            if (cov > 1e-6) return n > 0 || cov / A < C.stairCoverShare;
           }
           return false;
         });
