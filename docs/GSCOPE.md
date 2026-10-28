@@ -541,7 +541,7 @@ does, with a play button:
 
 A new layer (the slider moved, the other plate made active) shows the whole layer,
 scrubber at the end, until Play is pressed - Play from the end starts again from 0.
-Dragging the scrubber or pressing ◀ ▶ pauses. It changes nothing: the document, the
+Isolated, it plays the isolation's own moves on that layer. Dragging the scrubber or pressing ◀ ▶ pauses. It changes nothing: the document, the
 selection and the Features list are as they were. BACK shuts it (item 14); a
 document change or CLEAR shuts it too.
 
@@ -555,6 +555,40 @@ at 10; Play runs to the end and stops; BACK shuts it).
 
 **Not here yet.** Edits on a layer (snip, a detour) and playing a draft through GRISPR's
 verifier are the next rounds; Play is the layer they will be drawn and checked on.
+
+## 16. The slider's top handle, between layers (round 3d)
+
+**What the user sees.** Drag the **top handle** of the layer slider on a slice and the
+piece is printed as the handle goes up: every layer under it whole, the layer it stands
+in drawn **up to the nozzle** (the moves the handle has passed, in print order), a nozzle
+marker and a fading trail on the last of them, nothing above. Isolated, it is that
+isolation's own moves - one piece, bottom to top, the way Play shows one layer. The
+handle no longer snaps to layers: layer k stands over k/n - (k+1)/n of the track, and the
+place inside it is how far through the layer's moves the nozzle is. The label reads
+`Z 8.20 - 50%` and the count `40.5 / 100 layers`. The top of the track is the last layer
+whole. The handle rests where it is let go (pause the print mid-layer); a step by key, the
+`All` button or the band drag makes the top layer whole again. The bottom handle, the
+keys and Take band are by layers as before - Take band on a part layer takes what is
+drawn.
+
+**How it is built.** `zr` gains `part` (under 1 = part drawn) and `t` (where the handle
+stands on the track); `setZHead(f)` is the pointer's way in, `setZRange(lo, hi, part, t)`
+the general one (callers that move by layers are unchanged). `inMainRange` is every
+whole layer - what the overview and the isolation are built from, rebuilt only when a
+layer is crossed - and `inZRange` adds the part layer's drawn moves, so Take band,
+Measure and the hover count what is drawn. Inside a layer only `drawScrub` runs: the
+layer's first moves as lines (and beads, under True width) plus `trailGroup` - the
+nozzle and trail Play draws, now a function both use - so a frame is a layer's worth of
+lines, not the piece's (about 11 ms a frame on a 107,000-move slice; a layer crossing
+costs what a layer step always did). With Play's row open the nozzle is Play's own and
+follows the handle. The drag is one BACK step (item 14), which puts the handle back
+where it stood. Checked in `gscope:shell` (a whole layer has no part layer; the handle
+half way up draws the layer's first moves and the nozzle; further up the same layer draws
+more, still one BACK step; the top is whole; isolated, it scrubs the isolation's moves;
+BACK; a step by layer makes the layer whole).
+
+**Not here yet.** The bottom handle is by layers; scrubbing a piece through the Play
+row's speed (a piece-long Play button) is the next small step.
 
 ## Checks
 
