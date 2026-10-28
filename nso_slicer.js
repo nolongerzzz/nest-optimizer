@@ -267,6 +267,8 @@
       resolutionMm: BAMBU_PROFILE_06.resolutionMm,
       supportThresholdDeg: CONSTANTS.supportThresholdDeg.bambu,
       overhangMinAreaMm2: null,            // null -> one line width squared
+      overhangSubMm: 0.2,                  // a wall edge is judged along its length at this step, not at its midpoint alone: a corner's ledge a few tenths of a mm long is an overhang wall (Bambu's, measured on the six support heads); 0/null: the midpoint only
+      overhangEdgeFrac: null,              // null -> 0.5: a wall is over air when its centre is; less: when this share of its width is
       onlyOneWallTop: BAMBU_PROFILE_06.onlyOneWallTop,
       topWallMergeMm: null,                // null -> 2 x outer wall width (measured fit)
       topWallKeepMm: null,                 // null -> merge + 0.985 x (w / 0.62) (measured fit)
@@ -1459,7 +1461,7 @@
             var feat = lp.depth === 0 ? 'Outer wall' : 'Inner wall';
             var w = lp.depth === 0 ? o.outerWallWidthMm : o.innerWallWidthMm;
             loopsOf(g, lp.cs).forEach(function (path) {
-              splitOverhang(path, belowPolys, i).forEach(function (piece) {
+              splitOverhang(path, belowPolys, i, w, o.overhangEdgeFrac, o.overhangSubMm).forEach(function (piece) {
                 L.paths.push({ feature: piece.over ? 'Overhang wall' : feat, width: w,
                                closed: piece.closed, pts: piece.pts });
               });
@@ -1789,18 +1791,39 @@
    * is over air when its edges' midpoints fall outside the layer below's
    * section. The first layer is never an overhang.
    */
-  function splitOverhang(path, belowPolys, layerIndex) {
+  function splitOverhang(path, belowPolys, layerIndex, width, frac, subMm) {
     var pts = path.pts;
     if (layerIndex === 0 || !belowPolys) return [{ over: false, closed: true, pts: pts }];
     var n = pts.length;
-    var flags = [];
-    var any = false, all = true;
+    var sub = subMm > 0 ? subMm : 0;
+    /* One flag per stretch of the loop. An edge is judged at its midpoint (the rule as it was) - and, with `sub` (mm), along its length at that step,
+       so a few tenths of a millimetre of overhang at an edge's end, a corner's ledge, are found where the midpoint alone sits over the layer below. */
+    var P = [pts[0]], flags = [];
+    function over(x, y) { return !inside(belowPolys, x, y); }
     for (var i = 0; i < n; i++) {
       var p = pts[i], q = pts[(i + 1) % n];
-      var f = !inside(belowPolys, (p[0] + q[0]) / 2, (p[1] + q[1]) / 2);
-      flags.push(f);
-      if (f) any = true; else all = false;
+      var ex = q[0] - p[0], ey = q[1] - p[1], el = Math.hypot(ex, ey);
+      var k = sub > 0 ? Math.max(1, Math.ceil(el / sub - 1e-9)) : 1;
+      if (k === 1) {
+        flags.push(over((p[0] + q[0]) / 2, (p[1] + q[1]) / 2));
+        P.push(q);
+        continue;
+      }
+      var sf = [];
+      for (var u = 0; u < k; u++) { var t = (u + 0.5) / k; sf.push(over(p[0] + ex * t, p[1] + ey * t)); }
+      /* the legacy midpoint rule decides an edge that is uniform; a mixed edge is cut where the flag changes */
+      var uni = true;
+      for (u = 1; u < k; u++) if (sf[u] !== sf[0]) { uni = false; break; }
+      if (uni) { flags.push(sf[0]); P.push(q); continue; }
+      for (u = 0; u < k; u++) {
+        flags.push(sf[u]);
+        P.push(u === k - 1 ? q : [p[0] + ex * (u + 1) / k, p[1] + ey * (u + 1) / k]);
+      }
     }
+    P.pop();                                   /* the closing point repeats the first */
+    pts = P; n = pts.length;
+    var any = false, all = true;
+    for (var m = 0; m < n; m++) { if (flags[m]) any = true; else all = false; }
     if (!any) return [{ over: false, closed: true, pts: pts }];
     if (all) return [{ over: true, closed: true, pts: pts }];
     // rotate so we start at a change of state, then cut into runs

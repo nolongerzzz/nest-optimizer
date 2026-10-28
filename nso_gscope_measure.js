@@ -198,5 +198,40 @@
     return L.join('\n');
   }
 
-  return { summarize: summarize, layerRows: layerRows, compare: compare, report: report, lineMetrics: lineMetrics, mergeLines: mergeLines };
+  /* -------------------------------------------------------------- reach */
+
+  /* Where a head's support stops, against the overhang it holds up. Bambu's rule (measured on its slice of the six reference heads): the support runs up
+     to the TOP layer that has Overhang wall - its last line 0.2 - 0.4 mm under it - and nothing above, because what is printed above that layer has
+     something under it. Per head (opts.headOf(move) names it: the object id by default; a caller that knows names joins a part to the objects that
+     support it): the overhang wall's Z range, the top of the support family (Support, interface, transition), and gap = overhang top - support top. */
+  var SUPPORT_FAMILY = { 'Support': 1, 'Support interface': 1, 'Support transition': 1 };
+
+  function reach(items, opts) {
+    var headOf = (opts && opts.headOf) || function (m) { return m.objectId == null ? null : String(m.objectId); };
+    var by = {}, order = [];
+    movesOf(items).forEach(function (m) {
+      var h = headOf(m);
+      if (h == null) return;
+      var r = by[h];
+      if (!r) { r = by[h] = { head: h, overhangZMin: null, overhangTop: null, overhangMoves: 0, supportTop: null, interfaceTop: null, supportMoves: 0 }; order.push(h); }
+      var f = featOf(m), z = num(m.z, null);
+      if (z == null) return;
+      if (f === 'Overhang wall') {
+        r.overhangMoves++;
+        if (r.overhangTop == null || z > r.overhangTop) r.overhangTop = z;
+        if (r.overhangZMin == null || z < r.overhangZMin) r.overhangZMin = z;
+      } else if (SUPPORT_FAMILY[f]) {
+        r.supportMoves++;
+        if (r.supportTop == null || z > r.supportTop) r.supportTop = z;
+        if (f === 'Support interface' && (r.interfaceTop == null || z > r.interfaceTop)) r.interfaceTop = z;
+      }
+    });
+    return order.map(function (h) {
+      var r = by[h];
+      r.gapMm = r.overhangTop != null && r.supportTop != null ? Math.round((r.overhangTop - r.supportTop) * 1000) / 1000 : null;
+      return r;
+    });
+  }
+
+  return { summarize: summarize, layerRows: layerRows, compare: compare, report: report, lineMetrics: lineMetrics, mergeLines: mergeLines, reach: reach };
 });

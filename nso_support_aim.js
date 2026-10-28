@@ -1220,7 +1220,7 @@
     }
     var b = SB.detect(rawTris, {
       pitch: opts.beaconPitch, angleDeg: angleDeg, plateZ: plateZ, minDropMm: minDrop,
-      skipList: skipList, occluders: occluders, planeTol: planeTol, bridgeMm: opts.bridgeMm, insetMm: opts.beaconInsetMm, seedPitchMm: opts.beaconSeedMm
+      skipList: skipList, occluders: occluders, planeTol: planeTol, bridgeMm: opts.bridgeMm, insetMm: opts.beaconInsetMm, seedPitchMm: opts.beaconSeedMm, bridgeMinMm: opts.beaconBridgeMinMm
     });
     out.beaconsReason = b.reason;
     if (!b.ok) return null;

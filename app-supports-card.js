@@ -355,7 +355,7 @@ var NSO_SUPPORTS_CARD = (function () {
     if (S.det && S.det.key === key) return S.det;
     var soup = worldUp(p.mesh), sk = skipListFor(m, p, soup);
     /* beaconInsetMm: a spot stands at least this far in from the edge of the surface it holds (docs/SUPPORT-FOOTPRINT.md) */
-    var SBm = window.NSO_SupportBeacons, opts = { skipList: sk.list, angleDeg: S.angle, occluders: occ.map(occluderSoup), beaconInsetMm: SBm && SBm.INSET_PRODUCT_MM || 0, beaconSeedMm: SBm && SBm.SEED_PITCH_PRODUCT_MM || 0 };
+    var SBm = window.NSO_SupportBeacons, opts = { skipList: sk.list, angleDeg: S.angle, occluders: occ.map(occluderSoup), beaconInsetMm: SBm && SBm.INSET_PRODUCT_MM || 0, beaconSeedMm: SBm && SBm.SEED_PITCH_PRODUCT_MM || 0, beaconBridgeMinMm: SBm && SBm.BRIDGE_MIN_PRODUCT_MM || 0 };
     /* A BIG piece is read in a worker (detection is 10 s of JS on the vase, and
        the card used to freeze the page for all of it on opening). The card
        says "measuring…" and redraws when the read comes back. */

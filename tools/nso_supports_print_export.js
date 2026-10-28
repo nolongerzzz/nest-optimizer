@@ -53,7 +53,7 @@ for (const f of ['nso_thickness.js', 'nso_support_beacons.js', 'nso_support_aim.
   vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), ctx, { filename: f });
 }
 const SA = ctx.NSO_SupportAim, ST = ctx.NSO_SupportTree, GP = ctx.NSO_SupportGridpack, SI = ctx.NSO_SupportInterface;
-const CARD = { skipList: [], angleDeg: 35, occluders: [], style: 'tree', restOnModel: false, sideMm: 1.2 };
+const CARD = { skipList: [], angleDeg: +(process.env.NSO_SUPPORT_ANGLE || 35), occluders: [], style: 'tree', restOnModel: false, sideMm: +(process.env.NSO_SUPPORT_SIDE || 1.2) };   /* NSO_SUPPORT_ANGLE: the card's overhang angle, for a probe; 35 is the card's */
 /* app-supports-card.js PARTS_OPTS */
 const PARTS = { interface: true, foldSheets: false, footPads: 'shared' };
 const NAME = 'top_clip_x2';
@@ -67,7 +67,7 @@ async function build(piece, partsOver, name, one, brim, outline) {
      asks for some of them; 'perimeter' and 'inset' are the two early single options. */
   const OL = outline === true ? { inset: 1, seed: 1, perimeter: 1, fill: 1 } : outline === 'perimeter' ? { perimeter: 1 } : outline === 'inset' ? { inset: 1 } : (outline && typeof outline === 'object') ? outline : {};
   const SBM = ctx.NSO_SupportBeacons;
-  const det = SA.detectOverhangs(piece, { skipList: [], angleDeg: CARD.angleDeg, occluders: [], beaconInsetMm: OL.inset ? SBM.INSET_PRODUCT_MM : 0, beaconSeedMm: OL.seed ? SBM.SEED_PITCH_PRODUCT_MM : 0 });
+  const det = SA.detectOverhangs(piece, { skipList: [], angleDeg: CARD.angleDeg, occluders: [], beaconInsetMm: OL.inset ? SBM.INSET_PRODUCT_MM : 0, beaconSeedMm: OL.seed ? SBM.SEED_PITCH_PRODUCT_MM : 0, beaconBridgeMinMm: OL.ledge ? SBM.BRIDGE_MIN_PRODUCT_MM : 0 });
   if (!det.ok) throw new Error(det.reason);
   const areas = [];
   let plateZ = 0;

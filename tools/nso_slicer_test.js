@@ -253,6 +253,20 @@ function frustum(n, r0, r1, z0, z1) {
     // a slab floating over a block vs over the plate
     const over = prism(rect(0, 10, 0, 10), 0, 4).concat(prism(rect(0, 10, 0, 10), 5, 6));
     const oo = SL.sliceObjects([{ name: 'o', soup: over }], SL.defaultsFor(0.4, { emitGcode: false }), wasm).objects[0].overhang;
+    // a ledge at an edge's END: a 13.5 mm slab on a 10 mm block, flush along two edges - their midpoints are over the block, their ends over air.
+    // Bambu calls those ends Overhang wall (Circular and Sphere's corner ledges, 15.2); judged at the midpoint alone they are never found
+    const ledge = prism(rect(0, 10, 0, 10), 0, 4).concat(prism(rect(-2, 11.5, 0, 10), 4, 4.4));
+    const ledgeLen = sub => {
+      const L = SL.sliceObjects([{ name: 'l', soup: ledge }], SL.defaultsFor(0.4, { emitGcode: false, wallLoops: 1, overhangSubMm: sub }), wasm).objects[0].layers;
+      const first = L.find(l => l.printZ > 4.01);
+      return first.paths.filter(q => q.feature === 'Overhang wall').reduce((a, q) => a + q.pts.reduce((b, pt, i) => i ? b + Math.hypot(pt[0] - q.pts[i - 1][0], pt[1] - q.pts[i - 1][1]) : 0, 0), 0);
+    };
+    const lenOld = ledgeLen(0), lenNew = ledgeLen(0.2);
+    // the two short sides hang whole (2 x ~9.6 mm); the long sides' hanging ends are 2 x (1.8 + 1.3) mm more, found only along the edge
+    check('a slab flush along two edges, 3.1 mm of each hanging past its block at the ends: the midpoint alone finds the two short sides only, the edge judged along its length finds the ends as well',
+          Math.abs(lenOld - 19.2) < 1 && Math.abs((lenNew - lenOld) - 6.2) < 1,
+          'midpoint ' + lenOld.toFixed(2) + ' mm; along the edge ' + lenNew.toFixed(2) + ' mm');
+    check('the default is the along-the-edge rule (overhangSubMm 0.2)', SL.defaultsFor(0.4).overhangSubMm === 0.2, SL.defaultsFor(0.4).overhangSubMm);
     check('a slab over the piece itself needs support standing on the MODEL', oo.length === 1 && oo[0].standsOn === 'model', oo[0] && oo[0].standsOn);
     const half = prism(rect(0, 10, 0, 10), 0, 4).concat(prism(rect(0, 20, 0, 10), 5, 6));
     const oh = SL.sliceObjects([{ name: 'h', soup: half }], SL.defaultsFor(0.4, { emitGcode: false }), wasm).objects[0].overhang;
@@ -417,16 +431,17 @@ function frustum(n, r0, r1, z0, z1) {
           asSupport.every(L => L.paths.length === 1) && asPart.every(L => L.paths.length === 0) && forced.every(L => L.paths.length === 0));
     check('the thin-wall constants cite their source: 1.05 x the bead, 0.13 mm the thinnest wall printed',
           SL.CONSTANTS.thinWall.ratio === 1.05 && SL.CONSTANTS.thinWall.minMm === 0.13 && SL.CONSTANTS.thinWall.source.length > 40);
-    // the repo meshes, pinned: G-code sha256 (first 16 hex) at both nozzles, flag off and on - the slicer's own defaults
+    // the repo meshes, pinned: G-code sha256 (first 16 hex) at both nozzles, flag off and on - the slicer's own defaults.
+    // hinge_knuckle_box and the two top_clip_x2 meshes were re-pinned when an overhang wall began to be judged along each edge (overhangSubMm 0.2), not at its midpoint alone: their overhang runs are cut where the layer below ends, not at the next vertex
     const PINS = {
       'fixtures/box-20mm.stl': ['bf4fa6385480d9a1', '1ce8c7eb4eca30e8'],
       'fixtures/cylinder_r10h30_s64.stl': ['4102db1663681585', 'ee3474b981bba976'],
       'fixtures/fixture_sphere_curved.stl': ['fe9c5c9cc87c6876', 'b0cf24e5869176e3'],
-      'fixtures/hinge_knuckle_box.stl': ['7f1f8a5276b28a4e', '18bed110ec6c7169'],
+      'fixtures/hinge_knuckle_box.stl': ['3831b459390f104a', '2df4339e7b0ec609'],
       'fixtures/quick/shape-torus.stl': ['c868d617c53a9c78', '93606c4799665dd6'],
       'fixtures/quick/shape-tube.stl': ['59dafe6c8652a59d', 'df62d80fe91a6680'],
-      'fixtures/supports/top_clip_x2.stl': ['4d86925095fb0779', '4559c78d7bfa0163'],
-      'fixtures/supports/top_clip_x2_coupon.stl': ['606d27ea6a611218', '9cc87768a454c121']
+      'fixtures/supports/top_clip_x2.stl': ['5fc226e22b9cc74a', '4e4837b6bd636b56'],
+      'fixtures/supports/top_clip_x2_coupon.stl': ['a307947b2d6f8c8f', 'eabd2bd7a782ca2c']
     };
     const bad = [];
     let n = 0;

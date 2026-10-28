@@ -53,6 +53,24 @@ const near = (a, b, t) => Math.abs(a - b) <= t;
   ok(cmp.onlyA.length === 1 && cmp.onlyA[0] === 'Support transition' && !cmp.onlyB.length, 'a feature only one side has is named', JSON.stringify([cmp.onlyA, cmp.onlyB]));
   ok(near(sA.lengthMm, sB.lengthMm + M.summarize(L2).lengthMm, 1e-6), 'a summary adds the moves it is given');
 
+  /* 2b. reach: where a head's support stops against the top Overhang-wall layer (docs/SUPPORT-TOP.md) */
+  {
+    const mv = [];
+    const put = (z, feat, obj) => mv.push({ index: mv.length, x0: 0, y0: 0, x1: 1, y1: 0, z, width: 0.42, height: 0.2, length: 1, layer: 0, feature: feat, objectId: obj });
+    [5, 10, 15.2].forEach(z => put(z, 'Overhang wall', 'a'));
+    [2, 14.8].forEach(z => put(z, 'Support', 'a'));
+    put(14.4, 'Support interface', 'a');
+    put(9.8, 'Support', 'b'); put(10, 'Overhang wall', 'b');
+    put(7, 'Outer wall', 'c');
+    const rows = M.reach(mv, { headOf: m => m.objectId });
+    const a = rows.find(r => r.head === 'a'), b = rows.find(r => r.head === 'b');
+    ok(a && near(a.overhangTop, 15.2, 1e-9) && near(a.supportTop, 14.8, 1e-9) && near(a.gapMm, 0.4, 1e-9), 'reach: the top overhang layer, the top support line and the gap between', JSON.stringify(a));
+    ok(a && near(a.interfaceTop, 14.4, 1e-9), 'reach: the interface top is its own', a && a.interfaceTop);
+    ok(b && near(b.gapMm, 0.2, 1e-9), 'reach: a second head is read on its own', JSON.stringify(b));
+    const c = rows.find(r => r.head === 'c');
+    ok(c && c.overhangTop === null && c.supportTop === null && c.gapMm === null, 'reach: a head with neither overhang nor support has a row of nulls, and no gap', JSON.stringify(c));
+  }
+
   /* 3. a real sliced file: every move counted once */
   const fx = path.join(__dirname, '..', 'fixtures', 'supports', 'simple_overhang_bambu.gcode.3mf');
   const res = await G.readSlicedGcode3MF(new Uint8Array(fs.readFileSync(fx)), { name: 'x' });

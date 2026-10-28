@@ -166,11 +166,15 @@
   var INSET_PRODUCT_MM = 1;          /* what the Supports card asks (opts.insetMm): a spot stands at least this far in from the edge of the surface it holds, so a column (1.2 mm) and the lines round it stay on the part. Off (0) unless asked: the planner suites pin the spots where the grid put them */
   var FOOT_TOL_MM = 0.4;             /* the footprint: the flood's first step from a spot may find the surface this far (plus a step's climb) from the spot's own height; each later step, an eighth of it plus the step's climb */
   var FLAT_NZ = Math.cos(3 * Math.PI / 180);   /* a face is flat, for moving a spot in it, within 3 deg of the plate */
+  var BRIDGE_MIN_PRODUCT_MM = 1.3;   /* what the Supports card asks (opts.bridgeMinMm): a flat face between two walls closer than this is a ledge Bambu holds (the Circular and Sphere heads' four corners), not a span anything bridges */
   var SEED_PITCH_MM = 1;             /* what the Supports card asks (opts.seedPitchMm): a second, finer look for the surfaces the grid stepped over */
   var SEED_MARGIN_MM = 0.6;          /* a fine hit this near a footprint is that footprint's edge, not a surface of its own */
   var SEED_MIN_DROP_MM = 2;          /* a seed has this much air under it at least: a face within a couple of mm of the plate is held by the first layers (the planner stands nothing under it) */
   var SEED_NEAR_MM = 3;              /* ...and it is no more than the rest of a surface the grid already holds: a seeded surface within this far of a footprint at its height is that surface's own far edge (a crescent of rim), held by the spots and the sheet there */
   var SEED_MIN_AREA_MM2 = 1.5;       /* a seeded area whose footprint is smaller than this is not held (Bambu leaves such specks bare) */
+  var LEDGE_MIN_AREA_MM2 = 0.15;     /* ...except a ledge between two walls (opts.bridgeMinMm), which Bambu does hold: the corners of a square head on a round post are 0.4 - 0.8 mm2 each, read 0.2 - 0.4 off the 0.25 mm footprint step */
+  var LEDGE_PITCH_MM = 0.5;          /* the look that finds them: a ledge 0.7 mm across falls between the samples at 1 mm */
+  var LEDGE_MAX_CELLS = 400000;      /* ...and only on a plate-sized piece's worth of cells at that pitch */
   var FOOT_STEP_MM = 0.25;           /* the footprint's sample step (a cell is pitch / round(pitch / step) of it) */
   var SAME_Z_MM = 1e-4;              /* two hits this close on one ray are one crossing */
   var HIT_EPS_MM = 1e-3;
@@ -315,6 +319,7 @@
     var minDrop = (opts.minDropMm == null) ? MIN_DROP_MM : +opts.minDropMm;
     var bridgeMm = (opts.bridgeMm == null) ? BRIDGE_DEFAULT_MM : +opts.bridgeMm;
     var bridgeTiltMax = (opts.bridgeTiltMaxDeg == null) ? BRIDGE_TILT_MAX_DEG : +opts.bridgeTiltMaxDeg;
+    var bridgeMin = (opts.bridgeMinMm == null) ? 0 : +opts.bridgeMinMm;      /* a span narrower than this is a ledge between two walls, not a bridge: held (0 = off, the planner suites' pins) */
     var standoff = (opts.sideStandoffMm == null) ? SIDE_STANDOFF_MM : +opts.sideStandoffMm;
     var ridgeGap = (opts.ridgeGapMm == null) ? RIDGE_GAP_MM : +opts.ridgeGapMm;
     var ridgeReach = (opts.ridgeReachMm == null) ? RIDGE_REACH_MM : +opts.ridgeReachMm;
@@ -512,7 +517,7 @@
           var f = probe(pin, ax, 1), b = probe(pin, ax, -1);
           if (f && b && f.d + b.d < span) span = f.d + b.d;
         }
-        if (span <= bridgeMm) { counts.bridged++; return null; }
+        if (span <= bridgeMm && !(span < bridgeMin && c.gap >= SEED_MIN_DROP_MM)) { counts.bridged++; return null; }     /* a ledge hangs: air under it, not the wedge of a tilted slab near the plate */
         if (span < Infinity) {
           base.kind = 'gap'; base.spanMm = span;
           c.need = { x: c.x, y: c.y, z: c.z, T: c.T, normal: c.T.n.slice(), need: base };
@@ -1045,7 +1050,7 @@
        is a SEED: one a coarse cell and height is added to the beacons (need.seeded), and the areas and their footprints are made again, so
        the flood from a seed traces the whole of its surface. A seeded surface is traced on its own and kept only if a disc SEED_MIN_WIDTH_MM wide fits in it (and it is no speck): a thinner crescent is left as the grid had it.
        The grid's own spots are not moved, taken away or added to wherever they hold. ---- */
-    function seedMissed(regions, sp) {
+    function seedMissed(regions, sp, onlyLedges) {
       var fine = detect(rawTris, Object.assign({}, opts, { pitch: sp, seedPitchMm: 0, footprint: false, insetMm: 0 }));
       if (!fine.ok) return 0;
       function surf(b) { var k = b.need.kind; return k === 'face' || k === 'gap' || (k === 'edge' && b.need.corner); }
@@ -1083,6 +1088,10 @@
       var kept = {}, added = 0, cands = [], sr;
       fine.beacons.forEach(function (b) {
         if (!surf(b) || !(b.need.gapBelow >= SEED_MIN_DROP_MM)) return;
+        if (onlyLedges && !(b.need.spanMm != null && b.need.spanMm < bridgeMin)) return;     /* the half-mm look keeps only the ledges it was asked for */
+        if (onlyLedges) {                                                                    /* ...and not one an earlier look already holds */
+          for (var q = 0; q < beacons.length; q++) { var o = beacons[q]; if (Math.abs(o.x - b.x) < 0.75 && Math.abs(o.y - b.y) < 0.75 && Math.abs(o.z - b.z) < 0.3) return; }
+        }
         for (var f = 0; f < fp.length; f++) {
           var F = fp[f];
           if (b.z < F.zl || b.z > F.zh) continue;
@@ -1106,7 +1115,8 @@
       Object.keys(byZ).forEach(function (kz) {
         footprints(sr = regionsOf(byZ[kz], out.grid), 0);
         sr.forEach(function (R) {
-          if (!R.footprint || R.footprint.areaMm2 < SEED_MIN_AREA_MM2) return;
+          var ledge = bridgeMin > 0 && R.beacons.length > 0 && R.beacons.every(function (b) { return b.need.spanMm != null && b.need.spanMm < bridgeMin; });
+          if (!R.footprint || R.footprint.areaMm2 < (ledge ? LEDGE_MIN_AREA_MM2 : SEED_MIN_AREA_MM2)) return;
           var near = R.beacons.some(function (b) {
             for (var f = 0; f < fp.length; f++) { if (b.z >= fp[f].zl && b.z <= fp[f].zh && edgeD(fp[f], b.x, b.y) <= SEED_NEAR_MM) return true; }
             return false;
@@ -1125,10 +1135,15 @@
     if (wantFoot) {
       var fcounts = {}, fk;
       for (fk in counts) if (Object.prototype.hasOwnProperty.call(counts, fk)) fcounts[fk] = counts[fk];
-      if (seedPitch > 0 && seedPitch < pitch) {
+      var passes = [];
+      if (seedPitch > 0 && seedPitch < pitch) passes.push([seedPitch, false]);
+      if (bridgeMin > 0 && seedPitch > 0 && LEDGE_PITCH_MM < Math.min(pitch, seedPitch) && out.grid.nx * out.grid.ny * Math.pow(pitch / LEDGE_PITCH_MM, 2) <= LEDGE_MAX_CELLS) passes.push([LEDGE_PITCH_MM, true]);
+      if (passes.length) counts.seeded = 0;
+      for (var ps = 0; ps < passes.length; ps++) {
         footprints(out.regions, 0);                         /* where the grid's spots already hold: the coverage the finer look is read against */
-        counts.seeded = seedMissed(out.regions, seedPitch);
-        if (counts.seeded) {
+        var added = seedMissed(out.regions, passes[ps][0], passes[ps][1]);
+        counts.seeded += added;
+        if (added) {
           /* a seeded surface is an area of its own, by height: the rim the grid held and the apex over it are planned as they were and as two */
           var held = beacons.filter(function (b) { return !b.need.seeded; }), seeds = {}, regs = held.length ? regionsOf(held, out.grid) : [];
           beacons.forEach(function (b) { if (b.need.seeded) { var kz = Math.round(b.z / 1.5); (seeds[kz] = seeds[kz] || []).push(b); } });
@@ -1240,6 +1255,7 @@
     RIDGE_REACH_MM: RIDGE_REACH_MM,
     CREASE_MIN_DEG: CREASE_MIN_DEG,
     INSET_PRODUCT_MM: INSET_PRODUCT_MM,
+    BRIDGE_MIN_PRODUCT_MM: BRIDGE_MIN_PRODUCT_MM,
     SEED_PITCH_PRODUCT_MM: SEED_PITCH_MM,
     detect: detect,
     footprintsOf: footprintsOf,

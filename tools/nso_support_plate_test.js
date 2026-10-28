@@ -33,6 +33,8 @@ const { soupMinDistance } = require('./nso_soup_distance.js');
 
 const { ROOT } = lib;
 const FIXTURE = path.join(ROOT, 'fixtures', 'supports', 'supp_ref.3mf');
+// Circular and Sphere re-pinned by the narrow ledge (supports-top, docs/SUPPORT-TOP.md): the four corners of the square head on the round post (z 15, 0.4 - 0.8 mm2 each, a wall 0.2 - 1.2 mm
+// from each) were bridged and bare; the card asks (beaconBridgeMinMm) and they are held now - 13760 -> 22312 and 12888 -> 21444 triangles, the towers up to 13.4 mm. The other heads' bytes are the same.
 const TODAY = {        // sha256 of the support bytes of a single-piece Generate on the card as it is now (the plate: six parts, one picked).
                        // Re-pinned by supports-one-trunk: they were 7dc1d1f's (b1e08222e92a / 17be71520673 / af6e05895a2d, 584 / 440 / 424
                        // triangles); the card's Auto is the one-trunk build with the sheet of #301 since, and builds these three heads differently.
@@ -44,8 +46,8 @@ const TODAY = {        // sha256 of the support bytes of a single-piece Generate
                        // The region plate (supports-footprint, third round, docs/SUPPORT-FOOTPRINT.md section 9): the card lays the interface and the transition from each footprint and the surface's height, layer by layer;
                        // the Negative Sphere2 / Circular / Sphere re-pinned (24332 / 13760 / 12888 triangles on upstream's 2 transition + 2 interface stack, with the thin beads and the lighter smoothing of section 10, and the plate run to the face's edge (section 11); the plates are hatch and loops at 0.5 mm, the sheets were fewer lines).
   'Support Negative Sphere2.stl': { sha: '4fad39b1dca263b35c01b6a9227b5cbbe42c0b157d9bba951f162b8e85646896', triangles: 24332 },
-  'Support Circular.stl': { sha: '2d7b49914c8b4f7ec1f8cfc529211fd1b379ce556d6dad28df26f2064f01a883', triangles: 13760 },
-  'Support Sphere.stl': { sha: 'c60da53fc70e98d1e32c8aa74059d6c36e022febb956e4a7a3bc5b18e521d6e3', triangles: 12888 }
+  'Support Circular.stl': { sha: '06330b3b03fe1d1b18dc1bf63d38e55ecea46bc6eb91e8d7df1efbc51d0c19a9', triangles: 22312 },
+  'Support Sphere.stl': { sha: 'bdcb554b870bc0fa119c034c06d5bf8c2ddb49c48fe823a3371ca343c94fb7a1', triangles: 21444 }
 };
 const XY_DISTANCE = 0.35;      // the slice's support_object_xy_distance (nso_support_beacons.js SIDE_STANDOFF_MM, nso_support_gridpack.js TRUNK_KEEP_MM)
 const STRICT_GAP = process.env.NSO_STRICT_GAP === '1';
