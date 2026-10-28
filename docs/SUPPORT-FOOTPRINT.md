@@ -294,7 +294,7 @@ now moves its share by 11 points or less (the plate follows the surface; the sta
 **Gates.** `support:region` (`tools/nso_support_region_test.js`): the geometry on rasters of known answer (the exact distance, a circle's level set, the smoothed mask, the plate of a rectangle:
 one loop, a hatch flush on its lattice at 45 and 135 deg, never nearer the loop than a line, the strip too thin for a hatch, the speck, the disk's concentric rings) and that the extrusion takes every layer.
 `support:coverage`: floors per head, aligned and turned, the turn moving no head but the Oblique by more than 15 points, and ceilings on the plate's seconds. `support:plate` section 6 is re-pinned
-for the three single-piece builds the region plate changes (Negative Sphere2 29992, Circular 13484, Sphere 14272 triangles (on the 2 + 2 stack, with sections 10 and 11)). Everything else is unchanged with the option off.
+for the three single-piece builds the region plate changes (Negative Sphere2 30356, Circular 13760, Sphere 12888 triangles (on the 2 + 2 stack, with sections 10 and 11)). Everything else is unchanged with the option off.
 
 **Not done, and named.**
 - **A rim or a crescent under about 0.7 mm** is still bare: a bead needs the region a half line and a gap in from its edge on both sides, and the footprint's own 0.1 mm margin comes
@@ -405,7 +405,9 @@ The card's default stays 35 (its plan hashes and counts are pinned there) and it
 
 **What the 38 - 40 deg builds broke, and the fix.** At 38 deg and over the Negative Sphere2's three flat patches, its cavity's wall and its apex are one footprint that rises 5 mm; its plate was built (11 layers) and then thrown away by the plate's own check against the part (`dmin`
 0.1796 against the gap 0.18): the bead's downhill edge on a 20 deg slope stands 0.04 mm lower than the cell's centre that the stack's gap was read for. The footprint then went the ordinary way and the flat face held 28 %.
-`gapAt` now counts the bead's half width on the slope (`gap / cos + 0.03 + (width / 2 + 0.03) * slope`): 81 % at 36, 38 and 40 deg alike. `support:coverage` section 4 holds the plate at 40 (floors Base 85, Circular 85, Sphere 88, Negative Sphere 68, Negative Sphere2 52, Oblique 85).
+`gapAt` now counts the bead's half width on the slope (`gap / cos + (width / 2 + 0.03) * slope`): 81 % at 36, 38 and 40 deg alike. `support:coverage` section 4 holds the plate at 40 (floors Base 85, Circular 85, Sphere 88, Negative Sphere 68, Negative Sphere2 52, Oblique 85).
+
+**A layer too low (the owner's slice at 40 deg).** The first version of that fix also added a flat 0.03 mm, and the stack's layer index is read as `floor((surface - gap - A) / layer)` with `A` the lowest tip's height less the gap: the lowest flat sits *exactly* on a layer's edge, so any excess - that 0.03, or float32 noise of 1e-8 mm in the height map's `S` and `gapAt` - dropped the whole flat a layer. At 40 deg the Negative Sphere2's three flat patches were laid 0.2 mm lower (a gap of 0.38 mm, not 0.18), and Bambu's slicer, which types a line as interface by its distance under the part, called the plate plain *Support* (the owner saw "an entire interface missing"). The flat 0.03 is gone and the index takes 1e-4 of a layer of slack (`+ 1e-4`, not `+ 1e-9`); the plate now stands at the same height at 30 and at 40.
 
 **Left.** The Sphere's and the Circular's flat 0 - 20 deg (85 / 93 % against Bambu's 99): the pole's last millimetre inside the innermost loop, too small for a bead; the Negative Sphere2's patches' tails (section 11).
 **Not measured here:** Bambu's overhang-wall mm on a slice of the card's supports at 40 - there is no Bambu Studio in this box; the slice above is the owner's. A slice at 40 would settle whether the dome heads' overhang wall comes down to Bambu's.
