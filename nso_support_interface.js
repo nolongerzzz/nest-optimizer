@@ -1604,12 +1604,12 @@
             if (gi2 < 0 || gi2 >= nx || gj2 < 0 || gj2 >= ny || !inRegion[gj2 * nx + gi2]) continue;
             gmax = Math.max(gmax, Math.abs(S[qg2] - S[gj2 * nx + gi2]) / (2 * CELLS));
           }
-          gapAt[qg2] = o.gap * Math.sqrt(1 + gmax * gmax) + 0.03 + (o.width / 2 + 0.03) * gmax;   /* a bead is a line wide: on a slope its downhill edge stands lower than its middle */
+          gapAt[qg2] = o.gap * Math.sqrt(1 + gmax * gmax) + (o.width / 2 + 0.03) * gmax;   /* a bead is a line wide: on a slope its downhill edge stands lower than its middle */
         }
         var A = zs[0] - o.gap, m = new Int32Array(N).fill(-99999), mmin = 1e9, mmax = -1e9;
         for (var q5 = 0; q5 < N; q5++) {
           if (!usable[q5]) continue;
-          m[q5] = Math.floor((S[q5] - (range <= REGION_FLAT_MM ? o.gap : gapAt[q5]) - A) / o.layer + 1e-9) - 1;
+          m[q5] = Math.floor((S[q5] - (range <= REGION_FLAT_MM ? o.gap : gapAt[q5]) - A) / o.layer + 1e-4) - 1;     /* the lowest flat stands on a layer's edge: float32 noise (1e-8 mm) must not push it a layer down */
           if (m[q5] < mmin) mmin = m[q5]; if (m[q5] > mmax) mmax = m[q5];
         }
         if (mmin > mmax)return;
