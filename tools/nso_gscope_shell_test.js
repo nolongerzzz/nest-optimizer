@@ -831,7 +831,7 @@ withApp(async (page, logs) => {
     // EXPORT on a slice with a selection: all six, as it was
     await clickFace(page, '#ms-nav-export');
     let o = await opens(page);
-    const ex = await exportGroups(page);
+    const ex = (await exportGroups(page)).filter(g => !/^This slice/.test(g.t));      // (the two groups of a slice made on the plate show only for one: app-print.js exportSlice)
     check('Export (a real click on the corner\'s EXPORT) opens its card alone, under the corner row; a slice with a selection: "Selection" four, "Sliced piece" two, no "Whole plate"',
       o.exp.open && o.exp.vis && o.exp.on && o.exp.aria === 'true' && !o.menu.open && ex.length === 3 && ex[0].btns.length === 4 && ex[1].btns.length === 2 && ex[0].shown && ex[1].shown && !ex[2].shown, J([o.exp, ex]));
     const rx = await reach(page, EXPORT_IDS);
