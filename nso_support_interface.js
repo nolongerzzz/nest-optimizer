@@ -1088,6 +1088,102 @@
     }
     return loops;
   }
+  /* THE SLAB OF A REGION (opts.slabPlate): the region's footprint as ONE solid prism a layer high - its outline traced off the mask (marching squares,
+     simplified), the holes bridged to it and the cap ear-clipped on the loops' own vertices (so the prism is closed, not a soup). It is the footprint
+     alone: no loops, no lines, no thin beads. The slicer that reads it lays the zigzag itself (a sheet zone is filled with one continuous run, turned each
+     layer), where the plate of loops and lines it used to read was cut by the slicer's wall inset into the pieces the G-scope showed (20 runs a layer
+     against Bambu's 2). Returns { rings: [closed [x, y] rings, outer first], tris: Float32Array } or null when the mask has no ring to trace or the
+     triangulation fails (the caller then lays the loops and lines as before). */
+  function slabOfMask(M, nx, ny, ox, oy, cellMm, z0, z1, epsMm) {
+    var f = new Float32Array(M.length), q;
+    for (q = 0; q < M.length; q++) f[q] = M[q] ? 1 : 0;
+    function a2(r) { var s = 0; for (var i = 0, j = r.length - 1; i < r.length; j = i++) s += r[j][0] * r[i][1] - r[i][0] * r[j][1]; return s / 2; }
+    function pip(p, r) {
+      var inn = false;
+      for (var i = 0, j = r.length - 1; i < r.length; j = i++) if ((r[i][1] > p[1]) !== (r[j][1] > p[1]) && p[0] < (r[j][0] - r[i][0]) * (p[1] - r[i][1]) / (r[j][1] - r[i][1]) + r[i][0]) inn = !inn;
+      return inn;
+    }
+    var rings = isoLoops(f, nx, ny, 0.5).map(function (r) {
+      var mm = r.map(function (p) { return [ox + p[0] * cellMm, oy + p[1] * cellMm]; });
+      mm = simplifyRing(mm, epsMm);
+      return mm.slice(0, -1);
+    }).filter(function (r) { return r.length >= 3 && Math.abs(a2(r)) > 0.05; });
+    if (!rings.length) return null;
+    var depth = rings.map(function (r, i) { var d = 0; rings.forEach(function (o2, k) { if (k !== i && pip(r[0], o2)) d++; }); return d; });
+    var out = [], closed = [];
+    function side(r) {                                                   /* the wall of a ring wound with the solid on its left */
+      for (var i = 0; i < r.length; i++) {
+        var a = r[i], b = r[(i + 1) % r.length];
+        out.push(a[0], a[1], z0, b[0], b[1], z0, b[0], b[1], z1, a[0], a[1], z0, b[0], b[1], z1, a[0], a[1], z1);
+      }
+    }
+    for (var i = 0; i < rings.length; i++) {
+      if (depth[i] % 2) continue;
+      var O = rings[i].slice();
+      if (a2(O) < 0) O.reverse();
+      var Hs = [];
+      rings.forEach(function (h, k) { if (depth[k] === depth[i] + 1 && pip(h[0], O)) { var H = h.slice(); if (a2(H) > 0) H.reverse(); Hs.push(H); } });
+      var T;
+      try { T = triangulateRings(O, Hs); } catch (e) { return null; }
+      if (!T.tris.length) return null;
+      T.tris.forEach(function (t) {
+        var A = T.pts[t[0]], B = T.pts[t[1]], C = T.pts[t[2]];
+        out.push(A[0], A[1], z1, B[0], B[1], z1, C[0], C[1], z1);
+        out.push(A[0], A[1], z0, C[0], C[1], z0, B[0], B[1], z0);
+      });
+      side(O); Hs.forEach(side);
+      closed.push(O.concat([O[0].slice()]));
+    }
+    return { rings: closed, tris: new Float32Array(out) };
+  }
+  /* an outer ring (counter-clockwise) with holes (clockwise) cut into triangles on their own vertices: each hole bridged to the nearest vertex it can see,
+     then the ears clipped (as nso_face_features.triangulate does for a cap) */
+  function triangulateRings(outer, holes) {
+    var pts = outer.slice(), idx = outer.map(function (_, i) { return i; });
+    function o3(u, v, w) { return (v[0] - u[0]) * (w[1] - u[1]) - (v[1] - u[1]) * (w[0] - u[0]); }
+    function crosses(p, q, a, b) { var d1 = o3(p, q, a), d2 = o3(p, q, b), d3 = o3(a, b, p), d4 = o3(a, b, q); return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0)); }
+    function sees(p, q) { for (var i = 0; i < idx.length; i++) if (crosses(p, q, pts[idx[i]], pts[idx[(i + 1) % idx.length]])) return false; return true; }
+    function inTri(p, a, b, c) {
+      var d1 = (p[0] - b[0]) * (a[1] - b[1]) - (a[0] - b[0]) * (p[1] - b[1]), d2 = (p[0] - c[0]) * (b[1] - c[1]) - (b[0] - c[0]) * (p[1] - c[1]), d3 = (p[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (p[1] - a[1]);
+      return !((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0));
+    }
+    holes.slice().sort(function (a, b) { return Math.max.apply(null, b.map(function (p) { return p[0]; })) - Math.max.apply(null, a.map(function (p) { return p[0]; })); }).forEach(function (H) {
+      var base = pts.length, hi = 0, i;
+      H.forEach(function (p) { pts.push(p); });
+      for (i = 1; i < H.length; i++) if (H[i][0] > H[hi][0]) hi = i;
+      var hp = H[hi], best = -1, bestD = Infinity;
+      for (var j = 0; j < idx.length; j++) {
+        var p = pts[idx[j]], dd = (p[0] - hp[0]) * (p[0] - hp[0]) + (p[1] - hp[1]) * (p[1] - hp[1]);
+        if (dd < bestD && sees(hp, p)) { best = j; bestD = dd; }
+      }
+      if (best < 0) throw new Error('a hole could not be bridged');
+      var ring = [];
+      for (i = 0; i <= H.length; i++) ring.push(base + (hi + i) % H.length);
+      idx = idx.slice(0, best + 1).concat(ring).concat([idx[best]]).concat(idx.slice(best + 1));
+    });
+    var tris = [], cur = idx.slice(), guard = 0;
+    while (cur.length > 3 && guard++ < 100000) {
+      var clipped = false;
+      for (var pass = 0; pass < 2 && !clipped; pass++) for (var i2 = 0; i2 < cur.length; i2++) {
+        var ia = cur[(i2 + cur.length - 1) % cur.length], ib = cur[i2], ic = cur[(i2 + 1) % cur.length], a = pts[ia], b = pts[ib], c = pts[ic], cr = o3(a, b, c);
+        if (pass === 0 ? !(cr > 1e-12) : !(cr >= -1e-12)) continue;
+        var inside = false;
+        for (var m = 0; m < cur.length && !inside; m++) {
+          var im = cur[m];
+          if (im === ia || im === ib || im === ic) continue;
+          var pp = pts[im];
+          if ((pp[0] === a[0] && pp[1] === a[1]) || (pp[0] === b[0] && pp[1] === b[1]) || (pp[0] === c[0] && pp[1] === c[1])) continue;
+          if (inTri(pp, a, b, c)) inside = true;
+        }
+        if (inside) continue;
+        if (cr > 1e-12) tris.push([ia, ib, ic]);
+        cur.splice(i2, 1); clipped = true; break;
+      }
+      if (!clipped) throw new Error('a cap could not be triangulated');
+    }
+    if (cur.length === 3 && o3(pts[cur[0]], pts[cur[1]], pts[cur[2]]) > 1e-12) tris.push(cur.slice());
+    return { pts: pts, tris: tris };
+  }
   /* THE PLATE OF A REGION, as Bambu lays a raft and its interface: an outline loop hugging the region's edge, and inside it a hatch at hatchDeg (the
      caller alternates it layer by layer), the lines a pitch apart on a lattice fixed in the plane (so two layers of one direction stack line on line),
      each running to a line's gap short of the loop - the loops and the lines are separate paths, never touching, which the extrusion takes. A region too
@@ -1307,6 +1403,7 @@
       capRise: opts.capRiseMm == null ? CAP_RISE_MM : +opts.capRiseMm,
       capMin: opts.capMinMm == null ? CAP_MIN_MM : +opts.capMinMm,
       capMax: opts.capMaxMm == null ? CAP_MAX_MM : +opts.capMaxMm,
+      slab: opts.slabPlate === true,                      /* a region plate laid as one solid footprint for the slicer to fill (slabOfMask), not as loops and lines */
       eps: EPS_MM
     };
     if (!(o.pitch > o.width)) return { ok: false, reason: 'pitch ' + o.pitch + ' does not clear the ' + o.width + ' mm line' };
@@ -1686,6 +1783,16 @@
             var cnx = cI1 - cI0 + 1, cny = cJ1 - cJ0 + 1, Mcrop = new Uint8Array(cnx * cny);
             for (var cj = 0; cj < cny; cj++) for (var ci2 = 0; ci2 < cnx; ci2++) Mcrop[cj * cnx + ci2] = Mraw[(cJ0 + cj) * nx + cI0 + ci2];
             Mk = smoothMask(Mcrop, cnx, cny, 1 + Math.min(tryN, 3));                 /* a layer the extrusion refuses is traced again from a smoother mask */
+            if (o.slab) {
+              var sl = slabOfMask(Mk, cnx, cny, ox + cI0 * CELLS, oy + cJ0 * CELLS, CELLS, zb, zb + o.layer, 0.03);
+              if (sl) {
+                var slLen = 0; sl.rings.forEach(function (r) { for (var k = 1; k < r.length; k++) slLen += Math.hypot(r[k][0] - r[k - 1][0], r[k][1] - r[k - 1][1]); });
+                pl = { loops: sl.rings.map(function (r) { return { ring: r, lenMm: 0 }; }), lines: [], thin: [], slab: true };
+                pl.loops[0].lenMm = slLen;
+                paths = sl.rings; ex2 = { ok: true, tris: sl.tris };
+                break;
+              }
+            }
             pl = plateOfRegion(Mk, cnx, cny, ox + cI0 * CELLS, oy + cJ0 * CELLS, CELLS, o.pitch + 0.03 + 0.04 * Math.min(tryN, 2), o.width + 0.03 * Math.min(tryN, 2), (n % 2 ? 135 : 45), REGION_MIN_LOOP_MM, 0.9 + 0.4 * tryN);
             if (tryN >= 1) pl.thin = [];                                       /* the thin beads go first when a layer is refused: the loops and the hatch are the plate */
             if (tryN >= 2) pl.lines = [];
