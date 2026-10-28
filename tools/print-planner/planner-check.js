@@ -507,7 +507,7 @@ async function main() {
     ' layers; same feature set on ' + ra.equal + ' of ' + ra.aligned + ' - the engine\'s narrow-sparse rule was fitted on 0.6 mm slices)',
     ra.rows['Internal solid infill'].n >= 40 && ra.equal >= 10 && ra.equal <= 40, JSON.stringify(ra.rows['Internal solid infill']));
   check('PINNED, engine not planner: the arc has no supports in this plan, so its slope is Overhang wall in NSO (' + rb.rows['Overhang wall'].n + ' layers) where Studio holds it up with trees; the engine makes no Gap infill (Studio: ' + rb.rows['Gap infill'].b + ' layers) and no Floating vertical shell (' + rb.rows['Floating vertical shell'].b + ')',
-    rb.rows['Gap infill'].n === 0 && rb.rows['Gap infill'].b > 100 && rb.rows['Floating vertical shell'].n === 0 && rb.rows['Overhang wall'].n >= 50);
+    rb.rows['Gap infill'].n === 0 && rb.rows['Gap infill'].b > 100 && rb.rows['Floating vertical shell'].n === 0 && rb.rows['Overhang wall'].n >= 15);   // 50 and over while a wall was overhang once its centre hung; 23 now it is overhang where its whole width does (Bambu's)
   check('the same arc, A1 and P1S: the engine gives one toolpath (the two plans have the same features on every layer), the printers differ in the blocks and speeds only',
     JSON.stringify(results[refs[1].name].rows) === JSON.stringify(results[refs[2].name].rows));
 

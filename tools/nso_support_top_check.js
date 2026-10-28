@@ -8,10 +8,11 @@
    The rule, read off Bambu's slice of the six heads (fixtures/supports/tree_slimsupports.gcode.3mf): a head's support runs up to the TOP layer that
    has Overhang wall - its last line 0.2 - 0.4 mm under it - and nothing above, because what is printed above that layer has something under it.
 
-   Two things are measured per head, and they fail for different reasons:
+   Three things are measured per head, and they fail for different reasons:
      the SUPPORT   its top (the highest Support, interface or transition line) against the overhang's top: gap = overhang top - support top.
                    Bambu's gap is 0.2 - 0.4 mm on all six. This is the generator.
-     the CLASSIFIER our slicer's top Overhang-wall layer against Bambu's. A support cannot reach a layer our slicer never calls an overhang.
+     the CLASSIFIER our slicer's top Overhang-wall layer against Bambu's, and how much overhang wall it finds in all (Bambu: a wall is overhang where its
+                   whole width hangs past the layer below). A support cannot reach a layer our slicer never calls an overhang; one that calls too much asks for more.
    Gates: our overhang top is within 0.4 mm of Bambu's (the slicer, held). The support's gap under Bambu's own overhang top has a GOAL, 0 - 0.8 mm
    (a note where it is not met, today on the four heads whose tops are ledges and apexes), and a FLOOR, 2.2 mm, that fails: before the narrow ledge
    (docs/SUPPORT-TOP.md) Circular stopped 6.4 and Sphere 5.6 mm under it. --report prints and never fails. */
@@ -32,7 +33,7 @@ const RAFT = args.includes('--raft'), REPORT = args.includes('--report');
 const ONLY = (args.find(a => a.startsWith('--only=')) || '').slice(7).split(',').filter(Boolean);
 const REF = path.join(ROOT, 'fixtures', 'supports', 'tree_slimsupports.gcode.3mf');
 const KEYS = RP.NAMES.filter(k => !ONLY.length || ONLY.includes(k));
-const SUPPORT_GAP_GOAL = 0.8, SUPPORT_GAP_FLOOR = 2.2, CLASSIFIER_TOL = 0.4;
+const SUPPORT_GAP_GOAL = 0.8, SUPPORT_GAP_FLOOR = 2.2, CLASSIFIER_TOL = 0.4, LENGTH_RATIO = [0.8, 1.3];
 const headName = n => String(n).replace(/\.stl$/, '').replace(/ - (support|brim).*$/, '');
 
 let pass = 0, fail = 0;
@@ -57,7 +58,7 @@ async function ours(WASM, key) {
   const r = SL.sliceObjects(objs, SL.defaultsFor(0.4, {}), WASM);
   if (!r.ok) throw new Error('slice failed: ' + r.reason);
   const moves = [];
-  r.objects.forEach(ob => (ob.layers || []).forEach(L => (L.paths || []).forEach(p => moves.push({ feature: p.feature, z: L.printZ, objectId: 'h' }))));
+  r.objects.forEach(ob => (ob.layers || []).forEach(L => (L.paths || []).forEach(p => { let l = 0; for (let i = 0; i + 1 < p.pts.length; i++) l += Math.hypot(p.pts[i + 1][0] - p.pts[i][0], p.pts[i + 1][1] - p.pts[i][1]); moves.push({ feature: p.feature, z: L.printZ, objectId: 'h', length: l }); })));
   const row = M.reach(moves, { headOf: m => m.objectId })[0] || {};
   const sup = r.objects.filter(o => o.role === 'support').length;
   return Object.assign(row, { head: key, supports: sup });
@@ -81,6 +82,8 @@ async function ours(WASM, key) {
     const okFloor = vsB != null && vsB >= -0.2 && vsB <= SUPPORT_GAP_FLOOR + 1e-9, okGoal = vsB != null && vsB >= -0.2 && vsB <= SUPPORT_GAP_GOAL + 1e-9;
     check(name + ': the support stops within ' + SUPPORT_GAP_FLOOR + ' mm under the top of Bambu\'s overhang (the floor)', okFloor, 'support top ' + f2(O.supportTop) + ' vs overhang top ' + f2(B.overhangTop));
     if (okFloor && !okGoal) console.log('  note  ' + name + ': ' + f2(vsB) + ' mm under it; the goal is ' + SUPPORT_GAP_GOAL + ' (Bambu: 0.2 - 0.4)');
+    const ratio = B.overhangMm > 0 && O.overhangMm != null ? O.overhangMm / B.overhangMm : null;
+    check(name + ': our overhang wall is as long as Bambu\'s, within ' + LENGTH_RATIO.join(' - ') + ' x (a wall is overhang where its whole width hangs)', ratio != null && ratio >= LENGTH_RATIO[0] && ratio <= LENGTH_RATIO[1], 'ours ' + f2(O.overhangMm) + ' mm vs Bambu ' + f2(B.overhangMm) + ' mm');
     check(name + ': our top overhang-wall layer is Bambu\'s, within ' + CLASSIFIER_TOL + ' mm', O.overhangTop != null && Math.abs(O.overhangTop - B.overhangTop) <= CLASSIFIER_TOL + 1e-9, 'ours ' + f2(O.overhangTop) + ' vs Bambu ' + f2(B.overhangTop));
   }
   console.log('\n' + pass + ' passed, ' + fail + ' failed');

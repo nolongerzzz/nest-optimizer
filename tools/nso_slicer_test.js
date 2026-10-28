@@ -432,13 +432,14 @@ function frustum(n, r0, r1, z0, z1) {
     check('the thin-wall constants cite their source: 1.05 x the bead, 0.13 mm the thinnest wall printed',
           SL.CONSTANTS.thinWall.ratio === 1.05 && SL.CONSTANTS.thinWall.minMm === 0.13 && SL.CONSTANTS.thinWall.source.length > 40);
     // the repo meshes, pinned: G-code sha256 (first 16 hex) at both nozzles, flag off and on - the slicer's own defaults.
-    // hinge_knuckle_box and the two top_clip_x2 meshes were re-pinned when an overhang wall began to be judged along each edge (overhangSubMm 0.2), not at its midpoint alone: their overhang runs are cut where the layer below ends, not at the next vertex
+    // hinge_knuckle_box and the two top_clip_x2 meshes were re-pinned when an overhang wall began to be judged along each edge (overhangSubMm 0.2), not at its midpoint alone: their overhang runs are cut where the layer below ends, not at the next vertex;
+    // fixture_sphere_curved, hinge_knuckle_box and shape-torus again when a wall became Overhang wall only where its whole width hangs (overhangEdgeFrac 1, Bambu's: the dome heads' overhang length 170 -> 44 mm against its 44)
     const PINS = {
       'fixtures/box-20mm.stl': ['bf4fa6385480d9a1', '1ce8c7eb4eca30e8'],
       'fixtures/cylinder_r10h30_s64.stl': ['4102db1663681585', 'ee3474b981bba976'],
-      'fixtures/fixture_sphere_curved.stl': ['fe9c5c9cc87c6876', 'b0cf24e5869176e3'],
-      'fixtures/hinge_knuckle_box.stl': ['3831b459390f104a', '2df4339e7b0ec609'],
-      'fixtures/quick/shape-torus.stl': ['c868d617c53a9c78', '93606c4799665dd6'],
+      'fixtures/fixture_sphere_curved.stl': ['b20238310238d62d', '765e9c3a4bbce169'],
+      'fixtures/hinge_knuckle_box.stl': ['65695c31c351d63d', '3f137c8232bffa7e'],
+      'fixtures/quick/shape-torus.stl': ['95b2b40eb073d5c0', 'e686396781f0952d'],
       'fixtures/quick/shape-tube.stl': ['59dafe6c8652a59d', 'df62d80fe91a6680'],
       'fixtures/supports/top_clip_x2.stl': ['5fc226e22b9cc74a', '4e4837b6bd636b56'],
       'fixtures/supports/top_clip_x2_coupon.stl': ['a307947b2d6f8c8f', 'eabd2bd7a782ca2c']

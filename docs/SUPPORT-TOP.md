@@ -19,8 +19,9 @@ is the number it reads: per head, the top Overhang-wall layer, the top support /
 
 Two things are measured, and they fail for different reasons:
 
-1. **The classifier** - our slicer's top Overhang-wall layer against Bambu's. A support cannot reach a layer our slicer never calls an overhang.
-   Held to 0.4 mm on all six heads.
+1. **The classifier** - our slicer's top Overhang-wall layer against Bambu's, and how much overhang wall it finds in all. A support cannot reach a layer
+   our slicer never calls an overhang, and one that calls too much asks for more than Bambu's does. Held to 0.4 mm on the top layer and to 0.8 - 1.3 x
+   Bambu's overhang length on all six heads.
 2. **The support** - its top against the overhang's top. The *goal* is Bambu's 0.2 - 0.4 mm (a note where it is not met); the *floor*, 2.2 mm, fails.
 
 ## What was wrong, and what was changed
@@ -30,6 +31,11 @@ in a square head on a round post: the top layer's front edge is 5 mm long, its m
 Bambu calls those ends Overhang wall (15.2); ours were never found (11.0 / 13.4 / 14.4). An edge is now judged along its length, at `overhangSubMm`
 (0.2 mm) steps, and cut where the flag changes. A looser threshold (a share of the line's width past the layer below) was tried and rejected: it
 doubles the overhang length on Oblique, whose per-layer length the midpoint rule already matches (10.2 against Bambu's 10.3 mm).
+
+The classifier also called a wall overhang as soon as the line's *centre* hung past the layer below; Bambu does when the line's *whole width* hangs. On the
+four dome heads that made ours 2 - 4 times too long (Circular 166 mm against Bambu's 44; the layers up the dome's flank where Bambu has none).
+`overhangEdgeFrac` (1: the wall's inner edge is the point judged) is Bambu's: overhang length 43 / 40 / 100 / 78 mm against its 44 / 40 / 95 / 84 on Circular, Sphere,
+Negative Sphere, Negative Sphere2; Base and Oblique stay within 10 % (67 against 66, 206 against 187).
 
 **The generator** did not hold those ledges at all, for two reasons, both in `nso_support_beacons.js` and both off unless the card asks:
 

@@ -213,11 +213,12 @@
       var h = headOf(m);
       if (h == null) return;
       var r = by[h];
-      if (!r) { r = by[h] = { head: h, overhangZMin: null, overhangTop: null, overhangMoves: 0, supportTop: null, interfaceTop: null, supportMoves: 0 }; order.push(h); }
+      if (!r) { r = by[h] = { head: h, overhangZMin: null, overhangTop: null, overhangMoves: 0, overhangMm: 0, supportTop: null, interfaceTop: null, supportMoves: 0 }; order.push(h); }
       var f = featOf(m), z = num(m.z, null);
       if (z == null) return;
       if (f === 'Overhang wall') {
         r.overhangMoves++;
+        r.overhangMm += m.x0 != null && m.x1 != null ? Math.hypot(m.x1 - m.x0, m.y1 - m.y0) : num(m.length, 0);
         if (r.overhangTop == null || z > r.overhangTop) r.overhangTop = z;
         if (r.overhangZMin == null || z < r.overhangZMin) r.overhangZMin = z;
       } else if (SUPPORT_FAMILY[f]) {
@@ -228,6 +229,7 @@
     });
     return order.map(function (h) {
       var r = by[h];
+      r.overhangMm = Math.round(r.overhangMm * 100) / 100;
       r.gapMm = r.overhangTop != null && r.supportTop != null ? Math.round((r.overhangTop - r.supportTop) * 1000) / 1000 : null;
       return r;
     });

@@ -267,8 +267,8 @@
       resolutionMm: BAMBU_PROFILE_06.resolutionMm,
       supportThresholdDeg: CONSTANTS.supportThresholdDeg.bambu,
       overhangMinAreaMm2: null,            // null -> one line width squared
+      overhangEdgeFrac: 1,                 // a wall is Overhang wall when this share of its width hangs past the layer below: 1, the whole line (Bambu's: the six support heads' overhang length 44 / 41 / 103 / 83 mm against its 44 / 40 / 95 / 84); 0.5 is its centre, the rule before; null the same
       overhangSubMm: 0.2,                  // a wall edge is judged along its length at this step, not at its midpoint alone: a corner's ledge a few tenths of a mm long is an overhang wall (Bambu's, measured on the six support heads); 0/null: the midpoint only
-      overhangEdgeFrac: null,              // null -> 0.5: a wall is over air when its centre is; less: when this share of its width is
       onlyOneWallTop: BAMBU_PROFILE_06.onlyOneWallTop,
       topWallMergeMm: null,                // null -> 2 x outer wall width (measured fit)
       topWallKeepMm: null,                 // null -> merge + 0.985 x (w / 0.62) (measured fit)
@@ -1799,11 +1799,15 @@
     /* One flag per stretch of the loop. An edge is judged at its midpoint (the rule as it was) - and, with `sub` (mm), along its length at that step,
        so a few tenths of a millimetre of overhang at an edge's end, a corner's ledge, are found where the midpoint alone sits over the layer below. */
     var P = [pts[0]], flags = [];
-    function over(x, y) { return !inside(belowPolys, x, y); }
+    /* the point judged is the line's centre moved (frac - 0.5) widths toward the material - frac 1: its inner edge - along the normal to the right of the
+       travel (material is on the left of a loop's travel). A line whose inner edge is over air hangs whole. */
+    var reach = (frac != null && width > 0) ? (0.5 - frac) * width : 0, rnx = 0, rny = 0;
+    function over(x, y) { return !inside(belowPolys, x + rnx * reach, y + rny * reach); }
     for (var i = 0; i < n; i++) {
       var p = pts[i], q = pts[(i + 1) % n];
       var ex = q[0] - p[0], ey = q[1] - p[1], el = Math.hypot(ex, ey);
       var k = sub > 0 ? Math.max(1, Math.ceil(el / sub - 1e-9)) : 1;
+      if (el > 0) { rnx = ey / el; rny = -ex / el; }
       if (k === 1) {
         flags.push(over((p[0] + q[0]) / 2, (p[1] + q[1]) / 2));
         P.push(q);
