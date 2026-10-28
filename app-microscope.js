@@ -612,6 +612,9 @@ var NSO_MICROSCOPE = (function () {
   // what the capture box catches and what a line pick lands on are the same
   // moves either way, so switching back and forth never loses a selection.
   var renderMode = 'toolpath';
+  // Toolpath view only: also fill every extrusion move out to its real width (a flat
+  // ribbon under the line), the way Bambu Studio draws a slice. View state, like renderMode.
+  var trueWidth = true;
   // Isolate's state, kept apart from what is drawn. Isolated: the selection
   // alone, drawn as-is (applyDisplay).
   var isolated = false;
@@ -2597,6 +2600,10 @@ var NSO_MICROSCOPE = (function () {
         indexLines(mesh);
         v.overviewMeshes[feature] = mesh;
         v.overviewGroup.add(mesh);
+        if (trueWidth && renderMode !== 'solid' && !isTravel) {
+          var rb = ribbonMesh(segs, colorForGroup(feature, gi));
+          if (rb) { rb.userData.feature = feature; v.overviewGroup.add(rb); }
+        }
       });
       // Solid view: the same moves, swept. The line meshes stay in the scene
       // with their MATERIAL switched off - three.js still raycasts an object
@@ -3197,6 +3204,9 @@ var NSO_MICROSCOPE = (function () {
     Object.keys(v.solidMeshes || {}).forEach(function (name) {
       v.solidMeshes[name].visible = !rowOff(name) && !detail;
     });
+    v.overviewGroup.children.forEach(function (c) {
+      if (c.userData.ribbon) c.visible = !rowOff(c.userData.feature) && !detail;
+    });
     v.detailGroup.children.forEach(function (mesh) {
       mesh.visible = !rowOff(mesh.userData.feature);
     });
@@ -3621,6 +3631,10 @@ var NSO_MICROSCOPE = (function () {
         var mesh = lineMesh(byFeature[feature], colourOf(feature), feature === 'Travel');
         mesh.userData.feature = feature;
         v.detailGroup.add(mesh);
+        if (trueWidth && feature !== 'Travel') {
+          var rb = ribbonMesh(byFeature[feature], colourOf(feature));
+          if (rb) { rb.userData.feature = feature; v.detailGroup.add(rb); }
+        }
       });
       return;
     }
@@ -3651,6 +3665,42 @@ var NSO_MICROSCOPE = (function () {
       out[w + 3] = s.x1 - cx; out[w + 4] = s.z; out[w + 5] = -(s.y1 - cy);
     }
     return out;
+  }
+
+  /**
+   * Extrusion moves as flat ribbons at their real width, in view space: the
+   * bead's top face, two triangles a move, lit flat. Drawn beneath the move's
+   * own line (pushed back by a polygon offset, so the line wins where they meet)
+   * to read how neighbouring beads lie and touch. Not pickable: a pick is the
+   * line's.
+   */
+  function ribbonMesh(segs, color) {
+    var n = 0, i;
+    for (i = 0; i < segs.length; i++) if (segs[i].w > 0) n++;
+    if (!n) return null;
+    var out = new Float32Array(n * 18), w = 0, cx = doc.cx, cy = doc.cy;
+    for (i = 0; i < segs.length; i++) {
+      var s = segs[i];
+      if (!(s.w > 0)) continue;
+      var dx = s.x1 - s.x0, dy = s.y1 - s.y0, len = Math.sqrt(dx * dx + dy * dy);
+      if (!(len > 1e-9)) { n--; continue; }
+      var hw = s.w / 2, px = -dy / len * hw, py = dx / len * hw;
+      // (x, y, z) -> (x - cx, z, -(y - cy)); corners a,b at the start, c,d at the end
+      var ax = s.x0 - px - cx, ay = -(s.y0 - py - cy), bx = s.x0 + px - cx, by = -(s.y0 + py - cy);
+      var ex = s.x1 + px - cx, ey = -(s.y1 + py - cy), fx = s.x1 - px - cx, fy = -(s.y1 - py - cy);
+      out[w++] = ax; out[w++] = s.z; out[w++] = ay;  out[w++] = bx; out[w++] = s.z; out[w++] = by;  out[w++] = ex; out[w++] = s.z; out[w++] = ey;
+      out[w++] = ax; out[w++] = s.z; out[w++] = ay;  out[w++] = ex; out[w++] = s.z; out[w++] = ey;  out[w++] = fx; out[w++] = s.z; out[w++] = fy;
+    }
+    if (!w) return null;
+    var geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(w === out.length ? out : out.slice(0, w), 3));
+    var mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+      color: new THREE.Color(color).multiplyScalar(0.7), side: THREE.DoubleSide,
+      polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1
+    }));
+    mesh.userData.ribbon = true;
+    mesh.raycast = function () {};
+    return mesh;
   }
 
   /** Moves as line segments, the overview's own way of drawing them. */
@@ -4748,6 +4798,13 @@ var NSO_MICROSCOPE = (function () {
     return renderMode;
   }
 
+  function setTrueWidth(on) {
+    trueWidth = !!on;
+    syncRenderRow();
+    if (view && doc && doc.kind === 'toolpath') viewChanged();
+    return trueWidth;
+  }
+
   /**
    * Toolpath / Solid, a row of the card's Slice side: enabled while a slice is
    * shown - one made here, or a sliced file. On a mesh (the Normal side, where
@@ -4758,10 +4815,12 @@ var NSO_MICROSCOPE = (function () {
     var a = $('ms-render-toolpath'), b = $('ms-render-solid');
     if (a) { a.classList.toggle('active', renderMode === 'toolpath'); a.setAttribute('aria-pressed', String(renderMode === 'toolpath')); setDisabled(a, !isPath); }
     if (b) { b.classList.toggle('active', renderMode === 'solid'); b.setAttribute('aria-pressed', String(renderMode === 'solid')); setDisabled(b, !isPath); }
+    var w = $('ms-render-width');
+    if (w) { w.classList.toggle('active', trueWidth); w.setAttribute('aria-pressed', String(trueWidth)); setDisabled(w, !isPath || renderMode === 'solid'); }
     var rd = $('ms-render-read');
     if (rd) {
       if (!isPath) rd.textContent = 'Flip the switch to Slice to draw the slice as a toolpath or as a solid.';
-      else if (renderMode !== 'solid') rd.textContent = 'Each move drawn as a line; a small selection is highlighted as its flat beads.';
+      else if (renderMode !== 'solid') rd.textContent = trueWidth ? 'Each move drawn at its real width, with its line down the middle; a small selection is highlighted as its flat beads.' : 'Each move drawn as a line; a small selection is highlighted as its flat beads.';
       else if (view && view.solidBuilt) rd.textContent = 'Shown: ' + describeSolid(view.solidBuilt.stats) + '.';
       else rd.textContent = 'Nothing shown.';
     }
@@ -5473,6 +5532,7 @@ var NSO_MICROSCOPE = (function () {
     bind('ms-btn-export-solid-stl', 'click', exportSolidAsSTL);
     bind('ms-render-toolpath', 'click', function () { setRenderMode('toolpath'); });
     bind('ms-render-solid', 'click', function () { setRenderMode('solid'); });
+    bind('ms-render-width', 'click', function () { setTrueWidth(!trueWidth); });
     if (!wiredWindow && window && window.addEventListener) {
       wiredWindow = true;
       window.addEventListener('resize', resize);
@@ -5645,6 +5705,8 @@ var NSO_MICROSCOPE = (function () {
     fusedGeometry: fusedGeometry,
     setRenderMode: setRenderMode,
     renderMode: function () { return renderMode; },
+    trueWidth: function () { return trueWidth; },
+    setTrueWidth: setTrueWidth,
     shownSolid: function () { return view && view.solidBuilt ? view.solidBuilt : null; },
     isolate: function () { return isolate(); },
     back: back,
