@@ -2039,6 +2039,8 @@ function clearPlateOnly() {
     if (typeof NSO_BEDS !== 'undefined' && NSO_BEDS.count() > 1 && NSO_SUPPORTS_CARD.forget) NSO_SUPPORTS_CARD.forget(state.models.map(m => m.id));
     else NSO_SUPPORTS_CARD.forgetAll();
   }
+  // the Supports Blockers are this bed's too: they were put round the pieces that are going
+  if (window.NSO_SUPPORT_BLOCKERS) window.NSO_SUPPORT_BLOCKERS.forget();
   // Named before anything is dropped: the models, the plate, and what both stacks hold.
   const leaving = new Set();
   [state.models, state.placed, state.undoStack, state.redoStack].forEach(root => nsoGeometriesNamed(root, leaving));
@@ -3455,6 +3457,7 @@ function openCanvasContextMenu(event) {
   if (idx >= 0) selectPlaced(idx);
   const menu = document.getElementById('ctx-menu');
   if (menu) menu.dataset.piece = idx >= 0 ? String(idx) : '';
+  state.ctxClick = { x: event.clientX, y: event.clientY };   // where "Add Supports Blocker..." puts its box
   nsoCtxMenuRefresh();
   showCtxMenu(event.clientX, event.clientY);
   if (idx >= 0) setStatus('Selected #' + (idx + 1) + ' - Delete piece or press Delete');
@@ -3557,6 +3560,11 @@ function wireCtxMenu() {
   item('ctx-redo', () => redoLast());
   item('ctx-clone', () => cloneSelectedModel({ count: 1 }));
   item('ctx-mirror', () => nsoCtxMirrorAcrossX());
+  item('ctx-support-blocker', () => {
+    // a ghost box where the right click was: no support is made inside it (app-support-blockers.js, docs/SUPPORT-BLOCKERS.md)
+    if (window.NSO_SUPPORT_BLOCKERS) window.NSO_SUPPORT_BLOCKERS.addAtClient(state.ctxClick);
+    else setStatus('Supports Blocker did not load - check console', true);
+  });
   item('ctx-export', () => nsoCtxOpenExport('piece'));
   item('ctx-export-plate', () => nsoCtxOpenExport('plate'));
   item('ctx-clear-plate', () => clearPlateOnly());

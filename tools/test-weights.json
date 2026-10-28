@@ -298,6 +298,8 @@
     "support:beacons": {"weight":2100,"note":""},
     "support:canonical": {"weight":15550,"note":""},
     "support:curved": {"weight":63000,"note":"37s on the cloud box x 1.7, rounded up: the arc built at 35 deg, its slice, the coupon rebuilt, and the card in Chromium at 60 deg; supports-curved-sheet, #265; re-timed at supports-stair-body"},
+    "support:blockers": {"weight":80000,"note":"estimate (supports-blockers): Node only; the bridge planned and built in-thread six times (no box, a far box, a box across it, overlapping boxes, all held, two pieces) in about 45 s locally; one CI run measures it"},
+    "support:blockers-drive": {"weight":170000,"note":"estimate (supports-blockers): the Supports Blockers driven with real clicks and drags, one build, and a real slice opened in G-scope; about 100 s locally; one CI run measures it"},
     "support:custom": {"weight":196000,"note":"115s locally x 1.7, rounded up: the tilted box built in Auto, Assisted and Custom, circles drawn, tips clicked, a member erased; supports-custom-ui"},
     "support:everywhere": {"weight":520000,"note":"~5 min locally x 1.7, rounded up: the reference read, 24 builds of the six real parts in four poses each sliced and measured for sideways clearance, four .3mf written, and the flat coupon and top_clip_x2 hashed; supports-sheet-everywhere"},
     "support:exposed": {"weight":23900,"note":""},

@@ -200,7 +200,7 @@
   if (typeof document === 'undefined' || !document.getElementById) return api;
 
   var $ = function (id) { return document.getElementById(id); };
-  var S = { busy: false, job: null, result: null, sig: null, pieces: null, profile: null, assets: {}, timer: null, t0: 0, stage: '' };
+  var S = { busy: false, job: null, result: null, sig: null, pieces: null, profile: null, assets: {}, timer: null, t0: 0, stage: '', hook: null };
 
   function say(msg, isErr) {
     if (typeof setStatus === 'function') setStatus(msg, !!isErr);
@@ -333,6 +333,7 @@
     var secs = Math.round((Date.now() - S.t0) / 1000);
     var el = $('slice-stage');
     if (el) el.textContent = S.stage + ' - ' + secs + ' s';
+    if (S.hook && S.hook.onStage) S.hook.onStage(S.stage + ' - ' + secs + ' s');
   }
 
   function onStage(name, info) {
@@ -365,55 +366,81 @@
     syncActions();
   }
 
-  function slice() {
-    if (S.busy) return;
+  /**
+   * Slice the plate. Returns a promise of { ok, reason, cancelled } that never rejects, so another card can go on from it
+   * (Supports > Slice and Preview); the Slice card's own button ignores it. `hook.onStage(text)` hears the stage line as
+   * the card shows it, and `hook.onDone(result)` hears how it ended - the card's readout is the Slice card's, unchanged.
+   */
+  function slice(hook) {
+    if (S.busy) return Promise.resolve({ ok: false, reason: 'busy' });
     var profile = profileFor(plateId());
-    if (!profile) { refresh(); readout('Pick the A1 mini or the A1 / P1S / X1C plate to slice for.', true); return; }
+    function stop(reason, quietly) {
+      if (!quietly) readout(reason, true);
+      return { ok: false, reason: reason };
+    }
+    if (!profile) { refresh(); return Promise.resolve(stop('Pick the A1 mini or the A1 / P1S / X1C plate to slice for.')); }
     var pieces;
     try { pieces = readPieces(); } catch (err) { console.error(err); pieces = null; }
-    if (pieces === null) { readout('The plate reader (G-scope\'s) did not load - check console.', true); return; }
-    if (!pieces.length) { readout('Nothing on the plate to slice.', true); return; }
+    if (pieces === null) return Promise.resolve(stop('The plate reader (G-scope\'s) did not load - check console.'));
+    if (!pieces.length) return Promise.resolve(stop('Nothing on the plate to slice.'));
     S.result = null; S.pieces = null;
     var sig = plateSignature();
     readout('', false);
+    S.hook = hook || null;
     S.t0 = Date.now(); S.stage = 'Loading the ' + profile.short + ' profile';
     setBusy(true);
     stageText();
     S.timer = setInterval(stageText, 500);
-    var mine = S.job = { cancelled: false, run: null };
+    var mine = S.job = { cancelled: false, run: null, over: false, finish: null }, told;
+    var result = new Promise(function (go) { told = go; });
+    /* how it ended, once: by itself, or by Cancel (a worker that is stopped answers nothing) */
+    function ended(r) {
+      if (mine.over) return r;
+      mine.over = true;
+      if (S.hook === (hook || null)) S.hook = null;
+      if (hook && hook.onDone) hook.onDone(r);
+      told(r);
+      return r;
+    }
+    mine.finish = ended;
     loadAssets(profile).then(function (assets) {
       if (mine.cancelled) return null;
       var objects = pieceObjects(pieces, assets.printer.bed);
       mine.run = runAway(objects, assets, onStage);
       return mine.run.promise;
     }).then(function (r) {
-      if (mine.cancelled || !r) return;
+      if (mine.cancelled || !r) return ended({ ok: false, reason: 'Slice cancelled.', cancelled: true });
       S.job = null;
-      if (!r.ok) { setBusy(false); S.result = null; readout(r.reason, true); say('Slice: ' + r.reason, true); return; }
+      if (!r.ok) { setBusy(false); S.result = null; readout(r.reason, true); say('Slice: ' + r.reason, true); return ended({ ok: false, reason: r.reason }); }
       S.result = r; S.sig = sig; S.pieces = pieces; S.profile = profile;
       setBusy(false);
       var sup = pieces.filter(function (p) { return p.support && !p.brim; }).length;
       readout(describe(r) + ' - ' + pieces.length + ' object' + (pieces.length === 1 ? '' : 's') + (sup ? ' (' + sup + ' support' + (sup === 1 ? '' : 's') + ')' : ''), false);
       say('Sliced for the ' + profile.short + ': ' + describe(r));
       refresh();                          // a piece moved while it ran: the readout says so, and Export stays shut
+      return ended({ ok: true, reason: '', line: describe(r), fresh: isFresh() });
     }).catch(function (err) {
-      if (mine.cancelled) return;
+      if (mine.cancelled) return ended({ ok: false, reason: 'Slice cancelled.', cancelled: true });
       S.job = null; S.result = null;
       setBusy(false);
       var why = (err && err.message) || String(err);
       readout(why, true);
       console.error('[slice]', err);
       say('Slice failed: ' + why, true);
+      return ended({ ok: false, reason: why });
     });
+    return result;
   }
 
   function cancel() {
     if (!S.busy || !S.job) return;
-    S.job.cancelled = true;
-    if (S.job.run) S.job.run.cancel();
+    var job = S.job;
+    job.cancelled = true;
+    if (job.run) job.run.cancel();
     S.job = null;
     setBusy(false);
     readout('Slice cancelled.', false);
+    if (job.finish) job.finish({ ok: false, reason: 'Slice cancelled.', cancelled: true });
   }
 
   /** The finished file, or null (with the reason in the card) when the plate has moved on. */
@@ -439,20 +466,35 @@
 
   function previewInGscope() {
     var f = freshFile();
-    if (!f) return;
+    if (!f) return false;
     var MS = root.NSO_MICROSCOPE;
-    if (!MS || !MS.openFile) { readout('G-scope did not load - check console.', true); return; }
+    if (!MS || !MS.openFile) { readout('G-scope did not load - check console.', true); return false; }
     var menu = $('menu-slice');
     if (menu) menu.open = false;
     // a copy: G-scope reads the bytes, and the card keeps its file for Export
     MS.openFile(f.name, f.bytes.slice().buffer);
+    return true;
+  }
+
+  /**
+   * Slice the plate and open the slice in G-scope (the Supports card's Slice and Preview): the Slice card's own slice, then
+   * its own Preview in G-scope. Resolves { ok, reason, previewed }; a slice that fails, is cancelled, or is out of date by the
+   * time it is done is not opened. `hook` is slice()'s.
+   */
+  function sliceAndPreview(hook) {
+    return slice(hook).then(function (r) {
+      if (!r.ok) return { ok: false, reason: r.reason, cancelled: !!r.cancelled, previewed: false };
+      if (!isFresh()) return { ok: false, reason: 'The plate changed while it was slicing. Press Slice and Preview again.', previewed: false };
+      var opened = previewInGscope();
+      return opened ? { ok: true, reason: '', line: r.line, previewed: true } : { ok: false, reason: 'G-scope did not open the slice - check console.', previewed: false };
+    });
   }
 
   function mount() {
     var menu = $('menu-slice');
     if (!menu) return;
     var bind = function (id, fn) { var el = $(id); if (el) el.addEventListener('click', fn); };
-    bind('btn-slice-go', slice);
+    bind('btn-slice-go', function () { slice(); });
     bind('btn-slice-cancel', cancel);
     bind('btn-slice-export', exportFile);
     bind('btn-slice-preview', previewInGscope);
@@ -460,7 +502,7 @@
     refresh();
   }
 
-  api.card = { slice: slice, cancel: cancel, exportFile: exportFile, previewInGscope: previewInGscope, refresh: refresh,
+  api.card = { slice: slice, sliceAndPreview: sliceAndPreview, cancel: cancel, exportFile: exportFile, previewInGscope: previewInGscope, refresh: refresh,
                state: function () { return { busy: S.busy, result: S.result, fresh: isFresh() }; } };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount);

@@ -13,6 +13,9 @@ npm run support:custom      tools/nso_support_custom_drive_check.mjs - Auto / As
 card - All / None, region badges, dots - and is superseded by `support:workflow`.
 It is out of `testSteps`; the file stays until someone deletes it.
 
+**Supports Blockers** (ghost boxes no support is made in) and **Slice and Preview** (the card's last button) are in
+[SUPPORT-BLOCKERS.md](SUPPORT-BLOCKERS.md).
+
 No dots on the mesh. Each **hanging area** - one region of the beacon grid
 (`docs/SUPPORT-BEACONS.md`) - is outlined faintly on the surface: the edge of
 the surface its spots hold, traced on the piece (`region.footprint`,

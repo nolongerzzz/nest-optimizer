@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=42ea819a" />
+  <link rel="stylesheet" href="styles.css?v=338e6163" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -839,6 +839,17 @@
                 <button id="sup-paint-clear" class="sup-seg" type="button" disabled
                         title="Take all the paint off this piece. One Undo puts it back.">Clear paint</button>
               </div>
+              <!-- SUPPORTS BLOCKER (app-support-blockers.js, nso_support_blockers.js, docs/SUPPORT-BLOCKERS.md): ghost boxes on the plate inside which
+                   no support is made. The right-click menu's "Add Supports Blocker..." adds one too, where the click was. -->
+              <div id="sup-blocker-row" class="sup-tools sup-blocker-row" role="group" aria-label="Supports blockers">
+                <button id="sup-blocker-add" class="sup-seg" type="button"
+                        title="Put a ghost box on the plate: no support is made inside it. Drag the box to move it (Shift: up and down), drag a handle on a face to stretch it, add as many as you like - boxes that overlap are one larger area. Click a box to pick it; Delete takes the picked one away.">Supports Blocker</button>
+                <button id="sup-blocker-delete" class="sup-seg" type="button" disabled
+                        title="Take the picked blocker away. One Undo puts it back.">Delete</button>
+                <button id="sup-blocker-clear" class="sup-seg" type="button" disabled
+                        title="Take every blocker off the plate. One Undo puts them back.">Clear</button>
+              </div>
+              <p id="sup-blocker-read" class="hint sup-blocker-read" hidden></p>
               <label class="vp-bend-field" for="sup-angle">Angle
                 <input type="number" id="sup-angle" value="35" min="1" max="89" step="1" aria-label="Overhang angle, degrees"
                        title="Faces within this many degrees of horizontal get support. Bambu Studio's threshold means the same thing, and its default is 30. A smaller angle finds only the flatter undersides; a larger one reaches steeper faces too. The outlines follow as you type."><span id="sup-angle-note" class="sup-angle-note">35&deg; &middot; Bambu 30&deg;</span></label>
@@ -901,6 +912,14 @@
                 </div>
               </details>
               <p id="sup-hint" class="hint sup-hint">Click an outlined area to leave it out, or put it back. Shift-click the piece to add a spot. Click a support to pick it.</p>
+              <!-- SLICE AND PREVIEW: the Slice card's slice of the plate, then its Preview in G-scope. The Slice card is unchanged. -->
+              <div class="sup-go-row sup-slice-row">
+                <button id="btn-sup-slice" class="btn btn-secondary sup-go" type="button"
+                        title="Slice the plate for its printer - every piece, supports included - and open the slice in G-scope to look at it. The same slice as the Slice card's; nothing is added to the plate.">Slice and Preview</button>
+                <button id="btn-sup-slice-cancel" class="btn btn-secondary" type="button" hidden
+                        title="Stop slicing. Nothing is kept.">Cancel</button>
+              </div>
+              <p id="sup-slice-line" class="hint sup-slice-line" role="status" hidden></p>
             </div>
           </details>
           <!-- ADD: what builds material onto a piece - Fill / Densify, Foam, Thicken,
@@ -1578,6 +1597,7 @@
     <div class="ctx-sep" role="separator"></div>
     <button type="button" id="ctx-clone" class="ctx-item" role="menuitem" title="One copy of the piece, placed beside it" disabled>Clone</button>
     <button type="button" id="ctx-mirror" class="ctx-item" role="menuitem" title="Reflect the piece across the plane through its centre, perpendicular to the plate's X axis. One Undo." disabled>Mirror across X</button>
+    <button type="button" id="ctx-support-blocker" class="ctx-item" role="menuitem" title="Open Supports and put a ghost box where you clicked: no support is made inside it. Move it, stretch it, add more.">Add Supports Blocker...</button>
     <button type="button" id="ctx-export" class="ctx-item" role="menuitem" title="Open the Export card to download the selected piece as STL or 3MF" disabled>Export selected as&hellip;</button>
     <button type="button" id="ctx-export-plate" class="ctx-item" role="menuitem" title="Open the Export card to export the whole plate as STL or 3MF" disabled>Export plate</button>
     <div class="ctx-sep" role="separator"></div>
@@ -1997,9 +2017,9 @@
   <script src="nso-helpers.js?v=9c476e39"></script>
   <script src="nso-recent.js?v=f03d6f13"></script>
   <script src="nso-bounds.js?v=778acac4"></script>
-  <script src="app-core.js?v=e9a70e66"></script>
+  <script src="app-core.js?v=d4f02383"></script>
   <!-- Up to six plates (beds): the active one is state.models / state.placed, the rest are kept beside it. docs/BEDS.md. -->
-  <script src="app-beds.js?v=03d606f3"></script>
+  <script src="app-beds.js?v=3d221bc4"></script>
 
 
 
@@ -2138,7 +2158,11 @@
   <script src="app-gscope-support.js?v=2397557a"></script>
   <!-- The Supports card on the main page: the same detection and planner,
        after app-core.js / app-join.js, whose ingest and soups it uses. -->
-  <script src="app-supports-card.js?v=b89a6cee"></script>
+  <!-- Supports Blockers: boxes on the plate that no support is made in. The pure half first (the card reads it), then the boxes'
+       own page code, which listens for the press before the card does. After nso-helpers.js, app-core.js. docs/SUPPORT-BLOCKERS.md. -->
+  <script src="nso_support_blockers.js?v=6962a81c"></script>
+  <script src="app-support-blockers.js?v=73c8125d"></script>
+  <script src="app-supports-card.js?v=aa104f5a"></script>
   <script src="app-gscope-slice.js?v=87de44f2"></script>
   <!-- The Slice card (left bar): the plate sliced for its printer, the .gcode.3mf
        it makes. The print planner and the packager are loaded here for it and for
@@ -2148,7 +2172,7 @@
        plate reader and G-code import it calls. See docs/PRINT-PLANNER.md. -->
   <script src="nso-print-planner.js?v=6aba9121"></script>
   <script src="nso-gcode3mf-write.js?v=cdfa15b4"></script>
-  <script src="app-print.js?v=9a600b66"></script>
+  <script src="app-print.js?v=49a9f80c"></script>
   <!-- Lift: details off a face, the face left as it was round them. After
        nso_lift.js (Phase 1: a flat face), nso_lift_curved.js (Lift 3: the
        repair under a detail lifted off a curved base), nso_lift_auto.js

@@ -4470,6 +4470,15 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
 .sup-card .sup-brush input { width: 44px; margin: 0; padding: 2px 3px; }
 .sup-card #sup-paint-clear { border-left-width: 0; }
 .sup-card .vp-select { min-width: 0; }
+/* Supports Blocker (app-support-blockers.js): add / delete / clear, and what the boxes make */
+.sup-card .sup-blocker-row { grid-auto-columns: auto; grid-template-columns: minmax(max-content, 2fr) auto auto; }
+.sup-card #sup-blocker-add { white-space: nowrap; color: #fca5a5; }
+.sup-card #sup-blocker-delete, .sup-card #sup-blocker-clear { border-left-width: 0; }
+.sup-card .sup-blocker-read { margin: 0; font-size: 10px; color: #fca5a5; }
+/* Slice and Preview, the card's last row (the Slice card's slice, then G-scope) */
+.sup-card .sup-slice-row { margin-top: 4px; }
+.sup-card .sup-slice-line { margin: 2px 0 0; font-size: 10px; color: #94a3b8; }
+.sup-card .sup-slice-line.is-bad { color: #f87171; }
 .sup-card .sup-go-row { display: grid; grid-template-columns: minmax(0, 1fr); grid-auto-flow: column; grid-auto-columns: auto; gap: 4px; width: 100%; }
 .sup-card .sup-go-row .btn { width: auto; min-width: 0; margin: 0; white-space: nowrap; text-transform: uppercase; }
 .sup-card .sup-go { padding: 11px 8px; font-size: 13px; font-weight: 700; letter-spacing: 0.06em; }

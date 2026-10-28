@@ -50,7 +50,7 @@ var NSO_BEDS = (function () {
   function newBed() {
     return {
       id: ++bedSeq, group: null, pieces: null, floor: null,
-      models: [], placed: [], undoStack: [], redoStack: [], editId: null, plateLock: false
+      models: [], placed: [], undoStack: [], redoStack: [], editId: null, plateLock: false, blockers: []
     };
   }
 
@@ -304,6 +304,7 @@ var NSO_BEDS = (function () {
     b.models = state.models; b.placed = state.placed;
     b.undoStack = state.undoStack; b.redoStack = state.redoStack;
     b.editId = state.editId; b.plateLock = !!state.plateLock;
+    b.blockers = state.supportBlockers || [];        // the Supports Blockers (app-support-blockers.js) stand on their own bed
     moveChildren(state.modelGroup, b.pieces);
   }
 
@@ -312,7 +313,8 @@ var NSO_BEDS = (function () {
     state.models = b.models; state.placed = b.placed;
     state.undoStack = b.undoStack; state.redoStack = b.redoStack;
     state.editId = b.editId; state.plateLock = !!b.plateLock;
-    b.models = b.placed = b.undoStack = b.redoStack = null;
+    state.supportBlockers = b.blockers || [];
+    b.models = b.placed = b.undoStack = b.redoStack = null; b.blockers = null;
     moveChildren(b.pieces, state.modelGroup);
     state.selectedIndex = -1;
     state.moveIndex = -1;

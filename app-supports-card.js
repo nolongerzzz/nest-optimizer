@@ -224,6 +224,32 @@ var NSO_SUPPORTS_CARD = (function () {
      only asks what hangs in air; a tall, thin piece that may sway as it
      prints is a different question, not asked yet, and the words say so. */
   var NOTHING = 'Nothing hangs in air. Tall-and-thin sway isn\'t checked yet.';
+  var ALL_BLOCKED = 'Every spot is inside a Supports Blocker. Move or resize one to let supports in.';
+
+  /* SUPPORTS BLOCKERS (nso_support_blockers.js, app-support-blockers.js, docs/SUPPORT-BLOCKERS.md): boxes on the plate, in the plate's
+     own frame, held on state.supportBlockers. No support is made in one. The card takes the spots a box holds out of its list
+     (effective), cuts the held part out of the area's footprint (the outline, and the surface the sheet is laid over), and hands the
+     boxes to the planner as obstacles, as it hands it the other pieces. A plate with no box is built exactly as it was. */
+  function BL() { return window.NSO_SupportBlockers || null; }
+  function boxesNow() { return (typeof state !== 'undefined' && state && state.supportBlockers && BL()) ? state.supportBlockers : []; }
+  function boxesKey() {
+    var b = boxesNow();
+    return b.length ? b.map(function (x) { return x.c.map(function (v) { return Math.round(v * 1000); }).concat(x.h.map(function (v) { return Math.round(v * 1000); })).join(','); }).join(';') : '';
+  }
+  /* the clipped footprints are re-traced on a raster: kept by the footprint, the boxes and the spots it was cut for */
+  var CLIPPED = typeof WeakMap === 'function' ? new WeakMap() : null;
+  function clippedFp(fp, all, boxes, pitch) {
+    var key = boxesKey() + '|' + all.length, hit = CLIPPED && CLIPPED.get(fp);
+    if (hit && hit.key === key) return hit.fp;
+    var out = BL().clipFootprint(fp, all, boxes, pitch);
+    if (CLIPPED) CLIPPED.set(fp, { key: key, fp: out });
+    return out;
+  }
+  /* what the planner is to avoid: the other pieces, and the boxes */
+  function occludersOf(D) {
+    var boxes = boxesNow();
+    return ((D.opts && D.opts.occluders) || []).concat(boxes.length ? BL().soups(boxes) : []);
+  }
 
   var S = {
     open: false, hostId: null, selSupport: null, busy: false,
@@ -507,6 +533,11 @@ var NSO_SUPPORTS_CARD = (function () {
         else if (!b.tip && gone.some(function (w) { return dist(pt(b), w) <= OFF_TOL_MM; })) b.off = true;
       });
     }
+    /* SUPPORTS BLOCKERS: a spot a box holds is not planned, outlined or counted; the area keeps the rest, and its footprint is cut where the box was */
+    var boxes = boxesNow(), every = list, nBlocked = 0;
+    if (boxes.length) { var cut = BL().filterBeacons(list, boxes); list = cut.kept; nBlocked = cut.held.length; }
+    var allBy = {};
+    if (boxes.length) every.forEach(function (b) { (allBy[b.region] = allBy[b.region] || []).push(b); });
     var by = {};
     list.forEach(function (b) { (by[b.region] = by[b.region] || []).push(b); });
     var regions = Object.keys(by).map(Number).sort(function (a, b) { return a - b; }).map(function (id) {
@@ -515,10 +546,10 @@ var NSO_SUPPORTS_CARD = (function () {
       var L = Math.hypot(n[0], n[1], n[2]) || 1;
       var dr = (det.beaconRegions || [])[id];
       return { id: id, beacons: B, point: c, normal: [n[0] / L, n[1] / L, n[2] / L],
-        fp: !custom && dr && dr.footprint ? dr.footprint : null,      // the detector's outline of the surface (an area a build split has none of its own)
+        fp: !custom && dr && dr.footprint ? (boxes.length ? clippedFp(dr.footprint, allBy[id] || B, boxes, pitch) : dr.footprint) : null,      // the detector's outline of the surface (an area a build split has none of its own), with what a blocker holds cut away
         excluded: fed ? B.every(function (b) { return b.off; }) : !!left[id] };
     });
-    return { beacons: list, regions: regions, pitch: pitch, origin: det.grid ? det.grid.origin : [0, 0], error: null };
+    return { beacons: list, regions: regions, pitch: pitch, origin: det.grid ? det.grid.origin : [0, 0], error: null, blocked: nBlocked };
   }
 
   /* -------------------------------------------------- supports and states */
@@ -582,13 +613,15 @@ var NSO_SUPPORTS_CARD = (function () {
     var m = modelOf(S.hostId), name = m ? m.name : 'the piece';
     if (S.mode === 'auto') {
       return plural(a.areas, 'hanging area', 'hanging areas') + ' at ' + S.angle + '\u00b0 on ' + name +
-        (a.left ? ' \u00b7 ' + a.left + ' left out' : '');
+        (a.left ? ' \u00b7 ' + a.left + ' left out' : '') + blockedTail(S.eff);
     }
     var eff = S.eff, on = eff.beacons.filter(function (b) { return !b.off; }).length, off = eff.beacons.length - on, z = feedOf(m).zones.length;
-    var tail = (off ? ' \u00b7 ' + off + ' off' : '') + (z ? ' \u00b7 ' + plural(z, 'circle', 'circles') : '');
+    var tail = (off ? ' \u00b7 ' + off + ' off' : '') + (z ? ' \u00b7 ' + plural(z, 'circle', 'circles') : '') + blockedTail(eff);
     if (S.mode === 'custom') return (on ? plural(on, 'tip', 'tips') : 'No tips yet') + ' on ' + name + tail;
     return plural(on, 'spot', 'spots') + ' at ' + S.angle + '\u00b0 on ' + name + tail;
   }
+  /* the spots the Supports Blockers hold, said where the card counts what it will build */
+  function blockedTail(eff) { return eff && eff.blocked ? ' \u00b7 ' + plural(eff.blocked, 'spot', 'spots') + ' blocked' : ''; }
   var WHY = { unsupported: 'left out or skipped', unreachable: 'no route to the plate' };
   /* The rows under the BUILT line: every area that is not held, in order. */
   function rowsFor(eff, st) {
@@ -609,13 +642,13 @@ var NSO_SUPPORTS_CARD = (function () {
      statesFor, areaStats - asHost points the card at it), and the sums. A piece is read only once the one before it has
      been (a big piece is read in a worker, one at a time); `pending` says one is still being measured. */
   function wideRead() {
-    var out = { pieces: [], pending: false, totals: { pieces: 0, areas: 0, left: 0, spots: 0, held: 0, unsupported: 0, unreachable: 0, supports: 0, built: 0 } };
+    var out = { pieces: [], pending: false, totals: { pieces: 0, areas: 0, left: 0, blocked: 0, spots: 0, held: 0, unsupported: 0, unreachable: 0, supports: 0, built: 0 } };
     for (var i = 0; i < S.wideIds.length; i++) {
       var r = asHost(S.wideIds[i], wideReadOne);
       out.pieces.push(r);
       if (r.measuring) { out.pending = true; break; }
       var T = out.totals;
-      T.pieces++; T.areas += r.a.areas; T.left += r.a.left; T.spots += r.spots; T.held += r.a.held;
+      T.pieces++; T.areas += r.a.areas; T.left += r.a.left; T.blocked += r.eff && r.eff.blocked || 0; T.spots += r.spots; T.held += r.a.held;
       T.unsupported += r.a.unsupported; T.unreachable += r.a.unreachable; T.supports += r.a.supports;
       if (r.a.supports) T.built++;
     }
@@ -639,7 +672,7 @@ var NSO_SUPPORTS_CARD = (function () {
   function wideIdleLine(W) {
     var T = W.totals, what = S.mode === 'auto' ? plural(T.areas, 'hanging area', 'hanging areas')
       : S.mode === 'custom' ? plural(T.spots, 'tip', 'tips') : plural(T.spots, 'spot', 'spots');
-    return plural(T.pieces, 'piece', 'pieces') + ' \u00b7 ' + what + ' at ' + S.angle + '\u00b0' + (T.left ? ' \u00b7 ' + T.left + ' left out' : '');
+    return plural(T.pieces, 'piece', 'pieces') + ' \u00b7 ' + what + ' at ' + S.angle + '\u00b0' + (T.left ? ' \u00b7 ' + T.left + ' left out' : '') + (T.blocked ? ' \u00b7 ' + plural(T.blocked, 'spot', 'spots') + ' blocked' : '');
   }
   function wideBuiltLine(W) {
     var T = W.totals;
@@ -654,7 +687,7 @@ var NSO_SUPPORTS_CARD = (function () {
       if (r.measuring) return;
       var why, kind = 'unsupported', note = S.wideNotes[r.id];
       if (r.error) why = 'could not read it: ' + r.error;
-      else if (!r.eff.beacons.length) why = S.mode === 'custom' ? 'no tips' : 'no hanging area';
+      else if (!r.eff.beacons.length) why = r.eff.blocked ? 'every spot is in a blocker' : S.mode === 'custom' ? 'no tips' : 'no hanging area';
       else if (!r.a.areas) why = 'every area left out';
       else if (note) why = note;
       else if (r.a.unreachable || r.a.unsupported) {
@@ -918,14 +951,14 @@ var NSO_SUPPORTS_CARD = (function () {
     else if (cs === 'pick') text = 'Click a piece to see where it needs holding.';
     else if (cs === 'error') { text = eff.error; bad = true; }
     else if (cs === 'measuring') text = 'measuring\u2026';
-    else if (cs === 'nothing') text = NOTHING;
+    else if (cs === 'nothing') text = eff && eff.blocked ? ALL_BLOCKED : NOTHING;
     else if (cs === 'building') text = progressLine();
     else if (cs === 'built') text = wide ? wideBuiltLine(W) : builtLine(a);
     else text = wide ? wideIdleLine(W) : idleLine(a);
     var stale = hasHost && cs === 'built' && tuneStale();
     if (stale && !S.msg) text += ' \u00b7 out of date: Tune has changed';
     if (head) { head.textContent = text; head.classList.toggle('is-bad', bad); head.classList.toggle('is-stale', stale); }
-    var en = function (id, on) { var e = $(id); if (e) e.disabled = !on || !!S.busy; };
+    var en = function (id, on) { var e = $(id); if (e) e.disabled = !on || !!S.busy || SL.busy; };
     var go = $('btn-sup-all');
     if (go) { go.textContent = cs === 'building' ? buildingLine() : cs === 'built' ? 'Regenerate' : 'Generate'; go.classList.toggle('is-stale', stale); }
     en('btn-sup-all', (cs === 'idle' || cs === 'built') && (wide ? !!(W && W.totals.areas > 0) : a && a.areas > 0));
@@ -941,6 +974,7 @@ var NSO_SUPPORTS_CARD = (function () {
     var ang = $('sup-angle');
     if (ang && document.activeElement !== ang && ang.value !== String(S.angle)) ang.value = String(S.angle);
     drawRows(cs === 'built' ? (wide ? wideRows(W) : st ? rowsFor(eff, st) : []) : []);
+    syncSlice();
     syncSwitch(cs);
     syncTune(cs, stale);
     syncPlate();
@@ -1121,7 +1155,7 @@ var NSO_SUPPORTS_CARD = (function () {
     return poseKey(p) + '|' + others(S.hostId).map(function (q) { return q.sourceId + ':' + q.mesh.position.toArray().join(','); }).join(';') +
       '|' + supportsOf(S.hostId).map(function (q) { return q.id; }).join(',') + '|' + editsOf(m).ops.length +
       '|' + JSON.stringify(memOf(S.hostId).unreach).length + '|' + memOf(S.hostId).built + '|' + ((typeof nsoMaskCount === 'function') ? nsoMaskCount(m) : 0) +
-      '|' + S.angle + '|' + S.mode + '|' + (m.nsoSupportFeed ? JSON.stringify(m.nsoSupportFeed).length : 0);
+      '|' + S.angle + '|' + S.mode + '|' + (m.nsoSupportFeed ? JSON.stringify(m.nsoSupportFeed).length : 0) + '|' + boxesKey();
   }
 
   /* ------------------------------------------------------------- picking */
@@ -1301,6 +1335,7 @@ var NSO_SUPPORTS_CARD = (function () {
   function planArea(job, D, rid, beacons, o, onProgress, feed, legacy) {
     var bs = beacons.map(function (b) { return { x: b.x, y: b.y, z: b.z, normal: b.normal, regionId: b.rid != null ? b.rid : rid, key: b.key }; });
     var opts = Object.assign({}, D.opts, { beacons: bs, style: o.style, restOnModel: o.rest });
+    if (boxesNow().length) opts.occluders = occludersOf(D);       // a Supports Blocker is an obstacle, as another piece is
     /* AUTO builds as Bambu's tree slim does: ONE trunk to a cluster of tips (nso_support_gridpack.js planOneTrunk,
        docs/SUPPORT-ONE-TRUNK.md). Straight struts are one post a spot by definition, the gecko hand is the lattice's, and a support
        that may rest on the part has legs the one-trunk crown does not make (it stands on the plate only): with "may rest" the one-trunk
@@ -1361,7 +1396,7 @@ var NSO_SUPPORTS_CARD = (function () {
     var GP = window.NSO_SupportGridpack, live = results.filter(function (r) { return r.ok && r.solids.length; });
     if (!GP || typeof GP.shareFeet !== 'function' || !live.some(function (r) { return r.solids.some(function (x) { return x.feet && x.feet.length; }); })) return results;
     var sf = GP.shareFeet(live.map(function (r) { return { solids: r.solids }; }), D.soup,
-      { plateZ: live[0].plateZ, occluders: (D.opts && D.opts.occluders) || [] });
+      { plateZ: live[0].plateZ, occluders: occludersOf(D) });
     if (!sf.ok) throw new Error(sf.reason);
     var out = live.map(function (r) { return Object.assign({}, r, { solids: [] }); });
     sf.objects.forEach(function (ob) {
@@ -1497,7 +1532,7 @@ var NSO_SUPPORTS_CARD = (function () {
    * cancelled - nothing was added") and is back in the state it was in before.
    */
   function build(pre) {
-    if (S.busy) return Promise.resolve({ ok: false, reason: 'busy' });
+    if (S.busy || SL.busy) return Promise.resolve({ ok: false, reason: 'busy' });          // a slice reads the plate: it is not changed under it
     var host = placedOf(S.hostId), hm = modelOf(S.hostId), D = detect();
     if (D === PENDING) return Promise.resolve({ ok: false, reason: 'still measuring' });
     if (!host || !D || D.error) return Promise.resolve({ ok: false, reason: D ? D.error : 'no piece' });
@@ -1506,7 +1541,7 @@ var NSO_SUPPORTS_CARD = (function () {
     var regs = eff.regions.filter(function (r) { return !r.excluded; });
     var removeIds = supportsOf(hostId).map(function (m) { return m.id; });
     if (!regs.length) {
-      S.msg = { text: 'Every area is left out. Click one to put it back.', bad: true };
+      S.msg = { text: eff.blocked && !eff.beacons.length ? ALL_BLOCKED : 'Every area is left out. Click one to put it back.', bad: true };
       sync();
       return Promise.resolve({ ok: false, reason: 'nothing to build' });
     }
@@ -1660,7 +1695,10 @@ var NSO_SUPPORTS_CARD = (function () {
     var job = J.job, hm = c.hm, D = c.D, o = c.o, regs = c.regs, spots = c.spots, areas = [], builtOf = [], chain = Promise.resolve();
     job.parts = partsOptsOf(o);                       // this piece's sheet: Dense in the one-trunk build, Open in every other
     /* the sheet fills the contact surface the detector traced (docs/SUPPORT-FOOTPRINT.md), whatever tips were planned for it */
-    if (D && D.det && window.NSO_SupportBeacons && window.NSO_SupportBeacons.footprintsOf) job.parts.sheetFootprints = window.NSO_SupportBeacons.footprintsOf(D.det.beaconRegions);
+    if (D && D.det && window.NSO_SupportBeacons && window.NSO_SupportBeacons.footprintsOf) {
+      var bx = boxesNow();      // ...less what a blocker holds
+      job.parts.sheetFootprints = bx.length ? BL().footprintsOf(D.det.beaconRegions, bx, D.det.grid ? D.det.grid.pitch : 3) : window.NSO_SupportBeacons.footprintsOf(D.det.beaconRegions);
+    }
     /* ...and the paint: the cells the brush covered, laid to its edge (paintFootprints) */
     if (job.parts.sheetRegionPlate && c.hm && paintOps(c.hm).length) job.parts.sheetFootprints = paintFootprints(c.hm, c.host, job.parts.sheetFootprints || []);
     var gp = function () { return window.NSO_SupportGridpack; };
@@ -2933,6 +2971,47 @@ var NSO_SUPPORTS_CARD = (function () {
     return { ok: true, angle: a };
   }
 
+  /* ------------------------------------------------------ slice and preview */
+
+  /* SLICE AND PREVIEW, the card's last button: the Slice card's own slice of the plate (every piece, supports included, for the plate's
+     printer - app-print.js), then its own Preview in G-scope. Nothing here slices or opens anything itself, and the Slice card is as it
+     was; this is the shortest way from the supports just built to the layers they print as. The card says how far it has got on a
+     line under the button (the Slice card's stage line, word for word), and Cancel stops the slice. */
+  var SL = { busy: false, last: null };
+  function sliceLine(text, bad) {
+    var el = $('sup-slice-line');
+    if (!el) return;
+    el.hidden = !text;
+    el.textContent = text || '';
+    el.classList.toggle('is-bad', !!bad);
+  }
+  function syncSlice() {
+    var go = $('btn-sup-slice'), cx = $('btn-sup-slice-cancel');
+    if (go) { go.disabled = SL.busy || !!S.busy; go.textContent = SL.busy ? 'Slicing\u2026' : 'Slice and Preview'; }
+    if (cx) cx.hidden = !SL.busy;
+  }
+  function sliceAndPreview() {
+    var P = window.NSO_Print && window.NSO_Print.card;
+    if (SL.busy) return Promise.resolve({ ok: false, reason: 'busy' });
+    if (S.busy) { sliceLine('Wait for the build to end, then slice.', true); return Promise.resolve({ ok: false, reason: 'building' }); }
+    if (!P || !P.sliceAndPreview) { sliceLine('The slicer did not load - check console.', true); return Promise.resolve({ ok: false, reason: 'no slicer' }); }
+    SL.busy = true; sync(); sliceLine('Slicing the plate', false);
+    return P.sliceAndPreview({ onStage: function (t) { if (SL.busy) sliceLine(t, false); } }).then(function (r) {
+      SL.busy = false; SL.last = r;
+      if (r.ok) {
+        sliceLine('', false);
+        var menu = $('menu-supports');
+        if (menu && menu.open) menu.open = false;              // G-scope has the view now
+      } else sliceLine(r.reason, !r.cancelled);
+      sync();
+      return r;
+    });
+  }
+  function cancelSlice() {
+    var P = window.NSO_Print && window.NSO_Print.card;
+    if (SL.busy && P && P.cancel) P.cancel();
+  }
+
   /* --------------------------------------------------------- the pointer */
 
   function onCanvas(ev) { return state.renderer && ev.target === state.renderer.domElement; }
@@ -3023,6 +3102,8 @@ var NSO_SUPPORTS_CARD = (function () {
     window.addEventListener('pointerup', function () { if (S.stroke) endStroke(); }, true);
     window.addEventListener('click', function (ev) { if (S.noClickUntil && Date.now() < S.noClickUntil && S.paint) { S.noClickUntil = 0; ev.stopImmediatePropagation(); ev.preventDefault(); } }, true);
     window.addEventListener('pointercancel', function () { if (S.stroke) { S.stroke = null; drawPaint(); } }, true);
+    on('btn-sup-slice', 'click', function () { sliceAndPreview(); });
+    on('btn-sup-slice-cancel', 'click', function () { cancelSlice(); });
     on('sup-paint', 'click', function () { setPaint(!S.paint); });
     on('sup-paint-clear', 'click', function () { clearPaint(); });
     window.addEventListener('keydown', onKey, true);
@@ -3060,6 +3141,12 @@ var NSO_SUPPORTS_CARD = (function () {
     clearPaint: clearPaint,
     paintCount: paintCount,
     busy: function () { return S.busy; },
+    /** The tool that holds the pointer, so that nothing else answers a press: 'paint', 'circles', 'erase', or null (app-support-blockers.js stands down for them). */
+    pointerTool: function () { return S.open ? (S.stroke || S.paint ? 'paint' : S.mode !== 'auto' && (S.tool === 'circles' || S.tool === 'erase') ? S.tool : null) : null; },
+    /** Slice and Preview: the Slice card's slice of the plate, then G-scope. Resolves { ok, reason, previewed }. */
+    sliceAndPreview: sliceAndPreview,
+    cancelSlice: cancelSlice,
+    sliceBusy: function () { return SL.busy; },
     /** The angle detection runs at (degrees); setting one re-detects at once. */
     angle: function (v) { if (v !== undefined) setAngle(v, true); return S.angle; },
     /** The watchdog, ms: a build the planner has said nothing about for this long is stopped. Default 60000. */

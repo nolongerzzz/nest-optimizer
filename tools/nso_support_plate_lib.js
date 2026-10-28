@@ -72,7 +72,8 @@ function makeDom() {
     'sup-style', 'sup-size', 'sup-rest', 'sup-rows', 'sup-hint', 'sup-tools', 'sup-tune', 'sup-tune-note', 'sup-tune-count', 'sup-tune-defaults',
     'sup-knob-tip', 'sup-knob-growth', 'sup-knob-lean', 'sup-knob-node', 'sup-plate', 'sup-plate-row', 'status', 'menu-supports',
     'sup-mode-auto', 'sup-mode-assisted', 'sup-mode-custom', 'sup-tool-tips', 'sup-tool-circles', 'sup-tool-erase',
-    'sup-raft', 'sup-paint', 'sup-paint-row', 'sup-paint-clear', 'sup-brush']) el(id);
+    'sup-raft', 'sup-paint', 'sup-paint-row', 'sup-paint-clear', 'sup-brush', 'btn-sup-slice', 'btn-sup-slice-cancel', 'sup-slice-line']) el(id);
+  els['btn-sup-slice-cancel'].hidden = true; els['sup-slice-line'].hidden = true;
   els['sup-raft'].checked = true; els['sup-brush'].value = '4';
   els['sup-progress'].firstElementChild = new El('sup-progress-fill');
   els['sup-progress'].hidden = true;
@@ -140,6 +141,7 @@ function makeApp(opts) {
   /* the selection outline is app-sel-outline.js itself: it wraps selectPlaced and puts refreshOutline on window */
   vm.runInContext(selOutline, ctx, { filename: 'app-sel-outline.js' });
   for (const f of ENGINE) vm.runInContext(read(f), ctx, { filename: f });
+  vm.runInContext(read('nso_support_blockers.js'), ctx, { filename: 'nso_support_blockers.js' });     // the Supports Blockers' pure half; a test puts boxes on state.supportBlockers
   vm.runInContext(fs.readFileSync(cardFile, 'utf8'), ctx, { filename: path.basename(cardFile) });
   const card = ctx.NSO_SUPPORTS_CARD;
 
