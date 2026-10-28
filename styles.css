@@ -3299,6 +3299,17 @@ select:focus, input:focus {
 }
 .ms-main-card button.ms-disclose::before { content: "\25B8"; display: inline-block; width: 1.2em; }
 .ms-main-card button.ms-disclose[aria-expanded="true"]::before { content: "\25BE"; }
+/* MEASURE: closed until opened; small monospace lists, the long one scrolls. */
+#ms-measure { margin-top: 6px; }
+.ms-main-card .ms-measure-list {
+  font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--text);
+  max-height: 190px;
+  overflow: auto;
+  margin: 4px 0;
+  white-space: pre;
+}
+.ms-main-card .ms-measure-warn { color: var(--warn, #e0a030); }
 /* Two to a row: nozzle · layer, walls · infill, pattern · support below. */
 #ms-slice-settings {
   margin-top: 6px;

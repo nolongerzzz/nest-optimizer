@@ -170,6 +170,7 @@
     "grid:plate": {"weight":10250,"note":""},
     "grid:wire": {"weight":5600,"note":""},
     "gscope:select": {"weight":94050,"note":""},
+    "gscope:measure": {"weight":2000,"note":"estimate: node only, the moves of one small fixture"},
     "gscope:shell": {"weight":16050,"note":""},
     "gscope:speed-drag-file": {"weight":579000,"note":"estimate (ci-shard-split-2): local time on the cloud box x gscope:speed-drag's CI-over-local, 632 s / 680 s = 0.93. 623 s local (open 129, orbit 49, pick 15, pull 130, plate 2 drag and presses 282)."},
     "gscope:speed-drag-small": {"weight":50000,"note":"estimate (ci-shard-split-2): local time on the cloud box x gscope:speed-drag's CI-over-local, 632 s / 680 s = 0.93. 53 s local; it never opens the 203k-move file."},

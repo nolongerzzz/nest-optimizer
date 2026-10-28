@@ -97,10 +97,12 @@ const ROWS = [
   ['ms-band-row', 'slice', ['ms-btn-take-band', 'ms-band-read']],
   ['ms-render-row', 'slice', ['ms-render-toolpath', 'ms-render-solid', 'ms-render-read']],
   ['ms-slice-row', 'slice', ['ms-slice-settings-toggle', 'ms-slice-settings', 'ms-slice-nozzle', 'ms-slice-layer', 'ms-slice-walls',
-                             'ms-slice-density', 'ms-slice-pattern', 'ms-slice-angle', 'ms-slice-settings-note']]
+                             'ms-slice-density', 'ms-slice-pattern', 'ms-slice-angle', 'ms-slice-settings-note']],
+  ['ms-measure-row', 'slice', ['ms-measure-toggle', 'ms-measure', 'ms-measure-head', 'ms-measure-warn', 'ms-measure-feats', 'ms-measure-layers-toggle',
+                               'ms-measure-copy', 'ms-measure-layers']]
 ];
 const NORMAL_ROWS = ['ms-region-row', 'ms-whole-row'];
-const SLICE_ROWS = ['ms-region-row', 'ms-band-row', 'ms-render-row', 'ms-slice-row'];
+const SLICE_ROWS = ['ms-region-row', 'ms-band-row', 'ms-render-row', 'ms-slice-row', 'ms-measure-row'];
 const SETTINGS = ['ms-slice-nozzle', 'ms-slice-layer', 'ms-slice-walls', 'ms-slice-density', 'ms-slice-pattern', 'ms-slice-angle'];
 /* Export: one card, from the corner, as it was. */
 const EXPORT_IDS = ['ms-btn-export-plate', 'ms-btn-export-stl', 'ms-btn-export-solid-plate', 'ms-btn-export-solid-stl',
@@ -377,7 +379,7 @@ withApp(async (page, logs) => {
       !r.menu.inCard && r.menu.plateIn && r.menu.plateRole === 'menuitem' && r.menu.moreAria[0] === 'menu' && r.menu.moreAria[1] === 'ms-import-menu', J(r.menu));
     r.rows.forEach(([id, inRows, on, out]) => check('row #' + id + ': a .ms-row of the card, data-on "' + ROWS.find(x => x[0] === id)[1] + '", holding its controls',
       inRows && on && out.length === 0, out.length ? 'not in it: ' + out.join(',') : ''));
-    check('the card has exactly those five rows', r.rowCount === ROWS.length, String(r.rowCount));
+    check('the card has exactly those six rows', r.rowCount === ROWS.length, String(r.rowCount));
     check('every id the card, the corner, the dock, the slider and Export list appears exactly once, none twice inside #microscope',
       r.listedBad.length === 0 && r.dup.length === 0, (r.listedBad.concat(r.dup)).join(', ') || 'no duplicates');
     check('every other id the sidebar page had (less rounds 1b and 2c) is still there exactly once', r.missing.length === 0, r.missing.join(', ') || BEFORE.length + ' ids');
@@ -556,7 +558,7 @@ withApp(async (page, logs) => {
                                              note: document.getElementById('ms-slice-settings-note').textContent }));
     check('an imported .gcode.3mf (plate 2) is the Slice side: data-side, cardSide() and viewMode() say slice',
       st.side === 'slice' && st.cardSide === 'slice' && st.viewMode === 'slice', J([st.side, st.cardSide, st.viewMode]));
-    check('...4 rows: REGION, TAKE BAND, Toolpath | Solid, Slice settings', J(st.rows) === J(SLICE_ROWS), J(st.rows));
+    check('...5 rows: REGION, TAKE BAND, Toolpath | Solid, Slice settings, Measure', J(st.rows) === J(SLICE_ROWS), J(st.rows));
     check('...the switch: Slice active, Normal DISABLED (a sliced file has no mesh), Slice enabled',
       st.slice.active && st.slice.pressed === 'true' && !st.slice.disabled && !st.normal.active && st.normal.disabled, J([st.normal, st.slice]));
     check('...the Slice report is hidden; the settings say this file is sliced already', imp.readout === 'none' && /sliced already/.test(imp.note), J(imp));
@@ -596,7 +598,7 @@ withApp(async (page, logs) => {
       seen.aria && seen.busyCls && seen.labels.every(l => l === 'Slice'), J({ aria: seen.aria, busyCls: seen.busyCls, labels: Array.from(new Set(seen.labels)) }));
     st = await cardState(page);
     check('the Slice side: data-side, cardSide() and viewMode() say slice', st.side === 'slice' && st.cardSide === 'slice' && st.viewMode === 'slice', J([st.side, st.cardSide, st.viewMode]));
-    check('...exactly 4 rows: REGION, TAKE BAND, Toolpath | Solid, Slice settings', J(st.rows) === J(SLICE_ROWS), J(st.rows));
+    check('...exactly 5 rows: REGION, TAKE BAND, Toolpath | Solid, Slice settings, Measure', J(st.rows) === J(SLICE_ROWS), J(st.rows));
     check('...Slice active, Normal enabled (it goes back to the mesh) and not busy',
       st.slice.active && st.slice.pressed === 'true' && !st.normal.active && st.normal.pressed === 'false' && !st.normal.disabled && !st.busy && st.slice.text === 'Slice', J([st.normal, st.slice, st.busy]));
     check('...Whole part is not shown on the Slice side (Escape is its job there); Take band is enabled',
@@ -642,6 +644,24 @@ withApp(async (page, logs) => {
     await shot('05-slice-settings');
     // the layout gate, Slice side, unfolded, at 1280 x 800 (and folded below, and at 1024 x 720 in 8)
     layoutChecks(await layout(page), '1280 x 800, Slice side, settings unfolded');
+    // MEASURE: shut until opened, and nothing is computed or shown while it is
+    let m = await page.evaluate(() => ({ hidden: document.getElementById('ms-measure').hidden, aria: document.getElementById('ms-measure-toggle').getAttribute('aria-expanded'),
+      head: document.getElementById('ms-measure-head').textContent, feats: document.getElementById('ms-measure-feats').textContent }));
+    check('MEASURE is shut on the Slice side: the panel hidden, the toggle aria-expanded false, nothing computed', m.hidden && m.aria === 'false' && m.head === '\u2014' && m.feats === '', J(m));
+    const mr = await clickFace(page, '#ms-measure-toggle');
+    await frames(page);
+    m = await page.evaluate(() => ({ hidden: document.getElementById('ms-measure').hidden, aria: document.getElementById('ms-measure-toggle').getAttribute('aria-expanded'),
+      head: document.getElementById('ms-measure-head').textContent, feats: document.getElementById('ms-measure-feats').textContent,
+      layersHidden: document.getElementById('ms-measure-layers').hidden }));
+    check('a real click on "Measure" opens it: a line of totals and a row per line type', mr && mr.ok && !m.hidden && m.aria === 'true' && /moves, [\d]+ mm, [\d]+ layers/.test(m.head) && m.feats.split('\n').length >= 1, J([mr, m.head.slice(0, 90), m.feats.split('\n').length]));
+    check('...the per-layer table stays folded until Layers is pressed', m.layersHidden, J(m.layersHidden));
+    await page.evaluate(() => NSO_MICROSCOPE.setMeasureLayers(true));
+    const tab = await page.evaluate(() => document.getElementById('ms-measure-layers').textContent);
+    check('...Layers opens a table (or says why there is none)', tab.length > 10, tab.slice(0, 70));
+    const rep = await page.evaluate(() => NSO_MICROSCOPE.measureReport());
+    check('...and the report is plain text with the same totals', /^G-scope measure/.test(rep) && rep.indexOf('moves,') > 0, rep.slice(0, 60));
+    await page.evaluate(() => { NSO_MICROSCOPE.setMeasureLayers(false); NSO_MICROSCOPE.setMeasureOpen(false); });
+    await shotCard('card-slice-measure');
   }
 
   /* ------------------------------------------------------------------ 6 */

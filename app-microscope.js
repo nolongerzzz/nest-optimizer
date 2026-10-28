@@ -3157,6 +3157,7 @@ var NSO_MICROSCOPE = (function () {
   }
 
   function describeSelection() {
+    syncMeasure();
     if (!currentSelection.length) {
       info(selectionSource === 'layer' ? 'That layer holds nothing.'
          : selectionSource === 'line' ? 'No line picked.'
@@ -4533,16 +4534,123 @@ var NSO_MICROSCOPE = (function () {
     return '';
   }
 
+  // --- MEASURE: what the selection (or what is shown) adds up to --------------------
+  //
+  // A row of the card that stays shut until it is opened, and computes nothing
+  // while it is shut. Open, it reads the selection - or, with none, the moves the
+  // Features list and the slider leave drawn - through nso_gscope_measure.js (the
+  // numbers the checks hold): a line of totals, a row per line type, and (Layers)
+  // a row per layer of the support family. It also says which line types this
+  // plate has that the other plate has not, and the other way: two slices that
+  // differ in a type the eye would not catch. Copy report puts it all on the
+  // clipboard as text.
+
+  var measureOpen = false, measureLayersOpen = false, measureLast = null, measureOther = null;
+
+  function measureItems() {
+    if (!doc || doc.kind !== 'toolpath') return { items: [], what: '' };
+    if (currentSelection.length) return { items: currentSelection, what: 'selection' };
+    return { items: shownSegments(), what: 'everything shown' };
+  }
+  /** The other plate's toolpath summary, kept until that plate's document changes. */
+  function otherPlateSummary() {
+    var M = window.NSOMeasure, od = plateDoc(otherPlate());
+    if (!M || !od || od.kind !== 'toolpath' || od === doc) return null;
+    if (!measureOther || measureOther.doc !== od) measureOther = { doc: od, sum: M.summarize(od.segments) };
+    return measureOther.sum;
+  }
+  function measureLine(a, b) { return a + (b ? '  ' + b : ''); }
+  function padR(v, n) { v = String(v); while (v.length < n) v += ' '; return v.length > n ? v.slice(0, n) : v; }
+  function padL(v, n) { v = String(v); while (v.length < n) v = ' ' + v; return v; }
+  function shortFeature(f) { return f === 'Support interface' ? 'Interface' : f === 'Support transition' ? 'Transition' : f; }
+
+  function syncMeasure() {
+    var M = window.NSOMeasure, head = $('ms-measure-head');
+    if (!measureOpen || !head) return;
+    var feats = $('ms-measure-feats'), layersBox = $('ms-measure-layers'), warn = $('ms-measure-warn');
+    if (!M) { head.textContent = 'The measuring script did not load.'; return; }
+    var m = measureItems();
+    if (!m.items.length) {
+      measureLast = null;
+      head.textContent = !doc || doc.kind !== 'toolpath' ? 'A slice is measured: flip the switch to Slice.' : 'Nothing is selected or drawn.';
+      feats.textContent = ''; layersBox.textContent = ''; if (warn) warn.hidden = true;
+      return;
+    }
+    var sum = M.summarize(m.items), rows = measureLayersOpen ? M.layerRows(m.items) : null;
+    measureLast = { sum: sum, rows: rows, what: m.what };
+    head.textContent = m.what + ': ' + sum.moves + ' moves, ' + sum.lengthMm.toFixed(0) + ' mm, ' + sum.layers + ' layers, Z ' +
+      sum.zMin.toFixed(2) + ' - ' + sum.zMax.toFixed(2) + ' (average move ' + sum.avgMoveMm.toFixed(2) + ' mm)';
+    var L = [];
+    sum.features.forEach(function (f) { L.push(padR(f.feature, 24) + padL(f.moves, 7) + padL(f.lengthMm.toFixed(0), 8)); });
+    feats.textContent = L.join('\n');
+    // the line types one plate has and the other has not (the whole of each plate, not the selection)
+    if (warn) {
+      var osum = otherPlateSummary(), msg = '';
+      if (osum) {
+        var cmp = M.compare(M.summarize(doc.segments), osum);
+        if (cmp.onlyA.length) msg += 'Only on this plate: ' + cmp.onlyA.join(', ') + '. ';
+        if (cmp.onlyB.length) msg += 'Only on the other plate: ' + cmp.onlyB.join(', ') + '.';
+      }
+      warn.hidden = !msg; warn.textContent = msg;
+    }
+    if (measureLayersOpen) {
+      var out = [padR('Z', 7) + padR('line', 11) + padL('runs', 5) + padL('long', 5) + padL('mm', 6) + padL('deg', 5) + padL('pitch', 6) + padL('w x d', 11)];
+      var shown = rows.filter(function (r) { return /^Support/.test(r.feature); }).slice(0, 120);
+      shown.forEach(function (r) {
+        out.push(padR(r.z.toFixed(2), 7) + padR(shortFeature(r.feature), 11) + padL(r.runs, 5) + padL(r.longLines, 5) + padL(r.lengthMm.toFixed(0), 6) + padL(r.domDeg, 5) +
+          padL(r.pitchMm == null ? '-' : r.pitchMm.toFixed(2), 6) + padL(r.widthMm.toFixed(1) + 'x' + r.depthMm.toFixed(1), 11));
+      });
+      layersBox.textContent = shown.length ? out.join('\n') : 'No support lines in what is measured: select a head\'s supports (the Features list, or a Region).';
+    }
+  }
+
+  function setMeasureOpen(on) {
+    measureOpen = !!on;
+    var box = $('ms-measure'), b = $('ms-measure-toggle');
+    if (box) box.hidden = !measureOpen;
+    if (b) b.setAttribute('aria-expanded', String(measureOpen));
+    syncMeasure();
+  }
+  function setMeasureLayers(on) {
+    measureLayersOpen = !!on;
+    var box = $('ms-measure-layers'), b = $('ms-measure-layers-toggle');
+    if (box) box.hidden = !measureLayersOpen;
+    if (b) b.setAttribute('aria-pressed', String(measureLayersOpen));
+    syncMeasure();
+  }
+  /** The numbers as text (computes the layer rows even if that list is folded). */
+  function measureReport() {
+    var M = window.NSOMeasure, m = measureItems();
+    if (!M || !m.items.length) return '';
+    return M.report(M.summarize(m.items), M.layerRows(m.items).filter(function (r) { return /^Support/.test(r.feature); }), plateTitle(plateName) + ' - ' + m.what);
+  }
+  function copyMeasure() {
+    var text = measureReport();
+    if (!text) { say('Measure: nothing to copy.', true); return text; }
+    function fallback() {
+      var ta = document.createElement('textarea');
+      ta.value = text; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); } catch (e) { /* the text is still returned */ }
+      document.body.removeChild(ta);
+    }
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).catch(fallback); else fallback();
+    } catch (e) { fallback(); }
+    say('Measure: report copied.');
+    return text;
+  }
+
   function syncTakeBand() {
     var btn = $('ms-btn-take-band'), read = $('ms-band-read');
     var n = doc && doc.kind === 'toolpath' ? shownSegments().length : 0;
     var why = bandReason(n);
     setDisabled(btn, !!why);
     if (!read) return;
-    if (why) { read.textContent = why + '.'; return; }
+    if (why) { read.textContent = why + '.'; syncMeasure(); return; }
     var band = zBandMm();
     read.textContent = 'The slider\'s range is the band: Z ' + band[0].toFixed(2) + ' - ' + band[1].toFixed(2) + ' mm, ' +
-      n + ' move' + (n === 1 ? '' : 's') + '.';
+      n + ' move' + (n === 1 ? '' : 's') + '.';    syncMeasure();
   }
 
   /** The band isolated as one piece. Returns the selection, or null (and says why). */
@@ -5567,6 +5675,9 @@ var NSO_MICROSCOPE = (function () {
       syncExportRow();
     });
     bind('ms-btn-isolate', 'click', function () { isolateBoxes(); });
+    bind('ms-measure-toggle', 'click', function () { setMeasureOpen(!measureOpen); });
+    bind('ms-measure-layers-toggle', 'click', function () { setMeasureLayers(!measureLayersOpen); });
+    bind('ms-measure-copy', 'click', function () { copyMeasure(); });
     wireShell();
     bind('ms-btn-back', 'click', unIsolate);                  // WHOLE PART: back out of any isolate
     bind('ms-btn-show-all', 'click', checkAll);
@@ -5741,6 +5852,7 @@ var NSO_MICROSCOPE = (function () {
       if (highlightPending) { highlightPending = false; refreshHighlight(); }
     },
     takeBand: takeBand,
+    measureReport: measureReport, setMeasureOpen: setMeasureOpen, setMeasureLayers: setMeasureLayers, copyMeasure: copyMeasure,
     bandReason: function () { return bandReason(); },
     exportLabel: function () { return doc && currentSelection.length ? exportLabel() : null; },
     exportToPlate: exportToPlate,

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=24f87653" />
+  <link rel="stylesheet" href="styles.css?v=7f94f24e" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -1737,6 +1737,26 @@
               <p class="ms-note" id="ms-slice-settings-note">From the plate's printer profile. They take effect on the next slice: Normal, then Slice again.</p>
             </div>
           </div>
+          <!-- MEASURE, the Slice side, closed until opened: what the selection (or what
+               is shown) adds up to - moves, length, features, a per-layer table - read
+               by nso_gscope_measure.js, the same numbers the checks hold. Nothing is
+               computed while it is shut. app-microscope.js owns it (syncMeasure). -->
+          <div id="ms-measure-row" class="ms-row" data-on="slice">
+            <button id="ms-measure-toggle" type="button" class="ms-disclose"
+                    aria-expanded="false" aria-controls="ms-measure">Measure</button>
+            <div id="ms-measure" hidden>
+              <p class="ms-note" id="ms-measure-head">&mdash;</p>
+              <p class="ms-note ms-measure-warn" id="ms-measure-warn" hidden></p>
+              <div id="ms-measure-feats" class="ms-measure-list"></div>
+              <div class="ms-btn-row">
+                <button id="ms-measure-layers-toggle" type="button" aria-pressed="false"
+                        title="A row per layer and line type of the support family in what is measured: runs, lines, mm, angle, pitch, footprint">Layers</button>
+                <button id="ms-measure-copy" type="button"
+                        title="Copy the numbers as plain text">Copy report</button>
+              </div>
+              <div id="ms-measure-layers" class="ms-measure-list" hidden></div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1922,7 +1942,7 @@
        merged pairwise on a node lattice, plate first. planTree above is
        this; it needs nso_support_tree.js's contactPoints and union. See
        docs/SUPPORT-GRIDPACK.md. -->
-  <script src="nso_support_gridpack.js?v=016842e8"></script>
+  <script src="nso_support_gridpack.js?v=711eee94"></script>
   <script src="nso_exif.js?v=22458ef3"></script>
   <script src="nso_photoset.js?v=0974faf1"></script>
   <script src="nso-cooling-profiles.js"></script>
@@ -1941,7 +1961,7 @@
        line section both use. The Supports card's build worker loads them too. See
        docs/SUPPORT-INTERFACE.md. -->
   <script src="nso_crosshatch.js?v=c1b24917"></script>
-  <script src="nso_support_interface.js?v=f7182358"></script>
+  <script src="nso_support_interface.js?v=d23c02bc"></script>
   <script src="nso_relief.js?v=fe710fb1"></script>
   <!-- Every tool helper goes in and out of the scene through this registry. -->
   <script src="nso-helpers.js?v=9c476e39"></script>
@@ -2073,7 +2093,8 @@
   <!-- Handle, bracket, lid and hinge detection for G-scope's Parts list, one
        row each under the Flange row. Pure. docs/GSCOPE-FEATURES.md. -->
   <script src="nso_face_features.js?v=53ee4b23"></script>
-  <script src="app-microscope.js?v=c3b365a6"></script>
+  <script src="nso_gscope_measure.js?v=0ef4a708"></script>
+  <script src="app-microscope.js?v=4f07419a"></script>
   <!-- Detach / Reattach (Cut menu): cap a detected flange's hull on its own
        wall, lift the flange out as a piece, seat it elsewhere with Attach's
        seat. After nso_flange.js, app-crop.js, nso_assemble.js, app-assemble.js
@@ -2087,7 +2108,7 @@
   <script src="app-gscope-support.js?v=2397557a"></script>
   <!-- The Supports card on the main page: the same detection and planner,
        after app-core.js / app-join.js, whose ingest and soups it uses. -->
-  <script src="app-supports-card.js?v=8e74d2df"></script>
+  <script src="app-supports-card.js?v=b89a6cee"></script>
   <script src="app-gscope-slice.js?v=5f7c637f"></script>
   <!-- The Slice card (left bar): the plate sliced for its printer, the .gcode.3mf
        it makes. The print planner and the packager are loaded here for it and for

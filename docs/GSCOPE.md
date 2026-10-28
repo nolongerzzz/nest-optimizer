@@ -408,8 +408,8 @@ always:
   rows**:
   - **Normal side**: REGION (item 7) · WHOLE PART (back out of any isolate).
   - **Slice side**: REGION · TAKE BAND (the slider's range isolated as one
-    piece) · Toolpath | Solid · Slice settings (folded). An isolation there
-    is undone by Escape, or a click on it.
+    piece) · Toolpath | Solid · Slice settings (folded) · MEASURE (folded,
+    item 13). An isolation there is undone by Escape, or a click on it.
 - **Slice settings**: nozzle / layer / walls / infill (and its pattern) /
   support below. Their defaults are the **plate's printer profile**: on the A1
   mini a 0.4 mm nozzle and 0.2 mm layers (the owner's own Bambu slice:
@@ -457,6 +457,42 @@ always:
 - `app-gscope-slice.js` owns the switch (`syncToggle`), the settings
   (`profileDefaults`, `seedSettings`, `setSettingsOpen`) and the Slice report.
 
+## 13. MEASURE: the numbers, shut until asked for (round 3a)
+
+**What the user sees.** One more row on the Slice side of the card, last, as a
+single quiet line - `▸ MEASURE` - the way Slice settings is. Shut, it shows
+nothing and computes nothing. A click opens it:
+
+- a line of totals for what is measured - the selection, or with none, the moves
+  the Features list and the slider leave drawn: moves, mm, layers, Z range and the
+  average move;
+- a row per line type (moves, mm), longest first;
+- **Layers**: a row per layer and support line type - runs, long lines, mm,
+  angle, line pitch, footprint - a table that scrolls inside the card, folded
+  until pressed;
+- **Copy report**: all of it as plain text on the clipboard;
+- a line that names the line types ONE plate has and the other has not (the whole
+  of each plate, not the selection) - a type a slice never makes is the kind of
+  difference the eye misses.
+
+It stays shut by default and is never in the way: no table is drawn until it is
+asked for.
+
+**How it is built.** `nso_gscope_measure.js` is pure (no DOM): `summarize`,
+`layerRows`, `compare`, `report`. The card calls it from `syncMeasure()`
+(`app-microscope.js`), re-run on a selection, the slider or a document change
+only while the row is open; the checks call the same functions, so a number read
+off the card is a number a test holds. A *run* is moves laid without lifting (each
+starting where the one before ended); a *long line* is a straight stroke of
+2 mm or more; the pitch is read across the dominant direction. The numbers are the
+ones the support-interface work used against Bambu's reference slice - on its flat
+head: 2 runs a layer, about 259 mm, pitch 0.46.
+
+The parser is the viewer's own (`NSOGcodeLines`), which flattens Bambu's arc
+moves (G2/G3); a reader that skips them undercounts Bambu's slices - the
+reference's Support line type is 35 499 moves in the viewer, 8 665 when arcs are
+skipped.
+
 ## Checks
 
 | check | what it holds |
@@ -464,6 +500,7 @@ always:
 | `gscope:take` (`tools/nso_gscope_take_test.js`) | items 1-3, 6, 9, 11, 12: the two plates and click-to-activate; drags 1 -> 2 with the ghost under the pointer on every move and the copy landing exactly where let go; drag 2 -> 1 onto a plate read and into a slice; the refusals; grab and drop on a plate; Import, and IMPORT ▾ → Read plate, onto the active plate 2; the same content exporting byte-identical files from either plate; CLEAR on each plate emptying only that plate, from a fresh page and mid-session; CLOSE / BACK then reopen clean (REGION off, the ▾ menu shut, the settings folded); an import surviving a close |
 | `gscope:shell` | item 12: the column gone and the card present on open; IMPORT at the main page's Import spot; IMPORT ▾ → Read plate into the active plate; the switch flipping the view and the rows (Normal 2, Slice 4); the Slice settings folded, at the printer profile's 0.4 / 0.2; every removed control's job at its new home; the corner row (BACK · ◎ · CLEAR · EXPORT · CLOSE), the Export card, the dock clear of the card; the retired ids gone; shots of the card on both sides |
 | `gscope:select` | items 7, 8, 10, 12: the hover's clock on a fake clock; every hover waited for (up to 2 s, the failure says how long); REGION - click places a box, nothing isolated; a dot dragged resizes it, nothing isolated; a click inside / Isolate isolates exactly what it holds; Escape removes it; a dot behind the piece still takes the mousedown, in either mode; Region's hover where no move midpoint falls in the box; a big piece's hover answering while its tree builds; Piece in the view, a move's readout on hover, a layer by the slider + Take band; item 4's checkbox contract (two rows checked - exactly those two types drawn; none - nothing; hover changes nothing; the text toggles; Check all; Export and a drag take only what is shown) |
+| `gscope:measure` (`tools/nso_gscope_measure_test.js`) | item 13: a made zigzag reads back as one run at its pitch and angle; a row per (Z, feature); a feature only one side has is named; every move of a real slice counted once; with `NSO_MEASURE_REF=<supp_ref.gcode.3mf>` the reference's flat head reads 2 runs a layer, about 259 mm, pitch 0.46. The row's own gate is in `gscope:shell` (shut by default, a real click opens it) |
 | the #205 set | the older G-scope drive checks (camera, zoom, slice, solid, watch, legend, ...) still hold, driven through the card; `gcode:gscope`'s Crop sections are its Take band section now; `gcode:gscope-support` and `support:ui` are retired (item 5) |
 | `gscope:speed` | items 10 and 11: a 60-move drag follows on plate 1, across and on plate 2; the ghost drawn on every frame of a pull; orbit (the main thread's share of a frame: <= 33 ms on the file, <= 2 ms on the small slice; the small slice's frame rate over the file's >= 5.2; each frame rate a logged finding); the pick <= 16 ms; nothing renders under G-scope; no press or held move past a frame; a pull's first move per thousand moves copied |
 | `gcode:lines-build` | item 10: `buildLineGeometry`'s typed-array prisms are the old build's, bit for bit |

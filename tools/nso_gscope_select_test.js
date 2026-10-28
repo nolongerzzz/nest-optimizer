@@ -339,10 +339,10 @@ withApp(async (page, logs) => {
     check('an imported slice is the Slice side: the switch on Slice, Normal off (no mesh to go back to)',
       r.card.side === 'slice' && J(r.side) === J(['slice', 'slice']) && r.sw.sliceOn && J(r.sw.pressed) === J(['false', 'true']) && r.sw.normalOff && !r.sw.sliceOff, J([r.side, r.sw]));
     check('each row names its sides: REGION both, WHOLE PART Normal; TAKE BAND, Toolpath | Solid, Slice settings Slice',
-      J(r.rowsOn) === J(['ms-region-row:normal slice', 'ms-whole-row:normal', 'ms-band-row:slice', 'ms-render-row:slice', 'ms-slice-row:slice']), J(r.rowsOn));
+      J(r.rowsOn) === J(['ms-region-row:normal slice', 'ms-whole-row:normal', 'ms-band-row:slice', 'ms-render-row:slice', 'ms-slice-row:slice', 'ms-measure-row:slice']), J(r.rowsOn));
     const shownRows = await rowsShown(page);
-    check('the Slice side shows exactly 4 rows: REGION, TAKE BAND, Toolpath | Solid, Slice settings',
-      J(shownRows) === J(['ms-region-row', 'ms-band-row', 'ms-render-row', 'ms-slice-row']), J(shownRows));
+    check('the Slice side shows exactly 5 rows: REGION, TAKE BAND, Toolpath | Solid, Slice settings, Measure',
+      J(shownRows) === J(['ms-region-row', 'ms-band-row', 'ms-render-row', 'ms-slice-row', 'ms-measure-row']), J(shownRows));
     check('REGION\'s row: Region (off), Isolate, Clear boxes (both off with no box) and its note (hidden while not armed)',
       r.region.text === 'Region' && !r.region.off && r.region.pressed === 'false' && r.region.inRow && r.region.iso && r.region.clear && r.region.clearText === 'Clear boxes' && r.region.note, J(r.region));
     check('TAKE BAND and Toolpath | Solid keep their ids in their rows; WHOLE PART is "Whole part"', r.band && r.render && r.whole === 'Whole part', J([r.band, r.render, r.whole]));
@@ -1216,8 +1216,8 @@ withApp(async (page, logs) => {
     const sw = await page.evaluate(() => ({ side: [NSO_MICROSCOPE.cardSide(), NSO_GSCOPE_SLICE.viewMode()], slice: document.getElementById('ms-cam-slice').getAttribute('aria-pressed'),
       normalOff: document.getElementById('ms-cam-normal').disabled, label: document.getElementById('ms-cam-slice').textContent.trim() }));
     const srows = await rowsShown(page);
-    check('the switch sliced it: the Slice side (4 rows), Normal on - a slice made here goes back to its mesh',
-      J(sw.side) === J(['slice', 'slice']) && sw.slice === 'true' && !sw.normalOff && sw.label === 'Slice' && J(srows) === J(['ms-region-row', 'ms-band-row', 'ms-render-row', 'ms-slice-row']), J([sw, srows]));
+    check('the switch sliced it: the Slice side (5 rows), Normal on - a slice made here goes back to its mesh',
+      J(sw.side) === J(['slice', 'slice']) && sw.slice === 'true' && !sw.normalOff && sw.label === 'Slice' && J(srows) === J(['ms-region-row', 'ms-band-row', 'ms-render-row', 'ms-slice-row', 'ms-measure-row']), J([sw, srows]));
     const rows = await page.evaluate(() => Array.from(document.querySelectorAll('#ms-legend .ms-legend-item')).map(r => ({
       name: r.dataset.group, label: r.querySelector('.ms-legend-label').textContent, check: !!r.querySelector('input.ms-legend-display') })));
     const names = rows.map(r => r.name), at = names.indexOf('Support');
