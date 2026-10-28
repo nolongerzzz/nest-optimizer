@@ -364,8 +364,10 @@ async function main() {
       verts += a.count;
       for (let i = 0; i < a.count; i++) if (a.getY(i) < r.zLo - 1e-4 || a.getY(i) > r.zHi + 1e-4) outside++;
     });
-    const want = d.segments.filter((s) => s.z >= r.zLo - 1e-6 && s.z <= r.zHi + 1e-6).length;
-    return { lo: r.lo, hi: r.hi, steps: r.steps, shown: M.shownCount(), want, drawn: verts / 2, outside,
+    // the upper handle may stand part way up its layer: that layer is drawn by the scrub (its first moves), the rest by the overview
+    const sst = M.scrubState();
+    const want = d.segments.filter((s) => s.z >= r.zLo - 1e-6 && s.z <= r.zHi + 1e-6).length - (sst ? sst.moves - sst.shown : 0);
+    return { lo: r.lo, hi: r.hi, steps: r.steps, shown: M.shownCount(), want, drawn: verts / 2 + (sst ? sst.lines : 0), outside,
       readHi: document.getElementById('ms-zr-hi-read').textContent,
       readLo: document.getElementById('ms-zr-lo-read').textContent };
   });

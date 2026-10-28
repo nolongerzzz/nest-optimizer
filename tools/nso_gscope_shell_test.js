@@ -736,6 +736,38 @@ withApp(async (page, logs) => {
     pl = await page.evaluate(() => ({ hidden: document.getElementById('ms-play').hidden, st: NSO_MICROSCOPE.playState() }));
     check('BACK shuts Play: the panel, the path and the marker are gone', pl.hidden && !pl.st.open && !pl.st.drawn, J(pl));
     await page.evaluate(() => NSO_MICROSCOPE.clearSteps());
+
+    // SCRUB: the top handle between layers - the piece printed as the handle goes up
+    await page.evaluate(() => { NSO_MICROSCOPE.setZRange(0, 99999); NSO_MICROSCOPE.clearSteps(); });
+    const sc0 = await page.evaluate(() => ({ z: NSO_MICROSCOPE.zRange(), st: NSO_MICROSCOPE.scrubState() }));
+    check('SCRUB: a whole-layer slider has no part layer (part 1, nothing drawn extra)', sc0.z.part === 1 && sc0.st === null, J(sc0));
+    await page.evaluate(() => NSO_MICROSCOPE.setZHead(0.505)); await frames(page);
+    let sc = await page.evaluate(() => ({ z: NSO_MICROSCOPE.zRange(), st: NSO_MICROSCOPE.scrubState(), steps: NSO_MICROSCOPE.stepCount(), hi: document.getElementById('ms-zr-hi-read').textContent }));
+    check('the top handle half way up the track stands in a layer, part drawn: the layer\'s first moves, a nozzle on them', sc.st && sc.st.part > 0 && sc.st.part < 1 && sc.st.shown > 0 && sc.st.shown < sc.st.moves && sc.st.lines === sc.st.shown && sc.st.head, J(sc));
+    check('...the label gives the layer and how far through it, and one BACK step was left', /^Z \d+\.\d\d - \d+%$/.test(sc.hi) && sc.steps === 1, J(sc));
+    const first = sc.st;
+    await page.evaluate(() => NSO_MICROSCOPE.setZHead(NSO_MICROSCOPE.zRange().hi / (NSO_MICROSCOPE.zRange().steps) + 0.9 / NSO_MICROSCOPE.zRange().steps)); await frames(page);
+    sc = await page.evaluate(() => ({ st: NSO_MICROSCOPE.scrubState(), steps: NSO_MICROSCOPE.stepCount() }));
+    check('further up the same layer: more of it is drawn, and the drag is still the one BACK step', sc.st && sc.st.layer === first.layer && sc.st.shown > first.shown && sc.st.lines === sc.st.shown && sc.steps === 1, J([first, sc]));
+    await page.evaluate(() => NSO_MICROSCOPE.setZHead(1)); await frames(page);
+    sc = await page.evaluate(() => ({ z: NSO_MICROSCOPE.zRange(), st: NSO_MICROSCOPE.scrubState() }));
+    check('the top of the track is the last layer, whole', sc.st === null && sc.z.hi === sc.z.steps - 1 && sc.z.part === 1, J(sc));
+    // isolated: one piece's own moves
+    await page.evaluate(() => { const M = NSO_MICROSCOPE; M.selectVisible(); M.isolate(); M.setZHead(0.405); }); await frames(page);
+    sc = await page.evaluate(() => ({ st: NSO_MICROSCOPE.scrubState(), iso: NSO_MICROSCOPE.isIsolated() }));
+    check('isolated, the handle scrubs the isolation\'s own moves through the piece', sc.iso && sc.st && sc.st.shown > 0 && sc.st.shown <= sc.st.moves && sc.st.lines === sc.st.shown, J(sc));
+    await shot('12-scrub-isolated');
+    await clickFace(page, '#ms-btn-step-back'); await frames(page);
+    sc = await page.evaluate(() => ({ st: NSO_MICROSCOPE.scrubState(), iso: NSO_MICROSCOPE.isIsolated(), z: NSO_MICROSCOPE.zRange() }));
+    check('BACK takes the handle back to where it stood (the whole top layer), still isolated', sc.st === null && sc.z.part === 1 && sc.iso, J(sc));
+    await clickFace(page, '#ms-btn-step-back'); await frames(page);
+    await page.evaluate(() => { NSO_MICROSCOPE.setSelectionMoves([]); NSO_MICROSCOPE.setZRange(0, 99999); NSO_MICROSCOPE.clearSteps(); });
+    // a layer stepped by key or API is whole again
+    await page.evaluate(() => NSO_MICROSCOPE.setZHead(0.505)); await frames(page);
+    await page.evaluate(() => { const z = NSO_MICROSCOPE.zRange(); NSO_MICROSCOPE.setZRange(z.lo, z.hi); }); await frames(page);
+    sc = await page.evaluate(() => ({ z: NSO_MICROSCOPE.zRange(), st: NSO_MICROSCOPE.scrubState() }));
+    check('a step by layer (a key, setZRange) makes the top layer whole again', sc.st === null && sc.z.part === 1, J(sc));
+    await page.evaluate(() => { NSO_MICROSCOPE.setZRange(0, 99999); NSO_MICROSCOPE.clearSteps(); });
   }
 
   /* ------------------------------------------------------------------ 6 */

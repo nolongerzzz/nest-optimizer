@@ -930,11 +930,13 @@ var NSO_MICROSCOPE = (function () {
     mode = 'piece';
     clearSteps();
     if (playOpen) { playRunSet(false); playClear(); playKey = ''; playMoves = []; }
+    playFollow = false; scrubKept = null; layerIndex = null;
+    scrubClear();
   }
 
   /** One burst of coalesced redraws, run now so it lands on the plate that asked for it. */
   function flushPending() {
-    if (viewPending) { viewPending = false; viewChanged(); }
+    if (viewPending) { viewPending = false; var full = viewFull; viewFull = false; if (full) viewChanged(); else viewScrub(); }
     if (isolatePending) { isolatePending = false; isolateRedraw(); }
     if (highlightPending) { highlightPending = false; refreshHighlight(); }
   }
@@ -2588,7 +2590,7 @@ var NSO_MICROSCOPE = (function () {
       // moves inside the layer range and not cleared from view.
       doc.groups = byFeature;
       Object.keys(byFeature).forEach(function (feature, gi) {
-        var segs = byFeature[feature].filter(function (s) { return !CLEARED.has(s.id) && inZRange(s); });
+        var segs = byFeature[feature].filter(function (s) { return !CLEARED.has(s.id) && inMainRange(s); });
         var geo = new THREE.BufferGeometry();
         geo.setAttribute('position', new THREE.BufferAttribute(segPositions(segs), 3));
         var isTravel = feature === 'Travel';
@@ -2614,7 +2616,7 @@ var NSO_MICROSCOPE = (function () {
       // on exactly the moves they land on in the toolpath view.
       if (renderMode === 'solid') {
         Object.keys(v.overviewMeshes).forEach(function (k) { v.overviewMeshes[k].material.visible = false; });
-        var shownNow = doc.segments.filter(function (s) { return !CLEARED.has(s.id) && inZRange(s); });
+        var shownNow = doc.segments.filter(function (s) { return !CLEARED.has(s.id) && inMainRange(s); });
         var sm = solidMeshes(shownNow, function (f) { return colorForGroup(f, Object.keys(byFeature).indexOf(f)); });
         v.solidMeshes = sm.meshes;
         v.solidBuilt = sm.built;
@@ -3210,7 +3212,7 @@ var NSO_MICROSCOPE = (function () {
       v.solidMeshes[name].visible = !rowOff(name) && !detail;
     });
     v.overviewGroup.children.forEach(function (c) {
-      if (c.userData.bead) c.visible = !rowOff(c.userData.feature) && !detail;
+      if (c.userData.bead || c.userData.scrub) c.visible = !rowOff(c.userData.feature) && !detail;
     });
     v.detailGroup.children.forEach(function (mesh) {
       mesh.visible = !rowOff(mesh.userData.feature);
@@ -3627,7 +3629,7 @@ var NSO_MICROSCOPE = (function () {
     if (doc.kind === 'toolpath') {
       var keys = Object.keys(doc.groups || {});
       var colourOf = function (f) { return colorForGroup(f, Math.max(0, keys.indexOf(f))); };
-      var segs = currentSelection.filter(function (s) { return !CLEARED.has(s.id) && inZRange(s); });
+      var segs = currentSelection.filter(function (s) { return !CLEARED.has(s.id) && inMainRange(s); });
       if (renderMode === 'solid') {
         // A run the selection cuts is capped where the selection ends.
         var sd = solidMeshes(segs, colourOf);
@@ -3967,7 +3969,66 @@ var NSO_MICROSCOPE = (function () {
 
   // --- view filters -----------------------------------------------------------
 
-  function inZRange(s) { return !zr || (s.zi >= zr.lo && s.zi <= zr.hi); }
+  // The slider's top handle moves between layers as well as along them: with zr.part
+  // under 1, layer zr.hi is only part drawn - its first `part` of the moves, in print
+  // order. inMainRange is every whole layer (what the overview and the isolation are
+  // built from, rebuilt only when a layer is crossed); inZRange adds the part layer's
+  // drawn moves (what the rest of G-scope counts as shown: Take band, Measure, hover).
+  function inMainRange(s) { return !zr || (s.zi >= zr.lo && (zr.part < 1 ? s.zi < zr.hi : s.zi <= zr.hi)); }
+
+  function inZRange(s) {
+    if (inMainRange(s)) return true;
+    return !!zr && zr.part < 1 && s.zi === zr.hi && partIds().has(s.id);
+  }
+
+  /** The doc's moves by layer, in print order (built once a document). */
+  var layerIndex = null;
+  function layerSegs(zi) {
+    if (!doc || doc.kind !== 'toolpath') return [];
+    if (!layerIndex || layerIndex.segs !== doc.segments || layerIndex.n !== doc.segments.length) {
+      var by = [];
+      doc.segments.forEach(function (s) { (by[s.zi] = by[s.zi] || []).push(s); });
+      layerIndex = { segs: doc.segments, n: doc.segments.length, by: by };
+    }
+    return layerIndex.by[zi] || [];
+  }
+
+  /** Layer `zi`'s moves that are drawn there: not cleared from view, and - isolated - the isolation's own. */
+  var selIdsKept = null;
+  function layerDrawn(zi) {
+    var inSel = null;
+    if (isolated) {
+      if (!selIdsKept || selIdsKept.sel !== currentSelection || selIdsKept.n !== currentSelection.length) {
+        selIdsKept = { sel: currentSelection, n: currentSelection.length, ids: new Set(currentSelection.map(function (s) { return s.id; })) };
+      }
+      inSel = selIdsKept.ids;
+    }
+    return layerSegs(zi).filter(function (s) { return !CLEARED.has(s.id) && (!inSel || inSel.has(s.id)); });
+  }
+
+  var scrubKept = null, EMPTY_SET = new Set();
+  /**
+   * The layer under a part-way handle: its drawn moves in print order, how many of
+   * them the handle has passed (`cut`), and their ids. Null when the handle sits on
+   * a whole layer. Kept until the layer, the isolation or the cleared set changes.
+   */
+  function scrubTop() {
+    if (!doc || doc.kind !== 'toolpath' || !zr || !(zr.part < 1)) return null;
+    var sel = isolated ? currentSelection : null, selN = sel ? sel.length : 0, k = scrubKept;
+    if (!k || k.segs !== doc.segments || k.zi !== zr.hi || k.sel !== sel || k.selN !== selN || k.cleared !== CLEARED.size) {
+      k = scrubKept = { segs: doc.segments, zi: zr.hi, sel: sel, selN: selN, cleared: CLEARED.size, list: layerDrawn(zr.hi), cut: -1, ids: null };
+    }
+    var cut = Math.round(Math.max(0, Math.min(1, zr.part)) * k.list.length);
+    if (k.cut !== cut) { k.cut = cut; k.ids = null; }
+    return k;
+  }
+
+  function partIds() {
+    var t = scrubTop();
+    if (!t) return EMPTY_SET;
+    if (!t.ids) { t.ids = new Set(); for (var i = 0; i < t.cut; i++) t.ids.add(t.list[i].id); }
+    return t.ids;
+  }
 
   function segShown(s) {
     return !FEATURE_OFF.has(s.feature) && !CLEARED.has(s.id) && inZRange(s);
@@ -4002,7 +4063,7 @@ var NSO_MICROSCOPE = (function () {
    */
   var shownKept = null;
   function shownMemo() {
-    var key = [featureSig(), CLEARED.size, zr ? zr.lo + ':' + zr.hi : ''].join('/');
+    var key = [featureSig(), CLEARED.size, zr ? zr.lo + ':' + zr.hi + ':' + (zr.part < 1 ? 'p' + scrubTop().cut : '') : ''].join('/');
     if (!shownKept || shownKept.doc !== doc || shownKept.segs !== doc.segments || shownKept.cleared !== CLEARED || shownKept.key !== key) {
       shownKept = { doc: doc, segs: doc.segments, cleared: CLEARED, key: key, list: shownSegments(), byObj: new Map() };
     }
@@ -4024,13 +4085,14 @@ var NSO_MICROSCOPE = (function () {
   }
 
   /** The legend, a clear or the slider changed what is shown: redraw it. */
-  var viewPending = false;
+  var viewPending = false, viewFull = false;
   function viewChanged() {
     if (!view || !doc) return;
     buildLegend();
     if (doc.kind === 'toolpath') {
       buildOverview();
       if (isolated) isolateRedraw();
+      drawScrub();
     } else {
       applyClip();
       if (hasBeads(doc) && view.takeSig !== featureSig()) { buildOverview(); buildDetail_(); }
@@ -4041,11 +4103,23 @@ var NSO_MICROSCOPE = (function () {
     syncTakeBand();
     syncRenderRow();
   }
+  /**
+   * The top handle moved inside its layer: the whole layers below are as built, so
+   * only the part layer is drawn again (a layer's worth of lines, not the piece's).
+   */
+  function viewScrub() {
+    if (!view || !doc) return;
+    drawScrub();
+    applyFeatureVisibility();
+    syncZRangeUI();
+    syncTakeBand();
+  }
   /** Coalesce a burst of slider moves into one redraw per frame. */
-  function viewChangedSoon() {
+  function viewChangedSoon(partOnly) {
+    if (!partOnly) viewFull = true;
     if (viewPending) return;
     viewPending = true;
-    var run = function () { viewPending = false; viewChanged(); };
+    var run = function () { viewPending = false; var full = viewFull; viewFull = false; if (full) viewChanged(); else viewScrub(); };
     if (typeof requestAnimationFrame === 'function' && isOpen()) requestAnimationFrame(run); else run();
   }
 
@@ -4385,7 +4459,7 @@ var NSO_MICROSCOPE = (function () {
     return n > 1 ? doc.zMin + (doc.zMax - doc.zMin) * (i / (n - 1)) : doc.zMin;
   }
 
-  function zRangeFull() { return !zr || (zr.lo === 0 && zr.hi === zr.n - 1); }
+  function zRangeFull() { return !zr || (zr.lo === 0 && zr.hi === zr.n - 1 && !(zr.part < 1)); }
 
   /**
    * The band the slider holds, in mm, bottom to top - what Take band takes. On a
@@ -4399,7 +4473,13 @@ var NSO_MICROSCOPE = (function () {
     return [doc.zBottom[zr.lo], hi];
   }
 
-  function setZRange(lo, hi) {
+  /**
+   * The slider's range. `part` and `t` are the top handle between layers (a slice
+   * only): layer `hi` is drawn up to `part` (0 - 1) of its moves, and the handle
+   * stands `t` (0 - 1) of the way up the track. Left out, the top layer is whole
+   * and the handle stands on its layer - every caller that moves by layers.
+   */
+  function setZRange(lo, hi, part, t) {
     if (!doc) return null;
     var n = zSteps();
     lo = Math.round(Number(lo)); hi = Math.round(Number(hi));
@@ -4407,13 +4487,41 @@ var NSO_MICROSCOPE = (function () {
     if (!isFinite(hi)) hi = n - 1;
     lo = Math.max(0, Math.min(n - 1, lo));
     hi = Math.max(0, Math.min(n - 1, hi));
-    if (lo > hi) { var t = lo; lo = hi; hi = t; }
-    if (zr && zr.lo === lo && zr.hi === hi && zr.n === n) return zRange();
-    if (zr && zr.n === n) { var from = { lo: zr.lo, hi: zr.hi }; pushStep(function () { if (!zr || (zr.lo === from.lo && zr.hi === from.hi)) return false; setZRange(from.lo, from.hi); return true; }, 'range'); }
-    zr = { lo: lo, hi: hi, n: n };
-    viewChangedSoon();
+    var swapped = lo > hi;
+    if (swapped) { var sw = lo; lo = hi; hi = sw; }
+    part = part == null || swapped || doc.kind !== 'toolpath' ? 1 : Math.max(0, Math.min(1, Number(part)));
+    if (!isFinite(part)) part = 1;
+    t = part < 1 && t != null && isFinite(Number(t)) ? Math.max(0, Math.min(1, Number(t))) : null;
+    var op = zr && zr.part < 1 ? zr.part : 1, ot = zr && zr.t != null ? zr.t : null;
+    if (zr && zr.lo === lo && zr.hi === hi && zr.n === n && op === part && ot === t) return zRange();
+    if (zr && zr.n === n) {
+      var from = { lo: zr.lo, hi: zr.hi, part: op < 1 ? op : null, t: ot };
+      pushStep(function () {
+        if (!zr || (zr.lo === from.lo && zr.hi === from.hi && (zr.part < 1 ? zr.part : null) === from.part)) return false;
+        setZRange(from.lo, from.hi, from.part, from.t); return true;
+      }, 'range');
+    }
+    // Only the part drawn changed, inside the same layer: the whole layers stay as built.
+    var partOnly = !!zr && zr.n === n && zr.lo === lo && zr.hi === hi && op < 1 && part < 1;
+    zr = part < 1 ? { lo: lo, hi: hi, n: n, part: part, t: t } : { lo: lo, hi: hi, n: n };
+    viewChangedSoon(partOnly);
     syncZRangeUI();
     return zRange();
+  }
+
+  /**
+   * The top handle at `f` (0 - 1) of the track, a slice only: layer k stands over
+   * [k/n, (k+1)/n), and the handle's place inside it is how far through the layer's
+   * moves the nozzle has got. The top of the track is the last layer whole; the
+   * handle cannot go below the bottom handle's own layer.
+   */
+  function setZHead(f) {
+    if (!doc || !zr) return null;
+    var n = zSteps();
+    f = Math.max(0, Math.min(1, Number(f) || 0));
+    if (doc.kind !== 'toolpath' || n < 2) return setZRange(zr.lo, Math.round(f * (n - 1)));
+    var g = Math.max(zr.lo, f * n), hi = Math.min(n - 1, Math.floor(g)), part = g >= n ? 1 : g - hi;
+    return setZRange(zr.lo, hi, part >= 1 ? 1 : part, g / n);
   }
 
   /** The step whose Z is nearest `z` mm. */
@@ -4432,6 +4540,7 @@ var NSO_MICROSCOPE = (function () {
     return {
       lo: zr.lo, hi: zr.hi, steps: zr.n,
       zLo: zAt(zr.lo), zHi: zAt(zr.hi),
+      part: zr.part < 1 ? zr.part : 1,
       bandMm: band, full: zRangeFull(),
       unit: doc.kind === 'toolpath' ? 'layer' : 'mm'
     };
@@ -4450,16 +4559,19 @@ var NSO_MICROSCOPE = (function () {
     box.hidden = !(doc && n > 1);
     if (box.hidden) return;
     var pct = function (i) { return (n > 1 ? (i / (n - 1)) * 100 : 0); };
+    // the top handle, part way up a layer, stands where the pointer put it
+    var partWay = zr.part < 1, hiPct = partWay && zr.t != null ? zr.t * 100 : pct(zr.hi);
+    var hiText = stepLabel(zr.hi) + (partWay ? ' - ' + Math.floor(zr.part * 100) + '%' : '');
     var lo = $('ms-zr-lo'), hi = $('ms-zr-hi'), fill = $('ms-zr-fill');
     if (lo) { lo.style.bottom = pct(zr.lo) + '%'; lo.setAttribute('aria-valuenow', String(zr.lo)); lo.setAttribute('aria-valuemax', String(n - 1)); lo.setAttribute('aria-valuetext', stepLabel(zr.lo)); }
-    if (hi) { hi.style.bottom = pct(zr.hi) + '%'; hi.setAttribute('aria-valuenow', String(zr.hi)); hi.setAttribute('aria-valuemax', String(n - 1)); hi.setAttribute('aria-valuetext', stepLabel(zr.hi)); }
-    if (fill) { fill.style.bottom = pct(zr.lo) + '%'; fill.style.height = (pct(zr.hi) - pct(zr.lo)) + '%'; }
+    if (hi) { hi.style.bottom = hiPct + '%'; hi.setAttribute('aria-valuenow', String(zr.hi)); hi.setAttribute('aria-valuemax', String(n - 1)); hi.setAttribute('aria-valuetext', hiText); }
+    if (fill) { fill.style.bottom = pct(zr.lo) + '%'; fill.style.height = Math.max(0, hiPct - pct(zr.lo)) + '%'; }
     var rl = $('ms-zr-lo-read'), rh = $('ms-zr-hi-read'), cnt = $('ms-zr-count');
     if (rl) rl.textContent = stepLabel(zr.lo);
-    if (rh) rh.textContent = stepLabel(zr.hi);
+    if (rh) rh.textContent = hiText;
     if (cnt) {
       cnt.textContent = doc.kind === 'toolpath'
-        ? (zr.hi - zr.lo + 1) + ' / ' + n + ' layer' + (n === 1 ? '' : 's')
+        ? (partWay ? (zr.hi - zr.lo + zr.part).toFixed(1) : (zr.hi - zr.lo + 1)) + ' / ' + n + ' layer' + (n === 1 ? '' : 's')
         : (zAt(zr.hi) - zAt(zr.lo)).toFixed(1) + ' mm';
     }
   }
@@ -4474,6 +4586,11 @@ var NSO_MICROSCOPE = (function () {
       var f = r.height > 0 ? (r.bottom - clientY) / r.height : 0;
       f = Math.max(0, Math.min(1, f));
       return Math.round(f * ((zr ? zr.n : 1) - 1));
+    }
+    /** How far up the track, 0 - 1: the top handle of a slice moves by this, not by whole layers. */
+    function fracFromY(clientY) {
+      var r = track.getBoundingClientRect();
+      return r.height > 0 ? Math.max(0, Math.min(1, (r.bottom - clientY) / r.height)) : 0;
     }
     function begin(e, which) {
       if (!zr) return;
@@ -4508,16 +4625,19 @@ var NSO_MICROSCOPE = (function () {
     track.addEventListener('pointerdown', function (e) {
       if (!zr || e.target !== track) return;
       // A press on bare track moves the nearer handle there.
-      var at = stepFromY(e.clientY);
-      if (Math.abs(at - zr.lo) <= Math.abs(at - zr.hi)) setZRange(at, zr.hi); else setZRange(zr.lo, at);
-      begin(e, Math.abs(at - zr.lo) <= Math.abs(at - zr.hi) ? 'lo' : 'hi');
+      var at = stepFromY(e.clientY), nearLo = Math.abs(at - zr.lo) <= Math.abs(at - zr.hi);
+      if (nearLo) setZRange(at, zr.hi);
+      else if (doc && doc.kind === 'toolpath') setZHead(fracFromY(e.clientY));
+      else setZRange(zr.lo, at);
+      begin(e, nearLo ? 'lo' : 'hi');
     });
     window.addEventListener('pointermove', function (e) {
       if (!drag || !zr) return;
       var at = stepFromY(e.clientY);
-      if (drag.which === 'lo') setZRange(Math.min(at, zr.hi), zr.hi);
-      else if (drag.which === 'hi') setZRange(zr.lo, Math.max(at, zr.lo));
-      else {
+      if (drag.which === 'lo') setZRange(Math.min(at, zr.hi), zr.hi, zr.part, zr.t);
+      else if (drag.which === 'hi') {
+        if (doc && doc.kind === 'toolpath') setZHead(fracFromY(e.clientY)); else setZRange(zr.lo, Math.max(at, zr.lo));
+      } else {
         var width = drag.hi - drag.lo;
         var lo = Math.max(0, Math.min(zr.n - 1 - width, drag.lo + (at - drag.start)));
         setZRange(lo, lo + width);
@@ -4699,13 +4819,13 @@ var NSO_MICROSCOPE = (function () {
 
   var playOpen = false, playPos = 0, playMoves = [], playKey = '', playRunning = false, playRaf = 0, playLast = 0, playAcc = 0, playGroup = null;
   var PLAY_TRAIL = 80;                       // moves behind the nozzle that fade from bright to dim
+  var playFollow = false;                    // the nozzle is following the slider's part-way handle
 
   function playLayerMoves() {
     if (!doc || doc.kind !== 'toolpath' || !zr) return { key: '', list: [], zi: -1 };
-    var zi = zr.hi, key = plateName + ':' + zi + ':' + doc.segments.length;
+    var zi = zr.hi, list = layerDrawn(zi), last = list.length ? list[list.length - 1].id : '';
+    var key = plateName + ':' + zi + ':' + doc.segments.length + ':' + list.length + ':' + (list.length ? list[0].id : '') + ':' + last;
     if (playKey === key) return { key: key, list: playMoves, zi: zi, same: true };
-    var list = [];
-    for (var i = 0; i < doc.segments.length; i++) if (doc.segments[i].zi === zi) list.push(doc.segments[i]);
     return { key: key, list: list, zi: zi, same: false };
   }
 
@@ -4717,7 +4837,19 @@ var NSO_MICROSCOPE = (function () {
   function playDraw() {
     playClear();
     if (!playOpen || !view || !doc || !playMoves.length) return;
-    var cx = doc.cx, cy = doc.cy, n = Math.min(playPos, playMoves.length), g = new THREE.Group();
+    playGroup = trailGroup(playMoves, playPos);
+    view.scene.add(playGroup);
+  }
+
+  /**
+   * The nozzle at move `n` of `list` (a layer's moves in print order): the moves up to
+   * it in bright lines that fade with age, a dashed line where it jumped between runs,
+   * and the marker. Play draws it for the layer; the slider's part-way handle for the
+   * piece it is printing.
+   */
+  function trailGroup(list, n) {
+    var cx = doc.cx, cy = doc.cy, g = new THREE.Group(), playMoves = list;
+    n = Math.min(n, list.length);
     g.position.x = plateOffset(plateName);
     if (n > 0) {
       var pos = new Float32Array(n * 6), col = new Float32Array(n * 6), jp = [], i, s;
@@ -4748,7 +4880,52 @@ var NSO_MICROSCOPE = (function () {
     var head = n > 0 ? playMoves[n - 1] : playMoves[0], hx = n > 0 ? head.x1 : head.x0, hy = n > 0 ? head.y1 : head.y0;
     var marker = new THREE.Mesh(new THREE.SphereGeometry(0.5, 14, 10), new THREE.MeshBasicMaterial({ color: 0xffa63a, depthTest: false }));
     marker.position.set(hx - cx, head.z + 0.5, -(hy - cy)); marker.renderOrder = 1000; g.add(marker);
-    view.scene.add(g); playGroup = g;
+    return g;
+  }
+
+  // --- the slider's top handle, between layers ---------------------------------------
+  //
+  // Drag the top handle of a slice and the piece is printed as you go: every layer
+  // under the handle whole, the layer it stands in drawn up to the nozzle (the moves
+  // the handle has passed, in print order), nothing above. Isolated, it is the
+  // isolation's own moves - one piece, bottom to top. The whole layers are the
+  // overview's (rebuilt on crossing a layer, as before); only the part layer is
+  // built here, a layer's lines a frame, with Play's trail and marker on the nozzle
+  // (Play's own, when its row is open, so the two never draw twice).
+
+  var scrubHead = null;
+
+  function scrubClear() {
+    if (scrubHead && view) { view.scene.remove(scrubHead); disposeTree(scrubHead); }
+    scrubHead = null;
+    if (!view) return;
+    [view.overviewGroup, view.detailGroup].forEach(function (grp) {
+      for (var i = grp.children.length - 1; i >= 0; i--) {
+        var c = grp.children[i];
+        if (c.userData && c.userData.scrub) { grp.remove(c); disposeTree(c); }
+      }
+    });
+  }
+
+  function drawScrub() {
+    scrubClear();
+    var t = scrubTop();
+    if (!t || !view || !t.list.length) return;
+    var keys = Object.keys(doc.groups || {}), byFeature = {}, grp = isolated ? view.detailGroup : view.overviewGroup;
+    t.list.slice(0, t.cut).forEach(function (s) { (byFeature[s.feature] = byFeature[s.feature] || []).push(s); });
+    Object.keys(byFeature).forEach(function (feature) {
+      var color = colorForGroup(feature, Math.max(0, keys.indexOf(feature))), travel = feature === 'Travel', segs = byFeature[feature];
+      var geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(segPositions(segs), 3));
+      var mesh = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: color, transparent: travel, opacity: travel ? 0.35 : 1.0 }));
+      mesh.userData.feature = feature; mesh.userData.scrub = true; mesh.raycast = function () {};
+      grp.add(mesh);
+      if (trueWidth && renderMode !== 'solid' && !travel) {
+        var rb = beadMesh(segs, color);
+        if (rb) { rb.userData.feature = feature; rb.userData.scrub = true; grp.add(rb); }
+      }
+    });
+    if (!playOpen) { scrubHead = trailGroup(t.list, t.cut); view.scene.add(scrubHead); }
   }
 
   function playReadout() {
@@ -4796,13 +4973,17 @@ var NSO_MICROSCOPE = (function () {
   /** Follow the slider and the plate: a new layer shows the whole layer (nothing hidden) until Play is pressed. */
   function syncPlay() {
     if (!playOpen) return;
-    var t = playLayerMoves();
-    if (t.same) return;
-    if (playRunning) playRunSet(false);
-    playMoves = t.list; playKey = t.key;
-    var sc = $('ms-play-scrub');
-    if (sc) { sc.max = String(playMoves.length); sc.disabled = !playMoves.length; }
-    playSeek(playMoves.length);
+    var t = playLayerMoves(), top = scrubTop();
+    if (t.same && !top && !playFollow) return;
+    if (!t.same) {
+      if (playRunning) playRunSet(false);
+      playMoves = t.list; playKey = t.key;
+      var sc = $('ms-play-scrub');
+      if (sc) { sc.max = String(playMoves.length); sc.disabled = !playMoves.length; }
+    }
+    // the slider's top handle part way up the layer: the nozzle is where it stands
+    if (top) { if (playRunning) playRunSet(false); playFollow = true; playSeek(Math.min(top.cut, playMoves.length)); }
+    else { playFollow = false; playSeek(playMoves.length); }
   }
 
   function setPlayOpen(on) {
@@ -6049,10 +6230,21 @@ var NSO_MICROSCOPE = (function () {
     },
     stepLine: stepLine,
     setZRange: setZRange,
+    setZHead: setZHead,
+    /** The part-way top handle: null on a whole layer. `lines` is the part layer's segments drawn, `head` the nozzle group. */
+    scrubState: function () {
+      var t = scrubTop();
+      if (!t) return null;
+      var lines = 0;
+      [view.overviewGroup, view.detailGroup].forEach(function (g) {
+        g.children.forEach(function (c) { if (c.userData.scrub && !c.userData.bead) lines += c.geometry.attributes.position.count / 2; });
+      });
+      return { layer: zr.hi, part: zr.part, t: zr.t, moves: t.list.length, shown: t.cut, lines: lines, head: !!scrubHead || !!playGroup, shownMoves: shownSegments().length };
+    },
     setZRangeMm: function (zLo, zHi) { return setZRange(stepAtZ(zLo), stepAtZ(zHi)); },
     zRange: zRange,
     flushView: function () {
-      if (viewPending) { viewPending = false; viewChanged(); }
+      if (viewPending) { viewPending = false; var fullNow = viewFull; viewFull = false; if (fullNow) viewChanged(); else viewScrub(); }
       if (highlightPending) { highlightPending = false; refreshHighlight(); }
     },
     takeBand: takeBand,
