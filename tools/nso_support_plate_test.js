@@ -42,8 +42,8 @@ const TODAY = {        // sha256 of the support bytes of a single-piece Generate
                        // The Negative Sphere2 again (supports-footprint, the finer look): its apex surface (z 15, 9 spots in one area) was never detected, it is now - so a fourth area,
                        // a sheet laid over it, and the fill (the sheets reach the footprint): 16644 -> 23352 triangles on the lighter crowns (20332 -> 28884 on the ones before). Circular and Sphere are the same bytes.
                        // The region plate (supports-footprint, third round, docs/SUPPORT-FOOTPRINT.md section 9): the card lays the interface and the transition from each footprint and the surface's height, layer by layer;
-                       // the Negative Sphere2 / Circular / Sphere re-pinned (30356 / 13760 / 12888 triangles on upstream's 2 transition + 2 interface stack, with the thin beads and the lighter smoothing of section 10, and the plate run to the face's edge (section 11); the plates are hatch and loops at 0.5 mm, the sheets were fewer lines).
-  'Support Negative Sphere2.stl': { sha: 'eef7297dd100fd0f839881b47ca82de0bab875880e459ec54f58a4453b3a69e4', triangles: 30356 },
+                       // the Negative Sphere2 / Circular / Sphere re-pinned (24332 / 13760 / 12888 triangles on upstream's 2 transition + 2 interface stack, with the thin beads and the lighter smoothing of section 10, and the plate run to the face's edge (section 11); the plates are hatch and loops at 0.5 mm, the sheets were fewer lines).
+  'Support Negative Sphere2.stl': { sha: '4fad39b1dca263b35c01b6a9227b5cbbe42c0b157d9bba951f162b8e85646896', triangles: 24332 },
   'Support Circular.stl': { sha: '2d7b49914c8b4f7ec1f8cfc529211fd1b379ce556d6dad28df26f2064f01a883', triangles: 13760 },
   'Support Sphere.stl': { sha: 'c60da53fc70e98d1e32c8aa74059d6c36e022febb956e4a7a3bc5b18e521d6e3', triangles: 12888 }
 };

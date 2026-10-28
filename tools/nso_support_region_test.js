@@ -113,6 +113,18 @@ const MINLOOP = 2.4, MINLINE = 0.9;
   check('...and the extrusion takes them', ex.ok, ex.ok ? '' : ex.reason);
 }
 {
+  /* a patch 2.0 mm across and 6 long (the Negative Sphere2's flat under the bowl's rim): no room for an outline and a hatch inside it, so lines across it, edge to edge, turned
+     from one layer to the next - the zigzag of the slicer's own interface - and each layer extrudes */
+  const g = raster(6, 2.0, (x, y) => ((x - 3) / 3) * ((x - 3) / 3) + (y - 1) * (y - 1) <= 1);
+  const p45 = R.plateOfRegion(g.M, g.nx, g.ny, g.ox, g.oy, CELL, PITCH, WIDTH, 45, MINLOOP, MINLINE);
+  const p135 = R.plateOfRegion(g.M, g.nx, g.ny, g.ox, g.oy, CELL, PITCH, WIDTH, 135, MINLOOP, MINLINE);
+  check('a patch 2.0 mm across is laid in lines across it, no outline (three or more)', p45.loops.length === 0 && p45.lines.length >= 3 && p135.loops.length === 0 && p135.lines.length >= 3, p45.lines.length + ' / ' + p135.lines.length + ' lines');
+  const dir = (pl) => { const l = pl.lines[0]; return Math.round(Math.atan2(l[1][1] - l[0][1], l[1][0] - l[0][0]) * 180 / Math.PI + 360) % 180; };
+  check('...at 45 deg on one layer and 135 on the next', dir(p45) === 45 && dir(p135) === 135, dir(p45) + ' / ' + dir(p135));
+  const e1 = RL.extrudeFlat(p45.lines, { width: WIDTH, height: 0.2, baseZ: 0 }), e2 = RL.extrudeFlat(p135.lines, { width: WIDTH, height: 0.2, baseZ: 0.2 });
+  check('...and the extrusion takes both layers', e1.ok && e2.ok, (e1.ok ? '' : e1.reason) + (e2.ok ? '' : e2.reason));
+}
+{
   const g = raster(8, 8, (x, y) => x >= 0 && x <= 0.6 && y >= 0 && y <= 0.6);
   const p = R.plateOfRegion(g.M, g.nx, g.ny, g.ox, g.oy, CELL, PITCH, WIDTH, 45, MINLOOP, MINLINE);
   check('a 0.6 mm speck is no plate (shorter than the least loop)', p.loops.length === 0 && p.lines.length === 0);

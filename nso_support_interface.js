@@ -877,6 +877,8 @@
   var THIN_CLEAR_MM = 0.06;       /* ...stands a line and this far (centre to centre) from every path laid, so no two lines meet except at a node */
   var THIN_SIMPLIFY_MM = 0.06;    /* ...its skeleton's staircase cleaned to this */
   var THIN_SEG_MM = 0.6;          /* ...no segment of it shorter than this */
+  var EDGE_HATCH_HALF_MM = 1.0;  /* ... and only where the region is 2 mm across somewhere: a strip a line or two wide is one bead along it, not lines across it */
+  var EDGE_HATCH_SHARE = 0.3;   /* a narrow region is laid in lines alone, edge to edge, when they hold at least this share of it (lines x pitch over its area) */
   var HATCH_MIN_SHARE = 0.6;     /* a hatch whose lines (times the pitch) fill less than this share of the room inside its outline is given up for concentric loops */
   var REGION_MIN_LOOP_MM = 2.4;  /* a loop of the region plate shorter than this is a speck of the level set (a medial axis's end), not a line */
   var FILL_FLAT_MM = 2.4;      /* the region plate (and the fill) is for a footprint whose height range (its spots', and 1.6 mm of padding) is no more than this: a face of one height, not a slope or a dome */
@@ -1197,36 +1199,45 @@
   function plateOfRegionCore(M, nx, ny, ox, oy, cellMm, pitchMm, widthMm, hatchDeg, minLoopMm, minLineMm) {
     var N = nx * ny, outline = concentricLoops(M, nx, ny, ox, oy, cellMm, pitchMm, widthMm, minLoopMm, 1);
     if (!outline.length) return { loops: [], lines: [] };
-    var edgeIn = 0.1 + widthMm + 0.1;      /* the hatch starts this far in from the edge: the outline's centre, then a line and a gap */
-    var dist = edtCells(M, nx, ny), H = new Uint8Array(N), any = false;
-    for (var q = 0; q < N; q++) if (dist[q] >= edgeIn / cellMm + 0.5) { H[q] = 1; any = true; }
-    if (!any) return { loops: concentricLoops(M, nx, ny, ox, oy, cellMm, pitchMm, widthMm, minLoopMm), lines: [] };      /* too thin for a hatch: all its loops */
-    var th = hatchDeg * Math.PI / 180, ux = Math.cos(th), uy = Math.sin(th), nxv = -uy, nyv = ux, lines = [];
-    var cmin = Infinity, cmax = -Infinity, tmin = Infinity, tmax = -Infinity;
-    for (var j = 0; j < ny; j++) for (var i = 0; i < nx; i++) if (H[j * nx + i]) {
-      var x = ox + i * cellMm, y = oy + j * cellMm, c = x * nxv + y * nyv, t = x * ux + y * uy;
-      if (c < cmin) cmin = c; if (c > cmax) cmax = c; if (t < tmin) tmin = t; if (t > tmax) tmax = t;
-    }
-    var step = cellMm / 2;
-    function inH(x, y) {
-      var ii = Math.round((x - ox) / cellMm), jj = Math.round((y - oy) / cellMm);
-      return ii >= 0 && ii < nx && jj >= 0 && jj < ny && H[jj * nx + ii] === 1;
-    }
-    for (var k = Math.ceil(cmin / pitchMm); k * pitchMm <= cmax; k++) {
-      var cc = k * pitchMm, run = null;
-      for (var tt = tmin - 4 * step; tt <= tmax + 4 * step; tt += step) {
-        var px = cc * nxv + tt * ux, py = cc * nyv + tt * uy, on = inH(px, py);
-        if (on && !run) run = [tt, tt];
-        else if (on) run[1] = tt;
-        else if (run) { if (run[1] - run[0] >= minLineMm) lines.push([[cc * nxv + run[0] * ux, cc * nyv + run[0] * uy], [cc * nxv + run[1] * ux, cc * nyv + run[1] * uy]]); run = null; }
+    var dist = edtCells(M, nx, ny), th = hatchDeg * Math.PI / 180, ux = Math.cos(th), uy = Math.sin(th), nxv = -uy, nyv = ux;
+    /* the lines of a hatch over the cells of H: a lattice fixed in the plane, a pitch apart, each run of H a line (shorter than the minimum, none) */
+    function hatchOver(H, minLen) {
+      var lines = [], cmin = Infinity, cmax = -Infinity, tmin = Infinity, tmax = -Infinity;
+      for (var j = 0; j < ny; j++) for (var i = 0; i < nx; i++) if (H[j * nx + i]) {
+        var x = ox + i * cellMm, y = oy + j * cellMm, c = x * nxv + y * nyv, t = x * ux + y * uy;
+        if (c < cmin) cmin = c; if (c > cmax) cmax = c; if (t < tmin) tmin = t; if (t > tmax) tmax = t;
       }
-      if (run && run[1] - run[0] >= minLineMm) lines.push([[cc * nxv + run[0] * ux, cc * nyv + run[0] * uy], [cc * nxv + run[1] * ux, cc * nyv + run[1] * uy]]);
+      var step = cellMm / 2;
+      function inH(x, y) {
+        var ii = Math.round((x - ox) / cellMm), jj = Math.round((y - oy) / cellMm);
+        return ii >= 0 && ii < nx && jj >= 0 && jj < ny && H[jj * nx + ii] === 1;
+      }
+      for (var k = Math.ceil(cmin / pitchMm); k * pitchMm <= cmax; k++) {
+        var cc = k * pitchMm, run = null;
+        for (var tt = tmin - 4 * step; tt <= tmax + 4 * step; tt += step) {
+          var px = cc * nxv + tt * ux, py = cc * nyv + tt * uy, on = inH(px, py);
+          if (on && !run) run = [tt, tt];
+          else if (on) run[1] = tt;
+          else if (run) { if (run[1] - run[0] >= minLen) lines.push([[cc * nxv + run[0] * ux, cc * nyv + run[0] * uy], [cc * nxv + run[1] * ux, cc * nyv + run[1] * uy]]); run = null; }
+        }
+        if (run && run[1] - run[0] >= minLen) lines.push([[cc * nxv + run[0] * ux, cc * nyv + run[0] * uy], [cc * nxv + run[1] * ux, cc * nyv + run[1] * uy]]);
+      }
+      return lines;
     }
+    function lenOf(lines) { var s = 0; lines.forEach(function (l) { s += Math.hypot(l[1][0] - l[0][0], l[1][1] - l[0][1]); }); return s; }
+    var edgeIn = 0.1 + widthMm + 0.1;      /* the hatch starts this far in from the edge: the outline's centre, then a line and a gap */
+    var H = new Uint8Array(N), any = false, hCells = 0, mCells = 0, dMax = 0;
+    for (var q = 0; q < N; q++) { mCells += M[q]; if (dist[q] > dMax) dMax = dist[q]; if (dist[q] >= edgeIn / cellMm + 0.5) { H[q] = 1; any = true; hCells++; } }
+    var lines = any ? hatchOver(H, minLineMm) : [];
     /* a region the hatch mostly misses (a ring a couple of mm wide: its lines are cut short of the minimum, or never fit) is laid in concentric loops instead */
-    var hCells = 0, lineLen = 0;
-    for (var qh = 0; qh < N; qh++) hCells += H[qh];
-    lines.forEach(function (l) { lineLen += Math.hypot(l[1][0] - l[0][0], l[1][1] - l[0][1]); });
-    if (lineLen * pitchMm < HATCH_MIN_SHARE * hCells * cellMm * cellMm) return { loops: concentricLoops(M, nx, ny, ox, oy, cellMm, pitchMm, widthMm, minLoopMm), lines: [] };
+    if (!any || lenOf(lines) * pitchMm < HATCH_MIN_SHARE * hCells * cellMm * cellMm) {
+      /* ... unless the lines alone, run edge to edge (a line's half in from the edge, no loop), hold the region: the zigzag of a narrow patch, as the slicer lays it */
+      var Hw = new Uint8Array(N);
+      for (var qw = 0; qw < N; qw++) if (dist[qw] >= (widthMm / 2 + 0.03) / cellMm + 0.5) Hw[qw] = 1;
+      var wide = hatchOver(Hw, Math.max(0.5, minLineMm * 0.6));
+      if (dMax * cellMm >= EDGE_HATCH_HALF_MM && wide.length >= 3 && lenOf(wide) * pitchMm >= EDGE_HATCH_SHARE * mCells * cellMm * cellMm) return { loops: [], lines: wide };
+      return { loops: concentricLoops(M, nx, ny, ox, oy, cellMm, pitchMm, widthMm, minLoopMm), lines: [] };
+    }
     return { loops: outline, lines: lines };
   }
   /* a mask with its edge smoothed: three box blurs of radius r cells (about a gaussian of 0.9 r) and the 0.5 level; a stepped edge (the height map's
@@ -1680,13 +1691,13 @@
             if (tryN >= 2) pl.lines = [];
             if (tryN === 3) { var longest = 0; pl.loops.forEach(function (l) { longest = Math.max(longest, l.lenMm); }); pl.loops = pl.loops.filter(function (l) { return l.lenMm >= Math.min(longest, 8); }); }
             if (tryN === 4) { var lg = null; pl.loops.forEach(function (l) { if (!lg || l.lenMm > lg.lenMm) lg = l; }); pl.loops = lg ? [lg] : []; }
-            if (!pl.loops.length && !pl.thin.length) break;
+            if (!pl.loops.length && !pl.thin.length && !pl.lines.length) break;
             paths = pl.loops.map(function (l) { return l.ring; }).concat(pl.lines, pl.thin);
             ex2 = RL.extrudeFlat(paths, { width: o.width, height: o.layer, baseZ: zb });
             if (ex2.ok) break;
           }
           var exLoops = ex2 && ex2.ok && pl.lines.length ? RL.extrudeFlat(pl.loops.map(function (l) { return l.ring; }).concat(pl.thin), { width: o.width, height: o.layer, baseZ: zb }) : ex2;
-          if (!pl.loops.length && !pl.thin.length) continue;
+          if (!pl.loops.length && !pl.thin.length && !pl.lines.length) continue;
           if (!ex2.ok) { failed = 'layer ' + n + ' would not extrude: ' + ex2.reason; break; }
           var len = 0, lo = [Infinity, Infinity], hi = [-Infinity, -Infinity], area = 0;
           pl.loops.forEach(function (l) { len += l.lenMm; });
