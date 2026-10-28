@@ -5262,11 +5262,26 @@ var NSO_MICROSCOPE = (function () {
     show('ms-export-row', acts);
     show('ms-export-solid-row', !!(doc && ((doc.kind === 'toolpath' && acts) || takeSolidable())));
     show('ms-take-export-row', wholePlateObjects().length > 0);
+    // a slice made on the plate and opened here (the document carries its record, nsoPlateSlice): the slice itself, whole and for the selection
+    var rec = doc && doc.nsoPlateSlice;
+    show('ms-plate-export-row', !!rec);
+    show('ms-sel-export-row', !!(rec && acts && selectedObjectIds().length));
     var selTitle = $('ms-export-sel-title');
     if (selTitle) selTitle.textContent = isPieces(doc) ? 'Selected piece' : 'Selection';
     syncCardRows();
     var sa = $('ms-btn-show-all');
     setDisabled(sa, !hasLineTypes());
+  }
+
+  /** The G-code OBJECT_IDs the selected moves belong to (a null for a plate that is not labelled: one object). */
+  function selectedObjectIds() {
+    if (!doc || doc.kind !== 'toolpath' || !currentSelection.length) return [];
+    var seen = {}, out = [];
+    actedOn(currentSelection).forEach(function (s) {
+      var k = s.obj == null ? 'none' : String(s.obj);
+      if (!seen[k]) { seen[k] = true; out.push(s.obj == null ? null : s.obj); }
+    });
+    return out;
   }
 
   function syncHeader() {
@@ -5693,7 +5708,7 @@ var NSO_MICROSCOPE = (function () {
   // [button, card, the rows the engine shows for it - null: always available]
   var SHELL_CARDS = [
     ['ms-btn-import-more', 'ms-import-menu', null],
-    ['ms-nav-export', 'ms-card-export', ['ms-export-row', 'ms-export-solid-row', 'ms-slice-export-row', 'ms-take-export-row']]
+    ['ms-nav-export', 'ms-card-export', ['ms-export-row', 'ms-export-solid-row', 'ms-slice-export-row', 'ms-take-export-row', 'ms-plate-export-row', 'ms-sel-export-row']]
   ];
   var shellOpen = null;      // the card id that is open, or null
 
@@ -5939,6 +5954,9 @@ var NSO_MICROSCOPE = (function () {
     openPlate: openPlate,
     openObjects: openObjects,
     openToolpathResult: openToolpathResult,
+    /** The G-code OBJECT_IDs the selection is made of; and a re-read of which Export rows show (a slice from the plate says so after it opens). */
+    selectedObjectIds: selectedObjectIds,
+    refreshExport: function () { syncExportRow(); syncShell(); },
     plateObjects: plateObjects,
     openPicker: openPicker,
     setMode: function (m) { setMode(m); },

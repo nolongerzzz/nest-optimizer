@@ -94,6 +94,22 @@ was: its four controls, and its readout and Export hold this slice afterwards, e
   slice.*, *Pick the A1 mini or the A1 / P1S / X1C plate to slice for.*, the planner's refusal ...). Cancelled: *Slice
   cancelled.*, not in red. A plate that moved while it was slicing is not opened: *The plate changed while it was
   slicing. Press Slice and Preview again.*
+- **G-scope's Export card is live on the slice.** A slice opened by Slice and Preview (or the Slice card's Preview) carries
+  the record it was made from on its document (`doc.nsoPlateSlice`: the file's bytes, a snapshot of the pieces and the
+  gcode's `OBJECT_ID` of each). The EXPORT button no longer greys out, and the card gains two groups:
+
+  | group | button | what it downloads |
+  |---|---|---|
+  | **This slice - whole plate** | Export .gcode.3mf | the slice as it was made, the file G-scope shows |
+  | | Export .3mf | every piece and support on the plate as a Bambu Studio project (the Export card's 3MF writer and cooling profile; each support keeps its own slicer overrides) |
+  | **This slice - selected** (shows only with a selection) | Selected .gcode.3mf | the selected pieces **sliced again, alone**, with the supports that hold them - same profile, same engine, so its layers are the plate's own |
+  | | Selected .3mf | the selected pieces, with the supports that hold them, as a Bambu Studio project |
+
+  A selection (a capture box, a picked line, an isolated piece) is mapped to pieces through the `OBJECT_ID` of its moves
+  (`NSO_MICROSCOPE.selectedObjectIds()`, `NSO_Print.card.indicesFor`). The export is of the slice *shown*, not of the plate
+  as it is now: the snapshot rides with the document. The rest of the Export card (to plate, STL, solid, whole plate STL)
+  is as it was; `app-print.js` calls only `getDoc`, `selectedObjectIds` and `refreshExport` of G-scope besides its two
+  old calls (`print:slice` holds the list).
 - `slice()` returns a promise now (`{ ok, reason, cancelled }`), which the Slice card's button ignores; `hook.onStage` /
   `hook.onDone` are how another card hears it. That is the whole of the change to app-print.js.
 
@@ -106,7 +122,8 @@ was: its four controls, and its readout and Export hold this slice afterwards, e
 | `app-supports-card.js` | `effective()` (spots, footprints), `planArea` / `shareFeet` (obstacles), `runPiece` (the sheet's footprints), the readout, `pointerTool()`, Slice and Preview |
 | `app-core.js` | the menu item, where the click was (`state.ctxClick`), Clear plate |
 | `app-beds.js` | the boxes ride with the bed |
-| `app-print.js` | `slice()` returns a promise; `sliceAndPreview` |
+| `app-print.js` | `slice()` returns a promise; `sliceAndPreview`; `exportSlice` (G-scope's Export card rows for a slice made here) |
+| `app-microscope.js` / `index.html` | the Export card's two groups, `selectedObjectIds`, `refreshExport` |
 
 ## Known edges
 

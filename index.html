@@ -1851,6 +1851,26 @@
                     title="Download the piece this slice was made from as an STL">Export piece as STL</button>
           </div>
         </div>
+        <!-- A slice made from the plate (Slice and Preview, the Slice card's Preview): this slice, as .gcode.3mf and as .3mf, the
+             whole plate and what is selected (app-print.js exportSlice). -->
+        <div class="ms-xgroup">
+          <div class="ms-section-title">This slice - whole plate</div>
+          <div class="ms-btn-row" id="ms-plate-export-row" data-flex="1" style="display:none;">
+            <button id="ms-btn-plate-gcode3mf" type="button"
+                    title="Download this slice as it was made: the Bambu .gcode.3mf, ready to print">Export .gcode.3mf</button>
+            <button id="ms-btn-plate-3mf" type="button"
+                    title="Download the plate's pieces and supports as a Bambu Studio .3mf project, to slice there">Export .3mf</button>
+          </div>
+        </div>
+        <div class="ms-xgroup">
+          <div class="ms-section-title">This slice - selected</div>
+          <div class="ms-btn-row" id="ms-sel-export-row" data-flex="1" style="display:none;">
+            <button id="ms-btn-sel-gcode3mf" type="button"
+                    title="Slice the selected pieces alone (with the supports that hold them) and download the .gcode.3mf">Selected .gcode.3mf</button>
+            <button id="ms-btn-sel-3mf" type="button"
+                    title="Download the selected pieces (with the supports that hold them) as a Bambu Studio .3mf project">Selected .3mf</button>
+          </div>
+        </div>
         <!-- A plate of pieces (either plate): the whole plate. -->
         <div class="ms-xgroup">
           <div class="ms-section-title">Whole plate</div>
@@ -2144,7 +2164,7 @@
        row each under the Flange row. Pure. docs/GSCOPE-FEATURES.md. -->
   <script src="nso_face_features.js?v=53ee4b23"></script>
   <script src="nso_gscope_measure.js?v=0ef4a708"></script>
-  <script src="app-microscope.js?v=cde64fc1"></script>
+  <script src="app-microscope.js?v=8e5efd8e"></script>
   <!-- Detach / Reattach (Cut menu): cap a detected flange's hull on its own
        wall, lift the flange out as a piece, seat it elsewhere with Attach's
        seat. After nso_flange.js, app-crop.js, nso_assemble.js, app-assemble.js
@@ -2172,7 +2192,7 @@
        plate reader and G-code import it calls. See docs/PRINT-PLANNER.md. -->
   <script src="nso-print-planner.js?v=6aba9121"></script>
   <script src="nso-gcode3mf-write.js?v=cdfa15b4"></script>
-  <script src="app-print.js?v=49a9f80c"></script>
+  <script src="app-print.js?v=75ee131b"></script>
   <!-- Lift: details off a face, the face left as it was round them. After
        nso_lift.js (Phase 1: a flat face), nso_lift_curved.js (Lift 3: the
        repair under a detail lifted off a curved base), nso_lift_auto.js

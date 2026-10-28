@@ -153,6 +153,7 @@
         var st = out.plan.stats;
         return {
           ok: true, reason: '', bytes: out.bytes, features: Object.keys(seen), objects: out.plan.labels.length,
+          labels: out.plan.labels.map(function (l) { return { id: l.id, name: l.name, index: l.index }; }),     // the gcode's OBJECT_ID of each object, in the order they were given
           stats: { layers: st.layers, seconds: st.seconds.total, grams: st.grams, filamentMm: st.filamentMm, maxZ: st.maxZ }
         };
       });
@@ -200,7 +201,7 @@
   if (typeof document === 'undefined' || !document.getElementById) return api;
 
   var $ = function (id) { return document.getElementById(id); };
-  var S = { busy: false, job: null, result: null, sig: null, pieces: null, profile: null, assets: {}, timer: null, t0: 0, stage: '', hook: null };
+  var S = { busy: false, job: null, result: null, sig: null, pieces: null, profile: null, assets: {}, timer: null, t0: 0, stage: '', hook: null, exporting: false };
 
   function say(msg, isErr) {
     if (typeof setStatus === 'function') setStatus(msg, !!isErr);
@@ -227,7 +228,8 @@
       var placed = o.placedIndex != null ? state.placed[o.placedIndex] : null;
       var pm = placed && (state.models || []).find(function (x) { return x && x.id === placed.sourceId; });
       return { name: o.name, soup: o.positions, sourceId: o.sourceId, support: !!sup, brim: !!(sup && sup.brim), hostSourceId: sup ? sup.hostSourceId : undefined,
-               nonSolid: !!(pm && typeof root.nsoNonSolid === 'function' && root.nsoNonSolid(pm)) };
+               nonSolid: !!(pm && typeof root.nsoNonSolid === 'function' && root.nsoNonSolid(pm)),
+               settings: m && m.slicerSettings ? Object.assign({}, m.slicerSettings) : null };      // a support's own slicer overrides ride into a 3MF
     });
   }
 
@@ -472,8 +474,117 @@
     var menu = $('menu-slice');
     if (menu) menu.open = false;
     // a copy: G-scope reads the bytes, and the card keeps its file for Export
-    MS.openFile(f.name, f.bytes.slice().buffer);
+    var rec = { name: f.name, bytes: f.bytes, pieces: S.pieces, labels: S.result.labels || [], profile: S.profile };
+    var opened = MS.openFile(f.name, f.bytes.slice().buffer);
+    // G-scope's Export card then offers this slice (exportSlice): the document carries what it was made from
+    if (opened && opened.then) opened.then(function (d) {
+      if (!d) return;
+      d.nsoPlateSlice = rec;
+      if (d.importOf) d.importOf.nsoPlateSlice = rec;
+      if (MS.refreshExport) MS.refreshExport();
+    });
     return true;
+  }
+
+  // ---- G-scope's Export card, for a slice made here ----------------------------
+
+  function saveBytes(bytes, name, type) {
+    var blob = new Blob([bytes], { type: type || 'application/octet-stream' });
+    if (typeof downloadBlob === 'function') downloadBlob(blob, name);
+    else {
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob); a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+    }
+  }
+  /** The slice's objects (indices into rec.pieces) a list of G-code OBJECT_IDs stands for (null: the one unlabelled object of a one-piece plate). */
+  function indicesFor(rec, ids) {
+    var byId = {};
+    (rec.labels || []).forEach(function (l) { byId[String(l.id)] = l.index; });
+    var out = [];
+    (ids || []).forEach(function (id) {
+      var k = id == null ? (rec.labels && rec.labels.length === 1 ? 0 : null) : byId[String(id)];
+      if (k != null && out.indexOf(k) < 0) out.push(k);
+    });
+    return out.sort(function (a, b) { return a - b; });
+  }
+  /** What a selection of pieces takes with it: the supports (and brim) that hold them. */
+  function withSupports(rec, idx) {
+    var set = {}, hosts = {};
+    idx.forEach(function (i) { set[i] = true; var p = rec.pieces[i]; if (p && !p.support) hosts[p.sourceId] = true; });
+    rec.pieces.forEach(function (p, i) { if (p.support && hosts[p.hostSourceId]) set[i] = true; });
+    return Object.keys(set).map(Number).sort(function (a, b) { return a - b; });
+  }
+  function exportBusy(on, text) {
+    S.exporting = on;
+    ['ms-btn-plate-gcode3mf', 'ms-btn-plate-3mf', 'ms-btn-sel-gcode3mf', 'ms-btn-sel-3mf'].forEach(function (id) { var b = $(id); if (b) b.disabled = !!on; });
+    if (text) say(text, false);
+  }
+
+  /**
+   * Download what G-scope is showing, as the slice it came from, whole or for the pieces selected in it.
+   *   rec    the document's nsoPlateSlice
+   *   kind   'gcode3mf' - the sliced file: the whole plate's is the file as it was made, a selection is sliced again, alone, with the
+   *                       supports that hold it (the same profile and the same engine, so its layers are the plate's own);
+   *          '3mf'      - the pieces as a Bambu Studio project (the Export card's 3MF writer, the cooling profile it has chosen)
+   *   ids    null: the whole plate; else the G-code OBJECT_IDs of the selection (G-scope's selectedObjectIds())
+   * Resolves { ok, reason, name }; never rejects.
+   */
+  function exportSlice(rec, kind, ids) {
+    if (!rec || !rec.pieces) return Promise.resolve({ ok: false, reason: 'There is no slice here to export.' });
+    if (S.exporting) return Promise.resolve({ ok: false, reason: 'busy' });
+    var idx = null;
+    if (ids) {
+      idx = withSupports(rec, indicesFor(rec, ids));
+      if (!idx.length) { say('Nothing in the selection is one of the slice\'s pieces.', true); return Promise.resolve({ ok: false, reason: 'no pieces in the selection' }); }
+    }
+    var sub = idx ? idx.map(function (i) { return rec.pieces[i]; }) : rec.pieces;
+    var what = idx ? 'the selection' : 'the plate';
+    function fail(why) { exportBusy(false); say('Export failed: ' + why, true); return { ok: false, reason: why }; }
+    if (kind === 'gcode3mf') {
+      if (!idx) { saveBytes(rec.bytes, rec.name); say('Downloaded ' + rec.name); return Promise.resolve({ ok: true, name: rec.name }); }
+      exportBusy(true, 'Slicing ' + what + ' (' + sub.length + ' object' + (sub.length === 1 ? '' : 's') + ')...');
+      return loadAssets(rec.profile).then(function (assets) {
+        var run = runAway(pieceObjects(sub, assets.printer.bed), assets, function () {});
+        return run ? run.promise : build(pieceObjects(sub, assets.printer.bed), assets, {});
+      }).then(function (r) {
+        if (!r.ok) return fail(r.reason);
+        var name = fileName(sub, rec.profile);
+        saveBytes(r.bytes, name);
+        exportBusy(false);
+        say('Downloaded ' + name + ' - ' + describe(r));
+        return { ok: true, name: name };
+      }).catch(function (err) { console.error('[export slice]', err); return fail((err && err.message) || String(err)); });
+    }
+    if (kind === '3mf') {
+      var N3 = root.NSO3MF, plate = typeof root.getCurrentPlate === 'function' ? root.getCurrentPlate() : null;
+      if (!N3 || !N3.build3MF) { say('The 3MF writer did not load - check console.', true); return Promise.resolve({ ok: false, reason: '3MF writer missing' }); }
+      var dx = (plate ? plate.w : rec.profile ? 180 : 180) / 2, dy = (plate ? plate.d : 180) / 2;
+      var objects = sub.map(function (p, i) {
+        var flat = new Array(p.soup.length);
+        for (var k = 0; k < p.soup.length; k += 3) { flat[k] = p.soup[k] + dx; flat[k + 1] = p.soup[k + 1] + dy; flat[k + 2] = p.soup[k + 2]; }
+        var mesh = N3.indexTriangleSoup(flat), o = { name: p.name || ('piece_' + (i + 1)), vertices: mesh.vertices, triangles: mesh.triangles };
+        if (p.settings) o.settings = Object.assign({}, p.settings);
+        return o;
+      });
+      exportBusy(true, 'Building the 3MF of ' + what + '...');
+      var profileId = typeof root.getCoolingProfileId === 'function' ? root.getCoolingProfileId() : undefined;
+      return N3.build3MF({ objects: objects, profileId: profileId, plateName: plate ? plate.name : 'plate' }).then(function (res) {
+        var name = fileName(sub, rec.profile).replace(/\.gcode\.3mf$/i, '.3mf');
+        saveBytes(res.bytes, name, 'application/vnd.ms-package.3dmanufacturing-3dmodel+xml');
+        exportBusy(false);
+        say('Downloaded ' + name + ' - ' + sub.length + ' object' + (sub.length === 1 ? '' : 's'));
+        return { ok: true, name: name };
+      }).catch(function (err) { console.error('[export 3mf]', err); return fail((err && err.message) || String(err)); });
+    }
+    return Promise.resolve({ ok: false, reason: 'unknown format' });
+  }
+  /** The Export card's four buttons: this slice, whole or selected, as .gcode.3mf or .3mf. */
+  function exportFromCard(kind, selected) {
+    var MS = root.NSO_MICROSCOPE, d = MS && MS.getDoc && MS.getDoc(), rec = d && d.nsoPlateSlice;
+    if (!rec) return Promise.resolve({ ok: false, reason: 'no slice' });
+    return exportSlice(rec, kind, selected ? MS.selectedObjectIds() : null);
   }
 
   /**
@@ -498,11 +609,16 @@
     bind('btn-slice-cancel', cancel);
     bind('btn-slice-export', exportFile);
     bind('btn-slice-preview', previewInGscope);
+    bind('ms-btn-plate-gcode3mf', function () { exportFromCard('gcode3mf', false); });
+    bind('ms-btn-plate-3mf', function () { exportFromCard('3mf', false); });
+    bind('ms-btn-sel-gcode3mf', function () { exportFromCard('gcode3mf', true); });
+    bind('ms-btn-sel-3mf', function () { exportFromCard('3mf', true); });
     menu.addEventListener('toggle', function () { if (menu.open) refresh(); });
     refresh();
   }
 
   api.card = { slice: slice, sliceAndPreview: sliceAndPreview, cancel: cancel, exportFile: exportFile, previewInGscope: previewInGscope, refresh: refresh,
+               exportSlice: exportSlice, exportFromCard: exportFromCard, indicesFor: indicesFor,
                state: function () { return { busy: S.busy, result: S.result, fresh: isFresh() }; } };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount);

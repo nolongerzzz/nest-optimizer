@@ -238,8 +238,8 @@ async function main() {
   check('no G-scope file (' + gscopeFiles.join(', ') + ') loads or calls the planner, the packager or this card', gscopeFiles.length >= 3 && touchers.length === 0, touchers.join(', '));
   const src = read('app-print.js').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
   check('the card never reads or writes G-scope\'s Slice settings (ms-slice-*), and does not use toGcode()', !/ms-slice|toGcode\(/.test(src));
-  check('...it calls only G-scope\'s plate reader and its file import',
-    JSON.stringify([...new Set([...src.matchAll(/\bMS\.(\w+)/g)].map(m => m[1]))].sort()) === '["openFile","plateObjects"]');
+  check('...it calls only G-scope\'s plate reader and its file import, and - for the Export card\'s rows of a slice it opened - the open document, the selection\'s object ids and a re-read of the rows',
+    JSON.stringify([...new Set([...src.matchAll(/\bMS\.(\w+)/g)].map(m => m[1]))].sort()) === '["getDoc","openFile","plateObjects","refreshExport","selectedObjectIds"]');
 
   console.log('\n' + (fail ? 'FAILED  ' + fail + ' of ' + (pass + fail) : 'PASSED  all ' + pass));
   process.exit(fail ? 1 : 0);

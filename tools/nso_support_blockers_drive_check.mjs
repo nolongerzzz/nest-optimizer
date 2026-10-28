@@ -22,7 +22,11 @@
  *   8  SLICE AND PREVIEW. The button at the bottom of the card slices the plate (the Slice card's slice: its stage line on the card's
  *      own) and opens the slice in G-scope on the Slice side; the Slice card is as it was (its four controls, its readout holding
  *      the same slice, Export enabled); the supports card is put away. A plate with nothing on it is refused in words.
- *   9  No page errors.
+ *   9  G-SCOPE'S EXPORT after Slice and Preview. The Export button is live; its card has "This slice - whole plate" (Export .gcode.3mf, Export
+ *      .3mf) and, with something selected, "This slice - selected" (Selected .gcode.3mf, Selected .3mf). Real downloads, taken apart: the plate's
+ *      .gcode.3mf is the file G-scope shows, its .3mf holds every object (the part, its support, a second piece); a selection of the second piece
+ *      alone is a .3mf of that one object and a .gcode.3mf sliced again without the support.
+ *  10  No page errors.
  */
 import { chromium } from 'playwright';
 import { mkdir } from 'node:fs/promises';
@@ -55,6 +59,7 @@ function stl(soup) {
 /* the bridge: legs 8 wide, 18 tall, a slab 2 thick on them: 60 x 30 x 20 */
 const BENCH = stl([].concat(box([0, 0, 0], [8, 30, 18]), box([52, 0, 0], [60, 30, 18]), box([0, 0, 18], [60, 30, 20])));
 
+const CUBE = stl(box([0, 0, 0], [12, 12, 12]));
 const frames = (page) => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
 
 async function main() {
@@ -320,6 +325,10 @@ async function main() {
   // the bridge's supports, to slice with it
   await page.click('#btn-sup-all');
   await idle();
+  // a second, plain piece: so that a selection is not the whole plate
+  await page.evaluate((fs) => handleFiles(fs.map(([n, a]) => new File([new Uint8Array(a)], n))), [['cube.stl', CUBE]]);
+  await page.waitForFunction(() => state.placed.filter((p) => !state.models.find((m) => m.id === p.sourceId).nsoSupport).length === 2, null, { timeout: 30000 });
+  const cubeAt = await page.evaluate(() => { const p = state.placed.find((q) => state.models.find((m) => m.id === q.sourceId).name === 'cube'); const b = new THREE.Box3().setFromObject(p.mesh); return { x: (b.min.x + b.max.x) / 2, y: -(b.min.z + b.max.z) / 2, z: (b.min.y + b.max.y) / 2 }; });
   const sliceUi = await page.evaluate(() => ({ go: document.getElementById('btn-slice-go').textContent, exp: document.getElementById('btn-slice-export').disabled, prev: document.getElementById('btn-slice-preview').disabled }));
   check('before: the Slice card has not been used (Export and Preview are off)', sliceUi.exp && sliceUi.prev && sliceUi.go === 'Slice');
   await page.click('#btn-sup-slice');
@@ -345,8 +354,54 @@ async function main() {
   check('G-scope opened on the Slice side with the slice loaded', after.side === 'slice', JSON.stringify(after));
   check('...the supports card is put away', !after.card);
   check('...the Slice card is as it was: its four controls, its readout holding this slice, Export and Preview on', after.buttons.every(Boolean) && !after.exp && !after.prev && /layers/.test(after.readout) && /support/.test(after.readout) && after.cancel, after.readout);
-  check('...nothing was added to the plate (the bridge and its support)', after.pieces === 2, String(after.pieces));
+  check('...nothing was added to the plate (the bridge, its support, the cube)', after.pieces === 3, String(after.pieces));
   await shot('08-gscope.png');
+
+  /* ---------------------------------------------------------------- 9 */
+  console.log('\n--- 9 G-scope export');
+  const exp0 = await page.evaluate(() => { const b = document.getElementById('ms-nav-export'); return { off: b.disabled }; });
+  check('the Export button is live on the slice', exp0.off === false, JSON.stringify(exp0));
+  await page.click('#ms-nav-export');
+  await frames(page);
+  const rows = () => page.evaluate(() => ['ms-plate-export-row', 'ms-sel-export-row'].map((i) => getComputedStyle(document.getElementById(i)).display !== 'none' && getComputedStyle(document.getElementById(i).parentElement).display !== 'none'));
+  check('its card shows "whole plate" with .gcode.3mf and .3mf, and no "selected" row with nothing selected', JSON.stringify(await rows()) === '[true,false]', JSON.stringify(await rows()));
+  const save = async (sel) => {
+    const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 120000 }), page.click(sel)]);
+    const path = join(SHOTS, 'dl-' + dl.suggestedFilename().replace(/[^\w.-]+/g, '_'));
+    await dl.saveAs(path);
+    const { readFile } = await import('node:fs/promises');
+    return { name: dl.suggestedFilename(), bytes: Array.from(await readFile(path)) };
+  };
+  const inspect = (bytes) => page.evaluate(async (bytes) => {
+    const zip = NSO3MFRead.openZip(new Uint8Array(bytes)), names = zip.names();
+    const out = { sliced: NSO_MICROSCOPE.isSliced(new Uint8Array(bytes)), objects: 0, ids: [], support: false };
+    const model = names.find((n) => /3dmodel\.model$/i.test(n));
+    if (model) { const t = new TextDecoder().decode(await zip.read(model)); out.objects = (t.match(/<object /g) || []).length; out.names = [...t.matchAll(/<object [^>]*name="([^"]*)"/g)].map((m) => m[1]); }
+    const g = names.find((n) => /plate_\d+\.gcode$/i.test(n));
+    if (g) { const t = new TextDecoder().decode(await zip.read(g)); out.ids = [...new Set([...t.matchAll(/OBJECT_ID:\s*(\d+)/g)].map((m) => m[1]))]; out.support = /; FEATURE: Support/.test(t); }
+    return out;
+  }, bytes);
+  const whole = await save('#ms-btn-plate-gcode3mf');
+  const wi = await inspect(whole.bytes);
+  check('Export .gcode.3mf downloads the slice as made: a .gcode.3mf with the three objects and the support', /\.gcode\.3mf$/.test(whole.name) && wi.sliced && wi.ids.length === 3 && wi.support, whole.name + ' ' + JSON.stringify(wi));
+  const w3 = await save('#ms-btn-plate-3mf');
+  const w3i = await inspect(w3.bytes);
+  check('Export .3mf downloads the plate as a project: a .3mf, not sliced, one object each for the bridge, its support, the cube', /\.3mf$/.test(w3.name) && !/gcode/.test(w3.name) && !w3i.sliced && w3i.objects === 3, w3.name + ' ' + JSON.stringify(w3i));
+  // select the cube: a capture box round it
+  await page.evaluate(([c]) => { NSO_MICROSCOPE.clearBoxes(); NSO_MICROSCOPE.addBoxAt(90 + c.x, 90 + c.y, c.z, 5, 5); }, [cubeAt]);
+  await frames(page); await frames(page);
+  const selIds = await page.evaluate(() => NSO_MICROSCOPE.selectedObjectIds());
+  check('a box round the cube selects one object', selIds.length === 1, JSON.stringify(selIds));
+  check('the "selected" row shows', JSON.stringify(await rows()) === '[true,true]', JSON.stringify(await rows()));
+  await shot('09-export-card.png');
+  const s3 = await save('#ms-btn-sel-3mf');
+  const s3i = await inspect(s3.bytes);
+  check('Selected .3mf is the cube alone: one object', !s3i.sliced && s3i.objects === 1, s3.name + ' ' + JSON.stringify(s3i));
+  const sg = await save('#ms-btn-sel-gcode3mf');
+  const sgi = await inspect(sg.bytes);
+  check('Selected .gcode.3mf is the cube sliced again alone: one object, no support', /\.gcode\.3mf$/.test(sg.name) && sgi.sliced && sgi.ids.length <= 1 && !sgi.support, sg.name + ' ' + JSON.stringify(sgi));
+  const stillWhole = await save('#ms-btn-plate-3mf');
+  check('the whole plate is still the whole plate afterwards', (await inspect(stillWhole.bytes)).objects === 3);
 
   /* ---------------------------------------------------------------- the plate with nothing on it */
   const empty = await browser.newPage({ viewport: { width: W, height: H } });
@@ -361,7 +416,6 @@ async function main() {
   const nothing = await empty.evaluate(() => ({ text: document.getElementById('sup-slice-line').textContent, bad: document.getElementById('sup-slice-line').classList.contains('is-bad'), open: window.NSO_MICROSCOPE.isOpen() }));
   check('an empty plate is refused in words, in red, and G-scope stays shut', nothing.text === 'Nothing on the plate to slice.' && nothing.bad && !nothing.open, JSON.stringify(nothing));
 
-  /* ---------------------------------------------------------------- 9 */
   check('nothing hit the CDN unrouted', cdn.filter((x) => x.startsWith('UNROUTED')).length === 0, cdn.filter((x) => x.startsWith('UNROUTED')).join(' '));
   check('no page errors', errors.length === 0, errors.join(' | '));
 
