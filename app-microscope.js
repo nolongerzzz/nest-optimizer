@@ -929,6 +929,7 @@ var NSO_MICROSCOPE = (function () {
     zr = null;
     mode = 'piece';
     clearSteps();
+    if (playOpen) { playRunSet(false); playClear(); playKey = ''; playMoves = []; }
   }
 
   /** One burst of coalesced redraws, run now so it lands on the plate that asked for it. */
@@ -1040,6 +1041,7 @@ var NSO_MICROSCOPE = (function () {
     var c = $('ms-main-card');
     if (c) c.dataset.side = cardSide();
     syncBack();
+    syncPlay();
     var S = window.NSO_GSCOPE_SLICE;
     if (S && S.syncPanel) S.syncPanel(); else if (S && S.syncToggle) S.syncToggle();
   }
@@ -4685,16 +4687,147 @@ var NSO_MICROSCOPE = (function () {
     return text;
   }
 
+  // --- PLAY: a layer, move by move, as the nozzle printed it -------------------------
+  //
+  // Bambu Studio's horizontal move slider with a play button. The layer is the
+  // slider's TOP step (one step is one layer); its moves are read in file order.
+  // The played part is drawn over the view in bright lines that fade with age (the
+  // trail), a dashed line where the nozzle jumped between runs, and a marker on the
+  // nozzle. It changes nothing: the document, the selection and the Features list
+  // are as they were, and it draws nothing while it is shut. Shut, or the layer or
+  // plate changing, it is gone.
+
+  var playOpen = false, playPos = 0, playMoves = [], playKey = '', playRunning = false, playRaf = 0, playLast = 0, playAcc = 0, playGroup = null;
+  var PLAY_TRAIL = 80;                       // moves behind the nozzle that fade from bright to dim
+
+  function playLayerMoves() {
+    if (!doc || doc.kind !== 'toolpath' || !zr) return { key: '', list: [], zi: -1 };
+    var zi = zr.hi, key = plateName + ':' + zi + ':' + doc.segments.length;
+    if (playKey === key) return { key: key, list: playMoves, zi: zi, same: true };
+    var list = [];
+    for (var i = 0; i < doc.segments.length; i++) if (doc.segments[i].zi === zi) list.push(doc.segments[i]);
+    return { key: key, list: list, zi: zi, same: false };
+  }
+
+  function playClear() {
+    if (playGroup && view) { view.scene.remove(playGroup); disposeTree(playGroup); }
+    playGroup = null;
+  }
+
+  function playDraw() {
+    playClear();
+    if (!playOpen || !view || !doc || !playMoves.length) return;
+    var cx = doc.cx, cy = doc.cy, n = Math.min(playPos, playMoves.length), g = new THREE.Group();
+    g.position.x = plateOffset(plateName);
+    if (n > 0) {
+      var pos = new Float32Array(n * 6), col = new Float32Array(n * 6), jp = [], i, s;
+      for (i = 0; i < n; i++) {
+        s = playMoves[i];
+        var lift = s.z + 0.12;
+        pos[i * 6] = s.x0 - cx; pos[i * 6 + 1] = lift; pos[i * 6 + 2] = -(s.y0 - cy);
+        pos[i * 6 + 3] = s.x1 - cx; pos[i * 6 + 4] = lift; pos[i * 6 + 5] = -(s.y1 - cy);
+        var t = Math.min(1, (n - 1 - i) / PLAY_TRAIL), r = 0.55 - 0.45 * t, gr = 0.95 - 0.6 * t, b = 1.0 - 0.55 * t;
+        col[i * 6] = col[i * 6 + 3] = r; col[i * 6 + 1] = col[i * 6 + 4] = gr; col[i * 6 + 2] = col[i * 6 + 5] = b;
+        if (i > 0) {
+          var p = playMoves[i - 1];
+          if (Math.hypot(s.x0 - p.x1, s.y0 - p.y1) > 0.05) jp.push(p.x1 - cx, p.z + 0.12, -(p.y1 - cy), s.x0 - cx, lift, -(s.y0 - cy));
+        }
+      }
+      var lg = new THREE.BufferGeometry();
+      lg.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      lg.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      var lines = new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ vertexColors: true, depthTest: false, transparent: true }));
+      lines.renderOrder = 999; g.add(lines);
+      if (jp.length) {
+        var jg = new THREE.BufferGeometry();
+        jg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(jp), 3));
+        var jl = new THREE.LineSegments(jg, new THREE.LineDashedMaterial({ color: 0x8a96a6, dashSize: 0.6, gapSize: 0.5, depthTest: false, transparent: true, opacity: 0.8 }));
+        jl.computeLineDistances(); jl.renderOrder = 998; g.add(jl);
+      }
+    }
+    var head = n > 0 ? playMoves[n - 1] : playMoves[0], hx = n > 0 ? head.x1 : head.x0, hy = n > 0 ? head.y1 : head.y0;
+    var marker = new THREE.Mesh(new THREE.SphereGeometry(0.5, 14, 10), new THREE.MeshBasicMaterial({ color: 0xffa63a, depthTest: false }));
+    marker.position.set(hx - cx, head.z + 0.5, -(hy - cy)); marker.renderOrder = 1000; g.add(marker);
+    view.scene.add(g); playGroup = g;
+  }
+
+  function playReadout() {
+    var el = $('ms-play-read');
+    if (!el) return;
+    if (!doc || doc.kind !== 'toolpath') { el.textContent = 'A slice plays: flip the switch to Slice.'; return; }
+    if (!playMoves.length) { el.textContent = 'No moves on this layer.'; return; }
+    var m = playPos > 0 ? playMoves[Math.min(playPos, playMoves.length) - 1] : null, a = playMoves[0];
+    var l1 = 'Layer ' + (a.layer + 1) + ', Z ' + a.z.toFixed(2) + ' - move ' + playPos + ' of ' + playMoves.length;
+    if (!m) { el.textContent = l1 + '\nAt the start: press Play, or drag the scrubber.'; return; }
+    var prev = playPos > 1 ? playMoves[playPos - 2] : null, jump = prev ? Math.hypot(m.x0 - prev.x1, m.y0 - prev.y1) : 0;
+    el.textContent = l1 + '\n' + m.feature + ' - X ' + m.x1.toFixed(2) + ' Y ' + m.y1.toFixed(2) + ', ' + m.mv.length.toFixed(2) + ' mm' +
+      (m.mv.line ? ', G-code line ' + m.mv.line : '') + (jump > 0.05 ? '\njumped ' + jump.toFixed(1) + ' mm to start this run' : '');
+  }
+
+  function playSeek(p) {
+    p = Math.max(0, Math.min(playMoves.length, Math.round(Number(p) || 0)));
+    playPos = p;
+    var sc = $('ms-play-scrub');
+    if (sc && Number(sc.value) !== p) sc.value = String(p);
+    playDraw(); playReadout();
+    return playPos;
+  }
+
+  function playRunSet(on) {
+    on = !!on && playOpen && playMoves.length > 0;
+    if (on && playPos >= playMoves.length) playSeek(0);
+    if (playRaf && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(playRaf);
+    playRaf = 0; playRunning = on; playLast = 0; playAcc = 0;
+    var b = $('ms-play-run');
+    if (b) { b.textContent = on ? 'Pause' : 'Play'; b.setAttribute('aria-pressed', String(on)); }
+    if (on && typeof requestAnimationFrame === 'function') playRaf = requestAnimationFrame(playTick);
+  }
+  function playTick(ts) {
+    if (!playRunning) return;
+    playRaf = requestAnimationFrame(playTick);
+    if (!playLast) { playLast = ts; return; }
+    var rate = Number(($('ms-play-speed') || {}).value) || 100;
+    playAcc += (ts - playLast) / 1000 * rate; playLast = ts;
+    var n = Math.floor(playAcc);
+    if (n > 0) { playAcc -= n; playSeek(playPos + n); }
+    if (playPos >= playMoves.length) playRunSet(false);
+  }
+
+  /** Follow the slider and the plate: a new layer shows the whole layer (nothing hidden) until Play is pressed. */
+  function syncPlay() {
+    if (!playOpen) return;
+    var t = playLayerMoves();
+    if (t.same) return;
+    if (playRunning) playRunSet(false);
+    playMoves = t.list; playKey = t.key;
+    var sc = $('ms-play-scrub');
+    if (sc) { sc.max = String(playMoves.length); sc.disabled = !playMoves.length; }
+    playSeek(playMoves.length);
+  }
+
+  function setPlayOpen(on) {
+    on = !!on;
+    if (on && !playOpen) pushStep(function () { if (!playOpen) return false; setPlayOpen(false); return true; });
+    playOpen = on;
+    var box = $('ms-play'), b = $('ms-play-toggle');
+    if (box) box.hidden = !on;
+    if (b) b.setAttribute('aria-expanded', String(on));
+    if (!on) { playRunSet(false); playClear(); playKey = ''; playMoves = []; return; }
+    playKey = ''; syncPlay();
+  }
+
   function syncTakeBand() {
     var btn = $('ms-btn-take-band'), read = $('ms-band-read');
     var n = doc && doc.kind === 'toolpath' ? shownSegments().length : 0;
     var why = bandReason(n);
     setDisabled(btn, !!why);
     if (!read) return;
-    if (why) { read.textContent = why + '.'; syncMeasure(); return; }
+    if (why) { read.textContent = why + '.'; syncMeasure(); syncPlay(); return; }
     var band = zBandMm();
     read.textContent = 'The slider\'s range is the band: Z ' + band[0].toFixed(2) + ' - ' + band[1].toFixed(2) + ' mm, ' +
-      n + ' move' + (n === 1 ? '' : 's') + '.';    syncMeasure();
+      n + ' move' + (n === 1 ? '' : 's') + '.';
+    syncMeasure();
+    syncPlay();
   }
 
   /** The band isolated as one piece. Returns the selection, or null (and says why). */
@@ -5726,6 +5859,11 @@ var NSO_MICROSCOPE = (function () {
     bind('ms-measure-toggle', 'click', function () { setMeasureOpen(!measureOpen); });
     bind('ms-measure-layers-toggle', 'click', function () { setMeasureLayers(!measureLayersOpen); });
     bind('ms-measure-copy', 'click', function () { copyMeasure(); });
+    bind('ms-play-toggle', 'click', function () { setPlayOpen(!playOpen); });
+    bind('ms-play-run', 'click', function () { playRunSet(!playRunning); });
+    bind('ms-play-prev', 'click', function () { playRunSet(false); playSeek(playPos - 1); });
+    bind('ms-play-next', 'click', function () { playRunSet(false); playSeek(playPos + 1); });
+    bind('ms-play-scrub', 'input', function () { playRunSet(false); playSeek($('ms-play-scrub').value); });
     wireShell();
     bind('ms-btn-back', 'click', unIsolate);                  // WHOLE PART: back out of any isolate
     bind('ms-btn-show-all', 'click', checkAll);
@@ -5901,6 +6039,8 @@ var NSO_MICROSCOPE = (function () {
     },
     takeBand: takeBand,
     stepBack: stepBack, pushStep: pushStep, clearSteps: clearSteps, stepCount: function () { return (stepStacks[plateName] || []).length; },
+    setPlayOpen: setPlayOpen, playSeek: playSeek, playRun: playRunSet,
+    playState: function () { return { open: playOpen, pos: playPos, n: playMoves.length, running: playRunning, drawn: !!playGroup, children: playGroup ? playGroup.children.length : 0 }; },
     measureReport: measureReport, setMeasureOpen: setMeasureOpen, setMeasureLayers: setMeasureLayers, copyMeasure: copyMeasure,
     bandReason: function () { return bandReason(); },
     exportLabel: function () { return doc && currentSelection.length ? exportLabel() : null; },

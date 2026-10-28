@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=a034a69f" />
+  <link rel="stylesheet" href="styles.css?v=42ea819a" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -1762,6 +1762,31 @@
               <div id="ms-measure-layers" class="ms-measure-list" hidden></div>
             </div>
           </div>
+          <!-- PLAY, the Slice side, closed until opened (round 3c, docs/GSCOPE.md item 15):
+               the slider's top layer, played move by move as the nozzle printed it -
+               Bambu Studio's horizontal move slider, with a play button. The path
+               winds through the layer with a trail and a nozzle marker; a jump
+               between runs is a dashed line. app-microscope.js owns it (syncPlay). -->
+          <div id="ms-play-row" class="ms-row" data-on="slice">
+            <button id="ms-play-toggle" type="button" class="ms-disclose"
+                    aria-expanded="false" aria-controls="ms-play">Play</button>
+            <div id="ms-play" hidden>
+              <div class="ms-btn-row ms-play-buttons">
+                <button id="ms-play-prev" type="button" title="Back one move" aria-label="Back one move">&#9664;</button>
+                <button id="ms-play-run" type="button" aria-pressed="false"
+                        title="Play the layer from where the scrubber is (from the start if it is at the end)">Play</button>
+                <button id="ms-play-next" type="button" title="Forward one move" aria-label="Forward one move">&#9654;</button>
+                <select id="ms-play-speed" aria-label="Speed" title="Moves a second">
+                  <option value="25">25/s</option>
+                  <option value="100" selected>100/s</option>
+                  <option value="400">400/s</option>
+                  <option value="1600">1600/s</option>
+                </select>
+              </div>
+              <input id="ms-play-scrub" class="ms-play-scrub" type="range" min="0" max="0" step="1" value="0" aria-label="Move of the layer">
+              <p class="ms-note" id="ms-play-read">&mdash;</p>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1955,7 +1980,7 @@
   <script src="nso-3mf-read.js?v=28d79bcf"></script>
   <script src="nso-3mf-scene.js?v=abb8f614"></script>
   <script src="nso-surface-grid.js?v=c0d97583"></script>
-  <script src="nso-gcode-lines.js?v=f9dd974d"></script>
+  <script src="nso-gcode-lines.js?v=fe0b823c"></script>
   <script src="nso-gcode-solid.js?v=ac1a4f02"></script>
   <script src="nso_slicer.js?v=abf7f061"></script>
   <script src="nso_raster_lines.js?v=461ca449"></script>
@@ -2099,7 +2124,7 @@
        row each under the Flange row. Pure. docs/GSCOPE-FEATURES.md. -->
   <script src="nso_face_features.js?v=53ee4b23"></script>
   <script src="nso_gscope_measure.js?v=0ef4a708"></script>
-  <script src="app-microscope.js?v=7bf13b15"></script>
+  <script src="app-microscope.js?v=cde64fc1"></script>
   <!-- Detach / Reattach (Cut menu): cap a detected flange's hull on its own
        wall, lift the flange out as a piece, seat it elsewhere with Attach's
        seat. After nso_flange.js, app-crop.js, nso_assemble.js, app-assemble.js

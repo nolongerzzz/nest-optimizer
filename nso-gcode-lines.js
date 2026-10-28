@@ -213,6 +213,7 @@
       return { h: DEFAULT_LAYER_HEIGHT, src: 'fallback' };
     }
 
+    var curLine = 0;          // the 1-based G-code line being read (a move remembers it: G-scope's Play row shows it)
     function pushMove(x0, y0, x1, y1, atZ, dE) {
       var dx = x1 - x0, dy = y1 - y0;
       var dist = Math.sqrt(dx * dx + dy * dy);
@@ -234,7 +235,8 @@
         feature: feature || 'Unknown',
         objectId: objectId,
         layer: lay.index,
-        run: run
+        run: run,
+        line: curLine
       });
       runOpen = true;
       heightSourceCount[hh.src]++;
@@ -270,6 +272,7 @@
     }
 
     for (var li = 0; li < lines.length; li++) {
+      curLine = li + 1;
       var raw = lines[li];
       if (!raw) continue;
 

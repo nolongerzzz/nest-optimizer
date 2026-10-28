@@ -3299,6 +3299,13 @@ select:focus, input:focus {
 }
 .ms-main-card button.ms-disclose::before { content: "\25B8"; display: inline-block; width: 1.2em; }
 .ms-main-card button.ms-disclose[aria-expanded="true"]::before { content: "\25BE"; }
+/* PLAY: closed until opened. */
+#ms-play { margin-top: 6px; }
+#ms-play .ms-play-buttons { display: flex; gap: 6px; align-items: center; }
+#ms-play .ms-play-buttons button { min-width: 34px; }
+#ms-play .ms-play-buttons select { width: auto; margin-left: auto; }
+.ms-main-card .ms-play-scrub { width: 100%; margin: 8px 0 2px; }
+#ms-play-read { white-space: pre-line; }
 /* BACK: beside the card's head, the corner slabs' own glass. */
 .ms-step-back {
   position: absolute;

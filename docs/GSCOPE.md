@@ -409,7 +409,7 @@ always:
   - **Normal side**: REGION (item 7) · WHOLE PART (back out of any isolate).
   - **Slice side**: REGION · TAKE BAND (the slider's range isolated as one
     piece) · Toolpath | Solid · Slice settings (folded) · MEASURE (folded,
-    item 13); BACK (item 14) stands beside the card's head. An isolation there is undone by Escape, or a click on it.
+    item 13) · PLAY (folded, item 15); BACK (item 14) stands beside the card's head. An isolation there is undone by Escape, or a click on it.
 - **Slice settings**: nozzle / layer / walls / infill (and its pattern) /
   support below. Their defaults are the **plate's printer profile**: on the A1
   mini a 0.4 mm nozzle and 0.2 mm layers (the owner's own Bambu slice:
@@ -521,6 +521,40 @@ point they happen, and Slice settings (`app-gscope-slice.js`) through the API. U
 replays through the same setters with pushes switched off. Checked in
 `gscope:shell` (its position beside the card, grey at the start, three steps undone
 in reverse order, a skipped step, a line type's check and an isolate).
+
+## 15. PLAY: a layer, move by move (round 3c)
+
+**What the user sees.** One more folded row on the Slice side, `▸ PLAY`, under
+Measure; shut it shows nothing and draws nothing. Opened, it plays **the slider's
+top layer** (one step is one layer) the way Bambu Studio's horizontal move slider
+does, with a play button:
+
+- **◀ · Play/Pause · ▶** and a speed (25 / 100 / 400 / 1600 moves a second), and a
+  **scrubber** across the layer's moves in the order the nozzle printed them;
+- the played part is drawn over the view in bright lines that fade with age (the
+  last 80 moves are the trail), a **dashed line where the nozzle jumped** between
+  runs, and an orange marker on the nozzle - on top of everything, so a buried
+  layer is still readable;
+- a readout: `Layer, Z - move N of M`, then the move's line type, X / Y, length and
+  its **G-code line** (each move now remembers the line it was read from), and how far
+  it jumped to start a run.
+
+A new layer (the slider moved, the other plate made active) shows the whole layer,
+scrubber at the end, until Play is pressed - Play from the end starts again from 0.
+Dragging the scrubber or pressing ◀ ▶ pauses. It changes nothing: the document, the
+selection and the Features list are as they were. BACK shuts it (item 14); a
+document change or CLEAR shuts it too.
+
+**How it is built.** `app-microscope.js`: `playLayerMoves` (the segments of the
+top step, in file order), `playDraw` (a group of two `LineSegments` and a sphere,
+positioned by the active plate's offset), `playSeek` / `playRunSet` (a
+`requestAnimationFrame` clock), `syncPlay` (called with the slider and the card).
+`nso-gcode-lines.js` puts `line` (1-based) on each move. Checked in `gscope:shell`
+(shut by default; a real click opens it on the top layer; the scrubber at 0 and
+at 10; Play runs to the end and stops; BACK shuts it).
+
+**Not here yet.** Edits on a layer (snip, a detour) and playing a draft through GRISPR's
+verifier are the next rounds; Play is the layer they will be drawn and checked on.
 
 ## Checks
 

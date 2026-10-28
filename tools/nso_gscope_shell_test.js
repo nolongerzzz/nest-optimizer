@@ -99,10 +99,11 @@ const ROWS = [
   ['ms-slice-row', 'slice', ['ms-slice-settings-toggle', 'ms-slice-settings', 'ms-slice-nozzle', 'ms-slice-layer', 'ms-slice-walls',
                              'ms-slice-density', 'ms-slice-pattern', 'ms-slice-angle', 'ms-slice-settings-note']],
   ['ms-measure-row', 'slice', ['ms-measure-toggle', 'ms-measure', 'ms-measure-head', 'ms-measure-warn', 'ms-measure-feats', 'ms-measure-layers-toggle',
-                               'ms-measure-copy', 'ms-measure-layers']]
+                               'ms-measure-copy', 'ms-measure-layers']],
+  ['ms-play-row', 'slice', ['ms-play-toggle', 'ms-play', 'ms-play-prev', 'ms-play-run', 'ms-play-next', 'ms-play-speed', 'ms-play-scrub', 'ms-play-read']]
 ];
 const NORMAL_ROWS = ['ms-region-row', 'ms-whole-row'];
-const SLICE_ROWS = ['ms-region-row', 'ms-band-row', 'ms-render-row', 'ms-slice-row', 'ms-measure-row'];
+const SLICE_ROWS = ['ms-region-row', 'ms-band-row', 'ms-render-row', 'ms-slice-row', 'ms-measure-row', 'ms-play-row'];
 const SETTINGS = ['ms-slice-nozzle', 'ms-slice-layer', 'ms-slice-walls', 'ms-slice-density', 'ms-slice-pattern', 'ms-slice-angle'];
 /* Export: one card, from the corner, as it was. */
 const EXPORT_IDS = ['ms-btn-export-plate', 'ms-btn-export-stl', 'ms-btn-export-solid-plate', 'ms-btn-export-solid-stl',
@@ -379,7 +380,7 @@ withApp(async (page, logs) => {
       !r.menu.inCard && r.menu.plateIn && r.menu.plateRole === 'menuitem' && r.menu.moreAria[0] === 'menu' && r.menu.moreAria[1] === 'ms-import-menu', J(r.menu));
     r.rows.forEach(([id, inRows, on, out]) => check('row #' + id + ': a .ms-row of the card, data-on "' + ROWS.find(x => x[0] === id)[1] + '", holding its controls',
       inRows && on && out.length === 0, out.length ? 'not in it: ' + out.join(',') : ''));
-    check('the card has exactly those six rows', r.rowCount === ROWS.length, String(r.rowCount));
+    check('the card has exactly those seven rows', r.rowCount === ROWS.length, String(r.rowCount));
     check('every id the card, the corner, the dock, the slider and Export list appears exactly once, none twice inside #microscope',
       r.listedBad.length === 0 && r.dup.length === 0, (r.listedBad.concat(r.dup)).join(', ') || 'no duplicates');
     check('every other id the sidebar page had (less rounds 1b and 2c) is still there exactly once', r.missing.length === 0, r.missing.join(', ') || BEFORE.length + ' ids');
@@ -558,7 +559,7 @@ withApp(async (page, logs) => {
                                              note: document.getElementById('ms-slice-settings-note').textContent }));
     check('an imported .gcode.3mf (plate 2) is the Slice side: data-side, cardSide() and viewMode() say slice',
       st.side === 'slice' && st.cardSide === 'slice' && st.viewMode === 'slice', J([st.side, st.cardSide, st.viewMode]));
-    check('...5 rows: REGION, TAKE BAND, Toolpath | Solid, Slice settings, Measure', J(st.rows) === J(SLICE_ROWS), J(st.rows));
+    check('...6 rows: REGION, TAKE BAND, Toolpath | Solid, Slice settings, Measure, Play', J(st.rows) === J(SLICE_ROWS), J(st.rows));
     check('...the switch: Slice active, Normal DISABLED (a sliced file has no mesh), Slice enabled',
       st.slice.active && st.slice.pressed === 'true' && !st.slice.disabled && !st.normal.active && st.normal.disabled, J([st.normal, st.slice]));
     check('...the Slice report is hidden; the settings say this file is sliced already', imp.readout === 'none' && /sliced already/.test(imp.note), J(imp));
@@ -598,7 +599,7 @@ withApp(async (page, logs) => {
       seen.aria && seen.busyCls && seen.labels.every(l => l === 'Slice'), J({ aria: seen.aria, busyCls: seen.busyCls, labels: Array.from(new Set(seen.labels)) }));
     st = await cardState(page);
     check('the Slice side: data-side, cardSide() and viewMode() say slice', st.side === 'slice' && st.cardSide === 'slice' && st.viewMode === 'slice', J([st.side, st.cardSide, st.viewMode]));
-    check('...exactly 5 rows: REGION, TAKE BAND, Toolpath | Solid, Slice settings, Measure', J(st.rows) === J(SLICE_ROWS), J(st.rows));
+    check('...exactly 6 rows: REGION, TAKE BAND, Toolpath | Solid, Slice settings, Measure, Play', J(st.rows) === J(SLICE_ROWS), J(st.rows));
     check('...Slice active, Normal enabled (it goes back to the mesh) and not busy',
       st.slice.active && st.slice.pressed === 'true' && !st.normal.active && st.normal.pressed === 'false' && !st.normal.disabled && !st.busy && st.slice.text === 'Slice', J([st.normal, st.slice, st.busy]));
     check('...Whole part is not shown on the Slice side (Escape is its job there); Take band is enabled',
@@ -709,6 +710,32 @@ withApp(async (page, logs) => {
     ik = await page.evaluate(() => ({ iso: NSO_MICROSCOPE.isIsolated(), open: !document.getElementById('microscope').hidden }));
     check('...BACK makes it whole again, and G-scope stays open', !ik.iso && ik.open, J(ik));
     await page.evaluate(() => { NSO_MICROSCOPE.setSelectionMoves([]); NSO_MICROSCOPE.clearSteps(); });
+
+    // PLAY: shut until opened; the slider's top layer, move by move
+    let pl = await page.evaluate(() => ({ hidden: document.getElementById('ms-play').hidden, st: NSO_MICROSCOPE.playState(), read: document.getElementById('ms-play-read').textContent }));
+    check('PLAY is shut: the panel hidden, nothing drawn', pl.hidden && !pl.st.open && !pl.st.drawn && pl.read === '\u2014', J(pl));
+    await clickFace(page, '#ms-play-toggle'); await frames(page);
+    pl = await page.evaluate(() => ({ hidden: document.getElementById('ms-play').hidden, st: NSO_MICROSCOPE.playState(), max: +document.getElementById('ms-play-scrub').max,
+      val: +document.getElementById('ms-play-scrub').value, read: document.getElementById('ms-play-read').textContent, steps: NSO_MICROSCOPE.stepCount() }));
+    check('a real click on "Play" opens it on the slider\'s top layer, the whole layer drawn (scrubber at the end), one step left', !pl.hidden && pl.st.open && pl.st.n > 0 && pl.max === pl.st.n && pl.val === pl.max && pl.st.drawn && pl.steps === 1, J(pl));
+    check('...the readout names the layer, its Z and the move', /^Layer \d+, Z \d+\.\d\d - move \d+ of \d+\n/.test(pl.read), pl.read.replace(/\n/g, ' | '));
+    await page.evaluate(() => NSO_MICROSCOPE.playSeek(0));
+    pl = await page.evaluate(() => ({ st: NSO_MICROSCOPE.playState(), read: document.getElementById('ms-play-read').textContent }));
+    check('the scrubber at 0: only the nozzle marker is drawn', pl.st.pos === 0 && pl.st.children === 1 && /At the start/.test(pl.read), J(pl));
+    await page.evaluate(() => NSO_MICROSCOPE.playSeek(10));
+    pl = await page.evaluate(() => ({ st: NSO_MICROSCOPE.playState(), read: document.getElementById('ms-play-read').textContent }));
+    check('at move 10: the path so far and the marker are drawn, the readout gives the move\'s line type, place and G-code line', pl.st.pos === 10 && pl.st.children >= 2 && /move 10 of /.test(pl.read) && /G-code line \d+/.test(pl.read), pl.read.replace(/\n/g, ' | '));
+    await page.evaluate(() => NSO_MICROSCOPE.playSeek(Math.round(NSO_MICROSCOPE.playState().n * 0.6))); await frames(page);
+    await shot('11-play-mid-layer');
+    await page.evaluate(() => { document.getElementById('ms-play-speed').value = '1600'; });
+    await clickFace(page, '#ms-play-run'); await frames(page);
+    const ran = await page.waitForFunction(() => { const s = NSO_MICROSCOPE.playState(); return !s.running && s.pos === s.n; }, null, { timeout: 8000 }).then(() => true, () => false);
+    pl = await page.evaluate(() => ({ st: NSO_MICROSCOPE.playState(), btn: document.getElementById('ms-play-run').textContent }));
+    check('Play runs the layer to its end and stops, the button back to Play', ran && pl.btn === 'Play' && pl.st.pos === pl.st.n, J(pl));
+    await clickFace(page, '#ms-btn-step-back'); await frames(page);
+    pl = await page.evaluate(() => ({ hidden: document.getElementById('ms-play').hidden, st: NSO_MICROSCOPE.playState() }));
+    check('BACK shuts Play: the panel, the path and the marker are gone', pl.hidden && !pl.st.open && !pl.st.drawn, J(pl));
+    await page.evaluate(() => NSO_MICROSCOPE.clearSteps());
   }
 
   /* ------------------------------------------------------------------ 6 */
