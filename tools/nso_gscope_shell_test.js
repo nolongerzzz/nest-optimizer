@@ -662,6 +662,53 @@ withApp(async (page, logs) => {
     check('...and the report is plain text with the same totals', /^G-scope measure/.test(rep) && rep.indexOf('moves,') > 0, rep.slice(0, 60));
     await page.evaluate(() => { NSO_MICROSCOPE.setMeasureLayers(false); NSO_MICROSCOPE.setMeasureOpen(false); });
     await shotCard('card-slice-measure');
+
+    // BACK: one step back along the view's own changes, beside the card
+    await page.evaluate(() => { NSO_MICROSCOPE.setMeasureOpen(false); NSO_GSCOPE_SLICE.setSettingsOpen(false); NSO_MICROSCOPE.clearSteps(); });
+    await frames(page);
+    let bk = await page.evaluate(() => { const b = document.getElementById('ms-btn-step-back'), c = document.getElementById('ms-main-card').getBoundingClientRect(), r = b.getBoundingClientRect();
+      return { n: document.querySelectorAll('#ms-btn-step-back').length, disabled: b.disabled, text: b.textContent, left: Math.round(r.left), top: Math.round(r.top), cardRight: Math.round(c.right), cardTop: Math.round(c.top), h: Math.round(r.height) }; });
+    check('BACK stands once, grey at the starting point, right of the card\'s head and level with its top', bk.n === 1 && bk.disabled && /Back/.test(bk.text) && bk.left >= bk.cardRight && bk.left - bk.cardRight < 20 && Math.abs(bk.top - bk.cardTop) <= 2, J(bk));
+    const rBk = await reach(page, ['ms-btn-step-back']);
+    check('...and a click can reach it (nothing over it)', rBk.blocked.length === 0, J(rBk));
+    await clickFace(page, '#ms-slice-settings-toggle'); await frames(page);
+    await clickFace(page, '#ms-measure-toggle'); await frames(page);
+    await page.evaluate(() => NSO_MICROSCOPE.setZRange(0, 5)); await frames(page);
+    bk = await page.evaluate(() => ({ disabled: document.getElementById('ms-btn-step-back').disabled, n: NSO_MICROSCOPE.stepCount(), settings: !document.getElementById('ms-slice-settings').hidden, measure: !document.getElementById('ms-measure').hidden, z: NSO_MICROSCOPE.zRange() }));
+    check('three changes (Slice settings opened, Measure opened, the slider moved) leave three steps and wake BACK', !bk.disabled && bk.n === 3 && bk.settings && bk.measure, J(bk));
+    await clickFace(page, '#ms-btn-step-back'); await frames(page);
+    let b1 = await page.evaluate(() => ({ settings: !document.getElementById('ms-slice-settings').hidden, measure: !document.getElementById('ms-measure').hidden, z: NSO_MICROSCOPE.zRange() }));
+    check('a real click on BACK takes the LATEST step back: the slider is full again, the two rows stay open', b1.settings && b1.measure && !(b1.z && b1.z.lo === 0 && b1.z.hi === 5), J(b1));
+    await clickFace(page, '#ms-btn-step-back'); await frames(page);
+    b1 = await page.evaluate(() => ({ settings: !document.getElementById('ms-slice-settings').hidden, measure: !document.getElementById('ms-measure').hidden }));
+    check('the next press shuts Measure', b1.settings && !b1.measure, J(b1));
+    await clickFace(page, '#ms-btn-step-back'); await frames(page);
+    b1 = await page.evaluate(() => ({ settings: !document.getElementById('ms-slice-settings').hidden, measure: !document.getElementById('ms-measure').hidden, disabled: document.getElementById('ms-btn-step-back').disabled, n: NSO_MICROSCOPE.stepCount(), open: !document.getElementById('microscope').hidden }));
+    check('the next shuts Slice settings; BACK is grey at the starting point and G-scope is still open', !b1.settings && !b1.measure && b1.disabled && b1.n === 0 && b1.open, J(b1));
+    // a step undone another way is skipped, not a dead press
+    await clickFace(page, '#ms-measure-toggle'); await frames(page);
+    await clickFace(page, '#ms-measure-toggle'); await frames(page);     // shut by its own button
+    bk = await page.evaluate(() => { document.getElementById('ms-btn-step-back').click(); return { disabled: document.getElementById('ms-btn-step-back').disabled, measure: !document.getElementById('ms-measure').hidden, n: NSO_MICROSCOPE.stepCount() }; });
+    check('a step already undone another way is skipped: the press finds nothing left and BACK goes grey', !bk.measure && bk.disabled && bk.n === 0, J(bk));
+    await page.evaluate(() => NSO_MICROSCOPE.setZRange(0, 99999));
+    await clickFace(page, '#ms-slice-settings-toggle'); await frames(page);
+    await clickFace(page, '#ms-slice-settings-toggle'); await frames(page);
+    // the other kinds of step: a line type's check, an isolate
+    await page.evaluate(() => { NSO_MICROSCOPE.clearSteps(); });
+    const nameF = await page.evaluate(() => { const r = document.querySelector('#ms-legend .ms-legend-item'); return r ? r.dataset.group : null; });
+    await page.evaluate(n => NSO_MICROSCOPE.setFeatureDisplay(n, false), nameF); await frames(page);
+    let fk = await page.evaluate(n => ({ checked: document.querySelector('#ms-legend .ms-legend-item[data-group="' + n + '"] input').checked, n: NSO_MICROSCOPE.stepCount() }), nameF);
+    check('unchecking a line type leaves a step', fk.n === 1 && !fk.checked, J([nameF, fk]));
+    await clickFace(page, '#ms-btn-step-back'); await frames(page);
+    fk = await page.evaluate(n => ({ checked: document.querySelector('#ms-legend .ms-legend-item[data-group="' + n + '"] input').checked, n: NSO_MICROSCOPE.stepCount() }), nameF);
+    check('...BACK checks it again, and the stack is empty', fk.checked && fk.n === 0, J(fk));
+    await page.evaluate(() => { const M = NSO_MICROSCOPE; M.selectVisible(); M.isolate(); }); await frames(page);
+    let ik = await page.evaluate(() => ({ iso: NSO_MICROSCOPE.isIsolated(), n: NSO_MICROSCOPE.stepCount() }));
+    check('isolating leaves a step', ik.iso && ik.n >= 1, J(ik));
+    await clickFace(page, '#ms-btn-step-back'); await frames(page);
+    ik = await page.evaluate(() => ({ iso: NSO_MICROSCOPE.isIsolated(), open: !document.getElementById('microscope').hidden }));
+    check('...BACK makes it whole again, and G-scope stays open', !ik.iso && ik.open, J(ik));
+    await page.evaluate(() => { NSO_MICROSCOPE.setSelectionMoves([]); NSO_MICROSCOPE.clearSteps(); });
   }
 
   /* ------------------------------------------------------------------ 6 */

@@ -450,8 +450,8 @@ withApp(async (page, logs) => {
       return { side: $('ms-main-card').dataset.side, slice: $('ms-cam-slice').getAttribute('aria-pressed'), normalOff: $('ms-cam-normal').disabled,
                rows: Array.from(document.querySelectorAll('#ms-main-card .ms-row')).filter(e => getComputedStyle(e).display !== 'none').map(e => e.id) };
     });
-    check('the card: plate 1 an imported slice, so its Slice side - Slice pressed, Normal off (no mesh to go back to), the four Slice rows',
-      cd.side === 'slice' && cd.slice === 'true' && cd.normalOff && J(cd.rows) === J(['ms-region-row', 'ms-band-row', 'ms-render-row', 'ms-slice-row']), J(cd));
+    check('the card: plate 1 an imported slice, so its Slice side - Slice pressed, Normal off (no mesh to go back to), the five Slice rows',
+      cd.side === 'slice' && cd.slice === 'true' && cd.normalOff && J(cd.rows) === J(['ms-region-row', 'ms-band-row', 'ms-render-row', 'ms-slice-row', 'ms-measure-row']), J(cd));
     const words = await panelWords(page);
     // the plates' old names, as names: LENS / TAKE in capitals, or "Lens" (the toggle's label) - "take" is still an English verb
     const NAMES = /\b(LENS|TAKE)\b|\bLens\b|\bthe Take\b|\bonto Take\b/;

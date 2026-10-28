@@ -928,6 +928,7 @@ var NSO_MICROSCOPE = (function () {
     lineCursor = -1;
     zr = null;
     mode = 'piece';
+    clearSteps();
   }
 
   /** One burst of coalesced redraws, run now so it lands on the plate that asked for it. */
@@ -1038,6 +1039,7 @@ var NSO_MICROSCOPE = (function () {
   function syncCard() {
     var c = $('ms-main-card');
     if (c) c.dataset.side = cardSide();
+    syncBack();
     var S = window.NSO_GSCOPE_SLICE;
     if (S && S.syncPanel) S.syncPanel(); else if (S && S.syncToggle) S.syncToggle();
   }
@@ -3011,6 +3013,7 @@ var NSO_MICROSCOPE = (function () {
                           makeBoxVisuals());
     updateBoxTransform(b);
     balls.push(b);
+    pushStep(removeLastBox);
     return b;
   }
 
@@ -3306,6 +3309,8 @@ var NSO_MICROSCOPE = (function () {
   function setFeatureDisplay(name, on) {
     if (!doc) return;
     if (on === undefined) on = FEATURE_OFF.has(name);
+    var wasOn = !FEATURE_OFF.has(name);
+    if (wasOn !== !!on) pushStep(function () { if (!doc || FEATURE_OFF.has(name) === !wasOn) return false; setFeatureDisplay(name, wasOn); return true; });
     if (on) FEATURE_OFF.delete(name); else FEATURE_OFF.add(name);
     viewChanged();
     rescopeSelection();
@@ -3339,7 +3344,9 @@ var NSO_MICROSCOPE = (function () {
   function setMode(newMode) {
     newMode = MODE_ALIAS[newMode] || newMode;
     if (MODES.indexOf(newMode) < 0 || !modeAvailable(newMode)) newMode = 'piece';
+    var wasMode = mode;
     mode = newMode;
+    if (newMode === 'select' && wasMode !== 'select') pushStep(disarmRegion);
     var b = $('ms-mode-select');
     if (b) {
       b.classList.toggle('active', mode === 'select');
@@ -3802,7 +3809,9 @@ var NSO_MICROSCOPE = (function () {
 
   function isolate(opts) {
     if (!currentSelection.length) return false;
+    var wasIsolated = isolated;
     isolated = true;
+    if (!wasIsolated) pushStep(unIsolate);
     buildDetail();
     // Isolate shows the selection alone, turned to it (fitView: the same
     // viewing angle, the selection filling the frame). A redraw under a
@@ -4398,6 +4407,7 @@ var NSO_MICROSCOPE = (function () {
     hi = Math.max(0, Math.min(n - 1, hi));
     if (lo > hi) { var t = lo; lo = hi; hi = t; }
     if (zr && zr.lo === lo && zr.hi === hi && zr.n === n) return zRange();
+    if (zr && zr.n === n) { var from = { lo: zr.lo, hi: zr.hi }; pushStep(function () { if (!zr || (zr.lo === from.lo && zr.hi === from.hi)) return false; setZRange(from.lo, from.hi); return true; }, 'range'); }
     zr = { lo: lo, hi: hi, n: n };
     viewChangedSoon();
     syncZRangeUI();
@@ -4534,6 +4544,38 @@ var NSO_MICROSCOPE = (function () {
     return '';
   }
 
+  // --- BACK: one step back along the view's own changes ------------------------------
+  //
+  // A button beside the card (#ms-btn-step-back). Each change to the view that the
+  // user made - isolating, placing a box, arming REGION, opening a card or a row
+  // (Export, the IMPORT menu, Slice settings, Measure), moving the slider, checking
+  // or unchecking a line type - leaves one step behind it, per plate; BACK takes the
+  // latest one back. A step that has already been undone some other way (Escape, the
+  // row's own button) is skipped, so a press always changes something or the button
+  // is grey. It never closes G-scope, and it never touches what a plate holds: a
+  // copy, a CLEAR, an Import are not view steps. Escape's own chain is unchanged.
+
+  var stepStacks = { lens: [], take: [] }, replaying = false;
+  function pushStep(undo, kind) {
+    if (replaying || typeof undo !== 'function') return;
+    var st = stepStacks[plateName] || (stepStacks[plateName] = []);
+    if (kind && st.length && st[st.length - 1].kind === kind) return;      // a drag of the slider is one step
+    st.push({ undo: undo, kind: kind || null });
+    syncBack();
+  }
+  function stepBack() {
+    var st = stepStacks[plateName] || [], did = false;
+    replaying = true;
+    try { while (st.length && !did) did = !!st.pop().undo(); } finally { replaying = false; }
+    syncBack();
+    return did;
+  }
+  function clearSteps(name) { stepStacks[name || plateName] = []; syncBack(); }
+  function syncBack() {
+    var b = $('ms-btn-step-back');
+    if (b) setDisabled(b, !(stepStacks[plateName] || []).length);
+  }
+
   // --- MEASURE: what the selection (or what is shown) adds up to --------------------
   //
   // A row of the card that stays shut until it is opened, and computes nothing
@@ -4605,6 +4647,7 @@ var NSO_MICROSCOPE = (function () {
   }
 
   function setMeasureOpen(on) {
+    if (on && !measureOpen) pushStep(function () { if (!measureOpen) return false; setMeasureOpen(false); return true; });
     measureOpen = !!on;
     var box = $('ms-measure'), b = $('ms-measure-toggle');
     if (box) box.hidden = !measureOpen;
@@ -4612,6 +4655,7 @@ var NSO_MICROSCOPE = (function () {
     syncMeasure();
   }
   function setMeasureLayers(on) {
+    if (on && !measureLayersOpen) pushStep(function () { if (!measureLayersOpen) return false; setMeasureLayers(false); return true; });
     measureLayersOpen = !!on;
     var box = $('ms-measure-layers'), b = $('ms-measure-layers-toggle');
     if (box) box.hidden = !measureLayersOpen;
@@ -5560,7 +5604,10 @@ var NSO_MICROSCOPE = (function () {
   function shellCardToggle(card) {
     var was = shellOpen;
     shellCardClose();
-    if (was !== card) { shellCardSet(card, true); shellOpen = card; }
+    if (was !== card) {
+      shellCardSet(card, true); shellOpen = card;
+      pushStep(function () { if (shellOpen !== card) return false; shellCardClose(); return true; });
+    }
   }
 
   function syncShell() {
@@ -5675,6 +5722,7 @@ var NSO_MICROSCOPE = (function () {
       syncExportRow();
     });
     bind('ms-btn-isolate', 'click', function () { isolateBoxes(); });
+    bind('ms-btn-step-back', 'click', function () { stepBack(); });
     bind('ms-measure-toggle', 'click', function () { setMeasureOpen(!measureOpen); });
     bind('ms-measure-layers-toggle', 'click', function () { setMeasureLayers(!measureLayersOpen); });
     bind('ms-measure-copy', 'click', function () { copyMeasure(); });
@@ -5852,6 +5900,7 @@ var NSO_MICROSCOPE = (function () {
       if (highlightPending) { highlightPending = false; refreshHighlight(); }
     },
     takeBand: takeBand,
+    stepBack: stepBack, pushStep: pushStep, clearSteps: clearSteps, stepCount: function () { return (stepStacks[plateName] || []).length; },
     measureReport: measureReport, setMeasureOpen: setMeasureOpen, setMeasureLayers: setMeasureLayers, copyMeasure: copyMeasure,
     bandReason: function () { return bandReason(); },
     exportLabel: function () { return doc && currentSelection.length ? exportLabel() : null; },

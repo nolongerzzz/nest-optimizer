@@ -474,7 +474,9 @@ var NSO_GSCOPE_SLICE = (function () {
     }
     bind('ms-slice-settings-toggle', 'click', function () {
       var box = $('ms-slice-settings');
-      setSettingsOpen(!!(box && box.hidden));
+      var opening = !!(box && box.hidden), M = window.NSO_MICROSCOPE;
+      if (opening && M && M.pushStep) M.pushStep(function () { var b = $('ms-slice-settings'); if (!b || b.hidden) return false; setSettingsOpen(false); return true; });
+      setSettingsOpen(opening);
     });
     bind('ms-btn-slice-export-plate', 'click', exportPieceToPlate);
     bind('ms-btn-slice-export-stl', 'click', exportPieceAsSTL);

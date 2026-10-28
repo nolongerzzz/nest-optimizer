@@ -409,7 +409,7 @@ always:
   - **Normal side**: REGION (item 7) · WHOLE PART (back out of any isolate).
   - **Slice side**: REGION · TAKE BAND (the slider's range isolated as one
     piece) · Toolpath | Solid · Slice settings (folded) · MEASURE (folded,
-    item 13). An isolation there is undone by Escape, or a click on it.
+    item 13); BACK (item 14) stands beside the card's head. An isolation there is undone by Escape, or a click on it.
 - **Slice settings**: nozzle / layer / walls / infill (and its pattern) /
   support below. Their defaults are the **plate's printer profile**: on the A1
   mini a 0.4 mm nozzle and 0.2 mm layers (the owner's own Bambu slice:
@@ -492,6 +492,35 @@ The parser is the viewer's own (`NSOGcodeLines`), which flattens Bambu's arc
 moves (G2/G3); a reader that skips them undercounts Bambu's slices - the
 reference's Support line type is 35 499 moves in the viewer, 8 665 when arcs are
 skipped.
+
+## 14. BACK: one step back, beside the card (round 3b)
+
+**What the user sees.** A button, `↩ Back`, just right of the card's head, level
+with its top (the corner row is for leaving and framing; this is for the view).
+Grey at the starting point. Each change the user makes to the view leaves one step
+behind it, per plate, and a press takes the latest one back:
+
+- isolating a piece, a band or a box's contents (it is whole again; the selection
+  stays);
+- placing a capture box (the last one goes), arming REGION (it disarms);
+- opening a card or a row: Export, the IMPORT ▾ menu, Slice settings, Measure and
+  its Layers table (each shuts);
+- moving the layer-range slider (one drag is one step; it goes back to where the
+  drag began);
+- checking or unchecking a line type in the Features list.
+
+It never closes G-scope (Close does), never touches what a plate holds - a copy, a
+CLEAR, an Import and a slice are not view steps - and a step already undone another
+way (Escape, the row's own button) is skipped, so a press always changes something
+or the button is grey. Escape's chain (item 12) is unchanged. The stack is per
+plate, emptied when a plate is emptied or a file replaces it.
+
+**How it is built.** `pushStep(undo, kind)` / `stepBack()` in `app-microscope.js`
+(exported with `clearSteps`, `stepCount`); the changes above call `pushStep` at the
+point they happen, and Slice settings (`app-gscope-slice.js`) through the API. Undoing
+replays through the same setters with pushes switched off. Checked in
+`gscope:shell` (its position beside the card, grey at the start, three steps undone
+in reverse order, a skipped step, a line type's check and an isolate).
 
 ## Checks
 

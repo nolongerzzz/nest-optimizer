@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=7f94f24e" />
+  <link rel="stylesheet" href="styles.css?v=a034a69f" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -1628,6 +1628,11 @@
            side: a toolpath is the Slice side. Each row names the sides it shows
            on (data-on); the card names the side it is on (data-side). The
            engine and app-gscope-slice.js still find every control by its id. -->
+      <!-- BACK (round 3b, docs/GSCOPE.md item 14): beside the card's head. One step back
+           along the view's own changes, per plate; grey at the starting point. It never
+           closes G-scope (Close does) and never touches what a plate holds. -->
+      <button id="ms-btn-step-back" type="button" class="ms-step-back" disabled
+              title="Back one step: undo the latest change to the view - an isolate, a box, REGION, an opened card or row, the slider, a line type's check. Grey when there is nothing to step back from">&#8617; Back</button>
       <div id="ms-main-card" class="ms-main-card" role="group" aria-label="G-scope" data-side="normal">
         <div class="ms-main-head">
           <div class="ms-import" role="group" aria-label="Import">
@@ -2094,7 +2099,7 @@
        row each under the Flange row. Pure. docs/GSCOPE-FEATURES.md. -->
   <script src="nso_face_features.js?v=53ee4b23"></script>
   <script src="nso_gscope_measure.js?v=0ef4a708"></script>
-  <script src="app-microscope.js?v=4f07419a"></script>
+  <script src="app-microscope.js?v=7bf13b15"></script>
   <!-- Detach / Reattach (Cut menu): cap a detected flange's hull on its own
        wall, lift the flange out as a piece, seat it elsewhere with Attach's
        seat. After nso_flange.js, app-crop.js, nso_assemble.js, app-assemble.js
@@ -2109,7 +2114,7 @@
   <!-- The Supports card on the main page: the same detection and planner,
        after app-core.js / app-join.js, whose ingest and soups it uses. -->
   <script src="app-supports-card.js?v=b89a6cee"></script>
-  <script src="app-gscope-slice.js?v=5f7c637f"></script>
+  <script src="app-gscope-slice.js?v=87de44f2"></script>
   <!-- The Slice card (left bar): the plate sliced for its printer, the .gcode.3mf
        it makes. The print planner and the packager are loaded here for it and for
        its slice worker (which importScripts them from these tags); no G-scope file
