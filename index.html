@@ -1851,6 +1851,16 @@
                     title="Download the piece this slice was made from as an STL">Export piece as STL</button>
           </div>
         </div>
+        <!-- A plate of pieces (either plate): the whole plate. -->
+        <div class="ms-xgroup">
+          <div class="ms-section-title">Whole plate</div>
+          <div class="ms-btn-row" id="ms-take-export-row" data-flex="1" style="display:none;">
+            <button id="ms-btn-take-export-plate" type="button"
+                    title="Put every piece on the active plate onto the main plate, each as its own object (one Undo)">Export to plate</button>
+            <button id="ms-btn-take-export-stl" type="button"
+                    title="Download the whole of the active plate as one STL, the pieces where they stand">Export as STL</button>
+          </div>
+        </div>
         <!-- A slice made from the plate (Slice and Preview, the Slice card's Preview): this slice, as .gcode.3mf and as .3mf, the
              whole plate and what is selected (app-print.js exportSlice). -->
         <div class="ms-xgroup">
@@ -1869,16 +1879,6 @@
                     title="Slice the selected pieces alone (with the supports that hold them) and download the .gcode.3mf">Selected .gcode.3mf</button>
             <button id="ms-btn-sel-3mf" type="button"
                     title="Download the selected pieces (with the supports that hold them) as a Bambu Studio .3mf project">Selected .3mf</button>
-          </div>
-        </div>
-        <!-- A plate of pieces (either plate): the whole plate. -->
-        <div class="ms-xgroup">
-          <div class="ms-section-title">Whole plate</div>
-          <div class="ms-btn-row" id="ms-take-export-row" data-flex="1" style="display:none;">
-            <button id="ms-btn-take-export-plate" type="button"
-                    title="Put every piece on the active plate onto the main plate, each as its own object (one Undo)">Export to plate</button>
-            <button id="ms-btn-take-export-stl" type="button"
-                    title="Download the whole of the active plate as one STL, the pieces where they stand">Export as STL</button>
           </div>
         </div>
       </div>
