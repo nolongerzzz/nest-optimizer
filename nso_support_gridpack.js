@@ -3171,7 +3171,7 @@
     var ss = sheetStations(p), cols = ss.cols, sts = ss.sts;
     var plan = SI.sheet(opts.rawTris, sts, {
       columns: cols, sideMm: p.sideMm, plateZ: p.plateZ, footMm: foot, occluders: opts.occluders,
-      layerMm: opts.layerMm, gapMm: opts.gapMm, pitchMm: opts.sheetPitchMm, angleDeg: opts.sheetAngleDeg, widthMm: opts.sheetWidthMm, interfaceLayers: opts.interfaceLayers, flatGapMaxMm: opts.sheetFlatGapMm, stairLegMm: opts.sheetStairLegMm, perimeter: opts.sheetPerimeter, footprints: opts.sheetFootprints, regionPlate: opts.sheetRegionPlate, slabPlate: opts.sheetSlabPlate,
+      layerMm: opts.layerMm, gapMm: opts.gapMm, pitchMm: opts.sheetPitchMm, angleDeg: opts.sheetAngleDeg, widthMm: opts.sheetWidthMm, interfaceLayers: opts.interfaceLayers, flatGapMaxMm: opts.sheetFlatGapMm, stairLegMm: opts.sheetStairLegMm, perimeter: opts.sheetPerimeter, footprints: opts.sheetFootprints, regionPlate: opts.sheetRegionPlate, slabPlate: opts.sheetSlabPlate, slabEpsMm: opts.sheetSlabEps,
       capRiseMm: opts.capRiseMm, capMinMm: opts.capMinMm, capMaxMm: opts.capMaxMm,
       thickness: opts.thickness, crosshatch: opts.crosshatch, rasterLines: opts.rasterLines, beat: opts.beat,
       progress: opts.sheetProgress

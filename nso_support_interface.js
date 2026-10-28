@@ -1403,6 +1403,7 @@
       capRise: opts.capRiseMm == null ? CAP_RISE_MM : +opts.capRiseMm,
       capMin: opts.capMinMm == null ? CAP_MIN_MM : +opts.capMinMm,
       capMax: opts.capMaxMm == null ? CAP_MAX_MM : +opts.capMaxMm,
+      slabEps: opts.slabEpsMm == null ? 0.12 : +opts.slabEpsMm,      /* how far the traced outline may stray from the mask's own edge when it is simplified */
       slab: opts.slabPlate === true,                      /* a region plate laid as one solid footprint for the slicer to fill (slabOfMask), not as loops and lines */
       eps: EPS_MM
     };
@@ -1784,7 +1785,7 @@
             for (var cj = 0; cj < cny; cj++) for (var ci2 = 0; ci2 < cnx; ci2++) Mcrop[cj * cnx + ci2] = Mraw[(cJ0 + cj) * nx + cI0 + ci2];
             Mk = smoothMask(Mcrop, cnx, cny, 1 + Math.min(tryN, 3));                 /* a layer the extrusion refuses is traced again from a smoother mask */
             if (o.slab) {
-              var sl = slabOfMask(Mk, cnx, cny, ox + cI0 * CELLS, oy + cJ0 * CELLS, CELLS, zb, zb + o.layer, 0.03);
+              var sl = slabOfMask(Mk, cnx, cny, ox + cI0 * CELLS, oy + cJ0 * CELLS, CELLS, zb, zb + o.layer, o.slabEps);
               if (sl) {
                 var slLen = 0; sl.rings.forEach(function (r) { for (var k = 1; k < r.length; k++) slLen += Math.hypot(r[k][0] - r[k - 1][0], r[k][1] - r[k - 1][1]); });
                 pl = { loops: sl.rings.map(function (r) { return { ring: r, lenMm: 0 }; }), lines: [], thin: [], slab: true };
