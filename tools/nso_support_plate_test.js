@@ -35,6 +35,7 @@ const { ROOT } = lib;
 const FIXTURE = path.join(ROOT, 'fixtures', 'supports', 'supp_ref.3mf');
 // Circular and Sphere re-pinned by the narrow ledge (supports-top, docs/SUPPORT-TOP.md): the four corners of the square head on the round post (z 15, 0.4 - 0.8 mm2 each, a wall 0.2 - 1.2 mm
 // from each) were bridged and bare; the card asks (beaconBridgeMinMm) and they are held now - 13760 -> 22312 and 12888 -> 21444 triangles, the towers up to 13.4 mm. The other heads' bytes are the same.
+// Negative Sphere2 / Circular / Sphere re-pinned by the slab for the thin plates (sheetSlabPlate 'weak', docs/SUPPORT-FOOTPRINT.md "The slab for the thin plates"): a region whose loops and lines cover under 75 % of it is one prism a layer high, so 24332 / 22312 / 21444 triangles became 13728 / 15212 / 16388.
 const TODAY = {        // sha256 of the support bytes of a single-piece Generate on the card as it is now (the plate: six parts, one picked).
                        // Re-pinned by supports-one-trunk: they were 7dc1d1f's (b1e08222e92a / 17be71520673 / af6e05895a2d, 584 / 440 / 424
                        // triangles); the card's Auto is the one-trunk build with the sheet of #301 since, and builds these three heads differently.
@@ -45,9 +46,9 @@ const TODAY = {        // sha256 of the support bytes of a single-piece Generate
                        // a sheet laid over it, and the fill (the sheets reach the footprint): 16644 -> 23352 triangles on the lighter crowns (20332 -> 28884 on the ones before). Circular and Sphere are the same bytes.
                        // The region plate (supports-footprint, third round, docs/SUPPORT-FOOTPRINT.md section 9): the card lays the interface and the transition from each footprint and the surface's height, layer by layer;
                        // the Negative Sphere2 / Circular / Sphere re-pinned (24332 / 13760 / 12888 triangles on upstream's 2 transition + 2 interface stack, with the thin beads and the lighter smoothing of section 10, and the plate run to the face's edge (section 11); the plates are hatch and loops at 0.5 mm, the sheets were fewer lines).
-  'Support Negative Sphere2.stl': { sha: '4fad39b1dca263b35c01b6a9227b5cbbe42c0b157d9bba951f162b8e85646896', triangles: 24332 },
-  'Support Circular.stl': { sha: '06330b3b03fe1d1b18dc1bf63d38e55ecea46bc6eb91e8d7df1efbc51d0c19a9', triangles: 22312 },
-  'Support Sphere.stl': { sha: 'bdcb554b870bc0fa119c034c06d5bf8c2ddb49c48fe823a3371ca343c94fb7a1', triangles: 21444 }
+  'Support Negative Sphere2.stl': { sha: 'd88b23498eee6097562a194823095c52f205db138b65fa5f7e9dc79124b0ac16', triangles: 13728 },
+  'Support Circular.stl': { sha: '64bc0c7bb013f7987c7fbd899956d0262e0a7a9e76449e6983601170248fc5fb', triangles: 15212 },
+  'Support Sphere.stl': { sha: '0950104324f4ada8e993f1965c1d2a95a10efe9ba7731dd1bb389ed6c284b0c3', triangles: 16388 }
 };
 const XY_DISTANCE = 0.35;      // the slice's support_object_xy_distance (nso_support_beacons.js SIDE_STANDOFF_MM, nso_support_gridpack.js TRUNK_KEEP_MM)
 const STRICT_GAP = process.env.NSO_STRICT_GAP === '1';

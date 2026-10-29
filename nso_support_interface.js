@@ -1097,6 +1097,26 @@
      layer), where the plate of loops and lines it used to read was cut by the slicer's wall inset into the pieces the G-scope showed (20 runs a layer
      against Bambu's 2). Returns { rings: [closed [x, y] rings, outer first], tris: Float32Array } or null when the mask has no ring to trace or the
      triangulation fails (the caller then lays the loops and lines as before). */
+  /* the share of a region a set of paths covers, each a line wide: the paths stamped on the raster, as the cells of the region that lie within a half line of one */
+  function coverShare(M, nx, ny, ox, oy, cellMm, widthMm, paths) {
+    var N = nx * ny, C = new Uint8Array(N), r = widthMm / 2, rc = Math.ceil(r / cellMm), m = 0, cov = 0, q;
+    paths.forEach(function (p) {
+      for (var k = 1; k < p.length; k++) {
+        var len = Math.hypot(p[k][0] - p[k - 1][0], p[k][1] - p[k - 1][1]), n = Math.max(1, Math.ceil(len / (cellMm * 0.5)));
+        for (var u = 0; u <= n; u++) {
+          var x = p[k - 1][0] + (p[k][0] - p[k - 1][0]) * u / n, y = p[k - 1][1] + (p[k][1] - p[k - 1][1]) * u / n, ci = Math.round((x - ox) / cellMm), cj = Math.round((y - oy) / cellMm);
+          for (var dj = -rc; dj <= rc; dj++) for (var di = -rc; di <= rc; di++) {
+            var ii = ci + di, jj = cj + dj;
+            if (ii >= 0 && ii < nx && jj >= 0 && jj < ny && Math.hypot(ii * cellMm + ox - x, jj * cellMm + oy - y) <= r) C[jj * nx + ii] = 1;
+          }
+        }
+      }
+    });
+    for (q = 0; q < N; q++) if (M[q]) { m++; if (C[q]) cov++; }
+    return m ? cov / m : 0;
+  }
+  var SLAB_MIN_MM2 = 3.5;      /* a slab is laid for an island of the footprint this big at least */
+  var SLAB_WEAK_SHARE = 0.75;  /* slabPlate 'weak': a region is laid as a slab when its loops and lines (and thin beads) cover less than this share of it */
   function slabOfMask(M, nx, ny, ox, oy, cellMm, z0, z1, epsMm) {
     var f = new Float32Array(M.length), q;
     for (q = 0; q < M.length; q++) f[q] = M[q] ? 1 : 0;
@@ -1123,12 +1143,17 @@
     for (var i = 0; i < rings.length; i++) {
       if (depth[i] % 2) continue;
       var O = rings[i].slice();
+      if (Math.abs(a2(O)) < SLAB_MIN_MM2) continue;                    /* a speck of a footprint is no plate (the loops and lines drop it as well: nothing survives their opening) */
       if (a2(O) < 0) O.reverse();
       var Hs = [];
       rings.forEach(function (h, k) { if (depth[k] === depth[i] + 1 && pip(h[0], O)) { var H = h.slice(); if (a2(H) > 0) H.reverse(); Hs.push(H); } });
       var T;
       try { T = triangulateRings(O, Hs); } catch (e) { return null; }
       if (!T.tris.length) return null;
+      var want = Math.abs(a2(O)), capA = 0;                            /* the cap must hold the ring's area less its holes': a hole the bridging left covered is refused */
+      Hs.forEach(function (h) { want -= Math.abs(a2(h)); });
+      T.tris.forEach(function (t) { var A = T.pts[t[0]], B = T.pts[t[1]], C = T.pts[t[2]]; capA += Math.abs((B[0] - A[0]) * (C[1] - A[1]) - (B[1] - A[1]) * (C[0] - A[0])) / 2; });
+      if (Math.abs(capA - want) > 0.02 * Math.max(want, 1)) return null;
       T.tris.forEach(function (t) {
         var A = T.pts[t[0]], B = T.pts[t[1]], C = T.pts[t[2]];
         out.push(A[0], A[1], z1, B[0], B[1], z1, C[0], C[1], z1);
@@ -1137,6 +1162,7 @@
       side(O); Hs.forEach(side);
       closed.push(O.concat([O[0].slice()]));
     }
+    if (!closed.length) return null;
     return { rings: closed, tris: new Float32Array(out) };
   }
   /* an outer ring (counter-clockwise) with holes (clockwise) cut into triangles on their own vertices: each hole bridged to the nearest vertex it can see,
@@ -1417,7 +1443,7 @@
       capMin: opts.capMinMm == null ? CAP_MIN_MM : +opts.capMinMm,
       capMax: opts.capMaxMm == null ? CAP_MAX_MM : +opts.capMaxMm,
       slabEps: opts.slabEpsMm == null ? 0.12 : +opts.slabEpsMm,      /* how far the traced outline may stray from the mask's own edge when it is simplified */
-      slab: opts.slabPlate === true,                      /* a region plate laid as one solid footprint for the slicer to fill (slabOfMask), not as loops and lines */
+      slab: opts.slabPlate === true || opts.slabPlate === 'weak' ? opts.slabPlate : false,                      /* a region plate laid as one solid footprint for the slicer to fill (slabOfMask), not as loops and lines */
       eps: EPS_MM
     };
     if (!(o.pitch > o.width)) return { ok: false, reason: 'pitch ' + o.pitch + ' does not clear the ' + o.width + ' mm line' };
@@ -1797,7 +1823,12 @@
             var cnx = cI1 - cI0 + 1, cny = cJ1 - cJ0 + 1, Mcrop = new Uint8Array(cnx * cny);
             for (var cj = 0; cj < cny; cj++) for (var ci2 = 0; ci2 < cnx; ci2++) Mcrop[cj * cnx + ci2] = Mraw[(cJ0 + cj) * nx + cI0 + ci2];
             Mk = smoothMask(Mcrop, cnx, cny, 1 + Math.min(tryN, 3));                 /* a layer the extrusion refuses is traced again from a smoother mask */
-            if (o.slab) {
+            var weak = false;
+            if (o.slab === 'weak') {                                          /* the plate of loops and lines, asked first: a slab only where it leaves the region thin (a crescent, a ring: 50 - 66 %) */
+              var plc = plateOfRegion(Mk, cnx, cny, ox + cI0 * CELLS, oy + cJ0 * CELLS, CELLS, o.pitch + 0.03, o.width, (n % 2 ? 135 : 45), REGION_MIN_LOOP_MM, 0.9);
+              weak = (plc.loops.length > 0 || plc.lines.length > 0) && coverShare(Mk, cnx, cny, ox + cI0 * CELLS, oy + cJ0 * CELLS, CELLS, o.width, plc.loops.map(function (l) { return l.ring; }).concat(plc.lines, plc.thin)) < SLAB_WEAK_SHARE;
+            }
+            if (o.slab === true || weak) {
               var sl = slabOfMask(Mk, cnx, cny, ox + cI0 * CELLS, oy + cJ0 * CELLS, CELLS, zb, zb + o.layer, o.slabEps);
               if (sl) {
                 var slLen = 0; sl.rings.forEach(function (r) { for (var k = 1; k < r.length; k++) slLen += Math.hypot(r[k][0] - r[k - 1][0], r[k][1] - r[k - 1][1]); });
