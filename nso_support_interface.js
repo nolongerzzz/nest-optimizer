@@ -881,16 +881,6 @@
   var EDGE_HATCH_SHARE = 0.3;   /* a narrow region is laid in lines alone, edge to edge, when they hold at least this share of it (lines x pitch over its area) */
   var RING_LINE_MIN_MM = 0.5;     /* ...with lines down to this long inside it (the corners of the ring are a gap a line or two across) */
   var RING_MIN_AREA_MM2 = 20;      /* ...in a region of at least this area (a ring round a cavity, a trunk's cut and all: its outline may be one loop or two) */
-  var LADDER_MAX_HALF_MM = 1.35; /* a region is laid in rungs across its bands when no part of it is more than this far from its edge (a ring's corners reach 1.2) */
-  var LADDER_MIN_AREA_MM2 = 20;  /* ...and it is this large or larger (a small patch is a spot, not a band) */
-  var LADDER_MIN_MM = 0.5;       /* a rung - a line across a band, from one loop to the next - is this long or longer */
-  var LADDER_MAX_MM = 3;         /* ...and shorter than this (the band's other side lies within it) */
-  var LADDER_STEP_MM = 0.5;      /* the loops it hangs from carry a vertex at least this often, each a place a rung can start */
-  var LADDER_SIMPLIFY_MM = 0.04; /* ...the loops are cleaned to this first (their curves hold a vertex every tenth of a mm, none with room for a rung) */
-  var LADDER_VERT_MM = 0.3;      /* a rung's far end lands on a vertex of the loop within this far of it, else on a new one */
-  var LADDER_SNAP_MM = 0.35;     /* ...and the loop lies this near the end of the ray, or the rung is not laid */
-  var LADDER_MIN_SIN = 0.57;     /* ...and it meets a loop at more than this sine of an angle (35 deg) */
-  var LADDER_GAIN = 1.03;        /* the rungs are kept over the hatch's plate when the face they hold is this many times what the hatch's does */
   var RING_OUTLINE_GAIN = 1.25;  /* a ring's outline and what hatch fits inside it is kept over the edge-to-edge lines when it lays this many times their length */
   var HATCH_MIN_SHARE = 0.6;     /* a hatch whose lines (times the pitch) fill less than this share of the room inside its outline is given up for concentric loops */
   var REGION_MIN_LOOP_MM = 2.4;  /* a loop of the region plate shorter than this is a speck of the level set (a medial axis's end), not a line */
@@ -1202,8 +1192,8 @@
      each running to a line's gap short of the loop - the loops and the lines are separate paths, never touching, which the extrusion takes. A region too
      thin for a hatch inside its loop (nothing left a hatch-line's gap and a half inside it) is laid in concentric loops as it is. Returns
      { loops: [{ ring, lenMm }], lines: [[[x0, y0], [x1, y1]], ...] }. */
-  function plateOfRegion(M, nx, ny, ox, oy, cellMm, pitchMm, widthMm, hatchDeg, minLoopMm, minLineMm, rl) {
-    var pl = plateOfRegionCore(M, nx, ny, ox, oy, cellMm, pitchMm, widthMm, hatchDeg, minLoopMm, minLineMm, rl);
+  function plateOfRegion(M, nx, ny, ox, oy, cellMm, pitchMm, widthMm, hatchDeg, minLoopMm, minLineMm) {
+    var pl = plateOfRegionCore(M, nx, ny, ox, oy, cellMm, pitchMm, widthMm, hatchDeg, minLoopMm, minLineMm);
     pl.thin = thinLines(M, nx, ny, ox, oy, cellMm, widthMm, pl.loops, pl.lines, THIN_MIN_MM);
     return pl;
   }
@@ -1290,17 +1280,6 @@
     });
     return out;
   }
-  /* a closed ring (first point repeated last) with the points within eps of the line between their neighbours dropped: split at its two farthest-apart
-     points, each half simplified as an open polyline */
-  function simplifyClosed(ring, eps) {
-    var n = ring.length - 1;
-    if (n < 6) return ring.map(function (p) { return [p[0], p[1]]; });
-    var a = 0, b = 0, best = -1;
-    for (var i = 0; i < n; i += Math.max(1, n >> 6)) for (var j = i + 1; j < n; j += Math.max(1, n >> 6)) { var d = Math.hypot(ring[i][0] - ring[j][0], ring[i][1] - ring[j][1]); if (d > best) { best = d; a = i; b = j; } }
-    var h1 = ring.slice(a, b + 1), h2 = ring.slice(b, n).concat(ring.slice(0, a + 1));
-    var s1 = simplifyPath(h1, eps), s2 = simplifyPath(h2, eps), out = s1.concat(s2.slice(1));
-    return out.map(function (p) { return [p[0], p[1]]; });
-  }
   /* an open polyline with the points within eps of the line between their neighbours dropped (Douglas - Peucker) */
   function simplifyPath(pts, eps) {
     if (pts.length < 3) return pts.slice();
@@ -1316,167 +1295,12 @@
     }
     return pts.filter(function (p, i) { return keep[i]; });
   }
-  /* A NARROW REGION AS BAMBU LAYS IT - a ring's sides and corners, the crescents of one: its outline loops, and lines across each band from one loop to the next
-     (Bambu's flat plate round a cavity is the loops, and between them rungs a line apart: 80 to 94 % of the face held where the hatch inside the loops held
-     56 to 61 and turned each other's way layer on layer). The rungs hang from the loops, each at a vertex of the loop it starts on, running across the band
-     (along the way the region's edge runs from there) to the loop on its far side, where it meets a new vertex. The extrusion takes two lines within a line
-     width of each other only where they meet at a node, so a rung is laid only where its two nodes have room: a T's pad lies half a line each way along the loop,
-     and more where the rung leans over that side, a vertex's own join takes its share, and no two nodes of a loop stand nearer than a line and a hair. Rungs are
-     tried round each loop in turn, the shorter first, and each kept when it stands a line and a hair from every one kept. */
-  function ladderPlate(M, nx, ny, ox, oy, cellMm, widthMm, minLoopMm, rl) {
-    var outline = concentricLoops(M, nx, ny, ox, oy, cellMm, widthMm + 0.1, widthMm, minLoopMm, 1);
-    if (!outline.length) return null;
-    function inM(x, y) { var ii = Math.round((x - ox) / cellMm), jj = Math.round((y - oy) / cellMm); return ii >= 0 && ii < nx && jj >= 0 && jj < ny && M[jj * nx + ii] === 1; }
-    for (var es = 0; es < 2; es++) {
-      var jn = joinLadder(outline, widthMm, es ? 0 : LADDER_SIMPLIFY_MM, inM);
-      if (!jn.lines.length) continue;
-      /* the loops cleaned first (a node needs room); if the cleaned loops will not extrude on their own (a sharp end cap's corners), as they are */
-      if (!rl || es || rl.extrudeFlat(jn.loops.map(function (l) { return l.ring; }), { width: widthMm, height: 0.2, baseZ: 0 }).ok) return jn;
-    }
-    return null;
-  }
-  /* a closed ring with a vertex every LADDER_STEP_MM at least (a long segment is cut in equal parts: the ring itself does not move) */
-  function subdivide(ring, step) {
-    var out = [ring[0]];
-    for (var k = 0; k + 1 < ring.length; k++) {
-      var a = ring[k], b = ring[k + 1], L = Math.hypot(b[0] - a[0], b[1] - a[1]), m = Math.max(1, Math.ceil(L / step - 0.1));
-      for (var j = 1; j < m; j++) out.push([a[0] + (b[0] - a[0]) * j / m, a[1] + (b[1] - a[1]) * j / m]);
-      out.push(b);
-    }
-    return out;
-  }
-  function joinLadder(loops, wMm, epsS, inM) {
-    var rings = loops.map(function (lp) {
-      var r0 = epsS > 0 ? simplifyClosed(lp.ring, epsS) : lp.ring.map(function (pt) { return [pt[0], pt[1]]; }), r = subdivide(r0, LADDER_STEP_MM), per = 0;
-      for (var k = 1; k < r.length; k++) per += Math.hypot(r[k][0] - r[k - 1][0], r[k][1] - r[k - 1][1]);
-      return { ring: r, lenMm: lp.lenMm, level: lp.level, per: per, added: [] };
-    });
-    var gap = wMm + 0.012, taken = [], kept = [];
-    function nearest(pt) {
-      var best = null;
-      rings.forEach(function (R, ri) {
-        for (var k = 0; k + 1 < R.ring.length; k++) {
-          var a = R.ring[k], b = R.ring[k + 1], dx = b[0] - a[0], dy = b[1] - a[1], L2 = dx * dx + dy * dy;
-          var t = L2 > 0 ? Math.max(0, Math.min(1, ((pt[0] - a[0]) * dx + (pt[1] - a[1]) * dy) / L2)) : 0;
-          var qx = a[0] + t * dx, qy = a[1] + t * dy, d = Math.hypot(pt[0] - qx, pt[1] - qy);
-          if (!best || d < best.d) best = { d: d, ri: ri, k: k, t: t, p: [qx, qy] };
-        }
-      });
-      return best;
-    }
-    /* the room a T's pad takes along the loop on one side of its node: half a line, and more where the rung leans over that side (the pad's corner on the
-       acute side lies a half line over the tangent of half the angle out) */
-    function padNeed(ux, uy, rx, ry) {
-      var c = (ux * rx + uy * ry) / ((Math.hypot(ux, uy) * Math.hypot(rx, ry)) || 1), psi = Math.acos(Math.max(-1, Math.min(1, c)));
-      return Math.max(wMm / 2, wMm / 2 / Math.max(0.05, Math.tan(psi / 2))) + 0.03;
-    }
-    /* the node a rung's end lands on: a new vertex at the nearest point when its neighbours are far enough, else the vertex within LADDER_VERT_MM when ITS are -
-       and null where another rung has a node within a line and a hair of it on that loop */
-    function claim(e, rx, ry) {
-      var R = rings[e.ri], p = e.p, n = R.ring.length - 1, v = null, vd = Infinity, k, dd;
-      for (k = 0; k < n; k++) { dd = Math.hypot(R.ring[k][0] - p[0], R.ring[k][1] - p[1]); if (dd < vd) { vd = dd; v = k; } }
-      function corner(i) {                /* what the vertex's own join takes of a segment: a half line times the tangent of half its turn */
-        var a = R.ring[(i + n - 1) % n], b = R.ring[i], c = R.ring[(i + 1) % n], u1 = Math.atan2(b[1] - a[1], b[0] - a[0]), u2 = Math.atan2(c[1] - b[1], c[0] - b[0]), t = Math.abs(u2 - u1);
-        if (t > Math.PI) t = 2 * Math.PI - t;
-        return wMm / 2 * Math.tan(Math.min(t, 2.4) / 2);
-      }
-      function room(at, i, j) {           /* the vertices i and j either side of a node at `at` are far enough for its pad and for their own joins */
-        function ok1(m) { var dx = R.ring[m][0] - at[0], dy = R.ring[m][1] - at[1]; return Math.hypot(dx, dy) >= padNeed(dx, dy, rx, ry) + corner(m % n); }
-        return ok1(i) && ok1(j);
-      }
-      var at = null, isV = false;
-      if (vd <= 1e-9) { if (room(R.ring[v], (v + n - 1) % n, (v + 1) % n)) { at = R.ring[v]; isV = true; } }
-      else if (room(p, e.k, e.k + 1)) at = p;
-      else if (vd <= LADDER_VERT_MM && room(R.ring[v], (v + n - 1) % n, (v + 1) % n)) { at = R.ring[v]; isV = true; }
-      if (!at) return null;
-      for (var q = 0; q < taken.length; q++) if (taken[q].ri === e.ri && Math.hypot(taken[q].p[0] - at[0], taken[q].p[1] - at[1]) < gap) return null;
-      return isV ? { ri: e.ri, p: at, k: v, t: 0, vertex: true } : { ri: e.ri, p: at, k: e.k, t: e.t, vertex: false };
-    }
-    function segDist(p1, p2, p3, p4) {
-      function ptSeg(p, a, b) { var dx = b[0] - a[0], dy = b[1] - a[1], L2 = dx * dx + dy * dy, t = L2 > 0 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / L2)) : 0; return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy); }
-      function cross(o, a, b) { return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]); }
-      if (cross(p1, p2, p3) * cross(p1, p2, p4) < 0 && cross(p3, p4, p1) * cross(p3, p4, p2) < 0) return 0;
-      return Math.min(ptSeg(p1, p3, p4), ptSeg(p2, p3, p4), ptSeg(p3, p1, p2), ptSeg(p4, p1, p2));
-    }
-    var order = rings.map(function (R, i) { return i; }).sort(function (u, v) { return rings[u].per - rings[v].per; });
-    order.forEach(function (ri) {
-      var R = rings[ri].ring, n = R.length - 1;
-      for (var k = 0; k < n; k++) {
-        var a = R[k], p0 = R[(k + n - 1) % n], p1 = R[(k + 1) % n], tx = p1[0] - p0[0], ty = p1[1] - p0[1], tl = Math.hypot(tx, ty) || 1, ux = -ty / tl, uy = tx / tl;
-        if (!inM(a[0] + 0.2 * ux, a[1] + 0.2 * uy)) { ux = -ux; uy = -uy; if (!inM(a[0] + 0.2 * ux, a[1] + 0.2 * uy)) continue; }      /* the way into the region */
-        var s = 0.2;
-        while (s < LADDER_MAX_MM && inM(a[0] + s * ux, a[1] + s * uy)) s += 0.05;                   /* ...to the edge on its far side */
-        if (s >= LADDER_MAX_MM || s - 0.1 < LADDER_MIN_MM) continue;
-        var rg = [a, [a[0] + (s - 0.1) * ux, a[1] + (s - 0.1) * uy]], ends = [nearest(rg[0]), nearest(rg[1])];
-        if (ends[0].d > 1e-6 || ends[1].d > LADDER_SNAP_MM) continue;
-        var joined = [], bad = false;
-        for (var ei = 0; ei < 2 && !bad; ei++) {
-          var rx = rg[1 - ei][0] - rg[ei][0], ry = rg[1 - ei][1] - rg[ei][1], e = claim(ends[ei], rx, ry);
-          if (!e) { bad = true; break; }
-          var Re = rings[e.ri].ring, sa = Re[e.k], sb = Re[e.k + 1], sx = sb[0] - sa[0], sy = sb[1] - sa[1], sl = Math.hypot(sx, sy) || 1, rl2 = Math.hypot(rx, ry) || 1;
-          if (Math.abs(sx * ry - sy * rx) / (sl * rl2) < LADDER_MIN_SIN) bad = true;          /* a rung nearly along the loop: its pad would run over the next node */
-          joined.push(e);
-        }
-        if (bad) continue;
-        var A = joined[0].p, B = joined[1].p;
-        if (Math.hypot(B[0] - A[0], B[1] - A[1]) < LADDER_MIN_MM) continue;
-        var clash = false;
-        for (var kq = 0; kq < kept.length && !clash; kq++) if (segDist(A, B, kept[kq][0], kept[kq][1]) < gap) clash = true;
-        if (clash) continue;
-        joined.forEach(function (e2) { taken.push({ ri: e2.ri, p: e2.p }); if (!e2.vertex) rings[e2.ri].added.push(e2); });
-        kept.push([A, B]);
-      }
-    });
-    var outLoops = rings.map(function (R) {
-      var bySeg = {};
-      R.added.forEach(function (e) { (bySeg[e.k] = bySeg[e.k] || []).push(e); });
-      var ring = [];
-      for (var k = 0; k + 1 < R.ring.length; k++) {
-        ring.push(R.ring[k]);
-        (bySeg[k] || []).sort(function (u, v) { return u.t - v.t; }).forEach(function (e) { ring.push(e.p); });
-      }
-      ring.push(R.ring[R.ring.length - 1]);
-      return { ring: ring, lenMm: R.lenMm, level: R.level };
-    });
-    return { loops: outLoops, lines: kept };
-  }
-  /* the share of a region's cells that its beads (a line wide, centred on each path) cover */
-  function coverShare(M, nx, ny, ox, oy, cellMm, widthMm, loops, lines) {
-    var C = new Uint8Array(nx * ny), r = widthMm / 2, rc = Math.ceil(r / cellMm), tot = 0, hit = 0;
-    function stamp(a, b) {
-      var L = Math.hypot(b[0] - a[0], b[1] - a[1]), m = Math.max(1, Math.ceil(L / (cellMm * 0.5)));
-      for (var t = 0; t <= m; t++) {
-        var x = a[0] + (b[0] - a[0]) * t / m, y = a[1] + (b[1] - a[1]) * t / m, ci = Math.round((x - ox) / cellMm), cj = Math.round((y - oy) / cellMm);
-        for (var dj = -rc; dj <= rc; dj++) for (var di = -rc; di <= rc; di++) {
-          var ii = ci + di, jj = cj + dj;
-          if (ii < 0 || ii >= nx || jj < 0 || jj >= ny) continue;
-          if (Math.hypot(ox + ii * cellMm - x, oy + jj * cellMm - y) <= r) C[jj * nx + ii] = 1;
-        }
-      }
-    }
-    loops.forEach(function (lp) { for (var k = 0; k + 1 < lp.ring.length; k++) stamp(lp.ring[k], lp.ring[k + 1]); });
-    lines.forEach(function (l) { stamp(l[0], l[1]); });
-    for (var q = 0; q < nx * ny; q++) if (M[q]) { tot++; if (C[q]) hit++; }
-    return tot ? hit / tot : 0;
-  }
-  /* THE PLATE OF A REGION: the hatch's (plateClassic), or - where the region is a ring's bands and corners, narrow everywhere - the rungs' when they hold more of it */
-  function plateOfRegionCore(M, nx, ny, ox, oy, cellMm, pitchMm, widthMm, hatchDeg, minLoopMm, minLineMm, rl) {
-    var cl = plateClassic(M, nx, ny, ox, oy, cellMm, pitchMm, widthMm, hatchDeg, minLoopMm, minLineMm);
-    var N = nx * ny, mCells = 0, dMax = 0, dist = edtCells(M, nx, ny);
-    for (var q = 0; q < N; q++) { mCells += M[q]; if (dist[q] > dMax) dMax = dist[q]; }
-    if (!(dMax * cellMm <= LADDER_MAX_HALF_MM && mCells * cellMm * cellMm >= LADDER_MIN_AREA_MM2)) return cl;
-    var ld = ladderPlate(M, nx, ny, ox, oy, cellMm, widthMm, minLoopMm, rl);
-    if (!ld) return cl;
-    return coverShare(M, nx, ny, ox, oy, cellMm, widthMm, ld.loops, ld.lines) >= LADDER_GAIN * coverShare(M, nx, ny, ox, oy, cellMm, widthMm, cl.loops, cl.lines) ? ld : cl;
-  }
-  function plateClassic(M, nx, ny, ox, oy, cellMm, pitchMm, widthMm, hatchDeg, minLoopMm, minLineMm) {
+  function plateOfRegionCore(M, nx, ny, ox, oy, cellMm, pitchMm, widthMm, hatchDeg, minLoopMm, minLineMm) {
     var N = nx * ny, outline = concentricLoops(M, nx, ny, ox, oy, cellMm, pitchMm, widthMm, minLoopMm, 1);
     if (!outline.length) return { loops: [], lines: [] };
-    var dist = edtCells(M, nx, ny), thDef = hatchDeg * Math.PI / 180, pitchMmDef = pitchMm;
+    var dist = edtCells(M, nx, ny), th = hatchDeg * Math.PI / 180, ux = Math.cos(th), uy = Math.sin(th), nxv = -uy, nyv = ux;
     /* the lines of a hatch over the cells of H: a lattice fixed in the plane, a pitch apart, each run of H a line (shorter than the minimum, none) */
-    function hatchOver(H, minLen, degOver, pitchOver) {
-      var pitchMm = pitchOver || pitchMmDef;
-      var th = degOver == null ? thDef : degOver * Math.PI / 180, ux = Math.cos(th), uy = Math.sin(th), nxv = -uy, nyv = ux;
+    function hatchOver(H, minLen) {
       var lines = [], cmin = Infinity, cmax = -Infinity, tmin = Infinity, tmax = -Infinity;
       for (var j = 0; j < ny; j++) for (var i = 0; i < nx; i++) if (H[j * nx + i]) {
         var x = ox + i * cellMm, y = oy + j * cellMm, c = x * nxv + y * nyv, t = x * ux + y * uy;
@@ -1983,7 +1807,7 @@
                 break;
               }
             }
-            pl = plateOfRegion(Mk, cnx, cny, ox + cI0 * CELLS, oy + cJ0 * CELLS, CELLS, o.pitch + 0.03 + 0.04 * Math.min(tryN, 2), o.width + 0.03 * Math.min(tryN, 2), (n % 2 ? 135 : 45), REGION_MIN_LOOP_MM, 0.9 + 0.4 * tryN, RL);
+            pl = plateOfRegion(Mk, cnx, cny, ox + cI0 * CELLS, oy + cJ0 * CELLS, CELLS, o.pitch + 0.03 + 0.04 * Math.min(tryN, 2), o.width + 0.03 * Math.min(tryN, 2), (n % 2 ? 135 : 45), REGION_MIN_LOOP_MM, 0.9 + 0.4 * tryN);
             if (tryN >= 1) pl.thin = [];                                       /* the thin beads go first when a layer is refused: the loops and the hatch are the plate */
             if (tryN >= 2) pl.lines = [];
             if (tryN === 3) { var longest = 0; pl.loops.forEach(function (l) { longest = Math.max(longest, l.lenMm); }); pl.loops = pl.loops.filter(function (l) { return l.lenMm >= Math.min(longest, 8); }); }
