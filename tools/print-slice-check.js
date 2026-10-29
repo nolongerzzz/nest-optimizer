@@ -107,6 +107,20 @@ async function main() {
   check('seconds read as a person reads them', PRINT.fmtTime(30) === '30 s' && PRINT.fmtTime(125) === '2 min' && PRINT.fmtTime(3725) === '1 h 02 min' && PRINT.fmtTime(7200) === '2 h 00 min');
 
   // ===========================================================================
+  // a sheet of three interface layers (the card's Dense) is told to the slicer, as G-scope's Slice tells it
+  const dense = PRINT.pieceObjects(pieces.map(p => p.support ? Object.assign({}, p, { interfaceLayers: 3 }) : p), a1.bed);
+  check('a support piece\'s interfaceLayers rides on its engine object; a part\'s does not',
+    dense.filter(o => o.role === 'support').every(o => o.interfaceLayers === 3) && dense.filter(o => o.role !== 'support').every(o => o.interfaceLayers === undefined));
+  {
+    const SLm = require(path.join(ROOT, 'nso_slicer.js')), realRun = SLm.run, seen = [];
+    SLm.run = function (ob, o) { seen.push(o.supportInterfaceLayers); return realRun.apply(this, arguments); };
+    try {
+      await PRINT.build(dense.slice(0, 2), { config: tpl, printer: a1 }, {});
+      await PRINT.build(objs.slice(0, 2), { config: tpl, printer: a1 }, {});
+    } finally { SLm.run = realRun; }
+    check('build() gives the slicer supportInterfaceLayers 3 for a Dense sheet, and leaves the default alone otherwise', seen.length === 2 && seen[0] === 3 && seen[1] == null, String(seen));
+  }
+
   section('3. A plate with supports through build(): the file');
   // ===========================================================================
   const stages = [];

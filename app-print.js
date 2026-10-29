@@ -113,7 +113,8 @@
         soup[i + 2] = p.soup[i + 2];
       }
       return { name: p.name, soup: soup, key: p.sourceId, gapCloseMm: p.nonSolid ? 0 : undefined,
-               role: p.support ? (p.brim ? 'brim' : 'support') : 'part', hostKey: p.support ? p.hostSourceId : undefined };
+               role: p.support ? (p.brim ? 'brim' : 'support') : 'part', hostKey: p.support ? p.hostSourceId : undefined,
+               interfaceLayers: p.support ? p.interfaceLayers : undefined };
     });
   }
 
@@ -142,6 +143,10 @@
     return Promise.resolve().then(function () {
       var eng = PL.engineOptions(assets.config);
       var o = SL.defaultsFor(eng.nozzleMm, Object.assign({ emitGcode: false }, eng.over));
+      /* a sheet of more interface layers than the slicer's default says so (the card's Dense: 3): the slicer types its top 3 layers interface, as G-scope's Slice does */
+      var ni = 0;
+      objects.forEach(function (ob) { if (ob.interfaceLayers > ni) ni = ob.interfaceLayers; });
+      if (ni > 2 && (eng.over || {}).supportInterfaceLayers == null) o.supportInterfaceLayers = ni;
       stage('slicing', { objects: objects.length });
       return SL.run(objects, o);
     }).then(function (res) {
@@ -227,7 +232,7 @@
       var sup = m && m.nsoSupport ? m.nsoSupport : null;
       var placed = o.placedIndex != null ? state.placed[o.placedIndex] : null;
       var pm = placed && (state.models || []).find(function (x) { return x && x.id === placed.sourceId; });
-      return { name: o.name, soup: o.positions, sourceId: o.sourceId, support: !!sup, brim: !!(sup && sup.brim), hostSourceId: sup ? sup.hostSourceId : undefined,
+      return { name: o.name, soup: o.positions, sourceId: o.sourceId, support: !!sup, brim: !!(sup && sup.brim), hostSourceId: sup ? sup.hostSourceId : undefined, interfaceLayers: sup ? sup.interfaceLayers : undefined,
                nonSolid: !!(pm && typeof root.nsoNonSolid === 'function' && root.nsoNonSolid(pm)),
                settings: m && m.slicerSettings ? Object.assign({}, m.slicerSettings) : null };      // a support's own slicer overrides ride into a 3MF
     });
