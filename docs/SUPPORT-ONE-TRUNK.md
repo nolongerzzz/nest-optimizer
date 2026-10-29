@@ -204,7 +204,7 @@ the option (the shipped Custom feed's bytes are the claude-wip's; `support:feed`
 **The interface (`interfaceLayers`, `SHEET.densePitchMm`).** `sheet()` takes `interfaceLayers` (2 unless said): 2 transition
 layers and that many interface layers, the interface alternating across and along the sheet's A. The card's **Dense (Bambu)**
 interface is pitch **0.47 mm** (Bambu's 0.46: the strip's joins need a segment of 0.4665, and at 0.46 the stair under
-the tilted plane did not build) and **2 interface layers** over 2 of transition (`SHEET.denseInterfaceLayers`); **Open** is 0.84 mm, the same 2 + 2. The card's default is
+the tilted plane did not build) and **3 interface layers** over 2 of transition (`SHEET.denseInterfaceLayers`, as Bambu's reference lays every head; it was 2); **Open** is 0.84 mm, the same 2 + 2. The card's default is
 Dense **in the one-trunk build only**: a hand-placed row of three tips (Custom, `support:custom`) formed no sheet at 0.47 mm where it forms one at 0.84, so every other build stays Open. The slicer's labelling takes `supportInterfaceLayers` (default 2) to read a 3-layer sheet.
 
 ## 4. Measured (`support:onetrunk`, the six real parts, flat)

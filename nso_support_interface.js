@@ -4067,7 +4067,7 @@
 
   var api = {
     DEFAULTS: { gapMm: GAP_MM, layerMm: LAYER_MM, pitchMm: PITCH_MM, repeats: REPEATS, epsMm: EPS_MM },
-    SHEET: { pitchMm: SHEET_PITCH_MM, densePitchMm: SHEET_DENSE_PITCH_MM, denseInterfaceLayers: 2, denseFlatGapMaxMm: 0.9, denseStairLegMm: STAIR_LEG_MM, roles: SHEET_ROLES.slice(), under: SHEET_UNDER, minRunMm: MIN_RUN_MM, cellMm: CELL_MM,
+    SHEET: { pitchMm: SHEET_PITCH_MM, densePitchMm: SHEET_DENSE_PITCH_MM, denseInterfaceLayers: 3, denseFlatGapMaxMm: 0.9, denseStairLegMm: STAIR_LEG_MM, roles: SHEET_ROLES.slice(), under: SHEET_UNDER, minRunMm: MIN_RUN_MM, cellMm: CELL_MM,
              sampleMm: SAMPLE_MM, lineAngles: LINE_ANGLES.slice(), fieldMm: FIELD_MM, levelEdgeMm: LEVEL_EDGE_MM,
              slicerSettings: Object.assign({}, SHEET_SLICER) },
     STAIR: { tipMm: STAIR_TIP_MM, backMm: STAIR_BACK_MM },

@@ -2118,6 +2118,13 @@
           if (!g.isEmpty(inSheet)) {
             var wI = o.infillWidthMm, sI = spacingOf(wI, P.layers[j].h || 0.2), aD = (o.infillDirectionDeg || 45) * Math.PI / 180, aJ = (j % 2 === 0) ? aD : aD + Math.PI / 2;
             var hullS = g.polys(g.offset(inSheet, wI / 2 + 1e-4));
+            /* the sheet is the layer's only fill there: a fill the support's own shells laid inside it (the bottom shell of a sheet's first layer, which stands on a
+               hollow tree) is the same ground twice - a transition layer with double the lines. The walls stay. */
+            L.paths = L.paths.filter(function (q) {
+              if (q.sheetFill || /wall$/i.test(q.feature) || !q.pts.length) return true;
+              for (var qi = 0; qi < q.pts.length; qi++) if (!inside(hullS, q.pts[qi][0], q.pts[qi][1])) return true;
+              return false;
+            });
             connect(scanFill(g.polys(inSheet), aJ, sI, 0), 3 * sI, hullS).forEach(function (pth) {
               L.paths.push({ feature: 'Support', width: wI, closed: false, pts: pth.pts, sheetFill: true });
             });
