@@ -205,7 +205,7 @@ var NSO_SUPPORTS_CARD = (function () {
      one shell (the booleans merge a piece's shells for themselves: the
      overlap merge in nso-helpers.js). */
   /* sheetPerimeter: the sheet and its caps keep to where the part is over them, not out over the air past its edge */
-  var PARTS_OPTS = { interface: true, foldSheets: false, footPads: 'shared', sheetPerimeter: true, sheetRegionPlate: true, sheetSlabPlate: true };
+  var PARTS_OPTS = { interface: true, foldSheets: false, footPads: 'shared', sheetPerimeter: true, sheetRegionPlate: true, sheetSlabPlate: true, sheetRegionFlare: true };
   /* The sheet's line pitch and its interface layers are the build's own: DENSE is Bambu's (support_interface_spacing 0.1: lines
      0.46 mm apart, and 3 interface layers over the 2 of transition, as the reference slice lays every head); OPEN is the 0.84 mm
      and 2 + 2 layers the first prints were made with. */
@@ -219,7 +219,7 @@ var NSO_SUPPORTS_CARD = (function () {
        laid from each footprint and its height, layer by layer - is the original branch / transition / interface, and was only tied to the Raft box).
        Auto (the one-trunk tree) always lays it. The box now gates only the builds that are not Auto: off, their sheet is built from the tips alone, as it
        was before the region plate (docs/SUPPORT-FOOTPRINT.md section 9). */
-    if (o && o.raft === false && !oneTrunkOn(o)) { out.sheetRegionPlate = false; out.sheetSlabPlate = false; }
+    if (o && o.raft === false && !oneTrunkOn(o)) { out.sheetRegionPlate = false; out.sheetSlabPlate = false; out.sheetRegionFlare = false; }
     return out;
   }
   /* The card's state when the picked piece has no beacons at all. Detection

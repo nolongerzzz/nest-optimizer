@@ -901,6 +901,7 @@
   var CAP_FOOT = 0.9;          /* the cap's foot across, as a share of the column's side: inside its square however either is turned */
   var CAP_TUCK_MM = 0.1;       /* the column under a cap ends this far (and half its diagonal) inside it: no face of the two shares a plane */
   var CAP_SIDES = 32;          /* the cap's rim, sampled for its clearance */
+  var FLARE_OVERLAP = 1.4;     /* a flared cap under a region plate is this much of the way to its nearest neighbour's centre and past it, held to CAP_MAX_MM: their rims meet (flareOf) */
   var CAP_PART_MM = 0.05;      /* a cap stops this far short of its neighbour's: caps never overlap (see THE CAPS) */
   var CAP_BAND_MM = 0.02;      /* a cap's top band: upright, this tall, so its top edge is a wall, not the flank's (see THE CAPS) */
   var LINE_ANGLES = [0, 90, 26.565051177077994, 116.56505117707799, 63.43494882292201, 153.43494882292202, 45, 135];
@@ -1444,6 +1445,7 @@
       capMax: opts.capMaxMm == null ? CAP_MAX_MM : +opts.capMaxMm,
       slabEps: opts.slabEpsMm == null ? 0.12 : +opts.slabEpsMm,      /* how far the traced outline may stray from the mask's own edge when it is simplified */
       slab: opts.slabPlate === true || opts.slabPlate === 'weak' ? opts.slabPlate : false,                      /* a region plate laid as one solid footprint for the slicer to fill (slabOfMask), not as loops and lines */
+      flare: opts.regionFlare === true,                                 /* a tip under a region plate ends in a flared cap, as Bambu's legs do (flareOf), not a bare column */
       eps: EPS_MM
     };
     if (!(o.pitch > o.width)) return { ok: false, reason: 'pitch ' + o.pitch + ' does not clear the ' + o.width + ' mm line' };
@@ -3896,10 +3898,32 @@
     /* the cut heights: a capped tip along its own leg, inside its cap (rise
        0: no upright run); an uncapped one flat at z_cap; a gap tip flat, the
        gap under the part */
+    /* A FLARED CAP UNDER A REGION PLATE. The plate lies on the tip itself, so the tip was a bare column cut flat under it: a tube. Bambu's leg widens into a
+       bowl under its transition (a platform of rings 3 - 5 mm across). The cap is the sheet's own (THE CAPS): a round frustum from CAP_RISE_MM down the leg
+       to the plate's base, as wide as the nearest tip of the plate allows (held to the cap's maximum); the caller narrows it off the part. */
+    function flareOf(t) {
+      var col = columns[t.col];
+      if (!col || !col.pts || col.pts.length < 2 || t.shellB == null) return null;
+      var zCap = t.shellB, pts = col.pts;
+      if (!(zCap - o.capRise - ROOM_MM > o.plateZ + o.foot)) return null;
+      var top = colAxisAt(pts, zCap), foot = colAxisAt(pts, zCap - o.capRise), nn = Infinity;
+      tips.forEach(function (u) {
+        if (u === t || u.mode !== 'sheet' || u.shellB == null || !columns[u.col]) return;
+        var ut = colAxisAt(columns[u.col].pts, u.shellB);
+        nn = Math.min(nn, Math.hypot(ut[0] - top[0], ut[1] - top[1]));
+      });
+      var w = Math.min(o.capMax, Math.max(o.side + 0.2, nn * FLARE_OVERLAP));      /* neighbours' caps may run into each other: one platform, as Bambu's bowls do */
+      return { c: top, b: foot, w: w, z0: zCap - o.capRise, z1: zCap, footD: CAP_FOOT * o.side, band: CAP_BAND_MM, nnMm: nn, why: null, slidMm: 0, flare: true };
+    }
     tips.forEach(function (t) {
       if (t.mode === 'sheet') {
         var L = levels[t.level];
-        if (L.shell) { t.zTop = t.zTop; t.zBase = t.shellB; t.cutZ = t.shellB; t.rise = o.side; return; }
+        if (L.shell) {
+          t.zTop = t.zTop; t.zBase = t.shellB; t.cutZ = t.shellB; t.rise = o.side;
+          var fc = o.flare ? flareOf(t) : null;
+          if (fc) { t.cap = fc; t.capWhy = 'flared under the region plate'; t.cutZ = t.shellB - sink; t.rise = 0; }
+          return;
+        }
         t.zTop = L.res.zTop; t.zBase = L.res.zBase;
         t.cutZ = t.cap ? L.res.zCap - sink : L.res.zCap;
         t.rise = t.cap ? 0 : o.side;
@@ -3958,7 +3982,7 @@
       cap: { riseMm: o.capRise, minMm: o.capMin, maxMm: o.capMax, gapMaxMm: CAP_GAP_MAX_MM, tuckMm: CAP_TUCK_MM, foot: CAP_FOOT },
       levels: lv, failed: levels.filter(function (L) { return !L.ok && !L.dead; }).map(function (L) { return { id: L.id, zTop: L.first, reason: L.reason }; }),
       tips: tips.map(function (t) {
-        var cap = t.mode === 'sheet' && t.cap ? { c: t.cap.c, b: t.cap.b, w: t.cap.w, z0: t.cap.z0, z1: t.cap.z1, footD: t.cap.footD, band: t.cap.band, why: t.cap.why } : null;
+        var cap = t.mode === 'sheet' && t.cap ? { c: t.cap.c, b: t.cap.b, w: t.cap.w, z0: t.cap.z0, z1: t.cap.z1, footD: t.cap.footD, band: t.cap.band, why: t.cap.why, flare: !!t.cap.flare } : null;
         return { i: t.i, label: t.label, beacon: t.beacon, col: t.col, contact: t.contact.slice(), mode: t.mode, level: t.level, carried: t.mode === 'sheet' ? t.carried !== false : null,
                  zTop: t.zTop, zBase: t.zBase, cutZ: t.cutZ, rise: t.mode === 'sheet' ? t.rise : null, cap: cap,
                  why: t.why || (t.mode === 'sheet' && !t.cap ? t.capWhy : null) || null };

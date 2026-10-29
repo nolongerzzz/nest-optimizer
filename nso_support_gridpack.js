@@ -3171,7 +3171,7 @@
     var ss = sheetStations(p), cols = ss.cols, sts = ss.sts;
     var plan = SI.sheet(opts.rawTris, sts, {
       columns: cols, sideMm: p.sideMm, plateZ: p.plateZ, footMm: foot, occluders: opts.occluders,
-      layerMm: opts.layerMm, gapMm: opts.gapMm, pitchMm: opts.sheetPitchMm, angleDeg: opts.sheetAngleDeg, widthMm: opts.sheetWidthMm, interfaceLayers: opts.interfaceLayers, flatGapMaxMm: opts.sheetFlatGapMm, stairLegMm: opts.sheetStairLegMm, perimeter: opts.sheetPerimeter, footprints: opts.sheetFootprints, regionPlate: opts.sheetRegionPlate, slabPlate: opts.sheetSlabPlate, slabEpsMm: opts.sheetSlabEps,
+      layerMm: opts.layerMm, gapMm: opts.gapMm, pitchMm: opts.sheetPitchMm, angleDeg: opts.sheetAngleDeg, widthMm: opts.sheetWidthMm, interfaceLayers: opts.interfaceLayers, flatGapMaxMm: opts.sheetFlatGapMm, stairLegMm: opts.sheetStairLegMm, perimeter: opts.sheetPerimeter, footprints: opts.sheetFootprints, regionPlate: opts.sheetRegionPlate, regionFlare: opts.sheetRegionFlare, slabPlate: opts.sheetSlabPlate, slabEpsMm: opts.sheetSlabEps,
       capRiseMm: opts.capRiseMm, capMinMm: opts.capMinMm, capMaxMm: opts.capMaxMm,
       thickness: opts.thickness, crosshatch: opts.crosshatch, rasterLines: opts.rasterLines, beat: opts.beat,
       progress: opts.sheetProgress
@@ -3293,8 +3293,14 @@
        height. Its own shell, the next part after the column. */
     function capped(t, res, k) {
       if (!res || !res.ok || t.mode !== 'sheet' || !t.cap) return res;
-      var c = t.cap, ph = ((GOLDEN_DEG * (k + 1)) % (360 / CAP_SIDES)) * Math.PI / 180;
-      res.capSoup = frustumSoup(c.b[0], c.b[1], c.c[0], c.c[1], c.z0, c.z1, c.footD / 2, c.w / 2, CAP_SIDES, ph, c.band);
+      var c = t.cap, ph = ((GOLDEN_DEG * (k + 1)) % (360 / CAP_SIDES)) * Math.PI / 180, cw = c.w, cs = null;
+      /* a flared cap (under a region plate) is narrowed until it keeps the gap to the part, as the sheet's own caps are */
+      for (var ci = 0; ci < 14; ci++) {
+        cs = frustumSoup(c.b[0], c.b[1], c.c[0], c.c[1], c.z0, c.z1, c.footD / 2, cw / 2, CAP_SIDES, ph, c.band);
+        if (!c.flare || cw <= c.footD + 0.3 || clearance(cs, [c.c[0], c.c[1], c.z1]) >= aim) break;
+        cw -= 0.25;
+      }
+      res.capSoup = cs;
       if (res.soups) res.soups = res.soups.concat([res.capSoup]);
       return res;
     }
