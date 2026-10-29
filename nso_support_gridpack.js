@@ -3207,18 +3207,43 @@
       return out;
     }
     /* lower a cut until the tip's own solid keeps the gap */
-    function settleCut(t, build, pts, side, near) {
-      var z = t.cutZ, res = null, d = Infinity;
+    function settleCut(t, build, pts, side, near, phase) {
+      var z = t.cutZ, res = null, d = Infinity, path = null;
       for (var it = 0; it < 10; it++) {
-        res = build(cleanPath(SI.cutPath(pts, z, side, t.rise)));
+        path = cleanPath(SI.cutPath(pts, z, side, t.rise));
+        res = build(path);
         if (!res.ok) return res;
         if (t.mode === 'sheet') { d = null; break; }
         d = clearance(res.soup, near);
         if (d >= aim) break;
         z -= (aim - d) + 0.01;
       }
-      tipLog.push({ beacon: t.beacon, mode: t.mode, cutZ: z, clearanceMm: d });
+      var needle = null;
+      if (t.mode === 'gap' && d != null && d >= aim && z < t.cutZ - 0.1) needle = needleOf(path[0], near, side, phase, z);
+      if (needle && res.soups) res.soups = res.soups.concat([needle.soup]);
+      tipLog.push({ beacon: t.beacon, mode: t.mode, cutZ: z, clearanceMm: d, needleTopZ: needle ? needle.topZ : null });
       return res;
+    }
+    /* A TAPERED TIP FOR A LEDGE. A column that holds a ledge beside a wall (a
+       square head on a round post: the ledge is 0.2 - 1.2 mm from the flank)
+       cannot keep its 1.2 mm square up to the ledge - the flank is inside it -
+       so settleCut lowers it until the square clears. Bambu's tower tapers to a
+       point there and goes on up to 0.2 - 0.4 mm under the overhang. This is
+       that point: from just inside the settled column's top, a straight
+       frustum up toward the contact (aimed at it, else straight up), the
+       highest one whose own solid keeps the gap. Its top is a bead's width,
+       so the slicer lays one line up it. */
+    function needleOf(base, near, side, phase, zCut) {
+      var topMax = near[2] - gap - 0.02, scales = [0.4, 0.32];
+      for (var zt = topMax; zt > zCut + 0.4; zt -= 0.2) {
+        var aimAt = [[near[0], near[1]], [base[0], base[1]]];
+        for (var a = 0; a < aimAt.length; a++) for (var q = 0; q < scales.length; q++) {
+          var r = P.sweep({ points: [[base[0], base[1], zCut - 0.2], [aimAt[a][0], aimAt[a][1], zt]], profile: squareProfile(side, phase), up: [0, 1, 0], scales: [1, scales[q]] });
+          if (!r.ok || !r.tris || !r.tris.length) continue;
+          if (clearance(r.tris, near) >= aim) return { soup: r.tris, topZ: zt };
+        }
+      }
+      return null;
     }
     /* A CUT KEEPS THE COLUMN AS IT WAS. The sweep seeds its square's frame
        on the first segment and carries it round every bend by the minimal
@@ -3275,7 +3300,7 @@
     }
     function member(m) {
       var t = byBeacon[m.beacon], build = memberBuild(m), pts = m.path;
-      if (t.mode !== 'side') return capped(t, settleCut(t, build, pts, m.side, pts[0]), m.beacon);
+      if (t.mode !== 'side') return capped(t, settleCut(t, build, pts, m.side, pts[0], phaseOf(m.id + 1)), m.beacon);
       /* A SIDE TIP leaves its face sideways (a lateral stub along the face's
          normal, then down). It is drawn back along that stub until its own
          solid keeps the gap - while the stub stays longer than its own mitre
@@ -3304,7 +3329,7 @@
         up -= Math.max(0.03, (aim - (res.ok ? d : 0)) * 1.5);
       }
       var t2 = { beacon: m.beacon, mode: 'side-cut', cutZ: E[2] };
-      return settleCut(t2, build, rest, m.side, pts[0]);
+      return settleCut(t2, build, rest, m.side, pts[0], phaseOf(m.id + 1));
     }
     function stub(s) {
       var t = byBeacon[s.beacon];
@@ -3313,7 +3338,7 @@
         if (r.ok) r.soup = r.tris; else r.reason = 'stub ' + s.beacon + ' would not sweep: ' + r.reason;
         return r;
       };
-      return capped(t, settleCut(t, build, [s.to, s.via, s.from], s.side, s.to), s.beacon);
+      return capped(t, settleCut(t, build, [s.to, s.via, s.from], s.side, s.to, phaseOf(p.members.length + s.beacon + 1)), s.beacon);
     }
     function summary() {
       return {

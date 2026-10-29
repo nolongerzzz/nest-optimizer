@@ -14,7 +14,7 @@
      the CLASSIFIER our slicer's top Overhang-wall layer against Bambu's, and how much overhang wall it finds in all (Bambu: a wall is overhang where its
                    whole width hangs past the layer below). A support cannot reach a layer our slicer never calls an overhang; one that calls too much asks for more.
    Gates: our overhang top is within 0.4 mm of Bambu's (the slicer, held). The support's gap under Bambu's own overhang top has a GOAL, 0 - 0.8 mm
-   (a note where it is not met, today on the four heads whose tops are ledges and apexes), and a FLOOR, 2.2 mm, that fails: before the narrow ledge
+   (held on every head but the Negative Sphere, whose apex is still short and sits on the floor), and a FLOOR, 2.2 mm, that fails: before the narrow ledge
    (docs/SUPPORT-TOP.md) Circular stopped 6.4 and Sphere 5.6 mm under it. --report prints and never fails. */
 'use strict';
 const fs = require('fs');
@@ -34,6 +34,8 @@ const ONLY = (args.find(a => a.startsWith('--only=')) || '').slice(7).split(',')
 const REF = path.join(ROOT, 'fixtures', 'supports', 'tree_slimsupports.gcode.3mf');
 const KEYS = RP.NAMES.filter(k => !ONLY.length || ONLY.includes(k));
 const SUPPORT_GAP_GOAL = 0.8, SUPPORT_GAP_FLOOR = 2.2, CLASSIFIER_TOL = 0.4, LENGTH_RATIO = [0.8, 1.3];
+/* the heads that meet the goal today are held to it (the ledge heads, Circular and Sphere, since their columns end in a tapered tip); only the Negative Sphere's apex is still on the floor */
+const ON_THE_FLOOR = new Set(['Support Negative Sphere']);
 const headName = n => String(n).replace(/\.stl$/, '').replace(/ - (support|brim).*$/, '');
 
 let pass = 0, fail = 0;
@@ -79,8 +81,9 @@ async function ours(WASM, key) {
     try { O = await ours(WASM, key); } catch (e) { check(name + ': built and sliced', false, e.message); continue; }
     const vsB = O.supportTop == null ? null : Math.round((B.overhangTop - O.supportTop) * 100) / 100;
     console.log(' ' + name.padEnd(23) + ' |        ' + f2(B.overhangTop) + '        ' + f2(B.supportTop) + '  ' + f2(B.gapMm) + ' |       ' + f2(O.overhangTop) + '        ' + f2(O.supportTop) + '  ' + f2(O.gapMm) + ' | ' + f2(vsB) + '  (' + O.supports + ' supports, ' + (Date.now() - t0) + ' ms)');
-    const okFloor = vsB != null && vsB >= -0.2 && vsB <= SUPPORT_GAP_FLOOR + 1e-9, okGoal = vsB != null && vsB >= -0.2 && vsB <= SUPPORT_GAP_GOAL + 1e-9;
-    check(name + ': the support stops within ' + SUPPORT_GAP_FLOOR + ' mm under the top of Bambu\'s overhang (the floor)', okFloor, 'support top ' + f2(O.supportTop) + ' vs overhang top ' + f2(B.overhangTop));
+    const floorMm = ON_THE_FLOOR.has(name) ? SUPPORT_GAP_FLOOR : SUPPORT_GAP_GOAL;
+    const okFloor = vsB != null && vsB >= -0.2 && vsB <= floorMm + 1e-9, okGoal = vsB != null && vsB >= -0.2 && vsB <= SUPPORT_GAP_GOAL + 1e-9;
+    check(name + ': the support stops within ' + floorMm + ' mm under the top of Bambu\'s overhang (' + (ON_THE_FLOOR.has(name) ? 'the floor' : 'the goal, held') + ')', okFloor, 'support top ' + f2(O.supportTop) + ' vs overhang top ' + f2(B.overhangTop));
     if (okFloor && !okGoal) console.log('  note  ' + name + ': ' + f2(vsB) + ' mm under it; the goal is ' + SUPPORT_GAP_GOAL + ' (Bambu: 0.2 - 0.4)');
     const ratio = B.overhangMm > 0 && O.overhangMm != null ? O.overhangMm / B.overhangMm : null;
     check(name + ': our overhang wall is as long as Bambu\'s, within ' + LENGTH_RATIO.join(' - ') + ' x (a wall is overhang where its whole width hangs)', ratio != null && ratio >= LENGTH_RATIO[0] && ratio <= LENGTH_RATIO[1], 'ours ' + f2(O.overhangMm) + ' mm vs Bambu ' + f2(B.overhangMm) + ' mm');

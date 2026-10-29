@@ -47,14 +47,17 @@ Negative Sphere, Negative Sphere2; Base and Oblique stay within 10 % (67 against
 Circular's support went from stopping at 8.8 to 13.4 mm, Sphere's from 9.6 to 13.4. The other heads' bytes are unchanged
 (`support:plate` pins Circular and Sphere anew).
 
-## What is still short
+## The tapered tip for a ledge, and what is still short
+
+On the ledge heads the column was a flat-topped 1.2 mm square and the flank wall stands 0.2 mm from the ledge it holds: from 13.5 up the column touched the
+part, so `settleCut` lowered it until it kept the 0.18 mm gap (Circular's two columns stopped at 13.8 and 13.6, a mm and a half under the ledge at 15.3).
+Bambu's tower tapers to a point there and goes on up. `needleOf` (`nso_support_gridpack.js`) is that point: from just inside the settled column's top, a
+straight frustum - 1.2 mm square down to 0.4 (0.32 if that is too wide) at the top - aimed at the contact, else straight up, the highest one whose own solid keeps
+the gap. Circular and Sphere now stop at 14.8, which is Bambu's (support top 15.1 as built, 0.2 under the ledge). `npm run support:top` holds both to the goal.
 
 | head | support top | under Bambu's overhang top |
 |---|---|---|
-| Circular, Sphere | 13.4 | 1.8 |
-| Negative Sphere | 13.2 | 2.0 |
-| Negative Sphere2 | 14.4 | 1.0 |
+| Negative Sphere | 13.6 (the cone is built to 14.5; the slicer drops the last of it, narrower than a line) | 1.6 |
 
-On the three ledge heads the column is a flat-topped 1.2 mm square and the flank wall stands 0.2 mm from the ledge it holds: from 13.5 up, the column
-touches the part (`settleCut` lowers it until it keeps the 0.18 mm gap). Bambu's tower tapers to a point there. A tapered tip is the work that
-closes the gap; the Negative Sphere2's apex has not been looked at.
+The Negative Sphere's apex is a cone, not a ledge: its tip narrows below a bead's width at 13.6 and the slicer lays nothing there. It is the next piece of
+work, and is still held only to the 2.2 mm floor.
