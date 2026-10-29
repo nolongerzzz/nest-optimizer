@@ -108,9 +108,10 @@ const MINLOOP = 2.4, MINLINE = 0.9;
 {
   const g = raster(30, 1.0, (x, y) => x >= 0 && x <= 30 && y >= 0 && y <= 1.0);
   const p = R.plateOfRegion(g.M, g.nx, g.ny, g.ox, g.oy, CELL, PITCH, WIDTH, 45, MINLOOP, MINLINE);
-  check('a strip 1 mm wide is too thin for a hatch: loops alone', p.lines.length === 0 && p.loops.length >= 1, p.loops.length + ' loops, ' + p.lines.length + ' lines');
-  const ex = p.loops.length ? RL.extrudeFlat(p.loops.map((l) => l.ring), { width: WIDTH, height: 0.2, baseZ: 0 }) : { ok: false, reason: 'no loops' };
-  check('...and the extrusion takes them', ex.ok, ex.ok ? '' : ex.reason);
+  check('a strip 1 mm wide is too thin for a hatch: its loops, and rungs across the gap between them', p.loops.length >= 1 && p.lines.length >= 10, p.loops.length + ' loops, ' + p.lines.length + ' lines');
+  const ex = p.loops.length ? RL.extrudeFlat(p.loops.map((l) => l.ring).concat(p.lines), { width: WIDTH, height: 0.2, baseZ: 0 }) : { ok: false, reason: 'no loops' };
+  check('...and the extrusion takes them (each rung meets a loop at a node at both ends)', ex.ok, ex.ok ? '' : ex.reason);
+  check('...every rung runs across the strip (within 35 degrees of square to it)', p.lines.every((l) => Math.abs(l[1][1] - l[0][1]) / Math.hypot(l[1][0] - l[0][0], l[1][1] - l[0][1]) >= 0.57));
 }
 {
   /* a patch 2.0 mm across and 6 long (the Negative Sphere2's flat under the bowl's rim): no room for an outline and a hatch inside it, so lines across it, edge to edge, turned
@@ -174,6 +175,16 @@ console.log('\n=== 6. the thin parts: a bead along a sliver the outline cannot o
   const p135 = R.plateOfRegion(Ms, g.nx, g.ny, g.ox + 118, g.oy + 58, CELL, 0.49, 0.42, 135, MINLOOP, 0.9);
   const total = (p) => p.loops.reduce((a, l) => a + l.lenMm, 0) + p.lines.reduce((a, l) => a + Math.hypot(l[1][0] - l[0][0], l[1][1] - l[0][1]), 0) + p.thin.reduce((a, pt) => { let q = 0; for (let k = 1; k < pt.length; k++) q += Math.hypot(pt[k][0] - pt[k - 1][0], pt[k][1] - pt[k - 1][1]); return a + q; }, 0);
   check('a ring of narrow bands and wide corners: outline loops and hatch lines on both layers', p45.loops.length >= 1 && p135.loops.length >= 1 && p45.lines.length >= 3 && p135.lines.length >= 3, p45.loops.length + '/' + p135.loops.length + ' loops, ' + p45.lines.length + '/' + p135.lines.length + ' lines');
+  /* the share of the face the beads hold (a bead a line wide about each path) - Bambu's plate round this cavity holds 80 % (79 - 94) */
+  const held = (p) => {
+    const segs = []; p.loops.forEach((l) => { for (let k = 0; k + 1 < l.ring.length; k++) segs.push([l.ring[k], l.ring[k + 1]]); }); p.lines.forEach((l) => segs.push(l)); p.thin.forEach((pt) => { for (let k = 0; k + 1 < pt.length; k++) segs.push([pt[k], pt[k + 1]]); });
+    const dseg = (x, y, a, b) => { const dx = b[0] - a[0], dy = b[1] - a[1], L2 = dx * dx + dy * dy, t = L2 > 0 ? Math.max(0, Math.min(1, ((x - a[0]) * dx + (y - a[1]) * dy) / L2)) : 0; return Math.hypot(x - a[0] - t * dx, y - a[1] - t * dy); };
+    let tot = 0, hit = 0;
+    for (let j = 0; j < g.ny; j++) for (let i = 0; i < g.nx; i++) if (Ms[j * g.nx + i]) { tot++; const x = g.ox + 118 + i * CELL, y = g.oy + 58 + j * CELL; if (segs.some((s2) => dseg(x, y, s2[0], s2[1]) <= 0.21)) hit++; }
+    return hit / tot;
+  };
+  check('...each holding 70 % of the face or more (the hatch inside the loops held 56 and 61 %; Bambu\'s 80)', held(p45) >= 0.7 && held(p135) >= 0.7, (held(p45) * 100).toFixed(0) + ' / ' + (held(p135) * 100).toFixed(0) + ' %');
+  check('...the rungs lie across the bands, on the loops\' own vertices (the extrusion takes the layer)', RL.extrudeFlat(p45.loops.map((l) => l.ring).concat(p45.lines, p45.thin), { width: 0.42, height: 0.2, baseZ: 0 }).ok && RL.extrudeFlat(p135.loops.map((l) => l.ring).concat(p135.lines, p135.thin), { width: 0.42, height: 0.2, baseZ: 0.2 }).ok);
   check('...and both layers lay about the same length (within 20 %)', Math.abs(total(p45) - total(p135)) <= 0.2 * Math.max(total(p45), total(p135)), total(p45).toFixed(1) + ' / ' + total(p135).toFixed(1) + ' mm');
 }
 
