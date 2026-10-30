@@ -230,11 +230,12 @@
       var d2 = edt2(P, g.nx, g.ny), j2 = Math.pow(joinMm / cell, 2), lab = new Int32Array(N), out = [], stack = [];
       for (var s0 = 0; s0 < N; s0++) {
         if (!P[s0] || lab[s0]) continue;
-        var id = out.length + 1, cells = [];
+        var id = out.length + 1, cells = [], fill = [];
         lab[s0] = id; stack.push(s0);
         // flood over every cell within joinMm of the mask, so lines of one plate fall into one region
         while (stack.length) {
           var c = stack.pop(), ci = c % g.nx, cj = (c - ci) / g.nx;
+          fill.push(c);
           if (P[c]) cells.push(c);
           for (var k = 0; k < 4; k++) {
             var ni = ci + (k === 0 ? 1 : k === 1 ? -1 : 0), nj = cj + (k === 2 ? 1 : k === 3 ? -1 : 0);
@@ -244,7 +245,7 @@
             lab[n] = id; stack.push(n);
           }
         }
-        out.push({ cells: cells });
+        out.push({ cells: cells, fill: fill });
       }
       return out;
     }
@@ -285,6 +286,42 @@
                          overshootMm2: r2(over * cell2), overshootMaxMm: r2(Math.sqrt(maxD2) * cell) });
     }
 
+    /**
+     * WHERE one side has support-family material the other does not: per layer row and class, the cells only A's (or only B's), joined across 1 mm
+     * into pieces of at least 1 mm2, and stacked layer on layer into regions (a piece that overlaps the one under it in the same class and side is
+     * the same region). Coordinates are in A's own file frame (opts.offsetA is how far A was moved to stand here).
+     */
+    var offA = opts.offsetA || [0, 0], gapKeys = {}, gapAll = [], MIN_GAP_CELLS = Math.round(1.0 / cell2);
+    function trackGaps(cls, side, mask, z) {
+      var key = cls + side, st = gapKeys[key] || (gapKeys[key] = { map: null, z: null });
+      var comps = mask ? regionsOf(mask, 1.0).filter(function (R) { return R.cells.length >= MIN_GAP_CELLS; }) : [];
+      if (!comps.length) return;                                                   // a layer with none of it: the region may pick up again within 0.6 mm
+      var next = new Int32Array(N);
+      comps.forEach(function (R) {
+        var id = 0;
+        if (st.map && st.z != null && z - st.z <= 0.6 + 1e-9) {
+          var votes = {}, best = 0;
+          for (var q = 0; q < R.cells.length; q++) { var v = st.map[R.cells[q]]; if (v) { votes[v] = (votes[v] || 0) + 1; if (votes[v] > (votes[best] || 0)) best = v; } }
+          id = best;
+        }
+        var G = id ? gapAll[id - 1] : null;
+        if (!G) {
+          G = { cls: cls, side: side === 'A' ? 'onlyA' : 'onlyB', zFrom: z, zTo: z, layers: 0, areaMm2: 0, peakMm2: 0, sx: 0, sy: 0, x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+          gapAll.push(G); id = gapAll.length;
+        }
+        var a = R.cells.length * cell2;
+        G.layers++; G.areaMm2 += a; if (a > G.peakMm2) G.peakMm2 = a;
+        if (z < G.zFrom) G.zFrom = z; if (z > G.zTo) G.zTo = z;
+        R.cells.forEach(function (c) {
+          var i = c % g.nx, j = (c - i) / g.nx, x = g.ox + (i + 0.5) * cell, y = g.oy + (j + 0.5) * cell;
+          G.sx += x; G.sy += y; G.n = (G.n || 0) + 1;
+          if (x < G.x0) G.x0 = x; if (x > G.x1) G.x1 = x; if (y < G.y0) G.y0 = y; if (y > G.y1) G.y1 = y;
+        });
+        R.fill.forEach(function (c) { next[c] = id; });
+      });
+      st.map = next; st.z = z;
+    }
+
     rows.forEach(function (r) {
       var A = r.a != null ? LA[r.a] : null, B = r.b != null ? LB[r.b] : null;
       var z = A ? A.z : B.z;
@@ -300,7 +337,15 @@
         var e = { a: r2(na * cell2), b: r2(nb * cell2), both: r2(both * cell2), onlyA: r2((na - both) * cell2), onlyB: r2((nb - both) * cell2) };
         row.cls[c] = e;
         sums[c].onlyAMm2 += (na - both) * cell2; sums[c].onlyBMm2 += (nb - both) * cell2; sums[c].bothMm2 += both * cell2;
-        if (SUPPORT_CLASSES.indexOf(c) >= 0) sup += e.onlyA + e.onlyB;
+        if (SUPPORT_CLASSES.indexOf(c) >= 0) {
+          sup += e.onlyA + e.onlyB;
+          [['A', a, b, e.onlyA, A], ['B', b, a, e.onlyB, B]].forEach(function (t) {
+            if (t[3] < 1.0 && !gapKeys[c + t[0]]) return;
+            var only = null;
+            if (t[3] >= 1.0 && t[1]) { only = new Uint8Array(N); for (var k = 0; k < N; k++) only[k] = t[1][k] && !(t[2] && t[2][k]) ? 1 : 0; }
+            trackGaps(c, t[0], only, t[4] ? t[4].z : z);
+          });
+        }
       });
       row.supportDiffMm2 = r2(sup);
       layers.push(row);
@@ -324,8 +369,18 @@
     var worst = layers.filter(function (l) { return l.supportDiffMm2 > 0; })
       .sort(function (p, q) { return q.supportDiffMm2 - p.supportDiffMm2; }).slice(0, 8)
       .map(function (l) { return { z: l.z, supportDiffMm2: l.supportDiffMm2, cls: l.cls }; });
-    return { meta: { cellMm: cell, zTolMm: zTol, nearMm: nearMm, reachMm: reachMm, edgeMm: edgeMm, moves: [movesA.length, movesB.length], layers: layers.length },
-             classes: classes, layers: layers, plate: plate, worst: worst };
+    var shape = function (G) {
+      return { cls: G.cls, zFrom: r2(G.zFrom), zTo: r2(G.zTo), layers: G.layers, areaMm2: r2(G.areaMm2), peakMm2: r2(G.peakMm2),
+               x: r2(G.sx / G.n - offA[0]), y: r2(G.sy / G.n - offA[1]),
+               bbox: [r2(G.x0 - offA[0]), r2(G.y0 - offA[1]), r2(G.x1 - offA[0]), r2(G.y1 - offA[1])], sizeMm: [r2(G.x1 - G.x0), r2(G.y1 - G.y0)] };
+    };
+    var byArea = function (p, q) { return q.areaMm2 - p.areaMm2; };
+    var gaps = {
+      aLacks: gapAll.filter(function (G) { return G.side === 'onlyB'; }).map(shape).sort(byArea).slice(0, 12),   // the reference has it, ours does not
+      bLacks: gapAll.filter(function (G) { return G.side === 'onlyA'; }).map(shape).sort(byArea).slice(0, 6)    // ours has it, the reference does not
+    };
+    return { meta: { cellMm: cell, frame: 'gap coordinates are in A\'s own file frame (A\'s offset on the compare plate taken off)', offsetAMm: offA, zTolMm: zTol, nearMm: nearMm, reachMm: reachMm, edgeMm: edgeMm, moves: [movesA.length, movesB.length], layers: layers.length },
+             classes: classes, layers: layers, plate: plate, worst: worst, gaps: gaps };
   }
 
   var LABEL = { part: 'part', support: 'support (tree)', interface: 'interface', transition: 'transition' };
@@ -352,6 +407,15 @@
                  '  past its outline ' + q.overshootMm2.toFixed(2) + ' mm2 (max ' + q.overshootMaxMm.toFixed(2) + ' mm)');
       });
     });
+    var G = rep.gaps;
+    if (G && (G.aLacks.length || G.bLacks.length)) {
+      var line = function (q) {
+        return '  ' + pad(q.cls, 11) + 'z ' + q.zFrom.toFixed(2) + (q.zTo > q.zFrom ? ' - ' + q.zTo.toFixed(2) : '') + '  (' + q.layers + ' layer' + (q.layers === 1 ? '' : 's') + ')  at X ' + q.x.toFixed(1) + ' Y ' + q.y.toFixed(1) +
+               '  box ' + q.sizeMm[0].toFixed(1) + ' x ' + q.sizeMm[1].toFixed(1) + '  ' + q.areaMm2.toFixed(1) + ' mm2 in all (peak ' + q.peakMm2.toFixed(1) + '/layer)';
+      };
+      if (G.aLacks.length) { out.push(''); out.push('WHERE OURS HAS NOTHING AND THE REFERENCE DOES (largest first; X Y in A\'s file coordinates):'); G.aLacks.forEach(function (q) { out.push(line(q)); }); }
+      if (G.bLacks.length) { out.push(''); out.push('where ours has material the reference does not:'); G.bLacks.forEach(function (q) { out.push(line(q)); }); }
+    }
     if (rep.worst.length) {
       out.push('');
       out.push('layers that differ most (support, interface and transition together): ' + rep.worst.map(function (w) { return w.z.toFixed(2) + ' (' + w.supportDiffMm2.toFixed(1) + ')'; }).join(', '));

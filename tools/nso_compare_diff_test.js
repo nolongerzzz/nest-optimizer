@@ -71,6 +71,13 @@ const V2 = [...hl(sq('Support transition', 0.28, 0, 0, 3), 0.28), ...hl(sq('Supp
 const R6 = D.compute(V1, V2);
 check('layers at other heights pair by the height they cover: 2 rows, not 4', R6.layers.length === 2 && R6.layers.every(l => l.zA != null && l.zB != null), JSON.stringify(R6.layers.map(l => [l.zA, l.zB])));
 check('...so identical lines show (almost) no difference', R6.classes.transition.onlyAMm2 < 1 && R6.classes.transition.onlyBMm2 < 1, JSON.stringify([R6.classes.transition.onlyAMm2, R6.classes.transition.onlyBMm2]));
+/* WHERE: the tip B has past the plate's edge is a region ours lacks; ours' own file frame takes A's offset off */
+const gt = R.gaps.aLacks.find(q => q.cls === 'support');
+check('gaps: the tip (x 3.4 - 5.0, y -0.8 - 0.8, z 2.0) is a region only the reference has', gt && gt.zFrom === 2 && gt.layers === 1 && gt.areaMm2 > 3 && gt.areaMm2 < 4.5 && gt.x > 3.6 && gt.x < 4.8 && Math.abs(gt.y) < 0.5, JSON.stringify(gt));
+const go = D.compute(A, B, { offsetA: [10, 0] }).gaps.aLacks.find(q => q.cls === 'support');
+check('...and A\'s offset is taken off the coordinates (A stands 10 mm over: x - 10)', go && Math.abs(go.x - (gt.x - 10)) < 0.01 && go.bbox[0] < -5.5, JSON.stringify(go));
+check('a region stacks layer on layer: a column only B has, 5 layers, is one region', (() => { const Bc = [], Ac = []; for (let i = 1; i <= 5; i++) Bc.push(...sq('Support', lay(i), 0, 0, 1)); Ac.push(...sq('Outer wall', lay(1), 0, 0, 5)); const g = D.compute(Ac, Bc).gaps.aLacks; return g.length === 1 && g[0].layers === 5 && g[0].zFrom === 0.2 && g[0].zTo === 1; })());
+check('the text names where: "WHERE OURS HAS NOTHING"', /WHERE OURS HAS NOTHING/.test(D.text(R)) && /at X /.test(D.text(R)));
 check('empty input is answered', D.text(D.compute([], [])) === 'Nothing to compare.');
 console.log(fails ? '\nFAILED (' + fails + ')' : '\nall gates held');
 process.exit(fails ? 1 : 0);

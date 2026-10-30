@@ -5938,6 +5938,7 @@ var NSO_MICROSCOPE = (function () {
     var sp = Object.assign({}, spec, { name: label + spec.name, tint: tint });
     var g = makeGhost(sp), e = soupExtent(sp.positions);
     var landed = setDownOn(g, new THREE.Vector3(cx, e.z0, 0), null);
+    if (landed && !Array.isArray(landed) && spec.moves && spec.moves.length && landed.moves && landed.moves.length) landed.srcAt = [spec.moves[0].x0, spec.moves[0].y0];   // where its first move stood in its own file: the offset of this piece on the compare plate is read off it
     return landed && !Array.isArray(landed) ? landed : null;
   }
 
@@ -6046,7 +6047,8 @@ var NSO_MICROSCOPE = (function () {
     var D = window.NSOCompareDiff;
     if (!D) { say('Measure needs nso-gscope-diff.js', true); return null; }
     if (!compare.a.moves || !compare.b.moves) { say('Measure: a piece has no toolpath moves to measure (it is a mesh).', true); return null; }
-    var rep = D.compute(compare.a.moves, compare.b.moves);
+    var offA = compare.a.srcAt && compare.a.moves.length ? [compare.a.moves[0].x0 - compare.a.srcAt[0], compare.a.moves[0].y0 - compare.a.srcAt[1]] : [0, 0];
+    var rep = D.compute(compare.a.moves, compare.b.moves, { offsetA: offA });
     rep.meta.a = compare.a.name; rep.meta.b = compare.b.name;
     rep.meta.overlaid = compare.overlaid;
     rep.meta.blueOffsetMm = [compare.dx, compare.dy, compare.dz];

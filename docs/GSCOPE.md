@@ -627,7 +627,11 @@ type (part, support tree, interface, transition) the Z range and layer count of 
 A's, only B's, and both; the *first layer of every plate region* (interface / transition lines joined across
 1 mm) with the tree under it, whether there is none (**GAP**), and the tree standing out past the plate's
 outline (**overshoot**, area and furthest reach); and the layers that differ most. **Copy JSON** gives the same
-as data: `compareReport()`. "The layer under" is each side's own last layer that carries support (Bambu's
+as data: `compareReport()`. **Where** (`gaps`): the support-family material only one side has, joined across 1 mm into
+pieces of 1 mm2 or more and stacked layer on layer into regions - each with Z from/to, layers, area, centre X Y and
+bounding box, in *plate 1's own file coordinates* (the piece's offset on the compare plate is read off `srcAt`, its first
+move's place in its file, and taken off): `aLacks` (the reference has it, ours does not - the ones to fix, largest 12)
+and `bLacks` (ours has it, the reference does not). "The layer under" is each side's own last layer that carries support (Bambu's
 support layers sit at their own Z between the part's), and only if within 0.5 mm below.
 
 **How it is built.** `compareStart` reads each plate's selection with `pullSpec` (the drag's own read) and
