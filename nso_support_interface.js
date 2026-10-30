@@ -901,6 +901,7 @@
   var CAP_FOOT = 0.9;          /* the cap's foot across, as a share of the column's side: inside its square however either is turned */
   var CAP_TUCK_MM = 0.1;       /* the column under a cap ends this far (and half its diagonal) inside it: no face of the two shares a plane */
   var CAP_SIDES = 32;          /* the cap's rim, sampled for its clearance */
+  var CAP_TIP_MIN_MM = 0.5;    /* the least a flared cap narrows to where its plate is a ring or a thin neck: it tapers to the plate's width rather than stand out past it */
   var FLARE_OVERLAP = 1.4;     /* a flared cap under a region plate is this much of the way to its nearest neighbour's centre and past it, held to CAP_MAX_MM: their rims meet (flareOf) */
   var CAP_PART_MM = 0.05;      /* a cap stops this far short of its neighbour's: caps never overlap (see THE CAPS) */
   var CAP_BAND_MM = 0.02;      /* a cap's top band: upright, this tall, so its top edge is a wall, not the flank's (see THE CAPS) */
@@ -1808,6 +1809,7 @@
         });
         if (!carry.length)return;
         var layersOut = [], soups = [], soupsLoops = [], failed = null, totalLen = 0;
+        var maskLayers = [];                    /* each laid layer's traced mask (the cells it covers), to find the lowest layer a tip stands under */
         for (var n = mmin - NL + 1; n <= mmax && !failed; n++, beat()) {
           told(Math.floor(carry.length * (0.5 + 0.45 * (n - (mmin - NL + 1)) / Math.max(1, mmax - (mmin - NL + 1) + 1))));
           var Mk = new Uint8Array(N), any = false;
@@ -1864,6 +1866,7 @@
           layersOut.push({ role: n - (mmin - NL + 1) < 2 ? 'transition' : 'interface', angleDeg: n % 2 ? 135 : 45, z0: zb, z1: zb + o.layer, pieces: [piece], loopMm: piece.sizeMm.slice(), lines: piece.lines, linesMm: len, lengthMm: len,
                           shortestMm: 0, paths: paths, soup: ex2.tris });
           soups.push(ex2.tris); soupsLoops.push(exLoops && exLoops.ok ? exLoops.tris : ex2.tris);
+          maskLayers.push({ zb: zb, M: Mk, i0: cI0, j0: cJ0, w: cnx, h: cny, x0: ox + cI0 * CELLS, y0: oy + cJ0 * CELLS, cell: CELLS });
         }
         if (failed || !layersOut.length) return;
         /* the plate against the part: no nearer than the gap (a stem beside it, a wall) */
@@ -1881,10 +1884,25 @@
           var mm = t.shellM;
           t.shell = true; t.mode = 'sheet'; t.level = L.id; t.why = null; t.carried = true; t.cap = null; t.capWhy = 'no cap: the region plate lies on the tip itself';
           t.shellB = A + (mm - NL + 1) * o.layer; t.zTop = A + (mm + 1) * o.layer; t.zBase = t.shellB;
+          /* the plate's lowest layer THAT COVERS the tip: the stack the tip's cell calls the lowest may be a speck the traced mask drops (a bead a cell wide), and the
+             plate there begins a layer higher - the tip then ends a layer short of it, a gap in the column under the sheet */
+          (function () {
+            var ic = Math.round((t.contact[0] - ox) / CELLS), jc = Math.round((t.contact[1] - oy) / CELLS);
+            for (var li = 0; li < maskLayers.length; li++) {
+              var ml = maskLayers[li], hit = false;
+              if (ml.zb < t.shellB - 1e-6) continue;
+              for (var dj3 = -2; dj3 <= 2 && !hit; dj3++) for (var di3 = -2; di3 <= 2 && !hit; di3++) {
+                var ci3 = ic + di3 - ml.i0, cj3 = jc + dj3 - ml.j0;
+                if (ci3 >= 0 && ci3 < ml.w && cj3 >= 0 && cj3 < ml.h && ml.M[cj3 * ml.w + ci3]) hit = true;
+              }
+              if (hit) { if (ml.zb > t.shellB + 1e-6) { t.shellB = ml.zb; t.zBase = ml.zb; } plateUnder[t.i] = ml; break; }
+            }
+          })();
           t.top = bareShellTop(t, t.shellB);
         });
       });
     }
+    var plateUnder = {};                      /* tip index -> the plate layer (its traced mask) the tip stands under: how far the plate reaches round the tip (flareOf) */
     function bareShellTop(t, z) { var cp = cutPath(columns[t.col].pts, z, o.side, o.side); return [cp[0][0], cp[0][1]]; }
     shellPass();
 
@@ -3913,6 +3931,17 @@
         nn = Math.min(nn, Math.hypot(ut[0] - top[0], ut[1] - top[1]));
       });
       var w = Math.min(o.capMax, Math.max(o.side + 0.2, nn * FLARE_OVERLAP));      /* neighbours' caps may run into each other: one platform, as Bambu's bowls do */
+      /* never past the plate's perimeter: the cap's top disc stays inside the layer it meets (a tip stands >= 1 mm in from the surface's edge, a 4 mm cap would not) */
+      var ml = plateUnder[t.i];
+      if (ml) {
+        var ic = (top[0] - ml.x0) / ml.cell, jc = (top[1] - ml.y0) / ml.cell, Rc = Math.ceil(o.capMax / ml.cell / 2) + 2, dEdge = Rc * ml.cell;
+        for (var dj = -Rc; dj <= Rc; dj++) for (var di = -Rc; di <= Rc; di++) {
+          var qi = Math.round(ic) + di, qj = Math.round(jc) + dj;
+          if (qi >= 0 && qi < ml.w && qj >= 0 && qj < ml.h && ml.M[qj * ml.w + qi]) continue;
+          dEdge = Math.min(dEdge, Math.max(0, Math.hypot(qi - ic, qj - jc) * ml.cell - ml.cell / 2));
+        }
+        w = Math.min(w, Math.max(CAP_TIP_MIN_MM, 2 * (dEdge - 0.05)));
+      }
       return { c: top, b: foot, w: w, z0: zCap - o.capRise, z1: zCap, footD: CAP_FOOT * o.side, band: CAP_BAND_MM, nnMm: nn, why: null, slidMm: 0, flare: true };
     }
     tips.forEach(function (t) {
