@@ -28,7 +28,7 @@ top (1.375 mm at the low end, 1.0 above the anchor), and the slicer's own typing
 higher up, above an anchor, stays on the part's 0.2.
 
 Baseline (the build of 2026-10-30, Dense, 30 deg, own grid on): the plate starts where Bambu's does on all six (z0 matches); foot IoU 0.89 on the Base,
-0.67 / 0.63 on the Negative Spheres, 0.57 Circular and Sphere, 0.55 Oblique (its stair is not on the grid yet). The Circular's plate stops a layer short of
+0.67 / 0.63 on the Negative Spheres, 0.57 Circular, Sphere and Oblique (the Dense Oblique's planar slope is laid by the region plate, `regionSlopes`, as Bambu's one ribbon, not the stair's rungs; its first plate layer is still 0.2 low, 7.48 / 7.69). The Circular's plate stops a layer short of
 Bambu's ring round the cone flank (the card's footprint ends there); the Oblique's moves are 4 x shorter than Bambu's (its walls are cut into 2-point pieces,
 Overhang wall / Outer wall by turns, where a stair's slotted section is traced) and its plate is a ladder of rungs where Bambu's is one ribbon; the tree
 matches least (IoU 0.10 - 0.18).

@@ -214,7 +214,7 @@ var NSO_SUPPORTS_CARD = (function () {
     /* Dense belongs to the one-trunk build: its sheet is planned over the thinned tips the reference's is. A hand-placed row of three
        tips (Custom) did not form a sheet at 0.47 mm that it forms at 0.84 (support:custom), so the other builds stay Open. */
     var SI = window.NSO_SupportInterface, dense = !!o && o.dense !== false && oneTrunkOn(o);
-    var out = dense && SI && SI.SHEET && SI.SHEET.densePitchMm ? Object.assign({}, PARTS_OPTS, { sheetPitchMm: SI.SHEET.densePitchMm, interfaceLayers: SI.SHEET.denseInterfaceLayers, sheetLayerMm: SI.SHEET.denseSheetLayerMm, sheetFlatGapMm: SI.SHEET.denseFlatGapMaxMm, sheetStairLegMm: SI.SHEET.denseStairLegMm }) : Object.assign({}, PARTS_OPTS);
+    var out = dense && SI && SI.SHEET && SI.SHEET.densePitchMm ? Object.assign({}, PARTS_OPTS, { sheetPitchMm: SI.SHEET.densePitchMm, interfaceLayers: SI.SHEET.denseInterfaceLayers, sheetLayerMm: SI.SHEET.denseSheetLayerMm, sheetRegionSlopes: true, sheetFlatGapMm: SI.SHEET.denseFlatGapMaxMm, sheetStairLegMm: SI.SHEET.denseStairLegMm }) : Object.assign({}, PARTS_OPTS);
     /* THE PLATFORM is the tree's own (the owner's: raft is a support type of its own; the platform under a flat face - the interface and the transition
        laid from each footprint and its height, layer by layer - is the original branch / transition / interface, and was only tied to the Raft box).
        Auto (the one-trunk tree) always lays it. The box now gates only the builds that are not Auto: off, their sheet is built from the tips alone, as it

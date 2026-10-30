@@ -1695,7 +1695,7 @@
             var ga = (sxz * syy - syz * sxy) / det, gb = (syz * sxx - sxz * sxy) / det;
             pts.forEach(function (p) { resid = Math.max(resid, Math.abs(p[2] - mz - ga * (p[0] - mx) - gb * (p[1] - my))); });
             var slopeDeg = Math.atan(Math.hypot(ga, gb)) * 180 / Math.PI;
-            if (resid <= Math.max(REGION_PLANE_MM, REGION_PLANE_SHARE * range) && slopeDeg >= STAIR_MIN_DEG && slopeDeg <= STAIR_MAX_DEG) return;
+            if (resid <= Math.max(REGION_PLANE_MM, REGION_PLANE_SHARE * range) && slopeDeg >= STAIR_MIN_DEG && slopeDeg <= STAIR_MAX_DEG && !(opts.regionSlopes === true && o.sheetLayer !== o.layer)) return;     /* Dense: a planar slope is the region plate's too (Bambu's ribbon), not the stair's rungs */
           }
         }
         /* fill the lattice's cells; a flat face takes its lowest height */
