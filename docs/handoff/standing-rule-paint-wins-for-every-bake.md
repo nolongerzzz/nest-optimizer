@@ -72,6 +72,7 @@ Current roster, by category:
 | Foam in a box (`nso_foam.js` `foamBox`; its ADD card is the next ticket) | sub-region | the faces the foam welds to, against `piece.skipList` (`nsoMaskFaceList(m)`, required); a piece whose shells must be merged first stands down for any paint, since the merge replaces every triangle | header comment + `docs/FOAM.md` §10 |
 | Punch (`app-punch.js`, Subtract -> Punch; the geometry is `nso_punch.js`) | whole-piece | `nsoMaskCount(m) > 0` | header comment + `docs/PUNCH.md` |
 | Pull (`app-pull.js`, Shape -> Pull; the geometry is `nso_pull.js` + `nso_densify.js`) | sub-region | the moved vertices (where they were and where they went) against `nsoMaskPlaneList(m)`, `NSO_brushPaintCheck`; operand none | header comment + `docs/PULL.md` |
+| Limb (`app-limb.js`, Shape -> Limb; the geometry is `nso_limb.js` + `nso_densify.js`) | sub-region | the limb's moved vertices (where they were and where they went) against `nsoMaskPlaneList(m)`, `NSO_brushPaintCheck`; operand none | header comment + `docs/LIMB.md` |
 
 ### The SELECT list is an operand; the EXCLUDE list is still only a veto
 

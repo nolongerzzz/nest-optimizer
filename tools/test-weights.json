@@ -200,6 +200,8 @@
     "lift:drive": {"weight":159600,"note":""},
     "lift:plate": {"weight":281250,"note":""},
     "lift:test": {"weight":5550,"note":""},
+    "limb:drive": {"weight":75000,"note":"44 s locally x 1.7, rounded up: the real page, the sample tree, real pointer events, five screenshots; limb-main"},
+    "limb:test": {"weight":7000,"note":"3.7 s locally x 1.7, rounded up: the headless geometry on the sample tree, four STLs through mesh_validate.py --gate; limb-main"},
     "live:gate": {"weight":464,"note":""},
     "lock:multi": {"weight":59100,"note":""},
     "lock:test": {"weight":92650,"note":""},

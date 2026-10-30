@@ -610,6 +610,11 @@ if (typeof document !== 'undefined') (function () {
       var clockBtn = el('btn-center-lock-pick');
       if (clockBtn) clockBtn.click(); else state.centerLockArmed = false;
     }
+    if (typeof window.nsoLimbArmed === 'function' && window.nsoLimbArmed()) {
+      var limbBtn = el('btn-limb');
+      if (limbBtn) limbBtn.click();
+      else if (typeof window.nsoLimbSetArmed === 'function') window.nsoLimbSetArmed(false);
+    }
     if (window.nsoFoam && window.nsoFoam.on && window.nsoFoam.on()) window.nsoFoam.cancel();
     // The other Shape panels are sessions of their own; one is open at a time.
     ['btn-bend', 'btn-tube-edge'].forEach(function (id) {

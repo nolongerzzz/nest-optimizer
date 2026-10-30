@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=338e6163" />
+  <link rel="stylesheet" href="styles.css?v=552b6265" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -1341,6 +1341,47 @@
                         title="Put a drag in progress back and leave Pull; the piece is unchanged. Escape does the same mid-drag.">Cancel</button>
               </div>
             </div>
+            <!-- LIMB (app-limb.js, the geometry is nso_limb.js + nso_densify.js): grab a branch anywhere, stretch it or bend it. -->
+            <div class="vp-row vp-row-full">
+              <button id="btn-limb" class="btn btn-secondary btn-limb" type="button" aria-pressed="false" aria-expanded="false" aria-controls="limb-panel"
+                      title="For a tree, a coral, a wire: press on a branch and drag. The ring under the press follows the cursor, the branch from there out rides along whole, and the stretch of it down to the fork below flexes - lengthening and bending, with its girth kept. No straight axis needed (Extend wants X, Y or Z), and nothing but that one branch moves (Pull's falloff is a ball in space). Shift = extend only, Alt = bend only. Release to set (one Undo); Esc cancels. Refuses and puts the piece back if the move would fold the surface or pass it through itself.">Limb</button>
+            </div>
+            <div class="vp-bend-panel pull-panel limb-panel" id="limb-panel" hidden>
+              <div class="limb-modes" role="group" aria-label="What a drag does">
+                <button id="btn-limb-mode-free" class="btn btn-secondary is-on" type="button" aria-pressed="true"
+                        title="The ring under the press lands on the cursor: the limb leans and lengthens to reach it.">Stretch + bend</button>
+                <button id="btn-limb-mode-extend" class="btn btn-secondary" type="button" aria-pressed="false"
+                        title="Only the part of the drag along the limb counts: it gets longer or shorter, never bent. Holding Shift does the same for one drag.">Extend</button>
+                <button id="btn-limb-mode-bend" class="btn btn-secondary" type="button" aria-pressed="false"
+                        title="The limb swings towards the cursor with its length held. Holding Alt does the same for one drag.">Bend</button>
+              </div>
+              <div class="vp-row vp-row-brush">
+                <span class="vp-brush-tag">Reach</span>
+                <input type="range" id="inp-limb-reach" min="0" max="60" step="1" value="0" aria-label="Limb flex reach, mm"
+                       title="How much of the limb, counting back from the grab, flexes. 0 (the default) is all the way down to the fork. A number makes the bend tighter, nearer the grab. More than the fork allows is cut to the fork.">
+                <output id="out-limb-reach" class="vp-brush-out">to the fork</output>
+              </div>
+              <label class="vp-bend-field" title="Millimetres to add to the picked limb (negative shortens it). Click a limb to pick it, then Apply.">Extend
+                <input type="number" id="inp-limb-ext" value="5" step="0.5" aria-label="Extend the picked limb by, mm"><span>mm</span></label>
+              <label class="vp-bend-field" title="Degrees to turn the picked limb's tip end (0 to 110; a short or fat limb is held to what it can do and the status line says so).">Bend
+                <input type="number" id="inp-limb-bend" value="20" min="0" max="110" step="5" aria-label="Bend the picked limb by, degrees"><span>°</span></label>
+              <label class="vp-bend-field" title="Which way the Bend number leans the limb, as the camera sees it now.">Lean
+                <select id="sel-limb-lean" class="vp-select" aria-label="Which way the Bend number leans the limb, as the camera sees it">
+                  <option value="right">to the right</option>
+                  <option value="left">to the left</option>
+                  <option value="up">up</option>
+                  <option value="down">down</option>
+                  <option value="away">away from me</option>
+                  <option value="near">towards me</option>
+                </select></label>
+              <p id="limb-readout" class="bend-readout">Press and drag a branch: the ring under the press follows the cursor and everything beyond it rides along.</p>
+              <div class="vp-row vp-row-pair">
+                <button id="btn-limb-apply" class="btn btn-secondary" type="button" disabled
+                        title="Click a limb to pick it, then apply the Extend and Bend numbers to it. One Undo puts it back.">Apply</button>
+                <button id="btn-limb-cancel" class="btn btn-secondary" type="button"
+                        title="Put a drag in progress back; or clear the picked limb; or leave Limb. The piece is unchanged. Escape does the same mid-drag.">Cancel</button>
+              </div>
+            </div>
             </div>
           </details>
           <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-paint" data-sec="paint">
@@ -2071,7 +2112,7 @@
   <script src="nso-helpers.js?v=9c476e39"></script>
   <script src="nso-recent.js?v=f03d6f13"></script>
   <script src="nso-bounds.js?v=778acac4"></script>
-  <script src="app-core.js?v=d4f02383"></script>
+  <script src="app-core.js?v=121cd1ff"></script>
   <!-- Up to six plates (beds): the active one is state.models / state.placed, the rest are kept beside it. docs/BEDS.md. -->
   <script src="app-beds.js?v=3d221bc4"></script>
 
@@ -2133,21 +2174,24 @@
        nso_section.js and app-fatten.js's face filter at apply time. -->
   <script src="nso_ring.js?v=dc696549"></script>
   <script src="app-scale.js?v=9ed19fba"></script>
-  <script src="app-brush.js?v=654c784d"></script>
+  <script src="app-brush.js?v=6d319870"></script>
   <!-- Pull: nso_densify.js is the shared subdivision (the gun will use it too), nso_pull.js the field and its guards, app-pull.js the pointer session. docs/PULL.md -->
   <script src="nso_densify.js?v=0b7748d1"></script>
   <script src="nso_pull.js?v=6e876b23"></script>
-  <script src="app-pull.js?v=a0b1e1e3"></script>
+  <script src="app-pull.js?v=34905d94"></script>
+  <!-- Limb: nso_limb.js is the tree, the limb and the move (headless, tools/nso_limb_test.js); app-limb.js the pointer session. docs/LIMB.md -->
+  <script src="nso_limb.js?v=4f060b8f"></script>
+  <script src="app-limb.js?v=82dda061"></script>
   <script src="app-wheel.js?v=35fda70f"></script>
   <script src="app-fit.js?v=94ef7252"></script>
   <script src="app-stock.js?v=91def76f"></script>
   <script src="app-assemble.js?v=60984bfb"></script>
   <script src="app-sel-outline.js?v=42298564"></script>
   <script src="app-join.js?v=e3b5d8d5"></script>
-  <script src="app-center-lock.js?v=e233ea0f"></script>
+  <script src="app-center-lock.js?v=ee95c074"></script>
   <script src="app-oversize-washer.js?v=a445c3ff"></script>
   <script src="app-join-triple.js?v=95a9c48a"></script>
-  <script src="app-carve.js?v=15175db9"></script>
+  <script src="app-carve.js?v=c8e8fd9f"></script>
   <!-- Punch: round holes through a face, alone, in a grid or on a circle. The
        geometry (nso_punch.js) before its card (app-punch.js). docs/PUNCH.md. -->
   <script src="nso_punch.js?v=867ffba8"></script>
@@ -2162,7 +2206,7 @@
   <script src="app-raster.js?v=2f85efde"></script>
   <script src="app-relief.js?v=4f55f71d"></script>
   <script src="app-mold.js?v=c7052190"></script>
-  <script src="app-mask.js?v=9567fe41"></script>
+  <script src="app-mask.js?v=70da24fa"></script>
   <script src="app-seat-grid.js?v=7e42f602"></script>
   <script src="app-paint-delete.js?v=e9d1ec70"></script>
   <script src="app-extract-sel.js?v=0590eee5"></script>
@@ -2172,7 +2216,7 @@
   <!-- The arbiter first: the three menu tools below register with it as
        they bind, and it is what makes "one menu owns the input" true
        rather than three modules each hoping the other two are shut. -->
-  <script src="app-input-mode.js?v=91663564"></script>
+  <script src="app-input-mode.js?v=825df701"></script>
   <script src="app-tip-orient.js?v=fb26beaf"></script>
   <script src="app-rotate-handles.js?v=706f92c1"></script>
   <script src="app-move-vertical.js?v=da07bfef"></script>
@@ -2181,7 +2225,7 @@
   <!-- After app-defects.js, whose hooks and scan it uses. -->
   <script src="app-findings.js?v=a9a7a028"></script>
   <script src="app-patch.js?v=c837fc2d"></script>
-  <script src="app-measure.js?v=d6f110a3"></script>
+  <script src="app-measure.js?v=61a966dc"></script>
   <!-- The library write features. access first: it holds the gate, the
        target repository and the token key that the other two read. -->
   <script src="app-library-access.js?v=4724f9d4"></script>
@@ -2236,7 +2280,7 @@
   <script src="nso_lift.js?v=34f68869"></script>
   <script src="nso_lift_curved.js?v=692d105e"></script>
   <script src="nso_lift_auto.js?v=14d63622"></script>
-  <script src="app-lift-plate.js?v=e47d1f4e"></script>
+  <script src="app-lift-plate.js?v=092e1250"></script>
   <script src="nso_shells.js?v=9058ef83"></script>
   <script src="nso_split_parts.js?v=bbef4f98"></script>
   <script src="app-split-parts.js?v=90e688e6"></script>

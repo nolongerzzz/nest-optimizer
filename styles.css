@@ -2490,6 +2490,19 @@ select:focus, input:focus {
 .pull-panel .vp-row-brush { margin-bottom: 2px; }
 .pull-panel .vp-row-brush input[type="range"] { accent-color: #38bdf8; }
 
+/* Limb (app-limb.js): its own hue again - armed Pull is sky blue, the Brush
+   amber. Its panel is Pull's. */
+.btn-limb.is-armed {
+  background: #34d399;
+  color: #052e1c;
+  border-color: #34d399;
+  font-weight: 600;
+}
+.limb-panel .vp-row-brush input[type="range"] { accent-color: #34d399; }
+.limb-panel .limb-modes { display: flex; gap: 4px; margin: 2px 0 4px; }
+.limb-panel .limb-modes .btn { flex: 1 1 0; padding: 4px 2px; font-size: 12px; }
+.limb-panel .limb-modes .btn.is-on { background: #34d399; color: #052e1c; border-color: #34d399; font-weight: 600; }
+
 /* Seat here shares that slider and arms a click, so it needs the same armed
    state the other click-owning tools have. */
 #btn-seat-here { margin-top: 4px; }

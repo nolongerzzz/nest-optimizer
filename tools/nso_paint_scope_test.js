@@ -77,6 +77,8 @@ const ROSTER = [
     test: /NSO_brushPaintCheck/,                            standDown: /Brush stood down - ' \+ [\w.]+ \+ ' painted face\(s\)/ },
   { feature: 'Pull',           file: 'app-pull.js',            scope: 'SUB-REGION',
     test: /NSO_brushPaintCheck/,                            standDown: /Pull stood down - ' \+ [\w.]+ \+ ' painted face\(s\)/ },
+  { feature: 'Limb',           file: 'app-limb.js',            scope: 'SUB-REGION',
+    test: /NSO_brushPaintCheck/,                            standDown: /Limb stood down - ' \+ [\w.]+ \+ ' painted face\(s\)/ },
   { feature: 'Attach',         file: 'app-assemble.js',        scope: 'WHOLE-PIECE',
     test: /nsoMaskCount\s*\(\s*m\s*\)/,                     standDown: /Attach stood down - ' \+ \w+ \+ ' painted face\(s\)/ },
   { feature: 'Detach',         file: 'app-detach.js',          scope: 'WHOLE-PIECE',

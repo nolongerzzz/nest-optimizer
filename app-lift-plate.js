@@ -615,6 +615,10 @@ var NSO_LIFT_PLATE = (function () {
       var pl = $('btn-pull');
       if (pl) pl.click(); else if (typeof window.nsoPullSetArmed === 'function') window.nsoPullSetArmed(false);
     }
+    if (typeof window.nsoLimbArmed === 'function' && window.nsoLimbArmed()) {
+      var lb = $('btn-limb');
+      if (lb) lb.click(); else if (typeof window.nsoLimbSetArmed === 'function') window.nsoLimbSetArmed(false);
+    }
     if (state.measureOn) { var mb = $('btn-measure'); if (mb) mb.click(); else state.measureOn = false; }
     state.softenArmed = false;
     state.capArmed = false;

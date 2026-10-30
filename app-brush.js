@@ -1853,6 +1853,11 @@ if (typeof document !== 'undefined') (function () {
       if (pullBtn) pullBtn.click();
       else if (typeof window.nsoPullSetArmed === 'function') window.nsoPullSetArmed(false);
     }
+    if (typeof window.nsoLimbArmed === 'function' && window.nsoLimbArmed()) {
+      var limbBtn = el('btn-limb');
+      if (limbBtn) limbBtn.click();
+      else if (typeof window.nsoLimbSetArmed === 'function') window.nsoLimbSetArmed(false);
+    }
     if (state.carveArmed) {
       var carveBtn = el('btn-carve');
       if (carveBtn) carveBtn.click();

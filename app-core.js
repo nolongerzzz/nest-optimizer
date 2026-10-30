@@ -298,6 +298,7 @@ const UNDO_REPLACE_LABEL = {
   patchReplace: 'Undo: Patch reverted',
   bridgeReplace: 'Undo: Bridge reverted',
   pullReplace: 'Undo: Pull reverted',
+  limbReplace: 'Undo: Limb reverted',
   mergeShellsReplace: 'Undo: Merge shells reverted'
 };
 
@@ -3718,6 +3719,14 @@ function onCanvasPointerDown(event) {
      model #N" over Pull's own status. Asked beside the brush for the same
      reason - it bakes, so it wins a contested press over Measure. */
   if (typeof window.nsoPullTakesPointer === 'function' && window.nsoPullTakesPointer(event)) {
+    setOrbitFromPlate(false);
+    return;
+  }
+
+  /* Limb (app-limb.js) owns a press on a piece while it is armed, on Pull's
+     terms: the press is a grab or a click on a limb, and a fall-through here
+     would start a move drag under it. */
+  if (typeof window.nsoLimbTakesPointer === 'function' && window.nsoLimbTakesPointer(event)) {
     setOrbitFromPlate(false);
     return;
   }

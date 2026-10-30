@@ -228,6 +228,11 @@
       if (window.nsoPullArmed() && typeof window.nsoPullSetArmed === 'function') window.nsoPullSetArmed(false);
       left.push('pull');
     }
+    if (typeof window.nsoLimbArmed === 'function' && window.nsoLimbArmed()) {
+      press('btn-limb');
+      if (window.nsoLimbArmed() && typeof window.nsoLimbSetArmed === 'function') window.nsoLimbSetArmed(false);
+      left.push('limb');
+    }
     if (window.nsoFoam && window.nsoFoam.on()) {
       window.nsoFoam.cancel();
       left.push('foam');

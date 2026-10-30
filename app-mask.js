@@ -640,6 +640,11 @@
       if (pullBtn) pullBtn.click();
       else if (typeof window.nsoPullSetArmed === 'function') window.nsoPullSetArmed(false);
     }
+    if (typeof window.nsoLimbArmed === 'function' && window.nsoLimbArmed()) {
+      const limbBtn = el('btn-limb');
+      if (limbBtn) limbBtn.click();
+      else if (typeof window.nsoLimbSetArmed === 'function') window.nsoLimbSetArmed(false);
+    }
     if (state.measureOn) {
       const measureBtn = el('btn-measure');
       if (measureBtn) measureBtn.click();
