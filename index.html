@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=a36a418c" />
+  <link rel="stylesheet" href="styles.css?v=7d3b0551" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -1393,9 +1393,13 @@
             <summary class="vp-bar-btn" title="Stamp text into the surface of a piece: type it, pick a font, set the size and the depth, click a face">Text</summary>
             <div class="vp-menu-body vp-finish">
             <div class="vp-bend-panel text-card" id="text-card">
-              <textarea id="inp-text" class="text-input" rows="2" maxlength="200" spellcheck="false" placeholder="Type the text"
+              <div class="punch-seg" id="text-mode-row" role="group" aria-label="Mode">
+                <button id="btn-text-mode-stamp" class="btn btn-secondary" type="button" aria-pressed="true" title="Stamp text into a face">Stamp</button>
+                <button id="btn-text-mode-remove" class="btn btn-secondary" type="button" aria-pressed="false" title="Take engraved text off: click the floor of an engraved letter and the recess is filled back flush with the face. Works on any flat face's recesses, not only the ones stamped this session.">Remove</button>
+              </div>
+              <textarea id="inp-text" class="text-input text-stamp-only" rows="2" maxlength="200" spellcheck="false" placeholder="Type the text"
                         aria-label="Text to stamp" title="What to stamp. Enter starts a new line."></textarea>
-              <label class="vp-bend-field" title="The typeface. A loaded font file is added to the list.">Font
+              <label class="vp-bend-field text-stamp-only" title="The typeface. A loaded font file is added to the list.">Font
                 <select id="sel-text-font" class="vp-select" aria-label="Font">
                   <option value="sans" selected>Sans</option>
                   <option value="serif">Serif</option>
@@ -1403,22 +1407,27 @@
                   <option value="heavy">Heavy</option>
                   <option value="script">Script</option>
                 </select></label>
-              <div class="punch-seg" id="text-style-row" role="group" aria-label="Style">
+              <div class="punch-seg text-stamp-only" id="text-style-row" role="group" aria-label="Style">
                 <button id="btn-text-bold" class="btn btn-secondary" type="button" aria-pressed="false" title="Bold">Bold</button>
                 <button id="btn-text-italic" class="btn btn-secondary" type="button" aria-pressed="false" title="Italic">Italic</button>
                 <button id="btn-text-font-file" class="btn btn-secondary" type="button" title="Load a font file (.ttf, .otf, .woff, .woff2) from this machine and add it to the list. The file is read here and goes nowhere.">Font file</button>
                 <input id="inp-text-font-file" type="file" accept=".ttf,.otf,.woff,.woff2,font/*" hidden aria-label="Font file">
               </div>
-              <label class="vp-bend-field" title="The height of a capital letter, in mm. Lines are spaced 1.2 times the font's em.">Size
+              <label class="vp-bend-field text-stamp-only" title="The height of a capital letter, in mm. Lines are spaced 1.2 times the font's em.">Size
                 <input type="number" id="inp-text-size" value="6.0" min="1" max="200" step="0.5" aria-label="Capital letter height, mm"><span>mm</span></label>
-              <label class="vp-bend-field" title="How far below the surface, square to it, on a curved face too. A wall under the text thinner than two nozzle widths once it is cut is refused, and the depth that would fit is said.">Depth
+              <label class="vp-bend-field text-stamp-only" title="How far below the surface, square to it, on a curved face too. A wall under the text thinner than two nozzle widths once it is cut is refused, and the depth that would fit is said.">Depth
                 <input type="number" id="inp-text-depth" value="0.6" min="0.1" max="50" step="0.1" aria-label="Engraving depth, mm"><span>mm</span></label>
-              <label class="vp-bend-field" title="Turn the text about its middle, counter-clockwise seen from outside. 0 reads along the face's longest edge.">Angle
+              <label class="vp-bend-field text-stamp-only" title="Turn the text about its middle, counter-clockwise seen from outside. 0 reads along the face's longest edge.">Angle
                 <input type="number" id="inp-text-angle" value="0" min="-360" max="360" step="5" aria-label="Angle, degrees"><span>&deg;</span></label>
-              <label class="vp-clone text-mirror" title="Read it backwards, for a stamp or a mould."><input type="checkbox" id="chk-text-mirror"> Mirror</label>
+              <label class="vp-clone text-mirror text-stamp-only" title="Read it backwards, for a stamp or a mould."><input type="checkbox" id="chk-text-mirror"> Mirror</label>
+              <label class="vp-clone text-mirror text-remove-only" title="Fill every recess of the same depth in the same face within Reach of the one clicked, so a whole word goes in one click. Off: only the letter you clicked."><input type="checkbox" id="chk-text-word" checked> Whole word</label>
+              <label class="vp-bend-field text-remove-only" title="With Whole word: recesses of the same depth this close to each other (mm) are filled together.">Reach
+                <input type="number" id="inp-text-reach" value="3.0" min="0" max="200" step="0.5" aria-label="Reach, mm"><span>mm</span></label>
               <p id="text-readout" class="bend-readout">&mdash;</p>
               <div class="vp-row vp-row-pair">
-                <button id="btn-text-go" class="btn btn-secondary" type="button" disabled
+                <button id="btn-text-remove" class="btn btn-secondary text-remove-only" type="button" disabled
+                        title="Fill the recesses the ghost shows (green) back to the face, in one boolean. One Undo puts them back.">REMOVE</button>
+                <button id="btn-text-go" class="btn btn-secondary text-stamp-only" type="button" disabled
                         title="Cut the text into the face, in one boolean. One Undo puts the piece back. The card stays open for the next face.">STAMP</button>
                 <button id="btn-text-cancel" class="btn btn-secondary" type="button" title="Close Text; the piece is unchanged.">Cancel</button>
               </div>
@@ -2246,8 +2255,8 @@
   <script src="app-punch.js?v=f7f8a6e2"></script>
   <!-- Text: type a word, stamp it into a face. The geometry (nso_text.js, which reads
        nso_punch.js's surface probe) before its card (app-text.js). docs/TEXT.md. -->
-  <script src="nso_text.js?v=22c772bd"></script>
-  <script src="app-text.js?v=4c7256c4"></script>
+  <script src="nso_text.js?v=bbb124f3"></script>
+  <script src="app-text.js?v=3b506339"></script>
   <script src="app-live-slider.js?v=0bc4bb66"></script>
   <script src="app-hollow.js?v=5a8e2bd8"></script>
   <script src="app-foam.js?v=16cca4f6"></script>

@@ -58,6 +58,8 @@ Smart build-plate packing for 3D printing.
   a cylinder or a dome; drag it to move it, the arrows nudge it. STAMP is one
   boolean and one Undo. A text that runs off the face, or would leave less than
   two nozzle widths of wall, is refused in words with the depth that would fit
+  Switch the card to **Remove** and click the floor of an engraved letter to fill
+  the word back flush with its face (flat faces), one Undo
   ([docs/TEXT.md](docs/TEXT.md))
 - **New stock**: a correctly-sized blank to start from, before Carve, Hollow,
   Cut or anything else that begins with a blank block - sphere, box, cylinder,

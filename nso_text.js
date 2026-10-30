@@ -708,7 +708,227 @@
     return out;
   }
 
+
+  /* ------------------------------------------------------------- removing */
+
+  /* REMOVE. The text this tool stamps is a set of recesses in a flat face: each
+     letter a flat FLOOR, parallel to the face, ringed by WALLS square to it that
+     run up to a RIM in the face's own plane. pockets() finds them from a click on
+     one, with no memory of the stamp - so it works on a piece the stamp was made
+     on last week, or on other tools' recesses - and fillers() gives, for each, a
+     prism of the rim's outline from just under the floor to the face's plane.
+     Union that with the piece and the face is whole again.
+
+     From the click: a triangle on a floor (or a wall: the neighbours within half a
+     mm are tried) seeds a flood across edges to the facets within a degree of it
+     and in its plane (the floor); the triangles across the floor's edge that stand
+     square to it and rise above it (the walls), and the walls joined to those. The
+     patch's open edges are the rim. A recess is refused unless every rim vertex
+     lies in one plane (0.02 mm) above the floor and every triangle round the rim
+     is a facet of the face, not another wall. opts.word fills every recess of the
+     same floor plane and depth (0.03 mm) within opts.reach mm of one already
+     chosen, so a word goes in one click; otherwise only the one clicked. */
+  function weld(soup) {
+    var n = (soup.length / 9) | 0, vid = new Int32Array(3 * n), ids = new Map(), nV = 0, i, t, k;
+    var P = [];
+    for (i = 0; i < 3 * n; i++) {
+      var key = Math.round(soup[3 * i] * 1e4) + ',' + Math.round(soup[3 * i + 1] * 1e4) + ',' + Math.round(soup[3 * i + 2] * 1e4);
+      var id = ids.get(key);
+      if (id === undefined) { id = nV++; ids.set(key, id); P.push([soup[3 * i], soup[3 * i + 1], soup[3 * i + 2]]); }
+      vid[i] = id;
+    }
+    var nrm = new Float64Array(3 * n), edges = new Map(), K = 1 << 26;
+    for (t = 0; t < n; t++) {
+      var a = P[vid[3 * t]], b = P[vid[3 * t + 1]], c = P[vid[3 * t + 2]];
+      var ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+      var nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx, L = Math.hypot(nx, ny, nz) || 1;
+      nrm[3 * t] = nx / L; nrm[3 * t + 1] = ny / L; nrm[3 * t + 2] = nz / L;
+      for (k = 0; k < 3; k++) {
+        var e0 = vid[3 * t + k], e1 = vid[3 * t + (k + 1) % 3];
+        if (e0 === e1) continue;
+        var ek = e0 < e1 ? e0 * K + e1 : e1 * K + e0, l = edges.get(ek);
+        if (l) l.push(t); else edges.set(ek, [t]);
+      }
+    }
+    return { n: n, vid: vid, P: P, nrm: nrm, edges: edges, K: K };
+  }
+  function across(M, t, k) {                                 // the triangle over t's edge k, or -1
+    var e0 = M.vid[3 * t + k], e1 = M.vid[3 * t + (k + 1) % 3], l = M.edges.get(e0 < e1 ? e0 * M.K + e1 : e1 * M.K + e0);
+    if (!l) return -1;
+    for (var i = 0; i < l.length; i++) if (l[i] !== t) return l[i];
+    return -1;
+  }
+  function pocketFrom(M, seed, fr) {
+    var n0 = fr.n, o = fr.o, tol = 0.01, cosF = Math.cos(Math.PI / 180);
+    function ht(v) { var p = M.P[v]; return (p[0] - o[0]) * n0[0] + (p[1] - o[1]) * n0[1] + (p[2] - o[2]) * n0[2]; }
+    function nd(t) { return M.nrm[3 * t] * n0[0] + M.nrm[3 * t + 1] * n0[1] + M.nrm[3 * t + 2] * n0[2]; }
+    function flat(t) { return nd(t) >= cosF && Math.abs(ht(M.vid[3 * t])) < tol && Math.abs(ht(M.vid[3 * t + 1])) < tol && Math.abs(ht(M.vid[3 * t + 2])) < tol; }
+    if (!flat(seed)) return null;
+    var floor = new Set([seed]), q = [seed], t, k, u, i;
+    while (q.length) {
+      t = q.pop();
+      for (k = 0; k < 3; k++) { u = across(M, t, k); if (u >= 0 && !floor.has(u) && flat(u)) { floor.add(u); q.push(u); } }
+    }
+    var wall = new Set(), wq = [];
+    function wallOf(u, from) {                              // a triangle square to the floor, rising above it
+      if (u < 0 || floor.has(u) || wall.has(u) || Math.abs(nd(u)) > 0.2) return false;
+      var top = false;
+      for (var j = 0; j < 3; j++) if (ht(M.vid[3 * u + j]) > 0.02) top = true;
+      if (!top && !from) return false;
+      wall.add(u); wq.push(u);
+      return true;
+    }
+    floor.forEach(function (f) { for (var j = 0; j < 3; j++) { var w = across(M, f, j); if (w >= 0 && !floor.has(w)) wallOf(w, false); } });
+    if (!wall.size) return null;
+    while (wq.length) {
+      t = wq.pop();
+      for (k = 0; k < 3; k++) { u = across(M, t, k); if (u >= 0 && !floor.has(u)) wallOf(u, true); }
+      if (wall.size > 200000) return null;
+    }
+    // the rim: the patch's open edges, chained
+    var inP = function (x) { return floor.has(x) || wall.has(x); }, out = new Map(), rimTris = [], deg = true;
+    function visit(tt) {
+      for (var j = 0; j < 3; j++) {
+        var nb = across(M, tt, j);
+        if (nb >= 0 && inP(nb)) continue;
+        var a = M.vid[3 * tt + j], b = M.vid[3 * tt + (j + 1) % 3];
+        if (nb < 0) { deg = false; continue; }              // an open edge: not a recess
+        if (out.has(a)) deg = false;
+        out.set(a, b); rimTris.push(nb);
+      }
+    }
+    floor.forEach(visit); wall.forEach(visit);
+    if (!deg || !out.size) return null;
+    for (i = 0; i < rimTris.length; i++) if (nd(rimTris[i]) < 0.9) return null;   // a step, not the face
+    var loops = [], seen = new Set();
+    out.forEach(function (_, a0) {
+      if (seen.has(a0)) return;
+      var loop = [], cur = a0;
+      while (cur !== undefined && !seen.has(cur)) { seen.add(cur); loop.push(cur); cur = out.get(cur); }
+      if (cur === a0 && loop.length >= 3) loops.push(loop); else deg = false;
+    });
+    if (!deg) return null;
+    var hs = [], lo = Infinity, hi = -Infinity;
+    loops.forEach(function (l) { l.forEach(function (v) { var h = ht(v); hs.push(h); lo = Math.min(lo, h); hi = Math.max(hi, h); }); });
+    if (hi - lo > 0.02 || lo < 0.02) return null;
+    var H = (lo + hi) / 2, flo = Infinity;
+    return { floor: floor, wall: wall, loops: loops, H: H, planarity: hi - lo, ht: ht };
+  }
+
+  /* The recesses under a click. -> { ok, reason, pockets, frame, depth, count, width, height } */
+  function pockets(soup, hit, opts) {
+    var o = {}, k;
+    for (k in { word: 1, reach: 1 }) o[k] = (opts || {})[k];
+    if (o.word === undefined) o.word = true;
+    if (!(o.reach >= 0)) o.reach = 3;
+    if (!soup || soup.length < 36 || soup.length % 9) return refuse('there is no piece to take text off');
+    var p0 = hit && (hit.point || hit.p || hit);
+    if (!p0 || !(p0.length >= 3 || p0.x !== undefined)) return refuse('the click has no point on the piece');
+    p0 = p0.length >= 3 ? [+p0[0], +p0[1], +p0[2]] : [+p0.x, +p0.y, +p0.z];
+    var M = weld(soup), i, t;
+    // the triangles at the click, nearest first
+    var near = [];
+    for (t = 0; t < M.n; t++) {
+      var a = M.P[M.vid[3 * t]], b = M.P[M.vid[3 * t + 1]], c = M.P[M.vid[3 * t + 2]];
+      var cx = (a[0] + b[0] + c[0]) / 3 - p0[0], cy = (a[1] + b[1] + c[1]) / 3 - p0[1], cz = (a[2] + b[2] + c[2]) / 3 - p0[2];
+      var d = Math.hypot(cx, cy, cz);
+      if (d < 3) near.push([d, t]);
+    }
+    near.sort(function (x, y) { return x[0] - y[0]; });
+    var first = null, fr = null, tried = 0;
+    for (i = 0; i < near.length && tried < 40 && !first; i++) {
+      t = near[i][1]; tried++;
+      var n0 = [M.nrm[3 * t], M.nrm[3 * t + 1], M.nrm[3 * t + 2]];
+      var org = M.P[M.vid[3 * t]];
+      var cand = { n: n0, o: org };
+      var pk = pocketFrom(M, t, cand);
+      if (pk) { first = pk; fr = cand; }
+    }
+    if (!first) return refuse('that is not the inside of a recess in a flat face - click on the floor of an engraved letter');
+    // the frame the outlines are drawn in
+    var n = fr.n, e1 = Math.abs(n[0]) < 0.9 ? [0, -n[2], n[1]] : [-n[2], 0, n[0]], L = Math.hypot(e1[0], e1[1], e1[2]);
+    e1 = [e1[0] / L, e1[1] / L, e1[2] / L];
+    var e2 = [n[1] * e1[2] - n[2] * e1[1], n[2] * e1[0] - n[0] * e1[2], n[0] * e1[1] - n[1] * e1[0]];
+    fr.e1 = e1; fr.e2 = e2;
+    function polysOf(pk) {
+      var rings = pk.loops.map(function (l) {
+        return cleanLoop(l.map(function (v) {
+          var pt = M.P[v], w = [pt[0] - fr.o[0], pt[1] - fr.o[1], pt[2] - fr.o[2]];
+          return [w[0] * e1[0] + w[1] * e1[1] + w[2] * e1[2], w[0] * e2[0] + w[1] * e2[1] + w[2] * e2[2]];
+        }));
+      }).filter(function (r) { return r.length >= 3; });
+      var outers = rings.filter(function (r) { return area2(r) > 0; }), holes = rings.filter(function (r) { return area2(r) < 0; });
+      var polys = outers.map(function (r) { return { outer: r, holes: [], a2: area2(r) }; });
+      holes.forEach(function (h) {
+        var best = null;
+        polys.forEach(function (P) { if (inside(P.outer, h[0]) && (!best || P.a2 < best.a2)) best = P; });
+        if (best) best.holes.push(h);
+      });
+      polys.forEach(function (P) { delete P.a2; });
+      var lo = [Infinity, Infinity], hi = [-Infinity, -Infinity];
+      polys.forEach(function (P) { P.outer.forEach(function (q) { lo[0] = Math.min(lo[0], q[0]); lo[1] = Math.min(lo[1], q[1]); hi[0] = Math.max(hi[0], q[0]); hi[1] = Math.max(hi[1], q[1]); }); });
+      return { polys: polys, lo: lo, hi: hi, H: pk.H, planarity: pk.planarity };
+    }
+    var chosen = [polysOf(first)];
+    if (!chosen[0].polys.length) return refuse('that recess has no outline to fill');
+    if (o.word) {
+      var used = new Set(first.floor), found = [];
+      for (t = 0; t < M.n; t++) {
+        if (used.has(t)) continue;
+        var nn = M.nrm[3 * t] * n[0] + M.nrm[3 * t + 1] * n[1] + M.nrm[3 * t + 2] * n[2];
+        if (nn < 0.9998) continue;
+        var pk2 = pocketFrom(M, t, fr);
+        if (!pk2) { used.add(t); continue; }
+        pk2.floor.forEach(function (x) { used.add(x); });
+        if (Math.abs(pk2.H - first.H) > 0.03) continue;
+        var pp = polysOf(pk2);
+        if (pp.polys.length) found.push(pp);
+      }
+      // single linkage from the clicked recess: within reach of one already taken
+      var grew = true;
+      function gap(A, B) {
+        var dx = Math.max(0, A.lo[0] - B.hi[0], B.lo[0] - A.hi[0]), dy = Math.max(0, A.lo[1] - B.hi[1], B.lo[1] - A.hi[1]);
+        return Math.hypot(dx, dy);
+      }
+      while (grew) {
+        grew = false;
+        for (i = found.length - 1; i >= 0; i--) {
+          if (chosen.some(function (C) { return gap(C, found[i]) <= o.reach; })) { chosen.push(found[i]); found.splice(i, 1); grew = true; }
+        }
+      }
+    }
+    var lo2 = [Infinity, Infinity], hi2 = [-Infinity, -Infinity], area = 0, worst = 0;
+    chosen.forEach(function (C) {
+      lo2[0] = Math.min(lo2[0], C.lo[0]); lo2[1] = Math.min(lo2[1], C.lo[1]); hi2[0] = Math.max(hi2[0], C.hi[0]); hi2[1] = Math.max(hi2[1], C.hi[1]);
+      C.polys.forEach(function (P) { area += area2(P.outer) / 2; P.holes.forEach(function (h) { area += area2(h) / 2; }); });
+      worst = Math.max(worst, C.planarity);
+    });
+    var depth = first.H, count = chosen.length;
+    return {
+      ok: true, frame: { o: fr.o, n: n, ex: e1, ey: e2 }, pockets: chosen, count: count, depth: depth, area: area,
+      width: hi2[0] - lo2[0], height: hi2[1] - lo2[1], planarity: worst,
+      reason: (count === 1 ? '1 recess' : count + ' recesses') + ', ' + fmt(depth) + ' mm deep, ' + fmt(hi2[0] - lo2[0]) + ' × ' + fmt(hi2[1] - lo2[1]) + ' mm'
+    };
+  }
+
+  /* One closed prism soup per recess: the outline, from 0.05 mm under its floor
+     up to the plane of the face. */
+  function fillers(pl) {
+    if (!pl || !pl.ok) return [];
+    var out = [];
+    pl.pockets.forEach(function (C) {
+      var tri = triangulate({ polys: C.polys });
+      if (!tri.V) return;
+      var hb = new Float64Array(tri.V.length);
+      for (var i = 0; i < hb.length; i++) hb[i] = -0.05;
+      out.push(cutter({ data: { V: tri.V, T: tri.T, hb: hb, ht: C.H, o: pl.frame.o, n: pl.frame.n, ex: pl.frame.ex, ey: pl.frame.ey, edges: null } }));
+    });
+    return out;
+  }
+
   var API = {
+    pockets: pockets,
+    fillers: fillers,
     DEFAULTS: DEFAULTS,
     shape: shape,
     plan: plan,

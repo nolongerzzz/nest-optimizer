@@ -28,6 +28,9 @@ PAINT SCOPE: **WHOLE-PIECE** (`nsoMaskCount(m) > 0`).
   says how deep would fit.
 - **Armed = menu open.** Opening another menu closes Text (the accordion), and
   Text also puts itself away if Carve, Paint or Punch is armed over it.
+- **Remove (added 2026-10-30):** the card's Stamp | Remove switch. `NSO_Text.pockets`
+  reads the recess off the piece (floor, walls, one-plane rim) and `fillers` gives
+  prisms to union back; no stamp history. Flat faces only. Details in `docs/TEXT.md`.
 - **Not done, on purpose:** emboss (the prism has both ends; a union instead of a
   subtract), wrapping across edges, letter / line spacing, typed font names.
   Listed in `docs/TEXT.md`.

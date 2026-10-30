@@ -32,6 +32,11 @@
 //      thinner than the floor (and how deep would fit), bad numbers, no ink
 //   8. a thin stroke is said, not refused; a refusal still carries its ghost
 //   9. the soup handed in is not touched; a plan on a big mask is quick
+//  10. REMOVE: stamp three letters, click the floor of one, and the shipped union
+//      of the fillers takes the slab back to its volume and its flat top; one
+//      click fills one letter, "word" fills all three; an O's island is kept; a
+//      click on the plain face, a cylinder, and a stamp thinner than the face
+//      says why; a second stamp of another depth is left alone
 
 'use strict';
 
@@ -110,6 +115,19 @@ const rect = (x0, y0, x1, y1) => (x, y) => x >= x0 && x < x1 && y >= y0 && y < y
 const disc = (cx, cy, R) => (x, y) => (x - cx) * (x - cx) + (y - cy) * (y - cy) <= R * R;
 const any = (...f) => (x, y) => f.some(g => g(x, y));
 const minus = (a, b) => (x, y) => a(x, y) && !b(x, y);
+const rayTop = (soup, x, y) => { // highest z of the surface at (x, y), by brute force
+  let best = -Infinity;
+  for (let t = 0; t < soup.length; t += 9) {
+    const A = [soup[t], soup[t + 1], soup[t + 2]], B = [soup[t + 3], soup[t + 4], soup[t + 5]], C = [soup[t + 6], soup[t + 7], soup[t + 8]];
+    const d = (B[1] - C[1]) * (A[0] - C[0]) + (C[0] - B[0]) * (A[1] - C[1]);
+    if (Math.abs(d) < 1e-12) continue;
+    const a = ((B[1] - C[1]) * (x - C[0]) + (C[0] - B[0]) * (y - C[1])) / d, b = ((C[1] - A[1]) * (x - C[0]) + (A[0] - C[0]) * (y - C[1])) / d, c = 1 - a - b;
+    if (a < -1e-9 || b < -1e-9 || c < -1e-9) continue;
+    best = Math.max(best, a * A[2] + b * B[2] + c * C[2]);
+  }
+  return best;
+};
+
 const PX = 0.1;   // mm per pixel in the fixtures: 10 px a mm
 
 /* "H": two stems and a bar, 10 mm tall, 6 mm wide, 1.2 mm strokes. */
@@ -267,18 +285,6 @@ const polyArea = (sh) => sh.area;
     // a hole stays a hole: a ray through the middle of an O's hole meets the top, as before
     const ringSh = T.shape(ringO()), rp = T.plan(SLAB, CLICK, ringSh, { depth: 1 });
     const rr = await csg.NSO_subtractSoups(SLAB, T.cutter(rp));
-    const rayTop = (soup, x, y) => { // highest z of the surface at (x, y), by brute force
-      let best = -Infinity;
-      for (let t = 0; t < soup.length; t += 9) {
-        const A = [soup[t], soup[t + 1], soup[t + 2]], B = [soup[t + 3], soup[t + 4], soup[t + 5]], C = [soup[t + 6], soup[t + 7], soup[t + 8]];
-        const d = (B[1] - C[1]) * (A[0] - C[0]) + (C[0] - B[0]) * (A[1] - C[1]);
-        if (Math.abs(d) < 1e-12) continue;
-        const a = ((B[1] - C[1]) * (x - C[0]) + (C[0] - B[0]) * (y - C[1])) / d, b = ((C[1] - A[1]) * (x - C[0]) + (A[0] - C[0]) * (y - C[1])) / d, c = 1 - a - b;
-        if (a < -1e-9 || b < -1e-9 || c < -1e-9) continue;
-        best = Math.max(best, a * A[2] + b * B[2] + c * C[2]);
-      }
-      return best;
-    };
     gate('4g an O: the ring is cut 1 mm down, the middle of its hole and the slab outside are not',
       near(rayTop(rr.soup, 30 + 5, 20), 5, 1e-3) && near(rayTop(rr.soup, 30, 20), 6, 1e-3) && near(rayTop(rr.soup, 30 + 8, 20), 6, 1e-3),
       [35, 30, 38].map(x => rayTop(rr.soup, x, 20).toFixed(3)).join(' / '));
@@ -412,6 +418,54 @@ const polyArea = (sh) => sh.area;
     gate('9a eight letters on a 128-facet cylinder plan in under 4 s', pl.ok && ms < 4000, ms + ' ms, ' + (pl.stats ? pl.stats.tris : 0) + ' triangles, ' + (pl.reason || ''));
     const t1 = Date.now(), again = T.plan(cyl, { point: [50, 0, 40], normal: [0, 0, 1] }, sh, { depth: 0.8, angle: 80 });
     gate('9b a second angle on the same text re-uses the mesh (faster, still ok)', again.ok && (Date.now() - t1) <= ms + 50, (Date.now() - t1) + ' ms');
+  }
+
+  /* 10 -------------------------------------------------------------- */
+  {
+    const word3 = T.shape(word(3));
+    const stampOn = async (soup, shp, depth, at) => {
+      const pl = T.plan(soup, { point: at, normal: [0, 0, 1] }, shp, { depth });
+      const r = await csg.NSO_subtractSoups(soup, T.cutter(pl));
+      return { pl, soup: r.soup, ok: r.ok };
+    };
+    const A = await stampOn(SLAB, word3, 1, [30, 20, 6]);
+    // a point on the floor of the first letter's stem: 1 mm down, the left stem of letter 1
+    const sx = A.pl.data.o[0] + A.pl.data.V.reduce((m, v) => Math.min(m, v[0]), Infinity) + 0.6;
+    const floorPt = [sx, 20, 5];
+    const one = T.pockets(A.soup, { point: floorPt, normal: [0, 0, 1] }, { word: false });
+    gate('10a one click on a letter\\u2019s floor finds that recess alone: 1 mm deep, a flat rim', one.ok && one.count === 1 && near(one.depth, 1, 0.005) && one.planarity < 0.001, one.reason);
+    const all = T.pockets(A.soup, { point: floorPt, normal: [0, 0, 1] }, { word: true, reach: 5 });
+    gate('10b "word" finds all three letters of the stamp', all.ok && all.count === 3, all.reason);
+    const fill = T.fillers(all);
+    const back = await csg.NSO_unionSoups(A.soup, (() => { const o = new Float32Array(fill.reduce((n, f) => n + f.length, 0)); let q = 0; fill.forEach(f => { o.set(f, q); q += f.length; }); return o; })());
+    const v0 = volume(SLAB), v1 = volume(A.soup), v2 = back.soup ? volume(back.soup) : NaN;
+    gate('10c the shipped union of the fillers restores the slab\\u2019s volume (within 0.05%) and it is closed', back.ok && near(v2, v0, 5e-4 * v0) && closed(back.soup),
+      'slab ' + v0.toFixed(3) + ', stamped ' + v1.toFixed(3) + ', filled ' + v2.toFixed(3));
+    const tops = [[30 - 3.2, 20], [30, 20], [30 + 3.1, 22]].map(([x, y]) => rayTop(back.soup, x, y));
+    gate('10d the face is flat again where the letters were (z = 6 at the stems and the bar)', tops.every(z => near(z, 6, 1e-4)), tops.map(z => z.toFixed(4)).join(' / '));
+    const loneFill = await csg.NSO_unionSoups(A.soup, T.fillers(one)[0]);
+    gate('10e one click with "word" off fills one letter: it takes back a third of the engraving', loneFill.ok && closed(loneFill.soup) && (volume(loneFill.soup) - v1) > 0.2 * (v0 - v1) && (volume(loneFill.soup) - v1) < 0.5 * (v0 - v1),
+      'engraving ' + (v0 - v1).toFixed(3) + ', returned ' + (volume(loneFill.soup) - v1).toFixed(3));
+    const tight = T.pockets(A.soup, { point: floorPt, normal: [0, 0, 1] }, { word: true, reach: 0.1 });
+    gate('10f a reach of 0.1 mm joins none of them: still one recess', tight.ok && tight.count === 1, tight.reason);
+    // an O: the ring is filled, its island is not touched
+    const O = await stampOn(SLAB, T.shape(ringO()), 1, [30, 20, 6]);
+    const ringPt = [35, 20, 5];
+    const po = T.pockets(O.soup, { point: ringPt, normal: [0, 0, 1] }, { word: true });
+    const oBack = await csg.NSO_unionSoups(O.soup, T.fillers(po)[0]);
+    gate('10g an O: one recess with a hole in it, filled back to the slab, the island untouched',
+      po.ok && po.count === 1 && po.pockets[0].polys[0].holes.length === 1 && oBack.ok && near(volume(oBack.soup), v0, 5e-4 * v0) && closed(oBack.soup), po.reason);
+    // refusals
+    const plain = T.pockets(A.soup, { point: [5, 5, 6], normal: [0, 0, 1] }, {});
+    gate('10h a click on the plain face is refused in words', !plain.ok && /not the inside of a recess/.test(plain.reason), plain.reason);
+    const cylH = T.pockets(cylinder(15, 40, 96), { point: [20, 0, 15], normal: [0, 0, 1] }, {});
+    gate('10i an unengraved cylinder is refused too', !cylH.ok);
+    // two stamps of different depth: word fills the clicked depth only
+    const B2 = await stampOn(A.soup, T.shape(letterH()), 0.5, [30, 32, 6]);
+    const mixed = T.pockets(B2.soup, { point: floorPt, normal: [0, 0, 1] }, { word: true, reach: 30 });
+    gate('10j a second stamp 0.5 deep, in reach, is left alone: word takes only the 1 mm ones', B2.ok && mixed.ok && mixed.count === 3 && near(mixed.depth, 1, 0.005), mixed.reason);
+    const t0 = Date.now(); T.pockets(A.soup, { point: floorPt, normal: [0, 0, 1] }, { word: true });
+    gate('10k finding them is quick (under 1 s)', Date.now() - t0 < 1000, (Date.now() - t0) + ' ms');
   }
 
   console.log(fails ? '\n' + fails + ' FAILED' : '\nPASSED all gates');

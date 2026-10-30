@@ -4614,6 +4614,14 @@ body.sup-card-open #adjust-status { display: none; }
 /* Mirror: a plain checkbox and its word, on the left like the fields' labels */
 .vp-menu-body .text-card .text-mirror { font-size: 11px; gap: 6px; }
 .vp-menu-body .text-card .text-mirror input { width: auto; margin: 0; padding: 0; }
+/* Stamp | Remove: each mode shows only its own rows */
+.text-card .text-remove-only { display: none; }
+.text-card.is-remove .text-remove-only { display: revert; }
+.text-card.is-remove .text-stamp-only { display: none; }
+.text-card.is-remove .vp-bend-field.text-remove-only { display: grid; }
+.text-card.is-remove .vp-clone.text-remove-only { display: flex; }
+.text-card.is-remove .btn.text-remove-only { display: block; }
+.text-card .text-mode-row, #text-mode-row { margin-bottom: 3px; }
 #viewport canvas.text-cur-grab { cursor: grab; }
 
 /* COMPARE's measurement: a table in a fixed-width face, scrolling inside the card rather than growing it */

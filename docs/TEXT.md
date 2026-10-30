@@ -35,6 +35,36 @@ for the next face with its numbers kept. While it is open:
   the card. Opening another menu, or arming Carve or Paint, puts Text away too (one
   click-owning tool at a time).
 
+## Remove
+
+The switch at the top of the card, **Stamp | Remove**. In Remove, click the floor
+of an engraved letter: the ghost turns green and shows what will be put back,
+REMOVE fills it flush with the face (one boolean, one Undo, `textReplace`).
+
+It keeps no record of the stamp, so it works on text stamped in an earlier
+session, after other edits, and on any recess in a flat face (a blind hole
+included: a recess is a recess). `NSO_Text.pockets` reads it off the piece: a
+click on a floor - or on a wall, the triangles within 3 mm are tried - seeds a
+flood across the facets within a degree of it and in its plane (the floor), then
+the triangles square to it that rise above it (the walls); the patch's open edges
+are the **rim**, chained into loops. It is a recess only if the rim sits in one
+plane (0.02 mm) above the floor and every triangle round it is a facet of the
+face, not another step. `NSO_Text.fillers` makes a prism of each rim outline from
+0.05 mm under its floor to the face's plane; the shipped union with the piece
+closes it (the walls are coincident faces and the kernel takes them: three
+stamped letters came back to the slab's volume to the last digit).
+
+- **Whole word** (on): every recess whose floor and rim are in the same planes (0.03
+  mm), within **Reach** mm of one already chosen (single linkage), so a word goes in
+  one click and a second stamp of another depth is left alone. Off: the one clicked.
+- Refused in words: not a recess (a plain face, a bump, a cylinder), a rim that is
+  not flat (a recess in a **curved** face, or one a later Thicken / Scale has bent),
+  a painted piece.
+- The recess must still be a recess: **Thicken out** offsets every outer face,
+  walls and floors included, so letters it has grown into are not recesses any
+  more - Undo it, then Remove. The Check card's thin-wall count of text this small
+  is the tool saying the strokes are thin, not that the text is gone.
+
 ## From a font to a cutter
 
 1. **The picture.** The page draws the lines in the chosen font on a canvas at
@@ -104,6 +134,7 @@ its faces by axis and side, so any paint stands it down.
 - **Emboss** (raised text): the same cutter, unioned instead of subtracted, its
   bottom at the surface and its top `depth` above it. The engine's prism already
   has both ends.
+- **Removing** text from a curved face (the fill's top is a plane; the stamp's floor follows the surface, the removal does not yet).
 - **Wrapping** text across an edge or round a tube's whole circumference: the
   prism is straight along n, so text stops where the face's smooth surface does.
 - **Letter spacing, line spacing, alignment, outlines of a font's own name list**
@@ -122,5 +153,6 @@ its faces by axis and side, so any paint stands it down.
   (`tools/nso_csg_node.js`); every number is read off its output.
 - `tools/nso_text_drive_check.js` (`npm run text:drive`): the real page, real
   mouse and keyboard, the browser's own fonts (a loaded DejaVu face included).
+- Remove is gate 10 of `text:test` (the union restores the slab, an O's island, word vs one, refusals) and 7b of `text:drive`.
 - a Text row in `tools/nso_pick_release_test.js`: armed, after STAMP and after
   Escape, a left-drag on the bare plate orbits.

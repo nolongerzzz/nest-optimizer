@@ -36,6 +36,15 @@
 // runs longer than 300 ms the #226 bar sweeps under the readout (NSO_BoolBusy).
 // The card stays open for the next face; the fields stay.
 //
+// REMOVE (the Stamp | Remove switch at the top of the card): click the floor of an
+// engraved letter and the recess is filled back flush with its face. It needs no
+// memory of the stamp - NSO_Text.pockets reads the recess off the piece (a floor,
+// its walls, a rim in one plane), so it works on text stamped last week and after
+// other edits, as long as the face is flat. "Whole word" (on) takes every recess
+// of the same depth in the same face within Reach mm of the one clicked, so a
+// word goes in one click. The ghost is the fill, green; REMOVE unions it in, one
+// boolean, one Undo (textReplace). Drag and the arrows are the stamp's, off here.
+//
 // PAINT SCOPE: WHOLE-PIECE. Per the scoping rule in docs/HANDOFF.md: the text
 // is cut through whatever faces it meets, curved ones too, and paint names its
 // faces by axis and side - so any paint stands it down, naming the count:
@@ -43,6 +52,7 @@
 
 var TEXT_GHOST_COLOR = 0xf59e0b;        // Punch's ghost
 var TEXT_LINE_COLOR = 0xffc83d;         // its outline
+var TEXT_FILL_COLOR = 0x34d399;         // what REMOVE would put back
 var TEXT_BAD_COLOR = 0xf87171;          // what a refusal would have cut
 var TEXT_RENDER_ORDER = 20;
 var TEXT_STEP_MM = 0.1;                 // a drag's step
@@ -66,7 +76,7 @@ function NSO_textUI() {
   if (typeof state === 'undefined') return {};
   if (!state.text) {
     state.text = { open: false, modelId: null, soup: null, hit: null, plan: null, key: '', shape: null, shapeKey: '', mask: null,
-                   ghost: null, raf: 0, timer: 0, drag: null, hover: false, said: null, busy: false, fonts: {}, fontCount: 0 };
+                   ghost: null, raf: 0, timer: 0, drag: null, hover: false, said: null, busy: false, fonts: {}, fontCount: 0, mode: 'stamp' };
   }
   return state.text;
 }
@@ -117,8 +127,29 @@ function NSO_textReadout(text, bad) {
   NSO_textUI().said = { text: text, bad: !!bad };
 }
 function NSO_textSyncButtons() {
-  var B = NSO_textUI(), go = NSO_textEl('btn-text-go');
-  if (go) go.disabled = !!B.busy || !(B.plan && B.plan.ok);
+  var B = NSO_textUI(), go = NSO_textEl('btn-text-go'), rm = NSO_textEl('btn-text-remove'), ok = !B.busy && !!(B.plan && B.plan.ok);
+  if (go) go.disabled = !ok || B.mode !== 'stamp';
+  if (rm) rm.disabled = !ok || B.mode !== 'remove';
+}
+/* Stamp | Remove. */
+function NSO_textSetMode(mode) {
+  var B = NSO_textUI();
+  if (B.mode === mode) return;
+  if (B.drag) NSO_textDragEnd(false);
+  B.mode = mode;
+  B.hit = null; B.plan = null; B.key = '';
+  NSO_textClearGhost();
+  var card = NSO_textEl('text-card');
+  if (card) card.classList.toggle('is-remove', mode === 'remove');
+  [['btn-text-mode-stamp', 'stamp'], ['btn-text-mode-remove', 'remove']].forEach(function (p) {
+    var b = NSO_textEl(p[0]);
+    if (b) b.setAttribute('aria-pressed', p[1] === mode ? 'true' : 'false');
+  });
+  NSO_textPreview();
+  if (typeof setStatus === 'function') {
+    setStatus(mode === 'remove' ? 'Text remove - click the floor of an engraved letter to fill it back. Escape to stop.'
+                                : 'Text open - type the text, then click a face to place it. Close the menu or press Escape to stop.');
+  }
 }
 
 /* ------------------------------------------------------- the picture */
@@ -178,6 +209,7 @@ function NSO_textShape() {
 function NSO_textPreview() {
   var B = NSO_textUI(), m = NSO_textModel();
   if (!B.open) return null;
+  if (B.mode === 'remove') return NSO_textPreviewRemove(m);
   var sh = NSO_textShape();
   function nothing(msg, bad) {
     B.plan = null; B.key = '';
@@ -202,6 +234,56 @@ function NSO_textPreview() {
   else NSO_textReadout('Text: ' + pl.reason, true);
   NSO_textSyncButtons();
   return pl;
+}
+/* REMOVE's plan: the recesses under the click, drawn as the fill. */
+function NSO_textRemoveOpts() {
+  var w = NSO_textEl('chk-text-word'), r = NSO_textNum('inp-text-reach');
+  return { word: !w || !!w.checked, reach: r >= 0 ? r : 3 };
+}
+function NSO_textPreviewRemove(m) {
+  var B = NSO_textUI();
+  if (!m || !B.hit || B.modelId !== m.id) {
+    B.plan = null; B.key = '';
+    NSO_textClearGhost();
+    NSO_textReadout(m ? 'Click the floor of an engraved letter to fill it back.' : 'Click the floor of an engraved letter on a piece to fill it back.');
+    NSO_textSyncButtons();
+    return null;
+  }
+  var o = NSO_textRemoveOpts(), key = 'r|' + m.id + '|' + JSON.stringify(B.hit) + '|' + JSON.stringify(o);
+  if (B.key === key && B.soup === m.rawTris && B.plan) { NSO_textSyncButtons(); return B.plan; }
+  var pl;
+  try { pl = NSO_Text.pockets(m.rawTris, B.hit, o); }
+  catch (err) { pl = { ok: false, reason: (err && err.message) || String(err) }; }
+  B.plan = pl; B.key = key; B.soup = m.rawTris;
+  NSO_textDrawFill(m);
+  NSO_textReadout(pl.ok ? 'Fill ' + pl.reason + ' - REMOVE puts them back.' : 'Text: ' + pl.reason, !pl.ok);
+  NSO_textSyncButtons();
+  return pl;
+}
+function NSO_textDrawFill(m) {
+  NSO_textClearGhost();
+  var B = NSO_textUI(), pl = B.plan;
+  if (typeof THREE === 'undefined' || !state.scene || !pl || !pl.ok) return;
+  var group = new THREE.Group();
+  group.name = 'textGhost';
+  group.matrixAutoUpdate = false;
+  NSO_Text.fillers(pl).forEach(function (soup) {
+    var flat = new Float32Array(soup.length);
+    for (var k = 0; k < soup.length; k += 3) {
+      var d = NSO_textRawToDisplay(m, [soup[k], soup[k + 1], soup[k + 2]]);
+      flat[k] = d[0]; flat[k + 1] = d[1]; flat[k + 2] = d[2];
+    }
+    var geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(flat, 3));
+    var fill = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: TEXT_FILL_COLOR, transparent: true, opacity: 0.5,
+      depthTest: false, depthWrite: false, side: THREE.DoubleSide }));
+    fill.renderOrder = TEXT_RENDER_ORDER; fill.userData.skipXray = true; fill.userData.textFill = true;
+    fill.raycast = function () {}; fill.frustumCulled = false;
+    group.add(fill);
+  });
+  if (typeof nsoHelpers !== 'undefined') nsoHelpers.attach(state.scene, group, 'text'); else state.scene.add(group);
+  B.ghost = group;
+  NSO_textFollow();
 }
 function NSO_textSchedule() {
   var B = NSO_textUI();
@@ -349,7 +431,7 @@ function NSO_textPlaceAt(clientX, clientY) {
 /* Is the pointer over the text: inside its box (a little over), on the click's tangent plane. */
 function NSO_textHitAt(clientX, clientY) {
   var B = NSO_textUI(), m = NSO_textModel(), pl = B.plan, sh = B.shape;
-  if (!B.open || !m || !pl || !pl.frame || !sh || !sh.ok || B.modelId !== m.id || !NSO_textMeshOf(m)) return false;
+  if (!B.open || B.mode !== 'stamp' || !m || !pl || !pl.frame || !sh || !sh.ok || B.modelId !== m.id || !NSO_textMeshOf(m)) return false;
   var ray = NSO_textRawRay(m, clientX, clientY), F = pl.frame;
   if (!ray) return false;
   var q = NSO_textOnPlane(ray, F.o, F.n);
@@ -492,6 +574,69 @@ async function NSO_textGo() {
   }
 }
 
+// PAINT SCOPE: WHOLE-PIECE - see the header and docs/HANDOFF.md.
+async function NSO_textRemoveGo() {
+  var B = NSO_textUI(), m = NSO_textModel();
+  if (B.busy) return { ok: false, reason: 'busy' };
+  function refuse(why) {
+    if (typeof setStatus === 'function') setStatus('Text remove refused - piece unchanged (' + why + ')', true);
+    NSO_textReadout('Text: ' + why, true);
+    return { ok: false, reason: why };
+  }
+  if (!m) return refuse('select a piece and click an engraved letter first');
+  var painted = (typeof nsoMaskCount === 'function') ? nsoMaskCount(m) : 0;
+  if (painted > 0) {
+    if (typeof setStatus === 'function') {
+      setStatus('Text stood down - ' + painted + ' painted face(s); filling a recess rebuilds the face it is in. Clear paint to remove text.', true);
+    }
+    return { ok: false, reason: 'painted faces: ' + painted, painted: painted };
+  }
+  var pl = NSO_textPreview();
+  if (!pl) return refuse('click the floor of an engraved letter first');
+  if (!pl.ok) return refuse(pl.reason);
+  var soup0 = m.rawTris, hit = B.hit, o = NSO_textRemoveOpts(), job = null;
+  B.busy = true;
+  NSO_textSyncButtons();
+  NSO_textReadout('Filling\u2026');
+  var bar = setTimeout(function () {
+    if (B.busy && typeof NSO_BoolBusy !== 'undefined') job = NSO_BoolBusy.begin('Filling', 'text-readout');
+  }, TEXT_BAR_MS);
+  try {
+    var sol = (typeof nsoOverlap !== 'undefined' && nsoOverlap) ? await nsoOverlap.solid(m, null, 'text-readout') : { ok: true, merged: false };
+    if (!sol.ok) return refuse(sol.cancelled ? 'stopped' : sol.reason);
+    var soup = sol.merged ? sol.soup : soup0;
+    if (sol.merged) {
+      pl = NSO_Text.pockets(soup, hit, o);
+      if (!pl.ok) return refuse(pl.reason);
+    }
+    var parts = NSO_Text.fillers(pl), n = 0, tool, q = 0;
+    parts.forEach(function (f) { n += f.length; });
+    if (!n) return refuse('there was nothing to fill with');
+    tool = new Float32Array(n);
+    parts.forEach(function (f) { tool.set(f, q); q += f.length; });
+    var res = await NSO_unionSoups(soup, tool, { label: 'Filling', host: 'text-readout' });
+    if (!res || !res.ok || !res.soup || res.soup.length < 9) {
+      return refuse(res && res.cancelled ? 'stopped' : res && res.timedOut ? 'it ran too long and was stopped' : (res && res.reason) || 'the boolean returned nothing');
+    }
+    if (NSO_textModel() !== m || m.rawTris !== soup0) return refuse('the piece changed while it was filled');
+    var txt = 'Text removed - ' + pl.reason + (sol.merged ? ' - ' + sol.note : '');
+    if (!NSO_sculptCommitRaw(m, res.soup, 'textReplace', txt)) return refuse('the result could not be committed');
+    if (typeof updateAdjustUI === 'function') updateAdjustUI();
+    B.hit = null; B.plan = null; B.key = '';
+    NSO_textClearGhost();
+    NSO_textReadout('Removed ' + pl.reason + ' - click the next letter.');
+    return { ok: true, plan: pl };
+  } catch (err) {
+    console.error('[text]', err);
+    return refuse((err && err.message) || String(err));
+  } finally {
+    clearTimeout(bar);
+    if (job) job.end();
+    B.busy = false;
+    NSO_textSyncButtons();
+  }
+}
+
 /* ------------------------------------------------------------ a font file */
 
 async function NSO_textLoadFont(file) {
@@ -576,9 +721,10 @@ function nsoTextState() {
   var B = NSO_textUI(), pl = B.plan, sh = B.shape;
   var kids = B.ghost ? B.ghost.children : [];
   return {
-    open: !!B.open, busy: !!B.busy, hit: B.hit, ok: !!(pl && pl.ok), reason: pl ? pl.reason : '',
+    open: !!B.open, mode: B.mode, busy: !!B.busy, hit: B.hit, ok: !!(pl && pl.ok), reason: pl ? pl.reason : '',
     ghosts: kids.filter(function (o) { return o.userData.textFill; }).length,
     outlines: kids.filter(function (o) { return o.userData.textOutline; }).length,
+    count: pl && pl.count || 0,
     shape: sh && sh.ok ? { width: sh.width, height: sh.height, area: sh.area, polys: sh.polys.length } : null,
     stats: pl ? pl.stats || null : null,
     frame: pl && pl.frame ? { o: pl.frame.o, n: pl.frame.n, u: pl.frame.u, v: pl.frame.v } : null,
@@ -661,7 +807,7 @@ if (typeof document !== 'undefined') {
         return;
       }
       var k = KEYS[ev.key];
-      if (!k || B.drag || B.busy || !B.plan) return;
+      if (!k || B.drag || B.busy || !B.plan || B.mode !== 'stamp') return;
       NSO_textNudge(k, ev.shiftKey);
       ev.preventDefault(); ev.stopImmediatePropagation();
     }
@@ -670,8 +816,19 @@ if (typeof document !== 'undefined') {
       if (!menu || menu.dataset.nsoWired === '1') return;
       menu.dataset.nsoWired = '1';
       menu.addEventListener('toggle', function () { if (menu.open) NSO_textOpen(); else if (NSO_textUI().open) NSO_textClose(); });
-      var go = NSO_textEl('btn-text-go'), cancel = NSO_textEl('btn-text-cancel');
+      var go = NSO_textEl('btn-text-go'), cancel = NSO_textEl('btn-text-cancel'), rm = NSO_textEl('btn-text-remove');
       if (go) go.addEventListener('click', function () { NSO_textGo(); });
+      if (rm) rm.addEventListener('click', function () { NSO_textRemoveGo(); });
+      [['btn-text-mode-stamp', 'stamp'], ['btn-text-mode-remove', 'remove']].forEach(function (p) {
+        var b = NSO_textEl(p[0]);
+        if (b) b.addEventListener('click', function () { NSO_textSetMode(p[1]); });
+      });
+      ['chk-text-word', 'inp-text-reach'].forEach(function (id) {
+        var el = NSO_textEl(id);
+        if (!el) return;
+        el.addEventListener('change', function () { NSO_textSchedule(); });
+        el.addEventListener('input', function () { NSO_textSchedule(); });
+      });
       if (cancel) cancel.addEventListener('click', NSO_textClose);
       ['btn-text-bold', 'btn-text-italic'].forEach(function (id) {
         var b = NSO_textEl(id);

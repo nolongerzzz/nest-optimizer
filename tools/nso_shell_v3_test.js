@@ -119,7 +119,8 @@ const HOLDS = {
                'btn-hollow-safe', 'btn-lift', 'lift-panel', 'btn-detach'],
   // TEXT: the card is the menu - the text box, Font, Bold / Italic / Font file, Size, Depth, Angle, Mirror, the readout, STAMP, Cancel
   'menu-text': ['text-card', 'inp-text', 'sel-text-font', 'btn-text-bold', 'btn-text-italic', 'btn-text-font-file', 'inp-text-size',
-                'inp-text-depth', 'inp-text-angle', 'chk-text-mirror', 'text-readout', 'btn-text-go', 'btn-text-cancel'],
+                'inp-text-depth', 'inp-text-angle', 'chk-text-mirror', 'text-readout', 'btn-text-go', 'btn-text-cancel',
+                'btn-text-mode-stamp', 'btn-text-mode-remove', 'chk-text-word', 'inp-text-reach', 'btn-text-remove'],
   'menu-paint': ['btn-mask-select', 'btn-mask-paint', 'btn-mask-clear', 'btn-mask-delete', 'sel-mask-delete', 'btn-extract-sel'],
   // SURFACE & EDGES: Soften (R, Full wrap, edge treatment) · Mirror · Skin face · Skin wrap · Skin patch · Trace raster · Texture
   'menu-surface': ['inp-soften-r', 'chk-full-wrap', 'btn-soften', 'sel-edge-treat', 'btn-mirror', 'inp-mirror-plane',

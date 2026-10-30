@@ -24,6 +24,10 @@
         nothing: text run off the face; a wall under it under the floor
      7. the text is dragged across the face by a press inside it; an arrow nudges it
         1 mm, Shift 0.1; a press on the bare plate still orbits
+     7b. REMOVE: stamp "HEH", switch the card to Remove (the stamp rows go, the
+        Remove rows come), click the floor of a letter: the ghost is the fill of all
+        three, REMOVE puts the slab back (volume and flat top, one Undo step), and one
+        Undo brings the engraving back
      8. a painted piece stands STAMP down by name; Clear paint lets it through
      9. Escape leaves a field, then closes the card; another menu opened over Text
         closes it; Carve armed over it puts it away; no page errors */
@@ -128,6 +132,14 @@ function topAt(soup, x, y) {
     best = Math.max(best, a * A[2] + b * B[2] + c * C[2]);
   }
   return best;
+}
+function volume(s) {
+  let v = 0;
+  for (let i = 0; i < s.length; i += 9) {
+    v += s[i] * (s[i + 4] * s[i + 8] - s[i + 5] * s[i + 7]) - s[i + 1] * (s[i + 3] * s[i + 8] - s[i + 5] * s[i + 6]) +
+         s[i + 2] * (s[i + 3] * s[i + 7] - s[i + 4] * s[i + 6]);
+  }
+  return v / 6;
 }
 const soupOf = page => page.evaluate(() => Array.from(getActiveModel().rawTris));
 
@@ -296,6 +308,53 @@ withApp(async (page, logs) => {
   check('a press on the bare plate (' + (bare ? bare.x + ',' + bare.y : 'none found') + ') still orbits, and does not move the text', Math.hypot(cam1[0] - cam0[0], cam1[1] - cam0[1], cam1[2] - cam0[2]) > 1 && JSON.stringify((await S(page)).hit) === hitBefore,
     'camera moved ' + Math.hypot(cam1[0] - cam0[0], cam1[1] - cam0[1], cam1[2] - cam0[2]).toFixed(1));
   await lookDown(page);
+
+  console.log('\n=== 7b. REMOVE: fill the engraving back ===');
+  await page.fill('#inp-text', 'HEH');
+  await setField(page, '#inp-text-size', 6);
+  await setField(page, '#inp-text-depth', 1);
+  await click(page, await screenOf(page, mid));
+  await page.waitForFunction(() => nsoTextState().ok, null, { timeout: 5000 });
+  const stemX = await page.evaluate(() => { const D = state.text.plan.data; return D.o[0] + Math.min(...D.V.map(v => v[0])) + 0.5; });
+  const soupBefore = await soupOf(page), dR = await undoDepth(page);
+  await page.click('#btn-text-go');
+  await page.waitForFunction(d => state.undoStack.length > d && !nsoTextState().busy, dR, { timeout: 60000 }).catch(() => {});
+  const soupCut = await soupOf(page);
+  await page.click('#btn-text-mode-remove');
+  await page.waitForTimeout(200);
+  const ui = await page.evaluate(() => {
+    const vis = id => { const e = document.getElementById(id); const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    return { mode: nsoTextState().mode, stampRows: vis('inp-text') || vis('sel-text-font') || vis('inp-text-size') || vis('btn-text-go'), removeRows: vis('btn-text-remove') && vis('chk-text-word') && vis('inp-text-reach') };
+  });
+  check('Remove mode swaps the card: the stamp rows go, REMOVE / Whole word / Reach come', ui.mode === 'remove' && !ui.stampRows && ui.removeRows, JSON.stringify(ui));
+  await click(page, await screenOf(page, [stemX, mid[1], mid[2] - 1]));
+  await page.waitForFunction(() => nsoTextState().count > 0, null, { timeout: 5000 }).catch(() => {});
+  st = await S(page);
+  check('a click on the floor of the first H finds all three letters, 1 mm deep; the ghost is the fill (green) and REMOVE is on',
+    st.ok && st.count === 3 && st.ghosts === 3 && /3 recesses, 1\.0 mm deep/.test(st.readout) && !(await page.evaluate(() => document.getElementById('btn-text-remove').disabled)), st.readout);
+  const dragNo = await page.evaluate(() => NSO_textHitAt(0, 0));
+  check('drag and nudge are the stamp’s: off here', dragNo === false);
+  await page.click('#btn-text-remove');
+  await page.waitForFunction(d => state.undoStack.length > d + 1 && !nsoTextState().busy, dR, { timeout: 60000 }).catch(() => {});
+  const soupFilled = await soupOf(page);
+  const vB = volume(soupBefore), vC = volume(soupCut), vF = volume(soupFilled);
+  check('REMOVE puts the slab back: its volume (within 0.05%) and a flat top at the stem and the bar, one more Undo step',
+    Math.abs(vF - vB) < 5e-4 * vB && vC < vB - 5 && Math.abs(topAt(soupFilled, stemX, mid[1]) - 6) < 1e-3 && Math.abs(topAt(soupFilled, mid[0], mid[1]) - 6) < 1e-3 && (await undoDepth(page)) === dR + 2,
+    'slab ' + vB.toFixed(2) + ', engraved ' + vC.toFixed(2) + ', filled ' + vF.toFixed(2) + ' · ' + (await page.evaluate(() => document.getElementById('status').textContent)));
+  await page.click('#btn-undo');
+  await frames(page, 3);
+  const soupUndone = await soupOf(page);
+  check('one Undo brings the engraving back', Math.abs(volume(soupUndone) - vC) < 1e-6 * vB && Math.abs(topAt(soupUndone, stemX, mid[1]) - 5) < 1e-3);
+  await click(page, await screenOf(page, [mid[0] - 25, mid[1] + 20, mid[2]]));
+  st = await S(page);
+  check('a click on the plain face is refused in words, REMOVE off', !st.ok && st.bad && /not the inside of a recess/.test(st.readout) && await page.evaluate(() => document.getElementById('btn-text-remove').disabled), st.readout);
+  await page.click('#btn-undo');                      // the stamp itself
+  await frames(page, 3);
+  await page.click('#btn-text-mode-stamp');
+  await page.waitForTimeout(200);
+  await page.fill('#inp-text', 'H');
+  await setField(page, '#inp-text-size', 10);
+  await setField(page, '#inp-text-depth', 1.2);
 
   console.log('\n=== 8. a painted piece stands STAMP down ===');
   await page.click('#btn-text-cancel');
