@@ -119,6 +119,7 @@ function scoreOf(rep) {
     const ca = centre(ours), cb = centre(theirs);
     if (!ca || !cb || !theirs.length) { console.log(nm.padEnd(22) + 'no reference object found'); continue; }
     const shifted = theirs.map(m => Object.assign({}, m, { x0: m.x0 - cb[0] + ca[0], x1: m.x1 - cb[0] + ca[0], y0: m.y0 - cb[1] + ca[1], y1: m.y1 - cb[1] + ca[1] }));
+    if (arg('--dump')) { fs.mkdirSync(arg('--dump'), { recursive: true }); fs.writeFileSync(path.join(arg('--dump'), nm.replace(/\W+/g, '_') + '.json'), JSON.stringify({ ours: ours, theirs: shifted })); }
     const rep = D.compute(ours, shifted, {});
     rows[nm] = scoreOf(rep);
     // the footprint: every line of the plate drawn 1.6 mm wide, so lines 0.46 apart are one sheet, and a different zig-zag in the same ribbon is the same ribbon

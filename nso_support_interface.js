@@ -1647,6 +1647,8 @@
     function shellPass() {
       if (!regionWanted || !feet)return;
       var CELLS = 0.1, MARGIN = REGION_MARGIN_MM;
+      var zLowAll = Infinity;                     /* the lowest footprint: Bambu's support layer grid is anchored there (below the first sheet's top: the sheet's layers; above it, where surfaces slope, the part's) */
+      feet.forEach(function (f) { if (f.zl < zLowAll) zLowAll = f.zl; });
       /* the small footprints first: their tips are counted (the card's Building starts moving) before the large one is done */
       feet.map(function (f, fi) { return fi; }).sort(function (a, b) { return (feet[a].box[2] - feet[a].box[0]) * (feet[a].box[3] - feet[a].box[1]) - (feet[b].box[2] - feet[b].box[0]) * (feet[b].box[3] - feet[b].box[1]); }).forEach(function (fi) {
         var f = feet[fi];
@@ -1800,10 +1802,23 @@
         mmin = 1e9; mmax = -1e9;
         for (var q9 = 0; q9 < N; q9++) if (usable[q9]) { if (m[q9] < mmin) mmin = m[q9]; if (m[q9] > mmax) mmax = m[q9]; }
         if (mmin > mmax)return;
-        /* A FLAT STACK (one height over the whole plate) is laid in the sheet's own layer thickness, down from its top: Bambu's 0.275 mm layers, 5 of them 1.375 mm; a plate whose
-           stacks step (a slope, a dome's flank) stays on the part's layers */
-        var thk = (o.sheetLayer !== o.layer && mmin === mmax) ? o.sheetLayer : o.layer, zTopFlat = A + (mmax + 1) * o.layer;
-        var zbOf = function (nn) { return thk === o.layer ? A + nn * o.layer : zTopFlat - (NL - (nn - (mmin - NL + 1))) * thk; };
+        /* THE SHEET'S OWN LAYERS (Dense): Bambu cuts its supports on a grid of their own - the lowest stack's top is an anchor, below it the layers are the sheet's thickness
+           (0.275, 5 of them 1.375 mm), above it the part's 0.2 - and a stack is the 5 grid layers under a cell's top. A stack's bottom is where that puts it; a flat plate is one stack,
+           a plate that steps (a slope, a dome's flank) has stacks of 1.375 at its low end and 1.0 above, and the slicer's own typing then finds the 2 transition and 3 interface layers
+           of each column. The plate is laid in BANDS: between each two heights a stack starts or ends at */
+        var gridMode = o.sheetLayer !== o.layer && (mmin === mmax || zs[0] <= zLowAll + 0.5), gTop = A + (mmin + 1) * o.layer;
+        var botOfM = function (mq) { var j = mq - mmin; return !gridMode ? A + (mq - NL + 1) * o.layer : (j >= NL ? A + (mq + 1) * o.layer - NL * o.layer : gTop - (NL - j) * o.sheetLayer); };
+        var topOfM = function (mq) { return A + (mq + 1) * o.layer; };
+        var bands = [], zLow = botOfM(mmin);
+        if (!gridMode) {
+          for (var nb = mmin - NL + 1; nb <= mmax; nb++) bands.push({ n: nb, zb: A + nb * o.layer, h: o.layer, has: (function (nn) { return function (mq) { return nn <= mq && nn >= mq - NL + 1; }; })(nb) });
+        } else {
+          var seenM = {}, brk = [];
+          for (var qm = 0; qm < N; qm++) if (usable[qm] && !seenM[m[qm]]) { seenM[m[qm]] = 1; brk.push(botOfM(m[qm]), topOfM(m[qm])); }
+          brk.sort(function (a, b) { return a - b; });
+          var ub = brk.filter(function (v, k) { return !k || v - brk[k - 1] > 1e-6; });
+          for (var kb = 0; kb + 1 < ub.length; kb++) bands.push({ n: kb, zb: ub[kb], h: ub[kb + 1] - ub[kb], has: (function (lo, hi) { return function (mq) { return botOfM(mq) <= lo + 1e-6 && topOfM(mq) >= hi - 1e-6; }; })(ub[kb], ub[kb + 1]) });
+        }
         /* the tips this plate carries: where the plate is under the tip's contact */
         var carry = mine.filter(function (t) {
           var ic = Math.round((t.contact[0] - ox) / CELLS), jc = Math.round((t.contact[1] - oy) / CELLS);
@@ -1816,13 +1831,14 @@
         if (!carry.length)return;
         var layersOut = [], soups = [], soupsLoops = [], failed = null, totalLen = 0;
         var maskLayers = [];                    /* each laid layer's traced mask (the cells it covers), to find the lowest layer a tip stands under */
-        for (var n = mmin - NL + 1; n <= mmax && !failed; n++, beat()) {
-          told(Math.floor(carry.length * (0.5 + 0.45 * (n - (mmin - NL + 1)) / Math.max(1, mmax - (mmin - NL + 1) + 1))));
+        for (var bn = 0; bn < bands.length && !failed; bn++, beat()) {
+          var BD = bands[bn], n = BD.n, thk = BD.h;
+          told(Math.floor(carry.length * (0.5 + 0.45 * bn / Math.max(1, bands.length))));
           var Mk = new Uint8Array(N), any = false;
-          for (var q6 = 0; q6 < N; q6++) if (usable[q6] && n <= m[q6] && n >= m[q6] - NL + 1) { Mk[q6] = 1; any = true; }
+          for (var q6 = 0; q6 < N; q6++) if (usable[q6] && BD.has(m[q6])) { Mk[q6] = 1; any = true; }
           if (!any) continue;
           var Mraw = Mk;
-          var zb = zbOf(n), pl = null, paths = null, ex2 = null;
+          var zb = BD.zb, pl = null, paths = null, ex2 = null;
           for (var tryN = 0; tryN < 5; tryN++) {
             /* a layer the extrusion refuses is asked again with more room between its walls, then as its loops alone */
             beat();
@@ -1869,7 +1885,7 @@
           for (var q7 = 0; q7 < N; q7++) area += Mraw[q7];
           area *= CELLS * CELLS; totalLen += len;
           var piece = { kind: 'region', sizeMm: [hi[0] - lo[0], hi[1] - lo[1]], areaMm2: area, perimMm: len, caps: carry.length, lines: pl.lines.length + pl.loops.length + pl.thin.length, loop: paths[0], snake: [] };
-          layersOut.push({ role: n - (mmin - NL + 1) < 2 ? 'transition' : 'interface', angleDeg: n % 2 ? 135 : 45, z0: zb, z1: zb + thk, pieces: [piece], loopMm: piece.sizeMm.slice(), lines: piece.lines, linesMm: len, lengthMm: len,
+          layersOut.push({ role: (gridMode ? BD.zb - zLow < 2 * o.sheetLayer - 1e-6 : n - (mmin - NL + 1) < 2) ? 'transition' : 'interface', angleDeg: n % 2 ? 135 : 45, z0: zb, z1: zb + thk, pieces: [piece], loopMm: piece.sizeMm.slice(), lines: piece.lines, linesMm: len, lengthMm: len,
                           shortestMm: 0, paths: paths, soup: ex2.tris });
           soups.push(ex2.tris); soupsLoops.push(exLoops && exLoops.ok ? exLoops.tris : ex2.tris);
           maskLayers.push({ zb: zb, M: Mk, i0: cI0, j0: cJ0, w: cnx, h: cny, x0: ox + cI0 * CELLS, y0: oy + cJ0 * CELLS, cell: CELLS });
@@ -1880,7 +1896,7 @@
         var soupAll = joinSoups(soupsLoops), dmin = Infinity, rch = o.gap + 0.1;
         for (var bi = 0; bi < obstacles.length; bi++) { var dd = exactDistance(soupAll, exactVs(bi, rch), rch, beat); if (dd.mm < dmin) dmin = dd.mm; }
         if (dmin < o.gap - 1e-5) return;
-        var zBaseMin = zbOf(mmin - NL + 1), zTopMax = A + (mmax + 1) * o.layer;
+        var zBaseMin = botOfM(mmin), zTopMax = A + (mmax + 1) * o.layer;
         var L = { id: levels.length, first: zTopMax, tips: carry, told: carry.length, ok: true, shell: true, minDistanceMm: dmin,
                   res: { zTop: zTopMax, zBase: zBaseMin, zCap: zBaseMin, layers: layersOut, uncrossed: [], region: true,
                          lines: { angleDeg: 0, droppedShare: 0, bare: 0, pieces: layersOut.length, tried: [] } } };
@@ -1889,7 +1905,7 @@
         carry.forEach(function (t) {
           var mm = t.shellM;
           t.shell = true; t.mode = 'sheet'; t.level = L.id; t.why = null; t.carried = true; t.cap = null; t.capWhy = 'no cap: the region plate lies on the tip itself';
-          t.shellB = zbOf(mm - NL + 1); t.zTop = A + (mm + 1) * o.layer; t.zBase = t.shellB;
+          t.shellB = botOfM(mm); t.zTop = A + (mm + 1) * o.layer; t.zBase = t.shellB;
           /* the plate's lowest layer THAT COVERS the tip: the stack the tip's cell calls the lowest may be a speck the traced mask drops (a bead a cell wide), and the
              plate there begins a layer higher - the tip then ends a layer short of it, a gap in the column under the sheet */
           (function () {

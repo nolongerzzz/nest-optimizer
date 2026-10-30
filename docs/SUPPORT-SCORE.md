@@ -23,7 +23,12 @@ layers) gives each support its own planes - z0 0.2, anchored at each sheet's top
 (about 0.2755 on the Base) - and the G-code is merged by Z. The card's Dense sheet is laid at 0.275 per layer (`SHEET.denseSheetLayerMm`; 5 layers,
 1.375 mm, as Bambu's), G-scope's Slice turns the grid on for such a support. `NSO_SCORE_FLAT=1` scores with the grid off.
 
+A plate that steps (a dome's flank) is laid in bands on the same grid: the lowest stack's top is the anchor, a stack is the 5 grid layers under a cell's
+top (1.375 mm at the low end, 1.0 above the anchor), and the slicer's own typing then finds the 2 transition and 3 interface layers of each column. A stepped plate
+higher up, above an anchor, stays on the part's 0.2.
+
 Baseline (the build of 2026-10-30, Dense, 30 deg, own grid on): the plate starts where Bambu's does on all six (z0 matches); foot IoU 0.89 on the Base,
-0.67 / 0.63 on the Negative Spheres (flat plates, 0.275 layers), 0.48 - 0.55 on Circular, Oblique, Sphere (plates that step: still on the part's
-0.2 layers). The Oblique's moves are 4 x shorter than Bambu's (its walls are cut into 2-point pieces, Overhang wall / Outer wall by turns, where a
-stair's slotted section is traced); the tree matches least (IoU 0.10 - 0.18).
+0.67 / 0.63 on the Negative Spheres, 0.57 Circular and Sphere, 0.55 Oblique (its stair is not on the grid yet). The Circular's plate stops a layer short of
+Bambu's ring round the cone flank (the card's footprint ends there); the Oblique's moves are 4 x shorter than Bambu's (its walls are cut into 2-point pieces,
+Overhang wall / Outer wall by turns, where a stair's slotted section is traced) and its plate is a ladder of rungs where Bambu's is one ribbon; the tree
+matches least (IoU 0.10 - 0.18).

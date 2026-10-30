@@ -46,9 +46,9 @@ const TODAY = {        // sha256 of the support bytes of a single-piece Generate
                        // a sheet laid over it, and the fill (the sheets reach the footprint): 16644 -> 23352 triangles on the lighter crowns (20332 -> 28884 on the ones before). Circular and Sphere are the same bytes.
                        // The region plate (supports-footprint, third round, docs/SUPPORT-FOOTPRINT.md section 9): the card lays the interface and the transition from each footprint and the surface's height, layer by layer;
                        // the Negative Sphere2 / Circular / Sphere re-pinned (24332 / 13760 / 12888 triangles on upstream's 2 transition + 2 interface stack, with the thin beads and the lighter smoothing of section 10, and the plate run to the face's edge (section 11); the plates are hatch and loops at 0.5 mm, the sheets were fewer lines).
-  'Support Negative Sphere2.stl': { sha: 'a8d14f63875803ddd205907dc2a87f75eaf3eed7bdf54365adebcf714bcea91f', triangles: 12724 },
-  'Support Circular.stl': { sha: 'fc5828b6c86d99ddea5f814f4affacfb48c6bdda07fd4d7075cb155d1b8fb2d3', triangles: 14992 },
-  'Support Sphere.stl': { sha: '68108efa29f92d3c06b372573e7ede5c167bfec06a6c73867b2494f96ae937f0', triangles: 14584 }
+  'Support Negative Sphere2.stl': { sha: '25fcb758ccc0abea95e79ce48b8eac7d1a05546675e80c04fb1650a75014a52e', triangles: 12052 },
+  'Support Circular.stl': { sha: 'e46aff74e90ba552f4818b14781f7fb5a4b949e8b1c2e4e4d2d94c3571cf56ed', triangles: 14864 },
+  'Support Sphere.stl': { sha: 'b0d7d50cd356ce220b914ae89f6900ab0c0ed47055f9681b2d592f33780e87e3', triangles: 14372 }
 };
 const XY_DISTANCE = 0.35;      // the slice's support_object_xy_distance (nso_support_beacons.js SIDE_STANDOFF_MM, nso_support_gridpack.js TRUNK_KEEP_MM)
 const STRICT_GAP = process.env.NSO_STRICT_GAP === '1';
