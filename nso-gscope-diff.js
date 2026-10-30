@@ -139,7 +139,8 @@
     var g = gridOf([movesA, movesB], cell, reachMm + 1);
     var empty = { meta: { cellMm: cell, zTolMm: zTol, moves: [movesA.length, movesB.length] }, layers: [], classes: {}, plate: { A: [], B: [] }, worst: [] };
     if (!g) return empty;
-    var N = g.nx * g.ny, cell2 = cell * cell;
+    var N = g.nx * g.ny, cell2 = cell * cell, BED_MM = 0.5;
+    var hasTree = { A: movesA.some(function (m) { return classOf(m.feature) === 'support'; }), B: movesB.some(function (m) { return classOf(m.feature) === 'support'; }) };
     var key = function (z) { return Math.round(z * 1000); };
     var LA = byLayer(movesA, key), LB = byLayer(movesB, key);
     // layer rows: A's z, B's z within the tolerance of it, or alone
@@ -239,7 +240,7 @@
         var dR = edt2(Rm, g.nx, g.ny), b = 0;
         if (S) for (var i = 0; i < N; i++) if (S[i] && dR[i] <= near2) b++;
         below += b;
-        if (b === 0) nGap++;
+        if (b === 0 && hasTree[name] && z > BED_MM) nGap++;                      // no tree in the selection, or a plate on the bed: nothing to run up to it
       });
       if (!nFirst) return;
       var d2 = edt2(first, g.nx, g.ny), over = 0, maxD2 = 0;
@@ -248,7 +249,7 @@
         var d = d2[j];
         if (d > edge2 && d <= reach2) { over++; if (d > maxD2) maxD2 = d; }
       }
-      plate[name].push({ z: r2(z), regions: nFirst, gapRegions: nGap, plateMm2: r2(plateCells * cell2), supportBelowMm2: r2(below * cell2), gap: nGap > 0,
+      plate[name].push({ z: r2(z), regions: nFirst, gapRegions: nGap, plateMm2: r2(plateCells * cell2), supportBelowMm2: r2(below * cell2), gap: nGap > 0, treeAbsent: !hasTree[name], onBed: z <= BED_MM,
                          overshootMm2: r2(over * cell2), overshootMaxMm: r2(Math.sqrt(maxD2) * cell) });
     }
 
@@ -315,7 +316,7 @@
       out.push('');
       out.push((n === 'A' ? 'A' : 'B') + ': ' + (p.length ? p.length + ' plate' + (p.length === 1 ? '' : 's') + ' (first layers of interface / transition)' : 'no interface or transition plate'));
       p.forEach(function (q) {
-        out.push('  z ' + q.z.toFixed(2) + '  ' + q.regions + ' plate' + (q.regions === 1 ? '' : 's') + ' ' + q.plateMm2.toFixed(1) + '  tree under it ' + q.supportBelowMm2.toFixed(1) + (q.gap ? '  GAP: ' + q.gapRegions + ' of ' + q.regions + ' with no tree under' : '') +
+        out.push('  z ' + q.z.toFixed(2) + '  ' + q.regions + ' plate' + (q.regions === 1 ? '' : 's') + ' ' + q.plateMm2.toFixed(1) + '  tree under it ' + q.supportBelowMm2.toFixed(1) + (q.gap ? '  GAP: ' + q.gapRegions + ' of ' + q.regions + ' with no tree under' : q.treeAbsent ? '  (no tree in this selection - gap not judged)' : q.onBed ? '  (on the bed)' : '') +
                  '  past its outline ' + q.overshootMm2.toFixed(2) + ' mm2 (max ' + q.overshootMaxMm.toFixed(2) + ' mm)');
       });
     });

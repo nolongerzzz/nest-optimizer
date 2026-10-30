@@ -57,6 +57,12 @@ const R4 = D.compute(P, Q);
 check('two plate regions, first layer 1.24 only (the grown layers 1.55 / 1.86 are not first)', R4.plate.A.length === 1 && R4.plate.A[0].z === 1.24 && R4.plate.A[0].regions === 2, JSON.stringify(R4.plate.A));
 check('A: both plates have tree under them - the support layer under is the last support layer (0.93), not the part layer 1.0', R4.plate.A[0].gap === false && R4.plate.A[0].gapRegions === 0, JSON.stringify(R4.plate.A[0]));
 check('B: the plate at x = 6 has no tree under it: 1 of 2 regions is a gap', R4.plate.B[0].gap === true && R4.plate.B[0].gapRegions === 1, JSON.stringify(R4.plate.B[0]));
+/* a solo feature: only the transition isolated, no tree in the selection; and a plate on the bed - neither is a gap */
+const T1 = [...sq('Support transition', 0.2, 0, 0, 2), ...sq('Support transition', 1.4, 5, 0, 1)], T2 = sq('Support transition', 0.28, 0, 0, 2);
+const R5 = D.compute(T1, T2);
+check('a selection with no tree: plates are listed, none called a GAP, and the text says so', R5.plate.A.length === 2 && R5.plate.A.every(q => !q.gap && q.treeAbsent) && !/GAP/.test(D.text(R5)) && /no tree in this selection/.test(D.text(R5)), D.text(R5).split('\n').filter(l => /z \d/.test(l)).join(' | ').slice(0, 200));
+const T3 = [...sq('Support', 0.2, 9, 0, 1), ...sq('Support transition', 0.2, 0, 0, 2)];
+check('a plate on the bed with tree elsewhere is not a GAP', D.compute(T3, T3).plate.A[0].gap === false && D.compute(T3, T3).plate.A[0].onBed === true);
 check('empty input is answered', D.text(D.compute([], [])) === 'Nothing to compare.');
 console.log(fails ? '\nFAILED (' + fails + ')' : '\nall gates held');
 process.exit(fails ? 1 : 0);
