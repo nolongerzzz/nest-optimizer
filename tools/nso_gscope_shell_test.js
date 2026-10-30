@@ -95,6 +95,7 @@ const ROWS = [
   ['ms-region-row', 'normal slice', ['ms-mode-select', 'ms-btn-isolate', 'ms-btn-clear', 'ms-region-note']],
   ['ms-whole-row', 'normal', ['ms-btn-back']],
   ['ms-band-row', 'slice', ['ms-btn-take-band', 'ms-band-read']],
+  ['ms-compare-row', 'normal slice', ['ms-compare-toggle', 'ms-compare-body', 'ms-compare-start', 'ms-compare-overlay', 'ms-compare-tint', 'ms-compare-restore', 'ms-compare-step', 'ms-compare-read']],
   ['ms-render-row', 'slice', ['ms-render-toolpath', 'ms-render-solid', 'ms-render-read']],
   ['ms-slice-row', 'slice', ['ms-slice-settings-toggle', 'ms-slice-settings', 'ms-slice-nozzle', 'ms-slice-layer', 'ms-slice-walls',
                              'ms-slice-density', 'ms-slice-pattern', 'ms-slice-angle', 'ms-slice-settings-note']],
@@ -234,7 +235,7 @@ const cardState = page => page.evaluate(() => {
   const S = window.NSO_GSCOPE_SLICE, M = window.NSO_MICROSCOPE;
   return {
     up: up(c), side: c.dataset.side, cardSide: M.cardSide(), viewMode: S.viewMode(),
-    rows: Array.from(c.querySelectorAll('.ms-row')).filter(up).map(r => r.id),
+    rows: Array.from(c.querySelectorAll('.ms-row')).filter(up).map(r => r.id).filter(id => id !== 'ms-compare-row'),   /* Compare shows with a file on each plate: its own test (nso_gscope_compare_test.js) */
     normal: btn('ms-cam-normal'), slice: btn('ms-cam-slice'), region: btn('ms-mode-select'), whole: btn('ms-btn-back'),
     isolate: btn('ms-btn-isolate'), clearBoxes: btn('ms-btn-clear'), band: btn('ms-btn-take-band'),
     regionNote: up($('ms-region-note')), mode: M.mode(), open: c.classList.contains('is-open'),

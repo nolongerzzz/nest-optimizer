@@ -1706,6 +1706,40 @@
             </div>
             <p class="ms-note" id="ms-band-read">&mdash;</p>
           </div>
+          <!-- COMPARE, both sides. What is isolated on plate 1 and on plate 2 (a piece with its supports, a line type, a layer band)
+               set down together on plate 2 - side by side - then overlaid in two colours and nudged. Plate 2's own file comes back
+               with Restore plate 2. Shown only while both plates hold something; folded until opened. -->
+          <div id="ms-compare-row" class="ms-row" data-on="normal slice" style="display:none;">
+            <button id="ms-compare-toggle" type="button" class="ms-disclose" aria-expanded="false" aria-controls="ms-compare-body"
+                    title="Set what is isolated on each plate side by side on plate 2, then overlay it">Compare plates</button>
+            <div id="ms-compare-body" hidden>
+            <div class="ms-btn-row">
+              <button id="ms-compare-start" type="button" disabled
+                      title="Set what is isolated on plate 1 and what is isolated on plate 2 down together on plate 2, side by side">Side by side</button>
+              <button id="ms-compare-overlay" type="button" disabled
+                      title="Lay the second piece over the first, their parts' outlines together; both drawn see-through">Overlay</button>
+            </div>
+            <div class="ms-btn-row">
+              <button id="ms-compare-tint" type="button" class="active" aria-pressed="true" disabled
+                      title="Plate 1's piece orange, plate 2's blue; off, each in its own line-type colours">Colours</button>
+              <button id="ms-compare-restore" type="button" disabled
+                      title="Plate 2 as it was before Side by side">Restore plate 2</button>
+            </div>
+            <div class="ms-btn-row ms-nudge">
+              <button id="ms-compare-nx-" type="button" disabled title="Move the blue piece left">&larr;</button>
+              <button id="ms-compare-nx+" type="button" disabled title="Move the blue piece right">&rarr;</button>
+              <button id="ms-compare-ny+" type="button" disabled title="Move the blue piece back">&uarr;</button>
+              <button id="ms-compare-ny-" type="button" disabled title="Move the blue piece forward">&darr;</button>
+              <button id="ms-compare-nz+" type="button" disabled title="Raise the blue piece">Z+</button>
+              <button id="ms-compare-nz-" type="button" disabled title="Lower the blue piece">Z&minus;</button>
+              <select id="ms-compare-step" title="How far a nudge moves it">
+                <option value="0.05">0.05 mm</option><option value="0.1" selected>0.1 mm</option>
+                <option value="0.5">0.5 mm</option><option value="1">1 mm</option><option value="5">5 mm</option>
+              </select>
+            </div>
+            <p class="ms-note" id="ms-compare-read">&mdash;</p>
+            </div>
+          </div>
           <!-- Toolpath | Solid, the Slice side. View only: it changes what is
                drawn, never what is selected. -->
           <div id="ms-render-row" class="ms-row" data-on="slice">
@@ -2164,7 +2198,7 @@
        row each under the Flange row. Pure. docs/GSCOPE-FEATURES.md. -->
   <script src="nso_face_features.js?v=53ee4b23"></script>
   <script src="nso_gscope_measure.js?v=c5595269"></script>
-  <script src="app-microscope.js?v=8bdab23b"></script>
+  <script src="app-microscope.js?v=9454b5ad"></script>
   <!-- Detach / Reattach (Cut menu): cap a detected flange's hull on its own
        wall, lift the flange out as a piece, seat it elsewhere with Attach's
        seat. After nso_flange.js, app-crop.js, nso_assemble.js, app-assemble.js

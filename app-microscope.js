@@ -1030,7 +1030,7 @@ var NSO_MICROSCOPE = (function () {
     if (vp) vp.dataset.plate = plateName === 'take' ? '2' : '1';
     syncExportRow();
   }
-  function syncPlate() { syncPlateUI(); badgeFor(); syncCard(); }
+  function syncPlate() { syncPlateUI(); badgeFor(); syncCard(); syncCompare(); }
 
   /**
    * The card's side (docs/GSCOPE.md item 12): the document decides it. A
@@ -1312,7 +1312,7 @@ var NSO_MICROSCOPE = (function () {
       name: uniquePieceName(doc, spec.name),
       positions: placed || shiftedPositions(spec.positions, d[0], d[1], d[2]),
       moves: placed ? null : (spec.moves ? shiftedMoves(spec.moves, d[0], d[1], d[2]) : null),
-      take: { from: spec.from }
+      take: { from: spec.from }, tint: spec.tint
     });
     if (placed) { o.turned = true; dropGhost(g, false); }
     else if (g.geo) {
@@ -2638,9 +2638,11 @@ var NSO_MICROSCOPE = (function () {
       if (isPieces(doc) || o.take) {
         // a piece dragged here: built once and kept (pieceGeometry), sitting where it was moved to
         var pg = pieceGeometry(o, sig);
+        if (pg.beads) tintGeometry(pg.geo, o.tint || 0);        // COMPARE: a piece drawn in its plate's colour
         mesh = new THREE.Mesh(pg.geo, pg.beads
           ? new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, metalness: 0.05, roughness: 0.4, clippingPlanes: clipPlanes() })
-          : new THREE.MeshStandardMaterial({ color: colorForGroup(o.name, gi), metalness: 0.05, roughness: 0.4, clippingPlanes: clipPlanes() }));
+          : new THREE.MeshStandardMaterial({ color: o.tint || colorForGroup(o.name, gi), metalness: 0.05, roughness: 0.4, clippingPlanes: clipPlanes() }));
+        if (o.alpha) { mesh.material.transparent = true; mesh.material.opacity = o.alpha; mesh.material.depthWrite = false; }
         mesh.position.copy(pg.base);
         mesh.userData.base = pg.base.clone();
         if (pg.beads) mesh.userData.empty = !pg.geo.attributes.position.count;
@@ -5817,8 +5819,211 @@ var NSO_MICROSCOPE = (function () {
     return open(importCopy(importedDoc));
   }
 
+  // ===========================================================================
+  // COMPARE: two things from two plates, side by side on plate 2, then overlaid
+  // ===========================================================================
+  //
+  // What is isolated on plate 1 (a whole piece with its supports, one line type,
+  // a layer band - whatever a drag would carry: pullSpec) and what is isolated
+  // on plate 2 are set down together on plate 2, which becomes a plate of
+  // pieces: the first at the left, the second at the right, each at the height
+  // it stood at. Plate 2's own file is kept (compare.stash) and comes back with
+  // "Restore plate 2". Each piece is drawn in a colour of its own (its line
+  // types stay apart by shade). OVERLAY moves the second piece so the two parts'
+  // outlines coincide - XY only, the heights stay - and draws both see-through;
+  // the nudge arrows move it from there, by the step chosen.
+  var compare = null;       // { a, b, stash, step, dx, dy, dz, overlaid, tinted }
+  var COMPARE_GAP_MM = 12, TINT_A = 0xff9a1f, TINT_B = 0x23b5ff, OVERLAY_ALPHA = 0.7;
+  var NOT_PART = /^(Support|Travel|Skirt|Brim|Custom|Prime|Wipe)/i;
+
+  function soupExtent(p) {
+    var e = { x0: Infinity, x1: -Infinity, y0: Infinity, y1: -Infinity, z0: Infinity };
+    for (var i = 0; i < p.length; i += 3) {
+      if (p[i] < e.x0) e.x0 = p[i]; if (p[i] > e.x1) e.x1 = p[i];
+      if (p[i + 1] < e.y0) e.y0 = p[i + 1]; if (p[i + 1] > e.y1) e.y1 = p[i + 1];
+      if (p[i + 2] < e.z0) e.z0 = p[i + 2];
+    }
+    return e;
+  }
+
+  /** A piece's tint written into its kept geometry's colours (the shade of each line type stays), or taken off again (hex 0). */
+  function tintGeometry(geo, hex) {
+    var col = geo && geo.attributes && geo.attributes.color;
+    if (!col) return;
+    var ud = geo.userData || (geo.userData = {});
+    if ((ud.tint || 0) === (hex || 0)) return;
+    if (!ud.baseColors) ud.baseColors = new Uint8Array(col.array);
+    var base = ud.baseColors, out = col.array;
+    if (!hex) out.set(base);
+    else {
+      var tr = (hex >> 16) & 255, tg = (hex >> 8) & 255, tb = hex & 255;
+      for (var i = 0; i < base.length; i += 3) {
+        var k = 0.4 + 0.6 * (0.3 * base[i] + 0.59 * base[i + 1] + 0.11 * base[i + 2]) / 255;
+        out[i] = tr * k; out[i + 1] = tg * k; out[i + 2] = tb * k;
+      }
+    }
+    col.needsUpdate = true;
+    ud.tint = hex || 0;
+  }
+
+  /** The XY box of a piece's part (its walls and fill, not its supports or travel), or of everything it draws when it has none. */
+  function partBox(o) {
+    function box(filter) {
+      var b = { x0: Infinity, x1: -Infinity, y0: Infinity, y1: -Infinity, n: 0 };
+      (o.moves || []).forEach(function (m) {
+        if (!filter(m)) return;
+        b.n++;
+        b.x0 = Math.min(b.x0, m.x0, m.x1); b.x1 = Math.max(b.x1, m.x0, m.x1);
+        b.y0 = Math.min(b.y0, m.y0, m.y1); b.y1 = Math.max(b.y1, m.y0, m.y1);
+      });
+      return b.n ? b : null;
+    }
+    var part = box(function (m) { return !NOT_PART.test(m.feature || '') && m.feature; });
+    return part ? { box: part, part: true } : (function () { var all = box(function (m) { return m.feature && !/^travel/i.test(m.feature); }); return all ? { box: all, part: false } : null; })();
+  }
+
+  /** The reason Compare cannot start, or ''. */
+  function compareReason() {
+    if (!view) return 'open a file first';
+    if (compare) return '';
+    if (!plateDoc('lens') || !plateDoc('take')) return 'it needs a file on each plate';
+    return '';
+  }
+
+  function compareLive() {
+    if (!compare) return false;
+    var d = plateDoc('take');
+    if (d && isPieces(d) && d.objects.indexOf(compare.a) >= 0 && d.objects.indexOf(compare.b) >= 0) return true;
+    compare = null;
+    return false;
+  }
+
+  /** The compare row's buttons and its readout. */
+  function syncCompare() {
+    var live = compareLive(), why = compareReason();
+    var row = $('ms-compare-row'), body = $('ms-compare-body'), tg = $('ms-compare-toggle');
+    if (row) row.style.display = live || (plateDoc('lens') && plateDoc('take')) ? '' : 'none';
+    if (live && compare.unfold !== false && body && body.hidden) { body.hidden = false; if (tg) tg.setAttribute('aria-expanded', 'true'); }
+    var st = $('ms-compare-start'), ov = $('ms-compare-overlay'), rs = $('ms-compare-restore'), tn = $('ms-compare-tint'), rd = $('ms-compare-read');
+    setDisabled(st, live || !!why);
+    setDisabled(ov, !live);
+    setDisabled(rs, !live);
+    setDisabled(tn, !live);
+    ['nx-', 'nx+', 'ny-', 'ny+', 'nz-', 'nz+'].forEach(function (k) { setDisabled($('ms-compare-' + k), !live); });
+    if (tn) { tn.classList.toggle('active', !!(live && compare.tinted)); tn.setAttribute('aria-pressed', live && compare.tinted ? 'true' : 'false'); }
+    if (!rd) return;
+    if (live) {
+      rd.textContent = (compare.overlaid ? 'Overlaid' : 'Side by side') + ' on plate 2: ' + plateTitle('lens') + '\'s ' + compare.a.name.replace(/^Plate 1: /, '') +
+        ' (orange) and ' + plateTitle('take') + '\'s ' + compare.b.name.replace(/^Plate 2: /, '') + ' (blue). Second piece moved by ' +
+        compare.dx.toFixed(2) + ', ' + compare.dy.toFixed(2) + ', ' + compare.dz.toFixed(2) + ' mm from where Overlay put it.';
+    } else {
+      rd.textContent = why ? 'Compare: ' + why + '.' :
+        'Isolate a piece, a line type or a layer band on each plate, then Side by side sets both on plate 2.';
+    }
+  }
+
+  /** `spec` set down on the ACTIVE plate with its footprint centred on (cx, 0), at the height it came from. */
+  function comparePlace(spec, cx, tint, label) {
+    var sp = Object.assign({}, spec, { name: label + spec.name, tint: tint });
+    var g = makeGhost(sp), e = soupExtent(sp.positions);
+    var landed = setDownOn(g, new THREE.Vector3(cx, e.z0, 0), null);
+    return landed && !Array.isArray(landed) ? landed : null;
+  }
+
+  /** The camera on the two pieces, close: the whole point of Compare is to see them large. */
+  function compareFrame() {
+    if (!view || !compare) return;
+    var box = new THREE.Box3();
+    [compare.a, compare.b].forEach(function (o) { var m = takeMesh(o); if (m) box.union(takeBox(o)); });
+    if (!box.isEmpty()) frameBox(box, new THREE.Vector3().fromArray(FRAME_DIR));
+  }
+
+  function compareStart() {
+    var why = compareReason();
+    if (why || compare) { say(compare ? 'Compare is on - Restore plate 2 first.' : 'Compare: ' + why + '.', true); return null; }
+    var home = plateName, specs = {};
+    ['lens', 'take'].forEach(function (n) { showPlate(n, { quiet: true }); specs[n] = pullSpec(null); });
+    var none = !specs.lens ? 'lens' : !specs.take ? 'take' : null;
+    if (none) {
+      showPlate(home, { quiet: true });
+      say('Compare: isolate something on ' + plateTitle(none).toLowerCase() + ' first - a piece, a line type or a layer band.', true);
+      syncCompare();
+      return null;
+    }
+    showPlate('take', { quiet: true });
+    var stash = Object.assign({}, doc, { layerIndex: undefined });
+    emptyPlate('take');
+    showPlate('take');
+    var wA = soupExtent(specs.lens.positions), wB = soupExtent(specs.take.positions);
+    var wa = wA.x1 - wA.x0, wb = wB.x1 - wB.x0;
+    var a = comparePlace(specs.lens, -(wa / 2 + COMPARE_GAP_MM / 2), TINT_A, 'Plate 1: ');
+    var b = a && comparePlace(specs.take, wb / 2 + COMPARE_GAP_MM / 2, TINT_B, 'Plate 2: ');
+    if (!a || !b) {
+      emptyPlate('take');
+      open(stash);
+      say('Compare: the pieces could not be set down - plate 2 is back as it was.', true);
+      return null;
+    }
+    compare = { a: a, b: b, stash: stash, step: 0.1, dx: 0, dy: 0, dz: 0, overlaid: false, tinted: true };
+    setSelection([], 'pick');
+    redrawDoc();
+    compareFrame();
+    syncCompare();
+    say('Side by side on plate 2: ' + plateTitle('lens') + '\'s piece in orange, ' + plateTitle('take') + '\'s in blue. Overlay lays them over each other.');
+    return { a: a, b: b };
+  }
+
+  function compareOverlay() {
+    if (!compareLive()) { say('Compare: set the two pieces side by side first.', true); return null; }
+    var ba = partBox(compare.a), bb = partBox(compare.b);
+    if (!ba || !bb) { say('Compare: a piece has no moves to line up by.', true); return null; }
+    var ca = [(ba.box.x0 + ba.box.x1) / 2, (ba.box.y0 + ba.box.y1) / 2], cb = [(bb.box.x0 + bb.box.x1) / 2, (bb.box.y0 + bb.box.y1) / 2];
+    bakePiece(compare.b, ca[0] - cb[0], ca[1] - cb[1], 0);
+    compare.dx = compare.dy = compare.dz = 0;
+    compare.overlaid = true;
+    compare.a.alpha = compare.b.alpha = OVERLAY_ALPHA;
+    pieceRefresh();
+    treeSoon(compare.b);
+    compareFrame();
+    syncCompare();
+    say('Overlaid by ' + (ba.part && bb.part ? 'the parts\' outlines' : 'everything they draw (no part walls in one of them)') + ': Plate 1\'s in orange, Plate 2\'s in blue. Nudge the blue one to fine-tune.');
+    return { dx: ca[0] - cb[0], dy: ca[1] - cb[1], byPart: ba.part && bb.part };
+  }
+
+  function compareNudge(dx, dy, dz) {
+    if (!compareLive()) return null;
+    bakePiece(compare.b, dx, dy, dz);
+    compare.dx += dx; compare.dy += dy; compare.dz += dz;
+    pieceRefresh();
+    treeSoon(compare.b);
+    syncCompare();
+    return { dx: compare.dx, dy: compare.dy, dz: compare.dz };
+  }
+
+  function compareTint() {
+    if (!compareLive()) return null;
+    compare.tinted = !compare.tinted;
+    compare.a.tint = compare.tinted ? TINT_A : 0;
+    compare.b.tint = compare.tinted ? TINT_B : 0;
+    redrawDoc();
+    syncCompare();
+    return compare.tinted;
+  }
+
+  function compareRestore() {
+    if (!compareLive()) return null;
+    var stash = compare.stash;
+    compare = null;
+    showPlate('take');
+    open(stash);
+    syncCompare();
+    say('Plate 2 is back as it was.');
+    return true;
+  }
+
   /** Both plates empty, plate 1 active. */
   function reset() {
+    compare = null;
     cancelPull();
     if (view && plateName !== 'lens') showPlate('lens', { quiet: true });
     emptyPlate('take');
@@ -6064,6 +6269,23 @@ var NSO_MICROSCOPE = (function () {
     bind('ms-btn-back', 'click', unIsolate);                  // WHOLE PART: back out of any isolate
     bind('ms-btn-show-all', 'click', checkAll);
     bind('ms-btn-take-band', 'click', function () { takeBand(); });
+    bind('ms-compare-toggle', 'click', function () {
+      var b = $('ms-compare-body'), t = $('ms-compare-toggle');
+      if (!b) return;
+      b.hidden = !b.hidden;
+      if (t) t.setAttribute('aria-expanded', b.hidden ? 'false' : 'true');
+    });
+    bind('ms-compare-start', 'click', function () { compareStart(); });
+    bind('ms-compare-overlay', 'click', function () { compareOverlay(); });
+    bind('ms-compare-restore', 'click', function () { compareRestore(); });
+    bind('ms-compare-tint', 'click', function () { compareTint(); });
+    [['nx-', -1, 0, 0], ['nx+', 1, 0, 0], ['ny-', 0, -1, 0], ['ny+', 0, 1, 0], ['nz-', 0, 0, -1], ['nz+', 0, 0, 1]].forEach(function (k) {
+      bind('ms-compare-' + k[0], 'click', function () {
+        var st = $('ms-compare-step'), step = st ? parseFloat(st.value) : 0.1;
+        if (!(step > 0)) step = 0.1;
+        compareNudge(k[1] * step, k[2] * step, k[3] * step);
+      });
+    });
     wireZRange();
     bind('ms-btn-export-plate', 'click', exportToPlate);
     bind('ms-btn-export-stl', 'click', exportAsSTL);
@@ -6173,6 +6395,16 @@ var NSO_MICROSCOPE = (function () {
     boxes: function () { return gcodeBoxes(); },
     /** The card's side, as the switch shows it: 'normal' (a mesh, pieces, nothing) or 'slice' (a toolpath). */
     cardSide: function () { return cardSide(); },
+    /** COMPARE (docs/GSCOPE.md item 13): what is isolated on each plate, side by side on plate 2, overlaid, nudged, and plate 2 restored. */
+    compareStart: compareStart,
+    compareOverlay: compareOverlay,
+    compareNudge: compareNudge,
+    compareFrame: compareFrame,
+    compareTint: compareTint,
+    compareRestore: compareRestore,
+    compareState: function () {
+      return compareLive() ? { a: compare.a.name, b: compare.b.name, overlaid: compare.overlaid, tinted: compare.tinted, dx: compare.dx, dy: compare.dy, dz: compare.dz } : null;
+    },
     /** Each capture box's three dots, where they are drawn on screen (client px): [{ move, resizeH, resizeXY }]. */
     boxDots: function () {
       if (!view) return [];

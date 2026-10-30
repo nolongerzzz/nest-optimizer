@@ -339,7 +339,7 @@ withApp(async (page, logs) => {
     check('an imported slice is the Slice side: the switch on Slice, Normal off (no mesh to go back to)',
       r.card.side === 'slice' && J(r.side) === J(['slice', 'slice']) && r.sw.sliceOn && J(r.sw.pressed) === J(['false', 'true']) && r.sw.normalOff && !r.sw.sliceOff, J([r.side, r.sw]));
     check('each row names its sides: REGION both, WHOLE PART Normal; TAKE BAND, Toolpath | Solid, Slice settings Slice',
-      J(r.rowsOn) === J(['ms-region-row:normal slice', 'ms-whole-row:normal', 'ms-band-row:slice', 'ms-render-row:slice', 'ms-slice-row:slice', 'ms-measure-row:slice', 'ms-play-row:slice']), J(r.rowsOn));
+      J(r.rowsOn) === J(['ms-region-row:normal slice', 'ms-whole-row:normal', 'ms-band-row:slice', 'ms-compare-row:normal slice', 'ms-render-row:slice', 'ms-slice-row:slice', 'ms-measure-row:slice', 'ms-play-row:slice']), J(r.rowsOn));
     const shownRows = await rowsShown(page);
     check('the Slice side shows exactly 6 rows: REGION, TAKE BAND, Toolpath | Solid, Slice settings, Measure, Play',
       J(shownRows) === J(['ms-region-row', 'ms-band-row', 'ms-render-row', 'ms-slice-row', 'ms-measure-row', 'ms-play-row']), J(shownRows));

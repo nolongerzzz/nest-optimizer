@@ -609,3 +609,28 @@ Neither plate is saved with the session, and a plate has no Undo of its own
 (CLEAR is the way to start over). A piece's beads last only until a seat turns
 it. A piece dragged INTO a slice stays part of that slice: it is not grabbed
 and moved afterwards, as a plate's pieces are.
+
+## 13. Compare plates: side by side, then overlaid
+
+**What the user sees.** With a file on each plate, the card shows a folded row, *Compare plates*. Isolate
+something on each plate - a whole piece with its supports (the capture box takes the model and its supports
+in one), one line type, a layer band: whatever a drag would carry - then **Side by side** sets both down on
+plate 2, plate 1's at the left in orange and plate 2's at the right in blue, each at the height it came from,
+the camera close on them. **Overlay** moves the blue one so the two parts' outlines coincide (XY only; the
+heights stay; with no part walls - supports alone - it lines up by everything drawn) and draws both
+see-through. The arrows nudge the blue piece by the step chosen (0.05 - 5 mm), Z too; the row reads the
+total. **Colours** puts the line types' own colours back. The Features list and the layer slider act on both
+pieces at once - one feature, or one layer, in both. **Restore plate 2** brings plate 2's file back as it was.
+
+**How it is built.** `compareStart` reads each plate's selection with `pullSpec` (the drag's own read), keeps
+plate 2's document (`compare.stash`), empties plate 2 and sets the two copies down with `makeGhost` /
+`setDownOn` at a chosen XY and the height they came from - so a compare is a plate of two pieces, and every
+piece control (move, seat, Export) works on it. A piece's `tint` is written into its kept geometry's colours
+(`tintGeometry`: the tint scaled by each line type's brightness, the original colours kept to put back);
+`alpha` draws it see-through. `bakePiece` moves the blue piece for Overlay and the nudges. State:
+`NSO_MICROSCOPE.compareState()`; `compareStart / compareOverlay / compareNudge / compareTint / compareRestore`.
+
+**Check.** `gscope:compare` (`tools/nso_gscope_compare_test.js`): refused with nothing isolated; two pieces
+on plate 2, tinted, plate 1 byte-identical; Overlay's outlines coincide; the nudge moves only the blue piece;
+Colours off and on again are exact; Restore returns plate 2's file. `COMPARE_A` / `COMPARE_B` name two
+other `.gcode.3mf` files for it.
