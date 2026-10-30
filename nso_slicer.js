@@ -2174,6 +2174,23 @@
         return over.length ? g.polys(g.unionAll(over.map(function (x) { return x.cs; }))) : [];
       }
       function inPolys(polys, x, y) { return polys.length ? inside(polys, x, y) : false; }
+      /* the part's sections whose underside lies 0 - d over the top of support layer j: EXACTLY that reach (overAt adds a layer to it). Bambu's top support layer lies a layer
+         and the gap under the part (0.4: 14.8 under a part that starts at 15.2); each one under it a support layer further, so a layer is interface while the part is within
+         that + (NI - 1) of its layers over it, transition within NT more, whatever the part's slope does (a slope's cells are typed one by one) */
+      function hostExCs(j, d) {
+        var cs = [];
+        for (var k = 0; k < planes.length; k++) {
+          var dk = planes[k].printZ - planes[k].h - SP[j].printZ;
+          if (dk > d + 1e-6) break;
+          if (dk < -1e-6) continue;
+          hosts.forEach(function (Q) { if (!g.isEmpty(Q.S[k])) cs.push(Q.S[k]); });
+        }
+        return cs.length ? g.unionAll(cs) : null;
+      }
+      function hostEx(j, d) { var u = hostExCs(j, d); return u ? g.polys(u) : []; }
+      var DOEX = gap + hIm + 0.03;
+      function dInEx(j) { return DOEX + (NI - 1) * SP[j].h; }
+      function dTrEx(j) { return DOEX + (NI + NT - 1) * SP[j].h; }
       var SPLIT_MIN_MM = 0.6;
       P.layers.forEach(function (L, j) {
         if (!L.paths.length) return;
@@ -2184,8 +2201,12 @@
         var stairU = (zones[j].is.length || zones[j].ts.length) ? g.unionAll(zones[j].is.concat(zones[j].ts)) : null;
         var flatI = [], flatT = [], stI = zones[j].is.slice(), stT = zones[j].ts.slice();
         function touchesStair(cs) { return !!stairU && g.area(g.inter(cs, stairU)) > 1e-6; }
-        zones[j].i.forEach(function (cs) { (touchesStair(cs) ? stI : flatI).push(cs); });
-        zones[j].t.forEach(function (cs) { (touchesStair(cs) ? stT : flatT).push(cs); });
+        /* on a support's own layer grid (Bambu's independent support layer height) every zone is typed by the part's nearness, as a stair's is: a sloped plate
+           is interface where the part is within the interface layers over it and transition within the transition layers over that, cell by cell - not whole
+           islands, which made the one island all interface */
+        var byDepth = o.supportLayerMaxMm > 0;
+        zones[j].i.forEach(function (cs) { (byDepth || touchesStair(cs) ? stI : flatI).push(cs); });
+        zones[j].t.forEach(function (cs) { (byDepth || touchesStair(cs) ? stT : flatT).push(cs); });
         var stairAt = stI.length > 0 || stT.length > 0;
         var zis = stI.length ? g.polys(g.offset(g.unionAll(stI), w / 2)) : [];
         var zts = stT.length ? g.polys(g.offset(g.unionAll(stT), w / 2)) : [];
@@ -2200,9 +2221,12 @@
           var zcs = stI.concat(stT);
           var sheetCs = zc.length ? g.unionAll(zc) : g.empty();
           if (zcs.length) {
-            var hostD = overAt(j, dTr);
             var stairCs = g.unionAll(zcs);
-            if (hostD.length) stairCs = g.inter(stairCs, g.unionAll(hostD.map(function (x) { return x.cs; })));
+            if (byDepth) { var hD = hostExCs(j, dTrEx(j)); if (hD) stairCs = g.inter(stairCs, hD); }
+            else {
+              var hostD = overAt(j, dTr);
+              if (hostD.length) stairCs = g.inter(stairCs, g.unionAll(hostD.map(function (x) { return x.cs; })));
+            }
             sheetCs = g.isEmpty(sheetCs) ? stairCs : g.union(sheetCs, stairCs);
           }
           var inSheet = g.isEmpty(sheetCs) ? g.empty() : g.offset(g.inter(P.S[j], sheetCs), -(o.outerWallWidthMm * 1.0));
@@ -2225,7 +2249,7 @@
           if (zi.length && inside(zi, x, y)) return 'Support interface';
           if (zt.length && inside(zt, x, y)) return 'Support transition';
           if (zis.length || zts.length) {
-            if (!hT) { hI = hostPolys(j, dIn); hT = hostPolys(j, dTr); }
+            if (!hT) { hI = byDepth ? hostEx(j, dInEx(j)) : hostPolys(j, dIn); hT = byDepth ? hostEx(j, dTrEx(j)) : hostPolys(j, dTr); }
             if (zis.length && inside(zis, x, y) && inPolys(hI, x, y)) return 'Support interface';
             if ((zis.length && inside(zis, x, y) || zts.length && inside(zts, x, y)) && inPolys(hT, x, y)) return 'Support transition';
           }

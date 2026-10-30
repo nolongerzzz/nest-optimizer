@@ -559,6 +559,8 @@ on the part's planes (byte for byte as before, pinned). Each support is sliced o
 transition typing are done on those planes against the host's by height (`layersOverX`, `layersUnderX`), and `toGcode` merges the layers of all
 objects by Z, a `; LAYER_HEIGHT:` per object where it differs. The print planner and other consumers of `res.planes` do not know the grid: G-scope's
 Slice turns it on for a Dense sheet (`nsoSupport.sheetLayerMm`) only.
+With it on, every sheet zone is typed by the part's nearness (the stair's way): interface while the part lies within the top support layer's reach (the gap + a layer, 0.4) + 2
+of the support's own layers over it, transition within 2 more, cell by cell, so a slope's plate has the 3 + 2 across its ribbon (`hostEx`).
 
 ## 7. Scope and complexity, as found
 

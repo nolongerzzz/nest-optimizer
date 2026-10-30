@@ -27,8 +27,11 @@ A plate that steps (a dome's flank) is laid in bands on the same grid: the lowes
 top (1.375 mm at the low end, 1.0 above the anchor), and the slicer's own typing then finds the 2 transition and 3 interface layers of each column. A stepped plate
 higher up, above an anchor, stays on the part's 0.2.
 
-Baseline (the build of 2026-10-30, Dense, 30 deg, own grid on): the plate starts where Bambu's does on all six (z0 matches); foot IoU 0.89 on the Base,
-0.67 / 0.63 on the Negative Spheres, 0.57 Circular, Sphere and Oblique (the Dense Oblique's planar slope is laid by the region plate, `regionSlopes`, as Bambu's one ribbon, not the stair's rungs; its first plate layer is still 0.2 low, 7.48 / 7.69). The Circular's plate stops a layer short of
-Bambu's ring round the cone flank (the card's footprint ends there); the Oblique's moves are 4 x shorter than Bambu's (its walls are cut into 2-point pieces,
-Overhang wall / Outer wall by turns, where a stair's slotted section is traced) and its plate is a ladder of rungs where Bambu's is one ribbon; the tree
+On the support grid every sheet layer is typed by the part's nearness, cell by cell (`o.supportLayerMaxMm > 0`): Bambu's top support layer lies a layer and the
+gap (0.4) under the part, a layer is interface while the part is within that + 2 of its layers over it, transition within 2 more - a slope's cells one by one, not
+whole islands (which made a sloped plate all interface, its transition one line wide where Bambu's is two).
+
+Baseline (the build of 2026-10-30, Dense, 30 deg, own grid on): the plate starts where Bambu's does on all six but the Oblique (z0 matches; the Oblique's is 7.48 /
+7.69); foot IoU 0.89 Base, 0.68 / 0.67 the Negative Spheres, 0.62 Circular, 0.68 Sphere, 0.65 Oblique (its planar slope is laid by the region plate, `regionSlopes`, as
+Bambu's one ribbon, not the stair's rungs). The Circular's plate stops a layer short of Bambu's ring round the cone flank (the card's footprint ends there); the tree
 matches least (IoU 0.10 - 0.18).
