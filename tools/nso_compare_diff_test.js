@@ -26,7 +26,7 @@ const C = R.classes;
 check('line types: A\'s tree runs 0.2 - 2.0, B\'s the same plus its tip (to 2.0); the plate 2.2 / 2.4 in both', C.support.A.firstZ === 0.2 && C.support.A.lastZ === 2 && C.transition.A.firstZ === 2.2 && C.interface.B.lastZ === 2.4 && C.transition.B.firstZ === 2.2, JSON.stringify([C.support.A, C.transition.A].map(q => [q.firstZ, q.lastZ])));
 check('the part is the same in both: nothing only A\'s or only B\'s', C.part.onlyAMm2 === 0 && C.part.onlyBMm2 === 0 && C.part.bothMm2 > 90, JSON.stringify(C.part));
 check('the tree on the layers both have is the same (the tip alone is B\'s)', C.support.onlyAMm2 === 0 && C.support.onlyBMm2 > 3 && C.support.onlyBMm2 < 6, String(C.support.onlyBMm2));
-check('layers: 12 of them, paired by Z', R.layers.length === 12 && R.layers.every(l => l.zA != null && l.zB != null), String(R.layers.length));
+check('layers: 12 of support and 1 of part, each paired by Z', R.layers.length === 13 && R.layers.every(l => l.zA != null && l.zB != null), String(R.layers.length));
 const pa = R.plate.A, pb = R.plate.B;
 check('each side has one plate, its first layer at 2.2 (the transition)', pa.length === 1 && pb.length === 1 && pa[0].z === 2.2 && pb[0].z === 2.2, JSON.stringify([pa, pb]));
 check('A: the tree runs up to the plate - no gap, nothing past its outline', pa[0].gap === false && pa[0].supportBelowMm2 > 3 && pa[0].overshootMm2 === 0, JSON.stringify(pa[0]));
@@ -63,6 +63,14 @@ const R5 = D.compute(T1, T2);
 check('a selection with no tree: plates are listed, none called a GAP, and the text says so', R5.plate.A.length === 2 && R5.plate.A.every(q => !q.gap && q.treeAbsent) && !/GAP/.test(D.text(R5)) && /no tree in this selection/.test(D.text(R5)), D.text(R5).split('\n').filter(l => /z \d/.test(l)).join(' | ').slice(0, 200));
 const T3 = [...sq('Support', 0.2, 9, 0, 1), ...sq('Support transition', 0.2, 0, 0, 2)];
 check('a plate on the bed with tree elsewhere is not a GAP', D.compute(T3, T3).plate.A[0].gap === false && D.compute(T3, T3).plate.A[0].onBed === true);
+/* the same plate in different layer heights: ours 0.2 / 0.4 (0.2 thick), the reference's 0.28 / 0.55 (0.28, 0.27 thick) pair up, and the
+   same lines show no difference except their own width */
+const hl = (arr, h) => arr.map(m => Object.assign({}, m, { height: h }));
+const V1 = [...hl(sq('Support transition', 0.2, 0, 0, 3), 0.2), ...hl(sq('Support transition', 0.4, 0, 0, 3), 0.2)];
+const V2 = [...hl(sq('Support transition', 0.28, 0, 0, 3), 0.28), ...hl(sq('Support transition', 0.55, 0, 0, 3), 0.27)];
+const R6 = D.compute(V1, V2);
+check('layers at other heights pair by the height they cover: 2 rows, not 4', R6.layers.length === 2 && R6.layers.every(l => l.zA != null && l.zB != null), JSON.stringify(R6.layers.map(l => [l.zA, l.zB])));
+check('...so identical lines show (almost) no difference', R6.classes.transition.onlyAMm2 < 1 && R6.classes.transition.onlyBMm2 < 1, JSON.stringify([R6.classes.transition.onlyAMm2, R6.classes.transition.onlyBMm2]));
 check('empty input is answered', D.text(D.compute([], [])) === 'Nothing to compare.');
 console.log(fails ? '\nFAILED (' + fails + ')' : '\nall gates held');
 process.exit(fails ? 1 : 0);

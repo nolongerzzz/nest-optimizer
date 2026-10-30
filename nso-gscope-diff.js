@@ -16,7 +16,9 @@
  * CLASSES. 'part' is every line type that is not a support's; 'support' is the tree ("Support"); 'interface' and 'transition' are the plate
  * it carries ("Support interface", "Support transition"). Travel is not read.
  *
- * LAYERS are paired by Z: A's layer and the B layer within opts.zTolMm (0.11) of it are one row; a layer with no partner is a row of its own.
+ * LAYERS are paired by the height they occupy (z - height .. z): A's layer and the B layer that overlaps it by at least half the thinner
+ * one are one row (best overlap first, each used once) - Bambu's layers near a plate are 0.28, 0.55 ..., not on the 0.2 grid; a layer with no
+ * partner is a row of its own.
  *
  * THE PLATE'S FIRST LAYER. The lowest layer of an interface or transition (the plate's footprint P, union of the two) with none of either
  * under it. For it, per side:
@@ -122,7 +124,8 @@
       var c = classOf(m.feature);
       if (!c) return;
       var k = keyOf(m.z);
-      var L = out[k] || (out[k] = { z: m.z, cls: {} });
+      var L = out[k] || (out[k] = { z: m.z, h: 0, cls: {} });
+      if ((m.height || 0) > L.h) L.h = m.height;
       (L.cls[c] || (L.cls[c] = [])).push(m);
     });
     return out;
@@ -141,18 +144,47 @@
     if (!g) return empty;
     var N = g.nx * g.ny, cell2 = cell * cell, BED_MM = 0.5;
     var hasTree = { A: movesA.some(function (m) { return classOf(m.feature) === 'support'; }), B: movesB.some(function (m) { return classOf(m.feature) === 'support'; }) };
-    var key = function (z) { return Math.round(z * 1000); };
-    var LA = byLayer(movesA, key), LB = byLayer(movesB, key);
-    // layer rows: A's z, B's z within the tolerance of it, or alone
+    // two families of layers, paired on their own: the part's and the support's (Bambu prints its support layers at their own heights,
+    // 6.58 / 6.86 / 7.14, between the part's 6.6 / 6.8 / 7.0)
+    var FAM = 1e9, famOf = function (k) { return k >= FAM ? 1 : 0; }, zOf = function (k) { return k % FAM; };
+    var keyed = function (moves) {
+      var out = {};
+      moves.forEach(function (m) {
+        var c = classOf(m.feature);
+        if (!c) return;
+        var k = Math.round(m.z * 1000) + (c === 'part' ? 0 : FAM);
+        var L = out[k] || (out[k] = { z: m.z, h: 0, cls: {} });
+        if ((m.height || 0) > L.h) L.h = m.height;
+        (L.cls[c] || (L.cls[c] = [])).push(m);
+      });
+      return out;
+    };
+    var LA = keyed(movesA), LB = keyed(movesB);
+    // layer rows: A's layer and B's layer that cover the same height are one row; a layer with no partner is a row of its own.
+    // Paired by overlap of the heights the layers occupy (z - h .. z), not by z alone: Bambu's layers near a plate are not on the 0.2 grid
+    // (0.28, 0.55 ...), and a z tolerance leaves ours 0.40 and its 0.55 as two lone layers that look like all-different material.
     var zsA = Object.keys(LA).map(Number).sort(function (a, b) { return a - b; });
     var zsB = Object.keys(LB).map(Number).sort(function (a, b) { return a - b; });
     var rows = zsA.map(function (k) { return { a: k, b: null }; });
-    zsB.forEach(function (kb) {
-      var best = -1, bd = Infinity;
-      rows.forEach(function (r, i) { var d = Math.abs(r.a - kb); if (r.a != null && r.b == null && d < bd) { bd = d; best = i; } });
-      if (best >= 0 && bd <= zTol * 1000) rows[best].b = kb; else rows.push({ a: null, b: kb });
+    var spanOf = function (L) { var h = L.h || 0.2; return [L.z - h, L.z, h]; };
+    var cand = [];
+    zsA.forEach(function (ka, i) {
+      var sa = spanOf(LA[ka]);
+      zsB.forEach(function (kb) {
+        if (famOf(kb) !== famOf(ka)) return;
+        var sb = spanOf(LB[kb]), ov = Math.min(sa[1], sb[1]) - Math.max(sa[0], sb[0]);
+        if (ov >= 0.5 * Math.min(sa[2], sb[2]) - 1e-9 || Math.abs(zOf(ka) - zOf(kb)) <= zTol * 1000 * 0.5) cand.push({ i: i, kb: kb, ov: ov, dz: Math.abs(zOf(ka) - zOf(kb)) });
+      });
     });
-    rows.sort(function (p, q) { return (p.a != null ? p.a : p.b) - (q.a != null ? q.a : q.b); });
+    cand.sort(function (p, q) { return (q.ov - p.ov) || (p.dz - q.dz); });
+    var usedB = {};
+    cand.forEach(function (c) {
+      if (rows[c.i].b != null || usedB[c.kb]) return;
+      rows[c.i].b = c.kb; usedB[c.kb] = true;
+    });
+    zsB.forEach(function (kb) { if (!usedB[kb]) rows.push({ a: null, b: kb }); });
+    var rowZ = function (r) { return zOf(r.a != null ? r.a : r.b); };
+    rows.sort(function (p, q) { return (rowZ(p) - rowZ(q)) || (famOf(p.a != null ? p.a : p.b) - famOf(q.a != null ? q.a : q.b)); });
 
     var sums = {};
     CLASSES.forEach(function (c) {
