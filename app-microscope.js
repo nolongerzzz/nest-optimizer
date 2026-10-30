@@ -6054,7 +6054,7 @@ var NSO_MICROSCOPE = (function () {
     rep.meta.blueOffsetMm = [compare.dx, compare.dy, compare.dz];
     compare.report = rep;
     var rd = $('ms-compare-diff-read'), wr = $('ms-compare-worst');
-    if (rd) { rd.hidden = false; rd.textContent = (compare.overlaid ? '' : 'Not overlaid yet - the pieces stand apart, so the areas will not meet.\n\n') + D.text(rep); }
+    if (rd) { rd.hidden = false; renderDiff(rd, D, rep, compare.overlaid ? '' : 'Not overlaid yet - the pieces stand apart, so the areas will not meet.'); }
     if (wr) {
       wr.textContent = '';
       rep.worst.slice(0, 6).forEach(function (w) {
@@ -6070,12 +6070,78 @@ var NSO_MICROSCOPE = (function () {
     return rep;
   }
 
+  /** The measurement drawn for a narrow panel: sections of small tables and short lines, that scroll down and never sideways (D.view has the words). */
+  function renderDiff(rd, D, rep, lead) {
+    rd.textContent = '';
+    var el = function (tag, cls, txt, par) { var e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; (par || rd).appendChild(e); return e; };
+    if (lead) el('p', 'df-warn', lead);
+    D.view(rep).forEach(function (b) {
+      if (b.kind === 'lead') { el('p', 'df-lead', b.text); return; }
+      if (b.kind === 'types') {
+        b.rows.forEach(function (r) {
+          var sec = el('div', 'df-sec'); el('div', 'df-h', r.label, sec);
+          var t = el('table', 'df-tab', null, sec), row = function (k, a, c, cls) { var tr = el('tr', cls, null, t); el('th', null, k, tr); el('td', null, a, tr); el('td', null, c, tr); return tr; };
+          row('', 'A  ours', 'B  ref', 'df-head');
+          row('Z range', r.zA, r.zB); row('layers', String(r.layersA), String(r.layersB));
+          row('only here', r.onlyA, r.onlyB);
+          el('div', 'df-sub', 'only here = mm2 in that plate alone;  in both: ' + r.both + ' mm2', sec);
+        });
+        return;
+      }
+      if (b.kind === 'plates') {
+        var s2 = el('div', 'df-sec'); el('div', 'df-h', b.title, s2);
+        b.items.forEach(function (q) {
+          var d = el('div', 'df-item' + (q.gap ? ' df-bad' : ''), null, s2);
+          el('div', 'df-main', q.head, d); el('div', 'df-sub', q.tree, d); el('div', 'df-sub', q.outline, d);
+          if (q.note) el('div', q.gap ? 'df-flag' : 'df-sub', q.note, d);
+        });
+        return;
+      }
+      if (b.kind === 'gaps') {
+        var s3 = el('div', 'df-sec'); el('div', 'df-h', b.title, s3);
+        b.items.forEach(function (q) {
+          var d = el('div', 'df-item', null, s3);
+          el('div', 'df-main', q.what + '  ' + q.z, d); el('div', 'df-sub', q.at, d); el('div', 'df-sub', q.area, d);
+        });
+        return;
+      }
+      if (b.kind === 'worst') {
+        var s4 = el('div', 'df-sec'); el('div', 'df-h', b.title, s4);
+        var t4 = el('table', 'df-tab df-worst', null, s4);
+        b.items.forEach(function (w) { var tr = el('tr', null, null, t4); el('th', null, 'z ' + w[0], tr); el('td', null, w[1] + ' mm2', tr); });
+      }
+    });
+  }
+
+  /** A small "Copied" bubble on the button that was pressed, gone after a moment. */
+  function bubble(btn, msg, bad) {
+    if (!btn || !btn.parentNode) return;
+    var old = btn.parentNode.querySelector('.ms-bubble'); if (old) old.remove();
+    var b = document.createElement('span'); b.className = 'ms-bubble' + (bad ? ' bad' : ''); b.textContent = msg; b.setAttribute('role', 'status');
+    btn.parentNode.style.position = btn.parentNode.style.position || 'relative';
+    b.style.left = (btn.offsetLeft + btn.offsetWidth / 2) + 'px';
+    btn.parentNode.appendChild(b);
+    setTimeout(function () { if (b.parentNode) b.remove(); }, 1600);
+  }
+
   function compareCopy() {
     if (!compare || !compare.report) return false;
-    var txt = JSON.stringify(compare.report);
-    try { if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(txt); say('The measurement is on the clipboard (' + (txt.length / 1024).toFixed(0) + ' kB of JSON).'); return true; } } catch (err) { /* below */ }
-    say('The clipboard is not available here.', true);
+    var txt = JSON.stringify(compare.report), btn = $('ms-compare-diff-copy');
+    var done = function () { bubble(btn, 'Copied'); say('The measurement is on the clipboard (' + (txt.length / 1024).toFixed(0) + ' kB of JSON).'); };
+    var fail = function () { bubble(btn, 'Not copied', true); say('The clipboard is not available here.', true); };
+    try { if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(txt).then(done, function () { legacyCopy(txt) ? done() : fail(); }); return true; } } catch (err) { /* below */ }
+    if (legacyCopy(txt)) { done(); return true; }
+    fail();
     return false;
+  }
+
+  /** The old way (a hidden textarea and execCommand), for a page the clipboard API refuses. */
+  function legacyCopy(txt) {
+    try {
+      var ta = document.createElement('textarea'); ta.value = txt; ta.setAttribute('readonly', ''); ta.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
+      document.body.appendChild(ta); ta.select();
+      var ok = document.execCommand && document.execCommand('copy'); ta.remove(); return !!ok;
+    } catch (err) { return false; }
   }
 
   /** Plate 3 emptied: the compare is gone and plate 3 with it; plate 1 is active. */

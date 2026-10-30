@@ -4625,6 +4625,23 @@ body.sup-card-open #adjust-status { display: none; }
 #viewport canvas.text-cur-grab { cursor: grab; }
 
 /* COMPARE's measurement: a table in a fixed-width face, scrolling inside the card rather than growing it */
-.ms-main-card pre.ms-diff { font: 11px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre; overflow: auto; max-height: 240px; margin: 6px 0 0; padding: 6px 8px; border-radius: 6px; background: rgba(0,0,0,0.25); user-select: text; }
+.ms-main-card .ms-diff { max-height: 340px; overflow-y: auto; overflow-x: hidden; margin: 6px 0 0; padding: 8px 10px; border-radius: 6px; background: rgba(0,0,0,0.25); user-select: text; font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; overscroll-behavior: contain; }
+.ms-diff .df-lead, .ms-diff .df-warn { margin: 0 0 8px; color: var(--muted); }
+.ms-diff .df-warn { color: var(--text); }
+.ms-diff .df-sec { margin: 0 0 10px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.08); }
+.ms-diff .df-h { font-weight: 600; color: var(--text); margin: 0 0 4px; }
+.ms-diff .df-tab { width: 100%; border-collapse: collapse; font: 11.5px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; table-layout: fixed; }
+.ms-diff .df-tab th { text-align: left; font-weight: 400; color: var(--muted); width: 34%; padding: 0 6px 0 0; white-space: nowrap; }
+.ms-diff .df-tab td { text-align: right; color: var(--text); padding: 0 0 0 4px; white-space: nowrap; }
+.ms-diff .df-tab .df-head th, .ms-diff .df-tab .df-head td { color: var(--muted); border-bottom: 1px solid rgba(255,255,255,0.08); }
+.ms-diff .df-worst th { width: 50%; }
+.ms-diff .df-item { margin: 0 0 6px; padding-left: 8px; border-left: 2px solid rgba(255,255,255,0.14); }
+.ms-diff .df-item.df-bad { border-left-color: #ff6b6b; }
+.ms-diff .df-main { color: var(--text); font-variant-numeric: tabular-nums; }
+.ms-diff .df-sub { color: var(--muted); font-variant-numeric: tabular-nums; }
+.ms-diff .df-flag { color: #ff8a8a; font-weight: 600; }
+.ms-bubble { position: absolute; transform: translate(-50%, 6px); top: 100%; padding: 3px 9px; border-radius: 999px; background: #1f9d55; color: #fff; font-size: 11.5px; font-weight: 600; pointer-events: none; white-space: nowrap; box-shadow: 0 2px 8px rgba(0,0,0,0.4); animation: ms-bubble 1.6s ease forwards; z-index: 5; }
+.ms-bubble.bad { background: #c0392b; }
+@keyframes ms-bubble { 0% { opacity: 0; transform: translate(-50%, -2px); } 12% { opacity: 1; transform: translate(-50%, 6px); } 80% { opacity: 1; } 100% { opacity: 0; } }
 .ms-main-card #ms-compare-worst:empty { display: none; }
 .ms-main-card #ms-compare-worst button { font-variant-numeric: tabular-nums; }

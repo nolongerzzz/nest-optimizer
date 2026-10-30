@@ -424,5 +424,38 @@
   }
   function pad(s, n) { s = String(s); while (s.length < n) s += ' '; return s; }
 
-  return { compute: compute, text: text, classOf: classOf, edt2: edt2, CLASSES: CLASSES };
+  /** The same report as blocks for a narrow panel (no wide table to scroll sideways): the card draws these, the words are text()'s. */
+  function view(rep) {
+    if (!rep || !rep.layers || !rep.layers.length) return [{ kind: 'lead', text: 'Nothing to compare.' }];
+    var B = [], f1 = function (v) { return v.toFixed(1); };
+    B.push({ kind: 'lead', text: 'A = Plate 1 (ours), B = Plate 2 (reference). Areas in mm2 per layer summed over the piece; Z in mm.' });
+    var rows = [];
+    CLASSES.forEach(function (c) {
+      var s = rep.classes[c];
+      if (!s || (!s.A.layers && !s.B.layers)) return;
+      var zr = function (q) { return q.firstZ == null ? '-' : q.firstZ.toFixed(2) + ' - ' + q.lastZ.toFixed(2); };
+      rows.push({ label: LABEL[c], zA: zr(s.A), zB: zr(s.B), layersA: s.A.layers, layersB: s.B.layers, onlyA: f1(s.onlyAMm2), onlyB: f1(s.onlyBMm2), both: f1(s.bothMm2) });
+    });
+    B.push({ kind: 'types', title: 'line type', rows: rows });
+    ['A', 'B'].forEach(function (n) {
+      var p = rep.plate[n];
+      var items = p.map(function (q) {
+        return { head: 'z ' + q.z.toFixed(2) + '  ' + q.regions + ' plate' + (q.regions === 1 ? '' : 's') + ' ' + f1(q.plateMm2) + ' mm2',
+                 tree: 'tree under it ' + f1(q.supportBelowMm2), outline: 'past its outline ' + q.overshootMm2.toFixed(2) + ' mm2 (max ' + q.overshootMaxMm.toFixed(2) + ' mm)',
+                 note: q.gap ? 'GAP: ' + q.gapRegions + ' of ' + q.regions + ' with no tree under' : q.treeAbsent ? '(no tree in this selection - gap not judged)' : q.onBed ? '(on the bed)' : '', gap: !!q.gap };
+      });
+      B.push({ kind: 'plates', title: n + ': ' + (p.length ? p.length + ' plate' + (p.length === 1 ? '' : 's') + ' (first layers of interface / transition)' : 'no interface or transition plate'), items: items });
+    });
+    var G = rep.gaps;
+    var gi = function (q) {
+      return { what: q.cls, z: 'z ' + q.zFrom.toFixed(2) + (q.zTo > q.zFrom ? ' - ' + q.zTo.toFixed(2) : '') + '  (' + q.layers + ' layer' + (q.layers === 1 ? '' : 's') + ')',
+               at: 'at X ' + f1(q.x) + ' Y ' + f1(q.y) + '  box ' + f1(q.sizeMm[0]) + ' x ' + f1(q.sizeMm[1]), area: f1(q.areaMm2) + ' mm2 in all (peak ' + f1(q.peakMm2) + '/layer)' };
+    };
+    if (G && G.aLacks.length) B.push({ kind: 'gaps', title: 'WHERE OURS HAS NOTHING AND THE REFERENCE DOES (largest first; X Y in A\'s file coordinates):', items: G.aLacks.map(gi) });
+    if (G && G.bLacks.length) B.push({ kind: 'gaps', title: 'where ours has material the reference does not:', items: G.bLacks.map(gi) });
+    if (rep.worst.length) B.push({ kind: 'worst', title: 'layers that differ most (support, interface and transition together):', items: rep.worst.map(function (w) { return [w.z.toFixed(2), f1(w.supportDiffMm2)]; }) });
+    return B;
+  }
+
+  return { compute: compute, text: text, view: view, classOf: classOf, edt2: edt2, CLASSES: CLASSES };
 });

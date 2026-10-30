@@ -79,5 +79,10 @@ check('...and A\'s offset is taken off the coordinates (A stands 10 mm over: x -
 check('a region stacks layer on layer: a column only B has, 5 layers, is one region', (() => { const Bc = [], Ac = []; for (let i = 1; i <= 5; i++) Bc.push(...sq('Support', lay(i), 0, 0, 1)); Ac.push(...sq('Outer wall', lay(1), 0, 0, 5)); const g = D.compute(Ac, Bc).gaps.aLacks; return g.length === 1 && g[0].layers === 5 && g[0].zFrom === 0.2 && g[0].zTo === 1; })());
 check('the text names where: "WHERE OURS HAS NOTHING"', /WHERE OURS HAS NOTHING/.test(D.text(R)) && /at X /.test(D.text(R)));
 check('empty input is answered', D.text(D.compute([], [])) === 'Nothing to compare.');
+/* the narrow view: the same words as the text, in blocks the card draws (no wide table to scroll sideways) */
+const V = D.view(R), vt = JSON.stringify(V);
+check('the view: a lead, the line-type rows, the plates, where, the worst layers', V[0].kind === 'lead' && V.some(b => b.kind === 'types' && b.rows.length) && V.filter(b => b.kind === 'plates').length === 2 && V.some(b => b.kind === 'gaps') && V.some(b => b.kind === 'worst'), vt.slice(0, 200));
+check('...it carries the text\'s phrases (WHERE OURS HAS NOTHING, the tip\'s X Y, a GAP)', /WHERE OURS HAS NOTHING/.test(vt) && /at X /.test(vt) && /GAP:|no tree in this selection|on the bed|tree under it/.test(vt));
+check('...and empty input is answered the same', D.view(D.compute([], []))[0].text === 'Nothing to compare.');
 console.log(fails ? '\nFAILED (' + fails + ')' : '\nall gates held');
 process.exit(fails ? 1 : 0);
