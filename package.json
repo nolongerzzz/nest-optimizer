@@ -277,6 +277,7 @@
     "gscope:take": "node tools/nso_gscope_take_test.js",
     "gscope:compare": "node tools/nso_gscope_compare_test.js",
     "compare:diff": "node tools/nso_compare_diff_test.js",
+    "support:score": "node tools/nso_support_score.js --vs tools/support-score-baseline.json",
     "gscope:select": "node tools/nso_gscope_select_test.js",
     "gscope:speed": "node tools/nso_gscope_speed_test.js",
     "gscope:speed-orbit": "node tools/nso_gscope_speed_test.js --only=orbit",
