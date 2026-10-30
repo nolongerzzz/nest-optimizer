@@ -170,6 +170,7 @@
     "grid:plate": {"weight":10250,"note":""},
     "grid:wire": {"weight":5600,"note":""},
     "gscope:compare": {"weight":21000,"note":"12 s locally x 1.7, rounded up; added with the weights check, which found it missing from 8bbfd6a"},
+    "compare:diff": {"weight":1000,"note":"node only, synthetic moves"},
     "gscope:select": {"weight":94050,"note":""},
     "gscope:measure": {"weight":2000,"note":"estimate: node only, the moves of one small fixture"},
     "gscope:shell": {"weight":16050,"note":""},
