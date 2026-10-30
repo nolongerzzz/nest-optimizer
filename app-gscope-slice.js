@@ -185,6 +185,10 @@ var NSO_GSCOPE_SLICE = (function () {
     var ni = 0;
     d.objects.forEach(function (o) { var su = supportOf(o); if (su && su.interfaceLayers > ni) ni = su.interfaceLayers; });
     if (ni > 2 && !(optsOver && optsOver.supportInterfaceLayers != null)) opts.supportInterfaceLayers = ni;
+    /* ...and a Dense sheet's thicker layers (Bambu's 0.275) mean the supports are cut on their own layer grid, as Bambu's independent support layer height does */
+    var sl = 0;
+    d.objects.forEach(function (o) { var su = supportOf(o); if (su && su.sheetLayerMm > sl) sl = su.sheetLayerMm; });
+    if (sl > 0 && !(optsOver && optsOver.supportLayerMaxMm != null)) opts.supportLayerMaxMm = 0.28;
     var flagged = [];
     var objects = d.objects.map(function (o) {
       var ns = nonSolidOf(o);

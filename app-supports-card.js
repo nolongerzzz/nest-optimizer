@@ -214,7 +214,7 @@ var NSO_SUPPORTS_CARD = (function () {
     /* Dense belongs to the one-trunk build: its sheet is planned over the thinned tips the reference's is. A hand-placed row of three
        tips (Custom) did not form a sheet at 0.47 mm that it forms at 0.84 (support:custom), so the other builds stay Open. */
     var SI = window.NSO_SupportInterface, dense = !!o && o.dense !== false && oneTrunkOn(o);
-    var out = dense && SI && SI.SHEET && SI.SHEET.densePitchMm ? Object.assign({}, PARTS_OPTS, { sheetPitchMm: SI.SHEET.densePitchMm, interfaceLayers: SI.SHEET.denseInterfaceLayers, sheetFlatGapMm: SI.SHEET.denseFlatGapMaxMm, sheetStairLegMm: SI.SHEET.denseStairLegMm }) : Object.assign({}, PARTS_OPTS);
+    var out = dense && SI && SI.SHEET && SI.SHEET.densePitchMm ? Object.assign({}, PARTS_OPTS, { sheetPitchMm: SI.SHEET.densePitchMm, interfaceLayers: SI.SHEET.denseInterfaceLayers, sheetLayerMm: SI.SHEET.denseSheetLayerMm, sheetFlatGapMm: SI.SHEET.denseFlatGapMaxMm, sheetStairLegMm: SI.SHEET.denseStairLegMm }) : Object.assign({}, PARTS_OPTS);
     /* THE PLATFORM is the tree's own (the owner's: raft is a support type of its own; the platform under a flat face - the interface and the transition
        laid from each footprint and its height, layer by layer - is the original branch / transition / interface, and was only tied to the Raft box).
        Auto (the one-trunk tree) always lays it. The box now gates only the builds that are not Auto: off, their sheet is built from the tips alone, as it
@@ -1816,6 +1816,7 @@ var NSO_SUPPORTS_CARD = (function () {
         var meta = { card: true, hostSourceId: c.hostId, hostName: c.hm.name, regionId: r.rid, style: o.style,
           sideMm: r.sideMm || o.sideMm, rest: o.rest, angleDeg: S.angle, mode: S.mode, keys: sd.keys, holds: sd.holds, landing: sd.landing };
         if (sd.brim) meta.brim = true;
+        meta.sheetLayerMm = partsOptsOf(o).sheetLayerMm || 0;               /* a Dense sheet's layers are this thick: the slicer cuts the supports on their own layer grid then */
         meta.interfaceLayers = partsOptsOf(o).interfaceLayers || 2;      /* how many interface layers its sheet has: the slicer reads a 3-layer sheet as one */
         var pl = placeSolid(sd.soup, meta, c.host, c.D.minZ, sd.brim ? c.hm.name + ' - brim' : c.hm.name + ' - support ' + (r.rid + 1) + '.' + (++n) + ' (' + STYLES[o.style] + ')');
         if (!pl.ok) throw new Error(pl.reason);

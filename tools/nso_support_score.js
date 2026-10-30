@@ -31,6 +31,42 @@ function centre(moves) {
   return isFinite(x0) ? [(x0 + x1) / 2, (y0 + y1) / 2] : null;
 }
 
+
+/* The plate as a volume, independent of how either slicer cut it into layers: every plate line drawn FAT_MM wide, over the height of its layer
+   (z - h .. z), into cells of CELL_MM x CELL_MM x ZBIN_MM; the IoU of the two volumes. A plate on another layer grid is not penalised for the grid. */
+const CELL = 0.2, ZBIN = 0.05, FAT = 1.0;
+function volumeIoU(a, b) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, zMax = 0;
+  const keep = (ms) => ms.filter(m => /^Support (interface|transition)$/.test(m.feature));
+  const A = keep(a), B = keep(b);
+  A.concat(B).forEach(m => { x0 = Math.min(x0, m.x0, m.x1); x1 = Math.max(x1, m.x0, m.x1); y0 = Math.min(y0, m.y0, m.y1); y1 = Math.max(y1, m.y0, m.y1); zMax = Math.max(zMax, m.z); });
+  if (!isFinite(x0)) return null;
+  x0 -= FAT; y0 -= FAT; x1 += FAT; y1 += FAT;
+  const nx = Math.ceil((x1 - x0) / CELL) + 1, ny = Math.ceil((y1 - y0) / CELL) + 1, nz = Math.ceil(zMax / ZBIN) + 2;
+  const paint = (ms) => {
+    const V = new Uint8Array(nx * ny * nz), r = FAT / 2;
+    ms.forEach(m => {
+      const h = m.height || 0.2, k0 = Math.max(0, Math.round((m.z - h) / ZBIN)), k1 = Math.min(nz - 1, Math.round(m.z / ZBIN) - 1);
+      const i0 = Math.max(0, Math.floor((Math.min(m.x0, m.x1) - r - x0) / CELL)), i1 = Math.min(nx - 1, Math.ceil((Math.max(m.x0, m.x1) + r - x0) / CELL));
+      const j0 = Math.max(0, Math.floor((Math.min(m.y0, m.y1) - r - y0) / CELL)), j1 = Math.min(ny - 1, Math.ceil((Math.max(m.y0, m.y1) + r - y0) / CELL));
+      const dx = m.x1 - m.x0, dy = m.y1 - m.y0, L2 = dx * dx + dy * dy;
+      for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+        const px = x0 + (i + 0.5) * CELL, py = y0 + (j + 0.5) * CELL;
+        let t = L2 > 0 ? ((px - m.x0) * dx + (py - m.y0) * dy) / L2 : 0; t = t < 0 ? 0 : t > 1 ? 1 : t;
+        const qx = px - (m.x0 + t * dx), qy = py - (m.y0 + t * dy);
+        if (qx * qx + qy * qy > r * r) continue;
+        for (let k = k0; k <= k1; k++) V[(k * ny + j) * nx + i] = 1;
+      }
+    });
+    return V;
+  };
+  const VA = paint(A), VB = paint(B);
+  let both = 0, oa = 0, ob = 0;
+  for (let q = 0; q < VA.length; q++) { if (VA[q] && VB[q]) both++; else if (VA[q]) oa++; else if (VB[q]) ob++; }
+  const c3 = CELL * CELL * ZBIN;
+  return { iou: both + oa + ob ? both / (both + oa + ob) : null, bothMm3: both * c3, onlyOursMm3: oa * c3, onlyTheirsMm3: ob * c3 };
+}
+
 function movesOf(result) {
   const out = [];
   result.objects.forEach(ob => (ob.layers || []).forEach(L => (L.paths || []).forEach(p => {
@@ -77,7 +113,7 @@ function scoreOf(rep) {
     const sups = app.supportsOf(ids[i]).map(m => Array.from(app.soupOf(m.id)));
     const objl = [{ name: 'part', soup: Float32Array.from(app.soupOf(ids[i])), key: 101, role: 'part' }]
       .concat(sups.map((s, k) => ({ name: 's' + k, soup: Float32Array.from(s), key: 201 + k, role: 'support', hostKey: 101 })));
-    const ours = movesOf(SL.sliceObjects(objl, SL.defaultsFor(0.4, { supportInterfaceLayers: 3 }), WASM));
+    const ours = movesOf(SL.sliceObjects(objl, SL.defaultsFor(0.4, { supportInterfaceLayers: 3, supportLayerMaxMm: process.env.NSO_SCORE_FLAT ? 0 : 0.28 }), WASM));
     const rid = Object.keys(names).filter(k => names[k] === objs[i].name).map(Number);
     const theirs = ref.parsed.moves.filter(m => rid.includes(+m.objectId));
     const ca = centre(ours), cb = centre(theirs);
@@ -89,15 +125,16 @@ function scoreOf(rep) {
     const fat = (ms) => ms.filter(m => /^Support (interface|transition)$/.test(m.feature)).map(m => Object.assign({}, m, { width: 1.6 }));
     const rf = D.compute(fat(ours), fat(shifted), {});
     const fb = PLATE.reduce((a, c) => a + rf.classes[c].bothMm2, 0), fa = PLATE.reduce((a, c) => a + rf.classes[c].onlyAMm2, 0), fo = PLATE.reduce((a, c) => a + rf.classes[c].onlyBMm2, 0);
+    const vi = volumeIoU(ours, shifted); rows[nm].volIoU = vi && vi.iou; rows[nm].volOnlyOursMm3 = vi && vi.onlyOursMm3; rows[nm].volOnlyTheirsMm3 = vi && vi.onlyTheirsMm3;
     rows[nm].footIoU = fb + fa + fo ? fb / (fb + fa + fo) : null; rows[nm].footOnlyOursMm2 = fa; rows[nm].footOnlyTheirsMm2 = fo;
     rows[nm].gaps = { oursLacks: rep.gaps.aLacks.slice(0, 4), theirsLacks: rep.gaps.bLacks.slice(0, 2) };
   }
   const f = (v, d) => v == null ? '   -  ' : v.toFixed(d == null ? 2 : d).padStart(6);
   const before = arg('--vs') && fs.existsSync(arg('--vs')) ? JSON.parse(fs.readFileSync(arg('--vs'), 'utf8')) : null;
-  console.log('piece                  foot IoU  line IoU  len   mv/mm   z0 ours/theirs   tree IoU  tree len' + (before ? '    foot IoU was' : ''));
+  console.log('piece                  vol IoU  foot IoU  line IoU  len   mv/mm   z0 ours/theirs   tree IoU  tree len' + (before ? '    foot IoU was' : ''));
   Object.keys(rows).forEach(nm => {
     const r = rows[nm], b = before && before[nm];
-    console.log(nm.padEnd(22) + f(r.footIoU) + '  ' + f(r.plateIoU) + '    ' + f(r.lenRatio) + ' ' + f(r.mvRatio) + '   ' + f(r.z0Ours) + '/' + f(r.z0Theirs).trim().padEnd(6) + '   ' + f(r.treeIoU) + '   ' + f(r.treeLenRatio) +
+    console.log(nm.padEnd(22) + f(r.volIoU) + '  ' + f(r.footIoU) + '  ' + f(r.plateIoU) + '    ' + f(r.lenRatio) + ' ' + f(r.mvRatio) + '   ' + f(r.z0Ours) + '/' + f(r.z0Theirs).trim().padEnd(6) + '   ' + f(r.treeIoU) + '   ' + f(r.treeLenRatio) +
                 (b ? '      ' + f(b.footIoU) + (b.footIoU != null && r.footIoU != null ? (r.footIoU - b.footIoU >= 0 ? '  +' : '  ') + (r.footIoU - b.footIoU).toFixed(2) : '') : ''));
   });
   const out = arg('--json');

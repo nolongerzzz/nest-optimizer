@@ -550,6 +550,16 @@ first layer thick from `zPlate` - `{ ok, needed, soup, polys, areaMm2, loops }`,
 spacing at a time (`brimLoops`; a ring 4.9 mm wide gives 5 + 5 loops, a ring cut by the pad 5 racetrack loops of the same length), feature `Brim`; no walls, infill or
 supports typed on it, never a host; a part with a brim object of its own gets no `addBrims` brim.
 
+### Supports on their own layer grid (`supportLayerMaxMm`)
+
+Bambu's *independent support layer height* cuts supports on a grid of their own: z0 0.2, anchored at each sheet's top and the last layer, every stretch
+split into equal steps of at most the limit (0.28 -> about 0.2755 over 14.6 mm of the Base; 0.2774 on the Oblique's stair), and where anchors lie
+within one step of each other (a stair, a sloped top) the part's 0.2. `supportLayerMaxMm: 0.28` does the same here; the default 0 keeps every support
+on the part's planes (byte for byte as before, pinned). Each support is sliced on its own `planes` (`supportGrid`), the tree, interface and
+transition typing are done on those planes against the host's by height (`layersOverX`, `layersUnderX`), and `toGcode` merges the layers of all
+objects by Z, a `; LAYER_HEIGHT:` per object where it differs. The print planner and other consumers of `res.planes` do not know the grid: G-scope's
+Slice turns it on for a Dense sheet (`nsoSupport.sheetLayerMm`) only.
+
 ## 7. Scope and complexity, as found
 
 - **The real work was measurement.** The textbook core is the smaller part.

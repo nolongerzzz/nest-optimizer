@@ -301,6 +301,7 @@
       brimLineWidthMm: null,               // null -> 1.25 x the nozzle (Bambu's first-layer line, 0.5 mm at 0.4)
       brimAutoRatio: 2,
       brimSupportGapMm: 0.02,
+      supportLayerMaxMm: 0,                // 0 = supports are cut on the part's layers; 0.28 = on their own (Bambu's independent_support_layer_height): see sliceObjects
       supportInterfaceLayers: null,        // null -> CONSTANTS.supportSheet.interfaceLayers (2); a sheet of more says so
       weldMm: 1e-4,
       dropToPlate: true,
@@ -1387,11 +1388,12 @@
       var th = o.supportThresholdDeg * Math.PI / 180;
       var minOver = o.overhangMinAreaMm2 != null ? o.overhangMinAreaMm2 : o.outerWallWidthMm * o.outerWallWidthMm;
 
-      var perObject = objs.map(function (ob, oi) {
+      /* an object cut on the planes `pl` (the shared ones, or - a support, when supportLayerMaxMm is on - its own) */
+      function makeP(ob, oi, pl) {
         // Per-object override: a piece the user flagged non-solid is sliced
         // with gapCloseMm 0 - its open edges are the design, not a hole to
         // chord shut (the caller reads the flag; this module never infers it).
-        var sm = sliceMesh(ob.soup, planes, ob.gapCloseMm != null ? { weldMm: o.weldMm, gapCloseMm: ob.gapCloseMm } : o);
+        var sm = sliceMesh(ob.soup, pl, ob.gapCloseMm != null ? { weldMm: o.weldMm, gapCloseMm: ob.gapCloseMm } : o);
         var flipped = false;
         var total = 0;
         sm.sections.forEach(function (sec) { sec.loops.forEach(function (l) { total += signedArea(l); }); });
@@ -1412,12 +1414,14 @@
                  role: ob.role === 'support' ? 'support' : ob.role === 'brim' ? 'brim' : 'part', key: ob.key, hostKey: ob.hostKey,
                  thin: ob.detectThinWall != null ? !!ob.detectThinWall
                    : (ob.role === 'support' ? CONSTANTS.thinWall.supportsOn : !!o.detectThinWall),
-                 layers: [] };
-      });
+                 layers: [], planes: pl === planes ? null : pl };
+      }
+      var perObject = objs.map(function (ob, oi) { return makeP(ob, oi, planes); });
 
       // Layers, object by object.
-      perObject.forEach(function (P) {
-        var S = P.S, n = planes.length;
+      var buildLayers = function (P) {
+        var PL = P.planes || planes;
+        var S = P.S, n = PL.length;
         var sparsePrev = g.empty();
         /* A SUPPORT IS HOLLOW, as its export says (SHEET.slicerSettings: wall_loops 1, sparse_infill_density 0%) and as Bambu's own tree is: one wall
            round the trunk and no filler inside it. The shells (the first layers, the top under a sheet) stay the profile's. */
@@ -1426,16 +1430,16 @@
         if (P.role === 'brim') {
           /* a brim built with the supports (brimFor): one layer, its section printed as the brim's own loops, nothing else */
           for (var bi = 0; bi < n; bi++) {
-            var BL = { index: bi, printZ: planes[bi].printZ, h: planes[bi].h, paths: [], areaMm2: g.area(S[bi]), wallCount: 0 };
-            if (bi === 0 && !g.isEmpty(S[0])) { BL.paths = brimLoops(g, S[0], o, planes[0].h); BL.brimLoops = BL.paths.length; }
+            var BL = { index: bi, printZ: PL[bi].printZ, h: PL[bi].h, paths: [], areaMm2: g.area(S[bi]), wallCount: 0 };
+            if (bi === 0 && !g.isEmpty(S[0])) { BL.paths = brimLoops(g, S[0], o, PL[0].h); BL.brimLoops = BL.paths.length; }
             P.layers.push(BL);
           }
           return;
         }
         for (var i = 0; i < n; i++) {
-          var h = planes[i].h;
+          var h = PL[i].h;
           var region = S[i];
-          var L = { index: i, printZ: planes[i].printZ, h: h, paths: [], areaMm2: g.area(region) };
+          var L = { index: i, printZ: PL[i].printZ, h: h, paths: [], areaMm2: g.area(region) };
           P.layers.push(L);
           if (g.isEmpty(region)) { L.wallCount = 0; sparsePrev = g.empty(); continue; }
 
@@ -1566,7 +1570,27 @@
           }
           sparsePrev = sparse;
         }
-      });
+      };
+      perObject.forEach(buildLayers);
+
+      /* THE SUPPORT'S OWN LAYERS (o.supportLayerMaxMm; Bambu's independent_support_layer_height). A support is not cut on the part's 0.2 grid: its layers run
+         from the first layer up to each top of its sheets (where it meets the part) in the fewest equal steps of at most supportLayerMaxMm - 0.2755 mm on a
+         flat sheet, so the plate's 2 + 3 layers are 1.38 mm thick, not 1.0 - and the grid is the part's again where a stair's tops follow each other
+         closer than that. The tops are found by typing the supports once on the shared grid; each support is then cut again on its own. */
+      var ownGrids = false;
+      if (o.supportLayerMaxMm > 0 && perObject.some(function (P) { return P.role === 'support'; })) {
+        typeSupports(g, perObject, planes, o, minOver);
+        perObject.forEach(function (P, k) {
+          if (P.role !== 'support') return;
+          var own = supportGrid(P, planes, o.supportLayerMaxMm, shiftZ);
+          if (!own) return;
+          var P2 = makeP(objs[k], k, own);
+          perObject[k] = P2;
+          buildLayers(P2);
+          ownGrids = true;
+        });
+      }
+
 
       addBrims(g, perObject, planes, o);
 
@@ -1580,6 +1604,7 @@
       for (var ci = 0; ci < planes.length; ci++) {
         for (var a = 0; a < perObject.length; a++) {
           for (var b = a + 1; b < perObject.length; b++) {
+            if (perObject[a].planes || perObject[b].planes) continue;         // on different grids: below
             var Sa = perObject[a].S[ci], Sb = perObject[b].S[ci];
             if (g.isEmpty(Sa) || g.isEmpty(Sb)) continue;
             var ov = g.inter(Sa, Sb);
@@ -1592,6 +1617,23 @@
         }
       }
 
+      if (ownGrids) {
+        /* a support on its own grid against a part: its layer, and the part's layer that holds the height of its middle */
+        perObject.forEach(function (Ps) {
+          if (!Ps.planes) return;
+          perObject.forEach(function (Pq) {
+            if (Pq === Ps || Pq.planes) return;
+            Ps.S.forEach(function (Sa, i) {
+              if (g.isEmpty(Sa)) return;
+              var zm = Ps.planes[i].printZ - Ps.planes[i].h / 2, k = -1;
+              for (var q = 0; q < planes.length; q++) if (planes[q].printZ - planes[q].h <= zm + 1e-9 && zm <= planes[q].printZ + 1e-9) { k = q; break; }
+              if (k < 0 || g.isEmpty(Pq.S[k])) return;
+              var ov = g.inter(Sa, Pq.S[k]), ar = g.area(ov);
+              if (ar > 1e-6) conflicts.push({ layer: i + 1, index: i, printZ: Ps.planes[i].printZ, a: Ps.name, b: Pq.name, areaMm2: ar, polys: g.polys(ov) });
+            });
+          });
+        });
+      }
       var linkMm = o.layerMm / Math.tan(th) + o.outerWallWidthMm;
       var withSupports = perObject.some(function (P) { return P.role === 'support'; });
       if (withSupports) typeSupports(g, perObject, planes, o, minOver);
@@ -1615,7 +1657,7 @@
             st.closedByGap += s.closedByGap; st.droppedChains += s.droppedChains;
           });
           return {
-            id: P.id, name: P.name, flipped: P.flipped, nonSolid: P.nonSolid, role: P.role,
+            id: P.id, name: P.name, flipped: P.flipped, nonSolid: P.nonSolid, role: P.role, planes: P.planes || null,
             support: P.sheet || null,
             triangles: P.mesh.triangles, degenerate: P.mesh.degenerate,
             sectionStats: st,
@@ -1850,6 +1892,54 @@
   // Supports - a support object prints as support, and holds its host up
   // ===========================================================================
 
+  /**
+   * A support's own layers (Bambu's independent support layer height): from the first layer up through each top of its sheets (P.sheet.sheets[].zHi,
+   * found on the shared grid) and its last layer, each stretch in the fewest equal steps of at most maxH. Planes in the slicer's own shape.
+   */
+  function supportGrid(P, planes, maxH, shiftZ) {
+    var z0 = planes[0].printZ, zEnd = z0, anchors = [];
+    P.layers.forEach(function (L) { if (L.areaMm2 > 0 && L.printZ > zEnd) zEnd = L.printZ; });
+    ((P.sheet && P.sheet.sheets) || []).forEach(function (sh) { anchors.push(sh.zHi); });
+    anchors.push(zEnd);
+    anchors = anchors.filter(function (a) { return a > z0 + 1e-6 && a <= zEnd + 1e-6; }).sort(function (a, b) { return a - b; });
+    var zs = [z0], prev = z0;
+    anchors.forEach(function (a) {
+      var d = a - prev;
+      if (d < 1e-6) return;
+      var n = Math.max(1, Math.ceil(d / maxH - 1e-9));
+      for (var q = 1; q <= n; q++) zs.push(prev + d * q / n);
+      prev = a;
+    });
+    if (zs.length < 2) return null;
+    return zs.map(function (z, i) {
+      var h = i === 0 ? planes[0].h : z - zs[i - 1];
+      return { index: i, printZ: z, sliceZ: z - shiftZ - h / 2, h: h };
+    });
+  }
+
+  /** Layers k of the host's planes whose underside is within gap + one layer over the top of layer i of the support's planes `sp`. */
+  function layersOverX(sp, i, hostPl, gap) {
+    var out = [];
+    for (var k = 0; k < hostPl.length; k++) {
+      var d = hostPl[k].printZ - hostPl[k].h - sp[i].printZ;
+      if (d > gap + sp[i].h + 1e-6) break;
+      if (d >= -1e-6) out.push(k);
+    }
+    return out;
+  }
+
+  /** Layers i of the support's planes `sp` whose top is within gap + one layer under the underside of layer k of the host's planes. */
+  function layersUnderX(hostPl, k, sp, gap) {
+    var out = [], under = hostPl[k].printZ - hostPl[k].h;
+    for (var i = sp.length - 1; i >= 0; i--) {
+      var d = under - sp[i].printZ;
+      if (d < -1e-6) continue;
+      if (d > gap + sp[i].h + 1e-6) break;
+      out.push(i);
+    }
+    return out;
+  }
+
   /** Layers k whose underside (printZ - h) is within gap + one layer over layer i's top. */
   function layersOver(planes, i, gap) {
     var out = [];
@@ -1921,11 +2011,12 @@
        stair's band stands its back edge up to 0.55 mm under the part (its
        width in whole beads), so the one a layer lands on can lie a layer
        further below it (C.stairLayers) */
-    var stairH = (C.stairLayers || 0) * (planes.length ? planes[planes.length - 1].h : 0.2);
+    var stairHOf = function (SP) { return (C.stairLayers || 0) * (SP.length ? SP[SP.length - 1].h : 0.2); };
     var parts = perObject.filter(function (Q) { return Q.role === 'part'; });
-    var n = planes.length;
     perObject.forEach(function (P) {
       if (P.role !== 'support') return;
+      var SP = P.planes || planes;                                             // this support's own layers, and `planes` the part's
+      var n = SP.length, stairH = stairHOf(SP);
       var host = P.hostKey != null ? parts.find(function (Q) { return Q.key != null && Q.key === P.hostKey; }) || null : null;
       var hosts = host ? [host] : parts;
       P.host = host;
@@ -1982,7 +2073,7 @@
          top and made T T I I read T I I I. */
       function sloped(cs, i) {
         if (!cs) return null;
-        var ks = layersOver(planes, i, gap + stairH);
+        var ks = layersOverX(SP, i, planes, gap + stairH);
         var keep = g.parts(cs).filter(function (pc) {
           var bb = [Infinity, Infinity, -Infinity, -Infinity], A = g.area(pc);
           g.polys(pc).forEach(function (Q) { Q.forEach(function (q) { bb[0] = Math.min(bb[0], q[0]); bb[1] = Math.min(bb[1], q[1]); bb[2] = Math.max(bb[2], q[0]); bb[3] = Math.max(bb[3], q[1]); }); });
@@ -1998,7 +2089,7 @@
       }
       function overAt(i, d) {
         var over = [];
-        layersOver(planes, i, d).forEach(function (k) {
+        layersOverX(SP, i, planes, d).forEach(function (k) {
           hosts.forEach(function (Q) { if (!g.isEmpty(Q.S[k])) over.push({ Q: Q, cs: Q.S[k] }); });
         });
         return over;
@@ -2031,7 +2122,7 @@
       // sheet's islands on the layer above are the sheet's (each layer's lines
       // cross the ones above), for NI + NT layers; the islands under the last
       // that overlap it are its tips.
-      var reachMm = gap + (NI + NT + 2) * (planes.length ? planes[planes.length - 1].h : 0.2);
+      var reachMm = gap + (NI + NT + 2) * (SP.length ? SP[SP.length - 1].h : 0.2);
       function underPart(j, U) {
         var over = overAt(j, reachMm);
         if (!over.length) return false;
@@ -2066,7 +2157,7 @@
         }
         lowest = Math.min(lowest, lo); mLast = Math.max(mLast, m); tipsN = Math.max(tipsN, m >= NI + NT ? lvl.length : 0);
         });
-        sheets.push({ topLayer: i0, zLo: planes[lowest].printZ - planes[lowest].h, zHi: planes[i0].printZ,
+        sheets.push({ topLayer: i0, zLo: SP[lowest].printZ - SP[lowest].h, zHi: SP[i0].printZ,
                       areaMm2: g.area(tAll), tips: tipsN });
       });
       var counts = { 'Support': 0, 'Support transition': 0, 'Support interface': 0 };
@@ -2076,7 +2167,7 @@
          Bambu types what lies under its overhang - so a column further down is the tree under the sheet: Support. A flat sheet keeps its islands
          (a dome's flat sheet lies up to its reach under the part at the rim, and is all sheet). A path that is part sheet and part tree is split
          where its type changes (a loop of a strip with a post's wall on it is an interface run and a support run). */
-      var hIm = P.layers.length ? planes[planes.length - 1].h : 0.2;
+      var hIm = P.layers.length ? SP[SP.length - 1].h : 0.2;
       var dIn = gap + (NI - 1) * hIm + 0.25, dTr = gap + (NI + NT - 1) * hIm + 0.35;
       function hostPolys(j, d) {
         var over = overAt(j, d);
@@ -2253,9 +2344,9 @@
       openMm: o.outerWallWidthMm / 2,
       minMm2: minOver,
       at: function (k) {
-        var under = layersUnder(planes, k, o.supportGapMm);
         var out = [];
         sups.forEach(function (P) {
+          var under = P.planes ? layersUnderX(planes, k, P.planes, o.supportGapMm) : layersUnder(planes, k, o.supportGapMm);
           var cs = g.unionAll(under.map(function (i) { return P.footAt(i); }));
           if (!g.isEmpty(cs)) out.push({ sup: P, cs: cs });
         });
@@ -2278,7 +2369,8 @@
    * under the overhang floor dropped - a strip narrower than a line beside a
    * sheet is bridged by the first layer, as any overhang under that floor is.
    */
-  function overhangRegions(g, P, planes, linkMm, cover) {
+  function overhangRegions(g, P, planesShared, linkMm, cover) {
+    var planes = P.planes || planesShared;
     var regions = [];
     var prev = [];      // [{ cs, region }]
     var coverCache = new Map();
@@ -2410,15 +2502,32 @@
     L.push('M83');
     L.push('G90');
     var x = null, y = null;
-    for (var i = 0; i < res.planes.length; i++) {
-      var pl = res.planes[i];
+    /* the layers in the order they print: the part's planes and every support's own, by height (a support on its own grid prints between the part's) */
+    var zOrder = [], seenZ = {};
+    var addZ = function (z) { var k = Math.round(z * 10000); if (!seenZ[k]) { seenZ[k] = true; zOrder.push(z); } };
+    res.planes.forEach(function (pl) { addZ(pl.printZ); });
+    res.objects.forEach(function (ob) { if (ob.planes) ob.planes.forEach(function (pl) { addZ(pl.printZ); }); });
+    zOrder.sort(function (a, b) { return a - b; });
+    var layerAt = function (ob, z) {
+      var pls = ob.planes || res.planes;
+      // layers are in order: a binary search for the one at z
+      var lo = 0, hi = pls.length - 1;
+      while (lo <= hi) { var mid = (lo + hi) >> 1, dz = pls[mid].printZ - z; if (Math.abs(dz) < 5e-5) return ob.layers[mid]; if (dz < 0) lo = mid + 1; else hi = mid - 1; }
+      return null;
+    };
+    for (var zi = 0; zi < zOrder.length; zi++) {
+      var zNow = zOrder[zi], hFirst = null;
+      var present = res.objects.map(function (ob) { var lay = layerAt(ob, zNow); return lay && lay.paths.length ? { ob: ob, lay: lay } : null; }).filter(Boolean);
+      var shared = res.planes.filter(function (pl) { return Math.abs(pl.printZ - zNow) < 5e-5; })[0];
+      if (!present.length && !shared) continue;
+      var plH = shared ? shared.h : present[0].lay.h;
       L.push('; CHANGE_LAYER');
-      L.push('; Z_HEIGHT: ' + fmt(pl.printZ, 4));
-      L.push('; LAYER_HEIGHT: ' + fmt(pl.h, 4));
-      L.push('G1 Z' + fmt(pl.printZ, 4) + ' F1200');
-      res.objects.forEach(function (ob) {
-        var lay = ob.layers[i];
-        if (!lay || !lay.paths.length) return;
+      L.push('; Z_HEIGHT: ' + fmt(zNow, 4));
+      L.push('; LAYER_HEIGHT: ' + fmt(plH, 4));
+      L.push('G1 Z' + fmt(zNow, 4) + ' F1200');
+      present.forEach(function (it) {
+        var ob = it.ob, lay = it.lay, pl = { h: lay.h };
+        if (Math.abs(lay.h - plH) > 1e-6) L.push('; LAYER_HEIGHT: ' + fmt(lay.h, 4));
         L.push('; OBJECT_ID: ' + ob.id);
         var feat = null;
         lay.paths.forEach(function (p) {
@@ -2426,9 +2535,6 @@
           if (pts.length < 2) return;
           if (p.feature !== feat) { feat = p.feature; L.push('; FEATURE: ' + feat); }
           var area = beadArea(p.width, pl.h);
-          // E is computed from the coordinates AS WRITTEN (rounded to 4
-          // decimals), so a reader recovers each move's width exactly even on
-          // a move a few microns long.
           var sx = fmt(pts[0][0], 4), sy = fmt(pts[0][1], 4);
           L.push('G0 X' + sx + ' Y' + sy);
           x = +sx; y = +sy;

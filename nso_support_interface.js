@@ -1436,6 +1436,7 @@
     var o = {
       gap: opts.gapMm == null ? GAP_MM : +opts.gapMm,
       layer: opts.layerMm == null ? LAYER_MM : +opts.layerMm,
+      sheetLayer: opts.sheetLayerMm > 0 ? +opts.sheetLayerMm : 0,            /* a flat plate's layers are this thick (Bambu's support layers: 0.275), 0: the layer's */
       width: opts.widthMm == null ? Math.round(TH.floorFor(opts.nozzle) * SHEET_UNDER * 100) / 100 : +opts.widthMm,
       pitch: opts.pitchMm == null ? SHEET_PITCH_MM : +opts.pitchMm,
       side: opts.sideMm == null ? 1.2 : +opts.sideMm,
@@ -1509,7 +1510,8 @@
       if (!h || h.cell !== Math.max(1, reach * 4)) h = obsEx[i] = exactPrep(obstacles[i], reach);
       return h;
     }
-    var NL = ROLES.length, stackH = NL * o.layer;
+    if (!(o.sheetLayer > 0)) o.sheetLayer = o.layer;
+    var NL = ROLES.length, stackH = NL * o.sheetLayer;
     /* how far under the cap's top a capped column ends: CAP_TUCK and half its
        diagonal - and the cap rises at least that and CAP_TUCK again, so the
        column always ends inside its cap's height (a strut of 2.7 mm or more,
@@ -1798,6 +1800,10 @@
         mmin = 1e9; mmax = -1e9;
         for (var q9 = 0; q9 < N; q9++) if (usable[q9]) { if (m[q9] < mmin) mmin = m[q9]; if (m[q9] > mmax) mmax = m[q9]; }
         if (mmin > mmax)return;
+        /* A FLAT STACK (one height over the whole plate) is laid in the sheet's own layer thickness, down from its top: Bambu's 0.275 mm layers, 5 of them 1.375 mm; a plate whose
+           stacks step (a slope, a dome's flank) stays on the part's layers */
+        var thk = (o.sheetLayer !== o.layer && mmin === mmax) ? o.sheetLayer : o.layer, zTopFlat = A + (mmax + 1) * o.layer;
+        var zbOf = function (nn) { return thk === o.layer ? A + nn * o.layer : zTopFlat - (NL - (nn - (mmin - NL + 1))) * thk; };
         /* the tips this plate carries: where the plate is under the tip's contact */
         var carry = mine.filter(function (t) {
           var ic = Math.round((t.contact[0] - ox) / CELLS), jc = Math.round((t.contact[1] - oy) / CELLS);
@@ -1816,7 +1822,7 @@
           for (var q6 = 0; q6 < N; q6++) if (usable[q6] && n <= m[q6] && n >= m[q6] - NL + 1) { Mk[q6] = 1; any = true; }
           if (!any) continue;
           var Mraw = Mk;
-          var zb = A + n * o.layer, pl = null, paths = null, ex2 = null;
+          var zb = zbOf(n), pl = null, paths = null, ex2 = null;
           for (var tryN = 0; tryN < 5; tryN++) {
             /* a layer the extrusion refuses is asked again with more room between its walls, then as its loops alone */
             beat();
@@ -1833,7 +1839,7 @@
               weak = (plc.loops.length > 0 || plc.lines.length > 0) && coverShare(Mk, cnx, cny, ox + cI0 * CELLS, oy + cJ0 * CELLS, CELLS, o.width, plc.loops.map(function (l) { return l.ring; }).concat(plc.lines, plc.thin)) < SLAB_WEAK_SHARE;
             }
             if (o.slab === true || weak) {
-              var sl = slabOfMask(Mk, cnx, cny, ox + cI0 * CELLS, oy + cJ0 * CELLS, CELLS, zb, zb + o.layer, o.slabEps);
+              var sl = slabOfMask(Mk, cnx, cny, ox + cI0 * CELLS, oy + cJ0 * CELLS, CELLS, zb, zb + thk, o.slabEps);
               if (sl) {
                 var slLen = 0; sl.rings.forEach(function (r) { for (var k = 1; k < r.length; k++) slLen += Math.hypot(r[k][0] - r[k - 1][0], r[k][1] - r[k - 1][1]); });
                 pl = { loops: sl.rings.map(function (r) { return { ring: r, lenMm: 0 }; }), lines: [], thin: [], slab: true };
@@ -1849,10 +1855,10 @@
             if (tryN === 4) { var lg = null; pl.loops.forEach(function (l) { if (!lg || l.lenMm > lg.lenMm) lg = l; }); pl.loops = lg ? [lg] : []; }
             if (!pl.loops.length && !pl.thin.length && !pl.lines.length) break;
             paths = pl.loops.map(function (l) { return l.ring; }).concat(pl.lines, pl.thin);
-            ex2 = RL.extrudeFlat(paths, { width: o.width, height: o.layer, baseZ: zb });
+            ex2 = RL.extrudeFlat(paths, { width: o.width, height: thk, baseZ: zb });
             if (ex2.ok) break;
           }
-          var exLoops = ex2 && ex2.ok && pl.lines.length ? RL.extrudeFlat(pl.loops.map(function (l) { return l.ring; }).concat(pl.thin), { width: o.width, height: o.layer, baseZ: zb }) : ex2;
+          var exLoops = ex2 && ex2.ok && pl.lines.length ? RL.extrudeFlat(pl.loops.map(function (l) { return l.ring; }).concat(pl.thin), { width: o.width, height: thk, baseZ: zb }) : ex2;
           if (!pl.loops.length && !pl.thin.length && !pl.lines.length) continue;
           if (!ex2.ok) { failed = 'layer ' + n + ' would not extrude: ' + ex2.reason; break; }
           var len = 0, lo = [Infinity, Infinity], hi = [-Infinity, -Infinity], area = 0;
@@ -1863,7 +1869,7 @@
           for (var q7 = 0; q7 < N; q7++) area += Mraw[q7];
           area *= CELLS * CELLS; totalLen += len;
           var piece = { kind: 'region', sizeMm: [hi[0] - lo[0], hi[1] - lo[1]], areaMm2: area, perimMm: len, caps: carry.length, lines: pl.lines.length + pl.loops.length + pl.thin.length, loop: paths[0], snake: [] };
-          layersOut.push({ role: n - (mmin - NL + 1) < 2 ? 'transition' : 'interface', angleDeg: n % 2 ? 135 : 45, z0: zb, z1: zb + o.layer, pieces: [piece], loopMm: piece.sizeMm.slice(), lines: piece.lines, linesMm: len, lengthMm: len,
+          layersOut.push({ role: n - (mmin - NL + 1) < 2 ? 'transition' : 'interface', angleDeg: n % 2 ? 135 : 45, z0: zb, z1: zb + thk, pieces: [piece], loopMm: piece.sizeMm.slice(), lines: piece.lines, linesMm: len, lengthMm: len,
                           shortestMm: 0, paths: paths, soup: ex2.tris });
           soups.push(ex2.tris); soupsLoops.push(exLoops && exLoops.ok ? exLoops.tris : ex2.tris);
           maskLayers.push({ zb: zb, M: Mk, i0: cI0, j0: cJ0, w: cnx, h: cny, x0: ox + cI0 * CELLS, y0: oy + cJ0 * CELLS, cell: CELLS });
@@ -1874,7 +1880,7 @@
         var soupAll = joinSoups(soupsLoops), dmin = Infinity, rch = o.gap + 0.1;
         for (var bi = 0; bi < obstacles.length; bi++) { var dd = exactDistance(soupAll, exactVs(bi, rch), rch, beat); if (dd.mm < dmin) dmin = dd.mm; }
         if (dmin < o.gap - 1e-5) return;
-        var zBaseMin = A + (mmin - NL + 1) * o.layer, zTopMax = A + (mmax + 1) * o.layer;
+        var zBaseMin = zbOf(mmin - NL + 1), zTopMax = A + (mmax + 1) * o.layer;
         var L = { id: levels.length, first: zTopMax, tips: carry, told: carry.length, ok: true, shell: true, minDistanceMm: dmin,
                   res: { zTop: zTopMax, zBase: zBaseMin, zCap: zBaseMin, layers: layersOut, uncrossed: [], region: true,
                          lines: { angleDeg: 0, droppedShare: 0, bare: 0, pieces: layersOut.length, tried: [] } } };
@@ -1883,7 +1889,7 @@
         carry.forEach(function (t) {
           var mm = t.shellM;
           t.shell = true; t.mode = 'sheet'; t.level = L.id; t.why = null; t.carried = true; t.cap = null; t.capWhy = 'no cap: the region plate lies on the tip itself';
-          t.shellB = A + (mm - NL + 1) * o.layer; t.zTop = A + (mm + 1) * o.layer; t.zBase = t.shellB;
+          t.shellB = zbOf(mm - NL + 1); t.zTop = A + (mm + 1) * o.layer; t.zBase = t.shellB;
           /* the plate's lowest layer THAT COVERS the tip: the stack the tip's cell calls the lowest may be a speck the traced mask drops (a bead a cell wide), and the
              plate there begins a layer higher - the tip then ends a layer short of it, a gap in the column under the sheet */
           (function () {
@@ -2502,10 +2508,10 @@
         for (var qa = 0; qa < N; qa++) if (M[qa]) areaMm2 += CELL_MM * CELL_MM;
         var built = [];
         for (var lk = 0; lk < NL; lk++) {
-          var zb = zBase + lk * o.layer, ex = RL.extrudeFlat(paths, { width: o.width, height: o.layer, baseZ: zb });
+          var zb = zBase + lk * o.sheetLayer, ex = RL.extrudeFlat(paths, { width: o.width, height: o.sheetLayer, baseZ: zb });
           if (!ex.ok) return { ok: false, reason: 'layer ' + (lk + 1) + ' of the region would not extrude: ' + ex.reason };
           var piece = { kind: 'region', sizeMm: [hi2[0] - lo2[0], hi2[1] - lo2[1]], areaMm2: areaMm2, perimMm: lenTot, caps: live.length - uncrossed.length, lines: loops.length, loop: paths[0], snake: [] };
-          built.push({ role: ROLES[lk], angleDeg: 0, z0: zb, z1: zb + o.layer, pieces: [piece], loopMm: piece.sizeMm.slice(), lines: loops.length, linesMm: lenTot, lengthMm: lenTot,
+          built.push({ role: ROLES[lk], angleDeg: 0, z0: zb, z1: zb + o.sheetLayer, pieces: [piece], loopMm: piece.sizeMm.slice(), lines: loops.length, linesMm: lenTot, lengthMm: lenTot,
                        shortestMm: Math.min.apply(null, loops.map(function (lp) { return lp.lenMm; })), paths: paths, soup: ex.tris });
         }
         return { ok: true, zTop: zTop, zBase: zBase, zCap: zCap, layers: built, uncrossed: uncrossed, region: true,
@@ -2816,15 +2822,15 @@
         /* T1 sits on z_cap, each layer on the one below: faces meeting, no
            overlap (T2 is T1 again: an overlap would stand their walls in one
            plane for EPS_MM, which the union leaves as slivers) */
-        var zb = zBase + lk * o.layer;
+        var zb = zBase + lk * o.sheetLayer;
         for (var pj = 0; pj < plan.length; pj++) {
           /* a piece: its loop and its serpentine, a clear line width apart
              but at the bridge - one graph, one connected wall */
-          var ex = RL.extrudeFlat([pieces[pj].loop, pieces[pj].snake], { width: o.width, height: o.layer, baseZ: zb });
+          var ex = RL.extrudeFlat([pieces[pj].loop, pieces[pj].snake], { width: o.width, height: o.sheetLayer, baseZ: zb });
           if (!ex.ok) return { ok: false, reason: 'layer ' + (lk + 1) + ', piece ' + (pj + 1) + ' would not extrude: ' + ex.reason };
           soups.push(ex.tris);
         }
-        built.push({ role: ROLES[lk], angleDeg: alongA ? best.angleDeg : (best.angleDeg + 90) % 180, z0: zb, z1: zb + o.layer,
+        built.push({ role: ROLES[lk], angleDeg: alongA ? best.angleDeg : (best.angleDeg + 90) % 180, z0: zb, z1: zb + o.sheetLayer,
                      pieces: pieces, loopMm: pieces[0].sizeMm.slice(), lines: nLines, linesMm: lineMm, lengthMm: loopMm + lineMm,
                      shortestMm: shortest, paths: paths, soup: joinSoups(soups) });
       }
@@ -4120,7 +4126,7 @@
 
   var api = {
     DEFAULTS: { gapMm: GAP_MM, layerMm: LAYER_MM, pitchMm: PITCH_MM, repeats: REPEATS, epsMm: EPS_MM },
-    SHEET: { pitchMm: SHEET_PITCH_MM, densePitchMm: SHEET_DENSE_PITCH_MM, denseInterfaceLayers: 3, denseFlatGapMaxMm: 0.9, denseStairLegMm: STAIR_LEG_MM, roles: SHEET_ROLES.slice(), under: SHEET_UNDER, minRunMm: MIN_RUN_MM, cellMm: CELL_MM,
+    SHEET: { pitchMm: SHEET_PITCH_MM, densePitchMm: SHEET_DENSE_PITCH_MM, denseInterfaceLayers: 3, denseSheetLayerMm: 0.275, denseFlatGapMaxMm: 0.9, denseStairLegMm: STAIR_LEG_MM, roles: SHEET_ROLES.slice(), under: SHEET_UNDER, minRunMm: MIN_RUN_MM, cellMm: CELL_MM,
              sampleMm: SAMPLE_MM, lineAngles: LINE_ANGLES.slice(), fieldMm: FIELD_MM, levelEdgeMm: LEVEL_EDGE_MM,
              slicerSettings: Object.assign({}, SHEET_SLICER) },
     STAIR: { tipMm: STAIR_TIP_MM, backMm: STAIR_BACK_MM },
