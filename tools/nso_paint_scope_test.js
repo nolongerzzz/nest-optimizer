@@ -65,6 +65,8 @@ const ROSTER = [
     test: /nsoMaskIsExcludedRaw\s*\(\s*m\s*,\s*face\.n\s*,\s*face\.d/, standDown: /Skin stood down - ' \+ \w+ \+ ' is painted/ },
   { feature: 'Delete painted', file: 'app-paint-delete.js',    scope: 'SUB-REGION',
     test: /nsoMaskIsExcludedRaw\s*\(\s*m\s*,\s*face\.n\s*,\s*face\.d/, standDown: /Delete stood down - ' \+ \w+ \+ ' painted face\(s\)/ },
+  { feature: 'Text',           file: 'app-text.js',            scope: 'WHOLE-PIECE',
+    test: /nsoMaskCount\s*\(\s*m\s*\)/,                     standDown: /Text stood down - ' \+ \w+ \+ ' painted face\(s\)/ },
   { feature: 'Scale',          file: 'app-scale.js',           scope: 'WHOLE-PIECE',
     test: /nsoMaskCount\s*\(\s*m\s*\)/,                     standDown: /Scale stood down - ' \+ \w+ \+ ' painted face\(s\)/ },
   { feature: 'Texture',        file: 'app-texture.js',         scope: 'SUB-REGION',

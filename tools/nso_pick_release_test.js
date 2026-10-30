@@ -17,6 +17,7 @@
      Patch, Cap, Soften, Carve, Lift, Paint        (Add / Subtract / Surface)
      Close, Bridge, Connect, Thicken               (the cards with a Set)
      Punch                                         (Subtract: a card that stays armed)
+     Text                                          (its own menu is the card; open = armed)
      Supports                                      (Assisted: Circles started, a circle drawn, stopped; Erase after a build)
    Cap has no button on the page today (btn-cap is not in index.html); its
    arm is capSelectedModel(), the function the button was wired to.
@@ -45,8 +46,8 @@ const L = require('./nso_bridge_testlib.js');
 
 /* THREE STEPS, ONE FILE. The roster's rows are independent (each clears the plate and loads its own piece), so CI runs
    them as pick:release-edit / -paint-lift / -cards, ~70-85 s each here where the whole was ~216 s (374 s on CI). The
-   baseline (0) and the closing no-page-errors check run in every one; no flag runs all eleven rows. */
-const STEPS = { edit: 'Patch,Cap,Soften,Carve', 'paint-lift': 'Paint,Lift', cards: 'Close,Bridge,Connect,Thicken,Punch,Supports' };
+   baseline (0) and the closing no-page-errors check run in every one; no flag runs all twelve rows. */
+const STEPS = { edit: 'Patch,Cap,Soften,Carve', 'paint-lift': 'Paint,Lift', cards: 'Close,Bridge,Connect,Thicken,Punch,Text,Supports' };
 const onlyArg = process.argv.find(a => a.startsWith('--only='));
 const STEP_ROWS = onlyArg ? STEPS[onlyArg.slice('--only='.length)] : null;
 if (onlyArg && !STEP_ROWS) { console.error('nso_pick_release_test: ' + onlyArg + ' is not --only=' + Object.keys(STEPS).join('|')); process.exit(2); }
@@ -393,6 +394,24 @@ const ROSTER = [
       await page.waitForFunction(d => state.undoStack.length > d && !nsoPunchState().busy, d0, { timeout: 90000 });
     },
     isArmed: page => page.evaluate(() => nsoPunchState().open) },
+
+  // Text is armed while its menu is open (the menu is the card, no button inside it), stays
+  // armed after STAMP, and takes a press only on a piece or on its own text - never bare plate.
+  { name: 'Text', file: () => fx('box_hull_80x40x20-2.stl'),
+    arm: async page => {
+      await page.click('#menu-text > summary');
+      await page.waitForFunction(() => nsoTextState().open, null, { timeout: 5000 });
+      await page.fill('#inp-text', 'A');
+    },
+    verb: async (page, id) => {
+      await lookDown(page, id);
+      const d0 = await undoDepth(page);
+      await clickAt(page, await topOf(page, id));
+      await page.waitForFunction(() => nsoTextState().ok, null, { timeout: 15000 });
+      await page.click('#btn-text-go');
+      await page.waitForFunction(d => state.undoStack.length > d && !nsoTextState().busy, d0, { timeout: 90000 });
+    },
+    isArmed: page => page.evaluate(() => nsoTextState().open) },
 
   /* The Supports card's markers own the pointer only while their tool is on, and
      the tool is a switch you stop: Circles draws on the plate (so a left-drag

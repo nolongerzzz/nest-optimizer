@@ -137,6 +137,7 @@ merging its list by hand. The list below is generated.
 - [Supports stair body - each strip covers the part's step (2026-10-24)](handoff/supports-stair-body.md)
 - [Supports stair speed - the stair's build, same supports faster (2026-10-26)](handoff/supports-stair-speed.md)
 - [Supports thinning 1 - one tree to a circle (2026-10-25)](handoff/supports-thinning-1-one-tree-to-a-circle.md)
+- [Text - type a word, stamp it into a face (2026-10-30)](handoff/text-stamp.md)
 - [The crosshatch welds when stacked - one direction per layer (2026-09-18, same day)](handoff/the-crosshatch-welds-when-stacked-one-direction-per-layer.md)
 - [The Microscope view - the reference tool, with a way in and a way out (2026-09-20)](handoff/the-microscope-view-the-reference-tool-with-a-way-in-and-a-way.md)
 - [The reference raster was drawn at the wrong ANGLE (2026-09-18, same day)](handoff/the-reference-raster-was-drawn-at-the-wrong-angle.md)

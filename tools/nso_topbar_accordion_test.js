@@ -18,7 +18,7 @@ const check = (name, cond, detail) => {
 const ROW = ['menu-import', 'menu-measure', 'menu-move', 'menu-rotate', 'menu-tip', 'menu-align',
              'menu-gen', 'menu-export'];
 const COL = ['menu-scale', 'menu-cut', 'menu-crop', 'menu-joins', 'menu-seat', 'menu-supports', 'menu-add', 'menu-bit',
-             'menu-shape', 'menu-paint', 'menu-surface', 'menu-sculpt', 'menu-repair'];
+             'menu-shape', 'menu-text', 'menu-paint', 'menu-surface', 'menu-sculpt', 'menu-repair'];
 const ALL = ROW.concat(COL);
 
 withApp(async (page, logs) => {

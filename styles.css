@@ -4591,6 +4591,31 @@ body.sup-card-open #adjust-status { display: none; }
 }
 #viewport canvas.punch-cur-grab { cursor: grab; }
 
+/* Text (app-text.js): the left bar's TEXT menu is its own card - Bend's panel rows under a
+   text box; the style row is Punch's segmented row, three buttons wide. */
+.text-card { border-top: 0; padding-top: 2px; }
+.vp-menu-body .text-card .text-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 38px;
+  margin: 0 0 2px;
+  padding: 4px 6px;
+  border: 1px solid rgba(232, 238, 246, 0.45);
+  border-radius: 6px;
+  background: transparent;
+  color: #e8eef6;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.3;
+  resize: vertical;
+}
+.vp-menu-body .text-card .text-input:focus { outline: none; border-color: #ffc83d; }
+.text-card .vp-bend-field { grid-template-columns: 44px minmax(0, 1fr) 22px; }
+/* Mirror: a plain checkbox and its word, on the left like the fields' labels */
+.vp-menu-body .text-card .text-mirror { font-size: 11px; gap: 6px; }
+.vp-menu-body .text-card .text-mirror input { width: auto; margin: 0; padding: 0; }
+#viewport canvas.text-cur-grab { cursor: grab; }
+
 /* COMPARE's measurement: a table in a fixed-width face, scrolling inside the card rather than growing it */
 .ms-main-card pre.ms-diff { font: 11px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre; overflow: auto; max-height: 240px; margin: 6px 0 0; padding: 6px 8px; border-radius: 6px; background: rgba(0,0,0,0.25); user-select: text; }
 .ms-main-card #ms-compare-worst:empty { display: none; }

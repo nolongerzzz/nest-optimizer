@@ -338,6 +338,8 @@
     "texture:drive": {"weight":23850,"note":""},
     "texture:fixtures": {"weight":40,"note":""},
     "texture:test": {"weight":3850,"note":""},
+    "text:drive": {"weight":123000,"note":"estimate (text-stamp): 72 s on the cloud box x 1.7, rounded up; re-measure on the first CI run"},
+    "text:test": {"weight":3400,"note":"estimate (text-stamp): 2 s on the cloud box x 1.7; re-measure on the first CI run"},
     "thicken:check": {"weight":181250,"note":"thicken-live: 81250 CI-measured before + ~100000 estimated for sections 8-12 (the live control; ~100 s of 196 s total locally). Re-measure on the first CI run."},
     "tip:orient": {"weight":4250,"note":""},
     "to-plate": {"weight":29750,"note":""},

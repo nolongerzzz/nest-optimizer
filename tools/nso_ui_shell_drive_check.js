@@ -23,7 +23,7 @@ const check = (name, cond, detail) => {
 const ROW = ['menu-import', 'menu-measure', 'menu-move', 'menu-rotate', 'menu-tip', 'menu-align',
              'menu-gen', 'btn-lock-pos', 'btn-plate-lock', 'btn-undo', 'btn-delete-placed', 'menu-export'];
 const COL = ['menu-scale', 'menu-cut', 'menu-crop', 'menu-joins', 'menu-seat', 'menu-supports',
-             'menu-add', 'menu-bit', 'menu-shape', 'menu-paint', 'menu-surface', 'menu-sculpt', 'menu-slice',
+             'menu-add', 'menu-bit', 'menu-shape', 'menu-text', 'menu-paint', 'menu-surface', 'menu-sculpt', 'menu-slice',
              'btn-microscope', 'menu-repair'];
 const MENUS = ROW.filter(id => id.startsWith('menu-')).concat(COL.filter(id => id.startsWith('menu-')));
 

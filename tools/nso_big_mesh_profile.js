@@ -27,7 +27,7 @@ if (!FILE) { console.error('usage: nso_big_mesh_profile.js <file.3mf|file.stl> [
 fs.mkdirSync(OUT, { recursive: true });
 
 const COLUMN_CARDS = ['menu-measure', 'menu-align', 'menu-connect', 'menu-joins', 'menu-seat', 'menu-supports',
-                      'menu-add', 'menu-bit', 'menu-shape', 'menu-paint', 'menu-surface', 'menu-sculpt', 'menu-repair'];
+                      'menu-add', 'menu-bit', 'menu-shape', 'menu-text', 'menu-paint', 'menu-surface', 'menu-sculpt', 'menu-repair'];
 
 const pause = (page, ms) => page.waitForTimeout(ms);
 

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=0c7486ea" />
+  <link rel="stylesheet" href="styles.css?v=a36a418c" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -1384,6 +1384,47 @@
             </div>
             </div>
           </details>
+          <!-- TEXT (app-text.js, nso_text.js; docs/TEXT.md): type a word, click a face, and it is
+               stamped into the surface - any depth, any size, a font from the list or one loaded
+               from a file. The menu is the card: open it and a click on a piece places the text
+               (a live ghost of the engraving, its floor following a curved face), drag it to move
+               it, the arrows nudge it; STAMP is one boolean and one Undo. Close the menu to stop. -->
+          <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-text" data-sec="text">
+            <summary class="vp-bar-btn" title="Stamp text into the surface of a piece: type it, pick a font, set the size and the depth, click a face">Text</summary>
+            <div class="vp-menu-body vp-finish">
+            <div class="vp-bend-panel text-card" id="text-card">
+              <textarea id="inp-text" class="text-input" rows="2" maxlength="200" spellcheck="false" placeholder="Type the text"
+                        aria-label="Text to stamp" title="What to stamp. Enter starts a new line."></textarea>
+              <label class="vp-bend-field" title="The typeface. A loaded font file is added to the list.">Font
+                <select id="sel-text-font" class="vp-select" aria-label="Font">
+                  <option value="sans" selected>Sans</option>
+                  <option value="serif">Serif</option>
+                  <option value="mono">Mono</option>
+                  <option value="heavy">Heavy</option>
+                  <option value="script">Script</option>
+                </select></label>
+              <div class="punch-seg" id="text-style-row" role="group" aria-label="Style">
+                <button id="btn-text-bold" class="btn btn-secondary" type="button" aria-pressed="false" title="Bold">Bold</button>
+                <button id="btn-text-italic" class="btn btn-secondary" type="button" aria-pressed="false" title="Italic">Italic</button>
+                <button id="btn-text-font-file" class="btn btn-secondary" type="button" title="Load a font file (.ttf, .otf, .woff, .woff2) from this machine and add it to the list. The file is read here and goes nowhere.">Font file</button>
+                <input id="inp-text-font-file" type="file" accept=".ttf,.otf,.woff,.woff2,font/*" hidden aria-label="Font file">
+              </div>
+              <label class="vp-bend-field" title="The height of a capital letter, in mm. Lines are spaced 1.2 times the font's em.">Size
+                <input type="number" id="inp-text-size" value="6.0" min="1" max="200" step="0.5" aria-label="Capital letter height, mm"><span>mm</span></label>
+              <label class="vp-bend-field" title="How far below the surface, square to it, on a curved face too. A wall under the text thinner than two nozzle widths once it is cut is refused, and the depth that would fit is said.">Depth
+                <input type="number" id="inp-text-depth" value="0.6" min="0.1" max="50" step="0.1" aria-label="Engraving depth, mm"><span>mm</span></label>
+              <label class="vp-bend-field" title="Turn the text about its middle, counter-clockwise seen from outside. 0 reads along the face's longest edge.">Angle
+                <input type="number" id="inp-text-angle" value="0" min="-360" max="360" step="5" aria-label="Angle, degrees"><span>&deg;</span></label>
+              <label class="vp-clone text-mirror" title="Read it backwards, for a stamp or a mould."><input type="checkbox" id="chk-text-mirror"> Mirror</label>
+              <p id="text-readout" class="bend-readout">&mdash;</p>
+              <div class="vp-row vp-row-pair">
+                <button id="btn-text-go" class="btn btn-secondary" type="button" disabled
+                        title="Cut the text into the face, in one boolean. One Undo puts the piece back. The card stays open for the next face.">STAMP</button>
+                <button id="btn-text-cancel" class="btn btn-secondary" type="button" title="Close Text; the piece is unchanged.">Cancel</button>
+              </div>
+            </div>
+            </div>
+          </details>
           <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-paint" data-sec="paint">
             <summary class="vp-bar-btn" title="Paint faces selected or excluded, delete or extract what is painted">Paint</summary>
             <div class="vp-menu-body vp-finish">
@@ -2119,7 +2160,7 @@
   <script src="nso-helpers.js?v=9c476e39"></script>
   <script src="nso-recent.js?v=f03d6f13"></script>
   <script src="nso-bounds.js?v=778acac4"></script>
-  <script src="app-core.js?v=121cd1ff"></script>
+  <script src="app-core.js?v=191c4a42"></script>
   <!-- Up to six plates (beds): the active one is state.models / state.placed, the rest are kept beside it. docs/BEDS.md. -->
   <script src="app-beds.js?v=3d221bc4"></script>
 
@@ -2201,8 +2242,12 @@
   <script src="app-carve.js?v=c8e8fd9f"></script>
   <!-- Punch: round holes through a face, alone, in a grid or on a circle. The
        geometry (nso_punch.js) before its card (app-punch.js). docs/PUNCH.md. -->
-  <script src="nso_punch.js?v=867ffba8"></script>
+  <script src="nso_punch.js?v=0dd2e99a"></script>
   <script src="app-punch.js?v=f7f8a6e2"></script>
+  <!-- Text: type a word, stamp it into a face. The geometry (nso_text.js, which reads
+       nso_punch.js's surface probe) before its card (app-text.js). docs/TEXT.md. -->
+  <script src="nso_text.js?v=22c772bd"></script>
+  <script src="app-text.js?v=4c7256c4"></script>
   <script src="app-live-slider.js?v=0bc4bb66"></script>
   <script src="app-hollow.js?v=5a8e2bd8"></script>
   <script src="app-foam.js?v=16cca4f6"></script>

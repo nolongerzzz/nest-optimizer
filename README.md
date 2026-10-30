@@ -51,6 +51,14 @@ Smart build-plate packing for 3D printing.
   sockets with a 0.2 mm fit gap, a Ø8 sprue to the highest point and a Ø3 vent.
   Click the piece to move the pour point. One Undo removes both
   ([docs/MOLD.md](docs/MOLD.md))
+- **Text** (its own button in the left column, between Shape and Paint): type
+  a word, pick a font (Sans, Serif, Mono, Heavy, Script - or load a font file),
+  set the capital-letter height and the depth, click a face. A live ghost shows
+  the engraving, its floor following a curved face so it is one depth all over
+  a cylinder or a dome; drag it to move it, the arrows nudge it. STAMP is one
+  boolean and one Undo. A text that runs off the face, or would leave less than
+  two nozzle widths of wall, is refused in words with the depth that would fit
+  ([docs/TEXT.md](docs/TEXT.md))
 - **New stock**: a correctly-sized blank to start from, before Carve, Hollow,
   Cut or anything else that begins with a blank block - sphere, box, cylinder,
   cone, tube, torus, capsule or ellipsoid, sized from the target piece by a
@@ -337,12 +345,14 @@ Smart build-plate packing for 3D printing.
   (and Custom W · D · H), the bed grid (auto / on / off) and Snap to grid,
   the pieces list and Clone. Always visible, never a drop-down.
 - **Left column**: G-scope, Scale, Cut, Crop, Join (Join, A-B-C), Seat,
-  Supports, Add, Subtract · Shape, Paint, Surface & edges, Sculpt · Check &
+  Supports, Add, Subtract · Shape, Text, Paint, Surface & edges, Sculpt · Check &
   repair on its own at the bottom · X (X-ray), 👁 (Watch), ◎ (frame the
   view) in one row under it.
 - The cards: **Shape** Smooth, Bend, Tube edge (Flare, Roll, Neck), Pull
   (grab a spot and drag it, with pins; docs/PULL.md), Limb (grab a branch of a
   tree anywhere along it, then stretch it or bend it; docs/LIMB.md) ·
+  **Text** the text box, Font, Bold, Italic, Font file, Size, Depth, Angle,
+  Mirror, STAMP (docs/TEXT.md) ·
   **Add** Fill / Densify, Foam, Thicken out / in, Extend, Bridge ·
   **Subtract** Subtract B from A, Extract bit, Carve, Hollow, Hollow to safe
   min, Lift (opens G-scope at its Lift row) · **Surface & edges** Soften,

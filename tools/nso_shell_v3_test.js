@@ -11,7 +11,7 @@
    menu's Plate and Pieces bodies, pinned open: never a drop-down.
 
    The left column, Import sharing the corner: Scale, Cut, Crop,
-   Join, Seat, Supports, Add, Subtract | Shape, Paint, Surface & edges,
+   Join, Seat, Supports, Add, Subtract | Shape, Text, Paint, Surface & edges,
    Sculpt | Slice, G-scope (the bottom stack, pinned over the view row) |
    Check & repair, on its own over the view row | X-ray (X),
    Eye (👁), ◎ pinned to the bottom.
@@ -68,7 +68,7 @@ const GROUPS = [
   [['menu-scale', 'SCALE'], ['menu-cut', 'CUT'], ['menu-crop', 'CROP'],
    ['menu-connect', 'CONNECT'], ['menu-joins', 'JOIN'], ['menu-seat', 'SEAT'], ['menu-supports', 'SUPPORTS'], ['menu-add', 'ADD'],
    ['menu-bit', 'SUBTRACT']],
-  [['menu-shape', 'SHAPE'], ['menu-paint', 'PAINT'], ['menu-surface', 'SURFACE & EDGES'], ['menu-sculpt', 'SCULPT']],
+  [['menu-shape', 'SHAPE'], ['menu-text', 'TEXT'], ['menu-paint', 'PAINT'], ['menu-surface', 'SURFACE & EDGES'], ['menu-sculpt', 'SCULPT']],
   [['menu-slice', 'SLICE'], ['btn-microscope', 'G-SCOPE']],
   [['menu-repair', 'CHECK & REPAIR']],
   [['btn-xray', 'X-RAY'], ['btn-watch', 'EYE'], ['btn-frame-view', '◎']]
@@ -117,6 +117,9 @@ const HOLDS = {
   // SUBTRACT: Subtract B from A · Extract bit · Carve · Hollow · Hollow to safe min · Lift
   'menu-bit': ['btn-subtract', 'btn-extract-bit', 'btn-carve', 'carve-blade', 'carve-depth', 'btn-hollow', 'inp-hollow-mm',
                'btn-hollow-safe', 'btn-lift', 'lift-panel', 'btn-detach'],
+  // TEXT: the card is the menu - the text box, Font, Bold / Italic / Font file, Size, Depth, Angle, Mirror, the readout, STAMP, Cancel
+  'menu-text': ['text-card', 'inp-text', 'sel-text-font', 'btn-text-bold', 'btn-text-italic', 'btn-text-font-file', 'inp-text-size',
+                'inp-text-depth', 'inp-text-angle', 'chk-text-mirror', 'text-readout', 'btn-text-go', 'btn-text-cancel'],
   'menu-paint': ['btn-mask-select', 'btn-mask-paint', 'btn-mask-clear', 'btn-mask-delete', 'sel-mask-delete', 'btn-extract-sel'],
   // SURFACE & EDGES: Soften (R, Full wrap, edge treatment) · Mirror · Skin face · Skin wrap · Skin patch · Trace raster · Texture
   'menu-surface': ['inp-soften-r', 'chk-full-wrap', 'btn-soften', 'sel-edge-treat', 'btn-mirror', 'inp-mirror-plane',

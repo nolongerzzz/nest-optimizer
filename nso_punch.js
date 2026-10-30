@@ -631,6 +631,27 @@
     return ft ? { ok: true, point: ft.point, normal: ft.normal, tri: ft.tri } : { ok: false, reason: 'that is off the face' };
   }
 
+  /* The click's smooth surface as a probe, for Text (nso_text.js): the frame
+     (o the click on the surface, n its smooth normal, u and v as plan's), foot(p)
+     for a tangent-plane point's footprint - { point, normal, tri } or null -
+     thickness(c, axis) for the first stretch of material under c along -axis,
+     and flat: every facet of the click's surface within planarDeg of n. */
+  function surface(soup, hit, opts) {
+    var o = optsOf(opts);
+    if (!soup || soup.length < 36 || soup.length % 9) return { ok: false, reason: 'there is no piece to stamp' };
+    var F = frameOf(soup, hit, o);
+    if (F.reason) return { ok: false, reason: F.reason };
+    var M = F.M, cosP = Math.cos(o.planarDeg * Math.PI / 180), flat = true;
+    for (var t = 0; t < M.n && flat; t++) {
+      if (M.region[t] === F.R0 && dot(triN(M, t), F.n0) < cosP) flat = false;
+    }
+    return {
+      ok: true, o: F.p0, n: F.n0, u: F.u, v: F.v, flat: flat, diag: M.diag,
+      foot: function (p) { return footOf(M, F.R0, F.n0, p); },
+      thickness: function (c, axis) { var sp = spansFrom(M, c, axis); return sp ? sp[0].s1 : null; }
+    };
+  }
+
   /* Do any two of the plan's cutters meet (in air, past the material - through
      holes crossing a tube's bore)? Then they are unioned before the subtract;
      otherwise they go to the kernel as one soup of separate shells. */
@@ -651,6 +672,7 @@
     plan: plan,
     cutters: cutters,
     slide: slide,
+    surface: surface,
     cuttersOverlap: cuttersOverlap,
     sidesFor: sidesFor,
     _smoothNormal: function (soup, t, p, smoothDeg) { return smoothNormal(meshOf(soup, smoothDeg || DEFAULTS.smoothDeg), t, p); }
