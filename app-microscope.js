@@ -665,18 +665,22 @@ var NSO_MICROSCOPE = (function () {
   // a piece joins it (setDownOn). Nothing the user reads says 'lens' or 'take'.
 
   var plateName = 'lens';                         // the ACTIVE plate
-  var plateSaved = { lens: null, take: null };   // a plate's stash while it is NOT active
+  var PLATES = ['lens', 'take', 'cmp'];            // plate 1, plate 2 and plate 3 (COMPARE's: it shows only while it holds something)
+  var plateSaved = { lens: null, take: null, cmp: null };   // a plate's stash while it is NOT active
   var plateListeners = [];                       // fn(name) after the active plate changed
-  var SLOT = { lens: 0, take: 1 };               // left to right
-  var PLATE_LABEL = { lens: 'Plate 1', take: 'Plate 2' };
+  var SLOT = { lens: 0, take: 1, cmp: 2 };       // left to right
+  var PLATE_LABEL = { lens: 'Plate 1', take: 'Plate 2', cmp: 'Plate 3' };
+  function pn(name) { return PLATES.indexOf(name) >= 0 ? name : 'lens'; }
+  /** The plates standing: 1 and 2 always, 3 while it holds a compare (or is the active one). */
+  function livePlates() { return PLATES.filter(function (n) { return n !== 'cmp' || n === plateName || !!plateDoc('cmp'); }); }
   var importedDoc = null;                        // the file Import opened, kept across a close
 
   /** "Plate 1" / "Plate 2". */
-  function plateTitle(name) { return PLATE_LABEL[name === 'take' ? 'take' : 'lens']; }
+  function plateTitle(name) { return PLATE_LABEL[pn(name)]; }
 
   /** A plate's document, active or not (null: the plate is empty). */
   function plateDoc(name) {
-    name = name === 'take' ? 'take' : 'lens';
+    name = pn(name);
     return name === plateName ? doc : (plateSaved[name] ? plateSaved[name].doc : null);
   }
 
@@ -752,6 +756,7 @@ var NSO_MICROSCOPE = (function () {
   /** Plate 1's document, whichever plate is active. */
   function lensDoc() { return plateDoc('lens'); }
 
+  /** The plate a drag copies to: 1 and 2 are each other's; plate 3 (a compare) copies to plate 1. */
   function otherPlate() { return plateName === 'lens' ? 'take' : 'lens'; }
 
   /** Plate centre to plate centre, mm: a plate's side and a gap. */
@@ -759,7 +764,7 @@ var NSO_MICROSCOPE = (function () {
 
   /** Where plate `name` stands, along view X, with the active plate at the origin. */
   function plateOffset(name) {
-    return (SLOT[name === 'take' ? 'take' : 'lens'] - SLOT[plateName]) * plateSpacing();
+    return (SLOT[pn(name)] - SLOT[plateName]) * plateSpacing();
   }
 
   /** A plate's three scene groups, active or not. */
@@ -814,7 +819,7 @@ var NSO_MICROSCOPE = (function () {
   /** Both floors, at the plate side now (rebuilt when a plate read grows it). */
   function buildFloors() {
     var v = view;
-    ['lens', 'take'].forEach(function (n) {
+    PLATES.forEach(function (n) {
       var f = v.floors && v.floors[n];
       if (f && f.side === plateSide) return;
       if (f) { v.scene.remove(f.group); disposeTree(f.group); }
@@ -846,8 +851,10 @@ var NSO_MICROSCOPE = (function () {
     var v = view;
     if (!v) return;
     buildFloors();
-    ['lens', 'take'].forEach(function (n) {
-      var x = plateOffset(n), on = n === plateName, f = v.floors[n];
+    var live = livePlates();
+    PLATES.forEach(function (n) {
+      var x = plateOffset(n), on = n === plateName, f = v.floors[n], here = live.indexOf(n) >= 0;
+      f.group.visible = here;
       plateGroups(n).forEach(function (g) {
         g.position.x = x;
         if (g.parent !== v.scene) v.scene.add(g);
@@ -878,15 +885,14 @@ var NSO_MICROSCOPE = (function () {
   /** Both plates on the floor and in the scene; the one not active, empty if it is new. */
   function ensurePlates() {
     if (!view) return;
-    var o = otherPlate();
-    if (!plateSaved[o]) plateSaved[o] = freshPlate(o);
+    livePlates().forEach(function (n) { if (n !== plateName && !plateSaved[n]) plateSaved[n] = freshPlate(n); });
     placePlates();
   }
 
   /** The side both plates take: what either holds decides it (both grow together). */
   function sizePlates() {
     var was = plateSide;
-    plateSide = Math.max(sideFor(plateDoc('lens')), sideFor(plateDoc('take')));
+    plateSide = Math.max(sideFor(plateDoc('lens')), sideFor(plateDoc('take')), sideFor(plateDoc('cmp')));
     return plateSide !== was;
   }
 
@@ -897,7 +903,7 @@ var NSO_MICROSCOPE = (function () {
    * camera; which plate is active does not change.
    */
   function emptyPlate(name) {
-    name = name === 'take' ? 'take' : 'lens';
+    name = pn(name);
     var d = plateDoc(name);
     if (d && d.objects) d.objects.forEach(dropPieceGeometry);
     if (name !== plateName) {
@@ -948,7 +954,7 @@ var NSO_MICROSCOPE = (function () {
    * back.
    */
   function showPlate(name, opts) {
-    name = name === 'take' ? 'take' : 'lens';
+    name = pn(name);
     opts = opts || {};
     if (!buildWorld()) return plateName;
     if (name === plateName) { if (!opts.quiet) syncPlateUI(); return plateName; }
@@ -1024,10 +1030,10 @@ var NSO_MICROSCOPE = (function () {
     if (t) {
       t.title = 'Empty ' + plateTitle(plateName) + ', the active plate - ' + plateTitle(otherPlate()) + ' is not touched. ' +
                 'An emptied plate is ready for Import or Read plate';
-      t.dataset.plate = plateName === 'take' ? '2' : '1';
+      t.dataset.plate = plateName === 'take' ? '2' : plateName === 'cmp' ? '3' : '1';
     }
     var vp = $('ms-viewport');
-    if (vp) vp.dataset.plate = plateName === 'take' ? '2' : '1';
+    if (vp) vp.dataset.plate = plateName === 'take' ? '2' : plateName === 'cmp' ? '3' : '1';
     syncExportRow();
   }
   function syncPlate() { syncPlateUI(); badgeFor(); syncCard(); syncCompare(); }
@@ -1125,7 +1131,7 @@ var NSO_MICROSCOPE = (function () {
    * after a pull with it).
    */
   function plateState(name) {
-    name = name === 'take' ? 'take' : 'lens';
+    name = pn(name);
     var live = name === plateName, S = live ? null : plateSaved[name];
     var d = live ? doc : (S ? S.doc : null);
     if (!live && !S) return null;
@@ -2196,11 +2202,15 @@ var NSO_MICROSCOPE = (function () {
    */
   function otherPlateAt(e, floorOnly) {
     if (!view) return null;
-    var o = otherPlate(), rc = rayAt(e);
-    if (onFloorOf(o, rc)) return o;
+    var rc = rayAt(e), others = livePlates().filter(function (n) { return n !== plateName; }), i, o;
+    for (i = 0; i < others.length; i++) if (onFloorOf(others[i], rc)) return others[i];
     if (floorOnly) return null;
-    var gs = plateGroups(o).filter(function (g) { return g.visible; });
-    return rc.intersectObjects(gs, true).some(drawnAt) ? o : null;
+    for (i = 0; i < others.length; i++) {
+      o = others[i];
+      var gs = plateGroups(o).filter(function (g) { return g.visible; });
+      if (rc.intersectObjects(gs, true).some(drawnAt)) return o;
+    }
+    return null;
   }
 
   /** A press that the active plate does not take: on the other plate, it is noted for the click. */
@@ -2407,7 +2417,7 @@ var NSO_MICROSCOPE = (function () {
   /** A click on the other plate: it is the active one now - its Features, slider, cards and Export. */
   function activatePlate(name) {
     if (showPlate(name) !== name) return false;
-    say((name === 'take' ? 'Plate 2' : 'Plate 1') + ' is active - the Features list, the slider, every card and Export act on it.');
+    say(plateTitle(name) + ' is active - the Features list, the slider, every card and Export act on it.');
     return true;
   }
 
@@ -3422,14 +3432,14 @@ var NSO_MICROSCOPE = (function () {
     rc.far = v.camera.far;
     rc.params.Line.threshold = Math.max(0.05, v.camera.position.distanceTo(v.controls.target) * 0.006);
     // both plates: what is drawn on either, then either floor
-    var hits = rc.intersectObjects([v.overviewGroup, v.detailGroup, v.highlightGroup].concat(plateGroups(otherPlate())), true);
+    var hits = rc.intersectObjects([v.overviewGroup, v.detailGroup, v.highlightGroup].concat(plateGroups(otherPlate())).concat(plateName === 'cmp' ? [] : plateGroups('cmp')), true);
     for (var i = 0; i < hits.length; i++) {
       // ray.at(distance), not hit.point: on the ray itself, so the pixel holds
       if (drawnAt(hits[i])) return rc.ray.at(hits[i].distance, new THREE.Vector3());
     }
     var g = rc.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), new THREE.Vector3());
     if (g && v.grid && nsoVisibleInScene(v.grid) && g.distanceTo(rc.ray.origin) <= v.camera.far && Math.abs(g.z) <= plateSide / 2 &&
-        ['lens', 'take'].some(function (n) { return Math.abs(g.x - plateOffset(n)) <= plateSide / 2; })) return g;
+        livePlates().some(function (n) { return Math.abs(g.x - plateOffset(n)) <= plateSide / 2; })) return g;
     return null;
   }
 
@@ -5539,7 +5549,7 @@ var NSO_MICROSCOPE = (function () {
    */
   function worldBox() {
     var box = new THREE.Box3();
-    ['lens', 'take'].forEach(function (n) { box.union(plateBox(n)); });
+    livePlates().forEach(function (n) { box.union(plateBox(n)); });
     return box;
   }
 
@@ -5566,7 +5576,7 @@ var NSO_MICROSCOPE = (function () {
    */
   function worldSphere() {
     var out = null;
-    ['lens', 'take'].forEach(function (n) {
+    livePlates().forEach(function (n) {
       var s = plateBox(n).getBoundingSphere(new THREE.Sphere());
       s.radius *= 1.1;
       out = out ? out.union(s) : s;
@@ -5885,14 +5895,13 @@ var NSO_MICROSCOPE = (function () {
   /** The reason Compare cannot start, or ''. */
   function compareReason() {
     if (!view) return 'open a file first';
-    if (compare) return '';
-    if (!plateDoc('lens') || !plateDoc('take')) return 'it needs a file on each plate';
+    if (!plateDoc('lens') || !plateDoc('take')) return 'it needs a file on each of plates 1 and 2';
     return '';
   }
 
   function compareLive() {
     if (!compare) return false;
-    var d = plateDoc('take');
+    var d = plateDoc('cmp');
     if (d && isPieces(d) && d.objects.indexOf(compare.a) >= 0 && d.objects.indexOf(compare.b) >= 0) return true;
     compare = null;
     return false;
@@ -5903,22 +5912,24 @@ var NSO_MICROSCOPE = (function () {
     var live = compareLive(), why = compareReason();
     var row = $('ms-compare-row'), body = $('ms-compare-body'), tg = $('ms-compare-toggle');
     if (row) row.style.display = live || (plateDoc('lens') && plateDoc('take')) ? '' : 'none';
-    if (live && compare.unfold !== false && body && body.hidden) { body.hidden = false; if (tg) tg.setAttribute('aria-expanded', 'true'); }
+    if (live && body && body.hidden) { body.hidden = false; if (tg) tg.setAttribute('aria-expanded', 'true'); }
     var st = $('ms-compare-start'), ov = $('ms-compare-overlay'), rs = $('ms-compare-restore'), tn = $('ms-compare-tint'), rd = $('ms-compare-read');
-    setDisabled(st, live || !!why);
+    setDisabled(st, !!why);
     setDisabled(ov, !live);
     setDisabled(rs, !live);
     setDisabled(tn, !live);
+    setDisabled($('ms-compare-diff'), !live);
+    setDisabled($('ms-compare-diff-copy'), !(live && compare.report));
     ['nx-', 'nx+', 'ny-', 'ny+', 'nz-', 'nz+'].forEach(function (k) { setDisabled($('ms-compare-' + k), !live); });
     if (tn) { tn.classList.toggle('active', !!(live && compare.tinted)); tn.setAttribute('aria-pressed', live && compare.tinted ? 'true' : 'false'); }
     if (!rd) return;
     if (live) {
-      rd.textContent = (compare.overlaid ? 'Overlaid' : 'Side by side') + ' on plate 2: ' + plateTitle('lens') + '\'s ' + compare.a.name.replace(/^Plate 1: /, '') +
-        ' (orange) and ' + plateTitle('take') + '\'s ' + compare.b.name.replace(/^Plate 2: /, '') + ' (blue). Second piece moved by ' +
+      rd.textContent = (compare.overlaid ? 'Overlaid' : 'Side by side') + ' on plate 3: ' + compare.a.name.replace(/^Plate 1: /, '') +
+        ' (orange) and ' + compare.b.name.replace(/^Plate 2: /, '') + ' (blue). Blue moved by ' +
         compare.dx.toFixed(2) + ', ' + compare.dy.toFixed(2) + ', ' + compare.dz.toFixed(2) + ' mm from where Overlay put it.';
     } else {
       rd.textContent = why ? 'Compare: ' + why + '.' :
-        'Isolate a piece, a line type or a layer band on each plate, then Side by side sets both on plate 2.';
+        'Isolate a piece, a line type or a layer band on each plate, then Side by side sets both on plate 3.';
     }
   }
 
@@ -5938,9 +5949,10 @@ var NSO_MICROSCOPE = (function () {
     if (!box.isEmpty()) frameBox(box, new THREE.Vector3().fromArray(FRAME_DIR));
   }
 
+  /** What is isolated on plate 1 and on plate 2, copied onto plate 3 (a compare there before is replaced; plates 1 and 2 are not touched). */
   function compareStart() {
     var why = compareReason();
-    if (why || compare) { say(compare ? 'Compare is on - Restore plate 2 first.' : 'Compare: ' + why + '.', true); return null; }
+    if (why) { say('Compare: ' + why + '.', true); return null; }
     var home = plateName, specs = {};
     ['lens', 'take'].forEach(function (n) { showPlate(n, { quiet: true }); specs[n] = pullSpec(null); });
     var none = !specs.lens ? 'lens' : !specs.take ? 'take' : null;
@@ -5950,37 +5962,38 @@ var NSO_MICROSCOPE = (function () {
       syncCompare();
       return null;
     }
-    showPlate('take', { quiet: true });
-    var stash = Object.assign({}, doc, { layerIndex: undefined });
-    emptyPlate('take');
-    showPlate('take');
+    compare = null;
+    showPlate('cmp');
+    if (doc) { emptyPlate('cmp'); placePlates(); }
     var wA = soupExtent(specs.lens.positions), wB = soupExtent(specs.take.positions);
     var wa = wA.x1 - wA.x0, wb = wB.x1 - wB.x0;
     var a = comparePlace(specs.lens, -(wa / 2 + COMPARE_GAP_MM / 2), TINT_A, 'Plate 1: ');
     var b = a && comparePlace(specs.take, wb / 2 + COMPARE_GAP_MM / 2, TINT_B, 'Plate 2: ');
     if (!a || !b) {
-      emptyPlate('take');
-      open(stash);
-      say('Compare: the pieces could not be set down - plate 2 is back as it was.', true);
+      emptyPlate('cmp');
+      showPlate(home);
+      say('Compare: the pieces could not be set down on plate 3.', true);
       return null;
     }
-    compare = { a: a, b: b, stash: stash, step: 0.1, dx: 0, dy: 0, dz: 0, overlaid: false, tinted: true };
+    compare = { a: a, b: b, step: 0.1, dx: 0, dy: 0, dz: 0, overlaid: false, tinted: true };
     setSelection([], 'pick');
     redrawDoc();
     compareFrame();
     syncCompare();
-    say('Side by side on plate 2: ' + plateTitle('lens') + '\'s piece in orange, ' + plateTitle('take') + '\'s in blue. Overlay lays them over each other.');
+    say('Side by side on plate 3: ' + plateTitle('lens') + '\'s piece in orange, ' + plateTitle('take') + '\'s in blue. Overlay lays them over each other.');
     return { a: a, b: b };
   }
 
   function compareOverlay() {
     if (!compareLive()) { say('Compare: set the two pieces side by side first.', true); return null; }
+    if (plateName !== 'cmp') showPlate('cmp');
     var ba = partBox(compare.a), bb = partBox(compare.b);
     if (!ba || !bb) { say('Compare: a piece has no moves to line up by.', true); return null; }
     var ca = [(ba.box.x0 + ba.box.x1) / 2, (ba.box.y0 + ba.box.y1) / 2], cb = [(bb.box.x0 + bb.box.x1) / 2, (bb.box.y0 + bb.box.y1) / 2];
     bakePiece(compare.b, ca[0] - cb[0], ca[1] - cb[1], 0);
     compare.dx = compare.dy = compare.dz = 0;
     compare.overlaid = true;
+    compareStale();
     compare.a.alpha = compare.b.alpha = OVERLAY_ALPHA;
     pieceRefresh();
     treeSoon(compare.b);
@@ -5992,8 +6005,10 @@ var NSO_MICROSCOPE = (function () {
 
   function compareNudge(dx, dy, dz) {
     if (!compareLive()) return null;
+    if (plateName !== 'cmp') showPlate('cmp');
     bakePiece(compare.b, dx, dy, dz);
     compare.dx += dx; compare.dy += dy; compare.dz += dz;
+    compareStale();
     pieceRefresh();
     treeSoon(compare.b);
     syncCompare();
@@ -6002,6 +6017,7 @@ var NSO_MICROSCOPE = (function () {
 
   function compareTint() {
     if (!compareLive()) return null;
+    if (plateName !== 'cmp') showPlate('cmp');
     compare.tinted = !compare.tinted;
     compare.a.tint = compare.tinted ? TINT_A : 0;
     compare.b.tint = compare.tinted ? TINT_B : 0;
@@ -6010,14 +6026,65 @@ var NSO_MICROSCOPE = (function () {
     return compare.tinted;
   }
 
-  function compareRestore() {
-    if (!compareLive()) return null;
-    var stash = compare.stash;
-    compare = null;
-    showPlate('take');
-    open(stash);
+  /** The measurement shown is of how things stood before: say so, and take its layer buttons away. */
+  function compareStale() {
+    if (!compare || !compare.report) return;
+    compare.report = null;
+    var rd = $('ms-compare-diff-read'), wr = $('ms-compare-worst');
+    if (rd) { rd.textContent = 'The pieces moved since this was measured - Measure again.'; }
+    if (wr) wr.textContent = '';
+  }
+
+  /**
+   * THE MEASUREMENT (nso-gscope-diff.js): what plate 1's piece and plate 2's differ by, as numbers - per layer and line type the material only
+   * in one or in both, where each line type starts and stops in Z, and, at the first layer of each interface / transition plate, whether the
+   * tree runs up to it and whether any of it stands out past the plate's outline. Shown as text under the buttons, the worst layers as buttons
+   * that put the slider on the layer, and kept as `compare.report` for Copy JSON and compareReport().
+   */
+  function compareDiff() {
+    if (!compareLive()) { say('Measure: set the two pieces side by side first.', true); return null; }
+    var D = window.NSOCompareDiff;
+    if (!D) { say('Measure needs nso-gscope-diff.js', true); return null; }
+    if (!compare.a.moves || !compare.b.moves) { say('Measure: a piece has no toolpath moves to measure (it is a mesh).', true); return null; }
+    var rep = D.compute(compare.a.moves, compare.b.moves);
+    rep.meta.a = compare.a.name; rep.meta.b = compare.b.name;
+    rep.meta.overlaid = compare.overlaid;
+    rep.meta.blueOffsetMm = [compare.dx, compare.dy, compare.dz];
+    compare.report = rep;
+    var rd = $('ms-compare-diff-read'), wr = $('ms-compare-worst');
+    if (rd) { rd.hidden = false; rd.textContent = (compare.overlaid ? '' : 'Not overlaid yet - the pieces stand apart, so the areas will not meet.\n\n') + D.text(rep); }
+    if (wr) {
+      wr.textContent = '';
+      rep.worst.slice(0, 6).forEach(function (w) {
+        var b = document.createElement('button');
+        b.type = 'button'; b.textContent = w.z.toFixed(2);
+        b.title = 'Layer ' + w.z.toFixed(2) + ' mm: ' + w.supportDiffMm2.toFixed(1) + ' mm2 of support, interface or transition in only one of them - put the slider on it';
+        b.addEventListener('click', function () { setZRange(stepAtZ(w.z - 0.01), stepAtZ(w.z + 0.01)); });
+        wr.appendChild(b);
+      });
+    }
     syncCompare();
-    say('Plate 2 is back as it was.');
+    say('Measured: ' + rep.meta.layers + ' layers. ' + ['A', 'B'].map(function (n) { var p = rep.plate[n]; return (n === 'A' ? 'Plate 1' : 'Plate 2') + ': ' + p.length + ' plate' + (p.length === 1 ? '' : 's') + (p.some(function (q) { return q.gap; }) ? ', a gap under one' : ''); }).join('; ') + '.');
+    return rep;
+  }
+
+  function compareCopy() {
+    if (!compare || !compare.report) return false;
+    var txt = JSON.stringify(compare.report);
+    try { if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(txt); say('The measurement is on the clipboard (' + (txt.length / 1024).toFixed(0) + ' kB of JSON).'); return true; } } catch (err) { /* below */ }
+    say('The clipboard is not available here.', true);
+    return false;
+  }
+
+  /** Plate 3 emptied: the compare is gone and plate 3 with it; plate 1 is active. */
+  function compareClear() {
+    if (!compareLive()) return null;
+    compare = null;
+    if (plateName === 'cmp') { emptyPlate('cmp'); showPlate('lens'); }
+    else emptyPlate('cmp');
+    placePlates();
+    syncCompare();
+    say('Compare cleared - plates 1 and 2 are as they were.');
     return true;
   }
 
@@ -6026,6 +6093,7 @@ var NSO_MICROSCOPE = (function () {
     compare = null;
     cancelPull();
     if (view && plateName !== 'lens') showPlate('lens', { quiet: true });
+    emptyPlate('cmp');
     emptyPlate('take');
     emptyPlate('lens');
     plateSide = BED_GRID;
@@ -6276,8 +6344,10 @@ var NSO_MICROSCOPE = (function () {
       if (t) t.setAttribute('aria-expanded', b.hidden ? 'false' : 'true');
     });
     bind('ms-compare-start', 'click', function () { compareStart(); });
+    bind('ms-compare-diff', 'click', function () { compareDiff(); });
+    bind('ms-compare-diff-copy', 'click', function () { compareCopy(); });
     bind('ms-compare-overlay', 'click', function () { compareOverlay(); });
-    bind('ms-compare-restore', 'click', function () { compareRestore(); });
+    bind('ms-compare-restore', 'click', function () { compareClear(); });
     bind('ms-compare-tint', 'click', function () { compareTint(); });
     [['nx-', -1, 0, 0], ['nx+', 1, 0, 0], ['ny-', 0, -1, 0], ['ny+', 0, 1, 0], ['nz-', 0, 0, -1], ['nz+', 0, 0, 1]].forEach(function (k) {
       bind('ms-compare-' + k[0], 'click', function () {
@@ -6401,7 +6471,10 @@ var NSO_MICROSCOPE = (function () {
     compareNudge: compareNudge,
     compareFrame: compareFrame,
     compareTint: compareTint,
-    compareRestore: compareRestore,
+    compareClear: compareClear,
+    compareDiff: compareDiff,
+    compareReport: function () { return compareLive() ? compare.report || null : null; },
+    compareRestore: compareClear,
     compareState: function () {
       return compareLive() ? { a: compare.a.name, b: compare.b.name, overlaid: compare.overlaid, tinted: compare.tinted, dx: compare.dx, dy: compare.dy, dz: compare.dz } : null;
     },

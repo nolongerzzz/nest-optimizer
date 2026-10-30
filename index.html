@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=552b6265" />
+  <link rel="stylesheet" href="styles.css?v=0c7486ea" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -1748,15 +1748,14 @@
             <p class="ms-note" id="ms-band-read">&mdash;</p>
           </div>
           <!-- COMPARE, both sides. What is isolated on plate 1 and on plate 2 (a piece with its supports, a line type, a layer band)
-               set down together on plate 2 - side by side - then overlaid in two colours and nudged. Plate 2's own file comes back
-               with Restore plate 2. Shown only while both plates hold something; folded until opened. -->
+               set down together on plate 3 - side by side - then overlaid in two colours and nudged. Plates 1 and 2 are not touched. Shown only while both plates hold something; folded until opened. -->
           <div id="ms-compare-row" class="ms-row" data-on="normal slice" style="display:none;">
             <button id="ms-compare-toggle" type="button" class="ms-disclose" aria-expanded="false" aria-controls="ms-compare-body"
-                    title="Set what is isolated on each plate side by side on plate 2, then overlay it">Compare plates</button>
+                    title="Set what is isolated on each plate side by side on plate 3, then overlay it">Compare plates</button>
             <div id="ms-compare-body" hidden>
             <div class="ms-btn-row">
               <button id="ms-compare-start" type="button" disabled
-                      title="Set what is isolated on plate 1 and what is isolated on plate 2 down together on plate 2, side by side">Side by side</button>
+                      title="Set what is isolated on plate 1 and what is isolated on plate 2 down together on plate 3, side by side">Side by side</button>
               <button id="ms-compare-overlay" type="button" disabled
                       title="Lay the second piece over the first, their parts' outlines together; both drawn see-through">Overlay</button>
             </div>
@@ -1764,7 +1763,7 @@
               <button id="ms-compare-tint" type="button" class="active" aria-pressed="true" disabled
                       title="Plate 1's piece orange, plate 2's blue; off, each in its own line-type colours">Colours</button>
               <button id="ms-compare-restore" type="button" disabled
-                      title="Plate 2 as it was before Side by side">Restore plate 2</button>
+                      title="Take plate 3 away: plates 1 and 2 are as they were">Clear compare</button>
             </div>
             <div class="ms-btn-row ms-nudge">
               <button id="ms-compare-nx-" type="button" disabled title="Move the blue piece left">&larr;</button>
@@ -1779,6 +1778,13 @@
               </select>
             </div>
             <p class="ms-note" id="ms-compare-read">&mdash;</p>
+            <div class="ms-btn-row">
+              <button id="ms-compare-diff" type="button" disabled
+                      title="Measure what the two pieces differ by, layer by layer and line type by line type: where each starts and stops, where the tree misses its plate or stands out past it">Measure</button>
+              <button id="ms-compare-diff-copy" type="button" disabled title="Copy the measurement as JSON">Copy JSON</button>
+            </div>
+            <div id="ms-compare-worst" class="ms-btn-row" data-flex="1"></div>
+            <pre id="ms-compare-diff-read" class="ms-note ms-diff" hidden></pre>
             </div>
           </div>
           <!-- Toolpath | Solid, the Slice side. View only: it changes what is
@@ -2096,6 +2102,7 @@
   <script src="nso-3mf-scene.js?v=abb8f614"></script>
   <script src="nso-surface-grid.js?v=c0d97583"></script>
   <script src="nso-gcode-lines.js?v=fe0b823c"></script>
+  <script src="nso-gscope-diff.js?v=1a2d59c6"></script>
   <script src="nso-gcode-solid.js?v=ac1a4f02"></script>
   <script src="nso_slicer.js?v=51427ec3"></script>
   <script src="nso_raster_lines.js?v=461ca449"></script>
@@ -2242,7 +2249,7 @@
        row each under the Flange row. Pure. docs/GSCOPE-FEATURES.md. -->
   <script src="nso_face_features.js?v=53ee4b23"></script>
   <script src="nso_gscope_measure.js?v=c5595269"></script>
-  <script src="app-microscope.js?v=9454b5ad"></script>
+  <script src="app-microscope.js?v=5e6f939e"></script>
   <!-- Detach / Reattach (Cut menu): cap a detected flange's hull on its own
        wall, lift the flange out as a piece, seat it elsewhere with Attach's
        seat. After nso_flange.js, app-crop.js, nso_assemble.js, app-assemble.js

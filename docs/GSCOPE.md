@@ -610,27 +610,40 @@ Neither plate is saved with the session, and a plate has no Undo of its own
 it. A piece dragged INTO a slice stays part of that slice: it is not grabbed
 and moved afterwards, as a plate's pieces are.
 
-## 13. Compare plates: side by side, then overlaid
+## 13. Compare plates: side by side, then overlaid, then measured
 
 **What the user sees.** With a file on each plate, the card shows a folded row, *Compare plates*. Isolate
 something on each plate - a whole piece with its supports (the capture box takes the model and its supports
 in one), one line type, a layer band: whatever a drag would carry - then **Side by side** sets both down on
-plate 2, plate 1's at the left in orange and plate 2's at the right in blue, each at the height it came from,
-the camera close on them. **Overlay** moves the blue one so the two parts' outlines coincide (XY only; the
-heights stay; with no part walls - supports alone - it lines up by everything drawn) and draws both
-see-through. The arrows nudge the blue piece by the step chosen (0.05 - 5 mm), Z too; the row reads the
-total. **Colours** puts the line types' own colours back. The Features list and the layer slider act on both
-pieces at once - one feature, or one layer, in both. **Restore plate 2** brings plate 2's file back as it was.
+a **third plate** (Compare), plate 1's at the left in orange and plate 2's at the right in blue, each at the
+height it came from, the camera close on them. Plates 1 and 2 are not touched. **Overlay** moves the blue
+one so the two parts' outlines coincide (XY only; the heights stay; with no part walls - supports alone - it
+lines up by everything drawn) and draws both see-through. The arrows nudge the blue piece by the step chosen
+(0.05 - 5 mm), Z too; the row reads the total. **Colours** puts the line types' own colours back. The
+Features list and the layer slider act on both pieces at once. **Clear compare** empties plate 3.
 
-**How it is built.** `compareStart` reads each plate's selection with `pullSpec` (the drag's own read), keeps
-plate 2's document (`compare.stash`), empties plate 2 and sets the two copies down with `makeGhost` /
-`setDownOn` at a chosen XY and the height they came from - so a compare is a plate of two pieces, and every
-piece control (move, seat, Export) works on it. A piece's `tint` is written into its kept geometry's colours
-(`tintGeometry`: the tint scaled by each line type's brightness, the original colours kept to put back);
-`alpha` draws it see-through. `bakePiece` moves the blue piece for Overlay and the nudges. State:
-`NSO_MICROSCOPE.compareState()`; `compareStart / compareOverlay / compareNudge / compareTint / compareRestore`.
+**Measure** (Diff readout). Reads the two pieces' moves, already in one frame, and writes a table: per line
+type (part, support tree, interface, transition) the Z range and layer count of each side and the area only
+A's, only B's, and both; the *first layer of every plate region* (interface / transition lines joined across
+1 mm) with the tree under it, whether there is none (**GAP**), and the tree standing out past the plate's
+outline (**overshoot**, area and furthest reach); and the layers that differ most. **Copy JSON** gives the same
+as data: `compareReport()`. "The layer under" is each side's own last layer that carries support (Bambu's
+support layers sit at their own Z between the part's), and only if within 0.5 mm below.
 
-**Check.** `gscope:compare` (`tools/nso_gscope_compare_test.js`): refused with nothing isolated; two pieces
-on plate 2, tinted, plate 1 byte-identical; Overlay's outlines coincide; the nudge moves only the blue piece;
-Colours off and on again are exact; Restore returns plate 2's file. `COMPARE_A` / `COMPARE_B` name two
-other `.gcode.3mf` files for it.
+**How it is built.** `compareStart` reads each plate's selection with `pullSpec` (the drag's own read) and
+sets the two copies down on plate 3 with `makeGhost` / `setDownOn` at a chosen XY and the height they came
+from - so a compare is a plate of two pieces, and every piece control (move, seat, Export) works on it. A
+piece's `tint` is written into its kept geometry's colours (`tintGeometry`); `alpha` draws it see-through.
+`bakePiece` moves the blue piece for Overlay and the nudges. The measuring is `nso-gscope-diff.js`
+(`NSOCompareDiff.compute / text`): pure, each move painted at 0.1 mm as the stadium it prints, exact
+distances by EDT. State: `NSO_MICROSCOPE.compareState()`; `compareStart / compareOverlay / compareNudge /
+compareTint / compareClear / compareDiff / compareReport`.
+
+**Not built (on purpose).** Swapping the reference's layers into our output, or feeding the differences back
+to the generator, is not done; the report is the input to either.
+
+**Check.** `compare:diff` (`tools/nso_compare_diff_test.js`, synthetic moves with known answers) and
+`gscope:compare` (`tools/nso_gscope_compare_test.js`): refused with nothing isolated; plate 3 holds two
+tinted pieces, plates 1 and 2 byte-identical; Overlay's outlines coincide; the nudge moves only the blue
+piece; Colours off and on again are exact; Clear compare empties plate 3; the measurement reads. `COMPARE_A` /
+`COMPARE_B` name two other `.gcode.3mf` files for it.

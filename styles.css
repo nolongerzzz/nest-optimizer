@@ -4590,3 +4590,8 @@ body.sup-card-open #adjust-status { display: none; }
   line-height: 1.2;
 }
 #viewport canvas.punch-cur-grab { cursor: grab; }
+
+/* COMPARE's measurement: a table in a fixed-width face, scrolling inside the card rather than growing it */
+.ms-main-card pre.ms-diff { font: 11px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre; overflow: auto; max-height: 240px; margin: 6px 0 0; padding: 6px 8px; border-radius: 6px; background: rgba(0,0,0,0.25); user-select: text; }
+.ms-main-card #ms-compare-worst:empty { display: none; }
+.ms-main-card #ms-compare-worst button { font-variant-numeric: tabular-nums; }

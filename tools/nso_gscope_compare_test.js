@@ -3,12 +3,13 @@
 
    GATES
      1. Side by side: with a slice on each plate and something isolated on each (a layer on plate 1, everything shown on plate 2), the
-        Side by side button sets both down on plate 2 - a plate of two pieces, plate 1's at the left, plate 2's at the right, a gap between,
-        each at the height it came from, each in its own colour - and plate 1 is as it was.
+        Side by side button sets both down on plate 3 - a plate of two pieces, plate 1's at the left, plate 2's at the right, a gap between,
+        each at the height it came from, each in its own colour - and plates 1 and 2 are as they were. Plate 3 stands right of plate 2 only
+        while it holds a compare.
      2. Overlay lines the second piece up with the first by their parts' outlines (XY only, the height unchanged) and draws both see-through.
      3. The nudge arrows move the second piece by the step chosen, and only it.
      4. Colours off puts the line types' own colours back; on, the tints.
-     5. Restore plate 2 brings plate 2's slice back as it was (same file, same moves), and Side by side works again.
+     5. Clear compare takes plate 3 away (plates 1 and 2 as they were), and Side by side works again.
      6. Nothing to compare (a plate empty, nothing isolated) is refused, saying why, and changes nothing.
 
      node tools/nso_gscope_compare_test.js        exit 0 = every gate held */
@@ -64,7 +65,8 @@ withApp(async (page, logs) => {
     await page.evaluate(() => { const M = NSO_MICROSCOPE; M.showPlate('take'); M.selectVisible(); M.isolate(); });
     await page.evaluate(() => NSO_MICROSCOPE.showPlate('lens'));
     await frames(page);
-    ref = await page.evaluate(() => { const s = NSO_MICROSCOPE.plateState('lens'); delete s.camera; return { lens: JSON.stringify(s), takeName: NSO_MICROSCOPE.plateDoc('take').name, takeMoves: NSO_MICROSCOPE.plateDoc('take').parsed.moves.length }; });
+    ref = await page.evaluate(() => { const M = NSO_MICROSCOPE, s = M.plateState('lens'), s2 = M.plateState('take'); delete s.camera; delete s2.camera; return { lens: JSON.stringify(s), take: JSON.stringify(s2), takeName: M.plateDoc('take').name, takeMoves: M.plateDoc('take').parsed.moves.length, floors: Object.keys(M.getView().floors).filter(n => M.getView().floors[n].group.visible) }; });
+    check('before a compare only plates 1 and 2 stand', J(ref.floors) === J(['lens', 'take']), J(ref.floors));
     const rowShown = await page.evaluate(() => { const r = document.getElementById('ms-compare-row'); return r && getComputedStyle(r).display !== 'none'; });
     check('the Compare plates row shows with a file on each plate, folded', rowShown && await page.evaluate(() => document.getElementById('ms-compare-body').hidden));
     await page.click('#ms-compare-toggle');
@@ -73,15 +75,16 @@ withApp(async (page, logs) => {
     await page.click('#ms-compare-start');
     await frames(page);
     const r = await page.evaluate(() => {
-      const M = NSO_MICROSCOPE, d = M.plateDoc('take');
-      return { plate: M.plate(), kind: d.kind, src: d.source, names: d.objects.map(o => o.name), tint: d.objects.map(o => o.tint), st: M.compareState(),
+      const M = NSO_MICROSCOPE, d = M.plateDoc('cmp');
+      return { plate: M.plate(), floors: Object.keys(M.getView().floors).filter(n => M.getView().floors[n].group.visible), kind: d.kind, src: d.source, names: d.objects.map(o => o.name), tint: d.objects.map(o => o.tint), st: M.compareState(),
                boxes: d.objects.map(o => [o.bounds.minX, o.bounds.maxX, o.bounds.minZ, o.bounds.maxZ]) };
     });
-    check('plate 2 is now a plate of two pieces, active', r.plate === 'take' && r.src === 'take' && r.names.length === 2, J(r.names));
+    check('plate 3 stands now, a plate of two pieces, active', r.plate === 'cmp' && r.src === 'take' && r.names.length === 2 && J(r.floors) === J(['lens', 'take', 'cmp']), J([r.plate, r.names, r.floors]));
     check('...named for the plate they came from, each with its own colour', /^Plate 1: /.test(r.names[0]) && /^Plate 2: /.test(r.names[1]) && r.tint[0] !== r.tint[1] && r.tint.every(Boolean), J(r.tint));
     check('...plate 1\'s at the left, plate 2\'s at the right, with a gap between', r.boxes[0][1] < r.boxes[1][0], J(r.boxes));
     const lensNow = await page.evaluate(() => { const s = NSO_MICROSCOPE.plateState('lens'); delete s.camera; return JSON.stringify(s); });
-    check('plate 1 is as it was (byte for byte)', lensNow === ref.lens);
+    const takeNow = await page.evaluate(() => { const s = NSO_MICROSCOPE.plateState('take'); delete s.camera; return JSON.stringify(s); });
+    check('plates 1 and 2 are as they were (byte for byte)', lensNow === ref.lens && takeNow === ref.take);
     check('the compare state reads the two pieces', r.st && !r.st.overlaid && r.st.tinted, J(r.st));
     check('the colour tints are in the drawn geometry (orange and blue meshes differ)', await page.evaluate(() => {
       const v = NSO_MICROSCOPE.getView(), ms = Object.keys(v.overviewMeshes).map(k => v.overviewMeshes[k]).filter(m => m.geometry.attributes.color);
@@ -139,33 +142,36 @@ withApp(async (page, logs) => {
     check('Colours off changes the colours, and on puts the tints back exactly', J(on) !== J(off) && J(on) === J(on2), J({ on, off, on2 }));
   }
 
-  console.log('\n=== 5. restore ===');
+  console.log('\n=== 5. clear compare ===');
   {
     await page.click('#ms-compare-restore');
     await frames(page);
-    const r = await page.evaluate(() => ({ plate: NSO_MICROSCOPE.plate(), d: NSO_MICROSCOPE.plateDoc('take'), st: NSO_MICROSCOPE.compareState() }).d && ({ plate: NSO_MICROSCOPE.plate(), kind: NSO_MICROSCOPE.plateDoc('take').kind, name: NSO_MICROSCOPE.plateDoc('take').name, moves: NSO_MICROSCOPE.plateDoc('take').parsed.moves.length, st: NSO_MICROSCOPE.compareState() }));
-    check('plate 2 is its slice again - the same file, the same moves', r.kind === 'toolpath' && r.name === ref.takeName && r.moves === ref.takeMoves && r.st === null, J(r));
-    await page.evaluate(() => { const M = NSO_MICROSCOPE; M.selectVisible(); M.isolate(); M.showPlate('lens'); });
+    const r = await page.evaluate(() => { const M = NSO_MICROSCOPE, s = M.plateState('lens'), s2 = M.plateState('take'); delete s.camera; delete s2.camera;
+      return { plate: M.plate(), cmp: M.plateDoc('cmp'), st: M.compareState(), floors: Object.keys(M.getView().floors).filter(n => M.getView().floors[n].group.visible), lens: JSON.stringify(s), take: JSON.stringify(s2) }; });
+    check('plate 3 is gone, plate 1 active, plates 1 and 2 as they were', r.plate === 'lens' && r.cmp === null && r.st === null && J(r.floors) === J(['lens', 'take']) && r.lens === ref.lens && r.take === ref.take, J({ plate: r.plate, floors: r.floors }));
+    await page.evaluate(() => { const M = NSO_MICROSCOPE; M.showPlate('take'); M.selectVisible(); M.isolate(); M.showPlate('lens'); });
     await page.click('#ms-compare-start');
     await frames(page);
     check('...and Side by side works again', await page.evaluate(() => !!NSO_MICROSCOPE.compareState()));
+    const again = await page.evaluate(() => { const M = NSO_MICROSCOPE; return !!M.compareStart() && M.plateDoc('cmp').objects.length === 2; });
+    check('...and a second Side by side replaces the compare on plate 3', again);
   }
 
   console.log('\n=== 7. a solo line type, and a capture box ===');
   {
-    await page.evaluate(() => NSO_MICROSCOPE.compareRestore());
+    await page.evaluate(() => NSO_MICROSCOPE.compareClear());
     const r = await page.evaluate(() => {
       const M = NSO_MICROSCOPE, out = {};
       M.showPlate('lens'); const f = Object.keys(M.getDoc().groups).find(g => g !== 'Travel');
       M.soloGroups([f]); M.showPlate('take'); M.soloGroups([f]); M.showPlate('lens');
       out.feature = f; out.start = !!M.compareStart();
-      const d = M.plateDoc('take');
+      const d = M.plateDoc('cmp');
       out.feats = d.objects.map(o => Array.from(new Set(o.moves.filter(m => m.feature).map(m => m.feature))));
       out.ok = d.objects.length === 2;
       return out;
     });
     check('one line type isolated on each plate: both set down, each holding only that line type', r.start && r.ok && r.feats.every(fs => fs.length === 1 && fs[0] === r.feature), J(r));
-    await page.evaluate(() => NSO_MICROSCOPE.compareRestore());
+    await page.evaluate(() => NSO_MICROSCOPE.compareClear());
     const box = await page.evaluate(() => {
       const M = NSO_MICROSCOPE;
       M.showPlate('lens'); M.checkAll(); M.clearBoxes();
@@ -179,6 +185,28 @@ withApp(async (page, logs) => {
       return { sel, st: !!M.compareStart() };
     });
     check('a capture box over a model (everything it holds, supports with it) is carried the same way', box.sel > 0 && box.st, J(box));
+  }
+
+  console.log('\n=== 8. the measurement ===');
+  {
+    await page.selectOption('#ms-compare-step', '0.1');
+    await page.evaluate(() => { const M = NSO_MICROSCOPE; M.compareClear(); ['lens', 'take'].forEach(n => { M.showPlate(n); M.checkAll(); M.setZRangeMm(-1, 999); M.flushView(); M.selectVisible(); M.isolate(); }); M.showPlate('lens'); M.compareStart(); });
+    const pre = await page.evaluate(() => ({ dis: document.getElementById('ms-compare-diff').disabled, copy: document.getElementById('ms-compare-diff-copy').disabled }));
+    check('Measure is on once there is a compare; Copy JSON waits for a measurement', pre.dis === false && pre.copy === true, J(pre));
+    await page.click('#ms-compare-overlay');
+    await page.click('#ms-compare-diff');
+    await frames(page);
+    const r = await page.evaluate(() => { const M = NSO_MICROSCOPE, rep = M.compareReport(), rd = document.getElementById('ms-compare-diff-read');
+      return { has: !!rep, layers: rep && rep.meta.layers, shown: !rd.hidden, text: rd.textContent.slice(0, 120), offset: rep && rep.meta.blueOffsetMm, partOnly: rep && [rep.classes.part.onlyAMm2, rep.classes.part.onlyBMm2], both: rep && rep.classes.part.bothMm2, copy: document.getElementById('ms-compare-diff-copy').disabled }; });
+    check('Measure reads the overlaid pair: a report, shown as text, Copy JSON on', r.has && r.shown && r.layers > 0 && r.copy === false && /^A = Plate 1/.test(r.text), J(r));
+    check('...the same file on both plates, overlaid: what plate 1 holds is wholly in plate 2\'s (none only A\'s), and they share material', r.partOnly[0] < 0.5 && r.both > 5, J([r.partOnly, r.both]));
+    await page.click('#ms-compare-nx\\+');
+    const stale = await page.evaluate(() => ({ rep: NSO_MICROSCOPE.compareReport(), txt: document.getElementById('ms-compare-diff-read').textContent }));
+    check('a nudge makes the measurement out of date, and says so', stale.rep === null && /Measure again/.test(stale.txt), J(stale));
+    await page.click('#ms-compare-diff');
+    const shifted = await page.evaluate(() => { const rep = NSO_MICROSCOPE.compareReport(); return { only: [rep.classes.part.onlyAMm2, rep.classes.part.onlyBMm2], off: rep.meta.blueOffsetMm }; });
+    check('...measured again after a 0.1 mm nudge, an edge of material is only in each, and the offset is in the report', shifted.only[0] > 0.2 && shifted.only[1] > 0.2 && Math.abs(shifted.off[0] - 0.1) < 1e-9, J(shifted));
+    await shot('03-measure');
   }
 
   check('no page errors', logs.filter(l => /^\[pageerror\]/.test(l)).length === 0, logs.filter(l => /^\[pageerror\]/.test(l)).slice(0, 3).join(' | '));
