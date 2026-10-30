@@ -29,8 +29,11 @@ PAINT SCOPE: **WHOLE-PIECE** (`nsoMaskCount(m) > 0`).
 - **Armed = menu open.** Opening another menu closes Text (the accordion), and
   Text also puts itself away if Carve, Paint or Punch is armed over it.
 - **Remove (added 2026-10-30):** the card's Stamp | Remove switch. `NSO_Text.pockets`
-  reads the recess off the piece (floor, walls, one-plane rim) and `fillers` gives
-  prisms to union back; no stamp history. Flat faces only. Details in `docs/TEXT.md`.
+  reads the recess off the piece (floor, walls, rim), `caps` makes the caps and
+  `fill` lays them - mesh surgery, not a boolean (a unioned prism left slivers the app's
+  checker flags). Flat and curved faces; no stamp history. It stops, in words, on a
+  rim that folds back on itself (a splintered scan mesh): `text_repair_test.3mf`'s
+  hand is the example. Details and the limit in `docs/TEXT.md`.
 - **Not done, on purpose:** emboss (the prism has both ends; a union instead of a
   subtract), wrapping across edges, letter / line spacing, typed font names.
   Listed in `docs/TEXT.md`.

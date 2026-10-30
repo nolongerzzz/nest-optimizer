@@ -330,8 +330,8 @@ withApp(async (page, logs) => {
   await click(page, await screenOf(page, [stemX, mid[1], mid[2] - 1]));
   await page.waitForFunction(() => nsoTextState().count > 0, null, { timeout: 5000 }).catch(() => {});
   st = await S(page);
-  check('a click on the floor of the first H finds all three letters, 1 mm deep; the ghost is the fill (green) and REMOVE is on',
-    st.ok && st.count === 3 && st.ghosts === 3 && /3 recesses, 1\.0 mm deep/.test(st.readout) && !(await page.evaluate(() => document.getElementById('btn-text-remove').disabled)), st.readout);
+  check('a click on the floor of the first H finds all three letters, 1 mm deep; the ghost is their caps (green) and REMOVE is on',
+    st.ok && st.count === 3 && st.ghosts === 1 && /3 recesses, 1\.0 mm deep/.test(st.readout) && !(await page.evaluate(() => document.getElementById('btn-text-remove').disabled)), st.readout);
   const dragNo = await page.evaluate(() => NSO_textHitAt(0, 0));
   check('drag and nudge are the stamp’s: off here', dragNo === false);
   await page.click('#btn-text-remove');
@@ -398,7 +398,7 @@ withApp(async (page, logs) => {
   await page.click('#menu-text > summary');
   await page.waitForFunction(() => nsoTextState().open, null, { timeout: 5000 });
   await lookDown(page);
-  await page.fill('#inp-text', 'HEH');
+  await page.fill('#inp-text', 'HHH');
   await setField(page, '#inp-text-size', 8);
   await setField(page, '#inp-text-depth', 1);
   await click(page, await screenOf(page, ctop));
@@ -415,6 +415,7 @@ withApp(async (page, logs) => {
     });
     return out;
   });
+  const floorRaw = await page.evaluate(() => { const D = state.text.plan.data, i = 0; return [0, 1, 2].map(c => D.o[c] + D.ex[c] * D.V[i][0] + D.ey[c] * D.V[i][1] + D.n[c] * D.hb[i]); });
   await page.click('#btn-text-go');
   await page.waitForFunction(() => state.undoStack.length > 0 && !nsoTextState().busy, null, { timeout: 60000 }).catch(() => {});
   const csoup1 = await soupOf(page);
@@ -426,6 +427,33 @@ withApp(async (page, logs) => {
   });
   const lo = Math.min(...depths), hi = Math.max(...depths);
   check('every letter triangle sampled is engraved 1.00 mm square to the surface (+/- 0.04)', depths.length >= 20 && lo > 0.96 && hi < 1.04, depths.length + ' of ' + samples.length + ' samples: ' + lo.toFixed(3) + ' .. ' + hi.toFixed(3));
+
+  // and take it back off the curve
+  {
+    await page.click('#btn-text-mode-remove');
+    await page.waitForTimeout(200);
+    await click(page, await screenOf(page, floorRaw));
+    await page.waitForFunction(() => nsoTextState().count > 0 || nsoTextState().bad, null, { timeout: 8000 }).catch(() => {});
+    st = await S(page);
+    check('Remove on the cylinder: the three letters found in a curved face, the ghost is their caps, REMOVE on', st.ok && st.count === 3 && /in a curved face/.test(st.readout) && st.ghosts === 1 &&
+      !(await page.evaluate(() => document.getElementById('btn-text-remove').disabled)), st.readout);
+    const dC = await undoDepth(page);
+    await page.click('#btn-text-remove');
+    await page.waitForFunction(d => state.undoStack.length > d, dC, { timeout: 20000 }).catch(() => {});
+    const csoup2 = await soupOf(page);
+    const diffs = [];
+    samples.forEach(([x, y]) => {
+      const z0 = topAt(csoup0, x, y), z2 = topAt(csoup2, x, y);
+      if (z0 - topAt(csoup1, x, y) > 0.3) diffs.push(Math.abs(z2 - z0));
+    });
+    diffs.sort((a, b) => a - b);
+    const cnt = diffs.length, worst = diffs[cnt - 1] || 0, p95 = diffs[Math.floor(cnt * 0.95)] || 0;   // a sample on a letter's own edge reads the wall, not the face
+    check('REMOVE puts the cylinder\u2019s face back over the letters (95% within 0.03 mm, all within 0.1, ' + cnt + ' points), one Undo step, no boolean',
+      cnt >= 10 && p95 < 0.03 && worst < 0.1 && (await undoDepth(page)) === dC + 1 && volume(csoup2) > volume(csoup1) && Math.abs(volume(csoup2) - volume(csoup0)) < 0.01 * (volume(csoup0) - volume(csoup1)),
+      'p95 ' + p95.toFixed(4) + ', worst ' + worst.toFixed(4) + ', volume ' + volume(csoup0).toFixed(2) + ' / ' + volume(csoup1).toFixed(2) + ' / ' + volume(csoup2).toFixed(2));
+    await page.click('#btn-text-mode-stamp');
+    await page.waitForTimeout(200);
+  }
 
   console.log('\n=== 9. Escape, other menus, Carve ===');
   await click(page, await screenOf(page, ctop));

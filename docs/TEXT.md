@@ -38,32 +38,66 @@ for the next face with its numbers kept. While it is open:
 ## Remove
 
 The switch at the top of the card, **Stamp | Remove**. In Remove, click the floor
-of an engraved letter: the ghost turns green and shows what will be put back,
-REMOVE fills it flush with the face (one boolean, one Undo, `textReplace`).
+of an engraved letter: the ghost turns green and shows the caps that will be laid
+over each rim, REMOVE fills the recesses flush with the face (one Undo,
+`textReplace`).
 
 It keeps no record of the stamp, so it works on text stamped in an earlier
-session, after other edits, and on any recess in a flat face (a blind hole
-included: a recess is a recess). `NSO_Text.pockets` reads it off the piece: a
-click on a floor - or on a wall, the triangles within 3 mm are tried - seeds a
-flood across the facets within a degree of it and in its plane (the floor), then
-the triangles square to it that rise above it (the walls); the patch's open edges
-are the **rim**, chained into loops. It is a recess only if the rim sits in one
-plane (0.02 mm) above the floor and every triangle round it is a facet of the
-face, not another step. `NSO_Text.fillers` makes a prism of each rim outline from
-0.05 mm under its floor to the face's plane; the shipped union with the piece
-closes it (the walls are coincident faces and the kernel takes them: three
-stamped letters came back to the slab's volume to the last digit).
+session, after other edits, and on any recess a face has (a blind hole included:
+a recess is a recess). It is **mesh surgery, not a boolean**: the floor and wall
+triangles are dropped and a cap is laid over the rim loop, its boundary the rim's
+own vertices - nothing is left coincident with anything, the piece stays as
+watertight as it was, and a piece that is open or self-piercing elsewhere is not
+asked to be a solid first. (A first version unioned a prism in; the app's own
+checker found slivers - non-manifold and flipped edges - where the prism's top met
+the face, which is why it is surgery.) `NSO_Text.pockets` reads the recesses,
+`caps` makes the caps, `fill` lays them.
 
-- **Whole word** (on): every recess whose floor and rim are in the same planes (0.03
-  mm), within **Reach** mm of one already chosen (single linkage), so a word goes in
-  one click and a second stamp of another depth is left alone. Off: the one clicked.
-- Refused in words: not a recess (a plain face, a bump, a cylinder), a rim that is
-  not flat (a recess in a **curved** face, or one a later Thicken / Scale has bent),
-  a painted piece.
+- **Flat face**: the floor is one plane (within a degree, 0.01 mm), the walls
+  square to it, the rim in one plane above it (0.02 mm). The cap is the rim polygon.
+- **Curved face**: the floor is a smooth patch (neighbouring facets within 25
+  degrees); n0, the axis the walls run along, is found from the walls' own normals;
+  the walls rise above the floor edge they stand on. Each floor vertex on the edge
+  of the patch has a wall straight above it and the rim segment over it is on the
+  original surface, so the height of the face above it is known; the rest are
+  Laplace's equation on the floor's own mesh. The floor lifted by those heights is
+  the surface the recess was cut from (a stamp's floor is that surface offset down,
+  so it kept the curve). The cap is the rim polygon, and where the lifted floor
+  stands more than 0.01 mm off a chord across it the triangle is split and the new
+  corner put on it. On a faceted cylinder the face came back to within 0.003 mm and
+  the app's checker found the result clean.
+- **Splinters**: a mesh cut by a boolean carries triangles of no area whose normals
+  mean nothing. They are not allowed to vote on which way a face looks, a splinter
+  lying in the floor belongs to it, a splinter island inside a recess goes with it,
+  a splinter lobe hanging off it stays in the piece.
+- **Whole word** (on): every recess of the same axis (0.999) and depth (a flat
+  one 0.03 mm, a curved one within 2x: its height along the axis grows with the lean
+  of the face) within **Reach** mm of one already chosen (single linkage), so a word
+  goes in one click and a second stamp of another depth is left alone. Off: the one
+  clicked.
+- Refused in words: not a recess (a plain face, a bump), a flat rim that is not flat,
+  a curved recess whose walls are not square to one axis, **a rim that cannot be
+  capped** (see below), a painted piece.
 - The recess must still be a recess: **Thicken out** offsets every outer face,
   walls and floors included, so letters it has grown into are not recesses any
-  more - Undo it, then Remove. The Check card's thin-wall count of text this small
-  is the tool saying the strokes are thin, not that the text is gone.
+  more - Undo it, then Remove.
+
+**Where it stops.** A rim read off a mesh that is full of splinters and
+self-piercing shells (a hand model from a scan, after a boolean and a repair) can
+fold back on itself in the plane of the face: edges a few microns long run out
+along one line and straight back, or cross by less than 0.01 mm. A polygon like
+that has no clean triangulation, and Remove says so (`found 7 recesses, but the rim
+of that recess could not be capped`) and changes nothing; it will not lift the floor
+instead, which a try showed leaves a worse mesh (hundreds of flipped and
+non-manifold edges). On `text_repair_test.3mf`'s palm Remove finds the seven
+recesses of DUKE DOKS and stops there. Undo to before the repair, or Remove on the
+version the stamp was made on, and it fills them.
+
+A curved recess in a font's own letters can meet the same wall in a cleaner mesh: on
+a faceted cylinder (the app's own boolean output) `HHH` caps and fills, while `HEH`
+in the same font found its three recesses and could not cap the first (a hole in the
+rim polygon with no way out). That is a refusal in words, not a bad cut; it is the
+next thing to chase.
 
 ## From a font to a cutter
 
@@ -134,7 +168,7 @@ its faces by axis and side, so any paint stands it down.
 - **Emboss** (raised text): the same cutter, unioned instead of subtracted, its
   bottom at the surface and its top `depth` above it. The engine's prism already
   has both ends.
-- **Removing** text from a curved face (the fill's top is a plane; the stamp's floor follows the surface, the removal does not yet).
+- **Removing** text whose rim folds back on itself (a splintered mesh): a cap built in 3D rather than from the rim's flat projection.
 - **Wrapping** text across an edge or round a tube's whole circumference: the
   prism is straight along n, so text stops where the face's smooth surface does.
 - **Letter spacing, line spacing, alignment, outlines of a font's own name list**
@@ -153,6 +187,6 @@ its faces by axis and side, so any paint stands it down.
   (`tools/nso_csg_node.js`); every number is read off its output.
 - `tools/nso_text_drive_check.js` (`npm run text:drive`): the real page, real
   mouse and keyboard, the browser's own fonts (a loaded DejaVu face included).
-- Remove is gate 10 of `text:test` (the union restores the slab, an O's island, word vs one, refusals) and 7b of `text:drive`.
+- Remove is gate 10 of `text:test` (the slab's volume back and the app's own checker - open, non-manifold, flipped, flat triangles, piercing - finding it clean, an O's island, word vs one, a shell piercing the piece elsewhere, a cylinder back to the face within 0.03 mm, refusals) and 7b and the cylinder step of `text:drive`.
 - a Text row in `tools/nso_pick_release_test.js`: armed, after STAMP and after
   Escape, a left-drag on the bare plate orbits.

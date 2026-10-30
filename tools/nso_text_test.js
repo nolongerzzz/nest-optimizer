@@ -422,50 +422,75 @@ const polyArea = (sh) => sh.area;
 
   /* 10 -------------------------------------------------------------- */
   {
+    // the app's own checker, as the page loads it
+    const vm = require('vm'), fs = require('fs'), path = require('path');
+    const sb = { window: {} };
+    vm.createContext(sb);
+    for (const f of ['NSO_Repair.js', 'nso-defects.js']) vm.runInContext(fs.readFileSync(path.join(__dirname, '..', f), 'utf8'), sb, { filename: f });
+    const check = (soup) => { const r = sb.window.NSO_Defects.locate(soup, {}); return { open: r.openEdges, nm: r.nonManifoldEdges, odd: r.oddEdges, flip: r.flippedEdges, degen: r.degenerateTris, pierce: r.pierce }; };
+    const clean = (c) => c.open === 0 && c.nm === 0 && c.odd === 0 && c.flip === 0 && c.degen === 0 && !c.pierce;
     const word3 = T.shape(word(3));
-    const stampOn = async (soup, shp, depth, at) => {
-      const pl = T.plan(soup, { point: at, normal: [0, 0, 1] }, shp, { depth });
+    const stampOn = async (soup, shp, depth, at, angle) => {
+      const pl = T.plan(soup, { point: at, normal: [0, 0, 1] }, shp, { depth, angle: angle || 0 });
       const r = await csg.NSO_subtractSoups(soup, T.cutter(pl));
       return { pl, soup: r.soup, ok: r.ok };
     };
     const A = await stampOn(SLAB, word3, 1, [30, 20, 6]);
-    // a point on the floor of the first letter's stem: 1 mm down, the left stem of letter 1
     const sx = A.pl.data.o[0] + A.pl.data.V.reduce((m, v) => Math.min(m, v[0]), Infinity) + 0.6;
     const floorPt = [sx, 20, 5];
     const one = T.pockets(A.soup, { point: floorPt, normal: [0, 0, 1] }, { word: false });
-    gate('10a one click on a letter\\u2019s floor finds that recess alone: 1 mm deep, a flat rim', one.ok && one.count === 1 && near(one.depth, 1, 0.005) && one.planarity < 0.001, one.reason);
+    gate('10a one click on a letter’s floor finds that recess alone: flat, 1 mm deep', one.ok && one.count === 1 && !one.curved && near(one.depth, 1, 0.005), one.reason);
     const all = T.pockets(A.soup, { point: floorPt, normal: [0, 0, 1] }, { word: true, reach: 5 });
     gate('10b "word" finds all three letters of the stamp', all.ok && all.count === 3, all.reason);
-    const fill = T.fillers(all);
-    const back = await csg.NSO_unionSoups(A.soup, (() => { const o = new Float32Array(fill.reduce((n, f) => n + f.length, 0)); let q = 0; fill.forEach(f => { o.set(f, q); q += f.length; }); return o; })());
-    const v0 = volume(SLAB), v1 = volume(A.soup), v2 = back.soup ? volume(back.soup) : NaN;
-    gate('10c the shipped union of the fillers restores the slab\\u2019s volume (within 0.05%) and it is closed', back.ok && near(v2, v0, 5e-4 * v0) && closed(back.soup),
-      'slab ' + v0.toFixed(3) + ', stamped ' + v1.toFixed(3) + ', filled ' + v2.toFixed(3));
-    const tops = [[30 - 3.2, 20], [30, 20], [30 + 3.1, 22]].map(([x, y]) => rayTop(back.soup, x, y));
+    const f1 = T.fill(A.soup, all);
+    const v0 = volume(SLAB), v1 = volume(A.soup), v2 = f1.ok ? volume(f1.soup) : NaN;
+    gate('10c filling is mesh surgery: the slab’s volume back (0.05%), and the app’s checker finds it clean (no open, non-manifold, flipped or flat triangle)',
+      f1.ok && near(v2, v0, 5e-4 * v0) && clean(check(f1.soup)), 'slab ' + v0.toFixed(3) + ', stamped ' + v1.toFixed(3) + ', filled ' + v2.toFixed(3) + ' ' + JSON.stringify(f1.ok ? check(f1.soup) : f1.reason));
+    const tops = [[30 - 3.2, 20], [30, 20], [30 + 3.1, 22]].map(([x, y]) => rayTop(f1.soup, x, y));
     gate('10d the face is flat again where the letters were (z = 6 at the stems and the bar)', tops.every(z => near(z, 6, 1e-4)), tops.map(z => z.toFixed(4)).join(' / '));
-    const loneFill = await csg.NSO_unionSoups(A.soup, T.fillers(one)[0]);
-    gate('10e one click with "word" off fills one letter: it takes back a third of the engraving', loneFill.ok && closed(loneFill.soup) && (volume(loneFill.soup) - v1) > 0.2 * (v0 - v1) && (volume(loneFill.soup) - v1) < 0.5 * (v0 - v1),
-      'engraving ' + (v0 - v1).toFixed(3) + ', returned ' + (volume(loneFill.soup) - v1).toFixed(3));
+    const f2 = T.fill(A.soup, one);
+    gate('10e one click with "word" off fills one letter: a third of the engraving comes back, still clean', f2.ok && clean(check(f2.soup)) && (volume(f2.soup) - v1) > 0.2 * (v0 - v1) && (volume(f2.soup) - v1) < 0.5 * (v0 - v1),
+      'engraving ' + (v0 - v1).toFixed(3) + ', returned ' + (f2.ok ? (volume(f2.soup) - v1).toFixed(3) : f2.reason));
     const tight = T.pockets(A.soup, { point: floorPt, normal: [0, 0, 1] }, { word: true, reach: 0.1 });
     gate('10f a reach of 0.1 mm joins none of them: still one recess', tight.ok && tight.count === 1, tight.reason);
-    // an O: the ring is filled, its island is not touched
     const O = await stampOn(SLAB, T.shape(ringO()), 1, [30, 20, 6]);
-    const ringPt = [35, 20, 5];
-    const po = T.pockets(O.soup, { point: ringPt, normal: [0, 0, 1] }, { word: true });
-    const oBack = await csg.NSO_unionSoups(O.soup, T.fillers(po)[0]);
-    gate('10g an O: one recess with a hole in it, filled back to the slab, the island untouched',
-      po.ok && po.count === 1 && po.pockets[0].polys[0].holes.length === 1 && oBack.ok && near(volume(oBack.soup), v0, 5e-4 * v0) && closed(oBack.soup), po.reason);
-    // refusals
+    const po = T.pockets(O.soup, { point: [35, 20, 5], normal: [0, 0, 1] }, { word: true });
+    const fo = T.fill(O.soup, po);
+    gate('10g an O: one recess with a hole in it, filled back to the slab, clean, the island untouched',
+      po.ok && po.count === 1 && fo.ok && near(volume(fo.soup), v0, 5e-4 * v0) && clean(check(fo.soup)), po.reason + ' ' + (fo.ok ? JSON.stringify(check(fo.soup)) : fo.reason));
     const plain = T.pockets(A.soup, { point: [5, 5, 6], normal: [0, 0, 1] }, {});
     gate('10h a click on the plain face is refused in words', !plain.ok && /not the inside of a recess/.test(plain.reason), plain.reason);
     const cylH = T.pockets(cylinder(15, 40, 96), { point: [20, 0, 15], normal: [0, 0, 1] }, {});
     gate('10i an unengraved cylinder is refused too', !cylH.ok);
-    // two stamps of different depth: word fills the clicked depth only
     const B2 = await stampOn(A.soup, T.shape(letterH()), 0.5, [30, 32, 6]);
     const mixed = T.pockets(B2.soup, { point: floorPt, normal: [0, 0, 1] }, { word: true, reach: 30 });
     gate('10j a second stamp 0.5 deep, in reach, is left alone: word takes only the 1 mm ones', B2.ok && mixed.ok && mixed.count === 3 && near(mixed.depth, 1, 0.005), mixed.reason);
     const t0 = Date.now(); T.pockets(A.soup, { point: floorPt, normal: [0, 0, 1] }, { word: true });
     gate('10k finding them is quick (under 1 s)', Date.now() - t0 < 1000, (Date.now() - t0) + ' ms');
+    // a piece that is not a clean solid: two shells overlapping elsewhere; the fill does not ask it to be
+    const second = box([40, 10, 0], [70, 30, 8]);
+    const messy = new Float32Array(A.soup.length + second.length); messy.set(A.soup); messy.set(second, A.soup.length);
+    const pm = T.pockets(messy, { point: floorPt, normal: [0, 0, 1] }, { word: true, reach: 5 });
+    const fm = T.fill(messy, pm);
+    gate('10l a piece with another shell piercing it elsewhere is filled all the same (only the recesses change)', pm.ok && fm.ok && near(volume(fm.soup) - volume(messy), v0 - v1, 5e-4 * v0), pm.reason);
+    // curved faces: stamp on a faceted cylinder, then take it back
+    const cyl = cylinder(15, 40, 96), cs = T.shape(word(2));
+    const cpl = T.plan(cyl, { point: [20, 0, 15], normal: [0, 0, 1] }, cs, { depth: 1, angle: 90 });
+    const cut = await csg.NSO_subtractSoups(cyl, T.cutter(cpl));
+    const D = cpl.data, at = (x, y) => [D.o[0] + D.ex[0] * x + D.ey[0] * y, D.o[1] + D.ex[1] * x + D.ey[1] * y];
+    const stem = at(Math.min(...D.V.map(v => v[0])) + 0.6, 0);
+    const cp = T.pockets(cut.soup, { point: [stem[0], stem[1], rayTop(cut.soup, stem[0], stem[1])], normal: [0, 0, 1] }, { word: true, reach: 5 });
+    gate('10m a recess in a curved face is found: 2 letters, about 1 mm deep', cp.ok && cp.curved && cp.count === 2 && near(cp.depth, 1, 0.15), cp.reason);
+    const cf = T.fill(cut.soup, cp);
+    const vC0 = volume(cyl), vC1 = volume(cut.soup), vC2 = cf.ok ? volume(cf.soup) : NaN;
+    gate('10n the curved fill takes back the volume (within 1% of what was cut) and the app’s checker finds it clean', cf.ok && Math.abs(vC2 - vC0) < 0.01 * (vC0 - vC1) && clean(check(cf.soup)),
+      'cylinder ' + vC0.toFixed(2) + ', engraved ' + vC1.toFixed(2) + ', filled ' + vC2.toFixed(2) + ' ' + JSON.stringify(cf.ok ? check(cf.soup) : cf.reason));
+    let worst = 0, cn = 0;
+    for (const [x, y] of [[-3, -2], [0.6, 1], [2, -3], [-1, 3], [3.2, 0.5], [-3.5, 1.5]]) {
+      const [wx, wy] = at(x, y);
+      if (cf.ok && rayTop(cyl, wx, wy) - rayTop(cut.soup, wx, wy) > 0.3) { worst = Math.max(worst, Math.abs(rayTop(cf.soup, wx, wy) - rayTop(cyl, wx, wy))); cn++; }
+    }
+    gate('10o the surface is back to the cylinder’s within 0.03 mm over the letters', cn >= 2 && worst < 0.03, cn + ' points, worst ' + worst.toFixed(4) + ' mm');
   }
 
   console.log(fails ? '\n' + fails + ' FAILED' : '\nPASSED all gates');

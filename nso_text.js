@@ -454,7 +454,7 @@
     return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
   }
   /* The whole shape: { V, T } or { reason }. */
-  function triangulate(sh) {
+  function triangulate(sh, tolerant) {                          // tolerant: a rim read off a mesh, whose noise may leave a sliver turned over
     var V = [], T = [];
     for (var i = 0; i < sh.polys.length; i++) {
       var P = sh.polys[i], tr = triangulatePoly(V, P);
@@ -463,11 +463,11 @@
       P.holes.forEach(function (H) { want += area2(H); });
       want = Math.abs(want);
       tr.forEach(function (t) { got += triArea2(V, t); });
-      if (!(Math.abs(got - want) <= 1e-6 * Math.max(1, want) + 1e-9)) {
+      if (!(Math.abs(got - want) <= (tolerant ? 1e-3 : 1e-6) * Math.max(1, want) + 1e-9)) {
         return { reason: 'the letters could not be triangulated cleanly (area ' + fmt2(got / 2) + ' mm² against ' + fmt2(want / 2) + ')' };
       }
       for (var j = 0; j < tr.length; j++) {
-        if (!(triArea2(V, tr[j]) > 0)) return { reason: 'the letters could not be triangulated cleanly (a flat or turned triangle)' };
+        if (!(triArea2(V, tr[j]) > (tolerant ? -1e-4 : 0))) return { reason: 'the letters could not be triangulated cleanly (a flat or turned triangle)' };
         T.push(tr[j]);
       }
     }
@@ -711,24 +711,37 @@
 
   /* ------------------------------------------------------------- removing */
 
-  /* REMOVE. The text this tool stamps is a set of recesses in a flat face: each
-     letter a flat FLOOR, parallel to the face, ringed by WALLS square to it that
-     run up to a RIM in the face's own plane. pockets() finds them from a click on
-     one, with no memory of the stamp - so it works on a piece the stamp was made
-     on last week, or on other tools' recesses - and fillers() gives, for each, a
-     prism of the rim's outline from just under the floor to the face's plane.
-     Union that with the piece and the face is whole again.
+  /* REMOVE. The text this tool stamps is a set of recesses: each letter a FLOOR,
+     ringed by WALLS that run straight up (along one axis n0) to a RIM on the face.
+     pockets() finds them from a click on one, with no memory of the stamp - so it
+     works on a piece stamped last week, after other edits, or on any other tool's
+     recess - and fill() takes them out by surgery on the mesh, not a boolean: the
+     floor and wall triangles are dropped and a cap is laid over the rim loop, its
+     boundary the rim's own vertices, so nothing is left to be coincident with
+     anything and the piece stays as watertight as it was (a mesh that is already
+     overlapping or open elsewhere is not asked to be a solid first).
 
-     From the click: a triangle on a floor (or a wall: the neighbours within half a
-     mm are tried) seeds a flood across edges to the facets within a degree of it
-     and in its plane (the floor); the triangles across the floor's edge that stand
-     square to it and rise above it (the walls), and the walls joined to those. The
-     patch's open edges are the rim. A recess is refused unless every rim vertex
-     lies in one plane (0.02 mm) above the floor and every triangle round the rim
-     is a facet of the face, not another wall. opts.word fills every recess of the
-     same floor plane and depth (0.03 mm) within opts.reach mm of one already
-     chosen, so a word goes in one click; otherwise only the one clicked. */
+     A recess in a FLAT face has a floor in one plane (within a degree, 0.01 mm) and
+     a rim in one plane above it (0.02 mm); the cap is the flat polygon of the rim.
+     A recess in a CURVED face has a floor that is a smooth patch (neighbouring
+     facets within 25 degrees), n0 found from its walls' own normals (the direction
+     every wall contains), and walls that rise above the floor edge they stand on.
+     Each floor vertex on the patch's edge has a wall straight above it, and the rim
+     segment that crosses its line is on the original surface, so the height of the
+     face above that vertex is known; the rest are Laplace's equation on the floor's
+     own mesh. The floor lifted by those heights is the surface the recess was cut
+     from (a stamp's floor is that surface offset down, so it kept the curve), and
+     the cap is the rim polygon cut into 1 mm triangles, its inside vertices put on
+     that lifted floor.
+
+     From the click: a triangle on a floor (or a wall: the nearest 40 within 3 mm
+     are tried) seeds it. opts.word fills every recess of the same axis and depth
+     within opts.reach mm of one already chosen (single linkage), so a word goes in
+     one click; otherwise only the one clicked. */
+  var weldCache = typeof WeakMap === 'function' ? new WeakMap() : null;
   function weld(soup) {
+    var hit = weldCache && weldCache.get(soup);
+    if (hit && hit.len === soup.length) return hit;
     var n = (soup.length / 9) | 0, vid = new Int32Array(3 * n), ids = new Map(), nV = 0, i, t, k;
     var P = [];
     for (i = 0; i < 3 * n; i++) {
@@ -737,12 +750,13 @@
       if (id === undefined) { id = nV++; ids.set(key, id); P.push([soup[3 * i], soup[3 * i + 1], soup[3 * i + 2]]); }
       vid[i] = id;
     }
-    var nrm = new Float64Array(3 * n), edges = new Map(), K = 1 << 26;
+    var nrm = new Float64Array(3 * n), area = new Float64Array(n), edges = new Map(), K = 1 << 26;
     for (t = 0; t < n; t++) {
       var a = P[vid[3 * t]], b = P[vid[3 * t + 1]], c = P[vid[3 * t + 2]];
       var ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
       var nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx, L = Math.hypot(nx, ny, nz) || 1;
       nrm[3 * t] = nx / L; nrm[3 * t + 1] = ny / L; nrm[3 * t + 2] = nz / L;
+      area[t] = L / 2;
       for (k = 0; k < 3; k++) {
         var e0 = vid[3 * t + k], e1 = vid[3 * t + (k + 1) % 3];
         if (e0 === e1) continue;
@@ -750,7 +764,9 @@
         if (l) l.push(t); else edges.set(ek, [t]);
       }
     }
-    return { n: n, vid: vid, P: P, nrm: nrm, edges: edges, K: K };
+    var M = { n: n, vid: vid, P: P, nrm: nrm, area: area, edges: edges, K: K, soup: soup, len: soup.length };
+    if (weldCache) weldCache.set(soup, M);
+    return M;
   }
   function across(M, t, k) {                                 // the triangle over t's edge k, or -1
     var e0 = M.vid[3 * t + k], e1 = M.vid[3 * t + (k + 1) % 3], l = M.edges.get(e0 < e1 ? e0 * M.K + e1 : e1 * M.K + e0);
@@ -758,12 +774,57 @@
     for (var i = 0; i < l.length; i++) if (l[i] !== t) return l[i];
     return -1;
   }
-  function pocketFrom(M, seed, fr) {
-    var n0 = fr.n, o = fr.o, tol = 0.01, cosF = Math.cos(Math.PI / 180);
+  function frameFor(n) {
+    var e1 = Math.abs(n[0]) < 0.9 ? [0, -n[2], n[1]] : [-n[2], 0, n[0]], L = Math.hypot(e1[0], e1[1], e1[2]);
+    e1 = [e1[0] / L, e1[1] / L, e1[2] / L];
+    return { n: n, e1: e1, e2: [n[1] * e1[2] - n[2] * e1[1], n[2] * e1[0] - n[0] * e1[2], n[0] * e1[1] - n[1] * e1[0]] };
+  }
+  /* Directed rim edges -> loops of vertex ids, or null when a chain does not close. A vertex the rim
+     touches twice (two lobes meeting at a point) goes on by the sharpest left turn in the plane of
+     the face, which keeps each lobe a loop of its own. */
+  function loopsOf(rim, M, n0) {
+    var F = frameFor(n0), out = new Map(), i, used = new Set(), K = 1 << 26;
+    function xy(v) { var p = M.P[v]; return [p[0] * F.e1[0] + p[1] * F.e1[1] + p[2] * F.e1[2], p[0] * F.e2[0] + p[1] * F.e2[1] + p[2] * F.e2[2]]; }
+    for (i = 0; i < rim.length; i++) {
+      var l = out.get(rim[i][0]);
+      if (l) l.push(rim[i][1]); else out.set(rim[i][0], [rim[i][1]]);
+    }
+    var loops = [];
+    for (i = 0; i < rim.length; i++) {
+      var a0 = rim[i][0], b0 = rim[i][1];
+      if (used.has(a0 * K + b0)) continue;
+      var loop = [a0], a = a0, b = b0, guard = 0;
+      for (;;) {
+        used.add(a * K + b);
+        if (b === a0) {
+          // closed when no unused edge leaves the start vertex's loop back into it: this loop is done
+          break;
+        }
+        loop.push(b);
+        var cands = (out.get(b) || []).filter(function (c) { return !used.has(b * K + c); });
+        if (!cands.length) return null;
+        var pa = xy(a), pb = xy(b), din = [pb[0] - pa[0], pb[1] - pa[1]], best = cands[0], bt = -Infinity;
+        if (cands.length > 1) {
+          cands.forEach(function (c) {
+            var pc = xy(c), dout = [pc[0] - pb[0], pc[1] - pb[1]];
+            var tau = Math.atan2(din[0] * dout[1] - din[1] * dout[0], din[0] * dout[0] + din[1] * dout[1]);
+            if (tau > bt) { bt = tau; best = c; }
+          });
+        }
+        a = b; b = best;
+        if (++guard > rim.length + 5) return null;
+      }
+      if (loop.length >= 3) loops.push(loop);
+    }
+    return loops.length ? loops : null;
+  }
+
+  /* A recess in a flat face, from a triangle on its floor. */
+  function pocketFlat(M, seed) {
+    var n0 = [M.nrm[3 * seed], M.nrm[3 * seed + 1], M.nrm[3 * seed + 2]], o = M.P[M.vid[3 * seed]], tol = 0.01, cosF = Math.cos(Math.PI / 180);
     function ht(v) { var p = M.P[v]; return (p[0] - o[0]) * n0[0] + (p[1] - o[1]) * n0[1] + (p[2] - o[2]) * n0[2]; }
     function nd(t) { return M.nrm[3 * t] * n0[0] + M.nrm[3 * t + 1] * n0[1] + M.nrm[3 * t + 2] * n0[2]; }
     function flat(t) { return nd(t) >= cosF && Math.abs(ht(M.vid[3 * t])) < tol && Math.abs(ht(M.vid[3 * t + 1])) < tol && Math.abs(ht(M.vid[3 * t + 2])) < tol; }
-    if (!flat(seed)) return null;
     var floor = new Set([seed]), q = [seed], t, k, u, i;
     while (q.length) {
       t = q.pop();
@@ -785,150 +846,510 @@
       for (k = 0; k < 3; k++) { u = across(M, t, k); if (u >= 0 && !floor.has(u)) wallOf(u, true); }
       if (wall.size > 200000) return null;
     }
-    // the rim: the patch's open edges, chained
-    var inP = function (x) { return floor.has(x) || wall.has(x); }, out = new Map(), rimTris = [], deg = true;
+    var inP = function (x) { return floor.has(x) || wall.has(x); }, rim = [], rimTris = [], deg = true;
     function visit(tt) {
       for (var j = 0; j < 3; j++) {
         var nb = across(M, tt, j);
         if (nb >= 0 && inP(nb)) continue;
-        var a = M.vid[3 * tt + j], b = M.vid[3 * tt + (j + 1) % 3];
         if (nb < 0) { deg = false; continue; }              // an open edge: not a recess
-        if (out.has(a)) deg = false;
-        out.set(a, b); rimTris.push(nb);
+        rim.push([M.vid[3 * tt + j], M.vid[3 * tt + (j + 1) % 3]]); rimTris.push(nb);
       }
     }
     floor.forEach(visit); wall.forEach(visit);
-    if (!deg || !out.size) return null;
+    if (!deg || !rim.length) return null;
     for (i = 0; i < rimTris.length; i++) if (nd(rimTris[i]) < 0.9) return null;   // a step, not the face
-    var loops = [], seen = new Set();
-    out.forEach(function (_, a0) {
-      if (seen.has(a0)) return;
-      var loop = [], cur = a0;
-      while (cur !== undefined && !seen.has(cur)) { seen.add(cur); loop.push(cur); cur = out.get(cur); }
-      if (cur === a0 && loop.length >= 3) loops.push(loop); else deg = false;
-    });
-    if (!deg) return null;
-    var hs = [], lo = Infinity, hi = -Infinity;
-    loops.forEach(function (l) { l.forEach(function (v) { var h = ht(v); hs.push(h); lo = Math.min(lo, h); hi = Math.max(hi, h); }); });
+    var loops = loopsOf(rim, M, n0);
+    if (!loops) return null;
+    var lo = Infinity, hi = -Infinity;
+    loops.forEach(function (l) { l.forEach(function (v) { var h = ht(v); lo = Math.min(lo, h); hi = Math.max(hi, h); }); });
     if (hi - lo > 0.02 || lo < 0.02) return null;
-    var H = (lo + hi) / 2, flo = Infinity;
-    return { floor: floor, wall: wall, loops: loops, H: H, planarity: hi - lo, ht: ht };
+    return { curved: false, floor: floor, wall: wall, loops: loops, n0: n0, H: (lo + hi) / 2 };
   }
 
-  /* The recesses under a click. -> { ok, reason, pockets, frame, depth, count, width, height } */
+  function minEigen3(C) {                                    // the eigenvector of the smallest eigenvalue, C symmetric 3x3
+    var a = [[C[0], C[1], C[2]], [C[1], C[3], C[4]], [C[2], C[4], C[5]]], v = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+    for (var sweep = 0; sweep < 40; sweep++) {
+      var off = Math.abs(a[0][1]) + Math.abs(a[0][2]) + Math.abs(a[1][2]);
+      if (off < 1e-14) break;
+      for (var p = 0; p < 2; p++) for (var q = p + 1; q < 3; q++) {
+        if (Math.abs(a[p][q]) < 1e-18) continue;
+        var th = (a[q][q] - a[p][p]) / (2 * a[p][q]), t = (th >= 0 ? 1 : -1) / (Math.abs(th) + Math.sqrt(th * th + 1)), c = 1 / Math.sqrt(t * t + 1), sn = t * c, k;
+        for (k = 0; k < 3; k++) { var akp = a[k][p], akq = a[k][q]; a[k][p] = c * akp - sn * akq; a[k][q] = sn * akp + c * akq; }
+        for (k = 0; k < 3; k++) { var apk = a[p][k], aqk = a[q][k]; a[p][k] = c * apk - sn * aqk; a[q][k] = sn * apk + c * aqk; }
+        for (k = 0; k < 3; k++) { var vkp = v[k][p], vkq = v[k][q]; v[k][p] = c * vkp - sn * vkq; v[k][q] = sn * vkp + c * vkq; }
+      }
+    }
+    var best = 0;
+    for (var i = 1; i < 3; i++) if (a[i][i] < a[best][best]) best = i;
+    return [v[0][best], v[1][best], v[2][best]];
+  }
+  /* A recess in a curved face, from a triangle on its floor (see the header). */
+  function pocketCurved(M, seed) {
+    var cosS = Math.cos(25 * Math.PI / 180), cap = 8000, i, j, k, t, u;
+    function nrm(x) { return [M.nrm[3 * x], M.nrm[3 * x + 1], M.nrm[3 * x + 2]]; }
+    function sliver(x) { return M.area[x] < 2e-6; }          // a boolean's splinters: their normals mean nothing
+    function d3(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+    var floor = new Set([seed]), q = [seed], refN = new Map(), ax = nrm(seed);
+    refN.set(seed, ax);
+    function hzs(v) { var Pt = M.P[v]; return Pt[0] * ax[0] + Pt[1] * ax[1] + Pt[2] * ax[2]; }
+    while (q.length) {
+      t = q.pop();
+      var tn = refN.get(t);
+      for (k = 0; k < 3; k++) {
+        u = across(M, t, k);
+        if (u < 0 || floor.has(u)) continue;
+        if (!sliver(u)) {
+          if (d3(tn, nrm(u)) >= cosS) { floor.add(u); refN.set(u, nrm(u)); q.push(u); }
+        } else {                                              // a splinter lying in the floor (its far corner level with the edge it hangs from) belongs to it
+          var ea = hzs(M.vid[3 * t + k]), eb = hzs(M.vid[3 * t + (k + 1) % 3]), third = -1;
+          for (var c3 = 0; c3 < 3; c3++) { var vv = M.vid[3 * u + c3]; if (vv !== M.vid[3 * t + k] && vv !== M.vid[3 * t + (k + 1) % 3]) third = vv; }
+          if (third >= 0 && Math.abs(hzs(third) - (ea + eb) / 2) < 0.05) { floor.add(u); refN.set(u, tn); q.push(u); }
+        }
+        if (floor.size > cap) return null;
+      }
+    }
+    var side = new Set(), fn = [0, 0, 0];
+    floor.forEach(function (f) {
+      var n = nrm(f);
+      fn[0] += n[0]; fn[1] += n[1]; fn[2] += n[2];
+      for (var e = 0; e < 3; e++) { var w = across(M, f, e); if (w < 0) { side.add(-1); continue; } if (!floor.has(w)) side.add(w); }
+    });
+    if (side.has(-1) || !side.size) return null;
+    var C = [0, 0, 0, 0, 0, 0];
+    side.forEach(function (w) {
+      if (sliver(w)) return;
+      var n = nrm(w);
+      C[0] += n[0] * n[0]; C[1] += n[0] * n[1]; C[2] += n[0] * n[2]; C[3] += n[1] * n[1]; C[4] += n[1] * n[2]; C[5] += n[2] * n[2];
+    });
+    var n0 = minEigen3(C), Lf = Math.hypot(fn[0], fn[1], fn[2]) || 1;
+    if (d3(n0, fn) < 0) n0 = [-n0[0], -n0[1], -n0[2]];
+    if (d3(n0, fn) / Lf < 0.5) return null;                  // the floor does not face along the walls' axis
+    function hz(v) { var P = M.P[v]; return P[0] * n0[0] + P[1] * n0[1] + P[2] * n0[2]; }
+    var bad = false;
+    var sideA = 0, sideBad = 0;                              // walls are square to n0, by area: a corner triangle or two may lean
+    side.forEach(function (w) { if (sliver(w)) return; sideA += M.area[w]; if (Math.abs(d3(nrm(w), n0)) > 0.35) sideBad += M.area[w]; });
+    if (sideBad > 0.15 * sideA) bad = true;
+    if (bad) return null;
+    var vf = new Set();
+    floor.forEach(function (f) { for (var e = 0; e < 3; e++) vf.add(M.vid[3 * f + e]); });
+    var wall = new Set(), wq = [], flatA = 0;
+    side.forEach(function (w) {                              // walls rise above the floor edge they stand on: a recess, not a boss (by area)
+      if (sliver(w)) { wall.add(w); wq.push(w); return; }
+      var top = -Infinity, lo = Infinity, cnt = 0;
+      for (var e = 0; e < 3; e++) { var v = M.vid[3 * w + e]; if (vf.has(v)) { lo = Math.min(lo, hz(v)); cnt++; } else top = Math.max(top, hz(v)); }
+      if (cnt !== 2 || !(top > lo + 0.02)) flatA += M.area[w];
+      wall.add(w); wq.push(w);
+    });
+    if (flatA > 0.15 * sideA) return null;
+    while (wq.length) {
+      t = wq.pop();
+      for (k = 0; k < 3; k++) {
+        u = across(M, t, k);
+        if (u < 0) return null;
+        if (floor.has(u) || wall.has(u)) continue;
+        if (sliver(u) || Math.abs(d3(nrm(u), n0)) <= 0.2) { wall.add(u); wq.push(u); if (wall.size > cap) return null; }
+      }
+    }
+    // the rim: what the walls open onto is the face (by area: splinters do not vote). Loops of no
+    // area - a splinter island inside the recess, a splinter lobe hanging off it - are absorbed
+    // (the island dropped with it, the lobe left out of it), so the cap is never asked to cover nothing.
+    var rim, owner, loops, ok = true, F0 = frameFor(n0), pass;
+    function inP(x) { return wall.has(x) || floor.has(x); }
+    function area2d(l) {
+      var sum = 0;
+      for (var z = 0; z < l.length; z++) {
+        var p1 = M.P[l[z]], p2 = M.P[l[(z + 1) % l.length]];
+        var x1 = p1[0] * F0.e1[0] + p1[1] * F0.e1[1] + p1[2] * F0.e1[2], y1 = p1[0] * F0.e2[0] + p1[1] * F0.e2[1] + p1[2] * F0.e2[2];
+        var x2 = p2[0] * F0.e1[0] + p2[1] * F0.e1[1] + p2[2] * F0.e1[2], y2 = p2[0] * F0.e2[0] + p2[1] * F0.e2[1] + p2[2] * F0.e2[2];
+        sum += x1 * y2 - x2 * y1;
+      }
+      return sum / 2;
+    }
+    for (pass = 0; pass < 6; pass++) {
+      rim = []; owner = new Map(); var rimArea = 0, rimBad = 0, K3 = 1 << 26;
+      var scan = function (w) {
+        for (var e = 0; e < 3; e++) {
+          var nb = across(M, w, e);
+          if (nb < 0) { ok = false; continue; }
+          if (inP(nb)) continue;
+          if (!sliver(nb)) { rimArea += M.area[nb]; if (d3(nrm(nb), n0) < 0.3) rimBad += M.area[nb]; }
+          var ea = M.vid[3 * w + e], eb = M.vid[3 * w + (e + 1) % 3];
+          rim.push([ea, eb]); owner.set(ea * K3 + eb, [w, e]);
+        }
+      };
+      wall.forEach(scan); floor.forEach(scan);
+      if (!ok || !rim.length || rimBad > 0.1 * rimArea) return null;
+      loops = loopsOf(rim, M, n0);
+      if (!loops) return null;
+      // a zero-width spike (the loop goes out along a line and straight back) is a splinter pair: take the
+      // splinters it is made of into the recess and read the rim again
+      var spiky = 0;
+      loops.forEach(function (l) {
+        for (var z = 0; z < l.length; z++) {
+          var A1 = M.P[l[(z + l.length - 1) % l.length]], B1 = M.P[l[z]], C1 = M.P[l[(z + 1) % l.length]];
+          var ux = B1[0] - A1[0], uy = B1[1] - A1[1], uz = B1[2] - A1[2], vx = C1[0] - B1[0], vy = C1[1] - B1[1], vz = C1[2] - B1[2];
+          var du = ux * n0[0] + uy * n0[1] + uz * n0[2], dv = vx * n0[0] + vy * n0[1] + vz * n0[2];
+          var tu = [ux - du * n0[0], uy - du * n0[1], uz - du * n0[2]], tv = [vx - dv * n0[0], vy - dv * n0[1], vz - dv * n0[2]];
+          var lu = Math.hypot(tu[0], tu[1], tu[2]), lv = Math.hypot(tv[0], tv[1], tv[2]);
+          if (lu < 1e-9 || lv < 1e-9) continue;
+          var cs = (tu[0] * tv[0] + tu[1] * tv[1] + tu[2] * tv[2]) / (lu * lv);
+          if (cs < -0.9999) {                                   // turns straight back
+            for (var side2 = 0; side2 < 2; side2++) {
+              var ow2 = owner.get((side2 ? l[z] : l[(z + l.length - 1) % l.length]) * K3 + (side2 ? l[(z + 1) % l.length] : l[z]));
+              if (!ow2) continue;
+              var nb3 = across(M, ow2[0], ow2[1]);
+              if (nb3 >= 0 && !inP(nb3) && sliver(nb3)) { wall.add(nb3); spiky++; }
+            }
+          }
+        }
+      });
+      var tiny = loops.filter(function (l) { return Math.abs(area2d(l)) < 1e-3; });
+      if (!tiny.length && !spiky) break;
+      if (!tiny.length) continue;
+      tiny.forEach(function (l) {                             // the sign of a loop this small means nothing: try it as an island, else as a lobe
+        var island = [], seenI = new Set(), qi = [], z;
+        for (z = 0; z < l.length; z++) {
+          var ow = owner.get(l[z] * K3 + l[(z + 1) % l.length]);
+          if (!ow) continue;
+          var nb2 = across(M, ow[0], ow[1]);
+          if (nb2 >= 0 && !inP(nb2) && !seenI.has(nb2)) { seenI.add(nb2); qi.push(nb2); }
+        }
+        while (qi.length && island.length < 200) {
+          var tI = qi.pop();
+          island.push(tI);
+          for (var e2 = 0; e2 < 3; e2++) { var u2 = across(M, tI, e2); if (u2 >= 0 && !inP(u2) && !seenI.has(u2)) { seenI.add(u2); qi.push(u2); } }
+        }
+        if (island.length < 200 && island.length) { island.forEach(function (x) { wall.add(x); }); return; }
+        var lobe = new Set(), ql = [];
+        for (z = 0; z < l.length; z++) { var o2 = owner.get(l[z] * K3 + l[(z + 1) % l.length]); if (o2 && !lobe.has(o2[0])) { lobe.add(o2[0]); ql.push(o2[0]); } }
+        while (ql.length && lobe.size < 200) {
+          var tL = ql.pop();
+          for (var e3 = 0; e3 < 3; e3++) { var u3 = across(M, tL, e3); if (u3 >= 0 && inP(u3) && !lobe.has(u3)) { lobe.add(u3); ql.push(u3); } }
+        }
+        if (lobe.size >= 200) { ok = false; return; }
+        lobe.forEach(function (x) { wall.delete(x); floor.delete(x); });
+      });
+      if (!ok) return null;
+      if (pass === 5) return null;
+    }
+    if (!loops || !floor.size) return null;
+    // the floor's own mesh, compact
+    var idx = new Map(), P = [], T3 = [];
+    function vi(v) { var x = idx.get(v); if (x === undefined) { x = P.length; idx.set(v, x); P.push(M.P[v]); } return x; }
+    floor.forEach(function (f) { T3.push([vi(M.vid[3 * f]), vi(M.vid[3 * f + 1]), vi(M.vid[3 * f + 2])]); });
+    var inv = [];
+    idx.forEach(function (c, v) { inv[c] = v; });
+    var have = new Map(), K = 1 << 26, onB = new Set();
+    T3.forEach(function (tr) { for (var e = 0; e < 3; e++) have.set(tr[e] * K + tr[(e + 1) % 3], 1); });
+    T3.forEach(function (tr) { for (var e = 0; e < 3; e++) { var a = tr[e], b = tr[(e + 1) % 3]; if (!have.has(b * K + a)) { onB.add(a); onB.add(b); } } });
+    // the height of the face above each vertex on the patch's edge: the wall stands straight up
+    // from it, so the rim segment that crosses its line gives the height there
+    var h = new Float64Array(P.length), fixed = new Uint8Array(P.length), failed = false;
+    function tan(Pt) { var d = Pt[0] * n0[0] + Pt[1] * n0[1] + Pt[2] * n0[2]; return [Pt[0] - d * n0[0], Pt[1] - d * n0[1], Pt[2] - d * n0[2]]; }
+    var segs = rim.map(function (r) {
+      var A = M.P[r[0]], B = M.P[r[1]];
+      return { a: tan(A), b: tan(B), ha: A[0] * n0[0] + A[1] * n0[1] + A[2] * n0[2], hb: B[0] * n0[0] + B[1] * n0[1] + B[2] * n0[2] };
+    });
+    onB.forEach(function (a) {
+      var A = P[a], At = tan(A), hA = A[0] * n0[0] + A[1] * n0[1] + A[2] * n0[2], bh = 0;
+      for (var g = 0; g < segs.length; g++) {                 // the highest point of any rim segment standing over this vertex
+        var S = segs[g], dx = S.b[0] - S.a[0], dy = S.b[1] - S.a[1], dz = S.b[2] - S.a[2], L2 = dx * dx + dy * dy + dz * dz, dist, hh;
+        if (L2 < 1e-12) { dist = Math.hypot(At[0] - S.a[0], At[1] - S.a[1], At[2] - S.a[2]); hh = Math.max(S.ha, S.hb); }
+        else {
+          var tt = Math.max(0, Math.min(1, ((At[0] - S.a[0]) * dx + (At[1] - S.a[1]) * dy + (At[2] - S.a[2]) * dz) / L2));
+          dist = Math.hypot(At[0] - S.a[0] - tt * dx, At[1] - S.a[1] - tt * dy, At[2] - S.a[2] - tt * dz);
+          hh = S.ha + tt * (S.hb - S.ha);
+        }
+        if (dist < 0.03 && hh - hA > bh) bh = hh - hA;
+      }
+      if (!(bh > 0.02)) { failed = true; return; }
+      h[a] = bh; fixed[a] = 1;
+    });
+    if (failed) return null;
+    var nbr = P.map(function () { return []; });             // Laplace on the floor's graph
+    T3.forEach(function (tr) { for (var e = 0; e < 3; e++) { var a = tr[e], b = tr[(e + 1) % 3]; nbr[a].push(b); nbr[b].push(a); } });
+    var mean = 0, cntB = 0;
+    for (i = 0; i < P.length; i++) if (fixed[i]) { mean += h[i]; cntB++; }
+    mean /= cntB || 1;
+    for (i = 0; i < P.length; i++) if (!fixed[i]) h[i] = mean;
+    for (var it = 0; it < 4000; it++) {
+      var move = 0;
+      for (i = 0; i < P.length; i++) {
+        if (fixed[i] || !nbr[i].length) continue;
+        var sum = 0;
+        for (j = 0; j < nbr[i].length; j++) sum += h[nbr[i][j]];
+        var nv = sum / nbr[i].length;
+        move = Math.max(move, Math.abs(nv - h[i]));
+        h[i] = nv;
+      }
+      if (move < 1e-7) break;
+    }
+    var hmin = Infinity, hmax = -Infinity;
+    for (i = 0; i < P.length; i++) { hmin = Math.min(hmin, h[i]); hmax = Math.max(hmax, h[i]); }
+    if (hmin < 0.02 || hmax > 50) return null;
+    return { curved: true, floor: floor, wall: wall, loops: loops, n0: n0, H: mean, lift: { P: P, T: T3, h: h, ids: inv } };
+  }
+
+  /* The cap over one recess's rim: { tris: [[a, b, c] of 3D points] } or { reason }. */
+  function capOf(M, E) {
+    var F = frameFor(E.n0), org = E.curved ? E.lift.P[0] : M.P[E.loops[0][0]], i, j;
+    function to2(p) {
+      var w = [p[0] - org[0], p[1] - org[1], p[2] - org[2]];
+      return [w[0] * F.e1[0] + w[1] * F.e1[1] + w[2] * F.e1[2], w[0] * F.e2[0] + w[1] * F.e2[1] + w[2] * F.e2[2]];
+    }
+    var rings = E.loops.map(function (l) { return { ids: l, pts: l.map(function (v) { return to2(M.P[v]); }) }; });
+    var outers = rings.filter(function (r) { return area2(r.pts) > 0; }), holes = rings.filter(function (r) { return area2(r.pts) < 0; });
+    if (!outers.length) return { reason: 'that recess has no outline to cap' };
+    var polys = outers.map(function (r) { return { outer: r.pts, holes: [], ids: r.ids.slice(), a2: area2(r.pts) }; });
+    holes.forEach(function (h) {
+      var best = null;
+      polys.forEach(function (P) { if (inside(P.outer, h.pts[0]) && (!best || P.a2 < best.a2)) best = P; });
+      if (!best) return;
+      best.holes.push(h.pts); best.ids = best.ids.concat(h.ids);
+    });
+    var ids = [];
+    polys.forEach(function (P) { ids = ids.concat(P.ids); });
+    var tri = triangulate({ polys: polys.map(function (P) { return { outer: P.outer, holes: P.holes }; }) }, !!E.curved);
+    if (!tri.V) return { reason: 'the rim of that recess could not be capped (' + tri.reason + ')' };
+    var V = tri.V, T = tri.T, nRing = ids.length;
+    if (V.length !== nRing) return { reason: 'the rim of that recess could not be capped' };
+    var P3 = ids.map(function (v) { return M.P[v]; });
+    if (E.curved) {
+      // the triangles of the rim polygon are chords of a curved face; an edge across the inside is split
+      // where the lifted floor stands more than 0.01 mm off its chord, the new corner put on the floor
+      var L = E.lift, F2 = L.P.map(to2), sh = L.P.map(function (p, k) { return (p[0] - org[0]) * F.n[0] + (p[1] - org[1]) * F.n[1] + (p[2] - org[2]) * F.n[2] + L.h[k]; });
+      var at = function (x, y) {
+        for (var k = 0; k < L.T.length; k++) {
+          var t = L.T[k], a = F2[t[0]], b = F2[t[1]], c = F2[t[2]];
+          var d = (b[1] - c[1]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[1] - c[1]);
+          if (Math.abs(d) < 1e-14) continue;
+          var u = ((b[1] - c[1]) * (x - c[0]) + (c[0] - b[0]) * (y - c[1])) / d, v = ((c[1] - a[1]) * (x - c[0]) + (a[0] - c[0]) * (y - c[1])) / d, w = 1 - u - v;
+          if (u < -1e-6 || v < -1e-6 || w < -1e-6) continue;
+          return u * sh[t[0]] + v * sh[t[1]] + w * sh[t[2]];
+        }
+        return null;
+      };
+      var sArr = P3.map(function (p) { return (p[0] - org[0]) * F.n[0] + (p[1] - org[1]) * F.n[1] + (p[2] - org[2]) * F.n[2]; });
+      var cell = 0.05, hash = new Map();                         // no two corners within 0.03 mm: a fan of cuts toward one corner makes slivers
+      function hkey(x, y) { return Math.floor(x / cell) + ',' + Math.floor(y / cell); }
+      function hadd(i) { var k = hkey(V[i][0], V[i][1]), l = hash.get(k); if (l) l.push(i); else hash.set(k, [i]); }
+      function crowded(x, y) {
+        var cx = Math.floor(x / cell), cy = Math.floor(y / cell);
+        for (var dx = -1; dx <= 1; dx++) for (var dy = -1; dy <= 1; dy++) {
+          var l = hash.get((cx + dx) + ',' + (cy + dy));
+          if (l) for (var q = 0; q < l.length; q++) if (Math.hypot(V[l[q]][0] - x, V[l[q]][1] - y) < 0.03) return true;
+        }
+        return false;
+      }
+      for (i = 0; i < V.length; i++) hadd(i);
+      var rf = refineInterior(V, T, function (a, b, m) {
+        if (Math.hypot(V[a][0] - V[b][0], V[a][1] - V[b][1]) < 0.3 || crowded(m[0], m[1])) return false;
+        var s = at(m[0], m[1]), sa = at(V[a][0], V[a][1]), sb = at(V[b][0], V[b][1]);   // the floor's own curve, not the rim's few-micron mismatch with it
+        return s !== null && sa !== null && sb !== null && Math.abs(s - (sa + sb) / 2) > 0.004;
+      }, function (m, a, b, mid) {
+        var s = at(mid[0], mid[1]);
+        hadd(m);
+        if (s === null) s = (sArr[a] + sArr[b]) / 2;
+        sArr[m] = s;
+        P3[m] = [org[0] + F.e1[0] * mid[0] + F.e2[0] * mid[1] + F.n[0] * s, org[1] + F.e1[1] * mid[0] + F.e2[1] * mid[1] + F.n[1] * s,
+                 org[2] + F.e1[2] * mid[0] + F.e2[2] * mid[1] + F.n[2] * s];
+      }, V);
+      T = rf;
+    }
+    return { tris: T.map(function (t) { return [P3[t[0]], P3[t[1]], P3[t[2]]]; }) };
+  }
+  /* Split the interior edges that want(a, b, midpoint) says to (the outline is not touched), in
+     passes; made(m, a, b, midpoint) hears of each new corner. V is grown in place. -> triangles */
+  function refineInterior(V, T0, want, made) {
+    var T = T0.map(function (t) { return t.slice(); }), K = 1 << 26, pass;
+    for (pass = 0; pass < 14; pass++) {
+      var edges = new Map(), k, e;
+      for (k = 0; k < T.length; k++) for (e = 0; e < 3; e++) {
+        var a = T[k][e], b = T[k][(e + 1) % 3], key = a < b ? a * K + b : b * K + a, l = edges.get(key);
+        if (l) l.push(k); else edges.set(key, [k]);
+      }
+      var taken = new Uint8Array(T.length), next = [], did = false;
+      for (k = 0; k < T.length && T.length + next.length < 20000; k++) {
+        if (taken[k]) continue;
+        for (e = 0; e < 3; e++) {
+          var a2 = T[k][e], b2 = T[k][(e + 1) % 3], l2 = edges.get(a2 < b2 ? a2 * K + b2 : b2 * K + a2);
+          if (l2.length !== 2) continue;
+          var other = l2[0] === k ? l2[1] : l2[0];
+          if (taken[other]) continue;
+          var mid = [(V[a2][0] + V[b2][0]) / 2, (V[a2][1] + V[b2][1]) / 2];
+          if (!want(a2, b2, mid)) continue;
+          var ic = T[k][(e + 2) % 3], Tn = T[other], id = -1;
+          for (var q = 0; q < 3; q++) if (Tn[q] !== a2 && Tn[q] !== b2) id = Tn[q];
+          var m = V.length;
+          V.push(mid);
+          made(m, a2, b2, mid);
+          taken[k] = 1; taken[other] = 1; did = true;
+          next.push([a2, m, ic], [m, b2, ic], [b2, m, id], [m, a2, id]);
+          break;
+        }
+      }
+      if (!did) break;
+      var keep = [];
+      for (k = 0; k < T.length; k++) if (!taken[k]) keep.push(T[k]);
+      T = keep.concat(next);
+    }
+    return T;
+  }
+
+  /* The recesses under a click. -> { ok, reason, pockets, count, depth, width, height } */
   function pockets(soup, hit, opts) {
-    var o = {}, k;
-    for (k in { word: 1, reach: 1 }) o[k] = (opts || {})[k];
+    var o = { word: (opts || {}).word, reach: (opts || {}).reach };
     if (o.word === undefined) o.word = true;
     if (!(o.reach >= 0)) o.reach = 3;
     if (!soup || soup.length < 36 || soup.length % 9) return refuse('there is no piece to take text off');
     var p0 = hit && (hit.point || hit.p || hit);
     if (!p0 || !(p0.length >= 3 || p0.x !== undefined)) return refuse('the click has no point on the piece');
     p0 = p0.length >= 3 ? [+p0[0], +p0[1], +p0[2]] : [+p0.x, +p0.y, +p0.z];
-    var M = weld(soup), i, t;
-    // the triangles at the click, nearest first
-    var near = [];
+    var M = weld(soup), i, t, near = [];
     for (t = 0; t < M.n; t++) {
       var a = M.P[M.vid[3 * t]], b = M.P[M.vid[3 * t + 1]], c = M.P[M.vid[3 * t + 2]];
-      var cx = (a[0] + b[0] + c[0]) / 3 - p0[0], cy = (a[1] + b[1] + c[1]) / 3 - p0[1], cz = (a[2] + b[2] + c[2]) / 3 - p0[2];
-      var d = Math.hypot(cx, cy, cz);
+      var d = Math.hypot((a[0] + b[0] + c[0]) / 3 - p0[0], (a[1] + b[1] + c[1]) / 3 - p0[1], (a[2] + b[2] + c[2]) / 3 - p0[2]);
       if (d < 3) near.push([d, t]);
     }
     near.sort(function (x, y) { return x[0] - y[0]; });
-    var first = null, fr = null, tried = 0;
-    for (i = 0; i < near.length && tried < 40 && !first; i++) {
-      t = near[i][1]; tried++;
-      var n0 = [M.nrm[3 * t], M.nrm[3 * t + 1], M.nrm[3 * t + 2]];
-      var org = M.P[M.vid[3 * t]];
-      var cand = { n: n0, o: org };
-      var pk = pocketFrom(M, t, cand);
-      if (pk) { first = pk; fr = cand; }
+    // a click from the side lands on a wall or the face as often as on the floor: try first the
+    // triangles that stand at the foot of a wall (a neighbour square to them that rises above their edge)
+    function footing(t0) {
+      if (M.area[t0] < 2e-6) return false;
+      var nt = [M.nrm[3 * t0], M.nrm[3 * t0 + 1], M.nrm[3 * t0 + 2]];
+      for (var k = 0; k < 3; k++) {
+        var u = across(M, t0, k);
+        if (u < 0 || M.area[u] < 2e-6) continue;
+        if (Math.abs(M.nrm[3 * u] * nt[0] + M.nrm[3 * u + 1] * nt[1] + M.nrm[3 * u + 2] * nt[2]) > 0.2) continue;
+        var va = M.vid[3 * t0 + k], vb = M.vid[3 * t0 + (k + 1) % 3], vc = -1;
+        for (var c = 0; c < 3; c++) { var w = M.vid[3 * u + c]; if (w !== va && w !== vb) vc = w; }
+        var hv = function (v) { return M.P[v][0] * nt[0] + M.P[v][1] * nt[1] + M.P[v][2] * nt[2]; };
+        if (vc >= 0 && hv(vc) > (hv(va) + hv(vb)) / 2 + 0.02) return true;
+      }
+      return false;
     }
-    if (!first) return refuse('that is not the inside of a recess in a flat face - click on the floor of an engraved letter');
-    // the frame the outlines are drawn in
-    var n = fr.n, e1 = Math.abs(n[0]) < 0.9 ? [0, -n[2], n[1]] : [-n[2], 0, n[0]], L = Math.hypot(e1[0], e1[1], e1[2]);
-    e1 = [e1[0] / L, e1[1] / L, e1[2] / L];
-    var e2 = [n[1] * e1[2] - n[2] * e1[1], n[2] * e1[0] - n[0] * e1[2], n[0] * e1[1] - n[1] * e1[0]];
-    fr.e1 = e1; fr.e2 = e2;
-    function polysOf(pk) {
-      var rings = pk.loops.map(function (l) {
-        return cleanLoop(l.map(function (v) {
-          var pt = M.P[v], w = [pt[0] - fr.o[0], pt[1] - fr.o[1], pt[2] - fr.o[2]];
-          return [w[0] * e1[0] + w[1] * e1[1] + w[2] * e1[2], w[0] * e2[0] + w[1] * e2[1] + w[2] * e2[2]];
-        }));
-      }).filter(function (r) { return r.length >= 3; });
-      var outers = rings.filter(function (r) { return area2(r) > 0; }), holes = rings.filter(function (r) { return area2(r) < 0; });
-      var polys = outers.map(function (r) { return { outer: r, holes: [], a2: area2(r) }; });
-      holes.forEach(function (h) {
-        var best = null;
-        polys.forEach(function (P) { if (inside(P.outer, h[0]) && (!best || P.a2 < best.a2)) best = P; });
-        if (best) best.holes.push(h);
+    var seedsNear = near.filter(function (x) { return footing(x[1]); }).slice(0, 40).concat(near.slice(0, 40));
+    var first = null;
+    for (i = 0; i < seedsNear.length && !first; i++) first = pocketFlat(M, seedsNear[i][1]);
+    for (i = 0; i < seedsNear.length && !first; i++) first = pocketCurved(M, seedsNear[i][1]);
+    if (!first) return refuse('that is not the inside of a recess in a face - click on the floor of an engraved letter');
+    var n = first.n0, F = frameFor(n), org = M.P[M.vid[3 * Array.from(first.floor)[0]]];
+    function box(E) {
+      var pts = [];
+      E.loops.forEach(function (l) { l.forEach(function (v) { pts.push(M.P[v]); }); });
+      var lo = [Infinity, Infinity], hi = [-Infinity, -Infinity], lo3 = [Infinity, Infinity, Infinity], hi3 = [-Infinity, -Infinity, -Infinity];
+      pts.forEach(function (p) {
+        var w = [p[0] - org[0], p[1] - org[1], p[2] - org[2]], x = w[0] * F.e1[0] + w[1] * F.e1[1] + w[2] * F.e1[2], y = w[0] * F.e2[0] + w[1] * F.e2[1] + w[2] * F.e2[2];
+        lo[0] = Math.min(lo[0], x); lo[1] = Math.min(lo[1], y); hi[0] = Math.max(hi[0], x); hi[1] = Math.max(hi[1], y);
+        for (var k = 0; k < 3; k++) { lo3[k] = Math.min(lo3[k], p[k]); hi3[k] = Math.max(hi3[k], p[k]); }
       });
-      polys.forEach(function (P) { delete P.a2; });
-      var lo = [Infinity, Infinity], hi = [-Infinity, -Infinity];
-      polys.forEach(function (P) { P.outer.forEach(function (q) { lo[0] = Math.min(lo[0], q[0]); lo[1] = Math.min(lo[1], q[1]); hi[0] = Math.max(hi[0], q[0]); hi[1] = Math.max(hi[1], q[1]); }); });
-      return { polys: polys, lo: lo, hi: hi, H: pk.H, planarity: pk.planarity };
+      E.lo = lo; E.hi = hi; E.lo3 = lo3; E.hi3 = hi3;
+      return E;
     }
-    var chosen = [polysOf(first)];
-    if (!chosen[0].polys.length) return refuse('that recess has no outline to fill');
+    function gap3(A, B) {
+      var s = 0;
+      for (var k = 0; k < 3; k++) { var g = Math.max(0, A.lo3[k] - B.hi3[k], B.lo3[k] - A.hi3[k]); s += g * g; }
+      return Math.sqrt(s);
+    }
+    var chosen = [box(first)];
     if (o.word) {
-      var used = new Set(first.floor), found = [];
+      // candidates: the floor triangles that stand at the foot of a wall (a wall's lowest edge along n),
+      // near a chosen recess. Found once, from the walls, not by trying every triangle in reach.
+      var used = new Set(first.floor);
+      chosen[0].wall.forEach(function (w) { used.add(w); });
+      var seeds = [];
+      function hzn(v) { var q = M.P[v]; return q[0] * n[0] + q[1] * n[1] + q[2] * n[2]; }
       for (t = 0; t < M.n; t++) {
-        if (used.has(t)) continue;
-        var nn = M.nrm[3 * t] * n[0] + M.nrm[3 * t + 1] * n[1] + M.nrm[3 * t + 2] * n[2];
-        if (nn < 0.9998) continue;
-        var pk2 = pocketFrom(M, t, fr);
-        if (!pk2) { used.add(t); continue; }
-        pk2.floor.forEach(function (x) { used.add(x); });
-        if (Math.abs(pk2.H - first.H) > 0.03) continue;
-        var pp = polysOf(pk2);
-        if (pp.polys.length) found.push(pp);
+        if (M.area[t] < 2e-6 || Math.abs(M.nrm[3 * t] * n[0] + M.nrm[3 * t + 1] * n[1] + M.nrm[3 * t + 2] * n[2]) > 0.2) continue;
+        for (var k = 0; k < 3; k++) {
+          var u = across(M, t, k);
+          if (u < 0 || M.area[u] < 2e-6) continue;
+          var va = M.vid[3 * t + k], vb = M.vid[3 * t + (k + 1) % 3], vc = M.vid[3 * t + (k + 2) % 3];
+          if (hzn(vc) > (hzn(va) + hzn(vb)) / 2 + 0.02 && M.nrm[3 * u] * n[0] + M.nrm[3 * u + 1] * n[1] + M.nrm[3 * u + 2] * n[2] > (first.curved ? 0.3 : 0.9998)) {
+            var A = M.P[va], B = M.P[vb];
+            seeds.push([u, [(A[0] + B[0]) / 2, (A[1] + B[1]) / 2, (A[2] + B[2]) / 2]]);
+          }
+        }
       }
-      // single linkage from the clicked recess: within reach of one already taken
-      var grew = true;
-      function gap(A, B) {
-        var dx = Math.max(0, A.lo[0] - B.hi[0], B.lo[0] - A.hi[0]), dy = Math.max(0, A.lo[1] - B.hi[1], B.lo[1] - A.hi[1]);
-        return Math.hypot(dx, dy);
-      }
-      while (grew) {
+      var zone = o.reach + 1, rounds = 0, grew = true, found = [];
+      var tryFrom = first.curved ? pocketCurved : pocketFlat;
+      while (grew && rounds++ < 40) {
         grew = false;
+        for (var si = 0; si < seeds.length; si++) {
+          var sd = seeds[si];
+          if (used.has(sd[0])) continue;
+          var cen = sd[1];
+          var close = chosen.some(function (E) {
+            for (var q = 0; q < 3; q++) if (cen[q] < E.lo3[q] - zone || cen[q] > E.hi3[q] + zone) return false;
+            return true;
+          });
+          if (!close) continue;
+          var pk = tryFrom(M, sd[0]);
+          if (!pk) { used.add(sd[0]); continue; }
+          pk.floor.forEach(function (x) { used.add(x); });
+          pk.wall.forEach(function (x) { used.add(x); });
+          if (Math.abs(pk.n0[0] * n[0] + pk.n0[1] * n[1] + pk.n0[2] * n[2]) < 0.999 ||
+              (first.curved ? Math.min(pk.H, first.H) < 0.5 * Math.max(pk.H, first.H) : Math.abs(pk.H - first.H) > 0.03)) continue;
+          box(pk);
+          found.push(pk);
+        }
         for (i = found.length - 1; i >= 0; i--) {
-          if (chosen.some(function (C) { return gap(C, found[i]) <= o.reach; })) { chosen.push(found[i]); found.splice(i, 1); grew = true; }
+          if (chosen.some(function (E) { return gap3(E, found[i]) <= o.reach; })) { chosen.push(found[i]); found.splice(i, 1); grew = true; }
         }
       }
     }
-    var lo2 = [Infinity, Infinity], hi2 = [-Infinity, -Infinity], area = 0, worst = 0;
-    chosen.forEach(function (C) {
-      lo2[0] = Math.min(lo2[0], C.lo[0]); lo2[1] = Math.min(lo2[1], C.lo[1]); hi2[0] = Math.max(hi2[0], C.hi[0]); hi2[1] = Math.max(hi2[1], C.hi[1]);
-      C.polys.forEach(function (P) { area += area2(P.outer) / 2; P.holes.forEach(function (h) { area += area2(h) / 2; }); });
-      worst = Math.max(worst, C.planarity);
+    var lo2 = [Infinity, Infinity], hi2 = [-Infinity, -Infinity], depth = 0, worst = 0;
+    chosen.forEach(function (E) {
+      lo2[0] = Math.min(lo2[0], E.lo[0]); lo2[1] = Math.min(lo2[1], E.lo[1]); hi2[0] = Math.max(hi2[0], E.hi[0]); hi2[1] = Math.max(hi2[1], E.hi[1]);
+      depth += E.H / chosen.length;
     });
-    var depth = first.H, count = chosen.length;
     return {
-      ok: true, frame: { o: fr.o, n: n, ex: e1, ey: e2 }, pockets: chosen, count: count, depth: depth, area: area,
-      width: hi2[0] - lo2[0], height: hi2[1] - lo2[1], planarity: worst,
-      reason: (count === 1 ? '1 recess' : count + ' recesses') + ', ' + fmt(depth) + ' mm deep, ' + fmt(hi2[0] - lo2[0]) + ' × ' + fmt(hi2[1] - lo2[1]) + ' mm'
+      ok: true, curved: first.curved, pockets: chosen, count: chosen.length, depth: depth, width: hi2[0] - lo2[0], height: hi2[1] - lo2[1],
+      _M: M, frame: { o: org, n: n, ex: F.e1, ey: F.e2 },
+      reason: (chosen.length === 1 ? '1 recess' : chosen.length + ' recesses') + (first.curved ? ' in a curved face' : '') + ', ' + (first.curved ? 'about ' : '') +
+        fmt(depth) + ' mm deep, ' + fmt(hi2[0] - lo2[0]) + ' × ' + fmt(hi2[1] - lo2[1]) + ' mm'
     };
   }
 
-  /* One closed prism soup per recess: the outline, from 0.05 mm under its floor
-     up to the plane of the face. */
-  function fillers(pl) {
-    if (!pl || !pl.ok) return [];
-    var out = [];
-    pl.pockets.forEach(function (C) {
-      var tri = triangulate({ polys: C.polys });
-      if (!tri.V) return;
-      var hb = new Float64Array(tri.V.length);
-      for (var i = 0; i < hb.length; i++) hb[i] = -0.05;
-      out.push(cutter({ data: { V: tri.V, T: tri.T, hb: hb, ht: C.H, o: pl.frame.o, n: pl.frame.n, ex: pl.frame.ex, ey: pl.frame.ey, edges: null } }));
-    });
-    return out;
+  /* The caps over the plan's recesses, one soup (what fill() lays down; the page draws it as the ghost). */
+  function caps(pl) {
+    if (!pl || !pl.ok) return { reason: 'there is nothing to fill' };
+    if (pl._caps) return pl._caps;
+    var out = [], i;
+    for (i = 0; i < pl.pockets.length; i++) {
+      var c = capOf(pl._M, pl.pockets[i]);
+      if (!c.tris) return { reason: c.reason };
+      out.push(c.tris);
+    }
+    var n = 0;
+    out.forEach(function (l) { n += l.length; });
+    var soup = new Float32Array(n * 9), q = 0;
+    out.forEach(function (l) { l.forEach(function (t) { for (var k = 0; k < 3; k++) { soup[q++] = t[k][0]; soup[q++] = t[k][1]; soup[q++] = t[k][2]; } }); });
+    pl._caps = { soup: soup, tris: n };
+    return pl._caps;
+  }
+  /* The piece with its recesses filled: every floor and wall triangle dropped, the caps laid on. */
+  function fill(soup, pl) {
+    if (!pl || !pl.ok || !pl._M || pl._M.soup !== soup) return { ok: false, reason: 'the piece changed since the recesses were read' };
+    var c = caps(pl);
+    if (!c.soup) return { ok: false, reason: c.reason };
+    var drop = new Set();
+    pl.pockets.forEach(function (E) { E.floor.forEach(function (x) { drop.add(x); }); E.wall.forEach(function (x) { drop.add(x); }); });
+    var n = (soup.length / 9) | 0, out = new Float32Array((n - drop.size) * 9 + c.soup.length), q = 0, t;
+    for (t = 0; t < n; t++) {
+      if (drop.has(t)) continue;
+      out.set(soup.subarray(9 * t, 9 * t + 9), q); q += 9;
+    }
+    out.set(c.soup, q);
+    return { ok: true, soup: out, dropped: drop.size, added: c.tris };
   }
 
   var API = {
     pockets: pockets,
-    fillers: fillers,
+    caps: caps,
+    fill: fill,
+    _weld: weld,
+    _pocketCurved: pocketCurved,
     DEFAULTS: DEFAULTS,
     shape: shape,
     plan: plan,

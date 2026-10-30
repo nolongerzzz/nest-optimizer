@@ -39,11 +39,12 @@
 // REMOVE (the Stamp | Remove switch at the top of the card): click the floor of an
 // engraved letter and the recess is filled back flush with its face. It needs no
 // memory of the stamp - NSO_Text.pockets reads the recess off the piece (a floor,
-// its walls, a rim in one plane), so it works on text stamped last week and after
-// other edits, as long as the face is flat. "Whole word" (on) takes every recess
-// of the same depth in the same face within Reach mm of the one clicked, so a
-// word goes in one click. The ghost is the fill, green; REMOVE unions it in, one
-// boolean, one Undo (textReplace). Drag and the arrows are the stamp's, off here.
+// its walls, a rim), so it works on text stamped last week and after other edits,
+// on a flat face or a curved one. "Whole word" (on) takes every recess of the same
+// axis and depth within Reach mm of the one clicked, so a word goes in one click.
+// The ghost is the cap that will be laid over each rim, green; REMOVE drops the
+// floors and walls and lays the caps (mesh surgery, no boolean), one Undo
+// (textReplace). Drag and the arrows are the stamp's, off here.
 //
 // PAINT SCOPE: WHOLE-PIECE. Per the scoping rule in docs/HANDOFF.md: the text
 // is cut through whatever faces it meets, curved ones too, and paint names its
@@ -254,6 +255,10 @@ function NSO_textPreviewRemove(m) {
   var pl;
   try { pl = NSO_Text.pockets(m.rawTris, B.hit, o); }
   catch (err) { pl = { ok: false, reason: (err && err.message) || String(err) }; }
+  if (pl.ok) {                                              // the caps are the fill: if they cannot be laid, say so now
+    var cp = NSO_Text.caps(pl);
+    if (!cp.soup) pl = { ok: false, reason: 'found ' + pl.reason + ', but ' + cp.reason };
+  }
   B.plan = pl; B.key = key; B.soup = m.rawTris;
   NSO_textDrawFill(m);
   NSO_textReadout(pl.ok ? 'Fill ' + pl.reason + ' - REMOVE puts them back.' : 'Text: ' + pl.reason, !pl.ok);
@@ -264,23 +269,23 @@ function NSO_textDrawFill(m) {
   NSO_textClearGhost();
   var B = NSO_textUI(), pl = B.plan;
   if (typeof THREE === 'undefined' || !state.scene || !pl || !pl.ok) return;
+  var cp = NSO_Text.caps(pl);
+  if (!cp.soup) return;
   var group = new THREE.Group();
   group.name = 'textGhost';
   group.matrixAutoUpdate = false;
-  NSO_Text.fillers(pl).forEach(function (soup) {
-    var flat = new Float32Array(soup.length);
-    for (var k = 0; k < soup.length; k += 3) {
-      var d = NSO_textRawToDisplay(m, [soup[k], soup[k + 1], soup[k + 2]]);
-      flat[k] = d[0]; flat[k + 1] = d[1]; flat[k + 2] = d[2];
-    }
-    var geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(flat, 3));
-    var fill = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: TEXT_FILL_COLOR, transparent: true, opacity: 0.5,
-      depthTest: false, depthWrite: false, side: THREE.DoubleSide }));
-    fill.renderOrder = TEXT_RENDER_ORDER; fill.userData.skipXray = true; fill.userData.textFill = true;
-    fill.raycast = function () {}; fill.frustumCulled = false;
-    group.add(fill);
-  });
+  var soup = cp.soup, flat = new Float32Array(soup.length);
+  for (var k = 0; k < soup.length; k += 3) {
+    var d = NSO_textRawToDisplay(m, [soup[k], soup[k + 1], soup[k + 2]]);
+    flat[k] = d[0]; flat[k + 1] = d[1]; flat[k + 2] = d[2];
+  }
+  var geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(flat, 3));
+  var fill = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: TEXT_FILL_COLOR, transparent: true, opacity: 0.55,
+    depthTest: false, depthWrite: false, side: THREE.DoubleSide }));
+  fill.renderOrder = TEXT_RENDER_ORDER; fill.userData.skipXray = true; fill.userData.textFill = true;
+  fill.raycast = function () {}; fill.frustumCulled = false;
+  group.add(fill);
   if (typeof nsoHelpers !== 'undefined') nsoHelpers.attach(state.scene, group, 'text'); else state.scene.add(group);
   B.ghost = group;
   NSO_textFollow();
@@ -575,7 +580,9 @@ async function NSO_textGo() {
 }
 
 // PAINT SCOPE: WHOLE-PIECE - see the header and docs/HANDOFF.md.
-async function NSO_textRemoveGo() {
+// REMOVE is mesh surgery (NSO_Text.fill): no boolean, so no worker, no bar, no merge of overlapping
+// shells first - a piece that is open or self-piercing elsewhere is not asked to be a solid.
+function NSO_textRemoveGo() {
   var B = NSO_textUI(), m = NSO_textModel();
   if (B.busy) return { ok: false, reason: 'busy' };
   function refuse(why) {
@@ -594,47 +601,18 @@ async function NSO_textRemoveGo() {
   var pl = NSO_textPreview();
   if (!pl) return refuse('click the floor of an engraved letter first');
   if (!pl.ok) return refuse(pl.reason);
-  var soup0 = m.rawTris, hit = B.hit, o = NSO_textRemoveOpts(), job = null;
-  B.busy = true;
+  var res;
+  try { res = NSO_Text.fill(m.rawTris, pl); }
+  catch (err) { console.error('[text]', err); return refuse((err && err.message) || String(err)); }
+  if (!res.ok) return refuse(res.reason);
+  var txt = 'Text removed - ' + pl.reason;
+  if (!NSO_sculptCommitRaw(m, res.soup, 'textReplace', txt)) return refuse('the result could not be committed');
+  if (typeof updateAdjustUI === 'function') updateAdjustUI();
+  B.hit = null; B.plan = null; B.key = '';
+  NSO_textClearGhost();
+  NSO_textReadout('Removed ' + pl.reason + ' - click the next letter.');
   NSO_textSyncButtons();
-  NSO_textReadout('Filling\u2026');
-  var bar = setTimeout(function () {
-    if (B.busy && typeof NSO_BoolBusy !== 'undefined') job = NSO_BoolBusy.begin('Filling', 'text-readout');
-  }, TEXT_BAR_MS);
-  try {
-    var sol = (typeof nsoOverlap !== 'undefined' && nsoOverlap) ? await nsoOverlap.solid(m, null, 'text-readout') : { ok: true, merged: false };
-    if (!sol.ok) return refuse(sol.cancelled ? 'stopped' : sol.reason);
-    var soup = sol.merged ? sol.soup : soup0;
-    if (sol.merged) {
-      pl = NSO_Text.pockets(soup, hit, o);
-      if (!pl.ok) return refuse(pl.reason);
-    }
-    var parts = NSO_Text.fillers(pl), n = 0, tool, q = 0;
-    parts.forEach(function (f) { n += f.length; });
-    if (!n) return refuse('there was nothing to fill with');
-    tool = new Float32Array(n);
-    parts.forEach(function (f) { tool.set(f, q); q += f.length; });
-    var res = await NSO_unionSoups(soup, tool, { label: 'Filling', host: 'text-readout' });
-    if (!res || !res.ok || !res.soup || res.soup.length < 9) {
-      return refuse(res && res.cancelled ? 'stopped' : res && res.timedOut ? 'it ran too long and was stopped' : (res && res.reason) || 'the boolean returned nothing');
-    }
-    if (NSO_textModel() !== m || m.rawTris !== soup0) return refuse('the piece changed while it was filled');
-    var txt = 'Text removed - ' + pl.reason + (sol.merged ? ' - ' + sol.note : '');
-    if (!NSO_sculptCommitRaw(m, res.soup, 'textReplace', txt)) return refuse('the result could not be committed');
-    if (typeof updateAdjustUI === 'function') updateAdjustUI();
-    B.hit = null; B.plan = null; B.key = '';
-    NSO_textClearGhost();
-    NSO_textReadout('Removed ' + pl.reason + ' - click the next letter.');
-    return { ok: true, plan: pl };
-  } catch (err) {
-    console.error('[text]', err);
-    return refuse((err && err.message) || String(err));
-  } finally {
-    clearTimeout(bar);
-    if (job) job.end();
-    B.busy = false;
-    NSO_textSyncButtons();
-  }
+  return { ok: true, plan: pl };
 }
 
 /* ------------------------------------------------------------ a font file */
