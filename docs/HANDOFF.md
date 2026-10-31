@@ -76,6 +76,7 @@ merging its list by hand. The list below is generated.
 - [New stock - the Pottery Wheel's Ball, generalised (landed, `nso_stock.js`)](handoff/new-stock-the-pottery-wheels-ball-generalised.md)
 - [No gate cards - Connect and Join open on the column button (2026-10-17)](handoff/no-gate-cards-connect-and-join-open-on-the-column-button.md)
 - [Open ticket - G-scope renders on demand, not every frame (added 2026-09-26)](handoff/open-ticket-g-scope-renders-on-demand-not-every-frame.md)
+- [outline-cost - turning a piece moves its outline instead of rebuilding it (2026-10-31)](handoff/outline-cost.md)
 - [Output protocol](handoff/output-protocol.md)
 - [Parked ticket - re-vendor cth/ from click-test](handoff/parked-ticket-re-vendor-cth-from-click-test.md)
 - [perf-bisect - which merges made the app slower, and what grows in a session (2026-10-23)](handoff/perf-bisect.md)

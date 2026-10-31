@@ -59,21 +59,22 @@ function fnSource(src, name) {
 }
 const LIFTED = ['updateUndoBtn', 'pushUndo', 'clearUndo', 'clearRedo', 'undoLast', 'undoLastDiscard', 'redoLast',
   'nsoGeometriesNamed', 'nsoReleaseGeometries', 'nsoPoseBakeGeometries', 'nsoLeavingGeometries', 'nsoDropRedo',
-  'nsoCopyFields', 'nsoRestoreFields', 'nsoWorldFingerprint', 'nsoWorldSnapshot', 'nsoDropOutline', 'nsoWorldRestore', 'nsoUndoPoseBake'];
+  'nsoCopyFields', 'nsoRestoreFields', 'nsoWorldFingerprint', 'nsoWorldSnapshot', 'nsoDropOutline', 'nsoDropStrayOutlines', 'nsoWorldRestore', 'nsoUndoPoseBake'];
 const UNDO_MAX = 5;     // the real one is 40; the trim is the same code at any size
 
-// every EdgesGeometry (the selection outline's) is counted like the others: made in order, dispose() counted
+// every outline LINE geometry (what the selection outline draws, from the edge set kept per geometry) is counted like
+// the others: made in order, dispose() counted. The EdgesGeometry that makes an edge set is a scratch object.
 const edgeGeos = [];
-class CountedEdges extends THREE.EdgesGeometry {
-  constructor(...a) {
-    super(...a);
-    const real = this.dispose.bind(this);
-    this.dispose = () => { disposed.set(this, (disposed.get(this) || 0) + 1); real(); };
-    edgeGeos.push(this);
+class CountedLines extends THREE.LineSegments {
+  constructor(g, m) {
+    super(g, m);
+    const real = g.dispose.bind(g);
+    g.dispose = () => { disposed.set(g, (disposed.get(g) || 0) + 1); real(); };
+    edgeGeos.push(g);
   }
 }
 const ctx = {
-  THREE: Object.assign({}, THREE, { EdgesGeometry: CountedEdges }), Math, console, Object, Array, Map, Set,
+  THREE: Object.assign({}, THREE, { LineSegments: CountedLines }), window: {}, Math, console, Object, Array, Map, Set,
   document: { getElementById: () => null },
   setStatus: () => {},
   state: null
@@ -98,9 +99,11 @@ vm.runInContext([
   '  const mesh = new THREE.Mesh(m.geometry, new THREE.MeshStandardMaterial()); mesh.userData.placedIndex = state.placed.indexOf(p);',
   '  state.modelGroup.add(mesh); p.mesh = mesh; p.geometry = m.geometry; }',
   ...LIFTED.map(n => fnSource(core, n)),
-  // the selection outline, as app-sel-outline.js draws it (the big-piece worker path is not reached by a one-triangle piece)
-  'function isBig() { return false; }',
-  fnSource(selOutline, 'stripOutline'), fnSource(selOutline, 'refreshOutline'),
+  // the selection outline, as app-sel-outline.js draws it (the worker path is not reached by a one-triangle piece, and
+  // `window` is bare here: no NSO_Work)
+  'const OUTLINE_WORKER_TRIS = 50000; let edgeCache = new WeakMap(); const jobs = new WeakMap();',
+  ...['stripOutline', 'positionOf', 'cacheGet', 'cachePut', 'isFor', 'selected', 'useWorker', 'drawOutline', 'buildHere',
+    'buildInWorker', 'refreshOutline'].map(n => fnSource(selOutline, n)),
   'this.__app = { pushUndo, clearUndo, clearRedo, undoLast, undoLastDiscard, redoLast, nsoReleaseGeometries, refreshOutline };'
 ].join('\n'), ctx, { filename: 'app-core.js (lifted)' });
 const app = ctx.__app;
@@ -161,6 +164,7 @@ function yaw(P, opts) {
   m.geometry = ng; m.rawTris = new Float32Array(9);
   p.geometry = ng; mesh.geometry = ng;
   p.poseHome.chain.add(ng);
+  app.refreshOutline(p);        // the bake ends with it (nsoBakePlacedPose): the piece is drawn with its new geometry's edge
   return ng;
 }
 const undo = () => app.undoLast();

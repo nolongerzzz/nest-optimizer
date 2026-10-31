@@ -2820,7 +2820,7 @@ var NSO_SUPPORTS_CARD = (function () {
       p.mesh.material.emissive = new THREE.Color(LIT.color);
       p.mesh.material.emissiveIntensity = LIT.intensity;
       state.selectedIndex = i;
-      if (typeof refreshOutline === 'function') refreshOutline(p);
+      if (typeof refreshOutline === 'function') refreshOutline(p, { now: true });     // on screen before it returns, as it was
       S.lit.push({ p: p, line: p.outline || null });
     });
     state.selectedIndex = -1;

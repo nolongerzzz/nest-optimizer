@@ -377,6 +377,7 @@
     "support:top": "node tools/nso_support_top_check.js",
     "beds:test": "node tools/nso_beds_test.js",
     "edges:test": "node tools/nso_edges_test.js",
+    "outline:cost": "node tools/nso_outline_cost_test.js",
     "big:mesh": "node tools/nso_big_mesh_test.js",
     "big:profile": "node tools/nso_big_mesh_profile.js",
     "bool:worker": "node tools/nso_boolean_worker_test.js",
@@ -708,6 +709,7 @@
     "wire:detach",
     "wire:integration",
     "watch:test",
-    "photoset:drive"
+    "photoset:drive",
+    "outline:cost"
   ]
 }
