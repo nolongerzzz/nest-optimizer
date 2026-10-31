@@ -2291,7 +2291,7 @@
               var Ireg = hIc && !g.isEmpty(ZI) ? g.inter(g.inter(inSheet, ZI), hIc) : g.empty();
               var Zall = g.isEmpty(ZI) ? ZT : g.isEmpty(ZT) ? ZI : g.union(ZI, ZT);
               var Treg = hTc && !g.isEmpty(Zall) ? g.diff(g.inter(g.inter(inSheet, Zall), hTc), Ireg) : g.empty();
-              var wideT = g.isEmpty(Treg) ? Treg : g.offset(g.offset(Treg, -0.6 * wI), 0.6 * wI);
+              var wideT = g.isEmpty(Treg) ? Treg : g.offset(g.offset(Treg, -1.2 * wI), 1.2 * wI);
               fillCs = g.isEmpty(Ireg) ? wideT : g.isEmpty(wideT) ? Ireg : g.union(Ireg, wideT);
               /* the loops sit where the support's own wall sits (the slab's edge, half a line in): regions taken on the whole layer, not inside its wall */
               var slabI = hIc && !g.isEmpty(ZI) ? g.inter(g.inter(P.S[j], ZI), hIc) : g.empty();
