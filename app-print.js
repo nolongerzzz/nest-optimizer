@@ -114,7 +114,8 @@
       }
       return { name: p.name, soup: soup, key: p.sourceId, gapCloseMm: p.nonSolid ? 0 : undefined,
                role: p.support ? (p.brim ? 'brim' : 'support') : 'part', hostKey: p.support ? p.hostSourceId : undefined,
-               interfaceLayers: p.support ? p.interfaceLayers : undefined };
+               interfaceLayers: p.support ? p.interfaceLayers : undefined,
+               sheetLayerMm: p.support ? p.sheetLayerMm : undefined };
     });
   }
 
@@ -147,6 +148,10 @@
       var ni = 0;
       objects.forEach(function (ob) { if (ob.interfaceLayers > ni) ni = ob.interfaceLayers; });
       if (ni > 2 && (eng.over || {}).supportInterfaceLayers == null) o.supportInterfaceLayers = ni;
+      /* ...and a Dense sheet's own thicker layers (Bambu's 0.275): the supports are cut on their own layer grid, as G-scope's Slice does */
+      var sl = 0;
+      objects.forEach(function (ob) { if (ob.sheetLayerMm > sl) sl = ob.sheetLayerMm; });
+      if (sl > 0 && (eng.over || {}).supportLayerMaxMm == null) o.supportLayerMaxMm = 0.28;
       stage('slicing', { objects: objects.length });
       return SL.run(objects, o);
     }).then(function (res) {
@@ -232,7 +237,7 @@
       var sup = m && m.nsoSupport ? m.nsoSupport : null;
       var placed = o.placedIndex != null ? state.placed[o.placedIndex] : null;
       var pm = placed && (state.models || []).find(function (x) { return x && x.id === placed.sourceId; });
-      return { name: o.name, soup: o.positions, sourceId: o.sourceId, support: !!sup, brim: !!(sup && sup.brim), hostSourceId: sup ? sup.hostSourceId : undefined, interfaceLayers: sup ? sup.interfaceLayers : undefined,
+      return { name: o.name, soup: o.positions, sourceId: o.sourceId, support: !!sup, brim: !!(sup && sup.brim), hostSourceId: sup ? sup.hostSourceId : undefined, interfaceLayers: sup ? sup.interfaceLayers : undefined, sheetLayerMm: sup ? sup.sheetLayerMm : undefined,
                nonSolid: !!(pm && typeof root.nsoNonSolid === 'function' && root.nsoNonSolid(pm)),
                settings: m && m.slicerSettings ? Object.assign({}, m.slicerSettings) : null };      // a support's own slicer overrides ride into a 3MF
     });

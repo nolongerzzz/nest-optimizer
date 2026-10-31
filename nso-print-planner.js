@@ -496,7 +496,7 @@
       L.paths.forEach(function (p) {
         var pts = p.closed && p.pts.length ? p.pts.concat([p.pts[0]]) : p.pts;
         if (pts.length < 2) return;
-        var bead = beadOf(S, p.feature, p.width, plane.h);
+        var bead = beadOf(S, p.feature, p.width, L.h || plane.h);
         var fs = featureSpeed(S, p.feature, first);
         var vCap = S.filament.maxVolumetric > 0 ? S.filament.maxVolumetric / bead.area : Infinity;
         var v = Math.min(fs.v, vCap);
@@ -728,6 +728,39 @@
   // ===========================================================================
 
   /**
+   * Supports on their own layer grid (the slicer's supportLayerMaxMm: object.planes
+   * beside res.planes) put into ONE timeline: every height any object prints at,
+   * ascending, each object's layers on the heights it has (null elsewhere). A slice
+   * with no own grids comes back untouched, so nothing changes for it.
+   */
+  function alignGrids(res) {
+    if (!res.objects.some(function (ob) { return ob.planes; })) return res;
+    var key = function (z) { return Math.round(z * 10000); };
+    var by = {}, zs = [];
+    var add = function (pl, h) { var k = key(pl.printZ); if (!by[k]) { by[k] = { printZ: pl.printZ, h: h }; zs.push(by[k]); } };
+    res.planes.forEach(function (pl) { add(pl, pl.h); });
+    res.objects.forEach(function (ob) {
+      if (!ob.planes) return;
+      ob.planes.forEach(function (pl, i) { var L = ob.layers[i]; if (L && L.paths && L.paths.length) add(pl, L.h || pl.h); });
+    });
+    zs.sort(function (a, b) { return a.printZ - b.printZ; });
+    var at = {};
+    zs.forEach(function (pl, i) { at[key(pl.printZ)] = i; });
+    var objects = res.objects.map(function (ob) {
+      var src = ob.planes || res.planes, layers = new Array(zs.length);
+      for (var i = 0; i < zs.length; i++) layers[i] = null;
+      src.forEach(function (pl, i) {
+        var j = at[key(pl.printZ)];
+        if (j != null && ob.layers[i]) layers[j] = ob.layers[i];
+      });
+      var o2 = Object.assign({}, ob, { layers: layers });
+      delete o2.planes;
+      return o2;
+    });
+    return Object.assign({}, res, { planes: zs, objects: objects });
+  }
+
+  /**
    * @param {object} res    sliceObjects() result
    * @param {object} opts
    *   config   the printer template's project settings (the object)
@@ -740,6 +773,7 @@
   function plan(res, opts) {
     opts = opts || {};
     if (!res || !res.ok) return { ok: false, reason: 'nothing to plan: ' + (res && res.reason || 'no slice') };
+    res = alignGrids(res);
     if (!opts.config) return { ok: false, reason: 'the printer template\'s project settings (opts.config) are required' };
     if (!opts.printer) return { ok: false, reason: 'the printer\'s frozen start / end (opts.printer) is required' };
     var Pr = opts.printer;
@@ -1042,7 +1076,7 @@
     var density = parseFloat((/^; filament_density = ([\d.]+)/m.exec(Pr.configBlock.join('\n')) || [0, 1.24])[1]);
     var cfgOf = function (k) { var m = new RegExp('^; ' + k + ' = (.*)$', 'm').exec(Pr.configBlock.join('\n')); return m ? m[1] : ''; };
     var heights = res.objects.map(function (ob) {
-      var h = 0; ob.layers.forEach(function (Ly) { if (Ly.paths.length) h = Math.max(h, Ly.printZ); });
+      var h = 0; ob.layers.forEach(function (Ly) { if (Ly && Ly.paths.length) h = Math.max(h, Ly.printZ); });
       return h;
     });
     var head = ['; HEADER_BLOCK_START', '; BambuStudio ' + Pr.studio,

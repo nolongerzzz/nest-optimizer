@@ -9,6 +9,7 @@ import { chromium } from 'playwright';
 import { serveRoot, routeCdn, launchOpts, ROOT } from './cth-test/browser-lib.mjs';
 
 const out = process.argv[2];
+const printOut = process.argv[3];      // optional: ALSO run the Print card's Slice (what Export .gcode.3mf writes) and save its .gcode.3mf here
 const served = await serveRoot();
 const browser = await chromium.launch(launchOpts());
 try {
@@ -29,6 +30,17 @@ try {
   await page.waitForFunction(() => !window.NSO_SUPPORTS_CARD.busy(), null, { timeout: 900000 });
   console.log('supports:', await page.evaluate(() => document.getElementById('sup-count').textContent));
   console.log('meta:', JSON.stringify(await page.evaluate(() => state.models.filter(m => m.nsoSupport).slice(0, 3).map(m => ({ name: m.name, sheetLayerMm: m.nsoSupport.sheetLayerMm, interfaceLayers: m.nsoSupport.interfaceLayers })))));
+  if (printOut) {
+    const r = await page.evaluate(async () => {
+      const C = window.NSO_Print.card;
+      const o = await C.slice();
+      if (!o || !o.ok) return { ok: false, reason: o && o.reason };
+      const b = C.state().result.bytes; let bin = ''; for (let i = 0; i < b.length; i += 8192) bin += String.fromCharCode.apply(null, b.subarray(i, i + 8192));
+      return { ok: true, line: o.line, b64: btoa(bin) };
+    });
+    if (!r.ok) console.log('print slice refused:', r.reason);
+    else { await writeFile(printOut, Buffer.from(r.b64, 'base64')); console.log('print slice:', r.line, '->', printOut); }
+  }
   // G-scope on the plate, then the Slice switch's own call
   await page.evaluate(() => { const M = window.NSO_MICROSCOPE; if (M.openPlate) M.openPlate(); });
   await page.waitForTimeout(1500);

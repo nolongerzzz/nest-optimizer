@@ -245,3 +245,7 @@ show as support.
 After the PR: one small coupon on the A1 mini, watched; then the two-piece plate
 with NSO supports. Watch the first layer (a 0.42 mm line where Studio's is 0.5),
 the first retraction and z-hop, and that the head lifts clear at the end.
+
+## Supports on their own layer grid
+
+A Dense support (`sheetLayerMm` 0.275 in its meta) is sliced on its own layer grid (`supportLayerMaxMm` 0.28, see docs/SLICER.md), as G-scope's Slice does. The Print card sets the option the same way (`build()` in app-print.js), and `plan()` first puts the objects' grids into one timeline (`alignGrids`): every height any object prints at, ascending, each object's layers on the heights it has. A slice with no own grids passes through untouched. A bead takes its own layer's height, so the gcode carries a `; LAYER_HEIGHT` line where a support's layer differs from the part's. Checked on the real page with `node tools/nso_support_plate_page_slice.mjs out.json print.gcode.3mf` (Generate, Print card Slice, save the file): the six supp_ref supports start their transition/interface at Bambu's heights.
