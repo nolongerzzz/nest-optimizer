@@ -2232,6 +2232,7 @@
       function dInEx(j) { return DOEX + (NI - 1) * SP[j].h; }
       function dTrEx(j) { return DOEX + (NI + NT - 1) * SP[j].h; }
       var SPLIT_MIN_MM = 0.6;
+      var PINCH_INSET_MM = 0.1;      /* the loop's inset where the region is too narrow for a line's half-width on each side */
       var REGIONAL_PLATE = true;     /* a support's own grid lays its plate by regions (below) */
       P.layers.forEach(function (L, j) {
         if (!L.paths.length) return;
@@ -2298,7 +2299,16 @@
               var slabT = hTc && !g.isEmpty(Zall) ? g.diff(g.inter(g.inter(P.S[j], Zall), hTc), slabI) : g.empty();
               [[slabI, 'Support interface'], [slabT, 'Support transition']].forEach(function (rg) {
                 if (g.isEmpty(rg[0])) return;
-                g.polys(g.offset(rg[0], -wI / 2)).forEach(function (ring) {
+                var inner = g.offset(rg[0], -wI / 2);
+                /* a strip of the region narrower than a line has no loop inside it (the inset removes it: the Negative Spheres' ring pinches to 0.35 mm and fell
+                   into crescents); there the loop runs nearer the edge - one line down the strip, as Bambu's - and the ring stays whole */
+                {
+                  var near = g.offset(rg[0], -PINCH_INSET_MM);
+                  var bridge = g.isEmpty(near) ? near : g.isEmpty(inner) ? near : g.diff(near, g.offset(inner, PINCH_INSET_MM + 0.02));
+                  bridge = g.isEmpty(bridge) ? bridge : g.dropSmall(bridge, 0.02);
+                  if (!g.isEmpty(bridge)) inner = g.isEmpty(inner) ? g.inter(near, g.offset(bridge, wI)) : g.union(inner, g.inter(near, g.offset(bridge, wI / 2 + 0.05)));
+                }
+                g.polys(inner).forEach(function (ring) {
                   if (ring.length > 2) L.paths.push({ feature: rg[1], width: wI, closed: true, pts: ring, typed: true });
                 });
               });
