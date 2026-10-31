@@ -854,12 +854,13 @@
   }
 
   /* Which piece of work stands at a raw point (its node or a neighbour: the wall is part of the piece), or -1. */
-  function pieceAt(pl, p) {
+  function pieceAt(pl, p, reach) {
     if (!pl || !pl.owner || !pl.frame) return -1;
     var fr = pl.frame, G = pl.grid, w = [p[0] - fr.o[0], p[1] - fr.o[1], p[2] - fr.o[2]];
     var x = w[0] * fr.e1[0] + w[1] * fr.e1[1] + w[2] * fr.e1[2], y = w[0] * fr.e2[0] + w[1] * fr.e2[1] + w[2] * fr.e2[2];
     var i0 = Math.round((x - G.x0) / G.res), j0 = Math.round((y - G.y0) / G.res), best = -1, bd = Infinity;
-    for (var dy = -2; dy <= 2; dy++) for (var dx = -2; dx <= 2; dx++) {
+    var rr = reach > 0 ? reach : 2;
+    for (var dy = -rr; dy <= rr; dy++) for (var dx = -rr; dx <= rr; dx++) {
       var i = i0 + dx, j = j0 + dy;
       if (i < 0 || j < 0 || i >= G.nx || j >= G.ny) continue;
       var id = pl.owner[j * G.nx + i];

@@ -386,7 +386,7 @@ function NSO_textRmHover(clientX, clientY) {
   var hit = NSO_textRmHit(clientX, clientY), ids = [];
   if (hit) {
     var sc = NSO_textRmEnsure(m, hit);
-    if (sc) ids = NSO_textRmGroup(NSO_Resurface.pieceAt(sc, hit.point));
+    if (sc) ids = NSO_textRmGroup(NSO_Resurface.pieceAt(sc, hit.point, 5));
   }
   if (ids.join() === R.hover.join()) return;
   R.hover = ids;
@@ -402,7 +402,7 @@ function NSO_textRmClick(clientX, clientY) {
   B.modelId = m.id;
   var sc = NSO_textRmEnsure(m, hit);
   if (!sc) return true;
-  var id = NSO_Resurface.pieceAt(sc, hit.point);
+  var id = NSO_Resurface.pieceAt(sc, hit.point, 5);
   if (id < 0) { NSO_textReadout('Text: no engraved work under that point - move onto a letter.', true); return true; }
   var ids = NSO_textRmGroup(id), allIn = ids.every(function (i) { return R.sel.indexOf(i) >= 0; });
   if (allIn) R.sel = R.sel.filter(function (i) { return ids.indexOf(i) < 0; });
