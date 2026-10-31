@@ -42,3 +42,13 @@ changes. Full write-up of the preview: **`docs/HOLLOW.md` §6**.
   `node tools/nso_subtract_card_drive_check.js tools/subtract-card-out` redraws them.
 - **Tags / weights:** `npm run stamp`; `subtract:card` has an estimated weight
   in `tools/test-weights.json` until CI measures it.
+
+### Update (2026-10-31): sections removed - plain buttons like the other cards
+The six collapsing `<details class="vp-sec" id="sub-sec-...">` are gone: the card is
+a run of buttons (Subtract B from A, Extract bit, Carve, Punch, Hollow, Lift, Detach
+flange, Split to parts), as Shape, Surface and the rest are. Every other id, row and
+panel is unchanged; only the six `sub-sec-*` wrappers (and their headings) went.
+`app-hollow.js` now drops the live cavity when the card shuts (it used to also watch
+the Hollow section). `subtract:card` and `shell:v3` check the flat layout (no `<details>`
+on the card, every control present and hit-testable, Lift / Punch / Detach / Hollow live
+still working). `shell:v3`'s CLEAR PLATE check fails on the branch before this change too.

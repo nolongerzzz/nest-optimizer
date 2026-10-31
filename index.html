@@ -1040,17 +1040,9 @@
           <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-bit">
             <summary class="vp-bar-btn" title="Subtract B from A, Extract bit, Carve, Punch, Hollow, Lift, Split to parts">Subtract</summary>
             <div class="vp-menu-body vp-finish">
-            <details class="vp-sec" id="sub-sec-subtract">
-              <summary class="vp-sec-head" title="Subtract B from A">Subtract B from A</summary>
-              <div class="vp-sec-body">
             <div class="vp-row vp-row-full">
               <button id="btn-subtract" class="btn btn-secondary" type="button">Subtract B from A</button>
             </div>
-              </div>
-            </details>
-            <details class="vp-sec" id="sub-sec-extract">
-              <summary class="vp-sec-head" title="Extract bit, and Carve - the local blade">Extract bit</summary>
-              <div class="vp-sec-body">
             <div class="vp-row vp-row-full">
               <button id="btn-extract-bit" class="btn btn-secondary" type="button">Extract bit</button>
             </div>
@@ -1071,11 +1063,6 @@
               <label class="vp-clone" title="Spin the blade about the outward direction. 0 lays its sweep axis along the edge, which is what a chamfer wants."><span id="carve-roll-label">&deg;</span> <input type="number" id="carve-roll" value="0" min="-180" max="180" step="5"></label>
             </div>
             <div class="vp-row vp-row-full"><p id="carve-readout" class="carve-readout">&mdash;</p></div>
-              </div>
-            </details>
-            <details class="vp-sec" id="sub-sec-punch">
-              <summary class="vp-sec-head" title="Punch round holes">Punch</summary>
-              <div class="vp-sec-body">
             <!-- PUNCH (app-punch.js, nso_punch.js; docs/PUNCH.md): arm it, click a face - a
                  round hole straight through it or to a depth, normal to the face, alone,
                  in a grid or on a circle. A live ghost of every hole; the first hole's
@@ -1131,11 +1118,6 @@
                 <button id="btn-punch-cancel" class="btn btn-secondary" type="button" title="Put Punch away; the piece is unchanged.">Cancel</button>
               </div>
             </div>
-              </div>
-            </details>
-            <details class="vp-sec" id="sub-sec-hollow">
-              <summary class="vp-sec-head" title="Hollow out a solid, to the wall in the box; the slider shows the cavity live">Hollow</summary>
-              <div class="vp-sec-body">
             <!-- HOLLOW (app-hollow.js, nso_hollow.js; docs/HOLLOW.md): the wall in the box
                  is the number Hollow cuts to. The slider beside it is the same number: as it
                  moves the piece turns to a ghost and the cavity it would cut shows inside
@@ -1158,11 +1140,6 @@
               <button id="btn-hollow-safe" class="btn btn-secondary" type="button"
                       title="Hollow back out to the SAFEST minimum wall rather than to the number in the box. For reversing a Thicken in: the wall goes back down, but it stops at the nozzle-safety floor even when the wall was thinner than that before. Restoring an unprintable wall because it used to be unprintable is not a restore.">Hollow to safe min</button>
             </div>
-              </div>
-            </details>
-            <details class="vp-sec" id="sub-sec-lift">
-              <summary class="vp-sec-head" title="Lift features off a piece; Detach flange is part of Lift">Lift</summary>
-              <div class="vp-sec-body">
             <!-- LIFT (app-lift-plate.js, docs/LIFT.md section 7): arm it on a
                  selected piece; what stands on it is found once (the rolling
                  ball) and counted. Hover outlines a feature, a click lifts it,
@@ -1204,11 +1181,6 @@
             </div>
             <div class="vp-row vp-row-full"><p id="detach-readout" class="carve-readout">&mdash;</p></div>
             </div>
-              </div>
-            </details>
-            <details class="vp-sec" id="sub-sec-split">
-              <summary class="vp-sec-head" title="Split a multi-part piece into one piece per part">Split to parts</summary>
-              <div class="vp-sec-body">
             <!-- SPLIT TO PARTS (app-split-parts.js, nso_split_parts.js): a piece made of
                  several shells - the print-in-place hinge after Lift, any imported
                  multi-body STL - becomes one piece per part, each where it stood.
@@ -1221,8 +1193,6 @@
               <span id="split-count" class="lift-count">&mdash;</span>
             </div>
             <div class="vp-row vp-row-full"><p id="split-readout" class="carve-readout">Select a piece to see how many parts it is.</p></div>
-              </div>
-            </details>
             </div>
           </details>
           <details class="vp-menu vp-shell-menu vp-col-menu vp-group-start" id="menu-shape" data-sec="shape">

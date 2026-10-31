@@ -1,36 +1,32 @@
 #!/usr/bin/env node
-/* The SUBTRACT card, laid out as collapsing sections - one per tool - and
-   Hollow's live cavity.
+/* The SUBTRACT card, laid out as a plain run of buttons - one per tool, like the
+   other cards - and Hollow's live cavity.
      node tools/nso_subtract_card_drive_check.js          exit 0 = every gate held
      node tools/nso_subtract_card_drive_check.js dir      ...and the screenshots, into dir
                                                           (tools/subtract-card-out/)
 
-   UI only: no tool's behaviour changes, and every control keeps its id. The
-   sections are <details class="vp-sec"> inside the card's body (the groups the
-   Finish menu had, styles.css .vp-sec); they are not .vp-menu, so app-join's
-   one-panel rule leaves them alone and several can be open at once.
+   UI only: no tool's behaviour changes, and every control keeps its id. The card
+   holds no <details> of its own: every tool's button is showing as soon as the
+   card opens.
 
    GATES
-     1. The card opens with six sections, in the ticket's order - Subtract B
-        from A, Extract bit (with Carve), Punch, Hollow, Lift (with Detach
-        flange), Split to parts - all shut, each showing only its heading.
-     2. Every control the card had is still on it, under the id it had, in the
-        section the ticket names; Detach flange is in Lift, no longer a group
-        of its own under Split to parts.
-     3. A heading opens and shuts its section; sections open independently;
-        shutting the card and opening it again finds them as left.
-     4. Opening a section reveals its controls and they can be hit (a shut one
-        hides them): each control is hit-testable once its section is open.
+     1. The card opens with its tools in order - Subtract B from A, Extract bit
+        (with Carve), Punch, Hollow, Lift (with Detach flange), Split to parts -
+        each button showing, no collapsing section anywhere on it.
+     2. Every control the card had is still on it, under the id it had; Detach
+        flange is with Lift, after its panel.
+     3. Every control can be hit (no heading to open first); the ones a tool
+        hides until it is armed are skipped.
+     4. Shutting the card and opening it again leaves it as it was.
      5. Hollow's wall box is a box a person can read and type in (it was a 24 px
         square), and the slider and the box are one number.
      6. Moving the slider draws the cavity live inside a ghost of the piece;
         a different wall draws a different cavity; Hollow cuts what was
         previewed's wall, once, with one Undo, and the ghost is gone.
-     7. The preview goes away, and the piece comes back opaque, when the section
+     7. The preview goes away, and the piece comes back opaque, when the card
         shuts, on leave-tool, on a different piece, and on a refusal; a wall
         under the nozzle floor is refused in the readout, not the status line.
-     8. Lift still arms from inside its section, Detach flange still runs from
-        it, and Punch's card still opens in its section. */
+     8. Lift still arms, Detach flange still runs, and Punch's card still opens. */
 
 const fs = require('fs');
 const path = require('path');
@@ -44,25 +40,24 @@ const check = (name, cond, detail) => {
 const SHOTS = process.argv[2] || null;
 if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
 
-/* The ticket: sections, in order, with what each holds. The id on each heading's
-   <details> is new; every other id is the one the control had. */
+/* The tools, in order, with what each holds. Every id is the one the control had. */
 const SECTIONS = [
-  ['sub-sec-subtract', 'Subtract B from A', ['btn-subtract']],
-  ['sub-sec-extract', 'Extract bit',
+  [null, 'Subtract B from A', ['btn-subtract']],
+  [null, 'Extract bit',
     ['btn-extract-bit', 'btn-carve', 'carve-blade', 'carve-depth-label', 'carve-depth', 'carve-a-label', 'carve-a',
      'carve-b-label', 'carve-b', 'carve-roll-label', 'carve-roll', 'carve-readout']],
-  ['sub-sec-punch', 'Punch',
+  [null, 'Punch',
     ['btn-punch', 'punch-card', 'inp-punch-dia', 'sel-punch-depth', 'punch-depth-mm-row', 'inp-punch-depth',
      'punch-pattern-row', 'punch-grid-rows', 'inp-punch-rows', 'inp-punch-cols', 'btn-punch-pitch-xy', 'punch-pitch-label',
      'inp-punch-pitch', 'punch-pitch-y-row', 'inp-punch-pitch-y', 'punch-anchor-row', 'punch-radial-rows',
      'inp-punch-count', 'inp-punch-radius', 'punch-readout', 'btn-punch-go', 'btn-punch-cancel']],
-  ['sub-sec-hollow', 'Hollow',
+  [null, 'Hollow',
     ['btn-hollow', 'inp-hollow-mm', 'inp-hollow-slider', 'hollow-slider-read', 'hollow-readout', 'btn-hollow-safe']],
-  ['sub-sec-lift', 'Lift',
+  [null, 'Lift',
     ['btn-lift', 'lift-count', 'lift-panel', 'lift-height-read', 'lift-height', 'btn-lift-strip', 'lift-strip',
      'lift-strip-rows', 'lift-strip-sum', 'btn-lift-strip-go', 'btn-lift-strip-cancel', 'lift-readout',
      'detach-tools', 'btn-detach', 'detach-readout']],
-  ['sub-sec-split', 'Split to parts', ['btn-split-parts', 'split-count', 'split-readout']]
+  [null, 'Split to parts', ['btn-split-parts', 'split-count', 'split-readout']]
 ];
 /* ids that are hidden by their own state until a tool arms them (hit-test skips them):
    Carve's L for a blade with no length, Punch's card until Punch is armed, Lift's panel until Lift is */
@@ -112,11 +107,6 @@ async function shot(page, name) {
   await page.screenshot({ path: path.join(SHOTS, name + '.png'),
     clip: { x: x0, y: y0, width: Math.min(b.w + 12, vp.width - x0), height: Math.min(b.h + 52, vp.height - y0) } });
 }
-async function shutAll(page) {
-  await page.evaluate(() => {
-    document.querySelectorAll('.vp-sec').forEach(d => { d.open = false; });
-  });
-}
 
 withApp(async (page, logs) => {
   await page.setViewportSize({ width: 1280, height: 900 });
@@ -124,47 +114,39 @@ withApp(async (page, logs) => {
   await selectModel(page, id);
 
   /* ---------------------------------------------------------------- 1 */
-  console.log('1. six sections, shut');
+  console.log('1. a plain run of buttons');
   await page.click('#menu-bit > summary');
   await sleep(page, 200);
-  const heads = await page.evaluate(() => [...document.querySelectorAll('#menu-bit > .vp-menu-body > .vp-sec')].map(d => ({
-    id: d.id, open: d.open, label: d.querySelector(':scope > summary').textContent.trim(),
-    shown: d.querySelector(':scope > summary').getBoundingClientRect().height > 0,
-    bodyShown: d.querySelector(':scope > .vp-sec-body').checkVisibility({ contentVisibilityAuto: true }) })));
-  check('the card holds six sections, in the ticket\'s order',
-    JSON.stringify(heads.map(h => h.id)) === JSON.stringify(SECTIONS.map(s => s[0])), heads.map(h => h.id).join(' '));
-  check('each is headed by its tool\'s name', heads.every((h, i) => h.label === SECTIONS[i][1]), heads.map(h => h.label).join(' | '));
-  check('all six open shut: a heading each, no body showing',
-    heads.every(h => !h.open && h.shown && !h.bodyShown), JSON.stringify(heads.map(h => [h.open, h.shown, h.bodyShown])));
-  const strays = await page.evaluate(() => [...document.querySelectorAll('#menu-bit > .vp-menu-body > *')].filter(e => !e.classList.contains('vp-sec')).map(e => e.tagName + '#' + e.id));
-  check('nothing sits in the card outside a section', strays.length === 0, strays.join(', ') || 'none');
-  await shot(page, '1-collapsed');
+  const lead = await page.evaluate(ids => ({
+    sections: document.querySelectorAll('#menu-bit details, #menu-bit .vp-sec').length,
+    shown: ids.map(i => { const e = document.getElementById(i); const r = e.getBoundingClientRect();
+      return r.width > 0 && r.height > 0 && e.checkVisibility({ contentVisibilityAuto: true }); }) }), SECTIONS.map(s => s[2][0]));
+  check('no collapsing section on the card', lead.sections === 0, String(lead.sections));
+  check('each tool\'s button is showing as soon as the card opens', lead.shown.every(Boolean), JSON.stringify(lead.shown));
+  const order = await page.evaluate(ids => ids.map(i => document.getElementById(i)).every((e, k, a) =>
+    k === 0 || !!(a[k - 1].compareDocumentPosition(e) & Node.DOCUMENT_POSITION_FOLLOWING)), SECTIONS.map(s => s[2][0]));
+  check('...in the order Subtract, Extract bit, Punch, Hollow, Lift, Split to parts', order);
+  await shot(page, '1-card');
 
   /* ---------------------------------------------------------------- 2 */
-  console.log('2. every control is on the card, in its section');
-  const where = await page.evaluate(secs => secs.map(([sid, , ids]) => ({
-    sid, missing: ids.filter(i => { const e = document.getElementById(i); return !e || !e.closest('#' + sid); }),
-    elsewhere: ids.filter(i => { const e = document.getElementById(i); return e && !e.closest('#' + sid); }) })), SECTIONS);
-  check('every id the card had is in the section the ticket names', where.every(w => w.missing.length === 0),
-    where.map(w => w.sid + ': ' + (w.missing.join(',') || 'all')).join('; '));
+  console.log('2. every control is on the card');
+  const missing = await page.evaluate(secs => secs.flatMap(([, , ids]) =>
+    ids.filter(i => { const e = document.getElementById(i); return !e || !e.closest('#menu-bit'); })), SECTIONS);
+  check('every id the card had is on it', missing.length === 0, missing.join(', ') || 'all');
   const all = SECTIONS.flatMap(s => s[2]);
   check('no id is listed twice', new Set(all).size === all.length, all.length + ' ids');
   const detach = await page.evaluate(() => ({
-    inLift: !!document.getElementById('btn-detach').closest('#sub-sec-lift'),
     afterLiftPanel: !!(document.getElementById('lift-panel').compareDocumentPosition(document.getElementById('detach-tools')) & Node.DOCUMENT_POSITION_FOLLOWING),
-    inSplit: !!document.getElementById('btn-detach').closest('#sub-sec-split') }));
-  check('Detach flange is in Lift, under its panel, and not in Split to parts', detach.inLift && detach.afterLiftPanel && !detach.inSplit, JSON.stringify(detach));
+    beforeSplit: !!(document.getElementById('detach-tools').compareDocumentPosition(document.getElementById('btn-split-parts')) & Node.DOCUMENT_POSITION_FOLLOWING) }));
+  check('Detach flange is with Lift, under its panel and above Split to parts', detach.afterLiftPanel && detach.beforeSplit, JSON.stringify(detach));
 
   /* ---------------------------------------------------------------- 3, 4 */
-  console.log('3. headings open and shut their sections; 4. what is inside can be hit');
-  for (const [sid, label, ids] of SECTIONS) {
-    await page.click('#' + sid + ' > summary');
-    await sleep(page, 80);
-    const o = await open(page, sid);
+  console.log('3. what is on the card can be hit');
+  for (const [, label, ids] of SECTIONS) {
     const hit = await page.evaluate(([ids, own]) => ids.map(i => {
       const e = document.getElementById(i);
       let hidden = false;
-      for (let n = e; n && !n.classList.contains('vp-sec-body'); n = n.parentElement) {
+      for (let n = e; n && n.id !== 'menu-bit'; n = n.parentElement) {
         if (n.hidden || getComputedStyle(n).display === 'none') hidden = true;
       }
       if (hidden) return { i, ok: own.includes(i), own: true };
@@ -176,30 +158,18 @@ withApp(async (page, logs) => {
       return { i, ok: !!h && (h === e || e.contains(h) || (lab && (h === lab || lab.contains(h)))), why: h && (h.id || h.className) };
     }), [ids, [...OWN_STATE]]);
     const bad = hit.filter(x => !x.ok).map(x => x.i + (x.why ? ' (' + x.why + ')' : ''));
-    check(label + ': opens on its heading, and every control in it can be hit', o && bad.length === 0,
+    check(label + ': every control can be hit', bad.length === 0,
       bad.join(', ') || ids.length + ' controls, ' + hit.filter(x => x.own).length + ' hidden by their own state');
-    await shot(page, '2-open-' + sid.replace('sub-sec-', ''));
-    await page.click('#' + sid + ' > summary');
-    await sleep(page, 80);
-    check(label + ': shuts on its heading', !(await open(page, sid)));
   }
-  await page.click('#sub-sec-hollow > summary');
-  await page.click('#sub-sec-lift > summary');
-  await sleep(page, 80);
-  check('sections open independently (Hollow and Lift together)', (await open(page, 'sub-sec-hollow')) && (await open(page, 'sub-sec-lift')) &&
-    !(await open(page, 'sub-sec-punch')));
   await page.click('#menu-bit > summary');
   await sleep(page, 120);
   await page.click('#menu-bit > summary');
   await sleep(page, 120);
-  check('shutting the card and opening it again finds the sections as left',
-    (await open(page, 'sub-sec-hollow')) && (await open(page, 'sub-sec-lift')) && !(await open(page, 'sub-sec-punch')));
-  await shutAll(page);
+  check('shutting the card and opening it again finds it as it was',
+    await page.evaluate(() => document.getElementById('btn-hollow').checkVisibility({ contentVisibilityAuto: true })));
 
   /* ---------------------------------------------------------------- 5 */
   console.log('5. the wall box');
-  await page.click('#sub-sec-hollow > summary');
-  await sleep(page, 80);
   const wall = await page.evaluate(() => {
     const i = document.getElementById('inp-hollow-mm').getBoundingClientRect();
     const b = document.getElementById('btn-hollow').getBoundingClientRect();
@@ -274,16 +244,9 @@ withApp(async (page, logs) => {
   console.log('7. the preview goes away');
   await setSlider(page, 3);
   await waitPreview(page, true);
-  await page.click('#sub-sec-hollow > summary');
-  await sleep(page, 150);
-  check('shutting the Hollow section puts the preview away and the piece back', !(await previewOn(page)) && !(await matState(page)).transparent);
-  await page.click('#sub-sec-hollow > summary');
-  await sleep(page, 100);
-  await setSlider(page, 3);
-  await waitPreview(page, true);
   await page.click('#menu-bit > summary');
   await sleep(page, 200);
-  check('shutting the Subtract card (the section stays open, out of sight) puts it away too', !(await previewOn(page)) && !(await matState(page)).transparent);
+  check('shutting the Subtract card puts the preview away and the piece back', !(await previewOn(page)) && !(await matState(page)).transparent);
   await page.click('#menu-bit > summary');
   await sleep(page, 150);
   await setSlider(page, 3);
@@ -326,29 +289,28 @@ withApp(async (page, logs) => {
   await page.evaluate(() => { nsoHollowPreview.close(); });
 
   /* ---------------------------------------------------------------- 8 */
-  console.log('8. the other tools still run from their sections');
+  console.log('8. the other tools still run from the card');
   await page.evaluate(() => window.leaveTool());
   await page.click('#btn-lift');
   await sleep(page, 400);
   const lift = await page.evaluate(() => ({ armed: NSO_LIFT_PLATE.isArmed(), pressed: document.getElementById('btn-lift').getAttribute('aria-pressed') }));
-  check('Lift arms from inside its section', lift.armed && lift.pressed === 'true', JSON.stringify(lift));
+  check('Lift arms from the card', lift.armed && lift.pressed === 'true', JSON.stringify(lift));
   const panelShown = await page.evaluate(() => !document.getElementById('lift-panel').hidden);
   await shot(page, '5-lift-armed');
   await page.click('#btn-lift');
   check('...and a second click puts it away (its panel opens with it)', panelShown && !(await page.evaluate(() => NSO_LIFT_PLATE.isArmed())));
   await page.click('#btn-punch');
   await sleep(page, 300);
-  const punch = await page.evaluate(() => ({ card: !document.getElementById('punch-card').hidden, inSec: !!document.getElementById('punch-card').closest('#sub-sec-punch') }));
-  check('Punch opens its card inside its section', punch.card && punch.inSec, JSON.stringify(punch));
+  const punch = await page.evaluate(() => ({ card: !document.getElementById('punch-card').hidden, inCard: !!document.getElementById('punch-card').closest('#menu-bit') }));
+  check('Punch opens its card on the card', punch.card && punch.inCard, JSON.stringify(punch));
   await shot(page, '6-punch-armed');
   await page.click('#btn-punch-cancel');
   await page.evaluate(() => window.leaveTool());
   await page.click('#btn-detach');
   await sleep(page, 400);
   const det = await page.evaluate(() => document.getElementById('detach-readout').textContent);
-  check('Detach flange runs from inside Lift and answers in its readout', det && det !== '—', det.slice(0, 120));
+  check('Detach flange runs from the card and answers in its readout', det && det !== '—', det.slice(0, 120));
 
-  await shutAll(page);
   const errs = logs.filter(l => /pageerror/.test(l));
   check('no page errors', errs.length === 0, errs.slice(0, 3).join(' | ') || 'none');
 }).then(() => {

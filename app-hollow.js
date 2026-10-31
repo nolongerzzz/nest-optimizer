@@ -296,17 +296,15 @@
       slider: 'inp-hollow-slider', box: 'inp-hollow-mm', read: 'hollow-slider-read', unit: ' mm',
       onLive: previewWall
     });
-    /* Closing the Hollow section - or the whole Subtract card, which leaves the
-       section open but out of sight - puts the preview away; opening either draws
+    /* Closing the Subtract card puts the preview away; opening it draws
        nothing until the wall is touched. */
-    ['sub-sec-hollow', 'menu-bit'].forEach(function (id) {
-      var d = $(id);
-      if (!d || d.dataset.nsoLiveSec) return;
+    var d = $('menu-bit');
+    if (d && !d.dataset.nsoLiveSec) {
       d.dataset.nsoLiveSec = '1';
       d.addEventListener('toggle', function () {
         if (!d.open) { if (liveHandle) liveHandle.cancel(); closePreview(); }
       });
-    });
+    }
   }
 
   if (typeof nsoHelpers !== 'undefined') nsoHelpers.owner('hollow-live', {

@@ -132,16 +132,16 @@ const HOLDS = {
   // CHECK & REPAIR: Check piece · Cap open faces · Repair · Seal · Non-solid · Solidify
   'menu-repair': ['btn-check-defects', 'btn-cap-open', 'chk-seal-repair', 'btn-seal', 'chk-non-solid', 'btn-solidify']
 };
-/* SUBTRACT is laid out like a stack of collapsing sections, one per tool (shell v3 +
-   subtract-card): the id on each <details class="vp-sec">, its heading, and what it holds.
-   Detach flange is part of Lift. tools/nso_subtract_card_drive_check.js holds every control. */
+/* SUBTRACT is a plain run of buttons, one tool after another, like the other cards: the
+   tool, its label, and the ids it holds. Detach flange is part of Lift.
+   tools/nso_subtract_card_drive_check.js holds every control. */
 const SUBTRACT_SECTIONS = [
-  ['sub-sec-subtract', 'SUBTRACT B FROM A', ['btn-subtract']],
-  ['sub-sec-extract', 'EXTRACT BIT', ['btn-extract-bit', 'btn-carve', 'carve-blade', 'carve-depth']],
-  ['sub-sec-punch', 'PUNCH', ['btn-punch', 'punch-card']],
-  ['sub-sec-hollow', 'HOLLOW', ['btn-hollow', 'inp-hollow-mm', 'inp-hollow-slider', 'btn-hollow-safe']],
-  ['sub-sec-lift', 'LIFT', ['btn-lift', 'lift-panel', 'btn-detach']],
-  ['sub-sec-split', 'SPLIT TO PARTS', ['btn-split-parts']]
+  [null, 'SUBTRACT B FROM A', ['btn-subtract']],
+  [null, 'EXTRACT BIT', ['btn-extract-bit', 'btn-carve', 'carve-blade', 'carve-depth']],
+  [null, 'PUNCH', ['btn-punch', 'punch-card']],
+  [null, 'HOLLOW', ['btn-hollow', 'inp-hollow-mm', 'inp-hollow-slider', 'btn-hollow-safe']],
+  [null, 'LIFT', ['btn-lift', 'lift-panel', 'btn-detach']],
+  [null, 'SPLIT TO PARTS', ['btn-split-parts']]
 ];
 const ORDERED = ['menu-shape', 'menu-add', 'menu-bit', 'menu-surface', 'menu-repair'];
 /* Edge treatment offers exactly these; Tube edge's verbs are Reducer, Roll, Neck. */
@@ -690,36 +690,17 @@ withApp(async (page, logs) => {
     check('...and G-SCOPE shuts it again', g1b === false, String(g1b));
     await msClose();
     await shutAll(page);
-    // SUBTRACT: six collapsing sections, shut when the card opens; a heading opens and shuts its own.
+    // SUBTRACT: a plain run of buttons like the other cards - no collapsing sections.
     await clickFace(page, '#menu-bit > summary');
     await page.waitForTimeout(150);
-    const secs = await page.evaluate((want) => {
-      const got = [...document.querySelectorAll('#menu-bit > .vp-menu-body > details.vp-sec')];
-      return { ids: got.map(d => d.id), open: got.filter(d => d.open).map(d => d.id),
-               heads: got.map(d => getComputedStyle(d.querySelector(':scope > summary')).textTransform === 'uppercase'
-                 ? d.querySelector(':scope > summary').textContent.trim().toUpperCase() : d.querySelector(':scope > summary').textContent.trim()),
-               members: want.map(([id, , ids]) => ids.filter(i => { const e = document.getElementById(i); return !e || !e.closest('#' + id); })) };
-    }, SUBTRACT_SECTIONS);
-    check('SUBTRACT holds six sections, in the ticket\'s order, headed by the tool, all shut when the card opens',
-      JSON.stringify(secs.ids) === JSON.stringify(SUBTRACT_SECTIONS.map(x => x[0])) &&
-      JSON.stringify(secs.heads) === JSON.stringify(SUBTRACT_SECTIONS.map(x => x[1])) && secs.open.length === 0, JSON.stringify(secs));
-    check('...each holds its own controls (Detach flange is in Lift)', secs.members.every(m => m.length === 0), JSON.stringify(secs.members));
-    const toggled = [];
-    for (const [sid, label, ids] of SUBTRACT_SECTIONS) {
-      const first = await page.evaluate((i) => { const e = document.getElementById(i); const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && e.checkVisibility({ contentVisibilityAuto: true }); }, ids[0]);
-      await clickFace(page, '#' + sid + ' > summary');
-      await page.waitForTimeout(80);
-      const now = await page.evaluate(([s, i]) => ({ open: document.getElementById(s).open, shown: document.getElementById(i).checkVisibility({ contentVisibilityAuto: true }),
-        others: [...document.querySelectorAll('.vp-sec[open]')].map(d => d.id) }), [sid, ids[0]]);
-      await clickFace(page, '#' + sid + ' > summary');
-      await page.waitForTimeout(80);
-      const back = await page.evaluate((s) => document.getElementById(s).open, sid);
-      if (first || !now.open || !now.shown || now.others.length !== 1 || back) toggled.push(label + ' ' + JSON.stringify({ first, now, back }));
-    }
-    check('each heading opens its section (and only it) and shuts it again; shut, its controls are not shown', toggled.length === 0, toggled.join('; ') || '6 sections');
-    await shutAll(page);
-    await clickFace(page, '#menu-bit > summary');
-    await clickFace(page, '#sub-sec-lift > summary');
+    const secs = await page.evaluate((want) => ({
+      sections: document.querySelectorAll('#menu-bit details').length,
+      missing: want.map(([, , ids]) => ids.filter(i => { const e = document.getElementById(i); return !e || !e.closest('#menu-bit'); })).flat(),
+      hidden: want.map(([, , ids]) => ids[0]).filter(i => !document.getElementById(i).checkVisibility({ contentVisibilityAuto: true }))
+    }), SUBTRACT_SECTIONS);
+    check('SUBTRACT is a plain run of buttons: no collapsing sections, each tool\'s button showing when the card opens',
+      secs.sections === 0 && secs.hidden.length === 0, JSON.stringify(secs));
+    check('...and every control the card had is still on it', secs.missing.length === 0, JSON.stringify(secs.missing));
     c = await clickFace(page, '#btn-lift');
     await page.waitForTimeout(300);
     const gl = await gs(), lit = await page.evaluate(() => ({ armed: NSO_LIFT_PLATE.isArmed(), panel: !document.getElementById('lift-panel').hidden }));
