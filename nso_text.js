@@ -950,6 +950,43 @@
         if (sliver(u) || Math.abs(d3(nrm(u), n0)) <= 0.2) { wall.add(u); wq.push(u); if (wall.size > cap) return null; }
       }
     }
+    // A floor can come in pieces: small tilted triangles at a corner of the outline (a boolean's bevel)
+    // stop the smooth flood, and the far part of the letter is left as a floor-like patch standing at the
+    // foot of walls already taken. What lies at the foot of a wall and is shut in by the recess on every
+    // side (the triangles round it, bevels and all, are the island) is part of the floor; the face itself
+    // is not shut in, and a counter inside a letter stands at the top of its walls, not their foot.
+    function inPk(x) { return wall.has(x) || floor.has(x); }
+    var fLo = Infinity, fHi = -Infinity;
+    floor.forEach(function (f) { for (var e = 0; e < 3; e++) { var hh = hz(M.vid[3 * f + e]); fLo = Math.min(fLo, hh); fHi = Math.max(fHi, hh); } });
+    fLo -= 0.6; fHi += 0.6;
+    function inBand(x) { for (var e = 0; e < 3; e++) { var hh = hz(M.vid[3 * x + e]); if (hh < fLo || hh > fHi) return false; } return true; }
+    for (var absorbRound = 0; absorbRound < 6; absorbRound++) {
+      var taken = false, tried = new Set(), patchCap = 3 * floor.size + 50;   // a piece of the letter is not bigger than the letter
+      wall.forEach(function (w) {
+        if (sliver(w)) return;
+        for (var e = 0; e < 3; e++) {
+          var nb = across(M, w, e);
+          if (nb < 0 || inPk(nb) || tried.has(nb) || sliver(nb) || d3(nrm(nb), n0) < 0.9 || !inBand(nb)) continue;
+          var ea = M.vid[3 * w + e], eb = M.vid[3 * w + (e + 1) % 3], third = -1;
+          for (var c3 = 0; c3 < 3; c3++) { var vv = M.vid[3 * w + c3]; if (vv !== ea && vv !== eb) third = vv; }
+          if (!(third >= 0 && hz(third) > Math.max(hz(ea), hz(eb)) + 0.1)) continue;      // at the foot of the wall
+          var patch = new Set([nb]), pq = [nb], enclosed = true;
+          while (pq.length && enclosed) {
+            var tp = pq.pop(), tnp = nrm(tp);
+            for (var kk = 0; kk < 3; kk++) {
+              var up = across(M, tp, kk);
+              if (up < 0) { enclosed = false; break; }
+              if (patch.has(up) || inPk(up)) continue;
+              patch.add(up); pq.push(up);
+              if (patch.size > patchCap) { enclosed = false; break; }
+            }
+          }
+          patch.forEach(function (x) { tried.add(x); });
+          if (enclosed) { patch.forEach(function (x) { floor.add(x); }); taken = true; }
+        }
+      });
+      if (!taken) break;
+    }
     // the rim: what the walls open onto is the face (by area: splinters do not vote). Loops of no
     // area - a splinter island inside the recess, a splinter lobe hanging off it - are absorbed
     // (the island dropped with it, the lobe left out of it), so the cap is never asked to cover nothing.
@@ -1044,7 +1081,7 @@
     T3.forEach(function (tr) { for (var e = 0; e < 3; e++) { var a = tr[e], b = tr[(e + 1) % 3]; if (!have.has(b * K + a)) { onB.add(a); onB.add(b); } } });
     // the height of the face above each vertex on the patch's edge: the wall stands straight up
     // from it, so the rim segment that crosses its line gives the height there
-    var h = new Float64Array(P.length), fixed = new Uint8Array(P.length), failed = false;
+    var h = new Float64Array(P.length), fixed = new Uint8Array(P.length), failed = false, loose = 0;
     function tan(Pt) { var d = Pt[0] * n0[0] + Pt[1] * n0[1] + Pt[2] * n0[2]; return [Pt[0] - d * n0[0], Pt[1] - d * n0[1], Pt[2] - d * n0[2]]; }
     var segs = rim.map(function (r) {
       var A = M.P[r[0]], B = M.P[r[1]];
@@ -1062,9 +1099,10 @@
         }
         if (dist < 0.03 && hh - hA > bh) bh = hh - hA;
       }
-      if (!(bh > 0.02)) { failed = true; return; }
+      if (!(bh > 0.02)) { loose++; return; }                // no rim over it: a fin inside the letter, whose ridge is not the face - left to the interpolation
       h[a] = bh; fixed[a] = 1;
     });
+    if (loose > 0.25 * onB.size || loose === onB.size) failed = true;
     if (failed) return null;
     var nbr = P.map(function () { return []; });             // Laplace on the floor's graph
     T3.forEach(function (tr) { for (var e = 0; e < 3; e++) { var a = tr[e], b = tr[(e + 1) % 3]; nbr[a].push(b); nbr[b].push(a); } });
@@ -1118,16 +1156,19 @@
       // the triangles of the rim polygon are chords of a curved face; an edge across the inside is split
       // where the lifted floor stands more than 0.01 mm off its chord, the new corner put on the floor
       var L = E.lift, F2 = L.P.map(to2), sh = L.P.map(function (p, k) { return (p[0] - org[0]) * F.n[0] + (p[1] - org[1]) * F.n[1] + (p[2] - org[2]) * F.n[2] + L.h[k]; });
-      var at = function (x, y) {
+      var at = function (x, y) {                               // the lifted floor's height at (x, y): inside a triangle, else the nearest one's, if within 0.05 mm
+        var bestK = -1, bestOut = Infinity, bu = 0, bv = 0, bw = 0;
         for (var k = 0; k < L.T.length; k++) {
           var t = L.T[k], a = F2[t[0]], b = F2[t[1]], c = F2[t[2]];
           var d = (b[1] - c[1]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[1] - c[1]);
           if (Math.abs(d) < 1e-14) continue;
           var u = ((b[1] - c[1]) * (x - c[0]) + (c[0] - b[0]) * (y - c[1])) / d, v = ((c[1] - a[1]) * (x - c[0]) + (a[0] - c[0]) * (y - c[1])) / d, w = 1 - u - v;
-          if (u < -1e-6 || v < -1e-6 || w < -1e-6) continue;
-          return u * sh[t[0]] + v * sh[t[1]] + w * sh[t[2]];
+          var out = Math.max(0, -u, -v, -w);
+          if (out < bestOut) { bestOut = out; bestK = k; bu = u; bv = v; bw = w; if (out === 0) break; }
         }
-        return null;
+        if (bestK < 0 || bestOut > 0.05) return null;
+        var tt = L.T[bestK];
+        return bu * sh[tt[0]] + bv * sh[tt[1]] + bw * sh[tt[2]];
       };
       var sArr = P3.map(function (p) { return (p[0] - org[0]) * F.n[0] + (p[1] - org[1]) * F.n[1] + (p[2] - org[2]) * F.n[2]; });
       var cell = 0.05, hash = new Map();                         // no two corners within 0.03 mm: a fan of cuts toward one corner makes slivers
@@ -1143,9 +1184,9 @@
       }
       for (i = 0; i < V.length; i++) hadd(i);
       var rf = refineInterior(V, T, function (a, b, m) {
-        if (Math.hypot(V[a][0] - V[b][0], V[a][1] - V[b][1]) < 0.3 || crowded(m[0], m[1])) return false;
+        if (Math.hypot(V[a][0] - V[b][0], V[a][1] - V[b][1]) < 0.4 || crowded(m[0], m[1])) return false;
         var s = at(m[0], m[1]), sa = at(V[a][0], V[a][1]), sb = at(V[b][0], V[b][1]);   // the floor's own curve, not the rim's few-micron mismatch with it
-        return s !== null && sa !== null && sb !== null && Math.abs(s - (sa + sb) / 2) > 0.004;
+        return s !== null && sa !== null && sb !== null && Math.abs(s - (sa + sb) / 2) > 0.01;
       }, function (m, a, b, mid) {
         var s = at(mid[0], mid[1]);
         hadd(m);

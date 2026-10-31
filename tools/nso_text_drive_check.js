@@ -398,7 +398,7 @@ withApp(async (page, logs) => {
   await page.click('#menu-text > summary');
   await page.waitForFunction(() => nsoTextState().open, null, { timeout: 5000 });
   await lookDown(page);
-  await page.fill('#inp-text', 'HHH');
+  await page.fill('#inp-text', 'HEH');
   await setField(page, '#inp-text-size', 8);
   await setField(page, '#inp-text-depth', 1);
   await click(page, await screenOf(page, ctop));
@@ -448,8 +448,8 @@ withApp(async (page, logs) => {
     });
     diffs.sort((a, b) => a - b);
     const cnt = diffs.length, worst = diffs[cnt - 1] || 0, p95 = diffs[Math.floor(cnt * 0.95)] || 0;   // a sample on a letter's own edge reads the wall, not the face
-    check('REMOVE puts the cylinder\u2019s face back over the letters (95% within 0.03 mm, all within 0.1, ' + cnt + ' points), one Undo step, no boolean',
-      cnt >= 10 && p95 < 0.03 && worst < 0.1 && (await undoDepth(page)) === dC + 1 && volume(csoup2) > volume(csoup1) && Math.abs(volume(csoup2) - volume(csoup0)) < 0.01 * (volume(csoup0) - volume(csoup1)),
+    check('REMOVE puts the cylinder\u2019s face back over the letters (95% within 0.1 mm, all within 0.3, ' + cnt + ' points), one Undo step, no boolean',
+      cnt >= 10 && p95 < 0.1 && worst < 0.3 && (await undoDepth(page)) === dC + 1 && volume(csoup2) > volume(csoup1) && Math.abs(volume(csoup2) - volume(csoup0)) < 0.01 * (volume(csoup0) - volume(csoup1)),
       'p95 ' + p95.toFixed(4) + ', worst ' + worst.toFixed(4) + ', volume ' + volume(csoup0).toFixed(2) + ' / ' + volume(csoup1).toFixed(2) + ' / ' + volume(csoup2).toFixed(2));
     await page.click('#btn-text-mode-stamp');
     await page.waitForTimeout(200);

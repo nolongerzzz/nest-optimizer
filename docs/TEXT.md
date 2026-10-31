@@ -93,11 +93,19 @@ non-manifold edges). On `text_repair_test.3mf`'s palm Remove finds the seven
 recesses of DUKE DOKS and stops there. Undo to before the repair, or Remove on the
 version the stamp was made on, and it fills them.
 
-A curved recess in a font's own letters can meet the same wall in a cleaner mesh: on
-a faceted cylinder (the app's own boolean output) `HHH` caps and fills, while `HEH`
-in the same font found its three recesses and could not cap the first (a hole in the
-rim polygon with no way out). That is a refusal in words, not a bad cut; it is the
-next thing to chase.
+A curved recess in a font's own letters used to meet the same wall in a cleaner
+mesh: `HEH` on a faceted cylinder (the app's own boolean output) found its three
+recesses and could not cap the first. Cause: the boolean left small tilted bevel
+triangles where the H's crossbar meets its stem, they stopped the smooth floor flood,
+and the right stem's floor was left as an island inside the first recess's walls - a
+hole in the rim polygon with no way out. Now a floor-like island that stands at the
+foot of the recess's own walls and is shut in by them on every side (and is no bigger
+than three times the floor taken so far, which keeps it from running out onto the face)
+is taken as floor, and a floor-edge vertex with no rim over it (the ridge of a fin
+inside the letter) is left to the interpolation instead of failing. Result on
+`HEH`: three caps, the volume back to within 2 mm3 of 59, 95% of the face within
+0.05 mm, the app's checker finding open 0, non-manifold 0, flipped 0 and
+degenerate 1, piercing 2 (a few micron-scale cap corners at the rim).
 
 ## From a font to a cutter
 
