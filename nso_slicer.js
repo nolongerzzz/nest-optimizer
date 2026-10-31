@@ -1409,7 +1409,18 @@
           // quad face split into two triangles leaves in every loop.
           return g.simplify(cs, o.resolutionMm);
         });
-        return { name: ob.name || ('object ' + (oi + 1)), id: oi, mesh: sm, S: S, flipped: flipped,
+        /* the part cut at heights of its own choosing (soup frame, ascending sliceZ): the same section, orientation and closing as its layers - for the
+           support typing's exact reach (typeSupports, byDepth) */
+        var exactAt = function (zsl) {
+          var sm2 = sliceMesh(ob.soup, zsl.map(function (z) { return { sliceZ: z }; }), ob.gapCloseMm != null ? { weldMm: o.weldMm, gapCloseMm: ob.gapCloseMm } : o);
+          return sm2.sections.map(function (sec) {
+            if (flipped) sec.loops.forEach(function (l) { l.reverse(); });
+            var cs = g.of(sec.loops, 'Positive');
+            if (closeR > 0 && !g.isEmpty(cs)) cs = g.offset(g.offset(cs, closeR, 'Miter'), -closeR, 'Miter');
+            return g.simplify(cs, o.resolutionMm);
+          });
+        };
+        return { name: ob.name || ('object ' + (oi + 1)), id: oi, mesh: sm, S: S, flipped: flipped, exactAt: exactAt, soupOk: !!(ob.soup && ob.soup.length),
                  nonSolid: ob.gapCloseMm === 0,
                  role: ob.role === 'support' ? 'support' : ob.role === 'brim' ? 'brim' : 'part', key: ob.key, hostKey: ob.hostKey,
                  thin: ob.detectThinWall != null ? !!ob.detectThinWall
@@ -2177,15 +2188,44 @@
       /* the part's sections whose underside lies 0 - d over the top of support layer j: EXACTLY that reach (overAt adds a layer to it). Bambu's top support layer lies a layer
          and the gap under the part (0.4: 14.8 under a part that starts at 15.2); each one under it a support layer further, so a layer is interface while the part is within
          that + (NI - 1) of its layers over it, transition within NT more, whatever the part's slope does (a slope's cells are typed one by one) */
+      var exactOn = o.supportLayerMaxMm > 0;
       function hostExCs(j, d) {
-        var cs = [];
+        var cs = [], sz = SP[j].printZ;
+        if (exactOn) prepExact();
         for (var k = 0; k < planes.length; k++) {
-          var dk = planes[k].printZ - planes[k].h - SP[j].printZ;
+          var dk = planes[k].printZ - planes[k].h - sz;
           if (dk > d + 1e-6) break;
           if (dk < -1e-6) continue;
+          /* a layer whose middle lies over the reach is not the part at that height: the exact cut there stands for it (a slope's edge then moves
+             smoothly from one support layer to the next, not by the part's layers) */
+          if (exactOn && Q0exact && planes[k].printZ - planes[k].h / 2 - sz > d + 1e-6) break;
           hosts.forEach(function (Q) { if (!g.isEmpty(Q.S[k])) cs.push(Q.S[k]); });
         }
+        if (exactOn && Q0exact) {
+          var key = Math.round((sz + d - exShift) * 1e5);
+          hosts.forEach(function (Q) { var e = Q.exact && Q.exact[key]; if (e && !g.isEmpty(e)) cs.push(e); });
+        }
         return cs.length ? g.unionAll(cs) : null;
+      }
+      /* the host cut at each support layer's two reaches (the interface's and the transition's), in one pass per host */
+      var Q0exact = false, exShift = 0, exDone = false;
+      function prepExact() {
+        if (exDone) return;
+        exDone = true;
+        exShift = planes.length ? planes[0].printZ - planes[0].h / 2 - planes[0].sliceZ : 0;
+        var zs = {};
+        P.layers.forEach(function (L, j) {
+          if (!L.paths.length) return;
+          [dInEx(j), dTrEx(j)].forEach(function (dd) { var z = SP[j].printZ + dd - exShift; zs[Math.round(z * 1e5)] = z; });
+        });
+        var list = Object.keys(zs).map(function (k) { return zs[k]; }).sort(function (a, b) { return a - b; });
+        hosts.forEach(function (Q) {
+          if (!Q.exactAt || !Q.soupOk) return;
+          var cs = Q.exactAt(list);
+          Q.exact = {};
+          list.forEach(function (z, i) { Q.exact[Math.round(z * 1e5)] = cs[i]; });
+          Q0exact = true;
+        });
       }
       function hostEx(j, d) { var u = hostExCs(j, d); return u ? g.polys(u) : []; }
       var DOEX = gap + hIm + 0.03;

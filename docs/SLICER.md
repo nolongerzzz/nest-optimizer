@@ -586,3 +586,9 @@ of the support's own layers over it, transition within 2 more, cell by cell, so 
 | `gcode:gscope-slice` | 45 checks, real clicks, screenshots in `tools/gscope-slice-out/` | ~10 s |
 | `slicer:supports` | 26 checks on the clip coupon and its 2 card-default supports: every support line Support / transition / interface, interface exactly the top 2 layers' moves and transition the 2 below, the three Features rows, each clip's overhang credited to the support under it (uncovered 0 under the sheet), the readout's words, byte-identical G-code without supports | ~2 s |
 | `gcode:gscope-slice-view` | 50 checks: Normal -> Slice view -> Normal twice, the one All features list and its toggles, settings persisted, the whole-part state restored exactly | ~15 s |
+
+### Exact reach in the depth typing
+
+`typeSupports` (own grid, `supportLayerMaxMm` > 0) asks how near the part is over each support layer's top. The part's layers answered in 0.2 mm steps, so on a slope the interface/transition edge moved in jumps against a 0.275 grid. `hostExCs` now keeps the part's layers whose middle is within the reach and adds the part cut at exactly top + reach (`makeP`'s `exactAt`, one cut pass per host and support). Plate score moves a little (foot IoU +0.01 to +0.02 on Circular, Negative Sphere2, Oblique).
+
+What the score still shows on the Oblique ribbon (supp_ref): the generated slab is steady layer to layer (25 mm2), as Bambu's footprint is (26); what alternates is which lines of the slab are typed transition (a 0.7 mm strip holds one line or none depending on the phase of the loops). Bambu's plate is ~0.4 mm longer/wider than ours (growing the region plate uniformly by 0.3 - 0.5 mm was tried and scored worse on every piece, so it is not one uniform margin). The trunks under the plate are Bambu's merged wide ones against our thin columns (tree len 0.33 - 0.75).
