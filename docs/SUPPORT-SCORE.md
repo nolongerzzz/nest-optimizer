@@ -51,3 +51,8 @@ apart on every layer (0.275 and 0.2), ours were 0.36 (the solid-infill spacing).
 Negative Sphere2 0.79 -> 0.75, Oblique 0.98 -> 0.92, Sphere 1.51 -> 1.35. Tried and left out: growing the region 0.2 mm (new cells not taken within the clearance of the part's walls):
 Circular foot 0.65 -> 0.69, Negative Sphere 0.76 -> 0.82, Sphere 0.76 -> 0.61 (its plate is already past Bambu's), moves per mm up (Base 1.1 -> 1.26, Oblique 1.3 -> 1.57).
 
+Update (2026-10-31, transition fill): a transition region is hatched loop to loop (its ground the slab inset to the loops' own line, `LOOP_IN_MM`, not a wall's width) where the slab it lies in
+is wider than 1 mm (`TRANS_FILL_OPEN_MM` 0.5 each side): the Negative Spheres' ring (1.8 - 2.3 mm), which Bambu zig-zags; a narrow ribbon (the Oblique's, under 1 mm) stays its loop alone.
+Transition length (harness) Base 521 / Bambu 528, Negative Sphere 332 / 338, Negative Sphere2 240 / 304; Circular, Oblique, Sphere run high (241 / 189, 529 / 468, 154 / 110: their transition
+slabs are wider than Bambu's). Line IoU Negative Sphere 0.50 -> 0.53, Negative Sphere2 0.48 -> 0.52, Circular 0.49 -> 0.51.
+

@@ -2235,6 +2235,7 @@
       function dTrEx(j) { return DOEX + (NI + NT - 1) * SP[j].h; }
       var SPLIT_MIN_MM = 0.6;
       var PINCH_INSET_MM = 0.1;      /* the loop's inset where the region is too narrow for a line's half-width on each side */
+      var TRANS_FILL_OPEN_MM = 0.5;
       var REGION_FILL_GAP_MM = 0.04;
       var LOOP_IN_MM = 0.12;   /* the region loops lie this far in from the slab's edge (not half a line: Bambu's plate stands 0.4 mm past ours on the flat-floored pieces) */
       var REGIONAL_PLATE = true;     /* a support's own grid lays its plate by regions (below) */
@@ -2292,16 +2293,22 @@
             if (regional) sI = wI + REGION_FILL_GAP_MM;           /* Bambu's interface lines stand 0.46 mm apart (a line and 0.04), on every layer height */
             var fillCs = inSheet;
             if (regional) {
+              /* the hatch runs from loop to loop (Bambu's zig-zag meets the loops): its ground is the slab inset to the loops' own line, not the wall's width in */
+              var inLoop = g.offset(g.inter(P.S[j], sheetCs), -LOOP_IN_MM);
+              hullS = g.polys(g.offset(inLoop, wI / 2 + 1e-4));
               var ZI = stI.length ? g.offset(g.unionAll(stI), w / 2) : g.empty(), ZT = stT.length ? g.offset(g.unionAll(stT), w / 2) : g.empty();
               var hIc = hostExCs(j, dInEx(j)), hTc = hostExCs(j, dTrEx(j));
               var Ireg = hIc && !g.isEmpty(ZI) ? g.inter(g.inter(inSheet, ZI), hIc) : g.empty();
               var Zall = g.isEmpty(ZI) ? ZT : g.isEmpty(ZT) ? ZI : g.union(ZI, ZT);
-              var Treg = hTc && !g.isEmpty(Zall) ? g.diff(g.inter(g.inter(inSheet, Zall), hTc), Ireg) : g.empty();
-              var wideT = g.isEmpty(Treg) ? Treg : g.offset(g.offset(Treg, -1.2 * wI), 1.2 * wI);
-              fillCs = g.isEmpty(Ireg) ? wideT : g.isEmpty(wideT) ? Ireg : g.union(Ireg, wideT);
-              /* the loops sit where the support's own wall sits (the slab's edge, half a line in): regions taken on the whole layer, not inside its wall */
+              var Treg = hTc && !g.isEmpty(Zall) ? g.diff(g.inter(g.inter(inLoop, Zall), hTc), Ireg) : g.empty();
               var slabI = hIc && !g.isEmpty(ZI) ? g.inter(g.inter(P.S[j], ZI), hIc) : g.empty();
               var slabT = hTc && !g.isEmpty(Zall) ? g.diff(g.inter(g.inter(P.S[j], Zall), hTc), slabI) : g.empty();
+              /* a transition strip is filled where the slab it lies in is wider than 2 x TRANS_FILL_OPEN_MM (the Negative Spheres' ring, 1.8 - 2.3 mm: Bambu zig-zags it; the
+                 Oblique's ribbon, under 1 mm: its loop alone) */
+              var openT = g.isEmpty(slabT) ? slabT : g.offset(g.offset(slabT, -TRANS_FILL_OPEN_MM), TRANS_FILL_OPEN_MM);
+              var wideT = g.isEmpty(Treg) || g.isEmpty(openT) ? g.empty() : g.inter(Treg, openT);
+              fillCs = g.isEmpty(Ireg) ? wideT : g.isEmpty(wideT) ? Ireg : g.union(Ireg, wideT);
+              /* the loops sit where the support's own wall sits (the slab's edge, half a line in): regions taken on the whole layer, not inside its wall */
               [[slabI, 'Support interface'], [slabT, 'Support transition']].forEach(function (rg) {
                 if (g.isEmpty(rg[0])) return;
                 var inner = g.offset(rg[0], -LOOP_IN_MM);
