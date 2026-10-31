@@ -56,3 +56,10 @@ is wider than 1 mm (`TRANS_FILL_OPEN_MM` 0.5 each side): the Negative Spheres' r
 Transition length (harness) Base 521 / Bambu 528, Negative Sphere 332 / 338, Negative Sphere2 240 / 304; Circular, Oblique, Sphere run high (241 / 189, 529 / 468, 154 / 110: their transition
 slabs are wider than Bambu's). Line IoU Negative Sphere 0.50 -> 0.53, Negative Sphere2 0.48 -> 0.52, Circular 0.49 -> 0.51.
 
+
+Update (2026-10-31, the stack's gap on a slope): a column's stack top is `floor((surface - gap_at - A) / layer) - 1`, `gap_at` the perpendicular gap (`gap x sqrt(1 + slope^2)`) plus, for a bead, its downhill
+edge's drop (`(half a line + 0.03) x slope`). Two changes: a footprint that is one plane leaning 3 - 70 deg (the Oblique's) has no drop to allow for - a bead stands wholly on the plane - so it takes none;
+a curved face takes `REGION_BEAD_SHARE` 0.7 of it. Foot IoU Oblique 0.80 -> 0.83 (line 0.58 -> 0.64), Negative Sphere 0.76 -> 0.79, Negative Sphere2 0.70 -> 0.74, Sphere 0.76 -> 0.77, Base and Circular
+unchanged. The cliff: at 0.5 or less the Circular's and Sphere's plates fail the clearance check and are not built (foot 0.28 / 0.37), so 0.7 keeps a margin (0.6 gave Circular 0.66, Sphere 0.78). With
+the full allowance the Circular's plate stands a layer short of Bambu's and 0.5 mm too wide; it is still: its stack tops at 9.2 against Bambu's 9.4 and its footprint is wider than Bambu's by 0.5 - 0.8 mm
+(footprint, from the beacon detector, not the loops: `LOOP_IN_MM` 0.3 - 0.7 changed nothing there). Tree IoU of the Oblique 0.12 -> 0.10 (not chased: trunks wait for the plates).

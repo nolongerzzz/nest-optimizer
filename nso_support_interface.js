@@ -866,6 +866,7 @@
   var FILL_REACH_MM = 1.2;     /* ...wherever the part is this near over the stack's top (the legacy field, a cap and 1.25 mm, needs no such reach) */
   var CONC_CUSHION_MM = 0.08;      /* the opened level set keeps its walls this much more than a line width apart (what the cleaning of a loop moves them by: the extrusion refuses an overlap) */
   var CONC_SIMPLIFY_MM = 0.015;    /* a loop's points within this of the line between their neighbours go */
+  var REGION_BEAD_SHARE = 0.7;    /* on a curved face a bead's downhill edge stands lower than its middle by this share of (half a line + 0.03) x the slope: the full allowance (1.0) held the plate a layer and 0.5 mm clear of Bambu's; under about 0.55 the domes' plates fail their clearance check and are not built. A planar face has none (the perpendicular gap is exact on a plane) */
   var REGION_TIP_NEAR_MM = 0.5;   /* a tip's contact this near a footprint's edge is the footprint's */
   var REGION_MARGIN_MM = 0.02;    /* the region plate's cells lie this far in from the footprint's edge (the face's own edge: the plate may run to it; it was 0.1, which left a band 0.15 mm wide bare all round a 1 - 2 mm rim and the tails of the Negative Spheres' patches); its first loop is the edge of that, a wall's centre ~0.1 mm in */
   var REGION_HOLE_FILL_MM2 = 3;   /* a hole in a footprint under this area is laid over, not round (see shellPass) */
@@ -1692,6 +1693,7 @@
         if (zs.length < 30) return;
         zs.sort(function (a, b) { return a - b; });
         var zLoQ = zs[Math.floor(zs.length * 0.02)], zHiQ = zs[Math.floor(zs.length * 0.98)], range = zHiQ - zLoQ;
+        var planarFace = false;                       /* the footprint's surface is one plane that leans: a bead on it stands wholly on the plane (no curve to drop under) */
         if (range > REGION_FLAT_MM) {
           /* a plane (a stair's) stays the stair's; a curve is the plate's */
           var sx = 0, sy = 0, sz = 0, cnt = 0, pts = [];
@@ -1703,7 +1705,8 @@
             var ga = (sxz * syy - syz * sxy) / det, gb = (syz * sxx - sxz * sxy) / det;
             pts.forEach(function (p) { resid = Math.max(resid, Math.abs(p[2] - mz - ga * (p[0] - mx) - gb * (p[1] - my))); });
             var slopeDeg = Math.atan(Math.hypot(ga, gb)) * 180 / Math.PI;
-            if (resid <= Math.max(REGION_PLANE_MM, REGION_PLANE_SHARE * range) && slopeDeg >= STAIR_MIN_DEG && slopeDeg <= STAIR_MAX_DEG && !(opts.regionSlopes === true && o.sheetLayer !== o.layer)) return;     /* Dense: a planar slope is the region plate's too (Bambu's ribbon), not the stair's rungs */
+            planarFace = resid <= Math.max(REGION_PLANE_MM, REGION_PLANE_SHARE * range) && slopeDeg >= STAIR_MIN_DEG && slopeDeg <= STAIR_MAX_DEG;
+            if (planarFace && !(opts.regionSlopes === true && o.sheetLayer !== o.layer)) return;     /* Dense: a planar slope is the region plate's too (Bambu's ribbon), not the stair's rungs */
           }
         }
         /* fill the lattice's cells; a flat face takes its lowest height */
@@ -1767,7 +1770,7 @@
             if (gi2 < 0 || gi2 >= nx || gj2 < 0 || gj2 >= ny || !inRegion[gj2 * nx + gi2]) continue;
             gmax = Math.max(gmax, Math.abs(S[qg2] - S[gj2 * nx + gi2]) / (2 * CELLS));
           }
-          gapAt[qg2] = o.gap * Math.sqrt(1 + gmax * gmax) + (o.width / 2 + 0.03) * gmax;   /* a bead is a line wide: on a slope its downhill edge stands lower than its middle */
+          gapAt[qg2] = o.gap * Math.sqrt(1 + gmax * gmax) + (planarFace ? 0 : REGION_BEAD_SHARE * (o.width / 2 + 0.03) * gmax);   /* a bead is a line wide: on a slope its downhill edge stands lower than its middle */
         }
         var A = zs[0] - o.gap, m = new Int32Array(N).fill(-99999), mmin = 1e9, mmax = -1e9;
         for (var q5 = 0; q5 < N; q5++) {
