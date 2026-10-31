@@ -2232,6 +2232,7 @@
       function dInEx(j) { return DOEX + (NI - 1) * SP[j].h; }
       function dTrEx(j) { return DOEX + (NI + NT - 1) * SP[j].h; }
       var SPLIT_MIN_MM = 0.6;
+      var REGIONAL_PLATE = true;     /* a support's own grid lays its plate by regions (below) */
       P.layers.forEach(function (L, j) {
         if (!L.paths.length) return;
         var zi = zones[j].i.length ? g.polys(g.offset(g.unionAll(zones[j].i), w / 2)) : [];
@@ -2280,7 +2281,29 @@
               for (var qi = 0; qi < q.pts.length; qi++) if (!inside(hullS, q.pts[qi][0], q.pts[qi][1])) return true;
               return false;
             });
-            connect(scanFill(g.polys(inSheet), aJ, sI, 0), 3 * sI, hullS).forEach(function (pth) {
+            /* ON A SUPPORT'S OWN GRID the plate is laid by its regions, as Bambu lays it: the interface region and the transition region each have their loop, and the
+               interface its zig-zag; a narrow transition strip is its loop alone. (Typing one fill by position left a strip a line or none by the phase of the lines.) */
+            var regional = byDepth && REGIONAL_PLATE;
+            var fillCs = inSheet;
+            if (regional) {
+              var ZI = stI.length ? g.offset(g.unionAll(stI), w / 2) : g.empty(), ZT = stT.length ? g.offset(g.unionAll(stT), w / 2) : g.empty();
+              var hIc = hostExCs(j, dInEx(j)), hTc = hostExCs(j, dTrEx(j));
+              var Ireg = hIc && !g.isEmpty(ZI) ? g.inter(g.inter(inSheet, ZI), hIc) : g.empty();
+              var Zall = g.isEmpty(ZI) ? ZT : g.isEmpty(ZT) ? ZI : g.union(ZI, ZT);
+              var Treg = hTc && !g.isEmpty(Zall) ? g.diff(g.inter(g.inter(inSheet, Zall), hTc), Ireg) : g.empty();
+              var wideT = g.isEmpty(Treg) ? Treg : g.offset(g.offset(Treg, -0.6 * wI), 0.6 * wI);
+              fillCs = g.isEmpty(Ireg) ? wideT : g.isEmpty(wideT) ? Ireg : g.union(Ireg, wideT);
+              /* the loops sit where the support's own wall sits (the slab's edge, half a line in): regions taken on the whole layer, not inside its wall */
+              var slabI = hIc && !g.isEmpty(ZI) ? g.inter(g.inter(P.S[j], ZI), hIc) : g.empty();
+              var slabT = hTc && !g.isEmpty(Zall) ? g.diff(g.inter(g.inter(P.S[j], Zall), hTc), slabI) : g.empty();
+              [[slabI, 'Support interface'], [slabT, 'Support transition']].forEach(function (rg) {
+                if (g.isEmpty(rg[0])) return;
+                g.polys(g.offset(rg[0], -wI / 2)).forEach(function (ring) {
+                  if (ring.length > 2) L.paths.push({ feature: rg[1], width: wI, closed: true, pts: ring, typed: true });
+                });
+              });
+            }
+            if (!g.isEmpty(fillCs)) connect(scanFill(g.polys(fillCs), aJ, sI, 0), 3 * sI, hullS).forEach(function (pth) {
               L.paths.push({ feature: 'Support', width: wI, closed: false, pts: pth.pts, sheetFill: true });
             });
           }
@@ -2298,6 +2321,7 @@
         var out = [];
         L.paths.forEach(function (p) {
           var pts = p.pts, np = pts.length, m = p.closed ? np : np - 1;
+          if (p.typed) { out.push(p); counts[p.feature]++; return; }                      /* a region's own loop: its type is its region's */
           if (m < 1) { p.feature = 'Support'; out.push(p); counts[p.feature]++; return; }
           /* the path's segments, each typed at its middle (a long one at three places, the majority) */
           var lab = [], len = [];
@@ -2324,8 +2348,15 @@
             if (p.closed && merged.length > 1 && merged[0].f === merged[merged.length - 1].f) { var lm = merged.pop(); merged[0].from = lm.from - m; merged[0].l += lm.l; }
             runs = merged;
           }
-          if (runs.length <= 1) { p.feature = runs.length ? runs[0].f : 'Support'; out.push(p); counts[p.feature]++; return; }
+          /* a wall run that lies in the interface or the transition is the region's loop (laid above), not a second line beside it */
+          var dropWall = byDepth && REGIONAL_PLATE && /wall$/i.test(p.feature || '');
+          if (runs.length <= 1) {
+            var f1 = runs.length ? runs[0].f : 'Support';
+            if (dropWall && f1 !== 'Support') return;
+            p.feature = f1; out.push(p); counts[p.feature]++; return;
+          }
           runs.forEach(function (r) {
+            if (dropWall && r.f !== 'Support') return;
             var piece = [], from = r.from, to = r.to;
             for (var e2 = from; e2 <= to; e2++) { var idx = ((e2 % np) + np) % np; piece.push(pts[idx]); }
             piece.push(pts[(((to + 1) % np) + np) % np]);
