@@ -1656,6 +1656,8 @@
     <button type="button" id="ctx-undo" class="ctx-item" role="menuitem" disabled><span>Undo</span><kbd id="ctx-undo-key" class="ctx-key">Ctrl+Z</kbd></button>
     <button type="button" id="ctx-redo" class="ctx-item" role="menuitem" disabled><span>Redo</span><kbd id="ctx-redo-key" class="ctx-key">Ctrl+Y</kbd></button>
     <div class="ctx-sep" role="separator"></div>
+    <button type="button" id="ctx-select-all" class="ctx-item" role="menuitem" title="Select every piece on this plate: they all glow red. Delete then removes them all; click one piece to go back to a single selection." disabled>Select all</button>
+    <button type="button" id="ctx-split" class="ctx-item" role="menuitem" title="Split a piece made of several separate shells into one piece per part (the Subtract card's Split to parts). A piece of one part is left alone, with the reason in the status line. One Undo." disabled>Split to parts</button>
     <button type="button" id="ctx-clone" class="ctx-item" role="menuitem" title="One copy of the piece, placed beside it" disabled>Clone</button>
     <button type="button" id="ctx-mirror" class="ctx-item" role="menuitem" title="Reflect the piece across the plane through its centre, perpendicular to the plate's X axis. One Undo." disabled>Mirror across X</button>
     <button type="button" id="ctx-support-blocker" class="ctx-item" role="menuitem" title="Open Supports and put a ghost box where you clicked: no support is made inside it. Move it, stretch it, add more.">Add Supports Blocker...</button>
@@ -2147,7 +2149,7 @@
   <script src="nso-helpers.js?v=9c476e39"></script>
   <script src="nso-recent.js?v=f03d6f13"></script>
   <script src="nso-bounds.js?v=778acac4"></script>
-  <script src="app-core.js?v=a532df9b"></script>
+  <script src="app-core.js?v=ae265e04"></script>
   <!-- Up to six plates (beds): the active one is state.models / state.placed, the rest are kept beside it. docs/BEDS.md. -->
   <script src="app-beds.js?v=3d221bc4"></script>
 
@@ -2222,7 +2224,7 @@
   <script src="app-stock.js?v=91def76f"></script>
   <script src="app-assemble.js?v=60984bfb"></script>
   <script src="app-sel-outline.js?v=c1a5b4df"></script>
-  <script src="app-join.js?v=e3b5d8d5"></script>
+  <script src="app-join.js?v=b09e267d"></script>
   <script src="app-center-lock.js?v=ee95c074"></script>
   <script src="app-oversize-washer.js?v=a445c3ff"></script>
   <script src="app-join-triple.js?v=95a9c48a"></script>

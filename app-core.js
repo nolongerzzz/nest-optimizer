@@ -3473,13 +3473,18 @@ function openCanvasContextMenu(event) {
     hideCtxMenu();
     return;
   }
-  if (idx >= 0) selectPlaced(idx);
+  /* A right click on a piece of a Select all group keeps the group: the menu then
+     acts on all of it (Delete) and greys the single-piece items. Anywhere else
+     it selects that piece alone, as ever (selectPlaced ends the group). */
+  const inGroup = idx >= 0 && nsoSelAllPieces().indexOf(state.placed[idx]) >= 0;
+  if (idx >= 0 && !inGroup) selectPlaced(idx);
   const menu = document.getElementById('ctx-menu');
-  if (menu) menu.dataset.piece = idx >= 0 ? String(idx) : '';
+  if (menu) menu.dataset.piece = idx >= 0 && !inGroup ? String(idx) : '';
   state.ctxClick = { x: event.clientX, y: event.clientY };   // where "Add Supports Blocker..." puts its box
   nsoCtxMenuRefresh();
   showCtxMenu(event.clientX, event.clientY);
-  if (idx >= 0) setStatus('Selected #' + (idx + 1) + ' - Delete piece or press Delete');
+  if (inGroup) setStatus(nsoSelAllPieces().length + ' pieces selected - Delete pieces or press Delete');
+  else if (idx >= 0) setStatus('Selected #' + (idx + 1) + ' - Delete piece or press Delete');
 }
 
 /* ---- the right-click menu's items ----
@@ -3492,20 +3497,51 @@ function nsoCtxHasPiece() {
   const at = menu ? menu.dataset.piece : '';
   return !!(at !== '' && at != null && state.placed[+at]);
 }
+/* SELECT ALL. The app holds ONE selected piece (state.selectedIndex); "all the
+   pieces on this plate" is a group beside it, state.multiSel (placed entries),
+   drawn with the selected piece's red glow. While it stands selectedIndex is -1,
+   so no single-piece verb can land on an arbitrary piece; the group answers
+   Delete (one Undo step per piece) and Clear plate, and selecting anything
+   else, switching plate, deleting or clearing ends it (clearSelectionOutline). */
+function nsoSelAllPieces() {
+  const g = state.multiSel;
+  if (!g || !g.length) return [];
+  return g.filter(p => state.placed.indexOf(p) >= 0);
+}
+function nsoSelectAllOnPlate() {
+  if (!state.placed.length) { setStatus('Nothing on the plate to select', true); return { ok: false, reason: 'empty plate' }; }
+  clearSelectionOutline();
+  state.selectedIndex = -1;
+  if (typeof nsoInputMode !== 'undefined' && nsoInputMode) setTimeout(function () { nsoInputMode.refresh(); }, 0);
+  const group = state.placed.filter(p => p && p.mesh);
+  group.forEach(p => {
+    p.mesh.material.emissive = new THREE.Color(0xdc2626);
+    p.mesh.material.emissiveIntensity = 0.55;
+  });
+  state.multiSel = group;
+  updateAdjustUI();
+  setStatus('Selected all ' + group.length + (group.length === 1 ? ' piece' : ' pieces') + ' on this plate - Delete removes them; click one piece to select it alone');
+  return { ok: true, count: group.length };
+}
 function nsoCtxMenuRefresh() {
   const menu = document.getElementById('ctx-menu');
   if (!menu) return;
   const piece = nsoCtxHasPiece();
+  const group = nsoSelAllPieces().length;
   const on = (id, yes) => { const el = document.getElementById(id); if (el) el.disabled = !yes; };
   on('ctx-undo', state.undoStack.length > 0);
   on('ctx-redo', state.redoStack.length > 0);
   on('ctx-clone', piece);
   on('ctx-mirror', piece);
+  on('ctx-select-all', state.placed.length > 0);
+  on('ctx-split', piece);
   on('ctx-export', piece);
   on('ctx-export-plate', state.placed.length > 0);
   on('ctx-clear-plate', state.placed.length > 0);
   on('ctx-delete-plate', typeof NSO_BEDS !== 'undefined' && NSO_BEDS.canDelete());
-  on('ctx-delete', piece);
+  on('ctx-delete', piece || group > 0);
+  const del = document.getElementById('ctx-delete');
+  if (del) del.textContent = group > 1 ? 'Delete ' + group + ' pieces' : 'Delete piece';
   const mac = /Mac|iPhone|iPad/.test((typeof navigator !== 'undefined' && navigator.platform) || '');
   const key = (id, mac_, other) => { const el = document.getElementById(id); if (el) el.textContent = mac ? mac_ : other; };
   key('ctx-undo-key', '\u2318Z', 'Ctrl+Z');
@@ -3577,6 +3613,11 @@ function wireCtxMenu() {
   };
   item('ctx-undo', () => undoLast());
   item('ctx-redo', () => redoLast());
+  item('ctx-select-all', () => nsoSelectAllOnPlate());
+  item('ctx-split', () => {
+    if (window.NSO_SPLIT_PARTS) window.NSO_SPLIT_PARTS.split();     // app-split-parts.js: says why in the status line if it cannot
+    else setStatus('Split to parts did not load - check console', true);
+  });
   item('ctx-clone', () => cloneSelectedModel({ count: 1 }));
   item('ctx-mirror', () => nsoCtxMirrorAcrossX());
   item('ctx-support-blocker', () => {
@@ -3980,6 +4021,7 @@ function onCanvasPointerDown(event) {
 }
 
 function clearSelectionOutline() {
+  state.multiSel = null;           // a Select all group ends with any other selection change
   state.placed.forEach((p, i) => {
     if (p.mesh) {
       if (p.outline) {
@@ -4086,6 +4128,14 @@ function reindexPlacedMeshes() {
 
 function deleteSelectedPlaced() {
   hideCtxMenu();
+  const grp = nsoSelAllPieces();
+  if (grp.length) {                 // a Select all group: every piece, last first so each Undo puts one back in place
+    const idxs = grp.map(p => state.placed.indexOf(p)).sort((a, b) => b - a);
+    state.multiSel = null;
+    idxs.forEach(i => { state.selectedIndex = i; deleteSelectedPlaced(); });
+    setStatus('Deleted ' + idxs.length + (idxs.length === 1 ? ' piece' : ' pieces') + ' from plate - Undo (Ctrl+Z) puts them back one at a time');
+    return;
+  }
   const idx = state.selectedIndex;
   if (idx < 0 || !state.placed[idx]) {
     setStatus('Click or right-click a piece on the plate first', true);

@@ -37,6 +37,15 @@ close it.
   centre is not (measured: `pin.stl`, `hinge_knuckle_box.stl`) is refused with the
   card's own message and left alone; centred or on a clean grid it holds (box, cylinder,
   prism, tape, `lid_blank`). Nothing snaps the plane.
+- **Select all** (`nsoSelectAllOnPlate`, `app-core.js`) lights every piece on the active plate
+  (the selected piece's red glow) and holds them as a group, `state.multiSel`, with
+  `selectedIndex = -1` so no single-piece verb lands on an arbitrary piece. The app still has
+  ONE selection; the group answers **Delete** (menu item reads "Delete N pieces", the Delete key
+  too; one Undo step per piece) and Clear plate. A right click on a piece of the group keeps it
+  and greys Split / Clone / Mirror / Export selected; anything that selects (`clearSelectionOutline`),
+  a plate switch or a delete ends it.
+- **Split to parts** calls `NSO_SPLIT_PARTS.split()` (the Subtract card's verb) on the piece the
+  menu opened on; a one-part piece is refused with the reason in the status line. One Undo.
 - **Export selected as... / Export plate** open the Export card (`#menu-export`, the
   EXPORT button's own: format chooser, cooling profile) with Download selected / Export
   plate in front. The item used to read "Export STL" and call `exportSelected()` with the

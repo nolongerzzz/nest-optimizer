@@ -3177,8 +3177,8 @@ function setupUI() {
     }
     if (e.key === 'Delete' || e.key === 'Backspace') {
       e.preventDefault();
-      if (state.selectedIndex >= 0 && state.placed[state.selectedIndex]) {
-        deleteSelectedPlaced();
+      if ((state.selectedIndex >= 0 && state.placed[state.selectedIndex]) || (typeof nsoSelAllPieces === 'function' && nsoSelAllPieces().length)) {
+        deleteSelectedPlaced();     // the selected piece, or the Select all group
       } else if (getActiveModel()) {
         deleteActiveModel();
       }

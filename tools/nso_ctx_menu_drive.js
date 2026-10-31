@@ -4,7 +4,7 @@
    real right-clicks.
      node tools/nso_ctx_menu_drive.js [outDir]     exit 0 = every gate held
 
-   Gates:
+   Gates (9 Select all, 10 Split to parts are the newest):
      1  on a piece the menu opens with every item in order; on bare plate the
         piece items are grey and the plate's items are not; off the plate, in
         the background, there is still no menu
@@ -31,7 +31,7 @@ const check = (name, cond, detail) => {
   if (!cond) fails++;
 };
 const fx = f => path.join(ROOT, 'fixtures', f);
-const ITEMS = ['ctx-undo', 'ctx-redo', 'ctx-clone', 'ctx-mirror', 'ctx-support-blocker', 'ctx-export', 'ctx-export-plate', 'ctx-clear-plate', 'ctx-delete-plate', 'ctx-delete'];
+const ITEMS = ['ctx-undo', 'ctx-redo', 'ctx-select-all', 'ctx-split', 'ctx-clone', 'ctx-mirror', 'ctx-support-blocker', 'ctx-export', 'ctx-export-plate', 'ctx-clear-plate', 'ctx-delete-plate', 'ctx-delete'];
 
 withApp(async (page, logs) => {
   await page.setViewportSize({ width: 1400, height: 860 });
@@ -45,7 +45,7 @@ withApp(async (page, logs) => {
       return [r.left + (p.x * 0.5 + 0.5) * r.width, r.top + (-p.y * 0.5 + 0.5) * r.height];
     };
     H.open = () => !document.getElementById('ctx-menu').classList.contains('hidden');
-    H.off = () => Object.fromEntries(['ctx-undo', 'ctx-redo', 'ctx-clone', 'ctx-mirror', 'ctx-export', 'ctx-export-plate', 'ctx-clear-plate', 'ctx-delete-plate', 'ctx-delete']
+    H.off = () => Object.fromEntries(['ctx-undo', 'ctx-redo', 'ctx-select-all', 'ctx-split', 'ctx-clone', 'ctx-mirror', 'ctx-export', 'ctx-export-plate', 'ctx-clear-plate', 'ctx-delete-plate', 'ctx-delete']
       .map(id => [id, document.getElementById(id).disabled]));
     /* a point on bare plate: on the plate, on no piece, clear of the buttons */
     H.barePlate = () => {
@@ -77,15 +77,15 @@ withApp(async (page, logs) => {
   check('the items, in order', JSON.stringify(await N(() => Array.from(document.querySelectorAll('#ctx-menu .ctx-item')).map(b => b.id)))
     === JSON.stringify(ITEMS));
   check('the labels', JSON.stringify(await N(() => Array.from(document.querySelectorAll('#ctx-menu .ctx-item')).map(b => b.firstElementChild && b.children.length ? b.firstElementChild.textContent : b.textContent)))
-    === JSON.stringify(['Undo', 'Redo', 'Clone', 'Mirror across X', 'Add Supports Blocker...', 'Export selected as…', 'Export plate', 'Clear plate', 'Delete plate', 'Delete piece']));
+    === JSON.stringify(['Undo', 'Redo', 'Select all', 'Split to parts', 'Clone', 'Mirror across X', 'Add Supports Blocker...', 'Export selected as…', 'Export plate', 'Clear plate', 'Delete plate', 'Delete piece']));
   check('two separators: after Redo and after Export plate', await N(() => {
     const kids = Array.from(document.getElementById('ctx-menu').children).map(e => e.classList.contains('ctx-sep') ? '-' : e.id);
-    return kids.join() === 'ctx-undo,ctx-redo,-,ctx-clone,ctx-mirror,ctx-support-blocker,ctx-export,ctx-export-plate,-,ctx-clear-plate,ctx-delete-plate,ctx-delete';
+    return kids.join() === 'ctx-undo,ctx-redo,-,ctx-select-all,ctx-split,ctx-clone,ctx-mirror,ctx-support-blocker,ctx-export,ctx-export-plate,-,ctx-clear-plate,ctx-delete-plate,ctx-delete';
   }));
   check('the piece is selected', (await N(() => state.selectedIndex)) === 0);
   let off = await N(() => window.__c.off());
   check('on a piece: Clone, Mirror, Export selected, Export plate, Clear plate, Delete are live',
-    ['ctx-clone', 'ctx-mirror', 'ctx-export', 'ctx-export-plate', 'ctx-clear-plate', 'ctx-delete'].every(k => !off[k]), JSON.stringify(off));
+    ['ctx-select-all', 'ctx-split', 'ctx-clone', 'ctx-mirror', 'ctx-export', 'ctx-export-plate', 'ctx-clear-plate', 'ctx-delete'].every(k => !off[k]), JSON.stringify(off));
   check('Undo and Redo are grey (nothing done yet)', off['ctx-undo'] && off['ctx-redo']);
   check('the shortcut hints are there', await N(() => /Z/.test(document.getElementById('ctx-undo-key').textContent) && /Z|Y/.test(document.getElementById('ctx-redo-key').textContent)));
   await shot('01-menu-on-piece');
@@ -96,8 +96,8 @@ withApp(async (page, logs) => {
   await rightClick(bare);
   check('a right-click on bare plate opens the menu', await N(() => window.__c.open()));
   off = await N(() => window.__c.off());
-  check('...the piece items are grey', ['ctx-clone', 'ctx-mirror', 'ctx-export', 'ctx-delete'].every(k => off[k]), JSON.stringify(off));
-  check('...Export plate and Clear plate are not', !off['ctx-export-plate'] && !off['ctx-clear-plate']);
+  check('...the piece items are grey', ['ctx-split', 'ctx-clone', 'ctx-mirror', 'ctx-export', 'ctx-delete'].every(k => off[k]), JSON.stringify(off));
+  check('...Export plate, Clear plate and Select all are not', !off['ctx-export-plate'] && !off['ctx-clear-plate'] && !off['ctx-select-all']);
   await shot('02-menu-on-bare-plate');
   await N(() => window.__c.off()); // keep the menu up for the click below
   const cloneBefore = await N(() => state.models.length);
@@ -199,7 +199,7 @@ withApp(async (page, logs) => {
   await rightClick(await N(() => window.__c.proj(state.placed[0].mesh.position.toArray())));
   await page.click('#ctx-clear-plate');
   const viaMenu = await read6();
-  check('the same plate: none placed, models kept', viaMenu.placed === 0 && viaMenu.models === 2, JSON.stringify(viaMenu));
+  check('the same plate: none placed, none kept (Clear plate empties the model list; they are in Import > Recent)', viaMenu.placed === 0 && viaMenu.models === 0, JSON.stringify(viaMenu));
   check('menu and button leave the same state', JSON.stringify(viaMenu) === JSON.stringify(viaButton), JSON.stringify(viaButton));
 
   console.log('\n=== 7. Delete piece, as before ===');
@@ -224,6 +224,61 @@ withApp(async (page, logs) => {
   const mb = await page.locator('#ctx-menu').boundingBox();
   await page.mouse.click(mb.x + 4, mb.y + mb.height / 2 + 0.01); // on the padding, not an item
   check('a click on the menu\'s own padding leaves it open', await N(() => window.__c.open()));
+
+  console.log('\n=== 9. Select all ===');
+  await N(() => window.__c.reset());
+  await loadSTL(page, fx('box_hull_80x40x20-2.stl'));
+  await loadSTL(page, fx('box-20mm.stl'));
+  await loadSTL(page, fx('box_open.stl'));
+  await N(() => { state.undoStack = []; updateUndoBtn(); });
+  const lit = () => N(() => state.placed.map(p => p.mesh.material.emissive.getHex() === 0xdc2626));
+  const bare9 = await N(() => window.__c.barePlate());
+  await rightClick(bare9);
+  check('Select all is live on bare plate', !(await N(() => window.__c.off()))['ctx-select-all']);
+  await page.click('#ctx-select-all');
+  check('...every piece on the plate is lit', (await lit()).every(Boolean) && (await lit()).length === 3, JSON.stringify(await lit()));
+  check('...the group holds all three, no single piece is selected', await N(() => nsoSelAllPieces().length === 3 && state.selectedIndex === -1));
+  check('...the menu closed and the status says so', !(await N(() => window.__c.open())) && /all 3 pieces/.test(await N(() => document.getElementById('status').textContent)));
+  await shot('04-select-all');
+  // right-click on a piece of the group: group kept, single-piece items grey, Delete reads "Delete 3 pieces"
+  await rightClick(await N(() => window.__c.proj(state.placed[1].mesh.position.toArray())));
+  off = await N(() => window.__c.off());
+  check('right-click on a grouped piece keeps the group', await N(() => nsoSelAllPieces().length === 3));
+  check('...single-piece items grey (Split, Clone, Mirror, Export selected)', ['ctx-split', 'ctx-clone', 'ctx-mirror', 'ctx-export'].every(k => off[k]), JSON.stringify(off));
+  check('...Delete is live and counts the group', !off['ctx-delete'] && (await N(() => document.getElementById('ctx-delete').textContent)) === 'Delete 3 pieces');
+  await page.click('#ctx-delete');
+  check('Delete from the menu removes all three', (await N(() => state.placed.length)) === 0);
+  await N(() => undoLast()); await N(() => undoLast()); await N(() => undoLast());
+  check('...three Undos put them all back', (await N(() => state.placed.length)) === 3);
+  // selecting one piece ends the group
+  await N(() => nsoSelectAllOnPlate());
+  await N(() => selectPlaced(2));
+  check('selecting one piece ends the group: the others go dark, it is the selection', (await lit()).slice(0, 2).every(v => !v) && (await N(() => state.selectedIndex)) === 2 && (await N(() => nsoSelAllPieces().length)) === 0, JSON.stringify(await lit()));
+  // Delete key on the group removes pieces, never the active model
+  await N(() => nsoSelectAllOnPlate());
+  const models9 = await N(() => state.models.length);
+  await page.keyboard.press('Delete');
+  check('the Delete key on a group deletes the pieces, not a model', (await N(() => state.placed.length)) === 0 && (await N(() => state.models.length)) === models9);
+  await N(() => { undoLast(); undoLast(); undoLast(); });
+
+  console.log('\n=== 10. Split to parts ===');
+  await N(() => window.__c.reset());
+  await loadSTL(page, fx('box_hull_80x40x20-2.stl'));
+  await rightClick(await N(() => window.__c.proj(state.placed[0].mesh.position.toArray())));
+  check('Split to parts is live on a piece', !(await N(() => window.__c.off()))['ctx-split']);
+  await page.click('#ctx-split');
+  check('a one-part piece is refused with the reason, nothing changes', (await N(() => state.placed.length)) === 1 &&
+    /one part|1 part|single|nothing/i.test(await N(() => document.getElementById('status').textContent)), await N(() => document.getElementById('status').textContent));
+  await N(() => window.__c.reset());
+  const hingeSoup = require('./nso_split_parts_fixtures.js').hingeLifted().soup;
+  const tmp = path.join(require('os').tmpdir(), 'nso-ctx-split-hinge.stl');
+  require('./nso_stl_io.js').writeSTL(tmp, hingeSoup);
+  await loadSTL(page, tmp);
+  await rightClick(await N(() => window.__c.proj(state.placed[0].mesh.position.toArray())));
+  await page.click('#ctx-split');
+  check('a two-part piece becomes two pieces', (await N(() => state.placed.length)) === 2, await N(() => document.getElementById('status').textContent));
+  await N(() => undoLast());
+  check('one Undo puts the one piece back', (await N(() => state.placed.length)) === 1);
 
   const errs = logs.filter(l => /error|exception/i.test(l) && !/favicon|Failed to load resource/i.test(l));
   check('no console errors', errs.length === 0, errs.slice(0, 3).join(' | '));
