@@ -95,7 +95,7 @@ const ROWS = [
   ['ms-region-row', 'normal slice', ['ms-mode-select', 'ms-btn-isolate', 'ms-btn-clear', 'ms-region-note']],
   ['ms-whole-row', 'normal', ['ms-btn-back']],
   ['ms-band-row', 'slice', ['ms-btn-take-band', 'ms-band-read']],
-  ['ms-compare-row', 'normal slice', ['ms-compare-toggle', 'ms-compare-body', 'ms-compare-start', 'ms-compare-overlay', 'ms-compare-tint', 'ms-compare-restore', 'ms-compare-step', 'ms-compare-read']],
+  ['ms-compare-row', 'normal slice', ['ms-compare-toggle', 'ms-compare-body', 'ms-compare-plates', 'ms-compare-pieces', 'ms-compare-start', 'ms-compare-overlay', 'ms-compare-tint', 'ms-compare-restore', 'ms-compare-step', 'ms-compare-read']],
   ['ms-render-row', 'slice', ['ms-render-toolpath', 'ms-render-solid', 'ms-render-read']],
   ['ms-slice-row', 'slice', ['ms-slice-settings-toggle', 'ms-slice-settings', 'ms-slice-nozzle', 'ms-slice-layer', 'ms-slice-walls',
                              'ms-slice-density', 'ms-slice-pattern', 'ms-slice-angle', 'ms-slice-settings-note']],

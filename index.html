@@ -1771,11 +1771,17 @@
                set down together on plate 3 - side by side - then overlaid in two colours and nudged. Plates 1 and 2 are not touched. Shown only while both plates hold something; folded until opened. -->
           <div id="ms-compare-row" class="ms-row" data-on="normal slice" style="display:none;">
             <button id="ms-compare-toggle" type="button" class="ms-disclose" aria-expanded="false" aria-controls="ms-compare-body"
-                    title="Set what is isolated on each plate side by side on plate 3, then overlay it">Compare plates</button>
+                    title="Set the plates, or a piece from each, side by side on plate 3, then overlay it">Compare</button>
             <div id="ms-compare-body" hidden>
             <div class="ms-btn-row">
+              <button id="ms-compare-plates" type="button" disabled
+                      title="Set plate 1 and plate 2, whole, down together on plate 3, side by side">Plates</button>
+              <button id="ms-compare-pieces" type="button" disabled aria-pressed="false"
+                      title="Click a piece on plate 1, then a piece on plate 2: both are set down on plate 3, side by side">Pieces</button>
               <button id="ms-compare-start" type="button" disabled
-                      title="Set what is isolated on plate 1 and what is isolated on plate 2 down together on plate 3, side by side">Side by side</button>
+                      title="Set what is selected on plate 1 and what is selected on plate 2 (a piece, a line type, a layer band) down together on plate 3, side by side">Selected</button>
+            </div>
+            <div class="ms-btn-row">
               <button id="ms-compare-overlay" type="button" disabled
                       title="Lay the second piece over the first, their parts' outlines together; both drawn see-through">Overlay</button>
             </div>
@@ -2274,7 +2280,7 @@
        row each under the Flange row. Pure. docs/GSCOPE-FEATURES.md. -->
   <script src="nso_face_features.js?v=53ee4b23"></script>
   <script src="nso_gscope_measure.js?v=c5595269"></script>
-  <script src="app-microscope.js?v=ea96468a"></script>
+  <script src="app-microscope.js?v=d91440f9"></script>
   <!-- Detach / Reattach (Cut menu): cap a detected flange's hull on its own
        wall, lift the flange out as a piece, seat it elsewhere with Attach's
        seat. After nso_flange.js, app-crop.js, nso_assemble.js, app-assemble.js

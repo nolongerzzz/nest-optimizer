@@ -209,6 +209,55 @@ withApp(async (page, logs) => {
     await shot('03-measure');
   }
 
+  console.log('\n=== 9. Plates: both whole plates, one click ===');
+  {
+    const snap = () => page.evaluate(() => { const M = NSO_MICROSCOPE, a = M.plateState('lens'), b = M.plateState('take'); delete a.camera; delete b.camera; return JSON.stringify([a, b]); });
+    await page.evaluate(() => { const M = NSO_MICROSCOPE; M.compareClear(); ['lens', 'take'].forEach(n => { M.showPlate(n); }); M.showPlate('lens'); });
+    await frames(page);
+    const before = await snap();
+    const btn = await page.evaluate(() => { const b = document.getElementById('ms-compare-plates'); return { there: !!b, off: b && b.disabled }; });
+    check('the Plates button is on the card and enabled with a file on each plate', btn.there && !btn.off, J(btn));
+    await page.click('#ms-compare-plates');
+    await frames(page);
+    const r = await page.evaluate(() => { const M = NSO_MICROSCOPE, d = M.plateDoc('cmp');
+      return { plate: M.plate(), n: d && d.objects.length, names: d && d.objects.map(o => o.name), st: M.compareState(), box: d && d.objects.map(o => [o.bounds.minX, o.bounds.maxX]) }; });
+    check('no isolating needed: both whole plates stand on plate 3, side by side', r.plate === 'cmp' && r.n === 2 && /^Plate 1: /.test(r.names[0]) && /^Plate 2: /.test(r.names[1]) && r.box[0][1] < r.box[1][0], J(r));
+    check('...as a compare, ready to overlay', r.st && !r.st.overlaid && r.st.tinted, J(r.st));
+    check('...and plates 1 and 2 are as they were', await snap() === before);
+    await page.click('#ms-compare-overlay');
+    await frames(page);
+    check('Overlay works from there', await page.evaluate(() => NSO_MICROSCOPE.compareState().overlaid));
+  }
+
+  console.log('\n=== 10. Pieces: click a piece on each plate ===');
+  {
+    await page.evaluate(() => NSO_MICROSCOPE.compareClear());
+    await page.evaluate(() => NSO_MICROSCOPE.showPlate('take'));
+    await page.click('#ms-compare-pieces');
+    await frames(page);
+    let r = await page.evaluate(() => ({ pick: NSO_MICROSCOPE.comparePicking(), plate: NSO_MICROSCOPE.plate(), st: NSO_MICROSCOPE.compareState() }));
+    check('Pieces asks for a click on plate 1 first (and shows it)', r.pick === 'lens' && r.plate === 'lens' && r.st === null, J(r));
+    await page.evaluate(() => NSO_MICROSCOPE.pickPiece(0));
+    await frames(page);
+    r = await page.evaluate(() => ({ pick: NSO_MICROSCOPE.comparePicking(), plate: NSO_MICROSCOPE.plate(), st: NSO_MICROSCOPE.compareState() }));
+    check('a click on plate 1 moves on to plate 2', r.pick === 'take' && r.plate === 'take' && r.st === null, J(r));
+    await page.evaluate(() => NSO_MICROSCOPE.pickPiece(0));
+    await frames(page);
+    r = await page.evaluate(() => { const M = NSO_MICROSCOPE, d = M.plateDoc('cmp');
+      return { pick: M.comparePicking(), plate: M.plate(), n: d && d.objects.length, names: d && d.objects.map(o => o.name), st: M.compareState(), box: d && d.objects.map(o => [o.bounds.minX, o.bounds.maxX]) }; });
+    check('the click on plate 2 sets both pieces on plate 3, side by side', r.pick === null && r.plate === 'cmp' && r.n === 2 && /^Plate 1: /.test(r.names[0]) && /^Plate 2: /.test(r.names[1]) && r.box[0][1] < r.box[1][0] && r.st && !r.st.overlaid, J(r));
+    await page.click('#ms-compare-overlay');
+    await frames(page);
+    check('...and Overlay works from there', await page.evaluate(() => NSO_MICROSCOPE.compareState().overlaid));
+    await page.evaluate(() => NSO_MICROSCOPE.compareClear());
+    await page.evaluate(() => NSO_MICROSCOPE.showPlate('lens'));
+    await page.click('#ms-compare-pieces');
+    const on = await page.evaluate(() => NSO_MICROSCOPE.comparePicking());
+    await page.click('#ms-compare-pieces');
+    const off = await page.evaluate(() => NSO_MICROSCOPE.comparePicking());
+    check('Pieces again leaves the pick', on === 'lens' && off === null, J([on, off]));
+  }
+
   check('no page errors', logs.filter(l => /^\[pageerror\]/.test(l)).length === 0, logs.filter(l => /^\[pageerror\]/.test(l)).slice(0, 3).join(' | '));
   console.log(fails ? '\nFAILED (' + fails + ')' : '\nall gates held');
   process.exitCode = fails ? 1 : 0;

@@ -612,11 +612,14 @@ and moved afterwards, as a plate's pieces are.
 
 ## 13. Compare plates: side by side, then overlaid, then measured
 
-**What the user sees.** With a file on each plate, the card shows a folded row, *Compare plates*. Isolate
-something on each plate - a whole piece with its supports (the capture box takes the model and its supports
-in one), one line type, a layer band: whatever a drag would carry - then **Side by side** sets both down on
-a **third plate** (Compare), plate 1's at the left in orange and plate 2's at the right in blue, each at the
-height it came from, the camera close on them. Plates 1 and 2 are not touched. **Overlay** moves the blue
+**What the user sees.** With a file on each plate, the card shows a folded row, *Compare plates*, with three
+ways in, each one click or two. **Plates** sets both whole plates down side by side on a **third plate**
+(Compare) - nothing to isolate, no region box to drag. **Pieces** asks for a click on a piece on plate 1, then
+plate 2 is shown and asks for a click on a piece there; the second click sets both pieces down on plate 3
+(press Pieces again to leave the pick). **Selected** is the older way: isolate something on each plate - a
+piece with its supports, one line type, a layer band: whatever a drag would carry - then press it. On plate 3,
+plate 1's is at the left in orange and plate 2's at the right in blue, each at the height it came from, the
+camera close on them. Plates 1 and 2 are not touched. **Overlay** moves the blue
 one so the two parts' outlines coincide (XY only; the heights stay; with no part walls - supports alone - it
 lines up by everything drawn) and draws both see-through. The arrows nudge the blue piece by the step chosen
 (0.05 - 5 mm), Z too; the row reads the total. **Colours** puts the line types' own colours back. The

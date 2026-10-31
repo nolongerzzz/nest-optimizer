@@ -3936,6 +3936,7 @@ var NSO_MICROSCOPE = (function () {
     // Isolated, the view IS the selection: a box dragged, a line stepped,
     // redraws it. One rebuild per frame, however many steps a drag makes.
     if (isolated) isolateRedrawSoon();
+    if (cmpPick && selectionSource === 'pick' && currentSelection.length) setTimeout(comparePicked, 0);
     if (!selectionListeners.length) return;
     var region = selectionRegion();
     selectionListeners.forEach(function (fn) {
@@ -5915,6 +5916,10 @@ var NSO_MICROSCOPE = (function () {
     if (live && body && body.hidden) { body.hidden = false; if (tg) tg.setAttribute('aria-expanded', 'true'); }
     var st = $('ms-compare-start'), ov = $('ms-compare-overlay'), rs = $('ms-compare-restore'), tn = $('ms-compare-tint'), rd = $('ms-compare-read');
     setDisabled(st, !!why);
+    setDisabled($('ms-compare-plates'), !!why);
+    setDisabled($('ms-compare-pieces'), !!why);
+    var pcs = $('ms-compare-pieces');
+    if (pcs) { pcs.classList.toggle('active', !!cmpPick); pcs.setAttribute('aria-pressed', cmpPick ? 'true' : 'false'); }
     setDisabled(ov, !live);
     setDisabled(rs, !live);
     setDisabled(tn, !live);
@@ -5927,9 +5932,11 @@ var NSO_MICROSCOPE = (function () {
       rd.textContent = (compare.overlaid ? 'Overlaid' : 'Side by side') + ' on plate 3: ' + compare.a.name.replace(/^Plate 1: /, '') +
         ' (orange) and ' + compare.b.name.replace(/^Plate 2: /, '') + ' (blue). Blue moved by ' +
         compare.dx.toFixed(2) + ', ' + compare.dy.toFixed(2) + ', ' + compare.dz.toFixed(2) + ' mm from where Overlay put it.';
+    } else if (cmpPick) {
+      rd.textContent = cmpPick.step === 'lens' ? 'Compare pieces: click a piece on plate 1.' : 'Compare pieces: now click a piece on plate 2.';
     } else {
       rd.textContent = why ? 'Compare: ' + why + '.' :
-        'Isolate a piece, a line type or a layer band on each plate, then Side by side sets both on plate 3.';
+        'Plates sets both whole plates on plate 3, side by side. Pieces: click a piece on each plate. Selected takes what is selected on each.';
     }
   }
 
@@ -5950,30 +5957,19 @@ var NSO_MICROSCOPE = (function () {
     if (!box.isEmpty()) frameBox(box, new THREE.Vector3().fromArray(FRAME_DIR));
   }
 
-  /** What is isolated on plate 1 and on plate 2, copied onto plate 3 (a compare there before is replaced; plates 1 and 2 are not touched). */
-  function compareStart() {
-    var why = compareReason();
-    if (why) { say('Compare: ' + why + '.', true); return null; }
-    var home = plateName, specs = {};
-    ['lens', 'take'].forEach(function (n) { showPlate(n, { quiet: true }); specs[n] = pullSpec(null); });
-    var none = !specs.lens ? 'lens' : !specs.take ? 'take' : null;
-    if (none) {
-      showPlate(home, { quiet: true });
-      say('Compare: isolate something on ' + plateTitle(none).toLowerCase() + ' first - a piece, a line type or a layer band.', true);
-      syncCompare();
-      return null;
-    }
+  /** Two specs set down on plate 3 side by side, plate 1's in orange at the left and plate 2's in blue at the right (a compare there before is replaced). */
+  function compareFromSpecs(specA, specB, home, what) {
     compare = null;
     showPlate('cmp');
     if (doc) { emptyPlate('cmp'); placePlates(); }
-    var wA = soupExtent(specs.lens.positions), wB = soupExtent(specs.take.positions);
+    var wA = soupExtent(specA.positions), wB = soupExtent(specB.positions);
     var wa = wA.x1 - wA.x0, wb = wB.x1 - wB.x0;
-    var a = comparePlace(specs.lens, -(wa / 2 + COMPARE_GAP_MM / 2), TINT_A, 'Plate 1: ');
-    var b = a && comparePlace(specs.take, wb / 2 + COMPARE_GAP_MM / 2, TINT_B, 'Plate 2: ');
+    var a = comparePlace(specA, -(wa / 2 + COMPARE_GAP_MM / 2), TINT_A, 'Plate 1: ');
+    var b = a && comparePlace(specB, wb / 2 + COMPARE_GAP_MM / 2, TINT_B, 'Plate 2: ');
     if (!a || !b) {
       emptyPlate('cmp');
       showPlate(home);
-      say('Compare: the pieces could not be set down on plate 3.', true);
+      say('Compare: the ' + what + ' could not be set down on plate 3.', true);
       return null;
     }
     compare = { a: a, b: b, step: 0.1, dx: 0, dy: 0, dz: 0, overlaid: false, tinted: true };
@@ -5981,8 +5977,94 @@ var NSO_MICROSCOPE = (function () {
     redrawDoc();
     compareFrame();
     syncCompare();
-    say('Side by side on plate 3: ' + plateTitle('lens') + '\'s piece in orange, ' + plateTitle('take') + '\'s in blue. Overlay lays them over each other.');
+    say('Side by side on plate 3: ' + plateTitle('lens') + '\'s ' + what + ' in orange, ' + plateTitle('take') + '\'s in blue. Overlay lays them over each other.');
     return { a: a, b: b };
+  }
+
+  /** What is selected on plate 1 and on plate 2, copied onto plate 3 (a compare there before is replaced; plates 1 and 2 are not touched). */
+  function compareStart() {
+    var why = compareReason();
+    if (why) { say('Compare: ' + why + '.', true); return null; }
+    comparePickCancel(true);
+    var home = plateName, specs = {};
+    ['lens', 'take'].forEach(function (n) { showPlate(n, { quiet: true }); specs[n] = pullSpec(null); });
+    var none = !specs.lens ? 'lens' : !specs.take ? 'take' : null;
+    if (none) {
+      showPlate(home, { quiet: true });
+      say('Compare: isolate something on ' + plateTitle(none).toLowerCase() + ' first - a piece, a line type or a layer band - or use Plates or Pieces.', true);
+      syncCompare();
+      return null;
+    }
+    return compareFromSpecs(specs.lens, specs.take, home, 'piece');
+  }
+
+  /** The whole of a plate as one spec: every segment of a sliced file, every piece of a plate of pieces (no region box). */
+  function wholePlateSpec(n) {
+    showPlate(n, { quiet: true });
+    if (!doc) return null;
+    var items = doc.kind === 'toolpath' ? doc.segments : doc.objects;
+    return items && items.length ? pullSpec({ items: items, source: 'pick' }) : null;
+  }
+
+  /** COMPARE, PLATES: both whole plates on plate 3, side by side. */
+  function compareStartPlates() {
+    var why = compareReason();
+    if (why) { say('Compare: ' + why + '.', true); return null; }
+    comparePickCancel(true);
+    var home = plateName, lens = wholePlateSpec('lens'), take = lens && wholePlateSpec('take');
+    if (!lens || !take) {
+      showPlate(home, { quiet: true });
+      say('Compare: ' + plateTitle(!lens ? 'lens' : 'take').toLowerCase() + ' has nothing to compare.', true);
+      syncCompare();
+      return null;
+    }
+    return compareFromSpecs(lens, take, home, 'plate');
+  }
+
+  /**
+   * COMPARE, PIECES: click a piece on plate 1, then a piece on plate 2; the second click sets both on plate 3 side by side.
+   * cmpPick is the step the clicks are at: { step: 'lens' | 'take', lens: the first piece's spec, home: the plate it began on }.
+   */
+  var cmpPick = null;
+  function compareStartPieces() {
+    var why = compareReason();
+    if (why) { say('Compare: ' + why + '.', true); return null; }
+    if (cmpPick) { comparePickCancel(); return null; }                 // the button again: leave the pick
+    cmpPick = { step: 'lens', lens: null, home: plateName, busy: false };
+    showPlate('lens', { quiet: true });
+    setSelection([], 'pick');
+    syncCompare();
+    say('Compare pieces: click a piece on plate 1.');
+    return true;
+  }
+
+  function comparePickCancel(quiet) {
+    if (!cmpPick) return;
+    cmpPick = null;
+    syncCompare();
+    if (!quiet) say('Compare pieces: cancelled.');
+  }
+
+  /** A click picked something: at the first step it is plate 1's piece (then plate 2 is shown); at the second it is plate 2's, and both are set down. */
+  function comparePicked() {
+    var cp = cmpPick;
+    if (!cp || cp.busy || !doc || selectionSource !== 'pick' || !currentSelection.length) return;
+    if (plateName !== (cp.step === 'lens' ? 'lens' : 'take')) return;
+    cp.busy = true;
+    try {
+      var spec = pullSpec(null);
+      if (!spec) { say('Compare pieces: that has nothing to compare - click a piece.', true); return; }
+      if (cp.step === 'lens') {
+        cp.lens = spec; cp.step = 'take';
+        showPlate('take', { quiet: true });
+        setSelection([], 'pick');
+        syncCompare();
+        say('Compare pieces: now click a piece on plate 2.');
+        return;
+      }
+      cmpPick = null;
+      compareFromSpecs(cp.lens, spec, cp.home, 'piece');
+    } finally { cp.busy = false; }
   }
 
   function compareOverlay() {
@@ -6146,7 +6228,9 @@ var NSO_MICROSCOPE = (function () {
 
   /** Plate 3 emptied: the compare is gone and plate 3 with it; plate 1 is active. */
   function compareClear() {
-    if (!compareLive()) return null;
+    var picking = !!cmpPick;
+    comparePickCancel(true);
+    if (!compareLive()) { if (picking) { syncCompare(); say('Compare pieces: cancelled.'); } return null; }
     compare = null;
     if (plateName === 'cmp') { emptyPlate('cmp'); showPlate('lens'); }
     else emptyPlate('cmp');
@@ -6159,6 +6243,7 @@ var NSO_MICROSCOPE = (function () {
   /** Both plates empty, plate 1 active. */
   function reset() {
     compare = null;
+    cmpPick = null;
     cancelPull();
     if (view && plateName !== 'lens') showPlate('lens', { quiet: true });
     emptyPlate('cmp');
@@ -6412,6 +6497,8 @@ var NSO_MICROSCOPE = (function () {
       if (t) t.setAttribute('aria-expanded', b.hidden ? 'false' : 'true');
     });
     bind('ms-compare-start', 'click', function () { compareStart(); });
+    bind('ms-compare-plates', 'click', function () { compareStartPlates(); });
+    bind('ms-compare-pieces', 'click', function () { compareStartPieces(); });
     bind('ms-compare-diff', 'click', function () { compareDiff(); });
     bind('ms-compare-diff-copy', 'click', function () { compareCopy(); });
     bind('ms-compare-overlay', 'click', function () { compareOverlay(); });
@@ -6535,6 +6622,10 @@ var NSO_MICROSCOPE = (function () {
     cardSide: function () { return cardSide(); },
     /** COMPARE (docs/GSCOPE.md item 13): what is isolated on each plate, side by side on plate 2, overlaid, nudged, and plate 2 restored. */
     compareStart: compareStart,
+    compareStartPlates: compareStartPlates,
+    compareStartPieces: compareStartPieces,
+    comparePickCancel: comparePickCancel,
+    comparePicking: function () { return cmpPick ? cmpPick.step : null; },
     compareOverlay: compareOverlay,
     compareNudge: compareNudge,
     compareFrame: compareFrame,
@@ -6674,6 +6765,20 @@ var NSO_MICROSCOPE = (function () {
       var want = new Set(names || []);
       removeAllBalls();
       setSelection(doc.objects.filter(function (o) { return want.has(o.name); }), source || 'pick');
+      return currentSelection;
+    },
+    /** Click a piece the way the 3D view does: its moves (toolpath) or the object (mesh) selected by a 'pick'. n: which piece, in file order. */
+    pickPiece: function (n) {
+      if (!doc) return [];
+      removeAllBalls();
+      if (doc.kind === 'toolpath') {
+        var ids = [];
+        doc.segments.forEach(function (sg) { if (ids.indexOf(sg.obj) < 0) ids.push(sg.obj); });
+        var id = ids[Math.min(n || 0, ids.length - 1)];
+        setSelection(doc.segments.filter(function (sg) { return sg.obj === id; }), 'pick');
+      } else {
+        setSelection([doc.objects[Math.min(n || 0, doc.objects.length - 1)]], 'pick');
+      }
       return currentSelection;
     },
     getView: function () { return view; },
