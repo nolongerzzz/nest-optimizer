@@ -50,7 +50,7 @@ The switch at the top of the card, **Stamp | Remove**. In Remove the pointer is 
   - a word in one click. Off: the one letter under the pointer.
 - A press that is not on the piece orbits as ever; a click on plain face says so and locks nothing.
 
-Under it is **Resurface** (`docs/RESURFACE.md`, `nso_resurface.js`): the box round the pointer (32 mm across)
+Under it is **Resurface** (`docs/RESURFACE.md`, `nso_resurface.js`): the box round the pointer (44 mm across)
 is read once with a grid of rays and every piece of work in it numbered, so hover and click are lookups and
 the same letter is the same piece wherever on it the pointer is. It needs no record of the stamp, so it works
 on text stamped in an earlier session, after other edits, on a scan-derived mesh full of splinters (the DUKE

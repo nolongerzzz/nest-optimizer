@@ -241,7 +241,7 @@ function NSO_textPreview() {
    the pointer over one highlights it (amber), a click locks it (green), more clicks add more, a click on a
    locked one lets it go. With Whole word, a click or a hover takes the pieces within Reach of it too. REMOVE fills
    what is green. */
-var TEXT_BOX_MM = 16;                   // half the box one scan reads
+var TEXT_BOX_MM = 22;                   // half the box one scan reads (a word up to ~40 mm from a click at its end)
 function NSO_textRm() {
   var B = NSO_textUI();
   if (!B.rm) B.rm = { soup: null, modelId: null, scan: null, sel: [], hover: [], plan: null, tris: null, timer: 0, pend: null };
