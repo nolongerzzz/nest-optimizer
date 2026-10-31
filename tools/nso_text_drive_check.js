@@ -473,7 +473,7 @@ withApp(async (page, logs) => {
     await click(page, await screenOf(page, floorRaw));
     await page.waitForFunction(() => nsoTextState().sel > 0 || nsoTextState().bad, null, { timeout: 20000 }).catch(() => {});
     st = await S(page);
-    check('Remove on the cylinder: one click locks the word on a curved face (letters that touch are one piece), REMOVE on', st.ok && st.sel >= 2 && st.count === st.sel && st.ghosts >= 1 && /\b3[0-9]\.\d mm²/.test(st.readout) &&
+    check('Remove on the cylinder: one click locks the whole word on a curved face (all three letters, about 58 mm²), REMOVE on', st.ok && st.sel >= 2 && st.count === st.sel && st.ghosts >= 1 && /\b(5[0-9]|6[0-5])\.\d mm²/.test(st.readout) &&
       !(await page.evaluate(() => document.getElementById('btn-text-remove').disabled)), st.readout);
     const dC = await undoDepth(page);
     await page.click('#btn-text-remove');
