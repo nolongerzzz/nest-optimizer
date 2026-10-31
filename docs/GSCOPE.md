@@ -623,7 +623,9 @@ plate 2, and both land on plate 3. A segment is in when its midpoint is within t
 centroid is. A ring that holds nothing is refused and you draw it again; Esc or the button again leaves the pick. **Selected** is the older way: isolate something on each plate - a
 piece with its supports, one line type, a layer band: whatever a drag would carry - then press it. On plate 3,
 plate 1's is at the left in orange and plate 2's at the right in blue, each at the height it came from, the
-camera close on them. Plates 1 and 2 are not touched. **Overlay** moves the blue
+camera close on them. Plates 1 and 2 are not touched: with Pieces or Circle each plate is made whole again (un-isolated,
+nothing selected) as soon as its pick is taken, so **Clear compare** empties plate 3 and returns to plates 1 and 2 side by
+side, whole, with no selection. **Overlay** moves the blue
 one so the two parts' outlines coincide (XY only; the heights stay; with no part walls - supports alone - it
 lines up by everything drawn) and draws both see-through. The arrows nudge the blue piece by the step chosen
 (0.05 - 5 mm), Z too; the row reads the total. **Colours** puts the line types' own colours back. The

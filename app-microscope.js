@@ -6164,6 +6164,13 @@ var NSO_MICROSCOPE = (function () {
     });
   }
 
+  /** A pick is taken (its spec is in hand): the plate is whole again - un-isolated, nothing selected - as before the compare. */
+  function pickRelease() {
+    if (isolated) unIsolate();
+    removeAllBalls();
+    setSelection([], 'pick');
+  }
+
   function comparePickCancel(quiet) {
     circleDrop();
     if (!cmpPick) return;
@@ -6181,6 +6188,7 @@ var NSO_MICROSCOPE = (function () {
     try {
       var spec = pullSpec(null);
       if (!spec) { say('Compare: that has nothing to compare - pick a piece.', true); return; }
+      pickRelease();                                              // the plate goes back to whole, nothing selected
       if (cp.step === 'lens') {
         cp.lens = spec; cp.step = 'take';
         showPlate('take', { quiet: true });
@@ -6360,9 +6368,11 @@ var NSO_MICROSCOPE = (function () {
     comparePickCancel(true);
     if (!compareLive()) { if (picking) { syncCompare(); say('Compare pieces: cancelled.'); } return null; }
     compare = null;
-    if (plateName === 'cmp') { emptyPlate('cmp'); showPlate('lens'); }
+    var onCmp = plateName === 'cmp';
+    if (onCmp) { emptyPlate('cmp'); showPlate('lens'); }
     else emptyPlate('cmp');
     placePlates();
+    if (onCmp && view) { frame(); followClip(); }                // plates 1 and 2 side by side again, as before the compare
     syncCompare();
     say('Compare cleared - plates 1 and 2 are as they were.');
     return true;
@@ -6909,6 +6919,7 @@ var NSO_MICROSCOPE = (function () {
       } else {
         setSelection([doc.objects[Math.min(n || 0, doc.objects.length - 1)]], 'pick');
       }
+      isolate();                                  // a click on a piece isolates it, as clickTarget does
       return currentSelection;
     },
     getView: function () { return view; },

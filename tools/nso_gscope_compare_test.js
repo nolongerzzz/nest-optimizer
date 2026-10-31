@@ -232,7 +232,11 @@ withApp(async (page, logs) => {
   console.log('\n=== 10. Pieces: click a piece on each plate ===');
   {
     await page.evaluate(() => NSO_MICROSCOPE.compareClear());
-    await page.evaluate(() => NSO_MICROSCOPE.showPlate('take'));
+    // two whole plates, nothing isolated or selected (earlier sections left some isolated)
+    await page.evaluate(() => { const M = NSO_MICROSCOPE; ['take', 'lens'].forEach(n => { M.showPlate(n); M.clearBoxes(); M.back(); }); M.showPlate('take'); });
+    await frames(page);
+    const snap10 = () => page.evaluate(() => { const M = NSO_MICROSCOPE, a = M.plateState('lens'), b = M.plateState('take'); delete a.camera; delete b.camera; return JSON.stringify([a, b]); });
+    const before10 = await snap10();
     await page.click('#ms-compare-pieces');
     await frames(page);
     let r = await page.evaluate(() => ({ pick: NSO_MICROSCOPE.comparePicking(), plate: NSO_MICROSCOPE.plate(), st: NSO_MICROSCOPE.compareState() }));
@@ -246,9 +250,15 @@ withApp(async (page, logs) => {
     r = await page.evaluate(() => { const M = NSO_MICROSCOPE, d = M.plateDoc('cmp');
       return { pick: M.comparePicking(), plate: M.plate(), n: d && d.objects.length, names: d && d.objects.map(o => o.name), st: M.compareState(), box: d && d.objects.map(o => [o.bounds.minX, o.bounds.maxX]) }; });
     check('the click on plate 2 sets both pieces on plate 3, side by side', r.pick === null && r.plate === 'cmp' && r.n === 2 && /^Plate 1: /.test(r.names[0]) && /^Plate 2: /.test(r.names[1]) && r.box[0][1] < r.box[1][0] && r.st && !r.st.overlaid, J(r));
+    const after10 = await snap10();
+    check('...with no piece left selected or isolated on plates 1 and 2', after10.replace(/"selectionSource":"[a-z]+"/g, '') === before10.replace(/"selectionSource":"[a-z]+"/g, '') && await page.evaluate(() => { const M = NSO_MICROSCOPE; return ['lens', 'take'].every(n => { const s = M.plateState(n); return !s.isolated && !(s.selection && s.selection.length); }); }), after10 === before10 ? '' : J({ before: before10, after: after10 }));
     await page.click('#ms-compare-overlay');
     await frames(page);
     check('...and Overlay works from there', await page.evaluate(() => NSO_MICROSCOPE.compareState().overlaid));
+    await page.click('#ms-compare-restore');
+    await frames(page);
+    const back10 = await page.evaluate(() => { const M = NSO_MICROSCOPE, v = M.getView(), q = new THREE.Vector3(0, 0, 0).project(v.camera); return { plate: M.plate(), cmp: M.plateDoc('cmp'), sel: M.selection().length, onScreen: Math.abs(q.x) < 1 && Math.abs(q.y) < 1 }; });
+    check('Clear compare: back to plates 1 and 2 as they were, plate 3 gone, nothing selected, in view', back10.plate === 'lens' && back10.cmp === null && back10.sel === 0 && back10.onScreen && (await snap10()).replace(/"selectionSource":"[a-z]+"/g, '') === before10.replace(/"selectionSource":"[a-z]+"/g, ''), J(back10));
     await page.evaluate(() => NSO_MICROSCOPE.compareClear());
     await page.evaluate(() => NSO_MICROSCOPE.showPlate('lens'));
     await page.click('#ms-compare-pieces');
@@ -311,6 +321,11 @@ withApp(async (page, logs) => {
     await page.click('#ms-compare-overlay');
     await frames(page);
     check('...and Overlay works from there', await page.evaluate(() => NSO_MICROSCOPE.compareState().overlaid));
+    await page.click('#ms-compare-restore');
+    await frames(page);
+    const back11 = await page.evaluate(() => { const M = NSO_MICROSCOPE, v = M.getView(), q = new THREE.Vector3(0, 0, 0).project(v.camera);
+      return { plate: M.plate(), cmp: M.plateDoc('cmp'), sel: ['lens', 'take'].map(n => { const s = M.plateState(n); return [s.selection.length, s.isolated]; }), onScreen: Math.abs(q.x) < 1 && Math.abs(q.y) < 1 }; });
+    check('Clear compare after a circle: back on plates 1 and 2, plate 3 gone, nothing selected or isolated, in view', back11.plate === 'lens' && back11.cmp === null && J(back11.sel) === J([[0, false], [0, false]]) && back11.onScreen, J(back11));
     // a small ring takes only what is inside it
     await page.evaluate(() => NSO_MICROSCOPE.compareClear());
     await page.click('#ms-compare-circle');
