@@ -46,3 +46,8 @@ on both edges (Negative Sphere2 radial extent 4.6 - 6.8 against ours 5.0 - 6.4).
 0.77 -> 0.80; Circular 0.66 -> 0.65, Sphere 0.78 -> 0.76 (the domes' plates are not bigger in Bambu's). 0.04 mm in gave Base 0.93, Negative Spheres 0.78 / 0.74, but Sphere 0.61. Growing
 the region itself (0.2 / 0.4 mm) was worse: Oblique 0.24, Negative Sphere 0.57.
 
+Update (2026-10-31, later): the region plate's hatch lines stand 0.46 mm apart (a line and 0.04, `REGION_FILL_GAP_MM`): measured on all six pieces, Bambu's interface lines are 0.46 mm
+apart on every layer (0.275 and 0.2), ours were 0.36 (the solid-infill spacing). Line length against Bambu's: Base 1.12 -> 0.94, Circular 1.14 -> 1.02, Negative Sphere 0.88 -> 0.79,
+Negative Sphere2 0.79 -> 0.75, Oblique 0.98 -> 0.92, Sphere 1.51 -> 1.35. Tried and left out: growing the region 0.2 mm (new cells not taken within the clearance of the part's walls):
+Circular foot 0.65 -> 0.69, Negative Sphere 0.76 -> 0.82, Sphere 0.76 -> 0.61 (its plate is already past Bambu's), moves per mm up (Base 1.1 -> 1.26, Oblique 1.3 -> 1.57).
+

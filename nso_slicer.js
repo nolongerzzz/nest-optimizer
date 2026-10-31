@@ -2235,6 +2235,7 @@
       function dTrEx(j) { return DOEX + (NI + NT - 1) * SP[j].h; }
       var SPLIT_MIN_MM = 0.6;
       var PINCH_INSET_MM = 0.1;      /* the loop's inset where the region is too narrow for a line's half-width on each side */
+      var REGION_FILL_GAP_MM = 0.04;
       var LOOP_IN_MM = 0.12;   /* the region loops lie this far in from the slab's edge (not half a line: Bambu's plate stands 0.4 mm past ours on the flat-floored pieces) */
       var REGIONAL_PLATE = true;     /* a support's own grid lays its plate by regions (below) */
       P.layers.forEach(function (L, j) {
@@ -2288,6 +2289,7 @@
             /* ON A SUPPORT'S OWN GRID the plate is laid by its regions, as Bambu lays it: the interface region and the transition region each have their loop, and the
                interface its zig-zag; a narrow transition strip is its loop alone. (Typing one fill by position left a strip a line or none by the phase of the lines.) */
             var regional = byDepth && REGIONAL_PLATE;
+            if (regional) sI = wI + REGION_FILL_GAP_MM;           /* Bambu's interface lines stand 0.46 mm apart (a line and 0.04), on every layer height */
             var fillCs = inSheet;
             if (regional) {
               var ZI = stI.length ? g.offset(g.unionAll(stI), w / 2) : g.empty(), ZT = stT.length ? g.offset(g.unionAll(stT), w / 2) : g.empty();
