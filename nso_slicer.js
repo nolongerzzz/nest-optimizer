@@ -2235,6 +2235,7 @@
       function dTrEx(j) { return DOEX + (NI + NT - 1) * SP[j].h; }
       var SPLIT_MIN_MM = 0.6;
       var PINCH_INSET_MM = 0.1;      /* the loop's inset where the region is too narrow for a line's half-width on each side */
+      var LOOP_IN_MM = 0.12;   /* the region loops lie this far in from the slab's edge (not half a line: Bambu's plate stands 0.4 mm past ours on the flat-floored pieces) */
       var REGIONAL_PLATE = true;     /* a support's own grid lays its plate by regions (below) */
       P.layers.forEach(function (L, j) {
         if (!L.paths.length) return;
@@ -2301,7 +2302,7 @@
               var slabT = hTc && !g.isEmpty(Zall) ? g.diff(g.inter(g.inter(P.S[j], Zall), hTc), slabI) : g.empty();
               [[slabI, 'Support interface'], [slabT, 'Support transition']].forEach(function (rg) {
                 if (g.isEmpty(rg[0])) return;
-                var inner = g.offset(rg[0], -wI / 2);
+                var inner = g.offset(rg[0], -LOOP_IN_MM);
                 /* a strip of the region narrower than a line has no loop inside it (the inset removes it: the Negative Spheres' ring pinches to 0.35 mm and fell
                    into crescents); there the loop runs nearer the edge - one line down the strip, as Bambu's - and the ring stays whole */
                 {

@@ -40,3 +40,9 @@ Update (2026-10-30, evening): a tip whose contact stands within 0.5 mm of a foot
 its apex, so its column was carved out of the plate and a 2 mm strip of the flat band went bare (support:reach 0 - 20 deg 73 % of Bambu's 100 %; support:coverage, support:paint
 shared the cause). Oblique now vol IoU 0.74, foot 0.77, line 0.56, z0 7.69 (Bambu 7.69). Plate loops keep the ring whole where a region pinches under a line's width (Negative
 Sphere2 foot 0.62 -> 0.67; Negative Sphere 0.73 -> 0.71, Circular 0.67 -> 0.66, not yet explained).
+
+Update (2026-10-31): the region loops lie 0.12 mm in from the slab's edge (`LOOP_IN_MM`, was half a line, 0.225): on the flat-floored pieces Bambu's plate stands about 0.4 mm past ours
+on both edges (Negative Sphere2 radial extent 4.6 - 6.8 against ours 5.0 - 6.4). Foot IoU Base 0.89 -> 0.91, Negative Sphere 0.71 -> 0.76, Negative Sphere2 0.67 -> 0.70, Oblique
+0.77 -> 0.80; Circular 0.66 -> 0.65, Sphere 0.78 -> 0.76 (the domes' plates are not bigger in Bambu's). 0.04 mm in gave Base 0.93, Negative Spheres 0.78 / 0.74, but Sphere 0.61. Growing
+the region itself (0.2 / 0.4 mm) was worse: Oblique 0.24, Negative Sphere 0.57.
+
