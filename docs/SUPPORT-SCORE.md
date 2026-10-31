@@ -35,3 +35,8 @@ Baseline (the build of 2026-10-30, Dense, 30 deg, own grid on): the plate starts
 7.69); foot IoU 0.89 Base, 0.68 / 0.67 the Negative Spheres, 0.62 Circular, 0.68 Sphere, 0.65 Oblique (its planar slope is laid by the region plate, `regionSlopes`, as
 Bambu's one ribbon, not the stair's rungs). The Circular's plate stops a layer short of Bambu's ring round the cone flank (the card's footprint ends there); the tree
 matches least (IoU 0.10 - 0.18).
+
+Update (2026-10-30, evening): a tip whose contact stands within 0.5 mm of a footprint's edge is that footprint's (`REGION_TIP_NEAR_MM`). The Oblique's strip tip lay 0.25 mm beyond
+its apex, so its column was carved out of the plate and a 2 mm strip of the flat band went bare (support:reach 0 - 20 deg 73 % of Bambu's 100 %; support:coverage, support:paint
+shared the cause). Oblique now vol IoU 0.74, foot 0.77, line 0.56, z0 7.69 (Bambu 7.69). Plate loops keep the ring whole where a region pinches under a line's width (Negative
+Sphere2 foot 0.62 -> 0.67; Negative Sphere 0.73 -> 0.71, Circular 0.67 -> 0.66, not yet explained).

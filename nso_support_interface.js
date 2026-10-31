@@ -866,6 +866,7 @@
   var FILL_REACH_MM = 1.2;     /* ...wherever the part is this near over the stack's top (the legacy field, a cap and 1.25 mm, needs no such reach) */
   var CONC_CUSHION_MM = 0.08;      /* the opened level set keeps its walls this much more than a line width apart (what the cleaning of a loop moves them by: the extrusion refuses an overlap) */
   var CONC_SIMPLIFY_MM = 0.015;    /* a loop's points within this of the line between their neighbours go */
+  var REGION_TIP_NEAR_MM = 0.5;   /* a tip's contact this near a footprint's edge is the footprint's */
   var REGION_MARGIN_MM = 0.02;    /* the region plate's cells lie this far in from the footprint's edge (the face's own edge: the plate may run to it; it was 0.1, which left a band 0.15 mm wide bare all round a 1 - 2 mm rim and the tails of the Negative Spheres' patches); its first loop is the edge of that, a wall's centre ~0.1 mm in */
   var REGION_HOLE_FILL_MM2 = 3;   /* a hole in a footprint under this area is laid over, not round (see shellPass) */
   var REGION_FLAT_MM = 0.3;       /* a footprint whose height (2nd to 98th percentile) varies by no more than this is one flat face: the plate is one level at its lowest height */
@@ -1668,7 +1669,14 @@
           }
           return inn;
         }
-        var mine = cand.filter(function (t) { return t.mode === 'sheet' && !t.shell && t.contact[2] >= f.zl - 0.5 && t.contact[2] <= f.zh + 1.5 && inFoot(t.contact[0], t.contact[1]); });
+        /* a tip whose contact stands at the footprint's edge (the Oblique strip's, 0.25 mm beyond its apex) is the plate's
+           as well: it was left a column the plate carved its clearance from, and a strip 2 mm wide went bare */
+        function nearFoot(x, y) {
+          if (inFoot(x, y)) return true;
+          for (var da = 0; da < 8; da++) if (inFoot(x + REGION_TIP_NEAR_MM * Math.cos(da * Math.PI / 4), y + REGION_TIP_NEAR_MM * Math.sin(da * Math.PI / 4))) return true;
+          return false;
+        }
+        var mine = cand.filter(function (t) { return t.mode === 'sheet' && !t.shell && t.contact[2] >= f.zl - 0.5 && t.contact[2] <= f.zh + 1.5 && nearFoot(t.contact[0], t.contact[1]); });
         if (!mine.length)return;
         var ox = f.box[0] - 1, oy = f.box[1] - 1, nx = Math.ceil((f.box[2] - f.box[0] + 2) / CELLS) + 1, ny = Math.ceil((f.box[3] - f.box[1] + 2) / CELLS) + 1, N = nx * ny;
         /* the surface's height over the footprint, read on a 0.2 mm lattice and kept by the nearest */
