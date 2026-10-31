@@ -268,6 +268,8 @@ function disc3(cx, cy, Rr, z0, z1, m) {
     gate('8b a point on each letter finds that letter, and no two are the same', ids.every((v, i) => v === i), ids.join());
     gate('8c grouping: reach 5 takes the three letters, reach 0.1 only the one', sc.group(0, 5).length === 3 && sc.group(0, 0.1).length === 1, sc.group(0, 5).join() + ' / ' + sc.group(0, 0.1).join());
     const hl = R.highlight(A.soup, sc);
+    const above = [anchors[0][0], anchors[0][1], anchors[0][2] + 10];
+    gate('8c2 a point 10 mm above a letter (another part of the piece in the same line of sight) is not on it; one on it is', R.pieceAt(sc, above) === -1 && R.pieceAt(sc, anchors[0]) === 0, R.pieceAt(sc, above) + ' / ' + R.pieceAt(sc, anchors[0]));
     gate('8d every piece has its own triangles to light (floor and walls: at least 20 each, none shared)', hl.length === 3 && hl.every(a => a.length >= 20 * 9) && hl.reduce((n, a) => n + a.length, 0) < A.soup.length, hl.map(a => a.length / 9).join());
     const vA = volume(A.soup), per = (v0 - vA) / 3;
     const subsets = [[0], [1], [2], [0, 1], [1, 2], [0, 2], [0, 1, 2]];

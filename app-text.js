@@ -264,36 +264,36 @@ function NSO_textRemoveOpts() {
   return { word: !w || !!w.checked, reach: r >= 0 ? r : 3 };
 }
 // The scan that covers raw point `pt` (a hit: { point, normal, view }), reading the box again when it does not.
-function NSO_textRmEnsure(m, hit) {
+function NSO_textRmEnsure(m, hit, click) {
   var R = NSO_textRm(), sc = R.scan;
   if (sc && R.soup === m.rawTris && R.modelId === m.id) {
     var fr = sc.frame, w = [hit.point[0] - fr.o[0], hit.point[1] - fr.o[1], hit.point[2] - fr.o[2]];
-    var x = w[0] * fr.e1[0] + w[1] * fr.e1[1] + w[2] * fr.e1[2], y = w[0] * fr.e2[0] + w[1] * fr.e2[1] + w[2] * fr.e2[2], z = w[0] * fr.n[0] + w[1] * fr.n[1] + w[2] * fr.n[2];
-    if (Math.abs(x) < 0.75 * sc.box && Math.abs(y) < 0.75 * sc.box && Math.abs(z) < 6) return sc;
+    var x = w[0] * fr.e1[0] + w[1] * fr.e1[1] + w[2] * fr.e1[2], y = w[0] * fr.e2[0] + w[1] * fr.e2[1] + w[2] * fr.e2[2];
+    if (Math.abs(x) < 0.75 * sc.box && Math.abs(y) < 0.75 * sc.box) return sc;
+    // Pieces locked belong to this reading. Moving the pointer off it (to the REMOVE button, across the
+    // model) must not read the box again from somewhere else, which renumbers the pieces and loses the lock.
+    if (R.sel.length) {
+      if (click) NSO_textReadout('Text: that is outside the area read - REMOVE what is locked, or press Escape and start again there.', true);
+      return click ? null : null;
+    }
   }
   var fb = R.fail;                                          // a reading that found nothing is not repeated for every move of the pointer
   if (fb && R.soup === m.rawTris && R.modelId === m.id && Math.hypot(hit.point[0] - fb.p[0], hit.point[1] - fb.p[1], hit.point[2] - fb.p[2]) < 0.5 * TEXT_BOX_MM) {
     B_textRmSay(fb.say, true);
     return null;
   }
-  // a new reading: the selection is carried across by where its pieces are
-  var keep = [];
-  if (sc && R.soup === m.rawTris) R.sel.forEach(function (id) { var a = NSO_Resurface.pieceAnchor(sc, id); if (a) keep.push(a); });
   var axis = NSO_Resurface.axisAt(m.rawTris, hit.point, 2.5, hit.view) || hit.normal;
   var ns;
   try { ns = NSO_Resurface.scan(m.rawTris, { point: hit.point, normal: axis }, { half: TEXT_BOX_MM }); }
   catch (err) { ns = { ok: false, reason: (err && err.message) || String(err) }; }
-  R.soup = m.rawTris; R.modelId = m.id; R.tris = null; R.hover = []; R.fail = null;
+  R.soup = m.rawTris; R.modelId = m.id; R.tris = null; R.hover = []; R.fail = null; R.sel = []; R.plan = null;
   if (!ns.ok) {
     var say = /no pit/.test(ns.reason || '') ? 'Text: no engraved work within ' + TEXT_BOX_MM + ' mm of that point - move onto a letter.' : 'Text: ' + ns.reason;
     R.fail = { p: hit.point, say: say };
-    R.scan = null; R.sel = []; R.plan = null; B_textRmSay(say, true);
+    R.scan = null; B_textRmSay(say, true);
     return null;
   }
   R.scan = ns;
-  R.sel = [];
-  keep.forEach(function (a) { var id = NSO_Resurface.pieceAt(ns, a); if (id >= 0 && R.sel.indexOf(id) < 0) R.sel.push(id); });
-  NSO_textRmPlan();
   return ns;
 }
 function B_textRmSay(text, bad) { NSO_textReadout(text, bad); NSO_textSyncButtons(); }
@@ -400,7 +400,7 @@ function NSO_textRmClick(clientX, clientY) {
   var hit = NSO_textRmHit(clientX, clientY);
   if (!hit) return false;
   B.modelId = m.id;
-  var sc = NSO_textRmEnsure(m, hit);
+  var sc = NSO_textRmEnsure(m, hit, true);
   if (!sc) return true;
   var id = NSO_Resurface.pieceAt(sc, hit.point, 5);
   if (id < 0) { NSO_textReadout('Text: no engraved work under that point - move onto a letter.', true); return true; }

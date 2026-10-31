@@ -370,6 +370,14 @@ withApp(async (page, logs) => {
   await page.waitForFunction(() => nsoTextState().sel === 3, null, { timeout: 15000 }).catch(() => {});
   st = await S(page);
   check('Whole word back on: one click locks all three again', st.sel === 3, JSON.stringify({ sel: st.sel }));
+  // the pointer wandering off to the REMOVE button across the piece must not move or lose the lock
+  for (const away of [[mid[0] + 24, mid[1] + 14, mid[2]], [mid[0] - 25, mid[1] - 12, mid[2]], [mid[0], mid[1] + 17, mid[2]]]) {
+    const ap = await screenOf(page, away);
+    await page.mouse.move(ap.x, ap.y, { steps: 4 });
+    await page.waitForTimeout(250);
+  }
+  st = await S(page);
+  check('the pointer wandering across the piece after the lock leaves the three pieces locked and the plan whole', st.sel === 3 && st.count === 3 && st.ok && !(await page.evaluate(() => document.getElementById('btn-text-remove').disabled)), JSON.stringify({ sel: st.sel, count: st.count, ok: st.ok }));
   const dragNo = await page.evaluate(() => NSO_textHitAt(0, 0));
   check('drag and nudge are the stamp’s: off here', dragNo === false);
   await page.click('#btn-text-remove');
