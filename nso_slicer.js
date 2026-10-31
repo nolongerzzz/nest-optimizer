@@ -2092,7 +2092,9 @@
           for (var n = 0; n < ks.length; n++) {
             var cov = 0;
             hosts.forEach(function (Q) { if (!g.isEmpty(Q.S[ks[n]])) cov += g.area(g.inter(pc, Q.S[ks[n]])); });
-            if (cov > 1e-6) return n > 0 || cov / A < C.stairCoverShare;
+            /* a ceiling that covers it whole is a flat ceiling's when it stands the gap over it (the host's first layer over a flat sheet); it is air's, and the
+               island a top, when it stands well further over (the Negative Sphere apex's ring, ceiling 0.4 mm over it) */
+            if (cov > 1e-6) return cov / A < C.stairCoverShare || planes[ks[n]].printZ - planes[ks[n]].h - SP[i].printZ > gap + stairH / 2 + 1e-6;
           }
           return false;
         });
