@@ -1385,7 +1385,70 @@
     return { ok: true, soup: out, dropped: drop.size, added: c.tris };
   }
 
+
+  /* Cap polygons that already exist in 3D: loops of exact boundary points (outer counter-clockwise seen
+     from along n, holes clockwise; one loop's points are an array of [x, y, z]), a frame { o, n, e1, e2 }
+     and at(x, y) -> the surface's height along n from o at that (e1, e2) place, or null. The polygon is
+     triangulated on its own corners (so the cap is welded to what it closes, corner for corner) and its
+     interior edges split where the surface stands more than opts.sag (0.01 mm) off their chord, the new
+     corners put on it. -> { tris: [[a, b, c] of 3D points] } or { reason }. Resurface (nso_resurface.js)
+     uses it to close the hole where it took the old skin out. */
+  function capLoops(loops, fr, at, opts) {
+    var o = opts || {}, sag = o.sag > 0 ? o.sag : 0.01, minEdge = o.minEdge > 0 ? o.minEdge : 0.4, i, j;
+    function to2(p) {
+      var w = [p[0] - fr.o[0], p[1] - fr.o[1], p[2] - fr.o[2]];
+      return [w[0] * fr.e1[0] + w[1] * fr.e1[1] + w[2] * fr.e1[2], w[0] * fr.e2[0] + w[1] * fr.e2[1] + w[2] * fr.e2[2]];
+    }
+    var rings = loops.map(function (l) { return { pts3: l, pts: l.map(to2) }; });
+    var outers = rings.filter(function (r) { return area2(r.pts) > 0; }), holes = rings.filter(function (r) { return area2(r.pts) < 0; });
+    if (!outers.length) return { reason: 'there is no outline to close' };
+    var polys = outers.map(function (r) { return { outer: r.pts, holes: [], p3: r.pts3.slice(), a2: area2(r.pts) }; });
+    holes.forEach(function (h) {
+      var best = null;
+      polys.forEach(function (P) { if (inside(P.outer, h.pts[0]) && (!best || P.a2 < best.a2)) best = P; });
+      if (!best) return;
+      best.holes.push(h.pts); best.p3 = best.p3.concat(h.pts3);
+    });
+    var P3 = [];
+    polys.forEach(function (P) { P3 = P3.concat(P.p3); });
+    var tri = triangulate({ polys: polys.map(function (P) { return { outer: P.outer, holes: P.holes }; }) }, true);
+    if (!tri.V) return { reason: 'the outline could not be closed (' + tri.reason + ')' };
+    var V = tri.V, T = tri.T;
+    if (V.length !== P3.length) return { reason: 'the outline could not be closed' };
+    var nRing = V.length, cell = 0.05, hash = new Map();
+    function hkey(x, y) { return Math.floor(x / cell) + ',' + Math.floor(y / cell); }
+    function hadd(k) { var key = hkey(V[k][0], V[k][1]), l = hash.get(key); if (l) l.push(k); else hash.set(key, [k]); }
+    function crowded(x, y) {
+      var cx = Math.floor(x / cell), cy = Math.floor(y / cell);
+      for (var dx = -1; dx <= 1; dx++) for (var dy = -1; dy <= 1; dy++) {
+        var l = hash.get((cx + dx) + ',' + (cy + dy));
+        if (l) for (var q = 0; q < l.length; q++) if (Math.hypot(V[l[q]][0] - x, V[l[q]][1] - y) < 0.03) return true;
+      }
+      return false;
+    }
+    for (i = 0; i < V.length; i++) hadd(i);
+    var rf = refineInterior(V, T, function (a, b, m) {
+      if (Math.hypot(V[a][0] - V[b][0], V[a][1] - V[b][1]) < minEdge || crowded(m[0], m[1])) return false;
+      var s = at(m[0], m[1]), sa = at(V[a][0], V[a][1]), sb = at(V[b][0], V[b][1]);
+      return s !== null && sa !== null && sb !== null && Math.abs(s - (sa + sb) / 2) > sag;
+    }, function (m, a, b, mid) {
+      var s = at(mid[0], mid[1]);
+      hadd(m);
+      if (s === null) {
+        var pa = P3[a] || null, pb = P3[b] || null;
+        s = ((pa ? (pa[0] - fr.o[0]) * fr.n[0] + (pa[1] - fr.o[1]) * fr.n[1] + (pa[2] - fr.o[2]) * fr.n[2] : 0) + (pb ? (pb[0] - fr.o[0]) * fr.n[0] + (pb[1] - fr.o[1]) * fr.n[1] + (pb[2] - fr.o[2]) * fr.n[2] : 0)) / 2;
+      }
+      P3[m] = [fr.o[0] + fr.e1[0] * mid[0] + fr.e2[0] * mid[1] + fr.n[0] * s, fr.o[1] + fr.e1[1] * mid[0] + fr.e2[1] * mid[1] + fr.n[1] * s,
+               fr.o[2] + fr.e1[2] * mid[0] + fr.e2[2] * mid[1] + fr.n[2] * s];
+    }, V);
+    return { tris: rf.map(function (t) { return [P3[t[0]], P3[t[1]], P3[t[2]]]; }), nRing: nRing };
+  }
+
   var API = {
+    capLoops: capLoops,
+    _across: across,
+    _loopsOf: loopsOf,
+    _frameFor: frameFor,
     pockets: pockets,
     caps: caps,
     fill: fill,

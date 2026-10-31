@@ -259,6 +259,12 @@ function NSO_textPreviewRemove(m) {
     var cp = NSO_Text.caps(pl);
     if (!cp.soup) pl = { ok: false, reason: 'found ' + pl.reason + ', but ' + cp.reason };
   }
+  if (!pl.ok && typeof NSO_Resurface !== 'undefined') {     // a rim that will not close (a scan, a repaired mesh): lay the whole skin again
+    var rs;
+    try { rs = NSO_Resurface.plan(m.rawTris, B.hit, { half: Math.max(6, Math.min(30, o.reach * 2 + 4)), reach: o.reach }); }
+    catch (err2) { rs = { ok: false, reason: (err2 && err2.message) || String(err2) }; }
+    if (rs && rs.ok) pl = { ok: true, resurface: rs, reason: rs.reason };
+  }
   B.plan = pl; B.key = key; B.soup = m.rawTris;
   NSO_textDrawFill(m);
   NSO_textReadout(pl.ok ? 'Fill ' + pl.reason + ' - REMOVE puts them back.' : 'Text: ' + pl.reason, !pl.ok);
@@ -268,7 +274,7 @@ function NSO_textPreviewRemove(m) {
 function NSO_textDrawFill(m) {
   NSO_textClearGhost();
   var B = NSO_textUI(), pl = B.plan;
-  if (typeof THREE === 'undefined' || !state.scene || !pl || !pl.ok) return;
+  if (typeof THREE === 'undefined' || !state.scene || !pl || !pl.ok || pl.resurface) return;
   var cp = NSO_Text.caps(pl);
   if (!cp.soup) return;
   var group = new THREE.Group();
@@ -602,7 +608,7 @@ function NSO_textRemoveGo() {
   if (!pl) return refuse('click the floor of an engraved letter first');
   if (!pl.ok) return refuse(pl.reason);
   var res;
-  try { res = NSO_Text.fill(m.rawTris, pl); }
+  try { res = pl.resurface ? NSO_Resurface.apply(m.rawTris, pl.resurface) : NSO_Text.fill(m.rawTris, pl); }
   catch (err) { console.error('[text]', err); return refuse((err && err.message) || String(err)); }
   if (!res.ok) return refuse(res.reason);
   var txt = 'Text removed - ' + pl.reason;

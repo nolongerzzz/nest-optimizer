@@ -82,16 +82,17 @@ the face, which is why it is surgery.) `NSO_Text.pockets` reads the recesses,
   walls and floors included, so letters it has grown into are not recesses any
   more - Undo it, then Remove.
 
-**Where it stops.** A rim read off a mesh that is full of splinters and
+**Where it stops, and what takes over.** A rim read off a mesh that is full of splinters and
 self-piercing shells (a hand model from a scan, after a boolean and a repair) can
 fold back on itself in the plane of the face: edges a few microns long run out
 along one line and straight back, or cross by less than 0.01 mm. A polygon like
-that has no clean triangulation, and Remove says so (`found 7 recesses, but the rim
-of that recess could not be capped`) and changes nothing; it will not lift the floor
-instead, which a try showed leaves a worse mesh (hundreds of flipped and
-non-manifold edges). On `text_repair_test.3mf`'s palm Remove finds the seven
-recesses of DUKE DOKS and stops there. Undo to before the repair, or Remove on the
-version the stamp was made on, and it fills them.
+that has no clean triangulation, so Remove by caps says so. It does not stop
+there: it hands the click to **Resurface** (`docs/RESURFACE.md`), which looks down
+on the recess with a grid of rays, finds the work by its walls, and lays the skin
+again with no regard for the old rim. On `text_repair_test.3mf`'s palm that fills
+the eight recesses of DUKE DOKS in 0.7 s with the app's checker finding no open,
+non-manifold, flipped or flat triangle. (A try that lifted the floor instead left
+hundreds of flipped and non-manifold edges; a union of a prism left slivers.)
 
 A curved recess in a font's own letters used to meet the same wall in a cleaner
 mesh: `HEH` on a faceted cylinder (the app's own boolean output) found its three
@@ -176,7 +177,6 @@ its faces by axis and side, so any paint stands it down.
 - **Emboss** (raised text): the same cutter, unioned instead of subtracted, its
   bottom at the surface and its top `depth` above it. The engine's prism already
   has both ends.
-- **Removing** text whose rim folds back on itself (a splintered mesh): a cap built in 3D rather than from the rim's flat projection.
 - **Wrapping** text across an edge or round a tube's whole circumference: the
   prism is straight along n, so text stops where the face's smooth surface does.
 - **Letter spacing, line spacing, alignment, outlines of a font's own name list**

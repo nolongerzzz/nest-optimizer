@@ -92,6 +92,7 @@ merging its list by hand. The list below is generated.
 - [Punch - engine (2026-10-20)](handoff/punch-engine.md)
 - [Punch - the card (2026-10-20)](handoff/punch-the-card.md)
 - [Repair loop - Patch, Cap and Bridge from the Findings card (2026-10-16)](handoff/repair-loop-patch-cap-and-bridge-from-the-findings-card.md)
+- [Resurface - fill / repair any surface work (2026-10-31)](handoff/resurface.md)
 - [Right-click menu: Undo, Redo, Clone, Mirror, Export, Clear plate (ctx-menu, 2026-10-22)](handoff/right-click-menu-undo-redo-clone-mirror-export-clear-plate.md)
 - [Rotate - one ring size, a fixed pivot while turning (2026-10-12)](handoff/rotate-one-ring-size-a-fixed-pivot-while-turning.md)
 - [Rotate rails - darts on a major tick, leans named by the footprint (2026-10-17)](handoff/rotate-rails-darts-on-a-major-tick-leans-named-by-the-footprint.md)
