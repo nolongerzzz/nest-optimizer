@@ -258,6 +258,73 @@ withApp(async (page, logs) => {
     check('Pieces again leaves the pick', on === 'lens' && off === null, J([on, off]));
   }
 
+  console.log('\n=== 11. Circle: a ring round a piece on each plate ===');
+  {
+    await page.evaluate(() => NSO_MICROSCOPE.compareClear());
+    // what the whole plates hold, by the Plates button
+    const whole = await page.evaluate(() => { const M = NSO_MICROSCOPE; M.compareStartPlates(); const d = M.plateDoc('cmp'); const n = d.objects.map(o => o.moves.length); M.compareClear(); return n; });
+    // a ring dragged on the canvas: centre and edge are ground points on the active plate (file mm), mapped to the screen
+    const drag = async (cx, cy, r) => {
+      const pts = await page.evaluate(([cx, cy, r]) => {
+        const M = NSO_MICROSCOPE, v = M.getView(), rect = v.renderer.domElement.getBoundingClientRect();
+        const s = (x, y) => { const p = M.toView(x, y, 0); const q = new THREE.Vector3(p.x, 0, p.z).project(v.camera); return [rect.left + (q.x + 1) / 2 * rect.width, rect.top + (1 - q.y) / 2 * rect.height]; };
+        return [s(cx, cy), s(cx + r, cy)];
+      }, [cx, cy, r]);
+      if (process.env.CIRC_DBG) console.log('   drag', J(pts), await page.evaluate(([x, y]) => { const e = document.elementFromPoint(x, y); return e && e.tagName + '#' + e.id; }, pts[0]));
+      await page.mouse.move(pts[0][0], pts[0][1]);
+      await page.mouse.down();
+      await page.mouse.move((pts[0][0] + pts[1][0]) / 2, (pts[0][1] + pts[1][1]) / 2, { steps: 4 });
+      await page.mouse.move(pts[1][0], pts[1][1], { steps: 4 });
+      const mid = await page.evaluate(() => document.getElementById('ms-compare-read').textContent);
+      await page.mouse.up();
+      await page.waitForTimeout(80);
+      await frames(page);
+      return mid;
+    };
+    const box = () => page.evaluate(() => {
+      const d = NSO_MICROSCOPE.getDoc(); let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
+      d.segments.forEach(s => { x0 = Math.min(x0, s.x0, s.x1); x1 = Math.max(x1, s.x0, s.x1); y0 = Math.min(y0, s.y0, s.y1); y1 = Math.max(y1, s.y0, s.y1); });
+      return { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, r: Math.hypot(x1 - x0, y1 - y0) / 2 + 3 };
+    });
+    await page.evaluate(() => NSO_MICROSCOPE.showPlate('lens'));
+    await frames(page);
+    const btn = await page.evaluate(() => { const b = document.getElementById('ms-compare-circle'); return { there: !!b, off: b && b.disabled }; });
+    check('the Circle button is on the card and enabled with a file on each plate', btn.there && !btn.off, J(btn));
+    await page.click('#ms-compare-circle');
+    let r = await page.evaluate(() => ({ pick: NSO_MICROSCOPE.comparePicking(), plate: NSO_MICROSCOPE.plate(), on: document.getElementById('ms-compare-circle').getAttribute('aria-pressed'), say: document.getElementById('ms-compare-read').textContent }));
+    check('Circle asks for a ring on plate 1 first', r.pick === 'lens' && r.plate === 'lens' && r.on === 'true' && /circle/i.test(r.say), J(r));
+    // an empty spot first: nothing in the ring, still on plate 1
+    const b1 = await box();
+    await drag(b1.cx + b1.r + 40, b1.cy + b1.r + 40, 1.5);
+    r = await page.evaluate(() => ({ pick: NSO_MICROSCOPE.comparePicking(), plate: NSO_MICROSCOPE.plate() }));
+    check('a ring round nothing takes nothing and stays on plate 1', r.pick === 'lens' && r.plate === 'lens', J(r));
+    const mid = await drag(b1.cx, b1.cy, b1.r);
+    r = await page.evaluate(() => ({ pick: NSO_MICROSCOPE.comparePicking(), plate: NSO_MICROSCOPE.plate(), st: NSO_MICROSCOPE.compareState(), ring: !!document.getElementById('ms-compare-read') }));
+    check('the read-out counts the radius while the ring is dragged', /radius \d/i.test(mid), mid);
+    check('a ring round plate 1\'s piece moves on to plate 2', r.pick === 'take' && r.plate === 'take' && r.st === null, J(r));
+    const b2 = await box();
+    await drag(b2.cx, b2.cy, b2.r);
+    r = await page.evaluate(() => { const M = NSO_MICROSCOPE, d = M.plateDoc('cmp');
+      return { pick: M.comparePicking(), plate: M.plate(), n: d && d.objects.length, names: d && d.objects.map(o => o.name), moves: d && d.objects.map(o => o.moves.length), st: M.compareState(), box: d && d.objects.map(o => [o.bounds.minX, o.bounds.maxX]) }; });
+    check('the ring on plate 2 sets both on plate 3, side by side', r.pick === null && r.plate === 'cmp' && r.n === 2 && r.box[0][1] < r.box[1][0] && r.st && !r.st.overlaid, J(r));
+    check('...each holding everything the ring held, every layer and line type (the same as the whole plate)', J(r.moves) === J(whole), J({ ring: r.moves, whole }));
+    await page.click('#ms-compare-overlay');
+    await frames(page);
+    check('...and Overlay works from there', await page.evaluate(() => NSO_MICROSCOPE.compareState().overlaid));
+    // a small ring takes only what is inside it
+    await page.evaluate(() => NSO_MICROSCOPE.compareClear());
+    await page.click('#ms-compare-circle');
+    await drag(b1.cx, b1.cy, Math.max(2, b1.r / 4));
+    await drag(b2.cx, b2.cy, Math.max(2, b2.r / 4));
+    r = await page.evaluate(() => { const d = NSO_MICROSCOPE.plateDoc('cmp'); return d && d.objects.map(o => o.moves.length); });
+    check('a small ring takes only the part inside its cylinder', r && r.every((n, i) => n > 0 && n < whole[i]), J({ small: r, whole }));
+    // Esc leaves the pick
+    await page.evaluate(() => NSO_MICROSCOPE.compareClear());
+    await page.click('#ms-compare-circle');
+    await page.keyboard.press('Escape');
+    check('Escape leaves the pick', await page.evaluate(() => NSO_MICROSCOPE.comparePicking() === null));
+  }
+
   check('no page errors', logs.filter(l => /^\[pageerror\]/.test(l)).length === 0, logs.filter(l => /^\[pageerror\]/.test(l)).slice(0, 3).join(' | '));
   console.log(fails ? '\nFAILED (' + fails + ')' : '\nall gates held');
   process.exitCode = fails ? 1 : 0;

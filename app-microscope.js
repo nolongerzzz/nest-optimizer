@@ -1819,6 +1819,7 @@ var NSO_MICROSCOPE = (function () {
   }
   function hoverNow(e) {
     if (!view || !doc || !isOpen() || pull) return;
+    if (cmpPick && cmpPick.shape === 'circle') { clearHover(); return; }       // the ring is being drawn, not a piece clicked
     var tgt = null, own = false, seg = null;
     // a hover over a big plate 2 piece whose tree (nso_bvh.js) is not built yet outlines nothing until it is,
     // rather than walk every triangle - the main viewport's hover does the same
@@ -2226,6 +2227,7 @@ var NSO_MICROSCOPE = (function () {
     if (v) { v.platePress = null; v.regionPress = null; }
     if (!v || e.button !== 0 || pull) return;
     if (!doc) { notePlatePress(e); return; }
+    if (cmpPick && cmpPick.shape === 'circle' && circleBegin(e)) return;     // Compare, Circle: this press draws the ring
     var own = boxOwnsPress(e);
     if (own) {                                     // the box's dots and face: the older handler has them
       // ...and a click inside the box (no travel, not on a dot) toggles the isolation of what it holds
@@ -2446,6 +2448,8 @@ var NSO_MICROSCOPE = (function () {
   }
 
   function onPullKey(e) {
+    // Compare, Pieces / Circle: Escape leaves the pick
+    if (e.key === 'Escape' && cmpPick && !pull) { comparePickCancel(); e.preventDefault(); e.stopPropagation(); return; }
     if (e.key !== 'Escape' || !pull || pull.live || pull.cancelled) return;
     // pressed but not yet pulled: Escape lets go of it
     pull.cancelled = true;
@@ -3591,6 +3595,10 @@ var NSO_MICROSCOPE = (function () {
     window.addEventListener('pointerup', function () {
       if (v.dragState) { v.dragState = null; v.controls.enabled = true; }
     });
+    // Compare, Circle: the ring follows the pointer, and is the pick when let go
+    window.addEventListener('pointermove', circleMove);
+    window.addEventListener('pointerup', circleEnd);
+    window.addEventListener('pointercancel', function () { circleDrop(); syncCompare(); });
 
     // No double-click here. G-scope has two exits, Back and Close, and a
     // double-click on the view is not one of them: it does nothing.
@@ -5918,8 +5926,11 @@ var NSO_MICROSCOPE = (function () {
     setDisabled(st, !!why);
     setDisabled($('ms-compare-plates'), !!why);
     setDisabled($('ms-compare-pieces'), !!why);
-    var pcs = $('ms-compare-pieces');
-    if (pcs) { pcs.classList.toggle('active', !!cmpPick); pcs.setAttribute('aria-pressed', cmpPick ? 'true' : 'false'); }
+    setDisabled($('ms-compare-circle'), !!why);
+    [['ms-compare-pieces', 'piece'], ['ms-compare-circle', 'circle']].forEach(function (x) {
+      var bt = $(x[0]), on = !!(cmpPick && cmpPick.shape === x[1]);
+      if (bt) { bt.classList.toggle('active', on); bt.setAttribute('aria-pressed', on ? 'true' : 'false'); }
+    });
     setDisabled(ov, !live);
     setDisabled(rs, !live);
     setDisabled(tn, !live);
@@ -5933,10 +5944,10 @@ var NSO_MICROSCOPE = (function () {
         ' (orange) and ' + compare.b.name.replace(/^Plate 2: /, '') + ' (blue). Blue moved by ' +
         compare.dx.toFixed(2) + ', ' + compare.dy.toFixed(2) + ', ' + compare.dz.toFixed(2) + ' mm from where Overlay put it.';
     } else if (cmpPick) {
-      rd.textContent = cmpPick.step === 'lens' ? 'Compare pieces: click a piece on plate 1.' : 'Compare pieces: now click a piece on plate 2.';
+      rd.textContent = comparePickText(cmpPick);
     } else {
       rd.textContent = why ? 'Compare: ' + why + '.' :
-        'Plates sets both whole plates on plate 3, side by side. Pieces: click a piece on each plate. Selected takes what is selected on each.';
+        'Plates sets both whole plates on plate 3, side by side. Pieces: click a piece on each plate. Circle: draw a ring round a piece on each. Selected takes what is selected on each.';
     }
   }
 
@@ -6022,27 +6033,143 @@ var NSO_MICROSCOPE = (function () {
   }
 
   /**
-   * COMPARE, PIECES: click a piece on plate 1, then a piece on plate 2; the second click sets both on plate 3 side by side.
-   * cmpPick is the step the clicks are at: { step: 'lens' | 'take', lens: the first piece's spec, home: the plate it began on }.
+   * COMPARE, PIECES / CIRCLE: pick a piece on plate 1, then on plate 2; the second pick sets both on plate 3 side by side.
+   * Pieces: a click on a piece. Circle: a ring dragged out from a piece's middle on the plate takes everything inside its
+   * cylinder - every layer, every line type that is shown - so a whole piece comes with its supports.
+   * cmpPick is the step the picks are at: { shape: 'piece' | 'circle', step: 'lens' | 'take', lens: the first spec, home: the plate it began on }.
    */
   var cmpPick = null;
-  function compareStartPieces() {
+  function comparePickText(cp) {
+    var how = cp.shape === 'circle' ? 'drag a circle round a piece' : 'click a piece';
+    return 'Compare ' + (cp.shape === 'circle' ? 'circle' : 'pieces') + ': ' + (cp.step === 'lens' ? how + ' on plate 1.' : 'now ' + how + ' on plate 2.') +
+      (cp.shape === 'circle' ? ' Start at its middle and drag out; everything inside, every layer, comes along. Esc cancels.' : '');
+  }
+  /** The plate to pick on must be in view: if its middle is off the screen (the camera was left on plate 3), frame the plates again. */
+  function pickInView() {
+    if (!view || !doc) return;
+    var q = new THREE.Vector3(0, 0, 0).project(view.camera);
+    if (!(Math.abs(q.x) < 0.95 && Math.abs(q.y) < 0.95 && q.z < 1)) { frame(); followClip(); }
+  }
+  function comparePickStart(shape) {
     var why = compareReason();
     if (why) { say('Compare: ' + why + '.', true); return null; }
-    if (cmpPick) { comparePickCancel(); return null; }                 // the button again: leave the pick
-    cmpPick = { step: 'lens', lens: null, home: plateName, busy: false };
+    if (cmpPick && cmpPick.shape === shape) { comparePickCancel(); return null; }   // the button again: leave the pick
+    comparePickCancel(true);
+    cmpPick = { shape: shape, step: 'lens', lens: null, home: plateName, busy: false };
     showPlate('lens', { quiet: true });
+    pickInView();
     setSelection([], 'pick');
     syncCompare();
-    say('Compare pieces: click a piece on plate 1.');
+    say(comparePickText(cmpPick));
+    return true;
+  }
+  function compareStartPieces() { return comparePickStart('piece'); }
+  function compareStartCircle() { return comparePickStart('circle'); }
+
+  // --- the ring ---------------------------------------------------------------------
+  // Drawn on the active plate's floor in view space (the active plate stands at the origin), from the press out to the
+  // pointer. Let go: its cylinder is the selection - a segment is in when its midpoint is within r, at any height.
+  var circleDraft = null;     // { cx, cz: the centre in view space, r, ring, disc }
+
+  function groundAt(e) {
+    var rc = rayAt(e), p = new THREE.Vector3();
+    if (!rc.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), p) || p.distanceTo(rc.ray.origin) > view.camera.far) return null;
+    return p;
+  }
+
+  function circleVisual() {
+    var pts = [], i;
+    for (i = 0; i < 96; i++) pts.push(new THREE.Vector3(Math.cos(i / 96 * 2 * Math.PI), 0, Math.sin(i / 96 * 2 * Math.PI)));
+    var ring = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(pts),
+      new THREE.LineBasicMaterial({ color: 0xffd24a, depthTest: false, transparent: true }));
+    var disc = new THREE.Mesh(new THREE.CircleGeometry(1, 64).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({ color: 0xffd24a, opacity: 0.12, transparent: true, depthTest: false, depthWrite: false, side: THREE.DoubleSide }));
+    ring.renderOrder = disc.renderOrder = 20;
+    view.scene.add(disc); view.scene.add(ring);
+    return { ring: ring, disc: disc };
+  }
+
+  function circleShape() {
+    var d = circleDraft;
+    if (!d) return;
+    [d.ring, d.disc].forEach(function (m) { m.position.set(d.cx, 0.06, d.cz); m.scale.set(Math.max(d.r, 1e-3), 1, Math.max(d.r, 1e-3)); });
+    var rd = $('ms-compare-read');
+    if (rd) rd.textContent = 'Circle: radius ' + d.r.toFixed(1) + ' mm - let go to take everything inside it.';
+  }
+
+  function circleDrop() {
+    var d = circleDraft;
+    circleDraft = null;
+    if (!d) return null;
+    [d.ring, d.disc].forEach(function (m) { view.scene.remove(m); disposeTree(m); });
+    if (view) view.controls.enabled = true;
+    return d;
+  }
+
+  /** A press in Circle mode, on this step's plate, on its bed: it starts a ring (the orbit does not get it). */
+  function circleBegin(e) {
+    var v = view;
+    if (!v || !cmpPick || plateName !== (cmpPick.step === 'lens' ? 'lens' : 'take')) return false;
+    var p = groundAt(e), half = plateSide / 2;
+    if (!p || Math.abs(p.x) > half || Math.abs(p.z) > half) return false;     // off the bed: the orbit's
+    e.stopImmediatePropagation();
+    v.controls.enabled = false;
+    v.mouseDownPos = null; v.hookTook = false;
+    clearHover();
+    var vis = circleVisual();
+    circleDraft = { cx: p.x, cz: p.z, r: 0, ring: vis.ring, disc: vis.disc };
+    circleShape();
     return true;
   }
 
+  function circleMove(e) {
+    if (!circleDraft || !view) return;
+    var p = groundAt(e);
+    if (!p) return;
+    circleDraft.r = Math.hypot(p.x - circleDraft.cx, p.z - circleDraft.cz);
+    circleShape();
+  }
+
+  /** Let go: the ring's cylinder becomes the pick (the same seam a click on a piece uses). */
+  function circleEnd() {
+    var d = circleDrop();
+    if (!d || !cmpPick || !doc) return;
+    if (view) view.mouseDownPos = null;
+    if (d.r < 1) { say('Compare circle: press at the middle of the piece and drag out - the ring is the size you drag.', true); syncCompare(); return; }
+    var items = selectByCircle(d.cx + doc.cx, -d.cz + doc.cy, d.r);
+    if (!items.length) { say('Compare circle: nothing inside that circle - draw it again.', true); syncCompare(); return; }
+    removeAllBalls();
+    setSelection(items, 'pick');
+  }
+
+  /** Everything shown whose centre stands within r of (gx, gy) in G-code mm, at any height. */
+  function selectByCircle(gx, gy, r) {
+    var r2 = r * r;
+    if (doc.kind === 'toolpath') {
+      return doc.segments.filter(function (s) {
+        if (!segShown(s)) return false;
+        var dx = (s.x0 + s.x1) / 2 - gx, dy = (s.y0 + s.y1) / 2 - gy;
+        return dx * dx + dy * dy <= r2;
+      });
+    }
+    return shownObjects().filter(function (o) {
+      var b = o.bounds;
+      if (b && Math.hypot(Math.max(b.minX - gx, 0, gx - b.maxX), Math.max(b.minY - gy, 0, gy - b.maxY)) > r) return false;
+      var c = o.centroids;
+      for (var t = 0; t < c.length; t += 3) {
+        var dx = c[t] - gx, dy = c[t + 1] - gy;
+        if (dx * dx + dy * dy <= r2) return true;
+      }
+      return false;
+    });
+  }
+
   function comparePickCancel(quiet) {
+    circleDrop();
     if (!cmpPick) return;
     cmpPick = null;
     syncCompare();
-    if (!quiet) say('Compare pieces: cancelled.');
+    if (!quiet) say('Compare: pick cancelled.');
   }
 
   /** A click picked something: at the first step it is plate 1's piece (then plate 2 is shown); at the second it is plate 2's, and both are set down. */
@@ -6053,17 +6180,18 @@ var NSO_MICROSCOPE = (function () {
     cp.busy = true;
     try {
       var spec = pullSpec(null);
-      if (!spec) { say('Compare pieces: that has nothing to compare - click a piece.', true); return; }
+      if (!spec) { say('Compare: that has nothing to compare - pick a piece.', true); return; }
       if (cp.step === 'lens') {
         cp.lens = spec; cp.step = 'take';
         showPlate('take', { quiet: true });
+        pickInView();
         setSelection([], 'pick');
         syncCompare();
-        say('Compare pieces: now click a piece on plate 2.');
+        say(comparePickText(cp));
         return;
       }
       cmpPick = null;
-      compareFromSpecs(cp.lens, spec, cp.home, 'piece');
+      compareFromSpecs(cp.lens, spec, cp.home, cp.shape === 'circle' ? 'circled piece' : 'piece');
     } finally { cp.busy = false; }
   }
 
@@ -6499,6 +6627,7 @@ var NSO_MICROSCOPE = (function () {
     bind('ms-compare-start', 'click', function () { compareStart(); });
     bind('ms-compare-plates', 'click', function () { compareStartPlates(); });
     bind('ms-compare-pieces', 'click', function () { compareStartPieces(); });
+    bind('ms-compare-circle', 'click', function () { compareStartCircle(); });
     bind('ms-compare-diff', 'click', function () { compareDiff(); });
     bind('ms-compare-diff-copy', 'click', function () { compareCopy(); });
     bind('ms-compare-overlay', 'click', function () { compareOverlay(); });
@@ -6624,6 +6753,7 @@ var NSO_MICROSCOPE = (function () {
     compareStart: compareStart,
     compareStartPlates: compareStartPlates,
     compareStartPieces: compareStartPieces,
+    compareStartCircle: compareStartCircle,
     comparePickCancel: comparePickCancel,
     comparePicking: function () { return cmpPick ? cmpPick.step : null; },
     compareOverlay: compareOverlay,

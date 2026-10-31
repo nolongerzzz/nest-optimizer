@@ -612,11 +612,15 @@ and moved afterwards, as a plate's pieces are.
 
 ## 13. Compare plates: side by side, then overlaid, then measured
 
-**What the user sees.** With a file on each plate, the card shows a folded row, *Compare plates*, with three
+**What the user sees.** With a file on each plate, the card shows a folded row, *Compare plates*, with four
 ways in, each one click or two. **Plates** sets both whole plates down side by side on a **third plate**
 (Compare) - nothing to isolate, no region box to drag. **Pieces** asks for a click on a piece on plate 1, then
 plate 2 is shown and asks for a click on a piece there; the second click sets both pieces down on plate 3
-(press Pieces again to leave the pick). **Selected** is the older way: isolate something on each plate - a
+(press Pieces again to leave the pick). **Circle** is Pieces with a ring: press at the middle of a piece on
+plate 1 and drag out - a yellow ring follows the pointer, the card reads its radius - and let go; everything inside its
+cylinder is taken, at every height (all layers, every line type that is shown, supports with the piece). Then the same on
+plate 2, and both land on plate 3. A segment is in when its midpoint is within the radius; a mesh piece when any triangle
+centroid is. A ring that holds nothing is refused and you draw it again; Esc or the button again leaves the pick. **Selected** is the older way: isolate something on each plate - a
 piece with its supports, one line type, a layer band: whatever a drag would carry - then press it. On plate 3,
 plate 1's is at the left in orange and plate 2's at the right in blue, each at the height it came from, the
 camera close on them. Plates 1 and 2 are not touched. **Overlay** moves the blue
