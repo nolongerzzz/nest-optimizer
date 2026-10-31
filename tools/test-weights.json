@@ -214,6 +214,7 @@
     "mold:test": {"weight":9500,"note":""},
     "move:vertical": {"weight":5850,"note":""},
     "open:flag": {"weight":14300,"note":""},
+    "outline:cost": {"weight":290000,"note":"estimate (outline-cost): ~2.9 min locally x 1.7, rounded up. One 191,000-triangle piece in the real page, select / re-select / six pose ops each with Undo and Redo / a ring drag / a shape edit / Remove, and 28 freshly built EdgesGeometry (1.3 s each) to hold the carried outline to; replace with a CI measurement"},
     "overlap:drive": {"weight":56800,"note":""},
     "overlay:test": {"weight":3100,"note":""},
     "page:manifest": {"weight":4800,"note":""},

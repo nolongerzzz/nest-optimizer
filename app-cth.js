@@ -42,8 +42,8 @@ function collectRaycastables(into) {
 function wrapRefresh() {
   const prev = window.refreshOutline;
   if (typeof prev !== 'function' || prev._cthWrapped) return;
-  function wrapped(p) {
-    prev(p);
+  function wrapped(p, opts) {
+    prev(p, opts);
     nameMesh(p);
     if (typeof window.__CTH_REBUILD__ === 'function') window.__CTH_REBUILD__();
   }

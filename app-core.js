@@ -407,6 +407,17 @@ function nsoDropOutline(p) {
   if (o.geometry) o.geometry.dispose();
   if (o.material) o.material.dispose();
 }
+/* The other way an outline is left behind: it is a CHILD of its mesh, so a mesh taken off the plate (the piece was
+   rebuilt, an Undo swapped it) goes on carrying the line it had, and a Redo that puts the mesh back puts the line back
+   with it - next to the one refreshOutline then draws. p.outline names only the live one; strip what the mesh holds. */
+function nsoDropStrayOutlines(mesh) {
+  if (!mesh || !mesh.children) return;
+  mesh.children.filter(c => c && c.name === 'selOutline').forEach(o => {
+    mesh.remove(o);
+    if (o.geometry) o.geometry.dispose();
+    if (o.material) o.material.dispose();
+  });
+}
 function nsoWorldRestore(snap) {
   const keep = new Set(snap.placed.map(e => e.mesh).filter(Boolean));
   state.placed.forEach(p => {
@@ -424,6 +435,7 @@ function nsoWorldRestore(snap) {
       if (e.geo) p.mesh.geometry = e.geo;
       p.mesh.position.copy(e.pos); p.mesh.rotation.copy(e.rot); p.mesh.scale.copy(e.scl);
       p.mesh.userData.placedIndex = i;
+      nsoDropStrayOutlines(p.mesh);
       const mt = p.mesh.material;
       if (mt && e.look) { mt.color.setHex(e.look.color); mt.emissive.setHex(e.look.emissive); mt.emissiveIntensity = e.look.emissiveIntensity; }
       if (state.modelGroup) state.modelGroup.add(p.mesh);
@@ -476,6 +488,11 @@ function redoLast() {
   state.redoStack.pop();
   if (typeof nsoHelpers !== 'undefined') nsoHelpers.teardown('redo');
   if (typeof removeFaceHelper === 'function') removeFaceHelper();
+  /* a pose bake goes forward the way it went the first time: the outline is moved to the geometry Redo puts back */
+  if (r.entry.type === 'poseBake' && r.entry.outlineM && typeof nsoOutlineCarry === 'function') {
+    const at = r.post.placed[r.entry.index];
+    if (at && at.geo && at.ref === state.placed[r.entry.index]) nsoOutlineCarry(at.ref, at.geo, r.entry.outlineM);
+  }
   nsoWorldRestore(r.post);
   state.undoStack.push(r.entry);
   if (state.undoStack.length > UNDO_MAX) nsoReleaseGeometries(nsoLeavingGeometries([state.undoStack.shift()]));
@@ -4560,17 +4577,19 @@ function nsoBakePlacedPose(p, opts) {
   p.mesh.updateMatrixWorld(true);
   const q = p.mesh.quaternion.clone();
   const pos = p.mesh.position.clone();
+  let bakeEntry = null;
 
   if (opts.undo !== false) {
     const top = state.undoStack[state.undoStack.length - 1];
     const prevPose = (top && top.type === 'posePlaced' && top.index === idx) ? state.undoStack.pop() : snapshotPlacedPose(idx);
-    pushUndo({
+    bakeEntry = {
       type: 'poseBake', index: idx, modelId: m ? m.id : null, prevPose: prevPose,
       prevGeometry: geo0,
       prevRawTris: m ? m.rawTris : null, prevRawAxis: m ? m.rawAxis : null,
       prevCenterOffset: m ? m.centerOffset : null,
       prevSize: m && m.size ? { x: m.size.x, y: m.size.y, z: m.size.z } : null
-    });
+    };
+    pushUndo(bakeEntry);
   }
 
   /* the piece as loaded (or as the last other op left it), kept for
@@ -4618,6 +4637,12 @@ function nsoBakePlacedPose(p, opts) {
     shift = c1;
   }
   const size = newGeo.boundingBox.getSize(new THREE.Vector3());
+  /* The bake moves every vertex by v -> q v - shift (the display geometry is the raw soup turned, then centred), and
+     a turn does not change a piece's edges, only where they are: the outline goes by the same matrix instead of being
+     built again (app-sel-outline.js). The matrix rides on the Undo entry, which takes it back and forward. */
+  const outlineM = new THREE.Matrix4().makeRotationFromQuaternion(q).setPosition(-shift.x, -shift.y, -shift.z);
+  if (bakeEntry) bakeEntry.outlineM = outlineM.elements.slice();
+  if (typeof nsoOutlineCarry === 'function') nsoOutlineCarry(p, newGeo, outlineM.elements);
   if (m) {
     m.geometry = newGeo;
     m.size = { x: size.x, y: size.y, z: size.z };
@@ -4690,6 +4715,10 @@ function nsoUndoPoseBake(entry) {
     m.rawAxis = entry.prevRawAxis;
     m.centerOffset = entry.prevCenterOffset;
     if (entry.prevSize) m.size = { x: entry.prevSize.x, y: entry.prevSize.y, z: entry.prevSize.z };
+  }
+  /* the outline goes back the way the bake took it (a no-op while the earlier geometry's edges are still kept) */
+  if (entry.outlineM && typeof nsoOutlineCarry === 'function') {
+    nsoOutlineCarry(p, entry.prevGeometry, new THREE.Matrix4().fromArray(entry.outlineM).invert().elements);
   }
   p.geometry = entry.prevGeometry;
   p.mesh.geometry = entry.prevGeometry;
