@@ -300,7 +300,7 @@
         hi[0] = Math.max(hi[0], p[0]); hi[1] = Math.max(hi[1], p[1]);
       });
     });
-    var cx = (lo[0] + hi[0]) / 2, cy = (lo[1] + hi[1]) / 2, mm = mask.mmPerPx;
+    var cx = o.keep ? 0 : (lo[0] + hi[0]) / 2, cy = o.keep ? 0 : (lo[1] + hi[1]) / 2, mm = mask.mmPerPx;   // keep: where the picture put them
     function toMm(l) { return l.map(function (p) { return [(p[0] - cx) * mm, (p[1] - cy) * mm]; }); }
     var polys = outers.map(function (l) { return { outer: toMm(l), holes: [], a2: area2(l) }; });
     holes.forEach(function (hl) {

@@ -327,11 +327,49 @@ withApp(async (page, logs) => {
     return { mode: nsoTextState().mode, stampRows: vis('inp-text') || vis('sel-text-font') || vis('inp-text-size') || vis('btn-text-go'), removeRows: vis('btn-text-remove') && vis('chk-text-word') && vis('inp-text-reach') };
   });
   check('Remove mode swaps the card: the stamp rows go, REMOVE / Whole word / Reach come', ui.mode === 'remove' && !ui.stampRows && ui.removeRows, JSON.stringify(ui));
-  await click(page, await screenOf(page, [stemX, mid[1], mid[2] - 1]));
-  await page.waitForFunction(() => nsoTextState().count > 0, null, { timeout: 5000 }).catch(() => {});
+  if (process.env.NSO_DUMP) require('fs').writeFileSync(process.env.NSO_DUMP, JSON.stringify({ soup: Array.from(soupCut), stemX, mid }));
+  const floorPx = await screenOf(page, [stemX, mid[1], mid[2] - 1]);
+  await page.mouse.move(floorPx.x, floorPx.y);
+  await page.waitForFunction(() => nsoTextState().hover > 0, null, { timeout: 15000 }).catch(() => {});
   st = await S(page);
-  check('a click on the floor of the first H finds all three letters, 1 mm deep; the ghost is their caps (green) and REMOVE is on',
-    st.ok && st.count === 3 && st.ghosts === 1 && /3 recesses, 1\.0 mm deep/.test(st.readout) && !(await page.evaluate(() => document.getElementById('btn-text-remove').disabled)), st.readout);
+  check('moving over the first H lights the whole word (3 pieces, amber) and locks nothing: REMOVE is off',
+    st.hover === 3 && st.sel === 0 && st.ghosts === 1 && await page.evaluate(() => document.getElementById('btn-text-remove').disabled), JSON.stringify({ hover: st.hover, sel: st.sel, ghosts: st.ghosts }) + ' ' + st.readout);
+  await click(page, floorPx);
+  await page.waitForFunction(() => nsoTextState().sel > 0, null, { timeout: 15000 }).catch(() => {});
+  st = await S(page);
+  check('a click locks the word: 3 pieces, 1 mm deep, green, REMOVE is on',
+    st.ok && st.sel === 3 && st.count === 3 && st.ghosts >= 1 && /3 pieces locked/.test(st.readout) && !(await page.evaluate(() => document.getElementById('btn-text-remove').disabled)), st.readout);
+  // one letter at a time: Whole word off, Escape lets go, a click locks one, another click adds, a third on a locked one lets it go
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(150);
+  st = await S(page);
+  check('Escape lets go of what is locked and keeps the card open', st.sel === 0 && st.open && await page.evaluate(() => document.getElementById('btn-text-remove').disabled), JSON.stringify({ sel: st.sel, open: st.open }));
+  await page.evaluate(() => { const c = document.getElementById('chk-text-word'); c.checked = false; c.dispatchEvent(new Event('change', { bubbles: true })); });
+  let secondX = null, gapSeen = false;                    // along the middle of the word: floor of the first H, the gap, floor of the E
+  for (let x = stemX; x < stemX + 24; x += 0.1) {
+    const z = topAt(soupCut, x, mid[1]);
+    if (z > 5.5) gapSeen = true; else if (gapSeen) { secondX = x + 0.3; break; }
+  }
+  const secondPx = await screenOf(page, [secondX === null ? stemX + 6 : secondX, mid[1], mid[2] - 1]);
+  await click(page, floorPx);
+  await page.waitForFunction(() => nsoTextState().sel === 1, null, { timeout: 15000 }).catch(() => {});
+  st = await S(page);
+  check('Whole word off: a click locks the one letter', st.sel === 1 && st.count === 1, JSON.stringify({ sel: st.sel, count: st.count }));
+  await click(page, secondPx);
+  await page.waitForFunction(() => nsoTextState().sel === 2, null, { timeout: 15000 }).catch(() => {});
+  st = await S(page);
+  check('a click on another letter adds it: 2 locked', st.sel === 2 && st.count === 2, JSON.stringify({ sel: st.sel, count: st.count }));
+  await click(page, floorPx);
+  await page.waitForFunction(() => nsoTextState().sel === 1, null, { timeout: 15000 }).catch(() => {});
+  st = await S(page);
+  check('a click on a locked letter lets it go: 1 locked', st.sel === 1, JSON.stringify({ sel: st.sel }));
+  await page.evaluate(() => { const c = document.getElementById('chk-text-word'); c.checked = true; c.dispatchEvent(new Event('change', { bubbles: true })); });
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(150);
+  await click(page, floorPx);
+  await page.waitForFunction(() => nsoTextState().sel === 3, null, { timeout: 15000 }).catch(() => {});
+  st = await S(page);
+  check('Whole word back on: one click locks all three again', st.sel === 3, JSON.stringify({ sel: st.sel }));
   const dragNo = await page.evaluate(() => NSO_textHitAt(0, 0));
   check('drag and nudge are the stamp’s: off here', dragNo === false);
   await page.click('#btn-text-remove');
@@ -347,7 +385,7 @@ withApp(async (page, logs) => {
   check('one Undo brings the engraving back', Math.abs(volume(soupUndone) - vC) < 1e-6 * vB && Math.abs(topAt(soupUndone, stemX, mid[1]) - 5) < 1e-3);
   await click(page, await screenOf(page, [mid[0] - 25, mid[1] + 20, mid[2]]));
   st = await S(page);
-  check('a click on the plain face is refused in words, REMOVE off', !st.ok && st.bad && /not the inside of a recess/.test(st.readout) && await page.evaluate(() => document.getElementById('btn-text-remove').disabled), st.readout);
+  check('a click on the plain face is refused in words, nothing locked, REMOVE off', st.bad && /no engraved work/.test(st.readout) && st.sel === 0 && await page.evaluate(() => document.getElementById('btn-text-remove').disabled), st.readout);
   await page.click('#btn-undo');                      // the stamp itself
   await frames(page, 3);
   await page.click('#btn-text-mode-stamp');
@@ -433,9 +471,9 @@ withApp(async (page, logs) => {
     await page.click('#btn-text-mode-remove');
     await page.waitForTimeout(200);
     await click(page, await screenOf(page, floorRaw));
-    await page.waitForFunction(() => nsoTextState().count > 0 || nsoTextState().bad, null, { timeout: 8000 }).catch(() => {});
+    await page.waitForFunction(() => nsoTextState().sel > 0 || nsoTextState().bad, null, { timeout: 20000 }).catch(() => {});
     st = await S(page);
-    check('Remove on the cylinder: the three letters found in a curved face, the ghost is their caps, REMOVE on', st.ok && st.count === 3 && /in a curved face/.test(st.readout) && st.ghosts === 1 &&
+    check('Remove on the cylinder: one click locks the word on a curved face (letters that touch are one piece), REMOVE on', st.ok && st.sel >= 2 && st.count === st.sel && st.ghosts >= 1 && /\b3[0-9]\.\d mm²/.test(st.readout) &&
       !(await page.evaluate(() => document.getElementById('btn-text-remove').disabled)), st.readout);
     const dC = await undoDepth(page);
     await page.click('#btn-text-remove');

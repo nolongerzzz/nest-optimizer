@@ -3,11 +3,16 @@
 Fill or repair any surface work - an engraving, a trench, a punched recess, a hole
 straight through - on any mesh, however messy: the skin over the work is thrown
 away and laid again, flush with the face round it. The engine is
-`nso_resurface.js` (THREE-free, node-tested: `npm run resurface:test`). Today it
-is reached through **Text -> Remove**, as the way through when the rim-cap path
-(`NSO_Text.pockets`/`caps`) says a recess cannot be capped; the page shows the
-plan as "N pieces of work, up to X mm deep, A mm2, to put back" and REMOVE lays it
-(one Undo, `textReplace`).
+`nso_resurface.js` (THREE-free, node-tested: `npm run resurface:test`). It is
+what **Text -> Remove** runs on (docs/TEXT.md): hover a letter to light it, click
+to lock it, click more to add, REMOVE fills the green (one Undo, `textReplace`).
+
+API: `scan(soup, {point, normal}, {half})` reads the box once and returns the pieces
+of work (`pieces`, `owner`, `group(id, reach)`, `pick(ids)` -> a plan for those pieces);
+`pieceAt(scan, p)` which piece a point is on; `highlight(soup, scan)` the triangles of
+each piece to draw; `axisAt(soup, p, r, view)` a first guess at the axis from the skin
+round a point; `apply(soup, plan)` the new soup. `plan(soup, hit, opts)` is scan + a
+default pick (the click's piece and what is within `reach`).
 
 Why it exists: Remove by caps reads the recess's own floor, walls and rim, and a
 scan-derived mesh (`text_repair_test.3mf`, the DUKE DOKS hand: 148,000 triangles,
@@ -36,13 +41,24 @@ does not trust the work's own triangles at all.
    and spread inward by Laplace's equation, so the new face meets the old with no
    step and keeps whatever slope and bumps the face had at the edge. A hole
    straight through gets the same for its underside.
+2b. **The axis.** The first reading is along a guess (`axisAt`: the mean normal of the skin facing the
+   viewer round the point, with the walls that face it taken out, so a letter's walls do not pull it aside).
+   The walls of the pieces it finds are parallel to the axis the work was done along, so it is the direction
+   least present in their normals; if that differs by more than half a degree the box is read again along
+   it (up to three times). Walls that lean back under a skew axis hide from the rays - the first version
+   found 8 letters from one click point and 3 or 6 from another.
 4. **Replace the skin, no boolean.** Every triangle whose centroid stands in the
    footprint and within the heightfield's window (and, round a through hole, its
    wall and underside) is dropped. A shut-in patch of kept skin that small is
    work too (a splinter, a flake of old wall - a hole in the hole that no cap can
    go round) and goes with it. The rim of the hole is read as loops of the
-   kept triangles' own edges, and `NSO_Text.capLoops` closes each: ear-clipped,
-   refined where the new surface stands more than 0.01 mm off a chord. Nothing is
+   kept triangles' own edges. If a polygon of that rim can be ear-clipped and the result seals (every cap
+   edge met by its opposite, every rim edge walked once, no cap edge joining two corners the kept skin
+   already joins) `NSO_Text.capLoops` lays it, refined where the new surface stands more than 0.01 mm off
+   a chord. If not - the rim of a scan is as noisy as the scan: splinters, folds a few microns deep - the
+   new skin is laid on a clean outline a little inside the hole (the covered nodes, eroded 3 nodes, traced
+   like a letter) and the strip between the rim and the outline is **zipped**, rim corner to outline corner by
+   the shortest diagonal: a closed loop of vertices always zips, however folded, and the strip is manifold. Nothing is
    left coincident with anything, so the piece is as watertight as it was and a
    piece that pierces itself elsewhere is not asked to be a solid first.
 

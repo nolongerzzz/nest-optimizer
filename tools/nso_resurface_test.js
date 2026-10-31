@@ -15,6 +15,9 @@
 //   4. engraved text on a faceted cylinder: the curve is carried across (p95 < 0.03 mm), clean
 //   5. a shell piercing the piece elsewhere is left as it was; other work out of reach is left alone
 //   6. refusals in words: a click on the plain face, a click on a wall
+//   8. pieces one at a time: scan the box once, every letter is a piece of its own that can be found under a
+//      point (pieceAt), lit (highlight), grouped by reach, and filled alone or in any subset, the others untouched,
+//      from a skewed first guess at the axis too
 //   7. a mesh full of splinters (every face of the engraving split, a cloud of zero-area triangles
 //      between): the kept splinters inside the work are taken with it, no loop of no area is left
 'use strict';
@@ -250,6 +253,38 @@ function disc3(cx, cy, Rr, z0, z1, m) {
     const r = pl.ok ? R.apply(split, pl) : { ok: false, reason: pl.reason };
     gate('7 a mesh whose engraved triangles are split in three is filled all the same: volume back, checker clean', pl.ok && r.ok && near(volume(r.soup), v0, 2e-3 * v0) && clean(check(r.soup)),
       pl.ok ? (r.ok ? JSON.stringify(check(r.soup)) : r.reason) : pl.reason);
+  }
+
+
+  /* 8 --------------------------------------------------------------- */
+  {
+    const hitPt = [sx, 20, 5];
+    const skew = R.axisAt(A.soup, hitPt, 2.5, [0.3, 0.2, -1].map(v => v / Math.hypot(0.3, 0.2, 1)));
+    const sc = R.scan(A.soup, { point: hitPt, normal: skew }, { half: 26 });
+    gate('8a a skewed first guess at the axis is corrected by the walls: the scan is along z, and reads 3 pieces, none cut',
+      sc.ok && Math.abs(sc.frame.n[2]) > 0.9995 && sc.pieces.length === 3 && sc.pieces.every(p => !p.cut), sc.ok ? sc.frame.n.map(v => v.toFixed(4)) + ' ' + sc.pieces.length + ' pieces' : sc.reason);
+    const anchors = sc.pieces.map((p, i) => R.pieceAnchor(sc, i));
+    const ids = anchors.map(a => R.pieceAt(sc, a));
+    gate('8b a point on each letter finds that letter, and no two are the same', ids.every((v, i) => v === i), ids.join());
+    gate('8c grouping: reach 5 takes the three letters, reach 0.1 only the one', sc.group(0, 5).length === 3 && sc.group(0, 0.1).length === 1, sc.group(0, 5).join() + ' / ' + sc.group(0, 0.1).join());
+    const hl = R.highlight(A.soup, sc);
+    gate('8d every piece has its own triangles to light (floor and walls: at least 20 each, none shared)', hl.length === 3 && hl.every(a => a.length >= 20 * 9) && hl.reduce((n, a) => n + a.length, 0) < A.soup.length, hl.map(a => a.length / 9).join());
+    const vA = volume(A.soup), per = (v0 - vA) / 3;
+    const subsets = [[0], [1], [2], [0, 1], [1, 2], [0, 2], [0, 1, 2]];
+    const t0 = Date.now();
+    const rows = [];
+    let allGood = true;
+    subsets.forEach(sub => {
+      const pl = sc.pick(sub), r = pl.ok ? R.apply(A.soup, pl) : { ok: false, reason: pl.reason };
+      const c = r.ok ? check(r.soup) : null;
+      const filled = anchors.map((a, i) => r.ok ? rayTop(r.soup, a[0], a[1]) : NaN);
+      const good = r.ok && clean(c) && near(volume(r.soup) - vA, per * sub.length, 0.06 * per) &&
+        anchors.every((a, i) => sub.includes(i) ? near(filled[i], 6, 5e-3) : near(filled[i], 5, 5e-3));
+      if (!good) allGood = false;
+      rows.push('[' + sub + '] ' + (r.ok ? (good ? 'ok' : 'WRONG ' + JSON.stringify(c) + ' ' + (volume(r.soup) - vA).toFixed(2) + ' of ' + (per * sub.length).toFixed(2) + ' tops ' + filled.map(z => z.toFixed(3))) : r.reason));
+    });
+    gate('8e any subset of the three letters can be filled alone: those and no others come back (floor 5 -> face 6, the rest still 5), volume by a third each, checker clean', allGood, rows.join(' | '));
+    gate('8f quick (7 fills under 6 s)', Date.now() - t0 < 6000, (Date.now() - t0) + ' ms');
   }
 
   console.log(fails ? '\n' + fails + ' FAILED' : '\nPASSED all gates');

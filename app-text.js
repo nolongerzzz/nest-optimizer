@@ -36,15 +36,14 @@
 // runs longer than 300 ms the #226 bar sweeps under the readout (NSO_BoolBusy).
 // The card stays open for the next face; the fields stay.
 //
-// REMOVE (the Stamp | Remove switch at the top of the card): click the floor of an
-// engraved letter and the recess is filled back flush with its face. It needs no
-// memory of the stamp - NSO_Text.pockets reads the recess off the piece (a floor,
-// its walls, a rim), so it works on text stamped last week and after other edits,
-// on a flat face or a curved one. "Whole word" (on) takes every recess of the same
-// axis and depth within Reach mm of the one clicked, so a word goes in one click.
-// The ghost is the cap that will be laid over each rim, green; REMOVE drops the
-// floors and walls and lays the caps (mesh surgery, no boolean), one Undo
-// (textReplace). Drag and the arrows are the stamp's, off here.
+// REMOVE (the Stamp | Remove switch at the top of the card): the pointer is the tool. NSO_Resurface.scan
+// reads the box round the first point once and numbers every piece of work in it (engraving, trench,
+// recess, hole); the pointer over one lights it (amber), a click locks it (green), more clicks add, a click on
+// a locked one lets it go, Escape lets go of all. "Whole word" (on) takes the pieces within Reach mm of the
+// one under the pointer too. REMOVE lays the skin again over what is green (NSO_Resurface.apply: mesh
+// surgery, no boolean), one Undo (textReplace). It needs no memory of the stamp, so it works on text
+// stamped last week, after other edits, on a flat face or a curved one, on a scan full of splinters.
+// Drag and the arrows are the stamp's, off here. docs/RESURFACE.md.
 //
 // PAINT SCOPE: WHOLE-PIECE. Per the scoping rule in docs/HANDOFF.md: the text
 // is cut through whatever faces it meets, curved ones too, and paint names its
@@ -139,6 +138,7 @@ function NSO_textSetMode(mode) {
   if (B.drag) NSO_textDragEnd(false);
   B.mode = mode;
   B.hit = null; B.plan = null; B.key = '';
+  if (B.rm) { if (B.rm.timer) clearTimeout(B.rm.timer); B.rm = null; }
   NSO_textClearGhost();
   var card = NSO_textEl('text-card');
   if (card) card.classList.toggle('is-remove', mode === 'remove');
@@ -148,7 +148,7 @@ function NSO_textSetMode(mode) {
   });
   NSO_textPreview();
   if (typeof setStatus === 'function') {
-    setStatus(mode === 'remove' ? 'Text remove - click the floor of an engraved letter to fill it back. Escape to stop.'
+    setStatus(mode === 'remove' ? 'Text remove - move over an engraved letter, click to lock it, click more to add, then REMOVE. Escape clears, then closes.'
                                 : 'Text open - type the text, then click a face to place it. Close the menu or press Escape to stop.');
   }
 }
@@ -236,65 +236,187 @@ function NSO_textPreview() {
   NSO_textSyncButtons();
   return pl;
 }
-/* REMOVE's plan: the recesses under the click, drawn as the fill. */
+/* REMOVE: the piece's pieces of work, hovered, picked, filled. A scan of the box round the first point
+   (NSO_Resurface.scan) finds every engraving, trench and recess in it, each a piece of work with its own number;
+   the pointer over one highlights it (amber), a click locks it (green), more clicks add more, a click on a
+   locked one lets it go. With Whole word, a click or a hover takes the pieces within Reach of it too. REMOVE fills
+   what is green. */
+var TEXT_BOX_MM = 16;                   // half the box one scan reads
+function NSO_textRm() {
+  var B = NSO_textUI();
+  if (!B.rm) B.rm = { soup: null, modelId: null, scan: null, sel: [], hover: [], plan: null, tris: null, timer: 0, pend: null };
+  return B.rm;
+}
+function NSO_textRmReset(say) {
+  var B = NSO_textUI(), R = B.rm;
+  if (R && R.timer) clearTimeout(R.timer);
+  B.rm = null; B.plan = null; B.key = '';
+  NSO_textClearGhost();
+  if (say !== false) NSO_textReadout(NSO_textRmHint());
+  NSO_textSyncButtons();
+}
+function NSO_textRmHint() {
+  return NSO_textModel() ? 'Move over an engraved letter to see what will be filled; click it to lock it, click more to add. REMOVE fills the green.'
+                         : 'Select a piece, then move over an engraved letter to see what will be filled.';
+}
 function NSO_textRemoveOpts() {
   var w = NSO_textEl('chk-text-word'), r = NSO_textNum('inp-text-reach');
   return { word: !w || !!w.checked, reach: r >= 0 ? r : 3 };
 }
-function NSO_textPreviewRemove(m) {
-  var B = NSO_textUI();
-  if (!m || !B.hit || B.modelId !== m.id) {
-    B.plan = null; B.key = '';
-    NSO_textClearGhost();
-    NSO_textReadout(m ? 'Click the floor of an engraved letter to fill it back.' : 'Click the floor of an engraved letter on a piece to fill it back.');
-    NSO_textSyncButtons();
+// The scan that covers raw point `pt` (a hit: { point, normal, view }), reading the box again when it does not.
+function NSO_textRmEnsure(m, hit) {
+  var R = NSO_textRm(), sc = R.scan;
+  if (sc && R.soup === m.rawTris && R.modelId === m.id) {
+    var fr = sc.frame, w = [hit.point[0] - fr.o[0], hit.point[1] - fr.o[1], hit.point[2] - fr.o[2]];
+    var x = w[0] * fr.e1[0] + w[1] * fr.e1[1] + w[2] * fr.e1[2], y = w[0] * fr.e2[0] + w[1] * fr.e2[1] + w[2] * fr.e2[2], z = w[0] * fr.n[0] + w[1] * fr.n[1] + w[2] * fr.n[2];
+    if (Math.abs(x) < 0.75 * sc.box && Math.abs(y) < 0.75 * sc.box && Math.abs(z) < 6) return sc;
+  }
+  var fb = R.fail;                                          // a reading that found nothing is not repeated for every move of the pointer
+  if (fb && R.soup === m.rawTris && R.modelId === m.id && Math.hypot(hit.point[0] - fb.p[0], hit.point[1] - fb.p[1], hit.point[2] - fb.p[2]) < 0.5 * TEXT_BOX_MM) {
+    B_textRmSay(fb.say, true);
     return null;
   }
-  var o = NSO_textRemoveOpts(), key = 'r|' + m.id + '|' + JSON.stringify(B.hit) + '|' + JSON.stringify(o);
-  if (B.key === key && B.soup === m.rawTris && B.plan) { NSO_textSyncButtons(); return B.plan; }
+  // a new reading: the selection is carried across by where its pieces are
+  var keep = [];
+  if (sc && R.soup === m.rawTris) R.sel.forEach(function (id) { var a = NSO_Resurface.pieceAnchor(sc, id); if (a) keep.push(a); });
+  var axis = NSO_Resurface.axisAt(m.rawTris, hit.point, 2.5, hit.view) || hit.normal;
+  var ns;
+  try { ns = NSO_Resurface.scan(m.rawTris, { point: hit.point, normal: axis }, { half: TEXT_BOX_MM }); }
+  catch (err) { ns = { ok: false, reason: (err && err.message) || String(err) }; }
+  R.soup = m.rawTris; R.modelId = m.id; R.tris = null; R.hover = []; R.fail = null;
+  if (!ns.ok) {
+    var say = /no pit/.test(ns.reason || '') ? 'Text: no engraved work within ' + TEXT_BOX_MM + ' mm of that point - move onto a letter.' : 'Text: ' + ns.reason;
+    R.fail = { p: hit.point, say: say };
+    R.scan = null; R.sel = []; R.plan = null; B_textRmSay(say, true);
+    return null;
+  }
+  R.scan = ns;
+  R.sel = [];
+  keep.forEach(function (a) { var id = NSO_Resurface.pieceAt(ns, a); if (id >= 0 && R.sel.indexOf(id) < 0) R.sel.push(id); });
+  NSO_textRmPlan();
+  return ns;
+}
+function B_textRmSay(text, bad) { NSO_textReadout(text, bad); NSO_textSyncButtons(); }
+// The pieces a hover or click at piece `id` stands for.
+function NSO_textRmGroup(id) {
+  var R = NSO_textRm(), o = NSO_textRemoveOpts();
+  if (id < 0 || !R.scan) return [];
+  return o.word ? R.scan.group(id, o.reach) : [id];
+}
+// The plan for what is locked.
+function NSO_textRmPlan() {
+  var B = NSO_textUI(), R = NSO_textRm();
+  if (!R.scan || !R.sel.length) { R.plan = null; B.plan = null; B.key = ''; NSO_textRmDraw(); NSO_textRmSay(); return null; }
   var pl;
-  try { pl = NSO_Text.pockets(m.rawTris, B.hit, o); }
+  try { pl = R.scan.pick(R.sel); }
   catch (err) { pl = { ok: false, reason: (err && err.message) || String(err) }; }
-  if (pl.ok) {                                              // the caps are the fill: if they cannot be laid, say so now
-    var cp = NSO_Text.caps(pl);
-    if (!cp.soup) pl = { ok: false, reason: 'found ' + pl.reason + ', but ' + cp.reason };
-  }
-  if (!pl.ok && typeof NSO_Resurface !== 'undefined') {     // a rim that will not close (a scan, a repaired mesh): lay the whole skin again
-    var rs;
-    try { rs = NSO_Resurface.plan(m.rawTris, B.hit, { half: Math.max(6, Math.min(30, o.reach * 2 + 4)), reach: o.reach }); }
-    catch (err2) { rs = { ok: false, reason: (err2 && err2.message) || String(err2) }; }
-    if (rs && rs.ok) pl = { ok: true, resurface: rs, reason: rs.reason };
-  }
-  B.plan = pl; B.key = key; B.soup = m.rawTris;
-  NSO_textDrawFill(m);
-  NSO_textReadout(pl.ok ? 'Fill ' + pl.reason + ' - REMOVE puts them back.' : 'Text: ' + pl.reason, !pl.ok);
-  NSO_textSyncButtons();
+  R.plan = pl; B.plan = pl; B.key = 'rm';
+  NSO_textRmDraw();
+  NSO_textRmSay();
   return pl;
 }
-function NSO_textDrawFill(m) {
+function NSO_textRmSay() {
+  var R = NSO_textRm(), pl = R.plan;
+  if (!R.sel.length) { NSO_textReadout(R.hover.length ? 'Click to lock ' + (R.hover.length === 1 ? 'this letter' : R.hover.length + ' letters') + ' for REMOVE.' : NSO_textRmHint()); NSO_textSyncButtons(); return; }
+  if (pl && pl.ok) {
+    NSO_textReadout(R.sel.length + (R.sel.length === 1 ? ' piece' : ' pieces') + ' locked, up to ' + NSO_textFmt(pl.depth) + ' mm deep, ' + NSO_textFmt(pl.area) + ' mm² - REMOVE fills ' + (R.sel.length === 1 ? 'it' : 'them') + '. Click a locked one to let it go, Escape to clear.');
+  } else {
+    NSO_textReadout('Text: ' + (pl ? pl.reason : 'nothing to fill'), true);
+  }
+  NSO_textSyncButtons();
+}
+// Amber: under the pointer, not yet locked. Green: locked.
+function NSO_textRmDraw() {
   NSO_textClearGhost();
-  var B = NSO_textUI(), pl = B.plan;
-  if (typeof THREE === 'undefined' || !state.scene || !pl || !pl.ok || pl.resurface) return;
-  var cp = NSO_Text.caps(pl);
-  if (!cp.soup) return;
+  var B = NSO_textUI(), R = NSO_textRm(), m = NSO_textModel();
+  if (typeof THREE === 'undefined' || !state.scene || !m || !R.scan) return;
+  if (!R.tris) R.tris = NSO_Resurface.highlight(m.rawTris, R.scan);
   var group = new THREE.Group();
   group.name = 'textGhost';
   group.matrixAutoUpdate = false;
-  var soup = cp.soup, flat = new Float32Array(soup.length);
-  for (var k = 0; k < soup.length; k += 3) {
-    var d = NSO_textRawToDisplay(m, [soup[k], soup[k + 1], soup[k + 2]]);
-    flat[k] = d[0]; flat[k + 1] = d[1]; flat[k + 2] = d[2];
+  function add(ids, color, opacity) {
+    var n = 0, k, i;
+    ids.forEach(function (id) { if (R.tris[id]) n += R.tris[id].length; });
+    if (!n) return;
+    var flat = new Float32Array(n), at = 0;
+    ids.forEach(function (id) {
+      var a = R.tris[id];
+      if (!a) return;
+      for (k = 0; k < a.length; k += 3) {
+        var d = NSO_textRawToDisplay(m, [a[k], a[k + 1], a[k + 2]]);
+        flat[at++] = d[0]; flat[at++] = d[1]; flat[at++] = d[2];
+      }
+    });
+    var geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(flat, 3));
+    var mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: color, transparent: true, opacity: opacity, side: THREE.DoubleSide,
+      depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }));
+    mesh.renderOrder = TEXT_RENDER_ORDER; mesh.userData.skipXray = true; mesh.userData.textFill = true;
+    mesh.raycast = function () {}; mesh.frustumCulled = false;
+    group.add(mesh);
   }
-  var geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(flat, 3));
-  var fill = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: TEXT_FILL_COLOR, transparent: true, opacity: 0.55,
-    depthTest: false, depthWrite: false, side: THREE.DoubleSide }));
-  fill.renderOrder = TEXT_RENDER_ORDER; fill.userData.skipXray = true; fill.userData.textFill = true;
-  fill.raycast = function () {}; fill.frustumCulled = false;
-  group.add(fill);
+  add(R.hover.filter(function (id) { return R.sel.indexOf(id) < 0; }), TEXT_GHOST_COLOR, 0.7);
+  add(R.sel, TEXT_FILL_COLOR, 0.75);
+  if (!group.children.length) return;
   if (typeof nsoHelpers !== 'undefined') nsoHelpers.attach(state.scene, group, 'text'); else state.scene.add(group);
   B.ghost = group;
   NSO_textFollow();
+}
+// The point under (x, y) as { point, normal, view } in raw, or null.
+function NSO_textRmHit(clientX, clientY) {
+  var m = NSO_textModel(), t = NSO_textPick(clientX, clientY);
+  if (!m || !t || t.sourceId !== m.id) return null;
+  var ray = NSO_textRawRay(m, clientX, clientY);
+  return { point: NSO_textDisplayToRaw(m, t.local), normal: t.normal, view: ray ? ray.d : null };
+}
+function NSO_textRmHoverSoon(clientX, clientY) {
+  var R = NSO_textRm();
+  R.pend = { x: clientX, y: clientY };
+  if (R.timer) return;
+  R.timer = setTimeout(function () {
+    var B = NSO_textUI(), R2 = B.rm, p = R2 && R2.pend;
+    if (!R2) return;
+    R2.timer = 0; R2.pend = null;
+    if (B.open && B.mode === 'remove' && p) NSO_textRmHover(p.x, p.y);
+  }, 40);
+}
+function NSO_textRmHover(clientX, clientY) {
+  var B = NSO_textUI(), R = NSO_textRm(), m = NSO_textModel();
+  if (!m || B.busy) return;
+  var hit = NSO_textRmHit(clientX, clientY), ids = [];
+  if (hit) {
+    var sc = NSO_textRmEnsure(m, hit);
+    if (sc) ids = NSO_textRmGroup(NSO_Resurface.pieceAt(sc, hit.point));
+  }
+  if (ids.join() === R.hover.join()) return;
+  R.hover = ids;
+  NSO_textRmDraw();
+  if (!R.sel.length) NSO_textRmSay();
+}
+// A press: lock the piece (and the ones with it), or let a locked one go. False when the press is not on a piece.
+function NSO_textRmClick(clientX, clientY) {
+  var B = NSO_textUI(), R = NSO_textRm(), m = NSO_textModel();
+  if (!m) return false;
+  var hit = NSO_textRmHit(clientX, clientY);
+  if (!hit) return false;
+  B.modelId = m.id;
+  var sc = NSO_textRmEnsure(m, hit);
+  if (!sc) return true;
+  var id = NSO_Resurface.pieceAt(sc, hit.point);
+  if (id < 0) { NSO_textReadout('Text: no engraved work under that point - move onto a letter.', true); return true; }
+  var ids = NSO_textRmGroup(id), allIn = ids.every(function (i) { return R.sel.indexOf(i) >= 0; });
+  if (allIn) R.sel = R.sel.filter(function (i) { return ids.indexOf(i) < 0; });
+  else ids.forEach(function (i) { if (R.sel.indexOf(i) < 0) R.sel.push(i); });
+  R.hover = ids;
+  NSO_textRmPlan();
+  return true;
+}
+function NSO_textPreviewRemove(m) {
+  var B = NSO_textUI(), R = B.rm;
+  if (!m || (R && (R.modelId !== m.id || R.soup !== m.rawTris))) { NSO_textRmReset(); return null; }
+  if (!R) NSO_textReadout(NSO_textRmHint());
+  NSO_textSyncButtons();
+  return B.plan || null;
 }
 function NSO_textSchedule() {
   var B = NSO_textUI();
@@ -586,7 +708,7 @@ async function NSO_textGo() {
 }
 
 // PAINT SCOPE: WHOLE-PIECE - see the header and docs/HANDOFF.md.
-// REMOVE is mesh surgery (NSO_Text.fill): no boolean, so no worker, no bar, no merge of overlapping
+// REMOVE is mesh surgery (NSO_Resurface.apply): no boolean, so no worker, no bar, no merge of overlapping
 // shells first - a piece that is open or self-piercing elsewhere is not asked to be a solid.
 function NSO_textRemoveGo() {
   var B = NSO_textUI(), m = NSO_textModel();
@@ -604,20 +726,19 @@ function NSO_textRemoveGo() {
     }
     return { ok: false, reason: 'painted faces: ' + painted, painted: painted };
   }
-  var pl = NSO_textPreview();
-  if (!pl) return refuse('click the floor of an engraved letter first');
+  var R = B.rm, pl = R && R.plan;
+  if (!pl) return refuse('click an engraved letter first - it turns green when it is locked');
   if (!pl.ok) return refuse(pl.reason);
   var res;
-  try { res = pl.resurface ? NSO_Resurface.apply(m.rawTris, pl.resurface) : NSO_Text.fill(m.rawTris, pl); }
+  try { res = NSO_Resurface.apply(m.rawTris, pl); }
   catch (err) { console.error('[text]', err); return refuse((err && err.message) || String(err)); }
   if (!res.ok) return refuse(res.reason);
-  var txt = 'Text removed - ' + pl.reason;
+  var txt = 'Text removed - ' + R.sel.length + (R.sel.length === 1 ? ' piece' : ' pieces') + ', up to ' + NSO_textFmt(pl.depth) + ' mm deep';
   if (!NSO_sculptCommitRaw(m, res.soup, 'textReplace', txt)) return refuse('the result could not be committed');
   if (typeof updateAdjustUI === 'function') updateAdjustUI();
-  B.hit = null; B.plan = null; B.key = '';
-  NSO_textClearGhost();
-  NSO_textReadout('Removed ' + pl.reason + ' - click the next letter.');
-  NSO_textSyncButtons();
+  B.hit = null;
+  NSO_textRmReset(false);
+  NSO_textReadout('Removed - ' + (R.sel.length === 1 ? '1 piece' : R.sel.length + ' pieces') + '. Move over the next letter.');
   return { ok: true, plan: pl };
 }
 
@@ -668,6 +789,7 @@ function NSO_textClose() {
   if (B.timer) { clearTimeout(B.timer); B.timer = 0; }
   B.hover = false;
   B.open = false; B.hit = null; B.plan = null; B.key = '';
+  if (B.rm) { if (B.rm.timer) clearTimeout(B.rm.timer); B.rm = null; }
   NSO_textClearGhost();
   var cv = state.renderer && state.renderer.domElement;
   if (cv) cv.classList.remove('text-cur-grab');
@@ -695,6 +817,10 @@ function NSO_textTick() {
   if (!B.busy && (state.carveArmed || state.maskPaint || (state.punch && state.punch.open))) { NSO_textClose(); return; }
   var m = NSO_textModel();
   if ((m ? m.id : null) !== B.modelId) { B.modelId = m ? m.id : null; B.hit = null; NSO_textPreview(); }
+  else if (B.mode === 'remove') {
+    if (B.rm && m && B.rm.scan && (B.rm.soup !== m.rawTris || B.rm.modelId !== m.id)) NSO_textRmReset();   // another bake, an Undo: the readings are stale
+    else NSO_textFollow();
+  }
   else if (m && B.hit && m.rawTris !== B.soup && !B.busy) NSO_textPreview();
   else NSO_textFollow();
   B.raf = (typeof requestAnimationFrame === 'function') ? requestAnimationFrame(NSO_textTick) : 0;
@@ -714,7 +840,8 @@ function nsoTextState() {
     frame: pl && pl.frame ? { o: pl.frame.o, n: pl.frame.n, u: pl.frame.u, v: pl.frame.v } : null,
     readout: (NSO_textEl('text-readout') || {}).textContent || '',
     bad: !!(NSO_textEl('text-readout') && NSO_textEl('text-readout').classList.contains('is-bad')),
-    drag: !!B.drag
+    drag: !!B.drag,
+    sel: B.rm ? B.rm.sel.length : 0, hover: B.rm ? B.rm.hover.length : 0
   };
 }
 /* For the drive check: the text's middle on the screen, in client pixels. */
@@ -737,6 +864,12 @@ if (typeof document !== 'undefined') {
         if (NSO_textPick(ev.clientX, ev.clientY)) { ev.stopImmediatePropagation(); ev.preventDefault(); }
         return;
       }
+      if (B.mode === 'remove') {
+        if (!NSO_textRmClick(ev.clientX, ev.clientY)) return;       // a press off the piece orbits as ever
+        ev.stopImmediatePropagation();
+        ev.preventDefault();
+        return;
+      }
       if (NSO_textHitAt(ev.clientX, ev.clientY) && NSO_textDragBegin(ev)) {
         // out of a field, so the arrows are the text's after the drag
         var f = document.activeElement, card = NSO_textEl('text-card');
@@ -756,6 +889,7 @@ if (typeof document !== 'undefined') {
         if (B.hover) NSO_textHover(false);
         return;
       }
+      if (B.mode === 'remove') { NSO_textRmHoverSoon(ev.clientX, ev.clientY); return; }
       NSO_textHover(NSO_textHitAt(ev.clientX, ev.clientY));
     }
     function onUp(ev) {
@@ -785,6 +919,12 @@ if (typeof document !== 'undefined') {
       if (owner && IM.registered && IM.registered().indexOf(owner) >= 0) return;
       if (ev.key === 'Escape') {
         if (B.busy) return;                 // app-bool-busy.js's Escape stops the boolean
+        if (B.mode === 'remove' && B.rm && B.rm.sel.length) {      // the first Escape lets go of what is locked
+          B.rm.sel = []; B.rm.hover = [];
+          NSO_textRmPlan();
+          ev.preventDefault(); ev.stopImmediatePropagation();
+          return;
+        }
         NSO_textClose();
         if (typeof setStatus === 'function') setStatus('Text off');
         ev.preventDefault(); ev.stopImmediatePropagation();

@@ -25,3 +25,20 @@ PAINT SCOPE: unchanged - **WHOLE-PIECE**, the existing Text stand-down
   upload and is not in the repo (148k triangles) - numbers in the doc.
 - Not yet: raised work, its own card with a flow-up preview, a drive-check step for
   the fallback (it needs a mesh whose rim will not cap; the fixture is the hand).
+
+## Update: hover / lock / pick (2026-10-31)
+
+Text -> Remove is now a selection tool on Resurface instead of "click one recess, get what its click finds":
+`NSO_Resurface.scan` reads the box once (`half` 16, ~1 s on the 148k-triangle hand), pieces are numbered, hover
+lights (amber) and click locks (green) through `pieceAt` and `highlight`; `NSO_Text.pockets/caps/fill` is no
+longer called by the card. `app-text.js`: `state.text.rm = { soup, scan, sel, hover, plan, tris }`; Whole word now
+matters (`scan.group(id, reach)` vs the one); Escape clears the lock first. `nsoTextState()` gains `sel`, `hover`.
+Why the old behaviour was inconsistent: the box was centred on the click (so letters were cut by it), the axis
+was the clicked facet's normal (walls that lean back under a skew axis hide from the rays - 8 letters found from
+one place, 3 or 6 from another), and an apply that cut between letters met splinters.
+Engine changes that made every subset work on the hand: the axis from the walls; the footprint stops a node
+short of other pieces; down-facing fins in the footprint are skin; a hole's window reaches 3 nodes for the wall's
+foot; dropped flakes touching no work stay; splinter islands (by projected area) go; the cap tries the rim, then
+zips a strip to a clean outline (`zipTop`). The checker's numbers on the hand for each of the 8 letters alone:
+open 0, non-manifold 0, flipped 0, flat 0 (piercing pairs fall from 2544 to about 2000-2400, all of them
+elsewhere in the model).

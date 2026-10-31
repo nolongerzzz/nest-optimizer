@@ -277,7 +277,7 @@
       if (clickPiece < 0 && qi >= 0 && qi < N && pieceOf[qi] >= 0 && !big(pieces[pieceOf[qi]])) clickPiece = pieceOf[qi];
     }
     if (clickPiece < 0 && pieceOf[cid] >= 0) clickPiece = pieceOf[cid];       // the click is on a big piece itself: a trench floor
-    var isFace = pieces.map(function (Pc) { return Pc.id !== clickPiece && big(Pc); });
+    var isFace = pieces.map(function (Pc) { return (Pc.id !== clickPiece || Pc.nodes.length > 0.3 * valid) && big(Pc); });     // what covers a third of the box is the face, clicked or not
     pieces.forEach(function (Pc) {
       if (isFace[Pc.id]) return;
       var hC = 0, nC = 0, hD = 0, nD = 0;
@@ -339,13 +339,25 @@
     comps = comps.filter(function (C) { return C.nodes.length >= o.minWork; });
     if (!comps.length) return refuse('no pit with walls stands in this box - the box is not on any work, or the direction is not the one it was done from');
     function gap(A, B) { return Math.hypot(Math.max(0, A.lo[0] - B.hi[0], B.lo[0] - A.hi[0]), Math.max(0, A.lo[1] - B.hi[1], B.lo[1] - A.hi[1])) * res; }
-    var first = null, bd = Infinity;
-    comps.forEach(function (C) { var dd = 0; C.nodes.forEach(function (x2) { var dx = x2 % nx - ci, dy = ((x2 / nx) | 0) - cj, e = Math.hypot(dx, dy); if (!dd || e < dd) dd = e; }); if (dd < bd) { bd = dd; first = C; } });
-    var chosen = [first], grew = true;
-    while (grew) {
-      grew = false;
-      comps.forEach(function (C) { if (chosen.indexOf(C) < 0 && chosen.some(function (D) { return gap(C, D) <= o.reach; })) { chosen.push(C); grew = true; } });
+    comps.forEach(function (C, i) { C.id = i; });
+    var owner = new Int32Array(N).fill(-1);
+    comps.forEach(function (C) { C.nodes.forEach(function (x2) { owner[x2] = C.id; }); });
+    var pieces = comps.map(function (C) {
+      return { id: C.id, seed: C.nodes[0], nodes: C.nodes.length, area: C.nodes.length * res * res,
+               lo: [G.x0 + C.lo[0] * res, G.y0 + C.lo[1] * res], hi: [G.x0 + C.hi[0] * res, G.y0 + C.hi[1] * res],
+               cut: C.lo[0] <= 2 || C.lo[1] <= 2 || C.hi[0] >= nx - 3 || C.hi[1] >= ny - 3 };       // runs off the box: not whole
+    });
+    // pieces within reach of each other, single linkage, starting from some: a word
+    function link(ids, reach) {
+      var out = ids.slice(), grew = true;
+      while (grew) {
+        grew = false;
+        comps.forEach(function (C) { if (out.indexOf(C.id) < 0 && out.some(function (d2) { return gap(C, comps[d2]) <= reach; })) { out.push(C.id); grew = true; } });
+      }
+      return out;
     }
+    var fr0 = { o: p0, n: fr.n, e1: fr.e1, e2: fr.e2 };
+    function finish(chosen) {
     var inMask = new Uint8Array(N), nMask = 0;
     chosen.forEach(function (C) { C.nodes.forEach(function (x2) { inMask[x2] = 1; nMask++; }); });
     // distance in nodes from the chosen work (Chebyshev), out to band
@@ -435,12 +447,32 @@
     return {
       debug: dbg, ok: true, count: chosen.length, depth: maxDepth, area: area, volume: vol, holes: holes > 0, nodes: N, res: res,
       frame: { o: p0, n: fr.n, e1: fr.e1, e2: fr.e2 },
-      _g: { G: G, H: S.H, T: Tt, B: Tb, hnear: hnear, dist: dist, margin: o.margin },
+      _g: { G: G, H: S.H, T: Tt, B: Tb, hnear: hnear, dist: dist, margin: o.margin, owner: owner, inMask: inMask },
       reason: (chosen.length === 1 ? '1 piece of work' : chosen.length + ' pieces of work') + ', up to ' + fmt(maxDepth) + ' mm deep, ' + fmt(area) + ' mm², to put back'
     };
+    }
+    var chosen0;
+    if (o.pick) chosen0 = o.pick.map(function (i2) { return comps[i2]; }).filter(Boolean);
+    else {
+      var first = null, bd = Infinity;
+      comps.forEach(function (C) { var dd = 0; C.nodes.forEach(function (x2) { var dx = x2 % nx - ci, dy = ((x2 / nx) | 0) - cj, e = Math.hypot(dx, dy); if (!dd || e < dd) dd = e; }); if (dd < bd) { bd = dd; first = C; } });
+      chosen0 = link([first.id], o.reach).map(function (i2) { return comps[i2]; });
+    }
+    var res0;
+    if (o.scanOnly) res0 = { debug: o.debug ? { nx: nx, ny: ny, H: S.H, mask: mask } : null, ok: true, scan: true, frame: fr0, pieces: pieces, count: pieces.length, reason: pieces.length + ' pieces of work in the box' };
+    else {
+      res0 = finish(chosen0);
+      if (!res0.ok) return res0;
+    }
+    res0.pieces = pieces; res0.owner = owner; res0.grid = G; res0.frame = fr0; res0.box = o.half;
+    res0.group = function (id, reach) { return link([id], reach >= 0 ? reach : o.reach); };
+    res0.pick = function (ids) { var r2 = finish(ids.map(function (i2) { return comps[i2]; }).filter(Boolean)); if (r2.ok) { r2.pieces = pieces; r2.owner = owner; r2.grid = G; } return r2; };
+    res0.H = S.H;
+    return res0;
   }
 
   /* The piece with its skin replaced over the work: see the header, step 5. */
+  var ISLE_MAX = 2000;
   var ISLAND = 400;                                             // a shut-in patch of skin this small is work, not island
   function apply(soup, pl) {
     if (!pl || !pl.ok || !pl._g) return { ok: false, reason: 'there is no plan to apply' };
@@ -467,17 +499,25 @@
       if (i0 < 1 || j0 < 1 || i0 >= nx - 1 || j0 >= ny - 1) continue;
       var dd = g.dist[j0 * nx + i0];
       if (dd < 0 || dd > g.margin) continue;
-      var hmin = Infinity, hmax = -Infinity, bmin = Infinity, bmax = -Infinity;
-      for (var dy = -1; dy <= 1; dy++) for (var dx = -1; dx <= 1; dx++) {
+      // other work in the box is not being filled: the hole stops a node short of its walls
+      var other = false;
+      for (var oy = -1; oy <= 1 && !other; oy++) for (var ox = -1; ox <= 1; ox++) {
+        var oi = (j0 + oy) * nx + i0 + ox;
+        if (g.owner[oi] >= 0 && !g.inMask[oi]) { other = true; break; }
+      }
+      if (other) continue;
+      var hmin = Infinity, hmax = -Infinity, bmin = Infinity, bmax = -Infinity, rw = dd <= 2 ? 3 : 1;     // over the work the wall's foot is a few nodes from its top
+      for (var dy = -rw; dy <= rw; dy++) for (var dx = -rw; dx <= rw; dx++) {
+        if (i0 + dx < 0 || j0 + dy < 0 || i0 + dx >= nx || j0 + dy >= ny) continue;
         var hv = g.H[(j0 + dy) * nx + i0 + dx];
         if (!isNaN(hv)) { if (hv < hmin) hmin = hv; if (hv > hmax) hmax = hv; }
-        if (Bz) {
-          var bv = Bz[(j0 + dy) * nx + i0 + dx];
-          if (!isNaN(bv)) { if (bv < bmin) bmin = bv; if (bv > bmax) bmax = bv; }
-        }
+      }
+      if (Bz) for (dy = -1; dy <= 1; dy++) for (dx = -1; dx <= 1; dx++) {
+        var bv = Bz[(j0 + dy) * nx + i0 + dx];
+        if (!isNaN(bv)) { if (bv < bmin) bmin = bv; if (bv > bmax) bmax = bv; }
       }
       var nd = M.nrm[3 * t] * n[0] + M.nrm[3 * t + 1] * n[1] + M.nrm[3 * t + 2] * n[2];
-      if (isFinite(hmin) && z >= hmin - 0.08 && z <= hmax + 0.3 && nd >= -0.3) { drop.add(t); continue; }     // skin (an underside is not)
+      if (isFinite(hmin) && z >= hmin - 0.08 && z <= hmax + 0.3) { drop.add(t); continue; }     // skin, and fins of it facing back (the underside is far below)
       if (Bz && isFinite(bmin)) {
         if (nd <= 0.3 && z >= bmin - 0.3 && z <= bmax + 0.08) drop.add(t);                                   // the underside round the hole
         else if (hn[j0 * nx + i0] && Math.abs(nd) < 0.5 && z >= bmin - 0.3 && z <= (isFinite(hmax) ? hmax : bmax) + 0.3) drop.add(t);   // the wall of the hole
@@ -487,26 +527,60 @@
     // Islands: a bit of kept skin cut off from the rest by the dropped triangles (a splinter, a flake of
     // old wall) is a hole in the hole - a loop of no area the cap cannot go round. A kept patch that is
     // shut in by the dropped set and small is part of the work: it goes too. A big one is a real
-    // island (a post through the work) and stays.
-    var verdict = new Map(), isle = Math.min(ISLAND, Math.floor(drop.size / 4) + 4);
-    drop.forEach(function (tt) {
-      for (var e = 0; e < 3; e++) {
-        var nb0 = NT._across(M, tt, e);
-        if (nb0 < 0 || drop.has(nb0) || verdict.has(nb0)) continue;
-        var comp = new Set([nb0]), stack = [nb0], big = false;
-        while (stack.length && !big) {
-          var cur = stack.pop();
-          for (var e2 = 0; e2 < 3; e2++) {
-            var nb2 = NT._across(M, cur, e2);
-            if (nb2 < 0 || drop.has(nb2) || comp.has(nb2)) continue;
-            comp.add(nb2); stack.push(nb2);
-            if (comp.size > isle) { big = true; break; }
+    // island (a post through the work, another letter) and stays.
+    function absorb() {
+      var verdict = new Map(), isle = Math.min(ISLAND, Math.floor(drop.size / 4) + 4);
+      Array.from(drop).forEach(function (tt) {
+        for (var e = 0; e < 3; e++) {
+          var nb0 = NT._across(M, tt, e);
+          if (nb0 < 0 || drop.has(nb0) || verdict.has(nb0)) continue;
+          var comp = new Set([nb0]), stack = [nb0], big = false;
+          while (stack.length && !big) {
+            var cur = stack.pop();
+            for (var e2 = 0; e2 < 3; e2++) {
+              var nb2 = NT._across(M, cur, e2);
+              if (nb2 < 0 || drop.has(nb2) || comp.has(nb2)) continue;
+              comp.add(nb2); stack.push(nb2);
+              if (comp.size > ISLE_MAX) { big = true; break; }
+            }
+          }
+          if (!big && comp.size > isle) {                              // a large patch is real if it covers something seen from along n
+            var proj = 0;
+            comp.forEach(function (c) {
+              var A = M.P[M.vid[3 * c]], B = M.P[M.vid[3 * c + 1]], C = M.P[M.vid[3 * c + 2]];
+              var ux = B[0] - A[0], uy = B[1] - A[1], uz = B[2] - A[2], vx = C[0] - A[0], vy = C[1] - A[1], vz = C[2] - A[2];
+              proj += Math.abs(((uy * vz - uz * vy) * n[0] + (uz * vx - ux * vz) * n[1] + (ux * vy - uy * vx) * n[2]) / 2);
+            });
+            if (proj > 0.05) big = true;
+          }
+          comp.forEach(function (c) { verdict.set(c, big); });
+          if (!big) comp.forEach(function (c) { drop.add(c); });
+        }
+      });
+    }
+    // dropped triangles that touch no work (a stray flake of another letter's wall within reach of the margin) stay
+    (function () {
+      var seenD = new Set();
+      Array.from(drop).forEach(function (t0) {
+        if (seenD.has(t0)) return;
+        var comp = [t0], st = [t0], touchesWork = false;
+        seenD.add(t0);
+        while (st.length) {
+          var c0 = st.pop();
+          var A = M.P[M.vid[3 * c0]], B = M.P[M.vid[3 * c0 + 1]], C = M.P[M.vid[3 * c0 + 2]];
+          var cx = (A[0] + B[0] + C[0]) / 3 - fr.o[0], cy = (A[1] + B[1] + C[1]) / 3 - fr.o[1], cz = (A[2] + B[2] + C[2]) / 3 - fr.o[2];
+          var x = cx * fr.e1[0] + cy * fr.e1[1] + cz * fr.e1[2], y = cx * fr.e2[0] + cy * fr.e2[1] + cz * fr.e2[2];
+          var i0 = Math.round((x - G.x0) / G.res), j0 = Math.round((y - G.y0) / G.res);
+          if (i0 >= 0 && j0 >= 0 && i0 < nx && j0 < ny && g.inMask[j0 * nx + i0]) touchesWork = true;
+          for (var e = 0; e < 3; e++) {
+            var nb = NT._across(M, c0, e);
+            if (nb >= 0 && drop.has(nb) && !seenD.has(nb)) { seenD.add(nb); comp.push(nb); st.push(nb); }
           }
         }
-        comp.forEach(function (c) { verdict.set(c, big); });
-        if (!big) comp.forEach(function (c) { drop.add(c); });
-      }
-    });
+        if (!touchesWork) comp.forEach(function (c) { drop.delete(c); });
+      });
+    })();
+    absorb();
     // the hole's edge: the dropped triangles' edges whose other side stays
     var rim = [], open = false;
     drop.forEach(function (tt) {
@@ -528,22 +602,221 @@
       var ti = bil(g.T, ex, ey), bi = bil(Bz, ex, ey);
       (bi !== null && (ti === null || Math.abs(ez - bi) < Math.abs(ez - ti)) ? rimB : rimT).push(ed);
     });
-    var tris = [], loopCount = 0;
+    var tris = [], loopCount = 0, why = '';
+    function to2(P, f) { var w0 = P[0] - f.o[0], w1 = P[1] - f.o[1], w2 = P[2] - f.o[2]; return [w0 * f.e1[0] + w1 * f.e1[1] + w2 * f.e1[2], w0 * f.e2[0] + w1 * f.e2[1] + w2 * f.e2[2]]; }
+    function area2(pts) { var a2 = 0; for (var q2 = 0; q2 < pts.length; q2++) { var u = pts[q2], w = pts[(q2 + 1) % pts.length]; a2 += u[0] * w[1] - w[0] * u[1]; } return a2 / 2; }
+    function pip(poly, pt) {
+      var c = false;
+      for (var i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        var a = poly[i], b = poly[j];
+        if ((a[1] > pt[1]) !== (b[1] > pt[1]) && pt[0] < (b[0] - a[0]) * (pt[1] - a[1]) / (b[1] - a[1]) + a[0]) c = !c;
+      }
+      return c;
+    }
+    // The top skin. The rim is the old mesh's own edge and as noisy as the mesh (splinters, folds a few
+    // microns deep), and a polygon of it cannot always be triangulated. So the new skin is not laid on
+    // the rim: it is laid on a clean outline a little inside (the covered area, eroded, traced like a
+    // letter), and the strip between the two is zipped, rim corner to outline corner. Any rim, however
+    // folded, is a closed loop of vertices and zips; the strip is manifold by construction.
+    function zipTop(loopsV) {
+      var nN = nx * ny, covered = new Uint8Array(nN), tt, k2;
+      drop.forEach(function (t2) {
+        if (M.nrm[3 * t2] * n[0] + M.nrm[3 * t2 + 1] * n[1] + M.nrm[3 * t2 + 2] * n[2] < 0.2) return;       // walls and undersides cover nothing
+        var q3 = [0, 1, 2].map(function (c) { return to2(M.P[M.vid[3 * t2 + c]], fr); });
+        var xa = Math.min(q3[0][0], q3[1][0], q3[2][0]), xb = Math.max(q3[0][0], q3[1][0], q3[2][0]);
+        var ya = Math.min(q3[0][1], q3[1][1], q3[2][1]), yb = Math.max(q3[0][1], q3[1][1], q3[2][1]);
+        var i1 = Math.max(0, Math.ceil((xa - G.x0) / G.res - 1e-6)), i2 = Math.min(nx - 1, Math.floor((xb - G.x0) / G.res + 1e-6));
+        var j1 = Math.max(0, Math.ceil((ya - G.y0) / G.res - 1e-6)), j2 = Math.min(ny - 1, Math.floor((yb - G.y0) / G.res + 1e-6));
+        var d0 = (q3[1][1] - q3[2][1]) * (q3[0][0] - q3[2][0]) + (q3[2][0] - q3[1][0]) * (q3[0][1] - q3[2][1]);
+        if (Math.abs(d0) < 1e-12) return;
+        for (var j = j1; j <= j2; j++) for (var i = i1; i <= i2; i++) {
+          var px = G.x0 + i * G.res, py = G.y0 + j * G.res;
+          var l1 = ((q3[1][1] - q3[2][1]) * (px - q3[2][0]) + (q3[2][0] - q3[1][0]) * (py - q3[2][1])) / d0;
+          var l2 = ((q3[2][1] - q3[0][1]) * (px - q3[2][0]) + (q3[0][0] - q3[2][0]) * (py - q3[2][1])) / d0;
+          if (l1 >= -1e-6 && l2 >= -1e-6 && 1 - l1 - l2 >= -1e-6) covered[j * nx + i] = 1;
+        }
+      });
+      // uncovered nodes shut in by covered ones: air (a hole straight through) is filled, a kept island is not
+      var comp2 = new Int32Array(nN).fill(-1), ncomp = 0, isIsland = [];
+      for (tt = 0; tt < nN; tt++) {
+        if (covered[tt] || comp2[tt] >= 0) continue;
+        var st = [tt], touches = false;
+        comp2[tt] = ncomp;
+        while (st.length) {
+          var c0 = st.pop(), cx0 = c0 % nx, cy0 = (c0 / nx) | 0;
+          if (cx0 === 0 || cy0 === 0 || cx0 === nx - 1 || cy0 === ny - 1) touches = true;
+          [cx0 + 1 < nx ? c0 + 1 : -1, cx0 > 0 ? c0 - 1 : -1, c0 + nx < nN ? c0 + nx : -1, c0 - nx >= 0 ? c0 - nx : -1].forEach(function (nb) {
+            if (nb >= 0 && !covered[nb] && comp2[nb] < 0) { comp2[nb] = ncomp; st.push(nb); }
+          });
+        }
+        isIsland.push(!touches ? 0 : -1);
+        ncomp++;
+      }
+      loopsV.forEach(function (lv) {                              // a rim loop that is a hole (CW): the component under it is an island
+        var pts = lv.map(function (v) { return to2(M.P[v], fr); });
+        if (area2(pts) >= 0) return;
+        for (var q2 = 0; q2 < pts.length; q2 += Math.max(1, (pts.length / 8) | 0)) {
+          var ii = Math.round((pts[q2][0] - G.x0) / G.res), jj = Math.round((pts[q2][1] - G.y0) / G.res);
+          for (var dy = -2; dy <= 2; dy++) for (var dx = -2; dx <= 2; dx++) {
+            var ni = ii + dx, nj = jj + dy;
+            if (ni < 0 || nj < 0 || ni >= nx || nj >= ny) continue;
+            var cc = comp2[nj * nx + ni];
+            if (cc >= 0 && isIsland[cc] === 0) isIsland[cc] = 1;
+          }
+        }
+      });
+      for (tt = 0; tt < nN; tt++) if (!covered[tt] && comp2[tt] >= 0 && isIsland[comp2[tt]] === 0) covered[tt] = 1;
+      var rimPoly = loopsV.map(function (lv) { return lv.map(function (v) { return to2(M.P[v], fr); }); });
+      for (var erode = 3; erode >= 1; erode--) {
+        // the area the new skin is laid on: covered nodes with every node within `erode` covered too
+        var inner = new Uint8Array(nN);
+        for (var j = erode; j < ny - erode; j++) for (var i = erode; i < nx - erode; i++) {
+          var okN = 1;
+          for (var dy = -erode; dy <= erode && okN; dy++) for (var dx = -erode; dx <= erode; dx++) if (!covered[(j + dy) * nx + i + dx]) { okN = 0; break; }
+          inner[j * nx + i] = okN;
+        }
+        var img = new Uint8Array(nN);
+        for (k2 = 0; k2 < nN; k2++) img[(ny - 1 - ((k2 / nx) | 0)) * nx + k2 % nx] = inner[k2] ? 255 : 0;       // the picture's row 0 is the top (y up)
+        var sh = NT.shape({ w: nx, h: ny, data: img, mmPerPx: G.res }, { keep: true, tolPx: 0.35, minAreaPx: 2 });
+        if (!sh.ok) { why = 'no clean outline fits inside the hole'; continue; }
+        var innerLoops = [];                                      // { pts: [[x, y]] in the frame, ccw: bool, hole: bool, poly }
+        sh.polys.forEach(function (P, pi) {
+          innerLoops.push({ pts: P.outer.map(function (q) { return [q[0] + G.x0, q[1] + G.y0]; }), hole: false, poly: pi });
+          P.holes.forEach(function (H) { innerLoops.push({ pts: H.map(function (q) { return [q[0] + G.x0, q[1] + G.y0]; }), hole: true, poly: pi }); });
+        });
+        if (pl.debugZip) pl.debugZip(erode, rimPoly.map(function (r) { return [r.length, area2(r)]; }), innerLoops.map(function (il) { return [il.pts.length, area2(il.pts), il.hole]; }));
+        // pair each rim loop with the outline loop it zips to
+        var used = new Set(), pairs = [], bad = false;
+        rimPoly.forEach(function (rp, ri) {
+          if (bad) return;
+          var isHole = area2(rp) < 0, cand = [];
+          innerLoops.forEach(function (il, ix) {
+            if (il.hole !== isHole || used.has(ix)) return;
+            if (!isHole && pip(rp, il.pts[0])) cand.push(ix);
+            if (isHole && pip(il.pts, rp[0])) cand.push(ix);
+          });
+          if (isHole) cand.sort(function (a, b) { return Math.abs(area2(innerLoops[a].pts)) - Math.abs(area2(innerLoops[b].pts)); });
+          if (cand.length !== 1 && !(isHole && cand.length > 1)) { bad = true; why = cand.length ? 'the outline splits inside the hole' : 'the outline does not reach the hole'; return; }
+          used.add(cand[0]); pairs.push([ri, cand[0]]);
+        });
+        if (bad || used.size !== innerLoops.length) { if (!bad) why = 'part of the outline has no edge to zip to'; continue; }
+        // the cap: the outline's polygons (3D on the new surface), then the strips
+        var lift = function (q) { var h = bil(g.T, q[0], q[1]); return h === null ? null : [fr.o[0] + q[0] * fr.e1[0] + q[1] * fr.e2[0] + h * n[0], fr.o[1] + q[0] * fr.e1[1] + q[1] * fr.e2[1] + h * n[1], fr.o[2] + q[0] * fr.e1[2] + q[1] * fr.e2[2] + h * n[2]]; };
+        var lifted = innerLoops.map(function (il) { return il.pts.map(lift); });
+        if (lifted.some(function (l) { return l.some(function (q) { return !q; }); })) { why = 'the outline runs off the box'; continue; }
+        var cp = NT.capLoops(lifted, fr, function (x, y) { return bil(g.T, x, y); }, { sag: 0.01, minEdge: 0.4 });
+        if (!cp.tris) { why = cp.reason; continue; }
+        if (pl.debugSeal) { var dd2 = new Map(); cp.tris.forEach(function (tr) { for (var c = 0; c < 3; c++) { var kq = tr[c].join(',') + '>' + tr[(c + 1) % 3].join(','); dd2.set(kq, (dd2.get(kq) || 0) + 1); } }); dd2.forEach(function (v2, kq) { if (v2 > 1) pl.debugSeal('inner cap dup', kq, v2); }); pl.debugSeal('inner cap', cp.tris.length, 'inner loops', JSON.stringify(lifted.map(function (l) { return l.length; }))); }
+        var out2 = null;
+        // zip each pair; a rim that visits a corner twice can make the same diagonal twice, and another start (or another
+        // way of choosing the diagonals) does not
+        for (var variant = 0; variant < 12 && !out2; variant++) {
+          var cand2 = cp.tris.slice(), fine = true;
+          pairs.forEach(function (pr) {
+            var rl = loopsV[pr[0]], rp = rimPoly[pr[0]], il = innerLoops[pr[1]], ip = il.pts, ilift = lifted[pr[1]];
+            var rv = rl.map(function (v) { return M.P[v]; });
+            var rsign = area2(rp) > 0 ? 1 : -1;
+            // both ccw: a hole's rim is cw, so read it backwards; the bigger one is the outer
+            var A = rsign > 0 ? { p2: rp, p3: rv } : { p2: rp.slice().reverse(), p3: rv.slice().reverse() };
+            var B = il.hole ? { p2: ip.slice().reverse(), p3: ilift.slice().reverse() } : { p2: ip, p3: ilift };
+            var outer = Math.abs(area2(A.p2)) >= Math.abs(area2(B.p2)) ? A : B, inn = outer === A ? B : A;
+            var m1 = outer.p3.length, m2 = inn.p3.length, q2;
+            var order = [];
+            for (q2 = 0; q2 < m2; q2++) order.push([dist3(outer.p3[0], inn.p3[q2]), q2]);
+            order.sort(function (x, y) { return x[0] - y[0]; });
+            var bj = order[Math.min(variant >> 1, order.length - 1)][1], bias = (variant & 1) ? 0.9 : 1;   // odd variants lean to the inner loop
+            var ia = 0, jb = 0, usedD = new Set(), pk = function (q) { return q[0] + ',' + q[1] + ',' + q[2]; };       // the front: outer[ia], inner[(bj + jb) % m2]
+            var IN = function (j) { return inn.p3[(bj + j) % m2]; };
+            while (ia < m1 || jb < m2) {
+              var advO;
+              if (ia >= m1) advO = false;
+              else if (jb >= m2) advO = true;
+              else {
+                advO = dist3(outer.p3[(ia + 1) % m1], IN(jb)) * bias <= dist3(outer.p3[ia % m1], IN(jb + 1));
+                var dO = pk(outer.p3[(ia + 1) % m1]) + '|' + pk(IN(jb)), dI = pk(outer.p3[ia % m1]) + '|' + pk(IN(jb + 1));
+                if (advO && usedD.has(dO) && !usedD.has(dI)) advO = false;      // a rim that visits a corner twice would make the same diagonal twice
+                else if (!advO && usedD.has(dI) && !usedD.has(dO)) advO = true;
+              }
+              if (advO) { cand2.push([outer.p3[ia % m1], outer.p3[(ia + 1) % m1], IN(jb)]); usedD.add(pk(outer.p3[(ia + 1) % m1]) + '|' + pk(IN(jb))); ia++; }
+              else { cand2.push([IN(jb), outer.p3[ia % m1], IN(jb + 1)]); usedD.add(pk(outer.p3[ia % m1]) + '|' + pk(IN(jb + 1))); jb++; }
+            }
+          });
+          if (fine && sealed(cand2, loopsV.map(function (l) { return l.map(function (v) { return M.P[v]; }); }), loopsV)) out2 = cand2;
+        }
+        if (!out2) { why = 'the strip did not close the hole'; continue; }
+        loopCount += innerLoops.length;
+        return out2;
+      }
+      return null;
+    }
+    function dist3(a, b) { return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]); }
+    // is the cap a skin that closes the hole: every edge of it is met by its opposite, and every rim
+    // vertex loop is walked once the way the dropped triangles walked it
+    var incOf = null;
+    function incident(v) {
+      if (!incOf) {
+        incOf = new Map();
+        for (var tt = 0; tt < M.n; tt++) for (var c = 0; c < 3; c++) {
+          var vv = M.vid[3 * tt + c], l = incOf.get(vv);
+          if (l) l.push(tt); else incOf.set(vv, [tt]);
+        }
+      }
+      return incOf.get(v) || [];
+    }
+    function sealed(ts, l3s, lvs) {
+      var cnt = new Map(), kk = function (p) { return p[0] + ',' + p[1] + ',' + p[2]; };
+      // a cap edge that runs between two rim corners the kept skin already joins would be a third and fourth face on it
+      var kept = new Set();
+      lvs.forEach(function (l) { l.forEach(function (v) { incident(v).forEach(function (tt) {
+        if (drop.has(tt)) return;
+        for (var c = 0; c < 3; c++) { var a = M.vid[3 * tt + c], b = M.vid[3 * tt + (c + 1) % 3]; kept.add(kk(M.P[a]) + '|' + kk(M.P[b])); kept.add(kk(M.P[b]) + '|' + kk(M.P[a])); }
+      }); }); });
+      for (var q = 0; q < ts.length; q++) for (var c2 = 0; c2 < 3; c2++) if (kept.has(kk(ts[q][c2]) + '|' + kk(ts[q][(c2 + 1) % 3]))) {
+        var onRim = false;                                      // the rim edge itself is the one place the cap meets kept skin
+        l3s.forEach(function (l) { for (var r = 0; r < l.length; r++) if (kk(l[r]) === kk(ts[q][c2]) && kk(l[(r + 1) % l.length]) === kk(ts[q][(c2 + 1) % 3])) onRim = true; });
+        if (!onRim) return false;
+      }
+      ts.forEach(function (tr) {
+        for (var c = 0; c < 3; c++) {
+          var key = kk(tr[c]) + '>' + kk(tr[(c + 1) % 3]);
+          cnt.set(key, (cnt.get(key) || 0) + 1);
+        }
+      });
+      var ok = true;
+      cnt.forEach(function (v, key) { if (v > 1) { ok = false; if (pl.debugSeal) pl.debugSeal('dup', key, v); } });
+      if (!ok) return false;
+      var rimKeys = new Set();
+      l3s.forEach(function (l) { for (var q2 = 0; q2 < l.length; q2++) rimKeys.add(kk(l[q2]) + '>' + kk(l[(q2 + 1) % l.length])); });
+      cnt.forEach(function (v, key) {
+        var parts = key.split('>'), rev = parts[1] + '>' + parts[0];
+        if (rimKeys.has(key)) return;                          // a rim edge: the dropped triangle walked it this way
+        if (rimKeys.has(rev)) { ok = false; if (pl.debugSeal) pl.debugSeal('backwards', key); return; }           // the cap walks a rim edge backwards
+        if (!cnt.has(rev)) { ok = false; if (pl.debugSeal) pl.debugSeal('unpaired', key); }                         // an edge inside the cap with no partner
+      });
+      rimKeys.forEach(function (key) { if (cnt.get(key) !== 1) { ok = false; if (pl.debugSeal) pl.debugSeal('rim edge walked ' + cnt.get(key), key); } });       // every rim edge walked once, as the dropped triangle walked it
+      return ok;
+    }
+    var sides = [];
     [[rimT, false], [rimB, true]].forEach(function (sd) {
-      if (!sd[0].length || tris === null) return;
+      if (!sd[0].length) return;
       var down = sd[1], nn = down ? [-n[0], -n[1], -n[2]] : n;
       var lps = NT._loopsOf(sd[0], M, nn);
-      if (!lps) { tris = null; return; }
-      var l3 = lps.map(function (l) { return l.map(function (v) { return M.P[v]; }); });
-      var frS = down ? { o: fr.o, n: nn, e1: fr.e1, e2: [-fr.e2[0], -fr.e2[1], -fr.e2[2]] } : fr;
-      var atS = down ? function (x, y) { var h = bil(Bz, x, -y); return h === null ? null : -h; } : function (x, y) { return bil(g.T, x, y); };
-      if (pl.debugApply) pl.debugApply(l3, frS, drop.size);
-      var cp = NT.capLoops(l3, frS, atS, { sag: 0.01, minEdge: 0.4 });
-      if (!cp.tris) { tris = { reason: cp.reason }; return; }
-      tris = tris.concat(cp.tris); loopCount += lps.length;
+      sides.push({ down: down, lps: lps, frS: down ? { o: fr.o, n: nn, e1: fr.e1, e2: [-fr.e2[0], -fr.e2[1], -fr.e2[2]] } : fr });
     });
-    if (tris === null) return { ok: false, reason: 'the edge of the hole where the old skin came out does not close into loops - make the box larger so it falls in clean face' };
-    if (!Array.isArray(tris)) return { ok: false, reason: tris.reason };
+    for (var si = 0; si < sides.length; si++) {
+      var sdd = sides[si];
+      if (!sdd.lps) return { ok: false, reason: 'the edge of the hole where the old skin came out does not close into loops - make the box larger so it falls in clean face' };
+      if (pl.debugLoops) pl.debugLoops(sdd.lps, M, drop);
+      // the cap straight on the rim: exact when the old mesh's rim is clean
+      var l3 = sdd.lps.map(function (l) { return l.map(function (v) { return M.P[v]; }); });
+      var atS = sdd.down ? function (x, y) { var h = bil(Bz, x, -y); return h === null ? null : -h; } : function (x, y) { return bil(g.T, x, y); };
+      var cp2 = NT.capLoops(l3, sdd.frS, atS, { sag: 0.01, minEdge: 0.4 });
+      if (cp2.tris && sealed(cp2.tris, l3, sdd.lps)) { tris = tris.concat(cp2.tris); loopCount += sdd.lps.length; continue; }
+      // a rim with folds in it: lay the skin on a clean outline inside it and zip the strip between
+      var zt = sdd.down ? null : zipTop(sdd.lps);
+      if (zt) { tris = tris.concat(zt); continue; }
+      return { ok: false, reason: (cp2.tris ? 'the rim of the hole folds back on itself' : cp2.reason) + (why ? ' (' + why + ')' : '') };
+    }
     var cap = { tris: tris }, loops = { length: loopCount };
     var n0 = (soup.length / 9) | 0, out = new Float32Array((n0 - drop.size + cap.tris.length) * 9), q = 0;
     for (t = 0; t < n0; t++) {
@@ -558,7 +831,139 @@
     try { return typeof require === 'function' ? require('./nso_text.js') : null; } catch (e) { return null; }
   }
 
-  var API = { DEFAULTS: DEFAULTS, plan: plan, apply: apply, _sample: sample, _harmonic: harmonic };
+
+
+  /* Every piece of work in a box round a point, to be hovered over and picked from: the first reading is along a
+     guess at the axis, the walls it finds say where the axis really is, and the box is read again along that
+     (walls that lean back under a skew axis hide from the rays). */
+  function scan(soup, hit, opts) {
+    var o = {}, k;
+    for (k in opts || {}) o[k] = opts[k];
+    o.scanOnly = true;
+    var s1 = plan(soup, hit, o);
+    if (!s1.ok) return s1;
+    var cur = s1, best = s1;
+    for (var round = 0; round < 3; round++) {
+      var n = cur.frame.n, a = axisFromWalls(soup, cur, 0.15) || axisFromWalls(soup, cur, 0.4);
+      if (!a || Math.acos(Math.max(-1, Math.min(1, a[0] * n[0] + a[1] * n[1] + a[2] * n[2]))) < 0.5 * Math.PI / 180) break;
+      var s2 = plan(soup, { point: hit.point || hit, normal: a }, o);
+      if (!s2.ok || !s2.pieces.length) break;
+      cur = s2; best = s2;
+    }
+    return best;
+  }
+
+  /* Which piece of work stands at a raw point (its node or a neighbour: the wall is part of the piece), or -1. */
+  function pieceAt(pl, p) {
+    if (!pl || !pl.owner || !pl.frame) return -1;
+    var fr = pl.frame, G = pl.grid, w = [p[0] - fr.o[0], p[1] - fr.o[1], p[2] - fr.o[2]];
+    var x = w[0] * fr.e1[0] + w[1] * fr.e1[1] + w[2] * fr.e1[2], y = w[0] * fr.e2[0] + w[1] * fr.e2[1] + w[2] * fr.e2[2];
+    var i0 = Math.round((x - G.x0) / G.res), j0 = Math.round((y - G.y0) / G.res), best = -1, bd = Infinity;
+    for (var dy = -2; dy <= 2; dy++) for (var dx = -2; dx <= 2; dx++) {
+      var i = i0 + dx, j = j0 + dy;
+      if (i < 0 || j < 0 || i >= G.nx || j >= G.ny) continue;
+      var id = pl.owner[j * G.nx + i];
+      if (id >= 0 && dx * dx + dy * dy < bd) { bd = dx * dx + dy * dy; best = id; }
+    }
+    return best;
+  }
+
+  /* A raw point on a piece of work (for finding it again in another reading of the box). */
+  function pieceAnchor(pl, id) {
+    var pc = pl.pieces[id], G = pl.grid, fr = pl.frame;
+    if (!pc) return null;
+    var x = G.x0 + (pc.seed % G.nx) * G.res, y = G.y0 + ((pc.seed / G.nx) | 0) * G.res, z = pl.H[pc.seed];
+    if (isNaN(z)) z = 0;
+    return [fr.o[0] + x * fr.e1[0] + y * fr.e2[0] + z * fr.n[0], fr.o[1] + x * fr.e1[1] + y * fr.e2[1] + z * fr.n[1], fr.o[2] + x * fr.e1[2] + y * fr.e2[2] + z * fr.n[2]];
+  }
+
+  /* The triangles that stand over each piece of work (floor, walls, rim), one Float32Array a piece, to be drawn. */
+  function highlight(soup, pl) {
+    if (!pl || !pl.owner || !pl.H) return [];
+    var fr = pl.frame, G = pl.grid, nx = G.nx, ny = G.ny, n = fr.n, out = pl.pieces.map(function () { return []; });
+    for (var t = 0; t < soup.length; t += 9) {
+      var cx = (soup[t] + soup[t + 3] + soup[t + 6]) / 3 - fr.o[0], cy = (soup[t + 1] + soup[t + 4] + soup[t + 7]) / 3 - fr.o[1], cz = (soup[t + 2] + soup[t + 5] + soup[t + 8]) / 3 - fr.o[2];
+      var x = cx * fr.e1[0] + cy * fr.e1[1] + cz * fr.e1[2], y = cx * fr.e2[0] + cy * fr.e2[1] + cz * fr.e2[2], z = cx * n[0] + cy * n[1] + cz * n[2];
+      var i0 = Math.round((x - G.x0) / G.res), j0 = Math.round((y - G.y0) / G.res);
+      if (i0 < 1 || j0 < 1 || i0 >= nx - 1 || j0 >= ny - 1) continue;
+      var id = pl.owner[j0 * nx + i0];
+      if (id < 0) continue;
+      var hmin = Infinity, hmax = -Infinity;
+      for (var dy = -1; dy <= 1; dy++) for (var dx = -1; dx <= 1; dx++) {
+        var hv = pl.H[(j0 + dy) * nx + i0 + dx];
+        if (!isNaN(hv)) { if (hv < hmin) hmin = hv; if (hv > hmax) hmax = hv; }
+      }
+      if (!isFinite(hmin) || z < hmin - 0.15 || z > hmax + 0.3) continue;
+      var ax = soup[t + 3] - soup[t], ay = soup[t + 4] - soup[t + 1], az = soup[t + 5] - soup[t + 2], bx = soup[t + 6] - soup[t], by = soup[t + 7] - soup[t + 1], bz = soup[t + 8] - soup[t + 2];
+      var nn = (ay * bz - az * by) * n[0] + (az * bx - ax * bz) * n[1] + (ax * by - ay * bx) * n[2];
+      if (nn < 0) continue;                                   // looking down: not skin
+      for (var k = 0; k < 9; k++) out[id].push(soup[t + k]);
+    }
+    return out.map(function (a) { return new Float32Array(a); });
+  }
+
+  /* The axis the work was done along, from the walls of the pieces found with a first guess `n`: the walls are
+     parallel to it, so it is the direction least present in their normals (the smallest eigenvector of the sum
+     of their outer products, area weighted), on the side of `n`. Null when there are no walls to read. */
+  function axisFromWalls(soup, pl, band) {
+    var tris = highlight(soup, pl), n = pl.frame.n, S = [[0, 0, 0], [0, 0, 0], [0, 0, 0]], used = 0;
+    tris.forEach(function (a, id) {
+      if (pl.pieces[id].cut) return;
+      for (var t = 0; t < a.length; t += 9) {
+        var ux = a[t + 3] - a[t], uy = a[t + 4] - a[t + 1], uz = a[t + 5] - a[t + 2], vx = a[t + 6] - a[t], vy = a[t + 7] - a[t + 1], vz = a[t + 8] - a[t + 2];
+        var wx = uy * vz - uz * vy, wy = uz * vx - ux * vz, wz = ux * vy - uy * vx, l = Math.hypot(wx, wy, wz);
+        if (l < 1e-9 || Math.abs((wx * n[0] + wy * n[1] + wz * n[2]) / l) > (band || 0.3)) continue;      // walls only
+        var w = [wx / l, wy / l, wz / l], wt = l / 2;
+        for (var i = 0; i < 3; i++) for (var j = 0; j < 3; j++) S[i][j] += wt * w[i] * w[j];
+        used++;
+      }
+    });
+    if (used < 12) return null;
+    var v = n.slice();                                   // inverse iteration: the smallest eigenvector, starting from n
+    for (var it = 0; it < 30; it++) {
+      // solve (S + eps I) x = v by Gauss-Seidel-free direct 3x3 inverse
+      var eps = 1e-6 * (S[0][0] + S[1][1] + S[2][2]) + 1e-12, m = [[S[0][0] + eps, S[0][1], S[0][2]], [S[1][0], S[1][1] + eps, S[1][2]], [S[2][0], S[2][1], S[2][2] + eps]];
+      var det = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+      if (Math.abs(det) < 1e-300) return null;
+      var inv = [
+        [(m[1][1] * m[2][2] - m[1][2] * m[2][1]), -(m[0][1] * m[2][2] - m[0][2] * m[2][1]), (m[0][1] * m[1][2] - m[0][2] * m[1][1])],
+        [-(m[1][0] * m[2][2] - m[1][2] * m[2][0]), (m[0][0] * m[2][2] - m[0][2] * m[2][0]), -(m[0][0] * m[1][2] - m[0][2] * m[1][0])],
+        [(m[1][0] * m[2][1] - m[1][1] * m[2][0]), -(m[0][0] * m[2][1] - m[0][1] * m[2][0]), (m[0][0] * m[1][1] - m[0][1] * m[1][0])]];
+      var x = [0, 1, 2].map(function (i) { return (inv[i][0] * v[0] + inv[i][1] * v[1] + inv[i][2] * v[2]) / det; }), xl = Math.hypot(x[0], x[1], x[2]);
+      v = [x[0] / xl, x[1] / xl, x[2] / xl];
+    }
+    if (v[0] * n[0] + v[1] * n[1] + v[2] * n[2] < 0) v = [-v[0], -v[1], -v[2]];
+    return v;
+  }
+
+  /* The direction the work was done from, at a raw point: the mean normal of the skin round it that faces
+     the viewer (a wall alone would give a sideways one; the walls round a letter cancel and its floor and
+     face add). `view` is the unit vector from the viewer to the piece. */
+  function axisAt(soup, p, radius, view) {
+    var r2 = radius * radius, near = [], t;
+    for (t = 0; t < soup.length; t += 9) {
+      var cx = (soup[t] + soup[t + 3] + soup[t + 6]) / 3 - p[0], cy = (soup[t + 1] + soup[t + 4] + soup[t + 7]) / 3 - p[1], cz = (soup[t + 2] + soup[t + 5] + soup[t + 8]) / 3 - p[2];
+      if (cx * cx + cy * cy + cz * cz > r2) continue;
+      var ax = soup[t + 3] - soup[t], ay = soup[t + 4] - soup[t + 1], az = soup[t + 5] - soup[t + 2], bx = soup[t + 6] - soup[t], by = soup[t + 7] - soup[t + 1], bz = soup[t + 8] - soup[t + 2];
+      var nx_ = ay * bz - az * by, ny_ = az * bx - ax * bz, nz_ = ax * by - ay * bx, l = Math.hypot(nx_, ny_, nz_);       // twice the area, along the normal
+      if (l < 1e-12) continue;
+      if (view && -(nx_ * view[0] + ny_ * view[1] + nz_ * view[2]) / l <= 0.3) continue;                              // not facing the viewer (a wall, the underside)
+      near.push([nx_, ny_, nz_, l]);
+    }
+    function mean(keep) {
+      var sx = 0, sy = 0, sz = 0;
+      near.forEach(function (q) { if (keep(q)) { sx += q[0]; sy += q[1]; sz += q[2]; } });
+      var l = Math.hypot(sx, sy, sz);
+      return l > 0 ? [sx / l, sy / l, sz / l] : null;
+    }
+    var n1 = mean(function () { return true; });
+    if (!n1) return null;
+    // the walls of a letter that face the viewer pull the mean aside: the floor and the face are what is left when they are out
+    var n2 = mean(function (q) { return (q[0] * n1[0] + q[1] * n1[1] + q[2] * n1[2]) / q[3] > 0.85; });
+    return n2 || n1;
+  }
+
+  var API = { DEFAULTS: DEFAULTS, plan: plan, scan: scan, apply: apply, pieceAt: pieceAt, pieceAnchor: pieceAnchor, highlight: highlight, axisAt: axisAt, axisFromWalls: axisFromWalls, _sample: sample, _harmonic: harmonic };
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
   if (root) root.NSO_Resurface = API;
 })(typeof window !== 'undefined' ? window : (typeof globalThis !== 'undefined' ? globalThis : null));
