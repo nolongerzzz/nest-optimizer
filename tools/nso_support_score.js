@@ -2,7 +2,7 @@
 /* THE PLATE SCORE: every piece of the six-part supp_ref, generated and sliced here, against Bambu's own slice of it, by the same diff
    G-scope's Compare > Measure reads (nso-gscope-diff.js). One table, so a change that mends one piece shows what it did to the others.
 
-     NSO_SCORE_REF=supp_ref.gcode.3mf node tools/nso_support_score.js [--json out.json] [--vs before.json] [--piece Oblique]
+     NSO_SCORE_REF=supp_ref.gcode.3mf node tools/nso_support_score.js [--json out.json] [--vs before.json] [--piece Oblique] [--angle 30]
 
    Per piece, for the interface + transition (the plate that touches the model and has to break away) and for the tree:
      IoU   material both have / (both + only ours + only theirs), summed over the layers, 0 - 1; higher is better
@@ -104,6 +104,7 @@ function scoreOf(rep) {
   const zip = R3.openZip(bytes);
   const names = AUDIT.sliceNames(new TextDecoder().decode(await zip.read('Metadata/slice_info.config')));
   const app = lib.makeApp(); const ids = app.load(objs); app.openCard(); app.setPlateBox(true);
+  app.card.angle(+(arg('--angle') || process.env.NSO_SCORE_ANGLE || 30));          // the overhang angle: Bambu's own default (30) - the app's 35 grows every footprint's rim past Bambu's
   app.click('btn-sup-all'); await app.until(() => app.card.busy()); await app.until(() => !app.card.busy());
   const WASM = await SL.loadKernel({});
   const rows = {};

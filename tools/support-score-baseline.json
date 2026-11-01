@@ -124,22 +124,22 @@
   }
  },
  "Support Circular": {
-  "plateIoU": 0.5890101291135938,
-  "plateBothMm2": 135.49,
-  "plateOnlyOursMm2": 54.05,
-  "plateOnlyTheirsMm2": 40.489999999999995,
-  "lenRatio": 1.1549681337952862,
-  "mvRatio": 0.9122368015185021,
+  "plateIoU": 0.6128184922511164,
+  "plateBothMm2": 139.98,
+  "plateOnlyOursMm2": 52.44,
+  "plateOnlyTheirsMm2": 36,
+  "lenRatio": 1.166345865948073,
+  "mvRatio": 0.9572212233361361,
   "z0Ours": 7.69,
   "z0Theirs": 7.69,
-  "treeIoU": 0.13299450830576115,
-  "treeLenRatio": 0.3838050015304054,
-  "volIoU": 0.8520819836268332,
-  "volOnlyOursMm3": 6.646000000000002,
-  "volOnlyTheirsMm3": 3.400000000000001,
-  "footIoU": 0.753746647736236,
-  "footOnlyOursMm2": 79.25,
-  "footOnlyTheirsMm2": 30.02,
+  "treeIoU": 0.1342838394082205,
+  "treeLenRatio": 0.38667554577566743,
+  "volIoU": 0.8767013133990529,
+  "volOnlyOursMm3": 5.888000000000002,
+  "volOnlyTheirsMm3": 2.3920000000000003,
+  "footIoU": 0.7693230031359527,
+  "footOnlyOursMm2": 68.86,
+  "footOnlyTheirsMm2": 31.18,
   "gaps": {
    "oursLacks": [
     {
@@ -147,10 +147,10 @@
      "zFrom": 0.2,
      "zTo": 14.27,
      "layers": 74,
-     "areaMm2": 779.05,
-     "peakMm2": 31.25,
+     "areaMm2": 777.44,
+     "peakMm2": 31.05,
      "x": 16.31,
-     "y": 0.81,
+     "y": 0.82,
      "bbox": [
       11.32,
       -5.69,
@@ -163,14 +163,14 @@
      ]
     },
     {
-     "cls": "interface",
-     "zFrom": 8.52,
-     "zTo": 9.4,
-     "layers": 5,
-     "areaMm2": 19.98,
-     "peakMm2": 6.69,
-     "x": 17.71,
-     "y": -1.66,
+     "cls": "transition",
+     "zFrom": 7.97,
+     "zTo": 8.8,
+     "layers": 4,
+     "areaMm2": 24.36,
+     "peakMm2": 8.33,
+     "x": 17.86,
+     "y": -1.61,
      "bbox": [
       14.02,
       -5.29,
@@ -183,23 +183,23 @@
      ]
     },
     {
-     "cls": "transition",
-     "zFrom": 7.97,
-     "zTo": 8.8,
-     "layers": 4,
-     "areaMm2": 19.45,
-     "peakMm2": 8.32,
-     "x": 17.73,
-     "y": -1.61,
+     "cls": "interface",
+     "zFrom": 8.52,
+     "zTo": 9.4,
+     "layers": 5,
+     "areaMm2": 10.16,
+     "peakMm2": 2.42,
+     "x": 17.34,
+     "y": -1.65,
      "bbox": [
-      14.12,
-      -5.19,
-      21.42,
+      14.02,
+      -5.29,
+      21.52,
       2.21
      ],
      "sizeMm": [
-      7.3,
-      7.4
+      7.5,
+      7.5
      ]
     },
     {
@@ -229,10 +229,10 @@
      "zFrom": 0.2,
      "zTo": 7.69,
      "layers": 28,
-     "areaMm2": 154.13,
+     "areaMm2": 154.83,
      "peakMm2": 23.34,
      "x": 16.45,
-     "y": -1.66,
+     "y": -1.65,
      "bbox": [
       11.02,
       -6.19,
@@ -246,44 +246,44 @@
     },
     {
      "cls": "support",
-     "zFrom": 8.25,
+     "zFrom": 7.97,
      "zTo": 12.37,
-     "layers": 17,
-     "areaMm2": 40.34,
+     "layers": 18,
+     "areaMm2": 41.3,
      "peakMm2": 3.22,
-     "x": 22.77,
-     "y": 3.33,
+     "x": 22.7,
+     "y": 3.27,
      "bbox": [
-      17.82,
-      0.31,
+      18.72,
+      0.01,
       26.02,
       5.11
      ],
      "sizeMm": [
-      8.2,
-      4.8
+      7.3,
+      5.1
      ]
     }
    ]
   }
  },
  "Support Negative Sphere": {
-  "plateIoU": 0.6907050852904159,
-  "plateBothMm2": 257.93,
-  "plateOnlyOursMm2": 49.510000000000005,
-  "plateOnlyTheirsMm2": 65.99000000000001,
-  "lenRatio": 0.9757957884427032,
-  "mvRatio": 0.7067934775117196,
+  "plateIoU": 0.617068787103099,
+  "plateBothMm2": 226.60000000000002,
+  "plateOnlyOursMm2": 43.3,
+  "plateOnlyTheirsMm2": 97.32,
+  "lenRatio": 0.8615572967678747,
+  "mvRatio": 0.6776757673952568,
   "z0Ours": 9.3,
   "z0Theirs": 9.3,
-  "treeIoU": 0.11870090138361952,
-  "treeLenRatio": 0.38307312573663804,
-  "volIoU": 0.9128163217652725,
-  "volOnlyOursMm3": 6.782000000000002,
-  "volOnlyTheirsMm3": 5.166000000000001,
-  "footIoU": 0.8963432871062698,
-  "footOnlyOursMm2": 44.089999999999996,
-  "footOnlyTheirsMm2": 21.759999999999998,
+  "treeIoU": 0.13943394913544166,
+  "treeLenRatio": 0.3991126180756026,
+  "volIoU": 0.8637723207609248,
+  "volOnlyOursMm3": 3.4700000000000006,
+  "volOnlyTheirsMm3": 14.748000000000003,
+  "footIoU": 0.8554684355428185,
+  "footOnlyOursMm2": 29.93,
+  "footOnlyTheirsMm2": 59.84,
   "gaps": {
    "oursLacks": [
     {
@@ -291,10 +291,10 @@
      "zFrom": 0.2,
      "zTo": 13,
      "layers": 85,
-     "areaMm2": 773.78,
-     "peakMm2": 22.37,
-     "x": 35.49,
-     "y": -0.28,
+     "areaMm2": 750.82,
+     "peakMm2": 22.52,
+     "x": 35.51,
+     "y": -0.29,
      "bbox": [
       29.87,
       -6.39,
@@ -311,10 +311,10 @@
      "zFrom": 9.85,
      "zTo": 10.4,
      "layers": 3,
-     "areaMm2": 40.08,
-     "peakMm2": 13.36,
-     "x": 35.55,
-     "y": -1.66,
+     "areaMm2": 55.64,
+     "peakMm2": 19.05,
+     "x": 35.49,
+     "y": -1.91,
      "bbox": [
       28.67,
       -8.39,
@@ -331,10 +331,10 @@
      "zFrom": 9.3,
      "zTo": 9.57,
      "layers": 2,
-     "areaMm2": 10.33,
-     "peakMm2": 5.47,
-     "x": 36.13,
-     "y": -1.39,
+     "areaMm2": 23.2,
+     "peakMm2": 11.67,
+     "x": 35.46,
+     "y": -2.23,
      "bbox": [
       28.67,
       -8.39,
@@ -351,10 +351,10 @@
      "zFrom": 13,
      "zTo": 13.53,
      "layers": 3,
-     "areaMm2": 10.1,
-     "peakMm2": 5.1,
-     "x": 35.54,
-     "y": -1.54,
+     "areaMm2": 14.25,
+     "peakMm2": 8.93,
+     "x": 35.51,
+     "y": -1.57,
      "bbox": [
       33.77,
       -3.29,
@@ -372,11 +372,11 @@
      "cls": "support",
      "zFrom": 0.2,
      "zTo": 11.97,
-     "layers": 45,
-     "areaMm2": 221.23,
-     "peakMm2": 14.08,
-     "x": 35.17,
-     "y": -1.77,
+     "layers": 44,
+     "areaMm2": 212.97,
+     "peakMm2": 14.43,
+     "x": 35.26,
+     "y": -1.82,
      "bbox": [
       28.97,
       -6.59,
@@ -390,63 +390,63 @@
     },
     {
      "cls": "interface",
-     "zFrom": 13.28,
-     "zTo": 14,
-     "layers": 4,
-     "areaMm2": 19.13,
-     "peakMm2": 9.49,
-     "x": 35.44,
-     "y": -1.62,
+     "zFrom": 9.85,
+     "zTo": 10.4,
+     "layers": 3,
+     "areaMm2": 16.22,
+     "peakMm2": 5.46,
+     "x": 35.51,
+     "y": -1.78,
      "bbox": [
-      33.37,
-      -3.69,
-      37.57,
-      0.51
+      29.17,
+      -7.89,
+      41.87,
+      3.51
      ],
      "sizeMm": [
-      4.2,
-      4.2
+      12.7,
+      11.4
      ]
     }
    ]
   }
  },
  "Support Negative Sphere2": {
-  "plateIoU": 0.6569580270910527,
-  "plateBothMm2": 216.31,
-  "plateOnlyOursMm2": 40.72,
-  "plateOnlyTheirsMm2": 72.23,
-  "lenRatio": 0.902091293253588,
-  "mvRatio": 0.6602504517488004,
+  "plateIoU": 0.6728794573402203,
+  "plateBothMm2": 216.25,
+  "plateOnlyOursMm2": 33.42,
+  "plateOnlyTheirsMm2": 71.71000000000001,
+  "lenRatio": 0.8663543452726512,
+  "mvRatio": 0.681850525956214,
   "z0Ours": 9.3,
   "z0Theirs": 9.3,
-  "treeIoU": 0.09598425520826191,
-  "treeLenRatio": 0.3270896180749444,
-  "volIoU": 0.8815927523439973,
-  "volOnlyOursMm3": 6.1320000000000014,
-  "volOnlyTheirsMm3": 8.088000000000003,
-  "footIoU": 0.8262111051283306,
-  "footOnlyOursMm2": 49.19,
-  "footOnlyTheirsMm2": 57.32,
+  "treeIoU": 0.11201911068699845,
+  "treeLenRatio": 0.43680014273866596,
+  "volIoU": 0.8876534513986718,
+  "volOnlyOursMm3": 5.294000000000001,
+  "volOnlyTheirsMm3": 8.104000000000003,
+  "footIoU": 0.8298468802255812,
+  "footOnlyOursMm2": 46.300000000000004,
+  "footOnlyTheirsMm2": 57.489999999999995,
   "gaps": {
    "oursLacks": [
     {
      "cls": "support",
      "zFrom": 0.2,
      "zTo": 14.33,
-     "layers": 101,
-     "areaMm2": 1039.93,
-     "peakMm2": 49.37,
-     "x": 53,
-     "y": -0.18,
+     "layers": 87,
+     "areaMm2": 1003.05,
+     "peakMm2": 45.06,
+     "x": 52.97,
+     "y": -0.31,
      "bbox": [
-      44.92,
+      44.88,
       -8.26,
-      59.52,
+      59.58,
       6.24
      ],
      "sizeMm": [
-      14.6,
+      14.7,
       14.5
      ]
     },
@@ -455,19 +455,19 @@
      "zFrom": 9.85,
      "zTo": 10.4,
      "layers": 3,
-     "areaMm2": 31.32,
-     "peakMm2": 11.76,
-     "x": 52.96,
-     "y": -3.43,
+     "areaMm2": 30.25,
+     "peakMm2": 11.58,
+     "x": 53.41,
+     "y": -3.37,
      "bbox": [
-      46.02,
+      46.58,
       -8.76,
-      60.02,
-      2.04
+      60.48,
+      2.14
      ],
      "sizeMm": [
-      14,
-      10.8
+      13.9,
+      10.9
      ]
     },
     {
@@ -475,14 +475,14 @@
      "zFrom": 13.8,
      "zTo": 14.6,
      "layers": 4,
-     "areaMm2": 20.62,
-     "peakMm2": 10.18,
-     "x": 53.19,
-     "y": -1.55,
+     "areaMm2": 21.25,
+     "peakMm2": 10.28,
+     "x": 53.22,
+     "y": -1.58,
      "bbox": [
-      50.82,
+      50.88,
       -3.96,
-      55.52,
+      55.58,
       0.84
      ],
      "sizeMm": [
@@ -495,18 +495,18 @@
      "zFrom": 9.3,
      "zTo": 9.57,
      "layers": 2,
-     "areaMm2": 12.66,
-     "peakMm2": 6.61,
-     "x": 53.82,
-     "y": -3.25,
+     "areaMm2": 12.77,
+     "peakMm2": 6.51,
+     "x": 54.3,
+     "y": -2.82,
      "bbox": [
-      46.02,
+      46.58,
       -8.76,
-      60.02,
+      60.48,
       2.04
      ],
      "sizeMm": [
-      14,
+      13.9,
       10.8
      ]
     }
@@ -516,20 +516,20 @@
      "cls": "support",
      "zFrom": 0.2,
      "zTo": 12.64,
-     "layers": 52,
-     "areaMm2": 256.08,
-     "peakMm2": 22.27,
-     "x": 52.57,
-     "y": -2.9,
+     "layers": 72,
+     "areaMm2": 350.99,
+     "peakMm2": 22.04,
+     "x": 52.85,
+     "y": -1.2,
      "bbox": [
-      46.62,
+      44.68,
       -8.16,
-      59.82,
-      1.94
+      61.78,
+      6.34
      ],
      "sizeMm": [
-      13.2,
-      10.1
+      17.1,
+      14.5
      ]
     },
     {
@@ -537,41 +537,41 @@
      "zFrom": 14.04,
      "zTo": 14.8,
      "layers": 4,
-     "areaMm2": 25.63,
-     "peakMm2": 10.71,
-     "x": 53.32,
-     "y": -1.6,
+     "areaMm2": 15.21,
+     "peakMm2": 5.1,
+     "x": 53.3,
+     "y": -1.63,
      "bbox": [
-      50.72,
-      -4.16,
-      55.92,
-      1.14
+      50.88,
+      -3.96,
+      55.68,
+      0.84
      ],
      "sizeMm": [
-      5.2,
-      5.3
+      4.8,
+      4.8
      ]
     }
    ]
   }
  },
  "Support Oblique": {
-  "plateIoU": 0.6438678848451197,
-  "plateBothMm2": 382.66999999999996,
-  "plateOnlyOursMm2": 85.02,
-  "plateOnlyTheirsMm2": 126.64,
-  "lenRatio": 1.0007352383839914,
-  "mvRatio": 1.1007531840078166,
+  "plateIoU": 0.6338918481558897,
+  "plateBothMm2": 376.05,
+  "plateOnlyOursMm2": 83.93,
+  "plateOnlyTheirsMm2": 133.26,
+  "lenRatio": 0.9852649132115515,
+  "mvRatio": 1.1074644176424127,
   "z0Ours": 7.69,
   "z0Theirs": 7.69,
-  "treeIoU": 0.10161056297156122,
-  "treeLenRatio": 0.30665600625898615,
-  "volIoU": 0.8525602685382973,
-  "volOnlyOursMm3": 2.682000000000001,
-  "volOnlyTheirsMm3": 21.476000000000006,
-  "footIoU": 0.8439881976887139,
-  "footOnlyOursMm2": 51.43000000000001,
-  "footOnlyTheirsMm2": 138.92000000000002,
+  "treeIoU": 0.09961239201327306,
+  "treeLenRatio": 0.3233981078920188,
+  "volIoU": 0.8369708510326644,
+  "volOnlyOursMm3": 2.6800000000000006,
+  "volOnlyTheirsMm3": 24.032000000000007,
+  "footIoU": 0.8364952018815508,
+  "footOnlyOursMm2": 51.6,
+  "footOnlyTheirsMm2": 147.92000000000002,
   "gaps": {
    "oursLacks": [
     {
@@ -579,10 +579,10 @@
      "zFrom": 0.2,
      "zTo": 11.2,
      "layers": 49,
-     "areaMm2": 1010.31,
-     "peakMm2": 39.67,
-     "x": 71.7,
-     "y": -2.08,
+     "areaMm2": 1011.08,
+     "peakMm2": 39.54,
+     "x": 71.66,
+     "y": -2.1,
      "bbox": [
       64.04,
       -8.69,
@@ -599,10 +599,10 @@
      "zFrom": 8.25,
      "zTo": 12.2,
      "layers": 20,
-     "areaMm2": 81.34,
+     "areaMm2": 85.39,
      "peakMm2": 7.44,
-     "x": 71.18,
-     "y": -1.99,
+     "x": 71.33,
+     "y": -1.78,
      "bbox": [
       63.94,
       -8.59,
@@ -619,10 +619,10 @@
      "zFrom": 7.69,
      "zTo": 11.6,
      "layers": 18,
-     "areaMm2": 44.8,
-     "peakMm2": 3.92,
-     "x": 71.24,
-     "y": -1.83,
+     "areaMm2": 47.37,
+     "peakMm2": 5.22,
+     "x": 71.39,
+     "y": -1.57,
      "bbox": [
       63.94,
       -8.59,
@@ -641,19 +641,19 @@
      "zFrom": 0.2,
      "zTo": 10,
      "layers": 52,
-     "areaMm2": 220.16,
-     "peakMm2": 10.4,
-     "x": 71.06,
-     "y": -1.85,
+     "areaMm2": 240.75,
+     "peakMm2": 10.15,
+     "x": 71.3,
+     "y": -1.54,
      "bbox": [
       64.34,
       -8.09,
       77.64,
-      3.91
+      4.61
      ],
      "sizeMm": [
       13.3,
-      12
+      12.7
      ]
     },
     {
@@ -661,10 +661,10 @@
      "zFrom": 7.69,
      "zTo": 11.6,
      "layers": 19,
-     "areaMm2": 46.69,
+     "areaMm2": 46.33,
      "peakMm2": 6.1,
-     "x": 71.02,
-     "y": -1.77,
+     "x": 71.01,
+     "y": -1.83,
      "bbox": [
       64.44,
       -8.19,
@@ -680,38 +680,38 @@
   }
  },
  "Support Sphere": {
-  "plateIoU": 0.6371283997469954,
-  "plateBothMm2": 100.72999999999999,
-  "plateOnlyOursMm2": 44.510000000000005,
-  "plateOnlyTheirsMm2": 12.86,
-  "lenRatio": 1.361328696330484,
-  "mvRatio": 0.7399481234582429,
+  "plateIoU": 0.5908609271523179,
+  "plateBothMm2": 89.22,
+  "plateOnlyOursMm2": 37.15,
+  "plateOnlyTheirsMm2": 24.63,
+  "lenRatio": 1.1242890109532941,
+  "mvRatio": 0.6666817466918327,
   "z0Ours": 8.49,
   "z0Theirs": 8.49,
-  "treeIoU": 0.12242439255072399,
-  "treeLenRatio": 0.7504843192857343,
-  "volIoU": 0.8073839575710233,
-  "volOnlyOursMm3": 8.396000000000003,
-  "volOnlyTheirsMm3": 0.9740000000000002,
-  "footIoU": 0.8094850180633278,
-  "footOnlyOursMm2": 47.36,
-  "footOnlyTheirsMm2": 6.43,
+  "treeIoU": 0.15183634970229323,
+  "treeLenRatio": 0.7140340286941629,
+  "volIoU": 0.8202247191011236,
+  "volOnlyOursMm3": 6.374000000000001,
+  "volOnlyTheirsMm3": 1.9780000000000004,
+  "footIoU": 0.7737083060824069,
+  "footOnlyOursMm2": 40.95,
+  "footOnlyTheirsMm2": 21.330000000000002,
   "gaps": {
    "oursLacks": [
     {
      "cls": "support",
      "zFrom": 0.2,
-     "zTo": 12.88,
-     "layers": 53,
-     "areaMm2": 436.64,
-     "peakMm2": 20.14,
-     "x": 87.25,
-     "y": -0.83,
+     "zTo": 13.15,
+     "layers": 54,
+     "areaMm2": 418.21,
+     "peakMm2": 20.36,
+     "x": 87.19,
+     "y": -0.88,
      "bbox": [
       83.07,
-      -5.96,
+      -5.9,
       91.57,
-      3.54
+      3.6
      ],
      "sizeMm": [
       8.5,
@@ -720,42 +720,42 @@
     },
     {
      "cls": "transition",
-     "zFrom": 8.77,
+     "zFrom": 8.49,
      "zTo": 9.32,
-     "layers": 3,
-     "areaMm2": 7.13,
-     "peakMm2": 3.59,
-     "x": 87.22,
-     "y": -2.24,
+     "layers": 4,
+     "areaMm2": 13.18,
+     "peakMm2": 5.91,
+     "x": 87.28,
+     "y": -2.05,
      "bbox": [
-      84.77,
-      -4.76,
+      84.37,
+      -5.1,
       89.97,
-      0.44
+      0.4
      ],
      "sizeMm": [
-      5.2,
-      5.2
+      5.6,
+      5.5
      ]
     },
     {
      "cls": "interface",
-     "zFrom": 9.32,
-     "zTo": 9.8,
-     "layers": 3,
-     "areaMm2": 4.26,
-     "peakMm2": 1.92,
-     "x": 87.32,
-     "y": -2.38,
+     "zFrom": 9.05,
+     "zTo": 10,
+     "layers": 5,
+     "areaMm2": 11.45,
+     "peakMm2": 5.91,
+     "x": 86.98,
+     "y": -2.43,
      "bbox": [
-      84.57,
-      -4.96,
+      84.37,
+      -4.9,
       89.77,
-      0.34
+      0.3
      ],
      "sizeMm": [
-      5.2,
-      5.3
+      5.4,
+      5.2
      ]
     },
     {
@@ -763,15 +763,15 @@
      "zFrom": 14.53,
      "zTo": 14.53,
      "layers": 1,
-     "areaMm2": 1.02,
-     "peakMm2": 1.02,
+     "areaMm2": 1.04,
+     "peakMm2": 1.04,
      "x": 89.81,
-     "y": 3.18,
+     "y": 3.2,
      "bbox": [
       89.17,
-      2.64,
+      2.7,
       90.37,
-      3.74
+      3.8
      ],
      "sizeMm": [
       1.2,
@@ -785,39 +785,39 @@
      "zFrom": 0.2,
      "zTo": 13.72,
      "layers": 53,
-     "areaMm2": 290.17,
-     "peakMm2": 51.55,
-     "x": 85.13,
-     "y": -2.09,
+     "areaMm2": 249.45,
+     "peakMm2": 44.11,
+     "x": 84.77,
+     "y": -1.65,
      "bbox": [
       79.47,
-      -7.66,
+      -6.6,
       91.77,
-      3.74
+      3.7
      ],
      "sizeMm": [
       12.3,
-      11.4
+      10.3
      ]
     },
     {
-     "cls": "interface",
-     "zFrom": 9.05,
-     "zTo": 10,
-     "layers": 5,
-     "areaMm2": 32.28,
-     "peakMm2": 7.9,
-     "x": 87.24,
-     "y": -2.34,
+     "cls": "support",
+     "zFrom": 9.32,
+     "zTo": 12.36,
+     "layers": 13,
+     "areaMm2": 30.98,
+     "peakMm2": 3.22,
+     "x": 92.38,
+     "y": 3.18,
      "bbox": [
-      84.17,
-      -5.46,
-      90.27,
-      0.74
+      88.77,
+      0.7,
+      94.87,
+      4.4
      ],
      "sizeMm": [
       6.1,
-      6.2
+      3.7
      ]
     }
    ]

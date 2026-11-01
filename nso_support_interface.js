@@ -869,6 +869,10 @@
   var REGION_BEAD_SHARE = 0.7;    /* on a curved face a bead's downhill edge stands lower than its middle by this share of (half a line + 0.03) x the slope: the full allowance (1.0) held the plate a layer and 0.5 mm clear of Bambu's; under about 0.55 the domes' plates fail their clearance check and are not built. A planar face has none (the perpendicular gap is exact on a plane) */
   var REGION_TALL_TRY_MM = [0.05, 0.1, 0.2];     /* a curved face's taller plate (see shellPass): the extra distance from the footprint's edge, per attempt (0.05 first: the Circular wants the least, the Sphere 0.1) */
   var REGION_TALL_TOL_MM = 0.04;           /* ...and the clearance it may fall short of the gap by (the Sphere's and the Negative Spheres' taller plate comes within 0.14 - 0.17 of the part: so does Bambu's) */
+  var REGION_GROW_MM = 0.3;
+  var REGION_ANGLE_REF = 35, REGION_ANGLE_SPAN = 5;   /* the growth and the drop below are Bambu's 30 deg against our 35: at 35 deg the footprint's rim is already out to where Bambu's is (none), at 30 and under, all of it */
+  var REGION_BOWL_MM = 0.1;   /* a footprint whose rim stands this much above its mean is a bowl (a sphere's underside), not a cavity's ceiling */
+  var REGION_TALL_DROP_MM = 0.08;
   var REGION_TIP_NEAR_MM = 0.5;   /* a tip's contact this near a footprint's edge is the footprint's */
   var REGION_MARGIN_MM = 0.02;    /* the region plate's cells lie this far in from the footprint's edge (the face's own edge: the plate may run to it; it was 0.1, which left a band 0.15 mm wide bare all round a 1 - 2 mm rim and the tails of the Negative Spheres' patches); its first loop is the edge of that, a wall's centre ~0.1 mm in */
   var REGION_HOLE_FILL_MM2 = 3;   /* a hole in a footprint under this area is laid over, not round (see shellPass) */
@@ -1719,12 +1723,44 @@
           }
         }
         if (tryE != null && (range <= REGION_FLAT_MM || planarFace)) return;                  /* the taller, narrower attempt is for a curved face */
+        /* a curved face's footprint is grown outward by REGION_GROW_MM: Bambu's loops stand inside its overhang polygon, not on its edge, and the stack's top is read
+           from the cells out to that edge (the dome's rim cells are the highest) */
+        var curvedFace = range > REGION_FLAT_MM && !planarFace, GROW = 0, isBowl = false;
+        var angleK = Math.max(0, Math.min(1, (REGION_ANGLE_REF - (opts.overhangDeg == null ? REGION_ANGLE_REF : +opts.overhangDeg)) / REGION_ANGLE_SPAN));
+        var outerLoops = curvedFace ? plateLoops.filter(function (Lp) { var a2 = 0; for (var q0 = 0; q0 < Lp.length; q0++) { var u0 = Lp[q0], v0 = Lp[(q0 + 1) % Lp.length]; a2 += u0[0] * v0[1] - v0[0] * u0[1]; } return a2 > 0; }) : [];
+        function edgeDist(x, y) {
+          var best = Infinity;
+          outerLoops.forEach(function (Lp) {
+            for (var q = 0, w = Lp.length - 1; q < Lp.length; w = q++) {
+              var ex = Lp[q][0] - Lp[w][0], ey = Lp[q][1] - Lp[w][1], ee = ex * ex + ey * ey, tt = ee > 1e-18 ? Math.max(0, Math.min(1, ((x - Lp[w][0]) * ex + (y - Lp[w][1]) * ey) / ee)) : 0;
+              best = Math.min(best, Math.hypot(x - Lp[w][0] - tt * ex, y - Lp[w][1] - tt * ey));
+            }
+          });
+          return best;
+        }
+        function nearOuter(x, y) { return edgeDist(x, y) <= GROW; }
+        if (curvedFace) {                             /* a bowl (the surface rises outward: a sphere's underside) - a cavity's ceiling falls toward its rim */
+          var eS = 0, eN = 0, aS = 0, aN = 0;
+          for (var qe = 0; qe < N; qe++) if (fp[qe] === 1 && !isNaN(S[qe])) { aS += S[qe]; aN++; if (edgeDist(ox + (qe % nx) * CELLS, oy + Math.floor(qe / nx) * CELLS) <= 0.6) { eS += S[qe]; eN++; } }
+          isBowl = !!(eN && aN && eS / eN - aS / aN >= REGION_BOWL_MM);
+          if (isBowl) GROW = REGION_GROW_MM * angleK;
+        }
+        if (GROW > 0) {
+          for (var jg = 0; jg < ny; jg += STEP) for (var ig = 0; ig < nx; ig += STEP) {
+            var qgr = jg * nx + ig;
+            if (fp[qgr]) continue;
+            var xg = ox + ig * CELLS, yg = oy + jg * CELLS;
+            if (inFoot(xg, yg) || !nearOuter(xg, yg)) continue;
+            var zSg = f.zl - SHELL_START_MM, hg = firstHit(xg, yg, zSg, f.zh - zSg + 3);
+            if (isFinite(hg) && zSg + hg <= f.zh + 1.0) { S[qgr] = zSg + hg; fp[qgr] = 1; }
+          }
+        }
         /* fill the lattice's cells; a flat face takes its lowest height */
         for (var jf = 0; jf < ny; jf++) for (var iff = 0; iff < nx; iff++) {
           var q0 = jf * nx + iff;
           if (fp[q0]) continue;
           var xf = ox + iff * CELLS, yf = oy + jf * CELLS;
-          if (!inFoot(xf, yf)) continue;
+          if (!inFoot(xf, yf) && !(GROW > 0 && nearOuter(xf, yf))) continue;
           var ia = iff - (iff % STEP), ja = jf - (jf % STEP), best = NaN;
           for (var dj = 0; dj <= STEP; dj += STEP) for (var di = 0; di <= STEP; di += STEP) {
             var qa = Math.min(ny - 1, ja + dj) * nx + Math.min(nx - 1, ia + di);
@@ -1780,7 +1816,7 @@
             if (gi2 < 0 || gi2 >= nx || gj2 < 0 || gj2 >= ny || !inRegion[gj2 * nx + gi2]) continue;
             gmax = Math.max(gmax, Math.abs(S[qg2] - S[gj2 * nx + gi2]) / (2 * CELLS));
           }
-          gapAt[qg2] = tryE != null ? o.gap : o.gap * Math.sqrt(1 + gmax * gmax) + (planarFace ? 0 : REGION_BEAD_SHARE * (o.width / 2 + 0.03) * gmax);   /* a bead is a line wide: on a slope its downhill edge stands lower than its middle */
+          gapAt[qg2] = tryE != null ? o.gap - (isBowl ? REGION_TALL_DROP_MM * angleK : 0) : o.gap * Math.sqrt(1 + gmax * gmax) + (planarFace ? 0 : REGION_BEAD_SHARE * (o.width / 2 + 0.03) * gmax);   /* a bead is a line wide: on a slope its downhill edge stands lower than its middle */
         }
         var A = zs[0] - o.gap, m = new Int32Array(N).fill(-99999), mmin = 1e9, mmax = -1e9;
         for (var q5 = 0; q5 < N; q5++) {
@@ -1916,7 +1952,7 @@
         /* the loops, not the hatch: a hatch line ends a line and a gap short of them and lies level with them, so it is no nearer the part */
         var soupAll = joinSoups(soupsLoops), dmin = Infinity, rch = o.gap + 0.1;
         for (var bi = 0; bi < obstacles.length; bi++) { var dd = exactDistance(soupAll, exactVs(bi, rch), rch, beat); if (dd.mm < dmin) dmin = dd.mm; }
-        if (dmin < o.gap - (tryE != null ? REGION_TALL_TOL_MM : 1e-5)) return;
+        if (dmin < o.gap - (tryE != null ? REGION_TALL_TOL_MM + (isBowl ? REGION_TALL_DROP_MM * angleK : 0) : 1e-5)) return;
         var zBaseMin = botOfM(mmin), zTopMax = A + (mmax + 1) * o.layer;
         var L = { id: levels.length, first: zTopMax, tips: carry, told: carry.length, ok: true, shell: true, minDistanceMm: dmin,
                   res: { zTop: zTopMax, zBase: zBaseMin, zCap: zBaseMin, layers: layersOut, uncrossed: [], region: true,

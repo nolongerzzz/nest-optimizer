@@ -1696,6 +1696,7 @@ var NSO_SUPPORTS_CARD = (function () {
   function runPiece(J, c, keep) {
     var job = J.job, hm = c.hm, D = c.D, o = c.o, regs = c.regs, spots = c.spots, areas = [], builtOf = [], chain = Promise.resolve();
     job.parts = partsOptsOf(o);                       // this piece's sheet: Dense in the one-trunk build, Open in every other
+    job.parts.sheetOverhangDeg = S.angle;             // the overhang angle the footprints were read at: the region plate's curved faces are grown to Bambu's 30 from our 35
     /* the sheet fills the contact surface the detector traced (docs/SUPPORT-FOOTPRINT.md), whatever tips were planned for it */
     if (D && D.det && window.NSO_SupportBeacons && window.NSO_SupportBeacons.footprintsOf) {
       var bx = boxesNow();      // ...less what a blocker holds

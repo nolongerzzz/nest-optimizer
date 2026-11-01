@@ -100,3 +100,13 @@ as a stack a layer too low (the surface rises 0.23 mm in 0.4 mm of radius at 30 
 0.1 (0.05 and over: 0.81 / 0.81; at 0 it falls to 0.74 / 0.76), so 0.05 first. Foot / vol IoU Circular 0.68 / 0.79 -> 0.75 / 0.85 (line 0.55 -> 0.59, length 1.05 -> 1.15), Sphere 0.77 / 0.76 -> 0.81 / 0.81 (line 0.58 -> 0.64, length 1.40 -> 1.36),
 Negative Sphere 0.89 / 0.90 -> 0.90 / 0.91, Negative Sphere2 0.84 / 0.89 -> 0.83 / 0.88 (length 0.95 -> 0.90). Tried and left out: eroding every curved face 0.3 / 0.5 mm (Sphere foot 0.71 / 0.61). Still too long: the Sphere (1.36) and the
 Circular (1.15) lay more line than Bambu's on their rings.
+
+Update (2026-11-01, the score reads at Bambu's 30 deg, and the domes follow it): the harness had been generating at the card's default overhang angle (35 deg) while the reference - and every slice sent in - is Bambu's 30. At 30 the footprint's rim
+runs in to where Bambu's loops stand (Sphere rmax 2.66 against its 2.66) but the plate falls a layer short on both domes (top 9.8 / 9.2 against Bambu's 10.0 / 9.4): Bambu rounds the surface to its own layers (a column's top is the model layer
+whose mid-slice first covers it, less 0.2 - a vertical clearance of 0.1 - 0.3, mean 0.2) while ours kept 0.18 + a bead's drop, and its overhang polygon stands ~0.3 mm past its loops. `nso_score` now takes `--angle` (default 30, `NSO_SCORE_ANGLE`).
+A BOWL (a footprint whose rim lies 0.1 mm or more above its mean surface: a sphere's underside; the Negative Spheres' cavity ceilings fall toward their rim and are not) is grown 0.3 mm outward (`REGION_GROW_MM`; its heights read from the
+part, the walls' clearance still checked) and its taller plate takes a vertical gap 0.08 less (`REGION_TALL_DROP_MM`, tolerance widened by the same). Both fade in from 35 deg (none) to 30 deg (all): `sheetOverhangDeg` from the card
+through the grid pack to the generator, so the pinned 35 deg builds are byte for byte what they were. At 30 deg, foot / vol IoU Circular 0.66 / 0.78 -> 0.77 / 0.88 (line 0.50 -> 0.61), Sphere 0.62 / 0.77 -> 0.77 / 0.82 (line 0.49 -> 0.59);
+the rest unchanged (Base 0.98 / 0.98, Negative Sphere 0.86 / 0.86, Negative Sphere2 0.83 / 0.89, Oblique 0.84 / 0.84). The baseline file is now the 30 deg one. Tried: a rise-limited growth (cells up to 0.1 - 0.25 mm higher than the edge's own: Sphere
+0.76 - 0.80, Circular 0.69 - 0.77, no better than the fixed 0.3); a slope cut at 37.5 deg (no change: the rim was not the slope); growth 0.5 (Sphere 0.83 / 0.83 but the Circular 0.69). Still off: the Circular's rings reach 4.26 mm against
+Bambu's 3.67 on its top layers (length 1.17), the Negative Spheres at 30 deg (0.86 / 0.86, 0.83 / 0.89: a layer short on top).
