@@ -1364,6 +1364,7 @@ var NSO_MICROSCOPE = (function () {
     return d.segments.slice(old.length);
   }
 
+  var PICK_CLICK_SLOP_PX = 10;     // Compare, Pieces: a press let go within this many pixels of where it began is a click
   var pull = null;     // the press in progress: { kind: 'new' | 'move', tgt, x0, y0, live, cancelled }
 
   function pullSlop() { return (window.nsoGrab && window.nsoGrab.SLOP) || 3; }
@@ -2240,6 +2241,9 @@ var NSO_MICROSCOPE = (function () {
     // REGION where its box would hold nothing: the press is not taken - a drag
     // orbits, as on bare floor - and a click there still places the box
     if (tgt.source === 'box' && !tgt.items.length && !tgt.selected) { v.regionPress = { x: e.clientX, y: e.clientY, tgt: tgt }; return; }
+    // Compare, Pieces: a click picks the piece, nothing else. It is not a copy to carry (a hand that moves three pixels on the
+    // trackpad would have started one, switched plates and picked nothing), and a drag is the orbit's, as on bare floor.
+    if (cmpPick && cmpPick.shape === 'piece' && tgt.source === 'pick') { v.hookTook = false; v.regionPress = { x: e.clientX, y: e.clientY, tgt: tgt, slop: PICK_CLICK_SLOP_PX }; return; }
     // a piece dragged here, nothing isolated, by the mouse: it is grabbed - it moves
     var o = !isolated && e.pointerType !== 'touch' ? takePieceAt(e) : null;
     if (o && window.nsoGrab && window.nsoGrab.begin(o, null, e, pieceWorld)) {
@@ -2323,7 +2327,7 @@ var NSO_MICROSCOPE = (function () {
       var rp = view && view.regionPress;
       if (rp) {
         view.regionPress = null;
-        if (e && !view.hookTook && Math.hypot(e.clientX - rp.x, e.clientY - rp.y) < pullSlop() && isOpen() && doc) { clickTarget(rp.tgt, e); return; }
+        if (e && !view.hookTook && Math.hypot(e.clientX - rp.x, e.clientY - rp.y) < (rp.slop || pullSlop()) && isOpen() && doc) { clickTarget(rp.tgt, e); return; }
       }
       var bp = view && view.boxPress;
       // a click inside a box (no travel): what the boxes hold, isolated - or whole

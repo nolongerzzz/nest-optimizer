@@ -290,6 +290,30 @@ withApp(async (page, logs) => {
     check('Pieces on plates left isolated / in REGION: each plate is made whole and in piece mode to be clicked',
       d1.mode === 'piece' && !d1.iso && d1.sel === 0 && d1.pick === 'lens' && d2.mode === 'piece' && !d2.iso && d2.sel === 0 && d2.pick === 'take', J([d1, d2]));
     await page.evaluate(() => NSO_MICROSCOPE.compareClear());
+    // A real hand moves a few pixels between press and release: that is still a click (it used to start a copy, switch plates, and pick nothing).
+    await page.evaluate(() => { const M = NSO_MICROSCOPE; ['take', 'lens'].forEach(n => { M.showPlate(n); M.clearBoxes(); M.back(); }); M.showPlate('lens'); });
+    await page.click('#ms-compare-pieces');
+    await frames(page);
+    const jitterClick = () => page.evaluate(async () => {
+      const M = NSO_MICROSCOPE, c = document.querySelector('#microscope canvas'), r = c.getBoundingClientRect(), want = M.comparePicking();
+      const fire = (type, x, y, t) => (t || c).dispatchEvent(new PointerEvent(type, { clientX: x, clientY: y, button: 0, buttons: type === 'pointerup' ? 0 : 1, bubbles: true, pointerId: 1, pointerType: 'mouse', isPrimary: true }));
+      for (let fy = 0.2; fy <= 0.85; fy += 0.04) for (let fx = 0.2; fx <= 0.85; fx += 0.04) {
+        const x = r.left + r.width * fx, y = r.top + r.height * fy;
+        fire('pointermove', x, y); fire('pointerdown', x, y); fire('pointermove', x + 5, y + 1, window); fire('pointerup', x + 5, y + 1, window);
+        await new Promise(res => setTimeout(res, 30));          // the pick is taken on the next tick
+        if (M.comparePicking() !== want || M.plateDoc('cmp')) return true;
+      }
+      return false;
+    });
+    const j1 = await jitterClick();
+    await new Promise(r => setTimeout(r, 400)); await frames(page);
+    const j1s = await page.evaluate(() => ({ pick: NSO_MICROSCOPE.comparePicking(), plate: NSO_MICROSCOPE.plate() }));
+    const j2 = await jitterClick();
+    await new Promise(r => setTimeout(r, 400)); await frames(page);
+    const j2s = await page.evaluate(() => ({ pick: NSO_MICROSCOPE.comparePicking(), plate: NSO_MICROSCOPE.plate(), cmp: !!NSO_MICROSCOPE.plateDoc('cmp') }));
+    check('Pieces: a click that moves five pixels still picks (plate 1, then plate 2, then plate 3)',
+      j1 && j1s.pick === 'take' && j1s.plate === 'take' && j2 && j2s.pick === null && j2s.plate === 'cmp' && j2s.cmp, J([j1, j1s, j2, j2s]));
+    await page.evaluate(() => NSO_MICROSCOPE.compareClear());
   }
 
   console.log('\n=== 11. Lasso: a loop drawn round a piece on each plate ===');
