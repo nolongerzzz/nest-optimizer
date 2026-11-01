@@ -2237,8 +2237,9 @@
       var PINCH_INSET_MM = 0.1;      /* the loop's inset where the region is too narrow for a line's half-width on each side */
       var TRANS_FILL_OPEN_MM = 0.5;
       var REGION_FILL_GAP_MM = 0.04;
+      var HOST_GROW_MM = 0.2;   /* on a flat floor the part's host cut (the typing's reach) is this much wider: the plate's loops stand past the face's edge, and cells there were typed transition where Bambu's are interface */
       var THIN_SLAB_MIN_MM2 = 3;   /* a ribbon (one ring, no hole) at least this big keeps its loop though it is narrower than the wall's inset: the Oblique's top layers (a dome's thin ring is not: Bambu stops a layer lower there) */
-      var LOOP_IN_FLAT_MM = 0.03; /* on a layer whose zones keep their size from a neighbour (a flat floor) the loops lie this far in: Bambu's plate stands 0.4 mm past ours there */
+      var LOOP_IN_FLAT_MM = -0.15; /* on a layer whose zones keep their size from a neighbour (a flat floor) the loops lie this far in (negative: out past the slab's edge): Bambu's loop centrelines stand 0.2 - 0.25 mm past the face's edge on both sides of a flat ring */
       var LOOP_IN_MM = 0.12;   /* the region loops lie this far in from the slab's edge (not half a line: Bambu's plate stands 0.4 mm past ours on the flat-floored pieces) */
       var REGIONAL_PLATE = true;     /* a support's own grid lays its plate by regions (below) */
       P.layers.forEach(function (L, j) {
@@ -2304,6 +2305,8 @@
               hullS = g.polys(g.offset(inLoop, wI / 2 + 1e-4));
               var ZI = stI.length ? g.offset(g.unionAll(stI), w / 2) : g.empty(), ZT = stT.length ? g.offset(g.unionAll(stT), w / 2) : g.empty();
               var hIc = hostExCs(j, dInEx(j)), hTc = hostExCs(j, dTrEx(j));
+              if (hIc && steady && HOST_GROW_MM > 0) hIc = g.offset(hIc, HOST_GROW_MM);
+              if (hTc && steady && HOST_GROW_MM > 0) hTc = g.offset(hTc, HOST_GROW_MM);
               var Ireg = hIc && !g.isEmpty(ZI) ? g.inter(g.inter(inSheet, ZI), hIc) : g.empty();
               var Zall = g.isEmpty(ZI) ? ZT : g.isEmpty(ZT) ? ZI : g.union(ZI, ZT);
               var Treg = hTc && !g.isEmpty(Zall) ? g.diff(g.inter(g.inter(inLoop, Zall), hTc), Ireg) : g.empty();

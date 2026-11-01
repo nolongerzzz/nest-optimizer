@@ -86,3 +86,10 @@ worse at every size (foot 0.77 -> 0.64 at 0.4, 0.69 at 0.2, length 1.19 / 1.08 o
 walls than ours keeps (0.18 gap + half a line). Measured since (centreline of the interface lines to the part's moves in the same layer): the Base's top layer 0.57 mm both sides, Negative Sphere 10.4 ours 0.56 / Bambu 0.59 - the wall clearance is the same, so it is not what
 holds ours back. Grown again with a per-cell wall check (cells the part comes within a gap + half a line of, at the stack's middle or foot, not taken): Negative Sphere 0.25 mm foot 0.82 -> 0.79, length 1.19; Negative Sphere2
 0.80 vol but foot 0.68; the Base's grown plate still meets the part (distance 0 at its stack's foot, centre of the face: not traced) at 0.4 and 0.059 mm short of the gap at 0.25. No size raises foot and volume together; left out.
+
+Update (2026-10-31, flat floors: loops out past the edge, typed by a wider host): measured on the Negative Sphere (radii by angle) and the Base (extents along its diagonals), Bambu's loop CENTRELINES lie 0.2 - 0.25 mm past the face's
+edge on a flat ring's outer side and into its hole on the inner, 0.5 at the Base's horned end - not on the edge (`LOOP_IN_FLAT_MM` 0.03 -> -0.15). Moved out alone, foot IoU fell (Negative Sphere2 0.77 -> 0.67 at -0.2) while volume rose:
+the lines past the edge fell outside the part's host cut (the typing's reach), so those cells were typed TRANSITION on layers that are all interface in Bambu's (69 mm of transition line on NS2's 9.85, 28 on 10.4). On a flat floor
+the host cut is now `HOST_GROW_MM` 0.2 wider, so the plate's edge stays the layer's own type. Foot / vol IoU Base 0.94 / 0.93 -> 0.98 / 0.98, Negative Sphere 0.82 / 0.83 -> 0.89 / 0.90, Negative Sphere2 0.77 / 0.79 -> 0.84 / 0.89,
+line IoU +0.05 - 0.07; domes and Oblique unchanged. Applied to every layer (domes included) the wider host cost the Circular 0.68 -> 0.63 and Sphere 0.77 -> 0.72, hence flat floors only. The round blobs in Bambu's plan at the Negative Spheres'
+cavity centre and rim ends (z 9.85 - 10.4) are its trunks, typed Support, not plate: they wait for the trunk work.
