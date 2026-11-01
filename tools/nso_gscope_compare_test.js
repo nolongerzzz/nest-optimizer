@@ -106,6 +106,21 @@ withApp(async (page, logs) => {
     check('the first piece did not move; the second moved only in XY (its height is its own)', J(after[0]) === J(before[0]) && Math.abs(after[1][2] - before[1][2]) < 1e-9, J({ b0: before[0], a0: after[0], z: [before[1][2], after[1][2]] }));
     check('both are drawn see-through', await page.evaluate(() => { const o = NSO_MICROSCOPE.getDoc().objects; return o.every(x => x.alpha > 0 && x.alpha < 1); }) && st.overlaid, J(st));
     await shot('02-overlay');
+    // ...and back: Side by side takes plate 2's piece back beside plate 1's, and so does the Back button
+    check('Side by side is on after Overlay', await page.evaluate(() => !document.getElementById('ms-compare-side').disabled));
+    await page.click('#ms-compare-side');
+    await frames(page);
+    const sbs = [await partCentre(0), await partCentre(1)];
+    const st2 = await page.evaluate(() => ({ s: NSO_MICROSCOPE.compareState(), alpha: NSO_MICROSCOPE.getDoc().objects.map(x => x.alpha || 0), off: document.getElementById('ms-compare-side').disabled }));
+    check('Side by side: both pieces are where Compare set them down, opaque again', J(sbs[0]) === J(before[0]) && J(sbs[1].map(v => +v.toFixed(6))) === J(before[1].map(v => +v.toFixed(6))) && !st2.s.overlaid && st2.alpha.every(a => !a) && st2.off, J({ before, sbs, st2 }));
+    await page.click('#ms-compare-overlay');
+    await frames(page);
+    check('Overlay again, and Back (the top button) is on and undoes it', await page.evaluate(() => !document.getElementById('ms-btn-step-back').disabled));
+    await page.click('#ms-btn-step-back');
+    await frames(page);
+    check('Back puts them side by side', await page.evaluate(() => !NSO_MICROSCOPE.compareState().overlaid) && J(await partCentre(1)).length > 0 && Math.abs((await partCentre(1))[0] - before[1][0]) < 1e-3);
+    await page.click('#ms-compare-overlay');
+    await frames(page);
   }
 
   console.log('\n=== 3. nudge ===');
@@ -325,6 +340,7 @@ withApp(async (page, logs) => {
     const whole = await page.evaluate(() => { const M = NSO_MICROSCOPE; M.compareStartPlates(); const d = M.plateDoc('cmp'); const n = d.objects.map(o => o.moves.length); M.compareClear(); return n; });
     // a loop dragged on the canvas: its corners are ground points on the active plate (file mm), mapped to the screen
     const draw = async (poly) => {
+      await page.waitForTimeout(500); await frames(page);        // the camera has settled: the loop is drawn round what is on screen
       const pts = await page.evaluate((poly) => {
         const M = NSO_MICROSCOPE, v = M.getView(), rect = v.renderer.domElement.getBoundingClientRect();
         return poly.map(([x, y]) => { const p = M.toView(x, y, 0); const q = new THREE.Vector3(p.x, 0, p.z).project(v.camera); return [rect.left + (q.x + 1) / 2 * rect.width, rect.top + (1 - q.y) / 2 * rect.height]; });

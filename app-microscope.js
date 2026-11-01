@@ -5975,6 +5975,7 @@ var NSO_MICROSCOPE = (function () {
       if (bt) { bt.classList.toggle('active', on); bt.setAttribute('aria-pressed', on ? 'true' : 'false'); }
     });
     setDisabled(ov, !live);
+    setDisabled($('ms-compare-side'), !(live && compare.overlaid));
     setDisabled(rs, !live);
     setDisabled(tn, !live);
     setDisabled($('ms-compare-diff'), !live);
@@ -6015,6 +6016,7 @@ var NSO_MICROSCOPE = (function () {
   /** Two specs set down on plate 3 side by side, plate 1's in orange at the left and plate 2's in blue at the right (a compare there before is replaced). */
   function compareFromSpecs(specA, specB, home, what) {
     compare = null;
+    clearSteps('cmp');
     showPlate('cmp');
     if (doc) { emptyPlate('cmp'); placePlates(); }
     var wA = soupExtent(specA.positions), wB = soupExtent(specB.positions);
@@ -6312,7 +6314,10 @@ var NSO_MICROSCOPE = (function () {
     var ca = [(ba.box.x0 + ba.box.x1) / 2, (ba.box.y0 + ba.box.y1) / 2], cb = [(bb.box.x0 + bb.box.x1) / 2, (bb.box.y0 + bb.box.y1) / 2];
     bakePiece(compare.b, ca[0] - cb[0], ca[1] - cb[1], 0);
     compare.dx = compare.dy = compare.dz = 0;
+    compare.ov = [ca[0] - cb[0], ca[1] - cb[1]];                 // how far Overlay moved the blue piece: Side by side takes it back
     compare.overlaid = true;
+    var cmpNow = compare;
+    pushStep(function () { return compare === cmpNow && cmpNow.overlaid && !!compareSideBySide(); });   // Back undoes it too
     compareStale();
     compare.a.alpha = compare.b.alpha = OVERLAY_ALPHA;
     pieceRefresh();
@@ -6321,6 +6326,26 @@ var NSO_MICROSCOPE = (function () {
     syncCompare();
     say('Overlaid by ' + (ba.part && bb.part ? 'the parts\' outlines' : 'everything they draw (no part walls in one of them)') + ': Plate 1\'s in orange, Plate 2\'s in blue. Nudge the blue one to fine-tune.');
     return { dx: ca[0] - cb[0], dy: ca[1] - cb[1], byPart: ba.part && bb.part };
+  }
+
+  /** Overlay undone: plate 2's piece back beside plate 1's, where Compare set them down (the nudges since go with it). */
+  function compareSideBySide() {
+    if (!compareLive()) { say('Compare: set the two pieces side by side first.', true); return null; }
+    if (!compare.overlaid) { say('Compare: they are side by side already.', true); return null; }
+    if (plateName !== 'cmp') showPlate('cmp');
+    var ov = compare.ov || [0, 0];
+    bakePiece(compare.b, -(ov[0] + compare.dx), -(ov[1] + compare.dy), -compare.dz);
+    compare.dx = compare.dy = compare.dz = 0;
+    compare.ov = null;
+    compare.overlaid = false;
+    compareStale();
+    compare.a.alpha = compare.b.alpha = undefined;
+    pieceRefresh();
+    treeSoon(compare.b);
+    compareFrame();
+    syncCompare();
+    say('Side by side again on plate 3: Plate 1\'s piece in orange at the left, Plate 2\'s in blue at the right. Overlay lays them over each other.');
+    return true;
   }
 
   function compareNudge(dx, dy, dz) {
@@ -6480,6 +6505,7 @@ var NSO_MICROSCOPE = (function () {
     comparePickCancel(true);
     if (!compareLive()) { if (picking) { syncCompare(); say('Compare pieces: cancelled.'); } return null; }
     compare = null;
+    clearSteps('cmp');
     var onCmp = plateName === 'cmp';
     if (onCmp) { emptyPlate('cmp'); showPlate('lens'); }
     else emptyPlate('cmp');
@@ -6754,6 +6780,7 @@ var NSO_MICROSCOPE = (function () {
     bind('ms-compare-diff-copy', 'click', function () { compareCopy(); });
     bind('ms-compare-diff-fold', 'click', function () { compareFold(); });
     bind('ms-compare-overlay', 'click', function () { compareOverlay(); });
+    bind('ms-compare-side', 'click', function () { compareSideBySide(); });
     bind('ms-compare-restore', 'click', function () { compareClear(); });
     bind('ms-compare-tint', 'click', function () { compareTint(); });
     [['nx-', -1, 0, 0], ['nx+', 1, 0, 0], ['ny-', 0, -1, 0], ['ny+', 0, 1, 0], ['nz-', 0, 0, -1], ['nz+', 0, 0, 1]].forEach(function (k) {
@@ -6880,6 +6907,7 @@ var NSO_MICROSCOPE = (function () {
     comparePickCancel: comparePickCancel,
     comparePicking: function () { return cmpPick ? cmpPick.step : null; },
     compareOverlay: compareOverlay,
+    compareSideBySide: compareSideBySide,
     compareNudge: compareNudge,
     compareFrame: compareFrame,
     compareTint: compareTint,
