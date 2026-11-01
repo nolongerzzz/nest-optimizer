@@ -69,3 +69,8 @@ by standing back from the face's edge. A curved face is first tried so (`REGION_
 gap (to `REGION_TALL_TOL_MM`, 0.005 mm); otherwise the face goes the way it did. The surface read of a footprint is kept (`surfCache`) so a second attempt does not cast the rays again. Circular only passes
 (Circular foot 0.65 -> 0.68, vol 0.75 -> 0.79, line length 1.15 -> 1.05 of Bambu's); Sphere and the Negative Spheres come within 0.14 - 0.17 mm of the part against 0.18 and fall back. At 0.4 mm in the Circular
 passes too but is too narrow (foot 0.56, length 0.76). Still short: the Circular's last layer (9.2 against 9.4) and its transition tail.
+
+Update (2026-10-31, flat floors' loops): a region's loops lie 0.03 mm in from the slab's edge (`LOOP_IN_FLAT_MM`) on a layer whose interface+transition zones keep their area (within 3%) from the layer
+below or above - a flat floor, where Bambu's plate stands 0.35 - 0.4 mm past ours - and stay 0.12 in (`LOOP_IN_MM`) on a layer that changes (a dome's rings). Foot / vol IoU Base 0.91 / 0.90 -> 0.94 / 0.93,
+Negative Sphere 0.79 / 0.77 -> 0.82 / 0.83, Negative Sphere2 0.74 / 0.74 -> 0.77 / 0.79; Circular, Oblique and Sphere unchanged; line length Base 0.98, NS 0.97, NS2 0.93. Tried: -0.1 (vol Base 0.97, NS 0.88,
+but foot NS2 0.67), 0.0 (foot NS 0.75), 0.06 (foot NS 0.80, vol 0.79): 0.03 is the best on both. Still short: the top layer of Oblique (2 layers), Negative Sphere(s), Circular (1 layer).

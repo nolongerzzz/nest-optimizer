@@ -2237,6 +2237,7 @@
       var PINCH_INSET_MM = 0.1;      /* the loop's inset where the region is too narrow for a line's half-width on each side */
       var TRANS_FILL_OPEN_MM = 0.5;
       var REGION_FILL_GAP_MM = 0.04;
+      var LOOP_IN_FLAT_MM = 0.03; /* on a layer whose zones keep their size from a neighbour (a flat floor) the loops lie this far in: Bambu's plate stands 0.4 mm past ours there */
       var LOOP_IN_MM = 0.12;   /* the region loops lie this far in from the slab's edge (not half a line: Bambu's plate stands 0.4 mm past ours on the flat-floored pieces) */
       var REGIONAL_PLATE = true;     /* a support's own grid lays its plate by regions (below) */
       P.layers.forEach(function (L, j) {
@@ -2294,7 +2295,11 @@
             var fillCs = inSheet;
             if (regional) {
               /* the hatch runs from loop to loop (Bambu's zig-zag meets the loops): its ground is the slab inset to the loops' own line, not the wall's width in */
-              var inLoop = g.offset(g.inter(P.S[j], sheetCs), -LOOP_IN_MM);
+              var zArea = function (jj) { var q = zones[jj]; return q && (q.i.length || q.t.length) ? g.area(g.unionAll(q.i.concat(q.t))) : 0; };
+              var a0 = zArea(j), steady = false;
+              [j - 1, j + 1].forEach(function (jj) { var a1 = zArea(jj); if (a1 > 0 && a0 > 0 && Math.abs(a1 - a0) <= 0.03 * a0) steady = true; });
+              var loopIn = steady ? LOOP_IN_FLAT_MM : LOOP_IN_MM;
+              var inLoop = g.offset(g.inter(P.S[j], sheetCs), -loopIn);
               hullS = g.polys(g.offset(inLoop, wI / 2 + 1e-4));
               var ZI = stI.length ? g.offset(g.unionAll(stI), w / 2) : g.empty(), ZT = stT.length ? g.offset(g.unionAll(stT), w / 2) : g.empty();
               var hIc = hostExCs(j, dInEx(j)), hTc = hostExCs(j, dTrEx(j));
@@ -2311,7 +2316,7 @@
               /* the loops sit where the support's own wall sits (the slab's edge, half a line in): regions taken on the whole layer, not inside its wall */
               [[slabI, 'Support interface'], [slabT, 'Support transition']].forEach(function (rg) {
                 if (g.isEmpty(rg[0])) return;
-                var inner = g.offset(rg[0], -LOOP_IN_MM);
+                var inner = g.offset(rg[0], -loopIn);
                 /* a strip of the region narrower than a line has no loop inside it (the inset removes it: the Negative Spheres' ring pinches to 0.35 mm and fell
                    into crescents); there the loop runs nearer the edge - one line down the strip, as Bambu's - and the ring stays whole */
                 {
