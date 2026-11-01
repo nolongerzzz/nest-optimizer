@@ -5936,6 +5936,7 @@ var NSO_MICROSCOPE = (function () {
     setDisabled(tn, !live);
     setDisabled($('ms-compare-diff'), !live);
     setDisabled($('ms-compare-diff-copy'), !(live && compare.report));
+    setDisabled($('ms-compare-diff-fold'), !(live && compare.report));
     ['nx-', 'nx+', 'ny-', 'ny+', 'nz-', 'nz+'].forEach(function (k) { setDisabled($('ms-compare-' + k), !live); });
     if (tn) { tn.classList.toggle('active', !!(live && compare.tinted)); tn.setAttribute('aria-pressed', live && compare.tinted ? 'true' : 'false'); }
     if (!rd) return;
@@ -6271,6 +6272,16 @@ var NSO_MICROSCOPE = (function () {
     return compare.tinted;
   }
 
+  /** Fold the measurement's results (tables and worst layers) away, or open them: the panel below - Features, the sliders - stays in reach while comparing. Only the view; the report is kept. */
+  function compareFold(fold) {
+    var box = $('ms-compare-results'), btn = $('ms-compare-diff-fold');
+    if (!box) return false;
+    var f = fold === undefined ? !box.hidden : !!fold;
+    box.hidden = f;
+    if (btn) { btn.textContent = f ? 'Show' : 'Hide'; btn.setAttribute('aria-expanded', f ? 'false' : 'true'); }
+    return f;
+  }
+
   /** The measurement shown is of how things stood before: say so, and take its layer buttons away. */
   function compareStale() {
     if (!compare || !compare.report) return;
@@ -6297,6 +6308,7 @@ var NSO_MICROSCOPE = (function () {
     rep.meta.overlaid = compare.overlaid;
     rep.meta.blueOffsetMm = [compare.dx, compare.dy, compare.dz];
     compare.report = rep;
+    compareFold(false);                              // a fresh measurement opens its results
     var rd = $('ms-compare-diff-read'), wr = $('ms-compare-worst');
     if (rd) { rd.hidden = false; renderDiff(rd, D, rep, compare.overlaid ? '' : 'Not overlaid yet - the pieces stand apart, so the areas will not meet.'); }
     if (wr) {
@@ -6666,6 +6678,7 @@ var NSO_MICROSCOPE = (function () {
     bind('ms-compare-lasso', 'click', function () { compareStartLasso(); });
     bind('ms-compare-diff', 'click', function () { compareDiff(); });
     bind('ms-compare-diff-copy', 'click', function () { compareCopy(); });
+    bind('ms-compare-diff-fold', 'click', function () { compareFold(); });
     bind('ms-compare-overlay', 'click', function () { compareOverlay(); });
     bind('ms-compare-restore', 'click', function () { compareClear(); });
     bind('ms-compare-tint', 'click', function () { compareTint(); });
@@ -6798,6 +6811,7 @@ var NSO_MICROSCOPE = (function () {
     compareTint: compareTint,
     compareClear: compareClear,
     compareDiff: compareDiff,
+    compareFold: compareFold,
     compareReport: function () { return compareLive() ? compare.report || null : null; },
     compareRestore: compareClear,
     compareState: function () {

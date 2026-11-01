@@ -636,7 +636,7 @@ type (part, support tree, interface, transition) the Z range and layer count of 
 A's, only B's, and both; the *first layer of every plate region* (interface / transition lines joined across
 1 mm) with the tree under it, whether there is none (**GAP**), and the tree standing out past the plate's
 outline (**overshoot**, area and furthest reach); and the layers that differ most. **Copy JSON** gives the same
-as data: `compareReport()`. **Where** (`gaps`): the support-family material only one side has, joined across 1 mm into
+as data: `compareReport()`. **Hide** folds the results (the tables and the worst-layer buttons) away so Features and the sliders are in reach while you compare; **Show** brings them back, a new Measure opens them, and the report is kept either way (`compareFold()`). **Where** (`gaps`): the support-family material only one side has, joined across 1 mm into
 pieces of 1 mm2 or more and stacked layer on layer into regions - each with Z from/to, layers, area, centre X Y and
 bounding box, in *plate 1's own file coordinates* (the piece's offset on the compare plate is read off `srcAt`, its first
 move's place in its file, and taken off): `aLacks` (the reference has it, ours does not - the ones to fix, largest 12)

@@ -1901,9 +1901,13 @@
               <button id="ms-compare-diff" type="button" disabled
                       title="Measure what the two pieces differ by, layer by layer and line type by line type: where each starts and stops, where the tree misses its plate or stands out past it">Measure</button>
               <button id="ms-compare-diff-copy" type="button" disabled title="Copy the measurement as JSON">Copy JSON</button>
+              <button id="ms-compare-diff-fold" type="button" disabled aria-expanded="true" aria-controls="ms-compare-results"
+                      title="Fold the measurement away (the tables and the worst layers) so the rest of the panel - Features, the layer sliders - is in reach while you compare; the numbers are kept">Hide</button>
             </div>
+            <div id="ms-compare-results">
             <div id="ms-compare-worst" class="ms-btn-row" data-flex="1"></div>
             <div id="ms-compare-diff-read" class="ms-note ms-diff" hidden></div>
+            </div>
             </div>
           </div>
           <!-- Toolpath | Solid, the Slice side. View only: it changes what is
@@ -2382,7 +2386,7 @@
        row each under the Flange row. Pure. docs/GSCOPE-FEATURES.md. -->
   <script src="nso_face_features.js?v=53ee4b23"></script>
   <script src="nso_gscope_measure.js?v=c5595269"></script>
-  <script src="app-microscope.js?v=5b699ec2"></script>
+  <script src="app-microscope.js?v=bd5306d7"></script>
   <!-- Detach / Reattach (Cut menu): cap a detected flange's hull on its own
        wall, lift the flange out as a piece, seat it elsewhere with Attach's
        seat. After nso_flange.js, app-crop.js, nso_assemble.js, app-assemble.js

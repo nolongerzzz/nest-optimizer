@@ -206,6 +206,18 @@ withApp(async (page, logs) => {
     await page.click('#ms-compare-diff');
     const shifted = await page.evaluate(() => { const rep = NSO_MICROSCOPE.compareReport(); return { only: [rep.classes.part.onlyAMm2, rep.classes.part.onlyBMm2], off: rep.meta.blueOffsetMm }; });
     check('...measured again after a 0.1 mm nudge, an edge of material is only in each, and the offset is in the report', shifted.only[0] > 0.2 && shifted.only[1] > 0.2 && Math.abs(shifted.off[0] - 0.1) < 1e-9, J(shifted));
+    const fold = async () => page.evaluate(() => { const b = document.getElementById('ms-compare-diff-fold'), box = document.getElementById('ms-compare-results'); return { btn: b.textContent, exp: b.getAttribute('aria-expanded'), off: b.disabled, hidden: box.hidden, rep: !!NSO_MICROSCOPE.compareReport() }; });
+    const f0 = await fold();
+    check('a measurement opens its results: the fold button reads Hide, on, and the results show', f0.btn === 'Hide' && f0.exp === 'true' && !f0.off && !f0.hidden && f0.rep, J(f0));
+    await page.click('#ms-compare-diff-fold');
+    const f1 = await fold();
+    check('Hide folds the tables and the worst layers away (so Features is in reach) and keeps the report', f1.btn === 'Show' && f1.exp === 'false' && f1.hidden && f1.rep, J(f1));
+    await page.click('#ms-compare-diff-fold');
+    const f2 = await fold();
+    check('Show opens them again', f2.btn === 'Hide' && !f2.hidden, J(f2));
+    await page.click('#ms-compare-diff-fold'); await page.click('#ms-compare-diff');
+    const f3 = await fold();
+    check('a new Measure opens the results even if they were folded', f3.btn === 'Hide' && !f3.hidden, J(f3));
     await shot('03-measure');
   }
 
