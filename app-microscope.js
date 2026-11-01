@@ -1819,7 +1819,7 @@ var NSO_MICROSCOPE = (function () {
   }
   function hoverNow(e) {
     if (!view || !doc || !isOpen() || pull) return;
-    if (cmpPick && cmpPick.shape === 'circle') { clearHover(); return; }       // the ring is being drawn, not a piece clicked
+    if (cmpPick && cmpPick.shape === 'lasso') { clearHover(); return; }       // the loop is being drawn, not a piece clicked
     var tgt = null, own = false, seg = null;
     // a hover over a big plate 2 piece whose tree (nso_bvh.js) is not built yet outlines nothing until it is,
     // rather than walk every triangle - the main viewport's hover does the same
@@ -2227,7 +2227,7 @@ var NSO_MICROSCOPE = (function () {
     if (v) { v.platePress = null; v.regionPress = null; }
     if (!v || e.button !== 0 || pull) return;
     if (!doc) { notePlatePress(e); return; }
-    if (cmpPick && cmpPick.shape === 'circle' && circleBegin(e)) return;     // Compare, Circle: this press draws the ring
+    if (cmpPick && cmpPick.shape === 'lasso' && lassoBegin(e)) return;     // Compare, Lasso: this press draws the loop
     var own = boxOwnsPress(e);
     if (own) {                                     // the box's dots and face: the older handler has them
       // ...and a click inside the box (no travel, not on a dot) toggles the isolation of what it holds
@@ -2448,7 +2448,7 @@ var NSO_MICROSCOPE = (function () {
   }
 
   function onPullKey(e) {
-    // Compare, Pieces / Circle: Escape leaves the pick
+    // Compare, Pieces / Lasso: Escape leaves the pick
     if (e.key === 'Escape' && cmpPick && !pull) { comparePickCancel(); e.preventDefault(); e.stopPropagation(); return; }
     if (e.key !== 'Escape' || !pull || pull.live || pull.cancelled) return;
     // pressed but not yet pulled: Escape lets go of it
@@ -3595,10 +3595,10 @@ var NSO_MICROSCOPE = (function () {
     window.addEventListener('pointerup', function () {
       if (v.dragState) { v.dragState = null; v.controls.enabled = true; }
     });
-    // Compare, Circle: the ring follows the pointer, and is the pick when let go
-    window.addEventListener('pointermove', circleMove);
-    window.addEventListener('pointerup', circleEnd);
-    window.addEventListener('pointercancel', function () { circleDrop(); syncCompare(); });
+    // Compare, Lasso: the loop follows the pointer, and is the pick when let go
+    window.addEventListener('pointermove', lassoMove);
+    window.addEventListener('pointerup', lassoEnd);
+    window.addEventListener('pointercancel', function () { lassoDrop(); syncCompare(); });
 
     // No double-click here. G-scope has two exits, Back and Close, and a
     // double-click on the view is not one of them: it does nothing.
@@ -5926,8 +5926,8 @@ var NSO_MICROSCOPE = (function () {
     setDisabled(st, !!why);
     setDisabled($('ms-compare-plates'), !!why);
     setDisabled($('ms-compare-pieces'), !!why);
-    setDisabled($('ms-compare-circle'), !!why);
-    [['ms-compare-pieces', 'piece'], ['ms-compare-circle', 'circle']].forEach(function (x) {
+    setDisabled($('ms-compare-lasso'), !!why);
+    [['ms-compare-pieces', 'piece'], ['ms-compare-lasso', 'lasso']].forEach(function (x) {
       var bt = $(x[0]), on = !!(cmpPick && cmpPick.shape === x[1]);
       if (bt) { bt.classList.toggle('active', on); bt.setAttribute('aria-pressed', on ? 'true' : 'false'); }
     });
@@ -5947,7 +5947,7 @@ var NSO_MICROSCOPE = (function () {
       rd.textContent = comparePickText(cmpPick);
     } else {
       rd.textContent = why ? 'Compare: ' + why + '.' :
-        'Plates sets both whole plates on plate 3, side by side. Pieces: click a piece on each plate. Circle: draw a ring round a piece on each. Selected takes what is selected on each.';
+        'Plates sets both whole plates on plate 3, side by side. Pieces: click a piece on each plate. Lasso: draw a loop round a piece on each. Selected takes what is selected on each.';
     }
   }
 
@@ -6033,16 +6033,16 @@ var NSO_MICROSCOPE = (function () {
   }
 
   /**
-   * COMPARE, PIECES / CIRCLE: pick a piece on plate 1, then on plate 2; the second pick sets both on plate 3 side by side.
-   * Pieces: a click on a piece. Circle: a ring dragged out from a piece's middle on the plate takes everything inside its
+   * COMPARE, PIECES / LASSO: pick a piece on plate 1, then on plate 2; the second pick sets both on plate 3 side by side.
+   * Pieces: a click on a piece. Lasso: a loop drawn freehand round a piece on the plate takes everything inside its
    * cylinder - every layer, every line type that is shown - so a whole piece comes with its supports.
-   * cmpPick is the step the picks are at: { shape: 'piece' | 'circle', step: 'lens' | 'take', lens: the first spec, home: the plate it began on }.
+   * cmpPick is the step the picks are at: { shape: 'piece' | 'lasso', step: 'lens' | 'take', lens: the first spec, home: the plate it began on }.
    */
   var cmpPick = null;
   function comparePickText(cp) {
-    var how = cp.shape === 'circle' ? 'drag a circle round a piece' : 'click a piece';
-    return 'Compare ' + (cp.shape === 'circle' ? 'circle' : 'pieces') + ': ' + (cp.step === 'lens' ? how + ' on plate 1.' : 'now ' + how + ' on plate 2.') +
-      (cp.shape === 'circle' ? ' Start at its middle and drag out; everything inside, every layer, comes along. Esc cancels.' : '');
+    var how = cp.shape === 'lasso' ? 'draw a loop round a piece' : 'click a piece';
+    return 'Compare ' + (cp.shape === 'lasso' ? 'lasso' : 'pieces') + ': ' + (cp.step === 'lens' ? how + ' on plate 1.' : 'now ' + how + ' on plate 2.') +
+      (cp.shape === 'lasso' ? ' Any shape - it closes when you let go; everything inside, every layer, comes along. Esc cancels.' : '');
   }
   /** The plate to pick on must be in view: if its middle is off the screen (the camera was left on plate 3), frame the plates again. */
   function pickInView() {
@@ -6064,12 +6064,16 @@ var NSO_MICROSCOPE = (function () {
     return true;
   }
   function compareStartPieces() { return comparePickStart('piece'); }
-  function compareStartCircle() { return comparePickStart('circle'); }
+  function compareStartLasso() { return comparePickStart('lasso'); }
 
-  // --- the ring ---------------------------------------------------------------------
-  // Drawn on the active plate's floor in view space (the active plate stands at the origin), from the press out to the
-  // pointer. Let go: its cylinder is the selection - a segment is in when its midpoint is within r, at any height.
-  var circleDraft = null;     // { cx, cz: the centre in view space, r, ring, disc }
+  // --- the lasso --------------------------------------------------------------------
+  // Drawn freehand on the active plate's floor in view space (the active plate stands at the origin), from the press along the
+  // pointer. Let go: the loop closes itself and its cylinder is the selection - a segment is in when its midpoint is inside the
+  // loop (even-odd), at any height.
+  var lassoDraft = null;     // { pts: [[x, z]] in view space, line, fill }
+  var LASSO_STEP_MM = 0.4;   // a point is added when the pointer has moved this far
+  var LASSO_MIN_MM = 3;      // a loop with less than this across is a click, not a lasso
+  var LASSO_MIN_AREA_MM2 = 2;   // and one that encloses less than this is a stroke (a line out and back)
 
   function groundAt(e) {
     var rc = rayAt(e), p = new THREE.Vector3();
@@ -6077,37 +6081,45 @@ var NSO_MICROSCOPE = (function () {
     return p;
   }
 
-  function circleVisual() {
-    var pts = [], i;
-    for (i = 0; i < 96; i++) pts.push(new THREE.Vector3(Math.cos(i / 96 * 2 * Math.PI), 0, Math.sin(i / 96 * 2 * Math.PI)));
-    var ring = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(pts),
-      new THREE.LineBasicMaterial({ color: 0xffd24a, depthTest: false, transparent: true }));
-    var disc = new THREE.Mesh(new THREE.CircleGeometry(1, 64).rotateX(-Math.PI / 2),
-      new THREE.MeshBasicMaterial({ color: 0xffd24a, opacity: 0.12, transparent: true, depthTest: false, depthWrite: false, side: THREE.DoubleSide }));
-    ring.renderOrder = disc.renderOrder = 20;
-    view.scene.add(disc); view.scene.add(ring);
-    return { ring: ring, disc: disc };
+  function lassoVisual() {
+    var line = new THREE.LineLoop(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0xffd24a, depthTest: false, transparent: true }));
+    var fill = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial({ color: 0xffd24a, opacity: 0.12, transparent: true, depthTest: false, depthWrite: false, side: THREE.DoubleSide }));
+    line.renderOrder = fill.renderOrder = 20;
+    line.frustumCulled = fill.frustumCulled = false;
+    view.scene.add(fill); view.scene.add(line);
+    return { line: line, fill: fill };
   }
 
-  function circleShape() {
-    var d = circleDraft;
+  /** The loop as drawn so far: its outline, and a light fill (a self-crossing loop may not triangulate: the outline alone then). */
+  function lassoShape() {
+    var d = lassoDraft;
     if (!d) return;
-    [d.ring, d.disc].forEach(function (m) { m.position.set(d.cx, 0.06, d.cz); m.scale.set(Math.max(d.r, 1e-3), 1, Math.max(d.r, 1e-3)); });
+    var v3 = d.pts.map(function (q) { return new THREE.Vector3(q[0], 0.06, q[1]); });
+    d.line.geometry.dispose(); d.line.geometry = new THREE.BufferGeometry().setFromPoints(v3);
+    d.fill.geometry.dispose(); d.fill.geometry = new THREE.BufferGeometry();
+    if (d.pts.length >= 3) {
+      try {
+        var v2 = d.pts.map(function (q) { return new THREE.Vector2(q[0], q[1]); });
+        var tris = THREE.ShapeUtils.triangulateShape(v2, []), pos = [];
+        tris.forEach(function (t) { t.forEach(function (i) { pos.push(d.pts[i][0], 0.05, d.pts[i][1]); }); });
+        d.fill.geometry.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      } catch (err) { /* the outline stands for it */ }
+    }
     var rd = $('ms-compare-read');
-    if (rd) rd.textContent = 'Circle: radius ' + d.r.toFixed(1) + ' mm - let go to take everything inside it.';
+    if (rd) rd.textContent = 'Lasso: ' + d.pts.length + ' points - let go to close it and take everything inside.';
   }
 
-  function circleDrop() {
-    var d = circleDraft;
-    circleDraft = null;
+  function lassoDrop() {
+    var d = lassoDraft;
+    lassoDraft = null;
     if (!d) return null;
-    [d.ring, d.disc].forEach(function (m) { view.scene.remove(m); disposeTree(m); });
+    [d.line, d.fill].forEach(function (m) { view.scene.remove(m); disposeTree(m); });
     if (view) view.controls.enabled = true;
     return d;
   }
 
-  /** A press in Circle mode, on this step's plate, on its bed: it starts a ring (the orbit does not get it). */
-  function circleBegin(e) {
+  /** A press in Lasso mode, on this step's plate, on its bed: it starts a loop (the orbit does not get it). */
+  function lassoBegin(e) {
     var v = view;
     if (!v || !cmpPick || plateName !== (cmpPick.step === 'lens' ? 'lens' : 'take')) return false;
     var p = groundAt(e), half = plateSide / 2;
@@ -6116,50 +6128,64 @@ var NSO_MICROSCOPE = (function () {
     v.controls.enabled = false;
     v.mouseDownPos = null; v.hookTook = false;
     clearHover();
-    var vis = circleVisual();
-    circleDraft = { cx: p.x, cz: p.z, r: 0, ring: vis.ring, disc: vis.disc };
-    circleShape();
+    var vis = lassoVisual();
+    lassoDraft = { pts: [[p.x, p.z]], line: vis.line, fill: vis.fill };
+    lassoShape();
     return true;
   }
 
-  function circleMove(e) {
-    if (!circleDraft || !view) return;
+  function lassoMove(e) {
+    if (!lassoDraft || !view) return;
     var p = groundAt(e);
     if (!p) return;
-    circleDraft.r = Math.hypot(p.x - circleDraft.cx, p.z - circleDraft.cz);
-    circleShape();
+    var d = lassoDraft, last = d.pts[d.pts.length - 1];
+    if (Math.hypot(p.x - last[0], p.z - last[1]) < LASSO_STEP_MM) return;
+    d.pts.push([p.x, p.z]);
+    lassoShape();
   }
 
-  /** Let go: the ring's cylinder becomes the pick (the same seam a click on a piece uses). */
-  function circleEnd() {
-    var d = circleDrop();
+  /** Let go: the loop's cylinder becomes the pick (the same seam a click on a piece uses). */
+  function lassoEnd() {
+    var d = lassoDrop();
     if (!d || !cmpPick || !doc) return;
     if (view) view.mouseDownPos = null;
-    if (d.r < 1) { say('Compare circle: press at the middle of the piece and drag out - the ring is the size you drag.', true); syncCompare(); return; }
-    var items = selectByCircle(d.cx + doc.cx, -d.cz + doc.cy, d.r);
-    if (!items.length) { say('Compare circle: nothing inside that circle - draw it again.', true); syncCompare(); return; }
+    var x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    d.pts.forEach(function (q) { x0 = Math.min(x0, q[0]); x1 = Math.max(x1, q[0]); z0 = Math.min(z0, q[1]); z1 = Math.max(z1, q[1]); });
+    var area2 = 0;
+    d.pts.forEach(function (q, i) { var n = d.pts[(i + 1) % d.pts.length]; area2 += q[0] * n[1] - n[0] * q[1]; });
+    if (d.pts.length < 3 || Math.max(x1 - x0, z1 - z0) < LASSO_MIN_MM || Math.abs(area2) / 2 < LASSO_MIN_AREA_MM2) { say('Compare lasso: draw a loop round the piece - it closes when you let go (a stroke that encloses nothing is not a loop).', true); syncCompare(); return; }
+    var poly = d.pts.map(function (q) { return [q[0] + doc.cx, -q[1] + doc.cy]; });      // view space -> the file's mm
+    var items = selectByLasso(poly);
+    if (!items.length) { say('Compare lasso: nothing inside that loop - draw it again.', true); syncCompare(); return; }
     removeAllBalls();
     setSelection(items, 'pick');
   }
 
-  /** Everything shown whose centre stands within r of (gx, gy) in G-code mm, at any height. */
-  function selectByCircle(gx, gy, r) {
-    var r2 = r * r;
+  /** A point in a loop (even-odd), the loop in G-code mm. */
+  function inLoop(poly, x, y) {
+    var inn = false;
+    for (var i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      if ((poly[i][1] > y) !== (poly[j][1] > y) && x < (poly[j][0] - poly[i][0]) * (y - poly[i][1]) / (poly[j][1] - poly[i][1]) + poly[i][0]) inn = !inn;
+    }
+    return inn;
+  }
+
+  /** Everything shown whose centre stands inside the loop (G-code mm), at any height. */
+  function selectByLasso(poly) {
+    var bx0 = Infinity, bx1 = -Infinity, by0 = Infinity, by1 = -Infinity;
+    poly.forEach(function (q) { bx0 = Math.min(bx0, q[0]); bx1 = Math.max(bx1, q[0]); by0 = Math.min(by0, q[1]); by1 = Math.max(by1, q[1]); });
     if (doc.kind === 'toolpath') {
       return doc.segments.filter(function (s) {
         if (!segShown(s)) return false;
-        var dx = (s.x0 + s.x1) / 2 - gx, dy = (s.y0 + s.y1) / 2 - gy;
-        return dx * dx + dy * dy <= r2;
+        var mx = (s.x0 + s.x1) / 2, my = (s.y0 + s.y1) / 2;
+        return mx >= bx0 && mx <= bx1 && my >= by0 && my <= by1 && inLoop(poly, mx, my);
       });
     }
     return shownObjects().filter(function (o) {
       var b = o.bounds;
-      if (b && Math.hypot(Math.max(b.minX - gx, 0, gx - b.maxX), Math.max(b.minY - gy, 0, gy - b.maxY)) > r) return false;
+      if (b && (b.maxX < bx0 || b.minX > bx1 || b.maxY < by0 || b.minY > by1)) return false;
       var c = o.centroids;
-      for (var t = 0; t < c.length; t += 3) {
-        var dx = c[t] - gx, dy = c[t + 1] - gy;
-        if (dx * dx + dy * dy <= r2) return true;
-      }
+      for (var t = 0; t < c.length; t += 3) if (inLoop(poly, c[t], c[t + 1])) return true;
       return false;
     });
   }
@@ -6172,7 +6198,7 @@ var NSO_MICROSCOPE = (function () {
   }
 
   function comparePickCancel(quiet) {
-    circleDrop();
+    lassoDrop();
     if (!cmpPick) return;
     cmpPick = null;
     syncCompare();
@@ -6199,7 +6225,7 @@ var NSO_MICROSCOPE = (function () {
         return;
       }
       cmpPick = null;
-      compareFromSpecs(cp.lens, spec, cp.home, cp.shape === 'circle' ? 'circled piece' : 'piece');
+      compareFromSpecs(cp.lens, spec, cp.home, cp.shape === 'lasso' ? 'lassoed piece' : 'piece');
     } finally { cp.busy = false; }
   }
 
@@ -6637,7 +6663,7 @@ var NSO_MICROSCOPE = (function () {
     bind('ms-compare-start', 'click', function () { compareStart(); });
     bind('ms-compare-plates', 'click', function () { compareStartPlates(); });
     bind('ms-compare-pieces', 'click', function () { compareStartPieces(); });
-    bind('ms-compare-circle', 'click', function () { compareStartCircle(); });
+    bind('ms-compare-lasso', 'click', function () { compareStartLasso(); });
     bind('ms-compare-diff', 'click', function () { compareDiff(); });
     bind('ms-compare-diff-copy', 'click', function () { compareCopy(); });
     bind('ms-compare-overlay', 'click', function () { compareOverlay(); });
@@ -6763,7 +6789,7 @@ var NSO_MICROSCOPE = (function () {
     compareStart: compareStart,
     compareStartPlates: compareStartPlates,
     compareStartPieces: compareStartPieces,
-    compareStartCircle: compareStartCircle,
+    compareStartLasso: compareStartLasso,
     comparePickCancel: comparePickCancel,
     comparePicking: function () { return cmpPick ? cmpPick.step : null; },
     compareOverlay: compareOverlay,
