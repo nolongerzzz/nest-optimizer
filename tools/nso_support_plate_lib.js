@@ -77,7 +77,7 @@ function makeDom() {
   els['sup-raft'].checked = true; els['sup-brush'].value = '4';
   els['sup-progress'].firstElementChild = new El('sup-progress-fill');
   els['sup-progress'].hidden = true;
-  els['sup-angle'].value = '35'; els['sup-style'].value = 'tree'; els['sup-size'].value = '1.2';
+  els['sup-angle'].value = '30'; els['sup-style'].value = 'tree'; els['sup-size'].value = '1.2';
   els['sup-plate-row'].hidden = true; els['sup-rows'].hidden = true;
   els['btn-sup-all'].disabled = true;
   const doc = {

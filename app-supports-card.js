@@ -140,9 +140,10 @@ var NSO_SUPPORTS_CARD = (function () {
      is our 30 (measured on fixtures/supports/simple_overhang.3mf: Bambu, tree
      slim at 30, supported only the arc's underside within 30 deg of
      horizontal, z 41.4 - 46.2, 254 mm^2, and printed the 40 - 60 deg stretch
-     as overhang walls). The default is a hair more sensitive than Bambu's;
-     the label names Bambu's for comparison. */
-  var ANGLE_DEFAULT = 35;
+     as overhang walls). The default is Bambu's own (it was 35, a hair more
+     sensitive, until every slice compared with Bambu's was being set to 30 by
+     hand); the label still names Bambu's beside it. */
+  var ANGLE_DEFAULT = 30;
   var BAMBU_ANGLE = 30;          // Bambu Studio's default support_threshold_angle
   var ANGLE_MIN = 1, ANGLE_MAX = 89;
   var ANGLE_DEBOUNCE_MS = 220;   // typing "3" on the way to "30" does not detect at 3

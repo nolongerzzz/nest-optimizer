@@ -147,7 +147,7 @@ function verts(app) {
     const held = v0.beacons.length - v1.beacons.length;
     const expectHeld = v0.beacons.filter(b => b.p[0] >= -5 && b.p[0] <= 5).length;
     check('the spots in the box are not on the card', held > 0 && held === expectHeld && v1.beacons.every(b => b.p[0] < -5 || b.p[0] > 5), held + ' of ' + v0.beacons.length);
-    check('the readout counts them as blocked', app.head() === '1 hanging area at 35° on bench · ' + held + ' spots blocked', app.head());
+    check('the readout counts them as blocked', app.head() === '1 hanging area at 30° on bench · ' + held + ' spots blocked', app.head());
     check('the area is still one, and its outline is cut (it was a rectangle: now it has the box\'s notch)', v1.areas.length === 1 && v1.areas[0].outlineEdges > v0.areas[0].outlineEdges, v0.areas[0].outlineEdges + ' -> ' + v1.areas[0].outlineEdges);
     await build(app);
     check('it builds', /^Built: 1 support/.test(app.head()) && app.allSupports().length === 1, app.head());

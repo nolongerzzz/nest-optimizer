@@ -46,9 +46,9 @@ const TODAY = {        // sha256 of the support bytes of a single-piece Generate
                        // a sheet laid over it, and the fill (the sheets reach the footprint): 16644 -> 23352 triangles on the lighter crowns (20332 -> 28884 on the ones before). Circular and Sphere are the same bytes.
                        // The region plate (supports-footprint, third round, docs/SUPPORT-FOOTPRINT.md section 9): the card lays the interface and the transition from each footprint and the surface's height, layer by layer;
                        // the Negative Sphere2 / Circular / Sphere re-pinned (24332 / 13760 / 12888 triangles on upstream's 2 transition + 2 interface stack, with the thin beads and the lighter smoothing of section 10, and the plate run to the face's edge (section 11); the plates are hatch and loops at 0.5 mm, the sheets were fewer lines).
-  'Support Negative Sphere2.stl': { sha: 'ba2674478d2dce412b93d69301efcda1fba29e1d15602231d4e773cca80a683c', triangles: 12500 },
-  'Support Circular.stl': { sha: '08e349d4c376a69eb8ae2922d8f33c54bd18245cc5b5b8b7624ca82de37a40d3', triangles: 14556 },
-  'Support Sphere.stl': { sha: '2d4ad883f191b002d7ee52c352cd97c9c2ca0c7df553ade2cbf37a864ff22950', triangles: 13868 }
+  'Support Negative Sphere2.stl': { sha: 'ebb8df4d8fd3a79953b513bb7ef25e4455d92a529f97f5c20d804220464485ba', triangles: 21676 },
+  'Support Circular.stl': { sha: '9f291eec97f2be2a6038b4ded73c79dca9e884918b340e1fba21b838dcdccfb0', triangles: 14720 },
+  'Support Sphere.stl': { sha: '32ea32fdaf6317944580b941799f0411bebbcba9882953081754b5babcbefb92', triangles: 13648 }
 };
 const XY_DISTANCE = 0.35;      // the slice's support_object_xy_distance (nso_support_beacons.js SIDE_STANDOFF_MM, nso_support_gridpack.js TRUNK_KEEP_MM)
 const STRICT_GAP = process.env.NSO_STRICT_GAP === '1';
@@ -116,7 +116,7 @@ async function main() {
     app.setPlateBox(true);
     check('option on: one outline on every piece', lit(app).all === 6 && lit(app).most === 1, JSON.stringify(app.outlines().per));
     check('option on: every piece wears the selection\'s tint, none is selected', app.emissive().every(v => v === 0.55) && app.state.selectedIndex === -1);
-    check('the readout: "6 pieces · M hanging areas at 35°"', /^6 pieces · \d+ hanging areas at 35°$/.test(app.head()), app.head());
+    check('the readout: "6 pieces · M hanging areas at 30°"', /^6 pieces · \d+ hanging areas at 30°$/.test(app.head()), app.head());
     app.frame(); app.frame();
     check('a few frames later: still on, still one outline each', app.card.plate() === true && lit(app).all === 6 && lit(app).most === 1);
     app.setPlateBox(false);
@@ -141,7 +141,7 @@ async function main() {
     check('on, then a single piece selected: the option is off, the card is on that piece', app.card.plate() === false && app.card.host() === ids[2], 'host ' + app.card.host());
     check('...one outline in all - the selection\'s - on that piece, the tint only there', lit(app).all === 1 && app.outlines().per[2] === 1 &&
       app.emissive().filter(v => v > 0).length === 1, JSON.stringify(app.outlines().per));
-    check('...and the readout is the piece\'s own', /hanging areas? at 35° on /.test(app.head()), app.head());
+    check('...and the readout is the piece\'s own', /hanging areas? at 30° on /.test(app.head()), app.head());
     app.card.pick(null); app.state.selectedIndex = -1; app.ctx.clearSelectionOutline();
 
     // the card's own pick (a click on a piece with the card open)
@@ -191,19 +191,19 @@ async function main() {
     const app = lib.makeApp();
     const ids = app.load([clone(NS2, 'A'), clone(NS2, 'B'), lib.shape('Box', lib.boxSoup(0, 0, 0, 12, 12, 10))]);
     app.openCard(); app.setPlateBox(true);
-    check('Auto: "3 pieces · 8 hanging areas at 35°" (4 on each of the two Negative Sphere2: the apex is an area since the finer look)', app.head() === '3 pieces · 8 hanging areas at 35°', app.head());
+    check('Auto: "3 pieces · 8 hanging areas at 30°" (4 on each of the two Negative Sphere2: the apex is an area since the finer look)', app.head() === '3 pieces · 8 hanging areas at 30°', app.head());
     const v = app.card.plateView();
     check('...per piece: 4, 4 and 0 areas', same(v.pieces.map(p => p.areas), [4, 4, 0]), JSON.stringify(v.pieces.map(p => p.areas)));
     app.card.mode('assisted');
-    check('Assisted: the readout counts spots', /^3 pieces · \d+ spots at 35°$/.test(app.head()) && app.card.plate() === true, app.head());
+    check('Assisted: the readout counts spots', /^3 pieces · \d+ spots at 30°$/.test(app.head()) && app.card.plate() === true, app.head());
     app.card.mode('custom');
-    check('Custom: no tips yet, none counted', app.head() === '3 pieces · 0 tips at 35°' && app.card.plate() === true, app.head());
+    check('Custom: no tips yet, none counted', app.head() === '3 pieces · 0 tips at 30°' && app.card.plate() === true, app.head());
     app.card.mode('auto');
     check('the tools row is not on the plate', app.el('sup-tools').hidden === true);
     app.card.angle(60);
     check('the angle is the card\'s, editable: 60° re-detects every piece', /^3 pieces · \d+ hanging areas? at 60°$/.test(app.head()) && app.card.angle() === 60, app.head());
-    app.card.angle(35);
-    check('...and 35° again gives the first reading', app.head() === '3 pieces · 8 hanging areas at 35°');
+    app.card.angle(30);
+    check('...and 30° again gives the first reading', app.head() === '3 pieces · 8 hanging areas at 30°');
     check('Generate is on; Remove all / Remove are not on the plate', app.el('btn-sup-all').disabled === false && app.el('btn-sup-none').hidden === true && app.el('btn-sup-remove').hidden === true);
 
     // a piece's own left-out area is remembered: A has one area left out
@@ -213,7 +213,7 @@ async function main() {
     app.card.toggleArea(area0);
     app.card.pick(null); app.state.selectedIndex = -1; app.ctx.clearSelectionOutline();
     app.setPlateBox(true);
-    check('A had an area left out: the plate says so ("1 left out") and counts 7', app.head() === '3 pieces · 7 hanging areas at 35° · 1 left out', app.head());
+    check('A had an area left out: the plate says so ("1 left out") and counts 7', app.head() === '3 pieces · 7 hanging areas at 30° · 1 left out', app.head());
   }
 
   // 6 ----------------------------------------------------------------------------------------------------------
@@ -245,7 +245,7 @@ async function main() {
     app.openCard();
     app.setPlateBox(true);
     const readout = app.head();
-    check('option on: every piece lit, the readout says "6 pieces · M hanging areas at 35°"', lit(app).all === 6 && /^6 pieces · \d+ hanging areas at 35°$/.test(readout), readout);
+    check('option on: every piece lit, the readout says "6 pieces · M hanging areas at 30°"', lit(app).all === 6 && /^6 pieces · \d+ hanging areas at 30°$/.test(readout), readout);
     const before = world(app);
     const lines = [], at = {}, t0 = Date.now();
     let barSeen = 0, barBad = 0, statusSeen = 0;
@@ -443,7 +443,7 @@ async function main() {
     app.load([lib.shape('Box', lib.boxSoup(0, 0, 0, 12, 12, 10)), clone(NS2, 'Cave'), clone(NS2, 'Refused'), clone(NS2, 'Good1'), clone(NS2, 'Good2')]);
     app.openCard(); app.setPlateBox(true);
     const ids = app.realIds(), idOf = n => ids[['Box', 'Cave', 'Refused', 'Good1', 'Good2'].indexOf(n)];
-    check('readout: "5 pieces · 16 hanging areas at 35°" (the box has none)', app.head() === '5 pieces · 16 hanging areas at 35°', app.head());
+    check('readout: "5 pieces · 16 hanging areas at 30°" (the box has none)', app.head() === '5 pieces · 16 hanging areas at 30°', app.head());
     planner(app, (soup, opts, real) => {
       const id = pieceAt(app, soup);
       if (id === idOf('Cave')) return Promise.resolve({ ok: false, reason: 'no route to the plate', inside: [0] });        // the planner's own answer for a spot nothing reaches
@@ -451,7 +451,7 @@ async function main() {
       return Promise.resolve(real(soup, opts));
     });
     const r = await app.card.generate();
-    check('the build goes through: two pieces built', r.ok === true && /^Built: 2 supports on 2 pieces · held 8 · unsupported 4 · unreachable 6$/.test(app.head()), app.head());
+    check('the build goes through: two pieces built', r.ok === true && /^Built: 2 supports on 2 pieces · held 8 · unsupported 4 · unreachable 4$/.test(app.head()), app.head());
     check('Good1 and Good2 have their supports; Box, Cave and Refused have none', app.supportsOf(idOf('Good1')).length === 1 && app.supportsOf(idOf('Good2')).length === 1 &&
       ['Box', 'Cave', 'Refused'].every(n => app.supportsOf(idOf(n)).length === 0));
     const rows = app.rows().map(x => x.text);
@@ -459,7 +459,7 @@ async function main() {
     check('the unreachable piece\'s row: "Cave · unreachable 4"', rows.includes('Cave · unreachable 4'), rows.join(' | '));
     check('the refused piece\'s row: "Refused · refused: the planner refused this piece"', rows.includes('Refused · refused: the planner refused this piece'), rows.join(' | '));
     /* Good1 and Good2 each keep one crest spot of the apex that the planner cannot reach (3 tips hold 8 of the 9) - their rows say so */
-    check('five rows: Box, Cave and Refused, and the two that built, one apex spot each unreachable', rows.length === 5 && rows.includes('Good1 · unreachable 1') && rows.includes('Good2 · unreachable 1'), rows.join(' | '));
+    check('three rows: Box, Cave and Refused - the two that built have nothing unreachable at 30° (the apex\'s crest spot is not a hanging area there), so no row', rows.length === 3 && !rows.some(x => /^Good/.test(x)), rows.join(' | '));
     check('ONE Undo step', app.state.undoStack.length === 1);
     // a row: click selects and frames that piece
     const row = app.rows().find(x => x.text.startsWith('Cave'));
@@ -500,13 +500,13 @@ async function main() {
     app.card.toggleArea(out);
     app.card.pick(null); app.state.selectedIndex = -1; app.ctx.clearSelectionOutline();
     app.setPlateBox(true);
-    check('A has one area left out: "2 pieces · 7 hanging areas at 35° · 1 left out"', app.head() === '2 pieces · 7 hanging areas at 35° · 1 left out', app.head());
+    check('A has one area left out: "2 pieces · 7 hanging areas at 30° · 1 left out"', app.head() === '2 pieces · 7 hanging areas at 30° · 1 left out', app.head());
     const r = await app.card.generate();
     const held = list => list.reduce((o, m) => Object.assign(o, m.nsoSupport.holds), {});
     const a = held(app.supportsOf(ids[0])), b = held(app.supportsOf(ids[1]));
     check('built: A\'s supports hold nothing of its left-out area (' + outKeys.length + ' spots), but its other areas', r.ok && outKeys.length > 0 && outKeys.every(k => !(k in a)) && Object.keys(a).length > 0, Object.keys(a).length + ' spots held');
     check('...B\'s supports hold all three of its areas', Object.keys(b).length > Object.keys(a).length);
-    check('A\'s row: "A · unreachable 1 · unsupported 1"; B\'s: "B · unreachable 1" (the apex\'s crest spot)', app.rows().map(x => x.text).join('|') === 'A · unreachable 1 · unsupported 1|B · unreachable 1', app.rows().map(x => x.text).join('|'));
+    check('A\'s row: "A · unsupported 1" (its left-out area); B has no row (at 30° the apex\'s crest spot is not unreachable)', app.rows().map(x => x.text).join('|') === 'A · unsupported 1', app.rows().map(x => x.text).join('|'));
     app.undo();
 
     // fed tips: A has a tip of its own (Custom), B has none
@@ -520,7 +520,7 @@ async function main() {
     check('A is given a tip (Custom): one Undo step of its own', tip.ok === true && app2.state.undoStack.length === 1, JSON.stringify(tip));
     app2.card.pick(null); app2.state.selectedIndex = -1; app2.ctx.clearSelectionOutline();
     app2.setPlateBox(true);
-    check('plate, Custom: "2 pieces · 1 tip at 35°"', app2.head() === '2 pieces · 1 tip at 35°', app2.head());
+    check('plate, Custom: "2 pieces · 1 tip at 30°"', app2.head() === '2 pieces · 1 tip at 30°', app2.head());
     const r2 = await app2.card.generate();
     check('built from A\'s tip alone; B (no tips) is left out and named', r2.ok === true && app2.supportsOf(ids2[0]).length >= 1 && app2.supportsOf(ids2[1]).length === 0 &&
       app2.rows().map(x => x.text).join('|') === 'B · no tips' && /^Built: \d+ supports? on 1 piece /.test(app2.head()), app2.head() + ' | ' + app2.rows().map(x => x.text).join('|'));

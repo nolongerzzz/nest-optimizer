@@ -632,7 +632,7 @@ async function overhangArc() {
   console.log('\n=== 13. The Simple Overhang Test: the card\'s 35 is Bambu\'s 30, a hair more sensitive ===');
   const card = fs.readFileSync(path.join(ROOT, 'app-supports-card.js'), 'utf8');
   const ANGLE = +(/var ANGLE_DEFAULT = (\d+);/.exec(card) || [])[1], BAMBU = +(/var BAMBU_ANGLE = (\d+);/.exec(card) || [])[1];
-  check('the card defaults to 35 deg and names Bambu\'s 30 beside it', ANGLE === 35 && BAMBU === 30, `ANGLE_DEFAULT ${ANGLE}, BAMBU_ANGLE ${BAMBU}`);
+  check('the card defaults to Bambu\'s 30 deg and names it beside it', ANGLE === 30 && BAMBU === 30, `ANGLE_DEFAULT ${ANGLE}, BAMBU_ANGLE ${BAMBU}`);
   const R3 = require(path.join(ROOT, 'nso-3mf-read.js'));
   const res = await R3.parse3MF(new Uint8Array(fs.readFileSync(path.join(ROOT, 'fixtures', 'supports', 'simple_overhang.3mf'))));
   const piece = res.objects[0].positions;
