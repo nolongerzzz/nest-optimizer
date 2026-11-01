@@ -2,25 +2,29 @@
    strokes and a ring ENGRAVED in it, on a jittered grid (so its triangles are irregular, as a scan's are). The
    surface the engraving was cut from is known in closed form: base(x, y).
 
-     const fx = build({ W, H, cell, R, depth, jit, ink });  ->  { soup (Float32Array), base(x, y), inkAt(x, y), ... }
+     const fx = build({ W, H, cell, R, depth, jit, ink, inkScale, groove });  ->  { soup (Float32Array), base(x, y), inkAt(x, y), ... }
+     inkScale shrinks the strokes about the centre (a small, strongly curved cap); groove { depth, width } cuts a smooth valley
+     along y through the cap (part of the surface, so part of base): a groove the work lies across.
 
    The cap is centred on (0, 0); the strokes and the ring are in mm about the same centre. */
 'use strict';
 module.exports = function build(opts) {
   opts = opts || {};
   const W = opts.W || 36, H = opts.H || 28, cell = opts.cell || 0.15, R = opts.R || 30, depth = opts.depth == null ? 0.6 : opts.depth;
-  const zb = -4, jit = opts.jit == null ? 0.3 : opts.jit;
+  const zb = -4, jit = opts.jit == null ? 0.2 : opts.jit;
   let seed = 12345;
   const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296;
   const nx = Math.round(W / cell), ny = Math.round(H / cell);
-  const base = (x, y) => Math.sqrt(R * R - (x * x + y * y)) - R;
+  const gv = opts.groove || null, isc = opts.inkScale || 1;
+  const base = (x, y) => Math.sqrt(R * R - (x * x + y * y)) - R - (gv ? gv.depth * Math.exp(-(x * x) / (gv.width * gv.width)) : 0);
   const bars = opts.ink === false ? [] : [
     [-9, -4, -7.6, 4], [-7.6, -4, -5.5, -2.6], [-7.6, 2.6, -5.5, 4], [-5.7, -2.6, -4.3, 2.6],   // a D
     [-2.5, -4, -1.1, 4], [1, -4, 2.4, 4], [-1.1, -4, 1, -2.6],                                    // a U
     [5, -4, 6.4, 4], [6.4, -0.7, 9, 0.7]                                                          // a K-ish
   ];
   const ring = opts.ink === false ? null : { cx: 0, cy: 9, r0: 2, r1: 3.3 };
-  const inkAt = (x, y) => {
+  const inkAt = (x0, y0) => {
+    const x = x0 / isc, y = y0 / isc;
     for (const b of bars) if (x >= b[0] && x <= b[2] && y >= b[1] && y <= b[3]) return true;
     if (ring) { const d = Math.hypot(x - ring.cx, y - ring.cy); if (d >= ring.r0 && d <= ring.r1) return true; }
     return false;

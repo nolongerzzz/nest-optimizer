@@ -4,22 +4,26 @@
 
    A scan-like slab (tools/nso_weave_fixture.js: a jittered grid under a spherical cap, strokes and a ring engraved 0.6 mm
    in it) looked down on. Every press is a real mouse event on the canvas, every field a real fill, every button a real
-   click. X-ray is on for most of it: the card has to work through the wireframe.
+   click. X-ray is on for most of it: the card has to work through the wireframe. The only cutting tool is the lasso, a loop
+   drawn flat on the screen that cuts like a cylinder along the view.
 
-     1. WEAVE sits in the left column between TEXT and PAINT; opening it arms the card (no gate); the card holds the
-        Circle / Lasso switch, Radius, Grow / Shrink / Clear, Smooth / Follow, Pitch, the readout, WEAVE, REATTACH, Cancel
-     2. a click cuts a circle of the Radius round the spot: the plate, its rim and the rim's corners are drawn, the
-        readout says what is cut, WEAVE is on and REATTACH is off
-     3. a drag sets the size by hand; Shift adds a second circle, Alt takes one away; Grow and Shrink move the edge
+     1. WEAVE sits in the left column between TEXT and PAINT; opening it arms the card (no gate); the card holds Grow / Shrink /
+        Clear, Smooth / Follow, Pitch, the readout, WEAVE, REATTACH, Cancel
+     2. a loop drawn on the piece cuts the surface under it: the plate, its rim and the rim's corners are drawn, the readout says
+        what is cut, WEAVE is on and REATTACH is off
+     3. Shift adds a loop, Alt takes a bite (and a bite out of the middle stays a hole); Grow and Shrink move the edge; Clear
      4. WEAVE draws the new patch (green, wireframe) and changes nothing: not the piece, not the Undo stack
      5. REATTACH: one Undo step (weaveReplace); the app's checker finds the piece as closed as it was; the engraving is
         gone (the cap's surface at the strokes within 0.01 mm); the volume is the unengraved slab's; X-ray is still on, the
         mesh in it; one Undo puts the piece back byte for byte
-     6. a lasso drawn round the slab cuts what faces the camera, through X-ray, and weaves
-     7. a refusal in words, in red, the corners that stand on the work counted: a crop whose edge runs through a stroke
+     6. a loop round the whole top weaves, through X-ray
+     7. a loop whose edge runs across the letters: it weaves, says how many features the edge crosses and that they stay as they are
      8. a painted piece stands WEAVE down by name; Clear paint lets it through
      9. Escape lets go of the cut, then closes the card; another menu opened over Weave closes it; Carve armed over it
-        puts it away; no page errors */
+        puts it away; no page errors
+    10. a CURVED cap (R 14, leaning 40 degrees at the loop's edge) with a groove through the engraving, in the page: a loop
+        weaves it, the new surface follows the dome and the groove (within 0.2 mm of the truth where the groove is under the
+        work, 0.01 elsewhere), the piece as closed as it was */
 
 const fs = require('fs');
 const os = require('os');
@@ -34,6 +38,8 @@ const check = (name, cond, detail) => {
 };
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'nso-weave-drive-'));
 const fx = build({ W: 36, H: 28, cell: 0.3 }), fxPlain = build({ W: 36, H: 28, cell: 0.3, ink: false });
+const curvedOpt = { W: 20, H: 16, cell: 0.2, R: 14, inkScale: 0.6, groove: { depth: 1.2, width: 2.5 } };
+const fxCurved = build(curvedOpt);
 
 function writeSTL(name, soup) {
   const file = path.join(TMP, name), n = soup.length / 9, b = Buffer.alloc(84 + n * 50);
@@ -65,6 +71,16 @@ const drag = async (page, path_, mods) => {
   await page.mouse.up();
   for (const k of mods || []) await page.keyboard.up(k);
   await page.waitForTimeout(300);
+};
+
+/* A loop round a disc of the surface, as a hand draws it: its points sampled on the surface itself, then projected. */
+const loopAround = async (page, fix, cx, cy, r, n) => {
+  const pts = [];
+  for (let i = 0; i <= (n || 28); i++) {
+    const a = 2 * Math.PI * i / (n || 28), x = cx + r * Math.cos(a), y = cy + r * Math.sin(a);
+    pts.push(await screenOf(page, [x, y, fix.base(x, y)]));
+  }
+  return pts;
 };
 
 /* Look down on the piece, a little tilted, its middle right of the open card. */
@@ -125,47 +141,40 @@ withApp(async (page, logs) => {
   check('WEAVE is a column button between TEXT and PAINT, in line with them', place && place.label === 'Weave' && place.col && place.prev === 'menu-text' && place.next === 'menu-paint' && place.order && place.sameX, JSON.stringify(place));
   await page.click('#menu-weave > summary');
   await page.waitForFunction(() => nsoWeaveState().open, null, { timeout: 5000 });
-  const ids = ['btn-weave-circle', 'btn-weave-lasso', 'inp-weave-radius', 'btn-weave-grow', 'btn-weave-shrink', 'btn-weave-clear', 'btn-weave-smooth', 'btn-weave-follow',
+  const ids = ['btn-weave-grow', 'btn-weave-shrink', 'btn-weave-clear', 'btn-weave-smooth', 'btn-weave-follow',
                'inp-weave-pitch', 'weave-readout', 'btn-weave-go', 'btn-weave-attach', 'btn-weave-cancel'];
   const have = await page.evaluate(ids => ids.filter(i => !document.getElementById(i)), ids);
   let st = await S(page);
-  check('opening it arms the card; it holds Circle / Lasso, Radius, Grow / Shrink / Clear, Smooth / Follow, Pitch, the readout, WEAVE, REATTACH, Cancel',
-    st.open && st.mode === 'circle' && st.fit === 'smooth' && have.length === 0 && !st.go && !st.attach, 'missing ' + have.join(',') + ' ' + st.readout);
+  check('opening it arms the card; it holds Grow / Shrink / Clear, Smooth / Follow, Pitch, the readout, WEAVE, REATTACH, Cancel (no Circle: the lasso is the tool)',
+    st.open && st.fit === 'smooth' && have.length === 0 && !st.go && !st.attach, 'missing ' + have.join(',') + ' ' + st.readout);
   await lookDown(page);
   await page.click('#btn-xray');
   await frames(page, 2);
 
-  console.log('\n=== 2. a click cuts a circle of the Radius ===');
-  await page.fill('#inp-weave-radius', '13');
-  await click(page, await screenOf(page, [-1, 0, fx.base(-1, 0)]));
+  console.log('\n=== 2. a loop cuts the surface under it ===');
+  await drag(page, await loopAround(page, fx, -1, 0, 13.6));
   st = await S(page);
-  check('the cut is read: a patch of the surface, its outline one loop of the mesh’s own corners, drawn through X-ray (plate fill, rim lines, rim points)',
-    st.patch && st.patch.ok && st.cut > 8000 && st.patch.rim > 200 && st.patch.holes === 0 && st.drawn === 3 && st.fills === 1 && /^Cut: [\d,]+ triangles/.test(st.readout), st.readout + ' · drawn ' + st.drawn);
+  check('the cut is read: a patch of the surface, its outline one loop of the mesh\u2019s own corners, drawn through X-ray (plate fill, rim lines, rim points)',
+    st.patch && st.patch.ok && st.cut > 8000 && st.patch.rim > 200 && st.patch.holes === 0 && st.drawn === 3 && st.fills === 1 && /^Cut: [\d,]+ triangles/.test(st.readout), st.readout + ' \u00b7 drawn ' + st.drawn);
   check('WEAVE is on, REATTACH is off', st.go && !st.attach, JSON.stringify({ go: st.go, attach: st.attach }));
-  const cut13 = st.cut;
+  const cutBig = st.cut;
 
-  console.log('\n=== 3. drag, add, take away, grow, shrink ===');
-  await click(page, await screenOf(page, [0, 0, fx.base(0, 0)]));          // the same circle at the middle: still one cut
-  const c0 = await screenOf(page, [-1, 0, fx.base(-1, 0)]), c1 = await screenOf(page, [-1 + 8, 0, fx.base(7, 0)]);
-  const path_ = []; for (let i = 0; i <= 10; i++) path_.push({ x: c0.x + (c1.x - c0.x) * i / 10, y: c0.y + (c1.y - c0.y) * i / 10 });
-  await drag(page, path_);
+  console.log('\n=== 3. add, take away, grow, shrink ===');
+  await drag(page, await loopAround(page, fx, -1, 0, 8));
   st = await S(page);
   const r8 = st.cut;
-  check('a drag out 8 mm sets the circle by hand (a cut about a third the area of the 13 mm one, replacing it)', r8 > 3000 && r8 < cut13 * 0.6 && st.patch && st.patch.ok, 'dragged ' + r8 + ' triangles, clicked ' + cut13);
-  await page.fill('#inp-weave-radius', '5');
-  await click(page, await screenOf(page, [-1 + 7, 0, fx.base(6, 0)]), ['Shift']);
+  check('a smaller loop replaces the cut (about a third the area of the 13.6 mm one)', r8 > 3000 && r8 < cutBig * 0.6 && st.patch && st.patch.ok, 'drawn ' + r8 + ' triangles, before ' + cutBig);
+  await drag(page, await loopAround(page, fx, -1 + 7, 0, 5), ['Shift']);
   const added = (await S(page)).cut;
-  check('Shift adds a circle that overlaps it: the cut grows (one piece)', added > r8 && (await S(page)).patch.ok, r8 + ' -> ' + added);
-  await page.fill('#inp-weave-radius', '3');
-  await click(page, await screenOf(page, [-1 + 11, 0, fx.base(10, 0)]), ['Alt']);
+  check('Shift adds a loop that overlaps it: the cut grows (one piece)', added > r8 && (await S(page)).patch.ok, r8 + ' -> ' + added);
+  await drag(page, await loopAround(page, fx, -1 + 11, 0, 3), ['Alt']);
   const sub = (await S(page)).cut;
   check('Alt takes a bite off the edge', sub < added, added + ' -> ' + sub);
-  await click(page, await screenOf(page, [-1 + 2, 0, fx.base(1, 0)]), ['Alt']);
+  await drag(page, await loopAround(page, fx, -1 + 2, 0, 1.5), ['Alt']);
   const holed = await S(page);
   check('Alt inside the cut leaves a hole (close() does not fill what was cut on purpose): two outlines', holed.cut < sub && holed.patch.ok && holed.patch.holes === 1, sub + ' -> ' + holed.cut + ', holes ' + holed.patch.holes);
   await page.click('#btn-weave-clear');
-  await page.fill('#inp-weave-radius', '8');
-  await click(page, await screenOf(page, [-1, 0, fx.base(-1, 0)]));
+  await drag(page, await loopAround(page, fx, -1, 0, 8));
   const base8 = (await S(page)).cut;
   await page.click('#btn-weave-grow'); await frames(page, 2);
   const grown = (await S(page)).cut;
@@ -177,8 +186,7 @@ withApp(async (page, logs) => {
   check('Clear lets go of the cut (and its drawing)', st.cut === 0 && st.drawn === 0 && !st.go, JSON.stringify({ cut: st.cut, drawn: st.drawn }));
 
   console.log('\n=== 4. WEAVE draws the new patch and changes nothing ===');
-  await page.fill('#inp-weave-radius', '13');
-  await click(page, await screenOf(page, [-1, 0, fx.base(-1, 0)]));
+  await drag(page, await loopAround(page, fx, -1, 0, 13.6));
   const fp0 = await fingerprint(page), d0 = await undoDepth(page), soup0 = await soupOf(page);
   await page.click('#btn-weave-go');
   await page.waitForFunction(() => !nsoWeaveState().busy && nsoWeaveState().plan, null, { timeout: 60000 });
@@ -207,7 +215,6 @@ withApp(async (page, logs) => {
   check('one Undo puts the piece back byte for byte', (await fingerprint(page)) === fp0 && (await undoDepth(page)) === d0);
 
   console.log('\n=== 6. a lasso, through X-ray ===');
-  await page.click('#btn-weave-lasso');
   // a loop that follows the surface, as a hand drawing round it does: its edges sampled on the cap, then projected
   const corners = [[-16, -13.3], [16, -13.3], [16, 13.5], [-16, 13.5]], lasso = [];
   for (let e = 0; e < 4; e++) {
@@ -220,23 +227,21 @@ withApp(async (page, logs) => {
   lasso.push(lasso[0]);
   await drag(page, lasso);
   st = await S(page);
-  check('a loop drawn round the slab cuts the surface facing the camera: one patch, ok, well over the 13 mm circle’s, the engraving walls taken in', st.mode === 'lasso' && st.patch && st.patch.ok && st.cut > cut13 && st.drawn === 3, st.readout + ' · cut ' + st.cut);
+  check('a loop drawn round the slab cuts the surface facing the camera: one patch, ok, well over the 13 mm circle’s, the engraving walls taken in', st.patch && st.patch.ok && st.cut > cutBig && st.drawn === 3, st.readout + ' · cut ' + st.cut);
   await page.click('#btn-weave-go');
   await page.waitForFunction(() => !nsoWeaveState().busy && (nsoWeaveState().plan || /^Weave:/.test(nsoWeaveState().readout)), null, { timeout: 90000 });
   st = await S(page);
   check('and it weaves (the whole top, rim to rim)', st.plan && st.plan.ok && st.attach, st.readout);
-  await page.click('#btn-weave-circle');
   await page.click('#btn-weave-clear');
 
-  console.log('\n=== 7. a refusal in words: the crop’s edge through the work ===');
-  await page.fill('#inp-weave-radius', '6');
-  await click(page, await screenOf(page, [-4, 0, fx.base(-4, 0)]));
+  console.log('\n=== 7. a loop whose edge runs across the letters ===');
+  await drag(page, await loopAround(page, fx, -4, 0, 6));
   await page.click('#btn-weave-go');
   await page.waitForFunction(() => !nsoWeaveState().busy, null, { timeout: 60000 });
   st = await S(page);
-  check('WEAVE is refused in red, saying the crop’s edge cuts through the work and how to fix it; the corners on the work are counted; REATTACH stays off',
-    !st.plan && st.bad_readout && /edge cuts through the work/.test(st.readout) && /Widen the crop/.test(st.readout) && st.bad > 0 && !st.attach, st.readout + ' · bad ' + st.bad);
-  check('and the piece is untouched', (await fingerprint(page)) === fp0 && (await undoDepth(page)) === d0);
+  check('it weaves, and the readout says how many features the loop\u2019s edge crosses and that they stay as they are (draw wider to take them)',
+    st.plan && st.plan.ok && st.plan.stats.keptFeatures > 0 && /cross the lasso's edge and stay as they are \(draw it wider/.test(st.readout) && st.attach, st.readout);
+  check('and the piece is untouched until REATTACH', (await fingerprint(page)) === fp0 && (await undoDepth(page)) === d0);
   await page.click('#btn-weave-clear');
 
   console.log('\n=== 8. a painted piece stands WEAVE down ===');
@@ -250,8 +255,7 @@ withApp(async (page, logs) => {
   await page.click('#menu-weave > summary');
   await page.waitForFunction(() => nsoWeaveState().open, null, { timeout: 5000 });
   await lookDown(page);
-  await page.fill('#inp-weave-radius', '13');
-  await click(page, await screenOf(page, [-1, 0, fx.base(-1, 0)]));
+  await drag(page, await loopAround(page, fx, -1, 0, 13.6));
   const d8 = await undoDepth(page);
   await page.evaluate(() => NSO_weaveGo());
   await frames(page, 2);
@@ -262,7 +266,7 @@ withApp(async (page, logs) => {
   await page.click('#menu-weave > summary');
   await page.waitForFunction(() => nsoWeaveState().open, null, { timeout: 5000 });
   await lookDown(page);
-  await click(page, await screenOf(page, [-1, 0, fx.base(-1, 0)]));
+  await drag(page, await loopAround(page, fx, -1, 0, 13.6));
   await page.click('#btn-weave-go');
   await page.waitForFunction(() => !nsoWeaveState().busy && nsoWeaveState().plan, null, { timeout: 60000 }).catch(() => {});
   st = await S(page);
@@ -290,6 +294,33 @@ withApp(async (page, logs) => {
   const carveOver = await page.evaluate(() => ({ weave: nsoWeaveState().open, carve: !!state.carveArmed }));
   check('Carve armed over Weave puts Weave away (one click-owning tool at a time)', !carveOver.weave && carveOver.carve, JSON.stringify(carveOver));
   await page.click('#btn-carve');
+
+  console.log('\n=== 10. a curved cap with a groove through the work ===');
+  await page.click('#btn-clear-plate').catch(() => {});
+  await frames(page, 2);
+  const cid = await loadSTL(page, writeSTL('curved.stl', fxCurved.soup));
+  await selectModel(page, cid);
+  await page.evaluate(i => { const k = state.placed.findIndex(p => p && p.sourceId === i); if (k >= 0) selectPlaced(k); }, cid);
+  await page.click('#menu-weave > summary');
+  await page.waitForFunction(() => nsoWeaveState().open, null, { timeout: 5000 });
+  await lookDown(page);
+  const cdep0 = await page.evaluate(src => { const r = NSO_Defects.locate(new Float32Array(src), {}); return { open: r.openEdges, nm: r.nonManifoldEdges, odd: r.oddEdges, flip: r.flippedEdges, degen: r.degenerateTris, pierce: r.pierce }; }, Array.from(fxCurved.soup));
+  await drag(page, await loopAround(page, fxCurved, 0, 0, 9.2, 36));
+  st = await S(page);
+  check('a loop round the cap (the surface leans up to 40 degrees under it) cuts a patch, ok', st.patch && st.patch.ok && st.cut > 6000, st.readout);
+  await page.click('#btn-weave-go');
+  await page.waitForFunction(() => !nsoWeaveState().busy && (nsoWeaveState().plan || /^Weave:/.test(nsoWeaveState().readout)), null, { timeout: 120000 });
+  st = await S(page);
+  check('it weaves: the surface cloned, the work bridged, the weave even', st.plan && st.plan.ok && st.plan.stats.workArea > 20 && st.plan.stats.flipped === 0 && st.plan.stats.angleP1 > 25, st.readout);
+  const cd0 = await undoDepth(page);
+  await page.click('#btn-weave-attach');
+  await page.waitForFunction(d => state.undoStack.length > d, cd0, { timeout: 30000 }).catch(() => {});
+  const csoup = await soupOf(page), cdep = await defects(page);
+  check('the app\u2019s checker finds the curved piece exactly as closed as it was', cdep.open === 0 && cdep.nm === 0 && cdep.odd === 0 && cdep.flip === 0 && cdep.degen === 0 && cdep.pierce === cdep0.pierce, JSON.stringify(cdep));
+  const plainSpots = [[-5, 0], [4.5, 2], [-4.5, -4], [3, 6]], grooveSpots = [[-1.1, 0], [0, 7.0], [0, 3.8]];
+  const e1 = plainSpots.map(([x, y]) => Math.abs(topAt(csoup, x, y) - fxCurved.base(x, y))), e2 = grooveSpots.map(([x, y]) => Math.abs(topAt(csoup, x, y) - fxCurved.base(x, y)));
+  check('the engraving is gone and the surface is the dome and its groove again: within 0.02 mm off the groove, 0.2 mm where the groove runs under the letters',
+    Math.max.apply(null, e1) < 0.02 && Math.max.apply(null, e2) < 0.2, 'off the groove worst ' + Math.max.apply(null, e1).toFixed(4) + ', on it ' + Math.max.apply(null, e2).toFixed(3) + ' (the letters were 0.6 deep)');
   const errs = logs.filter(l => /\[pageerror\]/.test(l));
   check('no uncaught page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
 }).then(() => {

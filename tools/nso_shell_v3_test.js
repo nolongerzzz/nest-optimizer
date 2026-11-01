@@ -121,8 +121,8 @@ const HOLDS = {
   'menu-text': ['text-card', 'inp-text', 'sel-text-font', 'btn-text-bold', 'btn-text-italic', 'btn-text-font-file', 'inp-text-size',
                 'inp-text-depth', 'inp-text-angle', 'chk-text-mirror', 'text-readout', 'btn-text-go', 'btn-text-cancel',
                 'btn-text-mode-stamp', 'btn-text-mode-remove', 'chk-text-word', 'inp-text-reach', 'btn-text-remove'],
-  // WEAVE: the card is the menu - Circle / Lasso, Radius, Grow / Shrink / Clear, Smooth / Follow, Pitch, the readout, WEAVE, REATTACH, Cancel
-  'menu-weave': ['weave-card', 'btn-weave-circle', 'btn-weave-lasso', 'inp-weave-radius', 'btn-weave-grow', 'btn-weave-shrink', 'btn-weave-clear',
+  // WEAVE: the card is the menu - Grow / Shrink / Clear, Smooth / Follow, Pitch, the readout, WEAVE, REATTACH, Cancel (the lasso is the pointer)
+  'menu-weave': ['weave-card', 'btn-weave-grow', 'btn-weave-shrink', 'btn-weave-clear',
                  'btn-weave-smooth', 'btn-weave-follow', 'inp-weave-pitch', 'weave-readout', 'btn-weave-go', 'btn-weave-attach', 'btn-weave-cancel'],
   'menu-paint': ['btn-mask-select', 'btn-mask-paint', 'btn-mask-clear', 'btn-mask-delete', 'sel-mask-delete', 'btn-extract-sel'],
   // SURFACE & EDGES: Soften (R, Full wrap, edge treatment) · Mirror · Skin face · Skin wrap · Skin patch · Trace raster · Texture

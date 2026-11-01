@@ -3,20 +3,22 @@
 // card on it, the left bar's WEAVE, under Text. docs/WEAVE.md.
 //
 // Every corner of a mesh is a place it can be cut. WEAVE cuts a patch of a piece's surface out along its own
-// triangles - like a puzzle piece - lays a fresh, evenly woven patch over the plate it leaves, and reattaches it
+// triangles - like a puzzle piece - clones that surface as a fresh, evenly woven patch, and reattaches it
 // corner for corner: the new patch's rim IS the rim, so the join is watertight with nothing to weld or repair.
-// The plate is what the new surface is fitted over, so its contour carries across; the work on it (an engraving,
-// a boss, a gouge) is bridged. It is the clean way to take engraved text off a scan (docs/RESURFACE.md is the other).
+// The surface is cloned, not flattened: a curved palm, a groove, a saddle come back as they were. Work on it (an
+// engraving, a boss) is bridged, the face carried across it. It is the clean way to take engraved text off a scan
+// (docs/RESURFACE.md is the other).
 //
-//   1. CUT. With the card open, the pointer is the tool. CIRCLE: press on the surface and drag out to the size you
-//      want (a click alone takes the Radius field's). LASSO: draw round the part. Shift adds to the cut, Alt takes
-//      away; Grow and Shrink move the edge one ring of triangles. It is the surface facing you that is cut (a circle
-//      follows the surface; a lasso takes what faces the camera), so it works through X-RAY, where the plate (amber),
-//      its rim corners (the points it is cut at) and the new weave (green) are drawn over the wireframe.
-//   2. WEAVE. Fits the new patch over the plate and draws it. Nothing is changed yet. Smooth bridges the work;
-//      Follow keeps the plate's own surface and only re-weaves it. Pitch is the triangle size (blank: the plate's own).
-//      A refusal says why, in words: the cut curls too far to lay flat, its edge runs through the work (the corners
-//      that stand on it are drawn red - Grow, or draw it wider), the patch would be too fine.
+//   1. CUT with the LASSO: press on the piece and draw round the part. The loop is drawn flat on the screen but cuts
+//      like a cylinder along the view: it takes the surface that faces you inside it, whatever the surface does there
+//      (curves, grooves, walls). Shift adds another loop, Alt takes one away (what Alt takes from inside stays a hole);
+//      Grow and Shrink move the edge one ring of triangles. It is the surface facing you that is cut, so it works
+//      through X-RAY, where the plate (amber), its rim corners (the points it is cut at) and the new weave (green)
+//      are drawn over the wireframe.
+//   2. WEAVE. Clones the surface into the new patch and draws it. Nothing is changed yet. Smooth bridges the work;
+//      Follow keeps the plate exactly and only re-weaves it. Pitch is the triangle size (blank: the plate's own).
+//      Work the loop's edge crosses (a letter half inside) stays as it is, and the readout says how many; a refusal
+//      says why in words (the patch would be too fine, there is no face left round the work).
 //   3. REATTACH. Puts the new patch in place of the old, rim to rim - mesh surgery, no boolean - one Undo
 //      (weaveReplace).
 //
@@ -29,14 +31,12 @@ var WEAVE_RIM_COLOR = 0xffffff;         // its rim
 var WEAVE_NEW_COLOR = 0x34d399;         // the new weave
 var WEAVE_BAD_COLOR = 0xf87171;         // a cut that cannot be woven, and the corners that stand on work
 var WEAVE_RENDER_ORDER = 22;
-var WEAVE_MIN_DOT = 0.25;               // a circle takes only what faces within 75 degrees of where it was put down
-var WEAVE_DRAG_PX = 4;                  // a press that moves less than this is a click
 
 function NSO_weaveUI() {
   if (typeof state === 'undefined') return {};
   if (!state.weave) {
     state.weave = { open: false, modelId: null, soup: null, M: null, cen: null, raw: null, mask: null, patch: null, plan: null,
-                    mode: 'circle', fit: 'smooth', keep: null, drag: null, lasso: null, group: null, dirty: false, raf: 0, said: null, busy: false, bad: null, svg: null };
+                    fit: 'smooth', keep: null, drag: null, lasso: null, group: null, dirty: false, raf: 0, said: null, busy: false, bad: null, svg: null };
   }
   return state.weave;
 }
@@ -68,9 +68,6 @@ function NSO_weaveSyncButtons() {
   var cut = !!(B.patch && B.patch.ok);
   if (go) go.disabled = B.busy || !cut;
   if (at) at.disabled = B.busy || !(B.plan && B.plan.ok);
-  [['btn-weave-circle', 'circle'], ['btn-weave-lasso', 'lasso']].forEach(function (p) {
-    var b = NSO_weaveEl(p[0]); if (b) b.setAttribute('aria-pressed', B.mode === p[1] ? 'true' : 'false');
-  });
   [['btn-weave-smooth', 'smooth'], ['btn-weave-follow', 'follow']].forEach(function (p) {
     var b = NSO_weaveEl(p[0]); if (b) b.setAttribute('aria-pressed', B.fit === p[1] ? 'true' : 'false');
   });
@@ -114,9 +111,7 @@ function NSO_weaveReset(keepReadout) {
   if (!keepReadout) NSO_weaveReadout(NSO_weaveHint());
 }
 function NSO_weaveHint() {
-  var B = NSO_weaveUI();
-  return B.mode === 'lasso' ? 'Weave: draw round the part to cut out (Shift adds, Alt takes away).'
-                            : 'Weave: press on the surface and drag out a circle, or click for the Radius (Shift adds, Alt takes away).';
+  return 'Weave: press on the piece and draw round the part to cut out (Shift adds a loop, Alt takes one away).';
 }
 
 /* ----------------------------------------------------------- the pointer */
@@ -140,14 +135,6 @@ function NSO_weavePick(clientX, clientY) {
 function NSO_weaveToRaw(m, d) {
   var o = m.centerOffset || { x: 0, y: 0, z: 0 };
   return [d.x + o.x, -(d.z + o.z), d.y + o.y];
-}
-
-/* The surface's direction round a triangle: the mean normal of the triangles within 1.5 mm. */
-function NSO_weaveAxisAt(B, tri, point) {
-  var M = B.M, near = NSO_Weave.ball(M, tri, point, 1.5), ax = [0, 0, 0], t;
-  for (t = 0; t < M.n; t++) if (near[t]) { ax[0] += M.area[t] * M.nrm[3 * t]; ax[1] += M.area[t] * M.nrm[3 * t + 1]; ax[2] += M.area[t] * M.nrm[3 * t + 2]; }
-  var L = Math.hypot(ax[0], ax[1], ax[2]);
-  return L > 0 ? [ax[0] / L, ax[1] / L, ax[2] / L] : [M.nrm[3 * tri], M.nrm[3 * tri + 1], M.nrm[3 * tri + 2]];
 }
 
 /* Fold a new selection into the cut: Shift adds, Alt takes away (and what it takes from inside the cut stays a hole: close()
@@ -181,13 +168,6 @@ function NSO_weaveSetCut(mask, quick) {
     (pt.holes ? ', ' + pt.holes + (pt.holes === 1 ? ' hole' : ' holes') : '') + '. Press WEAVE.');
 }
 
-function NSO_weaveCircleAt(ev, tri, center, r) {
-  var B = NSO_weaveUI(), M = B.M;
-  var ax = B.drag && B.drag.axis ? B.drag.axis : NSO_weaveAxisAt(B, tri, center);
-  var mask = NSO_Weave.ball(M, tri, center, r, { axis: ax, minDot: WEAVE_MIN_DOT });
-  return { mask: mask, axis: ax };
-}
-
 function NSO_weaveDown(ev) {
   var B = NSO_weaveUI(), m = NSO_weaveModel();
   if (!m || B.busy) return false;
@@ -197,66 +177,30 @@ function NSO_weaveDown(ev) {
   }
   var M = NSO_weaveEnsure(m);
   if (!M) return false;
-  if (B.mode === 'lasso') {
-    var pk = NSO_weavePick(ev.clientX, ev.clientY);
-    if (!pk) return false;                                              // a press off the piece orbits as ever
-    B.drag = { kind: 'lasso', pts: [[ev.clientX, ev.clientY]], ev: ev, moved: false };
-    NSO_weaveLassoStart(ev.clientX, ev.clientY);
-    if (state.controls) state.controls.enabled = false;
-    return true;
-  }
-  var p = NSO_weavePick(ev.clientX, ev.clientY);
-  if (!p) return false;
-  var center = NSO_weaveToRaw(m, p.local);
-  B.drag = { kind: 'circle', tri: p.tri, center: center, axis: NSO_weaveAxisAt(B, p.tri, center), x0: ev.clientX, y0: ev.clientY, r: 0, moved: false, ev: ev };
+  var pk = NSO_weavePick(ev.clientX, ev.clientY);
+  if (!pk) return false;                                              // a press off the piece orbits as ever
+  B.drag = { pts: [[ev.clientX, ev.clientY]], ev: ev, moved: false };
+  NSO_weaveLassoStart(ev.clientX, ev.clientY);
   if (state.controls) state.controls.enabled = false;
   return true;
 }
 function NSO_weaveMove(ev) {
-  var B = NSO_weaveUI(), D = B.drag, m = NSO_weaveModel();
-  if (!D || !m) return;
-  if (D.kind === 'lasso') {
-    var last = D.pts[D.pts.length - 1];
-    if (Math.hypot(ev.clientX - last[0], ev.clientY - last[1]) < 4) return;
-    D.pts.push([ev.clientX, ev.clientY]); D.moved = true;
-    NSO_weaveLassoMove(D.pts);
-    return;
-  }
-  if (!D.moved && Math.hypot(ev.clientX - D.x0, ev.clientY - D.y0) < WEAVE_DRAG_PX) return;
-  D.moved = true;
-  var p = NSO_weavePick(ev.clientX, ev.clientY);
-  if (!p) return;
-  var q = NSO_weaveToRaw(m, p.local), r = Math.hypot(q[0] - D.center[0], q[1] - D.center[1], q[2] - D.center[2]);
-  D.r = Math.max(0.3, r);
-  D.ev = ev;
-  if (!D.pending) {
-    D.pending = true;
-    requestAnimationFrame(function () {
-      D.pending = false;
-      if (B.drag !== D) return;
-      var c = NSO_weaveCircleAt(D.ev, D.tri, D.center, D.r);
-      B.mask = NSO_weaveCombine(c.mask, D.ev);
-      B.patch = null; B.plan = null;
-      B.dirty = true; NSO_weaveDraw();
-      NSO_weaveReadout('Circle ' + NSO_weaveFmt(D.r) + ' mm - ' + NSO_weaveInt(NSO_Weave.count(B.mask)) + ' triangles. Let go to cut.');
-    });
-  }
+  var B = NSO_weaveUI(), D = B.drag;
+  if (!D) return;
+  var last = D.pts[D.pts.length - 1];
+  if (Math.hypot(ev.clientX - last[0], ev.clientY - last[1]) < 4) return;
+  D.pts.push([ev.clientX, ev.clientY]); D.moved = true; D.ev = ev;
+  NSO_weaveLassoMove(D.pts);
 }
 function NSO_weaveUp(ev, keep) {
   var B = NSO_weaveUI(), D = B.drag, m = NSO_weaveModel();
   if (!D) return;
   B.drag = null;
   if (state.controls) state.controls.enabled = true;
-  if (!keep || !m || !B.M) { NSO_weaveLassoEnd(); NSO_weaveSetCut(B.mask && B.patch ? B.mask : null); return; }
-  var fresh = null;
-  if (D.kind === 'lasso') {
-    fresh = D.pts.length >= 3 ? NSO_weaveLassoSelect(m, D.pts) : null;
-    NSO_weaveLassoEnd();
-    if (!fresh) { NSO_weaveReadout('Weave: that loop holds no surface - draw round part of the piece.', true); return; }
-  } else {
-    var r = D.moved ? D.r : (function () { var f = NSO_weaveEl('inp-weave-radius'); return f && +f.value > 0 ? +f.value : 4; })();
-    fresh = NSO_weaveCircleAt(ev || D.ev, D.tri, D.center, r).mask;
-  }
+  NSO_weaveLassoEnd();
+  if (!keep || !m || !B.M) { NSO_weaveSetCut(B.mask && B.patch ? B.mask : null); return; }
+  var fresh = D.pts.length >= 3 ? NSO_weaveLassoSelect(m, D.pts) : null;
+  if (!fresh) { NSO_weaveReadout('Weave: that loop holds no surface - draw a loop round part of the piece.', true); return; }
   NSO_weaveSetCut(NSO_weaveCombine(fresh, ev || D.ev));
 }
 
@@ -320,15 +264,6 @@ function NSO_weaveLassoSelect(m, pts) {
   }
   var k;
   if (!any) return null;
-  // only what faces roughly the way the surface under the loop does (as a circle takes): a wall of the piece that happens to face
-  // the camera inside the loop is not part of this surface, and cannot be laid flat with it
-  var ax = [0, 0, 0];
-  for (t = 0; t < n; t++) if (cand[t]) { ax[0] += M.area[t] * M.nrm[3 * t]; ax[1] += M.area[t] * M.nrm[3 * t + 1]; ax[2] += M.area[t] * M.nrm[3 * t + 2]; }
-  var al = Math.hypot(ax[0], ax[1], ax[2]);
-  if (al > 0) {
-    ax = [ax[0] / al, ax[1] / al, ax[2] / al];
-    for (t = 0; t < n; t++) if (cand[t] && M.nrm[3 * t] * ax[0] + M.nrm[3 * t + 1] * ax[1] + M.nrm[3 * t + 2] * ax[2] < WEAVE_MIN_DOT) cand[t] = 0;
-  }
   var seed = NSO_weavePick(cx, cy);
   var s = seed && cand[seed.tri] ? seed.tri : best;
   var mask = NSO_Weave.flood(M, s, function (t2) { return cand[t2] === 1; });
@@ -447,8 +382,9 @@ function NSO_weaveGo() {
     }
     B.plan = r;
     var s = r.stats;
-    NSO_weaveReadout('Woven: ' + NSO_weaveInt(s.oldTris) + ' → ' + NSO_weaveInt(s.newTris) + ' triangles at ' + NSO_weaveFmt(s.pitch, 2) + ' mm' +
+    NSO_weaveReadout('Woven: ' + NSO_weaveInt(s.oldTris) + ' → ' + NSO_weaveInt(s.newTris) + ' triangles at ' + NSO_weaveFmt(s.pitch, 2) + ' mm, the surface cloned' +
       (s.workArea > 0 ? ' · bridged ' + NSO_weaveFmt(s.workArea) + ' mm² of work up to ' + NSO_weaveFmt(s.workDepth, 2) + ' mm deep' : '') +
+      (s.keptFeatures > 0 ? ' · ' + s.keptFeatures + (s.keptFeatures === 1 ? ' feature crosses' : ' features cross') + ' the lasso\'s edge and ' + (s.keptFeatures === 1 ? 'stays' : 'stay') + ' as ' + (s.keptFeatures === 1 ? 'it is' : 'they are') + ' (draw it wider to take ' + (s.keptFeatures === 1 ? 'it' : 'them') + ')' : '') +
       ' · rim kept, all ' + NSO_weaveInt(s.rimCorners) + ' corners. REATTACH puts it in.');
     B.dirty = true; NSO_weaveDraw(); NSO_weaveSyncButtons();
   }, 30);
@@ -518,7 +454,7 @@ function NSO_weaveOpen() {
   B.modelId = m ? m.id : null;
   NSO_weaveSyncButtons();
   NSO_weaveReadout(NSO_weaveHint());
-  if (typeof setStatus === 'function') setStatus('Weave open - cut a patch with a circle or a lasso, then WEAVE. Close the menu or press Escape to stop.');
+  if (typeof setStatus === 'function') setStatus('Weave open - draw a lasso round the part to cut out, then WEAVE. Close the menu or press Escape to stop.');
   NSO_weaveTick();
 }
 function NSO_weaveClose() {
@@ -559,7 +495,7 @@ function NSO_weaveTick() {
 function nsoWeaveState() {
   var B = NSO_weaveUI(), pt = B.patch, pl = B.plan, kids = B.group ? B.group.children : [];
   return {
-    open: !!B.open, mode: B.mode, fit: B.fit, busy: !!B.busy,
+    open: !!B.open, fit: B.fit, busy: !!B.busy,
     cut: B.mask && B.M ? NSO_Weave.count(B.mask) : 0,
     patch: pt ? { ok: !!pt.ok, reason: pt.reason || '', tris: pt.tris ? pt.tris.length : 0, rim: pt.rimCorners || 0, area: pt.area || 0, holes: pt.holes || 0 } : null,
     plan: pl ? { ok: !!pl.ok, stats: pl.stats || null } : null,
@@ -570,17 +506,6 @@ function nsoWeaveState() {
     go: !(NSO_weaveEl('btn-weave-go') || { disabled: true }).disabled, attach: !(NSO_weaveEl('btn-weave-attach') || { disabled: true }).disabled
   };
 }
-/* For the drive check: cut a circle of radius r (mm) round the surface point under (x, y). */
-function nsoWeaveCutAt(clientX, clientY, r) {
-  var B = NSO_weaveUI(), m = NSO_weaveModel();
-  if (!m) return false;
-  var M = NSO_weaveEnsure(m), p = NSO_weavePick(clientX, clientY);
-  if (!M || !p) return false;
-  var center = NSO_weaveToRaw(m, p.local), ax = NSO_weaveAxisAt(B, p.tri, center);
-  NSO_weaveSetCut(NSO_Weave.ball(M, p.tri, center, r, { axis: ax, minDot: WEAVE_MIN_DOT }));
-  return true;
-}
-
 if (typeof document !== 'undefined') {
   (function wireWeave() {
     function onDown(ev) {
@@ -625,8 +550,6 @@ if (typeof document !== 'undefined') {
       menu.dataset.nsoWired = '1';
       menu.addEventListener('toggle', function () { if (menu.open) NSO_weaveOpen(); else if (NSO_weaveUI().open) NSO_weaveClose(); });
       function on(id, fn) { var b = NSO_weaveEl(id); if (b) b.addEventListener('click', fn); }
-      on('btn-weave-circle', function () { var B = NSO_weaveUI(); B.mode = 'circle'; NSO_weaveSyncButtons(); if (!B.mask) NSO_weaveReadout(NSO_weaveHint()); });
-      on('btn-weave-lasso', function () { var B = NSO_weaveUI(); B.mode = 'lasso'; NSO_weaveSyncButtons(); if (!B.mask) NSO_weaveReadout(NSO_weaveHint()); });
       on('btn-weave-grow', function () { NSO_weaveGrow(1); });
       on('btn-weave-shrink', function () { NSO_weaveGrow(-1); });
       on('btn-weave-clear', function () { NSO_weaveReset(); });
