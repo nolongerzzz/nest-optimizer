@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=924400ff" />
+  <link rel="stylesheet" href="styles.css?v=f9076365" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -1404,6 +1404,45 @@
             </div>
             </div>
           </details>
+          <!-- WEAVE (app-weave.js, nso_weave.js, nso_cdt.js; docs/WEAVE.md): cut a patch out of a piece along its own
+               triangles (a circle or a lasso, grown or shrunk a ring at a time - every corner of the mesh is a place
+               it can be cut), lay a fresh, evenly woven patch over it - fitted over the old one so the contour matches,
+               the work on it (an engraving) bridged - and reattach it corner for corner, rim to rim. Works through X-ray:
+               the plate, its rim corners and the new weave are drawn over the wireframe. -->
+          <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-weave" data-sec="weave">
+            <summary class="vp-bar-btn" title="Cut a patch of a piece's surface out along its own triangles and weave a fresh one in its place, rim corner for corner: removes engraved text, or re-meshes a patch of a scan">Weave</summary>
+            <div class="vp-menu-body vp-finish">
+            <div class="vp-bend-panel weave-card" id="weave-card">
+              <div class="punch-seg" id="weave-mode-row" role="group" aria-label="Crop with">
+                <button id="btn-weave-circle" class="btn btn-secondary" type="button" aria-pressed="true" title="Circle: press on the surface and drag out to the size you want, or just click for the Radius below. Shift adds to what is cut, Alt takes away.">Circle</button>
+                <button id="btn-weave-lasso" class="btn btn-secondary" type="button" aria-pressed="false" title="Lasso: draw round the part you want to cut out. Shift adds to what is cut, Alt takes away. Only the surface facing you is cut, so it works through X-ray.">Lasso</button>
+              </div>
+              <label class="vp-bend-field" title="The size of a click's circle, in mm along the surface. Dragging sets it by hand.">Radius
+                <input type="number" id="inp-weave-radius" value="4.0" min="0.5" max="80" step="0.5" aria-label="Circle radius, mm"><span>mm</span></label>
+              <div class="punch-seg" id="weave-size-row" role="group" aria-label="Adjust the cut">
+                <button id="btn-weave-grow" class="btn btn-secondary" type="button" title="Cut one ring of triangles wider all round, so the edge falls on clean surface.">Grow</button>
+                <button id="btn-weave-shrink" class="btn btn-secondary" type="button" title="Cut one ring of triangles narrower all round.">Shrink</button>
+                <button id="btn-weave-clear" class="btn btn-secondary" type="button" title="Let go of the cut (Escape does too).">Clear</button>
+              </div>
+              <div class="punch-seg" id="weave-fit-row" role="group" aria-label="The new surface">
+                <button id="btn-weave-smooth" class="btn btn-secondary" type="button" aria-pressed="true" title="Smooth: the new patch is the surface the old one was on, with the work on it bridged - an engraving, a boss, a gouge are gone, the face's curve carried across. The cut's edge must fall on clean surface round the work.">Smooth</button>
+                <button id="btn-weave-follow" class="btn btn-secondary" type="button" aria-pressed="false" title="Follow: the new patch is the old one's own surface exactly, only re-woven - nothing is bridged. Steep walls come out as stretched triangles.">Follow</button>
+              </div>
+              <label class="vp-bend-field" title="The new patch's triangle size, mm. Blank: the old patch's own median edge, so the weave resembles the mesh round it.">Pitch
+                <input type="number" id="inp-weave-pitch" value="" placeholder="auto" min="0.02" max="5" step="0.01" aria-label="Triangle size, mm"><span>mm</span></label>
+              <p id="weave-readout" class="bend-readout">&mdash;</p>
+              <div class="vp-row vp-row-pair">
+                <button id="btn-weave-go" class="btn btn-secondary" type="button" disabled
+                        title="Weave a fresh patch to fit the hole the cut leaves (drawn green, over the wireframe if X-ray is on). Nothing is changed yet.">WEAVE</button>
+                <button id="btn-weave-attach" class="btn btn-secondary" type="button" disabled
+                        title="Put the woven patch in place of the old one, rim to rim. One Undo puts the piece back.">REATTACH</button>
+              </div>
+              <div class="vp-row">
+                <button id="btn-weave-cancel" class="btn btn-secondary" type="button" title="Close Weave; the piece is unchanged.">Cancel</button>
+              </div>
+            </div>
+            </div>
+          </details>
           <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-paint" data-sec="paint">
             <summary class="vp-bar-btn" title="Paint faces selected or excluded, delete or extract what is painted">Paint</summary>
             <div class="vp-menu-body vp-finish">
@@ -2149,7 +2188,7 @@
   <script src="nso-helpers.js?v=9c476e39"></script>
   <script src="nso-recent.js?v=f03d6f13"></script>
   <script src="nso-bounds.js?v=778acac4"></script>
-  <script src="app-core.js?v=ae265e04"></script>
+  <script src="app-core.js?v=8ec5be82"></script>
   <!-- Up to six plates (beds): the active one is state.models / state.placed, the rest are kept beside it. docs/BEDS.md. -->
   <script src="app-beds.js?v=3d221bc4"></script>
 
@@ -2238,6 +2277,11 @@
   <script src="nso_text.js?v=e50a3620"></script>
   <script src="nso_resurface.js?v=55a8e0bf"></script>
   <script src="app-text.js?v=ca4c32a8"></script>
+  <!-- Weave: cut a patch out along its own triangles, weave a fresh one in its place, reattach it rim to rim. The mesher
+       (nso_cdt.js) and the engine (nso_weave.js, which needs it) before the card (app-weave.js). docs/WEAVE.md. -->
+  <script src="nso_cdt.js?v=516428c6"></script>
+  <script src="nso_weave.js?v=01e60dd6"></script>
+  <script src="app-weave.js?v=d47d1ef0"></script>
   <script src="app-live-slider.js?v=0bc4bb66"></script>
   <script src="app-hollow.js?v=f99c09ad"></script>
   <script src="app-foam.js?v=16cca4f6"></script>

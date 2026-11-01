@@ -3,7 +3,7 @@
 Type a word, click a face of a piece, get it engraved there - any depth, any
 size, a font from the list or one loaded from a file. The geometry is
 `nso_text.js` (THREE-free, node-tested: `npm run text:test`); the card is
-`app-text.js`, the **TEXT** button on the left bar between SHAPE and PAINT
+`app-text.js`, the **TEXT** button on the left bar between SHAPE and WEAVE (docs/WEAVE.md)
 (driven: `npm run text:drive`).
 
 Open the TEXT menu and Text is armed: the menu is the card, there is no second

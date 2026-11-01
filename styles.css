@@ -4645,3 +4645,11 @@ body.sup-card-open #adjust-status { display: none; }
 @keyframes ms-bubble { 0% { opacity: 0; transform: translate(-50%, -2px); } 12% { opacity: 1; transform: translate(-50%, 6px); } 80% { opacity: 1; } 100% { opacity: 0; } }
 .ms-main-card #ms-compare-worst:empty { display: none; }
 .ms-main-card #ms-compare-worst button { font-variant-numeric: tabular-nums; }
+
+/* Weave (app-weave.js): the card is Text's - Bend's panel rows, Punch's segmented rows; a lasso is drawn in an overlay */
+.weave-card { border-top: 0; padding-top: 2px; }
+.weave-card .vp-bend-field { grid-template-columns: 52px minmax(0, 1fr) 22px; }
+.weave-card .punch-seg { margin-bottom: 3px; }
+#viewport canvas.weave-cur { cursor: crosshair; }
+#weave-lasso { position: fixed; left: 0; top: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 30; }
+#weave-lasso polyline { fill: rgba(255, 200, 61, 0.12); stroke: #ffc83d; stroke-width: 1.5; stroke-dasharray: 5 3; }

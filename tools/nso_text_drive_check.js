@@ -7,7 +7,7 @@
    click. The page's own canvas draws the letters (the browser's fonts), so the
    numbers here are read back from what it made, never assumed.
 
-     1. TEXT sits in the left column between SHAPE and PAINT; opening it arms the
+     1. TEXT sits in the left column between SHAPE and WEAVE; opening it arms the
         card (no gate, no second button); the card holds the text box, Font, Bold /
         Italic / Font file, Size, Depth, Angle, Mirror, the readout, STAMP, Cancel
      2. typing "Hello" is read: its size is in the readout before any click;
@@ -159,7 +159,7 @@ withApp(async (page, logs) => {
     return t ? { label: sum.textContent.trim(), col: t.classList.contains('vp-col-menu'), prev: prev.id, next: next.id,
       order: y(prev).top < y(t).top && y(t).top < y(next).top, sameX: Math.abs(y(prev).left - y(t).left) < 1 } : null;
   });
-  check('TEXT is a column button between SHAPE and PAINT, in line with them', place && place.label === 'Text' && place.col && place.prev === 'menu-shape' && place.next === 'menu-paint' && place.order && place.sameX,
+  check('TEXT is a column button between SHAPE and WEAVE (which Weave put before PAINT), in line with them', place && place.label === 'Text' && place.col && place.prev === 'menu-shape' && place.next === 'menu-weave' && place.order && place.sameX,
     JSON.stringify(place));
   await page.click('#menu-text > summary');
   await page.waitForFunction(() => nsoTextState().open, null, { timeout: 5000 });

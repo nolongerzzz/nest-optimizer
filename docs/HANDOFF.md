@@ -155,4 +155,5 @@ merging its list by hand. The list below is generated.
 - [undo-dispose-seal - Seal -> Undo no longer leaks 2 geometries a cycle (2026-10-26)](handoff/undo-dispose-seal.md)
 - [undo-dispose-yaw - a pose bake's geometry is disposed when nothing reachable names it (2026-10-24)](handoff/undo-dispose-yaw.md)
 - [Vertical stacking - Seat (support) from the bed, Align edges keeps the seat (2026-09-16)](handoff/vertical-stacking-seat-support-from-the-bed-align-edges-keeps.md)
+- [Weave - cut a patch out along its own triangles, weave a fresh one in, reattach it rim to rim (2026-11-01)](handoff/weave.md)
 <!-- handoff-index:end -->

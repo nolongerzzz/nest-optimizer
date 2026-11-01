@@ -271,6 +271,7 @@ const UNDO_REPLACE_LABEL = {
   carveReplace: 'Undo: Carve reverted',
   punchReplace: 'Undo: Punch reverted',
   textReplace: 'Undo: Text reverted',
+  weaveReplace: 'Undo: Weave reverted',
   scaleReplace: 'Undo: Scale reverted',
   deleteReplace: 'Undo: Delete reverted',
   brushReplace: 'Undo: Brush reverted',
