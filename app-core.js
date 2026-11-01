@@ -1309,16 +1309,138 @@ function updatePlateByView() {
   }
 }
 
+/* ===================== Draw on change =====================
+   The loop used to call renderer.render() on every animation frame whether or
+   not anything had moved. On a laptop's integrated GPU (an Intel Iris Plus 640
+   measured 20-35 ms a draw for a bare plate, MSAA on) that is the whole frame
+   budget spent redrawing a picture that is identical to the last one, 60 times
+   a second, for as long as the tab is open - and the GPU is the same one the
+   browser composites the window on, so everything else slows with it.
+
+   So a frame is drawn only when one of these holds:
+     - the camera moved (OrbitControls.update() says so, damping included);
+     - the scene's SIGNATURE changed: every object's visibility and world
+       matrix, its geometry's buffers and draw range, its material's look, a
+       light's strength, the canvas size. Read as numbers, so no tool has to
+       remember to ask for a redraw - the same idea as app-fit.js's watch;
+     - input is in progress: any press, drag, wheel, key, edit or click holds
+       full-rate drawing for RENDER_ACTIVE_MS afterwards;
+     - RENDER_IDLE_MS has passed since the last draw. A safety net for what a
+       signature cannot see (a shader uniform, a texture changed in place): a
+       stale picture heals within a quarter second instead of staying wrong.
+   nsoWakeRender(ms) asks for full-rate drawing for a while - for code that
+   animates something the signature cannot see. ?render=always (or
+   localStorage nso.render.always = 1) puts the old every-frame loop back. */
+const RENDER_IDLE_MS = 250;
+const RENDER_ACTIVE_MS = 800;
+const nsoRenderGate = {
+  until: 0, last: 0, sig: NaN, drawn: 0, skipped: 0,
+  always: (function () {
+    try {
+      return /[?&]render=always\b/.test(window.location.search) ||
+             window.localStorage.getItem('nso.render.always') === '1';
+    } catch (e) { return false; }
+  })()
+};
+function nsoWakeRender(ms) {
+  const t = performance.now() + (ms == null ? RENDER_ACTIVE_MS : ms);
+  if (t > nsoRenderGate.until) nsoRenderGate.until = t;
+}
+window.nsoWakeRender = nsoWakeRender;
+window.nsoRenderStats = function () {
+  return { drawn: nsoRenderGate.drawn, skipped: nsoRenderGate.skipped, always: nsoRenderGate.always };
+};
+(function wireRenderWake() {
+  const onInput = function (e) {
+    // A hover over the toolbar or a card changes nothing in the picture.
+    if (e.type === 'pointermove' && !e.buttons) {
+      const cv = state.renderer && state.renderer.domElement;
+      if (!cv || e.target !== cv) return;
+    }
+    nsoWakeRender();
+  };
+  ['pointerdown', 'pointermove', 'pointerup', 'wheel', 'keydown', 'keyup', 'input',
+   'change', 'click', 'dblclick', 'contextmenu', 'dragover', 'drop', 'touchstart',
+   'touchmove', 'touchend'].forEach(function (t) {
+    window.addEventListener(t, onInput, { capture: true, passive: true });
+  });
+  window.addEventListener('resize', function () { nsoWakeRender(); });
+  document.addEventListener('visibilitychange', function () { nsoWakeRender(); });
+})();
+
+function nsoRenderMatSig(m) {
+  /* three r147 draws a transparent double-sided material in two passes and
+     bumps its version twice on EVERY draw, so reading the version of one would
+     see its own last frame as a change and never settle. Its look is still
+     read below; a bare needsUpdate on one is caught by the idle redraw. */
+  const selfBumps = m.transparent && m.side === THREE.DoubleSide;
+  let h = m.id * 0.11 + (selfBumps ? 0 : m.version * 17) + m.opacity * 19 + (m.visible ? 3 : 0) +
+          (m.wireframe ? 41 : 0) + m.side * 43 + (m.depthWrite ? 53 : 0) + (m.transparent ? 59 : 0);
+  if (m.color) h += m.color.r * 23 + m.color.g * 29 + m.color.b * 31;
+  if (m.emissive) h += m.emissive.r * 61 + m.emissive.g * 67 + m.emissive.b * 71;
+  if (m.emissiveIntensity != null) h += m.emissiveIntensity * 73;
+  if (m.map) h += m.map.version * 37;
+  if (m.clippingPlanes) h += m.clippingPlanes.length * 79;
+  return h;
+}
+
+/* One number for everything the picture depends on. NaN (anything unreadable)
+   never equals itself, so a surprise draws every frame - the old behaviour -
+   rather than freezing a stale picture. */
+function nsoRenderSignature() {
+  const scene = state.scene, cam = state.camera, cv = state.renderer.domElement;
+  let h = cv.width * 3 + cv.height * 5 + state.renderer.getPixelRatio() * 7 + cam.zoom * 11 + cam.fov * 13 + cam.aspect * 17;
+  const ce = cam.matrixWorld.elements;
+  for (let k = 0; k < 16; k++) h += ce[k] * (k + 1);
+  let n = 0;
+  scene.traverse(function (o) {
+    n++;
+    const w = (n % 13) + 1;
+    if (o.visible) h += n * 1.7;
+    const e = o.matrixWorld.elements;
+    for (let k = 0; k < 16; k++) h += e[k] * (k + 1) * w;
+    h += o.renderOrder * 0.3 + o.layers.mask * 0.001;
+    if (o.isLight) h += o.intensity * 47 + (o.color ? o.color.r + o.color.g + o.color.b : 0) * 49;
+    const g = o.geometry;
+    if (g) {
+      h += g.id * 0.37;
+      const a = g.attributes;
+      for (const key in a) h += a[key].version * 11 + a[key].count * 0.01;
+      if (g.index) h += g.index.version * 13 + g.index.count * 0.01;
+      h += Math.min(g.drawRange.start, 1e9) * 0.002 + Math.min(g.drawRange.count, 1e9) * 0.003;
+    }
+    if (o.isInstancedMesh) h += o.count * 0.7 + o.instanceMatrix.version * 5;
+    const m = o.material;
+    if (m) {
+      if (Array.isArray(m)) for (let i = 0; i < m.length; i++) h += nsoRenderMatSig(m[i]);
+      else h += nsoRenderMatSig(m);
+    }
+  });
+  if (scene.background && scene.background.isColor) h += scene.background.r * 83 + scene.background.g * 89 + scene.background.b * 97;
+  return h + n * 0.5;
+}
+
 function animate() {
   requestAnimationFrame(animate);
-  if (state.controls) state.controls.update();
+  // update() returns false when the camera did not move; anything else counts as moved.
+  const moved = state.controls ? state.controls.update() !== false : false;
   updatePlateByView();
   applyPlateGridVisibility();
   // G-scope covers the whole window (an opaque fixed panel): a frame drawn
   // under it is never seen, and it halved G-scope's own frame rate.
   if (window.NSO_MICROSCOPE && window.NSO_MICROSCOPE.isOpen()) return;
-  if (state.renderer && state.scene && state.camera) {
+  if (!(state.renderer && state.scene && state.camera)) return;
+  const G = nsoRenderGate, now = performance.now();
+  state.scene.updateMatrixWorld();
+  state.camera.updateMatrixWorld();
+  const sig = nsoRenderSignature();
+  if (G.always || moved || sig !== G.sig || now < G.until || now - G.last >= RENDER_IDLE_MS) {
+    G.sig = sig;
+    G.last = now;
+    G.drawn++;
     state.renderer.render(state.scene, state.camera);
+  } else {
+    G.skipped++;
   }
 }
 

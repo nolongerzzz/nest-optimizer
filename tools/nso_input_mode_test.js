@@ -423,31 +423,44 @@ withApp(async (page, logs) => {
       cost.perMoveMs + ' ms');
     check('a click costs well under a frame', cost.perClickMs < 5, cost.perClickMs + ' ms');
 
-    /* A stall is a requestAnimationFrame tick the app's loop did not draw on,
-       so that is what is counted: the main renderer's render() calls between
-       one tick and the next, over 60 ticks. Not frames a second against a
-       clock - that is the shared runner's speed, and on a starved shard it
-       read 15 against a bar of 15 with every tick drawn. The rate is still
-       logged, as a finding, so drift shows. */
-    const ticks = await page.evaluate(() => new Promise(res => {
+    /* A stall is a requestAnimationFrame tick the app's loop did not draw on
+       WHILE INPUT IS IN PROGRESS, so that is what is counted: the main
+       renderer's render() calls between one tick and the next, over 60 ticks,
+       with nsoWakeRender holding the loop at full rate (what a real drag does).
+       Not frames a second against a clock - that is the shared runner's speed,
+       and on a starved shard it read 15 against a bar of 15 with every tick
+       drawn. The rate is still logged, as a finding, so drift shows.
+
+       Then the other half of the contract: a page left alone must NOT draw on
+       every tick (app-core.js "Draw on change") - the draw per frame of an
+       unchanged picture is what a laptop GPU could not afford. */
+    const measure = (wake) => page.evaluate((wake) => new Promise(res => {
       const r = state.renderer, orig = r.render;
       let renders = 0, last = -1;
       const drew = [];
       r.render = function () { renders++; return orig.apply(this, arguments); };
       const t0 = performance.now();
       (function tick() {
+        if (wake) nsoWakeRender(500);
         if (last >= 0) drew.push(renders - last);
         last = renders;
         if (drew.length < 60) { requestAnimationFrame(tick); return; }
         r.render = orig;
         res({ drew, ms: performance.now() - t0 });
       })();
-    }));
+    }), wake);
+    const ticks = await measure(true);
     const skipped = ticks.drew.filter(n => n < 1).length;
     console.log('  FINDING the render loop ran ' + (60 / ticks.ms * 1000).toFixed(1) +
       ' fps on the clock (swiftshader): 60 ticks in ' + Math.round(ticks.ms) + ' ms');
     check('the render loop is not stalled: it drew on every one of 60 ticks', skipped === 0,
       skipped + ' skipped; renders per tick ' + JSON.stringify([...new Set(ticks.drew)]));
+    await page.waitForTimeout(1500);   // let the input window close
+    const idle = await measure(false);
+    const idleDrawn = idle.drew.reduce((a, n) => a + n, 0);
+    console.log('  FINDING an untouched page drew ' + idleDrawn + ' of 60 ticks (' + Math.round(idle.ms) + ' ms)');
+    check('an untouched page does not redraw an unchanged picture every tick', idleDrawn < 45,
+      idleDrawn + ' draws in 60 ticks over ' + Math.round(idle.ms) + ' ms');
 
     const residue = await page.evaluate(() => {
       let n = 0;
