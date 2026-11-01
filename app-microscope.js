@@ -6096,8 +6096,8 @@ var NSO_MICROSCOPE = (function () {
     comparePickCancel(true);
     cmpPick = { shape: shape, step: 'lens', lens: null, home: plateName, busy: false };
     showPlate('lens', { quiet: true });
+    pickReady();
     pickInView();
-    setSelection([], 'pick');
     syncCompare();
     say(comparePickText(cmpPick));
     return true;
@@ -6236,6 +6236,18 @@ var NSO_MICROSCOPE = (function () {
     setSelection([], 'pick');
   }
 
+  /**
+   * The active plate made ready to pick on: a click only picks a piece (source 'pick') on a plate that is whole, with no REGION
+   * box armed - isolated, or in REGION, a click isolates the selection or places a box, and Compare never hears of a pick.
+   * Each plate keeps its own mode and isolation, so this runs on plate 1 when Pieces / Lasso starts and on plate 2 when it is shown.
+   */
+  function pickReady() {
+    if (isolated) unIsolate();
+    removeAllBalls();
+    if (mode === 'select') setMode('piece');
+    setSelection([], 'pick');
+  }
+
   function comparePickCancel(quiet) {
     lassoDrop();
     if (!cmpPick) return;
@@ -6257,8 +6269,8 @@ var NSO_MICROSCOPE = (function () {
       if (cp.step === 'lens') {
         cp.lens = spec; cp.step = 'take';
         showPlate('take', { quiet: true });
+        pickReady();
         pickInView();
-        setSelection([], 'pick');
         syncCompare();
         say(comparePickText(cp));
         return;

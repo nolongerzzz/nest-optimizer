@@ -278,6 +278,18 @@ withApp(async (page, logs) => {
     await page.click('#ms-compare-pieces');
     const off = await page.evaluate(() => NSO_MICROSCOPE.comparePicking());
     check('Pieces again leaves the pick', on === 'lens' && off === null, J([on, off]));
+    // Each plate keeps its own mode and isolation: left isolated, or in REGION, a click isolates or places a box and never picks.
+    await page.evaluate(() => { const M = NSO_MICROSCOPE; ['take', 'lens'].forEach(n => { M.showPlate(n); M.selectVisible(); M.isolate(); M.setMode('select'); }); });
+    await frames(page);
+    await page.click('#ms-compare-pieces');
+    await frames(page);
+    const d1 = await page.evaluate(() => ({ mode: NSO_MICROSCOPE.mode(), iso: NSO_MICROSCOPE.plateState('lens').isolated, sel: NSO_MICROSCOPE.selection().length, pick: NSO_MICROSCOPE.comparePicking() }));
+    await page.evaluate(() => NSO_MICROSCOPE.pickPiece(0));
+    await frames(page);
+    const d2 = await page.evaluate(() => ({ mode: NSO_MICROSCOPE.mode(), iso: NSO_MICROSCOPE.plateState('take').isolated, sel: NSO_MICROSCOPE.selection().length, pick: NSO_MICROSCOPE.comparePicking() }));
+    check('Pieces on plates left isolated / in REGION: each plate is made whole and in piece mode to be clicked',
+      d1.mode === 'piece' && !d1.iso && d1.sel === 0 && d1.pick === 'lens' && d2.mode === 'piece' && !d2.iso && d2.sel === 0 && d2.pick === 'take', J([d1, d2]));
+    await page.evaluate(() => NSO_MICROSCOPE.compareClear());
   }
 
   console.log('\n=== 11. Lasso: a loop drawn round a piece on each plate ===');
