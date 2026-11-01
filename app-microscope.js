@@ -5539,11 +5539,12 @@ var NSO_MICROSCOPE = (function () {
     }
     var sub = $('ms-sub');
     if (!sub) return;
-    if (!doc) { sub.textContent = plateTitle(plateName) + ' - empty. Import the plate, an STL, a 3MF or a sliced .gcode.3mf into it.'; return; }
+    var put = function (t) { sub.textContent = t; sub.title = t; };      // one line in the flat box: the whole of it on hover
+    if (!doc) { put(plateTitle(plateName) + ' - empty. Import the plate, an STL, a 3MF or a sliced .gcode.3mf into it.'); return; }
     if (doc.kind === 'toolpath') {
-      sub.textContent = doc.name + ' - ' + doc.segments.length + ' extrusion moves, ' +
+      put(doc.name + ' - ' + doc.segments.length + ' extrusion moves, ' +
         doc.parsed.layers.length + ' layers, true layer heights. ' +
-        'Drag to orbit, scroll to zoom, right-drag to pan.';
+        'Drag to orbit, scroll to zoom, right-drag to pan.');
       return;
     }
     var tris = doc.objects.reduce(function (a, o) { return a + o.triangles; }, 0);
@@ -5552,9 +5553,9 @@ var NSO_MICROSCOPE = (function () {
       (doc.objects.length === 1 ? '' : 's') + ', ' + tris + ' triangles. ';
     // A document built from groups somebody else named says what it is in its
     // own words; a file says the one thing a file can say about being sliced.
-    sub.textContent = count + (doc.subtitle ||
+    put(count + (doc.subtitle ||
       ('Not sliced: no layers and no features, so it draws as ' +
-       (doc.objects.length === 1 ? 'one whole part.' : 'one whole part per object.')));
+       (doc.objects.length === 1 ? 'one whole part.' : 'one whole part per object.'))));
   }
 
   /**

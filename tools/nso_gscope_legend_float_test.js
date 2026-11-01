@@ -74,8 +74,7 @@ withApp(async (page, logs) => {
         corner: [+(b.left - vp.left).toFixed(0), +(vp.bottom - b.bottom).toFixed(0)],
         positioned: getComputedStyle(box.parentElement).position,
         inStack: box.parentElement.id === 'ms-dock-left',
-        headAbove: (h => !!h && h.getBoundingClientRect().bottom <= b.top && b.top - h.getBoundingClientRect().bottom < 16)(
-          document.querySelector('#ms-dock-left > .ms-head')),
+        headTop: (h => !!h && h.parentElement.id === 'ms-viewport' && h.getBoundingClientRect().top - vp.top <= 14)(document.getElementById('ms-head')),
         cardBottom: (c => c ? c.getBoundingClientRect().bottom : null)(document.getElementById('ms-main-card')),
         stackTop: document.getElementById('ms-dock-left').getBoundingClientRect().top,
         legendTop: b.top,
@@ -95,8 +94,8 @@ withApp(async (page, logs) => {
     check('in the left-wall stack, which is pinned (not in flow)', where.inStack && where.positioned === 'absolute', where.positioned);
     check('anchored to the bottom-left: 8 px from the left wall, 12 px off the bottom', where.corner[0] === 8 && where.corner[1] === 12,
       '(' + where.corner.join(', ') + ') from the viewport\'s left and bottom');
-    check('the G-scope file-line box is directly above it', where.headAbove);
-    check('and the whole stack (file line + legend) is under the card\'s bottom edge',
+    check('the G-scope file-line box is not above it any more: it is top centre of the viewport, with the badge', where.headTop);
+    check('and the stack is under the card\'s bottom edge',
       where.cardBottom !== null && where.stackTop >= where.cardBottom && where.legendTop >= where.cardBottom,
       'card bottom ' + (where.cardBottom | 0) + ', stack top ' + (where.stackTop | 0) + ', legend top ' + (where.legendTop | 0));
     check('still titled for what it lists', where.title === 'Features', where.title);

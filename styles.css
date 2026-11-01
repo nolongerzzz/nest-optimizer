@@ -2913,7 +2913,7 @@ select:focus, input:focus {
    readouts stay below it. app-microscope.js measures the card and writes it
    (--ms-card-bottom, "Shell"); this is the card's height before it has. */
 .ms-panel { --ms-card-bottom: 140px; }
-.ms-head h1 { font-size: 15px; margin: 0 0 4px 0; }
+.ms-head h1 { font-size: 14px; margin: 0 0 4px 0; }
 .ms-sub {
   font-size: 12px;
   color: var(--muted);
@@ -3454,23 +3454,47 @@ select:focus, input:focus {
   .ms-card { background: var(--glass-panel-solid); }
 }
 
-/* Top-CENTRE: the corner row (Back / Export / Close) has the top right, the
-   card stands at the top left. This is a view-state readout - "Whole part"
-   when you are looking at the whole document, "Detail: N ..." once you have
-   drilled into a selection - so it wants to stay in eyeshot. */
-#ms-mode-badge {
+/* Top-CENTRE: the G-scope box - the file line, with the view-state readout in its title row ("Whole part" when you are looking
+   at the whole document, "Detail: N ..." once you have drilled into a selection). The corner row (Back / Export / Close) has
+   the top right and the card the top left; it stays in eyeshot, and the Features list on the left wall has the room it used to
+   take. */
+#ms-head {
   position: absolute;
   top: 12px;
   left: 50%;
   transform: translateX(-50%);
+  /* flat: one row, as wide as the room between the card and the corner row allows */
+  width: clamp(280px, calc(100vw - 840px), 720px);     /* clear of the card and Back on the left (to 394 px), the corner row on the right */
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 10px;
+  z-index: 5;
+}
+.ms-head-row { display: contents; }
+.ms-head-row h1 { margin: 0; flex: 0 0 auto; }
+#ms-head .ms-sub {
+  flex: 1 1 0;
+  min-width: 0;
+  margin: 0;
   white-space: nowrap;
-  background: rgba(23, 26, 33, 0.9);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11.5px;
+}
+#ms-mode-badge {
+  flex: 0 0 auto;
+  max-width: 40%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: rgba(255, 255, 255, 0.06);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 6px 10px;
+  border-radius: 999px;
+  padding: 2px 9px;
   font-size: 12px;
   font-weight: 600;
-  z-index: 5;
 }
 #ms-hint-badge {
   background: rgba(23, 26, 33, 0.9);

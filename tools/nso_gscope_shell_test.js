@@ -112,7 +112,7 @@ const EXPORT_IDS = ['ms-btn-export-plate', 'ms-btn-export-stl', 'ms-btn-export-s
 const EXPORT_GROUPS = { 'Selection': ['ms-btn-export-plate', 'ms-btn-export-stl', 'ms-btn-export-solid-plate', 'ms-btn-export-solid-stl'],
                         'Sliced piece': ['ms-btn-slice-export-plate', 'ms-btn-slice-export-stl'],
                         'Whole plate': ['ms-btn-take-export-plate', 'ms-btn-take-export-stl'] };   // the last shows on a plate of pieces or a mesh, either plate
-const DOCK = ['ms-legend-float', 'ms-legend-title', 'ms-legend-toggle', 'ms-legend', 'ms-btn-show-all', 'ms-title', 'ms-sub',
+const DOCK = ['ms-legend-float', 'ms-legend-title', 'ms-legend-toggle', 'ms-legend', 'ms-btn-show-all',
               'ms-info-title', 'ms-info', 'ms-slice-readout', 'ms-slice-read', 'ms-hint-badge'];
 const SLIDER = ['ms-zr', 'ms-zr-hi-read', 'ms-zr-track', 'ms-zr-fill', 'ms-zr-hi', 'ms-zr-lo', 'ms-zr-lo-read', 'ms-zr-count', 'ms-zr-card', 'ms-zr-all'];
 /* What round 1b took out of G-scope: no element keeps these ids. */
@@ -400,7 +400,7 @@ withApp(async (page, logs) => {
     check('the corner holds Back, the framing, Clear, Export, Close, in the viewport, labelled BACK, ◎, CLEAR, EXPORT, CLOSE',
       J(r.cornerKids) === J(CORNER.map(c => c[0])) && r.cornerIn && J(r.cornerText.map(norm)) === J(CORNER.map(c => c[1])), r.cornerText.map(norm).join(' | '));
     check('Export is a .ms-card opened from the corner\'s EXPORT, holding its six', r.exportIn.length === 0 && /\bms-card\b/.test(r.exportCls) && r.exportNav === 'ms-nav-export', r.exportIn.join(','));
-    check('the dock holds the file line, the Features list (Check all in it), the info, the Slice report and the hint - none of it in a card',
+    check('the dock holds the Features list (Check all in it), the info, the Slice report and the hint - none of it in a card',
       r.dockOut.length === 0 && r.dockInCard.length === 0, r.dockOut.concat(r.dockInCard).join(', ') || DOCK.length + ' ids');
     check('IMPORT\'s file picker is #ms-input (STL, 3MF)', r.input && r.input.type === 'file' && /\.stl/.test(r.input.accept) && /\.3mf/.test(r.input.accept), J(r.input));
   }
@@ -416,7 +416,7 @@ withApp(async (page, logs) => {
                group: R(document.querySelector('.ms-import')), sw: R($('ms-camera-row')), head: R(document.querySelector('.ms-main-head')),
                impFont: getComputedStyle($('ms-btn-open')).fontSize, mainFont: getComputedStyle(document.querySelector('#menu-import > summary')).fontSize,
                corner: ['ms-btn-back-producer', 'ms-nav-export', 'ms-close'].map(id => $(id).hidden ? null : R($(id))),
-               legend: R($('ms-legend-float')), fileBox: R(document.querySelector('#ms-dock-left .ms-head')), info: R($('ms-info')),
+               legend: R($('ms-legend-float')), fileBox: R($('ms-head')), badgeBox: R($('ms-mode-badge')), info: R($('ms-info')),
                boxes: ['ms-info-title', 'ms-slice-readout'].map(id => $(id).closest('.ms-glass')).filter(e => getComputedStyle(e).display !== 'none').map(R),
                zr: $('ms-zr').hidden ? null : R($('ms-zr')), W: innerWidth, H: innerHeight,
                values: ['ms-slice-nozzle', 'ms-slice-layer'].map(id => $(id).value), prof: window.NSO_GSCOPE_SLICE.profileDefaults(),
@@ -455,8 +455,12 @@ withApp(async (page, logs) => {
       J({ main: mainPage, gscope: { panelY: g.panel.y, closeY: g.corner[2] && g.corner[2].y, closeGap: g.corner[2] && g.W - g.corner[2].r } }));
     check('the legend is on the left wall, under the card, in the lower half of the window',
       g.legend.x <= g.card.x + 3 && g.legend.y >= g.card.b && g.legend.b > g.H / 2 && g.legend.b <= g.H, J([g.legend.x, g.legend.y, g.legend.b, g.card.b]));
-    check('the G-scope file line is directly above the legend, on the same wall, under the card',
-      Math.abs(g.fileBox.x - g.legend.x) < 2 && g.fileBox.b <= g.legend.y && g.legend.y - g.fileBox.b < 16 && g.fileBox.y >= g.card.b, J([g.fileBox.x, g.fileBox.y, g.fileBox.b, g.legend.y]));
+    check('the G-scope box (file line + the view-state badge in its title row) is top centre: centred on the viewport, a pitch from the top, clear of the card and the corner row',
+      Math.abs((g.fileBox.x + g.fileBox.r) / 2 - (g.vp.x + g.vp.r) / 2) <= 2 && g.fileBox.y - g.vp.y <= 14 && g.fileBox.r < g.W && g.fileBox.x >= g.card.r &&
+      g.badgeBox.x >= g.fileBox.x && g.badgeBox.r <= g.fileBox.r && g.badgeBox.y >= g.fileBox.y && g.badgeBox.b <= g.fileBox.b &&
+      !g.corner.some(c => c && c.x < g.fileBox.r && c.r > g.fileBox.x && c.y < g.fileBox.b && c.b > g.fileBox.y),
+      J({ box: [g.fileBox.x, g.fileBox.y, g.fileBox.r, g.fileBox.b].map(Math.round), badge: [g.badgeBox.x, g.badgeBox.r].map(Math.round), card: [g.card.r].map(Math.round) }));
+    check('...and the box is one flat row (under 50 px high)', g.fileBox.h < 50, J(g.fileBox.h));
     check('the info box is along the bottom, to the right of the legend, bottom edges level',
       g.info.x >= g.legend.r && g.info.b > g.H - 40 && g.info.b <= g.H, J([g.info.x, g.info.b]));
     const row = g.boxes;

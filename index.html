@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=749e776a" />
+  <link rel="stylesheet" href="styles.css?v=68592055" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -1773,7 +1773,16 @@
        =================================================================== -->
   <div id="microscope" class="ms-panel" tabindex="0" hidden>
     <div id="ms-viewport" class="ms-viewport">
-      <div id="ms-mode-badge">Whole part</div>
+      <!-- Top-CENTRE: the file line and the view-state readout in one box. The title row carries the badge ("Whole part", or
+           "Detail: N ..." once drilled in); under it, what the file is. It stood in two places - the file line over the
+           Features list, the badge top centre - and the Features list gets the room back. -->
+      <div id="ms-head" class="ms-glass ms-head">
+        <div class="ms-head-row">
+          <h1 id="ms-title">G-scope</h1>
+          <div id="ms-mode-badge">Whole part</div>
+        </div>
+        <p class="ms-sub" id="ms-sub">The plate, or an STL, a 3MF or a sliced .gcode.3mf.</p>
+      </div>
 
       <!-- The top-right corner: Back (only when the document's producer gave
            one), the camera framing, Clear, Export (its card opens just under
@@ -2095,13 +2104,8 @@
            count, a Display check - and acts on both plates; surface features
            are the plate's now. -->
       <div id="ms-dock" class="ms-dock">
-        <!-- Left wall, under the card: the file line, and the legend right
-             below it. -->
+        <!-- Left wall, under the card: the legend. -->
         <div id="ms-dock-left" class="ms-dock-left">
-          <div class="ms-glass ms-head">
-            <h1 id="ms-title">G-scope</h1>
-            <p class="ms-sub" id="ms-sub">The plate, or an STL, a 3MF or a sliced .gcode.3mf.</p>
-          </div>
           <div id="ms-legend-float" class="ms-section">
             <div class="ms-legend-head">
               <div class="ms-section-title" id="ms-legend-title">Features</div>
@@ -2386,7 +2390,7 @@
        row each under the Flange row. Pure. docs/GSCOPE-FEATURES.md. -->
   <script src="nso_face_features.js?v=53ee4b23"></script>
   <script src="nso_gscope_measure.js?v=c5595269"></script>
-  <script src="app-microscope.js?v=8d29653a"></script>
+  <script src="app-microscope.js?v=1f1a74ef"></script>
   <!-- Detach / Reattach (Cut menu): cap a detected flange's hull on its own
        wall, lift the flange out as a piece, seat it elsewhere with Attach's
        seat. After nso_flange.js, app-crop.js, nso_assemble.js, app-assemble.js
