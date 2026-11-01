@@ -257,6 +257,8 @@ withApp(async (page, logs) => {
     await frames(page);
     r = await page.evaluate(() => ({ pick: NSO_MICROSCOPE.comparePicking(), plate: NSO_MICROSCOPE.plate(), st: NSO_MICROSCOPE.compareState() }));
     check('a click on plate 1 moves on to plate 2', r.pick === 'take' && r.plate === 'take' && r.st === null, J(r));
+    const placed = await page.evaluate(() => { const v = NSO_MICROSCOPE.getView(); return { x: v.overviewGroup.position.x, lit: v.floors.take.outline.material.color.getHex() !== v.floors.lens.outline.material.color.getHex() }; });
+    check('...with plate 2 placed as the active plate (its scene at the origin, its floor lit), not just swapped in behind plate 1', Math.abs(placed.x) < 1e-6 && placed.lit, J(placed));
     await page.evaluate(() => NSO_MICROSCOPE.pickPiece(0));
     await frames(page);
     r = await page.evaluate(() => { const M = NSO_MICROSCOPE, d = M.plateDoc('cmp');
@@ -353,9 +355,10 @@ withApp(async (page, logs) => {
     check('Lasso asks for a loop on plate 1 first', r.pick === 'lens' && r.plate === 'lens' && r.on === 'true' && /lasso/i.test(r.say), J(r));
     // an empty spot first: nothing in the loop, still on plate 1
     const b1 = await box();
-    await draw(sq(b1.cx + b1.h + 40, b1.cy + b1.h + 40, 4));
+    await draw(sq(b1.cx + b1.h + 12, b1.cy + b1.h + 12, 4));
     r = await page.evaluate(() => ({ pick: NSO_MICROSCOPE.comparePicking(), plate: NSO_MICROSCOPE.plate() }));
     check('a loop round nothing takes nothing and stays on plate 1', r.pick === 'lens' && r.plate === 'lens', J(r));
+    { const rt = await page.evaluate(() => document.getElementById('ms-compare-read').textContent); check('...and the readout says so (not the prompt again, as if the loop had not been seen)', /nothing inside/i.test(rt), rt + ' | status: ' + await page.evaluate(() => (document.getElementById('status') || {}).textContent)); }
     const mid = await draw(sq(b1.cx, b1.cy, b1.h));
     r = await page.evaluate(() => ({ pick: NSO_MICROSCOPE.comparePicking(), plate: NSO_MICROSCOPE.plate(), st: NSO_MICROSCOPE.compareState() }));
     check('the read-out counts the loop\'s points while it is drawn', /points/i.test(mid) && /lasso/i.test(mid), mid);

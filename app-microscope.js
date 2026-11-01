@@ -5987,7 +5987,7 @@ var NSO_MICROSCOPE = (function () {
         ' (orange) and ' + compare.b.name.replace(/^Plate 2: /, '') + ' (blue). Blue moved by ' +
         compare.dx.toFixed(2) + ', ' + compare.dy.toFixed(2) + ', ' + compare.dz.toFixed(2) + ' mm from where Overlay put it.';
     } else if (cmpPick) {
-      rd.textContent = comparePickText(cmpPick);
+      rd.textContent = cmpPick.note || comparePickText(cmpPick);
     } else {
       rd.textContent = why ? 'Compare: ' + why + '.' :
         'Plates sets both whole plates on plate 3, side by side. Pieces: click a piece on each plate. Lasso: draw a loop round a piece on each. Selected takes what is selected on each.';
@@ -6099,7 +6099,7 @@ var NSO_MICROSCOPE = (function () {
     if (cmpPick && cmpPick.shape === shape) { comparePickCancel(); return null; }   // the button again: leave the pick
     comparePickCancel(true);
     cmpPick = { shape: shape, step: 'lens', lens: null, home: plateName, busy: false };
-    showPlate('lens', { quiet: true });
+    showPlate('lens');                                          // in full (not quiet): the plate is placed and the view moved with it, so what is picked on is what is on screen
     pickReady();
     pickInView();
     syncCompare();
@@ -6171,8 +6171,9 @@ var NSO_MICROSCOPE = (function () {
     v.controls.enabled = false;
     v.mouseDownPos = null; v.hookTook = false;
     clearHover();
+    cmpPick.note = null;
     var vis = lassoVisual();
-    lassoDraft = { pts: [[p.x, p.z]], line: vis.line, fill: vis.fill };
+    lassoDraft = { pts: [[p.x, p.z]], scr: [ndc(e)], line: vis.line, fill: vis.fill };
     lassoShape();
     return true;
   }
@@ -6183,7 +6184,7 @@ var NSO_MICROSCOPE = (function () {
     if (!p) return;
     var d = lassoDraft, last = d.pts[d.pts.length - 1];
     if (Math.hypot(p.x - last[0], p.z - last[1]) < LASSO_STEP_MM) return;
-    d.pts.push([p.x, p.z]);
+    d.pts.push([p.x, p.z]); d.scr.push(ndc(e));
     lassoShape();
   }
 
@@ -6196,10 +6197,9 @@ var NSO_MICROSCOPE = (function () {
     d.pts.forEach(function (q) { x0 = Math.min(x0, q[0]); x1 = Math.max(x1, q[0]); z0 = Math.min(z0, q[1]); z1 = Math.max(z1, q[1]); });
     var area2 = 0;
     d.pts.forEach(function (q, i) { var n = d.pts[(i + 1) % d.pts.length]; area2 += q[0] * n[1] - n[0] * q[1]; });
-    if (d.pts.length < 3 || Math.max(x1 - x0, z1 - z0) < LASSO_MIN_MM || Math.abs(area2) / 2 < LASSO_MIN_AREA_MM2) { say('Compare lasso: draw a loop round the piece - it closes when you let go (a stroke that encloses nothing is not a loop).', true); syncCompare(); return; }
-    var poly = d.pts.map(function (q) { return [q[0] + doc.cx, -q[1] + doc.cy]; });      // view space -> the file's mm
-    var items = selectByLasso(poly);
-    if (!items.length) { say('Compare lasso: nothing inside that loop - draw it again.', true); syncCompare(); return; }
+    if (d.pts.length < 3 || Math.max(x1 - x0, z1 - z0) < LASSO_MIN_MM || Math.abs(area2) / 2 < LASSO_MIN_AREA_MM2) { lassoNote('Compare lasso: draw a loop round the piece - it closes when you let go (a stroke that encloses nothing is not a loop).'); return; }
+    var items = selectByLasso(d.scr);
+    if (!items.length) { lassoNote('Compare lasso: nothing inside that loop - draw it round the piece as it looks on screen and try again.'); return; }
     removeAllBalls();
     setSelection(items, 'pick');
   }
@@ -6213,24 +6213,43 @@ var NSO_MICROSCOPE = (function () {
     return inn;
   }
 
-  /** Everything shown whose centre stands inside the loop (G-code mm), at any height. */
-  function selectByLasso(poly) {
+  /**
+   * Everything shown whose centre stands inside the loop AS DRAWN ON THE SCREEN (the loop's points in view space, -1..1), at any height.
+   * Drawn round a tall piece seen from the side, the loop's floor shadow falls beside the piece's footprint - the screen is what the
+   * hand drew round, so the screen is what is tested.
+   */
+  function selectByLasso(scr) {
+    var cam = view.camera;
+    cam.updateMatrixWorld(true);
+    var m = new THREE.Matrix4().multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse).elements;
     var bx0 = Infinity, bx1 = -Infinity, by0 = Infinity, by1 = -Infinity;
-    poly.forEach(function (q) { bx0 = Math.min(bx0, q[0]); bx1 = Math.max(bx1, q[0]); by0 = Math.min(by0, q[1]); by1 = Math.max(by1, q[1]); });
+    scr.forEach(function (q) { bx0 = Math.min(bx0, q[0]); bx1 = Math.max(bx1, q[0]); by0 = Math.min(by0, q[1]); by1 = Math.max(by1, q[1]); });
+    var cx = doc.cx, cy = doc.cy;
+    // a file point (G-code mm, height z) to the screen, -1..1; null behind the camera
+    function inside(X, Y, Z) {
+      var vx = X - cx, vy = Z, vz = -(Y - cy);
+      var w = m[3] * vx + m[7] * vy + m[11] * vz + m[15];
+      if (!(w > 0)) return false;
+      var sx = (m[0] * vx + m[4] * vy + m[8] * vz + m[12]) / w, sy = (m[1] * vx + m[5] * vy + m[9] * vz + m[13]) / w;
+      return sx >= bx0 && sx <= bx1 && sy >= by0 && sy <= by1 && inLoop(scr, sx, sy);
+    }
     if (doc.kind === 'toolpath') {
       return doc.segments.filter(function (s) {
-        if (!segShown(s)) return false;
-        var mx = (s.x0 + s.x1) / 2, my = (s.y0 + s.y1) / 2;
-        return mx >= bx0 && mx <= bx1 && my >= by0 && my <= by1 && inLoop(poly, mx, my);
+        return segShown(s) && inside((s.x0 + s.x1) / 2, (s.y0 + s.y1) / 2, s.z);
       });
     }
     return shownObjects().filter(function (o) {
-      var b = o.bounds;
-      if (b && (b.maxX < bx0 || b.minX > bx1 || b.maxY < by0 || b.minY > by1)) return false;
       var c = o.centroids;
-      for (var t = 0; t < c.length; t += 3) if (inLoop(poly, c[t], c[t + 1])) return true;
+      for (var t = 0; t < c.length; t += 3) if (inside(c[t], c[t + 1], c[t + 2])) return true;
       return false;
     });
+  }
+
+  /** A lasso that took nothing: said on the status line AND left in the compare readout (syncCompare would put the prompt back over it). */
+  function lassoNote(msg) {
+    say(msg, true);
+    if (cmpPick) cmpPick.note = msg;                  // kept: every redraw of the readout says it until the next loop is begun
+    syncCompare();
   }
 
   /** A pick is taken (its spec is in hand): the plate is whole again - un-isolated, nothing selected - as before the compare. */
@@ -6271,8 +6290,8 @@ var NSO_MICROSCOPE = (function () {
       if (!spec) { say('Compare: that has nothing to compare - pick a piece.', true); return; }
       pickRelease();                                              // the plate goes back to whole, nothing selected
       if (cp.step === 'lens') {
-        cp.lens = spec; cp.step = 'take';
-        showPlate('take', { quiet: true });
+        cp.lens = spec; cp.step = 'take'; cp.note = null;
+        showPlate('take');                                      // in full: plate 2 is placed and drawn where it stands on screen, not just swapped in behind plate 1's scene
         pickReady();
         pickInView();
         syncCompare();
