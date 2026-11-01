@@ -74,3 +74,8 @@ Update (2026-10-31, flat floors' loops): a region's loops lie 0.03 mm in from th
 below or above - a flat floor, where Bambu's plate stands 0.35 - 0.4 mm past ours - and stay 0.12 in (`LOOP_IN_MM`) on a layer that changes (a dome's rings). Foot / vol IoU Base 0.91 / 0.90 -> 0.94 / 0.93,
 Negative Sphere 0.79 / 0.77 -> 0.82 / 0.83, Negative Sphere2 0.74 / 0.74 -> 0.77 / 0.79; Circular, Oblique and Sphere unchanged; line length Base 0.98, NS 0.97, NS2 0.93. Tried: -0.1 (vol Base 0.97, NS 0.88,
 but foot NS2 0.67), 0.0 (foot NS 0.75), 0.06 (foot NS 0.80, vol 0.79): 0.03 is the best on both. Still short: the top layer of Oblique (2 layers), Negative Sphere(s), Circular (1 layer).
+
+Update (2026-10-31, a ribbon's thin top): the slicer drops a layer's sheet when the slab, inset by the wall, is empty - the Oblique's top layers (its ribbon is 0.5 mm wide there, a tail of the plate under the slope) printed nothing at
+12.0 where Bambu draws the ribbon's loop at 12.0 and 12.2. A slab that is one ring (no hole) of 3 mm2 or more now keeps its loops though the inset is empty (`THIN_SLAB_MIN_MM2`); a dome's thin ring (a hole) does not - the
+Sphere and Negative Sphere2 gained a layer Bambu does not have when it did. Oblique foot / vol IoU 0.83 / 0.83 -> 0.84 / 0.85 (line 0.64), length 0.98 -> 1.00; the others unchanged. Still short: the Oblique's 12.2
+layer (the plate generator's top band, 12.12 - 12.32, lands a layer above the slicer's last slice: sheet-grid alignment), and the Negative Spheres' / Circular's last layer.

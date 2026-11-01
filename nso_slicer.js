@@ -2237,6 +2237,7 @@
       var PINCH_INSET_MM = 0.1;      /* the loop's inset where the region is too narrow for a line's half-width on each side */
       var TRANS_FILL_OPEN_MM = 0.5;
       var REGION_FILL_GAP_MM = 0.04;
+      var THIN_SLAB_MIN_MM2 = 3;   /* a ribbon (one ring, no hole) at least this big keeps its loop though it is narrower than the wall's inset: the Oblique's top layers (a dome's thin ring is not: Bambu stops a layer lower there) */
       var LOOP_IN_FLAT_MM = 0.03; /* on a layer whose zones keep their size from a neighbour (a flat floor) the loops lie this far in: Bambu's plate stands 0.4 mm past ours there */
       var LOOP_IN_MM = 0.12;   /* the region loops lie this far in from the slab's edge (not half a line: Bambu's plate stands 0.4 mm past ours on the flat-floored pieces) */
       var REGIONAL_PLATE = true;     /* a support's own grid lays its plate by regions (below) */
@@ -2278,7 +2279,7 @@
             sheetCs = g.isEmpty(sheetCs) ? stairCs : g.union(sheetCs, stairCs);
           }
           var inSheet = g.isEmpty(sheetCs) ? g.empty() : g.offset(g.inter(P.S[j], sheetCs), -(o.outerWallWidthMm * 1.0));
-          if (!g.isEmpty(inSheet)) {
+          if (!g.isEmpty(inSheet) || (byDepth && REGIONAL_PLATE && !g.isEmpty(sheetCs) && g.parts(g.inter(P.S[j], sheetCs)).some(function (pp) { return pp.area() >= THIN_SLAB_MIN_MM2 && g.polys(pp).length === 1; }))) {      /* a slab narrower than the wall's inset has no inside, but its loop is still Bambu's */
             var wI = o.infillWidthMm, sI = spacingOf(wI, P.layers[j].h || 0.2), aD = (o.infillDirectionDeg || 45) * Math.PI / 180, aJ = (j % 2 === 0) ? aD : aD + Math.PI / 2;
             var hullS = g.polys(g.offset(inSheet, wI / 2 + 1e-4));
             /* the sheet is the layer's only fill there: a fill the support's own shells laid inside it (the bottom shell of a sheet's first layer, which stands on a
