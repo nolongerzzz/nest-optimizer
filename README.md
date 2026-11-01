@@ -42,6 +42,16 @@ Smart build-plate packing for 3D printing.
   to Brush, Smooth, Cut and export like any other piece. A live triangle count,
   and a 400k budget that refuses by name with the Detail that would fit
   ([docs/RELIEF.md](docs/RELIEF.md))
+- **Wrap** (Surface & edges): lay **one** feature - a ball, spike or pyramid, bump, dent
+  or line - over a face as many times as the spacing asks: a flat face, a
+  **cylinder**'s side, a **tube**'s bore, a **sphere** or dome, or a **contoured**
+  face. Height, depth, spacing (or density per cm²), size, layout (grid / stagger /
+  hex / diamond) and rotation are numbers; there is a skin for every design on
+  the two plates it was built from (Soft Spikes, Ribbed and Medium Point rollers,
+  the spiked dome, the massage balls, the pads, the spikefoot). The face is
+  replaced by a new patch that meets the old mesh rim corner for corner - no
+  boolean - and one Undo puts it back. Samples in `fixtures/surftex/`
+  ([docs/SURFTEX.md](docs/SURFTEX.md))
 - **Mold** (Gen+): a two-piece interlocking mold from the selected piece, to print
   and cast silicone in. Slide and tilt the parting blade (the Cut card's slider,
   number and dial); the faces that would lock a half are tinted and counted
@@ -358,7 +368,8 @@ Smart build-plate packing for 3D printing.
   **Add** Fill / Densify, Foam, Thicken out / in, Extend, Bridge ·
   **Subtract** Subtract B from A, Extract bit, Carve, Hollow, Hollow to safe
   min, Lift (opens G-scope at its Lift row) · **Surface & edges** Soften,
-  Mirror, Skin face / wrap / patch, Trace raster, Texture · **Sculpt** the
+  Mirror, Skin face / wrap / patch, Trace raster, Texture, **Wrap** (one
+  feature laid over a face; docs/SURFTEX.md) · **Sculpt** the
   Brush · **Check & repair** Check piece, Cap open faces, Repair, Seal,
   Non-solid, Solidify.
 - Every drop-down opens at the same spot, right of the column and under the

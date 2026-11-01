@@ -49,9 +49,12 @@
 
   /* ------------------------------------------------------------ the triangulation */
 
-  /* pts: array of [x, y]; segs: array of [i, j] indices into pts. */
-  function triangulate(pts, segs) {
+  /* pts: array of [x, y]; segs: array of [i, j] indices into pts.
+     nHard (optional): only the first nHard segments are outline - the rest are forced edges that do not turn in into out (a ridge
+     line, a footprint drawn inside the shape). Left out, every segment is outline, as it always was. */
+  function triangulate(pts, segs, nHard) {
     var n = pts.length, i, t;
+    var hardN = nHard == null ? (segs ? segs.length : 0) : nHard, softNow = false;
     if (!n) return { tris: new Int32Array(0), nTri: 0, split: 0 };
     var lo = [Infinity, Infinity], hi = [-Infinity, -Infinity];
     for (i = 0; i < n; i++) {
@@ -231,9 +234,10 @@
     function mark(a, b) {
       var e = findEdge(a, b);
       if (!e) return false;
-      C[3 * e.t + e.k] = 1;
+      var v = softNow ? 2 : 1;                               // 1: outline, 2: forced but not outline
+      if (C[3 * e.t + e.k] !== 1) C[3 * e.t + e.k] = v;
       var u = N[3 * e.t + e.k];
-      if (u >= 0) C[3 * u + slotOf(u, e.t)] = 1;
+      if (u >= 0 && C[3 * u + slotOf(u, e.t)] !== 1) C[3 * u + slotOf(u, e.t)] = v;
       return true;
     }
     function crosses(a, b, p, q) {                           // the open segment p-q crosses the open segment a-b
@@ -304,6 +308,7 @@
     }
     for (i = 0; i < segs.length; i++) {
       var sa = rep[segs[i][0] + 3], sb = rep[segs[i][1] + 3];
+      softNow = i >= hardN;
       if (!insertSeg(sa, sb, 0)) {
         return { reason: 'the outline could not be forced into the triangulation (it crosses itself near ' +
           X[sa].toFixed(3) + ', ' + Y[sa].toFixed(3) + ')', badSeg: i };
@@ -337,7 +342,7 @@
       for (var k3 = 0; k3 < 3; k3++) {
         var nb3 = N[3 * tc + k3];
         if (nb3 < 0 || state[nb3] >= 0) continue;
-        state[nb3] = C[3 * tc + k3] ? 1 - state[tc] : state[tc];
+        state[nb3] = C[3 * tc + k3] === 1 ? 1 - state[tc] : state[tc];
         qq.push(nb3);
       }
     }

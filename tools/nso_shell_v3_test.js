@@ -125,9 +125,9 @@ const HOLDS = {
   'menu-weave': ['weave-card', 'btn-weave-grow', 'btn-weave-shrink', 'btn-weave-clear',
                  'btn-weave-smooth', 'btn-weave-follow', 'inp-weave-pitch', 'weave-readout', 'btn-weave-go', 'btn-weave-attach', 'btn-weave-cancel'],
   'menu-paint': ['btn-mask-select', 'btn-mask-paint', 'btn-mask-clear', 'btn-mask-delete', 'sel-mask-delete', 'btn-extract-sel'],
-  // SURFACE & EDGES: Soften (R, Full wrap, edge treatment) · Mirror · Skin face · Skin wrap · Skin patch · Trace raster · Texture
+  // SURFACE & EDGES: Soften (R, Full wrap, edge treatment) · Mirror · Skin face · Skin wrap · Skin patch · Trace raster · Texture · Wrap (a sub-menu: one feature laid over a face)
   'menu-surface': ['inp-soften-r', 'chk-full-wrap', 'btn-soften', 'sel-edge-treat', 'btn-mirror', 'inp-mirror-plane',
-                   'btn-skin-face', 'btn-skin-wrap', 'btn-skin-patch', 'btn-trace-raster', 'btn-texture'],
+                   'btn-skin-face', 'btn-skin-wrap', 'btn-skin-patch', 'btn-trace-raster', 'btn-texture', 'menu-surftex', 'btn-surftex-go'],
   // SCULPT: the Brush (Carve / Emboss / Smooth here); Carve the tool is in Subtract
   'menu-sculpt': ['btn-brush', 'sel-brush-mode', 'inp-brush-size', 'inp-brush-intensity', 'chk-brush-hard'],
   // SLICE (app-print.js): the plate's printer, Slice (and Cancel while it runs), the readout, Export .gcode.3mf, Preview in G-scope

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=f9076365" />
+  <link rel="stylesheet" href="styles.css?v=749e776a" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -1539,6 +1539,62 @@
               <label class="vp-clone" title="Target arc pitch in mm, measured along the curve. It is snapped to an exact divisor of the circumference so the pattern closes on itself; the status line says what it was snapped to.">Pitch <input type="number" id="inp-texture-pitch" value="1.2" min="0.3" max="10" step="0.1"></label>
               <label class="vp-clone" title="How far the relief stands off the curved surface, in mm.">Depth <input type="number" id="inp-texture-depth" value="0.6" min="0.1" max="4" step="0.1"></label>
             </div>
+            <!-- WRAP (app-surftex.js, nso_surftex.js, nso_surftex_presets.js; docs/SURFTEX.md): one feature - a ball, spike, pyramid, bump, dent or
+               line - laid over a face on a lattice and baked into the piece. The face is a smooth region (a flat face, a cylinder's side, a
+               tube's bore, a sphere or dome, or a contoured face), tinted on the piece; the feature's height / depth / spacing / density are
+               numbers. The face is replaced by a new patch that meets the old mesh rim corner for corner - no boolean. One Undo. -->
+          <details class="vp-menu vp-sub-menu vp-surftex-menu" id="menu-surftex">
+            <summary title="Lay ONE feature - a ball, spike, pyramid, bump, dent or line - over a face as many times as the spacing asks: a flat face, a cylinder's side, a tube's bore, a sphere or a contoured face. Presets for every design of the two plates (Soft Spikes, Ribbed and Medium Point rollers, the spiked dome, the massage balls, the pads, the spikefoot).">Wrap</summary>
+            <div class="vp-menu-body">
+            <div class="vp-bend-panel surftex-card" id="surftex-card">
+              <label class="vp-bend-field" title="The faces of the piece: each smooth region, fitted as a flat face, a cylinder, a bore, a sphere or a contoured face. The one picked is tinted amber on the piece.">Face
+                <select id="sel-surftex-face" class="vp-select" aria-label="Face to wrap"></select>
+                <button id="btn-surftex-refresh" class="btn btn-secondary" type="button" title="Read the faces of the piece again.">&#8635;</button></label>
+              <label class="vp-bend-field" title="Neighbouring triangles turned more than this are different faces. Lower splits a face that curves a lot; higher joins a rounded edge to its faces.">Crease
+                <input type="number" id="inp-surftex-crease" value="30" min="5" max="80" step="5" aria-label="Crease angle, degrees"><span>&deg;</span></label>
+              <label class="vp-bend-field" title="A skin: one for each design on the two plates, or a single feature to start from. Every number below can be changed after.">Skin
+                <select id="sel-surftex-preset" class="vp-select" aria-label="Skin preset"></select></label>
+              <label class="vp-bend-field" title="The feature that is repeated.">Feature
+                <select id="sel-surftex-motif" class="vp-select" aria-label="Feature">
+                  <option value="spike">Spike / pyramid</option><option value="ball">Ball</option><option value="bump">Bump</option>
+                  <option value="dent">Dent</option><option value="line">Line</option></select></label>
+              <label class="vp-bend-field" id="fld-surftex-sides" title="0: a round cone. 3 to 8: a pyramid with that many sides; 4 is square.">Sides
+                <select id="sel-surftex-sides" class="vp-select" aria-label="Spike sides"><option value="0">round</option><option value="3">3</option><option value="4" selected>4 (square)</option><option value="5">5</option><option value="6">6</option><option value="8">8</option></select></label>
+              <label class="vp-bend-field" id="fld-surftex-profile" title="The line's cross-section.">Section
+                <select id="sel-surftex-profile" class="vp-select" aria-label="Line section"><option value="tri">V</option><option value="round">round</option><option value="flat">flat top</option></select></label>
+              <label class="vp-bend-field" id="fld-surftex-groove" title="A line is a ridge standing off the face, or a groove cut into it."><input type="checkbox" id="chk-surftex-groove"> Groove (cut in)</label>
+              <label class="vp-bend-field" title="The footprint across, mm: a round feature's diameter, a pyramid's side, a line's width. The footprints never overlap - if this is more than the spacing allows they are shrunk together until they touch.">Size
+                <input type="number" id="inp-surftex-size" value="4" min="0.1" max="200" step="0.1" aria-label="Size, mm"><span>mm</span></label>
+              <label class="vp-bend-field" id="lbl-surftex-sizev" title="The footprint along, mm (a line's length; blank: the same as Size, a line: the row pitch so lines run end to end).">Length
+                <input type="number" id="inp-surftex-sizev" value="" placeholder="auto" min="0.1" max="400" step="0.1" aria-label="Length, mm"><span>mm</span></label>
+              <label class="vp-bend-field" id="fld-surftex-height" title="How far a ball, spike, bump or ridge stands off the face. (A ball is at most a hemisphere: its height is at most half its size.)">Height
+                <input type="number" id="inp-surftex-height" value="3" min="0.05" max="100" step="0.1" aria-label="Height, mm"><span>mm</span></label>
+              <label class="vp-bend-field" id="fld-surftex-depth" title="How far a dent or groove goes into the face.">Depth
+                <input type="number" id="inp-surftex-depth" value="0.6" min="0.05" max="100" step="0.1" aria-label="Depth, mm"><span>mm</span></label>
+              <label class="vp-bend-field" id="fld-surftex-curve" title="A round spike's profile: 1 straight, below 1 blunt (a soft tip), above 1 a needle.">Tip
+                <input type="number" id="inp-surftex-curve" value="1" min="0.3" max="3" step="0.1" aria-label="Spike profile"></label>
+              <label class="vp-bend-field" title="Centre to centre across a row, mm. On a cylinder it is snapped so a whole number fit round and the wrap closes.">Spacing
+                <input type="number" id="inp-surftex-spacing" value="5" min="0.1" max="400" step="0.1" aria-label="Spacing, mm"><span>mm</span></label>
+              <label class="vp-bend-field" title="Between rows, mm. Blank: the same as Spacing (hex: the equilateral pitch).">Rows
+                <input type="number" id="inp-surftex-row" value="" placeholder="auto" min="0.1" max="400" step="0.1" aria-label="Row pitch, mm"><span>mm</span></label>
+              <label class="vp-bend-field" title="Features per cm2. Above 0 it sets the spacing (and the row pitch with it).">Density
+                <input type="number" id="inp-surftex-density" value="" placeholder="off" min="0" max="2500" step="1" aria-label="Density, per cm2"><span>/cm&sup2;</span></label>
+              <label class="vp-bend-field" title="How the features sit: grid; stagger (every other row half a pitch over); hex (stagger with equilateral rows); diamond (a rotated grid).">Layout
+                <select id="sel-surftex-layout" class="vp-select" aria-label="Layout"><option value="grid">grid</option><option value="stagger">stagger</option><option value="hex">hex</option><option value="diamond">diamond</option></select></label>
+              <label class="vp-bend-field" title="Turns each feature about the face's normal.">Rotate
+                <input type="number" id="inp-surftex-rot" value="0" min="-180" max="180" step="5" aria-label="Rotate features, degrees"><span>&deg;</span></label>
+              <label class="vp-bend-field" title="Turns the whole lattice (flat and contoured faces; a cylinder's columns follow its axis).">Lattice
+                <input type="number" id="inp-surftex-angle" value="0" min="-90" max="90" step="5" aria-label="Turn the lattice, degrees"><span>&deg;</span></label>
+              <label class="vp-bend-field" title="How far a feature stays clear of the face's edge. A feature that does not fit whole is left out; the edge is held corner for corner.">Margin
+                <input type="number" id="inp-surftex-margin" value="0.4" min="0" max="50" step="0.1" aria-label="Margin, mm"><span>mm</span></label>
+              <p id="surftex-readout" class="bend-readout">&mdash;</p>
+              <div class="vp-row vp-row-pair">
+                <button id="btn-surftex-go" class="btn btn-secondary" type="button" title="Lay the feature over the face and bake it into the piece. The face is replaced by a new patch that meets the old mesh corner for corner. One Undo puts the piece back.">WRAP</button>
+                <button id="btn-surftex-close" class="btn btn-secondary" type="button" title="Close Wrap; the piece is as it was.">Close</button>
+              </div>
+            </div>
+            </div>
+          </details>
             </div>
           </details>
           <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-sculpt" data-sec="sculpt">
@@ -2182,7 +2238,7 @@
   <script src="nso-helpers.js?v=9c476e39"></script>
   <script src="nso-recent.js?v=f03d6f13"></script>
   <script src="nso-bounds.js?v=778acac4"></script>
-  <script src="app-core.js?v=8ec5be82"></script>
+  <script src="app-core.js?v=74b434c6"></script>
   <!-- Up to six plates (beds): the active one is state.models / state.placed, the rest are kept beside it. docs/BEDS.md. -->
   <script src="app-beds.js?v=3d221bc4"></script>
 
@@ -2273,9 +2329,13 @@
   <script src="app-text.js?v=ca4c32a8"></script>
   <!-- Weave: cut a patch out along its own triangles, weave a fresh one in its place, reattach it rim to rim. The mesher
        (nso_cdt.js) and the engine (nso_weave.js, which needs it) before the card (app-weave.js). docs/WEAVE.md. -->
-  <script src="nso_cdt.js?v=516428c6"></script>
+  <script src="nso_cdt.js?v=6d15bbab"></script>
   <script src="nso_weave.js?v=49184f5f"></script>
   <script src="app-weave.js?v=e3aaaa92"></script>
+  <!-- Wrap: one feature laid over a face on a lattice (nso_surftex.js needs nso_cdt.js and nso_weave.js above it; the presets and the card after). docs/SURFTEX.md. -->
+  <script src="nso_surftex.js?v=2491a6d9"></script>
+  <script src="nso_surftex_presets.js?v=2b935033"></script>
+  <script src="app-surftex.js?v=80bfd210"></script>
   <script src="app-live-slider.js?v=0bc4bb66"></script>
   <script src="app-hollow.js?v=f99c09ad"></script>
   <script src="app-foam.js?v=16cca4f6"></script>

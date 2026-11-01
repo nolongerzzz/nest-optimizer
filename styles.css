@@ -4653,3 +4653,14 @@ body.sup-card-open #adjust-status { display: none; }
 #viewport canvas.weave-cur { cursor: crosshair; }
 #weave-lasso { position: fixed; left: 0; top: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 30; }
 #weave-lasso polyline { fill: rgba(255, 200, 61, 0.12); stroke: #ffc83d; stroke-width: 1.5; stroke-dasharray: 5 3; }
+
+/* Wrap (app-surftex.js): a sub-menu of Surface & edges; the card is Weave's - Bend's panel rows, the select running across the row, the refresh button beside Face */
+.surftex-card { border-top: 0; padding-top: 2px; }
+.surftex-card .vp-bend-field { grid-template-columns: 54px minmax(0, 1fr) 24px; margin-bottom: 2px; }
+.surftex-card #fld-surftex-groove { grid-template-columns: minmax(0, 1fr); }
+.surftex-card .vp-bend-field .btn { padding: 0 4px; min-width: 22px; }
+/* in flow inside Surface & edges' panel, not a flyout: the panel scrolls, a popover hanging off a popover lands off screen */
+.vp-surftex-menu { width: 100%; margin-top: 4px; }
+.vp-surftex-menu > summary { width: auto; min-width: 64px; height: 28px; padding: 0 10px; font-size: 12px; }
+.vp-surftex-menu > .vp-menu-body { position: static; left: auto; top: auto; min-width: 0; max-width: none; width: 100%; margin-top: 4px; box-shadow: none; padding: 4px; box-sizing: border-box; }
+.surftex-card #sel-surftex-face { grid-column: 2; }
