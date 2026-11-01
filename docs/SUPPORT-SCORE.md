@@ -79,3 +79,8 @@ Update (2026-10-31, a ribbon's thin top): the slicer drops a layer's sheet when 
 12.0 where Bambu draws the ribbon's loop at 12.0 and 12.2. A slab that is one ring (no hole) of 3 mm2 or more now keeps its loops though the inset is empty (`THIN_SLAB_MIN_MM2`); a dome's thin ring (a hole) does not - the
 Sphere and Negative Sphere2 gained a layer Bambu does not have when it did. Oblique foot / vol IoU 0.83 / 0.83 -> 0.84 / 0.85 (line 0.64), length 0.98 -> 1.00; the others unchanged. Still short: the Oblique's 12.2
 layer (the plate generator's top band, 12.12 - 12.32, lands a layer above the slicer's last slice: sheet-grid alignment), and the Negative Spheres' / Circular's last layer.
+
+Update (2026-10-31, tried and left out: a flat face grown outward): the flat-floored faces (Base, Negative Spheres) were tried first at 0.4 / 0.3 / 0.2 / 0.15 mm wider than the footprint (outward only, the Negative Spheres' cavity not grown into; kept
+when the exact gap check holds, else the face goes as before). Base and Negative Sphere never pass the gap check (their plate would come within 0.18 of the part's wall - Bambu's does), so they stay as they were; Negative Sphere2 passes and is
+worse at every size (foot 0.77 -> 0.64 at 0.4, 0.69 at 0.2, length 1.19 / 1.08 of Bambu's). So the 0.35 - 0.4 mm Bambu's flat plates stand past ours is not the footprint's edge alone; it comes with a smaller clearance from the part's
+walls than ours keeps (0.18 gap + half a line). Next to look at: what clearance Bambu's plate keeps from the wall on the Base and the Negative Spheres (measured, not assumed) before moving the footprint.
