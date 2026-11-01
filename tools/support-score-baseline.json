@@ -124,22 +124,22 @@
   }
  },
  "Support Circular": {
-  "plateIoU": 0.523367967876806,
-  "plateBothMm2": 126.43,
-  "plateOnlyOursMm2": 65.59,
-  "plateOnlyTheirsMm2": 49.55,
-  "lenRatio": 1.1500491894435176,
-  "mvRatio": 0.904887759526469,
+  "plateIoU": 0.5482545293857711,
+  "plateBothMm2": 124.07,
+  "plateOnlyOursMm2": 50.32,
+  "plateOnlyTheirsMm2": 51.91,
+  "lenRatio": 1.0467727447709483,
+  "mvRatio": 0.9676780436904451,
   "z0Ours": 7.69,
   "z0Theirs": 7.69,
-  "treeIoU": 0.13363866642785865,
-  "treeLenRatio": 0.38461156655609147,
-  "volIoU": 0.7622992392223161,
-  "volOnlyOursMm3": 9.340000000000002,
-  "volOnlyTheirsMm3": 7.532000000000002,
-  "footIoU": 0.6529616724738677,
-  "footOnlyOursMm2": 93.78999999999999,
-  "footOnlyTheirsMm2": 65.57,
+  "treeIoU": 0.13250149559866678,
+  "treeLenRatio": 0.3802974777263966,
+  "volIoU": 0.7899067956583294,
+  "volOnlyOursMm3": 6.052000000000001,
+  "volOnlyTheirsMm3": 8.194000000000003,
+  "footIoU": 0.6844326931997403,
+  "footOnlyOursMm2": 66.33,
+  "footOnlyTheirsMm2": 69.72999999999999,
   "gaps": {
    "oursLacks": [
     {
@@ -147,18 +147,18 @@
      "zFrom": 0.2,
      "zTo": 14.27,
      "layers": 74,
-     "areaMm2": 778.32,
-     "peakMm2": 31.11,
+     "areaMm2": 779.7,
+     "peakMm2": 31.25,
      "x": 16.31,
      "y": 0.81,
      "bbox": [
       11.32,
       -5.69,
-      22.82,
+      22.72,
       5.61
      ],
      "sizeMm": [
-      11.5,
+      11.4,
       11.3
      ]
     },
@@ -167,10 +167,10 @@
      "zFrom": 8.52,
      "zTo": 9.4,
      "layers": 5,
-     "areaMm2": 30.89,
+     "areaMm2": 30.71,
      "peakMm2": 14.15,
-     "x": 17.66,
-     "y": -1.52,
+     "x": 17.75,
+     "y": -1.59,
      "bbox": [
       14.02,
       -5.29,
@@ -187,19 +187,19 @@
      "zFrom": 7.97,
      "zTo": 8.8,
      "layers": 4,
-     "areaMm2": 17.26,
-     "peakMm2": 8.04,
-     "x": 17.75,
-     "y": -1.71,
+     "areaMm2": 20.14,
+     "peakMm2": 8.45,
+     "x": 17.74,
+     "y": -1.6,
      "bbox": [
-      14.12,
+      14.02,
       -5.19,
-      21.32,
-      2.01
+      21.42,
+      2.21
      ],
      "sizeMm": [
-      7.2,
-      7.2
+      7.4,
+      7.4
      ]
     },
     {
@@ -229,10 +229,10 @@
      "zFrom": 0.2,
      "zTo": 7.69,
      "layers": 28,
-     "areaMm2": 154.32,
+     "areaMm2": 154.13,
      "peakMm2": 23.34,
      "x": 16.45,
-     "y": -1.67,
+     "y": -1.66,
      "bbox": [
       11.02,
       -6.19,
@@ -246,22 +246,22 @@
     },
     {
      "cls": "support",
-     "zFrom": 7.97,
-     "zTo": 12.37,
-     "layers": 18,
-     "areaMm2": 41,
-     "peakMm2": 3.22,
-     "x": 22.72,
-     "y": 3.29,
+     "zFrom": 8.25,
+     "zTo": 12.28,
+     "layers": 16,
+     "areaMm2": 38.16,
+     "peakMm2": 3.17,
+     "x": 22.78,
+     "y": 3.32,
      "bbox": [
       18.72,
-      -0.09,
+      0.31,
       26.02,
       5.11
      ],
      "sizeMm": [
       7.3,
-      5.2
+      4.8
      ]
     }
    ]

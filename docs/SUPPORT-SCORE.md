@@ -63,3 +63,9 @@ a curved face takes `REGION_BEAD_SHARE` 0.7 of it. Foot IoU Oblique 0.80 -> 0.83
 unchanged. The cliff: at 0.5 or less the Circular's and Sphere's plates fail the clearance check and are not built (foot 0.28 / 0.37), so 0.7 keeps a margin (0.6 gave Circular 0.66, Sphere 0.78). With
 the full allowance the Circular's plate stands a layer short of Bambu's and 0.5 mm too wide; it is still: its stack tops at 9.2 against Bambu's 9.4 and its footprint is wider than Bambu's by 0.5 - 0.8 mm
 (footprint, from the beacon detector, not the loops: `LOOP_IN_MM` 0.3 - 0.7 changed nothing there). Tree IoU of the Oblique 0.12 -> 0.10 (not chased: trunks wait for the plates).
+
+Update (2026-10-31, a curved face's taller plate): Bambu's stack on a dome stands taller and its plate narrower: its top layer is the vertical gap under the surface, and the plate keeps its distance from the part
+by standing back from the face's edge. A curved face is first tried so (`REGION_TALL_TRY_MM` 0.1, then 0.2 mm in from the footprint's edge; stack heights from the vertical gap), and kept when the plate keeps its
+gap (to `REGION_TALL_TOL_MM`, 0.005 mm); otherwise the face goes the way it did. The surface read of a footprint is kept (`surfCache`) so a second attempt does not cast the rays again. Circular only passes
+(Circular foot 0.65 -> 0.68, vol 0.75 -> 0.79, line length 1.15 -> 1.05 of Bambu's); Sphere and the Negative Spheres come within 0.14 - 0.17 mm of the part against 0.18 and fall back. At 0.4 mm in the Circular
+passes too but is too narrow (foot 0.56, length 0.76). Still short: the Circular's last layer (9.2 against 9.4) and its transition tail.

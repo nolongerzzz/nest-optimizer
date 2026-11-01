@@ -867,6 +867,8 @@
   var CONC_CUSHION_MM = 0.08;      /* the opened level set keeps its walls this much more than a line width apart (what the cleaning of a loop moves them by: the extrusion refuses an overlap) */
   var CONC_SIMPLIFY_MM = 0.015;    /* a loop's points within this of the line between their neighbours go */
   var REGION_BEAD_SHARE = 0.7;    /* on a curved face a bead's downhill edge stands lower than its middle by this share of (half a line + 0.03) x the slope: the full allowance (1.0) held the plate a layer and 0.5 mm clear of Bambu's; under about 0.55 the domes' plates fail their clearance check and are not built. A planar face has none (the perpendicular gap is exact on a plane) */
+  var REGION_TALL_TRY_MM = [0.1, 0.2];     /* a curved face's taller plate (see shellPass): the extra distance from the footprint's edge, per attempt */
+  var REGION_TALL_TOL_MM = 0.005;           /* ...and the clearance it may fall short of the gap by (the lattice is 0.1 mm: a plate 0.179 from the part is at 0.18) */
   var REGION_TIP_NEAR_MM = 0.5;   /* a tip's contact this near a footprint's edge is the footprint's */
   var REGION_MARGIN_MM = 0.02;    /* the region plate's cells lie this far in from the footprint's edge (the face's own edge: the plate may run to it; it was 0.1, which left a band 0.15 mm wide bare all round a 1 - 2 mm rim and the tails of the Negative Spheres' patches); its first loop is the edge of that, a wall's centre ~0.1 mm in */
   var REGION_HOLE_FILL_MM2 = 3;   /* a hole in a footprint under this area is laid over, not round (see shellPass) */
@@ -1652,7 +1654,9 @@
       var zLowAll = Infinity;                     /* the lowest footprint: Bambu's support layer grid is anchored there (below the first sheet's top: the sheet's layers; above it, where surfaces slope, the part's) */
       feet.forEach(function (f) { if (f.zl < zLowAll) zLowAll = f.zl; });
       /* the small footprints first: their tips are counted (the card's Building starts moving) before the large one is done */
-      feet.map(function (f, fi) { return fi; }).sort(function (a, b) { return (feet[a].box[2] - feet[a].box[0]) * (feet[a].box[3] - feet[a].box[1]) - (feet[b].box[2] - feet[b].box[0]) * (feet[b].box[3] - feet[b].box[1]); }).forEach(function (fi) {
+      var surfCache = {};                             /* a footprint's surface, read once: the attempts below start from it */
+      function footPass(fi, tryE) {
+        var tellP = tryE != null ? function () {} : told;
         var f = feet[fi];
         /* a hole in the footprint smaller than REGION_HOLE_FILL_MM2 is part of the surface (the crest of a cavity's apex: a cone 0.2 - 0.4 mm over its rim, a
            square millimetre or two the detector traces as a hole, and Bambu holds): the plate is laid over it */
@@ -1681,15 +1685,20 @@
         if (!mine.length)return;
         var ox = f.box[0] - 1, oy = f.box[1] - 1, nx = Math.ceil((f.box[2] - f.box[0] + 2) / CELLS) + 1, ny = Math.ceil((f.box[3] - f.box[1] + 2) / CELLS) + 1, N = nx * ny;
         /* the surface's height over the footprint, read on a 0.2 mm lattice and kept by the nearest */
-        var S = new Float32Array(N).fill(NaN), fp = new Uint8Array(N), STEP = 2, zs = [];
-        for (var j0 = 0; j0 < ny; j0 += STEP, beat()) for (var i0 = 0; i0 < nx; i0 += STEP) {
-          var x0 = ox + i0 * CELLS, y0 = oy + j0 * CELLS;
-          if (!inFoot(x0, y0)) continue;
-          var zStart = f.zl - SHELL_START_MM;
-          var h = firstHit(x0, y0, zStart, f.zh - zStart + 3);
-          if (isFinite(h) && zStart + h <= f.zh + 1.0) { S[j0 * nx + i0] = zStart + h; fp[j0 * nx + i0] = 1; zs.push(zStart + h); }     /* a hit far above the footprint is a stem's or another face's, not its underside */
+        var S, fp, STEP = 2, zs = [], scache = surfCache[fi];
+        if (scache) { S = scache.S.slice(); fp = scache.fp.slice(); zs = scache.zs.slice(); }
+        else {
+          S = new Float32Array(N).fill(NaN); fp = new Uint8Array(N);
+          for (var j0 = 0; j0 < ny; j0 += STEP, beat()) for (var i0 = 0; i0 < nx; i0 += STEP) {
+            var x0 = ox + i0 * CELLS, y0 = oy + j0 * CELLS;
+            if (!inFoot(x0, y0)) continue;
+            var zStart = f.zl - SHELL_START_MM;
+            var h = firstHit(x0, y0, zStart, f.zh - zStart + 3);
+            if (isFinite(h) && zStart + h <= f.zh + 1.0) { S[j0 * nx + i0] = zStart + h; fp[j0 * nx + i0] = 1; zs.push(zStart + h); }     /* a hit far above the footprint is a stem's or another face's, not its underside */
+          }
+          surfCache[fi] = { S: S.slice(), fp: fp.slice(), zs: zs.slice() };
         }
-        told(Math.round(0.1 * mine.length));          /* the setup is told as it goes (a footprint's first second is not a still bar): a tenth after the surface is read, */
+        tellP(Math.round(0.1 * mine.length));          /* the setup is told as it goes (a footprint's first second is not a still bar): a tenth after the surface is read, */
         if (zs.length < 30) return;
         zs.sort(function (a, b) { return a - b; });
         var zLoQ = zs[Math.floor(zs.length * 0.02)], zHiQ = zs[Math.floor(zs.length * 0.98)], range = zHiQ - zLoQ;
@@ -1709,6 +1718,7 @@
             if (planarFace && !(opts.regionSlopes === true && o.sheetLayer !== o.layer)) return;     /* Dense: a planar slope is the region plate's too (Bambu's ribbon), not the stair's rungs */
           }
         }
+        if (tryE != null && (range <= REGION_FLAT_MM || planarFace)) return;                  /* the taller, narrower attempt is for a curved face */
         /* fill the lattice's cells; a flat face takes its lowest height */
         for (var jf = 0; jf < ny; jf++) for (var iff = 0; iff < nx; iff++) {
           var q0 = jf * nx + iff;
@@ -1726,9 +1736,9 @@
         var inRegion = new Uint8Array(N);
         for (var q2 = 0; q2 < N; q2++) inRegion[q2] = fp[q2] && !isNaN(S[q2]) ? 1 : 0;
         if (range <= REGION_FLAT_MM) for (var q3 = 0; q3 < N; q3++) if (inRegion[q3]) S[q3] = zs[0];
-        told(Math.round(0.3 * mine.length));          /* three tenths after the fill, */
+        tellP(Math.round(0.3 * mine.length));          /* three tenths after the fill, */
         var dEdge = edtCells(inRegion, nx, ny), usable = new Uint8Array(N), nUse = 0;
-        var margin = f.marginMm != null ? f.marginMm : MARGIN;
+        var margin = (f.marginMm != null ? f.marginMm : MARGIN) + (tryE || 0);
         for (var q4 = 0; q4 < N; q4++) if (inRegion[q4] && (dEdge[q4] - 0.5) * CELLS >= margin) { usable[q4] = 1; nUse++; }
         if (nUse * CELLS * CELLS < (f.marginMm != null ? 0.8 : 4))return;               /* a region the user painted may be small */
         /* the other columns - every one this footprint's tips do not stand - keep their clearance from the plate, wherever they pass through its height */
@@ -1770,7 +1780,7 @@
             if (gi2 < 0 || gi2 >= nx || gj2 < 0 || gj2 >= ny || !inRegion[gj2 * nx + gi2]) continue;
             gmax = Math.max(gmax, Math.abs(S[qg2] - S[gj2 * nx + gi2]) / (2 * CELLS));
           }
-          gapAt[qg2] = o.gap * Math.sqrt(1 + gmax * gmax) + (planarFace ? 0 : REGION_BEAD_SHARE * (o.width / 2 + 0.03) * gmax);   /* a bead is a line wide: on a slope its downhill edge stands lower than its middle */
+          gapAt[qg2] = tryE != null ? o.gap : o.gap * Math.sqrt(1 + gmax * gmax) + (planarFace ? 0 : REGION_BEAD_SHARE * (o.width / 2 + 0.03) * gmax);   /* a bead is a line wide: on a slope its downhill edge stands lower than its middle */
         }
         var A = zs[0] - o.gap, m = new Int32Array(N).fill(-99999), mmin = 1e9, mmax = -1e9;
         for (var q5 = 0; q5 < N; q5++) {
@@ -1809,7 +1819,7 @@
           var dB = edtCells((function () { var inv = new Uint8Array(N); for (var q = 0; q < N; q++) inv[q] = blocked[q] ? 0 : 1; return inv; })(), nx, ny);
           for (var q8 = 0; q8 < N; q8++) if (usable[q8] && dB[q8] * CELLS < clear) usable[q8] = 0;
         })();
-        told(Math.round(0.5 * mine.length));          /* half once the walls stand; the layers carry it from there to 95 % */
+        tellP(Math.round(0.5 * mine.length));          /* half once the walls stand; the layers carry it from there to 95 % */
         mmin = 1e9; mmax = -1e9;
         for (var q9 = 0; q9 < N; q9++) if (usable[q9]) { if (m[q9] < mmin) mmin = m[q9]; if (m[q9] > mmax) mmax = m[q9]; }
         if (mmin > mmax)return;
@@ -1844,7 +1854,7 @@
         var maskLayers = [];                    /* each laid layer's traced mask (the cells it covers), to find the lowest layer a tip stands under */
         for (var bn = 0; bn < bands.length && !failed; bn++, beat()) {
           var BD = bands[bn], n = BD.n, thk = BD.h;
-          told(Math.floor(carry.length * (0.5 + 0.45 * bn / Math.max(1, bands.length))));
+          tellP(Math.floor(carry.length * (0.5 + 0.45 * bn / Math.max(1, bands.length))));
           var Mk = new Uint8Array(N), any = false;
           for (var q6 = 0; q6 < N; q6++) if (usable[q6] && BD.has(m[q6])) { Mk[q6] = 1; any = true; }
           if (!any) continue;
@@ -1906,7 +1916,7 @@
         /* the loops, not the hatch: a hatch line ends a line and a gap short of them and lies level with them, so it is no nearer the part */
         var soupAll = joinSoups(soupsLoops), dmin = Infinity, rch = o.gap + 0.1;
         for (var bi = 0; bi < obstacles.length; bi++) { var dd = exactDistance(soupAll, exactVs(bi, rch), rch, beat); if (dd.mm < dmin) dmin = dd.mm; }
-        if (dmin < o.gap - 1e-5) return;
+        if (dmin < o.gap - (tryE != null ? REGION_TALL_TOL_MM : 1e-5)) return;
         var zBaseMin = botOfM(mmin), zTopMax = A + (mmax + 1) * o.layer;
         var L = { id: levels.length, first: zTopMax, tips: carry, told: carry.length, ok: true, shell: true, minDistanceMm: dmin,
                   res: { zTop: zTopMax, zBase: zBaseMin, zCap: zBaseMin, layers: layersOut, uncrossed: [], region: true,
@@ -1933,6 +1943,14 @@
           })();
           t.top = bareShellTop(t, t.shellB);
         });
+      }
+      /* A CURVED FACE: Bambu's stack is taller (its top layer stands the vertical gap under the surface, not the perpendicular one) and its plate narrower - the
+         plate keeps its distance from the part by standing back from the face's edge, not by standing lower. Tried first, each a step further in (REGION_TALL_TRY_MM)
+         until the plate keeps its gap (the check below it); a face that never does goes the way it did, the perpendicular gap. */
+      feet.map(function (f, fi) { return fi; }).sort(function (a, b) { return (feet[a].box[2] - feet[a].box[0]) * (feet[a].box[3] - feet[a].box[1]) - (feet[b].box[2] - feet[b].box[0]) * (feet[b].box[3] - feet[b].box[1]); }).forEach(function (fi) {
+        var before = shellLevels.length;
+        for (var ti = 0; ti < REGION_TALL_TRY_MM.length && shellLevels.length === before; ti++) footPass(fi, REGION_TALL_TRY_MM[ti]);
+        if (shellLevels.length === before) footPass(fi, null);
       });
     }
     var plateUnder = {};                      /* tip index -> the plate layer (its traced mask) the tip stands under: how far the plate reaches round the tip (flareOf) */
