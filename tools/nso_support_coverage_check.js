@@ -118,7 +118,8 @@ async function plate(objs, yaws, angle) {
   for (const k of Object.keys(a.rows)) console.log('        ' + k.padEnd(18) + 'held ' + a.rows[k].pct.toFixed(0).padStart(3) + ' %   of ' + a.rows[k].mm2.toFixed(0) + ' mm2 of footprint');
   check('the Base: 85 % or more of its footprint has support under it', a.rows.Base.pct >= 85, a.rows.Base.pct.toFixed(0) + ' %');
   check('the Oblique (its stair stands at this angle): 85 % or more', a.rows.Oblique.pct >= 85, a.rows.Oblique.pct.toFixed(0) + ' %');
-  const FLOOR_ALIGNED = { Circular: 92, Sphere: 94, 'Negative Sphere': 74, 'Negative Sphere2': 70 };
+  // Sphere 94 -> 92 (2026-11-01): the domes' taller plate stands back 0.05 - 0.1 mm from the face's edge, as Bambu's does (held 94 -> 93.6 %); the floor stays a guard against a plate that leaves its footprint bare
+  const FLOOR_ALIGNED = { Circular: 92, Sphere: 92, 'Negative Sphere': 74, 'Negative Sphere2': 70 };
   for (const k of Object.keys(FLOOR_ALIGNED)) check('the ' + k + ' (the region plate): ' + FLOOR_ALIGNED[k] + ' % or more', a.rows[k].pct >= FLOOR_ALIGNED[k], a.rows[k].pct.toFixed(0) + ' %');
   check('the plate built in 45 s or less (this box 15; the runner is about 1.7 times slower; the plate was 36 s before the region plate)', a.secs <= 45, a.secs.toFixed(1) + ' s');
 

@@ -867,8 +867,8 @@
   var CONC_CUSHION_MM = 0.08;      /* the opened level set keeps its walls this much more than a line width apart (what the cleaning of a loop moves them by: the extrusion refuses an overlap) */
   var CONC_SIMPLIFY_MM = 0.015;    /* a loop's points within this of the line between their neighbours go */
   var REGION_BEAD_SHARE = 0.7;    /* on a curved face a bead's downhill edge stands lower than its middle by this share of (half a line + 0.03) x the slope: the full allowance (1.0) held the plate a layer and 0.5 mm clear of Bambu's; under about 0.55 the domes' plates fail their clearance check and are not built. A planar face has none (the perpendicular gap is exact on a plane) */
-  var REGION_TALL_TRY_MM = [0.1, 0.2];     /* a curved face's taller plate (see shellPass): the extra distance from the footprint's edge, per attempt */
-  var REGION_TALL_TOL_MM = 0.005;           /* ...and the clearance it may fall short of the gap by (the lattice is 0.1 mm: a plate 0.179 from the part is at 0.18) */
+  var REGION_TALL_TRY_MM = [0.05, 0.1, 0.2];     /* a curved face's taller plate (see shellPass): the extra distance from the footprint's edge, per attempt (0.05 first: the Circular wants the least, the Sphere 0.1) */
+  var REGION_TALL_TOL_MM = 0.04;           /* ...and the clearance it may fall short of the gap by (the Sphere's and the Negative Spheres' taller plate comes within 0.14 - 0.17 of the part: so does Bambu's) */
   var REGION_TIP_NEAR_MM = 0.5;   /* a tip's contact this near a footprint's edge is the footprint's */
   var REGION_MARGIN_MM = 0.02;    /* the region plate's cells lie this far in from the footprint's edge (the face's own edge: the plate may run to it; it was 0.1, which left a band 0.15 mm wide bare all round a 1 - 2 mm rim and the tails of the Negative Spheres' patches); its first loop is the edge of that, a wall's centre ~0.1 mm in */
   var REGION_HOLE_FILL_MM2 = 3;   /* a hole in a footprint under this area is laid over, not round (see shellPass) */

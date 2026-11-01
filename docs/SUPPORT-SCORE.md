@@ -93,3 +93,10 @@ the lines past the edge fell outside the part's host cut (the typing's reach), s
 the host cut is now `HOST_GROW_MM` 0.2 wider, so the plate's edge stays the layer's own type. Foot / vol IoU Base 0.94 / 0.93 -> 0.98 / 0.98, Negative Sphere 0.82 / 0.83 -> 0.89 / 0.90, Negative Sphere2 0.77 / 0.79 -> 0.84 / 0.89,
 line IoU +0.05 - 0.07; domes and Oblique unchanged. Applied to every layer (domes included) the wider host cost the Circular 0.68 -> 0.63 and Sphere 0.77 -> 0.72, hence flat floors only. The round blobs in Bambu's plan at the Negative Spheres'
 cavity centre and rim ends (z 9.85 - 10.4) are its trunks, typed Support, not plate: they wait for the trunk work.
+
+Update (2026-11-01, the domes' taller plate): on both domes our plate's rings stand 0.4 - 0.6 mm further out than Bambu's on every layer (rmin and rmax of the Sphere: ours 1.8 - 3.1 against 1.2 - 2.7; the Circular 0.4 - 0.6 over) - the same
+as a stack a layer too low (the surface rises 0.23 mm in 0.4 mm of radius at 30 deg). The taller attempt (vertical gap, plate stood back from the face's edge) held on the Circular only: the Sphere's and the Negative Spheres' come within
+0.14 - 0.17 of the part, and Bambu's does too. `REGION_TALL_TOL_MM` 0.005 -> 0.04 and the attempts `[0.05, 0.1, 0.2]` (was `[0.1, 0.2]`): the Circular wants the least erosion (0 or 0.05: foot 0.75, vol 0.85; at 0.1 0.68 / 0.79), the Sphere
+0.1 (0.05 and over: 0.81 / 0.81; at 0 it falls to 0.74 / 0.76), so 0.05 first. Foot / vol IoU Circular 0.68 / 0.79 -> 0.75 / 0.85 (line 0.55 -> 0.59, length 1.05 -> 1.15), Sphere 0.77 / 0.76 -> 0.81 / 0.81 (line 0.58 -> 0.64, length 1.40 -> 1.36),
+Negative Sphere 0.89 / 0.90 -> 0.90 / 0.91, Negative Sphere2 0.84 / 0.89 -> 0.83 / 0.88 (length 0.95 -> 0.90). Tried and left out: eroding every curved face 0.3 / 0.5 mm (Sphere foot 0.71 / 0.61). Still too long: the Sphere (1.36) and the
+Circular (1.15) lay more line than Bambu's on their rings.
