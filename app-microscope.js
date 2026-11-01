@@ -3643,6 +3643,7 @@ var NSO_MICROSCOPE = (function () {
    * Export as solid writes). Mesh: the objects' own triangles.
    */
   function buildDetail() {
+    drawDirty = true;
     var v = view;
     clearGroup(v.detailGroup);
     if (!doc || !currentSelection.length) return;
@@ -3798,6 +3799,7 @@ var NSO_MICROSCOPE = (function () {
    *   isolated       the selection alone, as-is (detail group)
    */
   function applyDisplay() {
+    drawDirty = true;
     var v = view;
     if (!v) return;
     var detail = showingDetail();
@@ -3860,18 +3862,49 @@ var NSO_MICROSCOPE = (function () {
   // one, so a reopen can never end up with two.
   var loop = 0;
 
+  /* DRAW ON CHANGE. This loop used to draw every frame for as long as G-scope
+     was open - 746,000 triangles with MSAA, 60 times a second, on a laptop
+     GPU that also blurs every translucent panel over the canvas
+     (backdrop-filter) each time the canvas changes. A page left on a big
+     slice then starved: a click on a fold toggle took minutes to answer.
+     A frame is drawn when the camera moved (damping included), when the view
+     was told it changed (drawDirty: applyDisplay, buildDetail, fitView,
+     normalView, viewChanged, resize), while input is in progress (app-core.js
+     holds that window open after every press, key, wheel, edit and hover over
+     a canvas), when the panel's own DOM changed (a result landing writes its
+     status or readout there), and once a second as a safety net for anything
+     that moved the picture without saying so. ?render=always restores the old
+     loop. */
+  var GSCOPE_IDLE_DRAW_MS = 1000;
+  var drawDirty = true, lastDrawAt = 0, domObserver = null;
+  function wakeDraw() { drawDirty = true; }
+  function watchPanelDom() {
+    var panel = $('microscope');
+    if (domObserver || !panel || typeof MutationObserver !== 'function') return;
+    domObserver = new MutationObserver(wakeDraw);
+    domObserver.observe(panel, { childList: true, characterData: true, subtree: true });
+  }
+
   function animate(gen) {
     if (!view || !view.running || gen !== loop) return;
     requestAnimationFrame(function () { animate(gen); });
-    view.controls.update();
+    var moved = view.controls.update() !== false;
     followClip();
     // The corner dot follows the camera round to the near corner, and every
     // dot keeps its least size on screen.
     balls.forEach(function (b) { b.cornerHandle.position.copy(cornerPoint(b)); dotsOnScreen(b); });
-    view.renderer.render(view.scene, view.camera);
+    var now = performance.now();
+    if (drawDirty || moved || now - lastDrawAt >= GSCOPE_IDLE_DRAW_MS ||
+        (typeof window.nsoInputActive === 'function' && window.nsoInputActive()) ||
+        (typeof window.nsoRenderAlways === 'function' && window.nsoRenderAlways())) {
+      drawDirty = false;
+      lastDrawAt = now;
+      view.renderer.render(view.scene, view.camera);
+    }
   }
 
   function resize() {
+    drawDirty = true;
     if (!view || !isOpen()) return;
     var w = view.host.clientWidth, h = view.host.clientHeight;
     if (!w || !h) return;
@@ -4108,6 +4141,7 @@ var NSO_MICROSCOPE = (function () {
   /** The legend, a clear or the slider changed what is shown: redraw it. */
   var viewPending = false, viewFull = false;
   function viewChanged() {
+    drawDirty = true;
     if (!view || !doc) return;
     buildLegend();
     if (doc.kind === 'toolpath') {
@@ -5676,6 +5710,7 @@ var NSO_MICROSCOPE = (function () {
   // and swaps the DOCUMENT (mesh <-> in-house slice). The old Close
   // inspection framing is gone.
   function normalView() {
+    drawDirty = true;
     var v = view;
     if (v) {
       if (isolated) fitView(selectionBox());
@@ -5696,6 +5731,7 @@ var NSO_MICROSCOPE = (function () {
    * is seen from where you were looking at it. Empty box: no move.
    */
   function fitView(box) {
+    drawDirty = true;
     var v = view;
     if (!box || box.isEmpty()) return;
     var size = new THREE.Vector3(), centre = new THREE.Vector3();
@@ -5773,6 +5809,8 @@ var NSO_MICROSCOPE = (function () {
     var btn = $('btn-microscope');
     if (btn) btn.classList.add('is-on');
     if (!buildWorld()) return;
+    drawDirty = true;
+    watchPanelDom();
     // One loop, however many times the panel is opened - a second would double
     // the frame rate and the damping with it.
     if (!view.running) { view.running = true; animate(++loop); }

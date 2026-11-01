@@ -1347,6 +1347,10 @@ function nsoWakeRender(ms) {
   if (t > nsoRenderGate.until) nsoRenderGate.until = t;
 }
 window.nsoWakeRender = nsoWakeRender;
+/* G-scope (app-microscope.js) has a view and a loop of its own and shares this
+   gate's rules, so it asks the same two questions of it. */
+window.nsoInputActive = function () { return performance.now() < nsoRenderGate.until; };
+window.nsoRenderAlways = function () { return nsoRenderGate.always; };
 window.nsoRenderStats = function () {
   return { drawn: nsoRenderGate.drawn, skipped: nsoRenderGate.skipped, always: nsoRenderGate.always };
 };
@@ -1354,8 +1358,8 @@ window.nsoRenderStats = function () {
   const onInput = function (e) {
     // A hover over the toolbar or a card changes nothing in the picture.
     if (e.type === 'pointermove' && !e.buttons) {
-      const cv = state.renderer && state.renderer.domElement;
-      if (!cv || e.target !== cv) return;
+      // Only a canvas has anything to redraw under a hover (this one's, or G-scope's).
+      if (!e.target || e.target.tagName !== 'CANVAS') return;
     }
     nsoWakeRender();
   };
