@@ -2273,6 +2273,7 @@
       /* A plate's lines turn with its own layers, not the support's: Bambu lays the first layer of a stack at 110 degrees, then 45, 135, 45, 135... up it. A stack's layer
          is the next of the one under it where the two stand over each other. */
       var FIRST_LAYER_DEG = 110;
+      var RIBBON_CYCLE = true;
       var RIBBON_RATIO = 2.5, RIBBON_PARALLEL_DEG = 30;
       /* a ring's long axis (the direction of the most spread of its outline) and how much longer it is than wide */
       function ringAxis(ring) {
@@ -2376,6 +2377,7 @@
               var zAreaAll = function (jj) { var q = zones[jj]; var all = q ? q.i.concat(q.t, q.is, q.ts) : []; return all.length ? g.area(g.unionAll(all)) : 0; };
               var b0 = zAreaAll(j), bMinus = zAreaAll(j - 1), bPlus = zAreaAll(j + 1), planar = b0 > 0 && bMinus > 0 && bPlus > 0 && Math.abs(bPlus - 2 * b0 + bMinus) <= PLANAR_2ND_DIFF * b0;
               /* a ribbon (one long thin slab: the ridge's plate) lies along a plane; a ring or a disc (a dome's) does not */
+              var ribbonAngled = false;
               var ribbonSlab = (function () {
                 var pp = g.parts(g.inter(Sj, sheetCs)), big = null;
                 pp.forEach(function (q) { if (!big || q.area() > big.area()) big = q; });
@@ -2383,6 +2385,13 @@
                 var ax = ringAxis(g.polys(big)[0]);
                 return !!ax && ax.ratio >= RIBBON_T_RATIO;
               })();
+              if (RIBBON_CYCLE && ribbonSlab) {
+                /* Bambu's ridge plate: the transition layers at 110, the interface's first and then every third at 20, the rest at 110 (measured: 20, 110, 20, then 110, 110, 20 on, over the
+                   0.2 mm layers) - the two directions cross the ribbon at 65 and 25 degrees, so a line is ~0.5 or ~1 mm and the lines 0.5 or 1.1 mm along it */
+                var sx = stackIdx[j];
+                aJ = ((sx === 2 || (sx >= 4 && (sx - 4) % 3 === 0)) ? 20 : 110) * Math.PI / 180;
+                ribbonAngled = true;
+              }
               var loopIn = steady ? LOOP_IN_FLAT_MM : LOOP_IN_MM;
               var inLoop = g.offset(g.inter(Sj, sheetCs), -loopIn);
               hullS = g.polys(g.offset(inLoop, wI / 2 + 1e-4));
@@ -2448,7 +2457,7 @@
                 var rings = g.polys(pp), ang = aJ, ax = ringAxis(rings[0]);
                 if (ax && ax.ratio >= RIBBON_RATIO) {
                   var dd = Math.abs(((ax.ang - aJ) % Math.PI + Math.PI) % Math.PI); dd = Math.min(dd, Math.PI - dd);
-                  if (dd < RIBBON_PARALLEL_DEG * Math.PI / 180) ang = aJ + Math.PI / 2;
+                  if (dd < RIBBON_PARALLEL_DEG * Math.PI / 180 && !ribbonAngled) ang = aJ + Math.PI / 2;
                 }
                 fillSegs = fillSegs.concat(scanFill(rings, ang, sI, 0));
               });
