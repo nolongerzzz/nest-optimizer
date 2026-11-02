@@ -2243,6 +2243,16 @@
       var LOOP_IN_FLAT_MM = -0.15; /* on a layer whose zones keep their size from a neighbour (a flat floor) the loops lie this far in (negative: out past the slab's edge): Bambu's loop centrelines stand 0.2 - 0.25 mm past the face's edge on both sides of a flat ring */
       var LOOP_IN_MM = 0.12;   /* the region loops lie this far in from the slab's edge (not half a line: Bambu's plate stands 0.4 mm past ours on the flat-floored pieces) */
       var REGIONAL_PLATE = true;     /* a support's own grid lays its plate by regions (below) */
+      /* A plate's lines turn with its own layers, not the support's: Bambu lays the first layer of a stack at 110 degrees, then 45, 135, 45, 135... up it. A stack's layer
+         is the next of the one under it where the two stand over each other. */
+      var FIRST_LAYER_DEG = 110;
+      var stackIdx = [], sheetOf = [];
+      P.layers.forEach(function (L, jj) {
+        var zz = zones[jj], all = zz.i.concat(zz.t, zz.is, zz.ts);
+        sheetOf[jj] = all.length ? g.unionAll(all) : null;
+        var below = jj > 0 ? sheetOf[jj - 1] : null;
+        stackIdx[jj] = sheetOf[jj] && below && g.area(g.inter(sheetOf[jj], below)) > 0.05 ? (stackIdx[jj - 1] || 0) + 1 : 0;
+      });
       P.layers.forEach(function (L, j) {
         if (!L.paths.length) return;
         var zi = zones[j].i.length ? g.polys(g.offset(g.unionAll(zones[j].i), w / 2)) : [];
@@ -2282,7 +2292,7 @@
           }
           var inSheet = g.isEmpty(sheetCs) ? g.empty() : g.offset(g.inter(P.S[j], sheetCs), -(o.outerWallWidthMm * 1.0));
           if (!g.isEmpty(inSheet) || (byDepth && REGIONAL_PLATE && !g.isEmpty(sheetCs) && g.parts(g.inter(P.S[j], sheetCs)).some(function (pp) { return pp.area() >= THIN_SLAB_MIN_MM2 && g.polys(pp).length === 1; }))) {      /* a slab narrower than the wall's inset has no inside, but its loop is still Bambu's */
-            var wI = o.supportWidthMm > 0 ? o.supportWidthMm : o.infillWidthMm, sI = spacingOf(wI, P.layers[j].h || 0.2), aD = (o.infillDirectionDeg || 45) * Math.PI / 180, aJ = (j % 2 === 0) ? aD : aD + Math.PI / 2;
+            var wI = o.supportWidthMm > 0 ? o.supportWidthMm : o.infillWidthMm, sI = spacingOf(wI, P.layers[j].h || 0.2), aD = (o.infillDirectionDeg || 45) * Math.PI / 180, aJ = byDepth && REGIONAL_PLATE ? (stackIdx[j] === 0 ? FIRST_LAYER_DEG * Math.PI / 180 : (stackIdx[j] % 2 === 1 ? aD : aD + Math.PI / 2)) : (j % 2 === 0) ? aD : aD + Math.PI / 2;
             var hullS = g.polys(g.offset(inSheet, wI / 2 + 1e-4));
             /* the sheet is the layer's only fill there: a fill the support's own shells laid inside it (the bottom shell of a sheet's first layer, which stands on a
                hollow tree) is the same ground twice - a transition layer with double the lines. The walls stay. */
