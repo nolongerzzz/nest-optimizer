@@ -2256,6 +2256,8 @@
       var RIBBON_T_RATIO = 3;
       var IFILL_IN_MM = 0.2;   /* the interface's hatch runs from loop to loop, as the transition's does (it was the slab inset a whole wall: only the wide parts of a ring were filled, and Bambu's interface ring is filled round); it stops this far short of the loops' line */
       var REGION_FILL_GAP_MM = 0.04;
+      var PLANAR_2ND_DIFF = 0.12;   /* a zone whose area's second difference over three layers is under this share of it is a plane's */
+      var CURVED_SHRINK_MM = 0.1;   /* on a curved face (the zone changes layer on layer) the host cut is this much narrower: a dome's plate was out past Bambu's */
       var HOST_GROW_MM = 0.2;   /* on a flat floor the part's host cut (the typing's reach) is this much wider: the plate's loops stand past the face's edge, and cells there were typed transition where Bambu's are interface */
       var THIN_SLAB_MIN_MM2 = 3;   /* a ribbon (one ring, no hole) at least this big keeps its loop though it is narrower than the wall's inset: the Oblique's top layers (a dome's thin ring is not: Bambu stops a layer lower there) */
       var LOOP_IN_FLAT_MM = -0.15; /* on a layer whose zones keep their size from a neighbour (a flat floor) the loops lie this far in (negative: out past the slab's edge): Bambu's loop centrelines stand 0.2 - 0.25 mm past the face's edge on both sides of a flat ring */
@@ -2363,6 +2365,9 @@
               var zArea = function (jj) { var q = zones[jj]; return q && (q.i.length || q.t.length) ? g.area(g.unionAll(q.i.concat(q.t))) : 0; };
               var a0 = zArea(j), steady = false;
               [j - 1, j + 1].forEach(function (jj) { var a1 = zArea(jj); if (a1 > 0 && a0 > 0 && Math.abs(a1 - a0) <= 0.03 * a0) steady = true; });
+              /* a plane (the oblique ridge) grows its zone by the same amount every layer: the second difference of the zone's area is nil; a curved face (a dome, a diamond's cup) does not */
+              var zAreaAll = function (jj) { var q = zones[jj]; var all = q ? q.i.concat(q.t, q.is, q.ts) : []; return all.length ? g.area(g.unionAll(all)) : 0; };
+              var b0 = zAreaAll(j), bMinus = zAreaAll(j - 1), bPlus = zAreaAll(j + 1), planar = b0 > 0 && bMinus > 0 && bPlus > 0 && Math.abs(bPlus - 2 * b0 + bMinus) <= PLANAR_2ND_DIFF * b0;
               var loopIn = steady ? LOOP_IN_FLAT_MM : LOOP_IN_MM;
               var inLoop = g.offset(g.inter(Sj, sheetCs), -loopIn);
               hullS = g.polys(g.offset(inLoop, wI / 2 + 1e-4));
@@ -2370,6 +2375,7 @@
               var hIc = hostExCs(j, dInEx(j)), hTc = hostExCs(j, dTrEx(j));
               if (hIc && steady && HOST_GROW_MM > 0) hIc = g.offset(hIc, HOST_GROW_MM);
               if (hTc && steady && HOST_GROW_MM > 0) hTc = g.offset(hTc, HOST_GROW_MM);
+              if (!planar && !steady && CURVED_SHRINK_MM > 0) { if (hIc) hIc = g.offset(hIc, -CURVED_SHRINK_MM); if (hTc) hTc = g.offset(hTc, -CURVED_SHRINK_MM); }
               var Ireg = hIc && !g.isEmpty(ZI) ? g.inter(g.inter(g.offset(inLoop, -IFILL_IN_MM), ZI), hIc) : g.empty();
               var Zall = g.isEmpty(ZI) ? ZT : g.isEmpty(ZT) ? ZI : g.union(ZI, ZT);
               var Treg = hTc && !g.isEmpty(Zall) ? g.diff(g.inter(g.inter(inLoop, Zall), hTc), Ireg) : g.empty();
