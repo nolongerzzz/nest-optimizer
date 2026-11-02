@@ -87,7 +87,7 @@
   function count(mask) { var n = 0; for (var i = 0; i < mask.length; i++) n += mask[i]; return n; }
 
   /** Squared distance (in cells) to the nearest set cell of `mask`, exact (Felzenszwalb - Huttenlocher). Large where nothing is set. */
-  function edt2(mask, nx, ny) {
+  function edt2Full(mask, nx, ny) {
     var INF = 1e12, f = new Float64Array(Math.max(nx, ny)), d = new Float64Array(Math.max(nx, ny)), v = new Int32Array(Math.max(nx, ny)), z = new Float64Array(Math.max(nx, ny) + 1);
     var out = new Float64Array(nx * ny);
     function pass(n) {
@@ -114,6 +114,28 @@
       pass(nx);
       for (i = 0; i < nx; i++) out[j * nx + i] = d[i];
     }
+    return out;
+  }
+
+  /** The same, but only where it is wanted: the distance is run over the box of the mask grown by `padCells`, and is 1e12 (far) outside it. Every caller reads
+      the distance against a limit no larger than the pad, so nothing it reads changes - and a layer's mask is a few pieces on a plate, not the whole plate. */
+  var POOL = [];
+  function edt2(mask, nx, ny, padCells, slot) {
+    if (padCells == null) return edt2Full(mask, nx, ny);
+    var i0 = nx, i1 = -1, j0 = ny, j1 = -1;
+    for (var j = 0; j < ny; j++) {
+      var row = j * nx;
+      for (var i = 0; i < nx; i++) if (mask[row + i]) { if (i < i0) i0 = i; if (i > i1) i1 = i; if (j < j0) j0 = j; if (j > j1) j1 = j; }
+    }
+    var out = POOL[slot || 0];                                                  // one buffer per call site, refilled: the result is read at once, before the site asks again
+    if (!out || out.length !== nx * ny) out = POOL[slot || 0] = new Float64Array(nx * ny);
+    out.fill(1e12);
+    if (i1 < 0) return out;
+    i0 = Math.max(0, i0 - padCells); j0 = Math.max(0, j0 - padCells); i1 = Math.min(nx - 1, i1 + padCells); j1 = Math.min(ny - 1, j1 + padCells);
+    var cw = i1 - i0 + 1, ch = j1 - j0 + 1, sub = new Uint8Array(cw * ch);
+    for (var cj = 0; cj < ch; cj++) for (var ci = 0; ci < cw; ci++) sub[cj * cw + ci] = mask[(j0 + cj) * nx + i0 + ci];
+    var d = edt2Full(sub, cw, ch);
+    for (var cj2 = 0; cj2 < ch; cj2++) for (var ci2 = 0; ci2 < cw; ci2++) out[(j0 + cj2) * nx + i0 + ci2] = d[cj2 * cw + ci2];
     return out;
   }
 
@@ -274,7 +296,7 @@
     }
     /** Connected pieces of a mask, joined across gaps up to `joinMm` (a plate is lines with air between them). Returns [{cells:[idx...], box}] */
     function regionsOf(P, joinMm) {
-      var d2 = edt2(P, g.nx, g.ny), j2 = Math.pow(joinMm / cell, 2), lab = new Int32Array(N), out = [], stack = [];
+      var d2 = edt2(P, g.nx, g.ny, Math.ceil(joinMm / cell) + 2, 0), j2 = Math.pow(joinMm / cell, 2), lab = new Int32Array(N), out = [], stack = [];
       for (var s0 = 0; s0 < N; s0++) {
         if (!P[s0] || lab[s0]) continue;
         var id = out.length + 1, cells = [], fill = [];
@@ -304,7 +326,7 @@
       var P = union(ms.interface, ms.transition);
       if (!P || count(P) * cell2 < 0.05) return;
       var Pprev = prevMs && union(prevMs.interface, prevMs.transition);
-      var dPrev = Pprev && count(Pprev) * cell2 >= 0.05 ? edt2(Pprev, g.nx, g.ny) : null, cont2 = Math.pow(1.5 / cell, 2);
+      var dPrev = Pprev && count(Pprev) * cell2 >= 0.05 ? edt2(Pprev, g.nx, g.ny, Math.ceil(1.5 / cell) + 2, 1) : null, cont2 = Math.pow(1.5 / cell, 2);
       var near2 = Math.pow(nearMm / cell, 2), reach2 = Math.pow(reachMm / cell, 2), edge2 = Math.pow(edgeMm / cell, 2);
       var S = prevMs && prevMs.support, first = new Uint8Array(N), nFirst = 0, nGap = 0, below = 0, plateCells = 0;
       regionsOf(P, 1.0).forEach(function (R) {
@@ -317,13 +339,13 @@
         var Rm = new Uint8Array(N);
         R.cells.forEach(function (c) { Rm[c] = 1; first[c] = 1; });
         nFirst++; plateCells += R.cells.length;
-        var dR = edt2(Rm, g.nx, g.ny), b = 0;
+        var dR = edt2(Rm, g.nx, g.ny, Math.ceil(nearMm / cell) + 2, 2), b = 0;
         if (S) for (var i = 0; i < N; i++) if (S[i] && dR[i] <= near2) b++;
         below += b;
         if (b === 0 && hasTree[name] && z > BED_MM) nGap++;                      // no tree in the selection, or a plate on the bed: nothing to run up to it
       });
       if (!nFirst) return;
-      var d2 = edt2(first, g.nx, g.ny), over = 0, maxD2 = 0;
+      var d2 = edt2(first, g.nx, g.ny, Math.ceil(reachMm / cell) + 2, 3), over = 0, maxD2 = 0;
       if (S) for (var j = 0; j < N; j++) {
         if (!S[j]) continue;
         var d = d2[j];
@@ -427,7 +449,7 @@
               var bl = blobOf(R.cells, c, zz);
               if (bl.x1 - bl.x0 <= 3.5 && bl.y1 - bl.y0 <= 3.5) strayRaw[t[0]].push(bl);       // small and alone; a rim sliver runs the length of its plate
             });
-            trackGaps(c, t[0], t[3] >= 1.0 ? only : null, zz, t[3] >= 1.0 && t[2] ? edt2(t[2], g.nx, g.ny) : null);
+            trackGaps(c, t[0], t[3] >= 1.0 ? only : null, zz, t[3] >= 1.0 && t[2] ? edt2(t[2], g.nx, g.ny, Math.ceil(6 / cell), 4) : null);
           });
         }
       });
@@ -621,5 +643,5 @@
     return B;
   }
 
-  return { compute: compute, text: text, view: view, classOf: classOf, edt2: edt2, CLASSES: CLASSES };
+  return { compute: compute, text: text, view: view, classOf: classOf, edt2: edt2Full, CLASSES: CLASSES };
 });
