@@ -2181,6 +2181,7 @@
              the sheet, not the sheet - Support, as Bambu's tree is, where the stair's strips stand alike on a steep wall only within reach */
           if (m >= NI + NT && !underPart(j, U)) break;
           (comp.stair ? (m < NI ? zones[j].is : zones[j].ts) : (m < NI ? zones[j].i : zones[j].t)).push(U);
+          zones[j].topI = Math.max(zones[j].topI == null ? 0 : zones[j].topI, i0);
           lo = j; prevFoot = foot;
           if (j - 1 < 0) { lvl = []; break; }
           lvl = g.parts(P.S[j - 1]).filter(function (p) { return g.area(g.inter(p, U)) > 1e-6; });
@@ -2235,7 +2236,7 @@
         var zs = {};
         P.layers.forEach(function (L, j) {
           if (!L.paths.length) return;
-          [dInEx(j), dTrEx(j)].forEach(function (dd) { var z = SP[j].printZ + dd - exShift; zs[Math.round(z * 1e5)] = z; });
+          [dInEx(j), dTrEx(j), dCl(j, dInEx(j)) + REACH_EXTRA_MM, dCl(j, dTrEx(j)) + REACH_EXTRA_MM].forEach(function (dd) { var z = SP[j].printZ + dd - exShift; zs[Math.round(z * 1e5)] = z; });
         });
         var list = Object.keys(zs).map(function (k) { return zs[k]; }).sort(function (a, b) { return a - b; });
         hosts.forEach(function (Q) {
@@ -2250,6 +2251,8 @@
       var DOEX = gap + hIm + 0.03;
       function dInEx(j) { return DOEX + (NI - 1) * SP[j].h; }
       function dTrEx(j) { return DOEX + (NI + NT - 1) * SP[j].h; }
+      /* a stack's layers all lie under the one face its top layer stands under: no reach runs past that face's own height (Bambu's lower layers repeat the top's outline on a dome and a flat floor; a plane's slide along it until it) */
+      function dCl(j, d) { var ti = zones[j] && zones[j].topI; return ti == null ? d : Math.min(d, Math.max(DOEX, SP[ti].printZ - SP[j].printZ + DOEX)); }
       var SPLIT_MIN_MM = 0.6;
       var PINCH_INSET_MM = 0.1;      /* the loop's inset where the region is too narrow for a line's half-width on each side */
       var TRANS_FILL_OPEN_MM = 0.4;
@@ -2257,6 +2260,10 @@
       var IFILL_IN_MM = 0.2;   /* the interface's hatch runs from loop to loop, as the transition's does (it was the slab inset a whole wall: only the wide parts of a ring were filled, and Bambu's interface ring is filled round); it stops this far short of the loops' line */
       var REGION_FILL_GAP_MM = 0.04;
       var PLANAR_2ND_DIFF = 0.12;   /* a zone whose area's second difference over three layers is under this share of it is a plane's */
+      var EXACT_OUTLINE = true;       /* A RIBBON PLATE (the ridge) is Bambu's: each layer the part's EXACT section at the layer's reach (one section, not the union of the layers up to it; the reach never past the stack top's own face: dCl), the loops' centre PLATE_OUT_MM + 0.12 past it (measured on all six pieces: the outer edge stands 0.33 - 0.38 past the outline). Domes keep the union cut: a single section at that reach is far wider than theirs. */
+      var REACH_EXTRA_MM = 0;   /* the section is read this much higher: a plane's edge moves 2.75 mm for 1 mm of height, and Bambu's plate stood 0.19 mm past ours on the downhill side */
+      var PLATE_OUT_MM = -0.11;
+      var PLATE_BAND_MM = 0.7;      /* how far past the support mesh's footprint the outline may run */
       var CURVED_SHRINK_MM = 0.1;   /* on a curved face (the zone changes layer on layer) the host cut is this much narrower: a dome's plate was out past Bambu's */
       var HOST_GROW_MM = 0.2;   /* on a flat floor the part's host cut (the typing's reach) is this much wider: the plate's loops stand past the face's edge, and cells there were typed transition where Bambu's are interface */
       var THIN_SLAB_MIN_MM2 = 3;   /* a ribbon (one ring, no hole) at least this big keeps its loop though it is narrower than the wall's inset: the Oblique's top layers (a dome's thin ring is not: Bambu stops a layer lower there) */
@@ -2368,6 +2375,14 @@
               /* a plane (the oblique ridge) grows its zone by the same amount every layer: the second difference of the zone's area is nil; a curved face (a dome, a diamond's cup) does not */
               var zAreaAll = function (jj) { var q = zones[jj]; var all = q ? q.i.concat(q.t, q.is, q.ts) : []; return all.length ? g.area(g.unionAll(all)) : 0; };
               var b0 = zAreaAll(j), bMinus = zAreaAll(j - 1), bPlus = zAreaAll(j + 1), planar = b0 > 0 && bMinus > 0 && bPlus > 0 && Math.abs(bPlus - 2 * b0 + bMinus) <= PLANAR_2ND_DIFF * b0;
+              /* a ribbon (one long thin slab: the ridge's plate) lies along a plane; a ring or a disc (a dome's) does not */
+              var ribbonSlab = (function () {
+                var pp = g.parts(g.inter(Sj, sheetCs)), big = null;
+                pp.forEach(function (q) { if (!big || q.area() > big.area()) big = q; });
+                if (!big) return false;
+                var ax = ringAxis(g.polys(big)[0]);
+                return !!ax && ax.ratio >= RIBBON_T_RATIO;
+              })();
               var loopIn = steady ? LOOP_IN_FLAT_MM : LOOP_IN_MM;
               var inLoop = g.offset(g.inter(Sj, sheetCs), -loopIn);
               hullS = g.polys(g.offset(inLoop, wI / 2 + 1e-4));
@@ -2375,6 +2390,25 @@
               var hIc = hostExCs(j, dInEx(j)), hTc = hostExCs(j, dTrEx(j));
               if (hIc && steady && HOST_GROW_MM > 0) hIc = g.offset(hIc, HOST_GROW_MM);
               if (hTc && steady && HOST_GROW_MM > 0) hTc = g.offset(hTc, HOST_GROW_MM);
+              if (EXACT_OUTLINE && !steady && ribbonSlab && Q0exact) {
+                var exAt = function (d) { var key = Math.round((SP[j].printZ + d - exShift) * 1e5), u = null; hosts.forEach(function (Q) { var e = Q.exact && Q.exact[key]; if (e && !g.isEmpty(e)) u = u ? g.union(u, e) : e; }); return u; };
+                var eI = exAt(dCl(j, dInEx(j)) + REACH_EXTRA_MM), eT = exAt(dCl(j, dTrEx(j)) + REACH_EXTRA_MM);
+                if (eI && eT) {
+                  var XO = PLATE_OUT_MM + loopIn;
+                  hIc = g.offset(eI, XO); hTc = g.offset(eT, XO);
+                  /* the ground: past the mesh's footprint as far as the outline goes, and never into the part at this height (its own section, the gap and a line's half) */
+                  var own = [];
+                  planes.forEach(function (pl, k) { if (pl.printZ > SP[j].printZ - SP[j].h + 1e-6 && pl.printZ - pl.h < SP[j].printZ - 1e-6) hosts.forEach(function (Q) { if (!g.isEmpty(Q.S[k])) own.push(Q.S[k]); }); });
+                  var ownCs = own.length ? g.offset(g.unionAll(own), gap + w / 2 + 0.03) : g.empty();
+                  var ground = g.inter(g.offset(g.inter(Sj, sheetCs), PLATE_BAND_MM), hTc);
+                  if (!g.isEmpty(ownCs)) ground = g.diff(ground, ownCs);
+                  Sj = g.union(Sj, ground); sheetCs = g.union(sheetCs, ground);
+                  if (!g.isEmpty(ZI)) ZI = g.union(ZI, ground);
+                  if (!g.isEmpty(ZT)) ZT = g.union(ZT, ground);
+                  inLoop = g.offset(g.inter(Sj, sheetCs), -loopIn);
+                  hullS = g.polys(g.offset(inLoop, wI / 2 + 1e-4));
+                }
+              } else
               if (!planar && !steady && CURVED_SHRINK_MM > 0) { if (hIc) hIc = g.offset(hIc, -CURVED_SHRINK_MM); if (hTc) hTc = g.offset(hTc, -CURVED_SHRINK_MM); }
               var Ireg = hIc && !g.isEmpty(ZI) ? g.inter(g.inter(g.offset(inLoop, -IFILL_IN_MM), ZI), hIc) : g.empty();
               var Zall = g.isEmpty(ZI) ? ZT : g.isEmpty(ZT) ? ZI : g.union(ZI, ZT);
