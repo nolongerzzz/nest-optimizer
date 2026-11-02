@@ -2238,6 +2238,7 @@
       var PINCH_INSET_MM = 0.1;      /* the loop's inset where the region is too narrow for a line's half-width on each side */
       var TRANS_FILL_OPEN_MM = 0.4;
       var RIBBON_T_RATIO = 3;
+      var IFILL_IN_MM = 0.2;   /* the interface's hatch runs from loop to loop, as the transition's does (it was the slab inset a whole wall: only the wide parts of a ring were filled, and Bambu's interface ring is filled round); it stops this far short of the loops' line */
       var REGION_FILL_GAP_MM = 0.04;
       var HOST_GROW_MM = 0.2;   /* on a flat floor the part's host cut (the typing's reach) is this much wider: the plate's loops stand past the face's edge, and cells there were typed transition where Bambu's are interface */
       var THIN_SLAB_MIN_MM2 = 3;   /* a ribbon (one ring, no hole) at least this big keeps its loop though it is narrower than the wall's inset: the Oblique's top layers (a dome's thin ring is not: Bambu stops a layer lower there) */
@@ -2333,7 +2334,7 @@
               var hIc = hostExCs(j, dInEx(j)), hTc = hostExCs(j, dTrEx(j));
               if (hIc && steady && HOST_GROW_MM > 0) hIc = g.offset(hIc, HOST_GROW_MM);
               if (hTc && steady && HOST_GROW_MM > 0) hTc = g.offset(hTc, HOST_GROW_MM);
-              var Ireg = hIc && !g.isEmpty(ZI) ? g.inter(g.inter(inSheet, ZI), hIc) : g.empty();
+              var Ireg = hIc && !g.isEmpty(ZI) ? g.inter(g.inter(g.offset(inLoop, -IFILL_IN_MM), ZI), hIc) : g.empty();
               var Zall = g.isEmpty(ZI) ? ZT : g.isEmpty(ZT) ? ZI : g.union(ZI, ZT);
               var Treg = hTc && !g.isEmpty(Zall) ? g.diff(g.inter(g.inter(inLoop, Zall), hTc), Ireg) : g.empty();
               var slabI = hIc && !g.isEmpty(ZI) ? g.inter(g.inter(P.S[j], ZI), hIc) : g.empty();
