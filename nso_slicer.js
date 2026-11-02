@@ -253,6 +253,7 @@
       outerWallWidthMm: w,
       innerWallWidthMm: w,
       infillWidthMm: w,
+      supportWidthMm: null,                // a support's plate (its interface and transition lines): support_line_width; null -> the infill's
       wallLoops: BAMBU_PROFILE_06.wallLoops,
       topShellLayers: BAMBU_PROFILE_06.topShellLayers,
       bottomShellLayers: BAMBU_PROFILE_06.bottomShellLayers,
@@ -2281,7 +2282,7 @@
           }
           var inSheet = g.isEmpty(sheetCs) ? g.empty() : g.offset(g.inter(P.S[j], sheetCs), -(o.outerWallWidthMm * 1.0));
           if (!g.isEmpty(inSheet) || (byDepth && REGIONAL_PLATE && !g.isEmpty(sheetCs) && g.parts(g.inter(P.S[j], sheetCs)).some(function (pp) { return pp.area() >= THIN_SLAB_MIN_MM2 && g.polys(pp).length === 1; }))) {      /* a slab narrower than the wall's inset has no inside, but its loop is still Bambu's */
-            var wI = o.infillWidthMm, sI = spacingOf(wI, P.layers[j].h || 0.2), aD = (o.infillDirectionDeg || 45) * Math.PI / 180, aJ = (j % 2 === 0) ? aD : aD + Math.PI / 2;
+            var wI = o.supportWidthMm > 0 ? o.supportWidthMm : o.infillWidthMm, sI = spacingOf(wI, P.layers[j].h || 0.2), aD = (o.infillDirectionDeg || 45) * Math.PI / 180, aJ = (j % 2 === 0) ? aD : aD + Math.PI / 2;
             var hullS = g.polys(g.offset(inSheet, wI / 2 + 1e-4));
             /* the sheet is the layer's only fill there: a fill the support's own shells laid inside it (the bottom shell of a sheet's first layer, which stands on a
                hollow tree) is the same ground twice - a transition layer with double the lines. The walls stay. */

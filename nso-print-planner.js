@@ -198,6 +198,7 @@
       outerWallWidthMm: num(config, 'outer_wall_line_width', 0.42),
       innerWallWidthMm: num(config, 'inner_wall_line_width', 0.42),
       infillWidthMm: num(config, 'sparse_infill_line_width', 0.42),
+      supportWidthMm: num(config, 'support_line_width', 0.42),
       wallLoops: num(config, 'wall_loops', 2),
       topShellLayers: num(config, 'top_shell_layers', 3),
       bottomShellLayers: num(config, 'bottom_shell_layers', 3),
