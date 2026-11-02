@@ -872,6 +872,7 @@
   var REGION_GROW_MM = 0.3;
   var REGION_ANGLE_REF = 35, REGION_ANGLE_SPAN = 5;   /* the growth and the drop below are Bambu's 30 deg against our 35: at 35 deg the footprint's rim is already out to where Bambu's is (none), at 30 and under, all of it */
   var REGION_BOWL_MM = 0.1;   /* a footprint whose rim stands this much above its mean is a bowl (a sphere's underside), not a cavity's ceiling */
+  var REGION_CREST_MIN_MM = 3, REGION_CREST_MAX_W_MM = 0.9;   /* a band with nothing laid whose mask is this long and no wider than this is a ridge's crest: one line along it */
   var REGION_TALL_DROP_MM = 0.08;
   var REGION_TIP_NEAR_MM = 0.5;   /* a tip's contact this near a footprint's edge is the footprint's */
   var REGION_MARGIN_MM = 0.02;    /* the region plate's cells lie this far in from the footprint's edge (the face's own edge: the plate may run to it; it was 0.1, which left a band 0.15 mm wide bare all round a 1 - 2 mm rim and the tails of the Negative Spheres' patches); its first loop is the edge of that, a wall's centre ~0.1 mm in */
@@ -1930,6 +1931,36 @@
             paths = pl.loops.map(function (l) { return l.ring; }).concat(pl.lines, pl.thin);
             ex2 = RL.extrudeFlat(paths, { width: o.width, height: thk, baseZ: zb });
             if (ex2.ok) break;
+          }
+          /* THE CREST OF A RIDGE: the top band of a plane that rises along its length is a strip a fraction of a line wide (the Oblique's 1.8 mm2, 0.2 mm across, 8 mm long), which
+             the smoothing that traces the others eats whole - and Bambu still lays its hairpin there. A band with nothing laid and a long thin mask gets one line along its axis. */
+          if (pl && !pl.loops.length && !pl.thin.length && !pl.lines.length && Mraw) {
+            var cn = 0, cx = 0, cy = 0;
+            for (var qc = 0; qc < N; qc++) if (Mraw[qc]) { cn++; cx += qc % nx; cy += (qc - qc % nx) / nx; }
+            if (cn >= 12) {
+              cx /= cn; cy /= cn;
+              var sxx = 0, syy = 0, sxy = 0;
+              for (var qc2 = 0; qc2 < N; qc2++) if (Mraw[qc2]) { var dxc = qc2 % nx - cx, dyc = (qc2 - qc2 % nx) / nx - cy; sxx += dxc * dxc; syy += dyc * dyc; sxy += dxc * dyc; }
+              var thc = 0.5 * Math.atan2(2 * sxy, sxx - syy), ux = Math.cos(thc), uy = Math.sin(thc), pmin = Infinity, pmax = -Infinity, qmin = Infinity, qmax = -Infinity;
+              for (var qc3 = 0; qc3 < N; qc3++) if (Mraw[qc3]) { var dx3 = qc3 % nx - cx, dy3 = (qc3 - qc3 % nx) / nx - cy, pa = dx3 * ux + dy3 * uy, pb = -dx3 * uy + dy3 * ux; if (pa < pmin) pmin = pa; if (pa > pmax) pmax = pa; if (pb < qmin) qmin = pb; if (pb > qmax) qmax = pb; }
+              var lenC = (pmax - pmin) * CELLS, wC = (qmax - qmin + 1) * CELLS;
+              if (lenC >= REGION_CREST_MIN_MM && wC <= REGION_CREST_MAX_W_MM) {
+                var trim = o.width / 2 / CELLS, a0 = pmin + trim, a1 = pmax - trim;
+                /* a line is wider than the strip: it is moved toward the higher side of the face (where the part is further), by the difference of half-widths */
+                var vx = -uy, vy = ux, sPlus = 0, sMinus = 0;
+                for (var sg = 2; sg <= 6; sg++) {
+                  var ip = Math.round(cx + vx * sg), jp = Math.round(cy + vy * sg), im = Math.round(cx - vx * sg), jm = Math.round(cy - vy * sg);
+                  if (ip >= 0 && ip < nx && jp >= 0 && jp < ny) sPlus += S[jp * nx + ip];
+                  if (im >= 0 && im < nx && jm >= 0 && jm < ny) sMinus += S[jm * nx + im];
+                }
+                var shiftC = Math.max(0, (o.width - wC) / 2) / CELLS * (sPlus >= sMinus ? 1 : -1);
+                var crest = [[ox + (cx + a0 * ux + vx * shiftC) * CELLS, oy + (cy + a0 * uy + vy * shiftC) * CELLS], [ox + (cx + a1 * ux + vx * shiftC) * CELLS, oy + (cy + a1 * uy + vy * shiftC) * CELLS]];
+                var exC = RL.extrudeFlat([crest], { width: o.width, height: thk, baseZ: zb });
+                var cOK = exC.ok;
+                if (cOK) { var sC = joinSoups([exC.tris]), rC = o.gap + 0.1; for (var bC = 0; bC < obstacles.length && cOK; bC++) { var ddC = exactDistance(sC, exactVs(bC, rC), rC, beat); if (ddC.mm < o.gap - 1e-5) cOK = false; } }      /* the line keeps the gap, or the plate would be refused whole */
+                if (cOK) { pl = { loops: [], lines: [], thin: [crest], slab: false }; paths = [crest]; ex2 = exC; }
+              }
+            }
           }
           var exLoops = ex2 && ex2.ok && pl.lines.length ? RL.extrudeFlat(pl.loops.map(function (l) { return l.ring; }).concat(pl.thin), { width: o.width, height: thk, baseZ: zb }) : ex2;
           if (!pl.loops.length && !pl.thin.length && !pl.lines.length) continue;
