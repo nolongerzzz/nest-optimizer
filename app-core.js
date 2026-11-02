@@ -269,6 +269,7 @@ const UNDO_REPLACE_LABEL = {
   skinReplace: 'Undo: Skin reverted',
   textureReplace: 'Undo: Texture reverted',
   carveReplace: 'Undo: Carve reverted',
+  notchReplace: 'Undo: Notch reverted',
   punchReplace: 'Undo: Punch reverted',
   textReplace: 'Undo: Text reverted',
   weaveReplace: 'Undo: Weave reverted',
@@ -3388,7 +3389,7 @@ function endMoveDrag() {
    centre) - so the blade follows the pointer along its axis whether it lies
    flat or stands on end (a horizontal plane at the piece's centre, the old
    drag plane, holds a standing piece's axis only edge-on). */
-function cutTFromPointer(hitWorld) {
+function cutTFromPointer(hitWorld, hit) {
   const m = getActiveModel();
   const f = m ? cutFrame(m) : null;
   if (!f || !f.mesh) return;
@@ -3400,6 +3401,11 @@ function cutTFromPointer(hitWorld) {
     local = hitWorld.clone().applyMatrix4(toLocal);
     // A drag that follows reads the pointer at the depth the click landed.
     state.cutDragFrom = local.clone();
+    // Where the click landed and which way that face looks, in the piece's
+    // frame: a SIZED blade anchors here and goes in against that face
+    // (app-cut.js, cutBladeSpec). The full blade ignores it.
+    state.cutBladeAt = { modelId: m.id, local: local.clone(),
+      normal: hit && hit.face && hit.face.normal ? hit.face.normal.clone() : null };
   } else {
     if (state.raycaster && state.camera) state.raycaster.setFromCamera(state.pointer, state.camera);
     const ray = state.raycaster.ray;
@@ -4069,7 +4075,7 @@ function onCanvasPointerDown(event) {
           // piece's length; holding the button drags it along.
           state.cutDragging = true;
           if (state.controls) state.controls.enabled = false;
-          cutTFromPointer(modelHits[0].point);
+          cutTFromPointer(modelHits[0].point, modelHits[0]);
           event.stopPropagation();
           return;
         }
@@ -4112,7 +4118,7 @@ function onCanvasPointerDown(event) {
           if (state.cutTool === 'crop') { event.stopPropagation(); return; }
           state.cutDragging = true;
           if (state.controls) state.controls.enabled = false;
-          cutTFromPointer(modelHits[0].point);
+          cutTFromPointer(modelHits[0].point, modelHits[0]);
           event.stopPropagation();
           return;
         }

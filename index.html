@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=68592055" />
+  <link rel="stylesheet" href="styles.css?v=770a5401" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -617,6 +617,22 @@
               <button id="btn-cut-nudge-p" class="btn btn-secondary" type="button" aria-label="Blade 0.1 mm toward the high end" title="0.1 mm toward the high end (Shift: 1 mm)">→</button>
               </div>
               <p id="cut-readout" class="cut-readout">—</p>
+              <!-- Blade: Full is the plane that splits the piece (the default). Sized is a
+                   box - width, depth, kerf - that takes only its own volume out: cut between
+                   things, or a notch into a face (nso_notch.js, app-cut.js cutNotchAt). -->
+              <div class="cut-blade">
+              <div class="edit-row cut-blade-mode" role="group" aria-label="Blade size">
+              <button id="btn-cut-blade-full" class="btn btn-secondary" type="button" aria-pressed="true"
+                      title="Full blade: a plane across the whole piece. It splits everything in its path, all the way through, with no kerf.">Full blade</button>
+              <button id="btn-cut-blade-sized" class="btn btn-secondary" type="button" aria-pressed="false"
+                      title="Sized blade: a box of your width, depth and kerf. Click a face to put it there; it goes in against that face and takes out only its own volume - between two things, or a notch that stops short of the far side.">Sized blade</button>
+              </div>
+              <div class="edit-row cut-blade-fields" id="cut-blade-fields" hidden>
+              <label title="How wide the blade is across the cut (mm)">Width <input type="number" id="cut-blade-width" class="cut-no-spin" min="0.2" max="1000" step="0.5" value="10" aria-label="Blade width, mm"></label>
+              <label title="How far the blade goes into the piece from the face you clicked (mm). Less than the piece is thick and it stops short of the far side.">Depth <input type="number" id="cut-blade-depth" class="cut-no-spin" min="0.2" max="1000" step="0.5" value="3" aria-label="Blade depth, mm"></label>
+              <label title="The blade's thickness: the width of the slot it leaves (mm). The floor is 0.2.">Kerf <input type="number" id="cut-blade-kerf" class="cut-no-spin" min="0.2" max="1000" step="0.1" value="1" aria-label="Blade kerf, mm"></label>
+              </div>
+              </div>
               <button id="btn-cut" class="btn btn-cut" type="button"
                       title="Split the piece at the blade: two pieces that meet exactly at the plane and add back to the original - no kerf. One Undo puts it back.">Cut</button>
               <button id="btn-cut-right-side-out" class="btn btn-secondary" type="button" hidden
@@ -2187,6 +2203,7 @@
   <script src="nso_skin.js?v=e0cfc361"></script>
   <script src="nso_skin_patch.js?v=4b2304fa"></script>
   <script src="nso_carve.js?v=a47e16e3"></script>
+<script src="nso_notch.js?v=8c41b7d6"></script>
   <script src="nso_seat_surface.js?v=293d7ca2"></script>
   <script src="nso_thickness.js?v=165379d6"></script>
   <script src="nso_hollow.js?v=9af04282"></script>
@@ -2248,7 +2265,7 @@
   <script src="nso-helpers.js?v=9c476e39"></script>
   <script src="nso-recent.js?v=f03d6f13"></script>
   <script src="nso-bounds.js?v=778acac4"></script>
-  <script src="app-core.js?v=f899d4be"></script>
+  <script src="app-core.js?v=13fdd73b"></script>
   <!-- Up to six plates (beds): the active one is state.models / state.placed, the rest are kept beside it. docs/BEDS.md. -->
   <script src="app-beds.js?v=3d221bc4"></script>
 
@@ -2256,7 +2273,7 @@
 
 
 
-  <script src="app-cut.js?v=f2270e19"></script>
+  <script src="app-cut.js?v=142ea359"></script>
   <script src="app-finish.js?v=e595107e"></script>
   <script src="app-sculpt.js?v=f522aee3"></script>
   <script src="app-extend.js?v=e24e3562"></script>
@@ -2323,7 +2340,7 @@
   <script src="app-stock.js?v=91def76f"></script>
   <script src="app-assemble.js?v=60984bfb"></script>
   <script src="app-sel-outline.js?v=c1a5b4df"></script>
-  <script src="app-join.js?v=b09e267d"></script>
+  <script src="app-join.js?v=f9860f3a"></script>
   <script src="app-center-lock.js?v=ee95c074"></script>
   <script src="app-oversize-washer.js?v=a445c3ff"></script>
   <script src="app-join-triple.js?v=95a9c48a"></script>

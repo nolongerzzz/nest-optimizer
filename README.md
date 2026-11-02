@@ -126,6 +126,11 @@ Smart build-plate packing for 3D printing.
   1° a press (Shift 0.1°, Alt 5°; hold to repeat).
   **Cut** is a clean split: the two halves meet exactly at the plane and add
   back to the original - "4 | 4", no kerf. One Undo puts it back.
+  **Sized blade** (the Blade row under the slider) swaps the plane for a box -
+  **Width**, **Depth**, **Kerf** - that takes out only its own volume: cut
+  *between* things without touching the rest of the blade's path, or notch
+  *into* a face without going through. Click the face to put it there; it goes
+  in against that face. See [docs/CUT-BLADE.md](docs/CUT-BLADE.md).
 - **Crop** (its own card, under Cut) takes a middle section out of a piece: set
   the box by two distances along the cut axis (or tick **Box** and drag it on
   the piece), press Crop, and the slab inside the box is removed, the far part

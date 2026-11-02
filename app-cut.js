@@ -421,7 +421,9 @@ function getCutPlaneLocal(model) {
                 t: mm / f.span, origin: f.origin, lo: f.lo, hi: f.hi, localBox: f.bbox,
                 deg: f.deg, bevel: f.bevel, turn: f.turn, frame: f.back, base: f.base || 0,
                 /* the travel line in the world, for parting the halves along it */
-                normalWorld: f.mesh ? f.normal.clone().transformDirection(f.mesh.matrixWorld) : null };
+                normalWorld: f.mesh ? f.normal.clone().transformDirection(f.mesh.matrixWorld) : null,
+                /* the plate vertical in the cut frame (a sized blade comes down along it) */
+                upCut: f.turn ? f.up.clone().transformDirection(f.turn) : f.up.clone() };
   if (f.turn) {
     const b = f.bbox, c = new THREE.Vector3(), box = new THREE.Box3();
     for (let i = 0; i < 8; i++) {
@@ -430,7 +432,66 @@ function getCutPlaneLocal(model) {
     }
     out.bbox = box;
   }
+  out.blade = cutBladeSpec(out);
   return out;
+}
+
+// ===================== The sized blade =====================
+// The full blade (the default) is a plane: it splits whatever is in its path,
+// through, with no kerf. state.cutBlade = { sized, width, depth, kerf } turns
+// it into a box (nso_notch.js): `width` across, `depth` in, `kerf` thick along
+// the plane's normal. It cuts only what that box holds, and is subtracted, not
+// split - one piece with a slot (or a notch) in it. Where it sits is the last
+// click: state.cutBladeAt, the click in the piece's frame and the face it
+// landed on. The blade goes in against that face; with no click yet it comes
+// down from the top of the section, centred.
+function cutBladeState() {
+  if (!state.cutBlade) state.cutBlade = { sized: false, width: NSO_Notch.DEFAULTS.width,
+                                          depth: NSO_Notch.DEFAULTS.depth, kerf: NSO_Notch.DEFAULTS.kerf };
+  return state.cutBlade;
+}
+
+/** The sized blade for the cut frame `info` (getCutPlaneLocal), or null when
+    the full blade is on: its box in the cut frame, the way it enters, and a
+    `key` that changes when the blade's shape or place in the plane changes
+    (not when it slides along the plane's normal). */
+function cutBladeSpec(info) {
+  const b = state.cutBlade;
+  if (!b || !b.sized || typeof NSO_Notch === 'undefined' || !info || !info.upCut) return null;
+  const AX = ['x', 'y', 'z'];
+  const k = AX.indexOf(info.axis);
+  const m = getActiveModel();
+  const at = state.cutBladeAt && m && state.cutBladeAt.modelId === m.id ? state.cutBladeAt : null;
+  let p = at ? at.local.clone() : null;
+  let nrm = at && at.normal ? at.normal.clone() : null;
+  if (info.turn) {
+    if (p) p.applyMatrix4(info.turn);
+    if (nrm) nrm.transformDirection(info.turn);
+  }
+  const entry = NSO_Notch.entryFor(k, nrm ? nrm.toArray() : null, info.upCut.toArray());
+  const C = info.bbox.getCenter(new THREE.Vector3());
+  const dName = AX[entry.dAxis];
+  const wCentre = p ? p.getComponent(entry.wAxis) : C.getComponent(entry.wAxis);
+  let dStart = p ? p.getComponent(entry.dAxis) : (entry.sign < 0 ? info.bbox.max[dName] : info.bbox.min[dName]);
+  /* Where the surface is AT THE PLANE, not at the click. The plane need not pass through the click: a
+     bevel pivots it about the piece's centre line, a mitre or the slider moves it. On a face that
+     stands square to the cut frame that changes nothing; on a leaned one the surface is at another
+     depth over there, and a blade started from the click's depth ends up buried (a void, not a
+     notch). The face through the click is N.x = N.p; the surface at the plane is where that meets
+     it, found along the entry axis. The entry axis was chosen for N leaning on it, so N[d] is not small. */
+  if (p && nrm) {
+    const nd = nrm.getComponent(entry.dAxis);
+    if (Math.abs(nd) > 1e-6) dStart = p.getComponent(entry.dAxis) - nrm.getComponent(k) * (info.plane - p.getComponent(k)) / nd;
+  }
+  const s = NSO_Notch.sizes(b);
+  const box = NSO_Notch.bladeBox({ axis: k, dAxis: entry.dAxis, wAxis: entry.wAxis, sign: entry.sign,
+    plane: info.plane, wCentre: wCentre, dStart: dStart, width: s.width, depth: s.depth, kerf: s.kerf });
+  const r = v => Math.round(v * 1000) / 1000;
+  const lat = [0, 1, 2].filter(i => i !== k);
+  const key = k + ':' + s.kerf + ':' + lat.map(i => r(box.min[i]) + '~' + r(box.max[i])).join(':');
+  const up = info.upCut.getComponent(entry.dAxis);
+  const from = Math.abs(up) > 0.7 ? (entry.sign * up < 0 ? 'down from the top' : 'up from below') : 'in from the side';
+  return { box: box, entry: entry, sizes: s, key: key, from: from, wCentre: wCentre, dStart: dStart };
 }
 
 /** For Cut: the plane the blade is drawn at - the same frame, the same number. */
@@ -602,7 +663,13 @@ function syncCutUI() {
   }
   // A clean split: the two sides are the plane's distance from each end and
   // add back to the piece. No kerf comes off.
-  if (readout) {
+  if (readout && info.blade) {
+    const bl = info.blade;
+    readout.textContent =
+      'SIZED BLADE @ ' + mm.toFixed(1) + ' mm (kerf ' + bl.sizes.kerf + ') - ' + bl.sizes.width + ' wide, ' +
+      bl.sizes.depth + ' deep, ' + bl.from + ' (' + axis.toUpperCase() + ')' +
+      (info.deg ? ', mitre ' + info.deg + '°' : '') + (info.bevel ? ', bevel ' + info.bevel + '°' : '');
+  } else if (readout) {
     readout.textContent =
       'RED LINE @ ' + mm.toFixed(1) + ' mm (no kerf) -> ' +
       mm.toFixed(1) + ' mm | ' + (span - mm).toFixed(1) + ' mm  (' + axis.toUpperCase() + ')' +
@@ -691,6 +758,8 @@ function openCutter(tool) {
   state.cutMiterDeg = 0;
   state.cutBevelDeg = 0;
   state.cutPlumb = null;
+  state.cutBlade = null;
+  state.cutBladeAt = null;
   state.editId = null;
   state.selectedIndex = -1;
   if (state.controls) state.controls.enabled = true;
@@ -698,6 +767,7 @@ function openCutter(tool) {
   state.previewMesh = null;
   if (typeof clearSelectionOutline === 'function') clearSelectionOutline();
   if (typeof paintJoinHighlights === 'function') paintJoinHighlights();
+  syncCutBladeUI();
   updateCutterUI();
   updateEditSize();
   const p = keep >= 0 && state.placed ? state.placed[keep] : null;
@@ -1041,7 +1111,42 @@ function cutOverlay(obj, pickable) {
   return obj;
 }
 
+/* The sized blade as a box in the helper: kerf thick, width across, depth in
+   (with the 1 mm it starts clear of the face), where cutBladeSpec put it. The
+   group sits at the section's centre with the plane's coordinate, so the box
+   is offset from there, and centred on the plane along its normal. */
+function cutBuildSizedBlade(group, f) {
+  const AX = ['x', 'y', 'z'];
+  const bl = f.blade, box = bl.box, k = AX.indexOf(f.axis);
+  const C = f.bbox.getCenter(new THREE.Vector3());
+  const size = new THREE.Vector3(box.max[0] - box.min[0], box.max[1] - box.min[1], box.max[2] - box.min[2]);
+  const mid = new THREE.Vector3((box.min[0] + box.max[0]) / 2, (box.min[1] + box.max[1]) / 2, (box.min[2] + box.max[2]) / 2);
+  const off = mid.clone().sub(C);
+  off.setComponent(k, 0);
+  const geo = new THREE.BoxGeometry(size.x, size.y, size.z);
+
+  const hit = new THREE.Mesh(new THREE.BoxGeometry(size.x + 12, size.y + 12, size.z + 12),
+    new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide }));
+  hit.userData.cutHandle = true;
+  hit.userData.skipXray = true;
+  const blade = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+    color: CUT_BLADE_FILL, transparent: true, opacity: CUT_BLADE_FILL_OPACITY,
+    side: THREE.DoubleSide, depthTest: false, depthWrite: false
+  }));
+  blade.userData.cutBlade = true;
+  cutOverlay(blade, true);
+  const frame = cutOverlay(new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({
+    color: CUT_BLADE_COLOR, transparent: true, opacity: 1, depthTest: false, depthWrite: false
+  })), true);
+  frame.userData.cutFrame = true;
+  [hit, blade, frame].forEach(o => { o.position.copy(off); group.add(o); });
+  group.userData.cutAxis = f.axis;
+  group.userData.cutAcross = cutBladeAcross(f.bbox);
+  group.userData.cutSig = bl.key;
+}
+
 function cutBuildBlade(group, f) {
+  if (f.blade) { cutBuildSizedBlade(group, f); return; }
   const AX = ['x', 'y', 'z'];
   const k = AX.indexOf(f.axis);
   const u = (k + 1) % 3, v = (k + 2) % 3;          // the two directions across the cut
@@ -1155,7 +1260,7 @@ function cutPlaceLine(group, info, mesh) {
   const g = group.children.find(c => c.name === 'cutPlateLine');
   if (!g) return;
   const w = cutPlateLineWorld(info, mesh);
-  g.visible = !!w;
+  g.visible = !!w && !info.blade;       // a sized blade is drawn whole; the full-width strip would lie
   group.userData.plateLine = w ? { a: w.a.toArray(), b: w.b.toArray(), across: w.across.toArray(), mm: w.mm } : null;
   if (!w) return;
   const toGroup = new THREE.Matrix4().copy(group.matrixWorld).invert();
@@ -1230,6 +1335,7 @@ function updateCutHelper() {
   const want = cutBladeAcross(info.bbox);
   const have = state.cutHelper.userData.cutAcross;
   if (state.cutHelper.userData.cutAxis !== info.axis || !have ||
+      (state.cutHelper.userData.cutSig || '') !== (info.blade ? info.blade.key : '') ||
       want.some((d, i) => Math.abs(d - have[i]) > 1e-6)) {
     state.previewMesh = mesh;
     buildCutHelper();
@@ -3018,6 +3124,149 @@ function cutSplitAt(model, info) {
   }
   const back = g => cutDisplayGeometry(cutTurnDisplaySoup(displaySoupOf(g), info.frame));
   return { left: back(pair.left), right: back(pair.right), engine: 'display' };
+}
+
+// ===================== The sized blade: card and cut =====================
+/** The Blade rows of the Cut card, read off state.cutBlade. */
+function syncCutBladeUI() {
+  if (typeof document === 'undefined') return;
+  const b = state.cutBlade || { sized: false };
+  const full = document.getElementById('btn-cut-blade-full');
+  const sized = document.getElementById('btn-cut-blade-sized');
+  const fields = document.getElementById('cut-blade-fields');
+  if (full) full.setAttribute('aria-pressed', b.sized ? 'false' : 'true');
+  if (sized) sized.setAttribute('aria-pressed', b.sized ? 'true' : 'false');
+  if (fields) fields.hidden = !b.sized;
+  [['cut-blade-width', 'width'], ['cut-blade-depth', 'depth'], ['cut-blade-kerf', 'kerf']].forEach(function (p) {
+    const el = document.getElementById(p[0]);
+    if (el && b[p[1]] != null && document.activeElement !== el) el.value = String(b[p[1]]);
+  });
+  const btn = document.getElementById('btn-cut');
+  if (btn) btn.title = b.sized
+    ? 'Cut the sized blade\'s slot out of the piece: only what the blade box holds comes out, kerf and all. One piece with a notch in it (or the pieces it severs). One Undo puts it back.'
+    : 'Split the piece at the blade: two pieces that meet exactly at the plane and add back to the original - no kerf. One Undo puts it back.';
+}
+
+function cutBladeRefresh() {
+  syncCutBladeUI();
+  syncCutUI();
+  updateCutHelper();
+}
+
+function cutWireBladeControls() {
+  if (typeof document === 'undefined') return;
+  const full = document.getElementById('btn-cut-blade-full');
+  const sized = document.getElementById('btn-cut-blade-sized');
+  if (!full || !sized || full.dataset.nsoWired === '1') return;
+  full.dataset.nsoWired = '1';
+  full.addEventListener('click', function () { cutBladeState().sized = false; cutBladeRefresh(); });
+  sized.addEventListener('click', function () { cutBladeState().sized = true; cutBladeRefresh(); });
+  [['cut-blade-width', 'width'], ['cut-blade-depth', 'depth'], ['cut-blade-kerf', 'kerf']].forEach(function (p) {
+    const el = document.getElementById(p[0]);
+    if (!el) return;
+    el.addEventListener('input', function () {
+      const v = Number(el.value);
+      if (!isFinite(v) || v <= 0) return;           // mid-typing: keep the last good blade
+      cutBladeState()[p[1]] = v;
+      syncCutUI();
+      updateCutHelper();
+    });
+    // A blade the card shows is the blade that cuts: leaving the box snaps it to what can be built.
+    el.addEventListener('change', function () {
+      const s = NSO_Notch.sizes(cutBladeState());
+      Object.assign(cutBladeState(), s);
+      cutBladeRefresh();
+    });
+  });
+  syncCutBladeUI();
+}
+
+let cutNotchBusy = false;
+
+/** Cut with the sized blade: its box (cutBladeSpec) subtracted from the piece
+    through the manifold kernel, welded as Carve's results are, committed as one
+    Undo step. Returns what happened, for the checks. */
+async function cutNotchAt(m, info) {
+  if (cutNotchBusy) return null;
+  const say = function (msg, bad) { setStatus(msg, !!bad); };
+  const why = NSO_Notch.refusal(state.cutBlade);
+  if (why) { say('Cut not made: ' + why + '. The piece is unchanged.', true); return { ok: false, reason: why }; }
+  const placed = (state.placed || []).find(function (p) { return p && p.sourceId === m.id && p.mesh; });
+  if (!placed) { say('Cut not made: that piece is not on the plate', true); return { ok: false, reason: 'not placed' }; }
+  cutNotchBusy = true;
+  const gone = [];
+  try {
+    // A piece whose shells overlap is cut as those shells merged into one solid (nso-helpers.js, nsoOverlap).
+    const sol = (typeof nsoOverlap !== 'undefined' && nsoOverlap)
+      ? await nsoOverlap.solid(m, { geometry: placed.mesh.geometry, mesh: placed.mesh }) : { ok: true, merged: false };
+    if (!sol.ok) {
+      say(sol.cancelled ? 'Cut stopped - piece unchanged' : 'Cut not made: ' + sol.reason + '. The piece is unchanged.', !sol.cancelled);
+      return { ok: false, reason: sol.reason };
+    }
+    placed.mesh.updateMatrixWorld(true);
+    const hull = sol.merged ? sol.world : meshToWorldSoup(placed.mesh);
+    const world = NSO_Notch.transformSoup(NSO_Notch.boxSoup(info.blade.box), cutWorldMatrix(info, placed.mesh).elements);
+
+    let wasm;
+    try { wasm = await NSO_CSG.load(); }
+    catch (err) { say('Cut not made: the CSG kernel failed to load - ' + ((err && err.message) || err), true); return { ok: false, reason: 'kernel' }; }
+    const keep = function (x) { gone.push(x); return x; };
+    const mA = keep(NSO_CSG.soupToManifold(wasm, hull));
+    const mB = keep(NSO_CSG.soupToManifold(wasm, world));
+    if (mA.status() !== 'NoError' || mB.status() !== 'NoError') {
+      say('Cut not made: the piece is not a closed solid the kernel can cut (' + mA.status() + '). Run Check piece. The piece is unchanged.', true);
+      return { ok: false, reason: 'not solid' };
+    }
+    const inter = keep(mA.intersect(mB));
+    const intended = inter.volume();
+    if (!(intended > 1e-4)) {
+      say('Cut not made: the blade does not reach the piece here - move it onto the piece or make it deeper. The piece is unchanged.', true);
+      return { ok: false, reason: 'miss' };
+    }
+    const res = keep(mA.subtract(mB));
+    if (res.status() !== 'NoError' || !(res.volume() > 1e-4)) {
+      say('Cut not made: the cut would leave nothing. The piece is unchanged.', true);
+      return { ok: false, reason: 'empty' };
+    }
+    const removed = mA.volume() - res.volume();
+    const parts = res.decompose();
+    parts.forEach(keep);
+    const soup = NSO_CSG.manifoldToSoup(res);
+
+    // The kernel carries float32: a crossing on a face plane can come back as two vertices one ULP apart.
+    // Weld at the gate's 1e-4 so the piece is the mesh the checkers will see (docs/LOCAL-CARVE.md, 9b).
+    let welded = soup, dropped = 0;
+    if (typeof NSO_buildAdjacency === 'function' && typeof NSO_adjacencyToRaw === 'function') {
+      const adj = NSO_buildAdjacency(soup, { tol: 1e-4, rawTol: true });
+      if (adj && adj.ok && !adj.openEdges && !adj.nmEdges) { welded = NSO_adjacencyToRaw(adj); dropped = adj.droppedTris; }
+    }
+    const raw = displayGeometryToRawSoup(soupToCenteredGeo(welded));
+    const status = NSO_Notch.report({ width: info.blade.sizes.width, depth: info.blade.sizes.depth,
+      kerf: info.blade.sizes.kerf, removed: removed, shells: parts.length }) +
+      (dropped ? ' - welded away ' + dropped + ' seam sliver' + (dropped === 1 ? '' : 's') : '') +
+      (sol.merged && sol.note ? ' - ' + sol.note : '');
+    if (!NSO_sculptCommitRaw(m, raw, 'notchReplace', status)) {
+      say('Cut not made: could not commit the result', true);
+      return { ok: false, reason: 'commit failed' };
+    }
+    // The piece is a new mesh in a re-centred frame: the old click means nothing there.
+    state.cutBladeAt = null;
+    const now = (state.placed || []).find(function (p) { return p && p.sourceId === m.id && p.mesh; });
+    removeCutHelper();
+    state.previewMesh = now ? now.mesh : null;
+    if (state.cutterOpen && state.previewMesh) buildCutHelper();
+    updateEditSize();
+    if (typeof updateAdjustUI === 'function') updateAdjustUI();
+    if (typeof removeFaceHelper === 'function') removeFaceHelper();
+    updateCutterUI();
+    return { ok: true, removed: removed, intended: intended, shells: parts.length, trisOut: raw.length / 9, status: status };
+  } catch (err) {
+    say('Cut not made: ' + ((err && err.message) || err) + '. The piece is unchanged.', true);
+    return { ok: false, reason: String((err && err.message) || err) };
+  } finally {
+    gone.forEach(function (x) { try { x.delete(); } catch (e) { /* already gone */ } });
+    cutNotchBusy = false;
+  }
 }
 
 // ===================== Cut on an inside-out piece =====================

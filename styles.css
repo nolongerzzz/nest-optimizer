@@ -1285,6 +1285,14 @@ select:focus, input:focus {
 .cut-bevel-top { fill: #ffc83d; }
 .cut-bevel-dart { fill: #ffc83d; stroke: #1a1d21; stroke-width: 1; cursor: pointer; }
 
+/* Cut card: the sized blade's mode switch and its three sizes */
+.cut-blade { margin-top: 6px; }
+.cut-blade-mode .btn { flex: 1 1 0; }
+.cut-blade-mode .btn[aria-pressed="true"] { outline: 1px solid var(--accent, #38bdf8); }
+.cut-blade-fields { gap: 6px; margin-top: 6px; }
+.cut-blade-fields[hidden] { display: none; }
+.cut-blade-fields label { display: flex; flex-direction: column; flex: 1 1 0; min-width: 0; font-size: 11px; gap: 2px; }
+.cut-blade-fields input[type="number"] { width: 100%; min-width: 0; box-sizing: border-box; }
 .cut-readout {
   font-size: 12px;
   color: #f87171;

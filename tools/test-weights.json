@@ -93,6 +93,8 @@
     "camera:leash": {"weight":224,"note":""},
     "carve:drag": {"weight":103600,"note":""},
     "carve:test": {"weight":14500,"note":""},
+    "notch:drive": {"weight":12659,"note":"measured with PW_CHROMIUM, 35 gates"},
+    "notch:test": {"weight":104,"note":"measured"},
     "cavity:thickwall": {"weight":89,"note":""},
     "centerlock:test": {"weight":21900,"note":""},
     "ci:failures": {"weight":600,"note":"estimate: 0.3 s on the cloud box x 1.7, rounded up (ci-self-hosted)"},

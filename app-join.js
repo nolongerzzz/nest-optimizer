@@ -2599,6 +2599,9 @@ function cutActiveModel(opts) {
     setStatus('Keep >= ' + MIN_CUT_SIDE_MM + ' mm on each side of the red plane', true);
     return;
   }
+  // A sized blade (Cut card, "Sized blade") is not a split: its box comes out
+  // of the piece (cutNotchAt, app-cut.js) and the piece stays one piece.
+  if (info.blade) { cutNotchAt(m, info); return; }
   // A clean split at the one plane (cutSplitAt, app-cut.js): the halves meet
   // exactly and add back to the piece - no kerf band comes out.
   // Turned right-side-out only on the click, only for the piece it was
@@ -3390,6 +3393,7 @@ const btnFrameView = document.getElementById('btn-frame-view');
   const nudgeP = document.getElementById('btn-cut-nudge-p');
   if (nudgeP) nudgeP.addEventListener('click', (ev) => setCutMm(getCutMm() + nudgeStep(ev)));
   cutWireMiterDial();
+  cutWireBladeControls();
   updateAdjustUI();
   updateCutterUI();
 }
