@@ -1917,6 +1917,7 @@
   // Supports - a support object prints as support, and holds its host up
   // ===========================================================================
 
+  var DOME_HOLE_MM2 = 8.0;   /* the largest hole of a dome's cup filled for its transition disc */
   var SUPPORT_HOLE_FILL_MM2 = 2.0;   /* a hole in a support's section smaller than this is filled (the dome apex's ring) */
 
   /**
@@ -2321,8 +2322,28 @@
             }
             sheetCs = g.isEmpty(sheetCs) ? stairCs : g.union(sheetCs, stairCs);
           }
-          var inSheet = g.isEmpty(sheetCs) ? g.empty() : g.offset(g.inter(P.S[j], sheetCs), -(o.outerWallWidthMm * 1.0));
-          if (!g.isEmpty(inSheet) || (byDepth && REGIONAL_PLATE && !g.isEmpty(sheetCs) && g.parts(g.inter(P.S[j], sheetCs)).some(function (pp) { return pp.area() >= THIN_SLAB_MIN_MM2 && g.polys(pp).length === 1; }))) {      /* a slab narrower than the wall's inset has no inside, but its loop is still Bambu's */
+          /* THE DOME'S CUP: a support head under a dome is a hollow cup - a ring of section round a hole of a few mm2 - and Bambu's transition layer under the dome is a
+             disc across it. A hole of under DOME_HOLE_MM2 that lies wholly under the part within the transition's reach and not within the interface's (a hole under the
+             interface's reach is a tree head's, which stays open: Circular's, Sphere's) is filled for the plate. */
+          var Sj = P.S[j];
+          if (!g.isEmpty(Sj) && byDepth) {
+            var dropH = [], hTx = null, hIx = null, holeKeep = g.polys(Sj).filter(function (Q) {
+              var a2 = 0;
+              for (var q = 0; q < Q.length; q++) { var u = Q[q], v = Q[(q + 1) % Q.length]; a2 += u[0] * v[1] - v[0] * u[1]; }
+              var ar = -a2 / 2;
+              if (!(a2 < 0 && ar >= SUPPORT_HOLE_FILL_MM2 && ar < DOME_HOLE_MM2)) return true;
+              if (!hTx) { hTx = hostExCs(j, dTrEx(j)) || g.empty(); hIx = hostExCs(j, dInEx(j)) || g.empty(); }
+              var hole = g.of([Q.slice().reverse()], 'Positive');
+              if (g.area(g.inter(hole, hTx)) >= 0.8 * ar && g.area(g.inter(hole, hIx)) <= 0.2 * ar) { dropH.push(Q); return false; }
+              return true;
+            });
+            if (dropH.length) {
+              Sj = g.of(holeKeep, 'Positive');
+              sheetCs = g.union(sheetCs, g.of(dropH.map(function (Q) { return Q.slice().reverse(); }), 'Positive'));          /* the zone is the ring's too: its hole is the sheet's */
+            }
+          }
+          var inSheet = g.isEmpty(sheetCs) ? g.empty() : g.offset(g.inter(Sj, sheetCs), -(o.outerWallWidthMm * 1.0));
+          if (!g.isEmpty(inSheet) || (byDepth && REGIONAL_PLATE && !g.isEmpty(sheetCs) && g.parts(g.inter(Sj, sheetCs)).some(function (pp) { return pp.area() >= THIN_SLAB_MIN_MM2 && g.polys(pp).length === 1; }))) {      /* a slab narrower than the wall's inset has no inside, but its loop is still Bambu's */
             var wI = o.supportWidthMm > 0 ? o.supportWidthMm : o.infillWidthMm, sI = spacingOf(wI, P.layers[j].h || 0.2), aD = (o.infillDirectionDeg || 45) * Math.PI / 180, aJ = byDepth && REGIONAL_PLATE ? (stackIdx[j] === 0 ? FIRST_LAYER_DEG * Math.PI / 180 : (stackIdx[j] % 2 === 1 ? aD : aD + Math.PI / 2)) : (j % 2 === 0) ? aD : aD + Math.PI / 2;
             var hullS = g.polys(g.offset(inSheet, wI / 2 + 1e-4));
             /* the sheet is the layer's only fill there: a fill the support's own shells laid inside it (the bottom shell of a sheet's first layer, which stands on a
@@ -2343,7 +2364,7 @@
               var a0 = zArea(j), steady = false;
               [j - 1, j + 1].forEach(function (jj) { var a1 = zArea(jj); if (a1 > 0 && a0 > 0 && Math.abs(a1 - a0) <= 0.03 * a0) steady = true; });
               var loopIn = steady ? LOOP_IN_FLAT_MM : LOOP_IN_MM;
-              var inLoop = g.offset(g.inter(P.S[j], sheetCs), -loopIn);
+              var inLoop = g.offset(g.inter(Sj, sheetCs), -loopIn);
               hullS = g.polys(g.offset(inLoop, wI / 2 + 1e-4));
               var ZI = stI.length ? g.offset(g.unionAll(stI), w / 2) : g.empty(), ZT = stT.length ? g.offset(g.unionAll(stT), w / 2) : g.empty();
               var hIc = hostExCs(j, dInEx(j)), hTc = hostExCs(j, dTrEx(j));
@@ -2352,8 +2373,8 @@
               var Ireg = hIc && !g.isEmpty(ZI) ? g.inter(g.inter(g.offset(inLoop, -IFILL_IN_MM), ZI), hIc) : g.empty();
               var Zall = g.isEmpty(ZI) ? ZT : g.isEmpty(ZT) ? ZI : g.union(ZI, ZT);
               var Treg = hTc && !g.isEmpty(Zall) ? g.diff(g.inter(g.inter(inLoop, Zall), hTc), Ireg) : g.empty();
-              var slabI = hIc && !g.isEmpty(ZI) ? g.inter(g.inter(P.S[j], ZI), hIc) : g.empty();
-              var slabT = hTc && !g.isEmpty(Zall) ? g.diff(g.inter(g.inter(P.S[j], Zall), hTc), slabI) : g.empty();
+              var slabI = hIc && !g.isEmpty(ZI) ? g.inter(g.inter(Sj, ZI), hIc) : g.empty();
+              var slabT = hTc && !g.isEmpty(Zall) ? g.diff(g.inter(g.inter(Sj, Zall), hTc), slabI) : g.empty();
               /* a transition strip is filled where the slab it lies in is wider than 2 x TRANS_FILL_OPEN_MM (the Negative Spheres' ring, 1.8 - 2.3 mm: Bambu zig-zags it; the
                  Oblique's ribbon, under 1 mm: its loop alone) */
               /* ...a ribbon of transition (the Oblique's, one long thin strip) is its loop alone however wide; a ring's narrow strips (the Negative Spheres') are zig-zagged */
