@@ -650,17 +650,24 @@
      than read off `#menu-rotate.open` directly: Tilt and Move claim the same
      four arrows off their own menus, and the arbiter is what guarantees one
      press is answered once (app-input-mode.js has the whole story). */
-  function menuOwnsInput() {
+  function menuOwns() {
     if (window.nsoInputMode) return window.nsoInputMode.owns('menu-rotate');
     var d = document.getElementById('menu-rotate');
     return !!(d && d.open);
   }
+  /* The Cut card's "Rotate piece" box: the rings are drawn and grabbed while Cut stays open. Only the
+     rings - the keyboard stays with whoever owns it (Cut's dials take the arrows), so one press is
+     still answered once. */
+  function cutRings() {
+    return typeof state !== 'undefined' && !!(state.cutterOpen && state.cutTool !== 'crop' && state.cutRotate);
+  }
+  function menuOwnsInput() { return menuOwns() || cutRings(); }
 
   function onKeyDown(ev) {
     var k = KEYS[ev.key];
     if (!k) return;
     if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
-    if (!menuOwnsInput()) return;                  // the scope rule, in one line
+    if (!menuOwns()) return;                       // the scope rule, in one line (keys: the Rotate menu's alone)
     /* Text fields keep their arrows. A checkbox does not use them, and the
        ring boxes are exactly what has focus right after one is ticked - so
        they are let through, or adding a ring would deafen the keys. */
@@ -997,6 +1004,7 @@
     g.position.copy(ringCentre(p));
     g.updateMatrixWorld(true);
     var r = ringRadius(), q = p.mesh.quaternion.clone();
+    if (cutRings() && typeof updateCutHelper === 'function') { updateCutHelper(); if (typeof syncCutUI === 'function') syncCutUI(); }
     list.forEach(function (ring) {
       var F = frameOf(ring, q);
       /* A dragged ring's darts ride the piece under the pointer (moveDrag);

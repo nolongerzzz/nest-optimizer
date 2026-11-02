@@ -3785,7 +3785,8 @@ function onCanvasPointerDown(event) {
      because this is the code doing the claiming. */
   if (typeof nsoRotate !== 'undefined' && typeof state !== 'undefined' &&
       state.raycaster && state.camera && event.button === 0 &&
-      (typeof nsoInputMode === 'undefined' || !nsoInputMode || nsoInputMode.owns('menu-rotate'))) {
+      (typeof nsoInputMode === 'undefined' || !nsoInputMode || nsoInputMode.owns('menu-rotate') ||
+       (state.cutterOpen && state.cutTool !== 'crop' && state.cutRotate))) {
     var rotG = state.scene && state.scene.getObjectByName('nso-rotate-handles');
     if (rotG && rotG.visible && rotG.children.length) {
       setPointerFromEvent(event);
@@ -4048,7 +4049,7 @@ function onCanvasPointerDown(event) {
   // other half - and look past the blade's own (invisible, oversized) grab
   // sheet, which lies in front of much of the piece: a click there is a
   // click on the piece.
-  if (state.cutterOpen && state.modelGroup) {
+  if (state.cutterOpen && state.cutAdjust !== false && state.modelGroup) {
     const inBlade = o => { for (let n = o; n; n = n.parent) if (n === state.cutHelper) return true; return false; };
     const modelHits = state.raycaster.intersectObjects(state.modelGroup.children, true)
       .filter(h => !inBlade(h.object));
@@ -4083,8 +4084,8 @@ function onCanvasPointerDown(event) {
     }
   }
 
-  // Cutter plane drag - never orbit
-  if (state.cutHelper) {
+  // Cutter plane drag - never orbit (parked blade: Adjust blade off, the plate behaves as with Cut shut)
+  if (state.cutHelper && state.cutAdjust !== false) {
     const cutHits = state.raycaster.intersectObject(state.cutHelper, true);
     if (cutHits.length) {
       setOrbitFromPlate(false);
@@ -4113,7 +4114,7 @@ function onCanvasPointerDown(event) {
           event.stopPropagation();
           return;
         }
-        if (state.cutterOpen && hit && hit.sourceId != null) {
+        if (state.cutterOpen && state.cutAdjust !== false && hit && hit.sourceId != null) {
           if (hit.sourceId !== state.editId) selectPlaced(idx);
           if (state.cutTool === 'crop') { event.stopPropagation(); return; }
           state.cutDragging = true;

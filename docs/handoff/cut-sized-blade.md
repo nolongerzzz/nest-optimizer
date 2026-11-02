@@ -14,3 +14,25 @@ click's depth buried it (a void, "2 bodies", 24 mm^3 instead of 18). The anchor 
 about the vertical and could not show it - the bevel gate is what caught it.
 
 Known gaps (also in the write-up): no wall-thickness refusal (Carve has one), position is by click only, no pocket into a face parallel to the plane.
+
+
+### Second round (2026-11-02): strands, Notch mode, Adjust blade, Rotate piece
+
+Asked for after the owner loaded `Connector (string)` (a flat spiral of 3.7 mm round cord): a sized blade that takes the one strand under the click and
+not every turn of the spiral; a Notch mode (a nick in from the strand's edge, adjustable width/depth - the owner chose the nick over a groove running
+along the cord); a checkbox to isolate blade adjustments from other controls; and a rotate box at the top of the card so a piece can be turned while Cut
+is open. `nso_notch.js` gains `sectionClusters` / `nearestCluster` / `notchBox` (node-tested on a comb). `app-cut.js`: three blade modes, the strand in
+`cutBladeSpec`, the strand outlined in the helper, `cutSetAdjust` / `cutSetRotate`. `app-core.js`: the three places a click or drag moves the blade
+check `state.cutAdjust`; the ring grab is allowed under Cut when `state.cutRotate`. `app-rotate-handles.js`: rings drawn/grabbed under Cut, keys stay
+with the Rotate menu. New `tools/nso_cut_strand_drive_check.js` (`notch:strand-drive`, a generated spiral). `nso_wire_cut_redesign_test` lists the card's
+controls again.
+
+Found on the owner's file: subtracting the strand's own piece (blade n piece) from the piece left one edge shared by four triangles (a boolean on
+coincident faces; 0 non-manifold before, 1 after, at every tolerance, kernel status NoError). The blade, clipped a hair outside the strand, is subtracted
+instead: same volume, 0 bad edges. Also found: a click-to-strand pick measured to the outline's corners picks a neighbour on coarse meshes; it is now
+measured to the outline's segments.
+
+Wrong assumption corrected in testing: with Adjust blade off I had written that a drag moves the piece. The app refuses that while Cut is open
+("Cutter open - close cutter to move pieces"); the box now says only that a click selects and the blade stays put.
+
+Known gaps: no wall-thickness refusal; Notch is a nick across the strand, not a groove along it; position by click only.
