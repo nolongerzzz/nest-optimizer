@@ -130,6 +130,8 @@ function scoreOf(rep) {
     const vi = volumeIoU(ours, shifted); rows[nm].volIoU = vi && vi.iou; rows[nm].volOnlyOursMm3 = vi && vi.onlyOursMm3; rows[nm].volOnlyTheirsMm3 = vi && vi.onlyTheirsMm3;
     rows[nm].footIoU = fb + fa + fo ? fb / (fb + fa + fo) : null; rows[nm].footOnlyOursMm2 = fa; rows[nm].footOnlyTheirsMm2 = fo;
     rows[nm].gaps = { oursLacks: rep.gaps.aLacks.slice(0, 4), theirsLacks: rep.gaps.bLacks.slice(0, 2) };
+    // what Compare names beyond the totals: whole plate layers one side lacks, the stacks that sit high / low / big / small, hatch angle, specks
+    rows[nm].found = { loneRef: rep.lone.aLacks, loneOurs: rep.lone.bLacks, stacks: rep.stacks, angles: rep.angles, strayOurs: rep.strays.A, strayRef: rep.strays.B };
   }
   const f = (v, d) => v == null ? '   -  ' : v.toFixed(d == null ? 2 : d).padStart(6);
   const before = arg('--vs') && fs.existsSync(arg('--vs')) ? JSON.parse(fs.readFileSync(arg('--vs'), 'utf8')) : null;
@@ -138,6 +140,15 @@ function scoreOf(rep) {
     const r = rows[nm], b = before && before[nm];
     console.log(nm.padEnd(22) + f(r.volIoU) + '  ' + f(r.footIoU) + '  ' + f(r.plateIoU) + '    ' + f(r.lenRatio) + ' ' + f(r.mvRatio) + '   ' + f(r.z0Ours) + '/' + f(r.z0Theirs).trim().padEnd(6) + '   ' + f(r.treeIoU) + '   ' + f(r.treeLenRatio) +
                 (b ? '      ' + f(b.footIoU) + (b.footIoU != null && r.footIoU != null ? (r.footIoU - b.footIoU >= 0 ? '  +' : '  ') + (r.footIoU - b.footIoU).toFixed(2) : '') : ''));
+  });
+  // THE FINDINGS: one block per piece; nothing printed when a piece has none of them (--found for every line, otherwise the counts and the flagged stacks)
+  console.log('\nfindings (ref-only layers | ours-only layers | hatch angle off | specks ours/ref | stacks flagged):');
+  Object.keys(rows).forEach(nm => {
+    const F = rows[nm].found, bad = F.stacks.filter(q => q.flags.length);
+    console.log(nm.padEnd(22) + String(F.loneRef.length).padStart(4) + String(F.loneOurs.length).padStart(6) + '      ' + (F.angles.mismatched + '/' + F.angles.compared).padStart(7) + '        ' + (F.strayOurs.length + '/' + F.strayRef.length).padStart(5) + '        ' + bad.length + ' of ' + F.stacks.length);
+    F.loneRef.slice(0, 4).forEach(q => console.log('    ref-only layer   z ' + q.zFrom.toFixed(2) + (q.zTo > q.zFrom ? '-' + q.zTo.toFixed(2) : '') + '  X ' + q.x.toFixed(1) + ' Y ' + q.y.toFixed(1) + '  ' + q.sizeMm.join(' x ') + ' mm'));
+    bad.slice(0, 4).forEach(q => console.log('    stack X ' + q.x.toFixed(1) + ' Y ' + q.y.toFixed(1) + '  ours ' + (q.A ? q.A.zFrom.toFixed(2) + '-' + q.A.zTo.toFixed(2) : '-') + ' | ref ' + (q.B ? q.B.zFrom.toFixed(2) + '-' + q.B.zTo.toFixed(2) : '-') + '  ' + q.flags.join(', ')));
+    F.strayOurs.slice(0, 3).forEach(q => console.log('    speck (ours)     ' + q.cls + ' z ' + q.zFrom.toFixed(2) + '  X ' + q.x.toFixed(1) + ' Y ' + q.y.toFixed(1) + '  ' + q.areaMm2.toFixed(2) + ' mm2'));
   });
   const out = arg('--json');
   if (out) fs.writeFileSync(out, JSON.stringify(rows, null, 1));

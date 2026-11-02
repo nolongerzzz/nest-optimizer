@@ -193,6 +193,53 @@
     });
     var layers = [], plate = { A: [], B: [] }, prev = { A: null, B: null, zA: null, zB: null }, ADJACENT_MM = 0.5;   // a layer more than this under is not 'the layer under'
 
+    // WHAT ELSE THE COMPARE READS (so a missing piece is named, not hunted for): per footprint the plate's stack (bottom, top, layers) on each side;
+    // whole plate layers one side has alone; the hatch angle layer by layer; tiny isolated pieces; how far a piece reaches past the other side.
+    var stk = { A: { top: new Float32Array(N), bot: new Float32Array(N).fill(1e9), n: new Uint16Array(N) }, B: { top: new Float32Array(N), bot: new Float32Array(N).fill(1e9), n: new Uint16Array(N) } };
+    var loneRaw = { aLacks: [], bLacks: [] }, strayRaw = { A: [], B: [] }, angBad = [], angCmp = 0;
+    function blobOf(cells, cls, z) {
+      var G = { cls: cls, zFrom: z, zTo: z, layers: 1, areaMm2: cells.length * cell2, peakMm2: cells.length * cell2, sx: 0, sy: 0, n: 0, x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+      cells.forEach(function (c) {
+        var i = c % g.nx, j = (c - i) / g.nx, x = g.ox + (i + 0.5) * cell, y = g.oy + (j + 0.5) * cell;
+        G.sx += x; G.sy += y; G.n++;
+        if (x < G.x0) G.x0 = x; if (x > G.x1) G.x1 = x; if (y < G.y0) G.y0 = y; if (y > G.y1) G.y1 = y;
+      });
+      return G;
+    }
+    /** Pieces of the same class and side that sit over one another on layers up to 0.6 mm apart are one piece. */
+    function stackBlobs(list) {
+      var out = [];
+      list.slice().sort(function (p, q) { return p.zFrom - q.zFrom; }).forEach(function (b) {
+        var hit = null;
+        for (var k = 0; k < out.length && !hit; k++) {
+          var o = out[k];
+          if (o.cls === b.cls && o.zTo >= b.zFrom - 0.6 - 1e-9 && b.x0 - 1 <= o.x1 && b.x1 + 1 >= o.x0 && b.y0 - 1 <= o.y1 && b.y1 + 1 >= o.y0) hit = o;
+        }
+        if (!hit) { out.push(b); return; }
+        hit.layers += b.layers; hit.areaMm2 += b.areaMm2; if (b.peakMm2 > hit.peakMm2) hit.peakMm2 = b.peakMm2;
+        hit.sx += b.sx; hit.sy += b.sy; hit.n += b.n; hit.zTo = Math.max(hit.zTo, b.zTo);
+        hit.x0 = Math.min(hit.x0, b.x0); hit.y0 = Math.min(hit.y0, b.y0); hit.x1 = Math.max(hit.x1, b.x1); hit.y1 = Math.max(hit.y1, b.y1);
+      });
+      return out;
+    }
+    /** The direction the long lines of a layer run in, 0 - 180 degrees, and how much of their length agrees (loops spread, hatch does not). */
+    function hatchAngle(list) {
+      var bins = new Float64Array(60), tot = 0;
+      list.forEach(function (m) {
+        var L = m.length || Math.hypot(m.x1 - m.x0, m.y1 - m.y0);
+        if (L < 1.0) return;
+        var a = Math.atan2(m.y1 - m.y0, m.x1 - m.x0) * 180 / Math.PI; a = ((a % 180) + 180) % 180;
+        bins[Math.min(59, Math.floor(a / 3))] += L; tot += L;
+      });
+      if (tot < 4) return null;
+      var best = 0, bw = -1;
+      for (var i = 0; i < 60; i++) { var w = bins[(i + 59) % 60] + bins[i] + bins[(i + 1) % 60]; if (w > bw) { bw = w; best = i; } }
+      var num = 0, den = 0;
+      for (var k = -1; k <= 1; k++) { var w2 = bins[(best + k + 60) % 60]; num += w2 * ((best + k) * 3 + 1.5); den += w2; }
+      var deg = num / den; deg = ((deg % 180) + 180) % 180;
+      return { deg: deg, share: bw / tot };
+    }
+
     function masksOf(L) {
       var out = {};
       if (!L) return out;
@@ -292,7 +339,7 @@
      * the same region). Coordinates are in A's own file frame (opts.offsetA is how far A was moved to stand here).
      */
     var offA = opts.offsetA || [0, 0], gapKeys = {}, gapAll = [], MIN_GAP_CELLS = Math.round(1.0 / cell2);
-    function trackGaps(cls, side, mask, z) {
+    function trackGaps(cls, side, mask, z, dOther) {
       var key = cls + side, st = gapKeys[key] || (gapKeys[key] = { map: null, z: null });
       var comps = mask ? regionsOf(mask, 1.0).filter(function (R) { return R.cells.length >= MIN_GAP_CELLS; }) : [];
       if (!comps.length) return;                                                   // a layer with none of it: the region may pick up again within 0.6 mm
@@ -310,6 +357,11 @@
           gapAll.push(G); id = gapAll.length;
         }
         var a = R.cells.length * cell2;
+        if (dOther) {                                                              // how far into the other side's empty space it reaches (a rim is under ~0.4 mm; a horn is not)
+          var md = -1;
+          for (var q2 = 0; q2 < R.cells.length; q2++) { var dv = dOther[R.cells[q2]]; if (dv < 1e11 && dv > md) md = dv; }
+          if (md >= 0) G.depth = Math.max(G.depth || 0, Math.sqrt(md) * cell);
+        }
         G.layers++; G.areaMm2 += a; if (a > G.peakMm2) G.peakMm2 = a;
         if (z < G.zFrom) G.zFrom = z; if (z > G.zTo) G.zTo = z;
         R.cells.forEach(function (c) {
@@ -327,6 +379,31 @@
       var z = A ? A.z : B.z;
       var mA = masksOf(A), mB = masksOf(B);
       side('A', A, mA, A ? A.z : z); side('B', B, mB, B ? B.z : z);
+      [['A', A], ['B', B]].forEach(function (t) {                                  // the plate's column: where it stands, from which Z to which, in how many layers (lines drawn 0.14 wider so the hatch's 0.04 gaps close)
+        var L = t[1]; if (!L || !(L.cls.interface || L.cls.transition)) return;
+        var m = new Uint8Array(N);
+        ['interface', 'transition'].forEach(function (c) { (L.cls[c] || []).forEach(function (mv) { paint(m, g, { x0: mv.x0, y0: mv.y0, x1: mv.x1, y1: mv.y1, width: (mv.width || 0.45) + 0.14 }); }); });
+        var S = stk[t[0]], top = L.z, bot = L.z - (L.h || 0.2);
+        for (var i = 0; i < N; i++) if (m[i]) { S.n[i]++; if (top > S.top[i]) S.top[i] = top; if (bot < S.bot[i]) S.bot[i] = bot; }
+      });
+      (function () {                                                              // a whole plate layer one side has and the other has not, however small
+        var pm = function (ms) { return union(ms.interface, ms.transition); }, ua = pm(mA), ub = pm(mB);
+        var aa = ua ? count(ua) * cell2 : 0, bb = ub ? count(ub) * cell2 : 0;
+        var one = bb >= 0.3 && aa < 0.05 ? ['aLacks', ub, B.z] : aa >= 0.3 && bb < 0.05 ? ['bLacks', ua, A.z] : null;
+        if (!one) return;
+        regionsOf(one[1], 1.0).forEach(function (R) {
+          if (R.cells.length * cell2 < 0.3) return;
+          loneRaw[one[0]].push(blobOf(R.cells, 'plate', one[2]));
+        });
+      })();
+      ['interface', 'transition'].forEach(function (c) {                          // the hatch direction layer by layer
+        if (!(A && B && A.cls[c] && B.cls[c])) return;
+        var a = hatchAngle(A.cls[c]), b = hatchAngle(B.cls[c]);
+        if (!a || !b || a.share < 0.3 || b.share < 0.3) return;
+        angCmp++;
+        var d = Math.abs(a.deg - b.deg) % 180; d = Math.min(d, 180 - d);
+        if (d > 10) angBad.push({ cls: c, z: r2(z), ours: r2(a.deg), ref: r2(b.deg), diffDeg: r2(d) });
+      });
       var row = { z: r2(z), zB: B ? r2(B.z) : null, zA: A ? r2(A.z) : null, cls: {} };
       var sup = 0;
       CLASSES.forEach(function (c) {
@@ -340,10 +417,17 @@
         if (SUPPORT_CLASSES.indexOf(c) >= 0) {
           sup += e.onlyA + e.onlyB;
           [['A', a, b, e.onlyA, A], ['B', b, a, e.onlyB, B]].forEach(function (t) {
-            if (t[3] < 1.0 && !gapKeys[c + t[0]]) return;
+            if (t[3] < 0.1 && !gapKeys[c + t[0]]) return;
             var only = null;
-            if (t[3] >= 1.0 && t[1]) { only = new Uint8Array(N); for (var k = 0; k < N; k++) only[k] = t[1][k] && !(t[2] && t[2][k]) ? 1 : 0; }
-            trackGaps(c, t[0], only, t[4] ? t[4].z : z);
+            if (t[3] >= 0.1 && t[1]) { only = new Uint8Array(N); for (var k = 0; k < N; k++) only[k] = t[1][k] && !(t[2] && t[2][k]) ? 1 : 0; }
+            var zz = t[4] ? t[4].z : z;
+            if (only && c !== 'support') regionsOf(only, 1.0).forEach(function (R) {          // a piece of plate on its own, under 1 mm2: the stray ring, the speck
+              var ar = R.cells.length * cell2;
+              if (ar < 0.1 || ar >= 1.0) return;
+              var bl = blobOf(R.cells, c, zz);
+              if (bl.x1 - bl.x0 <= 3.5 && bl.y1 - bl.y0 <= 3.5) strayRaw[t[0]].push(bl);       // small and alone; a rim sliver runs the length of its plate
+            });
+            trackGaps(c, t[0], t[3] >= 1.0 ? only : null, zz, t[3] >= 1.0 && t[2] ? edt2(t[2], g.nx, g.ny) : null);
           });
         }
       });
@@ -355,6 +439,42 @@
       if (A && hasSup(mA)) { prev.A = mA; prev.zA = A.z; } if (B && hasSup(mB)) { prev.B = mB; prev.zB = B.z; }                                  // each side's own previous layer, whatever the pairing
     });
 
+    // THE STACKS: every footprint of plate (either side's, joined across 0.5 mm) with, per side, the Z it starts and ends at, its layer count and its
+    // area; and where both stand, how far the top and bottom are apart and how far the outline is (as a circle of the same area).
+    var stacks = [];
+    (function () {
+      var U = new Uint8Array(N);
+      for (var i = 0; i < N; i++) U[i] = stk.A.n[i] || stk.B.n[i] ? 1 : 0;
+      regionsOf(U, 0.5).forEach(function (R) {
+        if (R.cells.length * cell2 < 1.0) return;
+        var T = { A: { n: 0, bot: Infinity, top: -Infinity, lay: 0 }, B: { n: 0, bot: Infinity, top: -Infinity, lay: 0 } };
+        var both = 0, dTop = 0, dBot = 0, sx = 0, sy = 0, x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+        R.cells.forEach(function (c) {
+          var ci = c % g.nx, cj = (c - ci) / g.nx, x = g.ox + (ci + 0.5) * cell, y = g.oy + (cj + 0.5) * cell;
+          sx += x; sy += y; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+          ['A', 'B'].forEach(function (n) {
+            var S = stk[n]; if (!S.n[c]) return;
+            var q = T[n]; q.n++; if (S.bot[c] < q.bot) q.bot = S.bot[c]; if (S.top[c] > q.top) q.top = S.top[c]; if (S.n[c] > q.lay) q.lay = S.n[c];
+          });
+          if (stk.A.n[c] && stk.B.n[c]) { both++; dTop += stk.A.top[c] - stk.B.top[c]; dBot += stk.A.bot[c] - stk.B.bot[c]; }
+        });
+        var side2 = function (q) { return q.n ? { zFrom: r2(q.bot), zTo: r2(q.top), layers: q.lay, footMm2: r2(q.n * cell2) } : null; };
+        var st = { x: r2(sx / R.cells.length - offA[0]), y: r2(sy / R.cells.length - offA[1]), sizeMm: [r2(x1 - x0), r2(y1 - y0)], A: side2(T.A), B: side2(T.B), flags: [] };
+        if (both >= 10) {
+          st.dTopMm = r2(dTop / both); st.dBottomMm = r2(dBot / both);
+          st.dRadiusMm = r2(Math.sqrt(T.A.n * cell2 / Math.PI) - Math.sqrt(T.B.n * cell2 / Math.PI));
+          if (Math.abs(st.dTopMm) > 0.1) st.flags.push('top ' + (st.dTopMm > 0 ? 'high' : 'low'));
+          if (Math.abs(st.dBottomMm) > 0.1) st.flags.push('bottom ' + (st.dBottomMm > 0 ? 'high' : 'low'));
+          if (Math.abs(st.dRadiusMm) > 0.15) st.flags.push('outline ' + (st.dRadiusMm > 0 ? 'too big' : 'too small'));
+        }
+        if (st.A && st.B && st.A.layers !== st.B.layers) st.flags.push('layers ' + st.A.layers + ' vs ' + st.B.layers);
+        if (!st.A) st.flags.push('ours has none'); if (!st.B) st.flags.push('reference has none');
+        st._area = Math.max(T.A.n, T.B.n);
+        stacks.push(st);
+      });
+      stacks.sort(function (p, q) { return q._area - p._area; });
+      stacks.forEach(function (st) { delete st._area; });
+    })();
     var classes = {};
     CLASSES.forEach(function (c) {
       var s = sums[c];
@@ -372,7 +492,8 @@
     var shape = function (G) {
       return { cls: G.cls, zFrom: r2(G.zFrom), zTo: r2(G.zTo), layers: G.layers, areaMm2: r2(G.areaMm2), peakMm2: r2(G.peakMm2),
                x: r2(G.sx / G.n - offA[0]), y: r2(G.sy / G.n - offA[1]),
-               bbox: [r2(G.x0 - offA[0]), r2(G.y0 - offA[1]), r2(G.x1 - offA[0]), r2(G.y1 - offA[1])], sizeMm: [r2(G.x1 - G.x0), r2(G.y1 - G.y0)] };
+               bbox: [r2(G.x0 - offA[0]), r2(G.y0 - offA[1]), r2(G.x1 - offA[0]), r2(G.y1 - offA[1])], sizeMm: [r2(G.x1 - G.x0), r2(G.y1 - G.y0)],
+               depthMm: G.depth != null ? r2(G.depth) : null };
     };
     var byArea = function (p, q) { return q.areaMm2 - p.areaMm2; };
     var gaps = {
@@ -380,7 +501,11 @@
       bLacks: gapAll.filter(function (G) { return G.side === 'onlyA'; }).map(shape).sort(byArea).slice(0, 6)    // ours has it, the reference does not
     };
     return { meta: { cellMm: cell, frame: 'gap coordinates are in A\'s own file frame (A\'s offset on the compare plate taken off)', offsetAMm: offA, zTolMm: zTol, nearMm: nearMm, reachMm: reachMm, edgeMm: edgeMm, moves: [movesA.length, movesB.length], layers: layers.length },
-             classes: classes, layers: layers, plate: plate, worst: worst, gaps: gaps };
+             classes: classes, layers: layers, plate: plate, worst: worst, gaps: gaps,
+             stacks: stacks.slice(0, 16),
+             lone: { aLacks: stackBlobs(loneRaw.aLacks).map(shape).sort(byArea).slice(0, 10), bLacks: stackBlobs(loneRaw.bLacks).map(shape).sort(byArea).slice(0, 10) },
+             angles: { compared: angCmp, mismatched: angBad.length, items: angBad.slice(0, 24) },
+             strays: { A: stackBlobs(strayRaw.A).map(shape).sort(byArea).slice(0, 10), B: stackBlobs(strayRaw.B).map(shape).sort(byArea).slice(0, 10) } };
   }
 
   var LABEL = { part: 'part', support: 'support (tree)', interface: 'interface', transition: 'transition' };
@@ -411,10 +536,33 @@
     if (G && (G.aLacks.length || G.bLacks.length)) {
       var line = function (q) {
         return '  ' + pad(q.cls, 11) + 'z ' + q.zFrom.toFixed(2) + (q.zTo > q.zFrom ? ' - ' + q.zTo.toFixed(2) : '') + '  (' + q.layers + ' layer' + (q.layers === 1 ? '' : 's') + ')  at X ' + q.x.toFixed(1) + ' Y ' + q.y.toFixed(1) +
-               '  box ' + q.sizeMm[0].toFixed(1) + ' x ' + q.sizeMm[1].toFixed(1) + '  ' + q.areaMm2.toFixed(1) + ' mm2 in all (peak ' + q.peakMm2.toFixed(1) + '/layer)';
+               '  box ' + q.sizeMm[0].toFixed(1) + ' x ' + q.sizeMm[1].toFixed(1) + '  ' + q.areaMm2.toFixed(1) + ' mm2 in all (peak ' + q.peakMm2.toFixed(1) + '/layer)' + (q.depthMm != null ? '  reaches ' + q.depthMm.toFixed(2) + ' mm past the other' : '');
       };
       if (G.aLacks.length) { out.push(''); out.push('WHERE OURS HAS NOTHING AND THE REFERENCE DOES (largest first; X Y in A\'s file coordinates):'); G.aLacks.forEach(function (q) { out.push(line(q)); }); }
       if (G.bLacks.length) { out.push(''); out.push('where ours has material the reference does not:'); G.bLacks.forEach(function (q) { out.push(line(q)); }); }
+    }
+    var oneLine = function (q) {
+      return '  z ' + q.zFrom.toFixed(2) + (q.zTo > q.zFrom ? ' - ' + q.zTo.toFixed(2) : '') + '  (' + q.layers + ' layer' + (q.layers === 1 ? '' : 's') + ')  at X ' + q.x.toFixed(1) + ' Y ' + q.y.toFixed(1) + '  ' + q.sizeMm[0].toFixed(1) + ' x ' + q.sizeMm[1].toFixed(1) + ' mm  ' + q.areaMm2.toFixed(1) + ' mm2';
+    };
+    var Lo = rep.lone;
+    if (Lo && Lo.aLacks.length) { out.push(''); out.push('PLATE LAYERS ONLY THE REFERENCE HAS (a whole layer, however small - ours has none on that layer):'); Lo.aLacks.forEach(function (q) { out.push(oneLine(q)); }); }
+    if (Lo && Lo.bLacks.length) { out.push(''); out.push('plate layers only ours has:'); Lo.bLacks.forEach(function (q) { out.push(oneLine(q)); }); }
+    if (rep.stacks && rep.stacks.length) {
+      var sf = function (q) { return q ? q.zFrom.toFixed(2) + ' - ' + q.zTo.toFixed(2) + ' (' + q.layers + ' lay, ' + q.footMm2.toFixed(1) + ' mm2)' : 'none'; };
+      out.push(''); out.push('PLATE STACKS (each footprint: Z from - to, layers, area; ours | reference; then top / bottom / outline offsets, ours minus reference):');
+      rep.stacks.forEach(function (q) {
+        out.push('  X ' + q.x.toFixed(1) + ' Y ' + q.y.toFixed(1) + '  ' + q.sizeMm[0].toFixed(1) + ' x ' + q.sizeMm[1].toFixed(1) + '   ' + sf(q.A) + ' | ' + sf(q.B) +
+                 (q.dTopMm != null ? '   top ' + q.dTopMm.toFixed(2) + '  bottom ' + q.dBottomMm.toFixed(2) + '  outline radius ' + q.dRadiusMm.toFixed(2) : '') + (q.flags.length ? '   <-- ' + q.flags.join(', ') : ''));
+      });
+    }
+    if (rep.angles && rep.angles.compared) {
+      out.push(''); out.push('HATCH ANGLE: ' + rep.angles.mismatched + ' of ' + rep.angles.compared + ' interface / transition layers run a different way (over 10 degrees)');
+      rep.angles.items.forEach(function (q) { out.push('  z ' + q.z.toFixed(2) + '  ' + q.cls + '  ours ' + q.ours.toFixed(0) + ' deg, reference ' + q.ref.toFixed(0) + ' deg'); });
+    }
+    var St = rep.strays;
+    if (St && (St.A.length || St.B.length)) {
+      if (St.A.length) { out.push(''); out.push('SMALL PIECES OF OURS ALONE (under 1 mm2 each, alone on their layer - stray rings, specks):'); St.A.forEach(function (q) { out.push('  ' + pad(q.cls, 11) + oneLine(q).trim()); }); }
+      if (St.B.length) { out.push(''); out.push('small pieces of the reference alone:'); St.B.forEach(function (q) { out.push('  ' + pad(q.cls, 11) + oneLine(q).trim()); }); }
     }
     if (rep.worst.length) {
       out.push('');
@@ -453,6 +601,22 @@
     };
     if (G && G.aLacks.length) B.push({ kind: 'gaps', title: 'WHERE OURS HAS NOTHING AND THE REFERENCE DOES (largest first; X Y in A\'s file coordinates):', items: G.aLacks.map(gi) });
     if (G && G.bLacks.length) B.push({ kind: 'gaps', title: 'where ours has material the reference does not:', items: G.bLacks.map(gi) });
+    var oi = function (q, what) {
+      return { what: what || q.cls, z: 'z ' + q.zFrom.toFixed(2) + (q.zTo > q.zFrom ? ' - ' + q.zTo.toFixed(2) : '') + '  (' + q.layers + ' layer' + (q.layers === 1 ? '' : 's') + ')',
+               at: 'at X ' + f1(q.x) + ' Y ' + f1(q.y) + '  box ' + f1(q.sizeMm[0]) + ' x ' + f1(q.sizeMm[1]), area: f1(q.areaMm2) + ' mm2 in all' };
+    };
+    if (rep.lone && rep.lone.aLacks.length) B.push({ kind: 'gaps', title: 'PLATE LAYERS ONLY THE REFERENCE HAS (a whole layer, however small):', items: rep.lone.aLacks.map(function (q) { return oi(q, 'plate'); }) });
+    if (rep.lone && rep.lone.bLacks.length) B.push({ kind: 'gaps', title: 'plate layers only ours has:', items: rep.lone.bLacks.map(function (q) { return oi(q, 'plate'); }) });
+    if (rep.stacks && rep.stacks.length) {
+      var sf = function (q) { return q ? q.zFrom.toFixed(2) + ' - ' + q.zTo.toFixed(2) + ', ' + q.layers + ' layers, ' + f1(q.footMm2) + ' mm2' : 'none'; };
+      B.push({ kind: 'gaps', title: 'PLATE STACKS (ours | reference):', items: rep.stacks.map(function (q) {
+        return { what: q.flags.length ? '<-- ' + q.flags.join(', ') : 'stack', z: 'ours ' + sf(q.A), at: 'ref  ' + sf(q.B) + '   at X ' + f1(q.x) + ' Y ' + f1(q.y),
+                 area: q.dTopMm != null ? 'top ' + q.dTopMm.toFixed(2) + '  bottom ' + q.dBottomMm.toFixed(2) + '  outline radius ' + q.dRadiusMm.toFixed(2) + ' mm' : '' };
+      }) });
+    }
+    if (rep.angles && rep.angles.compared) B.push({ kind: 'worst', title: 'HATCH ANGLE: ' + rep.angles.mismatched + ' of ' + rep.angles.compared + ' layers differ (ours / reference, deg):', items: rep.angles.items.map(function (q) { return [q.z.toFixed(2) + ' ' + q.cls, q.ours.toFixed(0) + ' / ' + q.ref.toFixed(0) + ' deg']; }).map(function (w) { return [w[0], w[1].replace(' mm2', '')]; }) });
+    if (rep.strays && rep.strays.A.length) B.push({ kind: 'gaps', title: 'SMALL PIECES OF OURS ALONE (under 1 mm2, alone on their layer):', items: rep.strays.A.map(function (q) { return oi(q); }) });
+    if (rep.strays && rep.strays.B.length) B.push({ kind: 'gaps', title: 'small pieces of the reference alone:', items: rep.strays.B.map(function (q) { return oi(q); }) });
     if (rep.worst.length) B.push({ kind: 'worst', title: 'layers that differ most (support, interface and transition together):', items: rep.worst.map(function (w) { return [w.z.toFixed(2), f1(w.supportDiffMm2)]; }) });
     return B;
   }

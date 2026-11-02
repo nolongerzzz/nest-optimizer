@@ -84,5 +84,27 @@ const V = D.view(R), vt = JSON.stringify(V);
 check('the view: a lead, the line-type rows, the plates, where, the worst layers', V[0].kind === 'lead' && V.some(b => b.kind === 'types' && b.rows.length) && V.filter(b => b.kind === 'plates').length === 2 && V.some(b => b.kind === 'gaps') && V.some(b => b.kind === 'worst'), vt.slice(0, 200));
 check('...it carries the text\'s phrases (WHERE OURS HAS NOTHING, the tip\'s X Y, a GAP)', /WHERE OURS HAS NOTHING/.test(vt) && /at X /.test(vt) && /GAP:|no tree in this selection|on the bed|tree under it/.test(vt));
 check('...and empty input is answered the same', D.view(D.compute([], []))[0].text === 'Nothing to compare.');
+/* WHAT ELSE IT READS: a whole plate layer one side lacks, the stacks, the hatch angle, small pieces alone, how far a piece reaches */
+const vert = (feature, z, cx, cy, half) => { const out = []; for (let x = cx - half; x <= cx + half + 1e-9; x += 0.4) out.push(mv(feature, z, x, cy - half, x, cy + half)); return out; };
+const P1 = [...sq('Support transition', 2.2, 0, 0, 3), ...sq('Support interface', 2.4, 0, 0, 3)];
+const P2 = [...P1, ...sq('Support interface', 2.6, 0, 0, 1)];                      // the reference has one more, small, layer on top
+const R7 = D.compute(P1, P2);
+check('a plate layer only the reference has is named, even 2 mm across: z 2.6, 1 layer, ours lacks it', R7.lone.aLacks.length === 1 && R7.lone.aLacks[0].zFrom === 2.6 && R7.lone.aLacks[0].layers === 1 && R7.lone.bLacks.length === 0, JSON.stringify(R7.lone));
+check('...and the stack says how it ends: ours 2.0 - 2.4 in 2 layers, the reference 2.0 - 2.6 in 3', R7.stacks.length === 1 && R7.stacks[0].A.zTo === 2.4 && R7.stacks[0].B.zTo === 2.6 && R7.stacks[0].B.layers === 3 && R7.stacks[0].A.layers === 2 && R7.stacks[0].flags.some(f => /layers 2 vs 3/.test(f)), JSON.stringify(R7.stacks));
+check('...and the text names both', /PLATE LAYERS ONLY THE REFERENCE HAS/.test(D.text(R7)) && /PLATE STACKS/.test(D.text(R7)) && /layers 2 vs 3/.test(D.text(R7)));
+const P3 = [...sq('Support transition', 2.2, 0, 0, 3), ...vert('Support interface', 2.4, 0, 0, 3)];     // the same plate, the top layer's lines turned a quarter
+const R8 = D.compute(P1, P3);
+check('hatch angle: 2.4 interface runs 0 vs 90 deg - 1 of 2 layers differs, the transition agrees', R8.angles.compared === 2 && R8.angles.mismatched === 1 && R8.angles.items[0].cls === 'interface' && R8.angles.items[0].diffDeg > 80, JSON.stringify(R8.angles));
+check('...the same plate against itself: no layer differs', D.compute(P1, P1).angles.mismatched === 0);
+const P4 = [...P1, ...sq('Support interface', 2.4, 9, 0, 0.2)];                      // a speck of interface 9 mm from the plate, alone (about 0.7 mm2)
+const R9 = D.compute(P4, P1);
+check('a small piece alone (a 0.4 mm speck of interface, 9 mm out) is listed as ours alone', R9.strays.A.length === 1 && R9.strays.A[0].cls === 'interface' && R9.strays.A[0].areaMm2 < 1 && R9.strays.B.length === 0 && /SMALL PIECES OF OURS ALONE/.test(D.text(R9)), JSON.stringify(R9.strays));
+check('...and a 4.5 mm wide offset of the whole plate is no stray (it is not small)', D.compute(P1, P1.map(m => Object.assign({}, m, { x0: m.x0 + 4.5, x1: m.x1 + 4.5 }))).strays.A.length === 0);
+check('how far a piece reaches: the tip past the plate reaches (about) 4 mm into the other side\'s empty space', (() => { const t = R.gaps.aLacks.find(q => q.cls === 'support'); return t && t.depthMm > 3 && t.depthMm < 5; })());
+const P5 = [...P1].map(m => Object.assign({}, m, { z: m.z + 0.2 }));                  // the same plate one layer higher: top and bottom both +0.2
+const R10 = D.compute(P5, P1);
+check('a stack 0.2 high is flagged: top +0.20, bottom +0.20', R10.stacks.length === 1 && Math.abs(R10.stacks[0].dTopMm - 0.2) < 0.02 && Math.abs(R10.stacks[0].dBottomMm - 0.2) < 0.02 && R10.stacks[0].flags.indexOf('top high') >= 0, JSON.stringify(R10.stacks));
+check('a bigger outline is flagged: ours 7 mm square against 6, outline radius +0.3 or so', (() => { const Q = [...sq('Support transition', 2.2, 0, 0, 3.5), ...sq('Support interface', 2.4, 0, 0, 3.5)]; const r = D.compute(Q, P1); return r.stacks.length === 1 && r.stacks[0].dRadiusMm > 0.2 && r.stacks[0].flags.some(f => /outline too big/.test(f)); })());
+check('the view carries them too', /PLATE LAYERS ONLY THE REFERENCE HAS/.test(JSON.stringify(D.view(R7))) && /PLATE STACKS/.test(JSON.stringify(D.view(R7))) && /HATCH ANGLE/.test(JSON.stringify(D.view(R8))));
 console.log(fails ? '\nFAILED (' + fails + ')' : '\nall gates held');
 process.exit(fails ? 1 : 0);
