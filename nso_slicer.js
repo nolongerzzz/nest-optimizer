@@ -2236,7 +2236,8 @@
       function dTrEx(j) { return DOEX + (NI + NT - 1) * SP[j].h; }
       var SPLIT_MIN_MM = 0.6;
       var PINCH_INSET_MM = 0.1;      /* the loop's inset where the region is too narrow for a line's half-width on each side */
-      var TRANS_FILL_OPEN_MM = 0.5;
+      var TRANS_FILL_OPEN_MM = 0.4;
+      var RIBBON_T_RATIO = 3;
       var REGION_FILL_GAP_MM = 0.04;
       var HOST_GROW_MM = 0.2;   /* on a flat floor the part's host cut (the typing's reach) is this much wider: the plate's loops stand past the face's edge, and cells there were typed transition where Bambu's are interface */
       var THIN_SLAB_MIN_MM2 = 3;   /* a ribbon (one ring, no hole) at least this big keeps its loop though it is narrower than the wall's inset: the Oblique's top layers (a dome's thin ring is not: Bambu stops a layer lower there) */
@@ -2246,6 +2247,20 @@
       /* A plate's lines turn with its own layers, not the support's: Bambu lays the first layer of a stack at 110 degrees, then 45, 135, 45, 135... up it. A stack's layer
          is the next of the one under it where the two stand over each other. */
       var FIRST_LAYER_DEG = 110;
+      var RIBBON_RATIO = 2.5, RIBBON_PARALLEL_DEG = 30;
+      /* a ring's long axis (the direction of the most spread of its outline) and how much longer it is than wide */
+      function ringAxis(ring) {
+        var pts = [], n = ring.length;
+        for (var e = 0; e < n; e++) {
+          var a = ring[e], b = ring[(e + 1) % n], l = Math.hypot(b[0] - a[0], b[1] - a[1]), k = Math.max(1, Math.ceil(l / 0.4));
+          for (var u = 0; u < k; u++) pts.push([a[0] + (b[0] - a[0]) * u / k, a[1] + (b[1] - a[1]) * u / k]);
+        }
+        if (pts.length < 3) return null;
+        var mx = 0, my = 0; pts.forEach(function (q) { mx += q[0]; my += q[1]; }); mx /= pts.length; my /= pts.length;
+        var sxx = 0, syy = 0, sxy = 0; pts.forEach(function (q) { var dx = q[0] - mx, dy = q[1] - my; sxx += dx * dx; syy += dy * dy; sxy += dx * dy; });
+        var tr = sxx + syy, det = sxx * syy - sxy * sxy, disc = Math.sqrt(Math.max(0, tr * tr / 4 - det)), l1 = tr / 2 + disc, l2 = tr / 2 - disc;
+        return { ang: 0.5 * Math.atan2(2 * sxy, sxx - syy), ratio: l2 > 1e-9 ? Math.sqrt(l1 / l2) : 99 };
+      }
       var stackIdx = [], sheetOf = [];
       P.layers.forEach(function (L, jj) {
         var zz = zones[jj], all = zz.i.concat(zz.t, zz.is, zz.ts);
@@ -2325,7 +2340,9 @@
               var slabT = hTc && !g.isEmpty(Zall) ? g.diff(g.inter(g.inter(P.S[j], Zall), hTc), slabI) : g.empty();
               /* a transition strip is filled where the slab it lies in is wider than 2 x TRANS_FILL_OPEN_MM (the Negative Spheres' ring, 1.8 - 2.3 mm: Bambu zig-zags it; the
                  Oblique's ribbon, under 1 mm: its loop alone) */
-              var openT = g.isEmpty(slabT) ? slabT : g.offset(g.offset(slabT, -TRANS_FILL_OPEN_MM), TRANS_FILL_OPEN_MM);
+              /* ...a ribbon of transition (the Oblique's, one long thin strip) is its loop alone however wide; a ring's narrow strips (the Negative Spheres') are zig-zagged */
+              var slabTR = g.isEmpty(slabT) ? slabT : g.unionAll(g.parts(slabT).filter(function (q) { var ax = ringAxis(g.polys(q)[0]); return !ax || ax.ratio < RIBBON_T_RATIO; }));
+              var openT = g.isEmpty(slabTR) ? slabTR : g.offset(g.offset(slabTR, -TRANS_FILL_OPEN_MM), TRANS_FILL_OPEN_MM);
               var wideT = g.isEmpty(Treg) || g.isEmpty(openT) ? g.empty() : g.inter(Treg, openT);
               fillCs = g.isEmpty(Ireg) ? wideT : g.isEmpty(wideT) ? Ireg : g.union(Ireg, wideT);
               /* the loops sit where the support's own wall sits (the slab's edge, half a line in): regions taken on the whole layer, not inside its wall */
@@ -2345,7 +2362,21 @@
                 });
               });
             }
-            if (!g.isEmpty(fillCs)) connect(scanFill(g.polys(fillCs), aJ, sI, 0), 3 * sI, hullS).forEach(function (pth) {
+            /* a ribbon is crossed, never run along: a strip whose long axis the layer's lines would lie within RIBBON_PARALLEL_DEG of takes the stack's other direction (a line
+               down a strip is one bead where Bambu's zig-zag crosses it) */
+            var fillSegs = [];
+            if (!g.isEmpty(fillCs)) {
+              if (!(byDepth && REGIONAL_PLATE)) fillSegs = scanFill(g.polys(fillCs), aJ, sI, 0);
+              else g.parts(fillCs).forEach(function (pp) {
+                var rings = g.polys(pp), ang = aJ, ax = ringAxis(rings[0]);
+                if (ax && ax.ratio >= RIBBON_RATIO) {
+                  var dd = Math.abs(((ax.ang - aJ) % Math.PI + Math.PI) % Math.PI); dd = Math.min(dd, Math.PI - dd);
+                  if (dd < RIBBON_PARALLEL_DEG * Math.PI / 180) ang = aJ + Math.PI / 2;
+                }
+                fillSegs = fillSegs.concat(scanFill(rings, ang, sI, 0));
+              });
+            }
+            if (fillSegs.length) connect(fillSegs, 3 * sI, hullS).forEach(function (pth) {
               L.paths.push({ feature: 'Support', width: wI, closed: false, pts: pth.pts, sheetFill: true });
             });
           }
