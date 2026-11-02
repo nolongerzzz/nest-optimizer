@@ -1390,6 +1390,18 @@
       var minOver = o.overhangMinAreaMm2 != null ? o.overhangMinAreaMm2 : o.outerWallWidthMm * o.outerWallWidthMm;
 
       /* an object cut on the planes `pl` (the shared ones, or - a support, when supportLayerMaxMm is on - its own) */
+      /* a support's section with its small holes filled (under 2 mm2): the Negative Sphere's apex is a ring of support 0.4 wide round a 1.2 mm hole (the support
+         mesh is hollow there) and Bambu prints a disc on it - the ring alone is eaten by the wall's inset and the apex loses its top layer */
+      function fillSmallHoles(cs) {
+        if (g.isEmpty(cs)) return cs;
+        var any = false, keep = g.polys(cs).filter(function (Pl) {
+          var a2 = 0;
+          for (var q = 0; q < Pl.length; q++) { var u = Pl[q], v = Pl[(q + 1) % Pl.length]; a2 += u[0] * v[1] - v[0] * u[1]; }
+          if (a2 < 0 && -a2 / 2 < SUPPORT_HOLE_FILL_MM2) { any = true; return false; }
+          return true;
+        });
+        return any ? g.of(keep, 'Positive') : cs;
+      }
       function makeP(ob, oi, pl) {
         // Per-object override: a piece the user flagged non-solid is sliced
         // with gapCloseMm 0 - its open edges are the design, not a hole to
@@ -1408,7 +1420,8 @@
           // Bambu's `resolution` (0.012 mm in both real slices): the section is
           // simplified to that deviation - it also drops the collinear points a
           // quad face split into two triangles leaves in every loop.
-          return g.simplify(cs, o.resolutionMm);
+          cs = g.simplify(cs, o.resolutionMm);
+          return ob.role === 'support' ? fillSmallHoles(cs) : cs;
         });
         /* the part cut at heights of its own choosing (soup frame, ascending sliceZ): the same section, orientation and closing as its layers - for the
            support typing's exact reach (typeSupports, byDepth) */
@@ -1903,6 +1916,8 @@
   // ===========================================================================
   // Supports - a support object prints as support, and holds its host up
   // ===========================================================================
+
+  var SUPPORT_HOLE_FILL_MM2 = 2.0;   /* a hole in a support's section smaller than this is filled (the dome apex's ring) */
 
   /**
    * A support's own layers (Bambu's independent support layer height): from the first layer up through each top of its sheets (P.sheet.sheets[].zHi,
