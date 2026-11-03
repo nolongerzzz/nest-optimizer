@@ -27,6 +27,10 @@
  *      app Undo takes it off; the piece already on the plate is untouched
  *   3. the same scan at Levels 8
  *   4. a photo at smooth
+ *   4b. Trim: a ring picture, Outline / Outline + holes / Off through the real
+ *      card - the plate clipped to the item, the hole kept or filled, the
+ *      numbers dim with Trim off, the card's line an upper bound with it on,
+ *      the piece closed on the plate, and Undo (here) puts the trim settings back
  *   5. it sculpts: Brush (Emboss - the brush's raising mode) pulls a region up
  *      and the brush's own gate keeps it closed; Smooth runs; Cut splits it
  *      and seals both halves; Export writes it and the canonical checker
@@ -212,7 +216,8 @@ const cardState = page => page.evaluate(() => {
   const v = id => { const e = document.getElementById(id); return e.type === 'checkbox' ? e.checked : e.value; };
   return JSON.stringify({ pic: window.nsoReliefPicture(), file: document.getElementById('relief-file-name').textContent,
     w: v('inp-relief-width'), b: v('inp-relief-base'), r: v('inp-relief-relief'), d: v('inp-relief-detail'),
-    l: v('sel-relief-levels'), up: v('chk-relief-bright') });
+    l: v('sel-relief-levels'), up: v('chk-relief-bright'),
+    t: v('sel-relief-trim'), ta: v('inp-relief-trim-above'), tb: v('inp-relief-trim-bridge'), tm: v('inp-relief-trim-margin') });
 });
 
 /* Look at a piece from (dx, dy, dz) mm off its centre, or off a point
@@ -422,6 +427,77 @@ withApp(async (page, logs) => {
   await lookAt(page, photo, [0, 46, 62]);
   await shot(page, '08-photo-smooth');
   await page.evaluate(() => undoLast());
+
+  console.log('\n=== 4b. Trim: clip the plate to the item ===');
+  {
+    /* a dark ring on white, drawn by the page's own canvas and handed to the real file input */
+    const png = await page.evaluate(() => {
+      const c = document.createElement('canvas'); c.width = 200; c.height = 200;
+      const x = c.getContext('2d');
+      x.fillStyle = '#fff'; x.fillRect(0, 0, 200, 200);
+      x.fillStyle = '#000'; x.beginPath(); x.arc(100, 100, 70, 0, 7); x.fill();
+      x.fillStyle = '#fff'; x.beginPath(); x.arc(100, 100, 25, 0, 7); x.fill();
+      return c.toDataURL('image/png').split(',')[1];
+    });
+    await openCard(page);
+    await pickFile(page, { name: 'ring.png', mimeType: 'image/png', buffer: Buffer.from(png, 'base64') });
+    await setCard(page, { width: 40, base: 1, relief: 2, detail: 0.5, levels: 2, bright: false });
+    const dim = async () => page.evaluate(() => ['inp-relief-trim-above', 'inp-relief-trim-bridge', 'inp-relief-trim-margin', 'inp-relief-trim-speck']
+      .map(id => document.getElementById(id).disabled));
+    check('Trim is Off to start, and its four numbers are dim', await page.inputValue('#sel-relief-trim') === 'off' &&
+      (await dim()).every(Boolean), (await dim()).join(','));
+    const lineOff = await triLine(page);
+    const whole = await makePiece(page);
+    const mWhole = await measure(page, whole);
+    check('Trim off: the whole 40 x 40 mm slab (x and depth), closed, the line the count', mWhole && mWhole.open === 0 && mWhole.nm === 0 &&
+      Math.abs(mWhole.size[0] - 40) < 1e-6 && Math.abs(mWhole.size[2] - 40) < 1e-6 && lineCount(lineOff) === mWhole.tris,
+      mWhole && (mWhole.size.join(' x ') + ', ' + mWhole.tris + ' triangles, ' + lineOff));
+    await page.evaluate(() => undoLast());
+
+    await openCard(page);
+    await page.selectOption('#sel-relief-trim', 'holes');
+    check('Trim on: the numbers light up and the line says it is a ceiling', (await dim()).every(x => !x) &&
+      /≤/.test(await triLine(page)) && /before the trim/.test(await triLine(page)), await triLine(page));
+    const lineOn = await triLine(page);
+    const holey = await makePiece(page);
+    const mHole = await measure(page, holey);
+    check('Outline + holes: closed on the plate, the item\'s own 28 x 28 mm box (x and depth) not the 40 mm plate, far fewer triangles, under the line',
+      mHole && mHole.open === 0 && mHole.nm === 0 && Math.abs(mHole.size[0] - 28) < 0.8 && Math.abs(mHole.size[2] - 28) < 0.8 &&
+      mHole.tris < 0.6 * mWhole.tris && mHole.tris <= lineCount(lineOn),
+      mHole && (mHole.size.join(' x ') + ' mm, ' + mHole.tris + ' vs ' + mWhole.tris + ' triangles, ' + lineOn));
+    /* the eye is a hole through it: a bare ring has less volume than the filled outline */
+    await page.evaluate(() => undoLast());
+    await openCard(page);
+    await page.selectOption('#sel-relief-trim', 'outer');
+    const filled = await makePiece(page);
+    const mFill = await measure(page, filled);
+    check('Outline: the eye filled - the same box, more volume than Outline + holes, closed', mFill && mFill.open === 0 && mFill.nm === 0 &&
+      Math.abs(mFill.size[0] - mHole.size[0]) < 0.3 && mFill.volume > mHole.volume + 50,
+      mFill && (mFill.volume.toFixed(1) + ' vs ' + mHole.volume.toFixed(1) + ' mm^3'));
+    await page.evaluate(() => undoLast());
+
+    /* Back to Picture / Undo bring the trim settings back with the photo */
+    await openCard(page);
+    await page.selectOption('#sel-relief-trim', 'holes');
+    await page.fill('#inp-relief-trim-margin', '1.5');
+    const a1 = await makePiece(page); await page.evaluate(() => undoLast());
+    const stateA = await cardState(page);
+    await openCard(page);
+    await page.selectOption('#sel-relief-trim', 'outer');
+    await page.fill('#inp-relief-trim-margin', '0');
+    const a2 = await makePiece(page); await page.evaluate(() => undoLast());
+    check('two slabs made, the card says Outline now', !!a1 && !!a2 && await page.inputValue('#sel-relief-trim') === 'outer');
+    await page.click('#btn-relief-undo');
+    await page.waitForFunction(() => /back to the previous slab/i.test(document.getElementById('status').textContent), null, { timeout: 60000 });
+    check('Undo (here) puts the previous slab\'s trim settings back on the card, with its photo', await cardState(page) === stateA,
+      'trim ' + await page.inputValue('#sel-relief-trim') + ', rim ' + await page.inputValue('#inp-relief-trim-margin'));
+    await page.evaluate(() => { if (window.NSO_MICROSCOPE && NSO_MICROSCOPE.isOpen()) NSO_MICROSCOPE.close(); });
+    await openCard(page);
+    await page.fill('#inp-relief-trim-margin', '0');
+    await page.selectOption('#sel-relief-trim', 'off');
+    check('Trim back to Off dims the numbers again', (await dim()).every(Boolean));
+    await closeMenus(page);
+  }
 
   console.log('\n=== 5. it sculpts - Brush, Smooth, Cut, Export ===');
   /* A slab at the scan's Levels 8, at a Detail the brush's whole-mesh gate

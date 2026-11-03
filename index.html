@@ -252,6 +252,21 @@
               <label class="vp-check" title="Raise the bright parts instead of the dark ones.">
               <input type="checkbox" id="chk-relief-bright"> Bright is up
               </label>
+              <div class="vp-row vp-row-opts">
+              <label class="vp-clone" title="Clip the flat plate off. Off keeps the whole rectangle. Outline keeps only what stands above the base - the item's own outer edge - and fills any holes inside it (a bright highlight is not a hole in the part). Outline + holes keeps a real hole, like a key ring's eye, cut through the base too.">Trim <select id="sel-relief-trim" aria-label="Trim to the item's outline">
+              <option value="off" selected>Off</option>
+              <option value="outer">Outline</option>
+              <option value="holes">Outline + holes</option>
+              </select></label>
+              <label class="vp-clone" title="How far above the base a sample must stand to count as the item, as a percent of Relief. Raise it to leave out a soft shadow or a grey ground; lower it to catch a pale edge.">Cut-off <input type="number" id="inp-relief-trim-above" value="10" min="0" max="95" step="1" aria-label="Trim cut-off, percent of relief" disabled></label>
+              </div>
+              <div class="vp-row vp-row-opts">
+              <label class="vp-clone" title="Close gaps in the item narrower than this, mm, before the holes are filled. A bright face joined to the ground by a hairline slit is part of the item, not a bay in it. 0 closes nothing; a gap or a bay wider than about twice this stays.">Bridge <input type="number" id="inp-relief-trim-bridge" value="1" min="0" max="20" step="0.1" aria-label="Trim gap bridge, mm" disabled></label>
+              <label class="vp-clone" title="Grow the outline outward by this much, mm: a rim of base all the way round the item. 0 is the item's edge exactly.">Rim <input type="number" id="inp-relief-trim-margin" value="0" min="0" max="20" step="0.1" aria-label="Trim rim, mm" disabled></label>
+              </div>
+              <div class="vp-row vp-row-opts">
+              <label class="vp-clone" title="Specks, as a percent of the item's area. Bits of dust beside the item smaller than this are dropped; holes inside it smaller than this are filled (with Outline + holes, only holes bigger than this stay). Raise it to fill a bright pocket you do not want as a hole; lower it to keep a small real one.">Specks % <input type="number" id="inp-relief-trim-speck" value="1" min="0" max="100" step="0.1" aria-label="Trim specks, percent of the item" disabled></label>
+              </div>
               <p id="relief-tris" class="hint relief-tris" aria-live="polite">Pick a picture</p>
               <div class="vp-row vp-row-full">
               <button id="btn-relief-make" class="btn btn-secondary" type="button" disabled

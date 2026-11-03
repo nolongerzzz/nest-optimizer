@@ -26,7 +26,15 @@
  *                               refused by name with the Detail that fits,
  *                               and that Detail does fit
  *   7. the card's number        plan() is build()'s count, not an estimate
- *   8. classic script           loads in a vm sandbox as window.NSO_Relief
+ *   8. edge cases               flat grey, sparse ink, 1 sample, RGBA, bad opts
+ *   9. trim                     the flat plate clipped off to the item's own
+ *                               outline: a disc, a ring (outline / + holes), a
+ *                               hairline slit bridged, specks dropped, a rim,
+ *                               an item on the picture's edge, a picture with
+ *                               nothing above the base - closed, no slivers,
+ *                               every kept sample bit-identical to the whole
+ *                               slab's, the canonical checker on each
+ *  10. classic script           loads in a vm sandbox as window.NSO_Relief
  */
 'use strict';
 
@@ -157,8 +165,9 @@ function judgeCanonical(row) {
     v.inconsistent_winding_edges === 0 && v.degenerate_tris === 0,
     'open ' + v.open_edges + ', nm ' + v.nonmanifold_edges + ', odd ' + v.odd_edges +
     ', winding ' + v.inconsistent_winding_edges + ', degenerate ' + v.degenerate_tris);
-  check(t + ': canonical - Euler 2, one closed shell', v.euler_characteristic === 2,
-    'chi ' + v.euler_characteristic);
+  const wantChi = row.chi == null ? 2 : row.chi;
+  check(t + ': canonical - Euler ' + wantChi + (wantChi === 2 ? ', one closed shell' : ' (a slab with a hole through it)'),
+    v.euler_characteristic === wantChi, 'chi ' + v.euler_characteristic);
   check(t + ': canonical - no self-intersecting pairs',
     v.self_intersection.pierce === 0 && v.self_intersection.coplanar === 0,
     v.self_intersection.pierce + ' pierce, ' + v.self_intersection.coplanar + ' coplanar over ' +
@@ -436,7 +445,165 @@ console.log('\n=== 8. edge cases the solid must survive ===');
   check('Levels 1 is refused by name', !badLv.ok && /Levels/.test(badLv.reason), badLv.reason);
 }
 
-console.log('\n=== 9. loads as a classic script ===');
+console.log('\n=== 9. trim: the flat plate clipped off ===');
+{
+  /* Pictures are 80 x 80 px, 40 mm wide, 0.5 mm/sample: one sample a pixel.
+     Dark is up, so a dark shape on white is the item and the white is plate. */
+  const PX = 80, MM = 40, S = 0.5, CX = 40, CY = 40, RAD = 25 * 0.5;
+  const dark = (x, y, cx, cy, r) => (x + 0.5 - cx) ** 2 + (y + 0.5 - cy) ** 2 <= r * r;
+  const disc = () => gray(PX, PX, (x, y) => dark(x, y, CX, CY, 25) ? 0 : 255);
+  const O = { widthMm: MM, sampleMm: S, baseMm: 1, reliefMm: 2, levels: 2 };
+  const trimmed = (img, o) => R.build(img, Object.assign({}, O, o));
+  /* a vertex's distance from the disc's centre, in mm, in the slab's frame */
+  const cxMm = CX * MM / PX, cyMm = MM - CY * MM / PX;
+  const reach = soup => { let m = 0; for (let i = 0; i < soup.length; i += 3) m = Math.max(m, Math.hypot(soup[i] - cxMm, soup[i + 1] - cyMm)); return m; };
+
+  const whole = trimmed(disc(), {});
+  check('Trim off is the whole slab, trim reported null, plan() not an upper bound',
+    whole.ok && whole.trim === null && whole.census.chi === 2 && !R.plan(PX, PX, O).upperBound);
+
+  /* --- a disc: the outline, and nothing of the plate --- */
+  const d = trimmed(disc(), { trim: 'outer' });
+  check('disc: built, closed, one shell, no hole', d.ok && d.census.closed && d.census.chi === 2 &&
+    d.trim.shells === 1 && d.trim.holes === 0, d.ok ? 'chi ' + d.census.chi + ', ' + d.trim.shells + ' shell, ' + d.trim.holes + ' holes' : d.reason);
+  if (d.ok) {
+    const want = Math.PI * RAD * RAD;
+    check('disc: the footprint is the disc\'s area, to 3%', Math.abs(d.trim.areaMm2 - want) / want < 0.03,
+      d.trim.areaMm2.toFixed(2) + ' mm^2 vs ' + want.toFixed(2));
+    check('disc: nothing of the plate left - no vertex beyond the disc\'s radius + 0.4 mm', reach(d.rawTris) <= RAD + 0.4,
+      'reach ' + reach(d.rawTris).toFixed(3) + ' mm of ' + RAD);
+    check('disc: far fewer triangles than the whole slab, and under its closed form',
+      d.triangles < 0.5 * whole.triangles && d.triangles <= R.plan(PX, PX, Object.assign({ trim: 'outer' }, O)).triangles,
+      d.triangles + ' vs ' + whole.triangles);
+    check('disc: sizeMm is the item\'s own box, ' + (2 * RAD) + ' mm across', Math.abs(d.sizeMm[0] - 2 * RAD) < 0.8 && Math.abs(d.sizeMm[1] - 2 * RAD) < 0.8,
+      d.sizeMm.map(x => +x.toFixed(2)).join(' x '));
+    /* every vertex the trim kept at a sample is where, and as high as, the whole slab's */
+    const wz = topZ(whole.rawTris), dz = topZ(d.rawTris);
+    let same = 0, differ = 0, cut = 0;
+    dz.forEach((z, k) => { if (!wz.has(k)) cut++; else if (wz.get(k) === z) same++; else differ++; });
+    check('disc: every kept sample is bit-identical to the whole slab\'s', differ === 0 && same > 0.5 * dz.size,
+      same + ' identical, ' + differ + ' differ, ' + cut + ' cut points');
+    const again = trimmed(disc(), { trim: 'outer' });
+    check('disc: the same picture and options make the same triangles, to the bit',
+      again.rawTris.length === d.rawTris.length && again.rawTris.every((v, i) => v === d.rawTris[i]));
+    canonical('trim disc', d);
+  }
+
+  /* --- a ring: the outline fills the eye, outline + holes keeps it --- */
+  const ring = () => gray(PX, PX, (x, y) => (dark(x, y, CX, CY, 25) && !dark(x, y, CX, CY, 10)) ? 0 : 255);
+  const ro = trimmed(ring(), { trim: 'outer' });
+  check('ring, Outline: the eye is filled - one shell, no hole, Euler 2', ro.ok && ro.census.closed && ro.census.chi === 2 &&
+    ro.trim.shells === 1 && ro.trim.holes === 0, ro.ok ? 'chi ' + ro.census.chi + ', ' + ro.trim.holesFilled + ' hole filled' : ro.reason);
+  const rh = trimmed(ring(), { trim: 'holes' });
+  check('ring, Outline + holes: the eye is kept - one shell, one hole, Euler 0', rh.ok && rh.census.closed && rh.census.chi === 0 &&
+    rh.trim.shells === 1 && rh.trim.holes === 1, rh.ok ? 'chi ' + rh.census.chi + ', ' + rh.trim.holes + ' hole' : rh.reason);
+  if (ro.ok && rh.ok) {
+    const eyeMm2 = Math.PI * (10 * 0.5) ** 2;
+    check('ring: the eye is a hole of the right size (area difference)', Math.abs((ro.trim.areaMm2 - rh.trim.areaMm2) - eyeMm2) / eyeMm2 < 0.05,
+      (ro.trim.areaMm2 - rh.trim.areaMm2).toFixed(2) + ' mm^2 vs ' + eyeMm2.toFixed(2));
+    let inEye = 0;
+    for (let i = 0; i < rh.rawTris.length; i += 9) {
+      const mx = (rh.rawTris[i] + rh.rawTris[i + 3] + rh.rawTris[i + 6]) / 3 - cxMm, my = (rh.rawTris[i + 1] + rh.rawTris[i + 4] + rh.rawTris[i + 7]) / 3 - cyMm;
+      if (Math.hypot(mx, my) < 10 * 0.5 - 0.6) inEye++;
+    }
+    /* the hole is a through-hole: no triangle, top, floor or wall, has its centre well inside the eye */
+    check('ring, Outline + holes: nothing is built across the eye', inEye === 0, inEye + ' triangles centred inside it');
+    canonical('trim ring outline', ro);
+    canonical('trim ring holes', rh, { chi: 0 });
+  }
+
+  /* --- a hairline slit into a bright pocket: bridged, or left a bay --- */
+  const pocketed = () => gray(PX, PX, (x, y) => {
+    if (!dark(x, y, CX, CY, 25)) return 255;
+    if (dark(x, y, CX, CY, 8)) return 255;                        /* a bright face inside the item */
+    if (x >= CX - 1 && x <= CX && y < CY && y >= CY - 25) return 255;   /* a 2 px slit up to the edge */
+    return 0;
+  });
+  const bay = trimmed(pocketed(), { trim: 'outer', trimBridgeMm: 0 });
+  const bridged = trimmed(pocketed(), { trim: 'outer', trimBridgeMm: 1 });
+  check('slit, Bridge 0: the pocket is a bay open to the ground, still closed, still no hole', bay.ok && bay.census.closed &&
+    bay.trim.holes === 0 && bay.trim.holesFilled === 0, bay.ok ? bay.trim.holesFilled + ' holes filled' : bay.reason);
+  check('slit, Bridge 1 mm: the slit is closed and the pocket filled - the whole disc, one shell, Euler 2', bridged.ok && bridged.census.closed &&
+    bridged.census.chi === 2 && bridged.trim.holesFilled >= 1, bridged.ok ? bridged.trim.holesFilled + ' hole filled, ' + bridged.trim.bridgedSamples + ' samples bridged' : bridged.reason);
+  if (bay.ok && bridged.ok) {
+    const slit = bridged.trim.areaMm2 - bay.trim.areaMm2;
+    check('slit: bridging gives back the pocket and the slit (about 50 mm^2 of disc)', slit > 40 && slit < 70, slit.toFixed(2) + ' mm^2');
+    canonical('trim slit bay', bay);
+    canonical('trim slit bridged', bridged);
+  }
+
+  /* --- specks: dust beside the item is dropped, and said --- */
+  const dusty = () => gray(PX, PX, (x, y) => {
+    if (dark(x, y, 38, 40, 22)) return 0;
+    if ((x === 6 || x === 7) && (y === 6 || y === 7)) return 0;
+    if ((x === 72 || x === 73) && (y === 70 || y === 71)) return 0;
+    if (x === 5 && y === 74) return 0;
+    return 255;
+  });
+  const dz2 = trimmed(dusty(), { trim: 'outer' });
+  check('specks: three bits of dust beside the item are dropped, one shell left', dz2.ok && dz2.trim.islandsDropped === 3 && dz2.trim.shells === 1,
+    dz2.ok ? dz2.trim.islandsDropped + ' dropped, ' + dz2.trim.shells + ' shell' : dz2.reason);
+  const dz0 = trimmed(dusty(), { trim: 'outer', trimSpeckPct: 0 });
+  check('specks: with the speck size at 0 they are kept, as their own shells', dz0.ok && dz0.trim.shells > 1 && dz0.census.chi === 2 * dz0.trim.shells,
+    dz0.ok ? dz0.trim.shells + ' shells, chi ' + dz0.census.chi : dz0.reason);
+  if (dz2.ok) canonical('trim specks dropped', dz2);
+
+  /* --- a rim: the outline grown outward, a plate edge round the item --- */
+  const rim = trimmed(disc(), { trim: 'outer', trimMarginMm: 2 });
+  if (rim.ok) {
+    const want = Math.PI * (RAD + 2) ** 2;
+    check('rim 2 mm: the footprint is the disc\'s plus a 2 mm ring, to 4%, still closed', rim.census.closed && Math.abs(rim.trim.areaMm2 - want) / want < 0.04,
+      rim.trim.areaMm2.toFixed(2) + ' mm^2 vs ' + want.toFixed(2));
+    check('rim 2 mm: reaches no further than 2 mm past the disc + 0.4', reach(rim.rawTris) <= RAD + 2 + 0.4, reach(rim.rawTris).toFixed(3) + ' mm');
+    canonical('trim rim 2 mm', rim);
+  } else check('rim 2 mm builds', false, rim.reason);
+
+  /* --- an item on the picture's edge: cut there by the picture, not by the trim --- */
+  const half = trimmed(gray(PX, PX, x => x < 30 ? 0 : 255), { trim: 'outer' });
+  if (half.ok) {
+    let atEdge = 0, beyond = 0;
+    for (let i = 0; i < half.rawTris.length; i += 3) { if (half.rawTris[i] === 0) atEdge++; if (half.rawTris[i] > 15 + 0.01) beyond++; }
+    check('item on the edge: closed, one shell, flush with the picture\'s edge, ending at its own', half.census.closed && half.trim.shells === 1 &&
+      atEdge > 0 && beyond === 0, atEdge + ' vertices on x = 0, ' + beyond + ' past 15 mm');
+    check('item on the edge: the box is 15 x 40 mm, to a sample', Math.abs(half.sizeMm[0] - 15) < 0.4 && Math.abs(half.sizeMm[1] - 40) < 1e-9, half.sizeMm.map(x => +x.toFixed(2)).join(' x '));
+    canonical('trim item on the edge', half);
+  } else check('item on the edge builds', false, half.reason);
+
+  /* --- a cut-off: a soft grey ground is plate only above the line --- */
+  const shadow = gray(PX, PX, (x, y) => dark(x, y, CX, CY, 20) ? 0 : (dark(x, y, CX, CY, 28) ? 215 : 255));
+  const lowCut = trimmed(shadow, { trim: 'outer', levels: 'smooth', trimAbove: 0.02 });
+  const highCut = trimmed(shadow, { trim: 'outer', levels: 'smooth', trimAbove: 0.5 });
+  check('cut-off: a higher cut-off leaves the soft shadow ring out, a lower one takes it in',
+    lowCut.ok && highCut.ok && highCut.trim.areaMm2 < 0.85 * lowCut.trim.areaMm2,
+    lowCut.ok && highCut.ok ? highCut.trim.areaMm2.toFixed(1) + ' vs ' + lowCut.trim.areaMm2.toFixed(1) + ' mm^2' : (lowCut.reason || highCut.reason));
+
+  /* --- refusals, by name --- */
+  const blank = R.build(gray(20, 20, () => 255), Object.assign({}, O, { trim: 'outer' }));
+  check('a picture with nothing above the base is refused by name, nothing made', !blank.ok && /nothing stands above the base/.test(blank.reason), blank.reason);
+  const grey = R.build(gray(20, 20, () => 128), Object.assign({}, O, { trim: 'outer' }));
+  check('a single flat grey is refused the same way', !grey.ok && /nothing stands above the base/.test(grey.reason), grey.reason);
+  const tiny = R.build(gray(PX, PX, (x, y) => (x === 40 && y === 40) ? 0 : 255), Object.assign({}, O, { trim: 'outer', trimSpeckPct: 0, trimBridgeMm: 0 }));
+  check('one lone sample (no speck filter, no bridge): either a closed little slab or refused by name - never a broken one',
+    tiny.ok ? tiny.census.closed : /too small|nothing/.test(tiny.reason),
+    tiny.ok ? 'built (' + tiny.triangles + ' triangles, closed ' + tiny.census.closed + ')' : tiny.reason);
+  check('a bad Trim mode is refused by name', !R.build(disc(), { trim: 'sideways' }).ok && /Trim/.test(R.build(disc(), { trim: 'sideways' }).reason));
+  check('a cut-off of 1 is refused by name', /cut-off/.test(R.build(disc(), { trim: 'outer', trimAbove: 1 }).reason || ''));
+  check('a negative rim is refused by name', /rim/.test(R.build(disc(), { trim: 'outer', trimMarginMm: -1 }).reason || ''));
+
+  /* --- the card's number: an upper bound when Trim is on --- */
+  const pl = R.plan(PX, PX, Object.assign({ trim: 'outer' }, O));
+  check('plan() with Trim on is the whole slab\'s closed form, flagged as an upper bound',
+    pl.upperBound === true && pl.triangles === whole.triangles && d.triangles <= pl.triangles, pl.triangles + ' triangles');
+
+  /* --- a real photo trimmed: still closed, still inside the budget --- */
+  const cam = readPNG(path.join(ROOT, 'fixtures', 'relief', 'camera.png'));
+  const camT = R.build(cam, { widthMm: 40, sampleMm: 0.4, levels: 4, trim: 'outer', trimAbove: 0.3 });
+  check('camera.png, Levels 4, trimmed: closed, within the budget', camT.ok && camT.census.closed && camT.triangles <= R.MAX_TRIANGLES,
+    camT.ok ? R.formatCount(camT.triangles) + ' triangles, ' + camT.trim.shells + ' shell(s), ' + camT.trim.holes + ' hole(s)' : camT.reason);
+  if (camT.ok) canonical('trim camera L4', camT, { chi: 2 * camT.trim.shells - 2 * camT.trim.holes });
+}
+
+console.log('\n=== 10. loads as a classic script ===');
 {
   const ctx = { Math, Map, Set, Float32Array, Float64Array, Int32Array, Uint8Array, Array, Object, String, isFinite, Error, window: {} };
   vm.createContext(ctx);

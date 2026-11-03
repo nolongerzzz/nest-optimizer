@@ -53,7 +53,8 @@
   var shown = null, previous = null;
 
   var CARD = ['inp-relief-width', 'inp-relief-base', 'inp-relief-relief', 'inp-relief-detail',
-              'sel-relief-levels', 'chk-relief-bright'];
+              'sel-relief-levels', 'chk-relief-bright',
+              'sel-relief-trim', 'inp-relief-trim-above', 'inp-relief-trim-bridge', 'inp-relief-trim-margin', 'inp-relief-trim-speck'];
 
   function el(id) { return document.getElementById(id); }
   function say(t, bad) { if (typeof setStatus === 'function') setStatus(t, !!bad); }
@@ -67,13 +68,20 @@
     var D = (typeof NSO_Relief !== 'undefined' && NSO_Relief) ? NSO_Relief.DEFAULTS : {};
     var lv = el('sel-relief-levels');
     var up = el('chk-relief-bright');
+    var tr = el('sel-relief-trim');
     return {
       widthMm: num('inp-relief-width', D.widthMm),
       baseMm: num('inp-relief-base', D.baseMm),
       reliefMm: num('inp-relief-relief', D.reliefMm),
       sampleMm: num('inp-relief-detail', D.sampleMm),
       levels: lv ? (lv.value === 'smooth' ? 'smooth' : parseInt(lv.value, 10)) : D.levels,
-      darkIsUp: !(up && up.checked)
+      darkIsUp: !(up && up.checked),
+      /* the card's cut-off is a percent of Relief, the module's a fraction */
+      trim: tr ? tr.value : 'off',
+      trimAbove: num('inp-relief-trim-above', D.trimAbove * 100) / 100,
+      trimBridgeMm: num('inp-relief-trim-bridge', D.trimBridgeMm),
+      trimMarginMm: num('inp-relief-trim-margin', D.trimMarginMm),
+      trimSpeckPct: num('inp-relief-trim-speck', D.trimSpeckPct)
     };
   }
 
@@ -81,6 +89,11 @@
   function refresh() {
     var line = el('relief-tris'), btn = el('btn-relief-make');
     if (!line) return null;
+    /* the trim's numbers mean nothing with Trim off */
+    var trimOn = !!el('sel-relief-trim') && el('sel-relief-trim').value !== 'off';
+    ['inp-relief-trim-above', 'inp-relief-trim-bridge', 'inp-relief-trim-margin', 'inp-relief-trim-speck'].forEach(function (id) {
+      if (el(id)) el(id).disabled = !trimOn;
+    });
     if (!picture) {
       line.textContent = 'Pick a picture';
       if (btn) btn.disabled = true;
@@ -92,7 +105,10 @@
       if (btn) btn.disabled = true;
       return p;
     }
-    line.textContent = '≈ ' + NSO_Relief.formatCount(p.triangles) + ' triangles';
+    /* a trim only drops triangles, so with it on the closed form is the ceiling */
+    line.textContent = p.upperBound
+      ? '≤ ' + NSO_Relief.formatCount(p.triangles) + ' triangles before the trim - fewer once the plate is clipped'
+      : '≈ ' + NSO_Relief.formatCount(p.triangles) + ' triangles';
     line.title = picture.name + ', ' + picture.w + ' x ' + picture.h + ' px - ' +
       NSO_Relief.formatCount(p.samples) + ' samples, ' + p.sizeMm[0].toFixed(1) + ' x ' +
       p.sizeMm[1].toFixed(1) + ' mm, ' + (+p.mmPerPixel.toPrecision(4)) + ' mm/px';

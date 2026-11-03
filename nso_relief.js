@@ -111,6 +111,68 @@
    it anyway.
 
    ---------------------------------------------------------------------------
+   TRIM - clip the flat plate off, leave the item's own edge
+   ---------------------------------------------------------------------------
+   A picture of one thing on a plain ground (a key on white, a cut-out, a
+   logo) makes a relief of that thing standing on a rectangle of flat base.
+   `trim` removes the rectangle and keeps the thing:
+
+     off     the full slab, as above. The default; nothing below runs.
+     outer   the item's outer edge only. Every hole inside it is filled - a
+             bright highlight on a metal face is not a hole in the part.
+     holes   the same, but a hole that is a real hole in the picture's item
+             (a key ring's eye) stays one, through the base and all.
+
+   How it decides, on the height grid the slab was already built from, after
+   Levels / Bright is up / the box filter - so it reads the relief the card
+   would print, not a second opinion about the picture:
+
+     raised    a sample is the item when its height is above `trimAbove` (a
+               fraction of Relief, default 0.1) - "anything above the base"
+     bridge    a gap in the item narrower than about `trimBridgeMm` (default
+               1 mm) is closed first - a morphological closing, whole
+               samples only - so a bright face joined to the ground by a
+               hairline slit is part of the item, not a bay in it
+     fill      the ground is what floods in from the picture's edge across
+               un-raised samples; an un-raised patch the flood does not
+               reach is a hole. `outer` fills them all; `holes` fills only
+               those under `trimSpeckPct` (default 1) of the item's area
+     islands   raised patches under `trimSpeckPct` of the largest one are
+               dropped: dust, a stray pixel, a JPEG halo that is not the item
+     margin    `trimMarginMm` grows the item's outline outward by that much,
+               a plate rim round the edge; 0 is the edge exactly
+     contour   the cleaned mask is blurred once (3 x 3 box) and cut where it
+               crosses one half: a smooth outline at a fraction of a sample,
+               not a staircase of samples. The blur only places the edge, it
+               never decides what is in: a sample the mask has in stays in
+               and one it has out stays out (the blurred value is pushed to
+               the right side of one half if it fell on the wrong one), so
+               the trimmed solid has exactly the mask's holes and bays. A
+               feature a sample wide keeps a hairline of an edge; Detail
+               finer keeps it properly
+
+   The cut is exact geometry, not a re-grid: every triangle of the slab's
+   top is clipped to the contour. A cut point is shared by the two triangles
+   either side of its grid edge, so it cannot open a crack; its height is the
+   top's own height there, so the surface is the untrimmed one up to the edge
+   (every kept sample is bit-identical). The cut point sits 0.1 to 0.9 of the
+   way along its edge - never on a sample - which is what keeps every cut
+   triangle a real triangle (no slivers) and every vertex a manifold one, at
+   a cost of at most a tenth of a sample in where the edge falls. The floor
+   is the same triangles under the top, wound the other way; the walls are
+   whatever edge the top has no neighbour across. So the trimmed slab is
+   closed by the same argument as the whole one.
+
+   What stays true and what does not: `triangles` is the real count, and the
+   budget gate is still the full slab's closed form (the trim can only drop
+   triangles, it does not decide whether the picture is too fine). The slab
+   keeps its frame - the item's own place in the picture - and `sizeMm` is
+   the item's bounding box. The edge census reports `shells` and `holes` and
+   closed means Euler = 2 shells - 2 holes, checked against a count of the
+   top's boundary loops taken separately. A picture with no raised sample is
+   refused by name.
+
+   ---------------------------------------------------------------------------
    THE BUDGET
    ---------------------------------------------------------------------------
    maxTriangles, default 400,000. A picture and detail that would exceed it is
@@ -125,8 +187,10 @@
   var MAX_TRIANGLES = 400000;
   var DEFAULTS = {
     widthMm: 60, baseMm: 2, reliefMm: 2, sampleMm: 0.3, levels: 2, darkIsUp: true,
-    maxTriangles: MAX_TRIANGLES
+    maxTriangles: MAX_TRIANGLES,
+    trim: 'off', trimAbove: 0.1, trimMarginMm: 0, trimSpeckPct: 1, trimBridgeMm: 1
   };
+  var TRIM_MODES = ['off', 'outer', 'holes'];
 
   /* ---------------------------------------------------------------- input */
 
@@ -300,6 +364,9 @@
     r.sampleMm = +r.sampleMm; r.maxTriangles = +r.maxTriangles;
     r.levels = levelsOf(o.levels === undefined ? DEFAULTS.levels : o.levels);
     r.darkIsUp = o.darkIsUp == null ? DEFAULTS.darkIsUp : !!o.darkIsUp;
+    r.trim = (o.trim == null || o.trim === '' || o.trim === false) ? 'off' : String(o.trim).toLowerCase();
+    r.trimAbove = +r.trimAbove; r.trimMarginMm = +r.trimMarginMm; r.trimSpeckPct = +r.trimSpeckPct;
+    r.trimBridgeMm = +r.trimBridgeMm;
     return r;
   }
 
@@ -324,6 +391,13 @@
       return 'Levels must be a whole number, 2 or more, or smooth';
     }
     if (!(o.maxTriangles > 0)) return 'the triangle budget must be positive';
+    if (TRIM_MODES.indexOf(o.trim) < 0) return 'Trim must be one of ' + TRIM_MODES.join(', ') + ', not ' + o.trim;
+    if (o.trim !== 'off') {
+      if (!(o.trimAbove >= 0 && o.trimAbove < 1)) return 'Trim cut-off must be from 0 up to (not including) 1 of the relief';
+      if (!(o.trimMarginMm >= 0) || !isFinite(o.trimMarginMm)) return 'Trim rim must be 0 mm or more';
+      if (!(o.trimSpeckPct >= 0 && o.trimSpeckPct <= 100)) return 'Trim speck size must be 0 to 100 % of the item';
+      if (!(o.trimBridgeMm >= 0) || !isFinite(o.trimBridgeMm)) return 'Trim gap bridge must be 0 mm or more';
+    }
     return null;
   }
 
@@ -338,7 +412,8 @@
     var r = {
       ok: tris <= o.maxTriangles, nx: g.nx, ny: g.ny, samples: g.nx * g.ny, triangles: tris,
       mmPerPixel: o.widthMm / width, sampleMm: o.sampleMm, cellMm: [g.dx, g.dy],
-      sizeMm: [g.widthMm, g.heightMm, o.baseMm + Math.max(0, o.reliefMm)], budget: o.maxTriangles
+      sizeMm: [g.widthMm, g.heightMm, o.baseMm + Math.max(0, o.reliefMm)], budget: o.maxTriangles,
+      trim: o.trim, upperBound: o.trim !== 'off'      /* a trim only ever drops triangles: this is the untrimmed count */
     };
     if (!r.ok) {
       r.suggestSampleMm = fittingSample(width, height, o.widthMm, o.maxTriangles);
@@ -449,6 +524,312 @@
     return out;
   }
 
+  /* ----------------------------------------------------------------- trim */
+
+  /* Connected components of the cells equal to `want` on an nx x ny grid.
+     conn8: diagonal neighbours join; otherwise only the four sides do.
+     -> { lab: Int32Array (component index, -1 where the cell is not `want`),
+          area: [cells per component], border: [true when it touches the edge] } */
+  function components(m, nx, ny, want, conn8) {
+    var lab = new Int32Array(nx * ny).fill(-1), area = [], border = [], stack = [];
+    var s0, c = 0, i, j, p, q, di, dj, ni, nj, a, b;
+    for (s0 = 0; s0 < nx * ny; s0++) {
+      if (m[s0] !== want || lab[s0] >= 0) continue;
+      a = 0; b = false;
+      lab[s0] = c; stack.push(s0);
+      while (stack.length) {
+        p = stack.pop(); a++;
+        i = p % nx; j = (p - i) / nx;
+        if (i === 0 || j === 0 || i === nx - 1 || j === ny - 1) b = true;
+        for (dj = -1; dj <= 1; dj++) {
+          for (di = -1; di <= 1; di++) {
+            if ((di === 0 && dj === 0) || (!conn8 && di !== 0 && dj !== 0)) continue;
+            ni = i + di; nj = j + dj;
+            if (ni < 0 || nj < 0 || ni >= nx || nj >= ny) continue;
+            q = nj * nx + ni;
+            if (m[q] === want && lab[q] < 0) { lab[q] = c; stack.push(q); }
+          }
+        }
+      }
+      area.push(a); border.push(b); c++;
+    }
+    return { lab: lab, area: area, border: border, count: c };
+  }
+
+  /* Squared distance, in cells, from every cell to the nearest cell set in m
+     (Felzenszwalb & Huttenlocher's exact transform, one pass per axis). */
+  function distSq(m, nx, ny) {
+    var INF = 1e20, f = new Float64Array(Math.max(nx, ny)), d = new Float64Array(Math.max(nx, ny));
+    var v = new Int32Array(Math.max(nx, ny)), z = new Float64Array(Math.max(nx, ny) + 1);
+    var g = new Float64Array(nx * ny), i, j;
+    function pass(len) {
+      var k = 0, q, s;
+      v[0] = 0; z[0] = -INF; z[1] = INF;
+      for (q = 1; q < len; q++) {
+        s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+        while (s <= z[k]) { k--; s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]); }
+        k++; v[k] = q; z[k] = s; z[k + 1] = INF;
+      }
+      k = 0;
+      for (q = 0; q < len; q++) {
+        while (z[k + 1] < q) k++;
+        d[q] = (q - v[k]) * (q - v[k]) + f[v[k]];
+      }
+    }
+    for (i = 0; i < nx * ny; i++) g[i] = m[i] ? 0 : INF;
+    for (i = 0; i < nx; i++) {
+      for (j = 0; j < ny; j++) f[j] = g[j * nx + i];
+      pass(ny);
+      for (j = 0; j < ny; j++) g[j * nx + i] = d[j];
+    }
+    for (j = 0; j < ny; j++) {
+      for (i = 0; i < nx; i++) f[i] = g[j * nx + i];
+      pass(nx);
+      for (i = 0; i < nx; i++) g[j * nx + i] = d[i];
+    }
+    return g;
+  }
+
+  /* Morphological closing by rc samples (>= 1): dilate, then erode by the same
+     distance, so a gap under about 2 rc closes and everything else stays. The
+     picture's own edge does not erode the item. */
+  function closeMask(m, nx, ny, rc) {
+    var n = nx * ny, i, lim = rc * rc, d = distSq(m, nx, ny), D = new Uint8Array(n);
+    for (i = 0; i < n; i++) D[i] = d[i] <= lim ? 1 : 0;
+    var inv = new Uint8Array(n);
+    for (i = 0; i < n; i++) inv[i] = D[i] ? 0 : 1;
+    var e = distSq(inv, nx, ny), out = new Uint8Array(n);
+    for (i = 0; i < n; i++) out[i] = (D[i] && e[i] > lim) ? 1 : 0;
+    return out;
+  }
+
+  /* The item's mask on the sample grid: 1 where the item is, after the
+     cut-off, islands, holes and rim described at the head of the file. */
+  function trimMask(hgt, g, o) {
+    var nx = g.nx, ny = g.ny, n = nx * ny, i, k;
+    var m = new Uint8Array(n), raised = 0;
+    for (i = 0; i < n; i++) if (hgt[i] > o.trimAbove) { m[i] = 1; raised++; }
+    if (!raised) {
+      return { ok: false, reason: 'nothing stands above the base (no sample is over ' +
+        (o.trimAbove * 100) + '% of the relief) - there is no outline to trim to; lower the cut-off' };
+    }
+    var info = { raisedSamples: raised, bridgedSamples: 0, islandsDropped: 0, islandSamplesDropped: 0, holesFilled: 0, holeSamplesFilled: 0 };
+
+    /* bridge: close hairline gaps first, in whole samples */
+    var rb = o.trimBridgeMm / ((g.dx + g.dy) / 2);
+    if (rb >= 1) {
+      var cl = closeMask(m, nx, ny, rb);
+      for (i = 0; i < n; i++) if (cl[i] && !m[i]) { m[i] = 1; info.bridgedSamples++; }
+    }
+
+    /* islands: raised patches (8-connected) far smaller than the largest */
+    var fg = components(m, nx, ny, 1, true), big = 0;
+    for (k = 0; k < fg.count; k++) if (fg.area[k] > big) big = fg.area[k];
+    var minIsland = o.trimSpeckPct / 100 * big;
+    for (i = 0; i < n; i++) {
+      k = fg.lab[i];
+      if (k >= 0 && fg.area[k] < minIsland) { m[i] = 0; info.islandSamplesDropped++; }
+    }
+    for (k = 0; k < fg.count; k++) if (fg.area[k] < minIsland) info.islandsDropped++;
+
+    /* holes: ground (4-connected) the picture's edge does not reach */
+    var item = 0;
+    for (i = 0; i < n; i++) item += m[i];
+    var bg = components(m, nx, ny, 0, false), minHole = o.trimSpeckPct / 100 * item;
+    for (k = 0; k < bg.count; k++) {
+      if (bg.border[k]) continue;
+      if (o.trim === 'holes' && bg.area[k] >= minHole) continue;
+      info.holesFilled++; info.holeSamplesFilled += bg.area[k];
+    }
+    for (i = 0; i < n; i++) {
+      k = bg.lab[i];
+      if (k >= 0 && !bg.border[k] && !(o.trim === 'holes' && bg.area[k] >= minHole)) m[i] = 1;
+    }
+
+    /* rim: every sample within the margin of the item joins it */
+    var rc = o.trimMarginMm / ((g.dx + g.dy) / 2);
+    if (rc > 0) {
+      var d2 = distSq(m, nx, ny), lim = rc * rc;
+      for (i = 0; i < n; i++) if (!m[i] && d2[i] <= lim) m[i] = 1;
+    }
+    info.itemSamples = 0;
+    for (i = 0; i < n; i++) info.itemSamples += m[i];
+    return { ok: true, mask: m, info: info };
+  }
+
+  /* One 3 x 3 box blur of the mask, edge samples repeated outward. */
+  function blur3(m, nx, ny) {
+    var out = new Float64Array(nx * ny), i, j, di, dj, s, ii, jj;
+    for (j = 0; j < ny; j++) {
+      for (i = 0; i < nx; i++) {
+        s = 0;
+        for (dj = -1; dj <= 1; dj++) {
+          jj = Math.min(ny - 1, Math.max(0, j + dj));
+          for (di = -1; di <= 1; di++) {
+            ii = Math.min(nx - 1, Math.max(0, i + di));
+            s += m[jj * nx + ii];
+          }
+        }
+        out[j * nx + i] = s / 9;
+      }
+    }
+    return out;
+  }
+
+  /* The slab clipped to the mask's contour. Same node grid as buildMesh (the
+     (nx + 2) x (ny + 2) one with the rim ring), same diagonal in every quad,
+     each top triangle cut where the blurred mask crosses one half. See the
+     TRIM section at the head of the file. */
+  function buildTrimmed(hgt, g, o, mask) {
+    var nx = g.nx, ny = g.ny, dx = g.dx, dy = g.dy, Hm = g.heightMm;
+    var NX = nx + 2, NY = ny + 2, N = NX * NY, a, b;
+    var xs = new Float64Array(NX), ys = new Float64Array(NY);
+    xs[0] = 0; xs[NX - 1] = g.widthMm;
+    for (a = 1; a <= nx; a++) xs[a] = (a - 0.5) * dx;
+    ys[0] = 0; ys[NY - 1] = Hm;
+    for (b = 1; b <= ny; b++) ys[b] = (b - 0.5) * dy;
+
+    var sm = blur3(mask, nx, ny);
+    var F = new Float64Array(N), px = new Float64Array(N), py = new Float64Array(N), pz = new Float64Array(N);
+    for (b = 0; b < NY; b++) {
+      var sj = Math.min(ny - 1, Math.max(0, b - 1));
+      for (a = 0; a < NX; a++) {
+        var si = Math.min(nx - 1, Math.max(0, a - 1)), nd = b * NX + a;
+        var sv = sm[sj * nx + si] - 0.5;
+        F[nd] = mask[sj * nx + si] ? (sv > 0.01 ? sv : 0.01) : (sv < -0.01 ? sv : -0.01);
+        px[nd] = xs[a]; py[nd] = Hm - ys[b];
+        pz[nd] = o.baseMm + hgt[sj * nx + si] * o.reliefMm;
+      }
+    }
+
+    var vx = [], vy = [], vz = [];
+    var nodeId = new Int32Array(N).fill(-1), cutId = new Map();
+    function nodeV(nd) {
+      if (nodeId[nd] < 0) { nodeId[nd] = vx.length; vx.push(px[nd]); vy.push(py[nd]); vz.push(pz[nd]); }
+      return nodeId[nd];
+    }
+    /* the cut point on the edge between an inside node and an outside one:
+       the same vertex whichever of the two triangles asks for it */
+    function cutV(inN, outN) {
+      var key = inN < outN ? inN * N + outN : outN * N + inN, id = cutId.get(key);
+      if (id !== undefined) return id;
+      var t = F[inN] / (F[inN] - F[outN]);
+      t = t < 0.1 ? 0.1 : (t > 0.9 ? 0.9 : t);
+      id = vx.length;
+      vx.push(px[inN] + t * (px[outN] - px[inN]));
+      vy.push(py[inN] + t * (py[outN] - py[inN]));
+      vz.push(pz[inN] + t * (pz[outN] - pz[inN]));
+      cutId.set(key, id);
+      return id;
+    }
+
+    var top = [];
+    function d2(i, j) { var ex = vx[i] - vx[j], ey = vy[i] - vy[j]; return ex * ex + ey * ey; }
+    function clip(n0, n1, n2) {
+      var nds = [n0, n1, n2], poly = [], e, u, w, iu, iw;
+      for (e = 0; e < 3; e++) {
+        u = nds[e]; w = nds[(e + 1) % 3]; iu = F[u] > 0; iw = F[w] > 0;
+        if (iu) poly.push(nodeV(u));
+        if (iu !== iw) poly.push(iu ? cutV(u, w) : cutV(w, u));
+      }
+      if (poly.length < 3) return;
+      top.push(poly[0], poly[1], poly[2]);
+      if (poly.length === 4) {
+        /* a quad: split on its shorter diagonal */
+        if (d2(poly[0], poly[2]) <= d2(poly[1], poly[3])) top.push(poly[0], poly[2], poly[3]);
+        else { top.length -= 3; top.push(poly[0], poly[1], poly[3], poly[1], poly[2], poly[3]); }
+      }
+    }
+    for (b = 0; b < NY - 1; b++) {
+      for (a = 0; a < NX - 1; a++) {
+        var q00 = b * NX + a, q10 = q00 + 1, q01 = q00 + NX, q11 = q01 + 1;
+        clip(q01, q11, q10);
+        clip(q01, q10, q00);
+      }
+    }
+    var nTop = top.length / 3;
+    if (!nTop) {
+      return { ok: false, reason: 'the item is too small to hold an outline at ' + o.sampleMm +
+        ' mm/sample (under about two samples across) - make Detail finer or lower the cut-off' };
+    }
+    var n = vx.length, t, e2;
+
+    /* walls go wherever the top has no neighbour across an edge */
+    var have = new Set(), bnd = [];
+    for (t = 0; t < nTop; t++) {
+      for (e2 = 0; e2 < 3; e2++) have.add(top[t * 3 + e2] * n + top[t * 3 + (e2 + 1) % 3]);
+    }
+    for (t = 0; t < nTop; t++) {
+      for (e2 = 0; e2 < 3; e2++) {
+        var p = top[t * 3 + e2], q = top[t * 3 + (e2 + 1) % 3];
+        if (!have.has(q * n + p)) bnd.push(p, q);
+      }
+    }
+    var nWall = bnd.length / 2;
+    var tri = new Int32Array((nTop * 2 + nWall * 2) * 3), k = 0;
+    function put(i, j, l) { tri[k++] = i; tri[k++] = j; tri[k++] = l; }
+    for (t = 0; t < nTop; t++) {
+      var i0 = top[t * 3], i1 = top[t * 3 + 1], i2 = top[t * 3 + 2];
+      put(i0, i1, i2);
+      put(n + i0, n + i2, n + i1);
+    }
+    for (t = 0; t < nWall; t++) {
+      var wp = bnd[t * 2], wq = bnd[t * 2 + 1];
+      put(wq, wp, n + wp);
+      put(wq, n + wp, n + wq);
+    }
+
+    var pos = new Float64Array(n * 2 * 3), i;
+    for (i = 0; i < n; i++) {
+      pos[i * 3] = pos[(n + i) * 3] = vx[i];
+      pos[i * 3 + 1] = pos[(n + i) * 3 + 1] = vy[i];
+      pos[i * 3 + 2] = vz[i];
+      pos[(n + i) * 3 + 2] = 0;
+    }
+
+    /* the topology, counted two ways: the Euler characteristic off the
+       index buffer, and shells and holes off the top's own boundary loops */
+    var next = new Map(), pinched = 0, loops = 0, seen = new Set();
+    for (t = 0; t < nWall; t++) {
+      if (next.has(bnd[t * 2])) pinched++; else next.set(bnd[t * 2], bnd[t * 2 + 1]);
+    }
+    next.forEach(function (_, start) {
+      if (seen.has(start)) return;
+      var cur = start;
+      while (!seen.has(cur) && next.has(cur)) { seen.add(cur); cur = next.get(cur); }
+      loops++;
+    });
+    var uf = new Int32Array(n);
+    for (i = 0; i < n; i++) uf[i] = i;
+    function find(x) { while (uf[x] !== x) { uf[x] = uf[uf[x]]; x = uf[x]; } return x; }
+    for (t = 0; t < nTop; t++) {
+      uf[find(top[t * 3 + 1])] = find(top[t * 3]);
+      uf[find(top[t * 3 + 2])] = find(top[t * 3]);
+    }
+    var roots = new Set();
+    for (t = 0; t < nTop; t++) roots.add(find(top[t * 3]));
+    var shells = roots.size, holes = loops - shells;
+
+    var cen = census(tri, n * 2);
+    cen.shells = shells; cen.holes = holes; cen.loops = loops; cen.pinched = pinched;
+    cen.expectedChi = 2 * shells - 2 * holes;
+    cen.closed = cen.open === 0 && cen.nonManifold === 0 && cen.windingClashes === 0 &&
+      cen.degenerate === 0 && pinched === 0 && cen.chi === cen.expectedChi;
+
+    var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, zMax = -Infinity, area = 0;
+    for (i = 0; i < n; i++) {
+      if (vx[i] < x0) x0 = vx[i]; if (vx[i] > x1) x1 = vx[i];
+      if (vy[i] < y0) y0 = vy[i]; if (vy[i] > y1) y1 = vy[i];
+      if (vz[i] > zMax) zMax = vz[i];
+    }
+    for (t = 0; t < nTop; t++) {
+      var A = top[t * 3], B = top[t * 3 + 1], C = top[t * 3 + 2];
+      area += ((vx[B] - vx[A]) * (vy[C] - vy[A]) - (vx[C] - vx[A]) * (vy[B] - vy[A])) / 2;
+    }
+    return { ok: true, pos: pos, tri: tri, V: n * 2, T: tri.length / 3, census: cen,
+             bboxMm: [x0, y0, x1, y1], zTop: zMax, areaMm2: area, nTop: nTop };
+  }
+
   /* ---------------------------------------------------------------- build */
 
   function build(img, opts) {
@@ -474,17 +855,38 @@
     var g = gridFor(W, H, o.widthMm, o.sampleMm);
     var hgt = boxResample(q, W, H, g.nx, g.ny);
 
-    var mesh = buildMesh(hgt, g, o);
-    var cen = census(mesh.tri, mesh.V);
+    var mesh, cen, trimInfo = null;
+    if (o.trim === 'off') {
+      mesh = buildMesh(hgt, g, o);
+      cen = census(mesh.tri, mesh.V);
+    } else {
+      var tm = trimMask(hgt, g, o);
+      if (!tm.ok) return { ok: false, reason: tm.reason };
+      mesh = buildTrimmed(hgt, g, o, tm.mask);
+      if (!mesh.ok) return { ok: false, reason: mesh.reason };
+      cen = mesh.census;
+      if (mesh.T > o.maxTriangles) {
+        return { ok: false, refused: 'budget', triangles: mesh.T, budget: o.maxTriangles,
+                 reason: 'the trimmed slab is ' + fmt(mesh.T) + ' triangles, over the ' + fmt(o.maxTriangles) + ' budget' };
+      }
+      trimInfo = Object.assign({
+        mode: o.trim, above: o.trimAbove, marginMm: o.trimMarginMm, speckPct: o.trimSpeckPct,
+        bridgeMm: o.trimBridgeMm, keptPct: 100 * mesh.areaMm2 / (g.widthMm * g.heightMm), areaMm2: mesh.areaMm2,
+        bboxMm: mesh.bboxMm, shells: cen.shells, holes: cen.holes, fullTriangles: pl.triangles
+      }, tm.info);
+    }
     if (!cen.closed) {
       return { ok: false, reason: 'the slab did not close (' + cen.open + ' open, ' + cen.nonManifold +
-               ' non-manifold, ' + cen.windingClashes + ' winding clash(es), chi ' + cen.chi + ') - nothing made',
+               ' non-manifold, ' + cen.windingClashes + ' winding clash(es), chi ' + cen.chi +
+               (trimInfo ? ', expected ' + cen.expectedChi + ', ' + cen.pinched + ' pinch(es)' : '') + ') - nothing made',
                census: cen };
     }
 
     var hMax = 0, hMin = 1;
     for (var k = 0; k < hgt.length; k++) { if (hgt[k] > hMax) hMax = hgt[k]; if (hgt[k] < hMin) hMin = hgt[k]; }
-    var zTop = o.baseMm + Math.max(hMax * o.reliefMm, hMin * o.reliefMm, 0);
+    var zTop = trimInfo ? mesh.zTop : o.baseMm + Math.max(hMax * o.reliefMm, hMin * o.reliefMm, 0);
+    var sizeMm = trimInfo ? [mesh.bboxMm[2] - mesh.bboxMm[0], mesh.bboxMm[3] - mesh.bboxMm[1], zTop]
+                          : [g.widthMm, g.heightMm, zTop];
     var r = {
       ok: true,
       rawTris: toSoup(mesh),
@@ -492,7 +894,8 @@
       triangles: mesh.T,
       mmPerPixel: o.widthMm / W,
       grid: { nx: g.nx, ny: g.ny, dx: g.dx, dy: g.dy },
-      sizeMm: [g.widthMm, g.heightMm, zTop],
+      sizeMm: sizeMm,
+      trim: trimInfo,
       heights: hgt,
       contrast: { source: c.source, lo: c.lo, hi: c.hi, p1: c.p1, p99: c.p99, min: c.min, max: c.max },
       census: cen,
@@ -503,6 +906,12 @@
       o.sampleMm + ' mm, ' + (o.levels ? o.levels + ' levels' : 'smooth') + ', ' +
       (o.darkIsUp ? 'dark' : 'bright') + ' is up, ' + (+r.mmPerPixel.toPrecision(4)) + ' mm/px - ' +
       fmt(r.triangles) + ' triangles, closed (chi ' + cen.chi + ')';
+    if (trimInfo) {
+      r.describe += ' - trimmed to the item\'s ' + (o.trim === 'holes' ? 'outline and holes' : 'outer edge') +
+        ': ' + trimInfo.keptPct.toFixed(1) + '% of the slab kept, ' + trimInfo.shells + ' shell' +
+        (trimInfo.shells === 1 ? '' : 's') + (trimInfo.holes ? ', ' + trimInfo.holes + ' hole' + (trimInfo.holes === 1 ? '' : 's') : '') +
+        (trimInfo.islandsDropped ? ', ' + trimInfo.islandsDropped + ' speck' + (trimInfo.islandsDropped === 1 ? '' : 's') + ' dropped' : '');
+    }
     return r;
   }
 
@@ -510,7 +919,8 @@
     MAX_TRIANGLES: MAX_TRIANGLES, DEFAULTS: DEFAULTS,
     grayscale: grayscale, contrast: contrast, quantize: quantize, boxResample: boxResample,
     triangleCount: triangleCount, gridFor: gridFor, fittingSample: fittingSample,
-    plan: plan, build: build, census: census, formatCount: fmt
+    plan: plan, build: build, census: census, formatCount: fmt,
+    trimMask: trimMask, TRIM_MODES: TRIM_MODES
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (root) root.NSO_Relief = api;

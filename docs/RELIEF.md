@@ -67,12 +67,91 @@ closed and passed the canonical checker, and it could not be sculpted
 With the floor a grid under the top, Brush, Smooth and Cut pass their own gates
 and the checker, and a fresh slab has 0 slivers.
 
+## 1b. Trim - clip the flat plate off, leave the item's own edge
+
+A picture of one thing on a plain ground (a key on white, a cut-out, a logo)
+makes a relief of that thing standing on a rectangle of flat base. **Trim**
+removes the rectangle and keeps the thing: the slab's outline becomes the
+outline of whatever stands above the base. It is an option on the same build -
+`trim: 'off' | 'outer' | 'holes'`, default `'off'`, in which case none of this
+runs and the slab is byte-for-byte what it was.
+
+| Trim | keeps |
+|---|---|
+| Off | the whole rectangle |
+| Outline (`outer`) | the item's outer edge. Every hole inside is filled - a bright highlight on a metal face is not a hole in the part |
+| Outline + holes (`holes`) | the same, but a real hole (a key ring's eye) stays one, through the base too |
+
+It reads the **height grid the slab was already built from** - after Levels,
+Bright is up and the box filter - so it outlines the relief the card would
+print, not a second opinion about the picture. In order:
+
+| step | option (default) | what it does |
+|---|---|---|
+| raised | `trimAbove` (0.1, a fraction of Relief; the card's Cut-off is that as a %) | a sample is the item when its height is above this: "anything above the base" |
+| bridge | `trimBridgeMm` (1) | a morphological closing, whole samples only: a gap in the item narrower than about this is closed, so a bright face joined to the ground by a hairline slit is part of the item, not a bay in it |
+| islands | `trimSpeckPct` (1) | raised patches under this % of the largest are dropped: dust, a stray pixel, a JPEG halo |
+| holes | same | the ground is what floods in from the picture's edge; an un-raised patch it never reaches is a hole. `outer` fills them all, `holes` fills those under the same % of the item |
+| rim | `trimMarginMm` (0) | grow the outline outward by this much: a rim of base round the item. 0 is the edge exactly |
+| contour | - | the cleaned mask is blurred once (3 x 3 box) and cut where it crosses one half: a smooth edge at a fraction of a sample, not a staircase |
+
+**The cut is geometry, not a re-grid.** Every triangle of the slab's top is
+clipped to the contour; a cut point is shared by the two triangles either side
+of its grid edge so it cannot open a crack, and its height is the top's own
+height there. Every kept sample is bit-identical to the whole slab's (the test
+reads it off the soup). The floor is the same triangles under the top wound the
+other way; the walls go wherever the top has no neighbour across an edge. So
+it is closed by the same argument the whole slab is.
+
+Two decisions that were measured, not assumed:
+
+- **The blur only places the edge; it never decides what is in.** The first
+  version cut at the blurred mask's one-half crossing alone. On a key photo that
+  closed a hairline slit into a pocket of bright metal, turned the pocket into a
+  hole, and `Outline` reported one hole - which is the one thing it must never
+  do. The blurred value is now pushed to the right side of one half where it
+  fell on the wrong one, so the trimmed solid has exactly the mask's holes and
+  bays. A feature one sample wide keeps a hairline of an edge; Detail finer
+  keeps it properly.
+- **Cut points sit 0.1 to 0.9 of the way along an edge, never on a sample.**
+  That keeps every cut triangle a real triangle (0 slivers in the canonical
+  checker, aspect limit 100) and every vertex a manifold one, at a cost of at
+  most a tenth of a sample in where the edge falls (0.03 mm at 0.3 mm/sample).
+
+What stays true and what does not. `triangles` is the real count; the budget
+gate is still the whole slab's closed form (a trim only drops triangles), so the
+card's live line becomes a ceiling - "<= N triangles before the trim" - and a
+trimmed slab that somehow exceeds the budget is refused by name. The slab keeps
+its frame (the item's own place in the picture) and `sizeMm` is the item's
+bounding box. `census.shells` and `census.holes` are reported, and closed means
+Euler = 2 shells - 2 holes against a count of the top's boundary loops taken
+separately, so a slab with a real hole is closed at chi 0 and not "failed".
+A picture with no raised sample is refused by name ("nothing stands above the
+base ... lower the cut-off").
+
+**On the key photo** (a cut-out, 1542 x 867 px, 60 mm wide, base 0.1, relief 4.5
+mm, 0.3 mm/sample, smooth): the whole slab is 92,108 triangles on a 60 x 33.7 mm
+plate; `Outline` is 44,504 triangles, 1 shell, 0 holes, chi 2, canonical PASS
+with 0 slivers and no piercing pairs; `Outline + holes` at the default Specks 1% keeps
+three holes (chi -4): the key ring's eye (15.8 mm^2) and two bright blade pockets
+(about 11 mm^2 each, 1.2% of the item). Specks 1.5 keeps only the eye (1 hole,
+chi 0, canonical PASS, 0 slivers); 2 fills that too. The window is narrow, which
+is why Specks is on the card.
+
+**Limits, said plainly.** It outlines by *height*, so a bright part of the item
+that touches the ground (a specular strip on a blade with no dark rim) is "plate"
+to it; Bridge closes gaps up to about twice its value and a wider gap stays a
+bay. If the picture has real transparency, an alpha-based outline would be exact
+- the card composites over white and drops alpha, so that is not done here.
+
 ## 2. The card - Gen+ -> Picture, and the loop through G-scope
 
 Choose picture... (`image/*`, and `.heic` / `.heif` listed too), then Width /
 Base / Relief mm, Detail mm/sample, Levels (2, 4, 8, 16, Smooth), Bright is
-up, the live line `~ N,NNN triangles` (`NSO_Relief.plan`, so it is the count
-the slab will have), Make piece and Undo.
+up, **Trim** (Off / Outline / Outline + holes, with Cut-off %, Bridge mm, Rim mm and
+Specks %, dim while Trim is Off - section 1b), the live line `~ N,NNN triangles`
+(`NSO_Relief.plan`, so it is the count the slab will have; with Trim on it is the
+ceiling, `<= N,NNN triangles before the trim`), Make piece and Undo.
 
 The picture is read at full size through the browser's own decoder (an `<img>`,
 a canvas on white, `getImageData`) - not downscaled first as Trace raster does,
@@ -141,9 +220,9 @@ a steep relief is the brush's behaviour, and changing it is out of this ticket.
 
 | script | what | checks |
 |---|---|---|
-| `relief:test` | the generator: checker, gradient, 1-px line, photo at 2/4/16/smooth, each turned 90 degrees, budget, plan = build, edge cases, vm load; the canonical checker on every slab | 277 |
+| `relief:test` | the generator: checker, gradient, 1-px line, photo at 2/4/16/smooth, each turned 90 degrees, budget, plan = build, edge cases, Trim (disc, ring, slit, specks, rim, edge item, cut-off, refusals), vm load; the canonical checker on every slab | 370 |
 | `relief:sculpt` | Brush, Smooth, Cut, STL, canonical after each | 12 |
-| `relief:drive` | the card in real Chromium; the loop - Make into G-scope, Back to Picture with every setting kept, Make again replacing, Undo one step, Export to plate named and posed on free plate, the app's Undo; the three pictures, the line, the plate untouched, Brush / Smooth / Cut / Export, the 4000 x 4000 refusal, placement on a busy and a too-small bed, the HEIC refusal | 65 |
+| `relief:drive` | the card in real Chromium; the loop - Make into G-scope, Back to Picture with every setting kept, Make again replacing, Undo one step, Export to plate named and posed on free plate, the app's Undo; the three pictures, the line, the plate untouched, Brush / Smooth / Cut / Export, the 4000 x 4000 refusal, placement on a busy and a too-small bed, the HEIC refusal, Trim on the real card (4b) | 73 |
 | `relief:shots` | `relief:drive`, keeping its screenshots and numbers in `tools/relief-out/` (gitignored - screenshots go in the PR, never in the repo) | - |
 
 Not here, on purpose: region lift, vectorising, edge detection, colour.

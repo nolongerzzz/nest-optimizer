@@ -93,6 +93,7 @@ merging its list by hand. The list below is generated.
 - [Slice card: the plate sliced for its printer (print-slice-main-plate)](handoff/print-slice-main-plate.md)
 - [Punch - engine (2026-10-20)](handoff/punch-engine.md)
 - [Punch - the card (2026-10-20)](handoff/punch-the-card.md)
+- [Picture -> Trim: clip the flat plate off a relief, keep the item's own edge (2026-11-03)](handoff/relief-trim-outline.md)
 - [Repair loop - Patch, Cap and Bridge from the Findings card (2026-10-16)](handoff/repair-loop-patch-cap-and-bridge-from-the-findings-card.md)
 - [Resurface - fill / repair any surface work (2026-10-31)](handoff/resurface.md)
 - [Right-click menu: Undo, Redo, Clone, Mirror, Export, Clear plate (ctx-menu, 2026-10-22)](handoff/right-click-menu-undo-redo-clone-mirror-export-clear-plate.md)
