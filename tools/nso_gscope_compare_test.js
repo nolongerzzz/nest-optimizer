@@ -50,6 +50,18 @@ withApp(async (page, logs) => {
   await page.waitForFunction(() => NSO_MICROSCOPE.plate() === 'take' && NSO_MICROSCOPE.getDoc() && NSO_MICROSCOPE.getDoc().kind === 'toolpath', null, { timeout: 30000 });
   await frames(page);
 
+  console.log('\n=== stops beside the slider: a click puts the range on one layer, whole ===');
+  {
+    const st0 = await page.evaluate(() => { const h = document.getElementById('ms-zr-stops'); const b = h ? Array.from(h.querySelectorAll('.ms-zr-stop')) : []; return { has: !!h, shown: h && !h.hidden, n: b.length, kinds: Array.from(new Set(b.map(x => x.className.replace('ms-zr-stop ', '').replace(/ on/, '')))), steps: NSO_MICROSCOPE.getZRange ? null : null }; });
+    check('the slider has stops: one tick per plate layer, in its own colour', st0.has && st0.shown && st0.n > 0, J(st0));
+    const pick = await page.evaluate(() => { const b = document.querySelectorAll('#ms-zr-stops .ms-zr-stop'); const k = b[Math.floor(b.length / 2)]; k.click(); const r = NSO_MICROSCOPE.zRange ? NSO_MICROSCOPE.zRange() : null; return { r: r && { lo: r.lo, hi: r.hi, part: r.part, steps: r.steps }, on: document.querySelectorAll('#ms-zr-stops .ms-zr-stop.on').length }; });
+    await frames(page); await shot('zr-stops');
+    check('a click on a stop puts both handles on that layer, whole (no part-way nozzle)', pick.r && pick.r.lo === pick.r.hi && pick.r.part === 1 && pick.on >= 1, J(pick));
+    const ext = await page.evaluate(() => { const b = document.querySelectorAll('#ms-zr-stops .ms-zr-stop'); b[b.length - 1].dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true })); const r = NSO_MICROSCOPE.zRange(); return { lo: r.lo, hi: r.hi }; });
+    check('Shift-click takes the range out to another stop', ext.hi > ext.lo, J(ext));
+    await page.evaluate(() => document.getElementById('ms-zr-all').click());
+  }
+
   console.log('\n=== 6. nothing isolated: refused ===');
   {
     await page.evaluate(() => NSO_MICROSCOPE.showPlate('lens'));

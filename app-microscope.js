@@ -4633,6 +4633,79 @@ var NSO_MICROSCOPE = (function () {
         ? (partWay ? (zr.hi - zr.lo + zr.part).toFixed(1) : (zr.hi - zr.lo + 1)) + ' / ' + n + ' layer' + (n === 1 ? '' : 's')
         : (zAt(zr.hi) - zAt(zr.lo)).toFixed(1) + ' mm';
     }
+    syncZStops(n);
+  }
+
+  /**
+   * STOPS beside the slider: a click puts both handles on one layer, whole - no part-way nozzle position, nothing moving - to look at that layer alone.
+   * Shift-click takes the range out to it. Where the slice has plate layers (interface, transition) the stops are those layers, in their own colours;
+   * a slice with none gets one per layer while there are at most 60.
+   */
+  var ZSTOP_ALL_MAX = 60;
+  function zStopsOf(d) {
+    var n = d.kind === 'toolpath' ? d.zLevels.length : 0, out = [];
+    if (d.kind === 'toolpath') {
+      var key = d.segments.length + ':' + n;
+      if (d._zstops && d._zstops.key === key) return d._zstops.list;
+      var fl = new Array(n);
+      d.segments.forEach(function (sg) {
+        var f = fl[sg.zi] || (fl[sg.zi] = { i: false, t: false });
+        if (/interface/i.test(sg.feature || '')) f.i = true; else if (/transition/i.test(sg.feature || '')) f.t = true;
+      });
+      var any = fl.some(function (f) { return f && (f.i || f.t); });
+      for (var i = 0; i < n; i++) {
+        var f = fl[i] || {};
+        if (any ? !(f.i || f.t) : n > ZSTOP_ALL_MAX) continue;
+        out.push({ lo: i, hi: i, z: d.zLevels[i], kind: f.i ? 'interface' : f.t ? 'transition' : 'layer' });
+      }
+      d._zstops = { key: key, list: out };
+      return out;
+    }
+    if (d.kind === 'mesh' && d.objects) {
+      var key2 = d.objects.length + ':' + d.zMin + ':' + d.zMax;
+      if (d._zstops && d._zstops.key === key2) return d._zstops.list;
+      var by = {};
+      d.objects.forEach(function (o) {
+        if (HIDDEN.has(o.name)) return;
+        (o.moves || []).forEach(function (m) {
+          var k = /interface/i.test(m.feature || '') ? 'interface' : /transition/i.test(m.feature || '') ? 'transition' : null;
+          if (!k) return;
+          var zk = Math.round(m.z * 1000), q = by[zk] || (by[zk] = { z: m.z, h: m.height || 0.2, kind: k });
+          if (k === 'interface') q.kind = 'interface';
+        });
+      });
+      Object.keys(by).map(Number).sort(function (a, b) { return a - b; }).forEach(function (k) {
+        var q = by[k];
+        out.push({ lo: stepAtZ(q.z - q.h), hi: stepAtZ(q.z), z: q.z, kind: q.kind });
+      });
+      d._zstops = { key: key2, list: out };
+    }
+    return out;
+  }
+
+  function syncZStops(n) {
+    var host = $('ms-zr-stops');
+    if (!host) return;
+    var list = doc && n > 1 ? zStopsOf(doc) : [];
+    var sig = list.length + ':' + n + ':' + (doc ? doc.name : '') + ':' + (list.length ? list[0].z + ',' + list[list.length - 1].z : '');
+    if (host.dataset.sig !== sig) {
+      host.dataset.sig = sig;
+      host.textContent = '';
+      list.forEach(function (q, k) {
+        var b = document.createElement('button');
+        b.type = 'button'; b.className = 'ms-zr-stop ms-zr-stop-' + q.kind; b.dataset.k = String(k);
+        b.style.bottom = (n > 1 ? (q.hi / (n - 1)) * 100 : 0) + '%';
+        b.title = 'Z ' + q.z.toFixed(2) + (q.kind === 'layer' ? '' : '  ' + q.kind) + ' - click: this layer alone, whole. Shift-click: take the range out to it';
+        b.setAttribute('aria-label', 'Layer at Z ' + q.z.toFixed(2) + (q.kind === 'layer' ? '' : ', ' + q.kind));
+        host.appendChild(b);
+      });
+    }
+    var kids = host.children;
+    for (var i = 0; i < kids.length; i++) {
+      var q2 = list[i];
+      if (q2) kids[i].classList.toggle('on', !!zr && q2.hi >= zr.lo && q2.lo <= zr.hi);
+    }
+    host.hidden = !list.length;
   }
 
   function wireZRange() {
@@ -4679,6 +4752,18 @@ var NSO_MICROSCOPE = (function () {
         }
       });
     });
+    var stopsEl = $('ms-zr-stops');
+    if (stopsEl) {
+      stopsEl.addEventListener('pointerdown', function (e) { e.stopPropagation(); });
+      stopsEl.addEventListener('click', function (e) {
+        var b = e.target.closest ? e.target.closest('.ms-zr-stop') : null;
+        if (!b || !doc || !zr) return;
+        var q = zStopsOf(doc)[+b.dataset.k];
+        if (!q) return;
+        if (e.shiftKey) setZRange(Math.min(zr.lo, q.lo), Math.max(zr.hi, q.hi));
+        else setZRange(q.lo, q.hi);
+      });
+    }
     var fill = $('ms-zr-fill');
     if (fill) fill.addEventListener('pointerdown', function (e) { begin(e, 'both'); });
     track.addEventListener('pointerdown', function (e) {
