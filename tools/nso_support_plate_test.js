@@ -44,10 +44,11 @@ const TODAY = {        // sha256 of the support bytes of a single-piece Generate
                        // sheets stay on the rim they hold (41 % of them lay over the air before); then the crown's branches one smooth body (supports-one-trunk, fifth round): all three re-pinned.
                        // The Negative Sphere2 again (supports-footprint, the finer look): its apex surface (z 15, 9 spots in one area) was never detected, it is now - so a fourth area,
                        // a sheet laid over it, and the fill (the sheets reach the footprint): 16644 -> 23352 triangles on the lighter crowns (20332 -> 28884 on the ones before). Circular and Sphere are the same bytes.
+                       // Circular re-pinned (14720 -> 14664 triangles) for the dome footprint's rounded corners (REGION_ROUND_MM).
                        // The region plate (supports-footprint, third round, docs/SUPPORT-FOOTPRINT.md section 9): the card lays the interface and the transition from each footprint and the surface's height, layer by layer;
                        // the Negative Sphere2 / Circular / Sphere re-pinned (24332 / 13760 / 12888 triangles on upstream's 2 transition + 2 interface stack, with the thin beads and the lighter smoothing of section 10, and the plate run to the face's edge (section 11); the plates are hatch and loops at 0.5 mm, the sheets were fewer lines).
   'Support Negative Sphere2.stl': { sha: 'ebb8df4d8fd3a79953b513bb7ef25e4455d92a529f97f5c20d804220464485ba', triangles: 21676 },
-  'Support Circular.stl': { sha: '9f291eec97f2be2a6038b4ded73c79dca9e884918b340e1fba21b838dcdccfb0', triangles: 14720 },
+  'Support Circular.stl': { sha: '0d90e27b80a7a18c661e52d50bd08d471dfea285497445fd92b8f424f10880e9', triangles: 14664 },
   'Support Sphere.stl': { sha: '32ea32fdaf6317944580b941799f0411bebbcba9882953081754b5babcbefb92', triangles: 13648 }
 };
 const XY_DISTANCE = 0.35;      // the slice's support_object_xy_distance (nso_support_beacons.js SIDE_STANDOFF_MM, nso_support_gridpack.js TRUNK_KEEP_MM)
