@@ -84,7 +84,12 @@
      A tiny painter's-algorithm renderer: rotate the soup into the view frame,
      cull the faces turned away, sort back to front by centroid and fill each
      triangle flat. Enough for eight primitives at 56 px, and it needs neither
-     THREE nor a GL context - a canvas 2D context is all a tile owns. */
+     THREE nor a GL context - a canvas 2D context is all a tile owns.
+
+     `tint`, when given, is asked for each triangle's index in the soup and may
+     answer an [r, g, b] to paint it in instead of the piece's blue - the one
+     thing the Soften card (app-soften-live.js) adds, so its tiles can light
+     the surface a style changes. It is exported as nsoStockShelf.paint. */
   function signedVolume(s) {
     var v = 0;
     for (var i = 0; i < s.length; i += 9) {
@@ -95,7 +100,7 @@
     return v;
   }
 
-  function paintTile(canvas, soup) {
+  function paintTile(canvas, soup, tint) {
     var ctx = canvas.getContext && canvas.getContext('2d');
     if (!ctx) return false;
     var W = canvas.width, H = canvas.height, n = (soup.length / 9) | 0;
@@ -143,7 +148,8 @@
     ctx.lineJoin = 'round';
     for (var q = 0; q < order.length; q++) {
       var f = order[q], p = 9 * f.t;
-      var col = 'rgb(' + Math.round(TILE_RGB[0] * f.shade) + ',' + Math.round(TILE_RGB[1] * f.shade) + ',' + Math.round(TILE_RGB[2] * f.shade) + ')';
+      var rgb = (tint && tint(f.t)) || TILE_RGB;
+      var col = 'rgb(' + Math.round(rgb[0] * f.shade) + ',' + Math.round(rgb[1] * f.shade) + ',' + Math.round(rgb[2] * f.shade) + ')';
       ctx.fillStyle = col; ctx.strokeStyle = col;
       ctx.beginPath();
       ctx.moveTo(ox + k * P[p], oy - k * P[p + 1]);
@@ -316,6 +322,7 @@
     shapes: shelfShapes,
     drop: drop,
     draw: drawTiles,
+    paint: paintTile,
     drawn: function () { return drawn; },
     lastShape: function () { return lastShape; },
     /* What a drop asks nso_stock.js for, minus the machine. app-assemble.js

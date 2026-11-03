@@ -125,8 +125,8 @@ const HOLDS = {
   'menu-weave': ['weave-card', 'btn-weave-grow', 'btn-weave-shrink', 'btn-weave-clear',
                  'btn-weave-smooth', 'btn-weave-follow', 'inp-weave-pitch', 'weave-readout', 'btn-weave-go', 'btn-weave-attach', 'btn-weave-cancel'],
   'menu-paint': ['btn-mask-select', 'btn-mask-paint', 'btn-mask-clear', 'btn-mask-delete', 'sel-mask-delete', 'btn-extract-sel'],
-  // SURFACE & EDGES: Soften (R, Full wrap, edge treatment) · Mirror · Skin face · Skin wrap · Skin patch · Trace raster · Texture · Wrap (a sub-menu: one feature laid over a face)
-  'menu-surface': ['inp-soften-r', 'chk-full-wrap', 'btn-soften', 'sel-edge-treat', 'btn-mirror', 'inp-mirror-plane',
+  // SURFACE & EDGES: Soften (R, Full wrap, the Soften card: four style tiles, Radius, readout, Cancel) · Mirror · Skin face · Skin wrap · Skin patch · Trace raster · Texture · Wrap (a sub-menu: one feature laid over a face)
+  'menu-surface': ['inp-soften-r', 'chk-full-wrap', 'btn-soften', 'soften-shelf', 'btn-mirror', 'inp-mirror-plane',
                    'btn-skin-face', 'btn-skin-wrap', 'btn-skin-patch', 'btn-trace-raster', 'btn-texture', 'menu-surftex', 'btn-surftex-go'],
   // SCULPT: the Brush (Carve / Emboss / Smooth here); Carve the tool is in Subtract
   'menu-sculpt': ['btn-brush', 'sel-brush-mode', 'inp-brush-size', 'inp-brush-intensity', 'chk-brush-hard'],
@@ -147,8 +147,10 @@ const SUBTRACT_SECTIONS = [
   [null, 'SPLIT TO PARTS', ['btn-split-parts']]
 ];
 const ORDERED = ['menu-shape', 'menu-add', 'menu-bit', 'menu-surface', 'menu-repair'];
-/* Edge treatment offers exactly these; Tube edge's verbs are Reducer, Roll, Neck. */
-const OPTIONS = { 'sel-edge-treat': ['fillet', 'chamfer', 'corners', 'cornersedges'], 'sel-te-verb': ['reducer', 'roll', 'neck'],
+/* Tube edge's verbs are Reducer, Roll, Neck. (Soften's four styles are tiles now: SOFTEN_STYLES.) */
+/* Soften's styles, in the shelf's order: Round, Corners, Corners+edges, Bevel. */
+const SOFTEN_STYLES = ['fillet', 'corners', 'cornersedges', 'chamfer'];
+const OPTIONS = { 'sel-te-verb': ['reducer', 'roll', 'neck'],
                   'sel-brush-mode': ['carve', 'emboss', 'smooth'], 'sel-measure-mode': ['span', 'edge'],
                   'plate-grid-show': ['auto', 'on', 'off'] };
 
@@ -200,6 +202,9 @@ const BEFORE = ['menu-import', 'file-input', 'btn-load-stl', 'btn-library', 'men
   'btn-microscope', 'ms-input', 'btn-xray', 'btn-watch', 'btn-frame-view', 'move-vert-slider'];
 /* The ids that went: wrappers whose job is now done by what is listed. */
 const RETIRED = {
+  // Soften's Round / Bevel / Corners / Corners+edges drop-down is a shelf of four tiles (app-soften-live.js);
+  // state.edgeTreat holds the choice the drop-down used to
+  'sel-edge-treat': ['soften-shelf'],
   'menu-plates': ['plate-panel', 'btn-clear-plate', 'btn-optimize'],   // the PLATE button: pinned panel + two slabs
   'menu-pack': ['btn-optimize'],                                      // Pack's one button is the OPTIMIZE slab
   'menu-bend': ['menu-shape'],                                        // the BEND card: Bend and Tube edge, in Shape
@@ -506,8 +511,11 @@ withApp(async (page, logs) => {
       const got = [...document.getElementById(id).options].map(x => x.value).sort().join();
       return got !== want.slice().sort().join();
     }).map(([id]) => id), OPTIONS);
-    check('the choices ride along unchanged (Round / Bevel / Corners / Corners+edges; Flare / Roll / Neck; Carve / Emboss / Smooth here; Two points / Edge; auto / on / off)',
+    check('the choices ride along unchanged (Flare / Roll / Neck; Carve / Emboss / Smooth here; Two points / Edge; auto / on / off)',
       opts.length === 0, opts.join(', ') || Object.keys(OPTIONS).join(', '));
+    const tileStyles = await page.evaluate(() => [...document.querySelectorAll('#soften-shelf button[data-style]')].map(b => b.dataset.style));
+    check('Soften offers its four styles as tiles - Round / Corners / Corners+edges / Bevel, in that order',
+      tileStyles.join() === SOFTEN_STYLES.join(), tileStyles.join(', '));
     const off = spots.filter(s => Math.abs(s.x - 134) > 0.5 || Math.abs(s.y - 52) > 0.5);
     check('every panel opens at the one spot, the green box (134, 52 in the viewport)', off.length === 0,
       off.map(s => s.id + '@' + s.x.toFixed(1) + ',' + s.y.toFixed(1)).join('; ') || spots.length + ' panels');

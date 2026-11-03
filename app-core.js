@@ -3950,7 +3950,10 @@ function onCanvasPointerDown(event) {
     return;
   }
 
-  if (state.softenArmed && state.modelGroup && event.button === 0) {
+  /* Not while the live Soften card is open (app-soften-live.js): there a click
+     names a face for the preview, on release, and bakes nothing. */
+  if (state.softenArmed && state.modelGroup && event.button === 0 &&
+      !(window.nsoSoftenLive && window.nsoSoftenLive.on())) {
     const sHits = state.raycaster.intersectObjects(state.modelGroup.children, true);
     if (sHits.length) {
       let obj = sHits[0].object;

@@ -254,10 +254,15 @@ const ROSTER = [
 
   { name: 'Soften', file: () => fx('box_hull_80x40x20-2.stl'),
     arm: async page => { await page.click('#btn-soften'); },
+    /* Soften is a live card now (app-soften-live.js): the verb is a style tile, the
+       preview (the pocket piece's comes back from the kernel a moment later), and a
+       second press of Soften to bake it. A click on the piece names a face for the
+       per-face pieces and bakes nothing. */
     verb: async (page, id) => {
-      await lookDown(page, id);
       const d0 = await undoDepth(page);
-      await clickAt(page, await topOf(page, id));
+      await page.click('#soften-shelf [data-style="fillet"]');
+      await page.waitForFunction(() => { const i = window.nsoSoftenLive.info(); return !!(i && i.ok); }, null, { timeout: 60000 });
+      await page.click('#btn-soften');
       await page.waitForFunction(d => state.undoStack.length > d || !state.softenArmed, d0, { timeout: 60000 });
     },
     isArmed: page => page.evaluate(() => !!state.softenArmed) },

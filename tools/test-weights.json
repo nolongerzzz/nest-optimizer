@@ -295,6 +295,7 @@
     "slicer:supports": {"weight":2550,"note":""},
     "slicer:test": {"weight":4650,"note":""},
     "soften:holes": {"weight":19550,"note":""},
+    "soften:live": {"weight":45000,"note":"estimate: nso_soften_live_drive_check.js measured locally at about 40 s (one page, a box, a cylinder, a pocket piece through the kernel)"},
     "split:parts": {"weight":8800,"note":""},
     "split:parts-drive": {"weight":37250,"note":""},
     "stock": {"weight":926,"note":""},

@@ -3860,7 +3860,8 @@ function wrapStatus(mode, b) {
 // wrap cannot tear a hull it does not understand.
 //
 // Returns true when it has taken the click.
-function wrapPocketsInPlace(m, run, R, firstOfRun, jobs) {
+function wrapPocketsInPlace(m, run, R, firstOfRun, jobs, commit) {
+  commit = commit || commitSoften;
   const painted = (typeof nsoMaskFaceList === 'function') ? nsoMaskFaceList(m) : [];
   if (!painted) {
     if (typeof removeFaceHelper === 'function') removeFaceHelper();
@@ -3946,7 +3947,7 @@ function wrapPocketsInPlace(m, run, R, firstOfRun, jobs) {
     const name = wrapMode === 'chamfer' ? 'Bevel'
                : wrapMode === 'cornersedges' ? 'corners+edges'
                : wrapMode === 'corners' ? 'Corners' : 'Round';
-    commitSoften(m, run, res.soup, firstOfRun,
+    commit(m, run, res.soup, firstOfRun,
                  [{ wrap: true, R: R, mode: wrapMode, pockets: pockets.length }],
                  name + ' wrap R ' + R.toFixed(2) + ' inside - ' + pockets.length + ' pocket' +
                  (pockets.length === 1 ? '' : 's') + ' wrapped, ' + painted.length +
@@ -3968,7 +3969,8 @@ function wrapPocketsInPlace(m, run, R, firstOfRun, jobs) {
 // The kernel call is a promise, so this hands the click back straight away and
 // commits when the cut lands. Nothing is written to the piece until then, so a
 // refusal anywhere leaves it exactly as it was.
-function wrapPocketBrickRun(m, run, R, firstOfRun, jobs) {
+function wrapPocketBrickRun(m, run, R, firstOfRun, jobs, commit) {
+  commit = commit || commitSoften;
   const brick = rawPocketBrick(run.base);
   if (!brick) return false;
   const faceList = (typeof nsoMaskFaceList === 'function') ? nsoMaskFaceList(m) : [];
@@ -4023,7 +4025,7 @@ function wrapPocketBrickRun(m, run, R, firstOfRun, jobs) {
                : wrapMode === 'cornersedges' ? 'corners+edges'
                : wrapMode === 'corners' ? 'Corners' : 'Round';
     const baked = 11 - skip.nHull - skip.nPocket;
-    commitSoften(m, run, res.soup, firstOfRun,
+    commit(m, run, res.soup, firstOfRun,
                  [{ wrap: true, R: R, mode: wrapMode, brick: true }],
                  name + ' wrap R ' + R.toFixed(2) + ' on a pocket piece - ' +
                  baked + ' of 11 faces baked (hull ' + (6 - skip.nHull) + '/6, pocket ' +
@@ -4210,6 +4212,47 @@ function applySoftenOnFace(face) {
     return;
   }
 
+  softenCompute(m, {
+    R: R,
+    mode: getEdgeTreat(),
+    fullWrap: getFullWrap(),
+    newJobs: [{ axisIdx: rawAxisIdx, keepMin: keepMinFace, plane: pick.rawPlane, recessed: !!pick.recessed }]
+  }, commitSoften);
+}
+
+/* Everything Soften decides, short of putting it on the piece.
+
+   applySoftenOnFace used to do this and the install in one breath, which left
+   a preview with nothing to call. The decisions are unchanged and are all
+   here - which run this belongs to, whole-box wrap or the pocket wraps or the
+   per-face replay, every refusal and its words - and the one thing that is
+   not here is the install: each place that used to call commitSoften calls
+   `commit` instead, with commitSoften's own arguments. applySoftenOnFace
+   passes commitSoften itself, so a click bakes exactly as it did. The live
+   Soften card (app-soften-live.js) passes a function that keeps what it is
+   handed, shows it, and installs that same soup, bit for bit, when Soften is
+   pressed.
+
+   o = { R, mode, fullWrap, newJobs: [{ axisIdx, keepMin, plane, recessed }] }
+   newJobs may be empty: a whole-box wrap or a pocket wrap needs no face named.
+   A piece that does need one comes back { ok: false, needPick: true } with
+   nothing said, because the caller knows whether it is waiting on a click.
+
+   Returns { ok: true, kind, pending } when the work is taken - 'box' and
+   'faces' call `commit` before they return; 'pocket' goes through the boolean
+   kernel and calls it later, or says why not through setStatus and never
+   calls it (state.nsoWrapBusy is the flag that tells those two apart) - or
+   { ok: false, reason } with the same words setStatus was just given. */
+function softenCompute(m, o, commit) {
+  commit = commit || commitSoften;
+  const R = o.R, mode = o.mode, fullWrap = !!o.fullWrap;
+  const newJobs = o.newJobs || [];
+  const refuse = function (msg) {
+    if (typeof removeFaceHelper === 'function') removeFaceHelper();
+    setStatus(msg, true);
+    return { ok: false, reason: msg };
+  };
+
   // ---- the accumulation run ----
   // A second face must not cost you the first. Every clicked face is recorded
   // against the piece's pre-Soften raw, and one bake replays the whole list
@@ -4230,11 +4273,10 @@ function applySoftenOnFace(face) {
     result: null
   };
   const firstOfRun = !run.result;
-  // Clicking the same face again re-bakes that face at the new R and mode
+  // Naming the same face again re-bakes that face at the new R and mode
   // rather than treating it twice.
-  const jobs = run.jobs.filter(j => !(j.axisIdx === rawAxisIdx && j.keepMin === keepMinFace));
-  jobs.push({ axisIdx: rawAxisIdx, keepMin: keepMinFace, plane: pick.rawPlane,
-              R: R, mode: getEdgeTreat() });
+  const jobs = run.jobs.filter(j => !newJobs.some(n => n.axisIdx === j.axisIdx && n.keepMin === j.keepMin));
+  newJobs.forEach(n => jobs.push({ axisIdx: n.axisIdx, keepMin: n.keepMin, plane: n.plane, R: R, mode: mode }));
 
   const sealScore = nsoSealScore;
   // ---- whole-solid wrap ----
@@ -4243,7 +4285,6 @@ function applySoftenOnFace(face) {
   // raw source, so a shared edge is never met twice and a three-edge vertex is
   // solved once instead of negotiated face by face. A new R just re-wraps from
   // the same source - it cannot stack.
-  const fullWrap = getFullWrap();
   const boxBase = rawSolidBox(run.base);
   // Paint does not veto the wrap - it names the faces the wrap leaves alone,
   // and it names them with the axis and side the click itself recorded. The
@@ -4266,47 +4307,40 @@ function applySoftenOnFace(face) {
   // each keep their radius. Everything below this is the plain-box path,
   // unchanged.
   if (!asBox && fullWrap && !boxBase) {
-    if (wrapPocketBrickRun(m, run, R, firstOfRun, jobs)) return;
+    if (wrapPocketBrickRun(m, run, R, firstOfRun, jobs, commit)) return { ok: true, kind: 'pocket', pending: true };
     // Not one box with one box pocket, so the hull is a shape the wrap
     // cannot rebuild. It does not have to: cut the pockets out of the piece
     // as it stands and leave everything else alone.
-    if (wrapPocketsInPlace(m, run, R, firstOfRun, jobs)) return;
+    if (wrapPocketsInPlace(m, run, R, firstOfRun, jobs, commit)) return { ok: true, kind: 'pocket', pending: true };
     console.log('[soften] no box pocket to wrap here - per-face bake on the clicked face');
   }
   if (asBox) {
-    const wrapMode = getEdgeTreat();
     if (squareCount) console.log('[soften] ' + squareCount + ' face(s) painted out - wrapping the other ' + (6 - squareCount));
     let wrapped = null;
     try {
-      wrapped = rawWrapSolid(run.base, R, wrapMode, wrapSquare);
+      wrapped = rawWrapSolid(run.base, R, mode, wrapSquare);
     } catch (e) {
-      if (typeof removeFaceHelper === 'function') removeFaceHelper();
-      setStatus('Soften failed - ' + (e && e.message ? e.message : e), true);
-      return;
+      return refuse('Soften failed - ' + (e && e.message ? e.message : e));
     }
     if (!wrapped || wrapped.length < 9) {
-      if (typeof removeFaceHelper === 'function') removeFaceHelper();
-      setStatus('Soften failed - wrap empty. Piece unchanged', true);
-      return;
+      return refuse('Soften failed - wrap empty. Piece unchanged');
     }
     const sB = sealScore(run.base), sW = sealScore(wrapped);
     if (sW.open > sB.open || sW.nm > sB.nm) {
-      if (typeof removeFaceHelper === 'function') removeFaceHelper();
-      setStatus('Soften failed - wrap did not close (open ' + sB.open + '\u2192' + sW.open +
-                ', non-manifold ' + sB.nm + '\u2192' + sW.nm + '). Piece unchanged', true);
-      return;
+      return refuse('Soften failed - wrap did not close (open ' + sB.open + '→' + sW.open +
+                    ', non-manifold ' + sB.nm + '→' + sW.nm + '). Piece unchanged');
     }
-    commitSoften(m, run, wrapped, firstOfRun,
-                 [{ wrap: true, R: R, mode: wrapMode }],
-                 wrapStatus(wrapMode, rawWrapSolid.lastBuild));
-    return;
+    commit(m, run, wrapped, firstOfRun,
+           [{ wrap: true, R: R, mode: mode }],
+           wrapStatus(mode, rawWrapSolid.lastBuild));
+    return { ok: true, kind: 'box' };
   }
 
-  if (pick.recessed) {
-    if (typeof removeFaceHelper === 'function') removeFaceHelper();
-    setStatus('That face is inside the piece - only a Full wrap can reach it, and this piece is not one ' +
-              'the wrap can name. Piece unchanged', true);
-    return;
+  if (!newJobs.length) return { ok: false, needPick: true, reason: 'click the face to soften' };
+
+  if (newJobs.some(j => j.recessed)) {
+    return refuse('That face is inside the piece - only a Full wrap can reach it, and this piece is not one ' +
+                  'the wrap can name. Piece unchanged');
   }
 
   // Replay order is not click order. The engines are not symmetric: a face loop
@@ -4314,7 +4348,7 @@ function applySoftenOnFace(face) {
   // but a face next to a finished band is fine for the ball engines. Bands
   // first, then Round and Bevel, then Corners. Same set of treatments either
   // way - replaying from the base means the order is ours to choose.
-  const rank = (mode) => (mode === 'cornersedges' ? 0 : (mode === 'corners' ? 2 : 1));
+  const rank = (md) => (md === 'cornersedges' ? 0 : (md === 'corners' ? 2 : 1));
   const order = jobs.map((j, i) => ({ j: j, i: i }))
                     .sort((a, b) => (rank(a.j.mode) - rank(b.j.mode)) || (a.i - b.i))
                     .map(x => x.j);
@@ -4350,59 +4384,52 @@ function applySoftenOnFace(face) {
     const s0 = sealScore(run.base), s1 = sealScore(working);
     if (s1.open > s0.open || s1.nm > s0.nm) {
       throw new Error('this face fights one already softened (open ' +
-                      s0.open + '\u2192' + s1.open + ', non-manifold ' +
-                      s0.nm + '\u2192' + s1.nm + ') - ' +
+                      s0.open + '→' + s1.open + ', non-manifold ' +
+                      s0.nm + '→' + s1.nm + ') - ' +
                       (jobs.length > 1 ? 'kept the ' + (jobs.length - 1) + ' already baked'
                                        : 'piece unchanged'));
     }
   } catch (e) {
-    working = null;
-    if (typeof removeFaceHelper === 'function') removeFaceHelper();
-    setStatus('Soften failed - ' + (e && e.message ? e.message : e), true);
-    return;
+    return refuse('Soften failed - ' + (e && e.message ? e.message : e));
   }
   if (!working || working.length < 9) {
-    if (typeof removeFaceHelper === 'function') removeFaceHelper();
-    setStatus('Soften failed - fillet empty. Piece unchanged', true);
-    return;
+    return refuse('Soften failed - fillet empty. Piece unchanged');
   }
-
-  commitSoften(m, run, working, firstOfRun, jobs.filter(j => !j.dead), null);
 
   // What actually got built: corners that took R, out of the corners found,
   // and the loop points the face carries. No sealing claim.
-  const treat = getEdgeTreat();
+  const live = jobs.filter(j => !j.dead);
   const clamp = (x) => (x.radius < x.requested - 1e-6 ? ' (asked ' + x.requested.toFixed(2) + ', wall clamp)' : '');
   // Says how many faces this piece is carrying once there is more than one,
   // so a second click reads as "kept the first" rather than "moved it".
-  const faces = run.jobs.length > 1 ? ' [' + run.jobs.length + ' faces baked]'
-              : (getFullWrap() ? '' : ' [full wrap off - this face only]');
+  const faces = live.length > 1 ? ' [' + live.length + ' faces baked]'
+              : (fullWrap ? '' : ' [full wrap off - this face only]');
   const built = newJob.build || null;
-  const ball = treat === 'cornersedges' ? built : null;
-  const only = treat === 'corners' ? built : null;
-  const perim = (treat === 'fillet' || treat === 'chamfer') ? built : null;
+  const ball = mode === 'cornersedges' ? built : null;
+  const only = mode === 'corners' ? built : null;
+  const perim = (mode === 'fillet' || mode === 'chamfer') ? built : null;
+  let text;
   if (nothingToAdd) {
-    setStatus('Soften ok - nothing to add on this face (' + nothingToAdd + ')' + faces);
-    return;
-  }
-  if (treat === 'cornersedges' && ball && ball.vertices != null) {
-    setStatus('corners+edges setback R ' + ball.radius.toFixed(2) + clamp(ball) +
-              ' (' + ball.vertices + ' corners + ' + ball.bands + ' edges, ' +
-              ball.patchTris + ' blend tris, no shelf)' +
-              (ball.skipped ? ' - ' + ball.skipped + ' not square, left sharp' : '') + faces);
-  } else if (treat === 'corners' && only && only.vertices != null) {
-    setStatus('Corners R ' + only.radius.toFixed(2) + clamp(only) +
-              ' - ' + only.vertices + ' vertices, mid-edges square' +
-              (only.skipped ? ' - ' + only.skipped + ' not square, left sharp' : '') + faces);
+    text = 'Soften ok - nothing to add on this face (' + nothingToAdd + ')' + faces;
+  } else if (mode === 'cornersedges' && ball && ball.vertices != null) {
+    text = 'corners+edges setback R ' + ball.radius.toFixed(2) + clamp(ball) +
+           ' (' + ball.vertices + ' corners + ' + ball.bands + ' edges, ' +
+           ball.patchTris + ' blend tris, no shelf)' +
+           (ball.skipped ? ' - ' + ball.skipped + ' not square, left sharp' : '') + faces;
+  } else if (mode === 'corners' && only && only.vertices != null) {
+    text = 'Corners R ' + only.radius.toFixed(2) + clamp(only) +
+           ' - ' + only.vertices + ' vertices, mid-edges square' +
+           (only.skipped ? ' - ' + only.skipped + ' not square, left sharp' : '') + faces;
   } else if (perim && perim.loopPts != null) {
     const holes = perim.holes ? ' (the edge and ' + (perim.holes === 1 ? 'its hole' : 'its ' + perim.holes + ' holes') + ')' : '';
-    setStatus('Soften ok - ' + perim.mode + ' on all ' + perim.loopPts + ' loop pts' + holes + ' at R ' +
-              perim.radius.toFixed(2) + clamp(perim) + faces);
+    text = 'Soften ok - ' + perim.mode + ' on all ' + perim.loopPts + ' loop pts' + holes + ' at R ' +
+           perim.radius.toFixed(2) + clamp(perim) + faces;
   } else {
-    setStatus('Soften ok' + faces);
+    text = 'Soften ok' + faces;
   }
+  commit(m, run, working, firstOfRun, live, text);
+  return { ok: true, kind: 'faces' };
 }
-
 
 // ===== Cap: raw engine — flat lid via existing clip+cap (rawCut), R=0 =====
 // Same extreme-finding + EPS nudge as softenSelectedFace, same keepMin
@@ -4551,6 +4578,11 @@ function getEdgeTreat() {
 }
 
 function softenSelectedModel() {
+  /* The Soften button is the live card's now (app-soften-live.js): the first
+     press opens it, the next bakes what it is showing. What follows is the
+     card-less path - arm, click a face, bake - kept for a page or a headless
+     check that loads this file without the card. */
+  if (window.nsoSoftenLive) return window.nsoSoftenLive.press();
   const m = getActiveModel();
   if (!m) { setStatus('Select a piece first', true); return; }
 

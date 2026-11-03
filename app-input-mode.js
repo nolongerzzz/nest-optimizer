@@ -248,6 +248,10 @@
     }
     /* Soften and Cap: their buttons' cancel branches, not the buttons. With
        Full wrap on, a second press of Soften on a ready piece BAKES it. */
+    if (window.nsoSoftenLive && window.nsoSoftenLive.on()) {
+      window.nsoSoftenLive.cancel();
+      left.push('soften');
+    }
     if (state.softenArmed) {
       state.softenArmed = false;
       if (typeof clearFacePick === 'function') clearFacePick();

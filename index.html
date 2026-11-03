@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=16e051d6" />
+  <link rel="stylesheet" href="styles.css?v=085dbc43" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -1511,16 +1511,37 @@
             <div class="vp-menu-body vp-finish">
             <div class="vp-row vp-row-opts">
               <label class="vp-clone">R <input type="number" id="inp-soften-r" value="0.5" min="0.05" max="5" step="0.05"></label>
-              <label class="vp-clone" title="On: one click wraps all six faces of a box. Off: one click bakes only the face you pick."><input type="checkbox" id="chk-full-wrap" checked> Full wrap</label>
+              <label class="vp-clone" title="On: a box (or a piece with pockets) is softened whole, no face to click. Off: only the faces you click are softened."><input type="checkbox" id="chk-full-wrap" checked> Full wrap</label>
             </div>
-            <div class="vp-row vp-row-full"><button id="btn-soften" class="btn btn-secondary" type="button">Soften</button></div>
-            <div class="vp-row vp-row-full">
-              <select id="sel-edge-treat" class="vp-select">
-                <option value="fillet" selected>Round</option>
-                <option value="corners">Corners</option>
-                <option value="cornersedges">Corners+edges</option>
-                <option value="chamfer">Bevel</option>
-              </select>
+            <!-- Soften is a live card (app-soften-live.js), Thicken's shape: the button opens
+                 it, a tile picks the style, the piece previews it as a ghost, the slider is the
+                 radius, and the button again bakes what is on screen. The four tiles are drawn
+                 once from the real engine on a small cube; they replace the old Round / Corners /
+                 Corners+edges / Bevel drop-down (state.edgeTreat now holds the choice). -->
+            <div class="vp-row vp-row-full"><button id="btn-soften" class="btn btn-secondary" type="button" aria-pressed="false"
+                      title="Soften the piece's edges and corners. Click it to open the styles, pick one to see it on the piece as a ghost, set the radius (R) and watch it change, then click Soften again to bake exactly what you see. Cancel or Escape drops the preview. A box (or a piece with pockets) previews whole; any other piece is softened a face at a time - click the face.">Soften</button></div>
+            <div id="soften-panel" class="soften-panel" hidden>
+              <div id="soften-shelf" class="soften-shelf" role="group" aria-label="Soften style">
+                <button class="stock-tile soften-tile" type="button" data-style="fillet" aria-pressed="false" aria-label="Round"
+                        title="Round: a smooth quarter-circle on every edge and a ball at every corner. The green is the surface this style changes."><canvas width="64" height="64" aria-hidden="true"></canvas><span>Round</span></button>
+                <button class="stock-tile soften-tile" type="button" data-style="corners" aria-pressed="false" aria-label="Corners"
+                        title="Corners: only the corners are rounded; the edges between them stay square. The green is the surface this style changes."><canvas width="64" height="64" aria-hidden="true"></canvas><span>Corners</span></button>
+                <button class="stock-tile soften-tile" type="button" data-style="cornersedges" aria-pressed="false" aria-label="Corners and edges"
+                        title="Corners+edges: the edges and the corners both softened, each corner blended into its edges with a setback so no shelf is left. The green is the surface this style changes."><canvas width="64" height="64" aria-hidden="true"></canvas><span>Corners+edges</span></button>
+                <button class="stock-tile soften-tile" type="button" data-style="chamfer" aria-pressed="false" aria-label="Bevel"
+                        title="Bevel: a flat angled cut along every edge in place of a curve. The green is the surface this style changes."><canvas width="64" height="64" aria-hidden="true"></canvas><span>Bevel</span></button>
+              </div>
+              <div class="vp-row vp-row-full">
+                <label class="live-slider" for="inp-soften-slider"
+                       title="Drag to change the radius and watch the preview follow. Nothing is baked until Soften is pressed. The R box above is the same number."><span>Radius</span>
+                  <span id="soften-slider-read">0.5 mm</span>
+                  <input type="range" id="inp-soften-slider" min="0.05" max="5" step="0.05" value="0.5" /></label>
+              </div>
+              <p id="soften-readout" class="soften-readout" aria-live="polite"></p>
+              <div class="vp-row vp-row-full">
+                <button id="btn-soften-cancel" class="btn btn-secondary" type="button"
+                        title="Drop the preview. The piece was never touched. Escape does the same.">Cancel</button>
+              </div>
             </div>
             <div class="vp-row vp-row-mirror">
               <button id="btn-mirror" class="btn btn-secondary" type="button"
@@ -2292,7 +2313,7 @@
   <script src="nso-helpers.js?v=9c476e39"></script>
   <script src="nso-recent.js?v=f03d6f13"></script>
   <script src="nso-bounds.js?v=778acac4"></script>
-  <script src="app-core.js?v=ee9de5fe"></script>
+  <script src="app-core.js?v=98dbfc0a"></script>
   <!-- Up to six plates (beds): the active one is state.models / state.placed, the rest are kept beside it. docs/BEDS.md. -->
   <script src="app-beds.js?v=3d221bc4"></script>
 
@@ -2301,7 +2322,7 @@
 
 
   <script src="app-cut.js?v=15e483d4"></script>
-  <script src="app-finish.js?v=e595107e"></script>
+  <script src="app-finish.js?v=8ee588aa"></script>
   <script src="app-sculpt.js?v=f522aee3"></script>
   <script src="app-extend.js?v=e24e3562"></script>
   <!-- Mirror: exact reflection across the cut plane. After app-extend.js,
@@ -2364,7 +2385,7 @@
   <script src="app-limb.js?v=82dda061"></script>
   <script src="app-wheel.js?v=35fda70f"></script>
   <script src="app-fit.js?v=94ef7252"></script>
-  <script src="app-stock.js?v=91def76f"></script>
+  <script src="app-stock.js?v=3a58ca28"></script>
   <script src="app-assemble.js?v=60984bfb"></script>
   <script src="app-sel-outline.js?v=c1a5b4df"></script>
   <script src="app-join.js?v=f9860f3a"></script>
@@ -2394,6 +2415,7 @@
   <script src="app-hollow.js?v=f99c09ad"></script>
   <script src="app-foam.js?v=16cca4f6"></script>
   <script src="app-thicken-live.js?v=9656a1a9"></script>
+  <script src="app-soften-live.js?v=ccc61303"></script>
   <script src="app-seat-surface.js?v=55908323"></script>
   <script src="app-skin.js?v=cb03e88b"></script>
   <script src="app-skin-patch.js?v=42ac8ff6"></script>
@@ -2410,7 +2432,7 @@
   <!-- The arbiter first: the three menu tools below register with it as
        they bind, and it is what makes "one menu owns the input" true
        rather than three modules each hoping the other two are shut. -->
-  <script src="app-input-mode.js?v=825df701"></script>
+  <script src="app-input-mode.js?v=da2de9ec"></script>
   <script src="app-tip-orient.js?v=fb26beaf"></script>
   <script src="app-rotate-handles.js?v=1ed397a5"></script>
   <script src="app-move-vertical.js?v=da07bfef"></script>

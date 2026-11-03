@@ -112,6 +112,7 @@ merging its list by hand. The list below is generated.
 - [Size — scale a piece to a real dimension (landed, `app-scale.js`)](handoff/size-scale-a-piece-to-a-real-dimension.md)
 - [Skin wrap + the double skin (2026-09-16)](handoff/skin-wrap-the-double-skin.md)
 - [Slice: the piece stays exportable while its slice is shown (2026-09-27)](handoff/slice-the-piece-stays-exportable-while-its-slice-is-shown.md)
+- [Soften, live - pick a style from four pictures, watch the ghost on the piece, slide R, press Soften to bake (2026-11-03)](handoff/soften-live.md)
 - [Solidify - a progress gate, and two loops it could not close (2026-09-24)](handoff/solidify-a-progress-gate-and-two-loops-it-could-not-close.md)
 - [Standing rule — a library entry resolves to an ABSOLUTE url (added 2026-09-18)](handoff/standing-rule-a-library-entry-resolves-to-an-absolute-url.md)
 - [Standing rule — a new Finish row goes IN a group (added 2026-09-18)](handoff/standing-rule-a-new-finish-row-goes-in-a-group.md)
