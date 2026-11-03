@@ -2469,8 +2469,9 @@
               var slabT = hTc && !g.isEmpty(Zall) ? g.diff(g.inter(g.inter(Sj, Zall), hTc), slabI) : g.empty();
               /* a transition strip is filled where the slab it lies in is wider than 2 x TRANS_FILL_OPEN_MM (the Negative Spheres' ring, 1.8 - 2.3 mm: Bambu zig-zags it; the
                  Oblique's ribbon, under 1 mm: its loop alone) */
-              /* ...a ribbon of transition (the Oblique's, one long thin strip) is its loop alone however wide; a ring's narrow strips (the Negative Spheres') are zig-zagged */
-              var slabTR = g.isEmpty(slabT) ? slabT : g.unionAll(g.parts(slabT).filter(function (q) { var ax = ringAxis(g.polys(q)[0]); return !ax || ax.ratio < RIBBON_T_RATIO; }));
+              /* ...a ribbon of transition (the Oblique's, one long thin strip) beside an interface is its loop alone however wide; a ring's narrow strips (the Negative Spheres') are zig-zagged,
+                 and so is a ribbon that is all transition (the ridge's first two plates, with no interface on the layer: Bambu's zig-zag at 110 across the whole band) */
+              var slabTR = g.isEmpty(slabT) ? slabT : g.unionAll(g.parts(slabT).filter(function (q) { var ax = ringAxis(g.polys(q)[0]); return !ax || ax.ratio < RIBBON_T_RATIO || g.isEmpty(slabI); }));
               var openT = g.isEmpty(slabTR) ? slabTR : g.offset(g.offset(slabTR, -TRANS_FILL_OPEN_MM), TRANS_FILL_OPEN_MM);
               var wideT = g.isEmpty(Treg) || g.isEmpty(openT) ? g.empty() : g.inter(Treg, openT);
               /* the ridge's ribbon: the zig-zag stands IFILL_RIBBON_MM in from the interface's own loop line on both sides - not from the sheet's union (its far edge is the transition's border, outside the loop) */
