@@ -2208,24 +2208,6 @@
         sheets.push({ topLayer: i0, zLo: SP[lowest].printZ - SP[lowest].h, zHi: SP[i0].printZ,
                       areaMm2: g.area(tAll), tips: tipsN });
       });
-      /* EACH COLUMN BY ITS DEPTH UNDER THE PART (Bambu's own rule: the NI layers under the part's underside are interface, the NT under those transition). The walk down from a
-         top finds a stack's ring only where a ring is wider than a line; a dome's flank steps by a few tenths of a mm per layer, so the walk typed its whole disc one way
-         (Sphere z 9.32: 67 mm of interface to Bambu's 41, the ring that is transition there not found). A layer's interface is the part of its zones that lies under the
-         part within NI layers of it, its transition the part within NI + NT (less ZONE_REACH_TRIM_MM: the underside's own layer is measured from its middle). */
-      var ZONE_REACH_TRIM_MM = 0.1;
-      for (var jz = 0; jz < SP.length; jz++) {
-        if (g.isEmpty(P.S[jz]) || !zones[jz] || !(zones[jz].i.length || zones[jz].t.length)) continue;
-        var hj = SP[jz].h, hostU = function (X) {
-          var parts = [];
-          layersOverX(SP, jz, planes, X).forEach(function (k) { hosts.forEach(function (Q) { if (!g.isEmpty(Q.S[k])) parts.push(Q.S[k]); }); });
-          return parts.length ? g.unionAll(parts) : g.empty();
-        };
-        var UI = hostU(gap + (NI - 1) * hj - ZONE_REACH_TRIM_MM), UT = hostU(gap + (NI + NT - 1) * hj - ZONE_REACH_TRIM_MM);
-        var oldAll = g.unionAll(zones[jz].i.concat(zones[jz].t));
-        var zI2 = g.inter(g.inter(P.S[jz], UI), oldAll), zT2 = g.diff(g.inter(g.inter(P.S[jz], UT), oldAll), UI);
-        zI2 = g.dropSmall(g.offset(g.offset(zI2, -w / 4), w / 4), 0.3); zT2 = g.dropSmall(g.offset(g.offset(zT2, -w / 4), w / 4), 0.3);
-        zones[jz].i = g.isEmpty(zI2) ? [] : [zI2]; zones[jz].t = g.isEmpty(zT2) ? [] : [zT2];
-      }
       var counts = { 'Support': 0, 'Support transition': 0, 'Support interface': 0 };
       /* STAIR ZONES. A stair's strips stand beside the posts that hold them, and a post is one island with the strip it touches (a row of posts is
          one blade): the zone of a stair's strip, walked down by islands, took the whole blade with it. A stair's zone holds only where the part is
