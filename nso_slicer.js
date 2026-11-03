@@ -2208,6 +2208,26 @@
         sheets.push({ topLayer: i0, zLo: SP[lowest].printZ - SP[lowest].h, zHi: SP[i0].printZ,
                       areaMm2: g.area(tAll), tips: tipsN });
       });
+      /* A DOME'S FLANK: AN INTERFACE DEEPER THAN ITS REACH STEPS DOWN (Bambu's rule: the NI layers under the part's underside are interface, the NT under those transition, and a cell
+         with the part further over it than that is the tree's; the walk's transition stays as it is). The walk down from a top finds a stack's ring only where it is wider than a line; a flank steps a few tenths
+         of a mm a layer, so the walk typed its whole disc one way (Circular z 8.52: 69 mm of interface to Bambu's 39). The plate's fringe, where no part is over it at all,
+         keeps the type the walk gave it. */
+      var ZONE_REACH_TRIM_MM = 0.1, ZONE_FAR_MM = 3;
+      for (var jz = 0; jz < SP.length; jz++) {
+        if (g.isEmpty(P.S[jz]) || !zones[jz] || !(zones[jz].i.length || zones[jz].t.length)) continue;
+        var hj = SP[jz].h, hostU = function (X) {
+          var parts = [];
+          layersOverX(SP, jz, planes, X).forEach(function (k) { hosts.forEach(function (Q) { if (!g.isEmpty(Q.S[k])) parts.push(Q.S[k]); }); });
+          return parts.length ? g.unionAll(parts) : g.empty();
+        };
+        var UI = hostU(gap + (NI - 1) * hj - ZONE_REACH_TRIM_MM), UT = hostU(gap + (NI + NT - 1) * hj - ZONE_REACH_TRIM_MM), UF = hostU(ZONE_FAR_MM);
+        var oI = zones[jz].i.length ? g.unionAll(zones[jz].i) : g.empty(), oT = zones[jz].t.length ? g.unionAll(zones[jz].t) : g.empty();
+        var keep = g.diff(g.union(oI, oT), g.diff(UF, UT)), fr = g.diff(keep, UT);
+        var nI = g.union(g.inter(g.inter(keep, UI), oI), g.inter(fr, oI));                   /* a walk's transition stays transition: only an interface that lies deeper than the reach steps down */
+        var nT = g.diff(keep, nI);
+        nI = g.dropSmall(nI, 0.05); nT = g.dropSmall(nT, 0.05);
+        zones[jz].i = g.isEmpty(nI) ? [] : [nI]; zones[jz].t = g.isEmpty(nT) ? [] : [nT];
+      }
       var counts = { 'Support': 0, 'Support transition': 0, 'Support interface': 0 };
       /* STAIR ZONES. A stair's strips stand beside the posts that hold them, and a post is one island with the strip it touches (a row of posts is
          one blade): the zone of a stair's strip, walked down by islands, took the whole blade with it. A stair's zone holds only where the part is
