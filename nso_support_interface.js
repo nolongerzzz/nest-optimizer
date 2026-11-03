@@ -870,6 +870,8 @@
   var REGION_TALL_TRY_MM = [0.05, 0.1, 0.2];     /* a curved face's taller plate (see shellPass): the extra distance from the footprint's edge, per attempt (0.05 first: the Circular wants the least, the Sphere 0.1) */
   var REGION_TALL_TOL_MM = 0.04;           /* ...and the clearance it may fall short of the gap by (the Sphere's and the Negative Spheres' taller plate comes within 0.14 - 0.17 of the part: so does Bambu's) */
   var REGION_GROW_MM = 0.3;
+  var CAVITY_EXTRA_LAYERS = 1;   /* the disc's stack stands this many 0.2 mm layers deeper than the NL under the lowest cell: Bambu's NS and NS2 caps start 0.17 - 0.2 mm lower */
+  var CAVITY_PRISM = true, CAVITY_MARGIN_MM = 0.25;   /* a cavity ceiling's disc: its loops' outer edge stands on the footprint's edge, so the traced mask is this much in */
   var REGION_ROUND_MM = 0.75, REGION_ROUND_MAX_SHARE = 0.06;
   var REGION_ANGLE_REF = 35, REGION_ANGLE_SPAN = 5;   /* the growth and the drop below are Bambu's 30 deg against our 35: at 35 deg the footprint's rim is already out to where Bambu's is (none), at 30 and under, all of it */
   var REGION_BOWL_MM = 0.1;   /* a footprint whose rim stands this much above its mean is a bowl (a sphere's underside), not a cavity's ceiling */
@@ -1784,7 +1786,7 @@
         if (range <= REGION_FLAT_MM) for (var q3 = 0; q3 < N; q3++) if (inRegion[q3]) S[q3] = zs[0];
         tellP(Math.round(0.3 * mine.length));          /* three tenths after the fill, */
         var dEdge = edtCells(inRegion, nx, ny), usable = new Uint8Array(N), nUse = 0;
-        var margin = (f.marginMm != null ? f.marginMm : MARGIN) + (tryE || 0);
+        var margin = (f.marginMm != null ? f.marginMm : MARGIN) + (tryE || 0) + (CAVITY_PRISM && curvedFace && !isBowl && tryE != null ? CAVITY_MARGIN_MM * angleK : 0);
         for (var q4 = 0; q4 < N; q4++) if (inRegion[q4] && (dEdge[q4] - 0.5) * CELLS >= margin) { usable[q4] = 1; nUse++; }
         if (nUse * CELLS * CELLS < (f.marginMm != null ? 0.8 : 4))return;               /* a region the user painted may be small */
         /* the other columns - every one this footprint's tips do not stand - keep their clearance from the plate, wherever they pass through its height */
@@ -1829,6 +1831,8 @@
           gapAt[qg2] = tryE != null ? o.gap - (isBowl ? REGION_TALL_DROP_MM * angleK : 0) : o.gap * Math.sqrt(1 + gmax * gmax) + (planarFace ? 0 : REGION_BEAD_SHARE * (o.width / 2 + 0.03) * gmax);   /* a bead is a line wide: on a slope its downhill edge stands lower than its middle */
         }
         var A = zs[0] - o.gap, m = new Int32Array(N).fill(-99999), mmin = 1e9, mmax = -1e9;
+        var cavityWanted = CAVITY_PRISM && curvedFace && !isBowl && tryE != null, mCavMin = 1e9;
+        if (cavityWanted) for (var qv = 0; qv < N; qv++) if (inRegion[qv] && (dEdge[qv] - 0.5) * CELLS >= margin - CAVITY_MARGIN_MM * angleK) { var mv = Math.floor((S[qv] - gapAt[qv] - A) / o.layer + 1e-4) - 1; if (mv < mCavMin) mCavMin = mv; }
         for (var q5 = 0; q5 < N; q5++) {
           if (!usable[q5]) continue;
           m[q5] = Math.floor((S[q5] - (range <= REGION_FLAT_MM ? o.gap : gapAt[q5]) - A) / o.layer + 1e-4) - 1;     /* the lowest flat stands on a layer's edge: float32 noise (1e-8 mm) must not push it a layer down */
@@ -1874,11 +1878,15 @@
            a plate that steps (a slope, a dome's flank) has stacks of 1.375 at its low end and 1.0 above, and the slicer's own typing then finds the 2 transition and 3 interface layers
            of each column. The plate is laid in BANDS: between each two heights a stack starts or ends at */
         var gridMode = o.sheetLayer !== o.layer && (mmin === mmax || zs[0] <= zLowAll + 0.5), gTop = A + (mmin + 1) * o.layer;
-        var botOfM = function (mq) { var j = mq - mmin; return !gridMode ? A + (mq - NL + 1) * o.layer : (j >= NL ? A + (mq + 1) * o.layer - NL * o.layer : gTop - (NL - j) * o.sheetLayer); };
+        var botOfM0 = function (mq) { var j = mq - mmin; return !gridMode ? A + (mq - NL + 1) * o.layer : (j >= NL ? A + (mq + 1) * o.layer - NL * o.layer : gTop - (NL - j) * o.sheetLayer); };
+        /* a cavity's ceiling (the surface falls toward its rim: a negative sphere's): Bambu stands the plate from one flat bottom, a disc across the whole footprint, and the layers above it
+           thin out toward the apex; a bulge's (Circular's, the Sphere's) plate follows the surface, a cone foot narrower than the stack above */
+        var cavity = cavityWanted && !gridMode, mBot = Math.min(mmin, mCavMin) - CAVITY_EXTRA_LAYERS;
+        var botOfM = cavity ? function () { return botOfM0(mBot); } : botOfM0;
         var topOfM = function (mq) { return A + (mq + 1) * o.layer; };
         var bands = [], zLow = botOfM(mmin);
         if (!gridMode) {
-          for (var nb = mmin - NL + 1; nb <= mmax; nb++) bands.push({ n: nb, zb: A + nb * o.layer, h: o.layer, has: (function (nn) { return function (mq) { return nn <= mq && nn >= mq - NL + 1; }; })(nb) });
+          for (var nb = (cavity ? mBot : mmin) - NL + 1; nb <= mmax; nb++) bands.push({ n: nb, zb: A + nb * o.layer, h: o.layer, has: (function (nn) { return function (mq) { return nn <= mq && nn >= (cavity ? mBot - NL + 1 : mq - NL + 1); }; })(nb) });
         } else {
           var seenM = {}, brk = [];
           for (var qm = 0; qm < N; qm++) if (usable[qm] && !seenM[m[qm]]) { seenM[m[qm]] = 1; brk.push(botOfM(m[qm]), topOfM(m[qm])); }
