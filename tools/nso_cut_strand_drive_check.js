@@ -83,11 +83,18 @@ const PROBE = `window.__probe = function (id) {
     vol += (a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0])) / 6; }
   const adj = m.rawTris ? NSO_buildAdjacency(m.rawTris, { tol: 1e-4, rawTol: true }) : null;
   return { vol: vol, tris: n, open: adj ? adj.openEdges : null, nm: adj ? adj.nmEdges : null };
+};
+window.__probeAll = function () {
+  // everything on the plate: a cut that goes right through separates the piece, so the original id is gone
+  let vol = 0, open = 0, nm = 0, n = 0;
+  state.models.forEach(m => { const r = window.__probe(m.id); if (r) { vol += r.vol; open += r.open || 0; nm += r.nm || 0; n++; } });
+  return { vol: vol, open: open, nm: nm, n: n };
 };`;
 
 withApp(async (page, logs) => {
   await page.addScriptTag({ content: PROBE });
   const probe = id => page.evaluate(id => __probe(id), id);
+  const probeAll = () => page.evaluate(() => __probeAll());
   const status = () => page.evaluate(() => document.getElementById('status').textContent);
   const waitCut = () => page.waitForFunction(() => /(Sized|Notch) cut|Cut not made/.test(document.getElementById('status').textContent), null, { timeout: 60000 });
   const SPIRAL = spiral({ R: 1.8, turns: 3, r0: 4, pitch: 6.5, ringSeg: 14, perTurn: 36 });
@@ -134,7 +141,8 @@ withApp(async (page, logs) => {
       strand: b.strand ? { lo: b.strand.min, hi: b.strand.max } : null, sizes: b.sizes, ro: document.getElementById('cut-readout').textContent } : null;
   });
   const cutOnce = async () => { await page.click('#btn-cut'); await waitCut(); const r = { st: await status() }; return r; };
-  const undo = () => page.click('#btn-undo');
+  // a cut that severs is two Undo steps now (the separation, then the cut)
+  const undo = async () => { await page.click('#btn-undo'); if (/Split to parts reverted/.test(await status())) await page.click('#btn-undo'); };
 
   console.log('the spiral');
   let id = await fresh();
@@ -154,14 +162,14 @@ withApp(async (page, logs) => {
   check('the strand is outlined in the helper', await page.evaluate(() => !!state.cutHelper.children.find(c => c.userData.cutStrand)));
 
   await setSized(60, 8, 1, false);
-  let r = await cutOnce(); let vOff = await probe(id);
-  const removedAll = v0.vol - vOff.vol, bodiesAll = /severs the piece into (\d+) bodies/.exec(r.st);
+  let r = await cutOnce(); let vOff = await probeAll();
+  const removedAll = v0.vol - vOff.vol, bodiesAll = /(?:separated into|severs the piece into) (\d+) (?:pieces|bodies)/.exec(r.st);
   check('with Single strand off the blade takes every turn it holds', removedAll > 40 && bodiesAll && Number(bodiesAll[1]) >= 4, removedAll.toFixed(2) + ' mm3; ' + r.st);
   await undo();
 
   await setSized(60, 8, 1, true);
   await clickAt(crown);
-  r = await cutOnce(); const vOn = await probe(id);
+  r = await cutOnce(); const vOn = await probeAll();
   const removedOne = v0.vol - vOn.vol;
   check('with it on, the same blade takes less than half of that', removedOne > 0 && removedOne < 0.5 * removedAll, removedOne.toFixed(3) + ' vs ' + removedAll.toFixed(3));
   check('and says it took one strand of several', /one strand of \d+ in the blade/.test(r.st), r.st);
@@ -175,7 +183,7 @@ withApp(async (page, logs) => {
   const s2 = await spec();
   const half = Math.max(s2.strand.hi[s2.wAxis] - s2.wCentre, s2.wCentre - s2.strand.lo[s2.wAxis]) + 0.3;
   await setSized(2 * half, 8, 1, false);
-  r = await cutOnce(); const vNarrow = await probe(id);
+  r = await cutOnce(); const vNarrow = await probeAll();
   const removedNarrow = v0.vol - vNarrow.vol;
   check('same volume as a plain blade made just wide enough for that strand (independent of the detection)',
     Math.abs(removedNarrow - removedOne) <= 0.01 * removedOne + 0.01, removedNarrow.toFixed(4) + ' vs ' + removedOne.toFixed(4) + ' (half-width ' + half.toFixed(2) + ')');
@@ -293,7 +301,7 @@ withApp(async (page, logs) => {
   check('the blade sits on the cut plane of the piece as it now lies', onPlane < 1e-3, onPlane.toExponential(2));
   await clickAt(await crownNear(id, 0));
   const vr0 = await probe(id);
-  const rc = await cutOnce(); const vr1 = await probe(id);
+  const rc = await cutOnce(); const vr1 = await probeAll();
   check('and a cut after turning it works', /^Sized cut/.test(rc.st) && vr1.vol < vr0.vol && vr1.open === 0 && vr1.nm === 0, rc.st);
   await page.evaluate(() => { const c = document.getElementById('chk-cut-rotate'); c.checked = false; c.dispatchEvent(new Event('change')); });
   await page.waitForTimeout(150);

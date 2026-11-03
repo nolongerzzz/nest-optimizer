@@ -65,11 +65,18 @@ const PROBE = `window.__probe = function (id) {
   const sorted = g.index ? null : Float32Array.from({ length: pos.count * 3 }, (_, i) => pos.array[i]);
   return { vol: vol, tris: n, open: adj ? adj.openEdges : null, nm: adj ? adj.nmEdges : null,
            size: [m.size.x, m.size.y, m.size.z], posHash: Array.from(pos.array.slice(0, 600)).map(v => Math.round(v * 1e4)).join(',') };
+};
+window.__probeAll = function () {
+  // everything on the plate: a cut that goes right through separates the piece, so the original id is gone
+  let vol = 0, open = 0, nm = 0, n = 0;
+  state.models.forEach(m => { const r = window.__probe(m.id); if (r) { vol += r.vol; open += r.open || 0; nm += r.nm || 0; n++; } });
+  return { vol: vol, open: open, nm: nm, n: n };
 };`;
 
 withApp(async (page, logs) => {
   await page.addScriptTag({ content: PROBE });
   const probe = id => page.evaluate(id => __probe(id), id);
+  const probeAll = () => page.evaluate(() => __probeAll());
   const status = () => page.evaluate(() => document.getElementById('status').textContent);
   const waitStatus = re => page.waitForFunction(r => new RegExp(r).test(document.getElementById('status').textContent),
     re.source, { timeout: 30000 });
@@ -175,11 +182,11 @@ withApp(async (page, logs) => {
   await setBlade(30, 30, 2);
   await clickAt(await topPoint(id, 0.5));
   await cutNow(); await waitStatus(/(Sized|Notch) cut|Cut not made/);
-  const sv = await probe(id);
+  const sv = await probeAll();
   const sst = await status();
   check('a blade over the whole section takes kerf x 20 x 20', near(w0.vol - sv.vol, 800, 0.1), (w0.vol - sv.vol).toFixed(3) + ' of 800');
-  check('and says it severed the piece into 2 bodies', /2 bodies/.test(sst), sst);
-  check('both bodies are closed', sv.open === 0 && sv.nm === 0, 'open ' + sv.open + ', nm ' + sv.nm);
+  check('and, as the full blade does, separates it: two pieces', /separated into 2 pieces/.test(sst) && sv.n === 2, sst + ' (' + sv.n + ' pieces)');
+  check('both pieces are closed', sv.open === 0 && sv.nm === 0, 'open ' + sv.open + ', nm ' + sv.nm);
 
   console.log('mitred sized blade');
   id = await fresh(bar(60, 20, 20), 'bar3.stl');
