@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=d49655de" />
+  <link rel="stylesheet" href="styles.css?v=16e051d6" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -551,20 +551,16 @@
               <p id="edit-size" class="hint hidden-quiet">—</p>
               <select id="edit-axis" class="hidden-quiet"><option value="auto">Longest axis</option><option value="x">X</option><option value="z">Z</option></select>
               <div id="cutter-tools" class="cutter-tools">
-              <!-- Two switches over the blade. Rotate piece: the rotate rings on the piece while Cut stays
-                   open (app-cut.js cutSetRotate, app-rotate-handles.js). Adjust blade (on by default): off,
-                   the blade is parked - its controls below are inert and a click on the plate only selects
-                   (cutSetAdjust, app-core.js onCanvasPointerDown). -->
+              <!-- Rotate piece: the rotate rings on the piece while Cut stays open (app-cut.js cutSetRotate,
+                   app-rotate-handles.js). The ring options it shows are in the row under it. -->
               <div class="cut-switches">
               <label class="cut-switch" title="Show the rotate rings on the piece so you can turn it while Cut is open. The blade follows the piece."><input type="checkbox" id="chk-cut-rotate"><span>Rotate piece</span></label>
-              <label class="cut-switch" title="On: the blade answers the sliders, dials, fields and clicks on the piece. Off: the blade is parked - those controls are locked and a click on the piece only selects it, so nothing you do to the piece or the view can shift the blade."><input type="checkbox" id="chk-cut-adjust" checked><span>Adjust blade</span></label>
               </div>
               <div class="cut-switches cut-rings" id="cut-rotate-rings" hidden>
               <span class="hint">Turn is on.</span>
               <label class="cut-switch" title="Also show the ring that tips the piece front over back."><input type="checkbox" id="chk-cut-ring-fb"><span>Lean front/back</span></label>
               <label class="cut-switch" title="Also show the ring that tips the piece side over side."><input type="checkbox" id="chk-cut-ring-ss"><span>Lean side/side</span></label>
               </div>
-              <div id="cut-adjust-wrap" class="cut-adjust-wrap">
               <div class="cut-miter">
               <svg id="cut-miter-dial" class="cut-dial" viewBox="0 0 100 100" width="104" height="104"
                    role="slider" tabindex="0" aria-label="Mitre, degrees" aria-valuemin="0" aria-valuemax="359.9" aria-valuenow="0">
@@ -643,16 +639,25 @@
               <button id="btn-cut-blade-notch" class="btn btn-secondary" type="button" aria-pressed="false"
                       title="Notch: click a strand (a cord, a turn of a spiral). The blade fits that strand and cuts a nick in from its edge, of the width and depth you set. Only that strand is touched.">Notch</button>
               </div>
-              <div class="edit-row cut-blade-fields" id="cut-blade-fields" hidden>
-              <label title="How wide the blade is across the cut (mm)">Width <input type="number" id="cut-blade-width" class="cut-no-spin" min="0.2" max="1000" step="0.5" value="10" aria-label="Blade width, mm"></label>
-              <label title="How far the blade goes into the piece from the face you clicked (mm). Less than the piece is thick and it stops short of the far side.">Depth <input type="number" id="cut-blade-depth" class="cut-no-spin" min="0.2" max="1000" step="0.5" value="3" aria-label="Blade depth, mm"></label>
-              <label title="The blade's thickness: the width of the slot it leaves (mm). The floor is 0.2.">Kerf <input type="number" id="cut-blade-kerf" class="cut-no-spin" min="0.2" max="1000" step="0.1" value="1" aria-label="Blade kerf, mm"></label>
+              <div class="cut-blade-sliders" id="cut-blade-fields" hidden>
+              <div class="cut-slide-row" title="How wide the blade is across the cut (mm)"><span class="cut-slide-label">Width</span>
+              <input type="range" id="cut-blade-width-s" min="0.2" max="60" step="0.1" value="10" aria-label="Width, mm">
+              <input type="number" id="cut-blade-width" class="cut-no-spin" min="0.2" max="1000" step="0.1" value="10" aria-label="Width, mm"></div>
+              <div class="cut-slide-row" title="How far the blade goes into the piece from the face you clicked (mm). Less than the piece is thick and it stops short of the far side."><span class="cut-slide-label">Depth</span>
+              <input type="range" id="cut-blade-depth-s" min="0.2" max="30" step="0.1" value="3" aria-label="Depth, mm">
+              <input type="number" id="cut-blade-depth" class="cut-no-spin" min="0.2" max="1000" step="0.1" value="3" aria-label="Depth, mm"></div>
+              <div class="cut-slide-row" title="The blade's thickness: the width of the slot it leaves (mm). The floor is 0.2."><span class="cut-slide-label">Kerf</span>
+              <input type="range" id="cut-blade-kerf-s" min="0.2" max="10" step="0.1" value="1" aria-label="Kerf, mm">
+              <input type="number" id="cut-blade-kerf" class="cut-no-spin" min="0.2" max="1000" step="0.1" value="1" aria-label="Kerf, mm"></div>
               <label class="cut-switch cut-strand" title="Take only the strand under the click: where the blade's box holds several strands (the turns of a spiral), the others are left alone. The strand is outlined in yellow."><input type="checkbox" id="chk-cut-blade-strand" checked><span>Single strand</span></label>
               </div>
-              <div class="edit-row cut-blade-fields" id="cut-notch-fields" hidden>
-              <label title="How long the nick is along the strand (mm). The floor is 0.2."><span>Notch width</span> <input type="number" id="cut-notch-width" class="cut-no-spin" min="0.2" max="1000" step="0.1" value="1" aria-label="Notch width, mm"></label>
-              <label title="How far in from the strand's edge the nick goes (mm). Less than the strand is thick and it stops short of the far side."><span>Notch depth</span> <input type="number" id="cut-notch-depth" class="cut-no-spin" min="0.2" max="1000" step="0.1" value="1" aria-label="Notch depth, mm"></label>
-              </div>
+              <div class="cut-blade-sliders" id="cut-notch-fields" hidden>
+              <div class="cut-slide-row" title="How long the nick is along the strand (mm). The floor is 0.2."><span class="cut-slide-label">Notch width</span>
+              <input type="range" id="cut-notch-width-s" min="0.2" max="10" step="0.1" value="1" aria-label="Notch width, mm">
+              <input type="number" id="cut-notch-width" class="cut-no-spin" min="0.2" max="1000" step="0.1" value="1" aria-label="Notch width, mm"></div>
+              <div class="cut-slide-row" title="How far in from the strand's edge the nick goes (mm). Less than the strand is thick and it stops short of the far side."><span class="cut-slide-label">Notch depth</span>
+              <input type="range" id="cut-notch-depth-s" min="0.2" max="10" step="0.1" value="1" aria-label="Notch depth, mm">
+              <input type="number" id="cut-notch-depth" class="cut-no-spin" min="0.2" max="1000" step="0.1" value="1" aria-label="Notch depth, mm"></div>
               </div>
               </div>
               <button id="btn-cut" class="btn btn-cut" type="button"
@@ -2287,7 +2292,7 @@
   <script src="nso-helpers.js?v=9c476e39"></script>
   <script src="nso-recent.js?v=f03d6f13"></script>
   <script src="nso-bounds.js?v=778acac4"></script>
-  <script src="app-core.js?v=ae7a6b37"></script>
+  <script src="app-core.js?v=ee9de5fe"></script>
   <!-- Up to six plates (beds): the active one is state.models / state.placed, the rest are kept beside it. docs/BEDS.md. -->
   <script src="app-beds.js?v=3d221bc4"></script>
 
@@ -2295,7 +2300,7 @@
 
 
 
-  <script src="app-cut.js?v=e65c50c0"></script>
+  <script src="app-cut.js?v=15e483d4"></script>
   <script src="app-finish.js?v=e595107e"></script>
   <script src="app-sculpt.js?v=f522aee3"></script>
   <script src="app-extend.js?v=e24e3562"></script>

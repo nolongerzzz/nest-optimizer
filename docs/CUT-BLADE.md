@@ -15,22 +15,23 @@ The Cut card's blade has three modes (the Blade row), and two switches above it.
   strand and cuts a **nick** in from its edge, `Notch width` along the strand
   and `Notch depth` in. It never goes through, and only that strand is touched.
 
-Switches:
+**Sizes are sliders.** Width, Depth and Kerf (Sized), and Notch width and Notch
+depth (Notch), are each a slider with a number box beside it; they are the same
+number, and the blade in the viewport and the readout follow as you drag. The
+slider's range comes from the piece (width and depth run a little past its
+biggest section dimension, kerf and notch width to 10 mm or half its length);
+the number box takes anything, and the slider's range grows to hold what it is
+given, so a slider never sits at its end while its box says something else.
 
-- **Adjust blade** (on by default): when off, the blade is parked. Its controls
-  (slider, nudges, mitre and bevel dials, the Blade row) are inert and a click or
-  drag on the plate no longer places or slides it, so nothing you do to the piece
-  or the view can shift it. A click still selects the piece. Pieces still do not
-  move while Cut is open (that is the app's rule, and it says so).
-- **Rotate piece**: shows the rotate rings on the piece while Cut stays open.
-  Turn is on; *Lean front/back* and *Lean side/side* appear as options. Drag a
-  ring and the piece turns and the blade follows it. The arrow keys are not
-  taken (Cut's dials use them; one press is answered once).
+**Rotate piece** (a box at the top of the card) shows the rotate rings on the
+piece while Cut stays open. Turn is on; *Lean front/back* and *Lean side/side*
+appear as options. Drag a ring and the piece turns and the blade follows it. The
+arrow keys are not taken (Cut's dials use them; one press is answered once).
+Closing Cut clears the box and takes the rings with it.
 
 Files: `nso_notch.js` (the geometry, THREE-free, `npm run notch:test`),
 `app-cut.js` (`cutBladeSpec`, `cutBuildSizedBlade`, `cutNotchAt`, the card
-wiring), `app-core.js` (the click's point and face, the Adjust blade gate, the
-ring grab under Cut), `app-rotate-handles.js` (rings under Cut), the Cut card
+wiring), `app-core.js` (the click's point and face, the ring grab under Cut), `app-rotate-handles.js` (rings under Cut), the Cut card
 in `index.html`. Real-browser checks: `npm run notch:drive` (bars) and
 `npm run notch:strand-drive` (a spiral of cord).
 
@@ -132,4 +133,3 @@ from the click's depth ends up buried.
 - **Single strand** picks by the plane's section, so two strands that *touch*
   (one blob) are one strand.
 - **Mitre and bevel** are supported; bevel is checked on a flat top face only.
-- **Adjust blade off** does not let pieces move while Cut is open.

@@ -1,6 +1,6 @@
 /* nso_cut_strand_drive_check.js - the Cut card on a SPIRAL OF CORD: the sized
    blade taking one strand and not the whole spiral, Notch mode, and the two
-   switches (Adjust blade, Rotate piece). Real app, real Chromium, real
+   Rotate piece switch. Real app, real Chromium, real
    manifold kernel, real mouse.
      node tools/nso_cut_strand_drive_check.js        exit 0 = every gate held
 
@@ -17,9 +17,8 @@
      strand's own piece leaves a pinched edge; one that subtracts a blade does not.)
    - Notch: fitted to the strand, from its edge; its volume grows in step with
      the notch width and depth, and the strand is not severed.
-   - Adjust blade off: the blade does not move for a click or a drag, and its
-     controls are inert; the click still selects the piece, and the app still
-     refuses to move pieces while Cut is open. On again: the blade answers.
+   - Sliders: width, depth and kerf for the Sized blade, width and depth for Notch -
+     each a slider beside its number box, ranged to the piece, and the same number.
    - Rotate piece: the rings appear and a real drag on one turns the piece, the
      blade follows, and a cut still works afterwards. Arrow keys are not
      answered twice.                                                          */
@@ -204,39 +203,56 @@ withApp(async (page, logs) => {
   check('Undo said what it undid', /Notch reverted/.test(await status()), await status());
   check('and the piece is back', near((await probe(id)).vol, v0.vol, 1e-3));
 
-  console.log('Adjust blade');
+  console.log('sliders: width, depth, kerf; notch width and depth');
   await setSized(60, 8, 1, true);
   await clickAt(crown);
-  const before = await page.evaluate(() => ({ t: state.cutT, at: state.cutBladeAt && state.cutBladeAt.local.toArray(), pos: [state.placed[0].x, state.placed[0].z] }));
-  await page.evaluate(() => { const c = document.getElementById('chk-cut-adjust'); c.checked = false; c.dispatchEvent(new Event('change')); });
-  check('off: the controls are inert', await page.evaluate(() => document.getElementById('cut-adjust-wrap').hasAttribute('inert') && state.cutAdjust === false));
-  check('off: Cut and the two switches stay live', await page.evaluate(() => !document.getElementById('btn-cut').closest('[inert]') && !document.getElementById('chk-cut-adjust').closest('[inert]') && !document.getElementById('chk-cut-rotate').closest('[inert]')));
-  const other = await crownNear(id, 8);
-  await clickAt(other);
-  const after = await page.evaluate(() => ({ t: state.cutT, at: state.cutBladeAt && state.cutBladeAt.local.toArray() }));
-  check('off: a click on the piece does not move the blade', after.t === before.t && JSON.stringify(after.at) === JSON.stringify(before.at), JSON.stringify({ before: before.t, after: after.t }));
-  const xy = await xyOf(other);
-  await page.mouse.move(xy[0], xy[1]); await page.mouse.down(); await page.mouse.move(xy[0] + 40, xy[1] + 24, { steps: 6 }); await page.mouse.up();
-  const moved = await page.evaluate(() => [state.placed[0].x, state.placed[0].z]);
-  const still = await page.evaluate(() => ({ t: state.cutT, at: state.cutBladeAt && state.cutBladeAt.local.toArray() }));
-  check('off: a drag on the piece does not slide the blade (and, as ever, pieces do not move while Cut is open)',
-    still.t === before.t && JSON.stringify(still.at) === JSON.stringify(before.at) && moved[0] === before.pos[0] && moved[1] === before.pos[1],
-    JSON.stringify({ t: [before.t, still.t], moved: moved }));
-  check('off: the app says why the piece did not move', /Cutter open - close cutter to move pieces/.test(await status()), await status());
-  await page.evaluate(() => { const c = document.getElementById('chk-cut-adjust'); c.checked = true; c.dispatchEvent(new Event('change')); });
-  const onXy = await crownNear(id, 8);
-  await clickAt(onXy);
-  const back = await page.evaluate(() => state.cutBladeAt && state.cutBladeAt.local.toArray());
-  check('on again: a click on the piece puts the blade there', JSON.stringify(back) !== JSON.stringify(before.at) && !(await page.evaluate(() => document.getElementById('cut-adjust-wrap').hasAttribute('inert'))));
+  const rng = id => page.evaluate(id => { const e = document.getElementById(id); return e ? { v: Number(e.value), min: Number(e.min), max: Number(e.max), shown: !!e.offsetParent } : null; }, id);
+  const ext = await page.evaluate(() => { const i = getCutPlaneLocal(getActiveModel()), k = ['x', 'y', 'z'].indexOf(i.axis), z = i.bbox.getSize(new THREE.Vector3()); return Math.max(...[0, 1, 2].filter(q => q !== k).map(q => z.getComponent(q))); });
+  const wS = await rng('cut-blade-width-s'), dS = await rng('cut-blade-depth-s'), kS = await rng('cut-blade-kerf-s');
+  check('Sized shows a slider for each of width, depth and kerf', wS.shown && dS.shown && kS.shown, JSON.stringify({ wS, dS, kS }));
+  check('the sliders sit at the numbers in the boxes (60, 8, 1), never pegged short of them', wS.v === 60 && dS.v === 8 && kS.v === 1 && wS.max >= 60, JSON.stringify({ w: wS, d: dS, k: kS }));
+  check('their ranges follow the piece: width and depth run a little past its biggest section dimension (or to the number given, if more)',
+    wS.max === Math.max(Math.ceil(ext + 2), 60) && dS.max === Math.max(Math.ceil(ext + 1), 8), JSON.stringify({ ext: +ext.toFixed(2), wMax: wS.max, dMax: dS.max }));
+  // The box's own three sizes (the cut frame can be turned, so its world-axis extent is not its size).
+  const bladeBox = () => page.evaluate(() => { const p = state.cutHelper.children.find(c => c.userData.cutBlade).geometry.parameters;
+    return [p.width, p.height, p.depth].map(v => +v.toFixed(3)).sort((a, b) => a - b); });
+  // a real mouse press on the width slider, a third of the way along its track
+  const wRect = await page.evaluate(() => { const r = document.getElementById('cut-blade-width-s').getBoundingClientRect(); return { x: r.left, y: r.top + r.height / 2, w: r.width }; });
+  await page.mouse.click(wRect.x + wRect.w * 0.3, wRect.y);
+  const wAfter = await page.evaluate(() => ({ s: Number(document.getElementById('cut-blade-width-s').value), n: Number(document.getElementById('cut-blade-width').value), st: state.cutBlade.width }));
+  check('a real click on the width slider sets the width, the box beside it and the blade setting together', wAfter.s === wAfter.n && wAfter.n === wAfter.st && wAfter.st > wS.min + 3 && wAfter.st < wS.max, JSON.stringify(wAfter));
+  const drawn = await bladeBox();
+  check('and the blade drawn in the viewport is that wide: kerf x (depth + 1 clear) x width', near(drawn[0], 1, 0.01) && near(drawn[1], 9, 0.01) && near(drawn[2], wAfter.st, 0.01), JSON.stringify({ drawn, width: wAfter.st }));
+  await page.evaluate(() => { const e = document.getElementById('cut-blade-depth-s'); e.value = '5.5'; e.dispatchEvent(new Event('input')); });
+  const dAfter = await page.evaluate(() => ({ n: Number(document.getElementById('cut-blade-depth').value), st: state.cutBlade.depth, ro: document.getElementById('cut-readout').textContent }));
+  check('the depth slider moves the depth, its box and the readout', dAfter.n === 5.5 && dAfter.st === 5.5 && /5\.5 deep/.test(dAfter.ro), JSON.stringify(dAfter));
+  await page.evaluate(() => { const e = document.getElementById('cut-blade-kerf-s'); e.value = '2.5'; e.dispatchEvent(new Event('input')); });
+  check('the kerf slider moves the kerf', await page.evaluate(() => state.cutBlade.kerf === 2.5 && Number(document.getElementById('cut-blade-kerf').value) === 2.5 && /kerf 2\.5/.test(document.getElementById('cut-readout').textContent)));
+  await page.focus('#cut-blade-width');          // typing into the box, as a user does (the slider the mouse used loses focus)
+  await page.evaluate(() => { const e = document.getElementById('cut-blade-width'); e.value = '500'; e.dispatchEvent(new Event('input')); e.dispatchEvent(new Event('change')); });
+  check('typing past the slider\'s end still works: the box takes 500, and the slider\'s range grows to hold it', await page.evaluate(() => state.cutBlade.width === 500 && Number(document.getElementById('cut-blade-width-s').max) >= 500 && Number(document.getElementById('cut-blade-width-s').value) === 500));
+  await setNotch(1, 1); await clickAt(crown);
+  const nW = await rng('cut-notch-width-s'), nD = await rng('cut-notch-depth-s');
+  check('Notch shows a slider for its width and its depth, and not the sized ones', nW.shown && nD.shown && !(await rng('cut-blade-width-s')).shown, JSON.stringify({ nW, nD }));
+  await page.evaluate(() => { const e = document.getElementById('cut-notch-width-s'); e.value = '2'; e.dispatchEvent(new Event('input')); });
+  await cutOnce(); const VS2 = v0.vol - (await probe(id)).vol; await undo();
+  check('the notch-width slider is the notch width: 2 takes twice the volume of 1 (within 12%)', Math.abs(VS2 / V11 - 2) < 0.24, 'ratio ' + (VS2 / V11).toFixed(3));
+  await page.evaluate(() => { const e = document.getElementById('cut-notch-depth-s'); e.value = '2'; e.dispatchEvent(new Event('input')); const w = document.getElementById('cut-notch-width-s'); w.value = '1'; w.dispatchEvent(new Event('input')); });
+  await cutOnce(); const VD2 = v0.vol - (await probe(id)).vol; await undo();
+  check('the notch-depth slider is the notch depth: 2 takes over 1.8 times the volume of 1', VD2 / V11 > 1.8, 'ratio ' + (VD2 / V11).toFixed(3));
+  check('there is no Adjust blade switch any more', await page.evaluate(() => !document.getElementById('chk-cut-adjust') && !document.getElementById('cut-adjust-wrap') && !/Adjust blade/.test(document.getElementById('edit-card').textContent)));
 
   console.log('Rotate piece');
   id = await fresh();
   await setSized(60, 8, 1, true);
   await clickAt(await crownNear(id, 0));
+  const rowShown = () => page.evaluate(() => { const e = document.getElementById('cut-rotate-rings'); return getComputedStyle(e).display !== 'none' && !!e.offsetParent; });
+  check('the ring options are not on the card until Rotate piece is ticked (computed style, not the attribute)', (await rowShown()) === false);
   check('rings are not drawn until asked', await page.evaluate(() => { const g = state.scene.getObjectByName('nso-rotate-handles'); return !g || !g.visible || !g.children.length; }));
   await page.evaluate(() => { const c = document.getElementById('chk-cut-rotate'); c.checked = true; c.dispatchEvent(new Event('change')); });
   await page.waitForTimeout(200);
   const ringInfo = await page.evaluate(() => { const g = state.scene.getObjectByName('nso-rotate-handles'); return { rings: nsoRotate.rings(), visible: !!(g && g.visible), kids: g ? g.children.length : 0, cutOpen: state.cutterOpen, row: !document.getElementById('cut-rotate-rings').hidden }; });
+  check('ticked: the ring options appear on the card', (await rowShown()) === true);
   check('ticked: the Turn ring is drawn on the piece, Cut still open, the ring options shown', ringInfo.rings.includes('turn') && ringInfo.visible && ringInfo.kids > 0 && ringInfo.cutOpen && ringInfo.row, JSON.stringify(ringInfo));
   // The pose is baked into the geometry when a turn ends (the mesh's own quaternion goes back to identity), so
   // "did it turn" is read off a real vertex in the world, not off the quaternion.

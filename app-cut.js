@@ -698,6 +698,7 @@ function syncCutBevelUI() {
 
 function syncCutUI() {
   syncCutMiterUI();
+  if (state.cutBlade && state.cutBlade.sized) syncCutBladeUI();
   const m = getActiveModel();
   const slider = document.getElementById('cut-slider');
   const input = document.getElementById('cut-mm');
@@ -830,7 +831,6 @@ function openCutter(tool) {
   state.cutPlumb = null;
   state.cutBlade = null;
   state.cutBladeAt = null;
-  state.cutAdjust = true;
   state.cutRotate = false;
   state.editId = null;
   state.selectedIndex = -1;
@@ -3216,10 +3216,30 @@ function cutSplitAt(model, info) {
 
 // ===================== The sized blade: card and cut =====================
 const CUT_BLADE_MODES = { full: 'btn-cut-blade-full', sized: 'btn-cut-blade-sized', notch: 'btn-cut-blade-notch' };
-const CUT_BLADE_FIELDS = [['cut-blade-width', 'width'], ['cut-blade-depth', 'depth'], ['cut-blade-kerf', 'kerf'],
-                          ['cut-notch-width', 'nwidth'], ['cut-notch-depth', 'ndepth']];
+/* [number box, slider, state key]: the three sizes of the Sized blade and the two of Notch. */
+const CUT_BLADE_FIELDS = [['cut-blade-width', 'cut-blade-width-s', 'width'], ['cut-blade-depth', 'cut-blade-depth-s', 'depth'],
+                          ['cut-blade-kerf', 'cut-blade-kerf-s', 'kerf'],
+                          ['cut-notch-width', 'cut-notch-width-s', 'nwidth'], ['cut-notch-depth', 'cut-notch-depth-s', 'ndepth']];
 
-/** The Blade rows of the Cut card, and the two switches above them, read off state. */
+/** How far each slider runs, from the piece in hand: the width and depth to a little past the piece's
+    biggest section dimension (so a blade can be made wider than the piece, to take it whole), the kerf
+    to 10 mm or half the piece's length. The number box takes anything past that, and the slider's range
+    grows to hold what it is given (syncCutBladeUI). */
+function cutSliderMax(key) {
+  const m = getActiveModel(), info = m ? getCutPlaneLocal(m) : null;
+  let ext = 40, span = 40;
+  if (info) {
+    const k = ['x', 'y', 'z'].indexOf(info.axis), size = info.bbox.getSize(new THREE.Vector3());
+    ext = Math.max.apply(null, [0, 1, 2].filter(i => i !== k).map(i => size.getComponent(i)));
+    span = info.span;
+  }
+  const up = v => Math.max(1, Math.ceil(v));
+  if (key === 'width') return up(ext + 2);
+  if (key === 'depth' || key === 'ndepth') return up(ext + 1);
+  return Math.max(1, Math.min(10, Math.floor(span / 2)));              // kerf, notch width
+}
+
+/** The Blade rows of the Cut card, and Rotate piece, read off state. */
 function syncCutBladeUI() {
   if (typeof document === 'undefined') return;
   const b = state.cutBlade || { mode: 'full' };
@@ -3232,18 +3252,24 @@ function syncCutBladeUI() {
   const notch = document.getElementById('cut-notch-fields');
   if (sized) sized.hidden = mode !== 'sized';
   if (notch) notch.hidden = mode !== 'notch';
-  CUT_BLADE_FIELDS.forEach(function (p) {
-    const el = document.getElementById(p[0]);
-    if (el && b[p[1]] != null && document.activeElement !== el) el.value = String(b[p[1]]);
-  });
+  if (mode !== 'full') {
+    CUT_BLADE_FIELDS.forEach(function (p) {
+      const num = document.getElementById(p[0]), sl = document.getElementById(p[1]), v = b[p[2]];
+      // The range always takes in the number it shows (a slider at its end while its box says 10 is a lie), and a
+      // slider in the hand is left alone, so its scale does not shift under the thumb.
+      if (sl && document.activeElement !== sl) {
+        sl.max = String(Math.min(1000, Math.max(cutSliderMax(p[2]), Math.ceil(v || 0))));
+        if (v != null) sl.value = String(v);
+      }
+      if (num && v != null && document.activeElement !== num) num.value = String(v);
+    });
+  }
   const strand = document.getElementById('chk-cut-blade-strand');
   if (strand) strand.checked = b.strand !== false;
-  const adj = document.getElementById('chk-cut-adjust');
-  if (adj) adj.checked = state.cutAdjust !== false;
   const rot = document.getElementById('chk-cut-rotate');
   if (rot) rot.checked = !!state.cutRotate;
-  const wrap = document.getElementById('cut-adjust-wrap');
-  if (wrap) { if (state.cutAdjust === false) wrap.setAttribute('inert', ''); else wrap.removeAttribute('inert'); }
+  const rings = document.getElementById('cut-rotate-rings');
+  if (rings) rings.hidden = !state.cutRotate;
   const btn = document.getElementById('btn-cut');
   if (btn) btn.title = mode === 'notch'
     ? 'Cut the notch: a nick of your width and depth in from the edge of the strand under the click. Only that strand is touched, and it stops short of the far side. One Undo puts it back.'
@@ -3259,21 +3285,9 @@ function cutBladeRefresh() {
   updateCutHelper();
 }
 
-/** Adjust blade: on (the default), the blade answers the card and the plate as it always did. Off, the
-    blade is parked - its controls are inert, and a click or drag on the plate no longer places or slides
-    it (a click still selects the piece; pieces still do not move while Cut is open) - so nothing you do
-    to the piece or the view can shift it. */
-function cutSetAdjust(on) {
-  state.cutAdjust = !!on;
-  if (!on) state.cutDragging = false;
-  syncCutBladeUI();
-}
-
 /** Rotate piece: the rotate rings (app-rotate-handles.js) drawn on the piece while Cut stays open. */
 function cutSetRotate(on) {
   state.cutRotate = !!on;
-  const rows = document.getElementById('cut-rotate-rings');
-  if (rows) rows.hidden = !on;
   if (typeof nsoRotate !== 'undefined' && nsoRotate.setRing && on) {
     nsoRotate.setRing('turn', true);
   }
@@ -3291,29 +3305,29 @@ function cutWireBladeControls() {
     if (el) el.addEventListener('click', function () { cutSetBladeMode(k); cutBladeRefresh(); });
   });
   CUT_BLADE_FIELDS.forEach(function (p) {
-    const el = document.getElementById(p[0]);
-    if (!el) return;
-    el.addEventListener('input', function () {
-      const v = Number(el.value);
+    const num = document.getElementById(p[0]), sl = document.getElementById(p[1]);
+    if (!num) return;
+    // Both set the one number in state; the blade and the readout follow it as it moves.
+    function set(v, from) {
       if (!isFinite(v) || v <= 0) return;           // mid-typing: keep the last good blade
-      cutBladeState()[p[1]] = v;
+      cutBladeState()[p[2]] = v;
+      if (from !== num) num.value = String(v);
+      if (sl && from !== sl) sl.value = String(v);
       syncCutUI();
       updateCutHelper();
-    });
+    }
+    num.addEventListener('input', function () { set(Number(num.value), num); });
+    if (sl) sl.addEventListener('input', function () { set(Number(sl.value), sl); });
     // A blade the card shows is the blade that cuts: leaving the box snaps it to what can be built.
-    el.addEventListener('change', function () {
-      const b = cutBladeState(), s = NSO_Notch.sizes(b);
-      if (b.mode === 'notch') { b.nwidth = s.kerf; b.ndepth = s.depth; }
-      else { b.width = NSO_Notch.sizes({ width: b.width, depth: b.depth, kerf: b.kerf }).width;
-             b.depth = NSO_Notch.sizes({ width: b.width, depth: b.depth, kerf: b.kerf }).depth;
-             b.kerf = NSO_Notch.sizes({ width: b.width, depth: b.depth, kerf: b.kerf }).kerf; }
+    num.addEventListener('change', function () {
+      const b = cutBladeState(), z = NSO_Notch.sizes({ mode: b.mode, width: b.width, depth: b.depth, kerf: b.kerf, nwidth: b.nwidth, ndepth: b.ndepth });
+      if (b.mode === 'notch') { b.nwidth = z.kerf; b.ndepth = z.depth; }
+      else { b.width = z.width; b.depth = z.depth; b.kerf = z.kerf; }
       cutBladeRefresh();
     });
   });
   const strand = document.getElementById('chk-cut-blade-strand');
   if (strand) strand.addEventListener('change', function () { cutBladeState().strand = strand.checked; cutBladeRefresh(); });
-  const adj = document.getElementById('chk-cut-adjust');
-  if (adj) adj.addEventListener('change', function () { cutSetAdjust(adj.checked); });
   const rot = document.getElementById('chk-cut-rotate');
   if (rot) rot.addEventListener('change', function () { cutSetRotate(rot.checked); });
   [['chk-cut-ring-fb', 'fb'], ['chk-cut-ring-ss', 'ss']].forEach(function (p) {

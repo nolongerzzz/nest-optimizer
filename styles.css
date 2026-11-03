@@ -1292,13 +1292,17 @@ select:focus, input:focus {
 .cut-blade-fields { gap: 6px; margin-top: 6px; }
 .cut-blade-fields[hidden] { display: none; }
 .cut-blade-fields label { display: flex; flex-direction: column; flex: 1 1 0; min-width: 0; font-size: 11px; gap: 2px; }
-.cut-blade-fields { flex-wrap: wrap; }
+.cut-blade-sliders[hidden] { display: none; }
+.cut-blade-sliders { margin-top: 6px; }
+.cut-slide-row { display: grid; grid-template-columns: 64px minmax(0, 1fr) 54px; align-items: center; gap: 8px; margin: 4px 0; }
+.cut-slide-label { font-size: 11px; opacity: 0.85; }
+.cut-slide-row input[type="range"] { width: 100%; min-width: 0; margin: 0; }
+.cut-slide-row input[type="number"] { width: 100%; min-width: 0; box-sizing: border-box; }
 .cut-blade-fields label.cut-strand { flex: 1 1 100%; flex-direction: row; align-items: center; gap: 6px; }
 /* Cut card: the two switches over the blade */
 .cut-switches { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin: 2px 0 6px; }
 .cut-switch { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; }
 .cut-switches[hidden] { display: none; }
-.cut-adjust-wrap[inert] { opacity: 0.45; filter: grayscale(0.6); }
 .cut-blade-fields input[type="number"] { width: 100%; min-width: 0; box-sizing: border-box; }
 .cut-readout {
   font-size: 12px;

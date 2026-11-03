@@ -133,10 +133,9 @@ Smart build-plate packing for 3D printing.
   strand under the click (one turn of a spiral of cord, not the whole spiral).
   **Notch** fits the blade to that strand and cuts a nick in from its edge, of
   the **Notch width** and **Notch depth** you set. Click the face to put either
-  there; it goes in against that face. **Adjust blade** (on by default) parks
-  the blade when off, so clicks and the other controls cannot shift it, and
-  **Rotate piece** shows the rotate rings so the piece can be turned while Cut
-  stays open. See [docs/CUT-BLADE.md](docs/CUT-BLADE.md).
+  there; it goes in against that face. Each size is a slider with a number box,
+  and **Rotate piece** shows the rotate rings so the piece can be turned while
+  Cut stays open. See [docs/CUT-BLADE.md](docs/CUT-BLADE.md).
 - **Crop** (its own card, under Cut) takes a middle section out of a piece: set
   the box by two distances along the cut axis (or tick **Box** and drag it on
   the piece), press Crop, and the slab inside the box is removed, the far part

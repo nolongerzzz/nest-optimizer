@@ -20,10 +20,9 @@ Known gaps (also in the write-up): no wall-thickness refusal (Carve has one), po
 
 Asked for after the owner loaded `Connector (string)` (a flat spiral of 3.7 mm round cord): a sized blade that takes the one strand under the click and
 not every turn of the spiral; a Notch mode (a nick in from the strand's edge, adjustable width/depth - the owner chose the nick over a groove running
-along the cord); a checkbox to isolate blade adjustments from other controls; and a rotate box at the top of the card so a piece can be turned while Cut
+along the cord); a checkbox to isolate blade adjustments from other controls (dropped in the third round - see below); and a rotate box at the top of the card so a piece can be turned while Cut
 is open. `nso_notch.js` gains `sectionClusters` / `nearestCluster` / `notchBox` (node-tested on a comb). `app-cut.js`: three blade modes, the strand in
-`cutBladeSpec`, the strand outlined in the helper, `cutSetAdjust` / `cutSetRotate`. `app-core.js`: the three places a click or drag moves the blade
-check `state.cutAdjust`; the ring grab is allowed under Cut when `state.cutRotate`. `app-rotate-handles.js`: rings drawn/grabbed under Cut, keys stay
+`cutBladeSpec`, the strand outlined in the helper, `cutSetRotate`. `app-core.js`: the ring grab is allowed under Cut when `state.cutRotate`. `app-rotate-handles.js`: rings drawn/grabbed under Cut, keys stay
 with the Rotate menu. New `tools/nso_cut_strand_drive_check.js` (`notch:strand-drive`, a generated spiral). `nso_wire_cut_redesign_test` lists the card's
 controls again.
 
@@ -32,7 +31,12 @@ coincident faces; 0 non-manifold before, 1 after, at every tolerance, kernel sta
 instead: same volume, 0 bad edges. Also found: a click-to-strand pick measured to the outline's corners picks a neighbour on coarse meshes; it is now
 measured to the outline's segments.
 
-Wrong assumption corrected in testing: with Adjust blade off I had written that a drag moves the piece. The app refuses that while Cut is open
-("Cutter open - close cutter to move pieces"); the box now says only that a click selects and the blade stays put.
-
 Known gaps: no wall-thickness refusal; Notch is a nick across the strand, not a groove along it; position by click only.
+
+### Third round (2026-11-03): Adjust blade dropped, sizes are sliders
+
+The owner dropped the Adjust blade switch (it was meant to keep other controls from shifting the blade; sliders for the sizes are the answer) and asked
+for a slider for width, depth and kerf on the Sized blade and the same for Notch. Adjust blade is gone from the card, `app-cut.js`, the three gates in
+`app-core.js` and the tests. Each size is a slider + number box (`CUT_BLADE_FIELDS`), ranged to the piece (`cutSliderMax`), and the range always takes in
+the number shown. `nso_wire_cut_redesign_test` lists the new card; `nso_cut_strand_drive_check` (47 gates) has the slider gates, including a real mouse
+click on a slider and a computed-style check that the ring options are hidden until Rotate piece is ticked (the owner's screenshot showed them up).

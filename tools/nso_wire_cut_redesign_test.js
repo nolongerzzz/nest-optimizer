@@ -260,21 +260,22 @@ withApp(async (page, logs) => {
     const gone = await page.evaluate(() => ['btn-cutter-open', 'btn-cutter-close', 'btn-cut-axis-x', 'btn-cut-axis-z',
       'btn-yaw-left', 'btn-yaw-right', 'btn-yaw-left-90', 'btn-yaw-right-90'].filter(id => document.getElementById(id)));
     check('no Open / Close, no Cut X / Cut Z, no yaw buttons', gone.length === 0, gone.join(', ') || 'none');
-    // The card, top to bottom: the two switches (Rotate piece, Adjust blade, and the ring options Rotate
+    // The card, top to bottom: the Rotate piece switch (and the ring options it
     // piece shows), the mitre dial (with its typed box and
     // Square, and the − / + buttons under it), the bevel dial (its box, − / +
     // and Plumb), the slider, ← number →, the Blade rows (Full / Sized / Notch and
-    // the fields the last two show), Cut. (The right-side-out offer
+    // the slider + number rows the last two show), Cut. (The right-side-out offer
     // is hidden until a Cut refuses an inside-out piece.)
     const order = await page.evaluate(() => [...document.querySelectorAll('#cutter-tools button, #cutter-tools input, #cutter-tools svg')]
       .filter(e => !e.hidden).map(e => e.id));
-    check('the Cut card is: switches, mitre dial, − / +, bevel dial, − / +, Plumb, slider, ← number →, Blade, Cut',
-      order.join(' ') === 'chk-cut-rotate chk-cut-adjust chk-cut-ring-fb chk-cut-ring-ss ' +
+    check('the Cut card is: Rotate piece, mitre dial, − / +, bevel dial, − / +, Plumb, slider, ← number →, Blade, Cut',
+      order.join(' ') === 'chk-cut-rotate chk-cut-ring-fb chk-cut-ring-ss ' +
         'cut-miter-dial cut-miter-deg btn-cut-square btn-cut-miter-minus btn-cut-miter-plus ' +
         'cut-bevel-dial cut-bevel-deg btn-cut-bevel-minus btn-cut-bevel-plus btn-cut-plumb ' +
         'cut-slider btn-cut-nudge-m cut-mm btn-cut-nudge-p ' +
-        'btn-cut-blade-full btn-cut-blade-sized btn-cut-blade-notch cut-blade-width cut-blade-depth cut-blade-kerf ' +
-        'chk-cut-blade-strand cut-notch-width cut-notch-depth btn-cut',
+        'btn-cut-blade-full btn-cut-blade-sized btn-cut-blade-notch ' +
+        'cut-blade-width-s cut-blade-width cut-blade-depth-s cut-blade-depth cut-blade-kerf-s cut-blade-kerf chk-cut-blade-strand ' +
+        'cut-notch-width-s cut-notch-width cut-notch-depth-s cut-notch-depth btn-cut',
       order.join(' '));
     const cards = await page.evaluate(() => ({
       cut: !!document.querySelector('.vp-shell-col > #menu-cut'), crop: !!document.querySelector('.vp-shell-col > #menu-crop'),
