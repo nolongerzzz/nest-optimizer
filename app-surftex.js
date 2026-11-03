@@ -11,6 +11,8 @@
 //        Spacing / Row   centre to centre, across and between rows - or Density, features per cm2, which sets the spacing
 //        Layout          grid, stagger, hex, diamond; Rotate turns each feature, Lattice turns the whole lattice
 //   3. WRAP. Lays it: the face is replaced by a new patch that meets the old mesh rim corner for corner - no boolean. One Undo.
+//   The card is live (app-surftex-live.js): Feature and Layout are tiles, and while the card is open the piece shows the wrap as a ghost,
+//   redrawn as any number moves; WRAP installs the result that is on screen.
 //
 // PAINT SCOPE: WHOLE-PIECE. Per the scoping rule in docs/HANDOFF.md: a new patch renumbers triangles, and paint names its faces by
 // axis and side - so any paint stands Wrap down, naming the count: nsoMaskCount(m) is the whole test (the same stand-down as Weave).
@@ -73,6 +75,7 @@ function NSO_surftexSetParams(p) {
   set('sel-surftex-motif', p.motif); set('sel-surftex-layout', p.layout || 'grid'); set('sel-surftex-sides', p.sides || 0); set('sel-surftex-profile', p.profile || 'tri');
   var rg = NSO_surftexEl('chk-surftex-groove'); if (rg) rg.checked = p.ridge === false;
   NSO_surftexShowFields();
+  if (window.nsoSurftexLive) window.nsoSurftexLive.sync();      // the tiles follow the selects a preset just filled
 }
 /* Only the fields that mean something for the feature chosen. */
 function NSO_surftexShowFields() {
@@ -104,7 +107,7 @@ function NSO_surftexFillFaces() {
   var sel = NSO_surftexEl('sel-surftex-face'), m = NSO_surftexModel(), B = NSO_surftexUI();
   if (!sel) return;
   sel.innerHTML = '';
-  if (!m) { var o0 = document.createElement('option'); o0.value = '-1'; o0.textContent = 'select a piece first'; sel.appendChild(o0); B.picked = -1; NSO_surftexDraw(); return; }
+  if (!m) { var o0 = document.createElement('option'); o0.value = '-1'; o0.textContent = 'select a piece first'; sel.appendChild(o0); B.picked = -1; NSO_surftexDraw(); if (window.nsoSurftexLive) window.nsoSurftexLive.refresh(); return; }
   var reg = NSO_surftexRegions(m), shown = reg.list.slice(0, 12), big = shown.length ? shown[0].area : 0;
   shown.forEach(function (r) {
     var o = document.createElement('option');
@@ -118,6 +121,7 @@ function NSO_surftexFillFaces() {
   B.picked = shown.length ? shown[0].id : -1;
   sel.value = shown.length ? String(shown[0].id) : '-1';
   NSO_surftexDraw();
+  if (window.nsoSurftexLive) window.nsoSurftexLive.refresh();    // the faces are new: the preview is drawn again
 }
 function NSO_surftexPicks() {
   var m = NSO_surftexModel(), B = NSO_surftexUI(), sel = NSO_surftexEl('sel-surftex-face');
@@ -160,9 +164,33 @@ function NSO_surftexDraw() {
 
 /* ---- the wrap ------------------------------------------------------------- */
 // PAINT SCOPE: WHOLE-PIECE - see the header and docs/HANDOFF.md.
+//
+// Two halves, so the live preview (app-surftex-live.js) can run the first and WRAP can install what it showed:
+//   NSO_surftexCompute  everything Wrap decides, short of putting it on the piece -> { ok, res, text } | { ok: false, reason, painted? }
+//   NSO_surftexWrap     the compute (or `opts.computed`, the preview's own result) and then the commit
+function NSO_surftexCompute(opts) {
+  opts = opts || {};
+  var m = NSO_surftexModel();
+  if (!m) return { ok: false, reason: 'select a piece first' };
+  if (typeof NSO_SurfTex === 'undefined') return { ok: false, reason: 'nso_surftex.js is not loaded' };
+  var painted = (typeof nsoMaskCount === 'function') ? nsoMaskCount(m) : 0;
+  if (painted > 0) return { ok: false, reason: 'painted faces: ' + painted, painted: painted };
+  var reg = NSO_surftexRegions(m), picks = opts.picks || NSO_surftexPicks();
+  if (!picks.length) return { ok: false, reason: 'pick a face' };
+  var params = opts.params || NSO_surftexParams(), res;
+  try { res = NSO_SurfTex.apply(m.rawTris, reg, picks, params); }
+  catch (err) { console.error('[wrap]', err); return { ok: false, reason: (err && err.message) || String(err) }; }
+  if (!res.ok) return { ok: false, reason: res.reason };
+  var notes = [];
+  res.perFace.forEach(function (f) { (f.stats.notes || []).forEach(function (n) { if (notes.indexOf(n) < 0) notes.push(n); }); });
+  var txt = 'Wrapped ' + res.perFace.length + (res.perFace.length > 1 ? ' faces' : ' face') + ' - ' + NSO_surftexInt(res.stats.tiles) + ' features' +
+    (res.stats.hmax > 0 ? ', up to +' + res.stats.hmax.toFixed(2) + ' mm' : '') + (res.stats.hmin < 0 ? ', down to ' + res.stats.hmin.toFixed(2) + ' mm' : '') +
+    ', ' + NSO_surftexInt(res.removed) + ' triangles out, ' + NSO_surftexInt(res.added) + ' in, rims kept corner for corner' + (notes.length ? ' - ' + notes.join('; ') : '');
+  return { ok: true, res: res, text: txt, model: m, picks: picks, params: params };
+}
 function NSO_surftexWrap(opts) {
   opts = opts || {};
-  var B = NSO_surftexUI(), m = NSO_surftexModel();
+  var B = NSO_surftexUI();
   function refuse(why) {
     if (typeof setStatus === 'function') setStatus('Wrap refused - piece unchanged (' + why + ')', true);
     NSO_surftexReadout('Wrap: ' + why, true);
@@ -170,26 +198,18 @@ function NSO_surftexWrap(opts) {
     return { ok: false, reason: why };
   }
   if (B.busy) return { ok: false, reason: 'busy' };
-  if (!m) return refuse('select a piece first');
-  if (typeof NSO_SurfTex === 'undefined') return refuse('nso_surftex.js is not loaded');
-  var painted = (typeof nsoMaskCount === 'function') ? nsoMaskCount(m) : 0;
-  if (painted > 0) {
-    if (typeof setStatus === 'function') setStatus('Wrap stood down - ' + painted + ' painted face(s); a new patch renumbers the triangles the paint names. Clear paint to wrap.', true);
-    NSO_surftexReadout('Wrap: ' + painted + ' painted face(s) - clear paint first.', true);
-    return { ok: false, reason: 'painted faces: ' + painted, painted: painted };
+  var c = opts.computed || NSO_surftexCompute(opts);
+  if (!c.ok) {
+    if (c.painted) {
+      if (typeof setStatus === 'function') setStatus('Wrap stood down - ' + c.painted + ' painted face(s); a new patch renumbers the triangles the paint names. Clear paint to wrap.', true);
+      NSO_surftexReadout('Wrap: ' + c.painted + ' painted face(s) - clear paint first.', true);
+      return { ok: false, reason: c.reason, painted: c.painted };
+    }
+    return refuse(c.reason);
   }
-  var reg = NSO_surftexRegions(m), picks = opts.picks || NSO_surftexPicks();
-  if (!picks.length) return refuse('pick a face');
-  var params = opts.params || NSO_surftexParams(), res;
-  try { res = NSO_SurfTex.apply(m.rawTris, reg, picks, params); }
-  catch (err) { console.error('[wrap]', err); return refuse((err && err.message) || String(err)); }
-  if (!res.ok) return refuse(res.reason);
-  var notes = [];
-  res.perFace.forEach(function (f) { (f.stats.notes || []).forEach(function (n) { if (notes.indexOf(n) < 0) notes.push(n); }); });
-  var txt = 'Wrapped ' + res.perFace.length + (res.perFace.length > 1 ? ' faces' : ' face') + ' - ' + NSO_surftexInt(res.stats.tiles) + ' features' +
-    (res.stats.hmax > 0 ? ', up to +' + res.stats.hmax.toFixed(2) + ' mm' : '') + (res.stats.hmin < 0 ? ', down to ' + res.stats.hmin.toFixed(2) + ' mm' : '') +
-    ', ' + NSO_surftexInt(res.removed) + ' triangles out, ' + NSO_surftexInt(res.added) + ' in, rims kept corner for corner' + (notes.length ? ' - ' + notes.join('; ') : '');
+  var m = c.model, res = c.res, txt = c.text;
   NSO_surftexClearDraw();
+  if (window.nsoSurftexLive) window.nsoSurftexLive.release();    // the ghost comes off before the bake swaps the piece's mesh
   if (typeof NSO_sculptCommitRaw !== 'function' || !NSO_sculptCommitRaw(m, res.soup, 'wrapReplace', txt)) return refuse('the result could not be committed');
   if (typeof updateAdjustUI === 'function') updateAdjustUI();
   B.reg = null; B.soup = null;                                // the soup is new: read the faces again
@@ -201,6 +221,7 @@ function NSO_surftexWrap(opts) {
 /* ---- open, close, wire ----------------------------------------------------- */
 function NSO_surftexOpen() {
   var B = NSO_surftexUI(); B.open = true;
+  if (window.nsoSurftexLive) window.nsoSurftexLive.open();
   NSO_surftexFillFaces();
   var m = NSO_surftexModel();
   NSO_surftexReadout(m ? 'Pick a face and a skin, then Wrap.' : 'Select a piece first.', !m);
@@ -208,6 +229,7 @@ function NSO_surftexOpen() {
 function NSO_surftexClose() {
   var B = NSO_surftexUI(); B.open = false;
   NSO_surftexClearDraw();
+  if (window.nsoSurftexLive) window.nsoSurftexLive.close();
 }
 function NSO_surftexFillPresets() {
   var sel = NSO_surftexEl('sel-surftex-preset');
@@ -255,7 +277,8 @@ if (typeof document !== 'undefined') {
         if (typeof setStatus === 'function') setStatus('Wrapping…');
         setTimeout(function () {
           try {
-            var r = NSO_surftexWrap();
+            // the live preview's own result when it is current: WRAP installs what was on screen, not a second calculation
+            var r = NSO_surftexWrap({ computed: (window.nsoSurftexLive && window.nsoSurftexLive.fresh()) || undefined });
             if (r && r.ok && typeof setStatus === 'function') {
               var s = r.perFace.length + ' face(s), ' + NSO_surftexInt(r.stats.tiles) + ' features';
               setStatus('Wrap done - ' + s + '. One Undo puts the piece back.');
@@ -282,5 +305,5 @@ if (typeof document !== 'undefined') {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { NSO_surftexParams: NSO_surftexParams, NSO_surftexWrap: NSO_surftexWrap };
+  module.exports = { NSO_surftexParams: NSO_surftexParams, NSO_surftexWrap: NSO_surftexWrap, NSO_surftexCompute: NSO_surftexCompute };
 }

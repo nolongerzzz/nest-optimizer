@@ -3892,6 +3892,15 @@ button.ms-legend-btn:disabled { opacity: 0.4; cursor: default; }
 .soften-tile canvas { width: 64px; height: 64px; border-radius: 4px; }
 .soften-tile.is-picked { border-color: #4ade80; box-shadow: inset 0 0 0 1px #4ade80; color: #bbf7d0; }
 .soften-readout { margin: 0; font-size: 11px; color: #86efac; overflow-wrap: anywhere; }
+/* Wrap (app-surftex-live.js): Feature and Layout are shelves of the same tiles. A name over each shelf, 3 or 2 across, and a smaller picture
+   than Soften's because the card is already long. */
+.surftex-pick { display: flex; flex-direction: column; gap: 2px; }
+.surftex-pick-name { font-size: 11px; color: #94a3b8; }
+.surftex-shelf-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.surftex-shelf-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.surftex-shelf-3 .soften-tile canvas { width: 46px; height: 46px; }
+.surftex-shelf-2 .soften-tile canvas { width: 56px; height: 56px; }
+.surftex-shelf .soften-tile span { font-size: 10px; }
 .soften-readout.is-refused { color: #fca5a5; }
 #btn-soften.is-on { border-color: #4ade80; box-shadow: inset 0 0 0 1px #4ade80; }
 /* Thicken (app-thicken-live.js): the panel under the Thicken out | mm | Thicken

@@ -89,7 +89,10 @@
      `tint`, when given, is asked for each triangle's index in the soup and may
      answer an [r, g, b] to paint it in instead of the piece's blue - the one
      thing the Soften card (app-soften-live.js) adds, so its tiles can light
-     the surface a style changes. It is exported as nsoStockShelf.paint. */
+     the surface a style changes. `view`, when given, is { yaw, elev } in
+     radians in place of the shelf's three-quarter view (Wrap's layout tiles
+     look nearly straight down: the pattern is the picture). It is exported as
+     nsoStockShelf.paint. */
   function signedVolume(s) {
     var v = 0;
     for (var i = 0; i < s.length; i += 9) {
@@ -100,7 +103,7 @@
     return v;
   }
 
-  function paintTile(canvas, soup, tint) {
+  function paintTile(canvas, soup, tint, view) {
     var ctx = canvas.getContext && canvas.getContext('2d');
     if (!ctx) return false;
     var W = canvas.width, H = canvas.height, n = (soup.length / 9) | 0;
@@ -108,8 +111,9 @@
     ctx.fillRect(0, 0, W, H);
     if (!n) return false;
 
-    var cy = Math.cos(TILE_YAW), sy = Math.sin(TILE_YAW);
-    var ce = Math.cos(TILE_ELEV), se = Math.sin(TILE_ELEV);
+    var yaw = view && view.yaw != null ? view.yaw : TILE_YAW, elev = view && view.elev != null ? view.elev : TILE_ELEV;
+    var cy = Math.cos(yaw), sy = Math.sin(yaw);
+    var ce = Math.cos(elev), se = Math.sin(elev);
     /* Z-up soup: turn about Z by the yaw, then look down at it from `elev`.
        Screen x is the turned x; screen y (up) is y*sin(e) + z*cos(e); depth
        toward the viewer is z*sin(e) - y*cos(e). */

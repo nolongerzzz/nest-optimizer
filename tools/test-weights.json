@@ -347,6 +347,7 @@
     "weave:test": {"weight":28000,"note":"estimate (weave): 16 s on the cloud box x 1.7, rounded up; re-measure on the first CI run"},
     "surftex:test": {"weight":135000,"note":"measured (surftex): 126 s on the cloud box (the sphere and preset matrices dominate), rounded up"},
     "surftex:drive": {"weight":90000,"note":"estimate (surftex): a page load, one wrap, an undo and a refusal - about the weave:drive shape; re-measure on the first CI run"},
+    "surftex:live": {"weight":40000,"note":"estimate: nso_surftex_live_drive_check.js measured locally at about 25 s (a cylinder and a box, nine tiles, a bake)"},
     "weave:drive": {"weight":120000,"note":"estimate (weave): placeholder from text:drive (same shape of page work); re-measure on the first CI run"},
     "resurface:test": {"weight":6000,"note":"estimate (resurface): 3.5 s on the cloud box x 1.7; re-measure on the first CI run"},
     "text:test": {"weight":3400,"note":"estimate (text-stamp): 2 s on the cloud box x 1.7; re-measure on the first CI run"},

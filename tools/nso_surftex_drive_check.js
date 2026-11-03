@@ -49,12 +49,12 @@ withApp(async (page, logs) => {
   await page.selectOption('#sel-surftex-preset', 'ribbed-roller');
   const f1 = await page.evaluate(() => ({ size: document.getElementById('inp-surftex-size').value, h: document.getElementById('inp-surftex-height').value, sp: document.getElementById('inp-surftex-spacing').value, motif: document.getElementById('sel-surftex-motif').value }));
   check('Ribbed Roller: pyramid, size 9, height 5.35, spacing 9', f1.motif === 'spike' && f1.size === '9' && f1.h === '5.35' && f1.sp === '9', JSON.stringify(f1));
-  await page.selectOption('#sel-surftex-motif', 'dent');
+  await page.click('#surftex-features [data-value="dent"]');
   const vis = await page.evaluate(() => ({ height: document.getElementById('fld-surftex-height').style.display, depth: document.getElementById('fld-surftex-depth').style.display, sides: document.getElementById('fld-surftex-sides').style.display }));
   check('Feature = dent hides Height and Sides, shows Depth', vis.height === 'none' && vis.sides === 'none' && vis.depth === '', JSON.stringify(vis));
 
   console.log('\n=== 4. WRAP ===');
-  await page.selectOption('#sel-surftex-motif', 'spike');
+  await page.click('#surftex-features [data-value="spike"]');
   await page.selectOption('#sel-surftex-sides', '4');
   await page.fill('#inp-surftex-size', '3'); await page.fill('#inp-surftex-spacing', '4'); await page.fill('#inp-surftex-row', '4'); await page.fill('#inp-surftex-height', '2');
   await page.selectOption('#sel-surftex-face', { index: 0 });

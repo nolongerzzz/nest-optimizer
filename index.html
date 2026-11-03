@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=085dbc43" />
+  <link rel="stylesheet" href="styles.css?v=e651ef2f" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -1618,10 +1618,21 @@
                 <input type="number" id="inp-surftex-crease" value="30" min="5" max="80" step="5" aria-label="Crease angle, degrees"><span>&deg;</span></label>
               <label class="vp-bend-field" title="A skin: one for each design on the two plates, or a single feature to start from. Every number below can be changed after.">Skin
                 <select id="sel-surftex-preset" class="vp-select" aria-label="Skin preset"></select></label>
-              <label class="vp-bend-field" title="The feature that is repeated.">Feature
-                <select id="sel-surftex-motif" class="vp-select" aria-label="Feature">
-                  <option value="spike">Spike / pyramid</option><option value="ball">Ball</option><option value="bump">Bump</option>
-                  <option value="dent">Dent</option><option value="line">Line</option></select></label>
+              <!-- Feature and Layout are shelves of tiles (app-surftex-live.js), each picture the engine's own wrap on a small slab with the new
+                   surface lit green. The two <select>s stay, hidden, as the card's value holders: NSO_surftexParams and the presets read and
+                   write them, and a tile sets one and says so. -->
+              <div class="surftex-pick" title="The feature that is repeated. Each picture is what that feature does to a flat face.">
+                <span class="surftex-pick-name">Feature</span>
+                <div id="surftex-features" class="soften-shelf surftex-shelf surftex-shelf-3" role="group" aria-label="Feature">
+                  <button class="stock-tile soften-tile" type="button" data-pick="motif" data-value="spike" aria-pressed="false" aria-label="Spike or pyramid" title="Spike / pyramid: a cone, or an n-sided pyramid (Sides below)."><canvas width="96" height="96" aria-hidden="true"></canvas><span>Spike</span></button>
+                  <button class="stock-tile soften-tile" type="button" data-pick="motif" data-value="ball" aria-pressed="false" aria-label="Ball" title="Ball: a dome standing off the face, at most a hemisphere."><canvas width="96" height="96" aria-hidden="true"></canvas><span>Ball</span></button>
+                  <button class="stock-tile soften-tile" type="button" data-pick="motif" data-value="bump" aria-pressed="false" aria-label="Bump" title="Bump: a soft hill."><canvas width="96" height="96" aria-hidden="true"></canvas><span>Bump</span></button>
+                  <button class="stock-tile soften-tile" type="button" data-pick="motif" data-value="dent" aria-pressed="false" aria-label="Dent" title="Dent: a dimple pressed into the face."><canvas width="96" height="96" aria-hidden="true"></canvas><span>Dent</span></button>
+                  <button class="stock-tile soften-tile" type="button" data-pick="motif" data-value="line" aria-pressed="false" aria-label="Line" title="Line: a ridge standing off the face, or a groove cut into it (Groove below)."><canvas width="96" height="96" aria-hidden="true"></canvas><span>Line</span></button>
+                </div></div>
+              <select id="sel-surftex-motif" class="vp-select" aria-label="Feature" hidden>
+                <option value="spike">Spike / pyramid</option><option value="ball">Ball</option><option value="bump">Bump</option>
+                <option value="dent">Dent</option><option value="line">Line</option></select>
               <label class="vp-bend-field" id="fld-surftex-sides" title="0: a round cone. 3 to 8: a pyramid with that many sides; 4 is square.">Sides
                 <select id="sel-surftex-sides" class="vp-select" aria-label="Spike sides"><option value="0">round</option><option value="3">3</option><option value="4" selected>4 (square)</option><option value="5">5</option><option value="6">6</option><option value="8">8</option></select></label>
               <label class="vp-bend-field" id="fld-surftex-profile" title="The line's cross-section.">Section
@@ -1643,8 +1654,15 @@
                 <input type="number" id="inp-surftex-row" value="" placeholder="auto" min="0.1" max="400" step="0.1" aria-label="Row pitch, mm"><span>mm</span></label>
               <label class="vp-bend-field" title="Features per cm2. Above 0 it sets the spacing (and the row pitch with it).">Density
                 <input type="number" id="inp-surftex-density" value="" placeholder="off" min="0" max="2500" step="1" aria-label="Density, per cm2"><span>/cm&sup2;</span></label>
-              <label class="vp-bend-field" title="How the features sit: grid; stagger (every other row half a pitch over); hex (stagger with equilateral rows); diamond (a rotated grid).">Layout
-                <select id="sel-surftex-layout" class="vp-select" aria-label="Layout"><option value="grid">grid</option><option value="stagger">stagger</option><option value="hex">hex</option><option value="diamond">diamond</option></select></label>
+              <div class="surftex-pick" title="How the features sit: grid; stagger (every other row half a pitch over); hex (stagger with equilateral rows); diamond (a rotated grid).">
+                <span class="surftex-pick-name">Layout</span>
+                <div id="surftex-layouts" class="soften-shelf surftex-shelf surftex-shelf-2" role="group" aria-label="Layout">
+                  <button class="stock-tile soften-tile" type="button" data-pick="layout" data-value="grid" aria-pressed="false" aria-label="Grid" title="Grid: rows and columns."><canvas width="96" height="96" aria-hidden="true"></canvas><span>Grid</span></button>
+                  <button class="stock-tile soften-tile" type="button" data-pick="layout" data-value="stagger" aria-pressed="false" aria-label="Stagger" title="Stagger: every other row half a pitch over."><canvas width="96" height="96" aria-hidden="true"></canvas><span>Stagger</span></button>
+                  <button class="stock-tile soften-tile" type="button" data-pick="layout" data-value="hex" aria-pressed="false" aria-label="Hex" title="Hex: stagger with equilateral rows."><canvas width="96" height="96" aria-hidden="true"></canvas><span>Hex</span></button>
+                  <button class="stock-tile soften-tile" type="button" data-pick="layout" data-value="diamond" aria-pressed="false" aria-label="Diamond" title="Diamond: a rotated grid."><canvas width="96" height="96" aria-hidden="true"></canvas><span>Diamond</span></button>
+                </div></div>
+              <select id="sel-surftex-layout" class="vp-select" aria-label="Layout" hidden><option value="grid">grid</option><option value="stagger">stagger</option><option value="hex">hex</option><option value="diamond">diamond</option></select>
               <label class="vp-bend-field" title="Turns each feature about the face's normal.">Rotate
                 <input type="number" id="inp-surftex-rot" value="0" min="-180" max="180" step="5" aria-label="Rotate features, degrees"><span>&deg;</span></label>
               <label class="vp-bend-field" title="Turns the whole lattice (flat and contoured faces; a cylinder's columns follow its axis).">Lattice
@@ -2385,7 +2403,7 @@
   <script src="app-limb.js?v=82dda061"></script>
   <script src="app-wheel.js?v=35fda70f"></script>
   <script src="app-fit.js?v=94ef7252"></script>
-  <script src="app-stock.js?v=3a58ca28"></script>
+  <script src="app-stock.js?v=04f0e346"></script>
   <script src="app-assemble.js?v=60984bfb"></script>
   <script src="app-sel-outline.js?v=c1a5b4df"></script>
   <script src="app-join.js?v=f9860f3a"></script>
@@ -2410,7 +2428,8 @@
   <!-- Wrap: one feature laid over a face on a lattice (nso_surftex.js needs nso_cdt.js and nso_weave.js above it; the presets and the card after). docs/SURFTEX.md. -->
   <script src="nso_surftex.js?v=2491a6d9"></script>
   <script src="nso_surftex_presets.js?v=2b935033"></script>
-  <script src="app-surftex.js?v=80bfd210"></script>
+  <script src="app-surftex.js?v=89cac998"></script>
+  <script src="app-surftex-live.js?v=2fba4db4"></script>
   <script src="app-live-slider.js?v=0bc4bb66"></script>
   <script src="app-hollow.js?v=f99c09ad"></script>
   <script src="app-foam.js?v=16cca4f6"></script>

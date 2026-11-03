@@ -15,6 +15,12 @@ tube, a sphere of R 22.5, a contoured slab). They are what the tool makes, not t
 
 ## The card
 
+The card is **live** (`app-surftex-live.js`). **Feature** and **Layout** are shelves of tiles - each picture is the engine's own wrap on a small
+flat slab with the new surface lit green - and while the card is open the piece shows the wrap as a ghost: touch a tile, a skin, a number or the face
+and the new patch is drawn on the piece, redrawn as the numbers move (a click on the piece picks the face under it). **WRAP** installs the result that is
+on screen, bit for bit; Close drops it. A redraw waits as long as the last one took, and one that took more than 2 s is redrawn when a number is let go
+rather than at every key. The Feature and Layout `<select>`s are still in the page, hidden, and hold the values the card reads and the skins write.
+
 1. **Face.** The piece is cut into smooth faces - neighbouring triangles turned less than **Crease**
    (30 degrees) are one face - and each is fitted: a flat face, a cylinder (`Cylinder Ø40`) or a bore
    (`Bore Ø15`), a sphere (`Sphere R22.5`), or a contoured face. The one picked is tinted amber on the
@@ -140,6 +146,10 @@ tipped wraps the same); tube (outside outward, bore inward, a dent into the wall
 kind of face and six of them on a kind that is not theirs; spacing, density, height, depth, size,
 rotation, lattice angle, layouts, 3 / 6-sided pyramids, ridges and grooves; the rim held bit for bit, the
 input untouched, all six faces of a box at once; the refusals.
+
+`npm run surftex:live` - the live card in real Chromium: nine tiles painted from the engine, each a different picture; a tile ghosts the piece and draws
+the patch; a number, a skin, a layout and the Face list move it; a click on the piece picks its face; WRAP installs the previewed soup bit for bit with
+one Undo; Close and a refusal leave the piece untouched.
 
 `npm run surftex:drive` - the card in real Chromium: loaded, wired, Face lists the fitted faces, a skin
 fills the numbers, the feature hides and shows fields, WRAP (status, triangle count, reach from the axis),
