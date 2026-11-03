@@ -131,6 +131,10 @@ withApp(async (page, logs) => {
   await page.click('#ctx-clone');
   const m1 = await N(() => [state.models.length, state.placed.length, state.undoStack.length]);
   check('one copy: +1 model, +1 piece, +1 Undo', m1[0] === m0[0] + 1 && m1[1] === m0[1] + 1 && m1[2] === m0[2] + 1, m0.join() + ' -> ' + m1.join());
+  check('...landed 4 mm to the right of the piece it copied, in line with it (not the plate corner)', await N(() => {
+    const c = state.placed[state.selectedIndex], o = state.placed[0];
+    return Math.abs((c.x - c.width / 2) - (o.x + o.width / 2) - 4) < 1e-6 && Math.abs(c.z - o.z) < 1e-6;
+  }));
   check('...named -copy1, and selected', await N(() => /-copy1$/.test(state.placed[state.selectedIndex] && state.placed[state.selectedIndex].name || '')));
   check('...the box still says 3 (the Clone button is unchanged)', (await N(() => document.getElementById('clone-count').value)) === '3');
   await N(() => { document.getElementById('btn-clone').click(); });

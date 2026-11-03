@@ -2247,39 +2247,25 @@ function cloneSelectedModel(opts) {
   const n = (opts && typeof opts.count === 'number')
     ? Math.max(1, Math.min(20, opts.count))
     : Math.max(1, Math.min(20, Number(document.getElementById('clone-count')?.value) || 1));
-  const plate = getCurrentPlate();
-  const gap = 3;
-  const w = src.size.x;
-  const d = src.size.z;
-  const cellW = w + gap;
-  const cellD = d + gap;
-  const cols = Math.max(1, Math.floor((plate.w + gap) / cellW));
-  const rows = Math.max(1, Math.floor((plate.d + gap) / cellD));
-  // Occupied cell keys from existing plate pieces
-  const occupied = new Set();
-  state.placed.forEach(p => {
-    const col = Math.round((p.x + plate.w / 2 - w / 2) / cellW);
-    const row = Math.round((p.z + plate.d / 2 - d / 2) / cellD);
-    occupied.add(col + ',' + row);
-  });
-  function nextFreeCell(start) {
-    for (let k = start; k < cols * rows * 4; k++) {
-      const col = k % cols;
-      const row = Math.floor(k / cols);
-      const key = col + ',' + row;
-      if (!occupied.has(key)) {
-        occupied.add(key);
-        const x = -plate.w / 2 + w / 2 + col * cellW;
-        const z = -plate.d / 2 + d / 2 + row * cellD;
-        return { x, z, k: k + 1 };
-      }
-    }
-    // Overflow: place to the right of plate
-    const k = start;
-    const x = plate.w / 2 + w / 2 + (k - cols * rows) * cellW;
-    return { x, z: 0, k: k + 1 };
+  /* CLONES LAND NEXT TO THE PIECE, THE WAY AN IMPORT DOES.
+     They used to be dealt into a grid that started in the plate's corner, so
+     the first clone appeared far from the piece it copied and the rest queued
+     along the plate's edge. placeNewModel() (From File, From Library) puts a
+     new piece just right of the rightmost piece, 4 mm clear; a clone does the
+     same, in line with the piece it copies, and each clone pushes that edge
+     out for the next - a row growing from the original. */
+  const gap = 4;
+  const srcPlaced = (state.selectedIndex >= 0 && state.placed[state.selectedIndex]
+      && state.placed[state.selectedIndex].sourceId === src.id)
+    ? state.placed[state.selectedIndex]
+    : state.placed.find(p => p.sourceId === src.id);
+  const rowZ = srcPlaced ? srcPlaced.z : 0;
+  let rightEdge = Math.max(...state.placed.map(p => p.x + (p.width || 0) / 2));
+  function nextSpot() {
+    const x = rightEdge + src.size.x / 2 + gap;
+    rightEdge = x + src.size.x / 2;
+    return { x, z: rowZ };
   }
-  let cursor = 0;
   const newIds = [];
   let firstPlaced = null;
   for (let i = 0; i < n; i++) {
@@ -2314,9 +2300,8 @@ function cloneSelectedModel(opts) {
     newIds.push(id);
     const model = state.models.find(x => x.id === id);
     if (!model) continue;
-    const cell = nextFreeCell(cursor);
-    cursor = cell.k;
-    const entry = placeModelMovable(model, cell.x, cell.z);
+    const spot = nextSpot();
+    const entry = placeModelMovable(model, spot.x, spot.z);
     if (entry && firstPlaced === null) firstPlaced = state.placed.indexOf(entry);
   }
   if (newIds.length) {
@@ -2342,7 +2327,7 @@ function cloneSelectedModel(opts) {
   updateOptimizeButton();
   updateEditSize();
   updateUndoBtn();
-  setStatus('Cloned ' + newIds.length + ' x ' + src.name + ' side-by-side on plate (' + cols + ' across)');
+  setStatus('Cloned ' + newIds.length + ' x ' + src.name + ' next to the piece');
 }
 
 function previewModelOnPlate(geometry, size) {
