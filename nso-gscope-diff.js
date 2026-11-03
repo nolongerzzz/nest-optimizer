@@ -396,10 +396,12 @@
       st.map = next; st.z = z;
     }
 
+    var plateRows = [];
     rows.forEach(function (r) {
       var A = r.a != null ? LA[r.a] : null, B = r.b != null ? LB[r.b] : null;
       var z = A ? A.z : B.z;
       var mA = masksOf(A), mB = masksOf(B);
+      plateRows.push({ A: A, B: B, zA: A ? A.z : null, zB: B ? B.z : null, mA: union(mA.interface, mA.transition), mB: union(mB.interface, mB.transition) });
       side('A', A, mA, A ? A.z : z); side('B', B, mB, B ? B.z : z);
       [['A', A], ['B', B]].forEach(function (t) {                                  // the plate's column: where it stands, from which Z to which, in how many layers (lines drawn 0.14 wider so the hatch's 0.04 gaps close)
         var L = t[1]; if (!L || !(L.cls.interface || L.cls.transition)) return;
@@ -461,6 +463,49 @@
       if (A && hasSup(mA)) { prev.A = mA; prev.zA = A.z; } if (B && hasSup(mB)) { prev.B = mB; prev.zB = B.z; }                                  // each side's own previous layer, whatever the pairing
     });
 
+    /**
+     * THE PLATES OF A STACK: a stack is 3-4 plates (layers) on top of each other, and the stack's own numbers (top, bottom, outline) are an outside view that
+     * hides which plate is off. Per plate, bottom to top: where each side has it (Z), what it is (interface / transition by length), its area and how much of
+     * it both have, how far its outline is, the length of its lines, the way its hatch runs - and what is wrong with it, in the plate's own words.
+     */
+    function platesOf(R) {
+      var cells = R.cells, PRESENT_MM2 = 0.3, out = [];
+      var inR = new Uint8Array(N); cells.forEach(function (c) { inR[c] = 1; });
+      var inReg = function (m) {
+        var ci = Math.floor(((m.x0 + m.x1) / 2 - g.ox) / cell), cj = Math.floor(((m.y0 + m.y1) / 2 - g.oy) / cell);
+        return ci >= 0 && cj >= 0 && ci < g.nx && cj < g.ny && inR[cj * g.nx + ci] === 1;
+      };
+      var sideOf = function (L, mask) {
+        if (!L || !mask) return null;
+        var n = 0; for (var q = 0; q < cells.length; q++) n += mask[cells[q]];
+        if (n * cell2 < PRESENT_MM2) return null;
+        var len = { interface: 0, transition: 0 }, all = [];
+        ['interface', 'transition'].forEach(function (c) { (L.cls[c] || []).forEach(function (m) { if (!inReg(m)) return; len[c] += m.length || Math.hypot(m.x1 - m.x0, m.y1 - m.y0); all.push(m); }); });
+        var ang = hatchAngle(all);
+        return { n: n, z: L.z, h: L.h || 0.2, lenMm: len.interface + len.transition, kind: len.interface >= len.transition ? 'interface' : 'transition', iShare: len.interface / Math.max(1e-9, len.interface + len.transition), ang: ang && ang.share >= 0.3 ? ang.deg : null };
+      };
+      plateRows.forEach(function (pr) {
+        var a = sideOf(pr.A, pr.mA), b = sideOf(pr.B, pr.mB);
+        if (!a && !b) return;
+        var both = 0;
+        if (a && b) for (var q = 0; q < cells.length; q++) both += pr.mA[cells[q]] & pr.mB[cells[q]];
+        var na = a ? a.n : 0, nb = b ? b.n : 0, e = { n: out.length + 1, zA: a ? r2(a.z) : null, zB: b ? r2(b.z) : null, kindA: a ? a.kind : null, kindB: b ? b.kind : null,
+          aMm2: r2(na * cell2), bMm2: r2(nb * cell2), bothMm2: r2(both * cell2), lenA: a ? r2(a.lenMm) : 0, lenB: b ? r2(b.lenMm) : 0, angA: a && a.ang != null ? r2(a.ang) : null, angB: b && b.ang != null ? r2(b.ang) : null, flags: [] };
+        e.lineIoU = na + nb - both > 0 ? r2(both / (na + nb - both)) : null;
+        if (a && b) {
+          e.dZMm = r2(a.z - b.z); e.dRadiusMm = r2(Math.sqrt(na * cell2 / Math.PI) - Math.sqrt(nb * cell2 / Math.PI));
+          if (Math.abs(e.dZMm) > 0.05) e.flags.push('Z ' + (e.dZMm > 0 ? '+' : '') + e.dZMm.toFixed(2));
+          if (Math.abs(e.dRadiusMm) > 0.15) e.flags.push('outline ' + (e.dRadiusMm > 0 ? 'too big' : 'too small') + ' ' + (e.dRadiusMm > 0 ? '+' : '') + e.dRadiusMm.toFixed(2));
+          if (a.kind !== b.kind && Math.abs(a.iShare - b.iShare) > 0.5) e.flags.push(a.kind + ' vs ' + b.kind);
+          if (e.angA != null && e.angB != null) { var d = Math.abs(e.angA - e.angB) % 180; d = Math.min(d, 180 - d); if (d > 10) e.flags.push('hatch ' + Math.round(e.angA) + ' vs ' + Math.round(e.angB) + ' deg'); }
+          var lr = b.lenMm > 0 ? a.lenMm / b.lenMm : 1; e.lenRatio = r2(lr);
+          if (lr > 1.25 || lr < 0.8) e.flags.push('lines x' + lr.toFixed(2));
+          if (e.lineIoU != null && e.lineIoU < 0.6) e.flags.push('line IoU ' + e.lineIoU.toFixed(2));
+        } else e.flags.push(a ? 'ours only' : 'reference only');
+        out.push(e);
+      });
+      return out;
+    }
     // THE STACKS: every footprint of plate (either side's, joined across 0.5 mm) with, per side, the Z it starts and ends at, its layer count and its
     // area; and where both stand, how far the top and bottom are apart and how far the outline is (as a circle of the same area).
     var stacks = [];
@@ -491,6 +536,7 @@
         }
         if (st.A && st.B && st.A.layers !== st.B.layers) st.flags.push('layers ' + st.A.layers + ' vs ' + st.B.layers);
         if (!st.A) st.flags.push('ours has none'); if (!st.B) st.flags.push('reference has none');
+        st.plates = platesOf(R);
         st._area = Math.max(T.A.n, T.B.n);
         stacks.push(st);
       });
@@ -575,6 +621,7 @@
       rep.stacks.forEach(function (q) {
         out.push('  X ' + q.x.toFixed(1) + ' Y ' + q.y.toFixed(1) + '  ' + q.sizeMm[0].toFixed(1) + ' x ' + q.sizeMm[1].toFixed(1) + '   ' + sf(q.A) + ' | ' + sf(q.B) +
                  (q.dTopMm != null ? '   top ' + q.dTopMm.toFixed(2) + '  bottom ' + q.dBottomMm.toFixed(2) + '  outline radius ' + q.dRadiusMm.toFixed(2) : '') + (q.flags.length ? '   <-- ' + q.flags.join(', ') : ''));
+        (q.plates || []).forEach(function (p) { out.push('      plate ' + p.n + '  Z ' + (p.zA != null ? p.zA.toFixed(2) : '-') + ' | ' + (p.zB != null ? p.zB.toFixed(2) : '-') + '  ' + pad((p.kindA || '-') + '/' + (p.kindB || '-'), 23) + 'area ' + p.aMm2.toFixed(1) + ' | ' + p.bMm2.toFixed(1) + '  lines ' + p.lenA.toFixed(0) + ' | ' + p.lenB.toFixed(0) + ' mm  hatch ' + (p.angA != null ? Math.round(p.angA) : '-') + ' | ' + (p.angB != null ? Math.round(p.angB) : '-') + '  IoU ' + (p.lineIoU != null ? p.lineIoU.toFixed(2) : '-') + (p.dRadiusMm != null ? '  outline ' + (p.dRadiusMm > 0 ? '+' : '') + p.dRadiusMm.toFixed(2) : '') + (p.flags.length ? '   <-- ' + p.flags.join(', ') : '')); });
       });
     }
     if (rep.angles && rep.angles.compared) {
@@ -636,6 +683,14 @@
                  area: q.dTopMm != null ? 'top ' + q.dTopMm.toFixed(2) + '  bottom ' + q.dBottomMm.toFixed(2) + '  outline radius ' + q.dRadiusMm.toFixed(2) + ' mm' : '' };
       }) });
     }
+    if (rep.stacks) rep.stacks.forEach(function (q) {
+      if (!q.plates || !q.plates.length) return;
+      B.push({ kind: 'gaps', title: 'PLATES OF THE STACK AT X ' + f1(q.x) + ' Y ' + f1(q.y) + ' (bottom to top, ours | reference):', items: q.plates.map(function (p) {
+        return { what: p.flags.length ? '<-- ' + p.flags.join(', ') : 'plate ' + p.n + ' ok', z: 'plate ' + p.n + '  Z ' + (p.zA != null ? p.zA.toFixed(2) : '-') + ' | ' + (p.zB != null ? p.zB.toFixed(2) : '-') + '  ' + (p.kindA || '-') + ' / ' + (p.kindB || '-'),
+                 at: 'area ' + f1(p.aMm2) + ' | ' + f1(p.bMm2) + ' mm2  lines ' + p.lenA.toFixed(0) + ' | ' + p.lenB.toFixed(0) + ' mm  hatch ' + (p.angA != null ? Math.round(p.angA) : '-') + ' | ' + (p.angB != null ? Math.round(p.angB) : '-') + ' deg',
+                 area: 'line IoU ' + (p.lineIoU != null ? p.lineIoU.toFixed(2) : '-') + (p.dRadiusMm != null ? '  outline radius ' + (p.dRadiusMm > 0 ? '+' : '') + p.dRadiusMm.toFixed(2) + ' mm' : '') };
+      }) });
+    });
     if (rep.angles && rep.angles.compared) B.push({ kind: 'worst', title: 'HATCH ANGLE: ' + rep.angles.mismatched + ' of ' + rep.angles.compared + ' layers differ (ours / reference, deg):', items: rep.angles.items.map(function (q) { return [q.z.toFixed(2) + ' ' + q.cls, q.ours.toFixed(0) + ' / ' + q.ref.toFixed(0) + ' deg']; }).map(function (w) { return [w[0], w[1].replace(' mm2', '')]; }) });
     if (rep.strays && rep.strays.A.length) B.push({ kind: 'gaps', title: 'SMALL PIECES OF OURS ALONE (under 1 mm2, alone on their layer):', items: rep.strays.A.map(function (q) { return oi(q); }) });
     if (rep.strays && rep.strays.B.length) B.push({ kind: 'gaps', title: 'small pieces of the reference alone:', items: rep.strays.B.map(function (q) { return oi(q); }) });

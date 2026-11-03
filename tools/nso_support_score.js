@@ -150,6 +150,17 @@ function scoreOf(rep) {
     bad.slice(0, 4).forEach(q => console.log('    stack X ' + q.x.toFixed(1) + ' Y ' + q.y.toFixed(1) + '  ours ' + (q.A ? q.A.zFrom.toFixed(2) + '-' + q.A.zTo.toFixed(2) : '-') + ' | ref ' + (q.B ? q.B.zFrom.toFixed(2) + '-' + q.B.zTo.toFixed(2) : '-') + '  ' + q.flags.join(', ')));
     F.strayOurs.slice(0, 3).forEach(q => console.log('    speck (ours)     ' + q.cls + ' z ' + q.zFrom.toFixed(2) + '  X ' + q.x.toFixed(1) + ' Y ' + q.y.toFixed(1) + '  ' + q.areaMm2.toFixed(2) + ' mm2'));
   });
+  // --plates: every stack broken into its plates (layers), ours | reference, with what is off on each
+  if (process.argv.includes('--plates')) Object.keys(rows).forEach(nm => {
+    const F = rows[nm].found;
+    console.log('\n' + nm + ' - plates of each stack (bottom to top; Z ours|ref, kind, area, line length, hatch deg, line IoU, outline radius ours-ref):');
+    F.stacks.forEach(q => {
+      console.log('  stack X ' + q.x.toFixed(1) + ' Y ' + q.y.toFixed(1) + '  ' + q.sizeMm.join(' x ') + (q.flags.length ? '   <-- ' + q.flags.join(', ') : ''));
+      (q.plates || []).forEach(p => console.log('    plate ' + p.n + '  Z ' + (p.zA != null ? p.zA.toFixed(2) : '  - ') + '|' + (p.zB != null ? p.zB.toFixed(2) : ' -  ') + '  ' + ((p.kindA || '-') + '/' + (p.kindB || '-')).padEnd(22) +
+        'area ' + p.aMm2.toFixed(1).padStart(5) + '|' + p.bMm2.toFixed(1).padEnd(5) + ' lines ' + p.lenA.toFixed(0).padStart(4) + '|' + p.lenB.toFixed(0).padEnd(4) + ' hatch ' + (p.angA != null ? Math.round(p.angA) : '-') + '|' + (p.angB != null ? Math.round(p.angB) : '-') +
+        '  IoU ' + (p.lineIoU != null ? p.lineIoU.toFixed(2) : '-') + (p.dRadiusMm != null ? '  r ' + (p.dRadiusMm > 0 ? '+' : '') + p.dRadiusMm.toFixed(2) : '') + (p.flags.length ? '   <-- ' + p.flags.join(', ') : '')));
+    });
+  });
   const out = arg('--json');
   if (out) fs.writeFileSync(out, JSON.stringify(rows, null, 1));
 })().then(() => process.exit(0)).catch(e => { console.error(e); process.exit(1); });

@@ -96,6 +96,13 @@ const P3 = [...sq('Support transition', 2.2, 0, 0, 3), ...vert('Support interfac
 const R8 = D.compute(P1, P3);
 check('hatch angle: 2.4 interface runs 0 vs 90 deg - 1 of 2 layers differs, the transition agrees', R8.angles.compared === 2 && R8.angles.mismatched === 1 && R8.angles.items[0].cls === 'interface' && R8.angles.items[0].diffDeg > 80, JSON.stringify(R8.angles));
 check('...the same plate against itself: no layer differs', D.compute(P1, P1).angles.mismatched === 0);
+/* THE PLATES OF A STACK: each stack is its layers, one by one, with what is off on each */
+check('a stack lists its plates bottom to top: P1 is a transition (2.2) and an interface (2.4)', R8.stacks.length === 1 && R8.stacks[0].plates.length === 2 && R8.stacks[0].plates[0].zA === 2.2 && R8.stacks[0].plates[0].kindA === 'transition' && R8.stacks[0].plates[1].kindA === 'interface', JSON.stringify(R8.stacks[0].plates));
+check('...only the plate that differs is flagged: the top plate\'s hatch a quarter turn, not the bottom one', R8.stacks[0].plates[0].flags.length === 0 && R8.stacks[0].plates[1].flags.some(f => /^hatch \d vs 9\d deg/.test(f)), JSON.stringify(R8.stacks[0].plates));
+check('...the same plate against itself: every plate clean, line IoU 1', (() => { const r = D.compute(P1, P1); return r.stacks[0].plates.length === 2 && r.stacks[0].plates.every(q => q.flags.length === 0 && q.lineIoU === 1); })());
+check('...a layer only the reference has is a plate of its own: "reference only"', R7.stacks[0].plates.length === 3 && R7.stacks[0].plates[2].flags.indexOf('reference only') >= 0 && R7.stacks[0].plates[2].zB === 2.6 && R7.stacks[0].plates[2].zA === null, JSON.stringify(R7.stacks[0].plates));
+check('...a plate that is too big is flagged on its own layer: top 7 mm against 6 only', (() => { const Q = [...sq('Support transition', 2.2, 0, 0, 3), ...sq('Support interface', 2.4, 0, 0, 3.5)]; const r = D.compute(Q, P1); const pl = r.stacks[0].plates; return pl.length === 2 && pl[0].flags.length === 0 && pl[1].flags.some(f => /outline too big/.test(f)); })());
+check('...the text and the view carry the plates', /plate 2 /.test(D.text(R8)) && D.view(R8).some(b => /PLATES OF THE STACK/.test(b.title || '')));
 const P4 = [...P1, ...sq('Support interface', 2.4, 9, 0, 0.2)];                      // a speck of interface 9 mm from the plate, alone (about 0.7 mm2)
 const R9 = D.compute(P4, P1);
 check('a small piece alone (a 0.4 mm speck of interface, 9 mm out) is listed as ours alone', R9.strays.A.length === 1 && R9.strays.A[0].cls === 'interface' && R9.strays.A[0].areaMm2 < 1 && R9.strays.B.length === 0 && /SMALL PIECES OF OURS ALONE/.test(D.text(R9)), JSON.stringify(R9.strays));
