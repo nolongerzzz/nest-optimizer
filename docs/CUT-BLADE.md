@@ -84,6 +84,48 @@ the clip would take it too (checked by volume), so the exact piece is used and
 the status line carries a warning if the result is not clean. The spiral drive
 check asserts 0 open / 0 non-manifold edges on every cut.
 
+## The blade turns in place
+
+Mitre and bevel turn the cut plane about a pivot. For the full blade (an infinite
+plane) that pivot is the piece's centre line, and it is invisible. A sized blade
+is a finite box where you clicked, so turning it about the centre line swung it
+round that line - up to 13 mm away from the click at a 90 degree mitre on a test
+piece ("the blade flies around"). Now a sized or notch blade turns about its own
+centre: the click carried onto the plane, which keeps passing through it. The
+blade holds its place in its own plane through every angle (checked from bevel
+-90 to 90 and mitre 0 to 270, and against the old code, which fails it).
+A cut keeps 1 mm of piece each side of the plane, so on a click right on the top
+face with the blade turned flat the plane can sit up to 1 mm off the click.
+
+## What the kernel does to a piece, and what the status line says about it
+
+The cut runs through the manifold kernel, which on the way in re-triangulates a
+piece's *flat faces*. On a piece with fine detail in one it can leave pinched edges
+and a zero-volume fin that the original did not have as the app counts it. The
+text-repaired hand (`text_repair_test.3mf`, 148,578 triangles, 0 open and 0
+non-manifold edges to the app) comes back from the kernel with **no blade at all**
+as 2 bodies and 20 non-manifold edges, around the detail on its flat base: 217
+triangles there become 205 different ones. Not near-duplicate vertices (welding
+finds none) and not degenerate triangles (there are none).
+
+So the cut is judged against **the piece as the kernel holds it**, not against the
+original soup:
+
+- the cut added edges -> `WARNING: the cut added N ... (before -> after)`;
+- it added none but the kernel's own count is not zero -> "the boolean kernel
+  already leaves N pinched edges in this piece before any cut ... the cut added
+  none - Check piece can repair them".
+
+That fin is also what made Split to parts refuse a cut hand ("part 2 is too small
+to be a piece"): another reason the separation folds dust in.
+
+Speed: the edge counts use a quick rounded-edge counter (`cutEdgeFaults`, about a
+tenth of a second on 150,000 triangles) instead of `NSO_buildAdjacency` (about
+seven seconds each, three times a cut); the distance weld only runs when the
+result is worse than the piece already was. The hand cut went from 42 s to 19 s;
+the rest is the app's overlap check (6.6 s), the kernel import (2.5 s) and Split
+to parts' analysis (6 s).
+
 ## Using it
 
 1. Open **Cut**. Pick **Sized blade** or **Notch**.
@@ -108,10 +150,14 @@ from the click's depth ends up buried.
 ## What can come out
 
 - **A notch / nick** - one piece, closed (0 open, 0 non-manifold edges).
-- **A severed piece** - a blade through a strand, or wide and deep enough to
-  cover the section. The result is still *one piece* holding several bodies; the
-  status says "the slot severs the piece into N bodies" and **Split to parts**
-  separates them.
+- **A severed piece** - a blade through a finger, a strand, or wide and deep
+  enough to cover the section. The bodies it leaves are **separated into pieces**,
+  as the full blade does: Split to parts runs for you, each piece where it stood
+  (close Cut to drag them apart). It is its own Undo step, so one Undo takes the
+  separation back and the next takes the cut back. A body under 0.1 mm across -
+  a sliver the model carried, which Split to parts alone would refuse over - is
+  folded into the largest part, not dropped and not refused. If nothing real came
+  away (only such a sliver), the status says so.
 - **A refusal, with the piece untouched** - kerf / width / depth under the floor,
   a Notch whose plane crosses nothing ("slide it onto a strand"), a blade that
   does not reach the piece, a piece that is not a closed solid the kernel can
@@ -132,4 +178,6 @@ from the click's depth ends up buried.
 - **Curved faces** use the tangent plane at the click.
 - **Single strand** picks by the plane's section, so two strands that *touch*
   (one blob) are one strand.
-- **Mitre and bevel** are supported; bevel is checked on a flat top face only.
+- **Mitre and bevel** are supported; bevel's removed volume is checked on a flat top face only.
+- **The kernel's own pinched edges** (above) are not repaired by the cut; the status line names them, and Check piece can repair them.
+- **Separated pieces stay where they stood**, a kerf apart; the full blade also parts its halves on the plate.

@@ -269,8 +269,8 @@
 
   /* The status line for a finished notch. */
   function report(o) {
-    return 'Notch cut - ' + (o.notch ? round(o.kerf) + ' mm wide x ' + round(o.depth) + ' mm deep nick into the strand\'s edge'
-                                      : 'blade ' + round(o.width) + ' wide x ' + round(o.depth) + ' deep, kerf ' + round(o.kerf) + ' mm') +
+    return (o.notch ? 'Notch cut - ' + round(o.kerf) + ' mm wide x ' + round(o.depth) + ' mm deep nick into the strand\'s edge'
+                    : 'Sized cut - blade ' + round(o.width) + ' wide x ' + round(o.depth) + ' deep, kerf ' + round(o.kerf) + ' mm') +
       ' - ' + round(o.removed) + ' mm³ removed' +
       (o.strands > 1 ? ' - one strand of ' + o.strands + ' in the blade' : '') +
       (o.shells > 1 ? ' - the slot severs the piece into ' + o.shells + ' bodies (still one piece: Split to parts separates them)' : '');

@@ -520,8 +520,11 @@ function cutBladeSpec(info) {
      notch). The face through the click is N.x = N.p; the surface at the plane is where that meets
      it, found along the entry axis. The entry axis was chosen for N leaning on it, so N[d] is not small. */
   if (p && nrm) {
+    // Only when the face really leans into the plane (entryFor read it so, at LEAN_MIN or more). A face square to the
+    // plane's normal - a blade turned flat onto a crown, bevel 90 - has no lean, and dividing by its float-noise
+    // component sends the blade off to nowhere.
     const nd = nrm.getComponent(entry.dAxis);
-    if (Math.abs(nd) > 1e-6) dStart = p.getComponent(entry.dAxis) - nrm.getComponent(k) * (info.plane - p.getComponent(k)) / nd;
+    if (Math.abs(nd) >= NSO_Notch.LEAN_MIN) dStart = p.getComponent(entry.dAxis) - nrm.getComponent(k) * (info.plane - p.getComponent(k)) / nd;
   }
   const notch = b.mode === 'notch';
   const s = NSO_Notch.sizes(b);
@@ -580,6 +583,13 @@ function setCutMm(mm) {
     crossing to keep). Position `t` is read in the frame `f`. */
 function cutPivotLocal(f, t) {
   const d = f.origin + cutMmAt(t, f.span);               // the plane: n.x = d
+  /* A SIZED blade is a box where you clicked, not a plane across the piece, so it turns about ITSELF: its
+     centre is the click carried onto the plane, and the plane keeps passing through it. Turned about the
+     piece's centre line instead (below), the box is swung round that line - the blade "flies". */
+  const bl = state.cutBlade, mm = getActiveModel(), at = state.cutBladeAt;
+  if (bl && bl.sized && at && mm && at.modelId === mm.id) {
+    return at.local.clone().addScaledVector(f.normal, d - f.normal.dot(at.local));
+  }
   const n = f.normal, C = f.bbox.getCenter(new THREE.Vector3());
   const nd = n.dot(C), na = n[f.axis];
   if (Math.abs(na) > 1e-6) {
@@ -3341,6 +3351,32 @@ function cutWireBladeControls() {
 
 let cutNotchBusy = false;
 
+/** Open edges (one triangle) and non-manifold edges (three or more) of a soup, welding by rounding to 0.1 micron:
+    the quick count the cut uses before and after, in about a tenth of a second where NSO_buildAdjacency took
+    seven on a 150,000-triangle piece. A pair of points straddling a rounding step can read as two, so it is
+    a screen: the slow, distance-welded NSO_buildAdjacency is still what the weld step and Check piece use. */
+function cutEdgeFaults(soup) {
+  const ids = new Map(), cnt = new Map();
+  const vid = function (o) {
+    const k = Math.round(soup[o] * 1e4) + ',' + Math.round(soup[o + 1] * 1e4) + ',' + Math.round(soup[o + 2] * 1e4);
+    let i = ids.get(k);
+    if (i === undefined) { i = ids.size; ids.set(k, i); }
+    return i;
+  };
+  for (let t = 0; t + 8 < soup.length; t += 9) {
+    const v = [vid(t), vid(t + 3), vid(t + 6)];
+    for (let e = 0; e < 3; e++) {
+      const a = v[e], b = v[(e + 1) % 3];
+      if (a === b) continue;                                  // a collapsed edge is not an edge
+      const k = a < b ? a * 4194304 + b : b * 4194304 + a;
+      cnt.set(k, (cnt.get(k) || 0) + 1);
+    }
+  }
+  let open = 0, nm = 0;
+  cnt.forEach(function (c) { if (c === 1) open++; else if (c > 2) nm++; });
+  return { open: open, nm: nm, total: open + nm };
+}
+
 /** The component of `parts` (kernel solids, world frame) whose surface passes nearest `qWorld`. */
 function cutNearestPart(parts, qWorld) {
   let best = 0, bestD = Infinity;
@@ -3398,6 +3434,11 @@ async function cutNotchAt(m, info) {
       say('Cut not made: the piece is not a closed solid the kernel can cut (' + mA.status() + '). Run Check piece. The piece is unchanged.', true);
       return { ok: false, reason: 'not solid' };
     }
+    // The piece as the KERNEL holds it, before any cut. The kernel re-triangulates flat faces on the way in, and on
+    // a piece with fine detail in one (a text-repaired hand's flat base: 217 triangles come back as 205) that can
+    // leave pinched edges and a zero-volume fin of its own. They are there before the blade touches it, so they
+    // are the baseline the cut is judged against - not the app's own count, which reads the original soup.
+    const kernelBefore = cutEdgeFaults(NSO_CSG.manifoldToSoup(mA));
     const inter = keep(mA.intersect(mB));
     // What is subtracted is the BLADE, never A-intersect-B: that solid's skin lies exactly on the piece's own
     // skin, and a boolean on coincident faces leaves pinched edges (measured on a spiral: one edge shared by
@@ -3445,22 +3486,30 @@ async function cutNotchAt(m, info) {
     const soup = NSO_CSG.manifoldToSoup(res);
 
     // The kernel carries float32: a crossing on a face plane can come back as two vertices one ULP apart.
-    // Weld at the gate's 1e-4 so the piece is the mesh the checkers will see (docs/LOCAL-CARVE.md, 9b).
+    // Weld at the gate's 1e-4 so the piece is the mesh the checkers will see (docs/LOCAL-CARVE.md, 9b) - but only
+    // when the quick count says the result is worse than the piece already was (seams show as extra open or
+    // non-manifold edges); the distance-welded pass is the slow one, and a piece the kernel already leaves
+    // pinched gains nothing from it.
     let welded = soup, dropped = 0;
-    if (typeof NSO_buildAdjacency === 'function' && typeof NSO_adjacencyToRaw === 'function') {
+    const kernelAfter = cutEdgeFaults(soup);
+    if (kernelAfter.total > kernelBefore.total && typeof NSO_buildAdjacency === 'function' && typeof NSO_adjacencyToRaw === 'function') {
       const adj = NSO_buildAdjacency(soup, { tol: 1e-4, rawTol: true });
       if (adj && adj.ok && !adj.openEdges && !adj.nmEdges) { welded = NSO_adjacencyToRaw(adj); dropped = adj.droppedTris; }
     }
     const raw = displayGeometryToRawSoup(soupToCenteredGeo(welded));
-    let nmAfter = 0;
-    if (typeof NSO_buildAdjacency === 'function') { const a2 = NSO_buildAdjacency(raw, { tol: 1e-4, rawTol: true }); nmAfter = a2 && a2.ok ? (a2.nmEdges || 0) + (a2.openEdges || 0) : 0; }
+    const nmBefore = kernelBefore.total, nmAfter = cutEdgeFaults(raw).total;
+    const plural = n => 'edge' + (n === 1 ? '' : 's');
+    const edgeNote = nmAfter > nmBefore
+      ? ' - WARNING: the cut added ' + (nmAfter - nmBefore) + ' open / non-manifold ' + plural(nmAfter - nmBefore) + ' (' + nmBefore + ' \u2192 ' + nmAfter + ')' +
+        (exact ? ' (another strand shares this one\'s extent, so the exact cut was used)' : '') + ' - run Check piece'
+      : nmAfter ? ' - the boolean kernel already leaves ' + nmBefore + ' pinched ' + plural(nmBefore) + ' in this piece before any cut (it re-triangulates its flat faces); the cut added none - Check piece can repair them'
+                : '';
+    const severs = parts.length > 1;
     const status = NSO_Notch.report({ width: info.blade.sizes.width, depth: info.blade.sizes.depth,
-      kerf: info.blade.sizes.kerf, removed: removed, shells: parts.length, notch: info.blade.notch,
+      kerf: info.blade.sizes.kerf, removed: removed, shells: severs ? 0 : 1, notch: info.blade.notch,
       strands: info.blade.isolate ? strands : 0 }) +
       (dropped ? ' - welded away ' + dropped + ' seam sliver' + (dropped === 1 ? '' : 's') : '') +
-      (nmAfter ? ' - WARNING: ' + nmAfter + ' open / non-manifold edge' + (nmAfter === 1 ? '' : 's') +
-        ' at the cut' + (exact ? ' (another strand shares this one\'s extent, so the exact cut was used)' : '') + ' - run Check piece' : '') +
-      (sol.merged && sol.note ? ' - ' + sol.note : '');
+      edgeNote + (sol.merged && sol.note ? ' - ' + sol.note : '');
     if (!NSO_sculptCommitRaw(m, raw, 'notchReplace', status)) {
       say('Cut not made: could not commit the result', true);
       return { ok: false, reason: 'commit failed' };
@@ -3476,8 +3525,25 @@ async function cutNotchAt(m, info) {
     if (typeof updateAdjustUI === 'function') updateAdjustUI();
     if (typeof removeFaceHelper === 'function') removeFaceHelper();
     updateCutterUI();
+    /* A cut that severs the piece leaves bodies that are still ONE piece, so the finger came away from the hand
+       only on the screen. Separate them, as the full blade does: one piece each (Split to parts, in place;
+       sub-0.1 mm dust is folded into the largest part rather than refusing the lot). Its own Undo step. */
+    let separated = null, sepNote = '';
+    if (severs) {
+      if (typeof NSO_SPLIT_PARTS !== 'undefined' && NSO_SPLIT_PARTS.split) {
+        separated = NSO_SPLIT_PARTS.split({ absorbDust: true, quiet: true });
+      }
+      sepNote = separated && separated.ok
+        ? ' - separated into ' + separated.names.length + ' pieces (' + separated.names.join(', ') + '); close Cut to drag them apart. Undo takes the separation back first, then the cut'
+        : separated && /one part once/.test(separated.reason || '')
+          ? ' - nothing came away as a piece of its own (the other body is a sliver under 0.1 mm across, kept with the piece)'
+          : ' - the slot severs the piece into ' + parts.length + ' bodies, but they stay one piece' +
+            (separated && separated.reason ? ' (' + separated.reason + ')' : '') + '; Split to parts separates them';
+      setStatus(status + sepNote);
+    }
     return { ok: true, removed: removed, intended: intended, shells: parts.length, strands: strands,
-             trisOut: raw.length / 9, status: status, nmAfter: nmAfter, exact: exact };
+             trisOut: raw.length / 9, status: status + sepNote, nmAfter: nmAfter, nmBefore: nmBefore, exact: exact,
+             separated: separated && separated.ok ? separated : null };
   } catch (err) {
     say('Cut not made: ' + ((err && err.message) || err) + '. The piece is unchanged.', true);
     return { ok: false, reason: String((err && err.message) || err) };

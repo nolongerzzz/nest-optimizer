@@ -89,7 +89,7 @@ withApp(async (page, logs) => {
   await page.addScriptTag({ content: PROBE });
   const probe = id => page.evaluate(id => __probe(id), id);
   const status = () => page.evaluate(() => document.getElementById('status').textContent);
-  const waitCut = () => page.waitForFunction(() => /Notch cut|Cut not made/.test(document.getElementById('status').textContent), null, { timeout: 60000 });
+  const waitCut = () => page.waitForFunction(() => /(Sized|Notch) cut|Cut not made/.test(document.getElementById('status').textContent), null, { timeout: 60000 });
   const SPIRAL = spiral({ R: 1.8, turns: 3, r0: 4, pitch: 6.5, ringSeg: 14, perTurn: 36 });
 
   async function fresh() {
@@ -294,7 +294,7 @@ withApp(async (page, logs) => {
   await clickAt(await crownNear(id, 0));
   const vr0 = await probe(id);
   const rc = await cutOnce(); const vr1 = await probe(id);
-  check('and a cut after turning it works', /^Notch cut/.test(rc.st) && vr1.vol < vr0.vol && vr1.open === 0 && vr1.nm === 0, rc.st);
+  check('and a cut after turning it works', /^Sized cut/.test(rc.st) && vr1.vol < vr0.vol && vr1.open === 0 && vr1.nm === 0, rc.st);
   await page.evaluate(() => { const c = document.getElementById('chk-cut-rotate'); c.checked = false; c.dispatchEvent(new Event('change')); });
   await page.waitForTimeout(150);
   check('unticked: the rings are gone and Cut is still open', await page.evaluate(() => { const g = state.scene.getObjectByName('nso-rotate-handles'); return (!g || !g.visible || !g.children.length) && state.cutterOpen && document.getElementById('cut-rotate-rings').hidden; }));

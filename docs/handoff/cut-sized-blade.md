@@ -40,3 +40,25 @@ for a slider for width, depth and kerf on the Sized blade and the same for Notch
 `app-core.js` and the tests. Each size is a slider + number box (`CUT_BLADE_FIELDS`), ranged to the piece (`cutSliderMax`), and the range always takes in
 the number shown. `nso_wire_cut_redesign_test` lists the new card; `nso_cut_strand_drive_check` (47 gates) has the slider gates, including a real mouse
 click on a slider and a computed-style check that the ring options are hidden until Rotate piece is ticked (the owner's screenshot showed them up).
+
+### Fourth round (2026-11-03): the finger would not separate; a bevel sent the blade flying
+
+Reported on `Cartoon-Hand_..._DukeDoks part 2` (and then the file, as `text_repair_test.3mf`, so it could be reproduced): a sized cut through a finger was
+called a "Notch cut", left the finger as one piece, warned of 25 open edges, and Split to parts then refused ("part 2 is too small"); a bevel sent the
+blade flying round the piece.
+
+- **Wording**: `Sized cut` / `Notch cut`, by mode.
+- **Separation**: a severing cut now runs Split to parts (`NSO_SPLIT_PARTS.split({ absorbDust, quiet })`: a part under 0.1 mm across is folded into the
+  largest part instead of refusing the lot; quiet reports by return value). Its own Undo step. A button click is unchanged.
+- **Flying blade**: `cutPivotLocal` returns the blade's own centre for a sized/notch blade, so mitre and bevel turn it in place (it was swung about the
+  piece's centre line, up to 13 mm off). `nso_cut_sever_drive_check` holds the blade to its click through bevel -90..90 and mitre 0..270, and fails on the
+  old code.
+- **The 25 edges were not the cut's** (0 -> 20 was the app's count of the kernel's output; the kernel alone, with no blade, gives the same 20 and a
+  zero-volume 12-triangle fin: it re-triangulates the flat base's fine detail on import). The warning now compares with the piece as the kernel holds
+  it and says so. Not fixed: that is the shared boolean kernel (Carve, Subtract and Punch see it too).
+- **Speed**: 42 s -> 19 s on the hand (the edge counts were three 7 s adjacency passes; now a quick counter, and the weld only when worse).
+- A surface correction divided by a near-zero face lean at bevel 90 and sent the blade to nowhere ("does not reach the piece"); it now applies only
+  where the face leans into the plane.
+
+Four suites that already fail on the commit before this work (`nso_rotate_rings_drive_check`, `nso_rotate_rings_steady_drive_check`,
+`nso_rotate_pivot_drive_check`, `nso_shell_v3_test`) are unchanged.

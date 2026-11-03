@@ -135,7 +135,8 @@ Smart build-plate packing for 3D printing.
   the **Notch width** and **Notch depth** you set. Click the face to put either
   there; it goes in against that face. Each size is a slider with a number box,
   and **Rotate piece** shows the rotate rings so the piece can be turned while
-  Cut stays open. See [docs/CUT-BLADE.md](docs/CUT-BLADE.md).
+  Cut stays open. A sized cut that goes right through something (a finger)
+  separates it into pieces, and mitre and bevel turn the blade in place. See [docs/CUT-BLADE.md](docs/CUT-BLADE.md).
 - **Crop** (its own card, under Cut) takes a middle section out of a piece: set
   the box by two distances along the cut axis (or tick **Box** and drag it on
   the piece), press Crop, and the slab inside the box is removed, the far part

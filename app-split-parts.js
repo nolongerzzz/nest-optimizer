@@ -62,7 +62,8 @@ var NSO_SPLIT_PARTS = (function () {
     sayCard(msg, bad);
     if (typeof setStatus === 'function') setStatus(msg, !!bad);
   }
-  function fail(msg) { say(msg, true); return { ok: false, reason: msg }; }
+  var quietNow = false;           // set while the Cut tool asks for a quiet split (split(opts))
+  function fail(msg) { if (!quietNow) say(msg, true); return { ok: false, reason: msg }; }
 
   /** The selected piece and its record, or null. */
   function target() {
@@ -230,7 +231,38 @@ var NSO_SPLIT_PARTS = (function () {
     return { x: at.x, y: at.y, z: at.z, liftY: entry.liftY };
   }
 
-  function split() {
+  /* The Cut tool's sized blade severs a piece and wants it separated without a button press: opts =
+     { absorbDust: true, quiet: true }. Dust - a part under 0.1 mm across one way, which addModel will not make a
+     piece of (a stray sheet, a sliver) - is folded into the largest part instead of refusing the whole split;
+     quiet reports through the return value and says nothing itself. A button click passes its event, which is
+     neither, so the button is exactly as it was. */
+  function foldDust(r) {
+    var span = function (soup) {
+      var lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+      for (var i = 0; i < soup.length; i += 3) for (var k = 0; k < 3; k++) { var v = soup[i + k]; if (v < lo[k]) lo[k] = v; if (v > hi[k]) hi[k] = v; }
+      return Math.min(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]);
+    };
+    var big = r.parts.slice().sort(function (a, b) { return b.tris - a.tris; })[0];
+    var keep = [], dust = [];
+    r.parts.forEach(function (p) { (p === big || span(p.soup) >= 0.1 ? keep : dust).push(p); });
+    if (!dust.length) return r;
+    var len = big.soup.length;
+    dust.forEach(function (d) { len += d.soup.length; });
+    var merged = new Float32Array(len), at = big.soup.length;
+    merged.set(big.soup, 0);
+    dust.forEach(function (d) { merged.set(d.soup, at); at += d.soup.length; big.tris += d.tris; });
+    big.soup = merged;
+    r.parts = keep;
+    return r;
+  }
+
+  function split(opts) {
+    opts = opts && opts.absorbDust === true ? opts : {};
+    quietNow = !!opts.quiet;
+    try { return splitNow(opts); } finally { quietNow = false; }
+  }
+
+  function splitNow(opts) {
     if (busy) return { ok: false, reason: 'busy' };
     var t = target();
     if (!t) return fail('Split to parts: select a piece on the plate first. Nothing changed.');
@@ -248,6 +280,10 @@ var NSO_SPLIT_PARTS = (function () {
       }
       var r = made ? SP().splitFrom(made, m.rawTris) : SP().split(m.rawTris);
       if (!r.ok) return fail(r.reason);
+      if (opts.absorbDust) {
+        r = foldDust(r);
+        if (r.parts.length < 2) return { ok: false, reason: 'one part once the dust is folded in' };
+      }
 
       /* The parts first, so a failure to add one leaves the plate alone. */
       var names = [];
@@ -308,7 +344,7 @@ var NSO_SPLIT_PARTS = (function () {
       shown = null;
       hold = added.length ? { id: added[0], text: txt } : null;
       refresh();
-      say(txt);
+      if (!opts.quiet) say(txt);
       return { ok: true, addedIds: added, names: names, hostId: hostId, spots: spots, parts: r.parts.map(function (p) { return { tris: p.tris, shells: p.shells, cavities: p.cavities }; }), reason: txt };
     } catch (err) {
       console.error('[split-parts]', err);
