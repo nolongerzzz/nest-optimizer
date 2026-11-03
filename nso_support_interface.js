@@ -1663,6 +1663,7 @@
       feet.forEach(function (f) { if (f.zl < zLowAll) zLowAll = f.zl; });
       /* the small footprints first: their tips are counted (the card's Building starts moving) before the large one is done */
       var surfCache = {};                             /* a footprint's surface, read once: the attempts below start from it */
+      var anyPainted = feet.some(function (q) { return q.marginMm != null; });      /* a painted build keeps the plates as they were: the cavity's disc is the auto build's */
       function footPass(fi, tryE) {
         var tellP = tryE != null ? function () {} : told;
         var f = feet[fi];
@@ -1786,7 +1787,7 @@
         if (range <= REGION_FLAT_MM) for (var q3 = 0; q3 < N; q3++) if (inRegion[q3]) S[q3] = zs[0];
         tellP(Math.round(0.3 * mine.length));          /* three tenths after the fill, */
         var dEdge = edtCells(inRegion, nx, ny), usable = new Uint8Array(N), nUse = 0;
-        var margin = (f.marginMm != null ? f.marginMm : MARGIN) + (tryE || 0) + (CAVITY_PRISM && curvedFace && !isBowl && tryE != null ? CAVITY_MARGIN_MM * angleK : 0);
+        var margin = (f.marginMm != null ? f.marginMm : MARGIN) + (tryE || 0) + (CAVITY_PRISM && curvedFace && !isBowl && tryE != null && !anyPainted ? CAVITY_MARGIN_MM * angleK : 0);
         for (var q4 = 0; q4 < N; q4++) if (inRegion[q4] && (dEdge[q4] - 0.5) * CELLS >= margin) { usable[q4] = 1; nUse++; }
         if (nUse * CELLS * CELLS < (f.marginMm != null ? 0.8 : 4))return;               /* a region the user painted may be small */
         /* the other columns - every one this footprint's tips do not stand - keep their clearance from the plate, wherever they pass through its height */
@@ -1831,7 +1832,7 @@
           gapAt[qg2] = tryE != null ? o.gap - (isBowl ? REGION_TALL_DROP_MM * angleK : 0) : o.gap * Math.sqrt(1 + gmax * gmax) + (planarFace ? 0 : REGION_BEAD_SHARE * (o.width / 2 + 0.03) * gmax);   /* a bead is a line wide: on a slope its downhill edge stands lower than its middle */
         }
         var A = zs[0] - o.gap, m = new Int32Array(N).fill(-99999), mmin = 1e9, mmax = -1e9;
-        var cavityWanted = CAVITY_PRISM && curvedFace && !isBowl && tryE != null, mCavMin = 1e9;
+        var cavityWanted = CAVITY_PRISM && curvedFace && !isBowl && tryE != null && !anyPainted, mCavMin = 1e9;
         if (cavityWanted) for (var qv = 0; qv < N; qv++) if (inRegion[qv] && (dEdge[qv] - 0.5) * CELLS >= margin - CAVITY_MARGIN_MM * angleK) { var mv = Math.floor((S[qv] - gapAt[qv] - A) / o.layer + 1e-4) - 1; if (mv < mCavMin) mCavMin = mv; }
         for (var q5 = 0; q5 < N; q5++) {
           if (!usable[q5]) continue;

@@ -130,7 +130,9 @@ const supportOf = (app, id) => Float32Array.from([].concat(...app.supportsOf(id)
   /* since the plate runs to the face's edge (REGION_MARGIN_MM 0.02) what the auto build leaves bare is the slivers under a bead's width: a stroke over them can ask for no more than that */
   check('the painted points are held no fewer than before (none were)', h1 >= h0, h0 + ' -> ' + h1 + ' of ' + bare.length);
   const all1 = samplesOf(body, sup1);
-  check('the footprint as a whole holds no less than it did (4 samples: a flared cap stops at its plate\'s edge, where it stood out past it)', all1.filter(s => s.held).length >= all0.filter(s => s.held).length - 4,
+  /* the Negative Sphere's cap is Bambu's disc (CAVITY_PRISM): its edge 0.25 mm in from the footprint's, so the strokes the test lays over the bare samples run along that rim and the painted
+     footprints take the cap's place as a flat plate - up to 25 samples of the cap's own are let go (a flared cap stopped at its plate's edge: 4 before) */
+  check('the footprint as a whole holds no less than it did (25 samples: the cavity disc\'s rim is painted over, and the cap becomes a painted plate)', all1.filter(s => s.held).length >= all0.filter(s => s.held).length - 25,
     all0.filter(s => s.held).length + ' -> ' + all1.filter(s => s.held).length + ' of ' + all1.length);
   check('the raft does not cross the line: no support face within the gap of the surface at any painted point', crossing(sup1, bare) === 0, crossing(sup1, bare) + ' crossing');
 
