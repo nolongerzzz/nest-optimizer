@@ -714,6 +714,23 @@
    * 2.22 / 4.11 / 6.37 mm, never the 10.48 mm hop to the next line of the same
    * family (docs/SLICER.md section 3). 'lines' passes maxLen 0: never joined.
    */
+  /* Bambu's zig-zag down a narrow ribbon: the strokes taken in order along it, each starting on the side the last one ended (its connector runs along that edge, a line's pitch long),
+     not the nearest end (which strings the strokes all one way with a short cross-over between). */
+  function serpentine(segs, axisAng, maxLen) {
+    var ca = Math.cos(axisAng), sa = Math.sin(axisAng), paths = [], path = null, prev = null;
+    var tOf = function (p) { return p[0] * ca + p[1] * sa; }, nOf = function (p) { return -p[0] * sa + p[1] * ca; };
+    var list = segs.slice().sort(function (u, v) { return (tOf(u.a) + tOf(u.b)) - (tOf(v.a) + tOf(v.b)); });
+    list.forEach(function (sg) {
+      var s0 = sg.a, s1 = sg.b;
+      if (prev) { if (Math.abs(nOf(sg.b) - nOf(prev)) < Math.abs(nOf(sg.a) - nOf(prev))) { s0 = sg.b; s1 = sg.a; } }
+      else if (nOf(s0) < nOf(s1)) { var tmp = s0; s0 = s1; s1 = tmp; }
+      var dx = prev ? s0[0] - prev[0] : 0, dy = prev ? s0[1] - prev[1] : 0;
+      if (path && Math.hypot(dx, dy) <= maxLen) path.pts.push(s0, s1);
+      else { path = { closed: false, pts: [s0, s1] }; paths.push(path); }
+      prev = s1;
+    });
+    return paths;
+  }
   function connect(segs, maxLen, hull, startAt) {
     var n = segs.length;
     if (!n) return [];
@@ -2257,6 +2274,8 @@
       var PINCH_INSET_MM = 0.1;      /* the loop's inset where the region is too narrow for a line's half-width on each side */
       var TRANS_FILL_OPEN_MM = 0.4;
       var RIBBON_T_RATIO = 3;
+      var RIBBON_SERPENTINE = true;
+      var IFILL_RIBBON_MM = 0.38;   /* the ridge's ribbon: Bambu's zig-zag stands this far in from each loop's line (strokes 1.1 mm across a 0.46 band, not the whole ribbon)  */
       var IFILL_IN_MM = 0.2;   /* the interface's hatch runs from loop to loop, as the transition's does (it was the slab inset a whole wall: only the wide parts of a ring were filled, and Bambu's interface ring is filled round); it stops this far short of the loops' line */
       var REGION_FILL_GAP_MM = 0.04;
       var PLANAR_2ND_DIFF = 0.12;   /* a zone whose area's second difference over three layers is under this share of it is a plane's */
@@ -2423,7 +2442,7 @@
                 }
               } else
               if (!planar && !steady && CURVED_SHRINK_MM > 0) { if (hIc) hIc = g.offset(hIc, -CURVED_SHRINK_MM); if (hTc) hTc = g.offset(hTc, -CURVED_SHRINK_MM); }
-              var Ireg = hIc && !g.isEmpty(ZI) ? g.inter(g.inter(g.offset(inLoop, -IFILL_IN_MM), ZI), hIc) : g.empty();
+              var Ireg = hIc && !g.isEmpty(ZI) ? g.inter(g.inter(g.offset(inLoop, -(ribbonSlab ? IFILL_RIBBON_MM : IFILL_IN_MM)), ZI), hIc) : g.empty();
               var Zall = g.isEmpty(ZI) ? ZT : g.isEmpty(ZT) ? ZI : g.union(ZI, ZT);
               var Treg = hTc && !g.isEmpty(Zall) ? g.diff(g.inter(g.inter(inLoop, Zall), hTc), Ireg) : g.empty();
               var slabI = hIc && !g.isEmpty(ZI) ? g.inter(g.inter(Sj, ZI), hIc) : g.empty();
@@ -2434,6 +2453,8 @@
               var slabTR = g.isEmpty(slabT) ? slabT : g.unionAll(g.parts(slabT).filter(function (q) { var ax = ringAxis(g.polys(q)[0]); return !ax || ax.ratio < RIBBON_T_RATIO; }));
               var openT = g.isEmpty(slabTR) ? slabTR : g.offset(g.offset(slabTR, -TRANS_FILL_OPEN_MM), TRANS_FILL_OPEN_MM);
               var wideT = g.isEmpty(Treg) || g.isEmpty(openT) ? g.empty() : g.inter(Treg, openT);
+              /* the ridge's ribbon: the zig-zag stands IFILL_RIBBON_MM in from the interface's own loop line on both sides - not from the sheet's union (its far edge is the transition's border, outside the loop) */
+              if (ribbonSlab && !g.isEmpty(slabI)) Ireg = g.offset(g.offset(slabI, -loopIn), -IFILL_RIBBON_MM);
               fillCs = g.isEmpty(Ireg) ? wideT : g.isEmpty(wideT) ? Ireg : g.union(Ireg, wideT);
               /* the loops sit where the support's own wall sits (the slab's edge, half a line in): regions taken on the whole layer, not inside its wall */
               [[slabI, 'Support interface'], [slabT, 'Support transition']].forEach(function (rg) {
@@ -2454,7 +2475,7 @@
             }
             /* a ribbon is crossed, never run along: a strip whose long axis the layer's lines would lie within RIBBON_PARALLEL_DEG of takes the stack's other direction (a line
                down a strip is one bead where Bambu's zig-zag crosses it) */
-            var fillSegs = [];
+            var fillSegs = [], serpPaths = [];
             if (!g.isEmpty(fillCs)) {
               if (!(byDepth && REGIONAL_PLATE)) fillSegs = scanFill(g.polys(fillCs), aJ, sI, 0);
               else g.parts(fillCs).forEach(function (pp) {
@@ -2463,9 +2484,12 @@
                   var dd = Math.abs(((ax.ang - aJ) % Math.PI + Math.PI) % Math.PI); dd = Math.min(dd, Math.PI - dd);
                   if (dd < RIBBON_PARALLEL_DEG * Math.PI / 180 && !ribbonAngled) ang = aJ + Math.PI / 2;
                 }
-                fillSegs = fillSegs.concat(scanFill(rings, ang, sI, 0));
+                var ss = scanFill(rings, ang, sI, 0);
+                if (ribbonAngled && ax && RIBBON_SERPENTINE && ss.length > 1) serpPaths = serpPaths.concat(serpentine(ss, ax.ang, 3 * sI));
+                else fillSegs = fillSegs.concat(ss);
               });
             }
+            serpPaths.forEach(function (pth) { L.paths.push({ feature: 'Support', width: wI, closed: false, pts: pth.pts, sheetFill: true }); });
             if (fillSegs.length) connect(fillSegs, 3 * sI, hullS).forEach(function (pth) {
               L.paths.push({ feature: 'Support', width: wI, closed: false, pts: pth.pts, sheetFill: true });
             });
