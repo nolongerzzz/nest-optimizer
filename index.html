@@ -2011,8 +2011,8 @@
               <button id="ms-compare-diff-copy" type="button" disabled title="Copy the measurement as JSON">Copy JSON</button>
               <button id="ms-compare-diff-fold" type="button" disabled aria-expanded="true" aria-controls="ms-compare-results"
                       title="Fold the measurement away (the tables and the worst layers) so the rest of the panel - Features, the layer sliders - is in reach while you compare; the numbers are kept">Hide</button>
-              <button id="ms-compare-stacks" type="button" disabled
-                      title="Split each plate stack into its plates and see them side by side: ours, the reference and both laid over each other, layer by layer, bottom to top - to check the numbers against the lines">Split stack</button>
+              <button id="ms-compare-stacks" type="button" disabled aria-pressed="false"
+                      title="Pull the pair's interface layers apart and lay them next to each other on plate 3 - ours in a row at the back, the reference in front, layer by layer - to see the stack's layers, not the stack. Only a view: no Measure, no Overlay. Press again to join them back">Split stack</button>
             </div>
             <div id="ms-compare-results">
             <div id="ms-compare-worst" class="ms-btn-row" data-flex="1"></div>
@@ -2494,7 +2494,7 @@
        row each under the Flange row. Pure. docs/GSCOPE-FEATURES.md. -->
   <script src="nso_face_features.js?v=53ee4b23"></script>
   <script src="nso_gscope_measure.js?v=c5595269"></script>
-  <script src="app-microscope.js?v=a62f4c2a"></script>
+  <script src="app-microscope.js?v=32ed4c22"></script>
   <!-- Detach / Reattach (Cut menu): cap a detected flange's hull on its own
        wall, lift the flange out as a piece, seat it elsewhere with Attach's
        seat. After nso_flange.js, app-crop.js, nso_assemble.js, app-assemble.js

@@ -5981,11 +5981,17 @@ var NSO_MICROSCOPE = (function () {
     setDisabled($('ms-compare-diff'), !live);
     setDisabled($('ms-compare-diff-copy'), !(live && compare.report));
     setDisabled($('ms-compare-diff-fold'), !(live && compare.report));
-    setDisabled($('ms-compare-stacks'), !(live && compare.a.moves && compare.b.moves && compare.a.moves.length && compare.b.moves.length));
-    ['nx-', 'nx+', 'ny-', 'ny+', 'nz-', 'nz+'].forEach(function (k) { setDisabled($('ms-compare-' + k), !live); });
+    var sp = !!(live && compare.split);
+    var spBtn = $('ms-compare-stacks');
+    setDisabled(spBtn, !(live && compare.a.moves && compare.b.moves && compare.a.moves.length && compare.b.moves.length));
+    if (spBtn) { spBtn.textContent = sp ? 'Join stack' : 'Split stack'; spBtn.classList.toggle('active', sp); spBtn.setAttribute('aria-pressed', sp ? 'true' : 'false'); }
+    if (sp) { setDisabled(ov, true); setDisabled($('ms-compare-side'), true); setDisabled($('ms-compare-diff'), true); }     // the pair is apart: Overlay, Measure and the nudges wait for the Join
+    ['nx-', 'nx+', 'ny-', 'ny+', 'nz-', 'nz+'].forEach(function (k) { setDisabled($('ms-compare-' + k), !live || sp); });
     if (tn) { tn.classList.toggle('active', !!(live && compare.tinted)); tn.setAttribute('aria-pressed', live && compare.tinted ? 'true' : 'false'); }
     if (!rd) return;
-    if (live) {
+    if (live && compare.split) {
+      rd.textContent = 'Stack split on plate 3: ours in the back row (orange), the reference in the front row (blue), interface layers from the bottom at the left. Join stack puts the pair back.';
+    } else if (live) {
       rd.textContent = (compare.overlaid ? 'Overlaid' : 'Side by side') + ' on plate 3: ' + compare.a.name.replace(/^Plate 1: /, '') +
         ' (orange) and ' + compare.b.name.replace(/^Plate 2: /, '') + ' (blue). Blue moved by ' +
         compare.dx.toFixed(2) + ', ' + compare.dy.toFixed(2) + ', ' + compare.dz.toFixed(2) + ' mm from where Overlay put it.';
@@ -6010,7 +6016,7 @@ var NSO_MICROSCOPE = (function () {
   function compareFrame() {
     if (!view || !compare) return;
     var box = new THREE.Box3();
-    [compare.a, compare.b].forEach(function (o) { var m = takeMesh(o); if (m) box.union(takeBox(o)); });
+    (compare.split ? compare.split.pieces : [compare.a, compare.b]).forEach(function (o) { var m = takeMesh(o); if (m) box.union(takeBox(o)); });
     if (!box.isEmpty()) frameBox(box, new THREE.Vector3().fromArray(FRAME_DIR));
   }
 
@@ -6470,54 +6476,79 @@ var NSO_MICROSCOPE = (function () {
   }
 
   /**
-   * The measurement Split stack draws from: the pair's own Measure when it is overlaid and measured; otherwise the pair measured as Overlay would lay it
-   * (plate 2's piece shifted over plate 1's by their outlines' centres, in the numbers only - nothing on plate 3 moves), so it works from Side by side.
+   * SPLIT STACK: strictly a view, an extension of Side by side. The pair's interface layers pulled apart and laid out next to each other on plate 3 - ours
+   * in a row at the back, the reference in a row in front, layer 1 / 2 / 3 ... in columns - every layer at one height, in the frame the pair is in (the
+   * reference shifted over ours as Overlay would, so a layer sits in its column as it sits over its partner). No Measure, no Overlay, no other screen.
+   * The pair itself stays (hidden, untouched); the button again joins the stack back. Back undoes it too.
    */
-  function platesReport(D) {
-    if (!compareLive() || !compare.a.moves || !compare.b.moves) return null;
-    if (compare.overlaid && compare.report) return compare.report;
-    var key = [compare.overlaid ? 1 : 0, compare.dx, compare.dy, compare.dz, compare.a.moves.length, compare.b.moves.length].join(',');
-    if (compare.sbs && compare.sbs.key === key) return compare.sbs.rep;
-    var sx = 0, sy = 0;
-    if (!compare.overlaid) {
-      var ba = partBox(compare.a), bb = partBox(compare.b);
-      if (!ba || !bb) return null;
-      sx = (ba.box.x0 + ba.box.x1) / 2 - (bb.box.x0 + bb.box.x1) / 2; sy = (ba.box.y0 + ba.box.y1) / 2 - (bb.box.y0 + bb.box.y1) / 2;
-    }
-    var bm = sx || sy ? compare.b.moves.map(function (m) { var c = Object.assign({}, m); c.x0 += sx; c.x1 += sx; c.y0 += sy; c.y1 += sy; return c; }) : compare.b.moves;
-    var offA = compare.a.srcAt && compare.a.moves.length ? [compare.a.moves[0].x0 - compare.a.srcAt[0], compare.a.moves[0].y0 - compare.a.srcAt[1]] : [0, 0];
-    var rep = D.compute(compare.a.moves, bm, { offsetA: offA });
-    rep.meta.a = compare.a.name; rep.meta.b = compare.b.name;
-    compare.sbs = { key: key, rep: rep };
-    return rep;
+  var SPLIT_GAP_MM = 3;
+  function splitLayers(o) {
+    var by = {};
+    (o.moves || []).forEach(function (m) {
+      if (!m.feature || !/interface/i.test(m.feature)) return;
+      var k = Math.round(m.z * 1000);
+      (by[k] || (by[k] = { z: m.z, moves: [] })).moves.push(m);
+    });
+    return Object.keys(by).map(Number).sort(function (p, q) { return p - q; }).map(function (k) { return by[k]; });
   }
-
-  /**
-   * SPLIT STACK: the measurement's stacks split into their plates, side by side. A full-window sheet over the viewport: a stack picker, then one card per plate,
-   * bottom to top - ours | the reference | both laid over each other - so the numbers in the Measure panel can be checked against the lines themselves.
-   * The drawing is nso-gscope-diff.js's (platesHtml); Escape or Close puts the sheet away.
-   */
-  function comparePlates(stackIdx) {
-    var D = window.NSOCompareDiff, rep = D && D.platesHtml && platesReport(D);
-    if (!D || !D.platesHtml) { say('Split stack needs nso-gscope-diff.js', true); return false; }
-    if (!rep) { say('Split stack: set the two pieces side by side first (they need toolpath moves).', true); return false; }
-    if (!rep.stacks || !rep.stacks.length) { say('Split stack: no interface or transition plate stack in this pair.', true); return false; }
-    var old = $('ms-plates-sheet'); if (old) old.remove();
-    var sheet = document.createElement('div'); sheet.id = 'ms-plates-sheet'; sheet.setAttribute('role', 'dialog'); sheet.setAttribute('aria-label', 'Plates of each stack, side by side');
-    sheet.style.cssText = 'position:fixed;inset:0;z-index:100000;background:#f3f3f7;overflow:auto;padding:12px 14px;color:#222';
-    var bar = document.createElement('div'); bar.style.cssText = 'display:flex;gap:10px;align-items:center;margin:0 0 10px;position:sticky;top:0;background:#f3f3f7;padding:4px 0;z-index:1';
-    var ttl = document.createElement('b'); ttl.textContent = 'Plates, side by side'; bar.appendChild(ttl);
-    var sel = document.createElement('select'); sel.id = 'ms-plates-stack'; sel.setAttribute('aria-label', 'Stack');
-    rep.stacks.forEach(function (q, i) { var o = document.createElement('option'); o.value = String(i); o.textContent = 'Stack ' + (i + 1) + ' at X ' + q.x.toFixed(1) + ' Y ' + q.y.toFixed(1) + ' (' + (q.plates ? q.plates.length : 0) + ' plates' + (q.flags.length ? ', flagged' : '') + ')'; sel.appendChild(o); });
-    bar.appendChild(sel);
-    var close = document.createElement('button'); close.type = 'button'; close.id = 'ms-plates-close'; close.textContent = 'Close'; close.style.marginLeft = 'auto'; bar.appendChild(close);
-    var body = document.createElement('div'); body.id = 'ms-plates-body';
-    sheet.appendChild(bar); sheet.appendChild(body); document.body.appendChild(sheet);
-    var show = function () { body.innerHTML = D.platesHtml(rep, { stack: +sel.value || 0 }); sheet.scrollTop = 0; };
-    var shut = function () { document.removeEventListener('keydown', onKey, true); sheet.remove(); };
-    var onKey = function (e) { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); shut(); } };
-    sel.addEventListener('change', show); close.addEventListener('click', shut); document.addEventListener('keydown', onKey, true);
-    sel.value = String(stackIdx || 0); show();
+  function compareSplit() {
+    if (!compareLive()) { say('Split stack: set the two pieces side by side first.', true); return null; }
+    if (compare.split) return compareJoin();
+    if (!window.NSOGcodeLines || !compare.a.moves || !compare.b.moves) { say('Split stack: a piece has no toolpath moves to split (it is a mesh).', true); return null; }
+    var La = splitLayers(compare.a), Lb = splitLayers(compare.b);
+    if (!La.length && !Lb.length) { say('Split stack: no interface layers in this pair.', true); return null; }
+    if (plateName !== 'cmp') showPlate('cmp');
+    // the reference over ours, as Overlay would (outlines' centres), in the numbers only
+    var ba = partBox(compare.a), bb = partBox(compare.b), sx = 0, sy = 0;
+    if (ba && bb) { sx = (ba.box.x0 + ba.box.x1) / 2 - (bb.box.x0 + bb.box.x1) / 2; sy = (ba.box.y0 + ba.box.y1) / 2 - (bb.box.y0 + bb.box.y1) / 2; }
+    var rows = [{ who: 'Ours', tint: TINT_A, layers: La, dx: 0, dy: 0 }, { who: 'Reference', tint: TINT_B, layers: Lb, dx: sx, dy: sy }];
+    var x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, z0 = Infinity, specs = [];
+    rows.forEach(function (R, ri) {
+      R.layers.forEach(function (L, li) {
+        var mv = L.moves.map(function (m) { var c = Object.assign({}, m); c.x0 += R.dx; c.x1 += R.dx; c.y0 += R.dy; c.y1 += R.dy; return c; });
+        var built = window.NSOGcodeLines.buildLineGeometry(mv);
+        if (!built || built.positions.length < 9) return;
+        var e = soupExtent(built.positions);
+        x0 = Math.min(x0, e.x0); x1 = Math.max(x1, e.x1); y0 = Math.min(y0, e.y0); y1 = Math.max(y1, e.y1); z0 = Math.min(z0, e.z0);
+        specs.push({ ri: ri, li: li, n: R.layers.length, z: L.z, R: R, spec: { name: R.who + ' ' + (li + 1) + '/' + R.layers.length + '  z ' + L.z.toFixed(2), from: doc.name, positions: built.positions, moves: mv, moveIds: built.moveIds, trisPerMove: built.trisPerMove, tint: R.tint } });
+      });
+    });
+    if (!specs.length) { say('Split stack: the interface layers have no lines to draw.', true); return null; }
+    var cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, px = (x1 - x0) + SPLIT_GAP_MM, py = (y1 - y0) + SPLIT_GAP_MM;
+    var cols = Math.max(La.length, Lb.length), pieces = [];
+    specs.forEach(function (q) {
+      var at = soupAnchor(q.spec.positions), g = makeGhost(q.spec);
+      var ox = (q.li - (cols - 1) / 2) * px + (at.x - cx), oy = (q.ri === 0 ? 1 : -1) * py / 2 + (at.y - cy);
+      var o = setDownOn(g, new THREE.Vector3(ox, z0, -oy), null);
+      if (o && !Array.isArray(o)) pieces.push(o);
+    });
+    if (!pieces.length) { say('Split stack: the layers could not be set down on plate 3.', true); return null; }
+    var hid = [compare.a.name, compare.b.name];
+    hid.forEach(function (n) { HIDDEN.add(n); });
+    compare.split = { pieces: pieces, hidden: hid };
+    setSelection([], 'pick');
+    pieceRefresh();
+    var cmpNow = compare;
+    pushStep(function () { return compare === cmpNow && !!cmpNow.split && !!compareJoin(); });
+    compareFrame();
+    syncCompare();
+    say('Stack split on plate 3: ' + La.length + ' interface layer' + (La.length === 1 ? '' : 's') + ' of Plate 1 (orange, back row) and ' + Lb.length + ' of Plate 2 (blue, front row), layer 1 at the left. The button again joins them.');
+    return pieces;
+  }
+  function compareJoin() {
+    if (!compareLive() || !compare.split) return null;
+    var sp = compare.split, d = doc && plateName === 'cmp' ? doc : plateDoc('cmp');
+    if (plateName !== 'cmp') showPlate('cmp');
+    d = doc;
+    sp.pieces.forEach(dropPieceGeometry);
+    d.objects = d.objects.filter(function (o) { return sp.pieces.indexOf(o) < 0; });
+    sp.hidden.forEach(function (n) { HIDDEN.delete(n); });
+    compare.split = null;
+    if (sizePlates()) placePlates();
+    pieceRefresh();
+    compareFrame();
+    syncCompare();
+    say('Stack joined: the pair is side by side again, as it was.');
     return true;
   }
 
@@ -6832,7 +6863,7 @@ var NSO_MICROSCOPE = (function () {
     bind('ms-compare-diff', 'click', function () { compareDiff(); });
     bind('ms-compare-diff-copy', 'click', function () { compareCopy(); });
     bind('ms-compare-diff-fold', 'click', function () { compareFold(); });
-    bind('ms-compare-stacks', 'click', function () { comparePlates(); });
+    bind('ms-compare-stacks', 'click', function () { compareSplit(); });
     bind('ms-compare-overlay', 'click', function () { compareOverlay(); });
     bind('ms-compare-side', 'click', function () { compareSideBySide(); });
     bind('ms-compare-restore', 'click', function () { compareClear(); });
@@ -6968,7 +6999,7 @@ var NSO_MICROSCOPE = (function () {
     compareClear: compareClear,
     compareDiff: compareDiff,
     compareFold: compareFold,
-    comparePlates: function (i) { return comparePlates(i); },
+    compareSplit: function () { return compareSplit(); },
     compareReport: function () { return compareLive() ? compare.report || null : null; },
     compareRestore: compareClear,
     compareState: function () {

@@ -98,13 +98,20 @@ withApp(async (page, logs) => {
   console.log('\n=== 2. overlay ===');
   {
     const before = [await partCentre(0), await partCentre(1)];
-    // Split stack works from Side by side, before any Overlay or Measure: the pair is measured as Overlay would lay it, in the numbers only
-    const sbsPl = await page.evaluate(() => ({ dis: document.getElementById('ms-compare-stacks').disabled, rep: !!NSO_MICROSCOPE.compareReport() }));
-    check('Split stack is on from Side by side (nothing measured yet)', sbsPl.dis === false && sbsPl.rep === false, J(sbsPl));
+    // SPLIT STACK: a view on plate 3 - the pair's interface layers laid out next to each other, ours in a back row and the reference in a front row
+    const splitPre = await page.evaluate(() => { const b = document.getElementById('ms-compare-stacks'); const lay = o => new Set(o.moves.filter(m => m.feature && /interface/i.test(m.feature)).map(m => Math.round(m.z * 1000))).size;
+      const c = NSO_MICROSCOPE.getDoc(); return { dis: b.disabled, label: b.textContent, n: c.objects.length, la: lay(c.objects[0]), lb: lay(c.objects[1]) }; });
+    check('Split stack is on from Side by side, with no Overlay and no Measure', splitPre.dis === false && splitPre.label === 'Split stack' && splitPre.n === 2, J(splitPre));
     await page.click('#ms-compare-stacks');
-    const sbsSheet = await page.evaluate(() => { const sh = document.getElementById('ms-plates-sheet'); return { open: !!sh, cards: sh ? sh.querySelectorAll('.pl-card').length : 0, moved: NSO_MICROSCOPE.compareReport() === null }; });
-    check('...and opens the plate cards from there, without moving the pieces or measuring', sbsSheet.open ? sbsSheet.cards > 0 && sbsSheet.moved : true, J(sbsSheet));
-    await page.keyboard.press('Escape');
+    await frames(page); await shot('split-stack');
+    const split = await page.evaluate(() => { const d = NSO_MICROSCOPE.getDoc(), b = document.getElementById('ms-compare-stacks'); const cen = o => { let y = 0, n = 0, z = 1e9; o.moves.forEach(m => { y += m.y0 + m.y1; n += 2; z = Math.min(z, m.z); }); return [y / n, z]; };
+      const ours = d.objects.filter(o => /^Ours /.test(o.name)), ref = d.objects.filter(o => /^Reference /.test(o.name));
+      return { n: d.objects.length, ours: ours.length, ref: ref.length, label: b.textContent, back: ours.length && ref.length ? cen(ours[0])[0] > cen(ref[0])[0] ? 'ours-back' : 'ours-front' : '-', zs: Array.from(new Set(d.objects.filter(o => /^(Ours|Reference) /.test(o.name)).map(o => cen(o)[1].toFixed(3)))).length, hiddenPair: d.objects.slice(0, 2).every(o => NSO_MICROSCOPE.isHidden ? NSO_MICROSCOPE.isHidden(o.name) : true), overlayOff: document.getElementById('ms-compare-overlay').disabled, measureOff: document.getElementById('ms-compare-diff').disabled }; });
+    check('Split stack lays the pair\'s interface layers out as pieces on plate 3: one per layer, ours and the reference, all at one height', split.ours === splitPre.la && split.ref === splitPre.lb && split.n === 2 + splitPre.la + splitPre.lb && split.zs === 1, J({ splitPre, split }));
+    check('...ours in the back row, the reference in front; the button turns into Join stack, and Overlay / Measure wait', split.back === 'ours-back' && split.label === 'Join stack' && split.overlayOff && split.measureOff, J(split));
+    await page.click('#ms-compare-stacks');
+    const joined = await page.evaluate(() => ({ n: NSO_MICROSCOPE.getDoc().objects.length, label: document.getElementById('ms-compare-stacks').textContent, overlay: document.getElementById('ms-compare-overlay').disabled }));
+    check('Join stack puts the pair back as it was', joined.n === 2 && joined.label === 'Split stack' && joined.overlay === false, J(joined));
     await page.click('#ms-compare-overlay');
     await frames(page);
     const after = [await partCentre(0), await partCentre(1)];
@@ -221,13 +228,6 @@ withApp(async (page, logs) => {
     const r = await page.evaluate(() => { const M = NSO_MICROSCOPE, rep = M.compareReport(), rd = document.getElementById('ms-compare-diff-read');
       return { has: !!rep, layers: rep && rep.meta.layers, shown: !rd.hidden, text: rd.textContent.slice(0, 120), offset: rep && rep.meta.blueOffsetMm, partOnly: rep && [rep.classes.part.onlyAMm2, rep.classes.part.onlyBMm2], both: rep && rep.classes.part.bothMm2, copy: document.getElementById('ms-compare-diff-copy').disabled }; });
     check('Measure reads the overlaid pair: a report, shown as text, Copy JSON on', r.has && r.shown && r.layers > 0 && r.copy === false && /^A = Plate 1/.test(r.text), J(r));
-    const pl = await page.evaluate(() => ({ btn: !!document.getElementById('ms-compare-stacks'), dis: document.getElementById('ms-compare-stacks').disabled, n: (NSO_MICROSCOPE.compareReport().stacks || []).length, sheet: !!document.getElementById('ms-plates-sheet') }));
-    check('Split stack sits beside Measure and is on with the pair, measured or not', pl.btn && pl.dis === false && pl.sheet === false, J(pl));
-    await page.click('#ms-compare-stacks');
-    const sh = await page.evaluate(() => { const sh = document.getElementById('ms-plates-sheet'); return { open: !!sh, cards: sh ? sh.querySelectorAll('.pl-card').length : 0, svgs: sh ? sh.querySelectorAll('.pl-card svg').length : 0, picker: sh ? sh.querySelectorAll('#ms-plates-stack option').length : 0 }; });
-    check('Split stack opens a sheet: the stack split into plate cards, three drawings each (ours, reference, both), a stack picker', sh.open && sh.cards > 0 && sh.svgs === sh.cards * 3 && sh.picker > 0, J(sh));
-    await page.keyboard.press('Escape');
-    check('...and Escape puts it away', await page.evaluate(() => !document.getElementById('ms-plates-sheet')));
     check('...the same file on both plates, overlaid: what plate 1 holds is wholly in plate 2\'s (none only A\'s), and they share material', r.partOnly[0] < 0.5 && r.both > 5, J([r.partOnly, r.both]));
     await page.click('#ms-compare-nx\\+');
     const stale = await page.evaluate(() => ({ rep: NSO_MICROSCOPE.compareReport(), txt: document.getElementById('ms-compare-diff-read').textContent }));
