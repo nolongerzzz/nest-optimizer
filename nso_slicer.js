@@ -2273,7 +2273,7 @@
         var zs = {};
         P.layers.forEach(function (L, j) {
           if (!L.paths.length) return;
-          [dInEx(j), dTrEx(j), dCl(j, dInEx(j)) + REACH_EXTRA_MM, dCl(j, dTrEx(j)) + REACH_EXTRA_MM, PLATE_UP_MM].forEach(function (dd) { var z = SP[j].printZ + dd - exShift; zs[Math.round(z * 1e5)] = z; });
+          [dInEx(j), dTrEx(j), dCl(j, dInEx(j)) + REACH_EXTRA_MM, dCl(j, dTrEx(j)) + REACH_EXTRA_MM, PLATE_UP_MM, PLATE_UP_LOW_MM].forEach(function (dd) { var z = SP[j].printZ + dd - exShift; zs[Math.round(z * 1e5)] = z; });
         });
         var list = Object.keys(zs).map(function (k) { return zs[k]; }).sort(function (a, b) { return a - b; });
         hosts.forEach(function (Q) {
@@ -2302,6 +2302,7 @@
       var EXACT_OUTLINE = true;       /* A RIBBON PLATE (the ridge) is Bambu's: each layer the part's EXACT section at the layer's reach (one section, not the union of the layers up to it; the reach never past the stack top's own face: dCl), the loops' centre PLATE_OUT_MM + 0.12 past it (measured on all six pieces: the outer edge stands 0.33 - 0.38 past the outline). Domes keep the union cut: a single section at that reach is far wider than theirs. */
       var REACH_EXTRA_MM = 0;   /* the section is read this much higher: a plane's edge moves 2.75 mm for 1 mm of height, and Bambu's plate stood 0.19 mm past ours on the downhill side */
       var PLATE_OUT_MM = -0.11;
+      var PLATE_UP_LOW_MM = 0.1, PLATE_UP_LOW_N = 4, RIBBON_SLAB_RATIO = 2;      /* the ridge's first plates (its rounded end, the slab still wide): the uphill edge stands 0.1 over the layer, and the slab is a ribbon from a ratio of 2 (Bambu cycles its hatch there too) */
       var PLATE_UP_MM = 0.21;      /* the uphill edge: the plate stops where the part's section 0.21 mm over the layer begins (the face there stands 0.21 over it; Bambu's ribbon is 0.9 mm of the face's height, ours was 1.05) */
       var PLATE_BAND_MM = 0.7;      /* how far past the support mesh's footprint the outline may run */
       var CURVED_SHRINK_MM = 0.1;   /* on a curved face (the zone changes layer on layer) the host cut is this much narrower: a dome's plate was out past Bambu's */
@@ -2423,7 +2424,7 @@
                 pp.forEach(function (q) { if (!big || q.area() > big.area()) big = q; });
                 if (!big) return false;
                 var ax = ringAxis(g.polys(big)[0]);
-                return !!ax && ax.ratio >= RIBBON_T_RATIO;
+                return !!ax && ax.ratio >= RIBBON_SLAB_RATIO;
               })();
               if (RIBBON_CYCLE && ribbonSlab) {
                 /* Bambu's ridge plate: the transition layers at 110, the interface's first and then every third at 20, the rest at 110 (measured: 20, 110, 20, then 110, 110, 20 on, over the
@@ -2449,7 +2450,7 @@
                   var own = [];
                   planes.forEach(function (pl, k) { if (pl.printZ > SP[j].printZ - SP[j].h + 1e-6 && pl.printZ - pl.h < SP[j].printZ - 1e-6) hosts.forEach(function (Q) { if (!g.isEmpty(Q.S[k])) own.push(Q.S[k]); }); });
                   var ownCs = own.length ? g.offset(g.unionAll(own), gap + w / 2 + 0.03) : g.empty();
-                  var topJ = zones[j] && zones[j].topI != null ? zones[j].topI : j, eU = PLATE_UP_MM > 0 && topJ > j ? exAt(PLATE_UP_MM) : null;     /* the stack's top layer keeps its crest */
+                  var topJ = zones[j] && zones[j].topI != null ? zones[j].topI : j, eU = PLATE_UP_MM > 0 && topJ > j ? exAt(stackIdx[j] <= PLATE_UP_LOW_N ? PLATE_UP_LOW_MM : PLATE_UP_MM) : null;     /* the stack's top layer keeps its crest */
                   if (eU) { Sj = g.diff(Sj, eU); sheetCs = g.diff(sheetCs, eU); }
                   var ground = g.inter(g.offset(g.inter(Sj, sheetCs), PLATE_BAND_MM), hTc);
                   if (eU) ground = g.diff(ground, eU);
