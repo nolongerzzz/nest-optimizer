@@ -5981,7 +5981,7 @@ var NSO_MICROSCOPE = (function () {
     setDisabled($('ms-compare-diff'), !live);
     setDisabled($('ms-compare-diff-copy'), !(live && compare.report));
     setDisabled($('ms-compare-diff-fold'), !(live && compare.report));
-    setDisabled($('ms-compare-stacks'), !(live && compare.report && compare.report.stacks && compare.report.stacks.length));
+    setDisabled($('ms-compare-stacks'), !(live && compare.a.moves && compare.b.moves && compare.a.moves.length && compare.b.moves.length));
     ['nx-', 'nx+', 'ny-', 'ny+', 'nz-', 'nz+'].forEach(function (k) { setDisabled($('ms-compare-' + k), !live); });
     if (tn) { tn.classList.toggle('active', !!(live && compare.tinted)); tn.setAttribute('aria-pressed', live && compare.tinted ? 'true' : 'false'); }
     if (!rd) return;
@@ -6470,13 +6470,38 @@ var NSO_MICROSCOPE = (function () {
   }
 
   /**
+   * The measurement Split stack draws from: the pair's own Measure when it is overlaid and measured; otherwise the pair measured as Overlay would lay it
+   * (plate 2's piece shifted over plate 1's by their outlines' centres, in the numbers only - nothing on plate 3 moves), so it works from Side by side.
+   */
+  function platesReport(D) {
+    if (!compareLive() || !compare.a.moves || !compare.b.moves) return null;
+    if (compare.overlaid && compare.report) return compare.report;
+    var key = [compare.overlaid ? 1 : 0, compare.dx, compare.dy, compare.dz, compare.a.moves.length, compare.b.moves.length].join(',');
+    if (compare.sbs && compare.sbs.key === key) return compare.sbs.rep;
+    var sx = 0, sy = 0;
+    if (!compare.overlaid) {
+      var ba = partBox(compare.a), bb = partBox(compare.b);
+      if (!ba || !bb) return null;
+      sx = (ba.box.x0 + ba.box.x1) / 2 - (bb.box.x0 + bb.box.x1) / 2; sy = (ba.box.y0 + ba.box.y1) / 2 - (bb.box.y0 + bb.box.y1) / 2;
+    }
+    var bm = sx || sy ? compare.b.moves.map(function (m) { var c = Object.assign({}, m); c.x0 += sx; c.x1 += sx; c.y0 += sy; c.y1 += sy; return c; }) : compare.b.moves;
+    var offA = compare.a.srcAt && compare.a.moves.length ? [compare.a.moves[0].x0 - compare.a.srcAt[0], compare.a.moves[0].y0 - compare.a.srcAt[1]] : [0, 0];
+    var rep = D.compute(compare.a.moves, bm, { offsetA: offA });
+    rep.meta.a = compare.a.name; rep.meta.b = compare.b.name;
+    compare.sbs = { key: key, rep: rep };
+    return rep;
+  }
+
+  /**
    * SPLIT STACK: the measurement's stacks split into their plates, side by side. A full-window sheet over the viewport: a stack picker, then one card per plate,
    * bottom to top - ours | the reference | both laid over each other - so the numbers in the Measure panel can be checked against the lines themselves.
    * The drawing is nso-gscope-diff.js's (platesHtml); Escape or Close puts the sheet away.
    */
   function comparePlates(stackIdx) {
-    var D = window.NSOCompareDiff, rep = compareLive() && compare.report;
-    if (!D || !D.platesHtml || !rep || !rep.stacks || !rep.stacks.length) { say('Split stack: Measure first - the stacks come from the measurement.', true); return false; }
+    var D = window.NSOCompareDiff, rep = D && D.platesHtml && platesReport(D);
+    if (!D || !D.platesHtml) { say('Split stack needs nso-gscope-diff.js', true); return false; }
+    if (!rep) { say('Split stack: set the two pieces side by side first (they need toolpath moves).', true); return false; }
+    if (!rep.stacks || !rep.stacks.length) { say('Split stack: no interface or transition plate stack in this pair.', true); return false; }
     var old = $('ms-plates-sheet'); if (old) old.remove();
     var sheet = document.createElement('div'); sheet.id = 'ms-plates-sheet'; sheet.setAttribute('role', 'dialog'); sheet.setAttribute('aria-label', 'Plates of each stack, side by side');
     sheet.style.cssText = 'position:fixed;inset:0;z-index:100000;background:#f3f3f7;overflow:auto;padding:12px 14px;color:#222';

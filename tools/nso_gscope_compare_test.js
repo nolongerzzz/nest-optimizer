@@ -98,6 +98,13 @@ withApp(async (page, logs) => {
   console.log('\n=== 2. overlay ===');
   {
     const before = [await partCentre(0), await partCentre(1)];
+    // Split stack works from Side by side, before any Overlay or Measure: the pair is measured as Overlay would lay it, in the numbers only
+    const sbsPl = await page.evaluate(() => ({ dis: document.getElementById('ms-compare-stacks').disabled, rep: !!NSO_MICROSCOPE.compareReport() }));
+    check('Split stack is on from Side by side (nothing measured yet)', sbsPl.dis === false && sbsPl.rep === false, J(sbsPl));
+    await page.click('#ms-compare-stacks');
+    const sbsSheet = await page.evaluate(() => { const sh = document.getElementById('ms-plates-sheet'); return { open: !!sh, cards: sh ? sh.querySelectorAll('.pl-card').length : 0, moved: NSO_MICROSCOPE.compareReport() === null }; });
+    check('...and opens the plate cards from there, without moving the pieces or measuring', sbsSheet.open ? sbsSheet.cards > 0 && sbsSheet.moved : true, J(sbsSheet));
+    await page.keyboard.press('Escape');
     await page.click('#ms-compare-overlay');
     await frames(page);
     const after = [await partCentre(0), await partCentre(1)];
@@ -215,7 +222,7 @@ withApp(async (page, logs) => {
       return { has: !!rep, layers: rep && rep.meta.layers, shown: !rd.hidden, text: rd.textContent.slice(0, 120), offset: rep && rep.meta.blueOffsetMm, partOnly: rep && [rep.classes.part.onlyAMm2, rep.classes.part.onlyBMm2], both: rep && rep.classes.part.bothMm2, copy: document.getElementById('ms-compare-diff-copy').disabled }; });
     check('Measure reads the overlaid pair: a report, shown as text, Copy JSON on', r.has && r.shown && r.layers > 0 && r.copy === false && /^A = Plate 1/.test(r.text), J(r));
     const pl = await page.evaluate(() => ({ btn: !!document.getElementById('ms-compare-stacks'), dis: document.getElementById('ms-compare-stacks').disabled, n: (NSO_MICROSCOPE.compareReport().stacks || []).length, sheet: !!document.getElementById('ms-plates-sheet') }));
-    check('Split stack sits beside Measure and is on only when the measurement found plate stacks (this pair is parts: off, no sheet)', pl.btn && (pl.n === 0 ? pl.dis === true : pl.dis === false) && pl.sheet === false, J(pl));
+    check('Split stack sits beside Measure and is on with the pair, measured or not', pl.btn && pl.dis === false && pl.sheet === false, J(pl));
     await page.click('#ms-compare-stacks');
     const sh = await page.evaluate(() => { const sh = document.getElementById('ms-plates-sheet'); return { open: !!sh, cards: sh ? sh.querySelectorAll('.pl-card').length : 0, svgs: sh ? sh.querySelectorAll('.pl-card svg').length : 0, picker: sh ? sh.querySelectorAll('#ms-plates-stack option').length : 0 }; });
     check('Split stack opens a sheet: the stack split into plate cards, three drawings each (ours, reference, both), a stack picker', sh.open && sh.cards > 0 && sh.svgs === sh.cards * 3 && sh.picker > 0, J(sh));
