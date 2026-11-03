@@ -283,6 +283,15 @@ withApp(async (page, logs) => {
   await page.waitForTimeout(150);
   check('unticked: the rings are gone and Cut is still open', await page.evaluate(() => { const g = state.scene.getObjectByName('nso-rotate-handles'); return (!g || !g.visible || !g.children.length) && state.cutterOpen && document.getElementById('cut-rotate-rings').hidden; }));
 
+  console.log('closing Cut takes its rings with it');
+  await page.evaluate(() => { const c = document.getElementById('chk-cut-rotate'); c.checked = true; c.dispatchEvent(new Event('change')); });
+  await page.waitForTimeout(150);
+  const ringsOn = await page.evaluate(() => { const g = state.scene.getObjectByName('nso-rotate-handles'); return !!(g && g.visible && g.children.length); });
+  await page.evaluate(() => closeCutter(true));
+  await page.waitForTimeout(150);
+  const ringsOff = await page.evaluate(() => { const g = state.scene.getObjectByName('nso-rotate-handles'); return { gone: !g || !g.visible || !g.children.length, flag: state.cutRotate, box: document.getElementById('chk-cut-rotate').checked }; });
+  check('rings were up, then Cut closed: they are gone and the box is clear', ringsOn && ringsOff.gone && ringsOff.flag === false && ringsOff.box === false, JSON.stringify({ ringsOn, ringsOff }));
+
   const errs = logs.filter(l => /error|exception/i.test(l) && !/favicon|Failed to load resource/i.test(l));
   check('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
   console.log(fails ? '\n' + fails + ' FAILED' : '\nall gates held');

@@ -856,6 +856,7 @@ function closeCutter(silent) {
   const was = state.cutterOpen ? (state.cutTool || 'cut') : null;
   state.cutterOpen = false;
   state.cutTool = null;
+  state.cutRotate = false;                 // the rings were Cut's to show; they go with it
   state.cutRightSideOutOffer = null;
   state.cutDragging = false;
   state.moveDragging = false;
@@ -869,6 +870,9 @@ function closeCutter(silent) {
   // Pieces are not cleared or rebuilt: the cutter is the blade only.
   state.previewMesh = null;
   updateCutterUI();
+  const rr = document.getElementById('cut-rotate-rings'); if (rr) rr.hidden = true;
+  if (typeof nsoRotate !== 'undefined' && nsoRotate.refresh) nsoRotate.refresh();
+  syncCutBladeUI();
   if (!silent) setStatus((was === 'crop' ? 'Crop' : 'Cut') + ' off - blade gone. Pieces unchanged.');
 }
 
