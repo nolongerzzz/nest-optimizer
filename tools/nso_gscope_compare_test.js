@@ -50,18 +50,6 @@ withApp(async (page, logs) => {
   await page.waitForFunction(() => NSO_MICROSCOPE.plate() === 'take' && NSO_MICROSCOPE.getDoc() && NSO_MICROSCOPE.getDoc().kind === 'toolpath', null, { timeout: 30000 });
   await frames(page);
 
-  console.log('\n=== stops beside the slider: a click puts the range on one layer, whole ===');
-  {
-    const st0 = await page.evaluate(() => { const h = document.getElementById('ms-zr-stops'); const b = h ? Array.from(h.querySelectorAll('.ms-zr-stop')) : []; return { has: !!h, shown: h && !h.hidden, n: b.length, kinds: Array.from(new Set(b.map(x => x.className.replace('ms-zr-stop ', '').replace(/ on/, '')))), steps: NSO_MICROSCOPE.getZRange ? null : null }; });
-    check('the slider has stops: one tick per plate layer, in its own colour', st0.has && st0.shown && st0.n > 0, J(st0));
-    const pick = await page.evaluate(() => { const b = document.querySelectorAll('#ms-zr-stops .ms-zr-stop'); const k = b[Math.floor(b.length / 2)]; k.click(); const r = NSO_MICROSCOPE.zRange ? NSO_MICROSCOPE.zRange() : null; return { r: r && { lo: r.lo, hi: r.hi, part: r.part, steps: r.steps }, on: document.querySelectorAll('#ms-zr-stops .ms-zr-stop.on').length }; });
-    await frames(page); await shot('zr-stops');
-    check('a click on a stop puts both handles on that layer, whole (no part-way nozzle)', pick.r && pick.r.lo === pick.r.hi && pick.r.part === 1 && pick.on >= 1, J(pick));
-    const ext = await page.evaluate(() => { const b = document.querySelectorAll('#ms-zr-stops .ms-zr-stop'); b[b.length - 1].dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true })); const r = NSO_MICROSCOPE.zRange(); return { lo: r.lo, hi: r.hi }; });
-    check('Shift-click takes the range out to another stop', ext.hi > ext.lo, J(ext));
-    await page.evaluate(() => document.getElementById('ms-zr-all').click());
-  }
-
   console.log('\n=== 6. nothing isolated: refused ===');
   {
     await page.evaluate(() => NSO_MICROSCOPE.showPlate('lens'));
@@ -111,16 +99,27 @@ withApp(async (page, logs) => {
   {
     const before = [await partCentre(0), await partCentre(1)];
     // SPLIT STACK: a view on plate 3 - the pair's interface layers laid out next to each other, ours in a back row and the reference in a front row
-    const splitPre = await page.evaluate(() => { const b = document.getElementById('ms-compare-stacks'); const lay = o => new Set(o.moves.filter(m => m.feature && /interface/i.test(m.feature)).map(m => Math.round(m.z * 1000))).size;
+    const splitPre = await page.evaluate(() => { const b = document.getElementById('ms-compare-stacks'); const lay = o => new Set(o.moves.filter(m => m.feature && /interface|transition/i.test(m.feature)).map(m => Math.round(m.z * 1000))).size;
       const c = NSO_MICROSCOPE.getDoc(); return { dis: b.disabled, label: b.textContent, n: c.objects.length, la: lay(c.objects[0]), lb: lay(c.objects[1]) }; });
     check('Split stack is on from Side by side, with no Overlay and no Measure', splitPre.dis === false && splitPre.label === 'Split stack' && splitPre.n === 2, J(splitPre));
     await page.click('#ms-compare-stacks');
     await frames(page); await shot('split-stack');
     const split = await page.evaluate(() => { const d = NSO_MICROSCOPE.getDoc(), b = document.getElementById('ms-compare-stacks'); const cen = o => { let y = 0, n = 0, z = 1e9; o.moves.forEach(m => { y += m.y0 + m.y1; n += 2; z = Math.min(z, m.z); }); return [y / n, z]; };
       const ours = d.objects.filter(o => /^Ours /.test(o.name)), ref = d.objects.filter(o => /^Reference /.test(o.name));
-      return { n: d.objects.length, ours: ours.length, ref: ref.length, label: b.textContent, back: ours.length && ref.length ? cen(ours[0])[0] > cen(ref[0])[0] ? 'ours-back' : 'ours-front' : '-', zs: Array.from(new Set(d.objects.filter(o => /^(Ours|Reference) /.test(o.name)).map(o => cen(o)[1].toFixed(3)))).length, hiddenPair: d.objects.slice(0, 2).every(o => NSO_MICROSCOPE.isHidden ? NSO_MICROSCOPE.isHidden(o.name) : true), overlayOff: document.getElementById('ms-compare-overlay').disabled, measureOff: document.getElementById('ms-compare-diff').disabled }; });
+      return { n: d.objects.length, ours: ours.length, ref: ref.length, label: b.textContent, back: ours.length && ref.length ? cen(ours[0])[0] > cen(ref[0])[0] ? 'ours-back' : 'ours-front' : '-', zs: Array.from(new Set(d.objects.filter(o => /^(Ours|Reference) /.test(o.name)).map(o => cen(o)[1].toFixed(3)))).length, overlayOff: document.getElementById('ms-compare-overlay').disabled, measureOff: document.getElementById('ms-compare-diff').disabled, stops: document.querySelectorAll('#ms-zr-stops .ms-zr-stop').length, cols: new Set(d.objects.filter(o => /^(Ours|Reference) /.test(o.name)).map(o => o.name.split(' ')[1])).size }; });
     check('Split stack lays the pair\'s interface layers out as pieces on plate 3: one per layer, ours and the reference, all at one height', split.ours === splitPre.la && split.ref === splitPre.lb && split.n === 2 + splitPre.la + splitPre.lb && split.zs === 1, J({ splitPre, split }));
-    check('...ours in the back row, the reference in front; the button turns into Join stack, and Overlay / Measure wait', split.back === 'ours-back' && split.label === 'Join stack' && split.overlayOff && split.measureOff, J(split));
+    check('...ours in the back row, the reference in front; the button turns into Join stack; Overlay and Measure stay on', split.back === 'ours-back' && split.label === 'Join stack' && split.overlayOff === false && split.measureOff === false, J(split));
+    check('...one stop beside the slider per column - the split\'s layers, not the slider\'s Z levels', split.stops === split.cols && split.stops > 0, J(split));
+    const solo = await page.evaluate(() => { const zr0 = JSON.stringify(NSO_MICROSCOPE.zRange()); const b = document.querySelectorAll('#ms-zr-stops .ms-zr-stop'); b[0].click(); const d = NSO_MICROSCOPE.getDoc(); const vis = () => NSO_MICROSCOPE.shownPieces().filter(nm => /^(Ours|Reference) /.test(nm)).length;
+      const on1 = document.querySelectorAll('#ms-zr-stops .ms-zr-stop.on').length; const v1 = vis(); b[0].click(); const on2 = document.querySelectorAll('#ms-zr-stops .ms-zr-stop.on').length; return { on1, on2, n: b.length, v1, v2: vis(), sliderSame: zr0 === JSON.stringify(NSO_MICROSCOPE.zRange()) }; });
+    check('a stop shows its column alone (the pieces drawn drop to that column\'s), the same stop again shows all, and the slider does not move', solo.sliderSame && solo.on1 === 1 && solo.on2 === solo.n && solo.v1 < solo.v2 && solo.v1 >= 1, J(solo));
+    await page.click('#ms-compare-overlay');
+    const ovl = await page.evaluate(() => { const d = NSO_MICROSCOPE.getDoc(); const rows = {}; d.objects.filter(o => /^(Ours|Reference) /.test(o.name)).forEach(o => { let y = 0, n = 0; o.moves.forEach(m => { y += m.y0 + m.y1; n += 2; }); (rows[o.name.split(' ')[0]] = rows[o.name.split(' ')[0]] || []).push(y / n); }); const ys = [...(rows.Ours || []), ...(rows.Reference || [])]; return { spread: Math.max(...ys) - Math.min(...ys), n: ys.length, still: document.getElementById('ms-compare-stacks').textContent }; });
+    check('Overlay while split lays each column\'s two layers over each other (the rows become one), still split', ovl.n > 0 && ovl.spread < 3 && ovl.still === 'Join stack', J(ovl));
+    await page.click('#ms-compare-side');
+    const sbs2 = await page.evaluate(() => { const d = NSO_MICROSCOPE.getDoc(); const ys = {}; d.objects.filter(o => /^(Ours|Reference) /.test(o.name)).forEach(o => { let y = 0, n = 0; o.moves.forEach(m => { y += m.y0 + m.y1; n += 2; }); ys[o.name.split(' ')[0]] = y / n; }); return { gap: ys.Ours - ys.Reference }; });
+    check('Side by side while split puts the rows apart again', sbs2.gap > 3, J(sbs2));
+
     await page.click('#ms-compare-stacks');
     const joined = await page.evaluate(() => ({ n: NSO_MICROSCOPE.getDoc().objects.length, label: document.getElementById('ms-compare-stacks').textContent, overlay: document.getElementById('ms-compare-overlay').disabled }));
     check('Join stack puts the pair back as it was', joined.n === 2 && joined.label === 'Split stack' && joined.overlay === false, J(joined));
@@ -396,6 +395,7 @@ withApp(async (page, logs) => {
     let r = await page.evaluate(() => ({ pick: NSO_MICROSCOPE.comparePicking(), plate: NSO_MICROSCOPE.plate(), on: document.getElementById('ms-compare-lasso').getAttribute('aria-pressed'), say: document.getElementById('ms-compare-read').textContent }));
     check('Lasso asks for a loop on plate 1 first', r.pick === 'lens' && r.plate === 'lens' && r.on === 'true' && /lasso/i.test(r.say), J(r));
     // an empty spot first: nothing in the loop, still on plate 1
+    await page.waitForTimeout(1200); await frames(page);       // the camera is still gliding after the framing above: measure the piece once it has stopped
     const b1 = await box();
     await draw(sq(b1.cx + b1.h + 12, b1.cy + b1.h + 12, 4));
     r = await page.evaluate(() => ({ pick: NSO_MICROSCOPE.comparePicking(), plate: NSO_MICROSCOPE.plate() }));

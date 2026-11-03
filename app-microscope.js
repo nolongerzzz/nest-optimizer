@@ -4637,75 +4637,35 @@ var NSO_MICROSCOPE = (function () {
   }
 
   /**
-   * STOPS beside the slider: a click puts both handles on one layer, whole - no part-way nozzle position, nothing moving - to look at that layer alone.
-   * Shift-click takes the range out to it. Where the slice has plate layers (interface, transition) the stops are those layers, in their own colours;
-   * a slice with none gets one per layer while there are at most 60.
+   * STOPS beside the slider: the split stack's layers (interface orange, transition green), not the slider's Z levels - they show what the split shows
+   * and move nothing of the slider. A click shows that layer's column alone, the same stop again shows all.
    */
-  var ZSTOP_ALL_MAX = 60;
-  function zStopsOf(d) {
-    var n = d.kind === 'toolpath' ? d.zLevels.length : 0, out = [];
-    if (d.kind === 'toolpath') {
-      var key = d.segments.length + ':' + n;
-      if (d._zstops && d._zstops.key === key) return d._zstops.list;
-      var fl = new Array(n);
-      d.segments.forEach(function (sg) {
-        var f = fl[sg.zi] || (fl[sg.zi] = { i: false, t: false });
-        if (/interface/i.test(sg.feature || '')) f.i = true; else if (/transition/i.test(sg.feature || '')) f.t = true;
-      });
-      var any = fl.some(function (f) { return f && (f.i || f.t); });
-      for (var i = 0; i < n; i++) {
-        var f = fl[i] || {};
-        if (any ? !(f.i || f.t) : n > ZSTOP_ALL_MAX) continue;
-        out.push({ lo: i, hi: i, z: d.zLevels[i], kind: f.i ? 'interface' : f.t ? 'transition' : 'layer' });
-      }
-      d._zstops = { key: key, list: out };
-      return out;
-    }
-    if (d.kind === 'mesh' && d.objects) {
-      var key2 = d.objects.length + ':' + d.zMin + ':' + d.zMax;
-      if (d._zstops && d._zstops.key === key2) return d._zstops.list;
-      var by = {};
-      d.objects.forEach(function (o) {
-        if (HIDDEN.has(o.name)) return;
-        (o.moves || []).forEach(function (m) {
-          var k = /interface/i.test(m.feature || '') ? 'interface' : /transition/i.test(m.feature || '') ? 'transition' : null;
-          if (!k) return;
-          var zk = Math.round(m.z * 1000), q = by[zk] || (by[zk] = { z: m.z, h: m.height || 0.2, kind: k });
-          if (k === 'interface') q.kind = 'interface';
-        });
-      });
-      Object.keys(by).map(Number).sort(function (a, b) { return a - b; }).forEach(function (k) {
-        var q = by[k];
-        out.push({ lo: stepAtZ(q.z - q.h), hi: stepAtZ(q.z), z: q.z, kind: q.kind });
-      });
-      d._zstops = { key: key2, list: out };
-    }
-    return out;
+  function splitStops() {
+    var sp = compare && compare.split && plateName === 'cmp' && compareLive() ? compare.split : null;
+    return sp ? sp.cols : [];
   }
 
   function syncZStops(n) {
     var host = $('ms-zr-stops');
     if (!host) return;
-    var list = doc && n > 1 ? zStopsOf(doc) : [];
-    var sig = list.length + ':' + n + ':' + (doc ? doc.name : '') + ':' + (list.length ? list[0].z + ',' + list[list.length - 1].z : '');
+    var cols = doc && n > 1 ? splitStops() : [], sp = compare && compare.split;
+    var zmin = doc ? doc.zMin : 0, span = doc && doc.zMax > doc.zMin ? doc.zMax - doc.zMin : 1;
+    var sig = cols.length + ':' + n + ':' + cols.map(function (c) { return (c.za != null ? c.za : c.zb).toFixed(2); }).join(',');
     if (host.dataset.sig !== sig) {
       host.dataset.sig = sig;
       host.textContent = '';
-      list.forEach(function (q, k) {
-        var b = document.createElement('button');
-        b.type = 'button'; b.className = 'ms-zr-stop ms-zr-stop-' + q.kind; b.dataset.k = String(k);
-        b.style.bottom = (n > 1 ? (q.hi / (n - 1)) * 100 : 0) + '%';
-        b.title = 'Z ' + q.z.toFixed(2) + (q.kind === 'layer' ? '' : '  ' + q.kind) + ' - click: this layer alone, whole. Shift-click: take the range out to it';
-        b.setAttribute('aria-label', 'Layer at Z ' + q.z.toFixed(2) + (q.kind === 'layer' ? '' : ', ' + q.kind));
+      cols.forEach(function (c, k) {
+        var z = c.za != null ? c.za : c.zb, b = document.createElement('button');
+        b.type = 'button'; b.className = 'ms-zr-stop ms-zr-stop-' + c.kind; b.dataset.k = String(k);
+        b.style.bottom = Math.max(0, Math.min(100, (z - zmin) / span * 100)) + '%';
+        b.title = 'Layer ' + (k + 1) + ' of ' + cols.length + ' (' + c.kind + ')  ours z ' + (c.za != null ? c.za.toFixed(2) : '-') + ' | reference z ' + (c.zb != null ? c.zb.toFixed(2) : '-') + ' - click: this layer alone; again: all layers';
+        b.setAttribute('aria-label', 'Split stack layer ' + (k + 1) + ', ' + c.kind);
         host.appendChild(b);
       });
     }
     var kids = host.children;
-    for (var i = 0; i < kids.length; i++) {
-      var q2 = list[i];
-      if (q2) kids[i].classList.toggle('on', !!zr && q2.hi >= zr.lo && q2.lo <= zr.hi);
-    }
-    host.hidden = !list.length;
+    for (var i = 0; i < kids.length; i++) kids[i].classList.toggle('on', !sp || sp.solo == null || sp.solo === i);
+    host.hidden = !cols.length;
   }
 
   function wireZRange() {
@@ -4757,11 +4717,7 @@ var NSO_MICROSCOPE = (function () {
       stopsEl.addEventListener('pointerdown', function (e) { e.stopPropagation(); });
       stopsEl.addEventListener('click', function (e) {
         var b = e.target.closest ? e.target.closest('.ms-zr-stop') : null;
-        if (!b || !doc || !zr) return;
-        var q = zStopsOf(doc)[+b.dataset.k];
-        if (!q) return;
-        if (e.shiftKey) setZRange(Math.min(zr.lo, q.lo), Math.max(zr.hi, q.hi));
-        else setZRange(q.lo, q.hi);
+        if (b) splitSolo(+b.dataset.k);
       });
     }
     var fill = $('ms-zr-fill');
@@ -6070,12 +6026,11 @@ var NSO_MICROSCOPE = (function () {
     var spBtn = $('ms-compare-stacks');
     setDisabled(spBtn, !(live && compare.a.moves && compare.b.moves && compare.a.moves.length && compare.b.moves.length));
     if (spBtn) { spBtn.textContent = sp ? 'Join stack' : 'Split stack'; spBtn.classList.toggle('active', sp); spBtn.setAttribute('aria-pressed', sp ? 'true' : 'false'); }
-    if (sp) { setDisabled(ov, true); setDisabled($('ms-compare-side'), true); setDisabled($('ms-compare-diff'), true); }     // the pair is apart: Overlay, Measure and the nudges wait for the Join
-    ['nx-', 'nx+', 'ny-', 'ny+', 'nz-', 'nz+'].forEach(function (k) { setDisabled($('ms-compare-' + k), !live || sp); });
+    ['nx-', 'nx+', 'ny-', 'ny+', 'nz-', 'nz+'].forEach(function (k) { setDisabled($('ms-compare-' + k), !live); });
     if (tn) { tn.classList.toggle('active', !!(live && compare.tinted)); tn.setAttribute('aria-pressed', live && compare.tinted ? 'true' : 'false'); }
     if (!rd) return;
     if (live && compare.split) {
-      rd.textContent = 'Stack split on plate 3: ours in the back row (orange), the reference in the front row (blue), interface layers from the bottom at the left. Join stack puts the pair back.';
+      rd.textContent = 'Stack split on plate 3 (' + compare.split.cols.length + ' layers, interface and transition' + (compare.overlaid ? ', overlaid: each column\'s two layers lie over each other' : ': ours in the back row, the reference in front') + '). A stop beside the slider shows one layer alone. Join stack puts the pair back.';
     } else if (live) {
       rd.textContent = (compare.overlaid ? 'Overlaid' : 'Side by side') + ' on plate 3: ' + compare.a.name.replace(/^Plate 1: /, '') +
         ' (orange) and ' + compare.b.name.replace(/^Plate 2: /, '') + ' (blue). Blue moved by ' +
@@ -6101,7 +6056,7 @@ var NSO_MICROSCOPE = (function () {
   function compareFrame() {
     if (!view || !compare) return;
     var box = new THREE.Box3();
-    (compare.split ? compare.split.pieces : [compare.a, compare.b]).forEach(function (o) { var m = takeMesh(o); if (m) box.union(takeBox(o)); });
+    (compare.split ? (compare.split.solo != null && compare.split.cols[compare.split.solo] ? compare.split.cols[compare.split.solo].pieces : compare.split.pieces) : [compare.a, compare.b]).forEach(function (o) { var m = takeMesh(o); if (m) box.union(takeBox(o)); });
     if (!box.isEmpty()) frameBox(box, new THREE.Vector3().fromArray(FRAME_DIR));
   }
 
@@ -6414,6 +6369,7 @@ var NSO_MICROSCOPE = (function () {
     compare.a.alpha = compare.b.alpha = OVERLAY_ALPHA;
     pieceRefresh();
     treeSoon(compare.b);
+    splitFollow();
     compareFrame();
     syncCompare();
     say('Overlaid by ' + (ba.part && bb.part ? 'the parts\' outlines' : 'everything they draw (no part walls in one of them)') + ': Plate 1\'s in orange, Plate 2\'s in blue. Nudge the blue one to fine-tune.');
@@ -6434,6 +6390,7 @@ var NSO_MICROSCOPE = (function () {
     compare.a.alpha = compare.b.alpha = undefined;
     pieceRefresh();
     treeSoon(compare.b);
+    splitFollow();
     compareFrame();
     syncCompare();
     say('Side by side again on plate 3: Plate 1\'s piece in orange at the left, Plate 2\'s in blue at the right. Overlay lays them over each other.');
@@ -6448,6 +6405,7 @@ var NSO_MICROSCOPE = (function () {
     compareStale();
     pieceRefresh();
     treeSoon(compare.b);
+    splitFollow();
     syncCompare();
     return { dx: compare.dx, dy: compare.dy, dz: compare.dz };
   }
@@ -6459,6 +6417,7 @@ var NSO_MICROSCOPE = (function () {
     compare.a.tint = compare.tinted ? TINT_A : 0;
     compare.b.tint = compare.tinted ? TINT_B : 0;
     redrawDoc();
+    splitFollow();
     syncCompare();
     return compare.tinted;
   }
@@ -6561,81 +6520,141 @@ var NSO_MICROSCOPE = (function () {
   }
 
   /**
-   * SPLIT STACK: strictly a view, an extension of Side by side. The pair's interface layers pulled apart and laid out next to each other on plate 3 - ours
-   * in a row at the back, the reference in a row in front, layer 1 / 2 / 3 ... in columns - every layer at one height, in the frame the pair is in (the
-   * reference shifted over ours as Overlay would, so a layer sits in its column as it sits over its partner). No Measure, no Overlay, no other screen.
-   * The pair itself stays (hidden, untouched); the button again joins the stack back. Back undoes it too.
+   * SPLIT STACK: strictly a view, an extension of Side by side. The pair's interface and transition layers pulled apart and laid out next to each other
+   * on plate 3, one column per layer: ours in a row at the back, the reference in a row in front, layer 1 at the left, every layer at one height. A column
+   * pairs ours with the reference's layer within SPLIT_PAIR_MM of its Z (a layer only one side has stands in a column alone). The pair itself stays, hidden:
+   * Overlay, Side by side, the nudges, Colours and Measure act on it as ever, and the layers follow (overlaid, a column's two layers lie over each other).
+   * The stops beside the slider are these columns, not Z levels: a click shows that column alone, the same stop again shows all. The button again joins them.
    */
-  var SPLIT_GAP_MM = 3;
+  var SPLIT_GAP_MM = 3, SPLIT_PER_BAND = 6, SPLIT_PAIR_MM = 0.15, SPLIT_KIND = /interface|transition/i;
   function splitLayers(o) {
     var by = {};
     (o.moves || []).forEach(function (m) {
-      if (!m.feature || !/interface/i.test(m.feature)) return;
-      var k = Math.round(m.z * 1000);
-      (by[k] || (by[k] = { z: m.z, moves: [] })).moves.push(m);
+      if (!m.feature || !SPLIT_KIND.test(m.feature)) return;
+      var k = Math.round(m.z * 1000), q = by[k] || (by[k] = { z: m.z, moves: [], i: 0, t: 0 });
+      q.moves.push(m);
+      if (/interface/i.test(m.feature)) q.i++; else q.t++;
     });
-    return Object.keys(by).map(Number).sort(function (p, q) { return p - q; }).map(function (k) { return by[k]; });
+    return Object.keys(by).map(Number).sort(function (p, q) { return p - q; }).map(function (k) { by[k].kind = by[k].i >= by[k].t ? 'interface' : 'transition'; return by[k]; });
+  }
+  /** Ours' layers and the reference's, paired by Z into columns (bottom to top): [{ a: layer|null, b: layer|null }]. */
+  function splitColumns(La, Lb) {
+    var cols = [], i = 0, j = 0;
+    while (i < La.length || j < Lb.length) {
+      var a = La[i], b = Lb[j];
+      if (a && b && Math.abs(a.z - b.z) <= SPLIT_PAIR_MM) { cols.push({ a: a, b: b }); i++; j++; }
+      else if (a && (!b || a.z < b.z)) { cols.push({ a: a, b: null }); i++; }
+      else { cols.push({ a: null, b: b }); j++; }
+    }
+    return cols;
+  }
+  function splitDrop() {
+    var sp = compare && compare.split;
+    if (!sp || !sp.pieces.length || !doc) return;
+    sp.pieces.forEach(dropPieceGeometry);
+    doc.objects = doc.objects.filter(function (o) { return sp.pieces.indexOf(o) < 0; });
+    sp.pieces = []; sp.cols = [];
+  }
+  /** Lay the columns out from the pair as it is now (overlaid or not, nudged or not). */
+  function splitBuild() {
+    if (!compareLive() || !compare.split) return null;
+    if (plateName !== 'cmp') showPlate('cmp');
+    var sp = compare.split;
+    splitDrop();
+    var La = splitLayers(compare.a), Lb = splitLayers(compare.b), cols = splitColumns(La, Lb);
+    if (!cols.length) return null;
+    // the reference over ours as Overlay would, in the numbers (already so once overlaid)
+    var sx = 0, sy = 0;
+    if (!compare.overlaid) {
+      var ba = partBox(compare.a), bb = partBox(compare.b);
+      if (ba && bb) { sx = (ba.box.x0 + ba.box.x1) / 2 - (bb.box.x0 + bb.box.x1) / 2; sy = (ba.box.y0 + ba.box.y1) / 2 - (bb.box.y0 + bb.box.y1) / 2; }
+    }
+    var x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, z0 = Infinity, items = [];
+    cols.forEach(function (c, ci) {
+      [['a', 0, 'Ours', TINT_A, 0, 0, compare.a], ['b', 1, 'Reference', TINT_B, sx, sy, compare.b]].forEach(function (R) {
+        var L = c[R[0]]; if (!L) return;
+        var mv = L.moves.map(function (m) { var q = Object.assign({}, m); q.x0 += R[4]; q.x1 += R[4]; q.y0 += R[5]; q.y1 += R[5]; return q; });
+        var built = window.NSOGcodeLines.buildLineGeometry(mv);
+        if (!built || built.positions.length < 9) return;
+        var e = soupExtent(built.positions);
+        x0 = Math.min(x0, e.x0); x1 = Math.max(x1, e.x1); y0 = Math.min(y0, e.y0); y1 = Math.max(y1, e.y1); z0 = Math.min(z0, e.z0);
+        items.push({ col: ci, row: R[1], z: L.z, kind: L.kind, spec: { name: R[2] + ' ' + (ci + 1) + '/' + cols.length + '  z ' + L.z.toFixed(2) + ' ' + L.kind, from: doc.name, positions: built.positions, moves: mv, moveIds: built.moveIds, trisPerMove: built.trisPerMove, tint: compare.tinted ? R[3] : 0 } });
+      });
+    });
+    if (!items.length) return null;
+    var cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, px = (x1 - x0) + SPLIT_GAP_MM, py = (y1 - y0) + SPLIT_GAP_MM, n = cols.length;
+    var per = Math.min(n, SPLIT_PER_BAND), bands = Math.ceil(n / per), bandPitch = (compare.overlaid ? 1 : 2) * py + SPLIT_GAP_MM;      // a tall stack wraps: bands of ours-over-reference, from the back
+    sp.cols = cols.map(function (c) { return { pieces: [], za: c.a ? c.a.z : null, zb: c.b ? c.b.z : null, kind: (c.a || c.b).kind }; });
+    items.forEach(function (q) {
+      var at = soupAnchor(q.spec.positions), g = makeGhost(q.spec);
+      var rowY = compare.overlaid ? 0 : (q.row === 0 ? 1 : -1) * py / 2, band = Math.floor(q.col / per), cc = q.col % per;
+      var ox = (cc - (per - 1) / 2) * px + (at.x - cx), oy = ((bands - 1) / 2 - band) * bandPitch + rowY + (at.y - cy);
+      var o = setDownOn(g, new THREE.Vector3(ox, z0, -oy), null);
+      if (!o || Array.isArray(o)) return;
+      if (compare.overlaid) o.alpha = OVERLAY_ALPHA;
+      sp.pieces.push(o); sp.cols[q.col].pieces.push(o);
+    });
+    splitApplySolo();
+    pieceRefresh();
+    syncZRangeUI();
+    return sp.pieces;
+  }
+  /** Only the solo column's pieces show (the pair stays hidden whatever); none solo, all show. */
+  function splitApplySolo() {
+    var sp = compare && compare.split;
+    if (!sp) return;
+    sp.hidden.forEach(function (nm) { HIDDEN.add(nm); });
+    sp.cols.forEach(function (c, k) { c.pieces.forEach(function (o) { if (sp.solo != null && sp.solo !== k) HIDDEN.add(o.name); else HIDDEN.delete(o.name); }); });
+  }
+  /** A stop: that column alone; the same stop again, all of them. Nothing of the slider moves. */
+  function splitSolo(k) {
+    var sp = compare && compare.split;
+    if (!sp || !sp.cols[k]) return null;
+    if (plateName !== 'cmp') showPlate('cmp');
+    sp.solo = sp.solo === k ? null : k;
+    splitApplySolo();
+    pieceRefresh();
+    syncZRangeUI();
+    compareFrame();                                  // the camera goes to the layer, or back to the whole split
+    syncCompare();
+    var c = sp.cols[k];
+    say(sp.solo == null ? 'All layers of the split stack shown.' : 'Layer ' + (k + 1) + ' of ' + sp.cols.length + ' alone (' + c.kind + '): ours z ' + (c.za != null ? c.za.toFixed(2) : '-') + ', reference z ' + (c.zb != null ? c.zb.toFixed(2) : '-') + '. Its stop again shows all.');
+    return sp.solo;
   }
   function compareSplit() {
     if (!compareLive()) { say('Split stack: set the two pieces side by side first.', true); return null; }
     if (compare.split) return compareJoin();
     if (!window.NSOGcodeLines || !compare.a.moves || !compare.b.moves) { say('Split stack: a piece has no toolpath moves to split (it is a mesh).', true); return null; }
     var La = splitLayers(compare.a), Lb = splitLayers(compare.b);
-    if (!La.length && !Lb.length) { say('Split stack: no interface layers in this pair.', true); return null; }
-    if (plateName !== 'cmp') showPlate('cmp');
-    // the reference over ours, as Overlay would (outlines' centres), in the numbers only
-    var ba = partBox(compare.a), bb = partBox(compare.b), sx = 0, sy = 0;
-    if (ba && bb) { sx = (ba.box.x0 + ba.box.x1) / 2 - (bb.box.x0 + bb.box.x1) / 2; sy = (ba.box.y0 + ba.box.y1) / 2 - (bb.box.y0 + bb.box.y1) / 2; }
-    var rows = [{ who: 'Ours', tint: TINT_A, layers: La, dx: 0, dy: 0 }, { who: 'Reference', tint: TINT_B, layers: Lb, dx: sx, dy: sy }];
-    var x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, z0 = Infinity, specs = [];
-    rows.forEach(function (R, ri) {
-      R.layers.forEach(function (L, li) {
-        var mv = L.moves.map(function (m) { var c = Object.assign({}, m); c.x0 += R.dx; c.x1 += R.dx; c.y0 += R.dy; c.y1 += R.dy; return c; });
-        var built = window.NSOGcodeLines.buildLineGeometry(mv);
-        if (!built || built.positions.length < 9) return;
-        var e = soupExtent(built.positions);
-        x0 = Math.min(x0, e.x0); x1 = Math.max(x1, e.x1); y0 = Math.min(y0, e.y0); y1 = Math.max(y1, e.y1); z0 = Math.min(z0, e.z0);
-        specs.push({ ri: ri, li: li, n: R.layers.length, z: L.z, R: R, spec: { name: R.who + ' ' + (li + 1) + '/' + R.layers.length + '  z ' + L.z.toFixed(2), from: doc.name, positions: built.positions, moves: mv, moveIds: built.moveIds, trisPerMove: built.trisPerMove, tint: R.tint } });
-      });
-    });
-    if (!specs.length) { say('Split stack: the interface layers have no lines to draw.', true); return null; }
-    var cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, px = (x1 - x0) + SPLIT_GAP_MM, py = (y1 - y0) + SPLIT_GAP_MM;
-    var cols = Math.max(La.length, Lb.length), pieces = [];
-    specs.forEach(function (q) {
-      var at = soupAnchor(q.spec.positions), g = makeGhost(q.spec);
-      var ox = (q.li - (cols - 1) / 2) * px + (at.x - cx), oy = (q.ri === 0 ? 1 : -1) * py / 2 + (at.y - cy);
-      var o = setDownOn(g, new THREE.Vector3(ox, z0, -oy), null);
-      if (o && !Array.isArray(o)) pieces.push(o);
-    });
-    if (!pieces.length) { say('Split stack: the layers could not be set down on plate 3.', true); return null; }
-    var hid = [compare.a.name, compare.b.name];
-    hid.forEach(function (n) { HIDDEN.add(n); });
-    compare.split = { pieces: pieces, hidden: hid };
+    if (!La.length && !Lb.length) { say('Split stack: no interface or transition layers in this pair.', true); return null; }
+    compare.split = { pieces: [], cols: [], hidden: [compare.a.name, compare.b.name], solo: null };
+    var pieces = splitBuild();
+    if (!pieces || !pieces.length) { compare.split = null; say('Split stack: the layers could not be set down on plate 3.', true); return null; }
     setSelection([], 'pick');
-    pieceRefresh();
     var cmpNow = compare;
     pushStep(function () { return compare === cmpNow && !!cmpNow.split && !!compareJoin(); });
     compareFrame();
     syncCompare();
-    say('Stack split on plate 3: ' + La.length + ' interface layer' + (La.length === 1 ? '' : 's') + ' of Plate 1 (orange, back row) and ' + Lb.length + ' of Plate 2 (blue, front row), layer 1 at the left. The button again joins them.');
+    say('Stack split on plate 3: ' + compare.split.cols.length + ' layers (interface and transition), ours in the back row (orange), the reference in front (blue), bottom layer at the left, wrapping to the next band after 6. Overlay, Measure and the nudges work as before; a stop beside the slider shows one layer alone. The button again joins them.');
     return pieces;
   }
   function compareJoin() {
     if (!compareLive() || !compare.split) return null;
-    var sp = compare.split, d = doc && plateName === 'cmp' ? doc : plateDoc('cmp');
     if (plateName !== 'cmp') showPlate('cmp');
-    d = doc;
-    sp.pieces.forEach(dropPieceGeometry);
-    d.objects = d.objects.filter(function (o) { return sp.pieces.indexOf(o) < 0; });
-    sp.hidden.forEach(function (n) { HIDDEN.delete(n); });
+    var sp = compare.split;
+    splitDrop();
+    sp.hidden.forEach(function (nm) { HIDDEN.delete(nm); });
     compare.split = null;
     if (sizePlates()) placePlates();
     pieceRefresh();
+    syncZRangeUI();
     compareFrame();
     syncCompare();
-    say('Stack joined: the pair is side by side again, as it was.');
+    say('Stack joined: the pair is as it was.');
     return true;
   }
+  /** After the pair changed (Overlay, Side by side, a nudge, Colours): the layers follow it. */
+  function splitFollow() { if (compare && compare.split) splitBuild(); }
 
   /** A small "Copied" bubble on the button that was pressed, gone after a moment. */
   function bubble(btn, msg, bad) {
@@ -7189,6 +7208,7 @@ var NSO_MICROSCOPE = (function () {
     hidden: function () { return doc && doc.kind === 'toolpath' ? Array.from(FEATURE_OFF) : (HIDDEN ? Array.from(HIDDEN) : []); },
     groups: function () { return doc ? Object.keys(doc.groups) : []; },
     getDoc: function () { return doc; },
+    shownPieces: function () { return doc && doc.kind === 'mesh' ? shownObjects().map(function (o) { return o.name; }) : []; },
     // --- the two plates (docs/GSCOPE.md) ---
     plate: function () { return plateName; },
     showPlate: showPlate,
