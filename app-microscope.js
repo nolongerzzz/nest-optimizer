@@ -5981,6 +5981,7 @@ var NSO_MICROSCOPE = (function () {
     setDisabled($('ms-compare-diff'), !live);
     setDisabled($('ms-compare-diff-copy'), !(live && compare.report));
     setDisabled($('ms-compare-diff-fold'), !(live && compare.report));
+    setDisabled($('ms-compare-stacks'), !(live && compare.report && compare.report.stacks && compare.report.stacks.length));
     ['nx-', 'nx+', 'ny-', 'ny+', 'nz-', 'nz+'].forEach(function (k) { setDisabled($('ms-compare-' + k), !live); });
     if (tn) { tn.classList.toggle('active', !!(live && compare.tinted)); tn.setAttribute('aria-pressed', live && compare.tinted ? 'true' : 'false'); }
     if (!rd) return;
@@ -6468,6 +6469,33 @@ var NSO_MICROSCOPE = (function () {
     });
   }
 
+  /**
+   * SPLIT STACK: the measurement's stacks split into their plates, side by side. A full-window sheet over the viewport: a stack picker, then one card per plate,
+   * bottom to top - ours | the reference | both laid over each other - so the numbers in the Measure panel can be checked against the lines themselves.
+   * The drawing is nso-gscope-diff.js's (platesHtml); Escape or Close puts the sheet away.
+   */
+  function comparePlates(stackIdx) {
+    var D = window.NSOCompareDiff, rep = compareLive() && compare.report;
+    if (!D || !D.platesHtml || !rep || !rep.stacks || !rep.stacks.length) { say('Split stack: Measure first - the stacks come from the measurement.', true); return false; }
+    var old = $('ms-plates-sheet'); if (old) old.remove();
+    var sheet = document.createElement('div'); sheet.id = 'ms-plates-sheet'; sheet.setAttribute('role', 'dialog'); sheet.setAttribute('aria-label', 'Plates of each stack, side by side');
+    sheet.style.cssText = 'position:fixed;inset:0;z-index:100000;background:#f3f3f7;overflow:auto;padding:12px 14px;color:#222';
+    var bar = document.createElement('div'); bar.style.cssText = 'display:flex;gap:10px;align-items:center;margin:0 0 10px;position:sticky;top:0;background:#f3f3f7;padding:4px 0;z-index:1';
+    var ttl = document.createElement('b'); ttl.textContent = 'Plates, side by side'; bar.appendChild(ttl);
+    var sel = document.createElement('select'); sel.id = 'ms-plates-stack'; sel.setAttribute('aria-label', 'Stack');
+    rep.stacks.forEach(function (q, i) { var o = document.createElement('option'); o.value = String(i); o.textContent = 'Stack ' + (i + 1) + ' at X ' + q.x.toFixed(1) + ' Y ' + q.y.toFixed(1) + ' (' + (q.plates ? q.plates.length : 0) + ' plates' + (q.flags.length ? ', flagged' : '') + ')'; sel.appendChild(o); });
+    bar.appendChild(sel);
+    var close = document.createElement('button'); close.type = 'button'; close.id = 'ms-plates-close'; close.textContent = 'Close'; close.style.marginLeft = 'auto'; bar.appendChild(close);
+    var body = document.createElement('div'); body.id = 'ms-plates-body';
+    sheet.appendChild(bar); sheet.appendChild(body); document.body.appendChild(sheet);
+    var show = function () { body.innerHTML = D.platesHtml(rep, { stack: +sel.value || 0 }); sheet.scrollTop = 0; };
+    var shut = function () { document.removeEventListener('keydown', onKey, true); sheet.remove(); };
+    var onKey = function (e) { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); shut(); } };
+    sel.addEventListener('change', show); close.addEventListener('click', shut); document.addEventListener('keydown', onKey, true);
+    sel.value = String(stackIdx || 0); show();
+    return true;
+  }
+
   /** A small "Copied" bubble on the button that was pressed, gone after a moment. */
   function bubble(btn, msg, bad) {
     if (!btn || !btn.parentNode) return;
@@ -6779,6 +6807,7 @@ var NSO_MICROSCOPE = (function () {
     bind('ms-compare-diff', 'click', function () { compareDiff(); });
     bind('ms-compare-diff-copy', 'click', function () { compareCopy(); });
     bind('ms-compare-diff-fold', 'click', function () { compareFold(); });
+    bind('ms-compare-stacks', 'click', function () { comparePlates(); });
     bind('ms-compare-overlay', 'click', function () { compareOverlay(); });
     bind('ms-compare-side', 'click', function () { compareSideBySide(); });
     bind('ms-compare-restore', 'click', function () { compareClear(); });
@@ -6914,6 +6943,7 @@ var NSO_MICROSCOPE = (function () {
     compareClear: compareClear,
     compareDiff: compareDiff,
     compareFold: compareFold,
+    comparePlates: function (i) { return comparePlates(i); },
     compareReport: function () { return compareLive() ? compare.report || null : null; },
     compareRestore: compareClear,
     compareState: function () {

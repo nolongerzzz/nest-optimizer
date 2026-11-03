@@ -214,6 +214,13 @@ withApp(async (page, logs) => {
     const r = await page.evaluate(() => { const M = NSO_MICROSCOPE, rep = M.compareReport(), rd = document.getElementById('ms-compare-diff-read');
       return { has: !!rep, layers: rep && rep.meta.layers, shown: !rd.hidden, text: rd.textContent.slice(0, 120), offset: rep && rep.meta.blueOffsetMm, partOnly: rep && [rep.classes.part.onlyAMm2, rep.classes.part.onlyBMm2], both: rep && rep.classes.part.bothMm2, copy: document.getElementById('ms-compare-diff-copy').disabled }; });
     check('Measure reads the overlaid pair: a report, shown as text, Copy JSON on', r.has && r.shown && r.layers > 0 && r.copy === false && /^A = Plate 1/.test(r.text), J(r));
+    const pl = await page.evaluate(() => ({ btn: !!document.getElementById('ms-compare-stacks'), dis: document.getElementById('ms-compare-stacks').disabled, n: (NSO_MICROSCOPE.compareReport().stacks || []).length, sheet: !!document.getElementById('ms-plates-sheet') }));
+    check('Split stack sits beside Measure and is on only when the measurement found plate stacks (this pair is parts: off, no sheet)', pl.btn && (pl.n === 0 ? pl.dis === true : pl.dis === false) && pl.sheet === false, J(pl));
+    await page.click('#ms-compare-stacks');
+    const sh = await page.evaluate(() => { const sh = document.getElementById('ms-plates-sheet'); return { open: !!sh, cards: sh ? sh.querySelectorAll('.pl-card').length : 0, svgs: sh ? sh.querySelectorAll('.pl-card svg').length : 0, picker: sh ? sh.querySelectorAll('#ms-plates-stack option').length : 0 }; });
+    check('Split stack opens a sheet: the stack split into plate cards, three drawings each (ours, reference, both), a stack picker', sh.open && sh.cards > 0 && sh.svgs === sh.cards * 3 && sh.picker > 0, J(sh));
+    await page.keyboard.press('Escape');
+    check('...and Escape puts it away', await page.evaluate(() => !document.getElementById('ms-plates-sheet')));
     check('...the same file on both plates, overlaid: what plate 1 holds is wholly in plate 2\'s (none only A\'s), and they share material', r.partOnly[0] < 0.5 && r.both > 5, J([r.partOnly, r.both]));
     await page.click('#ms-compare-nx\\+');
     const stale = await page.evaluate(() => ({ rep: NSO_MICROSCOPE.compareReport(), txt: document.getElementById('ms-compare-diff-read').textContent }));

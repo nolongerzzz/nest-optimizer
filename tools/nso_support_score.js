@@ -107,7 +107,7 @@ function scoreOf(rep) {
   app.card.angle(+(arg('--angle') || process.env.NSO_SCORE_ANGLE || 30));          // the overhang angle: Bambu's own default (30) - the app's 35 grows every footprint's rim past Bambu's
   app.click('btn-sup-all'); await app.until(() => app.card.busy()); await app.until(() => !app.card.busy());
   const WASM = await SL.loadKernel({});
-  const rows = {};
+  const rows = {}, reps = {};
   for (let i = 0; i < objs.length; i++) {
     const nm = objs[i].name.replace(/\.stl$/i, '');
     if (only && !nm.includes(only)) continue;
@@ -122,7 +122,7 @@ function scoreOf(rep) {
     const shifted = theirs.map(m => Object.assign({}, m, { x0: m.x0 - cb[0] + ca[0], x1: m.x1 - cb[0] + ca[0], y0: m.y0 - cb[1] + ca[1], y1: m.y1 - cb[1] + ca[1] }));
     if (arg('--dump')) { fs.mkdirSync(arg('--dump'), { recursive: true }); fs.writeFileSync(path.join(arg('--dump'), nm.replace(/\W+/g, '_') + '.json'), JSON.stringify({ ours: ours, theirs: shifted })); }
     const rep = D.compute(ours, shifted, {});
-    rows[nm] = scoreOf(rep);
+    rows[nm] = scoreOf(rep); reps[nm] = rep;
     // the footprint: every line of the plate drawn 1.6 mm wide, so lines 0.46 apart are one sheet, and a different zig-zag in the same ribbon is the same ribbon
     const fat = (ms) => ms.filter(m => /^Support (interface|transition)$/.test(m.feature)).map(m => Object.assign({}, m, { width: 1.6 }));
     const rf = D.compute(fat(ours), fat(shifted), {});
@@ -161,6 +161,14 @@ function scoreOf(rep) {
         '  IoU ' + (p.lineIoU != null ? p.lineIoU.toFixed(2) : '-') + (p.dRadiusMm != null ? '  r ' + (p.dRadiusMm > 0 ? '+' : '') + p.dRadiusMm.toFixed(2) : '') + (p.flags.length ? '   <-- ' + p.flags.join(', ') : '')));
     });
   });
+  // --plates-html dir: one page per piece, every stack's plates side by side (ours | reference | both) - the same view the app's Measure panel opens
+  if (arg('--plates-html')) {
+    fs.mkdirSync(arg('--plates-html'), { recursive: true });
+    Object.keys(reps).forEach(nm => {
+      const rep = reps[nm], body = rep.stacks.map((q, i) => D.platesHtml(rep, { stack: i })).join('<hr>');
+      fs.writeFileSync(path.join(arg('--plates-html'), nm.replace(/\W+/g, '_') + '.html'), '<!doctype html><meta charset="utf-8"><title>' + nm + ' plates</title><body style="margin:12px;background:#f3f3f7">' + body);
+    });
+  }
   const out = arg('--json');
   if (out) fs.writeFileSync(out, JSON.stringify(rows, null, 1));
 })().then(() => process.exit(0)).catch(e => { console.error(e); process.exit(1); });

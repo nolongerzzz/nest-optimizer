@@ -482,7 +482,7 @@
         var len = { interface: 0, transition: 0 }, all = [];
         ['interface', 'transition'].forEach(function (c) { (L.cls[c] || []).forEach(function (m) { if (!inReg(m)) return; len[c] += m.length || Math.hypot(m.x1 - m.x0, m.y1 - m.y0); all.push(m); }); });
         var ang = hatchAngle(all);
-        return { n: n, z: L.z, h: L.h || 0.2, lenMm: len.interface + len.transition, kind: len.interface >= len.transition ? 'interface' : 'transition', iShare: len.interface / Math.max(1e-9, len.interface + len.transition), ang: ang && ang.share >= 0.3 ? ang.deg : null };
+        return { moves: all, n: n, z: L.z, h: L.h || 0.2, lenMm: len.interface + len.transition, kind: len.interface >= len.transition ? 'interface' : 'transition', iShare: len.interface / Math.max(1e-9, len.interface + len.transition), ang: ang && ang.share >= 0.3 ? ang.deg : null };
       };
       plateRows.forEach(function (pr) {
         var a = sideOf(pr.A, pr.mA), b = sideOf(pr.B, pr.mB);
@@ -502,6 +502,8 @@
           if (lr > 1.25 || lr < 0.8) e.flags.push('lines x' + lr.toFixed(2));
           if (e.lineIoU != null && e.lineIoU < 0.6) e.flags.push('line IoU ' + e.lineIoU.toFixed(2));
         } else e.flags.push(a ? 'ours only' : 'reference only');
+        var segs = function (q) { return q ? q.moves.map(function (m) { return [r2(m.x0), r2(m.y0), r2(m.x1), r2(m.y1), m.width || 0.45, /interface/i.test(m.feature) ? 1 : 0]; }) : []; };
+        Object.defineProperty(e, 'draw', { value: { A: segs(a), B: segs(b) }, enumerable: false });      // the lines themselves, for the side by side view; kept out of the JSON
         out.push(e);
       });
       return out;
@@ -537,6 +539,7 @@
         if (st.A && st.B && st.A.layers !== st.B.layers) st.flags.push('layers ' + st.A.layers + ' vs ' + st.B.layers);
         if (!st.A) st.flags.push('ours has none'); if (!st.B) st.flags.push('reference has none');
         st.plates = platesOf(R);
+        Object.defineProperty(st, 'box', { value: [x0, y0, x1, y1], enumerable: false });
         st._area = Math.max(T.A.n, T.B.n);
         stacks.push(st);
       });
@@ -574,6 +577,52 @@
              lone: { aLacks: stackBlobs(loneRaw.aLacks).map(shape).sort(byArea).slice(0, 10), bLacks: stackBlobs(loneRaw.bLacks).map(shape).sort(byArea).slice(0, 10) },
              angles: { compared: angCmp, mismatched: angBad.length, items: angBad.slice(0, 24) },
              strays: { A: stackBlobs(strayRaw.A).map(shape).sort(byArea).slice(0, 10), B: stackBlobs(strayRaw.B).map(shape).sort(byArea).slice(0, 10) } };
+  }
+
+
+  /**
+   * THE PLATES SIDE BY SIDE: one card per plate of a stack, bottom to top, each with ours | reference | both laid over each other - the same frame on every
+   * card, so the numbers can be checked against the lines. Returns HTML (inline SVG, a <style> of its own); `opts.stack` is the stack's index in rep.stacks.
+   */
+  var PLATE_CSS = '.pl-wrap{font:13px/1.35 system-ui,sans-serif;color:#222}.pl-head{margin:0 0 6px;font-weight:600}.pl-legend{margin:0 0 10px;color:#555}' +
+    '.pl-legend b.o{color:#e8741a}.pl-legend b.b{color:#1f6fd6}.pl-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(620px,1fr));gap:12px}' +
+    '.pl-card{border:1px solid #ccd;border-radius:6px;padding:6px 8px;background:#fff}.pl-card.bad{border-color:#d33}.pl-title{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}' +
+    '.pl-title b{font-size:14px}.pl-flag{color:#c22;font-weight:600}.pl-ok{color:#2a8a3a}.pl-stat{color:#555;font-size:12px;margin:2px 0 4px}' +
+    '.pl-row{display:flex;gap:4px}.pl-cell{flex:1;min-width:0}.pl-cell small{display:block;text-align:center;color:#666;font-size:11px}' +
+    '.pl-cell svg{width:100%;height:auto;background:#fafafa;border:1px solid #e3e3ea;display:block}.pl-ov{mix-blend-mode:multiply}';
+  function platesHtml(rep, opts) {
+    opts = opts || {};
+    var st = rep && rep.stacks && rep.stacks[opts.stack || 0];
+    if (!st || !st.plates || !st.plates.length || !st.box) return '<div class="pl-wrap">No plates to show.</div>';
+    var M = 1.0, bx = st.box, vx = bx[0] - M, vy = -(bx[3] + M), vw = bx[2] - bx[0] + 2 * M, vh = bx[3] - bx[1] + 2 * M;
+    var f = function (v) { return (Math.round(v * 100) / 100).toString(); };
+    var path = function (segs, kind) {
+      var d = '';
+      segs.forEach(function (q) { if (q[5] === kind) d += 'M' + f(q[0]) + ' ' + f(-q[1]) + 'L' + f(q[2]) + ' ' + f(-q[3]); });
+      return d;
+    };
+    var layer = function (segs, col) {                                          // transition lines paler, interface lines full: the two read apart
+      var w = segs.length ? segs[0][4] : 0.45, di = path(segs, 1), dt = path(segs, 0), o = '';
+      if (dt) o += '<path d="' + dt + '" stroke="' + col + '" stroke-opacity="0.55" stroke-width="' + f(w) + '" stroke-linecap="round" fill="none"/>';
+      if (di) o += '<path d="' + di + '" stroke="' + col + '" stroke-width="' + f(w) + '" stroke-linecap="round" fill="none"/>';
+      return o;
+    };
+    var OC = '#e8741a', BC = '#1f6fd6';
+    var svg = function (inner, cls) { return '<svg viewBox="' + f(vx) + ' ' + f(vy) + ' ' + f(vw) + ' ' + f(vh) + '" xmlns="http://www.w3.org/2000/svg"' + (cls ? ' class="' + cls + '"' : '') + '>' + inner + '</svg>'; };
+    var out = '<style>' + PLATE_CSS + '</style><div class="pl-wrap"><div class="pl-head">Stack at X ' + st.x.toFixed(1) + ' Y ' + st.y.toFixed(1) + ' &mdash; ' + st.sizeMm[0].toFixed(1) + ' x ' + st.sizeMm[1].toFixed(1) + ' mm, ' + st.plates.length + ' plates, bottom to top' +
+      (st.flags.length ? ' <span class="pl-flag">&larr; ' + st.flags.join(', ') + '</span>' : '') + '</div>' +
+      '<div class="pl-legend"><b class="o">orange</b> = ours, <b class="b">blue</b> = reference, third picture both together (where they agree it is dark). Solid lines = interface, pale = transition. Same frame on every card.</div><div class="pl-grid">';
+    st.plates.forEach(function (p) {
+      var dr = p.draw || { A: [], B: [] };
+      var kinds = (p.kindA || '-') + ' / ' + (p.kindB || '-');
+      out += '<div class="pl-card' + (p.flags.length ? ' bad' : '') + '"><div class="pl-title"><b>plate ' + p.n + '</b><span>Z ' + (p.zA != null ? p.zA.toFixed(2) : '-') + ' | ' + (p.zB != null ? p.zB.toFixed(2) : '-') + '</span><span>' + kinds + '</span>' +
+        (p.flags.length ? '<span class="pl-flag">' + p.flags.join(', ') + '</span>' : '<span class="pl-ok">matches</span>') + '</div>' +
+        '<div class="pl-stat">area ' + p.aMm2.toFixed(1) + ' | ' + p.bMm2.toFixed(1) + ' mm2 &middot; lines ' + p.lenA.toFixed(0) + ' | ' + p.lenB.toFixed(0) + ' mm &middot; hatch ' + (p.angA != null ? Math.round(p.angA) : '-') + ' | ' + (p.angB != null ? Math.round(p.angB) : '-') +
+        ' deg &middot; line IoU ' + (p.lineIoU != null ? p.lineIoU.toFixed(2) : '-') + (p.dRadiusMm != null ? ' &middot; outline ' + (p.dRadiusMm > 0 ? '+' : '') + p.dRadiusMm.toFixed(2) + ' mm' : '') + '</div>' +
+        '<div class="pl-row"><div class="pl-cell"><small>ours</small>' + svg(layer(dr.A, OC)) + '</div><div class="pl-cell"><small>reference</small>' + svg(layer(dr.B, BC)) + '</div>' +
+        '<div class="pl-cell"><small>both</small>' + svg('<g class="pl-ov">' + layer(dr.A, OC) + '</g><g class="pl-ov" opacity="0.8">' + layer(dr.B, BC) + '</g>') + '</div></div></div>';
+    });
+    return out + '</div></div>';
   }
 
   var LABEL = { part: 'part', support: 'support (tree)', interface: 'interface', transition: 'transition' };
@@ -698,5 +747,5 @@
     return B;
   }
 
-  return { compute: compute, text: text, view: view, classOf: classOf, edt2: edt2Full, CLASSES: CLASSES };
+  return { compute: compute, text: text, view: view, platesHtml: platesHtml, classOf: classOf, edt2: edt2Full, CLASSES: CLASSES };
 });
