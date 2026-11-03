@@ -870,6 +870,7 @@
   var REGION_TALL_TRY_MM = [0.05, 0.1, 0.2];     /* a curved face's taller plate (see shellPass): the extra distance from the footprint's edge, per attempt (0.05 first: the Circular wants the least, the Sphere 0.1) */
   var REGION_TALL_TOL_MM = 0.04;           /* ...and the clearance it may fall short of the gap by (the Sphere's and the Negative Spheres' taller plate comes within 0.14 - 0.17 of the part: so does Bambu's) */
   var REGION_GROW_MM = 0.3;
+  var REGION_ROUND_MM = 0.75;
   var REGION_ANGLE_REF = 35, REGION_ANGLE_SPAN = 5;   /* the growth and the drop below are Bambu's 30 deg against our 35: at 35 deg the footprint's rim is already out to where Bambu's is (none), at 30 and under, all of it */
   var REGION_BOWL_MM = 0.1;   /* a footprint whose rim stands this much above its mean is a bowl (a sphere's underside), not a cavity's ceiling */
   var REGION_CREST_MIN_MM = 3, REGION_CREST_MAX_W_MM = 0.9;   /* a band with nothing laid whose mask is this long and no wider than this is a ridge's crest: one line along it */
@@ -1772,6 +1773,12 @@
         for (var q1 = 0; q1 < N; q1++) if (fp[q1] === 1) fp[q1] = 1;
         var inRegion = new Uint8Array(N);
         for (var q2 = 0; q2 < N; q2++) inRegion[q2] = fp[q2] && !isNaN(S[q2]) ? 1 : 0;
+        if (curvedFace && REGION_ROUND_MM > 0) {      /* Bambu's plate corners are rounded: the footprint is opened by a disc (its sharp tips and ears are not plate) */
+          var dR = edtCells(inRegion, nx, ny), erR = new Uint8Array(N), rr = REGION_ROUND_MM / CELLS;
+          for (var qr = 0; qr < N; qr++) erR[qr] = inRegion[qr] && dR[qr] - 0.5 >= rr ? 0 : 1;      /* 1 = not in the eroded set */
+          var dR2 = edtCells(erR, nx, ny);
+          for (var qr2 = 0; qr2 < N; qr2++) if (inRegion[qr2] && dR2[qr2] > rr + 0.5) inRegion[qr2] = 0;
+        }
         if (range <= REGION_FLAT_MM) for (var q3 = 0; q3 < N; q3++) if (inRegion[q3]) S[q3] = zs[0];
         tellP(Math.round(0.3 * mine.length));          /* three tenths after the fill, */
         var dEdge = edtCells(inRegion, nx, ny), usable = new Uint8Array(N), nUse = 0;
