@@ -3231,10 +3231,11 @@ const CUT_BLADE_FIELDS = [['cut-blade-width', 'cut-blade-width-s', 'width'], ['c
                           ['cut-blade-kerf', 'cut-blade-kerf-s', 'kerf'],
                           ['cut-notch-width', 'cut-notch-width-s', 'nwidth'], ['cut-notch-depth', 'cut-notch-depth-s', 'ndepth']];
 
-/** How far each slider runs, from the piece in hand: the width and depth to a little past the piece's
-    biggest section dimension (so a blade can be made wider than the piece, to take it whole), the kerf
-    to 10 mm or half the piece's length. The number box takes anything past that, and the slider's range
-    grows to hold what it is given (syncCutBladeUI). */
+/** How far each slider runs, from the piece in hand - with room to breathe (the first version stopped the kerf and
+    notch width at 10 mm, and a 15 mm notch on a 30 mm piece could not be dialled): the width to twice the piece's
+    biggest section dimension (a blade made wider than the piece takes it whole), the depth to one and a half times
+    it, the kerf and notch width to three quarters of the piece's length; each at least 20 mm. The number box takes
+    anything past that, and the slider's range grows to hold what it is given (syncCutBladeUI). */
 function cutSliderMax(key) {
   const m = getActiveModel(), info = m ? getCutPlaneLocal(m) : null;
   let ext = 40, span = 40;
@@ -3243,10 +3244,10 @@ function cutSliderMax(key) {
     ext = Math.max.apply(null, [0, 1, 2].filter(i => i !== k).map(i => size.getComponent(i)));
     span = info.span;
   }
-  const up = v => Math.max(1, Math.ceil(v));
-  if (key === 'width') return up(ext + 2);
-  if (key === 'depth' || key === 'ndepth') return up(ext + 1);
-  return Math.max(1, Math.min(10, Math.floor(span / 2)));              // kerf, notch width
+  const room = v => Math.max(20, Math.ceil(v));
+  if (key === 'width') return room(ext * 2 + 2);
+  if (key === 'depth' || key === 'ndepth') return room(ext * 1.5 + 2);
+  return room(span * 0.75);                                               // kerf, notch width
 }
 
 /** The Blade rows of the Cut card, and Rotate piece, read off state. */

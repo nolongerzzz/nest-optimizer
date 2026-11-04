@@ -18,8 +18,10 @@ The Cut card's blade has three modes (the Blade row), and two switches above it.
 **Sizes are sliders.** Width, Depth and Kerf (Sized), and Notch width and Notch
 depth (Notch), are each a slider with a number box beside it; they are the same
 number, and the blade in the viewport and the readout follow as you drag. The
-slider's range comes from the piece (width and depth run a little past its
-biggest section dimension, kerf and notch width to 10 mm or half its length);
+slider's range comes from the piece, with room to breathe (width to twice its
+biggest section dimension, depth to 1.5 times it, kerf and notch width to three
+quarters of its length; each at least 20 mm, so a 15 mm notch or kerf is always
+within reach);
 the number box takes anything, and the slider's range grows to hold what it is
 given, so a slider never sits at its end while its box says something else.
 

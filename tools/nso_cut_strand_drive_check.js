@@ -219,8 +219,8 @@ withApp(async (page, logs) => {
   const wS = await rng('cut-blade-width-s'), dS = await rng('cut-blade-depth-s'), kS = await rng('cut-blade-kerf-s');
   check('Sized shows a slider for each of width, depth and kerf', wS.shown && dS.shown && kS.shown, JSON.stringify({ wS, dS, kS }));
   check('the sliders sit at the numbers in the boxes (60, 8, 1), never pegged short of them', wS.v === 60 && dS.v === 8 && kS.v === 1 && wS.max >= 60, JSON.stringify({ w: wS, d: dS, k: kS }));
-  check('their ranges follow the piece: width and depth run a little past its biggest section dimension (or to the number given, if more)',
-    wS.max === Math.max(Math.ceil(ext + 2), 60) && dS.max === Math.max(Math.ceil(ext + 1), 8), JSON.stringify({ ext: +ext.toFixed(2), wMax: wS.max, dMax: dS.max }));
+  check('their ranges have room to breathe: width to twice the piece\'s biggest section, depth to 1.5x, kerf to 3/4 of its length (or the number given)',
+    wS.max >= Math.max(60, Math.ceil(2 * ext)) && dS.max >= Math.ceil(1.5 * ext) && kS.max >= Math.ceil(0.75 * 40), JSON.stringify({ ext: +ext.toFixed(2), wMax: wS.max, dMax: dS.max, kMax: kS.max }));
   // The box's own three sizes (the cut frame can be turned, so its world-axis extent is not its size).
   const bladeBox = () => page.evaluate(() => { const p = state.cutHelper.children.find(c => c.userData.cutBlade).geometry.parameters;
     return [p.width, p.height, p.depth].map(v => +v.toFixed(3)).sort((a, b) => a - b); });
@@ -239,9 +239,14 @@ withApp(async (page, logs) => {
   await page.focus('#cut-blade-width');          // typing into the box, as a user does (the slider the mouse used loses focus)
   await page.evaluate(() => { const e = document.getElementById('cut-blade-width'); e.value = '500'; e.dispatchEvent(new Event('input')); e.dispatchEvent(new Event('change')); });
   check('typing past the slider\'s end still works: the box takes 500, and the slider\'s range grows to hold it', await page.evaluate(() => state.cutBlade.width === 500 && Number(document.getElementById('cut-blade-width-s').max) >= 500 && Number(document.getElementById('cut-blade-width-s').value) === 500));
+  // Reported: a 15 mm notch could not be dialled in - the notch width and kerf sliders stopped at 10.
+  await page.evaluate(() => { const e = document.getElementById('cut-blade-kerf-s'); e.value = '15'; e.dispatchEvent(new Event('input')); });
+  check('the kerf slider can be set to 15 mm', await page.evaluate(() => state.cutBlade.kerf === 15 && Number(document.getElementById('cut-blade-kerf').value) === 15 && Number(document.getElementById('cut-blade-kerf-s').max) >= 20));
   await setNotch(1, 1); await clickAt(crown);
   const nW = await rng('cut-notch-width-s'), nD = await rng('cut-notch-depth-s');
   check('Notch shows a slider for its width and its depth, and not the sized ones', nW.shown && nD.shown && !(await rng('cut-blade-width-s')).shown, JSON.stringify({ nW, nD }));
+  await page.evaluate(() => { const e = document.getElementById('cut-notch-width-s'); e.value = '15'; e.dispatchEvent(new Event('input')); });
+  check('the notch width slider can be set to 15 mm, and the readout says so', await page.evaluate(() => state.cutBlade.nwidth === 15 && Number(document.getElementById('cut-notch-width').value) === 15 && Number(document.getElementById('cut-notch-width-s').max) >= 20 && /15 wide/.test(document.getElementById('cut-readout').textContent)), await page.evaluate(() => document.getElementById('cut-readout').textContent));
   await page.evaluate(() => { const e = document.getElementById('cut-notch-width-s'); e.value = '2'; e.dispatchEvent(new Event('input')); });
   await cutOnce(); const VS2 = v0.vol - (await probe(id)).vol; await undo();
   check('the notch-width slider is the notch width: 2 takes twice the volume of 1 (within 12%)', Math.abs(VS2 / V11 - 2) < 0.24, 'ratio ' + (VS2 / V11).toFixed(3));

@@ -62,3 +62,9 @@ blade flying round the piece.
 
 Four suites that already fail on the commit before this work (`nso_rotate_rings_drive_check`, `nso_rotate_rings_steady_drive_check`,
 `nso_rotate_pivot_drive_check`, `nso_shell_v3_test`) are unchanged.
+
+### Fifth round (2026-11-04): room on the sliders
+
+A 15 mm notch could not be dialled in: the kerf and notch-width sliders stopped at 10 mm (`min(10, span/2)`). `cutSliderMax` now gives every slider room to breathe:
+width 2x the piece's biggest section, depth 1.5x, kerf and notch width 3/4 of its length, each at least 20 mm. The number box still takes anything and the
+range still grows to hold it. `nso_cut_strand_drive_check` (49 gates) sets a 15 mm kerf and a 15 mm notch width by slider.
