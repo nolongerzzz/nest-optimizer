@@ -8,7 +8,9 @@
 //   Reducer  New Ø and New bore (the new pipe's outside and bore, set apart:
 //            the same change to both keeps the wall), Transition (mm along
 //            the wall from the tube's Ø to the new), Run (mm of the new pipe
-//            straight on, 0 for none), Profile Straight or Trumpet -
+//            straight on, 0 for none), Profile Straight or Trumpet,
+//            Keep length (cut the transition and run into the wall so the
+//            tube ends where it did; its length rings are then not handles) -
 //            NSO_TubeEdge.reducer; the angles are derived, in the readout
 //   Roll     Radius, Angle (90 / 180 / 270 offered, any typed up to 360)
 //   Neck     Length, Δr (below 0 pinches, above 0 bulges), Profile Smooth or
@@ -112,6 +114,9 @@ function NSO_teDisplayToRaw(m, d) {
   return [d.x + o.x, -(d.z + o.z), d.y + o.y];
 }
 
+// Keep length ticked on the Reducer's card.
+function NSO_teKeepOn() { var el = NSO_teEl('chk-te-keep'); return !!(el && el.checked); }
+
 /* The card's numbers as NSO_tubeEdgeRaw opts. */
 function NSO_teOpts() {
   function num(id) { var el = NSO_teEl(id); return el && el.value !== '' ? +el.value : null; }
@@ -126,8 +131,12 @@ function NSO_teOpts() {
   }
   if (verb === 'reducer') {
     // Run: blank is 0 (no run); a blank Transition the engine asks for
-    return { verb: 'reducer', point: B.point, od2: num('inp-te-od2'), id2: num('inp-te-id2'), transitionMm: num('inp-te-trans'),
-             runMm: num('inp-te-run') || 0, profile: val('sel-te-profile', 'straight') };
+    var ro = { verb: 'reducer', point: B.point, od2: num('inp-te-od2'), id2: num('inp-te-id2'), transitionMm: num('inp-te-trans'),
+               runMm: num('inp-te-run') || 0, profile: val('sel-te-profile', 'straight') };
+    // Keep length: the transition and run are cut into the wall, the tube ends where it did
+    // (nso_tube_edge.js section 8). Left off the options when off, so they are what they were.
+    if (NSO_teKeepOn()) ro.keepLength = true;
+    return ro;
   }
   return { verb: verb, direction: val('sel-te-dir', 'out'), point: B.point, radius: num('inp-te-radius'), angle: num('inp-te-roll-angle') };
 }
@@ -269,6 +278,9 @@ function NSO_teWallsVal() { var el = NSO_teEl('sel-te-walls'); return el && el.v
 function NSO_teReducerGeom() {
   var B = NSO_teUI(), m = NSO_teModel();
   if (!m || !B.read || !B.read.ok || !B.read.end || B.readVerb !== 'end' || NSO_teVerb() !== 'reducer') return null;
+  // Keep length lays the section down the tube from the end, not out past it: the rings
+  // here stand beyond the end, so they are not drawn or grabbed - the numbers are typed
+  if (NSO_teKeepOn()) return null;
   var end = B.read.end;
   function num(id, d) { var el = NSO_teEl(id), v = el && el.value !== '' ? +el.value : NaN; return isFinite(v) ? v : d; }
   var od2 = num('inp-te-od2', 2 * end.Ro), id2 = num('inp-te-id2', 2 * end.Ri), T = Math.max(0, num('inp-te-trans', 0)), run = Math.max(0, num('inp-te-run', 0));
@@ -1007,7 +1019,7 @@ if (typeof document !== 'undefined') {
         B.keyHandle = null; B.keyLen = null; B.keyDia = null;
         NSO_teSyncRows(); NSO_tePreview();
       });
-      ['sel-te-dir', 'sel-te-walls', 'sel-te-profile', 'inp-te-od2', 'inp-te-id2', 'inp-te-trans', 'inp-te-run', 'inp-te-radius', 'inp-te-roll-angle',
+      ['sel-te-dir', 'sel-te-walls', 'sel-te-profile', 'chk-te-keep', 'inp-te-od2', 'inp-te-id2', 'inp-te-trans', 'inp-te-run', 'inp-te-radius', 'inp-te-roll-angle',
        'inp-te-neck-length', 'inp-te-neck-dr', 'sel-te-neck-profile'].forEach(function (id) {
         var el = NSO_teEl(id);
         if (el) el.addEventListener('change', NSO_tePreview);

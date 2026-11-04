@@ -2088,6 +2088,8 @@ select:focus, input:focus {
 .nso-rot-readout[hidden] { display: none; }
 /* The vertical-placement checkbox, and the column beside the piece. */
 .vp-flag-movevert { --flag-accent: #34d399; --flag-line: rgba(52,211,153,0.5); --flag-fill: rgba(52,211,153,0.16); }
+/* Tube edge's Keep length: the card's amber (TUBE_EDGE_RING_COLOR). */
+.vp-flag-tekeep { --flag-accent: #ffc83d; --flag-line: rgba(255,200,61,0.5); --flag-fill: rgba(255,200,61,0.16); }
 /* Positioned from script against the piece's projected position, so it is
    absolute within the viewport rather than laid out in the bar. */
 .move-vert-wrap {

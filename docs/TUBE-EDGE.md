@@ -859,3 +859,96 @@ Flags:
    tube's own: `Straight on`, until the OD ring moves.
 3. **"Pull"** in the mock is the next tool's button under the card. It is
    unchanged.
+
+## Keep length — the reducer cut into the tube (tube-keep-length, 2026-11-04)
+
+`nso_tube_edge.js` (section 8), `app-tube-edge.js`, `index.html`, `styles.css`.
+
+The Reducer adds its transition and its run beyond the end: a 40 mm tube with
+a 10 mm transition and a 4 mm run comes out 54 mm tall. **Keep length**
+(`keepLength: true` on `NSO_TubeEdge.reducer`, the **Keep length** box on the
+card) lays the same pipe back down the tube instead. The end ring takes the new
+Ø, the run goes down from it, the transition eases back to the tube's own Ø,
+and below that the wall is the tube's, untouched. **The piece ends where it
+did.** Off (the default, and left out of the options when off) the Reducer is
+byte-identical to what it was - the old Flare and Roll hashes still hold.
+
+**It is the Reducer, not a second construction.** The last D = Transition +
+Run mm of the wall are taken off at a plane square to the axis, the cut is
+capped with a flat annulus, and the Reducer runs on that cap as it would on any
+end: the same faces and stations, and the same gates and refusals (the wall
+floor, the bore limit, the clearance, topology and Pappus on that piece). Its
+new wall rises D mm from the cap, which is where the end stood. The result is
+then held to the **original** piece, on the output:
+
+| gate | held to |
+|---|---|
+| topology | open / non-manifold / flipped / zero-area may not rise, Euler unchanged, against the original |
+| volume | the change against Pappus for the new section swept round against the straight wall it replaced, within 0.5% (+ 1e-4 of the volume) |
+| the end plane | the piece's highest point along the axis within 2 µm of where it was |
+
+**The cut.** Every triangle across the plane is clipped to the side that stays;
+a new vertex on an edge is made once, keyed by the edge's two vertices (lower id
+to higher), so the triangles that share the edge share the vertex to the bit. A
+vertex within 0.5 µm of the plane is moved onto it. The cut ring is read back
+off the clipped triangles' own edges - two closed loops, one turning each way
+about the axis, or the verb refuses. Everything under the plane is copied bit
+for bit. The cut ring has a vertex mid-facet where the plane crosses a quad's
+diagonal; it is collinear, and the new wall carries it up its own radial line
+like any other.
+
+**The straight wall it needs.** From the end down to the plane, every triangle
+is the end face or a piece of the outside cylinder (normal square to the axis
+within 1e-3 and out, vertices at the end ring's radius within max(0.02 mm,
+2e-4·R)) or of the bore's. Anything else - a flange, a chamfer, a tapered
+stretch, a boss, a hole - ends the straight stretch there. **One nozzle width**
+of straight wall must be left under the cut. The cap's lean is then set to 0,
+not read: the scan has proved it, and the cut's float noise (1e-8 rad) would
+otherwise make the Reducer lay a station 3e-8 mm above the ring - a sliver
+(found by the first test, with the cut between two rings of a tube that has
+them).
+
+**The card.** One flag, **Keep length**, under Profile, amber. Ticked, the
+readout says `Expander, length kept: Ø44.62 / bore Ø34.47 at the end, then
+easing back to the tube's Ø40.62 / bore Ø30.47 over 30.0 mm (3.8° outside, 3.8°
+bore) · the tube stays 40.62 mm long · wall 5.08 → 5.07`. The Reducer's four
+rings stand *past* the end, so with the box ticked they are not drawn or
+grabbed (`NSO_teReducerGeom()` is null): the numbers are typed, and the arrow
+keys do nothing for the Reducer. The box is kept across Set, like the other
+fields.
+
+### Refusals, in words, the piece unchanged
+
+| case | words |
+|---|---|
+| Transition + Run too long for the tube (the screenshot's 44 mm on a 40.6 mm tube) | `Keep length cuts the transition and the run into the wall, and the tube is 40.6 mm long - Transition 44.0 + Run 0.0 = 44.0 mm would not leave one nozzle width (0.4 mm) of the tube under it. Use 40.2 mm or less between them, or turn Keep length off to add the length instead` |
+| a flange / chamfer / taper / boss inside D | the same, with `the wall stays straight for 32.0 mm from the end (a flange, a chamfer, a taper or a boss starts there)` in place of the tube's length |
+| a bad Transition or Run, a wall under the floor, a closed bore, no round end | the Reducer's own words |
+| the cut would leave other than two rings | `the cut 17.0 mm in from the end would leave 3 outline(s), not two rings - Keep length cuts the wall square to the axis and needs the cut to be one ring round the wall and one round the bore` |
+
+### Numbers
+
+`node tools/nso_tube_edge_test.js` section 12 (`npm run tube:edges`), measured
+on the output by code that shares nothing with the construction: every vertex
+of the meridian at angle 0 against the section asked for (≤ 1e-4 mm straight,
+≤ 1e-3 trumpet); closed, 2-manifold, wound, Euler unchanged; `mesh_validate
+--gate` PASS; the piece's end where it was; the triangles wholly under the cut
+bit for bit; the volume equal to the plain Reducer's on the same tube cut to
+length. Run on a Stock tube, a tube with rings every 10 mm (the cut between two
+rings, and on one), a tube above a flange, either end of a tube, a tube tilted
+25° and moved off the origin, and an imported 48-sided tube along X.
+`tools/nso_tube_edge_drive_check.js` section 9b drives the real card: tick,
+readout, refusal and recovery, Set (one bake, the ghost's soup bit for bit, 40
+mm tall), Undo, untick.
+
+### Flags — not in the ticket
+
+- **Not Flare.** Flare (the engine's wrapper) has no Keep length; the card has
+  no Flare. Roll is unchanged.
+- **Bevelled and leaning rims** (a wall more than 0.06° off the axis) are
+  refused by the straight-wall scan, in the words above. The plain Reducer
+  still does them.
+- **Handles are off while it is ticked** rather than redrawn inward; the
+  numbers are the interface. Drawn inward they are a follow-up.
+- **Only the straight wall of one tube.** A tube with a hole, a boss or a
+  second shell inside D is refused, not worked around.

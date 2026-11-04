@@ -976,12 +976,15 @@ function NSO_tubeEdgeRaw(soup, opts) {
 /* THE REDUCER. end: a reading from NSO_tubeEdgeRead (reused when it is this
    soup's), a point [x, y, z] (the end nearest it), or null (the top end).
    ro: { od2, id2 (mm, the new outside and bore Ø), transitionMm, runMm,
-   profile 'straight' | 'trumpet', nozzle }. Returns Flare's contract:
+   profile 'straight' | 'trumpet', nozzle, keepLength (true: the transition and
+   the run are cut into the tube's own wall - section 8 - and the tube ends
+   where it did) }. Returns Flare's contract:
    { ok, reason, tris, end, wall, run, meridian, reducer, ... }; on refusal
    tris is the ORIGINAL soup. */
 function NSO_tubeEdgeReducer(soup, end, ro) {
   var o = {}, k;
   ro = ro || {};
+  if (ro.keepLength) return NSO_tubeEdgeKeepLength(soup, end, ro);
   for (k in ro) if (k !== 'read' && k !== '_flare' && k !== '_oneFace' && k !== '_exact' && k !== 'section') o[k] = ro[k];
   o.verb = 'reducer';
   // a reading that is not this soup's is read again, at ro.point
@@ -1415,5 +1418,320 @@ function NSO_teReducerWords(r) {
   return s;
 }
 
+/* =====================================================================
+   8. KEEP LENGTH: the reducer cut into the tube, not added to it
+
+   The Reducer adds its transition and its run beyond the end: a tube 40 mm
+   tall with a 10 mm transition and a 5 mm run comes out 55 mm tall. KEEP
+   LENGTH (ro.keepLength) lays the same new pipe back down the tube instead:
+   the end ring is at the new Ø, the run goes down from it, then the
+   transition eases back to the tube's own Ø, and below that the wall is the
+   tube's, untouched - the piece ends where it did.
+
+   It is the Reducer, not a second construction. The last D = Transition + Run
+   mm of the wall are taken off at a plane square to the axis (the straight
+   wall there is a plain cylinder or the verb refuses), the cut is capped with
+   a flat annulus, and the Reducer is run on that cap exactly as it would be on
+   an end: same faces, same stations, same gates (the wall floor, the bore
+   limit, the clearance, the topology and Pappus on that piece). Its new wall
+   rises D mm from the cap, which is where the end stood. The result is then
+   held to the ORIGINAL piece: the topology (open / non-manifold / flipped /
+   zero-area may not rise, Euler unchanged), the volume against Pappus for the
+   new section swept round against the straight wall it replaced, and the
+   top of the piece at the original end plane.
+
+   THE CUT. Every triangle across the plane is clipped to the side that stays;
+   a new vertex on an edge is made once (keyed by the edge's two vertices, from
+   the lower id to the higher) so the two triangles that share the edge share
+   the vertex to the bit. A vertex within NSO_TE_KEEP_EPS_MM of the plane is
+   moved onto it. The cut ring is read back off the clipped triangles' own
+   edges, not assumed: two closed loops or the verb refuses. Everything under
+   the plane is copied bit for bit.
+
+   THE STRAIGHT WALL it needs: from the end down to the plane, every triangle
+   is the end face, or a piece of the outside cylinder (its normal square to
+   the axis and out, its vertices at the end ring's radius) or of the bore's.
+   Anything else - a flange, a chamfer, a tapered stretch, a boss, a hole -
+   stops the straight stretch there, and the refusal says how long it was. One
+   nozzle width of that stretch is kept under the cut. */
+
+var NSO_TE_KEEP_EPS_MM = 5e-4;          // a vertex this close to the cut plane is on it, and moved onto it
+var NSO_TE_KEEP_RADIUS_MM = 0.02;       // one cylinder: every vertex within this of the end ring's radius...
+var NSO_TE_KEEP_RADIUS_FRAC = 2e-4;     // ...or within this × that radius, whichever is more (Neck's stated figure)
+var NSO_TE_KEEP_AXIAL_SIN = 1e-3;       // a straight wall triangle: its normal this square to the axis
+
+/* What each triangle is, along the axis read off the end: heights h (along the
+   outward axis, 0 at the end), radii, and the length of straight wall below
+   the end. kind: 1 outside cylinder, 2 bore cylinder, 3 the end's own face,
+   4 zero area, 0 anything else. */
+function NSO_teKeepScan(W, E) {
+  var P = W.P, nv = W.nv, n = W.n, C = E.center, a = E.axis;
+  var H = new Float64Array(nv), R = new Float64Array(nv), hMin = Infinity;
+  for (var v = 0; v < nv; v++) {
+    var wx = P[v * 3] - C[0], wy = P[v * 3 + 1] - C[1], wz = P[v * 3 + 2] - C[2], h = wx * a[0] + wy * a[1] + wz * a[2];
+    H[v] = h; R[v] = Math.hypot(wx - h * a[0], wy - h * a[1], wz - h * a[2]);
+    if (h < hMin) hMin = h;
+  }
+  var tolO = Math.max(NSO_TE_KEEP_RADIUS_MM, NSO_TE_KEEP_RADIUS_FRAC * E.Ro), tolI = Math.max(NSO_TE_KEEP_RADIUS_MM, NSO_TE_KEEP_RADIUS_FRAC * E.Ri);
+  var kind = new Uint8Array(n), top = new Float64Array(n), inEnd = new Uint8Array(n), maxBad = -Infinity, nBad = 0;
+  E.face.forEach(function (q) { inEnd[q] = 1; });
+  for (var t = 0; t < n; t++) {
+    var i0 = W.vid[t * 3], i1 = W.vid[t * 3 + 1], i2 = W.vid[t * 3 + 2];
+    top[t] = Math.max(H[i0], H[i1], H[i2]);
+    var k = 0;
+    if (inEnd[t]) k = 3;
+    else if (W.degen[t]) k = 4;
+    else {
+      var Nx = W.N[t * 3], Ny = W.N[t * 3 + 1], Nz = W.N[t * 3 + 2];
+      var cx = (P[i0 * 3] + P[i1 * 3] + P[i2 * 3]) / 3 - C[0], cy = (P[i0 * 3 + 1] + P[i1 * 3 + 1] + P[i2 * 3 + 1]) / 3 - C[1],
+          cz = (P[i0 * 3 + 2] + P[i1 * 3 + 2] + P[i2 * 3 + 2]) / 3 - C[2];
+      var ch = cx * a[0] + cy * a[1] + cz * a[2], ex = cx - ch * a[0], ey = cy - ch * a[1], ez = cz - ch * a[2], el = Math.hypot(ex, ey, ez);
+      var na = Nx * a[0] + Ny * a[1] + Nz * a[2], nr = el > 1e-12 ? (Nx * ex + Ny * ey + Nz * ez) / el : 0;
+      if (Math.abs(na) <= NSO_TE_KEEP_AXIAL_SIN && Math.abs(nr) >= 0.5) {
+        if (nr > 0 && Math.abs(R[i0] - E.Ro) <= tolO && Math.abs(R[i1] - E.Ro) <= tolO && Math.abs(R[i2] - E.Ro) <= tolO) k = 1;
+        else if (nr < 0 && Math.abs(R[i0] - E.Ri) <= tolI && Math.abs(R[i1] - E.Ri) <= tolI && Math.abs(R[i2] - E.Ri) <= tolI) k = 2;
+      }
+    }
+    kind[t] = k;
+    if (k === 0 || k === 4) { nBad++; if (top[t] > maxBad) maxBad = top[t]; }
+  }
+  return { H: H, R: R, kind: kind, top: top, hMin: hMin, lengthMm: -hMin, straightMm: nBad ? Math.max(0, -maxBad) : Infinity, tolO: tolO, tolI: tolI };
+}
+
+/* Take the last `depth` mm off the wall at a plane square to the axis and
+   cap the cut. Returns { ok, reason, tris, point (a point on the cap's
+   annulus), cap: { outer, inner (vertex counts), tris } }. */
+function NSO_teKeepTrim(soup, W, E, scan, depth) {
+  var res = { ok: false, reason: '' };
+  var P = W.P, nv = W.nv, n = W.n, C = E.center, a = E.axis, hc = -depth, f32 = NSO_teF32, EPS = NSO_TE_KEEP_EPS_MM;
+  var S = new Float64Array(nv), v;
+  for (v = 0; v < nv; v++) S[v] = scan.H[v] - hc;
+  var extra = [], inter = new Map();
+  function posOf(id) {
+    if (id >= nv) return [extra[(id - nv) * 3], extra[(id - nv) * 3 + 1], extra[(id - nv) * 3 + 2]];
+    if (Math.abs(S[id]) <= EPS) return [f32(P[id * 3] - S[id] * a[0]), f32(P[id * 3 + 1] - S[id] * a[1]), f32(P[id * 3 + 2] - S[id] * a[2])];
+    return [P[id * 3], P[id * 3 + 1], P[id * 3 + 2]];
+  }
+  function cut(i, j) {
+    var lo = i < j ? i : j, hi = i < j ? j : i, key = lo * nv + hi, id = inter.get(key);
+    if (id !== undefined) return id;
+    var sl = S[lo], sh = S[hi], tt = sl / (sl - sh);
+    var x = P[lo * 3] + tt * (P[hi * 3] - P[lo * 3]), y = P[lo * 3 + 1] + tt * (P[hi * 3 + 1] - P[lo * 3 + 1]), z = P[lo * 3 + 2] + tt * (P[hi * 3 + 2] - P[lo * 3 + 2]);
+    var sx = (x - C[0]) * a[0] + (y - C[1]) * a[1] + (z - C[2]) * a[2] - hc;       // its own residual off the plane, taken out
+    id = nv + extra.length / 3;
+    extra.push(f32(x - sx * a[0]), f32(y - sx * a[1]), f32(z - sx * a[2]));
+    inter.set(key, id);
+    return id;
+  }
+  var tri = [];                                  // the pieces that stay: vertex ids, three to a triangle
+  for (var t = 0; t < n; t++) {
+    var ids = [W.vid[t * 3], W.vid[t * 3 + 1], W.vid[t * 3 + 2]], cls = [0, 0, 0], np = 0, nn = 0;
+    for (var k = 0; k < 3; k++) {
+      var s = S[ids[k]];
+      cls[k] = s > EPS ? 1 : (s < -EPS ? -1 : 0);
+      if (cls[k] > 0) np++; else if (cls[k] < 0) nn++;
+    }
+    if (!np) { tri.push(ids[0], ids[1], ids[2]); continue; }
+    if (!nn) continue;
+    var poly = [];
+    for (var q = 0; q < 3; q++) {
+      var cur = ids[q], nxt = ids[(q + 1) % 3], cc = cls[q], cn = cls[(q + 1) % 3];
+      if (cc <= 0) poly.push(cur);
+      if ((cc < 0 && cn > 0) || (cc > 0 && cn < 0)) poly.push(cut(cur, nxt));
+    }
+    for (var f = 1; f + 1 < poly.length; f++) if (poly[0] !== poly[f] && poly[f] !== poly[f + 1] && poly[0] !== poly[f + 1]) tri.push(poly[0], poly[f], poly[f + 1]);
+  }
+  var nt = tri.length / 3, nAll = nv + extra.length / 3;
+  function onPlane(id) { return id >= nv || Math.abs(S[id]) <= EPS; }
+  // the cut ring: the edges of the triangles that stay which lie in the plane and
+  // have no partner running the other way. A triangle's edge a -> b is walked
+  // b -> a by the cap, which is the way an end face walks the ring
+  var dir = new Map();
+  for (var u = 0; u < nt; u++) for (var c = 0; c < 3; c++) {
+    var ea = tri[u * 3 + c], eb = tri[u * 3 + (c + 1) % 3];
+    if (onPlane(ea) && onPlane(eb)) dir.set(ea * nAll + eb, [ea, eb]);
+  }
+  var next = new Map(), nb = 0, tangled = 0;
+  dir.forEach(function (e) {
+    if (dir.has(e[1] * nAll + e[0])) return;
+    if (next.has(e[1])) tangled++;
+    next.set(e[1], e[0]); nb++;
+  });
+  var loops = [], seen = new Set();
+  next.forEach(function (b0, a0) {
+    if (seen.has(a0)) return;
+    var lp = [], w = a0, guard = 0;
+    while (!seen.has(w) && next.has(w) && guard++ <= nb) { seen.add(w); lp.push(w); w = next.get(w); }
+    if (w !== a0) tangled++;
+    loops.push(lp);
+  });
+  var words = ' - Keep length cuts the wall square to the axis and needs the cut to be one ring round the wall and one round the bore';
+  if (tangled) { res.reason = 'the wall is open or shared more than twice where Keep length would cut it, ' + NSO_teFmt(depth, 1) + ' mm in from the end - Repair it first'; return res; }
+  if (loops.length !== 2) {
+    res.reason = 'the cut ' + NSO_teFmt(depth, 1) + ' mm in from the end would leave ' + loops.length + ' outline(s), not two rings' + words;
+    return res;
+  }
+  var fr = E.frame;
+  function ang(id) {
+    var p = posOf(id), x = p[0] - C[0], y = p[1] - C[1], z = p[2] - C[2];
+    return Math.atan2(x * fr.e2[0] + y * fr.e2[1] + z * fr.e2[2], x * fr.e1[0] + y * fr.e1[1] + z * fr.e1[2]);
+  }
+  var TWO = 2 * Math.PI;
+  function turn(lp) {
+    var sum = 0;
+    for (var i = 0; i < lp.length; i++) {
+      var d = ang(lp[(i + 1) % lp.length]) - ang(lp[i]);
+      d -= TWO * Math.round(d / TWO); sum += d;
+    }
+    return sum;
+  }
+  function meanR(lp) {
+    var sum = 0;
+    lp.forEach(function (id) {
+      var p = posOf(id), x = p[0] - C[0], y = p[1] - C[1], z = p[2] - C[2], h = x * a[0] + y * a[1] + z * a[2];
+      sum += Math.hypot(x - h * a[0], y - h * a[1], z - h * a[2]);
+    });
+    return sum / lp.length;
+  }
+  var oi = meanR(loops[0]) >= meanR(loops[1]) ? 0 : 1, O = loops[oi], I = loops[1 - oi];
+  if (O.length < 12 || I.length < 12) { res.reason = 'the cut ' + NSO_teFmt(depth, 1) + ' mm in from the end would leave a ring of ' + Math.min(O.length, I.length) + ' points - too few to be a round wall' + words; return res; }
+  if (!(turn(O) > TWO * 0.99) || !(turn(I) < -TWO * 0.99)) {
+    res.reason = 'internal: the cut ring does not turn once the way the end face does (' + NSO_teFmt(turn(O) / TWO, 3) + ' and ' + NSO_teFmt(turn(I) / TWO, 3) + ' turns)';
+    return res;
+  }
+  // the cap: a flat annulus zipped between the two rings by angle (the lip of NSO_teBuild, the same way)
+  function rel0(id, base) { var d = ang(id) - base; d -= TWO * Math.floor(d / TWO); return d; }
+  var Ic = I.slice().reverse(), nO = O.length, nI = Ic.length, base = ang(O[0]);
+  var ao = [0]; for (var j = 1; j < nO; j++) ao.push(rel0(O[j], base)); ao.push(TWO);
+  var m0 = 0, bestA = Infinity;
+  for (var m = 0; m < nI; m++) { var d0 = rel0(Ic[m], base); if (d0 > Math.PI) d0 -= TWO; if (Math.abs(d0) < bestA) { bestA = Math.abs(d0); m0 = m; } }
+  var ai = [], prevA = null;
+  for (var r2 = 0; r2 <= nI; r2++) {
+    var av = rel0(Ic[(m0 + r2) % nI], base);
+    if (r2 === 0) { if (av > Math.PI) av -= TWO; } else { while (av <= prevA) av += TWO; }
+    if (r2 === nI) av = ai[0] + TWO;
+    ai.push(av); prevA = av;
+  }
+  var cap = [], jo = 0, ki = 0;
+  while (jo < nO || ki < nI) {
+    var pO = O[jo % nO], pO1 = O[(jo + 1) % nO], qI = Ic[(m0 + ki) % nI], qI1 = Ic[(m0 + ki + 1) % nI];
+    if (jo < nO && (ki >= nI || ao[jo + 1] <= ai[ki + 1])) { cap.push(pO, pO1, qI); jo++; }
+    else { cap.push(pO, qI1, qI); ki++; }
+  }
+  var out = new Float32Array((nt + cap.length / 3) * 9), w = 0;
+  function put(list, count) {
+    for (var i = 0; i < count * 3; i++) { var p = posOf(list[i]); out[w++] = p[0]; out[w++] = p[1]; out[w++] = p[2]; }
+  }
+  put(tri, nt); put(cap, cap.length / 3);
+  res.ok = true; res.tris = out;
+  res.point = [C[0] + hc * a[0] + E.frame.e1[0] * (E.Ro + E.Ri) / 2, C[1] + hc * a[1] + E.frame.e1[1] * (E.Ro + E.Ri) / 2, C[2] + hc * a[2] + E.frame.e1[2] * (E.Ro + E.Ri) / 2];
+  res.cap = { outer: nO, inner: nI, tris: cap.length / 3, kept: nt };
+  return res;
+}
+
+/* THE REDUCER, KEEPING THE LENGTH. Same contract as NSO_tubeEdgeReducer
+   (end: a reading, a point, or null; ro: its options, keepLength set); on
+   refusal tris is the ORIGINAL soup. The result is the Reducer's, on the
+   trimmed piece, then held to the original, with r.keepLength: { depthMm,
+   straightMm, lengthMm } and a reason of its own. */
+function NSO_tubeEdgeKeepLength(soup, end, ro) {
+  var res = { ok: false, reason: '', tris: soup, verb: 'reducer' }, o = {}, k;
+  for (k in ro) if (k !== 'read' && k !== '_flare' && k !== '_oneFace' && k !== '_exact' && k !== 'section' && k !== 'keepLength') o[k] = ro[k];
+  o.verb = 'reducer';
+  if (end && end.ok !== undefined) o.read = end;
+  else if (end && end.length === 3) o.point = end;
+  else if (end && end.point) o.point = end.point;
+  var f32in = (soup instanceof Float32Array) ? soup : new Float32Array(soup);
+  var rd = o.read && o.read.ok && o.read.soup === soup ? o.read : NSO_tubeEdgeRead(f32in, o);
+  res.read = rd;
+  if (!rd.ok) { res.reason = rd.reason; return res; }
+  var E = rd.end, W = rd.weld, nozzle = NSO_teNozzle(o);
+  res.end = E; res.nozzleMm = nozzle;
+  // the numbers as the Reducer would read them: its own words for a bad one
+  var pr = NSO_teProfile(E, o);
+  if (!pr.ok) { res.reason = pr.reason; return res; }
+  var T = pr.reducer.transitionMm, run = pr.runMm || 0, D = T + run;
+  if (!(D > 0)) { res.reason = 'nothing to make - no transition and no run'; return res; }
+  var sc = NSO_teKeepScan(W, E);
+  var room = sc.straightMm - nozzle;
+  if (D > room + 1e-9) {
+    var most = Math.max(0, Math.floor(room * 10) / 10);
+    var why = sc.straightMm >= sc.lengthMm - 1e-3
+      ? 'the tube is ' + NSO_teFmt(sc.lengthMm, 1) + ' mm long'
+      : 'the wall stays straight for ' + NSO_teFmt(sc.straightMm, 1) + ' mm from the end (a flange, a chamfer, a taper or a boss starts there)';
+    res.reason = 'Keep length cuts the transition and the run into the wall, and ' + why + ' - Transition ' + NSO_teFmt(T, 1) + ' + Run ' + NSO_teFmt(run, 1) +
+      ' = ' + NSO_teFmt(D, 1) + ' mm' + (most > 0 ? ' would not leave one nozzle width (' + NSO_teFmt(nozzle, 1) + ' mm) of the tube under it. Use ' + NSO_teFmt(most, 1) +
+      ' mm or less between them' : ' leaves no straight wall under it') + ', or turn Keep length off to add the length instead';
+    res.keepLength = { depthMm: D, straightMm: sc.straightMm, lengthMm: sc.lengthMm, maxMm: most };
+    return res;
+  }
+  var tr = NSO_teKeepTrim(f32in, W, E, sc, D);
+  if (!tr.ok) { res.reason = tr.reason; return res; }
+  var rdT = NSO_tubeEdgeRead(tr.tris, { point: tr.point });
+  if (!rdT.ok) { res.reason = 'internal: the capped cut does not read as an end - ' + rdT.reason; return res; }
+  // The scan proved the wall straight to the axis (its normals square to it, 1e-3), so the
+  // cap's lean is the float noise of the cut, not a tilt - and the Reducer lays a station
+  // at u0 = rim·sin(lean) whenever that is over 1e-9 mm: a sliver 3e-8 mm above the ring.
+  // The wall is square to the cap: lean 0, its thickness the rim's width.
+  var eT = rdT.end; eT.leanDeg = 0; eT.leanOuterDeg = 0; eT.leanInnerDeg = 0; eT.wallMm = eT.rimMm;
+  o.read = rdT;
+  var r = NSO_tubeEdgeReducer(tr.tris, rdT, o);
+  r.keepLength = { depthMm: D, straightMm: sc.straightMm, lengthMm: sc.lengthMm, cap: tr.cap };
+  if (!r.ok) { r.tris = soup; r.read = rd; return r; }
+  var out = r.tris;
+  function bad(msg) { r.ok = false; r.tris = soup; r.reason = msg; return r; }
+
+  // ---- gates, on the output, against the ORIGINAL piece ----
+  if (typeof NSO_bendTopology === 'function') {
+    var T0 = NSO_bendTopology(f32in), T1 = NSO_bendTopology(out);
+    r.topology = { before: T0, after: T1 };
+    if (T1.open > T0.open || T1.nm > T0.nm || T1.flip > T0.flip || T1.degen > T0.degen || T1.euler !== T0.euler) {
+      return bad('internal: the result is not welded to the piece (open ' + T0.open + '→' + T1.open + ', non-manifold ' + T0.nm + '→' + T1.nm +
+        ', flipped ' + T0.flip + '→' + T1.flip + ', zero-area ' + T0.degen + '→' + T1.degen + ', Euler ' + T0.euler + '→' + T1.euler + ')');
+    }
+  }
+  var Om = r.meridian.outer, Im = r.meridian.inner, H = Om[Om.length - 1][1];
+  function r2dh(M) {
+    var s = 0;
+    for (var i = 0; i + 1 < M.length; i++) { var A = M[i], B = M[i + 1]; s += (B[1] - A[1]) * (A[0] * A[0] + A[0] * B[0] + B[0] * B[0]) / 3; }
+    return s;
+  }
+  function pf(nSeg) { return nSeg * Math.sin(2 * Math.PI / nSeg) / (2 * Math.PI); }
+  var pappus = Math.PI * (pf(E.outer.length) * (r2dh(Om) - E.Ro * E.Ro * H) - pf(E.inner.length) * (r2dh(Im) - E.Ri * E.Ri * H));
+  var vol0 = NSO_teVolume(f32in, E.center), vol1 = NSO_teVolume(out, E.center);
+  r.volume = { before: vol0, after: vol1, change: vol1 - vol0, pappus: pappus };
+  if (!(Math.abs((vol1 - vol0) - pappus) <= NSO_TE_VOLUME_TOL * Math.abs(pappus) + 1e-4 * Math.abs(vol0))) {
+    return bad('internal: the volume changed by ' + NSO_teFmt(vol1 - vol0, 1) + ' mm³, not the section\'s ' + NSO_teFmt(pappus, 1) + ' mm³ swept round');
+  }
+  var a = E.axis, C = E.center, topIn = 0, topOut = -Infinity, i9;
+  for (i9 = 0; i9 < out.length; i9 += 3) {
+    var hh = (out[i9] - C[0]) * a[0] + (out[i9 + 1] - C[1]) * a[1] + (out[i9 + 2] - C[2]) * a[2];
+    if (hh > topOut) topOut = hh;
+  }
+  if (!(Math.abs(topOut - topIn) <= 2e-3)) return bad('internal: the piece ends ' + NSO_teFmt(topOut - topIn, 3) + ' mm from where it did - Keep length holds the end plane');
+  r.read = rd; r.end = E;
+  r.counts = { trisIn: W.n, trisOut: out.length / 9, removed: W.n - tr.cap.kept, added: out.length / 9 - tr.cap.kept };
+  r.reason = NSO_teKeepWords(r);
+  return r;
+}
+
+/* The Keep length line: "Expander, length kept: Ø44.62 / bore Ø34.47 at
+   the end, easing back to the tube's Ø40.62 / bore Ø30.47 over 12.0 mm (2.6°
+   outside, 2.6° bore) · the tube stays 40.62 mm long · wall 5.08 → 5.07". */
+function NSO_teKeepWords(r) {
+  var q = r.reducer, k = r.keepLength, tr = q.profile === 'trumpet';
+  var head = q.kind === 'straight' ? 'Straight on' : (q.kind === 'expander' ? 'Expander' : 'Reducer') +
+    (q.faces === 'outside' ? ' (outside only)' : q.faces === 'bore' ? ' (bore only)' : '');
+  var s = head + ', length kept: Ø' + NSO_teFmt(q.od2Mm) + ' / bore Ø' + NSO_teFmt(q.id2Mm) + ' at the end';
+  if (q.runMm > 0) s += ' for ' + NSO_teFmt(q.runMm, 1) + ' mm';
+  if (q.transitionMm > 0) {
+    s += ', then ' + (tr ? 'trumpeting' : 'easing') + ' back to the tube\'s Ø' + NSO_teFmt(q.od1Mm) + ' / bore Ø' + NSO_teFmt(q.id1Mm) + ' over ' + NSO_teFmt(q.transitionMm, 1) +
+      ' mm (' + NSO_teFmt(q.angleOuterDeg, 1) + '° outside, ' + NSO_teFmt(q.angleBoreDeg, 1) + '° bore' + (tr ? ' where it ends' : '') + ')';
+  }
+  s += ' · the tube stays ' + NSO_teFmt(k.lengthMm) + ' mm long · wall ' + NSO_teFmt(r.wallMm) + ' → ' + NSO_teFmt(q.wallEndMm);
+  if (r.wall && r.wall.minMm < Math.min(r.wallMm, q.wallEndMm) - 0.005) s += ' (' + NSO_teFmt(r.wall.minMm) + ' at the thinnest, square to the transition\'s faces)';
+  return s;
+}
+
 /* The verbs, by name, for the card. */
-var NSO_TubeEdge = { read: NSO_tubeEdgeRead, raw: NSO_tubeEdgeRaw, reducer: NSO_tubeEdgeReducer, flare: NSO_tubeEdgeFlare, describe: NSO_tubeEdgeDescribe };
+var NSO_TubeEdge = { read: NSO_tubeEdgeRead, raw: NSO_tubeEdgeRaw, reducer: NSO_tubeEdgeReducer, keepLength: NSO_tubeEdgeKeepLength, flare: NSO_tubeEdgeFlare, describe: NSO_tubeEdgeDescribe };

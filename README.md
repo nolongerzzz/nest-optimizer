@@ -371,7 +371,7 @@ Smart build-plate packing for 3D printing.
   Supports, Add, Subtract · Shape, Text, Paint, Surface & edges, Sculpt · Check &
   repair on its own at the bottom · X (X-ray), 👁 (Watch), ◎ (frame the
   view) in one row under it.
-- The cards: **Shape** Smooth, Bend, Tube edge (Flare, Roll, Neck), Pull
+- The cards: **Shape** Smooth, Bend, Tube edge (Reducer - with Keep length to cut it into the tube rather than add to it - Roll, Neck), Pull
   (grab a spot and drag it, with pins; docs/PULL.md), Limb (grab a branch of a
   tree anywhere along it, then stretch it or bend it; docs/LIMB.md) ·
   **Text** the text box, Font, Bold, Italic, Font file, Size, Depth, Angle,

@@ -1067,6 +1067,148 @@ console.log('\n=== 11. Reducer: the tube defined by its result (tube-reducer) ==
   }
 }
 
+console.log('\n=== 12. Reducer, Keep length: cut into the tube, its length kept (tube-keep) ===');
+{
+  const { NSO_TubeEdge } = ctx;
+  const KEEP = (soup, o, end) => NSO_TubeEdge.reducer(soup, end || null, Object.assign({ keepLength: true }, o));
+  // A tube Ø40 / bore Ø30, 40 tall, with rings of vertices every 10 mm up the wall
+  // (so some of its triangles lie wholly under a cut, and a cut can land on a ring)
+  const ringed = (rOut, rIn, h, step) => {
+    const prof = [{ z: 0, r: rIn }, { z: 0, r: rOut }];
+    for (let z = step; z < h - 1e-9; z += step) prof.push({ z, r: rOut });
+    prof.push({ z: h, r: rOut }, { z: h, r: rIn });
+    for (let z = h - step; z > 1e-9; z -= step) prof.push({ z, r: rIn });
+    prof.push({ z: 0, r: rIn });
+    return NSO_Stock.revolve(prof, 96);
+  };
+  const kt = ringed(20, 15, 40, 10);
+  const zRange = sv => { let lo = Infinity, hi = -Infinity; for (let i = 2; i < sv.length; i += 3) { lo = Math.min(lo, sv[i]); hi = Math.max(hi, sv[i]); } return [lo, hi]; };
+  // the section laid down the tube, from the end: run, then the transition, then the tube's own Ø
+  const radiusAt = (d, R, T, r0, r1, prof) => d <= R ? r1 : d >= R + T ? r0 :
+    prof === 'trumpet' ? r0 + (r1 - r0) * Math.pow((R + T - d) / T, 2) : r1 + (r0 - r1) * (d - R) / T;
+  // every vertex of the meridian at angle 0 against the section the verb was asked for
+  function sectionOff(sv, zTop, R, T, o, prof) {
+    const G = graph(sv); let worst = 0, n = 0;
+    G.P.forEach(q => {
+      if (!q || Math.abs(q[1]) > 1e-6 || q[0] <= 0) return;
+      const d = zTop - q[2];
+      const wantO = radiusAt(d, R, T, 20, o.od2 / 2, prof), wantI = radiusAt(d, R, T, 15, o.id2 / 2, prof);
+      worst = Math.max(worst, Math.min(Math.abs(q[0] - wantO), Math.abs(q[0] - wantI))); n++;
+    });
+    return { worst, n };
+  }
+  function holds(tag, soup, r, zTop) {
+    check(tag + ': treated', r.ok, r.reason);
+    if (!r.ok) return null;
+    const T0 = topo(soup), T1 = topo(r.tris);
+    check(tag + ': closed, 2-manifold, consistently wound, Euler unchanged', T1.open === 0 && T1.nm === 0 && T1.flip === 0 && T1.degen === 0 && T1.euler === T0.euler,
+      `open ${T1.open} nm ${T1.nm} flip ${T1.flip} degen ${T1.degen} euler ${T0.euler}->${T1.euler}`);
+    const MV = meshValidate(tag.replace(/[^a-z0-9]+/gi, '_'), r.tris);
+    check(tag + ': mesh_validate --gate PASS', MV.pass, MV.pass ? 'pierce ' + MV.pierce : (MV.fails || []).join('; '));
+    if (zTop != null) {          // a tube standing on Z; a tilted one is held to its own axis by its caller
+      const [z0, z1] = zRange(soup), [y0, y1] = zRange(r.tris);
+      check(tag + ': the piece ends where it did (z ' + f3(z0) + '..' + f3(z1) + ' in, ' + f3(y0) + '..' + f3(y1) + ' out)', Math.abs(y1 - z1) <= 2e-3 && Math.abs(y0 - z0) <= 1e-6);
+    }
+    check(tag + ': volume changed by the section swept round (Pappus) within 0.5%', Math.abs((volume(r.tris) - volume(soup)) - r.volume.pappus) <= 5e-3 * Math.abs(r.volume.pappus) + 1e-4 * Math.abs(volume(soup)),
+      f3(volume(r.tris) - volume(soup)) + ' vs ' + f3(r.volume.pappus) + ' mm³');
+    return { T0, T1 };
+  }
+  // A: an expander, Ø40/30 -> Ø48/38 at the end, 5 mm run then 12 mm transition, cut at z = 23
+  {
+    const o = { od2: 48, id2: 38, transitionMm: 12, runMm: 5 }, t0 = Date.now(), r = KEEP(kt, o), ms = Date.now() - t0;
+    console.log('   ' + r.reason);
+    const C = holds('keep expander', kt, r, 40);
+    if (C) {
+      const M = sectionOff(r.tris, 40, 5, 12, o, 'straight');
+      check('keep expander: every vertex on the meridian is on the section asked for, to 1e-4 mm (' + M.n + ' vertices)', M.worst <= 1e-4 && M.n > 6, f3(M.worst));
+      // everything wholly under the cut plane (z = 23) is the input's, bit for bit
+      const keyT = (sv, t) => Array.from(sv.subarray(t * 9, t * 9 + 9)).join(',');
+      const out = new Set(); for (let t = 0; t < r.tris.length / 9; t++) out.add(keyT(r.tris, t));
+      let under = 0, miss = 0;
+      for (let t = 0; t < kt.length / 9; t++) { const z = [kt[t * 9 + 2], kt[t * 9 + 5], kt[t * 9 + 8]]; if (Math.max(...z) <= 23 + 1e-6) { under++; if (!out.has(keyT(kt, t))) miss++; } }
+      check('keep expander: the ' + under + ' triangles wholly under the cut are copied bit for bit', under > 0 && miss === 0, miss + ' missing');
+      // it is the Reducer, on the tube D shorter: the same solid, moved D along the axis
+      const short = stockTube(20, 5, 23), pr = NSO_TubeEdge.reducer(short, null, o);
+      check('keep expander: the volume is the plain Reducer\'s on the same tube cut to 23 mm tall', pr.ok && Math.abs(volume(r.tris) - volume(pr.tris)) <= 1e-4 * volume(r.tris),
+        f3(volume(r.tris)) + ' vs ' + f3(pr.ok ? volume(pr.tris) : NaN));
+      check('keep expander: the readout says it kept the length', /^Expander, length kept: Ø48\.00 \/ bore Ø38\.00 at the end for 5\.0 mm, then easing back to the tube's Ø40\.00 \/ bore Ø30\.00 over 12\.0 mm .* · the tube stays 40\.00 mm long · wall 5\.00 → 5\.00/.test(r.reason), r.reason);
+      row('keep length: Ø40/30 → Ø48/38, run 5, transition 12 (tube 40 tall, stays 40)', kt, r, ms, 'meridian on the section to ' + M.worst.toExponential(1));
+    }
+  }
+  // B: a reducer, a trumpet, the cut landing exactly on a ring (z = 20)
+  {
+    const o = { od2: 30, id2: 22, transitionMm: 12, runMm: 8, profile: 'trumpet' }, r = KEEP(kt, o);
+    console.log('   ' + r.reason);
+    const C = holds('keep reducer, trumpet, cut on a ring', kt, r, 40);
+    if (C) {
+      const M = sectionOff(r.tris, 40, 8, 12, o, 'trumpet');
+      check('keep reducer, trumpet: every vertex on the section asked for, to 1e-3 mm (the trumpet is stationed at equal turns, its chords sag)', M.worst <= 1e-3, f3(M.worst));
+    }
+  }
+  // C: the numbers of the screenshot - a Ø40.62 tube 40.62 tall, an expander over 44 mm - is longer than the tube: refused in words
+  {
+    const sc = stockTube(20.311, 5.078, 40.623), o = { od2: 44.62, id2: 34.47, transitionMm: 44, runMm: 0 };
+    const r = KEEP(sc, o);
+    check('refused: Transition 44 on a 40.6 mm tube - the length, the sum, what it may be, and the way out',
+      !r.ok && r.tris === sc && /^Keep length cuts the transition and the run into the wall, and the tube is 40\.6 mm long - Transition 44\.0 \+ Run 0\.0 = 44\.0 mm would not leave one nozzle width \(0\.4 mm\) of the tube under it\. Use 40\.2 mm or less between them, or turn Keep length off to add the length instead$/.test(r.reason), r.reason);
+    const ok = KEEP(sc, Object.assign({}, o, { transitionMm: 40.2 }));
+    check('...and 40.2 mm, the most it names, is made, ending at the same z', ok.ok && Math.abs(zRange(ok.tris)[1] - 40.623) <= 2e-3 && topo(ok.tris).open === 0, ok.reason);
+    const plain = NSO_tubeEdgeRaw(sc, Object.assign({ verb: 'reducer' }, o));
+    check('...and with Keep length off the same numbers add the length (the piece grows to ' + f3(zRange(plain.tris)[1]) + ')', plain.ok && zRange(plain.tris)[1] > 84, plain.reason);
+  }
+  // D: a flange under the wall stops the straight stretch there
+  {
+    const fl = NSO_Stock.revolve([{ z: 0, r: 15 }, { z: 0, r: 26 }, { z: 8, r: 26 }, { z: 8, r: 20 }, { z: 40, r: 20 }, { z: 40, r: 15 }, { z: 0, r: 15 }], 96);
+    const r = KEEP(fl, { od2: 28, id2: 23, transitionMm: 30, runMm: 5 });
+    check('refused: a flange stops the straight wall - how long it is, and that it is the flange', !r.ok && r.tris === fl &&
+      /^Keep length cuts the transition and the run into the wall, and the wall stays straight for 32\.0 mm from the end \(a flange, a chamfer, a taper or a boss starts there\) - Transition 30\.0 \+ Run 5\.0 = 35\.0 mm would not leave one nozzle width \(0\.4 mm\) of the tube under it\. Use 31\.6 mm or less/.test(r.reason), r.reason);
+    const ok = KEEP(fl, { od2: 28, id2: 23, transitionMm: 20, runMm: 5 });
+    holds('keep above a flange', fl, ok, 40);
+  }
+  // E: the bottom end of the tube, the end picked by a click
+  {
+    const o = { od2: 44, id2: 34, transitionMm: 10, runMm: 0 }, r = KEEP(kt, o, [0, 17, 0.5]);
+    const C = holds('keep at the bottom end', kt, r, 0);
+    if (C) {
+      const G = graph(r.tris); let rBottom = 0; G.P.forEach(q => { if (q && Math.abs(q[2]) < 1e-9) rBottom = Math.max(rBottom, Math.hypot(q[0], q[1])); });
+      check('keep at the bottom end: the end ring at z = 0 is the new Ø44 (' + f3(2 * rBottom) + ')', Math.abs(rBottom - 22) < 1e-4);
+    }
+  }
+  // F: a tube standing tilted in the raw frame (its axis 25° off Z, moved off the origin), an imported 48-sided tube along X
+  {
+    const th = 25 * Math.PI / 180, c = Math.cos(th), sn = Math.sin(th), mv = [12, -7, 5];
+    const tilt = new Float32Array(kt.length);
+    for (let i = 0; i < kt.length; i += 3) { const x = kt[i], y = kt[i + 1], z = kt[i + 2]; tilt[i] = x + mv[0]; tilt[i + 1] = y * c - z * sn + mv[1]; tilt[i + 2] = y * sn + z * c + mv[2]; }
+    const a = [0, -sn, c], top = [mv[0], mv[1] - 40 * sn, mv[2] + 40 * c], o = { od2: 46, id2: 36, transitionMm: 10, runMm: 4 };
+    const r = KEEP(tilt, o, [top[0], top[1] + 17 * c, top[2] + 17 * sn]);
+    const C = holds('keep on a tube tilted 25° and moved', tilt, r, null);
+    if (C) {
+      let hi = -Infinity, hi0 = -Infinity; for (let i = 0; i < r.tris.length; i += 3) hi = Math.max(hi, r.tris[i] * a[0] + r.tris[i + 1] * a[1] + r.tris[i + 2] * a[2]);
+      for (let i = 0; i < tilt.length; i += 3) hi0 = Math.max(hi0, tilt[i] * a[0] + tilt[i + 1] * a[1] + tilt[i + 2] * a[2]);
+      check('keep on a tilted tube: its end stays where it was along its own axis (' + f3(hi) + ' vs ' + f3(hi0) + ')', Math.abs(hi - hi0) <= 2e-3);
+    }
+    const tx = tubeAlongX(80, 48), ox = { od2: 20, id2: 16, transitionMm: 12, runMm: 4 }, rx = KEEP(tx, ox, [80, 20, 18]);
+    console.log('   ' + rx.reason);
+    const T0 = topo(tx);
+    check('keep on the imported 48-sided tube along X: closed, wound, Euler unchanged, and its end where it was', rx.ok && topo(rx.tris).open === 0 && topo(rx.tris).nm === 0 && topo(rx.tris).flip === 0 &&
+      topo(rx.tris).euler === T0.euler && Math.abs(Math.max(...Array.from(rx.tris).filter((_, i) => i % 3 === 0)) - 80) <= 2e-3, rx.reason);
+  }
+  // G: Keep length changes nothing when it is off, and says so when it cannot read
+  {
+    const o = { od2: 48, id2: 38, transitionMm: 12, runMm: 5 };
+    const a1 = NSO_tubeEdgeRaw(kt, Object.assign({ verb: 'reducer' }, o)), a2 = NSO_tubeEdgeRaw(kt, Object.assign({ verb: 'reducer', keepLength: false }, o));
+    check('keepLength off (or false): the Reducer is byte-identical to what it was', a1.ok && a2.ok && Buffer.compare(Buffer.from(a1.tris.buffer), Buffer.from(a2.tris.buffer)) === 0 && zRange(a1.tris)[1] > 40 + 16);
+    const sq = squareTube(30), r = KEEP(sq, { od2: 10, id2: 8, transitionMm: 5 });
+    check('refused: no round end - the reader\'s words, the piece unchanged', !r.ok && r.tris === sq && /that end is not circular/.test(r.reason), r.reason);
+    const bad = KEEP(kt, { od2: 48, id2: 38, transitionMm: -2, runMm: 5 });
+    check('refused: a negative transition - the Reducer\'s own words', !bad.ok && /^a transition of −2\.0 mm is refused/.test(bad.reason), bad.reason);
+    const none = KEEP(kt, { od2: 40, id2: 30, transitionMm: 0, runMm: 0 });
+    check('refused: nothing to make', !none.ok && /nothing to make|transition 0/.test(none.reason), none.reason);
+    const wall = KEEP(kt, { od2: 20, id2: 19.4, transitionMm: 10, runMm: 5 });
+    check('refused: the Reducer\'s wall floor still applies - and the piece is the original', !wall.ok && wall.tris === kt && /the floor is 0\.42 mm/.test(wall.reason), wall.reason);
+  }
+}
+
 console.log('\n| piece and treatment | in → out triangles | ms | measured |');
 console.log('|---|---|---|---|');
 for (const t of TABLE) console.log('| ' + t.name + ' | ' + t.trisIn + ' → ' + t.trisOut + ' | ' + (t.ms === '0' ? '' : t.ms) + ' | ' + t.extra + ' |');

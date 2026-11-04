@@ -156,6 +156,7 @@ merging its list by hand. The list below is generated.
 - [Toolpath import - the entry point (2026-09-20)](handoff/toolpath-import-the-entry-point.md)
 - [Triple join - A-B-C in one press, two junctions, two gaps (2026-09-20)](handoff/triple-join-a-b-c-in-one-press-two-junctions-two-gaps.md)
 - [Tube edge - Flare and Roll on the open end of a tube (2026-10-14)](handoff/tube-edge-flare-and-roll-on-the-open-end-of-a-tube.md)
+- [Tube edge Reducer: Keep length - reduce or expand the rim without making the tube longer (2026-11-04)](handoff/tube-keep-length.md)
 - [UI cleanups - status panel, column menus on double-click, rotate screenshots (2026-10-13)](handoff/ui-cleanups-status-panel-column-menus-on-double-click-rotate.md)
 - [undo-dispose-seal - Seal -> Undo no longer leaks 2 geometries a cycle (2026-10-26)](handoff/undo-dispose-seal.md)
 - [undo-dispose-yaw - a pose bake's geometry is disposed when nothing reachable names it (2026-10-24)](handoff/undo-dispose-yaw.md)

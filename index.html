@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=b8c57dcc" />
+  <link rel="stylesheet" href="styles.css?v=e9a4c8e3" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -1322,6 +1322,9 @@
                     <option value="straight" selected>Straight</option>
                     <option value="trumpet">Trumpet</option>
                   </select></label>
+                <label class="vp-flag vp-flag-tekeep" title="Cut the transition and the run into the tube's own wall instead of adding them past its end: the end ring takes the new Ø, the run goes down from it, the transition eases back to the tube's Ø, and the piece ends exactly where it did. Needs a straight stretch of wall at least Transition + Run long (plus a nozzle width) below the end; with it on, the length rings are not handles - type the numbers.">
+                  <input type="checkbox" id="chk-te-keep" aria-label="Keep the tube's length: cut the transition and run into the wall"><span class="vp-flag-face">Keep length</span>
+                </label>
               </div>
               <div id="te-roll-rows" class="te-rows" hidden>
                 <label class="vp-bend-field" title="The bead's inside radius, mm: the outside face of the tube curls round a circle this size.">Radius
@@ -2392,11 +2395,11 @@
   <!-- Tube edge: Flare and Roll on the open end of a tube. After nso_section.js
        (the circle fit), nso_bend.js (the topology gate) and app-sculpt.js (the
        commit). See docs/TUBE-EDGE.md. -->
-  <script src="nso_tube_edge.js?v=d02ebd3a"></script>
+  <script src="nso_tube_edge.js?v=7d856960"></script>
   <!-- Neck: a pinch or a bulge along a tube. After nso_tube_edge.js (its end
        reader, weld and helpers). See docs/TUBE-EDGE.md, "Neck". -->
   <script src="nso_tube_neck.js?v=e42beb75"></script>
-  <script src="app-tube-edge.js?v=e061840c"></script>
+  <script src="app-tube-edge.js?v=ccab323a"></script>
   <!-- Bridge: a web between two places, welded. After NSO_Repair.js,
        nso_planar_fuse.js (the vertex space), nso_thickness.js,
        nso_assemble.js (the seat), nso_path_sweep.js (the rod) and

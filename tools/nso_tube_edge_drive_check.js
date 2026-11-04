@@ -244,6 +244,61 @@ withApp(async (page, logs) => {
   await page.waitForFunction(() => /Undo: Tube edge reverted/.test(document.getElementById('status').textContent), null, { timeout: 15000 });
   check('...and Undo again restores it', (await soupOf(page)) === before);
 
+  console.log('\n=== 9b. Keep length: the reducer cut into the wall, the tube stays 40 mm ===');
+  await page.click('#btn-tube-edge');
+  await page.waitForFunction(() => state.tubeEdge.open && state.tubeEdge.result, null, { timeout: 30000 });
+  await setField(page, 'sel-te-verb', 'reducer');
+  await setField(page, 'inp-te-od2', '26');
+  await setField(page, 'inp-te-id2', '22.8');
+  await setField(page, 'inp-te-trans', '10');
+  await setField(page, 'inp-te-run', '4');
+  let K = await page.evaluate(() => ({ box: !!document.getElementById('chk-te-keep'), on: document.getElementById('chk-te-keep').checked,
+    handles: !!NSO_teReducerGeom(), readout: document.getElementById('te-readout').textContent }));
+  check('the Keep length box is on the Reducer card, off by default, and the plain reducer adds its 14 mm (the old way, still there)',
+    K.box && !K.on && K.handles && /^Expander: Ø20\.00 \/ bore Ø16\.80 → Ø26\.00 \/ bore Ø22\.80 over 10\.0 mm .*, then 4\.0 mm run/.test(K.readout), K.readout);
+  await page.click('#chk-te-keep');
+  await page.waitForFunction(() => /length kept/.test(document.getElementById('te-readout').textContent), null, { timeout: 15000 });
+  K = await page.evaluate(() => ({ on: document.getElementById('chk-te-keep').checked, handles: !!NSO_teReducerGeom(), tris: state.tubeEdge.result && state.tubeEdge.result.tris,
+    readout: document.getElementById('te-readout').textContent, ghost: !!(state.tubeEdge.ghost && state.tubeEdge.ghost.parent), goDisabled: document.getElementById('btn-te-go').disabled,
+    key: state.tubeEdge.result && state.tubeEdge.result.keepLength }));
+  console.log('   readout: ' + K.readout);
+  check('ticked: the readout says Expander, length kept, Ø26 / bore Ø22.8 at the end for 4 mm, back to Ø20 / Ø16.8 over 10, the tube stays 40 mm',
+    K.on && /^Expander, length kept: Ø26\.00 \/ bore Ø22\.80 at the end for 4\.0 mm, then easing back to the tube's Ø20\.00 \/ bore Ø16\.80 over 10\.0 mm .* · the tube stays 40\.00 mm long · wall 1\.60/.test(K.readout), K.readout);
+  check('...the ghost is up, Set is live, and the length rings (stood past the end) are not drawn', K.ghost && !K.goDisabled && !K.handles);
+  const keepExpect = await page.evaluate(() => Array.from(state.tubeEdge.result.tris).join(','));
+  await frame(page, 28, 75);
+  await shot(page, 'tube-edge-keep-ghost.png');
+  await setField(page, 'inp-te-trans', '60');
+  K = await page.evaluate(() => ({ readout: document.getElementById('te-readout').textContent, bad: document.getElementById('te-readout').classList.contains('is-bad'),
+    ghost: !!(state.tubeEdge.ghost && state.tubeEdge.ghost.parent), goDisabled: document.getElementById('btn-te-go').disabled }));
+  check('Transition 60 on a 40 mm tube: refused in words, naming the room and the way out, the ghost gone, Set dead',
+    K.bad && !K.ghost && K.goDisabled && /^Tube edge: Keep length cuts the transition and the run into the wall, and the tube is 40\.0 mm long - Transition 60\.0 \+ Run 4\.0 = 64\.0 mm .*Use 39\.6 mm or less between them, or turn Keep length off/.test(K.readout), K.readout);
+  await setField(page, 'inp-te-trans', '10');
+  await page.waitForFunction(() => !!(state.tubeEdge.result && state.tubeEdge.result.ok), null, { timeout: 15000 });
+  check('...and back to 10 the same ghost is back, soup for soup', (await page.evaluate(() => Array.from(state.tubeEdge.result.tris).join(','))) === keepExpect);
+  await page.click('#btn-te-go');
+  await page.waitForFunction(() => /Tube edge done|Tube edge refused/.test(document.getElementById('status').textContent), null, { timeout: 30000 });
+  const stK = await statusOf(page);
+  console.log('   status: ' + stK);
+  const kept = await page.evaluate(() => { const m = getActiveModel(); return { T: NSO_bendTopology(m.rawTris), soup: Array.from(m.rawTris).join(','), h: m.size.y, w: m.size.x }; });
+  check('Set: Tube edge done, length kept', /^Tube edge done - Expander, length kept: Ø26\.00 \/ bore Ø22\.80/.test(stK), stK);
+  check('the piece is the ghost\'s soup, bit for bit', kept.soup === keepExpect);
+  check('closed, 2-manifold, consistently wound', kept.T.open === 0 && kept.T.nm === 0 && kept.T.flip === 0 && kept.T.degen === 0 && kept.T.euler === 0, JSON.stringify(kept.T));
+  check('it is still 40 mm tall (the plain reducer made it 54), and Ø26 across at the end', Math.abs(kept.h - 40) < 2e-3 && Math.abs(kept.w - 26) < 0.01, 'h ' + kept.h.toFixed(3) + ' w ' + kept.w.toFixed(3));
+  await frame(page, 28, 75);
+  await shot(page, 'tube-edge-keep-set.png');
+  await page.click('#btn-undo');
+  await page.waitForFunction(() => /Undo: Tube edge reverted/.test(document.getElementById('status').textContent), null, { timeout: 15000 });
+  check('one Undo puts the tube back, coordinate for coordinate', (await soupOf(page)) === before);
+  // the box stays ticked across the card (like the other fields): untick it so what follows is the plain card again
+  await page.click('#btn-tube-edge');
+  await page.waitForFunction(() => state.tubeEdge.open && state.tubeEdge.result, null, { timeout: 30000 });
+  await page.click('#chk-te-keep');
+  await page.waitForFunction(() => !/length kept/.test(document.getElementById('te-readout').textContent), null, { timeout: 15000 });
+  K = await page.evaluate(() => ({ on: document.getElementById('chk-te-keep').checked, handles: !!NSO_teReducerGeom(), readout: document.getElementById('te-readout').textContent }));
+  check('unticked: the plain reducer (its length rings back) - ' + K.readout.slice(0, 40), !K.on && K.handles && /^Expander: /.test(K.readout), K.readout);
+  await page.click('#btn-te-cancel');
+
   console.log('\n=== 10. a closed box is refused in the card ===');
   const boxId = await loadSTL(page, writeSTL('box.stl', NSO_Stock.boxSoup(30, 20, 10)));
   await selectModel(page, boxId);
