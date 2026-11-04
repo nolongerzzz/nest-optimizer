@@ -2307,7 +2307,7 @@
       var EXACT_OUTLINE = true;       /* A RIBBON PLATE (the ridge) is Bambu's: each layer the part's EXACT section at the layer's reach (one section, not the union of the layers up to it; the reach never past the stack top's own face: dCl), the loops' centre PLATE_OUT_MM + 0.12 past it (measured on all six pieces: the outer edge stands 0.33 - 0.38 past the outline). Domes keep the union cut: a single section at that reach is far wider than theirs. */
       var REACH_EXTRA_MM = 0;   /* the section is read this much higher: a plane's edge moves 2.75 mm for 1 mm of height, and Bambu's plate stood 0.19 mm past ours on the downhill side */
       var PLATE_OUT_MM = -0.11;
-      var PLATE_UP_LOW_MM = 0.1, PLATE_UP_LOW_N = 4, RIBBON_SLAB_RATIO = 2;      /* the ridge's first plates (its rounded end, the slab still wide): the uphill edge stands 0.1 over the layer, and the slab is a ribbon from a ratio of 2 (Bambu cycles its hatch there too) */
+      var DISC_REACH_MM = 0.55, DISC_CLOSING = 0.88, DISC_CLIP_MM = 0.15, PLATE_UP_LOW_MM = 0.1, PLATE_UP_LOW_N = 4, RIBBON_SLAB_RATIO = 2;      /* the ridge's first plates (its rounded end, the slab still wide): the uphill edge stands 0.1 over the layer, and the slab is a ribbon from a ratio of 2 (Bambu cycles its hatch there too) */
       var PLATE_UP_MM = 0.21;      /* the uphill edge: the plate stops where the part's section 0.21 mm over the layer begins (the face there stands 0.21 over it; Bambu's ribbon is 0.9 mm of the face's height, ours was 1.05) */
       var PLATE_BAND_MM = 0.7;      /* how far past the support mesh's footprint the outline may run */
       var CURVED_SHRINK_MM = 0.1;   /* on a curved face (the zone changes layer on layer) the host cut is this much narrower: a dome's plate was out past Bambu's */
@@ -2437,6 +2437,27 @@
                 var sx = stackIdx[j];
                 aJ = ((sx === 2 || (sx >= 4 && (sx - 4) % 3 === 0)) ? 20 : 110) * Math.PI / 180;
                 ribbonAngled = true;
+              }
+              /* A CAVITY CEILING'S DISC (a negative sphere's): the layers of one steady run stand under a ceiling that closes in, and Bambu draws every one with the cavity's
+                 own outline at one height - the run's top layer + DISC_REACH_MM (measured: 0.55 on the Negative Sphere and the Negative Sphere2, whose discs differ by 0.7 mm in radius) -
+                 the plate never past that, the hole the ceiling leaves there. A flat ceiling's hole does not close in: it keeps the support's own section. */
+              if (steady && !ribbonSlab && DISC_REACH_MM > 0 && !g.isEmpty(Sj) && !g.isEmpty(sheetCs)) {
+                var dTop = j, tIdx = zones[j] && zones[j].topI;
+                for (var jj2 = j + 1; jj2 < SP.length && (tIdx == null || jj2 <= tIdx); jj2++) { var a2z = zArea(jj2), a1z = zArea(jj2 - 1); if (a2z > 0 && a1z > 0 && Math.abs(a2z - a1z) <= 0.03 * a1z) dTop = jj2; else break; }
+                var plate0 = g.polys(g.inter(Sj, sheetCs))[0], px = 0, py = 0;
+                if (plate0 && plate0.length) {
+                  plate0.forEach(function (v) { px += v[0]; py += v[1]; }); px /= plate0.length; py /= plate0.length;
+                  var holeAtZ = function (zT) {                                              /* the hole of the part's section (union of its layers up to zT) that holds the plate's middle: a region, or null */
+                    var hsx = hostExCs(j, zT - SP[j].printZ), found = null;
+                    if (hsx) g.polys(hsx).forEach(function (R0) {
+                      var s2 = 0; for (var q = 0; q < R0.length; q++) { var u = R0[q], v = R0[(q + 1) % R0.length]; s2 += u[0] * v[1] - v[0] * u[1]; }
+                      if (s2 < 0 && inside([R0.slice().reverse()], px, py)) found = g.of([R0.slice().reverse()], 'Positive');
+                    });
+                    return found;
+                  };
+                  var zStar = SP[dTop].printZ + DISC_REACH_MM, hStar = holeAtZ(zStar), hLow = holeAtZ(SP[j].printZ + 0.3);
+                  if (hStar && hLow && g.area(hStar) < DISC_CLOSING * g.area(hLow)) Sj = g.inter(Sj, g.offset(hStar, DISC_CLIP_MM));
+                }
               }
               var loopIn = steady ? LOOP_IN_FLAT_MM : LOOP_IN_MM;
               var inLoop = g.offset(g.inter(Sj, sheetCs), -loopIn);
