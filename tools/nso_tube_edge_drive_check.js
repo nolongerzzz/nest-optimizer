@@ -330,8 +330,22 @@ withApp(async (page, logs) => {
   await page.mouse.move(O0p.x, O0p.y); await page.mouse.down(); await page.mouse.move(O0p.x2, O0p.y2, { steps: 12 }); await page.mouse.up();
   Fd = await fieldsNow();
   check('OD ring 1.5 mm toward the axis: New Ø 23.00 (was 26), the bore unchanged', +Fd.od2 === 23 && +Fd.id2 === 22.8, JSON.stringify(Fd));
+  // FROM ABOVE: looking almost straight down the axis (86°) the Ø rings, on the end, are what is in view. A radial ring is then
+  // read on its own plane, so the pointer is the radius: OD 2 mm out is New Ø +4, the ID ring 1 mm in is New bore -2 (both were nothing at 86°, half at 75°)
+  await frame(page, 86, 130);
+  const ringDrag = async (handle, dr) => {
+    const P = await page.evaluate(([handle, dr]) => { const g = NSO_teReducerGeom(), q = NSO_teReducerRings(g).find(x => x[0] === handle), O = NSO_teAxisPoint(g, q[1]);
+      const at = r => NSO_teScreen(g.m, [0, 1, 2].map(k => O[k] + r * g.e1[k])), a = at(q[2]), b = at(q[2] + dr); return { x: a.x, y: a.y, x2: b.x, y2: b.y }; }, [handle, dr]);
+    await page.mouse.move(P.x, P.y); await page.mouse.down(); await page.mouse.move(P.x2, P.y2, { steps: 12 }); await page.mouse.up();
+    return fieldsNow();
+  };
+  Fd = await ringDrag('od', 2);
+  check('from above (86°): the OD ring 2 mm out is New Ø +4 (23.00 -> 27.00), the bore unchanged', +Fd.od2 === 27 && +Fd.id2 === 22.8, JSON.stringify(Fd));
+  Fd = await ringDrag('id', -1);
+  check('from above (86°): the ID ring 1 mm in is New bore -2 (22.80 -> 20.80), the outside unchanged', +Fd.id2 === 20.8 && +Fd.od2 === 27, JSON.stringify(Fd));
+  await frame(page, 28, 75);
   // back to the numbers the Set below is checked against
-  await setField(page, 'inp-te-od2', '26'); await setField(page, 'inp-te-trans', '10'); await setField(page, 'inp-te-run', '4');
+  await setField(page, 'inp-te-od2', '26'); await setField(page, 'inp-te-id2', '22.8'); await setField(page, 'inp-te-trans', '10'); await setField(page, 'inp-te-run', '4');
   await page.waitForFunction(() => !!(state.tubeEdge.result && state.tubeEdge.result.ok), null, { timeout: 15000 });
   check('...and typed back to Ø26 / 10 / 4 the ghost is the first one again, soup for soup', (await page.evaluate(() => Array.from(state.tubeEdge.result.tris).join(','))) === keepExpect);
   await page.click('#btn-te-go');

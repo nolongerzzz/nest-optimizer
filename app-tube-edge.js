@@ -438,12 +438,21 @@ function NSO_teNeckHitAt(clientX, clientY) {
    under the pointer as it slides; the waist on the plane through the axis
    itself, so "toward the axis" is toward the axis as it is seen, from
    anywhere on the ring. */
-function NSO_teDragPlane(g, ray, through) {
+function NSO_teDragPlane(g, ray, through, ringH) {
   var a = g.a, da = ray.d[0] * a[0] + ray.d[1] * a[1] + ray.d[2] * a[2];
+  // A radial ring (Ø rings, the waist) seen steeply - from above, down the axis - is read on its OWN
+  // plane, square to the axis at the ring's height: there the pointer is the radius directly. The
+  // plane through the axis that faces the camera lies edge-on to a steep view (a 3 mm drag read as 1.5
+  // at 75°, and nothing at all straight down), and the ring's plane is at its best exactly then.
+  if (ringH != null && Math.abs(da) >= TUBE_RING_PLANE_COS) {
+    return { O: NSO_teAxisPoint(g, ringH), C: g.C, a: a, n: a };
+  }
   var n = [ray.d[0] - da * a[0], ray.d[1] - da * a[1], ray.d[2] - da * a[2]], L = Math.hypot(n[0], n[1], n[2]);
   if (!(L > 1e-6)) return null;                     // looking straight down the axis
   return { O: through || g.C, C: g.C, a: a, n: [n[0] / L, n[1] / L, n[2] / L] };
 }
+// Past this (the camera's ray against the axis: cos 45°), a radial ring is read on its own plane.
+var TUBE_RING_PLANE_COS = Math.SQRT1_2;
 function NSO_teOnPlane(pl, ray) {
   var dn = ray.d[0] * pl.n[0] + ray.d[1] * pl.n[1] + ray.d[2] * pl.n[2];
   if (Math.abs(dn) < 1e-9) return null;
@@ -606,7 +615,8 @@ function NSO_teDragBegin(hit, ev) {
   if (handle === 't' && ev.shiftKey && g && g.kind === 'reducer' && !(g.run > 0) && !g.keep) handle = 'r';
   // the waist and the Ø rings are read on the plane through the axis ("toward the axis")
   var radial = handle === 'waist' || handle === 'od' || handle === 'id';
-  var pl = ray && NSO_teDragPlane(g, ray, radial ? null : hit.at), at = pl && NSO_teOnPlane(pl, ray);
+  var ringH = handle === 'od' ? g.hO : handle === 'id' ? g.hI : handle === 'waist' ? g.h0 : null;
+  var pl = ray && NSO_teDragPlane(g, ray, radial ? null : hit.at, radial ? ringH : null), at = pl && NSO_teOnPlane(pl, ray);
   if (!at) return false;
   var fields = {};
   NSO_TE_DRAG_FIELDS.forEach(function (id) { var el = NSO_teEl(id); if (el) fields[id] = el.value; });

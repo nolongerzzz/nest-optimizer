@@ -17,3 +17,7 @@ the ring, a sliver, non-manifold. The Reducer's four rings are handles with Keep
 flanged stretch inside the cut.
 
 Tests: `npm run tube:edges` (367 checks; section 12 is this), `node tools/nso_tube_edge_drive_check.js` (section 9b: the rings dragged for real), `tube:neck` unchanged. Neither `tube:neck` nor `nso_ring_test` changed.
+
+**Radial rings, steep views (follow-up).** The OD / ID rings (and Neck's waist) dragged from above did nothing at 86° and read half at 75°: the drag plane (through the axis,
+facing the camera) is edge-on to a steep view. From 45° up (`TUBE_RING_PLANE_COS`) `NSO_teDragPlane` reads a radial ring on its own plane, square to the axis at the ring's
+height (`ringH`: `hO` / `hI` / `h0`), so the pointer is the radius. Below 45° unchanged. Drive check 9b drags the OD and ID rings at 86°; `tube:neck`'s drags are unchanged.

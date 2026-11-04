@@ -931,6 +931,16 @@ it (same grab, hover, readout, measure chip, Escape, 0.1 mm with Shift):
 - **Shift + T** (pulling a run out of the T ring) is the plain Reducer's; here
   the R ring is already there to pull.
 
+**Radial rings seen from above** (all radial handles: the Ø rings and Neck's
+waist, in every mode). The drag used to be read on the plane through the axis
+facing the camera, which lies edge-on to a steep view: at 75° a 3 mm radial
+drag read as 1.5, and straight down the axis nothing moved. From 45° up
+(`TUBE_RING_PLANE_COS`, the ray against the axis) the ring is read on its own
+plane, square to the axis at the ring's height, where the pointer is the radius
+directly; below 45° the plane through the axis is kept, so the low views are
+byte-for-byte what they were. The Ø rings stand on the rim with Keep length,
+which is what you look at from above.
+
 The box is kept across Set, like the other fields.
 
 ### Refusals, in words, the piece unchanged
