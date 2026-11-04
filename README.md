@@ -35,6 +35,11 @@ Smart build-plate packing for 3D printing.
   G-scope inspects line by line, like an imported `.gcode.3mf`. Validated
   against real Bambu slices, agreement and disagreement both on record. For
   reverse-engineering and internal iteration ([docs/SLICER.md](docs/SLICER.md))
+- **Fittings** (Gen+): a slip-on **Cap** for the selected tube (bore = its Ø plus
+  a printed-fit gap, walls and closed end = the tube's own wall, closed end down)
+  and **2-way / 3-way splitters** - a trunk into 2 or 3 branches - each a new
+  piece of its own, not an edit to the selected one
+  ([docs/FITTINGS.md](docs/FITTINGS.md))
 - **Picture** (Gen+): a photo or a scan becomes a relief slab - a flat base with
   a dense relief on top, heights from the picture (auto-contrast, 2 / 4 / 8 / 16
   levels or smooth, an exact box-filter resample at the Detail you set). Closed
@@ -361,7 +366,7 @@ Smart build-plate packing for 3D printing.
 ## Where things are (the shell)
 
 - **Top row**, left to right: Import, Measure (Two points / Edge), Move,
-  Rotate, Tip, Align, Gen+ (Wheel, Stock, Picture, Mold, Photo), Lock position,
+  Rotate, Tip, Align, Gen+ (Wheel, Stock, Fittings, Picture, Mold, Photo), Lock position,
   Lock plate; at the right Undo, Remove and Export, with **Clear plate**
   under Remove and **Optimize** under Export.
 - **Plate & pieces**, pinned open in the top-right corner: the plate picker

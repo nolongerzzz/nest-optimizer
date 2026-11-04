@@ -220,6 +220,49 @@
               </div>
               </div>
               </details>
+              <!-- Fittings: a slip-on Cap for the selected tube, and a 2- or 3-way Splitter - each a
+                   NEW piece on the plate, edits nothing. nso_fittings.js builds them (headless,
+                   tools/nso_fittings_test.js), app-fittings.js is this card. docs/FITTINGS.md. -->
+              <details class="vp-menu vp-wheel-menu vp-fittings-menu">
+              <summary title="A slip-on pipe cap for the selected tube, and a 2- or 3-way splitter - each a piece of its own">Fittings</summary>
+              <div class="vp-menu-body vp-wheel">
+              <div class="vp-row vp-row-opts">
+              <label class="vp-clone" title="Cap: the clearance all round between the tube and the cap's bore, mm. 0.25 is a printed slip fit; blank is 0.25.">Fit <input type="number" id="inp-fx-gap" min="0" max="2" step="0.05" placeholder="0.25" aria-label="Cap fit gap, mm"></label>
+              <label class="vp-clone" title="Cap: how far the tube goes into it, mm. Blank is 0.75 x the tube's Ø, 8 to 30.">Deep <input type="number" id="inp-fx-depth" min="1" max="200" step="1" placeholder="auto" aria-label="Cap depth, mm"></label>
+              </div>
+              <div class="vp-row vp-row-opts">
+              <label class="vp-clone" title="Which end of the selected tube the cap is for (its Ø and wall are the same at both, but the cap reads that end)">End
+                <select id="sel-fx-end" class="vp-select" aria-label="Tube end"><option value="top" selected>Top</option><option value="bottom">Bottom</option></select></label>
+              </div>
+              <div class="vp-row vp-row-full">
+              <button id="btn-fx-cap" class="btn btn-secondary" type="button"
+                title="Cap: a slip-on cup for the open end of the selected tube, as a plumber's pipe cap. Its bore is the tube's outside Ø plus the Fit all round; its walls AND its closed end are the tube's own wall thickness. A new piece, closed end down on the bed; the tube is not changed.">Cap for selected tube</button>
+              </div>
+              <div class="vp-row vp-row-opts">
+              <label class="vp-clone" title="Splitter: the trunk's outside Ø, mm. Blank is 20. 'Ø from tube' copies the selected tube's.">Ø <input type="number" id="inp-fx-od" min="1" max="400" step="0.5" placeholder="20" aria-label="Splitter trunk outside diameter, mm"></label>
+              <label class="vp-clone" title="Splitter: the wall of every run, mm - held to the nozzle-safety floor. Blank is 2.">Wall <input type="number" id="inp-fx-wall" min="0.4" max="40" step="0.1" placeholder="2" aria-label="Splitter wall, mm"></label>
+              </div>
+              <div class="vp-row vp-row-opts">
+              <label class="vp-clone" title="Splitter: each branch's outside Ø, mm. Blank is three quarters of the trunk's for a 2-way, two thirds for a 3-way.">Branch Ø <input type="number" id="inp-fx-bod" min="1" max="400" step="0.5" placeholder="auto" aria-label="Splitter branch outside diameter, mm"></label>
+              <label class="vp-clone" title="Splitter: each branch's angle off the trunk's axis, degrees, 10 to 80. Blank is 35.">Angle <input type="number" id="inp-fx-angle" min="10" max="80" step="1" placeholder="35" aria-label="Splitter branch angle, degrees"></label>
+              </div>
+              <div class="vp-row vp-row-opts">
+              <label class="vp-clone" title="Splitter: the trunk's length from the inlet to the junction, mm. Blank is 25.">Trunk <input type="number" id="inp-fx-trunk" min="1" max="500" step="1" placeholder="25" aria-label="Splitter trunk length, mm"></label>
+              <label class="vp-clone" title="Splitter: each branch's length from the junction, mm. Blank is 30. The outlets must stand a millimetre apart.">Branch <input type="number" id="inp-fx-branch" min="1" max="500" step="1" placeholder="30" aria-label="Splitter branch length, mm"></label>
+              </div>
+              <div class="vp-row vp-row-pair">
+              <button id="btn-fx-split2" class="btn btn-secondary" type="button"
+                title="2-way splitter: a trunk into two branches, a Y, as a piece of its own - trunk down on the bed, branches up and out at the Angle, the wall the same throughout.">2-way</button>
+              <button id="btn-fx-split3" class="btn btn-secondary" type="button"
+                title="3-way splitter: a trunk into three branches 120 degrees apart round its axis, as a piece of its own - trunk down on the bed, branches up and out at the Angle, the wall the same throughout.">3-way</button>
+              </div>
+              <div class="vp-row vp-row-full">
+              <button id="btn-fx-fromtube" class="btn btn-secondary" type="button"
+                title="Copy the selected tube's outside Ø and wall into the splitter's Ø and Wall, so the splitter's trunk matches that pipe.">Ø from tube</button>
+              </div>
+              <p id="fx-readout" class="bend-readout" aria-live="polite">—</p>
+              </div>
+              </details>
               <!-- Picture: an image becomes a relief slab, a flat base with a
                    dense heightfield on top. nso_relief.js builds it,
                    app-relief.js wires this card. See docs/RELIEF.md. -->
@@ -2399,6 +2442,7 @@
   <!-- Neck: a pinch or a bulge along a tube. After nso_tube_edge.js (its end
        reader, weld and helpers). See docs/TUBE-EDGE.md, "Neck". -->
   <script src="nso_tube_neck.js?v=e42beb75"></script>
+  <script src="nso_fittings.js?v=49474d70"></script>
   <script src="app-tube-edge.js?v=54e345d1"></script>
   <!-- Bridge: a web between two places, welded. After NSO_Repair.js,
        nso_planar_fuse.js (the vertex space), nso_thickness.js,
@@ -2428,6 +2472,7 @@
   <script src="app-wheel.js?v=35fda70f"></script>
   <script src="app-fit.js?v=94ef7252"></script>
   <script src="app-stock.js?v=04f0e346"></script>
+  <script src="app-fittings.js?v=474b8372"></script>
   <script src="app-assemble.js?v=60984bfb"></script>
   <script src="app-sel-outline.js?v=c1a5b4df"></script>
   <script src="app-join.js?v=f9860f3a"></script>

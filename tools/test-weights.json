@@ -366,6 +366,8 @@
     "tree:test": {"weight":4050,"note":""},
     "tube:edges": {"weight":31750,"note":""},
     "tube:edges-drive": {"weight":57250,"note":""},
+    "fittings": {"weight":13720,"note":"measured: node tools/nso_fittings_test.js, 114 checks, mesh_validate on each output"},
+    "fittings:drive": {"weight":14900,"note":"measured: the real card, Cap + both splitters + Undo + refusals"},
     "tube:neck": {"weight":190800,"note":""},
     "ui:shell": {"weight":26600,"note":""},
     "undo:dispose": {"weight":600,"note":"estimate (undo-dispose-yaw): a Node-only vm check, ~0.1 s locally; one CI run measures it"},
