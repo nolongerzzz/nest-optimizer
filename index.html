@@ -1944,7 +1944,10 @@
                       title="Isolate what the capture boxes hold">Isolate</button>
               <button id="ms-btn-clear" type="button" disabled
                       title="Remove every capture box">Clear boxes</button>
+              <button id="ms-gap" type="button" aria-pressed="false"
+                      title="Gap ruler: click one line, then another, and read the distance between them - centre to centre and edge to edge, seen from above, plus the height between them. Any two lines: a wall, a brim, a plate, a pillar's. Works on a slice, side by side or split. A third click starts again; Esc clears it. Nothing is selected or moved.">Gap ruler</button>
             </div>
+            <p class="ms-note" id="ms-gap-read">&mdash;</p>
             <p class="ms-note" id="ms-region-note" hidden>Click a piece: a box. Drag its dots to size it, then click inside it (or Isolate). Esc removes it.</p>
           </div>
           <!-- WHOLE PART, the Normal side: back out of any isolate. -->
@@ -2495,7 +2498,7 @@
        row each under the Flange row. Pure. docs/GSCOPE-FEATURES.md. -->
   <script src="nso_face_features.js?v=53ee4b23"></script>
   <script src="nso_gscope_measure.js?v=c5595269"></script>
-  <script src="app-microscope.js?v=311dafff"></script>
+  <script src="app-microscope.js?v=adc6da3c"></script>
   <!-- Detach / Reattach (Cut menu): cap a detected flange's hull on its own
        wall, lift the flange out as a piece, seat it elsewhere with Attach's
        seat. After nso_flange.js, app-crop.js, nso_assemble.js, app-assemble.js

@@ -1599,7 +1599,7 @@ var NSO_MICROSCOPE = (function () {
       if (sc < bestScore) { bestScore = sc; best = h; }
     });
     var seg = best.object.userData.segs[Math.floor(best.index / 2)];
-    return seg ? { seg: seg, point: best.point } : null;
+    return seg ? { seg: seg, point: best.point, object: best.object, index: best.index } : null;
   }
 
   /** The mesh object under the pointer: { obj, point } - the nearest drawn. */
@@ -2376,6 +2376,7 @@ var NSO_MICROSCOPE = (function () {
    */
   function clickTarget(tgt, e) {
     if (!tgt || !doc) return;
+    if (gapOn && e && gapClick(e)) return;          // the gap ruler: a click picks a line, nothing is selected or isolated
     if (tgt.selected) { if (isolated) unIsolate(); else isolate(); return; }
     if (tgt.source === 'box') {
       // the box a click places, where it was placed
@@ -4493,6 +4494,195 @@ var NSO_MICROSCOPE = (function () {
       m.length.toFixed(2) + ' mm long, ' + (m.angle * 180 / Math.PI).toFixed(1) + ' deg';
   }
 
+  // --- the gap ruler -------------------------------------------------------------
+  //
+  // Click one line, click another: the exact gap between them, read off the two
+  // lines as they are drawn (so on plate 3, side by side or split, it is the gap
+  // as it stands in view). Seen from above - what a bead rests on, or keeps clear
+  // of, is a bird's-eye matter - plus the height between them. A third click starts
+  // again. Nothing is selected, isolated or moved.
+
+  var gapOn = false, gapPicks = [];
+  var GAP_PARALLEL_DEG = 8;
+
+  /** Nearest points of two segments seen from above (x, z): { d, p on a, q on b }. */
+  function segSegPlan(a1, a2, b1, b2) {
+    function onSeg(p, s1, s2) {
+      var dx = s2[0] - s1[0], dz = s2[1] - s1[1], L2 = dx * dx + dz * dz;
+      var t = L2 > 0 ? ((p[0] - s1[0]) * dx + (p[1] - s1[1]) * dz) / L2 : 0;
+      t = Math.max(0, Math.min(1, t));
+      var q = [s1[0] + t * dx, s1[1] + t * dz];
+      return { d: Math.hypot(p[0] - q[0], p[1] - q[1]), q: q };
+    }
+    var d1 = [a2[0] - a1[0], a2[1] - a1[1]], d2 = [b2[0] - b1[0], b2[1] - b1[1]], den = d1[0] * d2[1] - d1[1] * d2[0];
+    if (Math.abs(den) > 1e-12) {
+      var t = ((b1[0] - a1[0]) * d2[1] - (b1[1] - a1[1]) * d2[0]) / den;
+      var u = ((b1[0] - a1[0]) * d1[1] - (b1[1] - a1[1]) * d1[0]) / den;
+      if (t >= 0 && t <= 1 && u >= 0 && u <= 1) { var x = [a1[0] + t * d1[0], a1[1] + t * d1[1]]; return { d: 0, p: x, q: x }; }
+    }
+    var best = null;
+    [[a1, b1, b2, 0], [a2, b1, b2, 0], [b1, a1, a2, 1], [b2, a1, a2, 1]].forEach(function (c) {
+      var r = onSeg(c[0], c[1], c[2]);
+      if (!best || r.d < best.d) best = c[3] === 0 ? { d: r.d, p: c[0], q: r.q } : { d: r.d, p: r.q, q: c[0] };
+    });
+    return best;
+  }
+
+  var BEAD_CORNERS = [0, 4, 1, 2, 6, 8, 7, 10];       // the 8 corners of a bead's 36-vertex prism (as pieceEdges reads them)
+
+  /** What a pick says about its line: line type, Z, width. */
+  function gapInfo(pk) {
+    if (pk.mv) return { feature: pk.mv.feature, z: pk.mv.z, width: pk.mv.width };
+    var sg = pk.seg;
+    return { feature: sg && sg.feature, z: sg && sg.z, width: sg && sg.mv ? sg.mv.width : 0 };
+  }
+
+  /** A picked line's two ends, where it is drawn now (null when it is no longer in the scene). */
+  function gapEnds(pk) {
+    var mesh = pk && pk.object;
+    if (!mesh || !mesh.parent || !mesh.geometry || !mesh.geometry.attributes.position) return null;
+    var pos = mesh.geometry.attributes.position;
+    mesh.updateMatrixWorld(true);
+    if (pk.mv) {
+      // a bead piece (plate 3's, and any piece dragged onto a plate): the bead's own prism, read where it stands now.
+      // The move's ends carry its direction and length; the prism's corners say where it is (they give the centre).
+      var b = pk.bead * 36;
+      if (b + 36 > pos.count) return null;
+      var c = new THREE.Vector3(), t = new THREE.Vector3(), m = pk.mv;
+      BEAD_CORNERS.forEach(function (k) { c.add(t.fromBufferAttribute(pos, b + k).applyMatrix4(mesh.matrixWorld)); });
+      c.multiplyScalar(1 / 8);
+      var ox = c.x - (m.x0 + m.x1) / 2, oz = c.z + (m.y0 + m.y1) / 2;      // gcode (x, y, z) -> view (x, z, -y), shifted so the move's middle is the prism's
+      return [new THREE.Vector3(m.x0 + ox, c.y, -m.y0 + oz), new THREE.Vector3(m.x1 + ox, c.y, -m.y1 + oz)];
+    }
+    if (pk.index + 1 >= pos.count) return null;
+    return [new THREE.Vector3().fromBufferAttribute(pos, pk.index).applyMatrix4(mesh.matrixWorld),
+            new THREE.Vector3().fromBufferAttribute(pos, pk.index + 1).applyMatrix4(mesh.matrixWorld)];
+  }
+
+  /** The two picked lines' gap, as numbers, or null with fewer than two (or one gone from the scene). */
+  function gapReport() {
+    if (gapPicks.length < 2) return null;
+    var A = gapEnds(gapPicks[0]), B = gapEnds(gapPicks[1]);
+    if (!A || !B) return null;
+    var a1 = [A[0].x, A[0].z], a2 = [A[1].x, A[1].z], b1 = [B[0].x, B[0].z], b2 = [B[1].x, B[1].z];
+    var r = segSegPlan(a1, a2, b1, b2);
+    var da = [a2[0] - a1[0], a2[1] - a1[1]], db = [b2[0] - b1[0], b2[1] - b1[1]];
+    var la = Math.hypot(da[0], da[1]), lb = Math.hypot(db[0], db[1]);
+    var ang = la > 0 && lb > 0 ? Math.acos(Math.min(1, Math.abs(da[0] * db[0] + da[1] * db[1]) / (la * lb))) * 180 / Math.PI : 0;
+    var parallel = ang <= GAP_PARALLEL_DEG && lb > 0;
+    var perp = null;
+    if (parallel) {
+      var mx = (a1[0] + a2[0]) / 2, mz = (a1[1] + a2[1]) / 2;
+      perp = Math.abs((mx - b1[0]) * db[1] - (mz - b1[1]) * db[0]) / lb;
+    }
+    var ia = gapInfo(gapPicks[0]), ib = gapInfo(gapPicks[1]), wa = ia.width || 0, wb = ib.width || 0;
+    var centre = parallel ? perp : r.d;
+    return {
+      centre: centre, edge: centre - (wa + wb) / 2, nearest: r.d, perp: perp, parallel: parallel, angleDeg: ang,
+      dz: B[0].y - A[0].y, p: r.p, q: r.q, ya: A[0].y, yb: B[0].y,
+      a: { feature: ia.feature, z: ia.z, width: wa }, b: { feature: ib.feature, z: ib.z, width: wb }
+    };
+  }
+
+  function gapHtml(g) {
+    var f = function (x) { return (x >= 0 ? '' : '-') + Math.abs(x).toFixed(3); };
+    return '<b>Gap</b> - ' + g.a.feature + ' (Z ' + g.a.z.toFixed(3) + ', ' + g.a.width.toFixed(3) + ' wide) to ' +
+      g.b.feature + ' (Z ' + g.b.z.toFixed(3) + ', ' + g.b.width.toFixed(3) + ' wide), seen from above<br>' +
+      'centre to centre <b>' + f(g.centre) + ' mm</b>' + (g.parallel ? ' (across the lines: they run parallel)' : ' (nearest points: the lines are ' + g.angleDeg.toFixed(0) + ' deg apart)') +
+      '<br>edge to edge <b>' + f(g.edge) + ' mm</b>' + (g.edge < -1e-3 ? ' (the beads overlap)' : '') +
+      '<br>height, B over A <b>' + f(g.dz) + ' mm</b>';
+  }
+
+  function gapClear() {
+    if (view && view.gapGroup) clearGroup(view.gapGroup);
+  }
+
+  /** Draw the picks (each outlined) and the connector between them, and say the gap. */
+  function gapDraw() {
+    if (!view) return;
+    if (!view.gapGroup) { view.gapGroup = new THREE.Group(); view.scene.add(view.gapGroup); }
+    gapClear();
+    var COLORS = [0x38f8c8, 0xffe14a];
+    gapPicks = gapPicks.filter(function (pk) { return !!gapEnds(pk); });
+    var d = view.camera.position.distanceTo(view.controls.target), r = Math.max(0.03, d * 0.004);
+    gapPicks.forEach(function (pk, i) {
+      var e = gapEnds(pk), g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(new Float32Array([e[0].x, e[0].y, e[0].z, e[1].x, e[1].y, e[1].z]), 3));
+      var ln = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: COLORS[i], depthTest: false, transparent: true }));
+      ln.renderOrder = 999;
+      view.gapGroup.add(ln);
+      [e[0], e[1]].forEach(function (pt) {
+        var dot = new THREE.Mesh(new THREE.SphereGeometry(r, 10, 8), new THREE.MeshBasicMaterial({ color: COLORS[i], depthTest: false }));
+        dot.position.copy(pt); dot.renderOrder = 999; view.gapGroup.add(dot);
+      });
+    });
+    var rep = gapReport();
+    if (rep) {
+      var cg = new THREE.BufferGeometry();
+      cg.setAttribute('position', new THREE.BufferAttribute(new Float32Array([rep.p[0], rep.ya, rep.p[1], rep.q[0], rep.yb, rep.q[1]]), 3));
+      var cl = new THREE.LineSegments(cg, new THREE.LineBasicMaterial({ color: 0xff4d8d, depthTest: false }));
+      cl.renderOrder = 1000; view.gapGroup.add(cl);
+    }
+    var html = rep ? gapHtml(rep) : gapPicks.length === 1 ? 'Gap ruler: first line picked - click the second.' : 'Gap ruler: click a line, then another.';
+    var rd = $('ms-gap-read');
+    if (rd) rd.innerHTML = html;
+    if (gapOn) info(html);
+  }
+
+  function gapAdd(pk) {
+    if (gapPicks.length >= 2) gapPicks = [];
+    gapPicks.push(pk);
+    gapDraw();
+  }
+
+  /** A click: the line under the pointer on a slice, the bead under it on plate 3's pieces. True when one was picked. */
+  function gapClick(e) {
+    if (doc.kind === 'toolpath') {
+      var lh = lineHitAt(e);
+      if (!lh || !lh.object) return false;
+      gapAdd({ object: lh.object, index: lh.index, seg: lh.seg });
+      return true;
+    }
+    var v = view, rc = rayAt(e);
+    var meshes = Object.keys(v.overviewMeshes).map(function (k) { return v.overviewMeshes[k]; })
+      .filter(function (m) { return m.visible && m.userData.object && pieceGeoms.get(m.userData.object) && pieceGeoms.get(m.userData.object).beads; });
+    var hit = rc.intersectObjects(meshes, false).filter(drawnAt)[0];
+    if (!hit || hit.faceIndex == null) return false;
+    return gapAddBead(hit.object, Math.floor(hit.faceIndex / 12));
+  }
+
+  /** Bead number `bead` of a piece's drawn beads (the moves its line types leave on), picked. */
+  function gapAddBead(mesh, bead) {
+    var o = mesh.userData.object, shown = o.moves.filter(function (m) { return !FEATURE_OFF.has(m.feature); });
+    var mv = shown[bead];
+    if (!mv || mesh.geometry.attributes.position.count !== shown.length * 36) return false;
+    gapAdd({ object: mesh, bead: bead, mv: mv });
+    return true;
+  }
+
+  function setGap(on) {
+    gapOn = !!on;
+    gapPicks = [];
+    gapClear();
+    var b = $('ms-gap'), rd = $('ms-gap-read');
+    if (b) { b.classList.toggle('active', gapOn); b.setAttribute('aria-pressed', gapOn ? 'true' : 'false'); }
+    if (rd) rd.textContent = gapOn ? 'Gap ruler: click a line, then another. Esc clears.' : '—';
+    if (view && view.renderer && view.renderer.domElement) view.renderer.domElement.style.cursor = gapOn ? 'crosshair' : '';
+    if (!gapOn) { if (doc) describeSelection(); }
+  }
+
+  /** Escape: the picks go first, then the ruler itself. True when it did something. */
+  function gapEscape() {
+    if (gapPicks.length) { gapPicks = []; gapClear(); gapDraw(); return true; }
+    if (gapOn) { setGap(false); return true; }
+    return false;
+  }
+
+  /** A pick that moved or went (a nudge, a split, a new view) is read again where it is now. */
+  function gapRefresh() {
+    if (gapPicks.length) gapDraw();
+  }
+
   // --- the layer-range slider ---------------------------------------------------
   //
   // Two handles on one vertical track, docked to the viewport's right edge:
@@ -6002,6 +6192,7 @@ var NSO_MICROSCOPE = (function () {
 
   /** The compare row's buttons and its readout. */
   function syncCompare() {
+    gapRefresh();
     var live = compareLive(), why = compareReason();
     var row = $('ms-compare-row'), body = $('ms-compare-body'), tg = $('ms-compare-toggle');
     if (row) row.style.display = live || (plateDoc('lens') && plateDoc('take')) ? '' : 'none';
@@ -6968,6 +7159,7 @@ var NSO_MICROSCOPE = (function () {
     bind('ms-compare-diff-copy', 'click', function () { compareCopy(); });
     bind('ms-compare-diff-fold', 'click', function () { compareFold(); });
     bind('ms-compare-stacks', 'click', function () { compareSplit(); });
+    bind('ms-gap', 'click', function () { setGap(!gapOn); });
     bind('ms-compare-overlay', 'click', function () { compareOverlay(); });
     bind('ms-compare-side', 'click', function () { compareSideBySide(); });
     bind('ms-compare-restore', 'click', function () { compareClear(); });
@@ -7000,7 +7192,7 @@ var NSO_MICROSCOPE = (function () {
         // isolated) goes; then REGION disarms; with none of those, Escape
         // closes G-scope, as before.
         if (ev.key === 'Escape') {
-          if (!shellCardClose() && !unIsolate() && !removeLastBox() && !disarmRegion()) close();
+          if (!shellCardClose() && !gapEscape() && !unIsolate() && !removeLastBox() && !disarmRegion()) close();
           ev.preventDefault();
           return;
         }
@@ -7158,6 +7350,30 @@ var NSO_MICROSCOPE = (function () {
       return doc.kind === 'toolpath' ? shownSegments().length : shownObjects().length;
     },
     pickLineAt: pickLineAt,
+    /** The gap ruler: on / off, a line picked by its move number, the numbers it reads. */
+    gapMode: function (on) { setGap(on == null ? !gapOn : !!on); return gapOn; },
+    gapPickMove: function (moveIndex) {
+      if (!view || !doc || doc.kind !== 'toolpath') return null;
+      var seg = doc.segments.find(function (s) { return s.mv.index === moveIndex; });
+      if (!seg) return null;
+      var found = null;
+      Object.keys(view.overviewMeshes).forEach(function (k) {
+        var m = view.overviewMeshes[k], at = m.userData.segs ? m.userData.segs.indexOf(seg) : -1;
+        if (at >= 0) found = { object: m, index: at * 2, seg: seg };
+      });
+      if (!found) return null;
+      gapAdd(found);
+      return gapReport();
+    },
+    gapReport: gapReport,
+    gapState: function () { return { on: gapOn, picks: gapPicks.length, moves: gapPicks.map(function (pk) { return pk.mv ? pk.mv.index : pk.seg.mv.index; }) }; },
+    gapPickBead: function (pieceName, bead) {
+      if (!view) return null;
+      var m = view.overviewMeshes[pieceName];
+      if (!m || !m.userData.object || !gapAddBead(m, bead)) return null;
+      return gapReport();
+    },
+    gapMath: segSegPlan,
     pickLine: function (moveIndex, additive) {
       if (!doc || doc.kind !== 'toolpath') return null;
       var seg = doc.segments.find(function (s) { return s.mv.index === moveIndex; });

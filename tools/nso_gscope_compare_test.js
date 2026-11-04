@@ -123,6 +123,48 @@ withApp(async (page, logs) => {
     await page.click('#ms-compare-stacks');
     const joined = await page.evaluate(() => ({ n: NSO_MICROSCOPE.getDoc().objects.length, label: document.getElementById('ms-compare-stacks').textContent, overlay: document.getElementById('ms-compare-overlay').disabled }));
     check('Join stack puts the pair back as it was', joined.n === 2 && joined.label === 'Split stack' && joined.overlay === false, J(joined));
+    // GAP RULER: click one line, click another, read the gap between them - on plate 3's pieces, side by side
+    const gapMath = await page.evaluate(() => { const M = NSO_MICROSCOPE.gapMath; const par = M([0, 0], [10, 0], [2, 0.4], [8, 0.4]), cross = M([0, 0], [10, 10], [0, 10], [10, 0]), end = M([0, 0], [1, 0], [3, 0], [3, 2]); return { par: par.d, cross: cross.d, end: end.d }; });
+    check('the ruler\'s plan math: parallel lines 0.4 apart read 0.4, crossing lines 0, an end to a line its distance', Math.abs(gapMath.par - 0.4) < 1e-9 && gapMath.cross === 0 && Math.abs(gapMath.end - 2) < 1e-9, J(gapMath));
+    const gapOff = await page.evaluate(() => { const b = document.getElementById('ms-gap'); return { there: !!b, off: b && b.disabled, pressed: b && b.getAttribute('aria-pressed') }; });
+    check('a Gap ruler button is there, off', gapOff.there && gapOff.off === false && gapOff.pressed === 'false', J(gapOff));
+    await page.click('#ms-gap');
+    const gapOn = await page.evaluate(() => ({ pressed: document.getElementById('ms-gap').getAttribute('aria-pressed'), st: NSO_MICROSCOPE.gapState() }));
+    check('...it turns on and waits for two lines', gapOn.pressed === 'true' && gapOn.st.on && gapOn.st.picks === 0, J(gapOn));
+    const gap = await page.evaluate(() => {
+      const M = NSO_MICROSCOPE, d = M.getDoc(), o = d.objects[0], shown = o.moves, n = shown.length;
+      // two beads of one piece: the ruler's numbers against the moves' own coordinates
+      const pairs = [[0, Math.min(n - 1, 40)], [3, Math.min(n - 1, 77)]], out = [];
+      pairs.forEach(([i, j]) => {
+        M.gapMode(false); M.gapMode(true);
+        const r1 = M.gapPickBead(o.name, i), r2 = M.gapPickBead(o.name, j);
+        const a = shown[i], b = shown[j];
+        const ex = M.gapMath([a.x0, a.y0], [a.x1, a.y1], [b.x0, b.y0], [b.x1, b.y1]);
+        out.push({ first: r1, centre: r2 && r2.centre, nearest: r2 && r2.nearest, expect: ex.d, parallel: r2 && r2.parallel, edge: r2 && r2.edge, widths: [a.width, b.width], dz: r2 && r2.dz, dzExpect: b.z - a.z });
+      });
+      return out;
+    });
+    check('two beads picked: the first says nothing yet, the second reads the gap, and the nearest points are where the moves\' own coordinates put them', gap.every(g => g.first === null && g.centre != null && Math.abs(g.nearest - g.expect) < 5e-3), J(gap));
+    check('...edge to edge is centre to centre less half of each width, and the height between them is the layers\' difference', gap.every(g => Math.abs(g.edge - (g.centre - (g.widths[0] + g.widths[1]) / 2)) < 1e-9 && Math.abs(g.dz - g.dzExpect) < 5e-3), J(gap));
+    const gapRead = await page.evaluate(() => { const r = document.getElementById('ms-gap-read'), i = document.getElementById('ms-info'); return { gap: r.textContent, info: i.textContent, lines: !!NSO_MICROSCOPE.getView().gapGroup && NSO_MICROSCOPE.getView().gapGroup.children.length }; });
+    check('the readout says the gap in the ruler row and in the segment info, and the picks and their connector are drawn', /centre to centre/.test(gapRead.gap) && /edge to edge/.test(gapRead.gap) && /centre to centre/.test(gapRead.info) && gapRead.lines >= 5, J(gapRead));
+    // ...and by the mouse: a click at where a bead is drawn picks that bead
+    const clickAt = await page.evaluate(() => {
+      const M = NSO_MICROSCOPE, o = M.getDoc().objects[0], n = o.moves.length, i = Math.min(5, n - 1), j = Math.min(30, n - 1);
+      M.gapMode(false); M.gapMode(true);
+      M.gapPickBead(o.name, i); const rep = M.gapPickBead(o.name, j);
+      const v = M.getView(), r = v.renderer.domElement.getBoundingClientRect();
+      const px = (x, y, z) => { const q = new v.camera.position.constructor(x, y, z).project(v.camera); return [r.left + (q.x + 1) / 2 * r.width, r.top + (1 - q.y) / 2 * r.height]; };
+      M.gapMode(false); M.gapMode(true);
+      return { a: px(rep.p[0], rep.ya, rep.p[1]), b: px(rep.q[0], rep.yb, rep.q[1]), i, j, centre: rep.centre, nearest: rep.nearest, view: [r.left, r.top, r.width, r.height], moveI: o.moves[i].index, moveJ: o.moves[j].index };
+    });
+    await page.mouse.click(clickAt.a[0], clickAt.a[1]);
+    await page.mouse.click(clickAt.b[0], clickAt.b[1]);
+    const clicked = await page.evaluate(() => { const st = NSO_MICROSCOPE.gapState(), rep = NSO_MICROSCOPE.gapReport(); return { st, nearest: rep && rep.nearest, isolated: NSO_MICROSCOPE.isolated ? NSO_MICROSCOPE.isolated() : null }; });
+    check('two mouse clicks on two beads read the same gap as picking them by number, and nothing is isolated or selected by them', clicked.st.picks === 2 && clicked.nearest != null && Math.abs(clicked.nearest - clickAt.nearest) < 0.2 && !clicked.isolated, J({ clickAt: { a: clickAt.a, b: clickAt.b, nearest: clickAt.nearest, moves: [clickAt.moveI, clickAt.moveJ], view: clickAt.view }, clicked }));
+    await page.keyboard.press('Escape');
+    const gapEsc = await page.evaluate(() => NSO_MICROSCOPE.gapState());
+    check('Esc clears the picks, a second Esc turns the ruler off', gapEsc.on && gapEsc.picks === 0 && await (async () => { await page.keyboard.press('Escape'); return page.evaluate(() => !NSO_MICROSCOPE.gapState().on && document.getElementById('ms-gap').getAttribute('aria-pressed') === 'false'); })());
     await page.click('#ms-compare-overlay');
     await frames(page);
     const after = [await partCentre(0), await partCentre(1)];
