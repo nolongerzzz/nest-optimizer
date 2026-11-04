@@ -10,7 +10,8 @@
 //            the wall from the tube's Ø to the new), Run (mm of the new pipe
 //            straight on, 0 for none), Profile Straight or Trumpet,
 //            Keep length (cut the transition and run into the wall so the
-//            tube ends where it did; its length rings are then not handles) -
+//            tube ends where it did; the length rings then stand down the
+//            tube from the end, and are dragged the same way) -
 //            NSO_TubeEdge.reducer; the angles are derived, in the readout
 //   Roll     Radius, Angle (90 / 180 / 270 offered, any typed up to 360)
 //   Neck     Length, Δr (below 0 pinches, above 0 bulges), Profile Smooth or
@@ -278,25 +279,36 @@ function NSO_teWallsVal() { var el = NSO_teEl('sel-te-walls'); return el && el.v
 function NSO_teReducerGeom() {
   var B = NSO_teUI(), m = NSO_teModel();
   if (!m || !B.read || !B.read.ok || !B.read.end || B.readVerb !== 'end' || NSO_teVerb() !== 'reducer') return null;
-  // Keep length lays the section down the tube from the end, not out past it: the rings
-  // here stand beyond the end, so they are not drawn or grabbed - the numbers are typed
-  if (NSO_teKeepOn()) return null;
-  var end = B.read.end;
+  var end = B.read.end, keep = NSO_teKeepOn();
   function num(id, d) { var el = NSO_teEl(id), v = el && el.value !== '' ? +el.value : NaN; return isFinite(v) ? v : d; }
   var od2 = num('inp-te-od2', 2 * end.Ro), id2 = num('inp-te-id2', 2 * end.Ri), T = Math.max(0, num('inp-te-trans', 0)), run = Math.max(0, num('inp-te-run', 0));
   var lean = end.leanDeg * Math.PI / 180, c = Math.cos(lean), sn = Math.sin(lean), u0 = Math.max(0, -end.rimMm * sn);
   function hAt(r) { var v = (r - end.Ro - (u0 + T) * sn) / c; return -v * sn + (u0 + T) * c; }
   var rO = Math.max(0.05, od2 / 2), rI = Math.max(0.05, id2 / 2), hO = hAt(rO), hI = hAt(rI), hT = Math.max(hO, hI), rMax = Math.max(end.Ro, rO);
-  return { kind: 'reducer', m: m, end: end, C: end.center, a: end.axis, e1: end.frame.e1, e2: end.frame.e2,
-           od2: od2, id2: id2, T: T, run: run, rO: rO, rI: rI, hO: hO, hI: hI, hT: hT, hR: hT + run,
+  var hR = hT + run, dimT = [0, hT], dimR = [hT, hR];
+  if (keep) {
+    // KEEP LENGTH lays the section down the tube from the end (nso_tube_edge.js, section 8), the
+    // wall square to the axis: the Ø rings stand on the end ring itself (the new Ø is there), the
+    // R ring a Run down, the T ring a Transition below that - where the tube's own Ø resumes.
+    // Heights are along the outward axis, so they are negative.
+    hO = 0; hI = 0; hR = -run; hT = -(run + T); dimR = [0, hR]; dimT = [hR, hT];
+  }
+  return { kind: 'reducer', m: m, end: end, C: end.center, a: end.axis, e1: end.frame.e1, e2: end.frame.e2, keep: keep,
+           od2: od2, id2: id2, T: T, run: run, rO: rO, rI: rI, hO: hO, hI: hI, hT: hT, hR: hR, dimT: dimT, dimR: dimR,
            Rlen: rMax + Math.max(2, 0.12 * rMax) };
 }
 // The R ring is up while there is a run, or while it is in hand (a drag
-// down to 0 keeps hold of it until the release).
+// down to 0 keeps hold of it until the release). With Keep length it is always
+// up: at Run 0 it stands on the end, outside the Ø rings, ready to be pulled
+// down the tube (there is no Shift + T to pull one out of the T ring there).
 function NSO_teRunShown(g) {
   var B = NSO_teUI();
-  return !!g && g.kind === 'reducer' && (g.run > 0 || !!(B.drag && B.drag.handle === 'r'));
+  return !!g && g.kind === 'reducer' && (g.keep || g.run > 0 || !!(B.drag && B.drag.handle === 'r'));
 }
+// Which way a length ring's drag along the axis changes its length: outward (+1) lengthens a
+// plain Reducer's Transition and Run, which stand out past the end; with Keep length they run
+// down the tube, so inward (-1) does.
+function NSO_teLenSign(g) { return g && g.keep ? -1 : 1; }
 // The Reducer's rings: [handle, height, radius, colour] - the Ø rings in the
 // waist's orange, the length rings in the end ring's amber.
 function NSO_teReducerRings(g) {
@@ -527,7 +539,7 @@ function NSO_teNeckKey(key, fine) {
   if (!g) return false;
   var st = fine ? TUBE_NECK_FINE_MM : TUBE_NECK_KEY_MM;
   if (g.kind === 'reducer') {
-    var up = (key === 'up' ? 1 : -1) * NSO_teUpSign(g, g.hT) * st, v = {}, h;
+    var up = (key === 'up' ? 1 : -1) * NSO_teUpSign(g, g.hT) * NSO_teLenSign(g) * st, v = {}, h;
     if (key === 'left' || key === 'right') {
       h = B.keyDia === 'id' ? 'id' : 'od';
       v[h + '2'] = g[h + '2'] + (key === 'right' ? st : -st);
@@ -591,7 +603,7 @@ function NSO_teTouch(handle) {
 function NSO_teDragBegin(hit, ev) {
   var B = NSO_teUI(), g = NSO_teGeom(), ray = g && NSO_teRawRay(g.m, ev.clientX, ev.clientY), handle = hit.handle;
   // with no run, Shift + the T ring pulls one out of it: an R drag from the T plane
-  if (handle === 't' && ev.shiftKey && g && g.kind === 'reducer' && !(g.run > 0)) handle = 'r';
+  if (handle === 't' && ev.shiftKey && g && g.kind === 'reducer' && !(g.run > 0) && !g.keep) handle = 'r';
   // the waist and the Ø rings are read on the plane through the axis ("toward the axis")
   var radial = handle === 'waist' || handle === 'od' || handle === 'id';
   var pl = ray && NSO_teDragPlane(g, ray, radial ? null : hit.at), at = pl && NSO_teOnPlane(pl, ray);
@@ -618,7 +630,7 @@ function NSO_teDragMove(ev) {
   }
   var ray = NSO_teRawRay(g.m, ev.clientX, ev.clientY), at = ray && NSO_teOnPlane(D.plane, ray);
   if (!at) return;
-  var fine = !!ev.shiftKey, dh = NSO_teSnap(at.h - D.at0.h, fine), v;
+  var fine = !!ev.shiftKey, dh = NSO_teSnap(at.h - D.at0.h, fine) * NSO_teLenSign(g), v;
   // the Reducer's: a Ø ring follows the pointer, so its Ø moves twice the radius
   if (D.handle === 'od') v = { od2: D.od2 + NSO_teSnap(2 * (at.s - D.at0.s), fine) };
   else if (D.handle === 'id') v = { id2: D.id2 + NSO_teSnap(2 * (at.s - D.at0.s), fine) };
@@ -716,7 +728,7 @@ function NSO_teShowCallout() {
     text = 'Ø' + (od ? g.od2 : g.id2).toFixed(2);
     anchor = NSO_teAt(g, od ? g.hO : g.hI, od ? g.rO : g.rI, dir);
   } else if (D.handle === 't' || D.handle === 'r') {
-    from = D.handle === 't' ? 0 : g.hT; to = D.handle === 't' ? g.hT : g.hR;
+    from = (D.handle === 't' ? g.dimT : g.dimR)[0]; to = (D.handle === 't' ? g.dimT : g.dimR)[1];
     text = NSO_teFmtMm(D.handle === 't' ? g.T : g.run) + ' mm';
     anchor = NSO_teAt(g, (from + to) / 2, R, dir);
   } else { NSO_teHideCallout(); return; }

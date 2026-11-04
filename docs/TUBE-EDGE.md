@@ -911,11 +911,27 @@ them).
 **The card.** One flag, **Keep length**, under Profile, amber. Ticked, the
 readout says `Expander, length kept: Ø44.62 / bore Ø34.47 at the end, then
 easing back to the tube's Ø40.62 / bore Ø30.47 over 30.0 mm (3.8° outside, 3.8°
-bore) · the tube stays 40.62 mm long · wall 5.08 → 5.07`. The Reducer's four
-rings stand *past* the end, so with the box ticked they are not drawn or
-grabbed (`NSO_teReducerGeom()` is null): the numbers are typed, and the arrow
-keys do nothing for the Reducer. The box is kept across Set, like the other
-fields.
+bore) · the tube stays 40.62 mm long · wall 5.08 → 5.07`.
+
+**The four rings are handles here too**, laid down the tube instead of out past
+it (same grab, hover, readout, measure chip, Escape, 0.1 mm with Shift):
+- **OD / ID rings** stand on the end ring itself - the new Ø is there. Drag
+  toward or away from the axis for New Ø / New bore.
+- **R ring** a Run below the end, outside everything. **Always drawn** with Keep
+  length, at Run 0 too (it then stands on the end): drag it down the tube to
+  make a run. Dragging it moves the T ring with it, the Transition held.
+- **T ring** a Transition below the R ring - where the tube's own Ø resumes.
+  Drag it down for a longer Transition, up for a shorter, the Run held.
+- Dragging down the tube *lengthens* (the plain Reducer's rings lengthen going
+  out), to 0 and no less; Up / Down move the ring last touched the way it moves
+  on screen. The dimension line and its chip run between the planes they
+  measure (end to R, R to T). Past what the tube has the ghost goes and the
+  readout says how much it has (`Use 39.6 mm or less between them`), as when
+  typing.
+- **Shift + T** (pulling a run out of the T ring) is the plain Reducer's; here
+  the R ring is already there to pull.
+
+The box is kept across Set, like the other fields.
 
 ### Refusals, in words, the piece unchanged
 
@@ -948,7 +964,5 @@ mm tall), Undo, untick.
 - **Bevelled and leaning rims** (a wall more than 0.06° off the axis) are
   refused by the straight-wall scan, in the words above. The plain Reducer
   still does them.
-- **Handles are off while it is ticked** rather than redrawn inward; the
-  numbers are the interface. Drawn inward they are a follow-up.
 - **Only the straight wall of one tube.** A tube with a hole, a boss or a
   second shell inside D is refused, not worked around.

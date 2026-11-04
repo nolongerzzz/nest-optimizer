@@ -264,7 +264,12 @@ withApp(async (page, logs) => {
   console.log('   readout: ' + K.readout);
   check('ticked: the readout says Expander, length kept, Ø26 / bore Ø22.8 at the end for 4 mm, back to Ø20 / Ø16.8 over 10, the tube stays 40 mm',
     K.on && /^Expander, length kept: Ø26\.00 \/ bore Ø22\.80 at the end for 4\.0 mm, then easing back to the tube's Ø20\.00 \/ bore Ø16\.80 over 10\.0 mm .* · the tube stays 40\.00 mm long · wall 1\.60/.test(K.readout), K.readout);
-  check('...the ghost is up, Set is live, and the length rings (stood past the end) are not drawn', K.ghost && !K.goDisabled && !K.handles);
+  check('...the ghost is up and Set is live', K.ghost && !K.goDisabled);
+  // the rings are handles here too, laid down the tube: OD and ID on the end ring, R a Run (4) below it, T a Transition (10) below that
+  const RG = await page.evaluate(() => { const g = NSO_teReducerGeom(); return g && { keep: g.keep, hO: g.hO, hI: g.hI, hR: g.hR, hT: g.hT, rings: NSO_teReducerRings(g).map(q => q[0]).join(),
+    live: state.tubeEdge.ring.children.map(c => c.userData.teHandle).join() }; });
+  check('Keep length: the OD / ID rings stand on the end (z 0), the R ring 4 mm down, the T ring 14 mm down, all four drawn (R even at Run 0)',
+    RG && RG.keep && RG.hO === 0 && RG.hI === 0 && RG.hR === -4 && RG.hT === -14 && RG.rings === 'od,id,t,r' && /od,id,t,r$/.test(RG.live.replace(/^,?(?:undefined,?)*/, '').replace(/^.*?(od,id,t,r)$/, '$1')), JSON.stringify(RG));
   const keepExpect = await page.evaluate(() => Array.from(state.tubeEdge.result.tris).join(','));
   await frame(page, 28, 75);
   await shot(page, 'tube-edge-keep-ghost.png');
@@ -276,6 +281,59 @@ withApp(async (page, logs) => {
   await setField(page, 'inp-te-trans', '10');
   await page.waitForFunction(() => !!(state.tubeEdge.result && state.tubeEdge.result.ok), null, { timeout: 15000 });
   check('...and back to 10 the same ghost is back, soup for soup', (await page.evaluate(() => Array.from(state.tubeEdge.result.tris).join(','))) === keepExpect);
+  // THE RINGS, DRAGGED: the T ring 4 mm further down the tube is Transition +4 (the Run held); the R ring 3 mm down is Run +3; with Run 0 the R ring is still there to pull
+  await frame(page, 20, 130);
+  const ringPt = (handle, dh) => page.evaluate(([handle, dh]) => {
+    const g = NSO_teReducerGeom(), r = NSO_teReducerRings(g).find(q => q[0] === handle), m = g.m;
+    let best = null;
+    for (let i = 0; i < 96; i++) {                         // the ring's right-most point on screen: edge-on, clear of the other rings
+      const a = 2 * Math.PI * i / 96, O = NSO_teAxisPoint(g, r[1] + dh);
+      const raw = [0, 1, 2].map(k => O[k] + r[2] * (Math.cos(a) * g.e1[k] + Math.sin(a) * g.e2[k]));
+      const P = NSO_teScreen(m, raw);
+      if (!best || P.x > best.x) best = { x: P.x, y: P.y };
+    }
+    return best;
+  }, [handle, dh]);
+  const fieldsNow = () => page.evaluate(() => ({ trans: document.getElementById('inp-te-trans').value, run: document.getElementById('inp-te-run').value,
+    od2: document.getElementById('inp-te-od2').value, id2: document.getElementById('inp-te-id2').value, callout: (document.getElementById('te-callout') || {}).textContent,
+    hit: null }));
+  const hitAt = pt => page.evaluate(([x, y]) => NSO_teNeckHit(x, y), [pt.x, pt.y]);
+  const T0p = await ringPt('t', 0), T1p = await ringPt('t', -4);
+  check('the T ring (14 mm down) is the handle under the pointer there', (await hitAt(T0p)) === 't', JSON.stringify(T0p));
+  await page.mouse.move(T0p.x, T0p.y); await page.mouse.down(); await page.mouse.move(T1p.x, T1p.y, { steps: 12 });
+  let Fd = await fieldsNow();
+  check('mid-drag, T 4 mm further down: the chip reads 14.0 mm, the dimension line is between the R and T rings', +Fd.trans === 14 && /^14\.0 mm$/.test(Fd.callout || ''), JSON.stringify(Fd));
+  await page.mouse.up();
+  Fd = await fieldsNow();
+  const geo = await page.evaluate(() => { const g = NSO_teReducerGeom(); return { hR: g.hR, hT: g.hT, ok: !!(state.tubeEdge.result && state.tubeEdge.result.ok), read: document.getElementById('te-readout').textContent }; });
+  check('T ring 4 mm down the tube: Transition 14, the Run held at 4, the Ø kept; the T ring now 18 mm down; the ghost still ok', +Fd.trans === 14 && +Fd.run === 4 && +Fd.od2 === 26 && geo.hT === -18 && geo.hR === -4 && geo.ok, JSON.stringify([Fd, geo]));
+  const R0p = await ringPt('r', 0), R1p = await ringPt('r', -3);
+  check('the R ring (4 mm down) is the handle there', (await hitAt(R0p)) === 'r');
+  await page.mouse.move(R0p.x, R0p.y); await page.mouse.down(); await page.mouse.move(R1p.x, R1p.y, { steps: 12 });
+  await page.mouse.up();
+  Fd = await fieldsNow();
+  const geo2 = await page.evaluate(() => { const g = NSO_teReducerGeom(); return { hR: g.hR, hT: g.hT, ok: !!(state.tubeEdge.result && state.tubeEdge.result.ok) }; });
+  check('R ring 3 mm down: Run 7, the Transition held at 14 (the T ring follows, 21 mm down)', +Fd.run === 7 && +Fd.trans === 14 && geo2.hR === -7 && geo2.hT === -21 && geo2.ok, JSON.stringify([Fd, geo2]));
+  // dragging a ring back up the tube shortens it, to 0 and no further; Up / Down step it the way it moves on screen
+  const R2p = await ringPt('r', 0), R3p = await ringPt('r', 12);
+  await page.mouse.move(R2p.x, R2p.y); await page.mouse.down(); await page.mouse.move(R3p.x, R3p.y, { steps: 12 }); await page.mouse.up();
+  Fd = await fieldsNow();
+  check('R ring dragged up past the end: Run 0 and no less; the R ring stays up, on the end, outside the Ø rings', +Fd.run === 0 &&
+    (await page.evaluate(() => NSO_teReducerRings(NSO_teReducerGeom()).map(q => q[0]).join())) === 'od,id,t,r');
+  // the Ø rings on the end ring: OD 1.5 mm in is New Ø -3
+  const O0p = await page.evaluate(() => { const g = NSO_teReducerGeom(); let best = null;
+    for (let i = 0; i < 96; i++) { const a = 2 * Math.PI * i / 96, O = NSO_teAxisPoint(g, 0), raw = [0, 1, 2].map(k => O[k] + g.rO * (Math.cos(a) * g.e1[k] + Math.sin(a) * g.e2[k]));
+      const P = NSO_teScreen(g.m, raw); if (!best || P.x > best.x) best = { x: P.x, y: P.y, a }; }
+    const a = best.a, O = NSO_teAxisPoint(g, 0), raw2 = [0, 1, 2].map(k => O[k] + (g.rO - 1.5) * (Math.cos(a) * g.e1[k] + Math.sin(a) * g.e2[k])), P2 = NSO_teScreen(g.m, raw2);
+    return { x: best.x, y: best.y, x2: P2.x, y2: P2.y }; });
+  check('the OD ring on the end is the handle there', (await hitAt(O0p)) === 'od');
+  await page.mouse.move(O0p.x, O0p.y); await page.mouse.down(); await page.mouse.move(O0p.x2, O0p.y2, { steps: 12 }); await page.mouse.up();
+  Fd = await fieldsNow();
+  check('OD ring 1.5 mm toward the axis: New Ø 23.00 (was 26), the bore unchanged', +Fd.od2 === 23 && +Fd.id2 === 22.8, JSON.stringify(Fd));
+  // back to the numbers the Set below is checked against
+  await setField(page, 'inp-te-od2', '26'); await setField(page, 'inp-te-trans', '10'); await setField(page, 'inp-te-run', '4');
+  await page.waitForFunction(() => !!(state.tubeEdge.result && state.tubeEdge.result.ok), null, { timeout: 15000 });
+  check('...and typed back to Ø26 / 10 / 4 the ghost is the first one again, soup for soup', (await page.evaluate(() => Array.from(state.tubeEdge.result.tris).join(','))) === keepExpect);
   await page.click('#btn-te-go');
   await page.waitForFunction(() => /Tube edge done|Tube edge refused/.test(document.getElementById('status').textContent), null, { timeout: 30000 });
   const stK = await statusOf(page);
@@ -296,7 +354,7 @@ withApp(async (page, logs) => {
   await page.click('#chk-te-keep');
   await page.waitForFunction(() => !/length kept/.test(document.getElementById('te-readout').textContent), null, { timeout: 15000 });
   K = await page.evaluate(() => ({ on: document.getElementById('chk-te-keep').checked, handles: !!NSO_teReducerGeom(), readout: document.getElementById('te-readout').textContent }));
-  check('unticked: the plain reducer (its length rings back) - ' + K.readout.slice(0, 40), !K.on && K.handles && /^Expander: /.test(K.readout), K.readout);
+  check('unticked: the plain reducer (its length rings back past the end, no R ring at Run 0) - ' + K.readout.slice(0, 40), !K.on && K.handles && /^Expander: /.test(K.readout), K.readout);
   await page.click('#btn-te-cancel');
 
   console.log('\n=== 10. a closed box is refused in the card ===');
