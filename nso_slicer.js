@@ -1951,8 +1951,13 @@
     anchors.forEach(function (a) {
       var d = a - prev;
       if (d < 1e-6) return;
-      var n = Math.max(1, Math.ceil(d / maxH - 1e-9));
-      for (var q = 1; q <= n; q++) zs.push(prev + d * q / n);
+      /* a stretch after the first stands off the sheet top below it by one part layer, and the sheet above it by one more (Bambu's, measured on the Negative Sphere and the Sphere:
+         10.4, then 10.6, then 12 equal steps to 13.8, then 14.0 and 14.2 - not 14 steps from 10.4 to 14.0). The last stretch ends on the support's own last layer: no sheet above it. */
+      var hp = planes[0].h, offS = prev > z0 + 1e-6 && d > 4 * hp - 1e-6 ? hp : 0, offE = offS && a < zEnd - 1e-6 ? hp : 0;
+      if (offS) { zs.push(prev + offS); prev += offS; d = a - prev; }
+      var n = Math.max(1, Math.ceil((d - offE) / maxH - 1e-9));
+      for (var q = 1; q <= n; q++) zs.push(prev + (d - offE) * q / n);
+      if (offE) zs.push(a);
       prev = a;
     });
     if (zs.length < 2) return null;
