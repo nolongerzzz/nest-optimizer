@@ -2,6 +2,7 @@ Test meshes for Claude / Grok. Not shipped to Pages as product files.
 
 - box-20mm.stl — closed 20 mm cube, origin-centered, Z-up, 12 triangles.
   Soften gate: one Square split, then Corners / Round / Bevel at R=0.5. Lid must stay on the cut plane.
+- notch_u.stl — a 47 x 35.43 x 36 mm block with a U-shaped notch (26 wide, 29.43 deep, open at the front) through all of Z, 28 triangles. The piece a Thicken-fills-a-notch ticket came with; `thicken:drive` section 13 fills it.
 - box_cavity_30.stl — 30 mm cube, 2 mm walls round a sealed 26 mm cavity: two
   shells, the cavity's faces wound into it. Origin-centered, 24 triangles.
   Cut gate (`cut:bore`, `wire:cut-bore`): through the cavity each piece's cut

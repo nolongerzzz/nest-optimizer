@@ -31,9 +31,15 @@
          bit for bit; one Undo
      10. Cancel (and Escape, and the button again) leaves the piece alone
      11. per-face - a click on a wall thickens that wall only, outer and inner;
-         a wall on the wrong side for the verb is refused in words
+         a wall on the other side from the armed verb takes the wall's side
+         (the verb flips, and says so) instead of refusing
      12. Hollow's number box takes a click and a typed number, and Hollow runs
-         on it */
+         on it
+     13. filling a notch (docs/handoff/thicken-fill-a-notch.md) - fixtures/
+         notch_u.stl, a block with a U notch through it: click the notch's back
+         wall with Thicken OUT armed, the verb follows to Thicken in, the slider
+         runs to the piece's size, the ghost carries the added slab, Set moves
+         that wall and nothing else, the engine refuses past the far wall */
 
 const fs = require('fs');
 const os = require('os');
@@ -477,11 +483,16 @@ withApp(async (page, logs) => {
     check('  ...the outer bbox is untouched, 60 x 40 x 25', await rawBox(page).then(b => b.size.every((v, k) => near(v, [60, 40, 25][k], 1e-5))));
     await undo(page);
 
-    // -- a wall on the wrong side for the verb: refused in words --
+    // -- a wall on the other side from the armed verb: the click takes the wall's side --
     await page.click('#btn-thicken-out');
     await realClick(page, await screenOfRaw(page, [mid[0], mid[1], bb.lo[2] + 2]));
     const wr = await live(page);
-    check('Thicken out on the cavity floor: refused in words (the wall picked is on the inside), Set greyed, nothing baked', !wr.ok && /^Thicken out 1.5 mm refused - the wall you picked is on the inside/.test(wr.readout) && await page.isDisabled('#btn-thicken-set') && sameFloats(await rawOf(page), orig), wr.readout);
+    check('Thicken out armed, click the cavity floor: the verb follows the wall - Thicken in, ghost live, Set live, nothing baked',
+      wr.mode === 'in' && wr.ok && wr.wall && wr.moved === wr.wall.count && /^Thicken in 1.5 mm - /.test(wr.readout) && !(await page.isDisabled('#btn-thicken-set')) && sameFloats(await rawOf(page), orig), wr.readout);
+    check('  ...the Thicken in button is the lit one, and the status line says why', (await ghostState(page)).inOn === 'true' && (await ghostState(page)).outOn === 'false' && /that wall faces a notch or pocket, so it grows into the gap/.test(await statusOf(page)), await statusOf(page));
+    await page.click('#btn-thicken-out');
+    const hand = await live(page);
+    check('a verb pressed BY HAND with a wall picked is still the engine\'s refusal (no silent flip of what the person chose)', hand.mode === 'out' && !hand.ok && /the wall you picked is on the inside/.test(hand.readout) && await page.isDisabled('#btn-thicken-set'), hand.readout);
     await page.click('#btn-thicken-whole');
     check('  ...Whole piece brings the ghost back and Set with it', (await live(page)).ok && !(await page.isDisabled('#btn-thicken-set')));
     await page.click('#btn-thicken-cancel');
@@ -508,6 +519,74 @@ withApp(async (page, logs) => {
     check('  ...one Undo step', (await undoDepth(page)) === 1);
     await undo(page);
     check('  ...Hollow to safe min is on its own row, the full width, and still there', await page.evaluate(() => { const b = document.getElementById('btn-hollow-safe'), h = document.getElementById('btn-hollow'); return !!b && b.getBoundingClientRect().width > h.getBoundingClientRect().width && b.getBoundingClientRect().top > h.getBoundingClientRect().bottom - 1; }));
+  }
+
+
+  console.log('\n=== 13. filling a notch: click a notch wall, slide, see the slab, Set ===');
+  {
+    await page.click('#btn-clear-plate');
+    const id = await loadSTL(page, fx('notch_u.stl')); await selectModel(page, id);
+    await page.evaluate(() => { document.getElementById('menu-add').open = true; });
+    const bb = await rawBox(page), orig = await rawOf(page), v0 = await rawVolume(page);
+    // the notch: x -12.3 .. 13.696398, from the open front (y -17.7165) back to the wall at y 11.712896, through all of z
+    const xl = -12.3, xr = 13.696398, yBack = 11.712896, width = xr - xl, height = bb.size[2], depth = yBack - bb.lo[1];
+    await frameOn([0.3, -0.8, 0.6])(page);
+    await page.click('#btn-thicken-out');
+    const w0 = await live(page);
+    check('armed on the whole piece: the slider stops at 8 (the skin)', w0.wall === null && w0.sliderMax === 8 && !w0.slab, 'max ' + w0.sliderMax);
+    await realClick(page, await screenOfRaw(page, [(xl + xr) / 2, yBack, (bb.lo[2] + bb.hi[2]) / 2]));
+    const p1 = await live(page);
+    check('Thicken OUT armed, a click on the notch\'s back wall: one wall (2 triangles), and the verb is Thicken in', p1.wall && p1.wall.count === 2 && p1.mode === 'in' && p1.ok, p1.readout);
+    check('  ...the Thicken in button is lit, Set is live', (await ghostState(page)).inOn === 'true' && !(await page.isDisabled('#btn-thicken-set')));
+    check('  ...the slider now runs to the piece\'s size: 47, not 8', p1.sliderMax === Math.ceil(Math.max(...bb.size)) && p1.sliderMax === 47, 'max ' + p1.sliderMax);
+    check('  ...the ghost carries the slab the wall would add', p1.slab && await page.evaluate(() => !!nsoThickenLive.objects().slab));
+
+    await setMm(page, 12);
+    const p2 = await live(page);
+    check('slider at 12 (past the old 8 limit): ok, still one wall moving', p2.ok && p2.mm === 12 && p2.moved === 2 && p2.slab, p2.readout);
+    const ghost = Array.from(p2.soup);
+    // -- the slab is the wall's rim swept: a 26 x 36 x 12 box --
+    const slabBox = await page.evaluate(() => {
+      const g = nsoThickenLive.objects().slab.geometry; g.computeBoundingBox();
+      const sz = new THREE.Vector3(); g.boundingBox.getSize(sz); return [sz.x, sz.y, sz.z].sort((a, b) => a - b);
+    });
+    const want = [12, width, height].sort((a, b) => a - b);
+    check('  ...the slab is the added block: ' + want.map(v => v.toFixed(2)).join(' x '), slabBox.every((v, k) => near(v, want[k], 1e-3)), slabBox.map(v => v.toFixed(3)).join(' x '));
+
+    await setMm(page, 40);
+    const p3 = await live(page);
+    check('slider at 40: past the far wall - refused in words by the engine, Set greyed, no slab', !p3.ok && /40 mm is more than the feature it grows into/.test(p3.readout) && await page.isDisabled('#btn-thicken-set') && !p3.slab, p3.readout);
+    await setMm(page, 12);
+
+    await page.click('#btn-thicken-set');
+    await page.waitForFunction(() => !nsoThickenLive.on(), null, { timeout: 30000 });
+    const baked = await rawOf(page), nb = await rawBox(page);
+    check('Set: the piece is the ghost, bit for bit', sameFloats(baked, ghost));
+    check('  ...the outer box is untouched', [0, 1, 2].every(k => near(nb.lo[k], bb.lo[k], 1e-5) && near(nb.hi[k], bb.hi[k], 1e-5)), nb.size.join(' x '));
+    let moved = 0, stray = 0;
+    for (let i = 0; i < orig.length; i += 3) {
+      const d = [0, 1, 2].map(k => baked[i + k] - orig[i + k]);
+      if (Math.hypot(...d) > 1e-6) { moved++; if (!(near(orig[i + 1], yBack, 1e-4) && near(d[1], -12, 1e-4) && near(d[0], 0, 1e-4) && near(d[2], 0, 1e-4))) stray++; }
+    }
+    check('  ...every corner that moved was on the back wall and went 12 mm toward the open front (' + moved + ' corners, ' + stray + ' stray)', moved > 0 && stray === 0);
+    check('  ...volume grew by exactly the filled block: ' + width.toFixed(3) + ' x ' + height.toFixed(3) + ' x 12', near((await rawVolume(page)) - v0, width * height * 12, 0.05), ((await rawVolume(page)) - v0).toFixed(3) + ' vs ' + (width * height * 12).toFixed(3));
+    check('  ...the notch is shallower by 12: ' + (depth - 12).toFixed(3) + ' deep', near(depth, 29.4294, 1e-3), 'was ' + depth.toFixed(4));
+    check('  ...slider is back to the whole piece\'s 8', (await page.evaluate(() => +document.getElementById('inp-thicken-mm').max)) === 8);
+    await undo(page);
+    check('Undo: the original notch', sameFloats(await rawOf(page), orig));
+
+    // -- the side wall too, from the other verb --
+    await page.click('#btn-thicken-in');
+    await realClick(page, await screenOfRaw(page, [xl, (yBack + bb.lo[1]) / 2, (bb.lo[2] + bb.hi[2]) / 2]));
+    const l1 = await live(page);
+    check('Thicken in armed, a click on the notch\'s left wall: that wall, Thicken in (no flip needed), slider to 47', l1.wall && l1.wall.count === 2 && l1.mode === 'in' && l1.ok && l1.sliderMax === 47, l1.readout);
+    await setMm(page, 20);
+    check('  ...20 mm of a 26 mm wide notch: ok', (await live(page)).ok);
+    await setMm(page, 26);
+    const l2 = await live(page);
+    check('  ...26 mm (the whole width): refused in words', !l2.ok && /more than the feature it grows into/.test(l2.readout), l2.readout);
+    await page.click('#btn-thicken-cancel');
+    check('Cancel: no slab left, slider back to 8, piece untouched', !(await page.evaluate(() => !!nsoThickenLive.objects().slab)) && (await page.evaluate(() => +document.getElementById('inp-thicken-mm').max)) === 8 && sameFloats(await rawOf(page), orig));
   }
 
   const errs = logs.filter(l => l.startsWith('[pageerror]'));

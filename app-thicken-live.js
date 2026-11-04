@@ -31,9 +31,19 @@
      Cancel / Escape            drops the ghost; the piece was never touched.
 
    Per-face needed no engine call that did not exist: mayMove is the filter.
-   A wall on the wrong side for the verb (an outside face with Thicken in) is
-   the engine's own refusal - "no face on the asked side survives" - and the
-   readout says it.
+
+   FILLING A NOTCH (docs/handoff/thicken-fill-a-notch.md): a wall in a notch,
+   slot or pocket is an INSIDE face to the engine, so only Thicken in moves it.
+   A click on a wall therefore takes the side the wall is on: arm Thicken out,
+   click a notch wall, and the verb flips to Thicken in (and says so) rather
+   than refusing - both verbs only ever ADD material to the wall, so the click
+   already says which one. With a wall picked the slider runs to the piece's own
+   size, not 8 mm (a notch is often wider than that); the engine is still the
+   limit and refuses past the opposite wall in words ("more than the feature it
+   grows into"). The ghost draws the material the wall would add as a solid
+   slab (the wall's old position swept to its new one), not only the faces that
+   land. A verb button pressed by hand with a wall already picked keeps the
+   engine's own refusal.
 
    NOT SLOWED: only _thickenOffsetSoup runs on a slider move. The piercing
    check (NSO_Repair, the slow part) runs when the slider is let go, so a
@@ -49,10 +59,13 @@
   var GHOST_OPACITY = 0.2;
   var MOVE_EPS = 1e-6;            // mm: a vertex that moved less than this has not moved
   var CLICK_PX = 5, CLICK_MS = 600;
+  var SLIDER_MAX_WHOLE = 8;       // mm: the whole piece (the slider's own max in index.html)
+  var SLIDER_MAX_WALL_CAP = 200;  // mm: a picked wall may run to the piece's size, never past this
 
   var on = false, mode = 'out';
   var m = null, soupRef = null, geoRef = null, usingRaw = false, mesh = null;
-  var group = null, movedObj = null, edgeObj = null, wallObj = null;
+  var group = null, movedObj = null, edgeObj = null, wallObj = null, slabObj = null, slabEdgeObj = null;
+  var sizeMm = 0;                 // the piece's longest extent: what a picked wall's slider runs to
   var ghostSaved = null;
   var topo = null;                // { soupRef, nf, tri, fn, outer, vertFaces } for the wall pick
   var wall = null;                // { mayMove: Uint8Array, count, seed }
@@ -75,6 +88,14 @@
     return isFinite(v) && v > 0 ? v : 1.5;
   }
   function fmt(v) { return (Math.round(v * 100) / 100).toString(); }
+  function extentOf(soup) {
+    var lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    for (var i = 0; i < soup.length; i += 3) for (var k = 0; k < 3; k++) {
+      if (soup[i + k] < lo[k]) lo[k] = soup[i + k];
+      if (soup[i + k] > hi[k]) hi[k] = soup[i + k];
+    }
+    return Math.max(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]);
+  }
 
   /* ---------------------------------------------------------------
      The piece
@@ -210,8 +231,37 @@
     }
     if (seed < 0) for (var j = 0; j < hits.length; j++) { var g = hits[j].faceIndex; if (g < T.nf && T.fn.ok[g]) { seed = g; break; } }
     if (seed < 0) return false;
-    if (wall && wall.mayMove[seed]) clearWall(); else setWall(growWall(seed));
+    if (wall && wall.mayMove[seed]) clearWall();
+    else {
+      setWall(growWall(seed));
+      followWallSide(T.outer[seed] === 1 ? 'out' : 'in');
+    }
     return true;
+  }
+
+  /* The wall you clicked is on one side only. A notch / pocket wall is an inside
+     face (Thicken in grows it into the gap); an outer skin is Thicken out's. Both
+     add material, so the click already says which verb - take it. */
+  function followWallSide(want) {
+    if (want === mode) return;
+    mode = want;
+    showPanel(true);
+    say(want === 'in'
+      ? 'Thicken in - that wall faces a notch or pocket, so it grows into the gap'
+      : 'Thicken out - that wall is on the outside, so it grows outward');
+  }
+
+  /* The slider's top: 8 mm for the whole piece (the skin), the piece's own size
+     for one picked wall - a notch can be wider than 8. */
+  function syncRange() {
+    var s = slider();
+    if (!s) return;
+    var max = SLIDER_MAX_WHOLE;
+    if (on && wall && sizeMm > SLIDER_MAX_WHOLE) max = Math.min(SLIDER_MAX_WALL_CAP, Math.ceil(sizeMm));
+    if (+s.max !== max) {
+      s.max = String(max);
+      if (parseFloat(s.value) > max) s.value = String(max);
+    }
   }
 
   function setWall(w) { wall = w; dirty = true; }
@@ -225,11 +275,14 @@
     disposeObj(movedObj); movedObj = null;
     disposeObj(edgeObj); edgeObj = null;
     disposeObj(wallObj); wallObj = null;
+    disposeObj(slabObj); slabObj = null;
+    disposeObj(slabEdgeObj); slabEdgeObj = null;
   }
 
   function redraw() {
     dirty = false;
     clearDrawn();
+    syncRange();
     var mm = mmNow();
     var res;
     try { res = _thickenOffsetSoup(soupRef, mode, mm, wall ? { mayMove: wall.mayMove } : undefined); }
@@ -258,6 +311,7 @@
         group.add(edgeObj);
       }
     }
+    if (wall && last.soup) drawSlab();
     if (wall) {
       var wt = [];
       for (var f = 0; f < wall.mayMove.length; f++) if (wall.mayMove[f]) for (var c = 0; c < 9; c++) wt.push(soupRef[f * 9 + c]);
@@ -267,6 +321,43 @@
       group.add(wallObj);
     }
     readout();
+  }
+
+  /* The material a picked wall would ADD, as a solid: the wall's rim swept from
+     where it stands to where it lands. Only the patch's boundary edges are swept
+     (a wall of many triangles has no sheets inside it). The faces that land are
+     already the green; this is what fills the gap between. */
+  function drawSlab() {
+    var T = topology(), soup = last.soup, nf = T.nf, edges = Object.create(null), tris = [];
+    function key(a, b) { return a < b ? a + '_' + b : b + '_' + a; }
+    for (var f = 0; f < nf; f++) {
+      if (!wall.mayMove[f]) continue;
+      for (var k = 0; k < 3; k++) {
+        var e = key(T.tri[f * 3 + k], T.tri[f * 3 + (k + 1) % 3]);
+        edges[e] = edges[e] ? edges[e] + 1 : 1;
+      }
+    }
+    function pt(arr, f, k) { return [arr[f * 9 + k * 3], arr[f * 9 + k * 3 + 1], arr[f * 9 + k * 3 + 2]]; }
+    for (var t = 0; t < nf; t++) {
+      if (!wall.mayMove[t]) continue;
+      for (var c = 0; c < 3; c++) {
+        var d = (c + 1) % 3;
+        if (edges[key(T.tri[t * 3 + c], T.tri[t * 3 + d])] !== 1) continue;
+        var a0 = pt(soupRef, t, c), b0 = pt(soupRef, t, d), a1 = pt(soup, t, c), b1 = pt(soup, t, d);
+        Array.prototype.push.apply(tris, a0.concat(b0, b1, a0, b1, a1));
+      }
+    }
+    if (!tris.length) return;
+    var g = localGeo(new Float32Array(tris));
+    g.computeVertexNormals();
+    slabObj = new THREE.Mesh(g, new THREE.MeshBasicMaterial({
+      color: 0x86efac, side: THREE.DoubleSide, transparent: true, opacity: 0.3, depthWrite: false }));
+    slabObj.renderOrder = 41;
+    group.add(slabObj);
+    slabEdgeObj = new THREE.LineSegments(new THREE.EdgesGeometry(g, 20),
+      new THREE.LineBasicMaterial({ color: 0xbbf7d0, transparent: true, opacity: 0.7, depthTest: false }));
+    slabEdgeObj.renderOrder = 43;
+    group.add(slabEdgeObj);
   }
 
   /* Would Set be refused for piercing? The slow check, run on release. */
@@ -357,6 +448,7 @@
     on = true; mode = which;
     m = model; soupRef = src.soup; geoRef = model.geometry; usingRaw = src.raw; mesh = ms;
     wall = null; topo = null; pierceBase = null; last = null;
+    sizeMm = extentOf(soupRef);
     openView();
     showPanel(true);
     redraw(); gate();
@@ -384,6 +476,7 @@
     closeView();
     showPanel(false);
     on = false;
+    syncRange();                                  // the slider goes back to the whole piece's 8 mm
     m = null; soupRef = null; geoRef = null; mesh = null; topo = null; wall = null; last = null; press = null; pierceBase = null;
     readout();
   }
@@ -501,16 +594,18 @@
         ok: !!(last && last.soup), reason: last && last.res && last.res.reason, gateWhy: last && last.gateWhy,
         moved: last && last.res ? last.res.moved : null, held: last && last.res ? last.res.held : null,
         movedTris: last ? last.movedTris : null, soup: last ? last.soup : null,
+        sliderMax: +(slider() || {}).max, slab: !!slabObj,
         readout: ($('thicken-readout') || {}).textContent, modelId: m.id
       } : null;
     },
     pickTriangle: function (seed) {                  // for a check that names a triangle rather than aiming a click
       if (!on) return false;
-      if (wall && wall.mayMove[seed]) clearWall(); else setWall(growWall(seed));
+      if (wall && wall.mayMove[seed]) clearWall();
+      else { setWall(growWall(seed)); followWallSide(topology().outer[seed] === 1 ? 'out' : 'in'); }
       redraw(); gate();
       return true;
     },
-    objects: function () { return { group: group, moved: movedObj, edges: edgeObj, wall: wallObj, mesh: mesh }; }
+    objects: function () { return { group: group, moved: movedObj, edges: edgeObj, wall: wallObj, slab: slabObj, mesh: mesh }; }
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bind);
