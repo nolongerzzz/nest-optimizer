@@ -1457,7 +1457,7 @@
       capRise: opts.capRiseMm == null ? CAP_RISE_MM : +opts.capRiseMm,
       capMin: opts.capMinMm == null ? CAP_MIN_MM : +opts.capMinMm,
       capMax: opts.capMaxMm == null ? CAP_MAX_MM : +opts.capMaxMm,
-      slabEps: opts.slabEpsMm == null ? 0.12 : +opts.slabEpsMm,      /* how far the traced outline may stray from the mask's own edge when it is simplified */
+      slabEps: opts.slabEpsMm == null ? 0.04 : +opts.slabEpsMm,      /* how far the traced outline may stray from the mask's own edge when it is simplified: 0.04, so a curve keeps its points (0.12 cut a round plate into flat sides) */
       slab: opts.slabPlate === true || opts.slabPlate === 'weak' ? opts.slabPlate : false,                      /* a region plate laid as one solid footprint for the slicer to fill (slabOfMask), not as loops and lines */
       flare: opts.regionFlare === true,                                 /* a tip under a region plate ends in a flared cap, as Bambu's legs do (flareOf), not a bare column */
       eps: EPS_MM
