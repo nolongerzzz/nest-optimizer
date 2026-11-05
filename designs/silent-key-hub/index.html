@@ -168,6 +168,15 @@ details[open] summary { margin-bottom: 10px; }
   </aside>
 </div>
 
+<script>
+// Show load failures on the page instead of hanging on "Loading".
+(function () {
+  function show(msg) { var el = document.getElementById('loading'); if (el && !window.__KEYHUB_STARTED__) { el.hidden = false; el.textContent = msg; } }
+  window.addEventListener('error', function (e) { show('Viewer error: ' + (e.message || (e.target && (e.target.src || e.target.href)) || 'unknown')); }, true);
+  window.addEventListener('unhandledrejection', function (e) { show('Viewer error: ' + (e.reason && e.reason.message || e.reason)); });
+  setTimeout(function () { show('Still loading after 20 s. The 3D library (cdn.jsdelivr.net) may be blocked on this network.'); }, 20000);
+})();
+</script>
 <script type="importmap">
 { "imports": {
   "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
@@ -175,13 +184,17 @@ details[open] summary { margin-bottom: 10px; }
 } }
 </script>
 <script type="module">
-import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js';
-import { PARAMS, DEFAULTS, build, derive, lint, leafLift, sweepCheck } from './keyhub-model.js';
-
 const $ = (id) => document.getElementById(id);
+const status = (t) => { $('loading').textContent = t; };
+status('Loading 3D library…');
+const THREE = await import('three');
+const { OrbitControls } = await import('three/addons/controls/OrbitControls.js');
+const { RoomEnvironment } = await import('three/addons/environments/RoomEnvironment.js');
+const { toCreasedNormals } = await import('three/addons/utils/BufferGeometryUtils.js');
+// The published page carries the model inline (window.__KEYHUB_MODEL__); in
+// the repo it is a sibling file.
+const { PARAMS, DEFAULTS, build, derive, lint, leafLift, sweepCheck } = window.__KEYHUB_MODEL__ || await import('./keyhub-model.js');
+
 const TAB_COLORS = [0xe9782c, 0x5b8fd0, 0xe9c22c, 0xcdb48a, 0x7c8048, 0xd99a2b, 0xc7b37d, 0x9b6bb3, 0x5fae9a, 0xd0605b, 0x8aa4c7, 0xb9b9b9];
 
 // ---------- renderer ----------
@@ -216,13 +229,19 @@ const mats = {
 const tabMats = TAB_COLORS.map((c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.5 }));
 
 function geomOf(man) {
-  const m = man.getMesh();
+  const m = man.getMesh ? man.getMesh() : man;
   const g = new THREE.BufferGeometry();
   const pos = new Float32Array(m.numVert * 3);
   for (let i = 0; i < m.numVert; i++) for (let k = 0; k < 3; k++) pos[i * 3 + k] = m.vertProperties[i * m.numProp + k];
   g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   g.setIndex(new THREE.BufferAttribute(m.triVerts, 1));
   return toCreasedNormals(g, Math.PI / 6);
+}
+
+function unbake(m) {
+  const bytes = (b64) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)).buffer;
+  const vertProperties = new Float32Array(bytes(m.v));
+  return { numProp: 3, numVert: vertProperties.length / 3, vertProperties, triVerts: new Uint32Array(bytes(m.i)) };
 }
 
 // ---------- state ----------
@@ -242,20 +261,29 @@ const targets = [];  // where each key is heading
 // ---------- build scene ----------
 function rebuild() {
   const t0 = performance.now();
-  const next = build(wasm, params);
-  const { P, d } = next;
-  const hubG = geomOf(next.hubNoLeaf());
-  const retG = geomOf(next.retainer);
-  const carG = geomOf(next.carrierLocal);
-  const keyG = geomOf(next.keyLocal);
-  const dowG = geomOf(next.dowelLocal);
-  const pinG = geomOf(next.keyPinLocal);
-  const leafG = geomOf(next.leafLocal.translate([-(d.beamRootU), -d.beamBot, 0]));
-  const tabG = geomOf(next.leafTabLocal.translate([-(d.beamRootU), -d.beamBot, 0]));
-  const eyeG = geomOf(next.eye), nutG = geomOf(next.nut), washG = geomOf(next.washer);
-  let sweep = null;
-  try { sweep = sweepCheck(wasm, next, selected % P.stations, 10); } catch (e) { console.warn(e); }
-  next.dispose();
+  let P, d, G, sweep = null;
+  if (wasm) {
+    const next = build(wasm, params);
+    ({ P, d } = next);
+    G = {
+      hub: next.hubNoLeaf(), ret: next.retainer, car: next.carrierLocal, key: next.keyLocal,
+      dow: next.dowelLocal, pin: next.keyPinLocal,
+      leaf: next.leafLocal.translate([-(d.beamRootU), -d.beamBot, 0]),
+      tab: next.leafTabLocal.translate([-(d.beamRootU), -d.beamBot, 0]),
+      eye: next.eye, nut: next.nut, wash: next.washer,
+    };
+    for (const k in G) G[k] = geomOf(G[k]);
+    try { sweep = sweepCheck(wasm, next, selected % P.stations, 10); } catch (e) { console.warn(e); }
+    next.dispose();
+  } else {
+    // No geometry kernel: show the pre-built default model.
+    ({ P, d } = derive(DEFAULTS));
+    G = {};
+    for (const [k, m] of Object.entries(window.__KEYHUB_BAKED__)) G[k] = geomOf(unbake(m));
+    sweep = { worst: 0, rows: [], baked: true };
+  }
+  const hubG = G.hub, retG = G.ret, carG = G.car, keyG = G.key, dowG = G.dow, pinG = G.pin;
+  const leafG = G.leaf, tabG = G.tab, eyeG = G.eye, nutG = G.nut, washG = G.wash;
   model = { P, d };
 
   if (root) { root.traverse((o) => o.geometry && o.geometry.dispose()); scene.remove(root); }
@@ -373,7 +401,8 @@ function updatePanel(sweep, ms) {
   const issues = lint(params);
   const ul = $('issues'); ul.innerHTML = '';
   const add = (lvl, txt) => { const li = document.createElement('li'); li.className = lvl; li.textContent = txt; ul.appendChild(li); };
-  if (sweep) {
+  if (sweep && sweep.baked) add('warn', 'Showing the pre-built default model. Its swing was checked clear when it was built.');
+  else if (sweep) {
     if (sweep.worst < 0.01) add('good', `Key ${selected + 1} swings 0–90° without touching the hub, retainer or neighbouring keys.`);
     else {
       const bad = sweep.rows.filter((r) => r.volume >= 0.01).map((r) => r.angle + '°');
@@ -551,13 +580,29 @@ function frame(now) {
 
 // ---------- boot ----------
 try {
-  // Published next to the page as ./manifold.js; in the repo it lives in vendor/.
-  let Module;
-  try { Module = (await import('./manifold.js')).default; }
-  catch (_) { Module = (await import('../../vendor/manifold/manifold.js')).default; }
-  wasm = await Module({ locateFile: (f) => new URL(f, import.meta.url).href });
-  wasm.setup();
+  status('Starting geometry kernel…');
+  try {
+    if (window.__KEYHUB_WASM__) {
+      // Published page: the kernel's binary is embedded, so nothing is fetched.
+      const Module = (await import('https://cdn.jsdelivr.net/npm/manifold-3d@3.5.3/manifold.js')).default;
+      const bin = Uint8Array.from(atob(window.__KEYHUB_WASM__), (c) => c.charCodeAt(0));
+      wasm = await Module({ wasmBinary: bin.buffer });
+    } else {
+      const Module = (await import('../../vendor/manifold/manifold.js')).default;
+      wasm = await Module({ locateFile: (f) => new URL('../../vendor/manifold/' + f, import.meta.url).href });
+    }
+    wasm.setup();
+  } catch (e) {
+    console.warn('geometry kernel unavailable', e);
+    wasm = null;
+    if (!window.__KEYHUB_BAKED__) throw e;
+    params = { ...DEFAULTS };
+  }
   buildParamUI();
+  if (!wasm) {
+    for (const el of document.querySelectorAll('#params input, #reset')) el.disabled = true;
+    $('copyOut').textContent = 'This browser blocked the geometry kernel, so you are seeing the default model and the dimension controls are off. Motion, section and explode still work.';
+  }
   rebuild();
   $('loading').hidden = true;
   resize();
@@ -565,6 +610,7 @@ try {
   // open with one key out so the mechanism reads at a glance
   targets[0] = 90;
   requestAnimationFrame(frame);
+  window.__KEYHUB_STARTED__ = true;
 } catch (e) {
   $('loading').textContent = 'Could not start the geometry kernel: ' + e.message;
   console.error(e);

@@ -10,6 +10,7 @@ render, with changes that make it work as a real part.
 | `keyhub-model.js` | the model: parameters, derived numbers, CSG build (manifold-3d), clearance sweep, print orientation |
 | `index.html` | interactive viewer: animate the keys, section and explode views, change parameters, live checks |
 | `build-stl.mjs` | builds, checks and writes print-oriented STLs to `stl/` |
+| `make-artifact.mjs` | bundles the viewer into one self-contained HTML file (`dist/`, not committed) for publishing |
 | `stl/` | STLs at default parameters |
 
 ## Build
