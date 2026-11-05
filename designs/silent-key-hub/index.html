@@ -171,29 +171,137 @@ details[open] summary { margin-bottom: 10px; }
 <script>
 // Show load failures on the page instead of hanging on "Loading".
 (function () {
-  function show(msg) { var el = document.getElementById('loading'); if (el && !window.__KEYHUB_STARTED__) { el.hidden = false; el.textContent = msg; } }
+  var first = null;
+  function show(msg, weak) {
+    var el = document.getElementById('loading');
+    if (!el || window.__KEYHUB_STARTED__) return;
+    if (weak && first) return;   // never hide a real error behind the timeout note
+    if (!weak) first = first || msg;
+    el.hidden = false; el.textContent = weak ? msg : first;
+  }
   window.addEventListener('error', function (e) { show('Viewer error: ' + (e.message || (e.target && (e.target.src || e.target.href)) || 'unknown')); }, true);
   window.addEventListener('unhandledrejection', function (e) { show('Viewer error: ' + (e.reason && e.reason.message || e.reason)); });
-  setTimeout(function () { show('Still loading after 20 s. The 3D library (cdn.jsdelivr.net) may be blocked on this network.'); }, 20000);
+  setTimeout(function () { show('Still loading after 20 s (step: ' + (window.__KEYHUB_STEP__ || 'start') + ').', true); }, 20000);
 })();
 </script>
-<script type="importmap">
-{ "imports": {
-  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
-} }
-</script>
-<script type="module">
+<script>
+(async () => {
 const $ = (id) => document.getElementById(id);
-const status = (t) => { $('loading').textContent = t; };
+const status = (t) => { window.__KEYHUB_STEP__ = t; $('loading').textContent = t; };
 status('Loading 3D library…');
-const THREE = await import('three');
-const { OrbitControls } = await import('three/addons/controls/OrbitControls.js');
-const { RoomEnvironment } = await import('three/addons/environments/RoomEnvironment.js');
-const { toCreasedNormals } = await import('three/addons/utils/BufferGeometryUtils.js');
+// The published page inlines three.js (window.THREE); the repo copy loads it.
+const THREE = window.THREE || await import('https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js');
 // The published page carries the model inline (window.__KEYHUB_MODEL__); in
 // the repo it is a sibling file.
-const { PARAMS, DEFAULTS, build, derive, lint, leafLift, sweepCheck } = window.__KEYHUB_MODEL__ || await import('./keyhub-model.js');
+const { PARAMS, DEFAULTS, build, derive, lint, leafLift, sweepCheck } = window.__KEYHUB_MODEL__ || await import(new URL('./keyhub-model.js', location.href).href);
+status('Setting up the 3D view…');
+
+// Orbit / zoom / pan around a target, Z up. Drag to orbit, right-drag or
+// two fingers to pan, wheel or pinch to zoom.
+class OrbitLite {
+  constructor(camera, el) {
+    this.camera = camera; this.target = new THREE.Vector3();
+    const ptrs = new Map();
+    let last = null;
+    el.addEventListener('contextmenu', (e) => e.preventDefault());
+    el.addEventListener('pointerdown', (e) => { el.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, [e.clientX, e.clientY]); last = this._snap(ptrs); this.pan = e.button === 2 || e.shiftKey; });
+    el.addEventListener('pointermove', (e) => {
+      if (!ptrs.has(e.pointerId)) return;
+      ptrs.set(e.pointerId, [e.clientX, e.clientY]);
+      const now = this._snap(ptrs);
+      if (last && now.n === last.n) {
+        const dx = now.x - last.x, dy = now.y - last.y;
+        if (now.n >= 2) { this._zoom(last.d / Math.max(1, now.d)); this._pan(dx, dy); }
+        else if (this.pan) this._pan(dx, dy);
+        else this._orbit(dx, dy);
+      }
+      last = now;
+    });
+    const up = (e) => { ptrs.delete(e.pointerId); last = this._snap(ptrs); };
+    el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up);
+    el.addEventListener('wheel', (e) => { e.preventDefault(); this._zoom(Math.exp(e.deltaY * 0.0012)); }, { passive: false });
+  }
+  _snap(ptrs) {
+    const p = [...ptrs.values()];
+    if (!p.length) return null;
+    const x = p.reduce((a, q) => a + q[0], 0) / p.length, y = p.reduce((a, q) => a + q[1], 0) / p.length;
+    const d = p.length > 1 ? Math.hypot(p[0][0] - p[1][0], p[0][1] - p[1][1]) : 0;
+    return { n: p.length, x, y, d };
+  }
+  _orbit(dx, dy) {
+    const o = this.camera.position.clone().sub(this.target);
+    const r = o.length();
+    let th = Math.atan2(o.y, o.x) - dx * 0.008;
+    let ph = Math.acos(Math.max(-1, Math.min(1, o.z / r))) - dy * 0.008;
+    ph = Math.max(0.05, Math.min(Math.PI - 0.05, ph));
+    o.set(r * Math.sin(ph) * Math.cos(th), r * Math.sin(ph) * Math.sin(th), r * Math.cos(ph));
+    this.camera.position.copy(this.target).add(o);
+  }
+  _zoom(f) {
+    const o = this.camera.position.clone().sub(this.target);
+    o.setLength(Math.max(40, Math.min(900, o.length() * f)));
+    this.camera.position.copy(this.target).add(o);
+  }
+  _pan(dx, dy) {
+    const dist = this.camera.position.distanceTo(this.target);
+    const s = (2 * dist * Math.tan((this.camera.fov * Math.PI) / 360)) / Math.max(1, canvas.clientHeight);
+    const right = new THREE.Vector3().setFromMatrixColumn(this.camera.matrix, 0);
+    const upv = new THREE.Vector3().setFromMatrixColumn(this.camera.matrix, 1);
+    const move = right.multiplyScalar(-dx * s).add(upv.multiplyScalar(dy * s));
+    this.camera.position.add(move); this.target.add(move);
+  }
+  update() { this.camera.lookAt(this.target); }
+}
+
+// Smooth normals across shallow edges, hard across sharp ones.
+function creasedNormals(g, crease) {
+  const pos = g.getAttribute('position'), idx = g.getIndex().array;
+  const nTri = idx.length / 3, cosC = Math.cos(crease);
+  const fn = new Float32Array(nTri * 3);
+  const A = new THREE.Vector3(), B = new THREE.Vector3(), C = new THREE.Vector3();
+  const byVert = new Map();
+  for (let t = 0; t < nTri; t++) {
+    A.fromBufferAttribute(pos, idx[t * 3]); B.fromBufferAttribute(pos, idx[t * 3 + 1]); C.fromBufferAttribute(pos, idx[t * 3 + 2]);
+    const n = C.sub(B).cross(A.sub(B)).normalize(); // outward for CCW
+    fn[t * 3] = n.x; fn[t * 3 + 1] = n.y; fn[t * 3 + 2] = n.z;
+    for (let k = 0; k < 3; k++) {
+      A.fromBufferAttribute(pos, idx[t * 3 + k]);
+      const key = A.x.toFixed(4) + ',' + A.y.toFixed(4) + ',' + A.z.toFixed(4);
+      let l = byVert.get(key); if (!l) byVert.set(key, (l = [])); l.push(t);
+    }
+  }
+  const out = new Float32Array(nTri * 9), nrm = new Float32Array(nTri * 9);
+  for (let t = 0; t < nTri; t++) for (let k = 0; k < 3; k++) {
+    A.fromBufferAttribute(pos, idx[t * 3 + k]);
+    out.set([A.x, A.y, A.z], (t * 3 + k) * 3);
+    const key = A.x.toFixed(4) + ',' + A.y.toFixed(4) + ',' + A.z.toFixed(4);
+    let x = 0, y = 0, z = 0;
+    for (const u of byVert.get(key)) {
+      const d = fn[t * 3] * fn[u * 3] + fn[t * 3 + 1] * fn[u * 3 + 1] + fn[t * 3 + 2] * fn[u * 3 + 2];
+      if (d >= cosC) { x += fn[u * 3]; y += fn[u * 3 + 1]; z += fn[u * 3 + 2]; }
+    }
+    const l = Math.hypot(x, y, z) || 1;
+    nrm.set([x / l, y / l, z / l], (t * 3 + k) * 3);
+  }
+  const g2 = new THREE.BufferGeometry();
+  g2.setAttribute('position', new THREE.BufferAttribute(out, 3));
+  g2.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
+  return g2;
+}
+
+// A small studio to light the metal parts (replaces three's RoomEnvironment).
+function studioScene() {
+  const s = new THREE.Scene();
+  const room = new THREE.Mesh(new THREE.BoxGeometry(10, 10, 10), new THREE.MeshBasicMaterial({ color: 0x3a3836, side: THREE.BackSide }));
+  s.add(room);
+  const panel = (w, h, c, x, y, z) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ color: c, side: THREE.DoubleSide })); m.position.set(x, y, z); m.lookAt(0, 0, 0); s.add(m); };
+  panel(6, 3, 0xffffff, 0, 0, 4.9);
+  panel(3, 4, 0xfff1d8, 4.9, -1, 1);
+  panel(3, 4, 0xd8e4ff, -4.9, 1, 0.5);
+  panel(8, 1.2, 0x8a847a, 0, -4.9, -1);
+  return s;
+}
+
 
 const TAB_COLORS = [0xe9782c, 0x5b8fd0, 0xe9c22c, 0xcdb48a, 0x7c8048, 0xd99a2b, 0xc7b37d, 0x9b6bb3, 0x5fae9a, 0xd0605b, 0x8aa4c7, 0xb9b9b9];
 
@@ -207,11 +315,10 @@ renderer.toneMappingExposure = 1.0;
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x121214);
 const pmrem = new THREE.PMREMGenerator(renderer);
-scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+scene.environment = pmrem.fromScene(studioScene(), 0.04).texture;
 const camera = new THREE.PerspectiveCamera(32, 1, 1, 2000);
 camera.up.set(0, 0, 1);
-const controls = new OrbitControls(camera, canvas);
-controls.enableDamping = true;
+const controls = new OrbitLite(camera, canvas);
 controls.target.set(0, 0, -14);
 const key = new THREE.DirectionalLight(0xffffff, 1.6); key.position.set(80, -120, 160); scene.add(key);
 scene.add(new THREE.HemisphereLight(0xfff4e0, 0x202024, 0.5));
@@ -235,7 +342,7 @@ function geomOf(man) {
   for (let i = 0; i < m.numVert; i++) for (let k = 0; k < 3; k++) pos[i * 3 + k] = m.vertProperties[i * m.numProp + k];
   g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   g.setIndex(new THREE.BufferAttribute(m.triVerts, 1));
-  return toCreasedNormals(g, Math.PI / 6);
+  return creasedNormals(g, Math.PI / 6);
 }
 
 function unbake(m) {
@@ -584,12 +691,12 @@ try {
   try {
     if (window.__KEYHUB_WASM__) {
       // Published page: the kernel's binary is embedded, so nothing is fetched.
-      const Module = (await import('https://cdn.jsdelivr.net/npm/manifold-3d@3.5.3/manifold.js')).default;
+      const Module = window.__KEYHUB_MANIFOLD__;
       const bin = Uint8Array.from(atob(window.__KEYHUB_WASM__), (c) => c.charCodeAt(0));
       wasm = await Module({ wasmBinary: bin.buffer });
     } else {
-      const Module = (await import('../../vendor/manifold/manifold.js')).default;
-      wasm = await Module({ locateFile: (f) => new URL('../../vendor/manifold/' + f, import.meta.url).href });
+      const Module = (await import(new URL('../../vendor/manifold/manifold.js', location.href).href)).default;
+      wasm = await Module({ locateFile: (f) => new URL('../../vendor/manifold/' + f, location.href).href });
     }
     wasm.setup();
   } catch (e) {
@@ -615,4 +722,5 @@ try {
   $('loading').textContent = 'Could not start the geometry kernel: ' + e.message;
   console.error(e);
 }
+})();
 </script>

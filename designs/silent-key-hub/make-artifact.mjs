@@ -1,9 +1,11 @@
-// Bundle the viewer into one self-contained HTML file for publishing:
-// the model source inline, the manifold-3d wasm embedded (so the page fetches
-// nothing but three.js and manifold's JS from the CDN), and the default model
-// pre-built as a fallback for browsers that refuse to run WebAssembly.
+// Bundle the viewer into one self-contained HTML file for publishing. The
+// page loads nothing from the network except fonts: three.js, manifold-3d
+// (JS and wasm) and the model are inlined as plain scripts - no ES modules,
+// no import maps - and the default model is pre-built as a fallback for
+// browsers that refuse to run WebAssembly.
 //   node designs/silent-key-hub/make-artifact.mjs [out.html]
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import Module from '../../vendor/manifold/manifold.js';
@@ -33,9 +35,26 @@ for (const [k, man] of Object.entries(parts)) {
 }
 m.dispose();
 
+// three.js classic build, from the npm tarball (cached in dist/).
+const THREE_VER = '0.160.0';
+const cache = join(here, 'dist', `three-${THREE_VER}`);
+if (!existsSync(join(cache, 'package/build/three.min.js'))) {
+  mkdirSync(cache, { recursive: true });
+  execSync(`npm pack three@${THREE_VER} --silent && tar xzf three-${THREE_VER}.tgz package/build/three.min.js`, { cwd: cache, stdio: 'ignore' });
+}
+const threeSrc = readFileSync(join(cache, 'package/build/three.min.js'), 'utf8');
+
+// manifold-3d ships as an ES module; turn it into a plain script.
+let manifoldSrc = readFileSync(join(here, '../../vendor/manifold/manifold.js'), 'utf8');
+if (!manifoldSrc.includes('export default Module;')) throw new Error('manifold.js layout changed');
+manifoldSrc = manifoldSrc.replace('export default Module;', 'window.__KEYHUB_MANIFOLD__ = Module;').replaceAll('import.meta.url', 'location.href');
+
 const modelSrc = readFileSync(join(here, 'keyhub-model.js'), 'utf8').replace(/^export /gm, '');
 const wasmB64 = readFileSync(join(here, '../../vendor/manifold/manifold.wasm')).toString('base64');
-const inject = `<script>
+const safe = (js) => js.replaceAll('</script', '<\\/script');
+const inject = `<script>${safe(threeSrc)}</script>
+<script>${safe(manifoldSrc)}</script>
+<script>
 window.__KEYHUB_WASM__ = "${wasmB64}";
 window.__KEYHUB_BAKED__ = ${JSON.stringify(baked)};
 (function () {
@@ -45,8 +64,8 @@ window.__KEYHUB_MODEL__ = { PARAMS, DEFAULTS, build, derive, lint, leafLift, swe
 </script>
 `;
 let html = readFileSync(join(here, 'index.html'), 'utf8');
-const at = html.indexOf('<script type="importmap">');
-if (at < 0) throw new Error('importmap not found');
+const at = html.indexOf('<script>\n(async () => {');
+if (at < 0) throw new Error('main script not found');
 html = html.slice(0, at) + inject + html.slice(at);
 mkdirSync(dirname(out), { recursive: true });
 writeFileSync(out, html);
