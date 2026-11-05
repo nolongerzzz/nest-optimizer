@@ -2290,6 +2290,20 @@
         });
       }
       function hostEx(j, d) { var u = hostExCs(j, d); return u ? g.polys(u) : []; }
+      /* the part's exact section at a printed height (a cavity's hole, to the corner): cut once, by height */
+      var cavEx = {};
+      function cavSection(zPrint) {
+        if (!exactOn) return null;
+        prepExact();
+        if (!Q0exact) return null;
+        var key = Math.round(zPrint * 1e5);
+        if (!(key in cavEx)) {
+          var us = [];
+          hosts.forEach(function (Q) { if (!Q.exactAt || !Q.soupOk) return; var c = Q.exactAt([zPrint - exShift])[0]; if (c && !g.isEmpty(c)) us.push(c); });
+          cavEx[key] = us.length ? g.unionAll(us) : null;
+        }
+        return cavEx[key];
+      }
       var DOEX = gap + hIm + 0.03;
       function dInEx(j) { return DOEX + (NI - 1) * SP[j].h; }
       function dTrEx(j) { return DOEX + (NI + NT - 1) * SP[j].h; }
@@ -2307,7 +2321,7 @@
       var EXACT_OUTLINE = true;       /* A RIBBON PLATE (the ridge) is Bambu's: each layer the part's EXACT section at the layer's reach (one section, not the union of the layers up to it; the reach never past the stack top's own face: dCl), the loops' centre PLATE_OUT_MM + 0.12 past it (measured on all six pieces: the outer edge stands 0.33 - 0.38 past the outline). Domes keep the union cut: a single section at that reach is far wider than theirs. */
       var REACH_EXTRA_MM = 0;   /* the section is read this much higher: a plane's edge moves 2.75 mm for 1 mm of height, and Bambu's plate stood 0.19 mm past ours on the downhill side */
       var PLATE_OUT_MM = -0.11;
-      var DISC_REACH_MM = 0.55, DISC_CLOSING = 0.88, DISC_CLIP_MM = 0.15, PLATE_UP_LOW_MM = 0.1, PLATE_UP_LOW_N = 4, RIBBON_SLAB_RATIO = 2;      /* the ridge's first plates (its rounded end, the slab still wide): the uphill edge stands 0.1 over the layer, and the slab is a ribbon from a ratio of 2 (Bambu cycles its hatch there too) */
+      var CONE_REACH_MM = 0.18, DISC_REACH_MM = 0.24, DISC_CLOSING = 0.88, DISC_CLIP_MM = -0.07, PLATE_UP_LOW_MM = 0.1, PLATE_UP_LOW_N = 4, RIBBON_SLAB_RATIO = 2;      /* the ridge's first plates (its rounded end, the slab still wide): the uphill edge stands 0.1 over the layer, and the slab is a ribbon from a ratio of 2 (Bambu cycles its hatch there too) */
       var PLATE_UP_MM = 0.21;      /* the uphill edge: the plate stops where the part's section 0.21 mm over the layer begins (the face there stands 0.21 over it; Bambu's ribbon is 0.9 mm of the face's height, ours was 1.05) */
       var PLATE_BAND_MM = 0.7;      /* how far past the support mesh's footprint the outline may run */
       var CURVED_SHRINK_MM = 0.1;   /* on a curved face (the zone changes layer on layer) the host cut is this much narrower: a dome's plate was out past Bambu's */
@@ -2438,31 +2452,38 @@
                 aJ = ((sx === 2 || (sx >= 4 && (sx - 4) % 3 === 0)) ? 20 : 110) * Math.PI / 180;
                 ribbonAngled = true;
               }
-              /* A CAVITY CEILING'S DISC (a negative sphere's): the layers of one steady run stand under a ceiling that closes in, and Bambu draws every one with the cavity's
-                 own outline at one height - the run's top layer + DISC_REACH_MM (measured: 0.55 on the Negative Sphere and the Negative Sphere2, whose discs differ by 0.7 mm in radius) -
-                 the plate never past that, the hole the ceiling leaves there. A flat ceiling's hole does not close in: it keeps the support's own section. */
-              if (steady && !ribbonSlab && DISC_REACH_MM > 0 && !g.isEmpty(Sj) && !g.isEmpty(sheetCs)) {
+              /* A CAVITY CEILING'S PLATES (a negative sphere's): the ceiling closes in above the plate, and Bambu draws each layer with the cavity's own outline - the part's EXACT
+                 section there, its hole - at one height: the layer + CONE_REACH_MM, and not lower than the flat run's (the disc's) top layer + DISC_REACH_MM. Measured on the Negative
+                 Sphere and the Negative Sphere2, whose discs differ by 0.7 mm in radius, on all five of their cone layers: 0.48 and 0.55 within 0.03. The hole's own corners are the
+                 plate's (the apex is a ten-sided ring: Bambu's top layers are ten-sided). A ceiling that does not close in (a flat one) keeps the support's own section. */
+              var cavGround = null;
+              if (!ribbonSlab && DISC_REACH_MM > 0 && !g.isEmpty(Sj) && !g.isEmpty(sheetCs)) {
                 var dTop = j, tIdx = zones[j] && zones[j].topI;
-                for (var jj2 = j + 1; jj2 < SP.length && (tIdx == null || jj2 <= tIdx); jj2++) { var a2z = zArea(jj2), a1z = zArea(jj2 - 1); if (a2z > 0 && a1z > 0 && Math.abs(a2z - a1z) <= 0.03 * a1z) dTop = jj2; else break; }
+                if (steady) for (var jj2 = j + 1; jj2 < SP.length && (tIdx == null || jj2 <= tIdx); jj2++) { var a2z = zArea(jj2), a1z = zArea(jj2 - 1); if (a2z > 0 && a1z > 0 && Math.abs(a2z - a1z) <= 0.03 * a1z) dTop = jj2; else break; }
                 var plate0 = g.polys(g.inter(Sj, sheetCs))[0], px = 0, py = 0;
                 if (plate0 && plate0.length) {
                   plate0.forEach(function (v) { px += v[0]; py += v[1]; }); px /= plate0.length; py /= plate0.length;
-                  var holeAtZ = function (zT) {                                              /* the hole of the part's section (union of its layers up to zT) that holds the plate's middle: a region, or null */
-                    var hsx = hostExCs(j, zT - SP[j].printZ), found = null;
+                  var holeAtZ = function (zT) {                                              /* the hole of the part's exact section at zT that holds the plate's middle: a region, or null */
+                    var hsx = cavSection(zT), found = null;
                     if (hsx) g.polys(hsx).forEach(function (R0) {
                       var s2 = 0; for (var q = 0; q < R0.length; q++) { var u = R0[q], v = R0[(q + 1) % R0.length]; s2 += u[0] * v[1] - v[0] * u[1]; }
                       if (s2 < 0 && inside([R0.slice().reverse()], px, py)) found = g.of([R0.slice().reverse()], 'Positive');
                     });
                     return found;
                   };
-                  var zStar = SP[dTop].printZ + DISC_REACH_MM, hStar = holeAtZ(zStar), hLow = holeAtZ(SP[j].printZ + 0.3);
-                  if (hStar && hLow && g.area(hStar) < DISC_CLOSING * g.area(hLow)) Sj = g.inter(Sj, g.offset(hStar, DISC_CLIP_MM));
+                  var zStar = Math.max(SP[j].printZ + CONE_REACH_MM, steady ? SP[dTop].printZ + DISC_REACH_MM : 0), hStar = holeAtZ(zStar), hLow = holeAtZ(SP[j].printZ - 0.3);
+                  if (hStar && hLow && g.area(hStar) < DISC_CLOSING * g.area(hLow)) {
+                    var win = g.offset(hLow, 1.0), clipH = g.offset(hStar, (steady ? LOOP_IN_FLAT_MM : LOOP_IN_MM) - w / 2 + DISC_CLIP_MM);      /* the drawn edge is the hole's: the loop stands loopIn in from the slab's edge and half a line out */
+                    var plateN = g.inter(clipH, g.offset(g.inter(g.inter(Sj, sheetCs), win), PLATE_BAND_MM));
+                    if (!g.isEmpty(plateN)) { Sj = g.union(g.diff(Sj, win), plateN); sheetCs = g.union(g.diff(sheetCs, win), plateN); cavGround = plateN; }
+                  }
                 }
               }
               var loopIn = steady ? LOOP_IN_FLAT_MM : LOOP_IN_MM;
               var inLoop = g.offset(g.inter(Sj, sheetCs), -loopIn);
               hullS = g.polys(g.offset(inLoop, wI / 2 + 1e-4));
               var ZI = stI.length ? g.offset(g.unionAll(stI), w / 2) : g.empty(), ZT = stT.length ? g.offset(g.unionAll(stT), w / 2) : g.empty();
+              if (cavGround) { if (!g.isEmpty(ZI)) ZI = g.union(ZI, cavGround); if (!g.isEmpty(ZT)) ZT = g.union(ZT, cavGround); }
               var hIc = hostExCs(j, dInEx(j)), hTc = hostExCs(j, dTrEx(j));
               if (hIc && steady && HOST_GROW_MM > 0) hIc = g.offset(hIc, HOST_GROW_MM);
               if (hTc && steady && HOST_GROW_MM > 0) hTc = g.offset(hTc, HOST_GROW_MM);
