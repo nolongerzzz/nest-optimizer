@@ -1,7 +1,7 @@
 /* The Scale card, driven through the real app: read the shape, then every
-   field it offers, typed on a real keyboard and left with Tab (the fields
-   are live - there is no Set; tools/nso_scale_live_drive_check.js proves the
-   live part), with real Undo.
+   field it offers, typed on a real keyboard and set with Enter (the fields
+   preview on the piece and Enter is Set; tools/nso_scale_live_drive_check.js
+   proves the preview part), with real Undo.
    node tools/nso_scale_card_drive_check.js               exit 0 = every gate held
    node tools/nso_scale_card_drive_check.js --shots DIR   also write DIR/*.png
                                                           (a scratch directory -
@@ -144,11 +144,11 @@ async function type(page, input, value) {
   if (String(value) === '') await page.keyboard.press('Backspace');
   else await page.keyboard.type(String(value));
 }
-/* Type a value and leave the field with Tab - which is what commits it. */
+/* Type a value and press Enter - Set, which bakes the preview. */
 async function typeAndLeave(page, input, value, waitRe) {
   await type(page, input, value);
   await page.evaluate(() => { document.getElementById('status').textContent = ''; });
-  await page.keyboard.press('Tab');
+  await page.keyboard.press('Enter');
   await page.waitForFunction(re => new RegExp(re).test(document.getElementById('status').textContent),
     waitRe, { timeout: 60000 });
   return statusOf(page);
@@ -299,12 +299,12 @@ withApp(async (page, logs) => {
   await shot(page, '03-tray-height-refused');
 
   console.log('\n=== 5. Every field repopulates on selection and pose change ===');
-  // Width typed - live, not left - and another piece selected from script,
-  // so the field never blurs: the card takes the selection as leaving the
-  // field, and keeps the edit on the tray.
+  // Width typed - previewed, not set - and another piece selected from
+  // script: the preview belongs to the tray, so selecting leaves it behind
+  // and the tray is as it was.
   const undo5 = await page.evaluate(() => state.undoStack.length);
   await type(page, 'scale-width', 77);
-  await page.waitForFunction(() => Math.abs(NSO_scaleRawBounds(getActiveModel().rawTris).span[1] - 77) < 1e-3, null, { timeout: 30000 });
+  await page.waitForFunction(() => nsoHelpers.live().some(o => o.userData.nsoHelper === 'scale-live'), null, { timeout: 30000 });
   await select(page, tube.id);
   const r1 = await card(page);
   check('selecting the tube mid-edit: its own fields, Whole × 1', r1.val.factor === '1' && r1.val.height === show(m.height) &&
@@ -312,11 +312,10 @@ withApp(async (page, logs) => {
   await select(page, trayId);
   const r2 = await card(page);
   const undo5b = await page.evaluate(() => state.undoStack.length);
-  check('back to the tray: the Width edit was kept as one step - 100.0 / 77.0 / 25.0, Whole × 1',
-    r2.val.length === '100.0' && r2.val.width === '77.0' && r2.val.height === '25.0' && r2.val.factor === '1' && undo5b === undo5 + 1,
+  check('back to the tray: the Width preview was dropped, not baked - 100.0 / 40.0 / 25.0, Whole × 1, no undo step, no preview left',
+    r2.val.length === '100.0' && r2.val.width === '40.0' && r2.val.height === '25.0' && r2.val.factor === '1' && undo5b === undo5 &&
+    r2.soup === t0.soup && !(await page.evaluate(() => nsoHelpers.live().length)),
     JSON.stringify(r2.val) + ', undo ' + undo5 + ' -> ' + undo5b);
-  await undo(page);
-  check('...one Undo returns the tray', (await card(page)).soup === t0.soup);
   // Boxes left showing other numbers with nobody editing them (set from
   // script, no event): a pose change re-reads every one.
   await page.evaluate(() => { document.getElementById('scale-factor').value = '3'; document.getElementById('scale-width').value = '77'; });
@@ -341,13 +340,14 @@ withApp(async (page, logs) => {
       return { bottom: Math.round(r.bottom), vh: innerHeight, scroll: c.scrollHeight - c.clientHeight,
                rowH: rows.map(e => Math.round(e.getBoundingClientRect().height)),
                // one line: every part of the row - label, field, unit - on the same line
-               spread: rows.map(e => { const c = Array.from(e.children).map(x => { const b = x.getBoundingClientRect(); return (b.top + b.bottom) / 2; });
+               // (the slider under the field is the row's second line, not a part of the first)
+               spread: rows.map(e => { const c = Array.from(e.children).filter(x => x.type !== 'range').map(x => { const b = x.getBoundingClientRect(); return (b.top + b.bottom) / 2; });
                                         return Math.round(Math.max(...c) - Math.min(...c)); }) };
     });
     console.log('   ' + (id === trayId ? 'tray' : 'tube') + ': card bottom ' + box.bottom + ' of ' + box.vh + ', rows ' + box.rowH.join('/') + ' px');
     check('  inside the window, no scroll inside the card', box.bottom <= box.vh && box.scroll <= 1, JSON.stringify(box));
-    check('  one line a row: label, field and unit centred on one line, no row taller than 44 px',
-      box.spread.every(d => d <= 2) && box.rowH.every(h => h <= 44), 'centres within ' + box.spread.join('/') + ' px');
+    check('  one line a row, plus its slider: label, field and unit centred on one line, no row taller than 64 px',
+      box.spread.every(d => d <= 2) && box.rowH.every(h => h <= 64), 'centres within ' + box.spread.join('/') + ' px, rows ' + box.rowH.join('/')); 
   }
 
   console.log('\n=== 7. Stock box -> Bar ===');
@@ -481,9 +481,12 @@ withApp(async (page, logs) => {
     if (real) return typeAndLeave(page, 'scale-target', 150, 'Scale (done|refused)|stood down|Longest');
     // A plain bar hides the row (its Length shows the same number), so the
     // value is set from script and the field's change fired, with the field
-    // not focused: the card's path for a value set from outside.
+    // not focused: the card's path for a value set from outside - it previews,
+    // and Set bakes it.
     await page.evaluate(() => { document.getElementById('status').textContent = ''; });
     await setFields(page, { 'scale-target': 150 });
+    await page.waitForFunction(() => !document.getElementById('btn-scale-set').disabled, null, { timeout: 60000 });
+    await page.click('#btn-scale-set');
     await page.waitForFunction(() => /Scale (done|refused)|stood down|Longest/.test(document.getElementById('status').textContent), null, { timeout: 60000 });
     return statusOf(page);
   };

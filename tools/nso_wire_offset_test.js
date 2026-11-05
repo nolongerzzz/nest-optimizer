@@ -54,8 +54,8 @@ async function card(page) {
   });
 }
 
-/* The live field (#187: no Set): typed on the keyboard and left with Tab,
-   which is what commits it. */
+/* The field: typed on the keyboard, previewed on the piece, and Enter (Set)
+   bakes it. */
 async function offset(page, mm, waitRe) {
   await openMenuFor(page, '#scale-offset');
   await page.focus('#scale-offset');
@@ -63,7 +63,7 @@ async function offset(page, mm, waitRe) {
   if (String(mm) === '') await page.keyboard.press('Backspace');
   else await page.keyboard.type(String(mm));
   await page.evaluate(() => { document.getElementById('status').textContent = ''; });
-  await page.keyboard.press('Tab');
+  await page.keyboard.press('Enter');
   await page.waitForFunction(re => new RegExp(re).test(document.getElementById('status').textContent), waitRe || 'Offset', { timeout: 60000 });
   return statusOf(page);
 }

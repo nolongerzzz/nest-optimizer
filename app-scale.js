@@ -674,15 +674,20 @@ function NSO_scaleSelectedModel(spec) {
    and repopulates whenever the selection, the piece's soup or its pose on the
    plate changes, whoever changed it.
 
-   THE FIELDS ARE LIVE - there is no Set. Typing applies (debounced
-   NSO_SCALE_LIVE_MS): the verb runs on the piece as it was when the edit
-   began, and the viewport, the readout and the other fields follow. Leaving
-   the field (blur, Tab, Enter) commits it: one Undo step for the whole edit,
-   however many values were typed on the way. Escape puts back the value the
-   field had when the edit began, and the piece with it. A value the piece
-   refuses says why under the field, in red, while it is typed; the piece
-   stays at the last good value, and leaving the field on it commits nothing.
-   Fit to plate stays a button.
+   EVERY ROW HAS A SLIDER AND A PREVIEW BEFORE THE BAKE. A slider under each
+   field (a quarter to four times the value the piece has; Whole x 0.1..4;
+   Offset +-5 mm) and the box say one number (app-live-slider.js). Moving
+   either - dragging, typing, the spinner - runs the verb on the piece as it
+   was when the edit began and draws the result as a translucent preview
+   standing over the piece, which turns to a ghost; the PIECE ITSELF IS NOT
+   TOUCHED. The preview is a scene helper (nso-helpers.js, owner 'scale-live'):
+   not a piece, never picked, packed or exported, not an Undo step. Set (the
+   button, or Enter in the field) bakes what the preview shows: one Undo step,
+   however many values were tried on the way. Cancel, Escape, another piece,
+   another field, the mm | in toggle or closing the card drops it. A value the
+   piece refuses says why under the field, in red, and draws nothing; Set stays
+   greyed until the value is one it takes. Fit to plate stays a button and
+   applies at once.
 --------------------------------------------------------------------------- */
 
 /* The section reading for a piece, cached on its soup: a bake replaces
@@ -1118,9 +1123,6 @@ function NSO_scaleCardVerb(k, value) {
   return NSO_scaleRingVerb(k, value);
 }
 
-// How long a live field waits after the last keystroke before it applies.
-var NSO_SCALE_LIVE_MS = 80;
-
 if (typeof document !== 'undefined') {
   (function wireScaleCard() {
     // Every field the card has: [key, input id, row id]. The verbs table in
@@ -1206,6 +1208,7 @@ if (typeof document !== 'undefined') {
         var el = byId(fd[1]);
         prefill[fd[0]] = val[fd[0]] != null ? val[fd[0]] : '';
         if (el) el.value = prefill[fd[0]];
+        setSlider(fd[0]);
       });
     }
 
@@ -1239,9 +1242,9 @@ if (typeof document !== 'undefined') {
       var el = byId('scale-readout');
       if (!el) return;
       var m = active();
-      // Another piece selected mid-edit: the field has been left, so the
-      // edit is kept, on the piece it was made on.
-      if (sess && m !== sess.m) finish(true);
+      // Another piece selected (or this one changed under it) mid-edit: the
+      // preview belongs to the piece it was made on, so it is dropped.
+      if (sess && (m !== sess.m || (m && m.rawTris !== sess.soup))) cancel(true);
       if (!cardOpen()) { el.dataset.stale = '1'; return; }
       el.dataset.stale = '0';
       el.textContent = NSO_scaleReadoutText(m);
@@ -1282,26 +1285,110 @@ if (typeof document !== 'undefined') {
       if (typeof requestAnimationFrame === 'function') requestAnimationFrame(watch);
     }
 
-    /* ---- live fields ----
-       An edit is one field from the moment it is typed in until it is left.
-       It keeps the piece and the soup it began from, and every value typed
-       runs its verb on THAT soup - never on the last one shown - so typing
-       60 then 65 gives exactly what 65 alone would, and what the field
-       commits is what a single Set used to.
+    /* ---- staged edits: slider or box -> ghost preview -> Set ----
+       An edit is one field from the first value moved until it is set or
+       dropped. It keeps the piece and the soup it began from, and every value
+       moved to runs its verb on THAT soup, so 60 then 65 gives exactly what 65
+       alone would, and what Set bakes is what the preview showed.
 
-       The piece follows through NSO_sculptCommitRaw, the one bake path. The
-       first value shown writes the edit's undo entry (its "before" is the
-       soup the edit began from); later ones swap the piece with pushUndo
-       held off, so the edit stays one step. Going back to where it began -
-       Escape, the value cleared or typed back, or leaving on a refused value
-       - is that entry undone. */
+       NOTHING TOUCHES THE PIECE UNTIL SET. The preview is a helper in the
+       scene, like Hollow's and Foam's: the piece turns to a ghost and the
+       result stands over it, seated the way the bake would seat it. It is not
+       a piece (never picked, packed or exported) and not an Undo step. Set
+       (or Enter) runs the one NSO_sculptCommitRaw - one Undo step, whatever
+       was moved on the way. Cancel, Escape, another piece, another field, the
+       mm | in toggle or closing the card drop it, and the piece was never
+       changed. A value the piece refuses says why under the field, in red,
+       and draws nothing; Set stays greyed until the value is one it takes. */
+    var GHOST_OPACITY = 0.2;
+    var pv = null;             // the preview on screen: { m, mesh, saved, over }
+    var handles = {};          // per field: nsoLiveSlider's handle (paces the preview)
+    var NOTE_IDLE = 'Move a slider or type a value to preview it on the piece. Set bakes it; nothing changes until then.';
+
+    function ghostOn(mesh) {
+      var mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      var saved = { skip: !!mesh.userData.skipXray, mats: mats.map(function (mt) {
+        return { mt: mt, transparent: mt.transparent, opacity: mt.opacity, depthWrite: mt.depthWrite,
+                 depthTest: mt.depthTest, wireframe: mt.wireframe };
+      }) };
+      mesh.userData.skipXray = true;
+      mats.forEach(function (mt) {
+        mt.transparent = true; mt.opacity = GHOST_OPACITY; mt.depthWrite = false; mt.depthTest = true;
+        mt.wireframe = false; mt.needsUpdate = true;
+      });
+      return saved;
+    }
+    function ghostOff(mesh, saved) {
+      saved.mats.forEach(function (x) {
+        x.mt.transparent = x.transparent; x.mt.opacity = x.opacity; x.mt.depthWrite = x.depthWrite;
+        x.mt.depthTest = x.depthTest; x.mt.wireframe = x.wireframe; x.mt.needsUpdate = true;
+      });
+      if (mesh) mesh.userData.skipXray = saved.skip;
+    }
+    function dropOver() {
+      if (!pv || !pv.over) return;
+      var o = pv.over;
+      pv.over = null;
+      if (o.parent) o.parent.remove(o);
+      if (o.geometry) o.geometry.dispose();
+      if (o.material) o.material.dispose();
+    }
+    function closePreview() {
+      if (!pv) return false;
+      var v = pv;
+      dropOver();
+      pv = null;
+      ghostOff(v.mesh, v.saved);
+      return true;
+    }
+    /* The result, standing over the ghosted piece where the bake would seat
+       it: the same display geometry the commit builds, on the plate at the
+       piece's x / z, bottom on the plate (NSO_sculptCommitRaw's own seating).
+       A piece with a pose keeps its turn and its centre. */
+    function showPreview(m, tris) {
+      var p = placedOf(m), mesh = p && p.mesh;
+      if (!mesh || typeof THREE === 'undefined' || typeof rawResultToDisplayGeometry !== 'function') return false;
+      if (!pv || pv.m !== m || pv.mesh !== mesh) { closePreview(); pv = { m: m, mesh: mesh, saved: ghostOn(mesh), over: null }; }
+      dropOver();
+      var geo = rawResultToDisplayGeometry(tris), sz = new THREE.Vector3();
+      geo.boundingBox.getSize(sz);
+      var o = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+        color: 0x22d3ee, metalness: 0.05, roughness: 0.5, emissive: 0x0a3a5c, emissiveIntensity: 0.25,
+        transparent: true, opacity: 0.65, depthWrite: false }));
+      o.quaternion.copy(mesh.quaternion);
+      o.scale.copy(mesh.scale);
+      o.position.copy(mesh.position);
+      if (Math.abs(Math.abs(mesh.quaternion.w) - 1) < 1e-9 && m.size) o.position.y += (sz.y - m.size.y) / 2;
+      o.renderOrder = 41;
+      o.userData.skipXray = true;
+      var parent = mesh.parent || (typeof state !== 'undefined' ? state.scene : null);
+      if (!parent) { pv.over = null; geo.dispose(); o.material.dispose(); return false; }
+      if (typeof nsoHelpers !== 'undefined') nsoHelpers.attach(parent, o, 'scale-live');
+      else parent.add(o);
+      pv.over = o;
+      return true;
+    }
+
+    function note(text, bad) {
+      var el = byId('scale-preview-note');
+      if (!el) return;
+      el.textContent = text == null ? NOTE_IDLE : text;
+      el.classList.toggle('scale-bad', !!bad);
+    }
+    function syncButtons() {
+      var set = byId('btn-scale-set'), cancelBtn = byId('btn-scale-cancel');
+      if (set) set.disabled = !(sess && sess.last && sess.last.ok);
+      if (cancelBtn) cancelBtn.disabled = !sess;
+    }
+    function sliderOf(k) { var fd = fieldOf(k); return fd ? byId(fd[1] + '-slider') : null; }
+
     function edit(k) {
       if (sess && sess.k === k) return sess;
-      if (sess) finish(true);
+      if (sess) cancel(false);
       var fd = fieldOf(k), m = active();
       sess = { k: k, el: byId(fd[1]), start: prefill[k] != null ? prefill[k] : '', m: m,
                soup: (m && m.rawTris && m.rawAxis === 'zup') ? m.rawTris : null,
-               entry: null, last: null, timer: 0 };
+               last: null, verb: null };
       return sess;
     }
 
@@ -1316,16 +1403,7 @@ if (typeof document !== 'undefined') {
       return NSO_scaleCardVerb(s.k, NSO_scaleToMm(num));
     }
 
-    function withoutUndo(fn) {
-      var push = window.pushUndo;
-      window.pushUndo = function () {};
-      try { return fn(); } finally { window.pushUndo = push; }
-    }
-    function topEntry() {
-      return (typeof state !== 'undefined' && state.undoStack) ? state.undoStack[state.undoStack.length - 1] : null;
-    }
-
-    // The reason under the field, red, while the typed value is refused.
+    // The reason under the field, red, while the value is refused.
     function whyOf(k) {
       var fd = fieldOf(k), id = fd[1] + '-why', p = byId(id);
       var row = byId(fd[2]);
@@ -1355,20 +1433,9 @@ if (typeof document !== 'undefined') {
       }
     }
 
-    // Back to the soup the edit began from.
-    function putBack(s) {
-      if (!s.entry) return;
-      var entry = s.entry;
-      s.entry = null;
-      if (topEntry() === entry && typeof undoLastDiscard === 'function') undoLastDiscard();
-      else if (s.m && s.soup && s.m.rawTris !== s.soup) {
-        withoutUndo(function () { NSO_sculptCommitRaw(s.m, s.soup, 'scaleReplace', ''); });
-      }
-    }
-
-    // Apply what the field says now.
+    // Draw what the field says now. The piece is not touched.
     function preview(s) {
-      if (s.timer) { clearTimeout(s.timer); s.timer = 0; }
+      if (!s || sess !== s) return;
       var verb = verbOf(s), r = null;
       if (verb) {
         try { r = NSO_scaleCardTry(verb, s.m, s.soup); } catch (err) {
@@ -1377,50 +1444,66 @@ if (typeof document !== 'undefined') {
           r = { ok: false, reason: why, inline: why, status: LABEL[s.k] + ' failed - piece unchanged (' + why + ')' };
         }
       }
-      s.last = r;
-      if (r && !r.ok) { mark(s, r.inline); return; }   // the piece stays at the last good value
-      mark(s, '');
-      if (!r) {
-        var had = !!s.entry;
-        putBack(s);
-        if (had && typeof setStatus === 'function') setStatus(LABEL[s.k] + ': as it was');
-        return;
+      s.verb = verb; s.last = r;
+      if (r && !r.ok) {                          // a refused value draws nothing
+        closePreview();
+        mark(s, r.inline);
+        note('Nothing to show - ' + r.inline, true);
+      } else if (!r) {                           // back to where it began
+        closePreview();
+        mark(s, '');
+        note(NOTE_IDLE);
+      } else {
+        mark(s, '');
+        var drew = showPreview(s.m, r.tris);
+        note((drew ? 'Preview: ' : 'No preview on the plate: ') + r.said + ' - Set bakes it, Esc drops it.');
       }
-      // An undo taken mid-edit (it can only be the edit's own) leaves no entry to fold into.
-      if (s.entry && topEntry() !== s.entry) s.entry = null;
-      var line = verb.label + ': ' + r.said + ' - leave the field to keep it, Esc to put it back';
-      var ok = s.entry
-        ? withoutUndo(function () { return NSO_sculptCommitRaw(s.m, r.tris, verb.undoType, line); })
-        : NSO_sculptCommitRaw(s.m, r.tris, verb.undoType, line);
-      if (ok && !s.entry) s.entry = topEntry();
-      if (!ok) s.last = { ok: false, reason: 'commit failed', status: verb.label + ' failed to commit - piece unchanged' };
+      syncButtons();
     }
 
-    // Leave the edit: keep it (blur, Tab, Enter) or put it back (Escape).
-    // Leaving on a refused value commits nothing.
-    function finish(keep) {
+    // Bake what the preview shows: one NSO_sculptCommitRaw, one Undo step.
+    function commit() {
       var s = sess;
       if (!s) return null;
-      sess = null;
-      if (keep && s.timer) preview(s);   // the last keystroke counts
-      if (s.timer) { clearTimeout(s.timer); s.timer = 0; }
-      mark(s, '');
-      var r = s.last;
-      if (keep && r && r.ok) {
-        s.entry = null;
-        if (typeof setStatus === 'function') setStatus(r.status);
-        readout(true);
+      if (handles[s.k]) handles[s.k].cancel();
+      preview(s);                                // the box as it reads now
+      var r = s.last, verb = s.verb;
+      if (!r || !r.ok) {
+        if (typeof setStatus === 'function') setStatus(r ? r.status : LABEL[s.k] + ': nothing to set - move the slider or type a value', !!r);
         return r;
       }
-      var moved = !!s.entry;
-      putBack(s);
-      if (s.el) s.el.value = s.start;
-      if (typeof setStatus === 'function') {
-        if (keep && r) setStatus(r.status, true);
-        else if (!keep && (moved || r)) setStatus(LABEL[s.k] + ': put back - piece unchanged');
+      sess = null;
+      closePreview();
+      mark(s, '');
+      var ok = typeof NSO_sculptCommitRaw === 'function' && NSO_sculptCommitRaw(s.m, r.tris, verb.undoType, r.status);
+      syncButtons();
+      note(NOTE_IDLE);
+      if (!ok) {
+        if (s.el) s.el.value = s.start;
+        if (typeof setStatus === 'function') setStatus(verb.label + ' failed to commit - piece unchanged', true);
+        readout(true);
+        return { ok: false, reason: 'commit failed' };
       }
-      if (moved || r) readout(true);
+      if (typeof setStatus === 'function') setStatus(r.status);
+      readout(true);
       return r;
+    }
+
+    // Drop the edit: the piece was never touched, the field goes back.
+    function cancel(quiet) {
+      var s = sess;
+      if (!s) return false;
+      sess = null;
+      if (handles[s.k]) handles[s.k].cancel();
+      var had = closePreview();
+      mark(s, '');
+      if (s.el) s.el.value = s.start;
+      var sl = sliderOf(s.k);
+      if (sl && s.start !== '') sl.value = s.start;
+      syncButtons();
+      note(NOTE_IDLE);
+      if (!quiet && typeof setStatus === 'function') setStatus(LABEL[s.k] + ': preview dropped - piece unchanged');
+      return had || true;
     }
 
     /* ---- the mm | in toggle ----
@@ -1483,7 +1566,7 @@ if (typeof document !== 'undefined') {
     // unit. An edit still open is left first, as a click on the toggle does.
     function setUnit(u) {
       u = u === 'in' ? 'in' : 'mm';
-      if (sess) finish(true);
+      if (sess) cancel(true);
       var was = NSO_scaleUnitNow;
       NSO_scaleUnitNow = u;
       try { localStorage.setItem(NSO_SCALE_UNIT_KEY, u); } catch (e) {}
@@ -1493,36 +1576,84 @@ if (typeof document !== 'undefined') {
       populate(lastReading);
     }
 
+    /* A slider under a row: the same number as the box, ranged round the
+       value the piece has (a quarter to four times it), or Whole x 0.1..4 and
+       Offset +-5 mm. Typing past the range still works - the box is the number
+       and the slider sits at its end. Rebuilt on every populate, in the unit
+       shown, on the box's own step. */
+    function makeSlider(fd) {
+      var row = byId(fd[2]), id = fd[1] + '-slider', sl = byId(id);
+      if (sl || !row) return sl;
+      sl = document.createElement('input');
+      sl.type = 'range';
+      sl.id = id;
+      sl.className = 'scale-slider';
+      sl.setAttribute('aria-label', LABEL[fd[0]] + ' slider - previews on the piece, Set bakes it');
+      row.appendChild(sl);
+      return sl;
+    }
+    function setSlider(k) {
+      var fd = fieldOf(k), el = byId(fd[1]), sl = byId(fd[1] + '-slider');
+      if (!el || !sl) return;
+      var inch = NSO_scaleIn(), step = parseFloat(el.step) || 0.1, lo, hi;
+      var tidy = function (x) { return +x.toPrecision(9); };
+      if (k === 'factor') { lo = 0.1; hi = 4; step = 0.01; }
+      else if (k === 'offset') { hi = inch ? 5 / NSO_SCALE_MM_PER_IN : 5; lo = -hi; }
+      else {
+        var v = parseFloat(prefill[k]);
+        if (!(v > 0)) { sl.disabled = true; return; }
+        lo = Math.max(v / 4, parseFloat(el.min) || 0);
+        hi = Math.min(v * 4, parseFloat(el.max) || Infinity);
+      }
+      lo = tidy(Math.ceil(lo / step - 1e-9) * step);
+      hi = tidy(Math.floor(hi / step + 1e-9) * step);
+      if (!(hi > lo)) { sl.disabled = true; return; }
+      sl.disabled = false;
+      sl.min = String(lo); sl.max = String(hi); sl.step = String(step);
+      sl.value = el.value;
+    }
+
+    // nsoLiveSlider keeps the slider and the box saying one number and paces
+    // the preview to what it costs; its onLive is the staged edit. The library
+    // loads after this file, and wire() can run before it has (the setTimeout
+    // pass), so this is retried on every wire() until it takes.
+    function bindLive(fd) {
+      var k = fd[0], sl = byId(fd[1] + '-slider');
+      if (handles[k] || !sl || !window.nsoLiveSlider) return;
+      handles[k] = window.nsoLiveSlider.bind({
+        slider: sl.id, box: fd[1], onLive: function () { preview(edit(k)); }
+      });
+    }
+
     function wireField(fd) {
       var k = fd[0], el = byId(fd[1]);
       if (!el || el.dataset.nsoWired === '1') return;
       el.dataset.nsoWired = '1';
       whyOf(k);
-      el.addEventListener('focus', function () { edit(k); });
+      var sl = makeSlider(fd);
+      bindLive(fd);
+      // A cleared box is "no change": the live slider has no value to hand
+      // on, so the preview is cleared here.
       el.addEventListener('input', function () {
-        var s = edit(k);
-        if (s.timer) clearTimeout(s.timer);
-        s.timer = setTimeout(function () { if (sess === s) preview(s); }, NSO_SCALE_LIVE_MS);
+        if (sess && sess.k === k && String(el.value).trim() === '') preview(sess);
       });
-      el.addEventListener('blur', function () { if (sess && sess.k === k) finish(true); });
-      // A value set from outside, with the field not focused (a script, an
-      // autofill): the same edit, begun and left at once. While focused,
-      // change is the spinner or Enter, both handled as typing.
-      el.addEventListener('change', function () {
-        if (document.activeElement === el) return;
-        if (sess && sess.k === k) finish(true);
-        else if (el.value !== (prefill[k] != null ? prefill[k] : '')) { edit(k); finish(true); }
-      });
-      el.addEventListener('keydown', function (e) {
+      // A key can land inside the preview's pacing gap, before the edit has
+      // started: Enter then starts it (and sets what the box says), Escape
+      // puts the box back.
+      var keys = function (e) {
+        var h = handles[k], waiting = h && h.pending() && !(sess && sess.k === k);
         if (e.key === 'Enter') {
           e.preventDefault();
-          if (sess && sess.k === k) finish(true);
+          if (waiting) edit(k);
+          if (sess && sess.k === k) commit();
         } else if (e.key === 'Escape') {
           e.preventDefault();
-          e.stopPropagation();
-          if (sess && sess.k === k) finish(false);
+          if (waiting) { e.stopPropagation(); h.cancel(); el.value = prefill[k] != null ? prefill[k] : ''; setSlider(k); }
+          else if (sess && sess.k === k) { e.stopPropagation(); cancel(false); }
         }
-      });
+      };
+      el.addEventListener('keydown', keys);
+      if (sl) sl.addEventListener('keydown', keys);
     }
 
     function wire() {
@@ -1535,11 +1666,22 @@ if (typeof document !== 'undefined') {
       });
       relabel();
       FIELDS.forEach(wireField);
+      FIELDS.forEach(bindLive);
+      var setBtn = byId('btn-scale-set'), cancelBtn = byId('btn-scale-cancel');
+      if (setBtn && setBtn.dataset.nsoWired !== '1') {
+        setBtn.dataset.nsoWired = '1';
+        setBtn.addEventListener('click', function () { commit(); });
+      }
+      if (cancelBtn && cancelBtn.dataset.nsoWired !== '1') {
+        cancelBtn.dataset.nsoWired = '1';
+        cancelBtn.addEventListener('click', function () { cancel(false); });
+      }
+      syncButtons();
       var fit = byId('btn-scale-fit');
       if (fit && fit.dataset.nsoWired !== '1') {
         fit.dataset.nsoWired = '1';
         fit.addEventListener('click', function () {
-          if (sess) finish(true);
+          if (sess) cancel(true);
           try { NSO_scaleFitToPlate(); } catch (err) {
             console.error('[scale]', err);
             if (typeof setStatus === 'function') {
@@ -1552,7 +1694,9 @@ if (typeof document !== 'undefined') {
       var menu = byId('menu-scale');
       if (menu && menu.dataset.nsoScaleWired !== '1') {
         menu.dataset.nsoScaleWired = '1';
-        menu.addEventListener('toggle', function () { if (menu.open) { readout(true); startWatch(); } });
+        menu.addEventListener('toggle', function () {
+          if (menu.open) { readout(true); startWatch(); } else cancel(true);   // a shut card has no preview
+        });
       }
       // The verdict names the machine, so a plate change re-reads it.
       ['plate-select', 'custom-w', 'custom-d', 'custom-h'].forEach(function (id) {
@@ -1578,6 +1722,14 @@ if (typeof document !== 'undefined') {
       wrapped._nsoScaleWrapped = true;
       window.updateEditSize = wrapped;
     }
+
+    // The preview is a scene helper (nso-helpers.js): Clear, leave-tool and an
+    // Undo past it all end it through the same close path as Cancel.
+    if (typeof nsoHelpers !== 'undefined') nsoHelpers.owner('scale-live', {
+      live: function () { return !!pv; },
+      close: function () { cancel(true); },
+      clear: function () { closePreview(); }
+    });
 
     loadUnit();
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire);

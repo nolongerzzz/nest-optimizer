@@ -101,15 +101,15 @@ async function shot(page, name) {
 
 async function clear(page) { await page.evaluate(() => { document.getElementById('status').textContent = ''; }); }
 
-/* Type into a ring field and leave it with Tab, as a user does (#187: the
-   fields are live, no Set; leaving the field is what commits it). */
+/* Type into a ring field and press Enter, as a user does: the field previews
+   on the piece, and Enter is Set, which bakes it. */
 async function ringSet(page, inputId, value) {
   await openMenuFor(page, '#' + inputId);
   await page.focus('#' + inputId);
   await page.keyboard.press('Control+A');
   await page.keyboard.type(String(value));
   await clear(page);
-  await page.keyboard.press('Tab');
+  await page.keyboard.press('Enter');
   await page.waitForFunction(() => document.getElementById('status').textContent.length > 0, null, { timeout: 30000 });
   return statusOf(page);
 }

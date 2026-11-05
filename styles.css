@@ -473,8 +473,8 @@ select:focus, input:focus {
 .library-list[hidden] { display: none !important; }
 /* The Scale card (part 3): every field is one compact row - label, field,
    unit or the hold it keeps - Length and Longest included, so the card fits
-   a 900 px-tall window without scrolling. The fields are live (app-scale.js),
-   so a row has no Set. The grid puts each part in its own column. Rows the
+   a 900 px-tall window without scrolling. Each row has a slider and a ghost preview
+   (app-scale.js); one Set under the rows bakes it. The grid puts each part in its own column. Rows the
    piece has no use for are [hidden], and an author display rule beats the UA
    sheet's [hidden] { display: none }, so it is said here, unconditionally. */
 #scale-rows .scale-row {
@@ -488,6 +488,15 @@ select:focus, input:focus {
 #scale-rows .scale-row label { margin: 0; white-space: nowrap; }
 #scale-rows .scale-row input { width: 100% !important; margin: 0; padding-top: 4px; padding-bottom: 4px; }
 #scale-rows .scale-row .hint { margin: 0; white-space: nowrap; }
+/* The slider under a row's field: the same number, drawn on the piece as a
+   preview before Set (app-scale.js). It rides in the row so it hides with it. */
+#scale-rows .scale-row .scale-slider { grid-column: 1 / -1; margin: 0; padding: 0; }
+#scale-rows .scale-row .scale-slider:disabled { opacity: 0.4; }
+#scale-card .scale-preview-note { margin: 4px 0; }
+#scale-card .scale-preview-note.scale-bad { color: #f87171; }
+#scale-card .scale-actions { display: flex; gap: 6px; margin: 4px 0; }
+#scale-card .scale-actions .btn { flex: 1 1 0; width: auto; }
+#scale-card .scale-actions .btn:disabled { opacity: 0.45; cursor: default; }
 /* A row's sentence, on its own line under the row, shown only with it. */
 #scale-rows .scale-note { margin: -2px 0 4px; }
 #scale-rows .scale-row[hidden] + .scale-note,

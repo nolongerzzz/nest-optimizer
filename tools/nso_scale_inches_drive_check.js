@@ -1,7 +1,7 @@
 /* The Scale card's mm | in toggle, driven through the real app with real
    clicks and a real keyboard. Display and entry only: the engines stay in
-   mm, the card converts at its edge. The fields are live - typed, then left
-   with Tab, which is what commits a value (there is no Set).
+   mm, the card converts at its edge. A typed value previews on the piece and
+   Enter (Set) bakes it.
    node tools/nso_scale_inches_drive_check.js               exit 0 = every gate held
    node tools/nso_scale_inches_drive_check.js --shots DIR   also write DIR/*.png
                                                             (a scratch directory -
@@ -150,11 +150,11 @@ async function type(page, input, value) {
   if (String(value) === '') await page.keyboard.press('Backspace');
   else await page.keyboard.type(String(value));
 }
-/* Type, then leave the field with Tab - which is what commits it. */
+/* Type, then press Enter - Set, which bakes the preview. */
 async function typeAndLeave(page, input, value, waitRe) {
   await type(page, input, value);
   await page.evaluate(() => { document.getElementById('status').textContent = ''; });
-  await page.keyboard.press('Tab');
+  await page.keyboard.press('Enter');
   await page.waitForFunction(re => new RegExp(re).test(document.getElementById('status').textContent),
     waitRe, { timeout: 60000 });
   return statusOf(page);
@@ -264,14 +264,13 @@ withApp(async (page, logs) => {
   check('(a) box: the Offset sentence in mm, then in inches - 0.6 mm -> 0.024 in',
     bmm.note === 'Thin features keep their thickness: a 0.6 mm lid strap stays 0.6 mm.' &&
     bin.note === 'Thin features keep their thickness: a 0.024 in lid strap stays 0.024 in.', bin.note);
-  // A number typed and the toggle clicked: the click leaves the field, so
-  // the value is kept, then read in the new unit.
+  // A number typed and the toggle clicked: the value is only a preview, so the
+  // click drops it - the piece never changed - and the boxes re-read in the new unit.
   await type(page, 'scale-length', '1.5');
   const t1 = await unit(page, 'mm'), t2 = await unit(page, 'in');
-  check('(c) 1.5 in typed, then the toggle clicked: the edit is kept, as one step - 38.1 mm, 1.500 in on the way back; the other boxes re-read',
-    t1.val.length === '38.1' && t2.val.length === '1.500' && t1.val.width === bmm.val.width && t2.val.width === inch(b.W) &&
-    t1.undo === bmm.undo + 1 && t2.undo === t1.undo, t1.val.length + ' / ' + t2.val.length + ', undo ' + bmm.undo + ' -> ' + t2.undo);
-  await undo(page);
+  check('(c) 1.5 in typed, then the toggle clicked: the preview is dropped, nothing baked - the boxes re-read the piece in each unit',
+    t1.val.length === bmm.val.length && t2.val.length === inch(b.L) && t1.val.width === bmm.val.width && t2.val.width === inch(b.W) &&
+    t1.undo === bmm.undo && t2.undo === t1.undo, t1.val.length + ' / ' + t2.val.length + ', undo ' + bmm.undo + ' -> ' + t2.undo);
   // (b) Length 1.25 in: exactly NSO_extendRaw at 1.25 x 25.4 mm on the same soup
   await keepSoup(page);
   let st = await typeAndLeave(page, 'scale-length', '1.25', 'Length (done|refused)|stood down');
@@ -441,6 +440,8 @@ withApp(async (page, logs) => {
   // is set from script and the field's change fired, with it not focused.
   await page.evaluate(() => { document.getElementById('status').textContent = ''; });
   await setFields(page, { 'scale-target': '6' });
+  await page.waitForFunction(() => !document.getElementById('btn-scale-set').disabled, null, { timeout: 60000 });
+  await page.click('#btn-scale-set');
   await page.waitForFunction(() => /Scale (done|refused)|stood down/.test(document.getElementById('status').textContent), null, { timeout: 60000 });
   st = await statusOf(page);
   console.log('   Longest 6 in: ' + st);

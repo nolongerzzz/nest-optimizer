@@ -102,8 +102,8 @@ its raw Z, Length the longer of its X and Y, Width the shorter. Part 1's bar lin
 read `W × D × L`, naming the section's sides; part 3 uses the names the fields
 use.
 
-One compact row per field — label | field | unit or hold | Set — and only the
-rows `NSO_sectionVerbs` says apply:
+One compact row per field — label | field | unit or hold, a slider under it — and
+only the rows `NSO_sectionVerbs` says apply:
 
 | row | shown when | what it calls |
 |---|---|---|
@@ -115,11 +115,28 @@ rows `NSO_sectionVerbs` says apply:
 | **Longest** `[ ] mm` | unless a named field already shows the same number | `NSO_scaleSelectedModel({ axis: 'longest', targetMm })`, prefilled with the longest edge. Its done line's before figure is the solver's own `spanBeforeMm`, the edge it solved on, whichever axis that is |
 | **Fit to plate** | always | `min(limit / size)` over the bed's three axes, from the same `nso_printer.js` fit the plate warning uses, applied as a uniform factor and stated. Already fits: says so, changes nothing |
 
+**Sliders and the preview before the bake.** Each row's slider and box are one
+number (`app-live-slider.js`): the slider runs a quarter to four times the value
+the piece has, Whole × 0.1 to 4, Offset ±5 mm (±0.2 in with inches shown, on the
+box's own 0.005 in step). Moving either runs the row's verb on the piece as it
+was when the edit began and draws the result as a translucent preview over the
+piece, which turns to a ghost, seated where the bake would put it (bottom on the
+plate, centred on the piece). **The piece is not touched**: the preview is a
+scene helper (`nso-helpers.js`, owner `scale-live`), never picked, packed or
+exported, and not an Undo step. **Set** (the button, or Enter in the field)
+bakes what the preview shows through `NSO_sculptCommitRaw` — one Undo step, the
+verb's own undo type — so what is baked is the previewed soup bit for bit.
+**Cancel**, Escape, selecting another piece, starting another field, the mm | in
+toggle and closing the card drop the preview. A refused value says why under the
+field in red and draws nothing; Set stays greyed until the value is one the piece
+takes. One field is staged at a time. Fit to plate stays a button and applies at
+once. `tools/nso_scale_live_drive_check.js` drives all of it.
+
 Every field repopulates whenever the selection, the selected piece's soup or its
 pose on the plate (Yaw, Tip, Roll, Lift, position) changes, whoever changed it:
 while the card is open, a per-frame check on the piece, `rawTris` identity
 (every bake replaces the array) and the placed entry's pose. A refused apply
-leaves what was typed. At a 900 px-tall window the card ends at 436 px (the
+leaves what was typed (and the preview down). At a 900 px-tall window the card ends at 436 px (the
 tray, the most rows a box gets) with no scroll; the drive check measures it.
 
 Paint scope: every verb is whole-piece and any paint stands it down, naming the

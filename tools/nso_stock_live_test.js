@@ -98,8 +98,8 @@ const scaleCard = async (page, field) => {
   }, field || null, { timeout: 30000 });
   await page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
 };
-/* Type a value into one of Scale's live fields and leave it with Tab, which is
-   what commits it. Resolves once the piece's soup has changed. */
+/* Type a value into one of Scale's fields and press Enter, which is Set: it
+   bakes the preview. Resolves once the piece's soup has changed. */
 const scaleType = async (page, id, field, value) => {
   await scaleCard(page, field);
   const before = await shot(page, id);
@@ -107,7 +107,7 @@ const scaleType = async (page, id, field, value) => {
   await page.focus('#' + field);
   await page.keyboard.press('Control+A');
   await page.keyboard.type(String(value));
-  await page.keyboard.press('Tab');
+  await page.keyboard.press('Enter');
   await page.waitForFunction(([i, sum]) => {
     const m = state.models.find(x => x && x.id === i);
     let s = 0;

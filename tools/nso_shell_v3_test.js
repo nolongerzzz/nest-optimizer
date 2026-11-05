@@ -208,8 +208,8 @@ const RETIRED = {
   'menu-plates': ['plate-panel', 'btn-clear-plate', 'btn-optimize'],   // the PLATE button: pinned panel + two slabs
   'menu-pack': ['btn-optimize'],                                      // Pack's one button is the OPTIMIZE slab
   'menu-bend': ['menu-shape'],                                        // the BEND card: Bend and Tube edge, in Shape
-  // #187: the Scale card's fields are live, no Set - each Set button's job
-  // is its own field's
+  // #187: the Scale card's rows have no Set of their own - the card's one Set (btn-scale-set)
+  // bakes whichever field is previewed
   'btn-scale-length': ['scale-length'], 'btn-scale-width': ['scale-width'], 'btn-scale-height': ['scale-height'],
   'btn-scale-ring-outer': ['scale-ring-outer'], 'btn-scale-ring-wall': ['scale-ring-wall'],
   'btn-scale-rod-diameter': ['scale-rod-diameter'], 'btn-scale-offset': ['scale-offset'],

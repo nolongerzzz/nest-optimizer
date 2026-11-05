@@ -96,7 +96,7 @@ withApp(async (page, logs) => {
       fac: el('scale-factor') ? el('scale-factor').dataset.nsoWired === '1' : false,
       len: el('scale-length') ? el('scale-length').dataset.nsoWired === '1' : false,
       fit: el('btn-scale-fit') ? el('btn-scale-fit').dataset.nsoWired === '1' : false,
-      // The fields are live: no Set beside any of them.
+      // No Set beside any field: the card's one Set (outside the rows) bakes the previewed one.
       set: Array.from(document.querySelectorAll('#scale-rows button')).map(b => b.id),
       api: typeof NSO_scaleSelectedModel
     };
@@ -110,7 +110,7 @@ withApp(async (page, logs) => {
   check('Longest field wired at load', ui.dim);
   check('Whole x field wired at load', ui.fac);
   check('Length field and Fit to plate wired at load', ui.len && ui.fit);
-  check('no Set button beside any field - typing applies, leaving commits', ui.set.length === 0, ui.set.join(', '));
+  check('no Set button inside the rows - the card has one Set, under them, that bakes the preview', ui.set.length === 0, ui.set.join(', '));
   check('NSO_scaleSelectedModel reachable', ui.api === 'function', ui.api);
 
   console.log('\n=== 2. a real click: 80x40x20 box, height to exactly 50 mm ===');

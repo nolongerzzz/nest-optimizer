@@ -28,6 +28,8 @@ Smart build-plate packing for 3D printing.
   face, for pipe work - and a rod's **Diameter**; **Offset** (the
   outside in or out, inner faces following - Fatten / Shrink, folded in) on
   everything but a ring or rod; **Whole ×**, **Longest** and **Fit to plate**.
+  Every row has a **slider** and previews on the piece - a translucent ghost
+  over it, the piece untouched - until **Set** bakes it (one Undo step).
   See [docs/SECTION.md](docs/SECTION.md)
 - **In-house slicer** (G-scope, **Slice**): exact layer sections, walls offset
   by the measured line widths, grid / zigzag infill by density, top and bottom

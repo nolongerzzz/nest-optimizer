@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=326ee39b" />
+  <link rel="stylesheet" href="styles.css?v=9f56b6d1" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -717,6 +717,13 @@
               <input id="scale-target" title="Solve the uniform factor that makes the piece's longest edge exactly this many mm. Hidden when Length, Width, Height or a diameter already shows the same number." type="number" min="0.1" max="1000" step="0.1" aria-label="Longest edge, mm" />
               <span class="hint">mm</span>
               </div>
+              </div>
+              <p id="scale-preview-note" class="hint scale-preview-note" aria-live="polite">Move a slider or type a value to preview it on the piece. Set bakes it; nothing changes until then.</p>
+              <div class="scale-actions">
+              <button id="btn-scale-set" class="btn" type="button" disabled
+              title="Bake the previewed size into the piece: one Undo step. Until this is pressed the piece is untouched (Enter in the field does the same).">Set</button>
+              <button id="btn-scale-cancel" class="btn btn-secondary" type="button" disabled
+              title="Drop the preview and put the field back. The piece was never changed (Esc does the same).">Cancel</button>
               </div>
               <button id="btn-scale-fit" class="btn btn-secondary" type="button"
               title="Scale uniformly by the largest factor that fits the printer the plate is set to, and say the factor. If it already fits, nothing changes.">Fit to plate</button>
@@ -2634,7 +2641,7 @@
   <!-- Ring verbs: Outer / Bore / Wall, a rod's Diameter. Calls
        nso_section.js and app-fatten.js's face filter at apply time. -->
   <script src="nso_ring.js?v=dc696549"></script>
-  <script src="app-scale.js?v=9ed19fba"></script>
+  <script src="app-scale.js?v=f9372cab"></script>
   <script src="app-brush.js?v=6d319870"></script>
   <!-- Pull: nso_densify.js is the shared subdivision (the gun will use it too), nso_pull.js the field and its guards, app-pull.js the pointer session. docs/PULL.md -->
   <script src="nso_densify.js?v=0b7748d1"></script>
@@ -2675,7 +2682,7 @@
   <script src="nso_surftex_presets.js?v=2b935033"></script>
   <script src="app-surftex.js?v=89cac998"></script>
   <script src="app-surftex-live.js?v=2fba4db4"></script>
-  <script src="app-live-slider.js?v=0bc4bb66"></script>
+  <script src="app-live-slider.js?v=da9aaed7"></script>
   <script src="app-hollow.js?v=f99c09ad"></script>
   <script src="app-foam.js?v=16cca4f6"></script>
   <script src="app-thicken-live.js?v=dab1b45f"></script>

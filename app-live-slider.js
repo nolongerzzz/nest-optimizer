@@ -34,9 +34,13 @@
 
   function $(id) { return document.getElementById(id); }
 
-  function trim(x) {
-    var s = String(Math.round(x * 100) / 100);
-    return s;
+  /* Two decimals, or as many as the slider's own step has (an inch box steps
+     by 0.005): the box must be able to say every position the slider can. */
+  function trim(x, slider) {
+    var st = slider ? String(slider.step || '') : '', dot = st.indexOf('.');
+    var d = Math.max(2, Math.min(6, dot < 0 ? 0 : st.length - dot - 1));
+    var k = Math.pow(10, d);
+    return String(Math.round(x * k) / k);
   }
 
   var bound = {};
@@ -55,7 +59,7 @@
     }
     function show() {
       var v = value();
-      if (read) read.textContent = v === null ? '—' : trim(v) + unit;
+      if (read) read.textContent = v === null ? '—' : trim(v, slider) + unit;
       if (v !== null) slider.value = String(v);   // the browser clamps it to the slider's own range
     }
     function run() {
@@ -78,12 +82,12 @@
       pending = false;
     }
     function set(v) {
-      box.value = trim(v);
+      box.value = trim(v, slider);
       fire();
     }
 
     slider.addEventListener('input', function () {
-      box.value = trim(parseFloat(slider.value));
+      box.value = trim(parseFloat(slider.value), slider);
       fire();
     });
     box.addEventListener('input', fire);
