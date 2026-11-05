@@ -2321,7 +2321,7 @@
       var EXACT_OUTLINE = true;       /* A RIBBON PLATE (the ridge) is Bambu's: each layer the part's EXACT section at the layer's reach (one section, not the union of the layers up to it; the reach never past the stack top's own face: dCl), the loops' centre PLATE_OUT_MM + 0.12 past it (measured on all six pieces: the outer edge stands 0.33 - 0.38 past the outline). Domes keep the union cut: a single section at that reach is far wider than theirs. */
       var REACH_EXTRA_MM = 0;   /* the section is read this much higher: a plane's edge moves 2.75 mm for 1 mm of height, and Bambu's plate stood 0.19 mm past ours on the downhill side */
       var PLATE_OUT_MM = -0.11;
-      var CONE_REACH_MM = 0.18, DISC_REACH_MM = 0.24, DISC_CLOSING = 0.88, DISC_CLIP_MM = -0.07, PLATE_UP_LOW_MM = 0.1, PLATE_UP_LOW_N = 4, RIBBON_SLAB_RATIO = 2;      /* the ridge's first plates (its rounded end, the slab still wide): the uphill edge stands 0.1 over the layer, and the slab is a ribbon from a ratio of 2 (Bambu cycles its hatch there too) */
+      var HOLE_SNAP_MM = 0.3, CONE_REACH_MM = 0.18, DISC_REACH_MM = 0.24, DISC_CLOSING = 0.88, DISC_CLIP_MM = -0.07, PLATE_UP_LOW_MM = 0.1, PLATE_UP_LOW_N = 4, RIBBON_SLAB_RATIO = 2;      /* the ridge's first plates (its rounded end, the slab still wide): the uphill edge stands 0.1 over the layer, and the slab is a ribbon from a ratio of 2 (Bambu cycles its hatch there too) */
       var PLATE_UP_MM = 0.21;      /* the uphill edge: the plate stops where the part's section 0.21 mm over the layer begins (the face there stands 0.21 over it; Bambu's ribbon is 0.9 mm of the face's height, ours was 1.05) */
       var PLATE_BAND_MM = 0.7;      /* how far past the support mesh's footprint the outline may run */
       var CURVED_SHRINK_MM = 0.1;   /* on a curved face (the zone changes layer on layer) the host cut is this much narrower: a dome's plate was out past Bambu's */
@@ -2476,6 +2476,26 @@
                     var win = g.offset(hLow, 1.0), clipH = g.offset(hStar, (steady ? LOOP_IN_FLAT_MM : LOOP_IN_MM) - w / 2 + DISC_CLIP_MM);      /* the drawn edge is the hole's: the loop stands loopIn in from the slab's edge and half a line out */
                     var plateN = g.inter(clipH, g.offset(g.inter(g.inter(Sj, sheetCs), win), PLATE_BAND_MM));
                     if (!g.isEmpty(plateN)) { Sj = g.union(g.diff(Sj, win), plateN); sheetCs = g.union(g.diff(sheetCs, win), plateN); cavGround = plateN; }
+                  } else if (hStar && HOLE_SNAP_MM > 0) {
+                    /* A HOLE THAT STAYS OPEN: the ring's inner loop is the part's own hole - a true circle in Bambu's (R 3.82, 0.002 mm off a fit) - and the slab's, rastered, is a staircase
+                       of 0.04 - 0.16 mm. The hole keeps its size (the slab's) and takes the part's shape: the exact hole, offset by the difference of their equivalent radii. */
+                    var holeOf = function (cs) {
+                      var found = null;
+                      g.polys(cs).forEach(function (R0) {
+                        var s2 = 0; for (var q = 0; q < R0.length; q++) { var u = R0[q], v = R0[(q + 1) % R0.length]; s2 += u[0] * v[1] - v[0] * u[1]; }
+                        if (s2 < 0 && inside([R0.slice().reverse()], px, py)) found = g.of([R0.slice().reverse()], 'Positive');
+                      });
+                      return found;
+                    };
+                    var hSj = holeOf(Sj), hSh = holeOf(sheetCs);
+                    if (hSj) {
+                      var dR = Math.sqrt(g.area(hSj) / Math.PI) - Math.sqrt(g.area(hStar) / Math.PI);
+                      if (Math.abs(dR) <= HOLE_SNAP_MM) {
+                        var newHole = g.offset(hStar, dR);
+                        Sj = g.diff(g.union(Sj, hSj), newHole);
+                        if (hSh) sheetCs = g.diff(g.union(sheetCs, hSh), newHole);
+                      }
+                    }
                   }
                 }
               }

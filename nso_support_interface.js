@@ -1129,11 +1129,19 @@
     for (q = 0; q < N; q++) if (M[q]) { m++; if (C[q]) cov++; }
     return m ? cov / m : 0;
   }
+  var SLAB_BLUR = true;
   var SLAB_MIN_MM2 = 3.5;      /* a slab is laid for an island of the footprint this big at least */
   var SLAB_WEAK_SHARE = 0.75;  /* slabPlate 'weak': a region is laid as a slab when its loops and lines (and thin beads) cover less than this share of it */
   function slabOfMask(M, nx, ny, ox, oy, cellMm, z0, z1, epsMm) {
     var f = new Float32Array(M.length), q;
     for (q = 0; q < M.length; q++) f[q] = M[q] ? 1 : 0;
+    /* the raster's edge is a staircase a cell high: the mask is blurred a cell (1 2 1, both ways) before it is traced at one half, and the trace lands between cells - a straight edge stays
+       where it was, a stair becomes the line through it, a curve its curve (Bambu's loops lie on the part's own smooth section) */
+    if (SLAB_BLUR) {
+      var g1 = new Float32Array(M.length), ix, iy;
+      for (iy = 0; iy < ny; iy++) for (ix = 0; ix < nx; ix++) { q = iy * nx + ix; g1[q] = (2 * f[q] + (ix > 0 ? f[q - 1] : f[q]) + (ix < nx - 1 ? f[q + 1] : f[q])) / 4; }
+      for (iy = 0; iy < ny; iy++) for (ix = 0; ix < nx; ix++) { q = iy * nx + ix; f[q] = (2 * g1[q] + (iy > 0 ? g1[q - nx] : g1[q]) + (iy < ny - 1 ? g1[q + nx] : g1[q])) / 4; }
+    }
     function a2(r) { var s = 0; for (var i = 0, j = r.length - 1; i < r.length; j = i++) s += r[j][0] * r[i][1] - r[i][0] * r[j][1]; return s / 2; }
     function pip(p, r) {
       var inn = false;
@@ -1457,7 +1465,7 @@
       capRise: opts.capRiseMm == null ? CAP_RISE_MM : +opts.capRiseMm,
       capMin: opts.capMinMm == null ? CAP_MIN_MM : +opts.capMinMm,
       capMax: opts.capMaxMm == null ? CAP_MAX_MM : +opts.capMaxMm,
-      slabEps: opts.slabEpsMm == null ? 0.04 : +opts.slabEpsMm,      /* how far the traced outline may stray from the mask's own edge when it is simplified: 0.04, so a curve keeps its points (0.12 cut a round plate into flat sides) */
+      slabEps: opts.slabEpsMm == null ? 0.01 : +opts.slabEpsMm,      /* how far the traced outline may stray from the mask's own edge when it is simplified: 0.04, so a curve keeps its points (0.12 cut a round plate into flat sides) */
       slab: opts.slabPlate === true || opts.slabPlate === 'weak' ? opts.slabPlate : false,                      /* a region plate laid as one solid footprint for the slicer to fill (slabOfMask), not as loops and lines */
       flare: opts.regionFlare === true,                                 /* a tip under a region plate ends in a flared cap, as Bambu's legs do (flareOf), not a bare column */
       eps: EPS_MM
