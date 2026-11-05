@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=3070a15c" />
+  <link rel="stylesheet" href="styles.css?v=a08c8029" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -220,56 +220,74 @@
               </div>
               </div>
               </details>
-              <!-- Fittings: a slip-on Cap for the selected tube, and a 2- or 3-way Splitter - each a
-                   NEW piece on the plate, edits nothing. nso_fittings.js builds them (headless,
-                   tools/nso_fittings_test.js), app-fittings.js is this card. docs/FITTINGS.md. -->
-              <details class="vp-menu vp-wheel-menu vp-fittings-menu">
-              <summary title="A slip-on pipe cap or a threaded end for the selected tube, threaded nipples, couplers, adapters, plugs and caps, and a 2- or 3-way splitter (plain or with threaded ends) - each a piece of its own">Fittings</summary>
+              <!-- Fittings: pick a fitting from the tiles (a slip-on Cap, a threaded end for the selected tube, a nipple, coupler, adapter,
+                   plug, screw cap, or a 2- / 3-way splitter, plain or with threaded ends), move the sliders - a translucent preview stands
+                   on the plate where the piece will land and follows every change - and press Add to plate to bake it. Each is a NEW piece,
+                   edits nothing, one Undo. nso_fittings.js and nso_thread.js build them (headless, tools/nso_fittings_test.js,
+                   tools/nso_thread_test.js), app-fittings.js is this card, app-piece-preview.js the preview. docs/FITTINGS.md, docs/THREADS.md. -->
+              <details class="vp-menu vp-wheel-menu vp-fittings-menu" id="menu-fittings">
+              <summary title="A slip-on pipe cap or a threaded end for the selected tube, threaded nipples, couplers, adapters, plugs and caps, and a 2- or 3-way splitter (plain or with threaded ends). Pick one, adjust it live on the plate, then add it - each a piece of its own">Fittings</summary>
               <div class="vp-menu-body vp-wheel">
-              <div class="vp-row vp-row-opts">
-              <label class="vp-clone" title="Cap and tube-end sleeve: the clearance all round between the tube and the bore, mm. 0.25 is a printed slip fit; blank is 0.25.">Fit <input type="number" id="inp-fx-gap" min="0" max="2" step="0.05" placeholder="0.25" aria-label="Cap fit gap, mm"></label>
-              <label class="vp-clone" title="Cap and tube-end sleeve: how far the tube goes into it, mm. Blank is 0.75 x the tube's Ø, 8 to 30.">Deep <input type="number" id="inp-fx-depth" min="1" max="200" step="1" placeholder="auto" aria-label="Cap depth, mm"></label>
+              <div class="fs-tiles" id="fx-kind-row" role="group" aria-label="What to make">
+                <button class="fs-tile" type="button" data-kind="cap" aria-pressed="true" title="Slip-on cap: an open cup that fits over the end of the selected tube (bore = its Ø + the Fit, walls and closed end = the tube's own wall), closed end down. Needs a tube selected to size it; until then the preview is a generic one."><canvas width="64" height="64" aria-hidden="true"></canvas><span>Cap</span></button>
+                <button class="fs-tile" type="button" data-kind="tubemale" aria-pressed="false" title="Threaded end for the selected tube, MALE: a sleeve that takes the tube (a ledge for it to stop on), a hex collar, then a threaded spigot with the flow bore through."><canvas width="64" height="64" aria-hidden="true"></canvas><span>Tube end: male</span></button>
+                <button class="fs-tile" type="button" data-kind="tubefemale" aria-pressed="false" title="Threaded end for the selected tube, FEMALE: the same sleeve and collar, then a threaded socket for a male thread to screw into."><canvas width="64" height="64" aria-hidden="true"></canvas><span>Tube end: female</span></button>
+                <button class="fs-tile" type="button" data-kind="split2" aria-pressed="false" title="2-way splitter: a trunk into two branches, a Y - trunk down on the bed, branches up and out at the Angle, the same wall throughout. Plain, or with threaded ends."><canvas width="64" height="64" aria-hidden="true"></canvas><span>2-way</span></button>
+                <button class="fs-tile" type="button" data-kind="split3" aria-pressed="false" title="3-way splitter: a trunk into three branches 120 degrees apart round its axis. Plain, or with threaded ends."><canvas width="64" height="64" aria-hidden="true"></canvas><span>3-way</span></button>
+                <button class="fs-tile" type="button" data-kind="nipple" aria-pressed="false" title="Nipple: male thread at both ends, a hex collar between, a flow bore through."><canvas width="64" height="64" aria-hidden="true"></canvas><span>Nipple</span></button>
+                <button class="fs-tile" type="button" data-kind="coupler" aria-pressed="false" title="Coupler: female thread at both ends, a hex collar, a flow bore through."><canvas width="64" height="64" aria-hidden="true"></canvas><span>Coupler</span></button>
+                <button class="fs-tile" type="button" data-kind="adapter" aria-pressed="false" title="Adapter: male Thread below, female Thread 2 above (the same size when Thread 2 is left on "same")."><canvas width="64" height="64" aria-hidden="true"></canvas><span>Adapter</span></button>
+                <button class="fs-tile" type="button" data-kind="plug" aria-pressed="false" title="Plug: a male thread and a hex head, solid - it closes a female thread."><canvas width="64" height="64" aria-hidden="true"></canvas><span>Plug</span></button>
+                <button class="fs-tile" type="button" data-kind="screwcap" aria-pressed="false" title="Screw cap: a female thread and a closed end - it closes a male thread. (The slip-on Cap fits over a plain tube.)"><canvas width="64" height="64" aria-hidden="true"></canvas><span>Screw cap</span></button>
               </div>
-              <div class="vp-row vp-row-opts">
-              <label class="vp-clone" title="Which end of the selected tube the cap is for (its Ø and wall are the same at both, but the cap reads that end)">End
+              <div class="fx-sub" id="fx-ends-row" hidden>
+              <span class="fx-sublabel">Trunk end</span>
+              <div class="fs-tiles fs-ends" id="fx-trunkend-row" role="group" aria-label="Splitter trunk end">
+                <button class="fs-tile" type="button" data-end="plain" aria-pressed="true" title="A plain pipe end."><canvas width="64" height="64" aria-hidden="true"></canvas><span>Plain</span></button>
+                <button class="fs-tile" type="button" data-end="male" aria-pressed="false" title="A threaded spigot under the inlet - the splitter stands on it."><canvas width="64" height="64" aria-hidden="true"></canvas><span>Male</span></button>
+                <button class="fs-tile" type="button" data-end="female" aria-pressed="false" title="A threaded socket cut into the trunk."><canvas width="64" height="64" aria-hidden="true"></canvas><span>Female</span></button>
+              </div>
+              <span class="fx-sublabel">Branch ends</span>
+              <div class="fs-tiles fs-ends" id="fx-branchend-row" role="group" aria-label="Splitter branch ends">
+                <button class="fs-tile" type="button" data-end="plain" aria-pressed="true" title="Plain pipe ends."><canvas width="64" height="64" aria-hidden="true"></canvas><span>Plain</span></button>
+                <button class="fs-tile" type="button" data-end="male" aria-pressed="false" title="Threaded spigots past the ends of the branches."><canvas width="64" height="64" aria-hidden="true"></canvas><span>Male</span></button>
+                <button class="fs-tile" type="button" data-end="female" aria-pressed="false" title="Threaded sockets cut into the ends of the branches."><canvas width="64" height="64" aria-hidden="true"></canvas><span>Female</span></button>
+              </div>
+              </div>
+              <div class="vp-row vp-row-opts" id="fx-row-end">
+              <label class="vp-clone" title="Which end of the selected tube the cap or sleeve is for (its Ø and wall are the same at both, but it reads that end)">End
                 <select id="sel-fx-end" class="vp-select" aria-label="Tube end"><option value="top" selected>Top</option><option value="bottom">Bottom</option></select></label>
               </div>
-              <div class="vp-row vp-row-full">
-              <button id="btn-fx-cap" class="btn btn-secondary" type="button"
-                title="Cap: a slip-on cup for the open end of the selected tube, as a plumber's pipe cap. Its bore is the tube's outside Ø plus the Fit all round; its walls AND its closed end are the tube's own wall thickness. A new piece, closed end down on the bed; the tube is not changed.">Cap for selected tube</button>
-              </div>
-              <div class="vp-row vp-row-opts">
-              <label class="vp-clone" title="Splitter: the trunk's outside Ø, mm. Blank is 20. 'Ø from tube' copies the selected tube's.">Ø <input type="number" id="inp-fx-od" min="1" max="400" step="0.5" placeholder="20" aria-label="Splitter trunk outside diameter, mm"></label>
-              <label class="vp-clone" title="Splitter: the wall of every run, mm - held to the nozzle-safety floor. Blank is 2.">Wall <input type="number" id="inp-fx-wall" min="0.4" max="40" step="0.1" placeholder="2" aria-label="Splitter wall, mm"></label>
-              </div>
-              <div class="vp-row vp-row-opts">
-              <label class="vp-clone" title="Splitter: each branch's outside Ø, mm. Blank is three quarters of the trunk's for a 2-way, two thirds for a 3-way.">Branch Ø <input type="number" id="inp-fx-bod" min="1" max="400" step="0.5" placeholder="auto" aria-label="Splitter branch outside diameter, mm"></label>
-              <label class="vp-clone" title="Splitter: each branch's angle off the trunk's axis, degrees, 10 to 80. Blank is 35.">Angle <input type="number" id="inp-fx-angle" min="10" max="80" step="1" placeholder="35" aria-label="Splitter branch angle, degrees"></label>
-              </div>
-              <div class="vp-row vp-row-opts">
-              <label class="vp-clone" title="Splitter: the trunk's length from the inlet to the junction, mm. Blank is 25.">Trunk <input type="number" id="inp-fx-trunk" min="1" max="500" step="1" placeholder="25" aria-label="Splitter trunk length, mm"></label>
-              <label class="vp-clone" title="Splitter: each branch's length from the junction, mm. Blank is 30. The outlets must stand a millimetre apart.">Branch <input type="number" id="inp-fx-branch" min="1" max="500" step="1" placeholder="30" aria-label="Splitter branch length, mm"></label>
-              </div>
-              <div class="vp-row vp-row-opts">
-              <label class="vp-clone" title="Splitter: the trunk's end. Plain is a plain pipe; Male adds a threaded spigot under the inlet (the splitter then stands on it); Female cuts a socket into the run. Thread is the size; the run must be wide enough - it says if not.">Trunk end
-                <select id="sel-fx-trunkend" class="vp-select" aria-label="Splitter trunk end"><option value="plain" selected>Plain</option><option value="male">Male</option><option value="female">Female</option></select></label>
-              <label class="vp-clone" title="Splitter: the branches' ends, as the trunk's. Their size is Thread 2 (same as Thread when blank).">Branch ends
-                <select id="sel-fx-branchend" class="vp-select" aria-label="Splitter branch ends"><option value="plain" selected>Plain</option><option value="male">Male</option><option value="female">Female</option></select></label>
-              </div>
-              <div class="vp-row vp-row-pair">
-              <button id="btn-fx-split2" class="btn btn-secondary" type="button"
-                title="2-way splitter: a trunk into two branches, a Y, as a piece of its own - trunk down on the bed, branches up and out at the Angle, the wall the same throughout.">2-way</button>
-              <button id="btn-fx-split3" class="btn btn-secondary" type="button"
-                title="3-way splitter: a trunk into three branches 120 degrees apart round its axis, as a piece of its own - trunk down on the bed, branches up and out at the Angle, the wall the same throughout.">3-way</button>
-              </div>
-              <div class="vp-row vp-row-full">
+              <div class="fs-slider" id="fx-row-gap" title="Cap and tube-end sleeve: the clearance all round between the tube and the bore, mm. 0.25 is a printed slip fit.">
+                <label for="inp-fx-gap-slider">Fit</label><input type="number" id="inp-fx-gap" min="0" max="1" step="0.05" value="0.25" aria-label="Fit"><span id="fx-gap-read" class="fs-read">0.25 mm</span>
+                <input type="range" id="inp-fx-gap-slider" min="0" max="1" step="0.05" value="0.25"></div>
+              <div class="fs-slider" id="fx-row-depth" title="Cap and tube-end sleeve: how far the tube goes in, mm. It starts at 0.75 x the tube's Ø (8 to 30) until moved.">
+                <label for="inp-fx-depth-slider">Deep</label><input type="number" id="inp-fx-depth" min="2" max="60" step="0.5" value="15" aria-label="Deep"><span id="fx-depth-read" class="fs-read">15 mm</span>
+                <input type="range" id="inp-fx-depth-slider" min="2" max="60" step="0.5" value="15"></div>
+              <div class="fs-slider" id="fx-row-od" title="Splitter: the trunk's outside Ø, mm. 'Ø from tube' copies the selected tube's.">
+                <label for="inp-fx-od-slider">Ø</label><input type="number" id="inp-fx-od" min="4" max="80" step="0.5" value="20" aria-label="Ø"><span id="fx-od-read" class="fs-read">20 mm</span>
+                <input type="range" id="inp-fx-od-slider" min="4" max="80" step="0.5" value="20"></div>
+              <div class="fs-slider" id="fx-row-wall" title="Splitter: the wall of every run, mm - held to the nozzle-safety floor.">
+                <label for="inp-fx-wall-slider">Wall</label><input type="number" id="inp-fx-wall" min="0.4" max="10" step="0.1" value="2" aria-label="Wall"><span id="fx-wall-read" class="fs-read">2 mm</span>
+                <input type="range" id="inp-fx-wall-slider" min="0.4" max="10" step="0.1" value="2"></div>
+              <div class="fs-slider" id="fx-row-bod" title="Splitter: each branch's outside Ø, mm. It starts at three quarters of the trunk's for a 2-way, two thirds for a 3-way, and follows the trunk until moved.">
+                <label for="inp-fx-bod-slider">Branch Ø</label><input type="number" id="inp-fx-bod" min="3" max="80" step="0.5" value="15" aria-label="Branch Ø"><span id="fx-bod-read" class="fs-read">15 mm</span>
+                <input type="range" id="inp-fx-bod-slider" min="3" max="80" step="0.5" value="15"></div>
+              <div class="fs-slider" id="fx-row-angle" title="Splitter: each branch's angle off the trunk's axis, degrees, 10 to 80.">
+                <label for="inp-fx-angle-slider">Angle</label><input type="number" id="inp-fx-angle" min="10" max="80" step="1" value="35" aria-label="Angle"><span id="fx-angle-read" class="fs-read">35°</span>
+                <input type="range" id="inp-fx-angle-slider" min="10" max="80" step="1" value="35"></div>
+              <div class="fs-slider" id="fx-row-trunk" title="Splitter: the trunk's length from the inlet to the junction, mm.">
+                <label for="inp-fx-trunk-slider">Trunk</label><input type="number" id="inp-fx-trunk" min="5" max="150" step="1" value="25" aria-label="Trunk"><span id="fx-trunk-read" class="fs-read">25 mm</span>
+                <input type="range" id="inp-fx-trunk-slider" min="5" max="150" step="1" value="25"></div>
+              <div class="fs-slider" id="fx-row-branch" title="Splitter: each branch's length from the junction, mm. The outlets must stand a millimetre apart.">
+                <label for="inp-fx-branch-slider">Branch</label><input type="number" id="inp-fx-branch" min="5" max="150" step="1" value="30" aria-label="Branch"><span id="fx-branch-read" class="fs-read">30 mm</span>
+                <input type="range" id="inp-fx-branch-slider" min="5" max="150" step="1" value="30"></div>
+              <div class="vp-row vp-row-full" id="fx-row-fromtube">
               <button id="btn-fx-fromtube" class="btn btn-secondary" type="button"
                 title="Copy the selected tube's outside Ø and wall into the splitter's Ø and Wall, so the splitter's trunk matches that pipe.">Ø from tube</button>
               </div>
-              <!-- Threads (docs/THREADS.md): a threaded end for the selected tube, threaded fittings of their own, and
-                   threaded ends on the splitter's runs. nso_thread.js builds the threads. -->
-              <div class="vp-row vp-row-opts">
-              <label class="vp-clone" title="The thread for a threaded end, a threaded fitting, and the splitter's ends. G is BSP parallel (seals with tape or a washer), NPT is tapered 1:16, M is metric.">Thread
+              <div class="vp-row vp-row-opts" id="fx-row-threads">
+              <label class="vp-clone" title="The thread: for a threaded end, a threaded fitting, and the splitter's ends. G is BSP parallel (seals with tape or a washer), NPT is tapered 1:16, M is metric.">Thread
                 <select id="sel-fx-tsize" class="vp-select" aria-label="Thread size">
                   <optgroup label="Pipe, parallel (G / BSP)">
                     <option>G1/8</option><option>G1/4</option><option>G3/8</option><option selected>G1/2</option><option>G3/4</option><option>G1</option><option>G1-1/4</option><option>G1-1/2</option><option>G2</option>
@@ -281,7 +299,7 @@
                     <option>M10x1</option><option>M12x1.5</option><option>M16x1.5</option><option>M20x1.5</option><option>M24x2</option><option>M30x2</option><option>M8</option><option>M10</option><option>M12</option><option>M16</option><option>M20</option><option>M24</option><option>M30</option>
                   </optgroup>
                 </select></label>
-              <label class="vp-clone" title="Adapter: the upper (female) end's thread. Splitter: the branch ends' thread. Same as Thread when left on 'same'.">Thread 2
+              <label class="vp-clone" id="fx-row-tsize2" title="Adapter: the upper (female) end's thread. Splitter: the branch ends' thread. Same as Thread when left on 'same'.">Thread 2
                 <select id="sel-fx-tsize2" class="vp-select" aria-label="Second thread size">
                   <option value="" selected>same</option>
                   <optgroup label="Pipe, parallel (G / BSP)">
@@ -295,26 +313,15 @@
                   </optgroup>
                 </select></label>
               </div>
-              <div class="vp-row vp-row-opts">
-              <label class="vp-clone" title="Threads: the length of each thread, mm. Blank is about six pitches, 8 to 25.">T length <input type="number" id="inp-fx-tlen" min="2" max="100" step="1" placeholder="auto" aria-label="Thread length, mm"></label>
-              <label class="vp-clone" title="Threads: the clearance added to a female thread so a male one turns in it, mm. 0.2 is a printed fit; blank is 0.2.">T fit <input type="number" id="inp-fx-tfit" min="0" max="1" step="0.05" placeholder="0.2" aria-label="Thread fit, mm"></label>
-              </div>
-              <div class="vp-row vp-row-pair">
-              <button id="btn-fx-tmale" class="btn btn-secondary" type="button"
-                title="Threaded end for the selected tube, MALE: a sleeve that takes the tube (bore = its Ø + the Fit, a ledge for it to stop on), a hex collar, then a threaded spigot with the flow bore through. Sized from the tube's own Ø and wall; a new piece, the tube is not changed.">Tube end: male</button>
-              <button id="btn-fx-tfemale" class="btn btn-secondary" type="button"
-                title="Threaded end for the selected tube, FEMALE: the same sleeve and collar, then a threaded socket for a male thread to screw into. A new piece, the tube is not changed.">Tube end: female</button>
-              </div>
-              <div class="vp-row vp-row-pair">
-              <button id="btn-fx-nipple" class="btn btn-secondary" type="button" title="Nipple: male thread at both ends, a hex collar between, a flow bore through.">Nipple</button>
-              <button id="btn-fx-coupler" class="btn btn-secondary" type="button" title="Coupler: female thread at both ends, a hex collar, a flow bore through.">Coupler</button>
-              </div>
-              <div class="vp-row vp-row-pair">
-              <button id="btn-fx-adapter" class="btn btn-secondary" type="button" title="Adapter: male Thread below, female Thread 2 above (blank = the same size).">Adapter</button>
-              <button id="btn-fx-plug" class="btn btn-secondary" type="button" title="Plug: a male thread and a hex head, solid - it closes a female thread.">Plug</button>
-              </div>
+              <div class="fs-slider" id="fx-row-tlen" title="Threads: the length of each thread, mm. It starts at about six pitches (8 to 25) until moved.">
+                <label for="inp-fx-tlen-slider">T length</label><input type="number" id="inp-fx-tlen" min="2" max="40" step="1" value="11" aria-label="T length"><span id="fx-tlen-read" class="fs-read">11 mm</span>
+                <input type="range" id="inp-fx-tlen-slider" min="2" max="40" step="1" value="11"></div>
+              <div class="fs-slider" id="fx-row-tfit" title="Threads: the clearance added to a female thread so a male one turns in it, mm. 0.2 is a printed fit.">
+                <label for="inp-fx-tfit-slider">T fit</label><input type="number" id="inp-fx-tfit" min="0" max="0.6" step="0.05" value="0.2" aria-label="T fit"><span id="fx-tfit-read" class="fs-read">0.2 mm</span>
+                <input type="range" id="inp-fx-tfit-slider" min="0" max="0.6" step="0.05" value="0.2"></div>
               <div class="vp-row vp-row-full">
-              <button id="btn-fx-tcap" class="btn btn-secondary" type="button" title="Screw cap: a female thread and a closed end - it closes a male thread. (Cap for selected tube above is the slip-on one.)">Screw cap</button>
+              <button id="btn-fx-add" class="btn btn-secondary" type="button"
+                title="Bake what the preview shows: it is added to the plate as a piece of its own, beside the selection, selected. One Undo. Nothing is added until this is pressed.">Add to plate</button>
               </div>
               <p id="fx-readout" class="bend-readout" aria-live="polite">—</p>
               </div>
@@ -2604,7 +2611,7 @@
        reader, weld and helpers). See docs/TUBE-EDGE.md, "Neck". -->
   <script src="nso_tube_neck.js?v=e42beb75"></script>
   <script src="nso_thread.js?v=3d986b5e"></script>
-  <script src="nso_fittings.js?v=d69ad69f"></script>
+  <script src="nso_fittings.js?v=b8b58426"></script>
   <script src="app-tube-edge.js?v=54e345d1"></script>
   <!-- Bridge: a web between two places, welded. After NSO_Repair.js,
        nso_planar_fuse.js (the vertex space), nso_thickness.js,
@@ -2634,8 +2641,9 @@
   <script src="app-wheel.js?v=35fda70f"></script>
   <script src="app-fit.js?v=94ef7252"></script>
   <script src="app-stock.js?v=04f0e346"></script>
-  <script src="app-fittings.js?v=7f46895b"></script>
-  <script src="app-fasteners.js?v=0d34ba0b"></script>
+  <script src="app-piece-preview.js?v=730a465a"></script>
+  <script src="app-fittings.js?v=d1920e12"></script>
+  <script src="app-fasteners.js?v=dbaebe2f"></script>
   <script src="app-assemble.js?v=60984bfb"></script>
   <script src="app-sel-outline.js?v=c1a5b4df"></script>
   <script src="app-join.js?v=5a50ad61"></script>

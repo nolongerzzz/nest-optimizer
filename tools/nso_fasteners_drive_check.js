@@ -86,7 +86,7 @@ withApp(async (page, logs) => {
   let st = await FS(page), rd = await readout(page);
   check('the default is a Bolt, M8, hex head: ONE translucent ghost stands in the scene', st.kind === 'bolt' && st.head === 'hex' && st.ghosts === 1 && st.ok && st.ghost[0].inScene, JSON.stringify(st));
   check('the readout says it is a preview, with the numbers', !rd.bad && /^Preview - Hex bolt M8 × 25\.0 \(ISO metric 60°\): 13\.0 across flats/.test(rd.text), rd.text);
-  const inScene = await page.evaluate(() => ({ placed: state.placed.length, group: state.modelGroup.children.length, flagged: state.scene.children.filter(c => c.userData && c.userData.nsoFastenerPreview).length, inGroup: state.modelGroup.children.some(c => c.userData && c.userData.nsoFastenerPreview) }));
+  const inScene = await page.evaluate(() => ({ placed: state.placed.length, group: state.modelGroup.children.length, flagged: state.scene.children.filter(c => c.userData && c.userData.nsoPiecePreview).length, inGroup: state.modelGroup.children.some(c => c.userData && c.userData.nsoPiecePreview) }));
   check('nothing is on the plate: no piece, not in the model group (so not picked, packed or exported), no Undo step', (await pieces(page)).length === n0 && inScene.flagged === 1 && !inScene.inGroup && (await undoDepth(page)) === u0, JSON.stringify(inScene));
   check('its size is the bolt\'s: 15.0 across corners, 13.0 across flats, 30.3 tall (5.3 head + 25 shank)', Math.abs(st.ghost[0].size.x - 15.01) < 0.03 && Math.abs(st.ghost[0].size.z - 13) < 0.03 && Math.abs(st.ghost[0].size.y - 30.3) < 0.03, JSON.stringify(st.ghost[0].size));
   check('it stands on the bed (its lowest point 0.2 mm up, as a placed piece does)', Math.abs(st.ghost[0].y - st.ghost[0].size.y / 2 - 0.2) < 1e-6, st.ghost[0].y.toFixed(3));
@@ -241,7 +241,7 @@ withApp(async (page, logs) => {
   await choose(page, 'sel-fs-hand', 'right');
   await page.evaluate(() => { document.getElementById('menu-fasteners').open = false; });
   await until(page, s => s.ghosts === 0 && !s.open);
-  check('closing the menu takes the preview away', (await FS(page)).ghosts === 0 && (await page.evaluate(() => state.scene.children.filter(c => c.userData && c.userData.nsoFastenerPreview).length)) === 0);
+  check('closing the menu takes the preview away', (await FS(page)).ghosts === 0 && (await page.evaluate(() => state.scene.children.filter(c => c.userData && c.userData.nsoPiecePreview).length)) === 0);
   await page.evaluate(() => { document.getElementById('menu-fasteners').open = true; });
   await until(page, s => s.ghosts === 1);
   check('opening it brings it back', (await FS(page)).ghosts === 1);

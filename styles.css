@@ -4787,3 +4787,9 @@ body.sup-card-open #adjust-status { display: none; }
 .fs-slider .fs-read { grid-column: 3; min-width: 40px; text-align: right; color: #cbd5e1; font-variant-numeric: tabular-nums; }
 .fs-slider input[type="range"] { grid-column: 1 / -1; width: 100%; min-width: 0; margin: 2px 0 0; }
 .fs-slider[hidden], .fs-tiles[hidden] { display: none; }
+.fx-sub { flex: 0 0 100%; box-sizing: border-box; }
+.fx-sub[hidden] { display: none; }
+.fx-sublabel { display: block; font-size: 10px; color: #94a3b8; margin: 4px 0 1px; }
+.fs-ends { grid-template-columns: repeat(3, 1fr); margin-top: 0; }
+.fs-ends .fs-tile canvas { width: 52px; height: 52px; }
+.vp-menu-body .vp-row[hidden], .vp-menu-body .vp-clone[hidden] { display: none; }

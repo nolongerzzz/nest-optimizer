@@ -238,9 +238,13 @@
         }
       } else {
         E.rOut = Math.max(G.ro, sp.R + fit + g.wall);          // a boss round the socket where the run is too thin to leave a wall
-        var need = Lt + hubO;
+        // A boss joins the run through the run's own wall. Where the thread's crests (R + fit) reach within two nozzle widths of the run's
+        // outside, the cut takes the wall away and the boss above the socket's floor would float: it then starts a shoulder BELOW the floor,
+        // where the run's wall is still whole, and holds on there.
+        E.shoulder = (E.rOut > G.ro + 1e-9 && sp.R + fit > G.ro - 2 * g.nozzle) ? 2 : 0;
+        var need = Lt + E.shoulder + hubO;
         if (G.run < need - 1e-9) {
-          res.reason = 'the ' + G.name + (k === 'branch' ? ' are' : ' is') + ' ' + fmt(G.run, 1) + ' mm long - too short for a ' + fmt(Lt, 1) + ' mm ' + sp.id + ' socket that must stop short of the hub; make ' + (k === 'branch' ? 'them' : 'it') + ' at least ' + fmt(Math.ceil(need * 10) / 10, 1) + ' mm';
+          res.reason = 'the ' + G.name + (k === 'branch' ? ' are' : ' is') + ' ' + fmt(G.run, 1) + ' mm long - too short for a ' + fmt(Lt, 1) + ' mm ' + sp.id + ' socket' + (E.shoulder ? ' (and its ' + E.shoulder + ' mm shoulder)' : '') + ' that must stop short of the hub; make ' + (k === 'branch' ? 'them' : 'it') + ' at least ' + fmt(Math.ceil(need * 10) / 10, 1) + ' mm';
           return res;
         }
       }
@@ -297,10 +301,10 @@
     var clear = sep - bodEnd;
     if (te.branch && te.branch.kind === 'female') {                // ...and where the socket boss begins, nearer the hub, the outlets are nearer each other
       var sep1 = ways === 2 ? 2 * Math.sin(th) : Math.sqrt(3) * Math.sin(th), room = sep1 - (2 * te.branch.rOut + DEFAULTS.outletGap);
-      var clearRoot = sep1 * (lb - te.branch.len) - 2 * te.branch.rOut;
+      var rootAt = lb - te.branch.len - (te.branch.shoulder || 0), clearRoot = sep1 * rootAt - 2 * te.branch.rOut;
       if (clearRoot < DEFAULTS.outletGap - 1e-9) {
-        res.reason = 'the ' + ways + ' ' + te.branch.size + ' sockets would ' + (clearRoot <= 0 ? 'run into each other' : 'stand only ' + fmt(clearRoot) + ' mm apart') + ' where they begin, ' + fmt(lb - te.branch.len, 1) +
-          ' mm from the hub - ' + (room > 0 ? 'make the branches at least ' + fmt(Math.ceil(te.branch.len * sep1 / room * 10) / 10, 1) + ' mm long' : 'widen the angle or take a smaller thread');
+        res.reason = 'the ' + ways + ' ' + te.branch.size + ' sockets would ' + (clearRoot <= 0 ? 'run into each other' : 'stand only ' + fmt(clearRoot) + ' mm apart') + ' where they begin, ' + fmt(rootAt, 1) +
+          ' mm from the hub - ' + (room > 0 ? 'make the branches at least ' + fmt(Math.ceil((te.branch.len + (te.branch.shoulder || 0)) * sep1 / room * 10) / 10, 1) + ' mm long' : 'widen the angle or take a smaller thread');
         return res;
       }
       clear = Math.min(clear, clearRoot);
@@ -364,7 +368,7 @@
       } else {
         var cutT = TH.cutter(TE.size, TE.len + 1, { fit: TE.fit, slope: TE.spec.slope, hand: p.hand });
         if (!cutT.ok) { res.reason = 'internal: ' + cutT.reason; return res; }
-        if (TE.rOut > ro + 1e-9) outer.push(cyl(TE.rOut, TE.len + 0.2));
+        if (TE.rOut > ro + 1e-9) outer.push(cyl(TE.rOut, TE.len + (TE.shoulder || 0) + 0.2));
         inner.push(keep(cyl(ri, J - TE.len + 0.25).translate([0, 0, TE.len - 0.25])));
         // the socket's floor at z = len, its mouth at the inlet: the cutter's local +z (floor to mouth) turned to -z
         inner.push(keep(keep(threadSolid(cutT.soup).rotate([180, 0, 0])).translate([0, 0, TE.len])));
@@ -381,7 +385,7 @@
       } else {
         var cutB = TH.cutter(BE.size, BE.len + 1, { fit: BE.fit, slope: BE.spec.slope, hand: p.hand });
         if (!cutB.ok) { res.reason = 'internal: ' + cutB.reason; return res; }
-        if (BE.rOut > rb + 1e-9) outer = outer.concat(onBranches(keep(cyl(BE.rOut, BE.len + 0.2).translate([0, 0, Lb - BE.len]))));
+        if (BE.rOut > rb + 1e-9) outer = outer.concat(onBranches(keep(cyl(BE.rOut, BE.len + (BE.shoulder || 0) + 0.2).translate([0, 0, Lb - BE.len - (BE.shoulder || 0)]))));
         inner = inner.concat(branch(rbi, Lb - BE.len + 0.25), onBranches(keep(threadSolid(cutB.soup).translate([0, 0, Lb - BE.len]))));
       }
       outer.push(keep(ball(hubO).translate([0, 0, J])));
@@ -431,7 +435,7 @@
     return s;
   }
 
-  var API = { DEFAULTS: DEFAULTS, cap: cap, capFromTube: capFromTube, threadEndFromTube: threadEndFromTube, capDepthFor: capDepthFor, splitterSize: splitterSize, splitter: splitter };
+  var API = { DEFAULTS: DEFAULTS, cap: cap, capFromTube: capFromTube, threadEndFromTube: threadEndFromTube, readTube: readTube, capDepthFor: capDepthFor, splitterSize: splitterSize, splitter: splitter };
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
   if (root) root.NSO_Fittings = API;
 })(typeof window !== 'undefined' ? window : (typeof globalThis !== 'undefined' ? globalThis : null));

@@ -65,23 +65,41 @@ the thread's own Ø read-only in the Ø field and takes the ring handle away; PU
 
 ## Fittings
 
-- **Tube end: male / female.** Reads the selected tube's end the way Cap does (`NSO_tubeEdgeRead`), then `NSO_Thread.sleeve`: a socket
-  that takes the tube (bore = its Ø + Fit, default 0.25; Deep as the cap's), a ledge for the tube to stop on, a hex collar, then a threaded
-  spigot or socket with the flow bore through. A new piece, tube end down; the tube is not changed.
+Pick a kind from the tiles - **Cap**, **Tube end: male / female**, **2-way**, **3-way**, **Nipple**, **Coupler**, **Adapter**, **Plug**, **Screw
+cap** - adjust, and **Add to plate**. The tiles, sliders and live preview work as Fasteners' do (below); what is particular to this card:
+
+- **Tiles** are drawn from the generators (`nsoStockShelf.paint`): the Cap is a *generic* slip-on cap (it needs no tube to be drawn), the tube ends
+  a sleeve with an amber tube going into it, the splitters tubes laid out as the splitter lays them, the rest `nso_thread.js`'s fittings at G1/2.
+  **Trunk end** and **Branch ends** are three tiles each - plain, male, female.
+- **Sliders** for every number: **Fit** and **Deep** (cap, tube end), **Ø**, **Wall**, **Branch Ø**, **Angle**, **Trunk**, **Branch** (splitter),
+  **T length**, **T fit** (threads); Thread, Thread 2 and End are selects. Deep (0.75 x the tube's Ø, 8 to 30), Branch Ø (3/4 or 2/3 of the trunk's)
+  and T length (about six pitches) *follow* what they depend on until moved. Rows a kind does not use are put away. **Ø from tube** copies the
+  selected tube's Ø and wall.
+- **The preview of a Cap or a Tube end reads the selected tube** (`NSO_Fittings.readTube`, the Tube-edge reader, cached per tube and end) and
+  follows a change of selection. With **no tube selected it is a generic Ø20 x 2 tube's**, labelled so in the readout, and Add to plate is off
+  (forced, it says `Select a tube: the cap is made for its end.`).
+- **The splitter's preview is built on the boolean kernel** (about 0.2-0.5 s): its refusals are said *at once* without the kernel, a newer change
+  supersedes an older build in flight (only the latest is shown), and Add to plate is off until the preview shown is the one the card now says.
+  Add bakes *that very mesh* - not a rebuild.
+
+- **Tube end: male / female.** Reads the selected tube's end the way Cap does, then `NSO_Thread.sleeve`: a socket that takes the tube (bore = its Ø +
+  Fit, default 0.25; Deep as the cap's), a ledge for the tube to stop on, a hex collar, then a threaded spigot or socket with the flow bore through.
+  A new piece, tube end down; the tube is not changed.
 - **Nipple, coupler, adapter, plug, screw cap.** A hex collar with a thread at either or both ends. The flow bore leaves a wall's worth of
   ledge under every male root and female crest (a bore between a female thread's crests and roots would cut across it - refused in words).
 - **The splitter's ends** (`trunkEnd` / `branchEnd`: plain, male, female; `trunkThread` / `branchThread`; `threadLen`, `fit`). *Male*: a
   threaded spigot added past the run's end, its bore the run's held under the root less a wall; the thread's **root must reach 0.8 mm
   into the run's wall** or the spigot would only touch it (refused with the bore that would work), and the thread must fit inside the run's
   outside. *Female*: the run's last `threadLen` mm becomes a socket - a boss round it where the run is too thin to leave a wall, the thread
-  cut with the 0.2 fit, the flow bore stopping at its floor; the run must be long enough to stop short of the hub, and neighbouring
-  sockets must clear each other where they begin. Built with the same Manifold kernel as the rest of the splitter, so the same gates hold:
-  one body, genus = openings − 1, Euler 4 − 2 × openings. A male trunk makes the splitter stand on its spigot; it is lifted so its lowest
-  point is z = 0.
+  cut with the 0.2 fit, the flow bore stopping at its floor; where the thread's crests reach within two nozzle widths of the run's outside the cut
+  takes the run's wall away, so the boss starts a **2 mm shoulder below the floor** to hold on (without it the boss floated free: 31 bodies); the run
+  must be long enough to stop short of the hub, and neighbouring sockets must clear each other where they begin. Built with the same Manifold
+  kernel as the rest of the splitter, so the same gates hold: one body, genus = openings - 1, Euler 4 - 2 x openings. A male trunk makes the
+  splitter stand on its spigot; it is lifted so its lowest point is z = 0.
 
 ## Fasteners
 
-Pick **Rod**, **Bolt**, **Nut** or **Bolt + nut** from the tiles, adjust, and **Add to plate**. (`npm run fasteners:drive`.)
+Pick **Rod**, **Bolt**, **Nut** or **Bolt + nut** from the tiles, adjust, and **Add to plate**. (`npm run fasteners:drive`.) The preview ghost and the tile-art helpers are `app-piece-preview.js`, shared with the Fittings card.
 
 - **Tiles** - the four kinds and the two head types (**Hex head**, **Socket head**) are pictures drawn from the generator's own meshes at M8 with
   the Stock shelf's painter (`nsoStockShelf.paint`), the first time the card opens: no image file is in the repo. A bolt is drawn head up (it prints

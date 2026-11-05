@@ -42,7 +42,10 @@ Smart build-plate packing for 3D printing.
   ([docs/FITTINGS.md](docs/FITTINGS.md)). **Threaded ends**: a male or female
   thread on a sleeve that takes the selected tube, threaded nipples, couplers,
   adapters, plugs and screw caps, and male / female ends on the splitter's runs
-  (G, NPT and metric; [docs/THREADS.md](docs/THREADS.md))
+  (G, NPT and metric; [docs/THREADS.md](docs/THREADS.md)). Pick a fitting from
+  picture tiles, move a slider for every number, watch a **live translucent
+  preview** on the plate (the splitter's built on the boolean kernel as you
+  drag), then **Add to plate**
 - **Fasteners** (Gen+): a threaded **rod**, a **bolt** (hex or socket head), a
   **nut** and a bolt + nut set, M2 to M30 (coarse and fine) or G pipe sizes or
   a typed Ø and pitch. Pick one from picture tiles, move a slider for every

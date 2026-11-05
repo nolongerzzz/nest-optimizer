@@ -47,3 +47,23 @@ Follow-up, same day - **Fasteners: tiles, sliders, live preview** (`app-fastener
   card still works.
 - The menu body is a wrapping flex box 176-320 px wide: a row that is not `flex: 0 0 100%` sits beside its neighbour (the first layout interleaved
   the two tile rows).
+
+Follow-up - **Fittings: tiles, sliders, live preview** (`app-fittings.js` rewritten, new `app-piece-preview.js`, the Fittings block in `index.html`,
+`tools/nso_fittings_drive_check.js` rewritten, `nso_fittings.js` exports `readTube` and gains the socket shoulder):
+- *`app-piece-preview.js` is the one ghost.* Fasteners' private ghost moved into it (`nsoPiecePreview.show / clear / place / state`, plus the tile-art
+  helpers `art.flipUp / moveZ / join / xform / rotY / rotZ / mul3`); `show(owner, ...)` replaces another card's ghost and `clear(owner)` only clears
+  its own. The page keeps one panel open (`app-input-mode.js`): opening Fasteners shuts Fittings, so two cards never both show - the owner rule is
+  the backstop. The ghost's scene flag is now `userData.nsoPiecePreview` (was `nsoFastenerPreview`).
+- *Cap and Tube end preview without a tube.* The Cap's tile is a generic cap; with nothing selected the preview is a generic Ø20 x 2 tube's
+  ("Preview for a generic Ø20 x 2 tube (select a tube to size it) - ...") and Add to plate is off, so the sliders still give feedback. With a tube it
+  reads `NSO_Fittings.readTube` once per (piece, end, what) and a click that changes the selection rebuilds it (a window `pointerup`, because Undo and
+  Remove change the selection too).
+- *The splitter preview is async.* `splitterSize` (sync) says the refusals at once without the kernel; otherwise one build runs at a time and a newer
+  request supersedes it (`S.want`), so a drag does not queue forty builds; Add waits for the one in flight and bakes `S.last` - the mesh the user saw -
+  unless the card has since changed. Branch Ø, Deep and T length are only passed to the engine once moved, so the engine's own defaults apply.
+- *A real engine bug the drive check found.* A female branch end whose thread crests (R + fit) are wider than the branch itself (G3/4 on a Ø21 branch)
+  cut the whole branch wall away in the socket zone, so the boss above the floor floated: 31 bodies of genus 4. The boss now starts a 2 mm shoulder
+  below the floor when the crests come within two nozzle widths of the run's outside (`E.shoulder`); the length checks count it. Regression:
+  `fittings:thread`'s "wide socket" case.
+- The Angle slider's range starts at 10 degrees, the engine's own minimum, so the 5-degree refusal is reached by typing in the box (the box takes
+  any value, as Hollow's does).

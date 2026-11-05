@@ -45,7 +45,7 @@
     fit:    { box: 'inp-fs-fit',    slider: 'inp-fs-fit-slider',    read: 'fs-fit-read' },
     nutm:   { box: 'inp-fs-nutm',   slider: 'inp-fs-nutm-slider',   read: 'fs-nutm-read' }
   };
-  var S = { kind: 'bolt', head: 'hex', touched: {}, ghost: [], tiles: false, ok: false };
+  var S = { kind: 'bolt', head: 'hex', touched: {}, tiles: false, ok: false };
 
   function menu() { return $('menu-fasteners'); }
   /* open, and so is every menu it sits in (Gen+): a preview for a card nobody can see is clutter */
@@ -127,52 +127,10 @@
 
   /* ---------------------------------------------------------------- the preview */
 
-  function ghostClear() {
-    S.ghost.forEach(function (m) {
-      if (m.parent) m.parent.remove(m);
-      if (m.geometry) m.geometry.dispose();
-      if (m.material) m.material.dispose();
-    });
-    S.ghost = [];
-  }
-  function sizeOfMesh(mesh) {
-    var bb = mesh.geometry.boundingBox;
-    return { x: bb.max.x - bb.min.x, y: bb.max.y - bb.min.y, z: bb.max.z - bb.min.z };
-  }
-  /* stand the ghost(s) where the drop would put them: the first at its free spot, a second beside it */
-  function ghostPlace() {
-    if (!S.ghost.length) return;
-    var fx = window.nsoFittings && window.nsoFittings.spotFor, prev = null;
-    S.ghost.forEach(function (m, i) {
-      var sz = sizeOfMesh(m), at;
-      if (i === 0) at = typeof fx === 'function' ? fx(sz.x, m) : { x: 0, z: 0 };
-      else at = { x: prev.x + prev.w / 2 + 6 + sz.x / 2, z: prev.z };
-      m.position.set(at.x, 0.2 + sz.y / 2, at.z);
-      m.updateMatrixWorld(true);
-      prev = { x: at.x, z: at.z, w: sz.x };
-    });
-  }
-  function ghostShow(items) {
-    ghostClear();
-    if (typeof THREE === 'undefined' || typeof state === 'undefined' || !state.scene) return;
-    items.forEach(function (it) {
-      var g = new THREE.BufferGeometry();
-      g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(it.soup), 3));
-      g.rotateX(-Math.PI / 2);                                      // the app's own z-up -> y-up
-      g.computeVertexNormals();
-      g.computeBoundingBox();
-      g.center();
-      var mat = new THREE.MeshStandardMaterial({ color: 0x34d399, metalness: 0.05, roughness: 0.5, emissive: 0x064e3b, emissiveIntensity: 0.35,
-                                                 transparent: true, opacity: 0.6, depthWrite: false });
-      var mesh = new THREE.Mesh(g, mat);
-      mesh.renderOrder = 40;
-      mesh.userData.skipXray = true;
-      mesh.userData.nsoFastenerPreview = true;
-      state.scene.add(mesh);
-      S.ghost.push(mesh);
-    });
-    ghostPlace();
-  }
+  /* the ghost is the shared one (app-piece-preview.js): beside the selection, one at a time, a scene helper and not a piece */
+  var PV = function () { return window.nsoPiecePreview; };
+  function ghostClear() { if (PV()) PV().clear('fasteners'); }
+  function ghostShow(items) { if (PV()) PV().show('fasteners', items.map(function (it) { return it.soup; })); }
 
   function setAdd(on) { var b = $('btn-fs-add'); if (b) b.disabled = !on; S.ok = !!on; }
 
@@ -241,17 +199,9 @@
 
   /* ---------------------------------------------------------------- the tiles */
 
-  function flipUp(s) {                                      // a half turn about X: the head up, as a bolt is held
-    var o = new Float32Array(s.length);
-    for (var i = 0; i < s.length; i += 3) { o[i] = s[i]; o[i + 1] = -s[i + 1]; o[i + 2] = -s[i + 2]; }
-    return o;
-  }
-  function moveZ(s, dz) { var o = new Float32Array(s); for (var i = 2; i < o.length; i += 3) o[i] += dz; return o; }
-  function join(a, b) { var o = new Float32Array(a.length + b.length); o.set(a, 0); o.set(b, a.length); return o; }
-
-  var AMBER = [251, 191, 36];
+  var A = function () { return window.nsoPiecePreview.art; };
   function tileArt(name) {
-    var T = NSO_Thread, bolt, nut, body;
+    var T = NSO_Thread, a = A(), flipUp = a.flipUp, moveZ = a.moveZ, join = a.join, AMBER = a.AMBER, bolt, nut, body;
     switch (name) {
       case 'rod': return { soup: T.rod({ size: 'M8', length: 16 }).soup };
       case 'bolt': return { soup: flipUp(T.bolt({ size: 'M8', length: 14 }).soup), view: { yaw: 0.62, elev: 0.5 } };
@@ -313,7 +263,7 @@
     var onToggle = function () { if (isOpen()) { drawTiles(); refresh(); } else ghostClear(); };
     for (var d = m; d; d = d.parentElement && d.parentElement.closest('details')) d.addEventListener('toggle', onToggle);
     // a click that selects another piece (or an Undo, a Remove) moves where the drop would land: stand the preview there
-    window.addEventListener('pointerup', function () { if (isOpen() && S.ghost.length) setTimeout(ghostPlace, 0); }, true);
+    window.addEventListener('pointerup', function () { if (isOpen() && PV() && PV().count()) setTimeout(function () { if (PV().state().owner === 'fasteners') PV().place(); }, 0); }, true);
     if (have()) {
       var f = $(FIELDS.fit.box); if (f && !S.touched.fit) setField('fit', NSO_Thread.DEFAULTS.fit);
       syncFromSize(); setField('length', KIND_LENGTH[S.kind]);
@@ -326,8 +276,10 @@
     // each bakes that kind with the card's numbers now (what the Add to plate button does for the chosen tile)
     rod: function () { return bake('rod'); }, bolt: function () { return bake('bolt'); }, nut: function () { return bake('nut'); }, set: function () { return bake('set'); },
     add: bake, select: selectKind, head: selectHead, preview: refresh, build: build, drawTiles: drawTiles,
-    state: function () { return { kind: S.kind, head: S.head, ghosts: S.ghost.length, ok: S.ok, open: isOpen(), tiles: S.tiles, touched: Object.assign({}, S.touched),
-                                  ghost: S.ghost.map(function (g) { var p = g.position, z = sizeOfMesh(g); return { x: p.x, y: p.y, z: p.z, size: z, inScene: !!g.parent }; }) }; }
+    state: function () {
+      var g = PV() ? PV().state() : { owner: null, count: 0, ghost: [] }, mine = g.owner === 'fasteners';
+      return { kind: S.kind, head: S.head, ghosts: mine ? g.count : 0, ok: S.ok, open: isOpen(), tiles: S.tiles, touched: Object.assign({}, S.touched), ghost: mine ? g.ghost : [] };
+    }
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire);

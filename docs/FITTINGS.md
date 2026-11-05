@@ -87,6 +87,13 @@ outlet corner is where trigonometry puts it; each outlet is open (nothing
 crossed from the junction out along its axis). Six more sizes and angles
 (20° to 80°, Ø12 to Ø30, walls 1.2 to 2.4) pass the same gates.
 
+## The card: tiles, sliders, a live preview
+
+Gen+ > Fittings is a shelf of tiles (Cap, Tube end male / female, 2-way, 3-way, Nipple, Coupler, Adapter, Plug, Screw cap), a slider for every
+number, and a translucent **preview** on the plate that follows them; **Add to plate** bakes what it shows. The Cap's tile is a generic cap; with
+no tube selected the Cap preview is a generic Ø20 x 2 tube's and Add is off. Details in [THREADS.md](THREADS.md), "Fittings" (the card's
+behaviours) and "Fasteners" (the shared preview). `npm run fittings:drive`.
+
 ## Threaded ends
 
 Plain ends are the default. **Threaded ends** - a male or female thread on the selected tube's sleeve, nipples, couplers, adapters, plugs and

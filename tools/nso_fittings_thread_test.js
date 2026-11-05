@@ -188,6 +188,17 @@ const stockTube = (rOut, wall, h) => S.revolve(S.profileTube(rOut, rOut - wall, 
     }
   }
   {
+    // a socket wider than the run itself (G3/4's crests r 13.4 on a Ø21 branch): the cut takes the branch's wall away, so the boss has to
+    // hold on BELOW the socket's floor. Found by the card's drive check: it built 31 bodies before the shoulder.
+    const r = await split({ ways: 2, od: 28, wall: 3, branchOd: 21, branchLen: 60, angle: 50, branchEnd: 'female', branchThread: 'G3/4' });
+    console.log('   ' + r.reason);
+    check('2-way, Ø21 branches with G3/4 sockets (wider than the branch): made, ONE body, genus 2', r.ok && r.info.genus === 2, r.reason);
+    if (r.ok) closed('2-way wide-socket splitter', r.soup, -2);
+    const z = F.splitterSize({ ways: 2, od: 28, wall: 3, branchOd: 21, branchLen: 20, angle: 50, branchEnd: 'female', branchThread: 'G3/4' });
+    console.log('   ' + z.reason);
+    check('a branch too short for the socket and its 2 mm shoulder is refused in words, with the length that works', !z.ok && /^the branches are 20\.0 mm long - too short for a 11\.0 mm G3\/4 socket \(and its 2 mm shoulder\) that must stop short of the hub; make them at least 27\.0 mm$/.test(z.reason), z.reason);
+  }
+  {
     const r = await split({ ways: 2, od: 20, wall: 2.4, branchOd: 14, branchLen: 45, angle: 40, trunkEnd: 'female', trunkThread: 'G1/4', branchEnd: 'male', branchThread: 'G1/4' });
     console.log('   ' + r.reason);
     check('a mixed one: female G1/4 trunk, male G1/4 branches: made, genus 2', r.ok && r.info.genus === 2, r.reason);
