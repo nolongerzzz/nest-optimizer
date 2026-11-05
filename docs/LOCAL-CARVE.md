@@ -157,6 +157,16 @@ through `NSO_seatFlushBitToHull` at all — not with a relaxed corner-ray gate,
 not with a larger tilt clamp. It needs its own placement step. The parts to
 reuse are below it: `NSO_plugFrame`, `NSO_CSG`, `subtractSoupBFromA`.
 
+> **Since measured, this straddle is refused** (`NSO_seatStraddle`, `app-join.js`;
+> `npm run seat:overhang`). The measurement above is what the shipped build did
+> when this audit ran, and it was taken up as a defect in its own right: the
+> silent 6 mm → 0.01 mm collapse is destructive, and the same placement one
+> corner further out already refused with `corner N missed hull along punch
+> axis`. Seat now refuses this pose too — *bit straddles that hull face -
+> 6.00mm of it stands proud and the rest is already inside* — and moves
+> nothing. Nothing below changes: a carve still needs its own placement step,
+> and now Seat will not even appear to offer one.
+
 ---
 
 ## 3. Four more constraints Task 3 has to design around
@@ -378,12 +388,13 @@ untouched to 1e-12 and turns the sweep axis a right angle to 6.1e-17.
 ### Why it does not go through Seat
 
 It cannot, and this is worth stating because "relax Seat's corner-ray gate"
-looks like the cheap answer. §2b measured what Seat does to a straddle it does
-*not* refuse: it drives 6.000 mm of overhang down to 0.0100 mm and buries the
+looks like the cheap answer. §2b measured what Seat did to a straddle it did
+*not* refuse: it drove 6.000 mm of overhang down to 0.0100 mm and buried the
 bit as a plug through the one flat face it picked, reporting `Seated`. Making
 something flush against one face is Seat's purpose, not a limitation of its
-tolerances. A carve therefore needs its own placement step over the shared
-kernel path, which is what this is.
+tolerances — and that pose is now refused outright rather than converted, so
+Seat answers a straddle with a refusal either way. A carve therefore needs its
+own placement step over the shared kernel path, which is what this is.
 
 ### Pose state: contained, by decision
 
@@ -588,12 +599,22 @@ free orientation, that is the ticket: one quaternion field, carried through both
 functions and through the undo snapshot, with the Euler fields kept as the UI's
 way of driving it.
 
-**Wall thickness / nozzle safety as a reusable utility.** `minWall` guards one
-axis, which is exactly wrong at an edge or a corner where two or three faces are
-in play. Left as-is here by decision, and reported in the status line instead.
+**Wall thickness / nozzle safety as a reusable utility.** ~~Deferred.~~ **Done**
+— `nso_thickness.js`, and its `cutClearance()` is now wired to the shared cut
+core (`subtractSoupBFromA`), so a carve reports it on the same status line that
+reports what it removed. See `docs/WALL-THICKNESS.md`.
+
+`minWall` still guards one axis, and still decides what gets cut; that is
+unchanged. What is new is that the other axes are now *measured and reported*.
 The `fixtures/box_open.stl` corner case from §3c — 48.000 of 48.000 mm³ removed,
-a 2 mm near wall severed, the result still gating clean — is the test case that
-thread wants.
+a 2 mm near wall severed, the result still gating clean — was the test case that
+thread wanted, and it is now the case the wiring is pinned on
+(`npm run wall:cut`): the cut still removes its 48.000 mm³ and the status line
+says `WALL SEVERED: cut severs the piece across z ... reported, not blocked`.
+
+Deliberately a **warning and not a refusal**, for this document's own reason: a
+corner gouge that cuts through a wall is what this tool is *for*. Blocking it
+would have retired the feature, not guarded it.
 
 **Slivers at a curved cut boundary.** Measured above: 24–93 triangles over
 aspect 100, none collapsed, not gated by canon. They are cosmetically poor and
@@ -617,3 +638,51 @@ than skipped quietly.
 curved bit through the shipped Subtract would hit the same float32 ULP seams, and
 the audit only proved Subtract clean for *box* bits on *box* hulls. Worth
 measuring; it moves numbers other checks pin, so it needs its own run.
+
+## 11. Drag: one continuous groove
+
+A press on a piece with Carve armed opens a stroke; the release decides. A
+release within 4 px of the press is a click and punches once, exactly as in
+§5-§8. Anything longer is a groove: the blade swept along the stroke at the set
+depth, one boolean, one Undo (`carveReplace`, "Undo: Carve reverted").
+
+`npm run carve:drag` writes a screenshot of three 20 mm drags (ball-nose, flat
+shave, V-groove) to tools/carve-out/carve-drag.png, which is git-ignored.
+
+**What the groove is.** `NSO_Carve.planStroke` builds it from two primitives
+the repo already proves:
+
+- the blade's section - its silhouette down its own sweep axis (`grooveSection`:
+  the slab's rectangle, the wedge's triangle, the U of the ball-nose meridian) -
+  swept along the stroke's tip line by `NSO_PathSweep.sweep`, the mitred sweep
+  Bend and the support branches use, so the section perpendicular to the stroke
+  is the blade's section exactly inside every segment;
+- the blade solid itself, placed at the press and the release from the sweep's
+  own end frames, so it meets the sweep's end ring bit for bit.
+
+For a straight stroke the union is exactly the Minkowski sum of the blade with
+the segment: a ball-nose groove gets round ends, a slab or wedge its own length
+of overrun. The pointer samples are straightened (RDP at 0.02 mm), spaced to at
+least the blade's half-width so a mitre has room to turn, and a stroke turning
+through more than 120° is cut into runs overlapping by one segment and unioned.
+The blade is held at one orientation - the mean surface normal under the stroke -
+and a stroke whose normals spread past 25° has crossed an edge and is refused in
+words.
+
+**The wall gate** (`NSO_Carve.strokeWallGate`) runs before the kernel loads and
+refuses, it does not clip. Floor: **two nozzle widths** (0.8 mm at the 0.4 mm
+nozzle), stricter than a punch's 0.42 mm one-line floor. Every 0.5 mm along the
+stroke it asks NSO_Thickness's `strokeGate` what the cut leaves under the tip,
+and looks out of the groove from each in-material vertex and edge midpoint of the
+section along its own normal, so a slab run along a block's edge is refused for
+the side wall it would leave, not just the floor. The ends' hemispheres and
+overruns are not probed separately.
+
+**Measured** - `npm run carve:drag` (tools/nso_carve_drag_check.js): a real
+pointer drag of 20 mm on fixtures/box_hull_80x40x20-2.stl with each blade; the
+section across the result every 0.5 mm along the whole stroke matches the blade's
+section to 0.0000 mm both ways (the ball-nose floor is the r 2 circle to
+0.017 mm, the facet sagitta); the piece gates clean on mesh_validate.py; one Undo
+restores it vertex for vertex. A still click still punches; a 126° arc drag is one
+groove; a 1.5 mm groove into fixtures/box_open.stl's 2 mm floor is refused in
+words and the piece is untouched, 1.15 mm (leaves 0.85) is cut.

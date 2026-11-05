@@ -4,22 +4,26 @@
 // directly (always rebuilds from rawTris). No model other than the
 // selected one is touched.
 //
-// All three treatments run the one shared cap-plane engine in app-cut.js
-// (rawEdgeRoundInPlace), which keeps the cut face on the plane it is
-// already on and pulls the wall back only at treated edges. Round and
-// Bevel differ by profile; Corners is a per-vertex radius filter on that
-// same loop, not a second loop walker.
+// Round and Bevel build their rings here and hand them to the one cap-plane
+// rebuild in app-cut.js (rawCapRebuildFromRings), which keeps the cut face on
+// the plane it is already on and pulls the wall back only at treated edges;
+// they differ by profile. Corners and corners+edges are the vertex-ball
+// engines below. Every engine reads the face through rawCapFaceContext, which
+// walks every boundary loop: a face with a hole (a tube end, a washer, a
+// bored plate) has its outline and each hole treated, the hole rounding out
+// into the same material.
 //
 // A model carries no record of which face (if any) was its own cut face,
 // and Split is locked from being changed to add that. So the caller picks
 // the face; a factory-curved end simply has no meaningful cap/wall
 // boundary there and the engine fails safely, before any mesh swap.
 
-// True perimeter fillet on the clicked face's own loop — Round and Bevel.
+// True perimeter fillet on the clicked face's own loops — Round and Bevel.
 //
 // Corners rolls only the vertices that turn; this rolls the WHOLE loop: every
 // loop point carries R, so all four edges of a square face get the radius and
-// none of them stays a sharp straight run. Same rules as Corners otherwise —
+// none of them stays a sharp straight run - and every loop, so a tube end's
+// bore edge is rounded with its outer edge. Same rules as Corners otherwise —
 // the cap plane is read off the mesh and the lid is rebuilt at exactly that
 // plane, the wall moves in depth only, and the lid is the original cap
 // triangles trimmed back to the ring rather than a re-fan. The lid boundary
@@ -29,449 +33,100 @@
 // opts.profile  'round' (default) quarter circle, or 'chamfer' flat band.
 function rawPerimeterFilletInPlace(rawTris, axisIdx, keepMin, requestedR, opts) {
   opts = opts || {};
+  // A face that will not take R is refused with the R it will take
+  // (rawSoftenWithLimit, app-cut.js).
+  return rawSoftenWithLimit(R => rawPerimeterFilletBuild(rawTris, axisIdx, keepMin, R, opts),
+                            requestedR, rawPerimeterFilletInPlace);
+}
+
+function rawPerimeterFilletBuild(rawTris, axisIdx, keepMin, requestedR, opts) {
   const chamfer = opts.profile === 'chamfer';
   const STEPS = chamfer ? 1 : 6;
   const intoBody = keepMin ? 1 : -1;
   const other = [0, 1, 2].filter(a => a !== axisIdx);
-  const tol = 1e-4;
 
-  let minV = Infinity, maxV = -Infinity;
-  for (let i = axisIdx; i < rawTris.length; i += 3) {
-    if (rawTris[i] < minV) minV = rawTris[i];
-    if (rawTris[i] > maxV) maxV = rawTris[i];
-  }
-  const capPlane = keepMin ? minV : maxV;
-  const capTol = 1e-3;
-
-  const triCount = rawTris.length / 9;
-  const vert = (t, v) => { const i0 = t*9 + v*3; return [rawTris[i0], rawTris[i0+1], rawTris[i0+2]]; };
-  const isOnCap = (p) => Math.abs(p[axisIdx] - capPlane) < capTol;
-
-  const capTriIdx = [], wallTriIdx = [];
-  for (let t = 0; t < triCount; t++) {
-    const v0=vert(t,0), v1=vert(t,1), v2=vert(t,2);
-    if (isOnCap(v0) && isOnCap(v1) && isOnCap(v2)) capTriIdx.push(t);
-    else wallTriIdx.push(t);
-  }
-  if (!capTriIdx.length) throw new Error('no cap found on this face');
-
-  const vkey = (p) => Math.round(p[0]/tol)+'|'+Math.round(p[1]/tol)+'|'+Math.round(p[2]/tol);
-  const edgeMap = new Map();
-  const addEdge = (a, b, isCap) => {
-    const ka = vkey(a), kb = vkey(b);
-    const ek = ka < kb ? ka+'~'+kb : kb+'~'+ka;
-    if (!edgeMap.has(ek)) edgeMap.set(ek, []);
-    edgeMap.get(ek).push({ isCap, a, b });
-  };
-  for (const t of capTriIdx) {
-    const v0=vert(t,0), v1=vert(t,1), v2=vert(t,2);
-    addEdge(v0,v1,true); addEdge(v1,v2,true); addEdge(v2,v0,true);
-  }
-  for (const t of wallTriIdx) {
-    const v0=vert(t,0), v1=vert(t,1), v2=vert(t,2);
-    if (isOnCap(v0) && isOnCap(v1)) addEdge(v0,v1,false);
-    if (isOnCap(v1) && isOnCap(v2)) addEdge(v1,v2,false);
-    if (isOnCap(v2) && isOnCap(v0)) addEdge(v2,v0,false);
-  }
-  const boundaryEdges = [];
-  for (const entries of edgeMap.values()) {
-    if (entries.length === 2 && entries.some(e=>e.isCap) && entries.some(e=>!e.isCap)) {
-      const capEntry = entries.find(e => e.isCap);
-      boundaryEdges.push([capEntry.a, capEntry.b]);
-    }
-  }
-  if (!boundaryEdges.length) throw new Error('no cap/wall boundary found');
-
-  const adj = new Map(), posOf = new Map();
-  const pushAdj = (k, o) => { if (!adj.has(k)) adj.set(k, []); adj.get(k).push(o); };
-  for (const [a,b] of boundaryEdges) {
-    const ka = vkey(a), kb = vkey(b);
-    posOf.set(ka,a); posOf.set(kb,b);
-    pushAdj(ka,kb); pushAdj(kb,ka);
-  }
-  for (const list of adj.values()) if (list.length !== 2) throw new Error('branch point in cap boundary');
-  const startKey = vkey(boundaryEdges[0][0]);
-  const loopKeys = [startKey];
-  let prevKey = null, curKey = startKey;
-  do {
-    const nbrs = adj.get(curKey);
-    const nextKey = nbrs[0] === prevKey ? nbrs[1] : nbrs[0];
-    if (nextKey === startKey) break;
-    loopKeys.push(nextKey);
-    prevKey = curKey; curKey = nextKey;
-    if (loopKeys.length > adj.size + 2) throw new Error('cap boundary did not close');
-  } while (true);
-  const loop3d = loopKeys.map(k => posOf.get(k));
-  if (loop3d.length < 3) throw new Error('cap boundary too small to fillet');
-
+  // Every boundary loop of the face (rawCapFaceContext, app-cut.js): the
+  // outline, and one loop per hole.
+  const fc = rawCapFaceContext(rawTris, axisIdx, keepMin);
+  const capPlane = fc.capPlane;
   const flat2 = (p3) => [p3[other[0]], p3[other[1]]];
-  let poly2d = loop3d.map(flat2);
-  poly2d = raw2DWeldLoop(poly2d, 0.08);
-  const n = poly2d.length;
-  if (n < 3) throw new Error('cap boundary too small after weld');
-
-  // Wall available at a loop point, skipping only the two segments that
-  // touch it. rawLocalThickness2 skips everything within two indices, so on a
-  // coarse loop it skips the whole loop and falls back to its 4mm default.
-  const wallLimitAt = (i) => {
-    const curr = poly2d[i];
-    const prev = poly2d[(i-1+n)%n], next = poly2d[(i+1)%n];
-    const nn = rawEdgeInwardNormal2(prev, next);
-    let best = Infinity;
-    for (let j = 0; j < n; j++) {
-      if (j === i || j === (i-1+n)%n) continue;
-      const a = poly2d[j], b = poly2d[(j+1)%n];
-      const dx = b[0]-a[0], dy = b[1]-a[1];
-      const den = nn[0]*dy - nn[1]*dx;
-      if (Math.abs(den) < 1e-10) continue;
-      const t = ((a[0]-curr[0])*dy - (a[1]-curr[1])*dx) / den;
-      const u = ((a[0]-curr[0])*nn[1] - (a[1]-curr[1])*nn[0]) / -den;
-      if (t > 0.1 && t < best && u >= -0.05 && u <= 1.05) best = t;
-    }
-    for (let j = 0; j < n; j++) {
-      if (j === i || j === (i-1+n)%n || j === (i+1)%n) continue;
-      const d = Math.hypot(poly2d[j][0]-curr[0], poly2d[j][1]-curr[1]);
-      if (d < best) best = d;
-    }
-    return best === Infinity ? 4 : best;
-  };
-  // Every loop point carries R — that is the whole difference from Corners.
-  const Rs = new Array(n);
-  let peakR = 0;
-  for (let i = 0; i < n; i++) {
-    Rs[i] = Math.min(requestedR, Math.max(0, wallLimitAt(i) * 0.45));
-    if (Rs[i] > peakR) peakR = Rs[i];
-  }
-  if (peakR < 0.02) throw new Error('no safe radius anywhere on this face');
-
-  let area2 = 0;
-  for (let i = 0; i < n; i++) { const a=poly2d[i], b=poly2d[(i+1)%n]; area2 += a[0]*b[1]-b[0]*a[1]; }
-  const windSign = area2 >= 0 ? 1 : -1;
-  const inwardNormal2 = (a, b) => {
-    const tx=b[0]-a[0], ty=b[1]-a[1];
-    let nx=-ty*windSign, ny=tx*windSign;
-    const len = Math.hypot(nx,ny) || 1e-9;
-    return [nx/len, ny/len];
-  };
-  const vertexOffset = (i, radius) => {
-    const prev=poly2d[(i-1+n)%n], curr=poly2d[i], next=poly2d[(i+1)%n];
-    const n1=inwardNormal2(prev,curr), n2=inwardNormal2(curr,next);
-    let bx=n1[0]+n2[0], by=n1[1]+n2[1];
-    const blen=Math.hypot(bx,by)||1e-9; bx/=blen; by/=blen;
-    const cosHalf = Math.max(bx*n1[0]+by*n1[1], 0.3);
-    return [curr[0]+bx*(radius/cosHalf), curr[1]+by*(radius/cosHalf)];
-  };
   const from3 = (uv, along) => { const p=[0,0,0]; p[other[0]]=uv[0]; p[other[1]]=uv[1]; p[axisIdx]=along; return p; };
-  const ringAt = (s) => {
-    const t = s / STEPS;
-    const phi = Math.asin(Math.min(1, Math.max(0, t)));
-    const ring = [];
+
+  const loops = [];
+  let peakR = Infinity, loopPts = 0, holes = 0;
+  for (const F of fc.loops) {
+    if (F.pts.length < 3) throw new Error('cap boundary too small to fillet');
+    const poly2d = raw2DWeldLoop(F.pts.map(flat2), 0.08);
+    const n = poly2d.length;
+    if (n < 3) throw new Error('cap boundary too small after weld');
+
+    // Every loop point carries R - that is the whole difference from Corners.
+    // On the outline R is clamped to the wall available across the face at
+    // that point, skipping only the two segments that touch it
+    // (rawLocalThickness2 skips everything within two indices, so on a
+    // coarse loop it skips the whole loop and falls back to its 4mm default).
+    // Across a hole there is no wall, only the hole: a hole's room is the
+    // material between it and the other loops, which rawSoftenLoopRoom
+    // measures and refuses on rather than clamping.
+    const Rs = new Array(n);
+    let loopPeak = 0;
     for (let i = 0; i < n; i++) {
-      const R = Rs[i];
-      const inset = chamfer ? R * t : R * (1 - Math.cos(phi));
-      const depth = chamfer ? R * (1 - t) : R * (1 - Math.sin(phi));
-      ring.push(from3(vertexOffset(i, inset), capPlane + intoBody * depth));
+      Rs[i] = F.hole ? requestedR
+                     : Math.min(requestedR, Math.max(0, NSO_Thickness.cornerWall(poly2d, i).mm * 0.45));
+      if (Rs[i] > loopPeak) loopPeak = Rs[i];
     }
-    return ring;
-  };
-  const rings = [];
-  for (let s = 0; s <= STEPS; s++) rings.push(ringAt(s));
-  const ringTop2 = rings[STEPS].map(flat2);
-  if (rawRingSelfIntersects2(ringTop2)) throw new Error('R=' + requestedR + ' self-intersects on this face');
+    if (loopPeak < 0.02) throw new Error('no safe radius anywhere on this face');
+    // The radius reported is the smallest any loop got, so an outline that
+    // clamped while its hole did not still reads as a clamp.
+    if (loopPeak < peakR) peakR = loopPeak;
 
-  const out = [];
-  const polyArea = (p) => {
-    let a = 0;
-    for (let i = 0; i < p.length; i++) { const q = p[i], r = p[(i+1)%p.length]; a += q[0]*r[1] - r[0]*q[1]; }
-    return Math.abs(a) * 0.5;
-  };
-  const clipHalf = (p, px, py, nx, ny) => {
-    if (p.length < 3) return [];
-    const res = [];
-    for (let i = 0; i < p.length; i++) {
-      const a = p[i], b = p[(i+1)%p.length];
-      const da = (a[0]-px)*nx + (a[1]-py)*ny;
-      const db = (b[0]-px)*nx + (b[1]-py)*ny;
-      if (da >= -1e-12) res.push(a);
-      if ((da > 1e-12 && db < -1e-12) || (da < -1e-12 && db > 1e-12)) {
-        const u = da / (da - db);
-        res.push([a[0] + (b[0]-a[0])*u, a[1] + (b[1]-a[1])*u]);
-      }
-    }
-    const cl = [];
-    for (const q of res) {
-      const last = cl[cl.length-1];
-      if (!last || Math.hypot(q[0]-last[0], q[1]-last[1]) > 1e-9) cl.push(q);
-    }
-    while (cl.length > 1 && Math.hypot(cl[0][0]-cl[cl.length-1][0], cl[0][1]-cl[cl.length-1][1]) < 1e-9) cl.pop();
-    return cl.length >= 3 ? cl : [];
-  };
-
-  // ---------- lid: original cap triangles trimmed back to the ring ----------
-  const capPolys = capTriIdx.map(t => [flat2(vert(t,0)), flat2(vert(t,1)), flat2(vert(t,2))]);
-  let lidBefore = 0;
-  for (const p of capPolys) lidBefore += polyArea(p);
-  let convexRing = true, csign = 0;
-  for (let i = 0; i < n && convexRing; i++) {
-    const a = ringTop2[i], b = ringTop2[(i+1)%n], c = ringTop2[(i+2)%n];
-    const cr = (b[0]-a[0])*(c[1]-b[1]) - (b[1]-a[1])*(c[0]-b[0]);
-    if (Math.abs(cr) < 1e-12) continue;
-    const sg = cr > 0 ? 1 : -1;
-    if (csign === 0) csign = sg; else if (sg !== csign) convexRing = false;
-  }
-  if (csign === 0) convexRing = false;
-  let lidPieces = [];
-  if (convexRing) {
-    let ra = 0;
-    for (let i = 0; i < n; i++) { const a=ringTop2[i], b=ringTop2[(i+1)%n]; ra += a[0]*b[1]-b[0]*a[1]; }
-    const w = ra >= 0 ? 1 : -1;
-    for (const cp of capPolys) {
-      let piece = cp;
-      for (let i = 0; i < n && piece.length; i++) {
-        const a = ringTop2[i], b = ringTop2[(i+1)%n];
-        piece = clipHalf(piece, a[0], a[1], -(b[1]-a[1])*w, (b[0]-a[0])*w);
-      }
-      if (piece.length >= 3) lidPieces.push(piece);
-    }
-  } else {
-    // Non-convex face: take the band off quad by quad instead of assuming the
-    // ring can be used as a set of half planes.
-    lidPieces = capPolys.slice();
-    for (let i = 0; i < n; i++) {
-      const i1 = (i+1)%n;
-      const q = [poly2d[i], poly2d[i1], ringTop2[i1], ringTop2[i]];
-      if (polyArea(q) < 1e-12) continue;
-      let bx0=Infinity, by0=Infinity, bx1=-Infinity, by1=-Infinity;
-      for (const v of q) {
-        if (v[0] < bx0) bx0 = v[0];
-        if (v[0] > bx1) bx1 = v[0];
-        if (v[1] < by0) by0 = v[1];
-        if (v[1] > by1) by1 = v[1];
-      }
-      const cen = [0, 0];
-      for (const v of q) { cen[0] += v[0]/q.length; cen[1] += v[1]/q.length; }
-      const next = [];
-      for (const p of lidPieces) {
-        let px0=Infinity, py0=Infinity, px1=-Infinity, py1=-Infinity;
-        for (const v of p) {
-          if (v[0] < px0) px0 = v[0];
-          if (v[0] > px1) px1 = v[0];
-          if (v[1] < py0) py0 = v[1];
-          if (v[1] > py1) py1 = v[1];
-        }
-        if (px1 < bx0-1e-9 || px0 > bx1+1e-9 || py1 < by0-1e-9 || py0 > by1+1e-9) { next.push(p); continue; }
-        let inside = p;
-        for (let e = 0; e < q.length && inside.length; e++) {
-          const a = q[e], b = q[(e+1)%q.length];
-          let nx = -(b[1]-a[1]), ny = b[0]-a[0];
-          if ((cen[0]-a[0])*nx + (cen[1]-a[1])*ny < 0) { nx = -nx; ny = -ny; }
-          const outer = clipHalf(inside, a[0], a[1], -nx, -ny);
-          if (outer.length >= 3) next.push(outer);
-          inside = clipHalf(inside, a[0], a[1], nx, ny);
-        }
-      }
-      lidPieces = next;
-      if (lidPieces.length > 4096) throw new Error('lid trim did not converge');
-    }
-  }
-  // The trimmed lid must come out as exactly the ring polygon.
-  let lidAfter = 0;
-  for (const p of lidPieces) lidAfter += polyArea(p);
-  let ringArea = 0;
-  for (let i = 0; i < n; i++) { const a=ringTop2[i], b=ringTop2[(i+1)%n]; ringArea += a[0]*b[1]-b[0]*a[1]; }
-  ringArea = Math.abs(ringArea) * 0.5;
-  if (!(ringArea > 1e-9) || Math.abs(ringArea - lidAfter) > Math.max(1e-6, lidBefore * 1e-5)) {
-    throw new Error('R=' + requestedR + ' too large for this face - left unchanged');
-  }
-
-  // T-junction repair on the lid, then the splits the band has to follow.
-  const cpts = [], cseen = new Set();
-  const addC = (p) => {
-    const k = Math.round(p[0]*1e4) + '|' + Math.round(p[1]*1e4);
-    if (cseen.has(k)) return;
-    cseen.add(k);
-    cpts.push(p);
-  };
-  for (const p of lidPieces) for (const v of p) addC(v);
-  for (const v of poly2d) addC(v);
-  for (const v of loop3d) addC(flat2(v));
-  for (const v of ringTop2) addC(v);
-  for (let idx = 0; idx < lidPieces.length; idx++) {
-    const p = lidPieces[idx], grown = [];
-    for (let i = 0; i < p.length; i++) {
-      const a = p[i], b = p[(i+1)%p.length];
-      grown.push(a);
-      const ex = b[0]-a[0], ey = b[1]-a[1], len2 = ex*ex + ey*ey;
-      if (!(len2 > 1e-18)) continue;
-      const inv = 1 / Math.sqrt(len2);
-      const mids = [];
-      for (const q of cpts) {
-        const u = ((q[0]-a[0])*ex + (q[1]-a[1])*ey) / len2;
-        if (u <= 1e-6 || u >= 1-1e-6) continue;
-        if (Math.abs((q[0]-a[0])*ey - (q[1]-a[1])*ex) * inv > 1e-6) continue;
-        mids.push({ u, q });
-      }
-      mids.sort((x, y) => x.u - y.u);
-      for (const md of mids) grown.push(md.q);
-    }
-    lidPieces[idx] = grown;
-  }
-  const ringSplits = new Map();
-  for (const p of lidPieces) {
-    for (const v of p) {
+    // Into the material: inside the outline, out from a hole.
+    let area2 = 0;
+    for (let i = 0; i < n; i++) { const a=poly2d[i], b=poly2d[(i+1)%n]; area2 += a[0]*b[1]-b[0]*a[1]; }
+    const windSign = (area2 >= 0 ? 1 : -1) * (F.hole ? -1 : 1);
+    const inwardNormal2 = (a, b) => {
+      const tx=b[0]-a[0], ty=b[1]-a[1];
+      let nx=-ty*windSign, ny=tx*windSign;
+      const len = Math.hypot(nx,ny) || 1e-9;
+      return [nx/len, ny/len];
+    };
+    const vertexOffset = (i, radius) => {
+      const prev=poly2d[(i-1+n)%n], curr=poly2d[i], next=poly2d[(i+1)%n];
+      const n1=inwardNormal2(prev,curr), n2=inwardNormal2(curr,next);
+      let bx=n1[0]+n2[0], by=n1[1]+n2[1];
+      const blen=Math.hypot(bx,by)||1e-9; bx/=blen; by/=blen;
+      const cosHalf = Math.max(bx*n1[0]+by*n1[1], 0.3);
+      return [curr[0]+bx*(radius/cosHalf), curr[1]+by*(radius/cosHalf)];
+    };
+    const ringAt = (s) => {
+      const t = s / STEPS;
+      const phi = Math.asin(Math.min(1, Math.max(0, t)));
+      const ring = [];
       for (let i = 0; i < n; i++) {
-        const P = ringTop2[i], Q = ringTop2[(i+1)%n];
-        const ex = Q[0]-P[0], ey = Q[1]-P[1], len2 = ex*ex + ey*ey;
-        if (!(len2 > 1e-18)) continue;
-        const u = ((v[0]-P[0])*ex + (v[1]-P[1])*ey) / len2;
-        if (u <= 1e-6 || u >= 1-1e-6) continue;
-        if (Math.abs((v[0]-P[0])*ey - (v[1]-P[1])*ex) / Math.sqrt(len2) > 1e-3) continue;
-        if (!ringSplits.has(i)) ringSplits.set(i, []);
-        const list = ringSplits.get(i);
-        if (!list.some(w => Math.abs(w - u) < 1e-6)) list.push(u);
+        const R = Rs[i];
+        const inset = chamfer ? R * t : R * (1 - Math.cos(phi));
+        const depth = chamfer ? R * (1 - t) : R * (1 - Math.sin(phi));
+        ring.push(from3(vertexOffset(i, inset), capPlane + intoBody * depth));
       }
-    }
+      return ring;
+    };
+    const rings = [];
+    for (let s = 0; s <= STEPS; s++) rings.push(ringAt(s));
+    loops.push({ pts: F.pts, poly: poly2d, Rs: Rs, rings: rings, hole: F.hole });
+    loopPts += n;
+    if (F.hole) holes++;
   }
 
-  const emitLid = (A, B, C) => {
-    let a = from3(A, capPlane), b = from3(B, capPlane), c = from3(C, capPlane);
-    const ux=b[0]-a[0], uy=b[1]-a[1], uz=b[2]-a[2];
-    const vx=c[0]-a[0], vy=c[1]-a[1], vz=c[2]-a[2];
-    const nrm = [uy*vz-uz*vy, uz*vx-ux*vz, ux*vy-uy*vx];
-    if (!(Math.hypot(nrm[0], nrm[1], nrm[2]) > 1e-10)) return;
-    const wantSign = keepMin ? -1 : 1;
-    if (Math.sign(nrm[axisIdx] || 1) !== wantSign) { const tmp=b; b=c; c=tmp; }
-    out.push(a[0],a[1],a[2], b[0],b[1],b[2], c[0],c[1],c[2]);
-  };
-  for (const p of lidPieces) {
-    const m = p.length;
-    let apexAt = -1;
-    for (let a = 0; a < m && apexAt < 0; a++) {
-      let clean = true;
-      for (let k = 1; k + 1 < m && clean; k++) {
-        const P0 = p[a], P1 = p[(a+k)%m], P2 = p[(a+k+1)%m];
-        const cr = (P1[0]-P0[0])*(P2[1]-P0[1]) - (P1[1]-P0[1])*(P2[0]-P0[0]);
-        if (Math.abs(cr) * 0.5 < 1e-12) clean = false;
-      }
-      if (clean) apexAt = a;
-    }
-    if (apexAt < 0) {
-      for (const t of rawEarClip2D(p)) emitLid(p[t[0]], p[t[1]], p[t[2]]);
-      continue;
-    }
-    for (let k = 1; k + 1 < m; k++) emitLid(p[apexAt], p[(apexAt+k)%m], p[(apexAt+k+1)%m]);
-  }
-
-  // ---------- wall: depth only, split at every loop vertex ----------
-  const depthOf = (uv) => {
-    let bestD = Infinity, bestR = 0;
-    for (let i = 0; i < n; i++) {
-      const a = poly2d[i], b = poly2d[(i+1)%n];
-      const ex = b[0]-a[0], ey = b[1]-a[1];
-      const len2 = ex*ex + ey*ey;
-      let u = len2 > 1e-18 ? ((uv[0]-a[0])*ex + (uv[1]-a[1])*ey) / len2 : 0;
-      u = Math.max(0, Math.min(1, u));
-      const d = Math.hypot(uv[0] - (a[0]+ex*u), uv[1] - (a[1]+ey*u));
-      if (d < bestD) { bestD = d; bestR = Rs[i] + (Rs[(i+1)%n] - Rs[i]) * u; }
-    }
-    return capPlane + intoBody * bestR;
-  };
-  const dropTo = (p3) => { const q = p3.slice(); q[axisIdx] = depthOf(flat2(p3)); return q; };
-  const splitTol = 1e-3;
-  const capEdgeChain = (A, B) => {
-    const ax = A[other[0]], ay = A[other[1]];
-    const ex = B[other[0]] - ax, ey = B[other[1]] - ay;
-    const len2 = ex*ex + ey*ey;
-    if (!(len2 > 1e-18)) return [A, B];
-    const inv = 1 / Math.sqrt(len2);
-    const mids = [];
-    for (let i = 0; i < n; i++) {
-      const px = poly2d[i][0] - ax, py = poly2d[i][1] - ay;
-      const u = (px*ex + py*ey) / len2;
-      if (u <= 1e-6 || u >= 1-1e-6) continue;
-      if (Math.abs(px*ey - py*ex) * inv > splitTol) continue;
-      const q = [0,0,0];
-      q[other[0]] = ax + ex*u;
-      q[other[1]] = ay + ey*u;
-      q[axisIdx] = capPlane;
-      mids.push({ u, q });
-    }
-    if (!mids.length) return [A, B];
-    mids.sort((x, y) => x.u - y.u);
-    const chain = [A];
-    const near = (p, q) => Math.hypot(p[other[0]]-q[other[0]], p[other[1]]-q[other[1]]) < 1e-9;
-    for (const md of mids) if (!near(md.q, chain[chain.length-1])) chain.push(md.q);
-    if (!near(B, chain[chain.length-1])) chain.push(B);
-    return chain;
-  };
-  const pushTri = (a, b, c) => {
-    const ux=b[0]-a[0], uy=b[1]-a[1], uz=b[2]-a[2];
-    const vx=c[0]-a[0], vy=c[1]-a[1], vz=c[2]-a[2];
-    const nx=uy*vz-uz*vy, ny=uz*vx-ux*vz, nz=ux*vy-uy*vx;
-    if (0.5*Math.hypot(nx,ny,nz) < 1e-12) return;
-    out.push(a[0],a[1],a[2], b[0],b[1],b[2], c[0],c[1],c[2]);
-  };
-  for (const t of wallTriIdx) {
-    const tri = [vert(t,0), vert(t,1), vert(t,2)];
-    let capEdge = -1;
-    for (let v = 0; v < 3; v++) if (isOnCap(tri[v]) && isOnCap(tri[(v+1)%3])) { capEdge = v; break; }
-    if (capEdge < 0) {
-      let moved = false;
-      for (let v = 0; v < 3; v++) {
-        if (!isOnCap(tri[v])) continue;
-        const q = dropTo(tri[v]);
-        if (q[axisIdx] !== tri[v][axisIdx]) moved = true;
-        tri[v] = q;
-      }
-      // Every wall triangle the input had is kept, area test and all. The
-      // split leaves zero-area seam triangles behind that bridge a T-junction
-      // on the piece's OTHER face; drop one and the edge it bridged is left
-      // odd. Only triangles this pass invents are area tested.
-      out.push(tri[0][0],tri[0][1],tri[0][2], tri[1][0],tri[1][1],tri[1][2], tri[2][0],tri[2][1],tri[2][2]);
-      continue;
-    }
-    const A = tri[capEdge], B = tri[(capEdge+1)%3], C = tri[(capEdge+2)%3];
-    const rawChain = capEdgeChain(A, B);
-    const chain = rawChain.map(dropTo);
-    const Cp = isOnCap(C) ? dropTo(C) : C;
-    if (rawChain.length === 2) {
-      out.push(chain[0][0],chain[0][1],chain[0][2], chain[1][0],chain[1][1],chain[1][2], Cp[0],Cp[1],Cp[2]);
-      continue;
-    }
-    for (let k = 0; k + 1 < chain.length; k++) pushTri(chain[k], chain[k+1], Cp);
-  }
-
-  // ---------- band ----------
-  const same = (p, q) => Math.hypot(p[0]-q[0], p[1]-q[1], p[2]-q[2]) < 1e-9;
-  const pushBand = (A, B, C) => {
-    if (same(A,B) || same(B,C) || same(C,A)) return;
-    out.push(A[0],A[1],A[2], B[0],B[1],B[2], C[0],C[1],C[2]);
-  };
-  for (let s = 0; s < STEPS; s++) {
-    const a = rings[s], b = rings[s+1];
-    for (let i = 0; i < n; i++) {
-      const i1 = (i+1)%n;
-      const A0=a[i], A1=a[i1], B0=b[i], B1=b[i1];
-      if (s === STEPS-1 && ringSplits.has(i) && !same(B0, B1)) {
-        const P = ringTop2[i], Q = ringTop2[i1];
-        const chain = [B0];
-        for (const u of ringSplits.get(i).slice().sort((x,y)=>x-y)) {
-          chain.push(from3([P[0] + (Q[0]-P[0])*u, P[1] + (Q[1]-P[1])*u], capPlane));
-        }
-        chain.push(B1);
-        pushBand(A0, A1, chain[chain.length-1]);
-        for (let k = chain.length-1; k > 0; k--) pushBand(A0, chain[k], chain[k-1]);
-        continue;
-      }
-      pushBand(A0, A1, B1);
-      pushBand(A0, B1, B0);
-    }
-  }
+  // Lid, wall and band for every loop at once - the one rebuild both
+  // cap-plane engines share (rawCapRebuildFromRings, app-cut.js).
+  const out = rawCapRebuildFromRings(fc, axisIdx, keepMin, loops, requestedR);
 
   if (out.length < 9) throw new Error('perimeter fillet produced no geometry');
   rawPerimeterFilletInPlace.lastBuild = {
     mode: chamfer ? 'bevel' : 'fillet',
-    loopPts: n,
+    loopPts: loopPts,
+    loops: loops.length,
+    holes: holes,
     radius: peakR,
     requested: requestedR
   };
@@ -517,53 +172,12 @@ function rawVertexBallOnly(rawTris, axisIdx, keepMin, requestedR, opts) {
   }
   if (!capTriIdx.length) throw new Error('no cap found on this face');
 
-  // ---- the clicked face's boundary loop ----
-  const vkey = (p) => Math.round(p[0]/tol)+'|'+Math.round(p[1]/tol)+'|'+Math.round(p[2]/tol);
-  const edgeMap = new Map();
-  const addEdge = (a, b, isCap) => {
-    const ka = vkey(a), kb = vkey(b);
-    const ek = ka < kb ? ka+'~'+kb : kb+'~'+ka;
-    if (!edgeMap.has(ek)) edgeMap.set(ek, []);
-    edgeMap.get(ek).push({ isCap, a, b });
-  };
-  for (const t of capTriIdx) {
-    const v0=vert(t,0), v1=vert(t,1), v2=vert(t,2);
-    addEdge(v0,v1,true); addEdge(v1,v2,true); addEdge(v2,v0,true);
-  }
-  for (const t of wallTriIdx) {
-    const v0=vert(t,0), v1=vert(t,1), v2=vert(t,2);
-    if (isOnCap(v0) && isOnCap(v1)) addEdge(v0,v1,false);
-    if (isOnCap(v1) && isOnCap(v2)) addEdge(v1,v2,false);
-    if (isOnCap(v2) && isOnCap(v0)) addEdge(v2,v0,false);
-  }
-  const boundaryEdges = [];
-  for (const entries of edgeMap.values()) {
-    if (entries.length === 2 && entries.some(e=>e.isCap) && entries.some(e=>!e.isCap)) {
-      const capEntry = entries.find(e => e.isCap);
-      boundaryEdges.push([capEntry.a, capEntry.b]);
-    }
-  }
-  if (!boundaryEdges.length) throw new Error('no cap/wall boundary found');
-  const adj = new Map(), posOf = new Map();
-  const pushAdj = (k, o) => { if (!adj.has(k)) adj.set(k, []); adj.get(k).push(o); };
-  for (const [a,b] of boundaryEdges) {
-    const ka = vkey(a), kb = vkey(b);
-    posOf.set(ka,a); posOf.set(kb,b);
-    pushAdj(ka,kb); pushAdj(kb,ka);
-  }
-  for (const list of adj.values()) if (list.length !== 2) throw new Error('branch point in cap boundary');
-  const startKey = vkey(boundaryEdges[0][0]);
-  const loopKeys = [startKey];
-  let prevKey = null, curKey = startKey;
-  do {
-    const nbrs = adj.get(curKey);
-    const nextKey = nbrs[0] === prevKey ? nbrs[1] : nbrs[0];
-    if (nextKey === startKey) break;
-    loopKeys.push(nextKey);
-    prevKey = curKey; curKey = nextKey;
-    if (loopKeys.length > adj.size + 2) throw new Error('cap boundary did not close');
-  } while (true);
-  const loop3d = loopKeys.map(k => posOf.get(k));
+  // ---- the clicked face's outline ----
+  // rawCapFaceContext (app-cut.js) walks every loop the face has and puts the
+  // outline first. Walking whichever loop came first rolled a bored plate's
+  // hole instead of its corners. A hole's corners are reflex in the
+  // material, which this engine leaves sharp wherever it meets one.
+  const loop3d = rawCapFaceContext(rawTris, axisIdx, keepMin).loop3d;
   if (loop3d.length < 3) throw new Error('cap boundary too small for corners');
   let poly = loop3d.map(flat2);
   poly = raw2DWeldLoop(poly, 0.08);
@@ -638,28 +252,7 @@ function rawVertexBallOnly(rawTris, axisIdx, keepMin, requestedR, opts) {
     }
     return { d: d0, run: run };
   };
-  const wallLimitAt = (i) => {
-    const curr = poly[i];
-    const prev = poly[(i-1+nL)%nL], next = poly[(i+1)%nL];
-    const nn = rawEdgeInwardNormal2(prev, next);
-    let best = Infinity;
-    for (let j = 0; j < nL; j++) {
-      if (j === i || j === (i-1+nL)%nL) continue;
-      const a = poly[j], b = poly[(j+1)%nL];
-      const dx = b[0]-a[0], dy = b[1]-a[1];
-      const den = nn[0]*dy - nn[1]*dx;
-      if (Math.abs(den) < 1e-10) continue;
-      const t = ((a[0]-curr[0])*dy - (a[1]-curr[1])*dx) / den;
-      const u = ((a[0]-curr[0])*nn[1] - (a[1]-curr[1])*nn[0]) / -den;
-      if (t > 0.1 && t < best && u >= -0.05 && u <= 1.05) best = t;
-    }
-    for (let j = 0; j < nL; j++) {
-      if (j === i || j === (i-1+nL)%nL || j === (i+1)%nL) continue;
-      const d = Math.hypot(poly[j][0]-curr[0], poly[j][1]-curr[1]);
-      if (d < best) best = d;
-    }
-    return best === Infinity ? 4 : best;
-  };
+  const wallLimitAt = (i) => NSO_Thickness.cornerWall(poly, i).mm;
   const gapFwd = (t) => {
     if (cornerCount === 1) return total;
     let g = cum[apex[(t+1)%cornerCount]] - cum[apex[t]];
@@ -939,6 +532,9 @@ function rawVertexBallOnly(rawTris, axisIdx, keepMin, requestedR, opts) {
     const extra = [];
     for (const b of balls) for (const q of b.capArc2) extra.push(q);
     for (const v of poly) extra.push(v);
+    // Clip points that landed a hair off an arc point, the outline or a ball's
+    // centre go onto it exactly (rawSnapPieces2, app-cut.js).
+    rawSnapPieces2(pieces, extra.concat(balls.map(b => b.M)));
     const wantOut = [0,0,0]; wantOut[axisIdx] = -intoBody;
     emitPlane(pieces, extra, (uv) => from3(uv, capPlane), wantOut);
   }
@@ -1234,53 +830,12 @@ function rawVertexBallCorners(rawTris, axisIdx, keepMin, requestedR, opts) {
   }
   if (!capTriIdx.length) throw new Error('no cap found on this face');
 
-  // ---- the clicked face's boundary loop ----
-  const vkey = (p) => Math.round(p[0]/tol)+'|'+Math.round(p[1]/tol)+'|'+Math.round(p[2]/tol);
-  const edgeMap = new Map();
-  const addEdge = (a, b, isCap) => {
-    const ka = vkey(a), kb = vkey(b);
-    const ek = ka < kb ? ka+'~'+kb : kb+'~'+ka;
-    if (!edgeMap.has(ek)) edgeMap.set(ek, []);
-    edgeMap.get(ek).push({ isCap, a, b });
-  };
-  for (const t of capTriIdx) {
-    const v0=vert(t,0), v1=vert(t,1), v2=vert(t,2);
-    addEdge(v0,v1,true); addEdge(v1,v2,true); addEdge(v2,v0,true);
-  }
-  for (const t of wallTriIdx) {
-    const v0=vert(t,0), v1=vert(t,1), v2=vert(t,2);
-    if (isOnCap(v0) && isOnCap(v1)) addEdge(v0,v1,false);
-    if (isOnCap(v1) && isOnCap(v2)) addEdge(v1,v2,false);
-    if (isOnCap(v2) && isOnCap(v0)) addEdge(v2,v0,false);
-  }
-  const boundaryEdges = [];
-  for (const entries of edgeMap.values()) {
-    if (entries.length === 2 && entries.some(e=>e.isCap) && entries.some(e=>!e.isCap)) {
-      const capEntry = entries.find(e => e.isCap);
-      boundaryEdges.push([capEntry.a, capEntry.b]);
-    }
-  }
-  if (!boundaryEdges.length) throw new Error('no cap/wall boundary found');
-  const adj = new Map(), posOf = new Map();
-  const pushAdj = (k, o) => { if (!adj.has(k)) adj.set(k, []); adj.get(k).push(o); };
-  for (const [a,b] of boundaryEdges) {
-    const ka = vkey(a), kb = vkey(b);
-    posOf.set(ka,a); posOf.set(kb,b);
-    pushAdj(ka,kb); pushAdj(kb,ka);
-  }
-  for (const list of adj.values()) if (list.length !== 2) throw new Error('branch point in cap boundary');
-  const startKey = vkey(boundaryEdges[0][0]);
-  const loopKeys = [startKey];
-  let prevKey = null, curKey = startKey;
-  do {
-    const nbrs = adj.get(curKey);
-    const nextKey = nbrs[0] === prevKey ? nbrs[1] : nbrs[0];
-    if (nextKey === startKey) break;
-    loopKeys.push(nextKey);
-    prevKey = curKey; curKey = nextKey;
-    if (loopKeys.length > adj.size + 2) throw new Error('cap boundary did not close');
-  } while (true);
-  const loop3d = loopKeys.map(k => posOf.get(k));
+  // ---- the clicked face's outline ----
+  // rawCapFaceContext (app-cut.js) walks every loop the face has and puts the
+  // outline first. Walking whichever loop came first rolled a bored plate's
+  // hole instead of its corners. A hole's corners are reflex in the
+  // material, which this engine leaves sharp wherever it meets one.
+  const loop3d = rawCapFaceContext(rawTris, axisIdx, keepMin).loop3d;
   if (loop3d.length < 3) throw new Error('cap boundary too small for corners');
   let poly = loop3d.map(flat2);
   poly = raw2DWeldLoop(poly, 0.08);
@@ -1355,28 +910,7 @@ function rawVertexBallCorners(rawTris, axisIdx, keepMin, requestedR, opts) {
     }
     return { d: d0, run: run };
   };
-  const wallLimitAt = (i) => {
-    const curr = poly[i];
-    const prev = poly[(i-1+nL)%nL], next = poly[(i+1)%nL];
-    const nn = rawEdgeInwardNormal2(prev, next);
-    let best = Infinity;
-    for (let j = 0; j < nL; j++) {
-      if (j === i || j === (i-1+nL)%nL) continue;
-      const a = poly[j], b = poly[(j+1)%nL];
-      const dx = b[0]-a[0], dy = b[1]-a[1];
-      const den = nn[0]*dy - nn[1]*dx;
-      if (Math.abs(den) < 1e-10) continue;
-      const t = ((a[0]-curr[0])*dy - (a[1]-curr[1])*dx) / den;
-      const u = ((a[0]-curr[0])*nn[1] - (a[1]-curr[1])*nn[0]) / -den;
-      if (t > 0.1 && t < best && u >= -0.05 && u <= 1.05) best = t;
-    }
-    for (let j = 0; j < nL; j++) {
-      if (j === i || j === (i-1+nL)%nL || j === (i+1)%nL) continue;
-      const d = Math.hypot(poly[j][0]-curr[0], poly[j][1]-curr[1]);
-      if (d < best) best = d;
-    }
-    return best === Infinity ? 4 : best;
-  };
+  const wallLimitAt = (i) => NSO_Thickness.cornerWall(poly, i).mm;
   const gapFwd = (t) => {
     if (cornerCount === 1) return total;
     let g = cum[apex[(t+1)%cornerCount]] - cum[apex[t]];
@@ -1748,6 +1282,9 @@ function rawVertexBallCorners(rawTris, axisIdx, keepMin, requestedR, opts) {
     const extra = [];
     for (const b of balls) extra.push(b.M);
     for (const v of poly) extra.push(v);
+    // Clip points that landed a hair off an arc point, the outline or a ball's
+    // centre go onto it exactly (rawSnapPieces2, app-cut.js).
+    rawSnapPieces2(pieces, extra.concat(balls.map(b => b.M)));
     const wantOut = [0,0,0]; wantOut[axisIdx] = -intoBody;
     emitPlane(pieces, extra, (uv) => from3(uv, capPlane), wantOut);
   }
@@ -2349,6 +1886,24 @@ function sealSelectedModel() {
   const repairChk = document.getElementById('chk-seal-repair');
   const repairMode = !!(repairChk && repairChk.checked);
 
+  // NON-SOLID SCOPE (docs/NON-SOLID.md): read through nsoNonSolid, never
+  // guessed from open-edge counts. Plain Seal's whole job is to close
+  // openings (cap loops, cap outer holes), which is the one requirement the
+  // flag lifts, so on a non-solid piece it stands down and says so. Repair
+  // still runs: NSO_Repair skips only its three closure-premised stages
+  // (flap peel, orphan drop, hole fill) and keeps welding, degenerate and
+  // duplicate removal, T-junctions, pinch separation and both final gates.
+  // It also re-closes any seam its own earlier stages tore open, which is why
+  // a flagged piece with real defects now repairs instead of tripping the
+  // odd-edge gate on damage the repair itself did; the piece's own openings
+  // are left alone, and the status line below names the two separately.
+  const nonSolid = (typeof nsoNonSolid === 'function') && nsoNonSolid(m);
+  if (nonSolid && !repairMode) {
+    setStatus('Seal stood down - ' + m.name + ' is flagged non-solid and Seal only closes ' +
+              'openings. Untick Non-solid to seal, or tick Repair to fix defects without closing.', true);
+    return;
+  }
+
   let openBefore = null, nmBefore = null;
   try { openBefore = openBoundaryEdges(soupIn).length; } catch (e) {}
   if (repairMode) { try { nmBefore = countNonManifoldEdges(soupIn); } catch (e) {} }
@@ -2387,7 +1942,7 @@ function sealSelectedModel() {
       working = result.soup;
       failReason = result.reason;
     } else {
-      const r = NSO_Repair.commit(soupIn);
+      const r = NSO_Repair.commit(soupIn, { nonSolid: nonSolid });
       repairReport = r.report || null;
       console.log('[seal/repair] NSO_Repair', r.ok, repairReport);
 
@@ -2408,11 +1963,21 @@ function sealSelectedModel() {
       //    silent no-op wearing a success message.
       if (!repairReport || repairReport.applied !== true) {
         const gated = (repairReport && repairReport.gate && repairReport.gate.blockedStages) || [];
+        // A piece the flag left alone can still carry a real defect the
+        // repair cannot fix (a pierce is not repairable here). Say it, so the
+        // flag never turns a defective piece into a clean-sounding no-op.
+        const residual = repairReport && repairReport.before ? repairReport.before.selfIntersections : 0;
+        const tail = residual > 0
+          ? ' - ' + residual + ' self-intersecting pair(s) present, not hidden by the ' +
+            (nonSolid ? 'non-solid flag' : 'repair')
+          : '';
+        const tag = nonSolid ? 'Repair (non-solid) ' : 'Repair ';
         if (gated.length) {
-          setStatus('Repair unavailable for this defect - ' + gated.length +
-                    ' stage(s) gated (' + gated.join(', ') + ') - piece unchanged', true);
+          setStatus(tag + 'unavailable for this defect - ' + gated.length +
+                    ' stage(s) gated (' + gated.join(', ') + ') - piece unchanged' + tail, true);
         } else {
-          setStatus('Nothing to repair - piece unchanged');
+          setStatus(nonSolid ? 'Nothing to repair (non-solid) - piece unchanged' + tail
+                             : 'Nothing to repair - piece unchanged' + tail, residual > 0);
         }
         return;
       }
@@ -2460,6 +2025,9 @@ function sealSelectedModel() {
   const size2 = new THREE.Vector3();
   newGeo.boundingBox.getSize(size2);
 
+  // The geometry the piece shows now is replaced below; the entry holds a clone of it, so it leaves
+  // with this swap (GEOMETRY LIFECYCLE, app-core.js).
+  const replacedGeos = [m.geometry];
   m.geometry = newGeo;
   if (usingRaw) {
     m.rawTris = working;
@@ -2471,6 +2039,7 @@ function sealSelectedModel() {
   const placedEntry = state.placed.find(p => p && p.sourceId === m.id);
   if (placedEntry) {
     const px = placedEntry.x, pz = placedEntry.z;
+    replacedGeos.push(placedEntry.geometry, placedEntry.mesh && placedEntry.mesh.geometry);
     if (placedEntry.mesh && state.modelGroup) {
       state.modelGroup.remove(placedEntry.mesh);
       if (placedEntry.mesh.material) {
@@ -2492,7 +2061,9 @@ function sealSelectedModel() {
     placedEntry.width = m.size.x;
     placedEntry.depth = m.size.z;
     settlePlacedOnBed(placedEntry);
+    if (typeof nsoReseatPlacedPose === 'function') nsoReseatPlacedPose(placedEntry);   // bake is in the piece's own frame: its pose still stands
   }
+  nsoReleaseGeometries(replacedGeos);   // keeps any a pose home, another piece or an entry still names
 
   let openAfter = null;
   try { openAfter = openBoundaryEdges(working).length; } catch (e) {}
@@ -2519,17 +2090,27 @@ function sealSelectedModel() {
     if (c.tJunctionSplits) did.push(c.tJunctionSplits + ' T-junction(s)');
     if (c.pinchVertsSplit) did.push(c.pinchVertsSplit + ' pinch vert(s) split');
     if (c.holesFilled) did.push(c.holesFilled + ' hole(s) filled');
+    // Not the same thing as a filled hole, and not shown as one: a seam is
+    // boundary an earlier stage of this same repair opened (deleting a
+    // degenerate sliver unpairs its neighbours), put back. Only the non-solid
+    // path reports these - without the flag hole fill has already covered
+    // them - and no opening the piece arrived with is ever counted here.
+    if (c.seamsReclosed) did.push(c.seamsReclosed + ' seam(s) re-closed');
+    const siAfter = (repairReport && repairReport.after) ? repairReport.after.selfIntersections : 0;
     const counts = 'open edges ' + openStr + ', non-manifold ' + nmStr +
-                   (did.length ? '; ' + did.join(', ') : '');
+                   (did.length ? '; ' + did.join(', ') : '') +
+                   (nonSolid ? '; open edges kept (non-solid)' : '') +
+                   (siAfter > 0 ? '; ' + siAfter + ' self-intersecting pair(s) remain' : '');
     const blocked = (repairReport && repairReport.gate && repairReport.gate.blockedStages) || [];
+    const tag = nonSolid ? 'Repair (non-solid) ' : 'Repair ';
     if (blocked.length) {
       // A gated stage means the safe passes landed but a risky one was rolled
       // back because it would have made the mesh worse. Say so - "Repair done"
       // would claim more than happened.
-      setStatus('Repair partial - ' + blocked.length + ' stage(s) gated (' +
+      setStatus(tag + 'partial - ' + blocked.length + ' stage(s) gated (' +
                 blocked.join(', ') + ') - ' + counts);
     } else {
-      setStatus('Repair done - ' + counts + (repairLegacy ? ' (fallback repair)' : ''));
+      setStatus(tag + 'done - ' + counts + (repairLegacy ? ' (fallback repair)' : ''), siAfter > 0);
     }
   } else {
     if (openBefore != null && openAfter != null) {
@@ -2540,6 +2121,290 @@ function sealSelectedModel() {
   }
 }
 
+
+// ---- Solidify ----
+//
+// weld (0.2 mm grid snap) -> cap small loops -> cap outer holes ->
+// repairJoinedSoup (its own 0.3 mm weld) -> weld. The two coarse welds are the
+// risky part: a grid snap that size merges every pair of distinct vertices
+// sharing a 0.2 mm cell and drops each triangle they collapse, so a finely
+// tessellated piece loses real surface. Measured on library/v9_mirror_factory.stl
+// - exact-vertex clean, 0 open / 0 non-manifold - the pipeline went 49,026 ->
+// 31,199 triangles and the canonical checker (tools/mesh_validate.py) read
+// 35 open / 55 non-manifold / 69 degenerate on the result. The hole fill never
+// fired: the piece had no holes. The welds did all of it, and the old status
+// line still said "Solidify ok".
+//
+// So two guards, both measured by NSO_Repair.inspect - the in-page
+// transcription of the canonical checker's weld (radius 1e-4 mm) and edge
+// census - not by the grid-snap counters above, which read that same clean
+// piece as 76 non-manifold edges and shift with where the piece sits:
+//   1. nothing to do: a piece with no open edge is left exactly as it is.
+//      Solidify closes openings; with none, every stage is risk and no
+//      reward. Keyed on open edges alone, not on non-manifold too: that
+//      factory piece reads NM 2 at the 1e-4 weld (one pair of distinct
+//      vertices closer than that) and 0 by exact vertex, and nothing in this
+//      pipeline is a non-manifold repair anyway - Repair is.
+//   2. result gate: the output is committed only if it has no more open,
+//      non-manifold, mis-wound or degenerate edges/faces than the input. Otherwise the
+//      piece is unchanged and the status names the count that rose - the
+//      same "gate on the result, not the request" rule Hollow uses.
+//   3. progress gate: not worse is not enough. If the result has as many
+//      open edges as the input, nothing was closed, and Solidify refuses
+//      instead of committing an unchanged piece under "Solidify ok" with an
+//      Undo entry (driver-testing round 1: "open 16->16", byte-identical).
+//      Fewer but not zero commits as "Solidify partial" and names what was
+//      left open and why.
+// Between the pipeline and the gates, solidifyCloseLoops closes the loops the
+// two cappers cannot (pinched loops, loops folded over an edge of the piece).
+// tools/nso_wire_solidify_test.js drives all of it through the real button and
+// re-measures with mesh_validate.py.
+function solidifyCensus(soup) {
+  if (typeof NSO_Repair === 'undefined' || !NSO_Repair || typeof NSO_Repair.inspect !== 'function') return null;
+  try {
+    const r = NSO_Repair.inspect(soup, { selfIntersections: false });
+    return { open: r.openEdges, nm: r.nonManifoldEdges, degen: r.degenerateTris, wind: r.flippedEdges, tris: r.tris };
+  } catch (e) {
+    return null;
+  }
+}
+
+/* Which canonical counts got worse, as status-line fragments. Empty = none. */
+function solidifyRegressions(before, after) {
+  const worse = [];
+  if (after.nm > before.nm) worse.push('non-manifold ' + before.nm + '\u2192' + after.nm);
+  if (after.open > before.open) worse.push('open ' + before.open + '\u2192' + after.open);
+  if (after.degen > before.degen) worse.push('degenerate ' + before.degen + '\u2192' + after.degen);
+  // Winding too: on shape-sphere_holes-shredded the coarse welds + repairJoinedSoup
+  // turned 0 mis-wound edges into 21 (canonical checker) while closing 13 open
+  // ones, and without this line that committed as progress.
+  if (after.wind != null && before.wind != null && after.wind > before.wind) {
+    worse.push('mis-wound ' + before.wind + '\u2192' + after.wind);
+  }
+  return worse;
+}
+
+// ---- Solidify: close the loops the bbox-plane cappers cannot ----
+//
+// capSmallOpenLoops walks the boundary as an UNDIRECTED graph and gives up on
+// any loop that touches a vertex of degree != 2; capAllOuterHoles only caps
+// openings lying on one of the piece's outer bounding-box planes. Found by
+// driver-testing round 1 (nso_damage.hole on fixtures/quick/shape-cylinder,
+// severity light, seed 7 - 16 open edges in 2 loops), the two cases neither
+// one closes:
+//
+//   1. PINCHED LOOP. Two holes in a fan cap that meet at the cap's centre
+//      vertex make one boundary component with a degree-4 vertex - a figure
+//      eight. Walked as DIRECTED half-edges (each open edge in the direction
+//      its one face runs it) the figure eight is two simple cycles that share
+//      a vertex; each is split off and closed on its own.
+//   2. FOLDED LOOP. Three top-cap faces and the side-wall face below them
+//      make one loop that folds 90 degrees over the top rim and reaches down
+//      to z = 0 - on no plane at all, let alone a bounding-box one. It is
+//      triangulated by solidifyFillLoop, which scores every triangulation of
+//      the loop's own vertices by its sharpest fold against the surface
+//      around it, and so puts the crease back on the rim.
+//
+// Only vertices already on the loop are used - nothing is invented - and a
+// loop is left open, with a reason, rather than guessed at when:
+//   - its walk dead-ends (an open edge whose neighbour is not open-once),
+//   - it is longer than SOLIDIFY_LOOP_MAX_EDGES (the same cap NSO_Repair's
+//     fillHoles uses: a loop that long is missing geometry, not a hole),
+//   - it has no non-degenerate triangulation, or every one of them folds
+//     sharper than SOLIDIFY_FOLD_MAX somewhere.
+// The result still goes through solidifyRegressions and the progress gate in
+// solidifySelectedModel, so a patch that made anything worse never lands.
+const SOLIDIFY_LOOP_MAX_EDGES = 64;
+// A fill whose worst fold is sharper than this is refused, not committed:
+// 150 degrees still admits a real 90-degree crease with room to spare.
+const SOLIDIFY_FOLD_MAX = 150 * Math.PI / 180;
+
+function solidifyDirectedLoops(mesh, edges) {
+  // Open edges, as directed half-edges u -> v in their one face's winding.
+  const out = new Map();
+  let total = 0;
+  const nf = mesh.faces.length / 3;
+  for (let f = 0; f < nf; f++) {
+    const a = mesh.faces[f * 3], b = mesh.faces[f * 3 + 1], c = mesh.faces[f * 3 + 2];
+    const tri = [[a, b], [b, c], [c, a]];
+    for (let e = 0; e < 3; e++) {
+      const u = tri[e][0], v = tri[e][1];
+      const k = u < v ? u + '_' + v : v + '_' + u;
+      if (!edges[k] || edges[k].count !== 1) continue;
+      if (!out.has(u)) out.set(u, []);
+      out.get(u).push(v);
+      total++;
+    }
+  }
+  const loops = [];
+  let deadEnds = 0;
+  for (const start of Array.from(out.keys())) {
+    let path = [start];
+    let cur = start;
+    while (true) {
+      const nexts = out.get(cur);
+      if (!nexts || !nexts.length) {
+        // Walk stranded mid-path: an open chain, not a closable loop.
+        if (path.length > 1) deadEnds++;
+        break;
+      }
+      const nxt = nexts.pop();
+      const at = path.indexOf(nxt);
+      if (at >= 0) {
+        // Closed a cycle. At a pinch the path revisits a vertex; the cycle is
+        // the stretch since that visit, and the walk carries on from there.
+        const cyc = path.slice(at);
+        if (cyc.length >= 3) loops.push(cyc);
+        path = path.slice(0, at + 1);
+        cur = nxt;
+        if (path.length === 1 && !(out.get(cur) || []).length) break;
+        continue;
+      }
+      path.push(nxt);
+      cur = nxt;
+    }
+  }
+  return { loops: loops, deadEnds: deadEnds, openHalfEdges: total };
+}
+
+// Triangulate one loop with the fewest, flattest folds: Liepa's hole-filling
+// weight (P. Liepa, "Filling Holes in Meshes", SGP 2003) - over every
+// triangulation that uses only the loop's own vertices, minimise first the
+// worst dihedral angle between neighbouring triangles (patch-patch, and
+// patch-to-surface across each loop edge), then total area. Exact O(n^3)
+// dynamic programme, n <= SOLIDIFY_LOOP_MAX_EDGES.
+//
+// Why not a flat fill in one best-fit plane: a loop that folds over an edge
+// of the piece (round 1's second loop: three top-cap faces and the wall face
+// below them) has no plane. Projected onto one, it triangulates into
+// chords that cut through the solid - measured on that fixture, checker-clean
+// but 1% of the cylinder's volume gone. Scoring folds against the faces
+// around the hole puts the crease back where the surface had it.
+//
+// `loop` is in boundary order; the patch runs the other way, so its edges
+// pair with the boundary. `rimNormal(a, b)` gives the unit normal of the one
+// face on the open edge a->b. Returns index triples, or a string saying why
+// not.
+function solidifyFillLoop(pos, loop, rimNormal) {
+  const R = loop.slice().reverse();
+  const n = R.length;
+  const P = R.map(i => [pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]]);
+  function triN(a, b, c) {
+    const A = P[a], B = P[b], C = P[c];
+    const ux = B[0] - A[0], uy = B[1] - A[1], uz = B[2] - A[2];
+    const vx = C[0] - A[0], vy = C[1] - A[1], vz = C[2] - A[2];
+    const x = uy * vz - uz * vy, y = uz * vx - ux * vz, z = ux * vy - uy * vx;
+    const l = Math.hypot(x, y, z);
+    return { n: l > 0 ? [x / l, y / l, z / l] : null, area: l / 2 };
+  }
+  const ang = (p, q) => Math.acos(Math.max(-1, Math.min(1, p[0] * q[0] + p[1] * q[1] + p[2] * q[2])));
+  // The patch edge R[i]->R[i+1] is the boundary edge R[i+1]->R[i] of the mesh.
+  const rim = [];
+  for (let i = 0; i < n; i++) rim.push(rimNormal(R[(i + 1) % n], R[i]));
+  let span = 0;
+  for (let i = 0; i < n; i++) for (let j = 0; j < 3; j++) span = Math.max(span, Math.abs(P[i][j]));
+  const AREA_EPS = 1e-12 * Math.max(1, span * span);
+  const ANG_EPS = 1e-9;
+  // W[i][j]: best patch over R[i..j], closed by the chord i-j. K: its apex.
+  const W = [], K = [];
+  for (let i = 0; i < n; i++) { W.push(new Array(n).fill(null)); K.push(new Array(n).fill(-1)); }
+  for (let i = 0; i + 1 < n; i++) W[i][i + 1] = { ang: 0, area: 0 };
+  const better = (a, b) => !b || a.ang < b.ang - ANG_EPS || (Math.abs(a.ang - b.ang) <= ANG_EPS && a.area < b.area);
+  // Normal of the triangle that sits on the chord i-j inside W[i][j], or the
+  // rim face when i-j is a loop edge.
+  function across(i, j) {
+    if (j === i + 1) return rim[i];
+    const k = K[i][j];
+    return k < 0 ? null : triN(i, k, j).n;
+  }
+  for (let len = 2; len < n; len++) {
+    for (let i = 0; i + len < n; i++) {
+      const j = i + len;
+      let best = null, bestK = -1;
+      for (let k = i + 1; k < j; k++) {
+        const L = W[i][k], Rr = W[k][j];
+        if (!L || !Rr) continue;
+        const t = triN(i, k, j);
+        if (!t.n || t.area <= AREA_EPS) continue;
+        let a = Math.max(L.ang, Rr.ang);
+        const nl = across(i, k), nr = across(k, j);
+        if (nl) a = Math.max(a, ang(t.n, nl));
+        if (nr) a = Math.max(a, ang(t.n, nr));
+        if (i === 0 && j === n - 1 && rim[n - 1]) a = Math.max(a, ang(t.n, rim[n - 1]));
+        const cand = { ang: a, area: L.area + Rr.area + t.area };
+        if (better(cand, best)) { best = cand; bestK = k; }
+      }
+      W[i][j] = best;
+      K[i][j] = bestK;
+    }
+  }
+  if (!W[0][n - 1]) return 'no non-degenerate triangulation';
+  // A patch that has to fold back on itself (a dihedral near 180) is not a
+  // hole fill, it is a guess; leave it open.
+  if (W[0][n - 1].ang > SOLIDIFY_FOLD_MAX) {
+    return 'every fill folds ' + Math.round(W[0][n - 1].ang * 180 / Math.PI) + '° somewhere';
+  }
+  const tris = [];
+  const stack = [[0, n - 1]];
+  while (stack.length) {
+    const [i, j] = stack.pop();
+    if (j - i < 2) continue;
+    const k = K[i][j];
+    tris.push([R[i], R[k], R[j]]);
+    stack.push([i, k], [k, j]);
+  }
+  return tris;
+}
+
+// Close every open loop the directed walk finds. Returns the soup with the
+// patches appended (the input soup untouched), and what it did and did not do.
+function solidifyCloseLoops(soup) {
+  const res = { soup: soup, loops: 0, closed: 0, added: 0, left: [] };
+  if (typeof NSO_Repair === 'undefined' || !NSO_Repair ||
+      typeof NSO_Repair._weldToIndexed !== 'function' || typeof NSO_Repair._buildEdges !== 'function') {
+    res.left.push('mesh checker not loaded');
+    return res;
+  }
+  const w = NSO_Repair._weldToIndexed(soup, NSO_Repair.WELD_TOL);
+  const mesh = w.mesh;
+  const edges = NSO_Repair._buildEdges(mesh);
+  const walk = solidifyDirectedLoops(mesh, edges);
+  res.loops = walk.loops.length;
+  if (walk.deadEnds) res.left.push(walk.deadEnds + ' open chain(s) that do not close');
+  // Unit normal of the one face on open edge a-b (either direction).
+  function rimNormal(a, b) {
+    const e = edges[a < b ? a + '_' + b : b + '_' + a];
+    if (!e || !e.faces.length) return null;
+    const f = e.faces[0], P = mesh.pos, F = mesh.faces;
+    const i0 = F[f * 3] * 3, i1 = F[f * 3 + 1] * 3, i2 = F[f * 3 + 2] * 3;
+    const ux = P[i1] - P[i0], uy = P[i1 + 1] - P[i0 + 1], uz = P[i1 + 2] - P[i0 + 2];
+    const vx = P[i2] - P[i0], vy = P[i2 + 1] - P[i0 + 1], vz = P[i2 + 2] - P[i0 + 2];
+    const x = uy * vz - uz * vy, y = uz * vx - ux * vz, z = ux * vy - uy * vx;
+    const l = Math.hypot(x, y, z);
+    return l > 0 ? [x / l, y / l, z / l] : null;
+  }
+  const patch = [];
+  for (const loop of walk.loops) {
+    if (loop.length > SOLIDIFY_LOOP_MAX_EDGES) {
+      res.left.push('a ' + loop.length + '-edge loop (over ' + SOLIDIFY_LOOP_MAX_EDGES + ': missing geometry, not a hole)');
+      continue;
+    }
+    const t = solidifyFillLoop(mesh.pos, loop, rimNormal);
+    if (typeof t === 'string') { res.left.push('a ' + loop.length + '-edge loop: ' + t); continue; }
+    for (const tri of t) {
+      for (const vi of tri) patch.push(mesh.pos[vi * 3], mesh.pos[vi * 3 + 1], mesh.pos[vi * 3 + 2]);
+    }
+    res.closed++;
+    res.added += t.length;
+  }
+  if (patch.length) {
+    const outSoup = new Float32Array(soup.length + patch.length);
+    outSoup.set(soup, 0);
+    outSoup.set(patch, soup.length);
+    res.soup = outSoup;
+  }
+  return res;
+}
 
 function solidifySelectedModel() {
   const m = getActiveModel();
@@ -2567,24 +2432,127 @@ function solidifySelectedModel() {
     setStatus('Solidify failed - piece unchanged', true);
     return;
   }
-  let openBefore = null, nmBefore = null;
-  try { openBefore = openBoundaryEdges(soupIn).length; } catch (e) {}
-  try { if (typeof countNonManifoldEdges === 'function') nmBefore = countNonManifoldEdges(soupIn); } catch (e) {}
-  let working = soupIn;
-  try {
-    working = weldSoupVerts(working);
-    if (typeof capSmallOpenLoops === 'function') working = capSmallOpenLoops(working, 28);
-    working = capAllOuterHoles(working);
-    if (typeof repairJoinedSoup === 'function') working = repairJoinedSoup(working);
-    working = weldSoupVerts(working);
-  } catch (e) {
-    setStatus('Solidify failed - piece unchanged', true);
+  const censusBefore = solidifyCensus(soupIn);
+  if (!censusBefore) {
+    // No canonical census means no way to prove the result is not worse, and
+    // an unprovable Solidify is the one that shipped a broken mesh as "ok".
+    setStatus('Solidify unavailable - the mesh checker (NSO_Repair) is not loaded; piece unchanged', true);
     return;
   }
-  if (!working || working.length < 9) {
-    setStatus('Solidify failed - piece unchanged', true);
+  if (censusBefore.open === 0) {
+    setStatus('Solidify: already closed - 0 open edges, nothing to fill; piece unchanged');
     return;
   }
+  // Run the pipeline once, at one weld tolerance, and report what it
+  // produced - never sets status, never commits. null means a stage threw.
+  function solidifyAttempt(weldTol, useRepairJoin, joinWeldTol) {
+    let w = soupIn;
+    try {
+      w = weldSoupVerts(w, weldTol);
+      if (typeof capSmallOpenLoops === 'function') w = capSmallOpenLoops(w, 28);
+      w = capAllOuterHoles(w);
+      if (useRepairJoin && typeof repairJoinedSoup === 'function') w = repairJoinedSoup(w, joinWeldTol);
+      w = weldSoupVerts(w, weldTol);
+    } catch (e) {
+      return null;
+    }
+    // Whatever the cappers above left open: pinched loops, loops folded over an edge.
+    let cl = null;
+    try {
+      cl = solidifyCloseLoops(w);
+      w = cl.soup;
+    } catch (e) {
+      cl = null;
+    }
+    if (!w || w.length < 9) return null;
+    const c = solidifyCensus(w);
+    if (!c) return null;
+    return { working: w, closeLoops: cl, census: c };
+  }
+
+  // Two tiers, tightest first. weldSoupVerts's 0.2 mm grid snap and
+  // repairJoinedSoup's own 0.3 mm weld are the risky part of this pipeline
+  // (see the comment above solidifyCensus): a grid that coarse merges every
+  // pair of distinct vertices sharing a cell, which is exactly what closes a
+  // real seam gap or a misaligned join, but on finely tessellated geometry
+  // merges vertices that were never meant to be the same point. A
+  // fine-detail hole's own boundary is usually exact-vertex already - a
+  // dropped face's edges are still shared with their neighbours - so it
+  // needs no snap at all to cap.
+  //
+  // repairJoinedSoup is left OUT of the fine tier entirely, not just called
+  // at a tighter tolerance: measured on library/v9_mirror_factory.stl with
+  // one face knocked out, repairJoinedSoup dropped ~160 triangles and opened
+  // 224 new edges even welding at the exact-vertex tolerance - its own
+  // degenerate/duplicate-face filter and its "drop small disjoint shells
+  // under 20 tris or 2% of volume" step are both blind to weld tolerance and
+  // both real risk on a piece with many small, legitimately separate
+  // features. The fine tier is weld -> cap -> cap -> weld -> close-loops
+  // only, which is exactly what closes that hole (a dropped face's edges
+  // were already exact, so nothing needed welding at all - just capping) -
+  // capSmallOpenLoops(28), capAllOuterHoles and solidifyCloseLoops carry
+  // none of repairJoinedSoup's extra filtering.
+  //
+  // Only escalate to the coarse tier - the full original pipeline,
+  // unchanged - when the fine tier makes no progress: closing a genuine gap
+  // wider than exact-vertex, and whatever repairJoinedSoup's filtering costs
+  // to get there, is what the coarse tolerance exists for.
+  const SOLIDIFY_WELD_TOL_FINE =
+    (typeof NSO_Repair !== 'undefined' && NSO_Repair && NSO_Repair.WELD_TOL) || 1e-4;
+  const fine = solidifyAttempt(SOLIDIFY_WELD_TOL_FINE, false);
+  const coarse = solidifyAttempt(0.2, true, 0.3);
+
+  // Both gates, run against a candidate: not worse (result gate) and some
+  // open edge actually closed (progress gate) - the same two solidifyCensus
+  // guards the single-tolerance pipeline always ran, just per candidate now.
+  function gate(attempt) {
+    if (!attempt) return { pass: false };
+    const worse = solidifyRegressions(censusBefore, attempt.census);
+    if (worse.length) return { pass: false, worse: worse };
+    if (attempt.census.open >= censusBefore.open) return { pass: false, noProgress: true };
+    return { pass: true };
+  }
+  const fineGate = gate(fine);
+  const coarseGate = gate(coarse);
+
+  let chosen = null;
+  if (fineGate.pass) chosen = fine;
+  // A tie keeps the fine result (tighter tolerance, less destructive); only
+  // an outright better one (fewer open edges left) displaces it.
+  if (coarseGate.pass && (!chosen || coarse.census.open < chosen.census.open)) chosen = coarse;
+
+  if (!chosen) {
+    // Report from the coarse attempt when it ran - it is what this pipeline
+    // always ran before the fine tier existed, so the message a user sees on
+    // a refusal is unchanged. Fall back to the fine attempt only when the
+    // coarse pipeline itself threw.
+    const report = coarse || fine;
+    if (!report) {
+      setStatus('Solidify failed - piece unchanged', true);
+      return;
+    }
+    const reportGate = report === coarse ? coarseGate : fineGate;
+    const leftWhy = (report.closeLoops && report.closeLoops.left.length)
+      ? ' - left open: ' + report.closeLoops.left.join('; ') : '';
+    if (reportGate.worse) {
+      setStatus('Solidify refused - it would make the mesh worse (' + reportGate.worse.join(', ') +
+                '; ' + censusBefore.tris + '\u2192' + report.census.tris + ' tris); piece unchanged', true);
+      return;
+    }
+    // Progress gate. Not worse is not enough: Solidify exists to close
+    // openings, so a result with as many open edges as the input is a
+    // refusal, not an "ok" with an Undo entry for a change that did not
+    // happen. Driver testing round 1 caught exactly that: "Solidify ok -
+    // open 16->16" on a result byte-identical to its input.
+    setStatus('Solidify refused - closed none of the ' + censusBefore.open + ' open edges (open ' +
+              censusBefore.open + '\u2192' + report.census.open + ')' + leftWhy + '; piece unchanged', true);
+    return;
+  }
+  const working0 = chosen.working;
+  const closeLoops = chosen.closeLoops;
+  const censusAfter = chosen.census;
+  const leftWhy = (closeLoops && closeLoops.left.length) ? ' - left open: ' + closeLoops.left.join('; ') : '';
+  let working = working0;
   pushUndo({
     type: 'solidifyReplace',
     modelId: m.id,
@@ -2632,237 +2600,517 @@ function solidifySelectedModel() {
     placedEntry.depth = m.size.z;
     placedEntry.height = m.size.y;
     settlePlacedOnBed(placedEntry);
+    if (typeof nsoReseatPlacedPose === 'function') nsoReseatPlacedPose(placedEntry);   // bake is in the piece's own frame: its pose still stands
   }
-  let openAfter = null, nmAfter = null;
-  try { openAfter = openBoundaryEdges(working).length; } catch (e) {}
-  try { if (typeof countNonManifoldEdges === 'function') nmAfter = countNonManifoldEdges(working); } catch (e) {}
-  if (openBefore != null && openAfter != null) {
-    let msg = 'Solidify ok - open ' + openBefore + '\u2192' + openAfter;
-    if (nmBefore != null && nmAfter != null) msg += ', NM ' + nmBefore + '\u2192' + nmAfter;
-    setStatus(msg);
-  } else {
-    setStatus('Solidify ok');
-  }
+  // "ok" only when every opening closed; fewer but not zero is "partial" and
+  // says what was left and why.
+  const closedNote = (closeLoops && closeLoops.closed) ? '; ' + closeLoops.closed + ' loop(s) closed in place' : '';
+  setStatus('Solidify ' + (censusAfter.open === 0 ? 'ok' : 'partial') +
+            ' - open ' + censusBefore.open + '\u2192' + censusAfter.open +
+            ', NM ' + censusBefore.nm + '\u2192' + censusAfter.nm +
+            (censusAfter.degen ? ', degenerate ' + censusBefore.degen + '\u2192' + censusAfter.degen : '') +
+            closedNote + (censusAfter.open ? leftWhy : ''));
 }
 
-// ---- Thicken: voxel dilate/erode helpers (new, not used by Solidify) ----
+// ---- Thicken: one-sided planar offset ----
+//
+// Thicken out / in moves ONE side of the piece's skin by the asked distance
+// and leaves the other side exactly as it was:
+//   out - the OUTER faces (the ones the outside world touches) move outward
+//   in  - the INNER faces (pocket, slot, cavity, bore) move into their void
+// Which side a face is on is a property of the face, not of where air can
+// reach. A face whose plane supports the piece's convex hull (no vertex of
+// the piece lies beyond it) is OUTER, and so is every face reached from one
+// of those across creases shallower than THICKEN_SMOOTH_DEG - the rest of a
+// tessellated curve, a rounded edge, a knuckle's far side. Everything else
+// is INNER: an open cup's cavity floor and walls are inner even though the
+// open top lets air in, because the rim is a sharp crease. That sharp crease
+// is also what makes the offset well posed: the moving / held boundary only
+// ever sits on an edge where the two planes meet at THICKEN_SMOOTH_DEG or
+// more, never on the near-flat step between two facets of one curve. A
+// pocket whose rim is rounded therefore reads as outside skin - Thicken in
+// wants a sharp rim. The earlier voxel version decided in/out by flood-
+// filling from the grid border, so every open cavity read as "exterior":
+// Thicken in found nothing to grow into, Thicken out ate the slot as well as
+// growing the outside, and both re-sampled the whole piece into cubes,
+// which moved the held side too.
+//
+// The offset itself is the intersection of offset planes. Every vertex moves
+// to the point that satisfies n.p' = n.p + d for each incident face on the
+// moving side and n.p' = n.p for each face on the held side: exact when up to
+// three plane directions meet, an area-weighted normal push when more than
+// three all move together (a vertex on a coarse curve; least squares if their
+// targets differ), minimum-norm when fewer (a vertex inside a flat face moves
+// straight along the normal, a vertex on a box edge slides to the offset edge). Incident faces whose
+// normals lie within THICKEN_CLUSTER_DEG of each other and share a target are
+// merged into one plane first, so a tessellated curve moves along its vertex
+// normal instead of chasing the intersection of near-parallel facets. Planar
+// faces stay planar, box corners stay sharp, the triangle count does not
+// change, and a held face's vertices that touch no moving face do not move at
+// all - the held side is bit-identical to the input.
+//
+// Refused, piece unchanged: an offset that inverts a face (bigger than the
+// slot or wall it grows into), one that raises the piercing self-intersection
+// count, or a piece with no face on the asked side (Thicken in on a solid).
+// A moving/held crease of only a few degrees (THICKEN_RESOLVE_RATIO; a fillet
+// running tangent into a held face) cannot be placed exactly; those vertices move
+// along the resolved directions only and are counted in the status line.
+//
+// PAINT SCOPE: WHOLE-PIECE. Any painted face on the piece stands this down.
+// The moving side's rim vertices are shared with the held faces, so a painted
+// held face would still change outline; there is no clean sub-region to scope
+// to. nsoMaskCount is the whole test, as for Smooth - see the scoping rule in
+// docs/HANDOFF.md.
+//
+// Non-solid flag: not read (docs/NON-SOLID.md section 6). The offset is per
+// face and per vertex and never needed closure; open loops stay open and the
+// status line still reports open / NM before and after.
 
-const THICKEN_MAX_DIM = 110;
-const THICKEN_TARGET_STEPS = 4;
-const THICKEN_PAD_VOX = 3;
+const THICKEN_HULL_EPS = 1e-3;       // mm past a face plane a vertex may sit and the face still count as outer
+const THICKEN_SMOOTH_DEG = 45;       // creases shallower than this are one surface; sharper ones bound a pocket
+const THICKEN_CLUSTER_DEG = 15;      // incident faces this close in normal, same target, share one plane
+const THICKEN_RESOLVE_RATIO = 1e-3;  // eigenvalue / largest below which a direction is left unresolved
+const THICKEN_MAX_MOVE = 6;          // safety cap on a vertex's move, in offsets
+const THICKEN_VOTE_AREA = 1e-3;      // mm2: a face smaller than this is a seam sliver and gets no vote on where a vertex goes
+const THICKEN_FLIP_AREA = 1e-2;      // mm2: a face smaller than this (or thinner than THICKEN_SLIVER_WIDTH) may fold without an
+const THICKEN_SLIVER_WIDTH = 0.1;    // mm   inversion verdict - it is well under a nozzle width; the piercing check still stands
+const THICKEN_MIN_POCKET_AREA = 0.16; // mm2: an inner patch smaller than a nozzle-width square is surface noise, not a pocket
 
-function _thickenBBoxOfSoup(soup) {
-  let minX = Infinity, minY = Infinity, minZ = Infinity;
-  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+/* Weld the soup for topology only (1e-4 mm cells); positions are kept verbatim. */
+function _thickenIndex(soup) {
+  const inv = 1e4;
+  const map = new Map();
+  const pos = [];
+  const tri = [];
   for (let i = 0; i < soup.length; i += 3) {
     const x = soup[i], y = soup[i + 1], z = soup[i + 2];
-    if (x < minX) minX = x; if (x > maxX) maxX = x;
-    if (y < minY) minY = y; if (y > maxY) maxY = y;
-    if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+    const k = Math.round(x * inv) + ',' + Math.round(y * inv) + ',' + Math.round(z * inv);
+    let id = map.get(k);
+    if (id === undefined) { id = pos.length / 3; pos.push(x, y, z); map.set(k, id); }
+    tri.push(id);
   }
-  return { minX, minY, minZ, maxX, maxY, maxZ };
+  return { pos, tri };
 }
 
-function _thickenChoosePitch(bb, offsetMm) {
-  const spanX = Math.max(1e-3, bb.maxX - bb.minX);
-  const spanY = Math.max(1e-3, bb.maxY - bb.minY);
-  const spanZ = Math.max(1e-3, bb.maxZ - bb.minZ);
-  let pitch = Math.max(offsetMm / THICKEN_TARGET_STEPS, 0.05);
-  function dims(p) {
-    return [
-      Math.ceil(spanX / p) + THICKEN_PAD_VOX * 2,
-      Math.ceil(spanY / p) + THICKEN_PAD_VOX * 2,
-      Math.ceil(spanZ / p) + THICKEN_PAD_VOX * 2
-    ];
+/* Unit normals and areas per face from an indexed mesh; ok[f] = 0 for degenerate faces. */
+function _thickenFaceNormals(pos, tri) {
+  const nf = tri.length / 3;
+  const n = new Float64Array(nf * 3);
+  const area = new Float64Array(nf);
+  const alt = new Float64Array(nf); // shortest altitude: the width of a sliver
+  const ok = new Uint8Array(nf);
+  let vol6 = 0;
+  for (let f = 0; f < nf; f++) {
+    const a = tri[f * 3] * 3, b = tri[f * 3 + 1] * 3, c = tri[f * 3 + 2] * 3;
+    const ax = pos[a], ay = pos[a + 1], az = pos[a + 2];
+    const e1x = pos[b] - ax, e1y = pos[b + 1] - ay, e1z = pos[b + 2] - az;
+    const e2x = pos[c] - ax, e2y = pos[c + 1] - ay, e2z = pos[c + 2] - az;
+    const nx = e1y * e2z - e1z * e2y, ny = e1z * e2x - e1x * e2z, nz = e1x * e2y - e1y * e2x;
+    const len = Math.sqrt(nx * nx + ny * ny + nz * nz);
+    vol6 += ax * (pos[b + 1] * pos[c + 2] - pos[b + 2] * pos[c + 1])
+          + ay * (pos[b + 2] * pos[c] - pos[b] * pos[c + 2])
+          + az * (pos[b] * pos[c + 1] - pos[b + 1] * pos[c]);
+    if (!(len > 1e-12)) continue;
+    n[f * 3] = nx / len; n[f * 3 + 1] = ny / len; n[f * 3 + 2] = nz / len;
+    area[f] = len / 2;
+    const e3x = pos[c] - pos[b], e3y = pos[c + 1] - pos[b + 1], e3z = pos[c + 2] - pos[b + 2];
+    const longest = Math.sqrt(Math.max(e1x * e1x + e1y * e1y + e1z * e1z, e2x * e2x + e2y * e2y + e2z * e2z, e3x * e3x + e3y * e3y + e3z * e3z));
+    alt[f] = len / longest;
+    ok[f] = 1;
   }
-  let [nx, ny, nz] = dims(pitch);
-  let guard = 0;
-  while ((nx > THICKEN_MAX_DIM || ny > THICKEN_MAX_DIM || nz > THICKEN_MAX_DIM) && guard < 60) {
-    pitch *= 1.25;
-    [nx, ny, nz] = dims(pitch);
-    guard++;
-  }
-  return pitch;
+  return { n, area, alt, ok, signedVolume: vol6 / 6 };
 }
 
-function _thickenPointInTri2D(px, py, ax, ay, bx, by, cx, cy) {
-  const d1 = (px - bx) * (ay - by) - (ax - bx) * (py - by);
-  const d2 = (px - cx) * (by - cy) - (bx - cx) * (py - cy);
-  const d3 = (px - ax) * (cy - ay) - (cx - ax) * (py - ay);
-  const hasNeg = (d1 < 0) || (d2 < 0) || (d3 < 0);
-  const hasPos = (d1 > 0) || (d2 > 0) || (d3 > 0);
-  return !(hasNeg && hasPos);
-}
-
-function _thickenVoxelize(soup, pitch) {
-  const bb = _thickenBBoxOfSoup(soup);
-  const pad = THICKEN_PAD_VOX * pitch;
-  const ox = bb.minX - pad, oy = bb.minY - pad, oz = bb.minZ - pad;
-  const nx = Math.max(1, Math.ceil((bb.maxX - bb.minX) / pitch) + THICKEN_PAD_VOX * 2);
-  const ny = Math.max(1, Math.ceil((bb.maxY - bb.minY) / pitch) + THICKEN_PAD_VOX * 2);
-  const nz = Math.max(1, Math.ceil((bb.maxZ - bb.minZ) / pitch) + THICKEN_PAD_VOX * 2);
-
-  const grid = new Uint8Array(nx * ny * nz);
-  const idx = (ix, iy, iz) => (ix * ny + iy) * nz + iz;
-
-  const buckets = new Array(nx * ny);
-  const triCount = (soup.length / 9) | 0;
-  for (let t = 0; t < triCount; t++) {
-    const i = t * 9;
-    const ax = soup[i], ay = soup[i + 1];
-    const bx = soup[i + 3], by = soup[i + 4];
-    const cxp = soup[i + 6], cyp = soup[i + 7];
-    const minXt = Math.min(ax, bx, cxp), maxXt = Math.max(ax, bx, cxp);
-    const minYt = Math.min(ay, by, cyp), maxYt = Math.max(ay, by, cyp);
-    const ix0 = Math.max(0, Math.floor((minXt - ox) / pitch) - 1);
-    const ix1 = Math.min(nx - 1, Math.ceil((maxXt - ox) / pitch) + 1);
-    const iy0 = Math.max(0, Math.floor((minYt - oy) / pitch) - 1);
-    const iy1 = Math.min(ny - 1, Math.ceil((maxYt - oy) / pitch) + 1);
-    for (let ix = ix0; ix <= ix1; ix++) {
-      for (let iy = iy0; iy <= iy1; iy++) {
-        const bi = ix * ny + iy;
-        if (!buckets[bi]) buckets[bi] = [];
-        buckets[bi].push(t);
+/* outer[f] = 1 when the face plane supports the convex hull (no vertex of the
+   piece lies more than THICKEN_HULL_EPS beyond it; coplanar faces share one
+   test), or when a chain of creases shallower than THICKEN_SMOOTH_DEG leads
+   to such a face. Every other face is inner. */
+function _thickenClassifyOuter(pos, tri, fn, sign) {
+  const outer = _thickenHullFaces(pos, tri, fn, sign);
+  const nf = tri.length / 3, nv = pos.length / 3;
+  // faces around each vertex: adjacency through shared vertices, so a
+  // T-junction or a non-manifold edge still connects what it touches
+  const vertFaces = new Array(nv);
+  for (let f = 0; f < nf; f++) {
+    if (!fn.ok[f]) continue;
+    for (let k = 0; k < 3; k++) {
+      const v = tri[f * 3 + k];
+      (vertFaces[v] || (vertFaces[v] = [])).push(f);
+    }
+  }
+  const cosSmooth = Math.cos(THICKEN_SMOOTH_DEG * Math.PI / 180);
+  const queue = [];
+  for (let f = 0; f < nf; f++) if (outer[f]) queue.push(f);
+  while (queue.length) {
+    const f = queue.pop();
+    const nx = fn.n[f * 3], ny = fn.n[f * 3 + 1], nz = fn.n[f * 3 + 2];
+    for (let k = 0; k < 3; k++) {
+      const list = vertFaces[tri[f * 3 + k]];
+      for (let i = 0; i < list.length; i++) {
+        const g = list[i];
+        if (g === f || outer[g]) continue;
+        if (nx * fn.n[g * 3] + ny * fn.n[g * 3 + 1] + nz * fn.n[g * 3 + 2] > cosSmooth) { outer[g] = 1; queue.push(g); }
       }
     }
   }
+  // an inner patch smaller than THICKEN_MIN_POCKET_AREA (a hairline ledge or
+  // seam sliver left by a CAD export) is not a pocket: it rides with the skin
+  const seen = new Uint8Array(nf);
+  for (let f0 = 0; f0 < nf; f0++) {
+    if (!fn.ok[f0] || outer[f0] || seen[f0]) continue;
+    const comp = [f0]; seen[f0] = 1;
+    let area = 0;
+    for (let qi = 0; qi < comp.length; qi++) {
+      const f = comp[qi];
+      area += fn.area[f];
+      for (let k = 0; k < 3; k++) {
+        const list = vertFaces[tri[f * 3 + k]];
+        for (let i = 0; i < list.length; i++) {
+          const g = list[i];
+          if (outer[g] || seen[g]) continue;
+          seen[g] = 1; comp.push(g);
+        }
+      }
+    }
+    if (area < THICKEN_MIN_POCKET_AREA) for (let i = 0; i < comp.length; i++) outer[comp[i]] = 1;
+  }
+  return outer;
+}
 
-  const EPS = 1e-6;
-  for (let ix = 0; ix < nx; ix++) {
-    const cx = ox + (ix + 0.5) * pitch;
-    for (let iy = 0; iy < ny; iy++) {
-      const list = buckets[ix * ny + iy];
-      if (!list || !list.length) continue;
-      const cy = oy + (iy + 0.5) * pitch;
-      const zs = [];
-      for (let li = 0; li < list.length; li++) {
-        const i = list[li] * 9;
-        const ax = soup[i], ay = soup[i + 1], az = soup[i + 2];
-        const bx = soup[i + 3], by = soup[i + 4], bz = soup[i + 5];
-        const cxp = soup[i + 6], cyp = soup[i + 7], cz = soup[i + 8];
-        if (!_thickenPointInTri2D(cx, cy, ax, ay, bx, by, cxp, cyp)) continue;
-        const e1x = bx - ax, e1y = by - ay, e1z = bz - az;
-        const e2x = cxp - ax, e2y = cyp - ay, e2z = cz - az;
-        const nX = e1y * e2z - e1z * e2y;
-        const nY = e1z * e2x - e1x * e2z;
-        const nZ = e1x * e2y - e1y * e2x;
-        if (Math.abs(nZ) < EPS) continue;
-        zs.push(az - (nX * (cx - ax) + nY * (cy - ay)) / nZ);
+function _thickenHullFaces(pos, tri, fn, sign) {
+  const nf = tri.length / 3, nv = pos.length / 3;
+  const outer = new Uint8Array(nf);
+  const cache = new Map();
+  for (let f = 0; f < nf; f++) {
+    if (!fn.ok[f]) continue;
+    const nx = fn.n[f * 3] * sign, ny = fn.n[f * 3 + 1] * sign, nz = fn.n[f * 3 + 2] * sign;
+    const a = tri[f * 3] * 3;
+    const d = nx * pos[a] + ny * pos[a + 1] + nz * pos[a + 2];
+    const key = Math.round(nx * 1e4) + ',' + Math.round(ny * 1e4) + ',' + Math.round(nz * 1e4) + ',' + Math.round(d * 1e3);
+    let r = cache.get(key);
+    if (r === undefined) {
+      r = 1;
+      for (let v = 0; v < nv; v++) {
+        if (nx * pos[v * 3] + ny * pos[v * 3 + 1] + nz * pos[v * 3 + 2] - d > THICKEN_HULL_EPS) { r = 0; break; }
       }
-      if (zs.length < 2) continue;
-      zs.sort((a, b) => a - b);
-      const uniq = [];
-      for (let k = 0; k < zs.length; k++) {
-        if (k === 0 || zs[k] - uniq[uniq.length - 1] > pitch * 0.1) uniq.push(zs[k]);
-        else uniq[uniq.length - 1] = zs[k];
+      cache.set(key, r);
+    }
+    outer[f] = r;
+  }
+  return outer;
+}
+
+/* Eigen-decomposition of a symmetric 3x3 (Jacobi). Returns { val: [3], vec: [9] column-major }. */
+function _thickenEigSym3(m) {
+  const a = [m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8]];
+  const v = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+  for (let sweep = 0; sweep < 30; sweep++) {
+    const off = Math.abs(a[1]) + Math.abs(a[2]) + Math.abs(a[5]);
+    if (off < 1e-15) break;
+    for (const [p, q] of [[0, 1], [0, 2], [1, 2]]) {
+      const apq = a[p * 3 + q];
+      if (Math.abs(apq) < 1e-18) continue;
+      const app = a[p * 3 + p], aqq = a[q * 3 + q];
+      const theta = (aqq - app) / (2 * apq);
+      const t = (theta >= 0 ? 1 : -1) / (Math.abs(theta) + Math.sqrt(theta * theta + 1));
+      const c = 1 / Math.sqrt(t * t + 1), s = t * c;
+      for (let k = 0; k < 3; k++) {
+        const akp = a[k * 3 + p], akq = a[k * 3 + q];
+        a[k * 3 + p] = c * akp - s * akq; a[k * 3 + q] = s * akp + c * akq;
       }
-      const pairCount = uniq.length - (uniq.length % 2);
-      for (let k = 0; k < pairCount; k += 2) {
-        const z0 = uniq[k], z1 = uniq[k + 1];
-        const iz0 = Math.max(0, Math.ceil((z0 - oz) / pitch - 0.5));
-        const iz1 = Math.min(nz - 1, Math.floor((z1 - oz) / pitch - 0.5));
-        for (let iz = iz0; iz <= iz1; iz++) grid[idx(ix, iy, iz)] = 1;
+      for (let k = 0; k < 3; k++) {
+        const apk = a[p * 3 + k], aqk = a[q * 3 + k];
+        a[p * 3 + k] = c * apk - s * aqk; a[q * 3 + k] = s * apk + c * aqk;
+      }
+      for (let k = 0; k < 3; k++) {
+        const vkp = v[k * 3 + p], vkq = v[k * 3 + q];
+        v[k * 3 + p] = c * vkp - s * vkq; v[k * 3 + q] = s * vkp + c * vkq;
       }
     }
   }
-  return { grid, nx, ny, nz, ox, oy, oz, pitch, idx };
+  return { val: [a[0], a[4], a[8]], vec: v };
 }
 
-function _thickenClassifyExterior(vox) {
-  const { grid, nx, ny, nz, idx } = vox;
-  const exterior = new Uint8Array(nx * ny * nz);
-  const total = nx * ny * nz;
-  const qx = new Int32Array(total), qy = new Int32Array(total), qz = new Int32Array(total);
-  let qh = 0, qt = 0;
-  function tryPush(ix, iy, iz) {
-    if (ix < 0 || iy < 0 || iz < 0 || ix >= nx || iy >= ny || iz >= nz) return;
-    const id = idx(ix, iy, iz);
-    if (grid[id] === 1 || exterior[id] === 1) return;
-    exterior[id] = 1;
-    qx[qt] = ix; qy[qt] = iy; qz[qt] = iz; qt++;
-  }
-  for (let ix = 0; ix < nx; ix++) for (let iy = 0; iy < ny; iy++) { tryPush(ix, iy, 0); tryPush(ix, iy, nz - 1); }
-  for (let ix = 0; ix < nx; ix++) for (let iz = 0; iz < nz; iz++) { tryPush(ix, 0, iz); tryPush(ix, ny - 1, iz); }
-  for (let iy = 0; iy < ny; iy++) for (let iz = 0; iz < nz; iz++) { tryPush(0, iy, iz); tryPush(nx - 1, iy, iz); }
-  while (qh < qt) {
-    const ix = qx[qh], iy = qy[qh], iz = qz[qh]; qh++;
-    tryPush(ix + 1, iy, iz); tryPush(ix - 1, iy, iz);
-    tryPush(ix, iy + 1, iz); tryPush(ix, iy - 1, iz);
-    tryPush(ix, iy, iz + 1); tryPush(ix, iy, iz - 1);
-  }
-  return exterior;
-}
-
-function _thickenDilateInto(vox, allowMask, steps) {
-  const { grid, nx, ny, nz, idx } = vox;
-  let frontier = [];
-  for (let ix = 0; ix < nx; ix++) for (let iy = 0; iy < ny; iy++) for (let iz = 0; iz < nz; iz++) {
-    const id = idx(ix, iy, iz);
-    if (grid[id] !== 1) continue;
-    if (
-      (ix + 1 < nx && grid[idx(ix + 1, iy, iz)] === 0 && allowMask[idx(ix + 1, iy, iz)]) ||
-      (ix - 1 >= 0 && grid[idx(ix - 1, iy, iz)] === 0 && allowMask[idx(ix - 1, iy, iz)]) ||
-      (iy + 1 < ny && grid[idx(ix, iy + 1, iz)] === 0 && allowMask[idx(ix, iy + 1, iz)]) ||
-      (iy - 1 >= 0 && grid[idx(ix, iy - 1, iz)] === 0 && allowMask[idx(ix, iy - 1, iz)]) ||
-      (iz + 1 < nz && grid[idx(ix, iy, iz + 1)] === 0 && allowMask[idx(ix, iy, iz + 1)]) ||
-      (iz - 1 >= 0 && grid[idx(ix, iy, iz - 1)] === 0 && allowMask[idx(ix, iy, iz - 1)])
-    ) frontier.push(id);
-  }
-  for (let s = 0; s < steps && frontier.length; s++) {
-    const next = [];
-    const seen = new Set();
-    for (let fi = 0; fi < frontier.length; fi++) {
-      const id = frontier[fi];
-      const iz = id % nz;
-      const iy = ((id - iz) / nz) % ny;
-      const ix = (id - iz - iy * nz) / (nz * ny);
-      const nb = [[ix + 1, iy, iz], [ix - 1, iy, iz], [ix, iy + 1, iz], [ix, iy - 1, iz], [ix, iy, iz + 1], [ix, iy, iz - 1]];
-      for (let k = 0; k < 6; k++) {
-        const nxp = nb[k][0], nyp = nb[k][1], nzp = nb[k][2];
-        if (nxp < 0 || nyp < 0 || nzp < 0 || nxp >= nx || nyp >= ny || nzp >= nz) continue;
-        const nid = idx(nxp, nyp, nzp);
-        if (grid[nid] === 1 || !allowMask[nid] || seen.has(nid)) continue;
-        seen.add(nid);
-        grid[nid] = 1;
-        next.push(nid);
-      }
+/* One vertex: cluster its incident planes, solve the offset-plane intersection.
+   Returns { d: [dx,dy,dz], approx: 0|1 }. */
+function _thickenSolveVertex(planes, offset) {
+  const cosTol = Math.cos(THICKEN_CLUSTER_DEG * Math.PI / 180);
+  const clusters = [];
+  planes.sort((p, q) => q.w - p.w);
+  for (const p of planes) {
+    let hit = null;
+    for (const c of clusters) {
+      if (c.t !== p.t) continue;
+      const len = Math.sqrt(c.sx * c.sx + c.sy * c.sy + c.sz * c.sz) || 1;
+      if ((c.sx * p.nx + c.sy * p.ny + c.sz * p.nz) / len >= cosTol) { hit = c; break; }
     }
-    frontier = next;
+    if (hit) { hit.sx += p.w * p.nx; hit.sy += p.w * p.ny; hit.sz += p.w * p.nz; hit.w += p.w; }
+    else clusters.push({ t: p.t, sx: p.w * p.nx, sy: p.w * p.ny, sz: p.w * p.nz, w: p.w });
   }
+  // more than three plane directions, all moving (a vertex on a coarse
+  // curve): the planes meet at no single point, and least squares would let
+  // the odd one out drag the vertex sideways - move along the area-weighted
+  // normal instead, scaled so the planes are offset by d on average
+  if (clusters.length > 3 && clusters.every(c => c.t === clusters[0].t)) {
+    let sx = 0, sy = 0, sz = 0;
+    for (const c of clusters) { sx += c.sx; sy += c.sy; sz += c.sz; }
+    const len = Math.sqrt(sx * sx + sy * sy + sz * sz);
+    if (len > 1e-12) {
+      sx /= len; sy /= len; sz /= len;
+      let cosSum = 0, cnt = 0;
+      for (const c of clusters) {
+        const cl = Math.sqrt(c.sx * c.sx + c.sy * c.sy + c.sz * c.sz);
+        if (cl > 1e-12) { cosSum += (c.sx * sx + c.sy * sy + c.sz * sz) / cl; cnt++; }
+      }
+      const scale = clusters[0].t / Math.max(cosSum / cnt, 0.2);
+      return { d: [sx * scale, sy * scale, sz * scale], approx: 0 };
+    }
+  }
+  // area weights average the normal inside a cluster; across clusters every
+  // plane is one geometric constraint, so a small chamfer counts like a big face
+  const A = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+  const b = [0, 0, 0];
+  for (const c of clusters) {
+    const len = Math.sqrt(c.sx * c.sx + c.sy * c.sy + c.sz * c.sz);
+    if (!(len > 1e-12)) continue;
+    const nx = c.sx / len, ny = c.sy / len, nz = c.sz / len;
+    const w = 1 / clusters.length;
+    A[0] += w * nx * nx; A[1] += w * nx * ny; A[2] += w * nx * nz;
+    A[4] += w * ny * ny; A[5] += w * ny * nz; A[8] += w * nz * nz;
+    b[0] += w * nx * c.t; b[1] += w * ny * c.t; b[2] += w * nz * c.t;
+  }
+  A[3] = A[1]; A[6] = A[2]; A[7] = A[5];
+  const e = _thickenEigSym3(A);
+  const lmax = Math.max(e.val[0], e.val[1], e.val[2]);
+  const d = [0, 0, 0];
+  let approx = 0;
+  for (let k = 0; k < 3; k++) {
+    const lam = e.val[k];
+    const ex = e.vec[k], ey = e.vec[3 + k], ez = e.vec[6 + k];
+    const proj = ex * b[0] + ey * b[1] + ez * b[2];
+    if (lam <= THICKEN_RESOLVE_RATIO * lmax) {
+      // no plane pins this direction (flat face, edge line) - stay put along it;
+      // if the planes disagreed here it is a tangent crease, count it
+      if (Math.abs(proj) > 1e-6 * Math.abs(offset)) approx = 1;
+      continue;
+    }
+    const s = proj / lam;
+    d[0] += s * ex; d[1] += s * ey; d[2] += s * ez;
+  }
+  const mag = Math.sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+  const cap = THICKEN_MAX_MOVE * Math.abs(offset);
+  if (mag > cap) { const s = cap / mag; d[0] *= s; d[1] *= s; d[2] *= s; approx = 1; }
+  return { d, approx };
 }
 
-function _thickenSoupFromVoxels(vox) {
-  const { grid, nx, ny, nz, ox, oy, oz, pitch, idx } = vox;
-  const out = [];
-  function solidAt(ix, iy, iz) {
-    if (ix < 0 || iy < 0 || iz < 0 || ix >= nx || iy >= ny || iz >= nz) return 0;
-    return grid[idx(ix, iy, iz)];
+/* The angle face f makes at its vertex v. wallKept weights a vertex's planes
+   by it rather than by area: on a curved wall the faces round a vertex merge
+   into one plane cluster, and an AREA-weighted normal leans to whichever side
+   the quad diagonals happen to give more triangles - the top and bottom rims
+   of a 96-segment tube then move in slightly different directions and its
+   walls come out leaning (0.01 mm on a 0.5 mm offset, enough that Extend no
+   longer finds them straight). The corner angle a quad contributes is 90
+   degrees however its diagonal falls, so the angle-weighted normal is the
+   true bisector at every rim alike. */
+function _thickenCornerAngle(pos, tri, f, v) {
+  let k = 0;
+  while (k < 3 && tri[f * 3 + k] !== v) k++;
+  if (k === 3) return 0;
+  const a = tri[f * 3 + k] * 3, b = tri[f * 3 + (k + 1) % 3] * 3, c = tri[f * 3 + (k + 2) % 3] * 3;
+  const ux = pos[b] - pos[a], uy = pos[b + 1] - pos[a + 1], uz = pos[b + 2] - pos[a + 2];
+  const wx = pos[c] - pos[a], wy = pos[c + 1] - pos[a + 1], wz = pos[c + 2] - pos[a + 2];
+  const cx = uy * wz - uz * wy, cy = uz * wx - ux * wz, cz = ux * wy - uy * wx;
+  return Math.atan2(Math.sqrt(cx * cx + cy * cy + cz * cz), ux * wx + uy * wy + uz * wz);
+}
+
+/* The offset. Returns { soup, moved, held, approx } or { reason } when refused.
+
+   opts.mayMove   optional Uint8Array, one entry per INPUT TRIANGLE (face f is
+                  triangle f of the soup, because _thickenIndex welds positions
+                  only and never reorders or merges faces). A 0 forbids that
+                  face from moving; it becomes a HELD plane like any other, so
+                  the vertex solve pins it exactly as it pins the far side of a
+                  Thicken out. The filter only ever NARROWS: a face still has to
+                  be on the asked side first. Omit it and nothing changes -
+                  every existing caller passes two arguments and gets the
+                  identical whole-surface offset it always got.
+
+                  Added for Fatten (app-fatten.js), which restricts the offset
+                  to the faces parallel to a piece's dominant axis so the length
+                  stays fixed. The axis is entirely the caller's business: this
+                  file offsets surfaces and has no notion of an axis, and giving
+                  it one would be the wrong place to put it.
+
+   opts.wallKept  every face moves: the outer ones (the same hull-and-crease
+                  classification Thicken out uses) by +offsetMm along their
+                  normal, every inner one by -offsetMm - the same direction in
+                  space as the outer face across the wall from it. So a bore
+                  grows with the outside, a tray's inner walls and floor top
+                  follow its outer walls and bottom, and every wall and floor
+                  keeps its thickness. Added for the Scale card's Offset
+                  (app-scale.js, which replaced Fatten / Shrink). `mode` is
+                  ignored with it. A refusal for inversion also says how many
+                  of the faces that turned were inner (flippedInner): a bore or
+                  pocket closing, as against a solid section going through
+                  zero.
+
+   offsetMm may be NEGATIVE here and always could be: every step below is
+   linear in it and the sign simply reverses the push. Only the UI entry point
+   gates it positive, which is why that gate is the one that had to learn about
+   signed callers rather than this function. A shrink is refused by the same
+   inversion check that refuses an over-large grow - a wall thinner than the
+   amount taken off it turns inside out and is caught there. */
+function _thickenOffsetSoup(soup, mode, offsetMm, opts) {
+  opts = opts || {};
+  const mayMove = opts.mayMove || null;
+  const wallKept = !!opts.wallKept;
+  const { pos, tri } = _thickenIndex(soup);
+  const nf = tri.length / 3, nv = pos.length / 3;
+  const fn = _thickenFaceNormals(pos, tri);
+  // STLs wound inward (negative signed volume) still thicken outward
+  const sign = fn.signedVolume < 0 ? -1 : 1;
+  const outer = _thickenClassifyOuter(pos, tri, fn, sign);
+  const moving = new Uint8Array(nf);
+  let moved = 0, held = 0, filtered = 0;
+  for (let f = 0; f < nf; f++) {
+    if (!fn.ok[f]) continue;
+    moving[f] = wallKept ? 1 : (mode === 'out') ? outer[f] : (outer[f] ? 0 : 1);
+    if (moving[f] && mayMove && !mayMove[f]) { moving[f] = 0; filtered++; }
+    if (moving[f]) moved++; else held++;
   }
-  function push6(v0, v1, v2, v3) {
-    out.push(v0[0], v0[1], v0[2], v1[0], v1[1], v1[2], v2[0], v2[1], v2[2]);
-    out.push(v0[0], v0[1], v0[2], v2[0], v2[1], v2[2], v3[0], v3[1], v3[2]);
+  if (moved === 0) {
+    if (filtered > 0) {
+      return { reason: 'no face on the asked side survives the caller\'s filter (' + filtered + ' were filtered out)' };
+    }
+    return { reason: mode === 'out' ? 'no outer face found' : 'no inner face on this piece (every face is on the outside)' };
   }
-  for (let ix = 0; ix < nx; ix++) for (let iy = 0; iy < ny; iy++) for (let iz = 0; iz < nz; iz++) {
-    if (!solidAt(ix, iy, iz)) continue;
-    const x0 = ox + ix * pitch, x1 = x0 + pitch;
-    const y0 = oy + iy * pitch, y1 = y0 + pitch;
-    const z0 = oz + iz * pitch, z1 = z0 + pitch;
-    if (!solidAt(ix + 1, iy, iz)) push6([x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [x1, y0, z1]);
-    if (!solidAt(ix - 1, iy, iz)) push6([x0, y0, z1], [x0, y1, z1], [x0, y1, z0], [x0, y0, z0]);
-    if (!solidAt(ix, iy + 1, iz)) push6([x1, y1, z0], [x0, y1, z0], [x0, y1, z1], [x1, y1, z1]);
-    if (!solidAt(ix, iy - 1, iz)) push6([x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1]);
-    if (!solidAt(ix, iy, iz + 1)) push6([x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]);
-    if (!solidAt(ix, iy, iz - 1)) push6([x0, y1, z0], [x1, y1, z0], [x1, y0, z0], [x0, y0, z0]);
+  const incident = new Array(nv);
+  for (let f = 0; f < nf; f++) {
+    if (!fn.ok[f]) continue;
+    for (let k = 0; k < 3; k++) {
+      const v = tri[f * 3 + k];
+      (incident[v] || (incident[v] = [])).push(f);
+    }
   }
-  return out.length >= 9 ? new Float32Array(out) : null;
+  const out = new Float64Array(pos.length);
+  let approx = 0;
+  for (let v = 0; v < nv; v++) {
+    out[v * 3] = pos[v * 3]; out[v * 3 + 1] = pos[v * 3 + 1]; out[v * 3 + 2] = pos[v * 3 + 2];
+    const list = incident[v];
+    if (!list) continue;
+    // a sliver's normal is noise; where a real face is present, slivers under
+    // THICKEN_VOTE_AREA do not get a say in where the vertex goes
+    let wmax = 0;
+    for (const f of list) if (fn.area[f] > wmax) wmax = fn.area[f];
+    const floor = wmax >= THICKEN_VOTE_AREA ? THICKEN_VOTE_AREA : 0;
+    let any = 0;
+    const planes = [];
+    for (const f of list) {
+      if (fn.area[f] < floor) continue;
+      if (moving[f]) any = 1;
+      planes.push({ nx: fn.n[f * 3] * sign, ny: fn.n[f * 3 + 1] * sign, nz: fn.n[f * 3 + 2] * sign,
+                    w: wallKept ? _thickenCornerAngle(pos, tri, f, v) : fn.area[f],
+                    t: !moving[f] ? 0 : (wallKept && !outer[f]) ? -offsetMm : offsetMm });
+    }
+    if (!any) continue; // touches no moving face: does not move, by construction
+    const r = _thickenSolveVertex(planes, offsetMm);
+    out[v * 3] += r.d[0]; out[v * 3 + 1] += r.d[1]; out[v * 3 + 2] += r.d[2];
+    approx += r.approx;
+  }
+  // a face whose normal turned round grew past the feature it sits in
+  // (a sliver - under THICKEN_FLIP_AREA, or thinner than THICKEN_SLIVER_WIDTH
+  // - is tessellation noise, not a feature; it may fold without a verdict)
+  let flipped = 0, flippedInner = 0, flippedMinWidth = Infinity;
+  const flipArea2 = 2 * THICKEN_FLIP_AREA;
+  for (let f = 0; f < nf; f++) {
+    if (!fn.ok[f] || fn.area[f] < THICKEN_FLIP_AREA || fn.alt[f] < THICKEN_SLIVER_WIDTH) continue;
+    const a = tri[f * 3] * 3, b = tri[f * 3 + 1] * 3, c = tri[f * 3 + 2] * 3;
+    const e1x = out[b] - out[a], e1y = out[b + 1] - out[a + 1], e1z = out[b + 2] - out[a + 2];
+    const e2x = out[c] - out[a], e2y = out[c + 1] - out[a + 1], e2z = out[c + 2] - out[a + 2];
+    const nx = e1y * e2z - e1z * e2y, ny = e1z * e2x - e1x * e2z, nz = e1x * e2y - e1y * e2x;
+    const dot = nx * fn.n[f * 3] + ny * fn.n[f * 3 + 1] + nz * fn.n[f * 3 + 2];
+    if (dot <= 0 && Math.sqrt(nx * nx + ny * ny + nz * nz) > flipArea2) {
+      flipped++;
+      if (!outer[f]) flippedInner++;
+      if (fn.alt[f] < flippedMinWidth) flippedMinWidth = fn.alt[f];
+    }
+  }
+  if (flipped > 0) {
+    return { reason: offsetMm + ' mm is more than the feature it grows into (' + flipped + ' face(s) would turn inside out)',
+             flipped, flippedInner, flippedMinWidth };
+  }
+  const res = new Float32Array(tri.length * 3);
+  for (let i = 0; i < tri.length; i++) {
+    const v = tri[i] * 3;
+    res[i * 3] = out[v]; res[i * 3 + 1] = out[v + 1]; res[i * 3 + 2] = out[v + 2];
+  }
+  return { soup: res, moved, held, approx, filtered, signedVolume: fn.signedVolume, outer };
+}
+
+function _thickenSignedVolume(soup) {
+  let v6 = 0;
+  for (let i = 0; i + 8 < soup.length; i += 9) {
+    v6 += soup[i] * (soup[i + 4] * soup[i + 8] - soup[i + 5] * soup[i + 7])
+        + soup[i + 1] * (soup[i + 5] * soup[i + 6] - soup[i + 3] * soup[i + 8])
+        + soup[i + 2] * (soup[i + 3] * soup[i + 7] - soup[i + 4] * soup[i + 6]);
+  }
+  return v6 / 6;
 }
 
 // ---- main entry ----
 
-function thickenSelectedModel(mode, offsetMm) {
+/* The UI / commit half.
+
+   opts is optional and every field of it defaults to exactly what the two
+   Thicken buttons have always got, so `thickenSelectedModel(mode, mm)` is
+   unchanged in behaviour and in the text it writes to the status line:
+
+     opts.mayMove    narrow the moving face set - forwarded to
+                     _thickenOffsetSoup, see its comment
+     opts.signed     accept a negative offsetMm. The offset maths never cared
+                     about the sign; this gate did, because the two Thicken
+                     buttons only ever mean "outward" and a negative number in
+                     their box is a typo. A caller that means "inward by this
+                     much" says so here.
+     opts.gate       extra refusal, called as gate(soupIn, working) after the
+                     piercing check and before anything is committed. Returns a
+                     reason string to refuse, or a falsy value to allow. This is
+                     where a caller's own promise is proved - Fatten measures
+                     the axial length on `working` here and refuses if it moved.
+     opts.label      name for the status line, default 'Thicken'
+     opts.modeLabel  the word after the label, default `mode`
+     opts.mmLabel    the figure after that, default `offsetMm`. A caller whose
+                     direction is already in the mode word ("shrink") says the
+                     size as a plain magnitude here rather than printing a
+                     minus sign the user never typed.
+     opts.sideWord   'outer' / 'inner' in the status line, default from `mode`
+     opts.undoType   undo entry type, default 'thickenReplace'. A new type needs
+                     its row in UNDO_REPLACE_LABEL (app-core.js) or undo will
+                     not handle it - that table is the gate as well as the label.
+     opts.note       note(result, working) -> a string appended to the status
+                     line after every figure Thicken reports, so a wrapper can
+                     add its own without re-composing the whole message.
+
+   Returns { ok, reason, ... } so a wrapper can report; the two buttons ignore
+   it, as they always have. */
+function thickenSelectedModel(mode, offsetMm, opts) {
+  opts = opts || {};
+  const label = opts.label || 'Thicken';
+  const tag = label + ' ' + (opts.modeLabel || mode) + ' ' + (opts.mmLabel != null ? opts.mmLabel : offsetMm);
+  const sideWord = opts.sideWord || (mode === 'out' ? 'outer' : 'inner');
   const m = getActiveModel();
-  if (!m) { setStatus('Select a piece first', true); return; }
-  if (!(offsetMm > 0)) { setStatus('Thicken failed - enter a positive mm value', true); return; }
+  if (!m) { setStatus('Select a piece first', true); return { ok: false, reason: 'no selection' }; }
+  if (!(opts.signed ? (isFinite(offsetMm) && offsetMm !== 0) : offsetMm > 0)) {
+    setStatus(label + ' failed - enter a ' + (opts.signed ? 'non-zero' : 'positive') + ' mm value', true);
+    return { ok: false, reason: 'offset out of range' };
+  }
+
+  const paintedCount = (typeof nsoMaskCount === 'function') ? nsoMaskCount(m) : 0;
+  if (paintedCount > 0) {
+    setStatus('Thicken stood down - ' + paintedCount + ' painted face(s); the rim of the moving side ' +
+              'is shared with the held faces, so no face can be promised untouched. Clear paint to thicken.', true);
+    return { ok: false, reason: 'painted faces: ' + paintedCount, painted: paintedCount };
+  }
 
   function localSoupFromGeometry(geo) {
     if (!geo || !geo.attributes || !geo.attributes.position) return null;
@@ -2882,52 +3130,50 @@ function thickenSelectedModel(mode, offsetMm) {
 
   const usingRaw = !!(m.rawTris && m.rawAxis === 'zup');
   const soupIn = usingRaw ? m.rawTris : localSoupFromGeometry(m.geometry);
-  if (!soupIn || soupIn.length < 9) { setStatus('Thicken failed - piece unchanged', true); return; }
+  if (!soupIn || soupIn.length < 9) { setStatus(label + ' failed - piece unchanged', true); return { ok: false, reason: 'no soup' }; }
 
   let openBefore = null, nmBefore = null;
   try { openBefore = openBoundaryEdges(soupIn).length; } catch (e) {}
   try { if (typeof countNonManifoldEdges === 'function') nmBefore = countNonManifoldEdges(soupIn); } catch (e) {}
 
-  let closedSoup = soupIn;
-  try { closedSoup = weldSoupVerts(closedSoup); } catch (e) {}
-  try { if (typeof capSmallOpenLoops === 'function') closedSoup = capSmallOpenLoops(closedSoup, 28); } catch (e) {}
-
-  let openCheck = null;
-  try { openCheck = openBoundaryEdges(closedSoup).length; } catch (e) {}
-  // Slots (cups, USB) are leftover open loops on purpose. Only refuse
-  // a shredded soup (no triangles) — not a bar that still has holes.
-  if (!closedSoup || closedSoup.length < 9) {
-    setStatus('Thicken ' + mode + ' ' + offsetMm + ' failed - piece unchanged', true);
-    return;
+  // Slots (cups, USB) are leftover open loops on purpose; the offset never
+  // needed closure, so nothing is welded or capped first and the held side
+  // comes out exactly as it went in.
+  let result = null;
+  try { result = _thickenOffsetSoup(soupIn, mode, offsetMm, opts); } catch (e) { result = { reason: (e && e.message) || 'error' }; }
+  if (!result || !result.soup || result.soup.length < 9) {
+    setStatus(tag + ' failed - ' + ((result && result.reason) || 'piece unchanged') + '; piece unchanged', true);
+    return { ok: false, reason: (result && result.reason) || 'piece unchanged' };
   }
+  const working = result.soup;
 
-  let working = null;
+  // Piercing self-intersections may not go up: the canonical policy lives in
+  // NSO_Repair (held to tools/mesh_validate.py by nso_selfint_equiv_test).
+  let pierceBefore = null, pierceAfter = null;
   try {
-    const bb = _thickenBBoxOfSoup(closedSoup);
-    const pitch = _thickenChoosePitch(bb, offsetMm);
-    const vox = _thickenVoxelize(closedSoup, pitch);
-    const exterior = _thickenClassifyExterior(vox);
-    const steps = Math.max(1, Math.round(offsetMm / pitch));
-    if (mode === 'out') {
-      _thickenDilateInto(vox, exterior, steps);
-    } else {
-      const interior = new Uint8Array(exterior.length);
-      for (let i = 0; i < interior.length; i++) interior[i] = (vox.grid[i] === 0 && exterior[i] === 0) ? 1 : 0;
-      _thickenDilateInto(vox, interior, steps);
+    if (typeof NSO_Repair !== 'undefined' && NSO_Repair && typeof NSO_Repair.inspect === 'function') {
+      pierceBefore = NSO_Repair.inspect(soupIn).selfIntersections;
+      pierceAfter = NSO_Repair.inspect(working).selfIntersections;
     }
-    working = _thickenSoupFromVoxels(vox);
-    if (working) { try { working = weldSoupVerts(working); } catch (e) {} }
-  } catch (e) {
-    working = null;
+  } catch (e) { pierceBefore = pierceAfter = null; }
+  if (pierceBefore != null && pierceAfter != null && pierceAfter > pierceBefore) {
+    setStatus(tag + ' failed - the moved faces would cross the piece (piercing pairs ' +
+              pierceBefore + '→' + pierceAfter + '); piece unchanged', true);
+    return { ok: false, reason: 'piercing ' + pierceBefore + '->' + pierceAfter };
   }
 
-  if (!working || working.length < 9) {
-    setStatus('Thicken ' + mode + ' ' + offsetMm + ' failed - piece unchanged', true);
-    return;
+  // The caller's own promise, proved on the result and before any commit.
+  if (typeof opts.gate === 'function') {
+    let why = null;
+    try { why = opts.gate(soupIn, working, result); } catch (e) { why = (e && e.message) || 'gate threw'; }
+    if (why) {
+      setStatus(tag + ' failed - ' + why + '; piece unchanged', true);
+      return { ok: false, reason: why };
+    }
   }
 
   pushUndo({
-    type: 'thickenReplace',
+    type: opts.undoType || 'thickenReplace',
     modelId: m.id,
     prevGeometry: m.geometry.clone(),
     prevRawTris: m.rawTris,
@@ -2975,14 +3221,24 @@ function thickenSelectedModel(mode, offsetMm) {
     placedEntry.depth = m.size.z;
     placedEntry.height = m.size.y;
     settlePlacedOnBed(placedEntry);
+    if (typeof nsoReseatPlacedPose === 'function') nsoReseatPlacedPose(placedEntry);   // bake is in the piece's own frame: its pose still stands
   }
 
   let openAfter = null, nmAfter = null;
   try { openAfter = openBoundaryEdges(working).length; } catch (e) {}
   try { if (typeof countNonManifoldEdges === 'function') nmAfter = countNonManifoldEdges(working); } catch (e) {}
-  let msg = 'Thicken ' + mode + ' ' + offsetMm + ' - open ' + (openBefore == null ? '?' : openBefore) + '\u2192' + (openAfter == null ? '?' : openAfter);
+  let msg = tag + ' - ' + result.moved + ' ' + sideWord +
+    ' face(s) moved, ' + result.held + ' held; open ' + (openBefore == null ? '?' : openBefore) + '\u2192' + (openAfter == null ? '?' : openAfter);
   if (nmBefore != null && nmAfter != null) msg += ', NM ' + nmBefore + '\u2192' + nmAfter;
+  if (pierceBefore != null && pierceAfter != null) msg += ', piercing ' + pierceBefore + '\u2192' + pierceAfter;
+  try {
+    const sgn = result.signedVolume < 0 ? -1 : 1;
+    msg += ', vol ' + (sgn * result.signedVolume).toFixed(1) + '\u2192' + (sgn * _thickenSignedVolume(working)).toFixed(1) + ' mm\u00b3';
+  } catch (e) {}
+  if (result.approx > 0) msg += '; ' + result.approx + ' vertex(es) on tangent creases placed approximately';
+  if (opts.note) msg += opts.note(result, working);
   setStatus(msg);
+  return { ok: true, result, tris: working, status: msg };
 }
 
 function thickenOutSelectedModel() {
@@ -3355,55 +3611,7 @@ function brickSkipLists(brick, faceList, soup) {
   return { hull: hull, pocket: pocket, nHull: nHull, nPocket: nPocket };
 }
 
-// Add one soup to another with the kernel the app already carries.
-async function nsoUnionSoups(aSoup, bSoup) {
-  if (typeof NSO_CSG === 'undefined') return { ok: false, reason: 'no CSG kernel in this build' };
-  let wasm;
-  try { wasm = await NSO_CSG.load(); }
-  catch (err) { return { ok: false, reason: 'CSG kernel failed to load: ' + (err && err.message ? err.message : err) }; }
-  let A = null, B = null, out = null;
-  try {
-    A = NSO_CSG.soupToManifold(wasm, aSoup);
-    B = NSO_CSG.soupToManifold(wasm, bSoup);
-    out = A.add(B);
-    if (out.status() !== 'NoError') throw new Error('kernel refused the fill: ' + out.status());
-    if (out.isEmpty()) throw new Error('the fill produced nothing');
-    return { ok: true, soup: NSO_CSG.manifoldToSoup(out) };
-  } catch (err) {
-    return { ok: false, reason: (err && err.message ? err.message : String(err)) };
-  } finally {
-    if (A) A.delete();
-    if (B) B.delete();
-    if (out) out.delete();
-  }
-}
-
-// Subtract one soup from another with the kernel the app already carries.
-// Nothing here reaches into the kernel; it is the same adapter Subtract and
-// Join use, called on two boxes this file generated.
-async function nsoSubtractSoups(aSoup, bSoup) {
-  if (typeof NSO_CSG === 'undefined') return { ok: false, reason: 'no CSG kernel in this build' };
-  let wasm;
-  try { wasm = await NSO_CSG.load(); }
-  catch (err) { return { ok: false, reason: 'CSG kernel failed to load: ' + (err && err.message ? err.message : err) }; }
-  let A = null, B = null, out = null;
-  try {
-    A = NSO_CSG.soupToManifold(wasm, aSoup);
-    if (A.status && A.status() !== 'NoError') throw new Error('hull rejected: ' + A.status());
-    B = NSO_CSG.soupToManifold(wasm, bSoup);
-    if (B.status && B.status() !== 'NoError') throw new Error('pocket rejected: ' + B.status());
-    out = A.subtract(B);
-    if (out.status() !== 'NoError') throw new Error('kernel refused the cut: ' + out.status());
-    if (out.isEmpty()) throw new Error('the cut left nothing');
-    return { ok: true, soup: NSO_CSG.manifoldToSoup(out) };
-  } catch (err) {
-    return { ok: false, reason: (err && err.message ? err.message : String(err)) };
-  } finally {
-    if (A) A.delete();
-    if (B) B.delete();
-    if (out) out.delete();
-  }
-}
+/* nsoUnionSoups / nsoSubtractSoups: nso_csg.js (they run in the boolean worker when the piece is big) */
 
 // The whole-solid wrap for a brick: the hull wrapped by the same generator a
 // plain box uses, with the pocket - wrapped by that same generator - taken
@@ -3645,6 +3853,24 @@ function wrapStatus(mode, b) {
          ' (' + b.tris + ' tris, one bake from source)';
 }
 
+// The sentence for a chosen-edges bake: what was asked now, then everything the
+// piece carries by radius, so a second bake reads as added to the first.
+function edgeRoundStatus(mode, b, nowCount) {
+  const name = mode === 'chamfer' ? 'Bevel' : 'Round';
+  const by = new Map();
+  b.perEdge.forEach(p => {
+    const k = p.R.toFixed(2);
+    by.set(k, (by.get(k) || 0) + 1);
+  });
+  const parts = Array.from(by.entries()).map(e => e[1] + ' at R ' + e[0]);
+  const clamp = b.clamped
+    ? ' (' + b.clamped + ' asked for more than the box allows, clamped)' : '';
+  const dropped = b.requested > b.edges ? ', ' + (b.requested - b.edges) + ' left sharp' : '';
+  const lead = nowCount + ' edge' + (nowCount === 1 ? '' : 's') + ' ' + (name === 'Bevel' ? 'beveled' : 'rounded');
+  return name + ' ' + lead + ' - the piece carries ' + b.edges + ' (' + parts.join(', ') + ')' + clamp + dropped +
+         ' (' + b.tris + ' tris, one bake from source)';
+}
+
 // Wrap the pockets of a piece that is not a plain box and not a plain box
 // with one pocket - a Subtract into a real part. The hull is not
 // re-generated: the piece's own soup goes in and only the pockets are cut
@@ -3652,7 +3878,8 @@ function wrapStatus(mode, b) {
 // wrap cannot tear a hull it does not understand.
 //
 // Returns true when it has taken the click.
-function wrapPocketsInPlace(m, run, R, firstOfRun, jobs) {
+function wrapPocketsInPlace(m, run, R, firstOfRun, jobs, commit) {
+  commit = commit || commitSoften;
   const painted = (typeof nsoMaskFaceList === 'function') ? nsoMaskFaceList(m) : [];
   if (!painted) {
     if (typeof removeFaceHelper === 'function') removeFaceHelper();
@@ -3738,7 +3965,7 @@ function wrapPocketsInPlace(m, run, R, firstOfRun, jobs) {
     const name = wrapMode === 'chamfer' ? 'Bevel'
                : wrapMode === 'cornersedges' ? 'corners+edges'
                : wrapMode === 'corners' ? 'Corners' : 'Round';
-    commitSoften(m, run, res.soup, firstOfRun,
+    commit(m, run, res.soup, firstOfRun,
                  [{ wrap: true, R: R, mode: wrapMode, pockets: pockets.length }],
                  name + ' wrap R ' + R.toFixed(2) + ' inside - ' + pockets.length + ' pocket' +
                  (pockets.length === 1 ? '' : 's') + ' wrapped, ' + painted.length +
@@ -3760,7 +3987,8 @@ function wrapPocketsInPlace(m, run, R, firstOfRun, jobs) {
 // The kernel call is a promise, so this hands the click back straight away and
 // commits when the cut lands. Nothing is written to the piece until then, so a
 // refusal anywhere leaves it exactly as it was.
-function wrapPocketBrickRun(m, run, R, firstOfRun, jobs) {
+function wrapPocketBrickRun(m, run, R, firstOfRun, jobs, commit) {
+  commit = commit || commitSoften;
   const brick = rawPocketBrick(run.base);
   if (!brick) return false;
   const faceList = (typeof nsoMaskFaceList === 'function') ? nsoMaskFaceList(m) : [];
@@ -3815,7 +4043,7 @@ function wrapPocketBrickRun(m, run, R, firstOfRun, jobs) {
                : wrapMode === 'cornersedges' ? 'corners+edges'
                : wrapMode === 'corners' ? 'Corners' : 'Round';
     const baked = 11 - skip.nHull - skip.nPocket;
-    commitSoften(m, run, res.soup, firstOfRun,
+    commit(m, run, res.soup, firstOfRun,
                  [{ wrap: true, R: R, mode: wrapMode, brick: true }],
                  name + ' wrap R ' + R.toFixed(2) + ' on a pocket piece - ' +
                  baked + ' of 11 faces baked (hull ' + (6 - skip.nHull) + '/6, pocket ' +
@@ -3888,6 +4116,7 @@ function commitSoften(m, run, working, firstOfRun, jobs, statusText) {
     placedEntry.width = m.size.x;
     placedEntry.depth = m.size.z;
     placedEntry.height = m.size.y;
+    if (typeof nsoReseatPlacedPose === 'function') nsoReseatPlacedPose(placedEntry);   // bake is in the piece's own frame: its pose still stands
   } else if (state.cutterOpen) {
     showEditPreview();
   }
@@ -4001,6 +4230,47 @@ function applySoftenOnFace(face) {
     return;
   }
 
+  softenCompute(m, {
+    R: R,
+    mode: getEdgeTreat(),
+    fullWrap: getFullWrap(),
+    newJobs: [{ axisIdx: rawAxisIdx, keepMin: keepMinFace, plane: pick.rawPlane, recessed: !!pick.recessed }]
+  }, commitSoften);
+}
+
+/* Everything Soften decides, short of putting it on the piece.
+
+   applySoftenOnFace used to do this and the install in one breath, which left
+   a preview with nothing to call. The decisions are unchanged and are all
+   here - which run this belongs to, whole-box wrap or the pocket wraps or the
+   per-face replay, every refusal and its words - and the one thing that is
+   not here is the install: each place that used to call commitSoften calls
+   `commit` instead, with commitSoften's own arguments. applySoftenOnFace
+   passes commitSoften itself, so a click bakes exactly as it did. The live
+   Soften card (app-soften-live.js) passes a function that keeps what it is
+   handed, shows it, and installs that same soup, bit for bit, when Soften is
+   pressed.
+
+   o = { R, mode, fullWrap, newJobs: [{ axisIdx, keepMin, plane, recessed }] }
+   newJobs may be empty: a whole-box wrap or a pocket wrap needs no face named.
+   A piece that does need one comes back { ok: false, needPick: true } with
+   nothing said, because the caller knows whether it is waiting on a click.
+
+   Returns { ok: true, kind, pending } when the work is taken - 'box' and
+   'faces' call `commit` before they return; 'pocket' goes through the boolean
+   kernel and calls it later, or says why not through setStatus and never
+   calls it (state.nsoWrapBusy is the flag that tells those two apart) - or
+   { ok: false, reason } with the same words setStatus was just given. */
+function softenCompute(m, o, commit) {
+  commit = commit || commitSoften;
+  const R = o.R, mode = o.mode, fullWrap = !!o.fullWrap;
+  const newJobs = o.newJobs || [];
+  const refuse = function (msg) {
+    if (typeof removeFaceHelper === 'function') removeFaceHelper();
+    setStatus(msg, true);
+    return { ok: false, reason: msg };
+  };
+
   // ---- the accumulation run ----
   // A second face must not cost you the first. Every clicked face is recorded
   // against the piece's pre-Soften raw, and one bake replays the whole list
@@ -4021,11 +4291,10 @@ function applySoftenOnFace(face) {
     result: null
   };
   const firstOfRun = !run.result;
-  // Clicking the same face again re-bakes that face at the new R and mode
+  // Naming the same face again re-bakes that face at the new R and mode
   // rather than treating it twice.
-  const jobs = run.jobs.filter(j => !(j.axisIdx === rawAxisIdx && j.keepMin === keepMinFace));
-  jobs.push({ axisIdx: rawAxisIdx, keepMin: keepMinFace, plane: pick.rawPlane,
-              R: R, mode: getEdgeTreat() });
+  const jobs = run.jobs.filter(j => !newJobs.some(n => n.axisIdx === j.axisIdx && n.keepMin === j.keepMin));
+  newJobs.forEach(n => jobs.push({ axisIdx: n.axisIdx, keepMin: n.keepMin, plane: n.plane, R: R, mode: mode }));
 
   const sealScore = nsoSealScore;
   // ---- whole-solid wrap ----
@@ -4034,8 +4303,46 @@ function applySoftenOnFace(face) {
   // raw source, so a shared edge is never met twice and a three-edge vertex is
   // solved once instead of negotiated face by face. A new R just re-wraps from
   // the same source - it cannot stack.
-  const fullWrap = getFullWrap();
   const boxBase = rawSolidBox(run.base);
+  // ---- chosen edges ----
+  // Round or Bevel only the edges the card names, each at its own radius, from
+  // the same raw box. Edges picked on an earlier bake of this run are kept
+  // (their radius too) and the ones picked now are added or re-done, so a
+  // piece can take its bottom pair at one radius and its top pair at another.
+  // The wrap above cannot do this: it rounds an edge only when both of its
+  // faces wrap. Paint still counts - an edge on a painted-out face is left
+  // sharp. nso_box_edges.js does the geometry.
+  if (o.edgePick) {
+    if (!boxBase) return refuse('Pick edges needs a plain box - this piece is not one. Piece unchanged');
+    if (mode !== 'fillet' && mode !== 'chamfer') {
+      return refuse('Pick edges works with Round and Bevel - ' + (mode === 'corners' ? 'Corners' : 'Corners+edges') +
+                    ' has no edge to pick. Piece unchanged');
+    }
+    if (typeof NSO_boxEdgeRound !== 'function') return refuse('Pick edges needs nso_box_edges.js');
+    const picked = (o.edges || []).filter(id => id >= 0 && id < 12);
+    if (!picked.length) return { ok: false, needEdges: true, reason: 'click an edge to round' };
+    const spec = new Map();
+    const before = run.jobs.find(j => j.edgeSpec);
+    if (before) before.edgeSpec.forEach(s => spec.set(s.id, s));
+    picked.forEach(id => spec.set(id, { id: id, R: R, mode: mode }));
+    const specList = Array.from(spec.values());
+    const paint = maskedBoxFaces(m);
+    let built = null;
+    try {
+      built = NSO_boxEdgeRound(boxBase, specList, { square: paint });
+    } catch (e) {
+      return refuse('Soften failed - ' + (e && e.message ? e.message : e));
+    }
+    const sB = sealScore(run.base), sW = sealScore(built.soup);
+    if (sW.open > sB.open || sW.nm > sB.nm) {
+      return refuse('Soften failed - the edge round did not close (open ' + sB.open + '→' + sW.open +
+                    ', non-manifold ' + sB.nm + '→' + sW.nm + '). Piece unchanged');
+    }
+    commit(m, run, built.soup, firstOfRun,
+           [{ wrap: true, R: R, mode: mode, edgeSpec: specList }],
+           edgeRoundStatus(mode, built.build, picked.length));
+    return { ok: true, kind: 'edges' };
+  }
   // Paint does not veto the wrap - it names the faces the wrap leaves alone,
   // and it names them with the axis and side the click itself recorded. The
   // one thing that still sends this back to the per-face path is a painted
@@ -4057,47 +4364,40 @@ function applySoftenOnFace(face) {
   // each keep their radius. Everything below this is the plain-box path,
   // unchanged.
   if (!asBox && fullWrap && !boxBase) {
-    if (wrapPocketBrickRun(m, run, R, firstOfRun, jobs)) return;
+    if (wrapPocketBrickRun(m, run, R, firstOfRun, jobs, commit)) return { ok: true, kind: 'pocket', pending: true };
     // Not one box with one box pocket, so the hull is a shape the wrap
     // cannot rebuild. It does not have to: cut the pockets out of the piece
     // as it stands and leave everything else alone.
-    if (wrapPocketsInPlace(m, run, R, firstOfRun, jobs)) return;
+    if (wrapPocketsInPlace(m, run, R, firstOfRun, jobs, commit)) return { ok: true, kind: 'pocket', pending: true };
     console.log('[soften] no box pocket to wrap here - per-face bake on the clicked face');
   }
   if (asBox) {
-    const wrapMode = getEdgeTreat();
     if (squareCount) console.log('[soften] ' + squareCount + ' face(s) painted out - wrapping the other ' + (6 - squareCount));
     let wrapped = null;
     try {
-      wrapped = rawWrapSolid(run.base, R, wrapMode, wrapSquare);
+      wrapped = rawWrapSolid(run.base, R, mode, wrapSquare);
     } catch (e) {
-      if (typeof removeFaceHelper === 'function') removeFaceHelper();
-      setStatus('Soften failed - ' + (e && e.message ? e.message : e), true);
-      return;
+      return refuse('Soften failed - ' + (e && e.message ? e.message : e));
     }
     if (!wrapped || wrapped.length < 9) {
-      if (typeof removeFaceHelper === 'function') removeFaceHelper();
-      setStatus('Soften failed - wrap empty. Piece unchanged', true);
-      return;
+      return refuse('Soften failed - wrap empty. Piece unchanged');
     }
     const sB = sealScore(run.base), sW = sealScore(wrapped);
     if (sW.open > sB.open || sW.nm > sB.nm) {
-      if (typeof removeFaceHelper === 'function') removeFaceHelper();
-      setStatus('Soften failed - wrap did not close (open ' + sB.open + '\u2192' + sW.open +
-                ', non-manifold ' + sB.nm + '\u2192' + sW.nm + '). Piece unchanged', true);
-      return;
+      return refuse('Soften failed - wrap did not close (open ' + sB.open + '→' + sW.open +
+                    ', non-manifold ' + sB.nm + '→' + sW.nm + '). Piece unchanged');
     }
-    commitSoften(m, run, wrapped, firstOfRun,
-                 [{ wrap: true, R: R, mode: wrapMode }],
-                 wrapStatus(wrapMode, rawWrapSolid.lastBuild));
-    return;
+    commit(m, run, wrapped, firstOfRun,
+           [{ wrap: true, R: R, mode: mode }],
+           wrapStatus(mode, rawWrapSolid.lastBuild));
+    return { ok: true, kind: 'box' };
   }
 
-  if (pick.recessed) {
-    if (typeof removeFaceHelper === 'function') removeFaceHelper();
-    setStatus('That face is inside the piece - only a Full wrap can reach it, and this piece is not one ' +
-              'the wrap can name. Piece unchanged', true);
-    return;
+  if (!newJobs.length) return { ok: false, needPick: true, reason: 'click the face to soften' };
+
+  if (newJobs.some(j => j.recessed)) {
+    return refuse('That face is inside the piece - only a Full wrap can reach it, and this piece is not one ' +
+                  'the wrap can name. Piece unchanged');
   }
 
   // Replay order is not click order. The engines are not symmetric: a face loop
@@ -4105,7 +4405,7 @@ function applySoftenOnFace(face) {
   // but a face next to a finished band is fine for the ball engines. Bands
   // first, then Round and Bevel, then Corners. Same set of treatments either
   // way - replaying from the base means the order is ours to choose.
-  const rank = (mode) => (mode === 'cornersedges' ? 0 : (mode === 'corners' ? 2 : 1));
+  const rank = (md) => (md === 'cornersedges' ? 0 : (md === 'corners' ? 2 : 1));
   const order = jobs.map((j, i) => ({ j: j, i: i }))
                     .sort((a, b) => (rank(a.j.mode) - rank(b.j.mode)) || (a.i - b.i))
                     .map(x => x.j);
@@ -4141,58 +4441,52 @@ function applySoftenOnFace(face) {
     const s0 = sealScore(run.base), s1 = sealScore(working);
     if (s1.open > s0.open || s1.nm > s0.nm) {
       throw new Error('this face fights one already softened (open ' +
-                      s0.open + '\u2192' + s1.open + ', non-manifold ' +
-                      s0.nm + '\u2192' + s1.nm + ') - ' +
+                      s0.open + '→' + s1.open + ', non-manifold ' +
+                      s0.nm + '→' + s1.nm + ') - ' +
                       (jobs.length > 1 ? 'kept the ' + (jobs.length - 1) + ' already baked'
                                        : 'piece unchanged'));
     }
   } catch (e) {
-    working = null;
-    if (typeof removeFaceHelper === 'function') removeFaceHelper();
-    setStatus('Soften failed - ' + (e && e.message ? e.message : e), true);
-    return;
+    return refuse('Soften failed - ' + (e && e.message ? e.message : e));
   }
   if (!working || working.length < 9) {
-    if (typeof removeFaceHelper === 'function') removeFaceHelper();
-    setStatus('Soften failed - fillet empty. Piece unchanged', true);
-    return;
+    return refuse('Soften failed - fillet empty. Piece unchanged');
   }
-
-  commitSoften(m, run, working, firstOfRun, jobs.filter(j => !j.dead), null);
 
   // What actually got built: corners that took R, out of the corners found,
   // and the loop points the face carries. No sealing claim.
-  const treat = getEdgeTreat();
+  const live = jobs.filter(j => !j.dead);
   const clamp = (x) => (x.radius < x.requested - 1e-6 ? ' (asked ' + x.requested.toFixed(2) + ', wall clamp)' : '');
   // Says how many faces this piece is carrying once there is more than one,
   // so a second click reads as "kept the first" rather than "moved it".
-  const faces = run.jobs.length > 1 ? ' [' + run.jobs.length + ' faces baked]'
-              : (getFullWrap() ? '' : ' [full wrap off - this face only]');
+  const faces = live.length > 1 ? ' [' + live.length + ' faces baked]'
+              : (fullWrap ? '' : ' [full wrap off - this face only]');
   const built = newJob.build || null;
-  const ball = treat === 'cornersedges' ? built : null;
-  const only = treat === 'corners' ? built : null;
-  const perim = (treat === 'fillet' || treat === 'chamfer') ? built : null;
+  const ball = mode === 'cornersedges' ? built : null;
+  const only = mode === 'corners' ? built : null;
+  const perim = (mode === 'fillet' || mode === 'chamfer') ? built : null;
+  let text;
   if (nothingToAdd) {
-    setStatus('Soften ok - nothing to add on this face (' + nothingToAdd + ')' + faces);
-    return;
-  }
-  if (treat === 'cornersedges' && ball && ball.vertices != null) {
-    setStatus('corners+edges setback R ' + ball.radius.toFixed(2) + clamp(ball) +
-              ' (' + ball.vertices + ' corners + ' + ball.bands + ' edges, ' +
-              ball.patchTris + ' blend tris, no shelf)' +
-              (ball.skipped ? ' - ' + ball.skipped + ' not square, left sharp' : '') + faces);
-  } else if (treat === 'corners' && only && only.vertices != null) {
-    setStatus('Corners R ' + only.radius.toFixed(2) + clamp(only) +
-              ' - ' + only.vertices + ' vertices, mid-edges square' +
-              (only.skipped ? ' - ' + only.skipped + ' not square, left sharp' : '') + faces);
+    text = 'Soften ok - nothing to add on this face (' + nothingToAdd + ')' + faces;
+  } else if (mode === 'cornersedges' && ball && ball.vertices != null) {
+    text = 'corners+edges setback R ' + ball.radius.toFixed(2) + clamp(ball) +
+           ' (' + ball.vertices + ' corners + ' + ball.bands + ' edges, ' +
+           ball.patchTris + ' blend tris, no shelf)' +
+           (ball.skipped ? ' - ' + ball.skipped + ' not square, left sharp' : '') + faces;
+  } else if (mode === 'corners' && only && only.vertices != null) {
+    text = 'Corners R ' + only.radius.toFixed(2) + clamp(only) +
+           ' - ' + only.vertices + ' vertices, mid-edges square' +
+           (only.skipped ? ' - ' + only.skipped + ' not square, left sharp' : '') + faces;
   } else if (perim && perim.loopPts != null) {
-    setStatus('Soften ok - ' + perim.mode + ' on all ' + perim.loopPts + ' loop pts at R ' +
-              perim.radius.toFixed(2) + clamp(perim) + faces);
+    const holes = perim.holes ? ' (the edge and ' + (perim.holes === 1 ? 'its hole' : 'its ' + perim.holes + ' holes') + ')' : '';
+    text = 'Soften ok - ' + perim.mode + ' on all ' + perim.loopPts + ' loop pts' + holes + ' at R ' +
+           perim.radius.toFixed(2) + clamp(perim) + faces;
   } else {
-    setStatus('Soften ok' + faces);
+    text = 'Soften ok' + faces;
   }
+  commit(m, run, working, firstOfRun, live, text);
+  return { ok: true, kind: 'faces' };
 }
-
 
 // ===== Cap: raw engine — flat lid via existing clip+cap (rawCut), R=0 =====
 // Same extreme-finding + EPS nudge as softenSelectedFace, same keepMin
@@ -4292,6 +4586,7 @@ function applyCapOnFace(face) {
     placedEntry.width = m.size.x;
     placedEntry.depth = m.size.z;
     placedEntry.height = m.size.y;
+    if (typeof nsoReseatPlacedPose === 'function') nsoReseatPlacedPose(placedEntry);   // bake is in the piece's own frame: its pose still stands
   } else if (state.cutterOpen) {
     showEditPreview();
   }
@@ -4340,6 +4635,11 @@ function getEdgeTreat() {
 }
 
 function softenSelectedModel() {
+  /* The Soften button is the live card's now (app-soften-live.js): the first
+     press opens it, the next bakes what it is showing. What follows is the
+     card-less path - arm, click a face, bake - kept for a page or a headless
+     check that loads this file without the card. */
+  if (window.nsoSoftenLive) return window.nsoSoftenLive.press();
   const m = getActiveModel();
   if (!m) { setStatus('Select a piece first', true); return; }
 
@@ -4399,9 +4699,12 @@ function capSelectedOpenFaces() {
     setStatus('No open face to cap');
     return;
   }
+  // `modelId`, the key undoLast() reads. This was `id`, so Undo after Cap
+  // open faces found no piece ("Undo: piece no longer exists"), consumed the
+  // entry and left the cap on.
   pushUndo({
     type: 'softenReplace',
-    id: m.id,
+    modelId: m.id,
     prevGeometry: prevGeo,
     prevRawTris: prevRaw,
     prevRawAxis: prevAxis,
@@ -4433,6 +4736,7 @@ function capSelectedOpenFaces() {
     placed.width = m.size.x;
     placed.depth = m.size.z;
     placed.height = m.size.y;
+    if (typeof nsoReseatPlacedPose === 'function') nsoReseatPlacedPose(placed);   // bake is in the piece's own frame: its pose still stands
   }
   updateEditSize();
   renderModelList();
@@ -4545,6 +4849,10 @@ function rawJoinPieces(rawMin, rawMax, axisIdx) {
 
 function meshLocalBox3(mesh) {
   if (!mesh || !mesh.geometry) return new THREE.Box3();
+  /* The box of the vertices as posed (nso-bounds.js), not the geometry's
+     bounding box with the pose put on its corners: for a geometry that
+     already carries a baked turn those corners are in the air. */
+  if (typeof nsoBounds !== 'undefined') return nsoBounds.worldBox(mesh);
   if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
   mesh.updateMatrixWorld(true);
   return mesh.geometry.boundingBox.clone().applyMatrix4(mesh.matrixWorld);
@@ -4623,36 +4931,7 @@ function stripFacingInBand(soup, axisIdx, plane, band, win) {
   return { tris: new Float32Array(out), stripped };
 }
 
-function weldSoupVerts(soup, eps) {
-  eps = eps || 0.2;
-  const inv = 1 / eps;
-  const map = new Map();
-  const verts = [];
-  function key(x, y, z) {
-    return (Math.round(x * inv)) + ',' + (Math.round(y * inv)) + ',' + (Math.round(z * inv));
-  }
-  function vid(x, y, z) {
-    const k = key(x, y, z);
-    if (map.has(k)) return map.get(k);
-    const id = verts.length / 3;
-    verts.push(x, y, z);
-    map.set(k, id);
-    return id;
-  }
-  const out = [];
-  const triCount = soup.length / 9;
-  for (let t = 0; t < triCount; t++) {
-    const i0 = t * 9;
-    const a = vid(soup[i0], soup[i0 + 1], soup[i0 + 2]);
-    const b = vid(soup[i0 + 3], soup[i0 + 4], soup[i0 + 5]);
-    const c = vid(soup[i0 + 6], soup[i0 + 7], soup[i0 + 8]);
-    if (a === b || b === c || c === a) continue;
-    out.push(verts[a * 3], verts[a * 3 + 1], verts[a * 3 + 2]);
-    out.push(verts[b * 3], verts[b * 3 + 1], verts[b * 3 + 2]);
-    out.push(verts[c * 3], verts[c * 3 + 1], verts[c * 3 + 2]);
-  }
-  return new Float32Array(out);
-}
+/* weldSoupVerts: nso_csg.js (the boolean worker welds before the kernel too) */
 
 function openBoundaryEdges(soup) {
   const edges = new Map();
@@ -4811,8 +5090,19 @@ function joinHalvesOnPlate(modelA, placedA, modelB, placedB, axisIdx) {
   matchPlacedBottoms(placedA, placedB);
   const pyA = placedA.mesh ? placedA.mesh.position.y : (modelA.size.y / 2 + 0.3);
   const pyB = placedB.mesh ? placedB.mesh.position.y : (modelB.size.y / 2 + 0.3);
-  const soupA = geomToWorldSoup(modelA.geometry, placedA.x, pyA, placedA.z);
-  const soupB = geomToWorldSoup(modelB.geometry, placedB.x, pyB, placedB.z);
+  // meshToWorldSoup(placed.mesh) when there is a mesh to read - the piece's
+  // FULL current transform, turn included. geomToWorldSoup only translates,
+  // so a piece rotated (rotY, flipX, tipX/tiltX, tipZ/tiltZ) before this
+  // Join came out unturned: the record said posed, the drawn geometry
+  // wasn't, and joinSelectedModels clears the record right after (it
+  // assumes every route bakes the pose in - see its own comment), so the
+  // turn was gone with nothing left even claiming it.
+  const soupA = (placedA.mesh && typeof meshToWorldSoup === 'function')
+    ? meshToWorldSoup(placedA.mesh)
+    : geomToWorldSoup(modelA.geometry, placedA.x, pyA, placedA.z);
+  const soupB = (placedB.mesh && typeof meshToWorldSoup === 'function')
+    ? meshToWorldSoup(placedB.mesh)
+    : geomToWorldSoup(modelB.geometry, placedB.x, pyB, placedB.z);
   const key = axisIdx === 0 ? 'x' : 'z';
   const aIsMin = placedA[key] <= placedB[key];
   const left = aIsMin ? soupA : soupB;
@@ -4909,7 +5199,8 @@ function joinHalvesOnPlate(modelA, placedA, modelB, placedB, axisIdx) {
   return soupToCenteredGeo(merged);
 }
 
-function repairJoinedSoup(soup) {
+function repairJoinedSoup(soup, weldTol) {
+  weldTol = weldTol == null ? 0.3 : weldTol;
   try {
     if (!soup || soup.length < 9) return soup;
     const original = soup;
@@ -4964,7 +5255,7 @@ function repairJoinedSoup(soup) {
 
     // 2) Weld vertices (reuse existing welder; also re-drops any triangles
     //    that collapse to zero area once shared verts snap together).
-    let soupW = weldSoupVerts(new Float32Array(work), 0.3);
+    let soupW = weldSoupVerts(new Float32Array(work), weldTol);
     if (soupW.length < 9) return original;
 
     // 3) Cap any remaining planar open loops with the existing capper
@@ -4976,7 +5267,7 @@ function repairJoinedSoup(soup) {
     for (let pass = 0; pass < 3; pass++) {
       if (!(typeof openBoundaryEdges === 'function' && openBoundaryEdges(soupC).length > 0)) break;
       const capped = capAllOuterHoles(soupC);
-      const reWelded = weldSoupVerts(capped, 0.3);
+      const reWelded = weldSoupVerts(capped, weldTol);
       if (reWelded.length < 9) break;
       if (reWelded.length === soupC.length) { soupC = reWelded; break; }
       soupC = reWelded;
@@ -5393,6 +5684,8 @@ function clearInspectCage() {
   state.inspectCage = null;
 }
 
+if (typeof nsoHelpers !== 'undefined') nsoHelpers.owner('inspect', { clear: clearInspectCage });
+
 function showInspectCage(model) {
   clearInspectCage();
   if (!model || !state.placed) return;
@@ -5410,8 +5703,7 @@ function showInspectCage(model) {
     const cage = new THREE.LineSegments(edges, mat);
     cage.renderOrder = 16;
     cage.name = 'inspectCage';
-    cage.raycast = function () {};
-    mesh.add(cage);
+    nsoHelpers.attach(mesh, cage, 'inspect');
     state.inspectCage = cage;
   } catch (e) {
     state.inspectCage = null;
@@ -5797,7 +6089,7 @@ function showPlanarHighlight(mesh, face) {
     depthWrite: false
   }));
   hl.renderOrder = 20;
-  state.scene.add(hl);
+  nsoHelpers.attach(state.scene, hl, 'face-pick');
   state.faceHelper = hl;
 }
 
@@ -5811,6 +6103,9 @@ function removeFaceHelper() {
   }
   state.faceHelper = null;
 }
+/* The picked-face highlight is not a session of its own - Soften, Cap and
+   Join each draw it - so it is cleared, never closed. */
+if (typeof nsoHelpers !== 'undefined') nsoHelpers.owner('face-pick', { clear: removeFaceHelper });
 
 function showFaceHighlight(hit) {
   removeFaceHelper();
@@ -5840,7 +6135,7 @@ function showFaceHighlight(hit) {
     depthWrite: false
   }));
   mesh.renderOrder = 20;
-  state.scene.add(mesh);
+  nsoHelpers.attach(state.scene, mesh, 'face-pick');
   state.faceHelper = mesh;
 }
 

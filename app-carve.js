@@ -21,6 +21,13 @@
        any free orientation the moment a pose button was pressed.
    That is the contained-pose-state decision, written down. See
    docs/LOCAL-CARVE.md, "Deferred: free orientation in the pose model".
+
+   Click or drag
+   -------------
+   A press opens a stroke and the release decides: a click punches the blade
+   in once (carveAt), a drag cuts one continuous groove along it
+   (carveStrokeOn - NSO_Carve.planStroke's swept section and end blades,
+   unioned and subtracted in one boolean, one Undo).
    ============================================================ */
 (function () {
   'use strict';
@@ -123,6 +130,54 @@
   }
 
   /* ---- arming ---- */
+
+  /* One click-owning mode at a time, the same contract app-measure.js states
+     and app-mask.js, app-brush.js and app-seat-surface.js all keep. Carve is
+     asked second in app-core's pointerdown routing - right after paint - so
+     paint left armed when Carve goes live is not queued behind it, it never
+     fires again: paint keeps taking the click and Carve's button sits lit and
+     dead. This used to name only Seat here.
+
+     Paint and the other two with a button go off THROUGH the button, so
+     aria-pressed and the armed class follow rather than being written behind
+     its back; state.centerLockArmed stays a flag write on purpose, as it does
+     in every other disarmOthers, because btn-center-lock-pick refuses to
+     cancel once the Join pair it needs is gone. */
+  function disarmOthers() {
+    if (state.maskPaint) {
+      var paintBtn = $(state.maskPaint === 'select' ? 'btn-mask-select' : 'btn-mask-paint');
+      if (paintBtn) paintBtn.click();
+    }
+    if (state.seatHereArmed) {
+      var seatBtn = $('btn-seat-here');
+      if (seatBtn) seatBtn.click();
+      else state.seatHereArmed = false;
+    }
+    if (typeof window.nsoBrushArmed === 'function' && window.nsoBrushArmed()) {
+      var brushBtn = $('btn-brush');
+      if (brushBtn) brushBtn.click();
+      else if (typeof window.nsoBrushSetArmed === 'function') window.nsoBrushSetArmed(false);
+    }
+    if (typeof window.nsoPullArmed === 'function' && window.nsoPullArmed()) {
+      var pullBtn = $('btn-pull');
+      if (pullBtn) pullBtn.click();
+      else if (typeof window.nsoPullSetArmed === 'function') window.nsoPullSetArmed(false);
+    }
+    if (typeof window.nsoLimbArmed === 'function' && window.nsoLimbArmed()) {
+      var limbBtn = $('btn-limb');
+      if (limbBtn) limbBtn.click();
+      else if (typeof window.nsoLimbSetArmed === 'function') window.nsoLimbSetArmed(false);
+    }
+    if (state.measureOn) {
+      var measureBtn = $('btn-measure');
+      if (measureBtn) measureBtn.click();
+      else state.measureOn = false;
+    }
+    state.softenArmed = false;
+    state.capArmed = false;
+    state.centerLockArmed = false;
+  }
+
   function setArmed(on) {
     state.carveArmed = !!on;
     var btn = $('btn-carve');
@@ -131,14 +186,10 @@
       btn.classList.toggle('is-armed', state.carveArmed);
     }
     if (state.carveArmed) {
-      /* one click-owning mode at a time, the way Measure's disarmOthers does it */
-      if (state.seatHereArmed) {
-        var seatBtn = $('btn-seat-here');
-        if (seatBtn) seatBtn.click();
-        else state.seatHereArmed = false;
-      }
-      say('Carve armed - click a face, an edge or a corner. Click Carve again to stop.');
+      disarmOthers();
+      say('Carve armed - click a face, an edge or a corner to punch, or drag to cut a groove. Click Carve again to stop.');
     } else {
+      if (stroke) endStroke(false);
       say('Carve off');
     }
   }
@@ -161,7 +212,14 @@
   }
 
   /* Asked by app-core's pointerdown, which runs first - the same predicate
-     paint answers, for the same reason. */
+     paint answers, for the same reason.
+
+     The press no longer cuts. It opens a STROKE, the way the Brush's press
+     does: the drag collects the surface under the pointer, and the release
+     decides. A release within CLICK_PX of the press is a click and punches the
+     blade in once at the press point, exactly as Carve always has; anything
+     longer is a groove - the blade swept along the stroke, one cut, one Undo.
+     The preview line follows the pointer while the button is held. */
   window.nsoCarveTakesClick = function (event) {
     if (!state.carveArmed || !event || event.button !== 0) return false;
     var t = hitPiece(event);
@@ -177,16 +235,87 @@
       say('Carve: the last cut is still running - one at a time', true);
       return true;
     }
+    beginStroke(t, event);
+    return true;
+  };
+
+  /* ---- the stroke: press, drag, release ---- */
+
+  /* Under this many screen pixels from the press, a release is a click. */
+  var CLICK_PX = 4;
+  var stroke = null;
+
+  function sampleOf(t) {
+    var n = t.hit.face ? t.hit.face.normal.clone().transformDirection(t.hit.object.matrixWorld).normalize() : null;
+    var p = t.hit.point;
+    return { point: [p.x, p.y, p.z], normal: n ? [n.x, n.y, n.z] : null };
+  }
+
+  function drawPreview(s) {
+    if (!state.scene || typeof THREE === 'undefined') return;
+    var pts = s.samples.map(function (q) {
+      var n = q.normal || [0, 0, 0];
+      return new THREE.Vector3(q.point[0] + n[0] * 0.05, q.point[1] + n[1] * 0.05, q.point[2] + n[2] * 0.05);
+    });
+    if (pts.length < 2) return;
+    if (!s.line) {
+      s.line = new THREE.Line(new THREE.BufferGeometry(),
+        new THREE.LineBasicMaterial({ color: 0xff7a1a, depthTest: false, transparent: true }));
+      s.line.renderOrder = 999;
+      s.line.userData.carveStroke = true;
+      state.scene.add(s.line);
+    }
+    s.line.geometry.dispose();
+    s.line.geometry = new THREE.BufferGeometry().setFromPoints(pts);
+  }
+
+  function dropPreview(s) {
+    if (!s || !s.line) return;
+    if (s.line.parent) s.line.parent.remove(s.line);
+    s.line.geometry.dispose();
+    s.line.material.dispose();
+    s.line = null;
+  }
+
+  function beginStroke(t, event) {
+    stroke = {
+      target: t, index: t.index, samples: [sampleOf(t)],
+      x0: event.clientX, y0: event.clientY, moved: 0, line: null
+    };
+    if (state.controls) state.controls.enabled = false;
+    try { if (event.target && event.target.setPointerCapture) event.target.setPointerCapture(event.pointerId); } catch (e) {}
+    say('Carve - drag to cut a groove, let go to cut it; a click punches. Esc cancels.');
+  }
+
+  function onStrokeMove(event) {
+    var s = stroke;
+    if (!s) return;
+    s.moved = Math.max(s.moved, Math.hypot(event.clientX - s.x0, event.clientY - s.y0));
+    var t = hitPiece(event);
+    if (!t || t.index !== s.index) return;
+    s.samples.push(sampleOf(t));
+    drawPreview(s);
+  }
+
+  function endStroke(commit) {
+    var s = stroke;
+    stroke = null;
+    if (!s) return;
+    dropPreview(s);
+    if (state.controls) state.controls.enabled = true;
+    if (!commit) { say('Carve cancelled - piece unchanged'); return; }
     busy = true;
+    var isClick = s.moved < CLICK_PX;
     /* do the work off the event so a slow boolean never blocks the pointer
        handler */
     setTimeout(function () {
-      Promise.resolve(carveAt(t)).catch(function (e) {
-        say('Carve failed - ' + ((e && e.message) ? e.message : e), true);
-      }).then(function () { busy = false; });
+      var job = isClick ? carveAt(s.target) : carveStrokeOn(s.target.placed, s.samples, s.target);
+      Promise.resolve(job).then(function (r) { window.nsoCarveLast = r || null; })
+        .catch(function (e) {
+          say('Carve failed - ' + ((e && e.message) ? e.message : e), true);
+        }).then(function () { busy = false; });
     }, 0);
-    return true;
-  };
+  }
 
   /* nso_carve's plain-data frame -> the THREE types buildCutVolume reads.
      Nothing is recomputed here: axis, sign and capCoord come straight from the
@@ -230,6 +359,33 @@
     }
   }
 
+  /* The weld at GATE_WELD every carve result gets before it is committed -
+     why, measured, is written at its call in carveAt. Returns the soup to
+     commit, how many seam slivers the weld collapsed, and the tolerance. */
+  function weldForGate(soup) {
+    var welded = soup, dropped = 0, weldTol = null;
+    if (typeof NSO_buildAdjacency === 'function' && typeof NSO_adjacencyToRaw === 'function') {
+      var adj = NSO_buildAdjacency(soup, { tol: GATE_WELD, rawTol: true });
+      if (adj && adj.ok && !adj.openEdges && !adj.nmEdges) {
+        welded = NSO_adjacencyToRaw(adj);
+        dropped = adj.droppedTris;
+        weldTol = adj.weldTol;
+      } else {
+        console.warn('[carve] weld stood down (' +
+          (adj && adj.ok ? 'it would leave ' + adj.openEdges + ' open / ' + adj.nmEdges + ' non-manifold edges'
+                         : (adj && adj.reason)) + ') - committing the kernel soup as is');
+      }
+    }
+    return { soup: welded, dropped: dropped, weldTol: weldTol };
+  }
+
+  /* The piece as the kernel will take it (nso-helpers.js, nsoOverlap.solid): its shells merged into one solid in
+     world, when they overlap. */
+  function solidFor(model, placed) {
+    if (typeof nsoOverlap === 'undefined' || !nsoOverlap) return Promise.resolve({ ok: true, merged: false });
+    return nsoOverlap.solid(model, { geometry: placed.mesh.geometry, mesh: placed.mesh });
+  }
+
   /* One carve. Returns the plan + numbers so the check can drive it headlessly
      and read what happened, not just the status text. */
   async function carveAt(target) {
@@ -237,6 +393,13 @@
     var placed = target.placed;
     var model = state.models.find(function (m) { return m && m.id === placed.sourceId; });
     if (!model || !placed.mesh) { say('Carve: that piece is not on the plate', true); return null; }
+    // Work as is (nso-helpers.js, nsoOverlap): a piece whose shells overlap is carved as those shells merged into
+    // one solid; the carve replaces the piece with its result, as it always did.
+    var sol = await solidFor(model, placed);
+    if (!sol.ok) {
+      say(sol.cancelled ? 'Carve stopped - piece unchanged' : 'Carve refused - ' + sol.reason + ' - piece unchanged', !sol.cancelled);
+      return { ok: false, reason: sol.reason };
+    }
 
     var blade = currentBlade();
     var depth = numOf($('carve-depth'), 1);
@@ -244,11 +407,43 @@
     var params = currentParams(blade, depth);
 
     placed.mesh.updateMatrixWorld(true);
-    var hullSoup = meshToWorldSoup(placed.mesh);
+    var hullSoup = sol.merged ? sol.world : meshToWorldSoup(placed.mesh);
     var pt = target.hit.point;
 
     var planned = NSO_Carve.plan(hullSoup, [pt.x, pt.y, pt.z], blade, params, { depth: depth, roll: roll });
     if (!planned.ok) { say('Carve: ' + planned.reason, true); return { ok: false, reason: planned.reason }; }
+
+    /* THE LIVE WALL GATE - proactive, before the kernel is even loaded.
+
+       This is a SECOND layer, independent of the cutClearance() warning below,
+       and the two catch different failures. cutClearance() asks whether the cut
+       SEVERS a member - whether the bit runs out the far side - and is
+       deliberately a warning and never a refusal, because Local-Carve's corner
+       gouge severs a wall on purpose (docs/LOCAL-CARVE.md 3c). This asks the
+       question nothing in the carve path asks at all: how much wall is under
+       this point, and does a cut this deep leave enough of it to print? A cut
+       that stops well short of the far face, severs nothing, and leaves 0.2 mm
+       standing passes every check that already exists and comes out of the
+       slicer as a hole.
+
+       So this one REFUSES, and it does so here - before the CSG kernel is
+       loaded and before anything is committed - rather than reporting after
+       the fact. The probe is NSO_Thickness.prepare() on the piece's own world
+       soup: one weld, one grid, one query, all on this click. */
+    var gate = null;
+    if (typeof NSO_Thickness !== 'undefined' && typeof NSO_Thickness.prepare === 'function') {
+      try {
+        var probe = NSO_Thickness.prepare(hullSoup, {});
+        if (probe) {
+          gate = probe.strokeGate({ point: [pt.x, pt.y, pt.z], depth: depth, label: 'carve' });
+        }
+      } catch (e) { gate = null; }
+    }
+    if (gate && !gate.ok) {
+      var refusal = NSO_Thickness.strokeRefusal(gate);
+      say(refusal, true);
+      return { ok: false, reason: refusal, gate: gate, planned: planned };
+    }
 
     var wasm;
     try { wasm = await NSO_CSG.load(); }
@@ -347,30 +542,34 @@
        and widening the shipped boolean would move numbers other checks pin. A
        curved bit through Subtract would likely want the same treatment; that is
        its own ticket, not this one. */
-    var welded = res.soup, dropped = 0, weldTol = null;
-    if (typeof NSO_buildAdjacency === 'function' && typeof NSO_adjacencyToRaw === 'function') {
-      var adj = NSO_buildAdjacency(res.soup, { tol: GATE_WELD, rawTol: true });
-      if (adj && adj.ok && !adj.openEdges && !adj.nmEdges) {
-        welded = NSO_adjacencyToRaw(adj);
-        dropped = adj.droppedTris;
-        weldTol = adj.weldTol;
-      } else {
-        console.warn('[carve] weld stood down (' +
-          (adj && adj.ok ? 'it would leave ' + adj.openEdges + ' open / ' + adj.nmEdges + ' non-manifold edges'
-                         : (adj && adj.reason)) + ') - committing the kernel soup as is');
-      }
-    }
+    var wd = weldForGate(res.soup), welded = wd.soup, dropped = wd.dropped, weldTol = wd.weldTol;
 
     /* Commit exactly as Soften / Smooth / Thicken commit: one raw soup through
        the shared helper, which pushes the undo entry, swaps the geometry,
        rebuilds the mesh and repaints the mask. carveReplace is a row in
-       app-core.js's undoLast, so Undo already knows what to call it. */
+       UNDO_REPLACE_LABEL, so Undo already knows what to call it. */
     var geo = soupToCenteredGeo(welded);
     var raw = displayGeometryToRawSoup(geo);
+    /* The nozzle-safety finding from the shared cut core, appended as one more
+       ' - ' clause on the line that already reports what the carve removed.
+       A carve is the op that MOST wants this and least wants it enforced: a
+       corner gouge severing a 2 mm wall is this tool's own use case, so the
+       warning is worded "reported, not blocked" and the commit below runs
+       unchanged. '' on a carve that leaves a printable wall. */
+    var cutWarn = (typeof NSO_Thickness !== 'undefined' && res.clearance)
+      ? NSO_Thickness.cutWarning(res.clearance) : '';
+    var wallNote = (gate && gate.measured)
+      ? 'wall ' + (Math.round(gate.wall_mm * 1000) / 1000) + ' mm, ' +
+        (Math.round(gate.residual_mm * 1000) / 1000) + ' mm left (floor ' +
+        (Math.round(gate.threshold_mm * 1000) / 1000) + ')'
+      : '';
     var status = NSO_Carve.carveReport(planned, removed, intended) +
       ' - open edges ' + res.openBefore + '→' + res.openAfter +
       ', non-manifold ' + res.nmBefore + '→' + res.nmAfter +
-      (dropped ? ', welded away ' + dropped + ' seam sliver' + (dropped === 1 ? '' : 's') : '');
+      (dropped ? ', welded away ' + dropped + ' seam sliver' + (dropped === 1 ? '' : 's') : '') +
+      (wallNote ? ' - ' + wallNote : '') +
+      (cutWarn ? ' - ' + cutWarn : '') +
+      (sol.merged ? ' - ' + sol.note : '');
     if (!NSO_sculptCommitRaw(model, raw, 'carveReplace', status)) {
       say('Carve: could not commit the result', true);
       return { ok: false, reason: 'commit failed', planned: planned };
@@ -381,9 +580,152 @@
     return {
       ok: true, planned: planned, removed: removed, intended: intended,
       openAfter: res.openAfter, nmAfter: res.nmAfter, status: status,
-      dropped: dropped, weldTol: weldTol, trisOut: welded.length / 9
+      dropped: dropped, weldTol: weldTol, trisOut: welded.length / 9,
+      /* the nozzle-safety report behind `status`'s warning clause, carried out
+         so a check can assert on the verdict rather than on its wording */
+      clearance: res.clearance || null
     };
   }
+
+  /* The nozzle the groove's wall floor is two widths of. The app has no
+     printer-wide nozzle setting; 0.4 is the one every other floor here quotes
+     (NSO_Thickness's default). */
+  var STROKE_NOZZLE = 0.4;
+
+  /* One groove: the blade swept along a drag. Same shape of answer as
+     carveAt, so the check reads both the same way.
+
+     Not through subtractSoupBFromA, and deliberately: that path's safety box
+     reserves minWall along ONE punch axis from ONE blade frame, and a groove
+     has a frame per segment. The wall question it answers is asked here
+     instead, along the whole stroke and before the kernel is even loaded, by
+     NSO_Carve.strokeWallGate - which is stricter: it refuses, it does not
+     clip. What is left is the plain boolean: piece minus the union of the
+     groove's pieces, in the same kernel, welded and committed the way a punch
+     is. */
+  async function carveStrokeOn(placed, samples, pressTarget) {
+    if (!window.NSO_Carve || !NSO_Carve.planStroke) { say('Carve needs nso_carve.js', true); return null; }
+    var model = state.models.find(function (m) { return m && m.id === placed.sourceId; });
+    if (!model || !placed.mesh) { say('Carve: that piece is not on the plate', true); return null; }
+    var sol = await solidFor(model, placed);
+    if (!sol.ok) {
+      say(sol.cancelled ? 'Carve stopped - piece unchanged' : 'Carve refused - ' + sol.reason + ' - piece unchanged', !sol.cancelled);
+      return { ok: false, reason: sol.reason, stroke: true };
+    }
+
+    var blade = currentBlade();
+    var depth = numOf($('carve-depth'), 1);
+    var params = currentParams(blade, depth);
+
+    placed.mesh.updateMatrixWorld(true);
+    var hullSoup = sol.merged ? sol.world : meshToWorldSoup(placed.mesh);
+    var planned = NSO_Carve.planStroke(hullSoup, samples, blade, params, { depth: depth });
+    if (!planned.ok && planned.short && pressTarget) return carveAt(pressTarget);
+    if (!planned.ok) { say('Carve: ' + planned.reason, true); return { ok: false, reason: planned.reason, stroke: true }; }
+
+    /* THE WALL GATE, before the kernel: two nozzle widths, the whole stroke. */
+    var wall = null;
+    if (typeof NSO_Thickness !== 'undefined' && typeof NSO_Thickness.prepare === 'function') {
+      try {
+        var probe = NSO_Thickness.prepare(hullSoup, {});
+        if (probe) wall = NSO_Carve.strokeWallGate(probe, planned, { nozzle: STROKE_NOZZLE });
+      } catch (e) { wall = null; }
+    }
+    if (wall && !wall.ok) {
+      var refusal = NSO_Carve.strokeRefusalText(wall, STROKE_NOZZLE);
+      say(refusal, true);
+      return { ok: false, reason: refusal, wall: wall, planned: planned, stroke: true };
+    }
+
+    var wasm;
+    try { wasm = await NSO_CSG.load(); }
+    catch (err) {
+      say('Carve: CSG kernel failed to load - ' + ((err && err.message) ? err.message : err), true);
+      return { ok: false, reason: 'kernel', stroke: true };
+    }
+
+    var before = NSO_edgeStats(hullSoup);
+    var manA = null, groove = null, inter = null, result = null, parts = [];
+    var out = null;
+    try {
+      var aIn = hullSoup;
+      if (typeof weldSoupVerts === 'function') {
+        try { aIn = weldSoupVerts(hullSoup, NSO_weldEpsFor(hullSoup, 0.08)); } catch (e0) { aIn = hullSoup; }
+      }
+      manA = NSO_CSG.soupToManifold(wasm, aIn);
+      if (manA.status && manA.status() !== 'NoError') throw new Error('piece rejected by the kernel: ' + manA.status());
+      for (var i = 0; i < planned.pieces.length; i++) {
+        var m = NSO_CSG.soupToManifold(wasm, planned.pieces[i]);
+        if (m.status && m.status() !== 'NoError') { m.delete(); throw new Error('groove piece ' + i + ' rejected: ' + m.status()); }
+        parts.push(m);
+      }
+      groove = parts[0];
+      for (i = 1; i < parts.length; i++) {
+        var u = groove.add(parts[i]);
+        if (groove !== parts[0]) groove.delete();
+        groove = u;
+      }
+      inter = manA.intersect(groove);
+      var intended = inter.volume();
+      if (!(intended > NOOP_FLOOR)) {
+        var miss = 'the groove does not reach the piece at depth ' + depth + ' mm';
+        say('Carve: ' + miss, true);
+        return { ok: false, reason: miss, planned: planned, stroke: true };
+      }
+      result = manA.subtract(groove);
+      if (result.status() !== 'NoError') throw new Error('subtract rejected by kernel: ' + result.status());
+      if (result.isEmpty()) throw new Error('subtract produced an empty solid');
+      var removed = manA.volume() - result.volume();
+      var soup = NSO_CSG.manifoldToSoup(result);
+      var exact = NSO_manifoldStats(result);
+      var after = exact.exact ? { open: exact.open, nm: exact.nm } : NSO_edgeStats(soup);
+      out = { soup: soup, removed: removed, intended: intended, after: after };
+    } catch (err) {
+      var why = (err && err.message) ? err.message : String(err);
+      say('Carve failed - ' + why, true);
+      return { ok: false, reason: why, planned: planned, stroke: true };
+    } finally {
+      if (manA) manA.delete();
+      if (inter) inter.delete();
+      if (result) result.delete();
+      if (groove && groove !== parts[0]) groove.delete();
+      parts.forEach(function (p) { p.delete(); });
+    }
+
+    var wd = weldForGate(out.soup);
+    var geo = soupToCenteredGeo(wd.soup);
+    var raw = displayGeometryToRawSoup(geo);
+    var status = NSO_Carve.strokeReport(planned, out.removed, out.intended) +
+      ' - open edges ' + before.open + '→' + out.after.open +
+      ', non-manifold ' + before.nm + '→' + out.after.nm +
+      (wd.dropped ? ', welded away ' + wd.dropped + ' seam sliver' + (wd.dropped === 1 ? '' : 's') : '') +
+      (wall ? ' - wall: ' + wall.reason + ' (two ' + STROKE_NOZZLE + ' mm nozzle widths)' : '') +
+      (sol.merged ? ' - ' + sol.note : '');
+    if (!NSO_sculptCommitRaw(model, raw, 'carveReplace', status)) {
+      say('Carve: could not commit the result', true);
+      return { ok: false, reason: 'commit failed', planned: planned, stroke: true };
+    }
+    if (typeof updateAdjustUI === 'function') updateAdjustUI();
+    if (typeof removeFaceHelper === 'function') removeFaceHelper();
+    return {
+      ok: true, stroke: true, planned: planned, removed: out.removed, intended: out.intended,
+      openAfter: out.after.open, nmAfter: out.after.nm, status: status, wall: wall,
+      dropped: wd.dropped, trisOut: wd.soup.length / 9
+    };
+  }
+
+  /* Exposed so tools/nso_carve_drag_check.js can run a groove from given
+     samples without a pointer; the drag path and this path run the same
+     carveStrokeOn. samples: [{ point:[x,y,z], normal:[x,y,z] }], world. */
+  window.nsoCarveStrokeAt = function (sourceId, samples) {
+    var idx = state.placed.findIndex(function (p) { return p && p.sourceId === sourceId; });
+    if (idx < 0) return Promise.resolve({ ok: false, reason: 'piece not on the plate' });
+    if (busy) return Promise.resolve({ ok: false, reason: 'a carve is already running' });
+    busy = true;
+    return Promise.resolve(carveStrokeOn(state.placed[idx], samples, null))
+      .then(function (r) { busy = false; return r; }, function (e) { busy = false; throw e; });
+  };
+  window.nsoCarveBusy = function () { return busy || !!stroke; };
 
   /* Exposed so tools/nso_carve_test.js can drive a carve at an exact world
      point without synthesising a pointer event and a camera pose for it. The
@@ -420,6 +762,13 @@
       if (el) el.addEventListener('input', describe);
     });
     syncFields();
+    if (!window._carveStrokeBound) {
+      window._carveStrokeBound = true;
+      window.addEventListener('pointermove', onStrokeMove);
+      window.addEventListener('pointerup', function () { if (stroke) endStroke(true); });
+      window.addEventListener('pointercancel', function () { if (stroke) endStroke(false); });
+      window.addEventListener('keydown', function (e) { if (e.key === 'Escape' && stroke) endStroke(false); });
+    }
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire);

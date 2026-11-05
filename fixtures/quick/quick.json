@@ -1,0 +1,452 @@
+{
+  "generated_by": "tools/nso_quick_fixtures.js",
+  "what": "small, cheap, fast-printing pieces to stress tools against - see the file header, and fixtures/README.md",
+  "print_model": {
+    "formula": "seconds = volume / (layer_mm * line_mm) / speed_mm_s + layers * layer_change_s",
+    "assumes": "a 100% infill solid - the worst case, which a real slicer always beats",
+    "budget_s": 600,
+    "layer_mm": 0.2,
+    "line_mm": 0.42,
+    "speed_mm_s": 50,
+    "layer_change_s": 1.5
+  },
+  "target": {
+    "segments": 32,
+    "height": 10,
+    "radius": 5,
+    "wall": 1
+  },
+  "per_shape_overrides": {
+    "ellipsoid": {
+      "ratio": 1.6
+    }
+  },
+  "slowest": {
+    "stl": "cube-12mm.stl",
+    "seconds": 501.4
+  },
+  "total_tris": 8584,
+  "total_print_s": 2699.5,
+  "entries": [
+    {
+      "stl": "cube-6mm.stl",
+      "note": "the small end of the ladder - a minute and a half solid",
+      "tris": 12,
+      "bbox_mm": [
+        6,
+        6,
+        6
+      ],
+      "base_z_mm": 0,
+      "volume_mm3": 216,
+      "topology": {
+        "verts": 8,
+        "edges": 18,
+        "faces": 12,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "inconsistent_winding_edges": 0,
+        "euler": 2,
+        "genus": 0
+      },
+      "print": {
+        "layers": 30,
+        "extruded_mm": 2571.4,
+        "seconds": 96.4
+      },
+      "kind": "box"
+    },
+    {
+      "stl": "cube-9mm.stl",
+      "note": "the middle of the ladder, about 3x the material of the 6",
+      "tris": 12,
+      "bbox_mm": [
+        9,
+        9,
+        9
+      ],
+      "base_z_mm": 0,
+      "volume_mm3": 729,
+      "topology": {
+        "verts": 8,
+        "edges": 18,
+        "faces": 12,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "inconsistent_winding_edges": 0,
+        "euler": 2,
+        "genus": 0
+      },
+      "print": {
+        "layers": 45,
+        "extruded_mm": 8678.6,
+        "seconds": 241.1
+      },
+      "kind": "box"
+    },
+    {
+      "stl": "cube-12mm.stl",
+      "note": "the large end, about 2.4x again and still inside the budget",
+      "tris": 12,
+      "bbox_mm": [
+        12,
+        12,
+        12
+      ],
+      "base_z_mm": 0,
+      "volume_mm3": 1728,
+      "topology": {
+        "verts": 8,
+        "edges": 18,
+        "faces": 12,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "inconsistent_winding_edges": 0,
+        "euler": 2,
+        "genus": 0
+      },
+      "print": {
+        "layers": 60,
+        "extruded_mm": 20571.4,
+        "seconds": 501.4
+      },
+      "kind": "box"
+    },
+    {
+      "stl": "plate-20x20x2.stl",
+      "note": "a flat plate: wide, ten layers tall, for anything that branches on a dominant flat face",
+      "tris": 12,
+      "bbox_mm": [
+        20,
+        20,
+        2
+      ],
+      "base_z_mm": 0,
+      "volume_mm3": 800,
+      "topology": {
+        "verts": 8,
+        "edges": 18,
+        "faces": 12,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "inconsistent_winding_edges": 0,
+        "euler": 2,
+        "genus": 0
+      },
+      "print": {
+        "layers": 10,
+        "extruded_mm": 9523.8,
+        "seconds": 205.5
+      },
+      "kind": "box"
+    },
+    {
+      "stl": "bar-20x5x5.stl",
+      "note": "a square-section bar: one long axis, for anything that branches on a dominant LONG axis",
+      "tris": 12,
+      "bbox_mm": [
+        20,
+        5,
+        5
+      ],
+      "base_z_mm": 0,
+      "volume_mm3": 500,
+      "topology": {
+        "verts": 8,
+        "edges": 18,
+        "faces": 12,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "inconsistent_winding_edges": 0,
+        "euler": 2,
+        "genus": 0
+      },
+      "print": {
+        "layers": 25,
+        "extruded_mm": 5952.4,
+        "seconds": 156.5
+      },
+      "kind": "box"
+    },
+    {
+      "stl": "shape-sphere.stl",
+      "note": "radius 4.822 mm",
+      "tris": 1984,
+      "bbox_mm": [
+        9.6442,
+        9.6442,
+        9.6442
+      ],
+      "base_z_mm": 0,
+      "volume_mm3": 465.5325,
+      "topology": {
+        "verts": 994,
+        "edges": 2976,
+        "faces": 1984,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "inconsistent_winding_edges": 0,
+        "euler": 2,
+        "genus": 0
+      },
+      "print": {
+        "layers": 49,
+        "extruded_mm": 5542.1,
+        "seconds": 184.3
+      },
+      "kind": "shape",
+      "shape": "sphere",
+      "sizing": {
+        "need_volume_mm3": 469.668102,
+        "analytic_volume_mm3": 469.668102,
+        "built_volume_mm3": 468.537312,
+        "polygon_factor": 0.993586851144
+      }
+    },
+    {
+      "stl": "shape-box.stl",
+      "note": "7.773 x 7.773 x 7.773 mm (the target's own bounding box)",
+      "tris": 12,
+      "bbox_mm": [
+        7.7731,
+        7.7731,
+        7.7731
+      ],
+      "base_z_mm": 0,
+      "volume_mm3": 469.6681,
+      "topology": {
+        "verts": 8,
+        "edges": 18,
+        "faces": 12,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "inconsistent_winding_edges": 0,
+        "euler": 2,
+        "genus": 0
+      },
+      "print": {
+        "layers": 39,
+        "extruded_mm": 5591.3,
+        "seconds": 170.3
+      },
+      "kind": "shape",
+      "shape": "box",
+      "sizing": {
+        "need_volume_mm3": 469.668102,
+        "analytic_volume_mm3": 469.668102,
+        "built_volume_mm3": 469.668102,
+        "polygon_factor": 1
+      }
+    },
+    {
+      "stl": "shape-cylinder.stl",
+      "note": "radius 4.212 mm x 8.425 mm tall (ratio 1.000, the target's own height over diameter)",
+      "tris": 128,
+      "bbox_mm": [
+        8.4249,
+        8.4249,
+        8.4249
+      ],
+      "base_z_mm": 0,
+      "volume_mm3": 466.656,
+      "topology": {
+        "verts": 66,
+        "edges": 192,
+        "faces": 128,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "inconsistent_winding_edges": 0,
+        "euler": 2,
+        "genus": 0
+      },
+      "print": {
+        "layers": 43,
+        "extruded_mm": 5555.4,
+        "seconds": 175.6
+      },
+      "kind": "shape",
+      "shape": "cylinder",
+      "sizing": {
+        "need_volume_mm3": 469.668102,
+        "analytic_volume_mm3": 469.668102,
+        "built_volume_mm3": 469.668102,
+        "polygon_factor": 0.993586851144
+      }
+    },
+    {
+      "stl": "shape-cone.stl",
+      "note": "base radius 6.075 mm x 12.151 mm tall (ratio 1.000, the target's own height over diameter)",
+      "tris": 64,
+      "bbox_mm": [
+        12.1509,
+        12.1509,
+        12.1509
+      ],
+      "base_z_mm": 0,
+      "volume_mm3": 466.6561,
+      "topology": {
+        "verts": 34,
+        "edges": 96,
+        "faces": 64,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "inconsistent_winding_edges": 0,
+        "euler": 2,
+        "genus": 0
+      },
+      "print": {
+        "layers": 61,
+        "extruded_mm": 5555.4,
+        "seconds": 202.6
+      },
+      "kind": "shape",
+      "shape": "cone",
+      "sizing": {
+        "need_volume_mm3": 469.668102,
+        "analytic_volume_mm3": 469.668102,
+        "built_volume_mm3": 469.668102,
+        "polygon_factor": 0.993586851144
+      }
+    },
+    {
+      "stl": "shape-tube.stl",
+      "note": "outer radius 5.549 mm, bore 4.162 mm, 11.098 mm tall (ratio 1.000, the target's own height over diameter; wall 1.387 mm = 25% of the radius)",
+      "tris": 256,
+      "bbox_mm": [
+        11.0979,
+        11.0979,
+        11.0979
+      ],
+      "base_z_mm": 0,
+      "volume_mm3": 466.6561,
+      "topology": {
+        "verts": 128,
+        "edges": 384,
+        "faces": 256,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "inconsistent_winding_edges": 0,
+        "euler": 0,
+        "genus": 1
+      },
+      "print": {
+        "layers": 56,
+        "extruded_mm": 5555.4,
+        "seconds": 195.1
+      },
+      "kind": "shape",
+      "shape": "tube",
+      "sizing": {
+        "need_volume_mm3": 469.668102,
+        "analytic_volume_mm3": 469.668102,
+        "built_volume_mm3": 469.668102,
+        "polygon_factor": 0.993586851144
+      }
+    },
+    {
+      "stl": "shape-torus.stl",
+      "note": "ring radius 5.791 mm, tube radius 2.027 mm, 15.636 mm across (tube ratio 0.350, the stated default)",
+      "tris": 2048,
+      "bbox_mm": [
+        15.6365,
+        15.6365,
+        4.0539
+      ],
+      "base_z_mm": 0,
+      "volume_mm3": 463.6633,
+      "topology": {
+        "verts": 1024,
+        "edges": 3072,
+        "faces": 2048,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "inconsistent_winding_edges": 0,
+        "euler": 0,
+        "genus": 1
+      },
+      "print": {
+        "layers": 21,
+        "extruded_mm": 5519.8,
+        "seconds": 141.9
+      },
+      "kind": "shape",
+      "shape": "torus",
+      "sizing": {
+        "need_volume_mm3": 469.668102,
+        "analytic_volume_mm3": 469.668102,
+        "built_volume_mm3": 466.65605,
+        "polygon_factor": 0.993586851144
+      }
+    },
+    {
+      "stl": "shape-capsule.stl",
+      "note": "radius 3.553 mm x 14.212 mm tall (ratio 2.000, the stated default - the target's own 1.000 is not taller than it is wide; 7.106 mm barrel between the caps)",
+      "tris": 2048,
+      "bbox_mm": [
+        7.1059,
+        7.1059,
+        14.2117
+      ],
+      "base_z_mm": 0,
+      "volume_mm3": 466.2066,
+      "topology": {
+        "verts": 1026,
+        "edges": 3072,
+        "faces": 2048,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "inconsistent_winding_edges": 0,
+        "euler": 2,
+        "genus": 0
+      },
+      "print": {
+        "layers": 72,
+        "extruded_mm": 5550.1,
+        "seconds": 219
+      },
+      "kind": "shape",
+      "shape": "capsule",
+      "sizing": {
+        "need_volume_mm3": 469.668102,
+        "analytic_volume_mm3": 469.668102,
+        "built_volume_mm3": 469.215786,
+        "polygon_factor": 0.993586851144
+      }
+    },
+    {
+      "stl": "shape-ellipsoid.stl",
+      "note": "radius 4.123 mm x 13.193 mm tall (ratio 1.600, as asked)",
+      "tris": 1984,
+      "bbox_mm": [
+        8.2456,
+        8.2456,
+        13.193
+      ],
+      "base_z_mm": 0,
+      "volume_mm3": 465.5325,
+      "topology": {
+        "verts": 994,
+        "edges": 2976,
+        "faces": 1984,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "inconsistent_winding_edges": 0,
+        "euler": 2,
+        "genus": 0
+      },
+      "print": {
+        "layers": 66,
+        "extruded_mm": 5542.1,
+        "seconds": 209.8
+      },
+      "kind": "shape",
+      "shape": "ellipsoid",
+      "sizing": {
+        "need_volume_mm3": 469.668102,
+        "analytic_volume_mm3": 469.668102,
+        "built_volume_mm3": 468.537312,
+        "polygon_factor": 0.993586851144
+      }
+    }
+  ]
+}

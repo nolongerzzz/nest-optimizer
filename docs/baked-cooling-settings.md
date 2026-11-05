@@ -4,9 +4,16 @@ NSO can export the nested plate as a Bambu Studio project (`.3mf`) with the
 cooling / overhang-fan settings already baked in, so the plate arrives in Bambu
 Studio with the right fan behaviour instead of the user re-entering it per job.
 
-- **Export plate 3MF** in the Export card writes the project.
-- **Cooling profile** next to it selects which set of values gets baked in.
-- The selection is remembered in `localStorage` between sessions.
+- **Format** at the top of the Export card picks STL or 3MF for both export
+  buttons and the right-click **Export** item, and relabels them.
+- With 3MF selected, **Export plate** writes the whole nested plate as one
+  project (one object per placed piece) and **Download selected** writes the
+  active model alone as a one-object project, set down centred on the current
+  plate and resting on z = 0.
+- **Cooling profile** (shown only for 3MF) selects which set of values gets
+  baked in; both routes bake the same `project_settings.config`.
+- Both selections are remembered in `localStorage` between sessions
+  (`nso.exportFormat`, `nso.coolingProfile`).
 
 This is the *baked / global settings* path. Per-object or per-material overrides
 via G-code post-processing (the "advanced mode" Grispr approach) are out of scope
@@ -141,14 +148,25 @@ bookkeeping) and asserts, for every profile in the table:
 That is 56 checks. It is dependency-free and needs no browser.
 
 **`export-drive-check.mjs`** covers what the Node check cannot reach: the
-`<script>` tags, the profile selector, the button wiring, and
-`buildPlacedObjects3MF()` turning real packed pieces into 3MF objects. It loads
-the real `index.html` in headless Chromium, imports `fixtures/box-20mm.stl`
-through the app's own `handleFiles`, presses **Optimize plate**, presses
-**Export plate 3MF**, captures the actual browser download, and then takes the
-saved file apart off the browser entirely — every cooling value read back out of
-the archive, plus the plate-coordinate assertions (nothing negative, nothing off
-the 180 mm plate, the piece resting on `z = 0`). That is 38 checks.
+`<script>` tags, the Format and profile selectors, the button wiring, and
+`buildPlacedObjects3MF()` / `buildActiveModelObject3MF()` turning real pieces
+into 3MF objects. It loads the real `index.html` in headless Chromium, checks
+the Format selector (STL default, relabelling, cooling row, persistence across a
+reload), imports `fixtures/box-20mm.stl` through the app's own `handleFiles`,
+clones it so the plate carries two pieces, presses **Export plate** with Format
+= 3MF, presses **Download selected** with Format = 3MF (accepting the filename
+prompt), presses **Export plate** again with Format = STL, captures each actual
+browser download, and then takes the two `.3mf` files apart off the browser
+entirely — every cooling value read back out of each archive, the plate file
+holding one object per piece and the selected-model file exactly one, plus the
+plate-coordinate assertions (nothing negative, nothing off the 180 mm plate,
+resting on `z = 0`, the selected model centred). That is 63 checks. It does not
+press **Optimize plate**, which throws on this branch (see `HANDOFF.md`).
+
+Confirmed by hand on 2026-09-15 with a real library part as well
+(`library/box_hull_80x40x20.stl`, both buttons, Format = 3MF): `unzip -t`
+clean, 14 keys in table order with byte-exact values, one object of 8 vertices /
+12 triangles, bounding box 50..130 x 70..110 x 0..20 on the 180 mm plate.
 
 Like the CTH browser checks, it serves three from the `three` devDependency
 rather than the CDN `index.html` names, so it needs no network. On a runner
@@ -179,27 +197,126 @@ preset; a 3MF cannot opt out of it. Guidance for users:
 - `Metadata/nso_profile.json` inside the export records which profile was baked
   in, so a plate that came out wrong can be checked after the fact.
 
-## Not yet verified
+## Verifying in Bambu Studio
 
-Two things are not covered by the checks above.
+The one leg of validation that cannot run here. Everything above is checked
+automatically; **whether Bambu Studio itself honours the baked values needs a
+machine with Bambu Studio on it.** Until someone does this, treat the feature as
+working-but-unconfirmed.
 
-**1. A real Bambu Studio instance has not opened these exports.** The archive is
-structurally valid and third-party readers accept it, but confirming that Bambu
-Studio itself loads the plate and applies the cooling values without coercing
-them needs a machine with Bambu Studio installed. Worth doing before this ships
-to users.
+Produce a file with **Export plate 3MF**, or run `npm run 3mf:drive` and use the
+`.3mf` it saves. Open it in Bambu Studio, then read
+**Filament settings → Cooling** and compare against the table below.
 
-**2. The container format was read as JSON.** The confirmed values arrived
-transcribed in a `key = ["value"]` shorthand. A real
-`Metadata/project_settings.config` is a JSON object, and the single-element
-string array is only meaningful inside one, so NSO writes JSON:
+| key in the file | Cooling tab field (wording varies by version) | should read |
+| --- | --- | --- |
+| `enable_overhang_bridge_fan` | Force cooling for overhangs / bridges | on |
+| `overhang_fan_threshold` | Overhang cooling threshold | 50% |
+| `overhang_threshold_participating_cooling` | Overhang threshold participating cooling | 95% |
+| `overhang_fan_speed` | Overhang / bridge fan speed | 100% |
+| `pre_start_fan_time` | Pre-start fan time | 2 s |
+| `reduce_fan_stop_start_freq` | Keep fan always on | on |
+| `slow_down_for_layer_cooling` | Slow printing down for better layer cooling | on |
+| `fan_min_speed` | Fan speed — min | 60% |
+| `fan_max_speed` | Fan speed — max | 80% |
+| `fan_cooling_layer_time` | Layer time, max fan speed threshold | 80 s |
+| `slow_down_layer_time` | Layer time, slow down threshold | 6 s |
+| `slow_down_min_speed` | Min print speed | 20 mm/s |
+| `no_slow_down_for_cooling_on_outwalls` | Don't slow down outer walls | off |
+| `cooling_slowdown_logic` | Cooling slowdown logic | uniform cooling |
 
-```json
-"overhang_fan_threshold": ["50%"]
+Field labels move between Bambu Studio versions; the key names in
+`project_settings.config` are the stable identity. Match on the value.
+
+**Do not read the speed fields as coercion.** `overhang_fan_speed`,
+`fan_min_speed` and `fan_max_speed` are stored bare (`"100"`, `"60"`, `"80"`)
+and Bambu's UI renders them with a `%` sign. A UI showing `100%` for a stored
+`"100"` is correct and expected — that is the inconsistency described above,
+not a value being rewritten.
+
+What would count as a real failure:
+
+- a field shows the **stock preset value** instead of the one in the table —
+  the file was parsed but that key was ignored;
+- **every** field shows stock values — the file was very likely not read as a
+  settings source at all (see below);
+- a value is **rounded, rescaled or retyped** (`50%` arriving as `50`, `6` as
+  `6.0`, `uniform_cooling` falling back to another mode) — genuine coercion.
+
+**The most likely failure mode, if there is one.** NSO writes only the 14
+confirmed cooling keys. A `project_settings.config` written by Bambu Studio
+carries hundreds, including preset identity (`filament_settings_id`,
+`print_settings_id`, `printer_settings_id`) and a `version`. That was a
+deliberate choice — inventing values for keys nobody has confirmed is worse than
+omitting them — but it is untested. If Bambu ignores the whole file, that
+envelope is the first thing to add, and it is an additive change: the 14 keys
+and their formats stay exactly as they are.
+
+Record the outcome here when it is done.
+
+## 3MF import
+
+`nso-3mf-read.js`, wired into `handleFiles()` in `app-core.js`. **Geometry
+only.** The picker and drop zone take `.3mf` alongside `.stl`; each build item
+in the file becomes one model, in millimetres, Z up, with every component and
+item transform applied, so the object lands where the slicer that wrote the
+file had it. The same ingest path (`addModelFromZUpGeometry`) then does what it
+does for an STL: raw triangles kept in file axes for Cut / Sculpt, display copy
+rotated and centred. Nothing else in the archive is read - not
+`project_settings.config`, not materials, colours, thumbnails or G-code.
+
+What the reader handles, each pinned by a check:
+
+- OPC root relationship -> model part (falls back to `3D/3dmodel.model`)
+- 3MF core: `<object><mesh>`, `<components>` (nested, transforms composed),
+  `<build><item transform>`; items with no transform stay put
+- Production extension: `p:path` on `<component>` and `<item>`, so Bambu
+  Studio's and PrusaSlicer's split `3D/Objects/*.model` parts resolve
+- units (`micron` .. `foot`) scaled to mm; mirroring transforms flip the
+  winding back outward; `type="other"` objects (Bambu modifiers / negative
+  volumes) skipped with a console warning
+- names: Bambu's `Metadata/model_settings.config`, else the first
+  `<object name>` down the chain, else the file name
+- ZIP: stored and deflate entries (`DecompressionStream`), ZIP64 markers,
+  data descriptors; encrypted, ZIP64-only-huge and other methods refused with
+  a message
+
+Out of scope for this first pass, deliberately: per-object print settings,
+paint / colour / material data, `<triangleset>` and beam lattices, multi-plate
+projects (all plates' items import onto one plate), G-code-only `.gcode.3mf`
+without a model part, and reading the cooling keys back out of an NSO export
+(the export side owns that format; the reader never looks at it).
+
+Tested against, all read back with the canonical checker
+(`tools/stl_watertight_check.py --odd --degen`) clean and wound outward:
+
+- **Bambu Studio's own files** in `fixtures/3mf/` (see its README): a
+  production-extension file with a non-uniform item scale, and an older
+  inline-mesh file with ten objects, material-extension colour groups and
+  ZIP64 markers. Triangle counts, names and sizes are asserted against the
+  raw XML via third-party `unzip`, never against the reader.
+- **A MakerWorld project saved by BambuStudio-02.07.01.62** (two rotated
+  objects, 21,694 + 21,386 triangles): names and counts match its
+  `model_settings.config`, both rest on z = 0 and sit inside the plate. Not
+  committed (MakerWorld licence); `NSO_3MF_REAL=/path/to/it npm run 3mf:import`
+  runs it. Through the real app it loads as two models of 39.99 x 39.99 x 52
+  and 34.97 x 34.97 x 50 mm, both placed.
+- **NSO's own exports**: four STL fixtures -> `nso-3mf.js` -> reader, corner
+  for corner within 1e-4 mm, same bounding box, same watertight verdict; and in
+  the real app, an imported Bambu cube exported with **Download selected 3MF**
+  and re-imported comes back corner for corner.
+
+```
+npm run 3mf:import        # tools/3mf-test/import-check.js        - 55 checks, +8 with NSO_3MF_REAL
+npm run 3mf:import-drive  # tools/3mf-test/import-drive-check.mjs - 21 checks, real app, headless Chromium
 ```
 
-If the extracted file genuinely used `=` as its separator rather than `:`, that
-is a one-line change in `serializeProjectSettings()` in
-`nso-cooling-profiles.js`, and `parseProjectSettings()` beside it. Worth
-eyeballing the real file's first line once to settle it. The key names, the
-values, the array shape and the `%` rule are unaffected either way.
+Both are in `npm test`.
+
+## Settled
+
+**The container is JSON, with `:`.** Confirmed by the owner — the keys were
+originally pulled out with `json.load()`, which only succeeds on valid JSON. The
+`key = ["value"]` form the values were first transcribed in was shorthand, not
+the file's syntax. `serializeProjectSettings()` is correct as written; no change
+needed.

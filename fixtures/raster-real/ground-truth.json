@@ -1,0 +1,108 @@
+{
+  "note": "Drawn by Chromium Canvas 2D, not by this repo. Ground truth is from the drawing instructions in tools/nso_raster_real_fixtures.mjs, never from the tracer.",
+  "pxPerMM": 20,
+  "canvas": 500,
+  "images": [
+    {
+      "file": "skew-cross.png",
+      "format": "png",
+      "bytes": 19792,
+      "shows": "two straight strokes crossing once, at 23 and 67 degrees, drawn 9 px and 15 px wide",
+      "angles": [
+        22.99999999999997,
+        67
+      ],
+      "components": 1,
+      "junctions": 1,
+      "drawnStrokePx": [
+        9,
+        15
+      ]
+    },
+    {
+      "file": "skew-cross-thin.png",
+      "format": "png",
+      "bytes": 19666,
+      "shows": "the same two strokes as skew-cross, both drawn 5 px wide",
+      "angles": [
+        22.99999999999997,
+        67
+      ],
+      "components": 1,
+      "junctions": 1,
+      "drawnStrokePx": [
+        5,
+        5
+      ]
+    },
+    {
+      "file": "two-apart.png",
+      "format": "png",
+      "bytes": 17832,
+      "shows": "two parallel strokes at 113 degrees, 140 px apart, touching nothing",
+      "angles": [
+        113
+      ],
+      "components": 2,
+      "junctions": 0,
+      "drawnStrokePx": [
+        7,
+        7
+      ]
+    },
+    {
+      "file": "two-apart-fat.png",
+      "format": "png",
+      "bytes": 18224,
+      "shows": "the same two strokes as two-apart, drawn 17 px wide instead of 7",
+      "angles": [
+        113
+      ],
+      "components": 2,
+      "junctions": 0,
+      "drawnStrokePx": [
+        17,
+        17
+      ]
+    },
+    {
+      "file": "hand-stroke.jpg",
+      "format": "jpeg",
+      "bytes": 6074,
+      "shows": "one hand-drawn wobbly stroke about 23 degrees, pressure-varying width, JPEG on off-white paper",
+      "angles": [
+        23
+      ],
+      "components": 1,
+      "junctions": 0,
+      "drawnStrokePx": [
+        6,
+        13
+      ],
+      "tangentRange": [
+        6.861818495234065,
+        39.13818150476594
+      ]
+    },
+    {
+      "file": "hand-stroke.png",
+      "format": "png",
+      "bytes": 16824,
+      "shows": "the same hand-drawn wobbly stroke as hand-stroke.jpg, saved losslessly as PNG",
+      "angles": [
+        23
+      ],
+      "components": 1,
+      "junctions": 0,
+      "drawnStrokePx": [
+        6,
+        13
+      ],
+      "tangentRange": [
+        6.861818495234065,
+        39.13818150476594
+      ],
+      "pngTwinOf": "hand-stroke.jpg"
+    }
+  ]
+}

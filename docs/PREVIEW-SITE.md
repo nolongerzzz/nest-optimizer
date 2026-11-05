@@ -1,7 +1,7 @@
 # Live preview site for `claude-wip`
 
 `main` is published at <https://nolongerzzz.github.io/nest-optimizer/>.
-`claude-wip` is published at <https://nolongerzzz.github.io/nest-optimizer-wip/>.
+`claude-wip` is published at <https://nolongerzzz.github.io/nest-wip/>.
 
 ## Why it needs a second repository
 
@@ -21,7 +21,7 @@ second repository.
 2. `.github/workflows/mirror-wip-pages.yml` assembles the site tree from the
    tracked files on `claude-wip`, minus `.github/` and `tools/`, and adds a
    generated `.github/workflows/pages.yml` and `README.md`.
-3. It force-pushes that tree to `main` of `nolongerzzz/nest-optimizer-wip`.
+3. It force-pushes that tree to `main` of `nolongerzzz/nest-wip`.
    The preview repo is a disposable snapshot with a single commit, not history.
 4. That push triggers `pages.yml` in the preview repo, which deploys the tree
    to that repo's own Pages site.
@@ -32,18 +32,17 @@ pushes made with it deliberately do not trigger workflows in the target repo.
 
 ## One-time setup
 
-Three steps. Steps 1 and 2 need repo-admin rights, which the CI token does not
-have; step 3 is automatic.
+Three steps. Steps 1 and 3 are done. Only step 2 (the token) is outstanding;
+until it exists the mirror cannot run on its own.
 
-### 1. Create the preview repository
+### 1. Create the preview repository -- DONE
 
-Create <https://github.com/new> with:
+<https://github.com/nolongerzzz/nest-wip> exists and is empty. Nothing to do.
 
-- **Name:** `nest-optimizer-wip` (must match `PREVIEW_REPO` in the mirror workflow)
-- **Visibility:** Public -- Pages on a private repo needs a paid plan, and the
-  source repo is already public
-- **Do not** add a README, `.gitignore`, or licence. The first mirror run
-  force-pushes over the default branch.
+If it is ever recreated, it must be **public** (Pages on a private repo needs a
+paid plan, and the source repo is already public) and **empty** -- no README,
+`.gitignore` or licence, since the first mirror run force-pushes over the
+default branch. The name must match `PREVIEW_REPO` in the mirror workflow.
 
 ### 2. Create the token and store it as a secret
 
@@ -51,7 +50,7 @@ Create a fine-grained PAT at
 <https://github.com/settings/personal-access-tokens/new>:
 
 - **Resource owner:** `nolongerzzz`
-- **Repository access:** Only select repositories -> `nest-optimizer-wip`
+- **Repository access:** Only select repositories -> `nest-wip`
 - **Permissions:** Repository permissions -> **Contents: Read and write**
   (nothing else is needed)
 - **Expiration:** your call -- the mirror job fails loudly when it lapses
@@ -62,11 +61,17 @@ Then add it to **this** repo at
 - **Name:** `WIP_PAGES_TOKEN`
 - **Value:** the token
 
-### 3. Pages turns itself on
+### 3. Enable Pages on the preview repo -- DONE
 
-No Settings clicks needed. The preview repo's `pages.yml` runs
-`actions/configure-pages` with `enablement: true`, which creates the Pages site
-on the first run with GitHub Actions as its source.
+Already set. If the repo is ever recreated, go to <https://github.com/nolongerzzz/nest-wip/settings/pages> and set
+**Build and deployment -> Source** to **GitHub Actions**. One click, once.
+
+This cannot be automated. The deploy workflow asks `actions/configure-pages`
+to create the site with `enablement: true`, but creating a Pages site needs
+admin rights that the workflow's `GITHUB_TOKEN` does not have, so it fails with
+`Create Pages site failed. Error: Resource not accessible by integration`.
+Once the source is set by hand, `configure-pages` finds the existing site and
+succeeds on every later run.
 
 ## First run
 
@@ -74,18 +79,18 @@ Push anything to `claude-wip`, or run the workflow manually from
 <https://github.com/nolongerzzz/nest-optimizer/actions/workflows/mirror-wip-pages.yml>.
 
 Watch both halves: the mirror run in this repo, then the deploy run in
-`nest-optimizer-wip`. The first deploy takes a couple of minutes because it
+`nest-wip`. The first deploy takes a couple of minutes because it
 creates the Pages site; later ones are faster. The site is then live at
-<https://nolongerzzz.github.io/nest-optimizer-wip/>.
+<https://nolongerzzz.github.io/nest-wip/>.
 
 ## Troubleshooting
 
 | Symptom | Cause |
 | --- | --- |
 | `WIP_PAGES_TOKEN is not set` | Step 2 not done, or the secret is named differently |
-| Mirror push 403s | Token lacks **Contents: Read and write**, expired, or does not list `nest-optimizer-wip` |
+| Mirror push 403s | Token lacks **Contents: Read and write**, expired, or does not list `nest-wip` |
 | Mirror is green, no deploy run in the preview repo | Actions disabled in the preview repo, or the token used was a `GITHUB_TOKEN` rather than a PAT |
-| Deploy fails on `configure-pages` | The preview repo's Pages source was hand-set to "Deploy from a branch"; set it to **GitHub Actions** |
+| `Create Pages site failed ... not accessible by integration` | Step 3 not done. Set the Pages source to **GitHub Actions** by hand; the token cannot create the site |
 | Site 404s | First deploy has not finished yet; check the deploy run in the preview repo |
 
 ## Notes
@@ -94,6 +99,6 @@ creates the Pages site; later ones are faster. The site is then live at
   harness). Everything else tracked on `claude-wip` ships, including
   `library/`, `vendor/`, `cth/`, `fixtures/` and `docs/`.
 - All asset paths in `index.html` are relative, so the site works correctly
-  under the `/nest-optimizer-wip/` path prefix.
+  under the `/nest-wip/` path prefix.
 - To rename the preview repo, change `PREVIEW_REPO` in
   `.github/workflows/mirror-wip-pages.yml` and re-scope the token.

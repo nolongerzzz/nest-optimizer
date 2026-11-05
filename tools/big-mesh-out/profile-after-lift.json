@@ -1,0 +1,351 @@
+{
+ "label": "after-lift",
+ "file": "0f7456c9-ButVase.3mf",
+ "tris": 947444,
+ "results": [
+  {
+   "name": "import",
+   "wallMs": 10336,
+   "value": {
+    "tris": 947444,
+    "status": "Loaded: single_color-219_fixed.stl_A (143x178x128 mm, 947,444 triangles, indexed in 4.1 s)"
+   },
+   "error": null,
+   "longTasks": [
+    782,
+    827,
+    597,
+    599,
+    635,
+    651,
+    643,
+    709
+   ],
+   "jsRuns": [
+    {
+     "startMs": 2485.215,
+     "ms": 780.317,
+     "incl": [
+      [
+       "addModelFromZUpGeometryAsync @ app-core.js:1344",
+       768.859
+      ],
+      [
+       "(anonymous) @ app-core.js:1425",
+       768.859
+      ],
+      [
+       "addModelFromZUpGeometry @ app-core.js:1310",
+       743.213
+      ],
+      [
+       "addModel @ app-core.js:1448",
+       267.856
+      ],
+      [
+       "zUpToYUp @ app-core.js:1254",
+       131.743
+      ],
+      [
+       "(anonymous) @ nso_bvh.js:361",
+       24.413
+      ]
+     ],
+     "self": [
+      [
+       "setFromBufferAttribute @ three.min.js:6",
+       204.089
+      ],
+      [
+       "getX @ three.min.js:6",
+       108.946
+      ],
+      [
+       "setXYZ @ three.min.js:6",
+       90.649
+      ],
+      [
+       "applyMatrix4 @ three.min.js:6",
+       68.995
+      ]
+     ]
+    },
+    {
+     "startMs": 6550.816,
+     "ms": 115.388,
+     "incl": [
+      [
+       "animate @ app-core.js:964",
+       98.364
+      ],
+      [
+       "worker.onmessage @ nso_bvh.js:327",
+       1.768
+      ],
+      [
+       "window.nsoPosLockCount @ app-poslock.js:97",
+       1.478
+      ],
+      [
+       "window.nsoPosLockHudLine @ app-poslock.js:284",
+       1.478
+      ],
+      [
+       "syncButton @ app-poslock.js:227",
+       1.478
+      ],
+      [
+       "window.nsoPosLockRefresh @ app-poslock.js:306",
+       1.478
+      ]
+     ],
+     "self": [
+      [
+       "bufferData @ (native):0",
+       86.793
+      ],
+      [
+       "(garbage collector) @ (native):0",
+       13.778
+      ],
+      [
+       "getProgramInfoLog @ (native):0",
+       8.075
+      ],
+      [
+       "worker.onmessage @ nso_bvh.js:327",
+       1.768
+      ]
+     ]
+    }
+   ],
+   "maxJsMs": 780.317,
+   "jsMs": 1019.031
+  },
+  {
+   "name": "idle (nothing selected), 3 s",
+   "wallMs": 3001,
+   "error": null,
+   "longTasks": [
+    626,
+    601,
+    610,
+    617,
+    638,
+    661,
+    570
+   ],
+   "jsRuns": [],
+   "maxJsMs": 0.73,
+   "jsMs": 1.8579999999999997
+  },
+  {
+   "name": "first selection (click)",
+   "wallMs": 6843,
+   "error": null,
+   "longTasks": [
+    569,
+    589,
+    675,
+    611,
+    126,
+    630,
+    625,
+    566,
+    613,
+    811,
+    831,
+    666,
+    680
+   ],
+   "jsRuns": [
+    {
+     "startMs": 1900.851,
+     "ms": 123.689,
+     "incl": [
+      [
+       "onCanvasPointerDown @ app-core.js:2974",
+       121.788
+      ],
+      [
+       "window.selectPlaced @ app-sel-outline.js:96",
+       117.041
+      ],
+      [
+       "next @ app-seat-grid.js:344",
+       117.041
+      ],
+      [
+       "wrapped @ app-split-parts.js:328",
+       117.041
+      ],
+      [
+       "selectPlaced @ app-core.js:3367",
+       91.855
+      ],
+      [
+       "window.selectPlaced @ app-finish.js:6416",
+       91.855
+      ]
+     ],
+     "self": [
+      [
+       "NSO_cropResolveBox @ app-crop.js:140",
+       28.143
+      ],
+      [
+       "NSO_cropBoundsWalk @ app-crop.js:71",
+       26.569
+      ],
+      [
+       "pump @ nso_work.js:93",
+       22.777
+      ],
+      [
+       "setFromBufferAttribute @ three.min.js:6",
+       20.571
+      ]
+     ]
+    }
+   ],
+   "maxJsMs": 123.689,
+   "jsMs": 148.106
+  },
+  {
+   "name": "arm Lift (piece selected)",
+   "wallMs": 8200,
+   "value": {
+    "armed": true,
+    "target": 1,
+    "read": {
+     "ok": true,
+     "cached": false,
+     "ms": 4112,
+     "seed": 933081
+    }
+   },
+   "error": null,
+   "longTasks": [
+    657,
+    650,
+    766,
+    679,
+    598,
+    650,
+    735,
+    624,
+    610
+   ],
+   "jsRuns": [
+    {
+     "startMs": 665.603,
+     "ms": 4119.456,
+     "incl": [
+      [
+       "target @ app-lift-plate.js:467",
+       3962.796
+      ],
+      [
+       "setArmed @ app-lift-plate.js:581",
+       3962.796
+      ],
+      [
+       "readTarget @ app-lift-plate.js:457",
+       3957.379
+      ],
+      [
+       "detectNow @ app-lift-plate.js:165",
+       3956.768
+      ],
+      [
+       "(anonymous) @ app-lift-plate.js:162",
+       3956.768
+      ],
+      [
+       "cachedRead @ app-lift-plate.js:143",
+       3956.768
+      ]
+     ],
+     "self": [
+      [
+       "index @ nso_lift_auto.js:180",
+       921.502
+      ],
+      [
+       "(anonymous) @ nso_lift_auto.js:896",
+       437.449
+      ],
+      [
+       "fitLocal @ nso_lift_auto.js:1018",
+       419.334
+      ],
+      [
+       "grow @ nso_lift_auto.js:1076",
+       273.106
+      ]
+     ]
+    }
+   ],
+   "maxJsMs": 4119.456,
+   "jsMs": 4129.518
+  },
+  {
+   "name": "Lift armed: 20 hovers",
+   "wallMs": 28611,
+   "value": {
+    "hover": -1,
+    "readout": "0 features found on single_color-219_fixed.stl_A standing out more than 0.42 mm."
+   },
+   "error": null,
+   "longTasks": [
+    693,
+    740,
+    719,
+    731,
+    769,
+    644,
+    725,
+    640,
+    704,
+    658,
+    708,
+    658,
+    618,
+    760,
+    720,
+    694,
+    713,
+    745,
+    830,
+    733,
+    634,
+    747,
+    800,
+    653,
+    612,
+    629,
+    701,
+    642,
+    649,
+    694,
+    665,
+    680,
+    710,
+    716,
+    698,
+    799,
+    741,
+    691,
+    613,
+    627,
+    671,
+    651,
+    725,
+    644
+   ],
+   "jsRuns": [],
+   "maxJsMs": 31.633,
+   "jsMs": 129.248
+  }
+ ]
+}

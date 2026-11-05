@@ -1,0 +1,826 @@
+{
+ "Support Base": {
+  "plateIoU": 0.8790102449572831,
+  "plateBothMm2": 495.92,
+  "plateOnlyOursMm2": 33.56999999999999,
+  "plateOnlyTheirsMm2": 34.69,
+  "lenRatio": 0.9889018333435526,
+  "mvRatio": 0.7578136838466493,
+  "z0Ours": 13.7,
+  "z0Theirs": 13.7,
+  "treeIoU": 0.17540446632161857,
+  "treeLenRatio": 0.5315053636685135,
+  "volIoU": 0.9806178073894609,
+  "volOnlyOursMm3": 1.4000000000000004,
+  "volOnlyTheirsMm3": 2.1840000000000006,
+  "footIoU": 0.982508931025007,
+  "footOnlyOursMm2": 4.93,
+  "footOnlyTheirsMm2": 7.8,
+  "gaps": {
+   "oursLacks": [
+    {
+     "cls": "support",
+     "zFrom": 0.2,
+     "zTo": 13.42,
+     "layers": 62,
+     "areaMm2": 640.59,
+     "peakMm2": 20.67,
+     "x": 0.18,
+     "y": -1.05,
+     "bbox": [
+      -6.1,
+      -8.36,
+      6.6,
+      3.24
+     ],
+     "sizeMm": [
+      12.7,
+      11.6
+     ]
+    },
+    {
+     "cls": "interface",
+     "zFrom": 14.25,
+     "zTo": 14.8,
+     "layers": 3,
+     "areaMm2": 22.45,
+     "peakMm2": 7.86,
+     "x": -0.42,
+     "y": -1.37,
+     "bbox": [
+      -7.2,
+      -8.76,
+      7.1,
+      4.44
+     ],
+     "sizeMm": [
+      14.3,
+      13.2
+     ]
+    },
+    {
+     "cls": "transition",
+     "zFrom": 13.7,
+     "zTo": 13.97,
+     "layers": 2,
+     "areaMm2": 12.07,
+     "peakMm2": 9.68,
+     "x": -1.02,
+     "y": -2.04,
+     "bbox": [
+      -7.2,
+      -8.76,
+      7.1,
+      4.44
+     ],
+     "sizeMm": [
+      14.3,
+      13.2
+     ]
+    }
+   ],
+   "theirsLacks": [
+    {
+     "cls": "support",
+     "zFrom": 0.2,
+     "zTo": 13.97,
+     "layers": 52,
+     "areaMm2": 268.12,
+     "peakMm2": 14.8,
+     "x": -0.16,
+     "y": -2.35,
+     "bbox": [
+      -6.4,
+      -8.16,
+      6.5,
+      3.14
+     ],
+     "sizeMm": [
+      12.9,
+      11.3
+     ]
+    },
+    {
+     "cls": "interface",
+     "zFrom": 14.25,
+     "zTo": 14.8,
+     "layers": 3,
+     "areaMm2": 17.08,
+     "peakMm2": 6.06,
+     "x": -0.08,
+     "y": -0.93,
+     "bbox": [
+      -6.9,
+      -8.66,
+      7.2,
+      4.14
+     ],
+     "sizeMm": [
+      14.1,
+      12.8
+     ]
+    }
+   ]
+  }
+ },
+ "Support Circular": {
+  "plateIoU": 0.6128184922511164,
+  "plateBothMm2": 139.98,
+  "plateOnlyOursMm2": 52.44,
+  "plateOnlyTheirsMm2": 36,
+  "lenRatio": 1.166345865948073,
+  "mvRatio": 0.9572212233361361,
+  "z0Ours": 7.69,
+  "z0Theirs": 7.69,
+  "treeIoU": 0.1342838394082205,
+  "treeLenRatio": 0.38667554577566743,
+  "volIoU": 0.8767013133990529,
+  "volOnlyOursMm3": 5.888000000000002,
+  "volOnlyTheirsMm3": 2.3920000000000003,
+  "footIoU": 0.7693230031359527,
+  "footOnlyOursMm2": 68.86,
+  "footOnlyTheirsMm2": 31.18,
+  "gaps": {
+   "oursLacks": [
+    {
+     "cls": "support",
+     "zFrom": 0.2,
+     "zTo": 14.27,
+     "layers": 74,
+     "areaMm2": 777.44,
+     "peakMm2": 31.05,
+     "x": 16.31,
+     "y": 0.82,
+     "bbox": [
+      11.32,
+      -5.69,
+      22.82,
+      5.61
+     ],
+     "sizeMm": [
+      11.5,
+      11.3
+     ]
+    },
+    {
+     "cls": "transition",
+     "zFrom": 7.97,
+     "zTo": 8.8,
+     "layers": 4,
+     "areaMm2": 24.36,
+     "peakMm2": 8.33,
+     "x": 17.86,
+     "y": -1.61,
+     "bbox": [
+      14.02,
+      -5.29,
+      21.52,
+      2.21
+     ],
+     "sizeMm": [
+      7.5,
+      7.5
+     ]
+    },
+    {
+     "cls": "interface",
+     "zFrom": 8.52,
+     "zTo": 9.4,
+     "layers": 5,
+     "areaMm2": 10.16,
+     "peakMm2": 2.42,
+     "x": 17.34,
+     "y": -1.65,
+     "bbox": [
+      14.02,
+      -5.29,
+      21.52,
+      2.21
+     ],
+     "sizeMm": [
+      7.5,
+      7.5
+     ]
+    },
+    {
+     "cls": "support",
+     "zFrom": 9.4,
+     "zTo": 9.6,
+     "layers": 2,
+     "areaMm2": 2.04,
+     "peakMm2": 1.04,
+     "x": 18.17,
+     "y": -5.49,
+     "bbox": [
+      17.12,
+      -5.99,
+      19.02,
+      -4.79
+     ],
+     "sizeMm": [
+      1.9,
+      1.2
+     ]
+    }
+   ],
+   "theirsLacks": [
+    {
+     "cls": "support",
+     "zFrom": 0.2,
+     "zTo": 7.69,
+     "layers": 28,
+     "areaMm2": 154.83,
+     "peakMm2": 23.34,
+     "x": 16.45,
+     "y": -1.65,
+     "bbox": [
+      11.02,
+      -6.19,
+      22.42,
+      3.31
+     ],
+     "sizeMm": [
+      11.4,
+      9.5
+     ]
+    },
+    {
+     "cls": "support",
+     "zFrom": 7.97,
+     "zTo": 12.37,
+     "layers": 18,
+     "areaMm2": 41.3,
+     "peakMm2": 3.22,
+     "x": 22.7,
+     "y": 3.27,
+     "bbox": [
+      18.72,
+      0.01,
+      26.02,
+      5.11
+     ],
+     "sizeMm": [
+      7.3,
+      5.1
+     ]
+    }
+   ]
+  }
+ },
+ "Support Negative Sphere": {
+  "plateIoU": 0.617068787103099,
+  "plateBothMm2": 226.60000000000002,
+  "plateOnlyOursMm2": 43.3,
+  "plateOnlyTheirsMm2": 97.32,
+  "lenRatio": 0.8615572967678747,
+  "mvRatio": 0.6776757673952568,
+  "z0Ours": 9.3,
+  "z0Theirs": 9.3,
+  "treeIoU": 0.13943394913544166,
+  "treeLenRatio": 0.3991126180756026,
+  "volIoU": 0.8637723207609248,
+  "volOnlyOursMm3": 3.4700000000000006,
+  "volOnlyTheirsMm3": 14.748000000000003,
+  "footIoU": 0.8554684355428185,
+  "footOnlyOursMm2": 29.93,
+  "footOnlyTheirsMm2": 59.84,
+  "gaps": {
+   "oursLacks": [
+    {
+     "cls": "support",
+     "zFrom": 0.2,
+     "zTo": 13,
+     "layers": 85,
+     "areaMm2": 750.82,
+     "peakMm2": 22.52,
+     "x": 35.51,
+     "y": -0.29,
+     "bbox": [
+      29.87,
+      -6.39,
+      41.07,
+      4.91
+     ],
+     "sizeMm": [
+      11.2,
+      11.3
+     ]
+    },
+    {
+     "cls": "interface",
+     "zFrom": 9.85,
+     "zTo": 10.4,
+     "layers": 3,
+     "areaMm2": 55.64,
+     "peakMm2": 19.05,
+     "x": 35.49,
+     "y": -1.91,
+     "bbox": [
+      28.67,
+      -8.39,
+      42.27,
+      3.71
+     ],
+     "sizeMm": [
+      13.6,
+      12.1
+     ]
+    },
+    {
+     "cls": "transition",
+     "zFrom": 9.3,
+     "zTo": 9.57,
+     "layers": 2,
+     "areaMm2": 23.2,
+     "peakMm2": 11.67,
+     "x": 35.46,
+     "y": -2.23,
+     "bbox": [
+      28.67,
+      -8.39,
+      42.27,
+      3.71
+     ],
+     "sizeMm": [
+      13.6,
+      12.1
+     ]
+    },
+    {
+     "cls": "transition",
+     "zFrom": 13,
+     "zTo": 13.53,
+     "layers": 3,
+     "areaMm2": 14.25,
+     "peakMm2": 8.93,
+     "x": 35.51,
+     "y": -1.57,
+     "bbox": [
+      33.77,
+      -3.29,
+      37.27,
+      0.21
+     ],
+     "sizeMm": [
+      3.5,
+      3.5
+     ]
+    }
+   ],
+   "theirsLacks": [
+    {
+     "cls": "support",
+     "zFrom": 0.2,
+     "zTo": 11.97,
+     "layers": 44,
+     "areaMm2": 212.97,
+     "peakMm2": 14.43,
+     "x": 35.26,
+     "y": -1.82,
+     "bbox": [
+      28.97,
+      -6.59,
+      42.07,
+      3.41
+     ],
+     "sizeMm": [
+      13.1,
+      10
+     ]
+    },
+    {
+     "cls": "interface",
+     "zFrom": 9.85,
+     "zTo": 10.4,
+     "layers": 3,
+     "areaMm2": 16.22,
+     "peakMm2": 5.46,
+     "x": 35.51,
+     "y": -1.78,
+     "bbox": [
+      29.17,
+      -7.89,
+      41.87,
+      3.51
+     ],
+     "sizeMm": [
+      12.7,
+      11.4
+     ]
+    }
+   ]
+  }
+ },
+ "Support Negative Sphere2": {
+  "plateIoU": 0.6728794573402203,
+  "plateBothMm2": 216.25,
+  "plateOnlyOursMm2": 33.42,
+  "plateOnlyTheirsMm2": 71.71000000000001,
+  "lenRatio": 0.8663543452726512,
+  "mvRatio": 0.681850525956214,
+  "z0Ours": 9.3,
+  "z0Theirs": 9.3,
+  "treeIoU": 0.11201911068699845,
+  "treeLenRatio": 0.43680014273866596,
+  "volIoU": 0.8876534513986718,
+  "volOnlyOursMm3": 5.294000000000001,
+  "volOnlyTheirsMm3": 8.104000000000003,
+  "footIoU": 0.8298468802255812,
+  "footOnlyOursMm2": 46.300000000000004,
+  "footOnlyTheirsMm2": 57.489999999999995,
+  "gaps": {
+   "oursLacks": [
+    {
+     "cls": "support",
+     "zFrom": 0.2,
+     "zTo": 14.33,
+     "layers": 87,
+     "areaMm2": 1003.05,
+     "peakMm2": 45.06,
+     "x": 52.97,
+     "y": -0.31,
+     "bbox": [
+      44.88,
+      -8.26,
+      59.58,
+      6.24
+     ],
+     "sizeMm": [
+      14.7,
+      14.5
+     ]
+    },
+    {
+     "cls": "interface",
+     "zFrom": 9.85,
+     "zTo": 10.4,
+     "layers": 3,
+     "areaMm2": 30.25,
+     "peakMm2": 11.58,
+     "x": 53.41,
+     "y": -3.37,
+     "bbox": [
+      46.58,
+      -8.76,
+      60.48,
+      2.14
+     ],
+     "sizeMm": [
+      13.9,
+      10.9
+     ]
+    },
+    {
+     "cls": "transition",
+     "zFrom": 13.8,
+     "zTo": 14.6,
+     "layers": 4,
+     "areaMm2": 21.25,
+     "peakMm2": 10.28,
+     "x": 53.22,
+     "y": -1.58,
+     "bbox": [
+      50.88,
+      -3.96,
+      55.58,
+      0.84
+     ],
+     "sizeMm": [
+      4.7,
+      4.8
+     ]
+    },
+    {
+     "cls": "transition",
+     "zFrom": 9.3,
+     "zTo": 9.57,
+     "layers": 2,
+     "areaMm2": 12.77,
+     "peakMm2": 6.51,
+     "x": 54.3,
+     "y": -2.82,
+     "bbox": [
+      46.58,
+      -8.76,
+      60.48,
+      2.04
+     ],
+     "sizeMm": [
+      13.9,
+      10.8
+     ]
+    }
+   ],
+   "theirsLacks": [
+    {
+     "cls": "support",
+     "zFrom": 0.2,
+     "zTo": 12.64,
+     "layers": 72,
+     "areaMm2": 350.99,
+     "peakMm2": 22.04,
+     "x": 52.85,
+     "y": -1.2,
+     "bbox": [
+      44.68,
+      -8.16,
+      61.78,
+      6.34
+     ],
+     "sizeMm": [
+      17.1,
+      14.5
+     ]
+    },
+    {
+     "cls": "interface",
+     "zFrom": 14.04,
+     "zTo": 14.8,
+     "layers": 4,
+     "areaMm2": 15.21,
+     "peakMm2": 5.1,
+     "x": 53.3,
+     "y": -1.63,
+     "bbox": [
+      50.88,
+      -3.96,
+      55.68,
+      0.84
+     ],
+     "sizeMm": [
+      4.8,
+      4.8
+     ]
+    }
+   ]
+  }
+ },
+ "Support Oblique": {
+  "plateIoU": 0.6338918481558897,
+  "plateBothMm2": 376.05,
+  "plateOnlyOursMm2": 83.93,
+  "plateOnlyTheirsMm2": 133.26,
+  "lenRatio": 0.9852649132115515,
+  "mvRatio": 1.1074644176424127,
+  "z0Ours": 7.69,
+  "z0Theirs": 7.69,
+  "treeIoU": 0.09961239201327306,
+  "treeLenRatio": 0.3233981078920188,
+  "volIoU": 0.8369708510326644,
+  "volOnlyOursMm3": 2.6800000000000006,
+  "volOnlyTheirsMm3": 24.032000000000007,
+  "footIoU": 0.8364952018815508,
+  "footOnlyOursMm2": 51.6,
+  "footOnlyTheirsMm2": 147.92000000000002,
+  "gaps": {
+   "oursLacks": [
+    {
+     "cls": "support",
+     "zFrom": 0.2,
+     "zTo": 11.2,
+     "layers": 49,
+     "areaMm2": 1011.08,
+     "peakMm2": 39.54,
+     "x": 71.66,
+     "y": -2.1,
+     "bbox": [
+      64.04,
+      -8.69,
+      78.74,
+      4.11
+     ],
+     "sizeMm": [
+      14.7,
+      12.8
+     ]
+    },
+    {
+     "cls": "interface",
+     "zFrom": 8.25,
+     "zTo": 12.2,
+     "layers": 20,
+     "areaMm2": 85.39,
+     "peakMm2": 7.44,
+     "x": 71.33,
+     "y": -1.78,
+     "bbox": [
+      63.94,
+      -8.59,
+      78.24,
+      4.01
+     ],
+     "sizeMm": [
+      14.3,
+      12.6
+     ]
+    },
+    {
+     "cls": "transition",
+     "zFrom": 7.69,
+     "zTo": 11.6,
+     "layers": 18,
+     "areaMm2": 47.37,
+     "peakMm2": 5.22,
+     "x": 71.39,
+     "y": -1.57,
+     "bbox": [
+      63.94,
+      -8.59,
+      78.14,
+      4.01
+     ],
+     "sizeMm": [
+      14.2,
+      12.6
+     ]
+    }
+   ],
+   "theirsLacks": [
+    {
+     "cls": "support",
+     "zFrom": 0.2,
+     "zTo": 10,
+     "layers": 52,
+     "areaMm2": 240.75,
+     "peakMm2": 10.15,
+     "x": 71.3,
+     "y": -1.54,
+     "bbox": [
+      64.34,
+      -8.09,
+      77.64,
+      4.61
+     ],
+     "sizeMm": [
+      13.3,
+      12.7
+     ]
+    },
+    {
+     "cls": "transition",
+     "zFrom": 7.69,
+     "zTo": 11.6,
+     "layers": 19,
+     "areaMm2": 46.33,
+     "peakMm2": 6.1,
+     "x": 71.01,
+     "y": -1.83,
+     "bbox": [
+      64.44,
+      -8.19,
+      77.74,
+      3.41
+     ],
+     "sizeMm": [
+      13.3,
+      11.6
+     ]
+    }
+   ]
+  }
+ },
+ "Support Sphere": {
+  "plateIoU": 0.5908609271523179,
+  "plateBothMm2": 89.22,
+  "plateOnlyOursMm2": 37.15,
+  "plateOnlyTheirsMm2": 24.63,
+  "lenRatio": 1.1242890109532941,
+  "mvRatio": 0.6666817466918327,
+  "z0Ours": 8.49,
+  "z0Theirs": 8.49,
+  "treeIoU": 0.15183634970229323,
+  "treeLenRatio": 0.7140340286941629,
+  "volIoU": 0.8202247191011236,
+  "volOnlyOursMm3": 6.374000000000001,
+  "volOnlyTheirsMm3": 1.9780000000000004,
+  "footIoU": 0.7737083060824069,
+  "footOnlyOursMm2": 40.95,
+  "footOnlyTheirsMm2": 21.330000000000002,
+  "gaps": {
+   "oursLacks": [
+    {
+     "cls": "support",
+     "zFrom": 0.2,
+     "zTo": 13.15,
+     "layers": 54,
+     "areaMm2": 418.21,
+     "peakMm2": 20.36,
+     "x": 87.19,
+     "y": -0.88,
+     "bbox": [
+      83.07,
+      -5.9,
+      91.57,
+      3.6
+     ],
+     "sizeMm": [
+      8.5,
+      9.5
+     ]
+    },
+    {
+     "cls": "transition",
+     "zFrom": 8.49,
+     "zTo": 9.32,
+     "layers": 4,
+     "areaMm2": 13.18,
+     "peakMm2": 5.91,
+     "x": 87.28,
+     "y": -2.05,
+     "bbox": [
+      84.37,
+      -5.1,
+      89.97,
+      0.4
+     ],
+     "sizeMm": [
+      5.6,
+      5.5
+     ]
+    },
+    {
+     "cls": "interface",
+     "zFrom": 9.05,
+     "zTo": 10,
+     "layers": 5,
+     "areaMm2": 11.45,
+     "peakMm2": 5.91,
+     "x": 86.98,
+     "y": -2.43,
+     "bbox": [
+      84.37,
+      -4.9,
+      89.77,
+      0.3
+     ],
+     "sizeMm": [
+      5.4,
+      5.2
+     ]
+    },
+    {
+     "cls": "support",
+     "zFrom": 14.53,
+     "zTo": 14.53,
+     "layers": 1,
+     "areaMm2": 1.04,
+     "peakMm2": 1.04,
+     "x": 89.81,
+     "y": 3.2,
+     "bbox": [
+      89.17,
+      2.7,
+      90.37,
+      3.8
+     ],
+     "sizeMm": [
+      1.2,
+      1.1
+     ]
+    }
+   ],
+   "theirsLacks": [
+    {
+     "cls": "support",
+     "zFrom": 0.2,
+     "zTo": 13.72,
+     "layers": 53,
+     "areaMm2": 249.45,
+     "peakMm2": 44.11,
+     "x": 84.77,
+     "y": -1.65,
+     "bbox": [
+      79.47,
+      -6.6,
+      91.77,
+      3.7
+     ],
+     "sizeMm": [
+      12.3,
+      10.3
+     ]
+    },
+    {
+     "cls": "support",
+     "zFrom": 9.32,
+     "zTo": 12.36,
+     "layers": 13,
+     "areaMm2": 30.98,
+     "peakMm2": 3.22,
+     "x": 92.38,
+     "y": 3.18,
+     "bbox": [
+      88.77,
+      0.7,
+      94.87,
+      4.4
+     ],
+     "sizeMm": [
+      6.1,
+      3.7
+     ]
+    }
+   ]
+  }
+ }
+}

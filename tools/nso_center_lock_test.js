@@ -32,6 +32,7 @@
 
 const path = require('path');
 const { withApp, loadSTL, statusOf, ROOT } = require('./nso_app_harness');
+const { openJoin } = require('./nso_join_card');
 
 const fx = f => path.join(ROOT, 'fixtures', f);
 const EPS = 1e-6;          // mm - exactness gate
@@ -123,7 +124,7 @@ async function setup(page, fileA, fileB) {
   await page.evaluate(() => {
     state.placed.forEach((p, i) => { if (p && p.mesh) p.mesh.userData.placedIndex = i; });
   });
-  await page.click('#btn-join-start');
+  await openJoin(page);
   await page.evaluate(([a, b]) => {
     state.joinArmed = 'a'; assignJoinClick(a);
     state.joinArmed = 'b'; assignJoinClick(b);
@@ -145,7 +146,21 @@ const poseOf = (page, id, mode) => page.evaluate(([i, m]) => {
 
 async function main(page) {
   await page.evaluate(PROBE);
-  await page.evaluate(() => { for (const d of document.querySelectorAll('details')) d.open = true; });
+  await page.evaluate(async () => {
+    document.querySelectorAll('details').forEach(d => { d.open = true; });
+    /* `.vp-menu` is an EXCLUSIVE accordion: the toggle handler in app-join.js
+       closes every other menu when one opens, and `toggle` fires
+       ASYNCHRONOUSLY - so the blanket open above is partly undone a task
+       later, and re-opening a menu that is still `open` at this instant is a
+       no-op that the queued handlers then override. Let them settle, then set
+       the accordion explicitly to the menu whose buttons this suite clicks.
+       This was invisible while Finish was the only .vp-menu on the page. */
+    await new Promise(r => setTimeout(r, 0));
+    document.querySelectorAll('.vp-menu').forEach(m => {
+      m.open = m.classList.contains('vp-finish-menu');
+    });
+    await new Promise(r => setTimeout(r, 0));
+  });
 
   /* ---- 1. the control is wired at all ---- */
   console.log('\n[1] control is present and gated like its siblings');
@@ -387,7 +402,7 @@ async function main(page) {
     return { ok: ok, status: document.getElementById('status').textContent };
   });
   check('run() with no pair refuses and says so',
-    noPair.ok === false && /Start Join/.test(noPair.status), noPair.status);
+    noPair.ok === false && /Open JOIN/.test(noPair.status), noPair.status);
 }
 
 withApp(async (page, logs) => {

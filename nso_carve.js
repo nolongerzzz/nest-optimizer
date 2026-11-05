@@ -724,6 +724,388 @@
     return s;
   }
 
+  /* ============================================================
+     6. THE STROKE - press, drag, release = one continuous groove
+
+     A click punches the blade in once (plan(), above). A drag sweeps it. The
+     groove is the blade dragged along the stroke, built from two primitives
+     this repo already proves:
+
+       - the blade's SECTION, swept along the stroke's tip line by
+         NSO_PathSweep.sweep - the same mitred sweep Bend and the support
+         branches use. Every wall quad lies in a plane containing its
+         segment, so the section perpendicular to the stroke is the blade's
+         section exactly, everywhere inside a segment (nso_path_sweep.js,
+         "WHY THIS FILE EXISTS");
+       - the blade SOLID itself, placed at the press and at the release.
+
+     Why those two and why they are enough. The section used here is the
+     blade's silhouette seen down its own sweep axis (local Z): the rectangle
+     of the slab, the triangle of the wedge, and for the ball-nose the U its
+     meridian makes - the revolve's j = 0 and j = seg/2 spokes lie in the
+     z = 0 plane, so the faceted ball's silhouette IS that polygon, vertex for
+     vertex. For a straight stroke, blade-at-press U section-swept U
+     blade-at-release is then exactly the Minkowski sum of the blade with the
+     segment - the solid a real tool dragged that far removes. A ball-nose
+     groove gets its round ends from the ball; a slab or a wedge gets the
+     blade's own length of overrun, because that is where the blade was.
+     The end blades share the sweep's first and last rings bit for bit (both
+     are tip + X*x + Y*y from the SAME frame vectors), so the union in the
+     kernel meets a coincident section, not a near-miss.
+
+     The blade is held at ONE orientation for the whole stroke - outward along
+     the mean of the surface normals under it - the way a hand holds a gouge.
+     A stroke whose normals spread wider than STROKE_MAX_SPREAD_DEG has
+     crossed an edge onto another face, and that is refused in words: a
+     groove that bends round a box edge is two strokes, not one.
+
+     A stroke that winds round more than STROKE_CHUNK_TURN_DEG is split into
+     runs that overlap by one segment, each swept on its own and unioned. A
+     run whose tangent never turns through a half-turn advances monotonically
+     along one direction, so it cannot fold back across itself; the overlap
+     carries each mitred joint whole into one of the two runs.
+     ============================================================ */
+  var STROKE_MAX_SPREAD_DEG = 25;
+  var STROKE_CHUNK_TURN_DEG = 120;
+  var STROKE_RDP_MM = 0.02;            /* straightness: a hand-held line is a line */
+  var STROKE_STATION_MM = 0.5;         /* wall-gate stations along the stroke */
+
+  function pathSweepLib() {
+    if (root && root.NSO_PathSweep) return root.NSO_PathSweep;
+    if (typeof NSO_PathSweep !== 'undefined') return NSO_PathSweep;   // eslint-disable-line no-undef
+    if (typeof require === 'function') {
+      try { return require('./nso_path_sweep.js'); } catch (e) { return null; }
+    }
+    return null;
+  }
+
+  /* The blade's section seen down its sweep axis, in blade-local (x, y):
+     CCW, tip at y = 0, shank end at y = height - the same numbers build()
+     uses, so the swept groove and the end blades cannot disagree. */
+  function grooveSection(name, over) {
+    var blade = buildBlade(name, over);
+    if (!blade.ok) return blade;
+    var p = blade.params, poly, hw;
+    if (name === 'flat') {
+      hw = p.width / 2;
+      poly = [[-hw, 0], [hw, 0], [hw, p.height], [-hw, p.height]];
+    } else if (name === 'vee') {
+      hw = p.height * Math.tan(p.angle * Math.PI / 360);
+      poly = [[0, 0], [hw, p.height], [-hw, p.height]];
+    } else {
+      var r = p.radius, nr = Math.max(2, p.rings | 0), k, right = [];
+      for (k = 1; k <= nr; k++) {
+        var phi = (k / nr) * (Math.PI / 2);
+        right.push([r * Math.sin(phi), r - r * Math.cos(phi)]);
+      }
+      hw = r;
+      poly = [[0, 0]].concat(right, [[r, p.height], [-r, p.height]],
+        right.slice().reverse().map(function (q) { return [-q[0], q[1]]; }));
+    }
+    /* outward normal at each vertex: the mean of its two edges' (dy, -dx) */
+    var n = poly.length, normals = [], i;
+    for (i = 0; i < n; i++) {
+      var a = poly[(i + n - 1) % n], b = poly[i], c = poly[(i + 1) % n];
+      var e1 = [b[1] - a[1], -(b[0] - a[0])], e2 = [c[1] - b[1], -(c[0] - b[0])];
+      var l1 = Math.hypot(e1[0], e1[1]), l2 = Math.hypot(e2[0], e2[1]);
+      var m = [e1[0] / l1 + e2[0] / l2, e1[1] / l1 + e2[1] / l2], lm = Math.hypot(m[0], m[1]);
+      normals.push([m[0] / lm, m[1] / lm]);
+    }
+    return { ok: true, blade: blade, profile: poly, normals: normals, halfWidth: hw, height: blade.height };
+  }
+
+  /* Ramer-Douglas-Peucker on a 3D polyline: drop points within tol of the
+     chord. Keeps the two ends. */
+  function rdp(pts, tol) {
+    if (pts.length < 3) return pts.slice();
+    var keep = new Uint8Array(pts.length), stack = [[0, pts.length - 1]];
+    keep[0] = keep[pts.length - 1] = 1;
+    while (stack.length) {
+      var se = stack.pop(), s = se[0], e = se[1];
+      var d = sub(pts[e], pts[s]), L = len(d), worst = -1, at = -1, i;
+      for (i = s + 1; i < e; i++) {
+        var w = sub(pts[i], pts[s]);
+        var dist = (L > EPS) ? len(cross(w, d)) / L : len(w);
+        if (dist > worst) { worst = dist; at = i; }
+      }
+      if (worst > tol && at > 0) { keep[at] = 1; stack.push([s, at], [at, e]); }
+    }
+    return pts.filter(function (_, i) { return keep[i]; });
+  }
+
+  /* No segment shorter than `step`: a mitre needs room for the section to
+     turn in, and pointer samples a pixel apart give it none. The release
+     point always survives - it is where the user let go. */
+  function spaceOut(pts, step) {
+    var out = [pts[0]], i;
+    for (i = 1; i < pts.length - 1; i++) {
+      if (len(sub(pts[i], out[out.length - 1])) >= step) out.push(pts[i]);
+    }
+    var last = pts[pts.length - 1];
+    if (out.length > 1 && len(sub(last, out[out.length - 1])) < step) out[out.length - 1] = last;
+    else out.push(last);
+    return out;
+  }
+
+  /* samples [{ point, normal }] (world, off the drag) -> the stroke's surface
+     line, its one outward direction, and its length */
+  function strokePath(samples, opts) {
+    opts = opts || {};
+    var pts = [], nsum = [0, 0, 0], ns = [], i;
+    for (i = 0; i < (samples || []).length; i++) {
+      var s = samples[i], p = s && s.point, nn = s && s.normal && norm(s.normal);
+      if (!p || !isFinite(p[0]) || !isFinite(p[1]) || !isFinite(p[2]) || !nn) continue;
+      if (pts.length && len(sub(p, pts[pts.length - 1])) < 1e-6) continue;
+      pts.push([+p[0], +p[1], +p[2]]); ns.push(nn); nsum = add(nsum, nn);
+    }
+    if (pts.length < 2) return { ok: false, reason: 'the stroke has fewer than two points on the piece' };
+    var Y = norm(nsum);
+    if (!Y) return { ok: false, reason: 'the surface normals under the stroke cancel out - it crosses a thin edge' };
+    var spread = 0, spreadAt = 0, along = 0;
+    for (i = 0; i < ns.length; i++) {
+      if (i) along += len(sub(pts[i], pts[i - 1]));
+      var ang = Math.acos(Math.max(-1, Math.min(1, dot(ns[i], Y)))) * 180 / Math.PI;
+      if (ang > spread) { spread = ang; spreadAt = along; }
+    }
+    if (spread > STROKE_MAX_SPREAD_DEG) {
+      return {
+        ok: false, spreadDeg: spread,
+        reason: 'the stroke crosses onto another face (the surface turns ' + spread.toFixed(0) +
+          '° away from the stroke\'s mean at ' + spreadAt.toFixed(1) + ' mm along; one stroke follows one face, ' +
+          'up to ' + STROKE_MAX_SPREAD_DEG + '°) - let go before the edge and stroke the next face on its own'
+      };
+    }
+    var step = (opts.step > 0) ? opts.step : 0.5;
+    var line = spaceOut(rdp(pts, STROKE_RDP_MM), step);
+    var L = 0;
+    for (i = 1; i < line.length; i++) L += len(sub(line[i], line[i - 1]));
+    return { ok: true, surface: line, outward: Y, length: L, spreadDeg: spread, raw: pts.length };
+  }
+
+  /* Cut a path into runs whose tangent turns through at most maxTurn, each
+     run overlapping the next by one segment. Returns arrays of indices. */
+  function chunkRuns(pts, maxTurnRad) {
+    if (pts.length < 3) return [[0, pts.length - 1]];
+    var runs = [], start = 0, turn = 0, i;
+    for (i = 1; i < pts.length - 1; i++) {
+      var a = norm(sub(pts[i], pts[i - 1])), b = norm(sub(pts[i + 1], pts[i]));
+      var t = Math.atan2(len(cross(a, b)), dot(a, b));
+      if (turn + t > maxTurnRad && i - start >= 1) {
+        runs.push([start, i]);
+        start = i - 1;
+        turn = Math.atan2(len(cross(norm(sub(pts[i], pts[start])), b)), dot(norm(sub(pts[i], pts[start])), b));
+      } else turn += t;
+    }
+    runs.push([start, pts.length - 1]);
+    return runs;
+  }
+
+  /* the blade at a sweep end, in world, from that end's own frame vectors */
+  function bladeAt(blade, X, Y, Z, origin) {
+    var m = [X[0], X[1], X[2], 0, Y[0], Y[1], Y[2], 0, Z[0], Z[1], Z[2], 0, origin[0], origin[1], origin[2], 1];
+    return { matrix: m, soup: transformSoup(blade.soup, m) };
+  }
+
+  /* hull + drag samples + blade -> every solid the groove is the union of,
+     plus the stations the wall gate reads. THREE-free and kernel-free: the
+     app unions `pieces` and subtracts. */
+  function planStroke(hullSoup, samples, bladeName, params, opts) {
+    opts = opts || {};
+    var PS = pathSweepLib();
+    if (!PS || typeof PS.sweep !== 'function') return { ok: false, reason: 'the stroke needs nso_path_sweep.js' };
+    var sec = grooveSection(bladeName, params);
+    if (!sec.ok) return sec;
+    var blade = sec.blade;
+    var depth = Number(opts.depth);
+    if (!isFinite(depth) || depth <= 0) return { ok: false, reason: 'depth must be a positive number of mm' };
+    if (depth >= blade.height) {
+      return { ok: false, reason: 'depth ' + depth + ' mm needs a blade taller than ' + blade.height +
+        ' mm - the shank must stay outside the piece' };
+    }
+
+    /* The lift puts the sweep's own path inside the section (profileCheck
+       wants the origin strictly inside, because the end caps fan from it):
+       the path runs half a blade-height above the tip line. */
+    var lift = blade.height / 2;
+    var profile = sec.profile.map(function (q) { return [q[0], q[1] - lift]; });
+
+    var base = Math.max(0.5, sec.halfWidth);
+    var tries = [base, base * 2, base * 4, base * 8], path = null, sw = null, runs = null, why = '', t, k;
+    for (t = 0; t < tries.length; t++) {
+      path = strokePath(samples, { step: tries[t] });
+      if (!path.ok) return { ok: false, reason: path.reason, blade: blade };
+      if (path.length < (opts.minLength || 0.2)) {
+        return { ok: false, short: true, reason: 'the stroke is ' + path.length.toFixed(2) + ' mm - that is a click, not a groove', blade: blade };
+      }
+      var Y = path.outward;
+      var line = path.surface.map(function (q) { return add(q, mul(Y, lift - depth)); });
+      runs = chunkRuns(line, STROKE_CHUNK_TURN_DEG * Math.PI / 180);
+      sw = [];
+      why = '';
+      for (k = 0; k < runs.length; k++) {
+        var pts = line.slice(runs[k][0], runs[k][1] + 1);
+        var u0 = norm(sub(pts[1], pts[0]));
+        var up = norm(cross(Y, u0));
+        if (!up) { why = 'the stroke runs straight into the surface'; break; }
+        var r = PS.sweep({ points: pts, profile: profile, up: up });
+        if (!r.ok) { why = r.reason; break; }
+        sw.push(r);
+      }
+      if (!why) break;
+    }
+    if (why) return { ok: false, reason: 'the stroke turns too tightly for this blade - ' + why, blade: blade };
+
+    /* the end blades, from the first run's first frame and the last run's last */
+    var first = sw[0], last = sw[sw.length - 1];
+    var f0 = first.frames[0], fL = last.frames[last.frames.length - 1];
+    var uS = first.segs[0].u, uE = last.segs[last.segs.length - 1].u;
+    var pS = first.pts[0], pE = last.pts[last.pts.length - 1];
+    var ends = [
+      bladeAt(blade, f0.r, f0.s, uS, sub(pS, mul(f0.s, lift))),
+      bladeAt(blade, fL.r, fL.s, uE, sub(pE, mul(fL.s, lift)))
+    ];
+    var pieces = sw.map(function (r) { return r.tris; }).concat(ends.map(function (e) { return e.soup; }));
+
+    /* Stations for the wall gate: every STROKE_STATION_MM along each segment,
+       the tip line point plus that segment's frame. */
+    var stations = [], along = 0, ri, si;
+    for (ri = 0; ri < sw.length; ri++) {
+      var R = sw[ri];
+      for (si = 0; si < R.segs.length; si++) {
+        if (ri > 0 && si === 0) continue;     /* the overlapped segment, already walked */
+        var a = sub(R.pts[si], mul(R.frames[si].s, lift)), sg = R.segs[si];
+        var nst = Math.max(1, Math.ceil(sg.len / STROKE_STATION_MM));
+        for (k = 0; k <= nst; k++) {
+          if (k === 0 && stations.length) continue;
+          stations.push({ tip: add(a, mul(sg.u, sg.len * k / nst)), X: R.frames[si].r, Y: R.frames[si].s,
+                          u: sg.u, along: along + sg.len * k / nst });
+        }
+        along += sg.len;
+      }
+    }
+
+    var segCount = sw.reduce(function (n, r) { return n + r.segs.length; }, 0) - (sw.length - 1);
+    return {
+      ok: true, blade: blade, section: sec, depth: depth, lift: lift,
+      outward: path.outward, surface: path.surface, length: path.length,
+      runs: runs.length, segments: segCount, sweeps: sw, ends: ends, pieces: pieces,
+      stations: stations, spreadDeg: path.spreadDeg
+    };
+  }
+
+  /* The wall gate for a groove. A groove is refused - in words, before the
+     kernel runs - if anywhere along it it would leave less than `floor` of
+     wall: two nozzle widths unless told otherwise.
+
+     Two questions per station, both on the piece as it is now:
+       1. the canonical one, NSO_Thickness's strokeGate at the tip line - how
+          thick is the wall under the deepest point of the blade, and what does
+          a cut this deep leave of it;
+       2. the groove's own sides. From every vertex of the section that lies
+          inside the material, look straight out of the groove along the
+          section's own outward normal: the first surface met is the wall the
+          groove leaves on that side. A slab run along a box's edge severs the
+          side wall, not the floor, and only this question sees it.
+     `P` is NSO_Thickness.prepare(hullSoup). */
+  function strokeWallGate(P, planned, opts) {
+    opts = opts || {};
+    var nozzle = (opts.nozzle > 0) ? opts.nozzle : 0.4;
+    var floor = (opts.minWall > 0) ? opts.minWall : 2 * nozzle;
+    var out = { ok: true, floor_mm: floor, nozzle_mm: nozzle, thinnest_mm: Infinity, at_mm: null, side: null,
+                stations: 0, rays: 0, reason: '' };
+    if (!P || !planned || !planned.ok) { out.reason = 'nothing measured'; return out; }
+    var sec = planned.section, depth = planned.depth, i, j;
+    var probe = depth + floor + 1;
+    var round3 = function (v) { return Math.round(v * 1000) / 1000; };
+    var floorWords = round3(floor) + ' mm floor (two ' + round3(nozzle) + ' mm nozzle widths)';
+    /* Where to look out of the groove from: every vertex of the section that
+       is inside the material (along its vertex normal) and the middle of
+       every in-material stretch of edge (along the edge's own normal) - so a
+       slab's flat side, whose two corners both sit at the tip, is still
+       asked. The tip itself is question 1's. */
+    var probes = [], prof = sec.profile, np = prof.length;
+    for (j = 0; j < np; j++) {
+      var A = prof[j], Bq = prof[(j + 1) % np];
+      if (A[1] < depth - 1e-6 && !(Math.abs(A[0]) < 1e-9 && A[1] < 1e-9 && P.strokeGate)) {
+        probes.push({ at: A, n: sec.normals[j] });
+      }
+      if (A[1] >= depth && Bq[1] >= depth) continue;
+      var lo = A, hi = Bq;
+      var clip = function (a, b) { var t = (depth - a[1]) / (b[1] - a[1]); return [a[0] + t * (b[0] - a[0]), depth]; };
+      if (A[1] > depth) lo = clip(Bq, A);
+      if (Bq[1] > depth) hi = clip(A, Bq);
+      var ex = hi[0] - lo[0], ey = hi[1] - lo[1], el = Math.hypot(ex, ey);
+      if (el < 1e-6) continue;
+      probes.push({ at: [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2], n: [ey / el, -ex / el] });
+    }
+    for (i = 0; i < planned.stations.length; i++) {
+      var st = planned.stations[i];
+      var surf = add(st.tip, mul(st.Y, depth));
+      out.stations++;
+      if (P.strokeGate) {
+        var g = P.strokeGate({ point: surf, normal: st.Y, depth: depth, minWall: floor, nozzle: nozzle, label: 'carve' });
+        if (g && g.measured) {
+          if (g.residual_mm < out.thinnest_mm) { out.thinnest_mm = g.residual_mm; out.at_mm = st.along; out.side = 'floor'; }
+          if (!g.ok) {
+            out.ok = false;
+            out.reason = g.reason + ', ' + st.along.toFixed(1) + ' mm along the stroke';
+            out.gate = g;
+            return out;
+          }
+        }
+      }
+      if (!P.hitsAlong) continue;
+      var stMin = Infinity;
+      for (j = 0; j < probes.length; j++) {
+        var q = probes[j].at, nq = probes[j].n;
+        var o = add(st.tip, add(mul(st.X, q[0]), mul(st.Y, q[1])));
+        var d = add(mul(st.X, nq[0]), mul(st.Y, nq[1]));
+        var hits = P.hitsAlong(o, d, probe);
+        out.rays++;
+        if (!hits || !hits.length) continue;
+        var tmin = (typeof hits[0] === 'number') ? hits[0] : hits[0].t;
+        if (tmin < stMin) stMin = tmin;
+        if (tmin < out.thinnest_mm) { out.thinnest_mm = tmin; out.at_mm = st.along; out.side = 'side'; }
+      }
+      /* the thinnest wall at this station, not the first ray under the floor */
+      if (stMin < floor - 1e-4) {
+        out.ok = false;
+        out.reason = 'the groove\'s side would leave ' + round3(stMin) + ' mm of wall ' + st.along.toFixed(1) +
+          ' mm along the stroke, under the ' + floorWords;
+        return out;
+      }
+    }
+    if (out.ok && out.reason === '') {
+      out.reason = isFinite(out.thinnest_mm)
+        ? 'thinnest wall left ' + round3(out.thinnest_mm) + ' mm, floor ' + round3(floor) + ' mm'
+        : 'no surface within ' + round3(probe) + ' mm of the groove, every wall it leaves is thicker';
+    }
+    return out;
+  }
+
+  /* The ONE wording for a refused groove, built on strokeRefusal's lead so a
+     punch, a brush and a groove say "Thicken first" the same way. */
+  function strokeRefusalText(gate, nozzle) {
+    if (!gate || gate.ok) return '';
+    var r = gate.reason;
+    if (gate.gate && gate.side !== 'side') {
+      r = r.replace(/floor for a ([\d.]+) mm nozzle/, 'floor (two $1 mm nozzle widths)');
+    }
+    return 'Carve refused - wall too thin here, Thicken first: ' + r + ' - piece unchanged';
+  }
+
+  function strokeReport(planned, removed, intended) {
+    if (!planned || !planned.ok) return 'Carve failed - ' + ((planned && planned.reason) || 'unknown');
+    var s = 'Carved a ' + planned.length.toFixed(1) + ' mm groove - ' + planned.blade.describe +
+      ', depth ' + planned.depth + ' mm, ' + planned.segments + ' segment' + (planned.segments === 1 ? '' : 's');
+    if (planned.runs > 1) s += ' in ' + planned.runs + ' runs';
+    if (isFinite(removed)) s += ' - ' + removed.toFixed(3) + ' mm³ removed';
+    if (isFinite(removed) && isFinite(intended) && Math.abs(intended - removed) > 1e-3) {
+      s += ' (' + intended.toFixed(3) + ' mm³ planned)';
+    }
+    return s;
+  }
+
   var api = {
     BLADES: BLADES,
     withDefaults: withDefaults,
@@ -734,6 +1116,13 @@
     transformSoup: transformSoup,
     plan: plan,
     carveReport: carveReport,
+    grooveSection: grooveSection,
+    strokePath: strokePath,
+    planStroke: planStroke,
+    strokeWallGate: strokeWallGate,
+    strokeRefusalText: strokeRefusalText,
+    strokeReport: strokeReport,
+    STROKE_MAX_SPREAD_DEG: STROKE_MAX_SPREAD_DEG,
     /* exposed for the tests, not for callers */
     _closestOnTri: closestOnTri,
     _extrudeZ: extrudeZ,

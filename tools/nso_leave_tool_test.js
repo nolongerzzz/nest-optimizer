@@ -1,0 +1,412 @@
+#!/usr/bin/env node
+/* Double-click the plate to leave whatever tool you're in - driven in the
+   real page, with real double-clicks.
+
+   node tools/nso_leave_tool_test.js                exit 0 = every gate held
+   LEAVE_TOOL_SHOTS=dir node tools/nso_leave_tool_test.js   also screenshots
+
+   THE FLOW, as a person runs it: open Cut, Split, double-click the plate;
+   open Rotate, double-click; Start Join, pick A, double-click; Finish ->
+   Soften, double-click; G-scope, Region mode, double-click twice
+   (G-scope takes no double-click: still open, still armed). Then Carve armed and a
+   double-click; then a double-click on Rotate's 90 button, which must stay
+   two clicks. Undo at the end. Last, each of the left column's eight
+   menus (Join .. Pack) opened and shut by a double-click on the plate.
+
+   Every step holds the same three things: what was live is gone, the pieces
+   did not move, and the selection and the Undo stack are what they were. A
+   double-click is two clicks first, so the plate point is found by asking
+   the scene - on the canvas, on the plate, under no piece - rather than
+   picked by hand, and the tests that a click there changes nothing are part
+   of each step rather than an assumption. */
+
+const path = require('path');
+const fs = require('fs');
+const { withApp, loadSTL, openFinishMenu, ROOT } = require('./nso_app_harness');
+const { openJoin } = require('./nso_join_card');
+
+let fails = 0;
+const check = (name, cond, detail) => {
+  console.log('  ' + (cond ? 'ok   ' : 'FAIL ') + name + (detail ? ' - ' + detail : ''));
+  if (!cond) fails++;
+};
+
+const SHOTS = process.env.LEAVE_TOOL_SHOTS || '';
+if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
+let shotNo = 0;
+
+withApp(async (page, logs) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await loadSTL(page, path.join(ROOT, 'fixtures', 'box_hull_80x40x20-2.stl'));
+  await page.waitForTimeout(400);
+
+  const shot = async (name) => {
+    if (!SHOTS) return;
+    shotNo++;
+    const f = path.join(SHOTS, String(shotNo).padStart(2, '0') + '-' + name + '.png');
+    await page.screenshot({ path: f });
+    console.log('  shot ' + path.basename(f));
+  };
+
+  /* Everything a leave must not change. */
+  const snap = () => page.evaluate(() => ({
+    sel: state.selectedIndex,
+    edit: state.editId,
+    undo: state.undoStack.length,
+    models: state.models.length,
+    poses: state.placed.map(p => [p.sourceId, +(p.x || 0).toFixed(4), +(p.z || 0).toFixed(4),
+      +(p.rotY || 0).toFixed(6), +(p.tiltX || 0).toFixed(6), +(p.tiltZ || 0).toFixed(6),
+      +(p.liftY || 0).toFixed(4)].join(','))
+  }));
+  const sameAs = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const held = (label, before, after) => {
+    check(label + ': pieces did not move', sameAs(before.poses, after.poses),
+      sameAs(before.poses, after.poses) ? '' : JSON.stringify({ before: before.poses, after: after.poses }));
+    check(label + ': selection kept', before.sel === after.sel && before.edit === after.edit,
+      'sel ' + before.sel + '->' + after.sel + ', editId ' + before.edit + '->' + after.edit);
+    check(label + ': Undo stack untouched', before.undo === after.undo && before.models === after.models,
+      'undo ' + before.undo + '->' + after.undo);
+  };
+
+  /* A point on the main canvas that is the plate and nothing else: the canvas
+     is the element there, the plate is under it, and no piece is - nor any of
+     Rotate's arrowheads, which app-core hit-tests ahead of everything and
+     which, at the bed-sized rings (45% of the bed), reach well out over the
+     plate. A double-click there is two arrowhead clicks, not empty plate. */
+  const platePoint = () => page.evaluate(() => {
+    const c = state.renderer.domElement;
+    const r = c.getBoundingClientRect();
+    const plateAt = (x, y) => {
+      const ev = { clientX: x, clientY: y };
+      if (document.elementFromPoint(x, y) !== c) return false;
+      if (!hitPlateSurface(ev)) return false;
+      setPointerFromEvent(ev);
+      state.raycaster.setFromCamera(state.pointer, state.camera);
+      if (state.raycaster.intersectObjects(state.modelGroup.children, true).length) return false;
+      const rot = state.scene.getObjectByName('nso-rotate-handles');
+      return !(rot && rot.visible && state.raycaster.intersectObjects(rot.children, true)
+        .some(h => h.object && h.object.userData.nsoRotateHandle));
+    };
+    let best = null;
+    for (let fy = 0.55; fy <= 0.9; fy += 0.05) {
+      for (let fx = 0.2; fx <= 0.8; fx += 0.05) {
+        const x = Math.round(r.left + fx * r.width), y = Math.round(r.top + fy * r.height);
+        if (plateAt(x, y)) {
+          const d = Math.abs(fx - 0.5) + Math.abs(fy - 0.7);
+          if (!best || d < best.d) best = { x, y, d };
+        }
+      }
+    }
+    return best;
+  });
+  /* The screen point of a placed piece's centre, for a real click on it. */
+  const pieceAt = (i) => page.evaluate((idx) => {
+    const p = state.placed[idx];
+    const box = new THREE.Box3().setFromObject(p.mesh);
+    const v = box.getCenter(new THREE.Vector3()).project(state.camera);
+    const r = state.renderer.domElement.getBoundingClientRect();
+    return { x: Math.round(r.left + (v.x * 0.5 + 0.5) * r.width), y: Math.round(r.top + (-v.y * 0.5 + 0.5) * r.height) };
+  }, i);
+  const dblPlate = async () => {
+    const pt = await platePoint();
+    if (!pt) throw new Error('no clear plate point on the canvas');
+    await page.mouse.dblclick(pt.x, pt.y);
+    await page.waitForTimeout(250);
+  };
+
+  /* ------------------------------------------------------------------ 0 */
+  console.log('\n=== 0. the gesture exists, and with nothing live it touches nothing ===');
+  {
+    const r = await page.evaluate(() => ({
+      fn: typeof window.leaveTool,
+      api: !!(window.nsoInputMode && window.nsoInputMode.leaveTool === window.leaveTool)
+    }));
+    check('leaveTool() is on the page and on nsoInputMode', r.fn === 'function' && r.api);
+    const before = await snap();
+    const left = await page.evaluate(() => window.leaveTool());
+    check('nothing live -> nothing closed', Array.isArray(left) && left.length === 0, JSON.stringify(left));
+    held('idle leave', before, await snap());
+  }
+
+  /* ------------------------------------------------------------------ 1 */
+  console.log('\n=== 1. open Cut, Split, double-click the plate ===');
+  {
+    await page.click('#menu-cut > summary');     // the card is the switch: open = armed
+    const pc = await pieceAt(0);
+    await page.mouse.click(pc.x, pc.y);
+    await page.waitForFunction(() => !!state.cutHelper, null, { timeout: 5000 });
+    await page.click('#btn-cut');
+    await page.waitForFunction(() => state.placed.length === 2 && state.cutterOpen, null, { timeout: 30000 });
+    await page.waitForTimeout(300);
+    const before = await snap();
+    await shot('cut-after-split');
+    check('cutter live after Split', await page.evaluate(() => state.cutterOpen && document.getElementById('menu-cut').open));
+    await dblPlate();
+    const r = await page.evaluate(() => ({
+      cutter: state.cutterOpen, menu: document.getElementById('menu-cut').open,
+      helper: !!state.cutHelper
+    }));
+    await shot('cut-dblclick-closed');
+    check('cutter closed', !r.cutter && !r.helper, JSON.stringify(r));
+    check('Cut card shut', !r.menu);
+    check('both halves still on the plate', (await snap()).poses.length === 2);
+    held('Cut', before, await snap());
+
+    /* closeCutter is the one close path that deselects - shutting the Cut
+       card means "done with this piece" too. The gesture leaves the tool, not the
+       piece: a half picked while the cutter is live is still picked after. */
+    await page.click('#menu-cut > summary');     // the card is the switch: open = armed
+    const ph = await pieceAt(1);
+    await page.mouse.click(ph.x, ph.y);
+    await page.waitForFunction(() => state.cutterOpen && state.selectedIndex === 1 && !!state.cutHelper, null, { timeout: 5000 });
+    const before2 = await snap();
+    await shot('cut-reopened-half-picked');
+    await dblPlate();
+    await shot('cut-dblclick-half-still-picked');
+    check('cutter closed again', await page.evaluate(() => !state.cutterOpen && !state.cutHelper &&
+      !document.getElementById('menu-cut').open));
+    held('Cut with a half picked', before2, await snap());
+  }
+
+  /* ------------------------------------------------------------------ 2 */
+  console.log('\n=== 2. open Rotate, double-click ===');
+  {
+    const pc = await pieceAt(0);
+    await page.mouse.click(pc.x, pc.y);
+    await page.waitForTimeout(200);
+    await page.click('#menu-rotate > summary');
+    await page.waitForTimeout(250);
+    const guide = () => page.evaluate(() => {
+      const g = state.scene.getObjectByName('nso-rotate-handles');
+      return !!(g && g.visible && g.children.length);
+    });
+    check('Rotate guide drawn on the selected piece', await guide());
+    const before = await snap();
+    await shot('rotate-open');
+    await dblPlate();
+    await shot('rotate-dblclick-closed');
+    check('Rotate guide gone', !(await guide()));
+    check('Rotate menu shut, nobody owns the input',
+      await page.evaluate(() => !document.getElementById('menu-rotate').open && nsoInputMode.active() === null));
+    held('Rotate', before, await snap());
+  }
+
+  /* ------------------------------------------------------------------ 3 */
+  console.log('\n=== 3. Open Join, pick A, double-click ===');
+  {
+    await page.evaluate(() => document.getElementById('menu-joins').scrollIntoView());
+    await openJoin(page);
+    await page.click('#join-slot-a');
+    const pc = await pieceAt(0);
+    await page.mouse.click(pc.x, pc.y);
+    await page.waitForTimeout(250);
+    const a = await page.evaluate(() => ({ session: state.joinSession, a: state.editId, b: state.joinPartnerId }));
+    check('Join live with A picked', a.session && a.a != null && a.b == null, JSON.stringify(a));
+    await page.click('#join-slot-b');      // B armed and waiting for its click
+    const before = await snap();
+    await shot('join-a-picked');
+    await dblPlate();
+    await shot('join-dblclick-ended');
+    const r = await page.evaluate(() => ({
+      session: state.joinSession, armed: state.joinArmed, b: state.joinPartnerId,
+      hull: state.joinHullId, faceA: state.joinFaceA,
+      slotA: document.getElementById('join-name-a').textContent
+    }));
+    check('Join ended, picks cleared', !r.session && r.armed == null && r.b == null && r.hull == null && r.faceA == null,
+      JSON.stringify(r));
+    held('Join', before, await snap());
+  }
+
+  /* ------------------------------------------------------------------ 4 */
+  console.log('\n=== 4. Surface & edges -> Soften, double-click ===');
+  {
+    const pc = await pieceAt(0);
+    await page.mouse.click(pc.x, pc.y);
+    await page.waitForTimeout(200);
+    await openFinishMenu(page);
+    await page.click('#btn-soften');
+    await page.waitForTimeout(150);
+    check('Soften armed, waiting for a face', await page.evaluate(() => state.softenArmed === true));
+    const before = await snap();
+    await shot('soften-armed');
+    await dblPlate();
+    await shot('soften-dblclick-closed');
+    const r = await page.evaluate(() => ({
+      armed: state.softenArmed, shape: document.getElementById('menu-surface').open, pick: state.facePick
+    }));
+    check('Soften disarmed', r.armed === false);
+    check('Surface & edges menu closed', r.shape === false);
+    held('Soften', before, await snap());
+  }
+
+  /* ------------------------------------------------------------------ 5 */
+  console.log('\n=== 5. G-scope: Region mode, double-click, double-click (no exit) ===');
+  {
+    const before = await snap();
+    await page.click('#btn-microscope');
+    await page.waitForFunction(() => window.NSO_MICROSCOPE && window.NSO_MICROSCOPE.isOpen(), null, { timeout: 15000 });
+    await page.waitForTimeout(500);
+    await page.click('#ms-mode-select');
+    const modeOf = () => page.evaluate(() => ({
+      open: NSO_MICROSCOPE.isOpen(),
+      mode: NSO_MICROSCOPE.mode(),
+      isolated: NSO_MICROSCOPE.isIsolated(),
+      boxes: NSO_MICROSCOPE.boxes().length,
+      select: document.getElementById('ms-mode-select').classList.contains('active')
+    }));
+    check('G-scope open, region pick armed', (m => m.open && m.select && m.mode === 'select')(await modeOf()));
+    await shot('gscope-select-region');
+    /* G-scope's canvas, at a corner the part does not reach - a click on the
+       part in select mode drops a capture box (and isolates it), and a drag
+       pulls it onto TAKE: that is the click doing its job, not the gesture.
+       So the point is bare plate by G-scope's own answer (pressTargetAt). */
+    const gp = await page.evaluate(() => {
+      const c = document.querySelector('#microscope canvas');
+      const r = c.getBoundingClientRect();
+      for (let fy = 0.92; fy > 0.5; fy -= 0.04) {
+        for (let fx = 0.08; fx < 0.5; fx += 0.04) {
+          const x = Math.round(r.left + fx * r.width), y = Math.round(r.top + fy * r.height);
+          if (document.elementFromPoint(x, y) === c && !NSO_MICROSCOPE.pressTargetAt(x, y)) return { x, y };
+        }
+      }
+      return null;
+    });
+    check('a bare-plate point on G-scope\'s canvas', !!gp);
+    const m0 = await modeOf();
+    /* G-scope has two exits, Back and Close. A double-click on the view is
+       neither: it does nothing - not a step back to orbit, not a close. */
+    await page.mouse.dblclick(gp.x, gp.y);
+    await page.waitForTimeout(250);
+    const m1 = await modeOf();
+    await shot('gscope-dblclick-orbit');
+    check('first double-click: nothing happens - G-scope still open, region pick still armed, no box dropped, nothing isolated',
+      m1.open && m1.select && m1.mode === 'select' && m1.boxes === m0.boxes && !m1.isolated, JSON.stringify(m1));
+    await page.mouse.dblclick(gp.x, gp.y);
+    await page.waitForTimeout(250);
+    const m2 = await modeOf();
+    await shot('gscope-dblclick-closed');
+    check('second double-click: nothing happens either - still open, still armed, no box, nothing isolated',
+      m2.open && m2.select && m2.boxes === m0.boxes && !m2.isolated, JSON.stringify(m2));
+    check('G-scope rail button still on', await page.evaluate(() => document.getElementById('btn-microscope').classList.contains('is-on')));
+    await page.click('#ms-close');
+    await page.waitForTimeout(250);
+    check('Close closes it', await page.evaluate(() => !NSO_MICROSCOPE.isOpen()));
+    check('G-scope rail button off', await page.evaluate(() => !document.getElementById('btn-microscope').classList.contains('is-on')));
+    held('G-scope', before, await snap());
+  }
+
+  /* ------------------------------------------------------------------ 6 */
+  console.log('\n=== 6. Carve armed, double-click ===');
+  {
+    await openFinishMenu(page);
+    await page.click('#btn-carve');
+    check('Carve armed', await page.evaluate(() => state.carveArmed === true));
+    const before = await snap();
+    await shot('carve-armed');
+    await dblPlate();
+    await shot('carve-dblclick-disarmed');
+    const r = await page.evaluate(() => ({
+      armed: state.carveArmed, pressed: document.getElementById('btn-carve').getAttribute('aria-pressed'),
+      sculpt: document.getElementById('menu-bit').open
+    }));
+    check('Carve disarmed through its button', r.armed === false && r.pressed === 'false', JSON.stringify(r));
+    check('Subtract menu (Carve\'s home since shell v3) closed with it', r.sculpt === false);
+    held('Carve', before, await snap());
+  }
+
+  /* ------------------------------------------------------------------ 7 */
+  console.log('\n=== 7. a double-click on Rotate\'s 90 button is two clicks ===');
+  let rotBefore;
+  {
+    const pc = await pieceAt(0);
+    await page.mouse.click(pc.x, pc.y);
+    await page.waitForTimeout(200);
+    await page.click('#menu-rotate > summary');
+    await page.waitForTimeout(200);
+    /* the turn is read off the piece's BODY: each 90 is baked into the
+       geometry when it ends (pose-bake), so rotY is 0 again after it */
+    rotBefore = await page.evaluate(() => ({
+      q: nsoPieceBodyQ(state.placed[state.selectedIndex]).toArray(), undo: state.undoStack.length, sel: state.selectedIndex
+    }));
+    await page.dblclick('#btn-rot-right');
+    await page.waitForTimeout(250);
+    const r = await page.evaluate(() => ({
+      q: nsoPieceBodyQ(state.placed[state.selectedIndex]).toArray(), undo: state.undoStack.length,
+      menu: document.getElementById('menu-rotate').open,
+      guide: (g => !!(g && g.children.length))(state.scene.getObjectByName('nso-rotate-handles'))
+    }));
+    await shot('rotate90-dblclick');
+    const turn = await page.evaluate(([a, b]) => {
+      const d = new THREE.Quaternion().fromArray(b).multiply(new THREE.Quaternion().fromArray(a).invert());
+      const s = Math.hypot(d.x, d.y, d.z);
+      return { deg: 2 * Math.atan2(s, Math.abs(d.w)) * 180 / Math.PI, up: s ? Math.abs(d.y) / s : 0 };
+    }, [rotBefore.q, r.q]);
+    check('piece turned 180', Math.abs(turn.deg - 180) < 1e-6 && Math.abs(turn.up - 1) < 1e-9,
+      turn.deg.toFixed(3) + ' deg about the vertical');
+    check('nothing closed: Rotate menu and guide still up', r.menu && r.guide, JSON.stringify(r));
+    check('two Undo steps, one per click', r.undo === rotBefore.undo + 2, rotBefore.undo + '->' + r.undo);
+  }
+
+  /* ------------------------------------------------------------------ 8 */
+  console.log('\n=== 8. Undo works at the end of the run ===');
+  {
+    await page.click('#btn-undo');
+    await page.waitForTimeout(150);
+    await page.click('#btn-undo');
+    await page.waitForTimeout(250);
+    const r = await page.evaluate((i) => ({
+      q: nsoPieceBodyQ(state.placed[i]).toArray(), undo: state.undoStack.length
+    }), rotBefore.sel);
+    await shot('undo-after-run');
+    const off = await page.evaluate(([a, b]) => {
+      const d = new THREE.Quaternion().fromArray(b).multiply(new THREE.Quaternion().fromArray(a).invert());
+      return 2 * Math.atan2(Math.hypot(d.x, d.y, d.z), Math.abs(d.w)) * 180 / Math.PI;
+    }, [rotBefore.q, r.q]);
+    check('two Undos put the turn back', off < 1e-9 && r.undo === rotBefore.undo,
+      'off by ' + off.toExponential(1) + ' deg, undo ' + r.undo);
+    await page.click('#btn-undo');
+    await page.waitForTimeout(500);
+    check('one more Undo takes back the Split',
+      await page.evaluate(() => state.placed.length === 1), 'placed ' + await page.evaluate(() => state.placed.length));
+  }
+
+  /* ------------------------------------------------------------------ 9 */
+  console.log('\n=== 9. each drop-down that owns no input, double-click ===');
+  {
+    /* Shell v3: Measure and Align in the row; Join, Seat, Supports, Add,
+       Subtract, Shape, Text, Paint, Surface & edges, Sculpt and Check & repair in
+       the column. Then a member open inside a merged one (Photo in Gen+):
+       the double-click shuts it and the drop-down holding it. Plate & pieces is pinned open, not a drop-down: it stays. */
+    const COL = ['menu-measure', 'menu-align', 'menu-connect', 'menu-joins', 'menu-seat', 'menu-supports', 'menu-add', 'menu-bit',
+                 'menu-shape', 'menu-text', 'menu-weave', 'menu-paint', 'menu-surface', 'menu-sculpt', 'menu-slice', 'menu-repair'];
+    const ids = await page.evaluate(() => [...document.querySelectorAll('.vp-col-menu')].map(d => d.id));
+    check('the shell holds these sixteen', JSON.stringify(ids) === JSON.stringify(COL), ids.join(', '));
+    for (const id of COL.concat(['menu-photo'])) {
+      await page.evaluate(() => document.querySelectorAll('.vp-menu').forEach(d => { d.open = false; }));
+      await page.click('#' + id + ' > summary');
+      await page.waitForTimeout(150);
+      const opened = await page.evaluate((i) => document.getElementById(i).open, id);
+      const before = await snap();
+      await dblPlate();
+      await shot(id + '-dblclick-closed');
+      const r = await page.evaluate((i) => ({
+        open: document.getElementById(i).open,
+        any: [...document.querySelectorAll('.vp-menu[open]')].map(d => d.id || d.className)
+      }), id);
+      check(id + ' open, then shut by the double-click', opened && !r.open && r.any.length === 0,
+        JSON.stringify({ opened, after: r }));
+      held(id, before, await snap());
+    }
+    const pinned = await page.evaluate(() => {
+      const p = document.getElementById('plate-panel');
+      return !!p && !p.hidden && p.getBoundingClientRect().height > 0;
+    });
+    check('Plate & pieces, pinned open, is still on screen after every double-click', pinned);
+  }
+
+  const errs = logs.filter(l => l.startsWith('[pageerror]'));
+  check('no page errors', errs.length === 0, errs.join(' | '));
+
+  console.log('\n' + (fails ? fails + ' FAILED' : 'all gates held'));
+  process.exitCode = fails ? 1 : 0;
+}).catch(e => { console.error(e); process.exit(1); });

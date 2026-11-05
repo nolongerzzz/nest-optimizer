@@ -1,0 +1,2059 @@
+{
+  "generator": "tools/nso_features_make_fixtures.js",
+  "checker": "tools/mesh_validate.py --json (weld 0.0001)",
+  "note": "`expected` is what the canonical checker must report (`piercing` is self_intersection.pierce). Each feature: `roots` is where it meets the hull and their area; `cells` (world AABBs) hold it and nothing else, so piece n cells = the feature (tools/nso_features.js detach()); `truth` is its own ground truth. `declared` is what the definitions add up to, stated before the output is read.",
+  "entries": [
+    {
+      "stl": "feature-hull_all.stl",
+      "what": "flange, handle, bracket, lid and hinge on one hull",
+      "library": true,
+      "host": {
+        "size": [
+          120,
+          70,
+          40
+        ],
+        "keep": 1,
+        "volume": 300000,
+        "surface_area": 35000
+      },
+      "features": [
+        {
+          "type": "flange",
+          "face": "-y",
+          "params": {
+            "t": 2.5,
+            "reach": 15,
+            "length": 60,
+            "u": 0,
+            "v": 0
+          },
+          "frame": {
+            "C": [
+              0,
+              -35,
+              20
+            ],
+            "U": [
+              1,
+              0,
+              0
+            ],
+            "V": [
+              0,
+              0,
+              1
+            ],
+            "W": [
+              0,
+              -1,
+              0
+            ]
+          },
+          "root_plane": {
+            "normal": [
+              0,
+              -1,
+              0
+            ],
+            "offset": 35
+          },
+          "roots": {
+            "rects": [
+              [
+                [
+                  -30,
+                  30
+                ],
+                [
+                  -1.25,
+                  1.25
+                ]
+              ]
+            ],
+            "area": 150
+          },
+          "topology": {},
+          "cells": [
+            {
+              "lo": [
+                -31,
+                -51,
+                17.75
+              ],
+              "hi": [
+                31,
+                -35,
+                22.25
+              ]
+            }
+          ],
+          "recess_cells": [],
+          "volume": 2250,
+          "surface_area": 2175,
+          "triangles_alone": 12,
+          "truth": {
+            "axis": [
+              0,
+              0,
+              1
+            ],
+            "thickness": 2.5,
+            "band": [
+              18.75,
+              21.25
+            ],
+            "reach": 15,
+            "root_length": 60,
+            "root_normal": [
+              0,
+              -1,
+              0
+            ],
+            "root_offset": 35,
+            "bounds": {
+              "lo": [
+                -30,
+                -50,
+                18.75
+              ],
+              "hi": [
+                30,
+                -35,
+                21.25
+              ]
+            }
+          }
+        },
+        {
+          "type": "handle",
+          "face": "-x",
+          "params": {
+            "r": 4,
+            "R": 25,
+            "u": 0,
+            "v": 0,
+            "sides": 24,
+            "arc": 24
+          },
+          "frame": {
+            "C": [
+              -60,
+              0,
+              20
+            ],
+            "U": [
+              0,
+              -1,
+              0
+            ],
+            "V": [
+              0,
+              0,
+              1
+            ],
+            "W": [
+              -1,
+              0,
+              0
+            ]
+          },
+          "root_plane": {
+            "normal": [
+              -1,
+              0,
+              0
+            ],
+            "offset": 60
+          },
+          "roots": {
+            "feet": [
+              {
+                "centre_local": [
+                  -25,
+                  0
+                ],
+                "centre": [
+                  -60,
+                  25,
+                  20
+                ],
+                "radius": 4,
+                "sides": 24
+              },
+              {
+                "centre_local": [
+                  25,
+                  0
+                ],
+                "centre": [
+                  -60,
+                  -25,
+                  20
+                ],
+                "radius": 4,
+                "sides": 24
+              }
+            ],
+            "area": 99.38651331936796
+          },
+          "topology": {
+            "host_genus": 1
+          },
+          "cells": [
+            {
+              "lo": [
+                -90,
+                -30,
+                15
+              ],
+              "hi": [
+                -60,
+                30,
+                25
+              ]
+            }
+          ],
+          "recess_cells": [],
+          "volume": 3891.762705805315,
+          "surface_area": 2064.1650350216114,
+          "triangles_alone": 1196,
+          "truth": {
+            "loop_plane_normal": [
+              0,
+              0,
+              1
+            ],
+            "rod_radius": 4,
+            "arc_radius": 25,
+            "clear": 21,
+            "opening_width": 42,
+            "opening_centre": [
+              -70.5,
+              0,
+              20
+            ],
+            "span": 50,
+            "bounds": {
+              "lo": [
+                -89,
+                -29,
+                16
+              ],
+              "hi": [
+                -60,
+                29,
+                24
+              ]
+            }
+          }
+        },
+        {
+          "type": "bracket",
+          "face": "+x",
+          "params": {
+            "t": 3,
+            "width": 40,
+            "height": 30,
+            "arm": 20,
+            "gusset": 14,
+            "gussets": 2,
+            "u": 0,
+            "v0": -15
+          },
+          "frame": {
+            "C": [
+              60,
+              0,
+              20
+            ],
+            "U": [
+              0,
+              1,
+              0
+            ],
+            "V": [
+              0,
+              0,
+              1
+            ],
+            "W": [
+              1,
+              0,
+              0
+            ]
+          },
+          "root_plane": {
+            "normal": [
+              1,
+              0,
+              0
+            ],
+            "offset": 60
+          },
+          "roots": {
+            "rects": [
+              [
+                [
+                  -20,
+                  20
+                ],
+                [
+                  -15,
+                  15
+                ]
+              ]
+            ],
+            "area": 1200
+          },
+          "topology": {},
+          "cells": [
+            {
+              "lo": [
+                60,
+                -21,
+                4
+              ],
+              "hi": [
+                81,
+                21,
+                36
+              ]
+            }
+          ],
+          "recess_cells": [],
+          "volume": 6227.999999999999,
+          "surface_area": 4624.79393923934,
+          "triangles_alone": 50,
+          "truth": {
+            "thickness": 3,
+            "arm": {
+              "normal": [
+                0,
+                0,
+                1
+              ],
+              "top": 8,
+              "projects": 20,
+              "bounds": {
+                "lo": [
+                  60,
+                  -20,
+                  5
+                ],
+                "hi": [
+                  80,
+                  20,
+                  8
+                ]
+              }
+            },
+            "plate": {
+              "normal": [
+                1,
+                0,
+                0
+              ],
+              "bounds": {
+                "lo": [
+                  60,
+                  -20,
+                  5
+                ],
+                "hi": [
+                  63,
+                  20,
+                  35
+                ]
+              }
+            },
+            "gussets": [
+              {
+                "leg": 14,
+                "bounds": {
+                  "lo": [
+                    63,
+                    -20,
+                    8
+                  ],
+                  "hi": [
+                    77,
+                    -17,
+                    22
+                  ]
+                }
+              },
+              {
+                "leg": 14,
+                "bounds": {
+                  "lo": [
+                    63,
+                    17,
+                    8
+                  ],
+                  "hi": [
+                    77,
+                    20,
+                    22
+                  ]
+                }
+              }
+            ],
+            "volume_analytic": 6228,
+            "flange_expected": false,
+            "bounds": {
+              "lo": [
+                60,
+                -20,
+                5
+              ],
+              "hi": [
+                80,
+                20,
+                35
+              ]
+            }
+          }
+        },
+        {
+          "type": "lid",
+          "face": "+z",
+          "params": {
+            "pu": 60,
+            "pv": 40,
+            "depth": 15,
+            "rim": 6,
+            "t": 3,
+            "plug": 5,
+            "clear": 0.5,
+            "u": 0,
+            "v": 0
+          },
+          "frame": {
+            "C": [
+              0,
+              0,
+              40
+            ],
+            "U": [
+              1,
+              0,
+              0
+            ],
+            "V": [
+              0,
+              1,
+              0
+            ],
+            "W": [
+              0,
+              0,
+              1
+            ]
+          },
+          "root_plane": {
+            "normal": [
+              0,
+              0,
+              1
+            ],
+            "offset": 40
+          },
+          "roots": {
+            "rings": [
+              {
+                "outer": [
+                  [
+                    -36,
+                    36
+                  ],
+                  [
+                    -26,
+                    26
+                  ]
+                ],
+                "inner": [
+                  [
+                    -30,
+                    30
+                  ],
+                  [
+                    -20,
+                    20
+                  ]
+                ]
+              }
+            ],
+            "area": 1344
+          },
+          "topology": {
+            "voids": 1
+          },
+          "cells": [
+            {
+              "lo": [
+                -37,
+                -27,
+                40
+              ],
+              "hi": [
+                37,
+                27,
+                44
+              ]
+            }
+          ],
+          "recess_cells": [
+            {
+              "lo": [
+                -29.75,
+                -19.75,
+                30
+              ],
+              "hi": [
+                29.75,
+                19.75,
+                40
+              ]
+            }
+          ],
+          "volume": 22737,
+          "surface_area": 9212,
+          "triangles_alone": 28,
+          "truth": {
+            "seat_normal": [
+              0,
+              0,
+              1
+            ],
+            "seat_offset": 40,
+            "clear": 0.5,
+            "plug_depth": 5,
+            "pocket": {
+              "lo": [
+                -30,
+                -20,
+                25
+              ],
+              "hi": [
+                30,
+                20,
+                40
+              ]
+            },
+            "plate": {
+              "lo": [
+                -36,
+                -26,
+                40
+              ],
+              "hi": [
+                36,
+                26,
+                43
+              ]
+            },
+            "plug": {
+              "lo": [
+                -29.5,
+                -19.5,
+                35
+              ],
+              "hi": [
+                29.5,
+                19.5,
+                40
+              ]
+            },
+            "void_volume": 24495,
+            "volume_analytic": 22737,
+            "bounds": {
+              "lo": [
+                -36,
+                -26,
+                35
+              ],
+              "hi": [
+                36,
+                26,
+                43
+              ]
+            }
+          }
+        },
+        {
+          "type": "hinge",
+          "face": "+y",
+          "params": {
+            "R": 5,
+            "rp": 2.5,
+            "clear": 0.5,
+            "gap": 0.5,
+            "k": 16,
+            "leaf": 25,
+            "web": 4,
+            "half": 4,
+            "u": 0,
+            "v": 0,
+            "sides": 32
+          },
+          "frame": {
+            "C": [
+              0,
+              35,
+              20
+            ],
+            "U": [
+              -1,
+              0,
+              0
+            ],
+            "V": [
+              0,
+              0,
+              1
+            ],
+            "W": [
+              0,
+              1,
+              0
+            ]
+          },
+          "root_plane": {
+            "normal": [
+              0,
+              1,
+              0
+            ],
+            "offset": 35
+          },
+          "roots": {
+            "rects": [
+              [
+                [
+                  -24,
+                  -8
+                ],
+                [
+                  -4,
+                  4
+                ]
+              ],
+              [
+                [
+                  8,
+                  24
+                ],
+                [
+                  -4,
+                  4
+                ]
+              ]
+            ],
+            "area": 256
+          },
+          "topology": {
+            "host_genus": 1,
+            "bodies": [
+              1
+            ]
+          },
+          "cells": [
+            {
+              "lo": [
+                -25,
+                35,
+                14
+              ],
+              "hi": [
+                25,
+                66.5,
+                26
+              ]
+            }
+          ],
+          "recess_cells": [],
+          "volume": 11468.016925007973,
+          "surface_area": 5322.714740799691,
+          "triangles_alone": 700,
+          "truth": {
+            "axis_point": [
+              0,
+              40.5,
+              20
+            ],
+            "axis_dir": [
+              -1,
+              0,
+              0
+            ],
+            "knuckle_radius": 5,
+            "pin_radius": 2.5,
+            "clear": 0.5,
+            "gap": 0.5,
+            "fixed": [
+              {
+                "lo": [
+                  8,
+                  35.5,
+                  15
+                ],
+                "hi": [
+                  24,
+                  45.5,
+                  25
+                ]
+              },
+              {
+                "lo": [
+                  -24,
+                  35.5,
+                  15
+                ],
+                "hi": [
+                  -8,
+                  45.5,
+                  25
+                ]
+              }
+            ],
+            "moving": {
+              "lo": [
+                -24,
+                35.5,
+                15
+              ],
+              "hi": [
+                24,
+                65.5,
+                25
+              ]
+            },
+            "leaf_direction": [
+              0,
+              1,
+              0
+            ],
+            "swing_free_deg": [
+              -90,
+              90
+            ],
+            "swing_blocked_deg": [
+              -135,
+              135
+            ],
+            "bounds": {
+              "lo": [
+                -24,
+                35,
+                15
+              ],
+              "hi": [
+                24,
+                65.5,
+                25
+              ]
+            }
+          }
+        }
+      ],
+      "declared": {
+        "shells": 3,
+        "bodies": 2,
+        "host_genus": 2,
+        "euler_characteristic": 0,
+        "signed_volume": 346574.7796308133,
+        "surface_area": 52299.900688421905
+      },
+      "detectors": {
+        "flange": {
+          "count": 1,
+          "features": [
+            "flange"
+          ]
+        },
+        "handle": {
+          "count": 1,
+          "features": [
+            "handle"
+          ]
+        },
+        "bracket": {
+          "count": 1,
+          "features": [
+            "bracket"
+          ]
+        },
+        "lid": {
+          "count": 1,
+          "features": [
+            "lid"
+          ]
+        },
+        "hinge": {
+          "count": 1,
+          "features": [
+            "hinge"
+          ]
+        }
+      },
+      "expected": {
+        "triangles": 2036,
+        "welded_vertices": 1018,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "inconsistent_winding_edges": 0,
+        "euler_characteristic": 0,
+        "degenerate_tris": 0,
+        "piercing": 0,
+        "signed_volume": 346574.7796308133,
+        "surface_area": 52299.90070469138
+      }
+    },
+    {
+      "stl": "feature-hull_flange.stl",
+      "what": "a 2.5 mm flange, 15 mm out along a 60 mm root",
+      "library": true,
+      "host": {
+        "size": [
+          120,
+          70,
+          40
+        ],
+        "keep": 1,
+        "volume": 336000,
+        "surface_area": 32000
+      },
+      "features": [
+        {
+          "type": "flange",
+          "face": "-y",
+          "params": {
+            "t": 2.5,
+            "reach": 15,
+            "length": 60,
+            "u": 0,
+            "v": 0
+          },
+          "frame": {
+            "C": [
+              0,
+              -35,
+              20
+            ],
+            "U": [
+              1,
+              0,
+              0
+            ],
+            "V": [
+              0,
+              0,
+              1
+            ],
+            "W": [
+              0,
+              -1,
+              0
+            ]
+          },
+          "root_plane": {
+            "normal": [
+              0,
+              -1,
+              0
+            ],
+            "offset": 35
+          },
+          "roots": {
+            "rects": [
+              [
+                [
+                  -30,
+                  30
+                ],
+                [
+                  -1.25,
+                  1.25
+                ]
+              ]
+            ],
+            "area": 150
+          },
+          "topology": {},
+          "cells": [
+            {
+              "lo": [
+                -31,
+                -51,
+                17.75
+              ],
+              "hi": [
+                31,
+                -35,
+                22.25
+              ]
+            }
+          ],
+          "recess_cells": [],
+          "volume": 2250,
+          "surface_area": 2175,
+          "triangles_alone": 12,
+          "truth": {
+            "axis": [
+              0,
+              0,
+              1
+            ],
+            "thickness": 2.5,
+            "band": [
+              18.75,
+              21.25
+            ],
+            "reach": 15,
+            "root_length": 60,
+            "root_normal": [
+              0,
+              -1,
+              0
+            ],
+            "root_offset": 35,
+            "bounds": {
+              "lo": [
+                -30,
+                -50,
+                18.75
+              ],
+              "hi": [
+                30,
+                -35,
+                21.25
+              ]
+            }
+          }
+        }
+      ],
+      "declared": {
+        "shells": 1,
+        "bodies": 1,
+        "host_genus": 0,
+        "euler_characteristic": 2,
+        "signed_volume": 338250,
+        "surface_area": 33875
+      },
+      "detectors": {
+        "flange": {
+          "count": 1,
+          "features": [
+            "flange"
+          ]
+        },
+        "handle": {
+          "count": 0,
+          "features": []
+        },
+        "bracket": {
+          "count": 0,
+          "features": []
+        },
+        "lid": {
+          "count": 0,
+          "features": []
+        },
+        "hinge": {
+          "count": 0,
+          "features": []
+        }
+      },
+      "expected": {
+        "triangles": 28,
+        "welded_vertices": 16,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "inconsistent_winding_edges": 0,
+        "euler_characteristic": 2,
+        "degenerate_tris": 0,
+        "piercing": 0,
+        "signed_volume": 338250,
+        "surface_area": 33875
+      }
+    },
+    {
+      "stl": "feature-hull_handle.stl",
+      "what": "an arch handle, 8 mm rod, 21 mm clear - genus 1",
+      "library": true,
+      "host": {
+        "size": [
+          120,
+          70,
+          40
+        ],
+        "keep": 1,
+        "volume": 336000,
+        "surface_area": 32000
+      },
+      "features": [
+        {
+          "type": "handle",
+          "face": "-x",
+          "params": {
+            "r": 4,
+            "R": 25,
+            "u": 0,
+            "v": 0,
+            "sides": 24,
+            "arc": 24
+          },
+          "frame": {
+            "C": [
+              -60,
+              0,
+              20
+            ],
+            "U": [
+              0,
+              -1,
+              0
+            ],
+            "V": [
+              0,
+              0,
+              1
+            ],
+            "W": [
+              -1,
+              0,
+              0
+            ]
+          },
+          "root_plane": {
+            "normal": [
+              -1,
+              0,
+              0
+            ],
+            "offset": 60
+          },
+          "roots": {
+            "feet": [
+              {
+                "centre_local": [
+                  -25,
+                  0
+                ],
+                "centre": [
+                  -60,
+                  25,
+                  20
+                ],
+                "radius": 4,
+                "sides": 24
+              },
+              {
+                "centre_local": [
+                  25,
+                  0
+                ],
+                "centre": [
+                  -60,
+                  -25,
+                  20
+                ],
+                "radius": 4,
+                "sides": 24
+              }
+            ],
+            "area": 99.38651331936796
+          },
+          "topology": {
+            "host_genus": 1
+          },
+          "cells": [
+            {
+              "lo": [
+                -90,
+                -30,
+                15
+              ],
+              "hi": [
+                -60,
+                30,
+                25
+              ]
+            }
+          ],
+          "recess_cells": [],
+          "volume": 3891.762705805315,
+          "surface_area": 2064.1650350216114,
+          "triangles_alone": 1196,
+          "truth": {
+            "loop_plane_normal": [
+              0,
+              0,
+              1
+            ],
+            "rod_radius": 4,
+            "arc_radius": 25,
+            "clear": 21,
+            "opening_width": 42,
+            "opening_centre": [
+              -70.5,
+              0,
+              20
+            ],
+            "span": 50,
+            "bounds": {
+              "lo": [
+                -89,
+                -29,
+                16
+              ],
+              "hi": [
+                -60,
+                29,
+                24
+              ]
+            }
+          }
+        }
+      ],
+      "declared": {
+        "shells": 1,
+        "bodies": 1,
+        "host_genus": 1,
+        "euler_characteristic": 0,
+        "signed_volume": 339891.7627058053,
+        "surface_area": 33865.39200838288
+      },
+      "detectors": {
+        "flange": {
+          "count": 0,
+          "features": []
+        },
+        "handle": {
+          "count": 1,
+          "features": [
+            "handle"
+          ]
+        },
+        "bracket": {
+          "count": 0,
+          "features": []
+        },
+        "lid": {
+          "count": 0,
+          "features": []
+        },
+        "hinge": {
+          "count": 0,
+          "features": []
+        }
+      },
+      "expected": {
+        "triangles": 1216,
+        "welded_vertices": 608,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "inconsistent_winding_edges": 0,
+        "euler_characteristic": 0,
+        "degenerate_tris": 0,
+        "piercing": 0,
+        "signed_volume": 339891.7627058053,
+        "surface_area": 33865.39202465235
+      }
+    },
+    {
+      "stl": "feature-hull_bracket.stl",
+      "what": "a gusseted angle bracket, 3 mm, 20 mm arm",
+      "library": true,
+      "host": {
+        "size": [
+          120,
+          70,
+          40
+        ],
+        "keep": 1,
+        "volume": 336000,
+        "surface_area": 32000
+      },
+      "features": [
+        {
+          "type": "bracket",
+          "face": "+x",
+          "params": {
+            "t": 3,
+            "width": 40,
+            "height": 30,
+            "arm": 20,
+            "gusset": 14,
+            "gussets": 2,
+            "u": 0,
+            "v0": -15
+          },
+          "frame": {
+            "C": [
+              60,
+              0,
+              20
+            ],
+            "U": [
+              0,
+              1,
+              0
+            ],
+            "V": [
+              0,
+              0,
+              1
+            ],
+            "W": [
+              1,
+              0,
+              0
+            ]
+          },
+          "root_plane": {
+            "normal": [
+              1,
+              0,
+              0
+            ],
+            "offset": 60
+          },
+          "roots": {
+            "rects": [
+              [
+                [
+                  -20,
+                  20
+                ],
+                [
+                  -15,
+                  15
+                ]
+              ]
+            ],
+            "area": 1200
+          },
+          "topology": {},
+          "cells": [
+            {
+              "lo": [
+                60,
+                -21,
+                4
+              ],
+              "hi": [
+                81,
+                21,
+                36
+              ]
+            }
+          ],
+          "recess_cells": [],
+          "volume": 6227.999999999999,
+          "surface_area": 4624.79393923934,
+          "triangles_alone": 50,
+          "truth": {
+            "thickness": 3,
+            "arm": {
+              "normal": [
+                0,
+                0,
+                1
+              ],
+              "top": 8,
+              "projects": 20,
+              "bounds": {
+                "lo": [
+                  60,
+                  -20,
+                  5
+                ],
+                "hi": [
+                  80,
+                  20,
+                  8
+                ]
+              }
+            },
+            "plate": {
+              "normal": [
+                1,
+                0,
+                0
+              ],
+              "bounds": {
+                "lo": [
+                  60,
+                  -20,
+                  5
+                ],
+                "hi": [
+                  63,
+                  20,
+                  35
+                ]
+              }
+            },
+            "gussets": [
+              {
+                "leg": 14,
+                "bounds": {
+                  "lo": [
+                    63,
+                    -20,
+                    8
+                  ],
+                  "hi": [
+                    77,
+                    -17,
+                    22
+                  ]
+                }
+              },
+              {
+                "leg": 14,
+                "bounds": {
+                  "lo": [
+                    63,
+                    17,
+                    8
+                  ],
+                  "hi": [
+                    77,
+                    20,
+                    22
+                  ]
+                }
+              }
+            ],
+            "volume_analytic": 6228,
+            "flange_expected": false,
+            "bounds": {
+              "lo": [
+                60,
+                -20,
+                5
+              ],
+              "hi": [
+                80,
+                20,
+                35
+              ]
+            }
+          }
+        }
+      ],
+      "declared": {
+        "shells": 1,
+        "bodies": 1,
+        "host_genus": 0,
+        "euler_characteristic": 2,
+        "signed_volume": 342228,
+        "surface_area": 34224.79393923934
+      },
+      "detectors": {
+        "flange": {
+          "count": 0,
+          "features": []
+        },
+        "handle": {
+          "count": 0,
+          "features": []
+        },
+        "bracket": {
+          "count": 1,
+          "features": [
+            "bracket"
+          ]
+        },
+        "lid": {
+          "count": 0,
+          "features": []
+        },
+        "hinge": {
+          "count": 0,
+          "features": []
+        }
+      },
+      "expected": {
+        "triangles": 64,
+        "welded_vertices": 34,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "inconsistent_winding_edges": 0,
+        "euler_characteristic": 2,
+        "degenerate_tris": 0,
+        "piercing": 0,
+        "signed_volume": 342228,
+        "surface_area": 34224.79393923934
+      }
+    },
+    {
+      "stl": "feature-hull_lid.stl",
+      "what": "a lid seated on a pocket, plug 0.5 mm clear - one void",
+      "library": true,
+      "host": {
+        "size": [
+          120,
+          70,
+          40
+        ],
+        "keep": 1,
+        "volume": 300000,
+        "surface_area": 35000
+      },
+      "features": [
+        {
+          "type": "lid",
+          "face": "+z",
+          "params": {
+            "pu": 60,
+            "pv": 40,
+            "depth": 15,
+            "rim": 6,
+            "t": 3,
+            "plug": 5,
+            "clear": 0.5,
+            "u": 0,
+            "v": 0
+          },
+          "frame": {
+            "C": [
+              0,
+              0,
+              40
+            ],
+            "U": [
+              1,
+              0,
+              0
+            ],
+            "V": [
+              0,
+              1,
+              0
+            ],
+            "W": [
+              0,
+              0,
+              1
+            ]
+          },
+          "root_plane": {
+            "normal": [
+              0,
+              0,
+              1
+            ],
+            "offset": 40
+          },
+          "roots": {
+            "rings": [
+              {
+                "outer": [
+                  [
+                    -36,
+                    36
+                  ],
+                  [
+                    -26,
+                    26
+                  ]
+                ],
+                "inner": [
+                  [
+                    -30,
+                    30
+                  ],
+                  [
+                    -20,
+                    20
+                  ]
+                ]
+              }
+            ],
+            "area": 1344
+          },
+          "topology": {
+            "voids": 1
+          },
+          "cells": [
+            {
+              "lo": [
+                -37,
+                -27,
+                40
+              ],
+              "hi": [
+                37,
+                27,
+                44
+              ]
+            }
+          ],
+          "recess_cells": [
+            {
+              "lo": [
+                -29.75,
+                -19.75,
+                30
+              ],
+              "hi": [
+                29.75,
+                19.75,
+                40
+              ]
+            }
+          ],
+          "volume": 22737,
+          "surface_area": 9212,
+          "triangles_alone": 28,
+          "truth": {
+            "seat_normal": [
+              0,
+              0,
+              1
+            ],
+            "seat_offset": 40,
+            "clear": 0.5,
+            "plug_depth": 5,
+            "pocket": {
+              "lo": [
+                -30,
+                -20,
+                25
+              ],
+              "hi": [
+                30,
+                20,
+                40
+              ]
+            },
+            "plate": {
+              "lo": [
+                -36,
+                -26,
+                40
+              ],
+              "hi": [
+                36,
+                26,
+                43
+              ]
+            },
+            "plug": {
+              "lo": [
+                -29.5,
+                -19.5,
+                35
+              ],
+              "hi": [
+                29.5,
+                19.5,
+                40
+              ]
+            },
+            "void_volume": 24495,
+            "volume_analytic": 22737,
+            "bounds": {
+              "lo": [
+                -36,
+                -26,
+                35
+              ],
+              "hi": [
+                36,
+                26,
+                43
+              ]
+            }
+          }
+        }
+      ],
+      "declared": {
+        "shells": 2,
+        "bodies": 1,
+        "host_genus": 0,
+        "euler_characteristic": 4,
+        "signed_volume": 322737,
+        "surface_area": 41524
+      },
+      "detectors": {
+        "flange": {
+          "count": 0,
+          "features": []
+        },
+        "handle": {
+          "count": 0,
+          "features": []
+        },
+        "bracket": {
+          "count": 0,
+          "features": []
+        },
+        "lid": {
+          "count": 1,
+          "features": [
+            "lid"
+          ]
+        },
+        "hinge": {
+          "count": 0,
+          "features": []
+        }
+      },
+      "expected": {
+        "triangles": 56,
+        "welded_vertices": 32,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "inconsistent_winding_edges": 0,
+        "euler_characteristic": 4,
+        "degenerate_tris": 0,
+        "piercing": 0,
+        "signed_volume": 322737,
+        "surface_area": 41524
+      }
+    },
+    {
+      "stl": "feature-hull_hinge.stl",
+      "what": "a print-in-place knuckle hinge, 0.5 mm clear - 2 bodies",
+      "library": true,
+      "host": {
+        "size": [
+          120,
+          70,
+          40
+        ],
+        "keep": 1,
+        "volume": 336000,
+        "surface_area": 32000
+      },
+      "features": [
+        {
+          "type": "hinge",
+          "face": "+y",
+          "params": {
+            "R": 5,
+            "rp": 2.5,
+            "clear": 0.5,
+            "gap": 0.5,
+            "k": 16,
+            "leaf": 25,
+            "web": 4,
+            "half": 4,
+            "u": 0,
+            "v": 0,
+            "sides": 32
+          },
+          "frame": {
+            "C": [
+              0,
+              35,
+              20
+            ],
+            "U": [
+              -1,
+              0,
+              0
+            ],
+            "V": [
+              0,
+              0,
+              1
+            ],
+            "W": [
+              0,
+              1,
+              0
+            ]
+          },
+          "root_plane": {
+            "normal": [
+              0,
+              1,
+              0
+            ],
+            "offset": 35
+          },
+          "roots": {
+            "rects": [
+              [
+                [
+                  -24,
+                  -8
+                ],
+                [
+                  -4,
+                  4
+                ]
+              ],
+              [
+                [
+                  8,
+                  24
+                ],
+                [
+                  -4,
+                  4
+                ]
+              ]
+            ],
+            "area": 256
+          },
+          "topology": {
+            "host_genus": 1,
+            "bodies": [
+              1
+            ]
+          },
+          "cells": [
+            {
+              "lo": [
+                -25,
+                35,
+                14
+              ],
+              "hi": [
+                25,
+                66.5,
+                26
+              ]
+            }
+          ],
+          "recess_cells": [],
+          "volume": 11468.016925007973,
+          "surface_area": 5322.714740799691,
+          "triangles_alone": 700,
+          "truth": {
+            "axis_point": [
+              0,
+              40.5,
+              20
+            ],
+            "axis_dir": [
+              -1,
+              0,
+              0
+            ],
+            "knuckle_radius": 5,
+            "pin_radius": 2.5,
+            "clear": 0.5,
+            "gap": 0.5,
+            "fixed": [
+              {
+                "lo": [
+                  8,
+                  35.5,
+                  15
+                ],
+                "hi": [
+                  24,
+                  45.5,
+                  25
+                ]
+              },
+              {
+                "lo": [
+                  -24,
+                  35.5,
+                  15
+                ],
+                "hi": [
+                  -8,
+                  45.5,
+                  25
+                ]
+              }
+            ],
+            "moving": {
+              "lo": [
+                -24,
+                35.5,
+                15
+              ],
+              "hi": [
+                24,
+                65.5,
+                25
+              ]
+            },
+            "leaf_direction": [
+              0,
+              1,
+              0
+            ],
+            "swing_free_deg": [
+              -90,
+              90
+            ],
+            "swing_blocked_deg": [
+              -135,
+              135
+            ],
+            "bounds": {
+              "lo": [
+                -24,
+                35,
+                15
+              ],
+              "hi": [
+                24,
+                65.5,
+                25
+              ]
+            }
+          }
+        }
+      ],
+      "declared": {
+        "shells": 2,
+        "bodies": 2,
+        "host_genus": 1,
+        "euler_characteristic": 0,
+        "signed_volume": 347468.016925008,
+        "surface_area": 36810.71474079969
+      },
+      "detectors": {
+        "flange": {
+          "count": 0,
+          "features": []
+        },
+        "handle": {
+          "count": 0,
+          "features": []
+        },
+        "bracket": {
+          "count": 0,
+          "features": []
+        },
+        "lid": {
+          "count": 0,
+          "features": []
+        },
+        "hinge": {
+          "count": 1,
+          "features": [
+            "hinge"
+          ]
+        }
+      },
+      "expected": {
+        "triangles": 720,
+        "welded_vertices": 360,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "inconsistent_winding_edges": 0,
+        "euler_characteristic": 0,
+        "degenerate_tris": 0,
+        "piercing": 0,
+        "signed_volume": 347468.016925008,
+        "surface_area": 36810.71474079969
+      }
+    },
+    {
+      "stl": "feature-hull_angle-unbraced.stl",
+      "what": "the bracket without its gussets - a flange by the rule",
+      "library": false,
+      "host": {
+        "size": [
+          120,
+          70,
+          40
+        ],
+        "keep": 1,
+        "volume": 336000,
+        "surface_area": 32000
+      },
+      "features": [
+        {
+          "type": "angle",
+          "face": "+x",
+          "params": {
+            "t": 3,
+            "width": 40,
+            "height": 30,
+            "arm": 20,
+            "u": 0,
+            "v0": -15
+          },
+          "frame": {
+            "C": [
+              60,
+              0,
+              20
+            ],
+            "U": [
+              0,
+              1,
+              0
+            ],
+            "V": [
+              0,
+              0,
+              1
+            ],
+            "W": [
+              1,
+              0,
+              0
+            ]
+          },
+          "root_plane": {
+            "normal": [
+              1,
+              0,
+              0
+            ],
+            "offset": 60
+          },
+          "roots": {
+            "rects": [
+              [
+                [
+                  -20,
+                  20
+                ],
+                [
+                  -15,
+                  15
+                ]
+              ]
+            ],
+            "area": 1200
+          },
+          "topology": {},
+          "cells": [
+            {
+              "lo": [
+                60,
+                -21,
+                4
+              ],
+              "hi": [
+                81,
+                21,
+                36
+              ]
+            }
+          ],
+          "recess_cells": [],
+          "volume": 5640,
+          "surface_area": 4282,
+          "triangles_alone": 30,
+          "truth": {
+            "thickness": 3,
+            "arm": {
+              "normal": [
+                0,
+                0,
+                1
+              ],
+              "top": 8,
+              "projects": 20,
+              "bounds": {
+                "lo": [
+                  60,
+                  -20,
+                  5
+                ],
+                "hi": [
+                  80,
+                  20,
+                  8
+                ]
+              }
+            },
+            "plate": {
+              "normal": [
+                1,
+                0,
+                0
+              ],
+              "bounds": {
+                "lo": [
+                  60,
+                  -20,
+                  5
+                ],
+                "hi": [
+                  63,
+                  20,
+                  35
+                ]
+              }
+            },
+            "gussets": [],
+            "volume_analytic": 5640,
+            "flange_expected": true,
+            "bounds": {
+              "lo": [
+                60,
+                -20,
+                5
+              ],
+              "hi": [
+                80,
+                20,
+                35
+              ]
+            }
+          }
+        }
+      ],
+      "declared": {
+        "shells": 1,
+        "bodies": 1,
+        "host_genus": 0,
+        "euler_characteristic": 2,
+        "signed_volume": 341640,
+        "surface_area": 33882
+      },
+      "detectors": {
+        "flange": {
+          "count": 1,
+          "features": [
+            "angle"
+          ]
+        },
+        "handle": {
+          "count": 0,
+          "features": []
+        },
+        "bracket": {
+          "count": 0,
+          "features": []
+        },
+        "lid": {
+          "count": 0,
+          "features": []
+        },
+        "hinge": {
+          "count": 0,
+          "features": []
+        }
+      },
+      "expected": {
+        "triangles": 44,
+        "welded_vertices": 24,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "inconsistent_winding_edges": 0,
+        "euler_characteristic": 2,
+        "degenerate_tris": 0,
+        "piercing": 0,
+        "signed_volume": 341640,
+        "surface_area": 33882
+      }
+    }
+  ]
+}

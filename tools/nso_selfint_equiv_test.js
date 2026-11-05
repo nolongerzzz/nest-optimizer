@@ -26,6 +26,7 @@ const { execFileSync } = require('child_process');
 const { readSTL, loadRepairModule } = require('./nso_stl_io.js');
 
 const ROOT = path.join(__dirname, '..');
+const LIBDIR = require('./nso_library_dir');
 const R = loadRepairModule(path.join(ROOT, 'NSO_Repair.js'));
 const MV = path.join(ROOT, 'tools', 'mesh_validate.py');
 
@@ -57,11 +58,15 @@ function stlsUnder(dir) {
 
 console.log('cross-language equivalence: NSO_Repair.js vs tools/mesh_validate.py');
 const files = [].concat(stlsUnder(path.join(ROOT, 'fixtures')),
-                        stlsUnder(path.join(ROOT, 'library')));
+                        stlsUnder(path.join(ROOT, 'library')),
+                        LIBDIR.extraStls());
 if (!files.length) { console.log('  no STL fixtures found'); fail++; }
+/* The catalog's pieces moved to nest-library; walk them from a checkout when
+   there is one (nso_library_dir.js), and say so when there is not. */
+if (!LIBDIR.libraryDir()) LIBDIR.skip('the catalog-only STLs in nest-library');
 
 for (const f of files) {
-  const rel = path.relative(ROOT, f);
+  const rel = LIBDIR.labelOf(f);
   let soup;
   try { soup = readSTL(f); } catch (e) { console.log('  skip  ' + rel + ' (' + e.message + ')'); continue; }
   if (soup.length === 0) { console.log('  skip  ' + rel + ' (empty)'); continue; }

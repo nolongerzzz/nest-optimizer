@@ -252,6 +252,10 @@ const carve = (page, id, pt) => page.evaluate(([id, pt]) => window.nsoCarveAtPoi
   if (!r) return { ok: false, reason: 'no result' };
   const out = { ok: r.ok, reason: r.reason, removed: r.removed, intended: r.intended, status: r.status };
   out.dropped = r.dropped; out.trisOut = r.trisOut; out.weldTol = r.weldTol;
+  /* The live wall gate's own report, so a refusal can be checked against the
+     wall it measured rather than against a thickness written down here. */
+  out.gate = r.gate ? { measured: r.gate.measured, wall: r.gate.wall_mm,
+                        residual: r.gate.residual_mm, floor: r.gate.threshold_mm } : null;
   if (r.planned && r.planned.ok) {
     out.kind = r.planned.probe.kind;
     out.facesUsed = r.planned.probe.facesUsed;
@@ -496,6 +500,62 @@ async function part2() {
     g = await gateCarve(page, idH, 'tray_small_gouge');
     check('  ... and the thin-walled tray gates clean', clean(g), gsum(g));
     checkSlivers(g, '  ... tray gouge');
+
+    /* --- 2i3. THE LIVE WALL GATE, on the same 2 mm floor ---
+
+       A blade that FITS the wall is not the same question as a cut that LEAVES
+       enough of it. The 0.5 mm gouge above fits and leaves 1.5 mm, which is
+       fine. The same blade at 1.8 mm fits just as well, severs nothing, reaches
+       nowhere near the far face - and leaves 0.2 mm, which the slicer drops.
+       Nothing in the carve path used to have an opinion about that: the blade
+       check is about the blade, cutClearance() is about severing and is
+       deliberately a warning, and no thickness check on the FINISHED mesh can
+       see a cut that removed material rather than thinning it in place.
+
+       So this is the layer that refuses it, and it refuses before the kernel
+       is loaded. See the comment at the gate in app-carve.js. */
+    console.log('\n--- 2i3. a cut that leaves an unprintable wall is REFUSED ---');
+    /* 2i2 left its 0.5 mm gouge in the floor and the gate reads the piece as
+       it IS, so put the floor back before asking about it - otherwise the
+       "2 mm wall" this section is about is a 1.52 mm one. */
+    await page.evaluate(() => undoLast());
+    const spot = [(H.min[0] + H.max[0]) / 2, H.min[1], (H.min[2] + H.max[2]) / 2];
+    const wallHere = await page.evaluate(([id, pt]) => {
+      const p = state.placed.find(q => q && q.sourceId === id && q.mesh);
+      p.mesh.updateMatrixWorld(true);
+      const w = NSO_Thickness.prepare(meshToWorldSoup(p.mesh), {}).wallAt(pt);
+      return { mm: w.mm, measured: w.measured, floor: NSO_Thickness.floorFor(0.4) };
+    }, [idH, spot]);
+    check('the floor under the click is back to its full 2 mm',
+      wallHere.measured && near(wallHere.mm, 2, 1e-3), wallHere.mm.toFixed(4) + ' mm');
+
+    /* Deepest cut this wall can take, derived from what was just measured
+       rather than written down: wall - floor. */
+    const maxCut = wallHere.mm - wallHere.floor;
+
+    await setControls(page, { blade: 'ball', a: 0.6, depth: 1.8, roll: 0 });
+    c = await carve(page, idH, spot);
+    check('a 1.8 mm cut into the 2 mm floor is refused', !c.ok, String(c.reason).slice(0, 100));
+    check('  ... in the canonical wording, which names the way out',
+      !c.ok && /wall too thin here/i.test(String(c.reason)) && /Thicken first/i.test(String(c.reason)),
+      String(c.reason).slice(0, 100));
+    check('  ... naming the 0.2 mm it would leave and the 0.42 mm floor it is under',
+      !c.ok && /leaves 0\.2 mm/.test(String(c.reason)) && /0\.42 mm floor/.test(String(c.reason)),
+      String(c.reason).slice(0, 100));
+    check('  ... and the gate measured the real wall before the cut, not after it',
+      !c.ok && c.gate && c.gate.measured === true && near(c.gate.wall, 2, 1e-3) &&
+      near(c.gate.residual, 0.2, 1e-3),
+      c.gate ? ('wall ' + c.gate.wall.toFixed(3) + ', leaves ' + c.gate.residual.toFixed(3)) : 'no gate report');
+    check('  ... and the piece is untouched - the gate runs before the kernel',
+      !c.ok && c.removed === undefined);
+
+    /* The other side of the same boundary, so this reads as a gate and not as
+       a blanket refusal of anything over a millimetre. */
+    await setControls(page, { blade: 'ball', a: 0.6, depth: maxCut - 0.05, roll: 0 });
+    c = await carve(page, idH, spot);
+    check('the deepest cut the wall can take (' + maxCut.toFixed(2) + ' mm) is ALLOWED', c.ok,
+      c.ok ? (c.kind + ', ' + c.removed.toFixed(4) + ' mm^3') : String(c.reason).slice(0, 100));
+    if (c.ok) await page.evaluate(() => undoLast());
 
     const errs = logs.filter(l => /pageerror/.test(l));
     check('no page errors anywhere in the run', errs.length === 0, errs.slice(0, 2).join(' | ') || 'none');

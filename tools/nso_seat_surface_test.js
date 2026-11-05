@@ -683,20 +683,8 @@ withApp(async (page, logs) => {
     await page.evaluate(stage, [idSphere, idBit]);
     const pt = await page.evaluate(surfacePoint, [idSphere, [1, 1, 0]]);
     const r = await page.evaluate(seatAt, [idSphere, idBit, pt, -0.18]);
-    /* NSO_recordSeat lives in the Scene-3MF work, which is not in this tree.
-       app-seat-surface.js guards its call, so what this tree can assert is the
-       documented degradation: the seat still succeeds and simply leaves no
-       record. The record's own gates below run as soon as the module lands -
-       they are conditioned on it being there, not commented out. */
-    const hasRecorder = await page.evaluate(() => typeof NSO_recordSeat === 'function');
-    if (hasRecorder) {
-      check('a Seat here writes a seat record on the piece it moved',
-        r.ok && !!r.seatRecord, JSON.stringify(r.seatRecord));
-    } else {
-      check('no NSO_recordSeat here (Scene-3MF): the seat still succeeds and writes no record',
-        r.ok && !r.seatRecord, JSON.stringify(r.seatRecord));
-      console.log('  skip  the seat-record gates - NSO_recordSeat arrives with Scene-3MF');
-    }
+    check('a Seat here writes a seat record on the piece it moved',
+      r.ok && !!r.seatRecord, JSON.stringify(r.seatRecord));
     if (r.seatRecord) {
       const rec = r.seatRecord;
       check('  ...with the gap it was asked for', near(rec.gap, -0.18, 1e-12), rec.gap);
@@ -717,14 +705,10 @@ withApp(async (page, logs) => {
       const withSeat = ((block && block.objects) || []).filter(x => x && x.seat);
       return withSeat.length ? withSeat[withSeat.length - 1].seat : null;
     });
-    if (carried === 'no scene module') {
-      console.log('  skip  the 3MF scene block gate - nso-3mf-scene.js arrives with Scene-3MF');
-    } else {
-      check('  ...and the 3MF scene block carries it out to the file',
-        carried && typeof carried === 'object' && near(carried.gap, -0.18, 1e-12) &&
-        carried.kind === 'support' && carried.reference === 'face',
-        JSON.stringify(carried));
-    }
+    check('  ...and the 3MF scene block carries it out to the file',
+      carried && typeof carried === 'object' && near(carried.gap, -0.18, 1e-12) &&
+      carried.kind === 'support' && carried.reference === 'face',
+      JSON.stringify(carried));
     await page.evaluate(() => undoLast());
   }
 
@@ -854,16 +838,7 @@ withApp(async (page, logs) => {
       m.posLock = false;
       return { ok: r2.ok, reason: r2.reason, status: document.getElementById('status').textContent };
     }, [idSphere, idBit, await page.evaluate(surfacePoint, [idSphere, [1, 0, 0]])]);
-    const hasPosLock = await page.evaluate(() => typeof nsoPosLockBlocks === 'function');
-    if (hasPosLock) {
-      check('a position-locked B is not moved by it', !rl.ok && rl.reason === 'position lock', rl.reason);
-    } else {
-      /* app-poslock.js is not in this tree; app-seat-surface.js guards the call,
-         so posLock is simply not a thing a piece can carry here. Assert the
-         guard does not break the seat, and re-arm the real gate with the file. */
-      check('no app-poslock.js here: the guard does not turn a good seat into a refusal', rl.ok, rl.reason);
-      console.log('  skip  the position-lock gate - nsoPosLockBlocks arrives with app-poslock.js');
-    }
+    check('a position-locked B is not moved by it', !rl.ok && rl.reason === 'position lock', rl.reason);
   }
 
   /* =================================================================

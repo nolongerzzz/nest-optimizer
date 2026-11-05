@@ -1,0 +1,1119 @@
+{
+ "label": "before",
+ "file": "0f7456c9-ButVase.3mf",
+ "tris": 947444,
+ "results": [
+  {
+   "name": "import",
+   "wallMs": 9083,
+   "value": {
+    "tris": 947444,
+    "status": "Loaded: single_color-219_fixed.stl_A (143x178x128 mm) - drag to move, Open cutter, or Optimize"
+   },
+   "error": null,
+   "longTasks": [
+    1134,
+    661,
+    667,
+    607,
+    642,
+    624
+   ],
+   "jsRuns": [
+    {
+     "startMs": 790.104,
+     "ms": 821.317,
+     "incl": [
+      [
+       "parseRootModelPart @ nso-3mf-read.js:459",
+       0.744
+      ],
+      [
+       "(anonymous) @ nso-3mf-read.js:517",
+       0.744
+      ]
+     ],
+     "self": [
+      [
+       "(anonymous) @ (native):0",
+       813.213
+      ],
+      [
+       "(garbage collector) @ (native):0",
+       3.622
+      ],
+      [
+       "parseRootModelPart @ nso-3mf-read.js:459",
+       0.744
+      ]
+     ]
+    },
+    {
+     "startMs": 1650.688,
+     "ms": 4250.861,
+     "incl": [
+      [
+       "(anonymous) @ nso-3mf-read.js:509",
+       1938.628
+      ],
+      [
+       "parseModelXml @ nso-3mf-read.js:337",
+       1752.556
+      ],
+      [
+       "walkXml @ nso-3mf-read.js:206",
+       1671.711
+      ],
+      [
+       "appendTransformed @ nso-3mf-read.js:625",
+       1048.877
+      ],
+      [
+       "(anonymous) @ nso-3mf-read.js:591",
+       1048.877
+      ],
+      [
+       "pushVertex @ nso-3mf-read.js:638",
+       1045.628
+      ]
+     ],
+     "self": [
+      [
+       "pushVertex @ nso-3mf-read.js:638",
+       1045.628
+      ],
+      [
+       "walkXml @ nso-3mf-read.js:206",
+       1011.155
+      ],
+      [
+       "open @ nso-3mf-read.js:345",
+       504.022
+      ],
+      [
+       "bufferData @ (native):0",
+       353.407
+      ]
+     ]
+    }
+   ],
+   "maxJsMs": 4250.861,
+   "jsMs": 5131.237
+  },
+  {
+   "name": "idle (nothing selected), 3 s",
+   "wallMs": 3002,
+   "error": null,
+   "longTasks": [
+    629,
+    588,
+    574,
+    576,
+    625,
+    676
+   ],
+   "jsRuns": [],
+   "maxJsMs": 1.723,
+   "jsMs": 3.678
+  },
+  {
+   "name": "first selection (click)",
+   "wallMs": 41909,
+   "error": null,
+   "longTasks": [
+    754,
+    697,
+    601,
+    676,
+    6622,
+    830,
+    856,
+    27041,
+    764,
+    787,
+    777,
+    803,
+    737,
+    757
+   ],
+   "jsRuns": [
+    {
+     "startMs": 2005.32,
+     "ms": 6612.533,
+     "incl": [
+      [
+       "onCanvasPointerDown @ app-core.js:2915",
+       6160.343
+      ],
+      [
+       "wrapped @ app-split-parts.js:283",
+       6020.865
+      ],
+      [
+       "window.selectPlaced @ app-sel-outline.js:46",
+       6020.228
+      ],
+      [
+       "next @ app-seat-grid.js:344",
+       6020.228
+      ],
+      [
+       "wrapped @ app-cth.js:45",
+       5823.452
+      ],
+      [
+       "refreshOutline @ app-sel-outline.js:19",
+       5822.874
+      ]
+     ],
+     "self": [
+      [
+       "Go @ three.min.js:6",
+       5321.381
+      ],
+      [
+       "(garbage collector) @ (native):0",
+       446.523
+      ],
+      [
+       "refreshOutline @ app-sel-outline.js:19",
+       307.822
+      ],
+      [
+       "dot @ three.min.js:6",
+       113.396
+      ]
+     ]
+    },
+    {
+     "startMs": 10315.304,
+     "ms": 27046.99,
+     "incl": [
+      [
+       "(anonymous) @ app-split-parts.js:131",
+       24612.245
+      ],
+      [
+       "analyse @ nso_split_parts.js:231",
+       24611.662
+      ],
+      [
+       "read @ app-split-parts.js:95",
+       24611.662
+      ],
+      [
+       "cavityShells @ nso_hollow.js:824",
+       22678.404
+      ],
+      [
+       "prepare @ nso_thickness.js:1122",
+       18476.413
+      ],
+      [
+       "indexSoup @ nso_thickness.js:189",
+       15931.28
+      ]
+     ],
+     "self": [
+      [
+       "indexSoup @ nso_thickness.js:189",
+       15931.28
+      ],
+      [
+       "cavityShells @ nso_hollow.js:824",
+       4170.642
+      ],
+      [
+       "(garbage collector) @ (native):0",
+       2413.604
+      ],
+      [
+       "surfaceShells @ nso_split_parts.js:71",
+       1586.092
+      ]
+     ]
+    }
+   ],
+   "maxJsMs": 27046.99,
+   "jsMs": 33690.71
+  },
+  {
+   "name": "20 hovers (selected, no tool)",
+   "wallMs": 28504,
+   "error": null,
+   "longTasks": [
+    670,
+    697,
+    660,
+    676,
+    642,
+    701,
+    769,
+    740,
+    776,
+    780,
+    803,
+    799,
+    776,
+    713,
+    796,
+    735,
+    673,
+    701,
+    720,
+    758,
+    696,
+    690,
+    659,
+    712,
+    661,
+    674,
+    735,
+    648,
+    685,
+    648,
+    737,
+    665,
+    604,
+    730,
+    670,
+    655,
+    689,
+    659,
+    744,
+    732,
+    740,
+    700,
+    584
+   ],
+   "jsRuns": [],
+   "maxJsMs": 12.571,
+   "jsMs": 45.748
+  },
+  {
+   "name": "orbit drag (2 s)",
+   "wallMs": 6410,
+   "error": null,
+   "longTasks": [
+    695,
+    739,
+    664,
+    717,
+    750,
+    763,
+    719,
+    680,
+    762,
+    837
+   ],
+   "jsRuns": [],
+   "maxJsMs": 2.167,
+   "jsMs": 7.774
+  },
+  {
+   "name": "open card: measure",
+   "wallMs": 11658,
+   "error": null,
+   "longTasks": [
+    626,
+    665,
+    725,
+    715,
+    758,
+    780,
+    729,
+    731,
+    795,
+    664,
+    807,
+    776,
+    653,
+    621,
+    650,
+    651,
+    585,
+    641
+   ],
+   "jsRuns": [],
+   "maxJsMs": 11.053,
+   "jsMs": 42.838000000000015
+  },
+  {
+   "name": "open card: align",
+   "wallMs": 11292,
+   "error": null,
+   "longTasks": [
+    713,
+    707,
+    602,
+    616,
+    699,
+    709,
+    773,
+    626,
+    659,
+    731,
+    667,
+    689,
+    794,
+    795,
+    726,
+    677,
+    628,
+    719
+   ],
+   "jsRuns": [],
+   "maxJsMs": 3.547,
+   "jsMs": 19.254
+  },
+  {
+   "name": "open card: connect",
+   "wallMs": 11240,
+   "error": null,
+   "longTasks": [
+    605,
+    666,
+    759,
+    813,
+    739,
+    706,
+    757,
+    656,
+    623,
+    634,
+    646,
+    618,
+    666,
+    732,
+    683,
+    688,
+    717,
+    623,
+    646
+   ],
+   "jsRuns": [],
+   "maxJsMs": 6.752,
+   "jsMs": 27.293
+  },
+  {
+   "name": "open card: joins",
+   "wallMs": 11093,
+   "error": null,
+   "longTasks": [
+    655,
+    711,
+    681,
+    625,
+    670,
+    691,
+    686,
+    662,
+    743,
+    720,
+    730,
+    652,
+    638,
+    653,
+    616,
+    641,
+    623,
+    583
+   ],
+   "jsRuns": [],
+   "maxJsMs": 6.056,
+   "jsMs": 22.766000000000002
+  },
+  {
+   "name": "open card: seat",
+   "wallMs": 11230,
+   "error": null,
+   "longTasks": [
+    719,
+    649,
+    813,
+    680,
+    723,
+    607,
+    661,
+    656,
+    663,
+    705,
+    717,
+    651,
+    752,
+    729,
+    649,
+    592,
+    679,
+    702,
+    592
+   ],
+   "jsRuns": [],
+   "maxJsMs": 5.735,
+   "jsMs": 17.900000000000002
+  },
+  {
+   "name": "open card: supports",
+   "wallMs": 28584,
+   "error": null,
+   "longTasks": [
+    621,
+    728,
+    722,
+    774,
+    667,
+    698,
+    710,
+    660,
+    745,
+    669,
+    622,
+    632,
+    632,
+    16439,
+    869,
+    775,
+    714,
+    632,
+    659,
+    665
+   ],
+   "jsRuns": [
+    {
+     "startMs": 8317.335,
+     "ms": 16470.732,
+     "incl": [
+      [
+       "pick @ app-supports-card.js:570",
+       15024.854
+      ],
+      [
+       "open @ app-supports-card.js:1018",
+       15024.854
+      ],
+      [
+       "(anonymous) @ app-supports-card.js:1078",
+       15024.854
+      ],
+      [
+       "refresh @ app-supports-card.js:551",
+       9505.045
+      ],
+      [
+       "effective @ app-supports-card.js:193",
+       9443.268
+      ],
+      [
+       "detect @ app-supports-card.js:162",
+       9438.256
+      ]
+     ],
+     "self": [
+      [
+       "Go @ three.min.js:6",
+       4733.733
+      ],
+      [
+       "make @ nso_support_aim.js:532",
+       3129.31
+      ],
+      [
+       "detect @ nso_support_beacons.js:287",
+       1518.401
+      ],
+      [
+       "(garbage collector) @ (native):0",
+       1407.286
+      ]
+     ]
+    }
+   ],
+   "maxJsMs": 16470.732,
+   "jsMs": 16500.565
+  },
+  {
+   "name": "open card: add",
+   "wallMs": 11635,
+   "error": null,
+   "longTasks": [
+    656,
+    658,
+    681,
+    772,
+    750,
+    668,
+    750,
+    703,
+    813,
+    682,
+    712,
+    708,
+    740,
+    742,
+    715,
+    706,
+    737,
+    709,
+    651
+   ],
+   "jsRuns": [
+    {
+     "startMs": 5747.099,
+     "ms": 80.48,
+     "incl": [
+      [
+       "animate @ app-core.js:959",
+       1.212
+      ]
+     ],
+     "self": [
+      [
+       "(garbage collector) @ (native):0",
+       77.408
+      ],
+      [
+       "elementState @ (native):6955",
+       0.643
+      ],
+      [
+       "set @ three.min.js:6",
+       0.626
+      ],
+      [
+       "getAriaRole @ (native):2941",
+       0.611
+      ]
+     ]
+    }
+   ],
+   "maxJsMs": 80.48,
+   "jsMs": 112.88799999999999
+  },
+  {
+   "name": "open card: bit",
+   "wallMs": 10603,
+   "error": null,
+   "longTasks": [
+    748,
+    740,
+    760,
+    742,
+    686,
+    760,
+    776,
+    759,
+    783,
+    888,
+    713,
+    733,
+    738,
+    788,
+    801
+   ],
+   "jsRuns": [],
+   "maxJsMs": 4.313,
+   "jsMs": 23.914999999999992
+  },
+  {
+   "name": "open card: shape",
+   "wallMs": 11240,
+   "error": null,
+   "longTasks": [
+    672,
+    727,
+    778,
+    674,
+    748,
+    671,
+    743,
+    676,
+    646,
+    616,
+    655,
+    673,
+    722,
+    684,
+    702,
+    660,
+    678,
+    693
+   ],
+   "jsRuns": [],
+   "maxJsMs": 5.118,
+   "jsMs": 18.324
+  },
+  {
+   "name": "open card: paint",
+   "wallMs": 11935,
+   "error": null,
+   "longTasks": [
+    680,
+    768,
+    756,
+    763,
+    744,
+    667,
+    702,
+    800,
+    727,
+    799,
+    814,
+    735,
+    741,
+    696,
+    660,
+    683,
+    663,
+    885
+   ],
+   "jsRuns": [],
+   "maxJsMs": 3.952,
+   "jsMs": 15.105
+  },
+  {
+   "name": "open card: surface",
+   "wallMs": 11624,
+   "error": null,
+   "longTasks": [
+    876,
+    784,
+    794,
+    730,
+    780,
+    726,
+    720,
+    654,
+    658,
+    692,
+    727,
+    709,
+    783,
+    639,
+    669,
+    721,
+    718,
+    707,
+    708
+   ],
+   "jsRuns": [],
+   "maxJsMs": 4.538,
+   "jsMs": 25.657
+  },
+  {
+   "name": "open card: sculpt",
+   "wallMs": 11714,
+   "error": null,
+   "longTasks": [
+    643,
+    698,
+    695,
+    698,
+    688,
+    756,
+    665,
+    722,
+    799,
+    835,
+    771,
+    696,
+    674,
+    795,
+    748,
+    760,
+    695
+   ],
+   "jsRuns": [],
+   "maxJsMs": 3.099,
+   "jsMs": 14.221999999999998
+  },
+  {
+   "name": "open card: repair",
+   "wallMs": 11583,
+   "error": null,
+   "longTasks": [
+    746,
+    781,
+    776,
+    717,
+    697,
+    708,
+    658,
+    716,
+    755,
+    671,
+    656,
+    694,
+    746,
+    785,
+    637,
+    621,
+    727,
+    692
+   ],
+   "jsRuns": [],
+   "maxJsMs": 3.805,
+   "jsMs": 14.463999999999999
+  },
+  {
+   "name": "To plate",
+   "wallMs": 17025,
+   "error": null,
+   "longTasks": [
+    653,
+    626,
+    763,
+    795,
+    827,
+    750,
+    719,
+    740,
+    721,
+    690,
+    741,
+    5683,
+    758,
+    685,
+    777,
+    790,
+    741,
+    682,
+    643
+   ],
+   "jsRuns": [
+    {
+     "startMs": 7415.715,
+     "ms": 5687.244,
+     "incl": [
+      [
+       "refreshOutline @ app-sel-outline.js:19",
+       5305.342
+      ],
+      [
+       "wrapped @ app-cth.js:45",
+       5305.342
+      ],
+      [
+       "bringSelectedToPlate @ app-core.js:3650",
+       5305.342
+      ],
+      [
+       "(anonymous) @ app-join.js:3661",
+       5305.342
+      ],
+      [
+       "animate @ app-core.js:959",
+       5.637
+      ]
+     ],
+     "self": [
+      [
+       "Go @ three.min.js:6",
+       4780.645
+      ],
+      [
+       "(garbage collector) @ (native):0",
+       372.048
+      ],
+      [
+       "refreshOutline @ app-sel-outline.js:19",
+       333.605
+      ],
+      [
+       "dot @ three.min.js:6",
+       106.669
+      ]
+     ]
+    }
+   ],
+   "maxJsMs": 5687.244,
+   "jsMs": 5725.9
+  },
+  {
+   "name": "open card: cut",
+   "wallMs": 16685,
+   "error": null,
+   "longTasks": [
+    682,
+    686,
+    675,
+    652,
+    682,
+    744,
+    725,
+    689,
+    711,
+    722,
+    664,
+    5987,
+    811,
+    705,
+    740,
+    786,
+    791,
+    695
+   ],
+   "jsRuns": [
+    {
+     "startMs": 7246.13,
+     "ms": 5985.494,
+     "incl": [
+      [
+       "(anonymous) @ app-cut.js:489",
+       5408.627
+      ],
+      [
+       "MutationObserver.observe.attributes @ app-cut.js:488",
+       5408.627
+      ],
+      [
+       "openCutter @ app-cut.js:429",
+       5402.543
+      ],
+      [
+       "next @ app-seat-grid.js:344",
+       5400.004
+      ],
+      [
+       "window.selectPlaced @ app-sel-outline.js:46",
+       5399.421
+      ],
+      [
+       "wrapped @ app-split-parts.js:283",
+       5399.421
+      ]
+     ],
+     "self": [
+      [
+       "Go @ three.min.js:6",
+       4605.035
+      ],
+      [
+       "(garbage collector) @ (native):0",
+       567.321
+      ],
+      [
+       "refreshOutline @ app-sel-outline.js:19",
+       310.986
+      ],
+      [
+       "NSO_cropBounds @ app-crop.js:56",
+       109.328
+      ]
+     ]
+    }
+   ],
+   "maxJsMs": 5985.494,
+   "jsMs": 6023.095
+  },
+  {
+   "name": "Cut blade appears (click piece)",
+   "wallMs": 5604,
+   "error": null,
+   "longTasks": [
+    707,
+    711,
+    687,
+    753,
+    237,
+    710,
+    658,
+    692,
+    713,
+    744
+   ],
+   "jsRuns": [
+    {
+     "startMs": 2363.745,
+     "ms": 237.97,
+     "incl": [
+      [
+       "onCanvasPointerDown @ app-core.js:2915",
+       228.645
+      ],
+      [
+       "cutTFromPointer @ app-core.js:2693",
+       168.22
+      ],
+      [
+       "updateCutHelper @ app-crop.js:1416",
+       131.747
+      ],
+      [
+       "NSO_cropSyncUI @ app-crop.js:1224",
+       115.955
+      ],
+      [
+       "NSO_cropSyncUI @ app-crop.js:1791",
+       115.955
+      ],
+      [
+       "NSO_cropSyncUI @ app-crop.js:2582",
+       115.955
+      ]
+     ],
+     "self": [
+      [
+       "NSO_cropBounds @ app-crop.js:56",
+       54.296
+      ],
+      [
+       "setFromBufferAttribute @ three.min.js:6",
+       42.853
+      ],
+      [
+       "getX @ three.min.js:6",
+       29.958
+      ],
+      [
+       "NSO_cropResolveBox @ app-crop.js:125",
+       28.031
+      ]
+     ]
+    }
+   ],
+   "maxJsMs": 237.97,
+   "jsMs": 244.18
+  },
+  {
+   "name": "Cut blade: 20 hovers/drag-free moves",
+   "wallMs": 14722,
+   "error": null,
+   "longTasks": [
+    612,
+    648,
+    784,
+    786,
+    845,
+    795,
+    750,
+    716,
+    664,
+    691,
+    654,
+    767,
+    789,
+    646,
+    654,
+    683,
+    682,
+    681,
+    708,
+    855,
+    716,
+    755,
+    654
+   ],
+   "jsRuns": [
+    {
+     "startMs": 2464.959,
+     "ms": 76.665,
+     "incl": [
+      [
+       "animate @ app-core.js:959",
+       1.255
+      ]
+     ],
+     "self": [
+      [
+       "(garbage collector) @ (native):0",
+       74.73
+      ],
+      [
+       "Ut @ three.min.js:6",
+       0.638
+      ],
+      [
+       "updateWorldMatrix @ three.min.js:6",
+       0.617
+      ]
+     ]
+    }
+   ],
+   "maxJsMs": 76.665,
+   "jsMs": 94.02899999999998
+  },
+  {
+   "name": "arm Lift",
+   "wallMs": 11636,
+   "error": null,
+   "longTasks": [
+    567,
+    640,
+    651,
+    642,
+    782,
+    680,
+    607,
+    708,
+    669,
+    673,
+    720,
+    735,
+    603,
+    632,
+    758,
+    656,
+    652,
+    646,
+    716,
+    682
+   ],
+   "jsRuns": [],
+   "maxJsMs": 3.017,
+   "jsMs": 25.929999999999996
+  },
+  {
+   "name": "Lift armed: 20 hovers",
+   "wallMs": 27750,
+   "error": null,
+   "longTasks": [
+    666,
+    651,
+    682,
+    681,
+    651,
+    627,
+    645,
+    645,
+    710,
+    782,
+    813,
+    668,
+    688,
+    745,
+    712,
+    661,
+    630,
+    655,
+    685,
+    677,
+    581,
+    747,
+    700,
+    710,
+    698,
+    684,
+    729,
+    657,
+    660,
+    709,
+    704,
+    723,
+    751,
+    690,
+    702,
+    708,
+    691,
+    692,
+    737,
+    667,
+    635,
+    677,
+    690
+   ],
+   "jsRuns": [],
+   "maxJsMs": 6.214,
+   "jsMs": 32.147
+  }
+ ]
+}

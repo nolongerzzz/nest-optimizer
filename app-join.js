@@ -1,10 +1,13 @@
 function updateJoinUI() {
   const a = state.models.find(function (x) { return x.id === state.editId && state.joinSession; });
   const b = state.models.find(function (x) { return x.id === state.joinPartnerId; });
+  const c = state.models.find(function (x) { return x.id === state.joinThirdId; });
   const nameA = document.getElementById('join-name-a');
   const nameB = document.getElementById('join-name-b');
+  const nameC = document.getElementById('join-name-c');
   const slotA = document.getElementById('join-slot-a');
   const slotB = document.getElementById('join-slot-b');
+  const slotC = document.getElementById('join-slot-c');
   const step = document.getElementById('join-step');
   const btn = document.getElementById('btn-join');
   if (nameA) {
@@ -19,6 +22,12 @@ function updateJoinUI() {
       ? (b.name + (face ? ' · ' + face.axis.toUpperCase() + (face.sign > 0 ? '+' : '-') : ''))
       : 'Pick piece B';
   }
+  if (nameC) {
+    const face = state.joinFaceC;
+    nameC.textContent = c
+      ? (c.name + (face ? ' · ' + face.axis.toUpperCase() + (face.sign > 0 ? '+' : '-') : ''))
+      : 'Pick piece C (optional)';
+  }
   const faceBtn = document.getElementById('btn-join-faces');
   if (faceBtn) {
     faceBtn.classList.toggle('tool-active', !!state.joinUseFaces);
@@ -31,6 +40,10 @@ function updateJoinUI() {
   if (slotB) {
     slotB.classList.toggle('filled-b', !!state.joinPartnerId);
     slotB.classList.toggle('armed', state.joinArmed === 'b');
+  }
+  if (slotC) {
+    slotC.classList.toggle('filled-c', !!state.joinThirdId);
+    slotC.classList.toggle('armed', state.joinArmed === 'c');
   }
   if (btn) btn.disabled = !(state.joinSession && state.editId && state.joinPartnerId && state.editId !== state.joinPartnerId);
   const btnSub = document.getElementById('btn-subtract');
@@ -45,13 +58,18 @@ function updateJoinUI() {
   // Center lock rides the same A+B precondition; its own module owns the
   // armed/target label on the pick button.
   if (window.NSO_CenterLock) window.NSO_CenterLock.syncUI();
+  // Same for the card's gap rows, toggle and readout (app-join-triple.js),
+  // off the very same A/B/C slots.
+  if (window.NSO_TripleJoin) window.NSO_TripleJoin.syncUI();
   if (step) {
     if (!state.joinSession) step.textContent = '1. Start Join';
     else if (state.joinArmed === 'a') step.textContent = '2. Click piece A on the plate or list';
     else if (!state.editId) step.textContent = '2. Click Pick A';
     else if (state.joinArmed === 'b') step.textContent = '3. Click piece B on the plate or list';
     else if (!state.joinPartnerId) step.textContent = '3. Click Pick B';
-    else step.textContent = '4. Align / slide B along the wall, then Complete Join';
+    else if (state.joinArmed === 'c') step.textContent = '4. Click piece C on the plate or list';
+    else if (state.joinThirdId) step.textContent = '4. Set a gap per junction, then JOIN';
+    else step.textContent = '4. Set the A-B gap (or none), then JOIN';
   }
   paintJoinHighlights();
 }
@@ -62,6 +80,7 @@ function assignJoinClick(id, face) {
   const useFace = face || null;
   if (state.joinArmed === 'a') {
     if (id === state.joinPartnerId) { state.joinPartnerId = null; state.joinFaceB = null; }
+    if (id === state.joinThirdId) { state.joinThirdId = null; state.joinFaceC = null; }
     state.editId = id;
     state.joinHullId = id;
     state.joinFaceA = useFace;
@@ -69,8 +88,18 @@ function assignJoinClick(id, face) {
     state.joinArmed = null;
   } else if (state.joinArmed === 'b') {
     if (id === state.editId) return;
+    if (id === state.joinThirdId) { state.joinThirdId = null; state.joinFaceC = null; }
     state.joinPartnerId = id;
     state.joinFaceB = useFace;
+    state.joinArmed = null;
+  } else if (state.joinArmed === 'c') {
+    /* Three DISTINCT pieces, or the sequence is not a sequence: C == A would
+       ask the second junction to seat A onto B having just seated B onto A,
+       and C == B would ask B to seat onto itself. Refusing the click leaves
+       the slot armed, so the next click can be the right piece. */
+    if (id === state.editId || id === state.joinPartnerId) return;
+    state.joinThirdId = id;
+    state.joinFaceC = useFace;
     state.joinArmed = null;
   }
   renderModelList();
@@ -86,6 +115,8 @@ function startJoinSession() {
   state.joinHullId = null;
   state.joinFaceA = null;
   state.joinFaceB = null;
+  state.joinThirdId = null;
+  state.joinFaceC = null;
   state.joinSlideAxis = null;
   if (typeof removeFaceHelper === 'function') removeFaceHelper();
   state.editId = null;
@@ -94,6 +125,41 @@ function startJoinSession() {
   if (typeof paintJoinHighlights === 'function') paintJoinHighlights();
   renderModelList();
   updateJoinUI();
+}
+
+/* No Start Join: the Join column is the switch. Opening it starts the session
+   (startJoinSession, what the button ran) and shows the Join card, with its
+   slots, at once; shutting it with the column button again, with Escape, or by
+   the leave-tool gesture is Cancel (clearJoinSlots). A session already
+   live is kept as it is: Seat, Align and Center lock work on the A and B the
+   Join card holds, so opening one of THEIR columns shuts this one and leaves
+   the session standing - returning to Join finds the slots as they were. (The
+   card's Cancel clears the slots and leaves the card open.) A MutationObserver
+   on `open`, for the reason the one-panel rule below gives. */
+function joinWireCard() {
+  const menu = document.getElementById('menu-joins');
+  if (!menu || menu.dataset.nsoWired === '1') return;
+  menu.dataset.nsoWired = '1';
+  const anotherOpen = function () {
+    return Array.prototype.some.call(document.querySelectorAll('.vp-menu[open]'),
+      function (d) { return d !== menu && !menu.contains(d); });
+  };
+  const show = function () {
+    if (!state.joinSession) startJoinSession();
+  };
+  if (typeof MutationObserver === 'function') {
+    new MutationObserver(function () {
+      if (menu.open) show();
+      else if (!anotherOpen()) clearJoinSlots();
+    }).observe(menu, { attributes: true, attributeFilter: ['open'] });
+  }
+  window.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape' || e.defaultPrevented || !menu.open) return;
+    const tag = (e.target && e.target.tagName) || '';
+    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+    menu.open = false;
+  });
+  if (menu.open) show();
 }
 
 function armJoinSlot(slot) {
@@ -109,6 +175,8 @@ function clearJoinSlots() {
   state.joinHullId = null;
   state.joinFaceA = null;
   state.joinFaceB = null;
+  state.joinThirdId = null;
+  state.joinFaceC = null;
   state.joinUseFaces = false;
   state.joinSlideAxis = null;
   // The Center lock target was picked on a piece in slot A; leaving Join
@@ -138,7 +206,7 @@ function clearJoinSlots() {
 
 var NSO_EPS = 1e-7;
 
-function NSO_soupLen(s) { return (s && s.length) ? (s.length / 9) | 0 : 0; }
+/* NSO_soupLen: nso_csg.js */
 
 /* ---- 1. World soup from a PLACED mesh (position + quaternion + scale + lift) ---- */
 
@@ -191,6 +259,34 @@ function NSO_geomToWorldSoup(geometry, px, py, pz, quatOrEuler, scale) {
 
   var fake = { geometry: geometry, matrixWorld: m, updateWorldMatrix: function () {} };
   return meshToWorldSoup(fake);
+}
+
+/* Rotates a RAW ('zup') soup by a placed piece's CURRENT pose - rotation
+   only, no translation, about the piece's own origin (raw soups, like the
+   display geometry they come from, are centered there).
+
+   Planar fuse (Join Route 0) works on raw soups on purpose - the same caps
+   in display/placed space carry kerf-offset seed vertices that break exact
+   congruence (see the route's own comment in joinSelectedModels). But raw
+   and display axes differ by a fixed permutation (displayGeometryToRawSoup:
+   raw = (x, -z, y)), while a piece's pose (mesh.quaternion, built by
+   applyMeshRotation) is defined in DISPLAY space. Applying it to raw
+   coordinates directly would rotate around the wrong axes, so each vertex
+   is round-tripped through display space: raw -> display -> rotate ->
+   raw. Identity pose in, unchanged soup out. */
+function NSO_rotateRawSoupByPlacedPose(soup, placed) {
+  if (!soup || !soup.length) return soup;
+  if (!placed || !placed.mesh || typeof nsoPlacedIsPosed !== 'function' || !nsoPlacedIsPosed(placed)) return soup;
+  var q = placed.mesh.quaternion;
+  var out = new Float32Array(soup.length);
+  var v = new THREE.Vector3();
+  for (var i = 0; i < soup.length; i += 3) {
+    var rx = soup[i], ry = soup[i + 1], rz = soup[i + 2];
+    v.set(rx, rz, -ry);          // raw -> display
+    v.applyQuaternion(q);
+    out[i] = v.x; out[i + 1] = -v.z; out[i + 2] = v.y;   // display -> raw
+  }
+  return out;
 }
 
 /* ---- soup <-> geometry ---- */
@@ -500,13 +596,131 @@ function NSO_signedDistToHull(grid, x, y, z) {
 
 /* ---- plug frame: which local box face is the outer face ---- */
 
+/* Does a corner ray from this face find the hull at all?
+
+   The same existence question NSO_nearestSkinHit answers - a hit at t > 0
+   along the punch or back along it - but it stops at the first one instead of
+   ranking them, because the axis chooser only needs to know whether the face
+   can see the hull, not where. */
+function NSO_seatRayReaches(soup, o, dir) {
+  var i, t;
+  for (i = 0; i < soup.length; i += 9) {
+    t = NSO_rayTri(o.x, o.y, o.z, dir.x, dir.y, dir.z,
+      soup[i], soup[i + 1], soup[i + 2], soup[i + 3], soup[i + 4], soup[i + 5],
+      soup[i + 6], soup[i + 7], soup[i + 8]);
+    if (t > 0) return true;
+  }
+  for (i = 0; i < soup.length; i += 9) {
+    t = NSO_rayTri(o.x, o.y, o.z, -dir.x, -dir.y, -dir.z,
+      soup[i], soup[i + 1], soup[i + 2], soup[i + 3], soup[i + 4], soup[i + 5],
+      soup[i + 6], soup[i + 7], soup[i + 8]);
+    if (t > 0) return true;
+  }
+  return false;
+}
+
+/* Would the corner-ray fit be able to work off this candidate face? Asked the
+   way the fit itself asks it: the four corners of that face, inset by
+   NSO_SEAT_RAY_INSET exactly as NSO_seatRayOrigins does, each cast along that
+   candidate's punch. All four, because the fit refuses on the first miss. */
+function NSO_seatFaceReaches(matrix, box, axis, sign, normal, aWorld) {
+  var corners = NSO_outerFaceCorners({
+    matrix: matrix, box: box, axis: axis, sign: sign,
+    capCoord: (sign > 0) ? box.max.getComponent(axis) : box.min.getComponent(axis)
+  });
+  var origins = NSO_seatRayOrigins(corners);
+  var punch = normal.clone().negate();
+  for (var i = 0; i < origins.length; i++) {
+    if (!NSO_seatRayReaches(aWorld, origins[i], punch)) return false;
+  }
+  return true;
+}
+
 /* ============================================================
    NSO_plugFrame  (patched — shape-agnostic axis selection)
+
+   THE CENTROID VECTOR IS A TIE-BREAK, NOT A DIRECTION.
+
+   The six candidate faces are ranked by what a step out of and into each one
+   meets: out of the hull and into it is a real seat axis (2), out of it only
+   is a bit standing clear (1), and into it is the wrong way round (-1). Only
+   when two candidates share a rank does `outward` - hull bbox centre to bit
+   centre - decide, and it is scaled to 0.01 to say so.
+
+   A bit standing clear of the hull puts ALL SIX candidates on rank 1: nothing
+   steps into a hull the bit is nowhere near. That is not an unusual pose, it
+   is the pose the seat deliberately creates - NSO_raiseBuriedBitClear lifts a
+   dragged bit 5 mm above the hull's top before every seat - so the whole
+   decision fell to the tie-break, and the tie-break is a centroid vector. Drag
+   the bit across a wide flat target and the plan offset overtakes the height
+   difference: on the 80 x 40 x 20 library hull with the 12 x 8 x 8 library
+   bit, past 19 mm off centre `outward` leans +X, the chooser calls the bit's
+   +X face the outer face, and the fit punches sideways through empty air ~13
+   mm above the hull. Every corner ray misses and the seat refuses with
+   "corner 0 missed hull along punch axis" - corner 0 only because it is the
+   one tested first. Over half of that target's top face was unseatable, with
+   both Seat buttons, for any bit. See tools/nso_seat_box_on_box_test.js.
+
+   So when the rank ties at the top, ask the question the fit is about to ask:
+   can the corner rays off this face find the hull at all? A face whose rays
+   all land stays in; one whose rays fly off into space is dropped, and
+   `outward` breaks whatever tie is left, exactly as before. Ranks are
+   untouched, the reach test only ever runs on a tie, and it can only change
+   the answer where the losing face was one the fit would have refused.
    ============================================================ */
+/* The bit's frame is the piece's frame - pieceFrame (nso-bounds.js), the one
+   every tool reads: its footprint's long side, the plate vertical and its
+   short side. A pose is baked into the geometry when it ends (app-core.js
+   nsoBakePlacedPose), so the geometry's own box is the box of a turned piece,
+   not the piece's: its faces stand off it in the air. The box here is the
+   bit's box in the frame's axes, carried by matrix x basis. A bit whose frame
+   is its own axes (each frame axis one of them, either sense - a piece lying
+   square) keeps its own box exactly: null basis.
+
+   HELD for the geometry. The basis is in the mesh's own terms, so it turns
+   with the mesh, and it is kept for as long as the mesh has that geometry:
+   a seat's fit turns the bit on its mesh step by step and asks for its frame
+   at every step, and the frame it fits by must be the one it started from,
+   not one re-measured off the half-turned bit (as a drag holds its frame from
+   press to release). A pose action bakes into new geometry, and the frame is
+   measured again off that. */
+function NSO_plugBasis(bitMesh) {
+  if (typeof nsoBounds === 'undefined' || !nsoBounds.pieceFrame) return null;
+  var g = bitMesh.geometry, pos = g && g.attributes && g.attributes.position;
+  var held = bitMesh.userData.nsoPlugBasis;
+  if (held && held.g === g && held.pos === pos && held.version === (pos ? pos.version : -1)) {
+    return held.basis ? held.basis.clone() : null;
+  }
+  var f = nsoBounds.pieceFrame(bitMesh);
+  var basis = null;
+  if (f) {
+    var inv = new THREE.Matrix4().copy(bitMesh.matrixWorld).invert();
+    var e = [f.long, f.up, f.short].map(function (v) { return v.clone().transformDirection(inv); });
+    var onAxis = e.every(function (v) {
+      return Math.max(Math.abs(v.x), Math.abs(v.y), Math.abs(v.z)) > 1 - 1e-9;
+    });
+    basis = onAxis ? null : new THREE.Matrix4().makeBasis(e[0], e[1], e[2]);
+  }
+  bitMesh.userData.nsoPlugBasis = { g: g, pos: pos, version: pos ? pos.version : -1, basis: basis };
+  return basis ? basis.clone() : null;
+}
+function NSO_boxInBasis(geometry, basis) {
+  var pos = geometry.attributes.position, el = basis.elements, box = new THREE.Box3(), v = new THREE.Vector3();
+  var c = [[el[0], el[1], el[2]], [el[4], el[5], el[6]], [el[8], el[9], el[10]]];
+  for (var i = 0; i < pos.count; i++) {
+    var x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    box.expandByPoint(v.set(c[0][0] * x + c[0][1] * y + c[0][2] * z,
+                            c[1][0] * x + c[1][1] * y + c[1][2] * z,
+                            c[2][0] * x + c[2][1] * y + c[2][2] * z));
+  }
+  return box;
+}
 function NSO_plugFrame(bitMesh, hullCenterWorld, aWorld) {
   bitMesh.updateWorldMatrix(true, false);
-  var box = NSO_localAABB(bitMesh.geometry);
+  var basis = NSO_plugBasis(bitMesh);
+  var box = basis ? NSO_boxInBasis(bitMesh.geometry, basis) : NSO_localAABB(bitMesh.geometry);
   var M = bitMesh.matrixWorld.clone();
+  if (basis) M.multiply(basis);
 
   var plugCenterLocal = new THREE.Vector3();
   box.getCenter(plugCenterLocal);
@@ -521,16 +735,15 @@ function NSO_plugFrame(bitMesh, hullCenterWorld, aWorld) {
   outward.normalize();
 
   var haveSoup = aWorld && NSO_soupLen(aWorld);
-  var axis = 1, sign = 1, bestN = new THREE.Vector3(0, 1, 0);
   var cand = new THREE.Vector3(), probeOut = new THREE.Vector3(), probeIn = new THREE.Vector3();
-  var bestScore = -Infinity;
+  var cands = [];
 
   for (var a = 0; a < 3; a++) {
     var half = Math.max(extent.getComponent(a) * 0.5, 0.5);
     var margin = half + Math.max(0.75, half * 0.25);
     for (var s = -1; s <= 1; s += 2) {
       cand.set(0, 0, 0).setComponent(a, s).applyMatrix3(nm).normalize();
-      var score;
+      var rank, tie;
       if (haveSoup) {
         probeOut.copy(plugCenterWorld).addScaledVector(cand, margin);
         probeIn.copy(plugCenterWorld).addScaledVector(cand, -margin);
@@ -539,14 +752,34 @@ function NSO_plugFrame(bitMesh, hullCenterWorld, aWorld) {
         /* real seat axis: stepping out clears the hull AND stepping in stays
            inside it. Local + shape-agnostic, so it holds on a stepped/
            non-convex hull, unlike a single whole-hull centroid vector. */
-        score = (outOK && inOK) ? 2 : (outOK ? 1 : -1);
-        score += cand.dot(outward) * 0.01; // tie-break only
+        rank = (outOK && inOK) ? 2 : (outOK ? 1 : -1);
+        tie = cand.dot(outward) * 0.01; // tie-break only
       } else {
-        score = cand.dot(outward);
+        rank = 0;
+        tie = cand.dot(outward);
       }
-      if (score > bestScore) { bestScore = score; axis = a; sign = s; bestN.copy(cand); }
+      cands.push({ a: a, s: s, n: cand.clone(), rank: rank, tie: tie });
     }
   }
+
+  /* the top rank, and - when more than one candidate shares it - only those
+     of them whose corner rays actually find the hull */
+  var i, topRank = -Infinity;
+  for (i = 0; i < cands.length; i++) if (cands[i].rank > topRank) topRank = cands[i].rank;
+  var pool = [];
+  for (i = 0; i < cands.length; i++) if (cands[i].rank === topRank) pool.push(cands[i]);
+  if (haveSoup && pool.length > 1) {
+    var reaching = [];
+    for (i = 0; i < pool.length; i++) {
+      if (NSO_seatFaceReaches(M, box, pool[i].a, pool[i].s, pool[i].n, aWorld)) reaching.push(pool[i]);
+    }
+    if (reaching.length) pool = reaching;
+  }
+
+  /* first of the best, in the candidate order the loop above built */
+  var best = pool[0];
+  for (i = 1; i < pool.length; i++) if (pool[i].tie > best.tie) best = pool[i];
+  var axis = best.a, sign = best.s, bestN = best.n;
 
   return {
     matrix: M,
@@ -710,12 +943,40 @@ function NSO_newellNormal(pts) {
    corner-ray path unchanged, byte for byte (reference: 'plane').
    ============================================================ */
 
+/* a relief is at least one printed layer tall; Float32 flat-face noise is ~1e-6 */
+var NSO_SEAT_TIPS_TOL = 0.01;
+
 /* How much of the bit may sit across the target face before the seat calls it
    an overhang rather than its own handiwork. A flush seat leaves the outer
    face 0.01 mm proud of the skin and the gap slider's overlap end (+0.05)
    leaves the mating face 0.05 mm inside it, so both of those must re-seat,
    not refuse; anything past this is a real protrusion the user put there. */
 var NSO_SEAT_STRADDLE_TOL = 0.1;
+
+/* How far off a GAP seat may end up and still be called a seat.
+
+   The gap slider runs -0.25 .. +0.05, so 0.25 mm is the largest offset the
+   control can ask for at all. A seat whose own read-back says the reference
+   face landed further than that from the offset requested has not done what
+   the slider said, whatever else it did, and "Seated" is the wrong word for
+   it. Every seat the suites pin measures 0.00; this only ever fires where the
+   fit did not converge.
+
+   Gap mode only. `proud` mode is the plug seat, and its residual on a curve is
+   a measured, deliberately-pinned limitation (docs/SEAT-SURFACE.md finding c,
+   tools/nso_seat_curved_audit.js section 3) rather than a failure to place -
+   changing it would retire a finding this repo is still carrying. */
+var NSO_SEAT_GAP_RESIDUAL_LIMIT = 0.25;
+
+/* What a gap seat says when it did not land where it was asked to. Names the
+   two numbers, because "Seat failed" on its own says nothing about whether the
+   pieces or the pose are the problem. */
+function NSO_seatResidualReason(resid, gap) {
+  return 'the fit ended ' + resid.toFixed(2) + ' mm off the '
+    + Math.abs(Number(gap)).toFixed(2) + ' mm that was asked for - the surface under '
+    + 'the bit is too steeply angled to the bit for the corner-ray fit to settle on it. '
+    + 'Square the two up (Tip on face, or the Tilt arrows) and seat again';
+}
 
 /* The bed baseline, in Float: a settled world-box bottom lands on 0.2 to
    within rounding, so a lift measured back off it can come out a hair
@@ -769,11 +1030,42 @@ function NSO_seatStraddle(hull, bitMesh, hullCenter, off) {
   return { proudBy: proudBy, corners: cut, depth: depth, normal: fr.outerNormal.clone() };
 }
 
-/* a relief is at least one printed layer tall; Float32 flat-face noise is ~1e-6 */
-var NSO_SEAT_TIPS_TOL = 0.01;
-
 /* The tips probe: null when the hull under the bit is flat (or NSO_Skin is
-   not loaded), else { s, sPlane, rise, point, hits }. Pure - moves nothing. */
+   not loaded), else { s, sPlane, rise, point, hits }. Pure - moves nothing.
+
+   THE RELIEF IS MEASURED AGAINST THE PLANE OF THE FOUR HITS, NOT THEIR MEAN.
+
+   `rise` picks which of the two seats runs. Over NSO_SEAT_TIPS_TOL the bit is
+   set against the tips UNTILTED; under it the corner-ray fit runs and tilts
+   the bit onto the face. So `rise` has to answer one question and only that
+   one: does the surface under the bit stand proud of the face the corner rays
+   found?
+
+   It used to be `ext.s - mean(hit . n)` - an extreme height against an AVERAGE
+   height, both along the BIT's own normal. Those two agree only while the face
+   is square to that normal. Tilt either piece by one press of the Tilt arrows
+   and the four hits sit at four different heights along n, their mean lands at
+   the middle of the face, and the highest point of that same FLAT face stands
+   above the mean by half the face's rise across the footprint: 1.07 mm at 15
+   degrees, 2.31 mm at 30, 4.00 mm at 45, on the plain flat top of
+   library/box_hull_80x40x20.stl. Every one of those is a hundred times
+   NSO_SEAT_TIPS_TOL, so a flat box top was called a contact skin and seated
+   with the tilt fit skipped: the bit left parallel to the plate, hanging off
+   the high edge of the slope and touching nothing, at a true shell-to-shell
+   separation of 0.174 / 0.156 / 0.127 mm while the status line read
+   `measured -0.180mm, skin error 0.00mm`. The tips path measures its own
+   residuals against the very extreme it positioned from, so that wrong seat
+   read exactly like a right one. See tools/nso_seat_tilted_face_test.js.
+
+   The plane through the four hits is the quantity that was meant, and the fit
+   already builds it - NSO_newellNormal of the hit quad is the plane it tilts
+   onto. A flat face at ANY angle puts its own extreme point IN that plane, so
+   the rise comes out as Float32 noise and the corner-ray path runs, byte for
+   byte as it did before the tips reference existed. A real relief still stands
+   its tip height proud of the plane its valleys' rays found, so the skin case
+   is untouched. A hit quad with no Newell normal, or one so edge-on to the
+   bit's own normal that the projection means nothing, keeps the old mean -
+   which is what a four-hit average is for. */
 function NSO_seatTipsProbe(hull, bitMesh, hullCenter) {
   if (typeof NSO_Skin === 'undefined' || !NSO_Skin || !NSO_Skin.supportExtreme) return null;
   var fr = NSO_plugFrame(bitMesh, hullCenter, hull);
@@ -793,8 +1085,19 @@ function NSO_seatTipsProbe(hull, bitMesh, hullCenter) {
     sSum += h.dot(nrm);
   }
   var sPlane = sSum / 4;
-  return { s: ext.s, sPlane: sPlane, rise: ext.s - sPlane,
-           point: new THREE.Vector3(ext.point[0], ext.point[1], ext.point[2]), hits: hits };
+  var extPt = new THREE.Vector3(ext.point[0], ext.point[1], ext.point[2]);
+  var rise = ext.s - sPlane;              /* the fallback, and what it used to be */
+  var nFit = NSO_newellNormal(hits);
+  if (nFit) {
+    if (nFit.dot(nrm) < 0) nFit.negate();
+    if (nFit.dot(nrm) > 1e-3) {
+      var hitC = new THREE.Vector3();
+      for (i = 0; i < 4; i++) hitC.add(hits[i]);
+      hitC.multiplyScalar(0.25);
+      rise = extPt.clone().sub(hitC).dot(nFit);
+    }
+  }
+  return { s: ext.s, sPlane: sPlane, rise: rise, point: extPt, hits: hits };
 }
 
 function NSO_seatFlushBitToHull(hullMesh, bitMesh, opts) {
@@ -864,7 +1167,9 @@ function NSO_seatFlushBitToHull(hullMesh, bitMesh, opts) {
     bitMesh.position.addScaledVector(nT, (probe.s + off) - faceS);
     bitMesh.updateMatrixWorld(true);
 
-    var frR = NSO_plugFrame(bitMesh, hullCenter);
+    /* the same hull the fit was given, so the read-back cannot pick a
+       different face than the seat just used - see the note on frameF */
+    var frR = NSO_plugFrame(bitMesh, hullCenter, hullSoup);
     var cmR = NSO_matingFaceCorners(frR), coR = NSO_outerFaceCorners(frR);
     var residT = [], maxT = 0, tMin = Infinity, tMax = -Infinity, tSum = 0;
     for (var r0 = 0; r0 < 4; r0++) {
@@ -872,6 +1177,12 @@ function NSO_seatFlushBitToHull(hullMesh, bitMesh, opts) {
       residT.push(dvT);
       if (Math.abs(dvT - off) > maxT) maxT = Math.abs(dvT - off);
       tSum += dvT; if (dvT < tMin) tMin = dvT; if (dvT > tMax) tMax = dvT;
+    }
+    if (maxT > NSO_SEAT_GAP_RESIDUAL_LIMIT) {
+      bitMesh.position.copy(savedPos);
+      bitMesh.quaternion.copy(savedQuat);
+      bitMesh.updateMatrixWorld(true);
+      return { ok: false, residual: maxT, reason: NSO_seatResidualReason(maxT, gap) };
     }
     return {
       ok: true,
@@ -959,7 +1270,23 @@ function NSO_seatFlushBitToHull(hullMesh, bitMesh, opts) {
 
   /* residual report: how far each corner of the reference face ends up from
      the skin, against the offset that was asked for */
-  var frameF = NSO_plugFrame(bitMesh, hullCenter);
+  /* THE READ-BACK ASKS THE HULL, EXACTLY AS THE FIT DID.
+
+     This call used to omit the hull soup. Without it NSO_plugFrame has no
+     hull to probe and falls all the way back to the raw centroid rule - bit
+     centre minus hull bbox centre - which is the rule the fit itself stopped
+     trusting. So the report could name a different face than the seat had
+     just worked off: on the 80 x 40 library hull, a bit seated 25 mm off
+     centre was measured against its +X face, every corner ray missed, and
+     every number below went quietly soft - cornerResidual all NaN, maxResidual
+     left at its initial 0, gapAchieved NaN. seatBitAtGap then prints the gap
+     that was ASKED for as the one it MEASURED, and "skin error 0.00mm", on a
+     seat nothing checked. A wrong seat and a right one read identically.
+
+     Handing it hullSoup is the whole fix: the read-back and the fit now ask
+     one question of one hull, so the residuals describe the face the bit was
+     actually seated against. */
+  var frameF = NSO_plugFrame(bitMesh, hullCenter, hullSoup);
   var cf = NSO_outerFaceCorners(frameF);
   var cfRay = NSO_seatRayOrigins(cf);
   var cref = refInner ? NSO_matingFaceCorners(frameF) : cf;
@@ -976,6 +1303,13 @@ function NSO_seatFlushBitToHull(hullMesh, bitMesh, opts) {
     resid.push(dv);
     if (isFinite(dv) && Math.abs(dv - off) > maxResid) maxResid = Math.abs(dv - off);
     if (isFinite(dv)) { dN++; dSum += dv; if (dv < dMin) dMin = dv; if (dv > dMax) dMax = dv; }
+  }
+
+  if (hasGap && maxResid > NSO_SEAT_GAP_RESIDUAL_LIMIT) {
+    bitMesh.position.copy(savedPos);
+    bitMesh.quaternion.copy(savedQuat);
+    bitMesh.updateMatrixWorld(true);
+    return { ok: false, residual: maxResid, reason: NSO_seatResidualReason(maxResid, gap) };
   }
 
   var out = {
@@ -1104,474 +1438,9 @@ function NSO_farWallMarch(grid, ox, oy, oz, dir, maxDist, tol) {
   return null;
 }
 
-/* ============================================================
-   subtractSoupBFromA — soup-level pocket cut  (patched)
-   ============================================================ */
-/* =====================================================================
-   NSO_CSG -- real solid boolean kernel adapter (Manifold, WASM)
-   New code. Does not replace or call any existing centroid/ray logic.
-
-   Loaded via dynamic import() from jsDelivr at call time (no bundler in
-   this app). To vendor for real instead of CDN-loading:
-     1. npm i manifold-3d
-     2. copy node_modules/manifold-3d/manifold.js and manifold.wasm into
-        your repo (e.g. /vendor/manifold/)
-     3. point NSO_CSG_URL at that local manifold.js path
-   The rest of this adapter is unchanged either way.
-   ===================================================================== */
-
-var NSO_CSG_URL = 'https://cdn.jsdelivr.net/npm/manifold-3d@3.5.3/manifold.js';
-
-var NSO_CSG = (function () {
-  var _wasmPromise = null;
-
-  function load() {
-    if (!_wasmPromise) {
-      _wasmPromise = import(NSO_CSG_URL)
-        .then(function (mod) { return (mod.default || mod)(); })
-        .then(function (wasm) { wasm.setup(); return wasm; })
-        .catch(function (err) {
-          _wasmPromise = null; // don't cache a permanent failure -- allow retry next call
-          throw err;
-        });
-    }
-    return _wasmPromise;
-  }
-
-  // world-space triangle soup (Float32Array, 9 floats/tri, no shared index)
-  // -> wasm Manifold. Calls Mesh.merge() to weld coincident corner
-  // vertices, since soup has none shared -- this is what lets Manifold see
-  // the input as a solid instead of N disconnected triangles.
-  function soupToManifold(wasm, soup) {
-    var n = (soup.length / 9) | 0;
-    var vertProperties = (soup instanceof Float32Array) ? soup.slice() : new Float32Array(soup);
-    var triVerts = new Uint32Array(n * 3);
-    for (var i = 0; i < n * 3; i++) triVerts[i] = i;
-    var mesh = new wasm.Mesh({ numProp: 3, vertProperties: vertProperties, triVerts: triVerts });
-    mesh.merge();
-    return new wasm.Manifold(mesh);
-  }
-
-  function manifoldToSoup(manifold) {
-    var mesh = manifold.getMesh();
-    var vp = mesh.vertProperties;
-    var tv = mesh.triVerts;
-    var numProp = mesh.numProp || 3;
-    var out = new Float32Array(tv.length * 3);
-    var w = 0;
-    for (var t = 0; t < tv.length; t++) {
-      var vi = tv[t] * numProp;
-      out[w++] = vp[vi]; out[w++] = vp[vi + 1]; out[w++] = vp[vi + 2];
-    }
-    return out;
-  }
-
-  // Builds a solid box (as a real Manifold, via Manifold.cube) bounding the
-  // region it's safe to cut into: from just outside the bit's own outer tip
-  // (frame.capCoord, frame.axis/sign -- the bit's own local AABB, NOT the
-  // hull's), inward along frame.punch, stopping `minWall` short of wherever
-  // hull A's actual surface is found by ray-casting the real soup. This is
-  // deliberately NOT based on frame.box for depth -- frame.box is the bit's
-  // own bounding box (sized to the bit, ~mm), not the hull's, so it can't
-  // tell us how thick the hull's wall actually is; only a real hit test
-  // against aWorld can.
-  // Samples 5 points across the bit's own footprint (center + 4 inset
-  // corners) and takes the worst (shortest) safe depth, so a tilted or
-  // uneven wall doesn't get punched through at one corner.
-  // Returns a world-space Manifold, or null if the bit doesn't reach the
-  // hull anywhere, or there's no room to cut within minWall.
-  function buildCutVolume(wasm, frame, aWorld, minWall) {
-    var axis = frame.axis, sign = frame.sign;
-    var axB = (axis + 1) % 3, axC = (axis + 2) % 3;
-    var box = frame.box; // bit's own local AABB -- used only for lateral (cross-section) sizing below
-
-    var basisX = new THREE.Vector3(), basisY = new THREE.Vector3(), basisZ = new THREE.Vector3();
-    frame.matrix.extractBasis(basisX, basisY, basisZ);
-    var axisScale = [basisX, basisY, basisZ][axis].length() || 1; // local-unit -> world-mm for the punch axis
-
-    var centerLocal = new THREE.Vector3();
-    box.getCenter(centerLocal);
-    centerLocal.setComponent(axis, frame.capCoord); // bit's own outer-tip face, centered on its cross-section
-
-    var punch = frame.punch; // world unit vector, tip -> into the hull (already computed correctly upstream)
-    var halfB = (box.max.getComponent(axB) - box.min.getComponent(axB)) / 2;
-    var halfC = (box.max.getComponent(axC) - box.min.getComponent(axC)) / 2;
-    var shrink = 0.85; // stay a little inboard of the bit's true edge for the probe rays
-    var offsets = [
-      [0, 0], [halfB * shrink, halfC * shrink], [halfB * shrink, -halfC * shrink],
-      [-halfB * shrink, halfC * shrink], [-halfB * shrink, -halfC * shrink]
-    ];
-
-    var mouthPadWorld = Math.max(1, frame.span * 0.1);
-    var lv = new THREE.Vector3(), wp = new THREE.Vector3();
-    var minFarWorld = Infinity, anySample = false;
-
-    for (var i = 0; i < offsets.length; i++) {
-      lv.copy(centerLocal);
-      lv.setComponent(axB, centerLocal.getComponent(axB) + offsets[i][0]);
-      lv.setComponent(axC, centerLocal.getComponent(axC) + offsets[i][1]);
-      wp.copy(lv).applyMatrix4(frame.matrix);
-      var ox = wp.x - punch.x * mouthPadWorld, oy = wp.y - punch.y * mouthPadWorld, oz = wp.z - punch.z * mouthPadWorld;
-      var hits = NSO_rayHitsSoup(aWorld, ox, oy, oz, punch.x, punch.y, punch.z);
-      if (!hits.length) continue;
-      var farWorld = hits[hits.length - 1] - mouthPadWorld; // distance from the tip (wp) to the far wall
-      if (farWorld <= 0) continue;
-      anySample = true;
-      if (farWorld < minFarWorld) minFarWorld = farWorld;
-    }
-
-    if (!anySample) return null; // bit doesn't actually reach the hull anywhere along the punch direction
-
-    var depthWorld = minFarWorld - minWall;
-    if (depthWorld <= 0.2) return null; // no safe room to cut
-
-    var depthLocal = depthWorld / axisScale;
-    var mouthPadLocal = mouthPadWorld / axisScale;
-
-    var lo = new THREE.Vector3(), hi = new THREE.Vector3();
-    var lateralPad = Math.max(0.5, frame.span * 0.05);
-    lo.setComponent(axB, box.min.getComponent(axB) - lateralPad);
-    hi.setComponent(axB, box.max.getComponent(axB) + lateralPad);
-    lo.setComponent(axC, box.min.getComponent(axC) - lateralPad);
-    hi.setComponent(axC, box.max.getComponent(axC) + lateralPad);
-
-    var outerLocal = frame.capCoord + sign * mouthPadLocal;   // just outside the bit's own tip
-    var innerLocal = frame.capCoord - sign * depthLocal;      // depthWorld into the hull, minWall short of its far wall
-    if (sign > 0) { lo.setComponent(axis, innerLocal); hi.setComponent(axis, outerLocal); }
-    else { lo.setComponent(axis, outerLocal); hi.setComponent(axis, innerLocal); }
-
-    var size = new THREE.Vector3().subVectors(hi, lo);
-    var center = new THREE.Vector3().addVectors(lo, hi).multiplyScalar(0.5);
-    var localTranslate = new THREE.Matrix4().makeTranslation(center.x, center.y, center.z);
-    var worldMat = frame.matrix.clone().multiply(localTranslate);
-
-    var cube = wasm.Manifold.cube([Math.max(size.x, 1e-3), Math.max(size.y, 1e-3), Math.max(size.z, 1e-3)], true);
-    return cube.transform(Array.from(worldMat.elements));
-  }
-
-  return {
-    load: load,
-    soupToManifold: soupToManifold,
-    manifoldToSoup: manifoldToSoup,
-    buildCutVolume: buildCutVolume
-  };
-})();
-
-// Möller-Trumbore ray/triangle-soup intersection. Returns sorted hit
-// distances (t along the ray from origin, direction assumed unit length)
-// for every triangle the ray crosses -- used to find where a punch ray
-// actually enters/exits hull A's real surface, in place of any bounding
-// box guess.
-function NSO_rayHitsSoup(soup, ox, oy, oz, dx, dy, dz) {
-  var hits = [];
-  var n = (soup.length / 9) | 0;
-  for (var t = 0; t < n; t++) {
-    var o = t * 9;
-    var ax = soup[o], ay = soup[o + 1], az = soup[o + 2];
-    var bx = soup[o + 3], by = soup[o + 4], bz = soup[o + 5];
-    var cx = soup[o + 6], cy = soup[o + 7], cz = soup[o + 8];
-    var e1x = bx - ax, e1y = by - ay, e1z = bz - az;
-    var e2x = cx - ax, e2y = cy - ay, e2z = cz - az;
-    var pvx = dy * e2z - dz * e2y, pvy = dz * e2x - dx * e2z, pvz = dx * e2y - dy * e2x;
-    var det = e1x * pvx + e1y * pvy + e1z * pvz;
-    if (Math.abs(det) < 1e-9) continue;
-    var invDet = 1 / det;
-    var tvx = ox - ax, tvy = oy - ay, tvz = oz - az;
-    var u = (tvx * pvx + tvy * pvy + tvz * pvz) * invDet;
-    if (u < -1e-6 || u > 1 + 1e-6) continue;
-    var qvx = tvy * e1z - tvz * e1y, qvy = tvz * e1x - tvx * e1z, qvz = tvx * e1y - tvy * e1x;
-    var v = (dx * qvx + dy * qvy + dz * qvz) * invDet;
-    if (v < -1e-6 || u + v > 1 + 1e-6) continue;
-    var tt = (e2x * qvx + e2y * qvy + e2z * qvz) * invDet;
-    if (tt > 1e-6) hits.push(tt);
-  }
-  hits.sort(function (a, b) { return a - b; });
-  return hits;
-}
-
-function NSO_errMsg(err) {
-  return (err && err.message) ? String(err.message) : String(err);
-}
-
-// Open-edge / non-manifold-edge counts for a triangle soup. Vertex welding
-// is by coordinate rounding (0.1 micron buckets), not topology -- this is a
-// diagnostic count for the status line, not a watertight/valid claim.
-function NSO_edgeStats(soup) {
-  var n = (soup.length / 9) | 0;
-  var q = 1e4;
-  function key(o) {
-    return Math.round(soup[o] * q) + '_' + Math.round(soup[o + 1] * q) + '_' + Math.round(soup[o + 2] * q);
-  }
-  var map = new Map();
-  for (var t = 0; t < n; t++) {
-    var o = t * 9;
-    var k = [key(o), key(o + 3), key(o + 6)];
-    for (var e = 0; e < 3; e++) {
-      var a = k[e], b = k[(e + 1) % 3];
-      if (a === b) continue;   // a sliver's zero-length edge is not a hole
-      var ek = a < b ? (a + '|' + b) : (b + '|' + a);
-      map.set(ek, (map.get(ek) || 0) + 1);
-    }
-  }
-  var open = 0, nm = 0;
-  map.forEach(function (count) {
-    if (count === 1) open++;
-    else if (count > 2) nm++;
-  });
-  return { open: open, nm: nm };
-}
-
-/* =====================================================================
-   Exact topology, straight off the kernel's own indexed mesh.
-
-   NSO_edgeStats has to weld by rounded position, because a soup carries no
-   shared indices. Where two surfaces meet tangentially - two wrapped cubes
-   kissing flat on flat - the union legitimately holds distinct vertices a
-   fraction of a micron apart, and rounding merges them, so edges that are
-   each used twice read as one edge used four times. That phantom is what
-   refused a join whose result was a perfect solid: one part, genus 0,
-   volume exactly A + B, 0 open and 0 non-manifold by index.
-
-   A Manifold result already knows its own topology, so ask it instead of
-   guessing from positions.
-   ===================================================================== */
-function NSO_manifoldStats(man) {
-  var out = { open: 0, nm: 0, parts: 1, exact: false };
-  try {
-    var mesh = man.getMesh();
-    var tv = mesh.triVerts;
-    var em = new Map();
-    for (var t = 0; t < tv.length; t += 3) {
-      var k = [tv[t], tv[t + 1], tv[t + 2]];
-      for (var e = 0; e < 3; e++) {
-        var a = k[e], b = k[(e + 1) % 3];
-        if (a === b) continue;
-        var ek = a < b ? (a + '_' + b) : (b + '_' + a);
-        em.set(ek, (em.get(ek) || 0) + 1);
-      }
-    }
-    em.forEach(function (c) { if (c === 1) out.open++; else if (c > 2) out.nm++; });
-    if (typeof man.decompose === 'function') {
-      var bits = man.decompose();
-      out.parts = bits.length;
-      for (var i = 0; i < bits.length; i++) bits[i].delete();
-    }
-    out.exact = true;
-  } catch (err) { out.exact = false; }
-  return out;
-}
-
-/* =====================================================================
-   Weld tolerance that cannot eat the piece's own detail.
-
-   Both booleans pre-weld their input so a sloppy imported STL reads as a
-   solid. A wrapped surface is far finer than those fixed tolerances: the
-   ring beside each corner ball's pole carries 0.034 mm edges, so welding a
-   wrap1 cube at 0.08 drops 128 triangles and at 0.22 drops 432. Cap the ask
-   at a third of the shortest real edge in the soup - coincident and
-   near-coincident vertices still merge, real geometry never does. An
-   imported mesh has normal-length edges and keeps the tolerance it always
-   had.
-
-   The shortest edge is a MINIMUM, though, and a minimum is an outlier
-   statistic: one degenerate sliver anywhere sets the tolerance for every
-   other triangle. On fixtures/tape_on-edge-single-B101_rounded_v8_FINAL.stl
-   2 edges out of 98,586 measure 1.499e-5 while the next-shortest is
-   1.272e-4 - 8.5x longer. The strict minimum drags the cap to 4.997e-6, and
-   at that tolerance the float32 rounding in the STL keeps vertex pairs
-   apart and the part reads as 1402 open edges. It is not open: anywhere in
-   2e-5 .. 3e-4 it welds to V-E+F = 2, 0 open, 0 non-manifold. Two slivers
-   cost a sound mesh its topology, and both booleans then fail it.
-
-   So reject the slivers before taking the minimum, and tell them from real
-   fine detail by the gap that separates them: walk up the sorted edge
-   lengths and cut at the first jump of GAPx or more. Two bounds keep that
-   honest. Only the bottom 0.1% of edges may be called slivers - past that a
-   short edge is the piece's feature scale, not a defect (a wrapped surface
-   at 0.034 mm is pervasive, not an outlier), and the strict minimum is
-   right. And 0.1% is zero until a mesh has 1000 edges, so small parts keep
-   the exact tolerance they always had. GAP sits on a 3x..8x plateau where
-   the tape lands on the same 4.24e-5 that NSO_buildAdjacency picks for it
-   independently; 4 is the middle of that plateau.
-
-   Same split that NSO_sculptWeldTol (app-sculpt.js) proved - slivers apart
-   from pervasive fine detail - but keyed off the mesh's own edge
-   distribution rather than off `want`, because the booleans ask for 0.08
-   and 0.22, far above the feature scale of the meshes that carry slivers.
-   ===================================================================== */
-function NSO_weldEpsFor(soup, want) {
-  var n = (soup && soup.length) ? (soup.length / 9) | 0 : 0;
-  if (!n) return want;
-  var lens = new Float64Array(n * 3), m = 0;
-  for (var t = 0; t < n; t++) {
-    var o = t * 9;
-    for (var e = 0; e < 3; e++) {
-      var a = o + e * 3, b = o + ((e + 1) % 3) * 3;
-      var L = Math.hypot(soup[a] - soup[b], soup[a + 1] - soup[b + 1], soup[a + 2] - soup[b + 2]);
-      if (L > 1e-9) lens[m++] = L;
-    }
-  }
-  if (!m) return want;
-  lens = lens.subarray(0, m);
-  lens.sort();
-  var SLIVER_FRAC = 0.001;   // at most the bottom 0.1% of edges may be called slivers
-  var SLIVER_GAP = 4;        // a sliver sits >= 4x below the next edge up
-  var limit = (m * SLIVER_FRAC) | 0;   // 0 below 1000 edges: small parts unchanged
-  var cut = 0;
-  for (var i = 0; i < limit; i++) {
-    if (lens[i + 1] >= lens[i] * SLIVER_GAP) { cut = i + 1; break; }
-  }
-  return Math.min(want, lens[cut] / 3);
-}
-
-/* =====================================================================
-   Union two world soups with the same kernel Subtract already uses.
-
-   Returns { ok, soup, parts, reason }. parts > 1 means the two pieces do
-   not actually touch, so there is nothing to join - the caller treats that
-   as a miss and falls back, it is not a result.
-   ===================================================================== */
-async function NSO_unionSoups(aWorld, bWorld) {
-  if (!NSO_soupLen(aWorld) || !NSO_soupLen(bWorld)) return { ok: false, reason: 'empty soup' };
-  var wasm;
-  try { wasm = await NSO_CSG.load(); }
-  catch (err) { return { ok: false, reason: 'CSG kernel failed to load: ' + NSO_errMsg(err) }; }
-  var manA = null, manB = null, out = null;
-  try {
-    var aIn = aWorld, bIn = bWorld;
-    if (typeof weldSoupVerts === 'function') {
-      try { aIn = weldSoupVerts(aWorld, NSO_weldEpsFor(aWorld, 0.08)); } catch (e0) { aIn = aWorld; }
-      try { bIn = weldSoupVerts(bWorld, NSO_weldEpsFor(bWorld, 0.08)); } catch (e1) { bIn = bWorld; }
-    }
-    manA = NSO_CSG.soupToManifold(wasm, aIn);
-    if (manA.status && manA.status() !== 'NoError') throw new Error('A rejected: ' + manA.status());
-    manB = NSO_CSG.soupToManifold(wasm, bIn);
-    if (manB.status && manB.status() !== 'NoError') throw new Error('B rejected: ' + manB.status());
-    out = manA.add(manB);
-    if (out.status() !== 'NoError') throw new Error('union rejected by kernel: ' + out.status());
-    if (out.isEmpty()) throw new Error('union produced empty solid');
-    var parts = 1;
-    if (typeof out.decompose === 'function') {
-      var bits = out.decompose();
-      parts = bits.length;
-      for (var i = 0; i < bits.length; i++) bits[i].delete();
-    }
-    var st = NSO_manifoldStats(out);
-    parts = st.exact ? st.parts : parts;
-    return { ok: parts === 1, parts: parts, soup: NSO_CSG.manifoldToSoup(out),
-             stats: st.exact ? { open: st.open, nm: st.nm } : null,
-             reason: parts === 1 ? '' : 'the two pieces do not touch' };
-  } catch (err) {
-    return { ok: false, reason: NSO_errMsg(err) };
-  } finally {
-    if (manA) manA.delete();
-    if (manB) manB.delete();
-    if (out) out.delete();
-  }
-}
-
-/* =====================================================================
-   REPLACEMENT: subtractSoupBFromA
-   Was: homemade ray/AABB pocket clipper (centroid filter + wall raycast).
-   Now: real solid boolean via Manifold. Async (WASM load + compute).
-   Same fail-safe contract: any failure returns { ok:false, soup: aWorld },
-   caller leaves A untouched.
-   ===================================================================== */
-async function subtractSoupBFromA(aWorld, bWorld, opts) {
-  opts = opts || {};
-  var na = NSO_soupLen(aWorld), nb = NSO_soupLen(bWorld);
-  if (!na || !nb) return { ok: false, soup: aWorld, reason: 'empty soup' };
-
-  var frame = opts.plugFrame || null;
-  if (!frame) return { ok: false, soup: aWorld, reason: 'no plug frame (bit not oriented against hull)' };
-
-  var minWall = (opts.minWall === undefined) ? 1.0 : opts.minWall;
-  var before = NSO_edgeStats(aWorld);
-
-  var wasm;
-  try {
-    wasm = await NSO_CSG.load();
-  } catch (err) {
-    return { ok: false, soup: aWorld, mode: 'manifold', reason: 'CSG kernel failed to load: ' + NSO_errMsg(err) };
-  }
-
-  var manA = null, manB = null, safetyBox = null, bClipped = null, result = null;
-  try {
-    var aIn = aWorld, bIn = bWorld;
-    if (typeof weldSoupVerts === 'function') {
-      try { aIn = weldSoupVerts(aWorld, NSO_weldEpsFor(aWorld, 0.08)); } catch (e0) { aIn = aWorld; }
-      try { bIn = weldSoupVerts(bWorld, NSO_weldEpsFor(bWorld, 0.08)); } catch (e1) { bIn = bWorld; }
-    }
-    try { manA = NSO_CSG.soupToManifold(wasm, aIn); }
-    catch (eA) { throw new Error('hull rejected: ' + ((eA && eA.message) ? eA.message : eA)); }
-    if (manA.status && manA.status() !== 'NoError') throw new Error('hull rejected: ' + manA.status());
-
-    try { manB = NSO_CSG.soupToManifold(wasm, bIn); }
-    catch (eB) { throw new Error('bit rejected: ' + ((eB && eB.message) ? eB.message : eB)); }
-    if (manB.status && manB.status() !== 'NoError') throw new Error('bit rejected: ' + manB.status());
-
-    safetyBox = NSO_CSG.buildCutVolume(wasm, frame, aWorld, minWall);
-    if (!safetyBox) throw new Error('bit does not reach hull A along the punch direction, or no room within minWall');
-
-    bClipped = manB.intersect(safetyBox);
-    if (bClipped.isEmpty()) throw new Error('bit does not reach hull within safe wall margin');
-
-    result = manA.subtract(bClipped);
-    if (result.status() !== 'NoError') throw new Error('subtract rejected by kernel: ' + result.status());
-    if (result.isEmpty()) throw new Error('subtract produced empty solid');
-
-    // No-op guard: a "successful" boolean that removed ~nothing (e.g. the
-    // bit doesn't actually touch the hull's outer skin, so the safety-box
-    // clip missed it) must NOT be reported as ok -- that would let the
-    // caller delete B and leave A silently unchanged. Compare solid
-    // volume, not triangle count (retriangulation can shuffle tri count
-    // even on a true no-op).
-    var volBefore = manA.volume();
-    var volAfter = result.volume();
-    var removedVol = volBefore - volAfter;
-    // The default floor is sized for a PLUG: a port cutout is a large fraction
-    // of the hull, and the guard has to be loose enough that float noise on a
-    // 64,000 mm^3 block never reads as a real cut. A local carve is legitimately
-    // smaller than that - a 1.5 mm ball gouge at a corner of the same block is
-    // ~2 mm^3, or 0.003% - so a caller whose op does not depend on this guard
-    // to protect a piece it is about to delete can set its own floor.
-    // opts.minRemoved is that override, and absent it the behaviour is
-    // unchanged: absolute floor + 0.01% of hull volume.
-    var askEps = Number(opts.minRemoved);
-    var noopEps = (isFinite(askEps) && askEps > 0) ? askEps : Math.max(1e-3, volBefore * 1e-4);
-    if (removedVol <= noopEps) {
-      throw new Error('removed ~0 volume (' + removedVol.toFixed(4) +
-        ' mm^3) -- bit likely does not touch the hull skin; check placement');
-    }
-
-    var outTris = result.numTri();
-    var soup = NSO_CSG.manifoldToSoup(result);
-    var exact = NSO_manifoldStats(result);
-    var after = exact.exact ? { open: exact.open, nm: exact.nm } : NSO_edgeStats(soup);
-
-    console.log('[subtract] kernel=manifold tris', manA.numTri(), '->', outTris,
-      'open', before.open, '->', after.open, 'nonManifold', before.nm, '->', after.nm);
-
-    return {
-      ok: true,
-      soup: soup,
-      mode: 'manifold',
-      hullTris: outTris,
-      openBefore: before.open, nmBefore: before.nm,
-      openAfter: after.open, nmAfter: after.nm
-    };
-  } catch (err) {
-    var why = NSO_errMsg(err);
-    console.warn('[subtract] failed:', why);
-    return { ok: false, soup: aWorld, mode: 'manifold', reason: why };
-  } finally {
-    if (manA) manA.delete();
-    if (manB) manB.delete();
-    if (safetyBox) safetyBox.delete();
-    if (bClipped) bClipped.delete();
-    if (result) result.delete();
-  }
-}
+/* The boolean kernel - NSO_CSG, the weld and edge helpers, the union / subtract / punch cores and
+   the worker dispatch under NSO_unionSoups, NSO_subtractSoups and subtractSoupBFromA - lives in
+   nso_csg.js, a file the page and the boolean worker (nso_work.js) both load. */
 
 /* =====================================================================
    REPLACEMENT: subtractBFromA
@@ -1600,13 +1469,22 @@ async function subtractBFromA() {
     setStatus('Select hull A and bit B', true);
     return;
   }
+  // Work as is (nso-helpers.js, nsoOverlap): a piece whose shells overlap goes to the kernel as those shells
+  // merged into one solid. A is replaced by the result anyway; B is used up.
+  const solSub = (typeof nsoOverlap !== 'undefined' && nsoOverlap)
+    ? await nsoOverlap.solids([modelA, modelB], (m, i) => { const pl = i ? placedB : placedA; return { geometry: pl.mesh.geometry, mesh: pl.mesh }; })
+    : { ok: true, list: [], note: '' };
+  if (!solSub.ok) {
+    setStatus(solSub.cancelled ? 'Subtract stopped - nothing was changed' : 'Subtract refused - ' + solSub.reason + ' - A and B unchanged', !solSub.cancelled);
+    return;
+  }
 
   let newGeo = null;
   try {
     placedA.mesh.updateMatrixWorld(true);
     placedB.mesh.updateMatrixWorld(true);
-    const aWorld = meshToWorldSoup(placedA.mesh);
-    const bWorld = meshToWorldSoup(placedB.mesh);
+    const aWorld = (solSub.list[0] && solSub.list[0].merged) ? solSub.list[0].world : meshToWorldSoup(placedA.mesh);
+    const bWorld = (solSub.list[1] && solSub.list[1].merged) ? solSub.list[1].world : meshToWorldSoup(placedB.mesh);
     placedA.mesh.updateMatrixWorld(true);
     if (!placedA.mesh.geometry.boundingBox) placedA.mesh.geometry.computeBoundingBox();
     const hullCenter = new THREE.Vector3();
@@ -1619,6 +1497,10 @@ async function subtractBFromA() {
       plugFrame: frame,
       minWall: 1.0
     });
+    if (res && (res.cancelled || res.timedOut)) {
+      setStatus(res.cancelled ? 'Subtract stopped - nothing was changed' : 'Subtract stopped - ' + res.reason, !res.cancelled);
+      return;
+    }
     if (!res || !res.ok || !res.soup || res.soup.length < 9) {
       throw new Error((res && res.reason) ? res.reason : 'result empty');
     }
@@ -1626,6 +1508,16 @@ async function subtractBFromA() {
     window.__nestSubtractMsg = 'Subtract ok - open edges ' +
       res.openBefore + '→' + res.openAfter +
       ', non-manifold ' + res.nmBefore + '→' + res.nmAfter;
+    /* The nozzle-safety finding rides the SUCCESS line as one more ' - '
+       clause, the way the defect overlay appends "(counted, not painted)" and
+       Skin appends "two shells: flagged non-solid": the cut is done and kept,
+       and this says what it cost. isError stays false - a finding is not a
+       failure, and the cut is not reverted. cutWarning() is '' on a cut that
+       leaves a printable wall, so an ordinary cut reads exactly as before. */
+    var cutWarn = (typeof NSO_Thickness !== 'undefined' && res.clearance)
+      ? NSO_Thickness.cutWarning(res.clearance) : '';
+    if (cutWarn) window.__nestSubtractMsg += ' - ' + cutWarn;
+    if (solSub.note) window.__nestSubtractMsg += ' - ' + solSub.note;
   } catch (err) {
     const why = (err && err.message) ? String(err.message) : 'unknown';
     console.warn('[subtract] failed:', why);
@@ -1642,6 +1534,7 @@ async function subtractBFromA() {
     aPrevRawAxis: modelA.rawAxis,
     aPrevCenterOffset: modelA.centerOffset,
     aPrevSize: { x: modelA.size.x, y: modelA.size.y, z: modelA.size.z },
+    aPrevPose: (placedA && typeof nsoPlacedPoseSnapshot === 'function') ? nsoPlacedPoseSnapshot(placedA) : null,
     bSnapshot: {
       id: modelB.id,
       name: modelB.name,
@@ -1680,6 +1573,8 @@ async function subtractBFromA() {
   reindexPlacedMeshes();
 
   state.joinPartnerId = null;
+  state.joinThirdId = null;
+  state.joinFaceC = null;
   state.joinSession = false;
   state.joinArmed = null;
 
@@ -1704,6 +1599,10 @@ async function subtractBFromA() {
   placedA.width = modelA.size.x;
   placedA.depth = modelA.size.z;
   placedA.height = modelA.size.y;
+  // The difference was taken in world space, so A's pose is in the geometry
+  // now and the mesh above is built at identity. Clear the record to match,
+  // or the next bake re-applies it on top (see nsoClearPlacedPose).
+  if (typeof nsoClearPlacedPose === 'function') nsoClearPlacedPose(placedA);
 
   updateEditSize();
   renderModelList();
@@ -1718,7 +1617,7 @@ function centerJoinAxis(axis) {
   const idA = state.editId;
   const idB = state.joinPartnerId;
   if (!state.joinSession || idA == null || idB == null || idA === idB) {
-    setStatus('Start Join, Pick A and B, then Center', true);
+    setStatus('Open JOIN, Pick A and B, then Center', true);
     return;
   }
   const placedA = state.placed.find(function (q) { return q && q.sourceId === idA && q.mesh; });
@@ -1759,7 +1658,7 @@ function flipPortOnPunch() {
   const bit = placedB && placedB.mesh;
   const hull = placedA && placedA.mesh;
   if (!bit || !hull) {
-    setStatus('Start Join, pick hull A and tunnel B, then Flip port', true);
+    setStatus('Open JOIN, pick hull A and tunnel B, then Flip port', true);
     return;
   }
   pushUndo(snapshotPlacedPose(state.placed.indexOf(placedB)));
@@ -1769,7 +1668,13 @@ function flipPortOnPunch() {
   if (!hull.geometry.boundingBox) hull.geometry.computeBoundingBox();
   hull.geometry.boundingBox.getCenter(hc);
   hc.applyMatrix4(hull.matrixWorld);
-  const aWorld = (typeof meshToWorldSoup === 'function') ? meshToWorldSoup(placedA) : null;
+  /* The MESH, not the placed record. meshToWorldSoup bakes matrixWorld into
+     the soup, so only a mesh can answer it - a placed record carries a
+     `geometry` (which gets it past the guard) but no updateWorldMatrix, and
+     the call died on `placed.updateWorldMatrix is not a function` before
+     NSO_plugFrame ever saw a hull. `hull` is placedA.mesh and was already
+     updated two lines up, which is the same pair reportJoinFlushGap uses. */
+  const aWorld = (typeof meshToWorldSoup === 'function') ? meshToWorldSoup(hull) : null;
   const frame = NSO_plugFrame(bit, hc, aWorld);
   const axis = frame.outerNormal && frame.outerNormal.lengthSq() > 1e-8
     ? frame.outerNormal.clone().normalize()
@@ -1821,11 +1726,36 @@ function NSO_restoreRaisedBit(placedB, before) {
   placedB.mesh.updateMatrixWorld(true);
 }
 
+/* Seat flush's proud value. One constant so the seat, the status line and the
+   record the scene block reads cannot say three different numbers. */
+const SEAT_FLUSH_PROUD = 0.01;
+
+/* What a Seat leaves behind on the piece it moved.
+
+   Neither seat could be read back before this: the gap lived on the slider and
+   the result lived in the pose. The record is what the 3MF scene block writes
+   (nso-3mf-scene.js) so a reopened plate says which gap a pair was seated at
+   instead of only where the two pieces happen to sit. It is descriptive - the
+   pose is still the truth, and nothing re-seats from it. Cleared by a fresh
+   seat, which overwrites it. */
+function NSO_recordSeat(placedB, placedA, info) {
+  if (!placedB || !info || !isFinite(Number(info.gap))) return;
+  placedB.seat = {
+    gap: Number(info.gap),
+    kind: info.kind === 'flush' ? 'flush' : 'support',
+    partnerName: (placedA && placedA.name) ? placedA.name : '',
+    partnerIndex: (typeof state !== 'undefined' && state.placed) ? state.placed.indexOf(placedA) : null,
+    measured: isFinite(Number(info.measured)) ? Number(info.measured) : null,
+    residual: isFinite(Number(info.residual)) ? Number(info.residual) : null,
+    reference: info.reference === 'tips' ? 'tips' : 'face'
+  };
+}
+
 function seatFlushBitToHull() {
   const idA = state.editId;
   const idB = state.joinPartnerId;
   if (!state.joinSession || idA == null || idB == null || idA === idB) {
-    setStatus('Start Join, A = hull, B = bit, then Seat flush', true);
+    setStatus('Open JOIN, A = hull, B = bit, then Seat flush', true);
     return;
   }
   const placedA = state.placed.find(function (p) { return p && p.sourceId === idA && p.mesh; });
@@ -1839,7 +1769,7 @@ function seatFlushBitToHull() {
   // slider - that belongs to Seat (support).
   pushUndo(snapshotPlacedPose(state.placed.indexOf(placedB)));
   const raised = NSO_raiseBuriedBitClear(placedA, placedB);
-  const res = NSO_seatFlushBitToHull(placedA.mesh, placedB.mesh, { proud: 0.01 });
+  const res = NSO_seatFlushBitToHull(placedA.mesh, placedB.mesh, { proud: SEAT_FLUSH_PROUD });
   if (!res || !res.ok) {
     NSO_restoreRaisedBit(placedB, raised);
     setStatus('Seat failed - ' + ((res && res.reason) || 'pieces unchanged'), true);
@@ -1847,11 +1777,17 @@ function seatFlushBitToHull() {
   }
   placedB.x = placedB.mesh.position.x;
   placedB.z = placedB.mesh.position.z;
-  const baseY = (placedB.height || placedB.mesh.geometry.boundingBox && (placedB.mesh.geometry.boundingBox.max.y - placedB.mesh.geometry.boundingBox.min.y) || 10) / 2 + 0.2;
+  // where the origin sits with B's lowest point on the baseline: nsoBelowOrigin
+  // under it, which is half the height only for a posed box centred on it
+  const baseY = nsoBelowOrigin(placedB.mesh, placedB.height ||
+    (placedB.mesh.geometry.boundingBox && (placedB.mesh.geometry.boundingBox.max.y - placedB.mesh.geometry.boundingBox.min.y)) || 10) + 0.2;
   placedB.liftY = Math.max(0, placedB.mesh.position.y - baseY);
   applyPlacedXZ(placedB, placedB.x, placedB.z);
   var resid = (res.maxResidual != null && isFinite(res.maxResidual)) ? res.maxResidual : 0;
-  setStatus('Seated - proud 0.01mm, skin error ' + resid.toFixed(2) + 'mm - Subtract');
+  NSO_recordSeat(placedB, placedA, {
+    gap: SEAT_FLUSH_PROUD, kind: 'flush', measured: null, residual: resid, reference: res.reference
+  });
+  setStatus('Seated - proud ' + SEAT_FLUSH_PROUD + 'mm, skin error ' + resid.toFixed(2) + 'mm - Subtract');
 }
 
 /* Seat (support): B's mating face at the gap the slider shows, coupon sign
@@ -1860,7 +1796,7 @@ function seatSupportBitToHull() {
   const idA = state.editId;
   const idB = state.joinPartnerId;
   if (!state.joinSession || idA == null || idB == null || idA === idB) {
-    setStatus('Start Join, A = hull, B = bit, then Seat (support)', true);
+    setStatus('Open JOIN, A = hull, B = bit, then Seat (support)', true);
     return;
   }
   const placedA = state.placed.find(function (p) { return p && p.sourceId === idA && p.mesh; });
@@ -1869,19 +1805,34 @@ function seatSupportBitToHull() {
     setStatus('Both hull and bit must be on the plate', true);
     return;
   }
+  /* The oversized-washer export mode, and only while it is explicitly armed:
+     a washer wider than its target has corner rays standing over open air, so
+     the corner-ray fit below refuses it whatever gap is asked for. Armed, the
+     placement goes through the measured-clearance seat instead and that
+     refusal becomes a line on the status line - see app-oversize-washer.js.
+     Unarmed, this is one property read and everything below is unchanged. */
+  if (window.NSO_OversizeWasher && window.NSO_OversizeWasher.armed()) {
+    window.NSO_OversizeWasher.seat(placedA, placedB);
+    return;
+  }
   const gap = readSeatGapInput();
   if (!isFinite(gap)) {
     setStatus('Seat gap slider is missing or out of range - nothing seated', true);
     return;
   }
-  seatBitAtGap(placedA, placedB, gap);
+  return seatBitAtGap(placedA, placedB, gap);
 }
 
 /* The gap slider's value in mm, or NaN when the slider is missing or its
    value is outside its own range (a range input clamps user input, so that
-   only happens to a value set from code). Never a silent fallback. */
-function readSeatGapInput() {
-  const el = document.getElementById('seat-gap');
+   only happens to a value set from code). Never a silent fallback.
+
+   `id` names which gap input to read, defaulting to the card's own slider.
+   Triple join's two per-junction gaps go through this same reader rather
+   than a copy of these rules: two inputs that disagreed with the slider
+   about what -0.18 means is not a bug anyone would think to look for. */
+function readSeatGapInput(id) {
+  const el = document.getElementById(id || 'seat-gap');
   if (!el) return NaN;
   const v = Number(el.value);
   const lo = Number(el.min), hi = Number(el.max);
@@ -1902,15 +1853,23 @@ function NSO_formatSeatGap(v) {
 
 /* Keep the readout on the exact slider value; called on every input event
    and once at start-up so the default (-0.18, mid easy-release) is shown. */
-function updateSeatGapReadout() {
-  const out = document.getElementById('seat-gap-value');
+function updateSeatGapReadout(id, outId) {
+  const out = document.getElementById(outId || 'seat-gap-value');
   if (!out) return;
-  out.textContent = NSO_formatSeatGap(readSeatGapInput());
+  out.textContent = NSO_formatSeatGap(readSeatGapInput(id));
 }
 
 /* Seat B's mating face `gap` mm off A's skin (coupon convention) and make
    the plate record match, so the export writes the same relation the
-   scene shows. */
+   scene shows.
+
+   Returns what it did: { ok, gap, measured, residual, reference, clamped } on
+   a seat, { ok: false, reason } on a refusal. The button never needed a
+   return value - the status line IS its report - but a caller that chains
+   seats (app-join-triple.js) has to know whether to run the next one, and
+   scraping the status text for that would make the wording load-bearing.
+   Purely additive: the status line and every pose this writes are unchanged,
+   which is what the Seat suites pin. */
 function seatBitAtGap(placedA, placedB, gap) {
   // Both pieces on the bed baseline settlePlacedOnBed uses, the way Align
   // edges does through matchPlacedBottoms. A piece that was dropped and never
@@ -1928,8 +1887,9 @@ function seatBitAtGap(placedA, placedB, gap) {
   const res = NSO_seatFlushBitToHull(placedA.mesh, placedB.mesh, { gap: gap });
   if (!res || !res.ok) {
     NSO_restoreRaisedBit(placedB, raised);
-    setStatus('Seat failed - ' + ((res && res.reason) || 'pieces unchanged'), true);
-    return;
+    const why = (res && res.reason) || 'pieces unchanged';
+    setStatus('Seat failed - ' + why, true);
+    return { ok: false, reason: why };
   }
   placedB.x = placedB.mesh.position.x;
   placedB.z = placedB.mesh.position.z;
@@ -1951,6 +1911,9 @@ function seatBitAtGap(placedA, placedB, gap) {
 
   const resid = (res.maxResidual != null && isFinite(res.maxResidual)) ? res.maxResidual : 0;
   const got = isFinite(res.gapAchieved) ? res.gapAchieved : gap;
+  NSO_recordSeat(placedB, placedA, {
+    gap: gap, kind: 'support', measured: got, residual: resid, reference: res.reference
+  });
   let what;
   if (gap < 0) what = 'air gap ' + Math.abs(gap).toFixed(2) + 'mm';
   else if (gap > 0) what = 'overlap ' + gap.toFixed(2) + 'mm';
@@ -1963,6 +1926,14 @@ function seatBitAtGap(placedA, placedB, gap) {
   if (res.reference === 'tips') msg += ' - from skin tips, relief ' + res.tipRise.toFixed(2) + 'mm above the base plane';
   if (clamped) msg += ' - bit would sink below the plate, held at plate level: gap NOT as requested';
   setStatus(msg, clamped);
+  /* A clamped seat did NOT land on the gap it was asked for, and says so. A
+     chained caller must treat that as a failure, not a seat with a caveat -
+     the whole point of a per-junction gap is that the junction is at it. */
+  return {
+    ok: !clamped, gap: gap, measured: got, residual: resid,
+    reference: res.reference, clamped: clamped,
+    reason: clamped ? 'bit would sink below the plate, held at plate level: gap NOT as requested' : ''
+  };
 }
 
 
@@ -2095,7 +2066,7 @@ function NSO_floodFillLargestEmptyCluster(empty, nx, ny, nz) {
   return best;
 }
 
-function extractBitFromSelected() {
+async function extractBitFromSelected() {
   const p = state.selectedIndex >= 0 ? state.placed[state.selectedIndex] : null;
   const model = p && p.sourceId != null
     ? state.models.find(function (m) { return m.id === p.sourceId; })
@@ -2104,8 +2075,25 @@ function extractBitFromSelected() {
     setStatus('Select a tile on the plate first', true);
     return;
   }
+  // The cavity is found by even-odd inside tests, which shells laid over one
+  // another turn inside out: such a piece is read as its shells merged into one
+  // solid (nso-helpers.js, nsoOverlap). The piece itself is not touched.
+  const solBit = (typeof nsoOverlap !== 'undefined' && nsoOverlap)
+    ? await nsoOverlap.solid(model, { geometry: model.geometry }) : { ok: true, merged: false };
+  if (!solBit.ok) {
+    setStatus(solBit.cancelled ? 'Extract stopped - piece unchanged' : 'Extract refused - ' + solBit.reason + ' - piece unchanged', !solBit.cancelled);
+    return;
+  }
   const py = p.mesh.position.y;
-  const soupPiece = geomToWorldSoup(model.geometry, p.x, py, p.z);
+  let soupPiece;
+  if (solBit.merged) {
+    soupPiece = new Float32Array(solBit.soup.length);
+    for (let i = 0; i < soupPiece.length; i += 3) {
+      soupPiece[i] = solBit.soup[i] + p.x; soupPiece[i + 1] = solBit.soup[i + 1] + py; soupPiece[i + 2] = solBit.soup[i + 2] + p.z;
+    }
+  } else {
+    soupPiece = geomToWorldSoup(model.geometry, p.x, py, p.z);
+  }
   if (!soupPiece || soupPiece.length < 9) {
     setStatus('Extract failed - piece unchanged', true);
     return;
@@ -2199,14 +2187,15 @@ function extractBitFromSelected() {
   const xPlace = p.x + (p.width || size.x) / 2 + size.x / 2 + 6;
   const m = state.models.find(function (mm) { return mm.id === id; });
   if (m) placeModelMovable(m, xPlace, p.z);
-  setStatus('Extract bit ok - solid ' + size.x.toFixed(1) + 'x' + size.y.toFixed(1) + 'x' + size.z.toFixed(1) + ' mm');
+  setStatus('Extract bit ok - solid ' + size.x.toFixed(1) + 'x' + size.y.toFixed(1) + 'x' + size.z.toFixed(1) + ' mm' +
+    (solBit.merged ? ' - ' + solBit.note : ''));
 }
 
 async function joinSelectedModels() {
   const idA = state.editId;
   const idB = state.joinPartnerId;
   if (!state.joinSession || idA == null || idB == null || idA === idB) {
-    setStatus('Start Join, Pick A, Pick B, then Complete Join', true);
+    setStatus('Open JOIN, Pick A, Pick B, then JOIN', true);
     return;
   }
   const modelA = state.models.find(x => x.id === idA);
@@ -2218,6 +2207,18 @@ async function joinSelectedModels() {
 
   const placedA = state.placed.find(p => p && p.sourceId === idA);
   const placedB = state.placed.find(p => p && p.sourceId === idB);
+
+  // Work as is (nso-helpers.js, nsoOverlap): a piece whose shells overlap is
+  // welded as those shells merged into one solid. The fuse and the plate weld
+  // would stack the shells, so a merged pair goes to the kernel union alone.
+  const solJoin = (typeof nsoOverlap !== 'undefined' && nsoOverlap && placedA && placedB && placedA.mesh && placedB.mesh)
+    ? await nsoOverlap.solids([modelA, modelB], (m, i) => { const pl = i ? placedB : placedA; return { geometry: pl.mesh.geometry, mesh: pl.mesh }; })
+    : { ok: true, list: [], note: '' };
+  if (!solJoin.ok) {
+    setStatus(solJoin.cancelled ? 'Join stopped - nothing was changed' : 'Join refused - ' + solJoin.reason + ' - A and B unchanged', !solJoin.cancelled);
+    return;
+  }
+  const solidOnly = !!solJoin.note;
   const poseA = placedA ? { x: placedA.x, z: placedA.z } : { x: 0, z: 0 };
   const poseB = placedB ? { x: placedB.x, z: placedB.z } : { x: 0, z: 0 };
 
@@ -2233,8 +2234,8 @@ async function joinSelectedModels() {
       const mA = placedA.mesh || placedA, mB = placedB.mesh || placedB;
       if (mA.updateMatrixWorld) mA.updateMatrixWorld(true);
       if (mB.updateMatrixWorld) mB.updateMatrixWorld(true);
-      joinSoupA = meshToWorldSoup(mA);
-      joinSoupB = meshToWorldSoup(mB);
+      joinSoupA = (solJoin.list[0] && solJoin.list[0].merged) ? solJoin.list[0].world : meshToWorldSoup(mA);
+      joinSoupB = (solJoin.list[1] && solJoin.list[1].merged) ? solJoin.list[1].world : meshToWorldSoup(mB);
       if (!NSO_soupLen(joinSoupA) || !NSO_soupLen(joinSoupB)) joinSoupA = joinSoupB = null;
     } catch (e) { joinSoupA = joinSoupB = null; }
   }
@@ -2265,7 +2266,9 @@ async function joinSelectedModels() {
   let fuseGeo = null, fuseStats = null, fuseInfo = null, fuseWhy = '';
   const paintedJoin = (typeof nsoMaskCount === 'function')
     ? (nsoMaskCount(modelA) + nsoMaskCount(modelB)) : 0;
-  if (typeof NSO_fuseFindMating !== 'function' || typeof NSO_planarFusePair !== 'function') {
+  if (solidOnly) {
+    fuseWhy = 'overlapping shells merged - the kernel union welds them';
+  } else if (typeof NSO_fuseFindMating !== 'function' || typeof NSO_planarFusePair !== 'function') {
     fuseWhy = 'fusion module not loaded';
   } else if (paintedJoin > 0) {
     // Paint wins (docs/HANDOFF.md), and the Paint faces button says so in as
@@ -2279,7 +2282,20 @@ async function joinSelectedModels() {
     fuseWhy = paintedJoin + ' painted face(s) - fusion has no skip list';
   } else {
     try {
-      const rawA = getModelRawSoup(modelA), rawB = getModelRawSoup(modelB);
+      // Each piece's CURRENT pose (placedA/placedB.mesh's rotation) must be
+      // folded in here, not dropped: fuse hands its output straight to
+      // joinSelectedModels, which then clears the pose off the record on
+      // the assumption that every route's geometry already carries it (see
+      // nsoClearPlacedPose's call site below). For an axis-preserving pose
+      // (a 90/180/270 turn, a flip) the rotated cap still lines up and fuse
+      // still finds and welds it, now correctly turned; for anything else
+      // the rotated cap no longer aligns to X/Y/Z, mating search finds
+      // nothing, and fuse declines - correctly, since a piece tipped at a
+      // free angle is no longer flush with its mate, and no fuse route
+      // should silently paper over that. Route 2 (kernel union) picks up
+      // from there and handles any orientation via a real boolean union.
+      const rawA = NSO_rotateRawSoupByPlacedPose(getModelRawSoup(modelA), placedA);
+      const rawB = NSO_rotateRawSoupByPlacedPose(getModelRawSoup(modelB), placedB);
       if (!NSO_soupLen(rawA) || !NSO_soupLen(rawB)) {
         fuseWhy = 'no raw soup for one side';
       } else {
@@ -2332,14 +2348,16 @@ async function joinSelectedModels() {
     // A real fuse already landed. Skip the plate route rather than let it
     // nudge the poses to close a kerf that is no longer there.
     legacyWhy = 'not needed - planar fuse succeeded';
+  } else if (solidOnly) {
+    legacyWhy = 'overlapping shells merged - the kernel union welds them';
   } else try {
     if (placedA && placedB) {
       const yA = placedA.mesh ? placedA.mesh.position.y : 0;
       const yB = placedB.mesh ? placedB.mesh.position.y : 0;
       const seated = Math.abs(yA - yB) > 3.5;
       if (seated && typeof meshToWorldSoup === 'function') {
-        const sa = meshToWorldSoup(placedA);
-        const sb = meshToWorldSoup(placedB);
+        const sa = meshToWorldSoup(placedA.mesh);
+        const sb = meshToWorldSoup(placedB.mesh);
         if (!sa || !sb || sa.length < 9 || sb.length < 9) throw new Error('in-place join empty soup');
         let merged = new Float32Array(sa.length + sb.length);
         merged.set(sa, 0);
@@ -2379,6 +2397,12 @@ async function joinSelectedModels() {
     try {
       setStatus('Joining (loading CSG kernel)...');
       const u = await NSO_unionSoups(joinSoupA, joinSoupB);
+      /* Stopped (Escape) or timed out in the worker: the whole Join stops. Falling through to another
+         route would commit a join the user just said no to. */
+      if (u.cancelled || u.timedOut) {
+        setStatus(u.cancelled ? 'Join stopped - nothing was changed' : 'Join stopped - ' + u.reason, !u.cancelled);
+        return;
+      }
       if (u.ok && u.soup && u.soup.length >= 9) {
         kernelGeo = soupToCenteredGeo(u.soup);
         // the kernel's own count, not one rounded off the soup
@@ -2438,6 +2462,7 @@ async function joinSelectedModels() {
     aPrevRawAxis: modelA.rawAxis,
     aPrevCenterOffset: modelA.centerOffset,
     aPrevSize: { x: modelA.size.x, y: modelA.size.y, z: modelA.size.z },
+    aPrevPose: (placedA && typeof nsoPlacedPoseSnapshot === 'function') ? nsoPlacedPoseSnapshot(placedA) : null,
     bSnapshot: {
       id: modelB.id,
       name: modelB.name,
@@ -2478,6 +2503,8 @@ async function joinSelectedModels() {
     reindexPlacedMeshes();
   }
   state.joinPartnerId = null;
+  state.joinThirdId = null;
+  state.joinFaceC = null;
   state.joinSession = false;
   state.joinArmed = null;
 
@@ -2508,6 +2535,14 @@ async function joinSelectedModels() {
     placedA.width = modelA.size.x;
     placedA.depth = modelA.size.z;
     placedA.height = modelA.size.y;
+    /* The union is drawn at identity: whichever route made it, the pose A
+       had is either baked into the soup (seated weld, kernel union - world
+       soups) or not part of the result at all (planar fuse, plate weld -
+       unposed geometry). Either way the record must stop claiming it. Left
+       set, the next bake that honours the record - Mirror, through
+       NSO_sculptCommitRaw - re-applies it, and an A that was edge-flipped
+       before this Join comes out of that Mirror turned 180 degrees. */
+    if (typeof nsoClearPlacedPose === 'function') nsoClearPlacedPose(placedA);
   } else if (state.cutterOpen) {
     showEditPreview();
   }
@@ -2520,49 +2555,28 @@ async function joinSelectedModels() {
   setStatus('Join ok (' + route + ') - open edges ' + before.open + '\u2192' + after.open +
             ', non-manifold ' + before.nm + '\u2192' + after.nm +
             (fuseInfo ? '; seam fused, ' + fuseInfo.removed + ' cap tri(s) removed, ' +
-                        fuseInfo.triIn + '\u2192' + fuseInfo.triOut + ' tris' : ''));
+                        fuseInfo.triIn + '\u2192' + fuseInfo.triOut + ' tris' : '') +
+            (solJoin.note ? ' - ' + solJoin.note : ''));
 }
 
 
-function splitBothSides(model, axis, leftPlane, rightPlane) {
-  const alreadySplit = /-[AB]\d+$/i.test(model.name || '');
-  // 2nd+ cuts: clip the DISPLAY mesh at the slider plane. Raw mapping on a
-  // half still in original-file coordinates misses the plane and looks like
-  // "Split does nothing."
-  if (!alreadySplit && model.rawTris && model.rawAxis === 'zup' && model.centerOffset) {
-    try {
-      const mapL = mapPlaneToRaw(model, axis, leftPlane, true);
-      const mapR = mapPlaneToRaw(model, axis, rightPlane, false);
-      if (!mapL || !mapR) throw new Error('no raw mapping');
-      const rawL = rawCut(model.rawTris, mapL.axisIdx, mapL.plane, mapL.keepMin);
-      const rawR = rawCut(model.rawTris, mapR.axisIdx, mapR.plane, mapR.keepMin);
-      if (!rawL || !rawR) throw new Error('rawCut empty side');
-      return {
-        left: rawResultToDisplayGeometry(rawL, model.centerOffset),
-        right: rawResultToDisplayGeometry(rawR, model.centerOffset),
-        engine: 'raw',
-        rawA: rawL,
-        centerOffsetA: computeCenterOffsetFromRaw(rawL),
-        rawB: rawR,
-        centerOffsetB: computeCenterOffsetFromRaw(rawR)
-      };
-    } catch (err) {
-      console.warn('[rawCut] fallback to display clip:', err.message);
-    }
-  }
-  return {
-    left: clipGeometrySide(model.geometry, axis, leftPlane, true),
-    right: clipGeometrySide(model.geometry, axis, rightPlane, false),
-    engine: 'display'
-  };
-}
+// splitBothSides lives in app-cut.js: one engine (rawCut) for every Cut.
 
-function cutActiveModel() {
+// opts.rightSideOut: the click on "Turn it right-side-out, then cut" (see
+// "Cut on an inside-out piece" in app-cut.js). The Split button's click event
+// carries no such field, so a plain Cut never turns anything.
+function cutActiveModel(opts) {
+  const rightSideOut = !!(opts && opts.rightSideOut === true);
+  const offer = state.cutRightSideOutOffer;
+  // Any Cut attempt answers the last offer; a refusal below makes a new one.
+  if (typeof cutClearRightSideOutOffer === 'function') cutClearRightSideOutOffer();
   try {
-  if (!state.cutterOpen) {
-    setStatus('Open cutter first', true);
+  if (!state.cutterOpen || (state.cutTool || 'cut') !== 'cut') {
+    setStatus('Open Cut first', true);
     return;
   }
+  // The Whole plate blade (app-cut-plate.js) cuts every piece at one height: no picked piece, no plane of its own.
+  if (typeof cutPlateOn === 'function' && cutPlateOn()) { cutPlateActiveRun(); return; }
   const m = getActiveModel();
   if (!m) {
     setStatus('Load an STL first', true);
@@ -2570,15 +2584,15 @@ function cutActiveModel() {
   }
   const info = getCutPlaneForSplit(m);
   if (!info) {
-    setStatus('Cannot resolve cut plane - reopen cutter', true);
+    setStatus('Cannot resolve cut plane - reopen Cut', true);
     return;
   }
   const axis = info.axis;
   const plateAxis = info.plateAxis || axis;
   const span = info.span;
   const plane = info.plane;
-  // Distance from min end - must match readout
-  const cutMm = (plane - info.origin);
+  // Distance from min end - the readout's own number
+  const cutMm = info.mm != null ? info.mm : (plane - info.origin);
   if (span < MIN_CUT_SIDE_MM * 2) {
     setStatus('Piece too short to cut (need >= ' + (MIN_CUT_SIDE_MM * 2) + ' mm along cut axis)', true);
     return;
@@ -2587,11 +2601,51 @@ function cutActiveModel() {
     setStatus('Keep >= ' + MIN_CUT_SIDE_MM + ' mm on each side of the red plane', true);
     return;
   }
-  // Kerf band centered on red line - middle slab discarded so halves have a real gap
-  const halfKerf = KERF_MM * 0.5;
-  const leftPlane = plane - halfKerf;
-  const rightPlane = plane + halfKerf;
-  const pair = splitBothSides(m, axis, leftPlane, rightPlane);
+  // A sized blade (Cut card, "Sized blade") is not a split: its box comes out
+  // of the piece (cutNotchAt, app-cut.js) and the piece stays one piece.
+  if (info.blade) { cutNotchAt(m, info); return; }
+  // A clean split at the one plane (cutSplitAt, app-cut.js): the halves meet
+  // exactly and add back to the piece - no kerf band comes out.
+  // Turned right-side-out only on the click, only for the piece it was
+  // offered for, and only when every shell of it is inside-out. The turn is
+  // made on a copy; m itself stays as it is, so it is what Undo restores.
+  let cutModel = m;
+  if (rightSideOut) {
+    if (!offer || offer.id !== m.id) {
+      setStatus('Not turned: the button belongs to the inside-out piece Split last refused, and this is not it. ' +
+        'Split this piece to see whether it needs turning.', true);
+      return;
+    }
+    const verdict = cutInsideOutVerdict(m);
+    if (!verdict.whole) {
+      setStatus('Not turned: ' + (verdict.wrong.length
+        ? cutPartlyInsideOutReason(verdict)
+        : 'this piece is not inside-out') + '. The piece is unchanged.', true);
+      return;
+    }
+    cutModel = cutRightSideOutCopy(m);
+  }
+  let pair;
+  try {
+    pair = cutSplitAt(cutModel, info);
+  } catch (err) {
+    if (err && err.name === 'CutRefused') {
+      if (err.insideOut && !rightSideOut) {
+        const verdict = cutInsideOutVerdict(m);
+        if (verdict.whole) {
+          cutOfferRightSideOut(m, 'Cut not made: ' + err.message + '. The piece is unchanged.');
+          return;
+        }
+        if (verdict.wrong.length) {
+          setStatus('Cut not made: ' + cutPartlyInsideOutReason(verdict) + '. The piece is unchanged.', true);
+          return;
+        }
+      }
+      setStatus('Cut not made: ' + err.message + '. The piece is unchanged - move the red plane and try again.', true);
+      return;
+    }
+    throw err;
+  }
   const left = pair.left;
   const right = pair.right;
   if (!left || !right) {
@@ -2724,6 +2778,8 @@ function cutActiveModel() {
   const sizeB = modelB ? (axis === 'x' ? modelB.size.x : modelB.size.z) : 0;
   state.selectedIndex = -1;
   state.joinPartnerId = null;
+  state.joinThirdId = null;
+  state.joinFaceC = null;
   state.joinSession = false;
   state.joinArmed = null;
   state.cutT = 0.5;
@@ -2737,7 +2793,8 @@ function cutActiveModel() {
   state.cutterOpen = true;
   removeCutHelper();
   state.previewMesh = null;
-  layoutAfterSplit(sourcePose, poseById, sourceId, modelA, modelB, plateAxis, stayA, stayB);
+  layoutAfterSplit(sourcePose, poseById, sourceId, modelA, modelB, plateAxis, stayA, stayB,
+                   info.base && !info.deg && !info.bevel ? info.normalWorld : null);
   state.cutterOpen = true;
   state.editId = null;
   removeCutHelper();
@@ -2747,13 +2804,12 @@ function cutActiveModel() {
   updateCutterUI();
   updateUndoBtn();
 
-  const sum = mL.along + mR.along;
-  const loss = span - sum;
   setStatus(
-    'Cut @ ' + cutMm.toFixed(1) + ' mm (kerf ' + KERF_MM + ' mm) -> ' +
+    (rightSideOut ? 'Turned right-side-out (' + (cutModel.geometry.attributes.position.count / 3) +
+      ' triangles reversed), then cut; one Undo puts the original back. ' : '') +
+    'Cut @ ' + cutMm.toFixed(1) + ' mm' + (info.deg ? ', mitre ' + info.deg + '°' : '') + ' -> ' +
     nameA + ' ' + mL.along.toFixed(1) + ' mm + ' + nameB + ' ' + mR.along.toFixed(1) +
-    ' mm [' + pair.engine + ']. List: ' + state.models.length + ' models. Undo: ' + state.undoStack.length + '.' +
-    (Math.abs(loss) > KERF_MM + 1.5 ? ' ! loss ' + loss.toFixed(1) + ' mm' : '')
+    ' mm [' + pair.engine + ']. List: ' + state.models.length + ' models. Undo: ' + state.undoStack.length + '.'
   );
   } catch (err) {
     console.error(err);
@@ -2793,17 +2849,29 @@ function arrayActiveModel() {
   setStatus('Arrayed ' + count + ' at ' + pitch + ' mm on ' + axis + '. Download that new model.');
 }
 
-function exportActiveModel() {
+/* The bytes half of "Download selected STL", with the download taken off it.
+
+   Everything from "which model" to "which triangles survive" to the Y-up ->
+   Z-up turn is export policy, and the Library's Save As has to produce the
+   SAME bytes the download button produces or a saved piece is not the piece
+   that was tested. So the policy lives here once and both callers run it:
+   exportActiveModel() below adds the filename prompt and the download,
+   app-library-save.js adds the catalog entry and the commit.
+
+   Returns { buffer, tris, dropped, name } or null. On null it has already put
+   the reason on the status line, because the two callers would word it
+   identically anyway. */
+function activeModelSTL() {
   const m = getActiveModel();
   if (!m || !m.geometry) {
     setStatus('Select a model in the list first (click its name), then Download selected model STL', true);
-    return;
+    return null;
   }
   try {
     let geo = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
     if (!geo.attributes || !geo.attributes.position) {
       setStatus('Model has no mesh data to export', true);
-      return;
+      return null;
     }
     // Work on a clean non-indexed clone
     if (geo === m.geometry) geo = geo.clone();
@@ -2830,14 +2898,30 @@ function exportActiveModel() {
     }
     if (mapped.length < 9) {
       setStatus('Export failed - mesh empty or invalid after cut', true);
-      return;
+      return null;
     }
     const out = new THREE.BufferGeometry();
     out.setAttribute('position', new THREE.Float32BufferAttribute(mapped, 3));
-    const buffer = geometryToBinarySTL(out);
+    return {
+      buffer: geometryToBinarySTL(out),
+      tris: Math.floor(mapped.length / 9),
+      dropped,
+      name: String(m.name || 'piece').replace(/[\/\?%*:|"<>]/g, '_')
+    };
+  } catch (err) {
+    console.error(err);
+    setStatus('Export failed: ' + (err && err.message ? err.message : 'unknown error'), true);
+    return null;
+  }
+}
+
+function exportActiveModel() {
+  const stl = activeModelSTL();
+  if (!stl) return;
+  try {
+    const { buffer, tris, dropped } = stl;
     const blob = new Blob([buffer], { type: 'application/octet-stream' });
-    const safe = String(m.name || 'piece').replace(/[\/\?%*:|"<>]/g, '_');
-    let filename = safe + '.stl';
+    let filename = stl.name + '.stl';
     try {
       const typed = window.prompt('Export as', filename);
       if (typed == null) {
@@ -2849,8 +2933,9 @@ function exportActiveModel() {
       filename = filename.replace(/[\/\?%*:|"<>]/g, '_');
     } catch (e) {}
     downloadBlob(blob, filename);
+    if (typeof nsoCloseTopCard === 'function') nsoCloseTopCard('menu-export');
     setStatus(
-      'Downloaded ' + filename + ' (' + Math.floor(mapped.length / 9) + ' tris' +
+      'Downloaded ' + filename + ' (' + tris + ' tris' +
       (dropped ? ', skipped ' + dropped + ' bad' : '') + '). Open in Bambu Studio.'
     );
   } catch (err) {
@@ -2864,7 +2949,11 @@ function setStatus(msg, isError = false) {
   const el = document.getElementById('status');
   if (!el) return;
   el.textContent = msg;
-  el.className = 'status' + (isError ? ' error' : ' success');
+  /* Only the variant changes: the line's own classes (status-hud, the
+     viewport panel) stay, which a className write would wipe. */
+  el.classList.add('status');
+  el.classList.toggle('error', !!isError);
+  el.classList.toggle('success', !isError);
 }
 
 function updatePlateInfo() {
@@ -2874,6 +2963,8 @@ function updatePlateInfo() {
   if (state.ready) {
     buildPlateMesh();
     clearPlaced();
+    // the size is every bed's: the others' pieces come off the plate the same way (app-beds.js)
+    if (typeof NSO_BEDS !== 'undefined') NSO_BEDS.plateSizeChanged();
   }
 }
 
@@ -2956,44 +3047,28 @@ function setupUI() {
   }
 
   document.getElementById('btn-optimize').addEventListener('click', runOptimize);
-  document.getElementById('btn-clear').addEventListener('click', () => {
-    state.models = [];
-    state.editId = null;
-    state.cutT = 0.5;
-    state.cutterOpen = false;
-    state.editYawDragging = false;
-    state.cutDragging = false;
-    clearUndo();
-    clearDisplayMeshes();
-    renderModelList();
-    clearPlaced();
-    removeCutHelper();
-    state.previewMesh = null;
-    state.selectedIndex = -1;
-    updateAdjustUI();
-    updateOptimizeButton();
-    updateEditSize();
-    updateCutterUI();
-    const fi = document.getElementById('file-input');
-    if (fi) fi.value = '';
-    setStatus('Cleared - click drop zone to load an STL again');
-  });
-  document.getElementById('btn-export-stl').addEventListener('click', exportSTLs);
-  const btn3mf = document.getElementById('btn-export-3mf');
-  if (btn3mf) btn3mf.addEventListener('click', export3MF);
+  document.getElementById('btn-export-stl').addEventListener('click', exportPlate);
   setupCoolingProfileUI();
+  setupExportFormatUI();
 
   // Manual adjust
   document.getElementById('btn-rot-left').addEventListener('click', () => rotateSelected(-1));
   document.getElementById('btn-rot-right').addEventListener('click', () => rotateSelected(1));
-  document.getElementById('btn-flip').addEventListener('click', () => flipSelected());
-  document.getElementById('btn-tip').addEventListener('click', () => tipSelected());
-  const btnRoll = document.getElementById('btn-roll');
-  if (btnRoll) btnRoll.addEventListener('click', () => rollSelected());
-  const btnRaise = document.getElementById('btn-raise');
-  if (btnRaise) btnRaise.addEventListener('click', () => liftSelected(1));
-  const btnLower = document.getElementById('btn-lower');
-  if (btnLower) btnLower.addEventListener('click', () => liftSelected(-1));
+  /* btn-flip is "Tip on side" now and app-tip-orient.js owns its click -
+     bound there so the orientation maths lives in one file. flipSelected()
+     (a 180 degree yaw) keeps its other callers and is not wired to a button.
+     btn-roll / "Flat" is retired: Tip on face reaches the same orientation
+     by picking the bottom face, and rollSelected() stays for its callers. */
+  /* btn-tip is "Stand" now; app-tip-orient.js owns its click. */
+  /* Raise / Lower retired: the Move menu's Vertical checkbox owns the
+     vertical axis now - slider and arrow keys, in app-move-vertical.js, which
+     writes liftY through its own step. liftSelected() is unchanged and still
+     has its callers; the suites drive the vertical step through it directly.
+
+     To plate is the one-press recovery those two never had, and it does NOT
+     go through liftSelected: see bringSelectedToPlate in app-core.js. */
+  const btnToPlate = document.getElementById('btn-to-plate');
+  if (btnToPlate) btnToPlate.addEventListener('click', () => bringSelectedToPlate());
   const btnTiltUp = document.getElementById('btn-tilt-up');
   if (btnTiltUp) btnTiltUp.addEventListener('click', () => tiltSelected(1));
   const btnTiltDn = document.getElementById('btn-tilt-dn');
@@ -3009,14 +3084,41 @@ function setupUI() {
 
   const btnFrame = document.getElementById('btn-frame-selected');
   if (btnFrame) btnFrame.addEventListener('click', frameSelectedPiece);
-  document.querySelectorAll('.vp-menu').forEach(function (d) {
-    d.addEventListener('toggle', function () {
-      if (!d.open) return;
-      document.querySelectorAll('.vp-menu').forEach(function (o) {
-        if (o !== d) o.open = false;
+  /* One panel open on the whole page. Every drop-down - the row along the
+     top, the column down the left, Finish, and the menus nested in Gen+ -
+     opens its panel at the same spot, so two open at once would sit on top
+     of one another. Opening any of them shuts every other.
+
+     A menu that contains the one being opened, or is contained by it, is
+     left alone: Gen+ holds Wheel, Stock and Picture, and opening Wheel must
+     not shut the Gen+ it lives in.
+
+     Watched with a MutationObserver on the `open` attribute rather than a
+     'toggle' listener, for the reason app-input-mode.js gives: toggle is
+     dispatched in a queued task, so for a moment after a click two panels
+     were open; the observer runs as a microtask, before the next event, and
+     sees a programmatic `.open = true` as well as a click.
+
+     Cut has no exemption. Opening another panel shuts Cut's panel, but the
+     cutter itself is a tool, not a panel: closing the <details> leaves
+     state.cutterOpen, the blade and its position exactly as they were, and
+     opening Cut again shows its controls. Only the cutter going away closes
+     Cut's panel by itself (updateCutterUI in app-cut.js). */
+  if (typeof MutationObserver === 'function') {
+    new MutationObserver(function (records) {
+      let opened = null;
+      records.forEach(function (r) {
+        const d = r.target;
+        if (r.oldValue === null && d.open && d.matches('.vp-menu')) opened = d;
       });
-    });
-  });
+      if (!opened) return;
+      document.querySelectorAll('.vp-menu[open]').forEach(function (o) {
+        if (o === opened || o.contains(opened) || opened.contains(o)) return;
+        o.open = false;
+      });
+    }).observe(document.body, { attributes: true, subtree: true,
+                                attributeFilter: ['open'], attributeOldValue: true });
+  }
 
   const btnClearPlate = document.getElementById('btn-clear-plate');
   if (btnClearPlate) btnClearPlate.addEventListener('click', clearPlateOnly);
@@ -3042,17 +3144,32 @@ function setupUI() {
     btnUndo.addEventListener('click', fireUndo, true);
     btnUndo.addEventListener('pointerdown', (e) => { e.stopPropagation(); }, true);
   }
+  const btnRedo = document.getElementById('btn-redo');
+  if (btnRedo) {
+    btnRedo.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      redoLast();
+    }, true);
+    btnRedo.addEventListener('pointerdown', (e) => { e.stopPropagation(); }, true);
+  }
   updateUndoBtn();
 
   window.addEventListener('keydown', (e) => {
     const tag = (e.target && e.target.tagName) || '';
     if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
-    if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
+    // Shift+Cmd/Ctrl+Z and Ctrl+Y redo; Cmd/Ctrl+Z undoes.
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || e.key === 'Y') && !e.shiftKey && !e.altKey) {
       e.preventDefault();
-      undoLast();
+      redoLast();
       return;
     }
-    if (state.cutterOpen && getActiveModel()) {
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
+      e.preventDefault();
+      if (e.shiftKey) redoLast(); else undoLast();
+      return;
+    }
+    if (cutterArmed('cut') && getActiveModel()) {
       if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
         e.preventDefault();
         setCutMm(getCutMm() - 0.5);
@@ -3066,23 +3183,24 @@ function setupUI() {
     }
     if (e.key === 'Delete' || e.key === 'Backspace') {
       e.preventDefault();
-      if (state.selectedIndex >= 0 && state.placed[state.selectedIndex]) {
-        deleteSelectedPlaced();
+      if ((state.selectedIndex >= 0 && state.placed[state.selectedIndex]) || (typeof nsoSelAllPieces === 'function' && nsoSelAllPieces().length)) {
+        deleteSelectedPlaced();     // the selected piece, or the Select all group
       } else if (getActiveModel()) {
         deleteActiveModel();
       }
     }
   });
-  const btnCutterOpen = document.getElementById('btn-cutter-open');
-  if (btnCutterOpen) btnCutterOpen.addEventListener('click', openCutter);
-  const btnCutterClose = document.getElementById('btn-cutter-close');
-  if (btnCutterClose) btnCutterClose.addEventListener('click', () => closeCutter(false));
+  // No Open / Close buttons: the Cut and Crop cards arm and disarm the
+  // cutter themselves (cutWireCards, app-cut.js).
+  cutWireCards();
   const btnCut = document.getElementById('btn-cut');
   if (btnCut) btnCut.addEventListener('click', cutActiveModel);
+  const btnCutRightSideOut = document.getElementById('btn-cut-right-side-out');
+  if (btnCutRightSideOut) btnCutRightSideOut.addEventListener('click', cutRightSideOutClicked);
   const btnArray = document.getElementById('btn-array');
   if (btnArray) btnArray.addEventListener('click', arrayActiveModel);
   const btnExportModel = document.getElementById('btn-export-model');
-  if (btnExportModel) btnExportModel.addEventListener('click', exportActiveModel);
+  if (btnExportModel) btnExportModel.addEventListener('click', exportSelected);
   const btnSoften = document.getElementById('btn-soften');
   if (btnSoften) btnSoften.addEventListener('click', softenSelectedModel);
   const btnCapFace = document.getElementById('btn-cap');
@@ -3092,10 +3210,8 @@ function setupUI() {
   if (btnSeal) btnSeal.addEventListener('click', sealSelectedModel);
   const btnSolidify = document.getElementById('btn-solidify');
   if (btnSolidify) btnSolidify.addEventListener('click', solidifySelectedModel);
-  const btnThickenOut = document.getElementById('btn-thicken-out');
-  if (btnThickenOut) btnThickenOut.addEventListener('click', thickenOutSelectedModel);
-  const btnThickenIn = document.getElementById('btn-thicken-in');
-  if (btnThickenIn) btnThickenIn.addEventListener('click', thickenInSelectedModel);
+  // Thicken out / in are wired by app-thicken-live.js now: the button arms a live
+  // ghost and Set bakes it (thickenSelectedModel, unchanged).
 
   const btnJoin = document.getElementById('btn-join');
   if (btnJoin) {
@@ -3106,13 +3222,16 @@ function setupUI() {
       var prevLabel = btnJoin.textContent;
       btnJoin.disabled = true;
       btnJoin.textContent = 'Joining...';
-      Promise.resolve(joinSelectedModels()).catch(function (err) {
+      // JOIN: two pieces with the A-B gap off is Complete Join; a gap or a
+      // third piece is the junction sequence (app-join-triple.js, press).
+      const go = window.NSO_TripleJoin ? window.NSO_TripleJoin.press : joinSelectedModels;
+      new Promise(function (resolve) { resolve(go()); }).catch(function (err) {
         console.warn('[join] unexpected error:', err);
         setStatus('Join failed - unexpected error', true);
       }).then(function () {
         joinBusy = false;
-        btnJoin.disabled = false;
         btnJoin.textContent = prevLabel;
+        updateJoinUI();
       });
     });
   }
@@ -3143,8 +3262,12 @@ function setupUI() {
   if (btnSeatSupport) btnSeatSupport.addEventListener('click', seatSupportBitToHull);
   const seatGapSlider = document.getElementById('seat-gap');
   if (seatGapSlider) {
-    seatGapSlider.addEventListener('input', updateSeatGapReadout);
-    seatGapSlider.addEventListener('change', updateSeatGapReadout);
+    /* Named wrapper, not updateSeatGapReadout itself: a listener is called
+       with the Event as its first argument, and the first argument is now
+       the id of the input to read. */
+    const syncSeatGap = function () { updateSeatGapReadout(); };
+    seatGapSlider.addEventListener('input', syncSeatGap);
+    seatGapSlider.addEventListener('change', syncSeatGap);
     updateSeatGapReadout();
   }
   const btnFlipPort = document.getElementById('btn-flip-port');
@@ -3153,8 +3276,7 @@ function setupUI() {
   if (btnCap) btnCap.addEventListener('click', capSelectedOpenFaces);
   const btnJoinClear = document.getElementById('btn-join-clear');
   if (btnJoinClear) btnJoinClear.addEventListener('click', clearJoinSlots);
-  const btnJoinStart = document.getElementById('btn-join-start');
-  if (btnJoinStart) btnJoinStart.addEventListener('click', startJoinSession);
+  joinWireCard();
   const btnJoinAlign = document.getElementById('btn-join-align');
   if (btnJoinAlign) btnJoinAlign.addEventListener('click', alignJoinForSlide);
   const btnJoinCx = document.getElementById('btn-join-cx');
@@ -3237,23 +3359,16 @@ const btnFrameView = document.getElementById('btn-frame-view');
   if (slotA) slotA.addEventListener('click', function () { armJoinSlot('a'); });
   const slotB = document.getElementById('join-slot-b');
   if (slotB) slotB.addEventListener('click', function () { armJoinSlot('b'); });
-  const btnYawL = document.getElementById('btn-yaw-left');
-  const btnYawR = document.getElementById('btn-yaw-right');
-  const btnYawL90 = document.getElementById('btn-yaw-left-90');
-  const btnYawR90 = document.getElementById('btn-yaw-right-90');
-  if (btnYawL) btnYawL.addEventListener('click', () => rotateActiveModelY(-15));
-  if (btnYawR) btnYawR.addEventListener('click', () => rotateActiveModelY(15));
-  if (btnYawL90) btnYawL90.addEventListener('click', () => rotateActiveModelY(-90));
-  if (btnYawR90) btnYawR90.addEventListener('click', () => rotateActiveModelY(90));
+  // The yaw buttons are gone from the Cut card (the mitre wheel angles the
+  // cut, the piece stays put); rotateActiveModelY stays for the yaw drag.
 
+  // The hidden axis select: Crop's axis (resolveAxis), and the programmatic
+  // cut-axis lock (cutFrame). No visible control sets either now - Cut X /
+  // Cut Z are gone; the blade is square to the piece's length by itself.
   function setCutAxisLock(axis) {
     state.cutAxis = axis;
     const sel = document.getElementById('edit-axis');
     if (sel) sel.value = axis;
-    const bx = document.getElementById('btn-cut-axis-x');
-    const bz = document.getElementById('btn-cut-axis-z');
-    if (bx) bx.classList.toggle('tool-active', axis === 'x');
-    if (bz) bz.classList.toggle('tool-active', axis === 'z');
     if (state.cutterOpen && getActiveModel()) {
       const mesh = getCutterTargetMesh();
       if (mesh) state.previewMesh = mesh;
@@ -3263,29 +3378,25 @@ const btnFrameView = document.getElementById('btn-frame-view');
     }
     setStatus('Blade axis ' + axis.toUpperCase());
   }
-  const btnAx = document.getElementById('btn-cut-axis-x');
-  const btnAz = document.getElementById('btn-cut-axis-z');
-  if (btnAx) btnAx.addEventListener('click', function () { setCutAxisLock('x'); });
-  if (btnAz) btnAz.addEventListener('click', function () { setCutAxisLock('z'); });
   const axisSel = document.getElementById('edit-axis');
   if (axisSel) axisSel.addEventListener('change', function () {
     setCutAxisLock(axisSel.value === 'z' ? 'z' : axisSel.value === 'x' ? 'x' : 'auto');
   });
   const slider = document.getElementById('cut-slider');
   if (slider) slider.addEventListener('input', () => {
-    const m = getActiveModel();
-    const span = m ? getCutSpan(m) : 100;
-    const raw = Math.min(0.98, Math.max(0.02, Number(slider.value) / 100));
-    state.cutT = snapCutT(raw, span);
-    syncCutUI();
-    updateCutHelper();
+    // The slider runs in mm from the low end (syncCutUI sets its range).
+    setCutMm(Number(slider.value));
   });
   const cutMm = document.getElementById('cut-mm');
   if (cutMm) cutMm.addEventListener('change', () => setCutMm(Number(cutMm.value)));
+  // ← / →: the blade along the piece by 0.1 mm each press, 1 mm with Shift.
+  const nudgeStep = (ev) => (ev && ev.shiftKey ? CUT_NUDGE_SHIFT_MM : CUT_NUDGE_MM);
   const nudgeM = document.getElementById('btn-cut-nudge-m');
-  if (nudgeM) nudgeM.addEventListener('click', () => setCutMm(getCutMm() - 1));
+  if (nudgeM) nudgeM.addEventListener('click', (ev) => setCutMm(getCutMm() - nudgeStep(ev)));
   const nudgeP = document.getElementById('btn-cut-nudge-p');
-  if (nudgeP) nudgeP.addEventListener('click', () => setCutMm(getCutMm() + 1));
+  if (nudgeP) nudgeP.addEventListener('click', (ev) => setCutMm(getCutMm() + nudgeStep(ev)));
+  cutWireMiterDial();
+  cutWireBladeControls();
   updateAdjustUI();
   updateCutterUI();
 }

@@ -141,6 +141,33 @@ if [ -z "$UPSTREAM" ]; then
   emit "[session-start git sync] $LOG" "Fetched origin; '$BRANCH' has no upstream - not updated"
 fi
 
+# ------------------------------------------------- shallow-clone merge base
+# Cloud sessions start from a shallow clone. When the checkout is older than
+# the fetched depth, HEAD and the upstream share no commit inside the local
+# history, and rev-list then counts every commit on both sides - reporting a
+# 50/50 "divergence" that does not exist. Deepen until the merge base is
+# present (or the history is complete) before counting anything.
+SHALLOW_UNRESOLVED=0
+if [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = "true" ]; then
+  for depth in 100 400 1600; do
+    git merge-base HEAD "$UPSTREAM" >/dev/null 2>&1 && break
+    timeout "$FETCH_TIMEOUT" git fetch --quiet --deepen="$depth" origin >/dev/null 2>&1 || break
+  done
+  if ! git merge-base HEAD "$UPSTREAM" >/dev/null 2>&1; then
+    timeout "$FETCH_TIMEOUT" git fetch --quiet --unshallow origin >/dev/null 2>&1
+  fi
+  git merge-base HEAD "$UPSTREAM" >/dev/null 2>&1 || SHALLOW_UNRESOLVED=1
+fi
+
+if [ "$SHALLOW_UNRESOLVED" -eq 1 ]; then
+  note
+  log "Fetched origin OK, but this is a shallow clone and no common commit between"
+  log "'$BRANCH' (${OLD_SHA:0:12}) and $UPSTREAM could be found even after deepening,"
+  log "so ahead/behind counts are unknown (not a confirmed divergence). Nothing was"
+  log "moved. 'git fetch --unshallow origin' then re-check if it matters."
+  emit "[session-start git sync] $LOG" "Shallow clone: relation to $UPSTREAM unknown - not updated"
+fi
+
 # ------------------------------------------------------- compare to upstream
 counts="$(git rev-list --left-right --count "${UPSTREAM}...HEAD" 2>/dev/null || echo '')"
 BEHIND="$(printf '%s' "$counts" | awk '{print $1+0}')"

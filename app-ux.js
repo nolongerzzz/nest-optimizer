@@ -1,21 +1,34 @@
 /* ux overlay — look lock + HUD stamp */
 (function () {
-  function stampHud() {
+  /* The build marker. Writes the HUD element, and on the FIRST stamp only,
+     the status line too - so opening the page says which build it is.
+
+     The re-stamps below used to call setStatus as well, and that is a real
+     bug rather than a cosmetic one: they land 0ms and 200ms after bind, so
+     any action taken in that window had its status line overwritten with the
+     build tag. It cost a drive check a status assertion - Stock reported
+     "HUD inside7" where it had just written what it made - and it would have
+     done the same to a person who clicked fast. The tag is a stamp, not a
+     result, and it stops speaking over results. */
+  function stampHud(alsoStatus) {
     var el = document.getElementById('adjust-status');
-    if (el) el.textContent = 'HUD inside4';
-    if (typeof setStatus === 'function') setStatus('HUD inside4');
+    if (el) el.textContent = 'HUD inside7';
+    if (alsoStatus && typeof setStatus === 'function') setStatus('HUD inside7');
   }
 
-  function pickIdx(event) {
-    if (!state.renderer || !state.camera || !state.modelGroup) return -1;
-    setPointerFromEvent(event);
-    state.raycaster.setFromCamera(state.pointer, state.camera);
-    const hits = state.raycaster.intersectObjects(state.modelGroup.children, true);
-    if (!hits.length) return -1;
-    let obj = hits[0].object;
-    while (obj && obj.userData.placedIndex == null && obj.parent) obj = obj.parent;
-    const idx = obj && obj.userData ? obj.userData.placedIndex : undefined;
-    return typeof idx === 'number' ? idx : -1;
+  // nsoMaskHudRefresh writes HUD_TAG at rest. Until that const moves with
+  // the named tag, retag its line so a selection cannot snap the stamp back.
+  function alignMaskHudTag() {
+    var fn = window.nsoMaskHudRefresh;
+    if (typeof fn !== 'function' || fn._hudInside7) return;
+    window.nsoMaskHudRefresh = function () {
+      fn.apply(this, arguments);
+      var el = document.getElementById('adjust-status');
+      if (el && el.textContent) {
+        el.textContent = el.textContent.replace(/HUD inside[456]/g, 'HUD inside7');
+      }
+    };
+    window.nsoMaskHudRefresh._hudInside7 = true;
   }
 
   function lookAtHit(event) {
@@ -31,6 +44,11 @@
     return true;
   }
 
+  // The Thicken mm box hides its native spin buttons so the number can sit on
+  // top and the arrows underneath, inside one border the same height as the
+  // Thicken buttons. These two drive it instead - same min, max and step the
+  // field already declares, and an input event so anything listening still
+  // hears it. Nothing else about Thicken changed.
   function bindThickenArrows() {
     var arrows = document.querySelectorAll('.thick-arrow[data-thick-step]');
     for (var i = 0; i < arrows.length; i++) {
@@ -47,6 +65,7 @@
         var now = parseFloat(box.value);
         if (!isFinite(now)) now = isFinite(min) ? min : 0;
         var next = now + dir * step;
+        // step can be fractional, so round to the step's own precision
         var dp = (String(step).split('.')[1] || '').length;
         next = parseFloat(next.toFixed(dp));
         if (next < min) next = min;
@@ -59,19 +78,16 @@
   }
 
   function bind() {
-    stampHud();
+    stampHud(true);
+    alignMaskHudTag();
     bindThickenArrows();
-    setTimeout(stampHud, 0);
-    setTimeout(stampHud, 200);
+    // HUD only: these exist to put the tag back after other code rewrites the
+    // HUD element, not to say the build tag again over whatever the user did.
+    setTimeout(function () { stampHud(false); alignMaskHudTag(); }, 0);
+    setTimeout(function () { stampHud(false); alignMaskHudTag(); }, 200);
     if (state.renderer && state.renderer.domElement) {
-      state.renderer.domElement.addEventListener('dblclick', function (event) {
-        if (!state.cutterOpen) return;
-        const idx = pickIdx(event);
-        if (idx < 0) return;
-        event.preventDefault();
-        event.stopPropagation();
-        if (typeof closeCutter === 'function') closeCutter(false);
-      });
+      /* Double-click on the plate is app-input-mode.js's leaveTool() now -
+         the cutter is one of the things it closes, not the only one. */
       state.renderer.domElement.addEventListener('pointerdown', function (event) {
         if (event.button !== 0) return;
         if (!event.altKey) return;
@@ -83,13 +99,8 @@
       }, true);
     }
     if (state.controls) state.controls.minDistance = 3;
-    const ctxExport = document.getElementById('ctx-export');
-    if (ctxExport) {
-      ctxExport.addEventListener('click', function () {
-        if (typeof hideCtxMenu === 'function') hideCtxMenu();
-        if (typeof exportActiveModel === 'function') exportActiveModel();
-      });
-    }
+    /* The right-click menu's Export items open the Export card (nsoCtxOpenExport,
+       app-core.js); they no longer hard-wire one format here. */
   }
 
   if (document.readyState === 'loading') {

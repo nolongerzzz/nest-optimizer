@@ -31,6 +31,12 @@
  *                           wall-thickness check (Task 4) is for.
  *   fabric_weave_selfint    one weft woven at the wrong height so it passes
  *                           through the warps instead of over and under them
+ *   thin_shell_cup_cracked  the cup, still open at the rim on purpose, plus
+ *                           the defects a real scan arrives with: 12 zero-area
+ *                           sliver stitches over T-junctions, 3 reversed
+ *                           duplicate faces, and one fin through both walls.
+ *                           Unlike the three above, most of this IS fixable,
+ *                           and the flag must let it be fixed
  */
 'use strict';
 
@@ -182,6 +188,94 @@ function fxWeave(badWeft) {
   return t;
 }
 
+/* ---------------- thin_shell_cup_cracked ---------------- */
+
+/* The defect class a photogrammetry or scan-derived shell actually arrives
+ * with, dropped onto a piece that is ALSO open on purpose. Both at once is the
+ * point: every other fixture here is open-and-clean or open-and-unfixable.
+ *
+ * SLIVER STITCH. One triangle's edge A-B is subdivided at its midpoint M while
+ * the triangle on the other side of A-B keeps using the whole edge, and the
+ * resulting T-junction is closed by the zero-area triangle (A, B, M). The
+ * surface is watertight over that patch and stays consistently wound, and the
+ * stitch holding it together is a degenerate triangle - which is exactly how
+ * fixtures/tape_welded_clustered.stl is built, 295 times over.
+ *
+ * A-B is always the triangle's AXIS-PARALLEL edge, because the stitch has to
+ * be degenerate after a float32 round trip and not merely thin. Two endpoints
+ * that agree exactly in two coordinates have a midpoint that agrees in those
+ * two as well, whatever rounding does to the third, so the cross product is
+ * exactly zero and NSO_Repair's `triArea <= 1e-12` test sees it. Halving an
+ * edge that slants in all three would leave a sliver of area ~1e-6 at this
+ * mesh's scale: visually identical, and not what is being tested.
+ *
+ * It is the configuration that produced this fixture's reason for existing:
+ * the degenerate strip deletes the stitch, which unpairs A-B, A-M and M-B, and
+ * the T-junction split then re-stitches the same patch properly. Between those
+ * two stages the surface is legitimately more open than it arrived, and on a
+ * piece flagged non-solid there used to be nothing left to close the residue,
+ * so the final odd-edge gate threw the whole repair away.
+ *
+ * REVERSED DUPLICATE. A copy of a face with the winding flipped: three edges
+ * used three times each (non-manifold) with the directed counts disagreeing
+ * (inconsistent winding). The duplicate strip fixes it outright.
+ *
+ * PIERCE. The same fin thin_shell_cup_selfint uses. NSO_Repair cannot fix a
+ * self-intersection and must not appear to: it stays in the report. */
+function sliverStitch(t, f, frac) {
+  const v = [t.slice(f * 9, f * 9 + 3), t.slice(f * 9 + 3, f * 9 + 6), t.slice(f * 9 + 6, f * 9 + 9)];
+  let e = -1;
+  for (let i = 0; i < 3 && e < 0; i++) {
+    const p = v[i], q = v[(i + 1) % 3];
+    let same = 0;
+    for (let k = 0; k < 3; k++) if (p[k] === q[k]) same++;
+    if (same === 2) e = i;
+  }
+  if (e < 0) throw new Error('triangle ' + f + ' has no axis-parallel edge to stitch');
+  const A = v[e], B = v[(e + 1) % 3], C = v[(e + 2) % 3];
+  const s = (frac == null) ? 0.5 : frac;
+  const M = [A[0] + (B[0] - A[0]) * s, A[1] + (B[1] - A[1]) * s, A[2] + (B[2] - A[2]) * s];
+  // A-B becomes A-M and M-B on this side only, keeping the winding A..B..C...
+  t.splice(f * 9, 9, ...A, ...M, ...C, ...M, ...B, ...C);
+  // ...and (A, B, M) is the zero-area triangle that pairs all three again,
+  // wound A->B so the directed counts stay balanced too.
+  tri(t, A, B, M);
+}
+function fxCupCracked() {
+  const t = fxCup();
+  // 3 reversed duplicates first, on the inner wall, clear of every stitch.
+  // They only append, so the outer-wall indices the stitches use stay put.
+  for (const f of [600, 640, 680]) {
+    const a = t.slice(f * 9, f * 9 + 3), b = t.slice(f * 9 + 3, f * 9 + 6), c = t.slice(f * 9 + 6, f * 9 + 9);
+    tri(t, a, c, b);
+  }
+  /* 12 stitches on the outer wall, all on ring 2 of 5 - clear of the bottom
+   * disk below and of the rim above - four columns apart so no two share an
+   * edge. The outer wall is the first CUP.n * CUP.rings * 2 = 480 triangles and
+   * `sheet` emits column-major, so the first triangle of column i, ring j is
+   * (i * CUP.rings + j) * 2. Taken high-to-low so an earlier splice cannot move
+   * a later target.
+   *
+   * Half of them are cut at the middle of the edge and half at 4e-4 of it, and
+   * the difference is the point of the fixture. NSO_Repair's T-junction split
+   * refuses a stray vertex closer to an endpoint than SPLIT_EPS - the margin is
+   * `max(SPLIT_EPS, WELD_TOL) / edgeLength`, here 5e-3 / 5 mm = 1e-3 - so the
+   * six cut at 4e-4 are cracks it CANNOT re-stitch, however right it was to
+   * delete the sliver. That is not a contrived limit: it is the whole residue
+   * left on fixtures/tape_welded_clustered.stl, whose leftover loops span
+   * 0.01 mm, every interior point of them inside the margin. Six cracks of
+   * three edges each is +18 odd edges with nothing downstream to close them -
+   * the exact shape of the bug this fixture exists to pin. */
+  const targets = [];
+  for (let k = 0; k < 12; k++) {
+    const col = 2 + k * 4;
+    targets.push([(col * CUP.rings + 2) * 2, (k % 2) ? 4e-4 : 0.5]);
+  }
+  for (const [f, frac] of targets.reverse()) sliverStitch(t, f, frac);
+  t.push(...fin(Math.PI / CUP.n, CUP.R - 3, CUP.R + 3, 10, 14));
+  return t;
+}
+
 /* ---------------- manifest ---------------- */
 
 const FIXTURES = [
@@ -192,6 +286,7 @@ const FIXTURES = [
   ['thin_shell_cup_thin.stl',    fxCupThin,             'thin_shell_cup with one patch dented to 0.25 mm'],
   ['fabric_weave.stl',           () => fxWeave(-1),     '5x5 plain weave of open ribbons, no contact'],
   ['fabric_weave_selfint.stl',   () => fxWeave(2),      'fabric_weave with weft 2 woven through the warps'],
+  ['thin_shell_cup_cracked.stl', fxCupCracked,          'thin_shell_cup with sliver stitches, reversed duplicates and a fin'],
 ];
 
 function build(dir) {

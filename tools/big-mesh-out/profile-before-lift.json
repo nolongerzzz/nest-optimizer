@@ -1,0 +1,1071 @@
+{
+ "label": "before-lift",
+ "file": "0f7456c9-ButVase.3mf",
+ "tris": 947444,
+ "results": [
+  {
+   "name": "import",
+   "wallMs": 7190,
+   "value": {
+    "tris": 947444,
+    "status": "Loaded: single_color-219_fixed.stl_A (143x178x128 mm) - drag to move, Open cutter, or Optimize"
+   },
+   "error": null,
+   "longTasks": [
+    755,
+    564,
+    573,
+    594,
+    636,
+    671,
+    632
+   ],
+   "jsRuns": [
+    {
+     "startMs": 909.382,
+     "ms": 306.857,
+     "incl": [
+      [
+       "animate @ app-core.js:959",
+       1.415
+      ],
+      [
+       "parseRootModelPart @ nso-3mf-read.js:459",
+       0.615
+      ],
+      [
+       "(anonymous) @ nso-3mf-read.js:517",
+       0.615
+      ],
+      [
+       "parseModelSettingsNames @ nso-3mf-read.js:438",
+       0.605
+      ],
+      [
+       "(anonymous) @ nso-3mf-read.js:521",
+       0.605
+      ]
+     ],
+     "self": [
+      [
+       "(anonymous) @ (native):0",
+       302.317
+      ],
+      [
+       "compose @ three.min.js:6",
+       0.815
+      ],
+      [
+       "parseRootModelPart @ nso-3mf-read.js:459",
+       0.615
+      ],
+      [
+       "parseModelSettingsNames @ nso-3mf-read.js:438",
+       0.605
+      ]
+     ]
+    },
+    {
+     "startMs": 1260.517,
+     "ms": 2483.661,
+     "incl": [
+      [
+       "(anonymous) @ nso-3mf-read.js:509",
+       1368.225
+      ],
+      [
+       "parseModelXml @ nso-3mf-read.js:337",
+       1286.98
+      ],
+      [
+       "walkXml @ nso-3mf-read.js:206",
+       1217.619
+      ],
+      [
+       "addModelFromZUpGeometry @ app-core.js:1305",
+       736.376
+      ],
+      [
+       "(anonymous) @ app-core.js:1375",
+       736.376
+      ],
+      [
+       "(anonymous) @ app-core.js:1356",
+       736.376
+      ]
+     ],
+     "self": [
+      [
+       "walkXml @ nso-3mf-read.js:206",
+       828.267
+      ],
+      [
+       "open @ nso-3mf-read.js:345",
+       233.128
+      ],
+      [
+       "setFromBufferAttribute @ three.min.js:6",
+       204.861
+      ],
+      [
+       "pushVertex @ nso-3mf-read.js:638",
+       188.806
+      ]
+     ]
+    }
+   ],
+   "maxJsMs": 2483.661,
+   "jsMs": 2834.191
+  },
+  {
+   "name": "idle (nothing selected), 3 s",
+   "wallMs": 3001,
+   "error": null,
+   "longTasks": [
+    659,
+    690,
+    768,
+    727,
+    668,
+    730
+   ],
+   "jsRuns": [],
+   "maxJsMs": 1.223,
+   "jsMs": 3.38
+  },
+  {
+   "name": "first selection (click)",
+   "wallMs": 36419,
+   "error": null,
+   "longTasks": [
+    621,
+    676,
+    647,
+    571,
+    5884,
+    690,
+    796,
+    22706,
+    721,
+    702,
+    691,
+    644,
+    686,
+    757,
+    725
+   ],
+   "jsRuns": [
+    {
+     "startMs": 1985.898,
+     "ms": 5887.252,
+     "incl": [
+      [
+       "onCanvasPointerDown @ app-core.js:2915",
+       5515.53
+      ],
+      [
+       "window.selectPlaced @ app-sel-outline.js:46",
+       5410.518
+      ],
+      [
+       "next @ app-seat-grid.js:344",
+       5410.518
+      ],
+      [
+       "wrapped @ app-split-parts.js:283",
+       5410.518
+      ],
+      [
+       "refreshOutline @ app-sel-outline.js:19",
+       5220.699
+      ],
+      [
+       "wrapped @ app-cth.js:45",
+       5220.699
+      ]
+     ],
+     "self": [
+      [
+       "Go @ three.min.js:6",
+       4726.823
+      ],
+      [
+       "(garbage collector) @ (native):0",
+       360.598
+      ],
+      [
+       "refreshOutline @ app-sel-outline.js:19",
+       301.036
+      ],
+      [
+       "dot @ three.min.js:6",
+       120.399
+      ]
+     ]
+    },
+    {
+     "startMs": 9358.897,
+     "ms": 22708.371,
+     "incl": [
+      [
+       "(anonymous) @ app-split-parts.js:131",
+       20686.906
+      ],
+      [
+       "analyse @ nso_split_parts.js:231",
+       20686.248
+      ],
+      [
+       "read @ app-split-parts.js:95",
+       20686.248
+      ],
+      [
+       "cavityShells @ nso_hollow.js:824",
+       19285.27
+      ],
+      [
+       "prepare @ nso_thickness.js:1122",
+       15732.892
+      ],
+      [
+       "indexSoup @ nso_thickness.js:189",
+       14156.404
+      ]
+     ],
+     "self": [
+      [
+       "indexSoup @ nso_thickness.js:189",
+       14156.404
+      ],
+      [
+       "cavityShells @ nso_hollow.js:824",
+       3505.559
+      ],
+      [
+       "(garbage collector) @ (native):0",
+       2006.109
+      ],
+      [
+       "surfaceShells @ nso_split_parts.js:71",
+       1090.135
+      ]
+     ]
+    }
+   ],
+   "maxJsMs": 22708.371,
+   "jsMs": 28605.648
+  },
+  {
+   "name": "arm Lift (piece selected)",
+   "wallMs": 7663,
+   "value": {
+    "armed": true,
+    "target": 1,
+    "read": {
+     "ok": true,
+     "cached": false,
+     "ms": 3552,
+     "seed": 933081
+    }
+   },
+   "error": null,
+   "longTasks": [
+    748,
+    763,
+    642,
+    727,
+    631,
+    638,
+    686,
+    766,
+    692
+   ],
+   "jsRuns": [
+    {
+     "startMs": 784.034,
+     "ms": 3566.656,
+     "incl": [
+      [
+       "target @ app-lift-plate.js:466",
+       3430.47
+      ],
+      [
+       "setArmed @ app-lift-plate.js:580",
+       3430.47
+      ],
+      [
+       "detectNow @ app-lift-plate.js:165",
+       3428.689
+      ],
+      [
+       "(anonymous) @ app-lift-plate.js:162",
+       3428.689
+      ],
+      [
+       "cachedRead @ app-lift-plate.js:143",
+       3428.689
+      ],
+      [
+       "detectSoup @ app-lift-plate.js:160",
+       3428.689
+      ]
+     ],
+     "self": [
+      [
+       "index @ nso_lift_auto.js:180",
+       754.398
+      ],
+      [
+       "(anonymous) @ nso_lift_auto.js:896",
+       399.234
+      ],
+      [
+       "fitLocal @ nso_lift_auto.js:1018",
+       328.588
+      ],
+      [
+       "grow @ nso_lift_auto.js:1076",
+       243.933
+      ]
+     ]
+    }
+   ],
+   "maxJsMs": 3566.656,
+   "jsMs": 3574.9790000000003
+  },
+  {
+   "name": "Lift armed: 20 hovers",
+   "wallMs": 60726,
+   "value": {
+    "hover": -1,
+    "readout": "0 features found on single_color-219_fixed.stl_A standing out more than 0.42 mm."
+   },
+   "error": null,
+   "longTasks": [
+    763,
+    727,
+    4388,
+    1577,
+    1528,
+    3283,
+    776,
+    790,
+    683,
+    815,
+    4580,
+    1386,
+    1354,
+    1883,
+    1326,
+    1336,
+    1385,
+    4218,
+    1395,
+    1345,
+    1348,
+    1306,
+    1391,
+    1411,
+    1360,
+    1463,
+    1333,
+    1543,
+    1513,
+    1559,
+    1421,
+    1716,
+    1370,
+    1355,
+    1280,
+    640,
+    674,
+    711,
+    638,
+    595,
+    634,
+    648,
+    687
+   ],
+   "jsRuns": [
+    {
+     "startMs": 930.799,
+     "ms": 3607.042,
+     "incl": [
+      [
+       "hoverAt @ app-lift-plate.js:667",
+       3292.651
+      ],
+      [
+       "(anonymous) @ app-lift-plate.js:660",
+       3292.651
+      ],
+      [
+       "draw @ app-lift-plate.js:1055",
+       3224.265
+      ],
+      [
+       "setHover @ app-lift-plate.js:723",
+       3224.265
+      ],
+      [
+       "outlineOf @ app-lift-plate.js:1020",
+       3180.676
+      ],
+      [
+       "(anonymous) @ app-lift-plate.js:1022",
+       3053.96
+      ]
+     ],
+     "self": [
+      [
+       "key @ app-lift-plate.js:1021",
+       1529.878
+      ],
+      [
+       "(anonymous) @ app-lift-plate.js:1022",
+       1524.082
+      ],
+      [
+       "(garbage collector) @ (native):0",
+       313.646
+      ],
+      [
+       "outlineOf @ app-lift-plate.js:1020",
+       125.411
+      ]
+     ]
+    },
+    {
+     "startMs": 5315.958,
+     "ms": 150.194,
+     "incl": [
+      [
+       "animate @ app-core.js:959",
+       99.985
+      ],
+      [
+       "hitAt @ app-lift-plate.js:604",
+       40.575
+      ],
+      [
+       "hoverAt @ app-lift-plate.js:667",
+       40.575
+      ],
+      [
+       "(anonymous) @ app-lift-plate.js:660",
+       40.575
+      ]
+     ],
+     "self": [
+      [
+       "bufferData @ (native):0",
+       33.184
+      ],
+      [
+       "setFromBufferAttribute @ three.min.js:6",
+       22.455
+      ],
+      [
+       "computeBoundingSphere @ three.min.js:6",
+       12.998
+      ],
+      [
+       "distanceToSquared @ three.min.js:6",
+       10.959
+      ]
+     ]
+    },
+    {
+     "startMs": 8425.035,
+     "ms": 1880.753,
+     "incl": [
+      [
+       "hoverAt @ app-lift-plate.js:667",
+       1308.267
+      ],
+      [
+       "(anonymous) @ app-lift-plate.js:660",
+       1308.267
+      ],
+      [
+       "settleFace @ app-lift-plate.js:701",
+       1264.271
+      ],
+      [
+       "planeByKey @ app-lift-plate.js:238",
+       1263.644
+      ],
+      [
+       "faceOfTri @ app-lift-plate.js:312",
+       1263.644
+      ],
+      [
+       "planesOf @ app-lift-plate.js:216",
+       1232.754
+      ]
+     ],
+     "self": [
+      [
+       "planesOf @ app-lift-plate.js:216",
+       784.612
+      ],
+      [
+       "(garbage collector) @ (native):0",
+       570.704
+      ],
+      [
+       "triPlane @ app-lift-plate.js:202",
+       422.5
+      ],
+      [
+       "planeByKey @ app-lift-plate.js:238",
+       30.89
+      ]
+     ]
+    },
+    {
+     "startMs": 11709.318,
+     "ms": 60.177,
+     "incl": [
+      [
+       "hitAt @ app-lift-plate.js:604",
+       45.467
+      ],
+      [
+       "hoverAt @ app-lift-plate.js:667",
+       45.467
+      ],
+      [
+       "(anonymous) @ app-lift-plate.js:660",
+       45.467
+      ],
+      [
+       "animate @ app-core.js:959",
+       0.633
+      ]
+     ],
+     "self": [
+      [
+       "(garbage collector) @ (native):0",
+       13.493
+      ],
+      [
+       "dot @ three.min.js:6",
+       7.476
+      ],
+      [
+       "raycast @ three.min.js:6",
+       6.103
+      ],
+      [
+       "getX @ three.min.js:6",
+       5.117
+      ]
+     ]
+    },
+    {
+     "startMs": 12485.739,
+     "ms": 50.899,
+     "incl": [
+      [
+       "hitAt @ app-lift-plate.js:604",
+       43.008
+      ],
+      [
+       "hoverAt @ app-lift-plate.js:667",
+       43.008
+      ],
+      [
+       "(anonymous) @ app-lift-plate.js:660",
+       43.008
+      ],
+      [
+       "animate @ app-core.js:959",
+       1.252
+      ]
+     ],
+     "self": [
+      [
+       "dot @ three.min.js:6",
+       9.314
+      ],
+      [
+       "raycast @ three.min.js:6",
+       8.523
+      ],
+      [
+       "$i @ three.min.js:6",
+       6.73
+      ],
+      [
+       "(garbage collector) @ (native):0",
+       6.055
+      ]
+     ]
+    },
+    {
+     "startMs": 13959.916,
+     "ms": 71.841,
+     "incl": [
+      [
+       "hoverAt @ app-lift-plate.js:667",
+       69.364
+      ],
+      [
+       "(anonymous) @ app-lift-plate.js:660",
+       69.364
+      ],
+      [
+       "hitAt @ app-lift-plate.js:604",
+       68.715
+      ],
+      [
+       "viewOf @ app-lift-plate.js:424",
+       0.649
+      ],
+      [
+       "settleFace @ app-lift-plate.js:701",
+       0.649
+      ],
+      [
+       "onMove @ app-lift-plate.js:654",
+       0.6
+      ]
+     ],
+     "self": [
+      [
+       "subVectors @ three.min.js:6",
+       12.061
+      ],
+      [
+       "crossVectors @ three.min.js:6",
+       9.145
+      ],
+      [
+       "dot @ three.min.js:6",
+       7.97
+      ],
+      [
+       "fromBufferAttribute @ three.min.js:6",
+       7.843
+      ]
+     ]
+    },
+    {
+     "startMs": 14775.308,
+     "ms": 3915.55,
+     "incl": [
+      [
+       "hoverAt @ app-lift-plate.js:667",
+       3601.608
+      ],
+      [
+       "(anonymous) @ app-lift-plate.js:660",
+       3601.608
+      ],
+      [
+       "draw @ app-lift-plate.js:1055",
+       3535.34
+      ],
+      [
+       "setHover @ app-lift-plate.js:723",
+       3535.34
+      ],
+      [
+       "outlineOf @ app-lift-plate.js:1020",
+       3456.259
+      ],
+      [
+       "(anonymous) @ app-lift-plate.js:1022",
+       3359.357
+      ]
+     ],
+     "self": [
+      [
+       "key @ app-lift-plate.js:1021",
+       1708.169
+      ],
+      [
+       "(anonymous) @ app-lift-plate.js:1022",
+       1651.188
+      ],
+      [
+       "(garbage collector) @ (native):0",
+       310.349
+      ],
+      [
+       "outlineOf @ app-lift-plate.js:1020",
+       95.094
+      ]
+     ]
+    },
+    {
+     "startMs": 19356.627,
+     "ms": 119.361,
+     "incl": [
+      [
+       "animate @ app-core.js:959",
+       70.697
+      ],
+      [
+       "hitAt @ app-lift-plate.js:604",
+       44.287
+      ],
+      [
+       "hoverAt @ app-lift-plate.js:667",
+       44.287
+      ],
+      [
+       "(anonymous) @ app-lift-plate.js:660",
+       44.287
+      ]
+     ],
+     "self": [
+      [
+       "bufferData @ (native):0",
+       33.455
+      ],
+      [
+       "getX @ three.min.js:6",
+       9.252
+      ],
+      [
+       "getProgramInfoLog @ (native):0",
+       8.444
+      ],
+      [
+       "fromBufferAttribute @ three.min.js:6",
+       6.768
+      ]
+     ]
+    },
+    {
+     "startMs": 22105.602,
+     "ms": 552.843,
+     "incl": [
+      [
+       "hitAt @ app-lift-plate.js:604",
+       66.946
+      ],
+      [
+       "hoverAt @ app-lift-plate.js:667",
+       66.946
+      ],
+      [
+       "(anonymous) @ app-lift-plate.js:660",
+       66.946
+      ]
+     ],
+     "self": [
+      [
+       "(garbage collector) @ (native):0",
+       485.897
+      ],
+      [
+       "raycast @ three.min.js:6",
+       10.91
+      ],
+      [
+       "$i @ three.min.js:6",
+       10.892
+      ],
+      [
+       "dot @ three.min.js:6",
+       7.804
+      ]
+     ]
+    },
+    {
+     "startMs": 28036.893,
+     "ms": 3572.744,
+     "incl": [
+      [
+       "hoverAt @ app-lift-plate.js:667",
+       3195.569
+      ],
+      [
+       "(anonymous) @ app-lift-plate.js:660",
+       3195.569
+      ],
+      [
+       "draw @ app-lift-plate.js:1055",
+       3136.139
+      ],
+      [
+       "setHover @ app-lift-plate.js:723",
+       3136.139
+      ],
+      [
+       "outlineOf @ app-lift-plate.js:1020",
+       3071.052
+      ],
+      [
+       "(anonymous) @ app-lift-plate.js:1022",
+       2925.317
+      ]
+     ],
+     "self": [
+      [
+       "(anonymous) @ app-lift-plate.js:1022",
+       1491.224
+      ],
+      [
+       "key @ app-lift-plate.js:1021",
+       1434.093
+      ],
+      [
+       "(garbage collector) @ (native):0",
+       375.264
+      ],
+      [
+       "outlineOf @ app-lift-plate.js:1020",
+       131.593
+      ]
+     ]
+    },
+    {
+     "startMs": 32255.223,
+     "ms": 105.2,
+     "incl": [
+      [
+       "animate @ app-core.js:959",
+       60.253
+      ],
+      [
+       "hitAt @ app-lift-plate.js:604",
+       43.712
+      ],
+      [
+       "hoverAt @ app-lift-plate.js:667",
+       43.712
+      ],
+      [
+       "(anonymous) @ app-lift-plate.js:660",
+       43.712
+      ]
+     ],
+     "self": [
+      [
+       "bufferData @ (native):0",
+       24.372
+      ],
+      [
+       "dot @ three.min.js:6",
+       8.716
+      ],
+      [
+       "crossVectors @ three.min.js:6",
+       7.319
+      ],
+      [
+       "$i @ three.min.js:6",
+       6.814
+      ]
+     ]
+    },
+    {
+     "startMs": 37653.939,
+     "ms": 71.041,
+     "incl": [
+      [
+       "hitAt @ app-lift-plate.js:604",
+       69.746
+      ],
+      [
+       "hoverAt @ app-lift-plate.js:667",
+       69.746
+      ],
+      [
+       "(anonymous) @ app-lift-plate.js:660",
+       69.746
+      ],
+      [
+       "animate @ app-core.js:959",
+       0.597
+      ]
+     ],
+     "self": [
+      [
+       "fromBufferAttribute @ three.min.js:6",
+       10.672
+      ],
+      [
+       "intersectTriangle @ three.min.js:6",
+       10.635
+      ],
+      [
+       "crossVectors @ three.min.js:6",
+       9.249
+      ],
+      [
+       "raycast @ three.min.js:6",
+       8.564
+      ]
+     ]
+    },
+    {
+     "startMs": 43282.186,
+     "ms": 67.951,
+     "incl": [
+      [
+       "hitAt @ app-lift-plate.js:604",
+       66.209
+      ],
+      [
+       "hoverAt @ app-lift-plate.js:667",
+       66.209
+      ],
+      [
+       "(anonymous) @ app-lift-plate.js:660",
+       66.209
+      ],
+      [
+       "animate @ app-core.js:959",
+       0.591
+      ]
+     ],
+     "self": [
+      [
+       "subVectors @ three.min.js:6",
+       10.601
+      ],
+      [
+       "fromBufferAttribute @ three.min.js:6",
+       10.47
+      ],
+      [
+       "dot @ three.min.js:6",
+       8.827
+      ],
+      [
+       "raycast @ three.min.js:6",
+       8.414
+      ]
+     ]
+    },
+    {
+     "startMs": 44615.83,
+     "ms": 52.198,
+     "incl": [
+      [
+       "hoverAt @ app-lift-plate.js:667",
+       50.358
+      ],
+      [
+       "(anonymous) @ app-lift-plate.js:660",
+       50.358
+      ],
+      [
+       "hitAt @ app-lift-plate.js:604",
+       49.729
+      ],
+      [
+       "animate @ app-core.js:959",
+       0.609
+      ]
+     ],
+     "self": [
+      [
+       "crossVectors @ three.min.js:6",
+       7.988
+      ],
+      [
+       "raycast @ three.min.js:6",
+       7.738
+      ],
+      [
+       "dot @ three.min.js:6",
+       7.122
+      ],
+      [
+       "fromBufferAttribute @ three.min.js:6",
+       5.334
+      ]
+     ]
+    },
+    {
+     "startMs": 47674.991,
+     "ms": 80.809,
+     "incl": [
+      [
+       "hitAt @ app-lift-plate.js:604",
+       79.537
+      ],
+      [
+       "hoverAt @ app-lift-plate.js:667",
+       79.537
+      ],
+      [
+       "(anonymous) @ app-lift-plate.js:660",
+       79.537
+      ],
+      [
+       "animate @ app-core.js:959",
+       0.634
+      ]
+     ],
+     "self": [
+      [
+       "crossVectors @ three.min.js:6",
+       13.245
+      ],
+      [
+       "fromBufferAttribute @ three.min.js:6",
+       11.583
+      ],
+      [
+       "subVectors @ three.min.js:6",
+       10.366
+      ],
+      [
+       "raycast @ three.min.js:6",
+       9.33
+      ]
+     ]
+    },
+    {
+     "startMs": 50657.885,
+     "ms": 55.741,
+     "incl": [
+      [
+       "hitAt @ app-lift-plate.js:604",
+       53.947
+      ],
+      [
+       "hoverAt @ app-lift-plate.js:667",
+       53.947
+      ],
+      [
+       "(anonymous) @ app-lift-plate.js:660",
+       53.947
+      ],
+      [
+       "animate @ app-core.js:959",
+       0.611
+      ]
+     ],
+     "self": [
+      [
+       "raycast @ three.min.js:6",
+       9.628
+      ],
+      [
+       "fromBufferAttribute @ three.min.js:6",
+       8.797
+      ],
+      [
+       "dot @ three.min.js:6",
+       8.011
+      ],
+      [
+       "intersectTriangle @ three.min.js:6",
+       6.075
+      ]
+     ]
+    }
+   ],
+   "maxJsMs": 3915.55,
+   "jsMs": 15167.846000000001
+  }
+ ]
+}

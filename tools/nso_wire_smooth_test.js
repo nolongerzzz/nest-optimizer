@@ -47,6 +47,10 @@ withApp(async (page, logs) => {
   await page.evaluate(() => {
     const b = document.getElementById('btn-smooth');
     for (let n = b; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true;
+    // ...and every group inside it: walking up from ONE control opens the
+    // groups above THAT control, which is not the same as reaching a control
+    // in another group.
+    document.querySelectorAll('.vp-finish-menu .vp-sec').forEach(d => { d.open = true; });
   });
   await page.click('#btn-smooth');
   await page.waitForFunction(() => {

@@ -1,0 +1,726 @@
+<meta charset="utf-8">
+<title>Silent Key Hub</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@500;700&family=Archivo:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: workbench — the model owns the screen, a machinist's spec sheet runs down the right edge. Single dark look on purpose (product renders are dark, brass is the accent). */
+:root {
+  color-scheme: dark;
+  --bg: #121214;
+  --panel: #19191c;
+  --line: #2c2b2a;
+  --fg: #e9e5dc;
+  --muted: #9a958a;
+  --brass: #d6b26a;
+  --brass-dim: #6e5c37;
+  --good: #7fbf8a;
+  --warn: #e5b45a;
+  --bad: #e5735e;
+  --f-display: "Saira Condensed", "Arial Narrow", sans-serif;
+  --f-body: "Archivo", system-ui, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+}
+html, body { height: 100%; }
+[hidden] { display: none !important; }
+body { background: var(--bg); color: var(--fg); font: 14px/1.45 var(--f-body); overflow: hidden; }
+* { box-sizing: border-box; }
+.app { display: grid; grid-template-columns: minmax(0, 1fr) 360px; height: 100%; }
+.stage { position: relative; min-width: 0; }
+#view { position: absolute; inset: 0; display: block; width: 100%; height: 100%; touch-action: none; }
+.hud { position: absolute; left: max(16px, env(safe-area-inset-left, 0px)); top: 14px; right: 16px; display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline; pointer-events: none; }
+.hud h1 { margin: 0; font: 700 30px/1 var(--f-display); letter-spacing: 0.01em; color: var(--brass); }
+.hud .sub { font: 500 12px var(--f-display); letter-spacing: 0.18em; text-transform: uppercase; color: var(--muted); }
+.chips { position: absolute; left: max(16px, env(safe-area-inset-left, 0px)); bottom: 14px; right: 16px; display: flex; flex-wrap: wrap; gap: 6px; pointer-events: none; }
+.chip { font: 500 11px var(--f-mono); padding: 4px 8px; border-radius: 3px; background: rgba(18,18,20,0.82); border: 1px solid var(--line); color: var(--muted); }
+.chip.good { color: var(--good); border-color: color-mix(in srgb, var(--good) 40%, transparent); }
+.chip.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
+.chip.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+.motion { position: absolute; right: 16px; top: 14px; display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; max-width: 60%; }
+.panel { background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; padding-block: 14px 40px; padding-left: 18px; padding-right: max(18px, env(safe-area-inset-right, 0px)); display: flex; flex-direction: column; gap: 18px; }
+section h2 { margin: 0 0 8px; font: 700 15px var(--f-display); letter-spacing: 0.14em; text-transform: uppercase; color: var(--brass); display: flex; justify-content: space-between; align-items: baseline; }
+section h2 small { font: 400 11px var(--f-mono); letter-spacing: 0; color: var(--muted); text-transform: none; }
+button { font: 600 12px var(--f-body); color: var(--fg); background: #232327; border: 1px solid var(--line); border-radius: 4px; padding: 7px 11px; cursor: pointer; }
+button:hover { border-color: var(--brass-dim); }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--brass); outline-offset: 1px; }
+button.primary { background: var(--brass); color: #17140d; border-color: var(--brass); }
+button.on { border-color: var(--brass); color: var(--brass); }
+.row { display: grid; grid-template-columns: 1fr 64px; gap: 4px 10px; align-items: center; }
+.row label { font-size: 12.5px; color: var(--fg); display: flex; justify-content: space-between; gap: 8px; }
+.row label span { font: 400 11px var(--f-mono); color: var(--muted); }
+.row input[type=range] { grid-column: 1; width: 100%; accent-color: var(--brass); margin: 0; }
+.row input[type=number] { grid-column: 2; grid-row: 1 / span 2; width: 64px; font: 12px var(--f-mono); background: #111113; color: var(--fg); border: 1px solid var(--line); border-radius: 3px; padding: 5px 6px; }
+.row.changed label { color: var(--brass); }
+.params { display: flex; flex-direction: column; gap: 10px; }
+details { border-top: 1px solid var(--line); padding-top: 8px; }
+details summary { cursor: pointer; font: 600 12px var(--f-body); color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; list-style: none; display: flex; justify-content: space-between; }
+details summary::after { content: "+"; font-family: var(--f-mono); }
+details[open] summary::after { content: "−"; }
+details[open] summary { margin-bottom: 10px; }
+.specs { display: grid; grid-template-columns: 1fr auto; gap: 3px 12px; font-size: 12.5px; }
+.specs dt { color: var(--muted); }
+.specs dd { margin: 0; font: 500 12px var(--f-mono); font-variant-numeric: tabular-nums; text-align: right; }
+.issues { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.issues li { font-size: 12.5px; padding: 6px 8px; border-left: 3px solid var(--line); background: #151517; }
+.issues li.bad { border-color: var(--bad); }
+.issues li.warn { border-color: var(--warn); }
+.issues li.good { border-color: var(--good); }
+.btns { display: flex; flex-wrap: wrap; gap: 6px; }
+.toggle { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.toggle input { accent-color: var(--brass); }
+#detent { width: 100%; height: 70px; display: block; }
+.notes { margin: 0; padding-left: 18px; font-size: 12.5px; color: var(--fg); display: flex; flex-direction: column; gap: 6px; }
+.notes b { color: var(--brass); font-weight: 600; }
+.parts { font-size: 12.5px; margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 3px; }
+.mono { font-family: var(--f-mono); font-size: 11.5px; color: var(--muted); }
+.angle-read { font: 500 12px var(--f-mono); color: var(--brass); }
+#loading { position: absolute; inset: 0; display: grid; place-items: center; font: 500 13px var(--f-mono); color: var(--muted); }
+@media (max-width: 820px) {
+  body { overflow: auto; }
+  .app { grid-template-columns: 1fr; grid-template-rows: 62vh auto; height: auto; }
+  .panel { border-left: 0; border-top: 1px solid var(--line); padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); overflow: visible; }
+  .motion { top: auto; bottom: 46px; right: 12px; max-width: 70%; }
+  .hud h1 { font-size: 24px; }
+}
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+
+<div class="app">
+  <div class="stage">
+    <canvas id="view" aria-label="3D view of the key hub. Drag to orbit, scroll to zoom, click a key to select it."></canvas>
+    <div id="loading">Loading geometry kernel…</div>
+    <div class="hud"><h1>Silent Key Hub</h1><span class="sub">parametric · v2.1 printable</span></div>
+    <div class="motion">
+      <button id="flip" class="primary">Flip key 1</button>
+      <button id="demo">Play demo</button>
+      <button id="section">Section</button>
+      <button id="keysBtn" class="on">Keys</button>
+    </div>
+    <div class="chips" id="chips"></div>
+  </div>
+
+  <aside class="panel">
+    <section>
+      <h2>Motion <small class="angle-read" id="angleRead">0°</small></h2>
+      <div class="row">
+        <label for="angle">Selected key angle <span>drag, release to snap</span></label>
+        <input id="angle" type="range" min="-6" max="96" step="0.5" value="0">
+        <input id="angleNum" type="number" min="-6" max="96" step="1" value="0" aria-label="Selected key angle in degrees">
+      </div>
+      <svg id="detent" viewBox="0 0 320 70" preserveAspectRatio="none" aria-label="Leaf lift versus carrier angle"></svg>
+      <div class="mono" id="detentCap">Leaf lift vs angle. Flats at 0° and 90° are the two stable positions.</div>
+      <div class="row" style="margin-top:10px">
+        <label for="explode">Exploded view</label>
+        <input id="explode" type="range" min="0" max="1" step="0.01" value="0">
+        <input id="explodeNum" type="number" min="0" max="100" step="5" value="0" aria-label="Explode percent">
+      </div>
+      <div class="btns" style="margin-top:10px">
+        <button id="allUp">All up</button>
+        <button id="allDown">All down</button>
+        <button id="viewFront">Front</button>
+        <button id="viewTop">Top</button>
+        <button id="viewIso">Iso</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Checks <small id="sweepState">—</small></h2>
+      <ul class="issues" id="issues"></ul>
+    </section>
+
+    <section>
+      <h2>Numbers</h2>
+      <dl class="specs" id="specs"></dl>
+    </section>
+
+    <section>
+      <h2>Parameters <small><button id="reset" style="padding:3px 8px">Reset</button></small></h2>
+      <div class="params" id="params"></div>
+      <div class="btns" style="margin-top:12px">
+        <button id="copy">Copy changed parameters</button>
+      </div>
+      <div class="mono" id="copyOut" style="margin-top:6px">Paste them back to Claude to regenerate STLs.</div>
+    </section>
+
+    <section>
+      <h2>Changed from the render</h2>
+      <ol class="notes">
+        <li><b>8 stations, edge-on keys.</b> The render shows 10 tabs from the top and keys facing outward. Eight 24 mm heads facing outward need ~200 mm of rim; the hub has ~170. Keys now hang edge-on in radial slots.</li>
+        <li><b>Printed leaf spring instead of a coil spring.</b> A spring and plunger that small won't print and is fiddly to buy. Each station's coloured top tab is now the tip of a flexure in the hub roof, pressing on a square cam.</li>
+        <li><b>Real hard stops.</b> 0°: fork meets the slot's back wall. 90°: fork meets the hood over the slot mouth. The detent holds, the stop takes the load when you turn the key.</li>
+        <li><b>Pivot pins you can actually fit.</b> A tangential pin can't be inserted from outside a ring of slots. 3 mm dowels drop into grooves from below; the retainer plate's fingers hold them up.</li>
+        <li><b>Steel eye bolt, not a printed ring.</b> An M5 eye bolt runs through the centre and clamps the retainer. A printed bail would snap along the layer lines.</li>
+        <li><b>Key held by its ring hole.</b> A pin through the fork and the key's hole replaces the spring clip, which would only fit one key shape.</li>
+      </ol>
+    </section>
+
+    <section>
+      <h2>Parts</h2>
+      <ul class="parts">
+        <li>1 × hub, PETG, printed top-down, no supports</li>
+        <li>1 × retainer plate, fingers up</li>
+        <li><span id="pc">8</span> × carrier, standing on the cam flat</li>
+        <li><span id="pd">8</span> × 3 × <span id="dl">9.5</span> mm steel dowel pin</li>
+        <li><span id="pk">8</span> × M2 × 6 screw or 2 mm pin (key retention)</li>
+        <li>1 × M5 eye bolt (≥ 30 mm shank), washer, nyloc nut</li>
+      </ul>
+    </section>
+  </aside>
+</div>
+
+<script>
+// Show load failures on the page instead of hanging on "Loading".
+(function () {
+  var first = null;
+  function show(msg, weak) {
+    var el = document.getElementById('loading');
+    if (!el || window.__KEYHUB_STARTED__) return;
+    if (weak && first) return;   // never hide a real error behind the timeout note
+    if (!weak) first = first || msg;
+    el.hidden = false; el.textContent = weak ? msg : first;
+  }
+  window.addEventListener('error', function (e) { show('Viewer error: ' + (e.message || (e.target && (e.target.src || e.target.href)) || 'unknown')); }, true);
+  window.addEventListener('unhandledrejection', function (e) { show('Viewer error: ' + (e.reason && e.reason.message || e.reason)); });
+  setTimeout(function () { show('Still loading after 20 s (step: ' + (window.__KEYHUB_STEP__ || 'start') + ').', true); }, 20000);
+})();
+</script>
+<script>
+(async () => {
+const $ = (id) => document.getElementById(id);
+const status = (t) => { window.__KEYHUB_STEP__ = t; $('loading').textContent = t; };
+status('Loading 3D library…');
+// The published page inlines three.js (window.THREE); the repo copy loads it.
+const THREE = window.THREE || await import('https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js');
+// The published page carries the model inline (window.__KEYHUB_MODEL__); in
+// the repo it is a sibling file.
+const { PARAMS, DEFAULTS, build, derive, lint, leafLift, sweepCheck } = window.__KEYHUB_MODEL__ || await import(new URL('./keyhub-model.js', location.href).href);
+status('Setting up the 3D view…');
+
+// Orbit / zoom / pan around a target, Z up. Drag to orbit, right-drag or
+// two fingers to pan, wheel or pinch to zoom.
+class OrbitLite {
+  constructor(camera, el) {
+    this.camera = camera; this.target = new THREE.Vector3();
+    const ptrs = new Map();
+    let last = null;
+    el.addEventListener('contextmenu', (e) => e.preventDefault());
+    el.addEventListener('pointerdown', (e) => { el.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, [e.clientX, e.clientY]); last = this._snap(ptrs); this.pan = e.button === 2 || e.shiftKey; });
+    el.addEventListener('pointermove', (e) => {
+      if (!ptrs.has(e.pointerId)) return;
+      ptrs.set(e.pointerId, [e.clientX, e.clientY]);
+      const now = this._snap(ptrs);
+      if (last && now.n === last.n) {
+        const dx = now.x - last.x, dy = now.y - last.y;
+        if (now.n >= 2) { this._zoom(last.d / Math.max(1, now.d)); this._pan(dx, dy); }
+        else if (this.pan) this._pan(dx, dy);
+        else this._orbit(dx, dy);
+      }
+      last = now;
+    });
+    const up = (e) => { ptrs.delete(e.pointerId); last = this._snap(ptrs); };
+    el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up);
+    el.addEventListener('wheel', (e) => { e.preventDefault(); this._zoom(Math.exp(e.deltaY * 0.0012)); }, { passive: false });
+  }
+  _snap(ptrs) {
+    const p = [...ptrs.values()];
+    if (!p.length) return null;
+    const x = p.reduce((a, q) => a + q[0], 0) / p.length, y = p.reduce((a, q) => a + q[1], 0) / p.length;
+    const d = p.length > 1 ? Math.hypot(p[0][0] - p[1][0], p[0][1] - p[1][1]) : 0;
+    return { n: p.length, x, y, d };
+  }
+  _orbit(dx, dy) {
+    const o = this.camera.position.clone().sub(this.target);
+    const r = o.length();
+    let th = Math.atan2(o.y, o.x) - dx * 0.008;
+    let ph = Math.acos(Math.max(-1, Math.min(1, o.z / r))) - dy * 0.008;
+    ph = Math.max(0.05, Math.min(Math.PI - 0.05, ph));
+    o.set(r * Math.sin(ph) * Math.cos(th), r * Math.sin(ph) * Math.sin(th), r * Math.cos(ph));
+    this.camera.position.copy(this.target).add(o);
+  }
+  _zoom(f) {
+    const o = this.camera.position.clone().sub(this.target);
+    o.setLength(Math.max(40, Math.min(900, o.length() * f)));
+    this.camera.position.copy(this.target).add(o);
+  }
+  _pan(dx, dy) {
+    const dist = this.camera.position.distanceTo(this.target);
+    const s = (2 * dist * Math.tan((this.camera.fov * Math.PI) / 360)) / Math.max(1, canvas.clientHeight);
+    const right = new THREE.Vector3().setFromMatrixColumn(this.camera.matrix, 0);
+    const upv = new THREE.Vector3().setFromMatrixColumn(this.camera.matrix, 1);
+    const move = right.multiplyScalar(-dx * s).add(upv.multiplyScalar(dy * s));
+    this.camera.position.add(move); this.target.add(move);
+  }
+  update() { this.camera.lookAt(this.target); }
+}
+
+// Smooth normals across shallow edges, hard across sharp ones.
+function creasedNormals(g, crease) {
+  const pos = g.getAttribute('position'), idx = g.getIndex().array;
+  const nTri = idx.length / 3, cosC = Math.cos(crease);
+  const fn = new Float32Array(nTri * 3);
+  const A = new THREE.Vector3(), B = new THREE.Vector3(), C = new THREE.Vector3();
+  const byVert = new Map();
+  for (let t = 0; t < nTri; t++) {
+    A.fromBufferAttribute(pos, idx[t * 3]); B.fromBufferAttribute(pos, idx[t * 3 + 1]); C.fromBufferAttribute(pos, idx[t * 3 + 2]);
+    const n = C.sub(B).cross(A.sub(B)).normalize(); // outward for CCW
+    fn[t * 3] = n.x; fn[t * 3 + 1] = n.y; fn[t * 3 + 2] = n.z;
+    for (let k = 0; k < 3; k++) {
+      A.fromBufferAttribute(pos, idx[t * 3 + k]);
+      const key = A.x.toFixed(4) + ',' + A.y.toFixed(4) + ',' + A.z.toFixed(4);
+      let l = byVert.get(key); if (!l) byVert.set(key, (l = [])); l.push(t);
+    }
+  }
+  const out = new Float32Array(nTri * 9), nrm = new Float32Array(nTri * 9);
+  for (let t = 0; t < nTri; t++) for (let k = 0; k < 3; k++) {
+    A.fromBufferAttribute(pos, idx[t * 3 + k]);
+    out.set([A.x, A.y, A.z], (t * 3 + k) * 3);
+    const key = A.x.toFixed(4) + ',' + A.y.toFixed(4) + ',' + A.z.toFixed(4);
+    let x = 0, y = 0, z = 0;
+    for (const u of byVert.get(key)) {
+      const d = fn[t * 3] * fn[u * 3] + fn[t * 3 + 1] * fn[u * 3 + 1] + fn[t * 3 + 2] * fn[u * 3 + 2];
+      if (d >= cosC) { x += fn[u * 3]; y += fn[u * 3 + 1]; z += fn[u * 3 + 2]; }
+    }
+    const l = Math.hypot(x, y, z) || 1;
+    nrm.set([x / l, y / l, z / l], (t * 3 + k) * 3);
+  }
+  const g2 = new THREE.BufferGeometry();
+  g2.setAttribute('position', new THREE.BufferAttribute(out, 3));
+  g2.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
+  return g2;
+}
+
+// A small studio to light the metal parts (replaces three's RoomEnvironment).
+function studioScene() {
+  const s = new THREE.Scene();
+  const room = new THREE.Mesh(new THREE.BoxGeometry(10, 10, 10), new THREE.MeshBasicMaterial({ color: 0x3a3836, side: THREE.BackSide }));
+  s.add(room);
+  const panel = (w, h, c, x, y, z) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ color: c, side: THREE.DoubleSide })); m.position.set(x, y, z); m.lookAt(0, 0, 0); s.add(m); };
+  panel(6, 3, 0xffffff, 0, 0, 4.9);
+  panel(3, 4, 0xfff1d8, 4.9, -1, 1);
+  panel(3, 4, 0xd8e4ff, -4.9, 1, 0.5);
+  panel(8, 1.2, 0x8a847a, 0, -4.9, -1);
+  return s;
+}
+
+
+const TAB_COLORS = [0xe9782c, 0x5b8fd0, 0xe9c22c, 0xcdb48a, 0x7c8048, 0xd99a2b, 0xc7b37d, 0x9b6bb3, 0x5fae9a, 0xd0605b, 0x8aa4c7, 0xb9b9b9];
+
+// ---------- renderer ----------
+const canvas = $('view');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.localClippingEnabled = true;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x121214);
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(studioScene(), 0.04).texture;
+const camera = new THREE.PerspectiveCamera(32, 1, 1, 2000);
+camera.up.set(0, 0, 1);
+const controls = new OrbitLite(camera, canvas);
+controls.target.set(0, 0, -14);
+const key = new THREE.DirectionalLight(0xffffff, 1.6); key.position.set(80, -120, 160); scene.add(key);
+scene.add(new THREE.HemisphereLight(0xfff4e0, 0x202024, 0.5));
+
+const clip = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+const mats = {
+  hub: new THREE.MeshStandardMaterial({ color: 0x232325, roughness: 0.55, metalness: 0.05, side: THREE.DoubleSide }),
+  leaf: new THREE.MeshStandardMaterial({ color: 0x2b2b2e, roughness: 0.5, side: THREE.DoubleSide }),
+  ret: new THREE.MeshStandardMaterial({ color: 0x2e2e31, roughness: 0.6, side: THREE.DoubleSide }),
+  carrier: new THREE.MeshStandardMaterial({ color: 0x3a3a3e, roughness: 0.45, side: THREE.DoubleSide }),
+  carrierSel: new THREE.MeshStandardMaterial({ color: 0x4d4537, roughness: 0.45, side: THREE.DoubleSide }),
+  key: new THREE.MeshStandardMaterial({ color: 0xc9a45c, roughness: 0.28, metalness: 0.9 }),
+  steel: new THREE.MeshStandardMaterial({ color: 0xb8bcc2, roughness: 0.25, metalness: 0.95, side: THREE.DoubleSide }),
+};
+const tabMats = TAB_COLORS.map((c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.5 }));
+
+function geomOf(man) {
+  const m = man.getMesh ? man.getMesh() : man;
+  const g = new THREE.BufferGeometry();
+  const pos = new Float32Array(m.numVert * 3);
+  for (let i = 0; i < m.numVert; i++) for (let k = 0; k < 3; k++) pos[i * 3 + k] = m.vertProperties[i * m.numProp + k];
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setIndex(new THREE.BufferAttribute(m.triVerts, 1));
+  return creasedNormals(g, Math.PI / 6);
+}
+
+function unbake(m) {
+  const bytes = (b64) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)).buffer;
+  const vertProperties = new Float32Array(bytes(m.v));
+  return { numProp: 3, numVert: vertProperties.length / 3, vertProperties, triVerts: new Uint32Array(bytes(m.i)) };
+}
+
+// ---------- state ----------
+let wasm, model;
+let params = { ...DEFAULTS };
+try { const saved = JSON.parse(localStorage.getItem('keyhub-params') || 'null'); if (saved) params = { ...DEFAULTS, ...saved }; } catch (_) {}
+let root = null;
+let stations = [];
+let selected = 0;
+let explode = 0;
+let sectionOn = false;
+let showKeys = true;
+let demo = null;
+const angles = [];   // current
+const targets = [];  // where each key is heading
+
+// ---------- build scene ----------
+function rebuild() {
+  const t0 = performance.now();
+  let P, d, G, sweep = null;
+  if (wasm) {
+    const next = build(wasm, params);
+    ({ P, d } = next);
+    G = {
+      hub: next.hubNoLeaf(), ret: next.retainer, car: next.carrierLocal, key: next.keyLocal,
+      dow: next.dowelLocal, pin: next.keyPinLocal,
+      leaf: next.leafLocal.translate([-(d.beamRootU), -d.beamBot, 0]),
+      tab: next.leafTabLocal.translate([-(d.beamRootU), -d.beamBot, 0]),
+      eye: next.eye, nut: next.nut, wash: next.washer,
+    };
+    for (const k in G) G[k] = geomOf(G[k]);
+    try { sweep = sweepCheck(wasm, next, selected % P.stations, 10); } catch (e) { console.warn(e); }
+    next.dispose();
+  } else {
+    // No geometry kernel: show the pre-built default model.
+    ({ P, d } = derive(DEFAULTS));
+    G = {};
+    for (const [k, m] of Object.entries(window.__KEYHUB_BAKED__)) G[k] = geomOf(unbake(m));
+    sweep = { worst: 0, rows: [], baked: true };
+  }
+  const hubG = G.hub, retG = G.ret, carG = G.car, keyG = G.key, dowG = G.dow, pinG = G.pin;
+  const leafG = G.leaf, tabG = G.tab, eyeG = G.eye, nutG = G.nut, washG = G.wash;
+  model = { P, d };
+
+  if (root) { root.traverse((o) => o.geometry && o.geometry.dispose()); scene.remove(root); }
+  root = new THREE.Group();
+  scene.add(root);
+  const hubMesh = new THREE.Mesh(hubG, mats.hub);
+  const retMesh = new THREE.Mesh(retG, mats.ret);
+  const eyeMesh = new THREE.Mesh(eyeG, mats.steel);
+  const nutMesh = new THREE.Mesh(nutG, mats.steel);
+  const washMesh = new THREE.Mesh(washG, mats.steel);
+  root.add(hubMesh, retMesh, eyeMesh, nutMesh, washMesh);
+  root.userData = { hubMesh, retMesh, eyeMesh, nutMesh, washMesh };
+
+  stations = [];
+  while (angles.length < P.stations) { angles.push(0); targets.push(0); }
+  angles.length = targets.length = P.stations;
+  for (let i = 0; i < P.stations; i++) {
+    const spin = new THREE.Group(); spin.rotation.z = (2 * Math.PI * i) / P.stations;
+    const frame = new THREE.Group(); frame.position.set(P.pivotRadius, 0, d.zp); frame.rotation.x = Math.PI / 2;
+    const explodeG = new THREE.Group();
+    const swing = new THREE.Group();
+    const carrier = new THREE.Mesh(carG, mats.carrier);
+    const keyM = new THREE.Mesh(keyG, mats.key);
+    const pin = new THREE.Mesh(pinG, mats.steel);
+    const dowel = new THREE.Mesh(dowG, mats.steel);
+    carrier.userData.station = keyM.userData.station = i;
+    swing.add(carrier, keyM, pin);
+    explodeG.add(swing, dowel);
+    const leafPivot = new THREE.Group(); leafPivot.position.set(d.beamRootU, d.beamBot, 0);
+    leafPivot.add(new THREE.Mesh(leafG, mats.leaf), new THREE.Mesh(tabG, tabMats[i % tabMats.length]));
+    frame.add(explodeG, leafPivot);
+    spin.add(frame);
+    root.add(spin);
+    stations.push({ swing, carrier, keyM, pin, explodeG, leafPivot, dowel });
+  }
+  if (selected >= P.stations) selected = 0;
+  applyClip();
+  applyKeys();
+  pose();
+  updatePanel(sweep, performance.now() - t0);
+}
+
+function applyClip() {
+  const planes = sectionOn ? [clip] : [];
+  for (const m of [mats.hub, mats.leaf, mats.ret, mats.carrier, mats.carrierSel, mats.steel, ...tabMats]) { m.clippingPlanes = planes; m.needsUpdate = true; }
+  $('section').classList.toggle('on', sectionOn);
+}
+function applyKeys() {
+  for (const s of stations) { s.keyM.visible = showKeys; s.pin.visible = showKeys; }
+  $('keysBtn').classList.toggle('on', showKeys);
+}
+
+function pose() {
+  if (!model) return;
+  const { P, d } = model;
+  const phiSel = (2 * Math.PI * selected) / P.stations;
+  // Section plane: the selected station's mid-plane, keeping the half behind it.
+  clip.normal.set(Math.sin(phiSel), -Math.cos(phiSel), 0);
+  clip.constant = 0;
+  stations.forEach((s, i) => {
+    const a = angles[i];
+    s.swing.rotation.z = (a * Math.PI) / 180;
+    const lift = leafLift(params, a) - P.beamPreload; // lift above the resting position
+    s.leafPivot.rotation.z = Math.atan2(Math.max(0, lift), d.beamLen);
+    s.carrier.material = i === selected ? mats.carrierSel : mats.carrier;
+    // explode: carriers slide down the grooves and out
+    s.explodeG.position.set(explode * 14, -explode * 26, 0);
+  });
+  const u = root.userData;
+  u.retMesh.position.z = -explode * 30;
+  u.nutMesh.position.z = u.washMesh.position.z = -explode * 46;
+  u.eyeMesh.position.z = explode * 30;
+  $('angleRead').textContent = `key ${selected + 1} · ${angles[selected].toFixed(0)}°`;
+  $('flip').textContent = targets[selected] > 45 ? `Store key ${selected + 1}` : `Flip key ${selected + 1}`;
+  drawDetent();
+}
+
+// ---------- panel ----------
+function buildParamUI() {
+  const host = $('params');
+  host.innerHTML = '';
+  let group = null, body = null;
+  for (const [g, k, label, def, min, max, step, unit] of PARAMS) {
+    if (g !== group) {
+      group = g;
+      const det = document.createElement('details');
+      if (g === 'Hub' || g === 'Key') det.open = true;
+      det.innerHTML = `<summary>${g}</summary>`;
+      body = document.createElement('div'); body.className = 'params';
+      det.appendChild(body); host.appendChild(det);
+    }
+    const row = document.createElement('div'); row.className = 'row'; row.dataset.key = k;
+    row.innerHTML = `<label for="p-${k}">${label} <span>${def}${unit}</span></label>
+      <input id="p-${k}" type="range" min="${min}" max="${max}" step="${step}" value="${params[k]}">
+      <input id="p-${k}-n" type="number" min="${min}" max="${max}" step="${step}" value="${params[k]}" aria-label="${label}">`;
+    body.appendChild(row);
+    const r = row.querySelector('input[type=range]'), n = row.querySelector('input[type=number]');
+    const set = (v) => { params[k] = Number(v); r.value = n.value = v; row.classList.toggle('changed', params[k] !== def); scheduleRebuild(); };
+    r.addEventListener('input', () => set(r.value));
+    n.addEventListener('change', () => set(n.value));
+    row.classList.toggle('changed', params[k] !== def);
+  }
+}
+
+let rebuildTimer = 0;
+function scheduleRebuild() {
+  try { localStorage.setItem('keyhub-params', JSON.stringify(params)); } catch (_) {}
+  $('sweepState').textContent = 'rebuilding…';
+  clearTimeout(rebuildTimer);
+  rebuildTimer = setTimeout(() => { try { rebuild(); } catch (e) { $('sweepState').textContent = 'build failed: ' + e.message; } }, 220);
+}
+
+function updatePanel(sweep, ms) {
+  const { P, d } = model;
+  const issues = lint(params);
+  const ul = $('issues'); ul.innerHTML = '';
+  const add = (lvl, txt) => { const li = document.createElement('li'); li.className = lvl; li.textContent = txt; ul.appendChild(li); };
+  if (sweep && sweep.baked) add('warn', 'Showing the pre-built default model. Its swing was checked clear when it was built.');
+  else if (sweep) {
+    if (sweep.worst < 0.01) add('good', `Key ${selected + 1} swings 0–90° without touching the hub, retainer or neighbouring keys.`);
+    else {
+      const bad = sweep.rows.filter((r) => r.volume >= 0.01).map((r) => r.angle + '°');
+      add('bad', `Key ${selected + 1} collides during the swing at ${bad.join(', ')} (${sweep.worst.toFixed(1)} mm³ worst).`);
+    }
+  }
+  for (const [l, m] of issues) add(l, m);
+  if (!issues.length) add('good', 'Wall thicknesses, leaf strain and stops are within limits.');
+  $('sweepState').textContent = `rebuilt in ${ms.toFixed(0)} ms`;
+
+  const rows = [
+    ['Hub', `Ø${P.hubDiameter} × ${P.hubHeight} mm`],
+    ['Overall drop below hub', `${d.overallDrop.toFixed(0)} mm`],
+    ['Key out, tip radius', `${(P.pivotRadius + P.keyPinDrop + P.keyHeadHeight - P.keyHoleToTop + P.keyBladeLength).toFixed(0)} mm`],
+    ['Detent travel', `${d.detentTravel.toFixed(2)} mm`],
+    ['Leaf strain (peak)', `${(d.beamStrain * 100).toFixed(2)} %`],
+    ['Leaf force, rest / peak', `${d.beamPreloadForce.toFixed(1)} / ${d.beamPeakForce.toFixed(1)} N`],
+    ['Leaf free length', `${d.beamLen.toFixed(1)} mm`],
+    ['Wall between slots', `${Math.min(d.wallAtRoot, d.wallAtCam).toFixed(2)} mm`],
+    ['Hood (90° stop) depth', `${d.hoodDepth.toFixed(1)} mm`],
+    ['Slot width', `${d.slotW.toFixed(2)} mm`],
+    ['Key slot in fork', `${d.keySlotW.toFixed(2)} mm`],
+    ['Dowel length', `${d.dowelLen.toFixed(1)} mm`],
+  ];
+  $('specs').innerHTML = rows.map(([a, b]) => `<dt>${a}</dt><dd>${b}</dd>`).join('');
+  for (const id of ['pc', 'pd', 'pk']) $(id).textContent = P.stations;
+  $('dl').textContent = d.dowelLen.toFixed(1);
+
+  const chips = [];
+  chips.push([sweep && sweep.worst < 0.01 ? 'good' : 'bad', sweep && sweep.worst < 0.01 ? 'swing clear' : 'swing collides']);
+  const worst = issues.some(([l]) => l === 'bad') ? 'bad' : issues.length ? 'warn' : 'good';
+  chips.push([worst, worst === 'good' ? 'printable' : worst === 'warn' ? 'check notes' : 'fix needed']);
+  chips.push(['', `strain ${(d.beamStrain * 100).toFixed(1)}%`]);
+  chips.push(['', `Ø${P.hubDiameter} × ${P.hubHeight}`]);
+  $('chips').innerHTML = chips.map(([c, t]) => `<span class="chip ${c}">${t}</span>`).join('');
+}
+
+function drawDetent() {
+  if (!model) return;
+  const svg = $('detent');
+  const W = 320, H = 70, pad = 6;
+  let max = 0; const pts = [];
+  for (let a = -6; a <= 96; a += 1) { const l = leafLift(params, a); pts.push([a, l]); max = Math.max(max, l); }
+  const x = (a) => pad + ((a + 6) / 102) * (W - 2 * pad);
+  const y = (l) => H - 12 - (l / (max || 1)) * (H - 24);
+  const path = pts.map(([a, l], i) => `${i ? 'L' : 'M'}${x(a).toFixed(1)},${y(l).toFixed(1)}`).join(' ');
+  const a = angles[selected];
+  svg.innerHTML = `
+    <line x1="${x(0)}" x2="${x(0)}" y1="4" y2="${H - 10}" stroke="#2c2b2a"/>
+    <line x1="${x(90)}" x2="${x(90)}" y1="4" y2="${H - 10}" stroke="#2c2b2a"/>
+    <path d="${path} L${x(96)},${H - 12} L${x(-6)},${H - 12} Z" fill="#d6b26a22"/>
+    <path d="${path}" fill="none" stroke="#d6b26a" stroke-width="1.5"/>
+    <text x="${x(0) + 3}" y="${H - 1}" fill="#9a958a" font-size="9" font-family="JetBrains Mono, monospace">0° stored</text>
+    <text x="${x(90) - 3}" y="${H - 1}" fill="#9a958a" font-size="9" font-family="JetBrains Mono, monospace" text-anchor="end">90° in use</text>
+    <text x="${x(45)}" y="9" fill="#9a958a" font-size="9" font-family="JetBrains Mono, monospace" text-anchor="middle">${max.toFixed(2)} mm</text>
+    <circle cx="${x(a)}" cy="${y(leafLift(params, a))}" r="4" fill="#e9e5dc"/>`;
+}
+
+// ---------- motion ----------
+function flipTo(i, deg) { targets[i] = deg; }
+function snapTarget(a) { return a >= 45 ? 90 : 0; }
+let dragging = false;
+$('angle').addEventListener('input', (e) => { dragging = true; stopDemo(); angles[selected] = targets[selected] = Number(e.target.value); $('angleNum').value = Math.round(angles[selected]); pose(); });
+$('angle').addEventListener('change', () => { dragging = false; flipTo(selected, snapTarget(angles[selected])); });
+$('angleNum').addEventListener('change', (e) => { stopDemo(); flipTo(selected, Math.max(-6, Math.min(96, Number(e.target.value)))); });
+$('flip').addEventListener('click', () => { stopDemo(); flipTo(selected, targets[selected] > 45 ? 0 : 90); });
+$('allUp').addEventListener('click', () => { stopDemo(); targets.fill(90); });
+$('allDown').addEventListener('click', () => { stopDemo(); targets.fill(0); });
+$('section').addEventListener('click', () => { sectionOn = !sectionOn; applyClip(); if (sectionOn) viewFront(); });
+$('keysBtn').addEventListener('click', () => { showKeys = !showKeys; applyKeys(); });
+$('explode').addEventListener('input', (e) => { explode = Number(e.target.value); $('explodeNum').value = Math.round(explode * 100); pose(); });
+$('explodeNum').addEventListener('change', (e) => { explode = Math.max(0, Math.min(1, Number(e.target.value) / 100)); $('explode').value = explode; pose(); });
+$('demo').addEventListener('click', () => { if (demo) stopDemo(); else startDemo(); });
+$('reset').addEventListener('click', () => { params = { ...DEFAULTS }; buildParamUI(); scheduleRebuild(); });
+$('copy').addEventListener('click', async () => {
+  const changed = Object.fromEntries(Object.entries(params).filter(([k, v]) => v !== DEFAULTS[k]));
+  const txt = Object.keys(changed).length ? JSON.stringify(changed) : '{} (all defaults)';
+  $('copyOut').textContent = txt;
+  try { await navigator.clipboard.writeText(txt); $('copyOut').textContent = 'Copied: ' + txt; } catch (_) {
+    const r = document.createRange(); r.selectNodeContents($('copyOut')); getSelection().removeAllRanges(); getSelection().addRange(r);
+  }
+});
+
+function startDemo() {
+  demo = { t: 0, step: 0 };
+  $('demo').classList.add('on'); $('demo').textContent = 'Stop demo';
+}
+function stopDemo() { if (!demo) return; demo = null; $('demo').classList.remove('on'); $('demo').textContent = 'Play demo'; }
+function demoTick(dt) {
+  if (!demo) return;
+  const n = model.P.stations;
+  demo.t += dt;
+  // each key: up, hold, down - overlapping a little with the next one
+  const period = 1.3;
+  const k = Math.floor(demo.t / period);
+  const i = k % n;
+  const phase = (demo.t % period) / period;
+  if (i !== demo.step) { demo.step = i; }
+  selected = i;
+  targets[i] = phase < 0.55 ? 90 : 0;
+}
+
+// Detent dynamics: the key coasts toward the target, and near each flat it
+// gets pulled in harder - so it visibly "clicks" into place.
+function stepAngles(dt) {
+  let moved = false;
+  for (let i = 0; i < angles.length; i++) {
+    if (dragging && i === selected) continue;
+    const a = angles[i], t = targets[i];
+    if (Math.abs(t - a) < 0.05) { if (a !== t) { angles[i] = t; moved = true; } continue; }
+    const dist = Math.abs(t - a);
+    const speed = 160 + (dist < 18 ? (18 - dist) * 22 : 0); // deg/s, snaps at the end
+    const stepd = Math.min(dist, speed * dt);
+    angles[i] = a + Math.sign(t - a) * stepd;
+    moved = true;
+  }
+  return moved;
+}
+
+// ---------- picking ----------
+const ray = new THREE.Raycaster();
+let downAt = null;
+canvas.addEventListener('pointerdown', (e) => { downAt = [e.clientX, e.clientY]; });
+canvas.addEventListener('pointerup', (e) => {
+  if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 4) return;
+  const r = canvas.getBoundingClientRect();
+  ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), camera);
+  const objs = stations.flatMap((s) => [s.carrier, s.keyM]);
+  const hit = ray.intersectObjects(objs, false)[0];
+  if (hit) {
+    stopDemo();
+    const i = hit.object.userData.station;
+    if (i === selected) flipTo(i, targets[i] > 45 ? 0 : 90);
+    selected = i;
+    $('angle').value = angles[i];
+    pose();
+  }
+});
+
+// ---------- camera ----------
+function setView(dir, dist = 270) {
+  const v = new THREE.Vector3(...dir).normalize().multiplyScalar(dist);
+  camera.position.copy(controls.target).add(v);
+  controls.update();
+}
+function viewFront() {
+  const phi = (2 * Math.PI * selected) / model.P.stations;
+  // look at the selected station's side, across the section plane
+  setView([-Math.sin(phi) * 1.0 + Math.cos(phi) * 0.15, Math.cos(phi) * 1.0 + Math.sin(phi) * 0.15, 0.12], 240);
+}
+$('viewFront').addEventListener('click', viewFront);
+$('viewTop').addEventListener('click', () => setView([0.001, -0.02, 1], 260));
+$('viewIso').addEventListener('click', () => setView([0.9, -1.25, 0.75]));
+
+function resize() {
+  const r = canvas.parentElement.getBoundingClientRect();
+  renderer.setSize(r.width, r.height, false);
+  camera.aspect = r.width / Math.max(1, r.height);
+  camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(canvas.parentElement);
+
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  if (model) {
+    demoTick(dt);
+    if (stepAngles(dt) || demo) pose();
+    if (!dragging) $('angle').value = angles[selected];
+  }
+  controls.update();
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+
+// ---------- boot ----------
+try {
+  status('Starting geometry kernel…');
+  try {
+    if (window.__KEYHUB_WASM__) {
+      // Published page: the kernel's binary is embedded, so nothing is fetched.
+      const Module = window.__KEYHUB_MANIFOLD__;
+      const bin = Uint8Array.from(atob(window.__KEYHUB_WASM__), (c) => c.charCodeAt(0));
+      wasm = await Module({ wasmBinary: bin.buffer });
+    } else {
+      const Module = (await import(new URL('../../vendor/manifold/manifold.js', location.href).href)).default;
+      wasm = await Module({ locateFile: (f) => new URL('../../vendor/manifold/' + f, location.href).href });
+    }
+    wasm.setup();
+  } catch (e) {
+    console.warn('geometry kernel unavailable', e);
+    wasm = null;
+    if (!window.__KEYHUB_BAKED__) throw e;
+    params = { ...DEFAULTS };
+  }
+  buildParamUI();
+  if (!wasm) {
+    for (const el of document.querySelectorAll('#params input, #reset')) el.disabled = true;
+    $('copyOut').textContent = 'This browser blocked the geometry kernel, so you are seeing the default model and the dimension controls are off. Motion, section and explode still work.';
+  }
+  rebuild();
+  $('loading').hidden = true;
+  resize();
+  setView([0.9, -1.25, 0.75]);
+  // open with one key out so the mechanism reads at a glance
+  targets[0] = 90;
+  requestAnimationFrame(frame);
+  window.__KEYHUB_STARTED__ = true;
+} catch (e) {
+  $('loading').textContent = 'Could not start the geometry kernel: ' + e.message;
+  console.error(e);
+}
+})();
+</script>

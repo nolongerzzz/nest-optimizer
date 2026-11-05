@@ -19,7 +19,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  PREVIEW_REPO: nest-optimizer-wip
+  PREVIEW_REPO: nest-wip
 
 jobs:
   mirror:

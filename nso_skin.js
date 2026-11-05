@@ -1,6 +1,7 @@
-/* nso_skin.js - apply a contact "skin" (a fine relief pattern) onto one flat
-   rectangular face of a closed triangle soup, and measure a skinned surface
-   the way Seat needs it: by its contact TIPS, not its base plane.
+/* nso_skin.js - apply a contact "skin" (a fine relief pattern) onto the flat
+   rectangular faces of a closed triangle soup - one face, several faces (the
+   wrap), or two patterns stacked (the double skin) - and measure a skinned
+   surface the way Seat needs it: by its contact TIPS, not its base plane.
 
    Loads as a classic script (window.NSO_Skin) and as a Node module
    (require('../nso_skin.js')). No DOM, no Three.js: a mesh is the app's raw
@@ -48,6 +49,30 @@
                0.6 tall (three 0.2 layers). NOTE: the physical reference
                (v8_FINAL's printed interface) is not in this repo as geometry,
                so these are stated defaults, every one a parameter.
+               RIBS BOTH WAYS IN ONE LAYER IS A RELIEF, NOT A PRINTED
+               LAYER, and the difference only shows when something is STACKED
+               on it. Here it is right: the mating piece is a flat plate, so
+               the tip area IS the contact and tipContactArea measures it. Set
+               a second PATTERNED layer on it and it is wrong - a 90 degree
+               copy's underside is the same lattice as the tips beneath it, so
+               the two coincide instead of crossing and 519.750 mm^2, every
+               square millimetre of tip, welds in a SINGLE patch; no other
+               crossing angle rescues it either (measured,
+               tools/nso_raster_line_audit.js parts 4-5). For a two-layer
+               breakaway interface use nso_crosshatch.js, which builds this
+               same pattern at this same pitch and rib the way a printer does -
+               one direction per layer, two layers, the second crossing the
+               first: 110.2500 mm^2 in 625 isolated crossings.
+               docs/CROSSHATCH.md.
+   crosshatch-fine
+               the same lattice at 0.84 pitch instead of 1.2 - a PRESET, not a
+               second builder (see `family` at PATTERNS). 1.43x the ribs per
+               axis, leaving a 0.42 channel between them, which is exactly one
+               extrusion line at a 0.4 nozzle and therefore the floor: tighter
+               and the slicer fills the gap in. 0.4 NOZZLE ONLY - at a 0.6
+               nozzle one line is 0.63, so 0.42 of air fuses, which is why
+               `crosshatch` at 1.2 is still the default.
+               docs/SKIN-CROSSHATCH-PITCH.md has the measurements.
    zigzag      parallel ridges with a trapezoid (sawtooth) section: `base`
                wide at the floor, `tip` wide at the crest, `height` tall,
                `pitch` apart, running along the face's second axis. Contact =
@@ -80,17 +105,79 @@
    is returned untouched with ok:false and a reason.
 
    ---------------------------------------------------------------------------
+   SEVERAL FACES AT ONCE - the wrap
+   ---------------------------------------------------------------------------
+   applySkinWrap skins a list of faces (or all six axis faces) one after
+   another on the growing soup. "Wrap" in this app's own sense, the one
+   Soften's Full wrap has: all six faces of a box instead of the one you
+   picked. NOT a curved wrap - every face is still a flat rectangle and a
+   cylinder's side is still refused; docs/HANDOFF.md, "the OTHER wrap",
+   records what a curved one would take.
+
+   It is only correct because the SEAM between two skinned faces closes. Two
+   opposite faces share no edge and always worked; two adjacent ones left 28
+   open, 28 non-manifold and 28 degenerate on a 20 mm cube, from two causes
+   now fixed and gated: the side parameter epsilon was absolute where the
+   soup it reads is float32 (see makeSides), and the relief perimeter was
+   never subdivided at the points the other face's relief put on the shared
+   edge (see fanRelief).
+
+   ---------------------------------------------------------------------------
+   TWO LAYERS - the double skin
+   ---------------------------------------------------------------------------
+   Skinning an already-skinned face is refused, correctly: its tips are
+   hundreds of separate rib tops, not one rectangle ("face boundary is not a
+   single loop"). So a second layer is not a second pass. Two readings, both
+   built, chosen by opts.layer2:
+
+   composed  (layer2.free false) layer 2 rides on layer 1's TIPS in the same
+             pass over one merged grid: h = h1 + (layer-1 tip ? h2 : 0). ONE
+             closed shell, no flag, grid patterns only, raise only. The
+             contact is the INTERSECTION of the two tip sets, so how much it
+             shrinks is the second pattern's business - zigzag crests take a
+             crosshatch to ~29%, a second crosshatch to ~84%, and layer 2 at
+             layer 1's own parameters leaves it exactly where it was and only
+             makes the relief taller. layer1TipArea rides on the result next
+             to tipArea so a caller can say which happened.
+   free      (layer2.free true) layer 2 is its OWN shell: a sheet resting on
+             layer 1's tips carrying its own relief, a second breakaway
+             interface. The piece then has TWO shells and stops being a closed
+             solid, which is what the non-solid flag is for - the result says
+             nonSolid: true and the caller is expected to set it. The sheet is
+             inset to layer 1's margin so its walls stay out of the piece's
+             own face planes. It bridges tip to tip when it prints.
+
+   ---------------------------------------------------------------------------
    API
    ---------------------------------------------------------------------------
    NSO_Skin.PATTERNS                      { name: { defaults, describe } }
-   NSO_Skin.findFace(soup, dir)           -> face | null
+   NSO_Skin.findFace(soup, dir, plane?)   -> face | null
+                                          plane: optional offset n.p = plane;
+                                          given, the group on THAT plane is
+                                          taken instead of the outermost one
    NSO_Skin.applySkinToFace(soup, {
        dir: [x,y,z],                      face direction (outward normal)
-       pattern: 'crosshatch'|'zigzag'|'ring',
+       plane: number,                     optional, see findFace
+       pattern: 'crosshatch'|'crosshatch-fine'|'zigzag'|'ring',
        params: {...},                     pattern parameters (see defaults)
-       mode: 'raise'|'recess' })
+       mode: 'raise'|'recess',
+       layer2: {                          optional second layer
+         pattern, params,                 its own smaller defaults, LAYER2_DEFAULTS
+         free: bool,                      false: composed. true: its own shell
+         sheet, gap, inset } })           free only (mm; gap 0 = resting on
+                                          the tips, inset defaults to layer
+                                          1's margin)
      -> { ok, reason?, tris, face, tipHeight, tipsPlane, basePlane,
-          tipArea, reliefTris, params, pattern, mode }
+          tipArea, reliefTris, params, pattern, mode, layers, shells,
+          layer2?, layer1TipArea?, layer1TipsPlane?, freeLayer?, nonSolid? }
+   NSO_Skin.applySkinWrap(soup, {
+       faces: [{dir, plane?}, ...] | 'box',   default 'box' (six axis faces)
+       skipUnskinnable: bool,             leave a face that cannot take a
+                                          skin alone and name it, instead of
+                                          standing the whole wrap down
+       ...everything applySkinToFace takes })
+     -> { ok, reason?, tris, faces[], skipped[], count, asked, tipArea,
+          shells, nonSolid, describe }
    NSO_Skin.supportExtreme(soup, footprintCorners[4], normal, opts)
      -> { s, point, inside } | null      max of p.normal over soup within the
                                           footprint prism (opts.sMax caps it)
@@ -99,6 +186,7 @@
 */
 (function (root) {
   'use strict';
+  var PLANE_TOL = 0.05;   /* mm - a select entry's offset vs a face group's, same D_TOL as app-mask.js */
 
   /* ------------------------------------------------------------ vectors */
   function sub(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
@@ -134,26 +222,100 @@
     return Math.round(p[0] * 1e4) + '_' + Math.round(p[1] * 1e4) + '_' + Math.round(p[2] * 1e4);
   }
 
-  /* ------------------------------------------------------------ patterns */
+  /* ------------------------------------------------------------ patterns
+
+     `family` says which builder a pattern name uses, so a name can be a
+     PRESET - the same geometry at different numbers - instead of a fourth
+     builder. Everything downstream dispatches on the family, never on the
+     name, which is what lets `crosshatch-fine` exist without touching
+     crosshatchPlan, gridRelief or any caller that already handles the three
+     shipped names.
+
+     WHY A PRESET AND NOT A UI FIELD. `pitch` was ALREADY a parameter here -
+     PATTERNS.crosshatch.defaults.pitch, merged by withDefaults, read by
+     crosshatchPlan - and nothing was hardcoded. What was missing is a way to
+     REACH it: index.html's #skin-pattern is a name-only select and no caller
+     in app-skin.js or app-skin-patch.js has ever passed `params`, so from the
+     app's seat 1.2 was the only pitch there was. A named preset is therefore
+     the smallest thing that closes the gap: it arrives through the select
+     every Skin control already reads, and the 1.2 default is untouched.
+
+     crosshatch-fine's 0.84 is NOT a taste figure. The open channel a
+     crosshatch leaves is pitch - rib, and with the rib held at one extrusion
+     line the tightest pitch that still leaves a full line of air is
+     rib + line = 0.42 + 0.42. Measured on the built mesh rather than
+     asserted - see tools/nso_skin_fine_test.js, which rays the channel
+     directly - and it is a 0.4-NOZZLE FIGURE: at a 0.6 nozzle one line is
+     0.63 (nso_thickness.floorFor) and the same sum is 1.05, which is why the
+     shipped 1.2 default is where it is and why it is the one that stays
+     default. docs/SKIN-CROSSHATCH-PITCH.md carries the whole table. */
   var PATTERNS = {
     crosshatch: {
+      family: 'crosshatch',
       defaults: { pitch: 1.2, rib: 0.42, height: 0.6, margin: null },
       describe: function (p) {
         return 'crosshatch lattice, rib ' + p.rib + ' mm, pitch ' + p.pitch + ' mm, ' + p.height + ' mm tall';
       }
     },
+    /* The tighter-pitch preset. Same builder, same rib, same height as
+       `crosshatch`; only the pitch moves, 1.2 -> 0.84, which is 1.43x the rib
+       density and leaves exactly one 0.4-nozzle extrusion line of air between
+       neighbouring ribs. 0.4 nozzle only. */
+    'crosshatch-fine': {
+      family: 'crosshatch',
+      defaults: { pitch: 0.84, rib: 0.42, height: 0.6, margin: null },
+      describe: function (p) {
+        return 'fine crosshatch lattice, rib ' + p.rib + ' mm, pitch ' + p.pitch + ' mm (' +
+          round3(p.pitch - p.rib) + ' mm channel), ' + p.height + ' mm tall';
+      }
+    },
     zigzag: {
+      family: 'zigzag',
       defaults: { pitch: 2.0, base: 1.2, tip: 0.42, height: 0.6, margin: null },
       describe: function (p) {
         return 'sawtooth ridges, base ' + p.base + ' -> tip ' + p.tip + ' mm, pitch ' + p.pitch + ' mm, ' + p.height + ' mm tall';
       }
     },
     ring: {
+      family: 'ring',
       defaults: { rOut: 5.0, wallBase: 0.8, wallTip: 0.4, height: 1.0, segments: 96, margin: null },
       describe: function (p) {
         return 'tapered ring, r ' + p.rOut + ' mm, wall ' + p.wallBase + ' -> ' + p.wallTip + ' mm, ' + p.height + ' mm tall';
       }
     }
+  };
+
+  function round3(x) { return Math.round(x * 1000) / 1000; }
+
+  /* Which builder a pattern name uses. An unknown name answers with itself so
+     every caller's existing "unknown pattern" refusal still fires. */
+  function familyOf(name) {
+    return (PATTERNS[name] && PATTERNS[name].family) || name;
+  }
+
+  /* The one grid dispatch, by family. */
+  function gridPlan(name, fr, p, shift) {
+    return familyOf(name) === 'crosshatch' ? crosshatchPlan(fr, p, shift) : zigzagPlan(fr, p, shift);
+  }
+
+  /* Layer 2 of a double skin: the same patterns at a smaller scale, so the
+     second layer lands several features across one of layer 1's tips instead
+     of one more rib exactly on top of it - layer 2 at layer 1's parameters
+     only makes layer 1 taller, it does not shrink the contact. Stated
+     defaults like layer 1's, every one a parameter. margin is 0 because
+     layer 2 rides on layer 1's tips, which are already inside layer 1's own
+     margin; it needs no rim of its own. */
+  var LAYER2_DEFAULTS = {
+    crosshatch: { pitch: 0.7, rib: 0.42, height: 0.3, margin: 0 },
+    /* Stated rather than left to the PATTERNS fallback, which would hand
+       layer 2 a null margin where the layer-2 convention is 0. The pitch does
+       NOT tighten further: layer 2 is meant to land several features across
+       one of layer 1's tips, and a fine crosshatch's tip is already one
+       extrusion line wide, so there is nothing to land across. It stays at
+       its own 0.84 and only the height halves. */
+    'crosshatch-fine': { pitch: 0.84, rib: 0.42, height: 0.3, margin: 0 },
+    zigzag: { pitch: 0.9, base: 0.5, tip: 0.25, height: 0.3, margin: 0 },
+    ring: { rOut: 2.5, wallBase: 0.6, wallTip: 0.3, height: 0.5, margin: 0 }
   };
 
   function withDefaults(name, params) {
@@ -163,12 +325,27 @@
     return out;
   }
 
+  /* Layer 2's parameters: its own smaller defaults, then whatever the
+     caller named. Never layer 1's - the two layers are independent. */
+  function withLayer2Defaults(name, params) {
+    var d = LAYER2_DEFAULTS[name] || PATTERNS[name].defaults, out = {}, k;
+    for (k in PATTERNS[name].defaults) if (Object.prototype.hasOwnProperty.call(PATTERNS[name].defaults, k)) out[k] = PATTERNS[name].defaults[k];
+    for (k in d) if (Object.prototype.hasOwnProperty.call(d, k)) out[k] = d[k];
+    if (params) for (k in params) if (Object.prototype.hasOwnProperty.call(params, k) && params[k] != null) out[k] = params[k];
+    return out;
+  }
+
   /* ------------------------------------------------------------ face pick */
 
   /* Planar faces whose normal is within 30 degrees of dir, grouped by plane. */
-  function findFace(soup, dir) {
+  function findFace(soup, dir, plane) {
     var d = unit(dir);
     if (len(d) === 0) return null;
+    /* plane (optional): the face's own offset n.p = plane, as a face select
+       records it (app-mask.js). With it, the pick is the coplanar group ON
+       that plane, not the outermost one along dir - which is what lets an
+       explicitly selected pocket floor win over the hull face above it. */
+    var wantPlane = (typeof plane === 'number' && isFinite(plane)) ? plane : null;
     var n = triCount(soup);
     var groups = [];
     for (var t = 0; t < n; t++) {
@@ -192,6 +369,7 @@
     var best = null;
     for (var k = 0; k < groups.length; k++) {
       var gk = groups[k];
+      if (wantPlane !== null && Math.abs(gk.d - wantPlane) > PLANE_TOL) continue;
       if (!best || gk.dotDir > best.dotDir + 1e-4 ||
           (Math.abs(gk.dotDir - best.dotDir) <= 1e-4 && gk.d > best.d)) best = gk;
     }
@@ -283,17 +461,29 @@
      c3->c0 (u=0, v decreasing). A side keeps sorted params t in [0,1] and
      the exact point for each; the same point object is what both the relief
      perimeter and the wall fans use. */
-  function makeSides(fr) {
+  /* side.eps is the seam tolerance `tol` (mm) expressed in THIS side's
+     parameter. A fixed epsilon in t was right while a face was only ever
+     skinned once from exact corners; it is wrong on a second face, because
+     the soup it reads came back as a Float32Array, so a param recomputed
+     from a stored point differs from the exact one that placed it by ~1e-7
+     of the span. At 1e-9 the same point then registers twice, and the fan
+     over it emits a zero-length edge - 28 degenerate triangles and 56 odd
+     edges on two adjacent faces of a 20 mm cube, measured. */
+  function makeSides(fr, tol) {
     var sides = [];
     for (var k = 0; k < 4; k++) {
-      sides.push({ a: fr.c[k], b: fr.c[(k + 1) % 4], ts: [0, 1], pts: [fr.c[k], fr.c[(k + 1) % 4]] });
+      var a = fr.c[k], b = fr.c[(k + 1) % 4];
+      var L = len(sub(b, a));
+      sides.push({ a: a, b: b, ts: [0, 1], pts: [a, b],
+                   eps: (L > 1e-9 && tol > 0) ? Math.max(1e-9, tol / L) : 1e-9 });
     }
     return sides;
   }
   function sideInsert(side, t, exactPt) {
-    if (t <= 1e-9 || t >= 1 - 1e-9) return t <= 1e-9 ? side.pts[0] : side.pts[side.pts.length - 1];
+    var eps = side.eps || 1e-9;
+    if (t <= eps || t >= 1 - eps) return t <= eps ? side.pts[0] : side.pts[side.pts.length - 1];
     for (var i = 0; i < side.ts.length; i++) {
-      if (Math.abs(side.ts[i] - t) < 1e-9) return side.pts[i];
+      if (Math.abs(side.ts[i] - t) < eps) return side.pts[i];
       if (side.ts[i] > t) {
         var p = exactPt || lerp(side.a, side.b, t);
         side.ts.splice(i, 0, t); side.pts.splice(i, 0, p);
@@ -331,34 +521,89 @@
     }
   }
 
+  /* The chain p -> q along whichever side it lies on, through every point
+     registered on that side between them. Null when the edge is on no side.
+     Consecutive points closer than `tol` collapse: a point registered from a
+     float32 vertex and the exact break that placed it are the same point,
+     and a chain step between them would be a zero-length edge. */
+  function sideChain(p, q, sides, tol) {
+    for (var k = 0; k < sides.length; k++) {
+      var side = sides[k];
+      var tp = sideParam(side, p, tol), tq = sideParam(side, q, tol);
+      if (tp === null || tq === null) continue;
+      var lo = Math.min(tp, tq), hi = Math.max(tp, tq), eps = side.eps || 1e-9;
+      var mids = [];
+      for (var i = 0; i < side.ts.length; i++) {
+        if (side.ts[i] > lo + eps && side.ts[i] < hi - eps) mids.push(side.pts[i]);
+      }
+      if (tp > tq) mids.reverse();
+      var chain = [p];
+      for (var c = 0; c < mids.length; c++) {
+        if (len(sub(mids[c], chain[chain.length - 1])) > tol && len(sub(mids[c], q)) > tol) chain.push(mids[c]);
+      }
+      chain.push(q);
+      return chain;
+    }
+    return null;
+  }
+
+  /* One triangle, re-emitted so every registered side point on any of its
+     edges is a vertex of it.
+       no split edge   the triangle as it stands (legacy: a wall whose edge
+                       lies on a side is re-emitted from that edge, which
+                       rotates its vertex order - kept bit for bit so a face
+                       skinned on its own comes out exactly as before)
+       one split edge  the fan from the vertex opposite it
+       two or three    split at the centroid first, so each piece has one
+                       split edge and the three interior edges stay paired.
+                       This is the corner cell where two skinned faces meet. */
+  function fanTri(v, sides, tol, out, legacyRotate) {
+    var chains = [null, null, null], first = -1, split = -1, nSplit = 0;
+    for (var e = 0; e < 3; e++) {
+      var ch = sideChain(v[e], v[(e + 1) % 3], sides, tol);
+      chains[e] = ch;
+      if (!ch) continue;
+      if (first < 0) first = e;
+      if (ch.length > 2) { if (split < 0) split = e; nSplit++; }
+    }
+    if (nSplit > 1) {
+      var g = scale(add(add(v[0], v[1]), v[2]), 1 / 3);
+      for (var e2 = 0; e2 < 3; e2++) {
+        var ch2 = chains[e2] || [v[e2], v[(e2 + 1) % 3]];
+        for (var c2 = 0; c2 + 1 < ch2.length; c2++) pushTri(out, ch2[c2], ch2[c2 + 1], g);
+      }
+      return 1;
+    }
+    var e0 = split >= 0 ? split : (legacyRotate ? first : -1);
+    if (e0 < 0) { pushTri(out, v[0], v[1], v[2]); return 0; }
+    var ch0 = chains[e0], apex = v[(e0 + 2) % 3];
+    for (var c = 0; c + 1 < ch0.length; c++) pushTri(out, ch0[c], ch0[c + 1], apex);
+    return 1;
+  }
+
   /* Replace every wall triangle that shares a piece of a side with a fan
      over the side's registered points. */
   function fanWalls(soup, faceSet, sides, tol, out) {
     var n = triCount(soup), used = 0;
     for (var t = 0; t < n; t++) {
       if (faceSet.has(t)) continue;
-      var v = [vtx(soup, t, 0), vtx(soup, t, 1), vtx(soup, t, 2)];
-      var done = false;
-      for (var e = 0; e < 3 && !done; e++) {
-        var p = v[e], q = v[(e + 1) % 3], r = v[(e + 2) % 3];
-        for (var k = 0; k < 4; k++) {
-          var side = sides[k];
-          var tp = sideParam(side, p, tol), tq = sideParam(side, q, tol);
-          if (tp === null || tq === null) continue;
-          var lo = Math.min(tp, tq), hi = Math.max(tp, tq);
-          var mids = [];
-          for (var i = 0; i < side.ts.length; i++) {
-            if (side.ts[i] > lo + 1e-9 && side.ts[i] < hi - 1e-9) mids.push(side.pts[i]);
-          }
-          if (tp > tq) mids.reverse();
-          var chain = [p].concat(mids, [q]);
-          for (var c = 0; c + 1 < chain.length; c++) pushTri(out, chain[c], chain[c + 1], r);
-          used++;
-          done = true;
-          break;
-        }
-      }
-      if (!done) pushTri(out, v[0], v[1], v[2]);
+      used += fanTri([vtx(soup, t, 0), vtx(soup, t, 1), vtx(soup, t, 2)], sides, tol, out, true);
+    }
+    return used;
+  }
+
+  /* The same pass over the relief that was just built. Its perimeter knows
+     its own breaks; when the face shares an edge with a face skinned before
+     it, the seam also carries that relief's perimeter points, and the two
+     must meet on every one of them. On a face skinned alone this inserts
+     nothing and re-emits the relief triangle for triangle. */
+  function fanRelief(relief, sides, tol, out) {
+    var n = (relief.length / 9) | 0, used = 0;
+    for (var t = 0; t < n; t++) {
+      var o = t * 9;
+      used += fanTri([[relief[o], relief[o + 1], relief[o + 2]],
+                      [relief[o + 3], relief[o + 4], relief[o + 5]],
+                      [relief[o + 6], relief[o + 7], relief[o + 8]]], sides, tol, out, false);
     }
     return used;
   }
@@ -502,7 +747,14 @@
         var z = (raised ? h : 0) + shift;
         return [z, z, z, z];
       },
-      ribsU: ivU.length, ribsV: ivV.length, margin: margin
+      ribsU: ivU.length, ribsV: ivV.length, margin: margin,
+      /* The rib spans themselves, published so a caller that has to BUTT
+         something against the outermost rib can find it instead of guessing
+         from breaksU. ribIntervals centres k ribs in the free span, so the
+         first one starts at ivU[0][0] >= margin and the leftover is split
+         evenly at the two ends - a sliver channel a frame has to swallow.
+         Read-only: the plan owns these. */
+      ivU: ivU, ivV: ivV
     };
   }
 
@@ -641,6 +893,127 @@
              rOutTop: rOut1, rInTop: rIn1 };
   }
 
+  /* ------------------------------------------- layered (double) skin */
+
+  /* Two patterns in ONE pass, on one merged grid, layer 2 riding on layer 1's
+     TIPS:  h(cell) = h1(cell) + (cell is a layer-1 tip ? h2(cell) : 0).
+     The floor between layer 1's features keeps its height and only the
+     surface B would have touched is skinned again, so the contact area can
+     only shrink. The result is still ONE closed shell - nothing about the
+     piece's closure changes, and no flag is needed for it.
+
+     Why one pass and not two calls: a skinned face is no longer a face.
+     applySkinToFace's second pass over its own output refuses with "face
+     boundary is not a single loop" (the tips are hundreds of separate rib
+     tops, not one rectangle), and that refusal is correct - measured, not
+     assumed. Composition happens in the height field, where both patterns
+     are still plans. */
+  function mergeBreaks(a, b, eps) {
+    var all = a.concat(b);
+    all.sort(function (x, y) { return x - y; });
+    var out = [];
+    for (var i = 0; i < all.length; i++) if (!out.length || all[i] - out[out.length - 1] > eps) out.push(all[i]);
+    return out;
+  }
+  /* Layer 1's own contact area, measured over the MERGED grid so it is the
+     same measurement the composite's tipArea is - what the contact would
+     have been with layer 1 alone. */
+  function layer1TipArea(fr, breaksU, breaksV, cells1, h1max) {
+    if (typeof cells1 !== 'function') return 0;
+    var area = 0;
+    for (var j = 0; j + 1 < breaksV.length; j++) {
+      for (var i = 0; i + 1 < breaksU.length; i++) {
+        var h = cells1(breaksU[i], breaksU[i + 1], breaksV[j], breaksV[j + 1]);
+        var tip = true;
+        for (var k = 0; k < 4; k++) if (Math.abs(h[k] - h1max) > 1e-9) { tip = false; break; }
+        if (tip) area += (breaksU[i + 1] - breaksU[i]) * (breaksV[j + 1] - breaksV[j]);
+      }
+    }
+    return area;
+  }
+
+  function composePlans(plan1, plan2, h1max, eps) {
+    return {
+      breaksU: mergeBreaks(plan1.breaksU, plan2.breaksU, eps),
+      breaksV: mergeBreaks(plan1.breaksV, plan2.breaksV, eps),
+      cellHeights: function (u0, u1, v0, v1) {
+        var a = plan1.cellHeights(u0, u1, v0, v1);
+        for (var k = 0; k < 4; k++) if (Math.abs(a[k] - h1max) > 1e-9) return a;
+        var b = plan2.cellHeights(u0, u1, v0, v1);
+        return [a[0] + b[0], a[1] + b[1], a[2] + b[2], a[3] + b[3]];
+      },
+      margin: plan1.margin, ribsU: plan1.ribsU, ribsV: plan1.ribsV, ridges: plan1.ridges
+    };
+  }
+
+  /* ------------------------------------------- free layer (its own shell) */
+
+  /* A closed box in the face's frame: u0..u1 x v0..v1, h0..h1 along N. */
+  function boxSoup(fr, u0, u1, v0, v1, h0, h1) {
+    function P(u, v, h) {
+      return add(fr.c[0], add(add(scale(fr.U, u), scale(fr.V, v)), scale(fr.N, h)));
+    }
+    var b = [P(u0, v0, h0), P(u1, v0, h0), P(u1, v1, h0), P(u0, v1, h0)];
+    var t = [P(u0, v0, h1), P(u1, v0, h1), P(u1, v1, h1), P(u0, v1, h1)];
+    var out = [], negN = scale(fr.N, -1), k, k1, want;
+    pushOriented(out, b[0], b[1], b[2], negN);
+    pushOriented(out, b[0], b[2], b[3], negN);
+    pushOriented(out, t[0], t[1], t[2], fr.N);
+    pushOriented(out, t[0], t[2], t[3], fr.N);
+    for (k = 0; k < 4; k++) {
+      k1 = (k + 1) % 4;
+      want = cross(sub(b[k1], b[k]), fr.N);
+      pushOriented(out, b[k], b[k1], t[k1], want);
+      pushOriented(out, b[k], t[k1], t[k], want);
+    }
+    return new Float32Array(out);
+  }
+
+  /* The OTHER reading of a double skin: layer 2 as a sheet that rests on
+     layer 1's tips and carries its own relief on top - a second breakaway
+     interface, free-hanging, not fused to the piece. It is its own closed
+     shell, built as a slab and skinned through this same engine, so the
+     piece it joins carries TWO shells and stops being a closed solid. That
+     is not a defect to hide: it is exactly what the non-solid flag is for
+     (docs/NON-SOLID.md), and the caller is handed `nonSolid: true` to say so.
+     Printing note, stated rather than measured: the sheet bridges from tip
+     to tip, so its first layer prints over air. */
+  function freeLayerShell(fr, hRest, basePlane, opts2) {
+    var name = opts2.pattern || 'crosshatch';
+    if (!PATTERNS[name]) return 'free layer: unknown pattern "' + name + '"';
+    var sheet = opts2.sheet == null ? 0.6 : opts2.sheet;
+    var gap = opts2.gap == null ? 0 : opts2.gap;
+    /* The sheet is inset by layer 1's margin by default, which is where
+       layer 1's features stop anyway - so the sheet covers the tips and
+       nothing else. It also keeps the sheet's side walls OUT of the piece's
+       own face planes: flush with them, they join those faces' coplanar
+       groups, and the next face pick then sees two loops where it needs one
+       ("face boundary is not a single loop" - measured on a wrap that put a
+       free layer on +Z and then asked for +X). */
+    var inset = opts2.inset == null ? (opts2.margin || 0) : opts2.inset;
+    if (!(sheet > 0)) return 'free layer: sheet thickness must be positive';
+    if (!(gap >= 0)) return 'free layer: gap must not be negative (it would sink into layer 1)';
+    if (!(inset >= 0)) return 'free layer: inset must not be negative';
+    var u0 = inset, u1 = fr.W - inset, v0 = inset, v1 = fr.D - inset;
+    if (!(u1 - u0 > 1e-6) || !(v1 - v0 > 1e-6)) return 'free layer: inset ' + inset + ' leaves no sheet on a ' + fr.W.toFixed(2) + ' x ' + fr.D.toFixed(2) + ' face';
+    var h0 = hRest + gap, h1 = h0 + sheet;
+    var box = boxSoup(fr, u0, u1, v0, v1, h0, h1);
+    var r = applySkinToFace(box, { dir: fr.N, pattern: name, params: opts2.params, mode: 'raise' });
+    if (!r.ok) return 'free layer: ' + r.reason;
+    return {
+      tris: r.tris,
+      shellTris: (r.tris.length / 9) | 0,
+      pattern: name, params: r.params, describe: r.describe,
+      sheet: sheet, gap: gap, inset: inset,
+      restsOnPlane: basePlane + h0,
+      sheetTopPlane: basePlane + h1,
+      tipsPlane: r.tipsPlane,
+      tipHeight: r.tipHeight,
+      tipArea: r.tipArea,
+      nonSolid: true
+    };
+  }
+
   /* ------------------------------------------------------- apply */
 
   function applySkinToFace(soup, opts) {
@@ -653,28 +1026,64 @@
     if (mode !== 'raise' && mode !== 'recess') { res.reason = 'mode must be raise or recess'; return res; }
     if (!(p.height > 0)) { res.reason = 'height must be positive'; return res; }
     if (!soup || triCount(soup) < 4) { res.reason = 'empty soup'; return res; }
+    /* layer 2: composed onto layer 1's tips (one shell), or free - its own
+       shell resting on them. Two readings of "double skin", both built, and
+       the caller says which; see composePlans and freeLayerShell. */
+    var l2 = opts.layer2 || null;
+    var layered = !!(l2 && l2.pattern !== 'off' && l2.pattern !== false);
+    var l2name = layered ? (l2.pattern || 'crosshatch') : null;
+    if (layered && !PATTERNS[l2name]) { res.reason = 'unknown layer 2 pattern "' + l2name + '"'; return res; }
+    var freeReq = !!(layered && l2.free);
+    if (freeReq && mode !== 'raise') { res.reason = 'a free second layer is raise-only (it rests on layer 1\'s tips)'; return res; }
+    var tol = 1e-4;          /* mm - the seam tolerance, see makeSides */
     var dir = opts.dir || [0, 0, 1];
-    var face = findFace(soup, dir);
-    if (!face) { res.reason = 'no flat face within 30 degrees of the requested direction'; return res; }
+    var face = findFace(soup, dir, opts.plane);
+    if (!face) {
+      res.reason = (typeof opts.plane === 'number')
+        ? 'no flat face on the selected plane (n.p = ' + opts.plane.toFixed(3) + ') within 30 degrees of its normal'
+        : 'no flat face within 30 degrees of the requested direction';
+      return res;
+    }
     var fr = rectFrame(soup, face);
     if (typeof fr === 'string') { res.reason = fr; return res; }
 
     var faceSet = new Set(face.tris);
-    var sides = makeSides(fr);
-    var tol = 1e-4;
+    var sides = makeSides(fr, tol);
     registerWallVertices(soup, faceSet, sides, tol);
 
     var relief = [];
     var info;
     var shift = mode === 'recess' ? -p.height : 0;
-    if (name === 'ring') {
+    /* layer 2, composed: it rides on layer 1's tips in the SAME pass, so the
+       two are one height field and one shell. Only the grid patterns have a
+       height field to compose; the ring builds its own surface, which is why
+       it can only carry a free layer, not a composed one. */
+    var p2 = null;
+    if (layered && !freeReq) {
+      if (mode !== 'raise') { res.reason = 'a composed second layer is raise-only (it is built on layer 1\'s tips)'; return res; }
+      if (familyOf(name) === 'ring' || familyOf(l2name) === 'ring') {
+        res.reason = 'a composed second layer needs two grid patterns (crosshatch or zigzag); ring has no height field to compose - use a free layer for it';
+        return res;
+      }
+      p2 = withLayer2Defaults(l2name, l2.params);
+      if (!(p2.height > 0)) { res.reason = 'layer 2 height must be positive'; return res; }
+    }
+    if (familyOf(name) === 'ring') {
       if (mode === 'recess') { res.reason = 'ring is raise-only'; return res; }
       info = ringRelief(fr, sides, p, relief);
       if (typeof info === 'string') { res.reason = info; return res; }
     } else {
-      var plan = name === 'crosshatch' ? crosshatchPlan(fr, p, shift) : zigzagPlan(fr, p, shift);
+      var plan = gridPlan(name, fr, p, shift);
       if (typeof plan === 'string') { res.reason = plan; return res; }
+      if (p2) {
+        var plan2 = gridPlan(l2name, fr, p2, 0);
+        if (typeof plan2 === 'string') { res.reason = 'layer 2: ' + plan2; return res; }
+        var cells1 = plan.cellHeights;
+        plan = composePlans(plan, plan2, p.height, tol);
+        plan.layer1Cells = cells1;
+      }
       info = gridRelief(fr, sides, plan.breaksU, plan.breaksV, plan.cellHeights, relief);
+      if (p2) info.layer1TipArea = layer1TipArea(fr, plan.breaksU, plan.breaksV, plan.layer1Cells, p.height);
       info.margin = plan.margin;
       if (plan.ribsU != null) { info.ribsU = plan.ribsU; info.ribsV = plan.ribsV; }
       if (plan.ridges != null) info.ridges = plan.ridges;
@@ -682,9 +1091,20 @@
 
     var out = [];
     var fanned = fanWalls(soup, faceSet, sides, tol, out);
-    for (var i = 0; i < relief.length; i++) out.push(relief[i]);
+    var reliefFanned = fanRelief(relief, sides, tol, out);
 
-    var tipsOffset = mode === 'recess' ? 0 : p.height;
+    /* the composite's own tips, not layer 1's stated height: with a composed
+       layer 2 the highest cell is h1 + h2, and gridRelief measured it. */
+    var tipsOffset = mode === 'recess' ? 0 : (p2 ? info.hmax : p.height);
+    var freeLayer = null;
+    if (freeReq) {
+      freeLayer = freeLayerShell(fr, tipsOffset, face.d, {
+        pattern: l2name, params: l2.params, sheet: l2.sheet, gap: l2.gap, inset: l2.inset,
+        margin: info.margin
+      });
+      if (typeof freeLayer === 'string') { res.reason = freeLayer; return res; }
+      for (var f = 0; f < freeLayer.tris.length; f++) out.push(freeLayer.tris[f]);
+    }
     res.ok = true;
     res.tris = new Float32Array(out);
     res.pattern = name;
@@ -693,12 +1113,166 @@
     res.face = { n: fr.N, d: face.d, corners: fr.c, W: fr.W, D: fr.D, tris: face.tris.length };
     res.basePlane = face.d;
     res.tipsPlane = face.d + tipsOffset;
-    res.tipHeight = p.height;
+    res.tipHeight = p2 ? info.hmax : p.height;
     res.tipArea = info.tipArea;
+    res.shells = 1;
+    res.layers = layered ? 2 : 1;
+    if (p2) {
+      /* The composed contact is the INTERSECTION of the two tip sets, so it
+         can only shrink - but it shrinks by however much layer 2's own tips
+         are sparse, and two patterns whose features line up (a crosshatch on
+         a crosshatch at a harmonic pitch, measured: 182.07 -> 182.07 mm² on
+         a 20 mm cube) leave it exactly where it was and only make the relief
+         taller. Layer 1's own tip area rides on the result next to the
+         composite's so a caller can say which happened instead of implying a
+         reduction that is not there. */
+      res.layer1TipArea = info.layer1TipArea;
+      res.layer2 = { pattern: l2name, params: p2, mode: 'composed',
+                     describe: PATTERNS[l2name].describe(p2),
+                     height: p2.height, tipsPlane: res.tipsPlane, tipArea: info.tipArea,
+                     contactRatio: info.layer1TipArea > 0 ? info.tipArea / info.layer1TipArea : null };
+    }
+    if (freeLayer) {
+      /* the outermost contact surface is now the free layer's tips - that is
+         the plane Seat has to measure to, so it is what tipsPlane reports.
+         Layer 1's own tips stay on the result as layer1TipsPlane. */
+      res.layer1TipsPlane = face.d + tipsOffset;
+      res.layer1TipArea = info.tipArea;
+      res.tipsPlane = freeLayer.tipsPlane;
+      res.tipHeight = freeLayer.tipsPlane - face.d;
+      res.tipArea = freeLayer.tipArea;
+      res.freeLayer = freeLayer;
+      res.layer2 = { pattern: freeLayer.pattern, params: freeLayer.params, mode: 'free',
+                     describe: freeLayer.describe, height: freeLayer.params.height,
+                     tipsPlane: freeLayer.tipsPlane, tipArea: freeLayer.tipArea };
+      res.shells = 2;
+      res.nonSolid = true;
+    }
     res.reliefTris = info.reliefTris;
     res.wallTrisFanned = fanned;
+    res.reliefTrisFanned = reliefFanned;
     res.info = info;
-    res.describe = PATTERNS[name].describe(p) + (mode === 'recess' ? ', recessed' : '');
+    res.describe = PATTERNS[name].describe(p) + (mode === 'recess' ? ', recessed' : '') +
+      (res.layer2 ? (res.layer2.mode === 'free'
+        ? ' + a free layer on its tips (' + res.layer2.describe + ', ' + freeLayer.sheet + ' mm sheet)'
+        : ' + ' + res.layer2.describe + ' on its tips') : '');
+    return res;
+  }
+
+  /* --------------------------------------------------------- wrap */
+
+  /* The six axis faces, in the order the wrap takes them. */
+  var BOX_DIRS = [[0, 0, 1], [0, 0, -1], [1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0]];
+
+  function dirName(d) {
+    for (var a = 0; a < 3; a++) {
+      if (Math.abs(d[a]) > 0.999 && Math.abs(d[(a + 1) % 3]) < 1e-3 && Math.abs(d[(a + 2) % 3]) < 1e-3) {
+        return (d[a] < 0 ? '-' : '+') + 'XYZ'[a];
+      }
+    }
+    return '[' + d.map(function (c) { return (+c).toFixed(3); }).join(', ') + ']';
+  }
+
+  /* Skin SEVERAL faces of one piece in one action - the wrap, in the same
+     sense as Soften's Full wrap ("one click wraps all six faces of a box").
+     Not a curved wrap: every face still has to be a flat rectangle, and a
+     cylinder's side is refused exactly as it was before. See docs/HANDOFF.md,
+     "Skin wrap", for what a curved one would take.
+
+     opts: everything applySkinToFace takes, plus
+       faces            [{ dir, plane? }, ...], or 'box' for the six axis
+                        faces (the default)
+       skipUnskinnable  true: a face with no flat pick, or one whose boundary
+                        is not a rectangle, is left alone and named in
+                        res.skipped. false (the default): it stands the whole
+                        wrap down.
+
+     Faces are skinned one after another on the growing soup - that is the
+     whole implementation. It is only correct because the seam between two
+     skinned faces closes: the second face's relief perimeter is subdivided
+     at the first's points (sideChain / fanRelief). Before that, two adjacent
+     faces of a 20 mm cube left 28 open and 28 non-manifold edges.
+
+     Never a half-wrap: a refusal on a face that was asked for returns the
+     ORIGINAL soup, with the reason and the face that refused. */
+  function applySkinWrap(soup, opts) {
+    opts = opts || {};
+    var res = { ok: false, tris: soup, faces: [], skipped: [] };
+    if (!soup || triCount(soup) < 4) { res.reason = 'empty soup'; return res; }
+    var want = opts.faces;
+    if (!want || want === 'box') want = BOX_DIRS.map(function (d) { return { dir: d }; });
+    if (!want.length) { res.reason = 'no faces asked for'; return res; }
+    var skip = !!opts.skipUnskinnable;
+    var asked = want.length;
+    var cur = soup, i, faces = [], skipped = [], tipArea = 0;
+    /* Every face's plane is resolved up front, on the ORIGINAL soup, and
+       handed to each pick explicitly. Neither raise nor recess moves another
+       face's plane, so these stay true for the whole wrap - and the pick can
+       then never drift onto something an earlier face added: a rib wall
+       parallel to the face, or a free layer standing above it. */
+    var resolved = [];
+    for (i = 0; i < want.length; i++) {
+      var w0 = want[i] || {};
+      var d0 = w0.dir || [0, 0, 1];
+      var nm0 = w0.name || dirName(d0);
+      var plane0 = w0.plane;
+      if (plane0 == null) {
+        var f0 = findFace(soup, d0);
+        if (!f0) {
+          if (skip) { skipped.push({ name: nm0, dir: d0, reason: 'no flat face within 30 degrees' }); continue; }
+          res.reason = 'the ' + nm0 + ' face refused: no flat face within 30 degrees';
+          res.faceRefused = nm0;
+          return res;
+        }
+        plane0 = f0.d;
+      }
+      resolved.push({ dir: d0, plane: plane0, name: nm0 });
+    }
+    want = resolved;
+    for (i = 0; i < want.length; i++) {
+      var req = want[i];
+      var d = req.dir;
+      var nm = req.name;
+      var r = applySkinToFace(cur, {
+        dir: d, plane: req.plane, pattern: opts.pattern, params: opts.params,
+        mode: opts.mode, layer2: opts.layer2
+      });
+      if (!r.ok) {
+        if (skip) { skipped.push({ name: nm, dir: d, reason: r.reason }); continue; }
+        res.reason = 'the ' + nm + ' face refused: ' + r.reason;
+        res.faceRefused = nm;
+        res.faces = faces;
+        return res;                       /* res.tris is still the input soup */
+      }
+      cur = r.tris;
+      tipArea += r.tipArea;
+      faces.push({
+        name: nm, dir: d, basePlane: r.basePlane, tipsPlane: r.tipsPlane,
+        tipHeight: r.tipHeight, tipArea: r.tipArea, reliefTris: r.reliefTris,
+        W: r.face.W, D: r.face.D, layers: r.layers, freeLayer: r.freeLayer || null,
+        describe: r.describe
+      });
+    }
+    res.asked = asked;
+    if (!faces.length) {
+      res.reason = 'no face of this piece can take a skin' +
+        (skipped.length ? ' (' + skipped.map(function (x) { return x.name + ': ' + x.reason; }).join('; ') + ')' : '');
+      res.skipped = skipped;
+      return res;
+    }
+    res.ok = true;
+    res.tris = cur;
+    res.faces = faces;
+    res.skipped = skipped;
+    res.count = faces.length;
+    res.tipArea = tipArea;
+    res.pattern = opts.pattern || 'crosshatch';
+    res.mode = opts.mode || 'raise';
+    res.layers = faces[0].layers;
+    res.shells = 1 + faces.reduce(function (n, f) { return n + (f.freeLayer ? 1 : 0); }, 0);
+    res.nonSolid = res.shells > 1;
+    res.describe = faces[0].describe + ' on ' + faces.length + ' face' + (faces.length === 1 ? '' : 's') +
+      ' (' + faces.map(function (f) { return f.name; }).join(', ') + ')';
     return res;
   }
 
@@ -808,11 +1382,78 @@
     return area;
   }
 
+  /* ------------------------------------ the relief, without a host
+
+     AUDIT (for nso_skin_patch.js, 2026-09-17): the relief IS already built as
+     an independent structure, and pattern generation is NOT welded to the
+     fusion step. crosshatchPlan / zigzagPlan are pure functions of a frame and
+     their parameters - they return a height field, not geometry - and
+     gridRelief / ringRelief read only that frame and its `sides`, never the
+     soup being skinned. Measured, not assumed: the relief triangles of the
+     same 30 x 30 +Z face come out bit-identical on a 30x30x8 block and on a
+     30x30x2 plate (9402 crosshatch / 434 zigzag / 864 ring triangles, every
+     one equal), while the host wall fans differ.
+
+     What that independent structure is NOT is a printable object. Taken on its
+     own the relief is a ZERO-THICKNESS OPEN SHEET: Euler 1, 196 / 116 / 96
+     open edges, bbox height exactly the skin height with nothing below it.
+     gridRelief emits the top surface and the walls BETWEEN cells and stops;
+     the back, and the watertightness, come from the HOST (fanWalls re-emits
+     the rest of its shell, and the host body is the floor). So "export the
+     pattern alone" cannot be a matter of keeping the relief triangles and
+     dropping the others - the thing that comes out has no thickness.
+
+     The path that works is the one freeLayerShell already takes for the free
+     second layer: give the relief A HOST OF ITS OWN and skin that. These two
+     exports are what a caller needs to do it for a host this module never
+     saw - a frame built from numbers instead of from a face's boundary loop,
+     and the height field behind it. They hand out a frame and a plan, never
+     geometry: the caller decides what closes the back. nso_skin_patch.js is
+     the first such caller. */
+
+  /* A frame for a rectangle that is not a face of any soup: rectFrame's
+     output, built from numbers. origin is the c0 corner, U/V the in-plane
+     axes (normalised here; V is squared against U), W/D the spans. */
+  function planeFrame(origin, U, V, W, D) {
+    var u = unit(U);
+    var v = unit(sub(V, scale(u, dot(u, V))));   /* V squared against U */
+    if (len(u) === 0 || len(v) === 0) return 'planeFrame: U and V must be non-zero and not parallel';
+    if (!(W > 1e-6) || !(D > 1e-6)) return 'planeFrame: W and D must be positive';
+    var N = unit(cross(u, v));
+    var c0 = [origin[0], origin[1], origin[2]];
+    return { c: [c0, add(c0, scale(u, W)), add(c0, add(scale(u, W), scale(v, D))), add(c0, scale(v, D))],
+             U: u, V: v, N: N, W: W, D: D };
+  }
+
+  /* The height field a grid pattern is, over `fr`: { breaksU, breaksV,
+     cellHeights(u0,u1,v0,v1) -> [h00,h10,h11,h01], margin, ... } or a reason
+     string. shift is applySkinToFace's own: 0 to raise, -height to recess.
+     `ring` has no height field (ringRelief builds its surface directly) and is
+     refused here by name rather than silently. */
+  function patternPlan(name, params, fr, shift) {
+    if (!PATTERNS[name]) return 'unknown pattern "' + name + '"';
+    if (familyOf(name) === 'ring') return 'ring has no height field - it builds its surface directly (see ringRelief)';
+    if (typeof fr === 'string' || !fr || !(fr.W > 0)) return 'patternPlan needs a frame (see planeFrame)';
+    var p = withDefaults(name, params);
+    if (!(p.height > 0)) return 'height must be positive';
+    var plan = gridPlan(name, fr, p, shift || 0);
+    if (typeof plan === 'string') return plan;
+    plan.params = p;
+    return plan;
+  }
+
   var api = {
     PATTERNS: PATTERNS,
+    familyOf: familyOf,
     withDefaults: withDefaults,
+    LAYER2_DEFAULTS: LAYER2_DEFAULTS,
+    BOX_DIRS: BOX_DIRS,
     findFace: findFace,
+    planeFrame: planeFrame,
+    patternPlan: patternPlan,
     applySkinToFace: applySkinToFace,
+    applySkinWrap: applySkinWrap,
+    withLayer2Defaults: withLayer2Defaults,
     supportExtreme: supportExtreme,
     tipContactArea: tipContactArea
   };

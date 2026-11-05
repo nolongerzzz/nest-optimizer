@@ -35,7 +35,7 @@ const { execFileSync } = require('child_process');
 const NSO_Skin = require('../nso_skin.js');
 const { readSTL, writeSTL } = require('./nso_stl_io.js');
 const samples = require('./nso_skin_samples.js');
-const { withApp, loadSTL, ROOT } = require('./nso_app_harness');
+const { withApp, loadSTL, openFinishMenu, ROOT } = require('./nso_app_harness');
 
 const fx = f => path.join(ROOT, 'fixtures', f);
 let fails = 0;
@@ -95,8 +95,14 @@ function edgeShells(soup) {
 console.log('=== 1. nso_skin.js on the 20 mm cube ===');
 const cube = readSTL(fx('box-20mm.stl'));
 const cubeV = meshValidate(fx('box-20mm.stl')).signed_volume;
+/* Keyed by pattern NAME, and this loop walks every name in PATTERNS - so a new
+   preset lands here rather than being skipped, which is what caught
+   crosshatch-fine the moment it was added. A preset shares its family's
+   formula: the ribs are prismatic either way, so the relief is contact x
+   height whatever the pitch. */
 const expectedVolume = {
   crosshatch: r => cubeV + r.tipArea * r.tipHeight,
+  'crosshatch-fine': r => cubeV + r.tipArea * r.tipHeight,
   zigzag: r => {
     const p = r.params, L = r.face.D - 2 * r.info.margin;
     return cubeV + r.info.ridges * ((p.base + p.tip) / 2 * p.height) * L;
@@ -301,6 +307,7 @@ withApp(async (page, logs) => {
   console.log('\n--- Skin face button on A (crosshatch, toward B) ---');
   await page.evaluate(stage, ids);
   const before = await page.evaluate(relation, ids);
+  await openFinishMenu(page);   // Skin face lives in the Finish tab
   await page.selectOption('#skin-pattern', 'crosshatch');
   await page.click('#btn-skin-face');
   await page.waitForFunction(() => /Skinned|Skin /.test(document.getElementById('status').textContent), null, { timeout: 60000 });

@@ -6,6 +6,9 @@ Usage:
 
 --odd    treat any undirected edge with count != 2 as a failure (open or non-manifold)
 --degen  fail on zero-area triangles
+--non-solid  the piece is intentionally open (docs/NON-SOLID.md): with --odd,
+         only non-manifold edges (count > 2) fail; open edges (count == 1) are
+         reported and allowed. --degen is unaffected.
 Exit 0 if clean under the requested flags, 1 otherwise.
 """
 from __future__ import annotations
@@ -73,6 +76,7 @@ def main():
     ap.add_argument("stl")
     ap.add_argument("--odd", action="store_true")
     ap.add_argument("--degen", action="store_true")
+    ap.add_argument("--non-solid", action="store_true")
     args = ap.parse_args()
     path = Path(args.stl)
     if not path.exists():
@@ -97,8 +101,10 @@ def main():
     print("odd_edges(count!=2)", odd)
     print("degenerate_tris", degen)
     fail = False
-    if args.odd and odd:
-        print("FAIL odd edges")
+    if args.non_solid:
+        print("non_solid yes (open edges allowed)")
+    if args.odd and (multi if args.non_solid else odd):
+        print("FAIL non-manifold edges" if args.non_solid else "FAIL odd edges")
         fail = True
     if args.degen and degen:
         print("FAIL degenerate tris")

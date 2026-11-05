@@ -11,7 +11,9 @@
      2. visibility is on / off / auto, and auto tracks active positioning;
      3. grid-snap is a soft pull during the drag, not a lock;
      4. the grid is invisible to raycasts, and the two controls are
-        independent of one another. */
+        independent of one another.
+   Section 9 pins free movement among neighbours (move-no-magnet): the drag
+   is the grid pull and nothing else - no pull into contact, no wall. */
 
 const path = require('path');
 const { withApp, loadSTL, selectModel, statusOf, ROOT } = require('./nso_app_harness');
@@ -341,7 +343,115 @@ withApp(async (page, logs) => {
   check('ticking the box drives snap', ui && ui.afterChk === true);
   check('the snap box ships unticked', ui && ui.defaultUnchecked);
 
-  console.log('\n=== 9. nothing broke on the way ===');
+  console.log('\n=== 9. free movement among neighbours: no magnet, no wall ===');
+  /* A second box on the plate, the way a load puts it there. Both pieces are
+     then set by applyPlacedXZ, the move primitive, well clear of the edges. */
+  const two = await page.evaluate(async () => {
+    setPlateGridSnap(false);
+    return state.placed.length;
+  });
+  const idB = await loadSTL(page, fx('box-20mm.stl'));
+  await selectModel(page, idB);
+  await page.evaluate(() => { runOptimize(); });
+  await page.waitForFunction((n) => state.placed.length > n, two, { timeout: 30000 });
+  const pair = await page.evaluate(() => {
+    const n = state.placed.length;
+    applyPlacedXZ(state.placed[0], 0, 0);
+    applyPlacedXZ(state.placed[n - 1], 50, 0);
+    const fa = placedFootprint(state.placed[0]);
+    const fb = placedFootprint(state.placed[n - 1]);
+    return { a: 0, b: n - 1, aMaxX: fa.maxx, aMinX: fa.minx, bHalf: 50 - fb.minx };
+  });
+  check('two pieces on the plate', pair.b === 1, pair.b + 1 + ' placed');
+  const gapAfter = (target) => page.evaluate(([b, tx]) => {
+    const p = state.placed[b];
+    resolveDragPose(p, b, p.x, p.z, tx, 0);
+    const fa = placedFootprint(state.placed[0]);
+    const fb = placedFootprint(p);
+    return { x: p.x, gap: fb.minx - fa.maxx,
+             overlaps: poseOverlapsOthers(p, b, p.x, p.z) };
+  }, [pair.b, target]);
+
+  // 5 mm short of A's right wall: the old 12 mm magnet closed this to 0.
+  const at5 = await gapAfter(pair.aMaxX + 5 + pair.bHalf);
+  check('dragged to 5 mm from a neighbour, it stays at 5 mm',
+        Math.abs(at5.gap - 5) < 1e-6, 'gap ' + at5.gap.toFixed(4) + ' mm');
+  const at1 = await gapAfter(pair.aMaxX + 1 + pair.bHalf);
+  check('and at 1 mm it stays at 1 mm - nothing pulls it into contact',
+        Math.abs(at1.gap - 1) < 1e-6, 'gap ' + at1.gap.toFixed(4) + ' mm');
+
+  // From touching on A's right, carried across A in 2 mm steps to its left:
+  // the old wall clamp held it at contact; now every step is the pointer.
+  await gapAfter(pair.aMaxX + pair.bHalf);
+  const start = pair.aMaxX + pair.bHalf;
+  const end = pair.aMinX - pair.bHalf - 5;
+  let worst = 0;
+  let overlapSeen = false;
+  for (let tx = start; tx >= end - 1e-9; tx -= 2) {
+    const r = await gapAfter(tx);
+    worst = Math.max(worst, Math.abs(r.x - tx));
+    if (r.overlaps) overlapSeen = true;
+  }
+  check('carried through a neighbour, every step lands under the pointer',
+        worst < 1e-6, 'worst miss ' + worst.toExponential(2) + ' mm, ' +
+        start.toFixed(1) + ' -> ' + end.toFixed(1));
+  check('  and it really passed through - overlap on the way', overlapSeen);
+  const across = await gapAfter(end);
+  check('a piece dragged across another ends where the pointer is',
+        Math.abs(across.x - end) < 1e-6 && !across.overlaps,
+        'x ' + across.x.toFixed(4) + ' for a pointer at ' + end.toFixed(4));
+  const inside = await gapAfter(10);
+  check('released on top of a neighbour, the overlap stays (shown, not fixed)',
+        Math.abs(inside.x - 10) < 1e-6 && inside.overlaps,
+        'x ' + inside.x.toFixed(4) + ', overlaps ' + inside.overlaps);
+
+  // Snap on: the grid pull is all that acts, even 5 mm from a neighbour.
+  const snapNear = await page.evaluate(([b, tx]) => {
+    setPlateGridSnap(true);
+    const p = state.placed[b];
+    const want = plateGridSnapXZ(tx, 0.7);
+    resolveDragPose(p, b, p.x, p.z, tx, 0.7);
+    const out = { x: p.x, z: p.z, want, raw: tx };
+    setPlateGridSnap(false);
+    return out;
+  }, [pair.b, pair.aMaxX + 5.4 + pair.bHalf]);
+  check('Snap to grid on: still snaps, and only the grid moves it',
+        Math.abs(snapNear.x - snapNear.want.x) < 1e-9 &&
+        Math.abs(snapNear.z - snapNear.want.z) < 1e-9 &&
+        Math.abs(snapNear.x - snapNear.raw) > 1e-6,
+        snapNear.raw.toFixed(3) + ', 0.700 -> ' + snapNear.x.toFixed(3) + ', ' +
+        snapNear.z.toFixed(3));
+
+  // Undo of a drop is one step, as before: a drag ending beside A.
+  const undo = await page.evaluate(([b, tx]) => {
+    const p = state.placed[b];
+    applyPlacedXZ(p, 50, 0);
+    const depth0 = state.undoStack.length;
+    state.moveDragging = true;
+    state.moveIndex = b;
+    state.moveUndoFrom = { index: b, x: p.x, z: p.z, meshY: p.mesh.position.y };
+    resolveDragPose(p, b, p.x, p.z, tx, 0);
+    const dropX = p.x;
+    endMoveDrag();
+    const depth1 = state.undoStack.length;
+    undoLast();
+    return { depth0, depth1, dropX, back: state.placed[b].x,
+             depth2: state.undoStack.length };
+  }, [pair.b, pair.aMaxX + 5 + pair.bHalf]);
+  check('a drop near a neighbour stays where it was let go',
+        Math.abs(undo.dropX - (pair.aMaxX + 5 + pair.bHalf)) < 1e-6,
+        undo.dropX.toFixed(4));
+  check('the drop is one Undo step, and Undo puts it back',
+        undo.depth1 === undo.depth0 + 1 && undo.depth2 === undo.depth0 &&
+        Math.abs(undo.back - 50) < 1e-6,
+        undo.depth0 + ' -> ' + undo.depth1 + ' -> ' + undo.depth2 +
+        ', back at ' + undo.back.toFixed(4));
+  const gone = await page.evaluate(() => ({
+    mag: typeof magnetTowardNeighbors, wall: typeof clampToApproachWalls }));
+  check('the neighbour magnet and the approach wall are gone from the page',
+        gone.mag === 'undefined' && gone.wall === 'undefined', JSON.stringify(gone));
+
+  console.log('\n=== 10. nothing broke on the way ===');
   const errs = logs.filter(l => l.startsWith('[pageerror]'));
   check('no page errors', errs.length === 0, errs.join(' | '));
   const stillPicks = await page.evaluate(() => {

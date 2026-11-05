@@ -272,15 +272,8 @@ withApp(async (page, logs) => {
       /function NSO_seatFlushBitToHull\(hullMesh, bitMesh, opts\)/.test(api.coreArgs), api.coreArgs);
     check('REUSABLE: NSO_Carve.probeTarget builds a frame at an arbitrary point on any surface',
       api.carveProbe && api.carvePlace);
-    /* Upstream asserted NSO_Skin.planeFrame here too. That one arrives with the
-       skin-patch work, which is not in this tree; the seat reuses
-       supportExtreme and nothing else from nso_skin.js, so the finding - no way
-       to aim at a point, and a measurement frame already exists to reuse -
-       stands on this half alone. Reported rather than dropped: skinFrame is
-       still probed and printed. */
     check('REUSABLE: NSO_Skin.supportExtreme measures a surface over a quad footprint',
-      api.skinSupport, 'supportExtreme ' + api.skinSupport + ', planeFrame ' + api.skinFrame
-        + ' (planeFrame comes with the skin-patch work, unused by the seat)');
+      api.skinSupport && api.skinFrame);
   }
 
   console.log('\n=== 6. FINDING: a free orientation does not survive the export, so the shipped');

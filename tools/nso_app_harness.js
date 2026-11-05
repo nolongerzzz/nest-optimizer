@@ -4,12 +4,17 @@
    nothing else about the page is altered.
 
    Usage:  node tools/nso_app_harness.js            (self-check)
-   Import: const { withApp } = require('./nso_app_harness');            */
+   Import: const { withApp } = require('./nso_app_harness');
+   APP_URL=https://nolongerzzz.github.io/nest-wip/  drives that deployment
+   instead of the local tree (the three.js CDN tags are still served
+   locally, so the check stays hermetic).                                  */
 
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { chromium } = require('playwright');
+const LIB = require('./nso_library_dir');
+const gscopeCards = require('./nso_gscope_cards');
 
 /* The sandbox ships a pinned Chromium that may not match this playwright
    build's expected revision, so prefer whatever is actually on disk. */
@@ -58,16 +63,67 @@ function serve() {
   });
 }
 
+/* The sidebar is gone (UI shell): every control lives in a drop-down, and a
+   shut <details> hides its contents from page.click. A drive check asserts
+   what a control DOES, not which drop-down it sits in, so before every
+   Playwright action on a selector the harness opens the drop-downs that hold
+   it, the way a user would - the same walk as openMenuFor below.
+
+   Two things are left alone. The menu whose OWN summary is the target is
+   not pre-opened, so a click on a summary still toggles that menu exactly
+   as before. And a selector querySelector cannot read (Playwright's text=
+   and >> forms) passes straight through. */
+const AUTO_OPEN_ACTIONS = ['click', 'dblclick', 'fill', 'check', 'uncheck', 'setChecked',
+                           'selectOption', 'hover', 'tap', 'type', 'press', 'focus'];
+function openDropdownsHolding(sel) {          // runs in the page
+  let el = null;
+  try { el = document.querySelector(sel); } catch (e) { return; }
+  if (!el) return;
+  const ownSummary = el.closest('summary');
+  for (let n = el.parentElement; n; n = n.parentElement) {
+    if (n.tagName !== 'DETAILS' || n.open) continue;
+    if (ownSummary && ownSummary.parentElement === n) continue;
+    n.open = true;
+  }
+}
+function installAutoOpen(page) {
+  for (const name of AUTO_OPEN_ACTIONS) {
+    const act = page[name].bind(page);
+    page[name] = async function (selector, ...rest) {
+      if (typeof selector === 'string') {
+        try { await page.evaluate(openDropdownsHolding, selector); } catch (e) { /* page busy: act as before */ }
+      }
+      return act(selector, ...rest);
+    };
+  }
+}
+
 /* Boots the app, hands `page` to fn, always tears down. */
 async function withApp(fn, opts) {
   opts = opts || {};
   const srv = await serve();
   const port = srv.address().port;
+  const live = !!(opts.liveLibrary || process.env.NSO_LIBRARY_LIVE === '1');
+  /* A live run is the one run whose page really goes out to the network, so
+     it is the one that must honour an egress proxy when the box has one.
+     Every other run is answered locally and gets no proxy at all. And https
+     ONLY: the app itself is served over plain http from 127.0.0.1, which
+     Playwright's own proxy option would send through the proxy too. */
+  const proxyUrl = live && (process.env.HTTPS_PROXY || process.env.https_proxy);
   const browser = await chromium.launch({
     executablePath: chromiumPath(),
     args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox']
+      .concat(proxyUrl ? ['--proxy-server=https=' + proxyUrl.replace(/^https?:\/\//, '').replace(/\/+$/, '')] : [])
   });
-  const page = await browser.newPage();
+  /* 900 tall, not Playwright's 720. It was chosen when the shell's left
+     column ran into the bottom-left tool strip under about 795 px; since
+     shell v2 that strip is gone (Undo is in the top row, the rest in the
+     column) and the column fits a 720 px window, but every check was
+     written and timed at 900, so it stays. Checks that set their own size
+     are unaffected. */
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  installAutoOpen(page);
+  gscopeCards.install(page);      // and the G-scope card a control lives in (the shell has no sidebar)
   const logs = [];
   page.on('console', m => logs.push('[' + m.type() + '] ' + m.text()));
   page.on('pageerror', e => logs.push('[pageerror] ' + e.message));
@@ -87,22 +143,34 @@ async function withApp(fn, opts) {
     r.fulfill({ status: 200, contentType: 'application/wasm',
                 body: fs.readFileSync(path.join(ROOT, 'vendor', 'manifold', 'manifold.wasm')) }));
 
-  // app-library.js asks the public GitHub contents API for library/*.stl on
-  // boot, so the row list matches what is actually on main. The sandbox has no
-  // outbound network, and a request that fails - or a 404 from an unauthorised
-  // read of a private repo - puts a "Failed to load resource" line in
-  // the console that any suite gating on a clean console sees, at whatever
-  // moment the attempt gives up. Answered from the tree this harness is already
-  // serving: the same directory, the shape the API returns, deterministic.
-  await page.route('https://api.github.com/repos/**/contents/library**', r => {
-    let names = [];
-    try { names = fs.readdirSync(path.join(ROOT, 'library')); } catch (e) { names = []; }
-    r.fulfill({ status: 200, contentType: 'application/json',
-                body: JSON.stringify(names.map(n => ({ name: n, type: 'file' }))) });
-  });
+  /* The Library catalog's rows fetch from nest-library on
+     raw.githubusercontent.com. Answered here from disk, like the CDN above:
+     the nest-library checkout when there is one, else this repo's library/
+     copy for the fixtures kept here (nso_library_dir.catalogFile), else a
+     404 - which the page reports as "Library load failed", exactly as it
+     would a file missing from the live repo. Every request is recorded on
+     page.__libraryServed so a check can prove where its bytes came from.
 
+     opts.liveLibrary (or NSO_LIBRARY_LIVE=1) leaves these requests alone and
+     lets them go to the real repository - tools/nso_library_live_check.js. */
+  page.__libraryServed = [];
+  if (!live) {
+    await page.route(LIB.RAW_BASE + '**', r => {
+      const name = decodeURIComponent(r.request().url().slice(LIB.RAW_BASE.length).split('?')[0]);
+      const file = /^[^/\\]+$/.test(name) ? LIB.catalogFile(name) : null;
+      page.__libraryServed.push({ name, file });
+      if (!file) return r.fulfill({ status: 404, contentType: 'text/plain', body: '404: Not Found' });
+      return r.fulfill({ status: 200, contentType: 'text/plain; charset=utf-8',
+                         headers: { 'access-control-allow-origin': '*' },
+                         body: fs.readFileSync(file) });
+    });
+  }
+
+  // APP_URL (or opts.url) points the same drive at a deployed copy, e.g. the
+  // wip preview site, instead of the local tree. CDN routes still apply.
+  const url = opts.url || process.env.APP_URL || ('http://127.0.0.1:' + port + '/index.html');
   try {
-    await page.goto('http://127.0.0.1:' + port + '/index.html', { waitUntil: 'load' });
+    await page.goto(url, { waitUntil: 'load' });
     // the app is up once its own state object exists and the scene is built
     await page.waitForFunction(() => typeof state !== 'undefined' && state.ready === true,
       null, { timeout: 30000 });
@@ -131,7 +199,57 @@ const statusOf = page => page.evaluate(() => {
   return el ? el.textContent : null;
 });
 
-module.exports = { withApp, loadSTL, selectModel, statusOf, ROOT };
+/* Finish is gone (shell v2): its groups are column buttons of their own -
+   since shell v3 Add, Subtract, Shape, Paint, Surface & edges, Sculpt and
+   Check & repair, with Measure in the row. Only one drop-down is open at a time, so no single
+   menu shows every Finish control any more. The checks don't need one: every
+   action through `page` opens the drop-down holding its target first
+   (installAutoOpen above), and openMenuFor below does the same for a check
+   that needs a panel open before it acts.
+
+   Both are kept, doing nothing, for the checks that still call them. A check
+   that reads where a Finish control sits on screen has to open its menu
+   itself (openMenuFor). */
+async function openFinishMenu(page) { }
+
+async function openFinishSections(page) { }
+
+/* Opens whatever menus a control is buried in: walks up from the element and
+   opens every <details> on the way, which is the idiom the wire checks already
+   use for the Finish menu.
+
+   Needed because every control lives in a drop-down - the top row, the left
+   column, Finish - and a <details> that is shut hides its contents from
+   page.click. (Actions through `page` now do this walk themselves, see
+   installAutoOpen; this stays for checks that need the panel open first.)
+
+   One menu at a time, not all of them: app-join makes .vp-menu an exclusive
+   accordion, so opening every menu would leave exactly one open anyway, and
+   an open panel hangs over the top of the viewport where the paint, brush and
+   measure checks click. Ask for the control you are about to use. */
+async function openMenuFor(page, selector) {
+  await page.evaluate(sel => {
+    const el = document.querySelector(sel);
+    if (!el) throw new Error('openMenuFor: no ' + sel);
+    for (let n = el; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true;
+  }, selector);
+  await page.waitForFunction(sel => {
+    const el = document.querySelector(sel);
+    if (!el) return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  }, selector, { timeout: 5000 });
+}
+
+/* Shuts the bar's menus again, for a check that needs the canvas clear. */
+async function closeTopMenus(page) {
+  await page.evaluate(() => {
+    document.querySelectorAll('.viewport-overlay-topbar details').forEach(d => { d.open = false; });
+  });
+}
+
+module.exports = { withApp, loadSTL, selectModel, statusOf, openFinishMenu, openFinishSections,
+                   openMenuFor, closeTopMenus, ROOT };
 
 if (require.main === module) {
   withApp(async (page, logs) => {

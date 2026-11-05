@@ -12,11 +12,101 @@ Smart build-plate packing for 3D printing.
   - Prusa MK4 / MK3S
   - Creality Ender 3
   - Custom size
-- Drag & drop multiple STL files
+- Drag & drop multiple STL or 3MF files (a 3MF's objects each become a model,
+  placed where the slicer had them)
 - Quantity control per model
-- Resize a piece to a real dimension - pick X, height, Z or the longest edge,
-  type the mm you want, and the uniform factor is solved and applied (or scale
-  by a plain multiplier)
+- **Scale card** reads the piece first: `Ring Ø40.0 outer · Ø36.0 bore · wall
+  2.0 · length 10.0`, `Bar 60.0 L × 20.0 W × 10.0 H`, or the three sizes and,
+  in plain words, why it is neither and what still applies (`its section along
+  X is a U - open at the top - not a closed rectangle, so length, width, height,
+  an even offset and whole-piece scaling apply`), with the build-volume verdict appended
+  (`fits A1 Mini` / `5.0 mm too wide for A1 Mini`). Under it, one compact row
+  per field that applies: **Length / Width / Height** - the piece's own axes
+  as it lies - each inserting or removing material inside one straight run, so
+  walls, floor, holes and lips keep their size; a ring's **Outer Ø** (bore
+  kept), **Bore Ø** (outer kept) and **Wall** (outer kept) - each moves one
+  face, for pipe work - and a rod's **Diameter**; **Offset** (the
+  outside in or out, inner faces following - Fatten / Shrink, folded in) on
+  everything but a ring or rod; **Whole ×**, **Longest** and **Fit to plate**.
+  Every row has a **slider** and previews on the piece - a translucent ghost
+  over it, the piece untouched - until **Set** bakes it (one Undo step).
+  See [docs/SECTION.md](docs/SECTION.md)
+- **In-house slicer** (G-scope, **Slice**): exact layer sections, walls offset
+  by the measured line widths, grid / zigzag infill by density, top and bottom
+  shells, and per-layer overhang / support-need calls - opened as a toolpath
+  G-scope inspects line by line, like an imported `.gcode.3mf`. Validated
+  against real Bambu slices, agreement and disagreement both on record. For
+  reverse-engineering and internal iteration ([docs/SLICER.md](docs/SLICER.md))
+- **Fittings** (Gen+): a slip-on **Cap** for the selected tube (bore = its Ø plus
+  a printed-fit gap, walls and closed end = the tube's own wall, closed end down)
+  and **2-way / 3-way splitters** - a trunk into 2 or 3 branches - each a new
+  piece of its own, not an edit to the selected one
+  ([docs/FITTINGS.md](docs/FITTINGS.md)). **Threaded ends**: a male or female
+  thread on a sleeve that takes the selected tube, threaded nipples, couplers,
+  adapters, plugs and screw caps, and male / female ends on the splitter's runs
+  (G, NPT and metric; [docs/THREADS.md](docs/THREADS.md)). Pick a fitting from
+  picture tiles, move a slider for every number, watch a **live translucent
+  preview** on the plate (the splitter's built on the boolean kernel as you
+  drag), then **Add to plate**
+- **Fasteners** (Gen+): a threaded **rod**, a **bolt** (hex or socket head), a
+  **nut** and a bolt + nut set, M2 to M30 (coarse and fine) or G pipe sizes or
+  a typed Ø and pitch. Pick one from picture tiles, move a slider for every
+  number (Ø, pitch, length, fit, nut thickness) against a **live translucent
+  preview** on the plate, then **Add to plate**. The nut's bore is the bolt's
+  thread plus a 0.2 mm fit, so the pair turns; every piece is a closed,
+  wound-outward mesh built directly (no boolean), measured by rays in
+  `npm run thread:test` ([docs/THREADS.md](docs/THREADS.md))
+- **Threaded holes** (Subtract > Punch > **Thread**): the Punch card cuts a
+  *tapped* hole - M2 to M30, G or NPT (tapered), right or left hand, through or
+  blind - alone, in a grid or on a circle, sized to take the bolt Fasteners makes
+  ([docs/THREADS.md](docs/THREADS.md))
+- **Picture** (Gen+): a photo or a scan becomes a relief slab - a flat base with
+  a dense relief on top, heights from the picture (auto-contrast, 2 / 4 / 8 / 16
+  levels or smooth, an exact box-filter resample at the Detail you set). Closed
+  and checked, it prints as it is (a relief or a lithophane) and is dense enough
+  to Brush, Smooth, Cut and export like any other piece. A live triangle count,
+  and a 400k budget that refuses by name with the Detail that would fit
+  ([docs/RELIEF.md](docs/RELIEF.md))
+- **Wrap** (Surface & edges): lay **one** feature - a ball, spike or pyramid, bump, dent
+  or line - over a face as many times as the spacing asks: a flat face, a
+  **cylinder**'s side, a **tube**'s bore, a **sphere** or dome, or a **contoured**
+  face. Height, depth, spacing (or density per cm²), size, layout (grid / stagger /
+  hex / diamond) and rotation are numbers; there is a skin for every design on
+  the two plates it was built from (Soft Spikes, Ribbed and Medium Point rollers,
+  the spiked dome, the massage balls, the pads, the spikefoot). The face is
+  replaced by a new patch that meets the old mesh rim corner for corner - no
+  boolean - and one Undo puts it back. Samples in `fixtures/surftex/`
+  ([docs/SURFTEX.md](docs/SURFTEX.md))
+- **Mold** (Gen+): a two-piece interlocking mold from the selected piece, to print
+  and cast silicone in. Slide and tilt the parting blade (the Cut card's slider,
+  number and dial); the faces that would lock a half are tinted and counted
+  ("N mm² would lock" - a warning). Generate puts two closed, manifold pieces on
+  the plate beside the original, parting face up: the block around the piece
+  with the piece taken out, split so the faces mate exactly, four cone keys and
+  sockets with a 0.2 mm fit gap, a Ø8 sprue to the highest point and a Ø3 vent.
+  Click the piece to move the pour point. One Undo removes both
+  ([docs/MOLD.md](docs/MOLD.md))
+- **Text** (its own button in the left column, between Shape and Paint): type
+  a word, pick a font (Sans, Serif, Mono, Heavy, Script - or load a font file),
+  set the capital-letter height and the depth, click a face. A live ghost shows
+  the engraving, its floor following a curved face so it is one depth all over
+  a cylinder or a dome; drag it to move it, the arrows nudge it. STAMP is one
+  boolean and one Undo. A text that runs off the face, or would leave less than
+  two nozzle widths of wall, is refused in words with the depth that would fit
+  Switch the card to **Remove** and click the floor of an engraved letter to fill
+  the word back flush with its face (flat or curved), one Undo
+  ([docs/TEXT.md](docs/TEXT.md))
+- **New stock**: a correctly-sized blank to start from, before Carve, Hollow,
+  Cut or anything else that begins with a blank block - sphere, box, cylinder,
+  cone, tube, torus, capsule or ellipsoid, sized from the target piece by a
+  Pappus thin-shell estimate plus a tunable waste margin, and refused outright
+  if the target cannot physically exist on the current plate. Every shape in
+  that list solves its defining measurement in closed form, exactly; the ones
+  that cannot - a rounded block, a superellipsoid, anything swept or
+  latticed - are audited and deferred rather than approximated
+  ([docs/STOCK.md](docs/STOCK.md)). One of each ships in the Library under
+  **Stock Blanks**, all eight sized from one target so picking between them is
+  picking a shape and nothing else.
 - Auto-orient for lower support needs
 - Auto-nest with optional 45°/90° rotations
 - Adjustable gap between models
@@ -25,9 +115,115 @@ Smart build-plate packing for 3D printing.
   or switch to Edge and click one edge for its length. Corners and edges snap, the
   number is drawn on the piece, and it follows the piece when you move it.
   See [docs/MEASURE.md](docs/MEASURE.md).
+- **Pottery Wheel**: throw a vessel on an axis - a centred ball sized by
+  Pappus's centroid theorem, one opening push, drag-shaped pulls at any
+  height, and a base trim, with a live clay budget and the nozzle-safety wall
+  floor enforced on every update ([docs/POTTERY-WHEEL.md](docs/POTTERY-WHEEL.md))
+- **Build-volume warning**: a live check against the selected printer's bed
+  and build height, per-printer profiles any tool can query
+  ([docs/BUILD-VOLUME.md](docs/BUILD-VOLUME.md))
 - Export positioned models as STL (ready to drop into Bambu Studio / Orca / PrusaSlicer)
-- Export the plate as a Bambu Studio `.3mf` project with cooling settings baked in,
-  chosen from a small table of named cooling profiles
+- Or pick **Format: 3MF** in the Export card and the same two buttons write a
+  Bambu Studio `.3mf` project with cooling settings baked in, chosen from a small
+  table of named cooling profiles - the whole plate, or the selected piece alone
+- **Save and reopen a plate.** A 3MF NSO writes also carries the working scene -
+  every piece's position and pose, the position and plate locks, the gap a pair
+  was seated at, the skin pattern that made a relief, the painted faces and the
+  non-solid flags. Drop that file back in and the plate comes back as you left
+  it, not just the shapes. Files from Bambu Studio or MakerWorld have no such
+  block and import as plain geometry, exactly as before.
+  See [docs/SCENE-3MF.md](docs/SCENE-3MF.md).
+- **To plate** (Move menu, beside the Vertical box) puts a piece back down on
+  the bed in one press, whatever put it in the air - a Seat that stacked it 20
+  mm up, a lift, a target since moved or deleted. It reads the piece's own box,
+  so the lowest point of it lands on the bed from any pose; where the Vertical
+  slider and arrows only write the lift and rebuild the piece's rotation from
+  the plate record, this keeps the rotation and only moves it down. Its place on
+  the plate is untouched and one Undo puts it back.
+- **Cut** (its own card in the left column) cuts a piece to length. Opening
+  the card arms it; a click on a piece drops the blade where the click landed,
+  square across the piece's longest dimension as it lies (a tipped piece too).
+  The slider, **←** / **→** and a drag on the blade move it along its own
+  travel axis, the same distance per pixel at every angle; the **mitre wheel**
+  (optional) turns the cut's heading to any degree while the piece stays put
+  (the blade turns about where it crossed the piece's centre line, and at 90°
+  it travels across the piece's width), and the **−** / **+** under it step it
+  1° a press (Shift 0.1°, Alt 5°; hold to repeat).
+  **Cut** is a clean split: the two halves meet exactly at the plane and add
+  back to the original - "4 | 4", no kerf. One Undo puts it back.
+  **Sized blade** (the Blade row under the slider) swaps the plane for a box -
+  **Width**, **Depth**, **Kerf** - that takes out only its own volume: cut
+  *between* things without touching the rest of the blade's path, or notch
+  *into* a face without going through. With **Single strand** it takes only the
+  strand under the click (one turn of a spiral of cord, not the whole spiral).
+  **Notch** fits the blade to that strand and cuts a nick in from its edge, of
+  the **Notch width** and **Notch depth** you set. Click the face to put either
+  there; it goes in against that face. Each size is a slider with a number box,
+  and **Rotate piece** shows the rotate rings so the piece can be turned while
+  Cut stays open. A sized cut that goes right through something (a finger)
+  separates it into pieces, and mitre and bevel turn the blade in place. See [docs/CUT-BLADE.md](docs/CUT-BLADE.md).
+  **Whole plate** (the Blade row's fourth button) is one level blade across the
+  *plate*, on a **Height** slider: **Cut** cuts every piece it crosses at that
+  height, at once, and one Undo puts the plate back. **Keep above** drops what is
+  under the blade and sets the rest back on the plate, so every piece comes out
+  shorter by the same amount (shorten a shared pillar once, to print-test faster);
+  **Keep below** drops the top. A piece the blade does not clear by 1 mm at both
+  ends (lower than it, or lifted past it) is left as it is, and named. Nothing is
+  cut unless every piece the blade crosses can be - a piece that will not close
+  or carries paint stops the press with the plate untouched. See
+  [docs/CUT-PLATE.md](docs/CUT-PLATE.md).
+- **Crop** (its own card, under Cut) takes a middle section out of a piece: set
+  the box by two distances along the cut axis (or tick **Box** and drag it on
+  the piece), press Crop, and the slab inside the box is removed, the far part
+  slides back by the box length, and the joint is sealed into one closed piece.
+  Stage 1 of two: no sideways alignment yet. See [docs/CROP.md](docs/CROP.md).
+- **Triple join** (Join card) joins three pieces in one press: pick A, B and C,
+  choose a **vertical stack** or a **horizontal sequence**, and each of the two
+  junctions (A-B, B-C) gets Center lock then Seat (support) at **its own gap**.
+  Both gaps span the Seat slider's full range - a real air gap at -0.18, zero
+  for touching, up to +0.05 for a solid welded penetration - and they are
+  independent, so a test gap at one seam and a weld at the other is one
+  operation rather than two passes with the slider moved in between. It adds no
+  positioning math of its own: the poses it leaves are bit-for-bit the poses the
+  Center lock and Seat buttons leave by hand, and Undo is the same four steps.
+  See [docs/JOIN-TRIPLE.md](docs/JOIN-TRIPLE.md).
+- **Lock position** on a placed piece: a locked piece refuses drag, the nudge
+  arrows, the vertical controls, To plate and the pose buttons, so a stray click cannot move it
+  once Seat has put it where it belongs. Seat, Center, Align and Skin still
+  work on it. Shown by a teal outline and a `locked` tag in the list. Any
+  number of pieces can be locked at once - the flag is one per piece - and the
+  pieces you did not lock stay selectable, draggable and nestable around them.
+  **Optimize plate** packs the free pieces around the locked ones, which keep
+  the exact pose and mesh they had.
+- **Lock plate** holds the whole current arrangement - every piece's position
+  relative to every other - in one action. It refuses the same moves on every
+  piece, plus a repack. It is a separate flag, not a shortcut for locking each
+  piece: it writes no per-piece lock, so unlocking the plate gives back exactly
+  the piece locks you had set.
+- **Check piece** runs the canonical mesh checker on the selected piece and
+  paints what it finds **on the mesh**, instead of only reporting numbers: red
+  lines along open edges, orange along non-manifold edges, red patches on the
+  triangles of every self-intersecting (piercing) pair, and violet on every
+  face whose wall or gap measures under the 0.42 mm nozzle floor - both sides
+  of the thin wall, so it reads as a wall and not as a skin. The status line
+  carries the verdict and the counts, including the two it counts but cannot
+  usefully paint (inconsistent winding, degenerate triangles).
+  - It is the same checker the tools use (`tools/mesh_validate.py`), not a
+    second opinion: the numbers are held to it on every fixture in the repo.
+  - On demand, and a snapshot. Press again to clear; a bake that changes the
+    piece clears it and says so. Moving, rotating or seating the piece keeps
+    it - the marks travel with the geometry.
+  - A piece flagged **Non-solid** still gets its open edges drawn - you still
+    want to see where it is open - they just stop counting against it. See
+    `docs/DEFECT-OVERLAY.md`
+  - Every finding on the **Findings** card names the fix that fits it, on its
+    own button, and runs it on that finding only: **CAP** a flat hole, **PATCH**
+    a curved one (a surface that continues the curvature round it, welded at the
+    rim), **BRIDGE** two openings or two faces facing each other across a gap,
+    **REPAIR** doubled edges, **THICKEN OUT** a thin wall with the mm filled in.
+    The card re-scans after each, **Fix all** runs them in order, each is one
+    Undo. **Add > Patch** does the same by hovering and clicking a hole. See
+    `docs/PATCH.md`.
 - **Carve** is a local carving tool - a handheld rotary tool, not the Cutter's
   full-plane Split. Pick a blade profile, arm it, then click a face, an **edge**
   or a **corner** of a piece: the blade is aimed along the outward bisector of
@@ -50,14 +246,189 @@ Smart build-plate packing for 3D printing.
   of a support block, and **Seat flush** with gap 0 rests the part on the
   relief's tips - never on its base plane. Print-ready two-shell samples in
   `fixtures/skin-samples/`; see `docs/HANDOFF.md`, "Contact skin on a face"
+  - **Skin wrap** puts the same relief on every flat rectangular face at once
+    (all six faces of a box), leaving painted faces alone and naming them.
+    Still flat faces only: a curved face is refused, as it always was.
+  - **Layer 2** adds a second pattern on the first one's tips. Composed (the
+    default) it stays one closed shell and cuts the contact to the two
+    patterns' overlap - a zigzag second layer takes a crosshatch from 182 to
+    52 mm², a second crosshatch mostly just makes the relief taller, and the
+    status line prints both numbers so you can tell which happened. With
+    **Free** on, layer 2 becomes its own free-hanging sheet resting on those
+    tips - a second breakaway interface - and the piece is flagged non-solid,
+    because it now carries two shells. See `docs/HANDOFF.md`, "Skin wrap +
+    the double skin"
+  - **Skin patch** bakes the relief as its own printable piece instead of onto
+    a face - a 30 x 30 mm coupon you can test on its own. `bordered` is a
+    washer: the pattern inside a solid rim that takes the handling. `loose` is
+    the pattern's features alone, no rim and no backing plate. `sandwich` is
+    double-sided - the pattern facing outward on BOTH faces with no floor
+    between them, which is the piece to use when the coupon goes *between* two
+    parts (a bordered washer would present its solid floor to one of them and
+    weld on area alone). All of them are in the **Library** tab, ready to load.
+  - **Oversized washer** (the checkbox under Seat here) is for the case those
+    patches are built for and the seat could not express: a washer or shim
+    *wider* than the piece it sits on, in deliberate close contact. Center lock
+    puts it in XZ, a typed mm field says how far off the target it sits - the
+    coupon sign convention, and past the slider's own +0.05 end if you want a
+    squeeze - and Seat (support) places it through the measured-clearance solve
+    instead of the corner-ray fit, which refuses any overhanging piece with
+    "corner N missed hull along punch axis". The status line reports the true
+    minimum surface-to-surface distance, the overhang in X and Z and the
+    corner-ray verdict it stood down on, the way the cut readout does:
+    reported, not blocked. Off by default, and off it changes nothing.
+    See [docs/OVERSIZED-WASHER.md](docs/OVERSIZED-WASHER.md)
+  - **crosshatch-fine** is the same lattice at a 0.84 mm pitch instead of 1.2 -
+    1.43x the ribs, leaving a 0.42 mm channel, which is exactly one extrusion
+    line at a 0.4 nozzle. **0.4 nozzle only**: at a 0.6 nozzle one line is
+    0.63 mm and that channel fuses, which is also why the 1.2 mm default stays
+    the default. Tighter than 0.84 is not a tuning question - the channel goes
+    under one line and the slicer fills it in. The measurements, including why
+    the canonical mesh checker cannot see this and what does, are in
+    `docs/SKIN-CROSSHATCH-PITCH.md`
+  - **Trace a raster into flat printed lines** - **Surface -> Trace raster**, or
+    the command line - for the case the reliefs above cannot do: a real printed
+    line's section. Pick any picture the browser can open (PNG, JPEG, WebP) and
+    the traced lines are added as a NEW piece, flagged Non-solid because every
+    wall in it is one 0.42 mm extrusion line. Three traced pieces ship in the
+    Library under **Traced Lines**. On the command line,
+    `node tools/nso_raster_lines_cli.js pattern.png out.stl --size 30` takes a
+    black-and-white picture of a toolpath, vectorises the lines and extrudes
+    each one flat and thin - 0.3 mm tall and 0.42 mm wide by default, the
+    measured Bambu line, both parameters - into a watertight STL you can drop
+    straight back in. Why it exists, in one number: two stacked, 90°-crossed
+    copies of the shipped sawtooth relief bond over 0.5040 mm² at every
+    crossing, because a standing ridge meets the interface with its 1.20 mm
+    base; two traced flat layers bond over 0.1764 mm², in 225 isolated dots
+    with no weld anywhere. The reference raster is drawn at 45° to the canvas,
+    where a slicer prints it, and the orientation is measured off the shipped
+    mesh rather than assumed (`npm run raster:angle`).
+    See [docs/RASTER-LINES.md](docs/RASTER-LINES.md)
+  - **The crosshatch, as two one-direction layers** (a module, not a button yet).
+    The relief above is a lattice that runs ribs *both* ways in one layer, which
+    is right against a flat mating face and wrong when it is stacked: turn a
+    copy 90° across it and the upper copy's underside is the same lattice as
+    the tips beneath it, so **519.75 mm² - the entire tip area - welds in one
+    patch**, and no other angle fixes it either (the best is still
+    248 mm² in patches millimetres long). `nso_crosshatch.js` builds the same
+    pattern the way a printer does - one direction per layer, two layers, the
+    second crossing the first - at the same 1.2 mm pitch and 0.42 mm rib:
+    **110.25 mm² in 625 isolated crossings**, every one exactly 0.1764 mm², none
+    wider than one line's diagonal. Resizing it **re-tiles** rather than scales:
+    whole repeats are added or removed and the pitch, the rib and the channel
+    stay bit-identical, so every line the smaller pattern had is in the same
+    place in the larger one. See [docs/CROSSHATCH.md](docs/CROSSHATCH.md)
+- **Delete painted** removes the geometry under the paint, rather than only
+  excluding it from bakes. **Paint Selected**, click the face, then Delete:
+  **Face** cuts that face out and leaves the rim open, **Face+seal** cuts it
+  out and lets Repair close the rim again, and **Shell** takes the whole body
+  that face belongs to - which is how a loose blob or a second shell a boolean
+  left behind goes in one click. What is pink is exactly what goes, measured
+  against the app's own highlight on every fixture.
+  - It refuses and leaves the piece untouched if the cut would empty the mesh,
+    split it into loose bodies, leave it crossing itself, or - with Face+seal -
+    if the rim cannot be closed safely. The status says which and with what
+    numbers, and one Undo puts the geometry and the paint back together.
+  - **Paint Excluded** still means hands off, here as everywhere else: a target
+    that is also painted excluded stands the delete down. See
+    `docs/PAINT-DELETE.md`
+- **Photo set** checks a photogrammetry capture against the capture contract
+  *before* any reconstruction time is spent on it. Drop the whole shoot in and
+  it grades every clause it can: the 93-frame shot list and its six passes,
+  duplicate frames, and the fixed-optics rules off EXIF - one focal length, one
+  lens (it catches a phone flipping to its ultra-wide), fixed aperture, ISO,
+  shutter against the hand-hold limit, no flash, no HDR / portrait / night
+  mode, one frame size, one camera body, one continuous session - plus a focus
+  outlier statistic and a subject-framing estimate measured off the pixels.
+  - **It is explicit about what it cannot know.** Eleven clauses are ticks you
+    confirm, not checks it runs, because no amount of image analysis settles
+    them: diffuse static lighting above all - a shadow fixed to the object and
+    one fixed to the camera look identical in any single frame - and the scale
+    reference, whose *length* is knowledge you have and the photograph does
+    not. An unticked box blocks "ready" exactly as hard as a failure. A missing
+    EXIF tag reads `NO DATA`, never `PASS`.
+  - **It reconstructs nothing.** No COLMAP, no Meshroom, no hosted API, no
+    network call at all - the photos never leave the browser. The five
+    post-reconstruction gates from the contract are listed unanswered rather
+    than quietly omitted. It ends at "this set is worth a reconstruction's
+    time". See [docs/PHOTOGRAMMETRY-ONRAMP.md](docs/PHOTOGRAMMETRY-ONRAMP.md)
+    and the contract it implements,
+    [docs/PHOTOGRAMMETRY-CAPTURE.md](docs/PHOTOGRAMMETRY-CAPTURE.md).
+- **G-scope** (the G🔬 button in the viewport's bottom-left rail - the one
+  G-code tool) opens the plate, or a file, in its own inspector instead of onto
+  the plate, and hands a selection back out. It takes an **STL**, a **3MF** or
+  an already-sliced **`.gcode.3mf`**, and which route a 3MF takes is decided by
+  what is inside it, never by its name. Importing a sliced project anywhere in
+  the app lands here and adds nothing to the plate.
+  - **Pick a line** isolates one extrusion move at a time (click, Shift-click,
+    arrow keys); a legend row's **only** isolates one feature; **Select shown**
+    makes what is on screen the selection. **Clear from view** hides a piece or
+    lines - view only, the plate is never touched.
+  - A **layer-range slider** on the viewport's right edge sets the lower and
+    upper Z drawn: one layer, a chunk, or everything.
+  - **Crop out band** removes the slider's Z band and rejoins the rest through
+    the Crop tool: a plate piece in place, or a slice's selection as a new
+    piece.
+  - **Supports:** *Show overhangs* marks every region auto-aim's detection
+    finds on the plate pieces, red where nothing holds it up. Click a marker to
+    generate a straight strut, a tree or a gecko-hand tree exactly there; click
+    a support to change its style or size, or remove it. Each is one Undo. See
+    [docs/GCODE-SUPPORTS.md](docs/GCODE-SUPPORTS.md).
+  - A sliced project draws as its toolpath, one colour per `; FEATURE:` group
+    the slicer named, with the legend built from the groups the file actually
+    has. Click a row to isolate that feature.
+  - **Two ways to select.** Drop a **capture box** on the model and drag it:
+    the blue centre dot moves it, a side resizes the footprint, and the small
+    orange dot on top sets how *thick* it is - a separate control from the
+    footprint, so you can reach across the plate without dragging in twenty
+    layers you did not want. Or take a **whole layer** at one printing height,
+    every feature at that height included.
+  - **Two ways out, and they write the same geometry.** *Export to plate*
+    closes the microscope and drops the selection into the main viewport as a
+    standalone piece with Undo wired; *Export as STL* downloads just the
+    selection.
+  - A plain STL or 3MF is not sliced, so it has no layers and no features: it
+    draws as one whole part per build object (an STL is always exactly one),
+    the capture box selects whole parts, and the layer control is **disabled
+    with the reason on screen** rather than inventing a layer height the file
+    never stated. See [docs/GCODE-MICROSCOPE.md](docs/GCODE-MICROSCOPE.md).
+
+## Where things are (the shell)
+
+- **Top row**, left to right: Import, Measure (Two points / Edge), Move,
+  Rotate, Tip, Align, Gen+ (Wheel, Stock, Fittings, Picture, Mold, Photo), Lock position,
+  Lock plate; at the right Undo, Remove and Export, with **Clear plate**
+  under Remove and **Optimize** under Export.
+- **Plate & pieces**, pinned open in the top-right corner: the plate picker
+  (and Custom W · D · H), the bed grid (auto / on / off) and Snap to grid,
+  the pieces list and Clone. Always visible, never a drop-down.
+- **Left column**: G-scope, Scale, Cut, Crop, Join (Join, A-B-C), Seat,
+  Supports, Add, Subtract · Shape, Text, Paint, Surface & edges, Sculpt · Check &
+  repair on its own at the bottom · X (X-ray), 👁 (Watch), ◎ (frame the
+  view) in one row under it.
+- The cards: **Shape** Smooth, Bend, Tube edge (Reducer - with Keep length to cut it into the tube rather than add to it - Roll, Neck), Pull
+  (grab a spot and drag it, with pins; docs/PULL.md), Limb (grab a branch of a
+  tree anywhere along it, then stretch it or bend it; docs/LIMB.md) ·
+  **Text** the text box, Font, Bold, Italic, Font file, Size, Depth, Angle,
+  Mirror, STAMP (docs/TEXT.md) ·
+  **Add** Fill / Densify, Foam, Thicken out / in, Extend, Bridge ·
+  **Subtract** Subtract B from A, Extract bit, Carve, Hollow, Hollow to safe
+  min, Lift (opens G-scope at its Lift row) · **Surface & edges** Soften,
+  Mirror, Skin face / wrap / patch, Trace raster, Texture, **Wrap** (one
+  feature laid over a face; docs/SURFTEX.md) · **Sculpt** the
+  Brush · **Check & repair** Check piece, Cap open faces, Repair, Seal,
+  Non-solid, Solidify.
+- Every drop-down opens at the same spot, right of the column and under the
+  row, one at a time. Supports and the slicer's settings are also G-scope's
+  own rows, as before.
 
 ## How to use
 
 1. Open `index.html` in Safari, Chrome, or Edge (works on iPhone too).
 2. Select your build plate.
-3. Tap / drop one or more STL files.
+3. Tap / drop one or more STL or 3MF files.
 4. Set quantities if needed.
-5. Tap **Optimize Plate**.
+5. Tap **Optimize** (top right, under Export).
 6. Download the result and open it in your slicer.
 
 ## Notes
@@ -68,8 +439,22 @@ Smart build-plate packing for 3D printing.
   overhang-fan settings baked in - see
   [docs/baked-cooling-settings.md](docs/baked-cooling-settings.md), including a
   known limitation around Bambu's "Use Modified Value of Filament Preset" dialog.
-  3MF *import* is still planned for a future iteration.
+  3MF **import** reads geometry - every object in the file, with its transforms
+  applied, becomes a model - and, when the file is one NSO wrote, the scene
+  block that restores the whole plate (`docs/SCENE-3MF.md`). Print settings,
+  materials and colours in the file are still ignored. Tested against files
+  Bambu Studio wrote as well as NSO's own exports - see
+  `docs/baked-cooling-settings.md`, "3MF import".
+- The eye button in the viewport's bottom-left corner turns on a live watch:
+  it logs errors, failed loads and NSO's own status and refusal lines, and
+  after every Undo, bake and tool switch it checks the scene you are looking at
+  against the app's own idea of what is on the plate, flagging any mismatch on
+  the spot. Off by default, and it never changes anything it finds - see
+  [docs/WATCH.md](docs/WATCH.md).
 - The packing algorithm is a solid bottom-left free-rectangle packer with rotation. It will improve over time.
+- The build-volume warning answers **"does it fit the machine"** and nothing
+  else. It is not a printability check - bridging, wall thickness and severed
+  connections are separate concerns with their own checks.
 
 ## Future ideas
 

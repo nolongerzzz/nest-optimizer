@@ -41,6 +41,7 @@ const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { withApp, loadSTL, ROOT } = require('./nso_app_harness');
+const { openJoin } = require('./nso_join_card');
 
 const fx = f => path.join(ROOT, 'fixtures', f);
 let fails = 0;
@@ -123,7 +124,7 @@ const setSlider = (page, value) => page.evaluate(v => {
 }, value);
 const selectRow = (page, id) => page.click(`.model-item[data-edit-id="${id}"]`);
 async function joinAB(page, idA, idB) {
-  await page.click('#btn-join-start');
+  await openJoin(page);
   await page.click('#join-slot-a'); await selectRow(page, idA);
   await page.click('#join-slot-b'); await selectRow(page, idB);
   return page.evaluate(() => ({ session: state.joinSession, a: state.editId, b: state.joinPartnerId }));

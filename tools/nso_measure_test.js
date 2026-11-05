@@ -23,7 +23,7 @@
 const path = require('path');
 const M = require('../app-measure.js');
 const { readSTL } = require('./nso_stl_io');
-const { withApp, loadSTL, selectModel, ROOT } = require('./nso_app_harness');
+const { withApp, loadSTL, selectModel, openMenuFor, ROOT } = require('./nso_app_harness');
 
 const fx = f => path.join(ROOT, 'fixtures', f);
 
@@ -168,7 +168,34 @@ function partA() {
           longest <= span);
   });
 
-  console.log('\n=== A6. the printed form ===');
+  console.log('\n=== A6. the measure colour is nobody else\'s ===');
+  /* A thin line drawn ON a piece has to beat the piece. This gate is source
+     level on purpose: the colours live in six files as constants, and the way
+     this breaks is somebody choosing a new accent without checking - which is
+     exactly how this file's first two colours were picked and had to be
+     changed (cyan onto a cyan piece, then rose onto what turned out to be a
+     rose SELECTED piece). */
+  const fs = require('fs');
+  const src = f => fs.readFileSync(path.join(ROOT, f), 'utf8');
+  const mine = (src('app-measure.js').match(/MEASURE_COLOUR = (0x[0-9a-f]{6})/) || [])[1];
+  check('app-measure.js names one colour constant', !!mine, mine);
+  const TAKEN = [
+    ['app-core.js', /PIECE_COLOR = (0x[0-9a-f]{6})/, 'an unselected piece'],
+    ['app-core.js', /^const SELECT_COLOR = (0x[0-9a-f]{6})/m, 'a SELECTED piece'],
+    ['app-mask.js', /SELECT_COLOR = (0x[0-9a-f]{6})/, 'Paint Selected'],
+    ['app-defects.js', /OPEN_COLOR = (0x[0-9a-f]{6})/, 'open edges'],
+    ['app-defects.js', /NM_COLOR\s*= (0x[0-9a-f]{6})/, 'non-manifold edges'],
+    ['app-defects.js', /THIN_COLOR = (0x[0-9a-f]{6})/, 'thin walls'],
+    ['app-poslock.js', /OUTLINE_COLOR = (0x[0-9a-f]{6})/, 'the position lock'],
+  ];
+  TAKEN.forEach(([file, re, who]) => {
+    const m = (src(file).match(re) || [])[1];
+    check('  not ' + who + ' (' + (m || '?') + ', ' + file + ')', !!m && m !== mine);
+  });
+  check('  not Paint Excluded (0xffdd00, app-mask.js)',
+        /0xffdd00/.test(src('app-mask.js')) && mine !== '0xffdd00');
+
+  console.log('\n=== A7. the printed form ===');
   check('20 mm prints as "20.000 mm"', M.formatMm(20) === '20.000 mm', M.formatMm(20));
   check('a metre-ish figure drops to 2 dp', M.formatMm(123.4567) === '123.46 mm', M.formatMm(123.4567));
   check('sub-millimetre keeps its digits', M.formatMm(0.4) === '0.400 mm', M.formatMm(0.4));
@@ -219,10 +246,10 @@ async function partB() {
 
     const id = await loadSTL(page, fx('box-20mm.stl'));
     await selectModel(page, id);
-    await page.evaluate(() => {
-      const b = document.getElementById('btn-measure');
-      for (let n = b; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true;
-    });
+    // Shell v2: Measure lives in the column's Measure & check menu; open it.
+    await openMenuFor(page, '#btn-measure');
+    check('Measure is reachable in the open Measure & check menu',
+          await page.isVisible('#btn-measure'));
     const box = await boxOf(page, 0);
     console.log('   box-20mm on the plate: ' + box.min.map(f3).join(', ') +
                 '  ->  ' + box.max.map(f3).join(', '));
@@ -230,6 +257,8 @@ async function partB() {
     console.log('\n=== B2. armed, a click measures instead of dragging the piece ===');
     await page.click('#btn-measure');
     check('measure mode is on', await page.evaluate(() => state.measureOn === true));
+    check('and it says so the way the other mode buttons do',
+          await page.getAttribute('#btn-measure', 'aria-pressed') === 'true');
     check('the button says so', (await page.textContent('#btn-measure')).indexOf('Measuring') === 0,
           await page.textContent('#btn-measure'));
 
@@ -379,7 +408,30 @@ async function partB() {
     });
     check('no helper left in the scene', stray === 0, stray + ' at renderOrder 30');
 
-    console.log('\n=== B9. the piece is unchanged - measuring is not a bake ===');
+    console.log('\n=== B9. arming Measure turns the other picking modes off ===');
+    /* Paint (both lists), Carve, Soften and Cap all take a click that lands on
+       a piece, and app-core asks them in a fixed order. Two armed at once does
+       not crash - it makes the later one silently dead - so Measure turns the
+       others off, THROUGH their buttons, so no button is left lit and inert. */
+    for (const [id, name, flag] of [['btn-mask-paint', 'Paint Excluded', 'exclude'],
+                                    ['btn-mask-select', 'Paint Selected', 'select'],
+                                    ['btn-carve', 'Carve', null]]) {
+      await page.click('#' + id);
+      const armed = await page.evaluate(i => (i === 'btn-carve' ? !!state.carveArmed : state.maskPaint), id);
+      check(name + ' arms', flag ? armed === flag : armed === true, String(armed));
+      await page.click('#btn-measure');
+      const after = await page.evaluate(i => ({
+        other: (i === 'btn-carve' ? !!state.carveArmed : state.maskPaint),
+        measure: state.measureOn,
+        pressed: document.getElementById(i).getAttribute('aria-pressed')
+      }), id);
+      check('  Measure takes over and ' + name + ' stands down',
+            !after.other && after.measure === true, JSON.stringify(after));
+      check('  ...and its button is not left lit', after.pressed !== 'true', String(after.pressed));
+      await page.click('#btn-measure');   // back to all-off for the next round
+    }
+
+    console.log('\n=== B10. the piece is unchanged - measuring is not a bake ===');
     const same = await page.evaluate(i => {
       const m = state.models.find(mm => mm.id === i);
       let v = 0;

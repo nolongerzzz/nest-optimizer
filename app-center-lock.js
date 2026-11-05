@@ -138,11 +138,24 @@
 
   /* ---- the move ---- */
 
+  /* Why the last refusal was a refusal, in the words the status line used.
+     run() has always answered true/false, which is all a button needs; a
+     caller that chains it (app-join-triple.js) has to be able to say WHICH
+     step stopped and why, and scraping the status line for that would make
+     the wording load-bearing. Set on every path out of run(), so it can
+     never describe an older failure than the one just reported. */
+  var lastReason = '';
+  function refuse(msg) {
+    lastReason = msg;
+    setStatus(msg, true);
+    return false;
+  }
+
   function run() {
+    lastReason = '';
     var pr = pair();
     if (!pr) {
-      setStatus('Start Join, Pick A and B, then Center lock', true);
-      return false;
+      return refuse('Open JOIN, Pick A and B, then Center lock');
     }
     var mode = getRefMode();
     pr.a.mesh.updateMatrixWorld(true);
@@ -157,14 +170,12 @@
       targetTag = mode === REF_CENTROID ? "A's centroid" : "A's box centre";
     }
     if (!target) {
-      setStatus('Center lock failed - no centroid for A. Try Bounding-box centre', true);
-      return false;
+      return refuse('Center lock failed - no centroid for A. Try Bounding-box centre');
     }
 
     var ref = refPointXZ(pr.b.mesh, mode);
     if (!ref) {
-      setStatus('Center lock failed - no centroid for B. Try Bounding-box centre', true);
-      return false;
+      return refuse('Center lock failed - no centroid for B. Try Bounding-box centre');
     }
 
     var dx = target.x - ref.x;
@@ -205,7 +216,7 @@
 
   function armPick() {
     if (!pair()) {
-      setStatus('Start Join, Pick A and B, then pick a target', true);
+      setStatus('Open JOIN, Pick A and B, then pick a target', true);
       return;
     }
     if (state.centerLockArmed) {
@@ -243,6 +254,21 @@
       var measureBtn = el('btn-measure');
       if (measureBtn) measureBtn.click();
       else state.measureOn = false;
+    }
+    if (typeof window.nsoBrushArmed === 'function' && window.nsoBrushArmed()) {
+      var brushBtn = el('btn-brush');
+      if (brushBtn) brushBtn.click();
+      else if (typeof window.nsoBrushSetArmed === 'function') window.nsoBrushSetArmed(false);
+    }
+    if (typeof window.nsoPullArmed === 'function' && window.nsoPullArmed()) {
+      var pullBtn = el('btn-pull');
+      if (pullBtn) pullBtn.click();
+      else if (typeof window.nsoPullSetArmed === 'function') window.nsoPullSetArmed(false);
+    }
+    if (typeof window.nsoLimbArmed === 'function' && window.nsoLimbArmed()) {
+      var limbBtn = el('btn-limb');
+      if (limbBtn) limbBtn.click();
+      else if (typeof window.nsoLimbSetArmed === 'function') window.nsoLimbSetArmed(false);
     }
     if (state.seatHereArmed) {
       var seatBtn = el('btn-seat-here');
@@ -333,6 +359,7 @@
 
   window.NSO_CenterLock = {
     run: run,
+    lastError: function () { return lastReason; },
     armPick: armPick,
     clearTarget: clearTarget,
     takesClick: takesClick,

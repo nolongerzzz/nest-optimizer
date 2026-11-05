@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Regression test for NSO_weldEpsFor (app-join.js).
+// Regression test for NSO_weldEpsFor (nso_csg.js).
 //
 //   node tools/nso_weld_eps_test.js
 //
@@ -37,9 +37,9 @@ function sliceFn(file, name) {
 const ctx = { Math, Map, Set, console, Float32Array, Float64Array, Int32Array, Uint8Array, isFinite };
 vm.createContext(ctx);
 for (const [f, n] of [
-  ['app-join.js', 'NSO_weldEpsFor'],
-  ['app-join.js', 'NSO_edgeStats'],
-  ['app-finish.js', 'weldSoupVerts'],
+  ['nso_csg.js', 'NSO_weldEpsFor'],
+  ['nso_csg.js', 'NSO_edgeStats'],
+  ['nso_csg.js', 'weldSoupVerts'],
   ['app-sculpt.js', 'NSO_buildAdjacency'],
 ]) vm.runInContext(sliceFn(f, n), ctx, { filename: f + ':' + n });
 const { NSO_weldEpsFor, NSO_edgeStats, weldSoupVerts, NSO_buildAdjacency } = ctx;

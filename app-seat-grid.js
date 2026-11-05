@@ -277,9 +277,13 @@
     if (!group) return null;
     current = { group: group, key: key, mesh: placed.mesh, sourceId: placed.sourceId };
     syncPose();
-    state.modelGroup.add(group);
+    nsoHelpers.attach(state.modelGroup, group, 'seat-grid');
     return group;
   }
+
+  /* No session of its own (it follows the selection and Join): cleared on
+     every teardown, drawn again by the next refresh. */
+  if (typeof nsoHelpers !== 'undefined') nsoHelpers.owner('seat-grid', { clear: clear });
 
   /* ---- what the tests and the rest of the app can ask ---- */
 

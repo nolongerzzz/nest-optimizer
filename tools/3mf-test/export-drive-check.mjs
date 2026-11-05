@@ -7,9 +7,15 @@
  *
  * roundtrip-check.js covers the modules in isolation: the format rules, the
  * archive, the profile table. What it cannot reach is the app itself - the
- * <script> tags, the profile selector, the button wiring, and
- * buildPlacedObjects3MF() turning real packed pieces into 3MF objects. That is
- * all browser, and it needs THREE, so it runs here.
+ * <script> tags, the Format selector that switches both export buttons between
+ * STL and 3MF, the profile selector, the button wiring, and
+ * buildPlacedObjects3MF() / buildActiveModelObject3MF() turning real pieces
+ * into 3MF objects. That is all browser, and it needs THREE, so it runs here.
+ *
+ * Two exports are driven end to end: "Export plate" (every placed piece, one
+ * object each) and "Download selected" (the active model alone), both with
+ * Format = 3MF. Then Format goes back to STL and the plate button is pressed
+ * once more, so the STL route is shown to still be wired.
  *
  * index.html names three (and the manifold kernel) on cdn.jsdelivr.net, which
  * this runner cannot reach; browser-lib serves the copies already in the repo
@@ -61,7 +67,44 @@ async function main() {
   check('NSO3MF is in this build',
     await page.evaluate(() => typeof window.NSO3MF), 'object');
 
-  // --- the selector the user actually sees ---
+  // --- the format choice the user actually sees ---
+  console.log('\n--- the export format selector ---');
+  check('the Format selector offers STL and 3MF',
+    await page.evaluate(() =>
+      Array.from(document.getElementById('export-format').options).map((o) => o.value)),
+    ['stl', '3mf']);
+  check('3MF is selectable (its modules loaded)',
+    await page.evaluate(() =>
+      document.querySelector('#export-format option[value="3mf"]').disabled), false);
+  check('a fresh session defaults to STL',
+    await page.evaluate(() => document.getElementById('export-format').value), 'stl');
+  // The right-click item opens the Export card (ctx-menu, #268), so it keeps
+  // its own words whichever format is chosen.
+  check('with STL selected the buttons say STL',
+    await page.evaluate(() => [
+      document.getElementById('btn-export-model').textContent,
+      document.getElementById('btn-export-stl').textContent,
+      document.getElementById('ctx-export').textContent]),
+    ['Download selected STL', 'Export plate STL', 'Export selected as\u2026']);
+  // export-format moved into the top bar's Export dropdown; unfold it first.
+  await page.evaluate(() => { const e = document.getElementById('export-format'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
+  check('with STL selected the cooling row is hidden',
+    await page.evaluate(() => document.getElementById('cooling-profile-row').hidden), true);
+
+  await page.evaluate(() => { const e = document.getElementById('export-format'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
+  await page.selectOption('#export-format', '3mf');
+  check('switching to 3MF relabels both buttons; the right-click item stays as it was',
+    await page.evaluate(() => [
+      document.getElementById('btn-export-model').textContent,
+      document.getElementById('btn-export-stl').textContent,
+      document.getElementById('ctx-export').textContent]),
+    ['Download selected 3MF', 'Export plate 3MF', 'Export selected as\u2026']);
+  check('switching to 3MF reveals the cooling row',
+    await page.evaluate(() => document.getElementById('cooling-profile-row').hidden), false);
+  check('the choice is remembered for next time',
+    await page.evaluate(() => localStorage.getItem('nso.exportFormat')), '3mf');
+
+  // --- the cooling profile selector ---
   console.log('\n--- the cooling profile selector ---');
   const opts = await page.evaluate(() =>
     Array.from(document.getElementById('cooling-profile').options).map((o) => o.value));
@@ -70,10 +113,18 @@ async function main() {
   check('it defaults to the confirmed profile',
     await page.evaluate(() => document.getElementById('cooling-profile').value),
     Profiles.DEFAULT_PROFILE_ID);
-  check('the 3MF button starts disabled with an empty plate',
-    await page.evaluate(() => document.getElementById('btn-export-3mf').disabled), true);
+  check('the plate button starts disabled with an empty plate',
+    await page.evaluate(() => document.getElementById('btn-export-stl').disabled), true);
 
-  // --- import a fixture through the app's own importer, then pack it ---
+  /* --- put real pieces on the plate, through the app's own paths ---
+     Deliberately NOT via "Optimize plate". runOptimize() throws on this branch
+     before it packs anything: app-core.js reads #opt-orient and #opt-rotate,
+     and neither element exists in index.html (already true at 63c5b00, so it
+     predates the 3MF work). An earlier version of this check pressed Optimize
+     and then asserted `state.placed.length > 0` - which passed for the wrong
+     reason, because handleFiles() already places the imported piece. Importing
+     and cloning reaches the same place honestly and does not rest on a
+     function that is currently broken. */
   console.log('\n--- driving the app ---');
   const stl = Array.from(await readFile(FIXTURE));
   await page.evaluate(async (bytes) => {
@@ -81,23 +132,31 @@ async function main() {
     handleFiles([new File([buf], 'box-20mm.stl', { type: 'model/stl' })]);
   }, stl);
   await page.waitForFunction('state.models.length > 0', null, { timeout: 20000 });
+  check('importing the fixture puts one piece on the plate',
+    await page.evaluate(() => state.placed.length), 1);
 
-  await page.click('#btn-optimize');
-  await page.waitForFunction('state.placed.length > 0', null, { timeout: 20000 });
-  const placed = await page.evaluate(() => state.placed.length);
-  check('a piece is on the plate after Optimize', placed > 0, true);
-  check('the 3MF button is enabled once the plate has pieces',
-    await page.evaluate(() => document.getElementById('btn-export-3mf').disabled), false);
+  // Clone it, so the export has to carry more than one object.
+  await page.evaluate(() => { state.selectedIndex = 0; updateAdjustUI(); });
+  await page.evaluate(() => { const e = document.getElementById('btn-clone'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
+  await page.click('#btn-clone');
+  await page.waitForFunction('state.placed.length === 2', null, { timeout: 20000 });
+  check('cloning gives the plate a second piece',
+    await page.evaluate(() => state.placed.length), 2);
+  check('the plate button is enabled once the plate has pieces',
+    await page.evaluate(() => document.getElementById('btn-export-stl').disabled), false);
 
-  // --- press the real button and catch the real download ---
+  // --- press the real plate button, Format = 3MF, and catch the real download ---
   const outDir = await mkdtemp(join(tmpdir(), 'nso-3mf-drive-'));
+  // btn-export-stl moved into the top bar's Export dropdown; unfold it first.
+  await page.evaluate(() => { const e = document.getElementById('btn-export-stl'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   const [download] = await Promise.all([
     page.waitForEvent('download', { timeout: 30000 }),
-    page.click('#btn-export-3mf'),
+    page.click('#btn-export-stl'),
   ]);
   const file = join(outDir, download.suggestedFilename());
   await download.saveAs(file);
-  check('the download is named .3mf', /\.3mf$/.test(download.suggestedFilename()), true);
+  check('"Export plate" with Format = 3MF downloads a .3mf',
+    /\.3mf$/.test(download.suggestedFilename()), true);
   console.log(`       saved ${file}`);
 
   const status = await page.evaluate(() =>
@@ -106,6 +165,68 @@ async function main() {
 
   // --- the piece the app packed actually made it into the archive ---
   const expectedObjects = await page.evaluate(() => state.placed.length);
+  // The names the app gave the placed pieces, in placement order -- what
+  // buildPlacedObjects3MF() should have written onto each <object>.
+  const placedNames = await page.evaluate(() =>
+    state.placed.map((p, i) => p.name || ('piece_' + (i + 1))));
+
+  // --- "Download selected", Format = 3MF: the active model alone ---
+  console.log('\n--- the selected-model export ---');
+  // The app prompts for a filename; accept its suggestion, as a user pressing
+  // Enter would. Playwright dismisses dialogs by default, which would read as
+  // "Export cancelled".
+  // The clone is the active model at this point (the app strips ".stl" from
+  // names on import, so it is "box-20mm-copy1"); read it rather than assume it.
+  const activeName = await page.evaluate(() => getActiveModel().name);
+  page.once('dialog', (d) => d.accept());
+  // btn-export-model moved into the top bar's Export dropdown; unfold it first.
+  await page.evaluate(() => { const e = document.getElementById('btn-export-model'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
+  const [pieceDownload] = await Promise.all([
+    page.waitForEvent('download', { timeout: 30000 }),
+    page.click('#btn-export-model'),
+  ]);
+  const pieceFile = join(outDir, 'selected-' + pieceDownload.suggestedFilename());
+  await pieceDownload.saveAs(pieceFile);
+  check('"Download selected" with Format = 3MF downloads a .3mf named after the active model',
+    pieceDownload.suggestedFilename(), activeName + '.3mf');
+  console.log(`       saved ${pieceFile}`);
+  const pieceStatus = await page.evaluate(() =>
+    (document.getElementById('status') || {}).textContent || '');
+  check('the app reports the baked profile for the selected model',
+    /cooling profile/.test(pieceStatus), true);
+
+  // --- Format back to STL: the same plate button now writes STL ---
+  console.log('\n--- the STL route is still wired ---');
+  // export-format moved into the top bar's Export dropdown; unfold it first.
+  await page.evaluate(() => { const e = document.getElementById('export-format'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
+  await page.selectOption('#export-format', 'stl');
+  const [stlDownload] = await Promise.all([
+    page.waitForEvent('download', { timeout: 30000 }),
+    page.click('#btn-export-stl'),
+  ]);
+  check('"Export plate" with Format = STL downloads a .stl',
+    /\.stl$/.test(stlDownload.suggestedFilename()), true);
+  const stlFile = join(outDir, stlDownload.suggestedFilename());
+  await stlDownload.saveAs(stlFile);
+  const stlBytes = await readFile(stlFile);
+  // export-format moved into the top bar's Export dropdown; unfold it first.
+  await page.evaluate(() => { const e = document.getElementById('export-format'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
+  check('the STL is binary STL with the plate\'s triangles',
+    stlBytes.length === 84 + 50 * stlBytes.readUInt32LE(80) && stlBytes.readUInt32LE(80) > 0, true);
+
+  // --- the choice survives a reload ---
+  await page.evaluate(() => { const e = document.getElementById('export-format'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
+  await page.selectOption('#export-format', '3mf');
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForFunction('window.state && window.state.ready', null, { timeout: 20000 });
+  check('after a reload the Format selector comes back as 3MF',
+    await page.evaluate(() => document.getElementById('export-format').value), '3mf');
+  check('and the buttons come back labelled 3MF',
+    await page.evaluate(() => [
+      document.getElementById('btn-export-model').textContent,
+      document.getElementById('btn-export-stl').textContent]),
+    ['Download selected 3MF', 'Export plate 3MF']);
+
   check('no uncaught page errors', errors, []);
   await browser.close();
   served.srv.close();
@@ -122,20 +243,27 @@ async function main() {
 
   const names = execFileSync('unzip', ['-Z1', file], { encoding: 'utf8' })
     .trim().split('\n').sort();
-  check('every OPC part is present', names, [
-    '3D/3dmodel.model', 'Metadata/model_settings.config',
-    'Metadata/nso_profile.json', 'Metadata/project_settings.config',
-    '[Content_Types].xml', '_rels/.rels',
-  ].sort());
+  // The Bambu project envelope (docs/BAMBU-PROJECT-EXPORT.md): the template's
+  // parts with one object part per piece, plus NSO's own two. Metadata/
+  // nso_scene.json is the plate's own state (nso-3mf-scene.js); the plate
+  // export always writes it. export:bambu gates the envelope part for part.
+  const tpl = await NSO3MF.loadTemplate();
+  const objectParts = (n) => Array.from({ length: n }, (_, i) => `3D/Objects/object_${i + 1}.model`);
+  const envelope = (n, scene) => tpl.names.filter((x) => !x.startsWith('3D/Objects/'))
+    .concat(objectParts(n), ['Metadata/nso_profile.json'], scene ? ['Metadata/nso_scene.json'] : []).sort();
+  check('every OPC part is present, the template\'s and NSO\'s', names, envelope(expectedObjects, true));
 
   const text = execFileSync('unzip', ['-p', file, NSO3MF.PART_PROJECT_SETTINGS],
     { encoding: 'utf8' });
-  const parsed = Profiles.parseProjectSettings(text);   // throws on shape drift
+  const raw = JSON.parse(text);
   const expected = Profiles.resolveValues(Profiles.DEFAULT_PROFILE_ID);
+  // Studio's filament keys hold a string per filament slot; NSO's value is on
+  // every one of them, so a slot that disagrees reads as "(slots differ)".
+  const cooling = (r) => Object.fromEntries(Object.keys(expected).map((k) => [k,
+    Array.isArray(r[k]) && r[k].length && r[k].every((v) => v === r[k][0]) ? r[k][0] : '(slots differ)']));
+  const parsed = cooling(raw);
 
-  check('exact key set and order survived', Object.keys(parsed), Object.keys(expected));
-  check('only the confirmed cooling keys are in the file',
-    Profiles.validateValues(parsed), []);
+  check('the template\'s key set and order survived', Object.keys(raw), Object.keys(tpl.settings));
 
   for (const key of Object.keys(expected)) {
     check(`  ${key} = ${JSON.stringify(expected[key])}`, parsed[key], expected[key]);
@@ -148,20 +276,52 @@ async function main() {
 
   // A tolerant JSON parser could hide a formatting slip; the raw text cannot.
   const rawMissing = Object.keys(expected).filter((k) =>
-    !text.includes(`    ${JSON.stringify(k)}: [${JSON.stringify(expected[k])}]`));
-  check('raw text carries each key verbatim as "key": ["value"]', rawMissing, []);
+    !text.includes(`    ${JSON.stringify(k)}: [\n` + raw[k].map(() => `        ${JSON.stringify(expected[k])}`).join(',\n') + '\n    ]'));
+  check('raw text carries each key verbatim, a line per filament slot', rawMissing, []);
 
-  // The geometry the app packed is really in there.
-  const model = execFileSync('unzip', ['-p', file, NSO3MF.PART_MODEL], { encoding: 'utf8' });
+  // The geometry the app packed is really in there: each wrapper object points
+  // at its own object part, and the build item places it.
+  function geometry(f, n) {
+    const model = execFileSync('unzip', ['-p', f, NSO3MF.PART_MODEL], { encoding: 'utf8' });
+    const items = [...model.matchAll(/<item objectid="(\d+)"[^>]*transform="([^"]*)"/g)]
+      .map((m) => ({ id: m[1], t: m[2].split(' ').map(Number) }));
+    const paths = Object.fromEntries([...model.matchAll(/<object id="(\d+)"[^>]*>\s*<components>\s*<component p:path="\/([^"]*)"/g)]
+      .map((m) => [m[1], m[2]]));
+    const verts = items.map((it) => {
+      const part = execFileSync('unzip', ['-p', f, paths[it.id]], { encoding: 'utf8' });
+      return [...part.matchAll(/<vertex x="([-\d.e]+)" y="([-\d.e]+)" z="([-\d.e]+)"/g)]
+        .map((m) => m.slice(1).map(Number)).map(([x, y, z]) => [x + it.t[9], y + it.t[10], z + it.t[11]]);
+    });
+    return { model, items, paths, verts, all: verts.flat(), n };
+  }
+  const plate = geometry(file, expectedObjects);
+  const model = plate.model;
   check('an object per packed piece reached the model part',
     (model.match(/<object /g) || []).length, expectedObjects);
-  check('the model part has vertices', (model.match(/<vertex /g) || []).length > 0, true);
-  check('the model part has triangles', (model.match(/<triangle /g) || []).length > 0, true);
+  check('each one is a wrapper on its own object part',
+    Object.values(plate.paths).sort(), objectParts(expectedObjects));
+
+  // Per-object identity, on the file the app itself wrote: a project names
+  // its objects in model_settings.config, and Studio's counter UUIDs keep
+  // them apart. See docs/BAMBU-PROJECT-EXPORT.md.
+  const SUFFIXES = Object.values(NSO3MF.UUID_SUFFIX);
+  check('the production extension is declared',
+    model.includes('xmlns:p="http://schemas.microsoft.com/3dmanufacturing/production/2015/06"'), true);
+  const plateSettings = execFileSync('unzip', ['-p', file, NSO3MF.PART_MODEL_SETTINGS], { encoding: 'utf8' });
+  check('the names are the pieces the app placed',
+    [...plateSettings.matchAll(/<object id="\d+">\s*<metadata key="name" value="([^"]*)"/g)].map((m) => m[1]), placedNames);
+  const modelUuids = [...model.matchAll(/p:UUID="([^"]*)"/g)].map((m) => m[1]);
+  check('object, component, build and item all carry a UUID',
+    modelUuids.length, expectedObjects * 3 + 1);
+  check('object, component and item UUIDs carry Studio\'s fixed suffixes',
+    modelUuids.slice(0, -expectedObjects - 1).concat(modelUuids.slice(-expectedObjects))
+      .filter((u) => !SUFFIXES.some((x) => u.endsWith(x))), []);
+  check('no two UUIDs collide', new Set(modelUuids).size, modelUuids.length);
+  check('the object parts have vertices', plate.all.length > 0, true);
 
   // Plate coordinates, not the packer's plate-centred ones: nothing negative,
   // nothing past the 180 mm A1 Mini plate, and the piece sits on z = 0.
-  const xs = [...model.matchAll(/<vertex x="([-\d.]+)" y="([-\d.]+)" z="([-\d.]+)"/g)]
-    .map((m) => m.slice(1).map(Number));
+  const xs = plate.all;
   check('every vertex is inside the plate in X/Y',
     xs.every(([x, y]) => x >= 0 && x <= 180 && y >= 0 && y <= 180), true);
   check('the piece rests on the plate (min Z = 0)',
@@ -171,6 +331,42 @@ async function main() {
     { encoding: 'utf8' }));
   check('provenance records which profile was baked in',
     prov.cooling_profile, Profiles.DEFAULT_PROFILE_ID);
+
+  // --- the selected-model file, taken apart the same way ---
+  console.log('\n--- the selected-model file ---');
+  try {
+    execFileSync('unzip', ['-tqq', pieceFile], { stdio: 'pipe' });
+    check('selected-model archive passes third-party `unzip -t`', true, true);
+  } catch (err) {
+    check('selected-model archive passes third-party `unzip -t`',
+      String(err.stderr || err.message).trim(), true);
+  }
+  const pieceText = execFileSync('unzip', ['-p', pieceFile, NSO3MF.PART_PROJECT_SETTINGS],
+    { encoding: 'utf8' });
+  const pieceParsed = cooling(JSON.parse(pieceText));
+  check('selected-model export carries the same 14 cooling values, "%" included',
+    Object.keys(expected).map((k) => pieceParsed[k]),
+    Object.keys(expected).map((k) => expected[k]));
+  check('selected-model project_settings.config is byte-identical to the plate export',
+    pieceText, text);
+
+  const piece = geometry(pieceFile, 1);
+  check('selected-model export holds exactly one object',
+    (piece.model.match(/<object /g) || []).length, 1);
+  const pv = piece.all;
+  check('selected-model has vertices', pv.length > 0, true);
+  const pxs = pv.map((v) => v[0]), pys = pv.map((v) => v[1]), pzs = pv.map((v) => v[2]);
+  check('selected-model rests on the plate (min Z = 0)', Math.min(...pzs) < 1e-6, true);
+  check('selected-model is centred on the 180 mm plate in X/Y',
+    [Math.abs((Math.min(...pxs) + Math.max(...pxs)) / 2 - 90) < 1e-3,
+     Math.abs((Math.min(...pys) + Math.max(...pys)) / 2 - 90) < 1e-3], [true, true]);
+  check('selected-model is the 20 mm box',
+    [Math.max(...pxs) - Math.min(...pxs), Math.max(...pys) - Math.min(...pys), Math.max(...pzs)]
+      .map((d) => Math.round(d * 1000) / 1000), [20, 20, 20]);
+  const pieceSettings = execFileSync('unzip', ['-p', pieceFile, NSO3MF.PART_MODEL_SETTINGS],
+    { encoding: 'utf8' });
+  check('selected-model is named after the active model in model_settings.config',
+    pieceSettings.includes('<metadata key="name" value="' + activeName + '"/>'), true);
 
   return check.report();
 }

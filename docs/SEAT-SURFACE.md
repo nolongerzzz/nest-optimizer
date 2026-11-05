@@ -354,6 +354,16 @@ Before measuring, A is settled onto the bed baseline the way `Seat (support)`
 does — and because this seat was aimed at a point on A's surface, the aim
 travels with A by the same delta, since settling only ever moves a piece in y.
 
+**The same seat, without a Join session.** `NSO_seatPieceAt(target, point,
+piece, opts, words)` is this seat with the Join pair taken out: Seat here calls
+it with A and B, and a drop (`app-grab-drop.js`, `docs/GRAB-DROP.md`) calls it
+with the piece it carried and the piece it was let go over. Same plan, same
+gap slider, same paint scope, same refusals and one Undo; `words` names the
+pieces and the verb in the status line (`Dropped onto "plate": seated on the
+face at that point - ...`), and `opts.undoType` names the geometry step when
+the seat turns the piece (`dropSeatReplace`, "Undo: Drop reverted"). It
+refuses a piece onto itself by name. Seat here's own words are unchanged.
+
 ### What it leaves behind, and who else on the canvas it has to agree with
 
 Two threads landed alongside this one, and both wanted something from a seat:

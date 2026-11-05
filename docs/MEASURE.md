@@ -11,9 +11,11 @@ number is drawn on the piece, not only written to the status line.
 
 ## 1. The audit: what already picks and what already draws
 
-This tool was written after reading the three mechanisms the app already had,
-and it reuses all three rather than growing a fourth. What follows is what
-each one does and what Measure took from it.
+This tool was written after reading the mechanisms the app already had, and it
+reuses them rather than growing a parallel set. What follows is what each one
+does and what Measure took from it. The first four sections were written
+against `claude-wip` at `2a6d07a`; the last four were added at the merge, when
+Check piece, Skin and Carve had landed.
 
 ### mask6 paint — `app-mask.js`
 
@@ -48,15 +50,23 @@ corner or an edge. But it takes the drawing conventions whole —
 `renderOrder`, added to `state.scene` in world space, removed and disposed by
 one clear function.
 
-Not its colour, though. `showPlanarHighlight` is cyan and says why it is not
-amber: amber next to the paint's yellow is two signals that look like one. That
-reasoning holds and rules yellow out here too — but cyan is out as well, and a
-screenshot of the first cut is what showed it. `placeModelMovable` gives every
-piece a `0x38bdf8` material, so a cyan line drawn **on** a piece is a cyan line
-on cyan and all but vanishes; a translucent face wash gets away with it, a 1 px
-line does not. Measure is rose (`0xfb7185`) throughout — button, line, end dots
-and the chip's border — so the mode and its marks are obviously one thing, and
-that thing is neither the piece nor the paint.
+Not its colour, though, and this took three goes. `showPlanarHighlight` is cyan
+and says why it is not amber: amber next to the paint's yellow is two signals
+that look like one. That rules yellow out here too — but cyan was wrong as
+well, and a screenshot of the first cut showed it plainly: `PIECE_COLOR` is
+`0x38bdf8`, so a cyan line drawn **on** a piece is a cyan line on cyan. A
+translucent face wash gets away with that; a one-pixel line does not. Rose
+`0xfb7185` replaced it, and survived until this merge — when `SELECT_COLOR`
+turned out to have become rose `0xf43f5e`, putting the same mistake on the
+piece you are most likely to be measuring.
+
+Measure is **lime `0xa3e635`** throughout — button, line, end dots and the
+chip's border. It is what is left once the plate's ten claimed colours are
+struck out (the list is in `app-measure.js` above `MEASURE_COLOUR`), and it
+reads hard against both piece colours and against the dark plate.
+`tools/nso_measure_test.js` A6 now reads those constants out of their own files
+and fails if any of them ever equals this one, so the next accent cannot repeat
+the mistake quietly.
 
 ### the selected-piece outline — `app-sel-outline.js`
 
@@ -77,14 +87,82 @@ code from it — but `cth/overlay.js`'s `buildAimSummary` is the model for how
 this file is split: the geometry is pure and free of THREE and the DOM, so a
 Node test can check it without a browser.
 
-### what was NOT found
+### Check piece, the defect overlay — `app-defects.js`, `nso-defects.js`
 
-The brief mentioned a shipped **defect overlay** and a **Skin face-select**.
-Neither exists on `claude-wip` at `2a6d07a`: there is no defect overlay, marker
-or badge layer anywhere in the app, and nothing named Skin. The nearest things
-are the four mechanisms above. The conventions reused here are therefore theirs,
-and if a defect overlay lands later it should find this file already speaking
-its language rather than the other way round.
+Written against `claude-wip` at `2a6d07a`, this section read "what was NOT
+found": the brief named a defect overlay and a Skin face-select, and neither
+existed yet. Both landed before the merge, so here is what they actually are
+and where each stands next to Measure.
+
+The defect overlay draws the canonical checker's findings on the mesh — open
+edges red, non-manifold edges orange, piercing triangles red, thin walls
+violet. It reached the same conclusions this file did, independently and from
+the same sources: line layers off `app-poslock.js`, patch layers off
+`app-mask.js`, `raycast` stubbed on every layer, an explicit place in the
+renderOrder ladder, and marks that end when the piece is re-baked under them.
+Nothing had to be reconciled — the two files agree because they read the same
+three predecessors.
+
+They differ in one decision, and the difference is right both times:
+
+| | Check piece | Measure |
+|---|---|---|
+| what a mark means | *where the piece is broken* | *how big this is* |
+| `depthTest` on patches | **off** — a piercing pair is usually inside the piece where nothing can see it | off on the line too, but the pick that made it had to be visible |
+| renderOrder | 50 / 52, above the paint | 30, below the paint |
+| ends when | the button, or a bake swaps `p.mesh` | the button, Esc, or a bake swaps the geometry the anchor was taken on |
+
+The renderOrder split is the interesting one. Both are transient, on-demand
+answers, but the check outranks the paint (a fault you cannot see is worse than
+a skip list you cannot see) and Measure does not (a ruler laid over a painted
+or a faulty face should lose to both). Put another way: 30 is below everything
+that is an *answer about the piece*, and above everything that is a *helper*.
+
+### Skin — `app-skin.js`, `nso_skin.js`
+
+There is no separate Skin face-select to reconcile with. Skin's target is the
+paint's own SELECT list: `app-mask.js` grew `Paint Selected` beside
+`Paint Excluded` (target pink `0xf472b6` at renderOrder 41), and Skin reads it.
+One picking system, two lists — so Measure inherits from the same file it
+always did, and `state.maskPaint` simply became `false | 'exclude' | 'select'`.
+Measure's `disarmOthers()` reads that three-state value and clicks whichever
+paint button is actually live.
+
+### Carve — `app-carve.js`, `nso_carve.js`
+
+The one real overlap, and it is worth being precise about, because at a glance
+the two look like the same feature.
+
+`app-carve.js` answers `window.nsoCarveTakesClick` — the identical contract to
+the paint's, arrived at independently, with a `hitPiece()` that is line for
+line the same idea as this file's. That is convergence, not duplication:
+app-core asks all three predicates in a row and each tool's own hit test lives
+with the tool.
+
+`nso_carve.js` classifies a click as **face, edge or corner** — which sounds
+like Measure's snap, and is not:
+
+| | `nso_carve.js` | `app-measure.js` |
+|---|---|---|
+| input | the planes within the blade's reach of the click | the piece's welded mesh topology |
+| grouping | clusters planes at `DIHEDRAL_DEG = 20`, transitively, so a tessellated dome is *one* face | marks feature edges at 15°, the threshold `EdgesGeometry` draws with |
+| output | a frame — an aim direction and a roll for the blade | a point, or a length in mm |
+| why that threshold | 20° keeps a 12° dome facet from reading as an edge to cut along | 15° so a measurable edge is exactly an edge the selection outline already draws |
+
+Two thresholds, two questions, and neither should be changed to match the
+other. Nothing is shared between them and nothing should be: a blade aimed by a
+measurement's idea of an edge would chamfer the facets of a dome.
+
+### the four picking modes, and who wins a click
+
+As of this merge, `app-core.js`'s `onCanvasPointerDown` asks, in order: paint,
+carve, measure, then the Soften pick, the Cap pick and the Join pick inline.
+Measure is asked **last of the three predicates** because it is the only one
+that cannot change the piece — if two modes are somehow armed at once, the one
+that bakes should win the click rather than have a measurement swallow it. In
+practice it never comes up: `disarmOthers()` turns the other four off when
+Measure arms, through their own buttons so none is left lit and inert, and
+`tools/nso_measure_test.js` B9 drives all three button pairs to prove it.
 
 ---
 
@@ -118,11 +196,12 @@ as `PlaneGeometry(plate.w, plate.d)` from the plate's mm figures, and a piece is
 added with its geometry unscaled. The distance is measured in world space and
 printed as mm with no conversion.
 
-**Render order.** The ladder on a piece is selected outline 12, inspect cage 16,
-armed-face highlight 20, paint 40. `app-mask.js` reserves the top for the paint
-and explains at length why. Measure sits at **30**: above the three helpers,
-below the paint. A measurement drawn across a painted face is the one place the
-yellow wins, and that is the rule working.
+**Render order.** The ladder on a piece: selected outline 12, inspect cage 16,
+armed-face highlight 20, Paint Excluded 40, Paint Selected 41, Check piece's
+patches 50 and lines 52, the position lock 999. Measure sits at **30** — above
+the three helpers, below everything that is an answer about the piece. A
+measurement drawn across a painted or a faulty face loses to both, and that is
+the ladder working.
 
 **Anchoring.** An endpoint is stored as (piece, the point in *that piece's* own
 space, the geometry it was picked on) — never a world point. The measurement is
@@ -153,7 +232,7 @@ list to read because there is nothing to skip. Measure is therefore deliberately
 **absent from the paint-scope roster** in `tools/nso_paint_scope_test.js`. If
 this file ever changes geometry, it joins that roster in the same commit.
 
-`tools/nso_measure_test.js` B9 pins it: after a full measuring session the piece
+`tools/nso_measure_test.js` B10 pins it: after a full measuring session the piece
 is still 12 triangles of 8000 mm³ and `nsoMaskCount()` is still 0.
 
 ## 4. Validation — `npm run measure`
@@ -173,6 +252,10 @@ Ground truth is the fixtures' own known sizes, not a previous run of the tool.
 | against its own bbox | `lid_blank.stl` | 60 / 40 / 2.4 | exactly those three |
 | against its own bbox | `out-box-square-half.stl` | 20 / 10, and no fold-back | 20 (1 and 2 segments), 10 |
 
+A6 is the palette gate: it reads `PIECE_COLOR`, `SELECT_COLOR`, the paint's
+`SELECT_COLOR`, the three `app-defects.js` colours and `app-poslock.js`'s
+outline out of their own files and fails if any equals `MEASURE_COLOUR`.
+
 **Part B, the real app in Chromium** — real button, real clicks at real screen
 coordinates, read back through `window.nsoMeasureReadout()`. Clicks are aimed by
 projecting a known world point through the app's own camera, and every expected
@@ -190,6 +273,7 @@ anything in `app-measure.js`.
 | the 80 mm hull's long top edge | 80.000 mm | 80.000 |
 | corner of piece 1 → corner of piece 2 | 10.771 mm (from the two bboxes) | 10.771 |
 | piece 2 slides 25 mm | 30.676 mm | 30.676 |
+| arming Measure disarms Paint Excluded, Paint Selected and Carve | each stands down, and no button is left lit | clean, all three |
 | mode off | readout null, chip hidden, no object left at renderOrder 30 | clean |
 | the piece afterwards | 12 tris, 8000 mm³, 0 painted faces | unchanged |
 

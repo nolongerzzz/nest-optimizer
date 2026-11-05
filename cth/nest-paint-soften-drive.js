@@ -88,6 +88,16 @@ export function paintSixOuter(m) {
   if (!p || !p.mesh || !p.mesh.geometry) throw new Error('no mesh to paint');
   if (!m.rawTris || !m.rawTris.length) throw new Error('piece has no raw soup to paint');
 
+  /* Two boxes, each read from the thing that actually owns it.
+
+     The wrap reads the RAW soup, so the plane offset d is measured there. The
+     yellow overlay reads the DISPLAY geometry, so dispPlane is measured there.
+     Deriving one from the other is what this used to do, and it cannot work:
+     handleFiles runs geometry.center() on the display copy (app-core.js:740),
+     so the display box is the raw box rotated AND shifted by m.centerOffset.
+     A display value used as a raw plane is only ever right for a piece that
+     happens to sit on the origin - which the shipped fixture does, which is
+     why nothing caught it. */
   var rlo = [Infinity, Infinity, Infinity], rhi = [-Infinity, -Infinity, -Infinity];
   for (var i = 0; i + 2 < m.rawTris.length; i += 3) {
     for (var k = 0; k < 3; k++) {
@@ -106,24 +116,29 @@ export function paintSixOuter(m) {
     }
   }
 
+  /* zUpToYUp is rotateX(-90): display X = raw X, display Y = raw Z, and
+     display Z = raw -Y. RAW_OF names the raw axis behind each display axis;
+     RAW_SIGN carries the flip on that third one, which the old code stated in
+     a comment and then dropped - so the display Z MIN face was filed as the
+     raw Y MIN face when it is the raw Y MAX face. */
   var RAW_OF = [0, 2, 1];
   var RAW_SIGN = [1, 1, -1];
 
   var snap = [];
   for (var a = 0; a < 3; a++) {
     for (var s = 0; s < 2; s++) {
-      var dispSign = s ? 1 : -1;
+      var dispSign = s ? 1 : -1;                    // which display half
       var axis = RAW_OF[a];
-      var rawSign = dispSign * RAW_SIGN[a];
+      var rawSign = dispSign * RAW_SIGN[a];         // the raw half it really is
       var keepMin = rawSign < 0;
-      var at = keepMin ? rlo[axis] : rhi[axis];
+      var at = keepMin ? rlo[axis] : rhi[axis];     // the raw plane, from raw
       var n = [0, 0, 0];
       n[axis] = rawSign;
       snap.push({
-        n: n, d: n[axis] * at,
+        n: n, d: n[axis] * at,                      // the contract: n . p = d
         axisIdx: axis, keepMin: keepMin, inner: false,
         dispAxis: a, dispSign: dispSign,
-        dispPlane: dispSign < 0 ? dlo[a] : dhi[a]
+        dispPlane: dispSign < 0 ? dlo[a] : dhi[a]   // the plane, from display
       });
     }
   }
@@ -150,6 +165,17 @@ function statusText() {
   return el ? String(el.textContent || '').trim() : '';
 }
 
+/* The wrap is a promise - the wasm CSG kernel runs the union and the subtract -
+   so #status reads "Wrapping N face(s), M painted out\u2026" the instant the
+   press is taken and only becomes the bake line when the kernel lands. A fixed
+   sleep graded that interim line and called a working bake a miss.
+
+   Wait for the line to settle instead: poll until the status has moved off the
+   text that was there before the press AND the shared rule stops saying
+   'pending'. The rule is cth/nest-status-grade.js, the same module a Node test
+   imports, so the driver cannot drift from it the way the old private regexes
+   had already drifted - the wrapPocketsInPlace success line never contains the
+   word "baked", and the old /baked/i test scored it a miss. */
 async function waitForSoftenStatus(before, timeoutMs) {
   var t0 = Date.now();
   var last = null;
@@ -180,7 +206,7 @@ function verdict(g) {
 export async function mountNestDrive(opts) {
   var overlay = opts && opts.overlay;
   try {
-    say(overlay, 'Drive: looking for CTH_fixture\u2026');
+    say(overlay, 'Drive: looking for CTH_fixture…');
     var m = findFixture();
     if (!m) {
       say(overlay, 'Drive: loading library/CTH_fixture.stl');
@@ -198,7 +224,7 @@ export async function mountNestDrive(opts) {
     var v = verdict(g);
     say(overlay, v.text, !v.ok);
   } catch (err) {
-    say(overlay, 'Drive miss \u2014 ' + (err && err.message ? err.message : String(err)), true);
+    say(overlay, 'Drive miss — ' + (err && err.message ? err.message : String(err)), true);
   }
 }
 

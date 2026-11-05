@@ -1,0 +1,638 @@
+{
+  "generator": "tools/nso_damage_make_fixtures.js",
+  "checker": "tools/mesh_validate.py --json (weld 0.0001)",
+  "note": "`expected` is what the canonical checker must report; `piercing` is self_intersection.pierce.",
+  "entries": [
+    {
+      "stl": "shape-sphere_hole.stl",
+      "source": "shape-sphere.stl",
+      "type": "hole",
+      "params": {
+        "severity": "one",
+        "seed": 1
+      },
+      "what": "one small real hole",
+      "library": true,
+      "expected": {
+        "triangles": 1979,
+        "welded_vertices": 994,
+        "open_edges": 7,
+        "nonmanifold_edges": 0,
+        "odd_edges": 7,
+        "inconsistent_winding_edges": 0,
+        "euler_characteristic": 1,
+        "degenerate_tris": 0,
+        "piercing": 0
+      },
+      "removed_faces": 5,
+      "boundary_loops": 1
+    },
+    {
+      "stl": "shape-sphere_holes-shredded.stl",
+      "source": "shape-sphere.stl",
+      "type": "hole",
+      "params": {
+        "severity": "shredded",
+        "seed": 1
+      },
+      "what": "twelve sites grown into each other - half the sphere gone, 2 boundary loops",
+      "library": true,
+      "expected": {
+        "triangles": 1015,
+        "welded_vertices": 615,
+        "open_edges": 221,
+        "nonmanifold_edges": 0,
+        "odd_edges": 221,
+        "inconsistent_winding_edges": 0,
+        "euler_characteristic": -3,
+        "degenerate_tris": 0,
+        "piercing": 0
+      },
+      "removed_faces": 969,
+      "boundary_loops": 2
+    },
+    {
+      "stl": "shape-sphere_hole-painted.stl",
+      "source": "shape-sphere.stl",
+      "type": "hole",
+      "params": {
+        "region": {
+          "faces": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        }
+      },
+      "what": "faces 0-7 removed as a painted selection",
+      "library": false,
+      "expected": {
+        "triangles": 1976,
+        "welded_vertices": 994,
+        "open_edges": 10,
+        "nonmanifold_edges": 0,
+        "odd_edges": 10,
+        "inconsistent_winding_edges": 0,
+        "euler_characteristic": 1,
+        "degenerate_tris": 0,
+        "piercing": 0
+      },
+      "removed_faces": 8,
+      "boundary_loops": 1
+    },
+    {
+      "stl": "shape-cylinder_holes-light.stl",
+      "source": "shape-cylinder.stl",
+      "type": "hole",
+      "params": {
+        "severity": "light",
+        "seed": 7
+      },
+      "what": "four sites, 10 faces: a loop pinched at the cap centre and a loop folded over the top rim",
+      "library": false,
+      "expected": {
+        "triangles": 118,
+        "welded_vertices": 66,
+        "open_edges": 16,
+        "nonmanifold_edges": 0,
+        "odd_edges": 16,
+        "inconsistent_winding_edges": 0,
+        "euler_characteristic": -1,
+        "degenerate_tris": 0,
+        "piercing": 0
+      },
+      "removed_faces": 10,
+      "boundary_loops": 2
+    },
+    {
+      "stl": "shape-tube_severed.stl",
+      "source": "shape-tube.stl",
+      "type": "sever",
+      "params": {
+        "slots": 1,
+        "width": 1
+      },
+      "what": "ring wall severed by one 1 mm slot, capped: a C, genus 1 -> 0",
+      "library": true,
+      "expected": {
+        "triangles": 260,
+        "welded_vertices": 132,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "inconsistent_winding_edges": 0,
+        "euler_characteristic": 2,
+        "degenerate_tris": 0,
+        "piercing": 0
+      },
+      "before": {
+        "genus": 1,
+        "bodies": 1,
+        "euler_characteristic": 0
+      },
+      "bodies": 1,
+      "genus_per_body": [
+        0
+      ],
+      "slots": [
+        {
+          "slot": {
+            "axis": "z",
+            "angle_deg": 0,
+            "width": 1,
+            "through": [
+              0,
+              0,
+              5.548953
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "stl": "shape-tube_severed-apart.stl",
+      "source": "shape-tube.stl",
+      "type": "sever",
+      "params": {
+        "slots": 2,
+        "width": 1
+      },
+      "what": "ring wall severed twice, capped: two bodies",
+      "library": false,
+      "expected": {
+        "triangles": 264,
+        "welded_vertices": 136,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "inconsistent_winding_edges": 0,
+        "euler_characteristic": 4,
+        "degenerate_tris": 0,
+        "piercing": 0
+      },
+      "before": {
+        "genus": 1,
+        "bodies": 1,
+        "euler_characteristic": 0
+      },
+      "bodies": 2,
+      "genus_per_body": [
+        0,
+        0
+      ],
+      "slots": [
+        {
+          "slot": {
+            "axis": "z",
+            "angle_deg": 0,
+            "width": 1,
+            "through": [
+              0,
+              0,
+              5.548953
+            ]
+          }
+        },
+        {
+          "slot": {
+            "axis": "z",
+            "angle_deg": 180,
+            "width": 1,
+            "through": [
+              0,
+              0,
+              5.548953
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "stl": "shape-sphere_nm-duplicate.stl",
+      "source": "shape-sphere.stl",
+      "type": "nonManifold",
+      "params": {
+        "mode": "duplicate",
+        "severity": "one",
+        "seed": 1
+      },
+      "what": "one face duplicated in place, same winding",
+      "library": true,
+      "expected": {
+        "triangles": 1985,
+        "welded_vertices": 994,
+        "open_edges": 0,
+        "nonmanifold_edges": 3,
+        "odd_edges": 3,
+        "inconsistent_winding_edges": 3,
+        "euler_characteristic": 3,
+        "degenerate_tris": 0,
+        "piercing": 0
+      },
+      "mode": "duplicate",
+      "patch_faces": 1
+    },
+    {
+      "stl": "shape-sphere_nm-duplicate-flipped.stl",
+      "source": "shape-sphere.stl",
+      "type": "nonManifold",
+      "params": {
+        "mode": "duplicate-flipped",
+        "severity": "moderate",
+        "seed": 2
+      },
+      "what": "five patches (68 faces) duplicated in place, reversed winding",
+      "library": false,
+      "expected": {
+        "triangles": 2052,
+        "welded_vertices": 994,
+        "open_edges": 0,
+        "nonmanifold_edges": 132,
+        "odd_edges": 132,
+        "inconsistent_winding_edges": 204,
+        "euler_characteristic": 70,
+        "degenerate_tris": 0,
+        "piercing": 0
+      },
+      "mode": "duplicate-flipped",
+      "patch_faces": 68
+    },
+    {
+      "stl": "shape-sphere_winding-flip.stl",
+      "source": "shape-sphere.stl",
+      "type": "nonManifold",
+      "params": {
+        "mode": "flip",
+        "severity": "one",
+        "seed": 1
+      },
+      "what": "one face flipped in place, nothing added or removed",
+      "library": true,
+      "expected": {
+        "triangles": 1984,
+        "welded_vertices": 994,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "inconsistent_winding_edges": 3,
+        "euler_characteristic": 2,
+        "degenerate_tris": 0,
+        "piercing": 0
+      },
+      "mode": "flip",
+      "patch_faces": 1
+    },
+    {
+      "stl": "shape-torus_weld-collide.stl",
+      "source": "shape-torus.stl",
+      "type": "weld",
+      "params": {
+        "severity": "one",
+        "distance": 0.00005,
+        "seed": 1
+      },
+      "what": "one vertex 5e-5 mm from a distinct neighbour - inside the 1e-4 weld",
+      "library": true,
+      "expected": {
+        "triangles": 2050,
+        "welded_vertices": 1024,
+        "open_edges": 0,
+        "nonmanifold_edges": 2,
+        "odd_edges": 2,
+        "inconsistent_winding_edges": 5,
+        "euler_characteristic": 1,
+        "degenerate_tris": 0,
+        "piercing": 0
+      },
+      "sites": [
+        {
+          "edge": [
+            632,
+            664
+          ],
+          "realized_distance": 0.00004997301192455662,
+          "merges": true
+        }
+      ]
+    },
+    {
+      "stl": "shape-torus_weld-near.stl",
+      "source": "shape-torus.stl",
+      "type": "weld",
+      "params": {
+        "severity": "one",
+        "distance": 0.0002,
+        "seed": 1
+      },
+      "what": "the same split at 2e-4 mm - outside the weld, the clean control",
+      "library": false,
+      "expected": {
+        "triangles": 2050,
+        "welded_vertices": 1025,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "inconsistent_winding_edges": 0,
+        "euler_characteristic": 0,
+        "degenerate_tris": 0,
+        "piercing": 0
+      },
+      "sites": [
+        {
+          "edge": [
+            632,
+            664
+          ],
+          "realized_distance": 0.0001998920476982265,
+          "merges": false
+        }
+      ]
+    },
+    {
+      "stl": "shape-torus_weld-shredded.stl",
+      "source": "shape-torus.stl",
+      "type": "weld",
+      "params": {
+        "severity": "shredded",
+        "distance": 0.00005,
+        "seed": 1
+      },
+      "what": "thirty-two weld collisions",
+      "library": false,
+      "expected": {
+        "triangles": 2112,
+        "welded_vertices": 1024,
+        "open_edges": 0,
+        "nonmanifold_edges": 64,
+        "odd_edges": 64,
+        "inconsistent_winding_edges": 160,
+        "euler_characteristic": 32,
+        "degenerate_tris": 0,
+        "piercing": 0
+      },
+      "sites": [
+        {
+          "edge": [
+            632,
+            664
+          ],
+          "realized_distance": 0.00004997301192455662,
+          "merges": true
+        },
+        {
+          "edge": [
+            2,
+            5
+          ],
+          "realized_distance": 0.000049897454413608176,
+          "merges": true
+        },
+        {
+          "edge": [
+            530,
+            562
+          ],
+          "realized_distance": 0.00004981978563922491,
+          "merges": true
+        },
+        {
+          "edge": [
+            6,
+            995
+          ],
+          "realized_distance": 0.00005009885023747048,
+          "merges": true
+        },
+        {
+          "edge": [
+            980,
+            1013
+          ],
+          "realized_distance": 0.00004996249799340875,
+          "merges": true
+        },
+        {
+          "edge": [
+            308,
+            309
+          ],
+          "realized_distance": 0.00005012463579566154,
+          "merges": true
+        },
+        {
+          "edge": [
+            616,
+            649
+          ],
+          "realized_distance": 0.000049971665482253694,
+          "merges": true
+        },
+        {
+          "edge": [
+            728,
+            760
+          ],
+          "realized_distance": 0.00005008038864642098,
+          "merges": true
+        },
+        {
+          "edge": [
+            426,
+            458
+          ],
+          "realized_distance": 0.00004986426403557426,
+          "merges": true
+        },
+        {
+          "edge": [
+            48,
+            1015
+          ],
+          "realized_distance": 0.00005002076010685505,
+          "merges": true
+        },
+        {
+          "edge": [
+            456,
+            488
+          ],
+          "realized_distance": 0.000049852292986515545,
+          "merges": true
+        },
+        {
+          "edge": [
+            132,
+            164
+          ],
+          "realized_distance": 0.00004996334238910809,
+          "merges": true
+        },
+        {
+          "edge": [
+            402,
+            435
+          ],
+          "realized_distance": 0.000049996324874786266,
+          "merges": true
+        },
+        {
+          "edge": [
+            242,
+            275
+          ],
+          "realized_distance": 0.000050000446155728575,
+          "merges": true
+        },
+        {
+          "edge": [
+            148,
+            180
+          ],
+          "realized_distance": 0.00004996334238910809,
+          "merges": true
+        },
+        {
+          "edge": [
+            89,
+            90
+          ],
+          "realized_distance": 0.000049897454413608176,
+          "merges": true
+        },
+        {
+          "edge": [
+            774,
+            807
+          ],
+          "realized_distance": 0.00005003723840444384,
+          "merges": true
+        },
+        {
+          "edge": [
+            313,
+            314
+          ],
+          "realized_distance": 0.000049897454413608176,
+          "merges": true
+        },
+        {
+          "edge": [
+            184,
+            217
+          ],
+          "realized_distance": 0.00004999860655937656,
+          "merges": true
+        },
+        {
+          "edge": [
+            3,
+            65
+          ],
+          "realized_distance": 0.00004984360683231281,
+          "merges": true
+        },
+        {
+          "edge": [
+            593,
+            626
+          ],
+          "realized_distance": 0.00004994300181674076,
+          "merges": true
+        },
+        {
+          "edge": [
+            322,
+            323
+          ],
+          "realized_distance": 0.00004991382779601615,
+          "merges": true
+        },
+        {
+          "edge": [
+            199,
+            232
+          ],
+          "realized_distance": 0.00005006634051296107,
+          "merges": true
+        },
+        {
+          "edge": [
+            549,
+            581
+          ],
+          "realized_distance": 0.00004971298946765675,
+          "merges": true
+        },
+        {
+          "edge": [
+            765,
+            798
+          ],
+          "realized_distance": 0.00005016204520643599,
+          "merges": true
+        },
+        {
+          "edge": [
+            186,
+            219
+          ],
+          "realized_distance": 0.00005014564659927363,
+          "merges": true
+        },
+        {
+          "edge": [
+            809,
+            810
+          ],
+          "realized_distance": 0.000050023355706057334,
+          "merges": true
+        },
+        {
+          "edge": [
+            235,
+            267
+          ],
+          "realized_distance": 0.00004997713512796246,
+          "merges": true
+        },
+        {
+          "edge": [
+            177,
+            178
+          ],
+          "realized_distance": 0.000049897454413608176,
+          "merges": true
+        },
+        {
+          "edge": [
+            321,
+            352
+          ],
+          "realized_distance": 0.00005005107583085926,
+          "merges": true
+        },
+        {
+          "edge": [
+            413,
+            445
+          ],
+          "realized_distance": 0.00004986597395084194,
+          "merges": true
+        },
+        {
+          "edge": [
+            245,
+            277
+          ],
+          "realized_distance": 0.00004997713512796246,
+          "merges": true
+        }
+      ]
+    }
+  ]
+}

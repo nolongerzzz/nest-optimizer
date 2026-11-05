@@ -29,13 +29,26 @@
      * The feature-edge threshold is the 15 degrees app-sel-outline.js hands
        THREE.EdgesGeometry. An edge this tool will measure is an edge the
        selection outline already draws, so what you can see is what you can
-       click.
+       click. It is NOT nso_carve.js's DIHEDRAL_DEG of 20: that one asks a
+       different question (are these facets one smooth region a blade should
+       treat as a face?) about a cluster of planes inside a blade's reach,
+       and answers it for aiming a cut, not for measuring a length. Two
+       thresholds, two questions - see docs/MEASURE.md section 1.
+     * Drawing a transient, on-demand answer ON the mesh is what
+       app-defects.js's Check piece does, and it reached the same conclusions
+       independently: line layers with depthTest off, patch layers off
+       app-mask.js's overlay, raycast stubbed, an explicit place in the
+       renderOrder ladder, and a redraw that ends when the piece is re-baked
+       under it. Where they differ is what the mark is FOR - see below.
 
-   RENDER ORDER. The ladder on a piece is: selected outline 12, inspect cage
-   16, armed-face highlight 20, paint 40. The paint sits on top on purpose
-   (app-mask.js says so, at length), so the measurement goes at 30 - above the
-   three helpers, below the paint. A measurement drawn across a painted face
-   is the one place the yellow wins, and that is the rule working, not a bug.
+   RENDER ORDER. The ladder on a piece, as it now stands: selected outline 12,
+   inspect cage 16, armed-face highlight 20, Paint Excluded 40, Paint Selected
+   41, Check piece's patches 50 and its lines 52, the position lock 999. The
+   measurement goes at 30 - above the three helpers, below everything that is
+   an ANSWER about the piece. That ordering is deliberate: the paint says which
+   faces a bake will skip and the check says where the piece is broken, and
+   both of those should beat a ruler laid over them. A measurement drawn across
+   a painted or a faulty face loses, and that is the ladder working.
 
    UNITS. One world unit is one millimetre: buildPlateMesh() builds the plate
    as PlaneGeometry(plate.w, plate.d) with the plate's mm figures, and a piece
@@ -332,8 +345,7 @@
     obj.renderOrder = MEASURE_RENDER_ORDER;
     // The paint learned this the hard way: a helper that answers the ray eats
     // the next click, and the click lands on the helper instead of the piece.
-    obj.raycast = function () {};
-    state.scene.add(obj);
+    nsoHelpers.attach(state.scene, obj, 'measure');   // tagged, never raycastable
     helpers.push(obj);
     return obj;
   }
@@ -550,23 +562,27 @@
     return true;
   }
 
-  /* Lime, chosen by elimination against everything already on the plate - a
-     measurement line is thin, it is drawn ON a piece, and it has to beat all
-     of them:
+  /* Lime, and the choice was made by elimination against what is already on
+     the plate - a measurement line is thin, it is drawn ON a piece, and it has
+     to beat every one of them:
 
        0x38bdf8  an unselected piece's material   (app-core PIECE_COLOR)
        0xf43f5e  a SELECTED piece's material      (app-core SELECT_COLOR)
-       0x4ade80  a seated piece's material        (app-core)
-       0xffdd00  the paint                        (app-mask)
+       0xffdd00  Paint Excluded                   (app-mask)
+       0xf472b6  Paint Selected, the Skin target  (app-mask SELECT_COLOR)
+       0xff2d2d  open edges and piercing pairs    (app-defects)
+       0xff8c1a  non-manifold edges               (app-defects)
+       0xc084fc  thin walls, and the Non-solid flag
+       0x2dd4bf  the position lock                (app-poslock)
        0xffffff  the selected piece's edge outline (app-sel-outline)
-       0x0b1a33  the plate background             (app-core)
+       0xfbbf24  the plate ticks                  (app-core)
 
      The first cut of this was cyan, following showPlanarHighlight, and a
      screenshot showed the obvious: a cyan line on a cyan piece. Rose was the
-     replacement - and that is the same mistake one step along, because
-     SELECT_COLOR is rose too, on the piece you are most likely to be
-     measuring. Lime is the one strong colour nothing here claims, and it
-     reads against both piece colours and against the dark plate. */
+     replacement until the merge, when SELECT_COLOR turned out to be rose too -
+     the same mistake, on the piece you are most likely to be measuring. Lime
+     is the one strong colour nothing on the plate claims, and it reads against
+     both piece colours and against the dark plate. */
   var MEASURE_COLOUR = 0xa3e635;
 
   function buildSpanHelpers() {
@@ -671,25 +687,54 @@
     var btn = el('btn-measure');
     if (!btn) return;
     btn.classList.toggle('is-armed', !!state.measureOn);
+    // Paint, Carve and Check piece all carry aria-pressed on their mode
+    // buttons; this is the fourth of them and says the same thing.
+    btn.setAttribute('aria-pressed', state.measureOn ? 'true' : 'false');
     btn.textContent = state.measureOn ? LIVE_LABEL : IDLE_LABEL;
   }
 
-  function enter() {
-    state.measureOn = true;
-    // One picking mode at a time: paint and the Soften pick both own clicks on
-    // a piece, and two armed tools would fight over the same pointerdown.
-    if (state.maskPaint && typeof window.nsoMaskTakesClick === 'function') {
-      var paintBtn = el('btn-mask-paint');
+  /* One picking mode at a time. Paint (either list), Carve, the Soften pick
+     and the Cap pick all own a click that lands on a piece, and app-core asks
+     them in a fixed order - so two armed modes do not crash, they just make
+     the second one silently dead. Turning them off is better than being the
+     one that never fires.
+
+     The two that have a button are turned off THROUGH the button, not by
+     writing their state flag: the button carries aria-pressed and the armed
+     class, and a flag set behind its back leaves a lit button that does
+     nothing. state.maskPaint is false | 'exclude' | 'select' since the paint
+     grew its target list, so the click has to go to whichever of the two
+     paint buttons is actually live - clicking the other one would SWITCH
+     paint modes rather than stop it. */
+  function disarmOthers() {
+    if (state.maskPaint) {
+      var paintBtn = el(state.maskPaint === 'select' ? 'btn-mask-select' : 'btn-mask-paint');
       if (paintBtn) paintBtn.click();
     }
-    /* Center lock is the same story: its pick owns a click on a piece too. It
-       goes off THROUGH its button, not by writing the flag, because the button
-       carries the armed label and a flag set behind its back leaves a lit
-       button that does nothing. */
+    if (state.carveArmed) {
+      var carveBtn = el('btn-carve');
+      if (carveBtn) carveBtn.click();
+      else state.carveArmed = false;
+    }
     if (state.centerLockArmed) {
       var clockBtn = el('btn-center-lock-pick');
       if (clockBtn) clockBtn.click();
       else state.centerLockArmed = false;
+    }
+    if (typeof window.nsoBrushArmed === 'function' && window.nsoBrushArmed()) {
+      var brushBtn = el('btn-brush');
+      if (brushBtn) brushBtn.click();
+      else if (typeof window.nsoBrushSetArmed === 'function') window.nsoBrushSetArmed(false);
+    }
+    if (typeof window.nsoPullArmed === 'function' && window.nsoPullArmed()) {
+      var pullBtn = el('btn-pull');
+      if (pullBtn) pullBtn.click();
+      else if (typeof window.nsoPullSetArmed === 'function') window.nsoPullSetArmed(false);
+    }
+    if (typeof window.nsoLimbArmed === 'function' && window.nsoLimbArmed()) {
+      var limbBtn = el('btn-limb');
+      if (limbBtn) limbBtn.click();
+      else if (typeof window.nsoLimbSetArmed === 'function') window.nsoLimbSetArmed(false);
     }
     if (state.seatHereArmed) {
       var seatBtn = el('btn-seat-here');
@@ -699,6 +744,11 @@
     state.softenArmed = false;
     state.capArmed = false;
     if (typeof clearFacePick === 'function') clearFacePick();
+  }
+
+  function enter() {
+    state.measureOn = true;
+    disarmOthers();
     setLabelState();
     setStatus(mode() === 'edge'
       ? 'Measure - click an edge to read its length. Click Measure again to stop.'
@@ -713,6 +763,16 @@
   }
 
   function toggle() { if (state.measureOn) leave(); else enter(); }
+
+  /* Measure's session, for the helper registry (nso-helpers.js). A span read
+     before an Undo measured a piece that is no longer there: it goes, and
+     Measure stays on for the next one. */
+  if (typeof nsoHelpers !== 'undefined') nsoHelpers.owner('measure', {
+    live: function () { return !!state.measureOn; },
+    close: leave,
+    clear: function () { clearShot(null); },
+    refresh: function () { clearShot(null); }
+  });
 
   /* app-core's onCanvasPointerDown asks this before it starts a move drag -
      the same contract app-mask.js's nsoMaskTakesClick has, for the same
