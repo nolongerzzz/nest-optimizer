@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=a08c8029" />
+  <link rel="stylesheet" href="styles.css?v=326ee39b" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -2033,7 +2033,7 @@
           <ul id="findings-rows" class="findings-rows"></ul>
           <p id="findings-unplaced" class="findings-note" hidden></p>
         </section>
-        <div class="viewport-overlay viewport-overlay-br">
+        <div class="viewport-overlay viewport-overlay-br" data-native-menu title="Right-click here for the browser's web tools. Everywhere else the browser menu is off.">
           <p id="adjust-status" class="status-hud status-hud-id">HUD inside7</p>
           <p id="status" class="status status-hud"></p>
         </div>
@@ -2442,6 +2442,11 @@
             <p class="ms-note" id="ms-slice-read">&mdash;</p>
           </div>
           <div id="ms-hint-badge"></div>
+          <!-- The one place in G-scope the browser's own right-click menu works
+               (data-native-menu; app-core.js shuts it everywhere else). It sits at
+               the right end of the bottom row, the twin of the main view's HUD box. -->
+          <div id="ms-webtools" class="ms-glass ms-webtools" data-native-menu
+               title="Right-click here for the browser's web tools. Everywhere else the browser menu is off.">web tools</div>
         </div>
       </div>
 
@@ -2563,7 +2568,7 @@
   <script src="nso-helpers.js?v=9c476e39"></script>
   <script src="nso-recent.js?v=f03d6f13"></script>
   <script src="nso-bounds.js?v=778acac4"></script>
-  <script src="app-core.js?v=a608c1d1"></script>
+  <script src="app-core.js?v=e1a29486"></script>
   <!-- Up to six plates (beds): the active one is state.models / state.placed, the rest are kept beside it. docs/BEDS.md. -->
   <script src="app-beds.js?v=3d221bc4"></script>
 
@@ -2646,7 +2651,7 @@
   <script src="app-fasteners.js?v=dbaebe2f"></script>
   <script src="app-assemble.js?v=60984bfb"></script>
   <script src="app-sel-outline.js?v=c1a5b4df"></script>
-  <script src="app-join.js?v=5a50ad61"></script>
+  <script src="app-join.js?v=431f0378"></script>
   <script src="app-center-lock.js?v=ee95c074"></script>
   <script src="app-oversize-washer.js?v=a445c3ff"></script>
   <script src="app-join-triple.js?v=95a9c48a"></script>

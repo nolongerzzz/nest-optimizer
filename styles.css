@@ -1724,6 +1724,10 @@ select:focus, input:focus {
   pointer-events: none;
 }
 .status-hud:empty { display: none; }
+/* The HUD box is the one place the browser's right-click menu works (data-native-menu,
+   app-core.js), so it has to be a real target: the box takes the pointer, the canvas
+   under it does not. It is a few lines in a corner. */
+.viewport-overlay-br[data-native-menu] > .status-hud { pointer-events: auto; }
 .status-hud.success { color: #86efac; }
 .status-hud.error { color: #fca5a5; }
 /* A button the status line offers (Cut's "Turn it right-side-out, then cut"):
@@ -3475,6 +3479,17 @@ select:focus, input:focus {
 }
 #ms-slice-read { max-height: 9em; overflow-y: auto; }
 #ms-hint-badge { pointer-events: auto; }
+/* G-scope's twin of the main HUD box: the only place the browser's right-click menu
+   works in here. At the right end of the bottom row, by the layer-range slider. */
+.ms-readouts > .ms-webtools {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 4px 9px;
+  font-size: 11px;
+  color: var(--muted);
+  cursor: context-menu;
+  user-select: none;
+}
 
 /* No backdrop-filter: solid slabs and cards, still readable over the canvas. */
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {

@@ -1375,6 +1375,22 @@ window.nsoRenderStats = function () {
   document.addEventListener('visibilitychange', function () { nsoWakeRender(); });
 })();
 
+/* THE BROWSER'S OWN RIGHT-CLICK MENU (Inspect, Back, Save as...) is shut
+   everywhere except the regions that opt in with data-native-menu: the HUD box
+   at the bottom right of the main viewport and the bubble at the bottom right
+   of G-scope. A right-click that lands on a button, a menu or a card then does
+   nothing, so it cannot misfire while you work. The page's own right-click
+   (the plate menu, the right-drag pan) listens on the canvas and is untouched:
+   this only cancels the browser's default, in the capture phase, and stops
+   nothing. */
+(function wireNativeMenuGate() {
+  document.addEventListener('contextmenu', function (e) {
+    const t = e.target;
+    if (t && typeof t.closest === 'function' && t.closest('[data-native-menu]')) return;
+    e.preventDefault();
+  }, true);
+})();
+
 function nsoRenderMatSig(m) {
   /* three r147 draws a transparent double-sided material in two passes and
      bumps its version twice on EVERY draw, so reading the version of one would
@@ -1777,10 +1793,14 @@ function handleFiles(files, origin) {
         if (window.NSO_MICROSCOPE && window.NSO_MICROSCOPE.isSliced(e.target.result)) {
           settle();
           window.NSO_MICROSCOPE.openFile(file.name, e.target.result);
+          nsoCloseTopCard('menu-import');
           return;
         }
         import3MF(file.name, e.target.result).then(result => {
-          if (result && result.objects && result.objects.length) noteRecentLoad(file, origin);
+          if (result && result.objects && result.objects.length) {
+            noteRecentLoad(file, origin);
+            nsoCloseTopCard('menu-import');      // the model is on the plate: the Import card has done its job
+          }
         }).then(settle, settle);
         return;
       }
@@ -1790,7 +1810,10 @@ function handleFiles(files, origin) {
           throw new Error('Invalid geometry');
         }
         addModelFromZUpGeometryAsync(file.name, geometry).then(id => {
-          if (id != null) noteRecentLoad(file, origin);
+          if (id != null) {
+            noteRecentLoad(file, origin);
+            nsoCloseTopCard('menu-import');      // the model is on the plate: the Import card has done its job
+          }
         }).then(settle, settle);
       } catch (err) {
         settle();
@@ -1800,6 +1823,15 @@ function handleFiles(files, origin) {
     };
     reader.readAsArrayBuffer(file);
   });
+}
+
+/* A top-row card (Import, Export) is a <details>; it closes by losing `open`.
+   Called once the work it was opened for has finished - the piece is on the
+   plate, the file has been handed to the browser - never earlier, so a failed
+   load or a cancelled export leaves the card up for another try. */
+function nsoCloseTopCard(id) {
+  const card = document.getElementById(id);
+  if (card && card.open) card.open = false;
 }
 
 function noteRecentLoad(file, origin) {
@@ -5047,6 +5079,7 @@ function exportSTLs() {
     const filename = `nest_${plateName}_${state.placed.length}pcs.stl`;
 
     downloadBlob(blob, filename);
+    nsoCloseTopCard('menu-export');
     setStatus(`Downloaded ${filename}${overlapNote}`);
   } catch (err) {
     console.error(err);
@@ -5594,6 +5627,7 @@ function export3MF() {
       const plateName = plate.name.replace(/\s+/g, '_').replace(/[\/\\?%*:|"<>]/g, '');
       const filename = `nest_${plateName}_${state.placed.length}pcs.3mf`;
       downloadBlob(blob, filename);
+      nsoCloseTopCard('menu-export');
       const profile = window.NSOCoolingProfiles.getProfile(result.profileId);
       setStatus(`Downloaded ${filename} - cooling profile "${profile ? profile.label : result.profileId}" baked in` +
                 (result.scene ? ' - scene saved, reopen this file to get the plate back' : '') + overlapNote);
@@ -5723,6 +5757,7 @@ function exportActiveModel3MF() {
     .then(result => {
       const blob = new Blob([result.bytes], { type: 'application/vnd.ms-package.3dmanufacturing-3dmodel+xml' });
       downloadBlob(blob, filename);
+      nsoCloseTopCard('menu-export');
       const profile = window.NSOCoolingProfiles.getProfile(result.profileId);
       setStatus(
         'Downloaded ' + filename + ' (' + object.triCount + ' tris' +

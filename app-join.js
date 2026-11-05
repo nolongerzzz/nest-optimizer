@@ -2933,6 +2933,7 @@ function exportActiveModel() {
       filename = filename.replace(/[\/\?%*:|"<>]/g, '_');
     } catch (e) {}
     downloadBlob(blob, filename);
+    if (typeof nsoCloseTopCard === 'function') nsoCloseTopCard('menu-export');
     setStatus(
       'Downloaded ' + filename + ' (' + tris + ' tris' +
       (dropped ? ', skipped ' + dropped + ' bad' : '') + '). Open in Bambu Studio.'
