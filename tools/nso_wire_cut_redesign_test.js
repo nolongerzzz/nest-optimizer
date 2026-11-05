@@ -263,8 +263,8 @@ withApp(async (page, logs) => {
     // The card, top to bottom: the Rotate piece switch (and the ring options it
     // piece shows), the mitre dial (with its typed box and
     // Square, and the − / + buttons under it), the bevel dial (its box, − / +
-    // and Plumb), the slider, ← number →, the Blade rows (Full / Sized / Notch and
-    // the slider + number rows the last two show), Cut. (The right-side-out offer
+    // and Plumb), the slider, ← number →, the Blade rows (Full / Sized / Notch / Whole plate and
+    // the slider + number rows the last three show), Cut. (The right-side-out offer
     // is hidden until a Cut refuses an inside-out piece.)
     const order = await page.evaluate(() => [...document.querySelectorAll('#cutter-tools button, #cutter-tools input, #cutter-tools svg')]
       .filter(e => !e.hidden).map(e => e.id));
@@ -273,8 +273,9 @@ withApp(async (page, logs) => {
         'cut-miter-dial cut-miter-deg btn-cut-square btn-cut-miter-minus btn-cut-miter-plus ' +
         'cut-bevel-dial cut-bevel-deg btn-cut-bevel-minus btn-cut-bevel-plus btn-cut-plumb ' +
         'cut-slider btn-cut-nudge-m cut-mm btn-cut-nudge-p ' +
-        'btn-cut-blade-full btn-cut-blade-sized btn-cut-blade-notch ' +
+        'btn-cut-blade-full btn-cut-blade-sized btn-cut-blade-notch btn-cut-blade-plate ' +
         'cut-blade-width-s cut-blade-width cut-blade-depth-s cut-blade-depth cut-blade-kerf-s cut-blade-kerf chk-cut-blade-strand ' +
+        'cut-plate-height-s cut-plate-height btn-cut-plate-above btn-cut-plate-below ' +
         'cut-notch-width-s cut-notch-width cut-notch-depth-s cut-notch-depth btn-cut',
       order.join(' '));
     const cards = await page.evaluate(() => ({

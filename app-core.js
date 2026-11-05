@@ -286,6 +286,7 @@ const UNDO_REPLACE_LABEL = {
   closeReplace: 'Undo: Close reverted',
   mirrorReplace: 'Undo: Mirror reverted',
   cropReplace: 'Undo: Crop reverted',
+  plateCutReplace: 'Undo: Whole-plate cut reverted',
   cropMove: 'Undo: Move reverted',
   wheelReplace: 'Undo: Pottery Wheel reverted',
   hollowReplace: 'Undo: Hollow reverted',
@@ -350,7 +351,8 @@ function undoLast() {
 const REDO_LABEL = {
   movePlaced: 'move re-applied', posePlaced: 'pose re-applied', addModels: 'clone re-applied',
   splitReplace: 'Cut re-applied', joinReplace: 'Join re-applied', subtractReplace: 'Subtract re-applied',
-  removePlaced: 'piece removed again', removeModel: 'model removed again'
+  removePlaced: 'piece removed again', removeModel: 'model removed again',
+  plateCutReplace: 'whole-plate cut re-applied'
 };
 function nsoCopyFields(o) {
   const f = Object.assign({}, o);
@@ -500,7 +502,7 @@ function redoLast() {
   state.undoStack.push(r.entry);
   if (state.undoStack.length > UNDO_MAX) nsoReleaseGeometries(nsoLeavingGeometries([state.undoStack.shift()]));
   updateUndoBtn();
-  const say = REDO_LABEL[r.entry.type] ||
+  const say = r.entry.redoLabel || REDO_LABEL[r.entry.type] ||
     (UNDO_REPLACE_LABEL[r.entry.type] || '').replace(/^Undo: /, '').replace(/ reverted$/, ' re-applied');
   setStatus('Redo: ' + (say || r.entry.label || 'step re-applied'));
 }
@@ -2049,7 +2051,7 @@ function placeNewModel(id, name, options) {
   /* Cut's armed cutter shows one piece alone (showEditPreview empties the plate).
      Crop's card is armed with no blade and keeps the plate: a piece imported while
      it is open - the cutter for Piece or Outline - lands on the plate beside the rest. */
-  if (state.cutterOpen && state.cutTool !== 'crop' && !options.keepSelection) {
+  if (state.cutterOpen && state.cutTool !== 'crop' && !options.keepSelection && !(typeof cutPlateOn === 'function' && cutPlateOn())) {
     showEditPreview();
     setStatus(`Loaded: ${name} (${size2.x.toFixed(0)}x${size2.y.toFixed(0)}x${size2.z.toFixed(0)} mm) - cutter open, slide red plane`);
   } else if (!options.keepSelection) {
@@ -4058,8 +4060,8 @@ function onCanvasPointerDown(event) {
             return;
           }
           if (p.sourceId !== state.editId) selectPlaced(idx);
-          // Crop's card: the click picks the piece; there is no blade to drop.
-          if (state.cutTool === 'crop') { event.stopPropagation(); return; }
+          // Crop's card: the click picks the piece; there is no blade to drop. Nor has the whole-plate blade.
+          if (state.cutTool === 'crop' || (typeof cutPlateOn === 'function' && cutPlateOn())) { event.stopPropagation(); return; }
           // Cut's card: the blade drops where the click landed, square to the
           // piece's length; holding the button drags it along.
           state.cutDragging = true;
@@ -4104,7 +4106,7 @@ function onCanvasPointerDown(event) {
         }
         if (state.cutterOpen && hit && hit.sourceId != null) {
           if (hit.sourceId !== state.editId) selectPlaced(idx);
-          if (state.cutTool === 'crop') { event.stopPropagation(); return; }
+          if (state.cutTool === 'crop' || (typeof cutPlateOn === 'function' && cutPlateOn())) { event.stopPropagation(); return; }
           state.cutDragging = true;
           if (state.controls) state.controls.enabled = false;
           cutTFromPointer(modelHits[0].point, modelHits[0]);
@@ -4193,7 +4195,7 @@ function selectPlaced(idx) {
       }
       updateEditSize();
       renderModelList();
-      if (state.cutterOpen) {
+      if (state.cutterOpen && !(typeof cutPlateOn === 'function' && cutPlateOn())) {
         removeCutHelper();
         state.previewMesh = p.mesh;
         if (state.cutT == null) state.cutT = 0.5;

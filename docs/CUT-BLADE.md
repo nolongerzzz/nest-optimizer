@@ -1,6 +1,8 @@
 # Cut: the sized blade, strands, and notches
 
 The Cut card's blade has three modes (the Blade row), and two switches above it.
+(A fourth, **Whole plate** - one level blade across every piece on the plate -
+is its own write-up: [CUT-PLATE.md](CUT-PLATE.md).)
 
 - **Full blade** (the default, unchanged): a plane across the whole piece. It
   splits everything in its path, all the way through, with no kerf. One piece

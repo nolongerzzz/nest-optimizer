@@ -2575,6 +2575,8 @@ function cutActiveModel(opts) {
     setStatus('Open Cut first', true);
     return;
   }
+  // The Whole plate blade (app-cut-plate.js) cuts every piece at one height: no picked piece, no plane of its own.
+  if (typeof cutPlateOn === 'function' && cutPlateOn()) { cutPlateActiveRun(); return; }
   const m = getActiveModel();
   if (!m) {
     setStatus('Load an STL first', true);

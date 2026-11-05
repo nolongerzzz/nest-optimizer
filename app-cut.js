@@ -452,11 +452,14 @@ function cutBladeState() {
   return state.cutBlade;
 }
 
-/** 'full' | 'sized' | 'notch'. Sized and notch both cut a box (b.sized). */
+/** 'full' | 'sized' | 'notch' | 'plate'. Sized and notch both cut a box (b.sized). Plate is the whole-plate blade
+    (app-cut-plate.js): a level plane across every piece, not a blade on one. */
 function cutSetBladeMode(mode) {
   const b = cutBladeState();
-  b.mode = mode === 'sized' || mode === 'notch' ? mode : 'full';
-  b.sized = b.mode !== 'full';
+  const was = b.mode;
+  b.mode = mode === 'sized' || mode === 'notch' || mode === 'plate' ? mode : 'full';
+  b.sized = b.mode === 'sized' || b.mode === 'notch';
+  if ((was === 'plate') !== (b.mode === 'plate') && typeof cutPlateModeChanged === 'function') cutPlateModeChanged();
 }
 
 // The piece as a soup in the cut frame, and the plane's section of it. Both
@@ -800,12 +803,15 @@ function updateCutterUI() {
   const cutBtn = document.getElementById('btn-cut');
   if (status) {
     status.textContent = cutting
-      ? (getActiveModel() && state.cutHelper
+      ? (typeof cutPlateOn === 'function' && cutPlateOn()
+        ? 'Whole plate: the blade crosses every piece. Set its height, then Cut.'
+        : getActiveModel() && state.cutHelper
         ? 'Click the piece to move the blade; slide, nudge or angle it, then Cut.'
         : 'Click a piece to drop a square blade on it.')
       : 'Cutter off.';
   }
   if (cutBtn) cutBtn.disabled = !cutting || !getActiveModel() || !state.cutHelper;
+  if (cutting && typeof cutPlateOn === 'function' && cutPlateOn()) cutPlateSync();   // the plate blade needs no picked piece
   const tools = document.getElementById('cutter-tools');
   if (tools) tools.classList.toggle('is-open', cutting);
   syncCutRightSideOutButton();
@@ -846,6 +852,7 @@ function openCutter(tool) {
   state.selectedIndex = -1;
   if (state.controls) state.controls.enabled = true;
   removeCutHelper();
+  if (typeof cutPlateRemoveHelper === 'function') cutPlateRemoveHelper();
   state.previewMesh = null;
   if (typeof clearSelectionOutline === 'function') clearSelectionOutline();
   if (typeof paintJoinHighlights === 'function') paintJoinHighlights();
@@ -877,6 +884,7 @@ function closeCutter(silent) {
   if (typeof paintJoinHighlights === 'function') paintJoinHighlights();
   if (state.controls) state.controls.enabled = true;
   removeCutHelper();
+  if (typeof cutPlateRemoveHelper === 'function') cutPlateRemoveHelper();
   // Pieces are not cleared or rebuilt: the cutter is the blade only.
   state.previewMesh = null;
   updateCutterUI();
@@ -1129,6 +1137,8 @@ function cutWireMiterStep(id, sign, which) {
 function showEditPreview() {
   const m = getActiveModel();
   if (!m || !state.scene || !state.modelGroup) return;
+  // The whole-plate blade keeps the whole plate up: there is no one piece to show alone.
+  if (typeof cutPlateOn === 'function' && cutPlateOn()) return;
 
   const cam = freezeCamera();
   removeCutHelper();
@@ -1384,8 +1394,8 @@ function buildCutHelper() {
     removeCutHelper();
     state.previewMesh = keep;
   }
-  // Crop's card shares the selection, not the blade.
-  if (state.cutTool === 'crop') return;
+  // Crop's card shares the selection, not the blade. So does the whole-plate blade (app-cut-plate.js).
+  if (state.cutTool === 'crop' || (typeof cutPlateOn === 'function' && cutPlateOn())) return;
   const info = getCutPlaneLocal(m);
   if (!info) return;
 
@@ -3225,7 +3235,8 @@ function cutSplitAt(model, info) {
 }
 
 // ===================== The sized blade: card and cut =====================
-const CUT_BLADE_MODES = { full: 'btn-cut-blade-full', sized: 'btn-cut-blade-sized', notch: 'btn-cut-blade-notch' };
+const CUT_BLADE_MODES = { full: 'btn-cut-blade-full', sized: 'btn-cut-blade-sized', notch: 'btn-cut-blade-notch',
+                          plate: 'btn-cut-blade-plate' };
 /* [number box, slider, state key]: the three sizes of the Sized blade and the two of Notch. */
 const CUT_BLADE_FIELDS = [['cut-blade-width', 'cut-blade-width-s', 'width'], ['cut-blade-depth', 'cut-blade-depth-s', 'depth'],
                           ['cut-blade-kerf', 'cut-blade-kerf-s', 'kerf'],
@@ -3263,7 +3274,7 @@ function syncCutBladeUI() {
   const notch = document.getElementById('cut-notch-fields');
   if (sized) sized.hidden = mode !== 'sized';
   if (notch) notch.hidden = mode !== 'notch';
-  if (mode !== 'full') {
+  if (mode === 'sized' || mode === 'notch') {
     CUT_BLADE_FIELDS.forEach(function (p) {
       const num = document.getElementById(p[0]), sl = document.getElementById(p[1]), v = b[p[2]];
       // The range always takes in the number it shows (a slider at its end while its box says 10 is a lie), and a
@@ -3282,7 +3293,10 @@ function syncCutBladeUI() {
   const rings = document.getElementById('cut-rotate-rings');
   if (rings) rings.hidden = !state.cutRotate;
   const btn = document.getElementById('btn-cut');
-  if (btn) btn.title = mode === 'notch'
+  if (typeof cutPlateSync === 'function') cutPlateSync();
+  if (btn) btn.title = mode === 'plate'
+    ? 'Cut every piece on the plate at the blade\'s height. Keep above: what is under the blade goes and the rest is set back on the plate, so each piece is shorter by that height. Keep below: what is above goes. One Undo puts the whole plate back.'
+    : mode === 'notch'
     ? 'Cut the notch: a nick of your width and depth in from the edge of the strand under the click. Only that strand is touched, and it stops short of the far side. One Undo puts it back.'
     : mode === 'sized'
       ? 'Cut the sized blade\'s slot out of the piece: only what the blade box holds comes out, kerf and all' +

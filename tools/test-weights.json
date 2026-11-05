@@ -97,6 +97,8 @@
     "notch:strand-drive": {"weight":16835,"note":"measured with PW_CHROMIUM"},
     "notch:sever-drive": {"weight":9720,"note":"measured with PW_CHROMIUM"},
     "notch:test": {"weight":104,"note":"measured"},
+    "cut:plate": {"weight":119,"note":"measured"},
+    "cut:plate-drive": {"weight":19614,"note":"measured with PW_CHROMIUM, 46 gates"},
     "cavity:thickwall": {"weight":89,"note":""},
     "centerlock:test": {"weight":21900,"note":""},
     "ci:failures": {"weight":600,"note":"estimate: 0.3 s on the cloud box x 1.7, rounded up (ci-self-hosted)"},

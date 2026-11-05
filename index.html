@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=e9a4c8e3" />
+  <link rel="stylesheet" href="styles.css?v=25eff12a" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -721,15 +721,15 @@
               <div id="cutter-tools" class="cutter-tools">
               <!-- Rotate piece: the rotate rings on the piece while Cut stays open (app-cut.js cutSetRotate,
                    app-rotate-handles.js). The ring options it shows are in the row under it. -->
-              <div class="cut-switches">
+              <div class="cut-switches cut-per-piece">
               <label class="cut-switch" title="Show the rotate rings on the piece so you can turn it while Cut is open. The blade follows the piece."><input type="checkbox" id="chk-cut-rotate"><span>Rotate piece</span></label>
               </div>
-              <div class="cut-switches cut-rings" id="cut-rotate-rings" hidden>
+              <div class="cut-switches cut-rings cut-per-piece" id="cut-rotate-rings" hidden>
               <span class="hint">Turn is on.</span>
               <label class="cut-switch" title="Also show the ring that tips the piece front over back."><input type="checkbox" id="chk-cut-ring-fb"><span>Lean front/back</span></label>
               <label class="cut-switch" title="Also show the ring that tips the piece side over side."><input type="checkbox" id="chk-cut-ring-ss"><span>Lean side/side</span></label>
               </div>
-              <div class="cut-miter">
+              <div class="cut-miter cut-per-piece">
               <svg id="cut-miter-dial" class="cut-dial" viewBox="0 0 100 100" width="104" height="104"
                    role="slider" tabindex="0" aria-label="Mitre, degrees" aria-valuemin="0" aria-valuemax="359.9" aria-valuenow="0">
                 <circle class="cut-dial-rail" cx="50" cy="50" r="40"></circle>
@@ -757,7 +757,7 @@
               </div>
               <!-- Bevel: the blade's lean off plumb, about its own horizontal line
                    (app-cut.js, cutWireBevelDial). Seen end-on, far end to the right. -->
-              <div class="cut-miter cut-bevel">
+              <div class="cut-miter cut-bevel cut-per-piece">
               <svg id="cut-bevel-dial" class="cut-dial" viewBox="0 0 100 100" width="104" height="104"
                    role="slider" tabindex="0" aria-label="Bevel, degrees" aria-valuemin="-90" aria-valuemax="90" aria-valuenow="0">
                 <title>Bevel: the blade's lean off plumb. Positive tips the top of the blade toward the piece's far end. Drag round the rail (it rests on the painted ticks), click a dart or press an arrow key for 1° (Shift: 0.1°).</title>
@@ -788,13 +788,13 @@
               </div>
               <button id="btn-cut-plumb" class="btn btn-secondary cut-plumb" type="button" title="Set the bevel that stands the blade vertical on the plate, whatever pose the piece came with. The readout shows the bevel it applied.">Plumb</button>
               </div>
-              <input type="range" id="cut-slider" min="1" max="99" step="0.1" value="50" aria-label="Blade position along the piece, mm" />
-              <div class="edit-row cut-mm-row">
+              <input type="range" id="cut-slider" class="cut-per-piece" min="1" max="99" step="0.1" value="50" aria-label="Blade position along the piece, mm" />
+              <div class="edit-row cut-mm-row cut-per-piece">
               <button id="btn-cut-nudge-m" class="btn btn-secondary" type="button" aria-label="Blade 0.1 mm toward the low end" title="0.1 mm toward the low end (Shift: 1 mm)">←</button>
               <input type="number" id="cut-mm" class="cut-no-spin" value="50" min="0.5" max="400" step="0.1" aria-label="Blade position, mm from the low end" />
               <button id="btn-cut-nudge-p" class="btn btn-secondary" type="button" aria-label="Blade 0.1 mm toward the high end" title="0.1 mm toward the high end (Shift: 1 mm)">→</button>
               </div>
-              <p id="cut-readout" class="cut-readout">—</p>
+              <p id="cut-readout" class="cut-readout cut-per-piece">—</p>
               <!-- Blade. Full: the plane that splits the piece (the default). Sized: a box - width, depth, kerf - that
                    takes out only its own volume (and, with Single strand, only the strand under the click).
                    Notch: a nick in from the edge of the strand under the click (nso_notch.js, app-cut.js cutNotchAt). -->
@@ -806,6 +806,8 @@
                       title="Sized blade: a box of your width, depth and kerf. Click a face to put it there; it goes in against that face and takes out only its own volume - between two things, or a notch that stops short of the far side.">Sized blade</button>
               <button id="btn-cut-blade-notch" class="btn btn-secondary" type="button" aria-pressed="false"
                       title="Notch: click a strand (a cord, a turn of a spiral). The blade fits that strand and cuts a nick in from its edge, of the width and depth you set. Only that strand is touched.">Notch</button>
+              <button id="btn-cut-blade-plate" class="btn btn-secondary" type="button" aria-pressed="false"
+                      title="Whole plate: one level blade across the plate, on a height slider. Cut cuts every piece it crosses at that height, at once - drop the bottom of every piece to shorten them all by the same amount (a long pillar, to print-test faster), or the top.">Whole plate</button>
               </div>
               <div class="cut-blade-sliders" id="cut-blade-fields" hidden>
               <div class="cut-slide-row" title="How wide the blade is across the cut (mm)"><span class="cut-slide-label">Width</span>
@@ -818,6 +820,19 @@
               <input type="range" id="cut-blade-kerf-s" min="0.2" max="10" step="0.1" value="1" aria-label="Kerf, mm">
               <input type="number" id="cut-blade-kerf" class="cut-no-spin" min="0.2" max="1000" step="0.1" value="1" aria-label="Kerf, mm"></div>
               <label class="cut-switch cut-strand" title="Take only the strand under the click: where the blade's box holds several strands (the turns of a spiral), the others are left alone. The strand is outlined in yellow."><input type="checkbox" id="chk-cut-blade-strand" checked><span>Single strand</span></label>
+              </div>
+              <!-- Whole plate: one level blade across every piece (app-cut-plate.js, nso_cut_plate.js, docs/CUT-PLATE.md). -->
+              <div class="cut-blade-sliders" id="cut-plate-fields" hidden>
+              <div class="cut-slide-row" title="How high the blade stands above the plate (mm). Every piece it crosses is cut at this height."><span class="cut-slide-label">Height</span>
+              <input type="range" id="cut-plate-height-s" min="1" max="20" step="0.1" value="5" aria-label="Blade height above the plate, mm">
+              <input type="number" id="cut-plate-height" class="cut-no-spin" min="1" max="1000" step="0.1" value="5" aria-label="Blade height above the plate, mm"></div>
+              <div class="edit-row cut-plate-keep" role="group" aria-label="Keep">
+              <button id="btn-cut-plate-above" class="btn btn-secondary" type="button" aria-pressed="true"
+                      title="Keep the part above the blade: what is under it is cut away and the rest is set back down on the plate, so every piece comes out shorter by the blade's height.">Keep above</button>
+              <button id="btn-cut-plate-below" class="btn btn-secondary" type="button" aria-pressed="false"
+                      title="Keep the part below the blade: what is above it is cut away and the pieces keep their feet.">Keep below</button>
+              </div>
+              <p id="cut-plate-readout" class="cut-readout cut-plate-readout">—</p>
               </div>
               <div class="cut-blade-sliders" id="cut-notch-fields" hidden>
               <div class="cut-slide-row" title="How long the nick is along the strand (mm). The floor is 0.2."><span class="cut-slide-label">Notch width</span>
@@ -2473,6 +2488,7 @@
   <script src="nso_skin_patch.js?v=4b2304fa"></script>
   <script src="nso_carve.js?v=a47e16e3"></script>
 <script src="nso_notch.js?v=b697e802"></script>
+<script src="nso_cut_plate.js?v=0683b280"></script>
   <script src="nso_seat_surface.js?v=293d7ca2"></script>
   <script src="nso_thickness.js?v=165379d6"></script>
   <script src="nso_hollow.js?v=9af04282"></script>
@@ -2535,7 +2551,7 @@
   <script src="nso-helpers.js?v=9c476e39"></script>
   <script src="nso-recent.js?v=f03d6f13"></script>
   <script src="nso-bounds.js?v=778acac4"></script>
-  <script src="app-core.js?v=e17e2bab"></script>
+  <script src="app-core.js?v=a608c1d1"></script>
   <!-- Up to six plates (beds): the active one is state.models / state.placed, the rest are kept beside it. docs/BEDS.md. -->
   <script src="app-beds.js?v=3d221bc4"></script>
 
@@ -2543,7 +2559,10 @@
 
 
 
-  <script src="app-cut.js?v=848008b3"></script>
+  <script src="app-cut.js?v=9eed2a55"></script>
+  <!-- Cut card, Whole plate blade: one level blade across every piece. After app-cut.js, whose cutOneSide / cutOverlay
+       it calls, and before the Crop card; it commits through app-sculpt.js's NSO_sculptCommitRaw at press time. docs/CUT-PLATE.md. -->
+  <script src="app-cut-plate.js?v=f56a1400"></script>
   <script src="app-finish.js?v=90a09756"></script>
   <script src="app-sculpt.js?v=f522aee3"></script>
   <script src="app-extend.js?v=e24e3562"></script>
@@ -2614,7 +2633,7 @@
   <script src="app-fasteners.js?v=22db4ba3"></script>
   <script src="app-assemble.js?v=60984bfb"></script>
   <script src="app-sel-outline.js?v=c1a5b4df"></script>
-  <script src="app-join.js?v=f9860f3a"></script>
+  <script src="app-join.js?v=5a50ad61"></script>
   <script src="app-center-lock.js?v=ee95c074"></script>
   <script src="app-oversize-washer.js?v=a445c3ff"></script>
   <script src="app-join-triple.js?v=95a9c48a"></script>

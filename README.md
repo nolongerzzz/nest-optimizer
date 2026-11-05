@@ -155,6 +155,16 @@ Smart build-plate packing for 3D printing.
   and **Rotate piece** shows the rotate rings so the piece can be turned while
   Cut stays open. A sized cut that goes right through something (a finger)
   separates it into pieces, and mitre and bevel turn the blade in place. See [docs/CUT-BLADE.md](docs/CUT-BLADE.md).
+  **Whole plate** (the Blade row's fourth button) is one level blade across the
+  *plate*, on a **Height** slider: **Cut** cuts every piece it crosses at that
+  height, at once, and one Undo puts the plate back. **Keep above** drops what is
+  under the blade and sets the rest back on the plate, so every piece comes out
+  shorter by the same amount (shorten a shared pillar once, to print-test faster);
+  **Keep below** drops the top. A piece the blade does not clear by 1 mm at both
+  ends (lower than it, or lifted past it) is left as it is, and named. Nothing is
+  cut unless every piece the blade crosses can be - a piece that will not close
+  or carries paint stops the press with the plate untouched. See
+  [docs/CUT-PLATE.md](docs/CUT-PLATE.md).
 - **Crop** (its own card, under Cut) takes a middle section out of a piece: set
   the box by two distances along the cut axis (or tick **Box** and drag it on
   the piece), press Crop, and the slab inside the box is removed, the far part
