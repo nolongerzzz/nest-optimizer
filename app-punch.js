@@ -5,6 +5,10 @@
 // Punch arms the card. A click on a face of a piece places the hole there,
 // normal to the face; the card's numbers shape it:
 //   Ø        the hole (default 3.0)
+//   Thread   None, or M2..M30 / G1/8..G2 / NPT1/8..NPT2 (and Left-hand): the hole is TAPPED -
+//            cut as that thread's bolt plus the 0.2 mm fit, so the bolt Gen+ > Fasteners makes
+//            turns in it. Ø is then the thread's own (shown, not typed, no ring handle).
+//            docs/THREADS.md
 //   Depth    Through, or mm (a field appears)
 //   Pattern  None · Grid · Radial
 //     Grid   Rows, Cols, Pitch (one field; × splits it into X and Y), Anchor
@@ -103,6 +107,14 @@ function NSO_punchOpts() {
   var depthSel = NSO_punchEl('sel-punch-depth');
   var o = { diaMm: num('inp-punch-dia'), depth: depthSel && depthSel.value === 'mm' ? num('inp-punch-depth') : 'through',
             pattern: NSO_punchPattern() };
+  var th = NSO_punchEl('sel-punch-thread');
+  if (th && th.value) {
+    var left = NSO_punchEl('chk-punch-thread-left');
+    o.thread = { size: th.value, hand: left && left.checked ? 'left' : 'right' };
+    // the hole's Ø is the thread's (its crests plus the fit): the ghost's rings, the handles and the floors read it
+    var ts = (typeof NSO_Thread !== 'undefined') ? NSO_Thread.spec(th.value, { hand: o.thread.hand }) : null;
+    if (ts && ts.ok) o.diaMm = ts.spec.major + 2 * NSO_Thread.DEFAULTS.fit;
+  }
   if (o.pattern === 'grid') {
     var px = num('inp-punch-pitch');
     o.rows = num('inp-punch-rows'); o.cols = num('inp-punch-cols');
@@ -118,6 +130,16 @@ function NSO_punchSyncRows() {
   var g = NSO_punchEl('punch-grid-rows'), r = NSO_punchEl('punch-radial-rows');
   if (g) g.hidden = pat !== 'grid';
   if (r) r.hidden = pat !== 'radial';
+  var tsel = NSO_punchEl('sel-punch-thread'), tl = NSO_punchEl('punch-thread-left-row'), dia = NSO_punchEl('inp-punch-dia');
+  if (tl) tl.hidden = !(tsel && tsel.value);
+  if (dia) {                                       // a threaded hole's Ø is the thread's: shown, not typed
+    var threaded = !!(tsel && tsel.value);
+    dia.disabled = threaded;
+    if (threaded && typeof NSO_Thread !== 'undefined') {
+      var ts = NSO_Thread.spec(tsel.value, {});
+      if (ts.ok) dia.value = (ts.spec.major + 2 * NSO_Thread.DEFAULTS.fit).toFixed(1);
+    }
+  }
   var py = NSO_punchEl('punch-pitch-y-row'), dm = NSO_punchEl('punch-depth-mm-row'), ds = NSO_punchEl('sel-punch-depth');
   if (py) py.hidden = !split;
   var lab = NSO_punchEl('punch-pitch-label');
@@ -350,8 +372,8 @@ function NSO_punchHitAt(clientX, clientY) {
     var t = L2 > 0 ? Math.max(0, Math.min(1, ((clientX - a.x) * ex + (clientY - a.y) * ey) / L2)) : 0;
     return Math.hypot(clientX - a.x - t * ex, clientY - a.y - t * ey);
   }
-  // 1. the first hole's ring
-  if (holes.length) {
+  // 1. the first hole's ring (a threaded hole's Ø is the thread's, not dragged)
+  if (holes.length && !o.thread) {
     var pts = NSO_punchCircle(holes[0].centre, holes[0].axis, holes[0].dia / 2, 48).map(function (p) { return NSO_punchScreen(m, p); });
     for (var i = 0; i < pts.length; i++) {
       var a = pts[i], b = pts[(i + 1) % pts.length];
@@ -781,7 +803,7 @@ if (typeof document !== 'undefined') {
         if (on && px && py) py.value = px.value;      // Y starts where the one pitch was
         NSO_punchSyncRows(); NSO_punchPreview();
       });
-      ['inp-punch-dia', 'sel-punch-depth', 'inp-punch-depth', 'inp-punch-rows', 'inp-punch-cols', 'inp-punch-pitch',
+      ['inp-punch-dia', 'sel-punch-thread', 'chk-punch-thread-left', 'sel-punch-depth', 'inp-punch-depth', 'inp-punch-rows', 'inp-punch-cols', 'inp-punch-pitch',
        'inp-punch-pitch-y', 'inp-punch-count', 'inp-punch-radius'].forEach(function (id) {
         var el = NSO_punchEl(id);
         if (!el) return;

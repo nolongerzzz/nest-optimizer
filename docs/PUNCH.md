@@ -21,6 +21,7 @@ with the reason in words; the piece is as it was.
 |---|---|---|
 | `diaMm` | 3 | the hole's flats; under two nozzle widths is refused (it prints shut) |
 | `depth` | `'through'` | or mm below the surface |
+| `thread` | none | a thread size (`'M6'`, `'G1/2'`, `'NPT3/4'`) or `{ size, hand, fit, major, pitch }`: a **tapped** hole - see [THREADS.md](THREADS.md). `diaMm` is then the thread's (major + 2 × fit), the wall floors read it, a blind hole must be 2 pitches deep |
 | `countersink` | `'none'` | the only value for now; anything else is refused |
 | `nozzle` | 0.4 | the wall floor is two of these (0.8) |
 | `pattern` | `'none'` | `'grid'` or `'radial'`, or `{ type, ...fields }` |
@@ -83,6 +84,12 @@ Two nozzle widths (0.8 mm at 0.4). Measured with the nominal radius:
 The worst one is named; `(N more places are under it too)` counts the rest.
 `violations` lists them all for a card to mark.
 
+## Threaded cutters
+
+With `thread` set, each hole's cutter is `NSO_Thread.cutter`'s threaded rod (the thread + the 0.2 mm fit), flat at both ends, mapped onto the
+hole's axis by a half-turn rotation (a mirror would flip the hand). It is built once per (thread, depth) and mapped for every hole. The
+ghost draws it as it draws any cutter. `npm run punch:thread`.
+
 ## Cutters
 
 One closed, outward-wound cylinder per hole: 48 sides at Ø6 and up, 8 per mm of
@@ -108,7 +115,8 @@ SUBTRACT › **Punch** arms it; a click on a face of a piece places the hole
 
 | row | |
 |---|---|
-| Ø | default 3.0 |
+| Ø | default 3.0 (read-only when a Thread is chosen: the thread's own) |
+| Thread | None, or M2-M30 / G1/8-G2 / NPT1/8-NPT2 (and Left-hand): the hole is tapped, [THREADS.md](THREADS.md) |
 | Depth | Through ▾ or mm (a Deep field appears) |
 | Pattern | None · Grid · Radial |
 | Grid | Rows, Cols, Pitch (one field; × splits it into Pitch X and Pitch Y, Y starting at X), Anchor Corner \| Centre |

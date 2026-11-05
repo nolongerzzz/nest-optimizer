@@ -39,7 +39,20 @@ Smart build-plate packing for 3D printing.
   a printed-fit gap, walls and closed end = the tube's own wall, closed end down)
   and **2-way / 3-way splitters** - a trunk into 2 or 3 branches - each a new
   piece of its own, not an edit to the selected one
-  ([docs/FITTINGS.md](docs/FITTINGS.md))
+  ([docs/FITTINGS.md](docs/FITTINGS.md)). **Threaded ends**: a male or female
+  thread on a sleeve that takes the selected tube, threaded nipples, couplers,
+  adapters, plugs and screw caps, and male / female ends on the splitter's runs
+  (G, NPT and metric; [docs/THREADS.md](docs/THREADS.md))
+- **Fasteners** (Gen+): a threaded **rod**, a **bolt** (hex or socket head), a
+  **nut** and a bolt + nut set, M2 to M30 (coarse and fine) or G pipe sizes or
+  a typed Ø and pitch. The nut's bore is the bolt's thread plus a 0.2 mm fit, so
+  the pair turns; every piece is a closed, wound-outward mesh built directly
+  (no boolean), measured by rays in `npm run thread:test`
+  ([docs/THREADS.md](docs/THREADS.md))
+- **Threaded holes** (Subtract > Punch > **Thread**): the Punch card cuts a
+  *tapped* hole - M2 to M30, G or NPT (tapered), right or left hand, through or
+  blind - alone, in a grid or on a circle, sized to take the bolt Fasteners makes
+  ([docs/THREADS.md](docs/THREADS.md))
 - **Picture** (Gen+): a photo or a scan becomes a relief slab - a flat base with
   a dense relief on top, heights from the picture (auto-contrast, 2 / 4 / 8 / 16
   levels or smooth, an exact box-filter resample at the Detail you set). Closed

@@ -19,6 +19,8 @@
      8. an arrow nudges the anchor 1 mm
      9. two holes 0.5 mm apart: the refusal in the readout with its numbers,
         PUNCH off, and PUNCH forced anyway cuts nothing
+    9b. a TAPPED hole: M5 from the Thread select; the Ø field shows 5.4 read-only; PUNCH
+        cuts the thread (crests and roots measured in the piece), one Undo restores it
     10. Escape disarms; Carve armed over Punch puts Punch away; no page errors */
 
 const fs = require('fs');
@@ -245,6 +247,55 @@ withApp(async (page, logs) => {
   const d9 = await undoDepth(page), fp9 = await fingerprint(page);
   const forced = await page.evaluate(() => NSO_punchGo());
   check('PUNCH forced anyway cuts nothing', !forced.ok && (await undoDepth(page)) === d9 && (await fingerprint(page)) === fp9, forced.reason);
+
+  console.log('\n=== 9b. a tapped (threaded) hole, through the real card ===');
+  {
+    await page.click('#punch-pattern-row [data-pattern="none"]');
+    await page.selectOption('#sel-punch-thread', 'M5');
+    await frames(page, 2);
+    const f = await page.evaluate(() => { const d = document.getElementById('inp-punch-dia'); return { v: d.value, dis: d.disabled, left: !document.getElementById('punch-thread-left-row').hidden }; });
+    check('choosing M5 puts the thread\'s Ø (5 + 2 x 0.2 = 5.4) in the Ø field, read-only, and shows Left-hand', f.v === '5.4' && f.dis && f.left, JSON.stringify(f));
+    const at = [mid[0] + 8, mid[1] + 6, mid[2]];
+    await click(page, await screenOf(page, at));
+    await page.waitForFunction(() => nsoPunchState().ghosts > 0, null, { timeout: 5000 }).catch(() => {});
+    st = await S(page);
+    check('one ghost, and the readout says it is an M5 threaded hole', st.ok && st.ghosts === 1 && /M5 threaded/.test(st.readout), st.readout);
+    const H = st.holes[0], ringPt = [H.centre[0] + H.dia / 2, H.centre[1], H.centre[2]];
+    const ringHit = await page.evaluate(r => { const p = NSO_punchScreen(getActiveModel(), r); const h = NSO_punchHitAt(p.x, p.y); return h ? h.handle : null; }, ringPt);
+    check('a threaded hole has no Ø ring handle (its Ø is the thread\'s)', ringHit !== 'dia', String(ringHit));
+    const dT = await undoDepth(page), fpT = await fingerprint(page);
+    await page.click('#btn-punch-go');
+    await page.waitForFunction(d => state.undoStack.length > d && !nsoPunchState().busy, dT, { timeout: 60000 }).catch(() => {});
+    check('PUNCH made one Undo step', (await undoDepth(page)) === dT + 1, await page.evaluate(() => document.getElementById('status').textContent));
+    const soup = await page.evaluate(() => Array.from(getActiveModel().rawTris));
+    const hit = (o, d) => { const hs = [];
+      for (let t = 0; t < soup.length; t += 9) {
+        const e1 = [soup[t + 3] - soup[t], soup[t + 4] - soup[t + 1], soup[t + 5] - soup[t + 2]], e2 = [soup[t + 6] - soup[t], soup[t + 7] - soup[t + 1], soup[t + 8] - soup[t + 2]];
+        const p = [d[1] * e2[2] - d[2] * e2[1], d[2] * e2[0] - d[0] * e2[2], d[0] * e2[1] - d[1] * e2[0]];
+        const det = e1[0] * p[0] + e1[1] * p[1] + e1[2] * p[2];
+        if (Math.abs(det) < 1e-12) continue;
+        const w = [o[0] - soup[t], o[1] - soup[t + 1], o[2] - soup[t + 2]], u = (w[0] * p[0] + w[1] * p[1] + w[2] * p[2]) / det;
+        if (u < -1e-9 || u > 1 + 1e-9) continue;
+        const q = [w[1] * e1[2] - w[2] * e1[1], w[2] * e1[0] - w[0] * e1[2], w[0] * e1[1] - w[1] * e1[0]];
+        const v = (d[0] * q[0] + d[1] * q[1] + d[2] * q[2]) / det;
+        if (v < -1e-9 || u + v > 1 + 1e-9) continue;
+        const tt = (e2[0] * q[0] + e2[1] * q[1] + e2[2] * q[2]) / det;
+        if (tt > 1e-9) hs.push(tt);
+      }
+      hs.sort((a, b) => a - b); return hs; };
+    let lo = Infinity, hi = 0;
+    for (let k = 0; k < 80; k++) { const z = 1.5 + 0.8 * k / 80, h = hit([H.centre[0], H.centre[1], z], [1, 0, 0]); if (h.length) { lo = Math.min(lo, h[0]); hi = Math.max(hi, h[0]); } }
+    const m5 = { R: 2.5, h: 0.61343 * 0.8 };
+    check('the tapped hole\'s wall in the piece runs from r ' + lo.toFixed(3) + ' to ' + hi.toFixed(3) + ' (M5 + 0.2: ' + (m5.R - m5.h + 0.2).toFixed(3) + ' to 2.700)', Math.abs(lo - (m5.R - m5.h + 0.2)) < 5e-3 && Math.abs(hi - 2.7) < 5e-3);
+    check('open through the 6 mm slab (a ray down the hole\'s axis meets nothing)', hit([H.centre[0], H.centre[1], 12], [0, 0, -1]).length === 0);
+    await page.click('#btn-undo');
+    await frames(page, 3);
+    check('one Undo puts the slab back', (await undoDepth(page)) === dT && (await fingerprint(page)) === fpT);
+    await page.selectOption('#sel-punch-thread', '');
+    await frames(page, 2);
+    const back = await page.evaluate(() => { const d = document.getElementById('inp-punch-dia'); return { dis: d.disabled, left: document.getElementById('punch-thread-left-row').hidden }; });
+    check('None puts the plain Ø field back, typable', !back.dis && back.left, JSON.stringify(back));
+  }
 
   console.log('\n=== 10. Escape disarms ===');
   await page.evaluate(() => { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); });

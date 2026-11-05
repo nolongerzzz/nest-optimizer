@@ -87,12 +87,19 @@ outlet corner is where trigonometry puts it; each outlet is open (nothing
 crossed from the junction out along its axis). Six more sizes and angles
 (20° to 80°, Ø12 to Ø30, walls 1.2 to 2.4) pass the same gates.
 
+## Threaded ends
+
+Plain ends are the default. **Threaded ends** - a male or female thread on the selected tube's sleeve, nipples, couplers, adapters, plugs and
+screw caps, and male / female ends on the splitter's trunk and branches - are in [THREADS.md](THREADS.md). `npm run fittings:thread`. The
+splitter's ends are checked for fit (a spigot's root must reach into the run's wall, a socket must leave the hub and its neighbours room)
+and refused in words when they do not.
+
 ## Flags — not in the ticket
 
-- **Plain ends.** The splitter's trunk and branches are plain pipes of the Ø
-  you ask for, so a tube joins it with the Join / Connect tools or a sleeve.
-  Socket (slip-over) and spigot (slip-in) ends, so a splitter takes a pipe
-  without gluing, are the obvious next step.
+- **Plain ends by default.** The splitter's trunk and branches are plain pipes of the Ø
+  you ask for, so a tube joins it with the Join / Connect tools or a sleeve. Threaded male
+  and female ends are now an option ([THREADS.md](THREADS.md)); slip-over / slip-in (unthreaded)
+  socket and spigot ends are still not here.
 - **"Splitter" means one in, N out**, radially symmetric, same wall
   everywhere. A T (two outlets opposite each other at 90°) is a 2-way at 80°,
   the nearest it goes; a true cross or an asymmetric manifold is not here.

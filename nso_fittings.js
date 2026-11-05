@@ -54,6 +54,13 @@
      - an angle outside 10 to 80 degrees
      - branch ends that would touch (the outlets must stand a millimetre clear of each other)
 
+   THREADED ENDS (docs/THREADS.md). trunkEnd / branchEnd: 'plain' (default), 'male' or 'female', with trunkThread /
+   branchThread the size (G1/2, NPT3/4, M20...). A MALE end is a threaded spigot (nso_thread.js's rod) added past the
+   run's end, its bore the run's, held to a wall under the thread's root; it must fit inside the run's outside. A FEMALE
+   end is the run's last threadLen mm made a socket: a boss round it where the run is too thin to leave a wall, the
+   internal thread cut into it (nso_thread.js's cutter, the 0.2 mm fit), the flow bore stopping at its floor. A male
+   trunk makes the splitter stand on its spigot; the piece is lifted so its lowest point is z = 0.
+
    The kernel is the app's own (nso_csg.js: Manifold, WASM) and is handed in: splitter(opts, wasm). */
 
 (function (root) {
@@ -133,33 +140,115 @@
     return res;
   }
 
+  /* The open end of a tube soup read - its outside Ø and wall - through Tube edge's own reader, held to a wall that does not lean
+     (a cap and a sleeve slip over a straight pipe). { ok, od, wall, read, end } or { ok: false, reason }; `what` finishes the
+     reader's own refusal ("A cap fits the open, round end of a tube."). */
+  function readTube(soup, opts, what, tail) {
+    var res = { ok: false, reason: '' };
+    var rd = (typeof NSO_tubeEdgeRead === 'function') ? NSO_tubeEdgeRead : (root && root.NSO_tubeEdgeRead);
+    if (typeof rd !== 'function') { res.reason = 'nso_tube_edge.js must be loaded - the ' + what + ' reads the tube\'s end with its reader'; return res; }
+    var f32 = (soup instanceof Float32Array) ? soup : new Float32Array(soup || []);
+    var r = rd(f32, { point: opts.point || null });
+    res.read = r;
+    if (!r.ok) { res.reason = r.reason.replace(/ Flare and Roll work on .*$/, ' ' + tail); return res; }
+    var e = r.end;
+    if (Math.abs(e.leanDeg) > DEFAULTS.maxLeanDeg) {
+      res.reason = 'that tube\'s wall leans ' + fmt(Math.abs(e.leanDeg), 1) + '° off its axis at the end (a flare or a taper) - a ' + what + ' slips over a straight pipe, within ' +
+        DEFAULTS.maxLeanDeg + '°';
+      return res;
+    }
+    res.ok = true; res.od = 2 * e.Ro; res.wall = e.wallMm; res.end = e;
+    return res;
+  }
+
   /* The cap for the open end of a tube soup: its Ø and wall read off that end (NSO_tubeEdgeRead - the same
      reader Tube edge uses), then cap(). opts as cap's, plus point [x, y, z] (raw frame) to choose the end:
      the one nearest it, else the highest. The tube's wall must run square to its axis there. */
   function capFromTube(soup, opts) {
     opts = opts || {};
-    var res = { ok: false, reason: '' };
-    var rd = (typeof NSO_tubeEdgeRead === 'function') ? NSO_tubeEdgeRead : (root && root.NSO_tubeEdgeRead);
-    if (typeof rd !== 'function') { res.reason = 'nso_tube_edge.js must be loaded - the cap reads the tube\'s end with its reader'; return res; }
-    var f32 = (soup instanceof Float32Array) ? soup : new Float32Array(soup || []);
-    var r = rd(f32, { point: opts.point || null });
-    res.read = r;
-    if (!r.ok) { res.reason = r.reason.replace(/ Flare and Roll work on .*$/, ' A cap fits the open, round end of a tube.'); return res; }
-    var e = r.end;
-    if (Math.abs(e.leanDeg) > DEFAULTS.maxLeanDeg) {
-      res.reason = 'that tube\'s wall leans ' + fmt(Math.abs(e.leanDeg), 1) + '° off its axis at the end (a flare or a taper) - a cap slips over a straight pipe, within ' +
-        DEFAULTS.maxLeanDeg + '°';
-      return res;
-    }
+    var t = readTube(soup, opts, 'cap', 'A cap fits the open, round end of a tube.');
+    if (!t.ok) return { ok: false, reason: t.reason, read: t.read };
     var o = {};
     for (var k in opts) if (k !== 'point') o[k] = opts[k];
-    o.od = 2 * e.Ro; o.wall = e.wallMm;
+    o.od = t.od; o.wall = t.wall;
     var c = cap(o);
-    c.read = r; c.end = e;
+    c.read = t.read; c.end = t.end;
     return c;
   }
 
+  /* The threaded end for the open end of a tube soup: a sleeve that takes the tube (bore = its Ø + 2 x gap, a ledge to stop on)
+     and carries a male spigot or a female socket at the other end - nso_thread.js's sleeve, sized from the tube. opts: { point,
+     gap, depth, end 'male'|'female', size (the thread), thread (its length), collar, bore, af, fit, hand }. */
+  function threadEndFromTube(soup, opts) {
+    opts = opts || {};
+    var th = (typeof NSO_Thread !== 'undefined') ? NSO_Thread : (root && root.NSO_Thread) || null;
+    if (!th) return { ok: false, reason: 'nso_thread.js must be loaded - the threaded end is built with its sleeve' };
+    var t = readTube(soup, opts, 'sleeve', 'A threaded end fits the open, round end of a tube.');
+    if (!t.ok) return { ok: false, reason: t.reason, read: t.read };
+    var o = {};
+    for (var k in opts) if (k !== 'point') o[k] = opts[k];
+    o.tubeOd = t.od; o.tubeWall = t.wall;
+    var r = th.sleeve(o);
+    r.read = t.read; r.end = t.end;
+    return r;
+  }
+
   /* ================================================================ SPLITTER */
+
+  /* The threaded ends a splitter asks for, checked against the runs they go on. opts: trunkEnd / branchEnd ('plain' | 'male' |
+     'female'), trunkThread / branchThread (a size id), threadLen, fit, hand. g: { od, bod, wall, nozzle, floor, trunkLen, branchLen }.
+     { ok, trunk, branch } - each null for a plain end, else { kind, spec, len, rOut (the end's outside radius), rBore (a male's
+     spigot bore), size } - or the reason, in words. */
+  function threadEnds(opts, g) {
+    var res = { ok: false, reason: '', trunk: null, branch: null };
+    var kinds = { trunk: opts.trunkEnd || 'plain', branch: opts.branchEnd || 'plain' };
+    for (var w in kinds) if (['plain', 'male', 'female'].indexOf(kinds[w]) < 0) { res.reason = 'the ' + w + ' end is plain, male or female'; return res; }
+    if (kinds.trunk === 'plain' && kinds.branch === 'plain') { res.ok = true; return res; }
+    var th = (typeof NSO_Thread !== 'undefined') ? NSO_Thread : (root && root.NSO_Thread) || null;
+    if (!th) { res.reason = 'nso_thread.js must be loaded - a threaded end is cut with its thread'; return res; }
+    var fit = num(opts.fit) != null ? num(opts.fit) : th.DEFAULTS.fit;
+    if (fit < 0) { res.reason = 'a thread fit of ' + fmt(fit) + ' mm is refused - it is the clearance added to the thread, 0 or more'; return res; }
+    var hubO = Math.max(g.od, g.bod) / 2;
+    var groups = { trunk: { ro: g.od / 2, ri: g.od / 2 - g.wall, run: g.trunkLen, name: 'trunk', poss: 'trunk\'s' }, branch: { ro: g.bod / 2, ri: g.bod / 2 - g.wall, run: g.branchLen, name: 'branches', poss: 'branches\'' } };
+    for (var k in groups) {
+      if (kinds[k] === 'plain') continue;
+      var G = groups[k], id = opts[k + 'Thread'] || 'G1/2';
+      var sp = th.spec(id, { nozzle: g.nozzle, hand: opts.hand });
+      if (!sp.ok) { res.reason = G.name + ' thread: ' + sp.reason; return res; }
+      sp = sp.spec;
+      var Lt = num(opts.threadLen) != null ? num(opts.threadLen) : Math.max(8, Math.min(25, Math.round(6 * sp.P)));
+      if (!(Lt >= 2 * sp.P)) { res.reason = 'a thread length of ' + fmt(Lt, 1) + ' mm is under two pitches of ' + sp.id + ' - at least ' + fmt(Math.ceil(2 * sp.P * 10) / 10, 1) + ' mm'; return res; }
+      var E = { kind: kinds[k], spec: sp, len: Lt, size: sp.id, fit: fit, rOut: G.ro, rBore: G.ri };
+      if (kinds[k] === 'male') {
+        if (sp.R + 0.2 > G.ro) {
+          res.reason = 'the ' + sp.id + ' male thread is Ø' + fmt(sp.major) + ' across - wider than the ' + G.poss + ' Ø' + fmt(2 * G.ro) + ' outside; make ' + (k === 'branch' ? 'them' : 'it') + ' at least Ø' + fmt(Math.ceil(2 * (sp.R + 0.2) * 10) / 10, 1) + ' or take a smaller thread';
+          return res;
+        }
+        // the spigot joins the run through the run's wall: its thread ROOT must reach into the wall's ring by a good bite, or it only touches
+        var bite = sp.minor / 2 - G.ri;
+        if (bite < 2 * g.nozzle - 1e-9) {
+          res.reason = 'the ' + sp.id + ' male thread\'s root (Ø' + fmt(sp.minor) + ') ' + (bite <= 0 ? 'is inside' : 'reaches only ' + fmt(bite) + ' mm into') + ' the ' + G.poss + ' bore (Ø' + fmt(2 * G.ri) + ') - it would not join the wall; ' +
+            'a bite of ' + fmt(2 * g.nozzle) + ' mm needs a bore under Ø' + fmt(2 * (sp.minor / 2 - 2 * g.nozzle)) + ' (a thicker wall or a wider ' + G.name + ') or a larger thread';
+          return res;
+        }
+        E.rBore = Math.min(G.ri, sp.minor / 2 - g.wall);
+        if (E.rBore * 2 < 2 * g.nozzle - 1e-9) {
+          res.reason = 'the ' + sp.id + ' male thread\'s root is Ø' + fmt(sp.minor) + ' - with a ' + fmt(g.wall) + ' mm wall under it the bore would be Ø' + fmt(Math.max(0, 2 * E.rBore)) + ', under 2 nozzle widths (' + fmt(2 * g.nozzle) + ' mm); take a larger thread or a thinner wall';
+          return res;
+        }
+      } else {
+        E.rOut = Math.max(G.ro, sp.R + fit + g.wall);          // a boss round the socket where the run is too thin to leave a wall
+        var need = Lt + hubO;
+        if (G.run < need - 1e-9) {
+          res.reason = 'the ' + G.name + (k === 'branch' ? ' are' : ' is') + ' ' + fmt(G.run, 1) + ' mm long - too short for a ' + fmt(Lt, 1) + ' mm ' + sp.id + ' socket that must stop short of the hub; make ' + (k === 'branch' ? 'them' : 'it') + ' at least ' + fmt(Math.ceil(need * 10) / 10, 1) + ' mm';
+          return res;
+        }
+      }
+      res[k] = E;
+    }
+    res.ok = true;
+    return res;
+  }
 
   /* The splitter's numbers as the build will use them, or why not.
      opts: { ways 2|3, od, wall, branchOd, angle, trunkLen, branchLen, nozzle, sides }. */
@@ -200,11 +289,24 @@
       res.reason = 'a branch angle of ' + fmt(ang, 1) + '° is outside ' + DEFAULTS.minAngle + '° to ' + DEFAULTS.maxAngle + '° off the trunk\'s axis - less and the branches are one pipe, more and they are not a splitter';
       return res;
     }
+    var te = threadEnds(opts, { od: od, bod: bod, wall: wall, nozzle: nozzle, floor: floor, trunkLen: lt, branchLen: lb });
+    if (!te.ok) { res.reason = te.reason; return res; }
+    var bodEnd = te.branch && te.branch.kind === 'female' ? Math.max(bod, 2 * te.branch.rOut) : bod;    // a socket boss is the outlet's outside
     // the outlets stand clear of each other: the distance between two ends' axes, less the branch Ø
     var th = ang * Math.PI / 180, sep = ways === 2 ? 2 * lb * Math.sin(th) : Math.sqrt(3) * lb * Math.sin(th);
-    var clear = sep - bod;
+    var clear = sep - bodEnd;
+    if (te.branch && te.branch.kind === 'female') {                // ...and where the socket boss begins, nearer the hub, the outlets are nearer each other
+      var sep1 = ways === 2 ? 2 * Math.sin(th) : Math.sqrt(3) * Math.sin(th), room = sep1 - (2 * te.branch.rOut + DEFAULTS.outletGap);
+      var clearRoot = sep1 * (lb - te.branch.len) - 2 * te.branch.rOut;
+      if (clearRoot < DEFAULTS.outletGap - 1e-9) {
+        res.reason = 'the ' + ways + ' ' + te.branch.size + ' sockets would ' + (clearRoot <= 0 ? 'run into each other' : 'stand only ' + fmt(clearRoot) + ' mm apart') + ' where they begin, ' + fmt(lb - te.branch.len, 1) +
+          ' mm from the hub - ' + (room > 0 ? 'make the branches at least ' + fmt(Math.ceil(te.branch.len * sep1 / room * 10) / 10, 1) + ' mm long' : 'widen the angle or take a smaller thread');
+        return res;
+      }
+      clear = Math.min(clear, clearRoot);
+    }
     if (clear < DEFAULTS.outletGap - 1e-9) {
-      var need = (bod + DEFAULTS.outletGap) / (ways === 2 ? 2 : Math.sqrt(3)) / Math.sin(th);
+      var need = (bodEnd + DEFAULTS.outletGap) / (ways === 2 ? 2 : Math.sqrt(3)) / Math.sin(th);
       res.reason = 'the ' + ways + ' outlets would ' + (clear <= 0 ? 'run into each other' : 'stand only ' + fmt(clear) + ' mm apart') + ' - at ' + fmt(ang, 1) + '° and ' + fmt(lb, 1) +
         ' mm long the branch ends are ' + fmt(sep) + ' mm between axes for Ø' + fmt(bod) + ' pipes; they need ' + fmt(DEFAULTS.outletGap) + ' mm clear. Make the branches at least ' +
         fmt(Math.ceil(need * 10) / 10, 1) + ' mm long, the angle wider, or the branches narrower';
@@ -212,12 +314,12 @@
     }
     res.ok = true;
     res.p = { ways: ways, od: od, wall: wall, branchOd: bod, angle: ang, trunkLen: lt, branchLen: lb, sides: sides, nozzle: nozzle, floorMm: floor,
-              trunkBoreMm: bt, branchBoreMm: bb, outletClearMm: clear };
+              trunkBoreMm: bt, branchBoreMm: bb, outletClearMm: clear, trunkEnd: te.trunk, branchEnd: te.branch, hand: opts.hand };
     return res;
   }
 
   /* Build it. wasm: the Manifold kernel module (NSO_CSG.load()). Resolves { ok, reason, soup, info }. */
-  async function splitter(opts, wasm) {
+  async function splitter(opts, wasm, helpers) {
     var sz = splitterSize(opts), res = { ok: false, reason: sz.reason };
     if (!sz.ok) return res;
     if (!wasm || !wasm.Manifold) { res.reason = 'the boolean kernel is not loaded'; return res; }
@@ -232,14 +334,62 @@
     function branch(r, h) {
       return az.map(function (a) { return keep(keep(keep(cyl(r, h)).rotate([0, p.angle, 0])).rotate([0, 0, a])).translate([0, 0, J]); });
     }
+    // a manifold built along +Z from the junction, turned onto every branch
+    function onBranches(m) { return az.map(function (a) { return keep(keep(keep(m.rotate([0, p.angle, 0])).rotate([0, 0, a])).translate([0, 0, J])); }); }
+    // a thread solid from nso_thread.js as a kernel solid (its mesh welded, as nso_csg.js's soupToManifold does)
+    function threadSolid(soup) {
+      if (helpers && typeof helpers.soupToManifold === 'function') return keep(helpers.soupToManifold(wasm, soup));
+      var vp = new Float32Array(soup), tv = new Uint32Array(vp.length / 3);
+      for (var i = 0; i < tv.length; i++) tv[i] = i;
+      var mesh = new wasm.Mesh({ numProp: 3, vertProperties: vp, triVerts: tv });
+      mesh.merge();
+      return keep(new wasm.Manifold(mesh));
+    }
+    var TH = (typeof NSO_Thread !== 'undefined') ? NSO_Thread : (root && root.NSO_Thread) || null;
+    var TE = p.trunkEnd, BE = p.branchEnd, lift = 0;
+    var outer = [], inner = [];
     var out = null;
     try {
-      var outer = [cyl(ro, J)].concat(branch(rb, p.branchLen), [keep(ball(hubO).translate([0, 0, J]))]);
-      // the bores run a unit past every open end, so each is cut through
-      var inner = [keep(cyl(ri, J + 1).translate([0, 0, -1]))].concat(branch(rbi, p.branchLen + 1), [keep(ball(hubI).translate([0, 0, J]))]);
+      // ---- the trunk: its inlet end is z = 0, the run goes up to the junction at z = J
+      outer.push(cyl(ro, J));
+      if (!TE) inner.push(keep(cyl(ri, J + 1).translate([0, 0, -1])));
+      else if (TE.kind === 'male') {
+        var rodT = TH.rod({ size: TE.size, length: TE.len + 0.5, slope: -TE.spec.slope, hand: p.hand });
+        if (!rodT.ok) { res.reason = 'internal: ' + rodT.reason; return res; }
+        // the spigot runs DOWN from the inlet: its local +z (the free end) turned to -z, its root 0.5 mm into the run
+        outer.push(keep(keep(threadSolid(rodT.soup).rotate([180, 0, 0])).translate([0, 0, 0.5])));
+        inner.push(keep(cyl(ri, J + 0.25).translate([0, 0, -0.25])));
+        inner.push(keep(cyl(TE.rBore, TE.len + 1.25).translate([0, 0, -TE.len - 1])));
+        lift = TE.len;
+      } else {
+        var cutT = TH.cutter(TE.size, TE.len + 1, { fit: TE.fit, slope: TE.spec.slope, hand: p.hand });
+        if (!cutT.ok) { res.reason = 'internal: ' + cutT.reason; return res; }
+        if (TE.rOut > ro + 1e-9) outer.push(cyl(TE.rOut, TE.len + 0.2));
+        inner.push(keep(cyl(ri, J - TE.len + 0.25).translate([0, 0, TE.len - 0.25])));
+        // the socket's floor at z = len, its mouth at the inlet: the cutter's local +z (floor to mouth) turned to -z
+        inner.push(keep(keep(threadSolid(cutT.soup).rotate([180, 0, 0])).translate([0, 0, TE.len])));
+      }
+      // ---- the branches: from the junction, each p.branchLen long
+      var Lb = p.branchLen;
+      outer = outer.concat(branch(rb, Lb));
+      if (!BE) inner = inner.concat(branch(rbi, Lb + 1));
+      else if (BE.kind === 'male') {
+        var rodB = TH.rod({ size: BE.size, length: BE.len + 0.5, slope: -BE.spec.slope, hand: p.hand });
+        if (!rodB.ok) { res.reason = 'internal: ' + rodB.reason; return res; }
+        outer = outer.concat(onBranches(keep(threadSolid(rodB.soup).translate([0, 0, Lb - 0.5]))));
+        inner = inner.concat(branch(rbi, Lb + 0.25), onBranches(keep(cyl(BE.rBore, BE.len + 1.25).translate([0, 0, Lb - 0.25]))));
+      } else {
+        var cutB = TH.cutter(BE.size, BE.len + 1, { fit: BE.fit, slope: BE.spec.slope, hand: p.hand });
+        if (!cutB.ok) { res.reason = 'internal: ' + cutB.reason; return res; }
+        if (BE.rOut > rb + 1e-9) outer = outer.concat(onBranches(keep(cyl(BE.rOut, BE.len + 0.2).translate([0, 0, Lb - BE.len]))));
+        inner = inner.concat(branch(rbi, Lb - BE.len + 0.25), onBranches(keep(threadSolid(cutB.soup).translate([0, 0, Lb - BE.len]))));
+      }
+      outer.push(keep(ball(hubO).translate([0, 0, J])));
+      inner.push(keep(ball(hubI).translate([0, 0, J])));
       var solid = keep(M.union(outer.map(keep)));
       var bore = keep(M.union(inner.map(keep)));
       out = solid.subtract(bore);
+      if (lift > 0) { var lifted = out.translate([0, 0, lift]); out.delete(); out = lifted; }    // a male trunk's spigot stands on the bed
       var openings = p.ways + 1;
       if (out.status() !== 'NoError') { res.reason = 'internal: the kernel refused the splitter (' + out.status() + ')'; return res; }
       if (out.isEmpty()) { res.reason = 'internal: the splitter came out empty'; return res; }
@@ -256,10 +406,13 @@
       res.ok = true;
       res.info = { kind: 'splitter', ways: p.ways, openings: openings, trunkOdMm: p.od, trunkBoreMm: p.trunkBoreMm, branchOdMm: p.branchOd, branchBoreMm: p.branchBoreMm,
                    wallMm: p.wall, angleDeg: p.angle, trunkLenMm: p.trunkLen, branchLenMm: p.branchLen, outletClearMm: p.outletClearMm, volumeMm3: vol, genus: genus,
-                   bboxMin: bb.min, bboxMax: bb.max, floorMm: p.floorMm };
+                   bboxMin: bb.min, bboxMax: bb.max, floorMm: p.floorMm,
+                   trunkEnd: p.trunkEnd ? { kind: p.trunkEnd.kind, size: p.trunkEnd.size, lenMm: p.trunkEnd.len } : null,
+                   branchEnd: p.branchEnd ? { kind: p.branchEnd.kind, size: p.branchEnd.size, lenMm: p.branchEnd.len } : null };
+      var endText = function (E, what) { return E ? ' · ' + what + ' ' + E.kind + ' ' + E.size + ' thread (' + fmt(E.len, 1) + ' mm' + (E.kind === 'female' ? ', a socket' : ', a spigot') + ')' : ''; };
       res.reason = p.ways + '-way splitter: Ø' + fmt(p.od) + ' trunk (bore Ø' + fmt(p.trunkBoreMm) + ') into ' + p.ways + ' × Ø' + fmt(p.branchOd) + ' branches (bore Ø' + fmt(p.branchBoreMm) +
         ') at ' + fmt(p.angle, 0) + '°, wall ' + fmt(p.wall) + ' throughout · trunk ' + fmt(p.trunkLen, 1) + ' mm, branches ' + fmt(p.branchLen, 1) + ' mm, outlets ' + fmt(p.outletClearMm, 1) +
-        ' mm apart · trunk down, branches up';
+        ' mm apart · trunk down, branches up' + endText(p.trunkEnd, 'trunk') + endText(p.branchEnd, 'branch ends');
       return res;
     } catch (err) {
       res.reason = 'the splitter could not be built: ' + ((err && err.message) || err);
@@ -278,7 +431,7 @@
     return s;
   }
 
-  var API = { DEFAULTS: DEFAULTS, cap: cap, capFromTube: capFromTube, capDepthFor: capDepthFor, splitterSize: splitterSize, splitter: splitter };
+  var API = { DEFAULTS: DEFAULTS, cap: cap, capFromTube: capFromTube, threadEndFromTube: threadEndFromTube, capDepthFor: capDepthFor, splitterSize: splitterSize, splitter: splitter };
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
   if (root) root.NSO_Fittings = API;
 })(typeof window !== 'undefined' ? window : (typeof globalThis !== 'undefined' ? globalThis : null));

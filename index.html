@@ -224,11 +224,11 @@
                    NEW piece on the plate, edits nothing. nso_fittings.js builds them (headless,
                    tools/nso_fittings_test.js), app-fittings.js is this card. docs/FITTINGS.md. -->
               <details class="vp-menu vp-wheel-menu vp-fittings-menu">
-              <summary title="A slip-on pipe cap for the selected tube, and a 2- or 3-way splitter - each a piece of its own">Fittings</summary>
+              <summary title="A slip-on pipe cap or a threaded end for the selected tube, threaded nipples, couplers, adapters, plugs and caps, and a 2- or 3-way splitter (plain or with threaded ends) - each a piece of its own">Fittings</summary>
               <div class="vp-menu-body vp-wheel">
               <div class="vp-row vp-row-opts">
-              <label class="vp-clone" title="Cap: the clearance all round between the tube and the cap's bore, mm. 0.25 is a printed slip fit; blank is 0.25.">Fit <input type="number" id="inp-fx-gap" min="0" max="2" step="0.05" placeholder="0.25" aria-label="Cap fit gap, mm"></label>
-              <label class="vp-clone" title="Cap: how far the tube goes into it, mm. Blank is 0.75 x the tube's Ø, 8 to 30.">Deep <input type="number" id="inp-fx-depth" min="1" max="200" step="1" placeholder="auto" aria-label="Cap depth, mm"></label>
+              <label class="vp-clone" title="Cap and tube-end sleeve: the clearance all round between the tube and the bore, mm. 0.25 is a printed slip fit; blank is 0.25.">Fit <input type="number" id="inp-fx-gap" min="0" max="2" step="0.05" placeholder="0.25" aria-label="Cap fit gap, mm"></label>
+              <label class="vp-clone" title="Cap and tube-end sleeve: how far the tube goes into it, mm. Blank is 0.75 x the tube's Ø, 8 to 30.">Deep <input type="number" id="inp-fx-depth" min="1" max="200" step="1" placeholder="auto" aria-label="Cap depth, mm"></label>
               </div>
               <div class="vp-row vp-row-opts">
               <label class="vp-clone" title="Which end of the selected tube the cap is for (its Ø and wall are the same at both, but the cap reads that end)">End
@@ -250,6 +250,12 @@
               <label class="vp-clone" title="Splitter: the trunk's length from the inlet to the junction, mm. Blank is 25.">Trunk <input type="number" id="inp-fx-trunk" min="1" max="500" step="1" placeholder="25" aria-label="Splitter trunk length, mm"></label>
               <label class="vp-clone" title="Splitter: each branch's length from the junction, mm. Blank is 30. The outlets must stand a millimetre apart.">Branch <input type="number" id="inp-fx-branch" min="1" max="500" step="1" placeholder="30" aria-label="Splitter branch length, mm"></label>
               </div>
+              <div class="vp-row vp-row-opts">
+              <label class="vp-clone" title="Splitter: the trunk's end. Plain is a plain pipe; Male adds a threaded spigot under the inlet (the splitter then stands on it); Female cuts a socket into the run. Thread is the size; the run must be wide enough - it says if not.">Trunk end
+                <select id="sel-fx-trunkend" class="vp-select" aria-label="Splitter trunk end"><option value="plain" selected>Plain</option><option value="male">Male</option><option value="female">Female</option></select></label>
+              <label class="vp-clone" title="Splitter: the branches' ends, as the trunk's. Their size is Thread 2 (same as Thread when blank).">Branch ends
+                <select id="sel-fx-branchend" class="vp-select" aria-label="Splitter branch ends"><option value="plain" selected>Plain</option><option value="male">Male</option><option value="female">Female</option></select></label>
+              </div>
               <div class="vp-row vp-row-pair">
               <button id="btn-fx-split2" class="btn btn-secondary" type="button"
                 title="2-way splitter: a trunk into two branches, a Y, as a piece of its own - trunk down on the bed, branches up and out at the Angle, the wall the same throughout.">2-way</button>
@@ -260,7 +266,111 @@
               <button id="btn-fx-fromtube" class="btn btn-secondary" type="button"
                 title="Copy the selected tube's outside Ø and wall into the splitter's Ø and Wall, so the splitter's trunk matches that pipe.">Ø from tube</button>
               </div>
+              <!-- Threads (docs/THREADS.md): a threaded end for the selected tube, threaded fittings of their own, and
+                   threaded ends on the splitter's runs. nso_thread.js builds the threads. -->
+              <div class="vp-row vp-row-opts">
+              <label class="vp-clone" title="The thread for a threaded end, a threaded fitting, and the splitter's ends. G is BSP parallel (seals with tape or a washer), NPT is tapered 1:16, M is metric.">Thread
+                <select id="sel-fx-tsize" class="vp-select" aria-label="Thread size">
+                  <optgroup label="Pipe, parallel (G / BSP)">
+                    <option>G1/8</option><option>G1/4</option><option>G3/8</option><option selected>G1/2</option><option>G3/4</option><option>G1</option><option>G1-1/4</option><option>G1-1/2</option><option>G2</option>
+                  </optgroup>
+                  <optgroup label="Pipe, tapered (NPT)">
+                    <option>NPT1/8</option><option>NPT1/4</option><option>NPT3/8</option><option>NPT1/2</option><option>NPT3/4</option><option>NPT1</option><option>NPT1-1/4</option><option>NPT1-1/2</option><option>NPT2</option>
+                  </optgroup>
+                  <optgroup label="Metric">
+                    <option>M10x1</option><option>M12x1.5</option><option>M16x1.5</option><option>M20x1.5</option><option>M24x2</option><option>M30x2</option><option>M8</option><option>M10</option><option>M12</option><option>M16</option><option>M20</option><option>M24</option><option>M30</option>
+                  </optgroup>
+                </select></label>
+              <label class="vp-clone" title="Adapter: the upper (female) end's thread. Splitter: the branch ends' thread. Same as Thread when left on 'same'.">Thread 2
+                <select id="sel-fx-tsize2" class="vp-select" aria-label="Second thread size">
+                  <option value="" selected>same</option>
+                  <optgroup label="Pipe, parallel (G / BSP)">
+                    <option>G1/8</option><option>G1/4</option><option>G3/8</option><option>G1/2</option><option>G3/4</option><option>G1</option><option>G1-1/4</option><option>G1-1/2</option><option>G2</option>
+                  </optgroup>
+                  <optgroup label="Pipe, tapered (NPT)">
+                    <option>NPT1/8</option><option>NPT1/4</option><option>NPT3/8</option><option>NPT1/2</option><option>NPT3/4</option><option>NPT1</option><option>NPT1-1/4</option><option>NPT1-1/2</option><option>NPT2</option>
+                  </optgroup>
+                  <optgroup label="Metric">
+                    <option>M10x1</option><option>M12x1.5</option><option>M16x1.5</option><option>M20x1.5</option><option>M24x2</option><option>M30x2</option><option>M8</option><option>M10</option><option>M12</option><option>M16</option><option>M20</option><option>M24</option><option>M30</option>
+                  </optgroup>
+                </select></label>
+              </div>
+              <div class="vp-row vp-row-opts">
+              <label class="vp-clone" title="Threads: the length of each thread, mm. Blank is about six pitches, 8 to 25.">T length <input type="number" id="inp-fx-tlen" min="2" max="100" step="1" placeholder="auto" aria-label="Thread length, mm"></label>
+              <label class="vp-clone" title="Threads: the clearance added to a female thread so a male one turns in it, mm. 0.2 is a printed fit; blank is 0.2.">T fit <input type="number" id="inp-fx-tfit" min="0" max="1" step="0.05" placeholder="0.2" aria-label="Thread fit, mm"></label>
+              </div>
+              <div class="vp-row vp-row-pair">
+              <button id="btn-fx-tmale" class="btn btn-secondary" type="button"
+                title="Threaded end for the selected tube, MALE: a sleeve that takes the tube (bore = its Ø + the Fit, a ledge for it to stop on), a hex collar, then a threaded spigot with the flow bore through. Sized from the tube's own Ø and wall; a new piece, the tube is not changed.">Tube end: male</button>
+              <button id="btn-fx-tfemale" class="btn btn-secondary" type="button"
+                title="Threaded end for the selected tube, FEMALE: the same sleeve and collar, then a threaded socket for a male thread to screw into. A new piece, the tube is not changed.">Tube end: female</button>
+              </div>
+              <div class="vp-row vp-row-pair">
+              <button id="btn-fx-nipple" class="btn btn-secondary" type="button" title="Nipple: male thread at both ends, a hex collar between, a flow bore through.">Nipple</button>
+              <button id="btn-fx-coupler" class="btn btn-secondary" type="button" title="Coupler: female thread at both ends, a hex collar, a flow bore through.">Coupler</button>
+              </div>
+              <div class="vp-row vp-row-pair">
+              <button id="btn-fx-adapter" class="btn btn-secondary" type="button" title="Adapter: male Thread below, female Thread 2 above (blank = the same size).">Adapter</button>
+              <button id="btn-fx-plug" class="btn btn-secondary" type="button" title="Plug: a male thread and a hex head, solid - it closes a female thread.">Plug</button>
+              </div>
+              <div class="vp-row vp-row-full">
+              <button id="btn-fx-tcap" class="btn btn-secondary" type="button" title="Screw cap: a female thread and a closed end - it closes a male thread. (Cap for selected tube above is the slip-on one.)">Screw cap</button>
+              </div>
               <p id="fx-readout" class="bend-readout" aria-live="polite">—</p>
+              </div>
+              </details>
+              <!-- Fasteners: a threaded rod, a bolt (hex or socket head), a nut and a bolt + nut set - each a
+                   NEW piece on the plate, edits nothing. nso_thread.js builds them (headless,
+                   tools/nso_thread_test.js), app-fasteners.js is this card. A nut's bore is the bolt's
+                   thread + the Fit, so the pair turns; Punch's Thread cuts the matching tapped hole.
+                   docs/THREADS.md. -->
+              <details class="vp-menu vp-wheel-menu vp-fasteners-menu">
+              <summary title="Threaded rods, bolts and nuts: ISO metric and G (BSP) sizes or a typed Ø and pitch - each a piece of its own, the nut fitted to the bolt">Fasteners</summary>
+              <div class="vp-menu-body vp-wheel">
+              <div class="vp-row vp-row-opts">
+              <label class="vp-clone" title="The thread. Metric coarse and fine, or G (BSP parallel) pipe sizes. Type a Ø and pitch below for any other.">Size
+                <select id="sel-fs-size" class="vp-select" aria-label="Thread size">
+                  <optgroup label="Metric (ISO coarse)">
+                    <option>M2</option><option>M2.5</option><option>M3</option><option>M4</option><option>M5</option><option>M6</option><option selected>M8</option><option>M10</option>
+                    <option>M12</option><option>M14</option><option>M16</option><option>M18</option><option>M20</option><option>M24</option><option>M30</option>
+                  </optgroup>
+                  <optgroup label="Metric (fine)">
+                    <option>M8x1</option><option>M10x1.25</option><option>M10x1</option><option>M12x1.5</option><option>M12x1.25</option><option>M14x1.5</option><option>M16x1.5</option>
+                    <option>M18x1.5</option><option>M20x1.5</option><option>M24x2</option><option>M30x2</option>
+                  </optgroup>
+                  <optgroup label="Pipe, parallel (G / BSP)">
+                    <option>G1/8</option><option>G1/4</option><option>G3/8</option><option>G1/2</option><option>G3/4</option><option>G1</option><option>G1-1/4</option><option>G1-1/2</option><option>G2</option>
+                  </optgroup>
+                </select></label>
+              <label class="vp-clone" title="Right-hand is the usual thread; a left-hand bolt takes a left-hand nut.">Hand
+                <select id="sel-fs-hand" class="vp-select" aria-label="Thread hand"><option value="right" selected>Right</option><option value="left">Left</option></select></label>
+              </div>
+              <div class="vp-row vp-row-opts">
+              <label class="vp-clone" title="Custom: the thread's major Ø, mm. Blank takes the size's own.">Ø <input type="number" id="inp-fs-major" min="1.5" max="100" step="0.1" placeholder="size" aria-label="Custom major diameter, mm"></label>
+              <label class="vp-clone" title="Custom: the pitch, mm. Blank takes the size's own. Under about 0.8 mm a 0.4 mm nozzle resolves the thread roughly - it says so; under half the nozzle's own depth it is refused.">Pitch <input type="number" id="inp-fs-pitch" min="0.1" max="12" step="0.05" placeholder="size" aria-label="Custom pitch, mm"></label>
+              </div>
+              <div class="vp-row vp-row-opts">
+              <label class="vp-clone" title="Rod: its length. Bolt: the shank under the head. Blank is 40 for a rod, 25 for a bolt.">Length <input type="number" id="inp-fs-length" min="1" max="500" step="1" placeholder="auto" aria-label="Length, mm"></label>
+              <label class="vp-clone" title="Bolt: a hex head (it stands on it) or a socket-head cap screw with a hex socket open on the bed.">Head
+                <select id="sel-fs-head" class="vp-select" aria-label="Bolt head"><option value="hex" selected>Hex</option><option value="socket">Socket</option></select></label>
+              </div>
+              <div class="vp-row vp-row-opts">
+              <label class="vp-clone" title="Nut: the radial clearance added to the thread so it turns, mm. 0.2 is a printed fit; blank is 0.2. The Punch tool's tapped hole uses the same 0.2.">Fit <input type="number" id="inp-fs-fit" min="0" max="1" step="0.05" placeholder="0.2" aria-label="Nut fit, mm"></label>
+              <label class="vp-clone" title="Nut: its thickness, mm. Blank is the standard nut for the size.">Nut thick <input type="number" id="inp-fs-nutm" min="1" max="100" step="0.5" placeholder="std" aria-label="Nut thickness, mm"></label>
+              </div>
+              <div class="vp-row vp-row-pair">
+              <button id="btn-fs-rod" class="btn btn-secondary" type="button"
+                title="Threaded rod: the thread's profile the whole length, flat ends, standing on the bed. A new piece.">Rod</button>
+              <button id="btn-fs-bolt" class="btn btn-secondary" type="button"
+                title="Bolt: a hex or socket head and a threaded shank, head down on the bed. A new piece.">Bolt</button>
+              </div>
+              <div class="vp-row vp-row-pair">
+              <button id="btn-fs-nut" class="btn btn-secondary" type="button"
+                title="Hex nut: the standard size for the thread (or your thickness), its bore the bolt's thread plus the Fit. A new piece.">Nut</button>
+              <button id="btn-fs-set" class="btn btn-secondary" type="button"
+                title="A bolt and its nut, two pieces, made together: the nut turns on the bolt.">Bolt + nut</button>
+              </div>
+              <p id="fs-readout" class="bend-readout" aria-live="polite">—</p>
               </div>
               </details>
               <!-- Picture: an image becomes a relief slab, a flat base with a
@@ -1175,8 +1285,29 @@
                       title="Punch round holes. Arm it, then click a face: a hole straight through it (or to a depth), normal to the face - one, a grid, or a circle of them, drawn live. Drag the first hole's ring for its diameter and the hole (or the cross at the click) to move it on the face; a grid's far-corner hole is its pitch, a radial hole its radius. The arrows nudge it 1 mm (Shift 0.1). A hole that would leave less than two nozzle widths of wall is refused in words. PUNCH cuts them all in one boolean, one Undo; the card stays armed for the next face. Escape stops.">Punch</button>
             </div>
             <div class="vp-bend-panel punch-card" id="punch-card" hidden>
-              <label class="vp-bend-field" title="The hole's diameter, across its flats: a pin this size goes in. Drag the first hole's ring to change it.">&Oslash;
+              <label class="vp-bend-field" title="The hole's diameter, across its flats: a pin this size goes in. Drag the first hole's ring to change it. With a Thread chosen this is the thread's own (and read-only).">&Oslash;
                 <input type="number" id="inp-punch-dia" value="3.0" min="0.8" max="100" step="0.1" aria-label="Hole diameter, mm"><span>mm</span></label>
+              <label class="vp-bend-field" title="Thread: cut the hole as a tapped thread instead of a plain Ø. The hole is the thread's own (M6 = a Ø6 bolt thread + the 0.2 mm fit a side, so the bolt Gen+ > Fasteners makes turns in it; G and NPT are pipe threads, NPT tapered). A blind one is at least two pitches deep; a pitch finer than the nozzle resolves says so. docs/THREADS.md.">Thread
+                <select id="sel-punch-thread" class="vp-select" aria-label="Thread of the hole">
+                  <option value="" selected>None (plain hole)</option>
+                  <optgroup label="Metric (ISO coarse)">
+                    <option>M2</option><option>M2.5</option><option>M3</option><option>M4</option><option>M5</option><option>M6</option><option>M8</option><option>M10</option>
+                    <option>M12</option><option>M14</option><option>M16</option><option>M18</option><option>M20</option><option>M24</option><option>M30</option>
+                  </optgroup>
+                  <optgroup label="Metric (fine)">
+                    <option>M8x1</option><option>M10x1.25</option><option>M10x1</option><option>M12x1.5</option><option>M12x1.25</option><option>M14x1.5</option><option>M16x1.5</option>
+                    <option>M18x1.5</option><option>M20x1.5</option><option>M24x2</option><option>M30x2</option>
+                  </optgroup>
+                  <optgroup label="Pipe, parallel (G / BSP)">
+                    <option>G1/8</option><option>G1/4</option><option>G3/8</option><option>G1/2</option><option>G3/4</option><option>G1</option><option>G1-1/4</option><option>G1-1/2</option><option>G2</option>
+                  </optgroup>
+                  <optgroup label="Pipe, tapered (NPT)">
+                    <option>NPT1/8</option><option>NPT1/4</option><option>NPT3/8</option><option>NPT1/2</option><option>NPT3/4</option><option>NPT1</option><option>NPT1-1/4</option><option>NPT1-1/2</option><option>NPT2</option>
+                  </optgroup>
+                </select></label>
+              <label class="vp-check" id="punch-thread-left-row" hidden title="A left-hand thread. Right-hand is the usual one.">
+                <input type="checkbox" id="chk-punch-thread-left"> Left-hand
+              </label>
               <label class="vp-bend-field" title="Through: until the hole leaves the piece for good. mm: that deep below the face.">Depth
                 <select id="sel-punch-depth" class="vp-select" aria-label="Hole depth">
                   <option value="through" selected>Through</option>
@@ -2389,7 +2520,7 @@
   <script src="nso-gcode-lines.js?v=fe0b823c"></script>
   <script src="nso-gscope-diff.js?v=937f4953"></script>
   <script src="nso-gcode-solid.js?v=ac1a4f02"></script>
-  <script src="nso_slicer.js?v=b059d4b8"></script>
+  <script src="nso_slicer.js?v=60b35b47"></script>
   <script src="nso_raster_lines.js?v=461ca449"></script>
   <!-- The support interface: the crosshatch's one-direction layers, and the
        sheet a support tree's tips carry under the part (flat caps on the
@@ -2448,7 +2579,8 @@
   <!-- Neck: a pinch or a bulge along a tube. After nso_tube_edge.js (its end
        reader, weld and helpers). See docs/TUBE-EDGE.md, "Neck". -->
   <script src="nso_tube_neck.js?v=e42beb75"></script>
-  <script src="nso_fittings.js?v=49474d70"></script>
+  <script src="nso_thread.js?v=d396a525"></script>
+  <script src="nso_fittings.js?v=d69ad69f"></script>
   <script src="app-tube-edge.js?v=54e345d1"></script>
   <!-- Bridge: a web between two places, welded. After NSO_Repair.js,
        nso_planar_fuse.js (the vertex space), nso_thickness.js,
@@ -2478,7 +2610,8 @@
   <script src="app-wheel.js?v=35fda70f"></script>
   <script src="app-fit.js?v=94ef7252"></script>
   <script src="app-stock.js?v=04f0e346"></script>
-  <script src="app-fittings.js?v=474b8372"></script>
+  <script src="app-fittings.js?v=ff1ca351"></script>
+  <script src="app-fasteners.js?v=22db4ba3"></script>
   <script src="app-assemble.js?v=60984bfb"></script>
   <script src="app-sel-outline.js?v=c1a5b4df"></script>
   <script src="app-join.js?v=f9860f3a"></script>
@@ -2488,8 +2621,8 @@
   <script src="app-carve.js?v=c8e8fd9f"></script>
   <!-- Punch: round holes through a face, alone, in a grid or on a circle. The
        geometry (nso_punch.js) before its card (app-punch.js). docs/PUNCH.md. -->
-  <script src="nso_punch.js?v=0dd2e99a"></script>
-  <script src="app-punch.js?v=f7f8a6e2"></script>
+  <script src="nso_punch.js?v=c86b8521"></script>
+  <script src="app-punch.js?v=1836e5ec"></script>
   <!-- Text: type a word, stamp it into a face. The geometry (nso_text.js, which reads
        nso_punch.js's surface probe) before its card (app-text.js). docs/TEXT.md. -->
   <script src="nso_text.js?v=e50a3620"></script>

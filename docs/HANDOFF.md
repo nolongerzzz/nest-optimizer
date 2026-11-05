@@ -153,6 +153,7 @@ merging its list by hand. The list below is generated.
 - [Thicken - fill a notch: a click on a wall takes its side (2026-11-04)](handoff/thicken-fill-a-notch.md)
 - [Thicken in / out - one-sided planar offset (2026-09-16)](handoff/thicken-in-out-one-sided-planar-offset.md)
 - [Thicken in / out, live - a slider ghost, Set, per-face (2026-10-23)](handoff/thicken-live.md)
+- [Threads - tapped holes in Punch, threaded pipe/fitting ends, a rod / bolt / nut generator (2026-11-05)](handoff/threads.md)
 - [To plate - put a piece back down on the bed, in one press (2026-09-20)](handoff/to-plate-put-a-piece-back-down-on-the-bed-in-one-press.md)
 - [Toolpath import - a sliced .gcode.3mf as real geometry](handoff/toolpath-import-a-sliced-gcode-3mf-as-real-geometry.md)
 - [Toolpath import - the entry point (2026-09-20)](handoff/toolpath-import-the-entry-point.md)

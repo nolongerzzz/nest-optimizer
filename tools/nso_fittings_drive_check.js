@@ -183,6 +183,91 @@ withApp(async (page, logs) => {
   check('3 outlets that would run together: the number of mm to lengthen the branches to is named', /^3-way: the 3 outlets would run into each other - at 12\.0° and 20\.0 mm long.*Make the branches at least \d+\.\d mm long/.test(rd.text) && rd.bad && (await pieces(page)).length === n0, rd.text);
   await setField(page, 'inp-fx-angle', ''); await setField(page, 'inp-fx-branch', '');
 
+  console.log('\n=== 6b. threads: a threaded end for the selected tube, threaded fittings, a splitter with threaded ends ===');
+  {
+    const ui2 = await page.evaluate(() => ['btn-fx-tmale', 'btn-fx-tfemale', 'btn-fx-nipple', 'btn-fx-coupler', 'btn-fx-adapter', 'btn-fx-plug', 'btn-fx-tcap'].every(i => document.getElementById(i) && document.getElementById(i).dataset.nsoWired === '1') &&
+      document.getElementById('sel-fx-tsize').value === 'G1/2' && document.getElementById('inp-fx-tfit').placeholder === '0.2');
+    check('the thread controls are there, wired at load (Thread G1/2, T fit placeholder 0.2)', ui2);
+    await selectModel(page, tubeId);
+    const u0 = await page.evaluate(() => state.undoStack.length);
+    await page.click('#btn-fx-tmale');
+    st = await waitStatus(page, /Dropped tube end male G1\/2|Tube end \(male\) refused/);
+    console.log('   status: ' + st);
+    P = await pieces(page);
+    const te = P.find(p => /^tube end male G1\/2/.test(p.name));
+    const Tt = te && await topoOf(page, te.id);
+    check('Tube end: male: a piece "tube end male G1/2 1", selected, beside the tube, one Undo step', !!te && (await selName(page)) === te.name && (await page.evaluate(() => state.undoStack.length)) === u0 + 1 && /, beside tube\.$/.test(st), st);
+    check('its status names the sleeve (Ø20 tube, 15 mm in, 0.25 clear) and the male G1/2 thread', /Threaded end for a Ø20\.00 tube: a 15\.0 mm sleeve \(bore Ø20\.50, 0\.25 mm clear all round.*male G1\/2 thread/.test(st), st);
+    check('closed, 2-manifold, wound, a ring (Euler 0)', Tt.open === 0 && Tt.nm === 0 && Tt.flip === 0 && Tt.degen === 0 && Tt.euler === 0, JSON.stringify(Tt));
+    check('the tube is untouched, bit for bit', (await page.evaluate(id => Array.from(state.models.find(m => m && m.id === id).rawTris).join(','), tubeId)) === tubeBefore);
+    await frame(page); await shot(page, 'fittings-tubeend-male.png');
+    await page.click('#btn-undo'); await waitStatus(page, /Undo/);
+    check('one Undo takes it off', !(await pieces(page)).some(p => /^tube end/.test(p.name)));
+    await selectModel(page, tubeId);
+    await page.click('#btn-fx-tfemale');
+    st = await waitStatus(page, /Dropped tube end female G1\/2|Tube end \(female\) refused/);
+    check('Tube end: female: dropped, with its thread named', /Dropped tube end female G1\/2 1 - .*female G1\/2 thread/.test(st), st);
+    await page.click('#btn-undo'); await waitStatus(page, /Undo/);
+    // nothing selected -> said in words
+    await page.evaluate(() => { state.editId = null; state.selectedIndex = -1; });
+    const nT = (await pieces(page)).length;
+    await page.click('#btn-fx-tmale');
+    rd = await readout(page);
+    check('no tube selected: said in words, in red, nothing added', rd.bad && /^Select a tube: the threaded end is made for its end\.$/.test(rd.text) && (await pieces(page)).length === nT, rd.text);
+
+    // threaded fittings of their own
+    await setField(page, 'sel-fx-tsize', 'G3/4');
+    await page.click('#btn-fx-nipple');
+    st = await waitStatus(page, /Dropped nipple G3\/4 1|Nipple refused/);
+    P = await pieces(page);
+    const nip = P.find(p => /^nipple G3\/4/.test(p.name)), Tn = nip && await topoOf(page, nip.id);
+    check('Nipple G3/4: a piece of its own, a ring (Euler 0), the status says male at both ends', !!nip && Tn.open === 0 && Tn.nm === 0 && Tn.euler === 0 && /Nipple: male G3\/4 at both ends/.test(st), st);
+    await page.click('#btn-fx-coupler');
+    st = await waitStatus(page, /Dropped coupler G3\/4 1|Coupler refused/);
+    check('Coupler G3/4: female at both ends', /Coupler: female G3\/4 at both ends/.test(st), st);
+    await setField(page, 'sel-fx-tsize2', 'G1/2');
+    await page.click('#btn-fx-adapter');
+    st = await waitStatus(page, /Dropped adapter G3\/4-G1\/2 1|Adapter refused/);
+    check('Adapter with Thread 2 G1/2: male G3/4 below, female G1/2 above', /Adapter: male G3\/4 below, female G1\/2 above/.test(st), st);
+    await setField(page, 'sel-fx-tsize2', '');
+    await page.click('#btn-fx-plug');
+    st = await waitStatus(page, /Dropped plug G3\/4 1|Plug refused/);
+    P = await pieces(page);
+    const plug = P.find(p => /^plug G3\/4/.test(p.name)), Tp = plug && await topoOf(page, plug.id);
+    check('Plug G3/4: solid, closed, Euler 2', !!plug && Tp.open === 0 && Tp.nm === 0 && Tp.euler === 2 && /Plug: male G3\/4, solid/.test(st), st);
+    await page.click('#btn-fx-tcap');
+    st = await waitStatus(page, /Dropped screw cap G3\/4 1|Cap refused|Screw cap refused/);
+    check('Screw cap G3/4: female, closed end down', /Cap: female G3\/4, closed end down/.test(st), st);
+    await frame(page); await shot(page, 'fittings-threaded-pieces.png');
+    // a refusal: a thread too short
+    const nR = (await pieces(page)).length;
+    await setField(page, 'inp-fx-tlen', '2');
+    await page.click('#btn-fx-nipple');
+    await page.waitForFunction(() => document.getElementById('fx-readout').classList.contains('is-bad'), null, { timeout: 15000 });
+    rd = await readout(page);
+    check('a thread length of 2 mm: refused in words, nothing added', /^Nipple: a thread length of 2\.0 mm is under two pitches/.test(rd.text) && (await pieces(page)).length === nR, rd.text);
+    await setField(page, 'inp-fx-tlen', '');
+    // the splitter with threaded ends: the trunk's male spigot and female branch ends need a run that suits - Ø28 / wall 3 takes G3/4 male
+    await setField(page, 'inp-fx-od', '28'); await setField(page, 'inp-fx-wall', '3'); await setField(page, 'inp-fx-bod', '28');
+    await setField(page, 'sel-fx-trunkend', 'male'); await setField(page, 'sel-fx-branchend', 'plain');
+    await page.click('#btn-fx-split2');
+    st = await waitStatus(page, /Dropped splitter 2-way 1|2-way splitter refused/);
+    P = await pieces(page);
+    const sp = P.find(p => p.name === 'splitter 2-way 1'), Ts2 = sp && await topoOf(page, sp.id);
+    check('2-way splitter with a male G3/4 trunk end: made, a thickened sphere with 3 openings (Euler -2), the status names the spigot', !!sp && Ts2.open === 0 && Ts2.nm === 0 && Ts2.flip === 0 && Ts2.euler === -2 && /trunk male G3\/4 thread \(11\.0 mm, a spigot\)/.test(st), st);
+    await frame(page); await shot(page, 'fittings-splitter-male.png');
+    await page.click('#btn-undo'); await waitStatus(page, /Undo/);
+    // refusal: a socket the run cannot hold
+    await setField(page, 'inp-fx-od', ''); await setField(page, 'inp-fx-wall', ''); await setField(page, 'inp-fx-bod', '');
+    await setField(page, 'sel-fx-trunkend', 'male'); await setField(page, 'sel-fx-tsize', 'G3/4');
+    const nS = (await pieces(page)).length;
+    await page.click('#btn-fx-split2');
+    await page.waitForFunction(() => document.getElementById('fx-readout').classList.contains('is-bad'), null, { timeout: 15000 });
+    rd = await readout(page);
+    check('a G3/4 male trunk on the default Ø20 trunk: refused in words (the thread is wider than the run), nothing added', /^2-way: the G3\/4 male thread is Ø26\.44 across - wider than the trunk's Ø20\.00 outside; make it at least Ø26\.9/.test(rd.text) && (await pieces(page)).length === nS, rd.text);
+    await setField(page, 'sel-fx-trunkend', 'plain');
+  }
+
   console.log('\n=== 7. nothing else on the page broke ===');
   const errs = logs.filter(l => l.startsWith('[pageerror]'));
   check('no uncaught page errors', errs.length === 0, errs.join(' | '));

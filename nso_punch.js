@@ -24,6 +24,10 @@
                    pin of this size goes in: the cutter's corners sit on
                    dia / 2 / cos(pi / sides).
          depth     'through' (default) or a number of mm below the surface
+         thread    null (a plain hole) or a thread size - 'M6', 'G1/2', 'NPT3/4' - or { size, hand, fit, major, pitch }.
+                   A THREADED hole: the cutter is that thread's bolt with the internal fit (0.2 mm, radial) added, so the
+                   bolt Gen+ > Fasteners makes turns in it. diaMm is then the thread's (the Ø at the crests of the
+                   cut), and the wall floors are measured from it. A blind one must be 2 pitches deep. docs/THREADS.md.
          countersink 'none' (the only one for now)
          nozzle    mm, default 0.4; the wall floor is two of these
          pattern   'none' | 'grid' | 'radial' (or { type, ...fields })
@@ -81,7 +85,14 @@
     try { BVH = require('./nso_bvh.js'); } catch (e) { BVH = null; }
   }
 
+  var THREAD = root && root.NSO_Thread ? root.NSO_Thread : null;
+  if (!THREAD && typeof module !== 'undefined' && typeof require === 'function') {
+    try { THREAD = require('./nso_thread.js'); } catch (e) { THREAD = null; }
+  }
+  function threadMod() { return (root && root.NSO_Thread) || THREAD; }
+
   var DEFAULTS = {
+    thread: null,
     diaMm: 3,
     depth: 'through',
     countersink: 'none',
@@ -389,9 +400,25 @@
       o.pattern = opts.pattern.type || 'none';
     }
     if (o.anchor === 'center') o.anchor = 'centre';
+    if (o.thread != null && o.thread !== '' && o.thread !== 'none') {
+      var TH = threadMod();
+      if (!TH) o.threadErr = 'nso_thread.js must be loaded - a threaded hole is cut with its thread';
+      else {
+        var t = typeof o.thread === 'object' ? o.thread : { size: o.thread };
+        var sp = TH.spec(t.size || t.id, { major: t.major, pitch: t.pitch, hand: t.hand, nozzle: o.nozzle });
+        var fit = t.fit != null && isFinite(+t.fit) ? +t.fit : TH.DEFAULTS.fit;
+        if (!sp.ok) o.threadErr = sp.reason;
+        else if (fit < 0) o.threadErr = 'a thread fit of ' + fmt(fit) + ' mm is refused - it is the clearance added to the thread, 0 or more';
+        else { o.threadSpec = sp.spec; o.threadNote = sp.note; o.threadFit = fit; o.diaMm = sp.spec.major + 2 * fit; }
+      }
+    } else o.thread = null;
     return o;
   }
   function badOpts(o) {
+    if (o.threadErr) return o.threadErr;
+    if (o.threadSpec && o.depth !== 'through' && isFinite(o.depth) && +o.depth < 2 * o.threadSpec.P - 1e-9) {
+      return 'a ' + fmt(+o.depth) + ' mm deep thread is under two pitches (' + fmt(2 * o.threadSpec.P) + ' mm for ' + o.threadSpec.id + ') - it would not hold; make it at least ' + (Math.ceil(2 * o.threadSpec.P * 10) / 10).toFixed(1) + ' mm';
+    }
     if (!(isFinite(o.diaMm) && o.diaMm > 0)) return 'the hole needs a diameter above 0';
     if (!(isFinite(o.nozzle) && o.nozzle > 0)) return 'the nozzle width must be above 0';
     if (o.diaMm < 2 * o.nozzle) return 'a ' + fmt(o.diaMm) + ' mm hole is narrower than two nozzle widths (' + fmt(2 * o.nozzle) + ') - it would print shut';
@@ -512,7 +539,7 @@
       var c = ft.point, axis = ft.normal;
       var spans = spansFrom(M, c, axis);
       if (!spans) return refuse('hole ' + (i + 1) + ' goes in and never comes out - the piece is not closed there; Repair it first');
-      holes.push({ n: i + 1, centre: c, axis: axis, dia: o.diaMm, depth: 0, lift: o.endMm, spans: spans });
+      holes.push({ n: i + 1, centre: c, axis: axis, dia: o.diaMm, depth: 0, lift: o.endMm, spans: spans, thread: o.threadSpec ? { spec: o.threadSpec, fit: o.threadFit } : null });
     }
     var total = pts.length;
     if (!holes.length) {
@@ -580,13 +607,15 @@
       return refuse(viol[0].text + '; the floor is ' + fmt(floor) + (more ? ' (' + plural(more, 'more place is', 'more places are') + ' under it too)' : ''),
         { violations: viol, floor: floor, frame: frame, dropped: dropped.length, droppedHoles: dropped, droppedAt: droppedAt, wouldBe: holes });
     }
-    var what = plural(holes.length, 'hole', 'holes') + ' Ø' + fmt(o.diaMm) + ' ' +
-               (o.depth === 'through' ? 'through' : fmt(+o.depth) + ' mm deep');
+    var what = plural(holes.length, 'hole', 'holes') + (o.threadSpec ?
+               ' ' + o.threadSpec.id + (o.threadSpec.hand < 0 ? ' left-hand' : '') + ' threaded (Ø' + fmt(o.diaMm) + ' at the crests of the cut, pitch ' + fmt(o.threadSpec.P) + ') ' :
+               ' Ø' + fmt(o.diaMm) + ' ') + (o.depth === 'through' ? 'through' : fmt(+o.depth) + ' mm deep') +
+               (o.threadNote ? ' - note: ' + o.threadNote : '');
     var reason = dropped.length ?
       plural(dropped.length, 'hole', 'holes') + ' of ' + total + ' fall off the face and ' + (dropped.length === 1 ? 'was' : 'were') +
       ' dropped (' + dropped.join(', ') + '); punching ' + what : 'punching ' + what;
     return { ok: true, holes: holes, reason: reason, dropped: dropped.length, droppedHoles: dropped, droppedAt: droppedAt,
-             floor: floor, frame: frame };
+             floor: floor, frame: frame, thread: o.threadSpec ? { spec: o.threadSpec, fit: o.threadFit, note: o.threadNote || '' } : null };
   }
 
   /* ----------------------------------------------------------- cutters */
@@ -598,9 +627,11 @@
   function cutters(pl) {
     var holes = (pl && pl.holes) || [];
     return holes.map(function (H) {
-      var a = unit(H.axis), m = sidesFor(H.dia), rv = H.dia / 2 / Math.cos(Math.PI / m);
+      var a = unit(H.axis), P0 = add(H.centre, mul(a, H.lift == null ? DEFAULTS.endMm : H.lift));
       var e1 = unit(Math.abs(a[0]) < 0.9 ? cross(a, [1, 0, 0]) : cross(a, [0, 1, 0])), e2 = cross(a, e1);
-      var P0 = add(H.centre, mul(a, H.lift == null ? DEFAULTS.endMm : H.lift)), P1 = sub(P0, mul(a, H.depth));
+      if (H.thread) return threadCutter(H, P0, a, e1, e2);
+      var m = sidesFor(H.dia), rv = H.dia / 2 / Math.cos(Math.PI / m);
+      var P1 = sub(P0, mul(a, H.depth));
       var top = [], bot = [], k;
       for (k = 0; k < m; k++) {
         var th = 2 * Math.PI * k / m, rad = add(mul(e1, rv * Math.cos(th)), mul(e2, rv * Math.sin(th)));
@@ -617,6 +648,31 @@
       }
       return out;
     });
+  }
+
+  /* A threaded hole's cutter: NSO_Thread.cutter's threaded rod, standing on its own z = 0 and running up the +z, mapped so
+     z = 0 is the cutter's top (P0) and z runs down the hole's axis: (x, y, z) -> P0 + x e1 - y e2 - z a. That basis (e1, -e2, -a)
+     is a rotation of half a turn about e1, so a right-hand thread stays right-hand (a mirror would flip it) and the winding
+     stays outward. The rod is built once per (thread, depth) and mapped for every hole. */
+  var cutCache = {};
+  function threadCutter(H, P0, a, e1, e2) {
+    var TH = threadMod(), sp = H.thread.spec, key = sp.id + '|' + sp.major + '|' + sp.P + '|' + sp.hand + '|' + H.thread.fit + '|' + H.depth.toFixed(5);
+    var rod = cutCache[key];
+    if (!rod) {
+      var c = TH.cutter({ ok: true, spec: sp, note: '' }, H.depth, { fit: H.thread.fit, slope: -sp.slope });
+      if (!c.ok) throw new Error(c.reason);
+      rod = cutCache[key] = c.soup;
+      var keys = Object.keys(cutCache);
+      if (keys.length > 8) delete cutCache[keys[0]];
+    }
+    var out = new Float32Array(rod.length);
+    for (var i = 0; i < rod.length; i += 3) {
+      var x = rod[i], y = rod[i + 1], z = rod[i + 2];
+      out[i] = P0[0] + e1[0] * x - e2[0] * y - a[0] * z;
+      out[i + 1] = P0[1] + e1[1] * x - e2[1] * y - a[1] * z;
+      out[i + 2] = P0[2] + e1[2] * x - e2[2] * y - a[2] * z;
+    }
+    return out;
   }
 
   /* Slide the click dx along u and dy along v, on its own surface: the hit a
@@ -659,7 +715,7 @@
     var holes = (pl && pl.holes) || [];
     var seg = holes.map(function (H) {
       var m = sidesFor(H.dia), a = unit(H.axis), P0 = add(H.centre, mul(a, H.lift == null ? DEFAULTS.endMm : H.lift));
-      return { a: P0, b: sub(P0, mul(a, H.depth)), r: H.dia / 2 / Math.cos(Math.PI / m) };
+      return { a: P0, b: sub(P0, mul(a, H.depth)), r: H.thread ? H.dia / 2 + 1e-3 : H.dia / 2 / Math.cos(Math.PI / m) };
     });
     for (var i = 0; i < seg.length; i++) for (var j = i + 1; j < seg.length; j++) {
       if (segDist(seg[i].a, seg[i].b, seg[j].a, seg[j].b) < seg[i].r + seg[j].r + 1e-6) return true;
