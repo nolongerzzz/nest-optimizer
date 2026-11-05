@@ -2751,8 +2751,12 @@
       if (!coverCache.has(i)) coverCache.set(i, cover.at(i));
       return coverCache.get(i);
     }
+    /* what lies below a region's first layer is the union of layers 0..firstLayer-1; regions come out in rising first-layer order, so one running union
+       serves them all (re-unioning every layer below for each region took ring8's 192 regions 270 s of a 290 s slice) */
+    var belowAcc = g.empty(), belowTo = 0;
     return regions.map(function (r) {
-      var belowAll = g.unionAll(P.S.slice(0, r.firstLayer));
+      for (; belowTo < r.firstLayer; belowTo++) belowAcc = g.union(belowAcc, P.S[belowTo]);
+      var belowAll = belowAcc;
       var fp = r.footprint;
       var fpA = g.area(fp);
       var onModel = g.area(g.inter(fp, belowAll));
