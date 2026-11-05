@@ -31,3 +31,19 @@ Things worth knowing:
   printable threads not gauged ones (tape them), the fit is one number (0.2), no left-hand in the Fittings card, a 60 degree thread's lower
   flank is 30 degrees off horizontal when standing on end.
 - *Running the drives here.* The harness wants `node_modules` (`npm ci`) and a Chromium: `PW_CHROMIUM=/opt/pw-browsers/chromium-1243/chrome-linux64/chrome`.
+
+Follow-up, same day - **Fasteners: tiles, sliders, live preview** (`app-fasteners.js` rewritten, `app-fittings.js` gains `nsoFittings.spotFor`,
+`styles.css` `.fs-tiles` / `.fs-slider`, the Fasteners block in `index.html`, `tools/nso_fasteners_drive_check.js` rewritten for the new flow):
+- The four buttons are now **tiles** that choose a kind; the heads are two more tiles; **Add to plate** bakes. Every number has a slider
+  (`nsoLiveSlider`); the old verbs live on as `nsoFasteners.rod() / bolt() / nut() / set()`.
+- *The preview is not a piece.* It is a `THREE.Mesh` added to `state.scene` (flagged `userData.nsoFastenerPreview`), never to `state.modelGroup` or
+  `state.placed` - picking intersects `modelGroup.children`, the packer and the export read `state.placed`, and Undo is only pushed by `addPiece`.
+  The drive check asserts all three. It stands where the drop would: `spotFor` runs `wantedSpot` then `nsoFreeSpot` with the ghost's own mesh as the
+  entry, so the free-spot search measures the real footprint. After a bake the drop's search must not see the ghost, so it is cleared first and
+  rebuilt beside the new piece.
+- *"Untouched" numbers.* Ø / Pitch / Nut thick start at the size's own and are only passed to the engine when moved off it (G1/2 is 20.955; the box
+  shows 20.96). `nso_thread.js` names an overridden thread by its numbers (`M7x1.5`), so a piece made from a moved slider is not called `M8`.
+- *Tiles reuse `nsoStockShelf.paint`* (the Stock shelf's 2D painter) - no image files; if a shelf is not loaded the canvases stay blank and the
+  card still works.
+- The menu body is a wrapping flex box 176-320 px wide: a row that is not `flex: 0 0 100%` sits beside its neighbour (the first layout interleaved
+  the two tile rows).

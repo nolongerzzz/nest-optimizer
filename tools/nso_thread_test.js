@@ -148,6 +148,10 @@ const TABLE = [];
     const n = T.spec('NPT3/4').spec;
     check('NPT3/4: Ø26.67, 14 TPI, tapered 1:16 on the diameter (1/32 a side)', near(n.major, 26.67, 1e-9) && near(n.P, 25.4 / 14, 1e-9) && near(n.taper, 1 / 16, 1e-12) && near(n.slope, 1 / 32, 1e-12));
     check('a typed Ø and pitch: { major: 7, pitch: 1.5 } is a thread of its own', (() => { const c = T.spec({ family: 'metric', major: 7, pitch: 1.5 }); return c.ok && c.spec.major === 7 && c.spec.P === 1.5; })());
+    const nm = (a, o) => T.spec(a, o || {}).spec.id;
+    check('a thread is named for what it is: the table\'s id when Ø and pitch are the table\'s (G1/2 even at 20.955 typed), else its numbers - M8, M7x1.25, M7x1.5, Ø20.96x2',
+      nm('M8') === 'M8' && nm('G1/2', { major: 20.955 }) === 'G1/2' && nm('M8', { major: 7 }) === 'M7x1.25' && nm({ family: 'metric', major: 7, pitch: 1.5 }) === 'M7x1.5' && nm('G1/2', { pitch: 2 }) === 'Ø20.96x2',
+      [nm('M8'), nm('M8', { major: 7 }), nm('G1/2', { pitch: 2 })].join(' / '));
     const no = (tag, r, re) => { console.log('   ' + r.reason); check('refused: ' + tag, !r.ok && re.test(r.reason), r.reason); };
     no('an unknown size', T.spec('M99'), /^unknown thread size "M99"/);
     no('a pitch under half a nozzle of depth', T.spec({ family: 'metric', major: 6, pitch: 0.2 }), /^a 0\.20 mm pitch is only 0\.123 mm deep - under 0\.5 of a 0\.4 mm nozzle; it would not form\. Use a pitch of at least 0\.33 mm$/);

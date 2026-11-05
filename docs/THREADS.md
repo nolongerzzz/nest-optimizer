@@ -81,9 +81,26 @@ the thread's own Ø read-only in the Ø field and takes the ring handle away; PU
 
 ## Fasteners
 
-Rod, Bolt (hex or socket head; a hex is 6 across-flats facets, a socket head a cylinder with a hex socket open on the bed), Nut (hex or
-round), and Bolt + nut. Head and nut dimensions are ISO 4017 / 4032 / 4762 for M2 to M30 (a table in `nso_thread.js`); a typed Ø takes
-formulas (`1.5 D + 1` across flats). Bolts print **head down on the bed**; rods stand on end.
+Pick **Rod**, **Bolt**, **Nut** or **Bolt + nut** from the tiles, adjust, and **Add to plate**. (`npm run fasteners:drive`.)
+
+- **Tiles** - the four kinds and the two head types (**Hex head**, **Socket head**) are pictures drawn from the generator's own meshes at M8 with
+  the Stock shelf's painter (`nsoStockShelf.paint`), the first time the card opens: no image file is in the repo. A bolt is drawn head up (it prints
+  head down); in Bolt + nut the nut is amber.
+- **Sliders** - every number is a box + slider + read-out bound with `nsoLiveSlider`: **Ø**, **Pitch**, **Length** (rod / bolt), **Fit** and **Nut
+  thick** (nut). Size and Hand are selects. Choosing a **Size** sets Ø, Pitch and the nut's thickness to its own and the sliders adjust from there;
+  Ø or Pitch moved off the table makes a thread of its own, named by its numbers (`M7x1.5`, `Ø20.96x2`); an unchanged one is exactly the table's
+  (G1/2 is 20.955, not the box's 20.96). The box takes a value past its slider's end. Rows that do not apply to the chosen kind are put away.
+- **Live preview** - a translucent copy of what Add to plate would drop (a set shows both) stands on the plate where the drop would put it: beside
+  the selection, then the nearest free spot (`nsoFittings.spotFor`, the drop's own two steps). It is rebuilt as any control moves (paced by the live
+  slider), and is a helper in the scene - **not** a piece (not in `state.placed` or `state.modelGroup`, so it is not picked, packed, exported, or
+  an Undo step). It shows only while Gen+ and the Fasteners menu are open. A choice that is refused clears it, says why in red, and turns Add to plate
+  off.
+- **Add to plate** bakes what the preview shows: one piece each (a set is two), selected, one Undo each; the preview then stands beside the new piece.
+  `nsoFasteners.rod() / bolt() / nut() / set()` bake that kind with the card's numbers (what the old buttons did).
+
+A bolt is a hex head (6 across-flats facets) or a socket cap (a cylinder with a hex socket open on the bed); a nut is hex or round. Head and nut
+dimensions are ISO 4017 / 4032 / 4762 for M2 to M30 (a table in `nso_thread.js`); a typed Ø takes formulas (`1.5 D + 1` across flats). Bolts print
+**head down on the bed**; rods stand on end.
 
 ## Refusals and notes, in words
 

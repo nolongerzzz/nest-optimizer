@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=25eff12a" />
+  <link rel="stylesheet" href="styles.css?v=3070a15c" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -319,16 +319,27 @@
               <p id="fx-readout" class="bend-readout" aria-live="polite">—</p>
               </div>
               </details>
-              <!-- Fasteners: a threaded rod, a bolt (hex or socket head), a nut and a bolt + nut set - each a
-                   NEW piece on the plate, edits nothing. nso_thread.js builds them (headless,
-                   tools/nso_thread_test.js), app-fasteners.js is this card. A nut's bore is the bolt's
-                   thread + the Fit, so the pair turns; Punch's Thread cuts the matching tapped hole.
-                   docs/THREADS.md. -->
-              <details class="vp-menu vp-wheel-menu vp-fasteners-menu">
-              <summary title="Threaded rods, bolts and nuts: ISO metric and G (BSP) sizes or a typed Ø and pitch - each a piece of its own, the nut fitted to the bolt">Fasteners</summary>
+              <!-- Fasteners: a threaded rod, a bolt (hex or socket head), a nut and a bolt + nut set. Pick one from the
+                   tiles (drawn from nso_thread.js's own meshes by app-fasteners.js, the way the Stock tiles are), move the
+                   sliders - a translucent preview sits on the plate where the piece will land and follows every change -
+                   and press Add to plate to bake it: each piece is a NEW piece, edits nothing, one Undo. nso_thread.js builds
+                   them (headless, tools/nso_thread_test.js). A nut's bore is the bolt's thread + the Fit, so the pair turns;
+                   Punch's Thread cuts the matching tapped hole. docs/THREADS.md. -->
+              <details class="vp-menu vp-wheel-menu vp-fasteners-menu" id="menu-fasteners">
+              <summary title="Threaded rods, bolts and nuts: ISO metric and G (BSP) sizes or a typed Ø and pitch. Pick one, adjust it live on the plate, then add it - the nut is fitted to the bolt">Fasteners</summary>
               <div class="vp-menu-body vp-wheel">
+              <div class="fs-tiles" id="fs-kind-row" role="group" aria-label="What to make">
+                <button class="fs-tile" type="button" data-kind="rod" aria-pressed="false" title="Threaded rod: the thread's profile the whole length, flat ends, standing on the bed."><canvas width="64" height="64" aria-hidden="true"></canvas><span>Rod</span></button>
+                <button class="fs-tile" type="button" data-kind="bolt" aria-pressed="true" title="Bolt: a hex or socket head and a threaded shank, head down on the bed."><canvas width="64" height="64" aria-hidden="true"></canvas><span>Bolt</span></button>
+                <button class="fs-tile" type="button" data-kind="nut" aria-pressed="false" title="Hex nut: the standard size for the thread (or your thickness), its bore the bolt's thread plus the Fit."><canvas width="64" height="64" aria-hidden="true"></canvas><span>Nut</span></button>
+                <button class="fs-tile" type="button" data-kind="set" aria-pressed="false" title="A bolt and its nut, two pieces made together: the nut turns on the bolt."><canvas width="64" height="64" aria-hidden="true"></canvas><span>Bolt + nut</span></button>
+              </div>
+              <div class="fs-tiles fs-heads" id="fs-head-row" role="group" aria-label="Head type">
+                <button class="fs-tile" type="button" data-head="hex" aria-pressed="true" title="Hex head: a six-sided head you turn with a spanner. It stands on its flat top face."><canvas width="64" height="64" aria-hidden="true"></canvas><span>Hex head</span></button>
+                <button class="fs-tile" type="button" data-head="socket" aria-pressed="false" title="Socket head: a round cap with a hex socket for an Allen key, open on the bed face."><canvas width="64" height="64" aria-hidden="true"></canvas><span>Socket head</span></button>
+              </div>
               <div class="vp-row vp-row-opts">
-              <label class="vp-clone" title="The thread. Metric coarse and fine, or G (BSP parallel) pipe sizes. Type a Ø and pitch below for any other.">Size
+              <label class="vp-clone" title="The thread. Metric coarse and fine, or G (BSP parallel) pipe sizes. Choosing one sets Ø, Pitch and the nut's thickness to its own; the sliders then adjust from there.">Size
                 <select id="sel-fs-size" class="vp-select" aria-label="Thread size">
                   <optgroup label="Metric (ISO coarse)">
                     <option>M2</option><option>M2.5</option><option>M3</option><option>M4</option><option>M5</option><option>M6</option><option selected>M8</option><option>M10</option>
@@ -345,30 +356,24 @@
               <label class="vp-clone" title="Right-hand is the usual thread; a left-hand bolt takes a left-hand nut.">Hand
                 <select id="sel-fs-hand" class="vp-select" aria-label="Thread hand"><option value="right" selected>Right</option><option value="left">Left</option></select></label>
               </div>
-              <div class="vp-row vp-row-opts">
-              <label class="vp-clone" title="Custom: the thread's major Ø, mm. Blank takes the size's own.">Ø <input type="number" id="inp-fs-major" min="1.5" max="100" step="0.1" placeholder="size" aria-label="Custom major diameter, mm"></label>
-              <label class="vp-clone" title="Custom: the pitch, mm. Blank takes the size's own. Under about 0.8 mm a 0.4 mm nozzle resolves the thread roughly - it says so; under half the nozzle's own depth it is refused.">Pitch <input type="number" id="inp-fs-pitch" min="0.1" max="12" step="0.05" placeholder="size" aria-label="Custom pitch, mm"></label>
-              </div>
-              <div class="vp-row vp-row-opts">
-              <label class="vp-clone" title="Rod: its length. Bolt: the shank under the head. Blank is 40 for a rod, 25 for a bolt.">Length <input type="number" id="inp-fs-length" min="1" max="500" step="1" placeholder="auto" aria-label="Length, mm"></label>
-              <label class="vp-clone" title="Bolt: a hex head (it stands on it) or a socket-head cap screw with a hex socket open on the bed.">Head
-                <select id="sel-fs-head" class="vp-select" aria-label="Bolt head"><option value="hex" selected>Hex</option><option value="socket">Socket</option></select></label>
-              </div>
-              <div class="vp-row vp-row-opts">
-              <label class="vp-clone" title="Nut: the radial clearance added to the thread so it turns, mm. 0.2 is a printed fit; blank is 0.2. The Punch tool's tapped hole uses the same 0.2.">Fit <input type="number" id="inp-fs-fit" min="0" max="1" step="0.05" placeholder="0.2" aria-label="Nut fit, mm"></label>
-              <label class="vp-clone" title="Nut: its thickness, mm. Blank is the standard nut for the size.">Nut thick <input type="number" id="inp-fs-nutm" min="1" max="100" step="0.5" placeholder="std" aria-label="Nut thickness, mm"></label>
-              </div>
-              <div class="vp-row vp-row-pair">
-              <button id="btn-fs-rod" class="btn btn-secondary" type="button"
-                title="Threaded rod: the thread's profile the whole length, flat ends, standing on the bed. A new piece.">Rod</button>
-              <button id="btn-fs-bolt" class="btn btn-secondary" type="button"
-                title="Bolt: a hex or socket head and a threaded shank, head down on the bed. A new piece.">Bolt</button>
-              </div>
-              <div class="vp-row vp-row-pair">
-              <button id="btn-fs-nut" class="btn btn-secondary" type="button"
-                title="Hex nut: the standard size for the thread (or your thickness), its bore the bolt's thread plus the Fit. A new piece.">Nut</button>
-              <button id="btn-fs-set" class="btn btn-secondary" type="button"
-                title="A bolt and its nut, two pieces, made together: the nut turns on the bolt.">Bolt + nut</button>
+              <div class="fs-slider" data-for="major" title="The thread's major Ø, mm. It starts at the size's own; moving it makes a thread of your own (the piece is then named by its numbers). The box takes any value past the slider's end.">
+                <label for="inp-fs-major-slider">Ø</label><input type="number" id="inp-fs-major" min="1.5" max="100" step="0.1" value="8" aria-label="Major diameter, mm"><span id="fs-major-read" class="fs-read">8 mm</span>
+                <input type="range" id="inp-fs-major-slider" min="2" max="64" step="0.1" value="8"></div>
+              <div class="fs-slider" data-for="pitch" title="The pitch, mm: the distance the thread advances in one turn. It starts at the size's own. Under about 0.8 mm a 0.4 mm nozzle resolves the thread roughly - it says so; under half the nozzle's own depth it is refused.">
+                <label for="inp-fs-pitch-slider">Pitch</label><input type="number" id="inp-fs-pitch" min="0.1" max="12" step="0.05" value="1.25" aria-label="Pitch, mm"><span id="fs-pitch-read" class="fs-read">1.25 mm</span>
+                <input type="range" id="inp-fs-pitch-slider" min="0.2" max="6" step="0.05" value="1.25"></div>
+              <div class="fs-slider" id="fs-length-row" data-for="length" title="Rod: its length. Bolt: the shank under the head.">
+                <label for="inp-fs-length-slider">Length</label><input type="number" id="inp-fs-length" min="1" max="500" step="1" value="25" aria-label="Length, mm"><span id="fs-length-read" class="fs-read">25 mm</span>
+                <input type="range" id="inp-fs-length-slider" min="2" max="150" step="1" value="25"></div>
+              <div class="fs-slider" id="fs-fit-row" data-for="fit" title="Nut: the radial clearance added to the thread so it turns, mm. 0.2 is a printed fit. The Punch tool's tapped hole uses the same 0.2.">
+                <label for="inp-fs-fit-slider">Fit</label><input type="number" id="inp-fs-fit" min="0" max="1" step="0.05" value="0.2" aria-label="Nut fit, mm"><span id="fs-fit-read" class="fs-read">0.2 mm</span>
+                <input type="range" id="inp-fs-fit-slider" min="0" max="0.6" step="0.05" value="0.2"></div>
+              <div class="fs-slider" id="fs-nutm-row" data-for="nutm" title="Nut: its thickness, mm. It starts at the standard nut for the size.">
+                <label for="inp-fs-nutm-slider">Nut thick</label><input type="number" id="inp-fs-nutm" min="1" max="100" step="0.1" value="6.8" aria-label="Nut thickness, mm"><span id="fs-nutm-read" class="fs-read">6.8 mm</span>
+                <input type="range" id="inp-fs-nutm-slider" min="1" max="40" step="0.1" value="6.8"></div>
+              <div class="vp-row vp-row-full">
+              <button id="btn-fs-add" class="btn btn-secondary" type="button"
+                title="Bake what the preview shows: it is added to the plate as a piece of its own (a bolt + nut as two), beside the selection, selected. One Undo each. Nothing is added until this is pressed.">Add to plate</button>
               </div>
               <p id="fs-readout" class="bend-readout" aria-live="polite">—</p>
               </div>
@@ -2598,7 +2603,7 @@
   <!-- Neck: a pinch or a bulge along a tube. After nso_tube_edge.js (its end
        reader, weld and helpers). See docs/TUBE-EDGE.md, "Neck". -->
   <script src="nso_tube_neck.js?v=e42beb75"></script>
-  <script src="nso_thread.js?v=d396a525"></script>
+  <script src="nso_thread.js?v=3d986b5e"></script>
   <script src="nso_fittings.js?v=d69ad69f"></script>
   <script src="app-tube-edge.js?v=54e345d1"></script>
   <!-- Bridge: a web between two places, welded. After NSO_Repair.js,
@@ -2629,8 +2634,8 @@
   <script src="app-wheel.js?v=35fda70f"></script>
   <script src="app-fit.js?v=94ef7252"></script>
   <script src="app-stock.js?v=04f0e346"></script>
-  <script src="app-fittings.js?v=ff1ca351"></script>
-  <script src="app-fasteners.js?v=22db4ba3"></script>
+  <script src="app-fittings.js?v=7f46895b"></script>
+  <script src="app-fasteners.js?v=0d34ba0b"></script>
   <script src="app-assemble.js?v=60984bfb"></script>
   <script src="app-sel-outline.js?v=c1a5b4df"></script>
   <script src="app-join.js?v=5a50ad61"></script>

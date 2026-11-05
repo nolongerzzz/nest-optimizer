@@ -375,7 +375,7 @@
     "fittings:thread": {"weight":27000,"note":"measured: node tools/nso_fittings_thread_test.js, 72 checks, splitter with male / female / NPT ends on the Manifold kernel + mesh_validate"},
     "thread:test": {"weight":22000,"note":"measured: node tools/nso_thread_test.js, 214 checks, rays through every thread piece + mesh_validate"},
     "punch:thread": {"weight":10700,"note":"measured: node tools/nso_punch_thread_test.js, threaded holes through the shipped boolean + mesh_validate"},
-    "fasteners:drive": {"weight":14000,"note":"measured: the real Fasteners card, rod / bolt / nut / set + Undo + refusals"},
+    "fasteners:drive": {"weight":18000,"note":"measured: the real Fasteners card - drawn tiles, sliders, live preview, Add to plate, refusals"},
     "tube:neck": {"weight":190800,"note":""},
     "ui:shell": {"weight":26600,"note":""},
     "undo:dispose": {"weight":600,"note":"estimate (undo-dispose-yaw): a Node-only vm check, ~0.1 s locally; one CI run measures it"},

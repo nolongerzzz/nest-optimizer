@@ -4772,3 +4772,18 @@ body.sup-card-open #adjust-status { display: none; }
 .vp-surftex-menu > summary { width: auto; min-width: 64px; height: 28px; padding: 0 10px; font-size: 12px; }
 .vp-surftex-menu > .vp-menu-body { position: static; left: auto; top: auto; min-width: 0; max-width: none; width: 100%; margin-top: 4px; box-shadow: none; padding: 4px; box-sizing: border-box; }
 .surftex-card #sel-surftex-face { grid-column: 2; }
+
+/* Fasteners (Gen+): tiles drawn from nso_thread.js's own meshes, and a number box with its slider (app-fasteners.js, app-live-slider.js). */
+.fs-tiles { flex: 0 0 100%; box-sizing: border-box; display: grid; grid-template-columns: repeat(auto-fit, minmax(64px, 1fr)); gap: 4px; margin: 2px 0 4px; }
+.fs-tile { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 3px 2px 3px; margin: 0; border: 1px solid rgba(148, 163, 184, 0.35); border-radius: 6px;
+  background: #14171c; color: #94a3b8; font: inherit; font-size: 10px; line-height: 1.1; cursor: pointer; overflow: hidden; }
+.fs-tile canvas { display: block; width: 64px; height: 64px; max-width: 100%; }
+.fs-tile:hover { border-color: rgba(56, 189, 248, 0.9); }
+.fs-tile:focus-visible { outline: 2px solid #38bdf8; outline-offset: 1px; }
+.fs-tile[aria-pressed="true"] { border-color: #38bdf8; color: #e2e8f0; box-shadow: 0 0 0 1px #38bdf8 inset; }
+.fs-slider { flex: 0 0 100%; box-sizing: border-box; display: grid; grid-template-columns: 1fr 64px auto; align-items: center; column-gap: 6px; font-size: 11px; color: #94a3b8; margin: 3px 0; }
+.fs-slider label { grid-column: 1; }
+.fs-slider input[type="number"] { grid-column: 2; width: 100%; min-width: 0; }
+.fs-slider .fs-read { grid-column: 3; min-width: 40px; text-align: right; color: #cbd5e1; font-variant-numeric: tabular-nums; }
+.fs-slider input[type="range"] { grid-column: 1 / -1; width: 100%; min-width: 0; margin: 2px 0 0; }
+.fs-slider[hidden], .fs-tiles[hidden] { display: none; }

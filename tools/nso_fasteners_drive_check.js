@@ -3,10 +3,15 @@
      node tools/nso_fasteners_drive_check.js            exit 0 = every gate held
      FASTENERS_SHOTS=dir node tools/nso_fasteners_drive_check.js   also screenshots
 
-   The geometry is proven headless in tools/nso_thread_test.js. What this proves is the card: it is in Gen+, its blank
-   fields show their defaults, Rod / Bolt / Nut / Bolt + nut each drop pieces of their own - named, selected, closed,
-   the size the standard says - one Undo each, a typed Ø and pitch and a left hand are honoured, a refusal says why and
-   adds nothing, and the nut and the bolt made together are built to turn on each other. */
+   The geometry is proven headless in tools/nso_thread_test.js. What this proves is the card:
+     1. it is in Gen+ with its tiles (Rod, Bolt, Nut, Bolt + nut; Hex head, Socket head) DRAWN - each canvas painted, no two alike -
+        and a number box + slider for every number (Ø, Pitch, Length, Fit, Nut thick), bound live
+     2. with the menu open a translucent PREVIEW stands on the plate - in the scene, not on the plate (no piece, no Undo step)
+     3. the sliders move the preview (Length changes its height, Ø its width), the box follows the slider, Size resets Ø / Pitch / nut
+        thickness, the head tiles swap the head, a Nut tile shows a nut, Bolt + nut shows two side by side
+     4. Add to plate BAKES what the preview shows (one Undo each); the preview stands beside the new piece; the nut and bolt turn
+     5. a choice that is refused clears the preview, says why in red, and Add to plate is off - nothing is added
+     6. closing the menu takes the preview away, opening it brings it back; a custom Ø is named by its numbers; left hand */
 
 const fs = require('fs');
 const path = require('path');
@@ -20,25 +25,30 @@ const check = (name, cond, detail) => {
 const SHOTS = process.env.FASTENERS_SHOTS || null;
 if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
 
-async function setField(page, id, value) {
-  await page.evaluate(([id, v]) => { const el = document.getElementById(id); el.value = v; el.dispatchEvent(new Event('change', { bubbles: true })); }, [id, value]);
-}
 const pieces = page => page.evaluate(() => state.models.filter(Boolean).map(m => ({ id: m.id, name: m.name, size: m.size && { x: m.size.x, y: m.size.y, z: m.size.z } })));
 const topoOf = (page, id) => page.evaluate(id => { const m = state.models.find(x => x && x.id === id); return NSO_bendTopology(m.rawTris); }, id);
 const readout = page => page.evaluate(() => ({ text: document.getElementById('fs-readout').textContent, bad: document.getElementById('fs-readout').classList.contains('is-bad') }));
-const selName = page => page.evaluate(() => { const m = getActiveModel(); return m ? m.name : null; });
+const FS = page => page.evaluate(() => nsoFasteners.state());
 const undoDepth = page => page.evaluate(() => state.undoStack.length);
-async function frame(page) {
-  await page.evaluate(() => {
-    const m = getActiveModel(), p = state.placed.find(q => q.sourceId === m.id), mesh = p.mesh;
-    mesh.updateMatrixWorld(true);
-    const c = new THREE.Vector3(); new THREE.Box3().setFromObject(mesh).getCenter(c);
-    state.controls.target.copy(c); state.camera.position.set(c.x + 30, c.y + 28, c.z + 42); state.controls.update(); state.camera.updateMatrixWorld(true);
-  });
+const frames = (page, n) => page.evaluate(k => new Promise(r => { let i = 0; const f = () => (++i >= k ? r() : requestAnimationFrame(f)); requestAnimationFrame(f); }), n || 2);
+/* a slider moved as a hand moves it: the range input's value, then the input event the live slider listens for */
+const slide = (page, name, v) => page.evaluate(([n, v]) => { const el = document.getElementById('inp-fs-' + n + '-slider'); el.value = String(v); el.dispatchEvent(new Event('input', { bubbles: true })); }, [name, v]);
+const typeBox = (page, name, v) => page.evaluate(([n, v]) => { const el = document.getElementById('inp-fs-' + n); el.value = String(v); el.dispatchEvent(new Event('input', { bubbles: true })); }, [name, v]);
+const field = (page, name) => page.evaluate(n => ({ box: document.getElementById('inp-fs-' + n).value, slider: document.getElementById('inp-fs-' + n + '-slider').value, read: document.getElementById('fs-' + n + '-read').textContent }), name);
+const choose = (page, id, v) => page.evaluate(([id, v]) => { const el = document.getElementById(id); el.value = v; el.dispatchEvent(new Event('change', { bubbles: true })); }, [id, v]);
+const click = (page, sel) => page.evaluate(s => document.querySelector(s).click(), sel);
+// wait until the preview (ghost) satisfies a test on its state
+const until = (page, fn, arg) => page.waitForFunction(([src, a]) => (new Function('s', 'a', 'return (' + src + ')(s, a)'))(nsoFasteners.state(), a), [fn.toString(), arg], { timeout: 8000 });
+async function frame(page, i) {
+  await page.evaluate(i => {
+    const g = nsoFasteners.state().ghost[i || 0]; if (!g) return;
+    const c = new THREE.Vector3(g.x, g.y, g.z);
+    state.controls.target.copy(c); state.camera.position.set(c.x + 34, c.y + 26, c.z + 46); state.controls.update(); state.camera.updateMatrixWorld(true);
+  }, i || 0);
 }
 async function shot(page, name) {
   if (!SHOTS) return;
-  await page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
+  await frames(page, 3);
   await page.screenshot({ path: path.join(SHOTS, name) });
   console.log('   screenshot ' + path.join(SHOTS, name));
 }
@@ -48,84 +58,125 @@ async function waitStatus(page, re) {
 }
 
 withApp(async (page, logs) => {
-  console.log('\n=== 1. the card, in Gen+, defaults showing ===');
-  const ui = await page.evaluate(() => {
+  console.log('\n=== 1. the card in Gen+: tiles drawn, a slider for every number ===');
+  const pre = await page.evaluate(() => {
     const el = id => document.getElementById(id), menu = document.querySelector('.vp-fasteners-menu');
-    const ids = ['btn-fs-rod', 'btn-fs-bolt', 'btn-fs-nut', 'btn-fs-set', 'sel-fs-size', 'sel-fs-hand', 'sel-fs-head', 'inp-fs-major', 'inp-fs-pitch', 'inp-fs-length', 'inp-fs-fit', 'inp-fs-nutm', 'fs-readout'];
-    return { menu: !!menu, inGen: !!(menu && menu.closest('#menu-gen')), ids: ids.every(i => !!el(i)), wired: ['btn-fs-rod', 'btn-fs-bolt', 'btn-fs-nut', 'btn-fs-set'].every(i => el(i).dataset.nsoWired === '1'),
-             size: el('sel-fs-size').value, fit: el('inp-fs-fit').placeholder, sizes: el('sel-fs-size').options.length };
+    const nums = ['major', 'pitch', 'length', 'fit', 'nutm'];
+    return { menu: !!menu, inGen: !!(menu && menu.closest('#menu-gen')), add: !!el('btn-fs-add'), kinds: document.querySelectorAll('#fs-kind-row [data-kind]').length, heads: document.querySelectorAll('#fs-head-row [data-head]').length,
+             sliders: nums.every(n => el('inp-fs-' + n) && el('inp-fs-' + n + '-slider') && el('fs-' + n + '-read') && el('inp-fs-' + n + '-slider').dataset.nsoLive === '1'),
+             size: el('sel-fs-size').value, sizes: el('sel-fs-size').options.length, ghostsBefore: nsoFasteners.state().ghosts };
   });
-  check('Fasteners is in the Gen+ menu with all its controls, wired at load', ui.menu && ui.inGen && ui.ids && ui.wired, JSON.stringify(ui));
-  check('M8 is the default size, the blank Fit says 0.2, and the table has 35 sizes (15 coarse, 11 fine, 9 G)', ui.size === 'M8' && ui.fit === '0.2' && ui.sizes === 35, JSON.stringify(ui));
-
-  console.log('\n=== 2. Bolt: an M8 hex bolt, 25 mm, a piece of its own ===');
+  check('Fasteners is in the Gen+ menu: 4 kind tiles, 2 head tiles, Add to plate, and a number box + slider + read-out for Ø, Pitch, Length, Fit, Nut thick - each bound live',
+    pre.menu && pre.inGen && pre.add && pre.kinds === 4 && pre.heads === 2 && pre.sliders, JSON.stringify(pre));
+  check('the menu is closed: there is no preview yet, and the table has 35 sizes', pre.ghostsBefore === 0 && pre.sizes === 35, JSON.stringify(pre));
   await page.evaluate(() => { state.editId = null; state.selectedIndex = -1; });
+  const u0 = await undoDepth(page), n0 = (await pieces(page)).length;
+  await page.evaluate(() => { document.getElementById('menu-gen').open = true; document.getElementById('menu-fasteners').open = true; });
+  await until(page, s => s.ghosts === 1 && s.tiles);
+  const tiles = await page.evaluate(() => Array.from(document.querySelectorAll('#menu-fasteners .fs-tile')).map(b => {
+    const c = b.querySelector('canvas'), d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    let lit = 0, h = 0; for (let i = 0; i < d.length; i += 4) { if (Math.abs(d[i] - 0x14) + Math.abs(d[i + 1] - 0x17) + Math.abs(d[i + 2] - 0x1c) > 24) lit++; h = (h * 31 + d[i] + 7 * d[i + 1] + 13 * d[i + 2]) | 0; }
+    return { id: b.getAttribute('data-kind') || b.getAttribute('data-head'), drawn: c.getAttribute('data-drawn'), lit, h, label: b.querySelector('span').textContent };
+  }));
+  check('all six tiles are drawn (a picture, not a blank: each has well over 150 lit pixels of 4096)', tiles.length === 6 && tiles.every(t => t.drawn === '1' && t.lit > 150), JSON.stringify(tiles.map(t => t.id + ':' + t.lit)));
+  check('no two tiles are alike (Rod, Bolt, Nut, Bolt + nut, Hex head, Socket head are six different pictures)', new Set(tiles.map(t => t.h)).size === 6, tiles.map(t => t.label).join(' / '));
+  const tileShot = SHOTS ? await page.locator('#menu-fasteners .fs-tiles').first().boundingBox() : null;
+
+  console.log('\n=== 2. the preview: in the scene, not on the plate ===');
+  let st = await FS(page), rd = await readout(page);
+  check('the default is a Bolt, M8, hex head: ONE translucent ghost stands in the scene', st.kind === 'bolt' && st.head === 'hex' && st.ghosts === 1 && st.ok && st.ghost[0].inScene, JSON.stringify(st));
+  check('the readout says it is a preview, with the numbers', !rd.bad && /^Preview - Hex bolt M8 × 25\.0 \(ISO metric 60°\): 13\.0 across flats/.test(rd.text), rd.text);
+  const inScene = await page.evaluate(() => ({ placed: state.placed.length, group: state.modelGroup.children.length, flagged: state.scene.children.filter(c => c.userData && c.userData.nsoFastenerPreview).length, inGroup: state.modelGroup.children.some(c => c.userData && c.userData.nsoFastenerPreview) }));
+  check('nothing is on the plate: no piece, not in the model group (so not picked, packed or exported), no Undo step', (await pieces(page)).length === n0 && inScene.flagged === 1 && !inScene.inGroup && (await undoDepth(page)) === u0, JSON.stringify(inScene));
+  check('its size is the bolt\'s: 15.0 across corners, 13.0 across flats, 30.3 tall (5.3 head + 25 shank)', Math.abs(st.ghost[0].size.x - 15.01) < 0.03 && Math.abs(st.ghost[0].size.z - 13) < 0.03 && Math.abs(st.ghost[0].size.y - 30.3) < 0.03, JSON.stringify(st.ghost[0].size));
+  check('it stands on the bed (its lowest point 0.2 mm up, as a placed piece does)', Math.abs(st.ghost[0].y - st.ghost[0].size.y / 2 - 0.2) < 1e-6, st.ghost[0].y.toFixed(3));
+  await frame(page, 0); await shot(page, 'fasteners-preview-bolt.png');
+
+  console.log('\n=== 3. the sliders move the preview ===');
+  await slide(page, 'length', 40);
+  await until(page, s => s.ghosts === 1 && Math.abs(s.ghost[0].size.y - 45.3) < 0.05);
+  let f = await field(page, 'length'); rd = await readout(page);
+  check('Length slider to 40: the box follows (40), the read-out says 40 mm, the ghost is 45.3 tall (5.3 + 40), the readout says × 40.0', f.box === '40' && f.read === '40 mm' && /Hex bolt M8 × 40\\.0/.test(rd.text.replace('.', '\\.')) || /× 40\.0/.test(rd.text), JSON.stringify(f) + ' · ' + rd.text.slice(0, 60));
+  await typeBox(page, 'length', 60);
+  await until(page, s => Math.abs(s.ghost[0].size.y - 65.3) < 0.05);
+  f = await field(page, 'length');
+  check('typing 60 in the box moves the slider (60) and the ghost (65.3 tall)', f.slider === '60' && f.read === '60 mm', JSON.stringify(f));
+  await typeBox(page, 'length', 200);
+  await until(page, s => Math.abs(s.ghost[0].size.y - 205.3) < 0.1);
+  f = await field(page, 'length');
+  check('a box value past the slider\'s end (200 > 150) is kept: the slider sits at its end, the ghost is 205.3 tall', f.box === '200' && f.slider === '150', JSON.stringify(f));
+  await slide(page, 'length', 25);
+  await until(page, s => Math.abs(s.ghost[0].size.y - 30.3) < 0.05);
+  const u1 = await undoDepth(page);
+  await slide(page, 'major', 12);
+  await until(page, s => s.ghosts === 1 && Math.abs(s.ghost[0].size.z - 13) > 0.5 || s.ghost[0].size.y > 0);
+  rd = await readout(page); st = await FS(page);
+  check('Ø slider to 12 (pitch left at 1.25): a thread of its own, named by its numbers in the readout - and the head is M12\'s (hex 18.0 across flats)', /Hex bolt M12x1\.25 × 25\.0.*18\.0 across flats/.test(rd.text), rd.text.slice(0, 120));
+  await slide(page, 'pitch', 2);
+  await until(page, s => true);
+  await frames(page, 6);
+  rd = await readout(page);
+  check('Pitch slider to 2: M12x2 - pitch 2.00 mm in the readout', /Hex bolt M12x2 × 25\.0.*pitch 2\.00 mm/.test(rd.text), rd.text.slice(0, 140));
+  check('moving sliders adds nothing: still no piece, no Undo step', (await pieces(page)).length === n0 && (await undoDepth(page)) === u1);
+  // Size resets the numbers it owns
+  await choose(page, 'sel-fs-size', 'M10');
+  await frames(page, 4);
+  const fm = await field(page, 'major'), fp = await field(page, 'pitch'), fn = await field(page, 'nutm');
+  check('choosing M10 puts Ø 10, Pitch 1.5 and the nut\'s standard 8.4 mm back on their sliders', fm.box === '10' && fm.slider === '10' && fp.box === '1.5' && fn.box === '8.4' && fn.read === '8.4 mm', JSON.stringify([fm, fp, fn]));
+  await until(page, s => s.ghosts === 1 && Math.abs(s.ghost[0].size.y - (6.4 + 25)) < 0.05);
+  rd = await readout(page);
+  check('...and the preview is the standard M10 bolt: 6.4 head + 25 shank = 31.4 tall, 16.0 across flats', /Hex bolt M10 × 25\.0.*16\.0 across flats, head 6\.4 mm, pitch 1\.50 mm/.test(rd.text), rd.text.slice(0, 120));
+
+  console.log('\n=== 4. head types, and the other tiles ===');
+  await click(page, '#fs-head-row [data-head="socket"]');
+  await until(page, s => s.head === 'socket' && s.ghosts === 1 && Math.abs(s.ghost[0].size.x - 16.0) < 0.2);
+  st = await FS(page); rd = await readout(page);
+  const pressed = await page.evaluate(() => Array.from(document.querySelectorAll('#fs-head-row [data-head]')).map(b => b.getAttribute('aria-pressed')).join());
+  check('Socket head tile: pressed (false,true), the ghost is a Ø16 cap (M10), the readout says socket-head with its 8.0 hex socket', pressed === 'false,true' && /Socket-head bolt M10 × 25\.0.*8\.0 hex socket/.test(rd.text), pressed + ' · ' + rd.text.slice(0, 100));
+  await frame(page, 0); await shot(page, 'fasteners-preview-socket.png');
+  await click(page, '#fs-kind-row [data-kind="nut"]');
+  await until(page, s => s.kind === 'nut' && s.ghosts === 1 && Math.abs(s.ghost[0].size.y - 8.4) < 0.05);
+  rd = await readout(page); st = await FS(page);
+  const rows = await page.evaluate(() => ({ len: document.getElementById('fs-length-row').hidden, head: document.getElementById('fs-head-row').hidden, fit: document.getElementById('fs-fit-row').hidden, nutm: document.getElementById('fs-nutm-row').hidden }));
+  check('Nut tile: a nut 8.4 thick (the ghost), the Length slider and the head tiles are put away, Fit and Nut thick are shown', /^Preview - Hex nut M10 \(ISO metric 60°\): 16\.0 across flats, 8\.4 mm thick, bore Ø10\.40/.test(rd.text) && rows.len && rows.head && !rows.fit && !rows.nutm, JSON.stringify(rows) + ' · ' + rd.text.slice(0, 90));
+  await slide(page, 'nutm', 12);
+  await until(page, s => Math.abs(s.ghost[0].size.y - 12) < 0.05);
+  await slide(page, 'fit', 0.4);
+  await frames(page, 6);
+  rd = await readout(page);
+  check('Nut thick slider to 12 (the ghost is 12 tall) and Fit slider to 0.4: the bore is the bolt\'s + 0.40 mm (Ø10.80)', /12\.0 mm thick, bore Ø10\.80 \(the bolt's \+ 0\.40 mm fit\)/.test(rd.text), rd.text.slice(0, 140));
+  await frame(page, 0); await shot(page, 'fasteners-preview-nut.png');
+  await click(page, '#fs-kind-row [data-kind="set"]');
+  await until(page, s => s.kind === 'set' && s.ghosts === 2);
+  st = await FS(page); rd = await readout(page);
+  const [ga, gb] = st.ghost;
+  check('Bolt + nut tile: two ghosts, side by side without touching (gap ' + (gb.x - ga.x - ga.size.x / 2 - gb.size.x / 2).toFixed(1) + ' mm), the readout names both', ga.z === gb.z && gb.x - ga.x - ga.size.x / 2 - gb.size.x / 2 >= 5.9 && /(Hex|Socket-head) bolt M10.* - and Hex nut M10/.test(rd.text), JSON.stringify(st.ghost.map(g => [g.x, g.z, g.size.x])) + ' · ' + rd.text.slice(0, 200));
+  await frame(page, 0); await shot(page, 'fasteners-preview-set.png');
+  // the length slider is back for a set; a rod goes to 40
+  await click(page, '#fs-kind-row [data-kind="rod"]');
+  await until(page, s => s.kind === 'rod' && s.ghosts === 1);
+  f = await field(page, 'length'); st = await FS(page);
+  check('Rod tile: the Length reads 25 (it was touched, so it stays) and the ghost is a 25 mm rod', f.box === '25' && Math.abs(st.ghost[0].size.y - 25) < 0.02, JSON.stringify(f) + ' ' + st.ghost[0].size.y);
+
+  console.log('\n=== 5. Add to plate bakes what the preview shows ===');
+  await click(page, '#fs-kind-row [data-kind="set"]');
+  await until(page, s => s.kind === 'set' && s.ghosts === 2);
+  await choose(page, 'sel-fs-size', 'M10');
+  await click(page, '#fs-head-row [data-head="hex"]');
+  await until(page, s => s.head === 'hex' && s.ghosts === 2);
   const d0 = await undoDepth(page);
-  await page.click('#btn-fs-bolt');
-  let st = await waitStatus(page, /Dropped bolt M8|Bolt refused/);
-  console.log('   status: ' + st);
-  let P = await pieces(page);
-  const bolt = P.find(p => p.name === 'bolt M8 1') || P.find(p => /^bolt M8/.test(p.name));
-  check('a piece "bolt M8 1" is added, selected, with one Undo entry', !!bolt && (await selName(page)) === bolt.name && (await undoDepth(page)) === d0 + 1, JSON.stringify(P.map(p => p.name)));
-  check('the status gives its numbers: 13.0 across flats, head 5.3, pitch 1.25, right-hand, head down', /^Dropped bolt M8 1 - Hex bolt M8 × 25\.0 \(ISO metric 60°\): 13\.0 across flats, head 5\.3 mm, pitch 1\.25 mm, right-hand, head down on the bed/.test(st), st);
-  check('its size: 15.0 across the hex corners, 13.0 across flats, 30.3 tall (5.3 head + 25 shank)', bolt && Math.abs(bolt.size.x - 15.01) < 0.03 && Math.abs(bolt.size.z - 13) < 0.03 && Math.abs(bolt.size.y - 30.3) < 0.03, bolt && JSON.stringify(bolt.size));
-  const T = await topoOf(page, bolt.id);
-  check('closed, 2-manifold, consistently wound, no degenerate faces, Euler 2', T.open === 0 && T.nm === 0 && T.flip === 0 && T.degen === 0 && T.euler === 2, JSON.stringify(T));
-  let rd = await readout(page);
-  check('the card\'s readout says the same, not as an error', !rd.bad && /^Hex bolt M8 × 25\.0/.test(rd.text), rd.text);
-  await frame(page); await shot(page, 'fasteners-bolt.png');
-  await page.click('#btn-undo'); await waitStatus(page, /Undo/);
-  check('one Undo takes it off', (await pieces(page)).length === 0 && (await undoDepth(page)) === d0, JSON.stringify((await pieces(page)).map(p => p.name)));
-
-  console.log('\n=== 3. Nut, Rod; the heads and the hand ===');
-  await page.click('#btn-fs-nut');
-  st = await waitStatus(page, /Dropped nut M8|Nut refused/);
-  P = await pieces(page);
-  const nut = P.find(p => /^nut M8/.test(p.name));
-  const Tn = nut && await topoOf(page, nut.id);
-  check('Nut: "nut M8 1", 13 across flats and 6.8 thick, a ring (Euler 0), bore = bolt + 0.2 said in the status',
-    !!nut && Math.abs(nut.size.y - 6.8) < 0.02 && Math.abs(nut.size.z - 13) < 0.03 && Tn.open === 0 && Tn.nm === 0 && Tn.flip === 0 && Tn.euler === 0 && /bore Ø8\.40 \(the bolt's \+ 0\.20 mm fit\)/.test(st), st);
-  await frame(page); await shot(page, 'fasteners-nut.png');
-  await setField(page, 'inp-fs-nutm', '10'); await setField(page, 'inp-fs-fit', '0.3');
-  await page.click('#btn-fs-nut');
-  st = await waitStatus(page, /Dropped nut M8 2|Nut refused/);
-  check('a typed thickness 10 and Fit 0.3: bore Ø8.60 and 10 mm thick', /10\.0 mm thick, bore Ø8\.60 \(the bolt's \+ 0\.30 mm fit\)/.test(st), st);
-  await setField(page, 'inp-fs-nutm', ''); await setField(page, 'inp-fs-fit', '');
-  await setField(page, 'sel-fs-size', 'M6'); await setField(page, 'inp-fs-length', '20');
-  await page.click('#btn-fs-rod');
-  st = await waitStatus(page, /Dropped rod M6|Rod refused/);
-  P = await pieces(page);
-  const rod = P.find(p => /^rod M6/.test(p.name)), Tr = rod && await topoOf(page, rod.id);
-  check('Rod M6 × 20: Ø6 across, 20 tall, closed, Euler 2', !!rod && Math.abs(rod.size.y - 20) < 0.01 && Math.abs(rod.size.x - 6) < 0.05 && Tr.open === 0 && Tr.nm === 0 && Tr.euler === 2, rod && JSON.stringify(rod.size));
-  await setField(page, 'sel-fs-head', 'socket'); await setField(page, 'inp-fs-length', '');
-  await page.click('#btn-fs-bolt');
-  st = await waitStatus(page, /Dropped bolt M6|Bolt refused/);
-  P = await pieces(page);
-  const sock = P.find(p => /^bolt M6/.test(p.name)), Ts = sock && await topoOf(page, sock.id);
-  check('Socket-head M6 × 25: Ø10 head, 6 + 25 tall = 31, a 5 hex socket, closed, Euler 2',
-    !!sock && Math.abs(sock.size.x - 10) < 0.05 && Math.abs(sock.size.y - 31) < 0.02 && Ts.open === 0 && Ts.nm === 0 && Ts.euler === 2 && /Socket-head bolt M6 × 25\.0.*5\.0 hex socket/.test(st), st);
-  await setField(page, 'sel-fs-head', 'hex');
-  await setField(page, 'sel-fs-hand', 'left');
-  await page.click('#btn-fs-nut');
-  st = await waitStatus(page, /Dropped nut M6/);
-  check('Left hand is honoured: the nut says left-hand', /left-hand/.test(st), st);
-  await setField(page, 'sel-fs-hand', 'right');
-  // a typed Ø and pitch: any other thread
-  await setField(page, 'inp-fs-major', '7'); await setField(page, 'inp-fs-pitch', '1.5'); await setField(page, 'inp-fs-length', '15');
-  await page.click('#btn-fs-rod');
-  st = await waitStatus(page, /Dropped rod M6 2|Rod refused/);
-  check('a typed Ø7 / pitch 1.5 beats the size: the rod says Ø7.00, pitch 1.50', /Ø7\.00 \/ root Ø.*pitch 1\.50 mm/.test(st), st);
-  for (const id of ['inp-fs-major', 'inp-fs-pitch', 'inp-fs-length']) await setField(page, id, '');
-
-  console.log('\n=== 4. Bolt + nut: two pieces, one thread, built to turn ===');
-  await setField(page, 'sel-fs-size', 'M10');
-  const nBefore = (await pieces(page)).length, dBefore = await undoDepth(page);
-  await page.click('#btn-fs-set');
-  st = await waitStatus(page, /Dropped nut M10/);
-  P = await pieces(page);
+  await click(page, '#btn-fs-add');
+  const status = await waitStatus(page, /Dropped nut M10/);
+  const P = await pieces(page);
   const b10 = P.find(p => /^bolt M10/.test(p.name)), n10 = P.find(p => /^nut M10/.test(p.name));
-  check('"bolt M10 1" and "nut M10 1" are both added, one Undo each', !!b10 && !!n10 && P.length === nBefore + 2 && (await undoDepth(page)) === dBefore + 2, JSON.stringify(P.map(p => p.name)));
-  // the pair, measured in the page: the nut's bore less the bolt's radius, at the same helix phase, is the Fit all round
+  check('"bolt M10 1" and "nut M10 1" are on the plate, one Undo each, and the bolt\'s size is the ghost\'s', !!b10 && !!n10 && P.length === n0 + 2 && (await undoDepth(page)) === d0 + 2 && Math.abs(b10.size.y - 31.4) < 0.05, JSON.stringify(P.map(p => p.name)));
+  const Tb = await topoOf(page, b10.id), Tn = await topoOf(page, n10.id);
+  check('both closed, 2-manifold, consistently wound: the bolt Euler 2, the nut (a ring) Euler 0', Tb.open === 0 && Tb.nm === 0 && Tb.flip === 0 && Tb.euler === 2 && Tn.open === 0 && Tn.nm === 0 && Tn.flip === 0 && Tn.euler === 0, JSON.stringify([Tb, Tn]));
+  await until(page, s => s.ghosts === 2);
+  st = await FS(page);
+  const placedMax = await page.evaluate(() => Math.max.apply(null, state.placed.filter(Boolean).map(p => placedFootprint(p).maxx)));
+  check('the preview is still up, standing beside what was just added (its left edge ' + (st.ghost[0].x - st.ghost[0].size.x / 2).toFixed(1) + ' is right of the plate\'s rightmost piece ' + placedMax.toFixed(1) + ')', st.ghosts === 2 && st.ghost[0].x - st.ghost[0].size.x / 2 > placedMax - 0.01, JSON.stringify(st.ghost.map(g => g.x)));
+  // measured in the page: the nut and the bolt it was made with turn on each other
   const gap = await page.evaluate(([bid, nid]) => {
     const b = state.models.find(m => m && m.id === bid).rawTris, n = state.models.find(m => m && m.id === nid).rawTris;
     function first(s, o, d) { let best = Infinity;
@@ -138,41 +189,75 @@ withApp(async (page, logs) => {
         const v = (d[0] * q[0] + d[1] * q[1] + d[2] * q[2]) / det; if (v < -1e-9 || u + v > 1 + 1e-9) continue;
         const tt = (e2[0] * q[0] + e2[1] * q[1] + e2[2] * q[2]) / det; if (tt > 1e-9 && tt < best) best = tt;
       } return best; }
-    // both pieces are in their own raw frames, axis +Z, centred on it; the bolt's shank starts at its head's top
-    let lo = Infinity, hi = -Infinity;
-    for (let i = 0; i < b.length; i += 3) { lo = Math.min(lo, b[i + 2]); hi = Math.max(hi, b[i + 2]); }
-    let gmin = Infinity;
+    let gmax = -Infinity;
     for (let c = 0; c < 60; c++) { const dz = 1.5 * c / 60; let g = Infinity;
       for (let i = 0; i < 8; i++) for (let j = 0; j < 4; j++) { const th = i * Math.PI / 4, z = 2 + j * 1.3;
         const rn = first(n, [0, 0, z], [Math.cos(th), Math.sin(th), 0]), rb = first(b, [0, 0, z + 12 - dz], [Math.cos(th), Math.sin(th), 0]);
         if (isFinite(rn) && isFinite(rb)) g = Math.min(g, rn - rb); }
-      gmin = Math.max(gmin === Infinity ? -Infinity : gmin, g); }
-    return gmin;
+      gmax = Math.max(gmax, g); }
+    return gmax;
   }, [b10.id, n10.id]);
-  check('measured on the two pieces in the page: the bolt has a screw position that clears the nut by ' + gap.toFixed(3) + ' mm (the 0.2 fit)', gap > 0.17 && gap < 0.22, gap.toFixed(3));
-  await frame(page); await shot(page, 'fasteners-set.png');
+  check('measured on the two pieces the preview became: the bolt has a screw position that clears the nut by ' + gap.toFixed(3) + ' mm (the 0.4 fit set on the slider earlier)', gap > 0.37 && gap < 0.43, gap.toFixed(3));
+  await frame(page, 0); await shot(page, 'fasteners-after-add.png');
 
-  console.log('\n=== 5. refusals, said in the card, nothing added ===');
-  const n0 = (await pieces(page)).length, u0 = await undoDepth(page);
-  await setField(page, 'inp-fs-nutm', '1');
-  await page.click('#btn-fs-nut');
-  st = await waitStatus(page, /Nut refused/);
+  console.log('\n=== 6. a refusal clears the preview; Add to plate is off; nothing is added ===');
+  await click(page, '#fs-kind-row [data-kind="nut"]');
+  await until(page, s => s.kind === 'nut' && s.ghosts === 1);
+  const nR = (await pieces(page)).length, uR = await undoDepth(page);
+  await slide(page, 'nutm', 1);
+  await until(page, s => s.ghosts === 0 && !s.ok);
   rd = await readout(page);
-  check('a nut thinner than a pitch: in words, in red, nothing added', rd.bad && /^Nut: a nut thinner than one pitch \(1\.50 mm\) does not engage - make it at least 3\.0 mm$/.test(rd.text) && (await pieces(page)).length === n0 && (await undoDepth(page)) === u0, rd.text);
-  await setField(page, 'inp-fs-nutm', '');
-  await setField(page, 'inp-fs-pitch', '0.2');
-  await page.click('#btn-fs-rod');
-  st = await waitStatus(page, /Rod refused/);
+  const addOff = await page.evaluate(() => document.getElementById('btn-fs-add').disabled);
+  check('a nut thinner than a pitch (1 mm of 1.50): the ghost is gone, the readout says why in red, Add to plate is disabled', rd.bad && /^Nut: a nut thinner than one pitch \(1\.50 mm\) does not engage - make it at least 3\.0 mm$/.test(rd.text) && addOff, rd.text);
+  const forced = await page.evaluate(() => nsoFasteners.add());
+  check('Add forced anyway adds nothing, and the status says so', !forced.ok && (await pieces(page)).length === nR && (await undoDepth(page)) === uR && /Nut refused - nothing added/.test(await statusOf(page)), forced.reason);
+  await slide(page, 'nutm', 9);
+  await until(page, s => s.ghosts === 1 && s.ok);
+  check('moving it back to 9 brings the preview back and Add to plate on', !(await page.evaluate(() => document.getElementById('btn-fs-add').disabled)));
+  await click(page, '#fs-kind-row [data-kind="rod"]');
+  await until(page, s => s.kind === 'rod' && s.ghosts === 1);
+  await slide(page, 'pitch', 0.2);
+  await until(page, s => s.ghosts === 0 && !s.ok);
   rd = await readout(page);
-  check('a pitch too fine to form: refused with the least pitch', rd.bad && /would not form\. Use a pitch of at least 0\.33 mm/.test(rd.text) && (await pieces(page)).length === n0, rd.text);
-  await setField(page, 'inp-fs-pitch', '');
-  await setField(page, 'sel-fs-size', 'M3');
-  await page.click('#btn-fs-rod');
-  st = await waitStatus(page, /Dropped rod M3/);
+  check('a pitch too fine to form (0.2): refused with the least pitch', rd.bad && /would not form\. Use a pitch of at least 0\.33 mm/.test(rd.text), rd.text.slice(0, 120));
+  await choose(page, 'sel-fs-size', 'M3');
+  await until(page, s => s.ghosts === 1 && s.ok);
   rd = await readout(page);
-  check('M3: made, with the note that 0.5 mm is finer than a 0.4 nozzle resolves (not an error)', !rd.bad && /note: a 0\.50 mm pitch is finer than a 0\.4 mm nozzle resolves well/.test(rd.text), rd.text);
+  check('choosing M3 resets the pitch (0.5) and brings the preview back, with the note about the nozzle (not an error)', !rd.bad && /note: a 0\.50 mm pitch is finer than a 0\.4 mm nozzle resolves well/.test(rd.text), rd.text.slice(0, 80));
+
+  console.log('\n=== 7. custom Ø, left hand, the menu closing, the API ===');
+  await choose(page, 'sel-fs-size', 'M6');
+  await click(page, '#fs-kind-row [data-kind="rod"]');
+  await slide(page, 'major', 7);
+  await until(page, s => s.ghosts === 1 && s.ok);
+  const dC = await undoDepth(page);
+  await click(page, '#btn-fs-add');
+  await waitStatus(page, /Dropped rod M7x1/);
+  check('a rod with Ø moved to 7 is named by its numbers: "rod M7x1"', (await pieces(page)).some(p => p.name === 'rod M7x1 1') && (await undoDepth(page)) === dC + 1);
+  await choose(page, 'sel-fs-hand', 'left');
+  await until(page, s => s.ghosts === 1);
+  rd = await readout(page);
+  check('Hand: Left shows in the preview', /left-hand/.test(rd.text), rd.text.slice(0, 100));
+  await choose(page, 'sel-fs-hand', 'right');
+  await page.evaluate(() => { document.getElementById('menu-fasteners').open = false; });
+  await until(page, s => s.ghosts === 0 && !s.open);
+  check('closing the menu takes the preview away', (await FS(page)).ghosts === 0 && (await page.evaluate(() => state.scene.children.filter(c => c.userData && c.userData.nsoFastenerPreview).length)) === 0);
+  await page.evaluate(() => { document.getElementById('menu-fasteners').open = true; });
+  await until(page, s => s.ghosts === 1);
+  check('opening it brings it back', (await FS(page)).ghosts === 1);
+  await page.evaluate(() => { document.getElementById('menu-gen').open = false; });
+  await until(page, s => s.ghosts === 0 && !s.open);
+  check('closing Gen+ (the menu it sits in) takes it away too', (await FS(page)).ghosts === 0);
+  await page.evaluate(() => { document.getElementById('menu-gen').open = true; });
+  await until(page, s => s.ghosts === 1);
+  // the old verbs still bake, with the card's numbers
+  await choose(page, 'sel-fs-size', 'M8'); await slide(page, 'length', 20);
+  const nB = (await pieces(page)).length;
+  const viaApi = await page.evaluate(() => nsoFasteners.bolt());
+  check('nsoFasteners.bolt() still bakes one bolt with the card\'s numbers: "bolt M8 1", 5.3 + 20 tall', viaApi.ok && viaApi.name === 'bolt M8 1' && (await pieces(page)).length === nB + 1 && Math.abs((await pieces(page)).find(p => p.name === 'bolt M8 1').size.y - 25.3) < 0.05, viaApi.reason);
   const errs = logs.filter(l => /\[pageerror\]/.test(l));
   check('no uncaught page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
+  if (SHOTS && tileShot) { /* the tiles row, for the record */ }
 }).then(() => {
   console.log(fails ? '\n' + fails + ' gate(s) FAILED' : '\nall gates held');
   process.exit(fails ? 1 : 0);

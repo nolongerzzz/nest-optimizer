@@ -122,6 +122,15 @@
   }
 
   /* ----------------------------------------------------------------- spec */
+  /* What a thread is called: its table id, unless the Ø or pitch was changed from the table's (then it is a thread of its own, named
+     by its numbers: M7x1.5, Ø21.5x1.8). */
+  function nameOf(base, major, pitch) {
+    var tr = function (x) { return String(Math.round(x * 100) / 100); };
+    var same = base.id && Math.abs(major - base.major) < 0.0051 && Math.abs(pitch - base.pitch) < 0.0051;
+    if (same) return base.id;
+    return (base.family === 'metric' ? 'M' : 'Ø') + tr(major) + 'x' + tr(pitch);
+  }
+
   /* A thread as numbers. size: a table id ('M8', 'G1/2', 'NPT3/4') or { family, major, pitch }; o: { pitch, major,
      angle, hand 'right'|'left', nozzle }. Resolves { ok, reason, note, spec }. */
   function spec(size, o) {
@@ -161,7 +170,7 @@
     }
     res.ok = true;
     res.spec = {
-      id: base.id || ('Ø' + fmt(major) + '×' + fmt(pitch)), family: base.family, familyLabel: fam.label, major: major, pitch: pitch, angle: angle, hand: hand, R: R, P: pitch,
+      id: nameOf(base, major, pitch), family: base.family, familyLabel: fam.label, major: major, pitch: pitch, angle: angle, hand: hand, R: R, P: pitch,
       h: h, fc: fc, fr: fr, w: w, minor: major - 2 * h, slope: fam.taper / 2, taper: fam.taper, nozzle: nozzle, note: base.note || ''
     };
     return res;

@@ -45,10 +45,12 @@ Smart build-plate packing for 3D printing.
   (G, NPT and metric; [docs/THREADS.md](docs/THREADS.md))
 - **Fasteners** (Gen+): a threaded **rod**, a **bolt** (hex or socket head), a
   **nut** and a bolt + nut set, M2 to M30 (coarse and fine) or G pipe sizes or
-  a typed Ø and pitch. The nut's bore is the bolt's thread plus a 0.2 mm fit, so
-  the pair turns; every piece is a closed, wound-outward mesh built directly
-  (no boolean), measured by rays in `npm run thread:test`
-  ([docs/THREADS.md](docs/THREADS.md))
+  a typed Ø and pitch. Pick one from picture tiles, move a slider for every
+  number (Ø, pitch, length, fit, nut thickness) against a **live translucent
+  preview** on the plate, then **Add to plate**. The nut's bore is the bolt's
+  thread plus a 0.2 mm fit, so the pair turns; every piece is a closed,
+  wound-outward mesh built directly (no boolean), measured by rays in
+  `npm run thread:test` ([docs/THREADS.md](docs/THREADS.md))
 - **Threaded holes** (Subtract > Punch > **Thread**): the Punch card cuts a
   *tapped* hole - M2 to M30, G or NPT (tapered), right or left hand, through or
   blind - alone, in a grid or on a circle, sized to take the bolt Fasteners makes

@@ -60,6 +60,18 @@
     return { x: right + BESIDE_GAP + made.size.x / 2, z: mid, beside: (src && src.name) || sel.name || null };
   }
 
+  /* Where a piece of this size would land if dropped now: beside the selection, then the nearest free spot - the same two steps addPiece
+     takes. `mesh` (optional) is a preview's mesh, so the free-spot search measures the real footprint. { x, z, onBed, beside }. */
+  function spotFor(sizeX, mesh) {
+    var want = wantedSpot({ size: { x: sizeX } }), at = { x: want.x, z: want.z, onBed: true };
+    if (mesh && typeof nsoFreeSpot === 'function') {
+      var e = nsoFreeSpot({ mesh: mesh, x: want.x, z: want.z }, want);
+      if (e) at = e;
+    }
+    at.beside = want.beside;
+    return at;
+  }
+
   /* Put a soup on the plate as a piece of its own - Stock's drop, step for step: added silently (the
      selection is moved below), one 'addModels' Undo entry, placed in the nearest free spot, selected. */
   function addPiece(label, soup, what) {
@@ -244,7 +256,7 @@
   window.nsoFittings = { cap: makeCap, splitter: makeSplitter, fromTube: fromTube, busy: function () { return busy; },
                          tubeEnd: makeTubeEnd, threaded: makeThreaded,
                          // the drop every generated piece shares (Gen+ > Fasteners uses it too): a new piece, selected, beside the selection, one Undo
-                         addPiece: addPiece };
+                         addPiece: addPiece, spotFor: spotFor };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire);
   else wire();
