@@ -331,6 +331,8 @@
     "wall:cut": "node tools/nso_cut_clearance_wire_test.js",
     "soften:holes": "node tools/nso_soften_holes_test.js",
     "soften:live": "node tools/nso_soften_live_drive_check.js",
+    "soften:edges": "node tools/nso_soften_edges_drive_check.js",
+    "boxedges:test": "node tools/nso_box_edges_test.js",
     "delete:audit": "node tools/nso_paint_delete_audit.js",
     "delete:test": "node tools/nso_paint_delete_test.js",
     "delete:drive": "node tools/nso_paint_delete_drive_check.js",
@@ -482,6 +484,7 @@
     "hollow",
     "live:gate",
     "soften:holes",
+    "boxedges:test",
     "delete:test",
     "texture:fixtures",
     "texture:test",
@@ -734,6 +737,7 @@
     "watch:test",
     "photoset:drive",
     "outline:cost",
-    "soften:live"
+    "soften:live",
+    "soften:edges"
   ]
 }

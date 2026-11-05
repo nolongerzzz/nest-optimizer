@@ -1571,7 +1571,7 @@
             <summary class="vp-bar-btn" title="Soften the edges, Mirror, skin, skin patch, trace a raster, texture">Surface &amp; edges</summary>
             <div class="vp-menu-body vp-finish">
             <div class="vp-row vp-row-opts">
-              <label class="vp-clone">R <input type="number" id="inp-soften-r" value="0.5" min="0.05" max="5" step="0.05"></label>
+              <label class="vp-clone">R <input type="number" id="inp-soften-r" value="0.5" min="0.05" max="15" step="0.05"></label>
               <label class="vp-clone" title="On: a box (or a piece with pockets) is softened whole, no face to click. Off: only the faces you click are softened."><input type="checkbox" id="chk-full-wrap" checked> Full wrap</label>
             </div>
             <!-- Soften is a live card (app-soften-live.js), Thicken's shape: the button opens
@@ -1596,7 +1596,12 @@
                 <label class="live-slider" for="inp-soften-slider"
                        title="Drag to change the radius and watch the preview follow. Nothing is baked until Soften is pressed. The R box above is the same number."><span>Radius</span>
                   <span id="soften-slider-read">0.5 mm</span>
-                  <input type="range" id="inp-soften-slider" min="0.05" max="5" step="0.05" value="0.5" /></label>
+                  <input type="range" id="inp-soften-slider" min="0.05" max="15" step="0.05" value="0.5" /></label>
+              </div>
+              <div class="vp-row vp-row-opts">
+                <label class="vp-clone" title="Round or bevel only the box edges you click, each bake at its own radius - two edges, one edge, any set. Works on a plain box with Round or Bevel. Edges picked on an earlier bake are kept, so one piece can take its bottom pair at one radius and its top pair at another. Off: every edge, as before."><input type="checkbox" id="chk-soften-edges"> Pick edges</label>
+                <button id="btn-soften-edges-clear" class="btn btn-secondary" type="button" hidden
+                        title="Un-pick every edge named so far this bake.">Clear</button>
               </div>
               <p id="soften-readout" class="soften-readout" aria-live="polite"></p>
               <div class="vp-row vp-row-full">
@@ -2347,6 +2352,7 @@
   <script src="nso_bvh.js?v=bfafc20d"></script>
   <script src="nso_work.js?v=ff504301"></script>
   <script src="nso_csg.js?v=f4534703"></script>
+  <script src="nso_box_edges.js?v=77146d82"></script>
   <script src="app-bool-busy.js?v=26c27885"></script>
   <script src="nso_edges.js?v=3fe8fea0"></script>
   <script src="nso_support_beacons.js?v=43f1a079"></script>
@@ -2407,7 +2413,7 @@
 
 
   <script src="app-cut.js?v=848008b3"></script>
-  <script src="app-finish.js?v=8ee588aa"></script>
+  <script src="app-finish.js?v=90a09756"></script>
   <script src="app-sculpt.js?v=f522aee3"></script>
   <script src="app-extend.js?v=e24e3562"></script>
   <!-- Mirror: exact reflection across the cut plane. After app-extend.js,
@@ -2503,7 +2509,7 @@
   <script src="app-hollow.js?v=f99c09ad"></script>
   <script src="app-foam.js?v=16cca4f6"></script>
   <script src="app-thicken-live.js?v=dab1b45f"></script>
-  <script src="app-soften-live.js?v=ccc61303"></script>
+  <script src="app-soften-live.js?v=d13157a0"></script>
   <script src="app-seat-surface.js?v=55908323"></script>
   <script src="app-skin.js?v=cb03e88b"></script>
   <script src="app-skin-patch.js?v=42ac8ff6"></script>

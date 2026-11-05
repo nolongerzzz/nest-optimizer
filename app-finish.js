@@ -3853,6 +3853,24 @@ function wrapStatus(mode, b) {
          ' (' + b.tris + ' tris, one bake from source)';
 }
 
+// The sentence for a chosen-edges bake: what was asked now, then everything the
+// piece carries by radius, so a second bake reads as added to the first.
+function edgeRoundStatus(mode, b, nowCount) {
+  const name = mode === 'chamfer' ? 'Bevel' : 'Round';
+  const by = new Map();
+  b.perEdge.forEach(p => {
+    const k = p.R.toFixed(2);
+    by.set(k, (by.get(k) || 0) + 1);
+  });
+  const parts = Array.from(by.entries()).map(e => e[1] + ' at R ' + e[0]);
+  const clamp = b.clamped
+    ? ' (' + b.clamped + ' asked for more than the box allows, clamped)' : '';
+  const dropped = b.requested > b.edges ? ', ' + (b.requested - b.edges) + ' left sharp' : '';
+  const lead = nowCount + ' edge' + (nowCount === 1 ? '' : 's') + ' ' + (name === 'Bevel' ? 'beveled' : 'rounded');
+  return name + ' ' + lead + ' - the piece carries ' + b.edges + ' (' + parts.join(', ') + ')' + clamp + dropped +
+         ' (' + b.tris + ' tris, one bake from source)';
+}
+
 // Wrap the pockets of a piece that is not a plain box and not a plain box
 // with one pocket - a Subtract into a real part. The hull is not
 // re-generated: the piece's own soup goes in and only the pockets are cut
@@ -4286,6 +4304,45 @@ function softenCompute(m, o, commit) {
   // solved once instead of negotiated face by face. A new R just re-wraps from
   // the same source - it cannot stack.
   const boxBase = rawSolidBox(run.base);
+  // ---- chosen edges ----
+  // Round or Bevel only the edges the card names, each at its own radius, from
+  // the same raw box. Edges picked on an earlier bake of this run are kept
+  // (their radius too) and the ones picked now are added or re-done, so a
+  // piece can take its bottom pair at one radius and its top pair at another.
+  // The wrap above cannot do this: it rounds an edge only when both of its
+  // faces wrap. Paint still counts - an edge on a painted-out face is left
+  // sharp. nso_box_edges.js does the geometry.
+  if (o.edgePick) {
+    if (!boxBase) return refuse('Pick edges needs a plain box - this piece is not one. Piece unchanged');
+    if (mode !== 'fillet' && mode !== 'chamfer') {
+      return refuse('Pick edges works with Round and Bevel - ' + (mode === 'corners' ? 'Corners' : 'Corners+edges') +
+                    ' has no edge to pick. Piece unchanged');
+    }
+    if (typeof NSO_boxEdgeRound !== 'function') return refuse('Pick edges needs nso_box_edges.js');
+    const picked = (o.edges || []).filter(id => id >= 0 && id < 12);
+    if (!picked.length) return { ok: false, needEdges: true, reason: 'click an edge to round' };
+    const spec = new Map();
+    const before = run.jobs.find(j => j.edgeSpec);
+    if (before) before.edgeSpec.forEach(s => spec.set(s.id, s));
+    picked.forEach(id => spec.set(id, { id: id, R: R, mode: mode }));
+    const specList = Array.from(spec.values());
+    const paint = maskedBoxFaces(m);
+    let built = null;
+    try {
+      built = NSO_boxEdgeRound(boxBase, specList, { square: paint });
+    } catch (e) {
+      return refuse('Soften failed - ' + (e && e.message ? e.message : e));
+    }
+    const sB = sealScore(run.base), sW = sealScore(built.soup);
+    if (sW.open > sB.open || sW.nm > sB.nm) {
+      return refuse('Soften failed - the edge round did not close (open ' + sB.open + '→' + sW.open +
+                    ', non-manifold ' + sB.nm + '→' + sW.nm + '). Piece unchanged');
+    }
+    commit(m, run, built.soup, firstOfRun,
+           [{ wrap: true, R: R, mode: mode, edgeSpec: specList }],
+           edgeRoundStatus(mode, built.build, picked.length));
+    return { ok: true, kind: 'edges' };
+  }
   // Paint does not veto the wrap - it names the faces the wrap leaves alone,
   // and it names them with the axis and side the click itself recorded. The
   // one thing that still sends this back to the per-face path is a painted

@@ -75,6 +75,9 @@
   var drawn = { result: null, changed: null, edges: null };
   var ghostSaved = null, baseIdx = null;
   var press = null, tilesDrawn = false, liveHandle = null;
+  // Pick edges: the box edges named this bake (NSO_boxEdgeFaces numbers), what is drawn for them
+  var edgeOn = false, edgePicks = [], needEdges = false, edgeDrawn = null;
+  var EDGE_PX = 14;                     // a click within this many pixels of an edge names it
 
   function $(id) { return document.getElementById(id); }
   function say(msg, bad) { if (typeof setStatus === 'function') setStatus(msg, !!bad); }
@@ -187,6 +190,7 @@
     drawn = { result: null, changed: null, edges: null };
   }
   function closeView() {
+    clearEdges();
     clearDrawn();
     if (group && group.parent) group.parent.remove(group);
     group = null;
@@ -284,6 +288,134 @@
   }
 
   /* ---------------------------------------------------------------
+     Pick edges: the box's twelve edges drawn on the ghost, a click names one
+     --------------------------------------------------------------- */
+
+  function baseSoup() {
+    return (m && m.softenRun && m.rawTris === m.softenRun.result) ? m.softenRun.base : (m ? m.rawTris : null);
+  }
+  function boxNow() {
+    return (typeof rawSolidBox === 'function' && baseSoup()) ? rawSolidBox(baseSoup()) : null;
+  }
+  function localOf(p) {
+    var f = (typeof nsoRawFrameOf === 'function') ? nsoRawFrameOf(m) : null;
+    var q = f ? nsoLocalPointFromRaw(f, p) : p;
+    return new THREE.Vector3(q[0], q[1], q[2]);
+  }
+  function edgeSegs() {
+    var b = boxNow();
+    if (!b || !window.NSO_BoxEdges) return null;
+    return NSO_BoxEdges.segments(b.lo, b.hi).map(function (e) {
+      return { id: e.id, a: localOf(e.p), b: localOf(e.q) };
+    });
+  }
+  function clearEdges() {
+    if (!edgeDrawn) return;
+    edgeDrawn.forEach(disposeObj);
+    edgeDrawn = null;
+  }
+  function drawEdges() {
+    clearEdges();
+    if (!edgeOn || !group) return;
+    var segs = edgeSegs();
+    if (!segs) return;
+    edgeDrawn = [];
+    var pos = [], span = 0;
+    segs.forEach(function (e) {
+      pos.push(e.a.x, e.a.y, e.a.z, e.b.x, e.b.y, e.b.z);
+      span = Math.max(span, e.a.distanceTo(e.b));
+    });
+    var g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3));
+    var all = new THREE.LineSegments(g, new THREE.LineBasicMaterial({
+      color: 0xe0f2fe, transparent: true, opacity: 0.55, depthTest: false }));
+    all.renderOrder = 44;
+    group.add(all); edgeDrawn.push(all);
+    // a picked edge is a bar, so it reads from across the plate; a line would be one pixel
+    var rad = Math.max(0.25, span / 160);
+    segs.forEach(function (e) {
+      if (edgePicks.indexOf(e.id) < 0) return;
+      var len = e.a.distanceTo(e.b);
+      var bar = new THREE.Mesh(new THREE.CylinderGeometry(rad, rad, len, 10),
+        new THREE.MeshBasicMaterial({ color: 0xfb923c, transparent: true, opacity: 0.95, depthTest: false }));
+      bar.position.copy(e.a).add(e.b).multiplyScalar(0.5);
+      bar.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), e.b.clone().sub(e.a).normalize());
+      bar.renderOrder = 45;
+      group.add(bar); edgeDrawn.push(bar);
+    });
+  }
+  function syncEdgeUi() {
+    var clr = $('btn-soften-edges-clear');
+    if (clr) clr.hidden = !(on && edgeOn && edgePicks.length);
+    var chk = $('chk-soften-edges');
+    if (chk && chk.checked !== edgeOn) chk.checked = edgeOn;
+  }
+
+  function setEdgeMode(v) {
+    v = !!v;
+    if (v === edgeOn) return edgeOn;
+    edgeOn = v;
+    if (on) {
+      if (edgeOn && !boxNow()) { say('Pick edges needs a plain box - this piece is not one', true); }
+      drawEdges();
+      if (style) dirty = true;
+      readout();
+    }
+    syncEdgeUi();
+    return edgeOn;
+  }
+
+  /* Name an edge (or take it back off). `id` is NSO_boxEdgeFaces's number. */
+  function toggleEdge(id) {
+    if (!on || !(id >= 0 && id < 12)) return false;
+    var at = edgePicks.indexOf(id);
+    if (at >= 0) edgePicks.splice(at, 1); else edgePicks.push(id);
+    drawEdges(); syncEdgeUi();
+    if (style) recompute(); else readout();
+    return true;
+  }
+
+  function clearEdgePicks() {
+    if (!edgePicks.length) return false;
+    edgePicks = [];
+    drawEdges(); syncEdgeUi();
+    if (style) recompute(); else readout();
+    return true;
+  }
+
+  /* The edge nearest the click on the screen, within EDGE_PX; where two are as near,
+     the one nearer the camera. */
+  function edgeAtEvent(event) {
+    var segs = edgeSegs();
+    if (!segs || !state.camera || !state.renderer) return null;
+    var r = state.renderer.domElement.getBoundingClientRect();
+    mesh.updateMatrixWorld(true);
+    var px = event.clientX - r.left, py = event.clientY - r.top, best = null;
+    var toScreen = function (v) {
+      var w = v.clone().applyMatrix4(mesh.matrixWorld), d = w.distanceTo(state.camera.position);
+      w.project(state.camera);
+      return { x: (w.x + 1) / 2 * r.width, y: (1 - w.y) / 2 * r.height, d: d, ok: w.z > -1 && w.z < 1 };
+    };
+    segs.forEach(function (e) {
+      var A = toScreen(e.a), B = toScreen(e.b);
+      if (!A.ok && !B.ok) return;
+      var dx = B.x - A.x, dy = B.y - A.y, l2 = dx * dx + dy * dy;
+      var t = l2 > 1e-9 ? Math.max(0, Math.min(1, ((px - A.x) * dx + (py - A.y) * dy) / l2)) : 0;
+      var cx = A.x + t * dx, cy = A.y + t * dy, dist = Math.hypot(px - cx, py - cy);
+      if (dist > EDGE_PX) return;
+      var depth = A.d + t * (B.d - A.d);
+      if (!best || dist < best.dist - 3 || (Math.abs(dist - best.dist) <= 3 && depth < best.depth)) best = { id: e.id, dist: dist, depth: depth };
+    });
+    return best ? best.id : null;
+  }
+  function pickEdgeFromEvent(event) {
+    if (!boxNow()) { say('Pick edges needs a plain box - this piece is not one', true); return false; }
+    var id = edgeAtEvent(event);
+    if (id == null) { say('Soften: click right on an edge of the box - the white lines are the ones you can pick'); return false; }
+    return toggleEdge(id);
+  }
+
+  /* ---------------------------------------------------------------
      The preview: softenCompute, with a commit that keeps what it is handed
      --------------------------------------------------------------- */
 
@@ -292,7 +424,7 @@
       if (!on || my !== seq) return;                 // a newer change has replaced this one
       if (rerun) { rerun = false; waiting = false; dirty = true; return; }
       plan = { soup: soup, run: run, firstOfRun: firstOfRun, jobs: jobs, text: text, R: rNow(), style: style };
-      waiting = false; refused = null; needPick = false;
+      waiting = false; refused = null; needPick = false; needEdges = false;
       drawPlan();
       readout();
     };
@@ -303,13 +435,14 @@
     if (!on) return;
     if (state.nsoWrapBusy) { rerun = true; waiting = true; readout(); return; }   // a pocket wrap is in flight
     var my = ++seq;
-    plan = null; refused = null; needPick = false; waiting = false; rerun = false; kind = null;
+    plan = null; refused = null; needPick = false; needEdges = false; waiting = false; rerun = false; kind = null;
     clearDrawn();
     if (!style) { readout(); return; }
     state.edgeTreat = style;                    // the pocket wraps read the mode through getEdgeTreat()
     var res;
     try {
       res = softenCompute(m, { R: rNow(), mode: style, fullWrap: fullWrapNow(),
+                               edgePick: edgeOn, edges: edgePicks.slice(),
                                newJobs: picks.map(function (p) { return { axisIdx: p.axisIdx, keepMin: p.keepMin, plane: p.plane, recessed: p.recessed }; }) },
                           deliver(my));
     } catch (e) {
@@ -318,15 +451,17 @@
     }
     kind = res.kind || null;
     needPick = !!res.needPick;
+    needEdges = !!res.needEdges;
     needsFaces = needPick || res.kind === 'faces';
     if (!plan) {
       if (res.ok && res.pending) {
         if (state.nsoWrapBusy) waiting = true; else refused = hudText();     // refused with its reason on the HUD
-      } else if (!res.ok && !res.needPick) {
+      } else if (!res.ok && !res.needPick && !res.needEdges) {
         refused = res.reason || hudText();
       }
     }
     if (plan) say('Soften preview: ' + plan.text + '. Press Soften to bake it.');
+    else if (needEdges) say('Soften (' + NAMES[style] + '): click an edge of the box to ' + (style === 'chamfer' ? 'bevel' : 'round') + ' it - it previews here.');
     else if (needPick) say('Soften (' + NAMES[style] + '): click the face to soften - it previews here.');
     readout();
   }
@@ -342,6 +477,8 @@
     if (!style) text = 'Pick a style above: the piece previews it here, and Soften bakes it.';
     else if (waiting) text = NAMES[style] + ' R ' + fmt(rNow()) + ' - working it out…';
     else if (plan) text = plan.text + ' — press Soften to bake it.';     // the engine's sentence already names the style and R
+    else if (needEdges) text = NAMES[style] + ' R ' + fmt(rNow()) + ': click the edges to ' + (style === 'chamfer' ? 'bevel' : 'round') +
+                               ' on the box (white lines) — each click picks or un-picks one, and it previews here.';
     else if (needPick) text = NAMES[style] + ' R ' + fmt(rNow()) + ': click the face to soften' +
                               (picks.length ? ' (' + picks.length + ' picked)' : '') + ' — it previews here.';
     else { text = NAMES[style] + ' R ' + fmt(rNow()) + ' refused — ' + (refused || 'nothing to preview'); bad = true; }
@@ -371,9 +508,11 @@
     m = model; soupRef = model.rawTris; mesh = ms;
     picks = []; plan = null; refused = null; needPick = false; waiting = false; needsFaces = false; kind = null;
     baseIdx = null; rerun = false; dirty = false;
+    edgePicks = []; needEdges = false;
     state.softenArmed = true;                    // the repo's "Soften is the tool in hand" flag
     if (typeof clearFacePick === 'function') clearFacePick();
     openView();
+    drawEdges(); syncEdgeUi();
     drawTiles();
     showPanel(true);
     readout();
@@ -390,6 +529,7 @@
     on = false; style = null;
     state.softenArmed = false;
     if (!baked && typeof clearFacePick === 'function') clearFacePick();     // a bake leaves its own cage
+    edgePicks = []; needEdges = false; syncEdgeUi();
     m = null; soupRef = null; mesh = null; plan = null; picks = []; baseIdx = null; press = null;
     refused = null; needPick = false; waiting = false; needsFaces = false; kind = null; rerun = false;
     if (liveHandle) liveHandle.cancel();
@@ -461,6 +601,7 @@
 
   function pickFromEvent(event) {
     if (!on || !mesh || !state.camera || !state.renderer) return false;
+    if (edgeOn) return pickEdgeFromEvent(event);
     if (!style) { say('Soften: pick a style first - the tiles above', true); return false; }
     if (!needsFaces) return false;               // a box or pocket wrap needs no face named
     var r = state.renderer.domElement.getBoundingClientRect();
@@ -532,6 +673,16 @@
       cancelBtn.dataset.nsoWired = '1';
       cancelBtn.addEventListener('click', function () { cancel(); });
     }
+    var edgeChk = $('chk-soften-edges');
+    if (edgeChk && edgeChk.dataset.nsoWired !== '1') {
+      edgeChk.dataset.nsoWired = '1';
+      edgeChk.addEventListener('change', function () { setEdgeMode(edgeChk.checked); });
+    }
+    var edgeClr = $('btn-soften-edges-clear');
+    if (edgeClr && edgeClr.dataset.nsoWired !== '1') {
+      edgeClr.dataset.nsoWired = '1';
+      edgeClr.addEventListener('click', function () { clearEdgePicks(); });
+    }
     var wrap = $('chk-full-wrap');
     if (wrap && wrap.dataset.nsoWired !== '1') {
       wrap.dataset.nsoWired = '1';
@@ -564,11 +715,17 @@
     info: function () {
       return on ? {
         style: style, R: rNow(), kind: kind, ok: !!plan, needPick: needPick, waiting: waiting, picks: picks.length,
+        edgeMode: edgeOn, edges: edgePicks.slice(), needEdges: needEdges,
         reason: refused, text: plan ? plan.text : null, soup: plan ? plan.soup : null,
         changedTris: plan ? plan.changedTris : null, totalTris: plan ? plan.totalTris : null,
         readout: ($('soften-readout') || {}).textContent, modelId: m.id
       } : null;
     },
+    setEdgeMode: setEdgeMode,
+    pickEdge: function (id) { return on ? toggleEdge(id) : false; },     // for a check that names an edge rather than aiming a click
+    clearEdges: clearEdgePicks,
+    edgeAt: function (event) { return on && edgeOn ? edgeAtEvent(event) : null; },
+    edgeSegments: function () { return on ? edgeSegs() : null; },
     pickFace: function (pk) { return on && style ? toggleFace(pk) : false; },   // for a check that names a face rather than aiming a click
     objects: function () { return { group: group, result: drawn.result, changed: drawn.changed, edges: drawn.edges, mesh: mesh }; }
   };
