@@ -279,7 +279,7 @@
     }
     var seedPos = [org[0] + (seed % nx) * pitch, org[1] + (((seed / nx) | 0) % ny) * pitch, org[2] + ((seed / (nx * ny)) | 0) * pitch];
     return { ok: true, points: new Float32Array(pts), tris: wallTris, seed: seedPos, R: round3(chosen.R), auto: !userR,
-             cells: chosen.cells, volumeMm3: chosen.cells * pitch * pitch * pitch, pitch: round3(pitch), tried: tried, reason: '' };
+             cells: chosen.cells, volumeMm3: chosen.cells * pitch * pitch * pitch, pitch: round3(pitch), span: round3(maxSpan), tried: tried, reason: '' };
   }
 
   var API = { select: select, MIN_CELLS: MIN_CELLS, HOLD: HOLD, STEP: STEP };

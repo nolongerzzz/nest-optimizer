@@ -8,7 +8,9 @@
         unchanged); Lid R is live (too small: the preview goes and says why; blank: it is back); Escape puts the preview
         away and then stops the tool; Make bit bakes the cylinder in the bore, named <piece>-bit, one Undo
      2. nut: a pick inside the thread makes a threaded rod, far from a plain cylinder of its own size
-     3. block: the button arms the click, a real pointer click on its outside is refused in words, nothing is made    */
+     3. Lid R slider: follows the box, redoes the preview, all the way left is automatic; the Extract bit button only
+        arms and disarms (Make bit alone bakes)
+     4. block: the button arms the click, a real pointer click on its outside is refused in words, nothing is made    */
 'use strict';
 const fs = require('fs');
 const os = require('os');
@@ -135,6 +137,36 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'nso-extract-bit-'));
       await page.evaluate(() => undoLast());
       const left = await page.evaluate(() => state.models.length);
       check('one Undo removes the bit', left === r.nModels, left + ' models, was ' + r.nModels);
+    }
+
+    console.log('\n=== Lid R slider, and only Make bit bakes ===');
+    {
+      const r = await pickOn('tube', c => ({ point: [c.c[0] + 12, c.c[1], c.c[2]], normal: [-1, 0, 0] }));
+      const sl = () => page.evaluate(() => { const s = document.getElementById('inp-extract-slider'); return { v: +s.value, max: +s.max, box: document.getElementById('inp-extract-r').value, ph: document.getElementById('inp-extract-r').placeholder, read: document.getElementById('extract-r-read').textContent }; });
+      let st = await sl();
+      check('after a pick the slider sits at the ball that was used, its range fits the piece, the box stays blank (auto)',
+        r.st.pending && st.v > 10 && st.max >= 30 && st.box === '' && st.ph !== 'auto' && /^auto - /.test(st.read), JSON.stringify(st));
+      const drag = v => page.evaluate(x => { const s = document.getElementById('inp-extract-slider'); s.value = String(x); s.dispatchEvent(new Event('input', { bubbles: true })); }, v);
+      await drag(3);
+      await page.waitForFunction(() => /does not close over/.test((document.getElementById('status') || {}).textContent || ''), null, { timeout: 30000 });
+      st = await sl();
+      check('dragging the slider to 3 writes the box and redoes the preview (too small: refused in words)', st.box === '3' && !(await previewState(page)).shown, JSON.stringify(st));
+      await drag(0);
+      await page.waitForFunction(() => window.nsoExtractBit.pending(), null, { timeout: 30000 });
+      st = await sl();
+      check('all the way left is automatic: the box is blank again and the preview is back', st.box === '' && (await previewState(page)).shown && /^auto - /.test(st.read), JSON.stringify(st));
+      /* Two drags in a row while it is still working: the last one is what is drawn. */
+      await drag(20); await drag(21); await drag(22);
+      await page.waitForFunction(() => /lid R 22 mm/.test((document.getElementById('status') || {}).textContent || '') && window.nsoExtractBit.pending(), null, { timeout: 40000 });
+      check('a run of drags ends on the last value', true);
+      /* The Extract bit button, with a preview showing, only disarms: it does not bake. */
+      const before = await page.evaluate(() => state.models.length);
+      await page.click('#btn-extract-bit');
+      const ps = await previewState(page);
+      check('Extract bit pressed with a preview showing disarms it and bakes nothing',
+        !ps.armed && !ps.shown && !ps.pending && (await page.evaluate(() => state.models.length)) === before, JSON.stringify({ a: ps.armed, s: ps.shown }));
+      await page.evaluate(() => { window.nsoExtractBit.cancel(); });
+      await page.fill('#inp-extract-r', '');
     }
 
     console.log('\n=== hex nut: click inside the threaded hole ===');

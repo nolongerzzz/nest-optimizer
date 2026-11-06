@@ -2198,7 +2198,7 @@ async function extractBitDetect(index, point, normal, opts) {
              reason: cav.noCavity ? 'no void there - the click was not inside one' : cav.reason };
   }
   return { ok: true, index: index, sourceId: model.id, name: model.name || 'tile', soup: cav.soup,
-           volumeMm3: cav.volumeMm3, R: sel.R, auto: sel.auto, merged: !!solBit.merged, note: solBit.note || '',
+           volumeMm3: cav.volumeMm3, R: sel.R, auto: sel.auto, span: sel.span, merged: !!solBit.merged, note: solBit.note || '',
            point: point, normal: normal };
 }
 

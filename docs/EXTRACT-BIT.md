@@ -8,9 +8,11 @@ and a whole blob from a head.)
 1. **Extract bit** (Subtract card) arms the click. Click *inside* the void you want: a wall of it, or its bottom.
 2. The tool finds that void and draws the bit it will make **in place, in amber**, the piece turned to a ghost round it. Nothing is
    on the plate yet; the piece is not touched.
-3. Not the one you meant? Click another wall. Or set **Lid R** (blank = automatic): the preview follows the box.
+3. Not the one you meant? Click another wall. Or set **Lid R**, in the box or with the slider under it (blank / all the way left =
+   automatic; after a pick the slider sits at the ball that was used): the preview follows, and a run of drags draws the last value.
    Too much taken in (it reached into the dents beside the opening): a smaller Lid R. Too little: a bigger one.
-4. **Make bit** (or Enter) bakes it beside its source, one Undo. Escape puts the preview away; again, it stops the tool.
+4. **Make bit** (or Enter) bakes it beside its source, one Undo. Only Make bit bakes: the Extract bit button arms and disarms.
+   Escape puts the preview away; again, it stops the tool. The tool also stops when the Subtract card is shut.
 
 ## How it works
 

@@ -7,17 +7,17 @@
      2. A click on a piece finds the void THAT click is in (nso_void.js) and makes the bit from it (the real
         boolean, nso_csg.js), and draws that bit in place in amber, the piece turned to a ghost round it: a LIVE PREVIEW of exactly what Make bit
         will bake. Nothing is on the plate yet, and the piece is not touched.
-     3. Not the void you meant? Click another wall (it is found again), or change Lid R: blank is automatic (the
+     3. Not the void you meant? Click another wall (it is found again), or change Lid R (the box or the slider): blank is automatic (the
         smallest ball that closes over the opening); a bigger one reaches across a wider opening, a smaller one stops
         short of the dents next to it. The preview follows the box.
-     4. Make bit (or Enter) bakes it: a piece beside the source, one Undo. Escape puts the preview away; again, it
-        stops the tool.
+     4. Make bit (or Enter) bakes it: a piece beside the source, one Undo. Only Make bit bakes - the Extract bit button
+        arms and disarms. Escape puts the preview away; again, it stops the tool.
 
    The detection and the bake are extractBitDetect / extractBitCommit in app-join.js. The preview is a helper
    (nso-helpers.js owner 'extract-bit-live'), swept with the others. */
 (function () {
   'use strict';
-  var armed = false, busy = false, pending = null, lastPick = null, seq = 0, timer = 0, raf = 0;
+  var armed = false, busy = false, redo = false, pending = null, lastPick = null, seq = 0, timer = 0, raf = 0;
   var preview = null;                      // { group, mesh, pieces: [{ mesh, saved }] }
   var GHOST_OPACITY = 0.22;
 
@@ -28,6 +28,28 @@
     var el = $('inp-extract-r');
     var v = el ? parseFloat(el.value) : NaN;
     return (isFinite(v) && v > 0) ? v : undefined;
+  }
+
+  /* ---- Lid R: the box and the slider are one number; blank / all the way left is automatic ---- */
+  function slider() { return $('inp-extract-slider'); }
+  function showRead(text) { var el = $('extract-r-read'); if (el) el.textContent = text; }
+  /* After a detection: the slider's reach fits the piece, and sits where the ball that was used is. */
+  function showReach(r) {
+    var sl = slider(), box = $('inp-extract-r');
+    if (sl && r && r.span) {
+      var mx = Math.max(2, Math.ceil(1.3 * r.span));
+      sl.max = String(mx);
+      sl.step = mx > 40 ? '0.5' : '0.1';
+      sl.value = String(r.R);                      // a script's write: it fires no input event
+    }
+    if (box) box.placeholder = r ? String(r.R) : 'auto';
+    showRead(r ? (r.auto ? 'auto - ' : '') + r.R + ' mm' : 'auto');
+  }
+  function reachChanged() {
+    if (!armed || !lastPick) return;
+    if (busy) { redo = true; return; }
+    clearTimeout(timer);
+    timer = setTimeout(function () { if (armed && lastPick) { if (busy) redo = true; else detect(lastPick); } }, 150);
   }
 
   function syncControls() {
@@ -106,7 +128,9 @@
   }
 
   function drop(why) {
-    pending = null; lastPick = null; seq++;
+    pending = null; lastPick = null; seq++; redo = false;
+    var bx = $('inp-extract-r'); if (bx) bx.placeholder = 'auto';
+    if (!(bx && bx.value)) showRead('auto');
     clearPreview();
     syncControls();
     if (why) say('Extract bit: ' + why);
@@ -124,6 +148,7 @@
     catch (err) { console.error('[extract-bit]', err); r = { ok: false, reason: (err && err.message) || String(err) }; }
     busy = false;
     if (my !== seq) return r;                     // a newer click or Escape has taken over
+    if (redo && armed && lastPick) { redo = false; return detect(lastPick); }   // Lid R moved while this one ran: draw the latest
     if (!r.ok) {
       clearPreview();
       say(r.cancelled ? 'Extract stopped - nothing changed' : 'Extract failed - ' + r.reason + ' - click another wall instead.', !r.cancelled);
@@ -131,6 +156,7 @@
       return r;
     }
     pending = r;
+    showReach(r);
     drawPreview(r);
     syncControls();
     say('Extract bit preview - the amber is the void you clicked (' + Math.round(r.volumeMm3) + ' mm3, lid R ' + r.R + ' mm' +
@@ -155,8 +181,9 @@
     else if (!quiet) say('Extract bit off');
   }
 
+  /* The button arms and disarms, and nothing else: only Make bit (or Enter) bakes, so a second press of the button never
+     makes a bit the user was still looking at. */
   function press() {
-    if (pending) return Promise.resolve(make());
     setArmed(!armed);
     return Promise.resolve(armed);
   }
@@ -220,13 +247,23 @@
   function wire() {
     var make2 = $('btn-extract-make');
     if (make2 && !make2.dataset.nsoWired) { make2.dataset.nsoWired = '1'; make2.addEventListener('click', make); }
-    var box = $('inp-extract-r');
+    var box = $('inp-extract-r'), sl = slider();
     if (box && !box.dataset.nsoWired) {
       box.dataset.nsoWired = '1';
       box.addEventListener('input', function () {
-        if (!armed || !lastPick) return;
-        clearTimeout(timer);
-        timer = setTimeout(function () { if (armed && lastPick && !busy) detect(lastPick); }, 350);
+        var v = parseFloat(box.value);
+        if (sl) sl.value = (isFinite(v) && v > 0) ? String(v) : '0';
+        showRead((isFinite(v) && v > 0) ? v + ' mm' : 'auto');
+        reachChanged();
+      });
+    }
+    if (sl && !sl.dataset.nsoWired) {
+      sl.dataset.nsoWired = '1';
+      sl.addEventListener('input', function () {
+        var v = parseFloat(sl.value);
+        if (box) box.value = (isFinite(v) && v > 0) ? String(v) : '';
+        showRead((isFinite(v) && v > 0) ? v + ' mm' : 'auto');
+        reachChanged();
       });
     }
     /* Escape: the preview first, then the tool. Enter makes the bit - but not out of a box someone is typing in. */
