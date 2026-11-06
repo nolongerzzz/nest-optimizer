@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=52274bed" />
+  <link rel="stylesheet" href="styles.css?v=d5ce7de6" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -1313,11 +1313,22 @@
                 <option value="vee">V-groove</option>
               </select>
             </div>
-            <div class="vp-row vp-row-carve2">
-              <label class="vp-clone" title="How deep the blade goes, along the outward bisector of the faces it meets."><span id="carve-depth-label">mm</span> <input type="number" id="carve-depth" value="1" min="0.1" max="30" step="0.1"></label>
-              <label class="vp-clone"><span id="carve-a-label">R</span> <input type="number" id="carve-a" value="2" min="0.1" max="30" step="0.1"></label>
-              <label class="vp-clone"><span id="carve-b-label">L</span> <input type="number" id="carve-b" value="10" min="0.2" max="60" step="0.1"></label>
-              <label class="vp-clone" title="Spin the blade about the outward direction. 0 lays its sweep axis along the edge, which is what a chamfer wants."><span id="carve-roll-label">&deg;</span> <input type="number" id="carve-roll" value="0" min="-180" max="180" step="5"></label>
+            <!-- Carve's four numbers are sliders (the ids are the ones the number boxes had; the
+                 value is the range's own, and the span beside each label says it, as Hollow's wall
+                 does - app-carve.js keeps the two in step and relabels them per blade). -->
+            <div class="vp-row vp-row-full carve-sliders">
+              <label class="live-slider" for="carve-depth" title="How deep the blade goes, along the outward bisector of the faces it meets."><span id="carve-depth-label">Depth</span>
+                <span id="carve-depth-read">1 mm</span>
+                <input type="range" id="carve-depth" value="1" min="0.1" max="30" step="0.05" aria-label="Carve depth, mm" /></label>
+              <label class="live-slider" for="carve-a"><span id="carve-a-label">Radius</span>
+                <span id="carve-a-read">2 mm</span>
+                <input type="range" id="carve-a" value="2" min="0.1" max="30" step="0.1" aria-label="Blade size, mm" /></label>
+              <label class="live-slider" for="carve-b"><span id="carve-b-label">Length</span>
+                <span id="carve-b-read">10 mm</span>
+                <input type="range" id="carve-b" value="10" min="0.2" max="60" step="0.1" aria-label="Blade length, mm" /></label>
+              <label class="live-slider" for="carve-roll" title="Spin the blade about the outward direction. 0 lays its sweep axis along the edge, which is what a chamfer wants."><span id="carve-roll-label">Roll</span>
+                <span id="carve-roll-read">0&deg;</span>
+                <input type="range" id="carve-roll" value="0" min="-180" max="180" step="5" aria-label="Blade roll, degrees" /></label>
             </div>
             <div class="vp-row vp-row-full"><p id="carve-readout" class="carve-readout">&mdash;</p></div>
             <!-- PUNCH (app-punch.js, nso_punch.js; docs/PUNCH.md): arm it, click a face - a
@@ -2522,7 +2533,7 @@
   <script src="nso_planar_fuse.js?v=03762b55"></script>
   <script src="nso_skin.js?v=e0cfc361"></script>
   <script src="nso_skin_patch.js?v=4b2304fa"></script>
-  <script src="nso_carve.js?v=a47e16e3"></script>
+  <script src="nso_carve.js?v=c82241ec"></script>
 <script src="nso_notch.js?v=b697e802"></script>
 <script src="nso_cut_plate.js?v=0683b280"></script>
   <script src="nso_seat_surface.js?v=293d7ca2"></script>
@@ -2675,7 +2686,7 @@
   <script src="app-center-lock.js?v=ee95c074"></script>
   <script src="app-oversize-washer.js?v=a445c3ff"></script>
   <script src="app-join-triple.js?v=95a9c48a"></script>
-  <script src="app-carve.js?v=c8e8fd9f"></script>
+  <script src="app-carve.js?v=908b99b7"></script>
   <!-- Punch: round holes through a face, alone, in a grid or on a circle. The
        geometry (nso_punch.js) before its card (app-punch.js). docs/PUNCH.md. -->
   <script src="nso_punch.js?v=c86b8521"></script>

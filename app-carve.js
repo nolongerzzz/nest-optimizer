@@ -34,14 +34,21 @@
 
   /* Which shape parameters each blade exposes, and what to call them. The
      blade's `height` is NOT here: it is derived from the cut depth below, so
-     "depth exceeds the blade" cannot be reached from the UI at all. */
+     "depth exceeds the blade" cannot be reached from the UI at all. These are
+     the ranges of the sliders (Depth and Roll are fixed ones, in index.html):
+     a slider has no way to be typed past its ends, so each is the number
+     box's old min / max, and the label is the whole word now that it has a row
+     to itself. */
   var FIELDS = {
-    flat: [{ key: 'width', label: 'W', min: 0.2, max: 60, step: 0.1 },
-           { key: 'length', label: 'L', min: 0.2, max: 60, step: 0.1 }],
-    ball: [{ key: 'radius', label: 'R', min: 0.1, max: 30, step: 0.1 }],
-    vee: [{ key: 'angle', label: '°', min: 10, max: 170, step: 1 },
-          { key: 'length', label: 'L', min: 0.2, max: 60, step: 0.1 }]
+    flat: [{ key: 'width', label: 'Width', unit: ' mm', min: 0.2, max: 60, step: 0.1 },
+           { key: 'length', label: 'Length', unit: ' mm', min: 0.2, max: 60, step: 0.1 }],
+    ball: [{ key: 'radius', label: 'Radius', unit: ' mm', min: 0.1, max: 30, step: 0.1 }],
+    vee: [{ key: 'angle', label: 'Angle', unit: '\u00b0', min: 10, max: 170, step: 1 },
+          { key: 'length', label: 'Length', unit: ' mm', min: 0.2, max: 60, step: 0.1 }]
   };
+
+  /* What the span beside each slider says after its number. */
+  var UNITS = { 'carve-depth': ' mm', 'carve-a': ' mm', 'carve-b': ' mm', 'carve-roll': '\u00b0' };
 
   /* The shank has to reach clear of the surface for the safety box's probe
      rays to start outside the piece, and clear of the ball's own radius so the
@@ -72,6 +79,16 @@
     var v = Number(el.value);
     return isFinite(v) ? v : fallback;
   }
+
+  /* The slider's own value, said beside its label. Two decimals at most, the
+     way app-live-slider.js says Hollow's wall: 1 not 1.00, 1.15 not 1.1500001. */
+  function showRead(id) {
+    var el = $(id), out = $(id + '-read');
+    if (!el || !out) return;
+    var v = Number(el.value);
+    out.textContent = (isFinite(v) ? String(Math.round(v * 100) / 100) : '\u2014') + (UNITS[id] || '');
+  }
+  function showReads() { ['carve-depth', 'carve-a', 'carve-b', 'carve-roll'].forEach(showRead); }
 
   function currentBlade() {
     var sel = $('carve-blade');
@@ -108,10 +125,16 @@
       }
       if (wrap) wrap.hidden = false;
       lab.textContent = spec.label;
+      UNITS[row[0]] = spec.unit;
+      /* range first, then the value: a range clamps what it is given to the
+         range it has, so the old blade's range would eat the new default */
       el.min = spec.min; el.max = spec.max; el.step = spec.step;
       el.value = d[spec.key];
-      el.title = blade + ': ' + spec.key + ' in mm' + (spec.key === 'angle' ? ' (degrees)' : '');
+      var tip = blade + ': ' + spec.key + (spec.key === 'angle' ? ' in degrees' : ' in mm');
+      el.title = tip;
+      el.setAttribute('aria-label', 'Blade ' + spec.key + (spec.key === 'angle' ? ', degrees' : ', mm'));
     });
+    showReads();
     describe();
   }
 
@@ -280,21 +303,49 @@
   function beginStroke(t, event) {
     stroke = {
       target: t, index: t.index, samples: [sampleOf(t)],
-      x0: event.clientX, y0: event.clientY, moved: 0, line: null
+      x0: event.clientX, y0: event.clientY, lastX: event.clientX, lastY: event.clientY, moved: 0, line: null
     };
     if (state.controls) state.controls.enabled = false;
     try { if (event.target && event.target.setPointerCapture) event.target.setPointerCapture(event.pointerId); } catch (e) {}
     say('Carve - drag to cut a groove, let go to cut it; a click punches. Esc cancels.');
   }
 
+  /* The pointer moves in jumps: a fast drag reports one position every few
+     pixels, and a coarse one every tens. Between two reports the surface is
+     read again every INTERP_PX pixels along the straight line the pointer
+     took, so the stroke is as dense as the drawing was, a slow curve and a
+     fast one come out the same, and two reports that really are on different
+     faces (an edge between them) are told apart from two that are only far
+     apart on one smooth face. At most MAX_INTERP reads per report. */
+  var INTERP_PX = 3, MAX_INTERP = 24;
+
+  function addSample(s, x, y) {
+    var t = hitPiece({ clientX: x, clientY: y });
+    if (!t || t.index !== s.index) return false;
+    s.samples.push(sampleOf(t));
+    return true;
+  }
+
   function onStrokeMove(event) {
     var s = stroke;
     if (!s) return;
-    s.moved = Math.max(s.moved, Math.hypot(event.clientX - s.x0, event.clientY - s.y0));
-    var t = hitPiece(event);
-    if (!t || t.index !== s.index) return;
-    s.samples.push(sampleOf(t));
-    drawPreview(s);
+    /* every position the browser coalesced into this event, then the event's own */
+    var evs = (typeof event.getCoalescedEvents === 'function') ? event.getCoalescedEvents() : null;
+    if (!evs || !evs.length) evs = [event];
+    var any = false, e, n, k;
+    for (e = 0; e < evs.length; e++) {
+      var x = evs[e].clientX, y = evs[e].clientY;
+      s.moved = Math.max(s.moved, Math.hypot(x - s.x0, y - s.y0));
+      if (s.lastX !== undefined) {
+        n = Math.min(MAX_INTERP, Math.floor(Math.hypot(x - s.lastX, y - s.lastY) / INTERP_PX));
+        for (k = 1; k <= n; k++) {
+          if (addSample(s, s.lastX + (x - s.lastX) * k / (n + 1), s.lastY + (y - s.lastY) * k / (n + 1))) any = true;
+        }
+      }
+      if (addSample(s, x, y)) any = true;
+      s.lastX = x; s.lastY = y;
+    }
+    if (any) drawPreview(s);
   }
 
   function endStroke(commit) {
@@ -645,8 +696,56 @@
     }
 
     var before = NSO_edgeStats(hullSoup);
-    var manA = null, groove = null, inter = null, result = null, parts = [];
-    var out = null;
+    var manA = null, out = null, lastErr = null, retried = false;
+
+    /* One attempt at the cut with a set of solids that together are the
+       groove: each into the kernel, the lot unioned, the piece intersected
+       with it (what it should remove) and the groove subtracted. Everything
+       the kernel hands back is freed before it returns, however it ends. */
+    function attempt(pieces) {
+      var parts = [], temps = [], groove = null, inter = null, result = null, i;
+      try {
+        for (i = 0; i < pieces.length; i++) {
+          var m = NSO_CSG.soupToManifold(wasm, pieces[i]);
+          if (m.status && m.status() !== 'NoError') { m.delete(); throw new Error('groove piece ' + i + ' rejected: ' + m.status()); }
+          parts.push(m);
+        }
+        /* A groove along a curve is one skin and two blades, or - round a bend
+           tighter than the blade - a hundred prisms and joints. Pairwise, so
+           each add is between two solids of similar size and the whole is
+           n log n, not each piece added to an ever-larger groove. */
+        var level = parts.slice();
+        while (level.length > 1) {
+          var next = [];
+          for (i = 0; i + 1 < level.length; i += 2) {
+            var u = level[i].add(level[i + 1]);
+            temps.push(u);
+            next.push(u);
+          }
+          if (level.length % 2) next.push(level[level.length - 1]);
+          level = next;
+        }
+        groove = level[0];
+        if (groove.status && groove.status() !== 'NoError') throw new Error('groove rejected by the kernel: ' + groove.status());
+        inter = manA.intersect(groove);
+        var intended = inter.volume();
+        if (!(intended > NOOP_FLOOR)) return { miss: true };
+        result = manA.subtract(groove);
+        if (result.status() !== 'NoError') throw new Error('subtract rejected by kernel: ' + result.status());
+        if (result.isEmpty()) throw new Error('subtract produced an empty solid');
+        var removed = manA.volume() - result.volume();
+        var soup = NSO_CSG.manifoldToSoup(result);
+        var exact = NSO_manifoldStats(result);
+        var after = exact.exact ? { open: exact.open, nm: exact.nm } : NSO_edgeStats(soup);
+        return { soup: soup, removed: removed, intended: intended, after: after };
+      } finally {
+        if (inter) inter.delete();
+        if (result) result.delete();
+        temps.forEach(function (t) { t.delete(); });
+        parts.forEach(function (p) { p.delete(); });
+      }
+    }
+
     try {
       var aIn = hullSoup;
       if (typeof weldSoupVerts === 'function') {
@@ -654,42 +753,29 @@
       }
       manA = NSO_CSG.soupToManifold(wasm, aIn);
       if (manA.status && manA.status() !== 'NoError') throw new Error('piece rejected by the kernel: ' + manA.status());
-      for (var i = 0; i < planned.pieces.length; i++) {
-        var m = NSO_CSG.soupToManifold(wasm, planned.pieces[i]);
-        if (m.status && m.status() !== 'NoError') { m.delete(); throw new Error('groove piece ' + i + ' rejected: ' + m.status()); }
-        parts.push(m);
+      /* the planned groove first; if the kernel will not take it, the same
+         groove built the other way (planStroke keeps both) */
+      var tries = [planned.pieces];
+      if (planned.piecesAlt) tries.push(planned.piecesAlt);
+      for (var ti = 0; ti < tries.length && !out; ti++) {
+        try {
+          var r = attempt(tries[ti]);
+          if (r.miss) {
+            var miss = 'the groove does not reach the piece at depth ' + depth + ' mm';
+            say('Carve: ' + miss, true);
+            return { ok: false, reason: miss, planned: planned, stroke: true };
+          }
+          out = r;
+          retried = ti > 0;
+        } catch (e1) { lastErr = e1; }
       }
-      groove = parts[0];
-      for (i = 1; i < parts.length; i++) {
-        var u = groove.add(parts[i]);
-        if (groove !== parts[0]) groove.delete();
-        groove = u;
-      }
-      inter = manA.intersect(groove);
-      var intended = inter.volume();
-      if (!(intended > NOOP_FLOOR)) {
-        var miss = 'the groove does not reach the piece at depth ' + depth + ' mm';
-        say('Carve: ' + miss, true);
-        return { ok: false, reason: miss, planned: planned, stroke: true };
-      }
-      result = manA.subtract(groove);
-      if (result.status() !== 'NoError') throw new Error('subtract rejected by kernel: ' + result.status());
-      if (result.isEmpty()) throw new Error('subtract produced an empty solid');
-      var removed = manA.volume() - result.volume();
-      var soup = NSO_CSG.manifoldToSoup(result);
-      var exact = NSO_manifoldStats(result);
-      var after = exact.exact ? { open: exact.open, nm: exact.nm } : NSO_edgeStats(soup);
-      out = { soup: soup, removed: removed, intended: intended, after: after };
+      if (!out) throw lastErr || new Error('the kernel would not cut the groove');
     } catch (err) {
       var why = (err && err.message) ? err.message : String(err);
       say('Carve failed - ' + why, true);
       return { ok: false, reason: why, planned: planned, stroke: true };
     } finally {
       if (manA) manA.delete();
-      if (inter) inter.delete();
-      if (result) result.delete();
-      if (groove && groove !== parts[0]) groove.delete();
-      parts.forEach(function (p) { p.delete(); });
     }
 
     var wd = weldForGate(out.soup);
@@ -700,6 +786,7 @@
       ', non-manifold ' + before.nm + '→' + out.after.nm +
       (wd.dropped ? ', welded away ' + wd.dropped + ' seam sliver' + (wd.dropped === 1 ? '' : 's') : '') +
       (wall ? ' - wall: ' + wall.reason + ' (two ' + STROKE_NOZZLE + ' mm nozzle widths)' : '') +
+      (retried ? ' - built from prisms and joints (the kernel would not take it as one skin)' : '') +
       (sol.merged ? ' - ' + sol.note : '');
     if (!NSO_sculptCommitRaw(model, raw, 'carveReplace', status)) {
       say('Carve: could not commit the result', true);
@@ -710,7 +797,7 @@
     return {
       ok: true, stroke: true, planned: planned, removed: out.removed, intended: out.intended,
       openAfter: out.after.open, nmAfter: out.after.nm, status: status, wall: wall,
-      dropped: wd.dropped, trisOut: wd.soup.length / 9
+      dropped: wd.dropped, trisOut: wd.soup.length / 9, mode: planned.mode, retried: retried
     };
   }
 
@@ -747,6 +834,7 @@
     if (o.b !== undefined && $('carve-b')) $('carve-b').value = o.b;
     if (o.depth !== undefined && $('carve-depth')) $('carve-depth').value = o.depth;
     if (o.roll !== undefined && $('carve-roll')) $('carve-roll').value = o.roll;
+    showReads();
     describe();
     return { blade: currentBlade(), depth: numOf($('carve-depth'), 1), roll: numOf($('carve-roll'), 0),
              params: currentParams(currentBlade(), numOf($('carve-depth'), 1)) };
@@ -759,7 +847,7 @@
     if (sel) sel.addEventListener('change', syncFields);
     ['carve-a', 'carve-b', 'carve-depth', 'carve-roll'].forEach(function (id) {
       var el = $(id);
-      if (el) el.addEventListener('input', describe);
+      if (el) el.addEventListener('input', function () { showRead(id); describe(); });
     });
     syncFields();
     if (!window._carveStrokeBound) {

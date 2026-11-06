@@ -11,6 +11,12 @@
      c. the wall gate refuses a groove that would leave under two nozzle
         widths (0.8 mm at 0.4) - under the floor AND through a side wall - and
         passes one that leaves more.
+     d. a drawn U, S or long arc is planned as drawn - on a plane and on a
+        sphere, with every blade, hand-shake and a pixel grid included - and
+        cut through the real kernel into a valid solid whose groove is where it
+        was drawn (floor depth, and the width at the surface, within 0.15 mm).
+        A U tighter than the blade is wide is still a valid cut. (These were
+        the ones that came out V-shaped, Z-shaped, or refused.)
    Part 2 - the shipped tool, a real pointer drag in real Chromium
      d. on fixtures/box_hull_80x40x20-2.stl, a 20 mm drag with each blade
         (ball-nose, flat shave, V-groove) cuts ONE groove: the section taken
@@ -33,11 +39,13 @@ const { withApp, loadSTL, selectModel, ROOT } = require('./nso_app_harness');
 const NSO_Carve = require(path.join(ROOT, 'nso_carve.js'));
 const NSO_PathSweep = require(path.join(ROOT, 'nso_path_sweep.js'));
 const NSO_Thickness = require(path.join(ROOT, 'nso_thickness.js'));
+const { csgContext } = require(path.join(ROOT, 'tools', 'nso_csg_node.js'));
 
 let fails = 0;
 const check = (name, cond, detail) => {
   console.log('  ' + (cond ? 'ok   ' : 'FAIL ') + name + (detail !== undefined ? ' - ' + detail : ''));
   if (!cond) fails++;
+  return !!cond;
 };
 const near = (a, b, tol) => Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) <= tol;
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'nso-carve-drag-'));
@@ -174,7 +182,13 @@ function part1() {
     if (!pl.ok) continue;
     const g = gate(pl.sweeps[0].tris, 'sweep_' + name);
     check('  ... whose swept body is one closed solid', clean(g), gsum(g));
-    const want = NSO_PathSweep.polyArea(sec.profile) * 20;
+    /* the groove reaches GROOVE_ABOVE_MM (1 mm) above the surface and no further: the shank above that
+       cuts nothing, and is wider than a bend can fit */
+    const top = Math.max(...pl.cutProfile.map(q => q[1]));
+    check('  ... whose section is the blade\'s, cut off 1 mm above the surface', near(top, 1.5 + 1, 1e-9) &&
+      pl.cutProfile.every(q => sec.profile.some(r => near(r[0], q[0], 1e-9) && near(r[1], q[1], 1e-9)) || near(q[1], top, 1e-9)),
+      'top at ' + top + ' mm');
+    const want = NSO_PathSweep.polyArea(pl.cutProfile) * 20;
     check('  ... of volume section area x length', g.j && near(g.j.signed_volume, want, 1e-3 * want),
       (g.j ? g.j.signed_volume.toFixed(4) : '?') + ' vs ' + want.toFixed(4) + ' mm^3');
     for (let e = 0; e < 2; e++) {
@@ -220,6 +234,150 @@ function part1() {
     { width: 4, length: 4, height: 4 }, { depth: 1 });
   w = NSO_Carve.strokeWallGate(PB, sideOk, { nozzle: 0.4 });
   check('  ... and one 1.0 mm in is allowed', w.ok, w.reason);
+}
+
+
+/* ============================================================
+   PART 1d - curves, through the real kernel
+   ============================================================ */
+const mul3 = (a, k) => [a[0] * k, a[1] * k, a[2] * k];
+const add3 = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+function sphereSoup(R, nu, nv) {
+  const P = (i, j) => { const th = Math.PI * i / nv, ph = 2 * Math.PI * (j % nu) / nu; return [R * Math.sin(th) * Math.cos(ph), R * Math.cos(th), R * Math.sin(th) * Math.sin(ph)]; };
+  const s = [];
+  for (let i = 0; i < nv; i++) for (let j = 0; j < nu; j++) {
+    const a = P(i, j), b = P(i + 1, j), c = P(i + 1, j + 1), d = P(i, j + 1);
+    if (i > 0) s.push(...a, ...d, ...b);
+    if (i < nv - 1) s.push(...b, ...d, ...c);
+  }
+  return Float32Array.from(s);
+}
+/* two surfaces to draw on: a plane (the top of a block, y = 20) and a sphere of radius R about the origin.
+   map(u, v) -> the point on the surface that the drawing's (u, v) lands on, and its outward normal */
+const PLANE = { name: 'plane', hull: boxSoup(-70, 0, -70, 70, 20, 70), map: (u, v) => ({ p: [u, 20, v], n: [0, 1, 0] }) };
+const sphereOf = R => ({
+  name: 'sphere R' + R, hull: sphereSoup(R, 160, 80),
+  map: (u, v) => { const th = Math.hypot(u, v) / R, ph = Math.atan2(v, u);
+    const n = [Math.sin(th) * Math.cos(ph), Math.cos(th), Math.sin(th) * Math.sin(ph)]; return { p: mul3(n, R), n }; },
+  offset: (p, n, lat, x) => { const R_ = Math.hypot(p[0], p[1], p[2]), c = Math.cos(x / R_), s_ = Math.sin(x / R_);
+    const q = add3(mul3(n, R_ * c), mul3(lat, R_ * s_)); return { q, nq: norm3(q) }; }
+});
+/* drawings, as (u, v) of t in [0, 1] */
+const DRAW = {
+  U: r => t => { const L1 = 15, A = Math.PI * r, L = 2 * L1 + A, s = t * L;
+    if (s < L1) return [-r, -s]; if (s < L1 + A) { const a = Math.PI + (s - L1) / r; return [r * Math.cos(a), -L1 + r * Math.sin(a)]; }
+    return [r, -L1 + (s - L1 - A)]; },
+  S: a => t => [a * Math.sin(t * 2 * Math.PI), 40 * (t - 0.5)],
+  arc: R => t => { const a = t * 1.5 * Math.PI; return [R * Math.cos(a), R * Math.sin(a)]; }
+};
+let seedNoise = 5;
+const noise = () => (seedNoise = (seedNoise * 16807) % 2147483647) / 2147483647 - 0.5;
+/* the drawing as the pointer reports it: n samples, a pixel grid of `grid` mm, `shake` mm of hand */
+function drawn(surf, shape, n, shake, grid) {
+  const out = [], ideal = [];
+  for (let i = 0; i <= n; i++) {
+    const [u, v] = shape(i / n);
+    ideal.push(surf.map(u, v));
+    const uu = u + (shake ? noise() * shake : 0), vv = v + (shake ? noise() * shake : 0);
+    const m = surf.map(grid ? Math.round(uu / grid) * grid : uu, grid ? Math.round(vv / grid) * grid : vv);
+    out.push({ point: m.p, normal: m.n });
+  }
+  return { samples: out, ideal };
+}
+/* where the groove is, measured on the finished solid: the floor under the drawn line, and the width at the surface */
+function grooveFit(ctx, soup, ideal, surf, depth, expectHW) {
+  let edge = 0, floor = 0, n = 0, miss = 0;
+  for (let i = 3; i < ideal.length - 3; i += 4) {
+    const m = ideal[i];
+    let tan = sub3(ideal[i + 1].p, ideal[i - 1].p); const Lt = Math.hypot(...tan); if (Lt < 1e-9) continue;
+    tan = mul3(tan, 1 / Lt);
+    const lat = norm3(cross3(m.n, tan));
+    const h0 = ctx.NSO_rayHitsSoup(soup, ...add3(m.p, mul3(m.n, 3)), ...mul3(m.n, -1));
+    if (h0.length) floor = Math.max(floor, Math.abs(h0[0] - 3 - depth));
+    for (const sg of [1, -1]) {
+      let found = null;
+      for (let x = 0.2; x < expectHW + 1.6; x += 0.04) {
+        const o = surf.offset ? surf.offset(m.p, m.n, mul3(lat, sg), x) : { q: add3(m.p, mul3(lat, sg * x)), nq: m.n };
+        const h = ctx.NSO_rayHitsSoup(soup, ...add3(o.q, mul3(o.nq, 3)), ...mul3(o.nq, -1));
+        if ((h.length ? h[0] - 3 : 0) < 0.03) { found = x; break; }
+      }
+      if (found === null) { miss++; continue; }
+      edge = Math.max(edge, Math.abs(found - expectHW)); n++;
+    }
+  }
+  return { edge, floor, n, miss };
+}
+async function cutThroughKernel(ctx, wasm, hull, planned) {
+  const A = ctx.NSO_CSG.soupToManifold(wasm, hull);
+  const parts = planned.pieces.map(q => ctx.NSO_CSG.soupToManifold(wasm, q)), temps = [];
+  let level = parts.slice();
+  while (level.length > 1) {
+    const nx = [];
+    for (let i = 0; i + 1 < level.length; i += 2) { const u = level[i].add(level[i + 1]); temps.push(u); nx.push(u); }
+    if (level.length % 2) nx.push(level[level.length - 1]);
+    level = nx;
+  }
+  const R = A.subtract(level[0]);
+  const out = { status: R.status(), soup: ctx.NSO_CSG.manifoldToSoup(R), stats: ctx.NSO_manifoldStats(R), removed: A.volume() - R.volume() };
+  [A, R, ...parts, ...temps].forEach(m => m.delete());
+  return out;
+}
+async function part1d() {
+  console.log('\n--- 1d. a drawn curve is cut as drawn: U, S and long arcs, plane and sphere ---');
+  const ctx = csgContext();
+  const wasm = await ctx.NSO_CSG.load();
+  const BL = {
+    ball: { params: { radius: 2, height: 8 }, hw: d => Math.sqrt(4 - (2 - d) * (2 - d)) },
+    flat: { params: { width: 4, length: 6, height: 8 }, hw: () => 2 },
+    vee: { params: { angle: 90, length: 6, height: 8 }, hw: d => d * Math.tan(Math.PI / 4) }
+  };
+  /* the width is read by stepping outward 0.04 mm at a time, and a sphere sags 0.04 mm across a 4 mm blade: 0.15 is
+     three of those steps, not a looseness in the cut (it measures 0.03-0.12) */
+  const FIT = 0.15, depth = 1;
+  const cases = [
+    ['U r6, steady', PLANE, DRAW.U(6), 300, 0, 0], ['U r4, 0.2 mm pixels', PLANE, DRAW.U(4), 300, 0, 0.2],
+    ['S, 0.2 mm pixels', PLANE, DRAW.S(10), 300, 0, 0.2], ['S, shaky + pixels', PLANE, DRAW.S(10), 400, 0.2, 0.2],
+    ['190 mm arc', PLANE, DRAW.arc(40), 700, 0, 0.2],
+    ['arc on a sphere R50', sphereOf(50), DRAW.arc(20), 400, 0, 0.1], ['U on a sphere R30', sphereOf(30), DRAW.U(6), 300, 0, 0.1],
+    ['S on a sphere R50, shaky', sphereOf(50), DRAW.S(10), 400, 0.1, 0.1]
+  ];
+  for (const [label, surf, shape, n, shake, grid] of cases) {
+    for (const name of Object.keys(BL)) {
+      const d = drawn(surf, shape, n, shake, grid);
+      let drawnLen = 0;
+      for (let i = 1; i < d.ideal.length; i++) drawnLen += Math.hypot(...sub3(d.ideal[i].p, d.ideal[i - 1].p));
+      const pl = NSO_Carve.planStroke(surf.hull, d.samples, name, BL[name].params, { depth });
+      if (!check(name + ', ' + label + ': planned (not refused)', pl.ok, pl.ok ? pl.segments + ' segments, ' + pl.joints + ' joints' : pl.reason)) continue;
+      check('  ... as long as it was drawn (' + drawnLen.toFixed(1) + ' mm)', near(pl.length, drawnLen, 0.03 * drawnLen),
+        pl.length.toFixed(1) + ' mm');
+      const cut = await cutThroughKernel(ctx, wasm, surf.hull, pl);
+      check('  ... cuts to a valid solid', cut.status === 'NoError' && cut.stats.open === 0 && cut.stats.nm === 0 && cut.removed > 0,
+        cut.status + ', open ' + cut.stats.open + ', nm ' + cut.stats.nm + ', ' + cut.removed.toFixed(1) + ' mm^3');
+      const fit = grooveFit(ctx, cut.soup, d.ideal, surf, depth, BL[name].hw(depth));
+      check('  ... where it was drawn: floor within ' + FIT + ' mm, width within ' + FIT + ' mm',
+        fit.n > 20 && fit.miss === 0 && fit.floor <= FIT && fit.edge <= FIT,
+        'floor ' + fit.floor.toFixed(3) + ', width ' + fit.edge.toFixed(3) + ' (' + fit.n + ' edges read, ' + fit.miss + ' missed)');
+    }
+  }
+  /* a turn tighter than the blade is wide: the sweep used to refuse it, then to flatten it; the union has no limit to hit */
+  for (const name of Object.keys(BL)) {
+    const d = drawn(PLANE, DRAW.U(1.2), 200, 0, 0.1);
+    const pl = NSO_Carve.planStroke(PLANE.hull, d.samples, name, BL[name].params, { depth: 1.5 });
+    if (!check(name + ': a U of 1.2 mm radius (tighter than the blade) is planned', pl.ok, pl.ok ? pl.segments + ' segments' : pl.reason)) continue;
+    const cut = await cutThroughKernel(ctx, wasm, PLANE.hull, pl);
+    check('  ... and cuts to a valid solid', cut.status === 'NoError' && cut.stats.open === 0 && cut.stats.nm === 0 && cut.removed > 0,
+      cut.status + ', open ' + cut.stats.open + ', nm ' + cut.stats.nm);
+  }
+  console.log('\n--- 1e. one smooth surface, many faces: an edge is still an edge ---');
+  {
+    const a = drawn(PLANE, t => [-20 + 20 * t, 0], 40, 0, 0).samples;
+    const bsm = Array.from({ length: 41 }, (_, i) => ({ point: [0, 20 - 20 * i / 40, 0], normal: [1, 0, 0] })).slice(1);
+    const r = NSO_Carve.planStroke(PLANE.hull, a.concat(bsm), 'ball', BL.ball.params, { depth: 1 });
+    check('a stroke from the top of a box over its edge down the side is refused in words', !r.ok && /crosses onto another face/.test(r.reason), r.reason);
+    const s = drawn(sphereOf(20), DRAW.arc(10), 300, 0, 0.1);
+    const r2 = NSO_Carve.planStroke(sphereOf(20).hull, s.samples, 'ball', BL.ball.params, { depth: 1 });
+    check('a 270-degree arc on a sphere (its normals spread 57 degrees, past the old 25 degree limit) is not an edge', r2.ok, r2.ok ? r2.segments + ' segments' : r2.reason);
+  }
 }
 
 /* ============================================================
@@ -300,6 +458,35 @@ async function part2() {
       if (!state.carveArmed) document.getElementById('btn-carve').click();
     });
     check('Carve is armed', await page.evaluate(() => state.carveArmed === true));
+
+    console.log('\n--- 2c. Carve\'s four numbers are sliders, and each says what it is set to ---');
+    {
+      const rd = () => page.evaluate(() => ['carve-depth', 'carve-a', 'carve-b', 'carve-roll'].map(id => {
+        const el = document.getElementById(id), r = el.getBoundingClientRect();
+        return { id, type: el.type, label: document.getElementById(id + '-label').textContent,
+                 read: document.getElementById(id + '-read').textContent, shown: !el.closest('label').hidden && r.width > 0,
+                 min: el.min, max: el.max };
+      }));
+      await page.evaluate(() => { document.getElementById('menu-bit').open = true; });
+      await setControls(page, { blade: 'flat', a: 4, b: 6, depth: 1, roll: 0 });
+      let c = await rd();
+      check('depth, width, length and roll are range sliders, all shown for a slab', c.every(x => x.type === 'range' && x.shown),
+        c.map(x => x.id + ':' + x.type + (x.shown ? '' : ' hidden')).join(', '));
+      check('  ... labelled in words, each with its value and unit beside it',
+        c.map(x => x.label + ' ' + x.read).join(' | ') === 'Depth 1 mm | Width 4 mm | Length 6 mm | Roll 0°', c.map(x => x.label + ' ' + x.read).join(' | '));
+      /* a real user input on the depth slider: the read-out and the blade line follow it */
+      await page.evaluate(() => { const d = document.getElementById('carve-depth'); d.value = '2.5'; d.dispatchEvent(new Event('input', { bubbles: true })); });
+      c = await rd();
+      const line = await page.evaluate(() => document.getElementById('carve-readout').textContent);
+      check('  ... moving Depth moves its read-out and the blade line', c[0].read === '2.5 mm' && /cutting 2\.5 mm deep/.test(line), c[0].read + ' / ' + line);
+      await setControls(page, { blade: 'ball', a: 2, depth: 1, roll: 0 });
+      c = await rd();
+      check('a ball-nose shows Radius and no Length slider', c[1].label === 'Radius' && c[1].read === '2 mm' && !c[2].shown, c.map(x => x.label + (x.shown ? '' : ' (hidden)')).join(', '));
+      await setControls(page, { blade: 'vee', a: 90, b: 6, depth: 1, roll: 0 });
+      c = await rd();
+      check('a V-groove shows Angle in degrees and Length', c[1].label === 'Angle' && c[1].read === '90°' && c[2].shown && c[2].read === '6 mm', c.map(x => x.label + ' ' + x.read).join(' | '));
+      await page.evaluate(() => { document.getElementById('menu-bit').open = false; });
+    }
     await lookDown(page, [cx, top, cz], 140);
 
     console.log('\n--- 2d. a 20 mm drag cuts one groove of the blade\'s section ---');
@@ -410,13 +597,53 @@ async function part2() {
       check('a 126-degree arc drag cuts one groove', r && r.ok && r.stroke,
         r ? (r.status || r.reason) : 'no result');
       if (r && r.ok) {
-        check('  ... along the arc (' + r.segments + ' mitred segments, ' + r.length.toFixed(1) + ' mm)',
+        check('  ... along the arc (' + r.segments + ' segments, ' + r.length.toFixed(1) + ' mm)',
           r.segments > 1 && near(r.length, 12 * Math.PI * 0.7, 0.5), r.length.toFixed(3) + ' mm vs ' + (12 * Math.PI * 0.7).toFixed(3));
         const g = gate(Float32Array.from(await soupOf(page, id)), 'drag_arc');
         check('  ... and the piece gates clean', clean(g), gsum(g));
         await page.evaluate(() => undoLast());
         const now = await soupOf(page, id);
         check('  ... and one Undo takes the whole arc back', now.length === before.length && now.every((v, i) => v === before[i]));
+      }
+    }
+
+
+    console.log('\n--- 2d3. a hand-drawn S, with a real pointer, is cut where it was drawn ---');
+    {
+      const ctx = csgContext();
+      const S_PTS = Array.from({ length: 121 }, (_, i) => { const t = i / 120; return [cx + 50 * (t - 0.5), top, cz + 8 * Math.sin(2 * Math.PI * t)]; });
+      let drawnLen = 0;
+      for (let i = 1; i < S_PTS.length; i++) drawnLen += Math.hypot(...sub3(S_PTS[i], S_PTS[i - 1]));
+      const ideal = S_PTS.map(q => ({ p: q, n: [0, 1, 0] }));
+      for (const c of [
+        { label: 'ball-nose', ctl: { blade: 'ball', a: 2, depth: 1 }, hw: Math.sqrt(3) },
+        { label: 'flat shave', ctl: { blade: 'flat', a: 4, b: 6, depth: 1 }, hw: 2 },
+        { label: 'V-groove', ctl: { blade: 'vee', a: 90, b: 6, depth: 1 }, hw: 1 }
+      ]) {
+        await setControls(page, Object.assign({ roll: 0 }, c.ctl));
+        const before = await soupOf(page, id);
+        const sp = await toScreen(page, S_PTS);
+        await page.evaluate(() => { window.nsoCarveLast = null; });
+        await page.mouse.move(sp[0].x, sp[0].y);
+        await page.mouse.down();
+        for (const q of sp.slice(1)) await page.mouse.move(q.x, q.y);
+        await page.mouse.up();
+        const r = await settle(page);
+        check(c.label + ': a ' + drawnLen.toFixed(0) + ' mm S cuts one groove', r && r.ok && r.stroke, r ? (r.status || r.reason) : 'no result');
+        if (!r || !r.ok) continue;
+        check('  ... as long as it was drawn, not straightened into a Z or a V (' + r.segments + ' segments)',
+          r.segments > 8 && near(r.length, drawnLen, 0.03 * drawnLen), r.length.toFixed(1) + ' mm vs ' + drawnLen.toFixed(1));
+        const soup = Float32Array.from(await soupOf(page, id));
+        const g = gate(soup, 'drag_S_' + c.ctl.blade);
+        check('  ... the piece gates clean', clean(g), gsum(g));
+        /* a screen pixel here is ~0.1-0.2 mm, so the drawing itself is only that exact */
+        const fit = grooveFit(ctx, soup, ideal, {}, c.ctl.depth, c.hw);
+        check('  ... and the groove is where the pointer went: floor and width within 0.25 mm',
+          fit.n > 20 && fit.miss === 0 && fit.floor <= 0.25 && fit.edge <= 0.25,
+          'floor ' + fit.floor.toFixed(3) + ', width ' + fit.edge.toFixed(3) + ' (' + fit.n + ' edges read, ' + fit.miss + ' missed)');
+        await page.evaluate(() => undoLast());
+        const now = await soupOf(page, id);
+        check('  ... and one Undo takes it back', now.length === before.length && now.every((v, k) => v === before[k]));
       }
     }
 
@@ -465,6 +692,55 @@ async function part2() {
       check('  ... and the tray gates clean', clean(g), gsum(g));
     }
 
+
+    console.log('\n--- 2g. a long curved line across a curved face is cut, not refused ---');
+    {
+      const ctx = csgContext();
+      const idS = await loadSTL(page, path.join(ROOT, 'fixtures', 'fixture_sphere_curved.stl'));
+      await selectModel(page, idS);
+      const Bs = await worldBox(page, idS);
+      const C0 = [0, 1, 2].map(k => (Bs.min[k] + Bs.max[k]) / 2), Rs = (Bs.max[1] - Bs.min[1]) / 2;
+      await lookDown(page, [C0[0], Bs.max[1], C0[2]], 60);
+      /* an S laid on the sphere's upper cap, 18 mm across and swinging 3 mm: it runs 52 degrees down the cap, so the
+         surface turns ~50 degrees along it - twice what one fixed blade angle allowed */
+      const onSphere = (u, v) => { const th = Math.hypot(u, v) / Rs, ph = Math.atan2(v, u);
+        const n = [Math.sin(th) * Math.cos(ph), Math.cos(th), Math.sin(th) * Math.sin(ph)];
+        return { p: [C0[0] + Rs * n[0], C0[1] + Rs * n[1], C0[2] + Rs * n[2]], n }; };
+      const ideal = Array.from({ length: 121 }, (_, i) => { const t = i / 120; return onSphere(18 * (t - 0.5), 3 * Math.sin(2 * Math.PI * t)); });
+      let drawnLen = 0;
+      for (let i = 1; i < ideal.length; i++) drawnLen += Math.hypot(...sub3(ideal[i].p, ideal[i - 1].p));
+      await setControls(page, { blade: 'ball', a: 0.8, depth: 0.5, roll: 0 });
+      const before = await soupOf(page, idS);
+      const sp = await toScreen(page, ideal.map(m => m.p));
+      check('the line lies on the canvas', sp.every(q => q.canvas), sp.filter(q => !q.canvas).length + ' points off it');
+      await page.evaluate(() => { window.nsoCarveLast = null; });
+      await page.mouse.move(sp[0].x, sp[0].y);
+      await page.mouse.down();
+      for (const q of sp.slice(1)) await page.mouse.move(q.x, q.y);
+      await page.mouse.up();
+      const r = await settle(page);
+      check('a ' + drawnLen.toFixed(0) + ' mm S across a sphere cuts one groove', r && r.ok && r.stroke, r ? (r.status || r.reason) : 'no result');
+      if (r && r.ok) {
+        check('  ... following the line (' + r.segments + ' segments)', r.segments > 6 && near(r.length, drawnLen, 0.05 * drawnLen),
+          r.length.toFixed(1) + ' mm vs ' + drawnLen.toFixed(1));
+        const soup = Float32Array.from(await soupOf(page, idS));
+        const g = gate(soup, 'drag_sphere_S');
+        check('  ... the sphere gates clean', clean(g), gsum(g));
+        /* the floor lies the depth below the surface along the line: on a faceted sphere, within a facet's sag */
+        let worst = 0, n = 0;
+        for (let i = 8; i < ideal.length - 8; i += 4) {
+          const m = ideal[i];
+          const h = ctx.NSO_rayHitsSoup(soup, ...add3(m.p, mul3(m.n, 3)), ...mul3(m.n, -1));
+          if (h.length) { worst = Math.max(worst, Math.abs(h[0] - 3 - 0.5)); n++; }
+        }
+        check('  ... and its floor is 0.5 mm under the surface all along the line (within 0.15 mm)', n > 20 && worst <= 0.15,
+          'worst ' + worst.toFixed(3) + ' mm over ' + n + ' points');
+        await page.evaluate(() => undoLast());
+        const now = await soupOf(page, idS);
+        check('  ... and one Undo takes it back', now.length === before.length && now.every((v, k) => v === before[k]));
+      }
+    }
+
     const errs = logs.filter(l => /pageerror/.test(l));
     check('no page errors anywhere in the run', errs.length === 0, errs.slice(0, 2).join(' | ') || 'none');
   });
@@ -472,6 +748,7 @@ async function part2() {
 
 (async () => {
   part1();
+  await part1d();
   await part2();
   fs.rmSync(tmp, { recursive: true, force: true });
   console.log('\n' + (fails ? fails + ' FAILED' : 'all carve:drag gates held'));

@@ -649,25 +649,55 @@ depth, one boolean, one Undo (`carveReplace`, "Undo: Carve reverted").
 `npm run carve:drag` writes a screenshot of three 20 mm drags (ball-nose, flat
 shave, V-groove) to tools/carve-out/carve-drag.png, which is git-ignored.
 
-**What the groove is.** `NSO_Carve.planStroke` builds it from two primitives
-the repo already proves:
+**The controls.** Depth, the blade's one or two shape fields (Radius; Width and
+Length; Angle and Length) and Roll are sliders, each with its value said beside
+its label (Hollow's wall is laid out the same way). They keep the ids the number
+boxes had, so `.value` and `input` work as before; a range cannot be typed past
+its ends, so each carries the box's old min and max (depth steps 0.05 mm).
 
-- the blade's section - its silhouette down its own sweep axis (`grooveSection`:
-  the slab's rectangle, the wedge's triangle, the U of the ball-nose meridian) -
-  swept along the stroke's tip line by `NSO_PathSweep.sweep`, the mitred sweep
-  Bend and the support branches use, so the section perpendicular to the stroke
-  is the blade's section exactly inside every segment;
-- the blade solid itself, placed at the press and the release from the sweep's
-  own end frames, so it meets the sweep's end ring bit for bit.
+**What the groove is.** `NSO_Carve.planStroke` takes the drag as drawn and never
+re-plans it from fewer points:
 
-For a straight stroke the union is exactly the Minkowski sum of the blade with
-the segment: a ball-nose groove gets round ends, a slab or wedge its own length
-of overrun. The pointer samples are straightened (RDP at 0.02 mm), spaced to at
-least the blade's half-width so a mitre has room to turn, and a stroke turning
-through more than 120° is cut into runs overlapping by one segment and unioned.
-The blade is held at one orientation - the mean surface normal under the stroke -
-and a stroke whose normals spread past 25° has crossed an edge and is refused in
-words.
+1. *The line.* The pointer samples are resampled at an even spacing, smoothed (a
+   moving average over a fraction of the groove's width, twice, reflected at the
+   ends so the press and release stay put) and simplified to within 0.03 mm
+   (RDP). A straight drag is one segment. The pointer itself is read densely: the
+   app asks for every coalesced position and re-reads the surface every 3 px
+   between reports, so a fast drag is as dense as a slow one.
+2. *The frames.* The blade follows the surface: the outward axis at each vertex
+   is the surface normal there, so a groove across a sphere or cylinder lies in
+   the surface rather than cutting a chord through it. What is refused is an
+   **edge**: two neighbouring samples whose normals differ by more than 35° are
+   on different faces ("the stroke crosses onto another face"). (A single blade
+   orientation, with the surface allowed to turn 25° from it, is why a long
+   curved line on a curved face used to be refused.)
+3. *The solid.* The blade's section - its silhouette down its own sweep axis
+   (`grooveSection`: the slab's rectangle, the wedge's triangle, the U of the
+   ball-nose meridian), cut off 1 mm above the surface, since the shank above
+   that cuts nothing - is placed in a ring at every vertex, in the plane that
+   bisects the two segments and stretched by 1/cos(turn/2) (the miter), and
+   neighbouring rings are joined by quads: **one watertight skin** (`loftStroke`).
+   There is no union of near-parallel faces in it, so it gates clean on
+   mesh_validate.py; the old way, a prism per segment, did not (a flat shave along
+   an S failed the gate with 22 piercing triangles). A slab or wedge's overrun at
+   each end is two collinear segments added to the skin; a ball-nose's end is its
+   blade, standing in the skin's own end ring.
+4. *When the skin does not fit.* A bend tighter than the groove is wide folds a
+   miter over itself. Then the path is smoothed harder, step by step, **but only
+   while it stays within 0.15 mm of the gently smoothed line** - hand shake is
+   that small and goes; a hairpin is not and stays. If it still does not fit, the
+   groove is built as a union of a prism per segment and a *joint* at every bend
+   (the section revolved about the vertex's outward axis; for a ball-nose, the
+   blade itself). That has no limit on how tight a bend can be, and is the one
+   place the output can carry glancing faces - which the kernel resolves and the
+   weld mostly absorbs, but a mesh gate may not pass. `planned.mode` says which
+   was used (`skin` or `union`); the union is also kept as `planned.piecesAlt`,
+   and the app retries with it if the kernel rejects the skin.
+
+What used to happen, for the record: the sweep was NSO_PathSweep's mitred one on
+a path spaced to at least the blade's half-width, and when it refused a turn the
+planner tried again from a path 2x, 4x, 8x coarser. A U 5 mm wide came back as a
+V, an S as a backwards Z, and a V-groove's U as one straight segment.
 
 **The wall gate** (`NSO_Carve.strokeWallGate`) runs before the kernel loads and
 refuses, it does not clip. Floor: **two nozzle widths** (0.8 mm at the 0.4 mm
@@ -675,8 +705,10 @@ nozzle), stricter than a punch's 0.42 mm one-line floor. Every 0.5 mm along the
 stroke it asks NSO_Thickness's `strokeGate` what the cut leaves under the tip,
 and looks out of the groove from each in-material vertex and edge midpoint of the
 section along its own normal, so a slab run along a block's edge is refused for
-the side wall it would leave, not just the floor. The ends' hemispheres and
-overruns are not probed separately.
+the side wall it would leave, not just the floor. A side ray whose first hit is a
+face it meets at a glancing angle (|cos| under 0.5) is the groove's own mouth on a
+curved face, the surface falling away under the lip, and is not a wall. The ends'
+hemispheres and overruns are not probed separately.
 
 **Measured** - `npm run carve:drag` (tools/nso_carve_drag_check.js): a real
 pointer drag of 20 mm on fixtures/box_hull_80x40x20-2.stl with each blade; the
@@ -686,3 +718,13 @@ section to 0.0000 mm both ways (the ball-nose floor is the r 2 circle to
 restores it vertex for vertex. A still click still punches; a 126° arc drag is one
 groove; a 1.5 mm groove into fixtures/box_open.stl's 2 mm floor is refused in
 words and the piece is untouched, 1.15 mm (leaves 0.85) is cut.
+
+**Curves, measured** (`carve:drag`, part 1d, through the real kernel; tools/nso_carve_drag_check.js):
+a U, an S (steady, with a 0.2 mm pixel grid, and with 0.2 mm of hand shake) and a
+190 mm arc, each with every blade, on a plane and on spheres of radius 30 and
+50: all planned as one skin, as long as they were drawn (within 3%), cut to a
+valid solid, and the groove's floor and width at the surface within 0.15 mm of
+where it was drawn (0.03-0.12 mm measured; 0.04 mm of that is the measuring
+step). A U of 1.2 mm radius under a 4 mm blade is planned and cuts to a valid
+solid (as a union). A real pointer drags an S with each blade on the block, and
+across a sphere, as one groove, gating clean, floor within 0.25 mm, one Undo.

@@ -728,56 +728,57 @@
      6. THE STROKE - press, drag, release = one continuous groove
 
      A click punches the blade in once (plan(), above). A drag sweeps it. The
-     groove is the blade dragged along the stroke, built from two primitives
-     this repo already proves:
+     groove is the blade dragged along the stroke, and it is built so that
+     NOTHING about the stroke's shape can make the sweep fail:
 
-       - the blade's SECTION, swept along the stroke's tip line by
-         NSO_PathSweep.sweep - the same mitred sweep Bend and the support
-         branches use. Every wall quad lies in a plane containing its
-         segment, so the section perpendicular to the stroke is the blade's
-         section exactly, everywhere inside a segment (nso_path_sweep.js,
-         "WHY THIS FILE EXISTS");
-       - the blade SOLID itself, placed at the press and at the release.
+       - the stroke is smoothed a little (a hand and a pixel grid are not a
+         line), then simplified to the fewest straight segments that stay
+         within STROKE_RDP_MM of it. It is never coarsened to fit the tool;
+       - each segment is a straight PRISM: the blade's section (its silhouette
+         seen down its own sweep axis - the rectangle of the slab, the triangle
+         of the wedge, the U of the ball-nose) extruded along the segment. A
+         prism is a valid closed solid at any length, however short and
+         however the stroke turns beside it;
+       - each vertex between two segments gets a JOINT: the same section
+         revolved about the vertex's outward axis (for the ball-nose that is
+         the blade itself, a ball). It fills the wedge the two prisms leave on
+         the outside of a turn with a round join, at ANY turn and any curve
+         radius - a U tighter than the blade is wide, a hairpin, a spiral;
+       - and the blade itself stands at the press and at the release, which
+         is what gives a ball-nose groove its round ends and a slab or a wedge
+         its own length of overrun, because that is where the blade was.
+     The app unions them in the kernel and subtracts: a sweep with round joins
+     is exactly the union of its parts, and a union has no failure mode that a
+     path has (the old mitred NSO_PathSweep refused a turn tighter than the
+     blade, and the retry that gave it a coarser path is what made U's into
+     V's and S's into backwards Z's).
 
-     Why those two and why they are enough. The section used here is the
-     blade's silhouette seen down its own sweep axis (local Z): the rectangle
-     of the slab, the triangle of the wedge, and for the ball-nose the U its
-     meridian makes - the revolve's j = 0 and j = seg/2 spokes lie in the
-     z = 0 plane, so the faceted ball's silhouette IS that polygon, vertex for
-     vertex. For a straight stroke, blade-at-press U section-swept U
-     blade-at-release is then exactly the Minkowski sum of the blade with the
-     segment - the solid a real tool dragged that far removes. A ball-nose
-     groove gets its round ends from the ball; a slab or a wedge gets the
-     blade's own length of overrun, because that is where the blade was.
-     The end blades share the sweep's first and last rings bit for bit (both
-     are tip + X*x + Y*y from the SAME frame vectors), so the union in the
-     kernel meets a coincident section, not a near-miss.
-
-     The blade is held at ONE orientation for the whole stroke - outward along
-     the mean of the surface normals under it - the way a hand holds a gouge.
-     A stroke whose normals spread wider than STROKE_MAX_SPREAD_DEG has
-     crossed an edge onto another face, and that is refused in words: a
+     The blade FOLLOWS THE SURFACE. Each segment's outward axis is the mean of
+     the surface normals at its two ends, each joint's the normal at its
+     vertex - so a groove drawn across a sphere or a cylinder lies in the
+     surface instead of cutting a chord through it. (One orientation for the
+     whole stroke, with the surface allowed to turn 25 degrees from it, is why
+     a long curved line on a curved face used to be refused.) What is still
+     refused is a stroke that crosses an EDGE: two neighbouring samples whose
+     normals differ by more than STROKE_EDGE_DEG are on different faces, and a
      groove that bends round a box edge is two strokes, not one.
 
-     A stroke that winds round more than STROKE_CHUNK_TURN_DEG is split into
-     runs that overlap by one segment, each swept on its own and unioned. A
-     run whose tangent never turns through a half-turn advances monotonically
-     along one direction, so it cannot fold back across itself; the overlap
-     carries each mitred joint whole into one of the two runs.
+     The prisms and joints of a straight stroke are exactly what the old sweep
+     was: section area x length, one segment, the end blades the same.
      ============================================================ */
-  var STROKE_MAX_SPREAD_DEG = 25;
-  var STROKE_CHUNK_TURN_DEG = 120;
-  var STROKE_RDP_MM = 0.02;            /* straightness: a hand-held line is a line */
+  var STROKE_EDGE_DEG = 35;            /* neighbouring samples further apart than this are on two faces */
+  var STROKE_RDP_MM = 0.03;            /* how far the simplified line may stray from the smoothed one */
+  var STROKE_MAX_SEGS = 400;           /* the cost cap: the tolerance grows until the line fits in this many */
+  var STROKE_JOINT_SEG = 32;           /* facets round a joint */
+  var STROKE_JOINT_MIN_DEG = 0.25;     /* a vertex that turns less than this needs no joint */
+  var STROKE_MAX_SAMPLES = 1500;       /* resampling density cap along a long stroke */
   var STROKE_STATION_MM = 0.5;         /* wall-gate stations along the stroke */
-
-  function pathSweepLib() {
-    if (root && root.NSO_PathSweep) return root.NSO_PathSweep;
-    if (typeof NSO_PathSweep !== 'undefined') return NSO_PathSweep;   // eslint-disable-line no-undef
-    if (typeof require === 'function') {
-      try { return require('./nso_path_sweep.js'); } catch (e) { return null; }
-    }
-    return null;
-  }
+  var LOFT_MAX_TURN = 120 * Math.PI / 180;   /* a miter stretches the section by 1/cos(turn/2): 2x at this */
+  var GROOVE_ABOVE_MM = 1;             /* how far above the surface the groove solid reaches (the blade's shank is taller, and needs
+                                          to be wider than a bend can fit, for nothing the cut touches) */
+  var STROKE_DEV_MM = 0.15;            /* how far smoothing a shaky line harder may move it from the gently smoothed one */
+  var STROKE_SMOOTH_STEPS = [1, 1.7, 2.9, 4.9, 8.4];   /* the window, in multiples of the gentle one, tried in turn */
+  var LOFT_MIN_ADVANCE = 1e-4;         /* a rail must move this far forward along its segment (mm) */
 
   /* The blade's section seen down its sweep axis, in blade-local (x, y):
      CCW, tip at y = 0, shank end at y = height - the same numbers build()
@@ -814,90 +815,158 @@
     return { ok: true, blade: blade, profile: poly, normals: normals, halfWidth: hw, height: blade.height };
   }
 
-  /* Ramer-Douglas-Peucker on a 3D polyline: drop points within tol of the
-     chord. Keeps the two ends. */
-  function rdp(pts, tol) {
-    if (pts.length < 3) return pts.slice();
-    var keep = new Uint8Array(pts.length), stack = [[0, pts.length - 1]];
+  /* The stroke as the planner reads it, in four steps - every one of them
+     keeps the line the user drew and only takes the noise out of it.
+
+       1. resample at an even spacing along the drag, positions and normals
+          together, so the next step's window means the same millimetres
+          everywhere and a fast drag (few samples) is no different from a slow
+          one (many);
+       2. smooth: a moving average over a few tenths of a millimetre, twice,
+          with the window tapering to nothing at both ends so the press and the
+          release stay exactly where they were. A hand-held mouse over a pixel
+          grid draws a staircase; this is what turns it back into a curve. The
+          window is a fraction of the blade's half-width (a tool cannot cut
+          what is finer than itself) and is capped at 1 mm, which on a 3 mm
+          radius curve moves the line by under 0.06 mm;
+       3. simplify (Ramer-Douglas-Peucker) to within STROKE_RDP_MM: a straight
+          drag is one segment, a curve as few as hold the tolerance;
+       4. the normals, smoothed with the positions, are the blade's outward
+          axis along the line. */
+  function resample(pts, ns, h) {
+    var cum = [0], i;
+    for (i = 1; i < pts.length; i++) cum.push(cum[i - 1] + len(sub(pts[i], pts[i - 1])));
+    var L = cum[cum.length - 1], n = Math.max(1, Math.ceil(L / h)), P = [], N = [], j = 0, k;
+    for (k = 0; k <= n; k++) {
+      var d = (k === n) ? L : L * k / n;
+      while (j < pts.length - 2 && cum[j + 1] < d) j++;
+      var seg = cum[j + 1] - cum[j], t = seg > EPS ? (d - cum[j]) / seg : 0;
+      t = Math.max(0, Math.min(1, t));
+      P.push(add(pts[j], mul(sub(pts[j + 1], pts[j]), t)));
+      var nn = norm(add(mul(ns[j], 1 - t), mul(ns[j + 1], t)));
+      N.push(nn || ns[j]);
+    }
+    return { P: P, N: N, length: L, step: L / n };
+  }
+
+  /* One box-filter pass over positions and normals, window k samples each
+     side. Past either end the line is continued by reflecting it through the
+     end point (the normals by mirroring them), which leaves the first and last
+     point exactly where they were AND smooths the stretch beside them - the
+     press and the release are where a hand is least steady, and they are what
+     the end blades take their direction from. */
+  function boxPass(P, N, k) {
+    var n = P.length, outP = [], outN = [], i, j;
+    k = Math.max(0, Math.min(k, n - 1));
+    for (i = 0; i < n; i++) {
+      var sp = [0, 0, 0], sn = [0, 0, 0];
+      for (j = i - k; j <= i + k; j++) {
+        var p, q;
+        if (j < 0) { p = sub(mul(P[0], 2), P[-j]); q = N[-j]; }
+        else if (j > n - 1) { p = sub(mul(P[n - 1], 2), P[2 * (n - 1) - j]); q = N[2 * (n - 1) - j]; }
+        else { p = P[j]; q = N[j]; }
+        sp = add(sp, p); sn = add(sn, q);
+      }
+      outP.push(mul(sp, 1 / (2 * k + 1)));
+      outN.push(norm(sn) || N[i]);
+    }
+    return { P: outP, N: outN };
+  }
+
+  /* RDP on the points but remembering which survive, so the normals can be
+     read at the same indices. */
+  function rdpIndices(pts, tol) {
+    var keepIdx = [], keep = new Uint8Array(pts.length), stack = [[0, pts.length - 1]], i;
     keep[0] = keep[pts.length - 1] = 1;
     while (stack.length) {
-      var se = stack.pop(), s = se[0], e = se[1];
-      var d = sub(pts[e], pts[s]), L = len(d), worst = -1, at = -1, i;
-      for (i = s + 1; i < e; i++) {
-        var w = sub(pts[i], pts[s]);
+      var se = stack.pop(), s0 = se[0], e0 = se[1];
+      var d = sub(pts[e0], pts[s0]), L = len(d), worst = -1, at = -1;
+      for (i = s0 + 1; i < e0; i++) {
+        var w = sub(pts[i], pts[s0]);
         var dist = (L > EPS) ? len(cross(w, d)) / L : len(w);
         if (dist > worst) { worst = dist; at = i; }
       }
-      if (worst > tol && at > 0) { keep[at] = 1; stack.push([s, at], [at, e]); }
+      if (worst > tol && at > 0) { keep[at] = 1; stack.push([s0, at], [at, e0]); }
     }
-    return pts.filter(function (_, i) { return keep[i]; });
+    for (i = 0; i < pts.length; i++) if (keep[i]) keepIdx.push(i);
+    return keepIdx;
   }
 
-  /* No segment shorter than `step`: a mitre needs room for the section to
-     turn in, and pointer samples a pixel apart give it none. The release
-     point always survives - it is where the user let go. */
-  function spaceOut(pts, step) {
-    var out = [pts[0]], i;
-    for (i = 1; i < pts.length - 1; i++) {
-      if (len(sub(pts[i], out[out.length - 1])) >= step) out.push(pts[i]);
+  /* A slab or a wedge points the way its first and last segments do, so those
+     two must be long enough to say where the stroke is heading: drop the
+     vertices closer than `reach` to either end (the line keeps its ends). A
+     ball-nose has no heading and asks for none. */
+  function trimEnds(idx, P, reach) {
+    if (!(reach > 0) || idx.length < 3) return idx;
+    var cum = [0], i;
+    for (i = 1; i < P.length; i++) cum.push(cum[i - 1] + len(sub(P[i], P[i - 1])));
+    var total = cum[cum.length - 1], out = [idx[0]];
+    if (total <= 2 * reach) return [idx[0], idx[idx.length - 1]];
+    for (i = 1; i < idx.length - 1; i++) {
+      if (cum[idx[i]] >= reach && total - cum[idx[i]] >= reach) out.push(idx[i]);
     }
-    var last = pts[pts.length - 1];
-    if (out.length > 1 && len(sub(last, out[out.length - 1])) < step) out[out.length - 1] = last;
-    else out.push(last);
+    out.push(idx[idx.length - 1]);
     return out;
   }
 
   /* samples [{ point, normal }] (world, off the drag) -> the stroke's surface
-     line, its one outward direction, and its length */
+     line with the surface's outward normal at every vertex of it. */
   function strokePath(samples, opts) {
     opts = opts || {};
-    var pts = [], nsum = [0, 0, 0], ns = [], i;
+    var pts = [], ns = [], i;
     for (i = 0; i < (samples || []).length; i++) {
       var s = samples[i], p = s && s.point, nn = s && s.normal && norm(s.normal);
       if (!p || !isFinite(p[0]) || !isFinite(p[1]) || !isFinite(p[2]) || !nn) continue;
       if (pts.length && len(sub(p, pts[pts.length - 1])) < 1e-6) continue;
-      pts.push([+p[0], +p[1], +p[2]]); ns.push(nn); nsum = add(nsum, nn);
+      pts.push([+p[0], +p[1], +p[2]]); ns.push(nn);
     }
     if (pts.length < 2) return { ok: false, reason: 'the stroke has fewer than two points on the piece' };
-    var Y = norm(nsum);
-    if (!Y) return { ok: false, reason: 'the surface normals under the stroke cancel out - it crosses a thin edge' };
-    var spread = 0, spreadAt = 0, along = 0;
-    for (i = 0; i < ns.length; i++) {
-      if (i) along += len(sub(pts[i], pts[i - 1]));
-      var ang = Math.acos(Math.max(-1, Math.min(1, dot(ns[i], Y)))) * 180 / Math.PI;
-      if (ang > spread) { spread = ang; spreadAt = along; }
+
+    /* An edge: two neighbouring samples on different faces. */
+    var along = 0, maxStep = 0, stepAt = 0, stepOver = 0;
+    for (i = 1; i < pts.length; i++) {
+      var gap = len(sub(pts[i], pts[i - 1]));
+      along += gap;
+      var ang = Math.acos(Math.max(-1, Math.min(1, dot(ns[i], ns[i - 1])))) * 180 / Math.PI;
+      if (ang > maxStep) { maxStep = ang; stepAt = along; stepOver = gap; }
     }
-    if (spread > STROKE_MAX_SPREAD_DEG) {
+    if (maxStep > STROKE_EDGE_DEG) {
       return {
-        ok: false, spreadDeg: spread,
-        reason: 'the stroke crosses onto another face (the surface turns ' + spread.toFixed(0) +
-          '° away from the stroke\'s mean at ' + spreadAt.toFixed(1) + ' mm along; one stroke follows one face, ' +
-          'up to ' + STROKE_MAX_SPREAD_DEG + '°) - let go before the edge and stroke the next face on its own'
+        ok: false, spreadDeg: maxStep,
+        reason: 'the stroke crosses onto another face (the surface turns ' + maxStep.toFixed(0) + '° within ' +
+          stepOver.toFixed(1) + ' mm at ' + stepAt.toFixed(1) + ' mm along; one stroke follows one smooth surface, ' +
+          'up to ' + STROKE_EDGE_DEG + '° between neighbouring points) - let go before the edge and stroke the next face on its own'
       };
     }
-    var step = (opts.step > 0) ? opts.step : 0.5;
-    var line = spaceOut(rdp(pts, STROKE_RDP_MM), step);
-    var L = 0;
-    for (i = 1; i < line.length; i++) L += len(sub(line[i], line[i - 1]));
-    return { ok: true, surface: line, outward: Y, length: L, spreadDeg: spread, raw: pts.length };
-  }
 
-  /* Cut a path into runs whose tangent turns through at most maxTurn, each
-     run overlapping the next by one segment. Returns arrays of indices. */
-  function chunkRuns(pts, maxTurnRad) {
-    if (pts.length < 3) return [[0, pts.length - 1]];
-    var runs = [], start = 0, turn = 0, i;
-    for (i = 1; i < pts.length - 1; i++) {
-      var a = norm(sub(pts[i], pts[i - 1])), b = norm(sub(pts[i + 1], pts[i]));
-      var t = Math.atan2(len(cross(a, b)), dot(a, b));
-      if (turn + t > maxTurnRad && i - start >= 1) {
-        runs.push([start, i]);
-        start = i - 1;
-        turn = Math.atan2(len(cross(norm(sub(pts[i], pts[start])), b)), dot(norm(sub(pts[i], pts[start])), b));
-      } else turn += t;
+    var raw = pts.length, total = along;
+    var h = Math.max(0.1, total / STROKE_MAX_SAMPLES);
+    var rs = resample(pts, ns, h);
+    var hw = (opts.halfWidth > 0) ? opts.halfWidth : 1;
+    var smoothMm = Math.min(1, Math.max(0.15, 0.2 * hw)) * ((opts.smooth > 0) ? opts.smooth : 1);
+    var k = Math.round(smoothMm / rs.step);
+    var P = rs.P, N = rs.N;
+    if (k >= 1) {
+      var a = boxPass(P, N, k), b = boxPass(a.P, a.N, k);
+      P = b.P; N = b.N;
     }
-    runs.push([start, pts.length - 1]);
-    return runs;
+
+    var tol = STROKE_RDP_MM, idx = rdpIndices(P, tol);
+    while (idx.length - 1 > STROKE_MAX_SEGS) { tol *= 1.5; idx = rdpIndices(P, tol); }
+    idx = trimEnds(idx, P, opts.endReach);
+    var line = [], nrm = [], L = 0;
+    for (i = 0; i < idx.length; i++) { line.push(P[idx[i]]); nrm.push(N[idx[i]]); }
+    for (i = 1; i < line.length; i++) L += len(sub(line[i], line[i - 1]));
+
+    var sum = [0, 0, 0], spread = 0;
+    for (i = 0; i < nrm.length; i++) sum = add(sum, nrm[i]);
+    var Y = norm(sum);
+    if (!Y) return { ok: false, reason: 'the surface normals under the stroke cancel out - it crosses a thin edge' };
+    for (i = 0; i < nrm.length; i++) {
+      spread = Math.max(spread, Math.acos(Math.max(-1, Math.min(1, dot(nrm[i], Y)))) * 180 / Math.PI);
+    }
+    return { ok: true, surface: line, normals: nrm, outward: Y, length: L, spreadDeg: spread, raw: raw, tolerance: tol,
+             smoothed: P, smoothMm: smoothMm };
   }
 
   /* the blade at a sweep end, in world, from that end's own frame vectors */
@@ -906,13 +975,197 @@
     return { matrix: m, soup: transformSoup(blade.soup, m) };
   }
 
+  /* The groove as ONE skin: the section placed in a ring at every vertex of
+     the line, neighbouring rings joined by quads. Because a ring is shared by
+     the segment before it and the segment after it, the skin is a single
+     watertight solid with no two faces meeting at a glancing angle - which is
+     what a union of separate prisms is full of at every gentle bend, and what
+     the weld at the canonical checker's 1e-4 then collapses into open and
+     non-manifold edges (measured: a flat shave along an S failed the gate with
+     22 piercing triangles, a V-groove with 18 non-manifold edges).
+
+     A ring at an interior vertex lies in the plane that bisects the two
+     segments, with the section stretched sideways by 1/cos(turn/2): the miter,
+     which keeps every wall of the groove the section's own width apart from
+     the line on both sides of the bend. Its up axis is the surface normal AT
+     that vertex, so the groove follows the surface.
+
+     The skin is only a solid while the miter fits: on the inside of a bend
+     tighter than the section is wide, a rail runs backwards ("the miter has
+     eaten the segment") and the skin folds over itself. That is detected here,
+     per rail and per segment, and the caller builds the groove from prisms and
+     joints instead - correct at any curve, merely less tidy. */
+  function loftStroke(V, NV, profile, depth) {
+    var m = V.length - 1, n = profile.length, i, k;
+    var U = [];
+    for (i = 0; i < m; i++) {
+      var uu = norm(sub(V[i + 1], V[i]));
+      if (!uu) return { ok: false, reason: 'two points of the line coincide', at: i };
+      U.push(uu);
+    }
+    var frames = [], rings = [];
+    for (i = 0; i <= m; i++) {
+      var t, scale = 1, turn = 0;
+      if (i === 0) t = U[0];
+      else if (i === m) t = U[m - 1];
+      else {
+        turn = Math.acos(Math.max(-1, Math.min(1, dot(U[i - 1], U[i]))));
+        t = norm(add(U[i - 1], U[i]));
+        if (!t || turn > LOFT_MAX_TURN) return { ok: false, reason: 'the line turns ' + (turn * 180 / Math.PI).toFixed(0) + '° at point ' + i, at: i };
+        scale = 1 / Math.cos(turn / 2);
+      }
+      var Yq = norm(sub(NV[i], mul(t, dot(NV[i], t))));
+      if (!Yq) return { ok: false, reason: 'the line runs straight into the surface at point ' + i, at: i };
+      var Xq = norm(cross(Yq, t));
+      var tip = sub(V[i], mul(Yq, depth));
+      frames.push({ X: Xq, Y: Yq, t: t, tip: tip });
+      var ring = [];
+      for (k = 0; k < n; k++) ring.push(add(tip, add(mul(Xq, profile[k][0] * scale), mul(Yq, profile[k][1]))));
+      rings.push(ring);
+    }
+    /* every rail must advance along its segment */
+    for (i = 0; i < m; i++) {
+      for (k = 0; k < n; k++) {
+        if (dot(sub(rings[i + 1][k], rings[i][k]), U[i]) <= LOFT_MIN_ADVANCE) {
+          return { ok: false, reason: 'the miter eats segment ' + i + ' on the groove\'s ' + (profile[k][0] < 0 ? 'left' : 'right') + ' wall', at: i };
+        }
+      }
+    }
+    var out = [];
+    function tri(a, b, c) { out.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]); }
+    for (i = 0; i < m; i++) {
+      for (k = 0; k < n; k++) {
+        var k1 = (k + 1) % n, a0 = rings[i][k], b0 = rings[i][k1], b1 = rings[i + 1][k1], a1 = rings[i + 1][k];
+        tri(a0, b0, b1); tri(a0, b1, a1);
+      }
+    }
+    for (k = 1; k < n - 1; k++) {
+      tri(rings[m][0], rings[m][k], rings[m][k + 1]);
+      tri(rings[0][0], rings[0][k + 1], rings[0][k]);
+    }
+    return { ok: true, tris: Float32Array.from(out), frames: frames, rings: rings };
+  }
+
+  /* A convex polygon (CCW, [[x, y], ...]) cut off above y = yMax. */
+  function clipProfile(poly, yMax) {
+    var out = [], n = poly.length, i;
+    for (i = 0; i < n; i++) {
+      var a = poly[i], b = poly[(i + 1) % n], ain = a[1] <= yMax, bin = b[1] <= yMax;
+      if (ain) out.push(a);
+      if (ain !== bin) {
+        var t = (yMax - a[1]) / (b[1] - a[1]);
+        out.push([a[0] + t * (b[0] - a[0]), yMax]);
+      }
+    }
+    /* a cut that lands on an existing vertex must not leave two of them */
+    var clean = [];
+    for (i = 0; i < out.length; i++) {
+      var prev = clean.length ? clean[clean.length - 1] : null;
+      if (prev && Math.hypot(out[i][0] - prev[0], out[i][1] - prev[1]) < 1e-9) continue;
+      clean.push(out[i]);
+    }
+    while (clean.length > 1 && Math.hypot(clean[0][0] - clean[clean.length - 1][0], clean[0][1] - clean[clean.length - 1][1]) < 1e-9) clean.pop();
+    return clean;
+  }
+
+  /* How wide the groove really is: the widest the section gets at or below the
+     surface (y <= depth). A wedge 8 mm tall is 16 mm across its shank but
+     1 mm either side of its path when it cuts 1 mm deep, and it is the
+     second that the smoothing and the end headings are sized to. */
+  function cutHalfWidth(profile, depth) {
+    var n = profile.length, best = 0, i;
+    for (i = 0; i < n; i++) {
+      var a = profile[i], b = profile[(i + 1) % n];
+      if (a[1] <= depth) best = Math.max(best, Math.abs(a[0]));
+      if ((a[1] - depth) * (b[1] - depth) < 0) {
+        var t = (depth - a[1]) / (b[1] - a[1]);
+        best = Math.max(best, Math.abs(a[0] + t * (b[0] - a[0])));
+      }
+    }
+    return best;
+  }
+
+  /* Which way the stroke is heading at one end, read over `reach` mm of it
+     rather than over its first segment, which can be a fraction of a
+     millimetre long and point anywhere a pixel's noise says. Forward along the
+     stroke at both ends. */
+  function endHeading(V, atStart, reach) {
+    var m = V.length - 1, walked = 0, i, far;
+    if (atStart) {
+      far = V[m];
+      for (i = 1; i <= m; i++) { walked += len(sub(V[i], V[i - 1])); if (walked >= reach) { far = V[i]; break; } }
+      return norm(sub(far, V[0]));
+    }
+    far = V[0];
+    for (i = m - 1; i >= 0; i--) { walked += len(sub(V[i + 1], V[i])); if (walked >= reach) { far = V[i]; break; } }
+    return norm(sub(V[m], far));
+  }
+
+  /* The solid a joint is: the groove's section revolved about local Y, tip at
+     the origin. The ball-nose's section IS a profile of revolution, so its
+     joint is the blade; the slab's is the cylinder of its half-width and the
+     wedge's the cone, each as tall as the blade. */
+  function jointLocal(profile) {
+    /* the right half of a profile that is symmetric about x = 0, bottom to top */
+    var half = profile.filter(function (q) { return q[0] >= -1e-9; });
+    half.sort(function (p, q) { return (p[1] - q[1]) || (q[0] - p[0]); });
+    var rings = half.map(function (q) { return { y: q[1], rad: Math.max(0, q[0]) }; });
+    var out = [];
+    revolveY(rings, STROKE_JOINT_SEG, out);
+    return Float32Array.from(out);
+  }
+
+  /* A polyline of surface points and normals -> the pieces a groove along it
+     is made of: the frame of each segment (also what the wall gate stands its
+     stations in), a prism per segment, a joint per bend, and the one-skin
+     alternative. */
+  function grooveParts(profile, V, NV, depth) {
+    var m = V.length - 1, i, segs = [], prisms = [], sweeps = [];
+    /* One frame per segment: u along it, the outward axis the mean of the
+       surface normals at its two ends (made square to u), X = Y x u so that
+       X x Y = u, the blade-local convention. The tip line runs `depth` below
+       the surface along that axis. */
+    for (i = 0; i < m; i++) {
+      var A = V[i], B = V[i + 1], d = sub(B, A), L = len(d);
+      var u = norm(d);
+      var Yn = norm(add(NV[i], NV[i + 1])) || NV[i];
+      var Ys = u ? norm(sub(Yn, mul(u, dot(Yn, u)))) : null;
+      if (!u || !Ys) return { ok: false, reason: 'the stroke runs straight into the surface' };
+      var X = norm(cross(Ys, u));
+      var origin = sub(A, mul(Ys, depth));
+      var mat = [X[0], X[1], X[2], 0, Ys[0], Ys[1], Ys[2], 0, u[0], u[1], u[2], 0, origin[0], origin[1], origin[2], 1];
+      var local = [];
+      extrudeZ(profile, 0, L, local);
+      var tris = transformSoup(Float32Array.from(local), mat);
+      segs.push({ A: A, B: B, u: u, len: L, X: X, Y: Ys, origin: origin });
+      prisms.push(tris);
+      sweeps.push({ tris: tris, segs: [{ u: u, len: L }], frames: [{ r: X, s: Ys }, { r: X, s: Ys }],
+                    pts: [origin, add(origin, mul(u, L))] });
+    }
+    /* The joints, between consecutive segments, where the line turns. */
+    var jointSoup = jointLocal(profile), joints = 0, jointPieces = [];
+    for (i = 1; i < m; i++) {
+      var s0 = segs[i - 1], s1 = segs[i];
+      var turn = Math.acos(Math.max(-1, Math.min(1, dot(s0.u, s1.u)))) * 180 / Math.PI;
+      if (turn < STROKE_JOINT_MIN_DEG) continue;
+      var Yv = NV[i];
+      var bis = norm(add(s0.u, s1.u)) || s1.u;
+      var Xj = norm(cross(Yv, bis)) || anyPerp(Yv);
+      var Zj = cross(Xj, Yv);
+      var tip = sub(V[i], mul(Yv, depth));
+      var mj = [Xj[0], Xj[1], Xj[2], 0, Yv[0], Yv[1], Yv[2], 0, Zj[0], Zj[1], Zj[2], 0, tip[0], tip[1], tip[2], 1];
+      jointPieces.push(transformSoup(jointSoup, mj));
+      joints++;
+    }
+    return { ok: true, segs: segs, prisms: prisms, sweeps: sweeps, jointPieces: jointPieces, joints: joints,
+             loft: loftStroke(V, NV, profile, depth) };
+  }
+
   /* hull + drag samples + blade -> every solid the groove is the union of,
      plus the stations the wall gate reads. THREE-free and kernel-free: the
      app unions `pieces` and subtracts. */
   function planStroke(hullSoup, samples, bladeName, params, opts) {
     opts = opts || {};
-    var PS = pathSweepLib();
-    if (!PS || typeof PS.sweep !== 'function') return { ok: false, reason: 'the stroke needs nso_path_sweep.js' };
     var sec = grooveSection(bladeName, params);
     if (!sec.ok) return sec;
     var blade = sec.blade;
@@ -923,74 +1176,136 @@
         ' mm - the shank must stay outside the piece' };
     }
 
-    /* The lift puts the sweep's own path inside the section (profileCheck
-       wants the origin strictly inside, because the end caps fan from it):
-       the path runs half a blade-height above the tip line. */
-    var lift = blade.height / 2;
-    var profile = sec.profile.map(function (q) { return [q[0], q[1] - lift]; });
+    var cutHW = cutHalfWidth(sec.profile, depth);
+    var endReach = (bladeName === 'ball') ? 0 : Math.min(2, Math.max(0.8, 1.5 * cutHW));
+    var cutProfile = clipProfile(sec.profile, depth + GROOVE_ABOVE_MM);
 
-    var base = Math.max(0.5, sec.halfWidth);
-    var tries = [base, base * 2, base * 4, base * 8], path = null, sw = null, runs = null, why = '', t, k;
-    for (t = 0; t < tries.length; t++) {
-      path = strokePath(samples, { step: tries[t] });
-      if (!path.ok) return { ok: false, reason: path.reason, blade: blade };
-      if (path.length < (opts.minLength || 0.2)) {
-        return { ok: false, short: true, reason: 'the stroke is ' + path.length.toFixed(2) + ' mm - that is a click, not a groove', blade: blade };
+    /* The line is smoothed as gently as noise allows and no gentler. A hand
+       over a pixel grid leaves a line of short, kinked segments, and a skin
+       cannot turn through a kink shorter than the groove is wide; so if the
+       gently smoothed line will not carry the skin, smooth it harder - but
+       only while the harder line stays within STROKE_DEV_MM of the gentle one.
+       Shake is that small and goes; a hairpin is not and stays, and is then
+       built as the union that has no such limit. (What this replaces re-planned
+       a refused line from fewer points, however far that moved it.) */
+    var path = null, path0 = null, q;
+    for (q = 0; q < STROKE_SMOOTH_STEPS.length; q++) {
+      var cand = strokePath(samples, { halfWidth: cutHW, endReach: endReach, smooth: STROKE_SMOOTH_STEPS[q] });
+      if (!cand.ok) return { ok: false, reason: cand.reason, blade: blade };
+      if (q === 0) path0 = cand;
+      else {
+        var dev = 0, di;
+        for (di = 0; di < cand.smoothed.length; di++) dev = Math.max(dev, len(sub(cand.smoothed[di], path0.smoothed[di])));
+        if (dev > STROKE_DEV_MM) break;
       }
-      var Y = path.outward;
-      var line = path.surface.map(function (q) { return add(q, mul(Y, lift - depth)); });
-      runs = chunkRuns(line, STROKE_CHUNK_TURN_DEG * Math.PI / 180);
-      sw = [];
-      why = '';
-      for (k = 0; k < runs.length; k++) {
-        var pts = line.slice(runs[k][0], runs[k][1] + 1);
-        var u0 = norm(sub(pts[1], pts[0]));
-        var up = norm(cross(Y, u0));
-        if (!up) { why = 'the stroke runs straight into the surface'; break; }
-        var r = PS.sweep({ points: pts, profile: profile, up: up });
-        if (!r.ok) { why = r.reason; break; }
-        sw.push(r);
-      }
-      if (!why) break;
+      if (cand.length < (opts.minLength || 0.2)) break;
+      if (loftStroke(cand.surface, cand.normals, cutProfile, depth).ok) { path = cand; break; }
     }
-    if (why) return { ok: false, reason: 'the stroke turns too tightly for this blade - ' + why, blade: blade };
+    if (!path) path = path0;
+    if (path.length < (opts.minLength || 0.2)) {
+      return { ok: false, short: true, reason: 'the stroke is ' + path.length.toFixed(2) + ' mm - that is a click, not a groove', blade: blade };
+    }
 
-    /* the end blades, from the first run's first frame and the last run's last */
-    var first = sw[0], last = sw[sw.length - 1];
-    var f0 = first.frames[0], fL = last.frames[last.frames.length - 1];
-    var uS = first.segs[0].u, uE = last.segs[last.segs.length - 1].u;
-    var pS = first.pts[0], pE = last.pts[last.pts.length - 1];
-    var ends = [
-      bladeAt(blade, f0.r, f0.s, uS, sub(pS, mul(f0.s, lift))),
-      bladeAt(blade, fL.r, fL.s, uE, sub(pE, mul(fL.s, lift)))
+    var V = path.surface, NV = path.normals, m = V.length - 1, i, k;
+
+    /* A slab or a wedge overruns each end of the stroke by half its length -
+       that is where the blade was. That overrun is the same section extruded
+       straight on, so it is made part of the groove (two collinear segments
+       added to the line) rather than a blade unioned on: a union of the two
+       puts the slab's walls coplanar with the groove's own, which the kernel
+       resolves to slivers that fail the canonical weld. A ball-nose's end is a
+       hemisphere, which the groove cannot be extended into, so it keeps its
+       blade at each end - meeting the groove in a coincident ring. */
+    var overrun = (bladeName === 'ball') ? 0 : blade.params.length / 2;
+    var Vx = V, NVx = NV;
+    if (overrun > 0 && m >= 1) {
+      var uS = norm(sub(V[1], V[0])), uE = norm(sub(V[m], V[m - 1]));
+      Vx = [sub(V[0], mul(uS, overrun))].concat(V, [add(V[m], mul(uE, overrun))]);
+      NVx = [NV[0]].concat(NV, [NV[m]]);
+    }
+
+    var base = grooveParts(cutProfile, V, NV, depth);
+    if (!base.ok) return { ok: false, reason: base.reason, blade: blade };
+    var ext = (Vx === V) ? base : grooveParts(cutProfile, Vx, NVx, depth);
+    if (!ext.ok) return { ok: false, reason: ext.reason, blade: blade };
+    var segs = base.segs;
+
+    /* The blade itself at the press and at the release: in the skin, standing
+       in the skin's own end rings; in the union, pointing the way the stroke
+       is heading over a blade's width of it (a ball-nose is the same from
+       every side; a slab and a wedge are not). */
+    var reach = Math.min(3, Math.max(1, 2 * cutHW)), sF = segs[0], sL = segs[segs.length - 1];
+    function endFrame(at, atStart, seg) {
+      var u = endHeading(V, atStart, reach) || seg.u;
+      var Yn = NV[at];
+      var Ys = norm(sub(Yn, mul(u, dot(Yn, u)))) || seg.Y;
+      var X = norm(cross(Ys, u));
+      return { u: u, Y: Ys, X: X, origin: sub(V[at], mul(Ys, depth)) };
+    }
+    var fF = endFrame(0, true, sF), fL = endFrame(m, false, sL);
+    var endsUnion = [
+      bladeAt(blade, fF.X, fF.Y, fF.u, fF.origin),
+      bladeAt(blade, fL.X, fL.Y, fL.u, fL.origin)
     ];
-    var pieces = sw.map(function (r) { return r.tris; }).concat(ends.map(function (e) { return e.soup; }));
+    var asSoups = function (list) { return list.map(function (e) { return e.soup; }); };
+
+    /* The groove, two ways. As ONE skin: watertight by construction, no
+       glancing faces, the way to build any bend the section fits round. Or as
+       a union of a prism per segment and a JOINT at every vertex that turns -
+       the section revolved about the vertex's outward axis (for a ball-nose,
+       the blade itself) - which has no limit on how tight a bend can be, at
+       the price of the glancing faces. The skin is used when it is a solid;
+       the union is kept beside it either way (`piecesAlt`) for the app to
+       fall back on if the kernel finds the skin wanting. */
+    var ends = endsUnion, mode = 'union', alt = null, sweeps = base.sweeps;
+    var piecesUnion = ext.prisms.concat(ext.jointPieces, overrun > 0 ? [] : asSoups(endsUnion));
+    var outPieces = piecesUnion;
+    if (ext.loft.ok && base.loft.ok) {
+      var g0 = base.loft.frames[0], gm = base.loft.frames[m];
+      ends = [bladeAt(blade, g0.X, g0.Y, g0.t, g0.tip), bladeAt(blade, gm.X, gm.Y, gm.t, gm.tip)];
+      outPieces = [ext.loft.tris].concat(overrun > 0 ? [] : asSoups(ends));
+      alt = piecesUnion;
+      mode = 'skin';
+      sweeps = [{ tris: base.loft.tris, segs: segs.map(function (g) { return { u: g.u, len: g.len }; }),
+                  frames: base.loft.frames.map(function (g) { return { r: g.X, s: g.Y }; }),
+                  pts: base.loft.frames.map(function (g) { return g.tip; }) }];
+    }
+    var joints = ext.joints;
 
     /* Stations for the wall gate: every STROKE_STATION_MM along each segment,
        the tip line point plus that segment's frame. */
-    var stations = [], along = 0, ri, si;
-    for (ri = 0; ri < sw.length; ri++) {
-      var R = sw[ri];
-      for (si = 0; si < R.segs.length; si++) {
-        if (ri > 0 && si === 0) continue;     /* the overlapped segment, already walked */
-        var a = sub(R.pts[si], mul(R.frames[si].s, lift)), sg = R.segs[si];
-        var nst = Math.max(1, Math.ceil(sg.len / STROKE_STATION_MM));
-        for (k = 0; k <= nst; k++) {
-          if (k === 0 && stations.length) continue;
-          stations.push({ tip: add(a, mul(sg.u, sg.len * k / nst)), X: R.frames[si].r, Y: R.frames[si].s,
-                          u: sg.u, along: along + sg.len * k / nst });
-        }
-        along += sg.len;
+    var stations = [], along = 0, si;
+    for (si = 0; si < segs.length; si++) {
+      var sg = segs[si];
+      var nst = Math.max(1, Math.ceil(sg.len / STROKE_STATION_MM));
+      for (k = 0; k <= nst; k++) {
+        if (k === 0 && stations.length) continue;
+        stations.push({ tip: add(sg.origin, mul(sg.u, sg.len * k / nst)), X: sg.X, Y: sg.Y,
+                        u: sg.u, along: along + sg.len * k / nst });
       }
+      along += sg.len;
     }
 
-    var segCount = sw.reduce(function (n, r) { return n + r.segs.length; }, 0) - (sw.length - 1);
     return {
-      ok: true, blade: blade, section: sec, depth: depth, lift: lift,
-      outward: path.outward, surface: path.surface, length: path.length,
-      runs: runs.length, segments: segCount, sweeps: sw, ends: ends, pieces: pieces,
-      stations: stations, spreadDeg: path.spreadDeg
+      ok: true, blade: blade, section: sec, depth: depth, lift: 0, cutHalfWidth: cutHW, cutProfile: cutProfile,
+      outward: path.outward, surface: path.surface, normals: path.normals, length: path.length,
+      runs: 1, segments: segs.length, joints: joints, mode: mode, skinReason: mode === 'skin' ? '' : (ext.loft.reason || base.loft.reason || ''),
+      sweeps: sweeps, ends: ends, pieces: outPieces, piecesAlt: alt,
+      stations: stations, spreadDeg: path.spreadDeg, tolerance: path.tolerance
     };
+  }
+
+  /* Does the ray (o, d) meet the surface at distance t at a glancing angle -
+     the face it hits within SKIN_GRAZE of edge-on? Needs the probe to name the
+     face; without that it is never taken as a graze, so a wall is never
+     missed for want of an answer. */
+  var SKIN_GRAZE = 0.5;                /* |cos| of the angle between the ray and the face's normal below which it grazes */
+  function grazesSkin(P, o, d, t) {
+    if (!P || typeof P.nearest !== 'function' || typeof P.faceNormal !== 'function') return false;
+    var near = P.nearest(add(o, mul(d, t)), 0.25);
+    if (!near || near.face == null) return false;
+    var N = P.faceNormal(near.face);
+    return !!N && Math.abs(dot(N, d)) < SKIN_GRAZE;
   }
 
   /* The wall gate for a groove. A groove is refused - in words, before the
@@ -1064,6 +1379,12 @@
         out.rays++;
         if (!hits || !hits.length) continue;
         var tmin = (typeof hits[0] === 'number') ? hits[0] : hits[0].t;
+        /* Looking sideways from just under the lip of a groove cut into a
+           CURVED face, the ray leaves through that same face a hair away, the
+           surface having fallen away beneath it. That is the groove's own
+           mouth, not a wall left standing: a wall is a face the ray meets
+           square on, and the skin it grazes is not. */
+        if (grazesSkin(P, o, d, tmin)) continue;
         if (tmin < stMin) stMin = tmin;
         if (tmin < out.thinnest_mm) { out.thinnest_mm = tmin; out.at_mm = st.along; out.side = 'side'; }
       }
@@ -1098,7 +1419,6 @@
     if (!planned || !planned.ok) return 'Carve failed - ' + ((planned && planned.reason) || 'unknown');
     var s = 'Carved a ' + planned.length.toFixed(1) + ' mm groove - ' + planned.blade.describe +
       ', depth ' + planned.depth + ' mm, ' + planned.segments + ' segment' + (planned.segments === 1 ? '' : 's');
-    if (planned.runs > 1) s += ' in ' + planned.runs + ' runs';
     if (isFinite(removed)) s += ' - ' + removed.toFixed(3) + ' mm³ removed';
     if (isFinite(removed) && isFinite(intended) && Math.abs(intended - removed) > 1e-3) {
       s += ' (' + intended.toFixed(3) + ' mm³ planned)';
@@ -1122,7 +1442,7 @@
     strokeWallGate: strokeWallGate,
     strokeRefusalText: strokeRefusalText,
     strokeReport: strokeReport,
-    STROKE_MAX_SPREAD_DEG: STROKE_MAX_SPREAD_DEG,
+    STROKE_EDGE_DEG: STROKE_EDGE_DEG,
     /* exposed for the tests, not for callers */
     _closestOnTri: closestOnTri,
     _extrudeZ: extrudeZ,

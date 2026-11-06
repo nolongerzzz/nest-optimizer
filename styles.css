@@ -1329,13 +1329,14 @@ select:focus, input:focus {
 
 /* ---- Carve: the local carving tool ----
 
-   Two rows plus a readout, in the Finish column. Row one is the arm button and
-   the blade select, laid out on .vp-row-skin's grid so Carve reads as a sibling
-   of Skin face rather than a new kind of control. Row two is four numbers, and
-   it is FLEX, not the card's usual grid: the ball-nose exposes one shape field
-   where the slab and the wedge expose two, so one cell is hidden at runtime and
-   a fixed four-column grid would leave a dead track where it was. Flex children
-   drop out of the flow when hidden, which is exactly what is wanted.
+   The arm button and the blade select on .vp-row-skin's grid, so Carve reads as
+   a sibling of Skin face rather than a new kind of control; under them four
+   sliders (Depth, the blade's one or two shape fields, Roll) laid out as
+   .live-slider rows, the same pair Hollow's wall uses; then a readout. The
+   ball-nose exposes one shape field where the slab and the wedge expose two,
+   so one slider is hidden at runtime (its whole label drops out of the flow,
+   which is what a stacked list wants). .vp-row-carve2 is no longer Carve's: the
+   Trace raster row in Gen+ still lays its four number boxes out on it.
 
    Teal for the armed state, matching the position lock rather than either
    paint: a carve is destructive geometry like a lock is a hard refusal, and
@@ -1395,6 +1396,8 @@ select:focus, input:focus {
                 min-width: 0; margin: 2px 0; width: 100%; font-variant-numeric: tabular-nums; }
 .lift-height input,
 .live-slider input { grid-column: 1 / -1; width: 100%; min-width: 0; margin: 2px 0 0; }
+/* display:grid above would beat the UA's [hidden]; Carve hides the shape slider a blade has no use for */
+.live-slider[hidden] { display: none; }
 .lift-strip { margin: 4px 0; padding: 4px 6px; border: 1px solid rgba(255, 43, 214, 0.45); border-radius: 4px; }
 .lift-strip-row { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text); margin: 0 0 3px; cursor: pointer; }
 .lift-strip-row input { margin: 0; }
