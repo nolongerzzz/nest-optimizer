@@ -3867,6 +3867,13 @@ function onCanvasPointerDown(event) {
     return;
   }
 
+  /* Extract bit (app-extract-bit.js) owns a click on a piece while it is armed: the click chooses the void, and a
+     fall-through would start a move drag under it. */
+  if (typeof window.nsoExtractTakesClick === 'function' && window.nsoExtractTakesClick(event)) {
+    setOrbitFromPlate(false);
+    return;
+  }
+
   /* Lift (app-lift-plate.js, Subtract's LIFT) owns a click on a piece while
      it is armed, on Carve's terms: the click lifts the feature under it, or
      points Lift at another piece. A fall-through would start a move drag. */

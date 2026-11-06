@@ -2126,133 +2126,18 @@ function soupAxisBox(min, max) {
   return new Float32Array(out);
 }
 
-// New helper: 6-connected flood fill over the empty-cell grid, returns the
-// largest connected empty region as index-space min/max (or null if the
-// grid has no empty cells at all).
-function NSO_floodFillLargestEmptyCluster(empty, nx, ny, nz) {
-  const total = nx * ny * nz;
-  const visited = new Uint8Array(total);
-  const stackX = new Int32Array(total);
-  const stackY = new Int32Array(total);
-  const stackZ = new Int32Array(total);
-  const idx3 = function (ix, iy, iz) { return (ix * ny + iy) * nz + iz; };
-
-  let best = null;
-
-  for (let ix = 0; ix < nx; ix++) {
-    for (let iy = 0; iy < ny; iy++) {
-      for (let iz = 0; iz < nz; iz++) {
-        const startIdx = idx3(ix, iy, iz);
-        if (!empty[startIdx] || visited[startIdx]) continue;
-
-        let sp = 0;
-        stackX[sp] = ix; stackY[sp] = iy; stackZ[sp] = iz; sp++;
-        visited[startIdx] = 1;
-
-        let size = 0;
-        let minIx = ix, minIy = iy, minIz = iz;
-        let maxIx = ix, maxIy = iy, maxIz = iz;
-
-        while (sp > 0) {
-          sp--;
-          const cx = stackX[sp], cy = stackY[sp], cz = stackZ[sp];
-          size++;
-          if (cx < minIx) minIx = cx; if (cx > maxIx) maxIx = cx;
-          if (cy < minIy) minIy = cy; if (cy > maxIy) maxIy = cy;
-          if (cz < minIz) minIz = cz; if (cz > maxIz) maxIz = cz;
-
-          if (cx > 0) { const n = idx3(cx - 1, cy, cz); if (empty[n] && !visited[n]) { visited[n] = 1; stackX[sp] = cx - 1; stackY[sp] = cy; stackZ[sp] = cz; sp++; } }
-          if (cx < nx - 1) { const n = idx3(cx + 1, cy, cz); if (empty[n] && !visited[n]) { visited[n] = 1; stackX[sp] = cx + 1; stackY[sp] = cy; stackZ[sp] = cz; sp++; } }
-          if (cy > 0) { const n = idx3(cx, cy - 1, cz); if (empty[n] && !visited[n]) { visited[n] = 1; stackX[sp] = cx; stackY[sp] = cy - 1; stackZ[sp] = cz; sp++; } }
-          if (cy < ny - 1) { const n = idx3(cx, cy + 1, cz); if (empty[n] && !visited[n]) { visited[n] = 1; stackX[sp] = cx; stackY[sp] = cy + 1; stackZ[sp] = cz; sp++; } }
-          if (cz > 0) { const n = idx3(cx, cy, cz - 1); if (empty[n] && !visited[n]) { visited[n] = 1; stackX[sp] = cx; stackY[sp] = cy; stackZ[sp] = cz - 1; sp++; } }
-          if (cz < nz - 1) { const n = idx3(cx, cy, cz + 1); if (empty[n] && !visited[n]) { visited[n] = 1; stackX[sp] = cx; stackY[sp] = cy; stackZ[sp] = cz + 1; sp++; } }
-        }
-
-        if (!best || size > best.size) {
-          best = { size: size, minIx: minIx, minIy: minIy, minIz: minIz, maxIx: maxIx, maxIy: maxIy, maxIz: maxIz };
-        }
-      }
-    }
-  }
-
-  return best;
-}
-
-/* Extract bit's fallback, for a kernel that cannot say what the void is: one box round the biggest
-   empty region of a 1.2mm lattice laid over the piece (6-connected flood fill of the cells that are not
-   inside it). Coarse, and always a box. -> { soup } or { msg }. */
-function NSO_voxelBitSoup(p, soupPiece) {
-  p.mesh.updateMatrixWorld(true);
-  const bb = meshLocalBox3(p.mesh);
-  const inset = 0.45;
-  const x0 = bb.min.x + inset, x1 = bb.max.x - inset;
-  const y0 = bb.min.y + inset, y1 = bb.max.y - inset;
-  const z0 = bb.min.z + inset, z1 = bb.max.z - inset;
-  if (x1 <= x0 || y1 <= y0 || z1 <= z0) {
-    return { msg: 'Extract failed - tile too thin' };
-  }
-
-  // Same sampling grid as before - cell centers on the 1.2mm lattice.
-  const step = 1.2;
-  const half = step * 0.49;
-  const xs = [];
-  for (let x = x0 + half; x <= x1 - half + 1e-6; x += step) xs.push(x);
-  const ys = [];
-  for (let y = y0 + half; y <= y1 - half + 1e-6; y += step) ys.push(y);
-  const zs = [];
-  for (let z = z0 + half; z <= z1 - half + 1e-6; z += step) zs.push(z);
-  const nx = xs.length, ny = ys.length, nz = zs.length;
-  if (nx < 1 || ny < 1 || nz < 1) {
-    return { msg: 'Extract failed - no cavity found' };
-  }
-
-  const empty = new Uint8Array(nx * ny * nz);
-  let emptyCount = 0;
-  for (let ix = 0; ix < nx; ix++) {
-    for (let iy = 0; iy < ny; iy++) {
-      for (let iz = 0; iz < nz; iz++) {
-        if (!NSO_pointInsideSoup(soupPiece, xs[ix], ys[iy], zs[iz])) {
-          empty[(ix * ny + iy) * nz + iz] = 1;
-          emptyCount++;
-        }
-      }
-    }
-  }
-  if (emptyCount < 4) {
-    return { msg: 'Extract failed - no cavity found' };
-  }
-
-  // Flood-fill (6-connected) to the single largest empty region - this is
-  // the fix: no more one cube per empty cell.
-  const cluster = NSO_floodFillLargestEmptyCluster(empty, nx, ny, nz);
-  if (!cluster || cluster.size < 4) {
-    return { msg: 'Extract failed - no cavity found' };
-  }
-
-  // One box spanning the cluster's cell extents.
-  const mn = {
-    x: xs[cluster.minIx] - half,
-    y: ys[cluster.minIy] - half,
-    z: zs[cluster.minIz] - half
-  };
-  const mx = {
-    x: xs[cluster.maxIx] + half,
-    y: ys[cluster.maxIy] + half,
-    z: zs[cluster.maxIz] + half
-  };
-
-  const bitSoup = soupAxisBox(mn, mx);
-  if (!bitSoup || bitSoup.length < 9) {
-    return { msg: 'Extract failed - no cavity found' };
-  }
-  return { soup: bitSoup };
-
-}
-
 /* The bit's display geometry from its exact soup. soupToCenteredGeo welds at 0.3 mm, which is right for
    the box round a void and would flatten a thread's flank (pitch 0.5 to 2 mm) into a smooth rod, so the
    exact bit is welded at the kernel's own scale (1e-4 mm: shared corners only) and centred. */
+function NSO_centerSoup(soup) {
+  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < soup.length; i += 3) for (let k = 0; k < 3; k++) { const v = soup[i + k]; if (v < lo[k]) lo[k] = v; if (v > hi[k]) hi[k] = v; }
+  const c = [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2];
+  const out = new Float32Array(soup.length);
+  for (let i = 0; i < soup.length; i += 3) { out[i] = soup[i] - c[0]; out[i + 1] = soup[i + 1] - c[1]; out[i + 2] = soup[i + 2] - c[2]; }
+  return out;
+}
+
 function NSO_exactBitGeo(soup) {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(soup, 3));
@@ -2264,23 +2149,31 @@ function NSO_exactBitGeo(soup) {
   return out;
 }
 
-async function extractBitFromSelected() {
-  const p = state.selectedIndex >= 0 ? state.placed[state.selectedIndex] : null;
+/* ---------------------------------------------------------------------------------------------------------
+   EXTRACT BIT. The bit is the void the user clicked, not one the tool guessed (nso_void.js says which void,
+   nso_csg.js NSO_cavityCore makes it solid). Two steps, so the user sees what they are about to get:
+
+     extractBitDetect(index, point, normal, opts)  the click: finds the void and makes the bit as a soup, changes
+                                                   nothing on the plate. -> { ok, ...bit } or { ok: false, reason }
+     extractBitCommit(bit)                         the bake: the bit becomes a piece beside its source, one Undo.
+
+   app-extract-bit.js is the card's side: it arms the click, draws the detected bit as a live preview, redoes it
+   when the Lid R box moves, and commits on Make bit. The button, pressed with nothing armed, arms.
+   --------------------------------------------------------------------------------------------------------- */
+async function extractBitDetect(index, point, normal, opts) {
+  opts = opts || {};
+  const p = index >= 0 ? state.placed[index] : null;
   const model = p && p.sourceId != null
     ? state.models.find(function (m) { return m.id === p.sourceId; })
-    : getActiveModel();
-  if (!p || !p.mesh || !model || !model.geometry) {
-    setStatus('Select a tile on the plate first', true);
-    return;
-  }
-  // The cavity is found by even-odd inside tests, which shells laid over one
-  // another turn inside out: such a piece is read as its shells merged into one
-  // solid (nso-helpers.js, nsoOverlap). The piece itself is not touched.
+    : null;
+  if (!p || !p.mesh || !model || !model.geometry) return { ok: false, reason: 'select a piece on the plate first' };
+  if (typeof NSO_Void === 'undefined') return { ok: false, reason: 'the void finder (nso_void.js) is not loaded' };
+  // The void is found by even-odd inside tests, which shells laid over one another turn inside out: such a
+  // piece is read as its shells merged into one solid (nso-helpers.js, nsoOverlap). The piece is not touched.
   const solBit = (typeof nsoOverlap !== 'undefined' && nsoOverlap)
     ? await nsoOverlap.solid(model, { geometry: model.geometry }) : { ok: true, merged: false };
   if (!solBit.ok) {
-    setStatus(solBit.cancelled ? 'Extract stopped - piece unchanged' : 'Extract refused - ' + solBit.reason + ' - piece unchanged', !solBit.cancelled);
-    return;
+    return { ok: false, cancelled: !!solBit.cancelled, reason: solBit.cancelled ? 'stopped' : solBit.reason };
   }
   const py = p.mesh.position.y;
   let soupPiece;
@@ -2292,58 +2185,67 @@ async function extractBitFromSelected() {
   } else {
     soupPiece = geomToWorldSoup(model.geometry, p.x, py, p.z);
   }
-  if (!soupPiece || soupPiece.length < 9) {
-    setStatus('Extract failed - piece unchanged', true);
-    return;
-  }
-  /* The void of the piece, exactly: its convex hull less the piece (nso_csg.js, NSO_cavityCore). A closed
-     tube gives the cylinder in its bore, a threaded hole gives the threaded rod, whatever the void is is the
-     bit. If the kernel cannot do it, a box round the void is made instead, and the status line says so. */
-  p.mesh.updateMatrixWorld(true);
-  let bitSoup = null, approx = null, voids = 1, exactMm3 = 0;
-  const cav = (typeof NSO_cavitySoup === 'function')
-    ? await NSO_cavitySoup(soupPiece, { label: 'Extracting' })
-    : { ok: false, reason: 'no CSG kernel in this build' };
-  if (cav.ok) {
-    bitSoup = cav.soup; voids = cav.voids || 1; exactMm3 = cav.volumeMm3 || 0;
-  } else if (cav.cancelled || cav.timedOut) {
-    setStatus('Extract stopped - piece unchanged' + (cav.timedOut ? ' (' + cav.reason + ')' : ''), !!cav.timedOut);
-    return;
-  } else if (cav.noCavity) {
-    setStatus('Extract failed - no cavity found', true);
-    return;
-  } else {
-    approx = cav.reason || 'the kernel could not run';
-    const vox = NSO_voxelBitSoup(p, soupPiece);
-    if (!vox.soup) { setStatus(vox.msg, true); return; }
-    bitSoup = vox.soup;
-  }
+  if (!soupPiece || soupPiece.length < 9) return { ok: false, reason: 'the piece has no surface to read' };
 
-  const geo = approx ? soupToCenteredGeo(bitSoup) : NSO_exactBitGeo(bitSoup);
+  /* Which void: the click's. Its wall comes back as points; the kernel makes the bit from them. */
+  const sel = NSO_Void.select(soupPiece, point, normal, { R: opts.R });
+  if (!sel.ok) return { ok: false, reason: sel.reason };
+  const cav = (typeof NSO_cavitySoup === 'function')
+    ? await NSO_cavitySoup(soupPiece, sel.points, sel.seed, { label: 'Extracting' })
+    : { ok: false, reason: 'no CSG kernel in this build' };
+  if (!cav.ok) {
+    return { ok: false, cancelled: !!cav.cancelled, timedOut: !!cav.timedOut,
+             reason: cav.noCavity ? 'no void there - the click was not inside one' : cav.reason };
+  }
+  return { ok: true, index: index, sourceId: model.id, name: model.name || 'tile', soup: cav.soup,
+           volumeMm3: cav.volumeMm3, R: sel.R, auto: sel.auto, merged: !!solBit.merged, note: solBit.note || '',
+           point: point, normal: normal };
+}
+
+function extractBitCommit(bit) {
+  const p = bit && state.placed[bit.index];
+  if (!p || p.sourceId !== bit.sourceId) { setStatus('Extract failed - the piece moved on; click the void again', true); return false; }
+  /* The raw soup is the kernel's own triangles, only moved to the middle: welding them (the display's job) is
+     what turns a thread's sliver triangles into non-manifold edges. */
+  const cs = NSO_centerSoup(bit.soup);
+  const rawGeo = new THREE.BufferGeometry();
+  rawGeo.setAttribute('position', new THREE.BufferAttribute(cs, 3));
+  const rawOut = displayGeometryToRawSoup(rawGeo);
+  const geo = NSO_exactBitGeo(cs);
   geo.computeBoundingBox();
   const size = new THREE.Vector3();
   geo.boundingBox.getSize(size);
-  const rawOut = displayGeometryToRawSoup(geo);
-  const id = addModel((model.name || 'tile') + '-bit', geo, {
+  const id = addModel(bit.name + '-bit', geo, {
     rawTris: rawOut,
     rawAxis: 'zup',
     centerOffset: computeCenterOffsetFromRaw(rawOut),
     keepSelection: true,
     silent: true
   });
-  if (!id) {
-    setStatus('Extract failed - piece unchanged', true);
-    return;
-  }
+  if (!id) { setStatus('Extract failed - piece unchanged', true); return false; }
   pushUndo({ type: 'addModels', ids: [id], editId: state.editId, cutT: state.cutT });
   const xPlace = p.x + (p.width || size.x) / 2 + size.x / 2 + 6;
   const m = state.models.find(function (mm) { return mm.id === id; });
   if (m) placeModelMovable(m, xPlace, p.z);
-  setStatus('Extract bit ok - ' + (approx ? 'box round the void (exact shape unavailable: ' + approx + ')' : 'exact void') +
-    ', solid ' + size.x.toFixed(1) + 'x' + size.y.toFixed(1) + 'x' + size.z.toFixed(1) + ' mm' +
-    (exactMm3 ? ', ' + exactMm3.toFixed(0) + ' mm3' : '') +
-    (voids > 1 ? ' - largest of ' + voids + ' voids' : '') +
-    (solBit.merged ? ' - ' + solBit.note : ''));
+  setStatus('Extract bit ok - the void you clicked (lid R ' + bit.R + ' mm' + (bit.auto ? ' auto' : '') + '), solid ' +
+    size.x.toFixed(1) + 'x' + size.y.toFixed(1) + 'x' + size.z.toFixed(1) + ' mm, ' + Math.round(bit.volumeMm3) + ' mm3' +
+    (bit.merged ? ' - ' + bit.note : ''));
+  return true;
+}
+
+/* The Extract bit button. With a pick ({ point, normal } in world space, or { index, point, normal }) it runs
+   the whole thing on the spot: detect, then bake - what a click and Make bit do together, for the checks. With
+   none it is the button: it arms the click (or, with a preview showing, makes the bit). */
+async function extractBitFromSelected(pick) {
+  if (pick && pick.point) {
+    const idx = pick.index != null ? pick.index : state.selectedIndex;
+    const r = await extractBitDetect(idx, pick.point, pick.normal || null, { R: pick.R });
+    if (!r.ok) { setStatus(r.cancelled ? 'Extract stopped - piece unchanged' : 'Extract failed - ' + r.reason, !r.cancelled); return r; }
+    r.committed = extractBitCommit(r);
+    return r;
+  }
+  if (window.nsoExtractBit && typeof window.nsoExtractBit.press === 'function') return window.nsoExtractBit.press();
+  setStatus('Extract bit needs app-extract-bit.js', true);
 }
 
 async function joinSelectedModels() {

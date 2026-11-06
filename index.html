@@ -1291,8 +1291,12 @@
               <p id="subtract-readout" class="carve-readout subtract-readout" hidden></p>
             </div>
             <div class="vp-row vp-row-full">
-              <button id="btn-extract-bit" class="btn btn-secondary" type="button"
-                      title="Make the void of the selected piece into a piece of its own: the bore of a tube becomes a cylinder plug, a threaded hole becomes a threaded rod, a sealed cavity becomes a solid of its shape. The void is the piece's convex hull less the piece; with several, the largest is taken. The piece is not changed; one Undo removes the bit. A solid piece has no void and is refused.">Extract bit</button>
+              <button id="btn-extract-bit" class="btn btn-secondary" type="button" aria-pressed="false"
+                      title="Make a void of the selected piece into a piece of its own: the bore of a tube a cylinder plug, a threaded hole a threaded rod, an Allen socket a hex plug, a mouth the shape of the mouth. Arm it, then click INSIDE the void you want - a wall of it, or its bottom. The bit it will make is drawn in place first (amber, the piece a ghost round it); Make bit (or Enter) bakes it, another click chooses again, Escape puts it away. The piece is not changed; one Undo removes the bit.">Extract bit</button>
+            </div>
+            <div class="vp-row vp-row-carve2">
+              <label class="vp-clone" title="The reach of the lid over the opening, mm: the radius of the ball that closes over the void you click. Blank is automatic - the smallest ball that closes it. Bigger reaches across a wider opening; smaller stops short of the dents beside it (if the preview takes in too much, try a smaller one; too little, a bigger one). The preview follows the box."><span>Lid R</span> <input type="number" id="inp-extract-r" min="0.2" max="500" step="0.5" placeholder="auto"></label>
+              <button id="btn-extract-make" class="btn btn-secondary" type="button" hidden title="Bake the previewed bit into a piece beside its source. One Undo.">Make bit</button>
             </div>
             <div class="vp-row vp-row-carve">
               <button id="btn-carve" class="btn btn-secondary btn-carve" type="button" aria-pressed="false"
@@ -2519,13 +2523,14 @@
   <script src="nso_seat_surface.js?v=293d7ca2"></script>
   <script src="nso_thickness.js?v=165379d6"></script>
   <script src="nso_hollow.js?v=9af04282"></script>
+  <script src="nso_void.js"></script>
   <script src="nso_foam.js?v=66ff8aa0"></script>
   <!-- Support beacons: the plan-grid detector detectOverhangs wraps. Before
        nso_support_aim.js so its beacons ride along on every detection. See
        docs/SUPPORT-BEACONS.md. -->
   <script src="nso_bvh.js?v=bfafc20d"></script>
   <script src="nso_work.js?v=ff504301"></script>
-  <script src="nso_csg.js?v=4fbcbcce"></script>
+  <script src="nso_csg.js?v=624d27a0"></script>
   <script src="nso_box_edges.js?v=77146d82"></script>
   <script src="app-bool-busy.js?v=26c27885"></script>
   <script src="nso_edges.js?v=3fe8fea0"></script>
@@ -2578,7 +2583,7 @@
   <script src="nso-helpers.js?v=9c476e39"></script>
   <script src="nso-recent.js?v=f03d6f13"></script>
   <script src="nso-bounds.js?v=778acac4"></script>
-  <script src="app-core.js?v=1bb4ec82"></script>
+  <script src="app-core.js?v=6ea040ee"></script>
   <!-- Up to six plates (beds): the active one is state.models / state.placed, the rest are kept beside it. docs/BEDS.md. -->
   <script src="app-beds.js?v=3d221bc4"></script>
 
@@ -2661,7 +2666,7 @@
   <script src="app-fasteners.js?v=dbaebe2f"></script>
   <script src="app-assemble.js?v=60984bfb"></script>
   <script src="app-sel-outline.js?v=c1a5b4df"></script>
-  <script src="app-join.js?v=56368be4"></script>
+  <script src="app-join.js?v=30fe343a"></script>
   <script src="app-center-lock.js?v=ee95c074"></script>
   <script src="app-oversize-washer.js?v=a445c3ff"></script>
   <script src="app-join-triple.js?v=95a9c48a"></script>
@@ -2700,6 +2705,7 @@
   <script src="app-seat-grid.js?v=7e42f602"></script>
   <script src="app-paint-delete.js?v=e9d1ec70"></script>
   <script src="app-extract-sel.js?v=0590eee5"></script>
+  <script src="app-extract-bit.js"></script>
   <script src="app-texture.js?v=94304c2d"></script>
   <script src="app-nonsolid.js?v=a54a7b89"></script>
   <script src="app-poslock.js?v=262df735"></script>

@@ -503,32 +503,26 @@ async function NSO_subtractCore(aWorld, bWorld) {
 }
 
 /* =====================================================================
-   The void of a piece, as a solid - Extract bit's exact path.
+   The void a click chose, as a solid - Extract bit's boolean.
 
-   What a piece's void is: the convex hull of the piece, less the piece. A closed
-   tube's hull is the cylinder it wraps, so the void is the bore, capped flush at
-   both ends; a block with a threaded hole has the block for a hull, so the void is
-   the threaded hole, thread and all - a threaded rod; a cup's is its inside up to
-   the rim; a sealed cavity's is the cavity. A solid ball or a plain block has
-   nothing left over: no void, and that is said, not guessed.
+   nso_void.js decides WHICH void (the click's) and hands back its WALL, the corners of the piece's triangles
+   that face it. The bit is the convex hull of those corners, less the piece, in the part that holds the
+   seed. The walls of the result are the piece's own, so a threaded hole gives a threaded rod and a hex
+   socket a hex plug, exactly; the lid across the opening is the hull's - flat over a flat opening,
+   chordal over a curved one. Only the air inside the hull is left, because everything the hull holds that is
+   the piece is what the subtraction takes away.
 
-   Two things the bounding box of the piece could not say, and the hull does: the
-   void is the shape it is (not a box round it), and the box's four outside corners
-   (round a tube, round a ball) are not voids - they lie outside the hull.
+   The hull less the piece may fall in several parts (slivers where the lid meets a curved skin); the part
+   the seed is in is the bit, by the bounding box and then the volume. Anything under MIN_VOID_MM3 is a
+   numerical sliver.
 
-   The hull less the piece may fall in several parts (a piece with a bore and a
-   cross-hole sealed from it, two pockets, a ring of slivers where a faceted hull
-   meets a curved face). The largest by volume is the bit, and the count is
-   reported so the caller can say "largest of 3". Anything under MIN_VOID_MM3 is
-   a numerical sliver, not a void.
-
-   -> { ok, soup, volumeMm3, voids, stats, reason }
-      ok false: noCavity true when the piece has none (it is not an error of the
-      kernel - the caller must not fall back to a guess), else the kernel's words.
+   -> { ok, soup, volumeMm3, parts, stats, reason }; ok false with noCavity true when nothing is left (the
+      wall's hull holds only the piece - the click was not in a void), else the kernel's words.
    ===================================================================== */
-var NSO_MIN_VOID_MM3 = 1;
-async function NSO_cavityCore(pieceWorld) {
+var NSO_MIN_VOID_MM3 = 0.5;
+async function NSO_cavityCore(pieceWorld, wallPoints, seed) {
   if (!NSO_soupLen(pieceWorld)) return { ok: false, reason: 'empty soup' };
+  if (!wallPoints || wallPoints.length < 12) return { ok: false, reason: 'no wall to build the bit from' };
   var wasm;
   try { wasm = await NSO_CSG.load(); }
   catch (err) { return { ok: false, reason: 'CSG kernel failed to load: ' + NSO_errMsg(err) }; }
@@ -540,22 +534,37 @@ async function NSO_cavityCore(pieceWorld) {
     }
     man = NSO_CSG.soupToManifold(wasm, pIn);
     if (man.status && man.status() !== 'NoError') throw new Error('piece rejected: ' + man.status());
-    if (typeof man.hull !== 'function') throw new Error('this kernel has no convex hull');
-    hull = man.hull();
+    if (typeof wasm.Manifold.hull !== 'function') throw new Error('this kernel has no convex hull');
+    var list = [];
+    /* new Array, not a literal: the kernel tells a point from a Manifold by `instanceof Array`, which a literal made in
+       another realm (the vm context the node checks run this file in) is not. In a page it is the same thing. */
+    for (var i = 0; i + 2 < wallPoints.length; i += 3) {
+      var pt = new Array(3);
+      pt[0] = wallPoints[i]; pt[1] = wallPoints[i + 1]; pt[2] = wallPoints[i + 2];
+      list.push(pt);
+    }
+    hull = wasm.Manifold.hull(list);
     if (hull.status && hull.status() !== 'NoError') throw new Error('hull rejected: ' + hull.status());
     gap = hull.subtract(man);
     if (gap.status() !== 'NoError') throw new Error('kernel refused the void: ' + gap.status());
     if (gap.isEmpty()) return { ok: false, noCavity: true, reason: 'no cavity found' };
     bits = (typeof gap.decompose === 'function') ? gap.decompose() : [gap];
-    var kept = 0, bestVol = 0;
-    for (var i = 0; i < bits.length; i++) {
-      var v = bits[i].volume();
-      if (v >= NSO_MIN_VOID_MM3) kept++;
-      if (v > bestVol) { bestVol = v; best = bits[i]; }
+    /* The part the seed is in: of those whose box holds it (a margin of a node), the biggest; failing that, the biggest. */
+    var m = 0.75, bestVol = 0, anyVol = 0, anyBest = null, parts = 0;
+    for (var b = 0; b < bits.length; b++) {
+      var v = bits[b].volume();
+      if (v >= NSO_MIN_VOID_MM3) parts++;
+      if (v > anyVol) { anyVol = v; anyBest = bits[b]; }
+      if (seed && seed.length >= 3 && typeof bits[b].boundingBox === 'function') {
+        var bb = bits[b].boundingBox();
+        if (seed[0] >= bb.min[0] - m && seed[0] <= bb.max[0] + m && seed[1] >= bb.min[1] - m && seed[1] <= bb.max[1] + m &&
+            seed[2] >= bb.min[2] - m && seed[2] <= bb.max[2] + m && v > bestVol) { bestVol = v; best = bits[b]; }
+      }
     }
+    if (!best) { best = anyBest; bestVol = anyVol; }
     if (!best || bestVol < NSO_MIN_VOID_MM3) return { ok: false, noCavity: true, reason: 'no cavity found' };
     var st = NSO_manifoldStats(best);
-    return { ok: true, soup: NSO_CSG.manifoldToSoup(best), volumeMm3: bestVol, voids: kept,
+    return { ok: true, soup: NSO_CSG.manifoldToSoup(best), volumeMm3: bestVol, parts: parts,
              stats: st.exact ? { open: st.open, nm: st.nm } : null, reason: '' };
   } catch (err) {
     return { ok: false, reason: NSO_errMsg(err) };
@@ -1074,7 +1083,7 @@ var NSO_BoolCore = {
   },
   fillUnion: function (a, b) { return nsoUnionCore(a, b); },
   fillSubtract: function (a, b) { return nsoSubtractCore(a, b); },
-  cavity: function (a) { return NSO_cavityCore(a); },
+  cavity: function (a, pts, seed) { return NSO_cavityCore(a, pts, seed); },
   job: function (op) {
     var args = Array.prototype.slice.call(arguments, 1);
     return Promise.resolve(NSO_BoolCore[op].apply(null, args)).then(NSO_boolHandBack);
@@ -1235,11 +1244,12 @@ function subtractSoupBFromA(aWorld, bWorld, opts) {
   var spec = NSO_boolSpec('punch', null);
   return NSO_boolRun(spec, [aWorld, bWorld, opts], function () { return NSO_punchCore(aWorld, bWorld, opts); });
 }
-/* Extract bit's exact path: the void of a piece as a solid (NSO_cavityCore). o: { label, host } as above. */
-function NSO_cavitySoup(pieceWorld, o) {
+/* Extract bit's boolean: the void a click chose, as a solid (NSO_cavityCore). wallPoints and seed come from
+   NSO_Void.select (nso_void.js). o: { label, host } as above. */
+function NSO_cavitySoup(pieceWorld, wallPoints, seed, o) {
   var spec = NSO_boolSpec('cavity', o);
   spec.tris = function (a) { return NSO_soupLen(a[0]); };
-  return NSO_boolRun(spec, [pieceWorld], function () { return NSO_cavityCore(pieceWorld); });
+  return NSO_boolRun(spec, [pieceWorld, wallPoints, seed], function () { return NSO_cavityCore(pieceWorld, wallPoints, seed); });
 }
 function nsoUnionSoups(aSoup, bSoup) {
   var spec = NSO_boolSpec('fillUnion', null);
