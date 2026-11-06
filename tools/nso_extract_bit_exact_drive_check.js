@@ -158,6 +158,30 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'nso-extract-bit-'));
       check('the nut is untouched', (await hashOf(page, r.id)) === r.before);
     }
 
+    console.log('\n=== shutting the Subtract card ends the tool ===');
+    {
+      const id = await loadSTL(page, path.join(TMP, 'block.stl'));
+      await place(page, id);
+      const arm = () => page.evaluate(() => { const d = document.getElementById('menu-bit'); d.open = true; window.nsoExtractBit.cancel(); window.nsoExtractBit.press(); });
+      await arm();
+      check('armed with the card open', (await previewState(page)).armed);
+      await page.evaluate(() => { document.getElementById('menu-bit').open = false; });
+      await page.waitForFunction(() => !window.nsoExtractBit.armed(), null, { timeout: 5000 }).catch(() => {});
+      check('shutting the card (any route: its toggle) disarms the tool', !(await previewState(page)).armed);
+      /* A route that does not fire toggle in time: the pointer path itself stands down and lets the piece move. */
+      await arm();
+      const lost = await page.evaluate(() => {
+        const d = document.getElementById('menu-bit'); d.removeAttribute('open');
+        const p = state.placed.find(q => q && q.mesh), b = nsoBounds.worldBox(p.mesh), c = b.getCenter(new THREE.Vector3());
+        const v = new THREE.Vector3(c.x, b.max.y, c.z).project(state.camera), r = state.renderer.domElement.getBoundingClientRect();
+        return { x: r.left + (v.x * 0.5 + 0.5) * r.width, y: r.top + (-v.y * 0.5 + 0.5) * r.height };
+      });
+      await page.mouse.click(lost.x, lost.y);
+      await page.waitForTimeout(300);
+      const after = await previewState(page);
+      check('a click on a piece with the card shut is not taken: no scan, tool off', !after.armed && !after.pending && !/Finding the void|preview|Extract failed/.test(after.status || ''), after.status);
+    }
+
     console.log('\n=== solid block: a click on its outside, through the real pointer path ===');
     {
       const id = await loadSTL(page, path.join(TMP, 'block.stl'));

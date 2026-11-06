@@ -180,9 +180,15 @@
     return null;
   }
 
+  /* The tool lives on the Subtract card: it is armed only while that card is open. */
+  function cardOpen() { var d = $('menu-bit'); return !d || !!d.open; }
+
   /* app-core's onCanvasPointerDown asks this before it starts a move drag - the contract paint, carve and attach keep. */
   window.nsoExtractTakesClick = function (event) {
     if (!armed || !event || event.button !== 0) return false;
+    /* The card was shut some way this file did not hear of (a double click on its button, another card opening over it):
+       stand down at once, so the click moves the piece instead of scanning for a void. */
+    if (!cardOpen()) { setArmed(false, true); return false; }
     var t = hitPiece(event);
     if (!t) return false;
     if (busy) { say('Extract bit: still finding the last void - one at a time', true); return true; }
@@ -232,6 +238,12 @@
         e.preventDefault(); make();
       }
     });
+    /* Shutting the Subtract card, by whatever route, ends it: an armed tool nobody can see would take every click on a piece. */
+    var card = $('menu-bit');
+    if (card && !card.dataset.nsoExtractWired) {
+      card.dataset.nsoExtractWired = '1';
+      card.addEventListener('toggle', function () { if (!card.open && armed) setArmed(false, true); });
+    }
     /* Another tool's button ends this one: its click would otherwise be taken here, under it. */
     document.addEventListener('click', function (e) {
       if (!armed || !e.target || !e.target.closest) return;
