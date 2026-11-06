@@ -1354,6 +1354,15 @@ select:focus, input:focus {
   border-color: #2dd4bf;
   font-weight: 600;
 }
+/* Subtract B from A picks its own A and B: the button is teal while it is waiting
+   for a click on a piece, Carve's armed colour, and its line says which. */
+.vp-menu-body .btn-subtract.is-armed {
+  background: #2dd4bf;
+  color: #1a1d21;
+  border-color: #2dd4bf;
+  font-weight: 600;
+}
+.subtract-readout { margin: 4px 0 0; }
 .vp-row-carve2 { display: flex; gap: 3px; }
 .vp-row-carve2 .vp-clone { flex: 1 1 0; min-width: 0; justify-self: stretch; }
 .vp-row-carve2 .vp-clone input { width: 100%; font-size: 10px; padding: 3px 0; }

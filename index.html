@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=9f56b6d1" />
+  <link rel="stylesheet" href="styles.css?v=52274bed" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -1286,7 +1286,9 @@
             <summary class="vp-bar-btn" title="Subtract B from A, Extract bit, Carve, Punch, Hollow, Lift, Split to parts">Subtract</summary>
             <div class="vp-menu-body vp-finish">
             <div class="vp-row vp-row-full">
-              <button id="btn-subtract" class="btn btn-secondary" type="button">Subtract B from A</button>
+              <button id="btn-subtract" class="btn btn-secondary btn-subtract" type="button" aria-pressed="false"
+                      title="Cut one piece out of another. Press it, click piece A (the one that is cut), then piece B (the bit that is taken out). Then move B into place, through A's surface, and press it again. B is used up, A is replaced by the result, one Undo. Press it while picking to stop.">Subtract B from A</button>
+              <p id="subtract-readout" class="carve-readout subtract-readout" hidden></p>
             </div>
             <div class="vp-row vp-row-full">
               <button id="btn-extract-bit" class="btn btn-secondary" type="button">Extract bit</button>
@@ -2575,7 +2577,7 @@
   <script src="nso-helpers.js?v=9c476e39"></script>
   <script src="nso-recent.js?v=f03d6f13"></script>
   <script src="nso-bounds.js?v=778acac4"></script>
-  <script src="app-core.js?v=e1a29486"></script>
+  <script src="app-core.js?v=1bb4ec82"></script>
   <!-- Up to six plates (beds): the active one is state.models / state.placed, the rest are kept beside it. docs/BEDS.md. -->
   <script src="app-beds.js?v=3d221bc4"></script>
 
@@ -2658,7 +2660,7 @@
   <script src="app-fasteners.js?v=dbaebe2f"></script>
   <script src="app-assemble.js?v=60984bfb"></script>
   <script src="app-sel-outline.js?v=c1a5b4df"></script>
-  <script src="app-join.js?v=431f0378"></script>
+  <script src="app-join.js?v=4aa8ea5a"></script>
   <script src="app-center-lock.js?v=ee95c074"></script>
   <script src="app-oversize-washer.js?v=a445c3ff"></script>
   <script src="app-join-triple.js?v=95a9c48a"></script>

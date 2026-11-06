@@ -308,6 +308,7 @@
     "stock:live": {"weight":68900,"note":""},
     "stock:shelf": {"weight":58650,"note":""},
     "subtract:card": {"weight":50000,"note":"estimate: 68 s locally with three other browsers running, one app boot, two pieces; CI re-measures"},
+    "subtract:pick": {"weight":30000,"note":"estimate: ~25 s locally, one app boot, two pieces, one boolean; CI re-measures"},
     "support:audit": {"weight":1450,"note":""},
     "support:beacons": {"weight":2100,"note":""},
     "support:canonical": {"weight":15550,"note":""},

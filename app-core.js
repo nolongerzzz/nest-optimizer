@@ -62,6 +62,11 @@ const state = {
   joinPickMode: false,
   joinArmed: null,
   joinSession: false,
+  /* The Subtract card picks its own A and B (app-join.js, startSubtractFlow) on
+     the Join slots, so the Join card is not visited. True while that run of picks
+     owns the session: the click on A arms B by itself, and shutting the card
+     ends it. clearJoinSlots() puts it down with the slots. */
+  subtractFlow: false,
   joinFaceA: null,
   joinFaceB: null,
   /* Triple join's third slot. Held here with the rest of the Join slots so

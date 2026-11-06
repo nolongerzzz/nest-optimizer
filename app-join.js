@@ -46,8 +46,8 @@ function updateJoinUI() {
     slotC.classList.toggle('armed', state.joinArmed === 'c');
   }
   if (btn) btn.disabled = !(state.joinSession && state.editId && state.joinPartnerId && state.editId !== state.joinPartnerId);
-  const btnSub = document.getElementById('btn-subtract');
-  if (btnSub) btnSub.disabled = !(state.editId && state.joinPartnerId && state.editId !== state.joinPartnerId);
+  // Subtract B from A is never greyed: its first press is the pick, not the cut.
+  updateSubtractUI();
   const alignBtn = document.getElementById('btn-join-align');
   if (alignBtn) alignBtn.disabled = !(state.joinSession && state.editId && state.joinPartnerId && state.editId !== state.joinPartnerId);
   const readyJoin = !!(state.joinSession && state.editId && state.joinPartnerId && state.editId !== state.joinPartnerId);
@@ -86,6 +86,8 @@ function assignJoinClick(id, face) {
     state.joinFaceA = useFace;
     state.cutT = 0.5;
     state.joinArmed = null;
+    // Subtract's run of picks: A taken, B is next without another press.
+    if (state.subtractFlow && state.joinPartnerId == null) state.joinArmed = 'b';
   } else if (state.joinArmed === 'b') {
     if (id === state.editId) return;
     if (id === state.joinThirdId) { state.joinThirdId = null; state.joinFaceC = null; }
@@ -170,6 +172,7 @@ function armJoinSlot(slot) {
 
 function clearJoinSlots() {
   state.joinSession = false;
+  state.subtractFlow = false;
   state.joinArmed = null;
   state.joinPartnerId = null;
   state.joinHullId = null;
@@ -1443,6 +1446,115 @@ function NSO_farWallMarch(grid, ox, oy, oz, dir, maxDist, tol) {
    nso_csg.js, a file the page and the boolean worker (nso_work.js) both load. */
 
 /* =====================================================================
+   SUBTRACT B FROM A, PICKED ON ITS OWN CARD
+
+   The Subtract card used to need a trip to the Join card: Pick A and Pick B were
+   its slots, and the button stayed grey until both were filled. Now the button
+   runs the whole thing, in this order:
+
+     press            -> click piece A (plate or list)
+     (A is taken)     -> click piece B - armed by the A click, no second press
+     (B is taken)     -> move B into place, through A's surface, by hand
+     press            -> the cut
+
+   It is the Join session under the hood - the same slots, the same click routing
+   in app-core.js, the same highlights, and B drags freely once both are taken -
+   with state.subtractFlow marking who started it. Shutting the card (to nothing
+   else open) or pressing the button while it waits for a click ends the run, as
+   Cancel does on the Join card. A and B that are already picked, by this card or
+   the Join card, are cut on the first press, so nothing that drove it before
+   changes.
+   ===================================================================== */
+function subtractReady() {
+  return !!(state.editId != null && state.joinPartnerId != null && state.editId !== state.joinPartnerId);
+}
+
+function updateSubtractUI() {
+  // A Join that finished or was cancelled elsewhere ends the run with it.
+  if (state.subtractFlow && !state.joinSession) state.subtractFlow = false;
+  const btn = document.getElementById('btn-subtract');
+  const out = document.getElementById('subtract-readout');
+  const picking = !!(state.joinSession && state.subtractFlow && state.joinArmed);
+  if (btn) {
+    btn.classList.toggle('is-armed', picking);
+    btn.setAttribute('aria-pressed', picking ? 'true' : 'false');
+  }
+  if (!out) return;
+  const nameOf = function (id) {
+    const m = (state.models || []).find(function (x) { return x.id === id; });
+    return m ? m.name : 'piece';
+  };
+  let msg = '';
+  if (state.joinSession && state.subtractFlow) {
+    if (state.joinArmed === 'a') {
+      msg = 'Click piece A - the one that is cut.';
+    } else if (state.joinArmed === 'b') {
+      msg = 'A: ' + nameOf(state.editId) + '. Now click piece B - the bit that is taken out.';
+    } else if (subtractReady()) {
+      msg = 'A: ' + nameOf(state.editId) + ' - B: ' + nameOf(state.joinPartnerId) +
+        '. Move B into A, through the surface it cuts, then press Subtract B from A.';
+    }
+  }
+  out.textContent = msg;
+  out.hidden = !msg;
+}
+
+function startSubtractFlow() {
+  // Anything else waiting for a click on a piece is put away first: its click
+  // would be taken before the pick is.
+  ['btn-carve', 'btn-punch', 'btn-lift'].forEach(function (id) {
+    const b = document.getElementById(id);
+    if (b && !b.disabled && b.getAttribute('aria-pressed') === 'true') b.click();
+  });
+  startJoinSession();
+  state.subtractFlow = true;
+  state.joinArmed = 'a';
+  setStatus('Subtract: click piece A, the one that is cut');
+  updateJoinUI();
+}
+
+/* The press that is not the cut: start the picks, carry them on, or stop them. */
+function subtractPick() {
+  if (state.joinSession && state.subtractFlow && state.joinArmed) {
+    clearJoinSlots();
+    setStatus('Subtract stopped - nothing was changed');
+    return;
+  }
+  const onPlate = {};
+  state.placed.forEach(function (p) { if (p && p.mesh && p.sourceId != null) onPlate[p.sourceId] = true; });
+  if (Object.keys(onPlate).length < 2) {
+    setStatus('Subtract needs two pieces on the plate - A to cut, B to cut with', true);
+    return;
+  }
+  if (!state.joinSession) { startSubtractFlow(); return; }
+  // A session the Join card already holds: finish its picks from here.
+  state.subtractFlow = true;
+  state.joinArmed = state.editId == null ? 'a' : 'b';
+  setStatus(state.joinArmed === 'a' ? 'Subtract: click piece A, the one that is cut'
+                                    : 'Subtract: click piece B, the bit that is taken out');
+  updateJoinUI();
+}
+
+function subtractWireCard() {
+  const menu = document.getElementById('menu-bit');
+  if (!menu || menu.dataset.nsoSubWired === '1') return;
+  menu.dataset.nsoSubWired = '1';
+  if (typeof MutationObserver !== 'function') return;
+  /* Watched on every menu, not only this one: the card shuts for Move when B is
+     put in place, and it is the Move menu shutting that leaves nothing open. A
+     run left standing then would keep Brush, Pull and Limb off (they stand down
+     for a live session) with no card on the page to say why. The look is one
+     tick later, so a column handing over to the next never reads as "nothing". */
+  const look = function () {
+    if (menu.open) updateSubtractUI();
+    if (!state.subtractFlow) return;
+    if (!document.querySelector('.vp-menu[open]')) clearJoinSlots();
+  };
+  new MutationObserver(function () { setTimeout(look, 0); })
+    .observe(document.body, { attributes: true, attributeFilter: ['open'], subtree: true });
+}
+
+/* =====================================================================
    REPLACEMENT: subtractBFromA
    Same selection checks, same undo shape (subtractReplace), same mesh
    swap/cleanup as before. Only change: awaits the now-async subtract,
@@ -1576,6 +1688,7 @@ async function subtractBFromA() {
   state.joinThirdId = null;
   state.joinFaceC = null;
   state.joinSession = false;
+  state.subtractFlow = false;
   state.joinArmed = null;
 
   if (placedA.mesh && state.modelGroup) {
@@ -3240,6 +3353,8 @@ function setupUI() {
     var subtractBusy = false;
     btnSubtract.addEventListener('click', function () {
       if (subtractBusy) return;
+      // Not both picked yet: this press is the picking, not the cut.
+      if (!subtractReady()) { subtractPick(); return; }
       subtractBusy = true;
       var prevLabel = btnSubtract.textContent;
       btnSubtract.disabled = true;
@@ -3277,6 +3392,7 @@ function setupUI() {
   const btnJoinClear = document.getElementById('btn-join-clear');
   if (btnJoinClear) btnJoinClear.addEventListener('click', clearJoinSlots);
   joinWireCard();
+  subtractWireCard();
   const btnJoinAlign = document.getElementById('btn-join-align');
   if (btnJoinAlign) btnJoinAlign.addEventListener('click', alignJoinForSlide);
   const btnJoinCx = document.getElementById('btn-join-cx');
