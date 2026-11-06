@@ -9,7 +9,7 @@
      2. with the menu open a translucent PREVIEW stands on the plate - in the scene, not on the plate (no piece, no Undo step)
      3. the sliders move the preview (Length changes its height, Ø its width), the box follows the slider, Size resets Ø / Pitch / nut
         thickness, the head tiles swap the head, a Nut tile shows a nut, Bolt + nut shows two side by side
-     4. Add to plate BAKES what the preview shows (one Undo each); the preview stands beside the new piece; the nut and bolt turn
+     4. Add to plate BAKES what the preview shows (one Undo each) and DISARMS the card: no ghost beside the new piece until a tile is clicked again; the nut and bolt turn
      5. a choice that is refused clears the preview, says why in red, and Add to plate is off - nothing is added
      6. closing the menu takes the preview away, opening it brings it back; a custom Ø is named by its numbers; left hand */
 
@@ -72,7 +72,12 @@ withApp(async (page, logs) => {
   await page.evaluate(() => { state.editId = null; state.selectedIndex = -1; });
   const u0 = await undoDepth(page), n0 = (await pieces(page)).length;
   await page.evaluate(() => { document.getElementById('menu-gen').open = true; document.getElementById('menu-fasteners').open = true; });
-  await until(page, s => s.ghosts === 1 && s.tiles);
+  await until(page, s => s.tiles);
+  await frames(page, 6);
+  const idle = await FS(page), idleAdd = await page.evaluate(() => ({ off: document.getElementById('btn-fs-add').disabled, pressed: document.querySelectorAll('#fs-kind-row [aria-pressed="true"]').length }));
+  check('the card open with no tile clicked: NO ghost, no tile pressed, Add to plate off', idle.ghosts === 0 && !idle.ok && idleAdd.off && idleAdd.pressed === 0, JSON.stringify([idle.ghosts, idleAdd]));
+  await click(page, '#fs-kind-row [data-kind="bolt"]');
+  await until(page, s => s.ghosts === 1);
   const tiles = await page.evaluate(() => Array.from(document.querySelectorAll('#menu-fasteners .fs-tile')).map(b => {
     const c = b.querySelector('canvas'), d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
     let lit = 0, h = 0; for (let i = 0; i < d.length; i += 4) { if (Math.abs(d[i] - 0x14) + Math.abs(d[i + 1] - 0x17) + Math.abs(d[i + 2] - 0x1c) > 24) lit++; h = (h * 31 + d[i] + 7 * d[i + 1] + 13 * d[i + 2]) | 0; }
@@ -172,10 +177,15 @@ withApp(async (page, logs) => {
   check('"bolt M10 1" and "nut M10 1" are on the plate, one Undo each, and the bolt\'s size is the ghost\'s', !!b10 && !!n10 && P.length === n0 + 2 && (await undoDepth(page)) === d0 + 2 && Math.abs(b10.size.y - 31.4) < 0.05, JSON.stringify(P.map(p => p.name)));
   const Tb = await topoOf(page, b10.id), Tn = await topoOf(page, n10.id);
   check('both closed, 2-manifold, consistently wound: the bolt Euler 2, the nut (a ring) Euler 0', Tb.open === 0 && Tb.nm === 0 && Tb.flip === 0 && Tb.euler === 2 && Tn.open === 0 && Tn.nm === 0 && Tn.flip === 0 && Tn.euler === 0, JSON.stringify([Tb, Tn]));
+  await frames(page, 8);
+  st = await FS(page);
+  const afterAdd = await page.evaluate(() => ({ off: document.getElementById('btn-fs-add').disabled, pressed: document.querySelectorAll('#fs-kind-row [aria-pressed="true"]').length }));
+  check('after the bake the card is disarmed: no ghost beside the new pieces, no tile pressed, Add to plate off', st.ghosts === 0 && !st.ok && afterAdd.off && afterAdd.pressed === 0, JSON.stringify([st.ghosts, afterAdd]));
+  await click(page, '#fs-kind-row [data-kind="set"]');
   await until(page, s => s.ghosts === 2);
   st = await FS(page);
   const placedMax = await page.evaluate(() => Math.max.apply(null, state.placed.filter(Boolean).map(p => placedFootprint(p).maxx)));
-  check('the preview is still up, standing beside what was just added (its left edge ' + (st.ghost[0].x - st.ghost[0].size.x / 2).toFixed(1) + ' is right of the plate\'s rightmost piece ' + placedMax.toFixed(1) + ')', st.ghosts === 2 && st.ghost[0].x - st.ghost[0].size.x / 2 > placedMax - 0.01, JSON.stringify(st.ghost.map(g => g.x)));
+  check('clicking a tile again starts a new preview, standing beside what was just added (its left edge ' + (st.ghost[0].x - st.ghost[0].size.x / 2).toFixed(1) + ' is right of the plate\'s rightmost piece ' + placedMax.toFixed(1) + ')', st.ghosts === 2 && st.ghost[0].x - st.ghost[0].size.x / 2 > placedMax - 0.01, JSON.stringify(st.ghost.map(g => g.x)));
   // measured in the page: the nut and the bolt it was made with turn on each other
   const gap = await page.evaluate(([bid, nid]) => {
     const b = state.models.find(m => m && m.id === bid).rawTris, n = state.models.find(m => m && m.id === nid).rawTris;
@@ -234,6 +244,7 @@ withApp(async (page, logs) => {
   await click(page, '#btn-fs-add');
   await waitStatus(page, /Dropped rod M7x1/);
   check('a rod with Ø moved to 7 is named by its numbers: "rod M7x1"', (await pieces(page)).some(p => p.name === 'rod M7x1 1') && (await undoDepth(page)) === dC + 1);
+  await click(page, '#fs-kind-row [data-kind="rod"]');
   await choose(page, 'sel-fs-hand', 'left');
   await until(page, s => s.ghosts === 1);
   rd = await readout(page);
@@ -244,7 +255,7 @@ withApp(async (page, logs) => {
   check('closing the menu takes the preview away', (await FS(page)).ghosts === 0 && (await page.evaluate(() => state.scene.children.filter(c => c.userData && c.userData.nsoPiecePreview).length)) === 0);
   await page.evaluate(() => { document.getElementById('menu-fasteners').open = true; });
   await until(page, s => s.ghosts === 1);
-  check('opening it brings it back', (await FS(page)).ghosts === 1);
+  check('opening it brings it back (the tile is still armed)', (await FS(page)).ghosts === 1);
   await page.evaluate(() => { document.getElementById('menu-gen').open = false; });
   await until(page, s => s.ghosts === 0 && !s.open);
   check('closing Gen+ (the menu it sits in) takes it away too', (await FS(page)).ghosts === 0);

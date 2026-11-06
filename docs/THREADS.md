@@ -108,12 +108,12 @@ Pick **Rod**, **Bolt**, **Nut** or **Bolt + nut** from the tiles, adjust, and **
   thick** (nut). Size and Hand are selects. Choosing a **Size** sets Ø, Pitch and the nut's thickness to its own and the sliders adjust from there;
   Ø or Pitch moved off the table makes a thread of its own, named by its numbers (`M7x1.5`, `Ø20.96x2`); an unchanged one is exactly the table's
   (G1/2 is 20.955, not the box's 20.96). The box takes a value past its slider's end. Rows that do not apply to the chosen kind are put away.
-- **Live preview** - a translucent copy of what Add to plate would drop (a set shows both) stands on the plate where the drop would put it: beside
+- **Live preview** - shown only once a tile is clicked (opening the card shows none); a translucent copy of what Add to plate would drop (a set shows both) stands on the plate where the drop would put it: beside
   the selection, then the nearest free spot (`nsoFittings.spotFor`, the drop's own two steps). It is rebuilt as any control moves (paced by the live
   slider), and is a helper in the scene - **not** a piece (not in `state.placed` or `state.modelGroup`, so it is not picked, packed, exported, or
   an Undo step). It shows only while Gen+ and the Fasteners menu are open. A choice that is refused clears it, says why in red, and turns Add to plate
   off.
-- **Add to plate** bakes what the preview shows: one piece each (a set is two), selected, one Undo each; the preview then stands beside the new piece.
+- **Add to plate** bakes what the preview shows: one piece each (a set is two), selected, one Undo each. The card then **disarms**: no ghost stands beside the new piece until a tile is clicked again.
   `nsoFasteners.rod() / bolt() / nut() / set()` bake that kind with the card's numbers (what the old buttons did).
 
 A bolt is a hex head (6 across-flats facets) or a socket cap (a cylinder with a hex socket open on the bed); a nut is hex or round. Head and nut

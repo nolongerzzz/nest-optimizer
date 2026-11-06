@@ -18,7 +18,8 @@
    beside the selection, then the nearest free spot (nsoFittings.spotFor, the drop's own two steps) - rebuilt as any control
    moves, paced by the live slider. Nothing is on the plate until Add to plate: the preview is a helper in the scene, not a
    piece (it is not in state.placed or state.modelGroup, so it is not picked, packed or exported). It shows only while the menu is
-   open. A choice that is refused clears it and says why, in red, and Add to plate is off.
+   open AND a tile has been clicked (armed): opening the card shows none, and Add to plate disarms it - no ghost stands beside
+   the piece just baked until a tile is clicked again. A choice that is refused clears it and says why, in red, and Add to plate is off.
 
    PAINT SCOPE: NONE. A fastener reads no face of anything and writes to no face. See docs/HANDOFF.md, "Scoping". */
 
@@ -45,7 +46,8 @@
     fit:    { box: 'inp-fs-fit',    slider: 'inp-fs-fit-slider',    read: 'fs-fit-read' },
     nutm:   { box: 'inp-fs-nutm',   slider: 'inp-fs-nutm-slider',   read: 'fs-nutm-read' }
   };
-  var S = { kind: 'bolt', head: 'hex', touched: {}, tiles: false, ok: false };
+  /* armed: a tile has been clicked and not yet baked. Only then is there a preview - none on opening the card, none after a bake */
+  var S = { kind: 'bolt', head: 'hex', touched: {}, tiles: false, ok: false, armed: false };
 
   function menu() { return $('menu-fasteners'); }
   /* open, and so is every menu it sits in (Gen+): a preview for a card nobody can see is clutter */
@@ -137,6 +139,7 @@
   /* the preview, now: build what the card says, show it, say what it is - or clear it and say why */
   function refresh() {
     if (!isOpen()) { ghostClear(); return null; }
+    if (!S.armed) { ghostClear(); setAdd(false); readout('Pick Rod, Bolt, Nut or Bolt + nut to preview it'); return null; }
     var b = build();
     if (!b.ok) { ghostClear(); setAdd(false); readout(b.reason, true); return b; }
     ghostShow(b.items); setAdd(true);
@@ -155,13 +158,13 @@
     show('fs-head-row', k === 'bolt' || k === 'set');
     show('fs-fit-row', k === 'nut' || k === 'set');
     show('fs-nutm-row', k === 'nut' || k === 'set');
-    document.querySelectorAll('#fs-kind-row [data-kind]').forEach(function (b) { b.setAttribute('aria-pressed', b.getAttribute('data-kind') === k ? 'true' : 'false'); });
+    document.querySelectorAll('#fs-kind-row [data-kind]').forEach(function (b) { b.setAttribute('aria-pressed', S.armed && b.getAttribute('data-kind') === k ? 'true' : 'false'); });
     document.querySelectorAll('#fs-head-row [data-head]').forEach(function (b) { b.setAttribute('aria-pressed', b.getAttribute('data-head') === S.head ? 'true' : 'false'); });
   }
   function selectKind(kind) {
     if (KINDS.indexOf(kind) < 0) return false;
     var was = S.kind;
-    S.kind = kind;
+    S.kind = kind; S.armed = true;
     if (!S.touched.length && KIND_LENGTH[kind] && KIND_LENGTH[kind] !== KIND_LENGTH[was]) setField('length', KIND_LENGTH[kind]);
     syncRows();
     refresh();
@@ -169,7 +172,7 @@
   }
   function selectHead(head) {
     if (head !== 'hex' && head !== 'socket') return false;
-    S.head = head; syncRows(); refresh();
+    S.head = head; syncRows(); refresh();   // a head choice only changes a preview that is already up
     return true;
   }
 
@@ -193,7 +196,8 @@
     var res = { ok: made.every(function (m) { return m.ok; }), pieces: made, reason: b.text };
     if (made.length === 1) { res.modelId = made[0].modelId; res.name = made[0].name; res.placedIndex = made[0].placedIndex; res.added = made[0].ok; }
     else { res.bolt = made[0]; res.nut = made[1]; }
-    if (isOpen()) { var again = build(); if (again.ok) ghostShow(again.items); }       // the preview stands beside what was just added
+    /* baked: disarm. No new ghost beside the piece just added - the next one starts when a tile is clicked again */
+    S.armed = false; syncRows(); setAdd(false); ghostClear();
     return res;
   }
 
