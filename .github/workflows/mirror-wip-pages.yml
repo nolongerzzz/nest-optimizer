@@ -36,16 +36,45 @@ jobs:
       - name: Assemble the preview tree
         run: |
           set -euo pipefail
-          rm -rf "$RUNNER_TEMP/site"
-          mkdir -p "$RUNNER_TEMP/site"
+          SITE="$RUNNER_TEMP/site"
+          rm -rf "$SITE"
+          # The publishable site goes in dist/, and pages.yml uploads only that
+          # directory - not the whole repository.
+          mkdir -p "$SITE/dist"
           # Only tracked files, so nothing untracked or ignored can leak out.
-          git archive --format=tar HEAD | tar -x -C "$RUNNER_TEMP/site"
-          # CI config and the Node/Python test harness are not part of the site.
-          rm -rf "$RUNNER_TEMP/site/.github" "$RUNNER_TEMP/site/tools"
-          mkdir -p "$RUNNER_TEMP/site/.github/workflows"
-          cp .github/preview-site/pages.yml "$RUNNER_TEMP/site/.github/workflows/pages.yml"
+          git archive --format=tar HEAD | tar -x -C "$SITE/dist"
+          cd "$SITE/dist"
+          # Not part of the site: CI config, the Node/Python test harness, the
+          # docs (the app only mentions them in comments), editor and repo
+          # housekeeping.
+          rm -rf .github .claude tools docs
+          rm -f package.json package-lock.json ARCHITECTURE_AUDIT.md .gitignore .claude-wip-ping
+          # fixtures/ is mostly test data (24 MB). The app fetches exactly these
+          # at run time - app-print.js (template + frozen planner data) and
+          # nso-3mf.js (TEMPLATE_DIR) - so keep them and nothing else. If the
+          # app starts fetching another fixture, add it here.
+          KEEP="$RUNNER_TEMP/keep-fixtures"
+          rm -rf "$KEEP"
+          mkdir -p "$KEEP/supports"
+          mv fixtures/bambu-templates "$KEEP/bambu-templates"
+          mv fixtures/print-planner "$KEEP/print-planner"
+          mv fixtures/supports/simple_overhang_p1s.gcode.3mf "$KEEP/supports/"
+          rm -rf fixtures
+          mkdir fixtures
+          mv "$KEEP"/* fixtures/
+          # What Pages needs from the artifact (and rejects if it is wrong).
+          test -f index.html || { echo "::error::dist/index.html is missing"; exit 1; }
+          for f in fixtures/supports/simple_overhang_p1s.gcode.3mf fixtures/print-planner fixtures/bambu-templates; do
+            test -e "$f" || { echo "::error::$f is missing from dist"; exit 1; }
+          done
+          if [ -n "$(find . -type l)" ]; then echo "::error::dist contains symbolic links"; find . -type l; exit 1; fi
+          if [ -n "$(find . -type f -links +1)" ]; then echo "::error::dist contains hard links"; find . -type f -links +1; exit 1; fi
+          echo "dist: $(find . -type f | wc -l) files, $(du -sh . | cut -f1)"
+          cd "$SITE"
+          mkdir -p .github/workflows
+          cp "$GITHUB_WORKSPACE/.github/preview-site/pages.yml" .github/workflows/pages.yml
           sed "s|@SOURCE_SHA@|${GITHUB_SHA}|g; s|@SOURCE_REPO@|${GITHUB_REPOSITORY}|g" \
-            .github/preview-site/README.md > "$RUNNER_TEMP/site/README.md"
+            "$GITHUB_WORKSPACE/.github/preview-site/README.md" > README.md
 
       - name: Push to the preview repository
         env:

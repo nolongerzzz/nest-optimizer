@@ -31,11 +31,11 @@ jobs:
         with:
           enablement: true
 
-      # upload-pages-artifact excludes .git and .github from the tarball, so
-      # the repo root is exactly the site root.
+      # Only dist/ is the site (index.html at its top level). The mirror
+      # workflow builds it; the rest of this repo is not uploaded.
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: .
+          path: ./dist
 
       - id: deployment
         uses: actions/deploy-pages@v4
