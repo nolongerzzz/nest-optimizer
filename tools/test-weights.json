@@ -399,6 +399,8 @@
     "wire:cut-yaw": {"weight":16200,"note":""},
     "wire:detach": {"weight":79400,"note":""},
     "wire:extend": {"weight":10750,"note":""},
+    "extract:bit-exact": {"weight":6000,"note":"estimated until CI measures it"},
+    "extract:bit-drive": {"weight":15000,"note":"estimated until CI measures it"},
     "wire:extract-sel": {"weight":12050,"note":""},
     "wire:fuse": {"weight":13550,"note":""},
     "wire:hollow": {"weight":26000,"note":""},

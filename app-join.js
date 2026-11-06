@@ -2179,6 +2179,91 @@ function NSO_floodFillLargestEmptyCluster(empty, nx, ny, nz) {
   return best;
 }
 
+/* Extract bit's fallback, for a kernel that cannot say what the void is: one box round the biggest
+   empty region of a 1.2mm lattice laid over the piece (6-connected flood fill of the cells that are not
+   inside it). Coarse, and always a box. -> { soup } or { msg }. */
+function NSO_voxelBitSoup(p, soupPiece) {
+  p.mesh.updateMatrixWorld(true);
+  const bb = meshLocalBox3(p.mesh);
+  const inset = 0.45;
+  const x0 = bb.min.x + inset, x1 = bb.max.x - inset;
+  const y0 = bb.min.y + inset, y1 = bb.max.y - inset;
+  const z0 = bb.min.z + inset, z1 = bb.max.z - inset;
+  if (x1 <= x0 || y1 <= y0 || z1 <= z0) {
+    return { msg: 'Extract failed - tile too thin' };
+  }
+
+  // Same sampling grid as before - cell centers on the 1.2mm lattice.
+  const step = 1.2;
+  const half = step * 0.49;
+  const xs = [];
+  for (let x = x0 + half; x <= x1 - half + 1e-6; x += step) xs.push(x);
+  const ys = [];
+  for (let y = y0 + half; y <= y1 - half + 1e-6; y += step) ys.push(y);
+  const zs = [];
+  for (let z = z0 + half; z <= z1 - half + 1e-6; z += step) zs.push(z);
+  const nx = xs.length, ny = ys.length, nz = zs.length;
+  if (nx < 1 || ny < 1 || nz < 1) {
+    return { msg: 'Extract failed - no cavity found' };
+  }
+
+  const empty = new Uint8Array(nx * ny * nz);
+  let emptyCount = 0;
+  for (let ix = 0; ix < nx; ix++) {
+    for (let iy = 0; iy < ny; iy++) {
+      for (let iz = 0; iz < nz; iz++) {
+        if (!NSO_pointInsideSoup(soupPiece, xs[ix], ys[iy], zs[iz])) {
+          empty[(ix * ny + iy) * nz + iz] = 1;
+          emptyCount++;
+        }
+      }
+    }
+  }
+  if (emptyCount < 4) {
+    return { msg: 'Extract failed - no cavity found' };
+  }
+
+  // Flood-fill (6-connected) to the single largest empty region - this is
+  // the fix: no more one cube per empty cell.
+  const cluster = NSO_floodFillLargestEmptyCluster(empty, nx, ny, nz);
+  if (!cluster || cluster.size < 4) {
+    return { msg: 'Extract failed - no cavity found' };
+  }
+
+  // One box spanning the cluster's cell extents.
+  const mn = {
+    x: xs[cluster.minIx] - half,
+    y: ys[cluster.minIy] - half,
+    z: zs[cluster.minIz] - half
+  };
+  const mx = {
+    x: xs[cluster.maxIx] + half,
+    y: ys[cluster.maxIy] + half,
+    z: zs[cluster.maxIz] + half
+  };
+
+  const bitSoup = soupAxisBox(mn, mx);
+  if (!bitSoup || bitSoup.length < 9) {
+    return { msg: 'Extract failed - no cavity found' };
+  }
+  return { soup: bitSoup };
+
+}
+
+/* The bit's display geometry from its exact soup. soupToCenteredGeo welds at 0.3 mm, which is right for
+   the box round a void and would flatten a thread's flank (pitch 0.5 to 2 mm) into a smooth rod, so the
+   exact bit is welded at the kernel's own scale (1e-4 mm: shared corners only) and centred. */
+function NSO_exactBitGeo(soup) {
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(soup, 3));
+  const U = THREE.BufferGeometryUtils;
+  const out = (U && typeof U.mergeVertices === 'function') ? U.mergeVertices(geo, 1e-4) : geo;
+  out.computeVertexNormals();
+  out.center();
+  out.computeBoundingBox();
+  return out;
+}
+
 async function extractBitFromSelected() {
   const p = state.selectedIndex >= 0 ? state.placed[state.selectedIndex] : null;
   const model = p && p.sourceId != null
@@ -2211,76 +2296,30 @@ async function extractBitFromSelected() {
     setStatus('Extract failed - piece unchanged', true);
     return;
   }
+  /* The void of the piece, exactly: its convex hull less the piece (nso_csg.js, NSO_cavityCore). A closed
+     tube gives the cylinder in its bore, a threaded hole gives the threaded rod, whatever the void is is the
+     bit. If the kernel cannot do it, a box round the void is made instead, and the status line says so. */
   p.mesh.updateMatrixWorld(true);
-  const bb = meshLocalBox3(p.mesh);
-  const inset = 0.45;
-  const x0 = bb.min.x + inset, x1 = bb.max.x - inset;
-  const y0 = bb.min.y + inset, y1 = bb.max.y - inset;
-  const z0 = bb.min.z + inset, z1 = bb.max.z - inset;
-  if (x1 <= x0 || y1 <= y0 || z1 <= z0) {
-    setStatus('Extract failed - tile too thin', true);
+  let bitSoup = null, approx = null, voids = 1, exactMm3 = 0;
+  const cav = (typeof NSO_cavitySoup === 'function')
+    ? await NSO_cavitySoup(soupPiece, { label: 'Extracting' })
+    : { ok: false, reason: 'no CSG kernel in this build' };
+  if (cav.ok) {
+    bitSoup = cav.soup; voids = cav.voids || 1; exactMm3 = cav.volumeMm3 || 0;
+  } else if (cav.cancelled || cav.timedOut) {
+    setStatus('Extract stopped - piece unchanged' + (cav.timedOut ? ' (' + cav.reason + ')' : ''), !!cav.timedOut);
     return;
-  }
-
-  // Same sampling grid as before - cell centers on the 1.2mm lattice.
-  const step = 1.2;
-  const half = step * 0.49;
-  const xs = [];
-  for (let x = x0 + half; x <= x1 - half + 1e-6; x += step) xs.push(x);
-  const ys = [];
-  for (let y = y0 + half; y <= y1 - half + 1e-6; y += step) ys.push(y);
-  const zs = [];
-  for (let z = z0 + half; z <= z1 - half + 1e-6; z += step) zs.push(z);
-  const nx = xs.length, ny = ys.length, nz = zs.length;
-  if (nx < 1 || ny < 1 || nz < 1) {
+  } else if (cav.noCavity) {
     setStatus('Extract failed - no cavity found', true);
     return;
+  } else {
+    approx = cav.reason || 'the kernel could not run';
+    const vox = NSO_voxelBitSoup(p, soupPiece);
+    if (!vox.soup) { setStatus(vox.msg, true); return; }
+    bitSoup = vox.soup;
   }
 
-  const empty = new Uint8Array(nx * ny * nz);
-  let emptyCount = 0;
-  for (let ix = 0; ix < nx; ix++) {
-    for (let iy = 0; iy < ny; iy++) {
-      for (let iz = 0; iz < nz; iz++) {
-        if (!NSO_pointInsideSoup(soupPiece, xs[ix], ys[iy], zs[iz])) {
-          empty[(ix * ny + iy) * nz + iz] = 1;
-          emptyCount++;
-        }
-      }
-    }
-  }
-  if (emptyCount < 4) {
-    setStatus('Extract failed - no cavity found', true);
-    return;
-  }
-
-  // Flood-fill (6-connected) to the single largest empty region - this is
-  // the fix: no more one cube per empty cell.
-  const cluster = NSO_floodFillLargestEmptyCluster(empty, nx, ny, nz);
-  if (!cluster || cluster.size < 4) {
-    setStatus('Extract failed - no cavity found', true);
-    return;
-  }
-
-  // One box spanning the cluster's cell extents.
-  const mn = {
-    x: xs[cluster.minIx] - half,
-    y: ys[cluster.minIy] - half,
-    z: zs[cluster.minIz] - half
-  };
-  const mx = {
-    x: xs[cluster.maxIx] + half,
-    y: ys[cluster.maxIy] + half,
-    z: zs[cluster.maxIz] + half
-  };
-
-  const bitSoup = soupAxisBox(mn, mx);
-  if (!bitSoup || bitSoup.length < 9) {
-    setStatus('Extract failed - no cavity found', true);
-    return;
-  }
-
-  const geo = soupToCenteredGeo(bitSoup);
+  const geo = approx ? soupToCenteredGeo(bitSoup) : NSO_exactBitGeo(bitSoup);
   geo.computeBoundingBox();
   const size = new THREE.Vector3();
   geo.boundingBox.getSize(size);
@@ -2300,7 +2339,10 @@ async function extractBitFromSelected() {
   const xPlace = p.x + (p.width || size.x) / 2 + size.x / 2 + 6;
   const m = state.models.find(function (mm) { return mm.id === id; });
   if (m) placeModelMovable(m, xPlace, p.z);
-  setStatus('Extract bit ok - solid ' + size.x.toFixed(1) + 'x' + size.y.toFixed(1) + 'x' + size.z.toFixed(1) + ' mm' +
+  setStatus('Extract bit ok - ' + (approx ? 'box round the void (exact shape unavailable: ' + approx + ')' : 'exact void') +
+    ', solid ' + size.x.toFixed(1) + 'x' + size.y.toFixed(1) + 'x' + size.z.toFixed(1) + ' mm' +
+    (exactMm3 ? ', ' + exactMm3.toFixed(0) + ' mm3' : '') +
+    (voids > 1 ? ' - largest of ' + voids + ' voids' : '') +
     (solBit.merged ? ' - ' + solBit.note : ''));
 }
 

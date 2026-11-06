@@ -503,6 +503,71 @@ async function NSO_subtractCore(aWorld, bWorld) {
 }
 
 /* =====================================================================
+   The void of a piece, as a solid - Extract bit's exact path.
+
+   What a piece's void is: the convex hull of the piece, less the piece. A closed
+   tube's hull is the cylinder it wraps, so the void is the bore, capped flush at
+   both ends; a block with a threaded hole has the block for a hull, so the void is
+   the threaded hole, thread and all - a threaded rod; a cup's is its inside up to
+   the rim; a sealed cavity's is the cavity. A solid ball or a plain block has
+   nothing left over: no void, and that is said, not guessed.
+
+   Two things the bounding box of the piece could not say, and the hull does: the
+   void is the shape it is (not a box round it), and the box's four outside corners
+   (round a tube, round a ball) are not voids - they lie outside the hull.
+
+   The hull less the piece may fall in several parts (a piece with a bore and a
+   cross-hole sealed from it, two pockets, a ring of slivers where a faceted hull
+   meets a curved face). The largest by volume is the bit, and the count is
+   reported so the caller can say "largest of 3". Anything under MIN_VOID_MM3 is
+   a numerical sliver, not a void.
+
+   -> { ok, soup, volumeMm3, voids, stats, reason }
+      ok false: noCavity true when the piece has none (it is not an error of the
+      kernel - the caller must not fall back to a guess), else the kernel's words.
+   ===================================================================== */
+var NSO_MIN_VOID_MM3 = 1;
+async function NSO_cavityCore(pieceWorld) {
+  if (!NSO_soupLen(pieceWorld)) return { ok: false, reason: 'empty soup' };
+  var wasm;
+  try { wasm = await NSO_CSG.load(); }
+  catch (err) { return { ok: false, reason: 'CSG kernel failed to load: ' + NSO_errMsg(err) }; }
+  var man = null, hull = null, gap = null, bits = null, best = null;
+  try {
+    var pIn = pieceWorld;
+    if (typeof weldSoupVerts === 'function') {
+      try { pIn = weldSoupVerts(pieceWorld, NSO_weldEpsFor(pieceWorld, 0.08)); } catch (e0) { pIn = pieceWorld; }
+    }
+    man = NSO_CSG.soupToManifold(wasm, pIn);
+    if (man.status && man.status() !== 'NoError') throw new Error('piece rejected: ' + man.status());
+    if (typeof man.hull !== 'function') throw new Error('this kernel has no convex hull');
+    hull = man.hull();
+    if (hull.status && hull.status() !== 'NoError') throw new Error('hull rejected: ' + hull.status());
+    gap = hull.subtract(man);
+    if (gap.status() !== 'NoError') throw new Error('kernel refused the void: ' + gap.status());
+    if (gap.isEmpty()) return { ok: false, noCavity: true, reason: 'no cavity found' };
+    bits = (typeof gap.decompose === 'function') ? gap.decompose() : [gap];
+    var kept = 0, bestVol = 0;
+    for (var i = 0; i < bits.length; i++) {
+      var v = bits[i].volume();
+      if (v >= NSO_MIN_VOID_MM3) kept++;
+      if (v > bestVol) { bestVol = v; best = bits[i]; }
+    }
+    if (!best || bestVol < NSO_MIN_VOID_MM3) return { ok: false, noCavity: true, reason: 'no cavity found' };
+    var st = NSO_manifoldStats(best);
+    return { ok: true, soup: NSO_CSG.manifoldToSoup(best), volumeMm3: bestVol, voids: kept,
+             stats: st.exact ? { open: st.open, nm: st.nm } : null, reason: '' };
+  } catch (err) {
+    return { ok: false, reason: NSO_errMsg(err) };
+  } finally {
+    if (bits) for (var j = 0; j < bits.length; j++) { try { bits[j].delete(); } catch (e1) { /* gone with its parent */ } }
+    if (gap && (!bits || bits.indexOf(gap) < 0)) { try { gap.delete(); } catch (e2) { /* already freed */ } }
+    if (hull) hull.delete();
+    if (man) man.delete();
+  }
+}
+
+/* =====================================================================
    REPLACEMENT: subtractSoupBFromA
    Was: homemade ray/AABB pocket clipper (centroid filter + wall raycast).
    Now: real solid boolean via Manifold. Async (WASM load + compute).
@@ -1009,6 +1074,7 @@ var NSO_BoolCore = {
   },
   fillUnion: function (a, b) { return nsoUnionCore(a, b); },
   fillSubtract: function (a, b) { return nsoSubtractCore(a, b); },
+  cavity: function (a) { return NSO_cavityCore(a); },
   job: function (op) {
     var args = Array.prototype.slice.call(arguments, 1);
     return Promise.resolve(NSO_BoolCore[op].apply(null, args)).then(NSO_boolHandBack);
@@ -1056,6 +1122,11 @@ var NSO_BOOL_OPS = {
   },
   fillSubtract: {
     label: 'Cutting', files: function () { return ['nso_csg.js']; },
+    refuse: function (a, why) { return { ok: false, reason: why }; },
+    restore: function (r) { return r; }
+  },
+  cavity: {
+    label: 'Extracting', files: function () { return ['nso_csg.js']; },
     refuse: function (a, why) { return { ok: false, reason: why }; },
     restore: function (r) { return r; }
   }
@@ -1163,6 +1234,12 @@ function NSO_subtractSoups(aWorld, bWorld, o) {
 function subtractSoupBFromA(aWorld, bWorld, opts) {
   var spec = NSO_boolSpec('punch', null);
   return NSO_boolRun(spec, [aWorld, bWorld, opts], function () { return NSO_punchCore(aWorld, bWorld, opts); });
+}
+/* Extract bit's exact path: the void of a piece as a solid (NSO_cavityCore). o: { label, host } as above. */
+function NSO_cavitySoup(pieceWorld, o) {
+  var spec = NSO_boolSpec('cavity', o);
+  spec.tris = function (a) { return NSO_soupLen(a[0]); };
+  return NSO_boolRun(spec, [pieceWorld], function () { return NSO_cavityCore(pieceWorld); });
 }
 function nsoUnionSoups(aSoup, bSoup) {
   var spec = NSO_boolSpec('fillUnion', null);

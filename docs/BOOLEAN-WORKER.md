@@ -97,9 +97,13 @@ browser with software GL:
 
 ## Not moved, and why
 
-- **Close, Extract bit, G-scope Crop Z** never ran Manifold. Close (`nso_close.js`)
-  is a JS lid; Extract bit is a voxel flood fill; G-scope's Crop Z is
-  `NSO_cropRaw`, a slab cut and seal. Their freeze, where there is one, is plain JS
+- **Close, G-scope Crop Z** never ran Manifold. Close (`nso_close.js`)
+  is a JS lid; G-scope's Crop Z is
+  `NSO_cropRaw`, a slab cut and seal.
+  **Extract bit** used to be on this list (a voxel flood fill that made a box). It now asks the kernel for
+  the piece's void, `NSO_cavitySoup` (`nso_csg.js`, op `cavity`, label `Extracting`): the convex hull less the
+  piece, largest part. It goes through `NSO_boolRun` like the rest, so a big piece runs in the worker; the voxel
+  box is kept only as the fallback when the kernel cannot run. Gates: `extract:bit-exact`, `extract:bit-drive`. Their freeze, where there is one, is plain JS
   on the page's thread and is a different change: they are untouched, and their
   tests (`close:test`, `wire:extract-sel`) pass as before.
 - **The landing** of a copy beside a big host and **Split to parts' reading** of a new selection (above).
