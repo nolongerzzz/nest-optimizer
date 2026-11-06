@@ -19,21 +19,29 @@ second repository.
 
 1. You push to `claude-wip`.
 2. `.github/workflows/mirror-wip-pages.yml` assembles the site from the
-   tracked files on `claude-wip` into `dist/` - not the whole repository: it
-   leaves out `.github/`, `tools/`, `docs/`, package files and `fixtures/`
+   tracked files on `claude-wip` - not the whole repository: it leaves out `.github/`, `tools/`, `docs/`, package files and `fixtures/`
    except the three paths the app fetches at run time
    (`fixtures/bambu-templates/`, `fixtures/print-planner/`,
    `fixtures/supports/simple_overhang_p1s.gcode.3mf`; app-print.js and
    nso-3mf.js). About 18 MB, down from 48. The step fails, and nothing is
-   pushed, if `dist/index.html` or one of those paths is missing, or if
-   `dist/` holds a symbolic or hard link (Pages rejects both). It then adds a
+   pushed, if `index.html` or one of those paths is missing, or if the site
+   holds a symbolic or hard link (Pages rejects both). It then adds a
    generated `.github/workflows/pages.yml` and `README.md`. **If the app starts
    fetching another fixture, add it to the keep list in that step**, or the
    preview will 404 on it.
 3. It force-pushes that tree to `main` of `nolongerzzz/nest-wip`.
    The preview repo is a disposable snapshot with a single commit, not history.
-4. That push triggers `pages.yml` in the preview repo, which uploads only
-   `dist/` and deploys it to that repo's own Pages site.
+4. That push triggers `pages.yml` in the preview repo, which deploys the repo
+   root (which is only the site now) to that repo's own Pages site.
+
+**Do not change `.github/preview-site/pages.yml` without checking the token.**
+The push is made with a personal access token, and GitHub rejects a push from
+a PAT that creates or changes a workflow file unless the token has the
+`workflow` scope (fine-grained: Workflows, read and write). The mirror pushes
+the same `pages.yml` every time, so the scope has never been needed - a change
+to it fails the "Push to the preview repository" step with `refusing to allow a
+Personal Access Token to create or update workflow`. Give the token that scope
+first, then change the file.
 
 The push uses a personal access token rather than the built-in `GITHUB_TOKEN`,
 both because `GITHUB_TOKEN` has no access to another repository and because

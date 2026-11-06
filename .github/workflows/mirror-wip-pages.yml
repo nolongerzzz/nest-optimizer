@@ -38,14 +38,13 @@ jobs:
           set -euo pipefail
           SITE="$RUNNER_TEMP/site"
           rm -rf "$SITE"
-          # The publishable site goes in dist/, and pages.yml uploads only that
-          # directory - not the whole repository.
-          mkdir -p "$SITE/dist"
+          mkdir -p "$SITE"
           # Only tracked files, so nothing untracked or ignored can leak out.
-          git archive --format=tar HEAD | tar -x -C "$SITE/dist"
-          cd "$SITE/dist"
-          # Not part of the site: CI config, the Node/Python test harness, the
-          # docs (the app only mentions them in comments), editor and repo
+          git archive --format=tar HEAD | tar -x -C "$SITE"
+          cd "$SITE"
+          # The repo root is the site (pages.yml uploads path: .), so what is not
+          # the site is taken out here: CI config, the Node/Python test harness,
+          # the docs (the app only mentions them in comments), editor and repo
           # housekeeping.
           rm -rf .github .claude tools docs
           rm -f package.json package-lock.json ARCHITECTURE_AUDIT.md .gitignore .claude-wip-ping
@@ -63,14 +62,16 @@ jobs:
           mkdir fixtures
           mv "$KEEP"/* fixtures/
           # What Pages needs from the artifact (and rejects if it is wrong).
-          test -f index.html || { echo "::error::dist/index.html is missing"; exit 1; }
+          test -f index.html || { echo "::error::index.html is missing from the site"; exit 1; }
           for f in fixtures/supports/simple_overhang_p1s.gcode.3mf fixtures/print-planner fixtures/bambu-templates; do
-            test -e "$f" || { echo "::error::$f is missing from dist"; exit 1; }
+            test -e "$f" || { echo "::error::$f is missing from the site"; exit 1; }
           done
-          if [ -n "$(find . -type l)" ]; then echo "::error::dist contains symbolic links"; find . -type l; exit 1; fi
-          if [ -n "$(find . -type f -links +1)" ]; then echo "::error::dist contains hard links"; find . -type f -links +1; exit 1; fi
-          echo "dist: $(find . -type f | wc -l) files, $(du -sh . | cut -f1)"
-          cd "$SITE"
+          if [ -n "$(find . -type l)" ]; then echo "::error::the site contains symbolic links"; find . -type l; exit 1; fi
+          if [ -n "$(find . -type f -links +1)" ]; then echo "::error::the site contains hard links"; find . -type f -links +1; exit 1; fi
+          echo "site: $(find . -type f | wc -l) files, $(du -sh . | cut -f1)"
+          # Added after the checks. pages.yml must stay byte-identical to the one
+          # already in the preview repo unless the push token has the `workflow`
+          # scope: GitHub rejects a PAT that changes a workflow file without it.
           mkdir -p .github/workflows
           cp "$GITHUB_WORKSPACE/.github/preview-site/pages.yml" .github/workflows/pages.yml
           sed "s|@SOURCE_SHA@|${GITHUB_SHA}|g; s|@SOURCE_REPO@|${GITHUB_REPOSITORY}|g" \
