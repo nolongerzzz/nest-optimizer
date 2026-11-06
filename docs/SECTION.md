@@ -126,10 +126,14 @@ scene helper (`nso-helpers.js`, owner `scale-live`), never picked, packed or
 exported, and not an Undo step. **Set** (the button, or Enter in the field)
 bakes what the preview shows through `NSO_sculptCommitRaw` — one Undo step, the
 verb's own undo type — so what is baked is the previewed soup bit for bit.
-**Cancel**, Escape, selecting another piece, starting another field, the mm | in
-toggle and closing the card drop the preview. A refused value says why under the
-field in red and draws nothing; Set stays greyed until the value is one the piece
-takes. One field is staged at a time. Fit to plate stays a button and applies at
+**Cancel**, Escape, selecting another piece, the mm | in toggle and closing the
+card drop the preview. A refused value says why under its
+field in red and is left out of the preview (the other staged fields still draw;
+alone, it draws nothing); Set stays greyed until every staged value is one the
+piece takes. Every field stays staged: Length, then Width, then Height can all be
+adjusted before Set, each change re-runs all of them on the piece as it began
+(its own sizes, then Offset, then Longest, then Whole ×), and Set bakes the
+final state as one Undo step. Fit to plate stays a button and applies at
 once. `tools/nso_scale_live_drive_check.js` drives all of it.
 
 Every field repopulates whenever the selection, the selected piece's soup or its
