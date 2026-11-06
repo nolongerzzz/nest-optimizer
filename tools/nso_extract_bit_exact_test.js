@@ -62,12 +62,21 @@ function radii(s, z0, z1) {
   check('tube: a bit comes out of a click on the bore wall', r.ok, r.reason);
   if (r.ok) {
     console.log('      lid R ' + r.sel.R + ' (' + (r.sel.auto ? 'auto' : 'asked') + '), pitch ' + r.sel.pitch + ', ' + r.ms + ' ms; tried ' + JSON.stringify(r.sel.tried));
-    check('tube: it is the cylinder in the bore (volume ' + r.volumeMm3.toFixed(0) + ' of ' + want1.toFixed(0) + ')', near(r.volumeMm3, want1, want1 * 0.015));
+    check('tube: it is the cylinder in the bore (volume ' + r.volumeMm3.toFixed(0) + ' of ' + want1.toFixed(0) + ')', near(r.volumeMm3, want1, want1 * 0.005));
+    check('tube: every triangle of the bore is its wall (' + r.sel.tris + ' of 192) - none dropped, so no ragged edge', r.sel.tris === 192);
+    let top = 0; for (let i = 0; i < r.soup.length; i += 3) if (r.soup[i + 2] > 14.95) top++;
+    check('tube: the lid is the whole 96-gon, not a part of it (' + top + ' vertices on the top plane)', top >= 96);
     const b = bounds(r.soup), rr = radii(r.soup, -20, 20);
     check('tube: flush with both ends, radius 12 not the 15 of the outside',
       near(b.lo[2], -15, 0.02) && near(b.hi[2], 15, 0.02) && near(rr.mx, 12, 0.02), 'z ' + b.lo[2].toFixed(3) + '..' + b.hi[2].toFixed(3) + ', r max ' + rr.mx.toFixed(3));
     check('tube: closed', r.stats && r.stats.open === 0 && r.stats.nm === 0);
   }
+
+  /* 1b. a short wide ring: its lid would sag the whole way down at a small ball, so a big one is needed */
+  const ring = soupOf(M.cylinder(12, 40, 40, 128, true).subtract(M.cylinder(14, 36, 36, 128, true)));
+  r = await extract(ring, [36, 0, 2], [-1, 0, 0]);
+  const wantRing = Math.PI * 36 * 36 * 12;
+  check('short wide ring: the click on the bore gets the whole disc (' + (r.ok ? r.volumeMm3.toFixed(0) : r.reason) + ' of ' + wantRing.toFixed(0) + ')', r.ok && near(r.volumeMm3, wantRing, wantRing * 0.005));
 
   /* 2. threaded hole: a nut's bore */
   const nut = T.nut({ size: 'M6' });

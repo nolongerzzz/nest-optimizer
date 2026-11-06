@@ -33,6 +33,8 @@ and a whole blob from a head.)
 - A piece that is not a closed solid is refused ("Seal it first"); overlapping shells are merged for the operation, as for the rest.
 - The void-finder runs on the page's thread (about a second on a bore, up to a few seconds on a large piece); the boolean after it
   goes to the worker when the piece is big.
+- Every triangle that faces the void is its wall, however long (a tube bore is a strip as long as the tube); only the corners
+  of the wall go to the hull.
 - A void with a very wide opening next to dents about as wide (a smooth mouth between bumps) can take in a neighbour at the smallest
   closing ball: look at the amber, and set Lid R.
 

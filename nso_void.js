@@ -30,8 +30,9 @@
         to close the dents next to it, where it leaks into them and grows again. The void is taken where
         it first HOLDS: the smallest ball that closes it, so the least reach into its neighbours. (opts.R
         asks for one radius instead: the "Lid R" box.)
-     5. The piece's triangles whose corners are all within a couple of nodes of that void are its wall. The
-        lid's sag does not matter - only the wall is used, and the lid the caller makes is the hull's.
+     5. The piece's triangles that FACE that void (a node of it one or two nodes out along the outward normal,
+        from some point on the triangle) are its wall. The lid's sag does not matter - only the wall is used, and the
+        lid the caller makes is the hull's.
 
    -> select(soup, point, normal, opts) =
         { ok, points: Float32Array (xyz, x3 per wall corner, welded), tris, seed: [x,y,z], R, auto,
@@ -46,7 +47,6 @@
   var MIN_CELLS = 6;          // a void smaller than this is a crease, not a void
   var HOLD = 1.3;             // the void "holds" when the next radius grows it by no more than this
   var STEP = 1.35;            // radius ratio between tries
-  var WALL_NODES = 2.2;       // a triangle is the void's wall when its corners are this near, in nodes
 
   function need() {
     var TH = root && root.NSO_Thickness, H = root && root.NSO_Hollow;
@@ -93,8 +93,9 @@
     var lo0 = P.lo, hi0 = P.hi;
     var maxSpan0 = Math.max(hi0[0] - lo0[0], hi0[1] - lo0[1], hi0[2] - lo0[2]);
     /* Small reach first: a fine grid, so a socket in a long bolt is many nodes across. A void too big for it (a
-       bore nearly the piece's own width) is not closed by its biggest ball and the next reach is tried. */
-    var reaches = userR ? [userR] : [Math.max(0.15 * maxSpan0, 1), Math.max(0.55 * maxSpan0, 1)];
+       bore nearly the piece's own width, a short ring whose lid sags the whole way down) is not closed by its biggest
+       ball and the next reach is tried; the last is a coarse grid, which is enough to say which triangles face it. */
+    var reaches = userR ? [userR] : [Math.max(0.15 * maxSpan0, 1), Math.max(0.55 * maxSpan0, 1), Math.max(1.3 * maxSpan0, 1)];
     var res = null;
     for (var q = 0; q < reaches.length; q++) {
       res = attempt(K, P, soup, point, normal, opts, reaches[q], userR);
@@ -227,21 +228,43 @@
         tried: tried };
     }
 
-    /* 5. its wall: the triangles whose corners are all within a couple of nodes of the void. */
-    var vs = new Float64Array(N);
-    for (var n2 = 0; n2 < N; n2++) vs[n2] = 1e18;
-    for (var c2 = 0; c2 < chosen.list.length; c2++) vs[chosen.list[c2]] = 0;
-    var dV = H.edt3d(vs, nx, ny, nz);
-    vs = null;
-    var lim = WALL_NODES * WALL_NODES;
+    /* 5. its wall: the triangles that FACE the void. A triangle is the void's wall when, from some point on it, one
+       or two nodes out along its outward normal is a node of the void. Whole triangles, however long: the bore of a
+       tube is a strip of triangles as long as the tube, with corners only on its two end rings, and those corners are
+       FAR from the void at its lids (a lid is a thin dome over the opening) - asking about the corners dropped
+       triangles at random and left the bit with a ragged edge. The top face round a socket faces away from the void
+       and is never asked for. */
+    var inV = new Uint8Array(N);
+    for (var c2 = 0; c2 < chosen.list.length; c2++) inV[chosen.list[c2]] = 1;
     var nTri = (soup.length / 9) | 0, pts = [], seen = new Map(), wallTris = 0;
-    function near(o) {
-      var id = nodeOf(soup[o], soup[o + 1], soup[o + 2]);
-      return id >= 0 && dV[id] <= lim;
+    var FRONT = [1.0 * pitch, 1.75 * pitch];
+    function faces(px, py, pz, nx0, ny0, nz0) {
+      for (var d = 0; d < FRONT.length; d++) {
+        var id = nodeOf(px + nx0 * FRONT[d], py + ny0 * FRONT[d], pz + nz0 * FRONT[d]);
+        if (id >= 0 && inV[id]) return true;
+      }
+      return false;
     }
     for (var tI = 0; tI < nTri; tI++) {
       var o = tI * 9;
-      if (!near(o) || !near(o + 3) || !near(o + 6)) continue;
+      var ax = soup[o], ay = soup[o + 1], az = soup[o + 2];
+      var ux = soup[o + 3] - ax, uy = soup[o + 4] - ay, uz = soup[o + 5] - az;
+      var wx = soup[o + 6] - ax, wy = soup[o + 7] - ay, wz = soup[o + 8] - az;
+      var tx = uy * wz - uz * wy, ty = uz * wx - ux * wz, tz = ux * wy - uy * wx;
+      var tl = Math.sqrt(tx * tx + ty * ty + tz * tz);
+      if (!(tl > 1e-12)) continue;
+      tx /= tl; ty /= tl; tz /= tl;
+      var longest = Math.max(Math.sqrt(ux * ux + uy * uy + uz * uz), Math.sqrt(wx * wx + wy * wy + wz * wz),
+                             Math.sqrt((wx - ux) * (wx - ux) + (wy - uy) * (wy - uy) + (wz - uz) * (wz - uz)));
+      var sub = Math.min(24, Math.max(1, Math.ceil(longest / pitch)));
+      var hit = false;
+      for (var i1 = 0; i1 <= sub && !hit; i1++) {
+        for (var j1 = 0; i1 + j1 <= sub && !hit; j1++) {
+          var fu = (sub === 1 ? 1 / 3 : i1 / sub), fw = (sub === 1 ? 1 / 3 : j1 / sub);
+          if (faces(ax + ux * fu + wx * fw, ay + uy * fu + wy * fw, az + uz * fu + wz * fw, tx, ty, tz)) hit = true;
+        }
+      }
+      if (!hit) continue;
       wallTris++;
       for (var v = 0; v < 3; v++) {
         var x = soup[o + v * 3], y = soup[o + v * 3 + 1], z = soup[o + v * 3 + 2];
