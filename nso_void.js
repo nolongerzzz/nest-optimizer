@@ -46,6 +46,7 @@
   var MAX_NODES = 1.8e6;      // total nodes
   var MIN_CELLS = 6;          // a void smaller than this is a crease, not a void
   var HOLD = 1.3;             // the void "holds" when the next radius grows it by no more than this
+  var GROW_RINGS = 2;         // rings of neighbouring triangles whose corners join the wall's, for the hull
   var STEP = 1.35;            // radius ratio between tries
 
   function need() {
@@ -237,6 +238,7 @@
     var inV = new Uint8Array(N);
     for (var c2 = 0; c2 < chosen.list.length; c2++) inV[chosen.list[c2]] = 1;
     var nTri = (soup.length / 9) | 0, pts = [], seen = new Map(), wallTris = 0;
+    var isWall = new Uint8Array(nTri);
     var FRONT = [1.0 * pitch, 1.75 * pitch];
     function faces(px, py, pz, nx0, ny0, nz0) {
       for (var d = 0; d < FRONT.length; d++) {
@@ -266,6 +268,7 @@
       }
       if (!hit) continue;
       wallTris++;
+      isWall[tI] = 1;
       for (var v = 0; v < 3; v++) {
         var x = soup[o + v * 3], y = soup[o + v * 3 + 1], z = soup[o + v * 3 + 2];
         var key = Math.round(x * 1e4) + ',' + Math.round(y * 1e4) + ',' + Math.round(z * 1e4);
@@ -274,11 +277,60 @@
         pts.push(x, y, z);
       }
     }
+    /* The wall's NEIGHBOURS: the triangles that share a corner with it, and so the corners of those. They are what
+       the wall alone leaves out and the hull needs: the crest flats between a thread's flanks, and the flat end faces
+       the bore opens on. Without them the lid of a threaded hole is the hull of its grooves alone, which at the ends
+       is a plane that slopes down through the crests and cuts the top off the thread. With them the lid is the face
+       the void opens on, flat. A corner of a neighbour is one the wall already has or a step from it, so a face of
+       big triangles puts its far corners in the hull, which on a flat face is the same plane. */
+    var grown = 0;
+    if (opts.grow !== false && pts.length) {
+      var isIn = new Map(seen);                      // the corners the hull has so far, by position
+      function key3(o2) {
+        return Math.round(soup[o2] * 1e4) + ',' + Math.round(soup[o2 + 1] * 1e4) + ',' + Math.round(soup[o2 + 2] * 1e4);
+      }
+      /* The box the wall's own corners fill, a half node over: a neighbour's corner joins the hull only inside it. The
+         hull can fill out to the face the void opens on, but cannot reach past the void's own extent - the far
+         corners of a big face, or the skin beyond a mouth's rim, would otherwise swell it. */
+      var bl = [Infinity, Infinity, Infinity], bh = [-Infinity, -Infinity, -Infinity];
+      for (var q1 = 0; q1 < pts.length; q1 += 3) for (var a1 = 0; a1 < 3; a1++) { if (pts[q1 + a1] < bl[a1]) bl[a1] = pts[q1 + a1]; if (pts[q1 + a1] > bh[a1]) bh[a1] = pts[q1 + a1]; }
+      var bm = 0.5 * pitch + 1e-3;
+      function inBox(x, y, z) { return x >= bl[0] - bm && x <= bh[0] + bm && y >= bl[1] - bm && y <= bh[1] + bm && z >= bl[2] - bm && z <= bh[2] + bm; }
+      /* Two rings: the first takes the crest flats and the end face's triangles at the groove; the second the end
+         face's triangles at the crests, which touch only the first ring. Each ring tests against the corners the ring
+         before it ended with. */
+      for (var ring = 0; ring < GROW_RINGS; ring++) {
+        var wl = [Infinity, Infinity, Infinity], wh = [-Infinity, -Infinity, -Infinity];
+        for (var q0 = 0; q0 < pts.length; q0 += 3) for (var a0 = 0; a0 < 3; a0++) { if (pts[q0 + a0] < wl[a0]) wl[a0] = pts[q0 + a0]; if (pts[q0 + a0] > wh[a0]) wh[a0] = pts[q0 + a0]; }
+        var epad = 1e-3, add = [], addKeys = [];
+        for (var tN = 0; tN < nTri; tN++) {
+          if (isWall[tN]) continue;
+          var on = tN * 9, any = false;
+          for (var vv = 0; vv < 3 && !any; vv++) {    // a corner inside the box of the hull's corners, and then one that IS one
+            var xx = soup[on + vv * 3], yy = soup[on + vv * 3 + 1], zz = soup[on + vv * 3 + 2];
+            if (xx < wl[0] - epad || xx > wh[0] + epad || yy < wl[1] - epad || yy > wh[1] + epad || zz < wl[2] - epad || zz > wh[2] + epad) continue;
+            if (isIn.has(key3(on + vv * 3))) any = true;
+          }
+          if (!any) continue;
+          isWall[tN] = 2;                              // taken, so the next ring does not count it twice
+          grown++;
+          for (var v3 = 0; v3 < 3; v3++) {
+            var k3 = key3(on + v3 * 3);
+            if (isIn.has(k3) || !inBox(soup[on + v3 * 3], soup[on + v3 * 3 + 1], soup[on + v3 * 3 + 2])) continue;
+            addKeys.push(k3);
+            add.push(soup[on + v3 * 3], soup[on + v3 * 3 + 1], soup[on + v3 * 3 + 2]);
+          }
+        }
+        for (var ak = 0; ak < addKeys.length; ak++) isIn.set(addKeys[ak], 1);
+        for (var ad = 0; ad < add.length; ad++) pts.push(add[ad]);
+        if (!add.length) break;
+      }
+    }
     if (wallTris < 2 || pts.length < 12) {
       return { ok: false, reason: 'found the void but not its wall (' + wallTris + ' triangle(s)) - try another click', tried: tried };
     }
     var seedPos = [org[0] + (seed % nx) * pitch, org[1] + (((seed / nx) | 0) % ny) * pitch, org[2] + ((seed / (nx * ny)) | 0) * pitch];
-    return { ok: true, points: new Float32Array(pts), tris: wallTris, seed: seedPos, R: round3(chosen.R), auto: !userR,
+    return { ok: true, points: new Float32Array(pts), tris: wallTris, grown: grown, seed: seedPos, R: round3(chosen.R), auto: !userR,
              cells: chosen.cells, volumeMm3: chosen.cells * pitch * pitch * pitch, pitch: round3(pitch), span: round3(maxSpan), tried: tried, reason: '' };
   }
 

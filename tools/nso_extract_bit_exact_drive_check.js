@@ -183,6 +183,7 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'nso-extract-bit-'));
         const dims = s.size.map(v => +v.toFixed(2)).sort((a, b) => a - b);
         const cyl = Math.PI * (dims[2] / 2) * (dims[2] / 2) * dims[0];
         check('it is a threaded rod, not a plain cylinder (volume ' + s.volume.toFixed(1) + ' of ' + cyl.toFixed(1) + ' for its envelope)', s.volume < 0.97 * cyl && s.volume > 0.6 * cyl);
+        check('the whole thread: the bit is the nut\'s bore (volume ' + s.volume.toFixed(2) + ' of 135.94, flat ends)', Math.abs(s.volume - 135.94) < 0.005 * 135.94);
         check('about Ø6.4 and one nut thick', Math.abs(dims[2] - 6.4) < 0.3 && Math.abs(dims[0] - 5.2) < 0.2, dims.join(' x '));
         // nm is not asserted here: the nut's own thread seam is a zero-area sliver after the STL round trip, and the bit inherits it (the node gate reads the kernel's own topology: 0 and 0).
         check('closed (no open edge)', s.open === 0, 'open ' + s.open + ' nm ' + s.nm);

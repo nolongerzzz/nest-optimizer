@@ -22,6 +22,10 @@ and a whole blob from a head.)
   R goes up from about a node until the void *holds* (the next radius grows it by no more than 30%): the smallest ball that closes
   it, so the least reach into its neighbours. It tries a small reach first (fine grid) then a large one (a bore nearly as wide as
   the piece). Its answer is the void's **wall**: the corners of the triangles that face it.
+- The wall's **neighbours** join it for the hull (two rings of triangles that share a corner with it, their corners kept only inside
+  the wall's own box): the crest flats between a thread's flanks and the flat face the bore opens on. Without them the lid of a
+  threaded hole slopes down through the crests and cuts the top off the thread; with them a threaded hole gives the whole threaded
+  bore, flush with both faces (the node gate checks M5, M8, M10 against hull-less-nut to 0.2%).
 - `NSO_cavityCore` (`nso_csg.js`) makes it solid: the **convex hull of the wall's corners, less the piece**, the part holding the
   click. The bit's walls are the piece's own - a threaded hole gives a threaded rod, a hex socket a hex plug - exactly. The lid
   across the opening is the hull's: flat over a flat opening, a chord over a curved one.

@@ -89,8 +89,24 @@ function radii(s, z0, z1) {
     const bore = hull.volume() - c.NSO_CSG.soupToManifold(wasm, nut.soup).volume();
     console.log('      lid R ' + r.sel.R + ', pitch ' + r.sel.pitch + ', ' + r.ms + ' ms; radii ' + rr.mn.toFixed(2) + '..' + rr.mx.toFixed(2) + ', z ' + b.lo[2].toFixed(2) + '..' + b.hi[2].toFixed(2));
     check('threaded: the thread is in the bit - crest and root radii differ (' + rr.mn.toFixed(2) + ' .. ' + rr.mx.toFixed(2) + ')', rr.mx - rr.mn > 0.5 && rr.mx > 3 && rr.mx < 3.5);
-    check('threaded: its volume is the bore, less a sliver where the lid meets the thread ends (' + r.volumeMm3.toFixed(1) + ' vs ' + bore.toFixed(1) + ')', r.volumeMm3 <= bore * 1.01 && r.volumeMm3 >= bore * 0.94);
+    check('threaded: its volume is the bore (' + r.volumeMm3.toFixed(2) + ' vs ' + bore.toFixed(2) + ')', near(r.volumeMm3, bore, 0.003 * bore));
+    check('threaded: flush with both faces of the nut, z ' + b.lo[2].toFixed(3) + ' .. ' + b.hi[2].toFixed(3), near(b.lo[2], nutB.lo[2], 0.01) && near(b.hi[2], nutB.hi[2], 0.01));
     check('threaded: closed', r.stats && r.stats.open === 0 && r.stats.nm === 0);
+  }
+
+  /* 2b. the same, on three sizes and on the auto reach AND a big one: the bit is the nut's bore, none of it missing and no more
+     than it (hull of the nut less the nut is the reference, from the kernel) */
+  for (const size of ['M5', 'M8', 'M10']) {
+    const nt = T.nut({ size });
+    const nb = bounds(nt.soup), nm = c.NSO_CSG.soupToManifold(wasm, nt.soup), ref = nm.hull().subtract(nm);
+    for (const opt of [{}, { R: 45 }]) {
+      const rr = await extract(nt.soup, [0.9 * (parseFloat(size.slice(1)) / 2 + 0.2), 0, (nb.lo[2] + nb.hi[2]) / 2], [-1, 0, 0], opt);
+      if (!rr.ok) { check(size + ' ' + JSON.stringify(opt) + ': a bit comes out', false, rr.reason); continue; }
+      const bit = c.NSO_CSG.soupToManifold(wasm, rr.soup);
+      const missing = ref.subtract(bit).volume(), extra = bit.subtract(ref).volume();
+      check(size + ' ' + (opt.R ? 'Lid R 45' : 'auto (R ' + rr.sel.R + ')') + ': the whole bore, nothing missing (' + missing.toFixed(3) + ' mm3 of ' + ref.volume().toFixed(1) + ') and nothing extra (' + extra.toFixed(3) + ')',
+        missing < 0.002 * ref.volume() && extra < 0.002 * ref.volume());
+    }
   }
 
   /* 3. an Allen socket in a bolt head: NOT the thread grooves, NOT the whole bolt's hull */
