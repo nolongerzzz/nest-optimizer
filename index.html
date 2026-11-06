@@ -1294,15 +1294,14 @@
               <button id="btn-extract-bit" class="btn btn-secondary" type="button" aria-pressed="false"
                       title="Make a void of the selected piece into a piece of its own: the bore of a tube a cylinder plug, a threaded hole a threaded rod, an Allen socket a hex plug, a mouth the shape of the mouth. Arm it, then click INSIDE the void you want - a wall of it, or its bottom. The bit it will make is drawn in place first (amber, the piece a ghost round it); Make bit (or Enter) bakes it, another click chooses again, Escape puts it away; pressing Extract bit again turns it off. The piece is not changed; one Undo removes the bit.">Extract bit</button>
             </div>
-            <div class="vp-row vp-row-carve2">
-              <label class="vp-clone" title="The reach of the lid over the opening, mm: the radius of the ball that closes over the void you click. Blank is automatic - the smallest ball that closes it. Bigger reaches across a wider opening; smaller stops short of the dents beside it (if the preview takes in too much, try a smaller one; too little, a bigger one). The preview follows the box."><span>Lid R</span> <input type="number" id="inp-extract-r" min="0.2" max="500" step="0.5" placeholder="auto"></label>
-              <button id="btn-extract-make" class="btn btn-secondary" type="button" hidden title="Bake the previewed bit into a piece beside its source. One Undo.">Make bit</button>
-            </div>
             <div class="vp-row vp-row-full">
               <label class="live-slider" for="inp-extract-slider"
-                     title="Drag to change the lid's reach and watch the preview follow. All the way left is automatic. The box above is the same number."><span>Lid R</span>
+                     title="The reach of the lid over the opening, mm: the radius of the ball that closes over the void you click. All the way left is automatic - the smallest ball that closes it. Drag right to reach across a wider opening, left to stop short of the dents beside it (if the preview takes in too much, go smaller; too little, bigger). The preview follows."><span>Lid R</span>
                 <span id="extract-r-read">auto</span>
                 <input type="range" id="inp-extract-slider" min="0" max="60" step="0.1" value="0" /></label>
+            </div>
+            <div class="vp-row vp-row-full">
+              <button id="btn-extract-make" class="btn btn-secondary" type="button" hidden title="Bake the previewed bit into a piece beside its source. One Undo.">Make bit</button>
             </div>
             <div class="vp-row vp-row-carve">
               <button id="btn-carve" class="btn btn-secondary btn-carve" type="button" aria-pressed="false"

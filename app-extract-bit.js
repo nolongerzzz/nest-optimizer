@@ -7,7 +7,7 @@
      2. A click on a piece finds the void THAT click is in (nso_void.js) and makes the bit from it (the real
         boolean, nso_csg.js), and draws that bit in place in amber, the piece turned to a ghost round it: a LIVE PREVIEW of exactly what Make bit
         will bake. Nothing is on the plate yet, and the piece is not touched.
-     3. Not the void you meant? Click another wall (it is found again), or change Lid R (the box or the slider): blank is automatic (the
+     3. Not the void you meant? Click another wall (it is found again), or move the Lid R slider: all the way left is automatic (the
         smallest ball that closes over the opening); a bigger one reaches across a wider opening, a smaller one stops
         short of the dents next to it. The preview follows the box.
      4. Make bit (or Enter) bakes it: a piece beside the source, one Undo. Only Make bit bakes - the Extract bit button
@@ -24,25 +24,27 @@
   function $(id) { return document.getElementById(id); }
   function say(msg, bad) { if (typeof setStatus === 'function') setStatus(msg, !!bad); }
   function tick() { return new Promise(function (r) { setTimeout(r, 30); }); }
+  /* Lid R is the slider's number; all the way left (0) is automatic. */
   function lidR() {
-    var el = $('inp-extract-r');
+    var el = $('inp-extract-slider');
     var v = el ? parseFloat(el.value) : NaN;
     return (isFinite(v) && v > 0) ? v : undefined;
   }
+  /* True when the user has set a reach - the slider is off its automatic stop, and not merely showing the ball that was used. */
+  var manual = false;
 
-  /* ---- Lid R: the box and the slider are one number; blank / all the way left is automatic ---- */
+  /* ---- Lid R: one slider; all the way left is automatic ---- */
   function slider() { return $('inp-extract-slider'); }
   function showRead(text) { var el = $('extract-r-read'); if (el) el.textContent = text; }
-  /* After a detection: the slider's reach fits the piece, and sits where the ball that was used is. */
+  /* After a detection: the slider's reach fits the piece, and (when automatic) sits where the ball that was used is. */
   function showReach(r) {
-    var sl = slider(), box = $('inp-extract-r');
+    var sl = slider();
     if (sl && r && r.span) {
       var mx = Math.max(2, Math.ceil(1.3 * r.span));
       sl.max = String(mx);
       sl.step = mx > 40 ? '0.5' : '0.1';
-      sl.value = String(r.R);                      // a script's write: it fires no input event
+      if (!manual) sl.value = String(r.R);          // a script's write: it fires no input event
     }
-    if (box) box.placeholder = r ? String(r.R) : 'auto';
     showRead(r ? (r.auto ? 'auto - ' : '') + r.R + ' mm' : 'auto');
   }
   function reachChanged() {
@@ -129,8 +131,7 @@
 
   function drop(why) {
     pending = null; lastPick = null; seq++; redo = false;
-    var bx = $('inp-extract-r'); if (bx) bx.placeholder = 'auto';
-    if (!(bx && bx.value)) showRead('auto');
+    if (!manual) showRead('auto');
     clearPreview();
     syncControls();
     if (why) say('Extract bit: ' + why);
@@ -175,7 +176,12 @@
 
   function setArmed(on, quiet) {
     armed = !!on;
-    if (!armed) drop(null);
+    if (!armed) {
+      drop(null);
+      manual = false;                              // the next time starts on automatic
+      var sl0 = slider(); if (sl0) sl0.value = '0';
+      showRead('auto');
+    }
     syncControls();
     if (armed) say('Extract bit - click inside the void you want: a wall of it, or its bottom. It is shown before it is made. Escape stops.');
     else if (!quiet) say('Extract bit off');
@@ -247,22 +253,13 @@
   function wire() {
     var make2 = $('btn-extract-make');
     if (make2 && !make2.dataset.nsoWired) { make2.dataset.nsoWired = '1'; make2.addEventListener('click', make); }
-    var box = $('inp-extract-r'), sl = slider();
-    if (box && !box.dataset.nsoWired) {
-      box.dataset.nsoWired = '1';
-      box.addEventListener('input', function () {
-        var v = parseFloat(box.value);
-        if (sl) sl.value = (isFinite(v) && v > 0) ? String(v) : '0';
-        showRead((isFinite(v) && v > 0) ? v + ' mm' : 'auto');
-        reachChanged();
-      });
-    }
+    var sl = slider();
     if (sl && !sl.dataset.nsoWired) {
       sl.dataset.nsoWired = '1';
       sl.addEventListener('input', function () {
         var v = parseFloat(sl.value);
-        if (box) box.value = (isFinite(v) && v > 0) ? String(v) : '';
-        showRead((isFinite(v) && v > 0) ? v + ' mm' : 'auto');
+        manual = isFinite(v) && v > 0;
+        showRead(manual ? v + ' mm' : 'auto');
         reachChanged();
       });
     }
