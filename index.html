@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=90c722de" />
+  <link rel="stylesheet" href="styles.css?v=c9ed869d" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -324,6 +324,22 @@
                 <button class="fs-tile" type="button" data-preset="trapezoid" title="A trapezoid - narrower at the back."><canvas width="64" height="64" aria-hidden="true"></canvas><span>Trapezoid</span></button>
                 <button class="fs-tile" type="button" data-preset="hexagon" title="A hexagon, 80 mm across the corners."><canvas width="64" height="64" aria-hidden="true"></canvas><span>Hexagon</span></button>
               </div>
+              <details class="cs-copy" id="cs-copy">
+                <summary title="Read the outline of a piece on the plate - a scan, a download, something made here - at a height you choose, and turn it into points, radii and curved sides you can edit">Copy from a piece</summary>
+                <p class="cs-hint" id="cs-copy-src">Select a piece on the plate to read its outline.</p>
+                <div class="fs-slider" id="cs-row-cut" title="Where to cut the piece to read its outline: the height up from its bottom, mm. The cut is drawn in the editor (orange) as you move this.">
+                  <label for="inp-cs-cut-slider">At height</label><input type="number" id="inp-cs-cut" min="0" max="500" step="0.1" value="5" aria-label="At height"><span id="cs-cut-read" class="fs-read">5 mm</span>
+                  <input type="range" id="inp-cs-cut-slider" min="0" max="100" step="0.1" value="5"></div>
+                <div class="fs-slider" id="cs-row-detail" title="How closely the points must follow the cut, mm. Smaller keeps more detail (and more points); larger reads a rough scan as clean sides and round corners.">
+                  <label for="inp-cs-detail-slider">Detail</label><input type="number" id="inp-cs-detail" min="0.05" max="3" step="0.05" value="0.2" aria-label="Detail"><span id="cs-detail-read" class="fs-read">0.2 mm</span>
+                  <input type="range" id="inp-cs-detail-slider" min="0.05" max="2" step="0.05" value="0.2"></div>
+                <div class="vp-row vp-row-opts">
+                  <label class="vp-clone" title="Which outline of the cut: the piece's outside, or the biggest hole in it (the inside of a tray, a pocket, a ring)">Use
+                    <select id="sel-cs-copy-use" class="vp-select" aria-label="Which outline"><option value="outside" selected>its outside</option><option value="inside">its inside (biggest hole)</option></select></label>
+                </div>
+                <div class="vp-row vp-row-full"><button id="btn-cs-copy" class="btn btn-secondary" type="button" disabled
+                  title="Replace the outline with the one read from the piece - straight sides, rounded corners and curved sides, your walls, height, lip and lid kept. Ctrl+Z in the editor brings back what was there.">Copy outline</button></div>
+              </details>
               <span class="fx-sublabel">Make it a</span>
               <div class="fs-tiles cs-modes" id="cs-mode-row" role="group" aria-label="What to make">
                 <button class="fs-tile" type="button" data-mode="tray" aria-pressed="true" title="Tray: walls and a floor, open at the top - a bin, a drawer or console insert."><canvas width="64" height="64" aria-hidden="true"></canvas><span>Tray</span></button>
@@ -384,9 +400,45 @@
               <div class="fs-slider" id="cs-row-allr" title="Set EVERY corner's radius to this, mm. Pick a point in the outline to give it a radius of its own.">
                 <label for="inp-cs-allr-slider">All radii</label><input type="number" id="inp-cs-allr" min="0" max="200" step="0.5" value="5" aria-label="All radii"><span id="cs-allr-read" class="fs-read">5 mm</span>
                 <input type="range" id="inp-cs-allr-slider" min="0" max="40" step="0.5" value="5"></div>
+              <div class="cs-grow" id="cs-row-grow" title="Move the whole outline out (Grow) or in (Shrink) by this much, mm - every side by the same amount, the corners kept round. For a clearance: shrink a copied pocket by the gap you want before making an insert for it.">
+                <label for="inp-cs-grow">Outline</label><input type="number" id="inp-cs-grow" min="0.05" max="50" step="0.05" value="0.5" aria-label="Grow or shrink by">
+                <button id="btn-cs-shrink" class="cs-mini" type="button">Shrink</button><button id="btn-cs-grow" class="cs-mini" type="button">Grow</button>
+              </div>
+              <span class="fx-sublabel">Lip</span>
+              <div class="fs-tiles cs-lips" id="cs-lip-row" role="group" aria-label="Lip">
+                <button class="fs-tile" type="button" data-lip="none" aria-pressed="true" title="No lip: the walls go straight up."><canvas width="64" height="64" aria-hidden="true"></canvas><span>None</span></button>
+                <button class="fs-tile" type="button" data-lip="out" aria-pressed="false" title="Lip out: a flange round the top, so the piece can hang on the edge of the hole it sits in."><canvas width="64" height="64" aria-hidden="true"></canvas><span>Out</span></button>
+                <button class="fs-tile" type="button" data-lip="in" aria-pressed="false" title="Lip in: a rim round the inside of the top, to keep things in or to take a lid."><canvas width="64" height="64" aria-hidden="true"></canvas><span>In</span></button>
+              </div>
+              <div class="fs-slider" id="cs-row-lipw" title="How far the lip stands out from (or in from) the wall, mm.">
+                <label for="inp-cs-lipw-slider">Lip width</label><input type="number" id="inp-cs-lipw" min="0.5" max="50" step="0.5" value="3" aria-label="Lip width"><span id="cs-lipw-read" class="fs-read">3 mm</span>
+                <input type="range" id="inp-cs-lipw-slider" min="0.5" max="20" step="0.5" value="3"></div>
+              <div class="fs-slider" id="cs-row-liph" title="How thick the lip is, top to bottom, mm (the chamfer under it is extra).">
+                <label for="inp-cs-liph-slider">Lip height</label><input type="number" id="inp-cs-liph" min="0.4" max="50" step="0.1" value="2" aria-label="Lip height"><span id="cs-liph-read" class="fs-read">2 mm</span>
+                <input type="range" id="inp-cs-liph-slider" min="0.4" max="10" step="0.1" value="2"></div>
+              <label class="cs-check" id="cs-row-lipch" title="A 45° slope under the lip, so it prints standing up without support. Off: a square step (an overhang the width of the lip).">
+                <input type="checkbox" id="chk-cs-lipch" checked> Chamfer under it (prints without support)</label>
+              <span class="fx-sublabel">Lid</span>
+              <div class="fs-tiles cs-lids" id="cs-lid-row" role="group" aria-label="Lid">
+                <button class="fs-tile" type="button" data-lid="none" aria-pressed="true" title="No lid."><canvas width="64" height="64" aria-hidden="true"></canvas><span>No lid</span></button>
+                <button class="fs-tile" type="button" data-lid="with" aria-pressed="false" title="With a lid: a second piece beside it - a plate the size of the top with a plug under it that fits the opening. Printed plate down."><canvas width="64" height="64" aria-hidden="true"></canvas><span>With lid</span></button>
+                <button class="fs-tile" type="button" data-lid="only" aria-pressed="false" title="Lid only: just the lid, for a tray already printed."><canvas width="64" height="64" aria-hidden="true"></canvas><span>Lid only</span></button>
+              </div>
+              <div class="fs-slider" id="cs-row-lidt" title="The lid's plate, mm thick.">
+                <label for="inp-cs-lidt-slider">Lid</label><input type="number" id="inp-cs-lidt" min="0.4" max="20" step="0.1" value="2" aria-label="Lid thickness"><span id="cs-lidt-read" class="fs-read">2 mm</span>
+                <input type="range" id="inp-cs-lidt-slider" min="0.4" max="8" step="0.1" value="2"></div>
+              <div class="fs-slider" id="cs-row-lidd" title="How far the plug goes down into the opening, mm. 0 is a flat lid with no plug.">
+                <label for="inp-cs-lidd-slider">Plug</label><input type="number" id="inp-cs-lidd" min="0" max="100" step="0.5" value="4" aria-label="Plug depth"><span id="cs-lidd-read" class="fs-read">4 mm</span>
+                <input type="range" id="inp-cs-lidd-slider" min="0" max="20" step="0.5" value="4"></div>
+              <div class="fs-slider" id="cs-row-lidfit" title="The gap all round between the plug and the opening, mm. 0.25 is a printed slip fit; less is tighter.">
+                <label for="inp-cs-lidfit-slider">Fit</label><input type="number" id="inp-cs-lidfit" min="0" max="2" step="0.05" value="0.25" aria-label="Lid fit"><span id="cs-lidfit-read" class="fs-read">0.25 mm</span>
+                <input type="range" id="inp-cs-lidfit-slider" min="0" max="1" step="0.05" value="0.25"></div>
+              <div class="fs-slider" id="cs-row-lidwall" title="The plug's wall, mm: it is a ring that thick, to save plastic. 0 makes it solid; it is solid anyway where the opening is too narrow for a ring.">
+                <label for="inp-cs-lidwall-slider">Plug wall</label><input type="number" id="inp-cs-lidwall" min="0" max="20" step="0.1" value="1.6" aria-label="Plug wall"><span id="cs-lidwall-read" class="fs-read">1.6 mm</span>
+                <input type="range" id="inp-cs-lidwall-slider" min="0" max="6" step="0.1" value="1.6"></div>
               <div class="vp-row vp-row-full">
               <button id="btn-cs-add" class="btn btn-secondary" type="button"
-                title="Bake what the preview shows: it is added to the plate as a piece of its own, beside the selection, selected. One Undo. Nothing is added until this is pressed.">Add to plate</button>
+                title="Bake what the preview shows: it is added to the plate as a piece of its own (and its lid as another), beside the selection, selected. One Undo. Nothing is added until this is pressed.">Add to plate</button>
               </div>
               <p id="cs-readout" class="bend-readout" aria-live="polite">—</p>
               </div>
@@ -2807,7 +2859,7 @@
   <script src="nso_tube_neck.js?v=4369044a"></script>
   <script src="nso_thread.js?v=3d986b5e"></script>
   <script src="nso_fittings.js?v=b8b58426"></script>
-  <script src="nso_custom_shape.js?v=a8f52d5d"></script>
+  <script src="nso_custom_shape.js?v=6912477d"></script>
   <script src="app-tube-edge.js?v=f95f28f0"></script>
   <!-- Bridge: a web between two places, welded. After NSO_Repair.js,
        nso_planar_fuse.js (the vertex space), nso_thickness.js,
@@ -2840,7 +2892,7 @@
   <script src="app-stock.js?v=04f0e346"></script>
   <script src="app-piece-preview.js?v=730a465a"></script>
   <script src="app-fittings.js?v=d1920e12"></script>
-  <script src="app-custom-shape.js?v=7b060e1b"></script>
+  <script src="app-custom-shape.js?v=b5377a5b"></script>
   <script src="app-fasteners.js?v=aafaf77d"></script>
   <script src="app-assemble.js?v=60984bfb"></script>
   <script src="app-sel-outline.js?v=e4042b39"></script>

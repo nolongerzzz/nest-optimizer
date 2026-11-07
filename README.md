@@ -45,7 +45,12 @@ Smart build-plate packing for 3D printing.
   be **curved** by dragging its handle. Presets (rectangle, rounded, swept
   corner, L, trapezoid, hexagon) to start from, a live preview on the plate, a
   **Big** editor for detail, and refusals in words when a radius or wall does
-  not fit ([docs/CUSTOM-SHAPE.md](docs/CUSTOM-SHAPE.md))
+  not fit. A **Lip** (a flange out, or a rim in, chamfered underneath so it
+  prints without support), a **Lid** (a plate with a plug that fits the opening
+  with a set clearance, made as a second piece), **Grow / Shrink** for the whole
+  outline, and **Copy from a piece**: cut the selected piece at a height, see the
+  cut drawn, and read it back as editable points, rounded corners and curved
+  sides ([docs/CUSTOM-SHAPE.md](docs/CUSTOM-SHAPE.md))
 - **Fittings** (Gen+): a slip-on **Cap** for the selected tube (bore = its Ø plus
   a printed-fit gap, walls and closed end = the tube's own wall, closed end down)
   and **2-way / 3-way splitters** - a trunk into 2 or 3 branches - each a new

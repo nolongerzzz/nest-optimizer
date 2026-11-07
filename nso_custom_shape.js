@@ -60,8 +60,11 @@
   var TOL = 0.02;            // mm: the most an arc's chords may stand off the true arc
   var MAX_ARC_SEG = 96;      // the most chords one arc gets
   var WALL_NOZZLES = 2;      // a wall under this many nozzle widths is warned about
-  var DEFAULTS = { height: 30, floor: 2, wall: 2, r: 5, mode: 'tray', nozzle: 0.4 };
+  var DEFAULTS = { height: 30, floor: 2, wall: 2, r: 5, mode: 'tray', nozzle: 0.4,
+                   lipWidth: 3, lipHeight: 2, lidThickness: 2, lidDepth: 4, lidFit: 0.25, lidWall: 1.6 };
   var MODES = ['tray', 'frame', 'solid'];
+  var LIP_TYPES = ['none', 'out', 'in'];
+  var LID_TYPES = ['none', 'with', 'only'];
 
   function fmt(x) { return (Math.round(x * 100) / 100).toFixed(2).replace(/\.?0+$/, ''); }
   function num(v, d) { v = +v; return isFinite(v) ? v : d; }
@@ -80,8 +83,14 @@
       sides.push({ wall: Math.max(0, num(s.wall, DEFAULTS.wall)), bulge: num(s.bulge, 0) });
     }
     var mode = MODES.indexOf(spec.mode) >= 0 ? spec.mode : DEFAULTS.mode;
+    var li = spec.lip || {}, ld = spec.lid || {};
     return {
       points: pts, sides: sides, mode: mode,
+      lip: { type: LIP_TYPES.indexOf(li.type) >= 0 ? li.type : 'none', width: Math.max(0, num(li.width, DEFAULTS.lipWidth)),
+             height: Math.max(0, num(li.height, DEFAULTS.lipHeight)), chamfer: li.chamfer == null ? true : !!li.chamfer },
+      lid: { type: LID_TYPES.indexOf(ld.type) >= 0 ? ld.type : 'none', thickness: Math.max(0, num(ld.thickness, DEFAULTS.lidThickness)),
+             depth: Math.max(0, num(ld.depth, DEFAULTS.lidDepth)), fit: Math.max(0, num(ld.fit, DEFAULTS.lidFit)),
+             wall: Math.max(0, num(ld.wall, DEFAULTS.lidWall)) },
       height: Math.max(0, num(spec.height, DEFAULTS.height)),
       floor: Math.max(0, num(spec.floor, DEFAULTS.floor)),
       nozzle: Math.max(0.05, num(spec.nozzle, DEFAULTS.nozzle))
@@ -253,20 +262,31 @@
       var s0 = C[i].sB, s1 = C[(i + 1) % n].sA;
       if (s0 > s1 + 1e-6) return { ok: false, side: i, corners: C, reason: '', at: { side: i } };
     }
-    var out = [];
+    /* marks[2i] is where corner i's fillet starts in the loop, marks[2i + 1] where side i starts (the fillet's
+       end): every outline of one spec has the same 2n pieces in the same order, so two of them at different
+       offsets can be stitched piece by piece (zip, below) whatever their point counts. A mark may equal the
+       loop's length: that is index 0 again, the piece before it ending where the loop began. */
+    var out = [], marks = [];
+    function add(p) {
+      var q = out[out.length - 1];
+      if (!q || Math.hypot(p[0] - q[0], p[1] - q[1]) > 1e-7) out.push(p);
+      return out.length - 1;
+    }
     for (i = 0; i < n; i++) {
       var co2 = C[i], S = sides[i], M = moved(S, dist[i]);
       /* the corner's fillet, ta -> tb */
+      var arc = [];
       if (co2.rho > 0) {
         var a0 = Math.atan2(co2.ta[1] - co2.c[1], co2.ta[0] - co2.c[0]);
         var a1 = Math.atan2(co2.tb[1] - co2.c[1], co2.tb[0] - co2.c[0]);
         var sw = a1 - a0;
         if (co2.convex) { while (sw < 0) sw += 2 * Math.PI; } else { while (sw > 0) sw -= 2 * Math.PI; }
-        var tmp = [];
-        arcPoints(co2.c, co2.rho, a0, sw, tmp, true);
-        tmp.forEach(function (p) { push(out, p); });
-      } else push(out, co2.c);
-      /* then the side, to the next corner's ta */
+        arcPoints(co2.c, co2.rho, a0, sw, arc, true);
+      } else arc.push(co2.c);
+      marks.push(add(arc[0]));
+      for (var q = 1; q < arc.length; q++) add(arc[q]);
+      marks.push(out.length - 1);
+      /* then the side, to the next corner's ta (not included: it is the next corner's first point) */
       var end = C[(i + 1) % n].ta;
       if (!S.line) {
         var b0 = Math.atan2(co2.tb[1] - M.c[1], co2.tb[0] - M.c[0]);
@@ -276,15 +296,16 @@
         if (Math.abs(sw2) > 1e-9 && M.R > 0) {
           var t2 = [];
           arcPoints(M.c, M.R, b0, sw2, t2, false);
-          t2.forEach(function (p) { push(out, p); });
+          t2.pop();                                   // its last point is `end`
+          t2.forEach(add);
         }
       }
     }
     if (out.length > 1) {
       var f = out[0], l = out[out.length - 1];
-      if (Math.hypot(f[0] - l[0], f[1] - l[1]) <= 1e-7) out.pop();
+      if (Math.hypot(f[0] - l[0], f[1] - l[1]) <= 1e-7) out.pop();   // a mark on the popped point now reads as out.length: index 0
     }
-    return { ok: true, loop: out, corners: C };
+    return { ok: true, loop: out, marks: marks, corners: C };
   }
 
   /* ------------------------------------------------------------- checks */
@@ -433,7 +454,33 @@
       sideLengths: o.sx.map(function () { return 0; })
     };
     for (j = 0; j < n; j++) res.info.sideLengths[o.sx[j]] = S[j].len;
+    var conv = out.corners.map(function (c) { return c.convex; });
+    res.ctx = { o: o, S: S, walls: walled ? o.sd.map(function (d) { return d.wall; }) : null, rOut: rOut, rIn: walled ? rIn : null, conv: conv };
+    res.outerLoop = out;
+    res.innerLoop = inn;
     return res;
+  }
+
+  /* ------------------------------------------------------------- levels
+     Another outline of the same spec, every side moved a further e in (out when e < 0) from the outside
+     ('out') or from the inside ('in', which is already every side at its own wall), corners kept concentric:
+     an outside corner's radius shrinks by e, a turned-in one's grows - the exact offset of the outline. A lip,
+     a lid's plug, Grow and Shrink are all this. -> { ok, loop, marks } or { ok: false, reason }. */
+  function conc(rho, e, convex) { return convex ? Math.max(0, rho - e) : Math.max(0, rho + e); }
+  function level(ctx, base, e, what) {
+    var n = ctx.o.P.length, dist = [], rho = [];
+    for (var j = 0; j < n; j++) {
+      dist.push((base === 'in' ? ctx.walls[j] : 0) + e);
+      rho.push(conc(base === 'in' ? ctx.rIn[j] : ctx.rOut[j], e, ctx.conv[j]));
+    }
+    var L = loop(ctx.S, ctx.o.P, dist, rho, base === 'in' ? 'inside' : 'outside', ctx.o.ix);
+    if (!L.ok) return { ok: false, reason: what + ' has no room: ' + (L.reason || ('side ' + (ctx.o.sx[L.side] + 1) + ' is used up by its corners')) };
+    if (!(signedArea(L.loop) > 0) || selfCross(L.loop)) return { ok: false, reason: what + ' turns over on itself - the outline is too small or too narrow for it' };
+    return L;
+  }
+  /* `child` lies wholly inside `parent`, touching it nowhere */
+  function within(child, parent) {
+    return inside(child[0], parent) && !loopsCross(child, parent);
   }
 
   /* A corner's fillet ran off its side: say which corners, and what room each has with the other as it is
@@ -495,63 +542,518 @@
     return { pts: pts, tris: r.tris };
   }
 
-  function make(spec) {
-    var o = outline(spec);
-    if (!o.ok) return o;
-    var sp = o.spec, H = sp.height, mode = sp.mode;
-    var F = mode === 'tray' ? sp.floor : 0;
-    if (!(H > 0)) return { ok: false, reason: 'the height must be more than 0', at: null };
-    if (mode === 'tray' && !(F > 0)) return { ok: false, reason: 'a tray needs a floor - give it a thickness, or choose Frame for no floor', at: null };
-    if (mode === 'tray' && F >= H - 1e-6) return { ok: false, reason: 'the floor (' + fmt(F) + ' mm) is as thick as the tray is tall (' + fmt(H) + ' mm) - choose Solid for a filled piece', at: null };
-
-    /* centre the footprint on the origin, as a stock piece arrives */
-    var cx = (o.info.min[0] + o.info.max[0]) / 2, cy = (o.info.min[1] + o.info.max[1]) / 2;
-    var shift = function (L) { return L.map(function (p) { return [p[0] - cx, p[1] - cy]; }); };
-    var O = shift(o.outer), I = o.inner ? shift(o.inner) : null;
-
+  /* ------------------------------------------------------------- the mesh writer
+     A piece is two STACKS of outlines, bottom to top - the outside surface and (walled) the inside one -
+     each entry an outline at a height. Between two entries: the same outline higher up is a straight wall;
+     a different outline higher up is a sloped band (a chamfer), zipped piece by piece; a different outline at
+     the same height is a flat step (a lip's underside or ceiling), filled between the two. Then the caps:
+     the bottom, the floor, the top. Every band and cap is built on the outlines' own points, so the mesh is
+     closed by construction. */
+  function writer() {
     var tri = [];
     function T(a, za, b, zb, c, zc) { tri.push(a[0], a[1], za, b[0], b[1], zb, c[0], c[1], zc); }
-    function cap(t, z, up) {
+    function cap(loops, z, up) {
+      var t = triangulate(loops);
       for (var i = 0; i < t.tris.length; i += 3) {
         var a = t.pts[t.tris[i]], b = t.pts[t.tris[i + 1]], c = t.pts[t.tris[i + 2]];
         if (up) T(a, z, b, z, c, z); else T(a, z, c, z, b, z);
       }
     }
-    function wall(L, z0, z1, outward) {
-      for (var i = 0; i < L.length; i++) {
-        var p = L[i], q = L[(i + 1) % L.length];
-        if (outward) { T(p, z0, q, z0, q, z1); T(p, z0, q, z1, p, z1); }
-        else { T(p, z0, q, z1, q, z0); T(p, z0, p, z1, q, z1); }
+    /* the band from lo (at z0) up to hi (at z1), facing out (or in, for an inside surface) */
+    function zip(lo, z0, hi, z1, out) {
+      var A = lo.loop, B = hi.loop, nA = A.length, nB = B.length, pieces = lo.marks.length;
+      function face(a, za, b, zb, c, zc) { if (out) T(a, za, b, zb, c, zc); else T(a, za, c, zc, b, zb); }
+      for (var k = 0; k < pieces; k++) {
+        var a0 = lo.marks[k], a1 = k + 1 < pieces ? lo.marks[k + 1] : nA;
+        var b0 = hi.marks[k], b1 = k + 1 < pieces ? hi.marks[k + 1] : nB;
+        var pa = [], pb = [], i;
+        for (i = a0; i <= a1; i++) pa.push(A[i % nA]);
+        for (i = b0; i <= b1; i++) pb.push(B[i % nB]);
+        var ta = params(pa), tb = params(pb), x = 0, y = 0;
+        while (x < pa.length - 1 || y < pb.length - 1) {
+          var stepA = y >= pb.length - 1 || (x < pa.length - 1 && ta[x + 1] <= tb[y + 1]);
+          if (stepA) { face(pa[x], z0, pa[x + 1], z0, pb[y], z1); x++; }
+          else { face(pa[x], z0, pb[y + 1], z1, pb[y], z1); y++; }
+        }
       }
     }
+    function params(pts) {
+      var t = [0], L = 0;
+      for (var i = 1; i < pts.length; i++) { L += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); t.push(L); }
+      return t.map(function (v, i) { return L > 1e-12 ? v / L : (pts.length > 1 ? i / (pts.length - 1) : 0); });
+    }
+    /* one surface's stack; `outside` true for the outside surface (faces out, material within its outlines) */
+    function stack(list, outside) {
+      for (var i = 0; i + 1 < list.length; i++) {
+        var lo = list[i], hi = list[i + 1];
+        if (hi.z > lo.z + 1e-9) zip(lo.L, lo.z, hi.L, hi.z, outside);
+        else if (lo.L !== hi.L) {
+          var bigUp = signedArea(hi.L.loop) > signedArea(lo.L.loop);
+          var big = bigUp ? hi.L : lo.L, small = bigUp ? lo.L : hi.L;
+          /* material above the step: outside, when the upper outline is the bigger; inside, the smaller */
+          var down = outside ? bigUp : !bigUp;
+          cap([big.loop, small.loop.slice().reverse()], lo.z, !down);
+        }
+      }
+    }
+    return { tri: tri, cap: cap, stack: stack, soup: function () { return new Float32Array(tri); } };
+  }
+  function soupVolume(s) {
+    var v = 0;
+    for (var i = 0; i < s.length; i += 9)
+      v += (s[i] * (s[i + 4] * s[i + 8] - s[i + 5] * s[i + 7]) - s[i + 1] * (s[i + 3] * s[i + 8] - s[i + 5] * s[i + 6]) + s[i + 2] * (s[i + 3] * s[i + 7] - s[i + 4] * s[i + 6])) / 6;
+    return v;
+  }
+  function shiftLoop(L, cx, cy) { return { loop: L.loop.map(function (p) { return [p[0] - cx, p[1] - cy]; }), marks: L.marks }; }
+  function bbox(loop) {
+    var lo = [Infinity, Infinity], hi = [-Infinity, -Infinity];
+    loop.forEach(function (p) { lo[0] = Math.min(lo[0], p[0]); lo[1] = Math.min(lo[1], p[1]); hi[0] = Math.max(hi[0], p[0]); hi[1] = Math.max(hi[1], p[1]); });
+    return { min: lo, max: hi, w: hi[0] - lo[0], d: hi[1] - lo[1] };
+  }
+  function bad(reason) { return { ok: false, reason: reason, at: null }; }
+
+  function make(spec) {
+    var o = outline(spec);
+    if (!o.ok) return o;
+    var sp = o.spec, H = sp.height, mode = sp.mode, lip = sp.lip, lid = sp.lid, ctx = o.ctx;
+    var walled = mode !== 'solid';
+    var F = mode === 'tray' ? sp.floor : 0;
+    if (!(H > 0)) return bad('the height must be more than 0');
+    if (mode === 'tray' && !(F > 0)) return bad('a tray needs a floor - give it a thickness, or choose Frame for no floor');
+    if (mode === 'tray' && F >= H - 1e-6) return bad('the floor (' + fmt(F) + ' mm) is as thick as the tray is tall (' + fmt(H) + ' mm) - choose Solid for a filled piece');
+
+    var O = { loop: o.outer, marks: o.outerLoop.marks }, I = walled ? { loop: o.inner, marks: o.innerLoop.marks } : null;
+    var warnings = o.warnings.slice();
+
+    /* ---- the lip: an outside flange (out) or an inside rim (in), lipH tall at the top, its underside a 45°
+       chamfer (printable without support) unless that is turned off */
+    var lipType = lip.type, w = lip.width, t = lip.height, ch = lip.chamfer;
+    if (lipType === 'in' && !walled) lipType = 'none';               // a solid has no inside to have a rim on
+    if (lipType !== 'none' && !(w > 0 && t > 0)) lipType = 'none';
+    var OL = null, IL = null, under = ch ? w : 0;
+    if (lipType === 'out') {
+      OL = level(ctx, 'out', -w, 'the lip');
+      if (!OL.ok) return bad(OL.reason);
+      if (H - t - under < -1e-9) return bad('the lip (' + fmt(t) + ' mm' + (ch ? ' + its ' + fmt(w) + ' mm chamfer' : '') + ') is taller than the piece (' + fmt(H) + ' mm)' + (ch ? ' - turn the chamfer off, or make the lip thinner' : ''));
+    } else if (lipType === 'in') {
+      IL = level(ctx, 'in', w, 'the lip');
+      if (!IL.ok) return bad(IL.reason + ' - make it narrower');
+      if (!within(IL.loop, I.loop)) return bad('the lip turns over on itself - make it narrower');
+      if (H - t - under < F - 1e-9) return bad('the lip (' + fmt(t) + ' mm' + (ch ? ' + its ' + fmt(w) + ' mm chamfer' : '') + ') reaches down past the ' + (mode === 'tray' ? 'floor' : 'bottom') + ' - make the piece taller or the lip thinner');
+    }
+
+    /* centre the footprint (the widest outline) on the origin, as a stock piece arrives */
+    var foot = bbox((OL || O).loop), cx = (foot.min[0] + foot.max[0]) / 2, cy = (foot.min[1] + foot.max[1]) / 2;
+    O = shiftLoop(O, cx, cy); if (I) I = shiftLoop(I, cx, cy);
+    if (OL) OL = shiftLoop(OL, cx, cy); if (IL) IL = shiftLoop(IL, cx, cy);
+    var topO = OL || O, topI = IL || I;
+
+    var parts = [], body = null;
     try {
-      var full = triangulate([O]);
-      var ring = I ? triangulate([O, I.slice().reverse()]) : null;
-      if (mode === 'solid') {
-        cap(full, 0, false); cap(full, H, true); wall(O, 0, H, true);
-      } else if (mode === 'frame') {
-        cap(ring, 0, false); cap(ring, H, true); wall(O, 0, H, true); wall(I, 0, H, false);
-      } else {
-        cap(full, 0, false); cap(ring, H, true); wall(O, 0, H, true); wall(I, F, H, false);
-        cap(triangulate([I]), F, true);
+      if (lid.type !== 'only') {
+        var W = writer();
+        var outS = [{ L: O, z: 0 }];
+        if (OL) { outS.push({ L: O, z: H - t - under }, { L: OL, z: H - t }, { L: OL, z: H }); }
+        else outS.push({ L: O, z: H });
+        W.stack(dedupeStack(outS), true);
+        if (walled) {
+          var inS = [{ L: I, z: F }];
+          if (IL) { inS.push({ L: I, z: H - t - under }, { L: IL, z: H - t }, { L: IL, z: H }); }
+          else inS.push({ L: I, z: H });
+          W.stack(dedupeStack(inS), false);
+          if (mode === 'tray') { W.cap([O.loop], 0, false); W.cap([I.loop], F, true); }
+          else W.cap([O.loop, I.loop.slice().reverse()], 0, false);
+          W.cap([topO.loop, topI.loop.slice().reverse()], H, true);
+        } else {
+          W.cap([O.loop], 0, false);
+          W.cap([topO.loop], H, true);
+        }
+        var soup = W.soup(), bb = bbox(topO.loop.concat(O.loop));
+        var text = MODE_NAME[mode] + ' ' + fmt(bb.w) + ' x ' + fmt(bb.d) + ' x ' + fmt(H) + ' mm';
+        if (walled) text += ', wall ' + wallText(sp) + (mode === 'tray' ? ', floor ' + fmt(F) : '');
+        if (lipType !== 'none') text += ', lip ' + (lipType === 'out' ? 'out ' : 'in ') + fmt(w) + ' x ' + fmt(t) + (ch ? ' chamfered' : '');
+        body = { kind: 'body', label: 'custom ' + mode, soup: soup, text: text, volume: soupVolume(soup), size: [bb.w, bb.d, H] };
+        parts.push(body);
+      }
+
+      /* ---- the lid: a plate the size of the top outline, printed face down, and a plug under it that fits
+         the opening with `fit` all round (hollow, a `wall` thick ring, when there is room for one) */
+      if (lid.type !== 'none') {
+        if (!walled) return bad('a solid has no opening for a lid - choose Tray or Frame');
+        var T0 = lid.thickness, D = lid.depth, c = lid.fit, pw = lid.wall;
+        if (!(T0 > 0)) return bad('the lid needs a thickness');
+        var room = H - F - (IL ? 0 : 0);
+        if (D > room + 1e-9) return bad('the lid\'s plug (' + fmt(D) + ' mm) is deeper than the ' + (mode === 'tray' ? 'tray is inside' : 'frame is tall') + ' (' + fmt(room) + ' mm)');
+        var eOpen = IL ? w : 0, PO = null, PI = null;
+        if (D > 0) {
+          PO = level(ctx, 'in', eOpen + c, 'the lid\'s plug');
+          if (!PO.ok) return bad(PO.reason + ' - make the Fit smaller');
+          if (pw > 0) {
+            PI = level(ctx, 'in', eOpen + c + pw, 'the plug\'s hollow');
+            if (!PI.ok || !within(PI.loop, PO.loop)) PI = null;              // no room for a hollow: a solid plug
+          }
+          PO = shiftLoop(PO, cx, cy); if (PI) PI = shiftLoop(PI, cx, cy);
+        }
+        var LW = writer();
+        LW.stack([{ L: topO, z: 0 }, { L: topO, z: T0 }], true);
+        LW.cap([topO.loop], 0, false);
+        if (PO) {
+          LW.cap([topO.loop, PO.loop.slice().reverse()], T0, true);
+          LW.stack([{ L: PO, z: T0 }, { L: PO, z: T0 + D }], true);
+          if (PI) {
+            LW.stack([{ L: PI, z: T0 }, { L: PI, z: T0 + D }], false);
+            LW.cap([PO.loop, PI.loop.slice().reverse()], T0 + D, true);
+            LW.cap([PI.loop], T0, true);
+          } else LW.cap([PO.loop], T0 + D, true);
+        } else LW.cap([topO.loop], T0, true);
+        var ls = LW.soup(), lb = bbox(topO.loop);
+        var ltext = 'Lid ' + fmt(lb.w) + ' x ' + fmt(lb.d) + ' x ' + fmt(T0) + ' mm' +
+          (PO ? ', ' + (PI ? 'hollow' : 'solid') + ' plug ' + fmt(D) + ' mm deep, ' + fmt(c) + ' mm fit' : ', flat');
+        if (PO && pw > 0 && !PI) warnings.push('the opening is too narrow for a hollow plug - it is solid');
+        parts.push({ kind: 'lid', label: 'custom lid', soup: ls, text: ltext, volume: soupVolume(ls), size: [lb.w, lb.d, T0 + D] });
       }
     } catch (e) {
-      return { ok: false, reason: (e && e.message) || String(e), at: null };
+      return bad((e && e.message) || String(e));
     }
-    var soup = new Float32Array(tri);
-    var vol = o.info.areaOut * H - (mode === 'solid' ? 0 : o.info.areaIn * (H - F));
+
     var info = o.info;
-    info.height = H; info.volume = vol; info.triangles = soup.length / 9; info.minWall = o.minWall != null ? o.minWall : null;
-    info.mode = mode; info.floor = F;
-    var text = MODE_NAME[mode] + ' ' + fmt(info.width) + ' x ' + fmt(info.depth) + ' x ' + fmt(H) + ' mm';
-    if (mode !== 'solid') text += ', wall ' + wallText(sp) + (mode === 'tray' ? ', floor ' + fmt(F) : '');
-    return { ok: true, soup: soup, outer: O, inner: I, info: info, text: text, warnings: o.warnings, spec: sp };
+    info.height = H; info.mode = mode; info.floor = F; info.minWall = o.minWall != null ? o.minWall : null;
+    info.lip = lipType; info.lid = lid.type;
+    if (body) { info.volume = body.volume; info.triangles = body.soup.length / 9; info.width = body.size[0]; info.depth = body.size[1]; }
+    else { info.volume = parts[0].volume; info.triangles = parts[0].soup.length / 9; }
+    return {
+      ok: true, parts: parts, soup: parts[0].soup, shift: [cx, cy], outer: O.loop, inner: I ? I.loop : null, lipOuter: OL ? OL.loop : null, lipInner: IL ? IL.loop : null,
+      info: info, text: parts.map(function (q) { return q.text; }).join(' + '), warnings: warnings, spec: sp
+    };
+  }
+  /* drop entries that add nothing: the same outline twice at one height (a chamfer of 0, a body of 0 below a lip) */
+  function dedupeStack(list) {
+    var out = [];
+    list.forEach(function (e) {
+      var q = out[out.length - 1];
+      if (q && q.L === e.L && Math.abs(q.z - e.z) < 1e-9) return;
+      out.push(e);
+    });
+    return out;
   }
   var MODE_NAME = { tray: 'Tray', frame: 'Frame', solid: 'Solid' };
   function wallText(sp) {
     var lo = Infinity, hi = -Infinity;
     sp.sides.forEach(function (s) { lo = Math.min(lo, s.wall); hi = Math.max(hi, s.wall); });
     return Math.abs(hi - lo) < 1e-9 ? fmt(lo) : fmt(lo) + '-' + fmt(hi);
+  }
+
+  /* ------------------------------------------------------------- grow / shrink
+     The whole outline moved out by d (in, when d < 0) - its EXACT offset, kept editable: every point goes to
+     where its two sides, moved, now meet; an outside corner's radius grows by d, a turned-in one's shrinks
+     (never under 0); a curved side stays on its own circle's offset, re-cut between the new points. Walls and
+     everything else are kept. -> { ok, spec } or { ok: false, reason }. */
+  function offsetSpec(spec, d) {
+    var sp = normalize(spec), why = basicChecks(sp);
+    if (why) return { ok: false, reason: why };
+    if (!d) return { ok: true, spec: sp };
+    var ol = outline(Object.assign({}, sp, { mode: 'solid' }));
+    if (!ol.ok) return { ok: false, reason: ol.reason };
+    var o = ol.ctx.o, S = ol.ctx.S, n = o.P.length, j, NP = [];
+    for (j = 0; j < n; j++) {
+      var c = corner(S[(j + n - 1) % n], S[j], o.P[j], -d, -d, 0);
+      if (!c) return { ok: false, reason: 'point ' + (o.ix[j] + 1) + ' has nowhere to go once the outline is moved ' + fmt(Math.abs(d)) + ' mm ' + (d > 0 ? 'out' : 'in') };
+      NP.push(c.c);
+    }
+    /* every side must still run the way it ran: one that turned round has been used up */
+    for (j = 0; j < n; j++) {
+      var a0 = o.P[j], b0 = o.P[(j + 1) % n], a1 = NP[j], b1 = NP[(j + 1) % n];
+      if ((b1[0] - a1[0]) * (b0[0] - a0[0]) + (b1[1] - a1[1]) * (b0[1] - a0[1]) <= 0)
+        return { ok: false, reason: 'side ' + (o.sx[j] + 1) + ' is used up once the outline is moved ' + fmt(Math.abs(d)) + ' mm in - the shape is too small for that' };
+    }
+    var out = normalize(sp);
+    for (j = 0; j < n; j++) {
+      var u = o.ix[j], p = out.points[u];
+      p.x = round2(NP[j][0]); p.y = round2(NP[j][1]);
+      p.r = round2(conc(o.pt[j].r, -d, ol.ctx.conv[j]));
+    }
+    for (j = 0; j < n; j++) {
+      var side = S[j], us = o.sx[j];
+      if (side.line) continue;
+      var R2 = side.R + side.k * d, a = NP[j], b = NP[(j + 1) % n], h = Math.hypot(b[0] - a[0], b[1] - a[1]) / 2;
+      if (!(R2 > h)) return { ok: false, reason: 'side ' + (us + 1) + "'s curve closes up once the outline is moved " + fmt(Math.abs(d)) + ' mm in' };
+      out.sides[us].bulge = round2(side.k * (R2 - Math.sqrt(R2 * R2 - h * h)));
+    }
+    var check = outline(Object.assign({}, out, { mode: 'solid' }));
+    if (!check.ok) return { ok: false, reason: 'moved ' + fmt(Math.abs(d)) + ' mm ' + (d > 0 ? 'out' : 'in') + ', ' + check.reason };
+    return { ok: true, spec: out };
+  }
+  function round2(x) { return Math.round(x * 100) / 100; }
+
+  /* ------------------------------------------------------------- an outline from points
+     fromLoop(points, { tol, wall }): a closed run of points - a section of a mesh, a trace - made into a spec
+     the editor can work with, every side within `tol` mm (default 0.2) of the points:
+       1. every edge is cut into pieces no longer than `tol` (a long straight side then has points of its own
+          to say it is straight; a facet's section has one more on every diagonal, which says nothing)
+       2. the STRAIGHT RUNS: every stretch at least STRAIGHT_MIN mm long that lies within tol of one line
+       3. each GAP between two straight runs is
+            - nothing (a sharp corner): one point, where the two lines meet
+            - one arc tangent to both lines (a fillet): one point where the lines meet, with the arc's radius
+              as its Radius - a rounded corner, as the editor makes one
+            - otherwise a chain of arcs (least-squares circles, each within tol and at most ~150°) and short
+              straight sides, each a side of its own
+       4. a loop with no straight run (a disc, an ellipse, a blob) is the chain of 3 alone
+     It is moved so its lowest-left corner is at (0, 0). -> { ok, spec, shift: [dx, dy], info } or { ok: false, reason } */
+  var STRAIGHT_MIN = 3;
+  function fromLoop(pts, opts) {
+    opts = opts || {};
+    var tol = Math.max(0.01, num(opts.tol, 0.2)), wall = num(opts.wall, DEFAULTS.wall), i, k;
+    var P0 = [];
+    (pts || []).forEach(function (p) {
+      var q = P0[P0.length - 1];
+      if (!q || Math.hypot(p[0] - q[0], p[1] - q[1]) > 1e-6) P0.push([+p[0], +p[1]]);
+    });
+    while (P0.length > 1 && Math.hypot(P0[0][0] - P0[P0.length - 1][0], P0[0][1] - P0[P0.length - 1][1]) <= 1e-6) P0.pop();
+    if (P0.length < 3) return { ok: false, reason: 'the outline has fewer than 3 points' };
+    if (signedArea(P0) < 0) P0.reverse();
+    if (!(signedArea(P0) > 0.01)) return { ok: false, reason: 'the outline encloses no area' };
+
+    /* 1. densify; start at the longest edge, which on a faceted mesh is a straight side */
+    var per = 0, longest = -1, st = 0;
+    for (i = 0; i < P0.length; i++) {
+      var el = Math.hypot(P0[(i + 1) % P0.length][0] - P0[i][0], P0[(i + 1) % P0.length][1] - P0[i][1]);
+      per += el; if (el > longest) { longest = el; st = i; }
+    }
+    var hstep = Math.max(tol, per / 6000), P = [];
+    for (i = 0; i < P0.length; i++) {
+      var A0 = P0[(st + i) % P0.length], B0 = P0[(st + i + 1) % P0.length], m = Math.max(1, Math.ceil(Math.hypot(B0[0] - A0[0], B0[1] - A0[1]) / hstep));
+      for (k = 0; k < m; k++) P.push([A0[0] + (B0[0] - A0[0]) * k / m, A0[1] + (B0[1] - A0[1]) * k / m]);
+    }
+    var N = P.length;
+    function pt(q) { return P[((q % N) + N) % N]; }
+    function arcLen(ia, ib) { var L = 0; for (var q = ia + 1; q <= ib; q++) L += Math.hypot(pt(q)[0] - pt(q - 1)[0], pt(q)[1] - pt(q - 1)[1]); return L; }
+    function segDist(p, a, b) {
+      var vx = b[0] - a[0], vy = b[1] - a[1], ll = vx * vx + vy * vy;
+      var t = ll > 0 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * vx + (p[1] - a[1]) * vy) / ll)) : 0;
+      return Math.hypot(a[0] + vx * t - p[0], a[1] + vy * t - p[1]);
+    }
+    function lineFit(ia, ib) {
+      var A = pt(ia), B = pt(ib);
+      if (Math.hypot(B[0] - A[0], B[1] - A[1]) < 1e-9) return false;
+      for (var q = ia + 1; q < ib; q++) if (segDist(pt(q), A, B) > tol) return false;
+      return true;
+    }
+    /* least-squares line through a run: its mean and direction (the run's own way) */
+    function lineLS(ia, ib) {
+      var n0 = ib - ia + 1, mx = 0, my = 0, q;
+      for (q = ia; q <= ib; q++) { mx += pt(q)[0]; my += pt(q)[1]; }
+      mx /= n0; my /= n0;
+      var sxx = 0, sxy = 0, syy = 0;
+      for (q = ia; q <= ib; q++) { var x = pt(q)[0] - mx, y = pt(q)[1] - my; sxx += x * x; sxy += x * y; syy += y * y; }
+      var ang = 0.5 * Math.atan2(2 * sxy, sxx - syy), d = [Math.cos(ang), Math.sin(ang)];
+      var run = [pt(ib)[0] - pt(ia)[0], pt(ib)[1] - pt(ia)[1]];
+      if (d[0] * run[0] + d[1] * run[1] < 0) d = [-d[0], -d[1]];
+      return { p: [mx, my], d: d };
+    }
+    function onLine(L, p) { var t = (p[0] - L.p[0]) * L.d[0] + (p[1] - L.p[1]) * L.d[1]; return [L.p[0] + L.d[0] * t, L.p[1] + L.d[1] * t]; }
+    function meet(L1, L2) {
+      var den = L1.d[0] * L2.d[1] - L1.d[1] * L2.d[0];
+      if (Math.abs(den) < 1e-6) return null;
+      var t = ((L2.p[0] - L1.p[0]) * L2.d[1] - (L2.p[1] - L1.p[1]) * L2.d[0]) / den;
+      return [L1.p[0] + L1.d[0] * t, L1.p[1] + L1.d[1] * t];
+    }
+    /* least-squares circle (Kasa) through a run, about its mean for conditioning */
+    function circleFit(ia, ib) {
+      var n0 = ib - ia + 1, mx = 0, my = 0, q;
+      if (n0 < 3) return null;
+      for (q = ia; q <= ib; q++) { mx += pt(q)[0]; my += pt(q)[1]; }
+      mx /= n0; my /= n0;
+      var Sxx = 0, Sxy = 0, Syy = 0, Sx = 0, Sy = 0, Sxz = 0, Syz = 0, Sz = 0;
+      for (q = ia; q <= ib; q++) {
+        var x = pt(q)[0] - mx, y = pt(q)[1] - my, z = x * x + y * y;
+        Sxx += x * x; Sxy += x * y; Syy += y * y; Sx += x; Sy += y; Sxz += x * z; Syz += y * z; Sz += z;
+      }
+      var M = [[Sxx, Sxy, Sx, -Sxz], [Sxy, Syy, Sy, -Syz], [Sx, Sy, n0, -Sz]];
+      for (var c0 = 0; c0 < 3; c0++) {
+        var piv = c0;
+        for (var r0 = c0 + 1; r0 < 3; r0++) if (Math.abs(M[r0][c0]) > Math.abs(M[piv][c0])) piv = r0;
+        var tmp = M[c0]; M[c0] = M[piv]; M[piv] = tmp;
+        if (Math.abs(M[c0][c0]) < 1e-12) return null;
+        for (var r1 = 0; r1 < 3; r1++) if (r1 !== c0) {
+          var f = M[r1][c0] / M[c0][c0];
+          for (var c1 = c0; c1 < 4; c1++) M[r1][c1] -= f * M[c0][c1];
+        }
+      }
+      var D = M[0][3] / M[0][0], E = M[1][3] / M[1][1], F = M[2][3] / M[2][2], R2 = D * D / 4 + E * E / 4 - F;
+      if (!(R2 > 0)) return null;
+      return { c: [mx - D / 2, my - E / 2], R: Math.sqrt(R2) };
+    }
+    /* an arc through a run: within tol, turning one way, at most ~150°, and (unless `loose`) not as good as
+       straight. `loose` is for the search, where short runs must pass so a longer one can be tried. */
+    function arcFit(ia, ib, loose) {
+      if (ib - ia < 2) return loose ? {} : null;
+      var C = circleFit(ia, ib);
+      if (!C) return loose && lineFit(ia, ib) ? {} : null;   // points in a line: a circle of no curvature, for the search
+      var q;
+      for (q = ia; q <= ib; q++) if (Math.abs(Math.hypot(pt(q)[0] - C.c[0], pt(q)[1] - C.c[1]) - C.R) > tol) return null;
+      var sweep = 0;
+      for (q = ia + 1; q <= ib; q++) {
+        var u = [pt(q - 1)[0] - C.c[0], pt(q - 1)[1] - C.c[1]], v = [pt(q)[0] - C.c[0], pt(q)[1] - C.c[1]];
+        sweep += Math.atan2(u[0] * v[1] - u[1] * v[0], u[0] * v[0] + u[1] * v[1]);
+      }
+      if (Math.abs(sweep) > 2.62) return null;                                     // ~150°: a full circle is 3 arcs
+      if (!loose && C.R * (1 - Math.cos(sweep / 2)) < 2 * tol) return null;      // as good as straight
+      return { c: C.c, R: C.R, ccw: sweep > 0 };
+    }
+    function furthest(ia, limit, ok) {
+      var good = -1, step = 1, e = ia + 1;
+      while (e <= limit && ok(ia, e)) { good = e; step *= 2; e = ia + step; }
+      var lo = good < 0 ? ia : good, hi = Math.min(e, limit + 1);
+      while (hi - lo > 1) { var mid = (lo + hi) >> 1; if (ok(ia, mid)) lo = mid; else hi = mid; }
+      return lo > ia ? lo : -1;
+    }
+
+    /* 2. straight runs. Within tol of a line is not enough - a short stretch of any arc is that - so a run is
+       straight only when a line explains it about as well as the best circle does (a straight side: both near
+       0, or both the scan's noise; a piece of a fillet: the line is off by its sag, the circle by nothing). */
+    function devCircle(ia, ib) {
+      var C = circleFit(ia, ib), m = 0;
+      if (!C) return Infinity;
+      for (var q = ia; q <= ib; q++) m = Math.max(m, Math.abs(Math.hypot(pt(q)[0] - C.c[0], pt(q)[1] - C.c[1]) - C.R));
+      return m;
+    }
+    /* straight: long enough, and the best circle through it bows no more than its own leftover error (or a
+       tenth of tol) - a line's best circle is nearly flat; a piece of a gentle arc bows clearly, even when
+       facets put the arc's points a little off it */
+    function straight(ia, ib) {
+      if (arcLen(ia, ib) < STRAIGHT_MIN) return false;
+      var C = circleFit(ia, ib);
+      if (!C) return true;                            // in a line exactly
+      var h = Math.hypot(pt(ib)[0] - pt(ia)[0], pt(ib)[1] - pt(ia)[1]) / 2;
+      var bow = C.R > h ? C.R - Math.sqrt(C.R * C.R - h * h) : C.R;
+      return bow <= Math.max(2 * devCircle(ia, ib), 0.1 * tol);
+    }
+    /* runs are walked at half of tol (an arc's tail passes for straight for a shorter way), and a run
+       found takes the first bit of each fillet beside it all the same: trim each end back to the points on
+       the run's own best line - within the noise of its middle half, or a tenth of tol - so the line is the
+       side's and the fillet is whole. */
+    var tolS = tol / 2;
+    function lineFitS(ia, ib) {
+      var A = pt(ia), B = pt(ib);
+      if (Math.hypot(B[0] - A[0], B[1] - A[1]) < 1e-9) return false;
+      for (var q = ia + 1; q < ib; q++) if (segDist(pt(q), A, B) > tolS) return false;
+      return true;
+    }
+    function trim(r) {
+      for (var pass = 0; pass < 3; pass++) {
+        var L = lineLS(r.a, r.b), q, res = [];
+        for (q = r.a; q <= r.b; q++) res.push(Math.abs((pt(q)[0] - L.p[0]) * L.d[1] - (pt(q)[1] - L.p[1]) * L.d[0]));
+        var n0 = res.length, mid = res.slice(Math.floor(n0 / 4), Math.ceil(3 * n0 / 4)), rms = 0;
+        mid.forEach(function (v) { rms += v * v; });
+        rms = Math.sqrt(rms / Math.max(1, mid.length));
+        var thr = Math.max(0.1 * tol, 3 * rms), a2 = r.a, b2 = r.b;
+        while (b2 - a2 > 2 && res[a2 - r.a] > thr) a2++;
+        while (b2 - a2 > 2 && res[b2 - r.a] > thr) b2--;
+        if (a2 === r.a && b2 === r.b) break;
+        r.a = a2; r.b = b2;
+      }
+      return r;
+    }
+    /* The first run may have begun before the start: walk it back so it is whole. */
+    var start = 0, e0 = furthest(0, N, lineFitS);
+    if (e0 > 0 && arcLen(0, e0) >= STRAIGHT_MIN) {
+      var back = 0;
+      while (back < N - e0 - 1 && lineFitS(-(back + 1), e0)) back++;
+      start = -back;
+    }
+    var runs = [], pos = start, end = start + N;
+    while (pos < end) {
+      var e = furthest(pos, end, lineFitS);
+      var r0 = e > pos ? trim({ a: pos, b: e }) : null;
+      if (r0 && straight(r0.a, r0.b)) { runs.push(r0); pos = e; }
+      else pos++;
+    }
+    /* two runs one after the other on one line are one run */
+    for (var mg = runs.length - 1; mg > 0; mg--) {
+      var r1 = runs[mg - 1], r2 = runs[mg];
+      if (r2.a - r1.b > 3) continue;
+      var m2 = trim({ a: r1.a, b: r2.b });             // trimmed first: one of the two may start in a fillet's tail
+      if (lineFitS(m2.a, m2.b) && m2.b - m2.a >= Math.max(r1.b - r1.a, r2.b - r2.a)) runs.splice(mg - 1, 2, m2);
+    }
+    /* a run that reaches the end and one that begins at the start are one run, if they are straight together */
+    if (runs.length > 1 && runs[runs.length - 1].b >= end && runs[0].a === start) {
+      var last = runs[runs.length - 1];
+      if (lineFitS(last.a, runs[0].b + N)) { runs[0] = trim({ a: last.a - N, b: runs[0].b }); runs.pop(); }
+    }
+
+    /* 3. chains: arcs and short straight sides for a stretch of points, greedily */
+    function chain(ia, ib) {
+      var out = [], q = ia;
+      while (q < ib) {
+        var eA = furthest(q, ib, function (x, y) { return !!arcFit(x, y, true); });
+        var fit = eA > q ? arcFit(q, eA) : null;
+        if (fit) { out.push({ a: q, b: eA, arc: fit }); q = eA; continue; }
+        var eL = furthest(q, ib, lineFit);
+        if (eL <= q) eL = q + 1;
+        out.push({ a: q, b: eL, arc: null });
+        q = eL;
+      }
+      return out;
+    }
+    function bulgeOf(arc, A, B) {
+      var h = Math.hypot(B[0] - A[0], B[1] - A[1]) / 2;
+      if (!(h > 1e-9) || arc.R <= h) return 0;
+      var sag = arc.R - Math.sqrt(arc.R * arc.R - h * h);
+      return (arc.ccw ? 1 : -1) * sag;                // counter-clockwise round its centre: bowed out
+    }
+
+    var V = [], SD = [], rounded = 0;                 // vertices { x, y, r } and the side from each to the next
+    function addV(p, r) { V.push({ x: p[0], y: p[1], r: r || 0 }); }
+    if (!runs.length) {
+      var ch = chain(0, N);
+      ch.forEach(function (c) { addV(pt(c.a)); SD.push(c.arc ? bulgeOf(c.arc, pt(c.a), pt(c.b)) : 0); });
+    } else {
+      var lines = runs.map(function (r) { return lineLS(r.a, r.b); }), K = runs.length;
+      /* each gap: a corner (X, r) or a chain */
+      var gaps = runs.map(function (r, j) {
+        var nx = runs[(j + 1) % K], ga = r.b, gb = nx.a + (j === K - 1 ? N : 0);
+        var L1 = lines[j], L2 = lines[(j + 1) % K], X = meet(L1, L2);
+        if (gb - ga <= 1 && X) return { corner: X, r: 0 };
+        var fit = gb - ga >= 2 ? arcFit(ga, gb) : null;
+        if (fit && X) {
+          var d1 = Math.abs((fit.c[0] - L1.p[0]) * L1.d[1] - (fit.c[1] - L1.p[1]) * L1.d[0]);
+          var d2 = Math.abs((fit.c[0] - L2.p[0]) * L2.d[1] - (fit.c[1] - L2.p[1]) * L2.d[0]);
+          var slack = Math.max(2 * tol, 0.03 * fit.R);
+          if (Math.abs(d1 - fit.R) <= slack && Math.abs(d2 - fit.R) <= slack) return { corner: X, r: Math.round(fit.R * 10) / 10, arc: true };
+        }
+        return { chain: chain(ga, gb), ga: ga, gb: gb };
+      });
+      for (var j = 0; j < K; j++) {
+        var pg = gaps[(j + K - 1) % K], g = gaps[j], L = lines[j];
+        if (pg.corner) addV(pg.corner, pg.r); else addV(onLine(L, pt(runs[j].a)));
+        SD.push(0);                                   // the straight run
+        if (g.corner) { if (g.arc) rounded++; continue; }
+        addV(onLine(L, pt(runs[j].b)));
+        var nextStart = onLine(lines[(j + 1) % K], pt(g.gb));
+        g.chain.forEach(function (c, q) {
+          var A = q === 0 ? onLine(L, pt(runs[j].b)) : pt(c.a), B = q === g.chain.length - 1 ? nextStart : pt(c.b);
+          SD.push(c.arc ? bulgeOf(c.arc, A, B) : 0);
+          if (q < g.chain.length - 1) addV(pt(c.b));
+        });
+      }
+    }
+    /* points closer than 0.05 mm are one */
+    for (i = V.length - 1; i >= 0 && V.length > 3; i--) {
+      var nb = V[(i + 1) % V.length];
+      if (Math.hypot(nb.x - V[i].x, nb.y - V[i].y) < 0.05) { nb.r = Math.max(nb.r, V[i].r); V.splice(i, 1); SD.splice(i, 1); }
+    }
+    if (V.length < 3) return { ok: false, reason: 'the outline came out as fewer than 3 points - try a finer Detail' };
+    var lo = [Infinity, Infinity];
+    V.forEach(function (p) { lo[0] = Math.min(lo[0], p.x); lo[1] = Math.min(lo[1], p.y); });
+    var spec = {
+      points: V.map(function (p) { return { x: round2(p.x - lo[0]), y: round2(p.y - lo[1]), r: p.r, rIn: null }; }),
+      sides: SD.map(function (b2) { return { wall: wall, bulge: round2(b2) }; })
+    };
+    var res = outline(Object.assign({}, spec, { mode: 'solid' }));
+    if (!res.ok) return { ok: false, reason: 'the outline read could not be rebuilt (' + res.reason + ') - try a different Detail' };
+    return { ok: true, spec: spec, shift: [-lo[0], -lo[1]],
+             info: { points: spec.points.length, curved: spec.sides.filter(function (s3) { return s3.bulge; }).length, rounded: rounded, from: P0.length,
+                     areaFrom: signedArea(P0), area: res.info.areaOut } };
   }
 
   /* ------------------------------------------------------------- presets */
@@ -578,7 +1080,8 @@
 
   var API = {
     normalize: normalize, outline: outline, make: make, maxRadius: maxRadius, preset: preset,
-    PRESETS: Object.keys(PRESETS), MODES: MODES.slice(), DEFAULTS: DEFAULTS, WALL_NOZZLES: WALL_NOZZLES,
+    offsetSpec: offsetSpec, fromLoop: fromLoop,
+    PRESETS: Object.keys(PRESETS), MODES: MODES.slice(), LIP_TYPES: LIP_TYPES.slice(), LID_TYPES: LID_TYPES.slice(), DEFAULTS: DEFAULTS, WALL_NOZZLES: WALL_NOZZLES,
     signedArea: signedArea, fmt: fmt
   };
   root.NSO_CustomShape = API;

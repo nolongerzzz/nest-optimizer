@@ -11,7 +11,11 @@
      5. double-clicking a side adds a point on it; Delete removes the picked point; Ctrl+Z steps the editor back
      6. a refusal (a radius its sides have no room for) says so, clears the preview and turns Add to plate off
      7. Add to plate bakes one closed piece of the size shown, selected, as one Undo; the app's Undo takes it off
-     8. Big lifts the editor over the page and Esc puts it back; closing the menu takes the preview away */
+     8. Big lifts the editor over the page and Esc puts it back; closing the menu takes the preview away
+     9. Lip tiles and rows change the ghost; With lid shows two ghosts, Add drops both as one Undo; a Solid's In lip and lid are off
+    10. Grow / Shrink move the whole outline
+    11. Copy from a piece: off with nothing selected; the cut is drawn; Copy reads the tray's outside, then its hole; Ctrl+Z
+        brings back what was there; a cut with no hole says so */
 
 const fs = require('fs');
 const { withApp } = require('./nso_app_harness');
@@ -39,6 +43,7 @@ async function drag(page, from, to) {
   await page.mouse.up();
   await settle(page);
 }
+const click = (page, sel) => page.evaluate(s => document.querySelector(s).click(), sel);
 const slide = (page, id, v) => page.evaluate(([id, v]) => { const el = document.getElementById(id); el.value = String(v); el.dispatchEvent(new Event('input', { bubbles: true })); }, [id, v]);
 
 withApp(async (page, logs) => {
@@ -62,7 +67,7 @@ withApp(async (page, logs) => {
     });
     return sums;
   });
-  check('every tile is painted', drawn.length === 9 && drawn.every(s => s > 0), JSON.stringify(drawn));
+  check('every tile is painted (6 presets, 3 modes, 3 lips, 3 lids)', drawn.length === 15 && drawn.every(s => s > 0), JSON.stringify(drawn));
   check('no two preset tiles alike', new Set(drawn.slice(0, 6)).size === 6);
 
   console.log('2. the preview');
@@ -182,6 +187,85 @@ withApp(async (page, logs) => {
   await page.evaluate(() => { document.getElementById('menu-cshape').open = false; });
   await settle(page);
   check('closing the menu takes the preview away', (await page.evaluate(() => state.scene.children.filter(c => c.userData && c.userData.nsoPiecePreview).length)) === 0);
+
+  console.log('9. lip and lid');
+  await page.evaluate(() => { document.getElementById('menu-cshape').open = true; });
+  await settle(page);
+  await page.evaluate(() => nsoCustomShape.preset('rounded'));
+  await settle(page);
+  await click(page, '#cs-lip-row [data-lip="out"]');
+  await settle(page);
+  st = await ST(page);
+  check('the Out tile puts a 3 mm flange round the top: the ghost is 86 wide', (await SPEC(page)).lip.type === 'out' && Math.abs(st.ghost[0].size.x - 86) < 0.01, JSON.stringify(st.ghost[0] && st.ghost[0].size));
+  check('its rows are up', await page.evaluate(() => !document.getElementById('cs-row-lipw').hidden && !document.getElementById('cs-row-lipch').hidden));
+  await slide(page, 'inp-cs-lipw-slider', 5);
+  await settle(page);
+  check('Lip width moves it: 90 wide', Math.abs((await ST(page)).ghost[0].size.x - 90) < 0.01);
+  await click(page, '#cs-lid-row [data-lid="with"]');
+  await settle(page);
+  st = await ST(page);
+  check('With lid: two ghosts, the tray and its lid', st.ghosts === 2 && st.parts.length === 2 && st.parts[1].kind === 'lid', JSON.stringify(st.parts.map(q => q.kind)));
+  check('the lid covers the lip (90 wide) and stands 6 tall (2 plate + 4 plug)', Math.abs(st.ghost[1].size.x - 90) < 0.01 && Math.abs(st.ghost[1].size.y - 6) < 0.01, JSON.stringify(st.ghost[1].size));
+  await shot(page, '7-lip-lid');
+  const undoA = await page.evaluate(() => state.undoStack.length);
+  await page.click('#btn-cs-add');
+  await settle(page);
+  const two = await page.evaluate(() => state.models.filter(Boolean).map(m => m.name));
+  check('Add to plate drops both: "custom tray 1" and "custom lid 1"', two.length === 2 && two.includes('custom tray 1') && two.includes('custom lid 1'), JSON.stringify(two));
+  check('as one Undo', (await page.evaluate(() => state.undoStack.length)) === undoA + 1);
+  await page.click('#btn-undo');
+  await settle(page);
+  check('which takes both off', (await page.evaluate(() => state.models.filter(Boolean).length)) === 0);
+  await click(page, '#cs-mode-row [data-mode="solid"]');
+  await settle(page);
+  const solidOff = await page.evaluate(() => ({ inLip: document.querySelector('#cs-lip-row [data-lip="in"]').disabled, lid: document.querySelector('#cs-lid-row [data-lid="with"]').disabled }));
+  check('a Solid takes no inside lip and no lid (their tiles are off)', solidOff.inLip && solidOff.lid, JSON.stringify(solidOff));
+  await page.evaluate(() => { nsoCustomShape.mode('tray'); nsoCustomShape.lip('none'); nsoCustomShape.lid('none'); });
+  await settle(page);
+
+  console.log('10. Grow / Shrink');
+  await page.evaluate(() => nsoCustomShape.preset('rounded'));
+  await page.evaluate(() => { const b = document.getElementById('inp-cs-grow'); b.value = '1'; });
+  await page.click('#btn-cs-shrink');
+  await settle(page);
+  sp = await SPEC(page);
+  check('Shrink 1: every point 1 in, every radius 1 less', JSON.stringify(sp.points.map(p => [p.x, p.y, p.r])) === '[[1,1,7],[79,1,7],[79,49,7],[1,49,7]]', JSON.stringify(sp.points.map(p => [p.x, p.y, p.r])));
+  await page.click('#btn-cs-grow');
+  await settle(page);
+  sp = await SPEC(page);
+  check('Grow 1 puts it back', JSON.stringify(sp.points.map(p => [p.x, p.y, p.r])) === '[[0,0,8],[80,0,8],[80,50,8],[0,50,8]]', JSON.stringify(sp.points.map(p => [p.x, p.y, p.r])));
+
+  console.log('11. copy an outline from a piece');
+  await page.evaluate(() => { nsoCustomShape.preset('rounded'); nsoCustomShape.add(); nsoCustomShape.preset('trapezoid'); });
+  await settle(page);
+  await page.evaluate(() => { state.editId = null; state.selectedIndex = -1; document.getElementById('cs-copy').open = true; window.dispatchEvent(new Event('pointerup')); });
+  await settle(page);
+  check('with nothing selected, Copy outline is off and says why', await page.evaluate(() => document.getElementById('btn-cs-copy').disabled && /Select a piece/.test(document.getElementById('cs-copy-src').textContent)));
+  await page.evaluate(() => { const m = state.models.filter(Boolean)[0], i = state.placed.findIndex(p => p && p.sourceId === m.id); state.editId = m.id; selectPlaced(i); window.dispatchEvent(new Event('pointerup')); });
+  await settle(page);
+  const cut = await page.evaluate(() => ({ max: +document.getElementById('inp-cs-cut-slider').max, at: +document.getElementById('inp-cs-cut').value, off: document.getElementById('btn-cs-copy').disabled, ref: nsoCustomShape.ref() }));
+  check('selecting the tray: the cut starts half way up its 25 mm, and is drawn', cut.max === 25 && cut.at === 12.5 && !cut.off && cut.ref && cut.ref.length > 20, JSON.stringify({ max: cut.max, at: cut.at, off: cut.off, ref: cut.ref && cut.ref.length }));
+  await page.locator('#cs-editor').scrollIntoViewIfNeeded();
+  await shot(page, '8-cut');
+  await page.click('#btn-cs-copy');
+  await settle(page);
+  sp = await SPEC(page);
+  check('Copy outline: the tray\'s outside comes back as 4 points of radius 8', JSON.stringify(sp.points.map(p => [p.x, p.y, p.r])) === '[[0,0,8],[80,0,8],[80,50,8],[0,50,8]]', JSON.stringify(sp.points.map(p => [p.x, p.y, p.r])));
+  await page.evaluate(() => { const el = document.getElementById('sel-cs-copy-use'); el.value = 'inside'; el.dispatchEvent(new Event('change', { bubbles: true })); });
+  await page.click('#btn-cs-copy');
+  await settle(page);
+  sp = await SPEC(page);
+  check('Use: its inside - the tray\'s hole, 76 x 46 at radius 6', JSON.stringify(sp.points.map(p => [p.x, p.y, p.r])) === '[[0,0,6],[76,0,6],[76,46,6],[0,46,6]]', JSON.stringify(sp.points.map(p => [p.x, p.y, p.r])));
+  await page.locator('#cs-editor').focus();
+  await page.keyboard.press('Control+z');
+  await page.keyboard.press('Control+z');
+  await settle(page);
+  sp = await SPEC(page);
+  check('Ctrl+Z twice: the trapezoid that was there', sp.points.length === 4 && sp.points[2].x === 70 && sp.points[2].y === 50, JSON.stringify(sp.points.map(p => [p.x, p.y])));
+  await page.evaluate(() => { const b = document.getElementById('inp-cs-cut'); b.value = '1'; b.dispatchEvent(new Event('input', { bubbles: true })); });
+  await settle(page);
+  check('a cut through the floor has no hole, and says so', await page.evaluate(() => document.getElementById('btn-cs-copy').disabled && /no hole/.test(document.getElementById('cs-copy-src').textContent)), await page.evaluate(() => document.getElementById('cs-copy-src').textContent));
+  await shot(page, '9-copied');
 
   const errs = logs.filter(l => /\[pageerror\]|\[error\]/.test(l) && /custom|cs-|NSO_CustomShape/i.test(l));
   check('no page errors from the card', errs.length === 0, errs.slice(0, 3).join(' | '));

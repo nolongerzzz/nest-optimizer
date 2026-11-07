@@ -4935,3 +4935,13 @@ body.sup-card-open #adjust-status { display: none; }
 @media (min-width: 960px) {
   .cs-editor-wrap.is-big { left: auto; right: 16px; transform: translateY(-50%); width: min(720px, calc(100vw - 470px)); }
 }
+/* Custom shape: the Copy fold, the Grow / Shrink row, the chamfer tick */
+.cs-copy { flex: 0 0 100%; box-sizing: border-box; border: 1px solid #334155; border-radius: 6px; padding: 2px 6px; margin: 2px 0; }
+.cs-copy > summary { font-size: 11px; color: #cbd5e1; cursor: pointer; padding: 2px 0; }
+.cs-copy[open] { display: flex; flex-direction: column; gap: 2px; padding-bottom: 6px; }
+.cs-copy .fs-slider, .cs-copy .vp-row { flex: none; }
+.cs-grow { flex: 0 0 100%; box-sizing: border-box; display: grid; grid-template-columns: 1fr 64px auto auto; align-items: center; column-gap: 4px; font-size: 11px; color: #94a3b8; margin: 3px 0; }
+.cs-grow input[type="number"] { width: 100%; min-width: 0; }
+.cs-check { flex: 0 0 100%; box-sizing: border-box; display: flex; align-items: center; gap: 6px; font-size: 11px; color: #94a3b8; margin: 2px 0; }
+.cs-check[hidden], .cs-grow[hidden] { display: none; }
+.cs-lips .fs-tile span, .cs-lids .fs-tile span { font-size: 10px; }

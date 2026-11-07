@@ -11,7 +11,14 @@
    6. Inner R: auto keeps the wall round an outside corner (r - wall) and an inside one (r + wall); a typed one is used as typed
    7. the refusals say what is wrong in words and name the point or side, counting from 1 in the order given
    8. maxRadius is the most a corner's sides have room for, with its neighbours as they are
-   9. a wall under 2 nozzle widths is made, with a warning */
+   9. a wall under 2 nozzle widths is made, with a warning
+  10. LIPS: an outside flange or an inside rim, square or with a 45° chamfer under it - sections at chosen heights are the
+      outlines they should be, every combination closed, the refusals said
+  11. LIDS: the plate is the top outline (the lip's, with an outside lip), the plug the opening less Fit (the lip's
+      opening, under an inside lip), hollow or solid or none, and the refusals
+  12. GROW / SHRINK (offsetSpec): the exact offset, kept as points, radii and curves
+  13. COPY AN OUTLINE (fromLoop): sections of made pieces come back as the points, radii and curves they were made from;
+      a noisy trace still reads as rounded corners; a hole reads the right way round */
 
 const CS = require('../nso_custom_shape.js');
 
@@ -51,7 +58,8 @@ for (const name of CS.PRESETS) for (const mode of CS.MODES) {
   if (!r.ok) { check(name + ' ' + mode, false, r.reason); continue; }
   const t = topo(r.soup), v = volume(r.soup);
   check(name + ' ' + mode + ' closed', t.open === 0 && t.multi === 0, JSON.stringify(t));
-  check(name + ' ' + mode + ' volume', near(v, r.info.volume, 1e-3 * r.info.volume), v.toFixed(2) + ' vs ' + r.info.volume.toFixed(2));
+  const want = r.info.areaOut * sp.height - (mode === 'solid' ? 0 : r.info.areaIn * (sp.height - (mode === 'tray' ? sp.floor : 0)));
+  check(name + ' ' + mode + ' volume', near(v, want, 1e-6 * want), v.toFixed(2) + ' vs ' + want.toFixed(2));
 }
 
 console.log('2. a different wall on every side');
@@ -158,6 +166,116 @@ console.log('9. thin walls warn, and are made');
   const r = CS.make(rect(80, 50, 0, [0.5, 2, 2, 2]));
   check('made', r.ok, r.reason);
   check('warned in words', r.ok && r.warnings.length === 1 && /0.5 mm/.test(r.warnings[0]) && /nozzle/.test(r.warnings[0]), r.ok && r.warnings.join('; '));
+}
+
+const SL = require('../nso_slicer.js');
+const areasAt = (soup, z) => SL.sliceMesh(soup, [{ sliceZ: z }]).sections[0].loops.map(l => SL.signedArea(l)).sort((a, b) => b - a);
+const chordUnder = R => 2 * Math.PI * R * 0.02;      // the most chords inscribed in a radius-R circle's worth of corners lose
+
+console.log('10. lips: an out flange or an in rim at the top, its underside a 45° chamfer unless turned off');
+{
+  /* rounded 80 x 50, r 8, wall 2, H 25; lip 3 wide, 2 tall: chamfer from z 20 to 23, the lip from 23 to 25 */
+  const lipAt = (type, chamfer, mode) => { const sp = CS.preset('rounded'); sp.mode = mode || 'tray'; sp.lip = { type, width: 3, height: 2, chamfer }; return CS.make(sp); };
+  const rr = (W, D, R) => W * D - (4 - Math.PI) * R * R;
+  for (const mode of ['tray', 'frame', 'solid']) for (const type of ['out', 'in']) for (const ch of [true, false]) {
+    const r = lipAt(type, ch, mode);
+    if (type === 'in' && mode === 'solid') { check('a solid takes no inside lip (made without)', r.ok && r.info.lip === 'none'); continue; }
+    check(type + ' lip, ' + (ch ? 'chamfered' : 'square') + ', ' + mode + ': made and closed', r.ok && topo(r.soup).open === 0 && topo(r.soup).multi === 0, r.reason || JSON.stringify(topo(r.soup)));
+  }
+  let r = lipAt('out', true);
+  check('out: below the chamfer the outline is the body', near(areasAt(r.soup, 10)[0], rr(80, 50, 8), chordUnder(8)));
+  check('out: half way up the chamfer it is 1.5 mm out', near(areasAt(r.soup, 21.5)[0], rr(83, 53, 9.5), chordUnder(9.5)), areasAt(r.soup, 21.5)[0].toFixed(2) + ' vs ' + rr(83, 53, 9.5).toFixed(2));
+  check('out: the lip is 3 mm out, its corners r + 3', near(areasAt(r.soup, 24)[0], rr(86, 56, 11), chordUnder(11)));
+  check('out: the inside is untouched', near(-areasAt(r.soup, 24)[1], rr(76, 46, 6), chordUnder(6)));
+  check('out: the footprint is the lip\'s, 86 x 56', near(r.info.width, 86, 1e-6) && near(r.info.depth, 56, 1e-6), r.info.width + ' x ' + r.info.depth);
+  r = lipAt('out', false);
+  check('out, square: no chamfer - just under the lip it is the body', near(areasAt(r.soup, 22.9)[0], rr(80, 50, 8), chordUnder(8)));
+  r = lipAt('in', true);
+  check('in: the opening at the top is 3 mm in all round', near(-areasAt(r.soup, 24)[1], rr(70, 40, 3), chordUnder(3)), (-areasAt(r.soup, 24)[1]).toFixed(2) + ' vs ' + rr(70, 40, 3).toFixed(2));
+  check('in: below the chamfer the inside is the wall\'s', near(-areasAt(r.soup, 15)[1], rr(76, 46, 6), chordUnder(6)));
+  check('in: the outside is untouched', near(areasAt(r.soup, 24)[0], rr(80, 50, 8), chordUnder(8)));
+  const why = sp => { const q = CS.make(sp); return q.ok ? '(made)' : q.reason; };
+  let sp = CS.preset('rect'); sp.lip = { type: 'in', width: 30, height: 2 };
+  check('refused: an inside lip wider than the opening', /lip/.test(why(sp)) && /narrower/.test(why(sp)), why(sp));
+  sp = CS.preset('rect'); sp.lip = { type: 'out', width: 3, height: 30 };
+  check('refused: a lip taller than the piece', /taller than the piece/.test(why(sp)), why(sp));
+  sp = CS.preset('rect'); sp.lip = { type: 'in', width: 3, height: 21, chamfer: true };   // 25 - 21 - 3 = 1, under the 2 mm floor
+  check('refused: an inside lip reaching the floor', /floor/.test(why(sp)), why(sp));
+}
+
+console.log('11. lids: a plate the size of the top, a plug that fits the opening with Fit all round');
+{
+  const rr = (W, D, R) => W * D - (4 - Math.PI) * R * R;
+  const lidOf = (lid, lip) => { const sp = CS.preset('rounded'); sp.lid = lid; if (lip) sp.lip = lip; return CS.make(sp); };
+  let r = lidOf({ type: 'with' });
+  check('with: two pieces, the tray and its lid, both closed', r.ok && r.parts.length === 2 && r.parts[0].kind === 'body' && r.parts[1].kind === 'lid' && r.parts.every(q => topo(q.soup).open === 0), r.reason);
+  const lid = r.parts[1].soup;
+  check('the plate is the top outline, 2 thick', near(areasAt(lid, 1)[0], rr(80, 50, 8), chordUnder(8)));
+  check('the plug is the opening less 0.25 all round', near(areasAt(lid, 4)[0], rr(75.5, 45.5, 5.75), chordUnder(6)), areasAt(lid, 4)[0].toFixed(2) + ' vs ' + rr(75.5, 45.5, 5.75).toFixed(2));
+  check('hollow: a 1.6 mm ring', near(-areasAt(lid, 4)[1], rr(72.3, 42.3, 4.15), chordUnder(6)));
+  check('4 mm deep, on a 2 mm plate: 6 mm tall', near(r.parts[1].size[2], 6, 1e-9));
+  r = lidOf({ type: 'only' });
+  check('only: the lid alone', r.ok && r.parts.length === 1 && r.parts[0].kind === 'lid');
+  r = lidOf({ type: 'with', wall: 0 });
+  check('wall 0: a solid plug', r.ok && areasAt(r.parts[1].soup, 4).length === 1);
+  r = lidOf({ type: 'with', depth: 0 });
+  check('depth 0: a flat lid', r.ok && topo(r.parts[1].soup).open === 0 && near(r.parts[1].size[2], 2, 1e-9));
+  r = lidOf({ type: 'with' }, { type: 'in', width: 3, height: 2 });
+  check('under an inside lip the plug fits the lip\'s opening', r.ok && near(areasAt(r.parts[1].soup, 4)[0], rr(69.5, 39.5, 2.75), chordUnder(3)), r.ok && areasAt(r.parts[1].soup, 4)[0].toFixed(2));
+  r = lidOf({ type: 'with' }, { type: 'out', width: 3, height: 2 });
+  check('over an outside lip the plate covers the lip', r.ok && near(areasAt(r.parts[1].soup, 1)[0], rr(86, 56, 11), chordUnder(11)));
+  const why = sp => { const q = CS.make(sp); return q.ok ? '(made)' : q.reason; };
+  let sp = CS.preset('rounded'); sp.lid = { type: 'with', depth: 30 };
+  check('refused: a plug deeper than the tray', /deeper than the tray/.test(why(sp)), why(sp));
+  sp = CS.preset('rounded'); sp.mode = 'solid'; sp.lid = { type: 'with' };
+  check('refused: a lid for a solid', /no opening/.test(why(sp)), why(sp));
+}
+
+console.log('12. grow and shrink: the exact offset, kept editable');
+{
+  let o = CS.offsetSpec(CS.preset('rounded'), 2);
+  check('grow 2: the points 2 out, the radii 2 more', o.ok && JSON.stringify(o.spec.points.map(p => [p.x, p.y, p.r])) === '[[-2,-2,10],[82,-2,10],[82,52,10],[-2,52,10]]', o.ok && JSON.stringify(o.spec.points.map(p => [p.x, p.y, p.r])));
+  o = CS.offsetSpec(CS.preset('lshape'), -1);
+  check('shrink an L 1: outside corners r - 1, the turned-in one r + 1', o.ok && o.spec.points[3].r === 5 && o.spec.points[0].r === 3 && o.spec.points[3].x === 34 && o.spec.points[3].y === 34, o.ok && JSON.stringify(o.spec.points[3]));
+  const sc = CS.preset('scoop'), A0 = CS.outline(Object.assign({}, sc, { mode: 'solid' })).info.areaOut;
+  o = CS.offsetSpec(sc, -0.5);
+  const A1 = o.ok && CS.outline(Object.assign({}, o.spec, { mode: 'solid' })).info.areaOut;
+  /* the area of an offset band: perimeter x d, less the corners' share - within a little of perimeter x 0.5 */
+  const perim = CS.outline(Object.assign({}, sc, { mode: 'solid' })).outer.reduce((L, p, i, a) => L + Math.hypot(a[(i + 1) % a.length][0] - p[0], a[(i + 1) % a.length][1] - p[1]), 0);
+  check('shrink the scoop 0.5: about its perimeter x 0.5 off its area, its curve kept', o.ok && near(A0 - A1, perim * 0.5, 2) && o.spec.sides[4].bulge > 5, o.ok && (A0 - A1).toFixed(2) + ' vs ' + (perim * 0.5).toFixed(2));
+  o = CS.offsetSpec(CS.preset('rect'), -30);
+  check('refused: shrunk past nothing', !o.ok && /used up/.test(o.reason), o.reason);
+}
+
+console.log('13. an outline from a section: sides, curves and rounded corners read back');
+{
+  const back = (sp, z, tol) => { sp.mode = 'solid'; const L = SL.sliceMesh(CS.make(sp).soup, [{ sliceZ: z || 5 }]).sections[0].loops[0]; return CS.fromLoop(L, { tol: tol || 0.2 }); };
+  const pts = r => r.spec.points.map(p => [p.x, p.y, p.r]);
+  let r = back(CS.preset('rect'));
+  check('a rectangle: its 4 corners', r.ok && JSON.stringify(pts(r)) === '[[0,0,0],[80,0,0],[80,50,0],[0,50,0]]', r.ok && JSON.stringify(pts(r)));
+  r = back(CS.preset('rounded'));
+  check('a rounded rectangle: 4 points of radius 8, not dozens', r.ok && JSON.stringify(pts(r)) === '[[0,0,8],[80,0,8],[80,50,8],[0,50,8]]', r.ok && JSON.stringify(pts(r)));
+  r = back(CS.preset('lshape'));
+  check('an L: 6 points of radius 4, the turned-in one among them', r.ok && r.spec.points.length === 6 && r.spec.points.every(p => p.r === 4) && near(r.info.area, r.info.areaFrom, 0.01), r.ok && JSON.stringify(pts(r)));
+  r = back(CS.preset('hexagon'));
+  check('a hexagon: 6 corners of radius 4', r.ok && r.spec.points.length === 6 && r.spec.points.every(p => p.r === 4), r.ok && JSON.stringify(pts(r)));
+  r = back(CS.preset('trapezoid'));
+  check('a trapezoid: 4 corners of radius 5', r.ok && JSON.stringify(pts(r)) === '[[0,0,5],[90,0,5],[70,50,5],[20,50,5]]', r.ok && JSON.stringify(pts(r)));
+  const stad = CS.preset('rect'); stad.points.forEach(p => { p.r = 0; }); stad.sides[1].bulge = 25; stad.sides[3].bulge = 25;
+  r = back(stad);
+  check('a stadium: straight sides and curved ends, within 0.1 % of its area', r.ok && r.info.curved >= 2 && r.spec.points.length <= 8 && near(r.info.area, r.info.areaFrom, 1e-3 * r.info.areaFrom), r.ok && JSON.stringify(r.info));
+  r = back(CS.preset('scoop'));
+  check('the swept-corner tray: its 3 square-ish corners rounded at 8, its sweep curved', r.ok && r.spec.points.filter(p => p.r === 8).length === 3 && r.info.curved >= 1 && near(r.info.area, r.info.areaFrom, 1e-3 * r.info.areaFrom), r.ok && JSON.stringify(r.info));
+  const ring = CS.make(CS.preset('rounded')), loops = SL.sliceMesh(ring.soup, [{ sliceZ: 10 }]).sections[0].loops;
+  const hole = loops.find(l => SL.signedArea(l) < 0);
+  r = CS.fromLoop(hole, { tol: 0.2 });
+  check('a tray\'s inside (a hole, clockwise): 76 x 46, radius 6', r.ok && JSON.stringify(pts(r)) === '[[0,0,6],[76,0,6],[76,46,6],[0,46,6]]', r.ok && JSON.stringify(pts(r)));
+  /* a scan is not exact: noise of +-0.05 on a rounded rectangle still reads as 4 rounded corners at Detail 0.3 */
+  let seed = 7; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647 - 0.5) * 0.1;
+  const noisy = CS.outline(Object.assign(CS.preset('rounded'), { mode: 'solid' })).outer.map(p => [p[0] + rnd(), p[1] + rnd()]);
+  r = CS.fromLoop(noisy, { tol: 0.3 });
+  check('a noisy trace (+-0.05) at Detail 0.3: 4 corners, radius within 0.5 of 8', r.ok && r.spec.points.length === 4 && r.spec.points.every(p => Math.abs(p.r - 8) <= 0.5), r.ok && JSON.stringify(pts(r)));
+  check('refused: fewer than 3 points', !CS.fromLoop([[0, 0], [1, 1]]).ok);
 }
 
 console.log(fails ? '\n' + fails + ' FAILED' : '\nall held');

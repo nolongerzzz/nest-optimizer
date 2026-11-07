@@ -14,6 +14,14 @@
    THE PREVIEW is NSO_CustomShape.make's soup, standing where Add to plate would drop it (nsoPiecePreview, the Fittings card's
    ghost). It follows every change; a refusal clears it, says why in the read-out and marks the point or side it is about in red.
 
+   LIP and LID: a lip is a flange round the top (Out) or a rim round its inside (In), with a 45° chamfer under it unless that
+   is turned off; a lid is a second piece - a plate the size of the top, a plug under it that fits the opening with Fit all
+   round - previewed and added beside the tray (or alone: Lid only). OUTLINE Grow / Shrink moves the whole outline out or in.
+
+   COPY FROM A PIECE reads the SELECTED piece's outline: a cut through it at At height (NSO_Slicer.sliceMesh, exact), its
+   outside or its biggest hole, drawn in the editor in orange as the controls move; Copy outline turns it into points,
+   rounded corners and curved sides (NSO_CustomShape.fromLoop) to within Detail, keeping the walls, height, lip and lid.
+
    THE SPEC is kept in this browser (localStorage, a convenience: it can be missing and the card starts from the Rounded
    preset), so a shape is still there when the card is opened again.
 
@@ -39,7 +47,8 @@
 
   var S = {
     spec: null, sel: null, out: null, last: null, ok: false,
-    view: null, drag: null, hover: null, history: [], tiles: false, big: false, home: null, timer: 0
+    view: null, drag: null, hover: null, history: [], tiles: false, big: false, home: null, timer: 0,
+    ref: null, refKey: '', cut: null
   };
 
   /* ================================================================ the spec */
@@ -100,9 +109,11 @@
       readout('Custom shape: ' + r.reason, true);
       return r;
     }
-    if (PV()) PV().show(OWNER, [r.soup]);
+    if (PV()) PV().show(OWNER, r.parts.map(function (q) { return q.soup; }));
     setAdd(true);
-    var txt = r.text + (r.info.minWall != null ? ' - thinnest wall ' + fmt(r.info.minWall) + ' mm' : '') + ', ' + fmt(r.info.volume / 1000) + ' cm³';
+    var vol = r.parts.reduce(function (a, q) { return a + q.volume; }, 0);
+    var txt = r.text + (r.info.minWall != null && r.info.lid !== 'only' ? ' - thinnest wall ' + fmt(r.info.minWall) + ' mm' : '') + ', ' + fmt(vol / 1000) + ' cm³';
+    draw();                                                    // the lip's outline, drawn from this
     if (r.warnings.length) txt += '. ' + r.warnings.join('; ');
     readout(txt, false);
     return r;
@@ -143,6 +154,24 @@
     setBox('inp-cs-allr', cr, 'cs-allr-read');
     if (cw == null) { var rw = $('cs-allwall-read'); if (rw) rw.textContent = 'mixed'; }
     if (cr == null) { var rr = $('cs-allr-read'); if (rr) rr.textContent = 'mixed'; }
+    var lip = sp.lip, lid = sp.lid;
+    document.querySelectorAll('#cs-lip-row [data-lip]').forEach(function (b) {
+      var v = b.getAttribute('data-lip');
+      b.setAttribute('aria-pressed', v === lip.type ? 'true' : 'false');
+      b.disabled = v === 'in' && !walled;                     // a solid has no inside to have a rim on
+    });
+    document.querySelectorAll('#cs-lid-row [data-lid]').forEach(function (b) {
+      var v = b.getAttribute('data-lid');
+      b.setAttribute('aria-pressed', v === lid.type ? 'true' : 'false');
+      b.disabled = v !== 'none' && !walled;
+    });
+    var lipOn = lip.type !== 'none' && (walled || lip.type === 'out'), lidOn = lid.type !== 'none' && walled;
+    show('cs-row-lipw', lipOn); show('cs-row-liph', lipOn); show('cs-row-lipch', lipOn);
+    show('cs-row-lidt', lidOn); show('cs-row-lidd', lidOn); show('cs-row-lidfit', lidOn); show('cs-row-lidwall', lidOn && lid.depth > 0);
+    setBox('inp-cs-lipw', lip.width, 'cs-lipw-read'); setBox('inp-cs-liph', lip.height, 'cs-liph-read');
+    var ch = $('chk-cs-lipch'); if (ch) ch.checked = !!lip.chamfer;
+    setBox('inp-cs-lidt', lid.thickness, 'cs-lidt-read'); setBox('inp-cs-lidd', lid.depth, 'cs-lidd-read');
+    setBox('inp-cs-lidfit', lid.fit, 'cs-lidfit-read'); setBox('inp-cs-lidwall', lid.wall, 'cs-lidwall-read');
     var size = $('cs-size');
     if (size) size.textContent = S.out && S.out.ok ? fmt(S.out.info.width) + ' × ' + fmt(S.out.info.depth) + ' mm' : '—';
 
@@ -249,12 +278,21 @@
     S.spec.mode = m;
     changed(true);
   }
+  function setLip(t) {
+    if (CS().LIP_TYPES.indexOf(t) < 0 || S.spec.lip.type === t) return;
+    remember(); S.spec.lip.type = t; changed(true);
+  }
+  function setLid(t) {
+    if (CS().LID_TYPES.indexOf(t) < 0 || S.spec.lid.type === t) return;
+    remember(); S.spec.lid.type = t; changed(true);
+  }
   function usePreset(name) {
     var p = CS().preset(name);
     if (!p) return;
     remember();
-    p.mode = S.spec.mode;
+    p.mode = S.spec.mode; p.lip = S.spec.lip; p.lid = S.spec.lid;
     S.spec = p;
+    S.ref = null; S.refKey = '';
     S.sel = null;
     S.view = null;
     changed(true);
@@ -324,6 +362,20 @@
       ctx.lineWidth = 1.5; ctx.strokeStyle = '#38bdf8';
       ctx.beginPath(); path(out.outer); ctx.stroke();
       if (out.inner) { ctx.lineWidth = 1; ctx.strokeStyle = '#7dd3fc'; ctx.beginPath(); path(out.inner); ctx.stroke(); }
+    }
+    /* the lip, as the last preview made it (its loops are centred on the footprint: put back) */
+    var lr = S.last && S.last.ok ? S.last : null;
+    if (lr && (lr.lipOuter || lr.lipInner)) {
+      var sh = lr.shift || [0, 0], un = function (L) { return L.map(function (p) { return [p[0] + sh[0], p[1] + sh[1]]; }); };
+      ctx.setLineDash([2, 2]); ctx.lineWidth = 1; ctx.strokeStyle = '#34d399';
+      if (lr.lipOuter) { ctx.beginPath(); path(un(lr.lipOuter)); ctx.stroke(); }
+      if (lr.lipInner) { ctx.beginPath(); path(un(lr.lipInner)); ctx.stroke(); }
+      ctx.setLineDash([]);
+    }
+    /* the cut of the piece being copied from, in orange */
+    if (S.ref) {
+      ctx.setLineDash([5, 3]); ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(251, 146, 60, 0.9)';
+      ctx.beginPath(); path(S.ref); ctx.stroke(); ctx.setLineDash([]);
     }
     /* the construction: point to point, straight - the dashed line the curve handles stand off */
     var bad = out && !out.ok ? (out.at || {}) : {};
@@ -543,28 +595,135 @@
     var r = CS() ? CS().make(S.spec) : null;
     if (!r || !r.ok) { var why = r ? r.reason : 'nso_custom_shape.js is not loaded'; say('Custom shape refused - nothing added: ' + why, true); return { ok: false, reason: why }; }
     if (typeof THREE === 'undefined' || typeof addModelFromZUpGeometry !== 'function') { say('Custom shape needs the viewport', true); return { ok: false, reason: 'no ingest path' }; }
-    var g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(r.soup), 3));
-    var name = nextName('custom ' + r.info.mode), editBefore = state.editId, cutBefore = state.cutT;
-    var id = addModelFromZUpGeometry(name, g, { keepSelection: true, silent: true });
-    if (id == null) { say('Custom shape refused - the new piece looked empty', true); return { ok: false, reason: 'addModel refused' }; }
-    var made = state.models.find(function (x) { return x && x.id === id; });
-    if (typeof pushUndo === 'function') pushUndo({ type: 'addModels', ids: [id], editId: editBefore, cutT: cutBefore });
-    var want = wantedSpot(made), entry = placeModelMovable(made, want.x, want.z), at = { x: want.x, z: want.z, onBed: true };
-    if (entry && typeof nsoFreeSpot === 'function') at = nsoFreeSpot(entry, want);
-    if (entry && typeof applyPlacedXZ === 'function') applyPlacedXZ(entry, at.x, at.z);
-    var idx = entry ? state.placed.indexOf(entry) : -1;
-    if (idx >= 0 && typeof selectPlaced === 'function') selectPlaced(idx);
+    var editBefore = state.editId, cutBefore = state.cutT, ids = [], names = [], idx = -1, beside = null, onBed = true, first = null;
+    r.parts.forEach(function (part) {
+      var g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(part.soup), 3));
+      var name = nextName(part.label);
+      var id = addModelFromZUpGeometry(name, g, { keepSelection: true, silent: true });
+      if (id == null) return;
+      var made = state.models.find(function (x) { return x && x.id === id; });
+      /* the lid stands beside the tray, as the preview had it: beside the selection, which is the tray by then */
+      var want = wantedSpot(made), entry = placeModelMovable(made, want.x, want.z), at = { x: want.x, z: want.z, onBed: true };
+      if (entry && typeof nsoFreeSpot === 'function') at = nsoFreeSpot(entry, want);
+      if (entry && typeof applyPlacedXZ === 'function') applyPlacedXZ(entry, at.x, at.z);
+      var i = entry ? state.placed.indexOf(entry) : -1;
+      if (i >= 0 && typeof selectPlaced === 'function') selectPlaced(i);
+      if (first == null) { first = i; beside = want.beside; }
+      if (!at.onBed) onBed = false;
+      ids.push(id); names.push(name); idx = i;
+    });
+    if (!ids.length) { say('Custom shape refused - the new piece looked empty', true); return { ok: false, reason: 'addModel refused' }; }
+    if (typeof pushUndo === 'function') pushUndo({ type: 'addModels', ids: ids, editId: editBefore, cutT: cutBefore });
+    if (first >= 0 && typeof selectPlaced === 'function') selectPlaced(first);   // the tray (or the lid, alone) is the one selected
     if (typeof renderModelList === 'function') renderModelList();
     if (typeof updateOptimizeButton === 'function') updateOptimizeButton();
     if (typeof updateEditSize === 'function') updateEditSize();
     if (typeof updateAdjustUI === 'function') updateAdjustUI();
-    var txt = 'Dropped ' + name + ' - ' + r.text + (want.beside ? ', beside ' + want.beside : '') + '.';
+    var txt = 'Dropped ' + names.join(' and ') + ' - ' + r.text + (beside ? ', beside ' + beside : '') + '.';
     if (r.warnings.length) txt += ' ' + r.warnings.join('; ') + '.';
-    if (!at.onBed) txt += ' The plate has no free room left - it sits past the edge.';
-    say(txt, !at.onBed);
+    if (!onBed) txt += ' The plate has no free room left - it sits past the edge.';
+    say(txt, !onBed);
     if (isOpen()) refresh();                                   // the preview stands beside what was just added
-    return { ok: true, modelId: id, name: name, placedIndex: idx, info: r.info };
+    return { ok: true, modelId: ids[0], modelIds: ids, name: names[0], names: names, placedIndex: first, info: r.info };
+  }
+
+  /* ================================================================ copy from a piece */
+
+  var bounds = (typeof WeakMap === 'function') ? new WeakMap() : null;
+  function source() {
+    var m = (typeof getActiveModel === 'function') ? getActiveModel() : null;
+    if (!m || !m.rawTris || m.rawAxis !== 'zup') return null;
+    var b = bounds && bounds.get(m.rawTris);
+    if (!b) {
+      var t = m.rawTris, lo = Infinity, hi = -Infinity;
+      for (var i = 2; i < t.length; i += 3) { if (t[i] < lo) lo = t[i]; if (t[i] > hi) hi = t[i]; }
+      b = { lo: lo, hi: hi };
+      if (bounds) bounds.set(m.rawTris, b);
+    }
+    return { m: m, lo: b.lo, hi: b.hi, h: b.hi - b.lo };
+  }
+  function copyUse() { var el = $('sel-cs-copy-use'); return el && el.value === 'inside' ? 'inside' : 'outside'; }
+  function num2(id, d) { var el = $(id), v = el ? parseFloat(el.value) : NaN; return isFinite(v) ? v : d; }
+  /* the cut's loop to copy: the biggest outside (counter-clockwise) or the biggest hole, put counter-clockwise */
+  function cutLoop(src, at, use) {
+    if (typeof NSO_Slicer === 'undefined' || !NSO_Slicer.sliceMesh) return { reason: 'the slicer (nso_slicer.js) is not loaded' };
+    var z = src.lo + Math.max(0.01, Math.min(src.h - 0.01, at));
+    var sec = NSO_Slicer.sliceMesh(src.m.rawTris, [{ sliceZ: z }]).sections[0], best = null, bestA = 0;
+    (sec.loops || []).forEach(function (L) {
+      var a = CS().signedArea(L);
+      if (use === 'outside' ? a > bestA : -a > bestA) { bestA = Math.abs(a); best = L; }
+    });
+    if (!best) return { reason: use === 'inside' ? 'the cut at ' + fmt(at) + ' mm has no hole in it - try Use: its outside, or another height' : 'nothing to cut at ' + fmt(at) + ' mm' };
+    var loop = use === 'inside' ? best.slice().reverse() : best.slice();
+    return { loop: loop, z: z, area: bestA };
+  }
+  /* The hint, the button and the orange reference in the editor, for the piece selected now */
+  function syncCopy() {
+    var hint = $('cs-copy-src'), btn = $('btn-cs-copy'), src = source(), fold = $('cs-copy');
+    if (!src) {
+      if (hint) hint.textContent = 'Select a piece on the plate to read its outline.';
+      if (btn) btn.disabled = true;
+      if (S.ref && S.refKey.indexOf('live:') === 0) { S.ref = null; S.refKey = ''; draw(); }
+      return null;
+    }
+    var at = num2('inp-cs-cut', src.h / 2), sl = $('inp-cs-cut-slider'), box = $('inp-cs-cut');
+    if (S.cut !== src.m.id) {                                 // a new piece: start half way up it
+      S.cut = src.m.id; at = Math.round(src.h / 2 * 10) / 10;
+      if (box) box.value = String(at);
+    }
+    if (sl) { sl.max = String(Math.max(0.1, Math.round(src.h * 10) / 10)); sl.value = String(at); }
+    if (box) box.max = String(Math.max(0.1, Math.round(src.h * 10) / 10));
+    var rd = $('cs-cut-read'); if (rd) rd.textContent = fmt(at) + ' of ' + fmt(src.h) + ' mm';
+    if (!fold || !fold.open) { if (btn) btn.disabled = false; if (hint) hint.textContent = src.m.name; return src; }
+    var c = cutLoop(src, at, copyUse());
+    if (!c.loop) {
+      if (hint) hint.textContent = src.m.name + ': ' + c.reason;
+      if (btn) btn.disabled = true;
+      S.ref = null; S.refKey = ''; draw();
+      return null;
+    }
+    var lo = [Infinity, Infinity];
+    c.loop.forEach(function (p) { lo[0] = Math.min(lo[0], p[0]); lo[1] = Math.min(lo[1], p[1]); });
+    S.ref = c.loop.map(function (p) { return [p[0] - lo[0], p[1] - lo[1]]; });   // where Copy will put it: its corner at 0, 0
+    S.refKey = 'live:' + src.m.id;
+    if (hint) hint.textContent = src.m.name + ' - its ' + (copyUse() === 'inside' ? 'biggest hole' : 'outside') + ' at ' + fmt(at) + ' mm: ' + fmt(c.area / 100) + ' cm², drawn in orange.';
+    if (btn) btn.disabled = false;
+    draw();
+    return src;
+  }
+  function copyOutline() {
+    var src = source();
+    if (!src) { readout('Custom shape: select a piece on the plate to copy its outline', true); return { ok: false, reason: 'no piece selected' }; }
+    var at = num2('inp-cs-cut', src.h / 2), tol = Math.max(0.05, num2('inp-cs-detail', 0.2)), c = cutLoop(src, at, copyUse());
+    if (!c.loop) { readout('Custom shape: ' + c.reason, true); return { ok: false, reason: c.reason }; }
+    var wall = common(S.spec.sides, 'wall');
+    var r = CS().fromLoop(c.loop, { tol: tol, wall: wall != null ? wall : CS().DEFAULTS.wall });
+    if (!r.ok) { readout('Custom shape: ' + r.reason, true); return r; }
+    remember();
+    S.spec.points = r.spec.points; S.spec.sides = r.spec.sides;
+    S.spec = CS().normalize(S.spec);
+    S.sel = null; S.view = null;
+    var lo = [Infinity, Infinity];
+    c.loop.forEach(function (p) { lo[0] = Math.min(lo[0], p[0]); lo[1] = Math.min(lo[1], p[1]); });
+    S.ref = c.loop.map(function (p) { return [p[0] - lo[0], p[1] - lo[1]]; });
+    S.refKey = 'copied:' + src.m.id;
+    changed(true);
+    var i = r.info;
+    say('Copied the ' + (copyUse() === 'inside' ? 'inside' : 'outline') + ' of ' + src.m.name + ' at ' + fmt(at) + ' mm: ' + i.points + ' points' +
+        (i.rounded ? ', ' + i.rounded + ' rounded corner' + (i.rounded > 1 ? 's' : '') : '') + (i.curved ? ', ' + i.curved + ' curved side' + (i.curved > 1 ? 's' : '') : '') +
+        ' (from ' + i.from + '), within ' + fmt(tol) + ' mm. Its cut stays in orange to compare.', false);
+    return { ok: true, info: i };
+  }
+
+  /* Grow (d > 0) or Shrink the whole outline */
+  function grow(d) {
+    var r = CS().offsetSpec(S.spec, d);
+    if (!r.ok) { readout('Custom shape: ' + r.reason, true); return r; }
+    remember();
+    S.spec = CS().normalize(r.spec);
+    changed(true);
+    return { ok: true };
   }
 
   /* ================================================================ tiles */
@@ -581,6 +740,26 @@
       var sp = CS().preset('rounded'); sp.mode = b.getAttribute('data-mode'); sp.sides.forEach(function (s) { s.wall = 5; });
       var r = CS().make(sp), c = b.querySelector('canvas');
       if (r && r.ok && c && paint(c, r.soup, null, { yaw: 0.5, elev: 0.75 })) { c.setAttribute('data-drawn', '1'); done++; }
+    });
+    var A = PV() && PV().art;
+    document.querySelectorAll('#cs-lip-row [data-lip]').forEach(function (b) {
+      var sp = CS().preset('rounded'); sp.sides.forEach(function (s) { s.wall = 4; }); sp.height = 30;
+      sp.lip = { type: b.getAttribute('data-lip'), width: 8, height: 4, chamfer: true };
+      var r = CS().make(sp), c = b.querySelector('canvas');
+      if (r && r.ok && c && paint(c, r.soup, null, { yaw: 0.5, elev: 0.55 })) { c.setAttribute('data-drawn', '1'); done++; }
+    });
+    document.querySelectorAll('#cs-lid-row [data-lid]').forEach(function (b) {
+      var sp = CS().preset('rounded'); sp.sides.forEach(function (s) { s.wall = 4; });
+      sp.lid = { type: b.getAttribute('data-lid'), thickness: 3, depth: 6, fit: 0.25, wall: 3 };
+      var r = CS().make(sp), c = b.querySelector('canvas');
+      if (!r || !r.ok || !c) return;
+      var soup = r.parts[0].soup, tint = null;
+      if (r.parts.length > 1 && A) {                           // the lid above the tray, plug down, amber
+        var lid = A.moveZ(A.flipUp(r.parts[1].soup), sp.height + 12 + 9), n1 = soup.length / 9;
+        soup = A.join(soup, lid);
+        tint = function (t) { return t >= n1 ? A.AMBER : null; };
+      } else if (r.parts[0].kind === 'lid' && A) { tint = function () { return A.AMBER; }; }
+      if (paint(c, soup, tint, { yaw: 0.5, elev: 0.5 })) { c.setAttribute('data-drawn', '1'); done++; }
     });
     return done;
   }
@@ -625,6 +804,27 @@
     bindNum('rin', function (v) { if (v >= 0 && S.sel && S.sel.kind === 'point') { var i = S.sel.i; edit('rin' + i, function () { S.spec.points[i].rIn = v; }); } });
     bindNum('wall', function (v) { if (v > 0 && S.sel && S.sel.kind === 'side') { var i = S.sel.i; edit('wall' + i, function () { S.spec.sides[i].wall = v; }); } });
     bindNum('bulge', function (v) { if (isFinite(v) && S.sel && S.sel.kind === 'side') { var i = S.sel.i; edit('bulge' + i, function () { S.spec.sides[i].bulge = v; }); } });
+    bindNum('lipw', function (v) { if (v > 0) edit('lipw', function () { S.spec.lip.width = v; }); });
+    bindNum('liph', function (v) { if (v > 0) edit('liph', function () { S.spec.lip.height = v; }); });
+    bindNum('lidt', function (v) { if (v > 0) edit('lidt', function () { S.spec.lid.thickness = v; }); });
+    bindNum('lidd', function (v) { if (v >= 0) edit('lidd', function () { S.spec.lid.depth = v; }); });
+    bindNum('lidfit', function (v) { if (v >= 0) edit('lidfit', function () { S.spec.lid.fit = v; }); });
+    bindNum('lidwall', function (v) { if (v >= 0) edit('lidwall', function () { S.spec.lid.wall = v; }); });
+    var lc = $('chk-cs-lipch');
+    if (lc) lc.addEventListener('change', function () { remember(); S.spec.lip.chamfer = !!lc.checked; changed(true); });
+    document.querySelectorAll('#cs-lip-row [data-lip]').forEach(function (b) { b.addEventListener('click', function () { setLip(b.getAttribute('data-lip')); }); });
+    document.querySelectorAll('#cs-lid-row [data-lid]').forEach(function (b) { b.addEventListener('click', function () { setLid(b.getAttribute('data-lid')); }); });
+    var gb = $('btn-cs-grow'), sb = $('btn-cs-shrink');
+    if (gb) gb.addEventListener('click', function () { grow(Math.abs(num2('inp-cs-grow', 0.5))); });
+    if (sb) sb.addEventListener('click', function () { grow(-Math.abs(num2('inp-cs-grow', 0.5))); });
+    bindNum('cut', function () { syncCopy(); });
+    bindNum('detail', function () { /* read when Copy is pressed */ });
+    var cu = $('sel-cs-copy-use'); if (cu) cu.addEventListener('change', syncCopy);
+    var cf = $('cs-copy'); if (cf) cf.addEventListener('toggle', function () { if (!cf.open && S.refKey.indexOf('live:') === 0) { S.ref = null; S.refKey = ''; draw(); } syncCopy(); });
+    var cb = $('btn-cs-copy');
+    if (cb) cb.addEventListener('click', function () {
+      try { copyOutline(); } catch (err) { if (typeof console !== 'undefined') console.error('[custom shape]', err); readout('Custom shape: the copy failed (' + ((err && err.message) || err) + ')', true); }
+    });
     ['x', 'y'].forEach(function (ax) {
       var box = $('inp-cs-' + ax);
       if (box) box.addEventListener('input', function () {
@@ -666,14 +866,14 @@
     window.addEventListener('keydown', function (ev) { if (S.big && ev.key === 'Escape') { setBig(false); ev.stopPropagation(); } }, true);
 
     var onToggle = function () {
-      if (isOpen()) { drawTiles(); syncRows(); draw(); refresh(); }
+      if (isOpen()) { drawTiles(); syncRows(); draw(); refresh(); syncCopy(); }
       else { if (S.big) setBig(false); if (PV()) PV().clear(OWNER); }
     };
     for (var d = m; d; d = d.parentElement && d.parentElement.closest('details')) d.addEventListener('toggle', onToggle);
     /* a click on the plate may change the selection, and the preview stands beside the selection */
     window.addEventListener('pointerup', function () {
       if (!isOpen()) return;
-      setTimeout(function () { if (PV() && PV().state().owner === OWNER) PV().place(); }, 0);
+      setTimeout(function () { if (PV() && PV().state().owner === OWNER) PV().place(); syncCopy(); }, 0);
     });
     syncRows();
     if (isOpen()) onToggle();
@@ -685,6 +885,7 @@
     setSpec: function (sp) { remember(); S.spec = CS().normalize(sp); S.sel = null; S.view = null; changed(true); return clone(S.spec); },
     select: function (kind, i) { select(kind ? { kind: kind, i: i } : null); return S.sel; },
     preset: usePreset, mode: setMode, split: splitSide, remove: deletePoint, undo: undoEdit, add: add, refresh: refresh,
+    lip: setLip, lid: setLid, grow: grow, copy: copyOutline, syncCopy: syncCopy, ref: function () { return S.ref ? S.ref.slice() : null; },
     big: setBig, fit: function () { fit(); draw(); },
     toScreen: function (x, y) { return toScreen(x, y); },
     /* where world (x, y) mm is in the window, as a pointer event's clientX / clientY */
@@ -692,7 +893,8 @@
     state: function () {
       var g = PV() ? PV().state() : { owner: null, count: 0, ghost: [] }, mine = g.owner === OWNER;
       return { open: isOpen(), ok: S.ok, sel: S.sel, ghosts: mine ? g.count : 0, ghost: mine ? g.ghost : [], tiles: S.tiles, big: S.big,
-               history: S.history.length, last: S.last ? { ok: S.last.ok, reason: S.last.reason || null, info: S.last.info || null, warnings: S.last.warnings || [] } : null };
+               history: S.history.length, parts: S.last && S.last.ok ? S.last.parts.map(function (q) { return { kind: q.kind, size: q.size, text: q.text }; }) : [],
+               last: S.last ? { ok: S.last.ok, reason: S.last.reason || null, info: S.last.info || null, warnings: S.last.warnings || [] } : null };
     }
   };
 
