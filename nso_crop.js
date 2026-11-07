@@ -719,11 +719,22 @@
         }
       }
     }
-    /* One or two triangles whose every edge borders a triangle that bends away by only a few degrees is not a wall but a
-       facet of a curved surface (a sphere's, a cone's): Wall has no line to draw on it, and a line on a facet would
-       be a sliver of nothing. Said in words, so the click is not mistaken for a wall that has nothing on it. */
-    if (patch.length <= 2) {
-      var cosS = Math.cos(20 * Math.PI / 180), bordered = 0, smooth = 0;     // by edge length: a cone's slope has one short edge on the base
+    /* A patch that is a facet of a curved surface (a sphere's, a cone's slope - which is flat only as a sliver) is not a
+       wall: Wall has no line to put on it. It is told apart from a flat wall by two things together: it is small, under
+       1% of the piece's whole surface, and over half its border (by length) meets triangles that bend away from it by
+       under 20 degrees, as neighbouring facets of a curve do. A real wall's edges are corners, and a face with fillets
+       round it is large; a small flat end (a pin's top, a bump's top) has corners round it. That the patch is several
+       triangles does not matter: a bump's foot re-cuts the facets round it into coplanar groups of up to nine. */
+    var patchArea = 0, allArea = 0;
+    function triArea(ti) {
+      var pa = pts[tris[ti][0]], pb = pts[tris[ti][1]], pc = pts[tris[ti][2]];
+      var ax = pb[0] - pa[0], ay = pb[1] - pa[1], az = pb[2] - pa[2], bx = pc[0] - pa[0], by = pc[1] - pa[1], bz = pc[2] - pa[2];
+      return 0.5 * Math.sqrt(Math.pow(ay * bz - az * by, 2) + Math.pow(az * bx - ax * bz, 2) + Math.pow(ax * by - ay * bx, 2));
+    }
+    patch.forEach(function (ti) { patchArea += triArea(ti); });
+    for (var ta = 0; ta < tris.length; ta++) allArea += triArea(ta);
+    if (patchArea < 0.01 * allArea) {
+      var cosS = Math.cos(20 * Math.PI / 180), bordered = 0, smooth = 0;
       patch.forEach(function (ti) {
         for (var e4 = 0; e4 < 3; e4++) {
           var ea = tris[ti][e4], eb = tris[ti][(e4 + 1) % 3], l4 = edges.get(ek(ea, eb)) || [];
@@ -736,7 +747,7 @@
           }
         }
       });
-      if (bordered > 0 && smooth >= 0.9 * bordered) return { reason: 'that is a curved surface, not a flat wall - Wall works on flat walls (click a face that is flat)', curved: true };
+      if (bordered > 0 && smooth >= 0.5 * bordered) return { reason: 'that is a curved surface, not a flat wall - Wall works on flat walls (click a face that is flat)', curved: true };
     }
     // the plane's own frame: n out, u along (square to the plate where it can be), w = n x u
     var up = Math.abs(n0[2]) > 0.9 ? [0, 1, 0] : [0, 0, 1];

@@ -71,8 +71,13 @@ The line starts flush on the wall (0). Move it by:
 
 **Wall is for flat walls.** On a sphere, or a cone's slope, a click lands on one facet of the curve, and
 Wall says so in words - "that is a curved surface, not a flat wall" - and draws nothing, rather than lay a line on
-a sliver (a one- or two-triangle patch all of whose edges border triangles bending away by under 20° is read as
-a facet of a curve). A cone's flat base is a wall like any other. Taking a bump off a curved base is not what
+a sliver. A patch is read as a facet of a curve when it is **small - under 1% of the piece's whole surface - and
+over half its border (by length) meets triangles that bend away from it by under 20°**, as neighbouring facets of a
+curve do. How many triangles it is does not matter: where a bump meets a curve, the facets round its foot are re-cut
+into coplanar groups of up to nine triangles, and a click there is refused too (`crop:engine` 6d clicks every
+triangle of the sphere and the cone). A flat wall's edges are corners, a face with fillets round it is large, and a
+small flat end - a pin's top, a bump's top - has corners round it, so all of those are walls. A cone's flat base is
+a wall like any other. Taking a bump off a curved base is not what
 this tool does yet.
 
 The test pieces are in `fixtures/crop-wall/` (`block_bump.stl`, `sphere_bump.stl`, `cone_bump.stl`, written by

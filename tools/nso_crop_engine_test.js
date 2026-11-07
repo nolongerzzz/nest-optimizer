@@ -680,6 +680,15 @@ async function crop(label, piece, shape, expect) {
     const st = triWhere(fx.sphere, c => Math.abs(Math.hypot(c[0], c[1], c[2] - 15) - 15) < 0.05 && c[0] > 0 && Math.hypot(c[1], c[2] - 15) > 6.5 && Math.hypot(c[1], c[2] - 15) < 8.5);
     const ct = triWhere(fx.cone, c => c[2] > 3 && c[2] < 20 && Math.abs(Math.hypot(c[0], c[1]) - 15 * (1 - c[2] / 25)) < 0.05 && c[0] > 0 && Math.hypot(c[1], c[2] - 8) > 4.5 && Math.hypot(c[1], c[2] - 8) < 7);
     check('a triangle of each curved surface was found to click', st >= 0 && ct >= 0, st + ', ' + ct);
+    /* EVERY triangle of the curves, the ones in the bump's foot included (a click there, as a person's is, lands on the
+       coplanar groups the bump's intersection re-cuts the facets into - 3 to 9 triangles - not only on clean facets):
+       the sphere is refused all over; the cone is refused all over its slope and kept only on its two flat ends. */
+    let sphereKept = 0, coneKept = {}, coneRefused = 0;
+    for (let t = 0; t < fx.sphere.length / 9; t += 3) if (!C.wallFace(fx.sphere, t).curved) sphereKept++;
+    for (let t = 0; t < fx.cone.length / 9; t++) { const F = C.wallFace(fx.cone, t); if (F.curved) coneRefused++; else { const k = F.tris + ' tris, ' + f3(F.areaMm2) + ' mm2'; coneKept[k] = (coneKept[k] || 0) + 1; } }
+    check('every triangle of the sphere (a third of them, the bump\'s foot too) is refused as a curved surface', sphereKept === 0, sphereKept + ' accepted');
+    check('every triangle of the cone\'s slope, the pin\'s foot too, is refused; only the flat base (94) and the pin\'s flat end (46) are walls', coneRefused === 406 - 94 - 46 &&
+      Object.keys(coneKept).map(k => k.split(',')[0]).sort().join('|') === '46 tris|94 tris', coneRefused + ' refused; kept ' + JSON.stringify(coneKept));
     const rs = C.wallFace(fx.sphere, st), rc = C.wallFace(fx.cone, ct);
     check('a click on the sphere is refused in words: a curved surface, not a flat wall', !rs.ring && rs.curved === true && /curved surface, not a flat wall/.test(rs.reason), rs.reason);
     check('a click on the cone\'s slope is refused the same way', !rc.ring && rc.curved === true && /curved surface, not a flat wall/.test(rc.reason), rc.reason);

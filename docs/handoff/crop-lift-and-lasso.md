@@ -33,3 +33,8 @@ Branch `claude-wip`. Full write-up: **`docs/CROP.md`, "The card"**; Lift's side 
   on the sphere or the cone's slope finds one facet of the curve; it now refuses in words ("that is a curved surface,
   not a flat wall") rather than draw a line on a sliver. The cone's base is a wall (`crop:engine` 6d: 1 mm into it is
   the closed form, within 0.05%). `crop:drive` 5b clicks the sphere and the cone with a real mouse.
+- **Wall's curved-surface refusal made robust** (2026-11-07): the first version only refused a clean one- or two-triangle
+  facet, so a click at a bump's foot on the sphere (where the bump re-cuts the facets into coplanar groups of 3-9
+  triangles) or on the cone's slope next to the pin still drew a line on a sliver. Now a patch is curved when it is under
+  1% of the piece's surface and over half its border bends away by under 20 degrees - every triangle of the sphere and
+  the cone's slope is refused, only the cone's base and the pin's flat end are walls.
