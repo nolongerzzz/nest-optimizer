@@ -1528,7 +1528,8 @@ function NSO_wheelLip(piece, opts) {
     nozzle: piece.nozzle, wall: piece.wall, segments: piece.segments,
     target: piece.target, sizing: piece.sizing,
     budget: { start: piece.budget.start, added: piece.budget.added, trimmed: piece.budget.trimmed },
-    ops: piece.ops.concat(['lip'])
+    ops: piece.ops.concat(['lip']),
+    press: piece.press            // still a pressed plate: the rim handle needs to know
   };
   var g = NSO_wheelGate(piece, cand, 'Lipping');
   if (!g.ok) return g;

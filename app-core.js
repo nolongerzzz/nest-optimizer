@@ -3983,6 +3983,16 @@ function onCanvasPointerDown(event) {
     return;
   }
 
+  /* The Pottery Wheel's handles (app-wheel-live.js) own a PRESS that lands on one of
+     them: the press starts a drag that writes to the Wheel's sliders, and a fall-through
+     here would start a move drag under it and push a "Moved model" Undo entry on release.
+     The wheel's own handler runs first on this canvas (capture), so by the time it is
+     asked here the drag has begun. */
+  if (typeof window.nsoWheelTakesPointer === 'function' && window.nsoWheelTakesPointer(event)) {
+    setOrbitFromPlate(false);
+    return;
+  }
+
   /* Measure owns a click that lands on a piece, on the same terms again -
      app-measure.js binds its own handler on this canvas after this one and
      takes the measurement there. Measuring changes nothing on the piece, so a

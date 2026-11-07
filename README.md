@@ -118,8 +118,9 @@ Smart build-plate packing for 3D printing.
 - **Pottery Wheel**: throw a vessel on an axis - a centred ball sized by
   Pappus's centroid theorem (or just the standard ball, dropped on the plate
   with nothing to type), a clay-conserving **Flatten** (ball to plate disc),
-  one opening push, pulls at any height and a base trim - the piece is a
-  recipe, every number a slider that stays live, the clay conserved - and a
+  one opening push, a flared plate **Lip**, pulls at any height and a base trim -
+  the piece is a recipe, every number a slider that stays live, the clay
+  conserved, and balls on the piece itself to drag it into shape - and a
   live clay budget and the nozzle-safety wall floor enforced on every update
   ([docs/POTTERY-WHEEL.md](docs/POTTERY-WHEEL.md))
 - **Build-volume warning**: a live check against the selected printer's bed

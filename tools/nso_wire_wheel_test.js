@@ -821,6 +821,172 @@ withApp(async (page, logs) => {
     check('Undo takes the lip back and keeps the white edge', !(await info()).open && e.n === 1 && e.mine, JSON.stringify(e));
   }
 
+  console.log('\n=== 10e. dragging on the piece: handles on the silhouette drive the same sliders ===');
+  {
+    const drag = (id, v) => page.evaluate(([i, x]) => {
+      const e = document.getElementById(i); e.value = String(x); e.dispatchEvent(new Event('input', { bubbles: true }));
+    }, [id, v]);
+    const release = id => page.evaluate(i => document.getElementById(i).dispatchEvent(new Event('change', { bubbles: true })), id);
+    const idle = () => page.waitForFunction(() => !document.getElementById('wheel-readout').textContent.startsWith('Preview') && !document.getElementById('wheel-readout').textContent.startsWith('Drag the'), null, { timeout: 15000 });
+    const setS = async (id, v) => { await drag(id, v); await release(id); await idle(); };
+    const handles = () => page.evaluate(() => NSO_wheelUI.handles());
+    const H = async k => (await handles()).find(h => h.kind === k);
+    const undoTypes = () => page.evaluate(() => state.undoStack.map(e => e.type));
+    const val = id => page.evaluate(i => parseFloat(document.getElementById(i).value), id);
+    const rec = () => page.evaluate(() => JSON.parse(JSON.stringify(NSO_wheelHome.recipe, (k, v) => k === 'base' ? undefined : v)));
+    const modelH = () => page.evaluate(() => getActiveModel().size.y);
+    const cam = () => page.evaluate(() => state.camera.position.toArray().map(v => +v.toFixed(3)).join(','));
+    const ctlOn = () => page.evaluate(() => state.controls.enabled);
+    const ro = () => page.evaluate(() => document.getElementById('wheel-readout').textContent);
+    /* press, move in steps, optionally hold (no release) */
+    const grab = async (h, dx, dy, o) => {
+      o = o || {};
+      await page.mouse.move(h.x, h.y);
+      if (o.shift) await page.keyboard.down('Shift');
+      await page.mouse.down();
+      const n = o.steps || 8;
+      for (let i = 1; i <= n; i++) { await page.mouse.move(h.x + dx * i / n, h.y + dy * i / n); await page.waitForTimeout(70); }
+      await page.waitForTimeout(450);
+    };
+    const letGo = async (o) => { await page.mouse.up(); if (o && o.shift) await page.keyboard.up('Shift'); await page.waitForTimeout(700); };
+
+    await page.evaluate(() => { document.getElementById('rng-wheel-scale').value = '25'; });
+    await page.click('#btn-wheel-ball');
+    await page.waitForFunction(() => /Dropped Wheel \d+/.test(document.getElementById('status').textContent), null, { timeout: 30000 });
+    /* five pieces are on the plate by now and the new one sits wherever there is room - maybe off the right of the window,
+       where a plate-sized rim handle could not be reached. Put it in the middle for this section. */
+    await page.evaluate(() => { const m = NSO_wheelModel(), e = state.placed.find(p => p.sourceId === m.id); applyPlacedXZ(e, 0, 0); NSO_wheelUI.place(); });
+    await page.waitForTimeout(600);
+    /* The Undo stack is capped, so by now "one more entry" cannot be told from its length: mark the top and look for
+       exactly one new entry above it. */
+    const markTop = () => page.evaluate(() => { window.__top = state.undoStack[state.undoStack.length - 1]; });
+    const oneNew = () => page.evaluate(() => { const s2 = state.undoStack; return s2.length >= 2 && s2[s2.length - 2] === window.__top && s2[s2.length - 1].type === 'wheelReplace'; });
+
+    /* the handles on a fresh ball */
+    let hs = await handles();
+    check('a fresh ball has a press handle (blue) and a wall handle (yellow), no lip handle yet',
+      hs.some(h => h.kind === 'thick') && hs.some(h => h.kind === 'wall') && !hs.some(h => h.kind === 'lip'), hs.map(h => h.kind).join(','));
+    let th = await H('thick');
+    await page.mouse.move(th.x, th.y); await page.waitForTimeout(250);
+    check('hovering a handle turns the cursor to a grab hand and says what it does',
+      (await page.evaluate(() => state.renderer.domElement.style.cursor)) === 'grab' && /Drag the blue ball down/.test(await ro()), await ro());
+    await page.mouse.move(980, 760); await page.waitForTimeout(250);
+    check('...and moving off it puts the cursor back', (await page.evaluate(() => state.renderer.domElement.style.cursor)) === '');
+
+    /* PRESS: drag the blue ball down */
+    await markTop();
+    const cam0 = await cam();
+    th = await H('thick');
+    await grab(th, 0, 110);
+    const mid = { y: await modelH(), undoSame: await page.evaluate(() => state.undoStack[state.undoStack.length - 1] === window.__top), ro: await ro(), thick: await val('rng-wheel-flat'), ctl: await ctlOn() };
+    const expect = 50 - 110 / Math.abs(th.b.y);
+    check('dragging the top of the ball down presses it, live: the Thick slider follows the cursor',
+      mid.thick < 45 && Math.abs(mid.thick - expect) < Math.max(1.5, 0.15 * Math.abs(expect)), 'Thick ' + mid.thick.toFixed(1) + ' mm, cursor-implied ' + expect.toFixed(1) + ' mm');
+    check('...nothing is set until you let go: the model is still 50 mm, Undo has not moved, and it says Preview',
+      Math.abs(mid.y - 50) < 0.01 && mid.undoSame && /^Preview/.test(mid.ro), 'model ' + mid.y.toFixed(2) + ', ' + mid.ro.slice(0, 40));
+    check('...and the orbit is off for the length of the drag', mid.ctl === false);
+    await letGo();
+    const after = { y: await modelH(), types: await undoTypes(), ctl: await ctlOn(), cam: await cam(), recipe: await rec() };
+    check('letting go sets it: ONE Undo step, the model is the pressed height, the camera has not moved',
+      await oneNew() && Math.abs(after.y - mid.thick) < 0.2 && after.cam === cam0,
+      after.types.slice(-2).join(',') + ', ' + after.y.toFixed(1) + ' mm');
+    check('...no stray "Moved model" step from the piece-dragging code underneath', !after.types.slice(-3).includes('movePlaced'));
+    check('...and the orbit is back', after.ctl === true);
+
+    /* back up, then LIP on a plate */
+    await setS('rng-wheel-flat', 6);
+    hs = await handles();
+    check('pressed to a plate, the rim handle (green) appears', hs.some(h => h.kind === 'lip'), hs.map(h => h.kind).join(','));
+    let lp = await H('lip');
+    await markTop();
+    await grab(lp, 0, -70);
+    const lipMid = await val('rng-wheel-lip');
+    const lipExpect = 70 / Math.abs(lp.b.y);
+    check('dragging the rim up lifts it: the Lip slider follows (mm of rise = pixels / the screen scale at the rim)',
+      lipMid > 2 && Math.abs(lipMid - lipExpect) < Math.max(1.5, 0.25 * lipExpect), 'Lip ' + lipMid.toFixed(1) + ' mm, cursor-implied ' + lipExpect.toFixed(1));
+    await letGo();
+    const lipped = await page.evaluate(() => ({ ops: NSO_wheelSession.ops.join('>'), h: NSO_wheelHeightOf(NSO_wheelSession) }));
+    check('letting go sets the lip: one Undo step, built as lip', lipped.ops === 'ball>flatten>lip' && await oneNew() && lipped.h > 8, lipped.ops + ' ' + lipped.h.toFixed(1));
+    hs = await handles();
+    lp = await H('lip');
+    check('the green ball rides up with the rim (it sits on the lifted edge now)', lp && lp.y < hs.find(h => h.kind === 'thick').y + 40);
+
+    /* ESCAPE and a plain click change nothing */
+    const rBefore = JSON.stringify(await rec());
+    await markTop();
+    const sameTop = () => page.evaluate(() => state.undoStack[state.undoStack.length - 1] === window.__top);
+    await grab(lp, 0, -50, { steps: 5 });
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(500);
+    await page.mouse.up(); await page.waitForTimeout(500);
+    check('Escape mid-drag puts it all back: the recipe, the Undo stack and the orbit are as they were',
+      JSON.stringify(await rec()) === rBefore && await sameTop() && await ctlOn());
+    lp = await H('lip');
+    await page.mouse.move(lp.x, lp.y); await page.mouse.down(); await page.waitForTimeout(100); await page.mouse.up(); await page.waitForTimeout(500);
+    check('a click on a handle without moving it changes nothing', JSON.stringify(await rec()) === rBefore && await sameTop());
+
+    /* SHIFT opens, and the handle becomes the cyan one */
+    await setS('rng-wheel-lip', 0);
+    await setS('rng-wheel-flat', 20);
+    th = await H('thick');
+    await grab(th, 0, 10, { shift: true });
+    await letGo({ shift: true });
+    let st = await rec();
+    hs = await handles();
+    check('Shift-dragging the blue ball down opens the piece (Deep), and the handle on the cavity floor is now cyan',
+      st.depth > 0.3 && (await page.evaluate(() => !!NSO_wheelSession.inner)) && hs.some(h => h.kind === 'deep') && !hs.some(h => h.kind === 'thick'),
+      'depth ' + st.depth.toFixed(2) + ', ' + hs.map(h => h.kind).join(','));
+    const d1 = st.depth;
+    let dp = await H('deep');
+    await grab(dp, 0, 14);
+    await letGo();
+    check('dragging the cyan ball down goes deeper', (await rec()).depth > d1 + 0.5, d1.toFixed(2) + ' -> ' + (await rec()).depth.toFixed(2));
+
+    /* WALL: out/in pulls, up/down moves where */
+    const w0 = await rec();
+    let wl = await H('wall');
+    await grab(wl, 40, -30);
+    await letGo();
+    const w1 = await rec();
+    check('dragging the yellow ball out pulls the wall out, and dragging it up moves where (Pull at rises)',
+      w1.pull.dr > w0.pull.dr + 0.5 && w1.pull.z > w0.pull.z + 0.01, 'dr ' + w0.pull.dr.toFixed(1) + ' -> ' + w1.pull.dr.toFixed(1) + ', at ' + (w0.pull.z * 100).toFixed(0) + ' -> ' + (w1.pull.z * 100).toFixed(0) + '%');
+    check('...the Pull and Pull at sliders show it', Math.abs((await val('rng-wheel-pull-dr')) - w1.pull.dr) < 0.6 && Math.abs((await val('rng-wheel-pull-z')) - w1.pull.z * 100) < 1.5);
+    check('...the clay is the same clay', await page.evaluate(() => Math.abs(NSO_wheelVolume(NSO_wheelSession) - NSO_wheelSession.budget.start) / NSO_wheelSession.budget.start < 1e-9));
+    await page.click('#btn-undo');
+    await page.waitForFunction(() => Math.abs(NSO_wheelHome.recipe.pull.dr) < 1e-9, null, { timeout: 5000 });
+    check('Undo takes the whole drag back in one step, the sliders with it', Math.abs((await val('rng-wheel-pull-dr'))) < 0.6);
+
+    /* the orbit still works on empty space, and the handles follow the camera */
+    const camA = await cam(), wallA = await H('wall'), deepA = await H('deep');
+    await page.mouse.move(980, 760); await page.mouse.down();
+    for (let i = 1; i <= 8; i++) { await page.mouse.move(980 - i * 12, 760 - i * 4); await page.waitForTimeout(50); }
+    await page.mouse.up(); await page.waitForTimeout(500);
+    const camB = await cam(), wallB = await H('wall'), deepB = await H('deep');
+    check('a drag on empty space still orbits the camera', camA !== camB);
+    check('...and the handles follow it: the wall handle is still on the camera\'s right-hand side of the piece, level with it, so a radial drag stays along the screen\'s x',
+      wallA && wallB && wallA.x - deepA.x > 20 && wallB.x - deepB.x > 20,
+      'before ' + (wallA.x - deepA.x).toFixed(0) + ' px right of the axis, after ' + (wallB.x - deepB.x).toFixed(0));
+    const onPiece = await page.evaluate(() => {
+      const m = NSO_wheelModel(), e = state.placed.find(p => p.sourceId === m.id), mesh = e.mesh, g = mesh.geometry;
+      g.computeBoundingBox();
+      const c = mesh.localToWorld(new THREE.Vector3((g.boundingBox.min.x + g.boundingBox.max.x) / 2, g.boundingBox.min.y, (g.boundingBox.min.z + g.boundingBox.max.z) / 2));
+      const r = state.renderer.domElement.getBoundingClientRect(), p = c.project(state.camera);
+      return { x: r.left + (p.x * .5 + .5) * r.width, y: r.top + (-p.y * .5 + .5) * r.height };
+    });
+    const dpH = await H('deep');
+    check('...and the cavity-floor handle is still over the piece\'s own axis (within 90 px of its base centre on screen)', Math.hypot(dpH.x - onPiece.x, dpH.y - onPiece.y) < 90,
+      'handle ' + dpH.x.toFixed(0) + ',' + dpH.y.toFixed(0) + ' base ' + onPiece.x.toFixed(0) + ',' + onPiece.y.toFixed(0));
+
+    /* put away with the menu */
+    await page.evaluate(() => { const b = document.getElementById('btn-wheel-ball'); const d = b.closest('details.vp-wheel-menu'); d.open = false; });
+    await page.waitForTimeout(700);
+    check('closing the Wheel menu puts the handles away: nothing left in the scene to grab',
+      await page.evaluate(() => !state.scene.getObjectByName('wheelHandles') && NSO_wheelUI.handles().length === 0));
+    await page.evaluate(() => { const b = document.getElementById('btn-wheel-ball'); for (let n = b; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
+    await page.waitForTimeout(700);
+    check('...and they come back when it opens', (await handles()).length >= 2);
+  }
+
   console.log('\n=== 11. nothing else on the page broke ===');
   const errs = logs.filter(l => l.startsWith('[pageerror]'));
   check('no uncaught page errors', errs.length === 0, errs.join(' | '));

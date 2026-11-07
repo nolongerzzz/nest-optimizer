@@ -170,6 +170,7 @@ merging its list by hand. The list below is generated.
 - [Vertical stacking - Seat (support) from the bed, Align edges keeps the seat (2026-09-16)](handoff/vertical-stacking-seat-support-from-the-bed-align-edges-keeps.md)
 - [Weave - lasso a patch out along its own triangles, clone its surface as a fresh weave, reattach it rim to rim (2026-11-01)](handoff/weave.md)
 - [Wheel card cleanup - one Scale slider, no number boxes](handoff/wheel-card-cleanup-one-scale-slider-no-number-boxes.md)
+- [Wheel: drag on the piece - handles that drive the sliders](handoff/wheel-drag-on-the-piece-handles-that-drive-the-sliders.md)
 - [Wheel: Flatten - a ball pressed to a disc, the clay conserved](handoff/wheel-flatten-a-ball-pressed-to-a-disc-clay-conserved.md)
 - [Wheel: Lip - a flared rim on a pressed plate](handoff/wheel-lip-a-flared-rim-on-a-pressed-plate.md)
 - [Wheel: the start - a standard ball that drops its own piece](handoff/wheel-start-a-standard-ball-that-drops-its-own-piece.md)

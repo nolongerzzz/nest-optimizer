@@ -572,6 +572,43 @@ little above where the outside stops, so every height the wheel reports (the sta
 build-volume check, the canonical checker's bbox) reads `NSO_wheelHeightOf` (the higher of the two
 profiles). The canonical mesh checker found this one.
 
+### Dragging on the piece
+
+Handles on the piece write to the **same draft recipe the sliders do**, through the same
+preview and the same Set — so a drag is one Undo step and the sliders move while you drag.
+They are balls drawn on top of the piece, round on the screen whatever the zoom:
+
+| ball | where | drag | drives |
+|---|---|---|---|
+| **blue** | the top face of a ball or plate | **down** | Thick (press). Hold **Shift** to open it instead (Deep) |
+| **cyan** | the cavity floor of an opened piece | down | Deep |
+| **yellow** | the wall, at the Pull height | **out / in**, and **up / down** | Pull, and Pull at |
+| **green** | the rim of a pressed plate | **up** | Lip |
+
+A drag on a handle swallows the press (orbit off for its length, back on after); a drag on
+empty space still orbits. Hover turns the cursor to a grab hand and says what the ball does;
+Escape puts a drag away; a click that does not move changes nothing.
+
+*How a mouse movement becomes millimetres.* Each handle knows its two axes on the screen —
+radial (the camera's right, so a radial drag runs along the screen's x) and up — by
+projecting the handle and one millimetre along each through the camera; the mouse delta is
+turned into `(radial mm, up mm)` by a 2x2 solve, so it holds from any angle, and the top of a
+pressed ball follows the cursor (measured: the Thick slider within 0.1 mm of what the cursor
+implies). The drag edits a **fresh copy of the recipe it started from** every time, so nothing
+drifts; builds are throttled to the pace they take (latest wins, a build is ~60 ms).
+
+*Where they sit.* `handleSpecs` puts them from the piece's profile and the recipe: blue at the
+top face centre (or the plate's floor under a lip), cyan at the cavity floor once opened, yellow
+on the outer wall at *Pull at*, green on a pressed plate's rim (the inner profile's highest point
+once there is a lip, so it rides up with it). They are children of a scene group, not of the
+piece's mesh, and follow the camera through OrbitControls' `change` event. On a thin plate the
+wall ball steps aside from the rim one. They exist only while the Wheel menu is open.
+
+*One hook in the core.* `app-core.js`'s press handler asks `window.nsoWheelTakesPointer(event)`
+(beside Brush, Pull, Limb and Foam), so a press on a handle does not also start the
+piece-moving drag underneath it (which left a stray "Moved model" Undo entry behind). The wheel's
+own `pointerdown` runs *after* the core's on that canvas, so the hook does its own hit test.
+
 ### The white edge
 
 The selected piece wears a white edge (`app-sel-outline.js`). It used to come and go while

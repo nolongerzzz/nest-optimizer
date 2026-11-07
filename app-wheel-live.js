@@ -104,6 +104,7 @@
     /* The white edge follows the geometry: put it back on the original (the house
        edge cache has it, so this is a lookup, not a rebuild). */
     if (restored && L.entry && typeof refreshOutline === 'function') refreshOutline(L.entry);
+    placeHandles();
   }
 
   /* The throwaway geometry for a piece of the wheel, with its bottom where the
@@ -129,6 +130,7 @@
     NSO_wheelWear(geo, piece);          // the white edge is drawn from the piece's own profile
     LIVE.mesh.geometry = geo;
     LIVE.geo = geo;
+    LIVE.piece = piece;                 // the drag handles sit on the shape being shown
     if (old) old.dispose();
     /* THE WHITE EDGE STAYS ON, AND ON THE SHAPE YOU ARE SEEING. It is a child
        line built from the mesh's geometry, so a swapped geometry used to leave the
@@ -239,8 +241,11 @@
   }
 
   /* One build of whatever the sliders say now: draw it, say it, re-range. */
-  function preview(only) {
-    var r = readDraft(only);
+  function preview(only) { return runPreview(readDraft(only)); }
+
+  /* The build-and-draw half, on a recipe already edited - by a slider (above) or by a
+     handle dragged on the piece (the drag section below). */
+  function runPreview(r) {
     var m = modelNow();
     if (NSO_wheelHome) {
       var sync = NSO_wheelSync();
@@ -290,6 +295,312 @@
     paintRead(d);
   }
 
+  /* ------------------------------------------------------------ dragging on the piece
+
+     Handles on the piece write to the SAME draft recipe the sliders do, through the same
+     preview and the same Set, so a drag is one Undo step and the sliders move with it.
+
+       blue ball    on the top face of a ball or plate: drag DOWN to press it (Thick);
+                    hold Shift to open it instead (Deep)
+       cyan ball    on the cavity floor of an opened piece: drag down to go deeper (Deep)
+       yellow ball  on the wall at the Pull height: drag OUT or IN to pull (Pull), UP or
+                    DOWN to move where (Pull at)
+       green ball   on a pressed plate's rim: drag UP to lift it (Lip)
+
+     They are round on the screen whatever the zoom, drawn on top, and picked by distance
+     from the cursor (the picked one wins; where two would sit on top of each other the
+     wall one steps aside). They sit on the camera's right-hand side of the piece, so a
+     radial drag runs along the screen's x; the mouse is turned into millimetres through
+     the camera's own projection at the handle (a 2x2 solve), so it holds from any angle.
+     The orbit is switched off for the length of a drag. The handles follow the camera
+     through OrbitControls' `change` event and are put away with the menu. */
+  var HANDLE_PX = 7, HIT_PX = 14;
+  var HANDLE_COLOR = { thick: 0x38bdf8, deep: 0x22d3ee, wall: 0xfacc15, lip: 0x4ade80 };
+  var HANDLE_HINT = {
+    thick: 'Drag the blue ball down to press it into a plate (hold Shift to open it instead)',
+    deep: 'Drag the cyan ball down to go deeper',
+    wall: 'Drag the yellow ball out or in to pull the wall - up or down to move where',
+    lip: 'Drag the green ball up to lift the rim'
+  };
+  var HG = null;            // { group, items: { kind: { mesh, kind, world, alpha, hidden } } }
+  var DRAG = null;
+  var hovered = null;
+  var dragBound = false;
+
+  function cv() { return (typeof state !== 'undefined' && state && state.renderer) ? state.renderer.domElement : null; }
+
+  function toScreen(v) {
+    var r = cv().getBoundingClientRect();
+    var p = v.clone().project(state.camera);
+    return { x: r.left + (p.x * 0.5 + 0.5) * r.width, y: r.top + (-p.y * 0.5 + 0.5) * r.height };
+  }
+
+  /* Where each handle goes on this piece: { kind, r, z, radial } in the profile's own terms. */
+  function handleSpecs(piece, recipe) {
+    var specs = [], opened = !!piece.inner && piece.ops.indexOf('open') >= 0;
+    var top = NSO_wheelTopZ(piece), span = NSO_wheelSpan(piece.outer);
+    if (opened) specs.push({ kind: 'deep', r: 0, z: piece.inner[0].z });
+    else specs.push({ kind: 'thick', r: 0, z: piece.inner ? piece.inner[0].z : top });
+    var zf = (recipe.pull && recipe.pull.z != null) ? recipe.pull.z : 0.5;
+    var zw = span.lo + zf * (span.hi - span.lo);
+    specs.push({ kind: 'wall', r: NSO_wheelRadiusAt(piece.outer, zw), z: zw, radial: true });
+    if (!opened && piece.press && piece.press.c >= piece.press.h) {
+      if (piece.inner && piece.ops.indexOf('lip') >= 0) {
+        var q = piece.inner[piece.inner.length - 1];
+        specs.push({ kind: 'lip', r: q.r, z: q.z, radial: true });
+      } else {
+        specs.push({ kind: 'lip', r: piece.press.c, z: top, radial: true });
+      }
+    }
+    return specs;
+  }
+
+  function removeHandles() {
+    if (!HG) return;
+    if (HG.group.parent) HG.group.parent.remove(HG.group);
+    Object.keys(HG.items).forEach(function (k) {
+      var it = HG.items[k];
+      if (it.mesh.geometry) it.mesh.geometry.dispose();
+      if (it.mesh.material) it.mesh.material.dispose();
+    });
+    HG = null;
+    hovered = null;
+    if (cv() && !DRAG) cv().style.cursor = '';
+  }
+
+  function placeHandles() {
+    try {
+      var m = modelNow(), e = m && entryOf(m);
+      var piece = (LIVE && LIVE.piece) || NSO_wheelSession;
+      if (!menuOpen() || !m || !e || !e.mesh || !piece || !state.camera || !cv()) { removeHandles(); return; }
+      var mesh = e.mesh;
+      mesh.updateMatrixWorld();
+      var g = mesh.geometry;
+      if (!g.boundingBox) g.computeBoundingBox();
+      var bb = g.boundingBox, cx = (bb.min.x + bb.max.x) / 2, cz = (bb.min.z + bb.max.z) / 2, y0 = bb.min.y;
+      var zLo = piece.outer[0].z;
+      /* the camera's right, in the mesh's own frame: a radial drag then runs along the screen's x */
+      var right = new THREE.Vector3().setFromMatrixColumn(state.camera.matrixWorld, 0);
+      right.y = 0;
+      if (right.lengthSq() < 1e-9) right.set(1, 0, 0);
+      right.normalize();
+      var inv = new THREE.Matrix4().copy(mesh.matrixWorld).invert();
+      var loc = right.transformDirection(inv);
+      var alpha = Math.atan2(-loc.z, loc.x);
+      var specs = handleSpecs(piece, DRAG ? DRAG.draftNow() : committed());
+      if (!HG) {
+        HG = { group: new THREE.Group(), items: {} };
+        HG.group.name = 'wheelHandles';
+        state.scene.add(HG.group);
+      }
+      var rect = cv().getBoundingClientRect();
+      var have = {};
+      specs.forEach(function (sp) {
+        have[sp.kind] = true;
+        var it = HG.items[sp.kind];
+        if (!it) {
+          var mat = new THREE.MeshBasicMaterial({ color: HANDLE_COLOR[sp.kind], depthTest: false, depthWrite: false, transparent: true, opacity: 0.95 });
+          var mh = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), mat);
+          mh.renderOrder = 30;
+          mh.raycast = function () {};
+          HG.group.add(mh);
+          it = HG.items[sp.kind] = { mesh: mh, kind: sp.kind };
+        }
+        var r = sp.radial ? sp.r : 0;
+        var local = new THREE.Vector3(cx + r * Math.cos(alpha), y0 + (sp.z - zLo), cz - r * Math.sin(alpha));
+        var world = mesh.localToWorld(local);
+        it.world = world; it.alpha = alpha; it.hidden = false;
+        it.mesh.position.copy(world);
+        var dist = state.camera.position.distanceTo(world);
+        var wpp = 2 * Math.tan(state.camera.fov * Math.PI / 360) * dist / rect.height;
+        var big = (hovered === sp.kind || (DRAG && DRAG.kind === sp.kind)) ? 1.4 : 1;
+        it.mesh.scale.setScalar(HANDLE_PX * wpp * big);
+      });
+      Object.keys(HG.items).forEach(function (k) {
+        if (have[k]) return;
+        var it = HG.items[k];
+        if (it.mesh.parent) it.mesh.parent.remove(it.mesh);
+        it.mesh.geometry.dispose(); it.mesh.material.dispose();
+        delete HG.items[k];
+      });
+      /* on a thin plate the wall and the rim are a few pixels apart: the wall steps aside */
+      var wall = HG.items.wall;
+      if (wall && !(DRAG && DRAG.kind === 'wall')) {
+        var sw = toScreen(wall.world);
+        ['lip', 'thick', 'deep'].forEach(function (k) {
+          var o = HG.items[k];
+          if (!o) return;
+          var so = toScreen(o.world);
+          if (Math.hypot(sw.x - so.x, sw.y - so.y) < 2.2 * HANDLE_PX) wall.hidden = true;
+        });
+      }
+      Object.keys(HG.items).forEach(function (k) { HG.items[k].mesh.visible = !HG.items[k].hidden; });
+      if (typeof nsoWakeRender === 'function') nsoWakeRender(200);
+    } catch (err) {
+      if (typeof console !== 'undefined') console.warn('[wheel handles]', err);
+    }
+  }
+
+  function nearestHandle(ev) {
+    if (!HG) return null;
+    var best = null, bd = HIT_PX;
+    Object.keys(HG.items).forEach(function (k) {
+      var it = HG.items[k];
+      if (it.hidden || !it.world) return;
+      var s2 = toScreen(it.world), d = Math.hypot(ev.clientX - s2.x, ev.clientY - s2.y);
+      if (d < bd) { bd = d; best = it; }
+    });
+    return best;
+  }
+
+  /* Screen pixels per millimetre along the handle's radial (a) and up (b) directions. */
+  function axesAt(it, m) {
+    var mesh = entryOf(m).mesh;
+    mesh.updateMatrixWorld();
+    var P = it.world;
+    var Rw = new THREE.Vector3(Math.cos(it.alpha), 0, -Math.sin(it.alpha)).transformDirection(mesh.matrixWorld);
+    var Uw = new THREE.Vector3(0, 1, 0).transformDirection(mesh.matrixWorld);
+    var s0 = toScreen(P), sR = toScreen(P.clone().add(Rw)), sU = toScreen(P.clone().add(Uw));
+    var a = { x: sR.x - s0.x, y: sR.y - s0.y }, b = { x: sU.x - s0.x, y: sU.y - s0.y };
+    return { a: a, b: b, det: a.x * b.y - b.x * a.y };
+  }
+
+  /* A mouse delta, in millimetres along the handle's radial and up directions, through the
+     camera's projection at the handle (Cramer's rule on the 2x2). */
+  function toMillimetres(d, dx, dy) {
+    if (Math.abs(d.det) < 1e-6) {
+      return { rad: dx / Math.max(1e-6, Math.hypot(d.a.x, d.a.y)), up: -dy / Math.max(1e-6, Math.hypot(d.b.x, d.b.y)) };
+    }
+    return { rad: (dx * d.b.y - d.b.x * dy) / d.det, up: (d.a.x * dy - dx * d.a.y) / d.det };
+  }
+
+  function clampTo(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
+
+  /* Edit a fresh copy of the recipe the drag started from - never incrementally, so nothing drifts. */
+  function applyDrag(dx, dy) {
+    var d = DRAG, mm = toMillimetres(d, dx, dy), r = NSO_wheelCloneRecipe(d.start), R = d.R || {};
+    if (d.kind === 'thick' && !d.shift) {
+      var th = R.thick || { min: 0, max: 0 };
+      var st = d.start.thick == null ? th.max : d.start.thick;
+      DEFS.thick.put(r, clampTo(st + mm.up, th.min, th.max), R);
+    } else if (d.kind === 'deep' || d.kind === 'thick') {
+      var mx = R.push ? R.push.max : 0;
+      DEFS.depth.put(r, clampTo((d.start.depth || 0) - mm.up, 0, mx));
+    } else if (d.kind === 'wall') {
+      var sw = R.pull ? R.pull.swing : 10;
+      r.pull.dr = clampTo((d.start.pull.dr || 0) + mm.rad, -sw, sw);
+      r.pull.z = clampTo((d.start.pull.z == null ? 0.5 : d.start.pull.z) + mm.up / d.spanH, 0, 1);
+    } else if (d.kind === 'lip') {
+      var lm = R.lip ? R.lip.max : 0;
+      r.lip = r.lip || { h: 0, at: 0.6, flare: 0.5 };
+      r.lip.h = clampTo((d.start.lip ? d.start.lip.h : 0) + mm.up, 0, lm);
+    }
+    draft = r;
+  }
+
+  function pump() {
+    var d = DRAG;
+    if (!d) return;
+    d.dirty = false;
+    if (d.last) {
+      applyDrag(d.last.dx, d.last.dy);
+      runPreview(draft);
+      show(draft, lastRanges);
+      placeHandles();
+    }
+    if (DRAG !== d) return;
+    if (d.dirty) setTimeout(pump, 0); else d.busy = false;
+  }
+
+  function dragEnd(commit, ev) {
+    var d = DRAG;
+    if (!d) return;
+    if (commit && d.last) applyDrag(d.last.dx, d.last.dy);
+    DRAG = null;
+    var c = cv();
+    if (c) { try { if (ev && c.releasePointerCapture) c.releasePointerCapture(d.pointerId); } catch (e) { /* synthetic */ } c.style.cursor = ''; }
+    if (state.controls) state.controls.enabled = true;
+    var moved = d.last && Math.hypot(d.last.dx, d.last.dy) >= 2;
+    if (commit && moved) set();
+    else { end(); refresh(); }
+    placeHandles();
+  }
+
+  function onDown(ev) {
+    if (ev.button !== 0 || DRAG || !HG) return;
+    var it = nearestHandle(ev);
+    if (!it) return;
+    ev.stopPropagation();
+    ev.preventDefault();
+    var m = modelNow();
+    if (!m) return;
+    NSO_wheelSelect(m);
+    var ax = axesAt(it, m), a = ax.a, b = ax.b;
+    var span = NSO_wheelSpan(NSO_wheelSession.outer);
+    DRAG = {
+      kind: it.kind, shift: !!ev.shiftKey, start: NSO_wheelCloneRecipe(committed()), R: lastRanges,
+      x0: ev.clientX, y0: ev.clientY, a: a, b: b, det: a.x * b.y - b.x * a.y,
+      spanH: Math.max(1, span.hi - span.lo), last: null, busy: false, dirty: false, pointerId: ev.pointerId,
+      draftNow: function () { return draft || DRAG.start; }
+    };
+    draft = NSO_wheelCloneRecipe(DRAG.start);
+    if (state.controls) state.controls.enabled = false;
+    var c = cv();
+    try { if (c.setPointerCapture) c.setPointerCapture(ev.pointerId); } catch (err) { /* synthetic */ }
+    c.style.cursor = 'grabbing';
+    placeHandles();
+  }
+
+  function onMove(ev) {
+    if (DRAG) {
+      DRAG.last = { dx: ev.clientX - DRAG.x0, dy: ev.clientY - DRAG.y0 };
+      if (!DRAG.busy) { DRAG.busy = true; setTimeout(pump, 0); } else DRAG.dirty = true;
+      return;
+    }
+    if (!HG || ev.target !== cv()) {
+      if (hovered) { hovered = null; if (cv()) cv().style.cursor = ''; placeHandles(); if (!LIVE) refresh(); }
+      return;
+    }
+    var it = nearestHandle(ev), k = it ? it.kind : null;
+    if (k === hovered) return;
+    hovered = k;
+    cv().style.cursor = k ? 'grab' : '';
+    placeHandles();
+    if (k) readout(HANDLE_HINT[k], false); else if (!LIVE) refresh();
+  }
+
+  function bindDrag() {
+    if (dragBound || !cv()) return;
+    dragBound = true;
+    cv().addEventListener('pointerdown', onDown, true);
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', function (ev) { dragEnd(true, ev); });
+    window.addEventListener('pointercancel', function (ev) { dragEnd(false, ev); });
+    if (state.controls && state.controls.addEventListener) state.controls.addEventListener('change', placeHandles);
+    window.addEventListener('resize', placeHandles);
+  }
+
+  /* Asked by app-core's press handler (like nsoPullTakesPointer): a press that lands on a handle
+     is the wheel's, so the core must not also start moving the piece across the plate. It does its
+     own hit test rather than relying on this module's handler having run - the core's runs first
+     on the canvas. */
+  window.nsoWheelTakesPointer = function (ev) {
+    return !!ev && ev.button === 0 && (!!DRAG || !!nearestHandle(ev));
+  };
+
+  /* For the checks: where each handle is on the page, in client pixels. */
+  function handleScreens() {
+    var out = [];
+    if (!HG) return out;
+    Object.keys(HG.items).forEach(function (k) {
+      var it = HG.items[k];
+      if (it.hidden || !it.world) return;
+      var s2 = toScreen(it.world), ax = axesAt(it, modelNow());
+      out.push({ kind: k, x: s2.x, y: s2.y, a: ax.a, b: ax.b });
+    });
+    return out;
+  }
+
   /* ------------------------------------------------------------ keeping in step */
   function refresh() {
     var r = committed();
@@ -301,6 +612,7 @@
       else if (b.ok) readout('Press Starter Ball to drop a ball of clay. It will be ' + describe(b, '').replace(/ - .*$/, '') + '.');
       else readout(b.reason, true);
     }
+    placeHandles();
   }
 
   function menuEl() { var b = $('btn-wheel-ball'); return b ? b.closest('details.vp-wheel-menu') : null; }
@@ -311,7 +623,8 @@
 
   var seen = { home: null, raw: null };
   function watch() {
-    if (!menuOpen()) { end(); return; }
+    bindDrag();
+    if (!menuOpen()) { end(); removeHandles(); return; }
     if (LIVE) return;
     var m = NSO_wheelHome ? NSO_wheelModel() : null;
     var raw = m ? m.rawTris : null;
@@ -340,15 +653,18 @@
     if (f) { f.dataset.nsoWired = '1'; f.addEventListener('click', function () { preset('thick', false); }); }
     if (o) { o.dataset.nsoWired = '1'; o.addEventListener('click', function () { preset('depth', true); }); }
     document.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape' && (LIVE || draft)) { end(); refresh(); }
+      if (e.key !== 'Escape') return;
+      if (DRAG) { dragEnd(false); return; }
+      if (LIVE || draft) { end(); refresh(); }
     });
     var menu = menuEl();
     if (menu) menu.addEventListener('toggle', function () { if (!menu.open) end(); else refresh(); });
+    bindDrag();
     setInterval(watch, 300);
     refresh();
   }
 
-  NSO_wheelUI = { end: end, refresh: function () { seen = { home: null, raw: null }; refresh(); } };
+  NSO_wheelUI = { end: end, refresh: function () { seen = { home: null, raw: null }; refresh(); }, handles: handleScreens, place: placeHandles };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire);
   else wire();

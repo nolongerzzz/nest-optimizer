@@ -1214,6 +1214,7 @@ console.log('\n== 7g. Lip: a flared rim on a pressed plate ==');
     check('...an opened piece: the underside is the outer profile, the top face the inner', !!lip.piece.inner && lip.piece.outer[0].z === plate.outer[0].z &&
       Math.abs(lip.piece.inner[0].z - (plate.outer[0].z + 6)) < 1e-9);
     check('...both profiles rise monotonically, so the whole wheel can take it', mono(lip.piece.outer) && mono(lip.piece.inner));
+    check('...and it is still a pressed plate (the press is carried, so the rim handle and a second Lip know it)', lip.piece.press && lip.piece.press.h === 6);
     check('...and it passes the wall gate, with a real rim to measure', lip.wall.pass && lip.wall.rim_mm >= W.NSO_wheelFloor(0.4),
       'thinnest ' + lip.wall.thinnest + ' ' + lip.wall.min_mm.toFixed(2) + ' mm, rim ' + lip.wall.rim_mm.toFixed(2) + ' mm');
     /* the thinnest place is the rim chord (0.6 of the thickness, by design); everywhere along the lifted underside the slab is
