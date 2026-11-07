@@ -153,50 +153,61 @@
               <details class="vp-menu vp-wheel-menu">
               <summary>Wheel</summary>
               <div class="vp-menu-body vp-wheel">
-              <div class="vp-row vp-row-opts">
-              <label class="vp-clone" title="Optional. Leave blank for the standard ball (25 mm radius): press it into a plate or open it into a bowl, and add clay for anything bigger. Type a finished height to size the ball from it instead, by Pappus's centroid theorem: a thin-shell estimate of the vessel plus a real waste margin.">H <input type="number" id="inp-wheel-height" min="10" max="900" step="1" placeholder="auto"></label>
-              <label class="vp-clone" title="Optional, used with H: the finished vessel's radius. Blank means half the height.">R <input type="number" id="inp-wheel-radius" min="5" max="450" step="1" placeholder="auto"></label>
-              </div>
-              <div class="vp-row vp-row-opts">
-              <label class="vp-clone" title="Wall thickness. Default 3 mm - a typical thrown wall. Refused under the nozzle-safety floor from nso_thickness.js.">W <input type="number" id="inp-wheel-wall" min="0.4" max="30" step="0.1" placeholder="3"></label>
-              <label class="vp-clone" title="Nozzle diameter. Sets the wall floor: nozzle x 1.05.">N <input type="number" id="inp-wheel-nozzle" min="0.1" max="2" step="0.05" placeholder="0.4"></label>
-              </div>
+              <p id="wheel-readout" class="carve-readout" aria-live="polite" title="What the piece on the wheel is, or what the slider you are moving would make. Nothing is set until you let go.">Press Ball to drop a ball of clay.</p>
+              <div class="fs-slider" id="wh-row-height" title="Optional. 0 / auto is the standard ball (25 mm radius): press it into a plate or open it into a bowl, and add clay for anything bigger. A finished height sizes the ball from it instead, by Pappus's centroid theorem. While the ball is still untouched, this resizes it live.">
+              <label for="rng-wheel-height">H</label><input type="number" id="inp-wheel-height" min="0" max="900" step="1" placeholder="auto" aria-label="Target height, mm"><span id="out-wheel-height" class="fs-read">auto</span>
+              <input type="range" id="rng-wheel-height" min="0" max="300" step="1" value="0" aria-label="Target height, mm slider"></div>
+              <div class="fs-slider" id="wh-row-radius" title="Optional, used with H: the finished vessel's radius. 0 / auto means half the height.">
+              <label for="rng-wheel-radius">R</label><input type="number" id="inp-wheel-radius" min="0" max="450" step="1" placeholder="auto" aria-label="Target radius, mm"><span id="out-wheel-radius" class="fs-read">auto</span>
+              <input type="range" id="rng-wheel-radius" min="0" max="150" step="1" value="0" aria-label="Target radius, mm slider"></div>
+              <div class="fs-slider" id="wh-row-wall" title="Wall thickness. Default 3 mm - a typical thrown wall. Refused under the nozzle-safety floor from nso_thickness.js. It is also how thin Flatten may press.">
+              <label for="rng-wheel-wall">W</label><input type="number" id="inp-wheel-wall" min="0.4" max="30" step="0.1" value="3" aria-label="Wall thickness, mm"><span id="out-wheel-wall" class="fs-read">3 mm</span>
+              <input type="range" id="rng-wheel-wall" min="0.4" max="12" step="0.1" value="3" aria-label="Wall thickness, mm slider"></div>
+              <div class="fs-slider" id="wh-row-nozzle" title="Nozzle diameter. Sets the wall floor: nozzle x 1.05.">
+              <label for="rng-wheel-nozzle">N</label><input type="number" id="inp-wheel-nozzle" min="0.1" max="2" step="0.05" value="0.4" aria-label="Nozzle diameter, mm"><span id="out-wheel-nozzle" class="fs-read">0.4 mm</span>
+              <input type="range" id="rng-wheel-nozzle" min="0.1" max="1.2" step="0.05" value="0.4" aria-label="Nozzle diameter, mm slider"></div>
               <div class="vp-row vp-row-full">
               <button id="btn-wheel-ball" class="btn btn-secondary" type="button"
-              title="Drop a ball of clay on the plate as a piece of its own - nothing to select and nothing to type. Blank H gives the standard 25 mm ball; an H sizes it from a finished height. Every move after it works on this piece.">Ball</button>
-              </div>
-              <div class="vp-row vp-row-extend">
-              <button id="btn-wheel-flatten" class="btn btn-secondary" type="button"
-              title="Press the ball down. The top comes down and the clay spreads, so the diameter grows by exactly what the height gives up (the clay is conserved) until the piece is a flat disc with a rounded edge. Blank presses as flat as the wall allows; a thickness stops it earlier. Needs a ball that is not open yet.">Flatten</button>
-              <input type="number" id="inp-wheel-flat-h" min="0.4" max="900" step="0.5"
-              placeholder="thick" aria-label="Flatten to thickness, mm">
-              </div>
-              <div class="vp-row vp-row-extend">
-              <button id="btn-wheel-open" class="btn btn-secondary" type="button"
-              title="One push down the middle. Turns the single outer profile into two - outer and inner - and everything after this is a shell.">Open</button>
-              <input type="number" id="inp-wheel-depth" min="1" max="900" step="1"
-              placeholder="deep" aria-label="Opening depth, mm">
-              </div>
-              <div class="vp-row vp-row-opts">
-              <label class="vp-clone" title="Height on the piece to pull at - any height, not only the rim.">Z <input type="number" id="inp-wheel-pull-z" step="0.5" placeholder="mm"></label>
-              <label class="vp-clone" title="How far out (or in, if negative) to move the wall there.">Δr <input type="number" id="inp-wheel-pull-dr" step="0.5" placeholder="mm"></label>
+              title="Drop a ball of clay on the plate as a piece of its own - nothing to select and nothing to type. 0 / auto H gives the standard 25 mm ball; an H sizes it from a finished height. Every move after it works on this piece.">Ball</button>
               </div>
               <div class="vp-row vp-row-full">
+              <button id="btn-wheel-flatten" class="btn btn-secondary" type="button"
+              title="Press the ball ALL the way: the top comes down and the clay spreads, so the diameter grows by exactly what the height gives up (the clay is conserved) until the piece is a flat disc with a rounded edge. The Thick slider below is the fine control. Needs a ball that is not open yet.">Flatten</button>
+              </div>
+              <div class="fs-slider" id="wh-row-flat" title="Press the ball to this thickness, live: drag it down to flatten, back up to un-press. Let go to set it (one Undo). The clay is conserved, so the diameter grows as the thickness falls.">
+              <label for="rng-wheel-flat">Thick</label><input type="number" id="inp-wheel-flat-h" min="0.4" max="900" step="0.1" placeholder="thick" aria-label="Flatten to thickness, mm"><span id="out-wheel-flat" class="fs-read">—</span>
+              <input type="range" id="rng-wheel-flat" min="0" max="1" step="0.1" value="0" disabled aria-label="Flatten to thickness, mm slider"></div>
+              <div class="vp-row vp-row-full">
+              <button id="btn-wheel-open" class="btn btn-secondary" type="button"
+              title="Open the ball as deep as it will take: one push down the middle. Turns the single outer profile into two - outer and inner - and everything after this is a shell. The Deep slider below is the fine control.">Open</button>
+              </div>
+              <div class="fs-slider" id="wh-row-depth" title="How deep to open, live. Dragging it again re-opens the BALL to the new depth rather than opening a bowl inside a bowl. Let go to set it (one Undo).">
+              <label for="rng-wheel-depth">Deep</label><input type="number" id="inp-wheel-depth" min="1" max="900" step="0.1" placeholder="deep" aria-label="Opening depth, mm"><span id="out-wheel-depth" class="fs-read">—</span>
+              <input type="range" id="rng-wheel-depth" min="0" max="1" step="0.1" value="0" disabled aria-label="Opening depth, mm slider"></div>
+              <div class="fs-slider" id="wh-row-pull-z" title="Height on the piece to pull at - any height, not only the rim. It only moves the ghost.">
+              <label for="rng-wheel-pull-z">Pull at</label><input type="number" id="inp-wheel-pull-z" step="0.5" placeholder="mm" aria-label="Height to pull at, mm"><span id="out-wheel-pull-z" class="fs-read">—</span>
+              <input type="range" id="rng-wheel-pull-z" min="0" max="1" step="0.5" value="0" disabled aria-label="Height to pull at, mm slider"></div>
+              <div class="fs-slider" id="wh-row-pull-dr" title="How far out (or in, if negative) to move the wall there. A ghost shows the pulled form over the piece and stops where the clay, the wall or the height runs out, saying which. Let go to set it; the clay is conserved, so pulling the wall out makes the piece a little shorter and pushing it in a little taller.">
+              <label for="rng-wheel-pull-dr">Δr</label><input type="number" id="inp-wheel-pull-dr" step="0.5" placeholder="mm" aria-label="Radius change, mm"><span id="out-wheel-pull-dr" class="fs-read">—</span>
+              <input type="range" id="rng-wheel-pull-dr" min="-1" max="1" step="0.5" value="0" disabled aria-label="Radius change, mm slider"></div>
+              <div class="vp-row vp-row-full">
               <button id="btn-wheel-pull" class="btn btn-secondary" type="button"
-              title="Drag-shape the profile at that height. The drag points are spline-fitted and the form is revolved to a clean solid. Refuses if it would run past the clay on the wheel or take the wall under the nozzle floor - and says which.">Pull</button>
+              title="Set the pull in the Z and Δr boxes (letting go of the Δr slider does the same). It does as much as the clay, the wall and the height allow and says what stopped it; the clay is conserved.">Pull</button>
               </div>
-              <div class="vp-row vp-row-extend">
+              <div class="vp-row vp-row-full">
               <button id="btn-wheel-trim" class="btn btn-secondary" type="button"
-              title="Level the base once the form is set. The clay taken off comes off the budget too.">Trim</button>
-              <input type="number" id="inp-wheel-trim-z" min="0" max="900" step="0.5"
-              placeholder="base z" aria-label="Trim base to height, mm">
+              title="Level the base once the form is set. The clay taken off comes off the budget too. Set the height with the slider below, or type it and click here.">Trim</button>
               </div>
-              <div class="vp-row vp-row-extend">
+              <div class="fs-slider" id="wh-row-trim" title="Level the base at this height, live. Let go to set it (one Undo); dragging it again re-trims from before the last trim.">
+              <label for="rng-wheel-trim">Trim to</label><input type="number" id="inp-wheel-trim-z" min="0" max="900" step="0.1" placeholder="base z" aria-label="Trim base to height, mm"><span id="out-wheel-trim" class="fs-read">—</span>
+              <input type="range" id="rng-wheel-trim" min="0" max="1" step="0.1" value="0" disabled aria-label="Trim base to height, mm slider"></div>
+              <div class="vp-row vp-row-full">
               <button id="btn-wheel-rim" class="btn btn-secondary" type="button"
-              title="Add height at the rim. This is Extend - the same axis-preserving stretch, on the same gate - not a second copy of it. Needs a straight-walled band to insert into.">Rim +</button>
-              <input type="number" id="inp-wheel-rim-mm" min="0.1" max="900" step="0.5"
-              placeholder="mm" aria-label="Extend rim by, mm">
+              title="Add height at the rim. This is Extend - the same axis-preserving stretch, on the same gate - not a second copy of it. Needs a straight-walled band to insert into. Set the amount with the slider below, or type it and click here.">Rim +</button>
               </div>
+              <div class="fs-slider" id="wh-row-rim" title="Height to add at the rim, live. Let go to set it (one Undo); dragging it again re-extends from before the last one. Needs a straight wall - the read-out says so when there is not one.">
+              <label for="rng-wheel-rim">Rim +</label><input type="number" id="inp-wheel-rim-mm" min="0" max="900" step="0.5" placeholder="mm" aria-label="Extend rim by, mm"><span id="out-wheel-rim" class="fs-read">—</span>
+              <input type="range" id="rng-wheel-rim" min="0" max="60" step="0.5" value="0" disabled aria-label="Extend rim by, mm slider"></div>
               </div>
               </details>
               <!-- Stock is a shelf: one tile per shape nso_stock.js makes, no fields.
@@ -2723,7 +2734,8 @@
   <!-- Limb: nso_limb.js is the tree, the limb and the move (headless, tools/nso_limb_test.js); app-limb.js the pointer session. docs/LIMB.md -->
   <script src="nso_limb.js?v=4f060b8f"></script>
   <script src="app-limb.js?v=82dda061"></script>
-  <script src="app-wheel.js?v=606030f5"></script>
+  <script src="app-wheel.js?v=2ea3d0e4"></script>
+  <script src="app-wheel-live.js?v=6b51a348"></script>
   <script src="app-fit.js?v=94ef7252"></script>
   <script src="app-stock.js?v=04f0e346"></script>
   <script src="app-piece-preview.js?v=730a465a"></script>

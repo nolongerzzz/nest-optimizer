@@ -778,6 +778,11 @@ function NSO_wheelOpen(piece, opts) {
                           pair)
          reshapeWall      rebuild the inside as a true perpendicular offset of
                           the new outside, instead of carrying it radially
+         conserve         keep the clay: the volume the pull added or took is
+                          taken out of or put into the HEIGHT (every z scaled
+                          about the base by V0/V1). Off by default for now, so
+                          the strict API still pins the ceiling behaviour; the
+                          Wheel's buttons and live ghost use it.
 
    TWO WAYS TO CARRY THE INSIDE, and the difference is not cosmetic.
 
@@ -914,8 +919,51 @@ function NSO_wheelPull(piece, opts) {
     }
   }
 
+  /* A pull that moved nothing is not a pull. Asking above the rim (or below
+     the base) used to come back "ok" with the piece unchanged, which looks
+     like it worked. */
+  var moved = 0;
+  for (i = 0; i < outer.length; i++) moved = Math.max(moved, Math.abs(outer[i].r - piece.outer[i].r));
+  /* reshapeWall rebuilds the INSIDE from the outside, which is an action even
+     when the outside does not move (straightening a wall that is straight). */
+  if (moved < 1e-6 && !opts.reshapeWall) {
+    return { ok: false, piece: piece, reason: 'Pulling at z = ' + pLo.toFixed(1) + ' mm moves nothing - ' +
+      'the piece only spans z = ' + span.lo.toFixed(1) + ' to ' + span.hi.toFixed(1) + ' mm' };
+  }
+
+  var tOuter = NSO_wheelTidy(outer), tInner = NSO_wheelTidy(inner);
+  var heightNote = '';
+  if (opts.conserve) {
+    /* THE CLAY IS CONSERVED (docs/POTTERY-WHEEL.md "Direction"). The wall
+       moved, so the volume changed; the clay for it comes out of - or goes
+       into - the HEIGHT. Volume is linear in height for a fixed r(z) (every
+       term of the contour integral is a dz), so scaling every z about the base
+       by V0/V1 restores it exactly: pull the wall out and the piece sits a
+       little lower, push it in and it stands a little taller. Without this a
+       pull on a clay-conserving piece has zero headroom and fails whenever it
+       goes outward, and quietly destroys clay whenever it goes inward. */
+    var V0 = NSO_wheelVolume(piece);
+    var V1 = NSO_wheelVolume({ outer: tOuter, inner: tInner });
+    if (!(V1 > 0)) {
+      return { ok: false, piece: piece, reason: 'Pulling at z = ' + pLo.toFixed(1) + ' mm would collapse the piece - pull less' };
+    }
+    var sc = V0 / V1;
+    if (sc < 0.25 || sc > 4) {
+      return { ok: false, piece: piece, reason: 'Pulling at z = ' + pLo.toFixed(1) + ' mm would change the height ' +
+        'by more than four times to keep the clay - pull less' };
+    }
+    var zb = tOuter[0].z;
+    var scaleZ = function (prof) {
+      if (!prof) return prof;
+      return prof.map(function (q) { return { z: zb + (q.z - zb) * sc, r: q.r }; });
+    };
+    var hBefore = span.hi - span.lo;
+    tOuter = scaleZ(tOuter); tInner = scaleZ(tInner);
+    heightNote = ', height ' + hBefore.toFixed(1) + ' -> ' + (hBefore * sc).toFixed(1) + ' mm to keep the clay';
+  }
+
   var cand = {
-    outer: NSO_wheelTidy(outer), inner: NSO_wheelTidy(inner),
+    outer: tOuter, inner: tInner,
     nozzle: piece.nozzle, wall: piece.wall, segments: piece.segments,
     target: piece.target, sizing: piece.sizing,
     budget: { start: piece.budget.start, added: piece.budget.added, trimmed: piece.budget.trimmed },
@@ -926,7 +974,7 @@ function NSO_wheelPull(piece, opts) {
     (dragSpan > 1e-6 ? ('-' + pHi.toFixed(1)) : '') + ' mm');
   if (!g.ok) return g;
   g.reason = 'Pulled z ' + pLo.toFixed(1) + '-' + pHi.toFixed(1) + ' mm through ' +
-    path.length + ' drag point(s), ' + (g.budget.headroom).toFixed(1) + ' mm^3 of clay left';
+    path.length + ' drag point(s), ' + (g.budget.headroom).toFixed(1) + ' mm^3 of clay left' + heightNote;
   g.path = path;
   return g;
 }
@@ -1334,6 +1382,171 @@ function NSO_wheelFlatten(piece, opts) {
   return g;
 }
 
+/* ------------------------------------------------------------ 7f. SLIDERS
+   What the live sliders (app-wheel-live.js) need from the geometry, kept here
+   so it is headless and tested: the piece a move starts from, a Pull that
+   stops where the clay or the wall runs out, a ball that can be resized, and
+   the range each slider may say for the piece on the wheel.                */
+
+var NSO_WHEEL_OP_OF = { flatten: 'flatten', open: 'open', trim: 'trim', rim: 'extendRim', pull: 'pull' };
+
+/* The piece a move starts from. Open, Trim and Rim + are ONE adjustable thing
+   each, so dragging their slider again starts from the piece as it was before
+   the last one - it adjusts, it does not stack a second. Flatten is a function
+   of the clay and needs no base; Pull accumulates, as pulls do. */
+function NSO_wheelBaseOf(piece, history, move) {
+  var last = piece.ops[piece.ops.length - 1];
+  if ((move === 'open' || move === 'trim' || move === 'rim') && history && history.length >= 2 &&
+      last === NSO_WHEEL_OP_OF[move]) {
+    return history[history.length - 2].piece;
+  }
+  return piece;
+}
+
+/* A Pull that does as much of what was asked as the clay and the wall allow.
+   Pull is refused whole when it would need clay the wheel does not have or
+   would thin the wall under the nozzle floor, which made it fail more often
+   than it worked. This finds the largest pull in the same direction that
+   passes the SAME gate (bisection on the amount: both limits only get worse
+   as the pull gets bigger) and says what stopped it. Used by the live ghost
+   and by what releasing it sets; NSO_wheelPull itself still refuses whole.
+   It CONSERVES the clay by default (opts.conserve, see NSO_wheelPull), so the
+   budget never stops it - the wall and the height limit do.
+   opts: z, dr (a single pull)                                              */
+function NSO_wheelPullClamped(piece, opts) {
+  opts = Object.assign({ conserve: true }, opts || {});
+  var full = NSO_wheelPull(piece, opts);
+  if (full.ok) { full.asked = 1; full.got = 1; return full; }
+  if (!(typeof opts.z === 'number' && typeof opts.dr === 'number') || opts.points) return full;
+  /* The refusal's own words are the limit: out of clay, or a wall under the floor. */
+  var limit = /out of material/.test(full.reason) ? 'the clay on the wheel ran out'
+            : /nozzle floor/.test(full.reason) ? 'the wall reached the nozzle floor'
+            : /four times/.test(full.reason) ? 'the height would have to change too much to keep the clay'
+            : null;
+  if (!limit) return full;
+  var lo = 0, hi = 1, best = null, i;
+  for (i = 0; i < 24; i++) {
+    var mid = 0.5 * (lo + hi);
+    var r = NSO_wheelPull(piece, { z: opts.z, dr: opts.dr * mid, taper: opts.taper, reshapeWall: opts.reshapeWall, conserve: opts.conserve });
+    if (r.ok) { lo = mid; best = r; } else hi = mid;
+  }
+  if (!best || !(lo > 1e-3)) {
+    full.limit = limit;
+    return full;           // not even a hair of it fits: refused as before
+  }
+  best.asked = 1; best.got = lo; best.limit = limit;
+  best.clamped = true;
+  best.reason = 'Pulled ' + (opts.dr * lo).toFixed(2) + ' of ' + opts.dr.toFixed(2) + ' mm at z = ' +
+    opts.z.toFixed(1) + ' mm - stopped there because ' + limit;
+  return best;
+}
+
+/* BALL, resized. Only while the ball is untouched: once anything has been done
+   to it there is no "the ball" left to resize, and the sliders then set the
+   NEXT ball instead. */
+function NSO_wheelIsPristine(piece) {
+  return !!piece && piece.ops.length === 1 && piece.ops[0] === 'ball';
+}
+
+function NSO_wheelReball(piece, opts) {
+  if (!NSO_wheelIsPristine(piece)) {
+    return { ok: false, piece: piece, reason: 'the ball has been worked already - these set the next ball' };
+  }
+  var r = NSO_wheelBall(opts);
+  if (!r.ok) return { ok: false, piece: piece, reason: r.reason };
+  r.reason = r.reason.replace(/^Ball centred/, 'Ball resized');
+  return r;
+}
+
+/* One entry for every move, on whichever piece the caller says: the
+   dispatcher NSO_wheelRun and the live preview both use it, so a preview can
+   never show something the commit would not do. */
+function NSO_wheelApply(move, piece, opts) {
+  if (move === 'flatten') return NSO_wheelFlatten(piece, opts);
+  if (move === 'open') return NSO_wheelOpen(piece, opts);
+  if (move === 'pull') return opts && opts.clamp ? NSO_wheelPullClamped(piece, opts) : NSO_wheelPull(piece, opts);
+  if (move === 'trim') return NSO_wheelTrim(piece, opts);
+  if (move === 'rim') return NSO_wheelExtendRim(piece, opts);
+  if (move === 'reball') return NSO_wheelReball(piece, opts);
+  return { ok: false, piece: piece, reason: 'unknown move ' + move };
+}
+
+function NSO_wheelStep(x, step, up) {
+  var k = Math.round(1 / step);
+  return up ? Math.ceil(x * k - 1e-9) / k : Math.floor(x * k + 1e-9) / k;
+}
+
+/* The range each slider may say for this piece (history: the session's, for
+   the "adjust the last one" bases). A slider whose move cannot be done right
+   now comes back { on: false, why } and is drawn disabled, with the reason as
+   its tooltip - never silently dead.                                       */
+function NSO_wheelRanges(piece, history) {
+  var out = {
+    pristine: NSO_wheelIsPristine(piece),
+    flatten: { on: false }, open: { on: false }, pull: { on: false },
+    trim: { on: false }, rim: { on: false }
+  };
+  if (!piece) {
+    var none = 'nothing on the wheel - drop a ball first';
+    out.flatten.why = out.open.why = out.pull.why = out.trim.why = out.rim.why = none;
+    return out;
+  }
+  var span = NSO_wheelSpan(piece.outer);
+  var rMax = 0, i;
+  for (i = 0; i < piece.outer.length; i++) if (piece.outer[i].r > rMax) rMax = piece.outer[i].r;
+  var floor = NSO_wheelFloor(piece.nozzle);
+
+  /* Flatten: from the ball's own height down to the wall. */
+  if (piece.inner) {
+    out.flatten.why = 'this piece is already open - Flatten presses a solid';
+  } else {
+    var s = NSO_wheelFlatSolve(NSO_wheelVolume(piece), span.lo, piece.wall, piece.wall);
+    if (!s.ok) out.flatten.why = s.reason;
+    else {
+      out.flatten = {
+        on: true, step: 0.1,
+        min: NSO_wheelStep(piece.wall, 0.1, true), max: NSO_wheelStep(s.hTop, 0.1, false),
+        value: Math.min(s.hTop, Math.max(piece.wall, span.hi - span.lo))
+      };
+    }
+  }
+
+  /* Open: from a little to as deep as the ball will take. */
+  var base = NSO_wheelBaseOf(piece, history, 'open');
+  if (base.inner) {
+    out.open.why = 'this piece is already open, and something has been done since';
+  } else {
+    var o = NSO_wheelOpen(base, {});
+    if (!o.ok) out.open.why = o.reason;
+    else {
+      var maxDepth = NSO_wheelStep(o.depth, 0.1, false);
+      var now = piece.inner ? (piece.outer[piece.outer.length - 1].z - piece.inner[0].z) : o.depth;
+      out.open = { on: true, step: 0.1, min: 1, max: maxDepth, value: Math.min(maxDepth, Math.max(1, now)) };
+    }
+  }
+
+  /* Pull: any height on the piece, and a swing about half the widest radius. */
+  var swing = Math.max(5, NSO_wheelStep(rMax / 2, 0.5, false));
+  out.pull = {
+    on: true, step: 0.5,
+    zMin: NSO_wheelStep(span.lo, 0.5, true), zMax: NSO_wheelStep(span.hi, 0.5, false),
+    drMin: -swing, drMax: swing
+  };
+
+  /* Trim: from where the base is now up to what the cavity or the thickness leaves. */
+  var tbase = NSO_wheelBaseOf(piece, history, 'trim');
+  var tspan = NSO_wheelSpan(tbase.outer);
+  var tmax = tbase.inner ? tbase.inner[0].z - floor - 0.1 : tspan.hi - floor - 0.1;
+  if (tmax <= tspan.lo + 0.1) out.trim.why = 'nothing to take off the base - the piece is already as thin as the floor allows';
+  else out.trim = { on: true, step: 0.1, min: NSO_wheelStep(tspan.lo, 0.1, true), max: NSO_wheelStep(tmax, 0.1, false),
+                    value: NSO_wheelStep(span.lo, 0.1, true) };
+
+  /* Rim +: height added at the rim. It needs a straight wall; the slider says
+     what the refusal says when there is not one. */
+  out.rim = { on: true, step: 0.5, min: 0, max: 60, value: 0 };
+  return out;
+}
+
 /* =====================================================================
    8. App wiring
 
@@ -1388,6 +1601,30 @@ var NSO_wheelSession = null;
    changed it (another tool, a Scale), the session ENDS rather than overwrite
    that work - Stock's rule (docs/handoff/stock-live-editing-...).            */
 var NSO_wheelHome = null;
+
+/* The live sliders (app-wheel-live.js) register themselves here: `end` drops any
+   preview (so a real move, a new ball or an Undo-sync is never drawn over a
+   preview that has moved on) and `refresh` re-reads every slider's range from
+   the piece. Absent in the headless suites, so every call is guarded. */
+var NSO_wheelUI = null;
+function NSO_wheelLiveEnd() {
+  if (NSO_wheelUI && typeof NSO_wheelUI.end === 'function') NSO_wheelUI.end();
+}
+/* A number box that is typed into and then clicked away from sets its value on
+   the change event - and clicking the move's own button is what clicks it
+   away, so the button's click would set it a second time (or, for a refusal,
+   do something else). The live file marks each attempt; the button skips the
+   click that follows it. */
+var NSO_wheelLastSet = { move: null, at: 0 };
+function NSO_wheelMarkSet(move) { NSO_wheelLastSet = { move: move, at: Date.now() }; }
+function NSO_wheelJustSet(move) {
+  var hit = NSO_wheelLastSet.move === move && Date.now() - NSO_wheelLastSet.at < 800;
+  if (hit) NSO_wheelLastSet = { move: null, at: 0 };
+  return hit;
+}
+function NSO_wheelUiRefresh() {
+  if (NSO_wheelUI && typeof NSO_wheelUI.refresh === 'function') NSO_wheelUI.refresh();
+}
 
 function NSO_wheelSay(msg, bad) {
   if (typeof setStatus === 'function') setStatus(msg, !!bad);
@@ -1494,6 +1731,7 @@ function NSO_wheelDrop(soup) {
    piece and no size - and the session only exists once the piece does, so a
    refusal can never leave the wheel holding a form for nothing. */
 function NSO_wheelThrow(opts, head) {
+  NSO_wheelLiveEnd();
   var r = NSO_wheelBall(opts);
   if (!r.ok) {
     NSO_wheelSay(r.reason, true);
@@ -1509,6 +1747,7 @@ function NSO_wheelThrow(opts, head) {
   NSO_wheelSay(line, !d.onBed);
   r.modelId = d.modelId;
   r.name = d.name;
+  NSO_wheelUiRefresh();
   return r;
 }
 
@@ -1588,14 +1827,10 @@ function NSO_wheelRun(move, opts, head) {
     var paint = NSO_wheelPaintOk(target, 'the wheel');
     if (!paint.ok) return paint;
 
-    var r;
-    if (move === 'flatten') r = NSO_wheelFlatten(NSO_wheelSession, opts);
-    else if (move === 'open') r = NSO_wheelOpen(NSO_wheelSession, opts);
-    else if (move === 'pull') r = NSO_wheelPull(NSO_wheelSession, opts);
-    else if (move === 'trim') r = NSO_wheelTrim(NSO_wheelSession, opts);
-    else if (move === 'rim') r = NSO_wheelExtendRim(NSO_wheelSession, opts);
-    else return { ok: false, reason: 'unknown move ' + move };
-
+    /* Any live preview is over: this is the real thing. */
+    NSO_wheelLiveEnd();
+    var base = NSO_wheelBaseOf(NSO_wheelSession, NSO_wheelHome.history, move);
+    var r = NSO_wheelApply(move, base, opts);
     if (!r.ok) {
       NSO_wheelSay(r.reason, true);
       return r;
@@ -1612,6 +1847,7 @@ function NSO_wheelRun(move, opts, head) {
       if (NSO_wheelSession === r.piece) NSO_wheelSession = prev;
       return b;
     }
+    NSO_wheelUiRefresh();
     return r;
   } catch (err) {
     if (typeof console !== 'undefined') console.error('[wheel]', err);
@@ -1654,25 +1890,34 @@ if (typeof document !== 'undefined') {
         }, 'Ball centred');
       });
       on('btn-wheel-flatten', function () {
-        /* Blank means as flat as the wall allows. */
-        NSO_wheelRun('flatten', { height: num('inp-wheel-flat-h', undefined) }, 'Flattened');
+        /* The button goes ALL the way: as flat as the wall allows. The Thick
+           slider (app-wheel-live.js) is the fine control. */
+        if (NSO_wheelJustSet('flatten')) return;
+        NSO_wheelRun('flatten', {}, 'Flattened');
       });
       on('btn-wheel-open', function () {
-        NSO_wheelRun('open', { depth: num('inp-wheel-depth', undefined) }, 'Opened');
+        /* The button opens as deep as the ball takes; the Deep slider is the
+           fine control. */
+        if (NSO_wheelJustSet('open')) return;
+        NSO_wheelRun('open', {}, 'Opened');
       });
       on('btn-wheel-pull', function () {
+        if (NSO_wheelJustSet('pull')) return;
         var z = num('inp-wheel-pull-z', undefined);
         var dr = parseFloat((document.getElementById('inp-wheel-pull-dr') || {}).value);
         if (!(isFinite(z) && isFinite(dr))) {
           if (typeof setStatus === 'function') setStatus('Pull needs a height and a radius change', true);
           return;
         }
-        NSO_wheelRun('pull', { z: z, dr: dr }, 'Pulled');
+        /* clamp: as much as the clay, wall and height allow, saying what stopped it. */
+        NSO_wheelRun('pull', { z: z, dr: dr, clamp: true }, 'Pulled');
       });
       on('btn-wheel-trim', function () {
+        if (NSO_wheelJustSet('trim')) return;
         NSO_wheelRun('trim', { z: num('inp-wheel-trim-z', undefined) }, 'Trimmed');
       });
       on('btn-wheel-rim', function () {
+        if (NSO_wheelJustSet('rim')) return;
         NSO_wheelRun('rim', { delta: num('inp-wheel-rim-mm', undefined) }, 'Rim extended');
       });
     }

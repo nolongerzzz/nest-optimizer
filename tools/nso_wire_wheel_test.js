@@ -193,9 +193,15 @@ withApp(async (page, logs) => {
     null, { timeout: 30000 });
   await page.click('#btn-undo');
   await page.waitForFunction(() => !state.models.some(m => m.name === 'Wheel 3'), null, { timeout: 30000 });
+  /* The live sliders notice at once (a 300 ms watch while the menu is open)
+     and end the session themselves, so by the time Open is pressed the wheel
+     already holds nothing: either message is the right one, and nothing starts. */
+  await page.waitForFunction(() => !NSO_wheelSession, null, { timeout: 5000 });
+  const placedBefore = await page.evaluate(() => state.placed.length);
   await page.click('#btn-wheel-open');
-  check('with its piece gone, a move says so and starts nothing',
-    /The piece on the wheel is gone/.test(await statusOf(page)), await statusOf(page));
+  check('with its piece gone, the session is over, a move says so and starts nothing',
+    /The piece on the wheel is gone|Nothing on the wheel - throw a ball first/.test(await statusOf(page)) &&
+    (await page.evaluate(() => state.placed.length)) === placedBefore, await statusOf(page));
 
   console.log('\n=== 2. a ball, dropped beside a real piece ===');
   const id = await loadSTL(page, fx('box-20mm.stl'));
@@ -264,8 +270,13 @@ withApp(async (page, logs) => {
   const pullStatus = await statusOf(page);
   console.log('   status: ' + pullStatus);
   check('a pull at mid-height lands', /Pulled/.test(pullStatus), pullStatus);
-  check('the piece gained material where the wall moved out',
-    pulled.volume > bowl.volume, bowl.volume.toFixed(1) + ' -> ' + pulled.volume.toFixed(1) + ' mm^3');
+  /* The clay is conserved (the Pull button is the conserving, clamped Pull):
+     the wall moved out, so the piece stands a little lower instead of gaining
+     material. */
+  check('the clay is conserved: the wall moved out and the height gave it up',
+    Math.abs(pulled.volume - bowl.volume) / bowl.volume < 1e-5 && pulled.size.y < bowl.size.y,
+    bowl.volume.toFixed(1) + ' -> ' + pulled.volume.toFixed(1) + ' mm^3, ' +
+    bowl.size.y.toFixed(2) + ' -> ' + pulled.size.y.toFixed(2) + ' mm tall');
   /* The default taper is narrow, so a pull at z = 12 must NOT reach the rim
      at z = 23.5 where the widest point is - the bbox staying put is the
      evidence that "at any height" means at that height and nowhere else. */
@@ -539,6 +550,160 @@ withApp(async (page, logs) => {
   check('Undo steps back one press: the thin disc returns',
     Math.abs(undoneFlat.size.y - 3) < 1e-3 && Math.abs(undoneFlat.size.x - flat.size.x) < 1e-3,
     undoneFlat.size.x.toFixed(2) + ' across x ' + undoneFlat.size.y.toFixed(2) + ' thick');
+
+  console.log('\n=== 10c. sliders: the piece answers while the slider moves, and letting go is Set ===');
+  const drag = (id, v) => page.evaluate(([i, x]) => {
+    const e = document.getElementById(i); e.value = String(x); e.dispatchEvent(new Event('input', { bubbles: true }));
+  }, [id, v]);
+  const release = id => page.evaluate(i => document.getElementById(i).dispatchEvent(new Event('change', { bubbles: true })), id);
+  const readoutOf = () => page.evaluate(() => document.getElementById('wheel-readout').textContent);
+  const waitReadout = (re) => page.waitForFunction(r => new RegExp(r).test(document.getElementById('wheel-readout').textContent), re.source, { timeout: 15000 });
+  const geoH = () => page.evaluate(() => {
+    const m = getActiveModel(), e = state.placed.find(p => p.sourceId === m.id), g = e.mesh.geometry;
+    g.computeBoundingBox(); return g.boundingBox.max.y - g.boundingBox.min.y;
+  });
+  const undoN = () => page.evaluate(() => state.undoStack.length);
+  const slider = id => page.evaluate(i => { const e = document.getElementById(i); return { v: parseFloat(e.value), min: parseFloat(e.min), max: parseFloat(e.max), off: e.disabled, title: e.title }; }, id);
+  const modelY = () => page.evaluate(() => getActiveModel().size.y);
+  const rawRef = () => page.evaluate(() => { window.__raw = getActiveModel().rawTris; return window.__raw.length; });
+  const rawSame = () => page.evaluate(() => getActiveModel().rawTris === window.__raw);
+
+  /* a fresh standard ball */
+  await page.evaluate(() => { document.getElementById('inp-wheel-height').value = ''; document.getElementById('rng-wheel-height').value = '0'; });
+  await page.click('#btn-wheel-ball');
+  await page.waitForFunction(() => /Dropped Wheel \d+/.test(document.getElementById('status').textContent), null, { timeout: 30000 });
+  await page.waitForFunction(() => !document.getElementById('rng-wheel-flat').disabled, null, { timeout: 5000 });
+  const fs0 = await slider('rng-wheel-flat');
+  check('Thick is live for a ball: from the wall (3) up to the ball\'s own height, sitting at the top',
+    !fs0.off && fs0.min === 3 && Math.abs(fs0.max - 50) < 0.11 && Math.abs(fs0.v - 50) < 0.11, JSON.stringify(fs0));
+  check('the read-out says what is on the wheel', /clay used/.test(await readoutOf()), await readoutOf());
+
+  /* DRAG: live, uncommitted */
+  const u0 = await undoN(); await rawRef();
+  await drag('rng-wheel-flat', 20);
+  await waitReadout(/Preview/);
+  const live = await geoH();
+  check('dragging Thick presses the piece you can see - 20 mm tall on screen', Math.abs(live - 20) < 0.1, live.toFixed(2) + ' mm');
+  check('...nothing is committed: the model is still 50 mm, its triangles are the same object',
+    Math.abs((await modelY()) - 50) < 0.01 && await rawSame());
+  check('...and the Undo stack has not moved', (await undoN()) === u0);
+  check('...the read-out says it is a preview, and what it would make',
+    /Preview/.test(await readoutOf()) && /mm tall/.test(await readoutOf()), await readoutOf());
+  check('...the number box says the same as the slider', parseFloat(await page.evaluate(() => document.getElementById('inp-wheel-flat-h').value)) === 20);
+
+  /* RELEASE: Set, one Undo step */
+  await release('rng-wheel-flat');
+  await page.waitForFunction(() => /Flattened to 20\.0/.test(document.getElementById('status').textContent), null, { timeout: 30000 });
+  check('letting go sets it: the model is 20 mm and the status says so', Math.abs((await modelY()) - 20) < 0.01, (await modelY()).toFixed(2));
+  check('...as ONE Undo step', (await undoN()) === u0 + 1, u0 + ' -> ' + (await undoN()));
+  const fs1 = await slider('rng-wheel-flat');
+  check('...and the slider sits at the piece\'s new thickness', Math.abs(fs1.v - 20) < 0.11, fs1.v + '');
+
+  /* DRAG AGAIN: it re-presses, it does not stack */
+  await drag('rng-wheel-flat', 8); await release('rng-wheel-flat');
+  await page.waitForFunction(() => /Flattened to 8\.0/.test(document.getElementById('status').textContent), null, { timeout: 30000 });
+  check('dragging again re-presses to the new thickness', Math.abs((await modelY()) - 8) < 0.01);
+  check('...and the diameter followed it out, the clay conserved',
+    await page.evaluate(() => {
+      const m = getActiveModel(), v = NSO_wheelVolume(NSO_wheelSession);
+      return m.size.x > 100 && Math.abs(v - NSO_wheelSession.budget.start) / v < 1e-9;
+    }));
+
+  /* UNDO: the sliders follow the piece back */
+  await page.click('#btn-undo');
+  await page.waitForFunction(() => { const e = document.getElementById('rng-wheel-flat'); return Math.abs(parseFloat(e.value) - 20) < 0.11; }, null, { timeout: 5000 });
+  check('Undo puts the slider back to what the piece is (20 mm) - the wheel rewound with it', Math.abs((await modelY()) - 20) < 0.01);
+
+  /* ESCAPE: the preview goes away */
+  await drag('rng-wheel-flat', 5); await waitReadout(/Preview/);
+  check('(a preview of 5 mm is up)', Math.abs((await geoH()) - 5) < 0.1);
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !/Preview/.test(document.getElementById('wheel-readout').textContent), null, { timeout: 5000 });
+  check('Escape puts the piece back on screen as it is (20 mm)', Math.abs((await geoH()) - 20) < 0.1, (await geoH()).toFixed(2));
+  check('...and the slider back with it', Math.abs((await slider('rng-wheel-flat')).v - 20) < 0.11);
+
+  /* DEEP: adjusting, not stacking */
+  await page.evaluate(() => { document.getElementById('inp-wheel-height').value = ''; });
+  await page.click('#btn-wheel-ball');
+  await page.waitForFunction(() => /Dropped Wheel \d+/.test(document.getElementById('status').textContent) && NSO_wheelIsPristine(NSO_wheelSession), null, { timeout: 30000 });
+  await page.waitForFunction(() => !document.getElementById('rng-wheel-depth').disabled, null, { timeout: 5000 });
+  await drag('rng-wheel-depth', 10); await release('rng-wheel-depth');
+  await page.waitForFunction(() => /Opened 10\.0 mm deep/.test(document.getElementById('status').textContent), null, { timeout: 30000 });
+  await drag('rng-wheel-depth', 18); await release('rng-wheel-depth');
+  await page.waitForFunction(() => /Opened 18\.0 mm deep/.test(document.getElementById('status').textContent), null, { timeout: 30000 });
+  const ops = await page.evaluate(() => NSO_wheelSession.ops.join('>'));
+  check('Deep: dragging it again re-opens the BALL to the new depth - one open, not a bowl in a bowl',
+    ops === 'ball>open', ops);
+  const fsOpen = await slider('rng-wheel-flat');
+  check('an opened piece cannot be flattened: that slider is off and says why',
+    fsOpen.off && /already open/.test(fsOpen.title), JSON.stringify(fsOpen));
+
+  /* PULL: a moveable ghost over the piece, clamped where the clay or wall runs out */
+  await page.waitForFunction(() => !document.getElementById('rng-wheel-pull-dr').disabled, null, { timeout: 5000 });
+  const before = await measure(page);
+  await rawRef();
+  await drag('rng-wheel-pull-z', 12);
+  await drag('rng-wheel-pull-dr', 4);
+  await waitReadout(/Ghost/);
+  const ghost = await page.evaluate(() => {
+    const m = getActiveModel(), e = state.placed.find(p => p.sourceId === m.id);
+    const g = (e.mesh.parent ? e.mesh.parent.children : []).filter(o => o !== e.mesh && o.material && o.material.transparent && o.material.opacity === 0.5);
+    return { n: g.length, color: g[0] && g[0].material.color.getHex(), same: e.mesh.geometry === m.geometry || true };
+  });
+  check('Pull draws a GHOST over the piece (a translucent copy), not a change to the piece', ghost.n === 1, JSON.stringify(ghost));
+  check('...blue: all of the 4 mm that was asked', ghost.color === 0x38bdf8 && /Ghost/.test(await readoutOf()), await readoutOf());
+  check('...and the real piece is untouched: same triangles, no Undo step', await rawSame());
+  /* The slider only swings about half the radius, which this bowl's wall takes
+     whole; the box can be typed past it ("the box is the number"), so ask for
+     40 mm at 15 mm up - far more than the wall will give. */
+  await drag('rng-wheel-pull-z', 15);
+  await page.evaluate(() => { const b = document.getElementById('inp-wheel-pull-dr'); b.value = '40'; b.dispatchEvent(new Event('input', { bubbles: true })); });
+  await page.waitForFunction(() => /stopped there because/.test(document.getElementById('wheel-readout').textContent), null, { timeout: 15000 });
+  const amber = await page.evaluate(() => {
+    const m = getActiveModel(), e = state.placed.find(p => p.sourceId === m.id);
+    const g = e.mesh.parent.children.filter(o => o !== e.mesh && o.material && o.material.transparent && o.material.opacity === 0.5);
+    return g[0] && g[0].material.color.getHex();
+  });
+  check('asked for more than the wall allows: the ghost stops there, goes amber, and says what stopped it',
+    amber === 0xf59e0b && /stopped there because the wall reached the nozzle floor/.test(await readoutOf()), await readoutOf());
+  const u1 = await undoN();
+  await release('inp-wheel-pull-dr');             // Enter / click away in the box is Set too
+  await page.waitForFunction(() => /Pulled/.test(document.getElementById('status').textContent) && /stopped there/.test(document.getElementById('status').textContent), null, { timeout: 30000 });
+  const afterPull = await measure(page);
+  check('letting go sets what the ghost showed - one Undo step, the clay conserved',
+    (await undoN()) === u1 + 1 && Math.abs(afterPull.volume - before.volume) / before.volume < 1e-5,
+    before.volume.toFixed(1) + ' -> ' + afterPull.volume.toFixed(1) + ' mm^3');
+  check('...the ghost is gone and Δr is back at 0 for the next pull',
+    await page.evaluate(() => {
+      const m = getActiveModel(), e = state.placed.find(p => p.sourceId === m.id);
+      return parseFloat(document.getElementById('inp-wheel-pull-dr').value) === 0 &&
+        e.mesh.parent.children.filter(o => o !== e.mesh && o.material && o.material.transparent && o.material.opacity === 0.5).length === 0;
+    }));
+
+  /* H R W N: resize the ball while it is still a ball */
+  await page.evaluate(() => { document.getElementById('inp-wheel-height').value = ''; });
+  await page.click('#btn-wheel-ball');
+  await page.waitForFunction(() => /Dropped Wheel \d+/.test(document.getElementById('status').textContent) && NSO_wheelIsPristine(NSO_wheelSession), null, { timeout: 30000 });
+  await drag('rng-wheel-height', 60);
+  await waitReadout(/Preview/);
+  check('H on an untouched ball previews the resized ball: 60 mm target -> 46.6 mm tall', Math.abs((await geoH()) - 46.58) < 0.1, (await geoH()).toFixed(2));
+  await release('rng-wheel-height');
+  await page.waitForFunction(() => /Ball resized/.test(document.getElementById('status').textContent), null, { timeout: 30000 });
+  check('...and letting go resizes it in place', Math.abs((await modelY()) - 46.5836) < 0.01, (await modelY()).toFixed(3));
+  check('...H reads in mm on the slider', /60 mm/.test(await page.evaluate(() => document.getElementById('out-wheel-height').textContent)));
+  await page.click('#btn-wheel-flatten');
+  await page.waitForFunction(() => /Flattened/.test(document.getElementById('status').textContent), null, { timeout: 30000 });
+  const yFlat = await modelY();
+  await drag('rng-wheel-height', 100);
+  await page.waitForFunction(() => /NEXT ball/.test(document.getElementById('wheel-readout').textContent), null, { timeout: 15000 });
+  await release('rng-wheel-height');
+  check('once the ball is worked, H only sizes the NEXT ball - the piece is not touched',
+    Math.abs((await modelY()) - yFlat) < 1e-6 && /NEXT ball/.test(await readoutOf()), await readoutOf());
+
+  /* off when there is nothing to do, and says why */
+  await page.evaluate(() => { for (const n of document.querySelectorAll('details')) n.open = n.open; });
+  const none = await page.evaluate(() => { NSO_wheelEnd('test'); NSO_wheelUiRefresh(); const e = document.getElementById('rng-wheel-trim'); return { off: e.disabled, t: e.title }; });
+  check('with nothing on the wheel the move sliders are off, and say why', none.off && /drop a ball/.test(none.t), JSON.stringify(none));
 
   console.log('\n=== 11. nothing else on the page broke ===');
   const errs = logs.filter(l => l.startsWith('[pageerror]'));

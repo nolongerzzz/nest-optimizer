@@ -1,6 +1,7 @@
 # Pottery Wheel — throw a vessel on an axis
 
-`app-wheel.js`, wired into `index.html` at the existing `?v=inside4` tag,
+`app-wheel.js` (the geometry and the commit half) and `app-wheel-live.js` (the live
+sliders, see [Live sliders](#live-sliders)), wired into `index.html`,
 loaded after `app-sculpt.js` (whose commit half it reuses) and after
 `app-extend.js` (which it calls for rim extension), and after
 `nso_thickness.js` (which owns the wall floor), `nso_printer.js` (which owns
@@ -103,6 +104,11 @@ NSO_wheelInnerAt(outer, z, wall)      -> the cavity radius at that height, or -1
 NSO_wheelPchip(points)                -> the drag-point interpolant
 NSO_wheelTidy(profile)                -> one axis point per end, never a run
 NSO_wheelFitReport(piece, printer)    -> the build-volume check, via nso_printer.js
+NSO_wheelApply(move, piece, opts)     -> one entry for every move; preview and commit share it
+NSO_wheelBaseOf(piece, history, move) -> the piece a move starts from (Open/Trim/Rim adjust their last)
+NSO_wheelRanges(piece, history)       -> what each slider may say, or why it is off
+NSO_wheelPullClamped(piece, opts)     -> a Pull that does as much as the wall / height allow
+NSO_wheelReball(piece, opts)          -> resize an untouched ball (NSO_wheelIsPristine)
 NSO_wheelRun(move, opts, head)        -> sync + paint check + move + bake + undo entry
 NSO_wheelSync()                       -> is the piece still what the wheel wrote? rewinds / ends
 NSO_wheelDrop(soup)                   -> a new piece on the plate, selected, one Undo entry
@@ -445,6 +451,60 @@ The canonical checker's "inside the material ceiling" gate moved from an absolut
 already asserts: a clay-conserving piece sits exactly *on* the ceiling, so the
 storage residual alone decides which side of it the measured number lands.
 
+## Live sliders
+
+Every number on the Wheel card is a slider with a number box and a read-out (the
+house pattern: `app-live-slider.js`, as Hollow and Fasteners use it) and the
+piece answers while it moves. Drag = a live **preview** (the piece's geometry is
+swapped for a throwaway one, `m.rawTris` untouched, the Undo stack does not move);
+let go = **Set**, one Undo step, no Set button (Pull's rule); type a number and it
+previews as you type, Enter or clicking away sets it; Escape puts the preview away.
+
+| slider | does |
+|---|---|
+| **H R W N** | size the next ball — and resize *this* one live while it is still untouched (`NSO_wheelReball`); once it has been worked they only set the next ball, and the read-out says so |
+| **Thick** | Flatten, live; sits at the piece's thickness, from the wall up to the ball's own height |
+| **Deep** | Open, live; dragging again re-opens the **ball** to the new depth (`NSO_wheelBaseOf`), it does not stack a bowl in a bowl |
+| **Pull at / Δr** | Pull, as a moveable **ghost** (below) |
+| **Trim to**, **Rim +** | live, each adjusting its own last step |
+
+The ranges are the piece's own and are re-read after every move, Undo and new ball
+(`NSO_wheelRanges`); a slider whose move cannot be done now is drawn disabled with
+the reason as its tooltip. Buttons keep their meaning where a slider is the fine
+control: **Flatten** goes all the way flat, **Open** as deep as the ball takes,
+**Pull / Trim / Rim +** set the box value. A box that is typed into and clicked
+away from sets on its change event, and the button click that caused the blur is
+skipped (`NSO_wheelJustSet`) so it is not set twice. **Rim +'s amount persists**
+across moves (it is an amount you chose); Thick, Deep and Trim follow the piece.
+
+### Pull is a ghost, and it conserves the clay
+
+Pull used to fail more often than it worked. With the clay conserved a pressed
+disc has exactly zero headroom, so *any* outward pull needed clay that does not
+exist, while every inward pull quietly destroyed some. Two changes:
+
+- **`conserve`** (on `NSO_wheelPull`, off by default for now so the strict API's
+  tests still pin the ceiling behaviour; the Wheel's button and ghost use it): the
+  volume the pull added or took comes out of, or goes into, the **height**. Volume
+  is linear in height for a fixed `r(z)`, so scaling every `z` about the base by
+  `V0/V1` restores it exactly (measured 4e-16). Pull the wall out and the piece sits a
+  little lower; push it in and it stands taller. Limits: a height change of more than
+  four times refuses.
+- **`NSO_wheelPullClamped`** finds the largest pull in the same direction that passes
+  the same gate (bisection on the amount; both limits only worsen as it grows) and
+  says what stopped it: the wall reached the nozzle floor, or the height would have
+  to change too much. The live ghost draws that — blue when it is all of what was
+  asked, amber once it has been stopped, with the reason in the read-out — and
+  letting go of Δr sets it.
+
+A pull that moves nothing (above the rim, below the base) now refuses instead of
+reporting success; `reshapeWall` is exempt, since rebuilding the inside is an action
+even when the outside does not move.
+
+**What this does not fix:** a single-point Pull is still a narrow bump (the falloff
+is about a tenth of the height), so a big one makes a flange rather than a belly.
+A falloff width, or a drag along the silhouette, is the next thing Pull wants.
+
 ## Direction
 
 Agreed with the owner while this tool was being shaped. Not all of it is built;
@@ -460,9 +520,10 @@ Pull already have — drag on the piece, see it live, release to Set, one Undo.
    clay up and out so the rim rises and the wall thins; Pull must conserve instead
    of displacing radially against a ceiling. **Rim extension is the one move that
    adds clay; trim and crop are the only ones that remove it.** The ball's waste
-   margin becomes a trim allowance. (Pinned today as a known gap: a Pull on a
-   pressed disc is refused as out of material, because it asks for clay it does
-   not have — the self-test flips when Pull conserves.)
+   margin becomes a trim allowance. (Pull now conserves behind `conserve` — the
+   Wheel's button and ghost use it, see [Live sliders](#live-sliders) — but the
+   strict `NSO_wheelPull` default and **Open** do not yet: Open still discards the
+   top half of the ball.)
 2. **Lip.** A flat disc's perimeter is lifted into a rim with a flared transition,
    the way a plate's is: flat out to a start radius, then the underside eases up
    (tangent at the start, so the flare is smooth) and holds an angle to the rim,

@@ -168,6 +168,7 @@ merging its list by hand. The list below is generated.
 - [Vertical stacking - Seat (support) from the bed, Align edges keeps the seat (2026-09-16)](handoff/vertical-stacking-seat-support-from-the-bed-align-edges-keeps.md)
 - [Weave - lasso a patch out along its own triangles, clone its surface as a fresh weave, reattach it rim to rim (2026-11-01)](handoff/weave.md)
 - [Wheel: Flatten - a ball pressed to a disc, the clay conserved](handoff/wheel-flatten-a-ball-pressed-to-a-disc-clay-conserved.md)
+- [Wheel: live sliders - the piece answers while the slider moves](handoff/wheel-live-sliders-the-piece-answers-while-the-slider-moves.md)
 - [Wheel: the start - a standard ball that drops its own piece](handoff/wheel-start-a-standard-ball-that-drops-its-own-piece.md)
 - [Wrap, live - pictures for Feature and Layout, a ghost of the wrap on the piece while you work, WRAP bakes what you see (2026-11-03)](handoff/wrap-live.md)
 <!-- handoff-index:end -->

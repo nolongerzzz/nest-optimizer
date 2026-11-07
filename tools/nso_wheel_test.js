@@ -529,7 +529,10 @@ console.log('\n== 5. the material budget and the wall floor, both live ==');
   const seq = [
     ['open', {}],
     ['pull', { z: span(ball) * 0.5, dr: 2, taper: 6 }],
-    ['pull', { z: span(ball) * 0.7, dr: 1, taper: 5 }],
+    /* 0.4, not 0.7: an opened ball only spans half the ball's height, and a
+       pull above the rim used to "succeed" while moving nothing - which is
+       what this sequence was quietly counting. It refuses now (section 4b). */
+    ['pull', { z: span(ball) * 0.4, dr: 1, taper: 5 }],
     ['trim', { z: 2 }]
   ];
   for (const [move, o] of seq) {
@@ -833,12 +836,13 @@ console.log('\n== 7b. Flatten: the top comes down, the clay spreads, nothing is 
   const lightOpen = W.NSO_wheelOpen(flats[40].piece, {});
   check('a lightly pressed ball can still be opened', lightOpen.ok, lightOpen.reason);
 
-  /* Honest about what is NOT conserving yet: Pull is still a radial
-     displacement with a ceiling, so on a pressed disc it asks for clay it does
-     not have. Pinned so the day Pull is made volume-conserving this flips and
-     says so (docs/POTTERY-WHEEL.md "Direction", step 4). */
+  /* Honest about what is NOT conserving by default yet: the strict Pull is
+     still a radial displacement with a ceiling, so on a pressed disc it asks
+     for clay it does not have. `conserve: true` (what the Wheel's live ghost
+     and Pull button use) fixes that - see section 7d - and this flips when it
+     becomes the default (docs/POTTERY-WHEEL.md "Direction", step 4). */
   const pullDisc = W.NSO_wheelPull(full.piece, { z: 1.5, dr: 4 });
-  check('(known) Pull is not yet volume-conserving: on a full disc it is refused as out of material',
+  check('(known) the strict Pull does not conserve yet by default: on a full disc it is refused as out of material',
     !pullDisc.ok && /out of material/.test(pullDisc.reason), pullDisc.reason);
 }
 
@@ -890,6 +894,123 @@ console.log('\n== 7c. the standard ball: start with nothing to type ==');
   const bowl = W.NSO_wheelOpen(std, {});
   check('opened it is a bowl', bowl.ok && bowl.depth > 15, bowl.reason);
   check('...within the wall floor', bowl.ok && bowl.wall.pass, bowl.ok ? bowl.wall.reason : '');
+}
+
+/* =====================================================================
+   7d. What the live sliders stand on: a Pull that conserves, a Pull that stops
+   where the clay or wall runs out, adjusting the last move, the ranges
+   ===================================================================== */
+console.log('\n== 7d. sliders: conserving Pull, clamped Pull, adjust-the-last-move, ranges ==');
+{
+  const std = W.NSO_wheelBall({}).piece;
+  const bowl = W.NSO_wheelOpen(std, {}).piece;
+  const disc = W.NSO_wheelFlatten(std, {}).piece;
+  const V = p => W.NSO_wheelVolume(p);
+
+  /* A pull that moves nothing is refused, not reported as done. */
+  const above = W.NSO_wheelPull(bowl, { z: span(bowl) + 10, dr: 5 });
+  check('a pull above the rim moves nothing and is REFUSED, saying where the piece is',
+    !above.ok && /moves nothing/.test(above.reason) && above.piece === bowl, above.reason);
+  check('...and so is one below the base',
+    !W.NSO_wheelPull(bowl, { z: -20, dr: 5 }).ok);
+
+  /* The old strict Pull is unchanged: ceiling-based, refused on a full disc. */
+  const strict = W.NSO_wheelPull(disc, { z: 1.5, dr: 4 });
+  check('(unchanged) the strict Pull still asks for clay a full disc does not have',
+    !strict.ok && /out of material/.test(strict.reason), strict.reason);
+
+  /* conserve: the volume a pull adds or takes comes out of / goes into the HEIGHT. */
+  const out = W.NSO_wheelPull(disc, { z: 1.5, dr: 4, conserve: true });
+  check('with conserve, the same pull on the full disc lands', out.ok, out.reason);
+  if (out.ok) {
+    check('...the clay exactly conserved',
+      Math.abs(V(out.piece) - V(disc)) / V(disc) < 1e-12, ((V(out.piece) - V(disc)) / V(disc)).toExponential(2));
+    check('...wall pushed OUT, so the piece sits lower: the clay came from the height',
+      span(out.piece) < span(disc), span(disc).toFixed(3) + ' -> ' + span(out.piece).toFixed(3) + ' mm');
+    check('...and the reason says so', /to keep the clay/.test(out.reason), out.reason);
+    check('...the base has not moved', out.piece.outer[0].z === disc.outer[0].z);
+  }
+  const inward = W.NSO_wheelPull(bowl, { z: 12, dr: -6, conserve: true });
+  check('pushing the wall IN conserves too, and stands the piece taller',
+    inward.ok && Math.abs(V(inward.piece) - V(bowl)) / V(bowl) < 1e-12 && span(inward.piece) > span(bowl),
+    inward.ok ? span(bowl).toFixed(2) + ' -> ' + span(inward.piece).toFixed(2) + ' mm' : inward.reason);
+  const bw = W.NSO_wheelPull(bowl, { z: 12, dr: 5, conserve: true });
+  check('on a bowl: conserved, wall inside the floor, headroom unchanged',
+    bw.ok && Math.abs(V(bw.piece) - V(bowl)) / V(bowl) < 1e-12 && bw.wall.pass &&
+    Math.abs(W.NSO_wheelBudget(bw.piece).headroom - W.NSO_wheelBudget(bowl).headroom) < 1e-6, bw.reason);
+
+  /* clamped: as much as the wall allows, saying what stopped it. */
+  const strictWall = W.NSO_wheelPull(bowl, { z: 15, dr: 40, conserve: true });
+  const clamp = W.NSO_wheelPullClamped(bowl, { z: 15, dr: 40 });
+  check('a pull the wall would refuse is refused whole by the strict Pull',
+    !strictWall.ok && /nozzle floor/.test(strictWall.reason), strictWall.reason);
+  check('...but the clamped one does as much as the wall allows, and says what stopped it',
+    clamp.ok && clamp.clamped === true && clamp.got > 0 && clamp.got < 1 &&
+    /stopped there because the wall reached the nozzle floor/.test(clamp.reason), clamp.reason);
+  check('...and what it did is a real, gated, conserved piece',
+    clamp.ok && clamp.wall.pass && Math.abs(V(clamp.piece) - V(bowl)) / V(bowl) < 1e-12);
+  const easy = W.NSO_wheelPullClamped(bowl, { z: 12, dr: 2 });
+  check('a pull that fits is not clamped', easy.ok && !easy.clamped && easy.got === 1);
+  check('a pull at nothing is still refused, not clamped',
+    !W.NSO_wheelPullClamped(bowl, { z: span(bowl) + 10, dr: 5 }).ok);
+
+  /* Adjust the last move instead of stacking a second. */
+  const hist = [{ piece: std }, { piece: bowl }];
+  check('Open adjusts the open before it: it starts from the ball',
+    W.NSO_wheelBaseOf(bowl, hist, 'open') === std);
+  check('Pull does not: pulls accumulate', W.NSO_wheelBaseOf(bowl, hist, 'pull') === bowl);
+  check('Flatten needs no base', W.NSO_wheelBaseOf(disc, [{ piece: std }, { piece: disc }], 'flatten') === disc);
+  check('a move that is not the last one starts from where the piece is',
+    W.NSO_wheelBaseOf(bw.piece, [{ piece: std }, { piece: bowl }, { piece: bw.piece }], 'open') === bw.piece);
+  const shallow = W.NSO_wheelOpen(W.NSO_wheelBaseOf(bowl, hist, 'open'), { depth: 8 });
+  check('...so opening again to 8 mm re-opens the BALL to 8 mm, not a bowl in a bowl',
+    shallow.ok && Math.abs(shallow.depth - 8) < 0.2 && shallow.piece.ops.filter(o => o === 'open').length === 1,
+    shallow.reason);
+
+  /* Ranges: what each slider may say, for the piece on the wheel. */
+  const R0 = W.NSO_wheelRanges(null, null);
+  check('with nothing on the wheel every move slider is off, and says why',
+    ['flatten', 'open', 'pull', 'trim', 'rim'].every(k => !R0[k].on && /drop a ball/.test(R0[k].why)));
+  const Rb = W.NSO_wheelRanges(std, [{ piece: std }]);
+  check('a fresh ball: Flatten runs from the wall up to the ball\'s own height, sitting at the top',
+    Rb.flatten.on && Rb.flatten.min === 3 && Math.abs(Rb.flatten.max - 50) < 0.11 && Math.abs(Rb.flatten.value - 50) < 0.11,
+    JSON.stringify(Rb.flatten));
+  check('...Open runs up to how deep this ball takes, sitting at the deepest',
+    Rb.open.on && Rb.open.max > 15 && Rb.open.value === Rb.open.max, JSON.stringify(Rb.open));
+  check('...the ball is pristine, so H R W N resize it', Rb.pristine === true);
+  const Rd = W.NSO_wheelRanges(disc, [{ piece: std }, { piece: disc }]);
+  check('a pressed disc: Flatten sits at the wall; Open is off and says there is no cavity to make',
+    Rd.flatten.on && Math.abs(Rd.flatten.value - 3) < 1e-9 && !Rd.open.on && /no cavity/.test(Rd.open.why) && Rd.pristine === false,
+    JSON.stringify(Rd.flatten) + ' / ' + Rd.open.why);
+  const Ro = W.NSO_wheelRanges(bowl, hist);
+  check('an opened bowl: Flatten is off and says why; Open sits at the depth it has',
+    !Ro.flatten.on && /already open/.test(Ro.flatten.why) && Ro.open.on &&
+    Math.abs(Ro.open.value - (bowl.outer[bowl.outer.length - 1].z - bowl.inner[0].z)) < 0.11, JSON.stringify(Ro.open));
+  check('Pull spans the piece\'s own height, and swings about half its radius',
+    Ro.pull.on && Ro.pull.zMin === 0 && Math.abs(Ro.pull.zMax - span(bowl)) < 0.51 && Ro.pull.drMax >= 5 && Ro.pull.drMin === -Ro.pull.drMax,
+    JSON.stringify(Ro.pull));
+  check('Trim stops short of the cavity floor (the nozzle floor under it)',
+    Ro.trim.on && Ro.trim.max < bowl.inner[0].z - W.NSO_wheelFloor(bowl.nozzle), JSON.stringify(Ro.trim));
+  check('every slider\'s value is inside its own range',
+    [Rb, Rd, Ro].every(R => ['flatten', 'open', 'trim', 'rim'].every(k => !R[k].on || (R[k].value >= R[k].min - 1e-9 && R[k].value <= R[k].max + 1e-9))));
+
+  /* Resize the ball while it is still a ball. */
+  const bigger = W.NSO_wheelReball(std, { height: 80 });
+  check('an untouched ball can be resized from a target', bigger.ok && /Ball resized/.test(bigger.reason) &&
+    bigger.piece.sizing.ball_radius > 25, bigger.ok ? bigger.piece.sizing.ball_radius.toFixed(2) + ' mm' : bigger.reason);
+  const back = W.NSO_wheelReball(std, {});
+  check('...or put back to the standard ball', back.ok && back.piece.sizing.ball_radius === 25);
+  const worked = W.NSO_wheelReball(disc, { height: 80 });
+  check('a worked ball cannot be resized: the sliders then set the NEXT ball',
+    !worked.ok && /next ball/.test(worked.reason) && worked.piece === disc, worked.reason);
+
+  /* One entry for every move: the preview and the commit cannot disagree. */
+  check('NSO_wheelApply routes every move, and refuses one it does not know',
+    W.NSO_wheelApply('flatten', std, {}).ok && W.NSO_wheelApply('open', std, {}).ok &&
+    !W.NSO_wheelApply('juggle', std, {}).ok);
+  const viaApply = W.NSO_wheelApply('pull', disc, { z: 1.5, dr: 4, clamp: true });
+  check('...and "clamp" sends a pull through the conserving, clamped one', viaApply.ok && viaApply.got === 1 &&
+    /to keep the clay/.test(viaApply.reason), viaApply.reason);
 }
 
 console.log('\n== 8. what this first version does not do, and says so ==');
