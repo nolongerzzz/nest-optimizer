@@ -684,6 +684,113 @@ console.log('\n=== 10. Walls: one face moved - socket, spigot, groove (tube-wall
   }
 }
 
+console.log('\n=== 11. Cylinders → Neck: a solid rod, its outside moved over the band ===');
+{
+  const { NSO_rodNeckRaw } = ctx;
+  // the screenshot's cylinder: Stock's, Ø30.84, 60 tall, 96 sides, its ends fans from a centre vertex
+  const R = 15.42, H = 60, rod = NSO_Stock.revolve(NSO_Stock.profileCylinder(R, H), 96);
+  const rd = NSO_tubeNeckRead(rod, { rod: true });
+  check('Stock rod Ø30.84: the axis read off its top (closed) end', rd.ok && rd.rod && rd.tube.axis[2] === 1 && Math.abs(rd.tube.center[2] - H) < 1e-9 &&
+        Math.abs(rd.tube.endRo - R) < 1e-3 && rd.tube.endRi === 0, rd.reason);
+  for (const [dr, prof] of [[-4, 'smooth'], [4, 'smooth'], [-4, 'funnel'], [3, 'funnel']]) {
+    const tag = 'rod Ø30.84, ' + (dr < 0 ? 'pinch ' : 'bulge ') + dr + ' over 23, ' + prof;
+    const t0 = Date.now();
+    const r = NSO_rodNeckRaw(rod, { point: [R, 0, 30], length: 23, dr, profile: prof });
+    const ms = Date.now() - t0;
+    console.log('   ' + r.reason);
+    if (!common(tag, rod, r)) continue;
+    // the waist's vertices: the outside's alone (a rod has nothing else at that height)
+    const w = radiiAt(r.tris, 30);
+    check(tag + ': the outside at the waist Ø' + f3(2 * (R + dr)) + ' ± 0.05, all round', Math.abs(2 * w.lo - 2 * (R + dr)) <= 0.05 && Math.abs(2 * w.hi - 2 * (R + dr)) <= 0.05,
+      'Ø' + f3(2 * w.lo) + ' – Ø' + f3(2 * w.hi));
+    // outside the band the rod is the rod it was: every vertex below z 18.5 or above 41.5 at R (or the end discs' own)
+    let off = 0;
+    for (let i = 0; i < r.tris.length; i += 3) {
+      const z = r.tris[i + 2], rr = Math.hypot(r.tris[i], r.tris[i + 1]);
+      if ((z < 18.5 - 1e-4 || z > 41.5 + 1e-4) && Math.abs(rr - R) > 1e-3 && z > 1e-4 && z < H - 1e-4) off++;
+    }
+    check(tag + ': nothing moved outside the band', off === 0, off + ' vertex refs off the rod');
+    check(tag + ': the readout says rod and the Ø', new RegExp('^Rod ' + (dr < 0 ? 'pinch' : 'bulge') + ' [+−]' + f3(Math.abs(dr)).slice(0, -1) + ' mm: Ø30\\.84 → Ø' + (2 * (R + dr)).toFixed(2)).test(r.reason), r.reason);
+    row('Stock rod Ø30.84 × 60, ' + (dr < 0 ? 'pinch ' : 'bulge ') + dr + ' over 23, ' + prof, rod, r, ms, 'waist Ø' + f3(2 * w.lo));
+  }
+
+  // a step at either end: the end disc is scaled with its ring, not taken out
+  function atEnd(tag, soup, r, zEnd, zIn, Rnew, Rold) {
+    check(tag + ': stepped', r.ok, r.reason);
+    if (!r.ok) return;
+    const T0 = topo(soup), T1 = topo(r.tris);
+    check(tag + ': closed, 2-manifold, consistently wound, Euler unchanged',
+      T1.open === T0.open && T1.nm === 0 && T1.flip === 0 && T1.degen === 0 && T1.euler === T0.euler,
+      `open ${T1.open} nm ${T1.nm} flip ${T1.flip} degen ${T1.degen} euler ${T0.euler}->${T1.euler}`);
+    const MV = meshValidate(tag.replace(/[^a-z0-9]+/gi, '_'), r.tris);
+    check(tag + ': mesh_validate --gate PASS', MV.pass, MV.pass ? 'pierce ' + MV.pierce : (MV.fails || []).join('; '));
+    const dv = volume(r.tris) - volume(soup);
+    check(tag + ': volume changed by Pappus within 0.5%', Math.abs(dv - r.volume.pappus) <= 5e-3 * Math.abs(r.volume.pappus), f3(dv) + ' vs ' + f3(r.volume.pappus) + ' mm³');
+    const e = radiiAt(r.tris, zEnd), s = radiiAt(r.tris, zIn);
+    check(tag + ': the end ring at Ø' + f3(2 * Rnew) + ', the disc inside it', Math.abs(e.hi - Rnew) <= 0.01 && e.lo < Rnew, 'rim Ø' + f3(2 * e.hi) + ', least r ' + f3(e.lo));
+    check(tag + ': a square shoulder at the step: Ø' + f3(2 * Rnew) + ' and Ø' + f3(2 * Rold) + ' at one height',
+      Math.abs(Math.min(s.lo, s.hi) - Math.min(Rnew, Rold)) <= 0.01 && Math.abs(Math.max(s.lo, s.hi) - Math.max(Rnew, Rold)) <= 0.01, f3(2 * s.lo) + ' / ' + f3(2 * s.hi));
+    row(tag, soup, r, null, 'end Ø' + f3(2 * e.hi));
+  }
+  const sp = NSO_rodNeckRaw(rod, { point: [R, 0, 59], length: 10, dr: -3 });
+  console.log('   ' + sp.reason);
+  atEnd('Stock rod: spigot −3 over 10 at the top end', rod, sp, H, H - 10, R - 3, R);
+  check('...named a spigot, stepped in from the end', /^Rod spigot: Ø30\.84 → Ø24\.84, stepped 10\.0 mm in from the end, square shoulder$/.test(sp.reason), sp.reason);
+  const co = NSO_rodNeckRaw(rod, { point: [R, 0, 1], length: 10, dr: 3 });
+  atEnd('Stock rod: collar +3 over 10 at the bottom end', rod, co, 0, 10, R + 3, R);
+  check('...named a collar, stepped in from the far end', /^Rod collar: Ø30\.84 → Ø36\.84, stepped 10\.0 mm in from the far end/.test(co.reason), co.reason);
+
+  // an imported rod along X: 48 sides, Ø16, its end discs fans from one rim vertex (no centre)
+  function rodAlongX(len, n, rr) {
+    const C = Array.from({ length: n }, (_, i) => { const a = 2 * Math.PI * i / n; return [20 + rr * Math.cos(a), 10 + rr * Math.sin(a)]; }), t = [];
+    for (let i = 0; i < n; i++) {
+      const p = C[i], q = C[(i + 1) % n];
+      t.push([0, p[0], p[1]], [0, q[0], q[1]], [len, q[0], q[1]], [0, p[0], p[1]], [len, q[0], q[1]], [len, p[0], p[1]]);
+    }
+    for (let i = 1; i + 1 < n; i++) {
+      t.push([len, C[0][0], C[0][1]], [len, C[i][0], C[i][1]], [len, C[i + 1][0], C[i + 1][1]]);
+      t.push([0, C[0][0], C[0][1]], [0, C[i + 1][0], C[i + 1][1]], [0, C[i][0], C[i][1]]);
+    }
+    return new Float32Array(t.flat());
+  }
+  const rx = rodAlongX(80, 48, 8);
+  const rxm = NSO_rodNeckRaw(rx, { point: [40, 28, 10], length: 16, dr: -2.5 });
+  console.log('   ' + rxm.reason);
+  if (common('imported Ø16 48-gon rod along X, pinch −2.5 over 16', rx, rxm)) row('imported Ø16 48-gon rod along X, pinch −2.5 over 16', rx, rxm, null, rxm.reason.replace(/^.*?: /, ''));
+  for (const [x, words] of [[80, 'end'], [0, 'far end']]) {
+    const r = NSO_rodNeckRaw(rx, { point: [x, 28, 10], length: 10, dr: -2 });
+    check('imported rod along X: a spigot −2 over 10 at its ' + words, r.ok && new RegExp('stepped 10\\.0 mm in from the ' + words).test(r.reason), r.reason);
+    if (r.ok) {
+      const T1 = topo(r.tris), MV = meshValidate('rodx_spigot_' + x, r.tris);
+      check('...closed, 2-manifold, wound, mesh_validate PASS', T1.open === 0 && T1.nm === 0 && T1.flip === 0 && T1.degen === 0 && MV.pass, (MV.fails || []).join('; '));
+    }
+  }
+
+  // two necks: the second beside the first, then one over it
+  const a = NSO_rodNeckRaw(rod, { point: [R, 0, 15], length: 12, dr: -3 });
+  const b = a.ok ? NSO_rodNeckRaw(a.tris, { point: [R, 0, 45], length: 12, dr: -3 }) : a;
+  if (common('Stock rod: a second neck 30 mm from the first', a.tris, b)) row('Stock rod, two pinches −3 over 12, 30 mm apart', a.tris, b, null, '');
+  const ov = a.ok ? NSO_rodNeckRaw(a.tris, { point: [R, 0, 20], length: 12, dr: -2 }) : a;
+  check('a neck over another is refused: not a straight stretch of rod', !ov.ok && /a neck is made on a straight stretch of rod/.test(ov.reason), ov.reason);
+
+  // refusals, the piece unchanged
+  const rz = NSO_rodNeckRaw(rod, { point: [R, 0, 30], length: 40, dr: -15.3 });
+  check('a pinch to under 2 nozzle widths across is refused, with the most it may take', !rz.ok && rz.tris === rod &&
+        /^a pinch of 15\.30 mm would take the Ø30\.84 rod to Ø0\.24 at the waist, under the limit of Ø0\.80 .* This rod pinches by 15\.02 mm at most$/.test(rz.reason), rz.reason);
+  const rp = NSO_rodNeckRaw(rod, { point: [R, 0, 55], length: 23, dr: -4 });
+  check('a band past the end of the rod... is a step at that end (Outside only rule)', rp.ok && /^Rod spigot/.test(rp.reason), rp.reason);
+  const rtube = NSO_rodNeckRaw(tube, { length: 8, dr: -2 });
+  check('a tube is refused by Cylinders, pointed at Tube edge → Neck', !rtube.ok && /its round end is open .* Tube edge → Neck/.test(rtube.reason), rtube.reason);
+  const rrod = NSO_tubeNeckRaw(rod, { length: 8, dr: -2 });
+  check('a rod is refused by Tube edge, pointed at Shape → Cylinders', !rrod.ok && /a solid rod or cylinder is necked from Shape → Cylinders/.test(rrod.reason), rrod.reason);
+  const cup = wheelCup();
+  const rcup = NSO_rodNeckRaw(cup, { point: [15, 0, 25], length: 14, dr: -3 });
+  check('a cup (closed base, a bore up its middle) is refused: a tube there', !rcup.ok && /there is a bore inside the rod across the band/.test(rcup.reason), rcup.reason);
+  const box = NSO_Stock.boxSoup(20, 20, 40);
+  const rbox = NSO_rodNeckRaw(box, { length: 8, dr: -2 });
+  check('a box is refused: no round end', !rbox.ok && /flat ends are not round/.test(rbox.reason), rbox.reason);
+}
+
 console.log('\n| piece and neck | in → out triangles | ms | measured |');
 console.log('|---|---|---|---|');
 for (const t of TABLE) console.log('| ' + t.name + ' | ' + t.trisIn + ' → ' + t.trisOut + ' | ' + t.ms + ' | ' + t.extra + ' |');

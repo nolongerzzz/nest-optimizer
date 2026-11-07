@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=e406378a" />
+  <link rel="stylesheet" href="styles.css?v=01a91044" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -1571,7 +1571,7 @@
             </div>
           </details>
           <details class="vp-menu vp-shell-menu vp-col-menu vp-group-start" id="menu-shape" data-sec="shape">
-            <summary class="vp-bar-btn" title="Smooth, Bend, and the tube's Flare, Roll and Neck">Shape</summary>
+            <summary class="vp-bar-btn" title="Smooth, Bend, the tube's Flare, Roll and Neck, and Cylinders (Neck on a solid rod)">Shape</summary>
             <div class="vp-menu-body vp-finish">
             <div class="vp-row vp-row-full">
               <button id="btn-smooth" class="btn btn-secondary" type="button"
@@ -1584,6 +1584,12 @@
                       title="Bend the piece like a pipe or plate bender, inside one straight stretch: the section is carried round the arc exactly - a plate's thickness, a tube's bore and wall do not change - and everything past the bend turns with it, rigidly. Opens a panel with a live ghost of the result; click the piece to set where.">Bend</button>
               <button id="btn-tube-edge" class="btn btn-secondary" type="button" aria-expanded="false" aria-controls="te-panel"
                       title="Make the open end of a tube a new pipe - a reducer or an expander, its outside and bore set apart - roll it outward, or neck it anywhere along its length (a pinch or a bulge) - the whole wall, or with Walls only its outside or its bore (a socket, a spigot, a funnel mouth). The wall's thickness is carried exactly through the new section and the new wall is welded to the old. Opens a card with a live ghost of the result; click the piece near the end to treat, or where the neck goes. A neck's three rings are handles: drag the waist in or out, an end ring to stretch the band, the band itself to slide it along the tube. A reducer's four rings are handles: the OD and ID rings at the transition's end set the new Ø and bore, the T ring the transition, the R ring the run.">Tube edge</button>
+            </div>
+            <!-- CYLINDERS: rod / cylinder work - Neck on a SOLID rod (nso_tube_neck.js with
+                 opts.rod), the Tube edge card opened in its rod mode (app-tube-edge.js). -->
+            <div class="vp-row vp-row-full">
+              <button id="btn-cylinders" class="btn btn-secondary" type="button" aria-expanded="false" aria-controls="te-panel"
+                      title="For a solid rod or cylinder: neck it anywhere along its length - a pinch (Δr below 0) or a bulge (above 0) over a band, Smooth or Funnel - or, with the band at an end, step it: a spigot (in) or a collar (out) with a square shoulder. The axis is read off the rod's flat, round end. Opens a card with a live ghost of the result; click the rod where the neck goes. The three rings are handles, as Tube edge's Neck: drag the waist in or out, an end ring to stretch the band, the band itself to slide it along the rod. A tube (a bore through it) is necked from Tube edge.">Cylinders</button>
             </div>
             <div class="vp-bend-panel" id="bend-panel" hidden>
               <label class="vp-bend-field" title="Where the bend's middle goes, in mm along the piece from its near (low) end. Click the piece to set it.">Where
@@ -1604,7 +1610,8 @@
               </div>
             </div>
             <div class="vp-bend-panel te-panel" id="te-panel" hidden>
-              <label class="vp-bend-field" title="Reducer makes the end a new pipe: a new outside Ø and bore over a transition, then a straight run. Roll curls the end over round a bead. Neck pinches or bulges the tube anywhere along it.">Verb
+              <p id="te-rod-head" class="te-rod-head" hidden>Cylinder / rod · Neck</p>
+              <label class="vp-bend-field" id="te-verb-row" title="Reducer makes the end a new pipe: a new outside Ø and bore over a transition, then a straight run. Roll curls the end over round a bead. Neck pinches or bulges the tube anywhere along it.">Verb
                 <select id="sel-te-verb" class="vp-select" aria-label="Tube edge verb">
                   <option value="reducer" selected>Reducer</option>
                   <option value="roll">Roll</option>
@@ -2718,7 +2725,7 @@
   <script src="nso-helpers.js?v=9c476e39"></script>
   <script src="nso-recent.js?v=f03d6f13"></script>
   <script src="nso-bounds.js?v=778acac4"></script>
-  <script src="app-core.js?v=1c34fb36"></script>
+  <script src="app-core.js?v=fad033f0"></script>
   <!-- Up to six plates (beds): the active one is state.models / state.placed, the rest are kept beside it. docs/BEDS.md. -->
   <script src="app-beds.js?v=3d221bc4"></script>
 
@@ -2766,11 +2773,11 @@
   <script src="nso_tube_edge.js?v=7d856960"></script>
   <!-- Neck: a pinch or a bulge along a tube. After nso_tube_edge.js (its end
        reader, weld and helpers). See docs/TUBE-EDGE.md, "Neck". -->
-  <script src="nso_tube_neck.js?v=e42beb75"></script>
+  <script src="nso_tube_neck.js?v=4369044a"></script>
   <script src="nso_thread.js?v=3d986b5e"></script>
   <script src="nso_fittings.js?v=b8b58426"></script>
   <script src="nso_custom_shape.js?v=a8f52d5d"></script>
-  <script src="app-tube-edge.js?v=54e345d1"></script>
+  <script src="app-tube-edge.js?v=27515a18"></script>
   <!-- Bridge: a web between two places, welded. After NSO_Repair.js,
        nso_planar_fuse.js (the vertex space), nso_thickness.js,
        nso_assemble.js (the seat), nso_path_sweep.js (the rod) and
@@ -2792,10 +2799,10 @@
   <!-- Pull: nso_densify.js is the shared subdivision (the gun will use it too), nso_pull.js the field and its guards, app-pull.js the pointer session. docs/PULL.md -->
   <script src="nso_densify.js?v=0b7748d1"></script>
   <script src="nso_pull.js?v=6e876b23"></script>
-  <script src="app-pull.js?v=34905d94"></script>
+  <script src="app-pull.js?v=d24d53f6"></script>
   <!-- Limb: nso_limb.js is the tree, the limb and the move (headless, tools/nso_limb_test.js); app-limb.js the pointer session. docs/LIMB.md -->
   <script src="nso_limb.js?v=4f060b8f"></script>
-  <script src="app-limb.js?v=82dda061"></script>
+  <script src="app-limb.js?v=1dbc318f"></script>
   <script src="app-wheel.js?v=31a3ea82"></script>
   <script src="app-wheel-live.js?v=9850178d"></script>
   <script src="app-fit.js?v=94ef7252"></script>

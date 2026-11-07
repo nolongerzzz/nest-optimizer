@@ -577,7 +577,7 @@ if (typeof document !== 'undefined') (function () {
       if (clockBtn) clockBtn.click(); else state.centerLockArmed = false;
     }
     if (window.nsoFoam && window.nsoFoam.on && window.nsoFoam.on()) window.nsoFoam.cancel();
-    ['btn-bend', 'btn-tube-edge'].forEach(function (id) {
+    ['btn-bend', 'btn-tube-edge', 'btn-cylinders'].forEach(function (id) {
       var b = el(id);
       if (b && b.getAttribute('aria-expanded') === 'true') b.click();
     });

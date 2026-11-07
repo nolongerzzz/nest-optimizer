@@ -63,6 +63,13 @@
 //     Bore only, the outside with Outside only and with Both. Hover names
 //     the face (Wall, Outside, Bore).
 //
+// CYLINDERS (Shape → Cylinders, btn-cylinders) opens this same card in rod
+// mode (state.tubeEdge.rod): Neck on a solid rod, its axis read off the rod's
+// closed end - a heading in place of Verb, no Walls (a rod's one face is its
+// outside), the same ghost, rings and keys. Either button takes the card over
+// from the other; Set's undo type is 'rodNeckReplace'. docs/TUBE-EDGE.md,
+// "Cylinders".
+//
 // Set commits through the sculpt commit (undo type 'tubeEdgeReplace', or
 // 'tubeNeckReplace' for a neck), so one Undo puts the whole piece back, and
 // the piece re-seats on the plate the way any bake does. Several necks on one
@@ -91,7 +98,7 @@ function NSO_teUI() {
     state.tubeEdge = { open: false, modelId: null, soup: null, read: null, point: null, result: null, key: '',
                        ghost: null, ring: null, raf: 0, readVerb: '', hidPiece: null,
                        drag: null, hover: null, said: null, keyHandle: null, keyLen: null, keyDia: null,
-                       dim: null, callout: null, diaFor: '' };
+                       dim: null, callout: null, diaFor: '', rod: false, neckMode: null };
   }
   return state.tubeEdge;
 }
@@ -122,13 +129,16 @@ function NSO_teKeepOn() { var el = NSO_teEl('chk-te-keep'); return !!(el && el.c
 function NSO_teOpts() {
   function num(id) { var el = NSO_teEl(id); return el && el.value !== '' ? +el.value : null; }
   function val(id, d) { var el = NSO_teEl(id); return el ? el.value : d; }
-  var B = NSO_teUI(), verb = val('sel-te-verb', 'reducer');
+  var B = NSO_teUI(), verb = NSO_teVerb();
   // Walls (Both / Outside only / Bore only), Neck's: the card's
-  // sel-te-walls when it has one, Both when it does not
-  var walls = val('sel-te-walls', 'both');
+  // sel-te-walls when it has one, Both when it does not; a rod's one face
+  // (Cylinders) is its outside
+  var walls = NSO_teWallsVal();
   if (verb === 'neck') {
-    return { verb: 'neck', point: B.point, length: num('inp-te-neck-length'), dr: num('inp-te-neck-dr'),
-             profile: val('sel-te-neck-profile', 'smooth'), walls: walls };
+    var no = { verb: 'neck', point: B.point, length: num('inp-te-neck-length'), dr: num('inp-te-neck-dr'),
+               profile: val('sel-te-neck-profile', 'smooth'), walls: walls };
+    if (B.rod) no.rod = true;
+    return no;
   }
   if (verb === 'reducer') {
     // Run: blank is 0 (no run); a blank Transition the engine asks for
@@ -266,7 +276,10 @@ function NSO_teNeckGeom() {
   return { kind: 'neck', m: m, tube: tb, C: C, a: a, e1: tb.frame.e1, e2: tb.frame.e2, h0: h0, L: L, dr: dr, walls: walls, atEnd: atEnd,
            ha: h0 - L / 2, hb: h0 + L / 2, Ro: Ro, Ri: Ri, Rf: Rf, Rw: Math.max(0.05, Rf + dr) };
 }
-function NSO_teWallsVal() { var el = NSO_teEl('sel-te-walls'); return el && el.value ? el.value : 'both'; }
+function NSO_teWallsVal() {
+  if (NSO_teUI().rod) return 'outside';
+  var el = NSO_teEl('sel-te-walls'); return el && el.value ? el.value : 'both';
+}
 
 /* The Reducer as its handles see it, from the read end and the card (so the
    rings stay up through a refusal): New Ø / New bore (the tube's own when
@@ -796,19 +809,25 @@ function NSO_teReadout(text, bad) {
   NSO_teUI().said = { text: text, bad: !!bad };     // what a handle's hover puts back
 }
 function NSO_teSyncRows() {
-  var verb = (NSO_teEl('sel-te-verb') || {}).value || 'reducer';
+  var verb = NSO_teVerb(), rod = !!NSO_teUI().rod;
+  // Cylinders: the card on a solid rod - Neck alone, its one face the outside
+  var vr = NSO_teEl('te-verb-row'), rh = NSO_teEl('te-rod-head');
+  if (vr) vr.hidden = rod;
+  if (rh) rh.hidden = !rod;
   ['te-reducer-rows'].forEach(function (id) { var el = NSO_teEl(id); if (el) el.hidden = verb !== 'reducer'; });
   ['te-roll-rows'].forEach(function (id) { var el = NSO_teEl(id); if (el) el.hidden = verb !== 'roll'; });
   ['te-neck-rows'].forEach(function (id) { var el = NSO_teEl(id); if (el) el.hidden = verb !== 'neck'; });
   ['te-dir-row'].forEach(function (id) { var el = NSO_teEl(id); if (el) el.hidden = verb !== 'roll'; });
-  ['te-walls-row'].forEach(function (id) { var el = NSO_teEl(id); if (el) el.hidden = verb !== 'neck'; });
+  ['te-walls-row'].forEach(function (id) { var el = NSO_teEl(id); if (el) el.hidden = verb !== 'neck' || rod; });
 }
 function NSO_teSyncButtons() {
   var B = NSO_teUI(), go = NSO_teEl('btn-te-go');
   if (go) go.disabled = !(B.result && B.result.ok);
 }
 
-function NSO_teVerb() { return (NSO_teEl('sel-te-verb') || {}).value || 'reducer'; }
+function NSO_teVerb() { return NSO_teUI().rod ? 'neck' : ((NSO_teEl('sel-te-verb') || {}).value || 'reducer'); }
+// What the card is working on, in words: 'Cylinder neck' for a rod, else the verb's.
+function NSO_teName(neck) { return NSO_teUI().rod ? 'Cylinder neck' : neck ? 'Neck' : 'Tube edge'; }
 
 // Read the selected piece (the end nearest B.point, else the top end; for a
 // neck, the tube's axis) and fill the card's blank fields from the wall.
@@ -817,19 +836,33 @@ function NSO_teLoad() {
   if (!m || m.id !== B.modelId) B.point = null;
   B.modelId = m ? m.id : null; B.soup = m ? m.rawTris : null; B.result = null; B.key = '';
   B.readVerb = neck ? 'neck' : 'end';
-  if (!m) { B.read = null; NSO_teReadout('Select a tube to reduce, expand, roll or neck.', true); NSO_teClear(); NSO_teSyncButtons(); return; }
+  if (!m) {
+    B.read = null;
+    NSO_teReadout(B.rod ? 'Select a solid rod or cylinder to neck.' : 'Select a tube to reduce, expand, roll or neck.', true);
+    NSO_teClear(); NSO_teSyncButtons(); return;
+  }
   var rd;
-  try { rd = neck ? NSO_tubeNeckRead(m.rawTris) : NSO_tubeEdgeRead(m.rawTris, { point: B.point }); }
+  try { rd = neck ? NSO_tubeNeckRead(m.rawTris, B.rod ? { rod: true } : undefined) : NSO_tubeEdgeRead(m.rawTris, { point: B.point }); }
   catch (err) { rd = { ok: false, reason: (err && err.message) || String(err) }; }
   B.read = rd;
-  if (!rd.ok) { NSO_teReadout((neck ? 'Neck: ' : 'Tube edge: ') + rd.reason, true); NSO_teClear(); NSO_teSyncButtons(); return; }
+  if (!rd.ok) { NSO_teReadout(NSO_teName(neck) + ': ' + rd.reason, true); NSO_teClear(); NSO_teSyncButtons(); return; }
   if (neck) {
     // blank fields take defaults from the wall at the end: 7.5 walls long, in
-    // by 2.5 walls (a 1.6 mm wall: 12 mm, -4)
-    var tw = rd.tube.endRo - rd.tube.endRi;
+    // by 2.5 walls (a 1.6 mm wall: 12 mm, -4). A rod has no wall: 1.5 radii
+    // long, in by a quarter of its radius (Ø30.84: 23 mm, -4). Switching
+    // between Tube edge's Neck and Cylinders starts from the new one's defaults.
+    var mode = B.rod ? 'rod' : 'tube', fresh = B.neckMode != null && B.neckMode !== mode;
+    B.neckMode = mode;
     var NL = NSO_teEl('inp-te-neck-length'), ND = NSO_teEl('inp-te-neck-dr');
-    if (NL && NL.value === '') NL.value = String(Math.max(4, Math.round(7.5 * tw)));
-    if (ND && ND.value === '') ND.value = String(-Math.max(0.5, Math.round(5 * tw) / 2));
+    if (B.rod) {
+      var Rr = rd.tube.endRo;
+      if (NL && (fresh || NL.value === '')) NL.value = String(Math.max(4, Math.round(1.5 * Rr)));
+      if (ND && (fresh || ND.value === '')) ND.value = String(-Math.max(0.5, Math.round(Rr / 2) / 2));
+    } else {
+      var tw = rd.tube.endRo - rd.tube.endRi;
+      if (NL && (fresh || NL.value === '')) NL.value = String(Math.max(4, Math.round(7.5 * tw)));
+      if (ND && (fresh || ND.value === '')) ND.value = String(-Math.max(0.5, Math.round(5 * tw) / 2));
+    }
     NSO_teRemoveRing();
     NSO_tePreview();
     return;
@@ -857,7 +890,7 @@ function NSO_teLoad() {
 // Run the treatment on the current numbers; show the ghost or say why not.
 function NSO_tePreview() {
   var B = NSO_teUI(), m = NSO_teModel();
-  if (B.open && m && B.readVerb !== (NSO_teVerb() === 'neck' ? 'neck' : 'end')) { NSO_teLoad(); return B.result; }
+  if (B.open && m && (B.readVerb !== (NSO_teVerb() === 'neck' ? 'neck' : 'end') || (B.read && B.read.ok && !!B.read.rod !== !!B.rod))) { NSO_teLoad(); return B.result; }
   if (!B.open || !m || !B.read || !B.read.ok) { NSO_teSyncButtons(); return null; }
   var o = NSO_teOpts(), neck = o.verb === 'neck';
   var key = m.id + '|' + JSON.stringify(o);
@@ -875,29 +908,49 @@ function NSO_tePreview() {
       (aligned ? '' : ' · (no ghost: the piece was turned since it was loaded)'));
   } else {
     NSO_teRemoveGhost();
-    NSO_teReadout((neck ? 'Neck: ' : 'Tube edge: ') + r.reason, true);
+    NSO_teReadout(NSO_teName(neck) + ': ' + r.reason, true);
   }
   NSO_teSyncButtons();
   return r;
 }
 
-function NSO_teOpen() {
-  var B = NSO_teUI(), panel = NSO_teEl('te-panel'), btn = NSO_teEl('btn-tube-edge');
+// The two buttons that open this card: Tube edge, and Cylinders (rod mode,
+// Neck on a solid rod). The one the card is open for shows it.
+function NSO_teSyncOpeners() {
+  var B = NSO_teUI();
+  [['btn-tube-edge', false], ['btn-cylinders', true]].forEach(function (q) {
+    var b = NSO_teEl(q[0]), on = !!B.open && !!B.rod === q[1];
+    if (!b) return;
+    b.setAttribute('aria-expanded', on ? 'true' : 'false');
+    b.classList.toggle('is-on', on);
+  });
+}
+// rod: true opens the card as Cylinders (Neck on a solid rod). Opened for the
+// other one while up, the card switches over, the piece read again.
+function NSO_teOpen(rod) {
+  var B = NSO_teUI(), panel = NSO_teEl('te-panel'), wasOpen = B.open;
   if (typeof NSO_bendUI === 'function' && NSO_bendUI().open && typeof NSO_bendClose === 'function') NSO_bendClose();
+  if (wasOpen && !!B.rod !== !!rod) {
+    if (B.drag) NSO_teDragEnd(false);
+    NSO_teHover(null);
+    B.point = null; B.result = null; B.key = ''; B.keyHandle = null; B.keyLen = null; B.keyDia = null;
+    NSO_teClear();
+  }
+  B.rod = !!rod;
   B.open = true;
   if (panel) panel.hidden = false;
-  if (btn) { btn.setAttribute('aria-expanded', 'true'); btn.classList.add('is-on'); }
+  NSO_teSyncOpeners();
   NSO_teSyncRows();
   NSO_teLoad();
-  NSO_teTick();
+  if (!wasOpen) NSO_teTick();
 }
 function NSO_teClose() {
-  var B = NSO_teUI(), panel = NSO_teEl('te-panel'), btn = NSO_teEl('btn-tube-edge');
+  var B = NSO_teUI(), panel = NSO_teEl('te-panel');
   if (B.drag) NSO_teDragEnd(false);
   NSO_teHover(null);
   B.open = false; B.result = null; B.key = ''; B.keyHandle = null; B.keyLen = null; B.keyDia = null;
   if (panel) panel.hidden = true;
-  if (btn) { btn.setAttribute('aria-expanded', 'false'); btn.classList.remove('is-on'); }
+  NSO_teSyncOpeners();
   NSO_teClear();
   if (B.raf && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(B.raf);
   B.raf = 0;
@@ -932,12 +985,13 @@ function NSO_teSelectedModel(opts) {
   var painted = (typeof nsoMaskCount === 'function') ? nsoMaskCount(m) : 0;
   if (painted > 0) {
     if (typeof setStatus === 'function') {
-      setStatus('Tube edge stood down - ' + painted + ' painted face(s); it rebuilds the wall and re-seats the piece. Clear paint to reduce, roll or neck.', true);
+      setStatus((NSO_teUI().rod ? 'Cylinders stood down - ' + painted + ' painted face(s); it rebuilds the outside and re-seats the piece. Clear paint to neck it.'
+                                : 'Tube edge stood down - ' + painted + ' painted face(s); it rebuilds the wall and re-seats the piece. Clear paint to reduce, roll or neck.'), true);
     }
     return { ok: false, reason: 'painted faces: ' + painted, painted: painted };
   }
   var B = NSO_teUI(), r;
-  var o = opts || NSO_teOpts(), neck = o.verb === 'neck', name = neck ? 'Neck' : 'Tube edge';
+  var o = opts || NSO_teOpts(), neck = o.verb === 'neck', name = o.rod ? 'Cylinder neck' : neck ? 'Neck' : 'Tube edge';
   var key = m.id + '|' + JSON.stringify(o);
   if (!opts && B.result && B.key === key && B.soup === m.rawTris) r = B.result;
   else r = neck ? NSO_tubeNeckRaw(m.rawTris, o) : NSO_tubeEdgeRaw(m.rawTris, o);
@@ -946,7 +1000,7 @@ function NSO_teSelectedModel(opts) {
     return r;
   }
   var txt = name + ' done - ' + r.reason + '; ' + r.counts.trisIn + ' → ' + r.counts.trisOut + ' faces';
-  NSO_sculptCommitRaw(m, r.tris, neck ? 'tubeNeckReplace' : 'tubeEdgeReplace', txt);
+  NSO_sculptCommitRaw(m, r.tris, o.rod ? 'rodNeckReplace' : neck ? 'tubeNeckReplace' : 'tubeEdgeReplace', txt);
   return r;
 }
 
@@ -1020,7 +1074,10 @@ if (typeof document !== 'undefined') {
       var btn = NSO_teEl('btn-tube-edge');
       if (!btn || btn.dataset.nsoWired === '1') return;
       btn.dataset.nsoWired = '1';
-      btn.addEventListener('click', function () { if (NSO_teUI().open) NSO_teClose(); else NSO_teOpen(); });
+      // each opener shuts the card when it is up for it, and takes it over when it is up for the other
+      btn.addEventListener('click', function () { var B = NSO_teUI(); if (B.open && !B.rod) NSO_teClose(); else NSO_teOpen(false); });
+      var cyl = NSO_teEl('btn-cylinders');
+      if (cyl) cyl.addEventListener('click', function () { var B = NSO_teUI(); if (B.open && B.rod) NSO_teClose(); else NSO_teOpen(true); });
       var go = NSO_teEl('btn-te-go'), cancel = NSO_teEl('btn-te-cancel');
       if (go) go.addEventListener('click', function () {
         try {
@@ -1028,7 +1085,7 @@ if (typeof document !== 'undefined') {
           if (r && r.ok) NSO_teClose();
         } catch (err) {
           console.error('[tube edge]', err);
-          if (typeof setStatus === 'function') setStatus('Tube edge failed - piece unchanged (' + ((err && err.message) || err) + ')', true);
+          if (typeof setStatus === 'function') setStatus(NSO_teName(NSO_teVerb() === 'neck') + ' failed - piece unchanged (' + ((err && err.message) || err) + ')', true);
         }
       });
       if (cancel) cancel.addEventListener('click', NSO_teClose);

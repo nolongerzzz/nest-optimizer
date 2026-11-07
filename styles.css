@@ -3881,6 +3881,9 @@ button.ms-legend-btn:disabled { opacity: 0.4; cursor: default; }
    the verb's rows in a block that hides whole. */
 .te-rows { display: flex; flex-direction: column; gap: 3px; }
 .te-rows[hidden] { display: none; }
+/* Cylinders opens the same card on a solid rod: a heading in place of Verb */
+.te-rod-head { margin: 0 0 1px; font-size: 11px; font-weight: 600; color: #ffc83d; }
+.te-rod-head[hidden] { display: none; }
 /* two fields to a line (the Reducer's New Ø / New bore, Transition / Run):
    the card is too narrow for two label-field-unit rows side by side, so each
    label stands over its field, the unit after the field */

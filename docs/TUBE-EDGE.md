@@ -976,3 +976,48 @@ mm tall), Undo, untick.
   still does them.
 - **Only the straight wall of one tube.** A tube with a hole, a boss or a
   second shell inside D is refused, not worked around.
+
+## Cylinders — Neck on a solid rod (2026-11-07)
+
+Shape → **Cylinders** is the rod's door to Neck. Tube edge's Neck reads its
+axis off an open, round end, so a solid cylinder was refused ("the end is
+closed - a flat Ø30.84 face with no opening") while Bend and Limb worked on it.
+Cylinders opens the same card in a rod mode (`state.tubeEdge.rod`): a
+"Cylinder / rod · Neck" heading in place of Verb, no Walls, Neck's Length, Δr,
+Profile, the same ghost and the same three handle rings, Set / Cancel.
+
+The engine is Neck's own, `NSO_tubeNeckRaw(soup, { rod: true, ... })`
+(`NSO_rodNeckRaw` is that call):
+
+- **The axis** is read off the rod's **closed, round end** - Tube edge's own
+  face reader (`NSO_teFaces` / `NSO_teClassFace`, its `closed` kind) - the end
+  standing highest, as Tube edge picks an open one (`NSO_tnRodEnd`).
+- **One face**: a rod has only its outside, so Walls is Outside only whatever
+  was asked. The band must be one cylinder about that axis and nothing else -
+  a bore there (a cup) is refused and pointed at Tube edge → Neck. Mid-rod the
+  outside follows the Profile (Smooth cosine, Funnel taper), held to 75°.
+- **At an end** (the band centred within Length / 2 of it, or on it): a step,
+  as a tube's one-face step - in is a **spigot**, out a **collar**, square
+  shoulder Length in. The end disc is not taken out: every vertex of it moves
+  along its own radial line by Δr × (its radius / R) - the rim by Δr exactly,
+  through the same `NSO_tnMoveRing` arithmetic as the moved ring, so the two
+  weld bit for bit; the centre stays (`NSO_tnScaleDisc`).
+- **The limit**: the rod at the waist (or the spigot) at least 2 nozzle widths
+  across - the bore limit, for the rod itself - refused with the most it may
+  pinch.
+- **The gates** are Neck's: topology (Euler unchanged), Pappus on the outside
+  face, and the rest of the piece copied bit for bit (the end disc's vertices
+  excepted on a step).
+
+Tube edge's Neck refusing a rod now ends "- a solid rod or cylinder is necked
+from Shape → Cylinders"; Cylinders refusing a tube ends "- a tube is necked
+from Tube edge → Neck". Commit undo type `rodNeckReplace` ("Undo: Cylinder
+neck reverted"). Switching the card between Tube edge and Cylinders reads the
+piece again; once a piece reads in the other mode, a neck's Length and Δr
+start from that mode's defaults (a rod: 1.5 radii long, in by a quarter of its
+radius - Ø30.84: 23 mm, −4); a read that is refused leaves them as they were.
+
+Tests: `tools/nso_tube_neck_test.js` section 11 (Stock rod pinch, bulge,
+funnel, spigot, collar, an imported 48-gon rod along X with rim-fan end discs,
+two necks, refusals; mesh_validate on every output) and the drive
+`tools/nso_cylinders_neck_check.js` (`npm run cylinders:drive`).
