@@ -121,6 +121,18 @@ function NSO_wheelSpan(profile) {
   return { lo: profile[0].z, hi: profile[profile.length - 1].z };
 }
 
+/* The top of the PIECE, not of one profile. On a bowl the outer profile ends at the
+   rim and so does the inner; on a lipped plate the highest point is the top face's
+   end on the INNER profile, a little above where the outside stops. Anything that
+   reports how tall the piece is (the status line, the build-volume check, the
+   canonical checker's bbox) reads this. */
+function NSO_wheelTopZ(piece) {
+  var t = piece.outer[piece.outer.length - 1].z;
+  if (piece.inner && piece.inner.length) t = Math.max(t, piece.inner[piece.inner.length - 1].z);
+  return t;
+}
+function NSO_wheelHeightOf(piece) { return NSO_wheelTopZ(piece) - piece.outer[0].z; }
+
 /* Keep a profile honest about where it starts and stops.
 
    A pull clamps radii at zero, so a displacement that reaches the base can
@@ -1370,7 +1382,8 @@ function NSO_wheelFlatten(piece, opts) {
     nozzle: piece.nozzle, wall: piece.wall, segments: piece.segments,
     target: piece.target, sizing: piece.sizing,
     budget: { start: piece.budget.start, added: piece.budget.added, trimmed: piece.budget.trimmed },
-    ops: piece.ops.concat(['flatten'])
+    ops: piece.ops.concat(['flatten']),
+    press: { h: s.height, e: s.e, c: s.c }          // what Lip needs to know it has a plate to lift
   };
   var g = NSO_wheelGate(piece, cand, 'Flattening to ' + s.height.toFixed(2) + ' mm');
   if (!g.ok) return g;
@@ -1379,6 +1392,160 @@ function NSO_wheelFlatten(piece, opts) {
   g.pressure = s.pressure;
   g.reason = 'Flattened to ' + s.height.toFixed(1) + ' mm thick, ' + s.diameter.toFixed(1) +
     ' mm across (' + Math.round(s.pressure * 100) + '% pressed), clay conserved';
+  return g;
+}
+
+/* ------------------------------------------------------------ 7e2. LIP
+
+   The perimeter of a flat plate, lifted into a rim with a flared transition - the
+   way a plate's edge rises. The plate is a constant-thickness slab of the thickness
+   it was pressed to; out to the START radius it stays flat, and from there its
+   MIDLINE turns up along a smooth curve - the heading eases in as sin^2 (so the
+   underside leaves the flat tangent, with no crease), holds a lift angle to the rim,
+   and the slab is swept along it, so the thickness is the plate's all the way. The
+   rim ends in a rounded edge.
+
+   THE CLAY IS CONSERVED. Bending a slab inward shortens its reach, so the plate does
+   not simply keep its diameter: the length of the bent part is SOLVED so the volume is
+   what it was (bisection, low side kept, as Flatten does), and the diameter is what
+   falls out - a hair under the flat plate's.
+
+   THE HEIGHT IS ASKED FOR, THE ANGLE IS SOLVED: the lift angle is whatever makes the
+   midline rise the asked height over that length (capped at 70 degrees, and said so
+   when it bites). The flare is the length of the transition as a fraction of the bent
+   length, lengthened where it would fold the top surface (the top face is the INSIDE of
+   the bend; a radius of curvature under half the thickness cusps it).
+
+   A lipped plate is an opened piece: outer = the underside up round the rim's outside,
+   inner = the top face. Both rise monotonically, so the whole wheel (gate, revolve,
+   guide lines, Pull, Trim) takes it as it takes a bowl. The rim is closed by a short
+   chord - 0.6 of the thickness - so the wall gate has a real rim to measure.
+
+   opts: height (mm the rim rises), at (0..1, where the lift starts, as a fraction of the
+         plate's radius), flare (0..1), clamp (true: cap what cannot be had and say so) */
+var NSO_WHEEL_LIP_MAX_DEG = 70;
+var NSO_WHEEL_LIP_STEPS = 96;
+
+/* How far the midline rises over length Sb for a lift angle th and transition length Ls. */
+function NSO_wheelLipRise(th, Sb, Ls) {
+  /* The same midpoint steps the profile is built with, so the rise solved for IS the rise drawn. */
+  var n = NSO_WHEEL_LIP_STEPS, ds = Sb / n, rise = 0;
+  for (var i = 0; i < n; i++) {
+    var u = Math.min(1, (i + 0.5) * ds / Ls);
+    rise += ds * Math.sin(th * Math.pow(Math.sin(Math.PI / 2 * u), 2));
+  }
+  return rise;
+}
+
+/* The lift angle and transition length for a rise H over bent length Sb. */
+function NSO_wheelLipShape(h, H, Sb, flare) {
+  var thMax = NSO_WHEEL_LIP_MAX_DEG * Math.PI / 180;
+  var Ls = Math.max(1e-6, flare * Sb), th = 0, clamped = false, lengthened = false;
+  for (var pass = 0; pass < 3; pass++) {
+    if (NSO_wheelLipRise(thMax, Sb, Ls) < H) { th = thMax; clamped = true; }
+    else {
+      clamped = false;
+      var lo = 0, hi = thMax;
+      for (var i = 0; i < 26; i++) { var mid = 0.5 * (lo + hi); if (NSO_wheelLipRise(mid, Sb, Ls) < H) lo = mid; else hi = mid; }
+      th = 0.5 * (lo + hi);
+    }
+    /* the top face is the inside of the bend: keep its radius of curvature >= h/2 */
+    var Lneed = th * (Math.PI / 2) * h / 1.6;
+    if (Ls < Lneed) { Ls = Lneed; lengthened = true; } else break;
+  }
+  return { th: th, Ls: Ls, clamped: clamped, lengthened: lengthened };
+}
+
+/* The lipped plate's two profiles. */
+function NSO_wheelLipProfile(z0, h, r0, Sb, Ls, th) {
+  var N = NSO_WHEEL_LIP_STEPS, rho = h / 2;
+  var outer = [{ z: z0, r: 0 }, { z: z0, r: r0 }];
+  var inner = [{ z: z0 + h, r: 0 }, { z: z0 + h, r: r0 }];
+  function theta(s) { var u = Math.min(1, s / Ls); return th * Math.pow(Math.sin(Math.PI / 2 * u), 2); }
+  var r = r0, zm = z0 + h / 2, s = 0, ds = Sb / N, i;
+  for (i = 1; i <= N; i++) {
+    var a = theta(s + ds / 2);
+    r += ds * Math.cos(a); zm += ds * Math.sin(a); s += ds;
+    var a1 = theta(s);
+    outer.push({ z: zm - rho * Math.cos(a1), r: r + rho * Math.sin(a1) });
+    inner.push({ z: zm + rho * Math.cos(a1), r: r - rho * Math.sin(a1) });
+  }
+  /* The rim: round arcs of radius h/2 about the midline's end, left a chord of 0.6 h
+     apart. psi is measured from the top normal round towards the tip; the top arc stops
+     where it is highest (psi = the end heading) so the inner profile keeps rising. */
+  var te = theta(Sb), cs = Math.cos(te), sn = Math.sin(te);
+  var gap = 2 * Math.asin(0.6), psiI = te, psiO = psiI + gap, K = 10, k;
+  function at(psi) {
+    return { r: r + rho * (Math.sin(psi) * cs - Math.cos(psi) * sn), z: zm + rho * (Math.sin(psi) * sn + Math.cos(psi) * cs) };
+  }
+  for (k = 1; k <= K; k++) inner.push(at(psiI * k / K));
+  for (k = 1; k <= K; k++) outer.push(at(Math.PI - (Math.PI - psiO) * k / K));
+  return { outer: outer, inner: inner, endHeading: te };
+}
+
+function NSO_wheelLip(piece, opts) {
+  opts = opts || {};
+  if (piece.inner) {
+    return { ok: false, piece: piece, reason: 'this piece is already open - Lip lifts the edge of a flat plate; close Deep first' };
+  }
+  var pr = piece.press;
+  if (!pr) {
+    return { ok: false, piece: piece, reason: 'Lip lifts the edge of a pressed plate - press the ball flat first (drag Thick down)' };
+  }
+  if (!(pr.c >= pr.h)) {
+    return { ok: false, piece: piece, reason: 'this is a thick bulge, not a plate (flat across ' + (2 * pr.c).toFixed(1) +
+      ' mm, ' + pr.h.toFixed(1) + ' mm thick) - press it flatter to give Lip a plate to lift' };
+  }
+  var H = opts.height;
+  if (!(typeof H === 'number' && H > 1e-9)) {
+    return { ok: false, piece: piece, reason: 'Lip needs a height to lift the rim by' };
+  }
+  var V = NSO_wheelVolume(piece), z0 = piece.outer[0].z, h = pr.h, R0 = pr.c + pr.e;
+  var at = (typeof opts.at === 'number') ? Math.min(0.95, Math.max(0.05, opts.at)) : 0.6;
+  var flare = (typeof opts.flare === 'number') ? Math.min(1, Math.max(0.05, opts.flare)) : 0.5;
+  var r0 = at * R0;
+
+  function build(Sb) {
+    var sh = NSO_wheelLipShape(h, H, Sb, flare);
+    var pf = NSO_wheelLipProfile(z0, h, r0, Sb, sh.Ls, sh.th);
+    return { sh: sh, pf: pf, vol: NSO_wheelVolume({ outer: pf.outer, inner: pf.inner }) };
+  }
+  var lo = 0.5, hi = 4 * R0 + 4 * H, i;
+  if (build(lo).vol > V) {
+    return { ok: false, piece: piece, reason: 'Lip starting at ' + (at * 100).toFixed(0) + '% of the radius leaves no clay to lift - start it further out' };
+  }
+  if (build(hi).vol < V) {
+    return { ok: false, piece: piece, reason: 'Lip could not use all the clay - lift less' };
+  }
+  for (i = 0; i < 38; i++) { var mid = 0.5 * (lo + hi); if (build(mid).vol <= V) lo = mid; else hi = mid; }
+  var b = build(lo);
+  if (b.sh.clamped && !opts.clamp) {
+    return { ok: false, piece: piece, reason: 'a ' + H.toFixed(1) + ' mm lip would need the rim to lean past ' + NSO_WHEEL_LIP_MAX_DEG +
+      ' degrees over this length - lift less, or start it further in' };
+  }
+  var cand = {
+    outer: b.pf.outer, inner: b.pf.inner,
+    nozzle: piece.nozzle, wall: piece.wall, segments: piece.segments,
+    target: piece.target, sizing: piece.sizing,
+    budget: { start: piece.budget.start, added: piece.budget.added, trimmed: piece.budget.trimmed },
+    ops: piece.ops.concat(['lip'])
+  };
+  var g = NSO_wheelGate(piece, cand, 'Lipping');
+  if (!g.ok) return g;
+  var rMax = 0, j;
+  for (j = 0; j < cand.outer.length; j++) if (cand.outer[j].r > rMax) rMax = cand.outer[j].r;
+  for (j = 0; j < cand.inner.length; j++) if (cand.inner[j].r > rMax) rMax = cand.inner[j].r;
+  /* The rise is the rim's highest point above the plate's own top face - the top of the
+     inner arc, where the top face stops rising - which is what the slider asks for. */
+  var zTop = 0;
+  for (j = 0; j < cand.inner.length; j++) if (cand.inner[j].z > zTop) zTop = cand.inner[j].z;
+  for (j = 0; j < cand.outer.length; j++) if (cand.outer[j].z > zTop) zTop = cand.outer[j].z;
+  g.diameter = 2 * rMax; g.flatDiameter = 2 * R0; g.rise = zTop - (z0 + h);
+  g.angle = b.sh.th * 180 / Math.PI; g.endAngle = b.pf.endHeading * 180 / Math.PI;
+  g.flareLength = b.sh.Ls; g.clamped = b.sh.clamped; g.lengthened = b.sh.lengthened;
+  g.reason = 'Lip raised ' + g.rise.toFixed(1) + ' mm' + (b.sh.clamped ? ' (of ' + H.toFixed(1) + ' asked - the rim cannot lean past ' + NSO_WHEEL_LIP_MAX_DEG + ' degrees over this length)' : '') +
+    ', flaring over ' + b.sh.Ls.toFixed(1) + ' mm' + (b.sh.lengthened ? ' (lengthened so the top face does not fold)' : '') +
+    ' to ' + g.angle.toFixed(1) + ' degrees; diameter ' + (2 * R0).toFixed(1) + ' -> ' + g.diameter.toFixed(1) + ' mm, clay conserved';
   return g;
 }
 
@@ -1468,6 +1635,7 @@ function NSO_wheelApply(move, piece, opts) {
   if (move === 'trim') return NSO_wheelTrim(piece, opts);
   if (move === 'rim') return NSO_wheelExtendRim(piece, opts);
   if (move === 'reball') return NSO_wheelReball(piece, opts);
+  if (move === 'lip') return NSO_wheelLip(piece, opts);
   return { ok: false, piece: piece, reason: 'unknown move ' + move };
 }
 
@@ -1553,8 +1721,8 @@ function NSO_wheelRanges(piece, history) {
    is a live value in one recipe, and the form is REBUILT from the ball, in the
    order a potter works, every time any of them moves:
 
-       ball  ->  press (Thick)  ->  open (Deep)  ->  pull (where, how far, how
-       soft)  ->  trim  ->  rim +
+       ball  ->  press (Thick)  ->  open (Deep) or lip (Lip)  ->  pull (where, how
+       far, how soft)  ->  trim  ->  rim +
 
    Nothing is baked into the profile, so nothing shuts a slider off: dragging
    Thick after the bowl is open re-presses the ball and opens it again on the new
@@ -1584,6 +1752,7 @@ function NSO_wheelNewRecipe(ball) {
     base: null,
     ball: Object.assign({ height: undefined, radius: undefined, wall: undefined, nozzle: undefined }, ball || {}),
     thick: null, depth: 0,
+    lip: { h: 0, at: 0.6, flare: 0.5 },
     pull: { z: 0.5, dr: 0, wide: 0.25 },
     trim: 0, rim: 0
   };
@@ -1592,6 +1761,7 @@ function NSO_wheelNewRecipe(ball) {
 function NSO_wheelCloneRecipe(r) {
   return {
     base: r.base, ball: Object.assign({}, r.ball), thick: r.thick, depth: r.depth,
+    lip: Object.assign({ h: 0, at: 0.6, flare: 0.5 }, r.lip || {}),
     pull: Object.assign({}, r.pull), trim: r.trim, rim: r.rim
   };
 }
@@ -1728,6 +1898,31 @@ function NSO_wheelBuild(recipe) {
     }
   } else {
     R.push = { max: 0, why: 'already open' };
+  }
+
+  /* 2b. LIP: the edge of a pressed plate lifted into a rim. A plate that is open is
+     not a plate, so Lip stands down for Deep (the slider says so). */
+  var lp = recipe.lip || {};
+  if (piece.inner) {
+    R.lip = { max: 0, why: 'an opened piece has no flat plate to lift - Lip is for plates (Deep 0)' };
+    if (lp.h > 1e-9) notes.push('Lip: an opened piece has no flat plate to lift');
+  } else if (!piece.press) {
+    R.lip = { max: 0, why: 'press the ball into a plate first (drag Thick down)' };
+    if (lp.h > 1e-9) notes.push('Lip: press the ball into a plate first');
+  } else if (!(piece.press.c >= piece.press.h)) {
+    R.lip = { max: 0, why: 'this is a thick bulge, not a plate - press it flatter' };
+    if (lp.h > 1e-9) notes.push('Lip: press it flatter - this is a bulge, not a plate');
+  } else {
+    var lipMax = Math.max(1, NSO_wheelStep((piece.press.c + piece.press.e) * 0.5, 0.5, false));
+    R.lip = { max: lipMax };
+    if (lp.h > 1e-9) {
+      var lr = NSO_wheelLip(piece, { height: Math.min(lp.h, lipMax), at: lp.at, flare: lp.flare, clamp: true });
+      if (lr.ok) {
+        piece = lr.piece;
+        if (lr.clamped) notes.push('Lip limited to ' + lr.rise.toFixed(1) + ' mm - the rim cannot lean further over this length');
+        if (lr.lengthened) notes.push('Flare lengthened so the top face does not fold');
+      } else notes.push(NSO_wheelFirstSentence(lr.reason));
+    }
   }
 
   /* 3. PULL */
@@ -2090,8 +2285,7 @@ function NSO_wheelThrow(opts, head) {
 
 function NSO_wheelStatus(piece, head) {
   var bud = NSO_wheelBudget(piece);
-  var span = NSO_wheelSpan(piece.outer);
-  var line = head + ' - ' + (span.hi - span.lo).toFixed(1) + ' mm tall, ' +
+  var line = head + ' - ' + NSO_wheelHeightOf(piece).toFixed(1) + ' mm tall, ' +
     bud.live.toFixed(0) + ' / ' + bud.ceiling.toFixed(0) + ' mm^3 clay used';
   if (typeof NSO_Printer !== 'undefined' && typeof NSO_wheelFitReport === 'function') {
     var f = NSO_wheelFitReport(piece);
@@ -2108,8 +2302,7 @@ function NSO_wheelFitReport(piece, printer) {
   if (typeof NSO_Printer === 'undefined' || !NSO_Printer) return null;
   var rMax = 0;
   for (var i = 0; i < piece.outer.length; i++) if (piece.outer[i].r > rMax) rMax = piece.outer[i].r;
-  var span = NSO_wheelSpan(piece.outer);
-  var size = { x: 2 * rMax, y: 2 * rMax, z: span.hi - span.lo };
+  var size = { x: 2 * rMax, y: 2 * rMax, z: NSO_wheelHeightOf(piece) };
   var p = printer;
   if (!p) {
     /* One resolution path for the whole app: app-fit.js owns it, because the

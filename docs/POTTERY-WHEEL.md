@@ -464,7 +464,7 @@ one live value, and the form is **rebuilt from the ball**, in the order a potter
 works, whenever any of them moves (`NSO_wheelBuild`, `app-wheel.js` "7g"):
 
 ```
-ball  ->  press (Thick)  ->  open (Deep)  ->  pull (Pull at, Pull, Soft)  ->  trim  ->  rim +
+ball  ->  press (Thick)  ->  open (Deep) or lip (Lip)  ->  pull (Pull at, Pull, Soft)  ->  trim  ->  rim +
 ```
 
 Nothing is baked into the profile, so **nothing is ever shut off**. Dragging Thick
@@ -488,6 +488,7 @@ takes effect.
 | **W** | the wall: how thin the disc may press and how thin the walls open. A thicker W opens a shorter, thicker-walled piece from the same clay |
 | **Thick** | press: the top comes down, the diameter grows, the clay is conserved. All the way up is the unpressed ball |
 | **Deep** | how far the finger goes in; the clay it pushes aside rises into the walls (`NSO_wheelOpenKeep`) |
+| **Lip / Lip at / Flare** | lift the edge of a pressed plate into a rim, this high; where the lift starts (a % of the plate's radius); how long the ease into it is (a % of the lifted part). [Lip](#lip) |
 | **Pull at / Pull / Soft** | where (a % of the height, so it follows the piece), how far out or in, how widely it spreads (a % of the height: small is a ring, large is a belly) |
 | **Trim, Rim +** | take off the base (the clay is gone); add height at the rim (Extend — needs a straight wall) |
 | **Flatten, Open** | one-click **presets**: they send their own slider to its far end. They bake nothing |
@@ -529,6 +530,47 @@ way in. A single Pull is still one bump, not several; two belly pulls need a sec
 control. Open's cavity is as wide as W allows, so a narrow mouth needs a "mouth"
 control. The ghost the previous version drew for Pull is gone — the piece itself now
 answers every slider — and is the right shape to bring back for dragging on the piece.
+
+### Lip
+
+`NSO_wheelLip` (`app-wheel.js` "7e2"), a recipe stage after Open, with three sliders:
+**Lip** (how high the rim rises above the plate), **Lip at** (where the lift starts, a % of
+the plate's radius) and **Flare** (how long the ease into it is, a % of the lifted part).
+The reference is a plate whose edge rises with a flared underside and a rounded rim.
+
+*The shape.* The plate is a constant-thickness slab of the thickness it was pressed to (a
+pressed plate remembers its press: `piece.press = { h, e, c }`). Out to *Lip at* it stays
+flat; from there its **midline** turns up — the heading eases in as `sin²`, so the underside
+leaves the flat tangent with no crease, then holds a lift angle to the rim — and the slab is
+swept along it, so the thickness is the plate's own all the way up (measured: 6.000 mm along
+the whole underside). The rim ends in rounded arcs of radius h/2 closed by a chord of 0.6 h,
+so the wall gate has a real rim to measure.
+
+*The clay is conserved.* Bending a slab inward shortens its reach, so the length of the bent
+part is solved (bisection, low side kept) until the volume is what it was; the diameter is what
+falls out — about 4–5 mm under the flat plate's for a 10 mm rim on a Ø119 plate (119.2 → 114.4),
+less for a gentler one. The lift angle is solved for the height asked (the rim's highest point
+above the plate's top face — measured, 10.0000 for 10), capped at 70° and said so when it bites
+("Lip limited to 16.7 mm — the rim cannot lean further over this length"). A **longer Flare** is
+a rounder ease and, for the same height, a steeper finish; a Flare too tight for the thickness is
+lengthened so the top face (the inside of the bend) does not fold.
+
+*What it is.* A lipped plate is an **opened** piece — outer = the underside up round the rim,
+inner = the top face — and both profiles rise monotonically, so the gate, the revolve, the
+guide lines, Pull and Trim take it as they take a bowl. (The earlier worry that a plate needed
+the loop-profile refactor was wrong: horizontal faces are fine as runs of samples with one z.)
+
+*When it stands down, it says so and stays live.* Lip needs a pressed plate whose flat core is at
+least as wide as it is thick, and not opened: an unpressed ball ("press the ball into a plate
+first"), a thick bulge ("press it flatter"), an opened piece ("an opened piece has no flat plate
+to lift") each leave the piece as it is, put the reason in the read-out and the slider's tooltip,
+and **remember the lip you asked for** — drag Deep back to 0 or Thick back down and it takes
+effect. Lip back to 0 is the flat plate exactly.
+
+*Height.* On a lipped plate the highest point is the top face's end on the **inner** profile, a
+little above where the outside stops, so every height the wheel reports (the status line, the
+build-volume check, the canonical checker's bbox) reads `NSO_wheelHeightOf` (the higher of the two
+profiles). The canonical mesh checker found this one.
 
 ### The white edge
 
@@ -574,17 +616,7 @@ Pull already have — drag on the piece, see it live, release to Set, one Undo.
    (`NSO_wheelOpenKeep`) and Pull all conserve — see [The recipe](#the-recipe-and-the-live-sliders).
    The strict `NSO_wheelOpen` / `NSO_wheelPull` API still refuses whole and Open
    still throws the top away there.)
-2. **Lip.** A flat disc's perimeter is lifted into a rim with a flared transition,
-   the way a plate's is: flat out to a start radius, then the underside eases up
-   (tangent at the start, so the flare is smooth) and holds an angle to the rim,
-   which ends in a rounded bead. The section is swept along that curve, so the
-   thickness is constant and the clay is conserved; the outer diameter shrinks a
-   little (prototype: 143.3 → 142.3 mm for 14° over 30 mm on a 6 mm plate). Its
-   handles are the start radius, the height (dragged) and the flare length. It is
-   called **Lip**, not Lift — Lift is taken by Crop. A lipped disc is an opened
-   vessel (outer = the underside, inner = the top face), so no new piece shape is
-   needed. The flare is Tube Edge's Trumpet curve; `NSO_teProfile` already builds
-   meridian curves and should be reused rather than copied.
+2. **Lip — done** (see [Lip](#lip)). Called **Lip**, not Lift, because Lift is taken by Crop.
 3. **Foot ring, handles, long spouts are separate steps,** after the body. The foot
    ring is a Trim (`toR` already cuts a foot back); handles and spouts are not
    solids of revolution — a spout is a Pull on the baked mesh, where the section

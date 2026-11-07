@@ -12,6 +12,9 @@
      W              the wall: how thin the disc may press and the walls open
      Thick          press the ball flat (the top comes down, the diameter grows)
      Deep           push in to open it (the clay rises into walls)
+     Lip            lift the edge of a pressed plate into a rim, this high
+     Lip at         where the lift starts, as a percentage of the plate's radius
+     Flare          how long the transition is, as a percentage of the lifted part
      Pull at        where on the piece, as a percentage of its height
      Pull           how far out (or in) the wall goes there
      Soft           how wide the pull spreads, as a percentage of the height
@@ -74,8 +77,7 @@
     var rMax = 0;
     for (var i = 0; i < b.piece.outer.length; i++) if (b.piece.outer[i].r > rMax) rMax = b.piece.outer[i].r;
     if (b.piece.inner) for (i = 0; i < b.piece.inner.length; i++) if (b.piece.inner[i].r > rMax) rMax = b.piece.inner[i].r;
-    var sp = NSO_wheelSpan(b.piece.outer);
-    var line = (head ? head + ' ' : '') + 'Ø' + (2 * rMax).toFixed(1) + ' × ' + (sp.hi - sp.lo).toFixed(1) + ' mm';
+    var line = (head ? head + ' ' : '') + 'Ø' + (2 * rMax).toFixed(1) + ' × ' + NSO_wheelHeightOf(b.piece).toFixed(1) + ' mm';
     var st = NSO_wheelStatus(b.piece, line);
     return b.notes.length ? st + ' - ' + b.notes.join('; ') : st;
   }
@@ -152,6 +154,15 @@
   define('depth', { slider: 'rng-wheel-depth', read: 'out-wheel-depth', unit: ' mm',
     get: function (r) { return r.depth || 0; },
     put: function (r, v) { r.depth = v < 0.05 ? 0 : v; } });
+  define('lip', { slider: 'rng-wheel-lip', read: 'out-wheel-lip', unit: ' mm',
+    get: function (r) { return r.lip ? r.lip.h : 0; },
+    put: function (r, v) { r.lip = r.lip || { h: 0, at: 0.6, flare: 0.5 }; r.lip.h = v < 0.05 ? 0 : v; } });
+  define('lipat', { slider: 'rng-wheel-lip-at', read: 'out-wheel-lip-at', unit: ' %',
+    get: function (r) { return Math.round((r.lip && r.lip.at != null ? r.lip.at : 0.6) * 100); },
+    put: function (r, v) { r.lip = r.lip || { h: 0, at: 0.6, flare: 0.5 }; r.lip.at = v / 100; } });
+  define('flare', { slider: 'rng-wheel-flare', read: 'out-wheel-flare', unit: ' %',
+    get: function (r) { return Math.round((r.lip && r.lip.flare != null ? r.lip.flare : 0.5) * 100); },
+    put: function (r, v) { r.lip = r.lip || { h: 0, at: 0.6, flare: 0.5 }; r.lip.flare = v / 100; } });
   define('pullz', { slider: 'rng-wheel-pull-z', read: 'out-wheel-pull-z', unit: ' %',
     get: function (r) { return Math.round((r.pull.z == null ? 0.5 : r.pull.z) * 100); },
     put: function (r, v) { r.pull.z = v / 100; } });
@@ -193,6 +204,7 @@
     var th = R.thick || { min: 0, max: 0 };
     range(DEFS.thick, th.min, th.max, 0.1, th.why);
     range(DEFS.depth, 0, R.push ? R.push.max : 0, 0.1, R.push && R.push.max <= 0 ? R.push.why : null);
+    range(DEFS.lip, 0, R.lip ? R.lip.max : 0, 0.5, R.lip && R.lip.max <= 0 ? R.lip.why : null);
     var sw = R.pull ? R.pull.swing : 10;
     range(DEFS.pulldr, -sw, sw, 0.5);
     range(DEFS.trim, 0, R.trim ? R.trim.max : 0, 0.1, R.trim && R.trim.max <= 0.1 ? 'nothing to take off the base' : null);

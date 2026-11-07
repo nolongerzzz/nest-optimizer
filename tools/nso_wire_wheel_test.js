@@ -722,6 +722,105 @@ withApp(async (page, logs) => {
     await release('rng-wheel-flat'); await idle();
   }
 
+  console.log('\n=== 10d. Lip: a flared rim on a pressed plate, live ===');
+  {
+    const drag = (id, v) => page.evaluate(([i, x]) => {
+      const e = document.getElementById(i); e.value = String(x); e.dispatchEvent(new Event('input', { bubbles: true }));
+    }, [id, v]);
+    const release = id => page.evaluate(i => document.getElementById(i).dispatchEvent(new Event('change', { bubbles: true })), id);
+    const idle = () => page.waitForFunction(() => !document.getElementById('wheel-readout').textContent.startsWith('Preview'), null, { timeout: 15000 });
+    const setS = async (id, v) => { await drag(id, v); await release(id); await idle(); };
+    const readoutOf = () => page.evaluate(() => document.getElementById('wheel-readout').textContent);
+    const sl = id => page.evaluate(i => { const e = document.getElementById(i); return { v: parseFloat(e.value), min: parseFloat(e.min), max: parseFloat(e.max), off: e.disabled, title: e.title }; }, id);
+    const info = () => page.evaluate(() => {
+      const m = getActiveModel(), p = NSO_wheelSession;
+      return { ops: p.ops.join('>'), open: !!p.inner, h: NSO_wheelHeightOf(p), d: 2 * Math.max.apply(null, p.outer.map(q => q.r)),
+               vol: NSO_wheelVolume(p), y: m.size.y, x: m.size.x, recipe: JSON.parse(JSON.stringify(NSO_wheelHome.recipe, (k, v) => k === 'base' ? undefined : v)) };
+    });
+    const edge = () => page.evaluate(() => {
+      const m = NSO_wheelModel(), e = state.placed.find(p => p.sourceId === m.id), mesh = e.mesh;
+      const lines = mesh.children.filter(c => c.name === 'selOutline'), ln = lines[0];
+      let h = null, mine = false;
+      if (ln) { ln.geometry.computeBoundingBox(); h = ln.geometry.boundingBox.max.y - ln.geometry.boundingBox.min.y; mine = ln.userData.nsoEdgesOf.uuid === mesh.geometry.uuid; }
+      mesh.geometry.computeBoundingBox();
+      return { n: lines.length, mine: mine, h: h, shown: mesh.geometry.boundingBox.max.y - mesh.geometry.boundingBox.min.y };
+    });
+
+    await page.evaluate(() => { document.getElementById('rng-wheel-scale').value = '25'; });
+    await page.click('#btn-wheel-ball');
+    await page.waitForFunction(() => /Dropped Wheel \d+/.test(document.getElementById('status').textContent), null, { timeout: 30000 });
+    await page.waitForTimeout(300);
+
+    /* on a ball Lip has no plate to lift: it says so and stays live */
+    await drag('rng-wheel-lip', 5);
+    await page.waitForTimeout(400);
+    let lipS = await sl('rng-wheel-lip');
+    check('on an unpressed ball the Lip slider says what it needs, and is not switched off',
+      !lipS.off && /press the ball into a plate/.test(lipS.title), JSON.stringify(lipS));
+    await release('rng-wheel-lip'); await idle();
+    check('...and the piece stays a ball', !(await info()).open && (await info()).ops === 'ball');
+    await setS('rng-wheel-lip', 0);
+
+    /* press it to a plate, then lift the rim */
+    await setS('rng-wheel-flat', 6);
+    const plate = await info();
+    lipS = await sl('rng-wheel-lip');
+    check('pressed to a 6 mm plate, Lip has a real range (up to half the plate\'s radius)', !lipS.off && lipS.max > 15 && lipS.max < 60, JSON.stringify(lipS));
+    await setS('rng-wheel-lip', 8);
+    const lipped = await info();
+    check('Lip 8 lifts the rim: the piece is 8 mm taller than the plate and built as lip, on the same clay',
+      lipped.ops === 'ball>flatten>lip' && Math.abs(lipped.h - (plate.h + 8)) < 0.05 && Math.abs(lipped.vol - plate.vol) / plate.vol < 1e-9,
+      plate.h.toFixed(1) + ' -> ' + lipped.h.toFixed(2) + ' mm, ' + lipped.ops);
+    check('...the model on the plate is that tall too (the revolved mesh, not just the profile)', Math.abs(lipped.y - lipped.h) < 0.01, lipped.y.toFixed(3));
+    check('...the diameter comes out a little under the flat plate\'s (clay conserved)', lipped.d < plate.d && lipped.d > plate.d * 0.9, plate.d.toFixed(1) + ' -> ' + lipped.d.toFixed(1));
+    let e = await edge();
+    check('...with its white edge on, on that shape', e.n === 1 && e.mine && Math.abs(e.h - e.shown) < 0.1, JSON.stringify(e));
+
+    /* the other two sliders change it */
+    await setS('rng-wheel-lip-at', 35);
+    const wide = await info();
+    check('Lip at, further in, is a wider, gentler rim: a shallower angle, so it keeps more of the plate\'s diameter',
+      wide.d > lipped.d && wide.d < plate.d && wide.ops === 'ball>flatten>lip', plate.d.toFixed(1) + ' plate, ' + lipped.d.toFixed(1) + ' -> ' + wide.d.toFixed(1));
+    await setS('rng-wheel-flare', 90);
+    check('Flare changes the curve without changing the height', Math.abs((await info()).h - lipped.h) < 0.05 && (await info()).d !== wide.d);
+    await setS('rng-wheel-lip-at', 60); await setS('rng-wheel-flare', 50);
+
+    /* a lip past what the length allows is limited, in words */
+    await drag('rng-wheel-lip', parseFloat((await sl('rng-wheel-lip')).max));
+    await page.waitForFunction(() => /Lip limited to/.test(document.getElementById('wheel-readout').textContent), null, { timeout: 15000 });
+    check('a lip taller than the plate\'s reach allows is capped, the read-out says so, the slider carries on',
+      /Lip limited to/.test(await readoutOf()) && !(await sl('rng-wheel-lip')).off, await readoutOf());
+    await release('rng-wheel-lip'); await idle();
+    await setS('rng-wheel-lip', 8);
+
+    /* Deep and Lip are not both a plate (a 12 mm plate is thick enough to open) */
+    await setS('rng-wheel-flat', 12);
+    const preDeep = await info();
+    check('(a 12 mm plate with the lip on it)', preDeep.ops === 'ball>flatten>lip');
+    await setS('rng-wheel-depth', 2);
+    const both = await info();
+    check('open it (Deep) and Lip stands down: it is not a plate any more, and the read-out says so',
+      both.open && both.ops !== 'ball>flatten>lip' && /Lip: an opened piece/.test(await readoutOf()) && !(await sl('rng-wheel-lip')).off, both.ops + ' | ' + await readoutOf());
+    check('...the 8 mm lip it was asked for is remembered', Math.abs(both.recipe.lip.h - 8) < 0.1, JSON.stringify(both.recipe.lip));
+    await setS('rng-wheel-depth', 0);
+    const back = await info();
+    check('Deep back to 0 and the lip is there again - nothing was lost', back.ops === 'ball>flatten>lip' && Math.abs(back.h - preDeep.h) < 1e-9 && Math.abs(back.d - preDeep.d) < 1e-9,
+      back.ops + ' ' + back.h.toFixed(2) + ' (was ' + preDeep.h.toFixed(2) + ')');
+    await setS('rng-wheel-flat', 6);
+
+    /* taking it back is exact */
+    await setS('rng-wheel-lip', 0);
+    const flat = await info();
+    check('Lip back to 0 is the flat plate exactly', !flat.open && flat.ops === 'ball>flatten' && Math.abs(flat.h - plate.h) < 1e-9 && Math.abs(flat.d - plate.d) < 1e-9);
+
+    /* undo and the edge */
+    await setS('rng-wheel-lip', 8);
+    await page.click('#btn-undo');
+    await page.waitForFunction(() => NSO_wheelHome && NSO_wheelHome.recipe.lip.h === 0, null, { timeout: 5000 });
+    e = await edge();
+    check('Undo takes the lip back and keeps the white edge', !(await info()).open && e.n === 1 && e.mine, JSON.stringify(e));
+  }
+
   console.log('\n=== 11. nothing else on the page broke ===');
   const errs = logs.filter(l => l.startsWith('[pageerror]'));
   check('no uncaught page errors', errs.length === 0, errs.join(' | '));

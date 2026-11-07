@@ -69,7 +69,7 @@ const save = (name, piece) => {
     analytic_volume: W.NSO_wheelVolume(piece),
     pappus_volume: W.NSO_wheelPappus(piece).volume,
     budget: { start: bud.start, added: bud.added, trimmed: bud.trimmed, ceiling: bud.ceiling, live: bud.live },
-    base_z: s.lo, top_z: s.hi,
+    base_z: s.lo, top_z: W.NSO_wheelTopZ(piece),
     max_radius: piece.outer.reduce((m, x) => Math.max(m, x.r), 0),
     opened: !!piece.inner,
     wall_mm: wall.min_mm, wall_floor_mm: wall.threshold_mm, wall_pass: wall.pass
@@ -1188,6 +1188,120 @@ console.log('\n== 7f. the white edge helper: rings and meridians from the piece\
     if (r > rMax(bowl) + 1e-6 || r < -1e-6) { onPiece = false; break; }
   }
   check('...and none of them wanders outside the piece\'s own radius', onPiece);
+}
+
+/* =====================================================================
+   7g. Lip: the plate's perimeter lifted into a rim, the clay conserved
+   ===================================================================== */
+console.log('\n== 7g. Lip: a flared rim on a pressed plate ==');
+{
+  const V = p => W.NSO_wheelVolume(p);
+  const std = W.NSO_wheelBall({}).piece;
+  const plate = W.NSO_wheelFlatten(std, { height: 6 }).piece;
+  const R0 = plate.press.c + plate.press.e;
+  const mono = a => a.every((q, i) => i === 0 || q.z >= a[i - 1].z - 1e-9);
+
+  check('a pressed plate remembers its press (the thickness, the flat core, the edge)',
+    plate.press && plate.press.h === 6 && plate.press.c > 40 && plate.press.e > 0, JSON.stringify(plate.press));
+
+  const lip = W.NSO_wheelLip(plate, { height: 10, at: 0.6, flare: 0.5 });
+  check('a lip lands on a pressed plate', lip.ok, lip.reason);
+  if (lip.ok) {
+    check('...the clay exactly conserved', Math.abs(V(lip.piece) - V(plate)) / V(plate) < 1e-9, ((V(lip.piece) - V(plate)) / V(plate)).toExponential(2));
+    check('...the rim rises the 10 mm that was asked, measured at its highest point', Math.abs(lip.rise - 10) < 1e-3, lip.rise.toFixed(4) + ' mm');
+    check('...the diameter falls out a little under the flat plate\'s (bending shortens the reach)',
+      lip.diameter < lip.flatDiameter && lip.diameter > lip.flatDiameter * 0.9, lip.flatDiameter.toFixed(1) + ' -> ' + lip.diameter.toFixed(1) + ' mm');
+    check('...an opened piece: the underside is the outer profile, the top face the inner', !!lip.piece.inner && lip.piece.outer[0].z === plate.outer[0].z &&
+      Math.abs(lip.piece.inner[0].z - (plate.outer[0].z + 6)) < 1e-9);
+    check('...both profiles rise monotonically, so the whole wheel can take it', mono(lip.piece.outer) && mono(lip.piece.inner));
+    check('...and it passes the wall gate, with a real rim to measure', lip.wall.pass && lip.wall.rim_mm >= W.NSO_wheelFloor(0.4),
+      'thinnest ' + lip.wall.thinnest + ' ' + lip.wall.min_mm.toFixed(2) + ' mm, rim ' + lip.wall.rim_mm.toFixed(2) + ' mm');
+    /* the thinnest place is the rim chord (0.6 of the thickness, by design); everywhere along the lifted underside the slab is
+       the plate's own 6 mm: every underside point is 6 mm from the top face (the last stretch, round the rim, excepted). */
+    let thickest = 0, thinnest = Infinity;
+    for (let i = 2; i < lip.piece.outer.length - 14; i++) {
+      const d = W.NSO_wheelDistToProfile(lip.piece.outer[i].r, lip.piece.outer[i].z, lip.piece.inner);
+      thickest = Math.max(thickest, d); thinnest = Math.min(thinnest, d);
+    }
+    check('...the slab keeps the plate\'s own thickness all the way up the lift (6 mm), the rim chord being the thinnest place',
+      Math.abs(thickest - 6) < 0.05 && Math.abs(thinnest - 6) < 0.05 && Math.abs(lip.wall.rim_mm - 3.6) < 0.01,
+      'underside to top face ' + thinnest.toFixed(3) + '..' + thickest.toFixed(3) + ' mm, rim chord ' + lip.wall.rim_mm.toFixed(2) + ' mm');
+    check('...the flat part stays flat out to the start radius', Math.abs(lip.piece.outer[1].r - 0.6 * R0) < 1e-6 && lip.piece.outer[1].z === lip.piece.outer[0].z);
+    check('...the lift is tangent to the flat (no crease): the first stretch of the underside is nearly level',
+      (lip.piece.outer[3].z - lip.piece.outer[2].z) / (lip.piece.outer[3].r - lip.piece.outer[2].r) < 0.02);
+    const soup = W.NSO_wheelRevolve(lip.piece);
+    check('...it revolves to a mesh', soup.length > 9 * 1000);
+    save('lipped-plate', lip.piece);
+  }
+
+  check('the piece\'s height is its highest point on EITHER profile - on a lipped plate the top face, not where the outside stops',
+    lip.ok && W.NSO_wheelTopZ(lip.piece) > lip.piece.outer[lip.piece.outer.length - 1].z &&
+    Math.abs(W.NSO_wheelHeightOf(lip.piece) - (6 + 10)) < 1e-3 && /16\.0 mm tall/.test(W.NSO_wheelStatus(lip.piece, 'x')),
+    W.NSO_wheelHeightOf(lip.piece).toFixed(3) + ' mm, status: ' + W.NSO_wheelStatus(lip.piece, 'x').slice(0, 30));
+
+  /* the angle is solved for the height, the flare is a fraction of the length */
+  const taller = W.NSO_wheelLip(plate, { height: 14, at: 0.6, flare: 0.5 });
+  const flatter = W.NSO_wheelLip(plate, { height: 6, at: 0.6, flare: 0.5 });
+  check('a higher lip leans further, a lower one less', taller.ok && flatter.ok && taller.angle > lip.angle && lip.angle > flatter.angle,
+    flatter.angle.toFixed(1) + ' < ' + lip.angle.toFixed(1) + ' < ' + taller.angle.toFixed(1) + ' degrees');
+  const longFlare = W.NSO_wheelLip(plate, { height: 10, at: 0.6, flare: 0.9 });
+  check('a longer Flare is a longer, rounder ease into the lift - and so, for the same height, a steeper finish',
+    longFlare.ok && longFlare.flareLength > lip.flareLength && longFlare.angle > lip.angle,
+    lip.flareLength.toFixed(1) + ' -> ' + longFlare.flareLength.toFixed(1) + ' mm, ' + lip.angle.toFixed(1) + ' -> ' + longFlare.angle.toFixed(1) + ' degrees');
+  const farOut = W.NSO_wheelLip(plate, { height: 2, at: 0.85, flare: 0.5 });
+  const farIn = W.NSO_wheelLip(plate, { height: 2, at: 0.3, flare: 0.5 });
+  check('starting the lift further in leaves a longer bent part and a gentler angle',
+    farOut.ok && farIn.ok && farIn.angle < farOut.angle, farIn.angle.toFixed(1) + ' vs ' + farOut.angle.toFixed(1) + ' degrees');
+
+  /* limits: strict refuses, clamped caps and says */
+  const tooHigh = W.NSO_wheelLip(plate, { height: 60, at: 0.6, flare: 0.5 });
+  check('the strict Lip refuses a rim that would have to lean past 70 degrees, naming the limit',
+    !tooHigh.ok && /70 degrees/.test(tooHigh.reason) && tooHigh.piece === plate, tooHigh.reason);
+  const capped = W.NSO_wheelLip(plate, { height: 60, at: 0.6, flare: 0.5, clamp: true });
+  check('...and the clamped one does what it can: capped at 70 degrees, clay still conserved, and says so',
+    capped.ok && capped.clamped && Math.abs(capped.angle - 70) < 1e-6 && capped.rise < 60 && Math.abs(V(capped.piece) - V(plate)) / V(plate) < 1e-9 &&
+    /cannot lean past 70/.test(capped.reason), capped.reason);
+  const tight = W.NSO_wheelLip(plate, { height: 10, at: 0.8, flare: 0.05, clamp: true });
+  check('a flare too tight for the thickness is lengthened so the top face does not fold',
+    tight.ok && tight.lengthened && /does not fold/.test(tight.reason) && mono(tight.piece.inner), tight.reason);
+
+  /* what it is not for */
+  check('a ball is not a plate: Lip says to press it first', !W.NSO_wheelLip(std, { height: 5 }).ok && /press the ball flat first/.test(W.NSO_wheelLip(std, { height: 5 }).reason));
+  const bump = W.NSO_wheelFlatten(std, { height: 30 }).piece;
+  check('a thick bulge is not a plate either', !W.NSO_wheelLip(bump, { height: 5 }).ok && /bulge, not a plate/.test(W.NSO_wheelLip(bump, { height: 5 }).reason),
+    W.NSO_wheelLip(bump, { height: 5 }).reason);
+  check('an opened piece is not a plate', !W.NSO_wheelLip(W.NSO_wheelOpen(std, {}).piece, { height: 5 }).ok);
+  check('a lip of nothing is not a lip', !W.NSO_wheelLip(plate, { height: 0 }).ok);
+
+  /* in the recipe */
+  const R0r = () => W.NSO_wheelNewRecipe({});
+  const base = (() => { const r = R0r(); r.thick = 6; return W.NSO_wheelBuild(r); })();
+  const withLip = (() => { const r = R0r(); r.thick = 6; r.lip.h = 8; return W.NSO_wheelBuild(r); })();
+  check('Lip is a recipe stage: Thick 6 + Lip 8 builds the lipped plate, on the same clay',
+    withLip.ok && withLip.piece.ops.join('>') === 'ball>flatten>lip' && Math.abs(V(withLip.piece) - V(base.piece)) / V(base.piece) < 1e-9, withLip.piece.ops.join('>'));
+  check('...and Lip back to 0 is the flat plate exactly (nothing baked)', (() => { const r = R0r(); r.thick = 6; r.lip.h = 0; const b = W.NSO_wheelBuild(r);
+    return !b.piece.inner && Math.abs(V(b.piece) - V(base.piece)) < 1e-9 && b.piece.ops.join('>') === 'ball>flatten'; })());
+  check('the Lip range is half the plate\'s radius, from the same pass', withLip.ranges.lip.max > 10 && withLip.ranges.lip.max <= (base.piece.press.c + base.piece.press.e) * 0.5 + 0.5,
+    JSON.stringify(withLip.ranges.lip));
+  const unpressed = (() => { const r = R0r(); r.lip.h = 8; return W.NSO_wheelBuild(r); })();
+  check('on an unpressed ball Lip stands down with a reason, and the range says why',
+    unpressed.ok && !unpressed.piece.inner && unpressed.notes.some(n => /Lip: press the ball into a plate first/.test(n)) && unpressed.ranges.lip.max === 0 && /press the ball into a plate/.test(unpressed.ranges.lip.why),
+    unpressed.notes.join(' | '));
+  const withDeep = (() => { const r = R0r(); r.thick = 10; r.depth = 2; r.lip.h = 8; return W.NSO_wheelBuild(r); })();
+  check('an opened piece is not a plate: Deep wins and Lip stands down, saying so',
+    withDeep.ok && withDeep.piece.ops.join('>') === 'ball>flatten>open' && withDeep.notes.some(n => /Lip: an opened piece/.test(n)), withDeep.notes.join(' | '));
+  const lipSoft = (() => { const r = R0r(); r.thick = 6; r.lip.h = 20; return W.NSO_wheelBuild(r); })();
+  check('a lip past what the length allows is clamped, with the reason in the notes',
+    lipSoft.ok && lipSoft.notes.some(n => /Lip limited to/.test(n)), lipSoft.notes.join(' | '));
+  const pulledLip = (() => { const r = R0r(); r.thick = 6; r.lip.h = 8; r.pull = { z: 0.7, dr: 3, wide: 0.3 }; return W.NSO_wheelBuild(r); })();
+  check('Pull still works on a lipped plate (the stages after it take it as they take a bowl)',
+    pulledLip.ok && pulledLip.piece.ops.join('>') === 'ball>flatten>lip>pull' && Math.abs(V(pulledLip.piece) - V(base.piece)) / V(base.piece) < 1e-9, pulledLip.piece.ops.join('>'));
+  const clone = W.NSO_wheelCloneRecipe((() => { const r = R0r(); r.lip.h = 5; return r; })());
+  clone.lip.h = 9;
+  check('a cloned recipe carries its own lip', clone.lip.h === 9 && W.NSO_wheelNewRecipe({}).lip.h === 0);
+  const t0 = Date.now(); for (let i = 0; i < 6; i++) { const r = R0r(); r.thick = 6; r.lip.h = 6 + i; W.NSO_wheelBuild(r); }
+  const per = (Date.now() - t0) / 6;
+  check('a whole rebuild with a lip is still fast enough for a live drag', per < 300, per.toFixed(0) + ' ms each');
 }
 
 console.log('\n== 8. what this first version does not do, and says so ==');

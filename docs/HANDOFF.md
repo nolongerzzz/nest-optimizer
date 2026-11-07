@@ -171,6 +171,7 @@ merging its list by hand. The list below is generated.
 - [Weave - lasso a patch out along its own triangles, clone its surface as a fresh weave, reattach it rim to rim (2026-11-01)](handoff/weave.md)
 - [Wheel card cleanup - one Scale slider, no number boxes](handoff/wheel-card-cleanup-one-scale-slider-no-number-boxes.md)
 - [Wheel: Flatten - a ball pressed to a disc, the clay conserved](handoff/wheel-flatten-a-ball-pressed-to-a-disc-clay-conserved.md)
+- [Wheel: Lip - a flared rim on a pressed plate](handoff/wheel-lip-a-flared-rim-on-a-pressed-plate.md)
 - [Wheel: the start - a standard ball that drops its own piece](handoff/wheel-start-a-standard-ball-that-drops-its-own-piece.md)
 - [Wheel: the piece is a recipe - every slider live all the time](handoff/wheel-the-piece-is-a-recipe-every-slider-live-all-the-time.md)
 - [Wheel: the white edge stays on while the sliders move](handoff/wheel-the-white-edge-stays-on-while-the-sliders-move.md)
