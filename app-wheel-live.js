@@ -173,7 +173,7 @@
     get: function (r) { return r.pull.dr || 0; },
     put: function (r, v) { r.pull.dr = v; } });
   define('wide', { slider: 'rng-wheel-soft', read: 'out-wheel-soft', unit: ' %',
-    get: function (r) { return Math.round((r.pull.wide == null ? 0.25 : r.pull.wide) * 100); },
+    get: function (r) { return Math.round((r.pull.wide == null ? 0.4 : r.pull.wide) * 100); },
     put: function (r, v) { r.pull.wide = v / 100; } });
   define('trim', { slider: 'rng-wheel-trim', read: 'out-wheel-trim', unit: ' mm',
     get: function (r) { return r.trim || 0; },

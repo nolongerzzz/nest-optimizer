@@ -509,9 +509,9 @@ was over 1100 px with number boxes.
 
 *Conserving the clay.* Press, open and pull all keep the volume: press by solving the
 rounded-slab family; **Open** by stretching everything above the cavity floor until
-the volume is what it was (volume is linear in that stretch, so two evaluations find it
-exactly; the base under the cavity is untouched); **Pull** by scaling heights about the
-base by `V0/V1`. A pull that moves nothing refuses. Trim takes clay away and Rim + adds
+the volume is what it was (volume is linear in the stretch, so two evaluations find it
+exactly; the base under the cavity is untouched; the stretch **eases in** on a ramp, see
+[A soft pull](#a-soft-pull)); **Pull** by scaling heights about the base by `V0/V1`. A pull that moves nothing refuses. Trim takes clay away and Rim + adds
 it, and both say so.
 
 *Which shapes come out.* With a 3 mm wall and the clay conserved, a cavity that spans
@@ -525,11 +525,47 @@ strict move **bakes** — what it makes becomes the recipe's `base` and the slid
 neutral on top of it (`NSO_wheelRecipeOn`). The sliders never come through there
 (`NSO_wheelSetRecipe`).
 
-**What this does not do yet.** Dragging *on the piece* (silhouette handles) is the next
-way in. A single Pull is still one bump, not several; two belly pulls need a second
-control. Open's cavity is as wide as W allows, so a narrow mouth needs a "mouth"
-control. The ghost the previous version drew for Pull is gone — the piece itself now
-answers every slider — and is the right shape to bring back for dragging on the piece.
+**What this does not do yet.** A single Pull is one bulge, not several: two bellies need a
+second control. Open's cavity is as wide as W allows, so a narrow mouth needs a "mouth"
+control. Scale, Trim, Rim + and Soft have no ball on the piece, nor do Lip at and Flare.
+
+### A soft pull
+
+Pulls used to look like a **funnel**: two straight cones meeting at a sharp ridge, and on a
+pinch a neck with hard shoulders. Measured on a Ø54 piece with Pull +24 at 40%, Soft 60%, the
+outside profile turned **86 degrees** between neighbouring segments (8 with no pull). Three
+things were behind it, and none of them was the falloff curve being "too sharp":
+
+1. **Too few samples where the wall moves.** An opened piece's outside had 35 samples in all, a
+   dozen on its tall wall, and a 24 mm pull moves each by a different amount — so the wall between
+   two samples is a straight facet whatever curve moved them. Now `refine` cuts every segment in
+   the pull's band into pieces no longer than a step **in height** (`NSO_wheelRefineBand`; the new
+   samples lie on the old segments, so the shape is unchanged; a flat face is left alone). The step
+   follows how hard the falloff bends — `0.07·taper² / (4.93·amplitude)`, a turn of about 4 degrees
+   between neighbours, from 0.04 mm for a narrow deep pull to 1 mm for a broad shallow one, never
+   more than ~260 samples across the band.
+2. **The curve itself.** The strict API's falloff is `(1 − u²)²`, tangent at its edge but with a
+   curvature jump there. The Wheel's pull now uses **Tube Edge's Smooth neck curve**,
+   `r = r_mid + Δr·(1 − cos 2πs/L)/2` — a raised cosine with a taper of L/2 — tangent where it
+   leaves the wall and rounded at the waist. Pulling a plain tube with it **reproduces Tube Edge's
+   Smooth neck to 5.6 microns** (tested), so a pull and a Tube Edge neck of the same Δr and length
+   are the same curve. (Funnel is Tube Edge's other profile: straight in, straight out.)
+3. **A crease at the foot of every opened piece.** Open stretched everything above the cavity floor
+   by one factor — exact for the clay, but the wall just below the split kept its slope and the wall
+   above had it divided by the stretch (×14 and more): a **35 degree kink** in the outside before any
+   pull. The stretch now eases in, `z' = z + a·G(z)` with `G` the integral of a smoothstep from the
+   floor over 60% of the height above it, so the base is untouched, the full stretch is reached
+   smoothly, and volume is still linear in `a` (two evaluations still find it exactly). 34.6 → 6.4
+   degrees. The cost: the ramp stretches the lower wall less, so an opened piece comes out a little
+   taller for the same clay (74.9 → 80.8 mm for Thick 20, Deep 5), and the stretch factors are large
+   (×21 there, ×75 for a 0.8 mm opening of a 10.9 mm disc) because a thin shell really does need that
+   to give back what its cavity displaced.
+
+Result on the three pulls above: **86 / 63 / 59 degrees → 5 / 8 / 6**, and the thinnest wall on the
+first goes from 0.47 mm (under the nozzle floor, because the facets cut the bulge's corners) to
+1.5 mm. **Soft** now reaches 100% of the height (it stopped at 60) and defaults to **40%**. The strict
+`NSO_wheelPull` is unchanged unless asked (`kernel: 'cosine'`, `refine: true` — what the recipe
+passes), so its pinned behaviour stands.
 
 ### Lip
 

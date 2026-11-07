@@ -613,6 +613,26 @@ withApp(async (page, logs) => {
   check('Pull back to 0: the bowl exactly as it was - the pull was never baked in',
     Math.abs(back.h - bowl.h) < 1e-9 && Math.abs(back.d - bowl.d) < 1e-9 && back.ops === bowl.ops, back.h.toFixed(3) + ' vs ' + bowl.h.toFixed(3));
 
+  /* SOFT: the pull is Tube Edge's Smooth curve on a finely sampled wall - no funnel */
+  const softS = await page.evaluate(() => { const e = document.getElementById('rng-wheel-soft'); return { max: parseFloat(e.max), min: parseFloat(e.min) }; });
+  check('Soft reaches 100% of the height (it stopped at 60)', softS.max === 100 && softS.min === 5, JSON.stringify(softS));
+  const worstTurnNow = () => page.evaluate(() => {
+    const c = NSO_wheelSession.outer; let worst = 0;
+    for (let i = 1; i + 1 < c.length; i++) {
+      const ax = c[i].r - c[i - 1].r, az = c[i].z - c[i - 1].z, bx = c[i + 1].r - c[i].r, bz = c[i + 1].z - c[i].z;
+      const la = Math.hypot(ax, az), lb = Math.hypot(bx, bz);
+      if (la < 1e-6 || lb < 1e-6) continue;
+      worst = Math.max(worst, Math.acos(Math.max(-1, Math.min(1, (ax * bx + az * bz) / (la * lb)))) * 180 / Math.PI);
+    }
+    return worst;
+  });
+  await setSlider('rng-wheel-soft', 60); await setSlider('rng-wheel-pull-dr', 12);
+  const turn = await worstTurnNow();
+  check('a big, broad pull (+12 mm, Soft 60%) is smooth: no segment turns more than 12 degrees from its neighbour (it was 60-86 before)', turn < 12, turn.toFixed(1) + ' degrees');
+  check('...and the wall has more samples where the pull reaches (it is drawn finely enough to show the curve)',
+    await page.evaluate(() => NSO_wheelSession.outer.length) > 80);
+  await setSlider('rng-wheel-pull-dr', 0); await setSlider('rng-wheel-soft', 40);
+
   /* H resizes the ball under everything */
   const hb = await info();
   await setSlider('rng-wheel-scale', 35);

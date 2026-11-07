@@ -1063,7 +1063,8 @@ console.log('\n== 7e. the recipe: every slider live, every limit a clamp, the cl
   const toomuch = mk(20, 50);
   check('Deep past what the shape takes is clamped, and says what the most is',
     toomuch.ok && toomuch.piece.inner && toomuch.notes.some(s => /Deep limited to/.test(s)), toomuch.notes.join(' | '));
-  const thinPull = (() => { const r = R0(); r.thick = 20; r.depth = 5; r.pull = { z: 0.5, dr: 40, wide: 0.3 }; return W.NSO_wheelBuild(r); })();
+  /* a narrow pinch the wall cannot take (a broad one now fits: the smooth, finely sampled pull keeps the wall's thickness) */
+  const thinPull = (() => { const r = R0(); r.thick = 20; r.depth = 5; r.pull = { z: 0.5, dr: -60, wide: 0.15 }; return W.NSO_wheelBuild(r); })();
   check('a Pull the wall cannot take is clamped, and says the wall stopped it',
     thinPull.ok && thinPull.notes.some(s => /stopped there because the wall/.test(s)) && W.NSO_wheelWall(thinPull.piece).pass,
     thinPull.notes.join(' | '));
@@ -1303,6 +1304,116 @@ console.log('\n== 7g. Lip: a flared rim on a pressed plate ==');
   const t0 = Date.now(); for (let i = 0; i < 6; i++) { const r = R0r(); r.thick = 6; r.lip.h = 6 + i; W.NSO_wheelBuild(r); }
   const per = (Date.now() - t0) / 6;
   check('a whole rebuild with a lip is still fast enough for a live drag', per < 300, per.toFixed(0) + ' ms each');
+}
+
+/* =====================================================================
+   7h. A soft pull: Tube Edge's Smooth curve, drawn on a wall sampled finely enough to show it
+   ===================================================================== */
+console.log('\n== 7h. a soft pull: the Smooth neck\'s cosine on a finely sampled wall ==');
+{
+  /* the sharpest turn between neighbouring segments of a profile, in degrees */
+  const worstTurn = c => {
+    let worst = 0;
+    for (let i = 1; i + 1 < c.length; i++) {
+      const ax = c[i].r - c[i - 1].r, az = c[i].z - c[i - 1].z, bx = c[i + 1].r - c[i].r, bz = c[i + 1].z - c[i].z;
+      const la = Math.hypot(ax, az), lb = Math.hypot(bx, bz);
+      if (la < 1e-6 || lb < 1e-6) continue;
+      worst = Math.max(worst, Math.acos(Math.max(-1, Math.min(1, (ax * bx + az * bz) / (la * lb)))) * 180 / Math.PI);
+    }
+    return worst;
+  };
+  const V = p => W.NSO_wheelVolume(p);
+  const rr = W.NSO_wheelNewRecipe({ ballRadius: 27, wall: 3.6 }); rr.thick = 10.9; rr.depth = 0.8;
+  const base = W.NSO_wheelBuild(rr).piece;
+  const sp = W.NSO_wheelSpan(base.outer), H = sp.hi - sp.lo;
+
+  /* Tube Edge's Smooth neck is r = r_mid + dr (1 - cos(2 pi s / L)) / 2 over a band of length L.
+     The Wheel's pull with the cosine falloff and a taper of L/2 is that curve: pull a plain straight
+     cylinder and compare. */
+  const cyl = (() => {
+    const o = [{ z: 0, r: 0 }, { z: 0, r: 20 }, { z: 60, r: 20 }, { z: 60, r: 0 }];
+    const p = { outer: o, inner: null, nozzle: 0.4, wall: 3, segments: 96, target: null, sizing: null, ops: ['ball'], budget: { start: 0, added: 0, trimmed: 0 } };
+    p.budget.start = W.NSO_wheelVolume(p) * 2;       // room to add: this check is about the curve, not the clay
+    return p;
+  })();
+  const L = 38, dr = 7.5;
+  const tp = W.NSO_wheelPull(cyl, { z: 30, dr: dr, taper: L / 2, kernel: 'cosine', refine: true });
+  check('a pull on a plain tube lands', tp.ok, tp.reason);
+  if (tp.ok) {
+    let worst = 0, n = 0;
+    for (let z = 30 - L / 2 + 0.3; z < 30 + L / 2 - 0.3; z += 0.7) {
+      const want = 20 + dr * (1 - Math.cos(2 * Math.PI * (z - (30 - L / 2)) / L)) / 2;
+      worst = Math.max(worst, Math.abs(W.NSO_wheelRadiusAt(tp.piece.outer, z) - want)); n++;
+    }
+    check('...IS Tube Edge\'s Smooth neck: the same cosine, r = r_mid + dr (1 - cos 2 pi s / L) / 2, to a few microns',
+      worst < 0.01, n + ' heights checked, worst difference ' + (worst * 1000).toFixed(1) + ' microns');
+    check('...and it leaves the tube tangent at both ends of the band (no step, no kink)',
+      Math.abs(W.NSO_wheelRadiusAt(tp.piece.outer, 30 - L / 2 - 0.2) - 20) < 1e-9 && Math.abs(W.NSO_wheelRadiusAt(tp.piece.outer, 30 - L / 2 + 0.5) - 20) < 0.03);
+  }
+
+  /* the owner's settings: Scale 54, Wall 3.6, Thick 10.9, Deep 0.8; Pull +24 at 40% and -24 at 63%, Soft 60% */
+  const pull = (d, at, w, o) => W.NSO_wheelPullClamped(base, Object.assign({ z: sp.lo + at * H, dr: d, taper: w * H }, o));
+  const cases = [[24, 0.40, 0.60], [-24, 0.63, 0.60], [10, 0.50, 0.25]];
+
+  /* The wall the owner first saw: Open stretched everything above the cavity floor by one factor, which left a
+     35 degree crease at the foot AND only 35 samples on the whole outside. Rebuild that piece (a hard stretch,
+     band 0) to show what the old pull did on it. */
+  const coarse = (() => {
+    const r0 = W.NSO_wheelNewRecipe({ ballRadius: 27, wall: 3.6 }); r0.thick = 10.9;
+    const pressed = W.NSO_wheelBuild(r0).piece, o = W.NSO_wheelOpen(pressed, { depth: 0.8 }).piece;
+    const hard = W.NSO_wheelStretchAbove(o, o.inner[0].z, V(pressed), { band: 0 });
+    return Object.assign({}, o, { outer: hard.outer, inner: hard.inner });
+  })();
+  const sc = W.NSO_wheelSpan(coarse.outer), Hc = sc.hi - sc.lo;
+  const pullOn = (b, bs, H, c, o) => W.NSO_wheelPullClamped(b, Object.assign({ z: bs.lo + c[1] * H, dr: c[0], taper: c[2] * H }, o));
+  const old = cases.map(c => worstTurn(pullOn(coarse, sc, Hc, c, {}).piece.outer));
+  const softCoarse = cases.map(c => worstTurn(pullOn(coarse, sc, Hc, c, { kernel: 'cosine', refine: true }).piece.outer));
+  const soft = cases.map(c => worstTurn(pull(c[0], c[1], c[2], { kernel: 'cosine', refine: true }).piece.outer));
+  check('the old pull on the old wall drew straight facets: 59 to 86 degrees between neighbouring segments on these three pulls',
+    old.every(t => t > 50), old.map(t => t.toFixed(0)).join(' / ') + ' degrees');
+  check('the soft pull on that same old wall turns no more than 12 degrees anywhere (the corners are gone)',
+    softCoarse.every(t => t < 12), softCoarse.map(t => t.toFixed(1)).join(' / ') + ' degrees');
+  check('...and is at least five times gentler than before on every one', softCoarse.every((t, i) => t * 5 < old[i]));
+  check('on the wall Open builds now, the same three pulls turn no more than 12 degrees either',
+    soft.every(t => t < 12), soft.map(t => t.toFixed(1)).join(' / ') + ' degrees');
+
+  /* THE FOOT. The stretch used to have a hard split at the cavity floor: the wall below it kept its slope and the
+     wall above had it divided by the stretch (x14 and more), a kink in every opened piece before any pull. */
+  const openedNow = (() => { const r1 = W.NSO_wheelNewRecipe({}); r1.thick = 20; r1.depth = 5; return W.NSO_wheelBuild(r1).piece; })();
+  const openedHard = (() => {
+    const r1 = W.NSO_wheelNewRecipe({}); r1.thick = 20; const pressed = W.NSO_wheelBuild(r1).piece, o = W.NSO_wheelOpen(pressed, { depth: 5 }).piece;
+    const hard = W.NSO_wheelStretchAbove(o, o.inner[0].z, V(pressed), { band: 0 });
+    return Object.assign({}, o, { outer: hard.outer, inner: hard.inner });
+  })();
+  check('an opened piece no longer has a crease at its foot: the stretch eases in (it was a 35 degree kink with the hard split)',
+    worstTurn(openedHard.outer) > 25 && worstTurn(openedNow.outer) < 12,
+    worstTurn(openedHard.outer).toFixed(1) + ' -> ' + worstTurn(openedNow.outer).toFixed(1) + ' degrees');
+  check('...the clay is still exactly conserved by it', Math.abs(V(openedNow) - V(W.NSO_wheelBuild((() => { const r1 = W.NSO_wheelNewRecipe({}); r1.thick = 20; return r1; })()).piece)) /
+    V(openedNow) < 1e-9);
+  check('...and the base under the cavity is still untouched', openedNow.outer[0].z === 0 && openedNow.inner[0].z > 0);
+  const ref = pull(24, 0.40, 0.60, { kernel: 'cosine', refine: true });
+  check('...with the clay still exactly conserved and the wall comfortably inside the floor',
+    ref.ok && Math.abs(V(ref.piece) - V(base)) / V(base) < 1e-9 && W.NSO_wheelWall(ref.piece).min_mm > 1);
+  check('...refinement adds samples where the pull reaches, without changing the shape (more samples than before)',
+    ref.piece.outer.length > base.outer.length * 2, base.outer.length + ' -> ' + ref.piece.outer.length);
+
+  /* refinement leaves the shape alone: refining a profile with no pull applied is the same curve */
+  const rb = W.NSO_wheelRefineBand(base.outer, sp.lo, sp.hi, 0.5);
+  let drift = 0;
+  for (let z = sp.lo + 0.1; z < sp.hi; z += 0.37) drift = Math.max(drift, Math.abs(W.NSO_wheelRadiusAt(rb, z) - W.NSO_wheelRadiusAt(base.outer, z)));
+  check('refining a wall adds samples ON it: the shape is unchanged', rb.length > base.outer.length && drift < 1e-9, 'drift ' + drift.toExponential(1));
+  const flatRun = [{ z: 0, r: 0 }, { z: 0, r: 30 }, { z: 5, r: 30 }];
+  check('a flat face is left alone (a pull moves it all together): no samples added along a horizontal run',
+    W.NSO_wheelRefineBand(flatRun, 0, 5, 0.5).filter(q => q.z === 0).length === 2);
+
+  /* the strict API keeps its old behaviour unless asked */
+  const strict = W.NSO_wheelPull(base, { z: sp.lo + 0.5 * H, dr: 5, taper: 10, conserve: true });
+  check('the strict Pull is unchanged unless asked: the biweight, no extra samples', strict.ok && strict.piece.outer.length === base.outer.length,
+    strict.ok ? strict.piece.outer.length + ' samples' : strict.reason);
+  check('the recipe\'s pull is the soft one: Soft defaults to 40% of the height', W.NSO_wheelNewRecipe({}).pull.wide === 0.4);
+  const viaRecipe = (() => { const r = W.NSO_wheelNewRecipe({ ballRadius: 27, wall: 3.6 }); r.thick = 10.9; r.depth = 0.8; r.pull = { z: 0.4, dr: 24, wide: 0.6 }; return W.NSO_wheelBuild(r); })();
+  check('built through the recipe (what the slider and the yellow ball do), the same pull turns under 12 degrees',
+    viaRecipe.ok && worstTurn(viaRecipe.piece.outer) < 12, worstTurn(viaRecipe.piece.outer).toFixed(1) + ' degrees');
 }
 
 console.log('\n== 8. what this first version does not do, and says so ==');

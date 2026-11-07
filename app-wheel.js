@@ -850,6 +850,46 @@ function NSO_wheelPchip(points) {
   };
 }
 
+/* More samples where a pull will move the wall. A profile has only as many samples as its
+   history left it - a pressed, opened piece's tall wall might have a dozen - and a pull of
+   20 mm moves each of them by a different amount, so the wall between two samples is a
+   straight facet however smooth the curve that moved them (measured: a turn of 86 degrees
+   between neighbouring segments on a 24 mm pull, against 8 with no pull). So inside the
+   band the pull reaches, every segment longer than `step` is cut into pieces no longer
+   than it IN HEIGHT. They lie on the segment they cut, so the shape does not change;
+   horizontal runs (a flat face) are left alone, since a pull moves them all together. */
+function NSO_wheelRefineBand(profile, zLo, zHi, step) {
+  var out = [{ z: profile[0].z, r: profile[0].r }];
+  for (var i = 1; i < profile.length; i++) {
+    var a = profile[i - 1], b = profile[i];
+    if (Math.abs(b.z - a.z) > 1e-6 && Math.max(a.z, b.z) >= zLo && Math.min(a.z, b.z) <= zHi) {
+      /* by HEIGHT, not by length: a pull moves a sample by a function of its z, so a segment that covers
+         little z (the near-flat underside of a pressed edge) gains nothing from being cut finer */
+      var n = Math.ceil(Math.abs(b.z - a.z) / step);
+      for (var k = 1; k < n; k++) {
+        var t = k / n;
+        out.push({ z: a.z + t * (b.z - a.z), r: a.r + t * (b.r - a.r) });
+      }
+    }
+    out.push({ z: b.z, r: b.r });
+  }
+  return out;
+}
+
+/* The two falloff curves a pull can use, 1 at the pull and 0 at u = 1 and beyond (compact
+   support: the base and the rim stay exactly where they were).
+     biweight  (1 - u^2)^2     the strict API's, as it always was
+     cosine    (1 + cos(pi u))/2   Tube Edge's SMOOTH neck (nso_tube_neck.js): there the mid-wall
+                               follows r = r_mid + dr (1 - cos(2 pi s / L)) / 2 over a band of
+                               length L, which IS this with u = |s - L/2| / (L/2) and a taper of
+                               L/2 - tangent where it leaves the wall, rounded at the waist,
+                               easing in and out the same way. The Wheel's pull uses it, so a pull
+                               and a Tube Edge neck of the same Δr and length are the same curve. */
+function NSO_wheelFalloff(kind) {
+  if (kind === 'cosine') return function (u) { return (1 + Math.cos(Math.PI * u)) / 2; };
+  return function (u) { var k = 1 - u * u; return k * k; };
+}
+
 function NSO_wheelPull(piece, opts) {
   opts = opts || {};
   var pts = opts.points;
@@ -889,21 +929,39 @@ function NSO_wheelPull(piece, opts) {
      there; outside, that edge value faded out over `taper`. */
   var dLo = fit(pLo) - NSO_wheelRadiusAt(piece.outer, pLo);
   var dHi = fit(pHi) - NSO_wheelRadiusAt(piece.outer, pHi);
+  var falloff = NSO_wheelFalloff(opts.kernel);
   function disp(z) {
     if (z >= pLo && z <= pHi) return fit(z) - NSO_wheelRadiusAt(piece.outer, z);
     var u, edge;
     if (z < pLo) { u = (pLo - z) / taper; edge = dLo; } else { u = (z - pHi) / taper; edge = dHi; }
     if (u >= 1) return 0;
-    var k = 1 - u * u;
-    return edge * k * k;
+    return edge * falloff(u);
   }
 
   var outer = NSO_wheelClone(piece.outer);
+  var band = null;
+  if (opts.refine) {
+    /* How fine? The falloff bends hardest where its curvature is (pi^2/2) amp / taper^2, and the turn
+       between neighbouring segments is about that curvature times their spacing; keeping it under
+       ~4 degrees (0.07 rad) gives a step of 0.07 taper^2 / (4.93 amp). A narrow, deep pull needs a
+       fine wall (down to 0.04 mm), a broad shallow one hardly any (up to 1 mm); and never more than
+       ~260 samples across the band, so a rebuild stays fast. */
+    var amp = Math.max(Math.abs(dLo), Math.abs(dHi), 1);
+    for (var q = 0; q < path.length; q++) amp = Math.max(amp, Math.abs(path[q].r - NSO_wheelRadiusAt(piece.outer, path[q].z)));
+    var want = Math.min(1, Math.max(0.04, 0.07 * taper * taper / (4.93 * amp)));
+    band = { lo: pLo - taper, hi: pHi + taper,
+             step: (typeof opts.refineStep === 'number' && opts.refineStep > 0) ? opts.refineStep : want };
+    band.step = Math.max(band.step, (Math.min(band.hi, span.hi) - Math.max(band.lo, span.lo)) / 260);
+    outer = NSO_wheelRefineBand(outer, band.lo, band.hi, band.step);
+  }
+  var movedMax = 0;
   for (i = 0; i < outer.length; i++) {
     /* The two ends of the profile sit ON the axis and must stay there: a pole
        or a base centre with r > 0 is a hole in the solid. */
     if (outer[i].r <= NSO_WHEEL_EPS) continue;
-    outer[i].r = Math.max(0, outer[i].r + disp(outer[i].z));
+    var dd = disp(outer[i].z);
+    if (Math.abs(dd) > movedMax) movedMax = Math.abs(dd);
+    outer[i].r = Math.max(0, outer[i].r + dd);
   }
 
   var inner = null;
@@ -922,6 +980,7 @@ function NSO_wheelPull(piece, opts) {
       inner = built.inner;
     } else {
       inner = NSO_wheelClone(piece.inner);
+      if (band) inner = NSO_wheelRefineBand(inner, band.lo, band.hi, band.step);
       if (opts.carryInner !== false) {
         for (i = 0; i < inner.length; i++) {
           if (inner[i].r <= NSO_WHEEL_EPS) continue;
@@ -934,8 +993,7 @@ function NSO_wheelPull(piece, opts) {
   /* A pull that moved nothing is not a pull. Asking above the rim (or below
      the base) used to come back "ok" with the piece unchanged, which looks
      like it worked. */
-  var moved = 0;
-  for (i = 0; i < outer.length; i++) moved = Math.max(moved, Math.abs(outer[i].r - piece.outer[i].r));
+  var moved = movedMax;
   /* reshapeWall rebuilds the INSIDE from the outside, which is an action even
      when the outside does not move (straightening a wall that is straight). */
   if (moved < 1e-6 && !opts.reshapeWall) {
@@ -1595,7 +1653,8 @@ function NSO_wheelPullClamped(piece, opts) {
   var lo = 0, hi = 1, best = null, i;
   for (i = 0; i < 24; i++) {
     var mid = 0.5 * (lo + hi);
-    var r = NSO_wheelPull(piece, { z: opts.z, dr: opts.dr * mid, taper: opts.taper, reshapeWall: opts.reshapeWall, conserve: opts.conserve });
+    var r = NSO_wheelPull(piece, { z: opts.z, dr: opts.dr * mid, taper: opts.taper, reshapeWall: opts.reshapeWall, conserve: opts.conserve,
+                                   kernel: opts.kernel, refine: opts.refine, refineStep: opts.refineStep });
     if (r.ok) { lo = mid; best = r; } else hi = mid;
   }
   if (!best || !(lo > 1e-3)) {
@@ -1754,7 +1813,7 @@ function NSO_wheelNewRecipe(ball) {
     ball: Object.assign({ height: undefined, radius: undefined, wall: undefined, nozzle: undefined }, ball || {}),
     thick: null, depth: 0,
     lip: { h: 0, at: 0.6, flare: 0.5 },
-    pull: { z: 0.5, dr: 0, wide: 0.25 },
+    pull: { z: 0.5, dr: 0, wide: 0.4 },
     trim: 0, rim: 0
   };
 }
@@ -1794,23 +1853,50 @@ function NSO_wheelSplitAt(profile, z) {
   return out;
 }
 
-/* Stretch everything ABOVE zSplit by the factor that makes the volume Vtarget,
-   leaving what is below it (the base) exactly as it was. Volume is linear in the
-   stretch - every term of the contour integral above the split is a dz - so two
-   evaluations give the factor exactly. Returns { s, outer, inner } or null. */
-function NSO_wheelStretchAbove(piece, zSplit, Vtarget) {
+/* Stretch what is ABOVE zSplit until the volume is Vtarget, leaving what is below it (the base)
+   exactly as it was - and do it on a RAMP, not a hard split.
+
+   The first version scaled every height above the split by one factor s, which is exact (volume is
+   linear in s) but leaves a crease: the profile just below the split keeps its slope and the profile
+   just above has it divided by s - on a pressed ball's rounded edge, stretched fourteen-fold, a 35
+   degree kink in the outside wall at the foot, in every opened piece. So the stretch now eases in:
+
+       z' = z + a G(z)        G(z) = the integral of smoothstep((t - zSplit) / band) from zSplit to z
+
+   which is the base untouched at the split, the full stretch (1 + a) from `band` above it, and a
+   slope that changes smoothly in between. Every height moves by a quantity LINEAR in the amplitude
+   a, so every term of the volume is too, and two evaluations (a = 0 and a = 1) still give a exactly.
+   The profile is cut finer over the ramp first (on the segments it lies on: no shape change) so the
+   ramp is drawn rather than guessed at. Returns { s: the full factor 1 + a, a, outer, inner } or null. */
+function NSO_wheelStretchAbove(piece, zSplit, Vtarget, opts) {
+  opts = opts || {};
+  var top = Math.max(piece.outer[piece.outer.length - 1].z, piece.inner ? piece.inner[piece.inner.length - 1].z : -Infinity);
+  var band = (typeof opts.band === 'number' && opts.band >= 0) ? opts.band : 0.6 * Math.max(0, top - zSplit);
+  var step = Math.max(0.05, Math.max(0, top - zSplit) / 240);
   var outer0 = NSO_wheelSplitAt(piece.outer, zSplit), inner0 = NSO_wheelSplitAt(piece.inner, zSplit);
-  function scale(prof, s) {
-    return prof && prof.map(function (q) {
-      return q.z > zSplit + 1e-9 ? { z: zSplit + (q.z - zSplit) * s, r: q.r } : { z: q.z, r: q.r };
-    });
+  if (band > 1e-9) {
+    outer0 = NSO_wheelRefineBand(outer0, zSplit, zSplit + band, step);
+    if (inner0) inner0 = NSO_wheelRefineBand(inner0, zSplit, zSplit + band, step);
   }
-  function vol(s) { return NSO_wheelVolume({ outer: scale(outer0, s), inner: scale(inner0, s) }); }
-  var v1 = vol(1), up = vol(2) - v1;
+  function G(z) {
+    var d = z - zSplit;
+    if (d <= 0) return 0;
+    if (!(band > 1e-9)) return d;                              // a hard split: the old behaviour
+    var u = d / band;
+    return u >= 1 ? d - band / 2 : band * (u * u * u - u * u * u * u / 2);
+  }
+  function scale(prof, a) {
+    return prof && prof.map(function (q) { return q.z > zSplit + 1e-9 ? { z: q.z + a * G(q.z), r: q.r } : { z: q.z, r: q.r }; });
+  }
+  function vol(a) { return NSO_wheelVolume({ outer: scale(outer0, a), inner: scale(inner0, a) }); }
+  var v0 = vol(0), up = vol(1) - v0;
   if (!(up > 1e-9)) return null;
-  var s = 1 + (Vtarget - v1) / up;
-  if (!(s > 0.05) || !(s < 50)) return null;
-  return { s: s, outer: scale(outer0, s), inner: scale(inner0, s) };
+  var a = (Vtarget - v0) / up;
+  /* The guard is only for nonsense. A thin shell really does need a large stretch to give back the clay its
+     cavity displaced (x49 on a 0.8 mm opening of a 10.9 mm disc, with the old hard split too), so it sits well
+     clear of that: the wall and height gates downstream are what refuse a form that cannot be built. */
+  if (!(1 + a > 0.05) || !(1 + a < 1000)) return null;
+  return { s: 1 + a, a: a, outer: scale(outer0, a), inner: scale(inner0, a) };
 }
 
 /* OPEN, keeping the clay. NSO_wheelOpen cuts the cavity and throws the top of
@@ -1933,8 +2019,9 @@ function NSO_wheelBuild(recipe) {
   var pl = recipe.pull || {};
   if (Math.abs(pl.dr || 0) > 1e-9) {
     var pz = sp.lo + (pl.z == null ? 0.5 : pl.z) * (sp.hi - sp.lo);
-    var pw = Math.max(1, (pl.wide == null ? 0.25 : pl.wide) * (sp.hi - sp.lo));
-    var pr = NSO_wheelPullClamped(piece, { z: pz, dr: pl.dr, taper: pw });
+    var pw = Math.max(1, (pl.wide == null ? 0.4 : pl.wide) * (sp.hi - sp.lo));
+    /* the Smooth neck's own curve (Tube Edge), with the wall sampled finely enough to draw it */
+    var pr = NSO_wheelPullClamped(piece, { z: pz, dr: pl.dr, taper: pw, kernel: 'cosine', refine: true });
     if (pr.ok) { piece = pr.piece; if (pr.clamped) notes.push(pr.reason); }
     else notes.push(NSO_wheelFirstSentence(pr.reason));
   }
