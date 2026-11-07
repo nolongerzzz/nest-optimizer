@@ -1361,6 +1361,8 @@ select:focus, input:focus {
 .vp-row-carve { grid-template-columns: 1fr 88px; gap: 4px; align-items: stretch; }
 .vp-row-carve .btn { font-size: 11px; padding: 2px 4px; white-space: nowrap; }
 .vp-row-carve .vp-select { min-width: 0; font-size: 11px; padding: 0 4px; }
+/* Sculpt's second arm (Carve) starts under a hairline, so Brush and Carve read as two tools. */
+.vp-arm-start { margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(148, 163, 184, 0.25); }
 .vp-menu-body .btn-carve {
   color: #2dd4bf;
   border-color: rgba(45, 212, 191, 0.55);

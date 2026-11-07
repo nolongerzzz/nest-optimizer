@@ -114,8 +114,8 @@ const HOLDS = {
   // ADD: Fill/Densify · Foam · Thicken out · Thicken in (a live ghost: the slider, Set, Cancel in its panel) · Extend · Bridge
   'menu-add': ['btn-fill', 'btn-foam', 'foam-panel', 'btn-thicken-out', 'btn-thicken-in', 'thicken-panel',
                'btn-extend', 'inp-extend-mm', 'btn-bridge', 'bridge-panel'],
-  // SUBTRACT: Subtract B from A · Extract bit · Carve · Hollow · Hollow to safe min · Lift
-  'menu-bit': ['btn-subtract', 'btn-extract-bit', 'btn-carve', 'carve-blade', 'carve-depth', 'btn-hollow', 'inp-hollow-mm',
+  // SUBTRACT: Subtract B from A · Extract bit · Hollow · Hollow to safe min · Lift (Carve is in Sculpt)
+  'menu-bit': ['btn-subtract', 'btn-extract-bit', 'btn-hollow', 'inp-hollow-mm',
                'btn-hollow-safe', 'btn-lift', 'lift-panel', 'btn-detach'],
   // TEXT: the card is the menu - the text box, Font, Bold / Italic / Font file, Size, Depth, Angle, Mirror, the readout, STAMP, Cancel
   'menu-text': ['text-card', 'inp-text', 'sel-text-font', 'btn-text-bold', 'btn-text-italic', 'btn-text-font-file', 'inp-text-size',
@@ -128,8 +128,9 @@ const HOLDS = {
   // SURFACE & EDGES: Soften (R, Full wrap, the Soften card: four style tiles, Radius, readout, Cancel) · Mirror · Skin face · Skin wrap · Skin patch · Trace raster · Texture · Wrap (a sub-menu: one feature laid over a face)
   'menu-surface': ['inp-soften-r', 'chk-full-wrap', 'btn-soften', 'soften-shelf', 'btn-mirror', 'inp-mirror-plane',
                    'btn-skin-face', 'btn-skin-wrap', 'btn-skin-patch', 'btn-trace-raster', 'btn-texture', 'menu-surftex', 'btn-surftex-go'],
-  // SCULPT: the Brush (Carve / Emboss / Smooth here); Carve the tool is in Subtract
-  'menu-sculpt': ['btn-brush', 'sel-brush-mode', 'inp-brush-size', 'inp-brush-intensity', 'chk-brush-hard'],
+  // SCULPT: two arms. Brush (Emboss / Smooth here; Size, Force, Hard falloff) and Carve (ball-nose / flat shave / V-groove; Depth, Radius, Roll)
+  'menu-sculpt': ['btn-brush', 'sel-brush-mode', 'inp-brush-size', 'inp-brush-intensity', 'chk-brush-hard',
+                  'btn-carve', 'carve-blade', 'carve-depth', 'carve-a', 'carve-roll', 'carve-readout'],
   // SLICE (app-print.js): the plate's printer, Slice (and Cancel while it runs), the readout, Export .gcode.3mf, Preview in G-scope
   'menu-slice': ['slice-card', 'slice-profile', 'btn-slice-go', 'btn-slice-cancel', 'slice-readout', 'btn-slice-export', 'btn-slice-preview'],
   // CHECK & REPAIR: Check piece · Cap open faces · Repair · Seal · Non-solid · Solidify
@@ -140,7 +141,7 @@ const HOLDS = {
    tools/nso_subtract_card_drive_check.js holds every control. */
 const SUBTRACT_SECTIONS = [
   [null, 'SUBTRACT B FROM A', ['btn-subtract']],
-  [null, 'EXTRACT BIT', ['btn-extract-bit', 'btn-carve', 'carve-blade', 'carve-depth']],
+  [null, 'EXTRACT BIT', ['btn-extract-bit']],
   [null, 'PUNCH', ['btn-punch', 'punch-card']],
   [null, 'HOLLOW', ['btn-hollow', 'inp-hollow-mm', 'inp-hollow-slider', 'btn-hollow-safe']],
   [null, 'LIFT', ['btn-lift', 'lift-panel', 'btn-detach']],
@@ -151,7 +152,7 @@ const ORDERED = ['menu-shape', 'menu-add', 'menu-bit', 'menu-surface', 'menu-rep
 /* Soften's styles, in the shelf's order: Round, Corners, Corners+edges, Bevel. */
 const SOFTEN_STYLES = ['fillet', 'corners', 'cornersedges', 'chamfer'];
 const OPTIONS = { 'sel-te-verb': ['reducer', 'roll', 'neck'],
-                  'sel-brush-mode': ['carve', 'emboss', 'smooth'], 'sel-measure-mode': ['span', 'edge'],
+                  'sel-brush-mode': ['emboss', 'smooth'], 'sel-measure-mode': ['span', 'edge'],
                   'plate-grid-show': ['auto', 'on', 'off'] };
 
 /* Every control in the shell on claude-wip before v3 (9f68c20): each

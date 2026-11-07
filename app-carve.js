@@ -850,6 +850,17 @@
       if (el) el.addEventListener('input', function () { showRead(id); describe(); });
     });
     syncFields();
+    /* Carve lives in the Sculpt card (beside the Brush) and is armed only while that card
+       is open: shutting it - by its summary, by another panel opening, or by the leave-tool
+       gesture - puts Carve away. A MutationObserver on `open` rather than a 'toggle'
+       listener, for the reason app-join.js's one-panel rule gives: it runs as a microtask
+       and sees a programmatic close as well as a click. */
+    var card = $('menu-sculpt');
+    if (card && !card.dataset.nsoCarveWired && typeof MutationObserver === 'function') {
+      card.dataset.nsoCarveWired = '1';
+      new MutationObserver(function () { if (!card.open && state.carveArmed) setArmed(false); })
+        .observe(card, { attributes: true, attributeFilter: ['open'] });
+    }
     if (!window._carveStrokeBound) {
       window._carveStrokeBound = true;
       window.addEventListener('pointermove', onStrokeMove);

@@ -43,9 +43,7 @@ if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
 /* The tools, in order, with what each holds. Every id is the one the control had. */
 const SECTIONS = [
   [null, 'Subtract B from A', ['btn-subtract']],
-  [null, 'Extract bit',
-    ['btn-extract-bit', 'btn-carve', 'carve-blade', 'carve-depth-label', 'carve-depth', 'carve-a-label', 'carve-a',
-     'carve-b-label', 'carve-b', 'carve-roll-label', 'carve-roll', 'carve-readout']],
+  [null, 'Extract bit', ['btn-extract-bit']],
   [null, 'Punch',
     ['btn-punch', 'punch-card', 'inp-punch-dia', 'sel-punch-depth', 'punch-depth-mm-row', 'inp-punch-depth',
      'punch-pattern-row', 'punch-grid-rows', 'inp-punch-rows', 'inp-punch-cols', 'btn-punch-pitch-xy', 'punch-pitch-label',
@@ -60,8 +58,8 @@ const SECTIONS = [
   [null, 'Split to parts', ['btn-split-parts', 'split-count', 'split-readout']]
 ];
 /* ids that are hidden by their own state until a tool arms them (hit-test skips them):
-   Carve's L for a blade with no length, Punch's card until Punch is armed, Lift's panel until Lift is */
-const OWN_STATE = new Set(['carve-b-label', 'carve-b', 'punch-card', 'punch-depth-mm-row', 'punch-grid-rows', 'punch-pitch-y-row', 'punch-radial-rows',
+   Punch's card until Punch is armed, Lift's panel until Lift is */
+const OWN_STATE = new Set(['punch-card', 'punch-depth-mm-row', 'punch-grid-rows', 'punch-pitch-y-row', 'punch-radial-rows',
   'inp-punch-depth', 'inp-punch-rows', 'inp-punch-cols', 'inp-punch-pitch', 'inp-punch-pitch-y', 'btn-punch-pitch-xy',
   'punch-pitch-label', 'punch-anchor-row', 'inp-punch-count', 'inp-punch-radius', 'punch-readout', 'btn-punch-go',
   'btn-punch-cancel', 'inp-punch-dia', 'sel-punch-depth', 'punch-pattern-row',

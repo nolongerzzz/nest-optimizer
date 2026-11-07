@@ -467,7 +467,7 @@ async function part2() {
                  read: document.getElementById(id + '-read').textContent, shown: !el.closest('label').hidden && r.width > 0,
                  min: el.min, max: el.max };
       }));
-      await page.evaluate(() => { document.getElementById('menu-bit').open = true; });
+      await page.evaluate(() => { document.getElementById('menu-sculpt').open = true; });
       await setControls(page, { blade: 'flat', a: 4, b: 6, depth: 1, roll: 0 });
       let c = await rd();
       check('depth, width, length and roll are range sliders, all shown for a slab', c.every(x => x.type === 'range' && x.shown),
@@ -485,7 +485,7 @@ async function part2() {
       await setControls(page, { blade: 'vee', a: 90, b: 6, depth: 1, roll: 0 });
       c = await rd();
       check('a V-groove shows Angle in degrees and Length', c[1].label === 'Angle' && c[1].read === '90°' && c[2].shown && c[2].read === '6 mm', c.map(x => x.label + ' ' + x.read).join(' | '));
-      await page.evaluate(() => { document.getElementById('menu-bit').open = false; });
+      /* the card stays open: shutting Sculpt puts Carve away, and the drags below need it armed */
     }
     await lookDown(page, [cx, top, cz], 140);
 

@@ -287,8 +287,8 @@ function buildPlan() {
   V(COL, 'Add', 'btn-patch', 'Patch (click a hole)', { run: arm('btn-patch', [0, 1]) });
   V(COL, 'Subtract', 'btn-subtract', 'Subtract B from A', Object.assign({ run: press(['btn-subtract']) }, two));
   V(COL, 'Subtract', 'btn-extract-bit', 'Extract bit', Object.assign({ run: press(['btn-extract-bit']) }, two));
-  V(COL, 'Subtract', 'btn-carve', 'Carve (click a face)', { run: arm('btn-carve', [0]) });
-  V(COL, 'Subtract', 'carve-drag', 'Carve (drag a groove)', { run: async x => { await x.click('btn-carve'); await x.wait(200); await x.dragAt(x.pt(0, 1), x.pt(0, 3)); } });
+  V(COL, 'Sculpt', 'btn-carve', 'Carve (click a face)', { run: arm('btn-carve', [0]) });
+  V(COL, 'Sculpt', 'carve-drag', 'Carve (drag a groove)', { run: async x => { await x.click('btn-carve'); await x.wait(200); await x.dragAt(x.pt(0, 1), x.pt(0, 3)); } });
   V(COL, 'Subtract', 'btn-hollow', 'Hollow', { run: press(['btn-hollow']) });
   V(COL, 'Subtract', 'btn-hollow-safe', 'Hollow to safe min', { run: press(['btn-hollow-safe']) });
   V(COL, 'Subtract', 'btn-lift', 'Lift (click a feature)', { run: arm('btn-lift', [0, 1]) });
@@ -315,7 +315,7 @@ function buildPlan() {
   V(COL, 'Surface & edges', 'btn-skin-patch', 'Skin patch', { run: press(['btn-skin-patch']) });
   V(COL, 'Surface & edges', 'btn-trace-raster', 'Trace raster (choose a picture)', { run: async x => { await x.chooser('btn-trace-raster', x.png()); } });
   V(COL, 'Surface & edges', 'btn-texture', 'Texture', { run: press(['btn-texture']) });
-  for (const [mode, l] of [[0, 'Carve'], [1, 'Emboss'], [2, 'Smooth here']])
+  for (const [mode, l] of [[0, 'Emboss'], [1, 'Smooth here']])
     V(COL, 'Sculpt', 'btn-brush', 'Brush: ' + l + ' (drag across the piece)', { run: async x => {
       await x.select('sel-brush-mode', { index: mode }); await x.click('btn-brush'); await x.wait(300);
       await x.dragAt(x.pt(0, 1), x.pt(0, 2), { steps: 12 }); } });
@@ -376,7 +376,7 @@ function buildPlan() {
   const watching = async x => { await x.click('btn-watch'); await x.wait(300); };
   V(COL, 'Seat', 'btn-flip-port', 'Flip port (Watch on)', Object.assign({ run: press(['btn-flip-port']) }, seatTwo, { pre: async x => { await watching(x); await seatTwo.pre(x); } }));
   V(COL, 'Shape', 'btn-pull', 'Pull (drag a spot, Watch on)', { pre: watching, run: async x => { await x.click('btn-pull'); await x.wait(300); const a = x.pt(0, 0); await x.dragAt(a, a && { x: a.x + 30, y: a.y - 25 }, { steps: 10 }); } });
-  for (const [mode, l] of [[0, 'Carve'], [1, 'Emboss'], [2, 'Smooth here']])
+  for (const [mode, l] of [[0, 'Emboss'], [1, 'Smooth here']])
     V(COL, 'Sculpt', 'btn-brush', 'Brush: ' + l + ' (Watch on)', { pre: watching, run: async x => {
       await x.select('sel-brush-mode', { index: mode }); await x.click('btn-brush'); await x.wait(300);
       await x.dragAt(x.pt(0, 1), x.pt(0, 2), { steps: 12 }); } });

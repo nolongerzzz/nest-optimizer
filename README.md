@@ -227,7 +227,8 @@ Smart build-plate packing for 3D printing.
     The card re-scans after each, **Fix all** runs them in order, each is one
     Undo. **Add > Patch** does the same by hovering and clicking a hole. See
     `docs/PATCH.md`.
-- **Carve** is a local carving tool - a handheld rotary tool, not the Cutter's
+- **Carve** (in the **Sculpt** card, its own arm beside the Brush) is a local
+  carving tool - a handheld rotary tool, not the Cutter's
   full-plane Split. Pick a blade profile, arm it, then click a face, an **edge**
   or a **corner** of a piece: the blade is aimed along the outward bisector of
   whatever faces it can reach there and just that local volume is subtracted.
@@ -415,11 +416,12 @@ Smart build-plate packing for 3D printing.
   **Text** the text box, Font, Bold, Italic, Font file, Size, Depth, Angle,
   Mirror, STAMP (docs/TEXT.md) ·
   **Add** Fill / Densify, Foam, Thicken out / in, Extend, Bridge ·
-  **Subtract** Subtract B from A, Extract bit, Carve, Hollow, Hollow to safe
+  **Subtract** Subtract B from A, Extract bit, Hollow, Hollow to safe
   min, Lift (opens G-scope at its Lift row) · **Surface & edges** Soften,
   Mirror, Skin face / wrap / patch, Trace raster, Texture, **Wrap** (one
-  feature laid over a face; docs/SURFTEX.md) · **Sculpt** the
-  Brush · **Check & repair** Check piece, Cap open faces, Repair, Seal,
+  feature laid over a face; docs/SURFTEX.md) · **Sculpt** two arms:
+  the Brush (Emboss, Smooth here; Size, Force) and Carve (ball-nose, flat shave,
+  V-groove; Depth, Radius, Roll) - shutting the card puts either away · **Check & repair** Check piece, Cap open faces, Repair, Seal,
   Non-solid, Solidify.
 - Every drop-down opens at the same spot, right of the column and under the
   row, one at a time. Supports and the slicer's settings are also G-scope's

@@ -494,7 +494,10 @@ async function partE2(page) {
     document.querySelectorAll('.vp-finish-menu .vp-sec').forEach(d => { d.open = true; });
     const set = (id, v) => { const e = document.getElementById(id); e.value = String(v);
       e.dispatchEvent(new Event('input', { bubbles: true })); e.dispatchEvent(new Event('change', { bubbles: true })); };
-    set('inp-brush-size', 6); set('inp-brush-intensity', 0.6); set('sel-brush-mode', 'carve');
+    set('inp-brush-size', 6); set('inp-brush-intensity', 0.6);
+    { const m = document.getElementById('sel-brush-mode');   // the select no longer offers Carve; the engine mode is what this checks
+      if (!Array.from(m.options).some(o => o.value === 'carve')) m.add(new Option('Carve', 'carve')); }
+    set('sel-brush-mode', 'carve');
     if (!window.nsoBrushArmed()) document.getElementById('btn-brush').click();
   });
   const mark = (await evs(page)).length;

@@ -307,10 +307,10 @@ withApp(async (page, logs) => {
     await shot('carve-dblclick-disarmed');
     const r = await page.evaluate(() => ({
       armed: state.carveArmed, pressed: document.getElementById('btn-carve').getAttribute('aria-pressed'),
-      sculpt: document.getElementById('menu-bit').open
+      sculpt: document.getElementById('menu-sculpt').open
     }));
     check('Carve disarmed through its button', r.armed === false && r.pressed === 'false', JSON.stringify(r));
-    check('Subtract menu (Carve\'s home since shell v3) closed with it', r.sculpt === false);
+    check('Sculpt menu (Carve\'s home) closed with it', r.sculpt === false);
     held('Carve', before, await snap());
   }
 
