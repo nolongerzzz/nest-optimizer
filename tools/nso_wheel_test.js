@@ -1095,6 +1095,22 @@ console.log('\n== 7e. the recipe: every slider live, every limit a clamp, the cl
   check('H resizes the ball under the press and the opening: more clay, the same steps',
     big.ok && V(big.piece) > Vb * 1.5 && big.piece.ops.join('>') === 'ball>flatten>open');
 
+  /* SCALE: the one size slider. It is the ball's own radius, under everything else. */
+  const rS = R0(); rS.ball.ballRadius = 35;
+  const bS = W.NSO_wheelBuild(rS);
+  check('Scale is the ball\'s radius: 35 mm is a 70 mm ball with (35/25)^3 the clay',
+    bS.ok && Math.abs(span(bS.piece) - 70) < 1e-9 && Math.abs(V(bS.piece) / Vb - Math.pow(35 / 25, 3)) < 1e-9,
+    span(bS.piece).toFixed(1) + ' mm, ' + (V(bS.piece) / Vb).toFixed(3) + 'x the clay');
+  const rS2 = R0(); rS2.ball.ballRadius = 35; rS2.thick = 20; rS2.depth = 5;
+  const bS2 = W.NSO_wheelBuild(rS2);
+  check('...and under the press and the opening: the same steps on more clay, a wider disc',
+    bS2.ok && bS2.piece.ops.join('>') === 'ball>flatten>open' && V(bS2.piece) > Vb * 2.5 &&
+    rMax(bS2.piece) > rMax(mk(20, 5).piece), (2 * rMax(bS2.piece)).toFixed(1) + ' vs ' + (2 * rMax(mk(20, 5).piece)).toFixed(1) + ' mm across');
+  const rS3 = R0(); rS3.ball.ballRadius = 10;
+  const bS3 = W.NSO_wheelBuild(rS3);
+  check('the Scale range\'s small end is a real ball too (10 mm radius), with the wall still held to the floor',
+    bS3.ok && Math.abs(span(bS3.piece) - 20) < 1e-9 && bS3.ranges.thick.min === 3);
+
   /* OPEN, keeping the clay. */
   const p0 = mk(20, 0).piece;
   const keep = W.NSO_wheelOpenKeep(p0, { depth: 5 });

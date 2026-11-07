@@ -167,6 +167,7 @@ merging its list by hand. The list below is generated.
 - [undo-dispose-yaw - a pose bake's geometry is disposed when nothing reachable names it (2026-10-24)](handoff/undo-dispose-yaw.md)
 - [Vertical stacking - Seat (support) from the bed, Align edges keeps the seat (2026-09-16)](handoff/vertical-stacking-seat-support-from-the-bed-align-edges-keeps.md)
 - [Weave - lasso a patch out along its own triangles, clone its surface as a fresh weave, reattach it rim to rim (2026-11-01)](handoff/weave.md)
+- [Wheel card cleanup - one Scale slider, no number boxes](handoff/wheel-card-cleanup-one-scale-slider-no-number-boxes.md)
 - [Wheel: Flatten - a ball pressed to a disc, the clay conserved](handoff/wheel-flatten-a-ball-pressed-to-a-disc-clay-conserved.md)
 - [Wheel: the start - a standard ball that drops its own piece](handoff/wheel-start-a-standard-ball-that-drops-its-own-piece.md)
 - [Wheel: the piece is a recipe - every slider live all the time](handoff/wheel-the-piece-is-a-recipe-every-slider-live-all-the-time.md)

@@ -4826,6 +4826,15 @@ body.sup-card-open #adjust-status { display: none; }
 .vp-surftex-menu > .vp-menu-body { position: static; left: auto; top: auto; min-width: 0; max-width: none; width: 100%; margin-top: 4px; box-shadow: none; padding: 4px; box-sizing: border-box; }
 .surftex-card #sel-surftex-face { grid-column: 2; }
 
+/* Pottery Wheel (Gen+): one row per slider - its name (or its preset button), the track, what it says - and no number box
+   to type into (app-wheel-live.js, app-live-slider.js). One row, not two, so the card stands shorter. */
+.wh-slider { flex: 0 0 100%; box-sizing: border-box; display: grid; grid-template-columns: 56px 1fr 56px; align-items: center; column-gap: 6px;
+  font-size: 11px; color: #94a3b8; margin: 1px 0; min-height: 22px; }
+.wh-slider label, .wh-slider .wh-preset { grid-column: 1; }
+.wh-slider .wh-preset { width: 100%; min-width: 0; margin: 0; padding: 1px 2px; font-size: 11px; line-height: 1.2; }
+.wh-slider input[type="range"] { grid-column: 2; width: 100%; min-width: 0; margin: 0; }
+.wh-slider .wh-read { grid-column: 3; text-align: right; color: #cbd5e1; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
 /* Fasteners (Gen+): tiles drawn from nso_thread.js's own meshes, and a number box with its slider (app-fasteners.js, app-live-slider.js). */
 .fs-tiles { flex: 0 0 100%; box-sizing: border-box; display: grid; grid-template-columns: repeat(auto-fit, minmax(64px, 1fr)); gap: 4px; margin: 2px 0 4px; }
 .fs-tile { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 3px 2px 3px; margin: 0; border: 1px solid rgba(148, 163, 184, 0.35); border-radius: 6px;

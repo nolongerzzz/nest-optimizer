@@ -469,7 +469,7 @@ ball  ->  press (Thick)  ->  open (Deep)  ->  pull (Pull at, Pull, Soft)  ->  tr
 
 Nothing is baked into the profile, so **nothing is ever shut off**. Dragging Thick
 after the bowl is open re-presses the ball and opens it again on the new shape;
-dragging H resizes the ball under everything else; take any slider back to neutral
+dragging Scale resizes the ball under everything else; take any slider back to neutral
 and the earlier piece is back, exactly. The order you move them in does not matter —
 the same recipe is the same piece (tested).
 
@@ -484,7 +484,7 @@ takes effect.
 | control | does |
 |---|---|
 | **Starter Ball** | drops the ball (standard 25 mm unless H / R say otherwise) as a piece of its own and starts a recipe on it |
-| **H, R** | size the ball from a finished vessel (Pappus); 0 / auto is the standard ball. Live at any time |
+| **Scale** | the size of the ball (its radius; the standard ball is 25 mm, shown as Ø50). Live at any time, under everything else. It replaced H and R: a target height (Pappus) is still `NSO_wheelBall({ height })` in the API, but the card has one size slider |
 | **W** | the wall: how thin the disc may press and how thin the walls open. A thicker W opens a shorter, thicker-walled piece from the same clay |
 | **Thick** | press: the top comes down, the diameter grows, the clay is conserved. All the way up is the unpressed ball |
 | **Deep** | how far the finger goes in; the clay it pushes aside rises into the walls (`NSO_wheelOpenKeep`) |
@@ -495,10 +495,16 @@ takes effect.
 *Interaction.* Drag a slider: the piece itself changes, live, as a **preview** (the
 placed mesh's geometry is swapped for a throwaway one, `m.rawTris` untouched, the Undo
 stack does not move). Let go: **Set**, one Undo step — and the *recipe* stays
-editable, so the next drag on any slider starts from the ball again. Type a number: it
-previews as you type, Enter or clicking away sets it. Escape puts the preview away.
-Undo rewinds the recipe with the piece (the history holds `{ recipe, piece, soup }`),
-and the sliders follow it back.
+editable, so the next drag on any slider starts from the ball again. Escape puts the
+preview away. Undo rewinds the recipe with the piece (the history holds
+`{ recipe, piece, soup }`), and the sliders follow it back.
+
+*There is nothing to type into.* Each slider is one row — its name (for Thick and Deep,
+the Flatten / Open preset button), the track, and what it says — and the number is the
+slider's own, through `app-live-slider.js`'s optional-box form (`bind` without `box`:
+`value()` reads the slider; the read-out is the only text). The whole card is nine
+sliders and three buttons, 316 px tall, so Gen+ fits the window without scrolling; it
+was over 1100 px with number boxes.
 
 *Conserving the clay.* Press, open and pull all keep the volume: press by solving the
 rounded-slab family; **Open** by stretching everything above the cavity floor until

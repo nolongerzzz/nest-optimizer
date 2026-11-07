@@ -26,7 +26,7 @@ away; this stretches everything above the cavity floor until the volume is what 
 a 3 mm wall the cavity spans the whole disc and the walls stand tall - Thick 30 + Deep max
 is a jar, Thick 8 is a O104 x 40 bowl. W is the lever.
 
-**Card:** Starter Ball first; no nozzle control; H R W Thick Deep, Pull at / Pull / Soft,
+**Card:** Starter Ball first; no nozzle control; Scale, W, Thick, Deep, Pull at / Pull / Soft,
 Trim, Rim +. Pull / Trim / Rim + buttons are gone (their sliders are the move);
 Flatten / Open stay as one-click presets that send their own slider to its far end. The
 Pull ghost is gone - the piece itself now answers every slider.
@@ -45,5 +45,5 @@ Things a later ticket should read before touching this:
 `npm run wheel` (194 checks, was 169; section 7e is the recipe) and `npm run wire:wheel`
 (section 10b is the new real-app test: drag is live and uncommitted, release is one Undo
 step, Thick after Deep re-presses and re-opens, order does not matter, a limit is a note
-not a disabled slider, Undo and Escape, Pull taken back is exact, H resizes under it all;
+not a disabled slider, Undo and Escape, Pull taken back is exact, Scale resizes under it all;
 sections 3-9 now drive the strict API).

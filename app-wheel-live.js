@@ -6,9 +6,9 @@
    off: the form is rebuilt from the ball, in the order a potter works, whenever
    any slider moves.
 
-     Starter Ball   drops the ball (the standard 25 mm one unless H / R say
-                    otherwise) and starts a recipe on it
-     H  R           size the ball - at any time, under everything else
+     Starter Ball   drops the ball (25 mm radius unless Scale says otherwise) and
+                    starts a recipe on it
+     Scale          the size of the ball - at any time, under everything else
      W              the wall: how thin the disc may press and the walls open
      Thick          press the ball flat (the top comes down, the diameter grows)
      Deep           push in to open it (the clay rises into walls)
@@ -22,8 +22,11 @@
                    and the Undo stack does not move
    let go          that is Set: one Undo step. The RECIPE stays editable - the next
                    drag, on any slider, starts from the ball again
-   type a number   previews as you type; Enter or clicking away sets it
    Escape          puts the preview away
+
+   THERE IS NOTHING TO TYPE INTO. Each slider is a label, the track and what it
+   says (the read-out), on one row; the number is the slider's own, through the
+   shared helper's optional-box form (app-live-slider.js).
 
    A LIMIT IS NOT A REFUSAL. A slider the current shape cannot fully honour (Deep
    on a 3 mm disc, a Pull that would take the wall under the nozzle floor, Rim +
@@ -57,7 +60,7 @@
     var k = Math.pow(10, Math.max(d, 1));
     return String(Math.round(x * k) / k);
   }
-  function boxVal(d) { var v = parseFloat(($(d.box) || {}).value); return isFinite(v) ? v : undefined; }
+  function sliderVal(d) { var v = parseFloat(($(d.slider) || {}).value); return isFinite(v) ? v : undefined; }
 
   /* ------------------------------------------------------------ read-out */
   function readout(text, bad) {
@@ -126,58 +129,53 @@
   /* ------------------------------------------------------------ the sliders */
   function define(key, d) { d.key = key; DEFS[key] = d; }
 
-  define('height', { slider: 'rng-wheel-height', box: 'inp-wheel-height', read: 'out-wheel-height', unit: ' mm',
-    fmt: function (v) { return v && v > 0 ? trim(v, 1) + ' mm' : 'auto'; },
-    get: function (r) { return r.ball.height || 0; },
-    put: function (r, v) { r.ball.height = v > 0 ? v : undefined; } });
-  define('radius', { slider: 'rng-wheel-radius', box: 'inp-wheel-radius', read: 'out-wheel-radius', unit: ' mm',
-    fmt: function (v) { return v && v > 0 ? trim(v, 1) + ' mm' : 'auto'; },
-    get: function (r) { return r.ball.radius || 0; },
-    put: function (r, v) { r.ball.radius = v > 0 ? v : undefined; } });
-  define('wall', { slider: 'rng-wheel-wall', box: 'inp-wheel-wall', read: 'out-wheel-wall', unit: ' mm',
+  define('scale', { slider: 'rng-wheel-scale', read: 'out-wheel-scale', unit: ' mm',
+    fmt: function (v) { return v === null ? '—' : 'Ø' + trim(2 * v, 1) + ' mm'; },
+    get: function (r) { return r.ball.ballRadius || NSO_WHEEL_DEFAULT_BALL_RADIUS; },
+    put: function (r, v) { r.ball.ballRadius = v > 0 ? v : undefined; } });
+  define('wall', { slider: 'rng-wheel-wall', read: 'out-wheel-wall', unit: ' mm',
     get: function (r) { return r.ball.wall || 3; },
     put: function (r, v) { r.ball.wall = v > 0 ? v : undefined; } });
-  define('thick', { slider: 'rng-wheel-flat', box: 'inp-wheel-flat-h', read: 'out-wheel-flat', unit: ' mm',
+  define('thick', { slider: 'rng-wheel-flat', read: 'out-wheel-flat', unit: ' mm',
     get: function (r, R) { return r.thick == null ? (R && R.thick ? R.thick.max : 0) : r.thick; },
     put: function (r, v, R) { r.thick = (R && R.thick && v >= R.thick.max - 0.05) ? null : v; } });
-  define('depth', { slider: 'rng-wheel-depth', box: 'inp-wheel-depth', read: 'out-wheel-depth', unit: ' mm',
+  define('depth', { slider: 'rng-wheel-depth', read: 'out-wheel-depth', unit: ' mm',
     get: function (r) { return r.depth || 0; },
     put: function (r, v) { r.depth = v < 0.05 ? 0 : v; } });
-  define('pullz', { slider: 'rng-wheel-pull-z', box: 'inp-wheel-pull-z', read: 'out-wheel-pull-z', unit: ' %',
+  define('pullz', { slider: 'rng-wheel-pull-z', read: 'out-wheel-pull-z', unit: ' %',
     get: function (r) { return Math.round((r.pull.z == null ? 0.5 : r.pull.z) * 100); },
     put: function (r, v) { r.pull.z = v / 100; } });
-  define('pulldr', { slider: 'rng-wheel-pull-dr', box: 'inp-wheel-pull-dr', read: 'out-wheel-pull-dr', unit: ' mm',
+  define('pulldr', { slider: 'rng-wheel-pull-dr', read: 'out-wheel-pull-dr', unit: ' mm',
     fmt: function (v) { return v === null ? '—' : (v > 0 ? '+' : '') + trim(v, 0.5) + ' mm'; },
     get: function (r) { return r.pull.dr || 0; },
     put: function (r, v) { r.pull.dr = v; } });
-  define('wide', { slider: 'rng-wheel-soft', box: 'inp-wheel-soft', read: 'out-wheel-soft', unit: ' %',
+  define('wide', { slider: 'rng-wheel-soft', read: 'out-wheel-soft', unit: ' %',
     get: function (r) { return Math.round((r.pull.wide == null ? 0.25 : r.pull.wide) * 100); },
     put: function (r, v) { r.pull.wide = v / 100; } });
-  define('trim', { slider: 'rng-wheel-trim', box: 'inp-wheel-trim-z', read: 'out-wheel-trim', unit: ' mm',
+  define('trim', { slider: 'rng-wheel-trim', read: 'out-wheel-trim', unit: ' mm',
     get: function (r) { return r.trim || 0; },
     put: function (r, v) { r.trim = v < 0.05 ? 0 : v; } });
-  define('rim', { slider: 'rng-wheel-rim', box: 'inp-wheel-rim-mm', read: 'out-wheel-rim', unit: ' mm',
+  define('rim', { slider: 'rng-wheel-rim', read: 'out-wheel-rim', unit: ' mm',
     get: function (r) { return r.rim || 0; },
     put: function (r, v) { r.rim = v < 0.05 ? 0 : v; } });
 
   function paintRead(d) {
-    var read = $(d.read), box = $(d.box);
-    if (!read || !box) return;
-    var v = parseFloat(box.value);
-    read.textContent = d.fmt ? d.fmt(isFinite(v) ? v : null) : (isFinite(v) ? trim(v, $(d.slider).step) + d.unit : '—');
+    var read = $(d.read), slider = $(d.slider);
+    if (!read || !slider) return;
+    var v = parseFloat(slider.value);
+    read.textContent = d.fmt ? d.fmt(isFinite(v) ? v : null) : (isFinite(v) ? trim(v, slider.step) + d.unit : '—');
   }
 
   /* A slider's range, from the build that has just been done. Never disables:
      a slider that has nothing to do right now sits at its end, with the reason
      as its tooltip. */
   function range(d, min, max, step, why) {
-    var slider = $(d.slider), box = $(d.box);
-    if (!slider || !box) return;
+    var slider = $(d.slider);
+    if (!slider) return;
     if (!(max > min)) max = min + step;
     slider.min = String(min); slider.max = String(max); slider.step = String(step);
-    box.min = String(min); box.max = String(max);
     if (slider.dataset.title === undefined) slider.dataset.title = slider.title || '';
-    slider.title = box.title = why ? (why + ' - ' + slider.dataset.title) : slider.dataset.title;
+    slider.title = why ? (why + ' - ' + slider.dataset.title) : slider.dataset.title;
   }
 
   function applyRanges(R) {
@@ -191,29 +189,28 @@
     range(DEFS.rim, 0, R.rim ? R.rim.max : 60, 0.5);
   }
 
-  /* Put every slider (and its box and read-out) at the recipe's value, clamped
-     into its own range. The recipe is the truth; the sliders only say it. */
+  /* Put every slider (and its read-out) at the recipe's value, clamped into its
+     own range. The recipe is the truth; the sliders only say it. */
   function show(recipe, R) {
     Object.keys(DEFS).forEach(function (k) {
-      var d = DEFS[k], slider = $(d.slider), box = $(d.box);
-      if (!slider || !box) return;
+      var d = DEFS[k], slider = $(d.slider);
+      if (!slider) return;
       var v = d.get(recipe, R);
       var lo = parseFloat(slider.min), hi = parseFloat(slider.max);
       if (isFinite(lo) && isFinite(hi)) v = Math.min(hi, Math.max(lo, v));
       slider.value = String(v);
-      box.value = (k === 'height' || k === 'radius') && !(v > 0) ? '' : trim(v, slider.step);
       paintRead(d);
     });
   }
 
   function committed() { return NSO_wheelHome ? NSO_wheelHome.recipe : pending; }
 
-  /* Edit the draft (a copy of the committed recipe) from every box. */
+  /* Edit the draft (a copy of the committed recipe) from the slider being moved. */
   function readDraft(only) {
     var base = committed();
     if (!draft) draft = NSO_wheelCloneRecipe(base);
     if (only) {
-      var v = boxVal(only);
+      var v = sliderVal(only);
       if (v !== undefined) only.put(draft, v, lastRanges);
     }
     return draft;
@@ -257,22 +254,16 @@
   }
 
   function bind(d) {
-    var slider = $(d.slider), box = $(d.box);
-    if (!slider || !box) return;
+    var slider = $(d.slider);
+    if (!slider) return;
     var handle = window.nsoLiveSlider
-      ? window.nsoLiveSlider.bind({ slider: d.slider, box: d.box, read: d.read, unit: d.unit, onLive: function () { preview(d); } })
+      ? window.nsoLiveSlider.bind({ slider: d.slider, read: d.read, unit: d.unit, onLive: function () { preview(d); } })
       : null;
     handles[d.key] = handle;
-    var after = function () { paintRead(d); };      // the helper writes value + unit; say it our way after it
-    slider.addEventListener('input', after);
-    box.addEventListener('input', after);
-    if (!handle) {                                  // no helper module: plain and unthrottled
-      slider.addEventListener('input', function () { box.value = slider.value; preview(d); });
-      box.addEventListener('input', function () { slider.value = box.value; preview(d); });
-    }
-    /* Let go of the slider (or Enter / click away in the box) is Set. */
+    slider.addEventListener('input', function () { paintRead(d); });   // the helper writes value + unit; say it our way after it
+    if (!handle) slider.addEventListener('input', function () { preview(d); });   // no helper module: plain and unthrottled
+    /* Let go of the slider is Set. */
     slider.addEventListener('change', function () { if (handle) handle.cancel(); set(d); });
-    box.addEventListener('change', function () { if (handle) handle.cancel(); set(d); });
     paintRead(d);
   }
 
@@ -312,10 +303,10 @@
   /* Flatten and Open are one-click presets: they move their own slider to its
      far end, live, and set it. They bake nothing - drag the slider back. */
   function preset(key, toMax) {
-    var d = DEFS[key], slider = $(d.slider), box = $(d.box);
-    if (!slider || !box) return;
-    var v = toMax ? parseFloat(slider.max) : parseFloat(slider.min);
-    slider.value = String(v); box.value = trim(v, slider.step); paintRead(d);
+    var d = DEFS[key], slider = $(d.slider);
+    if (!slider) return;
+    slider.value = String(toMax ? parseFloat(slider.max) : parseFloat(slider.min));
+    paintRead(d);
     set(d);
   }
 

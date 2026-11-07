@@ -164,11 +164,10 @@ withApp(async (page, logs) => {
       const b = document.getElementById('btn-wheel-ball');
       for (let n = b; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true;
     });
-    // inp-wheel-height moved into the top bar's Gen dropdown; unfold it first.
-    await page.evaluate(() => { const e = document.getElementById('inp-wheel-height'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
-    await page.fill('#inp-wheel-height', '60');
-    await page.evaluate(() => { const e = document.getElementById('btn-wheel-ball'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
-    await page.click('#btn-wheel-ball');
+    /* A target height has no box on the Wheel's card any more (Scale sizes the
+       ball); the Pappus-sized ball is still the strict API's, and this check pins
+       what it says through the real page. */
+    await page.evaluate(() => NSO_wheelRun('ball', { height: 60 }, 'Ball centred'));
     await page.waitForFunction(() => /Ball centred/.test(document.getElementById('status').textContent),
       null, { timeout: 30000 });
     const ball = await measure(page);

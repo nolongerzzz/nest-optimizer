@@ -60,8 +60,8 @@ withApp(async (page, logs) => {
   console.log('\n=== 1. the controls exist and are reachable ===');
   const ui = await page.evaluate(() => {
     const ids = ['btn-wheel-ball', 'btn-wheel-flatten', 'btn-wheel-open'];
-    const inputs = ['inp-wheel-height', 'inp-wheel-radius', 'inp-wheel-wall', 'inp-wheel-flat-h',
-      'inp-wheel-depth', 'inp-wheel-pull-z', 'inp-wheel-pull-dr', 'inp-wheel-soft', 'inp-wheel-trim-z', 'inp-wheel-rim-mm'];
+    const inputs = ['rng-wheel-scale', 'rng-wheel-wall', 'rng-wheel-flat', 'rng-wheel-depth', 'rng-wheel-pull-z',
+      'rng-wheel-pull-dr', 'rng-wheel-soft', 'rng-wheel-trim', 'rng-wheel-rim'];
     return {
       missing: ids.filter(i => !document.getElementById(i)),
       unwired: ids.filter(i => {
@@ -100,9 +100,12 @@ withApp(async (page, logs) => {
     (await ids()).length === 0 && !(await page.evaluate(() => !!NSO_wheelSession)));
   /* ...and the sliders are not shut off for having nothing to act on. */
   check('...and no slider is disabled',
-    await page.evaluate(() => Array.from(document.querySelectorAll('.vp-wheel input[type=range], .vp-wheel input[type=number]')).every(e => !e.disabled)));
+    await page.evaluate(() => Array.from(document.getElementById('btn-wheel-ball').closest('.vp-menu-body').querySelectorAll('input')).every(e => !e.disabled)));
   /* put the preset back: the next Starter Ball must be the plain ball */
-  await page.evaluate(() => { for (const id of ['rng-wheel-depth', 'inp-wheel-depth']) document.getElementById(id).value = '0'; NSO_wheelUiRefresh(); });
+  await page.evaluate(() => {
+    const e = document.getElementById('rng-wheel-depth'); e.value = '0';
+    e.dispatchEvent(new Event('input', { bubbles: true })); e.dispatchEvent(new Event('change', { bubbles: true }));
+  });
 
   /* A refused ball must not leave a session behind. (It used to: Ball set the
      session first and only then found there was no piece to bake onto.) */
@@ -209,15 +212,10 @@ withApp(async (page, logs) => {
   await selectModel(page, id);
   await openWheelMenu(page);
   const boxBefore = await measure(page);
-  // inp-wheel-height moved into the top bar's Gen dropdown; unfold it first.
-  await page.evaluate(() => { const e = document.getElementById('inp-wheel-height'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
-  console.log('   box before  tris ' + boxBefore.tris + '  vol ' + boxBefore.volume.toFixed(1) +
-              '  bbox ' + JSON.stringify(boxBefore.size));
-
-  await page.evaluate(() => { const e = document.getElementById('inp-wheel-height'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
-  await page.fill('#inp-wheel-height', '60');
-  await page.evaluate(() => { const e = document.getElementById('btn-wheel-ball'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
-  await page.click('#btn-wheel-ball');
+  /* The strict API's sized ball (Pappus, from a 60 mm target): the Starter Ball
+     button is tested in 1b and 10b, and sections 3-9 were written around this
+     46.58 mm ball. */
+  await page.evaluate(() => NSO_wheelRun('ball', { height: 60 }, 'Ball centred'));
   await page.waitForFunction(() => /Ball centred/.test(document.getElementById('status').textContent),
     null, { timeout: 30000 });
   const ball = await measure(page);
@@ -498,21 +496,27 @@ withApp(async (page, logs) => {
   });
   const rawRef = () => page.evaluate(() => { window.__raw = getActiveModel().rawTris; });
   const rawSame = () => page.evaluate(() => getActiveModel().rawTris === window.__raw);
-  const allLive = () => page.evaluate(() => Array.from(document.querySelectorAll('.vp-wheel input[type=range], .vp-wheel input[type=number]')).every(e => !e.disabled));
+  const allLive = () => page.evaluate(() => Array.from(document.getElementById('btn-wheel-ball').closest('.vp-menu-body').querySelectorAll('input')).every(e => !e.disabled));
 
   /* the card */
   const card = await page.evaluate(() => {
-    const ids = Array.from(document.querySelectorAll('.vp-wheel [id]')).map(e => e.id);
-    return { ballFirst: ids.indexOf('btn-wheel-ball') < ids.indexOf('rng-wheel-height'), label: document.getElementById('btn-wheel-ball').textContent.trim(),
+    const ids = Array.from(document.getElementById('btn-wheel-ball').closest('.vp-menu-body').querySelectorAll('[id]')).map(e => e.id);
+    return { ballFirst: ids.indexOf('btn-wheel-ball') < ids.indexOf('rng-wheel-scale'), label: document.getElementById('btn-wheel-ball').textContent.trim(),
              nozzle: !!document.getElementById('inp-wheel-nozzle') || !!document.getElementById('rng-wheel-nozzle'),
-             gone: ['btn-wheel-pull', 'btn-wheel-trim', 'btn-wheel-rim'].filter(i => document.getElementById(i)) };
+             gone: ['btn-wheel-pull', 'btn-wheel-trim', 'btn-wheel-rim'].filter(i => document.getElementById(i)),
+             boxes: document.getElementById('btn-wheel-ball').closest('.vp-menu-body').querySelectorAll('input[type=number]').length,
+             hr: ['rng-wheel-height', 'rng-wheel-radius'].filter(i => document.getElementById(i)) };
   });
   check('the Starter Ball button is first on the card, and says so', card.ballFirst && card.label === 'Starter Ball', JSON.stringify(card));
   check('there is no nozzle control, and no Pull / Trim / Rim + button to bake with',
     !card.nozzle && card.gone.length === 0, JSON.stringify(card));
+  check('there is nothing to type into: no number box anywhere on the card',
+    card.boxes === 0, card.boxes + ' number boxes');
+  check('Scale replaced H and R (W, the wall lever, stays)', card.hr.length === 0 &&
+    await page.evaluate(() => !!document.getElementById('rng-wheel-scale') && !!document.getElementById('rng-wheel-wall')), JSON.stringify(card.hr));
 
   /* a fresh standard ball */
-  await page.evaluate(() => { document.getElementById('inp-wheel-height').value = ''; document.getElementById('rng-wheel-height').value = '0'; });
+  await page.evaluate(() => { document.getElementById('rng-wheel-scale').value = '25'; });
   await page.click('#btn-wheel-ball');
   await page.waitForFunction(() => /Dropped Wheel \d+/.test(document.getElementById('status').textContent), null, { timeout: 30000 });
   const t0 = await sl('rng-wheel-flat');
@@ -611,11 +615,11 @@ withApp(async (page, logs) => {
 
   /* H resizes the ball under everything */
   const hb = await info();
-  await setSlider('rng-wheel-height', 90);
+  await setSlider('rng-wheel-scale', 35);
   const big = await info();
-  check('H resizes the ball under the press and the opening - the rest is rebuilt on it',
+  check('Scale resizes the ball under the press and the opening - the rest is rebuilt on it',
     big.ops === hb.ops && big.vol > hb.vol * 1.5 && big.recipe.thick === hb.recipe.thick, hb.vol.toFixed(0) + ' -> ' + big.vol.toFixed(0) + ' mm^3');
-  await setSlider('rng-wheel-height', 0);
+  await setSlider('rng-wheel-scale', 25);
 
   /* Trim and Rim + are live values too */
   const preTrim = await info();

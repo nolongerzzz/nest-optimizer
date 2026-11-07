@@ -13,7 +13,12 @@
        onLive: function (value) {}    // draw the preview for this value
      })  ->  { value(), set(v), fire(), cancel() }
 
-   THE BOX IS THE NUMBER. The button beside it reads the box, exactly as it did
+   THE BOX IS OPTIONAL. Leave `box` out and the slider is the number: value()
+   reads the slider, there is no box to keep in step, and the read-out (if any)
+   is the only text. The Pottery Wheel's card is built that way - a slider and
+   what it says, nothing to type into.
+
+   THE BOX IS THE NUMBER (when there is one). The button beside it reads the box, exactly as it did
    before there was a slider, so nothing about what the tool does changes: the
    slider only writes the box, and the box can be typed into past the slider's
    own range (the slider then sits at its end and the box keeps what was typed).
@@ -46,21 +51,21 @@
   var bound = {};
 
   function bind(o) {
-    var slider = $(o.slider), box = $(o.box);
-    if (!slider || !box) return null;
+    var slider = $(o.slider), box = o.box ? $(o.box) : null;
+    if (!slider || (o.box && !box)) return null;
     if (bound[o.slider]) return bound[o.slider];
     var read = o.read ? $(o.read) : null;
     var unit = o.unit || '';
     var timer = 0, lastCost = 0, lastAt = 0, pending = false;
 
     function value() {
-      var v = parseFloat(box.value);
+      var v = parseFloat(box ? box.value : slider.value);
       return isFinite(v) ? v : null;
     }
     function show() {
       var v = value();
       if (read) read.textContent = v === null ? '—' : trim(v, slider) + unit;
-      if (v !== null) slider.value = String(v);   // the browser clamps it to the slider's own range
+      if (v !== null && box) slider.value = String(v);   // the browser clamps it to the slider's own range
     }
     function run() {
       timer = 0;
@@ -82,16 +87,18 @@
       pending = false;
     }
     function set(v) {
-      box.value = trim(v, slider);
+      if (box) box.value = trim(v, slider); else slider.value = String(v);
       fire();
     }
 
     slider.addEventListener('input', function () {
-      box.value = trim(parseFloat(slider.value), slider);
+      if (box) box.value = trim(parseFloat(slider.value), slider);
       fire();
     });
-    box.addEventListener('input', fire);
-    box.addEventListener('change', fire);
+    if (box) {
+      box.addEventListener('input', fire);
+      box.addEventListener('change', fire);
+    }
 
     slider.dataset.nsoLive = '1';
     show();

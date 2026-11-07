@@ -178,9 +178,9 @@ function buildPlan() {
   for (const [id, l] of [['btn-stock-box', 'Box'], ['btn-stock-cylinder', 'Cylinder'], ['btn-stock-sphere', 'Sphere'], ['btn-stock-capsule', 'Capsule'],
                          ['btn-stock-ellipsoid', 'Ellipsoid'], ['btn-stock-torus', 'Torus'], ['btn-stock-tube', 'Tube'], ['btn-stock-cone', 'Cone']])
     V(TOP, 'Gen+', id, 'Stock: ' + l, { setup: 'none', run: press([id]) });
-  const wheelSet = async x => { await x.fill('inp-wheel-height', 60); await x.fill('inp-wheel-radius', 30); await x.fill('inp-wheel-wall', 3); };
+  const wheelSet = async x => { await x.slider('rng-wheel-scale', 0.5); };
   const ball = async x => { await wheelSet(x); await x.click('btn-wheel-ball'); await x.wait(400); };
-  V(TOP, 'Gen+', 'btn-wheel-ball', 'Wheel: Starter Ball (height 60, radius 30)', { pre: wheelSet, run: press(['btn-wheel-ball']) });
+  V(TOP, 'Gen+', 'btn-wheel-ball', 'Wheel: Starter Ball (scale mid)', { pre: wheelSet, run: press(['btn-wheel-ball']) });
   V(TOP, 'Gen+', 'btn-wheel-flatten', 'Wheel: Flatten', { pre: ball, run: press(['btn-wheel-flatten']) });
   V(TOP, 'Gen+', 'btn-wheel-open', 'Wheel: Open', { pre: ball, run: press(['btn-wheel-open']) });
   V(TOP, 'Gen+', 'btn-relief-pick', 'Picture: Choose picture…', { setup: 'none', run: async x => { await x.chooser('btn-relief-pick', x.png()); } });

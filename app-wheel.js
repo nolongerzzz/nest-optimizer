@@ -2130,12 +2130,11 @@ if (typeof document !== 'undefined') {
     function wire() {
       /* The only button that is not a slider's own preset (app-wheel-live.js):
          the Starter Ball. No height, no selection, no nozzle - the standard ball
-         dropped as a piece of its own; H / R / W size it if they are set. */
+         dropped as a piece of its own; Scale and W size it. */
       on('btn-wheel-ball', function () {
         NSO_wheelRun('ball', {
-          height: num('inp-wheel-height', undefined),
-          radius: num('inp-wheel-radius', undefined),
-          wall: num('inp-wheel-wall', undefined)
+          ballRadius: num('rng-wheel-scale', undefined),
+          wall: num('rng-wheel-wall', undefined)
         }, 'Ball centred');
       });
     }
