@@ -159,3 +159,15 @@ edge, read 30.7 after an Undo had put it flat, and a reading of -4.8 sat on a pi
 - **Stale after Undo / Redo.** `undoLast` / `redoLast` (`app-core.js`) now call `cutAfterPoseUndo`, which has the wheel and the blade read the pose that came back.
 Found on the way: landing the piece re-syncs the card, which unticked the box just clicked (the handler now reads the tick first). Redo closes and reopens the Cut tool (nsoHelpers.teardown), as
 it does for every helper, so the card starts again after a Redo - left as it was.
+
+### Thirteenth round (2026-11-07): no plate line - a ball on the blade's top end; a 90 degree mitre button
+
+Asked for: the strip that marks where the blade's plane meets the plate removed ("it floats around during rotate"), a ball on the blade's top end in its place as the grab handle, and a 90 degree
+button under Square. `app-cut.js`: `cutBuildPlateLine` / `cutPlateLineWorld` / `cutPlaceLine` and `userData.plateLine` are deleted; `cutBuildBall` (a 2.4 mm sphere, no depth test, a cut handle) is built with the full
+and the sized blade and `cutPlaceBall` puts it on the top end from the cut frame's `upCut` (less its part along the plane's normal; the first axis across the plane when the plane lies flat) on every update. `app-core.js`:
+a press that reaches the ball before the piece behind it takes hold of the blade (the piece pick ignores helper objects, which made the ball a click on the piece); and a drag from the helper now starts from the point
+taken hold of (the ball's centre, which is on the plane) instead of a plane through the blade's centre - the first reading used to jump the blade (13 mm from the ball on an oblique view).
+`index.html` / `styles.css`: `btn-cut-miter-90` stacked under Square (`.cut-dialbtns`); `setCutMiter(90)`. Tests: `nso_wire_cut_blade_view_test` (its plate-line gates became ball gates: on the plane, on the top end,
+drawn through the piece, pickable, no plate line anywhere), `nso_wire_cut_grab_test` (a real mouse press on the ball from a diagonal camera takes hold without moving the blade, and a drag slides it),
+`nso_wire_cut_tip_test` / `nso_wire_cut_yaw_test` (they held the cut face to the plate line's direction and extent; that geometry is now `__planeTrace` in the tests, the app no longer draws it),
+`nso_cut_rotate_dial_drive_check` (the 90 button: layout, mitre 90, the blade's normal a quarter-turn on, Square back), `nso_wire_cut_redesign_test` (control order).

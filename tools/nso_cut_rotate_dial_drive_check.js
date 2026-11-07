@@ -15,6 +15,8 @@
    - The box takes a heading; - / + step 1 degree a press (Shift 0.1); the arrow keys step it.
    - The blade goes with the piece: after the piece is turned the blade is still square across its length.
    - One Undo point for a drag, and Undo gives the heading back; a locked piece is not turned.
+   - The Mitre's 90 button sits under Square and jumps the blade to the opposite direction (mitre 90): the blade's normal turns
+     a quarter-turn about the vertical; Square takes it back.
    - The axes: a tick each for Horizontal (ticked by default), Front/back and Side/side, one at a time (the one in
      use cannot be cleared); the wheel then turns the piece about it. A lean reads the piece's tilt from level, 0 flat.
      Front/back tips it along its length (its ends go up and down), Side/side across it. The same wheel, box, - / +,
@@ -91,10 +93,29 @@ withApp(async (page, logs) => {
   check('the wheels are side by side, Rotate piece on the right', Math.abs(md.cy - rd.cy) < 3 && rd.x > md.r - 1, JSON.stringify({ mitreX: md.x, rotX: rd.x }));
   check('each wheel has its - / + directly under it, inside its width', mm.y - md.b >= 0 && mm.y - md.b < 14 && rm.y - rd.b >= 0 && rm.y - rd.b < 14 &&
     mm.x >= md.x - 0.5 && mp.r <= md.r + 0.5 && rm.x >= rd.x - 0.5 && rp.r <= rd.r + 0.5, JSON.stringify({ mitre: mm.y - md.b, rotate: rm.y - rd.b }));
-  check('the Mitre box and Square are under the Mitre wheel (and its - / +), side by side', mdeg.y >= mm.b - 1 && sq.y >= mm.b - 1 && Math.abs(sq.cy - mdeg.cy) < 8 && sq.r <= rd.x + 4 && mdeg.x >= md.x - 20,
+  check('the Mitre box and Square are under the Mitre wheel (and its - / +), side by side', mdeg.y >= mm.b - 1 && sq.y >= mm.b - 1 && Math.abs(sq.cy - mdeg.cy) < 16 && sq.r <= rd.x + 4 && mdeg.x >= md.x - 20,
     JSON.stringify({ steps: mm.b, box: mdeg.y, square: sq.y }));
   check('the Rotate piece box is under its wheel and its - / +', rdeg.y >= rm.b - 1 && rdeg.cx > rd.x && rdeg.cx < rd.r);
   check('nothing sticks out of the card', rp.r < 440 && sq.r < rd.x + 8, 'right edge ' + rp.r);
+
+  console.log('the Mitre 90 button');
+  {
+    const r90 = await R('btn-cut-miter-90');
+    check('90 sits under Square, the same width and in line with it', r90.y >= sq.b - 1 && r90.y - sq.b < 12 && Math.abs(r90.x - sq.x) < 1 && Math.abs(r90.w - sq.w) < 1.5, JSON.stringify({ squareBottom: sq.b, ninetyTop: r90.y, x: [sq.x, r90.x] }));
+    check('...and is beside the Mitre box, inside the Mitre column', r90.x > mdeg.r - 2 && r90.r <= rd.x + 4, JSON.stringify({ boxRight: mdeg.r, ninety: [r90.x, r90.r], rotateWheel: rd.x }));
+    const n0 = await page.evaluate(() => getCutPlaneLocal(getActiveModel()).normalWorld.toArray());
+    await page.click('#btn-cut-miter-90');
+    await page.waitForTimeout(100);
+    const n1 = await page.evaluate(() => getCutPlaneLocal(getActiveModel()).normalWorld.toArray());
+    const mit = await page.evaluate(() => ({ deg: state.cutMiterDeg, box: document.getElementById('cut-miter-deg').value, wheel: document.getElementById('cut-dial-deg').textContent }));
+    const dot0 = n0[0] * n1[0] + n0[1] * n1[1] + n0[2] * n1[2];
+    check('pressing 90 sets the mitre to 90 (box and wheel too)', mit.deg === 90 && mit.box === '90' && mit.wheel === '90°', JSON.stringify(mit));
+    check('...and the blade has turned a quarter-turn: its normal is square to what it was', Math.abs(dot0) < 1e-6, 'n.n0 = ' + dot0.toFixed(6));
+    await page.click('#btn-cut-square');
+    await page.waitForTimeout(100);
+    const n2 = await page.evaluate(() => getCutPlaneLocal(getActiveModel()).normalWorld.toArray());
+    check('Square takes it back to where it was', Math.abs(n2[0] * n0[0] + n2[1] * n0[1] + n2[2] * n0[2]) > 1 - 1e-9 && (await page.evaluate(() => state.cutMiterDeg)) === 0);
+  }
 
   console.log('the heading');
   check('a piece as loaded reads 0', (await heading()) === 0, String(await heading()));

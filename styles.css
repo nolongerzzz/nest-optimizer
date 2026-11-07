@@ -1295,6 +1295,8 @@ select:focus, input:focus {
 #edit-card .cut-dialfields { display: flex; align-items: center; justify-content: center; gap: 4px; width: 100%; }
 #edit-card .cut-dialfields input[type="number"] { width: 54px; min-width: 0; box-sizing: border-box; margin-top: 0; }
 #edit-card .cut-dialfields .btn { width: auto; flex: 0 0 auto; margin-top: 0; padding: 7px 8px; }
+.cut-dialbtns { display: flex; flex-direction: column; gap: 3px; }
+#edit-card .cut-dialbtns .btn { width: 100%; padding: 5px 8px; }
 #edit-card .cut-dialcol .cut-miter-steps { width: 100%; }
 #edit-card .cut-dialcol .cut-miter-steps .btn { flex: 0 0 46px; width: 46px; margin-top: 0; }
 .cut-rotate-axes { display: flex; flex-direction: column; align-items: flex-start; gap: 0; width: 100%; padding-left: 14px; box-sizing: border-box; }

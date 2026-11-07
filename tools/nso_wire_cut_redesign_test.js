@@ -269,7 +269,7 @@ withApp(async (page, logs) => {
     const order = await page.evaluate(() => [...document.querySelectorAll('#cutter-tools button, #cutter-tools input, #cutter-tools svg')]
       .filter(e => !e.hidden).map(e => e.id));
     check('the Cut card is: mitre dial + Rotate piece dial (− / +, then box, under each; the Rotate piece axes under its box), bevel dial, − / +, Plumb, slider, ← number →, Blade, Cut',
-      order.join(' ') === 'cut-miter-dial btn-cut-miter-minus btn-cut-miter-plus cut-miter-deg btn-cut-square ' +
+      order.join(' ') === 'cut-miter-dial btn-cut-miter-minus btn-cut-miter-plus cut-miter-deg btn-cut-square btn-cut-miter-90 ' +
         'cut-rotate-dial btn-cut-rotate-minus btn-cut-rotate-plus cut-rotate-deg chk-cut-rot-h chk-cut-rot-fb chk-cut-rot-ss ' +
         'cut-bevel-dial cut-bevel-deg btn-cut-bevel-minus btn-cut-bevel-plus btn-cut-plumb ' +
         'cut-slider btn-cut-nudge-m cut-mm btn-cut-nudge-p ' +

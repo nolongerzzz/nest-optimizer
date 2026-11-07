@@ -179,9 +179,35 @@ window.__sectionArea = function (geo, axis, v) {
   }
   return Math.abs(area);
 };
+/* Where the cut plane meets the plate, from the cut plane info on the piece mesh: its two ends (the cut frame's box carried
+   into world space, 1 mm over each end) and the horizontal direction across it. What the plate line drew, kept here as the
+   reference the cut face is held to - the app no longer draws a line. */
+window.__planeTrace = function (info, mesh) {
+  mesh.updateMatrixWorld(true);
+  const Mw = cutWorldMatrix(info, mesh);
+  const local = info.bbox.getCenter(new THREE.Vector3());
+  local[info.axis] = info.plane;
+  const P = local.clone().applyMatrix4(Mw);
+  const n = new THREE.Vector3(info.axis === 'x' ? 1 : 0, info.axis === 'y' ? 1 : 0, info.axis === 'z' ? 1 : 0)
+    .applyMatrix3(new THREE.Matrix3().getNormalMatrix(Mw)).normalize();
+  const nh = new THREE.Vector3(n.x, 0, n.z), nh2 = nh.lengthSq();
+  if (nh2 < 1e-6) return null;
+  const Q = new THREE.Vector3(P.x, 0, P.z).addScaledVector(nh, n.y * P.y / nh2);
+  const dir = new THREE.Vector3(-n.z, 0, n.x).normalize();
+  let lo = Infinity, hi = -Infinity;
+  const b = info.bbox, c = new THREE.Vector3();
+  for (let i = 0; i < 8; i++) {
+    c.set(i & 1 ? b.max.x : b.min.x, i & 2 ? b.max.y : b.min.y, i & 4 ? b.max.z : b.min.z).applyMatrix4(Mw);
+    const s = c.sub(Q).dot(dir);
+    if (s < lo) lo = s;
+    if (s > hi) hi = s;
+  }
+  lo -= CUT_OVERHANG_MM; hi += CUT_OVERHANG_MM;
+  return { a: Q.clone().addScaledVector(dir, lo).toArray(), b: Q.clone().addScaledVector(dir, hi).toArray(), across: nh.normalize().toArray() };
+};
 /* Split through the real button; the two halves as Split made them (before
    they are centred and laid out) and as they then sit on the plate, with the
-   blade and the plate line as they stood. Everything in world space. */
+   blade and the plane's trace on the plate (the line the plate line used to draw) as they stood. Everything in world space. */
 window.__splitAndMeasure = function (id) {
   const m = state.models.find(x => x.id === id);
   const mesh = cutMeshOf(m);
@@ -192,7 +218,7 @@ window.__splitAndMeasure = function (id) {
   const blade = state.cutHelper.children.find(c => c.userData.cutBlade);
   const P = new THREE.Vector3().setFromMatrixPosition(blade.matrixWorld);
   const n = new THREE.Vector3(0, 0, 1).transformDirection(blade.matrixWorld);
-  const pl = state.cutHelper.userData.plateLine;
+  const pl = __planeTrace(getCutPlaneLocal(m), mesh);
   const la = new THREE.Vector3().fromArray(pl.a), lb = new THREE.Vector3().fromArray(pl.b);
   const across = new THREE.Vector3().fromArray(pl.across);
   const ldir = lb.clone().sub(la); ldir.y = 0; const llen = ldir.length(); ldir.normalize();

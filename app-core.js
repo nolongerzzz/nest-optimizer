@@ -4092,7 +4092,13 @@ function onCanvasPointerDown(event) {
     const inBlade = o => { for (let n = o; n; n = n.parent) if (n === state.cutHelper) return true; return false; };
     const modelHits = state.raycaster.intersectObjects(state.modelGroup.children, true)
       .filter(h => !inBlade(h.object));
-    if (modelHits.length) {
+    /* The ball on the blade's top end is the blade's handle: a press that reaches it before it reaches the piece (the ball stands
+       over the piece from most views) takes hold of the blade, it is not a click on the piece behind it - on the Full blade. */
+    const ballObj = state.cutHelper && state.cutHelper.children.find(c => c.userData && c.userData.cutBall);
+    // (only on the Full blade: on the Sized blade and the Notch a click on the piece is how the blade is placed, and the
+    // ball, standing just over where it was last put, must not swallow a click on that same spot)
+    const ballHit = ballObj && !(state.cutBlade && state.cutBlade.sized) ? state.raycaster.intersectObject(ballObj, false)[0] : null;
+    if (modelHits.length && !(ballHit && ballHit.distance <= modelHits[0].distance)) {
       let obj = modelHits[0].object;
       while (obj && obj.userData.placedIndex == null && obj.parent) obj = obj.parent;
       const idx = obj && obj.userData ? obj.userData.placedIndex : undefined;
@@ -4133,7 +4139,15 @@ function onCanvasPointerDown(event) {
       // Follow strand: a drag on the blade slides it along the cord it is square across, not off it.
       if (typeof cutFollowOn === 'function' && cutFollowOn()) { cutFollowBeginDrag(); event.stopPropagation(); return; }
       state.cutDragging = true;
-      state.cutDragFrom = null;
+      /* The drag reads the pointer on a plane through the point taken hold of - on the blade's sheet or frame, or on the ball at
+         its top end, which stands well off the blade's centre - so taking hold moves nothing. */
+      {
+        const gm = getActiveModel(), gf = gm ? cutFrame(gm) : null;
+        const gp = cutHits[0].object.userData && cutHits[0].object.userData.cutBall
+          ? new THREE.Vector3().setFromMatrixPosition(cutHits[0].object.matrixWorld)     // the ball: by its centre, which is on the blade's plane
+          : cutHits[0].point;
+        state.cutDragFrom = gf && gf.mesh ? gp.clone().applyMatrix4(new THREE.Matrix4().copy(gf.mesh.matrixWorld).invert()) : null;
+      }
       if (state.controls) state.controls.enabled = false;
       cutTFromPointer();
       event.stopPropagation();
