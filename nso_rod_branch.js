@@ -85,6 +85,7 @@ var NSO_RB_MAX_TRIS = 2000000;
 var NSO_RB_RING_MIN_MM = 0.5;       // rings along the branch: about as far apart as its facets are wide,
 var NSO_RB_RING_MAX_MM = 2;         // ...held between these
 var NSO_RB_MAX_RINGS = 400;
+var NSO_RB_TIP_RING_MM = 0.75;      // the tip disc's rings: every edge under Limb's 1 mm spacing
 var NSO_RB_FINE_MM = 0.7;           // the parent's wall round the junction, subdivided to this before the union...
 var NSO_RB_FINE_MARGIN_MM = 2;      // ...over the junction's own reach plus this, when that comes back clean
 
@@ -99,7 +100,25 @@ function NSO_rbNozzle(opts) {
    1. Read the parent: the rod the press is on
    ===================================================================== */
 
-/* opts.point [x, y, z] raw: the press. Returns { ok, reason, ends (how many
+/* The piece's flat, round, closed ends (Tube edge's face reader), welded
+   once: { ok, reason, soup, weld, closed: [classed faces], open (how many
+   open round ends) }. A hover asks the same piece many questions - read it
+   once and hand it back as opts.ends. */
+function NSO_rodBranchEnds(soup) {
+  var res = { ok: false, reason: '', soup: soup };
+  var f32 = (soup instanceof Float32Array) ? soup : new Float32Array(soup);
+  if (!(NSO_teVolume(f32, [0, 0, 0]) > 0)) { res.reason = 'the piece is wound inside out (its volume reads negative) - Repair it first'; return res; }
+  var W = NSO_teWeld(f32), FF = NSO_teFaces(W), closed = [], open = 0;
+  FF.faces.forEach(function (F) {
+    var c = NSO_teClassFace(W, F, FF.region);
+    if (c.kind === 'closed' && c.center) closed.push(c);
+    else if (c.kind === 'open') open++;
+  });
+  res.ok = true; res.weld = W; res.closed = closed; res.open = open;
+  return res;
+}
+
+/* opts.point [x, y, z] raw: the press. opts.ends: a NSO_rodBranchEnds of this soup. Returns { ok, reason, ends (how many
    closed round ends the piece has), parent: { center, axis (outward, toward
    the end read), Ro (its end's radius), frame } } and, with a point, at:
    { h (along the axis from the end, <= 0 behind it), r (the rod's radius
@@ -119,13 +138,10 @@ function NSO_rodBranchRead(soup, opts) {
   if (!soup || soup.length < 9 || soup.length % 9) { res.reason = 'not a triangle soup'; return res; }
   var f32 = (soup instanceof Float32Array) ? soup : new Float32Array(soup);
   res.soup = soup;
-  if (!(NSO_teVolume(f32, [0, 0, 0]) > 0)) { res.reason = 'the piece is wound inside out (its volume reads negative) - Repair it first'; return res; }
-  var W = NSO_teWeld(f32), FF = NSO_teFaces(W), closed = [], open = 0;
-  FF.faces.forEach(function (F) {
-    var c = NSO_teClassFace(W, F, FF.region);
-    if (c.kind === 'closed' && c.center) closed.push(c);
-    else if (c.kind === 'open') open++;
-  });
+  var E = opts.ends && opts.ends.soup === soup ? opts.ends : NSO_rodBranchEnds(soup);
+  if (!E.ok) { res.reason = E.reason; return res; }
+  var W = E.weld, closed = E.closed, open = E.open;
+  res.weld = W;
   res.ends = closed.length;
   if (!closed.length) {
     res.reason = 'Branch grows out of a rod, and reads the rod\'s axis off a flat, round end - this piece has none' +
@@ -187,6 +203,45 @@ function NSO_rbParent(c) {
   return { center: c.center, axis: c.face.n, Ro: c.Ro, frame: c.frame || NSO_teFrame(c.face.n) };
 }
 
+/* LIMB ON A ROD (nso_limb.js, opts.hint). Limb finds a limb by walking the
+   surface from the piece's foot, and round a fat or slanted junction that
+   reading skews: its bone leans off the rod's axis and its fork's loop is
+   ragged, so even a straight Extend sheared the junction. On a rod with a
+   flat, round tip - every branch Branch makes, and the trunk - the answer is
+   exact, and this is it: the rod the grab is on (NSO_rodBranchRead), its
+   axis the bone, and the HINGE a millimetre past the last place, going down
+   from the grab, where the surface within the rod's radius stops being the
+   rod's own (a triangle whose face is not the rod's - square-ish to its
+   radius, at the radius the rod has there: straight, or the taper from its
+   tip to the grab). Between the hinge and the grab the flex zone is clean
+   rod. Returns { ok, reason, axis (toward the tip), center (the tip's),
+   hGrab, hHinge (along the axis from the tip, <= 0), radius }. */
+var NSO_RB_HINGE_MM = 1;            // the hinge, this far past the junction
+function NSO_rodLimbHint(soup, point, ends) {
+  var rd = NSO_rodBranchRead(soup, { point: point, ends: ends });
+  if (!rd.ok || !rd.at) return { ok: false, reason: rd.reason || 'not on a rod' };
+  var W = rd.weld, P = W.P, a = rd.parent.axis, C = rd.parent.center, hG = rd.at.h, rG = rd.at.r, Ro = rd.parent.Ro;
+  function R(h) { return hG < -1e-9 ? Ro + (rG - Ro) * h / hG : rG; }     // the rod's radius at h: tip to grab, run on
+  var top = -Infinity;
+  for (var t = 0; t < W.n; t++) {
+    if (W.degen[t]) continue;
+    var i0 = W.vid[t * 3] * 3, i1 = W.vid[t * 3 + 1] * 3, i2 = W.vid[t * 3 + 2] * 3;
+    var cx = (P[i0] + P[i1] + P[i2]) / 3 - C[0], cy = (P[i0 + 1] + P[i1 + 1] + P[i2 + 1]) / 3 - C[1], cz = (P[i0 + 2] + P[i1 + 2] + P[i2 + 2]) / 3 - C[2];
+    var h = cx * a[0] + cy * a[1] + cz * a[2];
+    if (!(h < hG)) continue;
+    var ex = cx - h * a[0], ey = cy - h * a[1], ez = cz - h * a[2], r = Math.hypot(ex, ey, ez), Rh = R(h);
+    if (r > Rh + 1.5) continue;                                          // off the rod: the parent beyond it
+    var nr = r > 1e-9 ? (W.N[t * 3] * ex + W.N[t * 3 + 1] * ey + W.N[t * 3 + 2] * ez) / r : 0;
+    if (nr >= 0.9 && Math.abs(r - Rh) <= Math.max(0.05, 0.03 * Rh)) continue;   // the rod's own face
+    [i0, i1, i2].forEach(function (o) {
+      var hv = (P[o] - C[0]) * a[0] + (P[o + 1] - C[1]) * a[1] + (P[o + 2] - C[2]) * a[2];
+      if (hv < hG && hv > top) top = hv;
+    });
+  }
+  if (!isFinite(top)) return { ok: false, reason: 'no end to the rod below the grab' };
+  return { ok: true, axis: a, center: C, hGrab: hG, hHinge: top + NSO_RB_HINGE_MM, radius: rG, tipR: Ro };
+}
+
 /* =====================================================================
    2. The branch: its axis, its depth and its solid
    ===================================================================== */
@@ -234,7 +289,7 @@ function NSO_rbShells(f32) {
 /* A frustum of revolution as a closed soup, wound outward: about the axis d
    from the root centre B, the profile [[t, radius], ...] (t along d; the
    first and last are the flat ends). n segments, frame (u, v) square to d. */
-function NSO_rbRevolve(B, d, u, v, prof, n, phase) {
+function NSO_rbRevolve(B, d, u, v, prof, n, phase, tipStep) {
   var out = [], ring = [];
   for (var i = 0; i < prof.length; i++) {
     var t = prof[i][0], rr = prof[i][1], R = [];
@@ -252,14 +307,32 @@ function NSO_rbRevolve(B, d, u, v, prof, n, phase) {
       push(A0, A1, B1); push(A0, B1, B0);
     }
   }
-  // the two discs: fans from their centres, the root facing back along d, the tip on along it
+  // the two discs. The root (buried: the union takes it out) a fan from its
+  // centre, facing back along d. The TIP in concentric rings (tipStep apart),
+  // facing on along d: a fan of rim-to-centre needles is what Limb's
+  // subdivision would split (and nso_densify.js's needle zip has broken), so
+  // every tip edge stays under its spacing; the rim is still one round loop,
+  // so the tip still reads as a flat, round end for the next branch.
   var c0 = [B[0] + prof[0][0] * d[0], B[1] + prof[0][0] * d[1], B[2] + prof[0][0] * d[2]], L = prof.length - 1;
   var c1 = [B[0] + prof[L][0] * d[0], B[1] + prof[L][0] * d[1], B[2] + prof[L][0] * d[2]];
-  for (var k = 0; k < n; k++) {
-    var k1 = (k + 1) % n;
-    push(c0, ring[0][k1], ring[0][k]);
-    push(c1, ring[L][k], ring[L][k1]);
+  for (var k = 0; k < n; k++) push(c0, ring[0][(k + 1) % n], ring[0][k]);
+  var rT = prof[L][1], K = Math.max(1, Math.ceil(rT / (tipStep || rT))), disc = [ring[L]];
+  for (var q = 1; q < K; q++) {
+    var rq = rT * (K - q) / K, Rq = [];
+    for (var j4 = 0; j4 < n; j4++) {
+      var th4 = 2 * Math.PI * (j4 + (phase || 0)) / n, c4 = Math.cos(th4) * rq, s4 = Math.sin(th4) * rq;
+      Rq.push([c1[0] + c4 * u[0] + s4 * v[0], c1[1] + c4 * u[1] + s4 * v[1], c1[2] + c4 * u[2] + s4 * v[2]]);
+    }
+    disc.push(Rq);
   }
+  for (var q2 = 0; q2 + 1 < disc.length; q2++) {
+    for (var j5 = 0; j5 < n; j5++) {
+      var j6 = (j5 + 1) % n, O0 = disc[q2][j5], O1 = disc[q2][j6], I0 = disc[q2 + 1][j5], I1 = disc[q2 + 1][j6];
+      push(O0, O1, I1); push(O0, I1, I0);
+    }
+  }
+  var inner = disc[disc.length - 1];
+  for (var k2 = 0; k2 < n; k2++) push(c1, inner[k2], inner[(k2 + 1) % n]);
   return new Float32Array(out);
 }
 
@@ -325,7 +398,7 @@ function NSO_rodBranchPlan(soup, opts) {
   // vertex column when the press is (a Stock rod pressed at 0°, 120°, 240°),
   // and the kernel answers that exact touch with a doubled edge
   var phase = opts.phase == null ? 0.5 : +opts.phase;
-  var bsoup = NSO_rbRevolve(Bc, d, u, v, prof, n, phase);
+  var bsoup = NSO_rbRevolve(Bc, d, u, v, prof, n, phase, NSO_RB_TIP_RING_MM);
   var pf = n * Math.sin(2 * Math.PI / n) / (2 * Math.PI);
   var outside = pf * Math.PI * L * (rb * rb + rb * rt + rt * rt) / 3, whole = outside + pf * Math.PI * rb * rb * depth;
   var T = [S[0] + L * d[0], S[1] + L * d[1], S[2] + L * d[2]];
@@ -432,6 +505,6 @@ function NSO_rbWeld(soup, opts) {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { NSO_rodBranchRead: NSO_rodBranchRead, NSO_rodBranchPlan: NSO_rodBranchPlan, NSO_rodBranchRaw: NSO_rodBranchRaw,
+  module.exports = { NSO_rodBranchEnds: NSO_rodBranchEnds, NSO_rodLimbHint: NSO_rodLimbHint, NSO_rodBranchRead: NSO_rodBranchRead, NSO_rodBranchPlan: NSO_rodBranchPlan, NSO_rodBranchRaw: NSO_rodBranchRaw,
                      NSO_rodBranchDescribe: NSO_rodBranchDescribe, NSO_rbDepth: NSO_rbDepth, NSO_rbShells: NSO_rbShells };
 }

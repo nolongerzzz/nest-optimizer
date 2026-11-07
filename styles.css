@@ -3883,6 +3883,13 @@ button.ms-legend-btn:disabled { opacity: 0.4; cursor: default; }
 .te-rows[hidden] { display: none; }
 /* Cylinders opens the same card on a solid rod: a heading in place of Verb */
 .te-rod-head { margin: 0 0 1px; font-size: 11px; font-weight: 600; color: #ffc83d; }
+/* Neck's and Branch's numbers: a slider and the box it writes (the box is the
+   exact number, and what the ring handles and the drag write) */
+.te-slide { display: grid; grid-template-columns: 40px minmax(0, 1fr) 46px 16px; align-items: center; gap: 4px; color: #cbd5e1; font-size: 11px; }
+.te-slide input[type="range"] { width: 100%; min-width: 0; margin: 0; }
+.vp-menu-body .te-slide input[type="number"] { min-width: 0; width: 100%; margin: 0; padding: 2px 3px; border: 1px solid rgba(232, 238, 246, 0.45);
+  border-radius: 6px; background: transparent; color: #e8eef6; font-size: 11px; }
+.te-slide span { font-size: 10px; color: #94a3b8; }
 .te-rod-head[hidden] { display: none; }
 /* two fields to a line (the Reducer's New Ø / New bore, Transition / Run):
    the card is too narrow for two label-field-unit rows side by side, so each

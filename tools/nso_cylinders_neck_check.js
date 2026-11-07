@@ -291,6 +291,97 @@ withApp(async (page) => {
   await page.waitForFunction(() => /Undo: Branch reverted/.test(document.getElementById('status').textContent), null, { timeout: 15000 });
   check('a second Undo puts the bare rod back, bit for bit', (await soupOf(page)) === before2);
 
+  console.log('\n=== 7. Sliders; then Limb on a Branch-made shoot (Ø10.5 × 15 at 45° on the Ø30.84 cylinder) ===');
+  const cylId = await loadSTL(page, writeSTL('cyl7.stl', NSO_Stock.revolve(NSO_Stock.profileCylinder(R, H), 96)));
+  await selectModel(page, cylId);
+  if (await page.evaluate(() => state.tubeEdge && state.tubeEdge.open)) await page.click('#btn-te-cancel');
+  await page.click('#btn-cylinders');
+  await page.waitForFunction(() => state.tubeEdge && state.tubeEdge.open && state.tubeEdge.rod, null, { timeout: 30000 });
+  await setField(page, 'sel-te-rod-verb', 'neck');
+  await page.waitForFunction(() => state.tubeEdge.result && state.tubeEdge.readVerb === 'neck', null, { timeout: 30000 });
+  const slide = (id, v) => page.evaluate(([i, val]) => { const e = document.getElementById(i); e.value = String(val); e.dispatchEvent(new Event('input', { bubbles: true })); }, [id, v]);
+  const sl = await page.evaluate(() => ['rng-te-neck-length', 'rng-te-neck-dr'].map(id => { const e = document.getElementById(id); return { id, min: +e.min, max: +e.max, v: +e.value, shown: e.offsetParent !== null }; }));
+  check('Neck: a slider beside Length and Δr, ranged off the rod (Length to its 60 mm, Δr −15.0 … +15.4), each at its box\'s number',
+        sl[0].shown && sl[1].shown && sl[0].max === 60 && Math.abs(sl[1].min + 15) < 1e-9 && Math.abs(sl[1].max - 15.4) < 1e-9 && sl[0].v === 23 && sl[1].v === +(await card(page)).dr, JSON.stringify(sl));
+  await slide('rng-te-neck-dr', -6);
+  await page.waitForFunction(() => /Ø18\.84 at the waist/.test(document.getElementById('te-readout').textContent), null, { timeout: 10000 }).catch(() => {});
+  let S7 = await card(page);
+  check('sliding Δr to −6 writes the box and the ghost follows: Ø18.84 at the waist', S7.dr === '-6' && near(S7.waistDia, 18.84, 0.05), S7.dr + ' · ' + S7.readout);
+  await setField(page, 'sel-te-rod-verb', 'branch');
+  await setField(page, 'inp-te-br-dia', '10.5');
+  await setField(page, 'inp-te-br-tip', '');
+  await setField(page, 'inp-te-br-len', '15');
+  await setField(page, 'inp-te-br-angle', '45');
+  const bs = await page.evaluate(() => ['rng-te-br-dia', 'rng-te-br-tip', 'rng-te-br-len', 'rng-te-br-angle'].map(id => { const e = document.getElementById(id); return { id, min: +e.min, max: +e.max, v: +e.value, shown: e.offsetParent !== null }; }));
+  check('Branch: a slider beside Ø, Tip Ø, Length and Angle; Tip Ø\'s (its box blank) sits at Ø', bs.every(q => q.shown) && bs[0].v === 10.5 && bs[1].v === 10.5 && bs[2].v === 15 && bs[3].v === 45 && bs[3].min === 20 && bs[3].max === 160,
+        JSON.stringify(bs));
+  const c7 = await page.evaluate(([R]) => {
+    const m = getActiveModel(), pl = state.placed.find(q => q.sourceId === m.id), mesh = pl.mesh, o = m.centerOffset;
+    const cam = state.camera.position.clone().applyMatrix4(new THREE.Matrix4().copy(mesh.matrixWorld).invert());
+    const cx = cam.x + o.x, cy = -(cam.z + o.z), L = Math.hypot(cx, cy), f = [cx / L, cy / L];
+    const local = new THREE.Vector3(R * f[0] - o.x, 30 - o.y, -(R * f[1]) - o.z);
+    const w = local.applyMatrix4(mesh.matrixWorld).project(state.camera), rc = state.renderer.domElement.getBoundingClientRect();
+    return { x: rc.left + (w.x + 1) / 2 * rc.width, y: rc.top + (1 - w.y) / 2 * rc.height };
+  }, [R]);
+  await frame(page, 15, 160);
+  const c7b = await page.evaluate(([R]) => {
+    const m = getActiveModel(), pl = state.placed.find(q => q.sourceId === m.id), mesh = pl.mesh, o = m.centerOffset;
+    const cam = state.camera.position.clone().applyMatrix4(new THREE.Matrix4().copy(mesh.matrixWorld).invert());
+    const cx = cam.x + o.x, cy = -(cam.z + o.z), L = Math.hypot(cx, cy), sd = [-cy / L, cx / L], f = [cx / L, cy / L];
+    const c = Math.cos(50 * Math.PI / 180), sn = Math.sin(50 * Math.PI / 180), dir = [c * sd[0] + sn * f[0], c * sd[1] + sn * f[1]];
+    const local = new THREE.Vector3(R * dir[0] - o.x, 30 - o.y, -(R * dir[1]) - o.z);
+    const w = local.applyMatrix4(mesh.matrixWorld).project(state.camera), rc = state.renderer.domElement.getBoundingClientRect();
+    return { x: rc.left + (w.x + 1) / 2 * rc.width, y: rc.top + (1 - w.y) / 2 * rc.height };
+  }, [R]);
+  void c7;
+  await page.mouse.click(c7b.x, c7b.y);
+  S7 = await br();
+  check('a click roots the Ø10.5 × 15 shoot at 45°', S7.ghost && /^Branch Ø10\.50, 15\.0 mm out at 45°/.test(S7.readout), S7.readout);
+  await slide('rng-te-br-len', 18);
+  await page.waitForFunction(() => /18\.0 mm out/.test(document.getElementById('te-readout').textContent), null, { timeout: 10000 }).catch(() => {});
+  S7 = await br();
+  check('sliding Length to 18 writes the box and the ghost follows', S7.len === '18' && S7.tip && Math.abs(S7.tip.far - 18) < 0.05, S7.len + ' · ' + S7.readout);
+  await slide('rng-te-br-len', 15);
+  await page.waitForFunction(() => /15\.0 mm out/.test(document.getElementById('te-readout').textContent), null, { timeout: 10000 }).catch(() => {});
+  const shoot = await page.evaluate(() => { const b = state.tubeEdge.result.branch; return { tip: b.tip, dir: b.dir, tipR: b.tipR }; });
+  await page.click('#btn-te-go');
+  await page.waitForFunction(() => /Branch done/.test(document.getElementById('status').textContent) && !state.tubeEdge.busy, null, { timeout: 30000 });
+  await page.click('#btn-te-cancel');
+  // Limb: pick the shoot 3 mm in from its tip, Extend 5 and Bend 20, Apply
+  const kept = await soupOf(page);
+  await page.click('#btn-limb');
+  const onShoot = back => page.evaluate(([b, back]) => {
+    const m = getActiveModel(), pl = state.placed.find(q => q.sourceId === m.id), mesh = pl.mesh, o = m.centerOffset;
+    const p = b.tip.map((x, k) => x - back * b.dir[k]);
+    const local = new THREE.Vector3(p[0] - o.x, p[2] - o.y, -p[1] - o.z);
+    const w = local.applyMatrix4(mesh.matrixWorld).project(state.camera), rc = state.renderer.domElement.getBoundingClientRect();
+    return { x: rc.left + (w.x + 1) / 2 * rc.width, y: rc.top + (1 - w.y) / 2 * rc.height };
+  }, [shoot, back]);
+  const g3 = await onShoot(3);
+  await page.mouse.click(g3.x, g3.y);
+  await page.waitForTimeout(200);
+  await page.fill('#inp-limb-ext', '5');
+  await page.fill('#inp-limb-bend', '20');
+  await page.click('#btn-limb-apply');
+  await page.waitForTimeout(400);
+  let st7 = await page.evaluate(() => document.getElementById('status').textContent);
+  check('Limb on the shoot: Extend 5 + Bend 20 applies ("Limb set - bent 20.0°, extended 5.00 mm")', /^Limb set - bent 20\.0°, extended 5\.00 mm/.test(st7), st7.slice(0, 160));
+  await shot(page, 'limb-on-branch.png');
+  await page.click('#btn-undo');
+  await page.waitForFunction(() => /Undo: /.test(document.getElementById('status').textContent), null, { timeout: 15000 });
+  check('...one Undo puts it back', (await soupOf(page)) === kept);
+  // and a stretch + bend drag from the same place
+  const d0 = await onShoot(3), d1 = { x: d0.x + 40, y: d0.y - 30 };
+  await page.mouse.move(d0.x, d0.y);
+  await page.mouse.down();
+  for (let i = 1; i <= 16; i++) await page.mouse.move(d0.x + (d1.x - d0.x) * i / 16, d0.y + (d1.y - d0.y) * i / 16);
+  await page.mouse.up();
+  await page.waitForTimeout(400);
+  st7 = await page.evaluate(() => document.getElementById('status').textContent);
+  check('Limb on the shoot: a Stretch + bend drag sets', /^Limb set - /.test(st7) && (await soupOf(page)) !== kept, st7.slice(0, 160));
+  await shot(page, 'limb-drag-branch.png');
+  await page.click('#btn-limb');
+
   console.log('\n' + (fails ? fails + ' FAILED' : 'all gates held'));
   if (fails) process.exitCode = 1;
 });

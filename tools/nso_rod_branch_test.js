@@ -267,6 +267,43 @@ function limbBend(tag, soup, b, back, deg, toward, want) {
   const twig = await NSO_rodBranchRaw(thin, { point: [5, 0, 30], dia: 5, length: 25, angle: 45, union });
   if (common('a Ø5 twig on a Ø10 rod at 45°', thin, twig)) for (const deg of [10, 60]) limbBend('the Ø5 twig, ' + deg + '°', twig.tris, twig.branch, 8, deg, [0, 1, 0], 'bend');
 
+  console.log('\n=== 4b. Limb with the rod hint (what the Limb card now passes): short, fat shoots too ===');
+  {
+    const { NSO_rodLimbHint, NSO_rodBranchEnds } = ctx;
+    const cyl = NSO_Stock.revolve(NSO_Stock.profileCylinder(R, 60), 96);
+    for (const [dia, len, ang, backs] of [[10.5, 15, 45, [2]], [10.5, 15, 90, [2, 7.5]], [10.5, 30, 45, [2, 15]], [7, 15, 45, [2, 7.5]], [5, 15, 45, [2, 7.5]]]) {
+      const br = await NSO_rodBranchRaw(cyl, { point: [R, 0, 30], dia, length: len, angle: ang, union });
+      const tag = `Ø${dia} × ${len} at ${ang}° on Ø30.84 × 60`;
+      check(tag + ': welded on', br.ok, br.reason);
+      if (!br.ok) continue;
+      const b = br.branch, E = NSO_rodBranchEnds(br.tris), c0 = L.context(br.tris);
+      for (const back of backs) {
+        const g = b.tip.map((x, k) => x - back * b.dir[k] + b.tipR * b.v[k]), hint = NSO_rodLimbHint(br.tris, g, E);
+        check(`${tag}, grabbed ${back} mm in: the hint reads this shoot (its axis the shoot's)`, hint.ok && dot(hint.axis, b.dir) > 0.99999 && Math.abs(hint.radius - b.tipR - (b.rootR - b.tipR) * back / b.lengthMm) < 0.05,
+              hint.ok ? 'hinge ' + f3(hint.hHinge) + ', grab ' + f3(hint.hGrab) : hint.reason);
+        for (const reach of [0, 1, 5]) for (const [e, deg] of [[5, 0], [0, 20], [5, 20]]) {
+          const S = L.prepare(br.tris, g, { ctx: c0, reach, hint });
+          const t2 = `${tag}, grabbed ${back} mm in, Reach ${reach}: Extend ${e} Bend ${deg}`;
+          if (!S.ok) { check(t2 + ': prepared', false, S.reason); continue; }
+          L.displaceBy(S, e, deg, [1, 0, 0]);
+          const f = L.finish(S, { repair: REPAIR });
+          // a bend that would swing a short, fat shoot through the trunk is refused, the piece unchanged
+          if (!f.ok && /pass through the tree/.test(f.reason)) { check(t2 + ': refused - it would pass through the trunk - the piece unchanged', f.tris === br.tris, f.reason); continue; }
+          check(t2 + ': sets, the bone the shoot\'s own axis', f.ok && S.an.rod && dot(S.u0, b.dir) > 0.99999, f.ok ? '' : f.reason);
+          if (f.ok && reach === 0 && e === 5 && deg === 20) {
+            const MV = meshValidate(t2, f.tris);
+            check(t2 + ': ...mesh_validate PASS', MV.pass, (MV.fails || []).join('; '));
+          }
+        }
+      }
+    }
+    // mid-way along that short fat 45° shoot there is no clean rod below the grab: refused in words
+    const br = await NSO_rodBranchRaw(cyl, { point: [R, 0, 30], dia: 10.5, length: 15, angle: 45, union });
+    const b = br.branch, g = b.tip.map((x, k) => x - 7.5 * b.dir[k] + b.tipR * b.v[k]);
+    const S = L.prepare(br.tris, g, { hint: NSO_rodLimbHint(br.tris, g, NSO_rodBranchEnds(br.tris)) });
+    check('the Ø10.5 × 15 shoot at 45°, grabbed half-way: refused - "grab it further out"', !S.ok && /grab it further out/.test(S.reason), S.reason);
+  }
+
   console.log('\n=== 5. refusals, the piece unchanged ===');
   const base = { point: [R, 0, 40], dia: 10, length: 20, angle: 45, union };
   const cases = [

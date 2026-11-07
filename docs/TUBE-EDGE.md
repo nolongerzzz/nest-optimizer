@@ -1096,14 +1096,39 @@ changes to Limb came with it:
   subdivision that broke it; a bend once passed both and came back with 43
   doubled edges.
 
-Measured (tools/nso_rod_branch_test.js, section 4): **slim** branches - up to
-about a third of the trunk's Ø, Branch's default - bend grabbed anywhere along
-them, alone or three round one trunk, every result through mesh_validate. A
-**fat** branch (half the trunk's Ø) bends grabbed toward its tip; further in,
-Limb's fork reading (surface distance from the foot) finds no rings round so
-fat a root and refuses ("would turn … triangles inside out"). A branch rooted
-among earlier junctions (its wall not subdivided, above) may be refused by
-the closed guard. Either way nothing broken is handed back.
+**Limb on a rod: the rod hint** (2026-11-07, after "I have not been able to
+get a single branch to stretch+bend, or extend"). Limb finds a limb by walking
+the surface from the piece's foot; round a fat or slanted junction that reading
+skewed - its bone leaned off the shoot's axis and its fork's loop was ragged -
+so on a short, fat shoot (Ø10.5 × 15 at 45° on a Ø30.84 cylinder) every
+Extend and Bend was refused at every Reach. Now, when the grab is on a rod with
+a flat, round tip (every Branch-made shoot, and the trunk), app-limb.js hands
+Limb a hint (nso_rod_branch.js `NSO_rodLimbHint`): the rod's own axis is the
+bone, and the hinge sits 1 mm past the last place, going down from the grab,
+where the surface within the rod's radius stops being the rod's own face. The
+flex zone between hinge and grab is clean rod; it is subdivided in small
+spheres strung along the axis (`nso_limb.js`, rod branch of `prepare`) that
+stay off the junction, and a Branch-made shoot is ringed finer than Limb's
+1 mm already - its tip disc too, now in concentric rings rather than a fan of
+rim-to-centre needles - so nothing there is split. Without a rod under the
+grab, or when the zone the hint gives is not clean rod, Limb reads the tree as
+before. Measured (tools/nso_rod_branch_test.js, section 4b): Extend 5, Bend 20
+and both, at Reach 0, 1 and 5, on Ø10.5 × 15 at 45° and 90°, Ø10.5 × 30, Ø7 and
+Ø5 shoots, all set; grabbed half-way along the short Ø10.5 shoot at 45° there
+is no clean rod below the grab (it meets the trunk over its first ~5 mm) and
+Limb says to grab it further out. In the real page (the Cylinders drive,
+section 7) a pick + Extend 5 / Bend 20 / Apply and a Stretch + bend drag both
+set on that shoot.
+
+**Sliders.** Every number of Neck and Branch has a slider beside its box
+(app-live-slider.js: the slider writes the box, the ghost follows at the pace
+it can keep). The box stays the exact number - typed, or written by a ring
+handle or the branch drag, the slider then put back in step. Ranges come from
+what was read: a neck's Length up to the rod's or tube's length, Δr from a
+2-nozzle-width waist to a bulge of the radius; a branch's Ø and Tip Ø up to the
+pressed rod's Ø, Length up to 3 of it (at least 60 mm), Angle 20° - 160°. Tip
+Ø's slider sits at Ø while its box is blank. The Cylinder verb and Profile stay
+pickers (choices, not numbers).
 
 **Neck first, then Branch.** Neck rebuilds a rod between whole rings of its
 vertices; a branch's union re-cuts the trunk's wall, so Neck refuses a

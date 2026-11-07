@@ -880,6 +880,7 @@ function NSO_teLoad() {
       if (ND && (fresh || ND.value === '')) ND.value = String(-Math.max(0.5, Math.round(5 * tw) / 2));
     }
     NSO_teRemoveRing();
+    NSO_teSetSliderRanges();
     NSO_tePreview();
     return;
   }
@@ -903,8 +904,59 @@ function NSO_teLoad() {
   NSO_tePreview();
 }
 
+/* ---------------------------------------------------------------- sliders */
+
+// Each number of Neck and Branch has a slider beside its box (app-live-slider.js
+// binds the pair: the slider writes the box, and the preview follows it at the
+// pace it can keep). The box stays the number - typed, written by a ring handle
+// or the branch drag - and the slider is put back in step with it on every
+// preview. Tip Ø's box may be blank (the same as Ø): its slider then sits at Ø.
+var NSO_TE_SLIDERS = [['rng-te-neck-length', 'inp-te-neck-length'], ['rng-te-neck-dr', 'inp-te-neck-dr'],
+                      ['rng-te-br-dia', 'inp-te-br-dia'], ['rng-te-br-tip', 'inp-te-br-tip'],
+                      ['rng-te-br-len', 'inp-te-br-len'], ['rng-te-br-angle', 'inp-te-br-angle']];
+function NSO_teBindSliders() {
+  if (typeof window === 'undefined' || !window.nsoLiveSlider) return;
+  NSO_TE_SLIDERS.forEach(function (q) {
+    window.nsoLiveSlider.bind({ slider: q[0], box: q[1], onLive: function () { NSO_tePreview(); } });
+  });
+}
+function NSO_teSyncSliders() {
+  NSO_TE_SLIDERS.forEach(function (q) {
+    var sl = NSO_teEl(q[0]), bx = NSO_teEl(q[1]);
+    if (!sl || !bx) return;
+    var v = bx.value !== '' ? bx.value : (q[1] === 'inp-te-br-tip' ? (NSO_teEl('inp-te-br-dia') || {}).value : '');
+    if (v !== '' && v != null && isFinite(+v)) sl.value = String(+v);
+  });
+}
+// The sliders' ranges, from what was read: a neck's from the tube or rod (its
+// length; Δr from pinching it to 2 nozzle widths to bulging it by its radius),
+// a branch's from the rod pressed (Ø and Tip Ø up to that rod's Ø, Length up to
+// 3 of it, at least 60 mm).
+function NSO_teSliderRange(id, lo, hi, step) {
+  var sl = NSO_teEl(id);
+  if (!sl || !(hi > lo)) return;
+  sl.min = String(lo); sl.max = String(hi); if (step) sl.step = String(step);
+}
+function NSO_teSetSliderRanges() {
+  var B = NSO_teUI(), rd = B.read;
+  if (!rd || !rd.ok) return;
+  var r1 = function (x) { return Math.round(x * 10) / 10; };
+  if (rd.tube) {
+    var tb = rd.tube, R = tb.endRo;
+    NSO_teSliderRange('rng-te-neck-length', 0.5, Math.max(1, r1(tb.lengthMm)), 0.5);
+    NSO_teSliderRange('rng-te-neck-dr', -Math.max(0.1, r1(R - 0.4)), Math.max(0.5, r1(R)), 0.1);
+  } else if (rd.parent) {
+    var D = rd.at ? 2 * rd.at.r : 2 * rd.parent.Ro;
+    NSO_teSliderRange('rng-te-br-dia', 0.8, Math.max(1, r1(D - 0.2)), 0.1);
+    NSO_teSliderRange('rng-te-br-tip', 0.8, Math.max(1, r1(D - 0.2)), 0.1);
+    NSO_teSliderRange('rng-te-br-len', 0.5, Math.max(60, Math.round(3 * D)), 0.5);
+  }
+  NSO_teSyncSliders();
+}
+
 // Run the treatment on the current numbers; show the ghost or say why not.
 function NSO_tePreview() {
+  NSO_teSyncSliders();
   var B = NSO_teUI(), m = NSO_teModel();
   var kind = NSO_teReadKind();
   if (B.open && m && (B.readVerb !== kind || (kind === 'neck' && B.read && B.read.ok && !!B.read.rod !== !!B.rod))) { NSO_teLoad(); return B.result; }
@@ -956,6 +1008,7 @@ function NSO_teOpen(rod) {
   }
   B.rod = !!rod;
   B.open = true;
+  NSO_teBindSliders();                       // once (a second bind hands back the first)
   if (panel) panel.hidden = false;
   NSO_teSyncOpeners();
   NSO_teSyncRows();
@@ -995,6 +1048,7 @@ function NSO_teBranchLoad(B, m) {
   if (DI && (DI.value === '' || (rd.at && !(+DI.value < D - 0.1)))) DI.value = String(fit);
   if (LE && LE.value === '') LE.value = String(Math.max(2, Math.round(1.5 * D)));
   if (AN && AN.value === '') AN.value = '45';
+  NSO_teSetSliderRanges();
   NSO_tePreview();
 }
 
@@ -1288,6 +1342,7 @@ if (typeof document !== 'undefined') {
         }
       });
       if (cancel) cancel.addEventListener('click', NSO_teClose);
+      NSO_teBindSliders();
       var rv = NSO_teEl('sel-te-rod-verb');
       if (rv) rv.addEventListener('change', function () {
         // a neck's band and a branch's root are different places

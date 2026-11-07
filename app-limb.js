@@ -29,6 +29,11 @@
               panel then apply to it. A grab is a limb picked and moved in one.
      REACH    0 (the default): the flex zone runs down to the fork. A number:
               only that many mm below the grab flex, so the bend is tighter.
+     A ROD    a grab on a rod with a flat, round tip (Cylinders → Branch's
+              shoots, the trunk) is bent about the rod's own axis from just past
+              where it meets what it grows from (hintFor, nso_rod_branch.js's
+              NSO_rodLimbHint) - the tree's reading from the foot skews round a
+              fat or slanted junction. docs/TUBE-EDGE.md, "Limb on a rod".
 
    THE PREVIEW IS NOT A COMMIT. During the drag the placed mesh shows a throwaway
    geometry; m.rawTris is untouched. A refused move, a cancelled one and a lost
@@ -200,8 +205,23 @@ if (typeof document !== 'undefined') (function () {
   }
 
   function ctxFor(m) {
-    if (cache.tris !== m.rawTris) cache = { tris: m.rawTris, ctx: NSO_Limb.context(m.rawTris) };
+    if (cache.tris !== m.rawTris) cache = { tris: m.rawTris, ctx: NSO_Limb.context(m.rawTris), ends: undefined };
     return cache.ctx;
+  }
+  /* A ROD under the grab (nso_rod_branch.js, NSO_rodLimbHint): a rod with a
+     flat, round tip - every branch Cylinders → Branch makes, and the trunk -
+     is bent about its own axis from just past where it meets what it grows
+     from, rather than by the tree's reading from the foot (which skews round a
+     fat or slanted junction). The piece's round ends are read once per soup. */
+  function hintFor(m, point) {
+    if (typeof NSO_rodLimbHint !== 'function' || typeof NSO_rodBranchEnds !== 'function') return null;
+    ctxFor(m);
+    if (cache.ends === undefined) {
+      try { cache.ends = NSO_rodBranchEnds(m.rawTris); } catch (e) { cache.ends = null; }
+    }
+    if (!cache.ends || !cache.ends.ok || !cache.ends.closed.length) return null;
+    try { var h = NSO_rodLimbHint(m.rawTris, point, cache.ends); return h && h.ok ? h : null; }
+    catch (e2) { return null; }
   }
 
   /* ---- picking ---- */
@@ -342,7 +362,7 @@ if (typeof document !== 'undefined') (function () {
     var h = rawHit(p);
     if (!h) { say('Limb needs a raw piece - split, wrap or boolean it first', true); return false; }
     var ctx = ctxFor(m);
-    var S = NSO_Limb.prepare(m.rawTris, h.point, { ctx: ctx, reach: reach() });
+    var S = NSO_Limb.prepare(m.rawTris, h.point, { ctx: ctx, reach: reach(), hint: hintFor(m, h.point) });
     if (!S.ok) { say('Limb refused - ' + S.reason + ' - piece unchanged', true); readout('Limb refused - ' + S.reason, true); return false; }
     p.mesh.updateMatrixWorld();
     session = {
@@ -456,7 +476,7 @@ if (typeof document !== 'undefined') (function () {
     if (!isFinite(ext)) ext = 0;
     if (!isFinite(bend)) bend = 0;
     if (ext === 0 && bend === 0) { readout('Type an Extend (mm, negative shortens) and/or a Bend (degrees) first.', true); return; }
-    var S = NSO_Limb.prepare(m.rawTris, selected.point, { ctx: ctxFor(m), reach: reach() });
+    var S = NSO_Limb.prepare(m.rawTris, selected.point, { ctx: ctxFor(m), reach: reach(), hint: hintFor(m, selected.point) });
     if (!S.ok) { say('Limb refused - ' + S.reason + ' - piece unchanged', true); readout('Limb refused - ' + S.reason, true); return; }
     p.mesh.updateMatrixWorld();
     var r = NSO_Limb.displaceBy(S, ext, bend, leanRaw({ mesh: p.mesh }));
@@ -498,14 +518,14 @@ if (typeof document !== 'undefined') (function () {
     if (!h) return;
     var ctx = ctxFor(p.m);
     if (!ctx || !ctx.ok) { clearMarker(); return; }
-    drawMarker(p.m, NSO_Limb.probe(ctx, h.point), key);
+    drawMarker(p.m, NSO_Limb.probe(ctx, h.point, hintFor(p.m, h.point)), key);
   }
   function showSelected() {
     if (!selected) { clearMarker(); return; }
     var m = state.models.find(function (x) { return x && x.id === selected.modelId; });
     if (!m || !ready()) return;
     var ctx = ctxFor(m);
-    if (ctx && ctx.ok) drawMarker(m, NSO_Limb.probe(ctx, selected.point), 'sel');
+    if (ctx && ctx.ok) drawMarker(m, NSO_Limb.probe(ctx, selected.point, hintFor(m, selected.point)), 'sel');
   }
 
   function onMove(event) {

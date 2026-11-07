@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=ad14bcd5" />
+  <link rel="stylesheet" href="styles.css?v=12be68df" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -1665,10 +1665,12 @@
                 <datalist id="te-roll-angles"><option value="90"></option><option value="180"></option><option value="270"></option></datalist>
               </div>
               <div id="te-neck-rows" class="te-rows" hidden>
-                <label class="vp-bend-field" title="How long the neck runs along the tube, in mm, centred where you click the tube. Or drag either end ring on the tube along its axis: the band stretches, its centre held (Shift: 0.1 mm steps).">Length
-                  <input type="number" id="inp-te-neck-length" min="0.1" step="0.5" aria-label="Neck length, mm"><span>mm</span></label>
-                <label class="vp-bend-field" title="How far the wall moves at the neck's waist, in mm: below 0 pinches the tube in, above 0 bulges it out. With Walls Both the wall's thickness is kept; with one face only that face moves. Or drag the waist ring on the tube (it sits on the face that moves): toward the axis pinches, away bulges (Shift: 0.1 mm steps); Left / Right arrows step it 1 mm, Up / Down move the band.">Δr
-                  <input type="number" id="inp-te-neck-dr" step="0.5" aria-label="Neck delta r, mm (negative pinches, positive expands)"><span>mm</span></label>
+                <div class="te-slide" title="How long the neck runs along the tube, in mm, centred where you click the tube. Or drag either end ring on the tube along its axis: the band stretches, its centre held (Shift: 0.1 mm steps)."><label for="rng-te-neck-length">Length</label>
+                  <input type="range" id="rng-te-neck-length" min="0.5" max="60" step="0.5" aria-label="Length slider">
+                  <input type="number" id="inp-te-neck-length" min="0.1" step="0.5" aria-label="Neck length, mm"><span>mm</span></div>
+                <div class="te-slide" title="How far the wall moves at the neck's waist, in mm: below 0 pinches the tube in, above 0 bulges it out. With Walls Both the wall's thickness is kept; with one face only that face moves. Or drag the waist ring on the tube (it sits on the face that moves): toward the axis pinches, away bulges (Shift: 0.1 mm steps); Left / Right arrows step it 1 mm, Up / Down move the band."><label for="rng-te-neck-dr">Δr</label>
+                  <input type="range" id="rng-te-neck-dr" min="-15" max="15" step="0.1" aria-label="Δr slider">
+                  <input type="number" id="inp-te-neck-dr" step="0.5" aria-label="Neck delta r, mm (negative pinches, positive expands)"><span>mm</span></div>
                 <label class="vp-bend-field" title="Smooth: a cosine ease in and out, tangent to the tube at both ends. Funnel: a straight taper in and a straight taper out.">Profile
                   <select id="sel-te-neck-profile" class="vp-select" aria-label="Neck profile">
                     <option value="smooth" selected>Smooth</option>
@@ -1676,18 +1678,18 @@
                   </select></label>
               </div>
               <div id="te-branch-rows" class="te-rows" hidden>
-                <div class="te-pair">
-                  <label class="vp-bend-field" title="The branch's Ø where it leaves the wall, mm. Narrower than the rod it grows from; at least 2 nozzle widths."><i class="te-lbl">Ø</i>
-                    <input type="number" id="inp-te-br-dia" min="0.1" step="0.5" aria-label="Branch diameter, mm"><span>mm</span></label>
-                  <label class="vp-bend-field" title="The branch's Ø at its tip, mm. Blank: the same as its Ø (a cylinder). Smaller: a shoot that tapers."><i class="te-lbl">Tip Ø</i>
-                    <input type="number" id="inp-te-br-tip" min="0.1" step="0.5" placeholder="= Ø" aria-label="Branch tip diameter, mm (blank: the same as its diameter)"><span>mm</span></label>
-                </div>
-                <div class="te-pair">
-                  <label class="vp-bend-field" title="How far the branch stands out of the wall, mm, along the branch. Or drag: press on the rod and pull - the tip follows the pointer (0.5 mm steps, 0.1 with Shift)."><i class="te-lbl">Length</i>
-                    <input type="number" id="inp-te-br-len" min="0.5" step="0.5" aria-label="Branch length out of the wall, mm"><span>mm</span></label>
-                  <label class="vp-bend-field" title="The branch's angle off the rod, 20° to 160°: 90 straight out, under 90 leaning toward the rod's upper end (a shoot), over 90 down. Or drag the tip."><i class="te-lbl">Angle</i>
-                    <input type="number" id="inp-te-br-angle" min="20" max="160" step="5" aria-label="Branch angle off the rod, degrees"><span>°</span></label>
-                </div>
+                <div class="te-slide" title="The branch's Ø where it leaves the wall, mm. Narrower than the rod it grows from; at least 2 nozzle widths."><label for="rng-te-br-dia">Ø</label>
+                  <input type="range" id="rng-te-br-dia" min="0.8" max="30" step="0.1" aria-label="Ø slider">
+                  <input type="number" id="inp-te-br-dia" min="0.1" step="0.5" aria-label="Branch diameter, mm"><span>mm</span></div>
+                <div class="te-slide" title="The branch's Ø at its tip, mm. Blank: the same as its Ø (a cylinder). Smaller: a shoot that tapers."><label for="rng-te-br-tip">Tip Ø</label>
+                  <input type="range" id="rng-te-br-tip" min="0.8" max="30" step="0.1" aria-label="Tip Ø slider">
+                  <input type="number" id="inp-te-br-tip" min="0.1" step="0.5" placeholder="= Ø" aria-label="Branch tip diameter, mm (blank: the same as its diameter)"><span>mm</span></div>
+                <div class="te-slide" title="How far the branch stands out of the wall, mm, along the branch. Or slide, or drag: press on the rod and pull - the tip follows the pointer (0.5 mm steps, 0.1 with Shift)."><label for="rng-te-br-len">Length</label>
+                  <input type="range" id="rng-te-br-len" min="0.5" max="100" step="0.5" aria-label="Length slider">
+                  <input type="number" id="inp-te-br-len" min="0.5" step="0.5" aria-label="Branch length out of the wall, mm"><span>mm</span></div>
+                <div class="te-slide" title="The branch's angle off the rod, 20° to 160°: 90 straight out, under 90 leaning toward the rod's upper end (a shoot), over 90 down. Or slide, or drag the tip."><label for="rng-te-br-angle">Angle</label>
+                  <input type="range" id="rng-te-br-angle" min="20" max="160" step="1" aria-label="Angle slider">
+                  <input type="number" id="inp-te-br-angle" min="20" max="160" step="5" aria-label="Branch angle off the rod, degrees"><span>°</span></div>
               </div>
               <p id="te-readout" class="bend-readout">—</p>
               <div class="vp-row vp-row-pair">
@@ -2794,12 +2796,12 @@
   <script src="nso_tube_edge.js?v=7d856960"></script>
   <!-- Neck: a pinch or a bulge along a tube. After nso_tube_edge.js (its end
        reader, weld and helpers). See docs/TUBE-EDGE.md, "Neck". -->
-  <script src="nso_rod_branch.js?v=d85eaeb7"></script>
+  <script src="nso_rod_branch.js?v=c31657e7"></script>
   <script src="nso_tube_neck.js?v=4369044a"></script>
   <script src="nso_thread.js?v=3d986b5e"></script>
   <script src="nso_fittings.js?v=b8b58426"></script>
   <script src="nso_custom_shape.js?v=a8f52d5d"></script>
-  <script src="app-tube-edge.js?v=b085f646"></script>
+  <script src="app-tube-edge.js?v=f95f28f0"></script>
   <!-- Bridge: a web between two places, welded. After NSO_Repair.js,
        nso_planar_fuse.js (the vertex space), nso_thickness.js,
        nso_assemble.js (the seat), nso_path_sweep.js (the rod) and
@@ -2823,8 +2825,8 @@
   <script src="nso_pull.js?v=6e876b23"></script>
   <script src="app-pull.js?v=d24d53f6"></script>
   <!-- Limb: nso_limb.js is the tree, the limb and the move (headless, tools/nso_limb_test.js); app-limb.js the pointer session. docs/LIMB.md -->
-  <script src="nso_limb.js?v=36b5c5c0"></script>
-  <script src="app-limb.js?v=1dbc318f"></script>
+  <script src="nso_limb.js?v=07938197"></script>
+  <script src="app-limb.js?v=9ca0b82c"></script>
   <script src="app-wheel.js?v=83eb7ba1"></script>
   <script src="app-wheel-live.js?v=f0ecbeeb"></script>
   <script src="app-fit.js?v=94ef7252"></script>
