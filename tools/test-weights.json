@@ -392,6 +392,7 @@
     "wire:cut-blade": {"weight":9150,"note":""},
     "wire:cut-blade-view": {"weight":32850,"note":""},
     "wire:cut-bore": {"weight":44100,"note":""},
+    "wire:cut-grab": {"weight":60000,"note":""},
     "wire:cut-inside-out": {"weight":51950,"note":""},
     "wire:cut-mitre-drag": {"weight":130050,"note":""},
     "wire:cut-redesign": {"weight":93550,"note":""},

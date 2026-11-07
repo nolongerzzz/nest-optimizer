@@ -68,3 +68,15 @@ Four suites that already fail on the commit before this work (`nso_rotate_rings_
 A 15 mm notch could not be dialled in: the kerf and notch-width sliders stopped at 10 mm (`min(10, span/2)`). `cutSliderMax` now gives every slider room to breathe:
 width 2x the piece's biggest section, depth 1.5x, kerf and notch width 3/4 of its length, each at least 20 mm. The number box still takes anything and the
 range still grows to hold it. `nso_cut_strand_drive_check` (49 gates) sets a 15 mm kerf and a 15 mm notch width by slider.
+
+### Sixth round (2026-11-07): the blade answers only to a press on it or on the piece
+
+A press on the empty plate a grid square or two from the blade still grabbed it and the drag moved it. Cause: `cutBuildBlade` / `cutBuildSizedBlade`
+(`app-cut.js`) each added an invisible hit mesh bigger than the blade (+24 mm across the full blade, +12 mm round the sized box) "for easy drag", and
+`app-core.js` takes any ray hit on `state.cutHelper` as a blade grab. Both hit meshes are gone. The blade's own sheet and edge frame are already
+pickable (`cutOverlay(..., true)`), so a press on the blade still drags it, and a click on the piece still drops the blade there (that branch runs first
+and is unchanged). A press anywhere else on the plate falls through to the plate's orbit.
+
+New `tools/nso_wire_cut_grab_test.js` (`wire:cut-grab`, real mouse, top-down): the click-to-jump, a plate press 8 and 14 mm past the blade (fails on the
+old code: the blade moved 10.4 mm), and a press on the blade frame still dragging it. Trade-off: the full blade seen edge-on is a line, so it is grabbed
+by its frame, not by a fat target.

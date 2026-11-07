@@ -1221,10 +1221,6 @@ function cutBuildSizedBlade(group, f) {
   off.setComponent(k, 0);
   const geo = new THREE.BoxGeometry(size.x, size.y, size.z);
 
-  const hit = new THREE.Mesh(new THREE.BoxGeometry(size.x + 12, size.y + 12, size.z + 12),
-    new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide }));
-  hit.userData.cutHandle = true;
-  hit.userData.skipXray = true;
   const blade = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
     color: CUT_BLADE_FILL, transparent: true, opacity: CUT_BLADE_FILL_OPACITY,
     side: THREE.DoubleSide, depthTest: false, depthWrite: false
@@ -1235,7 +1231,7 @@ function cutBuildSizedBlade(group, f) {
     color: CUT_BLADE_COLOR, transparent: true, opacity: 1, depthTest: false, depthWrite: false
   })), true);
   frame.userData.cutFrame = true;
-  [hit, blade, frame].forEach(o => { o.position.copy(off); group.add(o); });
+  [blade, frame].forEach(o => { o.position.copy(off); group.add(o); });
   // The strand the cut will take: the plane's section of it, boxed (a second colour, so it reads against the blade).
   if (bl.isolate && bl.strand) {
     const lat = [0, 1, 2].filter(i => i !== k), pt = (u, v) => { const a = [0, 0, 0]; a[lat[0]] = u - C.getComponent(lat[0]); a[lat[1]] = v - C.getComponent(lat[1]); return a; };
@@ -1264,14 +1260,6 @@ function cutBuildBlade(group, f) {
   // sides along u and v.
   const q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(e(u), e(v), e(k)));
 
-  // Large invisible hit target for easy drag.
-  const hit = new THREE.Mesh(new THREE.PlaneGeometry(across[u] + 24, across[v] + 24), new THREE.MeshBasicMaterial({
-    visible: false, side: THREE.DoubleSide
-  }));
-  hit.quaternion.copy(q);
-  hit.userData.cutHandle = true;
-  hit.userData.skipXray = true;
-
   // The sheet: the blade's whole extent, seen through the piece.
   const blade = new THREE.Mesh(new THREE.PlaneGeometry(across[u], across[v]), new THREE.MeshBasicMaterial({
     color: CUT_BLADE_FILL, transparent: true, opacity: CUT_BLADE_FILL_OPACITY,
@@ -1296,7 +1284,6 @@ function cutBuildBlade(group, f) {
   frame.userData.cutFrame = true;
   const cross = lines([pt(-hu * 0.9, 0), pt(hu * 0.9, 0), pt(0, -hv * 0.9), pt(0, hv * 0.9)], 0.55);
 
-  group.add(hit);
   group.add(blade);
   group.add(frame);
   group.add(cross);
@@ -1404,7 +1391,7 @@ function buildCutHelper() {
   cutBuildBlade(group, info);
   cutBuildPlateLine(group);
   // A helper (nso-helpers.js): tagged, never exported, gone on leave / Clear /
-  // Undo. Interactive - the grab sheet is how the blade is dragged.
+  // Undo. Interactive - the blade's own sheet and frame are how it is dragged (no padding past them).
   const parent = state.modelGroup || state.previewMesh;
   if (parent) nsoHelpers.attach(parent, group, 'cut', { interactive: true });
   state.cutHelper = group;
