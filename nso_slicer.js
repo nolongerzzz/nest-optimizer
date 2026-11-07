@@ -731,6 +731,32 @@
     });
     return paths;
   }
+  /** A closed ring smoothed along its length: resampled every 0.12 mm and averaged over a Gaussian window of sigma mm (a loop that follows a dome's section, which the union of the part's layers
+   *  makes a scallop 0.1 mm deep every millimetre, is the polygon Bambu's mesh section is). A ring shorter than 6 sigma is left. */
+  function smoothRing(ring, sigma) {
+    var n = ring.length, step = 0.12, L = 0, i, seg = [];
+    for (i = 0; i < n; i++) { var a = ring[i], b = ring[(i + 1) % n], l = Math.hypot(b[0] - a[0], b[1] - a[1]); seg.push(l); L += l; }
+    if (L < 6 * sigma + 1e-6) return ring;
+    var m = Math.max(8, Math.round(L / step)), ds = L / m, pts = [], k = 0, acc = 0;
+    for (i = 0; i < m; i++) {
+      var t = i * ds;
+      while (acc + seg[k] < t - 1e-12 && k < n - 1) { acc += seg[k]; k++; }
+      var a2 = ring[k], b2 = ring[(k + 1) % n], u = seg[k] > 0 ? (t - acc) / seg[k] : 0;
+      pts.push([a2[0] + (b2[0] - a2[0]) * u, a2[1] + (b2[1] - a2[1]) * u]);
+    }
+    var half = Math.ceil(3 * sigma / ds), wts = [], ws = 0;
+    for (i = -half; i <= half; i++) { var wv = Math.exp(-0.5 * (i * ds / sigma) * (i * ds / sigma)); wts.push(wv); ws += wv; }
+    var out = [];
+    for (i = 0; i < m; i++) {
+      var sx = 0, sy = 0;
+      for (var q = -half; q <= half; q++) { var p = pts[((i + q) % m + m) % m], wq = wts[q + half]; sx += p[0] * wq; sy += p[1] * wq; }
+      out.push([sx / ws, sy / ws]);
+    }
+    var closed = out.concat([out[0]]), keep = simplifyIdx(closed, 0.01), res = [];            /* the moves are as long as Bambu's, not one per 0.12 mm */
+    keep.forEach(function (ix) { if (ix < out.length) res.push(out[ix]); });
+    return res.length >= 3 ? res : out;
+  }
+
   function connect(segs, maxLen, hull, startAt) {
     var n = segs.length;
     if (!n) return [];
@@ -2217,15 +2243,22 @@
          with the part further over it than that is the tree's; the walk's transition stays as it is). The walk down from a top finds a stack's ring only where it is wider than a line; a flank steps a few tenths
          of a mm a layer, so the walk typed its whole disc one way (Circular z 8.52: 69 mm of interface to Bambu's 39). The plate's fringe, where no part is over it at all,
          keeps the type the walk gave it. */
-      var ZONE_REACH_TRIM_MM = 0.1, ZONE_FAR_MM = 3;
+      var ZONE_REACH_TRIM_MM = 0.1, ZONE_FAR_MM = 3, ZONE_DOME_TRIM_MM = 0.2, DOME_PLATEAU_RATIO = 1.11;
       for (var jz = 0; jz < SP.length; jz++) {
         if (g.isEmpty(P.S[jz]) || !zones[jz] || !(zones[jz].i.length || zones[jz].t.length)) continue;
-        var hj = SP[jz].h, hostU = function (X) {
+        var hj = SP[jz].h, hostUat = function (jj, X) {
           var parts = [];
-          layersOverX(SP, jz, planes, X).forEach(function (k) { hosts.forEach(function (Q) { if (!g.isEmpty(Q.S[k])) parts.push(Q.S[k]); }); });
+          layersOverX(SP, jj, planes, X).forEach(function (k) { hosts.forEach(function (Q) { if (!g.isEmpty(Q.S[k])) parts.push(Q.S[k]); }); });
           return parts.length ? g.unionAll(parts) : g.empty();
-        };
-        var UI = hostU(gap + (NI - 1) * hj - ZONE_REACH_TRIM_MM), UT = hostU(gap + (NI + NT - 1) * hj - ZONE_REACH_TRIM_MM), UF = hostU(ZONE_FAR_MM);
+        }, hostU = function (X) { return hostUat(jz, X); };
+        /* UNDER A DOME THE INTERFACE'S REACH IS SHORTER: the part over a stack's top grows from the interface's reach to the transition's (a dome: 1.15 x in area on the Sphere; a flat floor 1.0), and
+           Bambu's interface there is the inner part only (the Sphere's plate at 9.32: transition outside R 2.4, interface in it; ours was all interface) */
+        var tjz = zones[jz].topI != null ? zones[jz].topI : jz, hjt = SP[tjz].h, trimI = ZONE_REACH_TRIM_MM;
+        if (ZONE_DOME_TRIM_MM > 0) {
+          var aI1 = hostUat(tjz, gap + (NI - 1) * hjt - ZONE_REACH_TRIM_MM), aT1 = hostUat(tjz, gap + (NI + NT - 1) * hjt - ZONE_REACH_TRIM_MM);
+          if (!g.isEmpty(aI1) && !g.isEmpty(aT1) && g.area(aT1) > DOME_PLATEAU_RATIO * g.area(aI1)) trimI = ZONE_DOME_TRIM_MM;
+        }
+        var UI = hostU(gap + (NI - 1) * hj - trimI), UT = hostU(gap + (NI + NT - 1) * hj - ZONE_REACH_TRIM_MM), UF = hostU(ZONE_FAR_MM);
         var oI = zones[jz].i.length ? g.unionAll(zones[jz].i) : g.empty(), oT = zones[jz].t.length ? g.unionAll(zones[jz].t) : g.empty();
         var keep = g.diff(g.union(oI, oT), g.diff(UF, UT)), fr = g.diff(keep, UT);
         var nI = g.union(g.inter(g.inter(keep, UI), oI), g.inter(fr, oI));                   /* a walk's transition stays transition: only an interface that lies deeper than the reach steps down */
@@ -2321,7 +2354,7 @@
       var EXACT_OUTLINE = true;       /* A RIBBON PLATE (the ridge) is Bambu's: each layer the part's EXACT section at the layer's reach (one section, not the union of the layers up to it; the reach never past the stack top's own face: dCl), the loops' centre PLATE_OUT_MM + 0.12 past it (measured on all six pieces: the outer edge stands 0.33 - 0.38 past the outline). Domes keep the union cut: a single section at that reach is far wider than theirs. */
       var REACH_EXTRA_MM = 0;   /* the section is read this much higher: a plane's edge moves 2.75 mm for 1 mm of height, and Bambu's plate stood 0.19 mm past ours on the downhill side */
       var PLATE_OUT_MM = -0.11;
-      var HOLE_SNAP_MM = 0.3, CONE_REACH_MM = 0.18, DISC_REACH_MM = 0.24, DISC_CLOSING = 0.88, DISC_CLIP_MM = -0.07, PLATE_UP_LOW_MM = 0.1, PLATE_UP_LOW_N = 4, RIBBON_SLAB_RATIO = 2;      /* the ridge's first plates (its rounded end, the slab still wide): the uphill edge stands 0.1 over the layer, and the slab is a ribbon from a ratio of 2 (Bambu cycles its hatch there too) */
+      var LOOP_SMOOTH_MM = 0.4, HOLE_SNAP_MM = 0.3, CONE_REACH_MM = 0.18, DISC_REACH_MM = 0.24, DISC_CLOSING = 0.88, DISC_CLIP_MM = -0.07, PLATE_UP_LOW_MM = 0.1, PLATE_UP_LOW_N = 4, RIBBON_SLAB_RATIO = 2;      /* the ridge's first plates (its rounded end, the slab still wide): the uphill edge stands 0.1 over the layer, and the slab is a ribbon from a ratio of 2 (Bambu cycles its hatch there too) */
       var PLATE_UP_MM = 0.21;      /* the uphill edge: the plate stops where the part's section 0.21 mm over the layer begins (the face there stands 0.21 over it; Bambu's ribbon is 0.9 mm of the face's height, ours was 1.05) */
       var PLATE_BAND_MM = 0.7;      /* how far past the support mesh's footprint the outline may run */
       var CURVED_SHRINK_MM = 0.1;   /* on a curved face (the zone changes layer on layer) the host cut is this much narrower: a dome's plate was out past Bambu's */
@@ -2499,7 +2532,16 @@
                   }
                 }
               }
-              var loopIn = steady ? LOOP_IN_FLAT_MM : LOOP_IN_MM;
+              /* A STEADY ZONE UNDER A DOME IS NOT A FLAT FLOOR: a dome's plateau layers keep their size too (Bambu's Sphere: 2.58 - 2.61 on every layer from the fourth), but the part over
+                 them is not flat - its section grows from the interface's reach to the transition's (1.15 - 1.16 x in area at the stack's top layer on the Sphere, 1.0 on a flat ring, 1.04 - 1.08 on the Negative Spheres' filleted floor) - and its loops lie in from the slab's edge
+                 (0.12) as on any dome, not out past it (0.15: ours stood 0.25 too far out, 2.83 and 2.90 to 2.60) */
+              var flatFloor = steady;
+              if (steady && DOME_PLATEAU_RATIO > 0) {
+                var tj0 = zones[j].topI != null ? zones[j].topI : j;                  /* a stack stands under one face: its top layer's reaches say what the face is */
+                var hI0 = hostExCs(tj0, dInEx(tj0)), hT0 = hostExCs(tj0, dTrEx(tj0));
+                if (hI0 && hT0 && !g.isEmpty(hI0) && !g.isEmpty(hT0) && g.area(hT0) > DOME_PLATEAU_RATIO * g.area(hI0)) flatFloor = false;
+              }
+              var loopIn = flatFloor ? LOOP_IN_FLAT_MM : LOOP_IN_MM;
               var inLoop = g.offset(g.inter(Sj, sheetCs), -loopIn);
               hullS = g.polys(g.offset(inLoop, wI / 2 + 1e-4));
               var ZI = stI.length ? g.offset(g.unionAll(stI), w / 2) : g.empty(), ZT = stT.length ? g.offset(g.unionAll(stT), w / 2) : g.empty();
@@ -2558,7 +2600,7 @@
                   if (!g.isEmpty(bridge)) inner = g.isEmpty(inner) ? g.inter(near, g.offset(bridge, wI)) : g.union(inner, g.inter(near, g.offset(bridge, wI / 2 + 0.05)));
                 }
                 g.polys(inner).forEach(function (ring) {
-                  if (ring.length > 2) L.paths.push({ feature: rg[1], width: wI, closed: true, pts: ring, typed: true });
+                  if (ring.length > 2) L.paths.push({ feature: rg[1], width: wI, closed: true, pts: (!flatFloor && !ribbonSlab && !cavGround && LOOP_SMOOTH_MM > 0) ? smoothRing(ring, LOOP_SMOOTH_MM) : ring, typed: true });
                 });
               });
             }
