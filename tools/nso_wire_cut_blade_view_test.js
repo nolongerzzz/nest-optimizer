@@ -15,12 +15,13 @@
    NOW (app-cut.js buildCutHelper / updateCutHelper)
    - The blade is a thin translucent sheet with a solid edge frame, neither
      depth-tested, drawn after the pieces: visible through the piece.
-   - A BALL at the blade's front-left top corner (cutPlaceBall), out past it along
-     the top edge and joined to it by a short bar that runs a little into the blade:
-     on the blade's plane, at the height of the top edge, made of the blade's own
-     stuff (the sheet's colour and translucency - an extension of the blade, not
-     yellow), drawn through the piece like the rest, and pickable - the place to
-     take hold of a thin blade. There is no plate line.
+   - A TAB at the blade's front-left top corner (cutPlaceBall): a flat bar in the
+     blade's plane running straight out along the top edge (its upper edge in line
+     with the blade's), a ball on its centreline at the end, and ONE yellow outline -
+     the frame's - on from the blade's top edge along the bar, round the ball and back
+     along the bar's lower edge to the blade. The fill is the blade's own stuff (the
+     sheet's colour and translucency); all of it is drawn through the piece like the
+     rest, and pickable - the place to take hold of a thin blade. No plate line.
    - The x-ray view leaves all of it alone (it rewrites depth settings on
      whatever it walks, which would bring the opaque slab back).
 
@@ -93,26 +94,41 @@ const STATE = `window.__bladeView = function (id) {
   const ballLocal = bp.clone().applyMatrix4(toLocal).applyMatrix4(T);
   const ballOffPlane = Math.abs(ballLocal[k] - plane);
   const bladeTopY = Math.max(...verts(blade).concat(verts(frame)).map(v => v.y));
-  // The bar: one end on a top corner of the blade, the other on the ball; and the corner is the front-left one (the home view's
+  // The tab: a flat bar and a ball with ONE outline (the frame's yellow) that begins on the blade's top corner, runs out along the top edge,
+  // round the ball and back along the bar's lower edge to the blade's side edge. The corner is the front-left one (the home view's
   // toward-the-viewer and left), the better of the two ends of the top edge by that measure.
-  const bar = H.children.find(c => c.userData.cutBar);
-  bar.updateMatrixWorld(true);
-  const e1 = new THREE.Vector3(0, -0.5, 0).applyMatrix4(bar.matrixWorld), e2 = new THREE.Vector3(0, 0.5, 0).applyMatrix4(bar.matrixWorld);
+  const bar = H.children.find(c => c.userData.cutBar), ol = H.children.find(c => c.userData.cutBallOutline);
+  bar.updateMatrixWorld(true); ol.updateMatrixWorld(true);
+  const op = ol.geometry.attributes.position, opts = [];
+  for (let i = 0; i < op.count; i++) opts.push(new THREE.Vector3().fromBufferAttribute(op, i).applyMatrix4(ol.matrixWorld));
   const fv = verts(frame), maxY = Math.max(...fv.map(v => v.y)), topC = [];
   fv.forEach(v => { if (v.y >= maxY - 1e-6 && !topC.some(t => t.distanceTo(v) < 1e-6)) topC.push(v); });
   const nearC = p => Math.min(...topC.map(t => t.distanceTo(p)));
-  const cornerEnd = nearC(e1) < nearC(e2) ? e1 : e2;
-  const chosen = topC.slice().sort((p, q) => p.distanceTo(cornerEnd) - q.distanceTo(cornerEnd))[0];
+  const p0 = opts[0], p1 = opts[1], pEnd = opts[opts.length - 1];
+  const chosen = topC.slice().sort((p, q) => p.distanceTo(p0) - q.distanceTo(p0))[0];
+  const other = topC.find(t => t !== chosen);
   const bc = new THREE.Box3().setFromObject(blade).getCenter(new THREE.Vector3()), ref = new THREE.Vector3(-0.5, 0, 1).normalize();
   const frontLeftOk = topC.length < 2 || chosen.clone().sub(bc).dot(ref) >= Math.max(...topC.map(t => t.clone().sub(bc).dot(ref))) - 1e-6;
-  const barAtCorner = Math.min(nearC(e1), nearC(e2)), barAtBall = Math.min(e1.distanceTo(bp), e2.distanceTo(bp));
-  const ballOut = Math.max(...topC.map(t => t.distanceTo(bp)));          // the ball stands out past the corner, not on the blade
+  // the outline starts on the blade's corner, its first run is the blade's own top edge carried on outward (collinear, same sense), and
+  // it comes back to the blade's edge 3 mm below the top
+  const edgeDir = other ? chosen.clone().sub(other).normalize() : null;
+  const runDir = p1.clone().sub(p0).normalize();
+  const flush = other ? { straight: new THREE.Vector3().crossVectors(edgeDir, runDir).length(), same: edgeDir.dot(runDir), level: Math.abs(p1.y - p0.y) } : null;
+  const drop = p0.y - pEnd.y;
+  const arc = opts.slice(2, opts.length - 2), bp0 = new THREE.Vector3().setFromMatrixPosition(ball.matrixWorld);
+  const arcOnBall = Math.max(...arc.map(p => Math.abs(p.distanceTo(bp0) - ball.geometry.parameters.radius)));
+  // the bar is a flat box in the plane: thin across it, as wide as the outline's drop, its upper edge at the blade's top edge
+  const bs = new THREE.Vector3().setFromMatrixScale(bar.matrixWorld);
+  const barTop = Math.max(...[-0.5, 0.5].map(sx => new THREE.Vector3(sx, 0.5, 0).applyMatrix4(bar.matrixWorld).y));
+  const barFlat = bar.geometry.type === 'BoxGeometry' && bar.scale.z <= 1.2 && Math.abs(bar.scale.y - 3) < 1e-9 && Math.abs(barTop - bladeTopY) < 1e-3;
+  const ballOut = Math.max(...topC.map(t => t.distanceTo(bp0)));        // the ball stands out past the corner, not on the blade
+  const outlineAtCorner = nearC(p0), outlineIsFrame = ol.material.color.getHex() === frame.material.color.getHex();
   const sameStuff = [ball, bar].every(o => o.material.color.getHex() === blade.material.color.getHex() && o.material.opacity === blade.material.opacity && o.material.transparent === true) && ball.material.color.getHex() !== frame.material.color.getHex();
-  const depth = [blade, frame, ball, bar].every(o => o.material.depthTest === false && o.material.depthWrite === false);
+  const depth = [blade, frame, ball, bar, ol].every(o => o.material.depthTest === false && o.material.depthWrite === false);
   return { axis: k, span: f.span, slider: slider, box: Number(document.getElementById('cut-mm').value),
            offPlane: offPlane, margin: margin, depth: depth,
            ballOffPlane: ballOffPlane, ballAbove: bp.y - bladeTopY, ballPickable: ball.userData.cutHandle === true,
-           ballRadius: ball.geometry.parameters.radius, sameStuff: sameStuff, barAtCorner: barAtCorner, barAtBall: barAtBall, frontLeftOk: frontLeftOk, topCorners: topC.length, ballOut: ballOut, noPlateLine: !H.getObjectByName('cutPlateLine') && H.userData.plateLine === undefined,
+           ballRadius: ball.geometry.parameters.radius, sameStuff: sameStuff, outlineAtCorner: outlineAtCorner, outlineIsFrame: outlineIsFrame, flush: flush, drop: drop, arcOnBall: arcOnBall, barFlat: barFlat, frontLeftOk: frontLeftOk, topCorners: topC.length, ballOut: ballOut, noPlateLine: !H.getObjectByName('cutPlateLine') && H.userData.plateLine === undefined,
            bladeTransparent: blade.material.transparent && blade.material.opacity < 0.6 };
 };
 /* The canvas as rendered round a world point (a 7 x 7 patch, so a 1 px line
@@ -174,12 +190,17 @@ withApp(async (page, logs) => {
     check(label + ': the blade covers the piece\'s bounds across the cut, 1 mm over', s.margin > 1 - 1e-4, 'margin ' + s.margin.toFixed(4) + ' mm');
     check(label + ': sheet, frame and ball are drawn through the piece (no depth test), the sheet translucent',
       s.depth && s.bladeTransparent);
-    check(label + ': the ball stands on the blade\'s plane, at the height of its top edge, and can be picked',
-      s.ballOffPlane < 1e-4 && Math.abs(s.ballAbove) < 1e-3 && s.ballPickable && Math.abs(s.ballRadius - 2.4) < 1e-9,
-      'off plane ' + s.ballOffPlane.toExponential(1) + ', above the top edge ' + s.ballAbove.toFixed(4) + ' mm');
-    check(label + ': a short bar is built onto a top corner of the blade (running 0.6 mm into it) and ends at the ball, which stands out past the corner',
-      Math.abs(s.barAtCorner - 0.6) < 0.01 && s.barAtBall < 1e-3 && s.ballOut > 6, 'bar to corner ' + s.barAtCorner.toFixed(3) + ' (0.6 into the blade), bar to ball ' + s.barAtBall.toExponential(1) + ', ball ' + s.ballOut.toFixed(1) + ' mm out');
-    check(label + ': ball and bar are the blade\'s own stuff - the sheet\'s colour and translucency, not the yellow of the frame', s.sameStuff);
+    check(label + ': the ball stands on the blade\'s plane, on the flat bar\'s centreline (1.5 mm under the top edge), and can be picked',
+      s.ballOffPlane < 1e-4 && Math.abs(s.ballAbove + 1.5) < 1e-3 && s.ballPickable && Math.abs(s.ballRadius - 2.4) < 1e-9,
+      'off plane ' + s.ballOffPlane.toExponential(1) + ', ' + s.ballAbove.toFixed(4) + ' mm from the top edge');
+    check(label + ': the bar is FLAT (a thin box in the blade\'s plane, 3 mm wide), its upper edge at the blade\'s top edge',
+      s.barFlat, 'flat ' + s.barFlat);
+    check(label + ': one outline starts on the blade\'s top corner and its first run is the blade\'s own top edge carried straight on outward',
+      s.outlineAtCorner < 1e-3 && (!s.flush || (s.flush.straight < 1e-4 && s.flush.same > 0.9999 && s.flush.level < 1e-4)),
+      'start ' + s.outlineAtCorner.toExponential(1) + ' from the corner' + (s.flush ? ', off the edge line ' + s.flush.straight.toExponential(1) + ', level ' + s.flush.level.toExponential(1) : ''));
+    check(label + ': it goes round the ball (every point of the arc on the ball\'s circle), comes back along the bar\'s lower edge and ends on the blade\'s edge 3 mm down',
+      s.arcOnBall < 1e-3 && Math.abs(s.drop - 3) < 1e-3 && s.ballOut > 6, 'arc off the ball ' + s.arcOnBall.toExponential(1) + ', drop ' + s.drop.toFixed(3) + ', ball ' + s.ballOut.toFixed(1) + ' mm out');
+    check(label + ': the outline is the frame\'s yellow; ball and bar are the blade\'s own stuff - the sheet\'s colour and translucency', s.outlineIsFrame && s.sameStuff);
     check(label + ': it is the front-left top corner (toward the home view\'s viewer and left)', s.frontLeftOk, s.topCorners + ' top corners');
     check(label + ': there is no plate line', s.noPlateLine);
   }
@@ -351,16 +372,18 @@ withApp(async (page, logs) => {
   check('with x-ray on: likewise', s.depth && s.bladeTransparent && await page.evaluate(() => state.xray === true));
   await xray();
 
-  console.log('\n=== 6. the ball is the place to grab: a ray at it hits it, and it is a drag handle (so is its bar) ===');
+  console.log('\n=== 6. the tab is the place to grab: a ray at the ball or the bar hits it, and both are drag handles ===');
   const grabbed = await page.evaluate(() => {
-    const H = state.cutHelper, ball = H.children.find(c => c.userData.cutBall), rc = new THREE.Raycaster();
+    const H = state.cutHelper, ball = H.children.find(c => c.userData.cutBall), bar = H.children.find(c => c.userData.cutBar), rc = new THREE.Raycaster();
     state.scene.updateMatrixWorld(true);
-    const bp = new THREE.Vector3().setFromMatrixPosition(ball.matrixWorld);
-    rc.set(bp.clone().add(new THREE.Vector3(0.4, 50, 0.4)), new THREE.Vector3(0, -1, 0));
-    const hits = rc.intersectObject(H, true);
-    return { n: hits.length, first: hits[0] && hits[0].object.userData.cutBall === true, handle: hits[0] && hits[0].object.userData.cutHandle === true };
+    const aimDown = o => { const p = new THREE.Vector3().setFromMatrixPosition(o.matrixWorld); rc.set(p.clone().add(new THREE.Vector3(0.3, 50, 0.3)), new THREE.Vector3(0, -1, 0)); return rc.intersectObject(H, true); };
+    const isTab = h => h && h.object.userData && (h.object.userData.cutBall || h.object.userData.cutBar || h.object.userData.cutBallOutline);
+    const hb = aimDown(ball), hr = aimDown(bar);
+    return { ball: { n: hb.length, tab: !!isTab(hb[0]), handle: !!(hb[0] && hb[0].object.userData.cutHandle), ballAmong: hb.some(h => h.object.userData.cutBall) },
+             bar: { n: hr.length, tab: !!isTab(hr[0]), handle: !!(hr[0] && hr[0].object.userData.cutHandle) } };
   });
-  check('a ray straight down at the ball hits it first, and it is a cut handle', grabbed.n > 0 && grabbed.first && grabbed.handle, JSON.stringify(grabbed));
+  check('a ray straight down at the ball hits the tab first (the ball or its outline), the ball is among the hits, and it is a cut handle', grabbed.ball.n > 0 && grabbed.ball.tab && grabbed.ball.ballAmong && grabbed.ball.handle, JSON.stringify(grabbed.ball));
+  check('a ray straight down at the bar hits the tab and it is a cut handle', grabbed.bar.n > 0 && grabbed.bar.tab && grabbed.bar.handle, JSON.stringify(grabbed.bar));
   check('there is no plate line object anywhere in the helper', await page.evaluate(() => { let n = 0; state.cutHelper.traverse(o => { if (o.name === 'cutPlateLine' || (o.userData && (o.userData.cutPlateLine || o.userData.plateLine))) n++; }); return n === 0; }));
 
   const errs = logs.filter(l => l.startsWith('[pageerror]'));

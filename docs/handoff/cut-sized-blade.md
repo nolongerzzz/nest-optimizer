@@ -180,3 +180,13 @@ paints over it from straight above (three camera angles in `nso_wire_cut_blade_v
 blade stands square to the frame), picks the one toward the front and left of the home view (the world direction (-0.5, 0, 1): continuous in the blade's turn), runs the bar outward along the top edge from 0.6 mm
 inside the corner (`CUT_BALL_INSET_MM`) for `CUT_BALL_BAR_MM` + the ball's radius, and puts the ball at its end. A press on the bar grabs like one on the ball (`app-core.js`). The blade-view test now gates: ball on the
 plane at the height of the top edge, bar 0.6 into a top corner and ending at the ball, ball and bar the sheet's colour and translucency (not the frame's yellow), the front-left corner chosen, drawn through the piece.
+
+### Fifteenth round (2026-11-07): the tab - a flat bar, the ball on it, one yellow outline
+
+Asked for (from a sketch over a dark-background screenshot): the yellow outline of the blade carried straight out round the ball and its connector, the connector's edge aligned with the blade's, and a flat bar in place of the
+round tube - the fix for the dark ball being hard to see on the dark plate. `cutBuildBall` now builds three things: the ball (sphere, the sheet's material), a flat bar (a unit box scaled to length x 3 mm wide x 1 mm thick and
+turned onto the blade's plane by `cutPlaceBall`, the sheet's material) and an outline (`THREE.Line`, 35 points, the frame's yellow, drawn last so the dark fills do not dim it). `cutPlaceBall` still picks the front-left top
+corner, then lays the tab in the blade's plane from it: the bar's upper edge is the blade's top edge carried on outward (collinear), the ball is on the bar's centreline (H/2 below the top edge) at its end, and the outline is
+the top edge out to where the bar meets the ball, the long way round the ball, and back along the bar's lower edge to the blade's side edge. `nso_wire_cut_blade_view_test` gates it: outline starts on the corner and its first
+run is the blade's top edge carried on (cross product 0, same sense, level), the arc is on the ball's circle, it ends 3 mm down, the bar is a thin box with its top at the blade's top, the outline is the frame's colour and the fill
+the sheet's, drawn through the piece, front-left chosen; a ray at the ball or the bar hits a tab handle.
