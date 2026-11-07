@@ -17,3 +17,7 @@ Branch `claude-wip`. Full write-up: **`docs/CROP.md`, "The card"**; Lift's side 
   the Crop card, which stands over the left of the view: `nso_lift_plate_drive_lib.js` `setClearOfCard` slides the
   picture right for the ones that click on a piece).
 - **Known, not from this change:** `shell:v3`'s CLEAR PLATE check fails on the branch before it too.
+- **Piece is off the card** (2026-11-07): the shape that took another piece as the cutter was left over from another
+  build and Box, Cylinder, Sphere, Outline and Lasso cover it. Removed from `index.html` and `app-crop-card.js` (its
+  state, readout, overlay and click-pick); the engine keeps `{ kind: 'piece' }` (`crop:engine` 4 still runs it). The
+  drive checks that used it now use Box (`wire:crop`'s refusal) or Outline of the star (`crop:shapes`'s refusal).

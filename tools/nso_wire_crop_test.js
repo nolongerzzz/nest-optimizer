@@ -61,7 +61,7 @@ withApp(async (page, logs) => {
     const b = document.getElementById('btn-crop');
     const inMenu = !!(b && b.closest('#menu-crop'));
     return { btn: !!b, wired: !!b && b.dataset.nsoWired === '1', inMenu,
-             row: ['box', 'cylinder', 'sphere', 'piece', 'outline'].every(k => !!document.getElementById('btn-crop-shape-' + k)),
+             row: ['box', 'cylinder', 'sphere', 'outline', 'lasso'].every(k => !!document.getElementById('btn-crop-shape-' + k)),
              old: ['crop-start-mm', 'chk-crop-box', 'btn-crop-axis-x', 'btn-crop-lockin'].filter(i => document.getElementById(i)) };
   });
   check('#btn-crop present, inside the Crop card', ui.btn && ui.inMenu);
@@ -147,20 +147,18 @@ withApp(async (page, logs) => {
   await page.evaluate(i => { state.models.find(x => x.id === i).faceMask = null; }, id);
 
   console.log('\n=== 7. a shape that holds nothing is refused in words, the plate untouched ===');
-  const hid = await loadSTL(page, path.join(ROOT, 'library', 'hinge_knuckle_box.stl'));
   await selectModel(page, id);
   await page.evaluate(i => selectPlaced(state.placed.findIndex(p => p.sourceId === i)), id);
   await page.evaluate(() => { state.camera.position.set(70, 60, 90); state.controls.target.set(20, 4, 0); state.camera.lookAt(20, 4, 0); state.controls.update(); state.renderer.render(state.scene, state.camera); });
-  await page.click('#btn-crop-shape-piece');
-  const hxy = await page.evaluate(hh => {
-    const p = state.placed.find(q => q.sourceId === hh), r = state.renderer.domElement.getBoundingClientRect();
-    const c = new THREE.Box3().setFromObject(p.mesh).getCenter(new THREE.Vector3()).project(state.camera);
-    return { x: r.left + (c.x + 1) / 2 * r.width, y: r.top + (1 - c.y) / 2 * r.height };
-  }, hid);
-  await page.mouse.click(hxy.x, hxy.y);
-  await page.waitForFunction(() => { const S = NSO_CropCard.state(); return S.piece.id != null && S.plan && !S.timer; }, null, { timeout: 30000 });
+  await page.click('#btn-crop-shape-box');
+  // a box well clear of the bar, in the air beside it: it holds nothing of the piece
+  await page.evaluate(() => {
+    const S = NSO_CropCard.state(), p = state.placed.find(q => q.sourceId === S.forId), b = new THREE.Box3().setFromObject(p.mesh);
+    NSO_CropCard.setBox([b.max.x + 60, -(b.min.z + b.max.z) / 2, (b.min.y + b.max.y) / 2], [3, 3, 3]);
+  });
+  await page.waitForFunction(() => { const S = NSO_CropCard.state(); return S.plan && !S.timer; }, null, { timeout: 30000 });
   const refusal = await page.evaluate(() => ({ ro: document.getElementById('crop-readout').textContent, off: document.getElementById('btn-crop').disabled }));
-  check('the hinge, standing apart from the bar, is a cutter that holds nothing of it - said in words, CROP off',
+  check('a box standing apart from the bar holds nothing of it - said in words, CROP off',
     /holds nothing of this piece/.test(refusal.ro) && refusal.off, refusal.ro);
   const pre = await page.evaluate(() => ({ m: state.models.length, p: state.placed.length, u: state.undoStack.length }));
   const forced = await page.evaluate(async () => {
@@ -177,7 +175,7 @@ withApp(async (page, logs) => {
   await page.click('#btn-crop-shape-box');
   await settle(page);
   await page.click('#btn-crop');
-  await page.waitForFunction(() => state.models.length === 3, null, { timeout: 30000 });
+  await page.waitForFunction(() => state.models.length === 2, null, { timeout: 30000 });
   const halves = await page.evaluate(() => {
     const cid2 = state.models[state.models.length - 1].id;
     openCutter('cut');      // Cut is its own card: arm it for the split

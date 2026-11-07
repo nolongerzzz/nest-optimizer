@@ -98,9 +98,9 @@ const HOLDS = {
   'menu-export': ['export-format', 'btn-export-model', 'btn-library-save', 'btn-export-stl', 'btn-delete-model'],
   'menu-scale': ['scale-card', 'scale-factor', 'scale-target', 'btn-scale-fit'],
   'menu-cut': ['edit-card', 'cut-miter-dial', 'cut-slider', 'cut-mm', 'btn-cut'],
-  // CROP: the Shape row (Box ... Lasso), one readout, CROP, Cancel - then Lift, whose panel holds Strip and Detach flange (Reattach is in Connect)
+  // CROP: the Shape row (Box, Cylinder, Sphere, Outline, Lasso), one readout, CROP, Cancel - then Lift, whose panel holds Strip and Detach flange (Reattach is in Connect)
   'menu-crop': ['crop-card', 'crop-shape-row', 'btn-crop-shape-box', 'btn-crop-shape-cylinder', 'btn-crop-shape-sphere',
-                'btn-crop-shape-piece', 'btn-crop-shape-outline', 'btn-crop-shape-lasso', 'crop-readout', 'btn-crop', 'btn-crop-cancel',
+                'btn-crop-shape-outline', 'btn-crop-shape-lasso', 'crop-readout', 'btn-crop', 'btn-crop-cancel',
                 'btn-lift', 'lift-panel', 'btn-detach'],
   // CONNECT: the builder, and Reattach as its last row (it moved here from the Crop card)
   'menu-connect': ['connect-panel', 'btn-reattach'],

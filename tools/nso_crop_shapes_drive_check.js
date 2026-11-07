@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* Crop's Cylinder, Piece and Outline shapes, driven through the REAL app in headless
+/* Crop's Cylinder and Outline shapes, driven through the REAL app in headless
    Chromium at 1280 x 800 (nso_crop.js; the card is app-crop-card.js).
 
      node tools/nso_crop_shapes_drive_check.js                     exit 0 = every gate held
@@ -12,8 +12,8 @@
    Every copy goes through tools/mesh_validate.py, the canonical checker, self-intersection
    included. The geometry is measured HERE, from the meshes as drawn, not by the app's code.
    (The card is the copy card now: what the old card's Keep outside and Grow did is gone, and
-   docs/CROP.md says where each went. Its Circle is the Cylinder, its Piece region the Piece
-   shape, its Grow the Outline's offsets.)
+   docs/CROP.md says where each went. Its Circle is the Cylinder, its Grow the Outline's offsets.
+   The Piece shape has left the card; the engine still has it.)
 
      1. CYLINDER on a 60 x 60 x 4 mm plate: picked it is a vertical Ø30 cylinder centred on the
         plate; its ends pulled out past the plate. CROP copies a Ø30 disc - every vertex
@@ -22,14 +22,12 @@
         ONE Undo.
      2. its side handle resizes it, its body slides it; slid off the plate it refuses in words
         and CROP is off; one wider than the plate copies the whole plate.
-     3. PIECE: a 100 x 100 x 3 plate cropped to the star prism (library/soften_test_05_star_prism.stl)
-        laid over it off-centre. The outline matches the star's silhouette within 0.05 mm both
-        ways, in the plate's own raw frame. The star is untouched. One Undo.
+     3. the set-up: a 100 x 100 x 3 plate with the star prism (library/soften_test_05_star_prism.stl)
+        laid over it off-centre, the star's silhouette measured in the plate's own raw frame.
      4. OUTLINE of the star, its outer offset d1 dragged: a skin outside the star - every vertex
         either on the star's outline or d1 outside it, reaching d1 past it on all four sides; its
         inner offset d2 dragged: a skin inside it.
-     5. the star slid off the plate: refused in words; clicking the plate itself as its own cutter
-        is refused in words.
+     5. the star slid off the plate: the Outline refuses in words, and nothing changes.
 */
 'use strict';
 
@@ -366,8 +364,8 @@ withApp(async (page, logs) => {
     'Ø ' + (2 * wide.cyl.r).toFixed(1) + ', ' + (+vw.volume).toFixed(1) + ' mm3');
   await undoLast(page);
 
-  /* =========================================================== 3. piece */
-  console.log('\n=== 3. Piece: a 100 mm plate cropped to the star ===');
+  /* ============================================ 3. the plate and the star */
+  console.log('\n=== 3. a 100 mm plate with the star prism laid over it off-centre (Outline takes the star\'s footprint) ===');
   await page.click('#menu-crop > summary');
   await page.waitForFunction(() => !state.cutterOpen, null, { timeout: 10000 });
   check('shutting the card takes the shape away with it', await page.evaluate(() => !NSO_CropCard.state().shape && !NSO_CropCard.state().group));
@@ -393,51 +391,15 @@ withApp(async (page, logs) => {
   await page.waitForFunction(() => state.cutterOpen && state.cutTool === 'crop', null, { timeout: 10000 });
   await selectPiece(page, qid);
   await lookDown(page, qid, 110);
-  await page.click('#btn-crop-shape-piece');
-  check('no cutter yet: CROP is off, the read-out says what to do', await page.evaluate(() => document.getElementById('btn-crop').disabled) &&
-    /^Piece: click another piece/.test(await shapeReadout(page)), await shapeReadout(page));
-  const qTop = await screenOf(page, [qc[0] + 38, Q.box.max[1], qc[1] + 35]);
-  await page.mouse.click(qTop.x, qTop.y);
-  await page.waitForTimeout(200);
-  check('clicking the plate itself: "That is the piece being cropped"', /That is the piece being cropped/.test(await status(page)) &&
-    (await page.evaluate(() => state.editId)) === qid, await status(page));
   const S0 = await drawn(page, sid);
-  const sTop = await screenOf(page, [S0.M[12], S0.box.max[1], S0.M[14]]);
-  await page.mouse.click(sTop.x, sTop.y);
-  await settle(page);
-  check('clicking the star makes it the cutter; the plate stays selected', (await cardNow(page)).piece.id === sid && (await page.evaluate(() => state.editId)) === qid);
-  check('the read-out names it and what it holds', /^Piece soften_test_05_star_prism · holds \d+ faces, [\d.]+ cm³$/.test(await shapeReadout(page)), await shapeReadout(page));
-  await shot(page, '4-star-over-plate');
 
   const starWorld = await worldSoup(page, sid);
   const starInPlate = [];
   for (let i = 0; i < starWorld.length; i += 3) starInPlate.push(...worldToRaw(Q, [starWorld[i], starWorld[i + 1], starWorld[i + 2]]));
   const STAR_OUT = topOutline(starInPlate);
   check('the star\'s outline seen from above: 10 edges', STAR_OUT.length === 10, STAR_OUT.length + ' edges');
-  let starArea = 0;
-  for (const s of STAR_OUT) starArea += (s[0] * s[3] - s[2] * s[1]) / 2;
-  starArea = Math.abs(starArea);
 
   const QSRC = await raw(page, qid), uq = await undoDepth(page);
-  const cp9 = await cropNow(page);
-  const R9 = cp9.raw;
-  let far = 0, worst = 0;
-  for (let i = 0; i < R9.length; i += 3) { const d = distToOutline([R9[i], R9[i + 1]], STAR_OUT); worst = Math.max(worst, d); if (d > 0.05) far++; }
-  check('every vertex of the copy is on the star\'s outline (within 0.05 mm)', far === 0, 'worst ' + worst.toFixed(5) + ' mm');
-  const RES_OUT = topOutline(R9);
-  let miss = 0, worst2 = 0;
-  for (const p of samples(STAR_OUT, 0.25)) { const d = distToOutline(p, RES_OUT); worst2 = Math.max(worst2, d); if (d > 0.05) miss++; }
-  check('...and every point of the star\'s outline is on the copy\'s (within 0.05 mm)', miss === 0, 'worst ' + worst2.toFixed(5) + ' mm');
-  const v9 = validate(R9);
-  check('the canonical checker: closed, manifold, no piercing, one shell', v9.clean && v9.euler_characteristic === 2, v9.summary);
-  check('...its volume is the star\'s area x the plate\'s 3 mm (within 0.05%)', near(v9.volume, starArea * 3, starArea * 3 * 5e-4), (+v9.volume).toFixed(2) + ' vs ' + (starArea * 3).toFixed(2));
-  check('the star is untouched: same soup, same place; the plate is byte for byte what it was', same(await raw(page, sid), STAR_SRC) && same(await placedXZ(page, sid), STAR_XZ) && same(await raw(page, qid), QSRC));
-  const pl9 = await copyPlacement(page, cp9.id);
-  check('the copy lies under the star, in place: its middle is the plate\'s own at that spot', Math.abs(pl9.c[1] - (Q.box.min[1] + Q.box.max[1]) / 2) < 1e-3);
-  check('ONE Undo step', (await undoDepth(page)) === uq + 1);
-  await shot(page, '5-star-copy');
-  await undoLast(page);
-  check('Undo: the copy is gone, the plate untouched', same(await raw(page, qid), QSRC) && (await undoDepth(page)) === uq);
   await selectPiece(page, qid);
 
   /* ======================================================== 4. outline */
@@ -500,14 +462,14 @@ withApp(async (page, logs) => {
   /* ========================================================= 5. refusals */
   console.log('\n=== 5. refusals: the star off the plate ===');
   await selectPiece(page, qid);
-  await page.click('#btn-crop-shape-piece');
+  await page.click('#btn-crop-shape-outline');
   await settle(page);
   await page.mouse.click(sTop2.x, sTop2.y);
-  await settle(page);
+  await page.waitForFunction(() => { const S = NSO_CropCard.state(); return S.outline.fp && S.plan && !S.timer; }, null, { timeout: 60000 });
   await page.evaluate(([sid, x, z]) => { const p = state.placed.find(q => q.sourceId === sid); applyPlacedXZ(p, x, z); }, [sid, qc[0] + 120, qc[1]]);
   const r13 = await page.evaluate(() => NSO_Crop.planOn(state.models.find(q => q.id === NSO_CropCard.state().forId), NSO_CropCard.shape()).then(r => ({ ok: r.ok, reason: r.reason })));
   const ro13 = r13.reason || '';
-  check('the star off the plate: the engine refuses in words - the other piece holds nothing', /^the other piece holds nothing of this piece/.test(ro13), ro13);
+  check('the star off the plate: the engine refuses in words - the outline holds nothing of the plate', /^the outline holds nothing of this piece/.test(ro13), ro13);
   check('...nothing changed, no Undo step, the star untouched', same(await raw(page, qid), QSRC) && (await undoDepth(page)) === uq && same(await raw(page, sid), STAR_SRC));
 
   const errs = logs.filter(l => /^\[pageerror\]/.test(l) || /\[error\]/.test(l) && /crop/i.test(l));

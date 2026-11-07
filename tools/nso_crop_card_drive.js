@@ -19,15 +19,14 @@
      3. CYLINDER: the side sets the diameter, an end slides along the axis (the far
         end stays), an end pulled round past 45 degrees turns the axis
      4. SPHERE: one handle sets the diameter
-     5. PIECE: a click on another piece is the cutter; the piece being cropped is refused
-     6. OUTLINE: a click on a piece is its footprint, a Shift-click on a triangle its
+     5. OUTLINE: a click on a piece is its footprint, a Shift-click on a triangle its
         rim; d1, d2, z1, z2 dragged; the readout names them
-     7. Escape and Cancel put the shape away; so does closing the card
-     8. LASSO: a loop dragged round part of the piece with the real mouse is the shape; the
+     6. Escape and Cancel put the shape away; so does closing the card
+     7. LASSO: a loop dragged round part of the piece with the real mouse is the shape; the
         copy is what the loop sees (every vertex of it falls inside the loop on the screen);
         Alt-drag orbits and the cone stays; a click or an Escape'd loop changes nothing;
         a new loop replaces the old one
-     9. LIFT, in the Crop card, opens and folds away with its button; Detach flange is in its
+     8. LIFT, in the Crop card, opens and folds away with its button; Detach flange is in its
         panel; Lift and a shape never run together; Reattach is in the Connect card
 */
 'use strict';
@@ -60,12 +59,12 @@ const shapeNow = page => page.evaluate(() => NSO_CropCard.shape());
 const cardState = page => page.evaluate(() => {
   const S = NSO_CropCard.state();
   return { shape: S.shape, box: S.box, cyl: S.cyl, sph: S.sph, outline: { id: S.outline.id, mode: S.outline.mode, tri: S.outline.tri, d1: S.outline.d1, d2: S.outline.d2, z1: S.outline.z1, z2: S.outline.z2, hasFp: !!S.outline.fp },
-           piece: S.piece, plan: S.plan && { ok: S.plan.ok, faces: S.plan.faces, vol: S.plan.volumeMm3, reason: S.plan.reason }, group: !!S.group, forId: S.forId };
+           plan: S.plan && { ok: S.plan.ok, faces: S.plan.faces, vol: S.plan.volumeMm3, reason: S.plan.reason }, group: !!S.group, forId: S.forId };
 });
 /* The readout settles when the kernel has answered: wait for a "holds" or a refusal. */
 const settled = (page, ms) => page.waitForFunction(() => {
   const S = NSO_CropCard.state();
-  return !S.shape || (!S.timer && (S.plan || /^(Piece|Outline|Lasso): (click|drag)/.test(document.getElementById('crop-readout').textContent)));
+  return !S.shape || (!S.timer && (S.plan || /^(Outline|Lasso): (click|drag)/.test(document.getElementById('crop-readout').textContent)));
 }, null, { timeout: ms || 20000 });
 const handleXY = (page, id) => page.evaluate(i => NSO_CropCard.handleScreen(i), id);
 
@@ -158,9 +157,9 @@ const snap = (page, id) => page.evaluate(i => {
                reattachHere: !!c.querySelector('#btn-reattach'), reattachIn: !!document.querySelector('#menu-connect #btn-reattach'),
                readoutId: !!document.getElementById('crop-readout'), hit: NSO_CropCard.HIT_PX };
     });
-    check('the Shape row is Box, Cylinder, Sphere, Piece, Outline, Lasso', dom.row.join(',') === 'Box,Cylinder,Sphere,Piece,Outline,Lasso', dom.row.join(','));
-    check('the buttons outside Lift are the six shapes, CROP and Cancel, and no others', dom.btns.join(',') ===
-      'btn-crop-shape-box,btn-crop-shape-cylinder,btn-crop-shape-sphere,btn-crop-shape-piece,btn-crop-shape-outline,btn-crop-shape-lasso,btn-crop,btn-crop-cancel', dom.btns.join(','));
+    check('the Shape row is Box, Cylinder, Sphere, Outline, Lasso', dom.row.join(',') === 'Box,Cylinder,Sphere,Outline,Lasso', dom.row.join(','));
+    check('the buttons outside Lift are the five shapes, CROP and Cancel, and no others', dom.btns.join(',') ===
+      'btn-crop-shape-box,btn-crop-shape-cylinder,btn-crop-shape-sphere,btn-crop-shape-outline,btn-crop-shape-lasso,btn-crop,btn-crop-cancel', dom.btns.join(','));
     check('no field, checkbox or list outside Lift, and one readout line', dom.inputs === 0 && dom.readouts === 1 && dom.readoutId, dom.inputs + ' inputs, ' + dom.readouts + ' lines');
     check('Lift is a button of the card with its panel folded away; Strip and Detach flange are in the panel; none of it is in Subtract',
       dom.lift.btn && dom.lift.panelIn && dom.lift.panelHidden && dom.lift.detachInPanel && dom.lift.stripInPanel && dom.lift.notInSubtract, JSON.stringify(dom.lift));
@@ -424,36 +423,10 @@ const snap = (page, id) => page.evaluate(i => {
     await page.click('#btn-undo');
 
     /* ================================================================= 5 */
-    console.log('\n=== 5. PIECE ===');
+    console.log('\n=== 5. OUTLINE ===');
     await reselect(page, hid);
-    await frame(page, [56, 40, 62], [20, 6, 0]);
-    await page.click('#btn-crop-shape-piece');
-    await settled(page);
-    ro = await readout(page);
-    check('picked: it waits for a click on another piece', /^Piece: click another piece to be the cutter/.test(ro), ro);
-    check('...no handles, CROP off', (await page.evaluate(() => NSO_CropCard.handles().length)) === 0 && await page.evaluate(() => document.getElementById('btn-crop').disabled));
-    const self = await pointOn(page, hid, false);
-    await page.mouse.click(self.x, self.y);
-    check('a click on the piece being cropped is refused in words', /That is the piece being cropped/.test(await page.evaluate(() => document.getElementById('status').textContent))
-      && (await cardState(page)).piece.id == null);
-    check('...and did not change the selection', await page.evaluate(h => state.placed[state.selectedIndex].sourceId === h, hid));
-    await placeOver(page, tid, hid);
+    await placeOver(page, tid, hid);                 // the tube stands over the hinge, for its footprint to be clicked
     await frame(page, [40, 34, 46], [0, 8, 0]);
-    const tp = await pointOn(page, tid, false);
-    await page.mouse.click(tp.x, tp.y);
-    await settled(page);
-    st = await cardState(page);
-    ro = await readout(page);
-    check('a click on the tube makes it the cutter', st.piece.id === tid, JSON.stringify(st.piece));
-    check('the readout is "Piece <name> · holds N faces, X cm³"', /^Piece soften_test_03_thinwall_tube · holds \d+ faces, [\d.]+ cm³$/.test(ro), ro);
-    check('...and the selection is still the piece being cropped', await page.evaluate(h => state.placed[state.selectedIndex].sourceId === h, hid));
-    const pn = await cropNow(page, hid);
-    check('CROP adds "<name> crop N"', /^hinge_knuckle_box crop \d+$/.test(pn), pn);
-    await page.click('#btn-undo');
-
-    /* ================================================================= 6 */
-    console.log('\n=== 6. OUTLINE ===');
-    await reselect(page, hid);
     await page.click('#btn-crop-shape-outline');
     await settled(page);
     ro = await readout(page);
@@ -519,8 +492,8 @@ const snap = (page, id) => page.evaluate(i => {
     check('CROP on an outline adds the copy', /^hinge_knuckle_box crop \d+$/.test(sn), sn);
     await page.click('#btn-undo');
 
-    /* ================================================================= 7 */
-    console.log('\n=== 7. Escape, Cancel, closing the card ===');
+    /* ================================================================= 6 */
+    console.log('\n=== 6. Escape, Cancel, closing the card ===');
     await reselect(page, hid);
     await page.click('#btn-crop-shape-box');
     await settled(page);
@@ -537,8 +510,8 @@ const snap = (page, id) => page.evaluate(i => {
     await page.click('#menu-crop > summary');
     check('closing the card puts the shape away too', (await cardState(page)).shape === null && !(await page.evaluate(() => !!state.scene.getObjectByName('cropCardShape'))));
 
-    /* ================================================================= 8 */
-    console.log('\n=== 8. LASSO ===');
+    /* ================================================================= 7 */
+    console.log('\n=== 7. LASSO ===');
     await page.click('#menu-crop > summary');
     await reselect(page, hid);
     await frame(page, [26, 22, 30], [0, 4, 0]);
@@ -656,8 +629,8 @@ const snap = (page, id) => page.evaluate(i => {
     check('Cancel puts the lasso away: no shape, no cone, the pointer is the pointer again', await page.evaluate(() =>
       !NSO_CropCard.state().shape && !state.scene.getObjectByName('cropCardShape') && state.renderer.domElement.style.cursor === ''));
 
-    /* ================================================================= 9 */
-    console.log('\n=== 9. LIFT, in the Crop card, with Detach flange; Reattach from the Connect card ===');
+    /* ================================================================= 8 */
+    console.log('\n=== 8. LIFT, in the Crop card, with Detach flange; Reattach from the Connect card ===');
     const vid = await loadSTL(page, V9);
     await selectModel(page, vid);
     const ids0 = await page.evaluate(() => state.models.map(m => m.id));

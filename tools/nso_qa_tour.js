@@ -231,7 +231,6 @@ function buildPlan() {
   V(COL, 'Cut', 'btn-cut-right-side-out', 'Turn it right-side-out, then Cut', { run: press(['btn-cut-right-side-out']) });
   for (const [id, l] of [['btn-crop-shape-box', 'Box'], ['btn-crop-shape-cylinder', 'Cylinder'], ['btn-crop-shape-sphere', 'Sphere']])
     V(COL, 'Crop', id, l + ' then CROP', { run: arm(id, [], ['btn-crop']) });
-  V(COL, 'Crop', 'btn-crop-shape-piece', 'Piece (click the other piece) then CROP', { setup: 'two', run: async x => { await x.click('btn-crop-shape-piece'); await x.wait(200); await x.pick(1, 0); await x.click('btn-crop'); } });
   V(COL, 'Crop', 'btn-crop-shape-outline', 'Outline (click the piece) then CROP', { run: async x => { await x.click('btn-crop-shape-outline'); await x.wait(200); await x.pick(0, 0); await x.click('btn-crop'); } });
   V(COL, 'Crop', 'crop-box-drag', 'Box: drag its body, then CROP', { run: async x => {
     await x.click('btn-crop-shape-box'); await x.wait(300);

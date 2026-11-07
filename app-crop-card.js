@@ -7,8 +7,7 @@
    dragging.
 
    THE SHAPE. Picking Box, Cylinder or Sphere puts it centred on the selected
-   piece at half the piece's size, translucent, with grab handles. Piece waits
-   for a click on another piece, which becomes the cutter. Outline waits for a
+   piece at half the piece's size, translucent, with grab handles. Outline waits for a
    click on a piece (its footprint seen from above) or a Shift-click on a
    triangle (the rim loop that triangle borders), then shows the footprint band
    and its handles. Orbit between grabs: a press that lands on no handle and
@@ -61,8 +60,8 @@
   var HIT_PX = 14;             // a handle is grabbed this close to it on screen (never under 12)
   var DRAW_PX = 38;            // and drawn this big
   var MIN_MM = 0.1;            // no half-size, radius or height gap below this
-  var SHAPES = ['box', 'cylinder', 'sphere', 'piece', 'outline', 'lasso'];
-  var NAMES = { box: 'Box', cylinder: 'Cylinder', sphere: 'Sphere', piece: 'Piece', outline: 'Outline', lasso: 'Lasso' };
+  var SHAPES = ['box', 'cylinder', 'sphere', 'outline', 'lasso'];
+  var NAMES = { box: 'Box', cylinder: 'Cylinder', sphere: 'Sphere', outline: 'Outline', lasso: 'Lasso' };
   var LASSO_MIN_PX = 3;        // a loop point is kept when it is this far from the last one
   var LASSO_MIN_AREA = 80;     // a loop smaller than this (px squared) is a click, not a lasso
   var LASSO_MAX_PTS = 240;     // the loop is simplified until it has at most this many corners
@@ -71,10 +70,9 @@
   var PLAN_BIG_MS = 400;       // a big piece's plan is a worker job of seconds: ask when the drag has settled, not at every pause
 
   var S = {
-    shape: null,               // 'box' | 'cylinder' | 'sphere' | 'piece' | 'outline' | 'lasso' | null
+    shape: null,               // 'box' | 'cylinder' | 'sphere' | 'outline' | 'lasso' | null
     forId: null,               // the model it was picked on
     box: null, cyl: null, sph: null,
-    piece: { id: null },
     lasso: { eye: null, dirs: null },   // the loop, as rays from the eye it was drawn in (P)
     draw: null,                // a loop being drawn: { pts: [[x, y] in px] }
     outline: { id: null, mode: 'silhouette', tri: -1, d1: 0, d2: 0, z1: 0, z2: 0, fp: null, src: null, key: '' },
@@ -142,7 +140,6 @@
     if (kind === 'box') S.box = { c: c, h: [sx / 4, sy / 4, sz / 4], yaw: 0 };
     if (kind === 'cylinder') S.cyl = { c: c, r: Math.min(sx, sy) / 4, hl: sz / 4, axis: 'z', yaw: 0 };
     if (kind === 'sphere') S.sph = { c: c, r: Math.min(sx, sy, sz) / 4 };
-    if (kind === 'piece') S.piece = { id: null };
     if (kind === 'lasso') S.lasso = { eye: null, dirs: null };
     if (kind === 'outline') S.outline = { id: null, mode: 'silhouette', tri: -1, d1: 0, d2: 0, z1: bp.lo[2], z2: bp.hi[2], fp: null, src: null, key: '' };
   }
@@ -151,7 +148,6 @@
     if (S.shape === 'box') return { kind: 'box', c: S.box.c.slice(), h: S.box.h.slice(), yaw: S.box.yaw };
     if (S.shape === 'cylinder') return { kind: 'cylinder', c: S.cyl.c.slice(), r: S.cyl.r, hl: S.cyl.hl, axis: S.cyl.axis, yaw: S.cyl.yaw };
     if (S.shape === 'sphere') return { kind: 'sphere', c: S.sph.c.slice(), r: S.sph.r };
-    if (S.shape === 'piece') return S.piece.id == null ? null : { kind: 'piece', pieceId: S.piece.id };
     if (S.shape === 'lasso') {
       var l = S.lasso;
       if (!l.dirs) return null;
@@ -176,10 +172,6 @@
     if (S.shape === 'box') return 'Box ' + fmt(2 * S.box.h[0]) + ' × ' + fmt(2 * S.box.h[1]) + ' × ' + fmt(2 * S.box.h[2]) + ' mm';
     if (S.shape === 'cylinder') return 'Cylinder Ø' + fmt(2 * S.cyl.r) + ' × ' + fmt(2 * S.cyl.hl) + ' mm along ' + S.cyl.axis.toUpperCase();
     if (S.shape === 'sphere') return 'Sphere Ø' + fmt(2 * S.sph.r) + ' mm';
-    if (S.shape === 'piece') {
-      var pm = S.piece.id != null ? modelOf(S.piece.id) : null;
-      return pm ? 'Piece ' + pm.name : 'Piece';
-    }
     if (S.shape === 'lasso') return 'Lasso, ' + (S.lasso.dirs ? S.lasso.dirs.length + '-point loop' : 'no loop yet');
     if (S.shape === 'outline') {
       var o = S.outline, om = o.id != null ? modelOf(o.id) : null;
@@ -198,7 +190,6 @@
     var t = target();
     if (!t) return 'Select a piece, then pick a shape.';
     if (!S.shape) return 'Pick a shape: it appears on ' + t.m.name + ', ready to drag.';
-    if (S.shape === 'piece' && S.piece.id == null) return 'Piece: click another piece to be the cutter.';
     if (S.shape === 'lasso' && !S.lasso.dirs) return 'Lasso: drag a loop round what to copy (Alt-drag to orbit).';
     if (S.shape === 'outline' && S.outline.id == null) return 'Outline: click a piece for its footprint, or Shift-click a triangle for its rim.';
     var d = describe();
@@ -436,18 +427,6 @@
       g.add(holder);
       S.body = m;
       return;
-    }
-    if (S.shape === 'piece' && S.piece.id != null) {
-      var p = placedOf(S.piece.id);
-      if (p) {
-        p.mesh.updateMatrixWorld(true);
-        var ov = new THREE.Mesh(p.mesh.geometry, bodyMat(0.28));
-        ov.userData.sharedGeo = true;
-        ov.matrixAutoUpdate = false;
-        ov.matrix.copy(p.mesh.matrixWorld);
-        ov.matrixWorldNeedsUpdate = true;
-        g.add(ov);
-      }
     }
     if ((S.shape === 'outline' || S.shape === 'lasso') && S.previewGeo) {
       var pm = new THREE.Mesh(S.previewGeo, bodyMat(0.2));
@@ -793,7 +772,7 @@
 
   function consume(ev) { ev.stopImmediatePropagation(); ev.preventDefault(); }
 
-  /* A click on a piece in Piece or Outline: it becomes the cutter / the footprint. */
+  /* A click on a piece in Outline: it becomes the footprint. */
   function pickPiece(ev) {
     var ray = setRay(ev);
     var hits = state.raycaster.intersectObjects(state.modelGroup.children, true).filter(function (h) { return h.faceIndex != null; });
@@ -803,14 +782,7 @@
     while (obj && obj.userData.placedIndex == null && obj.parent) obj = obj.parent;
     var placed = obj && typeof obj.userData.placedIndex === 'number' ? state.placed[obj.userData.placedIndex] : null;
     if (!placed) return false;
-    var t = target(), pm = modelOf(placed.sourceId);
-    if (S.shape === 'piece') {
-      if (t && placed.sourceId === t.m.id) { say('That is the piece being cropped - click another piece to be the cutter', true); return true; }
-      S.piece.id = placed.sourceId;
-      say('Crop: ' + ((pm && pm.name) || 'that piece') + ' is the cutter');
-      rebuild(); schedulePlan();
-      return true;
-    }
+    var pm = modelOf(placed.sourceId);
     var o = S.outline;
     var keepZ = o.id != null ? { z1: o.z1, z2: o.z2, d1: o.d1, d2: o.d2 } : null;
     o.id = placed.sourceId; o.mode = ev.shiftKey ? 'rim' : 'silhouette'; o.tri = ev.shiftKey ? hits[0].faceIndex : -1;
@@ -852,7 +824,7 @@
         return;
       }
     }
-    if ((S.shape === 'piece' || S.shape === 'outline') && pickPiece(ev)) consume(ev);
+    if (S.shape === 'outline' && pickPiece(ev)) consume(ev);
   }
 
   function onMove(ev) {
@@ -910,8 +882,7 @@
     if (!t) { say('Select a piece first, then pick a shape', true); syncUI(); return; }
     S.shape = kind; S.forId = t.m.id; setPreview(null); S.expectSel = null;
     freshShape(kind, t);
-    say(kind === 'piece' ? 'Crop: Piece - click another piece to be the cutter'
-      : kind === 'lasso' ? 'Crop: Lasso - drag a loop round what to copy on ' + t.m.name + ' (Alt-drag to orbit), then CROP'
+    say(kind === 'lasso' ? 'Crop: Lasso - drag a loop round what to copy on ' + t.m.name + ' (Alt-drag to orbit), then CROP'
       : kind === 'outline' ? 'Crop: Outline - click a piece for its footprint, or Shift-click a triangle for its rim'
       : 'Crop: ' + NAMES[kind] + ' on ' + t.m.name + ' - drag a handle to size it, the body to move it, then CROP');
     rebuild();
