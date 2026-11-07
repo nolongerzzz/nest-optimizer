@@ -1285,6 +1285,19 @@ select:focus, input:focus {
 .cut-miter-steps { grid-column: 1; grid-row: 2; display: flex; justify-content: center; gap: 8px; margin-top: 2px; }
 .cut-miter-steps .btn { flex: 0 0 46px; width: 46px; padding: 7px 0; font-size: 16px; line-height: 1;
   touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+/* The Mitre and Rotate piece wheels side by side (the Cut card): a column each - wheel, name, number box (and Square),
+   - / +. They use the wheel and step-button rules above; only the grid they sit in is different. */
+.cut-dials { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 8px; margin: 2px 0 4px; }
+.cut-dialcol { display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 0; }
+.cut-dialcol .cut-dial { grid-column: auto; grid-row: auto; justify-self: auto; }
+.cut-dialcol .hint { margin: 0; }
+.cut-dialcol .cut-miter-steps { grid-column: auto; grid-row: auto; margin-top: 1px; }
+#edit-card .cut-dialfields { display: flex; align-items: center; justify-content: center; gap: 4px; width: 100%; }
+#edit-card .cut-dialfields input[type="number"] { width: 54px; min-width: 0; box-sizing: border-box; margin-top: 0; }
+#edit-card .cut-dialfields .btn { width: auto; flex: 0 0 auto; margin-top: 0; padding: 7px 8px; }
+#edit-card .cut-dialcol .cut-miter-steps { width: 100%; }
+#edit-card .cut-dialcol .cut-miter-steps .btn { flex: 0 0 46px; width: 46px; margin-top: 0; }
+.cut-rotate-piece { fill: rgba(148, 163, 184, 0.16); stroke: rgba(148, 163, 184, 0.7); stroke-width: 2; }
 /* The bevel dial (app-cut.js, cutWireBevelDial): the Mitre wheel's grid, a
    third row for Plumb under the dial. The piece is drawn side-on, a faint
    arrow to its far end; the dot is the blade's top; the darts are #229's. */

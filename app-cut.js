@@ -686,6 +686,7 @@ function syncCutMiterUI() {
   const input = document.getElementById('cut-miter-deg');
   if (input && document.activeElement !== input) input.value = String(deg);
   syncCutBevelUI();
+  if (typeof syncCutRotateUI === 'function') syncCutRotateUI();
 }
 
 /* The bevel dial: the blade, seen end-on along its horizontal line with the
@@ -992,6 +993,7 @@ function cutWireMiterDial() {
   cutWireMiterStep('btn-cut-miter-minus', -1);
   cutWireMiterStep('btn-cut-miter-plus', 1);
   cutWireBevelDial();
+  cutWireRotateDial();
   syncCutMiterUI();
 }
 
@@ -1085,6 +1087,151 @@ function cutWireBevelDial() {
   syncCutBevelUI();
 }
 
+/* The Rotate piece wheel, beside the Mitre wheel: turns the PIECE about the plate's vertical, the Turn ring's own motion
+   (nsoRotate.turn, app-rotate-handles.js - the pose buttons' path, with the position lock and one Undo point), for a small
+   piece worked close up where the rings stand out of view. The handle shows the piece's heading, clockwise seen from
+   above (0 = as it was loaded), and the wheel is a jog: a press does nothing until the pointer moves, then the piece
+   follows the pointer's turn about the wheel from where it was (the Mitre wheel jumps to the press, which a piece must
+   not), resting on the 45 degree ticks. The box takes a heading; the arrows, and the - / + buttons (1 degree, Shift 0.1,
+   Alt 5), step it. The blade goes with the piece. */
+
+/** The piece's heading on the plate, clockwise seen from above, in degrees [0, 360): 0 is the piece lying as it was
+    loaded, its own X along the plate's X. Read off the axis of the piece that lies nearest the plate (X, then Z, then Y),
+    so it still reads on a piece that has been tipped. Null with no piece picked. */
+function cutPieceHeadingRaw() {
+  const p = state.placed && state.placed[state.selectedIndex];
+  if (!p || !p.mesh) return null;
+  p.mesh.updateMatrixWorld(true);
+  const q = p.mesh.quaternion, axes = [[1, 0, 0, 0], [0, 0, 1, -90], [0, 1, 0, 0]];
+  for (let i = 0; i < axes.length; i++) {
+    const v = new THREE.Vector3(axes[i][0], axes[i][1], axes[i][2]).applyQuaternion(q);
+    if (Math.hypot(v.x, v.z) > 0.7) return ((((Math.atan2(v.z, v.x) * 180) / Math.PI + axes[i][3]) % 360) + 360) % 360;
+  }
+  return null;
+}
+function cutPieceHeading() {
+  const h = cutPieceHeadingRaw();
+  return h == null ? null : (Math.round(h * 10) / 10) % 360;
+}
+
+/** A heading dragged: on a 45 degree tick inside 3 degrees of one, else as it is. */
+function cutRotateDetent(deg) {
+  const tick = Math.round(deg / 45) * 45;
+  return Math.abs(deg - tick) <= 3 ? tick : deg;
+}
+
+const cutRotateDial = { dragging: false, undoAt: 0 };
+
+function syncCutRotateUI() {
+  const deg = cutPieceHeading();
+  const turn = document.getElementById('cut-rotate-turn');
+  if (turn) turn.setAttribute('transform', 'rotate(' + (deg == null ? 0 : deg) + ' 50 50)');
+  const text = document.getElementById('cut-rotate-dial-deg');
+  if (text) text.textContent = deg == null ? '-' : deg + '°';
+  const dial = document.getElementById('cut-rotate-dial');
+  if (dial) dial.setAttribute('aria-valuenow', String(deg == null ? 0 : deg));
+  const input = document.getElementById('cut-rotate-deg');
+  if (input && document.activeElement !== input) input.value = deg == null ? '' : String(deg);
+}
+
+/** Turn the selected piece `cw` degrees clockwise (seen from above) about the vertical. One Undo point for a press or a
+    run of presses (the same run: a held button, a drag - `fresh` false after the first), none if the piece is locked. */
+function cutRotateBy(cw, fresh) {
+  const idx = state.selectedIndex, p = state.placed && state.placed[idx];
+  if (!p || !p.mesh) { setStatus('Rotate piece: pick a piece first', true); return false; }
+  if (typeof nsoRotate === 'undefined' || !nsoRotate.turn) return false;
+  if (typeof nsoPosLockBlocks === 'function' && nsoPosLockBlocks(p, 'rotate')) return false;
+  const now = Date.now();
+  if (fresh !== false && now - cutRotateDial.undoAt > 700) pushUndo(snapshotPlacedPose(idx));
+  cutRotateDial.undoAt = now;
+  nsoRotate.turn('turn', -cw);
+  p.rotated = Math.abs(Math.sin(p.rotY || 0)) > 0.5;
+  cutAfterPieceTurn();
+  return true;
+}
+
+/** The piece has turned: the blade (a child of the piece's frame) follows by itself, the card's numbers and any Follow
+    strand place, held in the world, do not. */
+function cutAfterPieceTurn() {
+  state.cutFollowAt = null;
+  if (typeof cutFollowSyncUI === 'function') cutFollowSyncUI();
+  syncCutRotateUI();
+  syncCutUI();
+  updateCutHelper();
+  if (typeof updateExportButton === 'function') updateExportButton();
+}
+
+function cutWireRotateDial() {
+  const dial = document.getElementById('cut-rotate-dial');
+  if (!dial || dial.dataset.nsoWired === '1') return;
+  dial.dataset.nsoWired = '1';
+  let press = null;
+  function angleAt(ev) {
+    const r = dial.getBoundingClientRect();
+    const dx = ev.clientX - (r.left + r.width / 2), dy = ev.clientY - (r.top + r.height / 2);
+    return { a: (Math.atan2(dx, -dy) * 180) / Math.PI, centre: Math.hypot(dx, dy) < r.width * 0.18 };
+  }
+  dial.addEventListener('pointerdown', function (ev) {
+    if (ev.button !== 0) return;
+    const at = angleAt(ev);
+    if (at.centre) return;                                    // the centre is the readout, not the rail
+    const a0 = cutPieceHeadingRaw();
+    if (a0 == null) { setStatus('Rotate piece: pick a piece first', true); return; }
+    press = { x: ev.clientX, y: ev.clientY, lastA: at.a, raw: 0, abs0: a0, moved: false, first: true };
+    if (dial.setPointerCapture) { try { dial.setPointerCapture(ev.pointerId); } catch (e) { /* synthetic */ } }
+    if (dial.focus) dial.focus();
+    ev.preventDefault();
+    ev.stopPropagation();
+  });
+  dial.addEventListener('pointermove', function (ev) {
+    if (!press) return;
+    if (!press.moved && Math.hypot(ev.clientX - press.x, ev.clientY - press.y) < CUT_BEVEL_CLICK_SLOP_PX) return;
+    press.moved = true;
+    cutRotateDial.dragging = true;
+    const at = angleAt(ev);
+    let d = at.a - press.lastA;
+    if (d > 180) d -= 360;
+    else if (d < -180) d += 360;
+    press.lastA = at.a;
+    press.raw += d;                                            // clockwise on the wheel = clockwise on the piece
+    const want = cutRotateDetent(press.abs0 + press.raw), cur = cutPieceHeadingRaw();
+    if (cur == null) return;
+    let delta = want - cur;
+    while (delta > 180) delta -= 360;
+    while (delta <= -180) delta += 360;
+    if (Math.abs(delta) < 1e-6) return;
+    if (cutRotateBy(delta, press.first)) press.first = false;
+  });
+  const stop = function () {
+    press = null;
+    cutRotateDial.dragging = false;
+    syncCutRotateUI();
+  };
+  dial.addEventListener('pointerup', stop);
+  dial.addEventListener('pointercancel', stop);
+  dial.addEventListener('keydown', function (ev) {
+    const step = ev.shiftKey ? CUT_MITER_STEP_SHIFT_DEG : CUT_MITER_STEP_DEG;
+    if (ev.key === 'ArrowRight' || ev.key === 'ArrowUp') cutRotateBy(step);
+    else if (ev.key === 'ArrowLeft' || ev.key === 'ArrowDown') cutRotateBy(-step);
+    else return;
+    ev.preventDefault();
+    ev.stopPropagation();
+  });
+  const typed = document.getElementById('cut-rotate-deg');
+  if (typed) typed.addEventListener('change', function () {
+    const v = parseFloat(typed.value), cur = cutPieceHeading();
+    if (!isFinite(v) || cur == null) { syncCutRotateUI(); return; }
+    let d = v - cur;
+    while (d > 180) d -= 360;
+    while (d <= -180) d += 360;
+    if (Math.abs(d) > 1e-6) cutRotateDial.undoAt = 0, cutRotateBy(d);
+    syncCutRotateUI();
+  });
+  cutWireMiterStep('btn-cut-rotate-minus', -1, 'rotate');
+  cutWireMiterStep('btn-cut-rotate-plus', 1, 'rotate');
+  syncCutRotateUI();
+}
+
 /* One − / + button under the wheel. A press steps the mitre through
    setCutMiter - the call the handle's drag makes - so the wheel, the number
    and the blade all follow. The size is read from the press: 1 degree, Shift
@@ -1094,7 +1241,7 @@ function cutWireBevelDial() {
    scripted .click() arrive as a click with detail 0 and step once. With
    `which` 'bevel' it steps the bevel the same way. */
 function cutWireMiterStep(id, sign, which) {
-  const bevel = which === 'bevel';
+  const bevel = which === 'bevel', rotate = which === 'rotate';
   const btn = document.getElementById(id);
   if (!btn) return;
   let wait = null, rep = null;
@@ -1108,6 +1255,7 @@ function cutWireMiterStep(id, sign, which) {
   };
   const step = function (size) {
     if (bevel) setCutBevel(cutBevelDeg() + sign * size);
+    else if (rotate) cutRotateBy(sign * size);
     else setCutMiter(cutMiterDeg() + sign * size);
   };
   btn.addEventListener('pointerdown', function (ev) {
@@ -1116,7 +1264,7 @@ function cutWireMiterStep(id, sign, which) {
     // A number still being typed commits first. Its change event would
     // otherwise fire when this press takes the focus - after the step - and
     // put the typed angle back over it.
-    const typed = document.getElementById(bevel ? 'cut-bevel-deg' : 'cut-miter-deg');
+    const typed = document.getElementById(bevel ? 'cut-bevel-deg' : rotate ? 'cut-rotate-deg' : 'cut-miter-deg');
     if (typed && document.activeElement === typed) typed.blur();
     const size = sizeOf(ev);
     step(size);

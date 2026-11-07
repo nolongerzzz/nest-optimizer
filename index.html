@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=d5ce7de6" />
+  <link rel="stylesheet" href="styles.css?v=8b3d6f14" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -738,17 +738,22 @@
               <p id="edit-size" class="hint hidden-quiet">—</p>
               <select id="edit-axis" class="hidden-quiet"><option value="auto">Longest axis</option><option value="x">X</option><option value="z">Z</option></select>
               <div id="cutter-tools" class="cutter-tools">
-              <!-- Rotate piece: the rotate rings on the piece while Cut stays open (app-cut.js cutSetRotate,
+              <!-- Rotate rings: the rotate rings on the piece while Cut stays open (app-cut.js cutSetRotate,
                    app-rotate-handles.js). The ring options it shows are in the row under it. -->
               <div class="cut-switches cut-per-piece">
-              <label class="cut-switch" title="Show the rotate rings on the piece so you can turn it while Cut is open. The blade follows the piece."><input type="checkbox" id="chk-cut-rotate"><span>Rotate piece</span></label>
+              <label class="cut-switch" title="Show the rotate rings on the piece (for leaning it as well as turning it) while Cut is open. The blade follows the piece. For turning a small piece close up, the Rotate piece wheel below is easier."><input type="checkbox" id="chk-cut-rotate"><span>Rotate rings</span></label>
               </div>
               <div class="cut-switches cut-rings cut-per-piece" id="cut-rotate-rings" hidden>
               <span class="hint">Turn is on.</span>
               <label class="cut-switch" title="Also show the ring that tips the piece front over back."><input type="checkbox" id="chk-cut-ring-fb"><span>Lean front/back</span></label>
               <label class="cut-switch" title="Also show the ring that tips the piece side over side."><input type="checkbox" id="chk-cut-ring-ss"><span>Lean side/side</span></label>
               </div>
-              <div class="cut-miter cut-per-piece">
+              <!-- Mitre and Rotate piece, side by side: each a wheel with its − / + under it and, under those, its name and
+                   number box (Square, the mitre's own, beside its box). The Mitre wheel turns the blade; the Rotate piece wheel turns the PIECE
+                   about the vertical (app-cut.js, cutWireRotateDial) - for a small piece, close up, where the rotate rings
+                   stand too far out of view. -->
+              <div class="cut-dials cut-per-piece">
+              <div class="cut-dialcol">
               <svg id="cut-miter-dial" class="cut-dial" viewBox="0 0 100 100" width="104" height="104"
                    role="slider" tabindex="0" aria-label="Mitre, degrees" aria-valuemin="0" aria-valuemax="359.9" aria-valuenow="0">
                 <circle class="cut-dial-rail" cx="50" cy="50" r="40"></circle>
@@ -764,14 +769,41 @@
                 </g>
                 <text id="cut-dial-deg" class="cut-dial-deg" x="50" y="54" text-anchor="middle">0°</text>
               </svg>
-              <div class="cut-miter-side">
-              <span class="hint">Mitre</span>
-              <input type="number" id="cut-miter-deg" class="cut-no-spin" min="0" max="359.9" step="0.1" value="0" aria-label="Mitre, degrees" title="Type an angle, or drag the handle round the wheel. 0 = square.">
-              <button id="btn-cut-square" class="btn btn-secondary" type="button" title="Back to a square cut (0°)">Square</button>
-              </div>
               <div class="cut-miter-steps" role="group" aria-label="Mitre, step">
               <button id="btn-cut-miter-minus" class="btn btn-secondary" type="button" aria-label="Mitre 1 degree less" title="Mitre −1° (Shift: 0.1°, Alt: 5°). Hold to repeat.">−</button>
               <button id="btn-cut-miter-plus" class="btn btn-secondary" type="button" aria-label="Mitre 1 degree more" title="Mitre +1° (Shift: 0.1°, Alt: 5°). Hold to repeat.">+</button>
+              </div>
+              <span class="hint">Mitre</span>
+              <div class="cut-dialfields">
+              <input type="number" id="cut-miter-deg" class="cut-no-spin" min="0" max="359.9" step="0.1" value="0" aria-label="Mitre, degrees" title="Type an angle, or drag the handle round the wheel. 0 = square.">
+              <button id="btn-cut-square" class="btn btn-secondary" type="button" title="Back to a square cut (0°)">Square</button>
+              </div>
+              </div>
+              <div class="cut-dialcol">
+              <svg id="cut-rotate-dial" class="cut-dial" viewBox="0 0 100 100" width="104" height="104"
+                   role="slider" tabindex="0" aria-label="Rotate piece, degrees" aria-valuemin="0" aria-valuemax="359.9" aria-valuenow="0">
+                <title>Rotate piece: turns the piece itself about the vertical, clockwise seen from above. Drag round the rail (it rests on the 45° ticks) or press an arrow key for 1° (Shift: 0.1°). The blade goes with the piece.</title>
+                <circle class="cut-dial-rail" cx="50" cy="50" r="40"></circle>
+                <g class="cut-dial-ticks">
+                  <line x1="50" y1="6" x2="50" y2="14"></line><line x1="94" y1="50" x2="86" y2="50"></line>
+                  <line x1="50" y1="94" x2="50" y2="86"></line><line x1="6" y1="50" x2="14" y2="50"></line>
+                  <line x1="81.1" y1="18.9" x2="77.6" y2="22.4"></line><line x1="81.1" y1="81.1" x2="77.6" y2="77.6"></line>
+                  <line x1="18.9" y1="81.1" x2="22.4" y2="77.6"></line><line x1="18.9" y1="18.9" x2="22.4" y2="22.4"></line>
+                </g>
+                <g id="cut-rotate-turn" transform="rotate(0 50 50)">
+                  <rect class="cut-rotate-piece" x="27" y="38" width="46" height="24" rx="4"></rect>
+                  <circle id="cut-rotate-handle" class="cut-dial-handle" cx="50" cy="10" r="7"></circle>
+                </g>
+                <text id="cut-rotate-dial-deg" class="cut-dial-deg" x="50" y="54" text-anchor="middle">-</text>
+              </svg>
+              <div class="cut-miter-steps" role="group" aria-label="Rotate piece, step">
+              <button id="btn-cut-rotate-minus" class="btn btn-secondary" type="button" aria-label="Turn the piece 1 degree anticlockwise" title="Turn the piece −1° (anticlockwise from above; Shift: 0.1°, Alt: 5°). Hold to repeat.">−</button>
+              <button id="btn-cut-rotate-plus" class="btn btn-secondary" type="button" aria-label="Turn the piece 1 degree clockwise" title="Turn the piece +1° (clockwise from above; Shift: 0.1°, Alt: 5°). Hold to repeat.">+</button>
+              </div>
+              <span class="hint">Rotate piece</span>
+              <div class="cut-dialfields">
+              <input type="number" id="cut-rotate-deg" class="cut-no-spin" min="0" max="359.9" step="0.1" value="0" aria-label="Rotate piece, degrees" title="The piece's heading on the plate, clockwise seen from above. Type one, or drag the handle round the wheel.">
+              </div>
               </div>
               </div>
               <!-- Bevel: the blade's lean off plumb, about its own horizontal line
@@ -2621,7 +2653,7 @@
 
 
 
-  <script src="app-cut.js?v=00dcfb7d"></script>
+  <script src="app-cut.js?v=f791ee04"></script>
   <!-- Cut card, Follow strand: the sized blade put square across a cord and walked along it (nso_strand.js, docs/CUT-FOLLOW.md). After app-cut.js. -->
   <script src="app-cut-follow.js?v=59558adb"></script>
   <!-- Cut card, Whole plate blade: one level blade across every piece. After app-cut.js, whose cutOneSide / cutOverlay

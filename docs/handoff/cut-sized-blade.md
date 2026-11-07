@@ -92,3 +92,13 @@ and centre of a strand, march along it; `strand:test`), `app-cut-follow.js` (sta
 Found while testing: a plane that grazes a surface or the cord's end cuts a tiny outline, so "smallest section" picked wrong directions (now surface normals,
 voted); a plane lying on a cut face cuts part of a disc whose centre is off the axis (sections are gated on area); a march that ran out into empty space
 returned a target there (now the end); Back onto a kerf found another turn of the spiral (refused). `nso_wire_cut_redesign_test` lists the new controls.
+
+### Eighth round (2026-11-07): the Rotate piece wheel
+
+Asked for: the rotate rings are too far out of view to work on small pieces, so a rotary dial like the mitre's inside the Cut card, the Mitre box and Square
+moved under the Mitre wheel so the new wheel fits on its right. The two wheels are now a two-column row (`.cut-dials`, `index.html`, `styles.css`); each column is
+wheel, - / + (directly under it, as the layout gate in `nso_wire_cut_redesign_test` has always pinned), then its name and box (Square beside the Mitre's).
+`app-cut.js`: `cutWireRotateDial`, `cutRotateBy` (through `nsoRotate.turn`, with the lock check and one Undo point per run), `cutPieceHeading` (0 = as loaded,
+clockwise from above); `cutWireMiterStep` takes a third kind for its buttons. The old checkbox is now labelled **Rotate rings** (it still shows the rings and the
+lean options). The wheel is a jog, not a pointer-follower: a piece must not jump to wherever the rail is pressed. A turn clears the Follow strand place (it is held in
+the world). New `tools/nso_cut_rotate_dial_drive_check.js` (`rotate-dial:drive`); `nso_wire_cut_redesign_test` lists the card in its new order.

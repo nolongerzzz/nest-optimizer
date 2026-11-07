@@ -27,11 +27,20 @@ within reach);
 the number box takes anything, and the slider's range grows to hold what it is
 given, so a slider never sits at its end while its box says something else.
 
-**Rotate piece** (a box at the top of the card) shows the rotate rings on the
-piece while Cut stays open. Turn is on; *Lean front/back* and *Lean side/side*
-appear as options. Drag a ring and the piece turns and the blade follows it. The
-arrow keys are not taken (Cut's dials use them; one press is answered once).
-Closing Cut clears the box and takes the rings with it.
+**Rotate piece** is a wheel beside the Mitre wheel, for turning a small piece close up (the
+rotate rings stand too far out of view there). It turns the piece itself about the vertical,
+clockwise seen from above, through the same path as the Rotate menu's pose buttons (the
+position lock is honoured, one Undo point per drag or run of presses). Its handle shows the
+piece's heading - 0 for a piece as loaded, 90 after a clockwise quarter turn. It is a jog,
+not a pointer: pressing the rail does nothing until the pointer moves, then the piece follows
+the pointer's turn about the wheel, resting on a 45 degree tick it passes within 3. The box
+takes a heading; the - / + buttons under the wheel step 1 degree (Shift 0.1, Alt 5, hold to
+repeat) and so do the arrow keys on the wheel. The blade goes with the piece. Each wheel has
+its - / + directly under it, and under those its name and number box (the Mitre's with
+Square beside it). The old rotate rings, with their Lean front/back and side/side options,
+are still there behind the **Rotate rings** box above the wheels; arrow keys are not taken
+(Cut's dials use them; one press is answered once). Closing Cut clears the box and takes the
+rings with it. Real-browser check: `npm run rotate-dial:drive`.
 
 Files: `nso_notch.js` (the geometry, THREE-free, `npm run notch:test`),
 `app-cut.js` (`cutBladeSpec`, `cutBuildSizedBlade`, `cutNotchAt`, the card
