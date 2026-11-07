@@ -163,7 +163,7 @@ const BEFORE = ['menu-import', 'file-input', 'btn-load-stl', 'btn-library', 'men
   'chk-rot-ring-turn', 'chk-rot-ring-fb', 'chk-rot-ring-ss', 'menu-tip', 'btn-flip', 'btn-tip', 'btn-flip-over', 'btn-tip-face',
   'btn-tilt-up', 'btn-tilt-dn', 'btn-bank-up', 'btn-bank-dn', 'menu-align', 'btn-join-align', 'btn-join-cx', 'btn-join-cz',
   'btn-center-lock', 'btn-center-lock-pick', 'center-lock-ref', 'menu-gen', 'rng-wheel-scale',
-  'rng-wheel-wall', 'btn-wheel-ball', 'btn-wheel-open', 'rng-wheel-depth', 'rng-wheel-pull-z',
+  'rng-wheel-wall', 'btn-wheel-ball', 'btn-wheel-open', 'rng-wheel-open', 'rng-wheel-pull-z',
   'rng-wheel-pull-dr', 'rng-wheel-trim', 'rng-wheel-rim',
   'sel-stock-shape', 'inp-stock-height', 'inp-stock-radius', 'inp-stock-wall', 'inp-stock-nozzle', 'inp-stock-waste',
   'inp-stock-prop', 'chk-stock-match', 'chk-stock-oversize', 'btn-stock-make', 'btn-stock-attach', 'menu-relief', 'relief-file',

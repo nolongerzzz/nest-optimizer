@@ -4853,6 +4853,18 @@ body.sup-card-open #adjust-status { display: none; }
 .wh-slider .wh-preset { width: 100%; min-width: 0; margin: 0; padding: 1px 2px; font-size: 11px; line-height: 1.2; }
 .wh-slider input[type="range"] { grid-column: 2; width: 100%; min-width: 0; margin: 0; }
 .wh-slider .wh-read { grid-column: 3; text-align: right; color: #cbd5e1; font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* Each row wears the colour of the handle on the piece that works the same thing, and lights when either is hovered or moved
+   (app-wheel-live.js). Scale and Wall have no handle: violet, and the ring on the piece says where they act. */
+.wh-slider { border-left: 3px solid transparent; padding-left: 4px; border-radius: 3px; }
+.wh-slider[data-wh="shape"] { border-left-color: #c4b5fd; }
+.wh-slider[data-wh="flatten"] { border-left-color: #38bdf8; }
+.wh-slider[data-wh="open"] { border-left-color: #22d3ee; }
+.wh-slider[data-wh="pull"] { border-left-color: #facc15; }
+.wh-slider[data-wh="lip"] { border-left-color: #4ade80; }
+.wh-slider[data-wh="trim"] { border-left-color: #f87171; }
+.wh-slider.wh-lit, .wh-slider:hover { background: rgba(148, 163, 184, 0.14); color: #e2e8f0; }
+.wh-tag { position: fixed; z-index: 60; pointer-events: none; padding: 2px 7px; border-radius: 5px; font-size: 11px; line-height: 1.5;
+  background: rgba(15, 23, 42, 0.92); color: #e2e8f0; border: 1px solid rgba(148, 163, 184, 0.5); white-space: nowrap; font-variant-numeric: tabular-nums; }
 
 /* Fasteners (Gen+): tiles drawn from nso_thread.js's own meshes, and a number box with its slider (app-fasteners.js, app-live-slider.js). */
 .fs-tiles { flex: 0 0 100%; box-sizing: border-box; display: grid; grid-template-columns: repeat(auto-fit, minmax(64px, 1fr)); gap: 4px; margin: 2px 0 4px; }

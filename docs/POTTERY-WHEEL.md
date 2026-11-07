@@ -464,7 +464,7 @@ one live value, and the form is **rebuilt from the ball**, in the order a potter
 works, whenever any of them moves (`NSO_wheelBuild`, `app-wheel.js` "7g"):
 
 ```
-ball  ->  press (Thick)  ->  open (Deep) or lip (Lip)  ->  pull (Pull at, Pull, Soft)  ->  trim  ->  rim +
+ball  ->  press (Thick)  ->  open (Open) or lip (Lip)  ->  pull (Pull at, Pull, Soft)  ->  trim  ->  rim +
 ```
 
 Nothing is baked into the profile, so **nothing is ever shut off**. Dragging Thick
@@ -474,11 +474,11 @@ and the earlier piece is back, exactly. The order you move them in does not matt
 the same recipe is the same piece (tested).
 
 **A limit is a clamp, not a refusal.** A stage that cannot be done at the current
-values does the most it can and says so in the read-out: Deep on a 3 mm disc, a Pull
+values does the most it can and says so in the read-out: Open on a 3 mm disc, a Pull
 that would take the wall under the nozzle floor, Rim + on a curved wall. The slider
 stays live; the reason is on screen. Each slider's range follows what is upstream of
-it (Deep's maximum depends on how far Thick has pressed) and comes out of the same
-build pass. A Deep the shape cannot honour is remembered — drag Thick back up and it
+it (whether Open has room depends on how far Thick has pressed) and comes out of the same
+build pass. An Open the shape cannot honour is remembered — drag Thick back up and it
 takes effect.
 
 | control | does |
@@ -487,7 +487,7 @@ takes effect.
 | **Scale** | the size of the ball (its radius; the standard ball is 25 mm, shown as Ø50). Live at any time, under everything else. It replaced H and R: a target height (Pappus) is still `NSO_wheelBall({ height })` in the API, but the card has one size slider |
 | **W** | the wall: how thin the disc may press and how thin the walls open. A thicker W opens a shorter, thicker-walled piece from the same clay |
 | **Thick** | press: the top comes down, the diameter grows, the clay is conserved. All the way up is the unpressed ball |
-| **Deep** | how far the finger goes in; the clay it pushes aside rises into the walls (`NSO_wheelOpenKeep`) |
+| **Open** | from closed (0) to the widest bowl the wall allows (100%): the mouth, the depth and the size of the shell grow together, the clay conserved ([A soft Open](#a-soft-open)) |
 | **Lip / Lip at / Flare** | lift the edge of a pressed plate into a rim, this high; where the lift starts (a % of the plate's radius); how long the ease into it is (a % of the lifted part). [Lip](#lip) |
 | **Pull at / Pull / Soft** | where (a % of the height, so it follows the piece), how far out or in, how widely it spreads (a % of the height: small is a ring, large is a belly) |
 | **Trim, Rim +** | take off the base (the clay is gone); add height at the rim (Extend — needs a straight wall) |
@@ -500,7 +500,7 @@ editable, so the next drag on any slider starts from the ball again. Escape puts
 preview away. Undo rewinds the recipe with the piece (the history holds
 `{ recipe, piece, soup }`), and the sliders follow it back.
 
-*There is nothing to type into.* Each slider is one row — its name (for Thick and Deep,
+*There is nothing to type into.* Each slider is one row — its name (for Thick and Open,
 the Flatten / Open preset button), the track, and what it says — and the number is the
 slider's own, through `app-live-slider.js`'s optional-box form (`bind` without `box`:
 `value()` reads the slider; the read-out is the only text). The whole card is nine
@@ -508,16 +508,14 @@ sliders and three buttons, 316 px tall, so Gen+ fits the window without scrollin
 was over 1100 px with number boxes.
 
 *Conserving the clay.* Press, open and pull all keep the volume: press by solving the
-rounded-slab family; **Open** by stretching everything above the cavity floor until
-the volume is what it was (volume is linear in the stretch, so two evaluations find it
-exactly; the base under the cavity is untouched; the stretch **eases in** on a ramp, see
-[A soft pull](#a-soft-pull)); **Pull** by scaling heights about the base by `V0/V1`. A pull that moves nothing refuses. Trim takes clay away and Rim + adds
+rounded-slab family; **Open** by growing the whole shell until the volume is what it was
+(the wall is never scaled; [A soft Open](#a-soft-open)); **Pull** by scaling heights about the base by `V0/V1`. A pull that moves nothing refuses. Trim takes clay away and Rim + adds
 it, and both say so.
 
-*Which shapes come out.* With a 3 mm wall and the clay conserved, a cavity that spans
-the whole disc leaves thin walls that stand tall: from the standard ball, Thick 30 +
-Deep max is a Ø61 × 96 jar, Thick 12 is Ø87 × 54, **Thick 8 is Ø104 × 40 — a bowl**,
-and Thick 3 is a Ø167 plate that cannot be opened. W is the lever for the rest.
+*Which shapes come out.* From the standard ball with a 3 mm wall: Open 50% is a round pot with a
+thumb-dimple (Ø52), 85% a round bowl (Ø73 × 55), 100% a hemispherical bowl (Ø112 × 64); Thick 20 + Open 100%
+is Ø143 × 25; a plate as thin as its wall cannot be opened. **Wall is the lever for the rest** — it is never
+scaled, so a thin wall makes the same clay a bigger, thinner bowl (Wall 1.3: Ø161 × 91).
 
 *Strict API.* `NSO_wheelRun(move, …)` and the `NSO_wheelFlatten / Open / Pull / Trim /
 ExtendRim` functions are unchanged and refuse whole when a stage cannot be done; a
@@ -526,8 +524,8 @@ neutral on top of it (`NSO_wheelRecipeOn`). The sliders never come through there
 (`NSO_wheelSetRecipe`).
 
 **What this does not do yet.** A single Pull is one bulge, not several: two bellies need a
-second control. Open's cavity is as wide as W allows, so a narrow mouth needs a "mouth"
-control. Scale, Trim, Rim + and Soft have no ball on the piece, nor do Lip at and Flare.
+second control. Scale, Wall, Soft, Lip at and Flare have no ball on the piece — they have a ring
+(next section). The mouth and the depth rise together; a narrow-mouthed vase is Open then Pull in.
 
 ### A soft pull
 
@@ -550,14 +548,15 @@ things were behind it, and none of them was the falloff curve being "too sharp":
    leaves the wall and rounded at the waist. Pulling a plain tube with it **reproduces Tube Edge's
    Smooth neck to 5.6 microns** (tested), so a pull and a Tube Edge neck of the same Δr and length
    are the same curve. (Funnel is Tube Edge's other profile: straight in, straight out.)
-3. **A crease at the foot of every opened piece.** Open stretched everything above the cavity floor
+3. **A crease at the foot of every opened piece** (in the strict API's Open, which is still there; the
+   Wheel's Open is now [a soft Open](#a-soft-open) and has none). Open stretched everything above the cavity floor
    by one factor — exact for the clay, but the wall just below the split kept its slope and the wall
    above had it divided by the stretch (×14 and more): a **35 degree kink** in the outside before any
    pull. The stretch now eases in, `z' = z + a·G(z)` with `G` the integral of a smoothstep from the
    floor over 60% of the height above it, so the base is untouched, the full stretch is reached
    smoothly, and volume is still linear in `a` (two evaluations still find it exactly). 34.6 → 6.4
    degrees. The cost: the ramp stretches the lower wall less, so an opened piece comes out a little
-   taller for the same clay (74.9 → 80.8 mm for Thick 20, Deep 5), and the stretch factors are large
+   taller for the same clay (74.9 → 80.8 mm for Thick 20, strict Open depth 5), and the stretch factors are large
    (×21 there, ×75 for a 0.8 mm opening of a 10.9 mm disc) because a thin shell really does need that
    to give back what its cavity displaced.
 
@@ -566,6 +565,46 @@ first goes from 0.47 mm (under the nozzle floor, because the facets cut the bulg
 1.5 mm. **Soft** now reaches 100% of the height (it stopped at 60) and defaults to **40%**. The strict
 `NSO_wheelPull` is unchanged unless asked (`kernel: 'cosine'`, `refine: true` — what the recipe
 passes), so its pinned behaviour stands.
+
+### A soft Open
+
+The strict `NSO_wheelOpen` / `NSO_wheelOpenKeep` open the piece **as wide as the wall allows** and throw
+the dome away, so *any* opening — 0.1 mm of it — is the whole bowl, with the dome stood up as straight walls.
+On a slider that was a cliff, and two complaints were one bug: a squished ball became "a vase bottom" in the
+first pixel of Open (50 → 99 mm tall at 0.3 mm, 6 mm down to a 51 mm tube), and dragging Flatten with an Open
+left over jumped from a flat disc to a 47 mm tube the moment the disc was thick enough to hold a cavity. It
+also stood the walls straight up: a ball never came out *round*.
+
+The Wheel's Open (`NSO_wheelOpenSoft`, the recipe's `open`, 0 to 1) is one family from the closed piece to the
+widest bowl, and **every quantity in it goes to zero with it**:
+
+- **mouth** — `u` of the widest mouth the shape can hold. The rim sits where the *outside* is wide enough for that
+  mouth plus a wall: on the dome of a ball (a hair above the equator at 100%), on the **flat top of a plate**,
+  which keeps its top instead of losing it;
+- **depth** — `u` of the way from the rim down to the floor the wall allows. The cavity is an ellipsoid (a thumb's
+  dimple) that squares off into the bowl's own inside as `u` grows;
+- **the clay** — the whole shell is **scaled up** about the middle of its base until the volume is what it was
+  (a log-secant on volume, 3–5 builds, ≤ 3·10⁻⁷ short and never over). The clay the cavity and the cut-off cap
+  displaced does not vanish: the piece *grows*, the way a pressed disc's diameter does, so a ball opens into a
+  **round bowl** and a plate into a **dish**. The wall is the one thing never scaled, so **Wall** is the
+  lever for how thin it comes out.
+
+The mouth at a given rim is found by the same wall-distance rule the cavity always used (the largest radius at the rim
+height that is a wall from the *rest* of the outside — the part above the rim is cut off, so it is ignored), by bisection
+on the outline's arc; the widest rim is scanned, the jump where a plate first has room is bisected, a peak is polished, and
+the highest rim within 1% of the widest is taken (on a plate the widest is at the foot of the edge, with no depth to open).
+
+The slider is `p`, not `u`: the clay a mouth needs grows with the cube of how open it is, so the last tenth of a linear
+slider doubled the bowl. `u = 1 - (1 - p)^1.5` (`NSO_wheelOpenU`, and `NSO_wheelOpenP` back, which the mouth handle uses).
+
+What it measures (ball, wall 3): Open 25/50/70/85/100% → Ø50.6 / 52.7 / 69.9 / 98.6 / 111.7 at 0–60 mm tall; no 1% step of the
+slider moves the width more than 1.7 mm or the height more than 0.6 mm (it was a 49 mm jump). Dragging Flatten with Open
+set, 4 mm down to 1.4 mm on a 1.3 wall: what Open adds changes by ≤ 1.1 mm per 0.05 mm step (it was 45 mm). A build with Open and a
+Pull is 25 ms. The pieces are under the canonical mesh checker (watertight, wall, height, footprint).
+
+`NSO_wheelOpenReach` says whether there is room (a mouth *and* a rim above the floor: a plate two walls thick has the first
+and not the second) and how wide — that is the slider's range and its reason. A touch of Open too small to make (under a
+dimple's worth) is simply not opened yet, not a refusal. The strict API is untouched, and so are its tests.
 
 ### Lip
 
@@ -600,7 +639,7 @@ the loop-profile refactor was wrong: horizontal faces are fine as runs of sample
 least as wide as it is thick, and not opened: an unpressed ball ("press the ball into a plate
 first"), a thick bulge ("press it flatter"), an opened piece ("an opened piece has no flat plate
 to lift") each leave the piece as it is, put the reason in the read-out and the slider's tooltip,
-and **remember the lip you asked for** — drag Deep back to 0 or Thick back down and it takes
+and **remember the lip you asked for** — drag Open back to 0 or Thick back down and it takes
 effect. Lip back to 0 is the flat plate exactly.
 
 *Height.* On a lipped plate the highest point is the top face's end on the **inner** profile, a
@@ -616,14 +655,30 @@ They are balls drawn on top of the piece, round on the screen whatever the zoom:
 
 | ball | where | drag | drives |
 |---|---|---|---|
-| **blue** | the top face of a ball or plate | **down** | Thick (press). Hold **Shift** to open it instead (Deep) |
-| **cyan** | the cavity floor of an opened piece | down | Deep |
-| **yellow** | the wall, at the Pull height | **out / in**, and **up / down** | Pull, and Pull at |
-| **green** | the rim of a pressed plate | **up** | Lip |
+| **blue** Flatten | the top face of a ball or plate | **down** | Thick (press) |
+| **cyan** Open | off to the side of the top of a ball, where a mouth would start; on the **rim** of an opened piece | **out** (and, on the rim, **up**) | Open — the mouth; and Rim + |
+| **yellow** Pull | the wall, at the Pull height | **out / in**, and **up / down** | Pull, and Pull at |
+| **green** Lip | the rim of a pressed plate | **up** | Lip |
+| **red** Trim | the foot | **up** | Trim |
 
 A drag on a handle swallows the press (orbit off for its length, back on after); a drag on
-empty space still orbits. Hover turns the cursor to a grab hand and says what the ball does;
-Escape puts a drag away; a click that does not move changes nothing.
+empty space still orbits. Escape puts a drag away; a click that does not move changes nothing.
+The cyan ball is never on top of the blue one (the blue goes away once the piece is open, an opened piece
+being no plate), and where two would overlap on the screen the later of blue, cyan, green, yellow, red steps aside.
+
+**Every control says where it is.** Dragging "just moving knobs" was the complaint: the sliders and the balls
+did not tell you which was which. Now both ends point at each other:
+
+- each slider row wears **the colour of its handle** on its left edge (violet for Scale and Wall, which have no handle);
+- **hover a handle** — its rows light up, a **tag** beside it names it and reads its value (*Pull +10 mm at 50 %*), and a **ring**
+  on the piece shows the place it acts on;
+- **hover, focus or drag a slider row** — the handle it belongs to swells, the same tag follows, and the ring is drawn: at the pull height
+  for Pull / Pull at, at the pull height ± the Soft width for **Soft**, at the widest part for **Scale**, at the rim (inside and out) for
+  **Wall**, on the top face for **Flatten**, at the mouth for **Open**, where the lift starts for **Lip at** and at its crest for **Flare**,
+  on the foot for **Trim**, at the top edge for **Rim +**. A slider with no handle still has a ring; a ring is where it works.
+
+(`markerSpecs` in `app-wheel-live.js`, drawn as thin tori in the handles' own scene group, kept in step through the preview, so they
+ride the shape being shown while you drag a slider.)
 
 *How a mouse movement becomes millimetres.* Each handle knows its two axes on the screen —
 radial (the camera's right, so a radial drag runs along the screen's x) and up — by
@@ -631,14 +686,14 @@ projecting the handle and one millimetre along each through the camera; the mous
 turned into `(radial mm, up mm)` by a 2x2 solve, so it holds from any angle, and the top of a
 pressed ball follows the cursor (measured: the Thick slider within 0.1 mm of what the cursor
 implies). The drag edits a **fresh copy of the recipe it started from** every time, so nothing
-drifts; builds are throttled to the pace they take (latest wins, a build is ~60 ms).
+drifts; builds are throttled to the pace they take (latest wins, a build is ~60 ms). The mouth handle works in `u`
+(a radial millimetre is `1/(widest mouth)` of it) and converts back to the slider with `NSO_wheelOpenP`.
 
 *Where they sit.* `handleSpecs` puts them from the piece's profile and the recipe: blue at the
-top face centre (or the plate's floor under a lip), cyan at the cavity floor once opened, yellow
-on the outer wall at *Pull at*, green on a pressed plate's rim (the inner profile's highest point
-once there is a lip, so it rides up with it). They are children of a scene group, not of the
-piece's mesh, and follow the camera through OrbitControls' `change` event. On a thin plate the
-wall ball steps aside from the rim one. They exist only while the Wheel menu is open.
+top face centre (or the plate's floor under a lip), cyan on the top where the mouth would start or on the inner rim,
+yellow on the outer wall at *Pull at*, green on a pressed plate's rim (the inner profile's highest point
+once there is a lip, so it rides up with it), red on the foot. They are children of a scene group, not of the
+piece's mesh, and follow the camera through OrbitControls' `change` event. They exist only while the Wheel menu is open.
 
 *One hook in the core.* `app-core.js`'s press handler asks `window.nsoWheelTakesPointer(event)`
 (beside Brush, Pull, Limb and Foam), so a press on a handle does not also start the

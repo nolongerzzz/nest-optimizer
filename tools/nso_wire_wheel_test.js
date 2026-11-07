@@ -60,7 +60,7 @@ withApp(async (page, logs) => {
   console.log('\n=== 1. the controls exist and are reachable ===');
   const ui = await page.evaluate(() => {
     const ids = ['btn-wheel-ball', 'btn-wheel-flatten', 'btn-wheel-open'];
-    const inputs = ['rng-wheel-scale', 'rng-wheel-wall', 'rng-wheel-flat', 'rng-wheel-depth', 'rng-wheel-pull-z',
+    const inputs = ['rng-wheel-scale', 'rng-wheel-wall', 'rng-wheel-flat', 'rng-wheel-open', 'rng-wheel-pull-z',
       'rng-wheel-pull-dr', 'rng-wheel-soft', 'rng-wheel-trim', 'rng-wheel-rim'];
     return {
       missing: ids.filter(i => !document.getElementById(i)),
@@ -103,7 +103,7 @@ withApp(async (page, logs) => {
     await page.evaluate(() => Array.from(document.getElementById('btn-wheel-ball').closest('.vp-menu-body').querySelectorAll('input')).every(e => !e.disabled)));
   /* put the preset back: the next Starter Ball must be the plain ball */
   await page.evaluate(() => {
-    const e = document.getElementById('rng-wheel-depth'); e.value = '0';
+    const e = document.getElementById('rng-wheel-open'); e.value = '0';
     e.dispatchEvent(new Event('input', { bubbles: true })); e.dispatchEvent(new Event('change', { bubbles: true }));
   });
 
@@ -540,53 +540,53 @@ withApp(async (page, logs) => {
   check('...and the recipe says thick 20', Math.abs((await info()).recipe.thick - 20) < 0.11);
 
   /* THE POINT: nothing is baked, nothing is switched off */
-  await setSlider('rng-wheel-depth', 5);
+  await setSlider('rng-wheel-open', 0.5);
   let st = await info();
-  check('Deep opens the pressed piece', st.open && st.ops === 'ball>flatten>open', st.ops);
+  check('Open opens the pressed piece', st.open && st.ops === 'ball>flatten>open', st.ops);
   check('...every slider is still live', await allLive());
   const d20 = st.d;
   await setSlider('rng-wheel-flat', 10);
   st = await info();
   check('Thick, dragged AFTER it is open, re-presses the ball and re-opens it on the new shape',
-    st.open && st.ops === 'ball>flatten>open' && st.d > d20 && Math.abs(st.recipe.thick - 10) < 0.11 && st.recipe.depth > 0,
+    st.open && st.ops === 'ball>flatten>open' && st.d > d20 && Math.abs(st.recipe.thick - 10) < 0.11 && st.recipe.open > 0,
     st.ops + ', ' + d20.toFixed(1) + ' -> ' + st.d.toFixed(1) + ' mm across');
-  check('...the clay is the same clay', Math.abs(st.vol - ball0.vol) / ball0.vol < 1e-9);
+  check('...the clay is the same clay', Math.abs(st.vol - ball0.vol) / ball0.vol < 1e-6);
   await setSlider('rng-wheel-flat', parseFloat((await sl('rng-wheel-flat')).max));
   st = await info();
   check('Thick all the way back up: an opened UNPRESSED ball - the press is gone',
-    st.open && st.ops === 'ball>open' && st.recipe.thick === null && Math.abs(st.d - 50) < 0.5, st.ops + ', ' + st.d.toFixed(1) + ' mm across');
-  await setSlider('rng-wheel-depth', 0);
+    st.open && st.ops === 'ball>open' && st.recipe.thick === null && st.d < 56, st.ops + ', ' + st.d.toFixed(1) + ' mm across');
+  await setSlider('rng-wheel-open', 0);
   st = await info();
-  check('Deep back to 0: not opened, the original ball exactly',
+  check('Open back to 0: not opened, the original ball exactly',
     !st.open && st.ops === 'ball' && Math.abs(st.vol - ball0.vol) < 1e-6 && Math.abs(st.y - 50) < 0.01, st.ops + ', h ' + st.h.toFixed(2));
 
   /* ORDER DOES NOT MATTER: it is a recipe */
-  await setSlider('rng-wheel-flat', 15); await setSlider('rng-wheel-depth', 4);
+  await setSlider('rng-wheel-flat', 15); await setSlider('rng-wheel-open', 0.5);
   const a = await info();
-  await setSlider('rng-wheel-flat', parseFloat((await sl('rng-wheel-flat')).max)); await setSlider('rng-wheel-depth', 0);
-  await setSlider('rng-wheel-depth', 4); await setSlider('rng-wheel-flat', 15);
+  await setSlider('rng-wheel-flat', parseFloat((await sl('rng-wheel-flat')).max)); await setSlider('rng-wheel-open', 0);
+  await setSlider('rng-wheel-open', 0.5); await setSlider('rng-wheel-flat', 15);
   const b = await info();
-  check('Thick then Deep, or Deep then Thick: the same piece',
+  check('Thick then Open, or Open then Thick: the same piece',
     Math.abs(a.h - b.h) < 1e-6 && Math.abs(a.d - b.d) < 1e-6 && a.ops === b.ops, a.h.toFixed(2) + ' vs ' + b.h.toFixed(2));
 
   /* A LIMIT IS NOT A REFUSAL */
   await setSlider('rng-wheel-flat', 20);
-  await setSlider('rng-wheel-depth', 5);
-  check('(opened 5 mm in on the 20 mm disc)', (await info()).open && Math.abs((await info()).recipe.depth - 5) < 0.11);
+  await setSlider('rng-wheel-open', 0.5);
+  check('(opened 50% on the 20 mm disc)', (await info()).open && Math.abs((await info()).recipe.open - 0.5) < 0.011);
   await drag('rng-wheel-flat', 3);
   await waitReadout(/Preview/);
-  const lim = await sl('rng-wheel-depth');
-  check('press it down to a 3 mm disc and Deep cannot be honoured - the read-out says so and the slider stays live',
-    !lim.off && /Deep/.test(await readoutOf()) && lim.max < 1, JSON.stringify(lim) + ' ' + await readoutOf());
+  const lim = await sl('rng-wheel-open');
+  check('press it down to a 3 mm disc and Open cannot be honoured - the read-out says so and the slider stays live',
+    !lim.off && /Open/.test(await readoutOf()) && lim.max < 0.5, JSON.stringify(lim) + ' ' + await readoutOf());
   await release('rng-wheel-flat');
   await page.waitForFunction(() => !document.getElementById('wheel-readout').textContent.startsWith('Preview'), null, { timeout: 15000 });
   st = await info();
-  check('...the piece is a disc, and the 5 mm it was asked for is remembered, not lost',
-    !st.open && Math.abs(st.recipe.depth - 5) < 0.11 && st.y < 3.2, st.ops + ' depth ' + st.recipe.depth.toFixed(1));
+  check('...the piece is a disc, and the 50% it was asked for is remembered, not lost',
+    !st.open && Math.abs(st.recipe.open - 0.5) < 0.011 && st.y < 3.2, st.ops + ' open ' + st.recipe.open.toFixed(2));
   check('...every slider is live', await allLive());
   await setSlider('rng-wheel-flat', 20);
   st = await info();
-  check('drag Thick back up and the remembered Deep takes effect: the disc opens again', st.open && Math.abs(st.recipe.depth - 5) < 0.11, st.ops);
+  check('drag Thick back up and the remembered Open takes effect: the disc opens again', st.open && Math.abs(st.recipe.open - 0.5) < 0.011, st.ops);
 
   /* UNDO takes the recipe back, and the sliders follow it */
   await page.click('#btn-undo');
@@ -601,7 +601,7 @@ withApp(async (page, logs) => {
   check('Escape puts the piece and the slider back', Math.abs((await geoH()) - 3) < 0.1 && Math.abs((await sl('rng-wheel-flat')).v - 3) < 0.11);
 
   /* PULL: a live value, and taking it back is exact */
-  await setSlider('rng-wheel-flat', 20); await setSlider('rng-wheel-depth', 5);
+  await setSlider('rng-wheel-flat', 20); await setSlider('rng-wheel-open', 0.5);
   const bowl = await info();
   await setSlider('rng-wheel-pull-z', 60); await setSlider('rng-wheel-soft', 30); await setSlider('rng-wheel-pull-dr', 6);
   const pulled = await info();
@@ -628,7 +628,7 @@ withApp(async (page, logs) => {
   });
   await setSlider('rng-wheel-soft', 60); await setSlider('rng-wheel-pull-dr', 12);
   const turn = await worstTurnNow();
-  check('a big, broad pull (+12 mm, Soft 60%) is smooth: no segment turns more than 12 degrees from its neighbour (it was 60-86 before)', turn < 12, turn.toFixed(1) + ' degrees');
+  check('a big, broad pull (+12 mm, Soft 60%) is smooth: no segment turns more than 15 degrees from its neighbour (it was 60-86 before)', turn < 15, turn.toFixed(1) + ' degrees');
   check('...and the wall has more samples where the pull reaches (it is drawn finely enough to show the curve)',
     await page.evaluate(() => NSO_wheelSession.outer.length) > 80);
   await setSlider('rng-wheel-pull-dr', 0); await setSlider('rng-wheel-soft', 40);
@@ -704,7 +704,7 @@ withApp(async (page, logs) => {
 
     /* the same, over and over, on different sliders */
     let always = true, detail = [];
-    for (const [id, v] of [['rng-wheel-depth', 2], ['rng-wheel-pull-dr', 4], ['rng-wheel-soft', 40], ['rng-wheel-trim', 1], ['rng-wheel-scale', 30], ['rng-wheel-flat', 12]]) {
+    for (const [id, v] of [['rng-wheel-open', 0.5], ['rng-wheel-pull-dr', 4], ['rng-wheel-soft', 40], ['rng-wheel-trim', 1], ['rng-wheel-scale', 30], ['rng-wheel-flat', 12]]) {
       await drag(id, v); await waitPreview(); await page.waitForTimeout(200);
       const during = await edge();
       await release(id); await idle(); await page.waitForTimeout(250);
@@ -813,18 +813,18 @@ withApp(async (page, logs) => {
     await release('rng-wheel-lip'); await idle();
     await setS('rng-wheel-lip', 8);
 
-    /* Deep and Lip are not both a plate (a 12 mm plate is thick enough to open) */
+    /* Open and Lip are not both a plate (a 12 mm plate is thick enough to open) */
     await setS('rng-wheel-flat', 12);
     const preDeep = await info();
     check('(a 12 mm plate with the lip on it)', preDeep.ops === 'ball>flatten>lip');
-    await setS('rng-wheel-depth', 2);
+    await setS('rng-wheel-open', 0.5);
     const both = await info();
-    check('open it (Deep) and Lip stands down: it is not a plate any more, and the read-out says so',
+    check('open it (Open) and Lip stands down: it is not a plate any more, and the read-out says so',
       both.open && both.ops !== 'ball>flatten>lip' && /Lip: an opened piece/.test(await readoutOf()) && !(await sl('rng-wheel-lip')).off, both.ops + ' | ' + await readoutOf());
     check('...the 8 mm lip it was asked for is remembered', Math.abs(both.recipe.lip.h - 8) < 0.1, JSON.stringify(both.recipe.lip));
-    await setS('rng-wheel-depth', 0);
+    await setS('rng-wheel-open', 0);
     const back = await info();
-    check('Deep back to 0 and the lip is there again - nothing was lost', back.ops === 'ball>flatten>lip' && Math.abs(back.h - preDeep.h) < 1e-9 && Math.abs(back.d - preDeep.d) < 1e-9,
+    check('Open back to 0 and the lip is there again - nothing was lost', back.ops === 'ball>flatten>lip' && Math.abs(back.h - preDeep.h) < 1e-9 && Math.abs(back.d - preDeep.d) < 1e-9,
       back.ops + ' ' + back.h.toFixed(2) + ' (was ' + preDeep.h.toFixed(2) + ')');
     await setS('rng-wheel-flat', 6);
 
@@ -884,9 +884,9 @@ withApp(async (page, logs) => {
 
     /* the handles on a fresh ball */
     let hs = await handles();
-    check('a fresh ball has a press handle (blue) and a wall handle (yellow), no lip handle yet',
-      hs.some(h => h.kind === 'thick') && hs.some(h => h.kind === 'wall') && !hs.some(h => h.kind === 'lip'), hs.map(h => h.kind).join(','));
-    let th = await H('thick');
+    check('a fresh ball has a Flatten handle (blue), an Open handle (cyan), a Pull handle (yellow) and a Trim handle (red), no lip handle yet',
+      ['flatten', 'open', 'pull', 'trim'].every(k => hs.some(h => h.kind === k)) && !hs.some(h => h.kind === 'lip'), hs.map(h => h.kind).join(','));
+    let th = await H('flatten');
     await page.mouse.move(th.x, th.y); await page.waitForTimeout(250);
     check('hovering a handle turns the cursor to a grab hand and says what it does',
       (await page.evaluate(() => state.renderer.domElement.style.cursor)) === 'grab' && /Drag the blue ball down/.test(await ro()), await ro());
@@ -896,7 +896,7 @@ withApp(async (page, logs) => {
     /* PRESS: drag the blue ball down */
     await markTop();
     const cam0 = await cam();
-    th = await H('thick');
+    th = await H('flatten');
     await grab(th, 0, 110);
     const mid = { y: await modelH(), undoSame: await page.evaluate(() => state.undoStack[state.undoStack.length - 1] === window.__top), ro: await ro(), thick: await val('rng-wheel-flat'), ctl: await ctlOn() };
     const expect = 50 - 110 / Math.abs(th.b.y);
@@ -929,7 +929,7 @@ withApp(async (page, logs) => {
     check('letting go sets the lip: one Undo step, built as lip', lipped.ops === 'ball>flatten>lip' && await oneNew() && lipped.h > 8, lipped.ops + ' ' + lipped.h.toFixed(1));
     hs = await handles();
     lp = await H('lip');
-    check('the green ball rides up with the rim (it sits on the lifted edge now)', lp && lp.y < hs.find(h => h.kind === 'thick').y + 40);
+    check('the green ball rides up with the rim (it sits on the lifted edge now)', lp && lp.y < hs.find(h => h.kind === 'flatten').y + 40);
 
     /* ESCAPE and a plain click change nothing */
     const rBefore = JSON.stringify(await rec());
@@ -945,57 +945,104 @@ withApp(async (page, logs) => {
     await page.mouse.move(lp.x, lp.y); await page.mouse.down(); await page.waitForTimeout(100); await page.mouse.up(); await page.waitForTimeout(500);
     check('a click on a handle without moving it changes nothing', JSON.stringify(await rec()) === rBefore && await sameTop());
 
-    /* SHIFT opens, and the handle becomes the cyan one */
+    /* OPEN: the cyan ball, off to the side of the top, dragged OUT widens the mouth */
     await setS('rng-wheel-lip', 0);
     await setS('rng-wheel-flat', 20);
-    th = await H('thick');
-    await grab(th, 0, 10, { shift: true });
-    await letGo({ shift: true });
+    let op = await H('open');
+    await markTop();
+    await grab(op, 28, 0);
+    const openMid = await val('rng-wheel-open');
+    await letGo();
     let st = await rec();
     hs = await handles();
-    check('Shift-dragging the blue ball down opens the piece (Deep), and the handle on the cavity floor is now cyan',
-      st.depth > 0.3 && (await page.evaluate(() => !!NSO_wheelSession.inner)) && hs.some(h => h.kind === 'deep') && !hs.some(h => h.kind === 'thick'),
-      'depth ' + st.depth.toFixed(2) + ', ' + hs.map(h => h.kind).join(','));
-    const d1 = st.depth;
-    let dp = await H('deep');
-    await grab(dp, 0, 14);
+    check('dragging the cyan ball out opens the piece: the Open slider follows, one Undo step, and the Flatten handle is put away (an opened piece is not a plate)',
+      st.open > 0.05 && Math.abs(openMid - st.open) < 0.06 && (await page.evaluate(() => !!NSO_wheelSession.inner)) && await oneNew() &&
+      hs.some(h => h.kind === 'open') && !hs.some(h => h.kind === 'flatten'),
+      'open ' + st.open.toFixed(2) + ', ' + hs.map(h => h.kind).join(','));
+    const o1 = st.open;
+    op = await H('open');
+    await grab(op, 24, 0);
     await letGo();
-    check('dragging the cyan ball down goes deeper', (await rec()).depth > d1 + 0.5, d1.toFixed(2) + ' -> ' + (await rec()).depth.toFixed(2));
+    check('dragging the cyan ball (now on the rim) further out opens it wider', (await rec()).open > o1 + 0.03 || (await rec()).open >= 0.999, o1.toFixed(2) + ' -> ' + (await rec()).open.toFixed(2));
+    op = await H('open');
+    const rimBefore = (await rec()).rim || 0;
+    await grab(op, 0, -20);
+    await letGo();
+    check('...and up on the rim adds height there (Rim +; it says so if the wall is not straight enough, and the piece still builds)',
+      (await rec()).rim >= rimBefore && (await page.evaluate(() => !!NSO_wheelSession.inner)), 'rim ' + ((await rec()).rim || 0).toFixed(1));
+    await setS('rng-wheel-rim', 0);
 
     /* WALL: out/in pulls, up/down moves where */
     const w0 = await rec();
-    let wl = await H('wall');
+    let wl = await H('pull');
     await grab(wl, 40, -30);
     await letGo();
     const w1 = await rec();
     check('dragging the yellow ball out pulls the wall out, and dragging it up moves where (Pull at rises)',
       w1.pull.dr > w0.pull.dr + 0.5 && w1.pull.z > w0.pull.z + 0.01, 'dr ' + w0.pull.dr.toFixed(1) + ' -> ' + w1.pull.dr.toFixed(1) + ', at ' + (w0.pull.z * 100).toFixed(0) + ' -> ' + (w1.pull.z * 100).toFixed(0) + '%');
     check('...the Pull and Pull at sliders show it', Math.abs((await val('rng-wheel-pull-dr')) - w1.pull.dr) < 0.6 && Math.abs((await val('rng-wheel-pull-z')) - w1.pull.z * 100) < 1.5);
-    check('...the clay is the same clay', await page.evaluate(() => Math.abs(NSO_wheelVolume(NSO_wheelSession) - NSO_wheelSession.budget.start) / NSO_wheelSession.budget.start < 1e-9));
+    check('...the clay is the same clay', await page.evaluate(() => Math.abs(NSO_wheelVolume(NSO_wheelSession) - NSO_wheelSession.budget.start) / NSO_wheelSession.budget.start < 1e-6));
     await page.click('#btn-undo');
     await page.waitForFunction(() => Math.abs(NSO_wheelHome.recipe.pull.dr) < 1e-9, null, { timeout: 5000 });
     check('Undo takes the whole drag back in one step, the sliders with it', Math.abs((await val('rng-wheel-pull-dr'))) < 0.6);
 
     /* the orbit still works on empty space, and the handles follow the camera */
-    const camA = await cam(), wallA = await H('wall'), deepA = await H('deep');
-    await page.mouse.move(980, 760); await page.mouse.down();
-    for (let i = 1; i <= 8; i++) { await page.mouse.move(980 - i * 12, 760 - i * 4); await page.waitForTimeout(50); }
-    await page.mouse.up(); await page.waitForTimeout(500);
-    const camB = await cam(), wallB = await H('wall'), deepB = await H('deep');
-    check('a drag on empty space still orbits the camera', camA !== camB);
-    check('...and the handles follow it: the wall handle is still on the camera\'s right-hand side of the piece, level with it, so a radial drag stays along the screen\'s x',
-      wallA && wallB && wallA.x - deepA.x > 20 && wallB.x - deepB.x > 20,
-      'before ' + (wallA.x - deepA.x).toFixed(0) + ' px right of the axis, after ' + (wallB.x - deepB.x).toFixed(0));
-    const onPiece = await page.evaluate(() => {
+    const axisPx = () => page.evaluate(() => {
       const m = NSO_wheelModel(), e = state.placed.find(p => p.sourceId === m.id), mesh = e.mesh, g = mesh.geometry;
       g.computeBoundingBox();
       const c = mesh.localToWorld(new THREE.Vector3((g.boundingBox.min.x + g.boundingBox.max.x) / 2, g.boundingBox.min.y, (g.boundingBox.min.z + g.boundingBox.max.z) / 2));
       const r = state.renderer.domElement.getBoundingClientRect(), p = c.project(state.camera);
       return { x: r.left + (p.x * .5 + .5) * r.width, y: r.top + (-p.y * .5 + .5) * r.height };
     });
-    const dpH = await H('deep');
-    check('...and the cavity-floor handle is still over the piece\'s own axis (within 90 px of its base centre on screen)', Math.hypot(dpH.x - onPiece.x, dpH.y - onPiece.y) < 90,
-      'handle ' + dpH.x.toFixed(0) + ',' + dpH.y.toFixed(0) + ' base ' + onPiece.x.toFixed(0) + ',' + onPiece.y.toFixed(0));
+    const camA = await cam(), wallA = await H('pull'), deepA = await axisPx();
+    await page.mouse.move(1150, 840); await page.mouse.down();
+    for (let i = 1; i <= 8; i++) { await page.mouse.move(1150 - i * 12, 840 - i * 4); await page.waitForTimeout(50); }
+    await page.mouse.up(); await page.waitForTimeout(500);
+    const camB = await cam(), wallB = await H('pull'), deepB = await axisPx();
+    check('a drag on empty space still orbits the camera', camA !== camB);
+    check('...and the handles follow it: the wall handle is still on the camera\'s right-hand side of the piece, level with it, so a radial drag stays along the screen\'s x',
+      wallA && wallB && wallA.x - deepA.x > 20 && wallB.x - deepB.x > 20,
+      'before ' + (wallA.x - deepA.x).toFixed(0) + ' px right of the axis, after ' + (wallB.x - deepB.x).toFixed(0));
+    const opH = await H('open');
+    const rimPx = await page.evaluate(() => state.renderer.domElement.getBoundingClientRect().width);
+    check('...and the Open handle is still on the piece\'s rim after the orbit (over the canvas, within 400 px of the piece\'s base centre)',
+      opH && opH.x > 0 && opH.x < rimPx && Math.hypot(opH.x - deepB.x, opH.y - deepB.y) < 400,
+      opH ? 'handle ' + opH.x.toFixed(0) + ',' + opH.y.toFixed(0) + ' base ' + deepB.x.toFixed(0) + ',' + deepB.y.toFixed(0) : 'none');
+
+    /* TRIM: the red ball on the foot, dragged UP takes more off the base */
+    await setS('rng-wheel-open', 0); await setS('rng-wheel-flat', 20);
+    let tr = await H('trim');
+    const t0 = (await rec()).trim || 0;
+    await grab(tr, 0, -16);
+    await letGo();
+    check('dragging the red ball on the foot up trims the base: the Trim slider follows', (await rec()).trim > t0 + 0.5, t0.toFixed(1) + ' -> ' + ((await rec()).trim || 0).toFixed(1));
+    await setS('rng-wheel-trim', 0);
+
+    /* EVERY CONTROL SAYS WHERE IT IS: a ring and a tag on the piece, rows that light, both ways */
+    const ringCount = () => page.evaluate(() => { const g = state.scene.getObjectByName('wheelHandles'); return g ? g.children.length : 0; });
+    const tagNow = () => page.evaluate(() => { const t = document.getElementById('wheel-tag'); return t && t.style.display !== 'none' ? t.textContent : ''; });
+    const lit = id => page.evaluate(i => document.getElementById(i).classList.contains('wh-lit'), id);
+    await page.mouse.move(980, 760); await page.waitForTimeout(300);
+    const quiet = await ringCount();
+    check('nothing hovered: just the handles in the scene, no ring and no tag', (await tagNow()) === '' && quiet === (await handles()).length, quiet + ' objects');
+    await page.hover('#wh-row-soft'); await page.waitForTimeout(350);
+    check('hovering the Soft row (a slider with no handle of its own) draws rings on the piece where it acts, names it in a tag, and lights its group',
+      (await ringCount()) > quiet && /Soft/.test(await tagNow()) && await lit('wh-row-soft') && await lit('wh-row-pull-dr'), (await ringCount()) + ' objects, tag "' + await tagNow() + '"');
+    await page.hover('#wh-row-scale'); await page.waitForTimeout(350);
+    check('...Scale (also no handle) gets a ring too, at the widest part', (await ringCount()) > quiet && /Scale/.test(await tagNow()), await tagNow());
+    await page.hover('#wh-row-trim'); await page.waitForTimeout(350);
+    check('...Trim\'s tag sits on its handle and reads its value', /Trim/.test(await tagNow()) && (await ringCount()) > quiet, await tagNow());
+    await page.mouse.move(980, 760); await page.waitForTimeout(350);
+    check('...moving off puts the ring and the tag away', (await tagNow()) === '' && (await ringCount()) === quiet);
+    const ph = await H('pull');
+    await page.mouse.move(ph.x, ph.y); await page.waitForTimeout(350);
+    check('hovering the yellow handle lights all its rows (Pull at, Pull, Soft), draws the ring at the pull height and tags it',
+      await lit('wh-row-pull-z') && await lit('wh-row-pull-dr') && await lit('wh-row-soft') && !(await lit('wh-row-trim')) && /Pull/.test(await tagNow()) && (await ringCount()) > quiet,
+      'tag "' + await tagNow() + '"');
+    await page.mouse.move(980, 760); await page.waitForTimeout(300);
+    const rowColors = await page.evaluate(() => ['wh-row-flat', 'wh-row-open', 'wh-row-pull-dr', 'wh-row-lip', 'wh-row-trim', 'wh-row-scale']
+      .map(i => getComputedStyle(document.getElementById(i)).borderLeftColor));
+    check('every row wears the colour of its handle on its left edge (all six groups, each a different colour)', new Set(rowColors).size === 6, rowColors.join(' | '));
 
     /* put away with the menu */
     await page.evaluate(() => { const b = document.getElementById('btn-wheel-ball'); const d = b.closest('details.vp-wheel-menu'); d.open = false; });

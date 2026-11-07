@@ -169,6 +169,7 @@ merging its list by hand. The list below is generated.
 - [undo-dispose-yaw - a pose bake's geometry is disposed when nothing reachable names it (2026-10-24)](handoff/undo-dispose-yaw.md)
 - [Vertical stacking - Seat (support) from the bed, Align edges keeps the seat (2026-09-16)](handoff/vertical-stacking-seat-support-from-the-bed-align-edges-keeps.md)
 - [Weave - lasso a patch out along its own triangles, clone its surface as a fresh weave, reattach it rim to rim (2026-11-01)](handoff/weave.md)
+- [Wheel: a soft Open - one family with no cliff - and handles that say where they are](handoff/wheel-a-soft-open-one-family-no-cliff-and-handles-that-say-where-they-are.md)
 - [Wheel: a soft pull - Tube Edge's Smooth curve on a finely sampled wall](handoff/wheel-a-soft-pull-the-smooth-neck-curve-on-a-finely-sampled-wall.md)
 - [Wheel card cleanup - one Scale slider, no number boxes](handoff/wheel-card-cleanup-one-scale-slider-no-number-boxes.md)
 - [Wheel: drag on the piece - handles that drive the sliders](handoff/wheel-drag-on-the-piece-handles-that-drive-the-sliders.md)

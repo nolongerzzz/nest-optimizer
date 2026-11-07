@@ -11,7 +11,8 @@
      Scale          the size of the ball - at any time, under everything else
      W              the wall: how thin the disc may press and the walls open
      Thick          press the ball flat (the top comes down, the diameter grows)
-     Deep           push in to open it (the clay rises into walls)
+     Open           open it, from closed (0) to the widest bowl the wall allows: the mouth, the depth
+                    and the size of the shell grow together, the clay conserved
      Lip            lift the edge of a pressed plate into a rim, this high
      Lip at         where the lift starts, as a percentage of the plate's radius
      Flare          how long the transition is, as a percentage of the lifted part
@@ -31,11 +32,11 @@
    says (the read-out), on one row; the number is the slider's own, through the
    shared helper's optional-box form (app-live-slider.js).
 
-   A LIMIT IS NOT A REFUSAL. A slider the current shape cannot fully honour (Deep
-   on a 3 mm disc, a Pull that would take the wall under the nozzle floor, Rim +
+   A LIMIT IS NOT A REFUSAL. A slider the current shape cannot fully honour (Open
+   on a plate too thin to hold a mouth, a Pull that would take the wall under the nozzle floor, Rim +
    on a curved wall) is CLAMPED to what it can do and the read-out says so - the
    slider is never disabled. Each slider's range follows what is upstream of it
-   (Deep's maximum depends on how far Thick has pressed), and is re-read on every
+   (Lip's maximum depends on how far Thick has pressed), and is re-read on every
    preview.
 
    THE PREVIEW NEVER TOUCHES THE PIECE. The placed mesh's geometry is swapped for
@@ -153,9 +154,10 @@
   define('thick', { slider: 'rng-wheel-flat', read: 'out-wheel-flat', unit: ' mm',
     get: function (r, R) { return r.thick == null ? (R && R.thick ? R.thick.max : 0) : r.thick; },
     put: function (r, v, R) { r.thick = (R && R.thick && v >= R.thick.max - 0.05) ? null : v; } });
-  define('depth', { slider: 'rng-wheel-depth', read: 'out-wheel-depth', unit: ' mm',
-    get: function (r) { return r.depth || 0; },
-    put: function (r, v) { r.depth = v < 0.05 ? 0 : v; } });
+  define('open', { slider: 'rng-wheel-open', read: 'out-wheel-open', unit: ' %',
+    fmt: function (v) { return v === null ? '—' : Math.round(v * 100) + ' %'; },
+    get: function (r) { return r.open || 0; },
+    put: function (r, v) { r.open = v < 0.005 ? 0 : v; } });
   define('lip', { slider: 'rng-wheel-lip', read: 'out-wheel-lip', unit: ' mm',
     get: function (r) { return r.lip ? r.lip.h : 0; },
     put: function (r, v) { r.lip = r.lip || { h: 0, at: 0.6, flare: 0.5 }; r.lip.h = v < 0.05 ? 0 : v; } });
@@ -205,7 +207,7 @@
     lastRanges = R;
     var th = R.thick || { min: 0, max: 0 };
     range(DEFS.thick, th.min, th.max, 0.1, th.why);
-    range(DEFS.depth, 0, R.push ? R.push.max : 0, 0.1, R.push && R.push.max <= 0 ? R.push.why : null);
+    range(DEFS.open, 0, R.open ? R.open.max : 0, 0.01, R.open && R.open.max <= 0 ? R.open.why : null);
     range(DEFS.lip, 0, R.lip ? R.lip.max : 0, 0.5, R.lip && R.lip.max <= 0 ? R.lip.why : null);
     var sw = R.pull ? R.pull.swing : 10;
     range(DEFS.pulldr, -sw, sw, 0.5);
@@ -265,6 +267,7 @@
     }
     draw(b.piece, m);
     readout('Preview - ' + describe(b, '') + '. Let go to set it.', b.notes.length > 0);
+    placeHandles();                  // the handles, and the ring of the slider in hand, ride the shape being shown
   }
 
   function set(only) {
@@ -297,30 +300,50 @@
 
   /* ------------------------------------------------------------ dragging on the piece
 
-     Handles on the piece write to the SAME draft recipe the sliders do, through the same
+     A handle on the piece writes to the SAME draft recipe the sliders do, through the same
      preview and the same Set, so a drag is one Undo step and the sliders move with it.
 
-       blue ball    on the top face of a ball or plate: drag DOWN to press it (Thick);
-                    hold Shift to open it instead (Deep)
-       cyan ball    on the cavity floor of an opened piece: drag down to go deeper (Deep)
-       yellow ball  on the wall at the Pull height: drag OUT or IN to pull (Pull), UP or
-                    DOWN to move where (Pull at)
-       green ball   on a pressed plate's rim: drag UP to lift it (Lip)
+     EVERY CONTROL SAYS WHERE IT IS. A handle is a ball of the colour of its slider rows (the
+     coloured edge on the left of the row), and the two light each other up:
 
-     They are round on the screen whatever the zoom, drawn on top, and picked by distance
-     from the cursor (the picked one wins; where two would sit on top of each other the
-     wall one steps aside). They sit on the camera's right-hand side of the piece, so a
-     radial drag runs along the screen's x; the mouse is turned into millimetres through
-     the camera's own projection at the handle (a 2x2 solve), so it holds from any angle.
-     The orbit is switched off for the length of a drag. The handles follow the camera
-     through OrbitControls' `change` event and are put away with the menu. */
+       hover a handle     its rows light, a tag names it and reads it, and a ring on the piece
+                          shows the place it acts on
+       hover or drag a    the handle it belongs to swells, the tag follows it, and the same
+       slider row         ring is drawn - on a slider with no handle (Scale, Wall, Soft...) the
+                          ring is all there is, and that is the point: it is where it works
+
+       blue   Flatten  on the top of a ball or plate: drag DOWN to press it
+       cyan   Open     on the top of a ball (off to the side, where a mouth would start), or on the
+                       rim of an opened piece: drag OUT to widen the mouth, and on the rim UP to
+                       add height there (Rim +)
+       yellow Pull     on the wall at the Pull height: drag OUT or IN to pull, UP or DOWN to move where
+       green  Lip      on a pressed plate's rim: drag UP to lift it
+       red    Trim     on the foot: drag UP to take more off the base
+
+     They are round on the screen whatever the zoom, drawn on top, and picked by distance from the
+     cursor (the picked one wins; where two would sit on top of each other the later one steps
+     aside). They sit on the camera's right-hand side of the piece, so a radial drag runs along
+     the screen's x; the mouse is turned into millimetres through the camera's own projection at the
+     handle (a 2x2 solve), so it holds from any angle. The orbit is switched off for the length of a
+     drag. The handles follow the camera through OrbitControls' `change` event and are put away
+     with the menu. */
   var HANDLE_PX = 7, HIT_PX = 14;
-  var HANDLE_COLOR = { thick: 0x38bdf8, deep: 0x22d3ee, wall: 0xfacc15, lip: 0x4ade80 };
+  var COLOR = { flatten: 0x38bdf8, open: 0x22d3ee, pull: 0xfacc15, lip: 0x4ade80, trim: 0xf87171, shape: 0xc4b5fd };
+  var HANDLE_COLOR = COLOR;
+  var HANDLE_NAME = { flatten: 'Flatten', open: 'Open', pull: 'Pull', lip: 'Lip', trim: 'Trim' };
+  /* which slider rows a handle belongs to, and the one whose ring it shows */
+  var HANDLE_ROWS = { flatten: ['thick'], open: ['open', 'rim'], pull: ['pulldr', 'pullz', 'wide'], lip: ['lip', 'lipat', 'flare'], trim: ['trim'] };
+  var HANDLE_KEY = { flatten: 'thick', open: 'open', pull: 'pullz', lip: 'lip', trim: 'trim' };
+  var ROW_GROUP = { scale: 'shape', wall: 'shape', thick: 'flatten', open: 'open', rim: 'open', lip: 'lip', lipat: 'lip', flare: 'lip',
+    pullz: 'pull', pulldr: 'pull', wide: 'pull', trim: 'trim' };
+  var ROW_ID = { scale: 'wh-row-scale', wall: 'wh-row-wall', thick: 'wh-row-flat', open: 'wh-row-open', lip: 'wh-row-lip', lipat: 'wh-row-lip-at',
+    flare: 'wh-row-flare', pullz: 'wh-row-pull-z', pulldr: 'wh-row-pull-dr', wide: 'wh-row-soft', trim: 'wh-row-trim', rim: 'wh-row-rim' };
   var HANDLE_HINT = {
-    thick: 'Drag the blue ball down to press it into a plate (hold Shift to open it instead)',
-    deep: 'Drag the cyan ball down to go deeper',
-    wall: 'Drag the yellow ball out or in to pull the wall - up or down to move where',
-    lip: 'Drag the green ball up to lift the rim'
+    flatten: 'Drag the blue ball down to press the piece flat',
+    open: 'Drag the cyan ball out to widen the mouth (on the rim of an opened piece, up to add height)',
+    pull: 'Drag the yellow ball out or in to pull the wall - up or down to move where',
+    lip: 'Drag the green ball up to lift the rim',
+    trim: 'Drag the red ball up to take more off the base'
   };
   var HG = null;            // { group, items: { kind: { mesh, kind, world, alpha, hidden } } }
   var DRAG = null;
@@ -335,15 +358,32 @@
     return { x: r.left + (p.x * 0.5 + 0.5) * r.width, y: r.top + (-p.y * 0.5 + 0.5) * r.height };
   }
 
+  /* The height on the outside where it is `r` wide, going down from the top - where a mouth of that radius would start. */
+  function surfaceZAt(outer, r) {
+    for (var i = outer.length - 1; i > 0; i--) {
+      var a = outer[i - 1], b = outer[i];
+      if (a.r <= r && b.r >= r && b.r > a.r) return a.z + (b.z - a.z) * (r - a.r) / (b.r - a.r);
+      if (b.r <= r && a.r >= r && a.r > b.r) return b.z + (a.z - b.z) * (a.r - r) / (a.r - b.r);
+    }
+    return outer[outer.length - 1].z;
+  }
+
   /* Where each handle goes on this piece: { kind, r, z, radial } in the profile's own terms. */
   function handleSpecs(piece, recipe) {
     var specs = [], opened = !!piece.inner && piece.ops.indexOf('open') >= 0;
-    var top = NSO_wheelTopZ(piece), span = NSO_wheelSpan(piece.outer);
-    if (opened) specs.push({ kind: 'deep', r: 0, z: piece.inner[0].z });
-    else specs.push({ kind: 'thick', r: 0, z: piece.inner ? piece.inner[0].z : top });
+    var top = NSO_wheelTopZ(piece), span = NSO_wheelSpan(piece.outer), R = lastRanges || {};
+    if (!piece.inner || (piece.inner && !opened)) specs.push({ kind: 'flatten', r: 0, z: piece.inner ? piece.inner[0].z : top });
+    if (opened) {
+      var q0 = piece.inner[piece.inner.length - 1];
+      specs.push({ kind: 'open', r: q0.r, z: q0.z, radial: true });
+    } else if (!piece.inner && R.open && R.open.max > 0) {
+      /* closed: off to the side of the top, where the mouth would start - never on top of Flatten */
+      var r0 = Math.max(0.35 * R.open.mouth / 2, 0);
+      specs.push({ kind: 'open', r: r0, z: surfaceZAt(piece.outer, r0), radial: true });
+    }
     var zf = (recipe.pull && recipe.pull.z != null) ? recipe.pull.z : 0.5;
     var zw = span.lo + zf * (span.hi - span.lo);
-    specs.push({ kind: 'wall', r: NSO_wheelRadiusAt(piece.outer, zw), z: zw, radial: true });
+    specs.push({ kind: 'pull', r: NSO_wheelRadiusAt(piece.outer, zw), z: zw, radial: true });
     if (!opened && piece.press && piece.press.c >= piece.press.h) {
       if (piece.inner && piece.ops.indexOf('lip') >= 0) {
         var q = piece.inner[piece.inner.length - 1];
@@ -352,11 +392,53 @@
         specs.push({ kind: 'lip', r: piece.press.c, z: top, radial: true });
       }
     }
+    var foot = NSO_wheelRadiusAt(piece.outer, span.lo + Math.max(0.5, 0.04 * (span.hi - span.lo)));
+    if (foot > 1) specs.push({ kind: 'trim', r: foot, z: span.lo, radial: true });
     return specs;
   }
 
+  /* The rings that say where a slider acts, in the profile's own terms: [{ r, z, k }], k = the group colour. */
+  function markerSpecs(key, piece, recipe) {
+    var out = [], g = ROW_GROUP[key] || 'shape';
+    var span = NSO_wheelSpan(piece.outer), top = NSO_wheelTopZ(piece), zLo = span.lo, H = span.hi - span.lo;
+    var i, widest = { r: 0, z: zLo };
+    for (i = 0; i < piece.outer.length; i++) if (piece.outer[i].r > widest.r) widest = piece.outer[i];
+    var oL = piece.outer[piece.outer.length - 1], iL = piece.inner ? piece.inner[piece.inner.length - 1] : null;
+    var opened = !!piece.inner && piece.ops.indexOf('open') >= 0;
+    var lipped = !!piece.inner && piece.ops.indexOf('lip') >= 0;
+    var R = lastRanges || {};
+    var flatZ = piece.inner ? piece.inner[0].z : top;
+    function add(r, z) { if (r > 0.05) out.push({ r: r, z: z, k: g }); }
+    var pz = recipe.pull && recipe.pull.z != null ? recipe.pull.z : 0.5, zw = zLo + pz * H;
+    switch (key) {
+      case 'scale': add(widest.r, widest.z); break;
+      case 'wall': if (opened && iL) { add(oL.r, oL.z); add(iL.r, iL.z); } else add(widest.r, widest.z); break;
+      case 'thick': add(piece.press ? piece.press.c : widest.r, flatZ); break;
+      case 'open':
+        if (opened && iL) add(iL.r, iL.z);
+        else if (R.open && R.open.max > 0) { var r0 = 0.35 * R.open.mouth / 2; add(r0, surfaceZAt(piece.outer, r0)); }
+        break;
+      case 'rim': if (piece.inner) add(oL.r, oL.z); break;
+      case 'lip': if (lipped && iL) add(iL.r, iL.z); else if (piece.press) add(piece.press.c, flatZ); break;
+      case 'lipat': case 'flare':
+        if (piece.press) add((recipe.lip && recipe.lip.at != null ? recipe.lip.at : 0.6) * piece.press.c, flatZ);
+        if (key === 'flare' && lipped && iL) add(iL.r, iL.z);
+        break;
+      case 'pullz': case 'pulldr': add(NSO_wheelRadiusAt(piece.outer, zw), zw); break;
+      case 'wide':
+        var tp = Math.max(1, (recipe.pull && recipe.pull.wide != null ? recipe.pull.wide : 0.4) * H);
+        [zw - tp, zw, zw + tp].forEach(function (zz) { if (zz > zLo + 0.01 && zz < span.hi - 0.01) add(NSO_wheelRadiusAt(piece.outer, zz), zz); });
+        break;
+      case 'trim': add(NSO_wheelRadiusAt(piece.outer, zLo + Math.max(0.5, 0.04 * H)), zLo); break;
+    }
+    return out;
+  }
+
   function removeHandles() {
+    var t0 = $('wheel-tag');
+    if (t0) t0.style.display = 'none';
     if (!HG) return;
+    removeMarkers();
     if (HG.group.parent) HG.group.parent.remove(HG.group);
     Object.keys(HG.items).forEach(function (k) {
       var it = HG.items[k];
@@ -366,6 +448,59 @@
     HG = null;
     hovered = null;
     if (cv() && !DRAG) cv().style.cursor = '';
+  }
+
+  /* Which slider row, if any, is being looked at or moved: a handle hovered or dragged, or a row hovered, focused or being dragged. */
+  var rowKey = null;
+  function activeKey() {
+    if (DRAG) return HANDLE_KEY[DRAG.kind];
+    if (hovered) return HANDLE_KEY[hovered];
+    return rowKey;
+  }
+  function activeKind() {
+    if (DRAG) return DRAG.kind;
+    if (hovered) return hovered;
+    var g = rowKey ? ROW_GROUP[rowKey] : null;
+    return g && HANDLE_ROWS[g] ? g : null;
+  }
+
+  function paintRows() {
+    var key = activeKey(), kind = activeKind();
+    var lit = {};
+    if (kind && HANDLE_ROWS[kind]) HANDLE_ROWS[kind].forEach(function (k) { lit[k] = true; });
+    else if (key) lit[key] = true;
+    Object.keys(ROW_ID).forEach(function (k) {
+      var row = $(ROW_ID[k]);
+      if (row) row.classList.toggle('wh-lit', !!lit[k]);
+    });
+  }
+
+  function rowText(k) {
+    var row = $(ROW_ID[k]), d = DEFS[k];
+    if (!row || !d) return '';
+    var rd = $(d.read);
+    return rd ? rd.textContent : '';
+  }
+
+  function tagEl() {
+    var t = $('wheel-tag');
+    if (!t) {
+      t = document.createElement('div');
+      t.id = 'wheel-tag';
+      t.className = 'wh-tag';
+      t.style.display = 'none';
+      document.body.appendChild(t);
+    }
+    return t;
+  }
+
+  function removeMarkers() {
+    if (!HG || !HG.markers) return;
+    HG.markers.forEach(function (m) {
+      if (m.parent) m.parent.remove(m);
+      m.geometry.dispose(); m.material.dispose();
+    });
+    HG.markers = [];
   }
 
   function placeHandles() {
@@ -387,14 +522,16 @@
       var inv = new THREE.Matrix4().copy(mesh.matrixWorld).invert();
       var loc = right.transformDirection(inv);
       var alpha = Math.atan2(-loc.z, loc.x);
-      var specs = handleSpecs(piece, DRAG ? DRAG.draftNow() : committed());
+      var recipe = DRAG ? DRAG.draftNow() : (draft || committed());
+      var specs = handleSpecs(piece, recipe);
       if (!HG) {
-        HG = { group: new THREE.Group(), items: {} };
+        HG = { group: new THREE.Group(), items: {}, markers: [] };
         HG.group.name = 'wheelHandles';
         state.scene.add(HG.group);
       }
       var rect = cv().getBoundingClientRect();
       var have = {};
+      var kindNow = activeKind(), keyNow = activeKey();
       specs.forEach(function (sp) {
         have[sp.kind] = true;
         var it = HG.items[sp.kind];
@@ -413,7 +550,7 @@
         it.mesh.position.copy(world);
         var dist = state.camera.position.distanceTo(world);
         var wpp = 2 * Math.tan(state.camera.fov * Math.PI / 360) * dist / rect.height;
-        var big = (hovered === sp.kind || (DRAG && DRAG.kind === sp.kind)) ? 1.4 : 1;
+        var big = (kindNow === sp.kind) ? 1.45 : 1;
         it.mesh.scale.setScalar(HANDLE_PX * wpp * big);
       });
       Object.keys(HG.items).forEach(function (k) {
@@ -423,18 +560,68 @@
         it.mesh.geometry.dispose(); it.mesh.material.dispose();
         delete HG.items[k];
       });
-      /* on a thin plate the wall and the rim are a few pixels apart: the wall steps aside */
-      var wall = HG.items.wall;
-      if (wall && !(DRAG && DRAG.kind === 'wall')) {
-        var sw = toScreen(wall.world);
-        ['lip', 'thick', 'deep'].forEach(function (k) {
-          var o = HG.items[k];
-          if (!o) return;
+      /* where two handles would sit on top of each other the later one steps aside (never the one being used) */
+      var ORDER = ['flatten', 'open', 'lip', 'pull', 'trim'];
+      ORDER.forEach(function (k, ix) {
+        var it = HG.items[k];
+        if (!it || (DRAG && DRAG.kind === k) || hovered === k) return;
+        var sk = toScreen(it.world);
+        for (var j = 0; j < ix; j++) {
+          var o = HG.items[ORDER[j]];
+          if (!o || o.hidden) continue;
           var so = toScreen(o.world);
-          if (Math.hypot(sw.x - so.x, sw.y - so.y) < 2.2 * HANDLE_PX) wall.hidden = true;
+          if (Math.hypot(sk.x - so.x, sk.y - so.y) < 2.2 * HANDLE_PX) { it.hidden = true; break; }
+        }
+      });
+      Object.keys(HG.items).forEach(function (k) { HG.items[k].mesh.visible = !HG.items[k].hidden; });
+
+      /* the ring that says where the slider being looked at acts */
+      removeMarkers();
+      var tagAt = null;
+      if (keyNow) {
+        var pos = new THREE.Vector3(), quat = new THREE.Quaternion(), scl = new THREE.Vector3();
+        mesh.matrixWorld.decompose(pos, quat, scl);
+        var flat = new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI / 2, 0, 0));
+        markerSpecs(keyNow, piece, recipe).forEach(function (ms, idx) {
+          var cl = new THREE.Vector3(cx, y0 + (ms.z - zLo), cz);
+          var cw = mesh.localToWorld(cl);
+          var dist2 = state.camera.position.distanceTo(cw);
+          var wpp2 = 2 * Math.tan(state.camera.fov * Math.PI / 360) * dist2 / rect.height;
+          var tube = 1.4 * wpp2 / Math.max(1e-6, scl.x);
+          var ring = new THREE.Mesh(new THREE.TorusGeometry(ms.r, tube, 6, 72),
+            new THREE.MeshBasicMaterial({ color: COLOR[ms.k] || COLOR.shape, depthTest: false, depthWrite: false, transparent: true, opacity: idx === 0 ? 0.95 : 0.6 }));
+          ring.renderOrder = 29;
+          ring.raycast = function () {};
+          ring.position.copy(cw);
+          ring.quaternion.copy(quat).multiply(flat);
+          ring.scale.copy(scl);
+          HG.group.add(ring);
+          HG.markers.push(ring);
+          if (idx === 0) tagAt = mesh.localToWorld(new THREE.Vector3(cx + ms.r * Math.cos(alpha), y0 + (ms.z - zLo), cz - ms.r * Math.sin(alpha)));
         });
       }
-      Object.keys(HG.items).forEach(function (k) { HG.items[k].mesh.visible = !HG.items[k].hidden; });
+      /* the tag: what it is and what it says, beside the handle (or the ring when the slider has no handle) */
+      var tag = tagEl();
+      if (keyNow && (kindNow ? HG.items[kindNow] && !HG.items[kindNow].hidden : true)) {
+        var anchor = (kindNow && HG.items[kindNow]) ? HG.items[kindNow].world : tagAt;
+        var text = '';
+        if (kindNow && HANDLE_ROWS[kindNow] && (DRAG || hovered)) {
+          text = HANDLE_NAME[kindNow] + '  ' + rowText(HANDLE_ROWS[kindNow][0]);
+          if (kindNow === 'pull') text += '  at ' + rowText('pullz');
+          if (kindNow === 'open' && recipe.rim > 0.04) text += '  + rim ' + rowText('rim');
+        } else {
+          var lab = $(ROW_ID[keyNow]) && $(ROW_ID[keyNow]).querySelector('label,.wh-preset');
+          text = (lab ? lab.textContent : keyNow) + '  ' + rowText(keyNow);
+        }
+        if (anchor) {
+          var sp2 = toScreen(anchor);
+          tag.textContent = text;
+          tag.style.display = 'block';
+          tag.style.left = Math.round(sp2.x + 14) + 'px';
+          tag.style.top = Math.round(sp2.y - 30) + 'px';
+        } else tag.style.display = 'none';
+      } else tag.style.display = 'none';
+      paintRows();
       if (typeof nsoWakeRender === 'function') nsoWakeRender(200);
     } catch (err) {
       if (typeof console !== 'undefined') console.warn('[wheel handles]', err);
@@ -479,14 +666,19 @@
   /* Edit a fresh copy of the recipe the drag started from - never incrementally, so nothing drifts. */
   function applyDrag(dx, dy) {
     var d = DRAG, mm = toMillimetres(d, dx, dy), r = NSO_wheelCloneRecipe(d.start), R = d.R || {};
-    if (d.kind === 'thick' && !d.shift) {
+    if (d.kind === 'flatten') {
       var th = R.thick || { min: 0, max: 0 };
       var st = d.start.thick == null ? th.max : d.start.thick;
       DEFS.thick.put(r, clampTo(st + mm.up, th.min, th.max), R);
-    } else if (d.kind === 'deep' || d.kind === 'thick') {
-      var mx = R.push ? R.push.max : 0;
-      DEFS.depth.put(r, clampTo((d.start.depth || 0) - mm.up, 0, mx));
-    } else if (d.kind === 'wall') {
+    } else if (d.kind === 'open') {
+      /* radial drag = the mouth: u is how open it is, the slider is u on a curve (NSO_wheelOpenP) */
+      var rmax = R.open && R.open.mouth ? R.open.mouth / 2 : 0;
+      if (rmax > 0) {
+        var u0 = NSO_wheelOpenU(d.start.open || 0);
+        DEFS.open.put(r, clampTo(NSO_wheelOpenP(clampTo(u0 + mm.rad / rmax, 0, 1)), 0, 1));
+      }
+      if (d.opened && R.rim) r.rim = clampTo((d.start.rim || 0) + mm.up, 0, R.rim.max);
+    } else if (d.kind === 'pull') {
       var sw = R.pull ? R.pull.swing : 10;
       r.pull.dr = clampTo((d.start.pull.dr || 0) + mm.rad, -sw, sw);
       r.pull.z = clampTo((d.start.pull.z == null ? 0.5 : d.start.pull.z) + mm.up / d.spanH, 0, 1);
@@ -494,6 +686,10 @@
       var lm = R.lip ? R.lip.max : 0;
       r.lip = r.lip || { h: 0, at: 0.6, flare: 0.5 };
       r.lip.h = clampTo((d.start.lip ? d.start.lip.h : 0) + mm.up, 0, lm);
+    } else if (d.kind === 'trim') {
+      var tm = R.trim ? R.trim.max : 0;
+      r.trim = clampTo((d.start.trim || 0) + mm.up, 0, tm);
+      if (r.trim < 0.05) r.trim = 0;
     }
     draft = r;
   }
@@ -538,7 +734,8 @@
     var ax = axesAt(it, m), a = ax.a, b = ax.b;
     var span = NSO_wheelSpan(NSO_wheelSession.outer);
     DRAG = {
-      kind: it.kind, shift: !!ev.shiftKey, start: NSO_wheelCloneRecipe(committed()), R: lastRanges,
+      kind: it.kind, opened: !!(NSO_wheelSession && NSO_wheelSession.inner && NSO_wheelSession.ops.indexOf('open') >= 0),
+      start: NSO_wheelCloneRecipe(committed()), R: lastRanges,
       x0: ev.clientX, y0: ev.clientY, a: a, b: b, det: a.x * b.y - b.x * a.y,
       spanH: Math.max(1, span.hi - span.lo), last: null, busy: false, dirty: false, pointerId: ev.pointerId,
       draftNow: function () { return draft || DRAG.start; }
@@ -651,7 +848,7 @@
     Object.keys(DEFS).forEach(function (k) { bind(DEFS[k]); });
     var f = $('btn-wheel-flatten'), o = $('btn-wheel-open');
     if (f) { f.dataset.nsoWired = '1'; f.addEventListener('click', function () { preset('thick', false); }); }
-    if (o) { o.dataset.nsoWired = '1'; o.addEventListener('click', function () { preset('depth', true); }); }
+    if (o) { o.dataset.nsoWired = '1'; o.addEventListener('click', function () { preset('open', true); }); }
     document.addEventListener('keydown', function (e) {
       if (e.key !== 'Escape') return;
       if (DRAG) { dragEnd(false); return; }
@@ -659,6 +856,23 @@
     });
     var menu = menuEl();
     if (menu) menu.addEventListener('toggle', function () { if (!menu.open) end(); else refresh(); });
+    /* a slider row and the place it acts on light each other: hover, focus, or a drag in progress */
+    var held = null;
+    Object.keys(ROW_ID).forEach(function (k) {
+      var row = $(ROW_ID[k]);
+      if (!row) return;
+      row.dataset.wh = ROW_GROUP[k] || 'shape';
+      function on() { if (rowKey !== k) { rowKey = k; placeHandles(); } }
+      function off() { if (held === k) return; if (rowKey === k) { rowKey = null; placeHandles(); } }
+      row.addEventListener('mouseenter', on);
+      row.addEventListener('mouseleave', off);
+      row.addEventListener('focusin', on);
+      row.addEventListener('focusout', function () { held = held === k ? null : held; off(); });
+      row.addEventListener('pointerdown', function () { held = k; on(); });
+    });
+    window.addEventListener('pointerup', function () {
+      if (held) { var k = held; held = null; var row = $(ROW_ID[k]); if (row && !row.matches(':hover') && !row.contains(document.activeElement) && rowKey === k) { rowKey = null; placeHandles(); } }
+    });
     bindDrag();
     setInterval(watch, 300);
     refresh();

@@ -197,11 +197,11 @@ function NSO_wheelDistToProfile(r, z, profile) {
     var len2 = dr * dr + dz * dz;
     var t = len2 > 0 ? (((r - ar) * dr + (z - az) * dz) / len2) : 0;
     if (t < 0) t = 0; else if (t > 1) t = 1;
-    var qr = ar + t * dr, qz = az + t * dz;
-    var d = Math.hypot(r - qr, z - qz);
+    var qr = ar + t * dr - r, qz = az + t * dz - z;
+    var d = qr * qr + qz * qz;
     if (d < best) best = d;
   }
-  return best;
+  return Math.sqrt(best);
 }
 
 /* =====================================================================
@@ -1811,7 +1811,7 @@ function NSO_wheelNewRecipe(ball) {
   return {
     base: null,
     ball: Object.assign({ height: undefined, radius: undefined, wall: undefined, nozzle: undefined }, ball || {}),
-    thick: null, depth: 0,
+    thick: null, open: 0,
     lip: { h: 0, at: 0.6, flare: 0.5 },
     pull: { z: 0.5, dr: 0, wide: 0.4 },
     trim: 0, rim: 0
@@ -1820,7 +1820,7 @@ function NSO_wheelNewRecipe(ball) {
 
 function NSO_wheelCloneRecipe(r) {
   return {
-    base: r.base, ball: Object.assign({}, r.ball), thick: r.thick, depth: r.depth,
+    base: r.base, ball: Object.assign({}, r.ball), thick: r.thick, open: r.open || 0,
     lip: Object.assign({ h: 0, at: 0.6, flare: 0.5 }, r.lip || {}),
     pull: Object.assign({}, r.pull), trim: r.trim, rim: r.rim
   };
@@ -1929,6 +1929,255 @@ function NSO_wheelOpenKeep(piece, opts) {
   return g;
 }
 
+/* ------------------------------------------------------------ 7a2. OPEN, SOFT
+
+   The Wheel's Open. NSO_wheelOpen / NSO_wheelOpenKeep above are the strict move: they
+   open the piece AS WIDE AS THE WALL ALLOWS and throw the dome away, so ANY opening - 0.1 mm of it -
+   is the whole bowl, with the dome stood up as straight walls. On a slider that is a cliff: a squished
+   ball became a vase bottom in the first pixel, and a Flatten drag past the point where a disc can hold a cavity
+   did the same.
+
+   Soft Open is ONE family with no cliff in it, from the closed piece (u = 0) to the widest bowl the
+   wall allows (u = 1):
+
+     mouth     u of the widest mouth the shape can hold. The rim sits where the outside is as wide as
+               the mouth needs (on the dome of a ball; on the flat top of a plate, which keeps its top),
+     depth     u of the way from the rim down to the floor the wall allows - the cavity is a dimple
+               (an ellipsoid, round like a thumb) that turns into the bowl's own inside as u -> 1,
+     the clay  the whole shell is scaled up, about the middle of its base, until the volume is what it was.
+               The clay the cavity and the cut-off dome displaced does not vanish - the piece grows, the way a
+               pressed disc's diameter does - so a ball opens to a ROUND bowl, not a tube, and Wall (which is
+               never scaled) is the lever for how thin it is.
+
+   Every quantity goes to zero as u goes to zero, so the piece before the first opening and after it are the
+   same piece to within a dimple. Pure; the strict API is untouched. */
+var NSO_WHEEL_SOFT_MIN_MOUTH = 0.2;
+/* The slider is not u itself: the clay a mouth needs grows with the CUBE of how open it is, so the last tenth of a
+   linear slider doubled the bowl. This eases the end - u = 1 - (1 - p)^1.5 - so equal drags change the piece by
+   comparable amounts. */
+var NSO_WHEEL_OPEN_CURVE = 1.5;
+function NSO_wheelOpenU(p) {
+  p = Math.max(0, Math.min(1, p));
+  return 1 - Math.pow(1 - p, NSO_WHEEL_OPEN_CURVE);
+}
+function NSO_wheelOpenP(u) {            // and back: a drag on the mouth is in u, the slider is in p
+  u = Math.max(0, Math.min(1, u));
+  return 1 - Math.pow(1 - u, 1 / NSO_WHEEL_OPEN_CURVE);
+}      // mm of mouth radius below which there is nothing to open
+
+function NSO_wheelSoftPrep(outer) {
+  var n = outer.length, r = new Float64Array(n), z = new Float64Array(n), iw = 0, i;
+  for (i = 0; i < n; i++) { r[i] = outer[i].r; z[i] = outer[i].z; }
+  for (i = 0; i < n; i++) if (r[i] >= r[iw] - 1e-9) iw = i;
+  return { n: n, r: r, z: z, iw: iw };
+}
+
+/* Distance from (r, z) to the outside cut off at the point g along it (g = segment + fraction). */
+function NSO_wheelSoftCut(pp, g) {
+  var seg = Math.min(Math.floor(g), pp.n - 2), t = g - seg;
+  return { seg: seg, r: pp.r[seg] + t * (pp.r[seg + 1] - pp.r[seg]), z: pp.z[seg] + t * (pp.z[seg + 1] - pp.z[seg]) };
+}
+function NSO_wheelSoftDist(pp, cut, r, z) {
+  var best = Infinity, i, ar, az, br, bz, dr, dz, len2, t, qr, qz, d;
+  for (i = 0; i <= cut.seg; i++) {
+    ar = pp.r[i]; az = pp.z[i];
+    if (i < cut.seg) { br = pp.r[i + 1]; bz = pp.z[i + 1]; } else { br = cut.r; bz = cut.z; }
+    dr = br - ar; dz = bz - az;
+    len2 = dr * dr + dz * dz;
+    t = len2 > 0 ? (((r - ar) * dr + (z - az) * dz) / len2) : 0;
+    if (t < 0) t = 0; else if (t > 1) t = 1;
+    qr = ar + t * dr - r; qz = az + t * dz - z;
+    d = qr * qr + qz * qz;
+    if (d < best) best = d;
+  }
+  return Math.sqrt(best);
+}
+
+/* The widest mouth a rim at g can have: the largest radius at the rim's height that is a wall's thickness
+   from the rest of the outside. -1 where there is no room. */
+function NSO_wheelSoftMouth(pp, g, wall) {
+  var cut = NSO_wheelSoftCut(pp, g);
+  if (NSO_wheelSoftDist(pp, cut, 0, cut.z) < wall) return -1;
+  var lo = 0, hi = cut.r;
+  for (var i = 0; i < 26; i++) {
+    var mid = 0.5 * (lo + hi);
+    if (NSO_wheelSoftDist(pp, cut, mid, cut.z) >= wall) lo = mid; else hi = mid;
+  }
+  return lo;
+}
+
+/* Where along the outside the rim can be widest, and how wide: { g, rho } or null. The mouth is -1 where there is no
+   room (too near the base), so on a plate it JUMPS from -1 to its widest at the foot of the edge: a coarse scan finds
+   where, the jump is bisected to its edge, and a golden-section pass polishes a smooth peak (a ball's equator). */
+function NSO_wheelSoftReach(pp, wall) {
+  var lo = pp.iw, hi = pp.n - 1, m = 24, k, g, v, fs = [], gs = [];
+  var best = -2, bg = lo;
+  function note(gg, vv) { if (vv > best) { best = vv; bg = gg; } }
+  for (k = 0; k <= m; k++) {
+    g = lo + (hi - lo) * k / m;
+    v = NSO_wheelSoftMouth(pp, g, wall);
+    gs.push(g); fs.push(v); note(g, v);
+  }
+  if (!(best > 0)) return null;
+  for (k = 1; k <= m; k++) {
+    if (fs[k - 1] <= 0 && fs[k] > 0) {
+      var ga0 = gs[k - 1], gb0 = gs[k];
+      for (var q = 0; q < 28; q++) {
+        var gq = 0.5 * (ga0 + gb0);
+        if (NSO_wheelSoftMouth(pp, gq, wall) > 0) gb0 = gq; else ga0 = gq;
+      }
+      note(gb0, NSO_wheelSoftMouth(pp, gb0, wall));
+    }
+  }
+  var kb = Math.round((bg - lo) / (hi - lo) * m);
+  var a = gs[Math.max(0, kb - 1)], b = gs[Math.min(m, kb + 1)], gr = 0.6180339887;
+  var c = b - gr * (b - a), d = a + gr * (b - a), fc = NSO_wheelSoftMouth(pp, c, wall), fd = NSO_wheelSoftMouth(pp, d, wall);
+  note(c, fc); note(d, fd);
+  for (k = 0; k < 18; k++) {
+    if (fc > fd) { b = d; d = c; fd = fc; c = b - gr * (b - a); fc = NSO_wheelSoftMouth(pp, c, wall); note(c, fc); }
+    else { a = c; c = d; fc = fd; d = a + gr * (b - a); fd = NSO_wheelSoftMouth(pp, d, wall); note(d, fd); }
+  }
+  g = bg; v = best;
+  /* The widest mouth is not always a usable one: on a plate it is at the very foot of the edge, a wall above the
+     base, where there is no depth to open. Take the HIGHEST rim that is within 1% of the widest - on a ball that is
+     a hair up the dome, on a plate it is the top face. */
+  var floorMouth = v * 0.99, ga = g, gb = hi;
+  if (NSO_wheelSoftMouth(pp, gb, wall) < floorMouth) {
+    for (k = 0; k < 32; k++) {
+      var gm = 0.5 * (ga + gb);
+      if (NSO_wheelSoftMouth(pp, gm, wall) >= floorMouth) ga = gm; else gb = gm;
+    }
+    g = ga;
+  } else g = gb;
+  v = NSO_wheelSoftMouth(pp, g, wall);
+  return v > 0 ? { g: g, rho: v } : null;
+}
+
+/* The opened piece at one scale of the outside (the wall is not scaled). { outer, inner, rho, rimZ, floorZ } or null. */
+function NSO_wheelSoftShape(outerPts, wall, u) {
+  var pp = NSO_wheelSoftPrep(outerPts);
+  var reach = NSO_wheelSoftReach(pp, wall);
+  if (!reach || !(reach.rho > NSO_WHEEL_SOFT_MIN_MOUTH)) return null;
+  var rho = u * reach.rho, g = reach.g, i, k;
+  if (rho < NSO_WHEEL_SOFT_MIN_MOUTH) return null;
+  if (u < 1 - 1e-9) {
+    var lo = reach.g, hi = pp.n - 1;
+    for (k = 0; k < 34; k++) {
+      var mid = 0.5 * (lo + hi);
+      if (NSO_wheelSoftMouth(pp, mid, wall) >= rho) lo = mid; else hi = mid;
+    }
+    g = lo;
+  }
+  var cut = NSO_wheelSoftCut(pp, g);
+  var trunc = [];
+  for (i = 0; i <= cut.seg; i++) trunc.push({ z: pp.z[i], r: pp.r[i] });
+  trunc.push({ z: cut.z, r: cut.r });
+  var zlo = pp.z[0], zl = zlo, zh = cut.z;
+  for (k = 0; k < 30; k++) {
+    var zm = 0.5 * (zl + zh);
+    if (NSO_wheelSoftDist(pp, cut, 0, zm) >= wall) zh = zm; else zl = zm;
+  }
+  var nat = zh, depth = u * (cut.z - nat), floorZ = cut.z - depth;
+  if (!(depth > 0.05)) return null;
+  var zs = [], m = 22, phi;
+  for (k = 0; k <= m; k++) {
+    phi = (Math.PI / 2) * k / m;
+    zs.push(floorZ + depth * (1 - Math.cos(phi)));
+    zs.push(floorZ + depth * k / m);
+  }
+  zs.sort(function (a, b) { return a - b; });
+  /* a thumb's ellipsoid for a small opening, squaring off into the bowl's own inside as u -> 1 */
+  var pw = 2 + 12 * Math.pow(u, 4);
+  var inner = [{ z: floorZ, r: 0 }], last = floorZ;
+  for (k = 1; k < zs.length; k++) {
+    var z = Math.min(zs[k], cut.z);
+    if (z <= last + 1e-6) continue;
+    var h = (z - floorZ) / depth;
+    var dish = rho * Math.pow(Math.max(0, 1 - Math.pow(Math.max(0, 1 - h), pw)), 1 / pw);
+    var ri = NSO_wheelInnerAt(trunc, z, wall, 22);
+    if (ri < 0) ri = 0;
+    inner.push({ z: z, r: Math.min(rho, dish, ri) });
+    last = z;
+  }
+  if (inner.length < 3) return null;
+  return { outer: trunc, inner: inner, rho: rho, rhoMax: reach.rho, rimZ: cut.z, floorZ: floorZ, depth: cut.z - floorZ };
+}
+
+function NSO_wheelScaleOuter(outer, s) {
+  var z0 = outer[0].z;
+  return outer.map(function (q) { return { z: z0 + (q.z - z0) * s, r: q.r * s }; });
+}
+
+/* How wide a mouth this closed piece could be given, or why not. */
+function NSO_wheelOpenReach(piece) {
+  if (piece.inner) return { ok: false, reason: 'this piece is already open' };
+  var floor = NSO_wheelFloor(piece.nozzle);
+  if (piece.wall < floor) {
+    return { ok: false, reason: 'a ' + piece.wall.toFixed(3) + ' mm wall is under the ' + floor.toFixed(3) +
+      ' mm nozzle floor - nothing opened that thin could be printed' };
+  }
+  var reach = NSO_wheelSoftReach(NSO_wheelSoftPrep(piece.outer), piece.wall);
+  /* a mouth is not enough: the cavity needs a floor a wall above the base AND a rim above that - a plate two walls
+     thick has the first and not the second */
+  var full = reach && reach.rho > NSO_WHEEL_SOFT_MIN_MOUTH ? NSO_wheelSoftShape(piece.outer, piece.wall, 1) : null;
+  if (!full) {
+    return { ok: false, reason: 'a ' + piece.wall.toFixed(2) + ' mm wall leaves no room for a mouth in this shape - ' +
+      'press it less, or ask for a thinner wall' };
+  }
+  return { ok: true, rho: reach.rho, mouth: 2 * reach.rho, depth: full.depth };
+}
+
+/* OPEN, softly, keeping the clay. opts: u (0..1, default 1). */
+function NSO_wheelOpenSoft(piece, opts) {
+  opts = opts || {};
+  var u = Math.max(0, Math.min(1, typeof opts.u === 'number' ? opts.u : 1));
+  var rc = NSO_wheelOpenReach(piece);
+  if (!rc.ok) return { ok: false, piece: piece, reason: rc.reason };
+  var V0 = NSO_wheelVolume(piece), tgt = V0 * (1 - 1e-7), wall = piece.wall;
+  function at(s) {
+    var sh = NSO_wheelSoftShape(s === 1 ? piece.outer : NSO_wheelScaleOuter(piece.outer, s), wall, u);
+    if (!sh) return null;
+    sh.s = s; sh.V = NSO_wheelVolume({ outer: sh.outer, inner: sh.inner });
+    return sh;
+  }
+  var a = at(1);
+  /* below a dimple's worth the piece is simply not opened yet - not a refusal, there is just nothing to show */
+  if (!a) return { ok: true, piece: piece, u: u, tiny: true, reason: '', budget: NSO_wheelBudget(piece) };
+  var best = a;
+  if (a.V < tgt) {
+    var s0 = 1, e0 = a, s1 = Math.pow(tgt / a.V, 1 / 3), e1 = at(s1), it = 0;
+    while (e1 && it < 16) {
+      it++;
+      best = e1;
+      if (e1.V <= V0 && V0 - e1.V < 3e-7 * V0) break;
+      var p = Math.log(e1.V / e0.V) / Math.log(s1 / s0);
+      if (!(p > 0.3 && p < 8)) p = 3;
+      var s2 = s1 * Math.pow(tgt / e1.V, 1 / p);
+      if (!(s2 > 0) || s2 > 1e3) break;
+      var e2 = at(s2), tries = 0;
+      while (!e2 && tries++ < 6) { s2 = 0.5 * (s1 + s2); e2 = at(s2); }
+      if (!e2) { e1 = null; break; }
+      s0 = s1; e0 = e1; s1 = s2; e1 = e2;
+    }
+    if (!e1 || best.V > V0) {
+      return { ok: false, piece: piece, reason: 'Open could not keep the clay - open less' };
+    }
+  }
+  var cand = {
+    outer: NSO_wheelTidy(best.outer), inner: NSO_wheelTidy(best.inner),
+    nozzle: piece.nozzle, wall: piece.wall, segments: piece.segments,
+    target: piece.target, sizing: piece.sizing,
+    budget: { start: piece.budget.start, added: piece.budget.added, trimmed: piece.budget.trimmed },
+    ops: piece.ops.concat(['open'])
+  };
+  var g = NSO_wheelGate(piece, cand, 'Opening');
+  if (!g.ok) return g;
+  g.u = u; g.s = best.s; g.mouth = 2 * best.rho; g.mouthMax = 2 * best.rhoMax; g.depth = best.depth;
+  g.reason = 'Opened ' + (u * 100).toFixed(0) + '% - a ' + g.mouth.toFixed(1) + ' mm mouth, ' + best.depth.toFixed(1) +
+    ' mm deep, the shell grown x' + best.s.toFixed(2) + ' to keep the clay';
+  return g;
+}
+
 function NSO_wheelFirstSentence(reason) {
   var i = reason.indexOf(' - ');
   return i > 0 ? reason.slice(0, i) : reason;
@@ -1936,7 +2185,7 @@ function NSO_wheelFirstSentence(reason) {
 
 /* Build the form a recipe describes. Never refuses a stage that has a smaller
    version of itself: it clamps, and says so. Returns
-     { ok, piece, notes: [..], ranges: { thick, push, pull, trim, rim }, ball: <reason> }
+     { ok, piece, notes: [..], ranges: { thick, open, pull, trim, rim }, ball: <reason> }
    or { ok: false, reason } if there is no ball to start from.               */
 function NSO_wheelBuild(recipe) {
   var notes = [], R = {}, piece, ballReason = '';
@@ -1966,25 +2215,25 @@ function NSO_wheelBuild(recipe) {
     if (recipe.thick != null) notes.push('Thick: this piece is already open');
   }
 
-  /* 2. OPEN */
+  /* 2. OPEN: one soft family from closed (0) to the widest bowl the wall allows (1) */
   if (!piece.inner) {
-    var o0 = NSO_wheelOpen(piece, {});
-    if (o0.ok) {
-      R.push = { max: o0.depth };
-      if (recipe.depth > 1e-9) {
-        var push = Math.min(recipe.depth, o0.depth);
-        var ok = NSO_wheelOpenKeep(piece, push >= o0.depth - 1e-9 ? {} : { depth: push });
-        if (ok.ok) {
-          piece = ok.piece;
-          if (recipe.depth > o0.depth + 1e-6) notes.push('Deep limited to ' + o0.depth.toFixed(1) + ' mm - the most this shape takes');
-        } else notes.push(NSO_wheelFirstSentence(ok.reason));
+    var rc = NSO_wheelOpenReach(piece);
+    if (rc.ok) {
+      R.open = { max: 1, mouth: rc.mouth };
+      if (recipe.open > 1e-9) {
+        var os = NSO_wheelOpenSoft(piece, { u: NSO_wheelOpenU(recipe.open) });
+        if (os.ok) {
+          piece = os.piece;
+          if (os.s) R.open.scale = os.s;
+          if (recipe.open > 1 + 1e-6) notes.push('Open limited to 100%');
+        } else notes.push('Open: ' + NSO_wheelFirstSentence(os.reason));
       }
     } else {
-      R.push = { max: 0, why: o0.reason };
-      if (recipe.depth > 1e-9) notes.push('Deep: ' + NSO_wheelFirstSentence(o0.reason));
+      R.open = { max: 0, why: rc.reason };
+      if (recipe.open > 1e-9) notes.push('Open: ' + NSO_wheelFirstSentence(rc.reason));
     }
   } else {
-    R.push = { max: 0, why: 'already open' };
+    R.open = { max: 0, why: 'already open' };
   }
 
   /* 2b. LIP: the edge of a pressed plate lifted into a rim. A plate that is open is
