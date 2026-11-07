@@ -4,8 +4,9 @@
 > SELECT ticket, `docs/GSCOPE-SELECT.md`). Lift is worked on the plate; the sections
 > below that describe the read-only G-scope row are history.
 
-**Where Lift is worked (section 7):** on the plate, from the Subtract card's
-**Lift** verb (`app-lift-plate.js`). G-scope's row is **Features**, read-only:
+**Where Lift is worked (section 7):** on the plate, from the Crop card's
+**Lift** button (`app-lift-plate.js`; it was in the Subtract card until 2026-11-07,
+and **Detach flange** is part of it now, in its panel). G-scope's row is **Features**, read-only:
 it shows what Lift would find and nothing else. Sections 2 and 5's "In
 G-scope" describe the G-scope controls Lift had before; the engine they
 describe (`nso_lift.js`, `nso_lift_auto.js`, `nso_lift_curved.js`) is
@@ -475,7 +476,7 @@ Every other Lift 2 and Phase 1 gate is as it was.
 - A lifted piece keeps the curved back it came off with; flattening it for
   printing is not done.
 
-## 7. Lift on the plate - the Subtract card
+## 7. Lift on the plate - the Crop card
 
 Lift moved out of G-scope onto the plate. The engine is unchanged; this is
 only where and how it is driven. `app-lift-plate.js` (`window.NSO_LIFT_PLATE`),
@@ -487,7 +488,14 @@ share).
 
 ### The verb
 
-**Subtract -> Lift.** Arming it on a selected piece runs detection once: the
+**Crop -> Lift.** The button runs the width of the card, like CROP; pressing it opens
+its panel in the card (the count of what was found, *How far out counts*, Strip, and
+Detach flange with its readout) and pressing it again folds the panel away and puts
+Lift down. Pressing Lift puts any Crop shape away, and picking a shape puts Lift
+away - both want the click on a piece - and shutting the Crop card folds Lift
+away too. A piece Lift left in the air can still be grabbed and dropped while the
+card is open (app-core's `startMoveDrag` makes that one exception to "close the
+cutter to move pieces"). Arming it on a selected piece runs detection once: the
 rolling ball of section 5 (`NSO_LiftAuto.analyse`, `{ curved: true }`, so a
 curved base is section 6's fill), looking straight down onto the piece - the
 world's up carried into its raw frame, raw +Z for a piece lying as it was

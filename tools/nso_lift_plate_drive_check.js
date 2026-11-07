@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* Lift on the plate - the Subtract card's LIFT, driven through the REAL app
+/* Lift on the plate - the Crop card's LIFT, driven through the REAL app
    in headless Chromium at 1280 x 800.
 
      node tools/nso_lift_plate_drive_check.js                      exit 0 = every gate held
@@ -11,7 +11,7 @@
    plate: a line, a plant of 12 parts, 20 dots) and goes in through the app's
    own Import. Every hover and click is a real pointer event on the main
    canvas at the screen point of a triangle the app drew; every button and
-   tick box is a real click in the Subtract card.
+   tick box is a real click in the Crop card.
 
      1. arm Lift on the selected plate: detection runs once, the card says
         "22 features found"; arming again is the cache
@@ -40,6 +40,7 @@ const AFX = require('./nso_lift_auto_fixtures.js');
 const L = require('./nso_lift_plate_drive_lib.js');
 const { rawTriNear, status, readout, card, raw, plateState, pieceInfo, overlaps, frameOn, hoverTri, clickTri, ctrlZ, waitRead, featureOf, selectRow } = L;
 const C = L.makeCheck(), check = C.check;
+L.setClearOfCard(true);    // Lift is in the Crop card, which stands over the left of the view
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'nso-lift-plate-drive-'));
 const KEEP = !!process.argv[2];
@@ -90,8 +91,8 @@ withApp(async (page, logs) => {
   check('the Barocke plate came in through Import', SRC.length === BAR.soup.length, SRC.length / 9 + ' triangles');
   await selectRow(page, plateId);
   const c0 = await card(page);
-  check('Lift is a verb in the Subtract card, off, its panel hidden', !c0.armed && !c0.panel &&
-    await page.evaluate(() => !!document.querySelector('#menu-bit #btn-lift')));
+  check('Lift is a button in the Crop card, off, its panel hidden', !c0.armed && !c0.panel &&
+    await page.evaluate(() => !!document.querySelector('#menu-crop #btn-lift') && !document.querySelector('#menu-bit #btn-lift')));
   const t0 = Date.now();
   await page.click('#btn-lift');
   await page.waitForFunction(() => /features? found|nothing read/.test(document.getElementById('lift-count').textContent), null, { timeout: 60000 });

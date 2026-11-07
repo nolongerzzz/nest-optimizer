@@ -28,7 +28,7 @@
      4. The panel: always visible, never a drop-down, untouched by every
         drop-down and by leaving the tool; Clone and Snap work from it.
      5. Each plain button does what it did: the locks, Undo, Remove, Clear
-        plate, Optimize, X-ray, Eye, ◎, G-scope, Lift (in Subtract) opening
+        plate, Optimize, X-ray, Eye, ◎, G-scope, Lift (in Crop) opening
         G-scope at its row, Measure (in its row drop-down), Check piece (in
         Check & repair), and the Findings card docks under the panel.
      6. Every control the shell had before v3 (listed below by id, from
@@ -77,7 +77,7 @@ const GROUPS = [
    aria-labels, ◎ by itself. */
 const ICON = { 'btn-xray': 'X', 'btn-watch': '\u{1F441}', 'btn-frame-view': '◎' };
 // Gone from the shell as buttons. Their contents moved (RETIRED below);
-// Lift is not gone - it is Subtract's Lift verb (btn-lift), not a slab.
+// Lift is not gone - it is the Crop card's Lift button (btn-lift), not a slab.
 const GONE = ['menu-bend', 'menu-plates', 'menu-pack', 'btn-shell-supports', 'btn-shell-slice'];
 const NOT_SLABS = ['btn-lift'];
 const ALL = ROW.concat(RIGHT, UNDER.map(([id, l]) => [id, l]), ...GROUPS);
@@ -98,9 +98,10 @@ const HOLDS = {
   'menu-export': ['export-format', 'btn-export-model', 'btn-library-save', 'btn-export-stl', 'btn-delete-model'],
   'menu-scale': ['scale-card', 'scale-factor', 'scale-target', 'btn-scale-fit'],
   'menu-cut': ['edit-card', 'cut-miter-dial', 'cut-slider', 'cut-mm', 'btn-cut'],
-  // CROP: the Shape row, one readout, CROP, Cancel (Detach moved to Subtract, Reattach to Connect)
+  // CROP: the Shape row (Box ... Lasso), one readout, CROP, Cancel - then Lift, whose panel holds Strip and Detach flange (Reattach is in Connect)
   'menu-crop': ['crop-card', 'crop-shape-row', 'btn-crop-shape-box', 'btn-crop-shape-cylinder', 'btn-crop-shape-sphere',
-                'btn-crop-shape-piece', 'btn-crop-shape-outline', 'crop-readout', 'btn-crop', 'btn-crop-cancel'],
+                'btn-crop-shape-piece', 'btn-crop-shape-outline', 'btn-crop-shape-lasso', 'crop-readout', 'btn-crop', 'btn-crop-cancel',
+                'btn-lift', 'lift-panel', 'btn-detach'],
   // CONNECT: the builder, and Reattach as its last row (it moved here from the Crop card)
   'menu-connect': ['connect-panel', 'btn-reattach'],
   // JOIN: one card - the toggle, A, A-B gap, B, B-C gap, C, JOIN, Cancel
@@ -114,9 +115,9 @@ const HOLDS = {
   // ADD: Fill/Densify · Foam · Thicken out · Thicken in (a live ghost: the slider, Set, Cancel in its panel) · Extend · Bridge
   'menu-add': ['btn-fill', 'btn-foam', 'foam-panel', 'btn-thicken-out', 'btn-thicken-in', 'thicken-panel',
                'btn-extend', 'inp-extend-mm', 'btn-bridge', 'bridge-panel'],
-  // SUBTRACT: Subtract B from A · Extract bit · Hollow · Hollow to safe min · Lift (Carve is in Sculpt)
+  // SUBTRACT: Subtract B from A · Extract bit · Hollow · Hollow to safe min (Carve is in Sculpt; Lift, with Detach flange, is in Crop)
   'menu-bit': ['btn-subtract', 'btn-extract-bit', 'btn-hollow', 'inp-hollow-mm',
-               'btn-hollow-safe', 'btn-lift', 'lift-panel', 'btn-detach'],
+               'btn-hollow-safe'],
   // TEXT: the card is the menu - the text box, Font, Bold / Italic / Font file, Size, Depth, Angle, Mirror, the readout, STAMP, Cancel
   'menu-text': ['text-card', 'inp-text', 'sel-text-font', 'btn-text-bold', 'btn-text-italic', 'btn-text-font-file', 'inp-text-size',
                 'inp-text-depth', 'inp-text-angle', 'chk-text-mirror', 'text-readout', 'btn-text-go', 'btn-text-cancel',
@@ -137,14 +138,13 @@ const HOLDS = {
   'menu-repair': ['btn-check-defects', 'btn-cap-open', 'chk-seal-repair', 'btn-seal', 'chk-non-solid', 'btn-solidify']
 };
 /* SUBTRACT is a plain run of buttons, one tool after another, like the other cards: the
-   tool, its label, and the ids it holds. Detach flange is part of Lift.
+   tool, its label, and the ids it holds. (Lift moved to the Crop card, with Detach flange in its panel.)
    tools/nso_subtract_card_drive_check.js holds every control. */
 const SUBTRACT_SECTIONS = [
   [null, 'SUBTRACT B FROM A', ['btn-subtract']],
   [null, 'EXTRACT BIT', ['btn-extract-bit']],
   [null, 'PUNCH', ['btn-punch', 'punch-card']],
   [null, 'HOLLOW', ['btn-hollow', 'inp-hollow-mm', 'inp-hollow-slider', 'btn-hollow-safe']],
-  [null, 'LIFT', ['btn-lift', 'lift-panel', 'btn-detach']],
   [null, 'SPLIT TO PARTS', ['btn-split-parts']]
 ];
 const ORDERED = ['menu-shape', 'menu-add', 'menu-bit', 'menu-surface', 'menu-repair'];
@@ -179,8 +179,8 @@ const BEFORE = ['menu-import', 'file-input', 'btn-load-stl', 'btn-library', 'men
   'btn-scale-dim', 'btn-scale-fit', 'menu-cut', 'cut-miter-dial', 'cut-miter-deg', 'btn-cut-square', 'cut-slider',
   'btn-cut-nudge-m', 'cut-mm', 'btn-cut-nudge-p', 'btn-cut', 'btn-cut-right-side-out', 'menu-crop', 'edit-axis',
   /* The Crop card's axis buttons, box fields, Lift and Move controls are gone: one tool, a shape dragged to
-     size (docs/CROP.md says where each job went). The ids that stay are the card's own, and Detach flange and
-     Reattach, which moved to the Subtract and Connect cards under the same ids. */
+     size (docs/CROP.md says where each job went). The ids that stay are the card's own, and Detach flange, which
+     is part of the Lift button of this card, and Reattach, in the Connect card, under the same ids. */
   'btn-crop', 'btn-detach', 'btn-reattach', 'menu-joins', 'join-horizontal', 'join-slot-a', 'join-gap-ab-on', 'join-gap-ab',
   'join-slot-b', 'join-gap-bc-on', 'join-gap-bc', 'join-slot-c', 'btn-join', 'btn-join-clear',
   'btn-lift', 'menu-seat', 'btn-seat-support', 'seat-gap', 'btn-seat-here', 'chk-oversize-washer', 'oversize-gap',
@@ -232,6 +232,7 @@ const RETIRED = {
    is a failure, not a pass. */
 const OWN_STATE = {
   'move-vert-slider': 'Move > Vertical on',
+  'btn-detach': 'Lift on (Detach flange is in the Lift panel, which opens with the Lift button)',
   'inp-thicken-mm': 'Thicken out / in armed (the slider is in the live panel)',
   'cooling-profile': 'Export format 3MF',
   'scale-length': 'a section the reader names', 'btn-scale-length': 'ditto', 'scale-width': 'ditto',
@@ -383,7 +384,7 @@ withApp(async (page, logs) => {
     check('no drop-down mark on any face', geo._marks.length === 0, geo._marks.length + ' found');
     check('Bend, Plate, Pack, Supports and Slice settings are not buttons any more', geo._gone.length === 0,
       geo._gone.join(', ') || GONE.join(', '));
-    check('Lift is a button in a card, not a column slab', geo._notSlabs.length === 0, geo._notSlabs.join(', ') || 'in Subtract');
+    check('Lift is a button in a card, not a column slab', geo._notSlabs.length === 0, geo._notSlabs.join(', ') || 'in Crop');
     const cut = ALL.filter(([id]) => geo[id] && geo[id].cut).map(([id]) => id);
     check('no label is cut off or spills out of its slab at 1280 x 800', cut.length === 0, cut.join(', ') || 'none');
 
@@ -685,7 +686,7 @@ withApp(async (page, logs) => {
     const fv = await page.evaluate(() => ({ cam: state.camera.position.toArray(), status: document.getElementById('status').textContent }));
     check('◎ frames the view', c.ok && fv.cam.some((v, i) => Math.abs(v - cam0[i]) > 1), fv.status);
 
-    // G-scope, then Lift (in Subtract): on the plate, not a way into G-scope.
+    // G-scope, then Lift (in Crop): on the plate, not a way into G-scope.
     const gs = async () => page.evaluate(() => {
       const panel = document.getElementById('microscope');
       // the viewport is what G-scope draws on (its old Features row stood in for it, and left G-scope)
@@ -713,13 +714,18 @@ withApp(async (page, logs) => {
     check('SUBTRACT is a plain run of buttons: no collapsing sections, each tool\'s button showing when the card opens',
       secs.sections === 0 && secs.hidden.length === 0, JSON.stringify(secs));
     check('...and every control the card had is still on it', secs.missing.length === 0, JSON.stringify(secs.missing));
+    check('...and Lift, with Detach flange, is not on it', await page.evaluate(() => !document.querySelector('#menu-bit #btn-lift, #menu-bit #btn-detach, #menu-bit #lift-panel')));
+    await shutAll(page);
+    await clickFace(page, '#menu-crop > summary');
+    await page.waitForTimeout(150);
     c = await clickFace(page, '#btn-lift');
     await page.waitForTimeout(300);
-    const gl = await gs(), lit = await page.evaluate(() => ({ armed: NSO_LIFT_PLATE.isArmed(), panel: !document.getElementById('lift-panel').hidden }));
-    check('LIFT, in SUBTRACT, arms Lift on the plate and its panel opens; G-scope stays shut',
-      c.ok && lit.armed && lit.panel && !gl.open, JSON.stringify({ lit, open: gl.open, why: c.why }));
+    const gl = await gs(), lit = await page.evaluate(() => ({ armed: NSO_LIFT_PLATE.isArmed(), panel: !document.getElementById('lift-panel').hidden,
+      inCrop: !!document.getElementById('btn-lift').closest('#crop-card'), detach: !!document.getElementById('btn-detach').closest('#lift-panel') }));
+    check('LIFT, in CROP, arms Lift on the plate and its panel opens, Detach flange in it; G-scope stays shut',
+      c.ok && lit.armed && lit.panel && lit.inCrop && lit.detach && !gl.open, JSON.stringify({ lit, open: gl.open, why: c.why }));
     await page.evaluate(() => document.getElementById('btn-lift').click());
-    check('...a second click puts Lift away', await page.evaluate(() => !NSO_LIFT_PLATE.isArmed()), '');
+    check('...a second click puts Lift away, its panel with it', await page.evaluate(() => !NSO_LIFT_PLATE.isArmed() && document.getElementById('lift-panel').hidden), '');
     await shutAll(page);
 
     // Optimize, then Clear plate (last: it empties the plate).

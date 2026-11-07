@@ -16,9 +16,9 @@ All are in `npm test`.
 ## The card
 
 Crop is one tool: **pick a shape, drag it to size, press CROP.** The card is a
-**Shape** row (Box, Cylinder, Sphere, Piece, Outline), **one readout line**, **CROP**
-and **Cancel**. Nothing else - no field to type a size into, no checkbox, no axis
-button. `page:manifest` fails if a control finds its way back in.
+**Shape** row (Box, Cylinder, Sphere, Piece, Outline, Lasso), **one readout line**, **CROP**
+and **Cancel**, and under them **Lift** (below). Nothing else - no field to type a size
+into, no checkbox, no axis button. `page:manifest` fails if a control finds its way back in.
 
 Opening the card arms the piece selection (as Cut does, with no blade). Pick a
 shape and it appears **centred on the selected piece at half its size**,
@@ -32,6 +32,7 @@ handle and no shape is the orbit's.
 | Sphere | Ø half the piece's smallest side | one on the surface (Ø) |
 | Piece | nothing yet: click another piece to be the cutter | none (it is the other piece) |
 | Outline | nothing yet: click a piece for its footprint, or **Shift-click** a triangle for its rim loop | `d1` (outer offset) and `d2` (inner offset), dragged along the surface normal at the outline's boundary, and `z1`, `z2`, the two heights |
+| Lasso | nothing yet: **drag a loop** round what to copy, on the screen | none: draw again to replace the loop |
 
 The body itself slides the shape: across the plate by default, **straight up and
 down with Shift held**. The shape is kept in the plate frame, so it stays put if the
@@ -48,6 +49,26 @@ by a ray; the nearest wins.
 …`, `Piece <name> · holds …`, `Outline of <name>, +1.0 / −0.8 mm, z 2.0 → 14.5 mm ·
 holds …` (` rim` after the name for a rim). A refusal replaces "holds …" with the
 engine's words, in the refusal colour, and CROP goes off.
+
+**Lasso** is a loop drawn freehand on the screen (a plain left-drag; **Alt-drag orbits**,
+as a press that draws cannot also orbit). It is kept as the rays from the camera it was
+drawn in through its corners - the loop is simplified to at most 240 corners - so it is a
+**cone**: what is copied is what the loop *sees*, front to back, cut off just short of the
+piece and just past it. The cone stays where it was drawn when the view is orbited (its
+translucent drawing comes back from the kernel like Outline's band). A press that does not
+travel round anything (under 80 px²) keeps the old loop, Escape mid-loop drops the loop
+being drawn, and a loop that crosses itself keeps both lobes (the engine widens it by 5
+microns so the lobes overlap, not pinch). The engine's `{ kind: 'lasso', eye, dirs, near?, far? }`
+is `nso_crop.js`'s "lasso" cutter; it is checked against the closed form of a frustum
+(`crop:engine` 6b) and the card by a real mouse (`crop:drive` 8: every vertex of the copy
+falls inside the loop on the screen).
+
+**Lift** is the card's last button, and it reads like CROP. It opens the Lift panel in the
+card (`app-lift-plate.js`, docs/LIFT.md section 7): the count of features found, *How far
+out counts*, Strip, and **Detach flange** (part of Lift, with its readout) - and pressing it
+again folds the panel away. Lift and a shape never run together: pressing Lift puts the
+shape away, picking a shape folds Lift away, and shutting the card folds Lift away too.
+`page:manifest` allows these controls, and only these, in the Lift package.
 
 **CROP** is `NSO_Crop.copy`: the copy lands where it was cut from, **selected**; one
 Undo takes it off; the original is untouched. **The shape stays**, on the piece it
@@ -66,8 +87,8 @@ does closing the card.
 | Keep inside / Keep outside | Crop always copies what the shape holds; the original is never cut. To have the original without that part, Subtract the copy from it |
 | the slab crop itself (remove a slab, slide the far part back, seal the joint) | gone from the card. Crop copies; G-scope's Crop on its layer range and Detach's cap still use `NSO_cropRaw` / `NSO_cropSeal` (below) |
 | Move region (Up, Across, Lift, Lock in) | removed from Crop, with `NSO_cropMoveRaw` and the code under it: **CROP, grab the copy (grab-drop), JOIN if a weld is wanted.** `crop:move` and `wire:crop-move` are retired with it; the kernel union they ran is Join's (`csg:node`, `integration`), and every copy is checked by `crop:engine` |
-| Detach flange | the **Subtract** card, under Split to parts. Same ids (`btn-detach`, `detach-readout`), same behaviour |
-| Reattach | the **Connect** card, its last row (under Attach's row once that lands). Same id (`btn-reattach`), same behaviour; its readout is Detach's, in the Subtract card, and the status line |
+| Detach flange | part of **Lift**, in the Crop card (below). Same ids (`btn-detach`, `detach-readout`), same behaviour |
+| Reattach | the **Connect** card, its last row (under Attach's row once that lands). Same id (`btn-reattach`), same behaviour; its readout is Detach's, in Lift's panel, and the status line |
 | the hidden axis selector `#edit-axis` | moved into the Cut card, where the cut code reads it |
 
 Two things the card needed of the rest of the app, both fixed where they were:

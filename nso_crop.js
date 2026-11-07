@@ -49,6 +49,10 @@
      outline   { kind: 'outline', source, mode, tri, d1, d2, z1, z2 }
                the footprint of a chosen piece, extruded between heights z1 and
                z2 (omitted: right through the piece being cropped)
+     lasso     { kind: 'lasso', eye: [x,y,z], dirs: [[dx,dy,dz], ...], near?, far? }
+               a loop drawn on the screen: the cone of rays from the eye through
+               its points, between depths near and far along the view (omitted:
+               just short of the piece to just past it)
    yaw is degrees about the vertical, through the centre, counter-clockwise
    seen from above. `source` is a plate-frame soup, or a piece-like object
    ({ rawTris, toRaw }), which may be the very piece being cropped.
@@ -126,7 +130,7 @@
     weldQ: 1e4,          // 0.1 micron buckets, as NSO_edgeStats welds
     cleanTol: [2e-4, 5e-4, 1e-3]   // the simplify tolerances tried, in turn, on a result with slivers
   };
-  var SHAPES = ['box', 'cylinder', 'sphere', 'piece', 'outline'];
+  var SHAPES = ['box', 'cylinder', 'sphere', 'piece', 'outline', 'lasso'];
 
   var IDENTITY = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 
@@ -597,7 +601,67 @@
       if ((shape.z1 != null) !== (shape.z2 != null)) return 'give both heights z1 and z2, or neither';
       if (shape.z1 != null && !(isNum(shape.z1) && isNum(shape.z2) && shape.z2 > shape.z1)) return 'the outline heights need z1 below z2';
     }
+    else if (kind === 'lasso') {
+      if (!vec3(shape.eye)) return 'the lasso needs the eye it was drawn from, eye: [x, y, z]';
+      if (!Array.isArray(shape.dirs) && !(shape.dirs && typeof shape.dirs.length === 'number')) return 'the lasso needs the rays of its loop, dirs: [[dx, dy, dz], ...]';
+      if (shape.dirs.length < 3) return 'a lasso loop needs at least 3 points';
+      for (var di = 0; di < shape.dirs.length; di++) if (!vec3(shape.dirs[di])) return 'every lasso ray is three numbers';
+      if ((shape.near != null) !== (shape.far != null)) return 'give both depths near and far, or neither';
+      if (shape.near != null && !(isNum(shape.near) && isNum(shape.far) && shape.near > 0 && shape.far > shape.near)) return 'the lasso depths need 0 < near < far';
+    }
     return '';
+  }
+
+  /* A lasso, drawn on the screen, is a cone from the eye: the rays through the
+     loop's points, cut off at `near` and `far` (depths along the view). In the
+     view's own frame (u across, w up the screen, c the way it looks) the loop at
+     depth `near` is the polygon of the rays scaled to that depth, and the cone is
+     that polygon extruded along c with the top scaled by far / near - the kernel
+     scales about the eye's axis, which is exactly what a cone is.
+     -> { poly, basis, near, far, note } or { reason }. */
+  function lassoFrame(shape, pieceP) {
+    var dirs = Array.prototype.slice.call(shape.dirs).map(function (d) {
+      var l = Math.hypot(d[0], d[1], d[2]);
+      return l > 1e-12 ? [d[0] / l, d[1] / l, d[2] / l] : null;
+    });
+    if (dirs.some(function (d) { return !d; })) return { reason: 'a lasso ray has no direction' };
+    var c = [0, 0, 0];
+    dirs.forEach(function (d) { c[0] += d[0]; c[1] += d[1]; c[2] += d[2]; });
+    var cl = Math.hypot(c[0], c[1], c[2]);
+    if (!(cl > 1e-9)) return { reason: 'the lasso surrounds the eye - draw it on the view, not all the way round' };
+    c = [c[0] / cl, c[1] / cl, c[2] / cl];
+    for (var i = 0; i < dirs.length; i++) {
+      if (dirs[i][0] * c[0] + dirs[i][1] * c[1] + dirs[i][2] * c[2] < 0.1) return { reason: 'the lasso reaches too far round the view - draw a smaller loop' };
+    }
+    var up = Math.abs(c[2]) > 0.99 ? [0, 1, 0] : [0, 0, 1];
+    var u = [up[1] * c[2] - up[2] * c[1], up[2] * c[0] - up[0] * c[2], up[0] * c[1] - up[1] * c[0]];
+    var ul = Math.hypot(u[0], u[1], u[2]);
+    u = [u[0] / ul, u[1] / ul, u[2] / ul];
+    var w = [c[1] * u[2] - c[2] * u[1], c[2] * u[0] - c[0] * u[2], c[0] * u[1] - c[1] * u[0]];   // c x u: u x w = c
+    var near = shape.near, far = shape.far;
+    if (near == null) {
+      if (!pieceP) return { reason: 'the lasso needs depths near and far' };
+      var dlo = Infinity, dhi = -Infinity;
+      for (var k = 0; k < 8; k++) {
+        var px = (k & 1 ? pieceP.hi : pieceP.lo)[0] - shape.eye[0], py = (k & 2 ? pieceP.hi : pieceP.lo)[1] - shape.eye[1],
+            pz = (k & 4 ? pieceP.hi : pieceP.lo)[2] - shape.eye[2];
+        var dd = px * c[0] + py * c[1] + pz * c[2];
+        if (dd < dlo) dlo = dd;
+        if (dd > dhi) dhi = dd;
+      }
+      near = Math.max(1, dlo - DEFAULTS.marginMm);
+      far = dhi + DEFAULTS.marginMm;
+      if (!(far > near + 1e-3)) return { reason: 'the piece is behind the eye the lasso was drawn from' };
+    }
+    var poly = dirs.map(function (d) {
+      var t = d[0] * c[0] + d[1] * c[1] + d[2] * c[2];
+      return { x: near * (d[0] * u[0] + d[1] * u[1] + d[2] * u[2]) / t, y: near * (d[0] * w[0] + d[1] * w[1] + d[2] * w[2]) / t };
+    });
+    var area = 0;
+    for (var j = 0; j < poly.length; j++) { var a = poly[j], b = poly[(j + 1) % poly.length]; area += a.x * b.y - b.x * a.y; }
+    if (area < 0) poly.reverse();
+    return { poly: poly, area: Math.abs(area) / 2, near: near, far: far, note: poly.length + '-point loop, ' + f1(near) + ' to ' + f1(far) + ' mm from the eye',
+             basis: [u[0], u[1], u[2], 0, w[0], w[1], w[2], 0, c[0], c[1], c[2], 0, 0, 0, 0, 1] };
   }
 
   /* -> { m, what, ... } where m is a kernel Manifold in the piece's raw frame
@@ -638,6 +702,27 @@
         man = mo.man;
         moved = man.transform(realmArray(toRaw));
         return { m: moved, what: what };
+      }
+      if (kind === 'lasso') {
+        var lq = lassoFrame(shape, ctx.pieceP);
+        if (lq.reason) return { reason: lq.reason };
+        var lpoly = lq.poly, lcs = new wasm.CrossSection([lpoly], 'NonZero');
+        try {
+          if (lcs.isEmpty() || !(lcs.area() > 1e-9)) return { reason: 'the lasso loop encloses nothing - draw it round something' };
+          /* A loop that crosses itself (a figure of eight) has lobes that meet at a point, and the cone's walls would meet
+             along a line there: a pinch the copy cannot close on. Where the signed area and the filled area part, the loop
+             crosses: widen it by 5 microns so the lobes overlap into one waist. */
+          if (Math.abs(lq.area - lcs.area()) > 1e-6 * lcs.area()) {
+            var fat = lcs.offset(0.005, 'Round', 2, 8);
+            lcs.delete(); lcs = fat;
+            lq.note += ', crossed itself';
+          }
+          solid = lcs.extrude(lq.far - lq.near, 0, 0, realmArray([lq.far / lq.near, lq.far / lq.near]));   // a cone from the eye: the loop grows with depth
+          moved = solid.transform(realmArray(matMul(toRaw, matMul(matT(shape.eye[0], shape.eye[1], shape.eye[2]),
+                                                                  matMul(lq.basis, matT(0, 0, lq.near))))));
+          return { m: moved, what: shape.label || 'the lasso', note: lq.note,
+                   areaMm2: lcs.area() };
+        } finally { lcs.delete(); }
       }
       // outline
       var fp = footprint(wasm, shape);

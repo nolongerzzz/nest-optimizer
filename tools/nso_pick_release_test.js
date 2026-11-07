@@ -298,6 +298,7 @@ const ROSTER = [
     },
     verb: async (page, id) => {
       const Lib = require('./nso_lift_plate_drive_lib.js'), bar = ROSTER[5].bar;
+      Lib.setClearOfCard(true);   // Lift is in the Crop card, which stands over the left of the view
       const dot = bar.truth.find(t => t.kind === 'dot');
       const tri = Lib.rawTriNear(bar.soup, dot.center[0], dot.center[1], 3.5, 3.7);
       await Lib.frameOn(page, id);

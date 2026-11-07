@@ -1,5 +1,5 @@
 /*
- * Lift on the plate - the SUBTRACT card's LIFT verb.
+ * Lift on the plate - the CROP card's LIFT button (Detach flange is part of it).
  * The app side of nso_lift_auto.js (Lift 2) and nso_lift_curved.js (Lift 3);
  * the engine is unchanged, only where and how it is driven.
  * READ docs/LIFT.md FIRST (section 7 is this file).
@@ -623,6 +623,8 @@ var NSO_LIFT_PLATE = (function () {
     state.softenArmed = false;
     state.capArmed = false;
     state.centerLockArmed = false;
+    /* Lift sits in the Crop card: a Crop shape and Lift both want the click on a piece, so arming Lift puts the shape away. */
+    if (typeof window !== 'undefined' && window.NSO_CropCard && window.NSO_CropCard.state().shape && !window.NSO_CropCard.lent()) window.NSO_CropCard.cancel(true);
   }
 
   function setArmed(on) {
@@ -1352,6 +1354,12 @@ var NSO_LIFT_PLATE = (function () {
   function mount() {
     minH = defaultMin();
     bind('btn-lift', 'click', function () { setArmed(!armed); });
+    /* Lift is a button in the Crop card, and folds away with it: an armed tool nobody can see would take every click on a piece. */
+    var card = $('menu-crop');
+    if (card && card.dataset.nsoLiftWired !== '1') {
+      card.dataset.nsoLiftWired = '1';
+      card.addEventListener('toggle', function () { if (!card.open && armed) setArmed(false); });
+    }
     bind('btn-lift-strip', 'click', function () { openStrip(); });
     bind('btn-lift-strip-go', 'click', function () { confirmStrip(); });
     bind('btn-lift-strip-cancel', 'click', function () { closeStrip(); });

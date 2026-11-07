@@ -11,10 +11,11 @@
 
    GATES
      1. The card opens with its tools in order - Subtract B from A, Extract bit
-        (with Carve), Punch, Hollow, Lift (with Detach flange), Split to parts -
-        each button showing, no collapsing section anywhere on it.
-     2. Every control the card had is still on it, under the id it had; Detach
-        flange is with Lift, after its panel.
+        (with Carve), Punch, Hollow, Split to parts - each button showing, no
+        collapsing section anywhere on it.
+     2. Every control the card has is on it, under the id it had. Lift, with
+        Detach flange in its panel, is not: it moved to the Crop card (its
+        own check, crop:drive, drives it there).
      3. Every control can be hit (no heading to open first); the ones a tool
         hides until it is armed are skipped.
      4. Shutting the card and opening it again leaves it as it was.
@@ -26,7 +27,7 @@
      7. The preview goes away, and the piece comes back opaque, when the card
         shuts, on leave-tool, on a different piece, and on a refusal; a wall
         under the nozzle floor is refused in the readout, not the status line.
-     8. Lift still arms, Detach flange still runs, and Punch's card still opens. */
+     8. Punch's card still opens. */
 
 const fs = require('fs');
 const path = require('path');
@@ -51,20 +52,14 @@ const SECTIONS = [
      'inp-punch-count', 'inp-punch-radius', 'punch-readout', 'btn-punch-go', 'btn-punch-cancel']],
   [null, 'Hollow',
     ['btn-hollow', 'inp-hollow-mm', 'inp-hollow-slider', 'hollow-slider-read', 'hollow-readout', 'btn-hollow-safe']],
-  [null, 'Lift',
-    ['btn-lift', 'lift-count', 'lift-panel', 'lift-height-read', 'lift-height', 'btn-lift-strip', 'lift-strip',
-     'lift-strip-rows', 'lift-strip-sum', 'btn-lift-strip-go', 'btn-lift-strip-cancel', 'lift-readout',
-     'detach-tools', 'btn-detach', 'detach-readout']],
   [null, 'Split to parts', ['btn-split-parts', 'split-count', 'split-readout']]
 ];
 /* ids that are hidden by their own state until a tool arms them (hit-test skips them):
-   Punch's card until Punch is armed, Lift's panel until Lift is */
+   Punch's card until Punch is armed */
 const OWN_STATE = new Set(['punch-card', 'punch-depth-mm-row', 'punch-grid-rows', 'punch-pitch-y-row', 'punch-radial-rows',
   'inp-punch-depth', 'inp-punch-rows', 'inp-punch-cols', 'inp-punch-pitch', 'inp-punch-pitch-y', 'btn-punch-pitch-xy',
   'punch-pitch-label', 'punch-anchor-row', 'inp-punch-count', 'inp-punch-radius', 'punch-readout', 'btn-punch-go',
-  'btn-punch-cancel', 'inp-punch-dia', 'sel-punch-depth', 'punch-pattern-row',
-  'lift-panel', 'lift-height-read', 'lift-height', 'btn-lift-strip', 'lift-strip', 'lift-strip-rows', 'lift-strip-sum',
-  'btn-lift-strip-go', 'btn-lift-strip-cancel', 'lift-readout']);
+  'btn-punch-cancel', 'inp-punch-dia', 'sel-punch-depth', 'punch-pattern-row']);
 
 const BOX = path.join(ROOT, 'fixtures', 'box_hull_80x40x20-2.stl');
 const BALL = path.join(ROOT, 'fixtures', 'fixture_sphere_curved.stl');
@@ -123,7 +118,7 @@ withApp(async (page, logs) => {
   check('each tool\'s button is showing as soon as the card opens', lead.shown.every(Boolean), JSON.stringify(lead.shown));
   const order = await page.evaluate(ids => ids.map(i => document.getElementById(i)).every((e, k, a) =>
     k === 0 || !!(a[k - 1].compareDocumentPosition(e) & Node.DOCUMENT_POSITION_FOLLOWING)), SECTIONS.map(s => s[2][0]));
-  check('...in the order Subtract, Extract bit, Punch, Hollow, Lift, Split to parts', order);
+  check('...in the order Subtract, Extract bit, Punch, Hollow, Split to parts', order);
   await shot(page, '1-card');
 
   /* ---------------------------------------------------------------- 2 */
@@ -133,10 +128,9 @@ withApp(async (page, logs) => {
   check('every id the card had is on it', missing.length === 0, missing.join(', ') || 'all');
   const all = SECTIONS.flatMap(s => s[2]);
   check('no id is listed twice', new Set(all).size === all.length, all.length + ' ids');
-  const detach = await page.evaluate(() => ({
-    afterLiftPanel: !!(document.getElementById('lift-panel').compareDocumentPosition(document.getElementById('detach-tools')) & Node.DOCUMENT_POSITION_FOLLOWING),
-    beforeSplit: !!(document.getElementById('detach-tools').compareDocumentPosition(document.getElementById('btn-split-parts')) & Node.DOCUMENT_POSITION_FOLLOWING) }));
-  check('Detach flange is with Lift, under its panel and above Split to parts', detach.afterLiftPanel && detach.beforeSplit, JSON.stringify(detach));
+  const gone = await page.evaluate(() => ['btn-lift', 'lift-count', 'lift-panel', 'btn-detach', 'detach-tools', 'detach-readout']
+    .filter(i => { const e = document.getElementById(i); return !e || e.closest('#menu-bit') || !e.closest('#crop-card'); }));
+  check('Lift and Detach flange are not on this card: they are in the Crop card', gone.length === 0, gone.join(', ') || 'all in #crop-card');
 
   /* ---------------------------------------------------------------- 3, 4 */
   console.log('3. what is on the card can be hit');
@@ -287,16 +281,8 @@ withApp(async (page, logs) => {
   await page.evaluate(() => { nsoHollowPreview.close(); });
 
   /* ---------------------------------------------------------------- 8 */
-  console.log('8. the other tools still run from the card');
+  console.log('8. Punch still runs from the card');
   await page.evaluate(() => window.leaveTool());
-  await page.click('#btn-lift');
-  await sleep(page, 400);
-  const lift = await page.evaluate(() => ({ armed: NSO_LIFT_PLATE.isArmed(), pressed: document.getElementById('btn-lift').getAttribute('aria-pressed') }));
-  check('Lift arms from the card', lift.armed && lift.pressed === 'true', JSON.stringify(lift));
-  const panelShown = await page.evaluate(() => !document.getElementById('lift-panel').hidden);
-  await shot(page, '5-lift-armed');
-  await page.click('#btn-lift');
-  check('...and a second click puts it away (its panel opens with it)', panelShown && !(await page.evaluate(() => NSO_LIFT_PLATE.isArmed())));
   await page.click('#btn-punch');
   await sleep(page, 300);
   const punch = await page.evaluate(() => ({ card: !document.getElementById('punch-card').hidden, inCard: !!document.getElementById('punch-card').closest('#menu-bit') }));
@@ -304,10 +290,6 @@ withApp(async (page, logs) => {
   await shot(page, '6-punch-armed');
   await page.click('#btn-punch-cancel');
   await page.evaluate(() => window.leaveTool());
-  await page.click('#btn-detach');
-  await sleep(page, 400);
-  const det = await page.evaluate(() => document.getElementById('detach-readout').textContent);
-  check('Detach flange runs from the card and answers in its readout', det && det !== '—', det.slice(0, 120));
 
   const errs = logs.filter(l => /pageerror/.test(l));
   check('no page errors', errs.length === 0, errs.slice(0, 3).join(' | ') || 'none');

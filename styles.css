@@ -1242,7 +1242,7 @@ select:focus, input:focus {
   margin: 0;
 }
 
-/* Detach, in the Subtract card under Split to parts (app-detach.js) */
+/* Detach flange, in the Lift panel of the Crop card (app-detach.js) */
 .detach-tools {
   margin-top: 10px;
   padding-top: 8px;
@@ -4710,9 +4710,15 @@ body.sup-card-open #adjust-status { display: none; }
 .slice-card .slice-actions { display: flex; flex-direction: column; gap: 4px; }
 .slice-card .slice-actions .btn { width: 100%; margin: 0; }
 
-/* The Crop card (app-crop-card.js): the Shape row, one readout line, CROP, Cancel.
-   The five shapes share the row; the buttons are small enough to stay on it. */
-#crop-card .crop-shape-row { flex-wrap: nowrap; gap: 4px; }
+/* The Crop card (app-crop-card.js): the Shape row, one readout line, CROP, Cancel, then Lift
+   (its panel opens under its button). The six shapes lie three to a line. */
+#crop-card .crop-shape-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
+/* Lift's button reads like CROP: the card's width, the same face. Pressed, it is lit like a shape. Its count is the
+   first line of its panel. */
+#crop-card .vp-row-lift { grid-template-columns: 1fr; }
+#crop-card .vp-row-lift .btn { min-height: 0; padding: 10px 14px; font-size: 13px; margin-top: 6px; }
+#crop-card #btn-lift.is-armed { border-color: #ef4444; color: #fff; background: rgba(239, 68, 68, 0.25); }
+#crop-card .lift-count-line { margin: 6px 0 2px; }
 #crop-readout { font-size: 12px; margin: 8px 0; }
 #crop-readout.is-refusal { color: #f87171; }
 #crop-card .crop-shape-row .btn {

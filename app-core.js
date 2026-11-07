@@ -3257,7 +3257,9 @@ function resolveDragPose(p, selfIdx, fromX, fromZ, toX, toZ) {
 }
 
 function startMoveDrag(idx, event) {
-  if (state.cutterOpen) {
+  /* ...except a piece Lift left in the air, in the Crop card Lift is a button of: grabbing it to drop it elsewhere is Lift's own. */
+  const liftedOne = state.cutTool === 'crop' && typeof NSO_LIFT_PLATE !== 'undefined' && NSO_LIFT_PLATE.ownsDrop && NSO_LIFT_PLATE.ownsDrop(state.placed[idx]);
+  if (state.cutterOpen && !liftedOne) {
     setStatus('Cutter open - close cutter to move pieces');
     return false;
   }
@@ -3798,6 +3800,16 @@ function wireCtxMenu() {
   }, true);
 }
 
+/* Lift is a button in the Crop card, and what it lifts is left in the air to be grabbed and dropped somewhere
+   else. With the Crop card open a press on a piece only picks it (the cutter has no move), so a piece Lift left in the
+   air is the exception: a press on it is the ordinary select-and-move, whether or not Lift is still open. */
+function cropYieldsToLifted() {
+  if (state.cutTool !== 'crop' || typeof NSO_LIFT_PLATE === 'undefined' || !NSO_LIFT_PLATE.ownsDrop || !state.modelGroup) return false;
+  const h = nsoHelpers.pieceHits(state.raycaster.intersectObjects(state.modelGroup.children, false))[0];
+  const idx = h && h.object.userData.placedIndex;
+  return typeof idx === 'number' && !!state.placed[idx] && NSO_LIFT_PLATE.ownsDrop(state.placed[idx]);
+}
+
 function onCanvasPointerDown(event) {
   state.rightPress = null;
   /* The rotation handles are hit-tested first and swallow the event. That is
@@ -4088,7 +4100,7 @@ function onCanvasPointerDown(event) {
   // other half - and look past the blade's own (invisible, oversized) grab
   // sheet, which lies in front of much of the piece: a click there is a
   // click on the piece.
-  if (state.cutterOpen && state.modelGroup) {
+  if (state.cutterOpen && state.modelGroup && !cropYieldsToLifted()) {
     const inBlade = o => { for (let n = o; n; n = n.parent) if (n === state.cutHelper) return true; return false; };
     const modelHits = state.raycaster.intersectObjects(state.modelGroup.children, true)
       .filter(h => !inBlade(h.object));
@@ -4173,7 +4185,7 @@ function onCanvasPointerDown(event) {
           event.stopPropagation();
           return;
         }
-        if (state.cutterOpen && hit && hit.sourceId != null) {
+        if (state.cutterOpen && hit && hit.sourceId != null && !(state.cutTool === 'crop' && typeof NSO_LIFT_PLATE !== 'undefined' && NSO_LIFT_PLATE.ownsDrop && NSO_LIFT_PLATE.ownsDrop(hit))) {
           if (hit.sourceId !== state.editId) selectPlaced(idx);
           if (state.cutTool === 'crop' || (typeof cutPlateOn === 'function' && cutPlateOn())) { event.stopPropagation(); return; }
           if (typeof cutFollowOn === 'function' && cutFollowOn()) { cutFollowFromHit(modelHits[0]); event.stopPropagation(); return; }

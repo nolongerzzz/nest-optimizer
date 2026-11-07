@@ -4,7 +4,8 @@
    Real index.html, real script tags, real clicks. The geometry proofs live
    in tools/nso_detach_test.js; this file proves the part only the page can:
 
-     1. the Cut menu carries Detach flange and Reattach, wired, and app-core
+     1. the Lift panel (Crop card) carries Detach flange and the Connect card
+        Reattach, wired, and app-core
         asks Reattach about clicks;
      2. Detach on the clamp bar (library/v9_mirror_factory.stl) from the
         button: the piece becomes the hull where it stood, and the flange
@@ -78,14 +79,17 @@ const measure = (page, id) => page.evaluate(mid => {
 }, id);
 const rawOf = (page, id) => page.evaluate(mid => Array.from(state.models.find(x => x && x.id === mid).rawTris), id);
 const modelIds = page => page.evaluate(() => state.models.map(m => m.id));
-/* Detach is in the Subtract card, under Split to parts, and Reattach in the
-   Connect card (they were both in the Crop card). Opening a card is a real click
-   on its summary. */
+/* Detach flange is part of Lift, in the Crop card: the Lift button opens its panel, and
+   Detach is in it. Reattach is in the Connect card. Opening a card is a real click on
+   its summary, opening Lift a real click on its button. */
 const openCard = async (page, id) => {
   const open = await page.evaluate(i => document.getElementById(i).open, id);
   if (!open) await page.click('#' + id + ' > summary');
 };
-const openCutter = page => openCard(page, 'menu-bit');
+const openCutter = async page => {
+  await openCard(page, 'menu-crop');
+  if (!(await page.evaluate(() => NSO_LIFT_PLATE.isArmed()))) await page.click('#btn-lift');
+};
 /* An oblique view of the plate for the screenshots: the flange side and
    the top at once. */
 const frameOblique = page => page.evaluate(() => {
@@ -109,14 +113,14 @@ withApp(async (page, logs) => {
   {
     const w = await page.evaluate(() => {
       const d = document.getElementById('btn-detach'), r = document.getElementById('btn-reattach');
-      const sub = document.getElementById('menu-bit'), join = document.getElementById('menu-connect');
+      const sub = document.getElementById('lift-panel'), join = document.getElementById('menu-connect');
       return { d: !!d, r: !!r, wired: d && r && d.dataset.nsoWired === '1' && r.dataset.nsoWired === '1',
                inCut: !!(sub && d && sub.contains(d) && join && r && join.contains(r)), rDisabled: r && r.disabled,
                core: typeof window.NSO_Detach, flange: typeof window.NSO_Flange, run: typeof window.nsoDetachRun,
                at: typeof window.nsoReattachAt, hook: typeof window.nsoReattachTakesClick,
                pick: typeof window.nsoAttachRawPick };
     });
-    check('the Subtract card carries Detach flange and the Connect card Reattach, wired', w.d && w.r && w.wired && w.inCut, JSON.stringify(w));
+    check('the Lift panel (in the Crop card) carries Detach flange and the Connect card Reattach, wired', w.d && w.r && w.wired && w.inCut, JSON.stringify(w));
     check('Reattach is disabled until something is detached', w.rDisabled === true);
     check('nso_detach.js, nso_flange.js and app-detach.js are loaded', w.core === 'object' && w.flange === 'object' &&
       w.run === 'function' && w.at === 'function');

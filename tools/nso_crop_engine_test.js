@@ -570,6 +570,52 @@ async function crop(label, piece, shape, expect) {
   }
 
   /* =========================================================================
+     6b. Lasso: a loop drawn on the screen is a cone from the eye
+     The oracle is the closed form: a square loop of side a at depth D, seen from the
+     eye through a cube, is a frustum - the area at depth d is (a d / D)^2 - and the
+     cube's own faces at depths d0 and d1 cut it: V = a^2 (d1^3 - d0^3) / (3 D^2).
+     ========================================================================= */
+  console.log('\n=== 6b. lasso: the cone of rays through a loop ===');
+  {
+    const cube = boxSoup([-10, -10, -10], [10, 10, 10]), cubeP = { rawTris: cube }, E = [0, -100, 0];
+    const ring = pts => pts.map(([x, z]) => [x, 100, z]);          // a loop on the plane 100 mm in front of the eye
+    const sq = a => ring([[-a / 2, -a / 2], [a / 2, -a / 2], [a / 2, a / 2], [-a / 2, a / 2]]);
+    const frustum = (a, d0, d1, D) => a * a * (d1 ** 3 - d0 ** 3) / (3 * D * D);
+    await crop('lasso: a 10 mm square loop through a 20 mm cube', cubeP, { kind: 'lasso', eye: E, dirs: sq(10) },
+      { volume: frustum(10, 90, 110, 100), tol: 0.01, validate: true });
+    await crop('lasso: a 14 mm square loop, the same cube', cubeP, { kind: 'lasso', eye: E, dirs: sq(14) },
+      { volume: frustum(14, 90, 110, 100), tol: 0.01 });
+    const a = await crop('lasso: a loop wider than the cube is the whole cube', cubeP, { kind: 'lasso', eye: E, dirs: sq(60) }, { volume: 8000, tol: 0.001 });
+    check('...a copy of all of it: its 12 faces', a.ok && a.faces === 12, String(a.faces));
+    const n = 64, rr = 5, A0 = 0.5 * n * rr * rr * Math.sin(2 * Math.PI / n);
+    await crop('lasso: a 64-gon loop (a round one)', cubeP, { kind: 'lasso', eye: E, dirs: ring(Array.from({ length: n }, (_, i) => [rr * Math.cos(i / n * 2 * Math.PI), rr * Math.sin(i / n * 2 * Math.PI)])) },
+      { volume: A0 * (110 ** 3 - 90 ** 3) / (3 * 1e4), tol: 0.01 });
+    // winding does not matter, nor how long the rays are
+    const rev = sq(10).slice().reverse().map(d => d.map(v => v * 3));
+    await crop('lasso: the loop wound the other way, rays 3x as long', cubeP, { kind: 'lasso', eye: E, dirs: rev }, { volume: frustum(10, 90, 110, 100), tol: 0.01 });
+    // from above, and from an oblique eye: closed, the right depth of material, original untouched
+    await crop('lasso: seen from straight above', cubeP, { kind: 'lasso', eye: [0, 0, 100], dirs: [[-5, -5], [5, -5], [5, 5], [-5, 5]].map(([x, y]) => [x, y, -100]) },
+      { volume: frustum(10, 90, 110, 100), tol: 0.01 });
+    const eye3 = [70, -60, 50], aim = eye3.map(v => -v), L3 = Math.hypot(...aim), ctr = aim.map(v => v / L3);
+    const side = [ctr[1], -ctr[0], 0], sl = Math.hypot(side[0], side[1]), u = side.map(v => v / sl);
+    const w = [u[1] * ctr[2] - u[2] * ctr[1], u[2] * ctr[0] - u[0] * ctr[2], u[0] * ctr[1] - u[1] * ctr[0]];
+    const obl = [[-5, -4], [6, -3], [5, 5], [-4, 6]].map(([x, y]) => [0, 1, 2].map(k => ctr[k] * L3 + u[k] * x + w[k] * y));
+    const o = await crop('lasso: from an oblique eye, a skew loop', cubeP, { kind: 'lasso', eye: eye3, dirs: obl }, { validate: true });
+    check('...it is a part of the cube, not all of it', o.ok && o.volumeMm3 > 50 && o.volumeMm3 < 7500, f3(o.volumeMm3));
+    const bow = await crop('lasso: a bowtie (the loop crossed itself) keeps both lobes', cubeP, { kind: 'lasso', eye: E, dirs: ring([[-6, -3], [6, 3], [6, -3], [-6, 3]]) });
+    check('...more than one lobe, less than the cube', bow.ok && bow.volumeMm3 > 200 && bow.volumeMm3 < 8000, f3(bow.volumeMm3));
+    // plan agrees with run, builds nothing
+    const pl = await C.plan(cubeP, { kind: 'lasso', eye: E, dirs: sq(10) });
+    check('lasso: plan() agrees with run() and builds nothing', pl.ok && near(pl.volumeMm3, frustum(10, 90, 110, 100), 0.5) && !pl.tris);
+    // the cutter on its own: the preview's soup is closed, and the cone's own volume is the frustum between the depths given
+    const cs = await C.cutterSoup({ kind: 'lasso', eye: E, dirs: sq(10), near: 90, far: 110 });
+    check('lasso: cutterSoup draws the cone between near and far, closed', cs.soup && C.census(cs.soup).open === 0 && near(C.volume(cs.soup), frustum(10, 90, 110, 100), 0.5),
+      cs.soup ? f3(C.volume(cs.soup)) + ' mm3' : cs.reason);
+    const nf = await C.cutterSoup({ kind: 'lasso', eye: E, dirs: sq(10) });
+    check('...and with no depths and no piece it asks for them', !!nf.reason && /depths/.test(nf.reason), nf.reason);
+  }
+
+  /* =========================================================================
      7. refusals
      ========================================================================= */
   console.log('\n=== 7. refusals: only a shape that holds nothing, or a result that is not closed ===');
@@ -590,6 +636,11 @@ async function crop(label, piece, shape, expect) {
       ['a shape that is not one', hingeP, { kind: 'torus' }, /unknown shape/],
       ['no shape at all', hingeP, null, /no shape/],
       ['a Piece with no other piece', hingeP, { kind: 'piece' }, /another piece/],
+      ['a lasso of two points', hingeP, { kind: 'lasso', eye: [9, -100, 4], dirs: [[0, 1, 0], [1, 1, 0]] }, /at least 3 points/],
+      ['a lasso with no eye', hingeP, { kind: 'lasso', dirs: [[0, 1, 0], [1, 1, 0], [0, 1, 1]] }, /needs the eye/],
+      ['a lasso round empty air', hingeP, { kind: 'lasso', eye: [9, -100, 4], dirs: [[55, 100, -5], [65, 100, -5], [65, 100, 5], [55, 100, 5]] }, /holds nothing/],
+      ['a lasso drawn behind the piece', hingeP, { kind: 'lasso', eye: [9, 100, 4], dirs: [[-5, 100, -5], [5, 100, -5], [5, 100, 5], [-5, 100, 5]] }, /behind the eye/],
+      ['a lasso that only has a line in it', hingeP, { kind: 'lasso', eye: [9, -100, 4], dirs: [[0, 100, 0], [5, 100, 0], [10, 100, 0]] }, /encloses nothing/],
       ['an outline with a negative offset', hingeP, { kind: 'outline', source: HINGE, d1: -1 }, /distance of 0 or more/],
       ['an outline with one height', hingeP, { kind: 'outline', source: HINGE, z1: 1 }, /both heights/],
       ['an outline with its heights upside down', hingeP, { kind: 'outline', source: HINGE, z1: 5, z2: 1 }, /z1 below z2/],

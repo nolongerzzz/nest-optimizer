@@ -29,6 +29,11 @@
      sphere     one handle on the surface: it sets the diameter.
      outline    d1 (outer) and d2 (inner) offsets, dragged along the surface
                 normal at the outline's boundary, and the two heights z1 and z2.
+     lasso      no handles: drag a loop round what to copy, on the screen. The
+                loop is a cone of rays from the camera it was drawn in, so what
+                it copies is what it sees, front to back; the cone stays where it
+                was drawn when the view is orbited. Draw again to replace it.
+                Alt-drag orbits (a plain press draws).
      all        the body itself slides the shape: across the plate by default,
                 straight up and down with Shift held.
 
@@ -56,17 +61,22 @@
   var HIT_PX = 14;             // a handle is grabbed this close to it on screen (never under 12)
   var DRAW_PX = 38;            // and drawn this big
   var MIN_MM = 0.1;            // no half-size, radius or height gap below this
-  var SHAPES = ['box', 'cylinder', 'sphere', 'piece', 'outline'];
-  var NAMES = { box: 'Box', cylinder: 'Cylinder', sphere: 'Sphere', piece: 'Piece', outline: 'Outline' };
+  var SHAPES = ['box', 'cylinder', 'sphere', 'piece', 'outline', 'lasso'];
+  var NAMES = { box: 'Box', cylinder: 'Cylinder', sphere: 'Sphere', piece: 'Piece', outline: 'Outline', lasso: 'Lasso' };
+  var LASSO_MIN_PX = 3;        // a loop point is kept when it is this far from the last one
+  var LASSO_MIN_AREA = 80;     // a loop smaller than this (px squared) is a click, not a lasso
+  var LASSO_MAX_PTS = 240;     // the loop is simplified until it has at most this many corners
   var COL = { body: 0xef4444, edge: 0xb91c1c, rail: 0xfbbf24, dart: 0xfde68a, held: 0xffffff };
   var PLAN_MS = 90;
   var PLAN_BIG_MS = 400;       // a big piece's plan is a worker job of seconds: ask when the drag has settled, not at every pause
 
   var S = {
-    shape: null,               // 'box' | 'cylinder' | 'sphere' | 'piece' | 'outline' | null
+    shape: null,               // 'box' | 'cylinder' | 'sphere' | 'piece' | 'outline' | 'lasso' | null
     forId: null,               // the model it was picked on
     box: null, cyl: null, sph: null,
     piece: { id: null },
+    lasso: { eye: null, dirs: null },   // the loop, as rays from the eye it was drawn in (P)
+    draw: null,                // a loop being drawn: { pts: [[x, y] in px] }
     outline: { id: null, mode: 'silhouette', tri: -1, d1: 0, d2: 0, z1: 0, z2: 0, fp: null, src: null, key: '' },
     plan: null, planText: '', seq: 0, timer: null, busy: false,
     expectSel: null,           // the copy just made: its selection is not a retarget
@@ -133,6 +143,7 @@
     if (kind === 'cylinder') S.cyl = { c: c, r: Math.min(sx, sy) / 4, hl: sz / 4, axis: 'z', yaw: 0 };
     if (kind === 'sphere') S.sph = { c: c, r: Math.min(sx, sy, sz) / 4 };
     if (kind === 'piece') S.piece = { id: null };
+    if (kind === 'lasso') S.lasso = { eye: null, dirs: null };
     if (kind === 'outline') S.outline = { id: null, mode: 'silhouette', tri: -1, d1: 0, d2: 0, z1: bp.lo[2], z2: bp.hi[2], fp: null, src: null, key: '' };
   }
 
@@ -141,6 +152,14 @@
     if (S.shape === 'cylinder') return { kind: 'cylinder', c: S.cyl.c.slice(), r: S.cyl.r, hl: S.cyl.hl, axis: S.cyl.axis, yaw: S.cyl.yaw };
     if (S.shape === 'sphere') return { kind: 'sphere', c: S.sph.c.slice(), r: S.sph.r };
     if (S.shape === 'piece') return S.piece.id == null ? null : { kind: 'piece', pieceId: S.piece.id };
+    if (S.shape === 'lasso') {
+      var l = S.lasso;
+      if (!l.dirs) return null;
+      var ls = { kind: 'lasso', eye: l.eye.slice(), dirs: l.dirs.map(function (d) { return d.slice(); }) };
+      var lt = target(), dp = lt ? lassoDepths(lt.bp, l) : null;
+      if (dp) { ls.near = dp.near; ls.far = dp.far; }
+      return ls;
+    }
     if (S.shape === 'outline') {
       var o = S.outline;
       if (o.id == null) return null;
@@ -161,6 +180,7 @@
       var pm = S.piece.id != null ? modelOf(S.piece.id) : null;
       return pm ? 'Piece ' + pm.name : 'Piece';
     }
+    if (S.shape === 'lasso') return 'Lasso, ' + (S.lasso.dirs ? S.lasso.dirs.length + '-point loop' : 'no loop yet');
     if (S.shape === 'outline') {
       var o = S.outline, om = o.id != null ? modelOf(o.id) : null;
       return 'Outline of ' + (om ? om.name : 'a piece') + (o.mode === 'rim' ? ' rim' : '') + ', +' + o.d1.toFixed(1) + ' / −' + o.d2.toFixed(1) +
@@ -179,6 +199,7 @@
     if (!t) return 'Select a piece, then pick a shape.';
     if (!S.shape) return 'Pick a shape: it appears on ' + t.m.name + ', ready to drag.';
     if (S.shape === 'piece' && S.piece.id == null) return 'Piece: click another piece to be the cutter.';
+    if (S.shape === 'lasso' && !S.lasso.dirs) return 'Lasso: drag a loop round what to copy (Alt-drag to orbit).';
     if (S.shape === 'outline' && S.outline.id == null) return 'Outline: click a piece for its footprint, or Shift-click a triangle for its rim.';
     var d = describe();
     if (!S.plan) return d + ' · …';
@@ -201,6 +222,8 @@
       b.setAttribute('aria-pressed', on ? 'true' : 'false');
       b.disabled = !live() || !target();
     });
+    var cv = (typeof state !== 'undefined' && state && state.renderer) ? state.renderer.domElement : null;
+    if (cv) cv.style.cursor = (live() && S.shape === 'lasso' && !S.lent) ? 'crosshair' : '';
     var go = $('btn-crop');
     if (go) go.disabled = !(live() && S.shape && S.plan && S.plan.ok && !S.busy);
     var cancel = $('btn-crop-cancel');
@@ -231,20 +254,25 @@
     if (r.superseded) return;                      // a newer plan took its place and will land
     S.plan = r;
     syncUI();
-    if (S.shape === 'outline') refreshPreview(seq);
+    if (S.shape === 'outline' || S.shape === 'lasso') refreshPreview(seq);
   }
 
-  /* The outline's band, as the kernel cuts it: a closed soup in P, off the main
+  /* The outline's band (or the lasso's cone), as the kernel cuts it: a closed soup in P, off the main
      path, redrawn when it lands. */
   async function refreshPreview(seq) {
-    var o = S.outline;
-    if (o.id == null || !o.src) return;
-    var r;
-    try {
-      r = await NSO_Crop.cutterSoup({ kind: 'outline', source: o.src, mode: o.mode, tri: o.mode === 'rim' ? o.tri : undefined,
-                                      d1: o.d1, d2: o.d2, z1: o.z1, z2: o.z2 });
-    } catch (err) { r = { reason: String(err) }; }
-    if (seq !== S.seq || S.shape !== 'outline') return;
+    var o = S.outline, kind = S.shape, r;
+    if (kind === 'lasso') {
+      var ls = engineShape();
+      if (!ls) return;
+      try { r = await NSO_Crop.cutterSoup(ls); } catch (err2) { r = { reason: String(err2) }; }
+    } else {
+      if (o.id == null || !o.src) return;
+      try {
+        r = await NSO_Crop.cutterSoup({ kind: 'outline', source: o.src, mode: o.mode, tri: o.mode === 'rim' ? o.tri : undefined,
+                                        d1: o.d1, d2: o.d2, z1: o.z1, z2: o.z2 });
+      } catch (err) { r = { reason: String(err) }; }
+    }
+    if (seq !== S.seq || S.shape !== kind) return;
     setPreview(r.soup || null);
     rebuild();
   }
@@ -421,7 +449,7 @@
         g.add(ov);
       }
     }
-    if (S.shape === 'outline' && S.previewGeo) {
+    if ((S.shape === 'outline' || S.shape === 'lasso') && S.previewGeo) {
       var pm = new THREE.Mesh(S.previewGeo, bodyMat(0.2));
       pm.userData.sharedGeo = true;
       g.add(pm);
@@ -510,6 +538,119 @@
       if (d <= bd) { bd = d; best = h; }
     });
     return best;
+  }
+
+  /* ---- the lasso ---------------------------------------------------------- */
+
+  /* A loop drawn on the screen is kept as the rays through its corners, from the
+     camera it was drawn in, in P: a cone, which stays where it was drawn when the
+     view is orbited. The engine cuts the cone off short of the piece and just past
+     it (lassoDepths, from the piece as drawn). */
+
+  function rayDirP(x, y) {
+    var r = state.renderer.domElement.getBoundingClientRect();
+    var v = new THREE.Vector3((x - r.left) / r.width * 2 - 1, -((y - r.top) / r.height * 2 - 1), 0.5).unproject(state.camera);
+    return toP(v.sub(state.camera.position));
+  }
+
+  // Ramer-Douglas-Peucker on a polyline of px points.
+  function rdp(pts, eps) {
+    if (pts.length < 3) return pts.slice();
+    var keep = new Uint8Array(pts.length), stack = [[0, pts.length - 1]];
+    keep[0] = keep[pts.length - 1] = 1;
+    while (stack.length) {
+      var seg = stack.pop(), a = pts[seg[0]], b = pts[seg[1]], dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy);
+      var worst = -1, wd = eps;
+      for (var i = seg[0] + 1; i < seg[1]; i++) {
+        var d = L > 1e-9 ? Math.abs(dy * (pts[i][0] - a[0]) - dx * (pts[i][1] - a[1])) / L : Math.hypot(pts[i][0] - a[0], pts[i][1] - a[1]);
+        if (d > wd) { wd = d; worst = i; }
+      }
+      if (worst >= 0) { keep[worst] = 1; stack.push([seg[0], worst], [worst, seg[1]]); }
+    }
+    return pts.filter(function (_, i) { return keep[i]; });
+  }
+
+  function loopArea(pts) {
+    var a = 0;
+    for (var i = 0; i < pts.length; i++) { var p = pts[i], q = pts[(i + 1) % pts.length]; a += p[0] * q[1] - q[0] * p[1]; }
+    return Math.abs(a) / 2;
+  }
+
+  /* How deep the piece lies along the lasso's view: the cone runs from just short
+     of its nearest corner to just past its farthest. null when it is all behind the eye. */
+  function lassoDepths(bp, l) {
+    var c = [0, 0, 0];
+    l.dirs.forEach(function (d) { var n = Math.hypot(d[0], d[1], d[2]) || 1; c[0] += d[0] / n; c[1] += d[1] / n; c[2] += d[2] / n; });
+    var cl = Math.hypot(c[0], c[1], c[2]);
+    if (!(cl > 1e-9)) return null;
+    var lo = Infinity, hi = -Infinity;
+    for (var k = 0; k < 8; k++) {
+      var q = [(k & 1 ? bp.hi : bp.lo)[0] - l.eye[0], (k & 2 ? bp.hi : bp.lo)[1] - l.eye[1], (k & 4 ? bp.hi : bp.lo)[2] - l.eye[2]];
+      var dd = (q[0] * c[0] + q[1] * c[1] + q[2] * c[2]) / cl;
+      lo = Math.min(lo, dd); hi = Math.max(hi, dd);
+    }
+    var near = Math.max(1, lo - 1), far = hi + 1;
+    return far > near + 1e-3 ? { near: near, far: far } : null;
+  }
+
+  /* The loop (screen px) becomes the shape. */
+  function setLasso(pts) {
+    var eps = 1.5, pl = rdp(pts, eps);
+    while (pl.length > LASSO_MAX_PTS) { eps *= 1.4; pl = rdp(pts, eps); }
+    if (pl.length < 3 || loopArea(pl) < LASSO_MIN_AREA) return false;
+    state.camera.updateMatrixWorld(true);
+    S.lasso = { eye: toP(state.camera.position), dirs: pl.map(function (q) { return rayDirP(q[0], q[1]); }) };
+    S.plan = null;
+    rebuild();
+    schedulePlan();
+    return true;
+  }
+
+  // The loop under the pointer, drawn over the view while it is dragged.
+  function overlay(pts) {
+    var NS = 'http://www.w3.org/2000/svg', svg = S.svg;
+    if (!pts) { if (svg && svg.parentNode) svg.parentNode.removeChild(svg); S.svg = null; return; }
+    if (!svg) {
+      svg = document.createElementNS(NS, 'svg');
+      svg.setAttribute('id', 'crop-lasso-overlay');
+      svg.setAttribute('aria-hidden', 'true');
+      svg.style.cssText = 'position:fixed;left:0;top:0;width:100vw;height:100vh;pointer-events:none;z-index:9000';
+      var pg = document.createElementNS(NS, 'polygon');
+      pg.setAttribute('fill', 'rgba(239,68,68,0.14)');
+      pg.setAttribute('stroke', '#fbbf24');
+      pg.setAttribute('stroke-width', '2');
+      pg.setAttribute('stroke-dasharray', '6 4');
+      pg.setAttribute('stroke-linejoin', 'round');
+      svg.appendChild(pg);
+      document.body.appendChild(svg);
+      S.svg = svg;
+    }
+    svg.firstChild.setAttribute('points', pts.map(function (q) { return q[0].toFixed(1) + ',' + q[1].toFixed(1); }).join(' '));
+  }
+
+  function startLasso(ev) {
+    S.draw = { pts: [[ev.clientX, ev.clientY]] };
+    if (state.controls) state.controls.enabled = false;
+    overlay(S.draw.pts);
+  }
+
+  function moveLasso(ev) {
+    var pts = S.draw.pts, last = pts[pts.length - 1];
+    if (Math.hypot(ev.clientX - last[0], ev.clientY - last[1]) < LASSO_MIN_PX) return;
+    pts.push([ev.clientX, ev.clientY]);
+    overlay(pts);
+  }
+
+  // Let go: the loop closes itself. A press that did not travel round anything keeps the old loop.
+  function finishLasso(cancelled) {
+    var d = S.draw;
+    S.draw = null;
+    overlay(null);
+    if (state.controls) state.controls.enabled = true;
+    if (!d || cancelled) return;
+    if (setLasso(d.pts)) say('Crop: Lasso - ' + S.lasso.dirs.length + '-point loop; draw again to replace it, then CROP');
+    else say('Crop: Lasso - drag a loop round what to copy');
+    syncUI();
   }
 
   /* ---- the pointer ------------------------------------------------------- */
@@ -641,7 +782,8 @@
     cyl.c = [st.c[0] + av[0] * mid, st.c[1] + av[1] * mid, st.c[2] + av[2] * mid];
   }
 
-  function endDrag() {
+  function endDrag(ev) {
+    if (S.draw) { finishLasso(ev && ev.type === 'pointercancel'); return; }
     if (!S.drag) return;
     S.drag = null;
     if (state.controls) state.controls.enabled = true;
@@ -685,6 +827,12 @@
     if (ev.target !== state.renderer.domElement) return;
     var t = target();
     if (!t) return;
+    if (S.shape === 'lasso' && !S.lent) {
+      if (ev.altKey) return;                       // Alt-drag is the orbit's
+      startLasso(ev);
+      consume(ev);
+      return;
+    }
     var h = hitHandle(ev);
     if (h) {
       beginDrag(h, ev);
@@ -708,6 +856,7 @@
   }
 
   function onMove(ev) {
+    if (S.draw) { moveLasso(ev); return; }
     if (!S.drag) return;
     applyDrag(ev);
     rebuild();
@@ -741,6 +890,7 @@
     var had = !!S.shape;
     if (typeof NSO_boolCancelKey === 'function') NSO_boolCancelKey('crop-plan');   // a plan still measuring has no shape to measure
     S.shape = null; S.plan = null; setPreview(null); S.drag = null; S.seq++;
+    if (S.draw) { S.draw = null; overlay(null); }
     if (S.timer) { clearTimeout(S.timer); S.timer = null; }
     if (state.controls) state.controls.enabled = true;
     removeGroup();
@@ -748,13 +898,20 @@
     if (had && !silent) say('Crop: shape put away');
   }
 
+  // The Lift panel lives in this card. Lift owns a click on a piece while it is armed, so a shape and Lift never run together.
+  function liftAway() {
+    if (typeof NSO_LIFT_PLATE !== 'undefined' && NSO_LIFT_PLATE.isArmed && NSO_LIFT_PLATE.isArmed()) NSO_LIFT_PLATE.setArmed(false);
+  }
+
   function pick(kind) {
     if (S.lent) lentTaken();                         // the card wants its own shape: the gun's box goes
+    liftAway();                                      // Lift and a shape both want the clicks on a piece: one at a time
     var t = target();
     if (!t) { say('Select a piece first, then pick a shape', true); syncUI(); return; }
     S.shape = kind; S.forId = t.m.id; setPreview(null); S.expectSel = null;
     freshShape(kind, t);
     say(kind === 'piece' ? 'Crop: Piece - click another piece to be the cutter'
+      : kind === 'lasso' ? 'Crop: Lasso - drag a loop round what to copy on ' + t.m.name + ' (Alt-drag to orbit), then CROP'
       : kind === 'outline' ? 'Crop: Outline - click a piece for its footprint, or Shift-click a triangle for its rim'
       : 'Crop: ' + NAMES[kind] + ' on ' + t.m.name + ' - drag a handle to size it, the body to move it, then CROP');
     rebuild();
@@ -847,6 +1004,7 @@
     if (S.lent || ev.key !== 'Escape' || !live() || !S.shape) return;
     var el = ev.target;
     if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)) return;
+    if (S.draw) { finishLasso(true); return; }       // Escape mid-loop drops the loop, not the shape
     putAway(false);
   }
 
@@ -891,7 +1049,9 @@
     shape: function () { return engineShape(); },
     handles: function () { return S.handles.map(function (h) { return h.id; }); },
     handleScreen: handleScreen,
-    pick: pick, cancel: function () { putAway(false); }, crop: doCrop, sync: sync,
+    pick: pick, cancel: function (silent) { putAway(silent === true); }, crop: doCrop, sync: sync,
+    /* The lasso, set the way a drag sets it: a loop of screen points (client px). */
+    lasso: function (pts) { return S.shape === 'lasso' && setLasso(pts); },
     /* Ask the engine about the shape as it now stands (the checks set the shape's numbers, the mouse would). */
     replan: schedulePlan,
     /* The box's centre and half-sizes in P, set the way a drag sets them (a check has no mouse worth the name on a 1.4 M-triangle piece). */

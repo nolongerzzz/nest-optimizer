@@ -35,6 +35,7 @@ merging its list by hand. The list below is generated.
 - [Contact skin on a face + Seat against the skin's tips (2026-09-16)](handoff/contact-skin-on-a-face-seat-against-the-skins-tips.md)
 - [Crop card - pick a shape, drag it to size, CROP (2026-10-17)](handoff/crop-card-pick-a-shape-drag-it-to-size-crop.md)
 - [Crop engine - copy what a shape holds as a new piece (2026-10-17)](handoff/crop-engine-copy-what-a-shape-holds-as-a-new-piece.md)
+- [Crop card - Lift (with Detach flange) moves in, Lasso is a new shape (2026-11-07)](handoff/crop-lift-and-lasso.md)
 - [Crop shapes - a Circle and another Piece's outline as the region (2026-10-16)](handoff/crop-shapes-a-circle-and-another-pieces-outline-as-the-region.md)
 - [Crop, stage 2 - move a region, reconnect it by what is measured (2026-09-26)](handoff/crop-stage-2-move-a-region-reconnect-it-by-what-is-measured.md)
 - [Crosshatch at a tighter pitch, and a double-sided patch (2026-09-18)](handoff/crosshatch-at-a-tighter-pitch-and-a-double-sided-patch.md)

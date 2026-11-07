@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=b864b6ed" />
+  <link rel="stylesheet" href="styles.css?v=d02a6a68" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -890,11 +890,13 @@
           </details>
           <!-- Crop: copy what a shape holds out of the selected piece as a new, solid
                piece (nso_crop.js, app-crop-card.js, docs/CROP.md). Pick a shape, drag
-               it to size, press CROP. Nothing else lives here: the shape is sized by
-               its handles in the viewport, not by fields. Opening the card arms the
+               it to size, press CROP. The shape is sized by its handles in the viewport
+               (or, for Lasso, drawn on it), not by fields. Under CROP sits Lift, with
+               Detach flange inside it: its button opens its panel in the card and a
+               second press folds it away. Opening the card arms the
                same piece selection Cut uses, with no blade. -->
           <details class="vp-menu vp-top-menu vp-shell-menu" id="menu-crop">
-            <summary class="vp-bar-btn" title="Crop: copy what a shape holds out of the selected piece as a new solid piece. The original is not touched">Crop</summary>
+            <summary class="vp-bar-btn" title="Crop: copy what a shape holds out of the selected piece as a new solid piece (the original is not touched), or Lift features off it">Crop</summary>
             <div class="vp-menu-body vp-top-body" id="crop-card">
               <div class="edit-row crop-shape-row" id="crop-shape-row" role="group" aria-label="Shape">
               <button id="btn-crop-shape-box" class="btn btn-secondary" type="button" aria-pressed="false"
@@ -907,12 +909,58 @@
                       title="Piece: click another piece on the plate - the copy is where the two overlap">Piece</button>
               <button id="btn-crop-shape-outline" class="btn btn-secondary" type="button" aria-pressed="false"
                       title="Outline: click a piece for its footprint seen from above (Shift-click a triangle for its rim), then drag the outer and inner offsets and the two heights">Outline</button>
+              <button id="btn-crop-shape-lasso" class="btn btn-secondary" type="button" aria-pressed="false"
+                      title="Lasso: drag a loop round what to copy, on the screen - everything the loop sees, front to back, is copied. Draw again to replace it; Alt-drag to orbit">Lasso</button>
               </div>
               <p id="crop-readout" class="carve-readout">—</p>
               <button id="btn-crop" class="btn btn-secondary" type="button" disabled
                       title="Copy what the shape holds as a new solid piece, on the plate where it was cut from. The original is untouched. One Undo removes the copy. The shape stays for another crop">CROP</button>
               <button id="btn-crop-cancel" class="btn btn-ghost" type="button" disabled
                       title="Put the shape away (Escape does the same)">Cancel</button>
+            <!-- LIFT (app-lift-plate.js, docs/LIFT.md section 7), in the Crop card: the
+                 Lift button opens its panel in the card and a second press folds it
+                 away. Armed on a selected piece, what stands on it is found once (the
+                 rolling ball) and counted. Hover outlines a feature, a click lifts it,
+                 Shift-click gathers several; Strip lifts everything after an untick
+                 list. Detach flange is part of Lift and lives in the panel. Each lift
+                 is one Undo. -->
+            <div class="vp-row vp-row-lift">
+              <button id="btn-lift" class="btn btn-secondary" type="button" aria-pressed="false"
+                      title="Lift features off a piece as their own pieces. Arm it on a selected piece: what stands on its top is found and counted. Hover outlines a feature; a click lifts it; Shift-click gathers several and they lift together when Shift is let go. Each lift is one Undo. Click Lift again to fold it away.">Lift</button>
+            </div>
+            <div id="lift-panel" class="lift-panel" hidden>
+              <p class="lift-count-line"><span id="lift-count" class="lift-count">&mdash;</span></p>
+              <div class="vp-row vp-row-full">
+                <label class="lift-height" for="lift-height" title="A feature is offered when it stands out from the face by MORE than this. Default: one extrusion line at a 0.4 mm nozzle (NSO_Thickness.floorFor)"><span>How far out counts</span>
+                  <span id="lift-height-read">0.42 mm</span>
+                  <input type="range" id="lift-height" min="0" max="2" step="0.01" value="0.42" /></label>
+              </div>
+              <div class="vp-row vp-row-full">
+                <button id="btn-lift-strip" class="btn btn-secondary" type="button" disabled
+                        title="Lift every feature found: a short list first, untick what stays, then Confirm. One Undo for the whole strip.">Strip</button>
+              </div>
+              <div id="lift-strip" class="lift-strip" hidden>
+                <div id="lift-strip-rows"></div>
+                <p id="lift-strip-sum" class="lift-strip-sum"></p>
+                <div class="vp-row vp-row-pair">
+                  <button id="btn-lift-strip-go" class="btn btn-secondary" type="button">Confirm</button>
+                  <button id="btn-lift-strip-cancel" class="btn btn-secondary" type="button">Cancel</button>
+                </div>
+              </div>
+              <p id="lift-readout" class="carve-readout">&mdash;</p>
+              <!-- DETACH (app-detach.js, nso_detach.js; docs/DETACH.md): a detected
+                   flange comes off the piece, capped flush on its own neck wall, and
+                   lands beside it as its own closed piece. It is part of Lift: it opens
+                   and closes with the Lift button, id for id as it was in the Subtract
+                   card; Reattach, its other half, is in the Connect card. -->
+              <div class="detach-tools" id="detach-tools">
+              <div class="vp-row vp-row-full">
+                <button id="btn-detach" class="btn btn-secondary" type="button"
+                        title="Detach: find the flange on this piece and take it off. The piece is capped flush with its own neck wall, with nothing left of the flange and no gap to bridge. The flange lands beside it as its own closed piece. One Undo puts both back. Reattach (in Connect) seats it somewhere else.">Detach flange</button>
+              </div>
+              <div class="vp-row vp-row-full"><p id="detach-readout" class="carve-readout">&mdash;</p></div>
+              </div>
+            </div>
             </div>
           </details>
           <!-- CONNECT: the builder. Two anchors say where, the card says what runs
@@ -982,9 +1030,9 @@
                 </div>
               </div>
               <!-- REATTACH (app-detach.js; docs/DETACH.md): put a flange taken off by Detach
-                   (in the Subtract card) back on somewhere else. It moved here from the
-                   Crop card, id for id; its readout is Detach's, in the Subtract card, and
-                   the status line. The last row of the Connect card, under Attach's
+                   (in the Crop card, under Lift) back on somewhere else. It moved here from
+                   the Crop card, id for id; its readout is Detach's, in the Crop card's Lift
+                   panel, and the status line. The last row of the Connect card, under Attach's
                    row. -->
               <div class="edit-row">
               <button id="btn-reattach" class="btn btn-secondary btn-attach" type="button" aria-pressed="false" disabled
@@ -1300,10 +1348,10 @@
             </div>
           </details>
           <!-- SUBTRACT: what takes material away - Subtract, Extract bit, Punch, Hollow
-               (from Shape), and Lift, on the plate (app-lift-plate.js). Carve lives in
-               Sculpt, as its own arm beside Brush. -->
+               (from Shape). Carve lives in Sculpt, as its own arm beside Brush. Lift, with
+               Detach flange, moved to the Crop card. -->
           <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-bit">
-            <summary class="vp-bar-btn" title="Subtract B from A, Extract bit, Punch, Hollow, Lift, Split to parts">Subtract</summary>
+            <summary class="vp-bar-btn" title="Subtract B from A, Extract bit, Punch, Hollow, Split to parts">Subtract</summary>
             <div class="vp-menu-body vp-finish">
             <div class="vp-row vp-row-full">
               <button id="btn-subtract" class="btn btn-secondary btn-subtract" type="button" aria-pressed="false"
@@ -1420,47 +1468,6 @@
             <div class="vp-row vp-row-full">
               <button id="btn-hollow-safe" class="btn btn-secondary" type="button"
                       title="Hollow back out to the SAFEST minimum wall rather than to the number in the box. For reversing a Thicken in: the wall goes back down, but it stops at the nozzle-safety floor even when the wall was thinner than that before. Restoring an unprintable wall because it used to be unprintable is not a restore.">Hollow to safe min</button>
-            </div>
-            <!-- LIFT (app-lift-plate.js, docs/LIFT.md section 7): arm it on a
-                 selected piece; what stands on it is found once (the rolling
-                 ball) and counted. Hover outlines a feature, a click lifts it,
-                 Shift-click gathers several; Strip lifts everything after an
-                 untick list. Each lift is one Undo. -->
-            <div class="vp-row vp-row-lift">
-              <button id="btn-lift" class="btn btn-secondary btn-lift" type="button" aria-pressed="false"
-                      title="Lift features off a piece as their own pieces. Arm it on a selected piece: what stands on its top is found and counted. Hover outlines a feature; a click lifts it; Shift-click gathers several and they lift together when Shift is let go. Each lift is one Undo. Click Lift again to stop.">Lift</button>
-              <span id="lift-count" class="lift-count">&mdash;</span>
-            </div>
-            <div id="lift-panel" class="lift-panel" hidden>
-              <div class="vp-row vp-row-full">
-                <label class="lift-height" for="lift-height" title="A feature is offered when it stands out from the face by MORE than this. Default: one extrusion line at a 0.4 mm nozzle (NSO_Thickness.floorFor)"><span>How far out counts</span>
-                  <span id="lift-height-read">0.42 mm</span>
-                  <input type="range" id="lift-height" min="0" max="2" step="0.01" value="0.42" /></label>
-              </div>
-              <div class="vp-row vp-row-full">
-                <button id="btn-lift-strip" class="btn btn-secondary" type="button" disabled
-                        title="Lift every feature found: a short list first, untick what stays, then Confirm. One Undo for the whole strip.">Strip</button>
-              </div>
-              <div id="lift-strip" class="lift-strip" hidden>
-                <div id="lift-strip-rows"></div>
-                <p id="lift-strip-sum" class="lift-strip-sum"></p>
-                <div class="vp-row vp-row-pair">
-                  <button id="btn-lift-strip-go" class="btn btn-secondary" type="button">Confirm</button>
-                  <button id="btn-lift-strip-cancel" class="btn btn-secondary" type="button">Cancel</button>
-                </div>
-              </div>
-              <p id="lift-readout" class="carve-readout">&mdash;</p>
-            </div>
-            <!-- DETACH (app-detach.js, nso_detach.js; docs/DETACH.md): a detected
-                 flange comes off the piece, capped flush on its own neck wall, and
-                 lands beside it as its own closed piece. It is part of Lift: it sits in the
-                 Lift section, id for id (it came from the Crop card first); Reattach, its other half, is in the Connect card. -->
-            <div class="detach-tools" id="detach-tools">
-            <div class="vp-row vp-row-full">
-              <button id="btn-detach" class="btn btn-secondary" type="button"
-                      title="Detach: find the flange on this piece and take it off. The piece is capped flush with its own neck wall, with nothing left of the flange and no gap to bridge. The flange lands beside it as its own closed piece. One Undo puts both back. Reattach (in Join) seats it somewhere else.">Detach flange</button>
-            </div>
-            <div class="vp-row vp-row-full"><p id="detach-readout" class="carve-readout">&mdash;</p></div>
             </div>
             <!-- SPLIT TO PARTS (app-split-parts.js, nso_split_parts.js): a piece made of
                  several shells - the print-in-place hinge after Lift, any imported
@@ -2624,7 +2631,7 @@
   <script src="nso-helpers.js?v=9c476e39"></script>
   <script src="nso-recent.js?v=f03d6f13"></script>
   <script src="nso-bounds.js?v=778acac4"></script>
-  <script src="app-core.js?v=7f99f829"></script>
+  <script src="app-core.js?v=43d45126"></script>
   <!-- Up to six plates (beds): the active one is state.models / state.placed, the rest are kept beside it. docs/BEDS.md. -->
   <script src="app-beds.js?v=3d221bc4"></script>
 
@@ -2647,13 +2654,13 @@
   <!-- Crop's engine: copy what a shape holds out of a piece (docs/CROP.md). On
        the boolean kernel in app-join.js and app-sculpt.js's commit helpers;
        the Crop card (app-crop-card.js) runs on it, so it comes first. -->
-  <script src="nso_crop.js?v=fc0cc98c"></script>
+  <script src="nso_crop.js?v=0e1dcf45"></script>
   <!-- Crop, stage 1: box -> remove slab -> seal the joint. After app-cut.js
        (rawCutOpen, rawFlatCapLoop, mapPlaneToRaw) and app-sculpt.js (commit). -->
   <script src="app-crop.js?v=eaac717b"></script>
   <!-- The Crop card: a shape dragged to size, CROP (docs/CROP.md). After app-crop.js
        and app-cut.js, whose updateCutterUI it follows. -->
-  <script src="app-crop-card.js?v=9df7b5ca"></script>
+  <script src="app-crop-card.js?v=36b883b8"></script>
   <script src="app-fatten.js?v=9b21c866"></script>
   <!-- Section reader: Ring / Rod / Bar, or why not. Calls app-extend.js's
        axis detector and app-cut.js's loop walker at read time. -->
@@ -2788,7 +2795,7 @@
        seat. After nso_flange.js, app-crop.js, nso_assemble.js, app-assemble.js
        and app-join.js, whose functions it calls. See docs/DETACH.md. -->
   <script src="nso_detach.js?v=821852b5"></script>
-  <script src="app-detach.js?v=915c26c2"></script>
+  <script src="app-detach.js?v=4dbd1457"></script>
   <!-- G-scope supports: overhang markers, point-click generation, per-support
        edit / remove. After app-microscope.js, whose hooks it uses, and after
        nso_support_aim.js / nso_support_tree.js / app-join.js, whose
@@ -2820,7 +2827,7 @@
   <script src="nso_lift.js?v=34f68869"></script>
   <script src="nso_lift_curved.js?v=692d105e"></script>
   <script src="nso_lift_auto.js?v=14d63622"></script>
-  <script src="app-lift-plate.js?v=092e1250"></script>
+  <script src="app-lift-plate.js?v=d7c34582"></script>
   <script src="nso_shells.js?v=9058ef83"></script>
   <script src="nso_split_parts.js?v=bbef4f98"></script>
   <script src="app-split-parts.js?v=bc936632"></script>
