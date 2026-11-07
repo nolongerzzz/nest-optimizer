@@ -1511,19 +1511,25 @@ function showEditPreview() {
 // black slab, depth-tested: only what stuck out of the piece showed, so on a
 // tall or wide piece the blade looked as if it stopped short.)
 //
-// The blade carries a BALL on its top end - the end that stands uppermost on the plate (the plate vertical, seen in the
-// blade's own plane) - as the place to take hold of it: a thin blade is hard to catch, and the ball is not (a drag from it
-// is the blade's drag). It is placed by cutPlaceBall on every update, from the cut frame's own `up`, so it stays on the
-// top end through a mitre, a bevel and a turn of the piece. (A strip where the plane meets the plate used to stand in for
-// it. It was drawn on the plate, far from the blade whenever the blade lay near-flat, and is gone.)
+// The blade carries a BALL, joined by a short bar to the front-left end of its top edge, in the blade's own colour - built onto
+// the blade, an extension of it - as the place to take hold of it: a
+// thin blade is hard to catch, and the ball - standing clear of the piece, out past the corner, at the height of the top
+// edge - is not (a drag from it is the blade's drag). "Top" is the plate vertical seen in the blade's own plane; "front-left"
+// is the top corner that lies toward the viewer and the left of the home view (a continuous choice: it does not flip as the blade
+// turns, except where the blade runs exactly edge-on to it). cutPlaceBall places it on every update from the cut frame's own
+// `up`, so it stays on that corner through a mitre, a bevel and a turn of the piece. (A strip where the plane met the plate
+// used to stand in for it. It was drawn on the plate, far from the blade whenever the blade lay near-flat, and is gone.)
 //
 // Every part is skipped by the x-ray view (which rewrites depth settings on
 // whatever it walks); dragging starts from the blade's sheet, its frame or the ball.
-const CUT_BLADE_COLOR = 0xffc83d;      // the frame and the ball
+const CUT_BLADE_COLOR = 0xffc83d;      // the frame (the ball and its bar are the sheet's colour)
 const CUT_BLADE_FILL = 0x101010;       // the sheet: a dark tint reads on any piece colour
 const CUT_BLADE_FILL_OPACITY = 0.38;
 const CUT_BLADE_RENDER_ORDER = 20;     // after the pieces, so the sheet tints them
-const CUT_BALL_RADIUS_MM = 2.4;        // the ball on the blade's top end: big enough to catch
+const CUT_BALL_RADIUS_MM = 2.4;        // the ball at the blade's top corner: big enough to catch
+const CUT_BALL_BAR_MM = 6;             // the bar from the corner to the ball
+const CUT_BALL_BAR_RADIUS_MM = 0.7;
+const CUT_BALL_INSET_MM = 0.6;         // the bar runs this far into the blade
 const CUT_OVERHANG_MM = 1;             // the blade's margin past the section, each side
 const CUT_MIN_ACROSS_MM = 4;
 
@@ -1583,35 +1589,74 @@ function cutBuildSizedBlade(group, f) {
   group.userData.cutSig = bl.key;
 }
 
-/** The ball on the blade's top end, in the helper's own (cut) frame. `box` is the blade's extent there: { off: its centre
-    from the section's centre, size: its size along the three cut-frame axes (0 along the plane's normal) }, kept on the
-    helper so cutPlaceBall can find the end again whenever the frame turns. */
+/** The ball and its bar, in the helper's own (cut) frame. `box` is the blade's extent there: { off: its centre from the
+    section's centre, size: its size along the three cut-frame axes (0 along the plane's normal) }, kept on the helper so
+    cutPlaceBall can find the corner again whenever the frame turns. */
 function cutBuildBall(group, off, size) {
-  const ball = new THREE.Mesh(new THREE.SphereGeometry(CUT_BALL_RADIUS_MM, 20, 14), new THREE.MeshBasicMaterial({
-    color: CUT_BLADE_COLOR, depthTest: false, depthWrite: false
-  }));
-  ball.renderOrder = CUT_BLADE_RENDER_ORDER + 1;
+  // The blade's own stuff: the sheet's colour, translucency and settings (so it reads as part of the blade - an extension of it -
+  // and not as a separate thing), in the transparent pass like the sheet and frame: an opaque ball is drawn first, and the
+  // translucent plate (which knows nothing of it, no depth being written) is then drawn over it from straight above.
+  const mat = () => new THREE.MeshBasicMaterial({ color: CUT_BLADE_FILL, transparent: true, opacity: CUT_BLADE_FILL_OPACITY,
+    side: THREE.DoubleSide, depthTest: false, depthWrite: false });
+  const ball = new THREE.Mesh(new THREE.SphereGeometry(CUT_BALL_RADIUS_MM, 20, 14), mat());
   ball.userData.cutBall = true;
   cutOverlay(ball, true);
   ball.renderOrder = CUT_BLADE_RENDER_ORDER + 1;
+  const bar = new THREE.Mesh(new THREE.CylinderGeometry(CUT_BALL_BAR_RADIUS_MM, CUT_BALL_BAR_RADIUS_MM, 1, 10), mat());
+  bar.userData.cutBar = true;
+  cutOverlay(bar, true);
+  bar.renderOrder = CUT_BLADE_RENDER_ORDER + 1;
+  group.add(bar);
   group.add(ball);
   group.userData.cutBallBox = { off: off, size: size };
 }
 
-/** Put the ball on the blade's top end: the blade's `up` is the plate vertical taken into its own plane (the cut frame's
-    `upCut`, less its part along the plane's normal) - and when the plane lies flat there is no such direction, so the
-    first axis across the plane stands in. The ball sits just past the edge, on the middle of it. */
+/** Put the ball on the blade's front-left top corner, with its bar. The blade's `up` is the plate vertical taken into its
+    own plane (the cut frame's `upCut`, less its part along the plane's normal) - and when the plane lies flat there is no
+    such direction, so the first axis across the plane stands in. The blade is a rectangle in that plane; its top corners are
+    the ones furthest along `up` (both ends of the top edge when the blade stands square to the frame). Of those, the one
+    toward the front and left of the home view (the direction (-0.5, 0, 1) in the world) is taken. The bar runs from the
+    corner outward along the top edge - away from the blade's middle, in its plane - and the ball sits at its end. */
 function cutPlaceBall(group, info) {
-  const ball = group && group.children.find(c => c.userData.cutBall), box = group && group.userData.cutBallBox;
-  if (!ball || !box || !info || !info.upCut) return;
-  const AX = ['x', 'y', 'z'], k = AX.indexOf(info.axis);
+  const ball = group && group.children.find(c => c.userData.cutBall), bar = group && group.children.find(c => c.userData.cutBar);
+  const box = group && group.userData.cutBallBox;
+  if (!ball || !bar || !box || !info || !info.upCut) return;
+  const AX = ['x', 'y', 'z'], k = AX.indexOf(info.axis), a = (k + 1) % 3, b = (k + 2) % 3;
   const u = info.upCut.clone();
   u.setComponent(k, 0);
-  if (u.length() < 0.2) { u.set(0, 0, 0); u.setComponent((k + 1) % 3, 1); } else u.normalize();
-  let support = 0;
-  for (let i = 0; i < 3; i++) if (i !== k) support += Math.abs(u.getComponent(i)) * box.size[i] / 2;
-  ball.position.set(box.off[0], box.off[1], box.off[2]).addScaledVector(u, support + CUT_BALL_RADIUS_MM * 0.6);
+  if (u.length() < 0.2) { u.set(0, 0, 0); u.setComponent(a, 1); } else u.normalize();
+  const corners = [];
+  [-1, 1].forEach(function (sa) {
+    [-1, 1].forEach(function (sb) {
+      const c = new THREE.Vector3();
+      c.setComponent(a, sa * box.size[a] / 2);
+      c.setComponent(b, sb * box.size[b] / 2);
+      corners.push(c);
+    });
+  });
+  let top = -Infinity;
+  corners.forEach(function (c) { top = Math.max(top, c.dot(u)); });
+  group.updateMatrixWorld(true);
+  const q = group.getWorldQuaternion(new THREE.Quaternion()), ref = new THREE.Vector3(-0.5, 0, 1).normalize();
+  let best = null, bs = -Infinity;
+  corners.forEach(function (c) {
+    if (c.dot(u) < top - 1e-6) return;                       // not on the top edge
+    const sc = c.clone().applyQuaternion(q).dot(ref);
+    if (sc > bs) { bs = sc; best = c; }
+  });
+  // outward: along the top edge, away from the blade's middle (the corner less its part along `up`)
+  const out = best.clone().addScaledVector(u, -best.dot(u));
+  if (out.length() < 1e-6) out.crossVectors(new THREE.Vector3().setComponent(k, 1), u);
+  out.normalize();
+  const off = new THREE.Vector3(box.off[0], box.off[1], box.off[2]), corner = off.clone().add(best);
+  // The bar starts CUT_BALL_INSET_MM inside the blade's edge, so it is built onto the blade (no seam, whatever the angle it is seen from).
+  const L = CUT_BALL_BAR_MM + CUT_BALL_RADIUS_MM, Lb = L + CUT_BALL_INSET_MM;
+  ball.position.copy(corner).addScaledVector(out, L);
+  bar.position.copy(corner).addScaledVector(out, (L - CUT_BALL_INSET_MM) / 2);
+  bar.scale.set(1, Lb, 1);
+  bar.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), out);
   ball.updateMatrixWorld(true);
+  bar.updateMatrixWorld(true);
 }
 
 function cutBuildBlade(group, f) {

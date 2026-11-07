@@ -171,3 +171,12 @@ taken hold of (the ball's centre, which is on the plane) instead of a plane thro
 drawn through the piece, pickable, no plate line anywhere), `nso_wire_cut_grab_test` (a real mouse press on the ball from a diagonal camera takes hold without moving the blade, and a drag slides it),
 `nso_wire_cut_tip_test` / `nso_wire_cut_yaw_test` (they held the cut face to the plate line's direction and extent; that geometry is now `__planeTrace` in the tests, the app no longer draws it),
 `nso_cut_rotate_dial_drive_check` (the 90 button: layout, mitre 90, the blade's normal a quarter-turn on, Square back), `nso_wire_cut_redesign_test` (control order).
+
+### Fourteenth round (2026-11-07): the ball moves to the top corner, on a bar, in the blade's own colour
+
+Asked for (from a sketch): the ball out past the front corner of the blade's top edge, on a small bar to that corner, not floating; then, "an extension of the blade, same colour, not yellow". `cutBuildBall` makes
+a ball and a bar from the blade SHEET's material (colour, opacity 0.38, transparent, double-sided, no depth test) - transparent matters: an opaque ball is drawn before the translucent plate, which (no depth written) then
+paints over it from straight above (three camera angles in `nso_wire_cut_blade_view_test` found it). `cutPlaceBall` takes the blade rectangle's corners, keeps the ones furthest along `up` (the top edge's two ends when the
+blade stands square to the frame), picks the one toward the front and left of the home view (the world direction (-0.5, 0, 1): continuous in the blade's turn), runs the bar outward along the top edge from 0.6 mm
+inside the corner (`CUT_BALL_INSET_MM`) for `CUT_BALL_BAR_MM` + the ball's radius, and puts the ball at its end. A press on the bar grabs like one on the ball (`app-core.js`). The blade-view test now gates: ball on the
+plane at the height of the top edge, bar 0.6 into a top corner and ending at the ball, ball and bar the sheet's colour and translucency (not the frame's yellow), the front-left corner chosen, drawn through the piece.

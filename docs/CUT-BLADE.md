@@ -28,15 +28,18 @@ within reach);
 the number box takes anything, and the slider's range grows to hold what it is
 given, so a slider never sits at its end while its box says something else.
 
-**The ball.** The blade carries a ball on its top end - the end that stands uppermost on the plate, seen in
-the blade's own plane - as the place to take hold of it. A thin blade is hard to catch, and the ball is not: press
-it and drag, and the blade slides (the drag starts from where you took hold, so taking hold moves nothing). The ball
-stays on the top end through a mitre, a bevel and a turn of the piece (on the Sized blade and the Notch, where a click
-on the piece is how the blade is placed, a click that lands on the ball over the piece still places the blade; the ball is a
-handle where it stands clear of the piece); where the blade lies flat it stands on the
-first axis across the plane. It is drawn through the piece like the rest of the blade. A strip where the blade's
-plane met the plate used to do this job; it floated off the blade wherever the blade lay near-flat (a piece leaned
-past upright) and is gone.
+**The ball.** The blade carries a ball, joined to the front-left end of its top edge by a short bar, as the place to take
+hold of it. A thin blade is hard to catch, and the ball is not: press it (or the bar) and drag, and the blade slides (the drag
+starts from where you took hold, so taking hold moves nothing). It is built onto the blade - made of the blade's own stuff, the
+sheet's dark translucent colour, not yellow, with the bar running a little way into the blade's edge so there is no seam - so it
+reads as an extension of the blade and is never off by itself. "Top" is the plate vertical seen in the blade's own plane;
+"front-left" is the top corner toward the viewer and the left of the home view (a smooth choice: it does not flip as the blade
+turns). It stays on that corner through a mitre, a bevel and a turn of the piece; where the blade lies flat it stands on the first
+axis across the plane. It is drawn through the piece like the rest of the blade. On the Full blade a press that reaches the ball
+before the piece behind it takes hold of the blade; on the Sized blade and the Notch, where a click on the piece is how the blade
+is placed, a click that lands on the ball over the piece still places the blade, and the ball is a handle where it stands clear of
+the piece. A strip where the blade's plane met the plate used to do this job; it floated off the blade wherever the blade lay
+near-flat (a piece leaned past upright) and is gone.
 
 **Mitre buttons.** Under the Mitre wheel, beside its box, **Square** sets the mitre to 0 and **90°** to 90 - the
 opposite blade direction, a quarter-turn about the vertical - without dragging the wheel or typing an angle.

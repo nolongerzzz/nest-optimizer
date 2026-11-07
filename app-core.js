@@ -4143,8 +4143,10 @@ function onCanvasPointerDown(event) {
          its top end, which stands well off the blade's centre - so taking hold moves nothing. */
       {
         const gm = getActiveModel(), gf = gm ? cutFrame(gm) : null;
-        const gp = cutHits[0].object.userData && cutHits[0].object.userData.cutBall
-          ? new THREE.Vector3().setFromMatrixPosition(cutHits[0].object.matrixWorld)     // the ball: by its centre, which is on the blade's plane
+        const hu = cutHits[0].object.userData || {};
+        const ballOfHit = (hu.cutBall || hu.cutBar) ? state.cutHelper.children.find(c => c.userData && c.userData.cutBall) : null;
+        const gp = ballOfHit
+          ? new THREE.Vector3().setFromMatrixPosition(ballOfHit.matrixWorld)             // the ball or its bar: by the ball's centre, which is on the blade's plane
           : cutHits[0].point;
         state.cutDragFrom = gf && gf.mesh ? gp.clone().applyMatrix4(new THREE.Matrix4().copy(gf.mesh.matrixWorld).invert()) : null;
       }
