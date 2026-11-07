@@ -87,7 +87,117 @@ withApp(async (page, logs) => {
   check('the wall floor comes back from the canonical module in the page',
     ui.floor === 0.42, String(ui.floor));
 
-  console.log('\n=== 2. a ball, thrown onto a real piece ===');
+  console.log('\n=== 1b. the start: an empty plate, nothing typed, nothing selected ===');
+  const ids = () => page.evaluate(() => state.placed.map(p => p.name));
+  const startState = await page.evaluate(() => ({ placed: state.placed.length, session: !!NSO_wheelSession }));
+  check('the plate starts empty and the wheel holds nothing', startState.placed === 0 && !startState.session);
+
+  /* A move with no ball is a loud no-op: it must not conjure a piece. */
+  await openWheelMenu(page);
+  await page.click('#btn-wheel-open');
+  check('Open with no ball says to throw one first',
+    /Nothing on the wheel - throw a ball first/.test(await statusOf(page)), await statusOf(page));
+  check('...and puts nothing on the plate', (await ids()).length === 0);
+
+  /* A refused ball must not leave a session behind. (It used to: Ball set the
+     session first and only then found there was no piece to bake onto.) */
+  const refused = await page.evaluate(() => {
+    const r = NSO_wheelRun('ball', { wall: 0.1 }, 'Ball centred');
+    return { ok: r.ok, session: !!NSO_wheelSession, placed: state.placed.length };
+  });
+  check('a refused ball (wall under the nozzle floor) leaves no session and no piece',
+    refused.ok === false && !refused.session && refused.placed === 0,
+    JSON.stringify(refused) + ' ' + await statusOf(page));
+
+  /* The start itself: press Ball, nothing else. */
+  await page.click('#btn-wheel-ball');
+  await page.waitForFunction(() => /Dropped Wheel 1/.test(document.getElementById('status').textContent),
+    null, { timeout: 30000 });
+  const first = await page.evaluate(() => {
+    const m = getActiveModel();
+    return { names: state.placed.map(p => p.name), active: m && m.name, size: m && m.size,
+             session: !!NSO_wheelSession, radius: NSO_wheelSession && NSO_wheelSession.sizing.ball_radius };
+  });
+  const startStatus = await statusOf(page);
+  console.log('   status: ' + startStatus);
+  check('Ball with nothing typed and nothing selected drops a piece of its own, selected',
+    first.names.length === 1 && first.active === 'Wheel 1', JSON.stringify(first.names));
+  check('it is the standard ball: 25 mm radius, 50 mm across',
+    first.radius === 25 && Math.abs(first.size.x - 50) < 0.01, first.size.x + ' mm');
+  check('the status says what it is and what it is for',
+    /standard ball/.test(startStatus) && /plate/.test(startStatus) && /bowl/.test(startStatus), startStatus);
+  const firstMesh = await measure(page);
+  check('and it is a closed solid', firstMesh.open === 0 && firstMesh.nm === 0);
+
+  /* Pressed flat it is a plate that fits the smallest machine. */
+  await page.click('#btn-wheel-flatten');
+  await page.waitForFunction(() => /Flattened/.test(document.getElementById('status').textContent),
+    null, { timeout: 30000 });
+  const plate = await page.evaluate(() => {
+    const f = NSO_wheelFitReport(NSO_wheelSession, NSO_Printer.resolve('a1mini'));
+    return { fits: f.fits, d: 2 * Math.max.apply(null, NSO_wheelSession.outer.map(q => q.r)) };
+  });
+  check('the standard ball presses into a plate that fits the A1 Mini',
+    plate.fits === true && plate.d > 120 && plate.d < 180, plate.d.toFixed(1) + ' mm across');
+
+  /* Undo takes the press back - and the WHEEL goes back with it. Opening
+     afterwards opens the BALL; had the session stayed on the pressed disc, a
+     3 mm wall in a 3 mm disc would have refused. */
+  await page.click('#btn-undo');
+  await page.waitForFunction(() => /Undo/.test(document.getElementById('status').textContent),
+    null, { timeout: 30000 });
+  await page.click('#btn-wheel-open');
+  await page.waitForFunction(() => /Opened|leaves no cavity|already open/.test(document.getElementById('status').textContent),
+    null, { timeout: 30000 });
+  check('after Undo the wheel is back on the ball: Open opens it',
+    /Opened/.test(await statusOf(page)), await statusOf(page));
+  const bowl1 = await measure(page);
+
+  /* A second ball is a second piece. Moves act on the wheel's piece, wherever
+     the selection is - they do not bake onto whatever is selected. */
+  await page.click('#btn-wheel-ball');
+  await page.waitForFunction(() => /Dropped Wheel 2/.test(document.getElementById('status').textContent),
+    null, { timeout: 30000 });
+  check('a second Ball is a second piece, not a replacement', (await ids()).length === 2, (await ids()).join(', '));
+  const w1id = await page.evaluate(() => state.models.find(m => m.name === 'Wheel 1').id);
+  await selectModel(page, w1id);
+  check('(the bowl, Wheel 1, is selected now)', await page.evaluate(() => getActiveModel().name) === 'Wheel 1');
+  await page.click('#btn-wheel-flatten');
+  await page.waitForFunction(() => /Flattened/.test(document.getElementById('status').textContent),
+    null, { timeout: 30000 });
+  const after = await page.evaluate(() => ({
+    active: getActiveModel().name,
+    w1: state.models.find(m => m.name === 'Wheel 1').rawTris.length,
+    w2h: state.models.find(m => m.name === 'Wheel 2').size.y
+  }));
+  check('Flatten pressed the wheel\'s own piece (Wheel 2) and selected it',
+    after.active === 'Wheel 2' && Math.abs(after.w2h - 3) < 1e-3, after.active + ', ' + after.w2h.toFixed(3) + ' mm thick');
+  check('...and left the selected bowl exactly as it was', after.w1 === bowl1.tris * 9, after.w1 + ' floats');
+
+  /* Something other than the wheel changing the piece ends the session
+     rather than being overwritten by it. */
+  const stood = await page.evaluate(() => {
+    const m = state.models.find(x => x.name === 'Wheel 2');
+    m.rawTris = new Float32Array(m.rawTris);
+    const before = m.rawTris;
+    const r = NSO_wheelRun('flatten', { height: 10 }, 'Flattened');
+    return { ok: r.ok, ended: !NSO_wheelSession, same: m.rawTris === before };
+  });
+  check('a piece changed by something else stands the wheel down - and is not overwritten',
+    stood.ok === false && stood.ended && stood.same && /Wheel stood down/.test(await statusOf(page)),
+    JSON.stringify(stood) + ' ' + await statusOf(page));
+
+  /* A piece taken off the plate leaves nothing for the wheel to act on. */
+  await page.click('#btn-wheel-ball');
+  await page.waitForFunction(() => /Dropped Wheel 3/.test(document.getElementById('status').textContent),
+    null, { timeout: 30000 });
+  await page.click('#btn-undo');
+  await page.waitForFunction(() => !state.models.some(m => m.name === 'Wheel 3'), null, { timeout: 30000 });
+  await page.click('#btn-wheel-open');
+  check('with its piece gone, a move says so and starts nothing',
+    /The piece on the wheel is gone/.test(await statusOf(page)), await statusOf(page));
+
+  console.log('\n=== 2. a ball, dropped beside a real piece ===');
   const id = await loadSTL(page, fx('box-20mm.stl'));
   await selectModel(page, id);
   await openWheelMenu(page);
@@ -108,7 +218,12 @@ withApp(async (page, logs) => {
   console.log('   status: ' + ballStatus);
   console.log('   ball        tris ' + ball.tris + '  open ' + ball.open + '  nm ' + ball.nm +
               '  vol ' + ball.volume.toFixed(1) + '  bbox ' + JSON.stringify(ball.size));
-  check('the piece the app draws was actually replaced', ball.tris !== boxBefore.tris);
+  check('the ball is a piece of its own: the box is still there, untouched',
+    await page.evaluate((n) => {
+      const b = state.models.find(m => m.name === 'box-20mm');
+      return !!b && b.rawTris.length / 9 === n && state.placed.some(p => p.name === 'box-20mm');
+    }, boxBefore.tris), boxBefore.tris + ' triangles');
+  check('...and the new piece is the selected one', ball.tris !== boxBefore.tris);
   check('the ball is closed - 0 open, 0 non-manifold', ball.open === 0 && ball.nm === 0,
     ball.open + ' open, ' + ball.nm + ' non-manifold');
   check('it is round - all three bbox axes equal',

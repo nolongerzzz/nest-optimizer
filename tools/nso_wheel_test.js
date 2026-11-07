@@ -121,6 +121,10 @@ console.log('== 0. the wall floor comes from nso_thickness.js and nowhere else =
   try { bare.NSO_wheelBall({ height: 60 }); } catch (e) { threw = e.message; }
   check('without nso_thickness.js the wheel refuses to start, loudly',
     threw !== null && /nso_thickness/.test(threw), threw ? threw.slice(0, 64) + '...' : 'did NOT throw');
+  let threwDefault = null;
+  try { bare.NSO_wheelBall({}); } catch (e) { threwDefault = e.message; }
+  check('...and the standard ball (no target) refuses the same way, naming the same module',
+    threwDefault !== null && /nso_thickness/.test(threwDefault), threwDefault ? threwDefault.slice(0, 64) + '...' : 'did NOT throw');
 
   /* And the same contract on the OTHER module BALL now leans on. The sizing
      moved to nso_stock.js (docs/STOCK.md); loaded without it the wheel says so
@@ -836,6 +840,56 @@ console.log('\n== 7b. Flatten: the top comes down, the clay spreads, nothing is 
   const pullDisc = W.NSO_wheelPull(full.piece, { z: 1.5, dr: 4 });
   check('(known) Pull is not yet volume-conserving: on a full disc it is refused as out of material',
     !pullDisc.ok && /out of material/.test(pullDisc.reason), pullDisc.reason);
+}
+
+/* =====================================================================
+   7c. The standard ball: no target, no size to pick
+   ===================================================================== */
+console.log('\n== 7c. the standard ball: start with nothing to type ==');
+{
+  const r = W.NSO_wheelBall({});
+  check('a ball with no target at all lands', r.ok, r.reason);
+  const std = r.piece;
+  const a = W.NSO_WHEEL_DEFAULT_BALL_RADIUS;
+  check('it is the standard 25 mm ball, 50 mm tall, resting on z = 0',
+    a === 25 && Math.abs(span(std) - 50) < 1e-9 && W.NSO_wheelSpan(std.outer).lo === 0,
+    span(std).toFixed(3) + ' mm');
+  check('its widest point is the radius, poles on the axis',
+    Math.abs(rMax(std) - a) < 1e-9 && std.outer[0].r === 0 && std.outer[std.outer.length - 1].r === 0);
+  const trueSphere = 4 / 3 * Math.PI * a * a * a;
+  check('it carries the clay of a 25 mm sphere (to the 96-gon\'s shade under it), with zero headroom used',
+    Math.abs(W.NSO_wheelVolume(std) / trueSphere - 1) < 5e-4 && Math.abs(W.NSO_wheelBudget(std).headroom) < 1e-9,
+    (W.NSO_wheelVolume(std) / 1000).toFixed(2) + ' cm^3');
+  check('the status line says what it is and what it is for',
+    /standard ball/.test(r.reason) && /plate/.test(r.reason) && /bowl/.test(r.reason), r.reason);
+  check('the wall is the stated default, not a number typed',
+    std.wall === ctx.NSO_Stock.DEFAULTS.wall, std.wall + ' mm');
+
+  /* A wall can still be asked for - and the floor still applies. */
+  const thick = W.NSO_wheelBall({ wall: 4 });
+  check('a wall can still be asked for with no target', thick.ok && thick.piece.wall === 4);
+  const thin = W.NSO_wheelBall({ wall: 0.2 });
+  check('a wall under the nozzle floor refuses, naming it - and builds no piece',
+    !thin.ok && thin.piece === null && /nozzle floor/.test(thin.reason), thin.reason);
+
+  /* Sizing from a target is the option now, and is exactly what it was. */
+  const sized = W.NSO_wheelBall({ height: 60 });
+  check('with a target height the ball is still sized by Pappus, as before',
+    sized.ok && Math.abs(sized.piece.sizing.ball_radius - 23.2918) < 1e-3, sized.piece.sizing.ball_radius.toFixed(4) + ' mm');
+  check('a height of zero or less falls back to the standard ball rather than sizing nothing',
+    W.NSO_wheelBall({ height: 0 }).piece.sizing.ball_radius === 25 && W.NSO_wheelBall({ height: -5 }).piece.sizing.ball_radius === 25);
+
+  /* The point of a standard ball: the same one makes a plate and a bowl. */
+  const plate = W.NSO_wheelFlatten(std, {});
+  check('pressed flat it is a plate', plate.ok && Math.abs(span(plate.piece) - std.wall) < 1e-9,
+    plate.ok ? (2 * rMax(plate.piece)).toFixed(1) + ' mm across' : plate.reason);
+  const a1 = ctx.NSO_Printer.resolve('a1mini');
+  check('...and that plate fits the smallest machine (A1 Mini, 180 mm)',
+    plate.ok && W.NSO_wheelFitReport(plate.piece, a1).fits === true,
+    plate.ok ? (2 * rMax(plate.piece)).toFixed(1) + ' mm across' : '');
+  const bowl = W.NSO_wheelOpen(std, {});
+  check('opened it is a bowl', bowl.ok && bowl.depth > 15, bowl.reason);
+  check('...within the wall floor', bowl.ok && bowl.wall.pass, bowl.ok ? bowl.wall.reason : '');
 }
 
 console.log('\n== 8. what this first version does not do, and says so ==');

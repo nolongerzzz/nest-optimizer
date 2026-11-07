@@ -174,8 +174,14 @@ withApp(async (page, logs) => {
     const ball = await measure(page);
     const line = await statusOf(page);
     console.log('   status: ' + line);
-    check('Ball still bakes onto the SELECTED piece, the way it always has',
-      ball.id === id && ball.open === 0 && ball.nm === 0, ball.tris + ' triangles');
+    /* Changed on purpose (docs/handoff/wheel-start-a-standard-ball-that-drops-
+       its-own-piece.md): Ball used to overwrite whichever piece was selected and
+       refused with nothing selected. It now drops a piece of its own, like
+       Stock, and leaves the selected one alone. */
+    check('Ball drops a piece of its own and leaves the SELECTED piece untouched',
+      ball.id !== id && ball.open === 0 && ball.nm === 0 &&
+      await page.evaluate(i => { const b = state.models.find(m => m.id === i); return !!b && b.rawTris.length / 9 === 12; }, id),
+      ball.tris + ' triangles, the box still 12');
     check('...still 46.58 mm across for a 60 mm target',
       Math.abs(ball.size.x - 46.5836) < 0.01, ball.size.x + ' mm');
     check('...and still says exactly what it said before the sizing moved out',

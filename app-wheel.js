@@ -335,9 +335,42 @@ function NSO_wheelSizeBall(opts) {
 var NSO_WHEEL_PROFILE_N = 96;   // meridian samples on the starting ball
 var NSO_WHEEL_SEGMENTS = 96;    // radial segments in the revolve
 
+/* THE STANDARD BALL. Nobody should have to name the vessel they want before
+   they have touched the clay: with no target height the wheel starts from one
+   ball of a fixed size, big enough to press into a plate or open into a bowl,
+   and anything bigger is built from there by adding clay (Rim +). 25 mm radius
+   is 65.4 cm^3: pressed to the 3 mm wall it is a 166 mm disc, which still fits
+   the smallest machine in nso_printer.js, and opened it is a hand-sized bowl.
+   A target height (H, optionally R) still sizes the ball by Pappus's theorem,
+   exactly as before - that route is now the option, not the way in.          */
+var NSO_WHEEL_DEFAULT_BALL_RADIUS = 25;   // mm
+
+function NSO_wheelDefaultBall(opts) {
+  opts = opts || {};
+  /* The floor first, from NSO_Thickness, as every other route does: a context
+     with no nso_thickness.js must refuse by naming that module. */
+  var floor = NSO_wheelFloor(opts.nozzle);
+  var dflt = NSO_wheelStock().DEFAULTS || {};
+  var wall = (typeof opts.wall === 'number' && opts.wall > 0) ? opts.wall : (dflt.wall || 3);
+  if (wall < floor) {
+    return { ok: false, reason: 'a ' + wall.toFixed(3) + ' mm wall is under the ' + floor.toFixed(3) +
+      ' mm nozzle floor - nothing thrown that thin could be printed' };
+  }
+  var a = (typeof opts.ballRadius === 'number' && opts.ballRadius > 0) ? opts.ballRadius : NSO_WHEEL_DEFAULT_BALL_RADIUS;
+  var vol = 4 / 3 * Math.PI * a * a * a;
+  return {
+    ok: true,
+    height: 2 * a, radius: a, wall: wall, waste: 0, nozzle_floor: floor,
+    ball_volume: vol, ball_radius: a,
+    reason: 'standard ball, radius ' + a.toFixed(1) + ' mm (' + (vol / 1000).toFixed(1) +
+      ' cm^3 of clay) - flatten it for a plate or open it for a bowl'
+  };
+}
+
 function NSO_wheelBall(opts) {
   opts = opts || {};
-  var sized = NSO_wheelSizeBall(opts);
+  var sized = (typeof opts.height === 'number' && opts.height > 0)
+    ? NSO_wheelSizeBall(opts) : NSO_wheelDefaultBall(opts);
   if (!sized.ok) return { ok: false, reason: sized.reason, piece: null };
 
   var a = sized.ball_radius;
@@ -1339,6 +1372,146 @@ function NSO_wheelCommit(m, working, statusText) {
    sees the revolved result. */
 var NSO_wheelSession = null;
 
+/* WHERE THE SESSION LIVES. The profile above is the wheel's state; this is
+   the piece on the plate it belongs to. A thrown piece is a piece of its own
+   (Ball drops one, the way Stock does), and every move after it acts on THAT
+   piece - never on whatever happens to be selected, which is how a move used
+   to bake the wheel's form onto an unrelated piece.
+
+     modelId  the piece the wheel threw
+     history  the form the wheel held after each step, with the triangles it
+              wrote for it: { piece, soup }, oldest first
+
+   Undo puts a piece's triangles back by reference, so "is the piece still
+   what the wheel last wrote?" is an identity test on `soup`. If Undo took it
+   back to an earlier step the session rewinds to that step; if something else
+   changed it (another tool, a Scale), the session ENDS rather than overwrite
+   that work - Stock's rule (docs/handoff/stock-live-editing-...).            */
+var NSO_wheelHome = null;
+
+function NSO_wheelSay(msg, bad) {
+  if (typeof setStatus === 'function') setStatus(msg, !!bad);
+}
+
+function NSO_wheelModel() {
+  if (!NSO_wheelHome || typeof state === 'undefined' || !state || !state.models) return null;
+  var id = NSO_wheelHome.modelId;
+  return state.models.find(function (x) { return x && x.id === id; }) || null;
+}
+
+function NSO_wheelEnd(why) {
+  NSO_wheelSession = null;
+  NSO_wheelHome = null;
+  NSO_wheelSay(why, true);
+  return { ok: false, reason: why, ended: true };
+}
+
+/* Is the piece on the plate still the form the wheel holds? Rewinds to an
+   earlier step after an Undo; ends the session if the piece was changed by
+   anything else or is gone. Returns { ok, model } or a refusal (status set). */
+function NSO_wheelSync() {
+  if (!NSO_wheelSession || !NSO_wheelHome) {
+    NSO_wheelSay('Nothing on the wheel - throw a ball first', true);
+    return { ok: false, reason: 'no session' };
+  }
+  var m = NSO_wheelModel();
+  if (!m) {
+    return NSO_wheelEnd('The piece on the wheel is gone - throw a new ball to start again');
+  }
+  var h = NSO_wheelHome.history;
+  if (h[h.length - 1].soup !== m.rawTris) {
+    var i = h.length - 2;
+    while (i >= 0 && h[i].soup !== m.rawTris) i--;
+    if (i < 0) {
+      return NSO_wheelEnd('Wheel stood down - ' + (m.name || 'the piece') + ' was changed by something ' +
+        'other than the wheel since it was last thrown, and the wheel will not overwrite that. ' +
+        'Throw a new ball to start again.');
+    }
+    NSO_wheelHome.history = h.slice(0, i + 1);   // Undo took it back to here
+    NSO_wheelSession = h[i].piece;
+  }
+  return { ok: true, model: m };
+}
+
+/* Select the wheel's own piece, so what the move is about to change is what
+   the person is looking at. */
+function NSO_wheelSelect(m) {
+  if (typeof state === 'undefined' || !state.placed || typeof selectPlaced !== 'function') return;
+  var idx = -1;
+  for (var i = 0; i < state.placed.length; i++) {
+    if (state.placed[i] && state.placed[i].sourceId === m.id) { idx = i; break; }
+  }
+  /* The slot AND the edit target: the rest of the UI acts on the active model,
+     which can be a different piece from the selected slot. */
+  var active = (typeof getActiveModel === 'function') ? getActiveModel() : null;
+  if (idx >= 0 && (state.selectedIndex !== idx || active !== m)) selectPlaced(idx);
+}
+
+function NSO_wheelNextName() {
+  var top = 0;
+  ((typeof state !== 'undefined' && state.models) || []).forEach(function (m) {
+    var hit = m && /^Wheel (\d+)$/.exec(m.name || '');
+    if (hit) top = Math.max(top, parseInt(hit[1], 10));
+  });
+  return 'Wheel ' + (top + 1);
+}
+
+/* Put the ball on the plate as a piece of its own - Stock's drop, step for
+   step: added silently (the selection is moved below), ONE 'addModels' Undo
+   entry (so Undo takes the whole piece off again), placed in the nearest free
+   spot to the middle of the plate, selected. */
+function NSO_wheelDrop(soup) {
+  if (typeof THREE === 'undefined' || typeof addModelFromZUpGeometry !== 'function') {
+    NSO_wheelSay('The wheel needs the viewport', true);
+    return { ok: false, reason: 'no ingest path' };
+  }
+  var g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(soup), 3));
+  var name = NSO_wheelNextName();
+  var editBefore = state.editId, cutBefore = state.cutT;
+  var id = addModelFromZUpGeometry(name, g, { keepSelection: true, silent: true });
+  if (id == null) {
+    NSO_wheelSay('The wheel refused - the new piece looked empty', true);
+    return { ok: false, reason: 'addModel refused' };
+  }
+  var made = state.models.find(function (x) { return x && x.id === id; });
+  if (typeof pushUndo === 'function') pushUndo({ type: 'addModels', ids: [id], editId: editBefore, cutT: cutBefore });
+  var want = { x: 0, z: 0 };
+  var entry = (typeof placeModelMovable === 'function') ? placeModelMovable(made, want.x, want.z) : null;
+  var at = { x: want.x, z: want.z, onBed: true };
+  if (entry && typeof nsoFreeSpot === 'function') at = nsoFreeSpot(entry, want);
+  if (entry && typeof applyPlacedXZ === 'function') applyPlacedXZ(entry, at.x, at.z);
+  var idx = entry ? state.placed.indexOf(entry) : -1;
+  if (idx >= 0 && typeof selectPlaced === 'function') selectPlaced(idx);
+  if (typeof renderModelList === 'function') renderModelList();
+  if (typeof updateOptimizeButton === 'function') updateOptimizeButton();
+  if (typeof updateEditSize === 'function') updateEditSize();
+  if (typeof updateAdjustUI === 'function') updateAdjustUI();
+  return { ok: true, model: made, modelId: id, name: name, onBed: at.onBed !== false };
+}
+
+/* BALL: a new piece on the plate and a fresh session on it. Needs no selected
+   piece and no size - and the session only exists once the piece does, so a
+   refusal can never leave the wheel holding a form for nothing. */
+function NSO_wheelThrow(opts, head) {
+  var r = NSO_wheelBall(opts);
+  if (!r.ok) {
+    NSO_wheelSay(r.reason, true);
+    return r;
+  }
+  var soup = NSO_wheelRevolve(r.piece);
+  var d = NSO_wheelDrop(soup);
+  if (!d.ok) return d;
+  NSO_wheelSession = r.piece;
+  NSO_wheelHome = { modelId: d.modelId, name: d.name, history: [{ piece: r.piece, soup: d.model.rawTris }] };
+  var line = NSO_wheelStatus(r.piece, 'Dropped ' + d.name + ' - ' + (r.reason || head));
+  if (!d.onBed) line += ' - the plate has no free room left, it sits past the edge';
+  NSO_wheelSay(line, !d.onBed);
+  r.modelId = d.modelId;
+  r.name = d.name;
+  return r;
+}
+
 function NSO_wheelStatus(piece, head) {
   var bud = NSO_wheelBudget(piece);
   var span = NSO_wheelSpan(piece.outer);
@@ -1377,19 +1550,21 @@ function NSO_wheelFitReport(piece, printer) {
   return NSO_Printer.fit(size, p);
 }
 
-/* Bake whatever is on the wheel onto the selected model. */
+/* Bake whatever is on the wheel onto the wheel's own piece. */
 function NSO_wheelBake(head) {
-  if (!NSO_wheelSession) {
-    if (typeof setStatus === 'function') setStatus('Nothing on the wheel - throw a ball first', true);
+  if (!NSO_wheelSession || !NSO_wheelHome) {
+    NSO_wheelSay('Nothing on the wheel - throw a ball first', true);
     return { ok: false, reason: 'no session' };
   }
-  var m = (typeof getActiveModel === 'function') ? getActiveModel() : null;
-  if (!m) {
-    if (typeof setStatus === 'function') setStatus('Select a piece first', true);
-    return { ok: false, reason: 'no selection' };
-  }
+  var m = NSO_wheelModel();
+  if (!m) return NSO_wheelEnd('The piece on the wheel is gone - throw a new ball to start again');
   var soup = NSO_wheelRevolve(NSO_wheelSession);
-  NSO_wheelCommit(m, soup, NSO_wheelStatus(NSO_wheelSession, head));
+  var done = NSO_wheelCommit(m, soup, NSO_wheelStatus(NSO_wheelSession, head));
+  if (done === false) {
+    NSO_wheelSay('Pottery Wheel could not update the piece - unchanged', true);
+    return { ok: false, reason: 'commit failed' };
+  }
+  NSO_wheelHome.history.push({ piece: NSO_wheelSession, soup: m.rawTris });
   return { ok: true, tris: soup };
 }
 
@@ -1402,18 +1577,19 @@ function NSO_wheelBake(head) {
    one move apart, and the next bake would apply both at once. */
 function NSO_wheelRun(move, opts, head) {
   try {
-    if (move !== 'ball' && !NSO_wheelSession) {
-      if (typeof setStatus === 'function') setStatus('Nothing on the wheel - throw a ball first', true);
-      return { ok: false, reason: 'no session' };
-    }
-    var target = (typeof getActiveModel === 'function') ? getActiveModel() : null;
-    if (target) {
-      var paint = NSO_wheelPaintOk(target, 'the wheel');
-      if (!paint.ok) return paint;
-    }
+    /* Ball starts a session and a piece of its own; it needs neither a
+       selection nor a size. */
+    if (move === 'ball') return NSO_wheelThrow(opts, head);
+
+    var sync = NSO_wheelSync();
+    if (!sync.ok) return sync;
+    var target = sync.model;
+    NSO_wheelSelect(target);
+    var paint = NSO_wheelPaintOk(target, 'the wheel');
+    if (!paint.ok) return paint;
+
     var r;
-    if (move === 'ball') r = NSO_wheelBall(opts);
-    else if (move === 'flatten') r = NSO_wheelFlatten(NSO_wheelSession, opts);
+    if (move === 'flatten') r = NSO_wheelFlatten(NSO_wheelSession, opts);
     else if (move === 'open') r = NSO_wheelOpen(NSO_wheelSession, opts);
     else if (move === 'pull') r = NSO_wheelPull(NSO_wheelSession, opts);
     else if (move === 'trim') r = NSO_wheelTrim(NSO_wheelSession, opts);
@@ -1421,21 +1597,25 @@ function NSO_wheelRun(move, opts, head) {
     else return { ok: false, reason: 'unknown move ' + move };
 
     if (!r.ok) {
-      if (typeof setStatus === 'function') setStatus(r.reason, true);
+      NSO_wheelSay(r.reason, true);
       return r;
     }
-    NSO_wheelSession = r.piece;
     /* The move's own reason is the status line - it carries the numbers the
        potter needs (what was opened, what was trimmed, what Extend held) and
        NSO_wheelStatus appends the height, the budget and, when it fires, the
-       build-volume warning. The caller's `head` is only a fallback. */
-    NSO_wheelBake(r.reason || head);
+       build-volume warning. The caller's `head` is only a fallback. The
+       session only advances if the piece took the bake. */
+    var prev = NSO_wheelSession;
+    NSO_wheelSession = r.piece;
+    var b = NSO_wheelBake(r.reason || head);
+    if (!b.ok) {
+      if (NSO_wheelSession === r.piece) NSO_wheelSession = prev;
+      return b;
+    }
     return r;
   } catch (err) {
     if (typeof console !== 'undefined') console.error('[wheel]', err);
-    if (typeof setStatus === 'function') {
-      setStatus('Pottery Wheel failed - piece unchanged (' + ((err && err.message) || err) + ')', true);
-    }
+    NSO_wheelSay('Pottery Wheel failed - piece unchanged (' + ((err && err.message) || err) + ')', true);
     return { ok: false, reason: (err && err.message) || String(err) };
   }
 }
@@ -1464,13 +1644,10 @@ if (typeof document !== 'undefined') {
     }
     function wire() {
       on('btn-wheel-ball', function () {
-        var h = num('inp-wheel-height', 0);
-        if (!h) {
-          if (typeof setStatus === 'function') setStatus('Set a target height first (mm)', true);
-          return;
-        }
+        /* No height, no selection: the standard ball, dropped as a piece of
+           its own. A height (and radius) sizes it from a target instead. */
         NSO_wheelRun('ball', {
-          height: h,
+          height: num('inp-wheel-height', undefined),
           radius: num('inp-wheel-radius', undefined),
           wall: num('inp-wheel-wall', undefined),
           nozzle: num('inp-wheel-nozzle', undefined)

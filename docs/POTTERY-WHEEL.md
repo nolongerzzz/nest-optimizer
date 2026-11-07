@@ -23,7 +23,7 @@ takes Flatten, a bowl or vase takes Open; see [Direction](#direction)):
 
 | move | what it does |
 |---|---|
-| **Ball** | a smooth centred sphere, sized from the target vessel's height by Pappus's centroid theorem |
+| **Ball** | a smooth centred sphere **dropped on the plate as a piece of its own** — nothing to select, nothing to type. Blank gives the **standard ball** (25 mm radius, 65.4 cm³): pressed flat it is a 167 mm plate that fits the A1 Mini, opened it is a bowl, and anything bigger is built by adding clay. A target height (H, with R) still sizes it from a finished vessel by Pappus's centroid theorem |
 | **Flatten** | press the ball down: the top comes down, the clay spreads, and the diameter grows by exactly what the height gives up — a **clay-conserving** squash from the ball to a flat disc with a rounded edge ([Flatten](#flatten)) |
 | **Open** | one push down the middle; the single outer profile becomes **two**, outer and inner, and the piece is a shell from here on |
 | **Pull** | drag-shape the profile at **any** height, not only the top edge; the drag points are spline-fitted and the form is revolved to a clean solid on every update |
@@ -81,7 +81,9 @@ is measured. See finding 5.
 NSO_wheelFloor(nozzle)                -> mm, via NSO_Thickness.floorFor
 NSO_wheelSizeBall(opts)               -> the Pappus arithmetic, no geometry
                                          (now one call into NSO_Stock.size)
-NSO_wheelBall(opts)                   -> { ok, reason, piece }
+NSO_wheelBall(opts)                   -> { ok, reason, piece }   (no height: the standard ball)
+NSO_wheelDefaultBall(opts)            -> the standard ball's sizing record
+NSO_wheelThrow(opts, head)            -> Ball in the app: drop a piece, start a session on it
 NSO_wheelFlatten(piece, opts)         -> { ok, reason, piece, height, diameter, pressure }
 NSO_wheelFlatSolve(V, z0, h, hMin)    -> the pressed form of volume V at height h
 NSO_wheelDiscProfile(z0,h,e,c,en,fn)  -> the rounded slab as an outer profile
@@ -101,7 +103,9 @@ NSO_wheelInnerAt(outer, z, wall)      -> the cavity radius at that height, or -1
 NSO_wheelPchip(points)                -> the drag-point interpolant
 NSO_wheelTidy(profile)                -> one axis point per end, never a run
 NSO_wheelFitReport(piece, printer)    -> the build-volume check, via nso_printer.js
-NSO_wheelRun(move, opts, head)        -> paint check + move + bake + undo entry
+NSO_wheelRun(move, opts, head)        -> sync + paint check + move + bake + undo entry
+NSO_wheelSync()                       -> is the piece still what the wheel wrote? rewinds / ends
+NSO_wheelDrop(soup)                   -> a new piece on the plate, selected, one Undo entry
 ```
 
 ## Pappus's centroid theorem, both ways round
@@ -482,12 +486,23 @@ Pull already have — drag on the piece, see it live, release to Set, one Undo.
    and the revolve (`NSO_Stock.revolve`) all work on any closed meridian loop. The
    change is one closed `(r, z)` loop with the moves written as displacements along
    the arclength or the surface normal.
-5. **The session has to belong to its piece.** `NSO_wheelSession` is a global that
-   nothing resets: Undo steps the mesh back but not the session, and selecting
-   another piece and pressing a move bakes the wheel's form onto *that* piece.
-   Flatten dodges it by being a function of the clay and a height; Open, Pull and
-   Lip will not. Stock's pattern (a fingerprint of the last soup written; the
-   session ends rather than overwriting) is the model.
+5. **The session belongs to its piece — done.** It used to be a global that
+   nothing reset: Undo stepped the mesh back but not the session, and selecting
+   another piece and pressing a move baked the wheel's form onto *that* piece.
+   Ball now drops a piece of its own (Stock's drop), `NSO_wheelHome` holds that
+   piece's id and the history of `{ piece, soup }` the wheel wrote, and every move
+   acts on that piece whatever is selected (and selects it). Undo puts the
+   triangles back by reference, so an identity test on the soup says whether the
+   piece is still what the wheel wrote: after an Undo the session **rewinds** to
+   the matching step; if anything else changed the piece it **ends** ("Wheel stood
+   down") rather than overwrite that work; if the piece is gone it says so. A
+   refused Ball no longer leaves a session behind.
+6. **Start from one standard ball.** Nobody should have to name the vessel before
+   touching the clay. With no target height, Ball is the standard 25 mm ball; H
+   (and R) are optional and size it from a finished vessel as before. Bigger
+   pieces are made by adding clay — Rim +, and the add-clay lever still to come —
+   not by guessing a size up front. (Several refusals already say "add clay
+   here"; that move does not exist yet.)
 
 Order: loop profile and the session shell (ghost, handle, Set / Cancel, one Undo
 per gesture) → Flatten as a drag → Open as a clay-conserving drag → Pull as a

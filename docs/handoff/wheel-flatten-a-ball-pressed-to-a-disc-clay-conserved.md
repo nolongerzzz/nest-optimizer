@@ -26,9 +26,10 @@ Four things a later ticket should read before touching this:
   this). Flatten is safe on it; Pull, Open and Lip on top of it want the profile
   as a closed `(r, z)` loop - the gate, the volume and the revolve are already
   loop-general. "Direction" item 4.
-- **`NSO_wheelSession` still belongs to nobody.** Undo steps the mesh but not the
-  session, and a move bakes onto whichever piece is selected. Flatten dodges it
-  by being a function of the clay; the next moves will not. "Direction" item 5.
+- **`NSO_wheelSession` belonged to nobody - fixed since, see
+  `wheel-start-a-standard-ball-that-drops-its-own-piece.md`.** (It used to be that
+  Undo stepped the mesh but not the session, and a move baked onto whichever
+  piece was selected.) "Direction" item 5.
 
 Test change worth knowing: the canonical checker's "measured solid is inside the
 material ceiling" moved from an absolute 1e-6 mm^3 to the 1e-6 relative float32

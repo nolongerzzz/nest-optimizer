@@ -154,8 +154,8 @@
               <summary>Wheel</summary>
               <div class="vp-menu-body vp-wheel">
               <div class="vp-row vp-row-opts">
-              <label class="vp-clone" title="The finished vessel's height. The ball is sized from it by Pappus's centroid theorem: a thin-shell estimate of the vessel plus a real waste margin.">H <input type="number" id="inp-wheel-height" min="10" max="900" step="1" placeholder="mm"></label>
-              <label class="vp-clone" title="The finished vessel's radius. Blank means half the height.">R <input type="number" id="inp-wheel-radius" min="5" max="450" step="1" placeholder="mm"></label>
+              <label class="vp-clone" title="Optional. Leave blank for the standard ball (25 mm radius): press it into a plate or open it into a bowl, and add clay for anything bigger. Type a finished height to size the ball from it instead, by Pappus's centroid theorem: a thin-shell estimate of the vessel plus a real waste margin.">H <input type="number" id="inp-wheel-height" min="10" max="900" step="1" placeholder="auto"></label>
+              <label class="vp-clone" title="Optional, used with H: the finished vessel's radius. Blank means half the height.">R <input type="number" id="inp-wheel-radius" min="5" max="450" step="1" placeholder="auto"></label>
               </div>
               <div class="vp-row vp-row-opts">
               <label class="vp-clone" title="Wall thickness. Default 3 mm - a typical thrown wall. Refused under the nozzle-safety floor from nso_thickness.js.">W <input type="number" id="inp-wheel-wall" min="0.4" max="30" step="0.1" placeholder="3"></label>
@@ -163,7 +163,7 @@
               </div>
               <div class="vp-row vp-row-full">
               <button id="btn-wheel-ball" class="btn btn-secondary" type="button"
-              title="Centre a smooth ball of clay, sized from the target height by Pappus's centroid theorem.">Ball</button>
+              title="Drop a ball of clay on the plate as a piece of its own - nothing to select and nothing to type. Blank H gives the standard 25 mm ball; an H sizes it from a finished height. Every move after it works on this piece.">Ball</button>
               </div>
               <div class="vp-row vp-row-extend">
               <button id="btn-wheel-flatten" class="btn btn-secondary" type="button"
@@ -2722,7 +2722,7 @@
   <!-- Limb: nso_limb.js is the tree, the limb and the move (headless, tools/nso_limb_test.js); app-limb.js the pointer session. docs/LIMB.md -->
   <script src="nso_limb.js?v=4f060b8f"></script>
   <script src="app-limb.js?v=82dda061"></script>
-  <script src="app-wheel.js?v=414b7ec5"></script>
+  <script src="app-wheel.js?v=606030f5"></script>
   <script src="app-fit.js?v=94ef7252"></script>
   <script src="app-stock.js?v=04f0e346"></script>
   <script src="app-piece-preview.js?v=730a465a"></script>
