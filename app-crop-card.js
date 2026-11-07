@@ -1138,6 +1138,8 @@
       return true;
     },
     /* The Foam gun's loan of the Box (above). */
+    /* Nothing of the card's is in use: no shape picked and none lent - so a press on a piece is the ordinary one (select, move). */
+    idle: function () { return !S.shape && !S.lent; },
     lend: lend, release: release, lent: function () { return !!S.lent; }, box: boxCopy, bodyHit: bodyHit,
     refresh: function () { if (S.shape) rebuild(); }
   };

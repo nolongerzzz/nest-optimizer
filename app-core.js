@@ -3260,7 +3260,7 @@ function resolveDragPose(p, selfIdx, fromX, fromZ, toX, toZ) {
 function startMoveDrag(idx, event) {
   /* ...except a piece Lift left in the air, in the Crop card Lift is a button of: grabbing it to drop it elsewhere is Lift's own. */
   const liftedOne = state.cutTool === 'crop' && typeof NSO_LIFT_PLATE !== 'undefined' && NSO_LIFT_PLATE.ownsDrop && NSO_LIFT_PLATE.ownsDrop(state.placed[idx]);
-  if (state.cutterOpen && !liftedOne) {
+  if (state.cutterOpen && !liftedOne && !cropCardIdle()) {
     setStatus('Cutter open - close cutter to move pieces');
     return false;
   }
@@ -3801,6 +3801,14 @@ function wireCtxMenu() {
   }, true);
 }
 
+/* The Crop card is open but doing nothing: no shape picked (or lent to the Foam gun) and Lift not armed. Then a press on a
+   piece is the ordinary one - select it, drag it to move it - as with no card open; with a shape up, or Lift armed, it
+   is the tool's. */
+function cropCardIdle() {
+  return state.cutTool === 'crop' && typeof NSO_CropCard !== 'undefined' && !!NSO_CropCard.idle && NSO_CropCard.idle() &&
+    !(typeof NSO_LIFT_PLATE !== 'undefined' && NSO_LIFT_PLATE.isArmed && NSO_LIFT_PLATE.isArmed());
+}
+
 /* Lift is a button in the Crop card, and what it lifts is left in the air to be grabbed and dropped somewhere
    else. With the Crop card open a press on a piece only picks it (the cutter has no move), so a piece Lift left in the
    air is the exception: a press on it is the ordinary select-and-move, whether or not Lift is still open. */
@@ -4111,7 +4119,7 @@ function onCanvasPointerDown(event) {
   // other half - and look past the blade's own (invisible, oversized) grab
   // sheet, which lies in front of much of the piece: a click there is a
   // click on the piece.
-  if (state.cutterOpen && state.modelGroup && !cropYieldsToLifted()) {
+  if (state.cutterOpen && state.modelGroup && !cropCardIdle() && !cropYieldsToLifted()) {
     const inBlade = o => { for (let n = o; n; n = n.parent) if (n === state.cutHelper) return true; return false; };
     const modelHits = state.raycaster.intersectObjects(state.modelGroup.children, true)
       .filter(h => !inBlade(h.object));
@@ -4196,7 +4204,7 @@ function onCanvasPointerDown(event) {
           event.stopPropagation();
           return;
         }
-        if (state.cutterOpen && hit && hit.sourceId != null && !(state.cutTool === 'crop' && typeof NSO_LIFT_PLATE !== 'undefined' && NSO_LIFT_PLATE.ownsDrop && NSO_LIFT_PLATE.ownsDrop(hit))) {
+        if (state.cutterOpen && hit && hit.sourceId != null && !cropCardIdle() && !(state.cutTool === 'crop' && typeof NSO_LIFT_PLATE !== 'undefined' && NSO_LIFT_PLATE.ownsDrop && NSO_LIFT_PLATE.ownsDrop(hit))) {
           if (hit.sourceId !== state.editId) selectPlaced(idx);
           if (state.cutTool === 'crop' || (typeof cutPlateOn === 'function' && cutPlateOn())) { event.stopPropagation(); return; }
           if (typeof cutFollowOn === 'function' && cutFollowOn()) { cutFollowFromHit(modelHits[0]); event.stopPropagation(); return; }

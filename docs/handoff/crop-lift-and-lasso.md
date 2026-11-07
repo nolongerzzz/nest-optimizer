@@ -45,3 +45,7 @@ Branch `claude-wip`. Full write-up: **`docs/CROP.md`, "The card"**; Lift's side 
   "click slightly outside and it finds it"). New `lift:list`; `lift:any-face`, `lift:assembly` and `lift:plate` updated for the
   new start (they put the card on the top first / expect the scan's cached reads). The gates that remain (hover reads
   faces, off-piece resets to the top, clicks spent reading faces, Strip is per surface) are listed in docs/LIFT.md.
+- **Pieces move with the Crop card open** (2026-11-07): the card used to refuse every piece drag while open ("Cutter open -
+  close cutter to move pieces"). Now a press on a piece is the ordinary select-and-move whenever no shape is picked (or lent
+  to the Foam gun) and Lift is not armed (`cropCardIdle`, `NSO_CropCard.idle()`); with a shape up, or Lift armed, it is the
+  tool's, as before. `crop:drive` 6b drags a piece four ways.

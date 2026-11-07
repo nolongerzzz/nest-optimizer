@@ -20,7 +20,7 @@ Crop is one tool: **pick a shape, drag it to size, press CROP.** The card is a
 and **Cancel**, and under them **Lift** (below). Nothing else - no field to type a size
 into, no checkbox, no axis button. `page:manifest` fails if a control finds its way back in.
 
-Opening the card arms the piece selection (as Cut does, with no blade). Pick a
+Opening the card arms the piece selection (as Cut does, with no blade). **Pieces move as ever while the card is open and idle** - no shape picked and Lift not armed: a drag on a piece moves it. With a shape up, or Lift armed, a press on a piece is the tool's (`cropCardIdle` in `app-core.js`; `crop:drive` 6b). Pick a
 shape and it appears **centred on the selected piece at half its size**,
 translucent, with grab handles. Orbit between grabs: a press that lands on no
 handle and no shape is the orbit's.

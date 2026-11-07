@@ -27,6 +27,8 @@
      5. OUTLINE: a click on a piece is its footprint, a Shift-click on a triangle its
         rim; d1, d2, z1, z2 dragged; the readout names them
      6. Escape and Cancel put the shape away; so does closing the card
+     6b. MOVE: with the card open and no shape picked and Lift not armed, a drag on a piece moves it;
+        with a shape picked, or Lift armed, it does not
      7. LASSO: a loop dragged round part of the piece with the real mouse is the shape; the
         copy is what the loop sees (every vertex of it falls inside the loop on the screen);
         Alt-drag orbits and the cone stays; a click or an Escape'd loop changes nothing;
@@ -658,6 +660,41 @@ const snap = (page, id) => page.evaluate(i => {
     await settled(page);
     await page.click('#menu-crop > summary');
     check('closing the card puts the shape away too', (await cardState(page)).shape === null && !(await page.evaluate(() => !!state.scene.getObjectByName('cropCardShape'))));
+
+    /* ================================================================= 6b */
+    console.log('\n=== 6b. MOVE: with the card open, a piece moves unless a shape or Lift is up ===');
+    {
+      await page.click('#menu-crop > summary');
+      await page.waitForFunction(() => state.cutterOpen && state.cutTool === 'crop', null, { timeout: 10000 });
+      await reselect(page, hid);
+      await frame(page, [26, 22, 30], [0, 4, 0]);
+      const xz = () => page.evaluate(h => { const p = state.placed.find(q => q.sourceId === h); return [p.x, p.z]; }, hid);
+      const press = async dx => { const pt = await pointOn(page, hid, false); await drag(page, pt.x, pt.y, dx, 30); await page.waitForTimeout(150); };
+      const moved = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]) > 0.5;
+      const home = await xz();
+      check('the card is open and idle: no shape, Lift not armed', await page.evaluate(() => NSO_CropCard.idle() && !NSO_LIFT_PLATE.isArmed() && state.cutterOpen));
+      await press(60);
+      const m1 = await xz();
+      check('a drag on the piece moves it', moved(home, m1), JSON.stringify(home.map(f2)) + ' -> ' + JSON.stringify(m1.map(f2)));
+      await frame(page, [26, 22, 30], [0, 4, 0]);
+      await page.click('#btn-crop-shape-box');
+      await settled(page);
+      await press(60);
+      const m2 = await xz();
+      check('with a shape picked, the same drag does not move it', !moved(m1, m2), JSON.stringify(m2.map(f2)));
+      await page.click('#btn-crop-cancel');
+      await page.click('#btn-lift');
+      await press(60);
+      const m3 = await xz();
+      check('with Lift armed, it does not move it either', !moved(m2, m3) && await page.evaluate(() => NSO_LIFT_PLATE.isArmed()), JSON.stringify(m3.map(f2)));
+      await page.click('#btn-lift');
+      await press(60);
+      const m4 = await xz();
+      check('Lift folded away and nothing picked: it moves again', moved(m3, m4), JSON.stringify(m4.map(f2)));
+      check('the card is still open for Crop all the while', await page.evaluate(() => state.cutterOpen && state.cutTool === 'crop' && document.getElementById('menu-crop').open));
+      await page.evaluate(([h, x, z]) => { const p = state.placed.find(q => q.sourceId === h); applyPlacedXZ(p, x, z); }, [hid, home[0], home[1]]);
+      await page.click('#menu-crop > summary');
+    }
 
     /* ================================================================= 7 */
     console.log('\n=== 7. LASSO ===');
