@@ -289,6 +289,7 @@ const UNDO_REPLACE_LABEL = {
   tubeEdgeReplace: 'Undo: Tube edge reverted',
   tubeNeckReplace: 'Undo: Neck reverted',
   rodNeckReplace: 'Undo: Cylinder neck reverted',
+  rodBranchReplace: 'Undo: Branch reverted',
   closeReplace: 'Undo: Close reverted',
   mirrorReplace: 'Undo: Mirror reverted',
   cropReplace: 'Undo: Crop reverted',

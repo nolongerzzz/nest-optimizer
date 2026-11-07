@@ -20,7 +20,16 @@
        rod's numbers kept;
      - Set commits the ghost (status "Cylinder neck done"), one Undo puts the
        rod back bit for bit;
-     - a tube is refused by Cylinders, pointed at Tube edge. */
+     - a tube is refused by Cylinders, pointed at Tube edge.
+   And BRANCH (nso_rod_branch.js), on a Ø20 × 80 rod:
+     - the Cylinder picker switches to Branch: its rows, Neck's hidden;
+     - a press on the rod's side and a drag outward pulls a branch: the
+       Length and Angle fields follow the pointer and the ghost is the branch,
+       its tip where the fields say (read back off the ghost's vertices);
+     - the camera does not move during the drag;
+     - Set welds it on ("Branch done"), the card stays up for the next one;
+       a second branch is pressed and Set; two Undos put the rod back bit
+       for bit. */
 
 const fs = require('fs');
 const os = require('os');
@@ -183,6 +192,104 @@ withApp(async (page) => {
   await page.click('#btn-cylinders');
   C = await card(page);
   check('Cylinders again shuts the card', !C.open && !C.cylOn);
+
+  console.log('\n=== 6. Branch: press on the rod, drag out, Set; again; two Undos ===');
+  const R2 = 10, H2 = 80;
+  const rod2Id = await loadSTL(page, writeSTL('rod2.stl', NSO_Stock.revolve(NSO_Stock.profileCylinder(R2, H2), 96)));
+  await selectModel(page, rod2Id);
+  const before2 = await soupOf(page);
+  await page.click('#btn-cylinders');
+  await page.waitForFunction(() => state.tubeEdge && state.tubeEdge.open && state.tubeEdge.rod, null, { timeout: 30000 });
+  await setField(page, 'sel-te-rod-verb', 'branch');
+  const br = () => page.evaluate(() => {
+    const B = state.tubeEdge, el = id => document.getElementById(id), vis = id => { const e = el(id); return !!e && !e.hidden && e.offsetParent !== null; };
+    let tip = null;
+    if (B.ghost && B.result && B.result.ok) {
+      // the ghost back to raw, its farthest vertices along the branch: the tip's centre
+      const o = getActiveModel().centerOffset, P = B.ghost.geometry.attributes.position.array, b = B.result.branch, d = b.dir, S = b.wall;
+      let far = -Infinity; const pts = [];
+      for (let i = 0; i < P.length; i += 3) {
+        const X = P[i] + o.x, Y = -(P[i + 2] + o.z), Z = P[i + 1] + o.y, s = (X - S[0]) * d[0] + (Y - S[1]) * d[1] + (Z - S[2]) * d[2];
+        pts.push([X, Y, Z, s]); if (s > far) far = s;
+      }
+      const t = pts.filter(q => q[3] > far - 1e-3), c = [0, 1, 2].map(k => t.reduce((a, q) => a + q[k], 0) / t.length);
+      tip = { far, c, angle: Math.acos(((c[2] - S[2])) / Math.hypot(c[0] - S[0], c[1] - S[1], c[2] - S[2])) * 180 / Math.PI };
+    }
+    return { open: !!B.open, verb: NSO_teVerb(), branchRows: vis('te-branch-rows'), neckRows: vis('te-neck-rows'),
+             dia: el('inp-te-br-dia').value, len: el('inp-te-br-len').value, angle: el('inp-te-br-angle').value,
+             readout: el('te-readout').textContent, bad: el('te-readout').classList.contains('is-bad'),
+             ghost: !!(B.ghost && B.ghost.parent), tip, busy: !!B.busy, go: !el('btn-te-go').disabled, point: B.point, controls: state.controls.enabled };
+  });
+  let Bc = await br();
+  check('Branch: its rows up, Neck\'s hidden, no ghost before a press', Bc.verb === 'branch' && Bc.branchRows && !Bc.neckRows && !Bc.ghost && /^Press on the side of the rod/.test(Bc.readout),
+        JSON.stringify({ rows: Bc.branchRows, neck: Bc.neckRows, ghost: Bc.ghost, r: Bc.readout }));
+  check('defaults off the Ø20 rod: Ø6.5 (a third), Length 30, Angle 45', Bc.dia === '6.5' && Bc.len === '30' && Bc.angle === '45', Bc.dia + ' / ' + Bc.len + ' / ' + Bc.angle);
+  await frame(page, 10, 150);
+  const camOf = () => page.evaluate(() => [...state.camera.position.toArray(), ...state.controls.target.toArray()].map(v => +v.toFixed(6)).join(','));
+  const cam0 = await camOf();
+  // the press: the rod's wall at z 30, turned 40° from the silhouette toward the camera (a clean hit,
+  // not a graze); the drag: to the point 20 mm out and 20 mm up from the root the page read there
+  const p0 = await page.evaluate(([R2]) => {
+    const m = getActiveModel(), pl = state.placed.find(q => q.sourceId === m.id), mesh = pl.mesh, o = m.centerOffset;
+    const cam = state.camera.position.clone().applyMatrix4(new THREE.Matrix4().copy(mesh.matrixWorld).invert());
+    const cx = cam.x + o.x, cy = -(cam.z + o.z), L = Math.hypot(cx, cy), f = [cx / L, cy / L], sd = [-cy / L, cx / L];
+    const c = Math.cos(50 * Math.PI / 180), sn = Math.sin(50 * Math.PI / 180), dir = [c * sd[0] + sn * f[0], c * sd[1] + sn * f[1]];
+    const local = new THREE.Vector3(R2 * dir[0] - o.x, 30 - o.y, -(R2 * dir[1]) - o.z);
+    const w = local.applyMatrix4(mesh.matrixWorld).project(state.camera), rc = state.renderer.domElement.getBoundingClientRect();
+    return { x: rc.left + (w.x + 1) / 2 * rc.width, y: rc.top + (1 - w.y) / 2 * rc.height };
+  }, [R2]);
+  await page.mouse.move(p0.x, p0.y);
+  await page.mouse.down();
+  const p1 = await page.evaluate(() => {
+    const D = state.tubeEdge.bdrag, m = getActiveModel();
+    const T = [0, 1, 2].map(k => D.S[k] + 20 * D.e[k] + 20 * D.a[k]);
+    return Object.assign(NSO_teScreen(m, T), { S: D.S });
+  });
+  await page.mouse.move(p1.x, p1.y, { steps: 16 });
+  const mid = await br();
+  await page.mouse.up();
+  Bc = await br();
+  console.log('   readout: ' + Bc.readout);
+  check('mid-drag: OrbitControls off, the ghost following', !mid.controls && mid.ghost, JSON.stringify({ controls: mid.controls, ghost: mid.ghost }));
+  check('the drag 20 out and 20 up: Length 28.5 (20√2, to 0.5), Angle 45', Bc.len === '28.5' && Bc.angle === '45', Bc.len + ' / ' + Bc.angle);
+  check('the ghost is the branch, its tip 28.5 mm out at 45° (± 0.05)', Bc.ghost && Bc.tip && Math.abs(Bc.tip.far - 28.5) < 0.05 && Math.abs(Bc.tip.angle - 45) < 0.05,
+        Bc.tip && (Bc.tip.far.toFixed(3) + ' mm, ' + Bc.tip.angle.toFixed(3) + '°'));
+  check('the readout names it: "Branch Ø6.50, 28.5 mm out at 45° off a Ø20.00 rod"', !Bc.bad && /^Branch Ø6\.50, 28\.5 mm out at 45° off a Ø20\.00 rod, 50\.\d\d mm in from its end · Set welds it on/.test(Bc.readout), Bc.readout);
+  check('the camera did not move; OrbitControls on again', (await camOf()) === cam0 && Bc.controls);
+  await shot(page, 'branch-drag.png');
+  await page.click('#btn-te-go');
+  await page.waitForFunction(() => /Branch done/.test(document.getElementById('status').textContent), null, { timeout: 30000 });
+  const st = await page.evaluate(() => document.getElementById('status').textContent);
+  Bc = await br();
+  check('Set: "Branch done - Branch Ø6.50, 28.5 mm out ...", the card still up for the next, its root cleared', /^Branch done - Branch Ø6\.50, 28\.5 mm out at 45°/.test(st) && Bc.open && !Bc.point && !Bc.ghost, st);
+  const after1 = await soupOf(page);
+  check('the piece changed', after1 !== before2);
+  await shot(page, 'branch-set.png');
+  // a second branch, a click on the far side lower down (no drag: the fields' Length and Angle)
+  const q0 = await page.evaluate(([R2]) => {
+    const m = getActiveModel(), pl = state.placed.find(q => q.sourceId === m.id), mesh = pl.mesh, o = m.centerOffset;
+    const cam = state.camera.position.clone().applyMatrix4(new THREE.Matrix4().copy(mesh.matrixWorld).invert());
+    const cx = cam.x + o.x, cy = -(cam.z + o.z), L = Math.hypot(cx, cy), dir = [cx / L, cy / L];
+    const local = new THREE.Vector3(R2 * dir[0] - o.x, 15 - o.y, -(R2 * dir[1]) - o.z);
+    const w = local.applyMatrix4(mesh.matrixWorld).project(state.camera), rc = state.renderer.domElement.getBoundingClientRect();
+    return { x: rc.left + (w.x + 1) / 2 * rc.width, y: rc.top + (1 - w.y) / 2 * rc.height };
+  }, [R2]);
+  await setField(page, 'inp-te-br-angle', '70');
+  await setField(page, 'inp-te-br-len', '15');
+  await page.mouse.click(q0.x, q0.y);
+  Bc = await br();
+  check('a click on the rod (facing the camera, z 15) roots the next branch there: the ghost up', Bc.ghost && /15\.0 mm out at 70° off a Ø20\.00 rod, 65\.\d\d mm in/.test(Bc.readout), Bc.readout);
+  await page.click('#btn-te-go');
+  await page.waitForFunction(() => /Branch done/.test(document.getElementById('status').textContent) && getActiveModel().rawTris.length !== 0 && !state.tubeEdge.busy, null, { timeout: 30000 });
+  const after2 = await soupOf(page);
+  check('the second Set welds it on', after2 !== after1);
+  await shot(page, 'branch-two.png');
+  await page.click('#btn-undo');
+  await page.waitForFunction(() => /Undo: Branch reverted/.test(document.getElementById('status').textContent), null, { timeout: 15000 });
+  check('one Undo takes the second branch off', (await soupOf(page)) === after1);
+  await page.click('#btn-undo');
+  await page.waitForFunction(() => /Undo: Branch reverted/.test(document.getElementById('status').textContent), null, { timeout: 15000 });
+  check('a second Undo puts the bare rod back, bit for bit', (await soupOf(page)) === before2);
 
   console.log('\n' + (fails ? fails + ' FAILED' : 'all gates held'));
   if (fails) process.exitCode = 1;

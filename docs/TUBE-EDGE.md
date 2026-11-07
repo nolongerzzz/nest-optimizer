@@ -1021,3 +1021,99 @@ Tests: `tools/nso_tube_neck_test.js` section 11 (Stock rod pinch, bulge,
 funnel, spigot, collar, an imported 48-gon rod along X with rim-fan end discs,
 two necks, refusals; mesh_validate on every output) and the drive
 `tools/nso_cylinders_neck_check.js` (`npm run cylinders:drive`).
+
+## Cylinders → Branch — a rod pulled out of a rod's wall (2026-11-07)
+
+The Cylinders card's second verb (its **Cylinder** picker: Neck | Branch).
+**Press on the side of a rod where the branch grows, and drag outward**: the
+branch's tip follows the pointer on the plane through the rod's axis and the
+press, writing **Length** (mm out of the wall, along the branch) and **Angle**
+(° off the rod's axis: 90 straight out, under 90 leaning toward the rod's
+upper end - a shoot - over 90 drooping). **Ø** is the branch at the wall,
+**Tip Ø** its end (blank: the same, a cylinder; less: a shoot that tapers).
+The ghost is the branch alone; **Set** welds it on, one Undo
+(`rodBranchReplace`, "Undo: Branch reverted"), and the card stays up, its
+root cleared, for the next branch. A plain click roots a branch at the fields'
+Length and Angle. Esc mid-drag puts the fields back.
+
+The engine is `nso_rod_branch.js` (`NSO_rodBranchRead`, `NSO_rodBranchPlan`
+- the branch, no union, what the ghost shows - and `NSO_rodBranchRaw`, the
+Promise that welds it on):
+
+- **The parent** is any rod with a flat, round, closed end - the trunk, or a
+  branch made here, whose flat tip is such an end, so **branches grow off
+  branches**. Of the piece's closed round ends the one taken is the one whose
+  axis the press sits round (behind that end, as near its circle as any); the
+  two ends of one straight rod read the same wall, and the higher one is taken.
+  A press on a facet's flat reads up to R(1 − cos π/n) inside the circle: on a
+  straight rod that is snapped to the rod's own radius.
+- **The solid**: a frustum about the branch's own axis, ringed every 0.5 - 2 mm
+  (about as often as its facets are wide - one facet from the wall to the tip
+  was a needle Limb's bend turned inside out), its facets turned half a facet
+  off the press's meridian (on it, a Stock rod pressed at a vertex column met
+  the branch's vertices exactly, and the kernel answered with a doubled edge;
+  the weld retries at two other turns if the result is not one clean solid).
+  Its root disc is buried just deep enough that the whole disc is inside the
+  parent (solved by bisection; refused in words when no depth roots it).
+- **The parent's wall round the junction is subdivided to 0.7 mm first**
+  (nso_densify.js): a Stock rod's wall triangles run its whole length, the
+  union cuts them into slivers tens of mm long, and Limb's own subdivision of
+  its flex zone then left a mesh with open edges or triangles under the
+  slicer's weld. From 0.7 mm triangles the junction's are small and Limb has
+  nothing there to split. That same subdivision, run on a wall an earlier
+  union already cut, breaks it the same way - so the subdivided wall is used
+  only when it is provably as clean as the original (same edge counts, no
+  more piercing pairs by NSO_Repair), else the union goes ahead on the wall as
+  it was (`fine` in the result says which). The root cause is queued as its
+  own task: nso_densify.js's needle zip on sliver meshes.
+- **The union** is the app's Manifold boolean, `nsoUnionSoups` (Fill's: the
+  plain kernel add). Join's `NSO_unionSoups` welds both inputs at 0.08 mm
+  first, which collapsed the slivers an earlier branch's junction leaves.
+- **The gates**: as many solids after as before (the branch joined, not lying
+  beside), closed and 2-manifold, and the volume grown by at least half what
+  stands out of the wall and at most the branch's whole solid.
+- **Refusals**: no flat round end; a press on an end face; a branch as wide as
+  the rod at the press, or wider (with the most it may be); root or tip under
+  2 nozzle widths; Length ≤ 0; Angle outside 20° - 160°.
+
+**Defaults** off the rod pressed: Ø a third of the rod's (to 0.5 mm), Length
+1.5 × the rod's Ø, Angle 45°; a typed Ø too wide for the rod just pressed is
+set back to that rod's third.
+
+**Then Limb.** A welded branch is a limb to Limb (its root the fork). Two
+changes to Limb came with it:
+
+- **The fade**: a flex vertex's move fades in over 3 mm (or a quarter of the
+  zone) of surface from the fork's boundary. A branch that leaves its rod at
+  45° meets it in a loop that runs mm along Limb's bone, so the zone's
+  vertices next to the loop's high side moved while their neighbours across it
+  held, and the triangles between tore. On a square fork nothing changes.
+- **The closed guard**: the piece Limb hands back is counted as
+  tools/mesh_validate.py counts it (welded at 1e-4 mm) - no more open,
+  doubled or mis-wound edges, and no more triangles the weld collapses, than
+  it had - else Limb refuses in words and the piece is unchanged. Its fold and
+  pierce guards both look at the subdivided mesh, so they could not see a
+  subdivision that broke it; a bend once passed both and came back with 43
+  doubled edges.
+
+Measured (tools/nso_rod_branch_test.js, section 4): **slim** branches - up to
+about a third of the trunk's Ø, Branch's default - bend grabbed anywhere along
+them, alone or three round one trunk, every result through mesh_validate. A
+**fat** branch (half the trunk's Ø) bends grabbed toward its tip; further in,
+Limb's fork reading (surface distance from the foot) finds no rings round so
+fat a root and refuses ("would turn … triangles inside out"). A branch rooted
+among earlier junctions (its wall not subdivided, above) may be refused by
+the closed guard. Either way nothing broken is handed back.
+
+**Neck first, then Branch.** Neck rebuilds a rod between whole rings of its
+vertices; a branch's union re-cuts the trunk's wall, so Neck refuses a
+branched trunk in words. Neck the trunk, then branch it.
+
+Tests: `tools/nso_rod_branch_test.js` (`npm run rod:branch`: the shipped
+boolean on the vendored kernel, every output through mesh_validate - its
+self-intersection pass swapped for NSO_Repair's BVH, the Python one went past
+12 GB on a 20,000-triangle trunk whose wall triangles all overlap - the tip,
+taper and angle measured off the output, branches off branches, Limb bending
+what Branch made, refusals) and section 6 of the drive
+`tools/nso_cylinders_neck_check.js` (press, drag, Set, a second branch, two
+Undos, in the real page).
