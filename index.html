@@ -872,18 +872,6 @@
               <input type="range" id="cut-blade-kerf-s" min="0.2" max="10" step="0.1" value="1" aria-label="Kerf, mm">
               <input type="number" id="cut-blade-kerf" class="cut-no-spin" min="0.2" max="1000" step="0.1" value="1" aria-label="Kerf, mm"></div>
                             <label class="cut-switch cut-follow" title="Follow strand: the blade takes only the strand under it (where its box holds several - the turns of a spiral - the others are left alone; the strand is outlined in yellow) and follows it. Click a cord and the blade turns to stand square across it right there, however it winds. Drag the blade or the slider and it slides along the cord, about 90 degrees of it at a time; Back and Forward step it a slice, and Cut cuts and moves on to the next slice - slicing a spiral like salami. Off: a plain sized blade, square to the piece, that takes everything in its box."><input type="checkbox" id="chk-cut-follow"><span>Follow strand</span></label>
-              <div id="cut-follow-fields" hidden>
-              <div class="cut-slide-row" title="The material left between one cut and the next (mm). The blade moves this far plus its kerf each step."><span class="cut-slide-label">Slice</span>
-              <input type="range" id="cut-follow-slice-s" min="0.2" max="10" step="0.1" value="1.5" aria-label="Slice, mm">
-              <input type="number" id="cut-follow-slice" class="cut-no-spin" min="0.2" max="1000" step="0.1" value="1.5" aria-label="Slice, mm"></div>
-              <div class="edit-row cut-follow-steps" role="group" aria-label="Along the strand">
-              <button id="btn-cut-follow-back" class="btn btn-secondary" type="button" aria-pressed="false" disabled
-                      title="Move the blade one step back along the strand, square across it. Cut then goes on back.">&#9664; Back</button>
-              <button id="btn-cut-follow-fwd" class="btn btn-secondary" type="button" aria-pressed="true" disabled
-                      title="Move the blade one step forward along the strand, square across it. Cut then goes on forward.">Forward &#9654;</button>
-              </div>
-              <p id="cut-follow-readout" class="cut-readout">-</p>
-              </div>
               </div>
               <!-- Whole plate: one level blade across every piece (app-cut-plate.js, nso_cut_plate.js, docs/CUT-PLATE.md). -->
               <div class="cut-blade-sliders" id="cut-plate-fields" hidden>
@@ -905,6 +893,19 @@
               <div class="cut-slide-row" title="How far in from the strand's edge the nick goes (mm). Less than the strand is thick and it stops short of the far side."><span class="cut-slide-label">Notch depth</span>
               <input type="range" id="cut-notch-depth-s" min="0.2" max="10" step="0.1" value="1" aria-label="Notch depth, mm">
               <input type="number" id="cut-notch-depth" class="cut-no-spin" min="0.2" max="1000" step="0.1" value="1" aria-label="Notch depth, mm"></div>
+              <label class="cut-switch cut-follow" title="Follow strand: click a cord and the blade turns to stand square across it right there, however it winds, and the nick is cut in from the top of it. Drag the blade or the slider and it slides along the cord, about 90 degrees of it at a time; Back and Forward step it one nick-and-gap, and Cut cuts the nick and moves on to the next place - a row of nicks along a cord. Off: the nick goes in from the face you click."><input type="checkbox" id="chk-cut-notch-follow"><span>Follow strand</span></label>
+              </div>
+              <div class="cut-blade-sliders" id="cut-follow-fields" hidden>
+              <div class="cut-slide-row" title="The material left between one cut and the next (mm). The blade moves this far plus its kerf each step."><span class="cut-slide-label" id="cut-follow-slice-label">Slice</span>
+              <input type="range" id="cut-follow-slice-s" min="0.2" max="10" step="0.1" value="1.5" aria-label="Slice, mm">
+              <input type="number" id="cut-follow-slice" class="cut-no-spin" min="0.2" max="1000" step="0.1" value="1.5" aria-label="Slice, mm"></div>
+              <div class="edit-row cut-follow-steps" role="group" aria-label="Along the strand">
+              <button id="btn-cut-follow-back" class="btn btn-secondary" type="button" aria-pressed="false" disabled
+                      title="Move the blade one step back along the strand, square across it. Cut then goes on back.">&#9664; Back</button>
+              <button id="btn-cut-follow-fwd" class="btn btn-secondary" type="button" aria-pressed="true" disabled
+                      title="Move the blade one step forward along the strand, square across it. Cut then goes on forward.">Forward &#9654;</button>
+              </div>
+              <p id="cut-follow-readout" class="cut-readout">-</p>
               </div>
               </div>
               <button id="btn-cut" class="btn btn-cut" type="button"
@@ -2580,7 +2581,7 @@
   <script src="nso_skin_patch.js?v=4b2304fa"></script>
   <script src="nso_carve.js?v=c82241ec"></script>
 <script src="nso_notch.js?v=b697e802"></script>
-<script src="nso_strand.js?v=2f7aafd1"></script>
+<script src="nso_strand.js?v=b0562762"></script>
 <script src="nso_cut_plate.js?v=0683b280"></script>
   <script src="nso_seat_surface.js?v=293d7ca2"></script>
   <script src="nso_thickness.js?v=165379d6"></script>
@@ -2653,9 +2654,9 @@
 
 
 
-  <script src="app-cut.js?v=792b007e"></script>
+  <script src="app-cut.js?v=562eef9a"></script>
   <!-- Cut card, Follow strand: the sized blade put square across a cord and walked along it (nso_strand.js, docs/CUT-FOLLOW.md). After app-cut.js. -->
-  <script src="app-cut-follow.js?v=bd548b54"></script>
+  <script src="app-cut-follow.js?v=350438ca"></script>
   <!-- Cut card, Whole plate blade: one level blade across every piece. After app-cut.js, whose cutOneSide / cutOverlay
        it calls, and before the Crop card; it commits through app-sculpt.js's NSO_sculptCommitRaw at press time. docs/CUT-PLATE.md. -->
   <script src="app-cut-plate.js?v=f56a1400"></script>
@@ -2730,7 +2731,7 @@
   <script src="app-fasteners.js?v=aafaf77d"></script>
   <script src="app-assemble.js?v=60984bfb"></script>
   <script src="app-sel-outline.js?v=c1a5b4df"></script>
-  <script src="app-join.js?v=66cf5a31"></script>
+  <script src="app-join.js?v=dfbb820e"></script>
   <script src="app-center-lock.js?v=ee95c074"></script>
   <script src="app-oversize-washer.js?v=a445c3ff"></script>
   <script src="app-join-triple.js?v=95a9c48a"></script>
@@ -2778,7 +2779,7 @@
        rather than three modules each hoping the other two are shut. -->
   <script src="app-input-mode.js?v=da2de9ec"></script>
   <script src="app-tip-orient.js?v=fb26beaf"></script>
-  <script src="app-rotate-handles.js?v=7e28c684"></script>
+  <script src="app-rotate-handles.js?v=84135b4a"></script>
   <script src="app-move-vertical.js?v=da07bfef"></script>
   <script src="app-grab-drop.js?v=2bb09218"></script>
   <script src="app-defects.js?v=9f49a45d"></script>

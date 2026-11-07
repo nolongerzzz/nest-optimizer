@@ -777,10 +777,13 @@
     if (!mine) return;          // something else has already re-placed it
     if (!state.placed || state.placed.indexOf(h.p) < 0) return;   // its plate is not the active one any more (app-beds.js)
     if (typeof applyMeshRotation === 'function') applyMeshRotation(h.p);
-    if (typeof nsoBakePlacedPose === 'function') nsoBakePlacedPose(h.p);
+    /* A hold taken by holdTurn (below) is the Cut card's wheel's: Cut keeps the pose in its own frame (the blade is held
+       in the piece's coordinates), so it is seated and not baked, and Cut is told it has landed. */
+    if (!h.keepPose && typeof nsoBakePlacedPose === 'function') nsoBakePlacedPose(h.p);
     if (typeof refreshOutline === 'function') refreshOutline(h.p);
     if (typeof updateExportButton === 'function') updateExportButton();
     refresh();
+    if (h.keepPose && typeof cutRotateSeated === 'function') cutRotateSeated(h.p);
   }
   function seatLater() {
     if (!hold) return;
@@ -1121,6 +1124,34 @@
       refresh();
       return true;
     },
+    /* A HELD turn of `deg` about a ring, for a caller with a gesture of its own (the Cut card's Rotate piece wheel): the
+       piece pivots in place about its centre - through the plate where it must, as a ring drag does - instead of being
+       stood back on the plate at every step; it is seated on the plate once, `RUN_MS` after the last step (or when
+       seatNow is called), and NOT baked. No Undo point and no lock check: the caller takes both (the point from
+       undoPoint, which records the height the piece will be seated at). opts.A: the axis, [x, y, z] - held by a drag
+       so it does not wander as the footprint changes; opts.keep: a drag is in hand, so arm no timer (seatNow or
+       seatSoon when it ends). */
+    holdTurn: function (ring, deg, opts) {
+      var p = piece();
+      if (!p || !RINGS[ring]) return false;
+      opts = opts || {};
+      if (hold && (hold.p !== p || hold.ring !== ring || !holdIntact())) seat();
+      startHold(p, ring, 1);
+      hold.keepPose = true;
+      if (hold.timer) { clearTimeout(hold.timer); hold.timer = 0; }
+      p.mesh.updateMatrixWorld(true);
+      writePose(p, turned(p.mesh.quaternion.clone(), ring, deg, opts.A ? v3(opts.A) : null), true);
+      if (!opts.keep) seatLater();
+      lastTouched = ring;
+      if (typeof updateExportButton === 'function') updateExportButton();
+      refresh();
+      return true;
+    },
+    /* An Undo point for the pose as it will be seated (in a run, the height it will land at): what holdTurn's caller takes. */
+    undoPoint: function () { undoPoint(); },
+    seatNow: function () { seat(); },
+    seatSoon: function () { seatLater(); },
+    holding: function () { return !!hold; },
     nudge: nudge,
     beginDrag: beginDrag, moveDrag: moveDrag, endDrag: endDrag,
     dragging: function () { return !!drag; },

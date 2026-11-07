@@ -22,6 +22,19 @@ to cut a slot into a face, say.
    separates it into pieces (as any sized cut does), and the blade carries on onto
    whichever piece holds the next slice. The last slice says so.
 
+## The Notch, too
+
+The **Notch** has a Follow strand box of its own (off until ticked; the Sized blade's is on).
+Ticked, the blade is put square across the cord in the same way, the nick is cut in from the
+top of it, and Back / Forward / Cut / the slider and the drag all work as for the Sized blade -
+a row of nicks along a cord. The rows are the same ones, relabelled: **Gap** (the cord left
+between one nick and the next, default 1.5 mm) where the Sized blade has Slice; a step is the
+gap plus the nick's width. The notch's own Width and Depth are the ones you set (they are not
+raised the way the Sized blade's are, since a nick stops short on purpose), and a nick never
+severs the cord, so the piece stays one piece. The slide skips the nicks already cut: a section
+there is partial, so it is not a place to stand the blade (and Back is off where the step back
+is one). `npm run follow:drive` cuts three nicks on the generated spiral.
+
 ## Sliding along the cord
 
 The position slider, its number box, the ← / → nudges and a drag in the viewport all
@@ -63,7 +76,7 @@ strand carries on across the kerfs earlier cuts left.
   ahead and a little behind are read again from the centres of the sections there,
   which sit on the axis even when the plane is oblique.
 - **Marching** (`advance`): steps of 0.5 mm, each re-centred on the strand's own
-  section. A section must be a whole one of the cord (its area within a fifth of the
+  section. A section must be a whole one of the cord (its area within 5% under or 6% over the
   one at the start): the plane that lies on a cut face or just inside the end cuts
   part of a disc, whose centre is off the axis. Gaps up to kerf + 1.5 mm are
   crossed straight; a march that finishes with no strand under it has run off the end.

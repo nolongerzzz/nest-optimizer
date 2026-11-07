@@ -453,7 +453,7 @@ function getCutPlaneLocal(model) {
 function cutStrandOn(b) { return !!(b && (b.follow || b.strand === true)); }
 
 function cutBladeState() {
-  if (!state.cutBlade) state.cutBlade = { mode: 'full', sized: false, strand: false, follow: true, slice: 1.5, followDir: 1,
+  if (!state.cutBlade) state.cutBlade = { mode: 'full', sized: false, strand: false, follow: true, nfollow: false, slice: 1.5, followDir: 1,
     width: NSO_Notch.DEFAULTS.width, depth: NSO_Notch.DEFAULTS.depth, kerf: NSO_Notch.DEFAULTS.kerf,
     nwidth: NSO_Notch.NOTCH_DEFAULTS.width, ndepth: NSO_Notch.NOTCH_DEFAULTS.depth };
   return state.cutBlade;
@@ -466,6 +466,8 @@ function cutSetBladeMode(mode) {
   const was = b.mode;
   b.mode = mode === 'sized' || mode === 'notch' || mode === 'plate' ? mode : 'full';
   b.sized = b.mode === 'sized' || b.mode === 'notch';
+  // Follow is a box of its own on each blade: a place on the cord is the blade's, and goes when the blade does
+  if (b.mode !== was && typeof cutFollowOn === 'function' && !cutFollowOn()) state.cutFollowAt = null;
   if ((was === 'plate') !== (b.mode === 'plate') && typeof cutPlateModeChanged === 'function') cutPlateModeChanged();
 }
 
@@ -758,8 +760,8 @@ function syncCutUI() {
   // add back to the piece. No kerf comes off.
   if (readout && info.blade && fol) {
     const bl = info.blade, r1 = v => (Math.round(v * 10) / 10).toFixed(1);
-    readout.textContent = 'FOLLOWING THE STRAND - ' + r1(fol.val) + ' of ' + r1(fol.len) + ' mm along this stretch (let go and it moves on from here); ' +
-      'kerf ' + bl.sizes.kerf + ', ' + bl.sizes.width + ' wide, ' + bl.sizes.depth + ' deep' +
+    readout.textContent = (bl.notch ? 'NOTCH, FOLLOWING THE STRAND - ' : 'FOLLOWING THE STRAND - ') + r1(fol.val) + ' of ' + r1(fol.len) + ' mm along this stretch (let go and it moves on from here); ' +
+      (bl.notch ? 'a nick ' + bl.sizes.kerf + ' wide, ' + bl.sizes.depth + ' deep' : 'kerf ' + bl.sizes.kerf + ', ' + bl.sizes.width + ' wide, ' + bl.sizes.depth + ' deep') +
       (info.deg ? ', mitre ' + info.deg + '°' : '') + (info.bevel ? ', bevel ' + info.bevel + '°' : '');
   } else if (readout && info.blade) {
     const bl = info.blade;
@@ -1242,19 +1244,36 @@ function syncCutRotateUI() {
 /** Turn the selected piece `cw` degrees the way the wheel's clockwise is (about the ticked axis). One Undo point for a
     press or a run of presses (`fresh` true starts a step of its own - a drag's first move - false carries on one), none if
     the piece is locked. */
-function cutRotateBy(cw, fresh) {
+function cutRotateBy(cw, fresh, fix) {
   const idx = state.selectedIndex, p = cutRotatePiece();
   if (!p) { setStatus('Rotate piece: pick a piece first', true); return false; }
   if (typeof nsoRotate === 'undefined' || !nsoRotate.turn) return false;
   if (typeof nsoPosLockBlocks === 'function' && nsoPosLockBlocks(p, 'rotate')) return false;
   const now = Date.now();
   // A drag always starts a step of its own; presses of a held or repeated button within 0.7 s of each other share one.
-  if (fresh === true || (fresh !== false && now - cutRotateDial.undoAt > 700)) pushUndo(snapshotPlacedPose(idx));
+  const step = fresh === true || (fresh !== false && now - cutRotateDial.undoAt > 700);
+  if (step) {
+    // The point records the pose as it will be seated (a turn still in hand carries on pivoting; it is not put down for this).
+    if (nsoRotate.undoPoint) nsoRotate.undoPoint(); else pushUndo(snapshotPlacedPose(idx));
+  }
   cutRotateDial.undoAt = now;
-  nsoRotate.turn(cutRotateRing(), -cw);
+  /* HELD: the piece pivots in place about its centre, through the plate where it must, and is stood on the plate once
+     (a pause after the last step, or the release of a drag) - the way the rotate rings turn it - not stood back on the
+     plate at every step, which lifts it and lowers it again as it tips. */
+  if (nsoRotate.holdTurn) nsoRotate.holdTurn(cutRotateRing(), -cw, { A: fix && fix.A ? fix.A.toArray() : null, keep: cutRotateDial.dragging });
+  else nsoRotate.turn(cutRotateRing(), -cw);
   if (cutRotateAxis() === 'h') p.rotated = Math.abs(Math.sin(p.rotY || 0)) > 0.5;
   cutAfterPieceTurn();
   return true;
+}
+
+/** The piece has been stood on the plate after a held turn (app-rotate-handles.js, seat): the blade goes with it. */
+function cutRotateSeated(p) {
+  if (!state.cutterOpen || !p || cutRotatePiece() !== p) return;
+  state.cutFollowAt = null;
+  syncCutRotateUI();
+  syncCutUI();
+  updateCutHelper();
 }
 
 /** The piece has turned: the blade (a child of the piece's frame) follows by itself, the card's numbers and any Follow
@@ -1306,11 +1325,13 @@ function cutWireRotateDial() {
     if (cur == null) return;
     const delta = cutRotateWrap(want - cur);
     if (Math.abs(delta) < 1e-6) return;
-    if (cutRotateBy(delta, press.first)) press.first = false;
+    if (cutRotateBy(delta, press.first, press.fix)) press.first = false;
   });
   const stop = function () {
+    const moved = !!press && press.moved;
     press = null;
     cutRotateDial.dragging = false;
+    if (moved && typeof nsoRotate !== 'undefined' && nsoRotate.seatNow) nsoRotate.seatNow();     // let go: it lands on the plate
     syncCutRotateUI();
   };
   dial.addEventListener('pointerup', stop);

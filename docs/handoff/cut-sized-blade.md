@@ -130,3 +130,17 @@ across lean (`nsoRotate.leanNames`), turned through `nsoRotate.turn(ring, ...)`.
 the upright is kept (`cutRotateRef`) and re-picked only when the piece lands flat on another face or the piece / axis changes, so the reading does not jump 90 degrees when
 another axis becomes the more vertical past 45 (it did, on the first version: released at 51 it read -39). A drag always gets its own Undo step (it used to merge into a
 button press made less than 0.7 s before).
+
+### Eleventh round (2026-11-07): leans pivot in place; Follow strand for the Notch
+
+**Leans pivot in place.** The wheel's Front/back and Side/side were turned through `nsoRotate.turn`, which stands the piece back on the plate after every step - so a tipping piece
+rose and fell. The Rotate menu's rings HOLD the piece (`hold`: pivot on its centre, through the plate where it must, seated once at the end). New in `app-rotate-handles.js`:
+`holdTurn(ring, deg, {A, keep})`, `seatNow`, `seatSoon`, `undoPoint`, `holding`; a hold taken by `holdTurn` is seated and NOT baked (Cut keeps the pose in its own frame - the blade is
+held in the piece's coordinates, which a bake would move) and tells Cut it has landed (`cutRotateSeated`, `app-cut.js`). The wheel takes its Undo point from `undoPoint` (the pose as it will be
+seated; it does not put the piece down for it), keeps a drag pivoting through any pause (`keep`), seats it on release, and `cutActiveModel` (`app-join.js`) seats a turn still in hand before it cuts.
+`nso_cut_rotate_dial_drive_check` gates it: the centre does not move through 0 -> 20 -> 50 degrees, the low end goes through the plate, a pause lands it once, a drag held still for a second keeps
+pivoting, release lands it, one Undo takes it all back seated.
+
+**Follow strand for the Notch** (`nfollow`, off by default; its own box in the Notch rows). `cutFollowOn` knows both blades; the Slice / Back / Forward rows moved out of the Sized fields into a shared
+block under both, labelled Gap for the Notch; depth / width are raised only for the Sized blade. Found while testing: a plane square to the cord next to the wall of a nick cuts a section 7-10% short
+(the cord curves, the nick's walls do not), so the `ok` gate on a section's area is now 0.95..1.06 (was 0.8..1.25); on a clean faceted cord the area spread is 0.996..1.001.

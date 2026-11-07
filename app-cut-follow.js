@@ -17,9 +17,12 @@
 const CUT_FOLLOW_SLICE_DEFAULT = 1.5;
 const CUT_FOLLOW_UP = [0, 1, 0];                 // the plate vertical, world
 
+/* Follow strand is a box of its own on each of the two blades that take a strand: the Sized blade's (`follow`, on by
+   default) and the Notch's (`nfollow`, off until asked). One machinery serves both. */
 function cutFollowOn() {
   const b = state.cutBlade;
-  return !!(b && b.mode === 'sized' && b.follow && typeof NSO_Strand !== 'undefined');
+  if (!b || typeof NSO_Strand === 'undefined') return false;
+  return b.mode === 'sized' ? !!b.follow : b.mode === 'notch' ? !!b.nfollow : false;
 }
 
 /** Slice (material left between cuts) + kerf (what the blade takes): how far one step moves the blade. */
@@ -317,9 +320,11 @@ function cutFollowPlace(c, t, why, quiet) {
   const off = cutFollowAim(m, tL);
   // The blade must reach through the cord: as wide as it is across, and in far enough from the top to clear the underside.
   const b = cutBladeState(), notes = [];
-  const needD = Math.ceil((tr.h + 0.5) * 10) / 10, needW = Math.ceil((tr.w + 1) * 10) / 10;
-  if (b.depth < needD) { b.depth = needD; notes.push('depth raised to ' + needD + ' mm to go through the strand'); }
-  if (b.width < needW) { b.width = needW; notes.push('width raised to ' + needW + ' mm'); }
+  if (b.mode === 'sized') {                                  // (a notch stops short: its depth is the one you set, its width the strand's own)
+    const needD = Math.ceil((tr.h + 0.5) * 10) / 10, needW = Math.ceil((tr.w + 1) * 10) / 10;
+    if (b.depth < needD) { b.depth = needD; notes.push('depth raised to ' + needD + ' mm to go through the strand'); }
+    if (b.width < needW) { b.width = needW; notes.push('width raised to ' + needW + ' mm'); }
+  }
   state.cutBladeAt = { modelId: m.id, local: topL, normal: upL.clone() };
   const f = cutFrame(m);
   const want = f.normal.dot(cL) - f.origin;
@@ -394,11 +399,18 @@ function cutFollowRecompute() {
 function cutFollowSyncUI() {
   if (typeof document === 'undefined') return;
   const b = state.cutBlade || {};
-  const on = cutFollowOn();
-  const box = document.getElementById('chk-cut-follow');
+  const on = cutFollowOn(), notch = b.mode === 'notch';
+  const box = document.getElementById('chk-cut-follow'), nbox = document.getElementById('chk-cut-notch-follow');
   if (box) box.checked = !!b.follow;
+  if (nbox) nbox.checked = !!b.nfollow;
   const fields = document.getElementById('cut-follow-fields');
   if (fields) fields.hidden = !on;
+  // The same rows serve both: the Sized blade leaves a SLICE of cord between cuts, the Notch a GAP between nicks.
+  const lab = document.getElementById('cut-follow-slice-label');
+  if (lab) lab.textContent = notch ? 'Gap' : 'Slice';
+  const row = lab && lab.parentElement;
+  if (row) row.title = notch ? 'The cord left between one nick and the next (mm). The blade moves this far plus the width of the nick each step.'
+                             : 'The material left between one cut and the next (mm). The blade moves this far plus its kerf each step.';
   const fa = state.cutFollowAt;
   const back = document.getElementById('btn-cut-follow-back'), fwd = document.getElementById('btn-cut-follow-fwd');
   const dir = b.followDir || 1;
@@ -408,7 +420,8 @@ function cutFollowSyncUI() {
   if (ro) {
     const st = cutFollowStep(), r1 = v => Math.round(v * 10) / 10;
     ro.textContent = !fa
-      ? 'Click the strand. Each slice is ' + r1(st.slice) + ' mm and the blade takes ' + r1(st.kerf) + ' mm: ' + r1(st.pitch) + ' mm a step.'
+      ? (notch ? 'Click the strand. Each nick is ' + r1(st.kerf) + ' mm wide with ' + r1(st.slice) + ' mm of cord between: ' + r1(st.pitch) + ' mm a step.'
+               : 'Click the strand. Each slice is ' + r1(st.slice) + ' mm and the blade takes ' + r1(st.kerf) + ' mm: ' + r1(st.pitch) + ' mm a step.')
       : 'On the strand (' + r1(fa.w) + ' mm across). Drag the blade or the slider along it, a quarter turn at a time. ' + r1(st.pitch) +
         ' mm a step; Cut goes on ' + (dir > 0 ? 'forward' : 'back') +
         (dir > 0 ? (fa.next ? '' : ' - the strand ends here') : (fa.prev ? '' : ' - the strand ends here')) + '.';
@@ -420,13 +433,17 @@ function cutFollowWire() {
   const box = document.getElementById('chk-cut-follow');
   if (!box || box.dataset.nsoWired === '1') return;
   box.dataset.nsoWired = '1';
-  box.addEventListener('change', function () {
-    const b = cutBladeState();
-    b.follow = box.checked;
-    if (!b.follow) state.cutFollowAt = null;
-    cutBladeRefresh();
-    cutFollowSyncUI();
-    if (b.follow) setStatus('Follow strand on - click the strand to put the blade square across it.');
+  [[box, 'follow'], [document.getElementById('chk-cut-notch-follow'), 'nfollow']].forEach(function (pair) {
+    const el = pair[0], key = pair[1];
+    if (!el) return;
+    el.addEventListener('change', function () {
+      const b = cutBladeState();
+      b[key] = el.checked;
+      if (!el.checked) state.cutFollowAt = null;
+      cutBladeRefresh();
+      cutFollowSyncUI();
+      if (el.checked) setStatus('Follow strand on - click the strand to put the blade square across it.');
+    });
   });
   // A hand on the slider keeps the blade from being put down under it; letting go does that.
   const slider = document.getElementById('cut-slider');

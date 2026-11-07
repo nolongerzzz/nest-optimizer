@@ -275,9 +275,10 @@ withApp(async (page, logs) => {
         'cut-slider btn-cut-nudge-m cut-mm btn-cut-nudge-p ' +
         'btn-cut-blade-full btn-cut-blade-sized btn-cut-blade-notch btn-cut-blade-plate ' +
         'cut-blade-width-s cut-blade-width cut-blade-depth-s cut-blade-depth cut-blade-kerf-s cut-blade-kerf ' +
-        'chk-cut-follow cut-follow-slice-s cut-follow-slice btn-cut-follow-back btn-cut-follow-fwd ' +
+        'chk-cut-follow ' +
         'cut-plate-height-s cut-plate-height btn-cut-plate-above btn-cut-plate-below ' +
-        'cut-notch-width-s cut-notch-width cut-notch-depth-s cut-notch-depth btn-cut',
+        'cut-notch-width-s cut-notch-width cut-notch-depth-s cut-notch-depth chk-cut-notch-follow ' +
+        'cut-follow-slice-s cut-follow-slice btn-cut-follow-back btn-cut-follow-fwd btn-cut',
       order.join(' '));
     const cards = await page.evaluate(() => ({
       cut: !!document.querySelector('.vp-shell-col > #menu-cut'), crop: !!document.querySelector('.vp-shell-col > #menu-crop'),

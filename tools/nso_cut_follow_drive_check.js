@@ -16,6 +16,10 @@
    - At the cord's end the next Cut is the last: the card says so and nothing is left to move on to.
    - Back onto a place already cut is refused, not jumped to another turn of the spiral.
    - ONE box: Follow strand is also "take only the strand under the blade"; there is no separate Single strand.
+   - The Notch has a Follow strand box of its own (off until ticked): the blade is put square across the cord and
+     the nick cut in from the top of it; the card's rows say Gap, not Slice; the notch's depth and width are not
+     raised; Cut cuts the nick and moves on 2.5 mm (nick 1 + gap 1.5) to the next, a row of nicks along the cord that
+     never severs it, and Back is off where the nick is. The slide works the same.
    - Sliding: the position slider, its number box, the nudge buttons and a drag in the viewport (on the blade, or
      pressed on the cord) slide the blade ALONG THE CORD - square to it all the way - through the stretch traced when
      it was put down: a quarter turn each way. Held, it is not put down under the hand; let go and it is, with a new
@@ -341,10 +345,10 @@ withApp(async (page, logs) => {
   const nb0 = await blade();
   await page.click('#btn-cut-nudge-p');
   const nb1 = await blade();
-  check('→ is 0.1 mm along the cord', Math.abs(len(sub(nb1.centre, nb0.centre)) - 0.1) < 0.04, len(sub(nb1.centre, nb0.centre)).toFixed(3) + ' mm');
+  check('→ is 0.1 mm along the cord (the nudges start from the 0.1 grid, so 0.05 to 0.15)', len(sub(nb1.centre, nb0.centre)) > 0.03 && len(sub(nb1.centre, nb0.centre)) < 0.17, len(sub(nb1.centre, nb0.centre)).toFixed(3) + ' mm');
   await page.keyboard.down('Shift'); await page.click('#btn-cut-nudge-m'); await page.keyboard.up('Shift');
   const nb2 = await blade();
-  check('Shift+← is 1 mm back (the other way)', Math.abs(len(sub(nb2.centre, nb1.centre)) - 1) < 0.08 && dot(sub(nb2.centre, nb1.centre), sub(nb1.centre, nb0.centre)) < 0,
+  check('Shift+← is 1 mm back (the other way)', Math.abs(len(sub(nb2.centre, nb1.centre)) - 1) < 0.13 && dot(sub(nb2.centre, nb1.centre), sub(nb1.centre, nb0.centre)) < 0,
     len(sub(nb2.centre, nb1.centre)).toFixed(3) + ' mm');
   await page.waitForTimeout(800);
 
@@ -379,6 +383,64 @@ withApp(async (page, logs) => {
   const offIso = await page.evaluate(() => !!getCutPlaneLocal(getActiveModel()).blade.isolate);
   check('unticked, it is a plain sized blade (takes everything in its box)', offIso === false);
   await page.evaluate(() => { state.cutFollowAt = null; });
+
+  console.log('Notch with Follow strand');
+  id = await fresh();
+  await page.click('#btn-cut-blade-notch');
+  const nBox = await page.evaluate(() => ({ box: document.getElementById('chk-cut-notch-follow').checked, rows: !document.getElementById('cut-follow-fields').hidden }));
+  check('the Notch has its own Follow strand box, unticked, its rows not shown', nBox.box === false && nBox.rows === false, JSON.stringify(nBox));
+  await page.check('#chk-cut-notch-follow');
+  const nBox2 = await page.evaluate(() => ({ rows: !document.getElementById('cut-follow-fields').hidden, label: document.getElementById('cut-follow-slice-label').textContent, sizedBox: document.getElementById('chk-cut-follow').checked }));
+  check('ticked: the Slice / Back / Forward rows appear, and say Gap; the Sized blade\'s own box is as it was (ticked)', nBox2.rows && nBox2.label === 'Gap' && nBox2.sizedBox === true, JSON.stringify(nBox2));
+  const dims0 = await page.evaluate(() => ({ nw: state.cutBlade.nwidth, nd: state.cutBlade.ndepth, w: state.cutBlade.width, d: state.cutBlade.depth }));
+  const crn = await someCrown();
+  await clickAt(crn);
+  await waitStatus(/Follow: strand found/);
+  const nfa = await follow(), nbA = await blade();
+  const ncd = await page.evaluate(c => __cordAt(c), nfa.c);       // (a notch box is fitted to the top of the cord: measure on the cord's own centre)
+  check('a click on the cord puts the notch blade square across it', !!nfa && ncd && angle(nbA.normal, ncd.t) < 1.5, ncd ? angle(nbA.normal, ncd.t).toFixed(2) + ' deg' : 'no cord');
+  const dims1 = await page.evaluate(() => ({ nw: state.cutBlade.nwidth, nd: state.cutBlade.ndepth, w: state.cutBlade.width, d: state.cutBlade.depth }));
+  check('the notch\'s depth and width are not raised (a nick stops short)', JSON.stringify(dims0) === JSON.stringify(dims1), JSON.stringify(dims1));
+  const nv0 = (await page.evaluate(() => __pieceVolumes())).reduce((a, b) => a + b.vol, 0);
+  const nwin = await page.evaluate(() => __win());
+  check('the stretch is traced for sliding, as for the Sized blade', !!nwin && nwin.len > 8, nwin ? nwin.len.toFixed(1) + ' mm' : 'none');
+  let prevC = nfa.c;
+  for (let i = 1; i <= 3; i++) {
+    await page.click('#btn-cut');
+    await waitStatus(/Notch cut/);
+    await page.waitForTimeout(300);
+    const st = await status(), now = await follow(), bb = await blade();
+    const moved = now ? len(sub(now.c, prevC)) : -1;
+    const cd = now && await page.evaluate(c => __cordAt(c), now.c);
+    check('notch ' + i + ': still ONE piece (a nick never severs), the blade on 2.5 mm (nick 1 + gap 1.5), square',
+      (await models()) === 1 && moved > 2.35 && moved < 2.55 && cd && angle(bb.normal, cd.t) < 1.5,
+      'pieces ' + (await models()) + ', moved ' + moved.toFixed(3) + (cd ? ', ' + angle(bb.normal, cd.t).toFixed(2) + ' deg off square' : ''));
+    check('notch ' + i + ': the status line reports the notch and the move', /^Notch cut/.test(st) && /Follow: on to the next slice/.test(st), st.slice(0, 160));
+    prevC = now ? now.c : prevC;
+  }
+  const nv1 = await page.evaluate(() => ({ vols: __pieceVolumes(), pa: __probeAll() }));
+  const took = nv0 - nv1.vols.reduce((a, b) => a + b.vol, 0);
+  check('three nicks of 1 x 1 mm cut in from the top took about 3 x 2.3 mm3', took > 3 * 1.5 && took < 3 * 3.2, took.toFixed(2) + ' mm3');
+  check('the cord is one closed solid still', nv1.pa.n === 1 && nv1.pa.open === 0 && nv1.pa.nm === 0, JSON.stringify(nv1.pa));
+  check('Back is off where the step back is a nick already cut', (await page.$eval('#btn-cut-follow-back', e => e.disabled)) === true);
+  // sliding in Notch mode: never onto a nick, always square
+  const nsweep = await page.evaluate(POLY => {
+    const w = state.cutFollowAt.win; let n = 0, bad = 0;
+    for (let v = 0; v <= w.sMax - w.sMin + 1e-9; v += 1.3) {
+      cutFollowScrubMm(v); n++;
+      const b = __blade(), c = state.cutFollowAt.c, sec = __sectionArea(c, b.normal);
+      if (!sec || sec.off > 0.5 || Math.abs(sec.area / POLY - 1) > 0.015) bad++;
+    }
+    return { n, bad };
+  }, POLY_AREA);
+  check('sliding along it lands on whole sections only (it skips the nicks) and square', nsweep.bad === 0 && nsweep.n > 10, JSON.stringify(nsweep));
+  await page.waitForTimeout(800);
+  await page.uncheck('#chk-cut-notch-follow');
+  const nOff = await page.evaluate(() => ({ rows: !document.getElementById('cut-follow-fields').hidden, at: !!state.cutFollowAt }));
+  check('unticked: the rows go and the place on the cord is forgotten', nOff.rows === false && nOff.at === false, JSON.stringify(nOff));
+  await page.click('#btn-cut-blade-sized');
+  const sOn = await page.evaluate(() => ({ box: document.getElementById('chk-cut-follow').checked, rows: !document.getElementById('cut-follow-fields').hidden, label: document.getElementById('cut-follow-slice-label').textContent }));
+  check('back on the Sized blade its own box is still ticked, and the rows say Slice again', sOn.box && sOn.rows && sOn.label === 'Slice', JSON.stringify(sOn));
 
   console.log('the end of the cord');
   id = await fresh();

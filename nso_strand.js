@@ -136,12 +136,12 @@
     return best;
   }
 
-  /* The outline whose CENTRE is nearest p, if within `tol` (and, given `area`, a whole section of the cord: within a fifth of
-     that area): marching asks "is there strand where I expect it". */
+  /* The outline whose CENTRE is nearest p, if within `tol` (and, given `area`, a whole section of the cord: within 5% under or 6% over
+     that area - a plane square to a bend that clips the wall of a nick near it cuts a section 7-10% short): marching asks "is there strand where I expect it". */
   function loopNearCentre(tris, p, n, tol, area) {
     var L = sections(tris, n, dot(n, p)), best = null, bd = tol;
     for (var i = 0; i < L.length; i++) {
-      if (area && (L[i].area < 0.8 * area || L[i].area > 1.25 * area)) continue;   // not a whole section of this cord
+      if (area && (L[i].area < 0.95 * area || L[i].area > 1.06 * area)) continue;   // not a whole section of this cord
       var d = len(sub(L[i].c, p));
       if (d <= bd) { bd = d; best = L[i]; }
     }

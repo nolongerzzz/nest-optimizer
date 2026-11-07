@@ -18,7 +18,10 @@
    - The axes: a tick each for Horizontal (ticked by default), Front/back and Side/side, one at a time (the one in
      use cannot be cleared); the wheel then turns the piece about it. A lean reads the piece's tilt from level, 0 flat.
      Front/back tips it along its length (its ends go up and down), Side/side across it. The same wheel, box, - / +,
-     real drag and Undo. There are no rotate rings on the card.                                                    */
+     real drag and Undo. There are no rotate rings on the card.
+   - A lean pivots the piece IN PLACE, as the rotate rings do: its centre does not rise or fall as it tips (it passes
+     through the plate where it must), it is stood on the plate once - a pause after the last step, or the release of a
+     drag - and not at every step (which lifted it and lowered it again). A drag held still keeps pivoting.  */
 
 const fs = require('fs');
 const os = require('os');
@@ -205,6 +208,58 @@ withApp(async (page, logs) => {
   check('ticking Horizontal again: the wheel reads the heading again', JSON.stringify(await ticks()) === JSON.stringify({ h: true, fb: false, ss: false }) && (await heading()) !== null);
   await page.fill('#cut-rotate-deg', '0'); await page.press('#cut-rotate-deg', 'Tab');
   await page.waitForTimeout(100);
+
+  console.log('a lean pivots in place, through the plate');
+  {
+    const box = () => page.evaluate(() => { const b = new THREE.Box3().setFromObject(state.placed[state.selectedIndex].mesh); const c = b.getCenter(new THREE.Vector3()); return { cy: c.y, cx: c.x, cz: c.z, lo: b.min.y }; });
+    await page.click('#chk-cut-rot-fb');
+    await page.fill('#cut-rotate-deg', '0'); await page.press('#cut-rotate-deg', 'Tab');
+    await page.waitForTimeout(900);
+    const flat = await box();
+    check('flat on the plate: the lowest point is at the bed (about 0.2)', Math.abs(flat.lo - 0.2) < 0.05, 'lowest ' + flat.lo.toFixed(3));
+    await page.fill('#cut-rotate-deg', '20'); await page.press('#cut-rotate-deg', 'Tab');
+    const t20 = await box();
+    await page.fill('#cut-rotate-deg', '50'); await page.press('#cut-rotate-deg', 'Tab');
+    const t50 = await box();
+    check('tipping 0 -> 20 -> 50: the centre of the piece stays where it was (no rising and falling)', Math.abs(t20.cy - flat.cy) < 0.05 && Math.abs(t50.cy - flat.cy) < 0.05 && Math.abs(t50.cx - flat.cx) < 0.05,
+      'centre height ' + flat.cy.toFixed(2) + ' -> ' + t20.cy.toFixed(2) + ' -> ' + t50.cy.toFixed(2));
+    check('...so a 60 mm bar tipped 50 degrees goes through the plate (its low end is well under it)', t50.lo < -8, 'lowest ' + t50.lo.toFixed(2));
+    await page.waitForTimeout(900);
+    const landed = await box();
+    check('a pause after the last step: it is stood on the plate, once', Math.abs(landed.lo - 0.2) < 0.05 && landed.cy > t50.cy + 5, 'lowest ' + landed.lo.toFixed(2) + ', centre ' + t50.cy.toFixed(2) + ' -> ' + landed.cy.toFixed(2));
+    check('...and it is still tipped 50 as the wheel reads', (await heading()) === 50, String(await heading()));
+    // a drag: held through a long pause, put down on release
+    await page.fill('#cut-rotate-deg', '0'); await page.press('#cut-rotate-deg', 'Tab');
+    await page.waitForTimeout(900);
+    const d0 = await box();
+    const rr = await R('cut-rotate-dial'), rad = rr.w * 0.4, at = d => [rr.cx + rad * Math.sin(d * Math.PI / 180), rr.cy - rad * Math.cos(d * Math.PI / 180)];
+    let q = at(0);
+    await page.mouse.move(q[0], q[1]); await page.mouse.down();
+    for (let k = 1; k <= 8; k++) { q = at(40 * k / 8); await page.mouse.move(q[0], q[1]); }
+    await page.waitForTimeout(1000);                      // longer than the pause that seats a step
+    const dHeld = await box();
+    check('a drag held still for a second keeps pivoting: the centre has not moved, the low end is still through the plate', Math.abs(dHeld.cy - d0.cy) < 0.05 && dHeld.lo < -5 && (await heading()) === 40,
+      'centre ' + d0.cy.toFixed(2) + ' -> ' + dHeld.cy.toFixed(2) + ', lowest ' + dHeld.lo.toFixed(2));
+    await page.mouse.up();
+    await page.waitForTimeout(150);
+    const dDone = await box();
+    check('released, it lands on the plate at once', Math.abs(dDone.lo - 0.2) < 0.05, 'lowest ' + dDone.lo.toFixed(2));
+    // Undo gives the whole lean back, seated
+    await page.click('#btn-undo');
+    await page.waitForTimeout(250);
+    const u = await box();
+    check('one Undo takes the drag back: level, on the plate', (await heading()) === 0 && Math.abs(u.lo - 0.2) < 0.06, 'reading ' + (await heading()) + ', lowest ' + u.lo.toFixed(2));
+    // pressing Cut with a turn still in hand lands it first
+    await page.fill('#cut-rotate-deg', '30'); await page.press('#cut-rotate-deg', 'Tab');
+    const mid = await box();
+    await page.evaluate(() => nsoRotate.seatNow());
+    await page.waitForTimeout(100);
+    const after = await box();
+    check('seatNow lands a turn in hand on the plate', mid.lo < -2 && Math.abs(after.lo - 0.2) < 0.05, 'lowest ' + mid.lo.toFixed(2) + ' -> ' + after.lo.toFixed(2));
+    await page.fill('#cut-rotate-deg', '0'); await page.press('#cut-rotate-deg', 'Tab');
+    await page.waitForTimeout(900);
+    await page.click('#chk-cut-rot-h');
+  }
 
   console.log('a locked piece');
   await page.evaluate(() => { getActiveModel().posLock = true; });

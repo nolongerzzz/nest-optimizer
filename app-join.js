@@ -2632,6 +2632,8 @@ function cutActiveModel(opts) {
     setStatus('Open Cut first', true);
     return;
   }
+  // A turn of the Rotate piece wheel still in hand lands on the plate first: the cut is made on the piece as it will lie.
+  if (typeof nsoRotate !== 'undefined' && nsoRotate.seatNow) nsoRotate.seatNow();
   // The Whole plate blade (app-cut-plate.js) cuts every piece at one height: no picked piece, no plane of its own.
   if (typeof cutPlateOn === 'function' && cutPlateOn()) { cutPlateActiveRun(); return; }
   const m = getActiveModel();
