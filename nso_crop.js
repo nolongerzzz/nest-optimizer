@@ -49,6 +49,9 @@
      outline   { kind: 'outline', source, mode, tri, d1, d2, z1, z2 }
                the footprint of a chosen piece, extruded between heights z1 and
                z2 (omitted: right through the piece being cropped)
+     loop      { kind: 'loop', tris: [triangle indices of the piece's own rawTris] }
+               the triangles inside a loop of edges round a bump (from bumpLoops): copied exactly as they are, the underside
+               closed by Lift's own fill, which continues the base's curve across the loop (nso_lift_curved.js)
      wall      { kind: 'wall', o: [x,y,z], n: [..], u: [..], ring: [[a,b], ...], off, reach? }
                one flat wall of the piece (from wallFace) and a line parallel to it, `off` mm
                out from it: the copy is what stands outside the line, over the wall's outline
@@ -134,7 +137,7 @@
     wallNudgeMm: 0.0005, // a wall's line is kept this far outside where it was set (below)
     cleanTol: [2e-4, 5e-4, 1e-3]   // the simplify tolerances tried, in turn, on a result with slivers
   };
-  var SHAPES = ['box', 'cylinder', 'sphere', 'piece', 'outline', 'lasso', 'wall'];
+  var SHAPES = ['box', 'cylinder', 'sphere', 'piece', 'outline', 'lasso', 'wall', 'loop'];
 
   var IDENTITY = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 
@@ -605,7 +608,9 @@
       if ((shape.z1 != null) !== (shape.z2 != null)) return 'give both heights z1 and z2, or neither';
       if (shape.z1 != null && !(isNum(shape.z1) && isNum(shape.z2) && shape.z2 > shape.z1)) return 'the outline heights need z1 below z2';
     }
-    else if (kind === 'wall') {
+    else if (kind === 'loop') {
+      if (!shape.tris || typeof shape.tris.length !== 'number' || shape.tris.length < 1) return 'the loop needs the triangles inside it, tris: [index, ...]';
+    } else if (kind === 'wall') {
       if (!vec3(shape.o) || !vec3(shape.n) || !vec3(shape.u)) return 'the wall needs a point on it, o, its outward normal, n, and a direction along it, u';
       if (!(Math.hypot(shape.n[0], shape.n[1], shape.n[2]) > 1e-9) || !(Math.hypot(shape.u[0], shape.u[1], shape.u[2]) > 1e-9)) return 'the wall normal and direction are not directions';
       if (!shape.ring || typeof shape.ring.length !== 'number' || shape.ring.length < 3) return 'the wall needs its outline, ring: at least 3 points [a, b] on the wall';
@@ -663,7 +668,7 @@
      it by an edge that lies in the same plane (within tolMm), however it is tessellated; its outline is the outermost
      loop of that patch, so whatever stands on the wall - a bump whose base is a hole in it - is inside the outline.
      -> { o, n, u, w, d, ring: [[a, b], ...] (about o, in u, w, counter-clockwise), ring3, areaMm2, size: [width, height],
-          tris, holes } or { reason }. n points out of the piece (the soup's winding). */
+          share (the patch's part of the whole surface), tris, holes } or { reason }. n points out of the piece (the soup's winding). */
   function wallFace(soupP, triIdx, tolMm) {
     var Q = DEFAULTS.weldQ, nT = (soupP.length / 9) | 0, tol = isNum(tolMm) ? tolMm : 0.02;
     if (!(triIdx >= 0 && triIdx < nT) || triIdx !== Math.floor(triIdx)) return { reason: 'triangle ' + triIdx + ' is not a triangle of that piece (it has ' + nT + ')' };
@@ -799,7 +804,7 @@
       var cr = (p[0] - pr[0]) * (nx2[1] - p[1]) - (p[1] - pr[1]) * (nx2[0] - p[0]);
       return Math.abs(cr) > 1e-7 * Math.max(1, Math.hypot(p[0] - pr[0], p[1] - pr[1]) * Math.hypot(nx2[0] - p[0], nx2[1] - p[1]));
     });
-    return { o: org, n: n0, u: uu, w: ww, d: d0, ring: ring, ring3: outer.ring3, areaMm2: Math.abs(outer.area),
+    return { o: org, n: n0, u: uu, w: ww, d: d0, ring: ring, ring3: outer.ring3, areaMm2: Math.abs(outer.area), share: patchArea / allArea,
              size: [hi[0] - lo[0], hi[1] - lo[1]], centre: [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2], tris: patch.length, holes: loops.length - 1 };
   }
 
@@ -975,6 +980,205 @@
   }
 
   /* =====================================================================
+     Loop: the bump inside a loop of edges, copied with its underside following the base
+     ===================================================================== */
+
+  var CREASE_PATCH_DEG = 30;        // a patch is smooth: its triangles bend less than this across a shared edge
+  var graphMemo = typeof WeakMap === 'function' ? new WeakMap() : null;
+
+  /* The piece as smooth PATCHES - triangles grown over shared edges while the surface bends under CREASE_PATCH_DEG - and
+     which patch meets which across a crease. soup is the piece's own rawTris (the loop is in its indices).
+     -> { nt, tv, tw (welded vertex ids per corner), area, patchOf, patches: [{ tris, area }], total, twin(t, k) } */
+  function patchGraph(soup) {
+    var hit = graphMemo && graphMemo.get(soup);
+    if (hit) return hit;
+    var Q = DEFAULTS.weldQ, nt = (soup.length / 9) | 0, vmap = new Map(), tv = new Int32Array(nt * 3), area = new Float64Array(nt), nrm = new Float64Array(nt * 3), edges = new Map();
+    function vid(x, y, z) {
+      var k = Math.round(x * Q) + '_' + Math.round(y * Q) + '_' + Math.round(z * Q), i = vmap.get(k);
+      if (i === undefined) { i = vmap.size; vmap.set(k, i); }
+      return i;
+    }
+    for (var t = 0; t < nt; t++) {
+      var o = t * 9;
+      tv[t * 3] = vid(soup[o], soup[o + 1], soup[o + 2]); tv[t * 3 + 1] = vid(soup[o + 3], soup[o + 4], soup[o + 5]); tv[t * 3 + 2] = vid(soup[o + 6], soup[o + 7], soup[o + 8]);
+      var ux = soup[o + 3] - soup[o], uy = soup[o + 4] - soup[o + 1], uz = soup[o + 5] - soup[o + 2];
+      var vx = soup[o + 6] - soup[o], vy = soup[o + 7] - soup[o + 1], vz = soup[o + 8] - soup[o + 2];
+      var cx = uy * vz - uz * vy, cy = uz * vx - ux * vz, cz = ux * vy - uy * vx, L = Math.sqrt(cx * cx + cy * cy + cz * cz);
+      area[t] = L / 2;
+      if (L > 1e-12) { nrm[t * 3] = cx / L; nrm[t * 3 + 1] = cy / L; nrm[t * 3 + 2] = cz / L; }
+      if (!(L > 1e-12)) continue;
+      for (var e = 0; e < 3; e++) {
+        var a = tv[t * 3 + e], b = tv[t * 3 + (e + 1) % 3], key = a < b ? a + '_' + b : b + '_' + a, l = edges.get(key);
+        if (!l) { l = []; edges.set(key, l); }
+        l.push(t);
+      }
+    }
+    function twin(t, k) {
+      var a = tv[t * 3 + k], b = tv[t * 3 + (k + 1) % 3], l = edges.get(a < b ? a + '_' + b : b + '_' + a);
+      if (!l) return -1;
+      for (var i = 0; i < l.length; i++) if (l[i] !== t) return l[i];
+      return -1;
+    }
+    var cosS = Math.cos(CREASE_PATCH_DEG * Math.PI / 180), patchOf = new Int32Array(nt).fill(-1), patches = [], total = 0;
+    for (var s0 = 0; s0 < nt; s0++) {
+      if (patchOf[s0] >= 0 || !(area[s0] > 0)) continue;
+      var id = patches.length, stack = [s0], tris = [], pa = 0;
+      patchOf[s0] = id;
+      while (stack.length) {
+        var cur = stack.pop();
+        tris.push(cur); pa += area[cur];
+        for (var k = 0; k < 3; k++) {
+          var nb = twin(cur, k);
+          if (nb < 0 || patchOf[nb] >= 0 || !(area[nb] > 0)) continue;
+          if (nrm[nb * 3] * nrm[cur * 3] + nrm[nb * 3 + 1] * nrm[cur * 3 + 1] + nrm[nb * 3 + 2] * nrm[cur * 3 + 2] < cosS) continue;
+          patchOf[nb] = id; stack.push(nb);
+        }
+      }
+      patches.push({ tris: tris, area: pa });
+      total += pa;
+    }
+    var g = { nt: nt, tv: tv, area: area, patchOf: patchOf, patches: patches, total: total, twin: twin };
+    if (graphMemo) graphMemo.set(soup, g);
+    return g;
+  }
+
+  /* The loops of edges that bound the triangles `inSet` (a Uint8Array flag per triangle): directed edges { t, k } of a
+     triangle inside, whose other side is not; chained into closed loops. -> [{ edges: [{ t, k }, ...], length }] */
+  function boundaryLoops(G, soup, inSet) {
+    var out = [], from = new Map(), tv = G.tv;
+    G.__tmp = null;
+    var all = [];
+    for (var t = 0; t < G.nt; t++) {
+      if (!inSet[t]) continue;
+      for (var k = 0; k < 3; k++) {
+        var u = G.twin(t, k);
+        if (u >= 0 && inSet[u]) continue;
+        var a = tv[t * 3 + k], idx = all.length;
+        all.push({ t: t, k: k, a: a, b: tv[t * 3 + (k + 1) % 3] });
+        var l = from.get(a);
+        if (!l) { l = []; from.set(a, l); }
+        l.push(idx);
+      }
+    }
+    var used = new Uint8Array(all.length);
+    for (var s0 = 0; s0 < all.length; s0++) {
+      if (used[s0]) continue;
+      var chain = [], cur = s0, closed = false;
+      for (;;) {
+        used[cur] = 1; chain.push(cur);
+        if (all[cur].b === all[s0].a) { closed = true; break; }
+        var outs = from.get(all[cur].b) || [], nx = -1;
+        for (var q = 0; q < outs.length; q++) if (!used[outs[q]]) { nx = outs[q]; break; }
+        if (nx < 0) break;
+        cur = nx;
+      }
+      if (!closed) continue;
+      var len = 0;
+      var edges = chain.map(function (ci) {
+        var e = all[ci], o = e.t * 9 + e.k * 3, o2 = e.t * 9 + ((e.k + 1) % 3) * 3;
+        len += Math.hypot(soup[o] - soup[o2], soup[o + 1] - soup[o2 + 1], soup[o + 2] - soup[o2 + 2]);
+        return { t: e.t, k: e.k };
+      });
+      out.push({ edges: edges, length: len });
+    }
+    return out;
+  }
+
+  /* The loops round the bump a triangle is on. The patch under the triangle is grown outward, patch by patch, while what
+     it meets is not the surface the bump stands on (that is a patch at least three times the bump's area and 5% of the
+     piece's surface); each stage's boundary is a candidate loop - a pin's end rim, then its foot - and the outermost is
+     the default: the loop where the bump meets what it stands on. `edge` ({ t, k }, a crease edge clicked) starts from the
+     smaller of the two patches that edge divides and prefers the candidate that edge belongs to.
+     -> { ok, candidates: [{ tris, area, perimeterMm, edges, patches }], pick } or { ok: false, reason } */
+  function bumpLoops(soup, tri, opts) {
+    opts = opts || {};
+    var nt = (soup.length / 9) | 0;
+    if (!(tri >= 0 && tri < nt) || tri !== Math.floor(tri)) return { ok: false, reason: 'triangle ' + tri + ' is not a triangle of that piece (it has ' + nt + ')' };
+    var G = patchGraph(soup), p0 = G.patchOf[tri];
+    if (p0 < 0) return { ok: false, reason: 'that triangle has no area' };
+    if (opts.edge) {
+      var u0 = G.twin(opts.edge.t, opts.edge.k);
+      if (u0 >= 0 && G.patchOf[u0] >= 0 && G.patchOf[u0] !== G.patchOf[opts.edge.t]) {
+        var pa = G.patchOf[opts.edge.t], pb = G.patchOf[u0];
+        p0 = G.patches[pa].area <= G.patches[pb].area ? pa : pb;
+      }
+    }
+    var inR = new Uint8Array(nt), inP = new Set([p0]), rArea = G.patches[p0].area, cands = [];
+    G.patches[p0].tris.forEach(function (t) { inR[t] = 1; });
+    function record() {
+      var loops = boundaryLoops(G, soup, inR);
+      if (!loops.length) return false;
+      loops.sort(function (a, b) { return b.length - a.length; });
+      var tris = [];
+      for (var t = 0; t < nt; t++) if (inR[t]) tris.push(t);
+      var edges = [];
+      loops.forEach(function (L) { L.edges.forEach(function (e) { edges.push(e); }); });
+      cands.push({ tris: tris, area: rArea, perimeterMm: loops[0].length, edges: edges, loops: loops.length, patches: inP.size });
+      return true;
+    }
+    for (var step = 0; step < 6; step++) {
+      if (!record()) break;
+      if (rArea > 0.5 * G.total) { cands.pop(); break; }
+      var nbrs = new Set();
+      inP.forEach(function (pid) {
+        G.patches[pid].tris.forEach(function (t) {
+          for (var k = 0; k < 3; k++) {
+            var u = G.twin(t, k);
+            if (u >= 0 && !inR[u] && G.patchOf[u] >= 0) nbrs.add(G.patchOf[u]);
+          }
+        });
+      });
+      if (!nbrs.size) break;
+      var absorb = [];
+      nbrs.forEach(function (q) {
+        var qa = G.patches[q].area;
+        var base = qa >= 3 * rArea && qa >= 0.05 * G.total;
+        if (!base) absorb.push(q);
+      });
+      if (!absorb.length) break;                                   // everything it meets is the surface it stands on: this is the foot
+      absorb.forEach(function (q) { inP.add(q); rArea += G.patches[q].area; G.patches[q].tris.forEach(function (t) { inR[t] = 1; }); });
+    }
+    if (!cands.length) return { ok: false, reason: 'that is not a bump: nothing on that piece stands out of it along a loop of edges' };
+    var pick = cands.length - 1;
+    if (opts.edge) {
+      for (var ci = cands.length - 1; ci >= 0; ci--) {
+        if (cands[ci].edges.some(function (e) { return e.t === opts.edge.t && e.k === opts.edge.k; })) { pick = ci; break; }
+      }
+    }
+    return { ok: true, candidates: cands, pick: pick, patchArea: G.patches[p0].area, total: G.total };
+  }
+
+  /* The copy of what is inside a loop: the triangles as they are, and an underside that continues the surface round the
+     loop (Lift's fill). Needs nso_lift.js, nso_lift_auto.js, nso_lift_curved.js and the cut engine (rawFlatCapLoops) on
+     the page's thread - not the worker's. -> { ok, tris, faces, volumeMm3, bbox, what, ... } or { ok: false, reason } */
+  async function loopCore(piece, shape, build) {
+    var soup = soupOf(piece), res = { ok: false, reason: '', tris: soup };
+    var shapeWhy = shapeProblem(shape);
+    if (shapeWhy) { res.reason = shapeWhy; return res; }
+    var LC = root && root.NSO_LiftCurved && root.NSO_LiftCurved.surface, cap = root && root.rawFlatCapLoops;
+    if (!LC || !cap) { res.reason = 'the loop copy needs Lift\'s curved engine (nso_lift_curved.js) and the cut engine'; return res; }
+    var A;
+    /* relaxMm tiny: the fill is the base fitted round the loop and nothing else. Its other term pulls the fill toward the real
+       neighbours' far corners, which on a cone's fan are 25 mm away (it gave 3258 mm3 for a 50 mm3 pin); the fit is the base
+       to within a few microns, which is what "follows the surface" means for a copy that is then Subtracted from its piece. */
+    try { A = LC.island(soup, Array.prototype.slice.call(shape.tris), { relaxMm: 0.02 }); }
+    catch (err) { res.reason = 'the loop could not be read (' + ((err && err.message) || err) + ')'; return res; }
+    if (!A.ok) { res.reason = 'inside that loop ' + A.reason; return res; }
+    var r;
+    try { r = LC.lift(soup, A, [0], { rawFlatCapLoops: cap }); } catch (err2) { res.reason = 'the loop could not be filled (' + ((err2 && err2.message) || err2) + ')'; return res; }
+    if (!r.ok) { res.reason = 'inside that loop ' + (r.reason || 'could not be lifted'); return res; }
+    var tris = r.pieces[0].soup, cen = census(tris);
+    if (cen.open || cen.repeated || cen.degenerate || cen.welded.open || cen.welded.repeated || cen.welded.collapsed) {
+      res.reason = 'the copy inside that loop did not come out closed (open ' + cen.open + ', repeated ' + cen.repeated + ', degenerate ' + cen.degenerate + ')';
+      return res;
+    }
+    var v = volume(tris);
+    if (!(v > DEFAULTS.tinyMm3)) { res.reason = 'inside that loop holds nothing of this piece'; return res; }
+    return { ok: true, tris: build ? tris : null, faces: tris.length / 9, volumeMm3: v, bbox: bounds(tris), what: 'inside the loop', census: cen,
+             note: 'the underside follows the surface round the loop (' + r.pieces[0].capTris + ' triangles)', fill: r.pieces[0].fill };
+  }
+
+  /* =====================================================================
      4. plan / run
      ===================================================================== */
 
@@ -1134,6 +1338,7 @@
   }
 
   async function crop(piece, shape, build) {
+    if (shape && shape.kind === 'loop') return loopCore(piece, shape, build);        // the page's thread: Lift's engines are not in the worker
     var boolRun = root && root.NSO_boolRun;
     if (typeof boolRun !== 'function') return cropCore(piece, shape, build);
     var soup = soupOf(piece);
@@ -1306,7 +1511,7 @@
     var r = resolve(m, shape);
     if (r.reason) return { ok: false, reason: r.reason };
     // a piece whose shells a CROP already merged is planned on that solid, as its copy will be
-    var mergedRaw = root && root.nsoOverlap ? root.nsoOverlap.cachedMerge(r.piece.rawTris) : null;
+    var mergedRaw = root && root.nsoOverlap && r.shape.kind !== 'loop' ? root.nsoOverlap.cachedMerge(r.piece.rawTris) : null;
     if (!mergedRaw) return plan(r.piece, r.shape);
     var n = root.nsoOverlap.shells(r.piece.rawTris, true);
     r.piece.rawTris = mergedRaw;
@@ -1360,7 +1565,7 @@
       /* Work as is (nso-helpers.js, nsoOverlap): a piece - or a Piece cutter - whose shells overlap is cut from
          those shells merged into one solid, for this copy only. The piece on the plate is not touched. */
       var merged = [];
-      if (root && root.nsoOverlap) {
+      if (root && root.nsoOverlap && rs.shape.kind !== 'loop') {      // a loop reads its piece's triangles by index: left as drawn
         var sol = await root.nsoOverlap.solid(m, null, 'crop-readout');
         if (!sol.ok) return refuse(sol.reason, sol);
         if (sol.merged) { rs.piece.rawTris = sol.soup; merged.push(sol.note); }
@@ -1419,6 +1624,7 @@
     planOn: planOn,
     footprintPolys: footprintPolys,
     rimLoop: rimLoop,
+    bumpLoops: bumpLoops,
     wallFace: wallFace,
     census: census,
     weldSoup: weldSoup,

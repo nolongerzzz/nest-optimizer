@@ -56,7 +56,18 @@ async function build() {
   return out;
 }
 
-module.exports = { build, boxSoup };
+/* What stands out of each body, exactly, by the kernel with the same primitives: the dome outside the sphere, the pin outside the
+   cone, the block's bump. A loop copy that follows the base's curve has this volume (tools/nso_crop_engine_test.js 6e). */
+async function oracles() {
+  const ctx = csgContext(), kern = ctx.NSO_CSG, wasm = await kern.load(), M = wasm.Manifold;
+  const cone = M.cylinder(25, 15, 0, 96, false);
+  const nz = 15, nx = 25, nl = Math.hypot(nx, nz), n = [nx / nl, nz / nl], at = [15 * (1 - 8 / 25), 8], ang = Math.atan2(n[0], n[1]) * 180 / Math.PI;
+  const pin = M.cylinder(6, 2, 2, 48, true).rotate(0, ang, 0).translate(at[0] + n[0] * 1, 0, at[1] + n[1] * 1);
+  const sph = M.sphere(15, 96).translate(0, 0, 15), dome = M.sphere(3, 48).translate(15, 0, 15);
+  return { sphere: dome.subtract(sph).volume(), cone: pin.subtract(cone).volume(), block: 4 * 4 * 2 };
+}
+
+module.exports = { build, boxSoup, oracles };
 
 if (require.main === module) {
   build().then(fx => {

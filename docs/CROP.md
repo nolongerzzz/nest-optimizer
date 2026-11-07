@@ -94,6 +94,29 @@ are in the engine section; `crop:engine` 6c checks them against the closed forms
 a 4 × 4 × 2 bump (32 mm³ at the wall, 16 at 1 mm out, 232 at 1 mm in), `crop:drive` 5b with a real
 mouse.
 
+**Wall on a bump: the loop.** A flat line cannot lie on a curve, so a click on a **bump** - a patch too small to be a wall (under
+5% of the piece's surface): a dome on a sphere, a pin on a cone, the top of a block's bump - draws the **loops of edges round it**
+instead, and picks the outermost, where it meets what it stands on (the foot). A pin shows two: its end rim, then its foot. Every
+loop is drawn (the picked one bright, with the bump tinted; the others dim) and **clicking a drawn edge picks that loop** - as does
+a click within 8 px of any crease edge of the piece. The line is that loop exactly: it bends with the surface and has no handle.
+CROP copies **what is inside it, triangle for triangle as it is, and closes the underside with a surface that continues the base's
+curve across the loop** - Lift's own fill (`nso_lift_curved.js`, the fill that repairs the piece a lift leaves), made of exactly the
+triangles the loop encloses, so Lift's detection - the part that was failing - is not in it. The copy is what stands out of the body:
+60.31 mm³ for the sphere's dome against 60.48 by the kernel (0.3%), 50.73 for the cone's pin against 50.69 (0.08%), the block's bump
+32.00 exactly (`crop:engine` 6e, `crop:drive` 5b). The piece is untouched; Subtract the copy from it for a clean surface where the
+bump was.
+
+How the loops are found (`NSO_Crop.bumpLoops`): the piece is cut into smooth patches (triangles that bend under 30° across a shared
+edge); the patch under the click is grown outward, patch by patch, while what it meets is not the surface it stands on (a patch at
+least three times the bump's area and 5% of the piece's surface); each stage's boundary is a candidate loop. A click on the surface
+itself finds no bump and says so. The underside is fitted with `relaxMm` 0.02: the fill's other term pulls toward the real
+neighbours' far corners, which on a cone's fan of 30 mm triangles are 25 mm away (it gave 3258 mm³ for a 50 mm³ pin). Two
+changes in `nso_lift_curved.js` make that fit right on such a mesh: the base samples round a root are limited to the corners
+within the root's reach plus two rings, and **points are sampled across long triangles near the root** (a cone's fan has corners
+only at its apex and rim, so the fit passed exactly through a handful of far points and said nothing of the surface beside the
+pin - the underside came out 0.5 mm off the cone, now 0.006). A mesh whose triangles are under 2 mm is unchanged (Lift's own
+`lift:curved-test`, 483 gates, `lift:test`, `lift:auto-test`, `lift:curved-surface-test` all pass).
+
 **Lasso** is a loop drawn freehand on the screen (a plain left-drag; **Alt-drag orbits**,
 as a press that draws cannot also orbit). It is kept as the rays from the camera it was
 drawn in through its corners - the loop is simplified to at most 240 corners - so it is a

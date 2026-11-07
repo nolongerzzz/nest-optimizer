@@ -19,6 +19,10 @@
      3. CYLINDER: the side sets the diameter, an end slides along the axis (the far
         end stays), an end pulled round past 45 degrees turns the axis
      4. SPHERE: one handle sets the diameter
+     5b. WALL on a bump: the loop. A click on the surface a sphere's or cone's bump stands on is refused in words; a click on the
+        bump draws the loops of edges round it and picks its foot (the cone's pin: its end rim too, clickable); CROP copies what is
+        inside, its underside following the base's curve, closed, to within 0.5% of what the kernel says stands out; the piece is
+        untouched, one Undo.
      5b. WALL: click a flat wall of a block with a bump on it and a line appears along it; the line
         is dragged out of the wall and into it, or set by a click on the piece (the bump's top: the
         line is its height, and CROP holds nothing; the wall: the line is flush); CROP copies the
@@ -546,29 +550,89 @@ const snap = (page, id) => page.evaluate(i => {
     await selectModel(page, hid);
     await reselect(page, hid);
 
-    /* The sphere and the cone, each with a bump on its curved side: there is no flat wall to put a line on, and a click
-       says so in words - no line, no shape's numbers, CROP off - rather than lay a line on a facet. */
-    for (const [label, file] of [['sphere', 'sphere_bump.stl'], ['cone', 'cone_bump.stl']]) {
+    /* The sphere and the cone, each with a bump on its curved side - and the block's bump, as a loop. A click on the surface the
+       bump stands on says it is a curved surface, not a flat wall; a click on the BUMP draws the loops of edges round it, the
+       outermost picked (its foot); clicking another drawn loop switches; CROP copies what is inside, its underside following the
+       base's curve, to within a few tenths of a percent of what the kernel says stands out of the body. */
+    const ORC = await require('./nso_crop_wall_fixtures.js').oracles();
+    const nrm = [25 / Math.hypot(25, 15), 15 / Math.hypot(25, 15)];
+    /* The screen point of the triangle of piece `id` nearest raw point `pt`: { x, y, tri, seen } - seen when the mouse ray meets that triangle first. */
+    const screenOfRaw = (id, pt) => page.evaluate(([id, pt]) => {
+      const m = state.models.find(q => q.id === id), p = state.placed.find(q => q.sourceId === id), s = m.rawTris, P = p.mesh.geometry.attributes.position.array, rc = state.renderer.domElement.getBoundingClientRect();
+      let best = -1, bd = 1e9;
+      for (let t = 0; t < s.length / 9; t++) { const o = t * 9, d = Math.hypot((s[o] + s[o + 3] + s[o + 6]) / 3 - pt[0], (s[o + 1] + s[o + 4] + s[o + 7]) / 3 - pt[1], (s[o + 2] + s[o + 5] + s[o + 8]) / 3 - pt[2]); if (d < bd) { bd = d; best = t; } }
+      p.mesh.updateMatrixWorld(true); state.camera.updateMatrixWorld(true);
+      const v = new THREE.Vector3((P[best * 9] + P[best * 9 + 3] + P[best * 9 + 6]) / 3, (P[best * 9 + 1] + P[best * 9 + 4] + P[best * 9 + 7]) / 3, (P[best * 9 + 2] + P[best * 9 + 5] + P[best * 9 + 8]) / 3).applyMatrix4(p.mesh.matrixWorld), w = v.clone().project(state.camera);
+      const x = rc.left + (w.x + 1) / 2 * rc.width, y = rc.top + (1 - w.y) / 2 * rc.height;
+      state.raycaster.setFromCamera(new THREE.Vector2(w.x, w.y), state.camera);
+      const hit = state.raycaster.intersectObject(p.mesh, false).filter(h => h.faceIndex != null)[0];
+      return { x, y, tri: best, seen: !!hit && hit.faceIndex === best && document.elementFromPoint(x, y) === state.renderer.domElement };
+    }, [id, pt]);
+    /* where a drawn edge of the picked loop's candidate `ci` is on the screen (its middle) */
+    const loopEdgeXY = (ci, which) => page.evaluate(([ci, which]) => {
+      const S = NSO_CropCard.state(), l = S.wall.loop, t = state.placed.find(q => q.sourceId === S.forId), P = t.mesh.geometry.attributes.position.array, rc = state.renderer.domElement.getBoundingClientRect();
+      const e = l.cands[ci].edges[which], a = e.t * 9 + e.k * 3, b = e.t * 9 + ((e.k + 1) % 3) * 3;
+      t.mesh.updateMatrixWorld(true);
+      const v = new THREE.Vector3((P[a] + P[b]) / 2, (P[a + 1] + P[b + 1]) / 2, (P[a + 2] + P[b + 2]) / 2).applyMatrix4(t.mesh.matrixWorld).project(state.camera);
+      return { x: rc.left + (v.x + 1) / 2 * rc.width, y: rc.top + (1 - v.y) / 2 * rc.height };
+    }, [ci, which]);
+    const loopNow = () => page.evaluate(() => { const S = NSO_CropCard.state(), l = S.wall.loop; return { kind: S.wall.kind, n: l ? l.cands.length : 0, pick: l ? l.pick : -1, plan: S.plan && { ok: S.plan.ok, v: S.plan.volumeMm3, r: S.plan.reason }, handles: NSO_CropCard.handles().length }; });
+    const planned = () => page.waitForFunction(() => { const S = NSO_CropCard.state(); return !S.timer && S.plan; }, null, { timeout: 60000 });
+    const cases = [
+      ['sphere', 'sphere_bump.stl', [9.64, 0, 26.5], [18, 0, 15], 1, ORC.sphere],
+      ['cone', 'cone_bump.stl', [6, 0, 15], [10.2 + nrm[0] * 3.9, 0, 8 + nrm[1] * 3.9], 2, ORC.cone],
+      ['block', 'block_bump.stl', null, [42, 10, 5], 2, ORC.block]
+    ];
+    for (const [label, file, basePt, bumpPt, ncand, want] of cases) {
       const cid = await loadSTL(page, path.join(ROOT, 'fixtures', 'crop-wall', file));
       await selectModel(page, cid);
       await reselect(page, cid);
       const cb = await world(page, cid), cm = [0, 1, 2].map(k => (cb.lo[k] + cb.hi[k]) / 2);
-      await frame(page, [cb.hi[0] + 70, cm[2] + 30, -cm[1] + 40], [cm[0], cm[2], -cm[1]]);
+      await frame(page, [cb.hi[0] + 60, cm[2] + 28, -cm[1] + 30], [cm[0] + 8, cm[2], -cm[1]]);
       await page.click('#btn-crop-shape-wall');
       await settled(page);
-      const at = await page.evaluate(i => { const p = state.placed.find(q => q.sourceId === i), rc = state.renderer.domElement.getBoundingClientRect();
-        for (let gx = 0.3; gx < 0.7; gx += 0.01) for (let gy = 0.3; gy < 0.7; gy += 0.01) {
-          const x = rc.left + gx * rc.width, y = rc.top + gy * rc.height; if (document.elementFromPoint(x, y) !== state.renderer.domElement) continue;
-          state.raycaster.setFromCamera(new THREE.Vector2(gx * 2 - 1, 1 - gy * 2), state.camera);
-          const hit = state.raycaster.intersectObject(p.mesh, false).filter(h => h.faceIndex != null)[0];
-          if (hit) return { x, y }; } return null; }, cid);
-      check(label + ': a point on its curved side is in view to click', !!at, JSON.stringify(at));
-      await page.mouse.click(at.x, at.y);
-      await page.waitForTimeout(200);
-      const refused = await page.evaluate(() => ({ st: document.getElementById('status').textContent, face: !!NSO_CropCard.state().wall.face, handles: NSO_CropCard.handles().length,
-        crop: document.getElementById('btn-crop').disabled, ro: document.getElementById('crop-readout').textContent }));
-      check(label + ': a click on the curve is refused in words - a curved surface, not a flat wall - and nothing is drawn', /curved surface, not a flat wall/.test(refused.st) && !refused.face && refused.handles === 0 && refused.crop &&
-        /^Wall: click a flat wall/.test(refused.ro), refused.st.slice(0, 100));
+      if (basePt) {
+        const bp = await screenOfRaw(cid, basePt);
+        check(label + ': a point on the surface the bump stands on is in view', bp.seen, JSON.stringify(bp));
+        await page.mouse.click(bp.x, bp.y);
+        await page.waitForTimeout(200);
+        const refused = await page.evaluate(() => ({ st: document.getElementById('status').textContent, face: !!NSO_CropCard.state().wall.face, loop: !!NSO_CropCard.state().wall.loop,
+          crop: document.getElementById('btn-crop').disabled, ro: document.getElementById('crop-readout').textContent }));
+        check(label + ': a click on that surface is refused in words - a curved surface, not a flat wall - and nothing is drawn', /curved surface, not a flat wall/.test(refused.st) && !refused.face && !refused.loop && refused.crop &&
+          /^Wall: click a flat wall/.test(refused.ro), refused.st.slice(0, 110));
+      }
+      const bu = await screenOfRaw(cid, bumpPt);
+      check(label + ': the bump is in view to click', bu.seen, JSON.stringify(bu));
+      await page.mouse.click(bu.x, bu.y);
+      await planned();
+      let st = await loopNow();
+      check(label + ': a click on the bump draws its loops (' + ncand + ') and picks the outermost - its foot - with no handle', st.kind === 'loop' && st.n === ncand && st.pick === ncand - 1 && st.handles === 0, JSON.stringify(st));
+      ro = await readout(page);
+      check(label + ': the readout is "Loop N mm round … · holds N faces, X cm³"', /^Loop [\d.]+ mm round( \(\d of \d drawn - click another to switch\))? · holds \d+ faces, [\d.]+ cm³$/.test(ro), ro);
+      check(label + ': what is held is what stands out of the body - ' + f2(want) + ' mm3 by the kernel (0.5%)', st.plan && st.plan.ok && Math.abs(st.plan.v - want) / want < 0.005, st.plan && f2(st.plan.v));
+      await page.screenshot({ path: path.join(OUT(), 'crop-loop-' + label + '.png') });
+      if (label === 'cone') {
+        // the other drawn loop is the pin's end rim: clicking it switches to it, and a flat end has no surface to continue
+        const rimXY = await loopEdgeXY(0, 3);
+        await page.mouse.click(rimXY.x, rimXY.y);
+        await planned();
+        st = await loopNow(); ro = await readout(page);
+        check('cone: a click on the other drawn loop (the end rim) switches to it; a flat end is refused in words, CROP off', st.pick === 0 && st.plan && !st.plan.ok && /cannot be lifted|wraps round|too little/.test(ro) &&
+          await page.evaluate(() => document.getElementById('btn-crop').disabled), 'pick ' + st.pick + ' · ' + ro.slice(0, 120));
+        const footXY = await loopEdgeXY(1, 3);
+        await page.mouse.click(footXY.x, footXY.y);
+        await planned();
+        st = await loopNow();
+        check('cone: a click on the foot loop switches back, and it is held again', st.pick === 1 && st.plan && st.plan.ok && Math.abs(st.plan.v - want) / want < 0.005, 'pick ' + st.pick + ' ' + (st.plan && f2(st.plan.v)));
+      }
+      // CROP: the bump, closed, its underside on the base, the piece untouched
+      const pre = await snap(page, cid);
+      const nm = await cropNow(page, cid);
+      const made = await page.evaluate(() => { const m = state.models[state.models.length - 1], c = NSO_Crop.census(m.rawTris); return { name: m.name, v: NSO_Crop.volume(m.rawTris), open: c.open + c.repeated + c.degenerate + c.welded.open + c.welded.repeated }; });
+      check(label + ': CROP adds "<name> crop N", closed, and its volume is the bump\'s (within 0.5%)', /crop \d+$/.test(nm) && made.open === 0 && Math.abs(made.v - want) / want < 0.005, nm + ' ' + f2(made.v) + ' vs ' + f2(want));
+      check(label + ': the piece is byte for byte as it was', JSON.stringify((await snap(page, cid)).raw) === JSON.stringify(pre.raw));
+      await page.click('#btn-undo');
+      check(label + ': one Undo takes the copy off, the loops still there', (await snap(page, cid)).models === pre.models && (await loopNow()).kind === 'loop');
       await page.click('#btn-crop-cancel');
     }
     }

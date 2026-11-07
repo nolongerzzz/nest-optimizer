@@ -707,6 +707,54 @@ async function crop(label, piece, shape, expect) {
   }
 
   /* =========================================================================
+     6e. Loop: the bendable line round a bump, and a copy whose underside follows the base's curve
+     A click on a bump finds the loops of edges round it (a pin: its end rim, then its foot) and picks the outermost - where
+     it meets what it stands on. The copy is the triangles inside it, exactly, closed by Lift's fill, which continues the
+     base across the loop. Checked against what the kernel says stands out of each body (tools/nso_crop_wall_fixtures.js).
+     ========================================================================= */
+  console.log('\n=== 6e. loop: the bump on a curved base, copied with its underside following the curve ===');
+  {
+    const FXm = require('./nso_crop_wall_fixtures.js'), fx = await FXm.build(), orc = await FXm.oracles();
+    const LCtx = csgContext();
+    LCtx.window = LCtx;
+    vm.runInContext('var state = {}; var THREE = {};', LCtx);
+    for (const f of ['nso_lift.js', 'nso_lift_auto.js', 'nso_lift_curved.js', 'app-cut.js', 'nso_crop.js']) vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), LCtx, { filename: f });
+    const LCr = LCtx.NSO_Crop;
+    const triNear = (soup, pt, r) => { let best = -1, bd = 1e9; for (let t = 0; t < soup.length / 9; t++) { const o = t * 9, c = [0, 1, 2].map(a => (soup[o + a] + soup[o + 3 + a] + soup[o + 6 + a]) / 3), d = Math.hypot(c[0] - pt[0], c[1] - pt[1], c[2] - pt[2]); if (d <= r && d < bd) { bd = d; best = t; } } return best; };
+    const nrm = [25 / Math.hypot(25, 15), 15 / Math.hypot(25, 15)];
+    const cases = [
+      ['sphere', fx.sphere, triNear(fx.sphere, [18, 0, 15], 1.5), 1, orc.sphere, 0.01],
+      ['cone', fx.cone, triNear(fx.cone, [10.2 + nrm[0] * 3.9, 0, 8 + nrm[1] * 3.9], 1.5), 2, orc.cone, 0.01],
+      ['block', fx.block, triNear(fx.block, [42, 10, 5], 1.5), 2, orc.block, 0.005]
+    ];
+    for (const [label, soup, tri, ncand, want, tol] of cases) {
+      const B = LCr.bumpLoops(soup, tri);
+      check(label + ': a click on the bump finds its loops: ' + ncand + ' drawn, the outermost picked', B.ok && B.candidates.length === ncand && B.pick === ncand - 1, B.ok ? B.candidates.length + ' candidates, pick ' + B.pick : B.reason);
+      const before = bytes(soup);
+      const r = await LCr.run({ rawTris: soup }, { kind: 'loop', tris: B.candidates[B.pick].tris });
+      check(label + ': its copy comes out, closed', r.ok && r.census && r.census.open === 0 && r.census.repeated === 0, r.ok ? r.faces + ' faces' : r.reason);
+      check(label + ': the copy is what stands out of the body - ' + f3(want) + ' mm3 by the kernel', r.ok && pct(r.volumeMm3, want) <= tol * 100, r.ok ? f3(r.volumeMm3) + ' (' + f3(pct(r.volumeMm3, want)) + '%)' : r.reason);
+      check(label + ': the piece is byte for byte as it was', bytes(soup) === before);
+      if (r.ok) { const j = validate(r.tris); check(label + ': tools/mesh_validate.py, self-intersection included', j.clean, j.summary); }
+      const pl = await LCr.plan({ rawTris: soup }, { kind: 'loop', tris: B.candidates[B.pick].tris });
+      check(label + ': plan() agrees and builds nothing', pl.ok && near(pl.volumeMm3, want, want * tol) && !pl.tris);
+    }
+    // the cone's pin end rim is a loop of its own: a flat disc has no surface to continue, said in words
+    const Bc = LCr.bumpLoops(fx.cone, cases[1][2]);
+    const rim = await LCr.run({ rawTris: fx.cone }, { kind: 'loop', tris: Bc.candidates[0].tris });
+    check('the cone pin\'s end rim, picked as the loop, is refused in words - nothing to continue under a flat end', !rim.ok && /cannot be lifted|wraps round|too little/.test(rim.reason), rim.reason);
+    // a click that is on the surface a bump stands on is not a bump
+    const body = triNear(fx.sphere, [-15, 0, 15], 1.5);
+    const Bb = LCr.bumpLoops(fx.sphere, body);
+    check('a click on the sphere itself is not a bump: said in words', !Bb.ok && /not a bump/.test(Bb.reason), Bb.reason);
+    // a crease edge clicked picks that edge's loop
+    const Be = LCr.bumpLoops(fx.cone, cases[1][2], { edge: Bc.candidates[0].edges[0] });
+    check('a click on a crease edge (the pin\'s end rim) picks that edge\'s loop', Be.ok && Be.pick === 0, Be.ok ? 'pick ' + Be.pick : Be.reason);
+    check('a triangle that is not there is refused in words', /not a triangle/.test(LCr.bumpLoops(fx.sphere, 1e7).reason));
+    check('a loop with no triangles is refused in words', /needs the triangles inside it/.test((await LCr.plan({ rawTris: fx.sphere }, { kind: 'loop', tris: [] })).reason));
+  }
+
+  /* =========================================================================
      7. refusals
      ========================================================================= */
   console.log('\n=== 7. refusals: only a shape that holds nothing, or a result that is not closed ===');

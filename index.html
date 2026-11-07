@@ -997,7 +997,7 @@
               <button id="btn-crop-shape-outline" class="btn btn-secondary" type="button" aria-pressed="false"
                       title="Outline: click a piece for its footprint seen from above (Shift-click a triangle for its rim), then drag the outer and inner offsets and the two heights">Outline</button>
               <button id="btn-crop-shape-wall" class="btn btn-secondary" type="button" aria-pressed="false"
-                      title="Wall: click a flat wall of the piece and a straight line appears along it. Drag its handle out of the wall or into it - or look at a bump from the side and click behind it - until the line is flush on the wall, then CROP: the copy is what stands outside the line (the bump) and the original is untouched. Shift-click another wall to switch">Wall</button>
+                      title="Wall: click a flat wall of the piece for a straight line along it (drag its handle out or in, or click behind a bump seen from the side), or click a BUMP for the loops of edges round it - a bent line that follows the surface; its foot is picked, click another drawn loop or edge to switch. CROP copies what is on the bump's side, its underside following the surface's curve; the original is untouched. Shift-click picks afresh">Wall</button>
               <button id="btn-crop-shape-lasso" class="btn btn-secondary" type="button" aria-pressed="false"
                       title="Lasso: drag a loop round what to copy, on the screen - everything the loop sees, front to back, is copied. Draw again to replace it; Alt-drag to orbit">Lasso</button>
               </div>
@@ -2773,13 +2773,13 @@
   <!-- Crop's engine: copy what a shape holds out of a piece (docs/CROP.md). On
        the boolean kernel in app-join.js and app-sculpt.js's commit helpers;
        the Crop card (app-crop-card.js) runs on it, so it comes first. -->
-  <script src="nso_crop.js?v=8b8f6677"></script>
+  <script src="nso_crop.js?v=062e57ba"></script>
   <!-- Crop, stage 1: box -> remove slab -> seal the joint. After app-cut.js
        (rawCutOpen, rawFlatCapLoop, mapPlaneToRaw) and app-sculpt.js (commit). -->
   <script src="app-crop.js?v=eaac717b"></script>
   <!-- The Crop card: a shape dragged to size, CROP (docs/CROP.md). After app-crop.js
        and app-cut.js, whose updateCutterUI it follows. -->
-  <script src="app-crop-card.js?v=3def3136"></script>
+  <script src="app-crop-card.js?v=36bdd3e8"></script>
   <script src="app-fatten.js?v=9b21c866"></script>
   <!-- Section reader: Ring / Rod / Bar, or why not. Calls app-extend.js's
        axis detector and app-cut.js's loop walker at read time. -->
@@ -2947,7 +2947,7 @@
        app-cut.js (rawFlatCapLoops), app-sculpt.js (the commit) and
        app-microscope.js (the hooks). See docs/LIFT.md. -->
   <script src="nso_lift.js?v=34f68869"></script>
-  <script src="nso_lift_curved.js?v=692d105e"></script>
+  <script src="nso_lift_curved.js?v=73db5c05"></script>
   <script src="nso_lift_auto.js?v=14d63622"></script>
   <script src="app-lift-plate.js?v=78938239"></script>
   <script src="nso_shells.js?v=9058ef83"></script>

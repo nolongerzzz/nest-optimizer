@@ -36,6 +36,11 @@
                 picks another wall. CROP copies what stands outside the line - with
                 the line flush on the wall that is the bump and nothing else - and the
                 original is untouched (Subtract the copy from it for a clean wall).
+                A click on a BUMP - a small patch of the surface, a pin's end, a dome - draws the LOOPS of edges round it instead (a
+                pin: its end rim, then its foot) and picks the outermost, where it meets what it stands on: the bendable line. Click
+                another drawn loop, or any crease edge, to switch. CROP copies what is inside the loop, exactly as it is, and
+                closes the underside with Lift's fill, which continues the surface's curve across the loop, so Subtracting the copy
+                leaves the piece with a clean surface where the bump was.
      lasso      no handles: drag a loop round what to copy, on the screen. The
                 loop is a cone of rays from the camera it was drawn in, so what
                 it copies is what it sees, front to back; the cone stays where it
@@ -81,7 +86,7 @@
     shape: null,               // 'box' | 'cylinder' | 'sphere' | 'outline' | 'wall' | 'lasso' | null
     forId: null,               // the model it was picked on
     box: null, cyl: null, sph: null,
-    wall: { face: null, tri: -1, off: 0 },   // the wall picked (NSO_Crop.wallFace) and the line's distance out from it
+    wall: { kind: 'plane', face: null, tri: -1, off: 0, loop: null },   // the wall picked (NSO_Crop.wallFace) and the line's distance out from it - or, kind 'loop', the loops round a bump (NSO_Crop.bumpLoops)
     lasso: { eye: null, dirs: null },   // the loop, as rays from the eye it was drawn in (P)
     draw: null,                // a loop being drawn: { pts: [[x, y] in px] }
     outline: { id: null, mode: 'silhouette', tri: -1, d1: 0, d2: 0, z1: 0, z2: 0, fp: null, src: null, key: '' },
@@ -150,7 +155,7 @@
     if (kind === 'cylinder') S.cyl = { c: c, r: Math.min(sx, sy) / 4, hl: sz / 4, axis: 'z', yaw: 0 };
     if (kind === 'sphere') S.sph = { c: c, r: Math.min(sx, sy, sz) / 4 };
     if (kind === 'lasso') S.lasso = { eye: null, dirs: null };
-    if (kind === 'wall') S.wall = { face: null, tri: -1, off: 0 };
+    if (kind === 'wall') S.wall = { kind: 'plane', face: null, tri: -1, off: 0, loop: null };
     if (kind === 'outline') S.outline = { id: null, mode: 'silhouette', tri: -1, d1: 0, d2: 0, z1: bp.lo[2], z2: bp.hi[2], fp: null, src: null, key: '' };
   }
 
@@ -160,6 +165,7 @@
     if (S.shape === 'sphere') return { kind: 'sphere', c: S.sph.c.slice(), r: S.sph.r };
     if (S.shape === 'wall') {
       var wl = S.wall, wf = wl.face;
+      if (wl.kind === 'loop') return wl.loop ? { kind: 'loop', tris: wl.loop.cands[wl.loop.pick].tris } : null;
       if (!wf) return null;
       var wt = target(), wr = wt ? wallReach(wt.bp, wf) : null;
       var ws = { kind: 'wall', o: wf.o.slice(), n: wf.n.slice(), u: wf.u.slice(), ring: wf.ring.map(function (q) { return q.slice(); }), off: wl.off };
@@ -192,6 +198,7 @@
     if (S.shape === 'sphere') return 'Sphere Ø' + fmt(2 * S.sph.r) + ' mm';
     if (S.shape === 'wall') {
       var wd = S.wall;
+      if (wd.kind === 'loop' && wd.loop) return 'Loop ' + fmt(wd.loop.cands[wd.loop.pick].perimeterMm) + ' mm round' + (wd.loop.cands.length > 1 ? ' (' + (wd.loop.pick + 1) + ' of ' + wd.loop.cands.length + ' drawn - click another to switch)' : '');
       return wd.face ? 'Wall ' + fmt(wd.face.size[0]) + ' × ' + fmt(wd.face.size[1]) + ' mm, line ' + (wd.off < 0 ? '−' : '+') + Math.abs(wd.off).toFixed(2) + ' mm'
                      : 'Wall, no wall picked yet';
     }
@@ -213,7 +220,7 @@
     var t = target();
     if (!t) return 'Select a piece, then pick a shape.';
     if (!S.shape) return 'Pick a shape: it appears on ' + t.m.name + ', ready to drag.';
-    if (S.shape === 'wall' && !S.wall.face) return 'Wall: click a flat wall of the piece for a line along it.';
+    if (S.shape === 'wall' && !S.wall.face && !S.wall.loop) return 'Wall: click a flat wall of the piece for a straight line along it, or a bump on it for the loop round its foot.';
     if (S.shape === 'lasso' && !S.lasso.dirs) return 'Lasso: drag a loop round what to copy (Alt-drag to orbit).';
     if (S.shape === 'outline' && S.outline.id == null) return 'Outline: click a piece for its footprint, or Shift-click a triangle for its rim.';
     var d = describe();
@@ -269,7 +276,7 @@
     if (r.superseded) return;                      // a newer plan took its place and will land
     S.plan = r;
     syncUI();
-    if (S.shape === 'outline' || S.shape === 'lasso' || S.shape === 'wall') refreshPreview(seq);
+    if (S.shape === 'outline' || S.shape === 'lasso' || (S.shape === 'wall' && S.wall.kind !== 'loop')) refreshPreview(seq);
   }
 
   /* The outline's band (or the lasso's cone), as the kernel cuts it: a closed soup in P, off the main
@@ -380,7 +387,7 @@
       add('side', [c.c[0] + c.r * uv[0], c.c[1] + c.r * uv[1], c.c[2] + c.r * uv[2]], uv);
     } else if (S.shape === 'sphere') {
       add('radius', [S.sph.c[0] + S.sph.r, S.sph.c[1], S.sph.c[2]], [1, 0, 0]);
-    } else if (S.shape === 'wall' && S.wall.face) {
+    } else if (S.shape === 'wall' && S.wall.kind !== 'loop' && S.wall.face) {
       var wf = S.wall.face;
       // on the middle of the wall's top edge, so it is not in the way of a bump stood on the wall
       var topB = wf.ring.reduce(function (m, q) { return Math.max(m, q[1]); }, -Infinity);
@@ -457,7 +464,8 @@
       S.body = m;
       return;
     }
-    if (S.shape === 'wall' && S.wall.face) buildWallLine(g);
+    if (S.shape === 'wall' && S.wall.kind === 'loop' && S.wall.loop) buildLoopDraw(g);
+    else if (S.shape === 'wall' && S.wall.face) buildWallLine(g);
     if ((S.shape === 'outline' || S.shape === 'wall' || S.shape === 'lasso') && S.previewGeo) {
       var pm = new THREE.Mesh(S.previewGeo, bodyMat(0.2));
       pm.userData.sharedGeo = true;
@@ -587,16 +595,89 @@
     g.add(plane);
   }
 
-  /* A press on the piece in Wall: the first (or a Shift-press) picks the wall under it; after that a press sets the
-     line through the point pressed. A press that is not on the piece is the orbit's. */
+  /* The loops round a bump: every candidate loop's edges drawn (the picked one bright, the rest dim), and what is inside the
+     picked one tinted. Drawn in the piece's own frame, from the mesh's own positions - the triangles the engine named. */
+  function buildLoopDraw(g) {
+    var l = S.wall.loop, t = target();
+    if (!l || !t) return;
+    var P = t.mesh.geometry.attributes.position.array;
+    if (P.length !== t.m.rawTris.length) return;
+    t.mesh.updateMatrixWorld(true);
+    var holder = new THREE.Group();
+    holder.matrixAutoUpdate = false; holder.matrix.copy(t.mesh.matrixWorld); holder.matrixWorldNeedsUpdate = true;
+    var c = l.cands[l.pick], pos = new Float32Array(c.tris.length * 9);
+    c.tris.forEach(function (tt, i) { for (var q = 0; q < 9; q++) pos[i * 9 + q] = P[tt * 9 + q]; });
+    var tg = new THREE.BufferGeometry();
+    tg.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    var tint = new THREE.Mesh(tg, new THREE.MeshBasicMaterial({ color: COL.rail, transparent: true, opacity: 0.38, depthTest: false, depthWrite: false, side: THREE.DoubleSide }));
+    tint.renderOrder = 996;
+    holder.add(tint);
+    l.cands.forEach(function (cd, i) {
+      var seg = new Float32Array(cd.edges.length * 6);
+      cd.edges.forEach(function (e, j) {
+        var a = e.t * 9 + e.k * 3, b = e.t * 9 + ((e.k + 1) % 3) * 3;
+        seg[j * 6] = P[a]; seg[j * 6 + 1] = P[a + 1]; seg[j * 6 + 2] = P[a + 2]; seg[j * 6 + 3] = P[b]; seg[j * 6 + 4] = P[b + 1]; seg[j * 6 + 5] = P[b + 2];
+      });
+      var lg = new THREE.BufferGeometry();
+      lg.setAttribute('position', new THREE.BufferAttribute(seg, 3));
+      var ln = new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ color: i === l.pick ? COL.rail : 0xffffff, transparent: true, opacity: i === l.pick ? 1 : 0.6, depthTest: false }));
+      ln.renderOrder = i === l.pick ? 999 : 998;
+      holder.add(ln);
+    });
+    g.add(holder);
+  }
+
+  var EDGE_PX = 8;                                           // a click this near a drawn edge is on it
+  // Where the segment a-b (world) is on the screen, and how far the click is from it, in px.
+  function screenSegDist(a, b, ev) {
+    var A = screenOf(a), B = screenOf(b);
+    if (A.behind || B.behind) return Infinity;
+    var dx = B.x - A.x, dy = B.y - A.y, L2 = dx * dx + dy * dy, u = L2 > 0 ? Math.max(0, Math.min(1, ((ev.clientX - A.x) * dx + (ev.clientY - A.y) * dy) / L2)) : 0;
+    return Math.hypot(A.x + u * dx - ev.clientX, A.y + u * dy - ev.clientY);
+  }
+  function edgeEnds(mesh, P, t, k) {
+    var o = t * 9 + k * 3, o2 = t * 9 + ((k + 1) % 3) * 3;
+    return [new THREE.Vector3(P[o], P[o + 1], P[o + 2]).applyMatrix4(mesh.matrixWorld), new THREE.Vector3(P[o2], P[o2 + 1], P[o2 + 2]).applyMatrix4(mesh.matrixWorld)];
+  }
+
+  // A flat wall picked: its straight line.
+  function pickPlane(fc, tri) {
+    S.wall = { kind: 'plane', face: fc, tri: tri, off: 0, loop: null };
+    S.plan = null; setPreview(null);
+    say('Crop: Wall - a ' + fmt(fc.size[0]) + ' × ' + fmt(fc.size[1]) + ' mm wall' + (fc.holes ? ', ' + fc.holes + ' thing' + (fc.holes > 1 ? 's' : '') + ' standing on it' : '') +
+        '. Drag the handle, or click behind a bump from the side, to set the line');
+    rebuild(); schedulePlan(); syncUI();
+    return true;
+  }
+
+  /* A press on the piece in Wall.
+       a loop is up    a press on one of its drawn edges picks that loop; anywhere else on the piece picks afresh
+       a wall is up    a press sets the line through the point pressed (Shift picks afresh)
+       picking         a big flat wall gets its straight line; a bump - a small patch, a pin's end, a dome - gets the loops of
+                       edges round it, the outermost picked (its foot); a press within 8 px of a crease edge picks that edge's loop
+     A press that is not on the piece is the orbit's. */
   function wallClick(ev) {
     var t = target();
     if (!t) return false;
     setRay(ev);
     var hit = state.raycaster.intersectObject(t.mesh, false).filter(function (h) { return h.faceIndex != null; })[0];
     if (!hit) return false;
-    var w = S.wall;
-    if (w.face && !ev.shiftKey) {
+    var w = S.wall, raw = t.m.rawTris, P = t.mesh.geometry.attributes.position.array, tri = hit.faceIndex, drawn = P.length === raw.length;
+    if (w.kind === 'loop' && w.loop && drawn) {
+      var best = -1, bd = EDGE_PX;
+      w.loop.cands.forEach(function (cd, i) {
+        cd.edges.forEach(function (e) { var ends = edgeEnds(t.mesh, P, e.t, e.k), d = screenSegDist(ends[0], ends[1], ev); if (d < bd) { bd = d; best = i; } });
+      });
+      if (best >= 0) {
+        if (best !== w.loop.pick) {
+          w.loop.pick = best; S.plan = null;
+          say('Crop: Wall - loop ' + (best + 1) + ' of ' + w.loop.cands.length + ' (' + fmt(w.loop.cands[best].perimeterMm) + ' mm round)');
+          rebuild(); schedulePlan(); syncUI();
+        }
+        return true;
+      }
+    }
+    if (w.kind === 'plane' && w.face && !ev.shiftKey) {
       var q = toP(hit.point), f = w.face;
       var off = (q[0] - f.o[0]) * f.n[0] + (q[1] - f.o[1]) * f.n[1] + (q[2] - f.o[2]) * f.n[2];
       w.off = Math.round(off * 100) / 100;
@@ -604,13 +685,22 @@
       rebuild(); schedulePlan(); syncUI();
       return true;
     }
-    var fc = NSO_Crop.wallFace(NSO_Crop.meshSoupP(t.mesh), hit.faceIndex);
-    if (fc.reason) { say('Crop: Wall - ' + fc.reason, true); return true; }
-    S.wall = { face: fc, tri: hit.faceIndex, off: 0 };
-    S.plan = null; setPreview(null);
-    say('Crop: Wall - a ' + fmt(fc.size[0]) + ' × ' + fmt(fc.size[1]) + ' mm wall' + (fc.holes ? ', ' + fc.holes + ' thing' + (fc.holes > 1 ? 's' : '') + ' standing on it' : '') +
-        '. Drag the handle, or click behind a bump from the side, to set the line');
-    rebuild(); schedulePlan(); syncUI();
+    var fc = NSO_Crop.wallFace(NSO_Crop.meshSoupP(t.mesh), tri);
+    if (fc.ring && fc.share >= 0.05) return pickPlane(fc, tri);                    // a real wall: its straight line
+    var edge = null, ed = EDGE_PX;
+    if (drawn) for (var k = 0; k < 3; k++) { var en = edgeEnds(t.mesh, P, tri, k), dd = screenSegDist(en[0], en[1], ev); if (dd < ed) { ed = dd; edge = { t: tri, k: k }; } }
+    var B = drawn ? NSO_Crop.bumpLoops(raw, tri, edge ? { edge: edge } : {}) : { ok: false, reason: 'the drawn piece is not its triangles any more' };
+    if (B.ok) {
+      S.wall = { kind: 'loop', face: null, tri: tri, off: 0, loop: { cands: B.candidates, pick: B.pick } };
+      S.plan = null; setPreview(null);
+      var pk = B.candidates[B.pick];
+      say('Crop: Wall - the loop round the bump, ' + fmt(pk.perimeterMm) + ' mm' + (B.candidates.length > 1 ? '; ' + B.candidates.length + ' loops are drawn - click another to switch' : '') +
+          '. CROP copies what is inside it');
+      rebuild(); schedulePlan(); syncUI();
+      return true;
+    }
+    if (fc.ring) return pickPlane(fc, tri);                                         // a small flat face with no loop round it
+    say('Crop: Wall - ' + (fc.curved ? 'that is a curved surface, not a flat wall - click a bump on it for the loop round its foot, or a flat face' : B.reason), true);
     return true;
   }
 
@@ -1126,6 +1216,8 @@
     /* The lasso, set the way a drag sets it: a loop of screen points (client px). */
     lasso: function (pts) { return S.shape === 'lasso' && setLasso(pts); },
     /* The wall's line, set the way a drag sets it (a check has no steady hand): mm out of the wall, negative into it. */
+    /* The loop picked, set the way a click on a drawn edge sets it. */
+    pickLoop: function (i) { var l = S.wall.loop; if (S.shape !== 'wall' || !l || i < 0 || i >= l.cands.length) return false; l.pick = i; S.plan = null; rebuild(); schedulePlan(); return true; },
     setLine: function (off) { if (S.shape !== 'wall' || !S.wall.face) return false; S.wall.off = off; rebuild(); schedulePlan(); return true; },
     /* Ask the engine about the shape as it now stands (the checks set the shape's numbers, the mouse would). */
     replan: schedulePlan,

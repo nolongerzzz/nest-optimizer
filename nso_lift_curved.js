@@ -754,13 +754,45 @@
     }
     var vs = new Set();
     queue.forEach(function (t2) { for (var c = 0; c < 3; c++) vs.add(tv[t2 * 3 + c]); });
+    /* A triangle in the ring brings all three of its corners, and a long thin one (a cone's fan, 30 mm from the apex to the
+       rim) brings a corner far outside the ring: the quadratic is then fitted to a surface 25 mm across, not the 3.5 mm
+       round the root, and it is wild (11 mm rms on the cone). Corners further from the root than its own reach plus two
+       rings are left out - on a mesh whose triangles are the size of the ring none is. */
+    var rc = [0, 0, 0], nr = 0, rr = 0;
+    edges.forEach(function (e) { var o3 = tv[e.t * 3 + e.k] * 3; rc[0] += VX[o3]; rc[1] += VX[o3 + 1]; rc[2] += VX[o3 + 2]; nr++; });
+    if (nr) {
+      rc = [rc[0] / nr, rc[1] / nr, rc[2] / nr];
+      edges.forEach(function (e) { var o3 = tv[e.t * 3 + e.k] * 3; rr = Math.max(rr, Math.hypot(VX[o3] - rc[0], VX[o3 + 1] - rc[1], VX[o3 + 2] - rc[2])); });
+      var reach = rr + 2 * o.ringMm, near = new Set();
+      vs.forEach(function (v) { if (Math.hypot(VX[v * 3] - rc[0], VX[v * 3 + 1] - rc[1], VX[v * 3 + 2] - rc[2]) <= reach) near.add(v); });
+      if (near.size >= 6) vs = near;
+    }
     var SU = [], SV = [], SH = [];
-    vs.forEach(function (v) {
-      var x = VX[v * 3], y = VX[v * 3 + 1], z = VX[v * 3 + 2];
+    function addPoint(x, y, z) {
       SU.push(x * fr.e1[0] + y * fr.e1[1] + z * fr.e1[2]);
       SV.push(x * fr.e2[0] + y * fr.e2[1] + z * fr.e2[2]);
       SH.push(x * fr.n[0] + y * fr.n[1] + z * fr.n[2]);
-    });
+    }
+    vs.forEach(function (v) { addPoint(VX[v * 3], VX[v * 3 + 1], VX[v * 3 + 2]); });
+    /* A long triangle has corners far from the root and nothing between them: a cone's fan has samples only at its apex and its
+       rim, so the quadratic goes exactly through those few and says nothing of the surface beside the root. Points ON the long
+       triangles near the root (a lattice about a millimetre apart, those within reach of it) are surface too, and are added.
+       A mesh whose triangles are no longer than 2 mm adds none. */
+    if (nr) {
+      var reach2 = rr + 2 * o.ringMm;
+      queue.forEach(function (t3) {
+        var c0 = tv[t3 * 3] * 3, c1 = tv[t3 * 3 + 1] * 3, c2 = tv[t3 * 3 + 2] * 3, me = 0;
+        [[c0, c1], [c1, c2], [c2, c0]].forEach(function (pr) { me = Math.max(me, Math.hypot(VX[pr[0]] - VX[pr[1]], VX[pr[0] + 1] - VX[pr[1] + 1], VX[pr[0] + 2] - VX[pr[1] + 2])); });
+        if (!(me > 2)) return;
+        var nn = Math.min(60, Math.ceil(me / 1.0));
+        for (var i = 0; i <= nn; i++) for (var j = 0; j <= nn - i; j++) {
+          var a = i / nn, b = j / nn, c = 1 - a - b;
+          if ((a === 1 || b === 1 || c === 1)) continue;                                    // the corners are in already
+          var x = a * VX[c0] + b * VX[c1] + c * VX[c2], y = a * VX[c0 + 1] + b * VX[c1 + 1] + c * VX[c2 + 1], z = a * VX[c0 + 2] + b * VX[c1 + 2] + c * VX[c2 + 2];
+          if (Math.hypot(x - rc[0], y - rc[1], z - rc[2]) <= reach2) addPoint(x, y, z);
+        }
+      });
+    }
     return { SU: SU, SV: SV, SH: SH, tris: queue.length };
   }
 
@@ -1074,6 +1106,32 @@
     };
   }
 
+  /* THE ISLAND OF A CHOSEN SET OF TRIANGLES. Lift finds the features of a surface by growing a region from a seed and
+     taking what lies outside it; here the feature is given - the triangles inside a loop a person picked - and the same
+     read (its root loops, the base fitted round them, the fill) is made of exactly those. The analysis it returns is
+     the surface engine's own, so `lift` / `remove` take it as they take any other.
+       surface.island(soup, tris, opts) -> an analysis with the one island (id 0), or { ok: false, reason } */
+  function surfaceIsland(soup, tris, opts) {
+    var o = Object.assign({}, SURF, opts || {}), t0 = now(), A1 = LAu(), P1 = L1();
+    if (!A1 || !P1) return { ok: false, refused: 'deps', reason: 'Lift needs nso_lift.js and nso_lift_auto.js' };
+    if (!soup || soup.length < 36) return { ok: false, refused: 'empty', reason: 'there is no mesh to lift from' };
+    var M = o.M || A1.index(soup), nt = M.nt, set = Array.from(new Set(tris || [])).filter(function (t) { return t >= 0 && t < nt && M.area[t] > 1e-12; });
+    if (set.length < 1) return { ok: false, refused: 'seed', reason: 'there are no triangles inside that loop' };
+    var inR = new Uint8Array(nt).fill(1);
+    set.forEach(function (t) { inR[t] = 0; });
+    var R = { inR: inR, tris: [], area: Infinity, lo: [0, 0, 0], hi: [0, 0, 0], diag: 0 };      // the rest of the piece: never "smaller than the feature"
+    var ctx = { M: M, o: o, P1: P1, R: R, gen: 0, stamp: new Int32Array(nt) };
+    var islands = readFeature(ctx, set, false);
+    if (!islands.length) return { ok: false, refused: 'speck', reason: 'that loop holds too little to be a detail (under ' + o.minTris + ' triangles, or under ' + o.speckMm + ' mm proud)' };
+    islands.sort(function (a, b) { return b.areaMm2 - a.areaMm2; });
+    islands.forEach(function (I, i2) { I.id = i2; });
+    var islandOf = new Int32Array(nt).fill(-1);
+    islands.forEach(function (I) { I.tris.forEach(function (t4) { islandOf[t4] = I.id; }); });
+    return { ok: true, engine: 'surface', kind: 'surface', M: M, seed: set[0], region: R, islands: islands, islandOf: islandOf,
+      map: { thresholdMm: o.speckMm, words: 'the loop a person picked' }, relaxMm: o.relaxMm, opts: o, shells: [], caught: 0,
+      componentCount: 1, ms: { total: now() - t0 } };
+  }
+
   // -------------------------------------------------------------------------
   // Lift / Remove
   // -------------------------------------------------------------------------
@@ -1190,7 +1248,7 @@
 
   var api = {
     DEFAULTS: DEFAULTS, fill: fill, baseSampler: baseSampler, Tri: Tri,
-    surface: { DEFAULTS: SURF, WHY: SWHY, analyse: surfaceAnalyse, lift: surfaceLift, remove: surfaceRemove, region: growRegion, fit: fitSurface }
+    surface: { DEFAULTS: SURF, WHY: SWHY, analyse: surfaceAnalyse, island: surfaceIsland, lift: surfaceLift, remove: surfaceRemove, region: growRegion, fit: fitSurface }
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (root) root.NSO_LiftCurved = api;

@@ -55,3 +55,10 @@ Branch `claude-wip`. Full write-up: **`docs/CROP.md`, "The card"**; Lift's side 
   breaks, so the part of the base it never reached was lumped in with the bump). The scan now seeds a few ways round, out beyond
   the bump's foot, and keeps the tightest read: 62 mm² on the sphere, 64 on the cone. `lift:list` checks the highlight (one block,
   sphere, cone, and a block with bumps on two walls drawing both).
+- **Wall on a bump: the bendable loop** (2026-11-07): a click on a bump (a small patch: a dome, a pin, a block's bump top) draws the
+  loops of edges round it and picks its foot; click another drawn loop / crease edge to switch; CROP copies what is inside, triangle
+  for triangle, with the underside closed by Lift's own curved fill (so the copy follows the base's curve; Lift's detection is not
+  involved). `NSO_Crop.bumpLoops`, `{ kind: 'loop', tris }`, `NSO_LiftCurved.surface.island` (the island of a chosen set of triangles).
+  Volumes match the kernel: sphere dome 0.3%, cone pin 0.08%, block bump exact. Fixing the cone needed two sampling changes in
+  nso_lift_curved.js (corners near the root only; sample points across long triangles) - the fan of 30 mm triangles had given Lift a
+  fit through 10 far points, an underside 0.5 mm off the cone, and 166 mm3 for a 50 mm3 pin. Lift's own node suites pass unchanged.
