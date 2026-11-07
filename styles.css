@@ -4863,3 +4863,41 @@ body.sup-card-open #adjust-status { display: none; }
 .fs-ends { grid-template-columns: repeat(3, 1fr); margin-top: 0; }
 .fs-ends .fs-tile canvas { width: 52px; height: 52px; }
 .vp-menu-body .vp-row[hidden], .vp-menu-body .vp-clone[hidden] { display: none; }
+
+/* ---------------------------------------------------------------------------
+   Custom shape (Gen+ > Custom shape, app-custom-shape.js): the outline editor
+   fills the card's width and is square; Big lifts it out over the page (it is
+   moved to <body>, since the Gen+ panel's backdrop-filter would otherwise be
+   the containing block of anything position: fixed inside it). */
+.cs-editor-wrap { flex: 0 0 100%; box-sizing: border-box; display: flex; flex-direction: column; gap: 3px; margin: 2px 0; }
+.cs-editor-bar { display: flex; align-items: center; gap: 4px; font-size: 11px; color: #94a3b8; }
+.cs-editor-title { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cs-size { color: #cbd5e1; font-variant-numeric: tabular-nums; }
+.cs-snap { display: inline-flex; align-items: center; gap: 3px; }
+.vp-top-body .cs-snap select, .cs-snap select { width: auto; min-width: 0; padding: 1px 2px; font-size: 11px; }
+.cs-mini { font-size: 11px; padding: 2px 6px; border-radius: 5px; border: 1px solid rgba(148, 163, 184, 0.45); background: #1e293b; color: #e2e8f0; cursor: pointer; }
+.cs-mini:hover { border-color: #38bdf8; }
+.cs-mini[aria-pressed="true"] { border-color: #38bdf8; box-shadow: 0 0 0 1px #38bdf8 inset; }
+.cs-editor { display: block; width: 100%; aspect-ratio: 1 / 1; border-radius: 6px; border: 1px solid #334155; background: #0b1220; touch-action: none; cursor: crosshair; }
+.cs-editor:focus-visible { outline: 2px solid #38bdf8; outline-offset: 1px; }
+.cs-hint { font-size: 10px; color: #94a3b8; margin: 1px 0; line-height: 1.25; }
+.cs-sel { flex: 0 0 100%; box-sizing: border-box; display: flex; flex-direction: column; gap: 2px; }
+.cs-sel[hidden] { display: none; }
+/* .fs-slider is flex: 0 0 100% for the row-wrapping cards; in this column that would be 100% of the HEIGHT */
+.cs-sel .fs-slider, .cs-sel .cs-btns, .cs-sel .cs-xy { flex: none; }
+.cs-xy { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 11px; color: #94a3b8; }
+.cs-xy label { display: flex; align-items: center; gap: 4px; }
+.cs-xy input { width: 100%; min-width: 0; }
+.cs-btns { display: flex; gap: 4px; }
+.vp-top-body .cs-btns .btn { width: auto; flex: 1 1 0; }
+.cs-presets .fs-tile span, .cs-modes .fs-tile span { font-size: 10px; }
+.cs-editor-wrap.is-big {
+  position: fixed; z-index: 400; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: min(680px, calc(100vw - 32px)); max-height: calc(100vh - 32px); padding: 10px; box-sizing: border-box;
+  border-radius: 10px; border: 1px solid #3a4558; background: rgba(15, 23, 42, 0.98); box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+}
+.cs-editor-wrap.is-big .cs-editor { width: min(100%, calc(100vh - 120px)); align-self: center; }
+/* on a wide window Big stands to the right of the Gen+ panel, so the rows under the editor stay in reach beside it */
+@media (min-width: 960px) {
+  .cs-editor-wrap.is-big { left: auto; right: 16px; transform: translateY(-50%); width: min(720px, calc(100vw - 470px)); }
+}

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=d02a6a68" />
+  <link rel="stylesheet" href="styles.css?v=e406378a" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -148,7 +148,7 @@
             </div>
           </details>
           <details class="vp-menu vp-top-menu vp-shell-menu" id="menu-gen">
-            <summary class="vp-bar-btn" title="Generate a piece: stock to carve from, a vessel on the wheel, a relief slab from a picture, or a silicone mold of the selected piece; or check a photogrammetry capture">Gen+</summary>
+            <summary class="vp-bar-btn" title="Generate a piece: stock to carve from, a vessel on the wheel, a tray or plate of your own outline (Custom shape), a relief slab from a picture, or a silicone mold of the selected piece; or check a photogrammetry capture">Gen+</summary>
             <div class="vp-menu-body vp-top-body">
               <details class="vp-menu vp-wheel-menu">
               <summary>Wheel</summary>
@@ -303,6 +303,90 @@
                 title="Bake what the preview shows: it is added to the plate as a piece of its own, beside the selection, selected. One Undo. Nothing is added until this is pressed.">Add to plate</button>
               </div>
               <p id="fx-readout" class="bend-readout" aria-live="polite">—</p>
+              </div>
+              </details>
+              <!-- Custom shape: draw an outline - drag its points, double-click a side to add one - and give every corner its own
+                   radius and every side its own wall and curve; it is made into a Tray (walls and a floor), a Frame (walls only) or a
+                   Solid. A translucent preview stands on the plate where the piece will land and follows every change; Add to plate
+                   bakes it - a NEW piece, edits nothing, one Undo. nso_custom_shape.js builds it (headless,
+                   tools/nso_custom_shape_test.js), app-custom-shape.js is this card. docs/CUSTOM-SHAPE.md. -->
+              <details class="vp-menu vp-wheel-menu vp-cshape-menu" id="menu-cshape">
+              <summary title="Draw your own outline - any number of corners, each with its own radius, each side with its own wall thickness and curve - and make it a tray, a frame or a solid block. Adjust it live on the plate, then add it">Custom shape</summary>
+              <div class="vp-menu-body vp-wheel">
+              <span class="fx-sublabel">Start from</span>
+              <div class="fs-tiles cs-presets" id="cs-preset-row" role="group" aria-label="Start from a shape">
+                <button class="fs-tile" type="button" data-preset="rect" title="A plain rectangle, sharp corners."><canvas width="64" height="64" aria-hidden="true"></canvas><span>Rectangle</span></button>
+                <button class="fs-tile" type="button" data-preset="rounded" title="A rectangle with every corner rounded."><canvas width="64" height="64" aria-hidden="true"></canvas><span>Rounded</span></button>
+                <button class="fs-tile" type="button" data-preset="scoop" title="A tall tray with one corner swept off in a long curve - a console or door-pocket insert."><canvas width="64" height="64" aria-hidden="true"></canvas><span>Swept corner</span></button>
+                <button class="fs-tile" type="button" data-preset="lshape" title="An L: six corners, one of them turned in."><canvas width="64" height="64" aria-hidden="true"></canvas><span>L shape</span></button>
+                <button class="fs-tile" type="button" data-preset="trapezoid" title="A trapezoid - narrower at the back."><canvas width="64" height="64" aria-hidden="true"></canvas><span>Trapezoid</span></button>
+                <button class="fs-tile" type="button" data-preset="hexagon" title="A hexagon, 80 mm across the corners."><canvas width="64" height="64" aria-hidden="true"></canvas><span>Hexagon</span></button>
+              </div>
+              <span class="fx-sublabel">Make it a</span>
+              <div class="fs-tiles cs-modes" id="cs-mode-row" role="group" aria-label="What to make">
+                <button class="fs-tile" type="button" data-mode="tray" aria-pressed="true" title="Tray: walls and a floor, open at the top - a bin, a drawer or console insert."><canvas width="64" height="64" aria-hidden="true"></canvas><span>Tray</span></button>
+                <button class="fs-tile" type="button" data-mode="frame" aria-pressed="false" title="Frame: walls only, open top and bottom - a ring, a fence, a divider surround."><canvas width="64" height="64" aria-hidden="true"></canvas><span>Frame</span></button>
+                <button class="fs-tile" type="button" data-mode="solid" aria-pressed="false" title="Solid: the outline filled and stood up to the Height - a plate, a spacer, a blank."><canvas width="64" height="64" aria-hidden="true"></canvas><span>Solid</span></button>
+              </div>
+              <div class="cs-editor-wrap" id="cs-editor-wrap">
+                <div class="cs-editor-bar">
+                  <span class="cs-editor-title">Outline <span id="cs-size" class="cs-size">—</span></span>
+                  <label class="cs-snap" title="Points snap to this grid as they are dragged or added">Snap
+                    <select id="sel-cs-snap" class="vp-select" aria-label="Snap"><option value="0">off</option><option value="0.5">0.5</option><option value="1" selected>1</option><option value="5">5</option></select></label>
+                  <button id="btn-cs-fit" class="cs-mini" type="button" title="Fit the outline to the editor">Fit</button>
+                  <button id="btn-cs-big" class="cs-mini" type="button" aria-pressed="false" title="Open the editor big, over the page (press again, or Esc, to put it back)">Big</button>
+                </div>
+                <canvas id="cs-editor" class="cs-editor" width="264" height="264" tabindex="0" aria-label="Outline editor: drag a point to move it; click a point or a side to edit it; double-click a side to add a point there; Delete removes the selected point"></canvas>
+                <p class="cs-hint">Drag a point to move it. Click a point or side to edit it. Double-click a side to add a point. Drag the background to pan, wheel to zoom.</p>
+              </div>
+              <div class="cs-sel" id="cs-sel-none"><p class="cs-hint">Nothing picked - click a point (a corner) or a side in the outline above.</p></div>
+              <div class="cs-sel" id="cs-sel-point" hidden>
+                <span class="fx-sublabel" id="cs-point-title">Point</span>
+                <div class="cs-xy">
+                  <label title="The point's X, mm">X <input type="number" id="inp-cs-x" step="0.5" aria-label="Point X"></label>
+                  <label title="The point's Y, mm">Y <input type="number" id="inp-cs-y" step="0.5" aria-label="Point Y"></label>
+                </div>
+                <div class="fs-slider" id="cs-row-r" title="This corner's radius on the outside, mm. 0 is a sharp corner. The read-out says the most its two sides have room for.">
+                  <label for="inp-cs-r-slider">Radius</label><input type="number" id="inp-cs-r" min="0" max="200" step="0.5" value="5" aria-label="Radius"><span id="cs-r-read" class="fs-read">5 mm</span>
+                  <input type="range" id="inp-cs-r-slider" min="0" max="60" step="0.5" value="5"></div>
+                <div class="fs-slider" id="cs-row-rin" title="This corner's radius on the inside, mm. Leave it empty (auto) and it keeps the wall even round the corner: the outside radius less the wall at an outside corner, plus the wall at an inside (turned-in) corner.">
+                  <label for="inp-cs-rin-slider">Inner R</label><input type="number" id="inp-cs-rin" min="0" max="200" step="0.5" placeholder="auto" aria-label="Inner radius"><span id="cs-rin-read" class="fs-read">auto</span>
+                  <input type="range" id="inp-cs-rin-slider" min="0" max="60" step="0.5" value="0"></div>
+                <div class="vp-row vp-row-full cs-btns">
+                  <button id="btn-cs-rin-auto" class="btn btn-secondary" type="button" title="Put the inside radius back on auto">Inner R auto</button>
+                  <button id="btn-cs-del" class="btn btn-secondary" type="button" title="Remove this point - its two sides become one. An outline keeps at least 3 points.">Delete point</button>
+                </div>
+              </div>
+              <div class="cs-sel" id="cs-sel-side" hidden>
+                <span class="fx-sublabel" id="cs-side-title">Side</span>
+                <div class="fs-slider" id="cs-row-wall" title="This side's own wall thickness, mm. Every side can have a different one. Held to 2 nozzle widths with a warning.">
+                  <label for="inp-cs-wall-slider">Wall</label><input type="number" id="inp-cs-wall" min="0.4" max="50" step="0.1" value="2" aria-label="Side wall"><span id="cs-wall-read" class="fs-read">2 mm</span>
+                  <input type="range" id="inp-cs-wall-slider" min="0.4" max="15" step="0.1" value="2"></div>
+                <div class="fs-slider" id="cs-row-bulge" title="Curve this side: how far its middle stands off the straight line between its points, mm. + bows it out, - bows it in, 0 is straight.">
+                  <label for="inp-cs-bulge-slider">Curve</label><input type="number" id="inp-cs-bulge" min="-200" max="200" step="0.5" value="0" aria-label="Side curve"><span id="cs-bulge-read" class="fs-read">0 mm</span>
+                  <input type="range" id="inp-cs-bulge-slider" min="-40" max="40" step="0.5" value="0"></div>
+                <div class="vp-row vp-row-full cs-btns">
+                  <button id="btn-cs-split" class="btn btn-secondary" type="button" title="Add a point in the middle of this side, to bend the outline there">Add point</button>
+                </div>
+              </div>
+              <span class="fx-sublabel">Whole piece</span>
+              <div class="fs-slider" id="cs-row-height" title="The piece's height, mm.">
+                <label for="inp-cs-height-slider">Height</label><input type="number" id="inp-cs-height" min="0.5" max="300" step="0.5" value="25" aria-label="Height"><span id="cs-height-read" class="fs-read">25 mm</span>
+                <input type="range" id="inp-cs-height-slider" min="1" max="120" step="0.5" value="25"></div>
+              <div class="fs-slider" id="cs-row-floor" title="Tray: the floor's thickness, mm.">
+                <label for="inp-cs-floor-slider">Floor</label><input type="number" id="inp-cs-floor" min="0.2" max="50" step="0.1" value="2" aria-label="Floor"><span id="cs-floor-read" class="fs-read">2 mm</span>
+                <input type="range" id="inp-cs-floor-slider" min="0.4" max="10" step="0.1" value="2"></div>
+              <div class="fs-slider" id="cs-row-allwall" title="Set EVERY side's wall to this, mm. Pick a side in the outline to give it a wall of its own.">
+                <label for="inp-cs-allwall-slider">All walls</label><input type="number" id="inp-cs-allwall" min="0.4" max="50" step="0.1" value="2" aria-label="All walls"><span id="cs-allwall-read" class="fs-read">2 mm</span>
+                <input type="range" id="inp-cs-allwall-slider" min="0.4" max="15" step="0.1" value="2"></div>
+              <div class="fs-slider" id="cs-row-allr" title="Set EVERY corner's radius to this, mm. Pick a point in the outline to give it a radius of its own.">
+                <label for="inp-cs-allr-slider">All radii</label><input type="number" id="inp-cs-allr" min="0" max="200" step="0.5" value="5" aria-label="All radii"><span id="cs-allr-read" class="fs-read">5 mm</span>
+                <input type="range" id="inp-cs-allr-slider" min="0" max="40" step="0.5" value="5"></div>
+              <div class="vp-row vp-row-full">
+              <button id="btn-cs-add" class="btn btn-secondary" type="button"
+                title="Bake what the preview shows: it is added to the plate as a piece of its own, beside the selection, selected. One Undo. Nothing is added until this is pressed.">Add to plate</button>
+              </div>
+              <p id="cs-readout" class="bend-readout" aria-live="polite">—</p>
               </div>
               </details>
               <!-- Fasteners: a threaded rod, a bolt (hex or socket head), a nut and a bolt + nut set. Pick one from the
@@ -2685,6 +2769,7 @@
   <script src="nso_tube_neck.js?v=e42beb75"></script>
   <script src="nso_thread.js?v=3d986b5e"></script>
   <script src="nso_fittings.js?v=b8b58426"></script>
+  <script src="nso_custom_shape.js?v=a8f52d5d"></script>
   <script src="app-tube-edge.js?v=54e345d1"></script>
   <!-- Bridge: a web between two places, welded. After NSO_Repair.js,
        nso_planar_fuse.js (the vertex space), nso_thickness.js,
@@ -2717,6 +2802,7 @@
   <script src="app-stock.js?v=04f0e346"></script>
   <script src="app-piece-preview.js?v=730a465a"></script>
   <script src="app-fittings.js?v=d1920e12"></script>
+  <script src="app-custom-shape.js?v=7b060e1b"></script>
   <script src="app-fasteners.js?v=aafaf77d"></script>
   <script src="app-assemble.js?v=60984bfb"></script>
   <script src="app-sel-outline.js?v=e4042b39"></script>

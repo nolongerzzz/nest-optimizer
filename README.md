@@ -37,6 +37,15 @@ Smart build-plate packing for 3D printing.
   G-scope inspects line by line, like an imported `.gcode.3mf`. Validated
   against real Bambu slices, agreement and disagreement both on record. For
   reverse-engineering and internal iteration ([docs/SLICER.md](docs/SLICER.md))
+- **Custom shape** (Gen+): draw your own outline and make it a **Tray** (walls
+  and a floor - a bin, a drawer or console insert), a **Frame** (walls only) or
+  a **Solid**. Drag points on a snapping grid, double-click a side to add one;
+  every **corner has its own radius** (and inside radius, auto by default so the
+  wall stays even round it), every **side has its own wall thickness** and can
+  be **curved** by dragging its handle. Presets (rectangle, rounded, swept
+  corner, L, trapezoid, hexagon) to start from, a live preview on the plate, a
+  **Big** editor for detail, and refusals in words when a radius or wall does
+  not fit ([docs/CUSTOM-SHAPE.md](docs/CUSTOM-SHAPE.md))
 - **Fittings** (Gen+): a slip-on **Cap** for the selected tube (bore = its Ø plus
   a printed-fit gap, walls and closed end = the tube's own wall, closed end down)
   and **2-way / 3-way splitters** - a trunk into 2 or 3 branches - each a new
@@ -401,7 +410,7 @@ Smart build-plate packing for 3D printing.
 ## Where things are (the shell)
 
 - **Top row**, left to right: Import, Measure (Two points / Edge), Move,
-  Rotate, Tip, Align, Gen+ (Wheel, Stock, Fittings, Picture, Mold, Photo), Lock position,
+  Rotate, Tip, Align, Gen+ (Wheel, Stock, Fittings, Custom shape, Picture, Mold, Photo), Lock position,
   Lock plate; at the right Undo, Remove and Export, with **Clear plate**
   under Remove and **Optimize** under Export.
 - **Plate & pieces**, pinned open in the top-right corner: the plate picker
