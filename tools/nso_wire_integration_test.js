@@ -321,14 +321,15 @@ withApp(async (page, logs) => {
   {
     const seed = await loadSTL(page, fx('box-20mm.stl'));
     await selectPiece(page, seed);
-    await openMenuOf(page, 'btn-wheel-ball');
-    await setF(page, { 'inp-wheel-height': 60, 'inp-wheel-radius': 30, 'inp-wheel-wall': 3 });
-    // btn-wheel-ball moved into the top bar's Gen dropdown; unfold it first.
-    await page.evaluate(() => { const e = document.getElementById('btn-wheel-ball'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
-    await page.click('#btn-wheel-ball');
-    await setF(page, { 'inp-wheel-depth': 20 });
-    await page.evaluate(() => { const e = document.getElementById('btn-wheel-open'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
-    await page.click('#btn-wheel-open');
+    /* The vessel is built through the strict move API (Ball, then Open to 20 mm):
+       this section is about a wheel vessel flowing through Repair, Paint, Delete
+       and Seat, not about the sliders, and the strict moves make the same
+       hemisphere-and-rim vessel this test was written around. (The sliders now
+       build a recipe that conserves the clay - a different, taller vessel.) */
+    await page.evaluate(() => {
+      NSO_wheelRun('ball', { height: 60, radius: 30, wall: 3 }, 'Ball centred');
+      NSO_wheelRun('open', { depth: 20 }, 'Opened');
+    });
     const idV = await page.evaluate(() => state.editId);
     const v0 = await info(page, idV);
     check('the wheel throws and opens a vessel, closed',

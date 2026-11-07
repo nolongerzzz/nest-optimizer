@@ -180,13 +180,9 @@ function buildPlan() {
     V(TOP, 'Gen+', id, 'Stock: ' + l, { setup: 'none', run: press([id]) });
   const wheelSet = async x => { await x.fill('inp-wheel-height', 60); await x.fill('inp-wheel-radius', 30); await x.fill('inp-wheel-wall', 3); };
   const ball = async x => { await wheelSet(x); await x.click('btn-wheel-ball'); await x.wait(400); };
-  V(TOP, 'Gen+', 'btn-wheel-ball', 'Wheel: Ball (height 60, radius 30)', { pre: wheelSet, run: press(['btn-wheel-ball']) });
+  V(TOP, 'Gen+', 'btn-wheel-ball', 'Wheel: Starter Ball (height 60, radius 30)', { pre: wheelSet, run: press(['btn-wheel-ball']) });
   V(TOP, 'Gen+', 'btn-wheel-flatten', 'Wheel: Flatten', { pre: ball, run: press(['btn-wheel-flatten']) });
   V(TOP, 'Gen+', 'btn-wheel-open', 'Wheel: Open', { pre: ball, run: press(['btn-wheel-open']) });
-  V(TOP, 'Gen+', 'btn-wheel-pull', 'Wheel: Pull (height 30, +6 mm)', { pre: async x => { await ball(x); await x.click('btn-wheel-open'); await x.wait(400); await x.fill('inp-wheel-pull-z', 30); await x.fill('inp-wheel-pull-dr', 6); },
-    run: press(['btn-wheel-pull']) });
-  V(TOP, 'Gen+', 'btn-wheel-trim', 'Wheel: Trim', { pre: ball, run: press(['btn-wheel-trim']) });
-  V(TOP, 'Gen+', 'btn-wheel-rim', 'Wheel: Rim +', { pre: ball, run: press(['btn-wheel-rim']) });
   V(TOP, 'Gen+', 'btn-relief-pick', 'Picture: Choose picture…', { setup: 'none', run: async x => { await x.chooser('btn-relief-pick', x.png()); } });
   V(TOP, 'Gen+', 'btn-relief-make', 'Picture: Make piece', { setup: 'none', pre: async x => { await x.chooser('btn-relief-pick', x.png()); await x.wait(800); }, run: press(['btn-relief-make']) });
   V(TOP, 'Gen+', 'btn-relief-undo', 'Picture: Undo', { setup: 'none', pre: async x => { await x.chooser('btn-relief-pick', x.png()); await x.wait(800); await x.click('btn-relief-make'); await x.wait(800); }, run: press(['btn-relief-undo']) });

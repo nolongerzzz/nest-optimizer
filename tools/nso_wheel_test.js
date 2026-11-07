@@ -1013,6 +1013,120 @@ console.log('\n== 7d. sliders: conserving Pull, clamped Pull, adjust-the-last-mo
     /to keep the clay/.test(viaApply.reason), viaApply.reason);
 }
 
+/* =====================================================================
+   7e. The recipe: the piece is rebuilt from the ball, so nothing is baked
+   ===================================================================== */
+console.log('\n== 7e. the recipe: every slider live, every limit a clamp, the clay conserved ==');
+{
+  const R0 = () => W.NSO_wheelNewRecipe({});
+  const V = p => W.NSO_wheelVolume(p);
+  const ball = W.NSO_wheelBuild(R0());
+  const Vb = V(ball.piece);
+
+  check('a neutral recipe is the standard ball', ball.ok && Math.abs(span(ball.piece) - 50) < 1e-9 && ball.notes.length === 0 &&
+    /standard ball/.test(ball.ball));
+
+  /* A recipe is a pure function: same recipe, same piece, whatever was done before. */
+  const mk = (t, d) => { const r = R0(); r.thick = t; r.depth = d; return W.NSO_wheelBuild(r); };
+  const x = mk(15, 4), y = mk(15, 4);
+  check('the same recipe builds the same piece, every time',
+    Math.abs(span(x.piece) - span(y.piece)) < 1e-12 && Math.abs(rMax(x.piece) - rMax(y.piece)) < 1e-12 &&
+    x.piece.ops.join() === y.piece.ops.join());
+
+  /* The clay is conserved by press, open and pull at every setting. */
+  let worst = 0, n = 0;
+  for (const t of [null, 40, 25, 12, 4]) for (const d of [0, 3, 8]) for (const dr of [0, 5, -5]) {
+    const r = R0(); r.thick = t; r.depth = d; r.pull = { z: 0.55, dr: dr, wide: 0.3 };
+    const b = W.NSO_wheelBuild(r);
+    if (!b.ok) continue;
+    worst = Math.max(worst, Math.abs(V(b.piece) - Vb) / Vb); n++;
+  }
+  check('press, open and pull conserve the clay at every setting tried (' + n + ' recipes)',
+    n > 30 && worst < 1e-9, 'worst relative change ' + worst.toExponential(2));
+
+  /* Reversible: take a slider back to neutral and the earlier piece is back, exactly. */
+  const noOpen = mk(15, 0);
+  const noPress = (() => { const r = R0(); r.depth = 4; return W.NSO_wheelBuild(r); })();
+  const plain = mk(null, 0);
+  check('Deep back to 0 is the pressed disc, exactly - the opening was never baked', !noOpen.piece.inner &&
+    Math.abs(span(noOpen.piece) - 15) < 1e-9);
+  check('Thick back to the top is the opened ball, exactly - the press was never baked',
+    noPress.piece.inner && noPress.piece.ops.join('>') === 'ball>open' && Math.abs(rMax(noPress.piece) - 25) < 0.5);
+  check('both back to neutral is the ball again, exactly',
+    Math.abs(span(plain.piece) - 50) < 1e-9 && !plain.piece.inner && Math.abs(V(plain.piece) - Vb) < 1e-9);
+
+  /* A limit is a clamp with a reason, never a refusal. */
+  const thin = mk(3, 8);
+  check('a 3 mm disc cannot be opened: the build still lands, as a disc, and says why',
+    thin.ok && !thin.piece.inner && thin.notes.some(s => /Deep/.test(s)), thin.notes.join(' | '));
+  check('...and the Deep range is 0 there, with the reason attached', thin.ranges.push.max === 0 && /no cavity/.test(thin.ranges.push.why));
+  const toomuch = mk(20, 50);
+  check('Deep past what the shape takes is clamped, and says what the most is',
+    toomuch.ok && toomuch.piece.inner && toomuch.notes.some(s => /Deep limited to/.test(s)), toomuch.notes.join(' | '));
+  const thinPull = (() => { const r = R0(); r.thick = 20; r.depth = 5; r.pull = { z: 0.5, dr: 40, wide: 0.3 }; return W.NSO_wheelBuild(r); })();
+  check('a Pull the wall cannot take is clamped, and says the wall stopped it',
+    thinPull.ok && thinPull.notes.some(s => /stopped there because the wall/.test(s)) && W.NSO_wheelWall(thinPull.piece).pass,
+    thinPull.notes.join(' | '));
+  const rimNo = (() => { const r = R0(); r.thick = 20; r.depth = 5; r.rim = 10; return W.NSO_wheelBuild(r); })();
+  check('Rim + on a curved wall says it needs a straight one, and the rest still builds',
+    rimNo.ok && rimNo.notes.some(s => /Rim \+ needs a straight wall/.test(s)) && rimNo.piece.inner);
+  const trimmed = (() => { const r = R0(); r.thick = 20; r.depth = 5; r.trim = 1.5; return W.NSO_wheelBuild(r); })();
+  const untrimmed = mk(20, 5);
+  check('Trim takes clay off the base; Trim 0 gives the untrimmed piece back',
+    trimmed.ok && V(trimmed.piece) < V(untrimmed.piece) && span(trimmed.piece) < span(untrimmed.piece));
+
+  /* Ranges come out of the same pass, and follow what is upstream. */
+  check('the Thick range is the wall up to the ball\'s own height',
+    ball.ranges.thick.min === 3 && Math.abs(ball.ranges.thick.max - 50) < 0.1);
+  check('the Deep range depends on Thick: a thinner press takes less',
+    mk(40, 1).ranges.push.max > mk(15, 1).ranges.push.max && mk(15, 1).ranges.push.max > mk(6, 1).ranges.push.max,
+    [40, 15, 6].map(t => mk(t, 1).ranges.push.max.toFixed(1)).join(' > '));
+
+  /* The wall is the lever for how thin it presses and how thin it opens. */
+  const thickW = (() => { const r = R0(); r.ball.wall = 8; r.depth = 30; return W.NSO_wheelBuild(r); })();
+  const thinW = (() => { const r = R0(); r.depth = 30; return W.NSO_wheelBuild(r); })();
+  check('a thicker W opens a shorter, thicker-walled piece from the same clay',
+    thickW.ok && thinW.ok && span(thickW.piece) < span(thinW.piece) && W.NSO_wheelWall(thickW.piece).min_mm > 7.9,
+    span(thickW.piece).toFixed(1) + ' vs ' + span(thinW.piece).toFixed(1) + ' mm tall');
+
+  /* H resizes the ball under everything else. */
+  const rH = R0(); rH.thick = 20; rH.depth = 5; rH.ball.height = 90;
+  const big = W.NSO_wheelBuild(rH);
+  check('H resizes the ball under the press and the opening: more clay, the same steps',
+    big.ok && V(big.piece) > Vb * 1.5 && big.piece.ops.join('>') === 'ball>flatten>open');
+
+  /* OPEN, keeping the clay. */
+  const p0 = mk(20, 0).piece;
+  const keep = W.NSO_wheelOpenKeep(p0, { depth: 5 });
+  check('Open keeps the clay: what the cavity displaced goes back as wall height',
+    keep.ok && Math.abs(V(keep.piece) - V(p0)) / V(p0) < 1e-12 && span(keep.piece) > span(p0),
+    keep.ok ? span(p0).toFixed(1) + ' -> ' + span(keep.piece).toFixed(1) + ' mm tall, x' + keep.stretch.toFixed(2) : keep.reason);
+  check('...the base under the cavity is untouched', keep.ok && keep.piece.outer[0].z === p0.outer[0].z &&
+    Math.abs(keep.piece.inner[0].z - W.NSO_wheelOpen(p0, { depth: 5 }).piece.inner[0].z) < 1e-9);
+  check('...and the wall is inside the floor', keep.ok && keep.wall.pass);
+  const strictOpen = W.NSO_wheelOpen(p0, { depth: 5 });
+  check('(the strict Open is unchanged: it still throws the top away)', V(strictOpen.piece) < V(p0) * 0.9);
+  const st = W.NSO_wheelStretchAbove(strictOpen.piece, strictOpen.piece.inner[0].z, V(p0));
+  check('the stretch is exact: volume is linear in it, so two evaluations find it',
+    st && Math.abs(V({ outer: st.outer, inner: st.inner }) - V(p0)) / V(p0) < 1e-12);
+
+  /* A baked base: the strict API starts a recipe on top of what it made. */
+  const baked = W.NSO_wheelRecipeOn(W.NSO_wheelFlatten(W.NSO_wheelBall({}).piece, { height: 10 }).piece);
+  const bb = W.NSO_wheelBuild(baked);
+  check('a recipe on a baked piece builds that piece when nothing is set', bb.ok && Math.abs(span(bb.piece) - 10) < 1e-9);
+  baked.depth = 3;
+  check('...and the sliders still work on top of it', W.NSO_wheelBuild(baked).piece.inner !== null);
+  const cl = W.NSO_wheelCloneRecipe(baked);
+  cl.depth = 99;
+  check('a cloned recipe is its own: editing it does not touch the original', baked.depth === 3);
+
+  /* One whole build is fast enough to run while a slider moves. */
+  const r = R0(); r.thick = 20; r.depth = 5; r.pull = { z: 0.5, dr: 6, wide: 0.25 };
+  const t0 = Date.now(); for (let i = 0; i < 10; i++) { r.thick = 20 + i * 0.4; W.NSO_wheelBuild(r); }
+  const per = (Date.now() - t0) / 10;
+  check('a whole rebuild (ball, press, open, pull) is fast enough for a live drag', per < 250, per.toFixed(0) + ' ms each');
+}
+
 console.log('\n== 8. what this first version does not do, and says so ==');
 {
   const src = fs.readFileSync(path.join(ROOT, 'app-wheel.js'), 'utf8');

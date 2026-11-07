@@ -1547,6 +1547,227 @@ function NSO_wheelRanges(piece, history) {
   return out;
 }
 
+/* ------------------------------------------------------------ 7g. THE RECIPE
+
+   THE PIECE IS A RECIPE, NOT A PILE OF BAKED STEPS. Every slider on the card
+   is a live value in one recipe, and the form is REBUILT from the ball, in the
+   order a potter works, every time any of them moves:
+
+       ball  ->  press (Thick)  ->  open (Deep)  ->  pull (where, how far, how
+       soft)  ->  trim  ->  rim +
+
+   Nothing is baked into the profile, so nothing shuts a slider off: dragging
+   Thick after the bowl is open re-presses the ball and opens it again on the new
+   shape; dragging H resizes the ball under everything else. A stage that cannot
+   be done at the current values is CLAMPED to what it can do - never refused -
+   and says so in `notes`, so a slider is never dead, only limited, and the
+   reason is on screen. The ranges each slider may say come out of the same pass
+   (`ranges`), because they depend on what is upstream of them.
+
+   The clay is conserved by the first four stages (Trim takes clay away and Rim +
+   adds it, and both say so). Open used to throw the top of the ball away; here it
+   does not (NSO_wheelOpenKeep).
+
+   recipe = {
+     base    null, or a piece to start from instead of a ball (what the strict
+             move API bakes into: NSO_wheelRun)
+     ball    { height, radius, wall, nozzle } - blank is the standard ball
+     thick   null (unpressed) or the pressed thickness, mm
+     depth   0 (not opened) or how far the finger goes in, mm
+     pull    { z: fraction of the height, dr: mm, wide: falloff as a fraction of
+               the height }
+     trim    mm taken off the base, 0 for none
+     rim     mm added at the rim, 0 for none
+   }                                                                         */
+function NSO_wheelNewRecipe(ball) {
+  return {
+    base: null,
+    ball: Object.assign({ height: undefined, radius: undefined, wall: undefined, nozzle: undefined }, ball || {}),
+    thick: null, depth: 0,
+    pull: { z: 0.5, dr: 0, wide: 0.25 },
+    trim: 0, rim: 0
+  };
+}
+
+function NSO_wheelCloneRecipe(r) {
+  return {
+    base: r.base, ball: Object.assign({}, r.ball), thick: r.thick, depth: r.depth,
+    pull: Object.assign({}, r.pull), trim: r.trim, rim: r.rim
+  };
+}
+
+/* A recipe with nothing done, on top of a piece that is already what it is. */
+function NSO_wheelRecipeOn(piece) {
+  var r = NSO_wheelNewRecipe({});
+  r.base = piece;
+  return r;
+}
+
+/* Insert a sample where a profile crosses z, so that scaling everything above
+   it is a true stretch of that part (a segment straddling the split would
+   otherwise change slope instead of stretching). */
+function NSO_wheelSplitAt(profile, z) {
+  if (!profile) return profile;
+  var out = [], i;
+  for (i = 0; i < profile.length; i++) {
+    var a = profile[i];
+    if (i > 0) {
+      var b = profile[i - 1];
+      if (b.z < z - 1e-9 && a.z > z + 1e-9) {
+        var t = (z - b.z) / (a.z - b.z);
+        out.push({ z: z, r: b.r + t * (a.r - b.r) });
+      }
+    }
+    out.push({ z: a.z, r: a.r });
+  }
+  return out;
+}
+
+/* Stretch everything ABOVE zSplit by the factor that makes the volume Vtarget,
+   leaving what is below it (the base) exactly as it was. Volume is linear in the
+   stretch - every term of the contour integral above the split is a dz - so two
+   evaluations give the factor exactly. Returns { s, outer, inner } or null. */
+function NSO_wheelStretchAbove(piece, zSplit, Vtarget) {
+  var outer0 = NSO_wheelSplitAt(piece.outer, zSplit), inner0 = NSO_wheelSplitAt(piece.inner, zSplit);
+  function scale(prof, s) {
+    return prof && prof.map(function (q) {
+      return q.z > zSplit + 1e-9 ? { z: zSplit + (q.z - zSplit) * s, r: q.r } : { z: q.z, r: q.r };
+    });
+  }
+  function vol(s) { return NSO_wheelVolume({ outer: scale(outer0, s), inner: scale(inner0, s) }); }
+  var v1 = vol(1), up = vol(2) - v1;
+  if (!(up > 1e-9)) return null;
+  var s = 1 + (Vtarget - v1) / up;
+  if (!(s > 0.05) || !(s < 50)) return null;
+  return { s: s, outer: scale(outer0, s), inner: scale(inner0, s) };
+}
+
+/* OPEN, keeping the clay. NSO_wheelOpen cuts the cavity and throws the top of
+   the ball away (it stays in the budget, but not on the wheel). The clay a
+   finger pushes aside does not vanish - it rises - so what the cavity displaced
+   goes back as height on the WALLS: everything above the cavity floor is stretched
+   until the volume is what it was, and the base under it is untouched.
+   opts as NSO_wheelOpen (depth = how far the finger goes in). */
+function NSO_wheelOpenKeep(piece, opts) {
+  var V0 = NSO_wheelVolume(piece);
+  var o = NSO_wheelOpen(piece, opts);
+  if (!o.ok) return o;
+  var c = o.piece;
+  var st = NSO_wheelStretchAbove(c, c.inner[0].z, V0);
+  if (!st) return { ok: false, piece: piece, reason: 'Open could not keep the clay - open less' };
+  var cand = {
+    outer: NSO_wheelTidy(st.outer), inner: NSO_wheelTidy(st.inner),
+    nozzle: piece.nozzle, wall: piece.wall, segments: piece.segments,
+    target: piece.target, sizing: piece.sizing,
+    budget: { start: piece.budget.start, added: piece.budget.added, trimmed: piece.budget.trimmed },
+    ops: piece.ops.concat(['open'])
+  };
+  var g = NSO_wheelGate(piece, cand, 'Opening');
+  if (!g.ok) return g;
+  g.depth = cand.outer[cand.outer.length - 1].z - cand.inner[0].z;
+  g.push = o.depth;
+  g.stretch = st.s;
+  g.reason = 'Opened ' + o.depth.toFixed(1) + ' mm in, walls risen to ' + g.depth.toFixed(1) +
+    ' mm deep (x' + st.s.toFixed(2) + ') to keep the clay';
+  return g;
+}
+
+function NSO_wheelFirstSentence(reason) {
+  var i = reason.indexOf(' - ');
+  return i > 0 ? reason.slice(0, i) : reason;
+}
+
+/* Build the form a recipe describes. Never refuses a stage that has a smaller
+   version of itself: it clamps, and says so. Returns
+     { ok, piece, notes: [..], ranges: { thick, push, pull, trim, rim }, ball: <reason> }
+   or { ok: false, reason } if there is no ball to start from.               */
+function NSO_wheelBuild(recipe) {
+  var notes = [], R = {}, piece, ballReason = '';
+  if (recipe.base) piece = recipe.base;
+  else {
+    var b = NSO_wheelBall(recipe.ball || {});
+    if (!b.ok) return { ok: false, reason: b.reason };
+    piece = b.piece; ballReason = b.reason;
+  }
+  var floor = NSO_wheelFloor(piece.nozzle);
+
+  /* 1. PRESS */
+  if (!piece.inner) {
+    var span0 = NSO_wheelSpan(piece.outer);
+    var probe = NSO_wheelFlatSolve(NSO_wheelVolume(piece), span0.lo, piece.wall, piece.wall);
+    if (probe.ok) {
+      R.thick = { min: piece.wall, max: probe.hTop };
+      if (recipe.thick != null && recipe.thick < probe.hTop - 1e-6) {
+        var f = NSO_wheelFlatten(piece, { height: Math.max(piece.wall, recipe.thick) });
+        if (f.ok) piece = f.piece; else notes.push(NSO_wheelFirstSentence(f.reason));
+      }
+    } else {
+      R.thick = { min: 0, max: 0, why: probe.reason };
+    }
+  } else {
+    R.thick = { min: 0, max: 0, why: 'this piece is already open' };
+    if (recipe.thick != null) notes.push('Thick: this piece is already open');
+  }
+
+  /* 2. OPEN */
+  if (!piece.inner) {
+    var o0 = NSO_wheelOpen(piece, {});
+    if (o0.ok) {
+      R.push = { max: o0.depth };
+      if (recipe.depth > 1e-9) {
+        var push = Math.min(recipe.depth, o0.depth);
+        var ok = NSO_wheelOpenKeep(piece, push >= o0.depth - 1e-9 ? {} : { depth: push });
+        if (ok.ok) {
+          piece = ok.piece;
+          if (recipe.depth > o0.depth + 1e-6) notes.push('Deep limited to ' + o0.depth.toFixed(1) + ' mm - the most this shape takes');
+        } else notes.push(NSO_wheelFirstSentence(ok.reason));
+      }
+    } else {
+      R.push = { max: 0, why: o0.reason };
+      if (recipe.depth > 1e-9) notes.push('Deep: ' + NSO_wheelFirstSentence(o0.reason));
+    }
+  } else {
+    R.push = { max: 0, why: 'already open' };
+  }
+
+  /* 3. PULL */
+  var sp = NSO_wheelSpan(piece.outer), rMax = 0, i;
+  for (i = 0; i < piece.outer.length; i++) if (piece.outer[i].r > rMax) rMax = piece.outer[i].r;
+  R.pull = { swing: Math.max(5, NSO_wheelStep(rMax / 2, 0.5, false)) };
+  var pl = recipe.pull || {};
+  if (Math.abs(pl.dr || 0) > 1e-9) {
+    var pz = sp.lo + (pl.z == null ? 0.5 : pl.z) * (sp.hi - sp.lo);
+    var pw = Math.max(1, (pl.wide == null ? 0.25 : pl.wide) * (sp.hi - sp.lo));
+    var pr = NSO_wheelPullClamped(piece, { z: pz, dr: pl.dr, taper: pw });
+    if (pr.ok) { piece = pr.piece; if (pr.clamped) notes.push(pr.reason); }
+    else notes.push(NSO_wheelFirstSentence(pr.reason));
+  }
+
+  /* 4. TRIM */
+  var ts = NSO_wheelSpan(piece.outer);
+  var tmax = piece.inner ? piece.inner[0].z - floor - 0.1 : ts.hi - floor - 0.1;
+  R.trim = { max: Math.max(0, tmax - ts.lo) };
+  if (recipe.trim > 1e-9) {
+    var zt = Math.min(ts.lo + recipe.trim, tmax);
+    if (zt > ts.lo + 1e-6) {
+      var t = NSO_wheelTrim(piece, { z: zt });
+      if (t.ok) {
+        piece = t.piece;
+        if (ts.lo + recipe.trim > tmax + 1e-6) notes.push('Trim limited to ' + (tmax - ts.lo).toFixed(1) + ' mm');
+      } else notes.push(NSO_wheelFirstSentence(t.reason));
+    } else notes.push('Trim: nothing to take off the base');
+  }
+
+  /* 5. RIM + */
+  R.rim = { max: 60 };
+  if (recipe.rim > 1e-9) {
+    var rm = NSO_wheelExtendRim(piece, { delta: recipe.rim });
+    if (rm.ok) piece = rm.piece;
+    else notes.push('Rim + needs a straight wall' + (/best run is ([\d.]+) mm/.test(rm.reason) ? ' (the best run is ' + /best run is ([\d.]+) mm/.exec(rm.reason)[1] + ' mm)' : ''));
+  }
+  return { ok: true, piece: piece, notes: notes, ranges: R, ball: ballReason };
+}
+
 /* =====================================================================
    8. App wiring
 
@@ -1610,18 +1831,6 @@ var NSO_wheelUI = null;
 function NSO_wheelLiveEnd() {
   if (NSO_wheelUI && typeof NSO_wheelUI.end === 'function') NSO_wheelUI.end();
 }
-/* A number box that is typed into and then clicked away from sets its value on
-   the change event - and clicking the move's own button is what clicks it
-   away, so the button's click would set it a second time (or, for a refusal,
-   do something else). The live file marks each attempt; the button skips the
-   click that follows it. */
-var NSO_wheelLastSet = { move: null, at: 0 };
-function NSO_wheelMarkSet(move) { NSO_wheelLastSet = { move: move, at: Date.now() }; }
-function NSO_wheelJustSet(move) {
-  var hit = NSO_wheelLastSet.move === move && Date.now() - NSO_wheelLastSet.at < 800;
-  if (hit) NSO_wheelLastSet = { move: null, at: 0 };
-  return hit;
-}
 function NSO_wheelUiRefresh() {
   if (NSO_wheelUI && typeof NSO_wheelUI.refresh === 'function') NSO_wheelUI.refresh();
 }
@@ -1666,6 +1875,7 @@ function NSO_wheelSync() {
     }
     NSO_wheelHome.history = h.slice(0, i + 1);   // Undo took it back to here
     NSO_wheelSession = h[i].piece;
+    NSO_wheelHome.recipe = h[i].recipe || NSO_wheelRecipeOn(h[i].piece);
   }
   return { ok: true, model: m };
 }
@@ -1732,23 +1942,25 @@ function NSO_wheelDrop(soup) {
    refusal can never leave the wheel holding a form for nothing. */
 function NSO_wheelThrow(opts, head) {
   NSO_wheelLiveEnd();
-  var r = NSO_wheelBall(opts);
-  if (!r.ok) {
-    NSO_wheelSay(r.reason, true);
-    return r;
+  /* A recipe of its own (the sliders' settings) or the plain ball of `opts`. */
+  var recipe = (opts && opts.recipe) ? NSO_wheelCloneRecipe(opts.recipe) : NSO_wheelNewRecipe(opts);
+  var b = NSO_wheelBuild(recipe);
+  if (!b.ok) {
+    NSO_wheelSay(b.reason, true);
+    return { ok: false, reason: b.reason, piece: null };
   }
-  var soup = NSO_wheelRevolve(r.piece);
+  var soup = NSO_wheelRevolve(b.piece);
   var d = NSO_wheelDrop(soup);
   if (!d.ok) return d;
-  NSO_wheelSession = r.piece;
-  NSO_wheelHome = { modelId: d.modelId, name: d.name, history: [{ piece: r.piece, soup: d.model.rawTris }] };
-  var line = NSO_wheelStatus(r.piece, 'Dropped ' + d.name + ' - ' + (r.reason || head));
+  NSO_wheelSession = b.piece;
+  NSO_wheelHome = { modelId: d.modelId, name: d.name, recipe: recipe,
+                    history: [{ piece: b.piece, soup: d.model.rawTris, recipe: recipe }] };
+  var line = NSO_wheelStatus(b.piece, 'Dropped ' + d.name + ' - ' + (b.ball || head || 'Ball'));
+  if (b.notes.length) line += ' - ' + b.notes.join('; ');
   if (!d.onBed) line += ' - the plate has no free room left, it sits past the edge';
   NSO_wheelSay(line, !d.onBed);
-  r.modelId = d.modelId;
-  r.name = d.name;
   NSO_wheelUiRefresh();
-  return r;
+  return { ok: true, piece: b.piece, reason: b.ball, recipe: recipe, notes: b.notes, modelId: d.modelId, name: d.name };
 }
 
 function NSO_wheelStatus(piece, head) {
@@ -1803,7 +2015,7 @@ function NSO_wheelBake(head) {
     NSO_wheelSay('Pottery Wheel could not update the piece - unchanged', true);
     return { ok: false, reason: 'commit failed' };
   }
-  NSO_wheelHome.history.push({ piece: NSO_wheelSession, soup: m.rawTris });
+  NSO_wheelHome.history.push({ piece: NSO_wheelSession, soup: m.rawTris, recipe: NSO_wheelHome.recipe });
   return { ok: true, tris: soup };
 }
 
@@ -1840,15 +2052,52 @@ function NSO_wheelRun(move, opts, head) {
        NSO_wheelStatus appends the height, the budget and, when it fires, the
        build-volume warning. The caller's `head` is only a fallback. The
        session only advances if the piece took the bake. */
-    var prev = NSO_wheelSession;
+    var prev = NSO_wheelSession, prevRecipe = NSO_wheelHome.recipe;
     NSO_wheelSession = r.piece;
+    /* A strict move (the API, the headless suites) BAKES: what it made is the
+       new starting point and every slider goes back to neutral on top of it. The
+       sliders themselves never come through here (NSO_wheelSetRecipe). */
+    NSO_wheelHome.recipe = (move === 'reball') ? NSO_wheelNewRecipe(opts) : NSO_wheelRecipeOn(r.piece);
     var b = NSO_wheelBake(r.reason || head);
     if (!b.ok) {
       if (NSO_wheelSession === r.piece) NSO_wheelSession = prev;
+      NSO_wheelHome.recipe = prevRecipe;
       return b;
     }
     NSO_wheelUiRefresh();
     return r;
+  } catch (err) {
+    if (typeof console !== 'undefined') console.error('[wheel]', err);
+    NSO_wheelSay('Pottery Wheel failed - piece unchanged (' + ((err && err.message) || err) + ')', true);
+    return { ok: false, reason: (err && err.message) || String(err) };
+  }
+}
+
+/* THE SLIDERS' COMMIT. Build the recipe, put the result on the wheel's piece as
+   one Undo step, and keep the RECIPE: nothing is baked, so every slider stays
+   live and the next drag starts from the ball again. The status line says what
+   the piece is and what, if anything, a limit held back. */
+function NSO_wheelSetRecipe(recipe, head) {
+  try {
+    NSO_wheelLiveEnd();
+    var sync = NSO_wheelSync();
+    if (!sync.ok) return sync;
+    var target = sync.model;
+    NSO_wheelSelect(target);
+    var paint = NSO_wheelPaintOk(target, 'the wheel');
+    if (!paint.ok) return paint;
+    var b = NSO_wheelBuild(recipe);
+    if (!b.ok) { NSO_wheelSay(b.reason, true); return { ok: false, reason: b.reason, piece: NSO_wheelSession }; }
+    var prev = NSO_wheelSession, prevRecipe = NSO_wheelHome.recipe;
+    NSO_wheelSession = b.piece;
+    NSO_wheelHome.recipe = NSO_wheelCloneRecipe(recipe);
+    var bake = NSO_wheelBake((head || 'On the wheel') + (b.notes.length ? ' - ' + b.notes.join('; ') : ''));
+    if (!bake.ok) {
+      NSO_wheelSession = prev; NSO_wheelHome.recipe = prevRecipe;
+      return bake;
+    }
+    NSO_wheelUiRefresh();
+    return { ok: true, piece: b.piece, notes: b.notes, ranges: b.ranges, recipe: NSO_wheelHome.recipe };
   } catch (err) {
     if (typeof console !== 'undefined') console.error('[wheel]', err);
     NSO_wheelSay('Pottery Wheel failed - piece unchanged (' + ((err && err.message) || err) + ')', true);
@@ -1879,46 +2128,15 @@ if (typeof document !== 'undefined') {
       b.addEventListener('click', fn);
     }
     function wire() {
+      /* The only button that is not a slider's own preset (app-wheel-live.js):
+         the Starter Ball. No height, no selection, no nozzle - the standard ball
+         dropped as a piece of its own; H / R / W size it if they are set. */
       on('btn-wheel-ball', function () {
-        /* No height, no selection: the standard ball, dropped as a piece of
-           its own. A height (and radius) sizes it from a target instead. */
         NSO_wheelRun('ball', {
           height: num('inp-wheel-height', undefined),
           radius: num('inp-wheel-radius', undefined),
-          wall: num('inp-wheel-wall', undefined),
-          nozzle: num('inp-wheel-nozzle', undefined)
+          wall: num('inp-wheel-wall', undefined)
         }, 'Ball centred');
-      });
-      on('btn-wheel-flatten', function () {
-        /* The button goes ALL the way: as flat as the wall allows. The Thick
-           slider (app-wheel-live.js) is the fine control. */
-        if (NSO_wheelJustSet('flatten')) return;
-        NSO_wheelRun('flatten', {}, 'Flattened');
-      });
-      on('btn-wheel-open', function () {
-        /* The button opens as deep as the ball takes; the Deep slider is the
-           fine control. */
-        if (NSO_wheelJustSet('open')) return;
-        NSO_wheelRun('open', {}, 'Opened');
-      });
-      on('btn-wheel-pull', function () {
-        if (NSO_wheelJustSet('pull')) return;
-        var z = num('inp-wheel-pull-z', undefined);
-        var dr = parseFloat((document.getElementById('inp-wheel-pull-dr') || {}).value);
-        if (!(isFinite(z) && isFinite(dr))) {
-          if (typeof setStatus === 'function') setStatus('Pull needs a height and a radius change', true);
-          return;
-        }
-        /* clamp: as much as the clay, wall and height allow, saying what stopped it. */
-        NSO_wheelRun('pull', { z: z, dr: dr, clamp: true }, 'Pulled');
-      });
-      on('btn-wheel-trim', function () {
-        if (NSO_wheelJustSet('trim')) return;
-        NSO_wheelRun('trim', { z: num('inp-wheel-trim-z', undefined) }, 'Trimmed');
-      });
-      on('btn-wheel-rim', function () {
-        if (NSO_wheelJustSet('rim')) return;
-        NSO_wheelRun('rim', { delta: num('inp-wheel-rim-mm', undefined) }, 'Rim extended');
       });
     }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire);
