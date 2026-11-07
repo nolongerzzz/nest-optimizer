@@ -49,6 +49,9 @@
      outline   { kind: 'outline', source, mode, tri, d1, d2, z1, z2 }
                the footprint of a chosen piece, extruded between heights z1 and
                z2 (omitted: right through the piece being cropped)
+     wall      { kind: 'wall', o: [x,y,z], n: [..], u: [..], ring: [[a,b], ...], off, reach? }
+               one flat wall of the piece (from wallFace) and a line parallel to it, `off` mm
+               out from it: the copy is what stands outside the line, over the wall's outline
      lasso     { kind: 'lasso', eye: [x,y,z], dirs: [[dx,dy,dz], ...], near?, far? }
                a loop drawn on the screen: the cone of rays from the eye through
                its points, between depths near and far along the view (omitted:
@@ -128,9 +131,10 @@
     shortMm: 2e-4,       // an edge under this is a sliver: twice the weld radius
     creaseDeg: 30,       // a rim's face ends where edges bend more than this
     weldQ: 1e4,          // 0.1 micron buckets, as NSO_edgeStats welds
+    wallNudgeMm: 0.0005, // a wall's line is kept this far outside where it was set (below)
     cleanTol: [2e-4, 5e-4, 1e-3]   // the simplify tolerances tried, in turn, on a result with slivers
   };
-  var SHAPES = ['box', 'cylinder', 'sphere', 'piece', 'outline', 'lasso'];
+  var SHAPES = ['box', 'cylinder', 'sphere', 'piece', 'outline', 'lasso', 'wall'];
 
   var IDENTITY = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 
@@ -601,7 +605,14 @@
       if ((shape.z1 != null) !== (shape.z2 != null)) return 'give both heights z1 and z2, or neither';
       if (shape.z1 != null && !(isNum(shape.z1) && isNum(shape.z2) && shape.z2 > shape.z1)) return 'the outline heights need z1 below z2';
     }
-    else if (kind === 'lasso') {
+    else if (kind === 'wall') {
+      if (!vec3(shape.o) || !vec3(shape.n) || !vec3(shape.u)) return 'the wall needs a point on it, o, its outward normal, n, and a direction along it, u';
+      if (!(Math.hypot(shape.n[0], shape.n[1], shape.n[2]) > 1e-9) || !(Math.hypot(shape.u[0], shape.u[1], shape.u[2]) > 1e-9)) return 'the wall normal and direction are not directions';
+      if (!shape.ring || typeof shape.ring.length !== 'number' || shape.ring.length < 3) return 'the wall needs its outline, ring: at least 3 points [a, b] on the wall';
+      for (var ri = 0; ri < shape.ring.length; ri++) if (!(shape.ring[ri] && isNum(shape.ring[ri][0]) && isNum(shape.ring[ri][1]))) return 'every wall outline point is two numbers';
+      if (shape.off != null && !isNum(shape.off)) return 'the wall line distance, off, is a number of mm';
+      if (shape.reach != null && !(isNum(shape.reach) && shape.reach > 0)) return 'the wall reach is a distance above 0';
+    } else if (kind === 'lasso') {
       if (!vec3(shape.eye)) return 'the lasso needs the eye it was drawn from, eye: [x, y, z]';
       if (!Array.isArray(shape.dirs) && !(shape.dirs && typeof shape.dirs.length === 'number')) return 'the lasso needs the rays of its loop, dirs: [[dx, dy, dz], ...]';
       if (shape.dirs.length < 3) return 'a lasso loop needs at least 3 points';
@@ -610,6 +621,156 @@
       if (shape.near != null && !(isNum(shape.near) && isNum(shape.far) && shape.near > 0 && shape.far > shape.near)) return 'the lasso depths need 0 < near < far';
     }
     return '';
+  }
+
+  /* A wall and its line, in the frame of the wall: u along it, w up it (w = n x u, so u x w = n), n out of it.
+     The outline is in (u, w) about the point `o`; the cutter is that outline extruded along n from the line
+     (off) to `reach`, which is just past the piece's farthest point out along n unless it is given.
+     -> { poly, basis, off, reach, note } or { reason }. */
+  function wallFrame(shape, pieceP) {
+    var n = shape.n, nl = Math.hypot(n[0], n[1], n[2]);
+    n = [n[0] / nl, n[1] / nl, n[2] / nl];
+    var u = shape.u, ud = u[0] * n[0] + u[1] * n[1] + u[2] * n[2];
+    u = [u[0] - ud * n[0], u[1] - ud * n[1], u[2] - ud * n[2]];             // square to n
+    var ul = Math.hypot(u[0], u[1], u[2]);
+    if (!(ul > 1e-9)) return { reason: 'the wall direction runs along its normal' };
+    u = [u[0] / ul, u[1] / ul, u[2] / ul];
+    var w = [n[1] * u[2] - n[2] * u[1], n[2] * u[0] - n[0] * u[2], n[0] * u[1] - n[1] * u[0]];
+    /* The line is kept 0.5 micron outside where it was set. A line AT the wall is the commonest one, and a plane that
+       close to the wall's own face - to within the noise of a rotated float32 mesh, a millionth of a mm - leaves the
+       kernel a film of no thickness that the sliver clean-up then folds into the copy. Half a micron clear of it
+       the answer is the bump and nothing else; no printer can see it. */
+    var off = (shape.off == null ? 0 : shape.off) + DEFAULTS.wallNudgeMm, reach = shape.reach;
+    if (reach == null) {
+      if (!pieceP) return { reason: 'the wall needs a reach' };
+      reach = -Infinity;
+      for (var k = 0; k < 8; k++) {
+        var q = [(k & 1 ? pieceP.hi : pieceP.lo)[0] - shape.o[0], (k & 2 ? pieceP.hi : pieceP.lo)[1] - shape.o[1], (k & 4 ? pieceP.hi : pieceP.lo)[2] - shape.o[2]];
+        reach = Math.max(reach, q[0] * n[0] + q[1] * n[1] + q[2] * n[2]);
+      }
+      reach += DEFAULTS.marginMm;
+    }
+    if (!(reach > off + 1e-3)) return { reason: 'the line is out past everything - nothing of the piece stands outside it' };
+    var poly = Array.prototype.slice.call(shape.ring).map(function (p) { return { x: p[0], y: p[1] }; });
+    var area = 0;
+    for (var j = 0; j < poly.length; j++) { var a = poly[j], b = poly[(j + 1) % poly.length]; area += a.x * b.y - b.x * a.y; }
+    if (area < 0) poly.reverse();
+    return { poly: poly, off: off, reach: reach, note: 'the line ' + f2(off - DEFAULTS.wallNudgeMm) + ' mm out from the wall',
+             basis: [u[0], u[1], u[2], 0, w[0], w[1], w[2], 0, n[0], n[1], n[2], 0, 0, 0, 0, 1] };
+  }
+
+  /* The flat wall a triangle is on. soupP is the piece in P, tri an index into it. The wall is every triangle joined to
+     it by an edge that lies in the same plane (within tolMm), however it is tessellated; its outline is the outermost
+     loop of that patch, so whatever stands on the wall - a bump whose base is a hole in it - is inside the outline.
+     -> { o, n, u, w, d, ring: [[a, b], ...] (about o, in u, w, counter-clockwise), ring3, areaMm2, size: [width, height],
+          tris, holes } or { reason }. n points out of the piece (the soup's winding). */
+  function wallFace(soupP, triIdx, tolMm) {
+    var Q = DEFAULTS.weldQ, nT = (soupP.length / 9) | 0, tol = isNum(tolMm) ? tolMm : 0.02;
+    if (!(triIdx >= 0 && triIdx < nT) || triIdx !== Math.floor(triIdx)) return { reason: 'triangle ' + triIdx + ' is not a triangle of that piece (it has ' + nT + ')' };
+    var vmap = new Map(), pts = [], tris = [], nrm = [], slot = new Array(nT);
+    function vid(x, y, z) {
+      var k = Math.round(x * Q) + '_' + Math.round(y * Q) + '_' + Math.round(z * Q);
+      var i = vmap.get(k);
+      if (i === undefined) { i = pts.length; pts.push([x, y, z]); vmap.set(k, i); }
+      return i;
+    }
+    for (var t = 0; t < nT; t++) {
+      var o9 = t * 9;
+      var a = vid(soupP[o9], soupP[o9 + 1], soupP[o9 + 2]), b = vid(soupP[o9 + 3], soupP[o9 + 4], soupP[o9 + 5]), c = vid(soupP[o9 + 6], soupP[o9 + 7], soupP[o9 + 8]);
+      slot[t] = -1;
+      if (a === b || b === c || a === c) continue;
+      var ux = soupP[o9 + 3] - soupP[o9], uy = soupP[o9 + 4] - soupP[o9 + 1], uz = soupP[o9 + 5] - soupP[o9 + 2];
+      var vx = soupP[o9 + 6] - soupP[o9], vy = soupP[o9 + 7] - soupP[o9 + 1], vz = soupP[o9 + 8] - soupP[o9 + 2];
+      var nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx, L = Math.sqrt(nx * nx + ny * ny + nz * nz);
+      if (!(L > 1e-12)) continue;
+      slot[t] = tris.length;
+      tris.push([a, b, c]);
+      nrm.push([nx / L, ny / L, nz / L]);
+    }
+    var t0 = slot[triIdx];
+    if (t0 < 0) return { reason: 'that triangle has no area, so it is on no wall' };
+    var n0 = nrm[t0], p0 = pts[tris[t0][0]], d0 = n0[0] * p0[0] + n0[1] * p0[1] + n0[2] * p0[2];
+    function onPlane(v) { var p = pts[v]; return Math.abs(n0[0] * p[0] + n0[1] * p[1] + n0[2] * p[2] - d0) <= tol; }
+    function ek(u, v) { return u < v ? u + '_' + v : v + '_' + u; }
+    var edges = new Map();
+    for (var i = 0; i < tris.length; i++) {
+      for (var e = 0; e < 3; e++) {
+        var eu = tris[i][e], ew = tris[i][(e + 1) % 3], key = ek(eu, ew), list = edges.get(key);
+        if (!list) { list = []; edges.set(key, list); }
+        list.push(i);
+      }
+    }
+    var inPatch = new Uint8Array(tris.length), stack = [t0], patch = [];
+    var cosP = Math.cos(1 * Math.PI / 180);
+    function flat(i) {
+      var nn = nrm[i];
+      return nn[0] * n0[0] + nn[1] * n0[1] + nn[2] * n0[2] >= cosP && onPlane(tris[i][0]) && onPlane(tris[i][1]) && onPlane(tris[i][2]);
+    }
+    if (!flat(t0)) return { reason: 'that triangle is not flat' };
+    inPatch[t0] = 1;
+    while (stack.length) {
+      var cur = stack.pop();
+      patch.push(cur);
+      for (var e2 = 0; e2 < 3; e2++) {
+        var l2 = edges.get(ek(tris[cur][e2], tris[cur][(e2 + 1) % 3])) || [];
+        for (var q = 0; q < l2.length; q++) {
+          var nb = l2[q];
+          if (!inPatch[nb] && flat(nb)) { inPatch[nb] = 1; stack.push(nb); }
+        }
+      }
+    }
+    // the plane's own frame: n out, u along (square to the plate where it can be), w = n x u
+    var up = Math.abs(n0[2]) > 0.9 ? [0, 1, 0] : [0, 0, 1];
+    var uu = [up[1] * n0[2] - up[2] * n0[1], up[2] * n0[0] - up[0] * n0[2], up[0] * n0[1] - up[1] * n0[0]], ul = Math.hypot(uu[0], uu[1], uu[2]);
+    uu = [uu[0] / ul, uu[1] / ul, uu[2] / ul];
+    var ww = [n0[1] * uu[2] - n0[2] * uu[1], n0[2] * uu[0] - n0[0] * uu[2], n0[0] * uu[1] - n0[1] * uu[0]];
+    var org = [n0[0] * d0, n0[1] * d0, n0[2] * d0];
+    function to2(p) { var r = [p[0] - org[0], p[1] - org[1], p[2] - org[2]]; return [r[0] * uu[0] + r[1] * uu[1] + r[2] * uu[2], r[0] * ww[0] + r[1] * ww[1] + r[2] * ww[2]]; }
+    // the patch's boundary: directed edges whose neighbour is not in the patch
+    var bEdges = [], byFrom = new Map();
+    patch.forEach(function (ti) {
+      for (var e3 = 0; e3 < 3; e3++) {
+        var a3 = tris[ti][e3], b3 = tris[ti][(e3 + 1) % 3], l3 = edges.get(ek(a3, b3)) || [], shared = false;
+        for (var q3 = 0; q3 < l3.length; q3++) if (l3[q3] !== ti && inPatch[l3[q3]]) shared = true;
+        if (shared) continue;
+        var idx = bEdges.length;
+        bEdges.push({ a: a3, b: b3 });
+        var out = byFrom.get(a3);
+        if (!out) { out = []; byFrom.set(a3, out); }
+        out.push(idx);
+      }
+    });
+    var used = new Uint8Array(bEdges.length), loops = [];
+    for (var s0 = 0; s0 < bEdges.length; s0++) {
+      if (used[s0]) continue;
+      var chain = [], cur2 = s0, closed = false;
+      for (;;) {
+        used[cur2] = 1; chain.push(cur2);
+        if (bEdges[cur2].b === bEdges[s0].a) { closed = true; break; }
+        var outs = byFrom.get(bEdges[cur2].b) || [], nxt = -1;
+        for (var q4 = 0; q4 < outs.length; q4++) if (!used[outs[q4]]) { nxt = outs[q4]; break; }
+        if (nxt < 0) break;
+        cur2 = nxt;
+      }
+      if (!closed) continue;
+      var ring3 = chain.map(function (ci) { return pts[bEdges[ci].a]; }), ring2 = ring3.map(to2), ar = 0;
+      for (var r = 0; r < ring2.length; r++) { var P0 = ring2[r], P1 = ring2[(r + 1) % ring2.length]; ar += P0[0] * P1[1] - P1[0] * P0[1]; }
+      loops.push({ ring3: ring3, ring2: ring2, area: ar / 2 });
+    }
+    if (!loops.length) return { reason: 'the edge round that wall does not close into a loop' };
+    var outer = loops.reduce(function (m, l) { return Math.abs(l.area) > Math.abs(m.area) ? l : m; }, loops[0]);
+    if (!(Math.abs(outer.area) > 1e-6)) return { reason: 'that wall has no area' };
+    if (outer.area < 0) { outer.ring2.reverse(); outer.ring3.reverse(); }
+    var lo = [Infinity, Infinity], hi = [-Infinity, -Infinity];
+    outer.ring2.forEach(function (p) { lo = [Math.min(lo[0], p[0]), Math.min(lo[1], p[1])]; hi = [Math.max(hi[0], p[0]), Math.max(hi[1], p[1])]; });
+    // simple polygon: drop corners that lie on a straight run (a tessellated edge), so the outline is its real corners
+    var ring = outer.ring2.filter(function (p, i, all) {
+      var pr = all[(i + all.length - 1) % all.length], nx2 = all[(i + 1) % all.length];
+      var cr = (p[0] - pr[0]) * (nx2[1] - p[1]) - (p[1] - pr[1]) * (nx2[0] - p[0]);
+      return Math.abs(cr) > 1e-7 * Math.max(1, Math.hypot(p[0] - pr[0], p[1] - pr[1]) * Math.hypot(nx2[0] - p[0], nx2[1] - p[1]));
+    });
+    return { o: org, n: n0, u: uu, w: ww, d: d0, ring: ring, ring3: outer.ring3, areaMm2: Math.abs(outer.area),
+             size: [hi[0] - lo[0], hi[1] - lo[1]], centre: [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2], tris: patch.length, holes: loops.length - 1 };
   }
 
   /* A lasso, drawn on the screen, is a cone from the eye: the rays through the
@@ -702,6 +863,19 @@
         man = mo.man;
         moved = man.transform(realmArray(toRaw));
         return { m: moved, what: what };
+      }
+      if (kind === 'wall') {
+        var wq = wallFrame(shape, ctx.pieceP);
+        if (wq.reason) return { reason: wq.reason };
+        var wcs = new wasm.CrossSection([wq.poly], 'NonZero');
+        try {
+          if (wcs.isEmpty() || !(wcs.area() > 1e-9)) return { reason: 'the wall outline encloses nothing' };
+          solid = wcs.extrude(wq.reach - wq.off);
+          moved = solid.transform(realmArray(matMul(toRaw, matMul(matT(shape.o[0], shape.o[1], shape.o[2]),
+                                                                  matMul(wq.basis, matT(0, 0, wq.off))))));
+          return { m: moved, what: shape.label || 'outside the line', note: wq.note, areaMm2: wcs.area(),
+                   hold: 'pull the line in toward the wall' };
+        } finally { wcs.delete(); }
       }
       if (kind === 'lasso') {
         var lq = lassoFrame(shape, ctx.pieceP);
@@ -823,7 +997,7 @@
       if (!c.m) { res.reason = c.reason; return res; }
       cutter = c.m;
       res.what = c.what; res.segments = c.segments || null; res.areaMm2 = c.areaMm2 || null;
-      res.regionP = c.regionP || null; res.note = c.note || '';
+      res.regionP = c.regionP || null; res.note = c.note || ''; res.hold = c.hold || '';
 
       var mp = manifoldOfPiece(wasm, soup, 'this piece');
       if (!mp.man) { res.reason = mp.reason; return res; }
@@ -952,7 +1126,7 @@
   }
 
   function holdsNothing(res) {
-    return res.keptMm3 > res.tinyMm3 ? '' : res.what + ' holds nothing of this piece - move it over the piece';
+    return res.keptMm3 > res.tinyMm3 ? '' : res.what + ' holds nothing of this piece - ' + (res.hold || 'move it over the piece');
   }
 
   function say(res, verb) {
@@ -1215,6 +1389,7 @@
     planOn: planOn,
     footprintPolys: footprintPolys,
     rimLoop: rimLoop,
+    wallFace: wallFace,
     census: census,
     weldSoup: weldSoup,
     volume: volume,

@@ -19,6 +19,11 @@
      3. CYLINDER: the side sets the diameter, an end slides along the axis (the far
         end stays), an end pulled round past 45 degrees turns the axis
      4. SPHERE: one handle sets the diameter
+     5b. WALL: click a flat wall of a block with a bump on it and a line appears along it; the line
+        is dragged out of the wall and into it, or set by a click on the piece (the bump's top: the
+        line is its height, and CROP holds nothing; the wall: the line is flush); CROP copies the
+        bump and nothing else - 4 x 4 x 2 mm, closed - and the original is untouched; a Shift-click
+        picks another wall
      5. OUTLINE: a click on a piece is its footprint, a Shift-click on a triangle its
         rim; d1, d2, z1, z2 dragged; the readout names them
      6. Escape and Cancel put the shape away; so does closing the card
@@ -35,6 +40,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { withApp, loadSTL, selectModel, ROOT } = require('./nso_app_harness');
+const { csgContext } = require('./nso_csg_node.js');
+const { writeSTL } = require('./nso_stl_io.js');
 
 let pass = 0, fail = 0;
 function check(name, cond, detail) {
@@ -53,6 +60,22 @@ const V9 = path.join(ROOT, 'library', 'v9_mirror_factory.stl');
 
 /* ---- page helpers --------------------------------------------------------- */
 
+/* A 40 x 20 x 10 block with a 4 x 4 bump 2 mm proud on its +x wall (the bump is sunk 1 mm into the block, so the union has no seam), as an STL. */
+async function bumpyBlockSTL(file) {
+  const ctx = csgContext(), kern = ctx.NSO_CSG, wasm = await kern.load();
+  const box = (lo, hi) => {
+    const v = [[lo[0], lo[1], lo[2]], [hi[0], lo[1], lo[2]], [hi[0], hi[1], lo[2]], [lo[0], hi[1], lo[2]], [lo[0], lo[1], hi[2]], [hi[0], lo[1], hi[2]], [hi[0], hi[1], hi[2]], [lo[0], hi[1], hi[2]]];
+    const f = [[0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7], [0, 1, 5], [0, 5, 4], [1, 2, 6], [1, 6, 5], [2, 3, 7], [2, 7, 6], [3, 0, 4], [3, 4, 7]], o = [];
+    for (const t of f) for (const i of t) o.push(...v[i]);
+    return new Float32Array(o);
+  };
+  const a = kern.soupToManifold(wasm, box([0, 0, 0], [40, 20, 10])), b = kern.soupToManifold(wasm, box([39, 8, 3], [42, 12, 7]));
+  const u = a.add(b), soup = kern.manifoldToSoup(u);
+  a.delete(); b.delete(); u.delete();
+  writeSTL(file, soup);
+  return file;
+}
+
 const card = (page, fn, arg) => page.evaluate(fn, arg);
 const readout = page => page.evaluate(() => document.getElementById('crop-readout').textContent);
 const shapeNow = page => page.evaluate(() => NSO_CropCard.shape());
@@ -64,7 +87,7 @@ const cardState = page => page.evaluate(() => {
 /* The readout settles when the kernel has answered: wait for a "holds" or a refusal. */
 const settled = (page, ms) => page.waitForFunction(() => {
   const S = NSO_CropCard.state();
-  return !S.shape || (!S.timer && (S.plan || /^(Outline|Lasso): (click|drag)/.test(document.getElementById('crop-readout').textContent)));
+  return !S.shape || (!S.timer && (S.plan || /^(Outline|Wall|Lasso): (click|drag)/.test(document.getElementById('crop-readout').textContent)));
 }, null, { timeout: ms || 20000 });
 const handleXY = (page, id) => page.evaluate(i => NSO_CropCard.handleScreen(i), id);
 
@@ -157,9 +180,9 @@ const snap = (page, id) => page.evaluate(i => {
                reattachHere: !!c.querySelector('#btn-reattach'), reattachIn: !!document.querySelector('#menu-connect #btn-reattach'),
                readoutId: !!document.getElementById('crop-readout'), hit: NSO_CropCard.HIT_PX };
     });
-    check('the Shape row is Box, Cylinder, Sphere, Outline, Lasso', dom.row.join(',') === 'Box,Cylinder,Sphere,Outline,Lasso', dom.row.join(','));
-    check('the buttons outside Lift are the five shapes, CROP and Cancel, and no others', dom.btns.join(',') ===
-      'btn-crop-shape-box,btn-crop-shape-cylinder,btn-crop-shape-sphere,btn-crop-shape-outline,btn-crop-shape-lasso,btn-crop,btn-crop-cancel', dom.btns.join(','));
+    check('the Shape row is Box, Cylinder, Sphere, Outline, Wall, Lasso', dom.row.join(',') === 'Box,Cylinder,Sphere,Outline,Wall,Lasso', dom.row.join(','));
+    check('the buttons outside Lift are the six shapes, CROP and Cancel, and no others', dom.btns.join(',') ===
+      'btn-crop-shape-box,btn-crop-shape-cylinder,btn-crop-shape-sphere,btn-crop-shape-outline,btn-crop-shape-wall,btn-crop-shape-lasso,btn-crop,btn-crop-cancel', dom.btns.join(','));
     check('no field, checkbox or list outside Lift, and one readout line', dom.inputs === 0 && dom.readouts === 1 && dom.readoutId, dom.inputs + ' inputs, ' + dom.readouts + ' lines');
     check('Lift is a button of the card with its panel folded away; Strip and Detach flange are in the panel; none of it is in Subtract',
       dom.lift.btn && dom.lift.panelIn && dom.lift.panelHidden && dom.lift.detachInPanel && dom.lift.stripInPanel && dom.lift.notInSubtract, JSON.stringify(dom.lift));
@@ -421,6 +444,125 @@ const snap = (page, id) => page.evaluate(i => {
     await page.waitForFunction(n => state.models.length > n, n2, { timeout: 30000 });
     check('CROP on the sphere adds the copy', (await snap(page, hid)).models === n2 + 1);
     await page.click('#btn-undo');
+
+    /* ================================================================= 5b */
+    console.log('\n=== 5b. WALL ===');
+    {
+    const BUMPY = await bumpyBlockSTL(path.join(OUTDIR, 'bumpy-block.stl'));
+    const bid = await loadSTL(page, BUMPY);
+    await selectModel(page, bid);
+    await reselect(page, bid);
+    const bb = await world(page, bid);                         // P-frame box of the block with its bump
+    const wallX = bb.hi[0] - 2;                                // the +x wall is 2 mm under the bump's top
+    const mid = [(bb.lo[0] + bb.hi[0]) / 2, (bb.lo[1] + bb.hi[1]) / 2, (bb.lo[2] + bb.hi[2]) / 2];
+    // look at the +x wall from out in front of it, a little above, P (x, y, z) -> world (x, z, -y)
+    await frame(page, [bb.hi[0] + 55, mid[2] + 22, -mid[1] + 20], [wallX, mid[2], -mid[1]]);
+    await page.click('#btn-crop-shape-wall');
+    await settled(page);
+    ro = await readout(page);
+    check('picked: it asks for a wall, no handles, CROP off, the button lit', /^Wall: click a flat wall of the piece/.test(ro) &&
+      (await page.evaluate(() => NSO_CropCard.handles().length)) === 0 && await page.evaluate(() => document.getElementById('btn-crop').disabled &&
+      document.getElementById('btn-crop-shape-wall').getAttribute('aria-pressed') === 'true'), ro);
+    /* a screen point on the piece whose face is `wantN` (P) and sits `onPlane` mm out from the wall plane (+-0.05), clear of the bump and the handle */
+    const bumpC = [mid[1], mid[2]];                              // the bump is in the middle of the wall: P y and z of the block's centre
+    const aim = (wantN, plane, notNearBump) => page.evaluate(([i, wn, pl, wx, notNearBump, bumpC]) => {
+      const p = state.placed.find(q => q.sourceId === i), rc = state.renderer.domElement.getBoundingClientRect();
+      const hs = NSO_CropCard.handles().map(h => NSO_CropCard.handleScreen(h)).filter(Boolean);
+      let best = null;
+      for (let gx = 0.05; gx < 0.95; gx += 0.01) for (let gy = 0.05; gy < 0.95; gy += 0.01) {
+        const x = rc.left + gx * rc.width, y = rc.top + gy * rc.height;
+        if (document.elementFromPoint(x, y) !== state.renderer.domElement) continue;
+        if (hs.some(h => Math.hypot(h.x - x, h.y - y) < 30)) continue;
+        state.raycaster.setFromCamera(new THREE.Vector2(gx * 2 - 1, 1 - gy * 2), state.camera);
+        const hit = state.raycaster.intersectObject(p.mesh, false).filter(h => h.faceIndex != null)[0];
+        if (!hit) continue;
+        const nP = hit.face.normal.clone().transformDirection(p.mesh.matrixWorld), n = [nP.x, -nP.z, nP.y];
+        if (n[0] * wn[0] + n[1] * wn[1] + n[2] * wn[2] < 0.99) continue;
+        const q = [hit.point.x, -hit.point.z, hit.point.y], out = q[0] - wx;
+        if (Math.abs(out - pl) > 0.05) continue;
+        const dBump = Math.hypot(q[1] - bumpC[0], q[2] - bumpC[1]);
+        if (notNearBump && dBump < 7) continue;
+        if (!notNearBump && dBump > 1.5) continue;
+        const d = Math.hypot(gx - 0.5, gy - 0.5);
+        if (!best || d < best.d) best = { x, y, d };
+      }
+      return best;
+    }, [bid, wantN, plane, wallX, !!notNearBump, bumpC]);
+    const w1 = await aim([1, 0, 0], 0, true);
+    check('a point on the wall, away from the bump, is in view to click', !!w1, JSON.stringify(w1));
+    await page.mouse.click(w1.x, w1.y);
+    await settled(page);
+    let wst = await page.evaluate(() => { const S = NSO_CropCard.state(); return { f: S.wall.face && { n: S.wall.face.n, size: S.wall.face.size, holes: S.wall.face.holes, corners: S.wall.face.ring.length }, off: S.wall.off, plan: S.plan && { ok: S.plan.ok, v: S.plan.volumeMm3, r: S.plan.reason }, handles: NSO_CropCard.handles() }; });
+    check('a click on the wall picks it: faces +x, 20 x 10, four corners, the bump a hole in it', wst.f && near(wst.f.n[0], 1, 1e-6) && wst.f.corners === 4 && near(Math.min(...wst.f.size), 10, 1e-3) && near(Math.max(...wst.f.size), 20, 1e-3) && wst.f.holes === 1, JSON.stringify(wst.f));
+    check('...one handle, the line, and the line is flush on the wall', wst.handles.join(',') === 'line' && wst.off === 0, wst.handles.join(',') + ' off ' + wst.off);
+    ro = await readout(page);
+    check('the readout is "Wall 20 × 10 mm, line +0.00 mm · holds N faces, 0.03 cm³" - the bump', /^Wall 20 × 10 mm, line \+0\.00 mm · holds \d+ faces, 0\.03 cm³$/.test(ro) && wst.plan && wst.plan.ok && near(wst.plan.v, 32, 0.1), ro);
+    await page.screenshot({ path: path.join(OUT(), 'crop-wall.png') });
+
+    // the handle drags the line out of the wall and into it
+    const dir = () => page.evaluate(() => { const S = NSO_CropCard.state(), h = S.handles.find(q => q.id === 'line'), a = h.pos.clone().project(state.camera), b = h.pos.clone().add(h.dir.clone().multiplyScalar(4)).project(state.camera);
+      const r = state.renderer.domElement.getBoundingClientRect(), k = v => [(v.x + 1) / 2 * r.width, (1 - v.y) / 2 * r.height]; const A = k(a), B = k(b); return [B[0] - A[0], B[1] - A[1]]; });
+    const hl = await handleXY(page, 'line'), dv = await dir();
+    check('the handle sits on the line, clear of the wall\'s bump on the screen', !!hl, JSON.stringify(hl));
+    await drag(page, hl.x, hl.y, dv[0] * 0.25, dv[1] * 0.25);                 // 4 mm of screen along the normal is dv, so a quarter of that is 1 mm
+    await settled(page);
+    wst = await page.evaluate(() => { const S = NSO_CropCard.state(); return { off: S.wall.off, plan: S.plan && { ok: S.plan.ok, v: S.plan.volumeMm3 } }; });
+    check('dragged out along the wall\'s normal, the line leaves the wall and the bump shrinks to what stands outside it', wst.off > 0.3 && wst.off < 2 && wst.plan.ok && wst.plan.v < 31 && wst.plan.v > 4,
+      'off ' + wst.off + ', ' + (wst.plan && f2(wst.plan.v)) + ' mm3');
+    const hl2 = await handleXY(page, 'line');
+    await drag(page, hl2.x, hl2.y, -dv[0] * 0.6, -dv[1] * 0.6);
+    await settled(page);
+    wst = await page.evaluate(() => { const S = NSO_CropCard.state(); return { off: S.wall.off, plan: S.plan && { ok: S.plan.ok, v: S.plan.volumeMm3 } }; });
+    check('dragged into the wall, the copy is the bump and a skin of the wall under the outline', wst.off < -0.2 && wst.plan.ok && wst.plan.v > 40, 'off ' + wst.off + ', ' + (wst.plan && f2(wst.plan.v)) + ' mm3');
+
+    // a click on the piece sets the line through the point: the bump's top is 2 mm out - nothing stands outside that
+    const top = await aim([1, 0, 0], 2, false);
+    check('the bump\'s top is in view to click', !!top, JSON.stringify(top));
+    await page.mouse.click(top.x, top.y);
+    await page.waitForFunction(() => { const S = NSO_CropCard.state(); return !S.timer && S.plan && !S.plan.ok; }, null, { timeout: 20000 });
+    wst = await page.evaluate(() => NSO_CropCard.state().wall.off);
+    ro = await readout(page);
+    check('a click on the bump\'s top puts the line 2 mm out; nothing stands outside it, said in words, CROP off', near(wst, 2, 0.02) && /holds nothing of this piece - pull the line in toward the wall/.test(ro) &&
+      await page.evaluate(() => document.getElementById('btn-crop').disabled && document.getElementById('crop-readout').classList.contains('is-refusal')), 'off ' + wst + ' · ' + ro);
+    const w2 = await aim([1, 0, 0], 0, true);
+    await page.mouse.click(w2.x, w2.y);
+    await settled(page);
+    wst = await page.evaluate(() => { const S = NSO_CropCard.state(); return { off: S.wall.off, ok: S.plan && S.plan.ok, v: S.plan && S.plan.volumeMm3 }; });
+    check('a click on the wall itself puts it back flush, and the bump is what is held again', near(wst.off, 0, 0.02) && wst.ok && near(wst.v, 32, 0.2), JSON.stringify(wst));
+
+    // CROP: the bump, as a piece of its own
+    const pre5 = await snap(page, bid);
+    const bname = await cropNow(page, bid);
+    const made = await page.evaluate(() => { const m = state.models[state.models.length - 1], b = NSO_Crop.bounds(m.rawTris), c = NSO_Crop.census(m.rawTris);
+      return { name: m.name, v: NSO_Crop.volume(m.rawTris), size: [0, 1, 2].map(k => b.hi[k] - b.lo[k]), open: c.open + c.repeated + c.degenerate + c.welded.open + c.welded.repeated }; });
+    check('CROP adds "<name> crop N"', /crop \d+$/.test(bname), bname);
+    const sz = made.size.slice().sort((p, q) => p - q);
+    check('the copy is the bump and nothing else: 4 x 4 x 2 mm, 32 mm3, closed', near(sz[0], 2, 0.01) && near(sz[1], 4, 0.01) && near(sz[2], 4, 0.01) && near(made.v, 32, 0.1) && made.open === 0, JSON.stringify(made));
+    const post5 = await snap(page, bid);
+    check('the original is byte for byte as it was, bump and all', JSON.stringify(post5.raw) === JSON.stringify(pre5.raw));
+    await page.click('#btn-undo');
+    check('one Undo takes the copy off, the line still there', (await snap(page, bid)).models === pre5.models && await page.evaluate(() => !!NSO_CropCard.state().wall.face));
+
+    // Shift-click picks another wall: the top, 40 x 20, with the line back at 0
+    await frame(page, [mid[0] + 20, bb.hi[2] + 70, -mid[1] + 25], [mid[0], bb.hi[2], -mid[1]]);
+    const tpt = await page.evaluate(i => { const p = state.placed.find(q => q.sourceId === i), rc = state.renderer.domElement.getBoundingClientRect();
+      for (let gx = 0.2; gx < 0.8; gx += 0.02) for (let gy = 0.2; gy < 0.8; gy += 0.02) {
+        const x = rc.left + gx * rc.width, y = rc.top + gy * rc.height; if (document.elementFromPoint(x, y) !== state.renderer.domElement) continue;
+        state.raycaster.setFromCamera(new THREE.Vector2(gx * 2 - 1, 1 - gy * 2), state.camera);
+        const hit = state.raycaster.intersectObject(p.mesh, false).filter(h => h.faceIndex != null)[0];
+        if (hit && hit.face.normal.clone().transformDirection(p.mesh.matrixWorld).y > 0.99) return { x, y }; } return null; }, bid);
+    await page.keyboard.down('Shift');
+    await page.mouse.click(tpt.x, tpt.y);
+    await page.keyboard.up('Shift');
+    await settled(page);
+    wst = await page.evaluate(() => { const S = NSO_CropCard.state(); return { n: S.wall.face.n, size: S.wall.face.size, off: S.wall.off }; });
+    check('a Shift-click picks another wall: the top, 40 x 20, the line back at 0', near(wst.n[2], 1, 1e-6) && near(Math.max(...wst.size), 40, 1e-3) && near(Math.min(...wst.size), 20, 1e-3) && wst.off === 0, JSON.stringify(wst));
+    await page.click('#btn-crop-cancel');
+    check('Cancel puts the wall and its line away', await page.evaluate(() => !NSO_CropCard.state().shape && !state.scene.getObjectByName('cropCardShape')));
+    await selectModel(page, hid);
+    await reselect(page, hid);
+
+    }
 
     /* ================================================================= 5 */
     console.log('\n=== 5. OUTLINE ===');

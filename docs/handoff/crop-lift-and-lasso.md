@@ -21,3 +21,10 @@ Branch `claude-wip`. Full write-up: **`docs/CROP.md`, "The card"**; Lift's side 
   build and Box, Cylinder, Sphere, Outline and Lasso cover it. Removed from `index.html` and `app-crop-card.js` (its
   state, readout, overlay and click-pick); the engine keeps `{ kind: 'piece' }` (`crop:engine` 4 still runs it). The
   drive checks that used it now use Box (`wire:crop`'s refusal) or Outline of the star (`crop:shapes`'s refusal).
+- **Wall** (2026-11-07), the sixth shape: the manual stand-in for what Lift should find by itself. Click a flat
+  wall of the piece; a straight yellow line appears on the wall's outline (outermost loop of the coplanar patch, so a
+  bump is inside it); drag the handle, or click the piece (say behind a bump, from the side), to set how far out the line
+  is; CROP copies what stands outside it - the bump and nothing else with the line flush - and leaves the original alone
+  (Subtract the copy for a clean wall). Shift-click picks another wall. Engine `{ kind: 'wall', ... }` and
+  `NSO_Crop.wallFace`; the line is held 0.5 micron outside where it is set (see docs/CROP.md). Gates: `crop:engine` 6c,
+  `crop:drive` 5b. One wall at a time; the outline is the wall's own, not editable yet.

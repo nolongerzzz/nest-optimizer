@@ -616,6 +616,56 @@ async function crop(label, piece, shape, expect) {
   }
 
   /* =========================================================================
+     6c. Wall: one flat wall of a piece, a line parallel to it, and what stands outside the line
+     A 40 x 20 x 10 block with a 4 x 4 x 2 bump on its +x wall (x = 40). Closed forms: the line at
+     the wall holds the bump, 4 x 4 x 2 = 32; 1 mm out from it, 4 x 4 x 1 = 16; 1 mm INTO the wall,
+     the bump and a 1 mm skin of the whole wall, 32 + 20 x 10 x 1 = 232.
+     ========================================================================= */
+  console.log('\n=== 6c. wall: the bump on a wall, cropped off behind a line ===');
+  {
+    const kern = ctx.NSO_CSG, wasm = await kern.load();
+    const blk = kern.soupToManifold(wasm, boxSoup([0, 0, 0], [40, 20, 10])), bmp = kern.soupToManifold(wasm, boxSoup([39, 8, 3], [42, 12, 7]));
+    // the bump is 42 - 40 = 2 proud, and its base is 1 mm sunk into the block (so the union has no coplanar seam on the wall)
+    const both = blk.add(bmp), bumpy = kern.manifoldToSoup(both);
+    blk.delete(); bmp.delete(); both.delete();
+    const bumpyP = { rawTris: bumpy };
+    check('fixture: the block with its bump is closed, 8000 + 2 x 16 mm3', C.census(bumpy).open === 0 && near(C.volume(bumpy), 8000 + 32, 1e-3), String(C.volume(bumpy)));
+    // a triangle on the +x wall away from the bump: the wall is every triangle in its plane
+    let wallTri = -1, topTri = -1, bumpTopTri = -1;
+    for (let t = 0; t < bumpy.length / 9; t++) {
+      const o = t * 9, xs = [bumpy[o], bumpy[o + 3], bumpy[o + 6]], ys = [bumpy[o + 1], bumpy[o + 4], bumpy[o + 7]], zs = [bumpy[o + 2], bumpy[o + 5], bumpy[o + 8]];
+      if (xs.every(x => Math.abs(x - 40) < 1e-6) && Math.min(...ys) < 4 && wallTri < 0) wallTri = t;
+      if (zs.every(z => Math.abs(z - 10) < 1e-6) && topTri < 0) topTri = t;
+      if (xs.every(x => Math.abs(x - 42) < 1e-6) && bumpTopTri < 0) bumpTopTri = t;
+    }
+    const F = C.wallFace(bumpy, wallTri);
+    check('wallFace: the +x wall faces +x, 4 corners, 20 x 10', F.ring && near(F.n[0], 1, 1e-9) && F.ring.length === 4 && near(F.areaMm2, 200, 1e-6) &&
+      near(Math.min(...F.size), 10, 1e-6) && near(Math.max(...F.size), 20, 1e-6), F.ring ? JSON.stringify({ n: F.n, corners: F.ring.length, area: F.areaMm2, size: F.size }) : F.reason);
+    check('...the bump is a hole in it, not part of its outline', F.holes === 1, String(F.holes));
+    check('...o is on the wall plane, u square to n, w = n x u', near(F.o[0], 40, 1e-9) && near(F.u[0] * F.n[0] + F.u[1] * F.n[1] + F.u[2] * F.n[2], 0, 1e-9) &&
+      near(F.w[0], F.n[1] * F.u[2] - F.n[2] * F.u[1], 1e-9));
+    const FT = C.wallFace(bumpy, topTri);
+    check('wallFace: the top is a wall too, facing +z, 40 x 20', FT.ring && near(FT.n[2], 1, 1e-9) && near(FT.areaMm2, 800, 1e-6), FT.ring ? String(FT.areaMm2) : FT.reason);
+    const FB = C.wallFace(bumpy, bumpTopTri);
+    check('wallFace: the bump\'s own face is a 4 x 4 wall facing +x, 2 mm out', FB.ring && near(FB.n[0], 1, 1e-9) && near(FB.o[0], 42, 1e-9) && near(FB.areaMm2, 16, 1e-6), FB.ring ? String(FB.areaMm2) : FB.reason);
+    check('wallFace refuses a triangle that is not there, in words', /not a triangle/.test(C.wallFace(bumpy, 1e6).reason));
+    const wall = off => ({ kind: 'wall', o: F.o, n: F.n, u: F.u, ring: F.ring, off });
+    const at0 = await crop('wall: the line at the wall holds the bump', bumpyP, wall(0), { volume: 4 * 4 * 2, tol: 0.05, validate: true });
+    check('...and is only that: a 4 x 4 x 2 block, 12 faces', at0.ok && at0.faces === 12 && near(at0.bbox.lo[0], 40, 1e-3) && near(at0.bbox.hi[0], 42, 1e-4), at0.ok ? at0.faces + ' faces, x ' + at0.bbox.lo[0] + '..' + at0.bbox.hi[0] : at0.reason);
+    await crop('wall: the line 1 mm out holds the top half of it', bumpyP, wall(1), { volume: 4 * 4 * 1, tol: 0.1 });
+    await crop('wall: the line 1 mm into the wall holds the bump and a 1 mm skin of the whole wall', bumpyP, wall(-1), { volume: 32 + 200, tol: 0.05 });
+    const pl = await C.plan(bumpyP, wall(0));
+    // the line is kept half a micron outside where it is set (DEFAULTS.wallNudgeMm), so a wall at 0 does not leave a film
+    check('wall: plan() agrees and builds nothing', pl.ok && near(pl.volumeMm3, 32, 0.02) && !pl.tris);
+    const cs = await C.cutterSoup({ kind: 'wall', o: F.o, n: F.n, u: F.u, ring: F.ring, off: 0, reach: 3 });
+    check('wall: cutterSoup draws the outline wall extruded from the line to the reach, closed', cs.soup && C.census(cs.soup).open === 0 && near(C.volume(cs.soup), 200 * 3, 0.2), cs.soup ? String(C.volume(cs.soup)) : cs.reason);
+    // a posed piece: P is the piece seen on the plate, raw = Rz(37) P + t; the wall is found in P and cropped from the raw soup
+    const pose = toRawOf(37, [11, -4, 2]), bumpyP2 = rawToP(bumpy, 37, [11, -4, 2]);
+    const FP = C.wallFace(bumpyP2, wallTri);
+    await crop('wall: a posed piece (toRaw), the same bump', { rawTris: bumpy, toRaw: pose }, { kind: 'wall', o: FP.o, n: FP.n, u: FP.u, ring: FP.ring, off: 0 }, { volume: 32, tol: 0.05 });
+  }
+
+  /* =========================================================================
      7. refusals
      ========================================================================= */
   console.log('\n=== 7. refusals: only a shape that holds nothing, or a result that is not closed ===');
@@ -636,6 +686,10 @@ async function crop(label, piece, shape, expect) {
       ['a shape that is not one', hingeP, { kind: 'torus' }, /unknown shape/],
       ['no shape at all', hingeP, null, /no shape/],
       ['a Piece with no other piece', hingeP, { kind: 'piece' }, /another piece/],
+      ['a wall with no outline', hingeP, { kind: 'wall', o: [0, 0, 0], n: [1, 0, 0], u: [0, 0, 1] }, /needs its outline/],
+      ['a wall with no normal', hingeP, { kind: 'wall', o: [0, 0, 0], u: [0, 0, 1], ring: [[0, 0], [1, 0], [1, 1]] }, /needs a point on it/],
+      ['a wall line out past the piece', hingeP, { kind: 'wall', o: [18, 4, 4], n: [1, 0, 0], u: [0, 0, 1], ring: [[-3, -3], [3, -3], [3, 3], [-3, 3]], off: 20 }, /out past everything/],
+      ['a wall line that holds nothing (the line at a wall with nothing proud of it)', hingeP, { kind: 'wall', o: [18, 4, 4], n: [1, 0, 0], u: [0, 0, 1], ring: [[-3, -3], [3, -3], [3, 3], [-3, 3]], off: 0 }, /pull the line in/],
       ['a lasso of two points', hingeP, { kind: 'lasso', eye: [9, -100, 4], dirs: [[0, 1, 0], [1, 1, 0]] }, /at least 3 points/],
       ['a lasso with no eye', hingeP, { kind: 'lasso', dirs: [[0, 1, 0], [1, 1, 0], [0, 1, 1]] }, /needs the eye/],
       ['a lasso round empty air', hingeP, { kind: 'lasso', eye: [9, -100, 4], dirs: [[55, 100, -5], [65, 100, -5], [65, 100, 5], [55, 100, 5]] }, /holds nothing/],

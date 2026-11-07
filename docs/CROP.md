@@ -16,7 +16,7 @@ All are in `npm test`.
 ## The card
 
 Crop is one tool: **pick a shape, drag it to size, press CROP.** The card is a
-**Shape** row (Box, Cylinder, Sphere, Outline, Lasso), **one readout line**, **CROP**
+**Shape** row (Box, Cylinder, Sphere, Outline, Wall, Lasso), **one readout line**, **CROP**
 and **Cancel**, and under them **Lift** (below). Nothing else - no field to type a size
 into, no checkbox, no axis button. `page:manifest` fails if a control finds its way back in.
 
@@ -31,6 +31,7 @@ handle and no shape is the orbit's.
 | Cylinder | vertical, Ø half the narrower footprint, half the height | an end on each end (slide along the axis, the far end stays), one on the side (Ø). Pull an end round past 45° of the axis and the axis turns to follow it: the axis is whichever of x, y, z the pointer last followed on the screen |
 | Sphere | Ø half the piece's smallest side | one on the surface (Ø) |
 | Outline | nothing yet: click a piece for its footprint, or **Shift-click** a triangle for its rim loop | `d1` (outer offset) and `d2` (inner offset), dragged along the surface normal at the outline's boundary, and `z1`, `z2`, the two heights |
+| Wall | nothing yet: **click a flat wall** of the piece | `line`: one handle, on the middle of the wall's top edge, dragged out of the wall or into it |
 | Lasso | nothing yet: **drag a loop** round what to copy, on the screen | none: draw again to replace the loop |
 
 The body itself slides the shape: across the plate by default, **straight up and
@@ -48,6 +49,34 @@ by a ray; the nearest wins.
 …`, `Lasso, 29-point loop · holds …`, `Outline of <name>, +1.0 / −0.8 mm, z 2.0 → 14.5 mm ·
 holds …` (` rim` after the name for a rim). A refusal replaces "holds …" with the
 engine's words, in the refusal colour, and CROP goes off.
+
+**Wall** is the manual version of what Lift is meant to find by itself: take a bump (or any
+feature) off a wall, cleanly. Click the piece's wall and a straight line appears along it - the
+wall's own outline, carried out to where the line is, drawn in yellow with its plane faintly
+filled (from the side that plane *is* the line). The wall is every triangle joined to the one
+clicked in the same plane (within 0.02 mm and 1°, however it is tessellated), and its outline is
+the **outermost** loop of that patch, so whatever stands on the wall - a bump's base is a hole in
+the patch - is inside the outline. CROP copies what stands **outside the line**, over that
+outline: with the line flush on the wall, the bump and nothing else. The original is untouched;
+Subtract the copy from it for a clean, flat wall.
+
+The line starts flush on the wall (0). Move it by:
+
+- the **handle**, dragged along the wall's normal (a thin rail through it, like the others): out,
+  to take only the top of the bump; into the wall (negative), to take a skin of the wall as well;
+- a **click on the piece**: the line goes through the point clicked. Zoom in beside the bump,
+  look at it from the side, and click on the wall behind it; a click on the bump's top puts the
+  line at the bump's height (and the readout says nothing stands outside it);
+- a **Shift-click** on another wall of the piece picks that one instead (the line back at 0).
+
+The readout: `Wall 20 × 10 mm, line +0.00 mm · holds 12 faces, 0.03 cm³`. The engine keeps the
+line 0.5 µm outside where it is set (`DEFAULTS.wallNudgeMm`): a plane within a millionth of a mm
+of the wall's own face (the noise of a rotated float32 mesh) leaves the kernel a film that the
+sliver clean-up folds into the copy, and half a micron clear of it the copy is the bump alone.
+The engine's `{ kind: 'wall', o, n, u, ring, off, reach? }` and `NSO_Crop.wallFace(soupP, tri)`
+are in the engine section; `crop:engine` 6c checks them against the closed forms of a block with
+a 4 × 4 × 2 bump (32 mm³ at the wall, 16 at 1 mm out, 232 at 1 mm in), `crop:drive` 5b with a real
+mouse.
 
 **Lasso** is a loop drawn freehand on the screen (a plain left-drag; **Alt-drag orbits**,
 as a press that draws cannot also orbit). It is kept as the rays from the camera it was
