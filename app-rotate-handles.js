@@ -1149,9 +1149,10 @@
     },
     /* An Undo point for the pose as it will be seated (in a run, the height it will land at): what holdTurn's caller takes. */
     undoPoint: function () { undoPoint(); },
+    /* Is the turn in hand one holdTurn took (the Cut card's wheel's)? The Rotate menu's own holds are not the wheel's to land. */
+    holdingTurn: function () { return !!(hold && hold.keepPose && holdIntact()); },
     seatNow: function () { seat(); },
     seatSoon: function () { seatLater(); },
-    holding: function () { return !!hold; },
     nudge: nudge,
     beginDrag: beginDrag, moveDrag: moveDrag, endDrag: endDrag,
     dragging: function () { return !!drag; },

@@ -334,6 +334,7 @@ function undoLast() {
     nsoReleaseGeometries(leaving);
     updateUndoBtn();
   }
+  if (typeof cutAfterPoseUndo === 'function') cutAfterPoseUndo();      // the Cut card's Rotate piece wheel reads the pose that came back
   return r;
 }
 
@@ -510,6 +511,7 @@ function redoLast() {
   const say = r.entry.redoLabel || REDO_LABEL[r.entry.type] ||
     (UNDO_REPLACE_LABEL[r.entry.type] || '').replace(/^Undo: /, '').replace(/ reverted$/, ' re-applied');
   setStatus('Redo: ' + (say || r.entry.label || 'step re-applied'));
+  if (typeof cutAfterPoseUndo === 'function') cutAfterPoseUndo();
 }
 
 function undoLastStep() {

@@ -873,6 +873,7 @@ function openCutter(tool) {
   state.cutBladeAt = null;
   state.cutFollowAt = null;
   state.cutRotateAxis = 'h';
+  if (typeof cutRotateRef !== 'undefined') cutRotateRef.idx = -1;
   state.editId = null;
   state.selectedIndex = -1;
   if (state.controls) state.controls.enabled = true;
@@ -895,6 +896,7 @@ function openCutter(tool) {
 }
 
 function closeCutter(silent) {
+  if (typeof cutRotateSettle === 'function') cutRotateSettle();
   const was = state.cutterOpen ? (state.cutTool || 'cut') : null;
   state.cutterOpen = false;
   state.cutTool = null;
@@ -1123,13 +1125,17 @@ const CUT_ROTATE_AXES = { h: 'chk-cut-rot-h', fb: 'chk-cut-rot-fb', ss: 'chk-cut
 
 function cutRotateAxis() { return state.cutRotateAxis === 'fb' || state.cutRotateAxis === 'ss' ? state.cutRotateAxis : 'h'; }
 
-/** The ring (app-rotate-handles.js) that is the ticked axis: 'turn', or the along / across lean of the piece's footprint.
-    Front/back tips the piece along its length (its ends go up and down); Side/side across it. */
+/** The ring (app-rotate-handles.js) that is the ticked axis, as the session holds it (cutRotateSession). */
 function cutRotateRing() {
-  const a = cutRotateAxis();
-  if (a === 'h' || typeof nsoRotate === 'undefined' || !nsoRotate.leanNames) return 'turn';
-  const n = nsoRotate.leanNames();
-  return a === 'fb' ? n.along : n.across;
+  const t = cutRotateSession();
+  return t ? t.ring : 'turn';
+}
+
+/** The piece's turn in its BODY frame: the pose on the mesh after the turns baked into its geometry since it was loaded
+    (nsoBakedQ) - the frame the rotate rings' own scale is read in, so a reading is the same before and after a bake. */
+function cutRotateBodyQ(p) {
+  p.mesh.updateMatrixWorld(true);
+  return typeof nsoBakedQ === 'function' ? p.mesh.quaternion.clone().multiply(nsoBakedQ(p)) : p.mesh.quaternion.clone();
 }
 
 function cutRotatePiece() {
@@ -1143,8 +1149,7 @@ function cutRotatePiece() {
 function cutPieceHeadingRaw() {
   const p = cutRotatePiece();
   if (!p) return null;
-  p.mesh.updateMatrixWorld(true);
-  const q = p.mesh.quaternion, axes = [[1, 0, 0, 0], [0, 0, 1, -90], [0, 1, 0, 0]];
+  const q = cutRotateBodyQ(p), axes = [[1, 0, 0, 0], [0, 0, 1, -90], [0, 1, 0, 0]];
   for (let i = 0; i < axes.length; i++) {
     const v = new THREE.Vector3(axes[i][0], axes[i][1], axes[i][2]).applyQuaternion(q);
     if (Math.hypot(v.x, v.z) > 0.7) return ((((Math.atan2(v.z, v.x) * 180) / Math.PI + axes[i][3]) % 360) + 360) % 360;
@@ -1152,30 +1157,53 @@ function cutPieceHeadingRaw() {
   return null;
 }
 
-/** What a lean's reading is measured on: the lean's axis in the world `A`, and which of the piece's own axes `k` (and which
-    way, `sgn`) is its upright, so 0 is "flat as it lies". The upright is kept, not re-picked from whichever axis is most
-    nearly vertical now: tipped past 45 degrees another axis is the more vertical and the reading would jump 90 degrees
-    under the hand and again on release. It is re-picked when the piece, or the lean, changes, and when the piece comes to
-    rest flat on another of its faces (another axis within a degree of vertical): there the reading is 0 again. */
-const cutRotateRef = { idx: -1, ring: null, k: 0, sgn: 1 };
-function cutRotateFix(ring) {
+/** THE SESSION. What the wheel turns the piece about, and what its reading is measured on, picked ONCE and held while the wheel
+    is the one moving the piece:
+      ring  the rotate ring that is the ticked axis. For a lean it is the along / across lean of the piece's footprint AS
+            IT LAY WHEN THE SESSION BEGAN: the footprint of a piece tipping over changes shape (a near-square one swaps its
+            long side), and the ring named from it afresh each step would turn the piece about a different axis each time -
+            tilting freely instead of spinning one way;
+      A     that ring's axis in the world, held, so every step is a turn about the SAME line;
+      k, sgn  the piece's own axis that is its upright and which way up, so 0 is "as it lay when you started" and the lean
+            reads true: 45, 90 (on edge), 135, 180 ... It is not re-picked from whichever axis is most nearly vertical now
+            (a reading that followed it would jump at 45 and fall to 0 at 90, standing on edge).
+    The line (ring, A) is picked again whenever the piece's turn is not the one the wheel last left it in - an Undo or Redo, the
+    Rotate menu, another tool - since a lean's ring is named from the footprint as it lies. The reference (k, sgn) is kept
+    for the piece and the axis, in the piece's body frame, so a lean read as 70 is read as 70 again after Undo then Redo. */
+const cutRotateRef = { idx: -1, axis: null, ring: 'turn', A: null, k: 0, sgn: 1, q: null };
+function cutRotateSession() {
   const p = cutRotatePiece();
   if (!p || typeof nsoRotate === 'undefined' || !nsoRotate.ringAxis) return null;
-  const a = nsoRotate.ringAxis(ring);
-  if (!a) return null;
   p.mesh.updateMatrixWorld(true);
-  const ys = [[1, 0, 0], [0, 1, 0], [0, 0, 1]].map(function (e) {
-    return new THREE.Vector3(e[0], e[1], e[2]).applyQuaternion(p.mesh.quaternion).y;
-  });
-  const r = cutRotateRef;
-  const keep = r.idx === state.selectedIndex && r.ring === ring;
-  const flatOther = ys.some(function (y, k) { return k !== r.k && Math.abs(y) > Math.cos(Math.PI / 180); });     // within a degree of upright
-  if (!keep || flatOther) {
-    let best = 0;
-    ys.forEach(function (y, k) { if (Math.abs(y) > Math.abs(ys[best]) + 1e-9) best = k; });
-    r.idx = state.selectedIndex; r.ring = ring; r.k = best; r.sgn = ys[best] < 0 ? -1 : 1;
+  const r = cutRotateRef, axis = cutRotateAxis();
+  const same = r.idx === state.selectedIndex && r.axis === axis;
+  const keep = same && !!r.q && !!r.A && p.mesh.quaternion.angleTo(r.q) < 1e-5;
+  if (!keep) {
+    // The line: the ticked axis's ring and its axis in the world, as the piece lies NOW (a lean's ring is named from its footprint).
+    let ring = 'turn';
+    if (axis !== 'h' && nsoRotate.leanNames) { const n = nsoRotate.leanNames(); ring = axis === 'fb' ? n.along : n.across; }
+    const a = nsoRotate.ringAxis(ring) || [0, 1, 0];
+    r.ring = ring; r.A = new THREE.Vector3(a[0], a[1], a[2]); r.q = p.mesh.quaternion.clone();
+    // The reference: the piece's own upright, picked when the piece or the axis is new - and kept through an Undo, a Redo,
+    // a bake, so the reading does not re-base when the pose comes back.
+    if (!same) {
+      const bq = cutRotateBodyQ(p);
+      const ys = [[1, 0, 0], [0, 1, 0], [0, 0, 1]].map(function (e) { return new THREE.Vector3(e[0], e[1], e[2]).applyQuaternion(bq).y; });
+      let best = 0;
+      ys.forEach(function (y, k) { if (Math.abs(y) > Math.abs(ys[best]) + 1e-9) best = k; });
+      r.idx = state.selectedIndex; r.axis = axis; r.k = best; r.sgn = ys[best] < 0 ? -1 : 1;
+    }
   }
-  return { A: new THREE.Vector3(a[0], a[1], a[2]), k: r.k, sgn: r.sgn };
+  return r;
+}
+/** The session's reading frame (for a drag, taken at the press and kept). */
+function cutRotateFix() { const t = cutRotateSession(); return t ? { A: t.A, k: t.k, sgn: t.sgn } : null; }
+
+/** Put down whatever turn the wheel has in hand: the piece is stood on the plate. The wheel keeps the piece pivoting in
+    place, through the plate, for as long as you are using it; this is where that ends - another axis ticked, Cut pressed,
+    the card closed, a click anywhere outside the card. */
+function cutRotateSettle() {
+  if (typeof nsoRotate !== 'undefined' && nsoRotate.seatNow && nsoRotate.holdingTurn && nsoRotate.holdingTurn()) nsoRotate.seatNow();
 }
 
 /** A lean's reading: how far the piece's upright axis has tipped from the vertical about the lean's axis, in degrees
@@ -1185,7 +1213,7 @@ function cutPieceTiltRaw(fix) {
   if (!p || !fix) return null;
   p.mesh.updateMatrixWorld(true);
   const e = [[1, 0, 0], [0, 1, 0], [0, 0, 1]][fix.k];
-  const v = new THREE.Vector3(e[0], e[1], e[2]).applyQuaternion(p.mesh.quaternion).multiplyScalar(fix.sgn);
+  const v = new THREE.Vector3(e[0], e[1], e[2]).applyQuaternion(cutRotateBodyQ(p)).multiplyScalar(fix.sgn);
   const up = new THREE.Vector3(0, 1, 0);
   const phi = Math.atan2(fix.A.dot(new THREE.Vector3().crossVectors(up, v)), up.dot(v));    // right-handed about A, from up to v
   return -phi * 180 / Math.PI;
@@ -1193,7 +1221,7 @@ function cutPieceTiltRaw(fix) {
 
 /** The wheel's reading for the ticked axis: heading [0, 360) for Horizontal, tilt (-180, 180] for a lean. */
 function cutRotateReadingRaw(fix) {
-  return cutRotateAxis() === 'h' ? cutPieceHeadingRaw() : cutPieceTiltRaw(fix || cutRotateFix(cutRotateRing()));
+  return cutRotateAxis() === 'h' ? cutPieceHeadingRaw() : cutPieceTiltRaw(fix || cutRotateFix());
 }
 function cutRotateReading() {
   const r = cutRotateReadingRaw();
@@ -1244,7 +1272,7 @@ function syncCutRotateUI() {
 /** Turn the selected piece `cw` degrees the way the wheel's clockwise is (about the ticked axis). One Undo point for a
     press or a run of presses (`fresh` true starts a step of its own - a drag's first move - false carries on one), none if
     the piece is locked. */
-function cutRotateBy(cw, fresh, fix) {
+function cutRotateBy(cw, fresh) {
   const idx = state.selectedIndex, p = cutRotatePiece();
   if (!p) { setStatus('Rotate piece: pick a piece first', true); return false; }
   if (typeof nsoRotate === 'undefined' || !nsoRotate.turn) return false;
@@ -1257,14 +1285,30 @@ function cutRotateBy(cw, fresh, fix) {
     if (nsoRotate.undoPoint) nsoRotate.undoPoint(); else pushUndo(snapshotPlacedPose(idx));
   }
   cutRotateDial.undoAt = now;
-  /* HELD: the piece pivots in place about its centre, through the plate where it must, and is stood on the plate once
-     (a pause after the last step, or the release of a drag) - the way the rotate rings turn it - not stood back on the
-     plate at every step, which lifts it and lowers it again as it tips. */
-  if (nsoRotate.holdTurn) nsoRotate.holdTurn(cutRotateRing(), -cw, { A: fix && fix.A ? fix.A.toArray() : null, keep: cutRotateDial.dragging });
+  /* HELD: the piece pivots in place about its centre, through the plate where it must, about ONE line (the session's), and
+     stays so for as long as the wheel is in use - it is stood on the plate by cutRotateSettle, not by a timer (a timer
+     lifts it up off the plate in the middle of a spin). */
+  const sess = cutRotateSession();
+  if (nsoRotate.holdTurn && sess) nsoRotate.holdTurn(sess.ring, -cw, { A: sess.A.toArray(), keep: true });
   else nsoRotate.turn(cutRotateRing(), -cw);
   if (cutRotateAxis() === 'h') p.rotated = Math.abs(Math.sin(p.rotY || 0)) > 0.5;
+  if (cutRotateRef.q && cutRotateRef.idx === state.selectedIndex) cutRotateRef.q.copy(p.mesh.quaternion);   // the wheel's own turn: the reference stands
   cutAfterPieceTurn();
   return true;
+}
+
+/** An Undo or a Redo has put a pose back: the wheel and the blade read the piece as it is now, and a turn the wheel last
+    left is no longer the one the piece is in (so a lean's reference is picked again, 0 = as it lies). */
+function cutAfterPoseUndo() {
+  if (!state.cutterOpen) return;
+  cutRotateRef.q = null;                       // the line is read again; the reference stays
+  if (cutRotatePiece()) {
+    state.cutFollowAt = null;
+    if (typeof cutFollowSyncUI === 'function') cutFollowSyncUI();
+    syncCutRotateUI();
+    syncCutUI();
+    updateCutHelper();
+  }
 }
 
 /** The piece has been stood on the plate after a held turn (app-rotate-handles.js, seat): the blade goes with it. */
@@ -1301,7 +1345,7 @@ function cutWireRotateDial() {
     if (ev.button !== 0) return;
     const at = angleAt(ev);
     if (at.centre) return;                                    // the centre is the readout, not the rail
-    const fix = cutRotateAxis() === 'h' ? null : cutRotateFix(cutRotateRing());
+    const fix = cutRotateAxis() === 'h' ? null : cutRotateFix();
     const a0 = cutRotateReadingRaw(fix);
     if (a0 == null) { setStatus('Rotate piece: pick a piece first', true); return; }
     press = { x: ev.clientX, y: ev.clientY, lastA: at.a, raw: 0, abs0: a0, moved: false, first: true, fix: fix };
@@ -1325,13 +1369,11 @@ function cutWireRotateDial() {
     if (cur == null) return;
     const delta = cutRotateWrap(want - cur);
     if (Math.abs(delta) < 1e-6) return;
-    if (cutRotateBy(delta, press.first, press.fix)) press.first = false;
+    if (cutRotateBy(delta, press.first)) press.first = false;
   });
   const stop = function () {
-    const moved = !!press && press.moved;
     press = null;
     cutRotateDial.dragging = false;
-    if (moved && typeof nsoRotate !== 'undefined' && nsoRotate.seatNow) nsoRotate.seatNow();     // let go: it lands on the plate
     syncCutRotateUI();
   };
   dial.addEventListener('pointerup', stop);
@@ -1356,10 +1398,17 @@ function cutWireRotateDial() {
   Object.keys(CUT_ROTATE_AXES).forEach(function (k) {
     const el = document.getElementById(CUT_ROTATE_AXES[k]);
     if (el) el.addEventListener('change', function () {
-      state.cutRotateAxis = el.checked ? k : (cutRotateAxis() === k ? k : cutRotateAxis());
+      const ticked = el.checked;                                       // read first: landing the piece re-syncs the card
+      cutRotateSettle();                                              // a new axis: the turn in hand lands first
+      state.cutRotateAxis = ticked ? k : (cutRotateAxis() === k ? k : cutRotateAxis());
       syncCutRotateUI();
     });
   });
+  // A press anywhere but on the Cut card ends the wheel's turn: the piece lands before it is dragged, exported, cloned ...
+  document.addEventListener('pointerdown', function (ev) {
+    if (!ev.target || !ev.target.closest || ev.target.closest('#edit-card')) return;
+    cutRotateSettle();
+  }, true);
   cutWireMiterStep('btn-cut-rotate-minus', -1, 'rotate');
   cutWireMiterStep('btn-cut-rotate-plus', 1, 'rotate');
   syncCutRotateUI();

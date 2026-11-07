@@ -144,3 +144,18 @@ pivoting, release lands it, one Undo takes it all back seated.
 **Follow strand for the Notch** (`nfollow`, off by default; its own box in the Notch rows). `cutFollowOn` knows both blades; the Slice / Back / Forward rows moved out of the Sized fields into a shared
 block under both, labelled Gap for the Notch; depth / width are raised only for the Sized blade. Found while testing: a plane square to the cord next to the wall of a nick cuts a section 7-10% short
 (the cord curves, the nick's walls do not), so the `ok` gate on a section's area is now 0.95..1.06 (was 0.8..1.25); on a clean faceted cord the area spread is 0.996..1.001.
+
+### Twelfth round (2026-11-07): the wheel spins in place about one line, and reads the true turn
+
+From a screen recording of the wheel on the Connector string, Front/back ticked: the piece jumped and tilted freely above the plate, the wheel read 0 with the disc standing on its
+edge, read 30.7 after an Undo had put it flat, and a reading of -4.8 sat on a piece nearly upright. Four causes, all in `app-cut.js`:
+- **Free tilting.** The lean's ring was named from the footprint afresh at every step (`nsoRotate.leanNames`), and a tipping disc's footprint changes shape (a near-square one swaps
+  its long side), so successive steps turned it about different axes. `cutRotateSession` now picks the ring and its world axis once and holds them (`holdTurn` is always given `A`), re-picking
+  only when the piece's turn is not the one the wheel last left (Undo, Redo, the Rotate menu, another tool).
+- **Jumping.** `holdTurn` armed a 600 ms timer that stood the piece on the plate - up off it, mid-spin. The wheel's turns now arm none (`keep: true`); `cutRotateSettle` lands the piece when the
+  wheel is done: another axis ticked, a press outside `#edit-card` (a capture listener), Cut (`cutActiveModel`), `closeCutter`. A drag's release no longer lands it either.
+- **Re-basing.** The lean reference was re-picked when another face came within a degree of upright, so the reading fell to 0 at 90 with the piece on edge. It is now the piece's own upright
+  (`k`, `sgn`, in the BODY frame - mesh turn x `nsoBakedQ` - so a bake does not move it), kept for the piece and the axis: 90 reads 90, 120 reads 120.
+- **Stale after Undo / Redo.** `undoLast` / `redoLast` (`app-core.js`) now call `cutAfterPoseUndo`, which has the wheel and the blade read the pose that came back.
+Found on the way: landing the piece re-syncs the card, which unticked the box just clicked (the handler now reads the tick first). Redo closes and reopens the Cut tool (nsoHelpers.teardown), as
+it does for every helper, so the card starts again after a Redo - left as it was.

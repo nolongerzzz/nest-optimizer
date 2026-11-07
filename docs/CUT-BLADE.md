@@ -33,17 +33,27 @@ replaces the rotate rings, which Cut no longer shows (they stood too far out of 
 piece). Three ticks under its box pick the axis, one at a time: **Horizontal** (the default: about
 the plate's vertical, clockwise seen from above), **Front/back** (tips the piece along its length,
 its ends going up and down) and **Side/side** (across it, one long edge up). They are the rotate
-rings' own three motions, through the same path as the Rotate menu's pose buttons (the position
-lock is honoured, one Undo step per drag or run of presses). The handle shows where the piece
-stands on the axis: Horizontal, its heading - 0 for a piece as loaded, 90 after a clockwise quarter
-turn; a lean, its tilt from level (0 flat, signed, kept continuous between flat poses). It is a jog,
-not a pointer: pressing the rail does nothing until the pointer moves, then the piece follows the
-pointer's turn about the wheel, resting on a 45 degree tick it passes within 3. The box takes a
-reading; the - / + buttons under the wheel step 1 degree (Shift 0.1, Alt 5, hold to repeat) and so
-do the arrow keys on the wheel. The blade goes with the piece. Each wheel has its - / + directly
-under it, and under those its name and number box (the Mitre's with Square beside it). Arrow keys
-are not taken elsewhere (Cut's dials use them; one press is answered once). Real-browser check:
-`npm run rotate-dial:drive`.
+rings' own three motions (the position lock is honoured, one Undo step per drag, typed value or
+run of presses).
+
+**It spins in place, about one line.** The piece pivots about its own centre, through the plate
+where it must, and does not jump: it is not stood on the plate after every step, and not after a
+pause or when a drag is let go either. It lands on the plate when you are done with the wheel -
+another axis ticked, a click anywhere outside the card, Cut pressed, the card closed. The line it
+turns about is picked once, when you start (a lean's is the footprint's along / across line as the
+piece then lay) and held: a piece tipping over changes its footprint (a near-square one swaps its
+long side), and a line named afresh at each step turned the piece about a different axis each time.
+
+**The reading is the true turn.** Horizontal: the heading (0 for a piece as loaded, 90 after a
+clockwise quarter turn). A lean: the tilt of the piece's upright from the vertical about that line -
+0 flat as it lay when you started, 90 on its edge, 120 past it, 180 upside down, signed - not
+re-based to the nearest upright face. After an Undo or a Redo the wheel reads the pose that came
+back. The wheel is a jog, not a pointer: pressing the rail does nothing until the pointer moves,
+then the piece follows the pointer's turn about the wheel, resting on a 45 degree tick it passes
+within 3. The box takes a reading; the - / + buttons under the wheel step 1 degree (Shift 0.1, Alt 5,
+hold to repeat) and so do the arrow keys on the wheel. The blade goes with the piece. Each wheel has
+its - / + directly under it, and under those its name and number box (the Mitre's with Square beside
+it). Real-browser check: `npm run rotate-dial:drive`.
 
 Files: `nso_notch.js` (the geometry, THREE-free, `npm run notch:test`),
 `app-cut.js` (`cutBladeSpec`, `cutBuildSizedBlade`, `cutNotchAt`, the card

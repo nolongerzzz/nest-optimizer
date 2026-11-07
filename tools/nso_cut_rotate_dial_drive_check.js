@@ -19,9 +19,13 @@
      use cannot be cleared); the wheel then turns the piece about it. A lean reads the piece's tilt from level, 0 flat.
      Front/back tips it along its length (its ends go up and down), Side/side across it. The same wheel, box, - / +,
      real drag and Undo. There are no rotate rings on the card.
-   - A lean pivots the piece IN PLACE, as the rotate rings do: its centre does not rise or fall as it tips (it passes
-     through the plate where it must), it is stood on the plate once - a pause after the last step, or the release of a
-     drag - and not at every step (which lifted it and lowered it again). A drag held still keeps pivoting.  */
+   - A lean pivots the piece IN PLACE about ONE fixed line: its centre does not rise or fall as it tips (it passes through
+     the plate where it must) and it does not jump up when the wheel pauses or the drag is let go. It is stood on the plate
+     when the wheel's turn ends - another axis ticked, a click outside the card, Cut - not by a timer.
+   - A near-square piece (the spiral's shape) keeps that line all the way round: its own X stays put through 20, 50, 80,
+     110, 140 degrees (the footprint of a piece tipping over swaps its long side, which named a different axis each step).
+   - A lean reads the TRUE lean from where the piece started: 90 with the piece on its edge (not 0), 120 past it.
+   - Undo and Redo: the wheel reads the pose that came back (it kept the old number).                                  */
 
 const fs = require('fs');
 const os = require('os');
@@ -209,12 +213,14 @@ withApp(async (page, logs) => {
   await page.fill('#cut-rotate-deg', '0'); await page.press('#cut-rotate-deg', 'Tab');
   await page.waitForTimeout(100);
 
-  console.log('a lean pivots in place, through the plate');
+  console.log('a lean pivots in place, through the plate, about one line');
   {
     const box = () => page.evaluate(() => { const b = new THREE.Box3().setFromObject(state.placed[state.selectedIndex].mesh); const c = b.getCenter(new THREE.Vector3()); return { cy: c.y, cx: c.x, cz: c.z, lo: b.min.y }; });
     await page.click('#chk-cut-rot-fb');
     await page.fill('#cut-rotate-deg', '0'); await page.press('#cut-rotate-deg', 'Tab');
-    await page.waitForTimeout(900);
+    await page.waitForTimeout(300);
+    await page.click('#chk-cut-rot-h');                   // the turn in hand lands: flat on the plate
+    await page.click('#chk-cut-rot-fb');
     const flat = await box();
     check('flat on the plate: the lowest point is at the bed (about 0.2)', Math.abs(flat.lo - 0.2) < 0.05, 'lowest ' + flat.lo.toFixed(3));
     await page.fill('#cut-rotate-deg', '20'); await page.press('#cut-rotate-deg', 'Tab');
@@ -224,41 +230,97 @@ withApp(async (page, logs) => {
     check('tipping 0 -> 20 -> 50: the centre of the piece stays where it was (no rising and falling)', Math.abs(t20.cy - flat.cy) < 0.05 && Math.abs(t50.cy - flat.cy) < 0.05 && Math.abs(t50.cx - flat.cx) < 0.05,
       'centre height ' + flat.cy.toFixed(2) + ' -> ' + t20.cy.toFixed(2) + ' -> ' + t50.cy.toFixed(2));
     check('...so a 60 mm bar tipped 50 degrees goes through the plate (its low end is well under it)', t50.lo < -8, 'lowest ' + t50.lo.toFixed(2));
-    await page.waitForTimeout(900);
-    const landed = await box();
-    check('a pause after the last step: it is stood on the plate, once', Math.abs(landed.lo - 0.2) < 0.05 && landed.cy > t50.cy + 5, 'lowest ' + landed.lo.toFixed(2) + ', centre ' + t50.cy.toFixed(2) + ' -> ' + landed.cy.toFixed(2));
+    await page.waitForTimeout(1600);
+    const still = await box();
+    check('a long pause does not lift it: it stays where it was, through the plate (no timer lands it)', Math.abs(still.cy - t50.cy) < 0.05 && still.lo < -8, 'centre ' + t50.cy.toFixed(2) + ' -> ' + still.cy.toFixed(2) + ', lowest ' + still.lo.toFixed(2));
     check('...and it is still tipped 50 as the wheel reads', (await heading()) === 50, String(await heading()));
-    // a drag: held through a long pause, put down on release
+    // a drag: held through a pause, and still in place when let go
     await page.fill('#cut-rotate-deg', '0'); await page.press('#cut-rotate-deg', 'Tab');
-    await page.waitForTimeout(900);
     const d0 = await box();
     const rr = await R('cut-rotate-dial'), rad = rr.w * 0.4, at = d => [rr.cx + rad * Math.sin(d * Math.PI / 180), rr.cy - rad * Math.cos(d * Math.PI / 180)];
     let q = at(0);
     await page.mouse.move(q[0], q[1]); await page.mouse.down();
     for (let k = 1; k <= 8; k++) { q = at(40 * k / 8); await page.mouse.move(q[0], q[1]); }
-    await page.waitForTimeout(1000);                      // longer than the pause that seats a step
+    await page.waitForTimeout(1000);
     const dHeld = await box();
-    check('a drag held still for a second keeps pivoting: the centre has not moved, the low end is still through the plate', Math.abs(dHeld.cy - d0.cy) < 0.05 && dHeld.lo < -5 && (await heading()) === 40,
+    check('a drag held still for a second keeps pivoting: the centre has not moved, the low end is through the plate', Math.abs(dHeld.cy - d0.cy) < 0.05 && dHeld.lo < -5 && (await heading()) === 40,
       'centre ' + d0.cy.toFixed(2) + ' -> ' + dHeld.cy.toFixed(2) + ', lowest ' + dHeld.lo.toFixed(2));
     await page.mouse.up();
-    await page.waitForTimeout(150);
+    await page.waitForTimeout(900);
     const dDone = await box();
-    check('released, it lands on the plate at once', Math.abs(dDone.lo - 0.2) < 0.05, 'lowest ' + dDone.lo.toFixed(2));
+    check('let go, it does not jump: the centre is where it was, the low end still through the plate', Math.abs(dDone.cy - d0.cy) < 0.05 && dDone.lo < -5, 'centre ' + dDone.cy.toFixed(2) + ', lowest ' + dDone.lo.toFixed(2));
+    // it lands when the wheel's turn ends: another axis ticked
+    await page.click('#chk-cut-rot-h');
+    await page.waitForTimeout(150);
+    const landed = await box();
+    check('ticking another axis ends the turn: it is stood on the plate', Math.abs(landed.lo - 0.2) < 0.05 && landed.cy > dDone.cy + 3, 'lowest ' + landed.lo.toFixed(2) + ', centre ' + dDone.cy.toFixed(2) + ' -> ' + landed.cy.toFixed(2));
+    await page.click('#chk-cut-rot-fb');
+    // a click outside the card ends it too
+    await page.fill('#cut-rotate-deg', '70'); await page.press('#cut-rotate-deg', 'Tab');
+    const out0 = await box();
+    await page.mouse.click(700, 120);
+    await page.waitForTimeout(150);
+    const out1 = await box();
+    check('a click outside the card lands it', out0.lo < -5 && Math.abs(out1.lo - 0.2) < 0.05, 'lowest ' + out0.lo.toFixed(2) + ' -> ' + out1.lo.toFixed(2));
+    await page.evaluate(id => selectPlaced(state.placed.findIndex(p => p && p.sourceId === id)), id);
     // Undo gives the whole lean back, seated
     await page.click('#btn-undo');
     await page.waitForTimeout(250);
     const u = await box();
-    check('one Undo takes the drag back: level, on the plate', (await heading()) === 0 && Math.abs(u.lo - 0.2) < 0.06, 'reading ' + (await heading()) + ', lowest ' + u.lo.toFixed(2));
-    // pressing Cut with a turn still in hand lands it first
-    await page.fill('#cut-rotate-deg', '30'); await page.press('#cut-rotate-deg', 'Tab');
-    const mid = await box();
-    await page.evaluate(() => nsoRotate.seatNow());
-    await page.waitForTimeout(100);
-    const after = await box();
-    check('seatNow lands a turn in hand on the plate', mid.lo < -2 && Math.abs(after.lo - 0.2) < 0.05, 'lowest ' + mid.lo.toFixed(2) + ' -> ' + after.lo.toFixed(2));
+    check('one Undo takes the typed 70 back to the 40 before it, seated on the plate', Math.abs(u.lo - 0.2) < 0.06, 'lowest ' + u.lo.toFixed(2));
+    check('...and the WHEEL reads the pose that came back, 40 (it kept the old 70)', (await heading()) === 40 && (await page.inputValue('#cut-rotate-deg')) === '40' && /rotate\(40 /.test(await page.evaluate(() => document.getElementById('cut-rotate-turn').getAttribute('transform'))),
+      'reading ' + (await heading()) + ', box ' + (await page.inputValue('#cut-rotate-deg')));
+    await page.click('#btn-redo');
+    await page.waitForTimeout(250);
+    const rd = await axesOf();
+    check('Redo puts the 70 degree lean back (Redo closes and reopens the Cut tool, as it does for every helper, so the card starts again)', Math.abs(Math.acos(Math.min(1, rd.y[1])) * 180 / Math.PI - 70) < 0.8, 'own Y is ' + (Math.acos(Math.min(1, rd.y[1])) * 180 / Math.PI).toFixed(1) + ' from upright');
+    await page.click('#btn-undo');
+    await page.waitForTimeout(200);
+    await page.click('#chk-cut-rot-fb');
     await page.fill('#cut-rotate-deg', '0'); await page.press('#cut-rotate-deg', 'Tab');
-    await page.waitForTimeout(900);
+    await page.waitForTimeout(100);
+    // the reading is the TRUE lean, through the piece standing on its edge and past it
+    await page.fill('#cut-rotate-deg', '90'); await page.press('#cut-rotate-deg', 'Tab');
+    check('a lean of 90 (on its edge) reads 90, not 0', (await heading()) === 90, String(await heading()));
+    await page.fill('#cut-rotate-deg', '120'); await page.press('#cut-rotate-deg', 'Tab');
+    const ax120 = await axesOf();
+    check('past it, 120 reads 120, and the piece really is tipped 120 (60 the other side of upright)', (await heading()) === 120 && Math.abs(Math.acos(ax120.y[1]) * 180 / Math.PI - 120) < 0.8, JSON.stringify({ reading: await heading(), yUp: ax120.y.map(v => +v.toFixed(3)) }));
+    await dragDial(0, -30, 6);
+    check('a real drag carries on from there (120 - 30)', Math.abs((await heading()) - 90) < 1.5 || Math.abs((await heading()) - 90) < 4, String(await heading()));
+    await page.fill('#cut-rotate-deg', '0'); await page.press('#cut-rotate-deg', 'Tab');
     await page.click('#chk-cut-rot-h');
+    await page.waitForTimeout(150);
+    check('level again, on the plate', Math.abs((await box()).lo - 0.2) < 0.06);
+  }
+
+  console.log('a near-square piece keeps one axis the whole way round');
+  {
+    await page.evaluate(() => { if (typeof clearPlateOnly === 'function') clearPlateOnly(); });
+    const sid = await loadSTL(page, stl('square.stl', box(40, 40, 6)));
+    await page.evaluate(id => selectPlaced(state.placed.findIndex(p => p && p.sourceId === id)), sid);
+    await page.waitForTimeout(150);
+    await page.click('#chk-cut-rot-fb');
+    const ownX = () => page.evaluate(() => { const m = state.placed[state.selectedIndex].mesh; m.updateMatrixWorld(true); return new THREE.Vector3(1, 0, 0).applyQuaternion(m.quaternion).toArray(); });
+    const x0 = await ownX();
+    let worst = 0, centre = null, driftC = 0;
+    for (const v of [20, 50, 80, 110, 140, 170]) {
+      await page.fill('#cut-rotate-deg', String(v)); await page.press('#cut-rotate-deg', 'Tab');
+      const xx = await ownX();
+      worst = Math.max(worst, Math.acos(Math.min(1, Math.abs(xx[0] * x0[0] + xx[1] * x0[1] + xx[2] * x0[2]))) * 180 / Math.PI);
+      const c = await page.evaluate(() => new THREE.Box3().setFromObject(state.placed[state.selectedIndex].mesh).getCenter(new THREE.Vector3()).toArray());
+      if (centre) driftC = Math.max(driftC, Math.hypot(c[0] - centre[0], c[1] - centre[1], c[2] - centre[2])); else centre = c;
+    }
+    check('through 20, 50, 80, 110, 140, 170 the piece\'s own X never leaves its line (one axis, one way)', worst < 0.6, 'worst ' + worst.toFixed(2) + ' deg off');
+    check('...and its centre never moves (in place)', driftC < 0.05, driftC.toFixed(3) + ' mm');
+    check('...and the reading is the lean it was given', (await heading()) === 170, String(await heading()));
+    // the buttons too: 30 presses of + from level
+    await page.fill('#cut-rotate-deg', '0'); await page.press('#cut-rotate-deg', 'Tab');
+    for (let k = 0; k < 40; k++) await page.click('#btn-cut-rotate-plus');
+    const xx2 = await ownX();
+    check('40 presses of + (a 40 degree lean) never leave the line either', Math.acos(Math.min(1, Math.abs(xx2[0] * x0[0] + xx2[1] * x0[1] + xx2[2] * x0[2]))) * 180 / Math.PI < 0.6 && (await heading()) === 40, 'reading ' + (await heading()));
+    await page.fill('#cut-rotate-deg', '0'); await page.press('#cut-rotate-deg', 'Tab');
+    await page.click('#chk-cut-rot-h');
+    await page.waitForTimeout(150);
   }
 
   console.log('a locked piece');
