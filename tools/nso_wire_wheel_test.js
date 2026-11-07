@@ -637,6 +637,91 @@ withApp(async (page, logs) => {
   await setSlider('rng-wheel-rim', 0);
   }
 
+  console.log('\n=== 10c. the white edge stays on while the sliders move, and on the shape you are seeing ===');
+  {
+    const drag = (id, v) => page.evaluate(([i, x]) => {
+      const e = document.getElementById(i); e.value = String(x); e.dispatchEvent(new Event('input', { bubbles: true }));
+    }, [id, v]);
+    const release = id => page.evaluate(i => document.getElementById(i).dispatchEvent(new Event('change', { bubbles: true })), id);
+    const idle = () => page.waitForFunction(() => !document.getElementById('wheel-readout').textContent.startsWith('Preview'), null, { timeout: 15000 });
+    const waitPreview = () => page.waitForFunction(() => document.getElementById('wheel-readout').textContent.startsWith('Preview'), null, { timeout: 15000 });
+    /* what the viewport has on the wheel's piece: how many white edges, whether the edge IS this geometry's, and how tall it is */
+    const edge = () => page.evaluate(() => {
+      const m = NSO_wheelModel(), e = state.placed.find(p => p.sourceId === m.id), mesh = e.mesh;
+      const lines = mesh.children.filter(c => c.name === 'selOutline');
+      const ln = lines[0];
+      let h = null, mine = false;
+      if (ln) {
+        ln.geometry.computeBoundingBox(); h = ln.geometry.boundingBox.max.y - ln.geometry.boundingBox.min.y;
+        const k = ln.userData.nsoEdgesOf; mine = !!k && k.uuid === mesh.geometry.uuid;
+      }
+      mesh.geometry.computeBoundingBox();
+      return { n: lines.length, visible: !!ln && ln.visible, mine, h, shown: mesh.geometry.boundingBox.max.y - mesh.geometry.boundingBox.min.y,
+               selected: state.placed[state.selectedIndex] === e };
+    });
+
+    await page.evaluate(() => { document.getElementById('rng-wheel-scale').value = '25'; });
+    await page.click('#btn-wheel-ball');
+    await page.waitForFunction(() => /Dropped Wheel \d+/.test(document.getElementById('status').textContent), null, { timeout: 30000 });
+    await page.waitForTimeout(400);
+    let e = await edge();
+    check('a fresh ball wears exactly one white edge, and it is the ball\'s', e.n === 1 && e.mine && e.selected, JSON.stringify(e));
+
+    /* DRAG: the edge follows the preview */
+    await drag('rng-wheel-flat', 20); await waitPreview();
+    e = await edge();
+    check('dragging Thick: one white edge, on the PRESSED shape - 20 mm tall like the piece you see',
+      e.n === 1 && e.mine && Math.abs(e.h - 20) < 0.1 && Math.abs(e.shown - 20) < 0.1, JSON.stringify(e));
+    await drag('rng-wheel-flat', 8); await page.waitForTimeout(500);
+    e = await edge();
+    check('...and keeps following as the slider keeps moving (now 8 mm)', e.n === 1 && e.mine && Math.abs(e.h - 8) < 0.1, JSON.stringify(e));
+
+    /* RELEASE: the commit rebuilds the mesh - the edge must come back with it */
+    await release('rng-wheel-flat'); await idle(); await page.waitForTimeout(300);
+    e = await edge();
+    check('letting go: the piece is rebuilt and the white edge is still on it (it used to go off here)',
+      e.n === 1 && e.mine && Math.abs(e.h - 8) < 0.1, JSON.stringify(e));
+
+    /* the same, over and over, on different sliders */
+    let always = true, detail = [];
+    for (const [id, v] of [['rng-wheel-depth', 2], ['rng-wheel-pull-dr', 4], ['rng-wheel-soft', 40], ['rng-wheel-trim', 1], ['rng-wheel-scale', 30], ['rng-wheel-flat', 12]]) {
+      await drag(id, v); await waitPreview(); await page.waitForTimeout(200);
+      const during = await edge();
+      await release(id); await idle(); await page.waitForTimeout(250);
+      const after = await edge();
+      const ok = during.n === 1 && during.mine && after.n === 1 && after.mine && Math.abs(after.h - after.shown) < 0.1;
+      if (!ok) always = false;
+      detail.push(id.replace('rng-wheel-', '') + ':' + (ok ? 'on' : 'OFF ' + JSON.stringify([during, after])));
+    }
+    check('on every slider, during the drag and after the release: exactly one white edge, the piece\'s own',
+      always, detail.join('  '));
+
+    /* ESCAPE: the original shape's edge is back */
+    const before = await edge();
+    await drag('rng-wheel-flat', 5); await waitPreview();
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => !/Preview/.test(document.getElementById('wheel-readout').textContent), null, { timeout: 5000 });
+    await page.waitForTimeout(250);
+    e = await edge();
+    check('Escape puts the piece back and its white edge with it', e.n === 1 && e.mine && Math.abs(e.h - before.h) < 0.1, JSON.stringify(e));
+
+    /* UNDO */
+    await page.click('#btn-undo');
+    await page.waitForTimeout(600);
+    e = await edge();
+    check('Undo keeps the white edge on too', e.n === 1 && e.mine, JSON.stringify(e));
+
+    /* ANOTHER PIECE SELECTED: touching a slider selects the wheel's piece, and it wears the edge */
+    const other = await loadSTL(page, fx('box-20mm.stl'));
+    await selectModel(page, other);
+    await page.evaluate(i => { const idx = state.placed.findIndex(p => p.sourceId === i); selectPlaced(idx); }, other);
+    check('(a box is selected now, not the wheel\'s piece)', !(await edge()).selected);
+    await drag('rng-wheel-flat', 15); await waitPreview(); await page.waitForTimeout(200);
+    e = await edge();
+    check('moving a slider selects the wheel\'s own piece, and that piece has the white edge', e.selected && e.n === 1 && e.mine, JSON.stringify(e));
+    await release('rng-wheel-flat'); await idle();
+  }
+
   console.log('\n=== 11. nothing else on the page broke ===');
   const errs = logs.filter(l => l.startsWith('[pageerror]'));
   check('no uncaught page errors', errs.length === 0, errs.join(' | '));

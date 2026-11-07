@@ -530,6 +530,31 @@ control. Open's cavity is as wide as W allows, so a narrow mouth needs a "mouth"
 control. The ghost the previous version drew for Pull is gone — the piece itself now
 answers every slider — and is the right shape to bring back for dragging on the piece.
 
+### The white edge
+
+The selected piece wears a white edge (`app-sel-outline.js`). It used to come and go while
+the sliders moved, for two reasons:
+
+- **A commit threw it away.** The edge is a child of the piece's mesh; every release
+  rebuilt the mesh and nothing redrew it until the piece was selected again. And while
+  dragging, the preview swapped the geometry but left the old shape's edge hanging.
+  Now the preview redraws it for the previewed shape (and restores the original's on
+  Escape or release), the commit redraws it on the new mesh, Undo keeps it, and touching a
+  slider selects the wheel's own piece so it is the one wearing it.
+- **A smooth piece has no edge to draw.** The house rule is "an edge where two triangles
+  meet at more than 15 degrees", and a thrown ball, a pressed disc or a rounded bowl has
+  none. So the edge was on for a creased shape (a cavity floor, a rim) and absent for a
+  smooth one, whatever the sliders did.
+
+A revolved piece knows its own profile, so its helper is drawn from that
+(`NSO_wheelGuideLines`, section 7h): rings at every crease of the profile and at both ends
+of each wall, a few evenly spaced along the smooth stretches so a curve reads as a curve,
+and eight meridian lines up the outside and down the inside. It reaches the house outline
+through one optional hook — a geometry may carry `userData.nsoEdges(g)` returning its own
+line segments (`NSO_wheelWear`) — so the cache, selection and Undo are the house path. The
+lines are cheap (a few ms), so they are rebuilt on every frame of a drag. How many rings
+and meridians is three constants (`NSO_WHEEL_GUIDE_*`).
+
 ## Direction
 
 Agreed with the owner while this tool was being shaped. Not all of it is built;

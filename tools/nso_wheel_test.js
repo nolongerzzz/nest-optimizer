@@ -1143,6 +1143,53 @@ console.log('\n== 7e. the recipe: every slider live, every limit a clamp, the cl
   check('a whole rebuild (ball, press, open, pull) is fast enough for a live drag', per < 250, per.toFixed(0) + ' ms each');
 }
 
+/* =====================================================================
+   7f. The white edge: drawn from the profile, so a smooth piece has one too
+   ===================================================================== */
+console.log('\n== 7f. the white edge helper: rings and meridians from the piece\'s own profile ==');
+{
+  const R0 = () => W.NSO_wheelNewRecipe({});
+  const frame = { cx: 0, cz: 0, y0: 0 };
+  const lines = p => W.NSO_wheelGuideLines(p, frame);
+  const bbox = a => {
+    const b = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
+    for (let i = 0; i < a.length; i += 3) for (let k = 0; k < 3; k++) { b.min[k] = Math.min(b.min[k], a[i + k]); b.max[k] = Math.max(b.max[k], a[i + k]); }
+    return b;
+  };
+  const ball = W.NSO_wheelBuild(R0()).piece;
+  const gb = lines(ball), bb = bbox(gb);
+  check('a SMOOTH ball has white edge lines (the 15-degree crease rule finds none on it)', gb.length > 0 && gb.length % 6 === 0, gb.length / 6 + ' segments');
+  check('...they span the whole ball: 50 mm tall, 50 mm across',
+    Math.abs((bb.max[1] - bb.min[1]) - 50) < 1e-6 && Math.abs((bb.max[0] - bb.min[0]) - 50) < 0.05,
+    (bb.max[1] - bb.min[1]).toFixed(2) + ' x ' + (bb.max[0] - bb.min[0]).toFixed(2));
+  const r2 = R0(); r2.thick = 20; r2.depth = 5;
+  const bowl = W.NSO_wheelBuild(r2).piece;
+  const bw = bbox(lines(bowl));
+  check('a pressed, opened piece: lines span its height and its widest diameter (to float32)',
+    Math.abs((bw.max[1] - bw.min[1]) - span(bowl)) < 1e-3 && Math.abs((bw.max[0] - bw.min[0]) - 2 * rMax(bowl)) < 0.1);
+  const r3 = R0(); r3.thick = 3;
+  const disc = W.NSO_wheelBuild(r3).piece;
+  check('a flat disc has them too (nothing about it is sharper than 15 degrees but its faces)', lines(disc).length > 0 &&
+    Math.abs(bbox(lines(disc)).max[1] - 3) < 1e-6);
+  const gOpen = lines(bowl), gNone = lines(W.NSO_wheelBuild(R0()).piece);
+  check('an opened piece draws the inside as well as the outside: more lines than the same piece shut',
+    gOpen.length > lines(W.NSO_wheelBuild((() => { const r = R0(); r.thick = 20; return r; })()).piece).length);
+  const shifted = W.NSO_wheelGuideLines(bowl, { cx: 3, cz: -2, y0: 7 }), bs = bbox(shifted);
+  check('the frame places them: centred where the geometry is, sitting on its bottom',
+    Math.abs(bs.min[1] - 7) < 1e-9 && Math.abs((bs.min[0] + bs.max[0]) / 2 - 3) < 0.05 && Math.abs((bs.min[2] + bs.max[2]) / 2 + 2) < 0.05);
+  check('they are cheap enough to rebuild on every frame of a drag', (() => {
+    const t0 = Date.now(); for (let i = 0; i < 50; i++) lines(bowl); return (Date.now() - t0) / 50 < 20;
+  })());
+  /* every point lies on the piece: radius within the profile's own range at that height */
+  let onPiece = true;
+  for (let i = 0; i < gOpen.length; i += 3) {
+    const r = Math.hypot(gOpen[i], gOpen[i + 2]), z = gOpen[i + 1] + bowl.outer[0].z;
+    const lo = Math.min(W.NSO_wheelRadiusAt(bowl.outer, z), bowl.inner ? W.NSO_wheelRadiusAt(bowl.inner, z) : 1e9);
+    if (r > rMax(bowl) + 1e-6 || r < -1e-6) { onPiece = false; break; }
+  }
+  check('...and none of them wanders outside the piece\'s own radius', onPiece);
+}
+
 console.log('\n== 8. what this first version does not do, and says so ==');
 {
   const src = fs.readFileSync(path.join(ROOT, 'app-wheel.js'), 'utf8');

@@ -1768,6 +1768,98 @@ function NSO_wheelBuild(recipe) {
   return { ok: true, piece: piece, notes: notes, ranges: R, ball: ballReason };
 }
 
+/* ------------------------------------------------------------ 7h. THE WHITE EDGE
+   The selected piece wears a white edge (app-sel-outline.js) built from the angles
+   between its triangles, and a smooth piece has none sharper than 15 degrees - a
+   thrown ball, a pressed disc, a rounded bowl have NOTHING to draw, which is why the
+   edge came and went as the sliders moved the shape between creased and smooth. A
+   revolved piece knows its own profile, so the helper is drawn from that instead:
+
+     rings       at every crease of the profile (a turn of more than 9 degrees), at
+                 both ends of each wall, and a few evenly spaced along the smooth
+                 parts, so a curve reads as a curve
+     meridians   eight lines round the piece (every 45 degrees), up the outside and
+                 down the inside
+
+   in the geometry's own frame: x, z about its centre, y up from its bottom. `frame`
+   is { cx, cz, y0 } - the display geometry's bounding box. Pure, so it is tested. */
+var NSO_WHEEL_GUIDE_TURN = 9;      // degrees: a corner of the profile
+var NSO_WHEEL_GUIDE_SMOOTH = 5;    // evenly spaced rings on the smooth stretches
+var NSO_WHEEL_GUIDE_MERIDIANS = 8;
+
+function NSO_wheelGuideLines(piece, frame) {
+  var n = Math.max(12, piece.segments || NSO_WHEEL_SEGMENTS);
+  var zLo = NSO_wheelSpan(piece.outer).lo;
+  var out = [];
+  function pt(r, z, k) {
+    var th = 2 * Math.PI * k / n;
+    return [frame.cx + r * Math.cos(th), frame.y0 + (z - zLo), frame.cz - r * Math.sin(th)];
+  }
+  function seg(a, b) { out.push(a[0], a[1], a[2], b[0], b[1], b[2]); }
+  function ring(r, z) {
+    if (!(r > 1e-6)) return;
+    for (var k = 0; k < n; k++) seg(pt(r, z, k), pt(r, z, (k + 1) % n));
+  }
+  function meridian(chain, k) {
+    for (var i = 0; i + 1 < chain.length; i++) {
+      var a = chain[i], b = chain[i + 1];
+      if (a.r < 1e-9 && b.r < 1e-9) continue;
+      seg(pt(a.r, a.z, k), pt(b.r, b.z, k));
+    }
+  }
+  var chains = [piece.outer];
+  if (piece.inner && piece.inner.length > 1) chains.push(piece.inner);
+
+  chains.forEach(function (chain) {
+    if (!chain || chain.length < 2) return;
+    var want = {}, i;
+    want[0] = true; want[chain.length - 1] = true;
+    /* creases: where the direction of the profile turns */
+    for (i = 1; i + 1 < chain.length; i++) {
+      var ax = chain[i].r - chain[i - 1].r, az = chain[i].z - chain[i - 1].z;
+      var bx = chain[i + 1].r - chain[i].r, bz = chain[i + 1].z - chain[i].z;
+      var la = Math.hypot(ax, az), lb = Math.hypot(bx, bz);
+      if (la < 1e-9 || lb < 1e-9) continue;
+      var c = (ax * bx + az * bz) / (la * lb);
+      if (Math.acos(Math.max(-1, Math.min(1, c))) * 180 / Math.PI > NSO_WHEEL_GUIDE_TURN) want[i] = true;
+    }
+    /* a few evenly spaced along the length, so a smooth curve still shows its shape */
+    var cum = [0];
+    for (i = 1; i < chain.length; i++) cum.push(cum[i - 1] + Math.hypot(chain[i].r - chain[i - 1].r, chain[i].z - chain[i - 1].z));
+    var L = cum[cum.length - 1];
+    if (L > 1e-9) {
+      for (var j = 1; j <= NSO_WHEEL_GUIDE_SMOOTH; j++) {
+        var target = L * j / (NSO_WHEEL_GUIDE_SMOOTH + 1), best = 1;
+        for (i = 1; i + 1 < chain.length; i++) if (Math.abs(cum[i] - target) < Math.abs(cum[best] - target)) best = i;
+        want[best] = true;
+      }
+    }
+    var lastR = -1, lastZ = -1;
+    Object.keys(want).map(Number).sort(function (p, q) { return p - q; }).forEach(function (idx) {
+      var q = chain[idx];
+      if (Math.abs(q.r - lastR) < 1e-6 && Math.abs(q.z - lastZ) < 1e-6) return;   // the same ring twice
+      ring(q.r, q.z); lastR = q.r; lastZ = q.z;
+    });
+  });
+  var step = n / NSO_WHEEL_GUIDE_MERIDIANS;
+  for (var m = 0; m < NSO_WHEEL_GUIDE_MERIDIANS; m++) {
+    var k = Math.round(m * step);
+    chains.forEach(function (chain) { meridian(chain, k); });
+  }
+  return new Float32Array(out);
+}
+
+/* Make a geometry wear this piece's guide lines (the hook app-sel-outline.js reads). */
+function NSO_wheelWear(geo, piece) {
+  if (!geo || !piece) return;
+  geo.userData = geo.userData || {};
+  geo.userData.nsoEdges = function (g) {
+    if (!g.boundingBox) g.computeBoundingBox();
+    var bb = g.boundingBox;
+    return NSO_wheelGuideLines(piece, { cx: (bb.min.x + bb.max.x) / 2, cz: (bb.min.z + bb.max.z) / 2, y0: bb.min.y });
+  };
+}
+
 /* =====================================================================
    8. App wiring
 
@@ -1797,8 +1889,40 @@ function NSO_wheelPaintOk(m, what) {
 }
 
 function NSO_wheelCommit(m, working, statusText) {
-  if (typeof NSO_sculptCommitRaw === 'function') return NSO_sculptCommitRaw(m, working, 'wheelReplace', statusText);
-  return false;
+  if (typeof NSO_sculptCommitRaw !== 'function') return false;
+  var done = NSO_sculptCommitRaw(m, working, 'wheelReplace', statusText);
+  /* The commit throws the piece's mesh away and builds a new one, and the white
+     edge on the selected piece is a child of the OLD mesh - so without this it
+     went off at every release until the piece was selected again. */
+  if (done !== false) NSO_wheelOutline(m);
+  return done;
+}
+
+/* Put the selected piece's white edge back on whatever geometry its mesh wears now,
+   drawn from the piece's own profile (section 7h) - on a smooth piece the house
+   crease rule has nothing to draw. `piece` defaults to the wheel's. Forces a rebuild
+   when the geometry already carried an outline (one made before it wore its lines). */
+function NSO_wheelOutline(m, piece) {
+  if (typeof refreshOutline !== 'function' || typeof state === 'undefined' || !state || !state.placed || !m) return;
+  piece = piece || NSO_wheelSession;
+  for (var i = 0; i < state.placed.length; i++) {
+    var e = state.placed[i];
+    if (!e || e.sourceId !== m.id) continue;
+    var g = e.mesh && e.mesh.geometry;
+    if (g && piece) {
+      var had = g.userData && typeof g.userData.nsoEdges === 'function';
+      NSO_wheelWear(g, piece);
+      if (!had && e.outline) {
+        if (e.outline.parent) e.outline.parent.remove(e.outline);
+        if (e.outline.geometry) e.outline.geometry.dispose();
+        if (e.outline.material) e.outline.material.dispose();
+        e.outline = null;
+        if (typeof NSO_Outline !== 'undefined' && NSO_Outline.forget) NSO_Outline.forget(g);
+      }
+    }
+    refreshOutline(e);
+    return;
+  }
 }
 
 /* The live session. One thrown piece at a time, held here rather than on the
@@ -1955,6 +2079,7 @@ function NSO_wheelThrow(opts, head) {
   NSO_wheelSession = b.piece;
   NSO_wheelHome = { modelId: d.modelId, name: d.name, recipe: recipe,
                     history: [{ piece: b.piece, soup: d.model.rawTris, recipe: recipe }] };
+  NSO_wheelOutline(d.model, b.piece);     // the ball was selected on its way in, before it wore its own lines
   var line = NSO_wheelStatus(b.piece, 'Dropped ' + d.name + ' - ' + (b.ball || head || 'Ball'));
   if (b.notes.length) line += ' - ' + b.notes.join('; ');
   if (!d.onBed) line += ' - the plate has no free room left, it sits past the edge';

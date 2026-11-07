@@ -96,8 +96,12 @@
     LIVE = null;
     draft = null;
     if (!L) return;
-    if (L.mesh && L.geo && L.mesh.geometry === L.geo && L.origGeo) L.mesh.geometry = L.origGeo;
+    var restored = false;
+    if (L.mesh && L.geo && L.mesh.geometry === L.geo && L.origGeo) { L.mesh.geometry = L.origGeo; restored = true; }
     if (L.geo) L.geo.dispose();
+    /* The white edge follows the geometry: put it back on the original (the house
+       edge cache has it, so this is a lookup, not a rebuild). */
+    if (restored && L.entry && typeof refreshOutline === 'function') refreshOutline(L.entry);
   }
 
   /* The throwaway geometry for a piece of the wheel, with its bottom where the
@@ -117,12 +121,18 @@
     var e = entryOf(m);
     if (!e || !e.mesh) return false;
     if (LIVE && LIVE.mesh !== e.mesh) { var keep = draft; end(); draft = keep; }
-    if (!LIVE) LIVE = { mesh: e.mesh, origGeo: e.mesh.geometry, geo: null, origH: m.size.y };
+    if (!LIVE) LIVE = { mesh: e.mesh, entry: e, origGeo: e.mesh.geometry, geo: null, origH: m.size.y };
     var geo = previewGeometry(piece, LIVE.origH);
     var old = LIVE.geo;
+    NSO_wheelWear(geo, piece);          // the white edge is drawn from the piece's own profile
     LIVE.mesh.geometry = geo;
     LIVE.geo = geo;
     if (old) old.dispose();
+    /* THE WHITE EDGE STAYS ON, AND ON THE SHAPE YOU ARE SEEING. It is a child
+       line built from the mesh's geometry, so a swapped geometry used to leave the
+       old piece's edge hanging there; the house refreshOutline rebuilds it for the
+       preview (and caches it on the throwaway geometry). */
+    if (typeof refreshOutline === 'function') refreshOutline(e);
     return true;
   }
 
@@ -226,6 +236,7 @@
       m = sync.model;
       var paint = (typeof nsoMaskCount === 'function') ? nsoMaskCount(m) : 0;
       if (paint > 0) { readout('Pottery Wheel stood down - ' + paint + ' painted face(s). Clear paint to throw.', true); return; }
+      NSO_wheelSelect(m);          // the sliders act on the wheel's piece: it is the selected one, so it wears the white edge
     }
     var b = NSO_wheelBuild(r);
     if (!b.ok) { readout(b.reason, true); return; }
@@ -296,6 +307,7 @@
     /* Undo, or another tool, moved the piece under the wheel. */
     if (NSO_wheelHome) NSO_wheelSync();
     var m2 = NSO_wheelHome ? NSO_wheelModel() : null;
+    if (m2) NSO_wheelOutline(m2);       // keep the white edge on whatever the piece is now
     seen = { home: NSO_wheelHome, raw: m2 ? m2.rawTris : null };
     refresh();
   }

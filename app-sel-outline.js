@@ -59,6 +59,7 @@
   function useWorker(g, now) {
     const pos = positionOf(g);
     if (!pos || g.index) return false;
+    if (g.userData && typeof g.userData.nsoEdges === 'function') return false;    // its own lines are cheap: no worker
     if (!(window.NSO_Work && window.NSO_Edges && window.NSO_Work.canRun(['nso_edges.js']))) return false;
     const tris = pos.count / 3;
     return tris >= (now ? (window.NSO_BVH ? window.NSO_BVH.BIG_TRIS : Infinity) : OUTLINE_WORKER_TRIS);
@@ -85,10 +86,24 @@
     p.outline = line;
   }
 
+  /* A geometry may bring its OWN edge lines: `g.userData.nsoEdges(g)` returns a Float32Array of line segments in the
+     geometry's own frame. The 15-degree crease rule finds nothing at all on a smooth piece (a thrown ball, disc or
+     bowl has no edge sharper than that), which left the selected piece with no white edge exactly when it was most
+     needed; the Pottery Wheel (app-wheel.js, NSO_wheelGuideLines) draws its profile's own rings and meridians instead.
+     Everything else - the cache, selection, Undo - is the house path, unchanged. A function on userData is copied by
+     reference when a geometry is cloned, so an Undo's restored geometry keeps it. */
   function buildHere(g) {
-    const eg = new THREE.EdgesGeometry(g, 15);
-    const edges = eg.attributes.position.array;
-    eg.dispose();
+    let edges = null;
+    const own = g && g.userData && g.userData.nsoEdges;           // the geometry's own lines, if it brings them
+    if (typeof own === 'function') {
+      try { const e = own(g); if (e && e.length) edges = e; }
+      catch (err) { console.warn('refreshOutline: the geometry\'s own edges failed', err); }
+    }
+    if (!edges) {
+      const eg = new THREE.EdgesGeometry(g, 15);
+      edges = eg.attributes.position.array;
+      eg.dispose();
+    }
     cachePut(g, edges);
     return edges;
   }
@@ -178,6 +193,7 @@
   window.NSO_Outline = {
     WORKER_TRIS: OUTLINE_WORKER_TRIS,
     cached: function (g) { return !!cacheGet(g); },
+    forget: function (g) { edgeCache.delete(g); },
     forgetAll: function () { edgeCache = new WeakMap(); }
   };
 
