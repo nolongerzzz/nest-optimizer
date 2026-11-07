@@ -128,7 +128,7 @@ withApp(async (page, logs) => {
     document.getElementById('btn-cut-blade-sized').click();
     const set = (id, v) => { const e = document.getElementById(id); e.value = String(v); e.dispatchEvent(new Event('input')); e.dispatchEvent(new Event('change')); };
     set('cut-blade-width', w); set('cut-blade-depth', d); set('cut-blade-kerf', k);
-    const c = document.getElementById('chk-cut-blade-strand'); c.checked = !!strand; c.dispatchEvent(new Event('change'));
+    cutBladeState().strand = !!strand; cutBladeRefresh();      // the card's one box is Follow strand now; the isolation alone is driven here
   }, [w, d, k, strand]);
   const setNotch = (w, d) => page.evaluate(([w, d]) => {
     document.getElementById('btn-cut-blade-notch').click();

@@ -14,7 +14,13 @@
      blade is on the cord 2.5 mm further on, and the pieces between the cuts are slices of the slice's thickness.
    - Every piece is a closed solid (0 open / 0 non-manifold edges); what came out is the kerf and no more.
    - At the cord's end the next Cut is the last: the card says so and nothing is left to move on to.
-   - Back onto a place already cut is refused, not jumped to another turn of the spiral.                   */
+   - Back onto a place already cut is refused, not jumped to another turn of the spiral.
+   - ONE box: Follow strand is also "take only the strand under the blade"; there is no separate Single strand.
+   - Sliding: the position slider, its number box, the nudge buttons and a drag in the viewport (on the blade, or
+     pressed on the cord) slide the blade ALONG THE CORD - square to it all the way - through the stretch traced when
+     it was put down: a quarter turn each way. Held, it is not put down under the hand; let go and it is, with a new
+     stretch centred on it, so a second drag goes on another quarter turn. After cuts the slide crosses the kerfs
+     onto the pieces beyond, and never stops in a gap.                                                  */
 
 const fs = require('fs');
 const os = require('os');
@@ -112,6 +118,21 @@ window.__sectionArea = function (c, n) {
   L.forEach(l => { const d = Math.hypot(l.c[0] - c[0], l.c[1] - c[1], l.c[2] - c[2]); if (d < bd) { bd = d; best = l; } });
   return best ? { area: best.area, off: bd } : null;
 };
+window.__win = function () {
+  const fa = state.cutFollowAt, w = fa && fa.win, sl = document.getElementById('cut-slider');
+  return w ? { cur: w.cur, sMin: w.sMin, sMax: w.sMax, len: w.sMax - w.sMin, c: fa.c, t: fa.t, hTop: fa.hTop, slider: [Number(sl.min), Number(sl.max), Number(sl.value)],
+               box: Number(document.getElementById('cut-mm').value), editId: state.editId, samples: w.samples.length } : null;
+};
+/* A world point on the cord centre line, ds mm along the window from where the blade is, and where it shows. */
+window.__ahead = function (ds, lift) {
+  const w = state.cutFollowAt.win, smp = cutFollowSampleAt(w, w.cur + ds);
+  const p = new THREE.Vector3(smp.c[0], smp.c[1] + (lift || 0), smp.c[2]).project(state.camera), r = state.renderer.domElement.getBoundingClientRect();
+  return { c: smp.c, x: r.left + (p.x + 1) / 2 * r.width, y: r.top + (1 - p.y) / 2 * r.height };
+};
+window.__bladePx = function () {
+  const b = __blade(), p = new THREE.Vector3(b.centre[0], b.centre[1], b.centre[2]).project(state.camera), r = state.renderer.domElement.getBoundingClientRect();
+  return { x: r.left + (p.x + 1) / 2 * r.width, y: r.top + (1 - p.y) / 2 * r.height };
+};
 window.__pieceVolumes = function () {
   return state.models.map(m => ({ id: m.id, vol: window.__probe(m.id).vol }));
 };
@@ -135,6 +156,7 @@ withApp(async (page, logs) => {
   const clickAt = async wp => { const xy = await xyOf(wp); await page.mouse.move(xy[0], xy[1]); await page.mouse.down(); await page.mouse.up(); };
   const waitStatus = re => page.waitForFunction(s => new RegExp(s).test(document.getElementById('status').textContent), re.source, { timeout: 60000 });
   const blade = () => page.evaluate(() => __blade());
+  const R = id_ => page.evaluate(i => { const r = document.getElementById(i).getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height, cx: r.left + r.width / 2, cy: r.top + r.height / 2, r: r.right, b: r.bottom }; }, id_);
   const follow = () => page.evaluate(() => state.cutFollowAt && { c: state.cutFollowAt.c, t: state.cutFollowAt.t, next: !!state.cutFollowAt.next, prev: !!state.cutFollowAt.prev });
   const models = () => page.evaluate(() => state.models.length);
 
@@ -236,6 +258,125 @@ withApp(async (page, logs) => {
   // placing there directly (as an old click would) is refused too
   const refusedPlace = await page.evaluate(c => cutFollowPlace(c, state.cutFollowAt.t, 'test', true), centres[centres.length - 1]);
   check('placing the blade in a kerf already cut is refused', refusedPlace && refusedPlace.ok === false, JSON.stringify(refusedPlace));
+
+  console.log('slide across the pieces the cuts leave');
+  {
+    const win0 = await page.evaluate(() => __win());
+    check('the window is there after the cuts', !!win0 && win0.len > 8, win0 ? win0.len.toFixed(1) + ' mm' : 'none');
+    // a sweep through the whole window: at every stop the blade's plane cuts a whole round section of the cord (so it is on
+    // the cord, in no kerf, and square to it: an oblique plane cuts a longer outline) and faces the way the window says
+    const sweep = await page.evaluate(POLY => {
+      const w = state.cutFollowAt.win, out = { n: 0, partial: 0, worstArea: 0, worstAim: 0, pieces: new Set(), bad: [] };
+      for (let v = 0; v <= w.sMax - w.sMin + 1e-9; v += 1.1) {
+        cutFollowScrubMm(v); out.n++;
+        const b = __blade(), sec = __sectionArea(b.centre, b.normal), smp = cutFollowSampleAt(w, w.cur);
+        const ratio = sec ? sec.area / POLY : 0;
+        const aim = Math.acos(Math.min(1, Math.abs(b.normal[0] * smp.t[0] + b.normal[1] * smp.t[1] + b.normal[2] * smp.t[2]))) * 180 / Math.PI;
+        if (!sec || sec.off > 0.5 || Math.abs(ratio - 1) > 0.015) { out.partial++; out.bad.push([+v.toFixed(1), sec ? +ratio.toFixed(3) : null, sec ? +sec.off.toFixed(2) : null]); }
+        out.worstAim = Math.max(out.worstAim, aim);
+        out.pieces.add(state.editId);
+      }
+      return { n: out.n, partial: out.partial, worstAim: out.worstAim, pieces: out.pieces.size, bad: out.bad };
+    }, POLY_AREA);
+    check('sliding through the whole stretch: the blade always cuts a whole round section of the cord (on it, in no kerf, square)', sweep.partial === 0 && sweep.n > 20, JSON.stringify(sweep));
+    check('...and faces the way the traced stretch runs (< 1 degree)', sweep.worstAim < 1, sweep.worstAim.toFixed(2) + ' deg');
+    check('...and across the kerfs onto more than one piece', sweep.pieces >= 2, sweep.pieces + ' pieces were the one the blade was on');
+    // a real drag of the slider to its far left end
+    const before = await page.evaluate(() => __win());
+    const sl = await R('cut-slider');
+    const thumb = fr => sl.x + 8 + fr * (sl.w - 16);
+    await page.mouse.move(thumb((before.slider[2] - before.slider[0]) / (before.slider[1] - before.slider[0])), sl.cy);
+    await page.mouse.down();
+    await page.mouse.move(sl.x + 1, sl.cy, { steps: 12 });
+    await page.mouse.up();
+    await page.waitForTimeout(900);
+    const after = await page.evaluate(() => ({ w: __win(), sec: __sectionArea(__blade().centre, __blade().normal) }));
+    check('a real drag of the slider to its end settles the blade there: put down, on a whole section of the cord', after.sec && Math.abs(after.sec.area / POLY_AREA - 1) < 0.015 && after.w && Math.abs(after.w.cur) < 1e-6, JSON.stringify({ cur: after.w && after.w.cur, ratio: after.sec && +(after.sec.area / POLY_AREA).toFixed(3) }));
+  }
+
+  console.log('slide along the cord');
+  id = await fresh();
+  const cr = await someCrown();
+  await clickAt(cr);
+  await waitStatus(/Follow: strand found/);
+  const w0 = await page.evaluate(() => __win());
+  check('the stretch is traced when the blade is put down: a quarter turn each way', !!w0 && w0.len > 8 && w0.len < 120 && w0.cur === 0 && w0.sMin < -3 && w0.sMax > 3, w0 ? w0.sMin.toFixed(1) + ' to ' + w0.sMax.toFixed(1) + ' mm' : 'none');
+  check('the slider shows it, the thumb where the blade is', Math.abs(w0.slider[1] - w0.len) < 0.15 && Math.abs(w0.slider[2] + w0.sMin) < 0.15 && Math.abs(w0.box - w0.slider[2]) < 0.15, JSON.stringify(w0.slider));
+  const n0 = (await blade()).normal, startC = w0.c;
+
+  const sl2 = await R('cut-slider'), thumbAt = (win, v) => sl2.x + 8 + ((v - win.slider[0]) / (win.slider[1] - win.slider[0])) * (sl2.w - 16);
+  await page.mouse.move(thumbAt(w0, w0.slider[2]), sl2.cy);
+  await page.mouse.down();
+  await page.mouse.move(sl2.r - 1, sl2.cy, { steps: 14 });
+  let w1 = await page.evaluate(() => __win()), b1 = await blade();
+  const cd1 = await page.evaluate(c => __cordAt(c), b1.centre);
+  check('dragging the slider to its end slides the blade a quarter turn round the cord', Math.abs(w1.cur - w1.sMax) < 0.2 && len(sub(b1.centre, startC)) > 5 && angle(b1.normal, n0) > 70 && angle(b1.normal, n0) < 100,
+    'at ' + w1.cur.toFixed(1) + ' of ' + w1.sMax.toFixed(1) + ', turned ' + angle(b1.normal, n0).toFixed(1) + ' deg, moved ' + len(sub(b1.centre, startC)).toFixed(1) + ' mm');
+  check('...square to the cord all the way (< 1.5 degrees)', cd1 && angle(b1.normal, cd1.t) < 1.5, cd1 ? angle(b1.normal, cd1.t).toFixed(2) + ' deg' : 'no cord');
+  await page.waitForTimeout(1000);
+  const held = await page.evaluate(() => __win());
+  check('held, it is not put down under the hand (the stretch stays)', held.cur === w1.cur && held.sMin === w1.sMin && held.sMax === w1.sMax, JSON.stringify({ cur: held.cur, sMin: held.sMin }));
+  await page.mouse.up();
+  await page.waitForTimeout(700);
+  const w2 = await page.evaluate(() => __win()), b2 = await blade();
+  check('let go, it is put down there: a new stretch centred on it, the blade where it was', w2.cur === 0 && len(sub(b2.centre, b1.centre)) < 0.15 && Math.abs(w2.slider[2] + w2.sMin) < 0.15,
+    'cur ' + w2.cur + ', moved ' + len(sub(b2.centre, b1.centre)).toFixed(3) + ' mm');
+  await page.mouse.move(thumbAt(w2, w2.slider[2]), sl2.cy);
+  await page.mouse.down();
+  await page.mouse.move(sl2.r - 1, sl2.cy, { steps: 14 });
+  await page.mouse.up();
+  await page.waitForTimeout(800);
+  const w3 = await page.evaluate(() => __win()), b3 = await blade();
+  check('a second drag goes on another quarter turn from there', len(sub(b3.centre, b2.centre)) > 4 && angle(b3.normal, b2.normal) > 60 && angle(b3.normal, b2.normal) < 100,
+    'turned ' + angle(b3.normal, b2.normal).toFixed(1) + ' deg, moved ' + len(sub(b3.centre, b2.centre)).toFixed(1) + ' mm');
+
+  // the number box, and the nudges
+  let w4 = await page.evaluate(() => __win());
+  await page.fill('#cut-mm', String(Math.round((w4.slider[2] - 6) * 10) / 10)); await page.press('#cut-mm', 'Tab');
+  const w5 = await page.evaluate(() => __win());
+  check('typing a position in the box slides the blade to it', Math.abs(w5.cur - (w4.cur - 6)) < 0.15 && Math.abs(w5.box - (w5.cur - w5.sMin)) < 0.15, 'cur ' + w4.cur.toFixed(2) + ' -> ' + w5.cur.toFixed(2));
+  // (the stretch is put down 600 ms after the last move, which re-centres the numbers: so these are read in the world)
+  const nb0 = await blade();
+  await page.click('#btn-cut-nudge-p');
+  const nb1 = await blade();
+  check('→ is 0.1 mm along the cord', Math.abs(len(sub(nb1.centre, nb0.centre)) - 0.1) < 0.04, len(sub(nb1.centre, nb0.centre)).toFixed(3) + ' mm');
+  await page.keyboard.down('Shift'); await page.click('#btn-cut-nudge-m'); await page.keyboard.up('Shift');
+  const nb2 = await blade();
+  check('Shift+← is 1 mm back (the other way)', Math.abs(len(sub(nb2.centre, nb1.centre)) - 1) < 0.08 && dot(sub(nb2.centre, nb1.centre), sub(nb1.centre, nb0.centre)) < 0,
+    len(sub(nb2.centre, nb1.centre)).toFixed(3) + ' mm');
+  await page.waitForTimeout(800);
+
+  // a drag in the viewport: press on the blade, pull along the cord
+  let wa = await page.evaluate(() => __win());
+  const bp = await page.evaluate(() => __bladePx()), tgt = await page.evaluate(() => __ahead(7, 0));
+  await page.mouse.move(bp.x, bp.y); await page.mouse.down();
+  await page.mouse.move(tgt.x, tgt.y, { steps: 12 });
+  const wb = await page.evaluate(() => ({ w: __win(), b: __blade() }));
+  const cdb = await page.evaluate(c => __cordAt(c), wb.b.centre);
+  check('a press on the blade and a pull along the cord slides it there (within 1.2 mm of where the pointer is)', len(sub(wb.b.centre, tgt.c)) < 1.2, len(sub(wb.b.centre, tgt.c)).toFixed(2) + ' mm from the target');
+  check('...square to the cord', cdb && angle(wb.b.normal, cdb.t) < 1.5, cdb ? angle(wb.b.normal, cdb.t).toFixed(2) + ' deg' : 'no cord');
+  await page.mouse.up();
+  await page.waitForTimeout(700);
+  check('...and put down where it was let go', (await page.evaluate(() => __win())).cur === 0);
+
+  // a press on the cord itself places the blade there, and the same drag slides it
+  const cp = await page.evaluate(() => __ahead(-5, 1.7));
+  await page.mouse.move(cp.x, cp.y); await page.mouse.down();
+  await page.waitForTimeout(500);
+  const wc = await page.evaluate(() => __win());
+  const t2 = await page.evaluate(() => __ahead(6, 0));
+  await page.mouse.move(t2.x, t2.y, { steps: 12 });
+  const bc = await blade();
+  check('pressed on the cord (not on the blade) and pulled: the blade is put there and slides with the pointer', !!wc && len(sub(bc.centre, t2.c)) < 1.2, len(sub(bc.centre, t2.c)).toFixed(2) + ' mm from the target');
+  await page.mouse.up();
+  await page.waitForTimeout(700);
+  // one box: no separate Single strand, and Follow is what takes the one strand
+  const boxes = await page.evaluate(() => ({ strandBox: !!document.getElementById('chk-cut-blade-strand'), isolate: !!getCutPlaneLocal(getActiveModel()).blade.isolate }));
+  check('there is no separate Single strand box, and Follow strand takes the one strand', !boxes.strandBox && boxes.isolate, JSON.stringify(boxes));
+  await page.uncheck('#chk-cut-follow');
+  const offIso = await page.evaluate(() => !!getCutPlaneLocal(getActiveModel()).blade.isolate);
+  check('unticked, it is a plain sized blade (takes everything in its box)', offIso === false);
+  await page.evaluate(() => { state.cutFollowAt = null; });
 
   console.log('the end of the cord');
   id = await fresh();

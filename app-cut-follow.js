@@ -75,7 +75,7 @@ function cutNormalFor(f, deg, bevel) {
 /** Set mitre and bevel so the blade stands square to `tL` (the strand's direction, in the piece's frame, unit).
     A sweep, near the present angles first (a step along a cord turns the blade a little) and then all of them; each
     pass narrows to 0.1 degree, the grid the card keeps. -> the angle (degrees) the blade is left off square. */
-function cutFollowAim(m, tL) {
+function cutFollowAim(m, tL, fast) {
   const f = cutFrame(m);
   if (!f) return null;
   const err = function (d, b) { return 1 - Math.abs(cutNormalFor(f, d, b).dot(tL)); };
@@ -89,9 +89,18 @@ function cutFollowAim(m, tL) {
       }
     }
   };
-  scan(best, 15, 15, 1);
-  if (be > 1 - Math.cos(Math.PI / 180)) scan({ d: 180, b: 0 }, 180, 90, 2);
-  scan(best, 2, 2, 0.1);
+  const within = deg => be <= 1 - Math.cos(deg * Math.PI / 180);
+  if (fast) {
+    // Sliding along the cord: the direction is a degree or two from the last one, so a narrow sweep and a fine one.
+    scan(best, 8, 8, 1);
+    if (!within(2)) scan(best, 40, 40, 2);
+    if (!within(2)) scan({ d: 180, b: 0 }, 180, 90, 2);
+    scan(best, 1.5, 1.5, 0.25);
+  } else {
+    scan(best, 15, 15, 1);
+    if (!within(1)) scan({ d: 180, b: 0 }, 180, 90, 2);
+    scan(best, 2, 2, 0.1);
+  }
   state.cutMiterDeg = best.d;
   state.cutBevelDeg = best.b;
   return Math.acos(Math.max(-1, Math.min(1, 1 - be))) * 180 / Math.PI;
@@ -108,6 +117,181 @@ function cutFollowNeighbours(soup, c, t, st) {
     next: f && !f.end ? { c: f.c, t: f.t } : null,
     prev: b && !b.end ? { c: b.c, t: [-b.t[0], -b.t[1], -b.t[2]] } : null
   };
+}
+
+/* ---- Sliding along the cord: the slider, the box, ← / → and a drag in the viewport ----------------------------------
+   Putting the blade on the cord also traces the cord's centre line either side of it - out to CUT_FOLLOW_TURN_DEG of
+   turning (a quarter turn of a spiral) or CUT_FOLLOW_MAX_MM - and keeps it as the blade's WINDOW (fa.win). Sliding is
+   then a walk through that line with no mesh work: the blade goes to the sample, is turned square to it, and the card
+   follows. Letting go (the mouse, the slider, or a pause) puts the blade down for real - a fresh trace and a fresh window
+   centred on the new place - so the next stretch can be slid from there: round a spiral a quarter turn at a time. */
+const CUT_FOLLOW_TURN_DEG = 90;
+const CUT_FOLLOW_MAX_MM = 60;
+const CUT_FOLLOW_SETTLE_MS = 600;
+const cutFollowHold = { n: 0, timer: null };
+
+function cutFollowBuildWindow(soup, c, t, st) {
+  const win = NSO_Strand.centreline(soup, c, t, { up: CUT_FOLLOW_UP, maxTurn: CUT_FOLLOW_TURN_DEG, maxLen: CUT_FOLLOW_MAX_MM, gap: st.kerf + 1.5 });
+  if (!win) return null;
+  win.cur = 0;
+  win.pieces = null;
+  win.memo = {};
+  return win;
+}
+
+/** Where the window stands at arc length `s` (clamped to the strand): { c, t, s }, the centres and directions of the
+    samples either side blended; across a kerf (no strand to stand on) the nearer sample with strand. */
+function cutFollowSampleAt(win, s) {
+  const S = win.samples;
+  s = Math.min(win.sMax, Math.max(win.sMin, s));
+  let lo = 0, hi = S.length - 1;
+  while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (S[mid].s <= s) lo = mid; else hi = mid; }
+  const a = S[lo], b = S[hi];
+  if (a.ok && b.ok && b.s > a.s) {
+    const f = (s - a.s) / (b.s - a.s);
+    const c = [a.c[0] + (b.c[0] - a.c[0]) * f, a.c[1] + (b.c[1] - a.c[1]) * f, a.c[2] + (b.c[2] - a.c[2]) * f];
+    const t = [a.t[0] + (b.t[0] - a.t[0]) * f, a.t[1] + (b.t[1] - a.t[1]) * f, a.t[2] + (b.t[2] - a.t[2]) * f];
+    const l = Math.hypot(t[0], t[1], t[2]) || 1;
+    return { c: c, t: [t[0] / l, t[1] / l, t[2] / l], s: s };
+  }
+  let best = null;
+  S.forEach(function (q) { if (q.ok && (!best || Math.abs(q.s - s) < Math.abs(best.s - s))) best = q; });
+  return best ? { c: best.c, t: best.t, s: best.s } : null;
+}
+
+/** The placed piece the strand is in at a sample (cached per half millimetre of the window): an index, or -1. */
+function cutFollowPieceFor(win, smp) {
+  if (!win.pieces) {
+    win.pieces = [];
+    (state.placed || []).forEach(function (p, idx) {
+      if (p && p.sourceId != null && p.mesh) win.pieces.push({ idx: idx, soup: meshToWorldSoup(p.mesh) });
+    });
+  }
+  const key = Math.round(smp.s * 2);
+  if (win.memo[key] !== undefined) return win.memo[key];
+  let best = -1, bd = 1.5;
+  const d = smp.t[0] * smp.c[0] + smp.t[1] * smp.c[1] + smp.t[2] * smp.c[2];
+  win.pieces.forEach(function (pc) {
+    const tris = NSO_Strand.near(pc.soup, smp.c, 4);
+    if (!tris.length) return;
+    NSO_Strand.sections(tris, smp.t, d).forEach(function (l) {
+      const e = Math.hypot(l.c[0] - smp.c[0], l.c[1] - smp.c[1], l.c[2] - smp.c[2]);
+      if (e < bd) { bd = e; best = pc.idx; }
+    });
+  });
+  win.memo[key] = best;
+  return best;
+}
+
+/** The blade to a sample of the window: the cheap half of cutFollowPlace (no trace, no march). */
+function cutFollowApply(smp) {
+  const fa = state.cutFollowAt, win = fa && fa.win;
+  if (!win || !smp) return false;
+  const idx = cutFollowPieceFor(win, smp);
+  if (idx >= 0 && state.placed[idx].sourceId !== state.editId && typeof selectPlaced === 'function') selectPlaced(idx);
+  const m = getActiveModel(), mesh = m ? cutMeshOf(m) : null;
+  if (!m || !mesh) return false;
+  mesh.updateMatrixWorld(true);
+  const inv = new THREE.Matrix4().copy(mesh.matrixWorld).invert();
+  const cL = new THREE.Vector3(smp.c[0], smp.c[1], smp.c[2]).applyMatrix4(inv);
+  const tL = new THREE.Vector3(smp.t[0], smp.t[1], smp.t[2]).transformDirection(inv);
+  const upL = new THREE.Vector3(CUT_FOLLOW_UP[0], CUT_FOLLOW_UP[1], CUT_FOLLOW_UP[2]).transformDirection(inv);
+  fa.off = cutFollowAim(m, tL, true);
+  state.cutBladeAt = { modelId: m.id, local: cL.clone().addScaledVector(upL, fa.hTop), normal: upL.clone() };
+  const f = cutFrame(m);
+  state.cutT = snapCutT((f.normal.dot(cL) - f.origin) / f.span, f.span);
+  fa.c = smp.c; fa.t = smp.t; win.cur = smp.s;
+  // Where Back / Forward would land, from the window (a step either way, if the strand is there)
+  const pitch = cutFollowStep().pitch, ahead = cutFollowSampleAt(win, smp.s + pitch), behind = cutFollowSampleAt(win, smp.s - pitch);
+  fa.next = ahead && Math.abs(ahead.s - (smp.s + pitch)) < 0.3 ? { c: ahead.c, t: ahead.t } : null;
+  fa.prev = behind && Math.abs(behind.s - (smp.s - pitch)) < 0.3 ? { c: behind.c, t: behind.t } : null;
+  cutBladeRefresh();
+  return true;
+}
+
+/** Slide the blade to arc length `s` of the window. Lets go for real after a pause unless a hand is still on it. */
+function cutFollowScrubTo(s) {
+  const fa = state.cutFollowAt, win = fa && fa.win;
+  if (!win) return false;
+  const ok = cutFollowApply(cutFollowSampleAt(win, s));
+  cutFollowSettleSoon();
+  return ok;
+}
+
+/** The slider's view of the window: 0 is its start, the thumb stands where the blade is. Null if there is none. */
+function cutFollowSliderState() {
+  const fa = state.cutFollowAt, win = fa && fa.win;
+  if (!win || !cutFollowOn()) return null;
+  return { min: 0, max: win.sMax - win.sMin, val: win.cur - win.sMin, len: win.sMax - win.sMin };
+}
+function cutFollowScrubMm(v) {
+  const fa = state.cutFollowAt, win = fa && fa.win;
+  if (!win || !isFinite(v)) return false;
+  return cutFollowScrubTo(win.sMin + v);
+}
+
+/** Put the blade down where the slide left it: trace again there and open a new window centred on it. */
+function cutFollowSettle() {
+  clearTimeout(cutFollowHold.timer);
+  cutFollowHold.timer = null;
+  const fa = state.cutFollowAt, win = fa && fa.win;
+  if (!fa || !win || !cutFollowOn() || cutFollowHold.n > 0) return;
+  if (Math.abs(win.cur) < 1e-6) return;                       // it has not moved: the window is already centred on it
+  const r = cutFollowPlace(fa.c, fa.t, 'moved along the strand', true);
+  setStatus(r.ok ? 'Follow: ' + r.msg + '.' : 'Follow: ' + r.why + '.', !r.ok);
+}
+function cutFollowSettleSoon() {
+  clearTimeout(cutFollowHold.timer);
+  if (cutFollowHold.n > 0) return;
+  cutFollowHold.timer = setTimeout(cutFollowSettle, CUT_FOLLOW_SETTLE_MS);
+}
+
+/** A press on the blade or the cord, with Follow on: the drag that follows slides the blade along the cord. */
+function cutFollowBeginDrag() {
+  const fa = state.cutFollowAt;
+  if (!fa || !fa.win) return false;
+  state.cutDragging = true;
+  state.cutFollowDragging = true;
+  if (state.controls) state.controls.enabled = false;
+  cutFollowHold.n++;
+  return true;
+}
+
+/** The pointer is at state.pointer: slide the blade to the point of the window the pointer's ray passes nearest. */
+function cutFollowDragTo() {
+  const fa = state.cutFollowAt, win = fa && fa.win;
+  if (!win || !state.raycaster || !state.camera) return;
+  state.raycaster.setFromCamera(state.pointer, state.camera);
+  const o = state.raycaster.ray.origin, d = state.raycaster.ray.direction;
+  const dist2 = c => {                                        // squared distance from c to the ray
+    const x = c[0] - o.x, y = c[1] - o.y, z = c[2] - o.z, k = x * d.x + y * d.y + z * d.z;
+    const px = x - d.x * k, py = y - d.y * k, pz = z - d.z * k;
+    return px * px + py * py + pz * pz;
+  };
+  let best = -1, bd = Infinity;
+  win.samples.forEach(function (q, i) { if (q.ok) { const e = dist2(q.c); if (e < bd) { bd = e; best = i; } } });
+  if (best < 0) return;
+  // between the nearest sample and its neighbours: the point of each segment nearest the ray, by a short search
+  const S = win.samples;
+  let bs = S[best].s, be = bd;
+  [-1, 1].forEach(function (dir) {
+    const nb = S[best + dir];
+    if (!nb || !nb.ok) return;
+    for (let f = 0.1; f < 1; f += 0.1) {
+      const c = [S[best].c[0] + (nb.c[0] - S[best].c[0]) * f, S[best].c[1] + (nb.c[1] - S[best].c[1]) * f, S[best].c[2] + (nb.c[2] - S[best].c[2]) * f];
+      const e = dist2(c);
+      if (e < be) { be = e; bs = S[best].s + (nb.s - S[best].s) * f; }
+    }
+  });
+  if (Math.abs(bs - win.cur) < 1e-4) return;
+  cutFollowApply(cutFollowSampleAt(win, bs));
+}
+
+function cutFollowEndDrag() {
+  if (!state.cutFollowDragging) return;
+  state.cutFollowDragging = false;
+  cutFollowHold.n = Math.max(0, cutFollowHold.n - 1);
+  cutFollowSettle();
 }
 
 /** Put the blade square across the strand at world point `c` (running along `t`, a hint: the sense is kept). The piece the
@@ -145,7 +329,9 @@ function cutFollowPlace(c, t, why, quiet) {
   const st = cutFollowStep();
   const nb = cutFollowNeighbours(soup, tr.c, tr.t, st);
   state.cutFollowAt = { c: tr.c, t: tr.t, w: tr.w, h: tr.h, r: tr.r, next: nb.next, prev: nb.prev,
-                        off: off, clamped: Math.abs(got - want) > 0.3 };
+                        off: off, clamped: Math.abs(got - want) > 0.3,
+                        hTop: (tr.top[0] - tr.c[0]) * CUT_FOLLOW_UP[0] + (tr.top[1] - tr.c[1]) * CUT_FOLLOW_UP[1] + (tr.top[2] - tr.c[2]) * CUT_FOLLOW_UP[2],
+                        win: cutFollowBuildWindow(soup, tr.c, tr.t, st) };
   cutBladeRefresh();
   cutFollowSyncUI();
   const dirSay = (b.followDir || 1) > 0 ? nb.next : nb.prev;
@@ -165,6 +351,7 @@ function cutFollowFromHit(hit) {
   if (!tr) { setStatus('Follow: no strand under that click - click on the cord itself.', true); return; }
   const r = cutFollowPlace(tr.c, tr.t, 'strand found');
   if (!r.ok) setStatus('Follow: ' + r.why + '.', true);
+  else cutFollowBeginDrag();                                  // held and moved, the click slides along the cord
 }
 
 /** Back (-1) / Forward (+1): one step along the strand without cutting. The way last pressed is the way Cut goes on. */
@@ -181,6 +368,7 @@ function cutFollowMove(sign) {
 /** After a cut: on to the next slice, the way the last step went. Called by cutNotchAt once the cut is made and the
     parts are separated. */
 function cutFollowAfterCut() {
+  clearTimeout(cutFollowHold.timer);
   if (!cutFollowOn() || !state.cutFollowAt) return null;
   const sign = cutBladeState().followDir || 1, fa = state.cutFollowAt;
   const to = sign > 0 ? fa.next : fa.prev;
@@ -221,7 +409,8 @@ function cutFollowSyncUI() {
     const st = cutFollowStep(), r1 = v => Math.round(v * 10) / 10;
     ro.textContent = !fa
       ? 'Click the strand. Each slice is ' + r1(st.slice) + ' mm and the blade takes ' + r1(st.kerf) + ' mm: ' + r1(st.pitch) + ' mm a step.'
-      : 'On the strand (' + r1(fa.w) + ' mm across). ' + r1(st.pitch) + ' mm a step; Cut goes on ' + (dir > 0 ? 'forward' : 'back') +
+      : 'On the strand (' + r1(fa.w) + ' mm across). Drag the blade or the slider along it, a quarter turn at a time. ' + r1(st.pitch) +
+        ' mm a step; Cut goes on ' + (dir > 0 ? 'forward' : 'back') +
         (dir > 0 ? (fa.next ? '' : ' - the strand ends here') : (fa.prev ? '' : ' - the strand ends here')) + '.';
   }
 }
@@ -239,6 +428,20 @@ function cutFollowWire() {
     cutFollowSyncUI();
     if (b.follow) setStatus('Follow strand on - click the strand to put the blade square across it.');
   });
+  // A hand on the slider keeps the blade from being put down under it; letting go does that.
+  const slider = document.getElementById('cut-slider');
+  if (slider) {
+    let held = false;
+    slider.addEventListener('pointerdown', function () { if (!held) { held = true; cutFollowHold.n++; } });
+    const release = function () {
+      if (!held) return;
+      held = false;
+      cutFollowHold.n = Math.max(0, cutFollowHold.n - 1);
+      cutFollowSettle();
+    };
+    window.addEventListener('pointerup', release);
+    window.addEventListener('pointercancel', release);
+  }
   const back = document.getElementById('btn-cut-follow-back'), fwd = document.getElementById('btn-cut-follow-fwd');
   if (back) back.addEventListener('click', function () { cutFollowMove(-1); });
   if (fwd) fwd.addEventListener('click', function () { cutFollowMove(1); });

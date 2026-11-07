@@ -847,7 +847,7 @@
               </div>
               <p id="cut-readout" class="cut-readout cut-per-piece">—</p>
               <!-- Blade. Full: the plane that splits the piece (the default). Sized: a box - width, depth, kerf - that
-                   takes out only its own volume (and, with Single strand, only the strand under the click).
+                   takes out only its own volume (and, with Follow strand, only the strand under the blade, which it then follows).
                    Notch: a nick in from the edge of the strand under the click (nso_notch.js, app-cut.js cutNotchAt). -->
               <div class="cut-blade">
               <div class="edit-row cut-blade-mode" role="group" aria-label="Blade">
@@ -870,8 +870,7 @@
               <div class="cut-slide-row" title="The blade's thickness: the width of the slot it leaves (mm). The floor is 0.2."><span class="cut-slide-label">Kerf</span>
               <input type="range" id="cut-blade-kerf-s" min="0.2" max="10" step="0.1" value="1" aria-label="Kerf, mm">
               <input type="number" id="cut-blade-kerf" class="cut-no-spin" min="0.2" max="1000" step="0.1" value="1" aria-label="Kerf, mm"></div>
-              <label class="cut-switch cut-strand" title="Take only the strand under the click: where the blade's box holds several strands (the turns of a spiral), the others are left alone. The strand is outlined in yellow."><input type="checkbox" id="chk-cut-blade-strand" checked><span>Single strand</span></label>
-              <label class="cut-switch cut-follow" title="Follow the strand: click a cord and the blade turns to stand square across it right there, however it winds. Back and Forward walk it along the cord a slice at a time, and Cut cuts and moves on to the next slice - slicing a spiral like salami."><input type="checkbox" id="chk-cut-follow"><span>Follow strand</span></label>
+                            <label class="cut-switch cut-follow" title="Follow strand: the blade takes only the strand under it (where its box holds several - the turns of a spiral - the others are left alone; the strand is outlined in yellow) and follows it. Click a cord and the blade turns to stand square across it right there, however it winds. Drag the blade or the slider and it slides along the cord, about 90 degrees of it at a time; Back and Forward step it a slice, and Cut cuts and moves on to the next slice - slicing a spiral like salami. Off: a plain sized blade, square to the piece, that takes everything in its box."><input type="checkbox" id="chk-cut-follow"><span>Follow strand</span></label>
               <div id="cut-follow-fields" hidden>
               <div class="cut-slide-row" title="The material left between one cut and the next (mm). The blade moves this far plus its kerf each step."><span class="cut-slide-label">Slice</span>
               <input type="range" id="cut-follow-slice-s" min="0.2" max="10" step="0.1" value="1.5" aria-label="Slice, mm">
@@ -2580,7 +2579,7 @@
   <script src="nso_skin_patch.js?v=4b2304fa"></script>
   <script src="nso_carve.js?v=c82241ec"></script>
 <script src="nso_notch.js?v=b697e802"></script>
-<script src="nso_strand.js?v=34bebb6d"></script>
+<script src="nso_strand.js?v=2f7aafd1"></script>
 <script src="nso_cut_plate.js?v=0683b280"></script>
   <script src="nso_seat_surface.js?v=293d7ca2"></script>
   <script src="nso_thickness.js?v=165379d6"></script>
@@ -2645,7 +2644,7 @@
   <script src="nso-helpers.js?v=9c476e39"></script>
   <script src="nso-recent.js?v=f03d6f13"></script>
   <script src="nso-bounds.js?v=778acac4"></script>
-  <script src="app-core.js?v=5fc81900"></script>
+  <script src="app-core.js?v=690d78fd"></script>
   <!-- Up to six plates (beds): the active one is state.models / state.placed, the rest are kept beside it. docs/BEDS.md. -->
   <script src="app-beds.js?v=3d221bc4"></script>
 
@@ -2653,9 +2652,9 @@
 
 
 
-  <script src="app-cut.js?v=f791ee04"></script>
+  <script src="app-cut.js?v=2b30303b"></script>
   <!-- Cut card, Follow strand: the sized blade put square across a cord and walked along it (nso_strand.js, docs/CUT-FOLLOW.md). After app-cut.js. -->
-  <script src="app-cut-follow.js?v=59558adb"></script>
+  <script src="app-cut-follow.js?v=bd548b54"></script>
   <!-- Cut card, Whole plate blade: one level blade across every piece. After app-cut.js, whose cutOneSide / cutOverlay
        it calls, and before the Crop card; it commits through app-sculpt.js's NSO_sculptCommitRaw at press time. docs/CUT-PLATE.md. -->
   <script src="app-cut-plate.js?v=f56a1400"></script>

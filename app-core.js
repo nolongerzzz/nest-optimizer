@@ -3414,6 +3414,8 @@ function endMoveDrag() {
    flat or stands on end (a horizontal plane at the piece's centre, the old
    drag plane, holds a standing piece's axis only edge-on). */
 function cutTFromPointer(hitWorld, hit) {
+  // Follow strand: a drag reads the pointer against the cord's centre line, not against the blade's straight travel.
+  if (!hitWorld && state.cutFollowDragging && typeof cutFollowDragTo === 'function') { cutFollowDragTo(); return; }
   const m = getActiveModel();
   const f = m ? cutFrame(m) : null;
   if (!f || !f.mesh) return;
@@ -3483,6 +3485,7 @@ function onCanvasPointerMove(event) {
 
 function clearPointerState() {
   state.cutDragging = false;
+  if (state.cutFollowDragging && typeof cutFollowEndDrag === 'function') cutFollowEndDrag();
   if (state.moveDragging) endMoveDrag();
   state.moveDragging = false;
   if (state.controls) {
@@ -3497,6 +3500,7 @@ function onCanvasPointerUp(event) {
     state.cutDragging = false;
     if (state.controls) state.controls.enabled = true;
   }
+  if (state.cutFollowDragging && typeof cutFollowEndDrag === 'function') cutFollowEndDrag();   // put the blade down where it slid to
   if (state.editYawDragging) {
     state.editYawDragging = false;
     if (state.controls) state.controls.enabled = true;
@@ -4125,8 +4129,8 @@ function onCanvasPointerDown(event) {
     const cutHits = state.raycaster.intersectObject(state.cutHelper, true);
     if (cutHits.length) {
       setOrbitFromPlate(false);
-      // Follow strand: the blade is walked with Back / Forward, not dragged off the cord it is square across.
-      if (typeof cutFollowOn === 'function' && cutFollowOn()) { event.stopPropagation(); return; }
+      // Follow strand: a drag on the blade slides it along the cord it is square across, not off it.
+      if (typeof cutFollowOn === 'function' && cutFollowOn()) { cutFollowBeginDrag(); event.stopPropagation(); return; }
       state.cutDragging = true;
       state.cutDragFrom = null;
       if (state.controls) state.controls.enabled = false;

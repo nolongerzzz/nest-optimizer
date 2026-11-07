@@ -11,7 +11,8 @@ is its own write-up: [CUT-PLATE.md](CUT-PLATE.md).)
   `Kerf` thick - that takes out only its own volume. Use it to cut **between**
   things (a blade narrower than the section leaves whatever else is in the
   full blade's path alone) and to cut **into** a face without going through.
-  With **Single strand** on (the default) it takes only the *strand under the
+  With **Follow strand** on (one box: it is also *take only the strand* - see
+  [CUT-FOLLOW.md](CUT-FOLLOW.md)) it takes only the *strand under the
   click*, even where its box holds several - see below.
 - **Notch**: click a strand (a cord, one turn of a spiral). The blade fits that
   strand and cuts a **nick** in from its edge, `Notch width` along the strand
@@ -71,7 +72,7 @@ the plane is "the" strand (distance is to the outline's segments, not its
 corners - a click mid-way along a long flat face is far from its own corners).
 It is outlined in yellow in the viewport and named in the readout ("1 of 6").
 
-- **Sized + Single strand**: what the blade's box holds is split into one solid
+- **Sized + Follow strand**: what the blade's box holds is split into one solid
   per strand (`decompose`); the one nearest the click is taken, the others stay.
 - **Notch**: the blade is made as wide as that strand's own section plus 0.5 mm
   each side, and starts at the strand's *own edge* on the side the click came
@@ -189,7 +190,7 @@ from the click's depth ends up buried.
 - **Pockets.** A face *parallel* to the cut plane cannot be pocketed by Depth.
   Use Kerf as the pocket depth and slide the plane to the face.
 - **Curved faces** use the tangent plane at the click.
-- **Single strand** picks by the plane's section, so two strands that *touch*
+- **Follow strand** picks by the plane's section, so two strands that *touch*
   (one blob) are one strand.
 - **Mitre and bevel** are supported; bevel's removed volume is checked on a flat top face only.
 - **The kernel's own pinched edges** (above) are not repaired by the cut; the status line names them, and Check piece can repair them.

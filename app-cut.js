@@ -395,6 +395,8 @@ function getCutSpan(model) {
 }
 
 function getCutMm() {
+  const fs = typeof cutFollowSliderState === 'function' ? cutFollowSliderState() : null;
+  if (fs) return Math.round(fs.val * 10) / 10;                  // Follow strand: mm along the cord, from the section's start
   const f = cutFrame(getActiveModel());
   return f ? cutMmAt(state.cutT, f.span) : 0;
 }
@@ -445,8 +447,12 @@ function getCutPlaneLocal(model) {
 // click: state.cutBladeAt, the click in the piece's frame and the face it
 // landed on. The blade goes in against that face; with no click yet it comes
 // down from the top of the section, centred.
+/** The sized blade takes only the strand under it: with Follow strand on (one box for both). `strand` is the same switch
+    without the following, kept for the checks that exercise one without the other; the card does not set it. */
+function cutStrandOn(b) { return !!(b && (b.follow || b.strand === true)); }
+
 function cutBladeState() {
-  if (!state.cutBlade) state.cutBlade = { mode: 'full', sized: false, strand: true, follow: false, slice: 1.5, followDir: 1,
+  if (!state.cutBlade) state.cutBlade = { mode: 'full', sized: false, strand: false, follow: false, slice: 1.5, followDir: 1,
     width: NSO_Notch.DEFAULTS.width, depth: NSO_Notch.DEFAULTS.depth, kerf: NSO_Notch.DEFAULTS.kerf,
     nwidth: NSO_Notch.NOTCH_DEFAULTS.width, ndepth: NSO_Notch.NOTCH_DEFAULTS.depth };
   return state.cutBlade;
@@ -535,7 +541,7 @@ function cutBladeSpec(info) {
   const q = [0, 0, 0];
   q[k] = info.plane; q[entry.wAxis] = wCentre; q[entry.dAxis] = dStart;
   let strand = null, strands = 0;
-  if ((notch || b.strand !== false) && m) {
+  if ((notch || cutStrandOn(b)) && m) {
     const clusters = cutSectionOf(m, info, k);
     const near = NSO_Notch.nearestCluster(clusters, q);
     if (near) { strand = clusters[near.index]; strands = clusters.length; }
@@ -559,7 +565,7 @@ function cutBladeSpec(info) {
   const from = Math.abs(up) > 0.7 ? (entry.sign * up < 0 ? 'down from the top' : 'up from below') : 'in from the side';
   return { box: box, entry: entry, sizes: sizes, key: key, from: from, wCentre: wCentre, dStart: dStart,
            q: q, notch: notch, miss: miss, strand: strand, strands: strands,
-           isolate: !!strand && (notch || b.strand !== false) };
+           isolate: !!strand && (notch || cutStrandOn(b)) };
 }
 
 /** For Cut: the plane the blade is drawn at - the same frame, the same number. */
@@ -571,6 +577,8 @@ function getCutPlaneForSplit(model) {
 }
 
 function setCutMm(mm) {
+  // Follow strand: the slider, the box and the nudges slide the blade along the cord (cutFollowScrubMm).
+  if (typeof cutFollowSliderState === 'function' && cutFollowSliderState()) { cutFollowScrubMm(Number(mm)); return; }
   const m = getActiveModel();
   const f = cutFrame(m);
   if (!f) return;
@@ -738,9 +746,21 @@ function syncCutUI() {
     input.max = String(info.hi);
     if (document.activeElement !== input) input.value = mm.toFixed(1);
   }
+  // Follow strand: the slider and the box are the cord's own section - 0 at its start, the thumb where the blade is.
+  const fol = typeof cutFollowSliderState === 'function' ? cutFollowSliderState() : null;
+  if (fol) {
+    const r1 = v => (Math.round(v * 10) / 10).toFixed(1);
+    if (slider) { slider.min = '0'; slider.max = r1(fol.max); slider.value = r1(fol.val); }
+    if (input) { input.min = '0'; input.max = r1(fol.max); if (document.activeElement !== input) input.value = r1(fol.val); }
+  }
   // A clean split: the two sides are the plane's distance from each end and
   // add back to the piece. No kerf comes off.
-  if (readout && info.blade) {
+  if (readout && info.blade && fol) {
+    const bl = info.blade, r1 = v => (Math.round(v * 10) / 10).toFixed(1);
+    readout.textContent = 'FOLLOWING THE STRAND - ' + r1(fol.val) + ' of ' + r1(fol.len) + ' mm along this stretch (let go and it moves on from here); ' +
+      'kerf ' + bl.sizes.kerf + ', ' + bl.sizes.width + ' wide, ' + bl.sizes.depth + ' deep' +
+      (info.deg ? ', mitre ' + info.deg + '°' : '') + (info.bevel ? ', bevel ' + info.bevel + '°' : '');
+  } else if (readout && info.blade) {
     const bl = info.blade;
     const tail = (info.deg ? ', mitre ' + info.deg + '°' : '') + (info.bevel ? ', bevel ' + info.bevel + '°' : '');
     if (bl.notch) {
@@ -3424,8 +3444,6 @@ function syncCutBladeUI() {
       if (num && v != null && document.activeElement !== num) num.value = String(v);
     });
   }
-  const strand = document.getElementById('chk-cut-blade-strand');
-  if (strand) strand.checked = b.strand !== false;
   if (typeof cutFollowSyncUI === 'function') cutFollowSyncUI();
   const rot = document.getElementById('chk-cut-rotate');
   if (rot) rot.checked = !!state.cutRotate;
@@ -3439,7 +3457,7 @@ function syncCutBladeUI() {
     ? 'Cut the notch: a nick of your width and depth in from the edge of the strand under the click. Only that strand is touched, and it stops short of the far side. One Undo puts it back.'
     : mode === 'sized'
       ? 'Cut the sized blade\'s slot out of the piece: only what the blade box holds comes out, kerf and all' +
-        (b.strand !== false ? ' - and of that, only the strand under the click' : '') + '. One Undo puts it back.'
+        (cutStrandOn(b) ? ' - and of that, only the strand under the click' : '') + '. One Undo puts it back.'
       : 'Split the piece at the blade: two pieces that meet exactly at the plane and add back to the original - no kerf. One Undo puts it back.';
 }
 
@@ -3491,8 +3509,6 @@ function cutWireBladeControls() {
       cutBladeRefresh();
     });
   });
-  const strand = document.getElementById('chk-cut-blade-strand');
-  if (strand) strand.addEventListener('change', function () { cutBladeState().strand = strand.checked; cutBladeRefresh(); });
   if (typeof cutFollowWire === 'function') cutFollowWire();
   const rot = document.getElementById('chk-cut-rotate');
   if (rot) rot.addEventListener('change', function () { cutSetRotate(rot.checked); });

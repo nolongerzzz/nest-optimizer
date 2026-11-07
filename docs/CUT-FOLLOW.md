@@ -1,9 +1,11 @@
 # Cut: Follow strand - slice a spiral like salami
 
 The Sized blade is square to the piece's own axes. On a spiral of cord that is
-square across one turn and slanted across every other. **Follow strand** (a switch
-under *Single strand* on the Sized blade) puts the blade square across the cord
-wherever it runs and walks it along the cord, a slice at a time.
+square across one turn and slanted across every other. **Follow strand** (one box
+on the Sized blade; it is also "take only the strand under the blade", which used to
+be a box of its own) puts the blade square across the cord wherever it runs and
+walks it along the cord, a slice at a time. Unticked, the Sized blade is the plain
+one: square to the piece, taking everything in its box.
 
 1. Pick **Sized blade**, tick **Follow strand**, and click the cord. The strand's
    centre line is traced, the blade is turned (mitre and bevel, the card's own
@@ -17,6 +19,28 @@ wherever it runs and walks it along the cord, a slice at a time.
    again, from one end of the spiral to the other. The cut that severs the cord
    separates it into pieces (as any sized cut does), and the blade carries on onto
    whichever piece holds the next slice. The last slice says so.
+
+## Sliding along the cord
+
+The position slider, its number box, the ← / → nudges and a drag in the viewport all
+slide the blade **along the cord** (not along a straight line, which would pull it off
+it), square to the cord all the way.
+
+- Putting the blade on the cord also traces the cord's centre line either side of it, out
+  to a quarter turn (90 degrees of turning, or 60 mm) each way: the blade's **stretch**.
+  The slider is that stretch - 0 at its start, the thumb where the blade is - and the
+  readout says how far along it you are. A drag in the viewport (press on the blade, or
+  on the cord, which also puts the blade there) takes the point of the stretch nearest
+  the pointer's ray.
+- Sliding is a walk through the traced line, with no new work on the mesh (about 13 ms a
+  step on the Connector string), so it follows the hand. It never stops in a kerf an
+  earlier cut left: it goes over the gap onto the pieces beyond.
+- **Let go** - the mouse, the slider, or a 0.6 s pause on the keys - and the blade is put
+  down for real: traced again, with a new stretch centred on it. A second drag goes on
+  another quarter turn, and so on round the spiral, section by section. Held, it is not
+  put down under your hand.
+- Press **Cut** and it cuts where the blade stands, then moves on to the next slice as
+  before.
 
 Back is off where the step back is a cut already (the kerf is empty: there is no
 strand to stand the blade on). Clicking the cord's flat end is refused: the plane
@@ -47,7 +71,7 @@ strand carries on across the kerfs earlier cuts left.
 `npm run strand:test`: against a generated spiral (flat and climbing) the centre is
 on the centre line to 0.05 mm and the direction within 1 degree, 12 steps of 2.5 mm
 stay on it (worst 0.05 mm), a 1 mm gap is crossed (0.006 mm off) and the end is found.
-`npm run follow:drive` (real Chromium, real kernel): the blade within 0.2 degrees of
+`npm run follow:drive` (real Chromium, real kernel, real mouse; the slide gates are the last half): the blade within 0.2 degrees of
 square on the cord, Forward 2.50 mm, Back home, three Cuts running (3 x 1 mm of
 the cord's section removed, slices 14.2 and 15.1 mm^3 for 14.8 expected, 0 open /
 0 non-manifold edges), and the last slice at the cord's end. Also run by hand on the
@@ -59,5 +83,7 @@ Connector (string) 3MF the feature was asked for on.
   run each time); a 300 mm cord is a hundred and twenty slices.
 - The blade comes down from above (the plate vertical): a cord standing on end is
   cut from the side, as the Sized blade always does for a face in the cut plane.
-- Dragging the blade is off while Follow is on (it would pull the blade off the cord);
-  use Back / Forward, or click the cord again.
+- A slide covers a quarter turn each way at a time (`CUT_FOLLOW_TURN_DEG`, `CUT_FOLLOW_MAX_MM`
+  in `app-cut-follow.js`); to go further, let go and slide again.
+- Turning the Mitre or Bevel wheel, or the piece, while Follow is on takes the blade off the cord
+  (and the piece's turn forgets the stretch): click the cord again.

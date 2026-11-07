@@ -102,3 +102,19 @@ wheel, - / + (directly under it, as the layout gate in `nso_wire_cut_redesign_te
 clockwise from above); `cutWireMiterStep` takes a third kind for its buttons. The old checkbox is now labelled **Rotate rings** (it still shows the rings and the
 lean options). The wheel is a jog, not a pointer-follower: a piece must not jump to wherever the rail is pressed. A turn clears the Follow strand place (it is held in
 the world). New `tools/nso_cut_rotate_dial_drive_check.js` (`rotate-dial:drive`); `nso_wire_cut_redesign_test` lists the card in its new order.
+
+### Ninth round (2026-11-07): slide along the cord; one box
+
+Asked for: the slider and the drag to work while Follow is on, following the cord instead of pulling the blade off it; Single strand and Follow strand as one checkbox;
+a drag need not go round the whole spiral - section by section, about 90 degrees at a time. Done in `app-cut-follow.js` (the window and the slide) and
+`nso_strand.js` (`centreline`: the stretch either side of a point, out to 90 degrees of turning or 60 mm, as samples of centre / direction / arc length / on-strand;
+node-tested). Putting the blade down keeps the stretch (`fa.win`); `setCutMm` / `getCutMm` / `syncCutUI` (`app-cut.js`) map the slider, the box and the nudges to it,
+`cutTFromPointer` and the pointer up / down (`app-core.js`) take a drag against the stretch (the sample nearest the pointer's ray), and letting go - or a 0.6 s pause - puts
+the blade down for real with a fresh stretch (so the next drag goes another quarter turn). The sliding step is the cheap half of placing (no trace, no march, a narrow
+aim sweep): about 13 ms on the Connector string. One box: `#chk-cut-blade-strand` is gone; Follow strand implies the one-strand isolation (`cutStrandOn`), and **off is the plain
+sized blade that takes everything in its box** - which also means the default is no longer "Single strand on" (`b.strand` is kept as an internal switch for the
+checks that drive the isolation without the following).
+
+Found while testing: the window's end tangents were one-sided, half a baseline early (2.3 degrees off on a tight bend, held at the end of a stretch): extrapolated now.
+`follow:drive` slides with the real mouse (slider, blade, cord), types in the box, nudges, and sweeps a stretch that crosses the kerfs of three cuts: at every stop the
+blade's plane cuts a whole round section of the cord and faces the way the stretch runs.

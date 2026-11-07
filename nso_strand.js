@@ -294,7 +294,78 @@
     return fin ? { c: fin.c, t: fin.t, moved: dist, end: false, size: fin } : { c: cur, t: dir, moved: dist, end: false, blind: true };
   }
 
-  var api = { NEAR_MM: NEAR_MM, near: near, sections: sections, loopAt: loopAt, directionAt: directionAt, traceAt: traceAt, advance: advance };
+  /* The strand's centre line either side of `c` (running along unit `t`), out to `opts.maxTurn` degrees of turning (90) or
+     `opts.maxLen` mm (60) each way, or where the strand stops: the section a slider or a drag can be moved through
+     without asking the mesh again. Marched as `advance` does it (steps of `opts.step` mm, each re-centred on a whole
+     section of the cord, gaps up to `opts.gap` crossed straight) but kept: -> { samples, sMin, sMax } where each sample is
+       { c, t, s, ok }  centre, direction (along +s: the sense `t` was given in), arc length from c, and whether there
+                        is strand there (ok false across a kerf: the blade is not stood in a gap).
+     Directions are the central difference of the centres a mm either side - the centres are good to 0.01 mm, which makes
+     that good to under a degree. s = 0 is `c` itself. Null if `c` is not on a strand. */
+  function centreline(soup, c, t, opts) {
+    opts = opts || {};
+    var step = opts.step || 0.5, maxTurn = (opts.maxTurn || 90) * DEG, maxLen = opts.maxLen || 60;
+    var gap = opts.gap == null ? 2.5 : opts.gap;
+    var pre = near(soup, c, maxLen + 10);
+    var t0 = norm(t);
+    var here = loopAt(near(pre, c, 6), c, t0);
+    if (!here) return null;
+    var area = here.area, tol = Math.max(0.9 * here.reach, 1);
+    function side(sign) {
+      var out = [], cur = c, dir = mul(t0, sign), len = 0, blind = 0, tail = 0;
+      while (len < maxLen) {
+        var p = add(cur, mul(dir, step));
+        var l = loopNearCentre(near(pre, p, 5), p, dir, tol, area);
+        if (l) {
+          var chord = norm(sub(l.c, cur));
+          dir = norm(add(mul(dir, 0.5), mul(chord, 0.5)));
+          len += len3(sub(l.c, cur)); cur = l.c; blind = 0; tail = out.length + 1;
+          out.push({ c: cur, ok: true });
+        } else {
+          blind += step;
+          if (blind > gap + 1e-9) break;                       // the strand has ended
+          len += step; cur = p;
+          out.push({ c: cur, ok: false });
+        }
+        if (Math.acos(Math.max(-1, Math.min(1, dot(dir, mul(t0, sign))))) >= maxTurn) break;
+      }
+      return out.slice(0, tail);                               // never end in a gap
+    }
+    var f = side(1), b = side(-1), pts = [];
+    for (var i = b.length - 1; i >= 0; i--) pts.push(b[i]);
+    var i0 = pts.length;
+    pts.push({ c: c, ok: true });
+    f.forEach(function (q) { pts.push(q); });
+    // arc length from c, and the directions
+    var s = new Array(pts.length), k;
+    s[i0] = 0;
+    for (k = i0 + 1; k < pts.length; k++) s[k] = s[k - 1] + len3(sub(pts[k].c, pts[k - 1].c));
+    for (k = i0 - 1; k >= 0; k--) s[k] = s[k + 1] - len3(sub(pts[k + 1].c, pts[k].c));
+    var w = Math.max(1, Math.round(1 / step));                // a mm either side
+    var samples = pts.map(function (q, i) {
+      var a = pts[Math.max(0, i - w)].c, z = pts[Math.min(pts.length - 1, i + w)].c;
+      var tt = norm(sub(z, a));                                 // the points run along +s, so this does too
+      return { c: q.c, t: tt, s: s[i], ok: q.ok };
+    });
+    // The last w samples at each end have only one side to difference, which reads the direction half a baseline
+    // early (a few degrees on a tight bend): carry the direction on from the two interior samples instead.
+    var n = samples.length;
+    if (n > 3 * w + 1) {
+      for (k = 0; k < w; k++) {
+        var m1 = w, m0 = 2 * w;                                 // two interior samples at the start, w apart
+        var tb = add(samples[m1].t, mul(sub(samples[m1].t, samples[m0].t), (m1 - k) / w));
+        samples[k].t = norm(tb);
+        var e1 = n - 1 - w, e0 = n - 1 - 2 * w, ke = n - 1 - k;
+        var te = add(samples[e1].t, mul(sub(samples[e1].t, samples[e0].t), (ke - e1) / w));
+        samples[ke].t = norm(te);
+      }
+    }
+    var oks = samples.filter(function (q) { return q.ok; });
+    return { samples: samples, sMin: oks[0].s, sMax: oks[oks.length - 1].s };
+  }
+  function len3(a) { return Math.sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]); }
+
+  var api = { NEAR_MM: NEAR_MM, near: near, sections: sections, loopAt: loopAt, directionAt: directionAt, traceAt: traceAt, advance: advance, centreline: centreline };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.NSO_Strand = api;
 })(typeof window !== 'undefined' ? window : (typeof globalThis !== 'undefined' ? globalThis : this));

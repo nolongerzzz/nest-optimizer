@@ -11,7 +11,10 @@
         along it (arc length, < 0.1 mm), the direction is right (< 1.5 degrees) - round a tight bend too.
      3. advance carries on across a gap the cord does not fill (a kerf an earlier cut left), lands on the far side
         where it should, and says `end` when the cord stops for good.
-     4. the sense of the direction is the same wherever it is found (canonical), and a hint keeps its own sense.  */
+     4. the sense of the direction is the same wherever it is found (canonical), and a hint keeps its own sense.
+     5. centreline: the section either side of a point, out to 90 degrees of turning - every sample on the centre line
+        (< 0.05 mm), its direction right (< 1.5 degrees), arc length right, ending 90 degrees round; across a gap the
+        samples inside are not `ok` and the section never ends in one; it stops at the cord's end and at `maxLen`.  */
 
 const path = require('path');
 const S = require(path.join(__dirname, '..', 'nso_strand.js'));
@@ -133,6 +136,48 @@ console.log('\n=== a gap and an end ===');
   const sense2 = dot(tt.t, tail.t) > 0 ? 1 : -1;
   const e = S.advance(soup, tt.c, [tt.t[0] * sense2, tt.t[1] * sense2, tt.t[2] * sense2], 8, {});
   check('marching off the end of the cord says `end`, with how far it got', e && e.end === true && e.moved > 1 && e.moved < 3.5, e ? 'moved ' + e.moved.toFixed(2) : 'null');
+}
+
+// ---- 5: the centre line, section by section --------------------------------------------------------------------
+console.log('\n=== the centre line either side of a point ===');
+{
+  const sp = makeSpiral({ r0: 8, k: 1.6, rise: 0, turns: 3, rad: 1.85 }), soup = soupOf([tube(sp, 0, sp.total)]);
+  const s0 = sp.total * 0.5, truth = sp.at(s0);
+  const tr = S.traceAt(soup, [truth.p[0], truth.p[1] + 1.8, truth.p[2]], {});
+  const sense = dot(tr.t, truth.t) > 0 ? 1 : -1;
+  const cl = S.centreline(soup, tr.c, tr.t, {});
+  check('a section is found', !!cl && cl.samples.length > 40, cl ? cl.samples.length + ' samples, ' + cl.sMin.toFixed(1) + ' to ' + cl.sMax.toFixed(1) + ' mm' : 'null');
+  if (cl) {
+    let worstC = 0, worstT = 0, worstS = 0;
+    cl.samples.forEach(q => {
+      const w = sp.at(s0 + sense * q.s);
+      worstC = Math.max(worstC, len(sub(q.c, w.p)));
+      worstT = Math.max(worstT, angle(q.t, w.t));
+      // along +s the direction runs the way s runs: forward on the curve when sense is +1
+      if (dot(q.t, [w.t[0] * sense, w.t[1] * sense, w.t[2] * sense]) < 0.99) worstT = 99;
+    });
+    check('every sample is on the centre line', worstC < 0.05, 'worst ' + worstC.toFixed(3) + ' mm');
+    check('...and its direction is right, along +s', worstT < 1.5, 'worst ' + worstT.toFixed(2) + ' deg');
+    const a = cl.samples[0], b = cl.samples[cl.samples.length - 1], turn = x => angle(x.t, cl.samples.find(q => q.s === 0).t);
+    check('it ends 90 degrees round, both ways', Math.abs(turn(a) - 90) < 4 && Math.abs(turn(b) - 90) < 4, turn(a).toFixed(1) + ' and ' + turn(b).toFixed(1) + ' deg');
+    const gaps = cl.samples.slice(1).map((q, i) => q.s - cl.samples[i].s);
+    check('the samples run along +s in steps of about 0.5 mm', gaps.every(g => g > 0.4 && g < 0.6), 'steps ' + Math.min(...gaps).toFixed(3) + ' to ' + Math.max(...gaps).toFixed(3));
+    check('s = 0 is the point itself', len(sub(cl.samples.find(q => q.s === 0).c, tr.c)) < 1e-9);
+  }
+  const capped = S.centreline(soup, tr.c, tr.t, { maxLen: 10 });
+  check('maxLen caps each way', capped && capped.sMax <= 10.6 && capped.sMin >= -10.6 && capped.sMax > 9, capped ? capped.sMin.toFixed(1) + ' to ' + capped.sMax.toFixed(1) : 'null');
+  // a gap in the middle of the section
+  const gapAt = s0 + sense * 6, GAP = 1.0;
+  const soupG = soupOf(sense > 0 ? [tube(sp, 0, gapAt - GAP / 2), tube(sp, gapAt + GAP / 2, sp.total)] : [tube(sp, 0, gapAt + GAP / 2 - GAP), tube(sp, gapAt + GAP / 2, sp.total)]);
+  const clg = S.centreline(soupG, tr.c, tr.t, { gap: 2 });
+  const holes = clg ? clg.samples.filter(q => !q.ok) : [];
+  check('across a kerf the samples inside are not ok, and the section does not end in one', clg && holes.length >= 1 && clg.samples[0].ok && clg.samples[clg.samples.length - 1].ok, holes.length + ' samples in the gap');
+  check('...and beyond it the strand goes on', clg && clg.sMax > 6 + 3, clg ? 'sMax ' + clg.sMax.toFixed(1) : 'null');
+  // the end of the cord
+  const tail = sp.at(sp.total - 4), tt = S.traceAt(soup, [tail.p[0], tail.p[1] + 1.8, tail.p[2]], {});
+  const cle = S.centreline(soup, tt.c, tt.t, {});
+  const dirEnd = dot(tt.t, tail.t) > 0 ? cle.sMax : -cle.sMin, dirIn = dot(tt.t, tail.t) > 0 ? -cle.sMin : cle.sMax;
+  check('it stops at the cord\'s end (about 4 mm on, not 90 degrees)', dirEnd > 2.5 && dirEnd < 4.6 && dirIn > 10, 'toward the end ' + dirEnd.toFixed(1) + ', the other way ' + dirIn.toFixed(1));
 }
 
 console.log('\n----------------------------------------------------------');
