@@ -40,8 +40,6 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { withApp, loadSTL, selectModel, ROOT } = require('./nso_app_harness');
-const { csgContext } = require('./nso_csg_node.js');
-const { writeSTL } = require('./nso_stl_io.js');
 
 let pass = 0, fail = 0;
 function check(name, cond, detail) {
@@ -59,22 +57,6 @@ const TUBE = path.join(ROOT, 'library', 'soften_test_03_thinwall_tube.stl');
 const V9 = path.join(ROOT, 'library', 'v9_mirror_factory.stl');
 
 /* ---- page helpers --------------------------------------------------------- */
-
-/* A 40 x 20 x 10 block with a 4 x 4 bump 2 mm proud on its +x wall (the bump is sunk 1 mm into the block, so the union has no seam), as an STL. */
-async function bumpyBlockSTL(file) {
-  const ctx = csgContext(), kern = ctx.NSO_CSG, wasm = await kern.load();
-  const box = (lo, hi) => {
-    const v = [[lo[0], lo[1], lo[2]], [hi[0], lo[1], lo[2]], [hi[0], hi[1], lo[2]], [lo[0], hi[1], lo[2]], [lo[0], lo[1], hi[2]], [hi[0], lo[1], hi[2]], [hi[0], hi[1], hi[2]], [lo[0], hi[1], hi[2]]];
-    const f = [[0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7], [0, 1, 5], [0, 5, 4], [1, 2, 6], [1, 6, 5], [2, 3, 7], [2, 7, 6], [3, 0, 4], [3, 4, 7]], o = [];
-    for (const t of f) for (const i of t) o.push(...v[i]);
-    return new Float32Array(o);
-  };
-  const a = kern.soupToManifold(wasm, box([0, 0, 0], [40, 20, 10])), b = kern.soupToManifold(wasm, box([39, 8, 3], [42, 12, 7]));
-  const u = a.add(b), soup = kern.manifoldToSoup(u);
-  a.delete(); b.delete(); u.delete();
-  writeSTL(file, soup);
-  return file;
-}
 
 const card = (page, fn, arg) => page.evaluate(fn, arg);
 const readout = page => page.evaluate(() => document.getElementById('crop-readout').textContent);
@@ -448,7 +430,7 @@ const snap = (page, id) => page.evaluate(i => {
     /* ================================================================= 5b */
     console.log('\n=== 5b. WALL ===');
     {
-    const BUMPY = await bumpyBlockSTL(path.join(OUTDIR, 'bumpy-block.stl'));
+    const BUMPY = path.join(ROOT, 'fixtures', 'crop-wall', 'block_bump.stl');   // 40 x 20 x 10, a 4 x 4 bump 2 mm proud on +x (tools/nso_crop_wall_fixtures.js)
     const bid = await loadSTL(page, BUMPY);
     await selectModel(page, bid);
     await reselect(page, bid);
@@ -562,6 +544,31 @@ const snap = (page, id) => page.evaluate(i => {
     await selectModel(page, hid);
     await reselect(page, hid);
 
+    /* The sphere and the cone, each with a bump on its curved side: there is no flat wall to put a line on, and a click
+       says so in words - no line, no shape's numbers, CROP off - rather than lay a line on a facet. */
+    for (const [label, file] of [['sphere', 'sphere_bump.stl'], ['cone', 'cone_bump.stl']]) {
+      const cid = await loadSTL(page, path.join(ROOT, 'fixtures', 'crop-wall', file));
+      await selectModel(page, cid);
+      await reselect(page, cid);
+      const cb = await world(page, cid), cm = [0, 1, 2].map(k => (cb.lo[k] + cb.hi[k]) / 2);
+      await frame(page, [cb.hi[0] + 70, cm[2] + 30, -cm[1] + 40], [cm[0], cm[2], -cm[1]]);
+      await page.click('#btn-crop-shape-wall');
+      await settled(page);
+      const at = await page.evaluate(i => { const p = state.placed.find(q => q.sourceId === i), rc = state.renderer.domElement.getBoundingClientRect();
+        for (let gx = 0.3; gx < 0.7; gx += 0.01) for (let gy = 0.3; gy < 0.7; gy += 0.01) {
+          const x = rc.left + gx * rc.width, y = rc.top + gy * rc.height; if (document.elementFromPoint(x, y) !== state.renderer.domElement) continue;
+          state.raycaster.setFromCamera(new THREE.Vector2(gx * 2 - 1, 1 - gy * 2), state.camera);
+          const hit = state.raycaster.intersectObject(p.mesh, false).filter(h => h.faceIndex != null)[0];
+          if (hit) return { x, y }; } return null; }, cid);
+      check(label + ': a point on its curved side is in view to click', !!at, JSON.stringify(at));
+      await page.mouse.click(at.x, at.y);
+      await page.waitForTimeout(200);
+      const refused = await page.evaluate(() => ({ st: document.getElementById('status').textContent, face: !!NSO_CropCard.state().wall.face, handles: NSO_CropCard.handles().length,
+        crop: document.getElementById('btn-crop').disabled, ro: document.getElementById('crop-readout').textContent }));
+      check(label + ': a click on the curve is refused in words - a curved surface, not a flat wall - and nothing is drawn', /curved surface, not a flat wall/.test(refused.st) && !refused.face && refused.handles === 0 && refused.crop &&
+        /^Wall: click a flat wall/.test(refused.ro), refused.st.slice(0, 100));
+      await page.click('#btn-crop-cancel');
+    }
     }
 
     /* ================================================================= 5 */
@@ -762,7 +769,7 @@ const snap = (page, id) => page.evaluate(i => {
     check('a new loop replaces the old one and is planned', await page.evaluate(l => JSON.stringify(NSO_CropCard.state().lasso) !== l, lasso8) && ls2.plan && ls2.plan.ok, JSON.stringify(ls2));
 
     // a loop that sees nothing of the piece refuses in words, CROP off
-    await loop(ellipse(rect.x1 + 200, rect.y0 - 10, 30, 20, 12));
+    await loop(ellipse((rect.x0 + rect.x1) / 2, rect.y1 + 150, 30, 20, 12));      // below the piece, clear of the pieces panel on the right
     await page.waitForFunction(() => { const S = NSO_CropCard.state(); return !S.timer && S.plan && !S.plan.ok; }, null, { timeout: 20000 });
     ro = await readout(page);
     check('a loop round empty air says so, in the refusal colour, and CROP is off', /holds nothing/.test(ro) && await page.evaluate(() =>

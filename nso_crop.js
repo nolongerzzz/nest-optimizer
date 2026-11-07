@@ -719,6 +719,25 @@
         }
       }
     }
+    /* One or two triangles whose every edge borders a triangle that bends away by only a few degrees is not a wall but a
+       facet of a curved surface (a sphere's, a cone's): Wall has no line to draw on it, and a line on a facet would
+       be a sliver of nothing. Said in words, so the click is not mistaken for a wall that has nothing on it. */
+    if (patch.length <= 2) {
+      var cosS = Math.cos(20 * Math.PI / 180), bordered = 0, smooth = 0;     // by edge length: a cone's slope has one short edge on the base
+      patch.forEach(function (ti) {
+        for (var e4 = 0; e4 < 3; e4++) {
+          var ea = tris[ti][e4], eb = tris[ti][(e4 + 1) % 3], l4 = edges.get(ek(ea, eb)) || [];
+          var len = Math.hypot(pts[ea][0] - pts[eb][0], pts[ea][1] - pts[eb][1], pts[ea][2] - pts[eb][2]);
+          for (var q5 = 0; q5 < l4.length; q5++) {
+            if (inPatch[l4[q5]]) continue;
+            bordered += len;
+            var nb2 = nrm[l4[q5]];
+            if (nb2[0] * n0[0] + nb2[1] * n0[1] + nb2[2] * n0[2] >= cosS) smooth += len;
+          }
+        }
+      });
+      if (bordered > 0 && smooth >= 0.9 * bordered) return { reason: 'that is a curved surface, not a flat wall - Wall works on flat walls (click a face that is flat)', curved: true };
+    }
     // the plane's own frame: n out, u along (square to the plate where it can be), w = n x u
     var up = Math.abs(n0[2]) > 0.9 ? [0, 1, 0] : [0, 0, 1];
     var uu = [up[1] * n0[2] - up[2] * n0[1], up[2] * n0[0] - up[0] * n0[2], up[0] * n0[1] - up[1] * n0[0]], ul = Math.hypot(uu[0], uu[1], uu[2]);

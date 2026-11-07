@@ -28,3 +28,8 @@ Branch `claude-wip`. Full write-up: **`docs/CROP.md`, "The card"**; Lift's side 
   (Subtract the copy for a clean wall). Shift-click picks another wall. Engine `{ kind: 'wall', ... }` and
   `NSO_Crop.wallFace`; the line is held 0.5 micron outside where it is set (see docs/CROP.md). Gates: `crop:engine` 6c,
   `crop:drive` 5b. One wall at a time; the outline is the wall's own, not editable yet.
+- **Wall: the bump fixtures and the curved-surface refusal** (2026-11-07): `fixtures/crop-wall/` has `block_bump.stl`,
+  `sphere_bump.stl` and `cone_bump.stl` (made by `tools/nso_crop_wall_fixtures.js` with the app's kernel; closed). Wall
+  on the sphere or the cone's slope finds one facet of the curve; it now refuses in words ("that is a curved surface,
+  not a flat wall") rather than draw a line on a sliver. The cone's base is a wall (`crop:engine` 6d: 1 mm into it is
+  the closed form, within 0.05%). `crop:drive` 5b clicks the sphere and the cone with a real mouse.

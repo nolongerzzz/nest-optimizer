@@ -69,6 +69,17 @@ The line starts flush on the wall (0). Move it by:
   line at the bump's height (and the readout says nothing stands outside it);
 - a **Shift-click** on another wall of the piece picks that one instead (the line back at 0).
 
+**Wall is for flat walls.** On a sphere, or a cone's slope, a click lands on one facet of the curve, and
+Wall says so in words - "that is a curved surface, not a flat wall" - and draws nothing, rather than lay a line on
+a sliver (a one- or two-triangle patch all of whose edges border triangles bending away by under 20° is read as
+a facet of a curve). A cone's flat base is a wall like any other. Taking a bump off a curved base is not what
+this tool does yet.
+
+The test pieces are in `fixtures/crop-wall/` (`block_bump.stl`, `sphere_bump.stl`, `cone_bump.stl`, written by
+`node tools/nso_crop_wall_fixtures.js`): a 40 × 20 × 10 block with a 4 × 4 mm square bump 2 mm proud on its +x wall,
+an R15 sphere with a dome bump (R3, 3 mm proud) at +x, and an R15 × 25 cone with a Ø4 pin square to its slope,
+4 mm proud, 8 mm up. Load them with Import to try Wall and Lift on them.
+
 The readout: `Wall 20 × 10 mm, line +0.00 mm · holds 12 faces, 0.03 cm³`. The engine keeps the
 line 0.5 µm outside where it is set (`DEFAULTS.wallNudgeMm`): a plane within a millionth of a mm
 of the wall's own face (the noise of a rotated float32 mesh) leaves the kernel a film that the

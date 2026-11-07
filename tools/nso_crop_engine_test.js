@@ -666,6 +666,38 @@ async function crop(label, piece, shape, expect) {
   }
 
   /* =========================================================================
+     6d. Wall on the sphere and the cone (tools/nso_crop_wall_fixtures.js: each has a bump on its curved side)
+     Wall draws its line on a FLAT wall. On a sphere or a cone's slope there is none - a click lands on one facet of the
+     curve - and it says so in words rather than lay a line on a sliver. The cone's own flat base is a wall, and cropping
+     1 mm into it is a closed form: the cone's volume in z < 1, over the 96-gon base.
+     ========================================================================= */
+  console.log('\n=== 6d. wall: the sphere and the cone with their bumps ===');
+  {
+    const fx = await require('./nso_crop_wall_fixtures.js').build();
+    check('fixtures: block, sphere and cone, each with its bump, are closed', ['block', 'sphere', 'cone'].every(k => C.census(fx[k]).open === 0 && C.census(fx[k]).repeated === 0));
+    const triWhere = (soup, f) => { for (let t = 0; t < soup.length / 9; t++) { const o = t * 9, c = [0, 1, 2].map(a => (soup[o + a] + soup[o + 3 + a] + soup[o + 6 + a]) / 3); if (f(c, o)) return t; } return -1; };
+    // the sphere (R15, centre (0,0,15)): a facet 7 mm round from the dome bump on +x; the cone: a facet of the slope 5 mm from the pin
+    const st = triWhere(fx.sphere, c => Math.abs(Math.hypot(c[0], c[1], c[2] - 15) - 15) < 0.05 && c[0] > 0 && Math.hypot(c[1], c[2] - 15) > 6.5 && Math.hypot(c[1], c[2] - 15) < 8.5);
+    const ct = triWhere(fx.cone, c => c[2] > 3 && c[2] < 20 && Math.abs(Math.hypot(c[0], c[1]) - 15 * (1 - c[2] / 25)) < 0.05 && c[0] > 0 && Math.hypot(c[1], c[2] - 8) > 4.5 && Math.hypot(c[1], c[2] - 8) < 7);
+    check('a triangle of each curved surface was found to click', st >= 0 && ct >= 0, st + ', ' + ct);
+    const rs = C.wallFace(fx.sphere, st), rc = C.wallFace(fx.cone, ct);
+    check('a click on the sphere is refused in words: a curved surface, not a flat wall', !rs.ring && rs.curved === true && /curved surface, not a flat wall/.test(rs.reason), rs.reason);
+    check('a click on the cone\'s slope is refused the same way', !rc.ring && rc.curved === true && /curved surface, not a flat wall/.test(rc.reason), rc.reason);
+    // the cone's base is flat: one wall of 94 triangles, a 96-gon
+    const bt = triWhere(fx.cone, (c, o) => [2, 5, 8].every(a => Math.abs(fx.cone[o + a]) < 1e-6));
+    const FB = C.wallFace(fx.cone, bt), A96 = 0.5 * 96 * 225 * Math.sin(2 * Math.PI / 96);
+    check('the cone\'s base is a wall: faces down, a 96-gon of 706.4 mm2, the slope\'s foot its outline', FB.ring && near(FB.n[2], -1, 1e-9) && near(FB.areaMm2, A96, 0.01) && FB.ring.length === 96, FB.ring ? FB.ring.length + ' corners, ' + f3(FB.areaMm2) : FB.reason);
+    // 1 mm into the base: the cone's volume under z = 1 is  A96 * (25/3) * (1 - (24/25)^3)
+    const want = A96 * (25 / 3) * (1 - Math.pow(24 / 25, 3));
+    await crop('wall: 1 mm into the cone\'s base holds the foot of the cone', { rawTris: fx.cone }, { kind: 'wall', o: FB.o, n: FB.n, u: FB.u, ring: FB.ring, off: -1 }, { volume: want, tol: 0.2, validate: true });
+    check('...and the line AT the base holds nothing (nothing of the cone is below it)', !(await C.plan({ rawTris: fx.cone }, { kind: 'wall', o: FB.o, n: FB.n, u: FB.u, ring: FB.ring, off: 0 })).ok);
+    // the block still takes its bump: its wall is flat, its bump the only thing proud of it
+    const bw = triWhere(fx.block, (c, o) => [0, 3, 6].every(a => Math.abs(fx.block[o + a] - 40) < 1e-6) && Math.min(fx.block[o + 1], fx.block[o + 4], fx.block[o + 7]) < 4);
+    const FW = C.wallFace(fx.block, bw);
+    await crop('wall: the generator\'s block, the line at its +x wall holds the 4 x 4 x 2 bump', { rawTris: fx.block }, { kind: 'wall', o: FW.o, n: FW.n, u: FW.u, ring: FW.ring, off: 0 }, { volume: 32, tol: 0.05 });
+  }
+
+  /* =========================================================================
      7. refusals
      ========================================================================= */
   console.log('\n=== 7. refusals: only a shape that holds nothing, or a result that is not closed ===');
