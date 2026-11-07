@@ -4148,7 +4148,7 @@ function onCanvasPointerDown(event) {
     const ballObj = state.cutHelper && state.cutHelper.children.find(c => c.userData && c.userData.cutBall);
     // (only on the Full blade: on the Sized blade and the Notch a click on the piece is how the blade is placed, and the
     // ball, standing just over where it was last put, must not swallow a click on that same spot)
-    const ballHit = ballObj && !(state.cutBlade && state.cutBlade.sized) ? state.raycaster.intersectObject(ballObj, false)[0] : null;
+    const ballHit = ballObj && !state.cutHideBlade && !(state.cutBlade && state.cutBlade.sized) ? state.raycaster.intersectObject(ballObj, false)[0] : null;
     if (modelHits.length && !(ballHit && ballHit.distance <= modelHits[0].distance)) {
       let obj = modelHits[0].object;
       while (obj && obj.userData.placedIndex == null && obj.parent) obj = obj.parent;
@@ -4167,7 +4167,8 @@ function onCanvasPointerDown(event) {
           }
           if (p.sourceId !== state.editId) selectPlaced(idx);
           // Crop's card: the click picks the piece; there is no blade to drop. Nor has the whole-plate blade.
-          if (state.cutTool === 'crop' || (typeof cutPlateOn === 'function' && cutPlateOn())) { event.stopPropagation(); return; }
+          // (Hide blade: the same - the click picks the piece and the blade, hidden, is not placed or dragged.)
+          if (state.cutTool === 'crop' || state.cutHideBlade || (typeof cutPlateOn === 'function' && cutPlateOn())) { event.stopPropagation(); return; }
           // Follow strand: the click finds the cord under it and the blade stands square across it there.
           if (typeof cutFollowOn === 'function' && cutFollowOn()) { cutFollowFromHit(modelHits[0]); event.stopPropagation(); return; }
           // Cut's card: the blade drops where the click landed, square to the
@@ -4182,8 +4183,8 @@ function onCanvasPointerDown(event) {
     }
   }
 
-  // Cutter plane drag - never orbit
-  if (state.cutHelper) {
+  // Cutter plane drag - never orbit (not while the blade is hidden: a hidden blade answers no press)
+  if (state.cutHelper && !state.cutHideBlade) {
     const cutHits = state.raycaster.intersectObject(state.cutHelper, true);
     if (cutHits.length) {
       setOrbitFromPlate(false);
@@ -4226,7 +4227,7 @@ function onCanvasPointerDown(event) {
         }
         if (state.cutterOpen && hit && hit.sourceId != null && !cropCardIdle() && !(state.cutTool === 'crop' && typeof NSO_LIFT_PLATE !== 'undefined' && NSO_LIFT_PLATE.ownsDrop && NSO_LIFT_PLATE.ownsDrop(hit))) {
           if (hit.sourceId !== state.editId) selectPlaced(idx);
-          if (state.cutTool === 'crop' || (typeof cutPlateOn === 'function' && cutPlateOn())) { event.stopPropagation(); return; }
+          if (state.cutTool === 'crop' || state.cutHideBlade || (typeof cutPlateOn === 'function' && cutPlateOn())) { event.stopPropagation(); return; }
           if (typeof cutFollowOn === 'function' && cutFollowOn()) { cutFollowFromHit(modelHits[0]); event.stopPropagation(); return; }
           state.cutDragging = true;
           if (state.controls) state.controls.enabled = false;

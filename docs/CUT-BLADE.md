@@ -28,6 +28,13 @@ within reach);
 the number box takes anything, and the slider's range grows to hold what it is
 given, so a slider never sits at its end while its box says something else.
 
+**Hide blade.** A box at the top of the Cut card hides the blade - the per-piece blade with its tab, and the
+whole-plate blade - so a piece can be turned or leaned without the blade moving about on screen. While it is hidden a
+click on a piece only picks it (the blade is not placed or dragged, and a press where the hidden tab was takes no hold),
+the Rotate piece wheel and everything else on the card work as usual, and **Cut is off** (greyed, with the reason in its
+tooltip): nobody should cut at a plane they cannot see. It is a toggle for use while the card is open, not a setting: an
+Undo keeps it, and nothing else does - shutting the card clears it, and the blade is out whenever the card opens.
+
 **The tab.** The blade carries a tab on the front-left end of its top edge, as the place to take hold of it: a flat bar
 running straight out from the blade with a ball on its end. A thin blade is hard to catch, and the tab is not: press the ball or
 the bar and drag, and the blade slides (the drag starts from where you took hold, so taking hold moves nothing). It is built

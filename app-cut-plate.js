@@ -270,10 +270,11 @@ function cutPlateSync() {
   const readout = document.getElementById('cut-plate-readout');
   if (readout) readout.textContent = cutPlateReadout(st.height, st.keep, plan, pieces);
   const btn = document.getElementById('btn-cut');
-  if (btn) btn.disabled = !plan.cut;
+  if (btn) btn.disabled = !plan.cut || (typeof cutBladeHidden === 'function' && cutBladeHidden());
   if (!state.cutPlateHelper || !state.cutPlateHelper.parent) cutPlateBuildHelper(pieces);
   cutPlatePlaceHelper(st.height);
   cutPlateUpdateSection(pieces, plan);
+  if (typeof cutApplyHide === 'function') cutApplyHide();
   return plan;
 }
 

@@ -816,6 +816,38 @@ function removeCutHelper() {
    runs on every selection change while the card is open. */
 let cutterWasTool = null;
 
+/* HIDE BLADE. The blade (the per-piece one with its tab, and the whole-plate one) is not drawn and answers no press, so a piece can be
+   turned without the blade moving about on screen. While it is hidden a click on a piece only picks it (app-core.js), and Cut is off:
+   nobody should cut at a plane they cannot see. It is a toggle for use in the card, not a setting: it survives an Undo (the card stays open) and nothing else - the card's closing clears it and the
+   blade is out whenever the card opens (openCutter). */
+function cutBladeHidden() { return !!state.cutHideBlade; }
+
+/** Apply the hide to what is drawn, the Cut button and the box; cheap, so every update calls it. */
+function cutApplyHide() {
+  const hide = cutBladeHidden();
+  if (state.cutHelper) state.cutHelper.visible = !hide;
+  if (state.cutPlateHelper) state.cutPlateHelper.visible = !hide;
+  if (typeof document === 'undefined') return;
+  const box = document.getElementById('chk-cut-hide-blade');
+  if (box) box.checked = hide;
+  const btn = document.getElementById('btn-cut');
+  if (btn && hide) {
+    btn.disabled = true;
+    btn.title = 'The blade is hidden: show it (untick Hide blade) to cut.';
+  }
+}
+
+function cutSetHideBlade(on) {
+  state.cutHideBlade = !!on;
+  if (state.cutHideBlade) { state.cutDragging = false; state.cutFollowDragging = false; }
+  cutApplyHide();
+  if (typeof updateCutterUI === 'function') updateCutterUI();
+  if (typeof syncCutBladeUI === 'function') syncCutBladeUI();
+  setStatus(state.cutHideBlade
+    ? 'Blade hidden: turn or move the piece without it. Untick Hide blade to cut.'
+    : 'Blade shown.');
+}
+
 function updateCutterUI() {
   if (cutterWasTool && !state.cutterOpen) {
     const menu = document.getElementById(cutterWasTool === 'crop' ? 'menu-crop' : 'menu-cut');
@@ -834,11 +866,12 @@ function updateCutterUI() {
         : 'Click a piece to drop a square blade on it.')
       : 'Cutter off.';
   }
-  if (cutBtn) cutBtn.disabled = !cutting || !getActiveModel() || !state.cutHelper;
+  if (cutBtn) cutBtn.disabled = !cutting || !getActiveModel() || !state.cutHelper || cutBladeHidden();
   if (cutting && typeof cutPlateOn === 'function' && cutPlateOn()) cutPlateSync();   // the plate blade needs no picked piece
   const tools = document.getElementById('cutter-tools');
   if (tools) tools.classList.toggle('is-open', cutting);
   syncCutRightSideOutButton();
+  cutApplyHide();
 }
 
 /** Is the cutter live for `tool` ('cut' or 'crop')? */
@@ -872,6 +905,7 @@ function openCutter(tool) {
   state.cutBlade = null;
   state.cutBladeAt = null;
   state.cutFollowAt = null;
+  state.cutHideBlade = false;                  // Hide blade is a toggle for use in the card: the blade is out whenever the card opens
   state.cutRotateAxis = 'h';
   if (typeof cutRotateRef !== 'undefined') cutRotateRef.idx = -1;
   state.editId = null;
@@ -942,6 +976,7 @@ function cutWireCards() {
         // this piece": opening Join or Scale next works on the piece just
         // cut, and Join's A, set before its card opened, survives.
         const keepIndex = state.selectedIndex, keepId = state.editId;
+        state.cutHideBlade = false;                 // the card is shut: the next opening starts with the blade shown
         closeCutter(false);
         if (keepIndex >= 0 && state.placed && state.placed[keepIndex] && typeof selectPlaced === 'function') {
           selectPlaced(keepIndex);
@@ -1759,6 +1794,7 @@ function buildCutHelper() {
   if (parent) nsoHelpers.attach(parent, group, 'cut', { interactive: true });
   state.cutHelper = group;
   updateCutHelper();
+  cutApplyHide();
 }
 
 /* Cut's session, for the helper registry: live while the cutter is armed for
@@ -1816,6 +1852,7 @@ function updateCutHelper() {
   state.cutHelper.userData.cutDeg = info.deg || 0;
   state.cutHelper.userData.cutBevel = info.bevel || 0;
   cutPlaceBall(state.cutHelper, info);
+  state.cutHelper.visible = !cutBladeHidden();
 }
 
 function axisCoord(ax, x, y, z) {
@@ -3648,6 +3685,7 @@ function syncCutBladeUI() {
       ? 'Cut the sized blade\'s slot out of the piece: only what the blade box holds comes out, kerf and all' +
         (cutStrandOn(b) ? ' - and of that, only the strand under the click' : '') + '. One Undo puts it back.'
       : 'Split the piece at the blade: two pieces that meet exactly at the plane and add back to the original - no kerf. One Undo puts it back.';
+  cutApplyHide();
 }
 
 function cutBladeRefresh() {
@@ -3688,6 +3726,8 @@ function cutWireBladeControls() {
       cutBladeRefresh();
     });
   });
+  const hideBox = document.getElementById('chk-cut-hide-blade');
+  if (hideBox) hideBox.addEventListener('change', function () { cutSetHideBlade(hideBox.checked); });
   if (typeof cutFollowWire === 'function') cutFollowWire();
   syncCutBladeUI();
 }

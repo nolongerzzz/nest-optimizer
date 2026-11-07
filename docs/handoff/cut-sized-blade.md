@@ -190,3 +190,13 @@ corner, then lays the tab in the blade's plane from it: the bar's upper edge is 
 the top edge out to where the bar meets the ball, the long way round the ball, and back along the bar's lower edge to the blade's side edge. `nso_wire_cut_blade_view_test` gates it: outline starts on the corner and its first
 run is the blade's top edge carried on (cross product 0, same sense, level), the arc is on the ball's circle, it ends 3 mm down, the bar is a thin box with its top at the blade's top, the outline is the frame's colour and the fill
 the sheet's, drawn through the piece, front-left chosen; a ray at the ball or the bar hits a tab handle.
+
+### Sixteenth round (2026-11-07): Hide blade
+
+Asked for: a hide blade option in the Cut card, to turn pieces without the blade moving about; and, when it was first built to survive a re-open: it is a toggle for use in the card, the blade is out whenever the card opens.
+`chk-cut-hide-blade` at the top of the card (`index.html`); `state.cutHideBlade`, `cutSetHideBlade`, `cutApplyHide` (`app-cut.js`) set `.visible` on `state.cutHelper` and `state.cutPlateHelper` on every build / update, grey the Cut
+button (and say why in its title; `updateCutterUI`, `cutPlateSync` and `syncCutBladeUI` all honour it) and tick the box. `app-core.js`: while hidden the press handlers do not place or drag the blade (a click on a piece just picks it;
+the ball pre-empt and the helper drag branch are skipped - a hidden object still answers a ray, so it has to be switched off there). It is cleared by `openCutter` and by the card's closing (`cutWireCards`); an Undo leaves the
+tool, and so the toggle, as it was. (Redo shuts the whole Cut card for every tool, so it ends it like any close - found by driving the real Undo and Redo, after a same-tick close-and-reopen simulation gave a false result: the card's
+observer reads a closed card with the tool open as the user shutting it.) Tests: `nso_cut_rotate_dial_drive_check` (box, hidden, Cut off with reason, real click and drag on the piece place nothing, a press where the tab was takes no hold,
+the wheel still turns the piece, the whole-plate blade hides, an Undo keeps it, unticking restores and a click places again, shutting the card clears it, opening always shows the blade), `nso_wire_cut_redesign_test` (control order).

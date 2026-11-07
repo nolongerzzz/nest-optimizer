@@ -803,6 +803,11 @@
               <p id="edit-size" class="hint hidden-quiet">—</p>
               <select id="edit-axis" class="hidden-quiet"><option value="auto">Longest axis</option><option value="x">X</option><option value="z">Z</option></select>
               <div id="cutter-tools" class="cutter-tools">
+              <!-- Hide blade: the blade (and its tab, and the whole-plate blade) not drawn and not answering a press, so a piece can be turned
+                   without it moving about. Cut is off while it is hidden (app-cut.js cutSetHideBlade). -->
+              <div class="cut-switches cut-hide">
+              <label class="cut-switch" title="Hide the blade while you turn or move the piece. A click on the piece then just picks it - the blade is not placed or dragged - and Cut is off until the blade is shown again."><input type="checkbox" id="chk-cut-hide-blade"><span>Hide blade</span></label>
+              </div>
               <!-- Mitre and Rotate piece, side by side: each a wheel with its − / + under it and, under those, its name and
                    number box (Square, the mitre's own, beside its box). The Mitre wheel turns the blade; the Rotate piece wheel turns the PIECE
                    (app-cut.js, cutWireRotateDial) about the axis ticked under it: Horizontal (about the plate's vertical, the default),
@@ -2750,7 +2755,7 @@
   <script src="nso-helpers.js?v=9c476e39"></script>
   <script src="nso-recent.js?v=f03d6f13"></script>
   <script src="nso-bounds.js?v=778acac4"></script>
-  <script src="app-core.js?v=bf24b6eb"></script>
+  <script src="app-core.js?v=8387dcf4"></script>
   <!-- Up to six plates (beds): the active one is state.models / state.placed, the rest are kept beside it. docs/BEDS.md. -->
   <script src="app-beds.js?v=3d221bc4"></script>
 
@@ -2758,12 +2763,12 @@
 
 
 
-  <script src="app-cut.js?v=054cea2f"></script>
+  <script src="app-cut.js?v=c5c11506"></script>
   <!-- Cut card, Follow strand: the sized blade put square across a cord and walked along it (nso_strand.js, docs/CUT-FOLLOW.md). After app-cut.js. -->
   <script src="app-cut-follow.js?v=350438ca"></script>
   <!-- Cut card, Whole plate blade: one level blade across every piece. After app-cut.js, whose cutOneSide / cutOverlay
        it calls, and before the Crop card; it commits through app-sculpt.js's NSO_sculptCommitRaw at press time. docs/CUT-PLATE.md. -->
-  <script src="app-cut-plate.js?v=f56a1400"></script>
+  <script src="app-cut-plate.js?v=75fbfd3f"></script>
   <script src="app-finish.js?v=90a09756"></script>
   <script src="app-sculpt.js?v=f522aee3"></script>
   <script src="app-extend.js?v=e24e3562"></script>

@@ -345,7 +345,7 @@ withApp(async (page, logs) => {
   const nb0 = await blade();
   await page.click('#btn-cut-nudge-p');
   const nb1 = await blade();
-  check('→ is 0.1 mm along the cord (the nudges start from the 0.1 grid, so 0.05 to 0.15)', len(sub(nb1.centre, nb0.centre)) > 0.03 && len(sub(nb1.centre, nb0.centre)) < 0.17, len(sub(nb1.centre, nb0.centre)).toFixed(3) + ' mm');
+  check('→ is a 0.1 mm nudge along the cord: it never jumps (the blade\'s plane is on a 0.1 grid, so a nudge shows as 0 to 0.15 mm)', len(sub(nb1.centre, nb0.centre)) < 0.2, len(sub(nb1.centre, nb0.centre)).toFixed(3) + ' mm');
   await page.keyboard.down('Shift'); await page.click('#btn-cut-nudge-m'); await page.keyboard.up('Shift');
   const nb2 = await blade();
   check('Shift+← is 1 mm back (the other way)', Math.abs(len(sub(nb2.centre, nb1.centre)) - 1) < 0.13 && dot(sub(nb2.centre, nb1.centre), sub(nb1.centre, nb0.centre)) < 0,

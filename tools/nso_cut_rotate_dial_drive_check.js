@@ -17,6 +17,9 @@
    - One Undo point for a drag, and Undo gives the heading back; a locked piece is not turned.
    - The Mitre's 90 button sits under Square and jumps the blade to the opposite direction (mitre 90): the blade's normal turns
      a quarter-turn about the vertical; Square takes it back.
+   - Hide blade (a box at the top of the card): the blade, its tab and the whole-plate blade are not drawn; a real click on the piece
+     only picks it (the blade is not placed or dragged, a press where the hidden tab was takes no hold); the wheel still turns the
+     piece; Cut is off while hidden; it survives an Undo, and nothing else: shutting the Cut card clears it and the blade is out whenever the card opens.
    - The axes: a tick each for Horizontal (ticked by default), Front/back and Side/side, one at a time (the one in
      use cannot be cleared); the wheel then turns the piece about it. A lean reads the piece's tilt from level, 0 flat.
      Front/back tips it along its length (its ends go up and down), Side/side across it. The same wheel, box, - / +,
@@ -342,6 +345,81 @@ withApp(async (page, logs) => {
     await page.fill('#cut-rotate-deg', '0'); await page.press('#cut-rotate-deg', 'Tab');
     await page.click('#chk-cut-rot-h');
     await page.waitForTimeout(150);
+  }
+
+  console.log('Hide blade');
+  {
+    const hbox = await R('chk-cut-hide-blade');
+    check('the Hide blade box is at the top of the card, unticked', (await page.$eval('#chk-cut-hide-blade', e => e.checked)) === false && hbox.y < md.y - 10, 'box y ' + hbox.y.toFixed(0) + ', wheel y ' + md.y.toFixed(0));
+    check('blade shown, Cut on', await page.evaluate(() => !!state.cutHelper && state.cutHelper.visible === true && !document.getElementById('btn-cut').disabled));
+    const snap = () => page.evaluate(() => ({ cutT: state.cutT, at: JSON.stringify(state.cutBladeAt && state.cutBladeAt.local), drag: state.cutDragging, sel: state.selectedIndex, mitre: state.cutMiterDeg }));
+    const s0 = await snap();
+    await page.check('#chk-cut-hide-blade');
+    await page.waitForTimeout(100);
+    const h1 = await page.evaluate(() => ({ vis: state.cutHelper.visible, dis: document.getElementById('btn-cut').disabled, title: document.getElementById('btn-cut').title, flag: state.cutHideBlade }));
+    check('ticked: the blade is not drawn, Cut is off and says why', h1.vis === false && h1.dis === true && /hidden/i.test(h1.title) && h1.flag === true, JSON.stringify(h1));
+    // a real click on the piece, off its middle: it picks the piece and does not place the blade
+    const pc = await page.evaluate(() => { const m = state.placed[state.selectedIndex].mesh, b = new THREE.Box3().setFromObject(m), c = b.getCenter(new THREE.Vector3());
+      const w = [c.x + 8, b.max.y, c.z - 6], v = new THREE.Vector3(...w).project(state.camera), r = state.renderer.domElement.getBoundingClientRect();
+      return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height }; });
+    await page.mouse.move(pc.x, pc.y); await page.mouse.down();
+    const during = await snap();
+    await page.mouse.move(pc.x + 40, pc.y + 10, { steps: 5 });
+    await page.mouse.up();
+    const s1 = await snap();
+    check('a real click and drag on the piece does not place or drag the blade', during.drag === false && s1.cutT === s0.cutT && s1.at === s0.at, JSON.stringify({ cutT: [s0.cutT, s1.cutT], dragging: during.drag }));
+    check('...the piece stays picked', s1.sel === s0.sel && s1.sel >= 0);
+    // where the hidden tab was: a press takes no hold
+    const tp = await page.evaluate(() => { const ball = state.cutHelper.children.find(c => c.userData.cutBall); ball.updateMatrixWorld(true);
+      const w = new THREE.Vector3().setFromMatrixPosition(ball.matrixWorld), v = w.clone().project(state.camera), r = state.renderer.domElement.getBoundingClientRect();
+      return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height }; });
+    await page.mouse.move(tp.x, tp.y); await page.mouse.down();
+    const onTab = await snap();
+    await page.mouse.up();
+    check('a press where the hidden tab was takes no hold of the blade', onTab.drag === false);
+    // the wheel still turns the piece
+    await page.fill('#cut-rotate-deg', '30'); await page.press('#cut-rotate-deg', 'Tab');
+    await page.waitForTimeout(150);
+    const rot = await page.evaluate(() => ({ h: cutPieceHeading(), vis: state.cutHelper.visible }));
+    check('the Rotate piece wheel still turns the piece, the blade staying hidden', rot.h === 30 && rot.vis === false, JSON.stringify(rot));
+    await page.fill('#cut-rotate-deg', '0'); await page.press('#cut-rotate-deg', 'Tab');
+    // the Whole plate blade hides too
+    await page.click('#btn-cut-blade-plate');
+    await page.waitForTimeout(150);
+    const pl = await page.evaluate(() => ({ vis: state.cutPlateHelper ? state.cutPlateHelper.visible : null, dis: document.getElementById('btn-cut').disabled }));
+    check('the whole-plate blade is hidden too, and Cut is off', pl.vis === false && pl.dis === true, JSON.stringify(pl));
+    await page.click('#btn-cut-blade-full');
+    await page.waitForTimeout(150);
+    // an Undo leaves the tool open and the blade hidden (a Redo shuts the whole Cut card, as it does for every tool, so that starts again)
+    await page.fill('#cut-rotate-deg', '25'); await page.press('#cut-rotate-deg', 'Tab');
+    await page.waitForTimeout(150);
+    await page.click('#btn-undo'); await page.waitForTimeout(250);
+    const afterUndo = await page.evaluate(() => ({ flag: state.cutHideBlade, open: state.cutterOpen, vis: state.cutHelper ? state.cutHelper.visible : null, box: document.getElementById('chk-cut-hide-blade').checked, dis: document.getElementById('btn-cut').disabled, h: cutPieceHeading() }));
+    check('an Undo of a turn keeps the blade hidden and Cut off, and the wheel reads the pose that came back', afterUndo.flag === true && afterUndo.open === true && afterUndo.vis === false && afterUndo.box && afterUndo.dis && afterUndo.h === 0, JSON.stringify(afterUndo));
+    // untick: the blade is back, and a click places it again
+    await page.uncheck('#chk-cut-hide-blade');
+    await page.waitForTimeout(100);
+    const h2 = await page.evaluate(() => ({ vis: state.cutHelper.visible, dis: document.getElementById('btn-cut').disabled }));
+    check('unticked: the blade is drawn and Cut is on', h2.vis === true && h2.dis === false, JSON.stringify(h2));
+    await page.mouse.click(pc.x, pc.y);
+    await page.waitForTimeout(150);
+    const s2 = await snap();
+    check('...and a click on the piece places the blade again', s2.cutT !== s0.cutT || s2.at !== s0.at, JSON.stringify({ cutT: [s0.cutT, s2.cutT] }));
+    // shutting the card clears it
+    await page.check('#chk-cut-hide-blade');
+    await page.evaluate(() => { document.getElementById('menu-cut').open = false; });
+    await page.waitForTimeout(250);
+    check('shutting the Cut card clears Hide blade', await page.evaluate(() => state.cutHideBlade === false));
+    await page.evaluate(() => { document.getElementById('menu-cut').open = true; });
+    await page.waitForTimeout(250);
+    await page.evaluate(() => selectPlaced(0));
+    await page.waitForTimeout(150);
+    check('...and the card opens with the blade shown', await page.evaluate(() => !document.getElementById('chk-cut-hide-blade').checked && !!state.cutHelper && state.cutHelper.visible === true));
+    // not a setting: however the card comes to open, the blade is out
+    await page.evaluate(() => { state.cutterOpen = false; state.cutHideBlade = true; openCutter('cut'); selectPlaced(0); });      // the tool opening afresh with the card already open
+    await page.waitForTimeout(150);
+    check('opening the Cut card always shows the blade, whatever Hide blade was before', await page.evaluate(() => state.cutHideBlade === false && !document.getElementById('chk-cut-hide-blade').checked && !!state.cutHelper && state.cutHelper.visible === true && !document.getElementById('btn-cut').disabled));
+    await page.click('#chk-cut-rot-h');
   }
 
   console.log('a locked piece');
