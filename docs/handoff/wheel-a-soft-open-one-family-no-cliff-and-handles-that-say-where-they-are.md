@@ -55,3 +55,12 @@ The owner sent reference pieces (a field of vases, a low-poly pitcher, a clay ju
 Not done, in the order they probably want doing: several pulls (bellies/necks), a flared collar, a foot ring, then the non-axisymmetric kind - a
 spout (a rim cut: the rim stops being a circle, so a revolve cannot make it; it is a cut + a local lip on the finished mesh) and a handle (a swept
 tube joined at two points). Those are a different sort of feature from everything above and want their own design, handles and grab points.
+
+### Addendum 2: several pulls
+`recipe.more` (pulls 2-4) beside `recipe.pull`; `NSO_wheelPullSlot(recipe, i, make)`; Build applies them in order, each as a fraction of the piece as it
+then is. The card keeps ONE set of Pull at / Pull / Soft and a row of chips (`wh-row-pulls`) that picks the pull they edit - so the card did not grow by
+nine rows; every active pull gets a yellow ball (`pull`, `pull2`..`pull4`), pressing one selects it. Tests: `npm run wheel` section 7j (stacking, clamping with the
+slot's number, clay to 1e-6, wall, speed, a vase under the canonical checker), wire section 10e (chips, selection, two balls, drag, Undo).
+Things to know: `pullSel` is UI state, not recipe state (it is not in Undo); the handle placement uses the final piece's height fractions while Build
+uses each stage's, so after several pulls a ball can sit a few percent off its wall until the next build; the swing range (+-) is from the piece before any pull.
+Not done: foot ring (owner is fine without), spout, handle.

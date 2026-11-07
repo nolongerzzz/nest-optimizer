@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=12be68df" />
+  <link rel="stylesheet" href="styles.css?v=90c722de" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -166,6 +166,7 @@
               <div class="wh-slider" id="wh-row-lip" title="Lift the edge of a pressed plate into a rim: how high the rim rises above the plate. The plate stays flat out to Lip at, then curves up along a flared curve; the slab keeps its thickness all the way and the clay is conserved, so the diameter comes out a little under the flat plate's. Needs a plate (drag Thick down) that is not opened (Deep 0); the slider says so when it cannot."><label for="rng-wheel-lip">Lip</label><input type="range" id="rng-wheel-lip" min="0" max="1" step="0.5" value="0" aria-label="Lip"><span id="out-wheel-lip" class="wh-read">—</span></div>
               <div class="wh-slider" id="wh-row-lip-at" title="Where the lift starts, as a percentage of the plate's radius. Further in is a wider, gentler rim; further out is a narrow one."><label for="rng-wheel-lip-at">Lip at</label><input type="range" id="rng-wheel-lip-at" min="10" max="90" step="1" value="60" aria-label="Lip at"><span id="out-wheel-lip-at" class="wh-read">60 %</span></div>
               <div class="wh-slider" id="wh-row-flare" title="How long the transition is, as a percentage of the lifted part. The underside leaves the flat plate tangent, with no crease; a long Flare is a rounder, bowl-like ease into the lift (and a steeper finish for the same height), a short one a straighter cone."><label for="rng-wheel-flare">Flare</label><input type="range" id="rng-wheel-flare" min="10" max="100" step="1" value="50" aria-label="Flare"><span id="out-wheel-flare" class="wh-read">50 %</span></div>
+              <div class="wh-slider wh-pulls" id="wh-row-pulls" title="Up to four pulls, one on top of another: a belly, a neck, a flared lip. The three sliders below edit the ringed one; click a number to switch, or click its ball on the piece. A pull with Pull at 0 mm is switched off. Each keeps the clay and is held by the wall on its own."><label>Pulls</label><span class="wh-chips"><button type="button" data-slot="0" class="btn btn-secondary">1</button><button type="button" data-slot="1" class="btn btn-secondary">2</button><button type="button" data-slot="2" class="btn btn-secondary">3</button><button type="button" data-slot="3" class="btn btn-secondary">4</button></span><span id="out-wheel-pulls" class="wh-read">0 pulling</span></div>
               <div class="wh-slider" id="wh-row-pull-z" title="Where on the piece to pull, as a percentage of its height - it follows the piece as the other sliders change it."><label for="rng-wheel-pull-z">Pull at</label><input type="range" id="rng-wheel-pull-z" min="0" max="100" step="1" value="50" aria-label="Pull at"><span id="out-wheel-pull-z" class="wh-read">50 %</span></div>
               <div class="wh-slider" id="wh-row-pull-dr" title="How far the wall goes out (or in, if negative) at the height above. Always live. The clay is conserved, so pulling the wall out makes the piece a little shorter and pushing it in a little taller. It stops where the wall reaches the nozzle floor and says so."><label for="rng-wheel-pull-dr">Pull</label><input type="range" id="rng-wheel-pull-dr" min="-1" max="1" step="0.5" value="0" aria-label="Pull"><span id="out-wheel-pull-dr" class="wh-read">—</span></div>
               <div class="wh-slider" id="wh-row-soft" title="How wide the pull spreads, as a percentage of the piece's height (the half-width of the bulge). The pull follows a cosine - the same curve as Tube Edge's Smooth neck: it leaves the wall tangent and is rounded at the top, with no straight flanks and no point. Small is a ring, large is a gentle belly."><label for="rng-wheel-soft">Soft</label><input type="range" id="rng-wheel-soft" min="5" max="100" step="1" value="40" aria-label="Soft"><span id="out-wheel-soft" class="wh-read">40 %</span></div>
@@ -2828,8 +2829,8 @@
   <!-- Limb: nso_limb.js is the tree, the limb and the move (headless, tools/nso_limb_test.js); app-limb.js the pointer session. docs/LIMB.md -->
   <script src="nso_limb.js?v=07938197"></script>
   <script src="app-limb.js?v=9ca0b82c"></script>
-  <script src="app-wheel.js?v=b90ac2de"></script>
-  <script src="app-wheel-live.js?v=51d85485"></script>
+  <script src="app-wheel.js?v=7fbc137f"></script>
+  <script src="app-wheel-live.js?v=801e7add"></script>
   <script src="app-fit.js?v=94ef7252"></script>
   <script src="app-stock.js?v=04f0e346"></script>
   <script src="app-piece-preview.js?v=730a465a"></script>

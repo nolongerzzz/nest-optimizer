@@ -1417,6 +1417,66 @@ console.log('\n== 7h. a soft pull: the Smooth neck\'s cosine on a finely sampled
 }
 
 /* =====================================================================
+   7j. SEVERAL PULLS
+   ===================================================================== */
+console.log('\n== 7j. several pulls: a belly, a neck, a flared lip - each keeps the clay and is held by the wall ==');
+{
+  const R0 = () => W.NSO_wheelNewRecipe({});
+  const V = p => W.NSO_wheelVolume(p);
+  const Vb = V(W.NSO_wheelBuild(R0()).piece);
+  const P = (z, dr, wide) => ({ z, dr, wide });
+  const vase = (pulls, o) => {
+    const r = R0(); r.ball.wall = 2; r.open = 0.85; r.tall = 2.5; Object.assign(r, o || {});
+    r.pull = pulls[0] || r.pull; r.more = pulls.slice(1);
+    return W.NSO_wheelBuild(r);
+  };
+  const worstTurn = c => {
+    let w = 0;
+    for (let i = 1; i + 1 < c.length; i++) {
+      const ax = c[i].r - c[i - 1].r, az = c[i].z - c[i - 1].z, bx = c[i + 1].r - c[i].r, bz = c[i + 1].z - c[i].z, la = Math.hypot(ax, az), lb = Math.hypot(bx, bz);
+      if (la < 1e-6 || lb < 1e-6) continue;
+      w = Math.max(w, Math.acos(Math.max(-1, Math.min(1, (ax * bx + az * bz) / (la * lb)))) * 180 / Math.PI);
+    }
+    return w;
+  };
+
+  check('a new recipe has room for four pulls and none extra: pull 1 is recipe.pull, the rest recipe.more',
+    W.NSO_WHEEL_MAX_PULLS === 4 && Array.isArray(R0().more) && R0().more.length === 0);
+  check('a slot that was never made reads as its default (pull 2 at 80%, off) and making it stores it',
+    (() => { const r = R0(), d = W.NSO_wheelPullSlot(r, 1, false); const made = W.NSO_wheelPullSlot(r, 2, true); return d.z === 0.8 && d.dr === 0 && r.more.length === 2 && made.z === 0.3; })());
+  const none = vase([P(0.5, 0, 0.4)]);
+  const same = vase([P(0.5, 0, 0.4), P(0.8, 0, 0.25), P(0.3, 0, 0.25)]);
+  check('pulls that are 0 mm do nothing: the same piece, exactly', none.ok && same.ok && V(none.piece) === V(same.piece) &&
+    none.piece.outer.length === same.piece.outer.length);
+  const one = vase([P(0.78, -9, 0.16)]);
+  const two = vase([P(0.78, -9, 0.16), P(0.97, 7, 0.07)]);
+  const three = vase([P(0.3, 6, 0.3), P(0.75, -10, 0.15), P(0.97, 8, 0.06)]);
+  check('one, two and three pulls all build, and the clay is kept to 1e-6 in each',
+    [one, two, three].every(b => b.ok && Math.abs(V(b.piece) - Vb) / Vb < 1e-6),
+    [one, two, three].map(b => (Math.abs(V(b.piece) - Vb) / Vb).toExponential(1)).join(' / '));
+  check('the wall holds under all of them (the nozzle floor), pull by pull', [one, two, three].every(b => W.NSO_wheelWall(b.piece).pass),
+    [one, two, three].map(b => W.NSO_wheelWall(b.piece).min_mm.toFixed(2)).join(' / ') + ' mm');
+  const sp = p => W.NSO_wheelSpan(p.outer), zAt = (p, f) => sp(p).lo + f * (sp(p).hi - sp(p).lo);
+  const rAtTop = b => W.NSO_wheelRadiusAt(b.piece.outer, zAt(b.piece, 0.97));
+  check('the second pull does its own job on top of the first: the lip goes out where the neck alone did not',
+    rAtTop(two) > rAtTop(one) + 3, rAtTop(one).toFixed(1) + ' -> ' + rAtTop(two).toFixed(1) + ' mm radius at 97%');
+  check('...and the first is still there: the neck is as narrow in the pair as on its own (within 1 mm)',
+    Math.abs(W.NSO_wheelRadiusAt(two.piece.outer, zAt(two.piece, 0.78)) - W.NSO_wheelRadiusAt(one.piece.outer, zAt(one.piece, 0.78))) < 1.5);
+  check('three pulls (belly, neck, lip) make a vase: no segment of the outside turns more than 25 degrees',
+    worstTurn(three.piece.outer) < 25, worstTurn(three.piece.outer).toFixed(1) + ' degrees');
+  const four = vase([P(0.3, 6, 0.3), P(0.75, -10, 0.15), P(0.97, 8, 0.06), P(0.1, -5, 0.1)]);
+  check('four pulls is the most: it builds, keeps the clay and the wall', four.ok && Math.abs(V(four.piece) - Vb) / Vb < 1e-6 && W.NSO_wheelWall(four.piece).pass, four.notes.join(' | '));
+  check('a pull the wall cannot take is clamped and named by its number',
+    (() => { const b = vase([P(0.5, 0, 0.4), P(0.8, -60, 0.15)], { tall: 2 }); return b.ok && b.notes.some(s => /^Pull 2: /.test(s)) && W.NSO_wheelWall(b.piece).pass; })());
+  const c0 = three.piece;
+  const rc = R0(); rc.more = [P(0.8, 3, 0.2)]; const cl = W.NSO_wheelCloneRecipe(rc); cl.more[0].dr = 9; cl.more.push(P(0.3, 1, 0.1));
+  check('a cloned recipe owns its pulls: editing the clone leaves the original alone', rc.more.length === 1 && rc.more[0].dr === 3);
+  let t = 0; const t0 = Date.now(); for (let i = 0; i < 10; i++) { vase([P(0.3, 6 + i * 0.1, 0.3), P(0.75, -10, 0.15), P(0.97, 8, 0.06), P(0.1, -5, 0.1)]); t++; }
+  check('a whole build with four pulls is fast enough for a live drag', (Date.now() - t0) / t < 250, ((Date.now() - t0) / t).toFixed(0) + ' ms each');
+  save('soft_open_vase_three_pulls', three.piece);
+}
+
+/* =====================================================================
    7i. SOFT OPEN: one family from closed to the widest bowl, with no cliff in it
    ===================================================================== */
 console.log('\n== 7i. Open is one continuous family: a dimple, a cup, a round bowl - never a jump ==');

@@ -990,6 +990,45 @@ withApp(async (page, logs) => {
     check('Undo takes the whole drag back in one step, the sliders with it', Math.abs((await val('rng-wheel-pull-dr'))) < 0.6);
 
     /* the orbit still works on empty space, and the handles follow the camera */
+    /* SEVERAL PULLS: the chips pick which pull the three sliders edit, and every active pull has its own ball */
+    const chipCls = i => page.evaluate(n => document.querySelector('#wh-row-pulls button[data-slot="' + n + '"]').className, i);
+    check('the Pulls row has four chips; chip 1 is the one being edited', (await page.evaluate(() => document.querySelectorAll('#wh-row-pulls button[data-slot]').length)) === 4 && /\bsel\b/.test(await chipCls(0)));
+    await setS('rng-wheel-open', 0.8); await setS('rng-wheel-tall', 2);
+    await page.click('#wh-row-pulls button[data-slot="1"]'); await page.waitForTimeout(500);
+    check('clicking chip 2 hands the three sliders to the second pull: Pull at 80%, Pull 0 mm',
+      /\bsel\b/.test(await chipCls(1)) && !/\bsel\b/.test(await chipCls(0)) && (await val('rng-wheel-pull-z')) === 80 && (await val('rng-wheel-pull-dr')) === 0,
+      (await val('rng-wheel-pull-z')) + ' ' + (await val('rng-wheel-pull-dr')));
+    await setS('rng-wheel-pull-dr', -5);
+    let rc2 = await rec();
+    check('...Pull on chip 2 writes the second pull (recipe.more[0]) and leaves pull 1 alone, and the chip lights',
+      rc2.more && rc2.more[0] && rc2.more[0].dr === -5 && Math.abs(rc2.pull.dr) < 1e-9 && /\bon\b/.test(await chipCls(1)) && !/\bon\b/.test(await chipCls(0)), JSON.stringify(rc2.more));
+    hs = await handles();
+    check('...and its yellow ball is on the piece (pull2); pull 1 is off, so it has none', hs.some(h => h.kind === 'pull2') && !hs.some(h => h.kind === 'pull'), hs.map(h => h.kind).join(','));
+    await page.click('#wh-row-pulls button[data-slot="0"]'); await page.waitForTimeout(400);
+    await setS('rng-wheel-pull-z', 40); await setS('rng-wheel-pull-dr', 4);
+    rc2 = await rec();
+    hs = await handles();
+    check('pull 1 and pull 2 together: both balls, both chips lit, both recorded, the clay kept',
+      hs.some(h => h.kind === 'pull') && hs.some(h => h.kind === 'pull2') && /\bon\b/.test(await chipCls(0)) && /\bon\b/.test(await chipCls(1)) && rc2.pull.dr === 4 && rc2.more[0].dr === -5 &&
+      await page.evaluate(() => Math.abs(NSO_wheelVolume(NSO_wheelSession) - NSO_wheelSession.budget.start) / NSO_wheelSession.budget.start < 1e-6));
+    const p2 = await H('pull2');
+    await markTop();
+    await grab(p2, 24, 0);
+    const mid2 = await rec();
+    await letGo();
+    const aft2 = await rec();
+    check('dragging the second ball out pulls the second wall (pull 2 changes, pull 1 does not), one Undo step, and the chip follows',
+      aft2.more[0].dr > -5 + 0.5 && aft2.pull.dr === 4 && /\bsel\b/.test(await chipCls(1)) && await oneNew(), 'pull 2: -5 -> ' + aft2.more[0].dr.toFixed(1));
+    await page.hover('#wh-row-pull-dr'); await page.waitForTimeout(350);
+    const tagTxt = await page.evaluate(() => { const t = document.getElementById('wheel-tag'); return t && t.style.display !== 'none' ? t.textContent : ''; });
+    check('...and the Pull row\'s tag speaks for the pull being edited', /Pull/.test(tagTxt), tagTxt);
+    await page.mouse.move(980, 760);
+    await page.click('#btn-undo'); await page.waitForTimeout(600);
+    check('Undo takes the drag back', (await rec()).more[0].dr === -5);
+    await setS('rng-wheel-pull-dr', 0); await page.click('#wh-row-pulls button[data-slot="1"]'); await setS('rng-wheel-pull-dr', 0);
+    await page.click('#wh-row-pulls button[data-slot="0"]'); await page.waitForTimeout(300);
+    await setS('rng-wheel-tall', 1); await setS('rng-wheel-pull-z', 50);
+
     await setS('rng-wheel-open', 0.3);            // a piece small enough to leave empty plate to orbit on
     const axisPx = () => page.evaluate(() => {
       const m = NSO_wheelModel(), e = state.placed.find(p => p.sourceId === m.id), mesh = e.mesh, g = mesh.geometry;

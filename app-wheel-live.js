@@ -172,16 +172,19 @@
   define('flare', { slider: 'rng-wheel-flare', read: 'out-wheel-flare', unit: ' %',
     get: function (r) { return Math.round((r.lip && r.lip.flare != null ? r.lip.flare : 0.5) * 100); },
     put: function (r, v) { r.lip = r.lip || { h: 0, at: 0.6, flare: 0.5 }; r.lip.flare = v / 100; } });
+  /* SEVERAL PULLS: the three Pull sliders edit the SELECTED one (the chips), and every active pull has a ball on the piece */
+  var pullSel = 0;
+  function slotOf(r, make) { return NSO_wheelPullSlot(r, pullSel, make); }
   define('pullz', { slider: 'rng-wheel-pull-z', read: 'out-wheel-pull-z', unit: ' %',
-    get: function (r) { return Math.round((r.pull.z == null ? 0.5 : r.pull.z) * 100); },
-    put: function (r, v) { r.pull.z = v / 100; } });
+    get: function (r) { var s = slotOf(r, false); return Math.round((s.z == null ? 0.5 : s.z) * 100); },
+    put: function (r, v) { slotOf(r, true).z = v / 100; } });
   define('pulldr', { slider: 'rng-wheel-pull-dr', read: 'out-wheel-pull-dr', unit: ' mm',
     fmt: function (v) { return v === null ? '—' : (v > 0 ? '+' : '') + trim(v, 0.5) + ' mm'; },
-    get: function (r) { return r.pull.dr || 0; },
-    put: function (r, v) { r.pull.dr = v; } });
+    get: function (r) { return slotOf(r, false).dr || 0; },
+    put: function (r, v) { slotOf(r, true).dr = v; } });
   define('wide', { slider: 'rng-wheel-soft', read: 'out-wheel-soft', unit: ' %',
-    get: function (r) { return Math.round((r.pull.wide == null ? 0.4 : r.pull.wide) * 100); },
-    put: function (r, v) { r.pull.wide = v / 100; } });
+    get: function (r) { var s = slotOf(r, false); return Math.round((s.wide == null ? 0.4 : s.wide) * 100); },
+    put: function (r, v) { slotOf(r, true).wide = v / 100; } });
   define('trim', { slider: 'rng-wheel-trim', read: 'out-wheel-trim', unit: ' mm',
     get: function (r) { return r.trim || 0; },
     put: function (r, v) { r.trim = v < 0.05 ? 0 : v; } });
@@ -233,6 +236,23 @@
       slider.value = String(v);
       paintRead(d);
     });
+    paintChips(recipe);
+  }
+
+  /* The Pulls chips: which pull the three Pull sliders are editing (the ringed one), and which are doing something (lit). */
+  function paintChips(recipe) {
+    var row = $('wh-row-pulls');
+    if (!row) return;
+    var active = 0;
+    Array.prototype.forEach.call(row.querySelectorAll('button[data-slot]'), function (b) {
+      var i = parseInt(b.dataset.slot, 10), s = NSO_wheelPullSlot(recipe, i, false), on = Math.abs(s.dr || 0) > 1e-9;
+      if (on) active++;
+      b.classList.toggle('on', on);
+      b.classList.toggle('sel', i === pullSel);
+      b.setAttribute('aria-pressed', i === pullSel ? 'true' : 'false');
+    });
+    var rd = $('out-wheel-pulls');
+    if (rd) rd.textContent = active + ' pulling';
   }
 
   function committed() { return NSO_wheelHome ? NSO_wheelHome.recipe : pending; }
@@ -335,19 +355,24 @@
      with the menu. */
   var HANDLE_PX = 7, HIT_PX = 14;
   var COLOR = { flatten: 0x38bdf8, open: 0x22d3ee, pull: 0xfacc15, lip: 0x4ade80, trim: 0xf87171, shape: 0xc4b5fd };
-  var HANDLE_COLOR = COLOR;
-  var HANDLE_NAME = { flatten: 'Flatten', open: 'Open', pull: 'Pull', lip: 'Lip', trim: 'Trim' };
+  /* pull handles are 'pull' (the first) and 'pull2'..'pull4'; they share a colour, a group of rows and a hint */
+  function groupOf(kind) { return kind && kind.indexOf('pull') === 0 ? 'pull' : kind; }
+  function slotIndex(kind) { return kind === 'pull' ? 0 : (parseInt(kind.slice(4), 10) || 1) - 1; }
+  function kindOfSlot(i) { return i === 0 ? 'pull' : 'pull' + (i + 1); }
+  var HANDLE_COLOR = { flatten: COLOR.flatten, open: COLOR.open, lip: COLOR.lip, trim: COLOR.trim,
+    pull: COLOR.pull, pull2: COLOR.pull, pull3: COLOR.pull, pull4: COLOR.pull };
+  var HANDLE_NAME = { flatten: 'Flatten', open: 'Open', pull: 'Pull 1', pull2: 'Pull 2', pull3: 'Pull 3', pull4: 'Pull 4', lip: 'Lip', trim: 'Trim' };
   /* which slider rows a handle belongs to, and the one whose ring it shows */
-  var HANDLE_ROWS = { flatten: ['thick'], open: ['open', 'tall', 'rim'], pull: ['pulldr', 'pullz', 'wide'], lip: ['lip', 'lipat', 'flare'], trim: ['trim'] };
+  var HANDLE_ROWS = { flatten: ['thick'], open: ['open', 'tall', 'rim'], pull: ['pulldr', 'pullz', 'wide', 'pulls'], lip: ['lip', 'lipat', 'flare'], trim: ['trim'] };
   var HANDLE_KEY = { flatten: 'thick', open: 'open', pull: 'pullz', lip: 'lip', trim: 'trim' };
-  var ROW_GROUP = { scale: 'shape', wall: 'shape', thick: 'flatten', open: 'open', tall: 'open', rim: 'open', lip: 'lip', lipat: 'lip', flare: 'lip',
+  var ROW_GROUP = { pulls: 'pull', scale: 'shape', wall: 'shape', thick: 'flatten', open: 'open', tall: 'open', rim: 'open', lip: 'lip', lipat: 'lip', flare: 'lip',
     pullz: 'pull', pulldr: 'pull', wide: 'pull', trim: 'trim' };
-  var ROW_ID = { scale: 'wh-row-scale', wall: 'wh-row-wall', thick: 'wh-row-flat', open: 'wh-row-open', tall: 'wh-row-tall', lip: 'wh-row-lip', lipat: 'wh-row-lip-at',
+  var ROW_ID = { pulls: 'wh-row-pulls', scale: 'wh-row-scale', wall: 'wh-row-wall', thick: 'wh-row-flat', open: 'wh-row-open', tall: 'wh-row-tall', lip: 'wh-row-lip', lipat: 'wh-row-lip-at',
     flare: 'wh-row-flare', pullz: 'wh-row-pull-z', pulldr: 'wh-row-pull-dr', wide: 'wh-row-soft', trim: 'wh-row-trim', rim: 'wh-row-rim' };
   var HANDLE_HINT = {
     flatten: 'Drag the blue ball down to press the piece flat',
     open: 'Drag the cyan ball out to widen the mouth (on the rim of an opened piece, up to make it taller)',
-    pull: 'Drag the yellow ball out or in to pull the wall - up or down to move where',
+    pull: 'Drag a yellow ball out or in to pull the wall - up or down to move where. Click Pulls 1-4 to add more',
     lip: 'Drag the green ball up to lift the rim',
     trim: 'Drag the red ball up to take more off the base'
   };
@@ -387,9 +412,13 @@
       var r0 = Math.max(0.35 * R.open.mouth / 2, 0);
       specs.push({ kind: 'open', r: r0, z: surfaceZAt(piece.outer, r0), radial: true });
     }
-    var zf = (recipe.pull && recipe.pull.z != null) ? recipe.pull.z : 0.5;
-    var zw = span.lo + zf * (span.hi - span.lo);
-    specs.push({ kind: 'pull', r: NSO_wheelRadiusAt(piece.outer, zw), z: zw, radial: true });
+    for (var ps = 0; ps < NSO_WHEEL_MAX_PULLS; ps++) {
+      var slot = NSO_wheelPullSlot(recipe, ps, false);
+      if (!(Math.abs(slot.dr || 0) > 1e-9) && ps !== pullSel) continue;       // a ball for each pull that is doing something, and the one being edited
+      var zf = slot.z != null ? slot.z : 0.5;
+      var zw = span.lo + zf * (span.hi - span.lo);
+      specs.push({ kind: kindOfSlot(ps), r: NSO_wheelRadiusAt(piece.outer, zw), z: zw, radial: true });
+    }
     if (!opened && piece.press && piece.press.c >= piece.press.h) {
       if (piece.inner && piece.ops.indexOf('lip') >= 0) {
         var q = piece.inner[piece.inner.length - 1];
@@ -404,7 +433,7 @@
   }
 
   /* The rings that say where a slider acts, in the profile's own terms: [{ r, z, k }], k = the group colour. */
-  function markerSpecs(key, piece, recipe) {
+  function markerSpecs(key, piece, recipe, slotIdx) {
     var out = [], g = ROW_GROUP[key] || 'shape';
     var span = NSO_wheelSpan(piece.outer), top = NSO_wheelTopZ(piece), zLo = span.lo, H = span.hi - span.lo;
     var i, widest = { r: 0, z: zLo };
@@ -415,7 +444,8 @@
     var R = lastRanges || {};
     var flatZ = piece.inner ? piece.inner[0].z : top;
     function add(r, z) { if (r > 0.05) out.push({ r: r, z: z, k: g }); }
-    var pz = recipe.pull && recipe.pull.z != null ? recipe.pull.z : 0.5, zw = zLo + pz * H;
+    var pslot = NSO_wheelPullSlot(recipe, slotIdx == null ? pullSel : slotIdx, false);
+    var pz = pslot.z != null ? pslot.z : 0.5, zw = zLo + pz * H;
     switch (key) {
       case 'scale': add(widest.r, widest.z); break;
       case 'wall': if (opened && iL) { add(oL.r, oL.z); add(iL.r, iL.z); } else add(widest.r, widest.z); break;
@@ -431,9 +461,9 @@
         if (piece.press) add((recipe.lip && recipe.lip.at != null ? recipe.lip.at : 0.6) * piece.press.c, flatZ);
         if (key === 'flare' && lipped && iL) add(iL.r, iL.z);
         break;
-      case 'pullz': case 'pulldr': add(NSO_wheelRadiusAt(piece.outer, zw), zw); break;
+      case 'pullz': case 'pulldr': case 'pulls': add(NSO_wheelRadiusAt(piece.outer, zw), zw); break;
       case 'wide':
-        var tp = Math.max(1, (recipe.pull && recipe.pull.wide != null ? recipe.pull.wide : 0.4) * H);
+        var tp = Math.max(1, (pslot.wide != null ? pslot.wide : 0.4) * H);
         [zw - tp, zw, zw + tp].forEach(function (zz) { if (zz > zLo + 0.01 && zz < span.hi - 0.01) add(NSO_wheelRadiusAt(piece.outer, zz), zz); });
         break;
       case 'trim': add(NSO_wheelRadiusAt(piece.outer, zLo + Math.max(0.5, 0.04 * H)), zLo); break;
@@ -460,21 +490,24 @@
   /* Which slider row, if any, is being looked at or moved: a handle hovered or dragged, or a row hovered, focused or being dragged. */
   var rowKey = null;
   function activeKey() {
-    if (DRAG) return HANDLE_KEY[DRAG.kind];
-    if (hovered) return HANDLE_KEY[hovered];
+    if (DRAG) return HANDLE_KEY[groupOf(DRAG.kind)];
+    if (hovered) return HANDLE_KEY[groupOf(hovered)];
     return rowKey;
   }
   function activeKind() {
     if (DRAG) return DRAG.kind;
     if (hovered) return hovered;
     var g = rowKey ? ROW_GROUP[rowKey] : null;
+    if (g === 'pull') return kindOfSlot(pullSel);       // a Pull row belongs to the pull being edited
     return g && HANDLE_ROWS[g] ? g : null;
   }
+  /* which pull a ring or tag is about: the one under the cursor or being dragged, else the one being edited */
+  function activeSlot() { var k = DRAG ? DRAG.kind : hovered; return k && groupOf(k) === 'pull' ? slotIndex(k) : pullSel; }
 
   function paintRows() {
     var key = activeKey(), kind = activeKind();
     var lit = {};
-    if (kind && HANDLE_ROWS[kind]) HANDLE_ROWS[kind].forEach(function (k) { lit[k] = true; });
+    if (kind && HANDLE_ROWS[groupOf(kind)]) HANDLE_ROWS[groupOf(kind)].forEach(function (k) { lit[k] = true; });
     else if (key) lit[key] = true;
     Object.keys(ROW_ID).forEach(function (k) {
       var row = $(ROW_ID[k]);
@@ -568,7 +601,7 @@
         delete HG.items[k];
       });
       /* where two handles would sit on top of each other the later one steps aside (never the one being used) */
-      var ORDER = ['flatten', 'open', 'lip', 'pull', 'trim'];
+      var ORDER = ['flatten', 'open', 'lip', 'pull', 'pull2', 'pull3', 'pull4', 'trim'];
       ORDER.forEach(function (k, ix) {
         var it = HG.items[k];
         if (!it || (DRAG && DRAG.kind === k) || hovered === k) return;
@@ -589,7 +622,7 @@
         var pos = new THREE.Vector3(), quat = new THREE.Quaternion(), scl = new THREE.Vector3();
         mesh.matrixWorld.decompose(pos, quat, scl);
         var flat = new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI / 2, 0, 0));
-        markerSpecs(keyNow, piece, recipe).forEach(function (ms, idx) {
+        markerSpecs(keyNow, piece, recipe, activeSlot()).forEach(function (ms, idx) {
           var cl = new THREE.Vector3(cx, y0 + (ms.z - zLo), cz);
           var cw = mesh.localToWorld(cl);
           var dist2 = state.camera.position.distanceTo(cw);
@@ -612,9 +645,11 @@
       if (keyNow && (kindNow ? HG.items[kindNow] && !HG.items[kindNow].hidden : true)) {
         var anchor = (kindNow && HG.items[kindNow]) ? HG.items[kindNow].world : tagAt;
         var text = '';
-        if (kindNow && HANDLE_ROWS[kindNow] && (DRAG || hovered)) {
-          text = HANDLE_NAME[kindNow] + '  ' + rowText(HANDLE_ROWS[kindNow][0]);
-          if (kindNow === 'pull') text += '  at ' + rowText('pullz');
+        if (kindNow && HANDLE_ROWS[groupOf(kindNow)] && (DRAG || hovered)) {
+          if (groupOf(kindNow) === 'pull') {
+            var ts = NSO_wheelPullSlot(recipe, slotIndex(kindNow), false);
+            text = HANDLE_NAME[kindNow] + '  ' + ((ts.dr || 0) > 0 ? '+' : '') + trim(ts.dr || 0, 0.5) + ' mm  at ' + Math.round((ts.z == null ? 0.5 : ts.z) * 100) + ' %';
+          } else text = HANDLE_NAME[kindNow] + '  ' + rowText(HANDLE_ROWS[kindNow][0]);
           if (kindNow === 'open' && recipe.tall && Math.abs(recipe.tall - 1) > 0.02) text += '  tall ' + rowText('tall');
         } else {
           var lab = $(ROW_ID[keyNow]) && $(ROW_ID[keyNow]).querySelector('label,.wh-preset');
@@ -691,10 +726,11 @@
         r.tall = clampTo(t0 * k * k, R.tall.min, R.tall.max);
         if (Math.abs(r.tall - 1) < 0.02) r.tall = 1;
       }
-    } else if (d.kind === 'pull') {
-      var sw = R.pull ? R.pull.swing : 10;
-      r.pull.dr = clampTo((d.start.pull.dr || 0) + mm.rad, -sw, sw);
-      r.pull.z = clampTo((d.start.pull.z == null ? 0.5 : d.start.pull.z) + mm.up / d.spanH, 0, 1);
+    } else if (groupOf(d.kind) === 'pull') {
+      var sw = R.pull ? R.pull.swing : 10, si = slotIndex(d.kind);
+      var s0 = NSO_wheelPullSlot(d.start, si, false), s1 = NSO_wheelPullSlot(r, si, true);
+      s1.dr = clampTo((s0.dr || 0) + mm.rad, -sw, sw);
+      s1.z = clampTo((s0.z == null ? 0.5 : s0.z) + mm.up / d.spanH, 0, 1);
     } else if (d.kind === 'lip') {
       var lm = R.lip ? R.lip.max : 0;
       r.lip = r.lip || { h: 0, at: 0.6, flare: 0.5 };
@@ -743,6 +779,7 @@
     ev.preventDefault();
     var m = modelNow();
     if (!m) return;
+    if (groupOf(it.kind) === 'pull' && slotIndex(it.kind) !== pullSel) { pullSel = slotIndex(it.kind); show(committed(), lastRanges); }
     NSO_wheelSelect(m);
     var ax = axesAt(it, m), a = ax.a, b = ax.b;
     var span = NSO_wheelSpan(NSO_wheelSession.outer);
@@ -776,7 +813,7 @@
     hovered = k;
     cv().style.cursor = k ? 'grab' : '';
     placeHandles();
-    if (k) readout(HANDLE_HINT[k], false); else if (!LIVE) refresh();
+    if (k) readout(HANDLE_HINT[groupOf(k)], false); else if (!LIVE) refresh();
   }
 
   function bindDrag() {
@@ -859,6 +896,14 @@
 
   function wire() {
     Object.keys(DEFS).forEach(function (k) { bind(DEFS[k]); });
+    var chips = $('wh-row-pulls');
+    if (chips) Array.prototype.forEach.call(chips.querySelectorAll('button[data-slot]'), function (b) {
+      b.addEventListener('click', function () {
+        pullSel = parseInt(b.dataset.slot, 10);
+        end(); draft = null;
+        refresh();                       // the sliders, the ring and the ball now speak for this pull
+      });
+    });
     var f = $('btn-wheel-flatten'), o = $('btn-wheel-open');
     if (f) { f.dataset.nsoWired = '1'; f.addEventListener('click', function () { preset('thick', false); }); }
     if (o) { o.dataset.nsoWired = '1'; o.addEventListener('click', function () { preset('open', true); }); }

@@ -490,7 +490,7 @@ takes effect.
 | **Open** | from closed (0) to the widest bowl the wall allows (100%): the mouth, the depth and the size of the shell grow together, the clay conserved ([A soft Open](#a-soft-open)) |
 | **Tall** | how tall the opened piece grows, the same clay and Wall: ×1 is the round bowl, ×3 a jug, ×0.5 a dish ([Tall](#tall-the-jug-and-the-vase)) |
 | **Lip / Lip at / Flare** | lift the edge of a pressed plate into a rim, this high; where the lift starts (a % of the plate's radius); how long the ease into it is (a % of the lifted part). [Lip](#lip) |
-| **Pull at / Pull / Soft** | where (a % of the height, so it follows the piece), how far out or in, how widely it spreads (a % of the height: small is a ring, large is a belly) |
+| **Pulls 1–4, Pull at / Pull / Soft** | up to four pulls, one on top of another ([Several pulls](#several-pulls)); the chips pick which one the three sliders edit. Pull at: where (a % of the height, so it follows the piece); Pull: how far out or in; Soft: how widely it spreads (a % of the height: small is a ring, large is a belly) |
 | **Trim, Rim +** | take off the base (the clay is gone); add height at the rim (Extend — needs a straight wall) |
 | **Flatten, Open** | one-click **presets**: they send their own slider to its far end. They bake nothing |
 
@@ -524,9 +524,9 @@ strict move **bakes** — what it makes becomes the recipe's `base` and the slid
 neutral on top of it (`NSO_wheelRecipeOn`). The sliders never come through there
 (`NSO_wheelSetRecipe`).
 
-**What this does not do yet.** A single Pull is one bulge, not several: two bellies need a
-second control. Scale, Wall, Soft, Lip at and Flare have no ball on the piece — they have a ring
-(next section). The mouth and the depth rise together; a narrow-mouthed vase is Open then Pull in.
+**What this does not do yet.** No foot ring (Trim leaves a flat foot), no spout, no handle — the last two are not
+round, so they are a different kind of feature. Scale, Wall, Soft, Lip at and Flare have no ball on the piece — they have a ring
+(next section).
 
 ### A soft pull
 
@@ -623,6 +623,23 @@ canonical mesh checker. A neck is a Pull in at 80–85% of the height; a belly a
 bellies and necks in one piece (the pull is one bump), a flared collar on top of a neck (that is a second pull out at the rim), a foot ring
 (Trim leaves a flat foot, no ring), spouts and handles (non-axisymmetric: they are the next kind of thing, below).
 
+### Several pulls
+
+A vase is a belly, a neck and a flared lip, and one pull is one bump. The recipe now has **four pulls**: `recipe.pull` is the first and
+`recipe.more` holds the other three, each `{ z, dr, wide }` (`NSO_wheelPullSlot` reads or makes one; the defaults for slots 2–4 are Pull at
+80% / 30% / 95%, Soft 25%, 0 mm, i.e. off). They are applied **in order, each as a fraction of the piece as it then is** — the first
+conserves the clay by moving the heights, and the second finds its place on the result — so they stack, and each keeps the clay and is held by
+the wall on its own (a pull the wall cannot take is clamped and named: *Pull 2: ...*). Four pulls cost about 40–90 ms.
+
+On the card, **one set of three sliders and a row of chips**: the chips (1–4) pick which pull Pull at / Pull / Soft edit; a lit chip is a pull
+that is doing something (`Pull ≠ 0`). That keeps the stack the height it was. On the piece, **every active pull has a yellow ball**
+(numbered in its tag: *Pull 2 −5 mm at 80 %*) plus one for the pull being edited; pressing a ball selects its pull, dragging it out/in and up/down
+is that pull's Pull and Pull at. The ring and tag of the Pull rows speak for the pull being edited, and for the one under the cursor when a ball is hovered.
+
+What it makes (Open 85% + Tall 2.5, wall 2): belly out at 30% + neck in at 75% + lip out at 97% is a vase (139 mm, no segment of the outside
+turns more than 25 degrees, wall ≥ 1.05 mm); neck + collar, a gourd with two bulges, a bowl with a foot step and a flared rim all build and keep
+the clay to 1e-6 (the vase is under the canonical mesh checker).
+
 ### Lip
 
 `NSO_wheelLip` (`app-wheel.js` "7e2"), a recipe stage after Open, with three sliders:
@@ -674,7 +691,7 @@ They are balls drawn on top of the piece, round on the screen whatever the zoom:
 |---|---|---|---|
 | **blue** Flatten | the top face of a ball or plate | **down** | Thick (press) |
 | **cyan** Open | off to the side of the top of a ball, where a mouth would start; on the **rim** of an opened piece | **out** (and, on the rim, **up**) | Open — the mouth; and Tall |
-| **yellow** Pull | the wall, at the Pull height | **out / in**, and **up / down** | Pull, and Pull at |
+| **yellow** Pull (one per active pull, 1–4) | the wall, at that pull's height | **out / in**, and **up / down** | that pull's Pull, and Pull at |
 | **green** Lip | the rim of a pressed plate | **up** | Lip |
 | **red** Trim | the foot | **up** | Trim |
 

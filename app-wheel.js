@@ -1807,6 +1807,20 @@ function NSO_wheelRanges(piece, history) {
      trim    mm taken off the base, 0 for none
      rim     mm added at the rim, 0 for none
    }                                                                         */
+/* SEVERAL PULLS. `recipe.pull` is the first; `recipe.more` holds up to three more (slots 2-4), each { z, dr, wide }. They are
+   applied in order, each as a fraction of the piece AS IT THEN IS, so a neck and a belly and a collar are one recipe, and each
+   conserves the clay and is held by the wall on its own. NSO_wheelPullSlot reads or makes a slot with its defaults. */
+var NSO_WHEEL_MAX_PULLS = 4;
+var NSO_WHEEL_PULL_DEFAULT_Z = [0.5, 0.8, 0.3, 0.95];
+function NSO_wheelPullSlot(recipe, i, make) {
+  if (i === 0) return recipe.pull || (make ? (recipe.pull = { z: 0.5, dr: 0, wide: 0.4 }) : { z: 0.5, dr: 0, wide: 0.4 });
+  var arr = recipe.more || (make ? (recipe.more = []) : []);
+  if (arr[i - 1]) return arr[i - 1];
+  var d = { z: NSO_WHEEL_PULL_DEFAULT_Z[i] == null ? 0.5 : NSO_WHEEL_PULL_DEFAULT_Z[i], dr: 0, wide: 0.25 };
+  if (make) { while (arr.length < i - 1) arr.push({ z: 0.5, dr: 0, wide: 0.25 }); arr[i - 1] = d; }
+  return d;
+}
+
 function NSO_wheelNewRecipe(ball) {
   return {
     base: null,
@@ -1814,6 +1828,7 @@ function NSO_wheelNewRecipe(ball) {
     thick: null, open: 0, tall: 1,
     lip: { h: 0, at: 0.6, flare: 0.5 },
     pull: { z: 0.5, dr: 0, wide: 0.4 },
+    more: [],
     trim: 0, rim: 0
   };
 }
@@ -1822,7 +1837,8 @@ function NSO_wheelCloneRecipe(r) {
   return {
     base: r.base, ball: Object.assign({}, r.ball), thick: r.thick, open: r.open || 0, tall: r.tall || 1,
     lip: Object.assign({ h: 0, at: 0.6, flare: 0.5 }, r.lip || {}),
-    pull: Object.assign({}, r.pull), trim: r.trim, rim: r.rim
+    pull: Object.assign({}, r.pull), more: (r.more || []).map(function (m) { return Object.assign({}, m); }),
+    trim: r.trim, rim: r.rim
   };
 }
 
@@ -2276,18 +2292,21 @@ function NSO_wheelBuild(recipe) {
     }
   }
 
-  /* 3. PULL */
+  /* 3. PULL (one or several) */
   var sp = NSO_wheelSpan(piece.outer), rMax = 0, i;
   for (i = 0; i < piece.outer.length; i++) if (piece.outer[i].r > rMax) rMax = piece.outer[i].r;
-  R.pull = { swing: Math.max(5, NSO_wheelStep(rMax / 2, 0.5, false)) };
-  var pl = recipe.pull || {};
-  if (Math.abs(pl.dr || 0) > 1e-9) {
-    var pz = sp.lo + (pl.z == null ? 0.5 : pl.z) * (sp.hi - sp.lo);
-    var pw = Math.max(1, (pl.wide == null ? 0.4 : pl.wide) * (sp.hi - sp.lo));
+  R.pull = { swing: Math.max(5, NSO_wheelStep(rMax / 2, 0.5, false)), slots: NSO_WHEEL_MAX_PULLS };
+  for (var slot = 0; slot < NSO_WHEEL_MAX_PULLS; slot++) {
+    var pl = NSO_wheelPullSlot(recipe, slot, false);
+    if (!(Math.abs(pl.dr || 0) > 1e-9)) continue;
+    var sp2 = NSO_wheelSpan(piece.outer);
+    var pz = sp2.lo + (pl.z == null ? 0.5 : pl.z) * (sp2.hi - sp2.lo);
+    var pw = Math.max(1, (pl.wide == null ? 0.4 : pl.wide) * (sp2.hi - sp2.lo));
     /* the Smooth neck's own curve (Tube Edge), with the wall sampled finely enough to draw it */
     var pr = NSO_wheelPullClamped(piece, { z: pz, dr: pl.dr, taper: pw, kernel: 'cosine', refine: true });
-    if (pr.ok) { piece = pr.piece; if (pr.clamped) notes.push(pr.reason); }
-    else notes.push(NSO_wheelFirstSentence(pr.reason));
+    var tag = slot > 0 ? 'Pull ' + (slot + 1) + ': ' : '';
+    if (pr.ok) { piece = pr.piece; if (pr.clamped) notes.push(tag + pr.reason); }
+    else notes.push(tag + NSO_wheelFirstSentence(pr.reason));
   }
 
   /* 4. TRIM */
