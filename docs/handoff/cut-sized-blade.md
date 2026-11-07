@@ -80,3 +80,15 @@ and is unchanged). A press anywhere else on the plate falls through to the plate
 New `tools/nso_wire_cut_grab_test.js` (`wire:cut-grab`, real mouse, top-down): the click-to-jump, a plate press 8 and 14 mm past the blade (fails on the
 old code: the blade moved 10.4 mm), and a press on the blade frame still dragging it. Trade-off: the full blade seen edge-on is a line, so it is grabbed
 by its frame, not by a fat target.
+
+### Seventh round (2026-11-07): Follow strand
+
+Asked for: "make the sized blade follow this string in a square cut position across the strand as it spirals, so I can click my way from start to
+finish making 1-2 mm slices of salami". Full write-up: `docs/CUT-FOLLOW.md`. New: `nso_strand.js` (THREE-free: section by any plane, direction
+and centre of a strand, march along it; `strand:test`), `app-cut-follow.js` (state in the WORLD, `state.cutFollowAt`; place / Back / Forward / after-cut),
+`tools/nso_cut_follow_drive_check.js` (`follow:drive`). Hooks: `app-core.js` (a click with Follow on traces the cord; a press on the blade does not drag it),
+`app-cut.js` (the `slice` field, state clears, `cutNotchAt` calls `cutFollowAfterCut` and carries the move in its status line), `index.html` (the card rows).
+
+Found while testing: a plane that grazes a surface or the cord's end cuts a tiny outline, so "smallest section" picked wrong directions (now surface normals,
+voted); a plane lying on a cut face cuts part of a disc whose centre is off the axis (sections are gated on area); a march that ran out into empty space
+returned a target there (now the end); Back onto a kerf found another turn of the spiral (refused). `nso_wire_cut_redesign_test` lists the new controls.

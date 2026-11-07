@@ -446,7 +446,7 @@ function getCutPlaneLocal(model) {
 // landed on. The blade goes in against that face; with no click yet it comes
 // down from the top of the section, centred.
 function cutBladeState() {
-  if (!state.cutBlade) state.cutBlade = { mode: 'full', sized: false, strand: true,
+  if (!state.cutBlade) state.cutBlade = { mode: 'full', sized: false, strand: true, follow: false, slice: 1.5, followDir: 1,
     width: NSO_Notch.DEFAULTS.width, depth: NSO_Notch.DEFAULTS.depth, kerf: NSO_Notch.DEFAULTS.kerf,
     nwidth: NSO_Notch.NOTCH_DEFAULTS.width, ndepth: NSO_Notch.NOTCH_DEFAULTS.depth };
   return state.cutBlade;
@@ -847,6 +847,7 @@ function openCutter(tool) {
   state.cutPlumb = null;
   state.cutBlade = null;
   state.cutBladeAt = null;
+  state.cutFollowAt = null;
   state.cutRotate = false;
   state.editId = null;
   state.selectedIndex = -1;
@@ -874,6 +875,7 @@ function closeCutter(silent) {
   state.cutterOpen = false;
   state.cutTool = null;
   state.cutRotate = false;                 // the rings were Cut's to show; they go with it
+  state.cutFollowAt = null;                // Follow strand's place on the cord goes with the blade
   state.cutRightSideOutOffer = null;
   state.cutDragging = false;
   state.moveDragging = false;
@@ -3226,7 +3228,7 @@ const CUT_BLADE_MODES = { full: 'btn-cut-blade-full', sized: 'btn-cut-blade-size
                           plate: 'btn-cut-blade-plate' };
 /* [number box, slider, state key]: the three sizes of the Sized blade and the two of Notch. */
 const CUT_BLADE_FIELDS = [['cut-blade-width', 'cut-blade-width-s', 'width'], ['cut-blade-depth', 'cut-blade-depth-s', 'depth'],
-                          ['cut-blade-kerf', 'cut-blade-kerf-s', 'kerf'],
+                          ['cut-blade-kerf', 'cut-blade-kerf-s', 'kerf'], ['cut-follow-slice', 'cut-follow-slice-s', 'slice'],
                           ['cut-notch-width', 'cut-notch-width-s', 'nwidth'], ['cut-notch-depth', 'cut-notch-depth-s', 'ndepth']];
 
 /** How far each slider runs, from the piece in hand - with room to breathe (the first version stopped the kerf and
@@ -3245,6 +3247,7 @@ function cutSliderMax(key) {
   const room = v => Math.max(20, Math.ceil(v));
   if (key === 'width') return room(ext * 2 + 2);
   if (key === 'depth' || key === 'ndepth') return room(ext * 1.5 + 2);
+  if (key === 'slice') return 10;                                           // Follow strand's slice: a few mm
   return room(span * 0.75);                                               // kerf, notch width
 }
 
@@ -3275,6 +3278,7 @@ function syncCutBladeUI() {
   }
   const strand = document.getElementById('chk-cut-blade-strand');
   if (strand) strand.checked = b.strand !== false;
+  if (typeof cutFollowSyncUI === 'function') cutFollowSyncUI();
   const rot = document.getElementById('chk-cut-rotate');
   if (rot) rot.checked = !!state.cutRotate;
   const rings = document.getElementById('cut-rotate-rings');
@@ -3327,6 +3331,7 @@ function cutWireBladeControls() {
       if (sl && from !== sl) sl.value = String(v);
       syncCutUI();
       updateCutHelper();
+      if (typeof cutFollowRecompute === 'function') cutFollowRecompute();      // a new kerf or slice moves where Back / Forward land
     }
     num.addEventListener('input', function () { set(Number(num.value), num); });
     if (sl) sl.addEventListener('input', function () { set(Number(sl.value), sl); });
@@ -3340,6 +3345,7 @@ function cutWireBladeControls() {
   });
   const strand = document.getElementById('chk-cut-blade-strand');
   if (strand) strand.addEventListener('change', function () { cutBladeState().strand = strand.checked; cutBladeRefresh(); });
+  if (typeof cutFollowWire === 'function') cutFollowWire();
   const rot = document.getElementById('chk-cut-rotate');
   if (rot) rot.addEventListener('change', function () { cutSetRotate(rot.checked); });
   [['chk-cut-ring-fb', 'fb'], ['chk-cut-ring-ss', 'ss']].forEach(function (p) {
@@ -3542,6 +3548,12 @@ async function cutNotchAt(m, info) {
           : ' - the slot severs the piece into ' + parts.length + ' bodies, but they stay one piece' +
             (separated && separated.reason ? ' (' + separated.reason + ')' : '') + '; Split to parts separates them';
       setStatus(status + sepNote);
+    }
+    /* Follow strand: on to the next slice, on whichever piece it is now (the cut may have parted the cord). */
+    let followNote = '';
+    if (typeof cutFollowAfterCut === 'function') {
+      const fol = cutFollowAfterCut();
+      if (fol) { followNote = fol.text; setStatus(status + sepNote + fol.text); }
     }
     return { ok: true, removed: removed, intended: intended, shells: parts.length, strands: strands,
              trisOut: raw.length / 9, status: status + sepNote, nmAfter: nmAfter, nmBefore: nmBefore, exact: exact,

@@ -4106,6 +4106,8 @@ function onCanvasPointerDown(event) {
           if (p.sourceId !== state.editId) selectPlaced(idx);
           // Crop's card: the click picks the piece; there is no blade to drop. Nor has the whole-plate blade.
           if (state.cutTool === 'crop' || (typeof cutPlateOn === 'function' && cutPlateOn())) { event.stopPropagation(); return; }
+          // Follow strand: the click finds the cord under it and the blade stands square across it there.
+          if (typeof cutFollowOn === 'function' && cutFollowOn()) { cutFollowFromHit(modelHits[0]); event.stopPropagation(); return; }
           // Cut's card: the blade drops where the click landed, square to the
           // piece's length; holding the button drags it along.
           state.cutDragging = true;
@@ -4123,6 +4125,8 @@ function onCanvasPointerDown(event) {
     const cutHits = state.raycaster.intersectObject(state.cutHelper, true);
     if (cutHits.length) {
       setOrbitFromPlate(false);
+      // Follow strand: the blade is walked with Back / Forward, not dragged off the cord it is square across.
+      if (typeof cutFollowOn === 'function' && cutFollowOn()) { event.stopPropagation(); return; }
       state.cutDragging = true;
       state.cutDragFrom = null;
       if (state.controls) state.controls.enabled = false;
@@ -4151,6 +4155,7 @@ function onCanvasPointerDown(event) {
         if (state.cutterOpen && hit && hit.sourceId != null) {
           if (hit.sourceId !== state.editId) selectPlaced(idx);
           if (state.cutTool === 'crop' || (typeof cutPlateOn === 'function' && cutPlateOn())) { event.stopPropagation(); return; }
+          if (typeof cutFollowOn === 'function' && cutFollowOn()) { cutFollowFromHit(modelHits[0]); event.stopPropagation(); return; }
           state.cutDragging = true;
           if (state.controls) state.controls.enabled = false;
           cutTFromPointer(modelHits[0].point, modelHits[0]);
