@@ -504,6 +504,19 @@ reading the face, not lifting. Opening Lift now **scans every surface of the pie
   the triangles round the loop (the median mean-edge of the real neighbours across the root edges, up to `spacingHintMaxMm`), 1.6
   times that on a smooth fit, instead of the loop's own edge length. Sphere: 4,422 -> about 250 triangles, 0.006 mm off the sphere;
   cone: 64 triangles, 0.004 mm off the cone (`lift:list` 7). Lift's four node suites pass unchanged.
+- **On a wall of long strips the patch is strips too** (`stripMetric`, `fill`'s `strip` option). A cone or a cylinder out of a CAD
+  kernel is one long thin triangle pair per facet, foot to top, and Delaunay prefers fat triangles, so the patch left where a pin
+  stood was a hub of spokes (64 triangles on the cone, of which 9 lay along the strips; 60 on the cylinder, 4). Now, on a smooth
+  fit, the direction and proportions of the real triangles across the root edges are read (projected in the fill's frame): when
+  their long edges agree to 0.85 or better (axial mean) and the median is at least 4 times longer than high, the fill is made in
+  THAT metric - the Delaunay test's circles are measured with the strip direction shrunk by 1/aspect - and no points are put
+  inside, so the fill is a ladder between the rim's own corners that runs the way the wall does. It is kept only if the base under
+  every triangle's middle and edge middles is within `stripSagMm` (0.03 mm) of the chord; otherwise, or when the neighbours are
+  not strips (a sphere, a scan: aspect under 4, or no common direction), it is the even fill, unchanged. Cone: 58 triangles, all
+  along the strips, 0.005 mm off the cone; cylinder: 54, all along, 0.008 mm (a facet's own sag). One direction is used for the
+  whole hole, so a hole big enough that the strips visibly fan (a cone's pin of a few mm is nowhere near) reads as not agreeing
+  and takes the even fill. `lift:list` 7 gates it on the cone and cylinder; `lift:curved-surface` 6 gates it headless, with the
+  even fill (`deps.noStrips`) beside it.
 - **Highlighted the moment Lift opens**: every liftable feature on every surface the scan read is tinted and outlined in
   blue (the one under the cursor, and gathered ones, are drawn over it in their own colours), including features on a surface
   other than the one the card is on.
@@ -527,7 +540,7 @@ reading the face, not lifting. Opening Lift now **scans every surface of the pie
   the feature from it (one Undo). Moving the mouse over a row outlines its feature when it is on the surface shown; it
   never changes the surface, and a row that appears under a cursor at rest is not "moved over".
 - `NSO_LIFT_PLATE.scan()`, `.list()`, `.liftRow(i)` and `.goSurface(key)` are the checks' handles. `lift:list` drives it on
-  `fixtures/crop-wall/` (block, sphere, cone) and on the Barocke plate (22 features, all on the top, as before).
+  `fixtures/crop-wall/` (block, sphere, cone, cylinder) and on the Barocke plate (22 features, all on the top, as before).
 
 **Still gates, not changed here** (the next step, once the list is what you want): hovering a face still makes it the
 face read; the cursor off the piece still goes back to the top; a click on a non-feature still reads the face under it

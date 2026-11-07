@@ -16,6 +16,8 @@
         byte for byte as lift-any-face lifts them.
      4. an assembly: a free part held by the bump comes off with it.
      5. refusals in words, Remove, and the canonical checker (tools/mesh_validate.py).
+     6. a wall of long strips (fixtures/crop-wall/cone_bump.stl and cylinder_bump.stl): the patch left where a pin stood runs
+        along the strips (a ladder between the rim's corners, no points inside), not round a hub; on the wall to 0.03 mm.
 
    Gates from the output soups alone. A lift: the piece and the plate closed and manifold; the plate's
    other triangles the source's, in order, bit for bit; the piece the feature's own triangles bit for
@@ -336,6 +338,57 @@ console.log('\n=== 5. refusals in words ===');
   check('Lift on no such feature is refused in words', !bad.ok && /no detail/.test(bad.reason), bad.reason);
 }
 
+/* ---------------------------------------------------------------- 6. strips */
+
+const STRIP_PLATES = [];
+
+console.log('\n=== 6. a wall of long strips (a cone, a cylinder): the patch left by a pin keeps the strips ===');
+{
+  const WALL = path.join(ROOT, 'fixtures', 'crop-wall');
+  const cases = [
+    ['cone', 'cone_bump.stl', [10.2, 8], (x, y, z) => (Math.hypot(x, y) - 15 * (1 - z / 25)) * 25 / Math.hypot(25, 15), (x, y) => { const r = Math.hypot(x, y); return [-x / r * 15 / 25, -y / r * 15 / 25, 1]; }],
+    ['cylinder', 'cylinder_bump.stl', [15, 15], (x, y, z) => Math.hypot(x, y) - 15, () => [0, 0, 1]]
+  ];
+  for (const [name, file, pos, dist, gen] of cases) {
+    const fp = path.join(WALL, file);
+    if (!fs.existsSync(fp)) { check(name + ': fixture ' + file + ' present (node tools/nso_crop_wall_fixtures.js)', false); continue; }
+    const soup = readSTL(fp).soup || readSTL(fp), nt = soup.length / 9, Mx = LA.index(soup);
+    // seed on the body, 20 degrees round from the pin
+    const a = 20 * Math.PI / 180, pp = [pos[0] * Math.cos(a), pos[0] * Math.sin(a), pos[1]];
+    let seed = -1, bd = Infinity;
+    for (let t = 0; t < nt; t++) {
+      const c = [0, 1, 2].map(k => (soup[t * 9 + k] + soup[t * 9 + 3 + k] + soup[t * 9 + 6 + k]) / 3), d = Math.hypot(c[0] - pp[0], c[1] - pp[1], c[2] - pp[2]);
+      if (d < bd) { bd = d; seed = t; }
+    }
+    const An = S.analyse(soup, seed, { M: Mx }), pin = An.islands.find(I => I.status === 'ok');
+    check(name + ': the pin is found as a detail on the wall', An.ok && !!pin, An.islands.map(I => I.status + ':' + I.tris.length).join(' | '));
+    if (!pin) continue;
+    const measure = r => {
+      const nk = r.keptTris, pl = r.plate, nf = pl.length / 9 - nk;
+      let aligned = 0, worst = 0;
+      for (let t = nk; t < nk + nf; t++) {
+        const P = [0, 1, 2].map(c => [pl[t * 9 + c * 3], pl[t * 9 + c * 3 + 1], pl[t * 9 + c * 3 + 2]]);
+        P.forEach(p => { worst = Math.max(worst, Math.abs(dist(p[0], p[1], p[2]))); });
+        let bl = 0, bdir = null;
+        for (let c = 0; c < 3; c++) { const d = [P[(c + 1) % 3][0] - P[c][0], P[(c + 1) % 3][1] - P[c][1], P[(c + 1) % 3][2] - P[c][2]], l = Math.hypot(...d); if (l > bl) { bl = l; bdir = d; } }
+        const g = gen(P[0][0], P[0][1], P[0][2]);
+        if (Math.abs(bdir[0] * g[0] + bdir[1] * g[1] + bdir[2] * g[2]) / (bl * Math.hypot(...g)) > 0.97) aligned++;
+      }
+      return { nf, aligned, worst };
+    };
+    const on = S.lift(soup, An, [pin.id], DEPS), off = S.lift(soup, An, [pin.id], Object.assign({ noStrips: true }, DEPS));
+    check(name + ': lifts with and without strips', on.ok && off.ok, on.reason || off.reason);
+    if (!(on.ok && off.ok)) continue;
+    const mon = measure(on), moff = measure(off);
+    check(name + ': with strips, 90% of the patch\'s triangles run along the wall\'s strips (within 14 degrees)', mon.aligned >= 0.9 * mon.nf, mon.aligned + ' of ' + mon.nf);
+    check(name + ': ...where the even fill had ' + moff.aligned + ' of ' + moff.nf, mon.aligned / mon.nf > moff.aligned / moff.nf + 0.2);
+    check(name + ': ...on the wall (every new corner within 0.03 mm) and no more triangles than the even fill', mon.worst < 0.03 && mon.nf <= moff.nf, f4(mon.worst) + ' mm, ' + mon.nf + ' vs ' + moff.nf);
+    const cen = LA.census(on.plate);
+    check(name + ': the plate is closed and manifold, and plate + piece = the source (volume residual under 1e-6 mm3)', cen.closed && !cen.degen && Math.abs(on.volumes.residual) < 1e-6, JSON.stringify(on.volumes));
+    STRIP_PLATES.push([name + ' plate with strips', on.plate, name + '-strips']);
+  }
+}
+
 console.log('\n=== tools/mesh_validate.py, self-intersection on ===');
 function validate(soup, name) {
   const f = path.join(OUT, name + '.stl');
@@ -353,6 +406,10 @@ if (handle && bump) {
     check(n + ': mesh_validate PASS, 0 piercing, 0 coplanar', v.clean, v.text);
   });
 }
+STRIP_PLATES.forEach(([n, soup, f]) => {
+  const v = validate(soup, f);
+  check(n + ': mesh_validate PASS, 0 piercing, 0 coplanar', v.clean, v.text);
+});
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed' + (fail ? ' - ' + FAILS.join('; ') : ''));
 process.exit(fail ? 1 : 0);

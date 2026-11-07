@@ -80,6 +80,7 @@
     spacingHintMaxMm: 1.5, // ...or, when the caller says how big the neighbours' triangles are, about that - up to this
     clearFrac: 0.45,       // ...no point closer than this many spacings to the rim
     maxPoints: 20000,      // coarser past this many points
+    stripSagMm: 0.03,      // a fill made of strips may leave the base by this much (a facet's own sag) and no more
     cgTol: 1e-11,
     cgMax: 8000
   };
@@ -120,6 +121,12 @@
   Tri.prototype.incircle = function (a, b, c, d) {
     var X = this.X, Y = this.Y;
     var ax = X[a] - X[d], ay = Y[a] - Y[d], bx = X[b] - X[d], by = Y[b] - Y[d], cx = X[c] - X[d], cy = Y[c] - Y[d];
+    var st = this.st;
+    if (st) {   // the strips' metric: along the strips shrunk by st.k, so a long thin triangle with its long edge on a strip is a fat one
+      var q = (ax * st.c + ay * st.s) * st.k; ay = -ax * st.s + ay * st.c; ax = q;
+      q = (bx * st.c + by * st.s) * st.k; by = -bx * st.s + by * st.c; bx = q;
+      q = (cx * st.c + cy * st.s) * st.k; cy = -cx * st.s + cy * st.c; cx = q;
+    }
     return (ax * ax + ay * ay) * (bx * cy - cx * by) - (bx * bx + by * by) * (ax * cy - cx * ay) + (cx * cx + cy * cy) * (ax * by - bx * ay);
   };
   Tri.prototype.add = function (a, b, c) {
@@ -221,8 +228,57 @@
   // The fill
   // -------------------------------------------------------------------------
 
+  /** The fill. With opts.strip (the direction and proportions of the long thin triangles round the hole: see stripMetric) it is
+      first tried as strips - Delaunay in the strips' own metric and no points inside, so the fill runs the way the mesh does -
+      and if that cannot be done to the base's accuracy it is the even fill, as before. */
   function fill(A, I, ear, opts) {
+    if (opts && opts.strip) {
+      var r = fillCore(A, I, ear, opts);
+      if (r.ok) return r;
+      var r2 = fillCore(A, I, ear, Object.assign({}, opts, { strip: null }));
+      if (r2.ok) r2.stats.stripRefused = r.reason;
+      return r2;
+    }
+    return fillCore(A, I, ear, opts);
+  }
+
+  /** How the triangles round a hole run, when they are strips: from the real triangle across each root edge, projected into
+      the view's frame (the one the fill is made in). { c, s: the strips' direction, k: 1 over how many times longer a strip is
+      than wide } - or null when they are not strips (aspect under minAspect) or do not agree on a direction. */
+  function stripMetric(M, edges, e1, e2, o) {
+    o = o || {};
+    var minAspect = o.minAspect || 4, minAgree = o.minAgree || 0.85, maxAspect = o.maxAspect || 60;
+    var VX = M.VX, sc = 0, ss = 0, sw = 0, asp = [];
+    for (var i = 0; i < edges.length; i++) {
+      var u = M.twin(edges[i].t, edges[i].k);
+      if (u < 0) continue;
+      var P = [];
+      for (var c = 0; c < 3; c++) {
+        var v3 = M.tv[u * 3 + c] * 3;
+        P.push([VX[v3] * e1[0] + VX[v3 + 1] * e1[1] + VX[v3 + 2] * e1[2], VX[v3] * e2[0] + VX[v3 + 1] * e2[1] + VX[v3 + 2] * e2[2]]);
+      }
+      var bl = 0, bd = null;
+      for (c = 0; c < 3; c++) {
+        var dx = P[(c + 1) % 3][0] - P[c][0], dy = P[(c + 1) % 3][1] - P[c][1], l = Math.hypot(dx, dy);
+        if (l > bl) { bl = l; bd = [dx, dy]; }
+      }
+      var cr = Math.abs((P[1][0] - P[0][0]) * (P[2][1] - P[0][1]) - (P[1][1] - P[0][1]) * (P[2][0] - P[0][0]));
+      if (!(bl > 0) || !(cr > 0)) continue;
+      var th = Math.atan2(bd[1], bd[0]);
+      sc += bl * Math.cos(2 * th); ss += bl * Math.sin(2 * th); sw += bl;
+      asp.push(bl * bl / cr);                 // long edge over the height on it
+    }
+    if (asp.length < 4 || !(sw > 0) || Math.hypot(sc, ss) / sw < minAgree) return null;
+    asp.sort(function (a, b) { return a - b; });
+    var a50 = asp[asp.length >> 1];
+    if (!(a50 >= minAspect)) return null;
+    var ph = Math.atan2(ss, sc) / 2;
+    return { c: Math.cos(ph), s: Math.sin(ph), k: 1 / Math.min(a50, maxAspect), aspect: a50, agree: Math.hypot(sc, ss) / sw, dirDeg: ph * 180 / Math.PI };
+  }
+
+  function fillCore(A, I, ear, opts) {
     var o = Object.assign({}, DEFAULTS, opts || {});
+    var st = o.strip || null;
     var t0 = now();
     var M = A.M, G = A.map.grid, n = G.n, e1 = G.e1, e2 = G.e2;
     var Bs = o.target || A.map.sampler || (A.map.sampler = baseSampler(G, A.map.B));
@@ -240,6 +296,7 @@
     var loops = I.loops.map(function (L) { return L.verts.map(function (v) { var p = M.V[v]; return vid(p[0], p[1], p[2]); }); });
     var nLoop = X.length;
     var D = new Tri(X, Y);
+    D.st = st;
     for (var c = 0; c < ear.length; c += 9) {
       var a = vid(ear[c], ear[c + 1], ear[c + 2]), b = vid(ear[c + 3], ear[c + 4], ear[c + 5]), d = vid(ear[c + 6], ear[c + 7], ear[c + 8]);
       if (X.length !== nLoop) return { ok: false, reason: 'the cut engine\'s cap made a corner that is not on the root loop' };
@@ -307,7 +364,7 @@
       return true;
     }
     var rowH = h * Math.sqrt(3) / 2, pts = [];
-    for (var jr = 0, y = lo[1] + rowH / 2; y < hi[1]; jr++, y += rowH) {
+    if (!st) for (var jr = 0, y = lo[1] + rowH / 2; y < hi[1]; jr++, y += rowH) {
       for (var x = lo[0] + ((jr & 1) ? h / 2 : 0) + h / 4; x < hi[0]; x += h) {
         if (clearOf(x, y, o.clearFrac * h) && inside(x, y)) pts.push([x, y]);
       }
@@ -449,6 +506,21 @@
       P3[id] = [0, 1, 2].map(function (a2) { return X[id] * e1[a2] + Y[id] * e2[a2] + W[id] * n[a2]; });
     }
 
+    // ---- strips: a long triangle cuts across the surface, so it is kept only if the surface under it is the chord's ----
+    if (st) {
+      var sagMax = 0, sagBad = false;
+      function sagAt(px, py, pw) { var bz = Bs(px, py), dd = Math.abs(bz - pw); if (!(dd === dd)) { sagBad = true; return; } if (dd > sagMax) sagMax = dd; }
+      D.T.forEach(function (rw) {
+        if (!rw) return;
+        var a4 = rw[0], b4 = rw[1], c4 = rw[2];
+        sagAt((X[a4] + X[b4] + X[c4]) / 3, (Y[a4] + Y[b4] + Y[c4]) / 3, (W[a4] + W[b4] + W[c4]) / 3);
+        sagAt((X[a4] + X[b4]) / 2, (Y[a4] + Y[b4]) / 2, (W[a4] + W[b4]) / 2);
+        sagAt((X[b4] + X[c4]) / 2, (Y[b4] + Y[c4]) / 2, (W[b4] + W[c4]) / 2);
+        sagAt((X[c4] + X[a4]) / 2, (Y[c4] + Y[a4]) / 2, (W[c4] + W[a4]) / 2);
+      });
+      if (sagBad || sagMax > o.stripSagMm) return { ok: false, reason: 'the strips would leave the surface by ' + sagMax.toFixed(3) + ' mm' };
+    }
+
     // ---- out: triangles facing out (CCW looking down n) ----
     var cap = [], folded = 0, nTri = 0;
     D.T.forEach(function (rw) {
@@ -464,7 +536,7 @@
     return {
       ok: true, cap: cap,
       stats: { points: added, lattice: pts.length, loopVerts: nLoop, ringVerts: NV - nF, tris: nTri, spacingMm: h,
-               iters: it, relaxMm: o.relaxMm, maxOffBaseMm: dMax, earFlipped: flipped, chordsSplit: split, ms: now() - t0 }
+               iters: it, relaxMm: o.relaxMm, maxOffBaseMm: dMax, earFlipped: flipped, chordsSplit: split, strips: !!st, ms: now() - t0 }
     };
   }
 
@@ -1190,7 +1262,8 @@
         nb.sort(function (x, y) { return x - y; });
         var smoothFit = G.fit && G.fit.rms != null && G.fit.rms < SURF.pureFitMm;
         var fl = fill(stub, { tris: I.tris, loops: G.loops.map(function (L) { return { verts: L.verts }; }) }, ear,
-          { relaxMm: smoothFit ? SURF.pureRelaxMm : A.relaxMm, target: G.fit.T, spacingHintMm: nb.length ? nb[nb.length >> 1] * (smoothFit ? 1.6 : 1) : 0 });   // a smooth, well-fitted surface needs no more than the triangles round it: a little looser
+          { relaxMm: smoothFit ? SURF.pureRelaxMm : A.relaxMm, target: G.fit.T, spacingHintMm: nb.length ? nb[nb.length >> 1] * (smoothFit ? 1.6 : 1) : 0,
+            strip: smoothFit && !(deps && deps.noStrips) ? stripMetric(M, G.edges, G.frame.e1, G.frame.e2) : null });   // a smooth, well-fitted surface needs no more than the triangles round it: a little looser
         if (!fl.ok) return { ok: false, reason: 'detail ' + (I.id + 1) + ' could not be filled under: ' + fl.reason + ' - nothing changed' };
         mine.push(fl.cap); stats.push(fl.stats);
       }

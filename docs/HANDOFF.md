@@ -69,6 +69,7 @@ merging its list by hand. The list below is generated.
 - [Lift 3 - lift off a curved base, repair to match (2026-10-13)](handoff/lift-3-lift-off-a-curved-base-repair-to-match.md)
 - [Lift keeps an assembly together (2026-10-15)](handoff/lift-keeps-an-assembly-together.md)
 - [Lift on the plate - out of G-scope, into the Subtract card (2026-10-15)](handoff/lift-on-the-plate-out-of-g-scope-into-the-subtract-card.md)
+- [Lift - the patch left where a pin stood keeps the wall's strips (cone, cylinder) (2026-11-07)](handoff/lift-patch-keeps-the-strips-of-a-cone-or-cylinder-wall.md)
 - [Lift, phase 1 - details off a flat face, the face left flat (2026-10-13)](handoff/lift-phase-1-details-off-a-flat-face-the-face-left-flat.md)
 - [Lift reads any face (2026-10-15)](handoff/lift-reads-any-face.md)
 - [Live watch - the eye button](handoff/live-watch-the-eye-button.md)

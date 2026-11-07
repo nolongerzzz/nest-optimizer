@@ -80,10 +80,10 @@ small flat end - a pin's top, a bump's top - has corners round it, so all of tho
 a wall like any other. Taking a bump off a curved base is not what
 this tool does yet.
 
-The test pieces are in `fixtures/crop-wall/` (`block_bump.stl`, `sphere_bump.stl`, `cone_bump.stl`, written by
+The test pieces are in `fixtures/crop-wall/` (`block_bump.stl`, `sphere_bump.stl`, `cone_bump.stl`, `cylinder_bump.stl`, written by
 `node tools/nso_crop_wall_fixtures.js`): a 40 × 20 × 10 block with a 4 × 4 mm square bump 2 mm proud on its +x wall,
 an R15 sphere with a dome bump (R3, 3 mm proud) at +x, and an R15 × 25 cone with a Ø4 pin square to its slope,
-4 mm proud, 8 mm up. Load them with Import to try Wall and Lift on them.
+4 mm proud, 8 mm up, and an R15 × 30 cylinder with the same pin, 4 mm proud, half way up. Load them with Import to try Wall and Lift on them.
 
 The readout: `Wall 20 × 10 mm, line +0.00 mm · holds 12 faces, 0.03 cm³`. The engine keeps the
 line 0.5 µm outside where it is set (`DEFAULTS.wallNudgeMm`): a plane within a millionth of a mm

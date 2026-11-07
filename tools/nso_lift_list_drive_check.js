@@ -1,18 +1,20 @@
 #!/usr/bin/env node
 /* Lift's LIST - opening Lift reads every surface of the piece and lists what is on them - driven through the REAL
    app (1280 x 800). The pieces are fixtures/crop-wall/ (tools/nso_crop_wall_fixtures.js): a block with a square bump
-   on its +x wall, a sphere with a dome bump, a cone with a pin on its slope. Before the list, Lift read the top and
-   nothing else until a hover or a click on the right face told it where to look: "0 features found" on all three.
+   on its +x wall, a sphere with a dome bump, a cone with a pin on its slope, a cylinder with a pin on its wall. Before the list, Lift read the top and
+   nothing else until a hover or a click on the right face told it where to look: "0 features found" on all of them.
      node tools/nso_lift_list_drive_check.js        exit 0 = every gate held
 
      1. BLOCK: pressing Lift says "1 feature found" at once - not "0" - and the list holds one row, on the +x face; the
         top was read too and has nothing on it
      2. a row's Lift lifts that feature off the wall: one new piece, the block left with the bump gone, one Undo
-     3. SPHERE and CONE: the bump on a curved surface is found and listed on open, "on a curved surface"
+     3. SPHERE, CONE and CYLINDER: the bump on a curved surface is found and listed on open, "on a curved surface"
      4. a piece with nothing to lift says so, with an empty list
      5. a plate whose top has features is as it was: they are found on the top, the list names the top
-     7. the patch Lift leaves where a bump stood on the sphere and the cone lies on the body (every vertex within 0.03 mm of the true
-        surface) and is a loose weave (a few hundred triangles, not thousands); the lifted piece is the bump's volume
+     7. the patch Lift leaves where a bump stood on the sphere, the cone and the cylinder lies on the body (every vertex within 0.03 mm
+        of the true surface) and is a loose weave (a few hundred triangles, not thousands); the lifted piece is the bump's volume; and
+        on the cone and the cylinder, whose walls are long strips, the patch is strips too - its long edges run along the wall's own,
+        not round a hub
      6. what was found is HIGHLIGHTED the moment Lift opens - tinted and outlined, before any hover - on every surface that
         has something: a block with a bump on two walls draws both */
 'use strict';
@@ -71,8 +73,8 @@ withApp(async (page, logs) => {
   check('one Undo puts the bump back, and it is listed again', (await L.plateState(page)).models.length === b0.models.length && li.length === 1, li.length + ' rows');
   await disarm(page);
 
-  console.log('\n=== 3. the sphere and the cone: a bump on a curved surface ===');
-  for (const [label, file] of [['sphere', 'sphere_bump.stl'], ['cone', 'cone_bump.stl']]) {
+  console.log('\n=== 3. the sphere, the cone and the cylinder: a bump on a curved surface ===');
+  for (const [label, file] of [['sphere', 'sphere_bump.stl'], ['cone', 'cone_bump.stl'], ['cylinder', 'cylinder_bump.stl']]) {
     const id = await loadSTL(page, path.join(DIR, file));
     await armOn(page, id);
     cnt = await count(page); li = await list(page);
@@ -123,9 +125,12 @@ withApp(async (page, logs) => {
   {
     const ORC = await require('./nso_crop_wall_fixtures.js').oracles();
     const nrm = [25 / Math.hypot(25, 15), 15 / Math.hypot(25, 15)];
-    for (const [label, file, centre, maxCap, want, distSrc] of [
-      ['sphere', 'sphere_bump.stl', [15, 0, 15], 600, ORC.sphere, '(x, y, z) => Math.hypot(x, y, z - 15) - 15'],
-      ['cone', 'cone_bump.stl', [10.2 + nrm[0], 0, 8 + nrm[1]], 200, ORC.cone, '(x, y, z) => (Math.hypot(x, y) - 15 * (1 - z / 25)) * 25 / Math.hypot(25, 15)']
+    // genSrc: which way the strips of the body's wall run at a point (the surface's ruling), for the pieces that are made of strips
+    for (const [label, file, centre, maxCap, want, distSrc, genSrc] of [
+      ['sphere', 'sphere_bump.stl', [15, 0, 15], 600, ORC.sphere, '(x, y, z) => Math.hypot(x, y, z - 15) - 15', null],
+      ['cone', 'cone_bump.stl', [10.2 + nrm[0], 0, 8 + nrm[1]], 200, ORC.cone, '(x, y, z) => (Math.hypot(x, y) - 15 * (1 - z / 25)) * 25 / Math.hypot(25, 15)',
+        '(x, y, z) => { const r = Math.hypot(x, y); return [-x / r * 15 / 25, -y / r * 15 / 25, 1]; }'],
+      ['cylinder', 'cylinder_bump.stl', [15, 0, 15], 200, ORC.cylinder, '(x, y, z) => Math.hypot(x, y) - 15', '() => [0, 0, 1]']
     ]) {
       await disarm(page);
       const id = await loadSTL(page, path.join(DIR, file));
@@ -133,8 +138,9 @@ withApp(async (page, logs) => {
       const before = await L.plateState(page);
       await page.click('.lift-row-go');
       await page.waitForFunction(() => /Lifted|refused|failed/.test(document.getElementById('lift-readout').textContent), null, { timeout: 120000 });
-      const m = await page.evaluate(([id, c, distSrc]) => {
-        const dist = eval(distSrc);
+      const m = await page.evaluate(([id, c, distSrc, genSrc]) => {
+        const dist = eval(distSrc), gen = genSrc ? eval(genSrc) : null;
+        let fillTris = 0, along = 0;
         const host = state.models.find(q => q.id === id), s = host.rawTris, lifted = state.models[state.models.length - 1];
         let tris = 0, worst = 0, sum = 0, n = 0;
         for (let t = 0; t < s.length / 9; t++) {
@@ -142,13 +148,25 @@ withApp(async (page, logs) => {
           for (let k = 0; k < 3; k++) if (Math.hypot(s[t * 9 + k * 3] - c[0], s[t * 9 + k * 3 + 1] - c[1], s[t * 9 + k * 3 + 2] - c[2]) > 3.4) near = false;
           if (!near) continue;
           tris++;
+          if (gen) {   // a triangle of the fill (all three corners on the old pin's rim) should lie along the strips
+            let rim = true;
+            for (let k = 0; k < 3; k++) if (Math.hypot(s[t * 9 + k * 3] - c[0], s[t * 9 + k * 3 + 1] - c[1], s[t * 9 + k * 3 + 2] - c[2]) > 2.4) rim = false;
+            if (rim) {
+              let bl = 0, bd = null;
+              for (let k = 0; k < 3; k++) { const a = k * 3, b = ((k + 1) % 3) * 3, d = [s[t * 9 + b] - s[t * 9 + a], s[t * 9 + b + 1] - s[t * 9 + a + 1], s[t * 9 + b + 2] - s[t * 9 + a + 2]], l = Math.hypot(d[0], d[1], d[2]); if (l > bl) { bl = l; bd = d; } }
+              const g = gen(s[t * 9], s[t * 9 + 1], s[t * 9 + 2]), gl = Math.hypot(g[0], g[1], g[2]);
+              fillTris++;
+              if (bl > 0 && Math.abs(bd[0] * g[0] + bd[1] * g[1] + bd[2] * g[2]) / (bl * gl) > 0.97) along++;   // within 14 degrees
+            }
+          }
           for (let k = 0; k < 3; k++) { const d = Math.abs(dist(s[t * 9 + k * 3], s[t * 9 + k * 3 + 1], s[t * 9 + k * 3 + 2])); worst = Math.max(worst, d); sum += d; n++; }
         }
         const cen = NSO_Crop.census(host.rawTris);
-        return { tris, worst, mean: n ? sum / n : 0, vol: NSO_Crop.volume(lifted.rawTris), closed: cen.open === 0 && cen.repeated === 0 && cen.welded.open === 0, name: lifted.name };
-      }, [id, centre, distSrc]);
+        return { tris, fillTris, along, worst, mean: n ? sum / n : 0, vol: NSO_Crop.volume(lifted.rawTris), closed: cen.open === 0 && cen.repeated === 0 && cen.welded.open === 0, name: lifted.name };
+      }, [id, centre, distSrc, genSrc]);
       check(label + ': the patch where the bump stood lies on the body (every vertex within 0.03 mm of the true surface)', m.tris > 0 && m.worst < 0.03, m.tris + ' triangles in the patch, mean ' + m.mean.toFixed(4) + ', worst ' + m.worst.toFixed(4) + ' mm');
       check(label + ': ...and is a loose weave: ' + maxCap + ' triangles at most', m.tris > 0 && m.tris <= maxCap, m.tris + ' triangles');
+      if (genSrc) check(label + ': the fill keeps the strips: its long edges run along the wall\'s own (90% of the patch\'s triangles within 14 degrees)', m.fillTris >= 8 && m.along >= 0.9 * m.fillTris, m.along + ' of ' + m.fillTris + ' fill triangles');
       check(label + ': the plate is closed and the lifted piece is the bump (' + want.toFixed(2) + ' mm3 by the kernel, 1%)', m.closed && Math.abs(m.vol - want) / want < 0.01, m.vol.toFixed(2) + ' mm3, ' + m.name);
       await page.evaluate(() => document.getElementById('btn-undo').click());
       await page.waitForTimeout(300);

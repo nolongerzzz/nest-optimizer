@@ -8,7 +8,9 @@
 
      block   40 x 20 x 10 mm, a 4 x 4 mm square bump 2 mm proud of the +x wall (flat top)
      sphere  R15, a dome bump (R3 sphere centred on the surface) 3 mm proud at +x
-     cone    R15 base, 25 tall, a pin (Ø4 cylinder, square to the slope) 4 mm proud on the +x side, 8 mm up */
+     cone    R15 base, 25 tall, a pin (Ø4 cylinder, square to the slope) 4 mm proud on the +x side, 8 mm up
+     cylinder R15, 30 tall, a pin (Ø4 cylinder, square to the wall) 4 mm proud at +x, half way up. Like the cone, its wall is
+             the kernel's strips (one long thin triangle pair per facet, foot to top), which is what Lift's fill is tried against. */
 'use strict';
 
 const fs = require('fs');
@@ -53,6 +55,11 @@ async function build() {
     const pin = M.cylinder(6, 2, 2, 48, true).rotate(0, ang, 0).translate(at[0] + n[0] * 1, 0, at[1] + n[1] * 1);
     out.cone = soupOf(c.add(pin));
   }
+  // cylinder: a pin square to a wall of long strips
+  {
+    const c = M.cylinder(30, 15, 15, 96, false), pin = M.cylinder(6, 2, 2, 48, true).rotate(0, 90, 0).translate(16, 0, 15);
+    out.cylinder = soupOf(c.add(pin));
+  }
   return out;
 }
 
@@ -64,7 +71,8 @@ async function oracles() {
   const nz = 15, nx = 25, nl = Math.hypot(nx, nz), n = [nx / nl, nz / nl], at = [15 * (1 - 8 / 25), 8], ang = Math.atan2(n[0], n[1]) * 180 / Math.PI;
   const pin = M.cylinder(6, 2, 2, 48, true).rotate(0, ang, 0).translate(at[0] + n[0] * 1, 0, at[1] + n[1] * 1);
   const sph = M.sphere(15, 96).translate(0, 0, 15), dome = M.sphere(3, 48).translate(15, 0, 15);
-  return { sphere: dome.subtract(sph).volume(), cone: pin.subtract(cone).volume(), block: 4 * 4 * 2 };
+  const cyl = M.cylinder(30, 15, 15, 96, false), cpin = M.cylinder(6, 2, 2, 48, true).rotate(0, 90, 0).translate(16, 0, 15);
+  return { sphere: dome.subtract(sph).volume(), cone: pin.subtract(cone).volume(), block: 4 * 4 * 2, cylinder: cpin.subtract(cyl).volume() };
 }
 
 module.exports = { build, boxSoup, oracles };
