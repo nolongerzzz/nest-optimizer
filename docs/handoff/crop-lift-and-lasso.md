@@ -49,3 +49,9 @@ Branch `claude-wip`. Full write-up: **`docs/CROP.md`, "The card"**; Lift's side 
   close cutter to move pieces"). Now a press on a piece is the ordinary select-and-move whenever no shape is picked (or lent
   to the Foam gun) and Lift is not armed (`cropCardIdle`, `NSO_CropCard.idle()`); with a shape up, or Lift armed, it is the
   tool's, as before. `crop:drive` 6b drags a piece four ways.
+- **Lift highlights what it found** (2026-11-07): on opening, every liftable feature on every surface the scan read is tinted
+  and outlined in blue, not only on hover. The highlight showed the curved reads were too big (the sphere's "feature" was 301 mm²
+  for a 56 mm² dome: the engine grows its base region only while the normal turns under 12 deg over 4 mm, which an R15 curve
+  breaks, so the part of the base it never reached was lumped in with the bump). The scan now seeds a few ways round, out beyond
+  the bump's foot, and keeps the tightest read: 62 mm² on the sphere, 64 on the cone. `lift:list` checks the highlight (one block,
+  sphere, cone, and a block with bumps on two walls drawing both).

@@ -507,7 +507,8 @@ var NSO_LIFT_PLATE = (function () {
 
   var SCAN_MAX_TRIS = 150000;               // a bigger piece is read on its top only: a curved read takes seconds
   var SMOOTH_DEG = 30;                      // a curved surface runs while its triangles bend less than this
-  var SCAN_MAX_READS = 12;                  // curved reads a scan makes: each is a seed beside a small smooth patch
+  var SCAN_MAX_READS = 24;                  // curved reads a scan makes: a few seeds round each small smooth patch
+  var SEEDS_PER_FOOT = 5;                   // seeds tried round one bump's foot; the tightest read of it is kept
   var scanMemo = new WeakMap();             // soup -> { key, scan }
   var scan = null;                          // the target's: { bases: [{ key, label, face, D }], partial }
   var rows = [];                            // the list on the card: [{ base, id, I, text }]
@@ -567,7 +568,12 @@ var NSO_LIFT_PLATE = (function () {
           patchOf[nb] = id; stack.push(nb);
         });
       }
-      patches.push({ tris: tris, area: total });
+      var cx2 = 0, cy2 = 0, cz2 = 0;
+      tris.forEach(function (tt) {
+        var oo = tt * 9;
+        cx2 += area[tt] * (soup[oo] + soup[oo + 3] + soup[oo + 6]) / 3; cy2 += area[tt] * (soup[oo + 1] + soup[oo + 4] + soup[oo + 7]) / 3; cz2 += area[tt] * (soup[oo + 2] + soup[oo + 5] + soup[oo + 8]) / 3;
+      });
+      patches.push({ tris: tris, area: total, c: total > 0 ? [cx2 / total, cy2 / total, cz2 / total] : [0, 0, 0] });
     }
     var meets = [];
     for (var t2 = 0; t2 < nt; t2++) {
@@ -607,26 +613,44 @@ var NSO_LIFT_PLATE = (function () {
          region it grows from the seed to be the features, so a seed beside a bump leaves the bump the only thing outside,
          and a seed far off leaves the whole rest of the surface outside it ("the body", not a detail). A bump's foot is a
          crease, so each small patch is a candidate; its read is kept when it stands out of that surface as a feature. */
-      var sp = smoothPatches(soup, onFace), tried = new Map(), reads = 0;
-      sp.meets.forEach(function (mt) {
-        var key = mt.ps + '>' + mt.pq, n = tried.get(key) || 0;
-        if (n < 0 || n >= 4 || reads >= SCAN_MAX_READS) return;
-        tried.set(key, n + 1);                                   // up to four seeds round each foot, until one finds it
-        if (sp.patches[mt.ps].tris.length < 4) return;
-        var already = bases.some(function (b) { var A2 = b.surfFor === key && b.D && b.D.A; return !!A2; });
-        if (already) { tried.set(key, -1); return; }
-        var f = faceOfTri(soup, mt.q, view, true);
-        if (!f || !f.surf) return;
-        reads++;
-        var D2 = detectSurface(soup, f), A3 = D2 && D2.ok ? D2.A : null;
-        if (!A3 || A3.engine !== 'surface') return;
-        var id = A3.islandOf[mt.s];
-        if (id < 0 || A3.islands[id].status !== 'ok') return;
+      var sp = smoothPatches(soup, onFace), reads = 0, byPatch = new Map();
+      sp.meets.forEach(function (mt) {                           // each small patch: the bigger patch it meets most
+        var e = byPatch.get(mt.ps) || byPatch.set(mt.ps, { ps: mt.ps, q: new Map(), first: mt }).get(mt.ps);
+        e.q.set(mt.pq, (e.q.get(mt.pq) || 0) + 1);
+      });
+      byPatch.forEach(function (e) {
+        var S = sp.patches[e.ps];
+        if (S.tris.length < 4 || reads >= SCAN_MAX_READS) return;
+        var pq = -1, most = 0;
+        e.q.forEach(function (n, k) { if (n > most) { most = n; pq = k; } });
+        var Qp = sp.patches[pq];
+        /* Seeds on the bigger surface, not beside the crease but out beyond the bump's foot (1.2 to 2.2 of its radius, +2 mm), a few
+           ways round: the engine grows the base from the seed, and a seed hard against the crease grows it lopsided, leaving
+           part of the base outside it and lumped in with the bump. The tightest read of the feature is the one kept. */
+        var rS = Math.sqrt(S.area / Math.PI), lo = 1.2 * rS + 1, hi = 2.2 * rS + 2, cand = [];
+        Qp.tris.forEach(function (t) {
+          var o = t * 9, d = Math.hypot((soup[o] + soup[o + 3] + soup[o + 6]) / 3 - S.c[0], (soup[o + 1] + soup[o + 4] + soup[o + 7]) / 3 - S.c[1], (soup[o + 2] + soup[o + 5] + soup[o + 8]) / 3 - S.c[2]);
+          if (d >= lo && d <= hi) cand.push(t);
+        });
+        var seedsAt = [];
+        if (cand.length) { var stride = Math.max(1, Math.floor(cand.length / SEEDS_PER_FOOT)); for (var i = 0; i < cand.length && seedsAt.length < SEEDS_PER_FOOT; i += stride) seedsAt.push(cand[i]); }
+        else seedsAt.push(e.first.q);
+        var best = null, sTri = S.tris[0];
+        seedsAt.forEach(function (seed) {
+          if (reads >= SCAN_MAX_READS) return;
+          var f = faceOfTri(soup, seed, view, true);
+          if (!f || !f.surf) return;
+          reads++;
+          var D2 = detectSurface(soup, f), A3 = D2 && D2.ok ? D2.A : null;
+          if (!A3 || A3.engine !== 'surface') return;
+          var id = A3.islandOf[sTri];
+          if (id < 0 || A3.islands[id].status !== 'ok') return;
+          if (!best || A3.islands[id].areaMm2 < best.area) best = { f: f, D: D2, A: A3, area: A3.islands[id].areaMm2 };
+        });
+        if (!best) return;
         // the same feature found from another foot is one feature: the first read of it stands
-        var dup = bases.some(function (b) { var A4 = b.D && b.D.ok ? b.D.A : null; return A4 && A4 !== A3 && A4.engine === 'surface' && A4.islandOf[mt.s] >= 0 && A4.islands[A4.islandOf[mt.s]].status === 'ok'; });
-        if (dup) { tried.set(key, -1); return; }
-        bases.push({ key: f.key, label: 'a curved surface', face: f, D: D2, surfFor: key });
-        tried.set(key, -1);
+        var dup = bases.some(function (b) { var A4 = b.D && b.D.ok ? b.D.A : null; return A4 && A4 !== best.A && A4.engine === 'surface' && A4.islandOf[sTri] >= 0 && A4.islands[A4.islandOf[sTri]].status === 'ok'; });
+        if (!dup) bases.push({ key: best.f.key, label: 'a curved surface', face: best.f, D: best.D });
       });
     }
     var out = { bases: bases, partial: partial };
@@ -1545,8 +1569,23 @@ var NSO_LIFT_PLATE = (function () {
       if (fp) layer.add(fill(P, fp.tris, FACE, 0.38));
     }
     var stripSet = stripOpen ? new Set(stripIds()) : null;
-    off.forEach(function (id) { if (id !== hoverId && !pending.has(id)) all = all.concat(a.islands[id].tris); });
-    if (all.length) layer.add(lines(foundOutline(P, a, all), FOUND, stripOpen ? 0.35 : 0.55));
+    /* What the scan found, the moment Lift opens: every liftable feature on every surface it read, tinted and outlined
+       (the one under the cursor, and the gathered ones, are drawn over this in their own colours). A surface other
+       than the one the card is on is drawn too - its features are in the list, so they are shown. */
+    if (scan) scan.bases.forEach(function (b) {
+      var A2 = b.D && b.D.ok ? b.D.A : null;
+      if (!A2) return;
+      var here = A2 === a, ts = [];
+      offered(A2, minH).forEach(function (id) {
+        if (here && (id === hoverId || pending.has(id))) return;
+        ts = ts.concat(withParts(A2.islands[id]));
+      });
+      if (!ts.length) return;
+      if (!bigTarget()) layer.add(fill(P, ts, FOUND, stripOpen ? 0.16 : 0.34));
+      layer.add(lines(here ? foundOutline(P, a, ts) : outlineOf(P, ts), FOUND, stripOpen ? 0.5 : 0.95));
+    });
+    else off.forEach(function (id) { if (id !== hoverId && !pending.has(id)) all = all.concat(a.islands[id].tris); });
+    if (!scan && all.length) layer.add(lines(foundOutline(P, a, all), FOUND, stripOpen ? 0.35 : 0.55));
     if (stripSet && stripSet.size) {
       var ticked = [];
       stripSet.forEach(function (id) { ticked = ticked.concat(withParts(a.islands[id])); });

@@ -495,7 +495,16 @@ reading the face, not lifting. Opening Lift now **scans every surface of the pie
 - **the top** (as before), **each flat face that is a base** (`FACE_MIN_FRAC` of the piece's surface; the side walls),
   and **each curved surface**. Every read is the one the cursor would have asked for, cached the same way, so nothing
   is read twice; a piece over 150,000 triangles is read on its top only (a curved read takes seconds) and the card says so.
-- **A curved surface is read from beside each small smooth patch** - across the crease at the foot of a bump. The
+- **Highlighted the moment Lift opens**: every liftable feature on every surface the scan read is tinted and outlined in
+  blue (the one under the cursor, and gathered ones, are drawn over it in their own colours), including features on a surface
+  other than the one the card is on.
+- **A curved surface is read from a seed out beyond each small smooth patch, a few ways round, and the tightest read of the
+  feature is kept.** The engine grows its base region only while the normal turns under 12 degrees over 4 mm (`SURF.creaseDeg`,
+  `windowMm`), which a surface of 15 mm radius breaks all the time, so a seed hard against the bump's crease grows the base
+  lopsided and the part of the base it never reached is lumped in with the bump as "the feature" (a 301 mm² patch for a 56 mm²
+  dome - plain once the highlight was drawn). A seed 1.2 to 2.2 radii of the bump away (+2 mm) reads it as 62 mm². This is a
+  patch on how the scan seeds, not on the engine: a tight curve read from a click still has the limit.
+- (earlier wording) **A curved surface is read from beside each small smooth patch** - across the crease at the foot of a bump. The
   surface engine takes whatever lies *outside* the region it grows from the seed to be the features, so a seed beside
   a bump leaves the bump the only thing outside, while a seed far off leaves the whole rest of the surface outside it
   and reads it as "the body" (`bigger`, 0 mm). This is why a click "slightly outside the feature" used to find it and a
