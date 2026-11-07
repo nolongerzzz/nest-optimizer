@@ -2315,7 +2315,7 @@
       var RIBBON_T_RATIO = 3;
       var RIBBON_SERPENTINE = true;
       var IFILL_RIBBON_MM = 0.38;   /* the ridge's ribbon: Bambu's zig-zag stands this far in from each loop's line (strokes 1.1 mm across a 0.46 band, not the whole ribbon)  */
-      var IFILL_IN_MM = 0.2;   /* the interface's hatch runs from loop to loop, as the transition's does (it was the slab inset a whole wall: only the wide parts of a ring were filled, and Bambu's interface ring is filled round); it stops this far short of the loops' line */
+      var IFILL_IN_MM = 0.3;   /* the interface's hatch runs from loop to loop, as the transition's does (it was the slab inset a whole wall: only the wide parts of a ring were filled, and Bambu's interface ring is filled round); it stops this far short of the loops' line. 0.2 laid a line 0.2 mm from the loop beside it, on top of it (the diamond's side strips had 3 lines to Bambu's 2: line length x1.13); 0.3 puts the line where Bambu's is (0.98 mm from the outer loop) and the length at x1.05. The transition's hatch reaches its loops in Bambu's (0.3 there left it 15 % short) */
       var REGION_FILL_GAP_MM = 0.04;
       var PLANAR_2ND_DIFF = 0.12;   /* a zone whose area's second difference over three layers is under this share of it is a plane's */
       var EXACT_OUTLINE = true;       /* A RIBBON PLATE (the ridge) is Bambu's: each layer the part's EXACT section at the layer's reach (one section, not the union of the layers up to it; the reach never past the stack top's own face: dCl), the loops' centre PLATE_OUT_MM + 0.12 past it (measured on all six pieces: the outer edge stands 0.33 - 0.38 past the outline). Domes keep the union cut: a single section at that reach is far wider than theirs. */
