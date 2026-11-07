@@ -18,11 +18,13 @@ All three are in `npm test`.
 ## What it is
 
 A potter's wheel. A ball of clay, centred on the axis, is opened, pulled and
-trimmed into a vessel — four moves, in the order a potter makes them:
+trimmed into a vessel — the moves, in the order a potter makes them (a plate
+takes Flatten, a bowl or vase takes Open; see [Direction](#direction)):
 
 | move | what it does |
 |---|---|
 | **Ball** | a smooth centred sphere, sized from the target vessel's height by Pappus's centroid theorem |
+| **Flatten** | press the ball down: the top comes down, the clay spreads, and the diameter grows by exactly what the height gives up — a **clay-conserving** squash from the ball to a flat disc with a rounded edge ([Flatten](#flatten)) |
 | **Open** | one push down the middle; the single outer profile becomes **two**, outer and inner, and the piece is a shell from here on |
 | **Pull** | drag-shape the profile at **any** height, not only the top edge; the drag points are spline-fitted and the form is revolved to a clean solid on every update |
 | **Trim** | clean the excess off the base once the form is set |
@@ -80,6 +82,9 @@ NSO_wheelFloor(nozzle)                -> mm, via NSO_Thickness.floorFor
 NSO_wheelSizeBall(opts)               -> the Pappus arithmetic, no geometry
                                          (now one call into NSO_Stock.size)
 NSO_wheelBall(opts)                   -> { ok, reason, piece }
+NSO_wheelFlatten(piece, opts)         -> { ok, reason, piece, height, diameter, pressure }
+NSO_wheelFlatSolve(V, z0, h, hMin)    -> the pressed form of volume V at height h
+NSO_wheelDiscProfile(z0,h,e,c,en,fn)  -> the rounded slab as an outer profile
 NSO_wheelOpen(piece, opts)            -> { ok, reason, piece }
 NSO_wheelPull(piece, opts)            -> { ok, reason, piece }
 NSO_wheelTrim(piece, opts)            -> { ok, reason, piece, removed }
@@ -396,6 +401,98 @@ and the next bake applying both at once.
    intersection handling would give it in closed form and would let Open
    survive a profile with a sharp concave corner without leaning on the gate
    to catch it.
+
+## Flatten
+
+`NSO_wheelFlatten(piece, { height | pressure })`, the **Flatten** button and its
+thickness box (blank: as flat as the wall allows).
+
+A pressed ball is a rounded slab of height `h`: a flat core of radius `c`
+(top and bottom) and an edge that is a half-ellipse of horizontal semi-axis
+`e` and vertical semi-axis `h/2`. Pressure `p` runs from 0 (the ball) to 1 (the
+thinnest disc the wall allows, `h = wall`):
+
+```
+e(p) = h/2 + (eMax(h) - h/2) * (1 - p)^2        c solved so the volume is V
+V    = pi*h/2 * (2c^2 + pi*c*e + 4e^2/3)        (the closed form the self-test checks against)
+```
+
+`eMax(h)` is the widest `c = 0` ellipsoid of that height the clay will hold, so
+`e` never exceeds it and `c` is never negative — there is no clamp. The height
+is the one number (a drag, later); the pressure is derived from it, so a drag
+back **up** un-presses along the same curve, and the result is a function of the
+clay and the height, not of the history.
+
+**The clay is conserved.** The new form is solved so its volume equals the live
+volume — by bisection on `NSO_wheelVolume`, the same polygon the revolve
+tessellates, keeping the **low** side so a rounding error can never push a ball
+that has exactly zero headroom over its ceiling. Measured: a relative volume
+change of 1e-16 at every height. The diameter is what falls out: a 46.6 mm ball
+(52 915 mm³) is 49.9 mm across at 40 mm thick, 63.7 at 20, 84.7 at 10, 150.5 at
+3 mm.
+
+It presses a **solid**: an opened piece refuses and says to flatten first. A
+height above a ball of that clay refuses ("Flatten only presses down"), one under
+the wall refuses, a wall under the nozzle floor refuses — each with the original
+piece handed back. A lightly pressed ball can still be opened.
+
+The canonical checker's "inside the material ceiling" gate moved from an absolute
+1e-6 mm³ to the 1e-6 **relative** float32 storage bound the check before it
+already asserts: a clay-conserving piece sits exactly *on* the ceiling, so the
+storage residual alone decides which side of it the measured number lands.
+
+## Direction
+
+Agreed with the owner while this tool was being shaped. Not all of it is built;
+this is the record of what was decided and the order it is going in.
+
+**Pottery is the target.** Plates, bowls, vases, pitchers: everything starts from
+a ball and is pressed, opened and pulled. The interaction is the one Tube Edge and
+Pull already have — drag on the piece, see it live, release to Set, one Undo.
+
+1. **Clay is conserved by Flatten, Open and Pull.** Flatten is done. Open must
+   stop discarding the top half of the ball (today the rim lands at the equator
+   and the clay above it is thrown away but still counted) and instead push the
+   clay up and out so the rim rises and the wall thins; Pull must conserve instead
+   of displacing radially against a ceiling. **Rim extension is the one move that
+   adds clay; trim and crop are the only ones that remove it.** The ball's waste
+   margin becomes a trim allowance. (Pinned today as a known gap: a Pull on a
+   pressed disc is refused as out of material, because it asks for clay it does
+   not have — the self-test flips when Pull conserves.)
+2. **Lip.** A flat disc's perimeter is lifted into a rim with a flared transition,
+   the way a plate's is: flat out to a start radius, then the underside eases up
+   (tangent at the start, so the flare is smooth) and holds an angle to the rim,
+   which ends in a rounded bead. The section is swept along that curve, so the
+   thickness is constant and the clay is conserved; the outer diameter shrinks a
+   little (prototype: 143.3 → 142.3 mm for 14° over 30 mm on a 6 mm plate). Its
+   handles are the start radius, the height (dragged) and the flare length. It is
+   called **Lip**, not Lift — Lift is taken by Crop. A lipped disc is an opened
+   vessel (outer = the underside, inner = the top face), so no new piece shape is
+   needed. The flare is Tube Edge's Trumpet curve; `NSO_teProfile` already builds
+   meridian curves and should be reused rather than copied.
+3. **Foot ring, handles, long spouts are separate steps,** after the body. The foot
+   ring is a Trim (`toR` already cuts a foot back); handles and spouts are not
+   solids of revolution — a spout is a Pull on the baked mesh, where the section
+   rule keeps the wall's thickness.
+4. **The profile has to become a loop.** A plate's flat faces are horizontal, and a
+   horizontal face has infinite slope in `r(z)`: a flattened disc already carries
+   runs of samples sharing one `z`. `NSO_wheelPchip` divides by `dz`, and
+   `NSO_wheelRadiusAt`, Open, Pull and Trim all assume `r` is single-valued in
+   `z`. What is already general: the gate (`NSO_wheelDistToProfile`), the volume
+   and the revolve (`NSO_Stock.revolve`) all work on any closed meridian loop. The
+   change is one closed `(r, z)` loop with the moves written as displacements along
+   the arclength or the surface normal.
+5. **The session has to belong to its piece.** `NSO_wheelSession` is a global that
+   nothing resets: Undo steps the mesh back but not the session, and selecting
+   another piece and pressing a move bakes the wheel's form onto *that* piece.
+   Flatten dodges it by being a function of the clay and a height; Open, Pull and
+   Lip will not. Stock's pattern (a fingerprint of the last soup written; the
+   session ends rather than overwriting) is the model.
+
+Order: loop profile and the session shell (ghost, handle, Set / Cancel, one Undo
+per gesture) → Flatten as a drag → Open as a clay-conserving drag → Pull as a
+silhouette drag, refusing a no-op above the rim → Lip → rim flare and roll from
+Tube Edge's curve.
 
 ## The live drag
 

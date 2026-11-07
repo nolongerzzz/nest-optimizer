@@ -719,6 +719,125 @@ let tall;
 /* =====================================================================
    8. Out of scope, refused by name
    ===================================================================== */
+/* =====================================================================
+   7b. Flatten: press the ball, and the clay is conserved
+   ===================================================================== */
+console.log('\n== 7b. Flatten: the top comes down, the clay spreads, nothing is added or lost ==');
+{
+  const V0 = W.NSO_wheelVolume(ball);
+  const diam = p => 2 * rMax(p);
+
+  /* The headline: whatever height it is pressed to, the new form holds the
+     volume the old one did, to rounding - the bisection keeps the low side, so
+     a ball with exactly zero headroom is never refused by a rounding error. */
+  const heights = [40, 30, 20, 12, 6, 3];
+  const flats = {};
+  let worst = 0, worstHead = Infinity;
+  for (const h of heights) {
+    const r = W.NSO_wheelFlatten(ball, { height: h });
+    check('flatten to ' + h + ' mm lands', r.ok, r.reason);
+    if (!r.ok) continue;
+    flats[h] = r;
+    worst = Math.max(worst, Math.abs(W.NSO_wheelVolume(r.piece) - V0) / V0);
+    worstHead = Math.min(worstHead, W.NSO_wheelBudget(r.piece).headroom);
+  }
+  check('the clay is CONSERVED at every height, to a few parts in 1e12',
+    worst < 1e-12, 'worst relative volume change ' + worst.toExponential(2));
+  check('...and never a rounding error OVER the old volume (headroom stays >= 0)',
+    worstHead >= -1e-9, 'worst headroom ' + worstHead.toExponential(2) + ' mm^3');
+
+  /* The diameter is what falls out. It must grow, strictly, as the height is
+     given up - that is the whole visible behaviour. */
+  let grows = true, last = diam(ball);
+  for (const h of heights) { if (!flats[h]) { grows = false; break; } const d = diam(flats[h].piece); if (!(d > last)) grows = false; last = d; }
+  check('the diameter grows strictly as the height comes down',
+    grows, heights.map(h => h + '->' + (flats[h] ? diam(flats[h].piece).toFixed(1) : '?')).join('  '));
+
+  const full = W.NSO_wheelFlatten(ball, {});
+  check('with no height asked it presses as flat as the wall allows',
+    full.ok && Math.abs(span(full.piece) - ball.wall) < 1e-9,
+    full.ok ? span(full.piece).toFixed(3) + ' mm thick, ' + diam(full.piece).toFixed(1) + ' mm across' : full.reason);
+  save('flat-disc', full.piece);
+
+  /* Independent of the code under test: the closed form for the pressed
+     form's volume, V = pi*h/2 * (2c^2 + pi*c*e + 4e^2/3), from the solved c
+     and e. The profile is a 40-gon on the edge, so the two differ by the
+     chord error only. */
+  const s = W.NSO_wheelFlatSolve(V0, 0, ball.wall, ball.wall);
+  const closed = Math.PI * s.height / 2 * (2 * s.c * s.c + Math.PI * s.c * s.e + 4 * s.e * s.e / 3);
+  check('the solved form matches the closed-form volume within the edge polygon\'s chord error',
+    Math.abs(closed - V0) / V0 < 5e-3,
+    'closed form ' + closed.toFixed(1) + ' vs ' + V0.toFixed(1) + ' mm^3 (' +
+    (Math.abs(closed - V0) / V0 * 100).toFixed(3) + '%)');
+  check('fully pressed, the edge is a half-circle of radius h/2 and the faces are flat',
+    Math.abs(s.e - s.height / 2) < 1e-9 && s.c > 0 &&
+    full.piece.outer.filter(q => q.z === 0).length > 2 &&
+    full.piece.outer.filter(q => Math.abs(q.z - full.piece.wall) < 1e-12).length > 2,
+    'e = ' + s.e.toFixed(4) + ' mm, flat core r = ' + s.c.toFixed(2) + ' mm');
+  check('the base stays where it was (z = 0), pole on the axis',
+    full.piece.outer[0].z === 0 && full.piece.outer[0].r === 0);
+
+  /* The pressed mesh is a real solid: the revolve's exact identity still
+     holds on a form with two flat annuli, and the canonical checker (which
+     reads the STL written above) says closed and manifold. */
+  const k = full.piece.segments * Math.sin(2 * Math.PI / full.piece.segments) / (2 * Math.PI);
+  const exact = meshVolume(W.NSO_wheelRevolve(full.piece, { precise: true })) / W.NSO_wheelVolume(full.piece);
+  check('mesh volume / analytic volume == n*sin(2pi/n)/(2pi), EXACTLY, on a pressed disc too',
+    Math.abs(exact - k) < 1e-12, exact.toFixed(15) + ' vs ' + k.toFixed(15));
+
+  /* Pressure is the same family seen from the other end. */
+  const ball0 = W.NSO_wheelFlatten(ball, { pressure: 0 });
+  check('pressure 0 is the ball again: no flat core, widest point = half the height',
+    ball0.ok && Math.abs(rMax(ball0.piece) - span(ball0.piece) / 2) < 5e-3 &&
+    W.NSO_wheelFlatSolve(V0, 0, span(ball0.piece), ball.wall).c === 0,
+    ball0.ok ? span(ball0.piece).toFixed(3) + ' mm tall, r ' + rMax(ball0.piece).toFixed(3) + ' mm' : ball0.reason);
+  const half = W.NSO_wheelFlatten(ball, { pressure: 0.5 });
+  check('pressure 0.5 lands between the ball and the thinnest disc',
+    half.ok && span(half.piece) < span(ball0.piece) && span(half.piece) > ball.wall, half.reason);
+
+  /* It is a function of the clay and the height, not of the history: pressing
+     a pressed disc, or pressing it back UP, lands on the same form as pressing
+     the ball straight there. A drag can therefore go down and up along one
+     curve. */
+  const up = W.NSO_wheelFlatten(full.piece, { height: 20 });
+  check('pressing the thin disc back up to 20 mm lands on the same form as the ball pressed to 20',
+    up.ok && Math.abs(diam(up.piece) - diam(flats[20].piece)) < 1e-9 &&
+    Math.abs(W.NSO_wheelVolume(up.piece) - V0) / V0 < 1e-12,
+    up.ok ? diam(up.piece).toFixed(4) + ' vs ' + diam(flats[20].piece).toFixed(4) + ' mm' : up.reason);
+  const twice = W.NSO_wheelFlatten(flats[20].piece, { height: 20 });
+  check('pressing to the height it is already at changes nothing',
+    twice.ok && Math.abs(diam(twice.piece) - diam(flats[20].piece)) < 1e-9);
+
+  /* Refusals, each naming what to do next, each handing back the ORIGINAL
+     piece (the house contract), none of them touching the budget. */
+  const open = W.NSO_wheelOpen(ball, {});
+  const onOpen = W.NSO_wheelFlatten(open.piece, {});
+  check('an opened piece refuses: Flatten presses a solid', !onOpen.ok && /already open/.test(onOpen.reason) &&
+    onOpen.piece === open.piece, onOpen.reason);
+  const thin = W.NSO_wheelFlatten(ball, { height: ball.wall - 1 });
+  check('a disc thinner than the wall refuses, naming the wall', !thin.ok && /thinner than the/.test(thin.reason) &&
+    thin.piece === ball, thin.reason);
+  const tall = W.NSO_wheelFlatten(ball, { height: span(ball) + 50 });
+  check('a height taller than the clay can reach refuses: Flatten only presses down',
+    !tall.ok && /presses down/.test(tall.reason) && tall.piece === ball, tall.reason);
+  const flimsy = Object.assign({}, ball, { wall: 0.2 });
+  const noz = W.NSO_wheelFlatten(flimsy, {});
+  check('a wall under the nozzle floor refuses before anything is pressed',
+    !noz.ok && /nozzle floor/.test(noz.reason), noz.reason);
+
+  /* A light press is still a ball you can open: the two moves compose. */
+  const lightOpen = W.NSO_wheelOpen(flats[40].piece, {});
+  check('a lightly pressed ball can still be opened', lightOpen.ok, lightOpen.reason);
+
+  /* Honest about what is NOT conserving yet: Pull is still a radial
+     displacement with a ceiling, so on a pressed disc it asks for clay it does
+     not have. Pinned so the day Pull is made volume-conserving this flips and
+     says so (docs/POTTERY-WHEEL.md "Direction", step 4). */
+  const pullDisc = W.NSO_wheelPull(full.piece, { z: 1.5, dr: 4 });
+  check('(known) Pull is not yet volume-conserving: on a full disc it is refused as out of material',
+    !pullDisc.ok && /out of material/.test(pullDisc.reason), pullDisc.reason);
+}
+
 console.log('\n== 8. what this first version does not do, and says so ==');
 {
   const src = fs.readFileSync(path.join(ROOT, 'app-wheel.js'), 'utf8');

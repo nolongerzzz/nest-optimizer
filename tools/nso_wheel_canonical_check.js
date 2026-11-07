@@ -105,8 +105,13 @@ for (const m of MANIFEST) {
   /* The constraint, stated on the checker's number: what is on the wheel can
      never be more clay than the potter has. */
   const ceilingMesh = m.budget.ceiling * m.polygon_factor;
+  /* The tolerance is the float32 STL storage bound the check above already
+     asserts (1e-6 relative), not an absolute 1e-6 mm^3. A piece that CONSERVES
+     its clay (Flatten) sits exactly ON the ceiling, so the storage residual
+     alone decides which side of it the measured number lands - for a fresh
+     ball it happened to land under. */
   check('the measured solid is inside the material ceiling',
-    v.signed_volume <= ceilingMesh + 1e-6,
+    v.signed_volume <= ceilingMesh * (1 + 1e-6),
     v.signed_volume.toFixed(1) + ' of ' + ceilingMesh.toFixed(1) + ' mm^3 (' +
     (100 * v.signed_volume / ceilingMesh).toFixed(1) + '% of the ball used)');
   check('...and the ceiling is the arithmetic the wheel says it is',

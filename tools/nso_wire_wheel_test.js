@@ -362,6 +362,69 @@ withApp(async (page, logs) => {
   check('...and the custom build height is a real field on the Plate card',
     await page.evaluate(() => !!document.getElementById('custom-h')));
 
+  console.log('\n=== 10b. Flatten: press a fresh ball, the diameter grows, the clay does not change ===');
+  /* The app's model size is Y-up: a disc's thickness is size.y, its footprint
+     size.x by size.z. */
+  await page.evaluate(() => { const e = document.getElementById('btn-wheel-flatten'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
+  await page.evaluate(() => { const e = document.getElementById('inp-wheel-height'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
+  await page.fill('#inp-wheel-height', '40');
+  await page.click('#btn-wheel-ball');
+  await page.waitForFunction(() => /Ball centred/.test(document.getElementById('status').textContent),
+    null, { timeout: 30000 });
+  const ball2 = await measure(page);
+  check('a fresh ball is on the wheel', ball2.open === 0 && ball2.nm === 0 && ball2.size.x === ball2.size.y,
+    JSON.stringify(ball2.size));
+
+  /* Blank thickness: as flat as the wall allows. */
+  await page.click('#btn-wheel-flatten');
+  await page.waitForFunction(() => /Flattened/.test(document.getElementById('status').textContent),
+    null, { timeout: 30000 });
+  const flatStatus = await statusOf(page);
+  const flat = await measure(page);
+  console.log('   status: ' + flatStatus);
+  console.log('   flat disc   tris ' + flat.tris + '  open ' + flat.open + '  nm ' + flat.nm +
+              '  vol ' + flat.volume.toFixed(1) + '  bbox ' + JSON.stringify(flat.size));
+  check('the button is wired and the status names the press',
+    /Flattened to 3\.0 mm thick/.test(flatStatus) && /clay conserved/.test(flatStatus), flatStatus);
+  check('the piece the app draws is a flat disc, 3 mm thick and wider than the ball',
+    Math.abs(flat.size.y - 3) < 1e-3 && flat.size.x > ball2.size.x * 2,
+    flat.size.x.toFixed(2) + ' across x ' + flat.size.y.toFixed(3) + ' thick, from a ' + ball2.size.x.toFixed(2) + ' mm ball');
+  check('and it is closed - 0 open, 0 non-manifold', flat.open === 0 && flat.nm === 0,
+    flat.open + ' open, ' + flat.nm + ' non-manifold');
+  check('the clay is conserved in the mesh the app draws, to float32 storage',
+    Math.abs(flat.volume - ball2.volume) / ball2.volume < 1e-5,
+    ball2.volume.toFixed(2) + ' -> ' + flat.volume.toFixed(2) + ' mm^3');
+
+  /* A thickness in the box stops the press short. */
+  await page.fill('#inp-wheel-flat-h', '20');
+  await page.click('#btn-wheel-flatten');
+  await page.waitForFunction(() => /Flattened to 20\.0 mm/.test(document.getElementById('status').textContent),
+    null, { timeout: 30000 });
+  const mid = await measure(page);
+  check('a thickness in the box presses to that height - and back UP from the thin disc',
+    Math.abs(mid.size.y - 20) < 1e-3 && mid.size.x < flat.size.x && mid.size.x > ball2.size.x,
+    mid.size.x.toFixed(2) + ' across x ' + mid.size.y.toFixed(2) + ' thick');
+  check('...still the same clay', Math.abs(mid.volume - ball2.volume) / ball2.volume < 1e-5);
+
+  /* A refusal is loud and leaves the piece alone. */
+  await page.fill('#inp-wheel-flat-h', '1');
+  await page.click('#btn-wheel-flatten');
+  await page.waitForFunction(() => /thinner than the/.test(document.getElementById('status').textContent),
+    null, { timeout: 30000 });
+  check('a disc thinner than the wall is refused, in words',
+    /flatten to no less than that/.test(await statusOf(page)));
+  check('...leaving the piece exactly as it was',
+    JSON.stringify(await measure(page)) === JSON.stringify(mid));
+
+  /* Undo steps back one press. */
+  await page.click('#btn-undo');
+  await page.waitForFunction(() => /Undo: Pottery Wheel reverted/.test(document.getElementById('status').textContent),
+    null, { timeout: 30000 });
+  const undoneFlat = await measure(page);
+  check('Undo steps back one press: the thin disc returns',
+    Math.abs(undoneFlat.size.y - 3) < 1e-3 && Math.abs(undoneFlat.size.x - flat.size.x) < 1e-3,
+    undoneFlat.size.x.toFixed(2) + ' across x ' + undoneFlat.size.y.toFixed(2) + ' thick');
+
   console.log('\n=== 11. nothing else on the page broke ===');
   const errs = logs.filter(l => l.startsWith('[pageerror]'));
   check('no uncaught page errors', errs.length === 0, errs.join(' | '));

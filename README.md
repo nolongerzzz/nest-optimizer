@@ -116,8 +116,8 @@ Smart build-plate packing for 3D printing.
   number is drawn on the piece, and it follows the piece when you move it.
   See [docs/MEASURE.md](docs/MEASURE.md).
 - **Pottery Wheel**: throw a vessel on an axis - a centred ball sized by
-  Pappus's centroid theorem, one opening push, drag-shaped pulls at any
-  height, and a base trim, with a live clay budget and the nozzle-safety wall
+  Pappus's centroid theorem, a clay-conserving **Flatten** (ball to plate
+  disc), one opening push, drag-shaped pulls at any height, and a base trim, with a live clay budget and the nozzle-safety wall
   floor enforced on every update ([docs/POTTERY-WHEEL.md](docs/POTTERY-WHEEL.md))
 - **Build-volume warning**: a live check against the selected printer's bed
   and build height, per-printer profiles any tool can query

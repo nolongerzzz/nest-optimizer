@@ -1143,6 +1143,164 @@ function NSO_wheelExtendRim(piece, opts) {
   return g;
 }
 
+/* ------------------------------------------------------------ 7e. FLATTEN
+
+   Press the ball down onto the wheel. The top comes down, and because the
+   clay has nowhere else to go the piece spreads: a sphere becomes an oblate
+   bulge, then a disc with a flat core and a rounded edge, and its diameter
+   grows by exactly as much as the height was given up.
+
+   THE CLAY IS CONSERVED. This is the first move that is held to the volume of
+   the piece it started from rather than to the budget's ceiling: the new form
+   is SOLVED so its volume equals the live volume, and the diameter is what
+   falls out. (The decision, and the same rule for Open and Pull to follow, is
+   in docs/POTTERY-WHEEL.md "Direction".) The solve is a bisection on this
+   file's own NSO_wheelVolume - the polygon the revolve will tessellate - and
+   it keeps the LOW side of the bracket, so the new form can never come out a
+   rounding error over the old one and trip the budget gate on a ball whose
+   headroom is exactly zero.
+
+   THE FAMILY. A pressed ball is a rounded slab of height h: a flat core of
+   radius c (top and bottom), and an edge that is a half-ellipse of horizontal
+   semi-axis e and vertical semi-axis h/2. Pressure p runs from 0 (the ball) to
+   1 (the thinnest disc the wall allows). The edge goes from the widest
+   ellipsoid the volume will hold (c = 0, which is the oblate bulge) to a full
+   half-circle of radius h/2:
+
+       e(p) = h/2 + (eMax(h) - h/2) * (1 - p)^2           c solved from V
+
+   eMax(h) is the c = 0 ellipsoid of that height, so e never exceeds it and c
+   is never negative: there is no clamp to get wrong, and p = 0 is a ball
+   again. The height is the user's one number (the drag, later); the pressure
+   is derived from it, so a drag back UP un-presses along the same family.
+
+   The base stays where it was. Flatten presses a SOLID: an opened piece has a
+   cavity floor and a rim a flat press would crush, so it refuses and says to
+   flatten first. It does not need to be a ball - any solid is squashed to the
+   same family from its own volume - but a piece taller than a ball of that
+   much clay cannot be reached by pressing, and refuses.
+
+   opts: height     the pressed height in mm (the top of the piece), OR
+         pressure   0..1, how far between the ball and the thinnest disc
+         (neither: the thinnest disc the wall allows)                      */
+var NSO_WHEEL_FLAT_EDGE_N = 40;   // samples round the rounded edge
+var NSO_WHEEL_FLAT_FACE_N = 12;   // samples across each flat face
+
+/* The pressed form as an outer profile: bottom axis, flat bottom out to c,
+   round the edge, flat top back in to the axis. Both faces are horizontal, so
+   consecutive samples share a z - the same shape Trim's flat base already
+   writes, and the revolve takes it as a flat annulus. */
+function NSO_wheelDiscProfile(z0, h, e, c, edgeN, faceN) {
+  var out = [{ z: z0, r: 0 }], i;
+  var core = c > 1e-9;
+  if (core) for (i = 1; i <= faceN; i++) out.push({ z: z0, r: c * i / faceN });
+  for (i = 1; i <= edgeN; i++) {
+    var f = -Math.PI / 2 + Math.PI * i / edgeN;
+    out.push({ z: z0 + h / 2 + (h / 2) * Math.sin(f), r: c + e * Math.cos(f) });
+  }
+  /* cos(pi/2) is 6e-17, not 0: pin the last edge sample so the top is exactly
+     the flat face's rim (core) or exactly the pole (no core). */
+  out[out.length - 1] = { z: z0 + h, r: core ? c : 0 };
+  if (core) for (i = 1; i <= faceN; i++) out.push({ z: z0 + h, r: c * (1 - i / faceN) });
+  return out;
+}
+
+/* The pressed form of volume V at height h, from the base at z0.
+   Returns { ok, outer, e, c, diameter, pressure, hTop, hMin } or a refusal. */
+function NSO_wheelFlatSolve(V, z0, h, hMin, opts) {
+  opts = opts || {};
+  var edgeN = Math.max(12, Math.round(opts.edgeN || NSO_WHEEL_FLAT_EDGE_N));
+  var faceN = Math.max(2, Math.round(opts.faceN || NSO_WHEEL_FLAT_FACE_N));
+  function vol(hh, e, c) {
+    return NSO_wheelVolume({ outer: NSO_wheelDiscProfile(z0, hh, e, c, edgeN, faceN), inner: null });
+  }
+  /* The tallest the family goes: the c = 0, e = h/2 ellipsoid IS a ball, so the
+     height at which that holds exactly V. Grown then bisected - no cube root
+     here, because the ball arithmetic is nso_stock.js's and not this file's. */
+  var hi = Math.max(1, hMin), lo = 0, i;
+  while (vol(hi, hi / 2, 0) < V && hi < 1e6) hi *= 2;
+  for (i = 0; i < 80; i++) { var m = 0.5 * (lo + hi); if (vol(m, m / 2, 0) <= V) lo = m; else hi = m; }
+  var hTop = lo;
+  if (!(hTop > hMin + 1e-9)) {
+    return { ok: false, reason: 'this much clay is only ' + hTop.toFixed(2) + ' mm tall as a ball - ' +
+      'no thicker than the ' + hMin.toFixed(2) + ' mm wall, so there is nothing to press' };
+  }
+  if (h > hTop + 1e-9) {
+    return { ok: false, reason: 'a ' + h.toFixed(2) + ' mm height is taller than a ball of this much clay ' +
+      '(' + hTop.toFixed(2) + ' mm) - Flatten only presses down' };
+  }
+  if (h < hMin - 1e-9) {
+    return { ok: false, reason: 'a ' + h.toFixed(2) + ' mm disc is thinner than the ' + hMin.toFixed(2) +
+      ' mm wall - flatten to no less than that, or ask for a thinner wall' };
+  }
+  h = Math.min(hTop, Math.max(hMin, h));
+  var p = (hTop - h) / (hTop - hMin);
+
+  /* The widest c = 0 ellipsoid of this height that holds no more than V. */
+  var eLo = 0, eHi = Math.sqrt(3 * V / (2 * Math.PI * h)) * 1.2 + 1;
+  for (i = 0; i < 80; i++) { var me = 0.5 * (eLo + eHi); if (vol(h, me, 0) <= V) eLo = me; else eHi = me; }
+  var eMax = eLo;
+  var e = h / 2 + Math.max(0, eMax - h / 2) * (1 - p) * (1 - p);
+
+  var cLo = 0, cHi = Math.sqrt(V / (Math.PI * h)) + 1;
+  if (vol(h, e, 0) > V) { cHi = 0; }          // already no room for a core: the bulge itself
+  for (i = 0; i < 80 && cHi > 0; i++) { var mc = 0.5 * (cLo + cHi); if (vol(h, e, mc) <= V) cLo = mc; else cHi = mc; }
+  var c = cLo;
+  if (c < 1e-9) c = 0;
+  return {
+    ok: true, outer: NSO_wheelDiscProfile(z0, h, e, c, edgeN, faceN),
+    height: h, e: e, c: c, diameter: 2 * (c + e), pressure: p, hTop: hTop, hMin: hMin
+  };
+}
+
+function NSO_wheelFlatten(piece, opts) {
+  opts = opts || {};
+  if (piece.inner) {
+    return { ok: false, piece: piece, reason: 'this piece is already open - Flatten presses a solid; ' +
+      'flatten first, then open it' };
+  }
+  var wall = piece.wall;
+  var nozzleFloor = NSO_wheelFloor(piece.nozzle);
+  if (wall < nozzleFloor) {
+    return { ok: false, piece: piece, reason: 'a ' + wall.toFixed(3) + ' mm wall is under the ' +
+      nozzleFloor.toFixed(3) + ' mm nozzle floor - nothing pressed that thin could be printed' };
+  }
+  var V = NSO_wheelVolume(piece);
+  if (!(V > 0)) return { ok: false, piece: piece, reason: 'there is no clay on the wheel to press' };
+  var z0 = piece.outer[0].z;
+
+  var h = opts.height;
+  if (!(typeof h === 'number' && isFinite(h))) {
+    if (typeof opts.pressure === 'number' && isFinite(opts.pressure)) {
+      /* Pressure picks a height inside the family, so it needs hTop first. */
+      var probe = NSO_wheelFlatSolve(V, z0, wall, wall, opts);
+      if (!probe.ok) return { ok: false, piece: piece, reason: 'Flatten: ' + probe.reason };
+      var pp = Math.min(1, Math.max(0, opts.pressure));
+      h = probe.hTop - pp * (probe.hTop - wall);
+    } else {
+      h = wall;        // nothing asked: as flat as the wall allows
+    }
+  }
+  var s = NSO_wheelFlatSolve(V, z0, h, wall, opts);
+  if (!s.ok) return { ok: false, piece: piece, reason: 'Flatten: ' + s.reason };
+
+  var cand = {
+    outer: s.outer, inner: null,
+    nozzle: piece.nozzle, wall: piece.wall, segments: piece.segments,
+    target: piece.target, sizing: piece.sizing,
+    budget: { start: piece.budget.start, added: piece.budget.added, trimmed: piece.budget.trimmed },
+    ops: piece.ops.concat(['flatten'])
+  };
+  var g = NSO_wheelGate(piece, cand, 'Flattening to ' + s.height.toFixed(2) + ' mm');
+  if (!g.ok) return g;
+  g.height = s.height;
+  g.diameter = s.diameter;
+  g.pressure = s.pressure;
+  g.reason = 'Flattened to ' + s.height.toFixed(1) + ' mm thick, ' + s.diameter.toFixed(1) +
+    ' mm across (' + Math.round(s.pressure * 100) + '% pressed), clay conserved';
+  return g;
+}
+
 /* =====================================================================
    8. App wiring
 
@@ -1255,6 +1413,7 @@ function NSO_wheelRun(move, opts, head) {
     }
     var r;
     if (move === 'ball') r = NSO_wheelBall(opts);
+    else if (move === 'flatten') r = NSO_wheelFlatten(NSO_wheelSession, opts);
     else if (move === 'open') r = NSO_wheelOpen(NSO_wheelSession, opts);
     else if (move === 'pull') r = NSO_wheelPull(NSO_wheelSession, opts);
     else if (move === 'trim') r = NSO_wheelTrim(NSO_wheelSession, opts);
@@ -1316,6 +1475,10 @@ if (typeof document !== 'undefined') {
           wall: num('inp-wheel-wall', undefined),
           nozzle: num('inp-wheel-nozzle', undefined)
         }, 'Ball centred');
+      });
+      on('btn-wheel-flatten', function () {
+        /* Blank means as flat as the wall allows. */
+        NSO_wheelRun('flatten', { height: num('inp-wheel-flat-h', undefined) }, 'Flattened');
       });
       on('btn-wheel-open', function () {
         NSO_wheelRun('open', { depth: num('inp-wheel-depth', undefined) }, 'Opened');
