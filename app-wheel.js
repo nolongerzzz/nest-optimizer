@@ -1811,7 +1811,7 @@ function NSO_wheelNewRecipe(ball) {
   return {
     base: null,
     ball: Object.assign({ height: undefined, radius: undefined, wall: undefined, nozzle: undefined }, ball || {}),
-    thick: null, open: 0,
+    thick: null, open: 0, tall: 1,
     lip: { h: 0, at: 0.6, flare: 0.5 },
     pull: { z: 0.5, dr: 0, wide: 0.4 },
     trim: 0, rim: 0
@@ -1820,7 +1820,7 @@ function NSO_wheelNewRecipe(ball) {
 
 function NSO_wheelCloneRecipe(r) {
   return {
-    base: r.base, ball: Object.assign({}, r.ball), thick: r.thick, open: r.open || 0,
+    base: r.base, ball: Object.assign({}, r.ball), thick: r.thick, open: r.open || 0, tall: r.tall || 1,
     lip: Object.assign({ h: 0, at: 0.6, flare: 0.5 }, r.lip || {}),
     pull: Object.assign({}, r.pull), trim: r.trim, rim: r.rim
   };
@@ -2077,8 +2077,13 @@ function NSO_wheelSoftShape(outerPts, wall, u) {
     var zm = 0.5 * (zl + zh);
     if (NSO_wheelSoftDist(pp, cut, 0, zm) >= wall) zh = zm; else zl = zm;
   }
-  var nat = zh, depth = u * (cut.z - nat), floorZ = cut.z - depth;
+  /* How deep: the cavity goes down toward the floor the wall allows faster than the mouth widens (a bottle is a narrow mouth over
+     a deep hollow), and how wide it gets below the mouth: it flares out at a slope that grows with u until the wall's own offset
+     stops it. Both go to zero with u, so a touch of Open is a thin shallow bore, not a hollow ball behind a pinhole. */
+  var nat = zh, full = cut.z - nat, depth = full * Math.pow(u, 0.6), floorZ = cut.z - depth;
   if (!(depth > 0.05)) return null;
+  var slope = 2.2 * u;
+  var spread = rho + slope * depth;                   // how wide the hollow is at its floor, before the wall stops it
   var zs = [], m = 22, phi;
   for (k = 0; k <= m; k++) {
     phi = (Math.PI / 2) * k / m;
@@ -2086,26 +2091,30 @@ function NSO_wheelSoftShape(outerPts, wall, u) {
     zs.push(floorZ + depth * k / m);
   }
   zs.sort(function (a, b) { return a - b; });
-  /* a thumb's ellipsoid for a small opening, squaring off into the bowl's own inside as u -> 1 */
+  /* a thumb's ellipsoid at the floor, squaring off into the bowl's own inside as u -> 1 */
   var pw = 2 + 12 * Math.pow(u, 4);
   var inner = [{ z: floorZ, r: 0 }], last = floorZ;
   for (k = 1; k < zs.length; k++) {
     var z = Math.min(zs[k], cut.z);
     if (z <= last + 1e-6) continue;
     var h = (z - floorZ) / depth;
-    var dish = rho * Math.pow(Math.max(0, 1 - Math.pow(Math.max(0, 1 - h), pw)), 1 / pw);
+    var dish = spread * Math.pow(Math.max(0, 1 - Math.pow(Math.max(0, 1 - h), pw)), 1 / pw);
+    var flare = rho + slope * (cut.z - z);
     var ri = NSO_wheelInnerAt(trunc, z, wall, 22);
     if (ri < 0) ri = 0;
-    inner.push({ z: z, r: Math.min(rho, dish, ri) });
+    inner.push({ z: z, r: Math.min(dish, flare, ri) });
     last = z;
   }
   if (inner.length < 3) return null;
   return { outer: trunc, inner: inner, rho: rho, rhoMax: reach.rho, rimZ: cut.z, floorZ: floorZ, depth: cut.z - floorZ };
 }
 
-function NSO_wheelScaleOuter(outer, s) {
-  var z0 = outer[0].z;
-  return outer.map(function (q) { return { z: z0 + (q.z - z0) * s, r: q.r * s }; });
+/* Grow the outside by s about the middle of its base. `tall` changes the shape of the growth, not its size: heights
+   times sqrt(tall) and radii over sqrt(tall) is a volume-preserving stretch, so tall = 1 is the plain scale and any
+   other tall asks for the same clay in a taller (or squatter) vessel. */
+function NSO_wheelScaleOuter(outer, s, tall) {
+  var z0 = outer[0].z, k = Math.sqrt(tall || 1), sz = s * k, sr = s / k;
+  return outer.map(function (q) { return { z: z0 + (q.z - z0) * sz, r: q.r * sr }; });
 }
 
 /* How wide a mouth this closed piece could be given, or why not. */
@@ -2134,8 +2143,9 @@ function NSO_wheelOpenSoft(piece, opts) {
   var rc = NSO_wheelOpenReach(piece);
   if (!rc.ok) return { ok: false, piece: piece, reason: rc.reason };
   var V0 = NSO_wheelVolume(piece), tgt = V0 * (1 - 1e-7), wall = piece.wall;
+  var tall = Math.max(0.25, Math.min(8, typeof opts.tall === 'number' && opts.tall > 0 ? opts.tall : 1));
   function at(s) {
-    var sh = NSO_wheelSoftShape(s === 1 ? piece.outer : NSO_wheelScaleOuter(piece.outer, s), wall, u);
+    var sh = NSO_wheelSoftShape(s === 1 && tall === 1 ? piece.outer : NSO_wheelScaleOuter(piece.outer, s, tall), wall, u);
     if (!sh) return null;
     sh.s = s; sh.V = NSO_wheelVolume({ outer: sh.outer, inner: sh.inner });
     return sh;
@@ -2221,7 +2231,7 @@ function NSO_wheelBuild(recipe) {
     if (rc.ok) {
       R.open = { max: 1, mouth: rc.mouth };
       if (recipe.open > 1e-9) {
-        var os = NSO_wheelOpenSoft(piece, { u: NSO_wheelOpenU(recipe.open) });
+        var os = NSO_wheelOpenSoft(piece, { u: NSO_wheelOpenU(recipe.open), tall: recipe.tall || 1 });
         if (os.ok) {
           piece = os.piece;
           if (os.s) R.open.scale = os.s;
@@ -2234,6 +2244,11 @@ function NSO_wheelBuild(recipe) {
     }
   } else {
     R.open = { max: 0, why: 'already open' };
+  }
+
+  R.tall = { min: 0.5, max: 4 };
+  if (!(recipe.open > 1e-9 && piece.inner && piece.ops.indexOf('open') >= 0)) {
+    R.tall.why = 'Tall shapes how the piece opens - raise Open first';
   }
 
   /* 2b. LIP: the edge of a pressed plate lifted into a rim. A plate that is open is

@@ -42,3 +42,16 @@ plate -> dish; mouth/depth monotone; conserved at all 101 settings; canonical me
 Not done, and said so: a drag handle for Scale / Wall / Soft / Lip at / Flare; a second pull; a narrow-mouthed vase is Open then Pull in (the mouth and the
 depth rise together). The wire test needs `PW_CHROMIUM=/opt/pw-browsers/chromium-1243/chrome-linux64/chrome` in this container (the harness looks for a
 `chrome-linux` folder).
+
+### Addendum: Tall, and a hollow body under the mouth (the jug and vase references)
+The owner sent reference pieces (a field of vases, a low-poly pitcher, a clay jug with a cut spout, a Roman jug with a collar and a handle) for
+"the taller opens". Measured first, honestly: the round-bowl Open could not stand taller than wide, and below 100% it left the belly SOLID
+(a thumb-pot lump with a pocket), which is wrong for a vase and for printing. Two changes, both in `NSO_wheelSoftShape` / `NSO_wheelOpenSoft`:
+- **Tall** (`recipe.tall`, 0.5-4, row `rng-wheel-tall`): a volume-preserving stretch of the growth (z x sqrt(t), r / sqrt(t)), inside Open. The
+  cyan rim handle's UP drag is Tall now (it was Rim +, which only works on a straight wall; Rim + keeps its slider and its ring).
+- **A hollow body**: depth `u^0.6` of the way to the floor and the hollow flares below the mouth at a slope `2.2 u` until the wall offset stops it.
+  A touch of Open is still a thin shallow bore (all quantities go to 0 with u), but a narrow mouth now opens into a hollow, not a lump.
+  Consequence: depth is no longer monotone in Open (the rim comes DOWN the dome as the bowl widens); the test now asserts the mouth only.
+Not done, in the order they probably want doing: several pulls (bellies/necks), a flared collar, a foot ring, then the non-axisymmetric kind - a
+spout (a rim cut: the rim stops being a circle, so a revolve cannot make it; it is a cut + a local lip on the finished mesh) and a handle (a swept
+tube joined at two points). Those are a different sort of feature from everything above and want their own design, handles and grab points.

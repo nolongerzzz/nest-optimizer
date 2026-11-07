@@ -488,6 +488,7 @@ takes effect.
 | **W** | the wall: how thin the disc may press and how thin the walls open. A thicker W opens a shorter, thicker-walled piece from the same clay |
 | **Thick** | press: the top comes down, the diameter grows, the clay is conserved. All the way up is the unpressed ball |
 | **Open** | from closed (0) to the widest bowl the wall allows (100%): the mouth, the depth and the size of the shell grow together, the clay conserved ([A soft Open](#a-soft-open)) |
+| **Tall** | how tall the opened piece grows, the same clay and Wall: ×1 is the round bowl, ×3 a jug, ×0.5 a dish ([Tall](#tall-the-jug-and-the-vase)) |
 | **Lip / Lip at / Flare** | lift the edge of a pressed plate into a rim, this high; where the lift starts (a % of the plate's radius); how long the ease into it is (a % of the lifted part). [Lip](#lip) |
 | **Pull at / Pull / Soft** | where (a % of the height, so it follows the piece), how far out or in, how widely it spreads (a % of the height: small is a ring, large is a belly) |
 | **Trim, Rim +** | take off the base (the clay is gone); add height at the rim (Extend — needs a straight wall) |
@@ -581,8 +582,10 @@ widest bowl, and **every quantity in it goes to zero with it**:
 - **mouth** — `u` of the widest mouth the shape can hold. The rim sits where the *outside* is wide enough for that
   mouth plus a wall: on the dome of a ball (a hair above the equator at 100%), on the **flat top of a plate**,
   which keeps its top instead of losing it;
-- **depth** — `u` of the way from the rim down to the floor the wall allows. The cavity is an ellipsoid (a thumb's
-  dimple) that squares off into the bowl's own inside as `u` grows;
+- **depth** — `u^0.6` of the way from the rim down to the floor the wall allows, and below the mouth the **hollow flares out** (a slope
+  of `2.2 u`) until the wall's own offset stops it: a narrow mouth over a hollow body, the bottle, not a solid lump with a pocket in it.
+  The floor is an ellipsoid that squares off into the bowl's own inside as `u` grows. Both the depth and the flare go to zero with `u`,
+  so a touch of Open is still a thin shallow bore;
 - **the clay** — the whole shell is **scaled up** about the middle of its base until the volume is what it was
   (a log-secant on volume, 3–5 builds, ≤ 3·10⁻⁷ short and never over). The clay the cavity and the cut-off cap
   displaced does not vanish: the piece *grows*, the way a pressed disc's diameter does, so a ball opens into a
@@ -597,7 +600,7 @@ the highest rim within 1% of the widest is taken (on a plate the widest is at th
 The slider is `p`, not `u`: the clay a mouth needs grows with the cube of how open it is, so the last tenth of a linear
 slider doubled the bowl. `u = 1 - (1 - p)^1.5` (`NSO_wheelOpenU`, and `NSO_wheelOpenP` back, which the mouth handle uses).
 
-What it measures (ball, wall 3): Open 25/50/70/85/100% → Ø50.6 / 52.7 / 69.9 / 98.6 / 111.7 at 0–60 mm tall; no 1% step of the
+What it measures (ball, wall 3): Open 10/30/50/70/85/100% → Ø50 / 60 / 76 / 93 / 103 / 113 at 50–72 mm tall; no 1% step of the
 slider moves the width more than 1.7 mm or the height more than 0.6 mm (it was a 49 mm jump). Dragging Flatten with Open
 set, 4 mm down to 1.4 mm on a 1.3 wall: what Open adds changes by ≤ 1.1 mm per 0.05 mm step (it was 45 mm). A build with Open and a
 Pull is 25 ms. The pieces are under the canonical mesh checker (watertight, wall, height, footprint).
@@ -605,6 +608,20 @@ Pull is 25 ms. The pieces are under the canonical mesh checker (watertight, wall
 `NSO_wheelOpenReach` says whether there is room (a mouth *and* a rim above the floor: a plate two walls thick has the first
 and not the second) and how wide — that is the slider's range and its reason. A touch of Open too small to make (under a
 dimple's worth) is simply not opened yet, not a refusal. The strict API is untouched, and so are its tests.
+
+### Tall: the jug and the vase
+
+A round bowl is wider than it is tall, and a jug is not. **Tall** (`recipe.tall`, ×0.5–×4, 1 = the plain Open) changes the *shape of the
+growth*, not its size: the shell is grown by `s`, heights `× sqrt(tall)` and radii `÷ sqrt(tall)` — a volume-preserving stretch, so
+`tall = 1` is exactly the plain scale and any other value asks for the **same clay** in a taller (or squatter) vessel, solved by the same
+volume solve and never over. It acts inside Open, so it has nothing to do until Open is raised (the slider stays live and its tooltip
+says so). Dragging the **rim** of an opened piece up or down is this slider (`tall ∝ ((H + dy) / H)²`, the height following the cursor).
+
+Measured (ball, wall 1.6–3): Tall ×2 at Open 70% is 127 × 82 mm; ×3 at 85% is 120–170 mm tall, h/Ø 2.0; ×4 at 60% is h/Ø 3.4. The wall holds
+(`wall 3.00` at every point), the clay is kept to 1e-6, no 0.05 step of Tall moves the height more than 5 mm, and the pieces are under the
+canonical mesh checker. A neck is a Pull in at 80–85% of the height; a belly a Pull out at 30%. What it does **not** make yet: several
+bellies and necks in one piece (the pull is one bump), a flared collar on top of a neck (that is a second pull out at the rim), a foot ring
+(Trim leaves a flat foot, no ring), spouts and handles (non-axisymmetric: they are the next kind of thing, below).
 
 ### Lip
 
@@ -656,7 +673,7 @@ They are balls drawn on top of the piece, round on the screen whatever the zoom:
 | ball | where | drag | drives |
 |---|---|---|---|
 | **blue** Flatten | the top face of a ball or plate | **down** | Thick (press) |
-| **cyan** Open | off to the side of the top of a ball, where a mouth would start; on the **rim** of an opened piece | **out** (and, on the rim, **up**) | Open — the mouth; and Rim + |
+| **cyan** Open | off to the side of the top of a ball, where a mouth would start; on the **rim** of an opened piece | **out** (and, on the rim, **up**) | Open — the mouth; and Tall |
 | **yellow** Pull | the wall, at the Pull height | **out / in**, and **up / down** | Pull, and Pull at |
 | **green** Lip | the rim of a pressed plate | **up** | Lip |
 | **red** Trim | the foot | **up** | Trim |

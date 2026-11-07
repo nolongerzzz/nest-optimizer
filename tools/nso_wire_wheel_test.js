@@ -60,7 +60,7 @@ withApp(async (page, logs) => {
   console.log('\n=== 1. the controls exist and are reachable ===');
   const ui = await page.evaluate(() => {
     const ids = ['btn-wheel-ball', 'btn-wheel-flatten', 'btn-wheel-open'];
-    const inputs = ['rng-wheel-scale', 'rng-wheel-wall', 'rng-wheel-flat', 'rng-wheel-open', 'rng-wheel-pull-z',
+    const inputs = ['rng-wheel-scale', 'rng-wheel-wall', 'rng-wheel-flat', 'rng-wheel-open', 'rng-wheel-tall', 'rng-wheel-pull-z',
       'rng-wheel-pull-dr', 'rng-wheel-soft', 'rng-wheel-trim', 'rng-wheel-rim'];
     return {
       missing: ids.filter(i => !document.getElementById(i)),
@@ -554,7 +554,7 @@ withApp(async (page, logs) => {
   await setSlider('rng-wheel-flat', parseFloat((await sl('rng-wheel-flat')).max));
   st = await info();
   check('Thick all the way back up: an opened UNPRESSED ball - the press is gone',
-    st.open && st.ops === 'ball>open' && st.recipe.thick === null && st.d < 56, st.ops + ', ' + st.d.toFixed(1) + ' mm across');
+    st.open && st.ops === 'ball>open' && st.recipe.thick === null && st.d < 90, st.ops + ', ' + st.d.toFixed(1) + ' mm across');
   await setSlider('rng-wheel-open', 0);
   st = await info();
   check('Open back to 0: not opened, the original ball exactly',
@@ -965,12 +965,15 @@ withApp(async (page, logs) => {
     await letGo();
     check('dragging the cyan ball (now on the rim) further out opens it wider', (await rec()).open > o1 + 0.03 || (await rec()).open >= 0.999, o1.toFixed(2) + ' -> ' + (await rec()).open.toFixed(2));
     op = await H('open');
-    const rimBefore = (await rec()).rim || 0;
+    const hBefore = await page.evaluate(() => NSO_wheelHeightOf(NSO_wheelSession));
     await grab(op, 0, -20);
     await letGo();
-    check('...and up on the rim adds height there (Rim +; it says so if the wall is not straight enough, and the piece still builds)',
-      (await rec()).rim >= rimBefore && (await page.evaluate(() => !!NSO_wheelSession.inner)), 'rim ' + ((await rec()).rim || 0).toFixed(1));
-    await setS('rng-wheel-rim', 0);
+    check('...and up on the rim makes the piece taller (the Tall slider follows, the piece gets taller, the clay is kept)',
+      (await rec()).tall > 1.05 && (await page.evaluate(() => NSO_wheelHeightOf(NSO_wheelSession))) > hBefore + 2 &&
+      Math.abs((await val('rng-wheel-tall')) - (await rec()).tall) < 0.06 &&
+      await page.evaluate(() => Math.abs(NSO_wheelVolume(NSO_wheelSession) - NSO_wheelSession.budget.start) / NSO_wheelSession.budget.start < 1e-6),
+      'tall ' + ((await rec()).tall || 1).toFixed(2) + ', ' + hBefore.toFixed(1) + ' -> ' + (await page.evaluate(() => NSO_wheelHeightOf(NSO_wheelSession))).toFixed(1) + ' mm');
+    await setS('rng-wheel-tall', 1);
 
     /* WALL: out/in pulls, up/down moves where */
     const w0 = await rec();
@@ -987,6 +990,7 @@ withApp(async (page, logs) => {
     check('Undo takes the whole drag back in one step, the sliders with it', Math.abs((await val('rng-wheel-pull-dr'))) < 0.6);
 
     /* the orbit still works on empty space, and the handles follow the camera */
+    await setS('rng-wheel-open', 0.3);            // a piece small enough to leave empty plate to orbit on
     const axisPx = () => page.evaluate(() => {
       const m = NSO_wheelModel(), e = state.placed.find(p => p.sourceId === m.id), mesh = e.mesh, g = mesh.geometry;
       g.computeBoundingBox();
@@ -994,12 +998,24 @@ withApp(async (page, logs) => {
       const r = state.renderer.domElement.getBoundingClientRect(), p = c.project(state.camera);
       return { x: r.left + (p.x * .5 + .5) * r.width, y: r.top + (-p.y * .5 + .5) * r.height };
     });
+    /* a spot on the canvas with no piece under it (several pieces sit on the plate by now) */
+    const empty = await page.evaluate(() => {
+      const r = state.renderer.domElement.getBoundingClientRect(), rc = new THREE.Raycaster(), meshes = state.placed.map(p => p.mesh).filter(Boolean);
+      for (let y = r.bottom - 60; y > r.top + 300; y -= 40) for (let x = r.right - 330; x > r.left + 420; x -= 40) {
+        rc.setFromCamera(new THREE.Vector2(((x - r.left) / r.width) * 2 - 1, -((y - r.top) / r.height) * 2 + 1), state.camera);
+        if (rc.intersectObjects(meshes, false).length === 0) {
+          const el = document.elementFromPoint(x, y);
+          if (el && el.tagName === 'CANVAS') return { x, y };
+        }
+      }
+      return { x: 980, y: 760 };
+    });
     const camA = await cam(), wallA = await H('pull'), deepA = await axisPx();
-    await page.mouse.move(1150, 840); await page.mouse.down();
-    for (let i = 1; i <= 8; i++) { await page.mouse.move(1150 - i * 12, 840 - i * 4); await page.waitForTimeout(50); }
+    await page.mouse.move(empty.x, empty.y); await page.mouse.down();
+    for (let i = 1; i <= 8; i++) { await page.mouse.move(empty.x - i * 12, empty.y - i * 4); await page.waitForTimeout(50); }
     await page.mouse.up(); await page.waitForTimeout(500);
     const camB = await cam(), wallB = await H('pull'), deepB = await axisPx();
-    check('a drag on empty space still orbits the camera', camA !== camB);
+    check('a drag on empty space still orbits the camera', camA !== camB, camA + ' -> ' + camB + ' | under the pointer: ' + await page.evaluate(() => { const e = document.elementFromPoint(980, 760); return e ? e.tagName + '#' + e.id : 'none'; }) + ' | controls ' + await ctlOn());
     check('...and the handles follow it: the wall handle is still on the camera\'s right-hand side of the piece, level with it, so a radial drag stays along the screen\'s x',
       wallA && wallB && wallA.x - deepA.x > 20 && wallB.x - deepB.x > 20,
       'before ' + (wallA.x - deepA.x).toFixed(0) + ' px right of the axis, after ' + (wallB.x - deepB.x).toFixed(0));

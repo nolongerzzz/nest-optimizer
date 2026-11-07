@@ -13,6 +13,7 @@
      Thick          press the ball flat (the top comes down, the diameter grows)
      Open           open it, from closed (0) to the widest bowl the wall allows: the mouth, the depth
                     and the size of the shell grow together, the clay conserved
+     Tall           how tall the opened piece grows (1 = the round bowl; a jug or a vase above it)
      Lip            lift the edge of a pressed plate into a rim, this high
      Lip at         where the lift starts, as a percentage of the plate's radius
      Flare          how long the transition is, as a percentage of the lifted part
@@ -158,6 +159,10 @@
     fmt: function (v) { return v === null ? '—' : Math.round(v * 100) + ' %'; },
     get: function (r) { return r.open || 0; },
     put: function (r, v) { r.open = v < 0.005 ? 0 : v; } });
+  define('tall', { slider: 'rng-wheel-tall', read: 'out-wheel-tall', unit: '',
+    fmt: function (v) { return v === null ? '—' : '×' + v.toFixed(2); },
+    get: function (r) { return r.tall || 1; },
+    put: function (r, v) { r.tall = Math.abs(v - 1) < 0.02 ? 1 : v; } });
   define('lip', { slider: 'rng-wheel-lip', read: 'out-wheel-lip', unit: ' mm',
     get: function (r) { return r.lip ? r.lip.h : 0; },
     put: function (r, v) { r.lip = r.lip || { h: 0, at: 0.6, flare: 0.5 }; r.lip.h = v < 0.05 ? 0 : v; } });
@@ -208,6 +213,7 @@
     var th = R.thick || { min: 0, max: 0 };
     range(DEFS.thick, th.min, th.max, 0.1, th.why);
     range(DEFS.open, 0, R.open ? R.open.max : 0, 0.01, R.open && R.open.max <= 0 ? R.open.why : null);
+    range(DEFS.tall, R.tall ? R.tall.min : 0.5, R.tall ? R.tall.max : 4, 0.05, R.tall ? R.tall.why : null);
     range(DEFS.lip, 0, R.lip ? R.lip.max : 0, 0.5, R.lip && R.lip.max <= 0 ? R.lip.why : null);
     var sw = R.pull ? R.pull.swing : 10;
     range(DEFS.pulldr, -sw, sw, 0.5);
@@ -315,7 +321,7 @@
        blue   Flatten  on the top of a ball or plate: drag DOWN to press it
        cyan   Open     on the top of a ball (off to the side, where a mouth would start), or on the
                        rim of an opened piece: drag OUT to widen the mouth, and on the rim UP to
-                       add height there (Rim +)
+                       make the piece taller (Tall)
        yellow Pull     on the wall at the Pull height: drag OUT or IN to pull, UP or DOWN to move where
        green  Lip      on a pressed plate's rim: drag UP to lift it
        red    Trim     on the foot: drag UP to take more off the base
@@ -332,15 +338,15 @@
   var HANDLE_COLOR = COLOR;
   var HANDLE_NAME = { flatten: 'Flatten', open: 'Open', pull: 'Pull', lip: 'Lip', trim: 'Trim' };
   /* which slider rows a handle belongs to, and the one whose ring it shows */
-  var HANDLE_ROWS = { flatten: ['thick'], open: ['open', 'rim'], pull: ['pulldr', 'pullz', 'wide'], lip: ['lip', 'lipat', 'flare'], trim: ['trim'] };
+  var HANDLE_ROWS = { flatten: ['thick'], open: ['open', 'tall', 'rim'], pull: ['pulldr', 'pullz', 'wide'], lip: ['lip', 'lipat', 'flare'], trim: ['trim'] };
   var HANDLE_KEY = { flatten: 'thick', open: 'open', pull: 'pullz', lip: 'lip', trim: 'trim' };
-  var ROW_GROUP = { scale: 'shape', wall: 'shape', thick: 'flatten', open: 'open', rim: 'open', lip: 'lip', lipat: 'lip', flare: 'lip',
+  var ROW_GROUP = { scale: 'shape', wall: 'shape', thick: 'flatten', open: 'open', tall: 'open', rim: 'open', lip: 'lip', lipat: 'lip', flare: 'lip',
     pullz: 'pull', pulldr: 'pull', wide: 'pull', trim: 'trim' };
-  var ROW_ID = { scale: 'wh-row-scale', wall: 'wh-row-wall', thick: 'wh-row-flat', open: 'wh-row-open', lip: 'wh-row-lip', lipat: 'wh-row-lip-at',
+  var ROW_ID = { scale: 'wh-row-scale', wall: 'wh-row-wall', thick: 'wh-row-flat', open: 'wh-row-open', tall: 'wh-row-tall', lip: 'wh-row-lip', lipat: 'wh-row-lip-at',
     flare: 'wh-row-flare', pullz: 'wh-row-pull-z', pulldr: 'wh-row-pull-dr', wide: 'wh-row-soft', trim: 'wh-row-trim', rim: 'wh-row-rim' };
   var HANDLE_HINT = {
     flatten: 'Drag the blue ball down to press the piece flat',
-    open: 'Drag the cyan ball out to widen the mouth (on the rim of an opened piece, up to add height)',
+    open: 'Drag the cyan ball out to widen the mouth (on the rim of an opened piece, up to make it taller)',
     pull: 'Drag the yellow ball out or in to pull the wall - up or down to move where',
     lip: 'Drag the green ball up to lift the rim',
     trim: 'Drag the red ball up to take more off the base'
@@ -418,6 +424,7 @@
         if (opened && iL) add(iL.r, iL.z);
         else if (R.open && R.open.max > 0) { var r0 = 0.35 * R.open.mouth / 2; add(r0, surfaceZAt(piece.outer, r0)); }
         break;
+      case 'tall': add(widest.r, widest.z); if (opened && iL) add(oL.r, oL.z); break;
       case 'rim': if (piece.inner) add(oL.r, oL.z); break;
       case 'lip': if (lipped && iL) add(iL.r, iL.z); else if (piece.press) add(piece.press.c, flatZ); break;
       case 'lipat': case 'flare':
@@ -608,7 +615,7 @@
         if (kindNow && HANDLE_ROWS[kindNow] && (DRAG || hovered)) {
           text = HANDLE_NAME[kindNow] + '  ' + rowText(HANDLE_ROWS[kindNow][0]);
           if (kindNow === 'pull') text += '  at ' + rowText('pullz');
-          if (kindNow === 'open' && recipe.rim > 0.04) text += '  + rim ' + rowText('rim');
+          if (kindNow === 'open' && recipe.tall && Math.abs(recipe.tall - 1) > 0.02) text += '  tall ' + rowText('tall');
         } else {
           var lab = $(ROW_ID[keyNow]) && $(ROW_ID[keyNow]).querySelector('label,.wh-preset');
           text = (lab ? lab.textContent : keyNow) + '  ' + rowText(keyNow);
@@ -677,7 +684,13 @@
         var u0 = NSO_wheelOpenU(d.start.open || 0);
         DEFS.open.put(r, clampTo(NSO_wheelOpenP(clampTo(u0 + mm.rad / rmax, 0, 1)), 0, 1));
       }
-      if (d.opened && R.rim) r.rim = clampTo((d.start.rim || 0) + mm.up, 0, R.rim.max);
+      /* on the rim of an opened piece, UP is TALLER: the height follows the cursor (height goes as sqrt(tall)) */
+      if (d.opened && R.tall) {
+        var h0 = Math.max(1, d.spanH), t0 = d.start.tall || 1;
+        var k = Math.max(0.2, (h0 + mm.up) / h0);
+        r.tall = clampTo(t0 * k * k, R.tall.min, R.tall.max);
+        if (Math.abs(r.tall - 1) < 0.02) r.tall = 1;
+      }
     } else if (d.kind === 'pull') {
       var sw = R.pull ? R.pull.swing : 10;
       r.pull.dr = clampTo((d.start.pull.dr || 0) + mm.rad, -sw, sw);
