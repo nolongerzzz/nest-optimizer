@@ -655,13 +655,7 @@
     var d = document.getElementById('menu-rotate');
     return !!(d && d.open);
   }
-  /* The Cut card's "Rotate piece" box: the rings are drawn and grabbed while Cut stays open. Only the
-     rings - the keyboard stays with whoever owns it (Cut's dials take the arrows), so one press is
-     still answered once. */
-  function cutRings() {
-    return typeof state !== 'undefined' && !!(state.cutterOpen && state.cutTool !== 'crop' && state.cutRotate);
-  }
-  function menuOwnsInput() { return menuOwns() || cutRings(); }
+  function menuOwnsInput() { return menuOwns(); }
 
   function onKeyDown(ev) {
     var k = KEYS[ev.key];
@@ -1004,7 +998,6 @@
     g.position.copy(ringCentre(p));
     g.updateMatrixWorld(true);
     var r = ringRadius(), q = p.mesh.quaternion.clone();
-    if (cutRings() && typeof updateCutHelper === 'function') { updateCutHelper(); if (typeof syncCutUI === 'function') syncCutUI(); }
     list.forEach(function (ring) {
       var F = frameOf(ring, q);
       /* A dragged ring's darts ride the piece under the pointer (moveDrag);

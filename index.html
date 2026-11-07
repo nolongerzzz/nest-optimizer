@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=8b3d6f14" />
+  <link rel="stylesheet" href="styles.css?v=3ae1721b" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -744,20 +744,10 @@
               <p id="edit-size" class="hint hidden-quiet">—</p>
               <select id="edit-axis" class="hidden-quiet"><option value="auto">Longest axis</option><option value="x">X</option><option value="z">Z</option></select>
               <div id="cutter-tools" class="cutter-tools">
-              <!-- Rotate rings: the rotate rings on the piece while Cut stays open (app-cut.js cutSetRotate,
-                   app-rotate-handles.js). The ring options it shows are in the row under it. -->
-              <div class="cut-switches cut-per-piece">
-              <label class="cut-switch" title="Show the rotate rings on the piece (for leaning it as well as turning it) while Cut is open. The blade follows the piece. For turning a small piece close up, the Rotate piece wheel below is easier."><input type="checkbox" id="chk-cut-rotate"><span>Rotate rings</span></label>
-              </div>
-              <div class="cut-switches cut-rings cut-per-piece" id="cut-rotate-rings" hidden>
-              <span class="hint">Turn is on.</span>
-              <label class="cut-switch" title="Also show the ring that tips the piece front over back."><input type="checkbox" id="chk-cut-ring-fb"><span>Lean front/back</span></label>
-              <label class="cut-switch" title="Also show the ring that tips the piece side over side."><input type="checkbox" id="chk-cut-ring-ss"><span>Lean side/side</span></label>
-              </div>
               <!-- Mitre and Rotate piece, side by side: each a wheel with its − / + under it and, under those, its name and
                    number box (Square, the mitre's own, beside its box). The Mitre wheel turns the blade; the Rotate piece wheel turns the PIECE
-                   about the vertical (app-cut.js, cutWireRotateDial) - for a small piece, close up, where the rotate rings
-                   stand too far out of view. -->
+                   (app-cut.js, cutWireRotateDial) about the axis ticked under it: Horizontal (about the plate's vertical, the default),
+                   Front/back or Side/side (the two leans). It stands in for the rotate rings, which Cut no longer shows. -->
               <div class="cut-dials cut-per-piece">
               <div class="cut-dialcol">
               <svg id="cut-miter-dial" class="cut-dial" viewBox="0 0 100 100" width="104" height="104"
@@ -788,7 +778,7 @@
               <div class="cut-dialcol">
               <svg id="cut-rotate-dial" class="cut-dial" viewBox="0 0 100 100" width="104" height="104"
                    role="slider" tabindex="0" aria-label="Rotate piece, degrees" aria-valuemin="0" aria-valuemax="359.9" aria-valuenow="0">
-                <title>Rotate piece: turns the piece itself about the vertical, clockwise seen from above. Drag round the rail (it rests on the 45° ticks) or press an arrow key for 1° (Shift: 0.1°). The blade goes with the piece.</title>
+                <title>Rotate piece: turns the piece itself about the axis ticked below it - Horizontal turns it clockwise seen from above. Drag round the rail (it rests on the 45° ticks) or press an arrow key for 1° (Shift: 0.1°). The blade goes with the piece.</title>
                 <circle class="cut-dial-rail" cx="50" cy="50" r="40"></circle>
                 <g class="cut-dial-ticks">
                   <line x1="50" y1="6" x2="50" y2="14"></line><line x1="94" y1="50" x2="86" y2="50"></line>
@@ -809,6 +799,11 @@
               <span class="hint">Rotate piece</span>
               <div class="cut-dialfields">
               <input type="number" id="cut-rotate-deg" class="cut-no-spin" min="0" max="359.9" step="0.1" value="0" aria-label="Rotate piece, degrees" title="The piece's heading on the plate, clockwise seen from above. Type one, or drag the handle round the wheel.">
+              </div>
+              <div class="cut-rotate-axes" role="group" aria-label="Rotate piece about">
+              <label class="cut-switch" title="Turn the piece about the plate's vertical, as seen from above (the default)."><input type="checkbox" id="chk-cut-rot-h" checked><span>Horizontal</span></label>
+              <label class="cut-switch" title="Lean the piece front over back: its two ends go up and down, about the level line across its footprint."><input type="checkbox" id="chk-cut-rot-fb"><span>Front/back</span></label>
+              <label class="cut-switch" title="Lean the piece side over side: one long edge goes up as the other goes down, about the level line along its footprint."><input type="checkbox" id="chk-cut-rot-ss"><span>Side/side</span></label>
               </div>
               </div>
               </div>
@@ -2650,7 +2645,7 @@
   <script src="nso-helpers.js?v=9c476e39"></script>
   <script src="nso-recent.js?v=f03d6f13"></script>
   <script src="nso-bounds.js?v=778acac4"></script>
-  <script src="app-core.js?v=690d78fd"></script>
+  <script src="app-core.js?v=a60db748"></script>
   <!-- Up to six plates (beds): the active one is state.models / state.placed, the rest are kept beside it. docs/BEDS.md. -->
   <script src="app-beds.js?v=3d221bc4"></script>
 
@@ -2658,7 +2653,7 @@
 
 
 
-  <script src="app-cut.js?v=2b30303b"></script>
+  <script src="app-cut.js?v=792b007e"></script>
   <!-- Cut card, Follow strand: the sized blade put square across a cord and walked along it (nso_strand.js, docs/CUT-FOLLOW.md). After app-cut.js. -->
   <script src="app-cut-follow.js?v=bd548b54"></script>
   <!-- Cut card, Whole plate blade: one level blade across every piece. After app-cut.js, whose cutOneSide / cutOverlay
@@ -2783,7 +2778,7 @@
        rather than three modules each hoping the other two are shut. -->
   <script src="app-input-mode.js?v=da2de9ec"></script>
   <script src="app-tip-orient.js?v=fb26beaf"></script>
-  <script src="app-rotate-handles.js?v=1ed397a5"></script>
+  <script src="app-rotate-handles.js?v=7e28c684"></script>
   <script src="app-move-vertical.js?v=da07bfef"></script>
   <script src="app-grab-drop.js?v=2bb09218"></script>
   <script src="app-defects.js?v=9f49a45d"></script>

@@ -167,7 +167,8 @@ withApp(async (page, logs) => {
     await page.evaluate(() => openCutter('cut'));
     await page.evaluate(id => selectPlaced(state.placed.findIndex(p => p && p.sourceId === id)), id);
     await page.click('#btn-cut-blade-sized');
-    await page.check('#chk-cut-follow');
+    // Follow strand is on as soon as the Sized blade is picked: nothing to tick (and the card shows its rows)
+    fresh.onByDefault = await page.evaluate(() => ({ box: document.getElementById('chk-cut-follow').checked, rows: !document.getElementById('cut-follow-fields').hidden }));
     return id;
   }
   // the crown of the strand a ray straight down meets nearest a given world xz
@@ -188,6 +189,7 @@ withApp(async (page, logs) => {
 
   console.log('click the cord: the blade stands square across it');
   let id = await fresh();
+  check('Follow strand is on as soon as the Sized blade is picked (box ticked, its rows shown)', fresh.onByDefault.box === true && fresh.onByDefault.rows === true, JSON.stringify(fresh.onByDefault));
   const v0 = (await page.evaluate(() => __pieceVolumes())).reduce((a, b) => a + b.vol, 0);
   const crown = await someCrown();
   check('found a strand to click', !!crown, JSON.stringify(crown));

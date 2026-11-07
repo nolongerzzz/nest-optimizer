@@ -28,20 +28,22 @@ within reach);
 the number box takes anything, and the slider's range grows to hold what it is
 given, so a slider never sits at its end while its box says something else.
 
-**Rotate piece** is a wheel beside the Mitre wheel, for turning a small piece close up (the
-rotate rings stand too far out of view there). It turns the piece itself about the vertical,
-clockwise seen from above, through the same path as the Rotate menu's pose buttons (the
-position lock is honoured, one Undo point per drag or run of presses). Its handle shows the
-piece's heading - 0 for a piece as loaded, 90 after a clockwise quarter turn. It is a jog,
-not a pointer: pressing the rail does nothing until the pointer moves, then the piece follows
-the pointer's turn about the wheel, resting on a 45 degree tick it passes within 3. The box
-takes a heading; the - / + buttons under the wheel step 1 degree (Shift 0.1, Alt 5, hold to
-repeat) and so do the arrow keys on the wheel. The blade goes with the piece. Each wheel has
-its - / + directly under it, and under those its name and number box (the Mitre's with
-Square beside it). The old rotate rings, with their Lean front/back and side/side options,
-are still there behind the **Rotate rings** box above the wheels; arrow keys are not taken
-(Cut's dials use them; one press is answered once). Closing Cut clears the box and takes the
-rings with it. Real-browser check: `npm run rotate-dial:drive`.
+**Rotate piece** is a wheel beside the Mitre wheel, for turning or leaning a piece close up. It
+replaces the rotate rings, which Cut no longer shows (they stood too far out of view on a small
+piece). Three ticks under its box pick the axis, one at a time: **Horizontal** (the default: about
+the plate's vertical, clockwise seen from above), **Front/back** (tips the piece along its length,
+its ends going up and down) and **Side/side** (across it, one long edge up). They are the rotate
+rings' own three motions, through the same path as the Rotate menu's pose buttons (the position
+lock is honoured, one Undo step per drag or run of presses). The handle shows where the piece
+stands on the axis: Horizontal, its heading - 0 for a piece as loaded, 90 after a clockwise quarter
+turn; a lean, its tilt from level (0 flat, signed, kept continuous between flat poses). It is a jog,
+not a pointer: pressing the rail does nothing until the pointer moves, then the piece follows the
+pointer's turn about the wheel, resting on a 45 degree tick it passes within 3. The box takes a
+reading; the - / + buttons under the wheel step 1 degree (Shift 0.1, Alt 5, hold to repeat) and so
+do the arrow keys on the wheel. The blade goes with the piece. Each wheel has its - / + directly
+under it, and under those its name and number box (the Mitre's with Square beside it). Arrow keys
+are not taken elsewhere (Cut's dials use them; one press is answered once). Real-browser check:
+`npm run rotate-dial:drive`.
 
 Files: `nso_notch.js` (the geometry, THREE-free, `npm run notch:test`),
 `app-cut.js` (`cutBladeSpec`, `cutBuildSizedBlade`, `cutNotchAt`, the card

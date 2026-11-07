@@ -447,12 +447,13 @@ function getCutPlaneLocal(model) {
 // click: state.cutBladeAt, the click in the piece's frame and the face it
 // landed on. The blade goes in against that face; with no click yet it comes
 // down from the top of the section, centred.
-/** The sized blade takes only the strand under it: with Follow strand on (one box for both). `strand` is the same switch
+/** The sized blade takes only the strand under it: with Follow strand on (one box for both, and on by default once the sized
+    blade is picked). `strand` is the same switch
     without the following, kept for the checks that exercise one without the other; the card does not set it. */
 function cutStrandOn(b) { return !!(b && (b.follow || b.strand === true)); }
 
 function cutBladeState() {
-  if (!state.cutBlade) state.cutBlade = { mode: 'full', sized: false, strand: false, follow: false, slice: 1.5, followDir: 1,
+  if (!state.cutBlade) state.cutBlade = { mode: 'full', sized: false, strand: false, follow: true, slice: 1.5, followDir: 1,
     width: NSO_Notch.DEFAULTS.width, depth: NSO_Notch.DEFAULTS.depth, kerf: NSO_Notch.DEFAULTS.kerf,
     nwidth: NSO_Notch.NOTCH_DEFAULTS.width, ndepth: NSO_Notch.NOTCH_DEFAULTS.depth };
   return state.cutBlade;
@@ -869,7 +870,7 @@ function openCutter(tool) {
   state.cutBlade = null;
   state.cutBladeAt = null;
   state.cutFollowAt = null;
-  state.cutRotate = false;
+  state.cutRotateAxis = 'h';
   state.editId = null;
   state.selectedIndex = -1;
   if (state.controls) state.controls.enabled = true;
@@ -895,7 +896,6 @@ function closeCutter(silent) {
   const was = state.cutterOpen ? (state.cutTool || 'cut') : null;
   state.cutterOpen = false;
   state.cutTool = null;
-  state.cutRotate = false;                 // the rings were Cut's to show; they go with it
   state.cutFollowAt = null;                // Follow strand's place on the cord goes with the blade
   state.cutRightSideOutOffer = null;
   state.cutDragging = false;
@@ -911,7 +911,6 @@ function closeCutter(silent) {
   // Pieces are not cleared or rebuilt: the cutter is the blade only.
   state.previewMesh = null;
   updateCutterUI();
-  const rr = document.getElementById('cut-rotate-rings'); if (rr) rr.hidden = true;
   if (typeof nsoRotate !== 'undefined' && nsoRotate.refresh) nsoRotate.refresh();
   syncCutBladeUI();
   if (!silent) setStatus((was === 'crop' ? 'Crop' : 'Cut') + ' off - blade gone. Pieces unchanged.');
@@ -1107,20 +1106,41 @@ function cutWireBevelDial() {
   syncCutBevelUI();
 }
 
-/* The Rotate piece wheel, beside the Mitre wheel: turns the PIECE about the plate's vertical, the Turn ring's own motion
-   (nsoRotate.turn, app-rotate-handles.js - the pose buttons' path, with the position lock and one Undo point), for a small
-   piece worked close up where the rings stand out of view. The handle shows the piece's heading, clockwise seen from
-   above (0 = as it was loaded), and the wheel is a jog: a press does nothing until the pointer moves, then the piece
-   follows the pointer's turn about the wheel from where it was (the Mitre wheel jumps to the press, which a piece must
-   not), resting on the 45 degree ticks. The box takes a heading; the arrows, and the - / + buttons (1 degree, Shift 0.1,
-   Alt 5), step it. The blade goes with the piece. */
+/* The Rotate piece wheel, beside the Mitre wheel: turns the PIECE about the axis ticked under it - Horizontal (the plate's
+   vertical, the default), Front/back or Side/side (the two leans, level lines of the piece's footprint) - the rotate rings'
+   own motions (nsoRotate.turn, app-rotate-handles.js: the pose buttons' path, with the position lock and one Undo point),
+   for a small piece worked close up. It stands in for the rings, which Cut no longer shows. The ticks are exclusive
+   (one axis at a time), kept in state.cutRotateAxis.
+
+   The handle shows where the piece stands on that axis: Horizontal, its heading clockwise seen from above (0 = as it was
+   loaded, [0, 360)); a lean, its tilt from level (0 = flat, signed). The wheel is a jog: a press does nothing until the
+   pointer moves, then the piece follows the pointer's turn about the wheel from where it was (the Mitre wheel jumps to
+   the press, which a piece must not), resting on the 45 degree ticks. The box takes a reading; the arrows, and the
+   - / + buttons (1 degree, Shift 0.1, Alt 5), step it. The blade goes with the piece. */
+const CUT_ROTATE_AXES = { h: 'chk-cut-rot-h', fb: 'chk-cut-rot-fb', ss: 'chk-cut-rot-ss' };
+
+function cutRotateAxis() { return state.cutRotateAxis === 'fb' || state.cutRotateAxis === 'ss' ? state.cutRotateAxis : 'h'; }
+
+/** The ring (app-rotate-handles.js) that is the ticked axis: 'turn', or the along / across lean of the piece's footprint.
+    Front/back tips the piece along its length (its ends go up and down); Side/side across it. */
+function cutRotateRing() {
+  const a = cutRotateAxis();
+  if (a === 'h' || typeof nsoRotate === 'undefined' || !nsoRotate.leanNames) return 'turn';
+  const n = nsoRotate.leanNames();
+  return a === 'fb' ? n.along : n.across;
+}
+
+function cutRotatePiece() {
+  const p = state.placed && state.placed[state.selectedIndex];
+  return p && p.mesh ? p : null;
+}
 
 /** The piece's heading on the plate, clockwise seen from above, in degrees [0, 360): 0 is the piece lying as it was
     loaded, its own X along the plate's X. Read off the axis of the piece that lies nearest the plate (X, then Z, then Y),
     so it still reads on a piece that has been tipped. Null with no piece picked. */
 function cutPieceHeadingRaw() {
-  const p = state.placed && state.placed[state.selectedIndex];
-  if (!p || !p.mesh) return null;
+  const p = cutRotatePiece();
+  if (!p) return null;
   p.mesh.updateMatrixWorld(true);
   const q = p.mesh.quaternion, axes = [[1, 0, 0, 0], [0, 0, 1, -90], [0, 1, 0, 0]];
   for (let i = 0; i < axes.length; i++) {
@@ -1129,43 +1149,110 @@ function cutPieceHeadingRaw() {
   }
   return null;
 }
-function cutPieceHeading() {
-  const h = cutPieceHeadingRaw();
-  return h == null ? null : (Math.round(h * 10) / 10) % 360;
+
+/** What a lean's reading is measured on: the lean's axis in the world `A`, and which of the piece's own axes `k` (and which
+    way, `sgn`) is its upright, so 0 is "flat as it lies". The upright is kept, not re-picked from whichever axis is most
+    nearly vertical now: tipped past 45 degrees another axis is the more vertical and the reading would jump 90 degrees
+    under the hand and again on release. It is re-picked when the piece, or the lean, changes, and when the piece comes to
+    rest flat on another of its faces (another axis within a degree of vertical): there the reading is 0 again. */
+const cutRotateRef = { idx: -1, ring: null, k: 0, sgn: 1 };
+function cutRotateFix(ring) {
+  const p = cutRotatePiece();
+  if (!p || typeof nsoRotate === 'undefined' || !nsoRotate.ringAxis) return null;
+  const a = nsoRotate.ringAxis(ring);
+  if (!a) return null;
+  p.mesh.updateMatrixWorld(true);
+  const ys = [[1, 0, 0], [0, 1, 0], [0, 0, 1]].map(function (e) {
+    return new THREE.Vector3(e[0], e[1], e[2]).applyQuaternion(p.mesh.quaternion).y;
+  });
+  const r = cutRotateRef;
+  const keep = r.idx === state.selectedIndex && r.ring === ring;
+  const flatOther = ys.some(function (y, k) { return k !== r.k && Math.abs(y) > Math.cos(Math.PI / 180); });     // within a degree of upright
+  if (!keep || flatOther) {
+    let best = 0;
+    ys.forEach(function (y, k) { if (Math.abs(y) > Math.abs(ys[best]) + 1e-9) best = k; });
+    r.idx = state.selectedIndex; r.ring = ring; r.k = best; r.sgn = ys[best] < 0 ? -1 : 1;
+  }
+  return { A: new THREE.Vector3(a[0], a[1], a[2]), k: r.k, sgn: r.sgn };
 }
 
-/** A heading dragged: on a 45 degree tick inside 3 degrees of one, else as it is. */
+/** A lean's reading: how far the piece's upright axis has tipped from the vertical about the lean's axis, in degrees
+    (-180, 180], the sense a turn of the wheel clockwise gives (so + is what the + button does). 0 is level. */
+function cutPieceTiltRaw(fix) {
+  const p = cutRotatePiece();
+  if (!p || !fix) return null;
+  p.mesh.updateMatrixWorld(true);
+  const e = [[1, 0, 0], [0, 1, 0], [0, 0, 1]][fix.k];
+  const v = new THREE.Vector3(e[0], e[1], e[2]).applyQuaternion(p.mesh.quaternion).multiplyScalar(fix.sgn);
+  const up = new THREE.Vector3(0, 1, 0);
+  const phi = Math.atan2(fix.A.dot(new THREE.Vector3().crossVectors(up, v)), up.dot(v));    // right-handed about A, from up to v
+  return -phi * 180 / Math.PI;
+}
+
+/** The wheel's reading for the ticked axis: heading [0, 360) for Horizontal, tilt (-180, 180] for a lean. */
+function cutRotateReadingRaw(fix) {
+  return cutRotateAxis() === 'h' ? cutPieceHeadingRaw() : cutPieceTiltRaw(fix || cutRotateFix(cutRotateRing()));
+}
+function cutRotateReading() {
+  const r = cutRotateReadingRaw();
+  if (r == null) return null;
+  const v = Math.round(r * 10) / 10;
+  return cutRotateAxis() === 'h' ? v % 360 : (Object.is(v, -0) ? 0 : v);
+}
+function cutPieceHeading() { return cutRotateReading(); }
+
+/** A reading dragged: on a 45 degree tick inside 3 degrees of one, else as it is. */
 function cutRotateDetent(deg) {
   const tick = Math.round(deg / 45) * 45;
   return Math.abs(deg - tick) <= 3 ? tick : deg;
+}
+function cutRotateWrap(d) {
+  while (d > 180) d -= 360;
+  while (d <= -180) d += 360;
+  return d;
 }
 
 const cutRotateDial = { dragging: false, undoAt: 0 };
 
 function syncCutRotateUI() {
-  const deg = cutPieceHeading();
+  const lean = cutRotateAxis() !== 'h';
+  const deg = cutRotateReading();
   const turn = document.getElementById('cut-rotate-turn');
   if (turn) turn.setAttribute('transform', 'rotate(' + (deg == null ? 0 : deg) + ' 50 50)');
   const text = document.getElementById('cut-rotate-dial-deg');
   if (text) text.textContent = deg == null ? '-' : deg + '°';
   const dial = document.getElementById('cut-rotate-dial');
-  if (dial) dial.setAttribute('aria-valuenow', String(deg == null ? 0 : deg));
+  if (dial) {
+    dial.setAttribute('aria-valuenow', String(deg == null ? 0 : deg));
+    dial.setAttribute('aria-valuemin', lean ? '-180' : '0');
+    dial.setAttribute('aria-valuemax', lean ? '180' : '359.9');
+  }
   const input = document.getElementById('cut-rotate-deg');
-  if (input && document.activeElement !== input) input.value = deg == null ? '' : String(deg);
+  if (input) {
+    input.min = lean ? '-180' : '0';
+    input.max = lean ? '180' : '359.9';
+    if (document.activeElement !== input) input.value = deg == null ? '' : String(deg);
+  }
+  Object.keys(CUT_ROTATE_AXES).forEach(function (k) {
+    const el = document.getElementById(CUT_ROTATE_AXES[k]);
+    if (el) el.checked = k === cutRotateAxis();
+  });
 }
 
-/** Turn the selected piece `cw` degrees clockwise (seen from above) about the vertical. One Undo point for a press or a
-    run of presses (the same run: a held button, a drag - `fresh` false after the first), none if the piece is locked. */
+/** Turn the selected piece `cw` degrees the way the wheel's clockwise is (about the ticked axis). One Undo point for a
+    press or a run of presses (`fresh` true starts a step of its own - a drag's first move - false carries on one), none if
+    the piece is locked. */
 function cutRotateBy(cw, fresh) {
-  const idx = state.selectedIndex, p = state.placed && state.placed[idx];
-  if (!p || !p.mesh) { setStatus('Rotate piece: pick a piece first', true); return false; }
+  const idx = state.selectedIndex, p = cutRotatePiece();
+  if (!p) { setStatus('Rotate piece: pick a piece first', true); return false; }
   if (typeof nsoRotate === 'undefined' || !nsoRotate.turn) return false;
   if (typeof nsoPosLockBlocks === 'function' && nsoPosLockBlocks(p, 'rotate')) return false;
   const now = Date.now();
-  if (fresh !== false && now - cutRotateDial.undoAt > 700) pushUndo(snapshotPlacedPose(idx));
+  // A drag always starts a step of its own; presses of a held or repeated button within 0.7 s of each other share one.
+  if (fresh === true || (fresh !== false && now - cutRotateDial.undoAt > 700)) pushUndo(snapshotPlacedPose(idx));
   cutRotateDial.undoAt = now;
-  nsoRotate.turn('turn', -cw);
-  p.rotated = Math.abs(Math.sin(p.rotY || 0)) > 0.5;
+  nsoRotate.turn(cutRotateRing(), -cw);
+  if (cutRotateAxis() === 'h') p.rotated = Math.abs(Math.sin(p.rotY || 0)) > 0.5;
   cutAfterPieceTurn();
   return true;
 }
@@ -1195,9 +1282,10 @@ function cutWireRotateDial() {
     if (ev.button !== 0) return;
     const at = angleAt(ev);
     if (at.centre) return;                                    // the centre is the readout, not the rail
-    const a0 = cutPieceHeadingRaw();
+    const fix = cutRotateAxis() === 'h' ? null : cutRotateFix(cutRotateRing());
+    const a0 = cutRotateReadingRaw(fix);
     if (a0 == null) { setStatus('Rotate piece: pick a piece first', true); return; }
-    press = { x: ev.clientX, y: ev.clientY, lastA: at.a, raw: 0, abs0: a0, moved: false, first: true };
+    press = { x: ev.clientX, y: ev.clientY, lastA: at.a, raw: 0, abs0: a0, moved: false, first: true, fix: fix };
     if (dial.setPointerCapture) { try { dial.setPointerCapture(ev.pointerId); } catch (e) { /* synthetic */ } }
     if (dial.focus) dial.focus();
     ev.preventDefault();
@@ -1214,11 +1302,9 @@ function cutWireRotateDial() {
     else if (d < -180) d += 360;
     press.lastA = at.a;
     press.raw += d;                                            // clockwise on the wheel = clockwise on the piece
-    const want = cutRotateDetent(press.abs0 + press.raw), cur = cutPieceHeadingRaw();
+    const want = cutRotateDetent(press.abs0 + press.raw), cur = cutRotateReadingRaw(press.fix);
     if (cur == null) return;
-    let delta = want - cur;
-    while (delta > 180) delta -= 360;
-    while (delta <= -180) delta += 360;
+    const delta = cutRotateWrap(want - cur);
     if (Math.abs(delta) < 1e-6) return;
     if (cutRotateBy(delta, press.first)) press.first = false;
   });
@@ -1239,13 +1325,19 @@ function cutWireRotateDial() {
   });
   const typed = document.getElementById('cut-rotate-deg');
   if (typed) typed.addEventListener('change', function () {
-    const v = parseFloat(typed.value), cur = cutPieceHeading();
+    const v = parseFloat(typed.value), cur = cutRotateReading();
     if (!isFinite(v) || cur == null) { syncCutRotateUI(); return; }
-    let d = v - cur;
-    while (d > 180) d -= 360;
-    while (d <= -180) d += 360;
+    const d = cutRotateWrap(v - cur);
     if (Math.abs(d) > 1e-6) cutRotateDial.undoAt = 0, cutRotateBy(d);
     syncCutRotateUI();
+  });
+  // One axis at a time: ticking one clears the others, and the one in use cannot be cleared (the wheel needs an axis)
+  Object.keys(CUT_ROTATE_AXES).forEach(function (k) {
+    const el = document.getElementById(CUT_ROTATE_AXES[k]);
+    if (el) el.addEventListener('change', function () {
+      state.cutRotateAxis = el.checked ? k : (cutRotateAxis() === k ? k : cutRotateAxis());
+      syncCutRotateUI();
+    });
   });
   cutWireMiterStep('btn-cut-rotate-minus', -1, 'rotate');
   cutWireMiterStep('btn-cut-rotate-plus', 1, 'rotate');
@@ -3445,10 +3537,6 @@ function syncCutBladeUI() {
     });
   }
   if (typeof cutFollowSyncUI === 'function') cutFollowSyncUI();
-  const rot = document.getElementById('chk-cut-rotate');
-  if (rot) rot.checked = !!state.cutRotate;
-  const rings = document.getElementById('cut-rotate-rings');
-  if (rings) rings.hidden = !state.cutRotate;
   const btn = document.getElementById('btn-cut');
   if (typeof cutPlateSync === 'function') cutPlateSync();
   if (btn) btn.title = mode === 'plate'
@@ -3465,16 +3553,6 @@ function cutBladeRefresh() {
   syncCutBladeUI();
   syncCutUI();
   updateCutHelper();
-}
-
-/** Rotate piece: the rotate rings (app-rotate-handles.js) drawn on the piece while Cut stays open. */
-function cutSetRotate(on) {
-  state.cutRotate = !!on;
-  if (typeof nsoRotate !== 'undefined' && nsoRotate.setRing && on) {
-    nsoRotate.setRing('turn', true);
-  }
-  if (typeof nsoRotate !== 'undefined' && nsoRotate.refresh) nsoRotate.refresh();
-  syncCutBladeUI();
 }
 
 function cutWireBladeControls() {
@@ -3510,14 +3588,6 @@ function cutWireBladeControls() {
     });
   });
   if (typeof cutFollowWire === 'function') cutFollowWire();
-  const rot = document.getElementById('chk-cut-rotate');
-  if (rot) rot.addEventListener('change', function () { cutSetRotate(rot.checked); });
-  [['chk-cut-ring-fb', 'fb'], ['chk-cut-ring-ss', 'ss']].forEach(function (p) {
-    const el = document.getElementById(p[0]);
-    if (el) el.addEventListener('change', function () {
-      if (typeof nsoRotate !== 'undefined' && nsoRotate.setRing) nsoRotate.setRing(p[1], el.checked);
-    });
-  });
   syncCutBladeUI();
 }
 

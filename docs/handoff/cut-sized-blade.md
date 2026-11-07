@@ -118,3 +118,15 @@ checks that drive the isolation without the following).
 Found while testing: the window's end tangents were one-sided, half a baseline early (2.3 degrees off on a tight bend, held at the end of a stretch): extrapolated now.
 `follow:drive` slides with the real mouse (slider, blade, cord), types in the box, nudges, and sweeps a stretch that crosses the kerfs of three cuts: at every stop the
 blade's plane cuts a whole round section of the cord and faces the way the stretch runs.
+
+### Tenth round (2026-11-07): Follow on by default; the rotate rings are gone, the wheel has the axes
+
+Asked for: Follow strand on by default when the Sized blade is picked; the rotate rings option removed, a tick for each rotate option on the same wheel, Horizontal
+ticked by default. `cutBladeState` now starts with `follow: true` (the card resets on every open), so picking Sized is enough; the checks that drive a plain sized blade
+(`notch:drive`, `notch:sever`, `notch:strand-drive`) turn it off first. The rings option is out of the card (`index.html`), `app-cut.js` (`cutSetRotate`, the state, the
+ring boxes), and out of the two places that gave Cut the rings (`app-core.js`'s press claim, `app-rotate-handles.js`'s `cutRings`; the Rotate MENU's rings are untouched).
+The Rotate piece wheel takes the axis from three exclusive ticks (`chk-cut-rot-h` default, `-fb`, `-ss`; `state.cutRotateAxis`), mapped to the ring `turn` or the footprint's along /
+across lean (`nsoRotate.leanNames`), turned through `nsoRotate.turn(ring, ...)`. A lean reads the tilt of the piece's upright axis from the vertical about the lean's axis;
+the upright is kept (`cutRotateRef`) and re-picked only when the piece lands flat on another face or the piece / axis changes, so the reading does not jump 90 degrees when
+another axis becomes the more vertical past 45 (it did, on the first version: released at 51 it read -39). A drag always gets its own Undo step (it used to merge into a
+button press made less than 0.7 s before).

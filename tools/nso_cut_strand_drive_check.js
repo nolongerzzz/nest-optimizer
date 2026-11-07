@@ -126,6 +126,7 @@ withApp(async (page, logs) => {
   }, [id, dz]);
   const setSized = (w, d, k, strand) => page.evaluate(([w, d, k, strand]) => {
     document.getElementById('btn-cut-blade-sized').click();
+    cutBladeState().follow = false; cutBladeRefresh();      // Follow strand is on by default; these drive the plain sized blade
     const set = (id, v) => { const e = document.getElementById(id); e.value = String(v); e.dispatchEvent(new Event('input')); e.dispatchEvent(new Event('change')); };
     set('cut-blade-width', w); set('cut-blade-depth', d); set('cut-blade-kerf', k);
     cutBladeState().strand = !!strand; cutBladeRefresh();      // the card's one box is Follow strand now; the isolation alone is driven here
@@ -259,44 +260,21 @@ withApp(async (page, logs) => {
   id = await fresh();
   await setSized(60, 8, 1, true);
   await clickAt(await crownNear(id, 0));
-  const rowShown = () => page.evaluate(() => { const e = document.getElementById('cut-rotate-rings'); return getComputedStyle(e).display !== 'none' && !!e.offsetParent; });
-  check('the ring options are not on the card until Rotate piece is ticked (computed style, not the attribute)', (await rowShown()) === false);
-  check('rings are not drawn until asked', await page.evaluate(() => { const g = state.scene.getObjectByName('nso-rotate-handles'); return !g || !g.visible || !g.children.length; }));
-  await page.evaluate(() => { const c = document.getElementById('chk-cut-rotate'); c.checked = true; c.dispatchEvent(new Event('change')); });
-  await page.waitForTimeout(200);
-  const ringInfo = await page.evaluate(() => { const g = state.scene.getObjectByName('nso-rotate-handles'); return { rings: nsoRotate.rings(), visible: !!(g && g.visible), kids: g ? g.children.length : 0, cutOpen: state.cutterOpen, row: !document.getElementById('cut-rotate-rings').hidden }; });
-  check('ticked: the ring options appear on the card', (await rowShown()) === true);
-  check('ticked: the Turn ring is drawn on the piece, Cut still open, the ring options shown', ringInfo.rings.includes('turn') && ringInfo.visible && ringInfo.kids > 0 && ringInfo.cutOpen && ringInfo.row, JSON.stringify(ringInfo));
-  // The pose is baked into the geometry when a turn ends (the mesh's own quaternion goes back to identity), so
-  // "did it turn" is read off a real vertex in the world, not off the quaternion.
+  check('the rotate rings are not an option on the card any more', await page.evaluate(() => !document.getElementById('chk-cut-rotate') && !document.getElementById('cut-rotate-rings') && !document.getElementById('chk-cut-ring-fb') && !/Rotate rings/.test(document.getElementById('edit-card').textContent)));
+  check('and none are drawn while Cut is open', await page.evaluate(() => { const g = state.scene.getObjectByName('nso-rotate-handles'); return !g || !g.visible || !g.children.length; }));
+  // The pose is baked into the geometry when a turn ends, so "did it turn" is read off a real vertex in the world.
   const vtx = () => page.evaluate(() => { const m = state.placed[0].mesh; m.updateMatrixWorld(true);
     return new THREE.Vector3().fromBufferAttribute(m.geometry.attributes.position, 100).applyMatrix4(m.matrixWorld).toArray().map(v => +v.toFixed(4)); });
   const pose0 = await vtx();
   await page.keyboard.press('ArrowRight'); await page.keyboard.press('ArrowRight');
-  const poseKey = await vtx();
-  check('arrow keys do not turn the piece (the keys stay with the Rotate menu alone)', JSON.stringify(poseKey) === JSON.stringify(pose0));
-  // a real drag on a ring handle
-  const handle = await page.evaluate(() => {
-    const g = state.scene.getObjectByName('nso-rotate-handles'); g.updateMatrixWorld(true); let best = null;
-    g.traverse(o => { if (o.userData && o.userData.nsoRotateHandle && !best) best = o; });
-    if (!best) return null;
-    const p = new THREE.Vector3(); best.getWorldPosition(p);
-    const v = p.clone().project(state.camera), r = state.renderer.domElement.getBoundingClientRect();
-    return { xy: [r.left + (v.x + 1) / 2 * r.width, r.top + (1 - v.y) / 2 * r.height], axis: best.userData.nsoRotateHandle };
-  });
-  check('found a ring handle to grab', !!handle, JSON.stringify(handle));
-  await page.mouse.move(handle.xy[0], handle.xy[1]);
-  await page.mouse.down();
-  const grabbed = await page.evaluate(() => nsoRotate.dragging());
-  await page.mouse.move(handle.xy[0] + 70, handle.xy[1] + 40, { steps: 8 });
-  const mid = await page.evaluate(() => { const i = getCutPlaneLocal(getActiveModel()); const b = state.cutHelper && state.cutHelper.children.find(c => c.userData.cutBlade);
-    return { ok: !!i && !!b }; });
-  await page.mouse.up();
+  check('arrow keys do not turn the piece (they are Cut\'s dials\')', JSON.stringify(await vtx()) === JSON.stringify(pose0));
+  // the Rotate piece wheel turns it, the blade follows, and a cut after turning works
+  await page.click('#btn-cut-rotate-plus');
+  await page.fill('#cut-rotate-deg', '40'); await page.press('#cut-rotate-deg', 'Tab');
+  await page.waitForTimeout(150);
   const pose1 = await vtx();
-  check('a real mouse press on the ring starts a rotation, not a blade drag', grabbed === true);
-  check('and the piece turns (a vertex of it has moved in the world)', Math.hypot(pose1[0] - pose0[0], pose1[1] - pose0[1], pose1[2] - pose0[2]) > 0.5, JSON.stringify({ before: pose0, after: pose1 }));
-  check('the blade is still there, following it', mid.ok && await page.evaluate(() => !!state.cutHelper && !!getCutPlaneLocal(getActiveModel())));
-  // the blade stands on the plane in the turned piece's frame
+  check('the Rotate piece wheel turns the piece (a vertex of it has moved in the world)', Math.hypot(pose1[0] - pose0[0], pose1[1] - pose0[1], pose1[2] - pose0[2]) > 0.5, JSON.stringify({ before: pose0, after: pose1 }));
+  check('the blade is still there, following it', await page.evaluate(() => !!state.cutHelper && !!getCutPlaneLocal(getActiveModel())));
   const onPlane = await page.evaluate(() => {
     const m = getActiveModel(), info = getCutPlaneForSplit(m), mesh = cutMeshOf(m); state.scene.updateMatrixWorld(true);
     const blade = state.cutHelper.children.find(c => c.userData.cutBlade); const bc = new THREE.Box3().setFromObject(blade).getCenter(new THREE.Vector3());
@@ -308,18 +286,9 @@ withApp(async (page, logs) => {
   const vr0 = await probe(id);
   const rc = await cutOnce(); const vr1 = await probeAll();
   check('and a cut after turning it works', /^Sized cut/.test(rc.st) && vr1.vol < vr0.vol && vr1.open === 0 && vr1.nm === 0, rc.st);
-  await page.evaluate(() => { const c = document.getElementById('chk-cut-rotate'); c.checked = false; c.dispatchEvent(new Event('change')); });
-  await page.waitForTimeout(150);
-  check('unticked: the rings are gone and Cut is still open', await page.evaluate(() => { const g = state.scene.getObjectByName('nso-rotate-handles'); return (!g || !g.visible || !g.children.length) && state.cutterOpen && document.getElementById('cut-rotate-rings').hidden; }));
-
-  console.log('closing Cut takes its rings with it');
-  await page.evaluate(() => { const c = document.getElementById('chk-cut-rotate'); c.checked = true; c.dispatchEvent(new Event('change')); });
-  await page.waitForTimeout(150);
-  const ringsOn = await page.evaluate(() => { const g = state.scene.getObjectByName('nso-rotate-handles'); return !!(g && g.visible && g.children.length); });
   await page.evaluate(() => closeCutter(true));
   await page.waitForTimeout(150);
-  const ringsOff = await page.evaluate(() => { const g = state.scene.getObjectByName('nso-rotate-handles'); return { gone: !g || !g.visible || !g.children.length, flag: state.cutRotate, box: document.getElementById('chk-cut-rotate').checked }; });
-  check('rings were up, then Cut closed: they are gone and the box is clear', ringsOn && ringsOff.gone && ringsOff.flag === false && ringsOff.box === false, JSON.stringify({ ringsOn, ringsOff }));
+  check('closing Cut leaves no ring group behind', await page.evaluate(() => { const g = state.scene.getObjectByName('nso-rotate-handles'); return !g || !g.visible || !g.children.length; }));
 
   const errs = logs.filter(l => /error|exception/i.test(l) && !/favicon|Failed to load resource/i.test(l));
   check('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));

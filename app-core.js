@@ -3813,8 +3813,7 @@ function onCanvasPointerDown(event) {
      because this is the code doing the claiming. */
   if (typeof nsoRotate !== 'undefined' && typeof state !== 'undefined' &&
       state.raycaster && state.camera && event.button === 0 &&
-      (typeof nsoInputMode === 'undefined' || !nsoInputMode || nsoInputMode.owns('menu-rotate') ||
-       (state.cutterOpen && state.cutTool !== 'crop' && state.cutRotate))) {
+      (typeof nsoInputMode === 'undefined' || !nsoInputMode || nsoInputMode.owns('menu-rotate'))) {
     var rotG = state.scene && state.scene.getObjectByName('nso-rotate-handles');
     if (rotG && rotG.visible && rotG.children.length) {
       setPointerFromEvent(event);

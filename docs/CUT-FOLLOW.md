@@ -4,8 +4,10 @@ The Sized blade is square to the piece's own axes. On a spiral of cord that is
 square across one turn and slanted across every other. **Follow strand** (one box
 on the Sized blade; it is also "take only the strand under the blade", which used to
 be a box of its own) puts the blade square across the cord wherever it runs and
-walks it along the cord, a slice at a time. Unticked, the Sized blade is the plain
-one: square to the piece, taking everything in its box.
+walks it along the cord, a slice at a time. It is **on as soon as the Sized blade is
+picked** (the Sized blade is for work like this, between things on a strand); untick it
+for the plain Sized blade: square to the piece, taking everything in its box - what to use
+to cut a slot into a face, say.
 
 1. Pick **Sized blade**, tick **Follow strand**, and click the cord. The strand's
    centre line is traced, the blade is turned (mitre and bevel, the card's own

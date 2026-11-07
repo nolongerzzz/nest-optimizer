@@ -1297,6 +1297,8 @@ select:focus, input:focus {
 #edit-card .cut-dialfields .btn { width: auto; flex: 0 0 auto; margin-top: 0; padding: 7px 8px; }
 #edit-card .cut-dialcol .cut-miter-steps { width: 100%; }
 #edit-card .cut-dialcol .cut-miter-steps .btn { flex: 0 0 46px; width: 46px; margin-top: 0; }
+.cut-rotate-axes { display: flex; flex-direction: column; align-items: flex-start; gap: 0; width: 100%; padding-left: 14px; box-sizing: border-box; }
+.cut-rotate-axes .cut-switch { margin: 1px 0; }
 .cut-rotate-piece { fill: rgba(148, 163, 184, 0.16); stroke: rgba(148, 163, 184, 0.7); stroke-width: 2; }
 /* The bevel dial (app-cut.js, cutWireBevelDial): the Mitre wheel's grid, a
    third row for Plumb under the dial. The piece is drawn side-on, a faint

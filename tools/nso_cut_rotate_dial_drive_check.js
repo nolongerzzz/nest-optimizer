@@ -14,7 +14,11 @@
      piece), a press that does not move does nothing, and the wheel rests on a 45 degree tick it passes within 3.
    - The box takes a heading; - / + step 1 degree a press (Shift 0.1); the arrow keys step it.
    - The blade goes with the piece: after the piece is turned the blade is still square across its length.
-   - One Undo point for a drag, and Undo gives the heading back; a locked piece is not turned.                     */
+   - One Undo point for a drag, and Undo gives the heading back; a locked piece is not turned.
+   - The axes: a tick each for Horizontal (ticked by default), Front/back and Side/side, one at a time (the one in
+     use cannot be cleared); the wheel then turns the piece about it. A lean reads the piece's tilt from level, 0 flat.
+     Front/back tips it along its length (its ends go up and down), Side/side across it. The same wheel, box, - / +,
+     real drag and Undo. There are no rotate rings on the card.                                                    */
 
 const fs = require('fs');
 const os = require('os');
@@ -147,6 +151,60 @@ withApp(async (page, logs) => {
   await page.waitForTimeout(100);
   const h4 = await heading();
   check('Shift+left is a tenth of a degree back', Math.abs(((h3 - h4 + 540) % 360) - 180 - 0.1) < 0.06, h3 + ' -> ' + h4);
+
+  console.log('the axes: Horizontal, Front/back, Side/side');
+  const ticks = () => page.evaluate(() => ({ h: document.getElementById('chk-cut-rot-h').checked, fb: document.getElementById('chk-cut-rot-fb').checked, ss: document.getElementById('chk-cut-rot-ss').checked }));
+  const axesOf = () => page.evaluate(() => { const m = state.placed[state.selectedIndex].mesh; m.updateMatrixWorld(true);
+    const q = m.quaternion, v = e => new THREE.Vector3(e[0], e[1], e[2]).applyQuaternion(q).toArray();
+    return { x: v([1, 0, 0]), y: v([0, 1, 0]), z: v([0, 0, 1]) }; });
+  const rh = await R('chk-cut-rot-h'), rfb = await R('chk-cut-rot-fb'), rss = await R('chk-cut-rot-ss');
+  check('three ticks under the Rotate piece box, Horizontal first', rh.y >= rdeg.b - 2 && rfb.y > rh.y && rss.y > rfb.y && rh.cx > rd.x - 20 && rh.x < rd.r);
+  check('Horizontal is ticked by default, the leans are not', JSON.stringify(await ticks()) === JSON.stringify({ h: true, fb: false, ss: false }), JSON.stringify(await ticks()));
+  check('and the card has no rotate rings option', await page.evaluate(() => !document.getElementById('chk-cut-rotate') && !document.getElementById('cut-rotate-rings') && !/Rotate rings/.test(document.getElementById('edit-card').textContent)));
+  await page.fill('#cut-rotate-deg', '0'); await page.press('#cut-rotate-deg', 'Tab');
+  await page.waitForTimeout(100);
+  await page.click('#chk-cut-rot-fb');
+  check('ticking Front/back unticks Horizontal (one at a time)', JSON.stringify(await ticks()) === JSON.stringify({ h: false, fb: true, ss: false }), JSON.stringify(await ticks()));
+  await page.click('#chk-cut-rot-fb');
+  check('the axis in use cannot be unticked', (await ticks()).fb === true);
+  check('a flat piece reads 0 as a lean', (await heading()) === 0, String(await heading()));
+  const lvl = await axesOf();
+  await page.fill('#cut-rotate-deg', '20'); await page.press('#cut-rotate-deg', 'Tab');
+  await page.waitForTimeout(150);
+  let ax2 = await axesOf();
+  const tilt = v => Math.acos(Math.min(1, Math.abs(v[1]))) * 180 / Math.PI;           // an upright axis (own Y): off vertical
+  const rise = v => Math.asin(Math.min(1, Math.abs(v[1]))) * 180 / Math.PI;           // a level axis (own X, Z): up from level
+  check('typing 20 leans the piece front over back: its LENGTH (own X) rises 20 degrees and its width stays level', Math.abs(rise(ax2.x) - 20) < 0.6 && rise(ax2.z) < 0.6 && Math.abs(tilt(ax2.y) - 20) < 0.6,
+    JSON.stringify({ xRise: rise(ax2.x).toFixed(1), yTilt: tilt(ax2.y).toFixed(1), zRise: rise(ax2.z).toFixed(1) }));
+  check('the wheel and box read 20, the handle at 20', (await heading()) === 20 && (await page.inputValue('#cut-rotate-deg')) === '20' && /rotate\(20 /.test(await page.evaluate(() => document.getElementById('cut-rotate-turn').getAttribute('transform'))));
+  await page.click('#btn-cut-rotate-plus');
+  await page.waitForTimeout(80);
+  check('+ is 1 degree more lean', (await heading()) === 21, String(await heading()));
+  await dragDial(0, 30, 8);
+  let hl2 = await heading();
+  check('a real drag of 30 degrees clockwise leans it 30 more (21 + 30)', Math.abs(hl2 - 51) < 1.5, 'reading ' + hl2);
+  await page.click('#btn-undo');
+  await page.waitForTimeout(200);
+  check('Undo gives the lean back', Math.abs((await heading()) - 21) < 1.5, 'reading ' + (await heading()));
+  await page.fill('#cut-rotate-deg', '0'); await page.press('#cut-rotate-deg', 'Tab');
+  await page.waitForTimeout(100);
+  check('typing 0 brings it level again', (await heading()) === 0 && tilt((await axesOf()).y) < 0.3);
+  await page.click('#chk-cut-rot-ss');
+  check('ticking Side/side clears Front/back', JSON.stringify(await ticks()) === JSON.stringify({ h: false, fb: false, ss: true }));
+  await page.fill('#cut-rotate-deg', '25'); await page.press('#cut-rotate-deg', 'Tab');
+  await page.waitForTimeout(150);
+  ax2 = await axesOf();
+  check('Side/side leans it across: its WIDTH (own Z) rises 25 degrees and its length stays level', Math.abs(rise(ax2.z) - 25) < 0.6 && rise(ax2.x) < 0.6, JSON.stringify({ xRise: rise(ax2.x).toFixed(1), zRise: rise(ax2.z).toFixed(1) }));
+  check('the blade is still on the piece through a lean', await page.evaluate(() => !!state.cutHelper && !!getCutPlaneLocal(getActiveModel())));
+  await page.fill('#cut-rotate-deg', '-15'); await page.press('#cut-rotate-deg', 'Tab');
+  await page.waitForTimeout(150);
+  check('a lean reads signed: -15 leans it the other way', (await heading()) === -15 && Math.abs(rise((await axesOf()).z) - 15) < 0.6, String(await heading()));
+  await page.fill('#cut-rotate-deg', '0'); await page.press('#cut-rotate-deg', 'Tab');
+  await page.waitForTimeout(100);
+  await page.click('#chk-cut-rot-h');
+  check('ticking Horizontal again: the wheel reads the heading again', JSON.stringify(await ticks()) === JSON.stringify({ h: true, fb: false, ss: false }) && (await heading()) !== null);
+  await page.fill('#cut-rotate-deg', '0'); await page.press('#cut-rotate-deg', 'Tab');
+  await page.waitForTimeout(100);
 
   console.log('a locked piece');
   await page.evaluate(() => { getActiveModel().posLock = true; });

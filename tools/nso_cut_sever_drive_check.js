@@ -103,6 +103,7 @@ withApp(async (page, logs) => {
   }, alongFrac);
   const setSized = (w, d, k) => page.evaluate(([w, d, k]) => {
     document.getElementById('btn-cut-blade-sized').click();
+    cutBladeState().follow = false; cutBladeRefresh();      // Follow strand is on by default; these drive the plain sized blade
     const set = (id, v) => { const e = document.getElementById(id); e.value = String(v); e.dispatchEvent(new Event('input')); e.dispatchEvent(new Event('change')); };
     set('cut-blade-width', w); set('cut-blade-depth', d); set('cut-blade-kerf', k);
   }, [w, d, k]);

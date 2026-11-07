@@ -92,7 +92,7 @@ withApp(async (page, logs) => {
   await page.click('#btn-cut-blade-plate');
   await page.waitForTimeout(300);
   check('Whole plate is pressed and its fields show', (await page.getAttribute('#btn-cut-blade-plate', 'aria-pressed')) === 'true' && !(await page.$eval('#cut-plate-fields', e => e.hidden)));
-  const gone = await page.evaluate(() => ['cut-slider', 'cut-miter-dial', 'cut-bevel-dial', 'cut-readout', 'chk-cut-rotate'].map(id => getComputedStyle(document.getElementById(id)).display === 'none' ||
+  const gone = await page.evaluate(() => ['cut-slider', 'cut-miter-dial', 'cut-bevel-dial', 'cut-readout', 'cut-rotate-dial'].map(id => getComputedStyle(document.getElementById(id)).display === 'none' ||
     !document.getElementById(id).offsetParent));
   check('the per-piece slider, dials, readout and Rotate piece stand down', gone.every(Boolean), JSON.stringify(gone));
   check('no per-piece blade, a plate blade instead', await page.evaluate(() => !state.cutHelper) && !!(await plateBlade(page)));
