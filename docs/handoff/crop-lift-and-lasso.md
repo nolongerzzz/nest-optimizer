@@ -62,3 +62,8 @@ Branch `claude-wip`. Full write-up: **`docs/CROP.md`, "The card"**; Lift's side 
   Volumes match the kernel: sphere dome 0.3%, cone pin 0.08%, block bump exact. Fixing the cone needed two sampling changes in
   nso_lift_curved.js (corners near the root only; sample points across long triangles) - the fan of 30 mm triangles had given Lift a
   fit through 10 far points, an underside 0.5 mm off the cone, and 166 mm3 for a 50 mm3 pin. Lift's own node suites pass unchanged.
+- **The patch Lift leaves** (2026-11-07, from "cone needs a complete patch, sphere a looser weave"): on the cone the plate patch lay
+  0.41 mm off the cone (0.88 worst) because the fill's neighbour-matching term pulls toward a fan's far corners; on the sphere it was
+  4,422 triangles for 28 mm2 because the lattice followed the dome's tiny root edges. Now a smooth fit (rms under 0.02 mm) fills with
+  the base alone, and the lattice follows the neighbours' triangle size (x1.6 on a smooth fit): sphere ~250 triangles at 0.006 mm,
+  cone 64 at 0.004 mm. `lift:list` 7 checks it in the app. The loop crop's copy uses the same fill.

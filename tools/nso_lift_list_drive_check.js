@@ -11,6 +11,8 @@
      3. SPHERE and CONE: the bump on a curved surface is found and listed on open, "on a curved surface"
      4. a piece with nothing to lift says so, with an empty list
      5. a plate whose top has features is as it was: they are found on the top, the list names the top
+     7. the patch Lift leaves where a bump stood on the sphere and the cone lies on the body (every vertex within 0.03 mm of the true
+        surface) and is a loose weave (a few hundred triangles, not thousands); the lifted piece is the bump's volume
      6. what was found is HIGHLIGHTED the moment Lift opens - tinted and outlined, before any hover - on every surface that
         has something: a block with a bump on two walls draws both */
 'use strict';
@@ -115,6 +117,42 @@ withApp(async (page, logs) => {
     check('two bumps on two walls: "2 features found on 2 surfaces", two rows, one on each wall', cnt === '2 features found on 2 surfaces' && li.length === 2 && new Set(li.map(r => r.surface)).size === 2, cnt + ' · ' + li.map(r => r.surface).join(', '));
     check('...both highlighted at once, though the card is on one of them (a tint and an outline for each)', (await found(page, 'Mesh')) === 2 && (await found(page, 'LineSegments')) === 2, JSON.stringify(await layerKids(page)));
     await page.screenshot({ path: path.join(os.tmpdir(), 'lift-list-two.png') });
+  }
+
+  console.log('\n=== 7. the patch left where a bump stood: on the body, and a loose weave ===');
+  {
+    const ORC = await require('./nso_crop_wall_fixtures.js').oracles();
+    const nrm = [25 / Math.hypot(25, 15), 15 / Math.hypot(25, 15)];
+    for (const [label, file, centre, maxCap, want, distSrc] of [
+      ['sphere', 'sphere_bump.stl', [15, 0, 15], 600, ORC.sphere, '(x, y, z) => Math.hypot(x, y, z - 15) - 15'],
+      ['cone', 'cone_bump.stl', [10.2 + nrm[0], 0, 8 + nrm[1]], 200, ORC.cone, '(x, y, z) => (Math.hypot(x, y) - 15 * (1 - z / 25)) * 25 / Math.hypot(25, 15)']
+    ]) {
+      await disarm(page);
+      const id = await loadSTL(page, path.join(DIR, file));
+      await armOn(page, id);
+      const before = await L.plateState(page);
+      await page.click('.lift-row-go');
+      await page.waitForFunction(() => /Lifted|refused|failed/.test(document.getElementById('lift-readout').textContent), null, { timeout: 120000 });
+      const m = await page.evaluate(([id, c, distSrc]) => {
+        const dist = eval(distSrc);
+        const host = state.models.find(q => q.id === id), s = host.rawTris, lifted = state.models[state.models.length - 1];
+        let tris = 0, worst = 0, sum = 0, n = 0;
+        for (let t = 0; t < s.length / 9; t++) {
+          let near = true;
+          for (let k = 0; k < 3; k++) if (Math.hypot(s[t * 9 + k * 3] - c[0], s[t * 9 + k * 3 + 1] - c[1], s[t * 9 + k * 3 + 2] - c[2]) > 3.4) near = false;
+          if (!near) continue;
+          tris++;
+          for (let k = 0; k < 3; k++) { const d = Math.abs(dist(s[t * 9 + k * 3], s[t * 9 + k * 3 + 1], s[t * 9 + k * 3 + 2])); worst = Math.max(worst, d); sum += d; n++; }
+        }
+        const cen = NSO_Crop.census(host.rawTris);
+        return { tris, worst, mean: n ? sum / n : 0, vol: NSO_Crop.volume(lifted.rawTris), closed: cen.open === 0 && cen.repeated === 0 && cen.welded.open === 0, name: lifted.name };
+      }, [id, centre, distSrc]);
+      check(label + ': the patch where the bump stood lies on the body (every vertex within 0.03 mm of the true surface)', m.tris > 0 && m.worst < 0.03, m.tris + ' triangles in the patch, mean ' + m.mean.toFixed(4) + ', worst ' + m.worst.toFixed(4) + ' mm');
+      check(label + ': ...and is a loose weave: ' + maxCap + ' triangles at most', m.tris > 0 && m.tris <= maxCap, m.tris + ' triangles');
+      check(label + ': the plate is closed and the lifted piece is the bump (' + want.toFixed(2) + ' mm3 by the kernel, 1%)', m.closed && Math.abs(m.vol - want) / want < 0.01, m.vol.toFixed(2) + ' mm3, ' + m.name);
+      await page.evaluate(() => document.getElementById('btn-undo').click());
+      await page.waitForTimeout(300);
+    }
   }
 
   const errs = logs.filter(l => /\[pageerror\]/.test(l));

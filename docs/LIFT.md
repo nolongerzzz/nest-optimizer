@@ -495,6 +495,15 @@ reading the face, not lifting. Opening Lift now **scans every surface of the pie
 - **the top** (as before), **each flat face that is a base** (`FACE_MIN_FRAC` of the piece's surface; the side walls),
   and **each curved surface**. Every read is the one the cursor would have asked for, cached the same way, so nothing
   is read twice; a piece over 150,000 triangles is read on its top only (a curved read takes seconds) and the card says so.
+- **The patch Lift leaves is the base, and a loose weave** (curved-surface lifts, `surfaceCut`). Two things it did on the sphere and
+  cone fixtures: the cone's patch lay 0.41 mm off the cone on average (0.88 at worst) and the sphere's was 4,422 triangles for 28
+  mm² (accurate, but four times denser than everything round it). (1) The fill pulls toward the real neighbours' corners by a term
+  that dies away over `relaxMm`; where the fit round the loop is excellent (rms under `pureFitMm`, 0.02 mm) the surface IS its fit,
+  so that term is turned right down (`pureRelaxMm`) and the patch is the base alone - on a cone's fan the neighbours' corners are
+  25 mm away and say nothing. A rough surface keeps `relaxMm` and the neighbours as before. (2) The lattice spacing is the size of
+  the triangles round the loop (the median mean-edge of the real neighbours across the root edges, up to `spacingHintMaxMm`), 1.6
+  times that on a smooth fit, instead of the loop's own edge length. Sphere: 4,422 -> about 250 triangles, 0.006 mm off the sphere;
+  cone: 64 triangles, 0.004 mm off the cone (`lift:list` 7). Lift's four node suites pass unchanged.
 - **Highlighted the moment Lift opens**: every liftable feature on every surface the scan read is tinted and outlined in
   blue (the one under the cursor, and gathered ones, are drawn over it in their own colours), including features on a surface
   other than the one the card is on.

@@ -77,6 +77,7 @@
     relaxMm: 1.5,          // d dies away into the base over about this
     spacingMinMm: 0.12,    // the lattice inside: about one root edge, kept within these
     spacingMaxMm: 0.8,
+    spacingHintMaxMm: 1.5, // ...or, when the caller says how big the neighbours' triangles are, about that - up to this
     clearFrac: 0.45,       // ...no point closer than this many spacings to the rim
     maxPoints: 20000,      // coarser past this many points
     cgTol: 1e-11,
@@ -263,7 +264,12 @@
     var area = 0;
     loops.forEach(function (L) { for (var i = 0; i < L.length; i++) { var p = L[i], q = L[(i + 1) % L.length]; area += X[p] * Y[q] - X[q] * Y[p]; } });
     area = Math.abs(area / 2);
-    var h = Math.max(o.spacingMinMm, Math.min(o.spacingMaxMm, lens[lens.length >> 1] || o.spacingMinMm));
+    /* The lattice is about the size of the triangles round the loop. The loop's own edges stand for that when nothing says
+       otherwise; but a bump finer than the surface it stands on (a dome of 0.4 mm triangles on a base of 1 mm ones) would
+       fill its hole with a lattice four times as dense as everything round it - 4,400 triangles for 28 mm2 - so a caller
+       that knows the neighbours' size (opts.spacingHintMm) is believed, up to spacingHintMaxMm. */
+    var h = o.spacingHintMm > 0 ? Math.max(o.spacingMinMm, Math.min(o.spacingHintMaxMm, o.spacingHintMm))
+                                : Math.max(o.spacingMinMm, Math.min(o.spacingMaxMm, lens[lens.length >> 1] || o.spacingMinMm));
     h = Math.max(h, Math.sqrt(area / (0.866 * o.maxPoints)));
     // edge buckets for the distance and inside tests
     var bs = Math.max(h, 0.25), bw = Math.ceil((hi[0] - lo[0]) / bs) + 1, bh = Math.ceil((hi[1] - lo[1]) / bs) + 1;
@@ -519,6 +525,8 @@
     slantDeg: 60,        // a root whose surround leans more than this from its mean direction (90th percentile) cannot be filled in one go
     flushMinTris: 20,    // a patch of a feature is base only if it is a patch: at least this many triangles...
     flushMinMm2: 1,      // ...and this much surface
+    pureFitMm: 0.02,     // a base fitted to its ring to within this (rms) is the surface: the fill under a detail IS the fit, ...
+    pureRelaxMm: 0.02,   // ...not pulled toward the real neighbours' corners (which, on a cone's fan, are 25 mm away and say nothing)
     relaxMm: 1.5,
     captureMm: 2
   };
@@ -1169,8 +1177,20 @@
         try { ear = P1.internals.capFor({ M: M, plane: { n: G.frame.n, d: 0 }, frame: G.frame }, { loops: G.loops }, capEngine); }
         catch (err) { return { ok: false, reason: 'detail ' + (I.id + 1) + ' could not be capped (' + ((err && err.message) || err) + ')' }; }
         var stub = { M: M, map: { grid: { n: G.frame.n, e1: G.frame.e1, e2: G.frame.e2 } } };
+        /* How big the triangles are that the fill has to match: the median of the mean edge of each real neighbour across a root
+           edge. And whether the surface is smooth enough to be filled by its own fit alone. */
+        var nb = [];
+        G.edges.forEach(function (e) {
+          var u = M.twin(e.t, e.k);
+          if (u < 0) return;
+          var a3 = M.tv[u * 3] * 3, b3 = M.tv[u * 3 + 1] * 3, c3 = M.tv[u * 3 + 2] * 3, VX = M.VX;
+          nb.push((Math.hypot(VX[a3] - VX[b3], VX[a3 + 1] - VX[b3 + 1], VX[a3 + 2] - VX[b3 + 2]) + Math.hypot(VX[b3] - VX[c3], VX[b3 + 1] - VX[c3 + 1], VX[b3 + 2] - VX[c3 + 2]) +
+                   Math.hypot(VX[c3] - VX[a3], VX[c3 + 1] - VX[a3 + 1], VX[c3 + 2] - VX[a3 + 2])) / 3);
+        });
+        nb.sort(function (x, y) { return x - y; });
+        var smoothFit = G.fit && G.fit.rms != null && G.fit.rms < SURF.pureFitMm;
         var fl = fill(stub, { tris: I.tris, loops: G.loops.map(function (L) { return { verts: L.verts }; }) }, ear,
-          { relaxMm: A.relaxMm, target: G.fit.T });
+          { relaxMm: smoothFit ? SURF.pureRelaxMm : A.relaxMm, target: G.fit.T, spacingHintMm: nb.length ? nb[nb.length >> 1] * (smoothFit ? 1.6 : 1) : 0 });   // a smooth, well-fitted surface needs no more than the triangles round it: a little looser
         if (!fl.ok) return { ok: false, reason: 'detail ' + (I.id + 1) + ' could not be filled under: ' + fl.reason + ' - nothing changed' };
         mine.push(fl.cap); stats.push(fl.stats);
       }
