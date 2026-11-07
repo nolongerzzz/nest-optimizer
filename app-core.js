@@ -2210,6 +2210,16 @@ function frameSelectedPiece() {
   setStatus('Camera: plate view');
 }
 
+/* How many plates have pieces on them: the active plate's state.placed plus
+   each other plate's stashed list (app-beds.js info()). One plate, the app as
+   it always was, is 1 with a piece and 0 without. */
+function nsoPlatesInPlay() {
+  if (typeof NSO_BEDS !== 'undefined' && NSO_BEDS && typeof NSO_BEDS.info === 'function') {
+    return NSO_BEDS.info().filter(function (r) { return r.placed > 0; }).length;
+  }
+  return state.placed.length > 0 ? 1 : 0;
+}
+
 /* CLEAR PLATE IS A WIPE. The pieces go off the plate AND out of state.models,
    with everything that named them: the two stacks (an entry names a model, a
    piece, a geometry that would be put back on a plate that is no longer
@@ -2222,6 +2232,15 @@ function frameSelectedPiece() {
    pieces and keep state.models; only this function wipes it. Returns how many
    geometries it disposed, for the check. */
 function clearPlateOnly() {
+  /* A FRESH START WHEN THIS IS THE ONLY PLATE IN PLAY. With one plate holding
+     pieces (the common, single-plate case) Clearing it leaves nothing in play
+     anywhere, so every armed mode is disarmed and every tool, card and menu is
+     closed - leaveTool(), the same gesture as a double-click on the canvas -
+     and the app starts over. With pieces on more than one plate the other
+     plates' work is still in play, so Clear plate stays what it was: this
+     plate's wipe and the helper teardown below, nothing more. Counted BEFORE
+     the wipe. */
+  if (nsoPlatesInPlay() <= 1 && typeof leaveTool === 'function') leaveTool();
   // Every tool closed and every helper gone first, while the pieces they
   // were drawn on are still there to close against (nso-helpers.js).
   nsoHelpers.teardown('clear-plate');
