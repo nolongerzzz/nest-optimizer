@@ -17,6 +17,10 @@
      5  coarse box       densified under the grab; a smooth bump, not a kink
      6  guards           a 0.8 mm wall pulled 2 mm is refused in words, piece
                          unchanged; a pull through itself is refused
+     7  this side only   the bore pushed, the outer skin left where it is
+     8  nso_densify.js   on a boolean junction: a cylinder with a branch
+                         unioned on, its slivers densified - closed, manifold,
+                         no two vertices within a weld
 */
 
 const fs = require('fs');
@@ -478,5 +482,127 @@ console.log('\n=== 7. "This side only" - the bore of the tube pushed 0.4 mm inwa
   ok(!intoSide.ok && /under the 0\.8 mm floor/.test(intoSide.reason), 'the 0.8 mm guard still applies: the OUTSIDE of a 0.8 wall pushed 0.5 mm into it is refused', intoSide.reason);
 }
 
-console.log('\n' + pass + ' passed, ' + fail + ' failed');
-if (fail) { console.log('FAILED:\n  ' + FAILS.join('\n  ')); process.exit(1); }
+/* ============================================= 8. DENSIFY ON A BOOLEAN JUNCTION */
+/* A Manifold union cutting a long wall triangle leaves slivers: caps a few
+   ten-thousandths of a millimetre high and fans of 30-60 mm spokes off the
+   intersection curve. Stock's 96-segment cylinder (its wall triangles run the
+   full 100 mm) with a 4 mm-radius branch at 45 degrees is the case that broke:
+   the branch's silhouette runs within 0.006 mm of the cylinder's vertical
+   edges. The union passes the gate; densifying it used to put two vertices
+   closer than the 1e-4 mm every consumer welds at (cut points on the two sides
+   of a cap, a fan's spokes cut at the same distance from their corner, nearly
+   parallel spokes inside a 0.04 mm cap halved seven times over), and welded,
+   those are doubled edges - Limb, which densifies its flex zone with exactly
+   this call, came back non-manifold, mis-wound and self-piercing. Densify on
+   its own has to hand back a mesh that stays closed and manifold however it is
+   welded. Async, for the boolean kernel. */
+(async () => {
+  console.log('\n=== 8. nso_densify.js on a boolean junction - slivers left by a union ===');
+  const { csgContext } = require('./nso_csg_node.js');
+  const csg = csgContext();
+  const cyl = STOCK.revolve(STOCK.profileCylinder(15.42, 100), 96);
+  /* A frustum r0 -> r1 along an axis 45 degrees off Z in the XZ plane, leaving
+     the cylinder's wall at (15.42, 0, 40) (`bury` mm of it inside the wall),
+     its own seam turned by `phase`. */
+  function branch(seg, r0, r1, bury, phase) {
+    const s = STOCK.revolve(STOCK.profileCone(r0, 30 + bury, r1), seg);
+    const ux = Math.SQRT1_2, uz = Math.SQRT1_2, cp = Math.cos(phase), sp = Math.sin(phase);
+    const P = [15.42 - bury * ux, 0, 40 - bury * uz], out = new Float32Array(s.length);
+    for (let i = 0; i < s.length; i += 3) {
+      const x = s[i] * cp - s[i + 1] * sp, y = s[i] * sp + s[i + 1] * cp, z = s[i + 2];
+      out[i] = P[0] + x * uz + z * ux; out[i + 1] = y; out[i + 2] = P[2] - x * ux + z * uz;
+    }
+    return out;
+  }
+  const union = async b => { const u = await csg.nsoUnionSoups(cyl, b); return u && u.soup ? u.soup : u; };
+  /* Open / non-manifold edges of a soup keyed on its exact float32 corners -
+     no weld at all, so two vertices that rounded to one point show here. */
+  function exactEdges(soup) {
+    const und = new Map();
+    const key = i => soup[i] + ',' + soup[i + 1] + ',' + soup[i + 2];
+    for (let t = 0; t < soup.length; t += 9) {
+      const v = [key(t), key(t + 3), key(t + 6)];
+      for (let e = 0; e < 3; e++) {
+        const a = v[e], b = v[(e + 1) % 3], k = a < b ? a + '|' + b : b + '|' + a;
+        und.set(k, (und.get(k) || 0) + 1);
+      }
+    }
+    let open = 0, nm = 0;
+    und.forEach(c => { if (c === 1) open++; else if (c > 2) nm++; });
+    return { open, nm };
+  }
+  /* Distinct vertices of a mesh closer than tol to each other - the pairs a
+     weld would merge. */
+  function closePairs(mesh, tol) {
+    const p = mesh.pos, cell = new Map(), inv = 1 / tol, ck = (x, y, z) => x + '|' + y + '|' + z;
+    let n = 0;
+    for (let i = 0; i < mesh.vertCount; i++) {
+      const cx = Math.floor(p[i * 3] * inv), cy = Math.floor(p[i * 3 + 1] * inv), cz = Math.floor(p[i * 3 + 2] * inv);
+      for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) {
+        for (const j of cell.get(ck(cx + dx, cy + dy, cz + dz)) || []) {
+          if (Math.hypot(p[i * 3] - p[j * 3], p[i * 3 + 1] - p[j * 3 + 1], p[i * 3 + 2] - p[j * 3 + 2]) < tol) n++;
+        }
+      }
+      const k = ck(cx, cy, cz);
+      (cell.get(k) || cell.set(k, []).get(k)).push(i);
+    }
+    return n;
+  }
+
+  const s15 = 15 * Math.SQRT1_2;
+  const zones = [{ c: [15.42, 0, 40], r: 6, name: 'at the junction, r 6' },
+                 { c: [15.42 + s15, 0, 40 + s15], r: 17, name: '15 mm out along the branch, r 17' }];
+  {
+    const u = await union(branch(96, 4, 4, 1, 0));                  // the plain 8 mm rod
+    const mv0 = canonical(u, 'junction-union');
+    ok(mv0.verdict === 'PASS', 'the union itself: mesh_validate.py --gate PASS', (u.length / 9) + ' triangles');
+    for (const z of zones) {
+      const t0 = Date.now();
+      const r = D.region(u, { c: z.c, r: z.r }, { spacing: 1 });
+      const ms = Date.now() - t0;
+      const ex = exactEdges(r.soup), tp = topology(r.soup), cp = closePairs(r.mesh, 1e-4);
+      ok(r.ok && r.changed && ex.open === 0 && ex.nm === 0, 'junction, ' + z.name + ': closed and manifold by an exact-key edge count',
+         JSON.stringify(ex) + '; ' + r.report.trisBefore + ' -> ' + r.report.trisAfter + ' triangles in ' + ms + ' ms');
+      ok(tp.open === 0 && tp.nm === 0 && tp.wind === 0, 'junction, ' + z.name + ': and still so welded at 1e-4', JSON.stringify({ open: tp.open, nm: tp.nm, wind: tp.wind }));
+      ok(cp === 0, 'junction, ' + z.name + ': no two vertices within 1e-4 mm of each other', cp + ' pairs (it was 7 and 13)');
+      ok(r.report.moved <= 0.02, 'junction, ' + z.name + ': slivers moved the surface by at most 0.02 mm',
+         r.report.slivers + ' slivers, ' + f3(r.report.moved * 1000) + ' microns');
+      // the fan spokes are zipped, not bisected into 45,000 needles
+      ok(r.report.trisAfter < (z.r < 10 ? 15000 : 40000), 'junction, ' + z.name + ': the spokes do not pile up', r.report.trisAfter + ' triangles (it was ' + (z.r < 10 ? '39,644' : '91,746') + ')');
+      const mv = canonical(r.soup, 'junction-r' + z.r);
+      ok(mv.verdict === 'PASS', 'junction, ' + z.name + ': mesh_validate.py --gate PASS',
+         mv.triangles + ' triangles' + (mv.verdict === 'PASS' ? '' : ': ' + JSON.stringify(mv.verdict_fails)));
+      const again = D.region(r.soup, { c: z.c, r: z.r }, { spacing: 1 });
+      ok(again.report.splits === 0 && !again.changed, 'junction, ' + z.name + ': densifying it again changes nothing', D.say(again.report));
+    }
+  }
+  {
+    /* Branches the pseudo-random search found, each a different way to put two
+       vertices within a weld of each other before this was fixed: a frustum
+       turned on its seam, a 16-gon, a tip a fan of spokes converges on, a
+       cap along the cylinder's edge laddered from one end. */
+    const cases = [
+      [[96, 4, 3.830653190612793, 1.0455968856811524, 6.98161193728447], { c: [15.42, 0, 40], r: 6 }, 1],
+      [[16, 4, 2.678019106388092, 1.802739191055298, 4.611982434988022], { c: [15.42, 0, 40], r: 6 }, 0.5],
+      [[96, 4, 2.118068218231201, 4.140644657611847, 0.21177470684051514], { c: zones[1].c, r: 17 }, 0.5],
+      [[24, 4, 3.9652884006500244, 4.994905281066894, 1.0418696403503418], { c: [15.42, 0, 44.18472796678543], r: 4.020506858825684 }, 0.5],
+      [[64, 4, 2.4047086238861084, 1.5065163254737854, 5.951233088970184], { c: [15.42, 0, 40], r: 6 }, 0.5],
+      [[48, 4, 3.3271291255950928, 1.188580083847046, 6.250055640935898], { c: [15.42, 0, 37.672927379608154], r: 3.740446090698242 }, 0.5]
+    ];
+    let bad = 0, pairs = 0, tris = 0, worst = 0;
+    const t0 = Date.now();
+    for (const [b, z, spacing] of cases) {
+      const u = await union(branch(...b));
+      const r = D.region(u, z, { spacing });
+      const ex = exactEdges(r.soup), tp = topology(r.soup), cp = closePairs(r.mesh, 1e-4);
+      if (ex.open || ex.nm || tp.open || tp.nm || tp.wind || cp) { bad++; console.log('          ' + JSON.stringify({ b, z, spacing, ex, tp: { open: tp.open, nm: tp.nm, wind: tp.wind }, cp })); }
+      pairs += cp; tris += r.report.trisAfter; worst = Math.max(worst, r.report.moved);
+    }
+    ok(bad === 0, 'six more junctions (16- to 96-gon branches, zones r 3.7-17, spacing 0.5 and 1): every one closed, manifold, nothing within a weld',
+       cases.length + ' zones, ' + tris + ' triangles, ' + pairs + ' close pairs, surface moved at most ' + f3(worst * 1000) + ' microns, ' + (Date.now() - t0) + ' ms');
+  }
+
+  console.log('\n' + pass + ' passed, ' + fail + ' failed');
+  if (fail) { console.log('FAILED:\n  ' + FAILS.join('\n  ')); process.exit(1); }
+  process.exit(0);
+})().catch(e => { console.log('  FAIL  section 8 threw: ' + (e && e.stack || e)); process.exit(1); });

@@ -24,6 +24,13 @@
    its exact coordinates (midpoints are the only new points, and they lie on the
    old edges), so the surface is geometrically unchanged; only its sampling is.
 
+   THE ONE EXCEPTION IS A SLIVER (see "slivers" below): a triangle less than
+   1e-3 mm high cannot be cut without putting two points closer together than
+   the 1e-4 mm everything downstream welds at, so it is flipped or collapsed
+   away first. That moves the surface by at most the sliver's height or its
+   shortest edge (<= 0.02 mm, and <= a tenth of the spacing), the report says
+   how far (`moved`), and a mesh with no slivers is not touched by it.
+
    WHAT "INSIDE THE RADIUS" MEANS. A triangle is in the zone when the nearest
    point of the triangle to the zone's centre is within r + margin - not when a
    vertex is. A vertex test misses the case this exists for: a two-triangle
@@ -36,25 +43,32 @@
    remembering which regions were done.
 
    NUMBERS. spacing is a MAXIMUM EDGE LENGTH, not an average: when this is done
-   every edge of every triangle in the zone is <= spacing. A split edge halves,
+   every edge of every triangle in the zone is <= spacing (an edge already
+   within 1e-4 mm of it counts: FINE_SLACK, below). A split edge halves,
    so a result edge is in (spacing/2, spacing] unless it was already shorter.
    `maxTris` is a budget: a round that would pass it is not applied (half a
    round is not a mesh anyone wants) and the report says `capped`.
 
      NSO_Densify.region(rawTris, zone, opts) -> {
        ok, reason, mesh, soup, changed,
-       report: { spacing, splits, passes, trisBefore, trisAfter, capped, zone }
+       report: { spacing, splits, passes, trisBefore, trisAfter, capped, zone,
+                 slivers, moved }
      }
        rawTris  Float32Array/Array, 9 floats per triangle
        zone     { c: [x,y,z], r }                (r in mm)
        opts     { spacing = 0.5, margin = spacing, maxPasses = 24,
-                  maxTris = 600000, weld = 1e-4 }
+                  maxTris = 600000, weld = 1e-4,
+                  sliver = 1e-3, sliverEdge = min(0.02, spacing / 10) }
+                slivers  triangles lower than `sliver` mm flipped or collapsed
+                         (their shortest edge up to `sliverEdge`) before
+                         cutting; `moved` is the furthest the surface went
        mesh     { pos: Float64Array, tri: Int32Array, vertCount, triCount }
        soup     Float32Array rebuilt from the mesh (same winding)
        changed  false when nothing was split (soup is then rawTris itself)
 
      NSO_Densify.weld(rawTris, tol) -> mesh
-     NSO_Densify.refine(mesh, zone, opts) -> { mesh, splits, passes, capped }
+     NSO_Densify.refine(mesh, zone, opts) -> { mesh, splits, passes, capped,
+                                               flips, collapses, moved }
      NSO_Densify.toSoup(mesh, pos?) -> Float32Array
      NSO_Densify.triDist2(pos, a, b, c, p) -> squared distance from p to the triangle
      NSO_Densify.say(report) -> one status-line phrase
@@ -63,6 +77,12 @@
   'use strict';
 
   var DEFAULT_SPACING = 0.5;
+  /* An edge within this of the spacing IS the spacing. The grading and the
+     halving make edges of exactly the spacing, and a float32 soup stores a
+     1 mm edge at 26 mm from the origin as 1.0000028 mm: without the slack,
+     densifying a densified region cut those again (it is not idempotent). One
+     weld tolerance - nothing downstream can tell the difference. */
+  var FINE_SLACK = 1e-4;
 
   /* ------------------------------------------------------------ weld */
 
@@ -245,6 +265,8 @@
      zone's diameter are first bisected - which is harmless to a needle, it
      only halves the length - until each piece is about the zone's size. */
   var NEEDLE_ASPECT = 3, NEEDLE_NARROW = 3;
+  // a thin triangle whose SHORTEST edge is this many heights long is a cap, not a needle (zip, below)
+  var CAP_RATIO = 4;
 
   function crossLen(pos, a, b, c) {
     var ux = pos[b * 3] - pos[a * 3], uy = pos[b * 3 + 1] - pos[a * 3 + 1], uz = pos[b * 3 + 2] - pos[a * 3 + 2];
@@ -310,16 +332,22 @@
      piercing pairs lived (docs/PULL.md). */
   function spanCuts(span, spacing) {
     var t0 = span.t0, t1 = span.t1, len = span.len;
-    var n = Math.max(1, Math.ceil((t1 - t0) * len / spacing - 1e-9));
+    var n = Math.max(1, Math.ceil(((t1 - t0) * len - FINE_SLACK) / spacing - 1e-9));
     var ts = [], i, step = 2 * spacing, at = t0 * len;
     while (at > 1e-9 && ts.length < 64) {
       at -= step;
       if (at <= 0.25 * step) break;
       ts.unshift(at / len); step *= 2;
     }
-    if (t0 > 1e-9) ts.push(t0);
+    /* The sphere can cross an edge a hair from one of its ends. A cut there is
+       a vertex a hair from another one - and on a fan of edges meeting at that
+       end, a row of them a hair from each other. Inside a quarter spacing of
+       an end the end itself stands in for it (the piece it leaves is at most
+       1.25 spacings, and bisection halves it). */
+    var gap = 0.25 * spacing;
+    if (t0 * len >= gap) ts.push(t0);
     for (i = 1; i < n; i++) ts.push(t0 + (t1 - t0) * i / n);
-    if (t1 < 1 - 1e-9) ts.push(t1);
+    if ((1 - t1) * len >= gap) ts.push(t1);
     step = 2 * spacing; at = t1 * len;
     while (at < len - 1e-9 && ts.length < 128) {
       at += step;
@@ -343,7 +371,7 @@
      laddered alone, as above. */
   function zip(mesh, zone, spacing, reach) {
     var V = mesh.vertCount, T = mesh.triCount, tri = mesh.tri, pos = mesh.pos;
-    var s2 = spacing * spacing, reach2 = reach * reach;
+    var s2 = (spacing + FINE_SLACK) * (spacing + FINE_SLACK), reach2 = reach * reach;
     /* needle[t]: t is a needle (by shape) that is coarse. inZone[t]: and it
        touches the zone. Only an in-zone needle starts anything, but its other
        half may lie just outside the sphere: it is a needle too, and leaving it
@@ -422,7 +450,16 @@
       // the long sides are the opposite pair with the greater total length
       var lAB = d2(pos, QA, QB), lBC = d2(pos, QB, QC), lCD = d2(pos, QC, QD), lDA = d2(pos, QD, QA);
       var A2 = QA, B2 = QB, C2 = QC, D2 = QD;
-      if (Math.sqrt(lAB) + Math.sqrt(lCD) > Math.sqrt(lBC) + Math.sqrt(lDA)) { A2 = QB; B2 = QC; C2 = QD; D2 = QA; }
+      var sA = Math.sqrt(lBC), sB = Math.sqrt(lDA), sF = Math.sqrt(lAB), sH = Math.sqrt(lCD);
+      if (sF + sH > sA + sB) { A2 = QB; B2 = QC; C2 = QD; D2 = QA; sA = Math.sqrt(lCD); sB = Math.sqrt(lAB); sF = Math.sqrt(lBC); sH = Math.sqrt(lDA); }
+      /* ...and it IS a strip: two long sides of about one length, each well
+         over the foot and the head. Two neighbouring needles of a FAN - the
+         spokes a boolean leaves from an intersection curve to a far corner -
+         also share a longest edge in one plane, but their "long sides" are a
+         60 mm spoke and a 0.09 mm piece of the curve. Paired, the two sides
+         share their cuts (below), and the 0.09 mm edge was cut 32 times for a
+         30 mm one: points 0.003 mm apart and a ladder of slivers. */
+      if (Math.min(sA, sB) < 0.75 * Math.max(sA, sB) || Math.min(sA, sB) < NEEDLE_ASPECT * Math.max(sF, sH)) continue;
       partner[t] = o; partner[o] = t;
       quads.set(t, [A2, B2, C2, D2, dkey]);
     }
@@ -464,16 +501,24 @@
       if (!c) cls.set(r.root, { t0: a0, t1: a1, len: own.len });
       else { c.t0 = Math.min(c.t0, a0); c.t1 = Math.max(c.t1, a1); c.len = Math.max(c.len, own.len); }
     });
-    var edgeT = new Map();
+    var edgeT = new Map(), decided = new Set();
     uf.forEach(function (n, key) {
       var r = find(key), c = cls.get(r.root);
       if (!c) return;
       var span = r.f ? { t0: 1 - c.t1, t1: 1 - c.t0, len: c.len } : { t0: c.t0, t1: c.t1, len: c.len };
-      edgeT.set(key, spanCuts(span, spacing));
+      var ts = spanCuts(span, spacing);
+      decided.add(key);
+      if (ts.length) edgeT.set(key, ts);
     });
     // every other needle edge (the rest of the unpaired needles, the feet and
     // heads of the quads, the diagonals) is cut on its own
-    edgeS.forEach(function (sp, key) { if (!edgeT.has(key)) edgeT.set(key, spanCuts(sp, spacing)); });
+    // (An edge with no cut is not in edgeT at all: an empty list there made a
+    // quad with uncut sides look cut, and its two fans overlapped.)
+    edgeS.forEach(function (sp, key) {
+      if (decided.has(key)) return;
+      var ts = spanCuts(sp, spacing);
+      if (ts.length) edgeT.set(key, ts);
+    });
     // A quad whose sides came out uncut has nothing to ladder: back to two needles.
     quads.forEach(function (q, t1) {
       var dkey = q[4];
@@ -544,9 +589,48 @@
       if (!edgeIds.has(ek(ta, tb)) && !edgeIds.has(ek(tb, tc)) && !edgeIds.has(ek(tc, ta))) {
         built.push(ta, tb, tc); continue;
       }
+      var e0 = d2(allPos, ta, tb), e1 = d2(allPos, tb, tc), e2 = d2(allPos, tc, ta);
+      /* A CAP - the third vertex a hair off the longest edge, both its other
+         edges long - has no short base to ladder up from: a boolean leaves
+         them along a wall it cut (100 mm of wall edge, the third vertex 0.04 mm
+         off it, 39 mm up). Laddered as a needle, its 39 mm "base" was fanned
+         from one point, every fan edge a long spoke inside a 0.04 mm strip,
+         and the bisection after cut those nearly parallel spokes into
+         midpoints 7e-5 mm apart that share no triangle - a weld merges them,
+         and no edge collapse can. So a cap is laddered between its long edge
+         and the two-edge path through the third vertex, both from one end of
+         the long edge to the other: the rungs go ACROSS the strip. */
+      var eMax = Math.max(e0, e1, e2), eMin = Math.min(e0, e1, e2);
+      var hCap = crossLen(allPos, ta, tb, tc) / Math.sqrt(eMax);
+      if (eMax > 0 && Math.sqrt(eMin) > CAP_RATIO * hCap) {
+        var cu, cw, cm;                                     // u->w the long edge, in the winding
+        if (e0 === eMax) { cu = ta; cw = tb; cm = tc; }
+        else if (e1 === eMax) { cu = tb; cw = tc; cm = ta; }
+        else { cu = tc; cw = ta; cm = tb; }
+        var Lc = chain(cu, cw);                             // with the winding
+        /* Both chains start at u, so the ladder is opened with ONE triangle,
+           u and the first point of each. Left to the stepping rule, one chain
+           can take several steps while the other is still at u, and each of
+           those is a triangle from u to two points on u's own edge: three
+           corners on one line, area 1e-17, which the bisection after grinds
+           into points 1e-5 mm apart. (So a long edge with no cut on it, which
+           would leave nothing to open with, is laddered as a needle below.) */
+        if (Lc.length > 2) {
+          var Rc = chain(cu, cm).concat(chain(cm, cw).slice(1)); // against it
+          var gLc = fractions(allPos, Lc), gRc = fractions(allPos, Rc);
+          tri3(cu, Lc[1], Rc[1]);
+          var ic = 1, jc = 1;
+          while (ic < Lc.length - 1 || jc < Rc.length - 1) {
+            var stepLc = (jc === Rc.length - 1) ? true : (ic === Lc.length - 1) ? false : gLc[ic + 1] <= gRc[jc + 1];
+            // the last step is degenerate (both chains end at w) and skipped
+            if (stepLc) { tri3(Lc[ic], Lc[ic + 1], Rc[jc]); ic++; }
+            else { tri3(Rc[jc + 1], Rc[jc], Lc[ic]); jc++; }
+          }
+          continue;
+        }
+      }
       /* Rotate (keeping the winding) so the apex C is opposite the shortest
          edge AB: the ladder runs from that short base up the two long sides. */
-      var e0 = d2(allPos, ta, tb), e1 = d2(allPos, tb, tc), e2 = d2(allPos, tc, ta);
       var A, B, C;
       if (e0 <= e1 && e0 <= e2) { A = ta; B = tb; C = tc; }
       else if (e1 <= e2) { A = tb; B = tc; C = ta; }
@@ -684,10 +768,293 @@
              splits: mark.size };
   }
 
+  /* ----------------------------------------------------------- slivers */
+
+  /* WHY A SLIVER HAS TO GO FIRST. A Manifold boolean that cuts a long wall
+     triangle (a revolved cylinder's are its full height) leaves CAPS behind:
+     triangles 40-60 mm long whose third vertex lies a few ten-thousandths of
+     a millimetre off the long edge. Such a triangle is closed and manifold, and
+     passes every gate - but everything this file does to it puts points on
+     two of its edges at nearly the same place along its length (the zip cuts
+     each edge where the zone's sphere crosses it, and two edges that are
+     nearly one line are crossed at nearly one place; bisection halves the long
+     edge and then the short ones next to it). Two such points are as far apart
+     as the cap is high, and 7e-5 mm is closer than the 1e-4 mm every consumer
+     welds at (mesh_validate.py, NSO_Repair, this file's own weld on the next
+     call). Welded, the two become one vertex and the edges on either side of
+     it double: a closed soup in, non-manifold edges and flipped winding out,
+     with no T-junction anywhere in the topology this file built. When the
+     coordinates are close enough to round to one float32, the same thing shows
+     in the soup itself as open and non-manifold edges.
+
+     So before anything is cut, every triangle lower than `sliver` (its height
+     over its longest edge) has that longest edge FLIPPED - replaced by the edge
+     from its low vertex to the far vertex of the triangle across. That is the
+     same pair of triangles as inserting the low vertex into the long edge and
+     dropping the zero-area remainder, which is what the cap is: a T-junction
+     that happens to be within tolerance. Only vertices are reused, none move,
+     and the surface moves by at most the cap's height (the low vertex is that
+     far from the plane of the triangle across), so with `sliver` at 1e-3 mm
+     the change is a micron at most and usually a tenth of that.
+
+     A flip is made only when it RAISES the lower of the two triangles' heights
+     - a needle fan along an intersection curve would otherwise trade its long
+     edges for tiny caps along the curve and back again. It is never made when
+     the new edge already exists (that would be a non-manifold edge), or when
+     either new triangle would face away from the one it replaces. Each flip
+     strictly improves its pair, and the work list is bounded besides.
+
+     WHEN NO FLIP HELPS, THE SHORT EDGE GOES. The case this was written for -
+     a 96-segment cylinder with a 4 mm-radius branch, whose silhouette runs
+     within 0.006 mm of the cylinder's vertical edges - has slivers that no
+     flip improves: the boolean's intersection curve takes a 0.004 mm step
+     ALONG the wall's long direction, and every triangle on that step, whichever
+     way the quad is cut, is a 1e-4 mm sliver (a triangle on a 0.004 mm edge is
+     at most 0.004 x sin(angle) high, and the angle is the curve's slope).
+     So when a sliver's shortest edge is at most `sliverEdge` it is
+     COLLAPSED - the higher-numbered end joins the lower, the two triangles on
+     it go - which is a weld at that edge's length. Only when the edge is
+     interior and manifold, the link condition holds (else the collapse pinches
+     the surface into a non-manifold edge), and none of the triangles that move
+     turns over or tilts by more than 60 degrees. */
+  var SLIVER_H = 1e-3, SLIVER_E = 0.02;
+
+  // twice the area over the longest edge = the lowest altitude, in mm
+  function lowAlt(pos, a, b, c) {
+    var q = Math.max(d2(pos, a, b), d2(pos, b, c), d2(pos, c, a));
+    return q > 0 ? crossLen(pos, a, b, c) / Math.sqrt(q) : 0;
+  }
+
+  function normalOf(pos, a, b, c) {
+    var ux = pos[b * 3] - pos[a * 3], uy = pos[b * 3 + 1] - pos[a * 3 + 1], uz = pos[b * 3 + 2] - pos[a * 3 + 2];
+    var vx = pos[c * 3] - pos[a * 3], vy = pos[c * 3 + 1] - pos[a * 3 + 1], vz = pos[c * 3 + 2] - pos[a * 3 + 2];
+    return [uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx];
+  }
+
+  /* Edge surgery on a copy of an indexed mesh: flips and collapses with the
+     adjacency kept up to date, then compacted back to a plain mesh. Shared by
+     the sliver pass before refining and the weld-safe pass after it. */
+  function surgery(mesh) {
+    var V = mesh.vertCount, T = mesh.triCount, pos = mesh.pos;
+    var tri = new Int32Array(mesh.tri), t, k;
+    var dead = new Uint8Array(T);
+    // directed edge u->w -> the triangle that has it; undirected use count beside
+    var half = new Map(), count = new Map();
+    var around = new Array(V);                       // vertex -> its triangles (may hold stale ids)
+    var S = { tri: tri, dead: dead, moved: 0, flips: 0, collapses: 0, onChange: null };
+    function ek(u, w) { return u < w ? u * V + w : w * V + u; }
+    function link(tt, on) {
+      for (var e = 0; e < 3; e++) {
+        var u = tri[tt * 3 + e], w = tri[tt * 3 + (e + 1) % 3], key = ek(u, w);
+        if (on) { half.set(u * V + w, tt); count.set(key, (count.get(key) || 0) + 1); }
+        else {
+          if (half.get(u * V + w) === tt) half.delete(u * V + w);
+          var n = (count.get(key) || 0) - 1;
+          if (n > 0) count.set(key, n); else count.delete(key);
+        }
+      }
+    }
+    function has(tt, v) { return tri[tt * 3] === v || tri[tt * 3 + 1] === v || tri[tt * 3 + 2] === v; }
+    function trisOf(v) {
+      var src = around[v] || [], out = [];
+      for (var i = 0; i < src.length; i++) {
+        var tt = src[i];
+        if (!dead[tt] && has(tt, v) && out.indexOf(tt) < 0) out.push(tt);
+      }
+      around[v] = out;
+      return out;
+    }
+    function ringOf(v) {
+      var ts = trisOf(v), s = new Set();
+      for (var i = 0; i < ts.length; i++) for (var e = 0; e < 3; e++) {
+        var x = tri[ts[i] * 3 + e];
+        if (x !== v) s.add(x);
+      }
+      return s;
+    }
+    function dot(p, q) { return p[0] * q[0] + p[1] * q[1] + p[2] * q[2]; }
+    for (t = 0; t < T; t++) {
+      link(t, true);
+      for (k = 0; k < 3; k++) {
+        var vv = tri[t * 3 + k];
+        (around[vv] || (around[vv] = [])).push(t);
+      }
+    }
+    S.trisOf = trisOf;
+    S.edgeCount = function (u, w) { return count.get(ek(u, w)) || 0; };
+
+    /* Triangle t's edge u->w swapped for m-x, m being t's third vertex. Only
+       when it RAISES the lower of the two heights (`improve`), the new edge is
+       not there already, and neither new triangle faces away. */
+    S.flip = function (t, u, w, m) {
+      if (count.get(ek(u, w)) !== 2) return false;           // an open or non-manifold edge: leave it
+      var o = half.get(w * V + u);
+      if (o == null || o === t || dead[o]) return false;
+      var x = -1;
+      for (var i = 0; i < 3; i++) { var vi = tri[o * 3 + i]; if (vi !== u && vi !== w) x = vi; }
+      if (x < 0 || x === m || count.has(ek(m, x))) return false;
+      var nO = normalOf(pos, w, u, x), nT = normalOf(pos, u, w, m);
+      var ref = [nO[0] + nT[0], nO[1] + nT[1], nO[2] + nT[2]];
+      if (dot(normalOf(pos, u, x, m), ref) <= 0 || dot(normalOf(pos, x, w, m), ref) <= 0) return false;
+      var hT = lowAlt(pos, u, w, m);
+      var before = Math.min(hT, lowAlt(pos, w, u, x));
+      var after = Math.min(lowAlt(pos, u, x, m), lowAlt(pos, x, w, m));
+      if (!(after > before)) return false;
+      link(t, false); link(o, false);
+      tri[t * 3] = u; tri[t * 3 + 1] = x; tri[t * 3 + 2] = m;
+      tri[o * 3] = x; tri[o * 3 + 1] = w; tri[o * 3 + 2] = m;
+      link(t, true); link(o, true);
+      around[x].push(t); around[m].push(o);
+      // m's height over u-w (its distance off the plane of the triangle across) is how far the surface moved
+      S.moved = Math.max(S.moved, hT);
+      S.flips++;
+      if (S.onChange) { S.onChange(t); S.onChange(o); }
+      return true;
+    };
+
+    /* Edge p-r shrunk to the point p: r's triangles are p's, the two on the
+       edge go. Only when the edge is interior and manifold, the LINK CONDITION
+       holds (p and r have no common neighbour but the two apexes of the edge -
+       else the collapse pinches the surface into a non-manifold edge), and
+       none of r's triangles turns over or tilts by more than 60 degrees. */
+    S.collapse = function (p, r) {
+      if (count.get(ek(p, r)) !== 2) return false;
+      var t1 = half.get(p * V + r), t2 = half.get(r * V + p);
+      if (t1 == null || t2 == null || dead[t1] || dead[t2]) return false;
+      var apex = new Set(), i;
+      for (i = 0; i < 3; i++) {
+        var a1 = tri[t1 * 3 + i], a2 = tri[t2 * 3 + i];
+        if (a1 !== p && a1 !== r) apex.add(a1);
+        if (a2 !== p && a2 !== r) apex.add(a2);
+      }
+      if (apex.size !== 2) return false;
+      var rp = ringOf(p), rr = ringOf(r), bad = false, common = 0;
+      rr.forEach(function (x) { if (rp.has(x)) { common++; if (!apex.has(x)) bad = true; } });
+      if (bad || common !== 2) return false;
+      var ts = trisOf(r), moving = [];
+      for (i = 0; i < ts.length; i++) {
+        var tt = ts[i];
+        if (tt === t1 || tt === t2) continue;
+        var vs = [tri[tt * 3], tri[tt * 3 + 1], tri[tt * 3 + 2]];
+        var n0 = normalOf(pos, vs[0], vs[1], vs[2]);
+        var ws = vs.map(function (v) { return v === r ? p : v; });
+        var n1 = normalOf(pos, ws[0], ws[1], ws[2]);
+        if (dot(n0, n1) <= 0.5 * Math.sqrt(dot(n0, n0) * dot(n1, n1))) return false;
+        moving.push(tt);
+      }
+      link(t1, false); link(t2, false); dead[t1] = 1; dead[t2] = 1;
+      for (i = 0; i < moving.length; i++) {
+        var mt = moving[i];
+        link(mt, false);
+        for (var e = 0; e < 3; e++) if (tri[mt * 3 + e] === r) tri[mt * 3 + e] = p;
+        link(mt, true);
+        around[p].push(mt);
+      }
+      around[r] = [];
+      S.moved = Math.max(S.moved, Math.sqrt(d2(pos, p, r)));
+      S.collapses++;
+      if (S.onChange) for (i = 0; i < moving.length; i++) S.onChange(moving[i]);
+      return true;
+    };
+
+    /* Back to a plain mesh: dead triangles out, unused vertices out, the rest
+       renumbered IN ORDER (so a vertex that was older than another still is). */
+    S.result = function () {
+      if (!S.flips && !S.collapses) return mesh;
+      var used = new Uint8Array(V), nt = [], tt, kk;
+      for (tt = 0; tt < T; tt++) if (!dead[tt]) for (kk = 0; kk < 3; kk++) used[tri[tt * 3 + kk]] = 1;
+      var remap = new Int32Array(V).fill(-1), nv = 0, np = [];
+      for (var v = 0; v < V; v++) if (used[v]) { remap[v] = nv++; np.push(pos[v * 3], pos[v * 3 + 1], pos[v * 3 + 2]); }
+      for (tt = 0; tt < T; tt++) if (!dead[tt]) for (kk = 0; kk < 3; kk++) nt.push(remap[tri[tt * 3 + kk]]);
+      return { pos: new Float64Array(np), tri: new Int32Array(nt), vertCount: nv, triCount: (nt.length / 3) | 0 };
+    };
+    return S;
+  }
+
+  /* Flip, or collapse, the slivers of `mesh` away - those near enough to the
+     zone to be cut (within `reach` plus their own length; anything further
+     that the cutting still reaches is the weld-safe pass's). With no zone,
+     every sliver. Returns { mesh, flips, collapses, moved }; the mesh is the
+     input itself when nothing was done. `moved` is the furthest any surface
+     point went. */
+  function unsliver(mesh, hMax, eMax, zone, reach) {
+    var none = { mesh: mesh, flips: 0, collapses: 0, moved: 0 };
+    if (!(hMax > 0)) return none;
+    var pos = mesh.pos, T = mesh.triCount, t, work = [];
+    for (t = 0; t < T; t++) {
+      var ia = mesh.tri[t * 3], ib = mesh.tri[t * 3 + 1], ic = mesh.tri[t * 3 + 2];
+      if (!(lowAlt(pos, ia, ib, ic) < hMax)) continue;
+      if (zone) {
+        var near = reach + Math.sqrt(Math.max(d2(pos, ia, ib), d2(pos, ib, ic), d2(pos, ic, ia)));
+        if (triDist2(pos, ia, ib, ic, zone.c) > near * near) continue;
+      }
+      work.push(t);
+    }
+    if (!work.length) return none;
+    var S = surgery(mesh), tri = S.tri;
+    S.onChange = function (tt) {
+      if (!S.dead[tt] && lowAlt(pos, tri[tt * 3], tri[tt * 3 + 1], tri[tt * 3 + 2]) < hMax) work.push(tt);
+    };
+    var guard = work.length * 8 + 64, e2Max = eMax > 0 ? eMax * eMax : 0;
+    while (work.length && guard-- > 0) {
+      t = work.pop();
+      if (S.dead[t]) continue;
+      var a = tri[t * 3], b = tri[t * 3 + 1], c = tri[t * 3 + 2];
+      if (!(lowAlt(pos, a, b, c) < hMax)) continue;
+      var q0 = d2(pos, a, b), q1 = d2(pos, b, c), q2 = d2(pos, c, a);
+      // the longest edge u->w, and m across it
+      var u, w, m;
+      if (q0 >= q1 && q0 >= q2) { u = a; w = b; m = c; }
+      else if (q1 >= q2) { u = b; w = c; m = a; }
+      else { u = c; w = a; m = b; }
+      if (S.flip(t, u, w, m)) continue;
+      // the shortest edge, if it is short enough to be a weld
+      var s0, s1, qs;
+      if (q0 <= q1 && q0 <= q2) { s0 = a; s1 = b; qs = q0; }
+      else if (q1 <= q2) { s0 = b; s1 = c; qs = q1; }
+      else { s0 = c; s1 = a; qs = q2; }
+      if (!(qs <= e2Max)) continue;
+      // keep the older vertex (the lower id) where it is
+      if (!S.collapse(Math.min(s0, s1), Math.max(s0, s1))) S.collapse(Math.max(s0, s1), Math.min(s0, s1));
+    }
+    if (!S.flips && !S.collapses) return none;
+    return { mesh: S.result(), flips: S.flips, collapses: S.collapses, moved: S.moved };
+  }
+
+  /* WELD-SAFE. Whatever is left: an edge this file made that is shorter than
+     `minLen` (twice the weld tolerance) is collapsed into its older end. Two
+     vertices that close are one vertex to every consumer that welds, and a
+     weld that merges them without removing the two triangles between them is
+     exactly the doubled edge this pass exists to prevent - so they are merged
+     here, properly. It arises where no sliver is low enough to be flipped
+     away first: a boolean's fan of spokes meeting at a far corner the zone
+     reaches, 1.8e-4 rad apart, cut at the same distance from that corner.
+     Only edges with at least one end at or past `firstNew` (a vertex the
+     refinement made) are touched, and the surface moves by under `minLen`.
+     Returns { mesh, collapses, moved, left } - `left` the short edges that
+     could not be collapsed (the link condition, or a triangle turning over). */
+  function weldSafe(mesh, minLen, firstNew) {
+    var none = { mesh: mesh, collapses: 0, moved: 0, left: 0 };
+    if (!(minLen > 0)) return none;
+    var pos = mesh.pos, T = mesh.triCount, tri0 = mesh.tri, m2 = minLen * minLen, t, e, work = [];
+    for (t = 0; t < T; t++) for (e = 0; e < 3; e++) {
+      var u0 = tri0[t * 3 + e], w0 = tri0[t * 3 + (e + 1) % 3];
+      if (u0 < w0 && w0 >= firstNew && d2(pos, u0, w0) < m2) work.push(u0, w0);
+    }
+    if (!work.length) return none;
+    var S = surgery(mesh), left = 0;
+    for (var i = 0; i < work.length; i += 2) {
+      var p = work[i], r = work[i + 1];                    // p < r, r is new
+      if (S.edgeCount(p, r) !== 2) continue;               // already gone with an earlier collapse
+      if (!S.collapse(p, r) && !(p >= firstNew && S.collapse(r, p))) left++;
+    }
+    return { mesh: S.result(), collapses: S.collapses, moved: S.moved, left: left };
+  }
+
   /* ----------------------------------------------------------- refine */
 
   function stillCoarse(mesh, zone, spacing, reach2) {
-    var s2 = spacing * spacing, tri = mesh.tri, pos = mesh.pos;
+    var s2 = (spacing + FINE_SLACK) * (spacing + FINE_SLACK), tri = mesh.tri, pos = mesh.pos;
     for (var q = 0; q < mesh.triCount; q++) {
       var a = tri[q * 3], b = tri[q * 3 + 1], c = tri[q * 3 + 2];
       if ((d2(pos, a, b) > s2 || d2(pos, b, c) > s2 || d2(pos, c, a) > s2) &&
@@ -702,10 +1069,15 @@
     var margin = opts.margin != null ? +opts.margin : spacing;
     var maxPasses = opts.maxPasses != null ? (opts.maxPasses | 0) : 24;
     var maxTris = opts.maxTris != null ? (opts.maxTris | 0) : 600000;
-    var out = { mesh: mesh, splits: 0, passes: 0, capped: false, spacing: spacing, zipped: 0 };
+    var sliver = opts.sliver != null ? +opts.sliver : SLIVER_H;
+    var out = { mesh: mesh, splits: 0, passes: 0, capped: false, spacing: spacing, zipped: 0,
+                flips: 0, collapses: 0, moved: 0, closeLeft: 0 };
     if (!zone || !zone.c || !(zone.r > 0)) return out;
     var reach = zone.r + margin, reach2 = reach * reach;
-    var cur = mesh, next, pass;
+    // 0. slivers flipped or collapsed away (kept only if something is then split, below)
+    var sliverEdge = opts.sliverEdge != null ? +opts.sliverEdge : Math.min(SLIVER_E, 0.1 * spacing);
+    var uns = unsliver(mesh, sliver, sliverEdge, zone, reach);
+    var cur = uns.mesh, next, pass;
 
     // 1. needles zipped, once: only the part inside the zone is subdivided
     var zipped = zip(cur, zone, spacing, reach);
@@ -715,13 +1087,28 @@
     }
     // 2. whatever is still coarse, by longest-edge bisection
     for (pass = 0; !out.capped && pass < maxPasses; pass++) {
-      next = bisect(cur, zone, spacing, reach2, spacing, false);
+      next = bisect(cur, zone, spacing, reach2, spacing + FINE_SLACK, false);
       if (!next) break;
       if (next.triCount > maxTris) { out.capped = true; break; }
       out.splits += next.splits; out.passes = pass + 1; cur = next;
     }
     if (!out.capped && pass === maxPasses) out.capped = stillCoarse(cur, zone, spacing, reach2);
-    out.mesh = cur;
+    // 3. no two vertices this made closer than a weld would keep apart
+    var safe = { collapses: 0, moved: 0, left: 0 };
+    if (out.splits > 0) {
+      var minLen = opts.weldSafe != null ? +opts.weldSafe : 2 * (opts.weld > 0 ? opts.weld : 1e-4);
+      for (var round = 0; round < 4; round++) {
+        var ws = weldSafe(cur, minLen, uns.mesh.vertCount);
+        cur = ws.mesh; safe.collapses += ws.collapses; safe.moved = Math.max(safe.moved, ws.moved); safe.left = ws.left;
+        if (!ws.collapses) break;
+      }
+    }
+    // A zone with nothing to split hands back the mesh it was given, flips and
+    // all undone: "unchanged" means unchanged.
+    if (out.splits > 0) {
+      out.mesh = cur; out.flips = uns.flips; out.collapses = uns.collapses + safe.collapses;
+      out.moved = Math.max(uns.moved, safe.moved); out.closeLeft = safe.left;
+    }
     return out;
   }
 
@@ -742,7 +1129,8 @@
     res.report = {
       spacing: ref.spacing, splits: ref.splits, passes: ref.passes, capped: ref.capped,
       trisBefore: (rawTris.length / 9) | 0, trisAfter: ref.mesh.triCount,
-      zone: { c: zone.c.slice(), r: zone.r }
+      zone: { c: zone.c.slice(), r: zone.r },
+      slivers: ref.flips + ref.collapses, moved: ref.moved
     };
     return res;
   }
@@ -759,7 +1147,8 @@
   var API = {
     DEFAULT_SPACING: DEFAULT_SPACING,
     weld: weld, toSoup: toSoup, refine: refine, region: region,
-    triDist2: triDist2, say: say
+    triDist2: triDist2, say: say,
+    _unsliver: unsliver           // internal: the sliver pre-pass on its own, for tests
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = API;

@@ -111,8 +111,8 @@ from 6 mm sideways to 20 mm straight out land to better than 2e-10 mm. *Bend onl
 fixes `e = 0` and solves `theta` alone; *Extend only* fixes `theta = 0`.
 
 **Everything else is copied through untouched.** Not one vertex outside the limb moves
-by a bit (tested: 2,006 vertices held). Nothing is scaled, welded or deleted. The flex
-zone is densified to 1 mm first (`nso_densify.js`: 3,796 -> 4,694 triangles for a
+by a bit (tested: 1,994 vertices held). Nothing is scaled, welded or deleted. The flex
+zone is densified to 1 mm first (`nso_densify.js`: 3,796 -> 4,658 triangles for a
 prong), so the bend has vertices to bend with; the rest of the piece keeps its triangles.
 
 ## Limits, and the guards

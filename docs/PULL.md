@@ -4,7 +4,7 @@
 guards, headless) and `app-pull.js` (the pointer session), under **Shape -> Pull**.
 
 ```
-node tools/nso_pull_test.js          headless: densify, field, pins, tube, box, guards (72 checks)
+node tools/nso_pull_test.js          headless: densify, field, pins, tube, box, guards, a boolean junction (88 checks)
 node tools/nso_pull_drive_check.js   the real app at 1280x800: gesture, pins, Shift, Escape, refusals
 PULL_SHOTS=dir node tools/nso_pull_drive_check.js     screenshots elsewhere (default tools/pull-out/)
 ```
@@ -79,7 +79,7 @@ moved 2.0 mm; the grab still moves 6.000 mm.
 A coarse mesh has no vertex to take a curve: the top of a 20 mm cube is two triangles.
 Before the first drag on a region the triangles within the grab's radius (plus one
 spacing) are subdivided so **every edge is at most 0.5 mm**; it is done once, reported
-in the status line (`densified to 0.5 mm spacing (768->15222 triangles)`), and a region
+in the status line (`densified to 0.5 mm spacing (768->15052 triangles)`), and a region
 that is already fine is left alone (`already 0.5 mm fine here`). It is its own file
 because the gun will want the same subdivision, and "how fine is fine" should have one
 answer. `NSO_Densify.region(rawTris, {c, r}, {spacing})`.
@@ -97,7 +97,7 @@ sides are cut into pieces of at most 0.5 mm and the strip between them laddered;
 needles that are halves of a rectangle are laddered as one quad (the diagonal goes);
 the two long sides of a quad - and of the whole ring of quads - share their cuts so the
 rungs are square; and the cuts thin out geometrically past the zone's edge so a fine
-triangle is never beside a 20 mm one. Result on that tube: 15,222 triangles, median
+triangle is never beside a 20 mm one. Result on that tube: 15,052 triangles, median
 aspect 2.4, 90th percentile 3.75, `mesh_validate.py --gate` PASS.
 
 That last point is not cosmetic. The first zipper left the canonical checker reporting
@@ -108,6 +108,23 @@ millionth of a millimetre off-plane and which Moller's test then calls piercing.
 overlap nowhere (checked in 2D). 0 of 40 now, and `nso_pull_test.js` holds it at 0 over
 16 zones. The guard still compares to the densified mesh and not the original (below),
 because a phantom is not the pull's doing.
+
+**Slivers from a boolean.** A Manifold union that cuts a long wall triangle (Stock's
+cylinder's run its full 100 mm) leaves a fan of 30-60 mm spokes from the intersection
+curve to the wall's far corners, and caps whose third vertex is 1e-4 mm off the long
+edge. The union is closed and passes the gate, but densifying it put two vertices
+closer than the 1e-4 mm every consumer welds at, so welded the result had doubled
+edges: Limb (which densifies its flex zone with this call) came back non-manifold,
+mis-wound and self-piercing. Four things, all in `nso_densify.js`: two neighbouring
+fan spokes are no longer paired as a "rectangle" (their "long sides" were a 60 mm spoke
+and a 0.09 mm piece of curve, and the short one inherited the long one's 32 cuts); a
+cap is laddered between its long edge and the path through its third vertex, not
+fanned from its base; slivers under 1e-3 mm high near the zone are flipped or have a
+<= 0.02 mm edge collapsed first (the report's `moved` says how far the surface went);
+and any edge the refinement made that is under 2e-4 mm is collapsed into its older end
+(a fan converging on a corner the zone reaches). On a 15.42 x 100 cylinder with an
+8 mm rod at 45 degrees: 0 vertex pairs within 1e-4 (was 7), 7,074 triangles (was 39,644)
+for a 6 mm zone at 1 mm, `mesh_validate.py --gate` PASS - section 8 of `nso_pull_test.js`.
 
 ## The guards, at release, on the result
 
