@@ -4722,6 +4722,14 @@ body.sup-card-open #adjust-status { display: none; }
 #crop-card .vp-row-lift .btn { min-height: 0; padding: 10px 14px; font-size: 13px; margin-top: 6px; }
 #crop-card #btn-lift.is-armed { border-color: #ef4444; color: #fff; background: rgba(239, 68, 68, 0.25); }
 #crop-card .lift-count-line { margin: 6px 0 2px; }
+/* Lift's list: what the scan found on every surface, a Lift button on each row */
+#crop-card .lift-list { margin: 4px 0 6px; display: flex; flex-direction: column; gap: 4px; }
+#crop-card .lift-row-item { display: flex; align-items: center; gap: 6px; font-size: 11px; line-height: 1.3; color: var(--text);
+  padding: 4px 6px; border: 1px solid rgba(250, 204, 21, 0.28); border-radius: 5px; }
+#crop-card .lift-row-item.is-here { border-color: rgba(250, 204, 21, 0.7); }
+#crop-card .lift-row-text { flex: 1 1 auto; min-width: 0; }
+#crop-card .lift-row-item .lift-row-go { flex: 0 0 auto; width: auto; margin: 0; padding: 4px 10px; font-size: 11px; }
+#crop-card .lift-list-note { margin: 0; font-size: 11px; color: #94a3b8; }
 #crop-readout { font-size: 12px; margin: 8px 0; }
 #crop-readout.is-refusal { color: #f87171; }
 #crop-card .crop-shape-row .btn {

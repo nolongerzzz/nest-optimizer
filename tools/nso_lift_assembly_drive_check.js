@@ -49,6 +49,7 @@ const AF = require('./nso_lift_assembly_fixtures.js');
 const L = require('./nso_lift_plate_drive_lib.js');
 const { rawTriNear, status, readout, card, raw, plateState, pieceInfo, overlaps, added, sameSoup, hoverTri, clickTri,
         ctrlZ, waitRead, armOn, disarm, frameOn, dropPieces, selectRow } = L;
+L.setClearOfCard(true);    // Lift is in the Crop card, which stands over the left of the view (and is taller now it lists what it found)
 const C = L.makeCheck(), check = C.check;
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'nso-lift-assembly-'));
@@ -227,6 +228,7 @@ withApp(async (page, logs) => {
   const [HULL_SH, LEAF_SH] = SHELLS;
   check('the hinge hull has TWO shells (this file: hull + fixed knuckles + pin, and the moving knuckle + leaf)', SHELLS.length === 2, SHELLS.map(s => s.tris.length + ' tris').join(' + '));
   await armOn(page, hullId);
+  await page.evaluate(() => NSO_LIFT_PLATE.goSurface(null));          // Lift opens on the wall that has the leaf; this section starts from the top
   await frameDir(page, hullId, WALL_VIEW);
   const wall = wallTris(SRC, [0, 1, 0], 1, 35, -45, 20);
   const wv = await visibleTri(page, hullId, wall.slice(0, 200), false);
@@ -321,7 +323,9 @@ withApp(async (page, logs) => {
   await ctrlZ(page);
   check('one Ctrl+Z: the parent bit for bit', sameSoup(await raw(page, hullId), SRC) && (await plateState(page)).models.length === b4.models.length);
   await disarm(page);
-  const topCount = await armOn(page, hullId);
+  await armOn(page, hullId);
+  await page.evaluate(() => NSO_LIFT_PLATE.goSurface(null));
+  const topCount = (await card(page)).count;
   const top = await isl(page);
   check('the TOP face: no feature there holds the leaf, so nothing is brought along and the read is as it was', topCount === '0 features found' && top.caught === 0 && top.list.every(i => i.s !== 'ok' && i.parts === 0) && /1 can't be lifted/.test(await readout(page)), topCount + ' / ' + (await readout(page)).slice(0, 120));
   await disarm(page);

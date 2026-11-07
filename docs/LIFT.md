@@ -486,6 +486,36 @@ only where and how it is driven. `app-lift-plate.js` (`window.NSO_LIFT_PLATE`),
 `tools/nso_lift_plate_drive_lib.js` (the page helpers the four Lift drives
 share).
 
+### The list (2026-11-07)
+
+Lift used to read the **top** and nothing else until a hover or a click on the right face told it where to look: a bump
+on a side wall, or on a curve, was "0 features found" until a click beside it, and a click on a non-feature was spent
+reading the face, not lifting. Opening Lift now **scans every surface of the piece once** and **lists** what is on each:
+
+- **the top** (as before), **each flat face that is a base** (`FACE_MIN_FRAC` of the piece's surface; the side walls),
+  and **each curved surface**. Every read is the one the cursor would have asked for, cached the same way, so nothing
+  is read twice; a piece over 150,000 triangles is read on its top only (a curved read takes seconds) and the card says so.
+- **A curved surface is read from beside each small smooth patch** - across the crease at the foot of a bump. The
+  surface engine takes whatever lies *outside* the region it grows from the seed to be the features, so a seed beside
+  a bump leaves the bump the only thing outside, while a seed far off leaves the whole rest of the surface outside it
+  and reads it as "the body" (`bigger`, 0 mm). This is why a click "slightly outside the feature" used to find it and a
+  click on it, or anywhere else, did not. Heights on a curved surface are not shown (they are measured against a plane
+  through the root, which means little on a curve - the cone's pin read 132 mm).
+- **The card starts on the surface that has the feature** (the top, when it has something on it), so the count is
+  never "0 features found" over a bump that is on a wall. When features are on more than one surface the count says
+  `3 features found on 2 surfaces`.
+- **The list** (`#lift-list`, in the panel under the count): one row per liftable feature on every surface - `A dot, 2.00
+  mm high, 16.0 mm² - on the +x face` - each with its own **Lift** button, which takes the card to that surface and lifts
+  the feature from it (one Undo). Moving the mouse over a row outlines its feature when it is on the surface shown; it
+  never changes the surface, and a row that appears under a cursor at rest is not "moved over".
+- `NSO_LIFT_PLATE.scan()`, `.list()`, `.liftRow(i)` and `.goSurface(key)` are the checks' handles. `lift:list` drives it on
+  `fixtures/crop-wall/` (block, sphere, cone) and on the Barocke plate (22 features, all on the top, as before).
+
+**Still gates, not changed here** (the next step, once the list is what you want): hovering a face still makes it the
+face read; the cursor off the piece still goes back to the top; a click on a non-feature still reads the face under it
+instead of lifting; a click on a feature that is not `ok` from the face being read still reads the curved surface under
+it. Strip lifts the surface shown, not all of them. See "The verb" below.
+
 ### The verb
 
 **Crop -> Lift.** The button runs the width of the card, like CROP; pressing it opens

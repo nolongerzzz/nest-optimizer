@@ -494,15 +494,241 @@ var NSO_LIFT_PLATE = (function () {
     return detectSoup(m.rawTris, viewOf(p));
   }
 
+
+  // =========================================================================
+  // The scan: every surface of the piece, read once, listed together
+  // =========================================================================
+  /* Lift used to read the top and nothing else until the cursor or a click told it which face to read, so a bump on
+     a wall or on a curve was "0 features found" until a click beside it. Opening Lift now reads EVERY surface of the
+     piece once - the top, each flat face that is a base (FACE_MIN_FRAC of the piece's surface), each curved surface
+     (a smooth patch that is on no flat face) - and the card LISTS what each holds. Each read is the one the cursor
+     would have asked for, cached the same way, so nothing is read twice. The card starts on the surface that has
+     something on it (the top when it does), and a row's Lift button lifts its feature from whichever surface it is on. */
+
+  var SCAN_MAX_TRIS = 150000;               // a bigger piece is read on its top only: a curved read takes seconds
+  var SMOOTH_DEG = 30;                      // a curved surface runs while its triangles bend less than this
+  var SCAN_MAX_READS = 12;                  // curved reads a scan makes: each is a seed beside a small smooth patch
+  var scanMemo = new WeakMap();             // soup -> { key, scan }
+  var scan = null;                          // the target's: { bases: [{ key, label, face, D }], partial }
+  var rows = [];                            // the list on the card: [{ base, id, I, text }]
+
+  /** A plane's normal, in words: the piece's own +x / -y / +z face, else the nearest axis. */
+  function axisWords(n) {
+    var k = 0;
+    for (var i = 1; i < 3; i++) if (Math.abs(n[i]) > Math.abs(n[k])) k = i;
+    return (n[k] < 0 ? '−' : '+') + 'xyz'[k];
+  }
+
+  /** The smooth patches of the triangles in no flat face, and where they meet: patches are grown over shared edges while
+      the surface bends less than SMOOTH_DEG (a crease ends one); `meets` are the triangle pairs across a crease, a small
+      patch's side and the bigger patch's. -> { patches: [{ tris, area }], patchOf, meets: [{ s, q, ps, pq }] } */
+  function smoothPatches(soup, skip) {
+    var Q = 1e4, nt = Math.floor(soup.length / 9), vmap = new Map(), tv = new Array(nt), nrm = new Array(nt), area = new Float64Array(nt);
+    function vid(x, y, z) {
+      var k = Math.round(x * Q) + '_' + Math.round(y * Q) + '_' + Math.round(z * Q), i = vmap.get(k);
+      if (i === undefined) { i = vmap.size; vmap.set(k, i); }
+      return i;
+    }
+    var edges = new Map();
+    for (var t = 0; t < nt; t++) {
+      var o = t * 9;
+      var a = vid(soup[o], soup[o + 1], soup[o + 2]), b = vid(soup[o + 3], soup[o + 4], soup[o + 5]), c = vid(soup[o + 6], soup[o + 7], soup[o + 8]);
+      var ux = soup[o + 3] - soup[o], uy = soup[o + 4] - soup[o + 1], uz = soup[o + 5] - soup[o + 2];
+      var vx = soup[o + 6] - soup[o], vy = soup[o + 7] - soup[o + 1], vz = soup[o + 8] - soup[o + 2];
+      var cx = uy * vz - uz * vy, cy = uz * vx - ux * vz, cz = ux * vy - uy * vx, L = Math.hypot(cx, cy, cz);
+      tv[t] = [a, b, c]; area[t] = L / 2;
+      nrm[t] = L > 1e-12 ? [cx / L, cy / L, cz / L] : null;
+      if (!nrm[t]) continue;
+      for (var e = 0; e < 3; e++) {
+        var u = tv[t][e], w = tv[t][(e + 1) % 3], key = u < w ? u + '_' + w : w + '_' + u, l = edges.get(key);
+        if (!l) { l = []; edges.set(key, l); }
+        l.push(t);
+      }
+    }
+    function nbrs(t) {
+      var out = [];
+      for (var e2 = 0; e2 < 3; e2++) {
+        var u2 = tv[t][e2], w2 = tv[t][(e2 + 1) % 3], l2 = edges.get(u2 < w2 ? u2 + '_' + w2 : w2 + '_' + u2) || [];
+        for (var q = 0; q < l2.length; q++) if (l2[q] !== t && !skip[l2[q]] && nrm[l2[q]]) out.push(l2[q]);
+      }
+      return out;
+    }
+    var cosS = Math.cos(SMOOTH_DEG * Math.PI / 180), patchOf = new Int32Array(nt).fill(-1), patches = [];
+    for (var s0 = 0; s0 < nt; s0++) {
+      if (patchOf[s0] >= 0 || skip[s0] || !nrm[s0]) continue;
+      var id = patches.length, stack = [s0], tris = [], total = 0;
+      patchOf[s0] = id;
+      while (stack.length) {
+        var cur = stack.pop();
+        tris.push(cur); total += area[cur];
+        nbrs(cur).forEach(function (nb) {
+          if (patchOf[nb] >= 0) return;
+          if (nrm[nb][0] * nrm[cur][0] + nrm[nb][1] * nrm[cur][1] + nrm[nb][2] * nrm[cur][2] < cosS) return;
+          patchOf[nb] = id; stack.push(nb);
+        });
+      }
+      patches.push({ tris: tris, area: total });
+    }
+    var meets = [];
+    for (var t2 = 0; t2 < nt; t2++) {
+      if (patchOf[t2] < 0) continue;
+      nbrs(t2).forEach(function (nb) {
+        var ps = patchOf[t2], pq = patchOf[nb];
+        if (pq >= 0 && pq !== ps && patches[pq].area > patches[ps].area) meets.push({ s: t2, q: nb, ps: ps, pq: pq });
+      });
+    }
+    return { patches: patches, patchOf: patchOf, meets: meets };
+  }
+
+  /** Every surface of `soup` read once: { bases: [{ key, label, face, D }], partial }. `face` is what readTarget takes
+      (null: the top). Memoised per soup and view; the reads under it are cached by detectSoup / detectFace / detectSurface. */
+  function scanSoup(soup, view) {
+    var vk = nkey(view), hit = soup && scanMemo.get(soup);
+    if (hit && hit.key === vk) {                              // the same scan again: every read in it is the cache's
+      return { partial: hit.scan.partial, bases: hit.scan.bases.map(function (b) { return Object.assign({}, b, { D: Object.assign({}, b.D, { cached: true }) }); }) };
+    }
+    var nt = Math.floor(soup.length / 9), bases = [], partial = nt > SCAN_MAX_TRIS;
+    bases.push({ key: null, label: 'the top', face: null, D: detectSoup(soup, view) });
+    if (!partial) {
+      var P = planesOf(soup), cosUp = Math.cos(UP_DEG * Math.PI / 180), onFace = new Uint8Array(nt), done = new Set();
+      P.groups.forEach(function (g, nk) {
+        g.bins.forEach(function (b, k) {
+          var key = nk + '|' + k, pl = planeByKey(soup, key);
+          if (!pl || pl.area < FACE_MIN_FRAC * P.total) return;
+          b.tris.forEach(function (t) { onFace[t] = 1; });
+          if (g.n[0] * view[0] + g.n[1] * view[1] + g.n[2] * view[2] >= cosUp) return;      // the top is read above
+          if (done.has(nk + '|' + (k - 1)) || done.has(nk + '|' + (k + 1))) return;          // the same plane, a bin over
+          done.add(key);
+          var f = { key: key, n: pl.n, area: pl.area };
+          bases.push({ key: key, label: 'the ' + axisWords(pl.n) + ' face', face: f, D: detectFace(soup, f) });
+        });
+      });
+      /* A curved surface is read from the surface BESIDE each small smooth patch: the engine takes what lies outside the
+         region it grows from the seed to be the features, so a seed beside a bump leaves the bump the only thing outside,
+         and a seed far off leaves the whole rest of the surface outside it ("the body", not a detail). A bump's foot is a
+         crease, so each small patch is a candidate; its read is kept when it stands out of that surface as a feature. */
+      var sp = smoothPatches(soup, onFace), tried = new Map(), reads = 0;
+      sp.meets.forEach(function (mt) {
+        var key = mt.ps + '>' + mt.pq, n = tried.get(key) || 0;
+        if (n < 0 || n >= 4 || reads >= SCAN_MAX_READS) return;
+        tried.set(key, n + 1);                                   // up to four seeds round each foot, until one finds it
+        if (sp.patches[mt.ps].tris.length < 4) return;
+        var already = bases.some(function (b) { var A2 = b.surfFor === key && b.D && b.D.A; return !!A2; });
+        if (already) { tried.set(key, -1); return; }
+        var f = faceOfTri(soup, mt.q, view, true);
+        if (!f || !f.surf) return;
+        reads++;
+        var D2 = detectSurface(soup, f), A3 = D2 && D2.ok ? D2.A : null;
+        if (!A3 || A3.engine !== 'surface') return;
+        var id = A3.islandOf[mt.s];
+        if (id < 0 || A3.islands[id].status !== 'ok') return;
+        // the same feature found from another foot is one feature: the first read of it stands
+        var dup = bases.some(function (b) { var A4 = b.D && b.D.ok ? b.D.A : null; return A4 && A4 !== A3 && A4.engine === 'surface' && A4.islandOf[mt.s] >= 0 && A4.islands[A4.islandOf[mt.s]].status === 'ok'; });
+        if (dup) { tried.set(key, -1); return; }
+        bases.push({ key: f.key, label: 'a curved surface', face: f, D: D2, surfFor: key });
+        tried.set(key, -1);
+      });
+    }
+    var out = { bases: bases, partial: partial };
+    scanMemo.set(soup, { key: vk, scan: out });
+    return out;
+  }
+
+  /** The list: one row per liftable feature on every surface read, with the words for it. */
+  function buildRows() {
+    var out = [];
+    if (!scan) return out;
+    scan.bases.forEach(function (b) {
+      var A2 = b.D && b.D.ok ? b.D.A : null;
+      if (!A2) return;
+      offered(A2, minH).forEach(function (id) {
+        var I = A2.islands[id], what = WORDS[I.group] ? WORDS[I.group][0] : 'feature';
+        // a curved surface's height is measured against a plane through the root, which means little on a curve: not shown there
+        out.push({ base: b, id: id, I: I, text: 'A ' + what + (b.face && b.face.surf ? ', ' : ', ' + f2(I.heightMm) + ' mm high, ') + I.areaMm2.toFixed(1) + ' mm²' +
+          (I.partCount ? ', with ' + capturedWords(I.partCount) : '') + ' — on ' + b.label });
+      });
+    });
+    return out;
+  }
+
+  function sameFace(a, b) { return (a ? a.key : null) === (b ? b.key : null); }
+
+  /** Point the card at a surface of the scan (the face the rest of the card reads). */
+  function goBase(b) {
+    if (!b || sameFace(b.face, face)) return false;
+    return setFace(b.face);
+  }
+
+  /** The surface to start on: the top when it has something on it, else the one with the most. */
+  function startBase(sc) {
+    var best = null, bestN = 0;
+    sc.bases.forEach(function (b) {
+      var n = b.D && b.D.ok ? offered(b.D.A, minH).length : 0;
+      if (n > bestN) { best = b; bestN = n; }
+      if (b.key === null && n > 0) { best = b; bestN = Infinity; }
+    });
+    return best;
+  }
+
+  var listSig = '';
+  function renderList() {
+    var box = $('lift-list');
+    if (!box) return;
+    rows = armed && targetId != null && !SH() ? buildRows() : [];
+    var cant = 0;
+    if (armed && scan) scan.bases.forEach(function (b) { if (b.D && b.D.ok) cant += groups(b.D.A, minH).cant; });
+    var sig = rows.map(function (r) { return r.base.key + ':' + r.id + ':' + r.text; }).join('|') + '#' + cant + '#' + (scan && scan.partial ? 1 : 0) + '#' + (face ? face.key : '') + '#' + minH;
+    if (!armed || targetId == null || SH() || (!rows.length && !(scan && scan.partial))) { box.hidden = true; if (listSig !== '') { box.innerHTML = ''; listSig = ''; } return; }
+    box.hidden = false;
+    if (sig === listSig) return;
+    listSig = sig;
+    box.innerHTML = '';
+    rows.forEach(function (r, i) {
+      var d = document.createElement('div');
+      d.className = 'lift-row-item' + (sameFace(r.base.face, face) ? ' is-here' : '');
+      d.setAttribute('data-i', String(i));
+      var t = document.createElement('span'); t.className = 'lift-row-text'; t.textContent = r.text;
+      var b = document.createElement('button'); b.type = 'button'; b.className = 'btn btn-secondary lift-row-go'; b.setAttribute('data-i', String(i)); b.textContent = 'Lift';
+      b.title = 'Lift this feature off ' + r.base.label + ' as a piece of its own. One Undo puts it back.';
+      d.appendChild(t); d.appendChild(b); box.appendChild(d);
+    });
+    if (scan && scan.partial) {
+      var pn = document.createElement('p'); pn.className = 'lift-list-note'; pn.textContent = 'A big piece: only its top was read.'; box.appendChild(pn);
+    }
+  }
+
+  /** The cursor moving over a row outlines its feature - when it is on the surface the card is showing. Moving over a row
+      never changes the surface (only its Lift button does), and a row that appears under a cursor at rest is not "moved over". */
+  var previewed = -1;
+  function previewRow(i) {
+    var r = rows[i];
+    if (i === previewed || !r || busy || stripOpen) return;
+    previewed = i;
+    if (!sameFace(r.base.face, face)) return;
+    setHover(r.id);
+  }
+
+  /** A row's Lift: the card goes to that surface, and the feature lifts from it. */
+  function liftRow(i) {
+    var r = rows[i];
+    if (!r || busy) return { ok: false, reason: 'no such row' };
+    goBase(r.base);
+    return lift([r.id], 'list');
+  }
+
   /** Point the card at a piece: read it (or its cached read) and say so. */
   function target(id) {
     var m = modelOf(id), p = placedOf(id);
     clearHover(); pending = new Set(); closeStrip(true);
     face = null;
     var why = refusalFor(m, p);
-    if (why) { targetId = null; D = null; draw(); sync(); return fail(why); }
+    if (why) { targetId = null; D = null; scan = null; draw(); sync(); return fail(why); }
     targetId = id;
-    D = readTarget(m, p);
+    scan = scanFor(m, p);
+    var st = scan ? startBase(scan) : null;
+    if (st) face = st.face;                                   // start where something is: the top when it has something on it
+    var b0 = scan && scan.bases.find(function (b) { return sameFace(b.face, face); });
+    D = b0 && b0.D && b0.D.ok ? b0.D : readTarget(m, p);      // the scan's own read of it, when it has one (a first read stays a first read)
     syncSlider();
     draw(); sync();
     if (!D.ok) return fail(D.reason);
@@ -511,12 +737,19 @@ var NSO_LIFT_PLATE = (function () {
     return { ok: true, count: offered(A(), minH).length, cached: D.cached, ms: D.ms };
   }
 
+  /** The scan of the target, or null when it is read as shells (no height map there). */
+  function scanFor(m, p) {
+    if (!m || !m.rawTris || shellRead(m.rawTris).shell) return null;
+    try { return scanSoup(m.rawTris, viewOf(p)); } catch (err) { console.error('[lift]', err); return null; }
+  }
+
   /** Re-read the target if its soup changed (a lift, an Undo, any edit). */
   function refresh() {
     if (!armed || targetId == null) { draw(); sync(); return; }
     var m = modelOf(targetId), p = placedOf(targetId);
-    if (!m || !p) { targetId = null; D = null; face = null; clearHover(); draw(); sync(); return; }
+    if (!m || !p) { targetId = null; D = null; face = null; scan = null; clearHover(); draw(); sync(); return; }
     if (D && D.lazy && D.soup === m.rawTris) { draw(); sync(); return; }       // still the piece a shell came off: read on the next hover
+    scan = scanFor(m, p);
     D = readTarget(m, p);
     if (hoverId >= 0 && !(A() && A().islands[hoverId])) hoverId = -1;
     syncSlider(); draw(); sync();
@@ -586,11 +819,16 @@ var NSO_LIFT_PLATE = (function () {
     if (panel) panel.hidden = !armed;
     var a = A(), n = offered(a, minH).length, asm = armed && targetId != null && D && D.ok ? assemblyWords(a, minH) : '';
     var c = $('lift-count');
+    var all = 0, surfaces = 0;
+    if (armed && scan) scan.bases.forEach(function (b) { var k = b.D && b.D.ok ? offered(b.D.A, minH).length : 0; all += k; if (k) surfaces++; });
+    var onMany = surfaces > 1 && all > n;                      // features on more than one surface: the count is of them all
     if (c) c.textContent = !armed || targetId == null ? '—' : D && D.lazy ? 'not read yet' : !D || !D.ok ? 'nothing read' : SH() ? SH().S.parts + ' shells found' :
+      onMany ? all + ' feature' + (all === 1 ? '' : 's') + ' found on ' + surfaces + ' surfaces' :
       n + ' feature' + (n === 1 ? '' : 's') + ' found' + (asm ? ' \u2014 ' + asm : '');
     var sb = $('btn-lift-strip');
     if (sb) sb.disabled = !(armed && n && !busy);
     syncStrip();
+    renderList();
     var r = $('lift-readout');
     if (r && armed && !busy && lastMsg !== r.textContent) r.textContent = lastMsg || readout();
   }
@@ -633,7 +871,7 @@ var NSO_LIFT_PLATE = (function () {
     armed = on;
     if (!armed) {
       clearHover(); pending = new Set(); closeStrip(true);
-      targetId = null; D = null; face = null;
+      targetId = null; D = null; face = null; scan = null;
       draw(); sync();
       say('Lift off.');
       return armed;
@@ -1360,6 +1598,13 @@ var NSO_LIFT_PLATE = (function () {
       card.dataset.nsoLiftWired = '1';
       card.addEventListener('toggle', function () { if (!card.open && armed) setArmed(false); });
     }
+    var listBox = $('lift-list');
+    if (listBox && listBox.dataset.wired !== '1') {
+      listBox.dataset.wired = '1';
+      listBox.addEventListener('click', function (e) { var b = e.target && e.target.closest && e.target.closest('.lift-row-go'); if (b) liftRow(+b.getAttribute('data-i')); });
+      listBox.addEventListener('mousemove', function (e) { var d = e.target && e.target.closest && e.target.closest('.lift-row-item'); if (d) previewRow(+d.getAttribute('data-i')); });
+      listBox.addEventListener('mouseleave', function () { previewed = -1; });
+    }
     bind('btn-lift-strip', 'click', function () { openStrip(); });
     bind('btn-lift-strip-go', 'click', function () { confirmStrip(); });
     bind('btn-lift-strip-cancel', 'click', function () { closeStrip(); });
@@ -1399,6 +1644,12 @@ var NSO_LIFT_PLATE = (function () {
     analysis: A,
     detection: function () { return D ? { ok: D.ok, cached: D.cached, ms: D.ms, seed: D.seed, reason: D.reason } : null; },
     offered: function () { return offered(A(), minH); },
+    /* The list: what the scan found on every surface of the target - [{ surface, id, text }] - and a row's Lift. */
+    scan: function () { return scan ? { partial: scan.partial, surfaces: scan.bases.map(function (b) { return { label: b.label, key: b.key, features: b.D && b.D.ok ? offered(b.D.A, minH).length : 0, ok: !!(b.D && b.D.ok) }; }) } : null; },
+    list: function () { return buildRows().map(function (r) { return { surface: r.base.label, id: r.id, text: r.text, here: sameFace(r.base.face, face) }; }); },
+    liftRow: function (i) { rows = buildRows(); return liftRow(i); },
+    /* Point the card at a surface of the scan: null is the top, else the key the scan lists (see scan()). */
+    goSurface: function (key) { var b = scan && scan.bases.find(function (x) { return x.key === (key == null ? null : key); }); return b ? (goBase(b) || true) : false; },
     count: function () { return offered(A(), minH).length; },
     setMinHeight: setMinHeight,
     minHeight: function () { return minH; },

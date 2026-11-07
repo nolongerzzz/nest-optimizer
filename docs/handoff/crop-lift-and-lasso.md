@@ -38,3 +38,10 @@ Branch `claude-wip`. Full write-up: **`docs/CROP.md`, "The card"**; Lift's side 
   triangles) or on the cone's slope next to the pin still drew a line on a sliver. Now a patch is curved when it is under
   1% of the piece's surface and over half its border bends away by under 20 degrees - every triangle of the sphere and
   the cone's slope is refused, only the cone's base and the pin's flat end are walls.
+- **Lift's list** (2026-11-07): opening Lift scans every surface (top, each flat face that is a base, each curved surface)
+  once and lists what each holds, with a Lift button per row; the card starts on the surface that has the feature, so a bump
+  on a wall or a curve is no longer "0 features found". A curved surface is read from beside each small smooth patch: the
+  surface engine takes what lies outside its region to be the features, so only a seed beside a bump finds it (the cause of
+  "click slightly outside and it finds it"). New `lift:list`; `lift:any-face`, `lift:assembly` and `lift:plate` updated for the
+  new start (they put the card on the top first / expect the scan's cached reads). The gates that remain (hover reads
+  faces, off-piece resets to the top, clicks spent reading faces, Strip is per surface) are listed in docs/LIFT.md.
