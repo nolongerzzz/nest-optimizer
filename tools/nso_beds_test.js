@@ -87,7 +87,7 @@ vm.runInContext([
   PLATE_CONSTS,
   ...['updateUndoBtn', 'nsoGeometriesNamed', 'nsoReleaseGeometries', 'nsoPoseBakeGeometries', 'nsoLeavingGeometries', 'nsoDropRedo',
     'pushUndo', 'undoLast', 'undoLastStep', 'nsoCopyFields', 'nsoWorldFingerprint', 'nsoWorldSnapshot',
-    'modelIsOnPlate', 'modelsOnPlate', 'clearPlaced', 'clearDisplayMeshes', 'clearPlateOnly', 'clearSelectionOutline', 'selectPlaced',
+    'modelIsOnPlate', 'modelsOnPlate', 'clearPlaced', 'clearDisplayMeshes', 'nsoPlatesInPlay', 'clearPlateOnly', 'clearSelectionOutline', 'selectPlaced',
     'reindexPlacedMeshes', 'applyPlacedXZ', 'restoreMeshY', 'setPointerFromEvent', 'endMoveDrag',
     'getCurrentPlate', 'buildPlateGrid', 'disposePlateGrid', 'plateGridNow', 'plateGridAutoActive', 'plateGridWantsVisible',
     'applyPlateGridVisibility', 'plateGridNeverRaycast', 'buildPlateMesh', 'framePlateHome', 'nsoCtxMenuRefresh']
