@@ -2204,6 +2204,273 @@ function NSO_wheelOpenSoft(piece, opts) {
   return g;
 }
 
+/* ------------------------------------------------------------ 7k. PUTTING A PIECE BACK ON THE WHEEL
+
+   A piece that has been baked is just a mesh. If it was a solid of revolution it can be put back: cut it with a plane
+   through its axis, and the cut IS the meridian the wheel works with.
+
+     axis      the vertical through the middle of the footprint (the wheel's own pieces have it at x = y = 0)
+     the cut   the mesh cut by the half-plane at a handful of angles, each a polyline from the axis at the foot to the axis
+               at the top (or the floor). The plane is a hair off any meridian so it passes through the ring vertices
+               instead of along their edges - the radii are the mesh's own, not a chord's short of them
+     round?    the cuts are laid on top of each other; if the outside differs between angles by more than a few hundredths
+               of the radius it is not round, and says by how much and where
+     split     a solid is one outline. A vessel is the outside up to the rim and the inside from the floor to the rim; the
+               rim is the flat across the top (two points at the top height) or the short chord across the wall at the top
+     overhang  both walls must rise: a lip rolled back under itself is a profile the wheel cannot hold, and is refused by name
+     rim       the wheel needs a rim as wide as the nozzle floor; a rounded or knife-edge one is cut down to where it is
+
+   The result is a piece with `ops: ['loaded']` and the clay it has, ready to sit under a recipe (NSO_wheelRecipeOn). Pure.
+   Round trip on the wheel's own pieces: the outside comes back to within a micron and the volume exactly (the analytic one). */
+var NSO_WHEEL_RELATHE_ANGLES = 8;
+
+/* The half-plane cut at angle theta about (cx, cy): the segments of the surface in the plane, as [r0, z0, r1, z1], r >= 0. */
+function NSO_wheelCutSegments(tris, cx, cy, theta) {
+  var dx = Math.cos(theta), dy = Math.sin(theta), nx = -dy, ny = dx;
+  var nT = (tris.length / 9) | 0, segs = [], t, k;
+  var X = [0, 0, 0], Y = [0, 0, 0], Z = [0, 0, 0], D = [0, 0, 0];
+  for (t = 0; t < nT; t++) {
+    var o = t * 9;
+    for (k = 0; k < 3; k++) {
+      X[k] = tris[o + 3 * k]; Y[k] = tris[o + 3 * k + 1]; Z[k] = tris[o + 3 * k + 2];
+      D[k] = (X[k] - cx) * nx + (Y[k] - cy) * ny;
+      if (D[k] === 0) D[k] = 1e-12;
+    }
+    var p0 = D[0] > 0, p1 = D[1] > 0, p2 = D[2] > 0;
+    if (p0 === p1 && p1 === p2) continue;
+    var pts = [];
+    for (k = 0; k < 3; k++) {
+      var a = k, b = (k + 1) % 3;
+      if ((D[a] > 0) !== (D[b] > 0)) {
+        var u = D[a] / (D[a] - D[b]);
+        var px = X[a] + u * (X[b] - X[a]), py = Y[a] + u * (Y[b] - Y[a]), pz = Z[a] + u * (Z[b] - Z[a]);
+        pts.push((px - cx) * dx + (py - cy) * dy, pz);
+      }
+    }
+    if (pts.length !== 4) continue;
+    var s0 = pts[0], z0 = pts[1], s1 = pts[2], z1 = pts[3];
+    if (s0 < 0 && s1 < 0) continue;
+    if (s0 < 0) { var w0 = (0 - s0) / (s1 - s0); z0 = z0 + w0 * (z1 - z0); s0 = 0; }
+    else if (s1 < 0) { var w1 = (0 - s1) / (s0 - s1); z1 = z1 + w1 * (z0 - z1); s1 = 0; }
+    segs.push([s0, z0, s1, z1]);
+  }
+  return segs;
+}
+
+/* Join segments end to end into the one outline. Endpoints within `q` of each other are one point (the plane passes a
+   hair from the ring vertices, so every vertex is met twice, a few thousandths of a millimetre apart). Returns
+   { chain: [{r, z}], covered } - covered is the fraction of the cut's length the chain accounts for - or null. */
+function NSO_wheelChainSegments(segs, q) {
+  var cell = {}, nodes = [];
+  function node(r, z) {
+    var ci = Math.floor(r / q), cj = Math.floor(z / q), di, dj, list, i;
+    for (di = -1; di <= 1; di++) for (dj = -1; dj <= 1; dj++) {
+      list = cell[(ci + di) + ',' + (cj + dj)];
+      if (!list) continue;
+      for (i = 0; i < list.length; i++) if (Math.abs(list[i].r - r) <= q && Math.abs(list[i].z - z) <= q) return list[i];
+    }
+    var nd = { r: r, z: z, adj: [], seen: false };
+    (cell[ci + ',' + cj] = cell[ci + ',' + cj] || []).push(nd);
+    nodes.push(nd);
+    return nd;
+  }
+  var total = 0, i;
+  for (i = 0; i < segs.length; i++) {
+    var a = node(segs[i][0], segs[i][1]), b = node(segs[i][2], segs[i][3]);
+    if (a === b) continue;
+    if (a.adj.indexOf(b) < 0) a.adj.push(b);
+    if (b.adj.indexOf(a) < 0) b.adj.push(a);
+    total += Math.hypot(segs[i][2] - segs[i][0], segs[i][3] - segs[i][1]);
+  }
+  /* the ends are the nodes with one neighbour; start at the lowest */
+  var start = null;
+  for (i = 0; i < nodes.length; i++) if (nodes[i].adj.length === 1 && (start === null || nodes[i].z < start.z)) start = nodes[i];
+  if (!start) return null;
+  var chain = [], cur = start, prev = null, len = 0;
+  while (cur) {
+    cur.seen = true;
+    chain.push({ r: cur.r, z: cur.z });
+    var best = null, bestTurn = Infinity;
+    for (i = 0; i < cur.adj.length; i++) {
+      var nb = cur.adj[i];
+      if (nb.seen) continue;
+      var turn = 0;
+      if (prev) {
+        var a1 = Math.atan2(cur.z - prev.z, cur.r - prev.r), a2 = Math.atan2(nb.z - cur.z, nb.r - cur.r);
+        turn = Math.abs(a2 - a1); if (turn > Math.PI) turn = 2 * Math.PI - turn;
+      }
+      if (turn < bestTurn) { bestTurn = turn; best = nb; }
+    }
+    if (best) len += Math.hypot(best.r - cur.r, best.z - cur.z);
+    prev = cur; cur = best;
+  }
+  return { chain: chain, covered: total > 0 ? len / total : 0 };
+}
+
+/* Fewer points on a smooth outline without leaving it by more than `tol`. */
+function NSO_wheelSimplify(pts, tol) {
+  if (pts.length < 3) return pts;
+  var keep = new Array(pts.length), stack = [[0, pts.length - 1]], i;
+  for (i = 0; i < pts.length; i++) keep[i] = false;
+  keep[0] = keep[pts.length - 1] = true;
+  while (stack.length) {
+    var seg = stack.pop(), a = pts[seg[0]], b = pts[seg[1]], dmax = 0, imax = -1;
+    var dr = b.r - a.r, dz = b.z - a.z, L = Math.hypot(dr, dz);
+    for (i = seg[0] + 1; i < seg[1]; i++) {
+      var d = L > 0 ? Math.abs((pts[i].r - a.r) * dz - (pts[i].z - a.z) * dr) / L : Math.hypot(pts[i].r - a.r, pts[i].z - a.z);
+      if (d > dmax) { dmax = d; imax = i; }
+    }
+    if (dmax > tol && imax > 0) { keep[imax] = true; stack.push([seg[0], imax], [imax, seg[1]]); }
+  }
+  return pts.filter(function (p, k) { return keep[k]; });
+}
+
+/* The outside's radius at height z on a polyline (the largest, where it crosses more than once). */
+function NSO_wheelMaxRadiusAt(chain, z) {
+  var best = null;
+  for (var i = 0; i + 1 < chain.length; i++) {
+    var a = chain[i], b = chain[i + 1];
+    if ((a.z - z) * (b.z - z) > 0) continue;
+    var r = Math.abs(b.z - a.z) < 1e-12 ? Math.max(a.r, b.r) : a.r + (b.r - a.r) * (z - a.z) / (b.z - a.z);
+    if (best === null || r > best) best = r;
+  }
+  return best;
+}
+
+/* tris: a flat triangle soup, z up. opts: nozzle, segments, tolerance (mm of roundness allowed, default the larger of
+   0.3 mm and 0.6% of the radius). Returns { ok, piece, report } or { ok: false, reason }. */
+function NSO_wheelRelathe(tris, opts) {
+  opts = opts || {};
+  var nT = tris && tris.length ? (tris.length / 9) | 0 : 0, i;
+  if (nT < 12) return { ok: false, reason: 'that piece has no surface to read (' + nT + ' triangles)' };
+  var xmin = Infinity, xmax = -Infinity, ymin = Infinity, ymax = -Infinity, zmin = Infinity, zmax = -Infinity;
+  for (i = 0; i < tris.length; i += 3) {
+    var x = tris[i], y = tris[i + 1], z = tris[i + 2];
+    if (x < xmin) xmin = x; if (x > xmax) xmax = x;
+    if (y < ymin) ymin = y; if (y > ymax) ymax = y;
+    if (z < zmin) zmin = z; if (z > zmax) zmax = z;
+  }
+  var cx = (xmin + xmax) / 2, cy = (ymin + ymax) / 2, H = zmax - zmin;
+  var rBox = Math.max(xmax - xmin, ymax - ymin) / 2;
+  if (!(H > 0.5) || !(rBox > 0.5)) return { ok: false, reason: 'that piece is too small to put on the wheel' };
+  var q = Math.max(1e-3, 2e-4 * Math.max(H, 2 * rBox));
+  var nAng = NSO_WHEEL_RELATHE_ANGLES, cuts = [], j;
+  for (j = 0; j < nAng; j++) {
+    var segs = NSO_wheelCutSegments(tris, cx, cy, (2 * Math.PI * j / nAng) + 1e-4 + 0.0137 * j);
+    var ch = NSO_wheelChainSegments(segs, q);
+    if (!ch || ch.chain.length < 3) return { ok: false, reason: 'its section through the axis is not one clean outline - it is not a single solid of revolution' };
+    if (ch.covered < 0.97) return { ok: false, reason: 'its section through the axis is broken into more than one outline (' + Math.round(ch.covered * 100) + '% joined) - a hole through the axis, a second cavity or a loose part is not something the wheel can hold' };
+    cuts.push(ch.chain);
+  }
+  /* round? the outside at 48 heights, every angle against every other */
+  var dev = 0, devAt = 0, rMax = 0;
+  for (i = 0; i <= 48; i++) {
+    var zz = zmin + H * (0.002 + 0.996 * i / 48), lo = Infinity, hi = -Infinity, okAll = true;
+    for (j = 0; j < nAng; j++) {
+      var rr = NSO_wheelMaxRadiusAt(cuts[j], zz);
+      if (rr === null) { okAll = false; break; }
+      if (rr < lo) lo = rr; if (rr > hi) hi = rr;
+    }
+    if (!okAll) continue;
+    if (hi > rMax) rMax = hi;
+    if (hi - lo > dev) { dev = hi - lo; devAt = zz - zmin; }
+  }
+  var tol = (typeof opts.tolerance === 'number' && opts.tolerance > 0) ? opts.tolerance : Math.max(0.3, 0.006 * rMax);
+  if (dev > tol) {
+    return { ok: false, deviation: dev,
+      reason: 'it is not round about its vertical axis: the outside differs by ' + dev.toFixed(2) + ' mm between angles ' +
+        devAt.toFixed(1) + ' mm up (the wheel allows ' + tol.toFixed(2) + ' mm) - stand it upright, or it is not a thrown shape' };
+  }
+  /* the section nearest the vertices: the one that encloses the most */
+  var bestJ = 0, bestA = -1;
+  for (j = 0; j < nAng; j++) {
+    var c = cuts[j], area = 0;
+    for (i = 0; i + 1 < c.length; i++) area += 0.5 * (c[i].r * c[i + 1].z - c[i + 1].r * c[i].z);
+    area = Math.abs(area);
+    if (area > bestA) { bestA = area; bestJ = j; }
+  }
+  var chain = cuts[bestJ];
+  var axisTol = Math.max(2 * q, 0.02);
+  if (chain[0].r > axisTol || chain[chain.length - 1].r > axisTol) {
+    return { ok: false, reason: 'its outline does not meet the axis at both ends - a hole through the middle (a ring or a pipe) is not something the wheel can throw' };
+  }
+  chain[0].r = 0; chain[chain.length - 1].r = 0;
+  if (chain.length > 360) chain = NSO_wheelSimplify(chain, Math.max(0.01, H * 1e-4));
+
+  /* closed, or a vessel? a vessel's outline rises to the rim and comes back down to a floor below it */
+  var floor = NSO_wheelFloor(opts.nozzle), n = chain.length, zTop = -Infinity, ztol = Math.max(1e-4, 2e-5 * H);
+  for (i = 0; i < n; i++) if (chain[i].z > zTop) zTop = chain[i].z;
+  var outer, inner = null, a, b, notes = [];
+  if (chain[n - 1].z >= zTop - ztol) {
+    outer = chain.slice();
+  } else {
+    var first = -1, last = -1;
+    for (i = 0; i < n; i++) if (chain[i].z >= zTop - ztol) { if (first < 0) first = i; last = i; }
+    if (first < last) { a = first; b = last; }                     // a flat across the top: outer ends at a, inner starts at b
+    else {                                                         // one point at the top: the chord is the neighbour that spans the wall
+      var drPrev = first > 0 ? Math.abs(chain[first].r - chain[first - 1].r) : 0;
+      var drNext = first + 1 < n ? Math.abs(chain[first + 1].r - chain[first].r) : 0;
+      if (drPrev > drNext) { a = first - 1; b = first; } else { a = first; b = first + 1; }
+    }
+    if (a < 1 || b > n - 2) return { ok: false, reason: 'it has no wall to speak of - the rim is at the axis' };
+    outer = chain.slice(0, a + 1);
+    inner = chain.slice(b).reverse();
+  }
+  /* both walls rise */
+  function rises(pr, name) {
+    var worst = 0, at = 0, k;
+    for (k = 1; k < pr.length; k++) if (pr[k - 1].z - pr[k].z > worst) { worst = pr[k - 1].z - pr[k].z; at = pr[k].z - zmin; }
+    if (worst > Math.max(0.05, 1e-3 * H)) {
+      return 'the ' + name + ' folds back under itself by ' + worst.toFixed(2) + ' mm at ' + at.toFixed(1) +
+        ' mm up - the wheel holds profiles that only rise (no overhang, no curled lip)';
+    }
+    for (k = 1; k < pr.length; k++) if (pr[k].z < pr[k - 1].z) pr[k].z = pr[k - 1].z;
+    return null;
+  }
+  var bad = rises(outer, 'outside') || (inner && rises(inner, 'inside'));
+  if (bad) return { ok: false, reason: bad };
+  /* a rim the nozzle can print: as wide as the floor, or cut down to where it is */
+  if (inner) {
+    var oT = outer[outer.length - 1], iT = inner[inner.length - 1], cutBy = 0;
+    if (Math.hypot(oT.r - iT.r, oT.z - iT.z) < floor) {
+      var zc = Math.min(oT.z, iT.z), step = Math.max(0.02, H * 0.0005), found = false;
+      for (var tries = 0; tries < 400 && zc > inner[0].z + step && zc > outer[0].z + step; tries++) {
+        zc -= step;
+        var ro = NSO_wheelRadiusAt(outer, zc), ri = NSO_wheelRadiusAt(inner, zc);
+        if (ro - ri >= 1.15 * floor) { found = true; break; }          // a margin: the wall is measured across, not along the radius
+      }
+      if (!found) return { ok: false, reason: 'its rim is thinner than the ' + floor.toFixed(2) + ' mm nozzle floor all the way down - there is no flat to stand a wall on' };
+      cutBy = Math.max(oT.z, iT.z) - zc;
+      var keepO = outer.filter(function (p) { return p.z < zc - 1e-9; }), keepI = inner.filter(function (p) { return p.z < zc - 1e-9; });
+      keepO.push({ z: zc, r: NSO_wheelRadiusAt(outer, zc) });
+      keepI.push({ z: zc, r: NSO_wheelRadiusAt(inner, zc) });
+      outer = keepO; inner = keepI;
+      notes.push('the rim was rounded or sharper than the nozzle floor; cut flat ' + cutBy.toFixed(2) + ' mm down');
+    }
+  }
+  outer = NSO_wheelTidy(outer);
+  if (inner) inner = NSO_wheelTidy(inner);
+  var piece = {
+    outer: outer, inner: inner, nozzle: opts.nozzle, wall: 3, segments: Math.max(12, Math.round(opts.segments || NSO_WHEEL_SEGMENTS)),
+    target: null, sizing: null, ops: ['loaded'], budget: { start: 0, added: 0, trimmed: 0 }
+  };
+  piece.budget.start = NSO_wheelVolume(piece);
+  /* the wall it has: the middle of how far each inner point is from the outside (a closed piece: the standard 3 mm) */
+  if (inner) {
+    var ds = [];
+    for (i = 0; i < inner.length; i++) if (inner[i].r > 1e-6) ds.push(NSO_wheelDistToProfile(inner[i].r, inner[i].z, outer));
+    ds.sort(function (p, r) { return p - r; });
+    if (ds.length) piece.wall = Math.max(floor, ds[Math.floor(ds.length / 2)]);
+  } else {
+    piece.wall = Math.max(floor, 3);
+  }
+  var wall = NSO_wheelWall(piece);
+  return { ok: true, piece: piece, notes: notes, report: {
+    deviation: dev, tolerance: tol, axis: { x: cx, y: cy }, height: H, widest: 2 * rMax, open: !!inner, points: outer.length + (inner ? inner.length : 0),
+    volume: piece.budget.start, wall: wall, angles: nAng
+  } };
+}
+
 function NSO_wheelFirstSentence(reason) {
   var i = reason.indexOf(' - ');
   return i > 0 ? reason.slice(0, i) : reason;
@@ -2263,9 +2530,8 @@ function NSO_wheelBuild(recipe) {
   }
 
   R.tall = { min: 0.5, max: 4 };
-  if (!(recipe.open > 1e-9 && piece.inner && piece.ops.indexOf('open') >= 0)) {
-    R.tall.why = 'Tall shapes how the piece opens - raise Open first';
-  }
+  if (recipe.base && recipe.base.inner) R.tall.why = 'this piece is already open - Tall shapes how a ball opens';
+  else if (!(recipe.open > 1e-9 && piece.inner && piece.ops.indexOf('open') >= 0)) R.tall.why = 'Tall shapes how the piece opens - raise Open first';
 
   /* 2b. LIP: the edge of a pressed plate lifted into a rim. A plate that is open is
      not a plate, so Lip stands down for Deep (the slider says so). */
@@ -2645,6 +2911,7 @@ function NSO_wheelThrow(opts, head) {
   NSO_wheelSession = b.piece;
   NSO_wheelHome = { modelId: d.modelId, name: d.name, recipe: recipe,
                     history: [{ piece: b.piece, soup: d.model.rawTris, recipe: recipe }] };
+  NSO_wheelRemember(d.model);
   NSO_wheelOutline(d.model, b.piece);     // the ball was selected on its way in, before it wore its own lines
   var line = NSO_wheelStatus(b.piece, 'Dropped ' + d.name + ' - ' + (b.ball || head || 'Ball'));
   if (b.notes.length) line += ' - ' + b.notes.join('; ');
@@ -2705,6 +2972,7 @@ function NSO_wheelBake(head) {
     return { ok: false, reason: 'commit failed' };
   }
   NSO_wheelHome.history.push({ piece: NSO_wheelSession, soup: m.rawTris, recipe: NSO_wheelHome.recipe });
+  NSO_wheelRemember(m);
   return { ok: true, tris: soup };
 }
 
@@ -2766,6 +3034,16 @@ function NSO_wheelRun(move, opts, head) {
    one Undo step, and keep the RECIPE: nothing is baked, so every slider stays
    live and the next drag starts from the ball again. The status line says what
    the piece is and what, if anything, a limit held back. */
+function NSO_wheelSameProfile(a, b) {
+  function same(p, q) {
+    if (!p && !q) return true;
+    if (!p || !q || p.length !== q.length) return false;
+    for (var i = 0; i < p.length; i++) if (Math.abs(p[i].z - q[i].z) > 1e-9 || Math.abs(p[i].r - q[i].r) > 1e-9) return false;
+    return true;
+  }
+  return !!a && !!b && same(a.outer, b.outer) && same(a.inner, b.inner);
+}
+
 function NSO_wheelSetRecipe(recipe, head) {
   try {
     NSO_wheelLiveEnd();
@@ -2778,6 +3056,17 @@ function NSO_wheelSetRecipe(recipe, head) {
     var b = NSO_wheelBuild(recipe);
     if (!b.ok) { NSO_wheelSay(b.reason, true); return { ok: false, reason: b.reason, piece: NSO_wheelSession }; }
     var prev = NSO_wheelSession, prevRecipe = NSO_wheelHome.recipe;
+    /* A slider that changed nothing about the shape (Pull at with Pull at 0 mm, Tall before Open, a limit that held the
+       same value) is not an edit: the recipe is kept, the piece and its Undo history are left alone - and a loaded mesh
+       stays the mesh it was, not its re-lathe, until something really moves. */
+    if (NSO_wheelSameProfile(prev, b.piece)) {
+      NSO_wheelHome.recipe = NSO_wheelCloneRecipe(recipe);
+      var hh = NSO_wheelHome.history;
+      hh[hh.length - 1].recipe = NSO_wheelHome.recipe;
+      NSO_wheelRemember(NSO_wheelModel());
+      NSO_wheelUiRefresh();
+      return { ok: true, piece: prev, notes: b.notes, ranges: b.ranges, recipe: NSO_wheelHome.recipe, unchanged: true };
+    }
     NSO_wheelSession = b.piece;
     NSO_wheelHome.recipe = NSO_wheelCloneRecipe(recipe);
     var bake = NSO_wheelBake((head || 'On the wheel') + (b.notes.length ? ' - ' + b.notes.join('; ') : ''));
@@ -2787,6 +3076,68 @@ function NSO_wheelSetRecipe(recipe, head) {
     }
     NSO_wheelUiRefresh();
     return { ok: true, piece: b.piece, notes: b.notes, ranges: b.ranges, recipe: NSO_wheelHome.recipe };
+  } catch (err) {
+    if (typeof console !== 'undefined') console.error('[wheel]', err);
+    NSO_wheelSay('Pottery Wheel failed - piece unchanged (' + ((err && err.message) || err) + ')', true);
+    return { ok: false, reason: (err && err.message) || String(err) };
+  }
+}
+
+/* WHAT THE PIECE REMEMBERS. The model carries the recipe that made it and the soup the wheel wrote, so that putting it back
+   on the wheel later - after the menu was closed, or another piece was thrown - restores EVERY slider, not just a mesh. It is
+   only believed while the model's triangles are still the ones the wheel wrote (identity): if anything else touched the piece,
+   or Undo moved it, the memo is ignored and the piece is read from its mesh instead. Not saved with a project (a reloaded piece
+   is a mesh, and is read as one). */
+function NSO_wheelRemember(m) {
+  if (!m || !NSO_wheelHome || !NSO_wheelSession) return;
+  m.wheelMemo = { recipe: NSO_wheelCloneRecipe(NSO_wheelHome.recipe), piece: NSO_wheelSession, soup: m.rawTris };
+}
+
+/* PUT A PIECE ON THE WHEEL. The piece that is on the plate (not a new one): if it still wears the memo of the wheel that
+   made it, its whole recipe comes back; otherwise it is read as a solid of revolution (NSO_wheelRelathe) and the wheel starts a
+   recipe on top of what it is - Pull, Trim, Rim + and the rest work on it; Flatten / Open / Tall are for a ball and say so.
+   Nothing on the plate changes until the first slider moves (then it is one Undo step, like any other). */
+function NSO_wheelPutOn(m) {
+  try {
+    NSO_wheelLiveEnd();
+    if (!m) {
+      NSO_wheelSay('Select a piece to put on the wheel', true);
+      return { ok: false, reason: 'nothing selected' };
+    }
+    if (NSO_wheelHome && NSO_wheelHome.modelId === m.id && NSO_wheelSession) {
+      var sy = NSO_wheelSync();
+      if (sy.ok) { NSO_wheelSay((m.name || 'The piece') + ' is already on the wheel', false); return { ok: true, already: true, piece: NSO_wheelSession }; }
+    }
+    var paint = NSO_wheelPaintOk(m, 'the wheel');
+    if (!paint.ok) return paint;
+    if (!m.rawTris || !m.rawTris.length) {
+      NSO_wheelSay((m.name || 'That piece') + ' has no triangle data the wheel can read', true);
+      return { ok: false, reason: 'no rawTris' };
+    }
+    var piece, recipe, how, notes = [], rep = null, memo = m.wheelMemo;
+    if (memo && memo.soup === m.rawTris && memo.piece && memo.recipe) {
+      piece = memo.piece; recipe = NSO_wheelCloneRecipe(memo.recipe); how = 'its recipe remembered';
+    } else {
+      var rl = NSO_wheelRelathe(m.rawTris);
+      if (!rl.ok) {
+        NSO_wheelSay((m.name || 'That piece') + ' cannot go on the wheel - ' + rl.reason, true);
+        return rl;
+      }
+      piece = rl.piece; recipe = NSO_wheelRecipeOn(piece); notes = rl.notes; rep = rl.report;
+      how = 'read from its mesh (round to ' + rl.report.deviation.toFixed(2) + ' mm)';
+    }
+    NSO_wheelSession = piece;
+    NSO_wheelHome = { modelId: m.id, name: m.name, recipe: recipe, history: [{ piece: piece, soup: m.rawTris, recipe: recipe }] };
+    NSO_wheelSelect(m);
+    NSO_wheelOutline(m, piece);
+    var line = NSO_wheelStatus(piece, 'Put ' + (m.name || 'the piece') + ' on the wheel - ' + how);
+    if (notes.length) line += ' - ' + notes.join('; ');
+    var wl = rep && rep.wall;
+    if (wl && !wl.pass) line += ' - its ' + wl.thinnest + ' is ' + wl.min_mm.toFixed(2) + ' mm, under the ' + wl.threshold_mm.toFixed(2) + ' mm nozzle floor: edits that touch it will be refused until it is thicker';
+    if (!memo || memo.soup !== m.rawTris) line += ' - Pull, Trim and Rim + work on it; Flatten, Open and Tall are for a fresh ball';
+    NSO_wheelSay(line, false);
+    NSO_wheelUiRefresh();
+    return { ok: true, piece: piece, recipe: recipe, how: how, notes: notes, report: rep, modelId: m.id };
   } catch (err) {
     if (typeof console !== 'undefined') console.error('[wheel]', err);
     NSO_wheelSay('Pottery Wheel failed - piece unchanged (' + ((err && err.message) || err) + ')', true);
@@ -2820,6 +3171,9 @@ if (typeof document !== 'undefined') {
       /* The only button that is not a slider's own preset (app-wheel-live.js):
          the Starter Ball. No height, no selection, no nozzle - the standard ball
          dropped as a piece of its own; Scale and W size it. */
+      on('btn-wheel-load', function () {
+        NSO_wheelPutOn((typeof getActiveModel === 'function') ? getActiveModel() : null);
+      });
       on('btn-wheel-ball', function () {
         NSO_wheelRun('ball', {
           ballRadius: num('rng-wheel-scale', undefined),

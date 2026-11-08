@@ -483,6 +483,7 @@ takes effect.
 
 | control | does |
 |---|---|
+| **Edit on wheel** | puts the **selected piece** back on the wheel to shape it again ([Putting a piece back on the wheel](#putting-a-piece-back-on-the-wheel)) |
 | **Starter Ball** | drops the ball (standard 25 mm unless H / R say otherwise) as a piece of its own and starts a recipe on it |
 | **Scale** | the size of the ball (its radius; the standard ball is 25 mm, shown as Ø50). Live at any time, under everything else. It replaced H and R: a target height (Pappus) is still `NSO_wheelBall({ height })` in the API, but the card has one size slider |
 | **W** | the wall: how thin the disc may press and how thin the walls open. A thicker W opens a shorter, thicker-walled piece from the same clay |
@@ -525,7 +526,7 @@ neutral on top of it (`NSO_wheelRecipeOn`). The sliders never come through there
 (`NSO_wheelSetRecipe`).
 
 **What this does not do yet.** No foot ring (Trim leaves a flat foot), no spout, no handle — the last two are not
-round, so they are a different kind of feature. Scale, Wall, Soft, Lip at and Flare have no ball on the piece — they have a ring
+round, so they are a different kind of feature. A loaded piece is not given back a Flatten / Open / Tall to play with (those are a ball's). Scale, Wall, Soft, Lip at and Flare have no ball on the piece — they have a ring
 (next section).
 
 ### A soft pull
@@ -639,6 +640,44 @@ is that pull's Pull and Pull at. The ring and tag of the Pull rows speak for the
 What it makes (Open 85% + Tall 2.5, wall 2): belly out at 30% + neck in at 75% + lip out at 97% is a vase (139 mm, no segment of the outside
 turns more than 25 degrees, wall ≥ 1.05 mm); neck + collar, a gourd with two bulges, a bowl with a foot step and a flared rim all build and keep
 the clay to 1e-6 (the vase is under the canonical mesh checker).
+
+### Putting a piece back on the wheel
+
+**Edit on wheel** (next to Starter Ball) takes the selected piece — not a new one — back onto the wheel. There are two ways in, and it says which:
+
+1. **The wheel threw it and it still wears its memo.** Every piece the wheel writes carries its recipe and the triangles it wrote (`m.wheelMemo`,
+   checked by identity: `memo.soup === m.rawTris`). Put it back after the menu was closed or another ball took the wheel and **every slider
+   comes back** — Open, Tall, the four pulls, Trim. If anything else touched the piece, or Undo moved it, the memo is ignored and the piece is read
+   from its mesh instead. The memo is not saved with a project.
+2. **Any other piece that is a solid of revolution** (an exported and re-imported vase, a piece from another tool) is **read from its mesh**
+   (`NSO_wheelRelathe`, section 7k). The wheel starts a recipe on top of what it is (`ops: ['loaded']`, `NSO_wheelRecipeOn`): **Pull (all four),
+   Trim and Rim + work on it**; Flatten, Open and Tall are for a fresh ball, and their tooltips say the piece is already open.
+
+*Reading a mesh.* The axis is the vertical through the middle of the footprint (found wherever the piece sits). The mesh is cut by a half-plane through
+the axis at 8 angles, **a hair off any meridian** so the cut passes through the ring vertices rather than along their edges — the radii are the mesh's
+own, not a chord's short of them (the round trip on the wheel's own pieces: outside within 0.2 µm, thinnest wall identical, volume 6.5·10⁻⁶; a
+three-pull vase simplified from 569 points to 234 is within 14 µm). Each cut is a polyline from the axis at the foot to the axis at the top or the
+floor; the endpoints are joined with a tolerance (every vertex is met twice, a few thousandths of a millimetre apart). A solid is one outline; a vessel
+is the outside up to the rim and the inside from the floor to it (the rim is the flat across the top, or the short chord across the wall).
+
+*What it refuses, by name, and leaves the piece as it was:*
+- **not round** — the 8 cuts differ by more than the larger of 0.3 mm and 0.6% of the radius; the message gives the difference and the height ("the outside
+  differs by 7.90 mm between angles 0.1 mm up"). A box, a bowl squashed 12%, a jug tipped over;
+- **an overhang** — a wall that folds back under itself (a mushroom's cap, a curled lip): the wheel holds profiles that only rise;
+- **a hole through the axis** (a ring, a pipe) or **more than one outline** (a second cavity, a loose part): its profiles start on the axis;
+- **no wall to speak of**, or **too few triangles**.
+
+*What it quietly fixes, and says so:* a rim rounded or sharper than the nozzle floor (the wheel needs a flat rim as wide as the floor) is **cut flat** a
+fraction of a millimetre down, and the status line says how far. A wall already under the floor loads, with a warning that edits touching it will be refused.
+
+*Nothing on the plate changes until something really moves.* Loading builds no Undo step and replaces no triangles; the first slider that actually changes
+the shape is one `wheelReplace` step like any other, and Undo gives back the **original mesh exactly** (tested by identity). A slider that does not change the
+shape (Pull at while Pull is 0 mm, Tall before Open) no longer makes an Undo step either: `NSO_wheelSetRecipe` compares the built profile with the current one
+and only keeps the recipe. A plate loaded this way has no `press`, so Lip says to press a ball first — the wheel does not guess one.
+
+**A race this found, and fixed.** The 300 ms background refresh (`watch`) could put the recipe's old value back on a slider between its first `input`
+event and its `change`, and the drag was lost — about 1 in 12 times in a stress loop of Flatten / Open / Pull sets. A slider in someone's hand is theirs now
+(`heldSlider`, which lapses after 1.5 s so a drag ended by Escape cannot freeze the card), and `watch` does not refresh while one is held.
 
 ### Lip
 

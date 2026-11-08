@@ -64,3 +64,18 @@ slot's number, clay to 1e-6, wall, speed, a vase under the canonical checker), w
 Things to know: `pullSel` is UI state, not recipe state (it is not in Undo); the handle placement uses the final piece's height fractions while Build
 uses each stage's, so after several pulls a ball can sit a few percent off its wall until the next build; the swing range (+-) is from the piece before any pull.
 Not done: foot ring (owner is fine without), spout, handle.
+
+### Addendum 3: Edit on wheel (a baked piece back on the wheel), and a slider race
+`NSO_wheelRelathe(tris)` (section 7k: half-plane cuts at 8 angles a hair off a meridian, joined with a tolerance, round check, closed/vessel split, only-rises check,
+flat-rim rule), `NSO_wheelPutOn(model)` (binds the EXISTING model to a session; memo path = whole recipe, mesh path = `ops: ['loaded']` + `NSO_wheelRecipeOn`),
+`NSO_wheelRemember` (`m.wheelMemo`, believed only while `memo.soup === m.rawTris`), the `btn-wheel-load` button. Tests: `npm run wheel` 7k (round trip on seven kinds of
+wheel piece, off-centre; box / squashed / tipped / mushroom / ring / knife-edge rim / too few triangles; Pull + Trim on a loaded vase; 100 000 triangles), wire 10f
+(recipe remembered, mesh read with no memo, no Undo step on load, Undo gives the original mesh back by identity, a box refused).
+Things to know:
+- Loading changes nothing on the plate. `NSO_wheelSetRecipe` now SKIPS the commit when the built profile equals the current one (`NSO_wheelSameProfile`) - this is why a
+  loaded mesh stays the mesh it was until something moves, and it also removes the no-op Undo steps ordinary sliders used to make.
+- A loaded OPEN piece gets no Flatten ball (`handleSpecs`); Open / Tall are off with 'already open' tooltips. Rim + still works on a straight wall.
+- The rim is the flat across the top, else the neighbour of the top point that spans the wall (the more radial segment); a rounded rim is cut flat to 1.15 x the nozzle floor.
+- **The race.** `watch()` (300 ms) -> `refresh()` -> `show()` could write the recipe's old value onto a slider between its `input` and `change`; found by a 25-iteration loop that
+  lost 2 pulls. `heldSlider` (+1.5 s lapse) now guards `show()` and `watch()`. If a slider ever "jumps back" again, look there first.
+- Not done: restoring a `press` for a loaded plate (so Lip works on it), a Tall for an already-open piece, saving the memo with the project.

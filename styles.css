@@ -1977,6 +1977,7 @@ select:focus, input:focus {
    an implicit column and every button fills its cell - no orphan half-width
    stragglers next to a full-width Soften. */
 .vp-row-full { grid-template-columns: 1fr; }
+.vp-wheel .vp-row-full.wh-top { grid-template-columns: auto 1fr; gap: 6px; }
 .vp-row-pair { grid-template-columns: 1fr 1fr; gap: 6px; }
 /* The paint row: Paint Selected / Paint Excluded / Clear paint, three equal
    cells. Two words each, so the label is allowed to wrap onto two lines and

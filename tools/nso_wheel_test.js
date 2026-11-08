@@ -1594,6 +1594,89 @@ console.log('\n== 7i. Open is one continuous family: a dimple, a cup, a round bo
   check('a whole build with Open and a Pull is fast enough for a live drag', per < 200, per.toFixed(0) + ' ms each');
 }
 
+/* =====================================================================
+   7k. Putting a baked piece back on the wheel
+   ===================================================================== */
+console.log('\n== 7k. a baked piece goes back on the wheel: read from its mesh, round trip, refusals ==');
+{
+  const R0 = () => W.NSO_wheelNewRecipe({});
+  const V = p => W.NSO_wheelVolume(p);
+  const P = (z, dr, wide) => ({ z, dr, wide });
+  const mk = f => { const r = R0(); f(r); return W.NSO_wheelBuild(r); };
+  const shift = (soup, dx, dy, dz) => { const o = new Float32Array(soup.length); for (let i = 0; i < soup.length; i += 3) { o[i] = soup[i] + dx; o[i + 1] = soup[i + 1] + dy; o[i + 2] = soup[i + 2] + dz; } return o; };
+  const cases = [
+    ['a ball', r => { }], ['a pressed plate', r => { r.thick = 6; }], ['a lipped plate', r => { r.thick = 6; r.lip.h = 8; }],
+    ['a round bowl', r => { r.open = 0.85; }], ['a jug', r => { r.open = 0.85; r.tall = 3; r.ball.wall = 2; }],
+    ['a three-pull vase', r => { r.ball.wall = 2; r.open = 0.85; r.tall = 2.5; r.pull = P(0.3, 6, 0.3); r.more = [P(0.75, -10, 0.15), P(0.97, 8, 0.06)]; }],
+    ['a trimmed bowl', r => { r.open = 0.7; r.trim = 3; }]
+  ];
+  let worstR = 0, worstV = 0, worstW = 0, okAll = true, detail = [];
+  for (const [lab, f] of cases) {
+    const b = mk(f), o = b.piece, soup = shift(W.NSO_wheelRevolve(o), 13.5, -7.25, 4);
+    const rl = W.NSO_wheelRelathe(soup);
+    if (!rl.ok) { okAll = false; detail.push(lab + ': ' + rl.reason); continue; }
+    const p = rl.piece, sh = p.outer.map(q => ({ z: q.z - 4, r: q.r })), H = W.NSO_wheelSpan(o.outer);
+    let w = 0;
+    for (let k = 1; k < 60; k++) { const z = H.lo + (H.hi - H.lo) * k / 60; w = Math.max(w, Math.abs(W.NSO_wheelRadiusAt(sh, z) - W.NSO_wheelRadiusAt(o.outer, z))); }
+    worstR = Math.max(worstR, w);
+    worstV = Math.max(worstV, Math.abs(V(p) - V(o)) / V(o));
+    if (!!p.inner !== !!o.inner) okAll = false;
+    if (p.inner) worstW = Math.max(worstW, Math.abs(W.NSO_wheelWall(p).min_mm - W.NSO_wheelWall(o).min_mm));
+  }
+  check('the wheel\'s own pieces (ball, plate, lipped plate, bowl, jug, a three-pull vase, trimmed) come back from their meshes, off-centre',
+    okAll, detail.join(' | '));
+  check('...the outside to within 0.05 mm, the volume to 1e-4, the thinnest wall to 0.01 mm',
+    worstR < 0.05 && worstV < 1e-4 && worstW < 0.01, 'outside ' + worstR.toFixed(4) + ' mm, volume ' + worstV.toExponential(1) + ', wall ' + worstW.toFixed(4));
+  const rlj = W.NSO_wheelRelathe(shift(W.NSO_wheelRevolve(mk(r => { r.open = 0.85; r.tall = 3; r.ball.wall = 2; }).piece), 40, 12, 0));
+  check('...the axis is found wherever the piece is (a piece 40 mm off the origin is as round as it was)', rlj.ok && Math.abs(rlj.report.axis.x - 40) < 0.01 && rlj.report.deviation < 0.1,
+    rlj.ok ? 'axis x ' + rlj.report.axis.x.toFixed(3) + ', round to ' + rlj.report.deviation.toFixed(3) + ' mm' : rlj.reason);
+  check('a ball reads as closed (one outline), a bowl as open (outside + inside), a plate has no press (the wheel does not guess one)',
+    !W.NSO_wheelRelathe(W.NSO_wheelRevolve(mk(r => { }).piece)).piece.inner && W.NSO_wheelRelathe(W.NSO_wheelRevolve(mk(r => { r.open = 0.6; }).piece)).piece.inner !== null &&
+    !W.NSO_wheelRelathe(W.NSO_wheelRevolve(mk(r => { r.thick = 6; }).piece)).piece.press);
+
+  /* then it is a piece like any other: a recipe on top of it works, and keeps its clay */
+  const vase = mk(r => { r.ball.wall = 2; r.open = 0.85; r.tall = 2.5; r.pull = P(0.3, 6, 0.3); r.more = [P(0.75, -10, 0.15)]; }).piece;
+  const back = W.NSO_wheelRelathe(W.NSO_wheelRevolve(vase)).piece;
+  const rec = W.NSO_wheelRecipeOn(back); rec.pull = P(0.6, 4, 0.25); rec.more = [P(0.9, 5, 0.08)]; rec.trim = 2;
+  const edited = W.NSO_wheelBuild(rec);
+  check('a loaded piece takes Pull, a second Pull and Trim on top: it builds, the wall holds, the clay is its own less the trim',
+    edited.ok && edited.piece.inner && W.NSO_wheelWall(edited.piece).pass && V(edited.piece) < V(back) && V(edited.piece) > 0.9 * V(back), edited.notes.join(' | '));
+  const onlyPull = W.NSO_wheelRecipeOn(back); onlyPull.pull = P(0.5, 5, 0.3);
+  const op = W.NSO_wheelBuild(onlyPull);
+  check('...a Pull alone keeps the clay exactly (the same clay it had when loaded)', op.ok && Math.abs(V(op.piece) - V(back)) / V(back) < 1e-9);
+  check('...Tall says the piece is already open, and Open has nothing to do', (() => { const b = W.NSO_wheelBuild(W.NSO_wheelRecipeOn(back)); return b.ok && /already open/.test(b.ranges.tall.why) && b.ranges.open.max === 0; })());
+
+  /* what it will not take, and says why */
+  const box = W.NSO_Stock.boxSoup ? W.NSO_Stock.boxSoup(40, 40, 30) : null;
+  const rb = box ? W.NSO_wheelRelathe(box) : { ok: false, reason: 'not round - skipped' };
+  check('a box is not round: refused with the measured difference', !rb.ok && /not round about its vertical axis: the outside differs by [\d.]+ mm/.test(rb.reason), rb.reason);
+  const oval = W.NSO_wheelRevolve(mk(r => { r.open = 0.6; }).piece);
+  for (let i = 0; i < oval.length; i += 3) oval[i] *= 1.12;
+  const ro = W.NSO_wheelRelathe(oval);
+  check('a bowl squashed 12% on one axis is refused too (not round), and says how much', !ro.ok && ro.deviation > 2, ro.reason);
+  const tilt = W.NSO_wheelRevolve(mk(r => { r.open = 0.85; r.tall = 3; r.ball.wall = 2; }).piece), tl = new Float32Array(tilt.length), ca = Math.cos(0.5), sa = Math.sin(0.5);
+  for (let i = 0; i < tilt.length; i += 3) { tl[i] = tilt[i]; tl[i + 1] = tilt[i + 1] * ca - tilt[i + 2] * sa; tl[i + 2] = tilt[i + 1] * sa + tilt[i + 2] * ca; }
+  check('a jug tipped over 29 degrees is refused (stand it upright)', !W.NSO_wheelRelathe(tl).ok);
+  const curl = W.NSO_wheelStock().revolve([{ z: 0, r: 0 }, { z: 0, r: 8 }, { z: 30, r: 8 }, { z: 26, r: 25 }, { z: 40, r: 25 }, { z: 40, r: 0 }], 96);   // a mushroom: the cap's underside slopes DOWN as it goes out
+  const rcu = W.NSO_wheelRelathe(curl);
+  check('a mushroom - a cap whose underside slopes back down under itself - is refused by name (the wheel holds profiles that only rise)', !rcu.ok && /folds back under itself|only rise/.test(rcu.reason), rcu.reason);
+  const ring = W.NSO_wheelStock().revolve([{ z: 0, r: 20 }, { z: 0, r: 30 }, { z: 20, r: 30 }, { z: 20, r: 20 }, { z: 0, r: 20 }], 96);
+  const rr = W.NSO_wheelRelathe(ring);
+  check('a ring with a hole through its axis is refused (the wheel\'s profiles start on the axis)', !rr.ok, rr.reason);
+  check('too few triangles is refused politely', !W.NSO_wheelRelathe(new Float32Array(9)).ok);
+
+  /* a rim sharper than the nozzle floor is cut flat, and says so */
+  const sharp = W.NSO_wheelStock().revolve([{ z: 0, r: 0 }, { z: 0, r: 20 }, { z: 40, r: 26 }, { z: 40, r: 25.6 }, { z: 2, r: 16 }, { z: 2, r: 0 }], 96);
+  const rs = W.NSO_wheelRelathe(sharp);
+  check('a knife-edge rim (0.4 mm wide, under the nozzle floor) is cut down to where the wall is wide enough, and the notes say how far',
+    rs.ok && rs.notes.some(n => /cut flat/.test(n)) && W.NSO_wheelWall(rs.piece).pass, rs.ok ? rs.notes.join(' | ') + ' - wall ' + W.NSO_wheelWall(rs.piece).min_mm.toFixed(2) : rs.reason);
+
+  /* fast: a vase's section is a few thousand triangles */
+  const big = W.NSO_wheelRevolve(mk(r => { r.ball.wall = 2; r.open = 0.85; r.tall = 2.5; r.pull = P(0.3, 6, 0.3); r.more = [P(0.75, -10, 0.15), P(0.97, 8, 0.06)]; }).piece);
+  const t0 = Date.now(); const rbg = W.NSO_wheelRelathe(big);
+  check('reading a 100 000-triangle vase takes well under a second', rbg.ok && (Date.now() - t0) < 1000, (big.length / 9).toFixed(0) + ' triangles, ' + (Date.now() - t0) + ' ms');
+}
+
 console.log('\n== 8. what this first version does not do, and says so ==');
 {
   const src = fs.readFileSync(path.join(ROOT, 'app-wheel.js'), 'utf8');

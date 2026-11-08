@@ -58,6 +58,9 @@
   var draft = null;         // uncommitted edits to the recipe, between a drag and its release
   var pending = NSO_wheelNewRecipe({});   // the recipe the sliders hold while no piece is on the wheel
   var lastRanges = null;
+  var heldSlider = null, heldAt = 0;    // the slider between its first 'input' and its 'change': nothing may write to it meanwhile
+  /* ...but never for long: a drag that ends any other way (Escape, a lost pointer) must not freeze the card */
+  function isHeld(id) { return heldSlider !== null && (id === undefined || heldSlider === id) && (Date.now() - heldAt) < 1500; }
 
   function trim(x, step) {
     var st = String(step || 0.1), dot = st.indexOf('.');
@@ -233,7 +236,9 @@
       var v = d.get(recipe, R);
       var lo = parseFloat(slider.min), hi = parseFloat(slider.max);
       if (isFinite(lo) && isFinite(hi)) v = Math.min(hi, Math.max(lo, v));
-      slider.value = String(v);
+      /* a slider in somebody's hand is theirs: the background refresh used to put the recipe's old value back on it
+         between the first 'input' and the 'change', and the drag was lost */
+      if (!isHeld(d.slider)) slider.value = String(v);
       paintRead(d);
     });
     paintChips(recipe);
@@ -317,10 +322,10 @@
       ? window.nsoLiveSlider.bind({ slider: d.slider, read: d.read, unit: d.unit, onLive: function () { preview(d); } })
       : null;
     handles[d.key] = handle;
-    slider.addEventListener('input', function () { paintRead(d); });   // the helper writes value + unit; say it our way after it
+    slider.addEventListener('input', function () { heldSlider = d.slider; heldAt = Date.now(); paintRead(d); });   // the helper writes value + unit; say it our way after it
     if (!handle) slider.addEventListener('input', function () { preview(d); });   // no helper module: plain and unthrottled
     /* Let go of the slider is Set. */
-    slider.addEventListener('change', function () { if (handle) handle.cancel(); set(d); });
+    slider.addEventListener('change', function () { if (handle) handle.cancel(); try { set(d); } finally { heldSlider = null; } });
     paintRead(d);
   }
 
@@ -403,7 +408,8 @@
   function handleSpecs(piece, recipe) {
     var specs = [], opened = !!piece.inner && piece.ops.indexOf('open') >= 0;
     var top = NSO_wheelTopZ(piece), span = NSO_wheelSpan(piece.outer), R = lastRanges || {};
-    if (!piece.inner || (piece.inner && !opened)) specs.push({ kind: 'flatten', r: 0, z: piece.inner ? piece.inner[0].z : top });
+    /* Flatten is for a ball or a plate: not for an opened piece, and not for an open one put back on the wheel from its mesh */
+    if (!piece.inner || (!opened && piece.ops.indexOf('loaded') < 0)) specs.push({ kind: 'flatten', r: 0, z: piece.inner ? piece.inner[0].z : top });
     if (opened) {
       var q0 = piece.inner[piece.inner.length - 1];
       specs.push({ kind: 'open', r: q0.r, z: q0.z, radial: true });
@@ -872,7 +878,7 @@
   function watch() {
     bindDrag();
     if (!menuOpen()) { end(); removeHandles(); return; }
-    if (LIVE) return;
+    if (LIVE || isHeld()) return;
     var m = NSO_wheelHome ? NSO_wheelModel() : null;
     var raw = m ? m.rawTris : null;
     if (seen.home === NSO_wheelHome && seen.raw === raw) return;
@@ -910,7 +916,7 @@
     document.addEventListener('keydown', function (e) {
       if (e.key !== 'Escape') return;
       if (DRAG) { dragEnd(false); return; }
-      if (LIVE || draft) { end(); refresh(); }
+      if (LIVE || draft) { heldSlider = null; end(); refresh(); }
     });
     var menu = menuEl();
     if (menu) menu.addEventListener('toggle', function () { if (!menu.open) end(); else refresh(); });

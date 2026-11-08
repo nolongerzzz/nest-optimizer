@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=7647bc47" />
+  <link rel="stylesheet" href="styles.css?v=043a43d1" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -153,7 +153,9 @@
               <details class="vp-menu vp-wheel-menu">
               <summary>Wheel</summary>
               <div class="vp-menu-body vp-wheel">
-              <div class="vp-row vp-row-full">
+              <div class="vp-row vp-row-full wh-top">
+              <button id="btn-wheel-load" class="btn btn-secondary" type="button"
+              title="Put the selected piece on the wheel to shape it again. A piece the wheel threw keeps its whole recipe (every slider comes back); any other piece that is a solid of revolution - one saved and re-imported, say - is read from its mesh by cutting it through its axis, and Pull, Trim and Rim + work on it. A piece that is not round, or has an overhang, says so and stays as it is. Nothing changes until you move a slider.">Edit on wheel</button>
               <button id="btn-wheel-ball" class="btn btn-secondary" type="button"
               title="Drop a ball of clay on the plate as a piece of its own - nothing to select. Scale sets its size (the standard ball is 25 mm radius): press it into a plate or open it into a bowl. Every slider below then shapes THIS piece, live and for as long as you like - nothing is baked.">Starter Ball</button>
               </div>
@@ -2900,8 +2902,8 @@
   <!-- Limb: nso_limb.js is the tree, the limb and the move (headless, tools/nso_limb_test.js); app-limb.js the pointer session. docs/LIMB.md -->
   <script src="nso_limb.js?v=07938197"></script>
   <script src="app-limb.js?v=9ca0b82c"></script>
-  <script src="app-wheel.js?v=7fbc137f"></script>
-  <script src="app-wheel-live.js?v=801e7add"></script>
+  <script src="app-wheel.js?v=82790461"></script>
+  <script src="app-wheel-live.js?v=a6612e99"></script>
   <script src="app-fit.js?v=94ef7252"></script>
   <script src="app-stock.js?v=04f0e346"></script>
   <script src="app-piece-preview.js?v=730a465a"></script>

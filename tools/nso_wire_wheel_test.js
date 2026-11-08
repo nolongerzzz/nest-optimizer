@@ -1109,6 +1109,74 @@ withApp(async (page, logs) => {
     check('...and they come back when it opens', (await handles()).length >= 2);
   }
 
+  console.log('\n=== 10f. Edit on wheel: a baked piece goes back on the wheel ===');
+  {
+    const set = async (id, v) => { await page.evaluate(([i, x]) => { const e = document.getElementById(i); e.value = String(x); e.dispatchEvent(new Event('input', { bubbles: true })); e.dispatchEvent(new Event('change', { bubbles: true })); }, [id, v]); await page.waitForTimeout(450); };
+    const status = () => page.evaluate(() => document.getElementById('status').textContent);
+    const val = id => page.evaluate(i => parseFloat(document.getElementById(i).value), id);
+    const homeInfo = () => page.evaluate(() => NSO_wheelHome ? { id: NSO_wheelHome.modelId, ops: NSO_wheelSession.ops.join('>'), base: !!NSO_wheelHome.recipe.base } : null);
+    check('the Edit on wheel button is there and wired', await page.evaluate(() => { const b = document.getElementById('btn-wheel-load'); return !!b && b.dataset.nsoWired === '1' && /Edit on wheel/.test(b.textContent); }));
+
+    /* a vase thrown with several pulls, then another piece takes the wheel */
+    await page.click('#btn-wheel-ball');
+    await page.waitForFunction(() => /Dropped Wheel \d+/.test(document.getElementById('status').textContent), null, { timeout: 30000 });
+    await set('rng-wheel-wall', 2); await set('rng-wheel-open', 0.85); await set('rng-wheel-tall', 2.5);
+    await page.click('#wh-row-pulls button[data-slot="0"]'); await set('rng-wheel-pull-z', 30); await set('rng-wheel-pull-dr', 6);
+    await page.click('#wh-row-pulls button[data-slot="1"]'); await set('rng-wheel-pull-z', 75); await set('rng-wheel-pull-dr', -9);
+    const vase = await page.evaluate(() => ({ id: NSO_wheelHome.modelId, name: NSO_wheelModel().name, tris: NSO_wheelModel().rawTris, rec: JSON.parse(JSON.stringify(NSO_wheelHome.recipe, (k, v) => k === 'base' ? undefined : v)) }));
+    await page.click('#btn-wheel-ball');
+    await page.waitForFunction(id => NSO_wheelHome && NSO_wheelHome.modelId !== id, vase.id, { timeout: 30000 });
+    check('(a second ball takes the wheel: the vase is just a piece on the plate now)', (await homeInfo()).id !== vase.id);
+
+    /* select the vase and put it back: its whole recipe returns */
+    await page.evaluate(id => { const i = state.placed.findIndex(p => p.sourceId === id); selectPlaced(i); }, vase.id);
+    await page.waitForTimeout(300);
+    const undo0 = await page.evaluate(() => state.undoStack.length);
+    await page.click('#btn-wheel-load'); await page.waitForTimeout(700);
+    let hi = await homeInfo();
+    check('Edit on wheel puts the selected piece (not a new one) back on the wheel', hi && hi.id === vase.id && (await page.evaluate(() => state.placed.length)) >= 2);
+    check('...a piece the wheel threw comes back with its whole recipe: Open 85%, Tall x2.5, Wall 2, pull 1 +6 mm, pull 2 -9 mm',
+      Math.abs((await val('rng-wheel-open')) - 0.85) < 0.011 && Math.abs((await val('rng-wheel-tall')) - 2.5) < 0.06 && Math.abs((await val('rng-wheel-wall')) - 2) < 0.11 && !hi.base &&
+      await page.evaluate(() => { const r = NSO_wheelHome.recipe; return r.pull.dr === 6 && r.more[0].dr === -9; }), await status());
+    check('...and says so, and nothing on the plate changed (no Undo step, the same triangles)',
+      /recipe remembered/.test(await status()) && (await page.evaluate(() => state.undoStack.length)) === undo0);
+    await set('rng-wheel-pull-dr', 3);
+    check('...the sliders are live on it again: Pull 2 moves the vase', await page.evaluate(() => NSO_wheelHome.recipe.more[0].dr === 3 || NSO_wheelHome.recipe.pull.dr === 3));
+    await page.click('#btn-undo'); await page.waitForTimeout(500);
+
+    /* a mesh with no memory: read from its triangles */
+    await page.evaluate(id => { const m = state.models.find(x => x.id === id); m.wheelMemo = null; }, vase.id);
+    await page.click('#btn-wheel-ball');
+    await page.waitForFunction(id => NSO_wheelHome && NSO_wheelHome.modelId !== id, vase.id, { timeout: 30000 });
+    await page.evaluate(id => { selectPlaced(state.placed.findIndex(p => p.sourceId === id)); }, vase.id);
+    await page.waitForTimeout(300);
+    await page.evaluate(id => { const m = state.models.find(x => x.id === id); window.__before = { tris: m.rawTris, top: state.undoStack[state.undoStack.length - 1] }; }, vase.id);   // references: kept in the page, not copied out
+    await page.click('#btn-wheel-load'); await page.waitForTimeout(800);
+    hi = await homeInfo();
+    check('a piece with no memory (an imported mesh) is read from its triangles: the wheel holds it as a loaded piece with a recipe on top',
+      hi && hi.id === vase.id && hi.ops === 'loaded' && hi.base && /read from its mesh/.test(await status()), await status());
+    check('...nothing on the plate changes yet: the same triangles, no new Undo step',
+      await page.evaluate(id => { const m = state.models.find(x => x.id === id); return m.rawTris === window.__before.tris && state.undoStack[state.undoStack.length - 1] === window.__before.top; }, vase.id));
+    check('...and it has no Flatten ball (an open piece is not a plate): the Pull and Trim balls are there, the sliders stay live',
+      await page.evaluate(() => { const k = NSO_wheelUI.handles().map(h => h.kind); return !k.includes('flatten') && k.includes('trim') && (k.includes('pull') || k.includes('pull2')); }));
+    check('...Flatten, Open and Tall say they are for a ball; the sliders stay live',
+      await page.evaluate(() => { const s = n => document.getElementById(n); return !s('rng-wheel-open').disabled && /already open/.test(s('rng-wheel-tall').title) && /already open/.test(s('rng-wheel-open').title); }));
+    const vol0 = await page.evaluate(() => NSO_wheelVolume(NSO_wheelSession));
+    await set('rng-wheel-pull-z', 55); await set('rng-wheel-pull-dr', 5);
+    const aft = await page.evaluate(id => ({ ops: NSO_wheelSession.ops.join('>'), vol: NSO_wheelVolume(NSO_wheelSession), n: state.undoStack.length, last: state.undoStack[state.undoStack.length - 1].type, wall: NSO_wheelWall(NSO_wheelSession).pass }), vase.id);
+    check('a Pull on it changes the piece, keeps the clay, holds the wall, and is one Undo step of its own',
+      aft.ops === 'loaded>pull' && Math.abs(aft.vol - vol0) / vol0 < 1e-6 && aft.wall && aft.last === 'wheelReplace', JSON.stringify(aft));
+    await page.click('#btn-undo'); await page.waitForTimeout(600);
+    check('Undo gives back the original mesh exactly', await page.evaluate(id => state.models.find(x => x.id === id).rawTris === window.__before.tris, vase.id));
+
+    /* a piece that is not round is refused, by name, and stays as it was */
+    const box = await page.evaluate(() => { const d = NSO_wheelDrop(NSO_Stock.boxSoup(40, 40, 30)); return { id: d.modelId }; });
+    await page.waitForTimeout(500);
+    await page.click('#btn-wheel-load'); await page.waitForTimeout(600);
+    check('a box is refused: it says it is not round and by how much, and the wheel keeps what it had',
+      /cannot go on the wheel - it is not round about its vertical axis/.test(await status()) && (await homeInfo()).id !== box.id, await status());
+  }
+
   console.log('\n=== 11. nothing else on the page broke ===');
   const errs = logs.filter(l => l.startsWith('[pageerror]'));
   check('no uncaught page errors', errs.length === 0, errs.join(' | '));
