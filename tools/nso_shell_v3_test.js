@@ -132,8 +132,9 @@ const HOLDS = {
   // SCULPT: two arms. Brush (Emboss / Smooth here; Size, Force, Hard falloff) and Carve (ball-nose / flat shave / V-groove; Depth, Radius, Roll)
   'menu-sculpt': ['btn-brush', 'sel-brush-mode', 'inp-brush-size', 'inp-brush-intensity', 'chk-brush-hard',
                   'btn-carve', 'carve-blade', 'carve-depth', 'carve-a', 'carve-roll', 'carve-readout'],
-  // SLICE (app-print.js): the plate's printer, Slice (and Cancel while it runs), the readout, Export .gcode.3mf, Preview in G-scope
-  'menu-slice': ['slice-card', 'slice-profile', 'btn-slice-go', 'btn-slice-cancel', 'slice-readout', 'btn-slice-export', 'btn-slice-preview'],
+  // SLICE (app-print.js): the plate's printer, its Slice settings (folded), Slice (and Cancel while it runs), the readout, Export .gcode.3mf, Preview in G-scope
+  'menu-slice': ['slice-card', 'slice-profile', 'slice-settings-toggle', 'slice-set-layer', 'slice-set-walls', 'slice-set-density', 'slice-set-angle',
+                 'btn-slice-go', 'btn-slice-cancel', 'slice-readout', 'btn-slice-export', 'btn-slice-preview'],
   // CHECK & REPAIR: Check piece · Cap open faces · Repair · Seal · Non-solid · Solidify
   'menu-repair': ['btn-check-defects', 'btn-cap-open', 'chk-seal-repair', 'btn-seal', 'chk-non-solid', 'btn-solidify']
 };

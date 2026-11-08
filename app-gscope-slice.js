@@ -99,7 +99,8 @@ var NSO_GSCOPE_SLICE = (function () {
   var SLICE_REST = { walls: 2, density: 15, pattern: 'grid', angle: 30, brim: 'auto' };
 
   /* THE INTERFACE RULE (nso_slicer.js supportInterfaceRule; docs/SUPPORT-GATE.md): a preference, not a profile setting - kept in this
-     browser, never reset by seedSettings, and read by Export print (app-print.js) as well as by Slice. '' is the sheet typing, 'column' the rule. */
+     browser, never reset by seedSettings, and read by the left bar's Slice card as well as by Slice (one choice: its interface row sets it
+     through nsoSetSupportInterfaceRule). '' is the sheet typing, 'column' the rule. */
   var IFACE_RULE_KEY = 'nso.supportInterfaceRule';
   var ifaceRuleMem = null;   /* the choice when the browser keeps nothing */
   function ifaceRule() {
@@ -108,11 +109,17 @@ var NSO_GSCOPE_SLICE = (function () {
     return v === 'column' ? 'column' : null;
   }
   function showIfaceRule() { var el = $('ms-slice-iface-rule'); if (el) el.value = ifaceRule() || ''; }
+  function setIfaceRule(v) {
+    v = v === 'column' ? 'column' : '';
+    ifaceRuleMem = v;
+    try { localStorage.setItem(IFACE_RULE_KEY, v); } catch (er) { /* not kept past this page */ }
+    showIfaceRule();
+  }
   window.nsoSupportInterfaceRule = ifaceRule;
+  window.nsoSetSupportInterfaceRule = setIfaceRule;
   if (typeof document !== 'undefined' && document.addEventListener) document.addEventListener('change', function (e) {
     if (!e.target || e.target.id !== 'ms-slice-iface-rule') return;
-    ifaceRuleMem = e.target.value;
-    try { localStorage.setItem(IFACE_RULE_KEY, e.target.value); } catch (er) { /* not kept past this page */ }
+    setIfaceRule(e.target.value);
   });
 
   /** { printer, nozzle, layer } for the plate's printer, read as it is now. */

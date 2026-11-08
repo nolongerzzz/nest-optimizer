@@ -711,11 +711,13 @@
     return lines;
   }
 
-  /** The CONFIG_BLOCK: Studio's own for this printer, with NSO's cooling keys put in. */
-  function configLines(Pr, S) {
+  /** The CONFIG_BLOCK: Studio's own for this printer, with NSO's cooling keys put in, and any process
+   *  setting the caller changed from the template (`over`, { key: value } - the Slice card's settings). */
+  function configLines(Pr, S, over) {
     var map = Cooling.resolveValues(S.coolingId);
     return Pr.configBlock.map(function (l) {
       var m = /^; ([^ =]+) = (.*)$/.exec(l);
+      if (m && over && Object.prototype.hasOwnProperty.call(over, m[1])) return '; ' + m[1] + ' = ' + over[m[1]];
       if (!m || !Object.prototype.hasOwnProperty.call(map, m[1])) return l;
       var slots = m[2].split(',').length;
       var v = [];
@@ -769,6 +771,7 @@
    *   cooling  a cooling profile id (default NSO's default) or the resolved keys
    *   hooks    { spaghetti, timelapse, clog }: false leaves one out; default as the template
    *   labelIds the objects' label ids (default 1001, 1002 ...)
+   *   configOver  { key: value } process settings changed from the template (already in `config`), written into the CONFIG_BLOCK
    * @returns {{ok, reason, gcode, layers, stats, settings, labels}}
    */
   function plan(res, opts) {
@@ -1097,7 +1100,7 @@
     head.push('; support_material_on_wipe_tower: 0');
     head.push('; HEADER_BLOCK_END');
 
-    var outLines = head.concat(['', '; CONFIG_BLOCK_START'], configLines(Pr, S), ['; CONFIG_BLOCK_END', '', '; EXECUTABLE_BLOCK_START']);
+    var outLines = head.concat(['', '; CONFIG_BLOCK_START'], configLines(Pr, S, opts.configOver), ['; CONFIG_BLOCK_END', '', '; EXECUTABLE_BLOCK_START']);
     var mark = function (t) {
       t = Math.min(t, totalSeconds);
       return { p: Math.floor(100 * t / totalSeconds), r: Math.floor((totalSeconds - t) / 60) };

@@ -197,7 +197,7 @@ What Studio's file has that `toGcode()`'s text does not, and where each landed.
 `app-print.js`, `#menu-slice`. A SLICE button in the left bar's bottom stack
 (Slice, G-scope, Check & repair, top to bottom) opens a card shaped like the other
 left-bar cards (a `details.vp-menu`, one open at a time). It is UI only and download
-only: no Send, no printer link, no settings.
+only: no Send, no printer link.
 
 - **What it does.** Slices every piece on the plate, supports included, for the
   plate's printer profile, and reads out layers, estimated time and filament grams.
@@ -211,29 +211,49 @@ only: no Send, no printer link, no settings.
   `fixtures/print-planner/a1mini-0.4/frozen.json`); `a1` ("A1 / P1S / X1C 256") ->
   P1S 0.4 (the project inside `fixtures/supports/simple_overhang_p1s.gcode.3mf`,
   `fixtures/print-planner/p1s-0.4/frozen.json`). Any other plate has no profile and the
-  card says so. The template's values are used as they are. Print settings live
-  here, per printer profile; they never read or write G-scope's Slice settings.
+  card says so.
+- **Slice settings** (folded under the profile line): the rows G-scope's Slice side
+  has - nozzle, layer, walls, infill % and pattern, support below, brim, interface -
+  but the card's own (`slice-set-*`; it never reads or writes G-scope's `ms-slice-*`
+  rows). They start at the template's values (`settingsFromConfig`; the markup's
+  defaults are the same, shown until the open card has fetched the template), and go
+  back to them when another printer is picked or **Profile values** is pressed. A
+  value changed from the template's is written into a copy of the template's project
+  settings (`configOverlay` / `withOverlay`), so the engine, the planner, the G-code's
+  CONFIG_BLOCK (`plan(..., { configOver })`) and the file's `project_settings.config`
+  (listed as a change to the process preset) all carry it; an untouched card slices
+  byte for byte as the template does. The first layer stays the profile's. The nozzle
+  is the profile's: 0.6 is shown but off, since it needs its own start / end blocks
+  (`build()` refuses one). The interface rule is one choice with G-scope's
+  (`nsoSupportInterfaceRule` / `nsoSetSupportInterfaceRule`), read on the page and
+  handed to the worker with the rest. A changed setting makes the slice stale, as a
+  moved piece does, and the readout names the settings when they are not the
+  profile's.
 - **The plate becomes the engine's input** through G-scope's `plateObjects()` (a
   read of the plate, not an edit of G-scope): each piece's Z-up soup, moved by half
   the printer's bed (the viewport's plate is centred on 0,0, a bed starts at its
   corner), a support carrying its host and `role: 'support'` (the engine types its
   paths; the UI retypes nothing), a non-solid piece sliced with its open edges open.
-  The engine's options are the template's (`engineOptions(config)`).
+  The engine's options are the template's (`engineOptions(config)`), with the card's
+  settings written in.
 - **The slice runs on a worker** (it loads the engine files the page loaded, found
   from the page's own `<script>` tags), so the page stays alive; the card shows the
   stage ("Slicing 3 objects", "Writing the G-code and packing the file") and the
   seconds, with no invented percent, and Cancel ends the worker.
   `tools/nso_slice_pool.js` is the Node-only pool and is not used.
 - **Stale.** Export and Preview exist only for a slice of the plate as it stands; a
-  piece moved, added or removed, or another plate picked, greys them and says so.
+  piece moved, added or removed, another plate picked, or a Slice setting changed,
+  greys them and says so.
 - **Static files.** The frozen blocks and the template are fetched when Slice is
   pressed; a missing one says which path and that `fixtures/` must be served.
 - **Gate:** `npm run print:slice` (`tools/print-slice-check.js`): the plate with
   supports through `build()` -> a `.gcode.3mf` whose FEATURE lines carry Support,
-  Support interface and Support transition, the packager's checks, the refusals,
+  Support interface and Support transition, the packager's checks, the Slice
+  settings (the profile's values change nothing; a changed one reaches the slicer,
+  the CONFIG_BLOCK and project_settings.config), the refusals,
   the coupon on the P1S, the markup and the load order. The browser drive of the card belongs to
   the audit driver, not to `testSteps`.
-- **Not wired:** a settings panel; Send / a printer link; supports on the card (the
+- **Not wired:** a 0.6 nozzle profile; Send / a printer link; supports on the card (the
   Supports card is separate: Slice works on what is on the plate); a profile for the
   Prusa, Ender and Custom plates.
 

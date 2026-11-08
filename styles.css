@@ -4720,6 +4720,28 @@ body.sup-card-open #adjust-status { display: none; }
 .slice-card .sup-progress.is-indeterminate .sup-progress-fill { width: 35%; animation: sup-sweep 1.1s ease-in-out infinite; }
 .slice-card .slice-actions { display: flex; flex-direction: column; gap: 4px; }
 .slice-card .slice-actions .btn { width: 100%; margin: 0; }
+/* The card's Slice settings: a row that opens, then G-scope's rows two to a line
+   (nozzle · layer, walls · infill, pattern · support below, brim · interface). */
+.slice-card button.slice-disclose {
+  width: 100%; margin: 2px 0 0 0; padding: 4px 2px; text-align: left; cursor: pointer;
+  background: transparent; border: 1px solid transparent; border-radius: 6px;
+  color: var(--muted, #94a3b8); font: inherit; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;
+}
+.slice-card button.slice-disclose:hover { color: #e2e8f0; }
+.slice-card button.slice-disclose::before { content: "\25B8"; display: inline-block; width: 1.2em; }
+.slice-card button.slice-disclose[aria-expanded="true"]::before { content: "\25BE"; }
+#slice-settings { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; align-items: center; margin: 0 0 4px 0; }
+#slice-settings label { display: inline-flex; align-items: center; gap: 4px; margin: 0; white-space: nowrap; font-size: 11.5px; color: var(--muted, #94a3b8); }
+#slice-settings input[type="number"],
+#slice-settings select {
+  width: auto; background: var(--bg, #0f172a); border: 1px solid var(--border, #334155); color: var(--text, #e2e8f0);
+  border-radius: 6px; font-size: 12px; font-family: inherit;
+}
+#slice-settings input[type="number"] { width: 5.2em; padding: 4px 4px 4px 6px; }
+#slice-settings select { padding: 4px 6px; }
+#slice-settings > select { justify-self: start; }
+#slice-settings .slice-settings-note { grid-column: 1 / -1; margin: 2px 0 0 0; font-size: 11.5px; line-height: 1.4; color: var(--muted, #94a3b8); }
+#slice-settings > .btn { grid-column: 1 / -1; width: 100%; margin: 0; padding: 6px 10px; font-size: 11px; }
 
 /* The Crop card (app-crop-card.js): the Shape row, one readout line, CROP, Cancel, then Lift
    (its panel opens under its button). The six shapes lie three to a line. */

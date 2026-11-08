@@ -13,13 +13,24 @@
  *                        supports read as Support / Support interface /
  *                        Support transition
  * A plate the planner refuses (off the bed, too tall, no first layer) shows
- * the planner's own reason in the card. Nothing else is invented: no settings
- * here; the printer template's values are used as they are.
+ * the planner's own reason in the card.
+ *
+ * SLICE SETTINGS. The card has the rows G-scope's Slice side has (nozzle,
+ * layer, walls, infill and its pattern, support below, brim, interface), its
+ * own: they start at the plate's printer profile's values (the template's) and
+ * go back to them when another printer is picked or Profile values is pressed.
+ * A value changed from the template's is written into a copy of the template's
+ * project settings (configOverlay / withOverlay), so the engine, the planner,
+ * the G-code's CONFIG_BLOCK and the file's project_settings.config agree; an
+ * untouched card slices exactly as the template does. The nozzle is the
+ * profile's (another needs its own start / end blocks). The interface rule is
+ * one choice with G-scope's (its page keeps it: nsoSupportInterfaceRule), read
+ * on the page and handed to the worker. Changing a setting makes the slice
+ * stale, as moving a piece does.
  *
  * G-SCOPE IS NOT TOUCHED. This file reads the plate through G-scope's public
  * plateObjects() and hands a finished file to its openFile(); it never reads
- * or writes G-scope's Slice settings, and no G-scope file loads the planner.
- * Print settings belong to the plate's printer profile, not to G-scope's panel.
+ * or writes G-scope's Slice settings rows, and no G-scope file loads the planner.
  *
  * TWO HALVES, ONE FILE
  *   the pure half   profileFor, pieceObjects, build, fileName, readTemplate.
@@ -80,6 +91,92 @@
   var ENGINE = ['nso-cooling-profiles.js', 'nso-3mf.js', 'nso-3mf-read.js', 'nso_csg.js', 'nso_slicer.js',
                 'nso-print-planner.js', 'nso-gcode3mf-write.js', 'app-print.js'];
 
+  // ---- the card's Slice settings ---------------------------------------------
+  //
+  // The rows G-scope's Slice side has, kept by the card itself: { nozzle, layer, walls,
+  // density (%), pattern ('grid' | 'zigzag' | 'lines'), angle (deg), brim ('auto' |
+  // 'outer' | 'none'), interfaceRule ('column' | null) }. They start at the template's
+  // values; a value the owner changed is written into a copy of the template's project
+  // settings (configOverlay), so the engine, the planner, the G-code's CONFIG_BLOCK and
+  // the file's project_settings.config all read the same number. The nozzle is the
+  // profile's: another nozzle needs its own start / end blocks.
+  var SETTINGS_DEFAULT = { nozzle: 0.4, layer: 0.2, walls: 2, density: 15, pattern: 'grid', angle: 30, brim: 'auto', interfaceRule: null };
+  var PATTERN_TO_CONFIG = { grid: 'grid', zigzag: 'zig-zag', lines: 'line' };
+  var PATTERN_FROM_CONFIG = { grid: 'grid', 'zig-zag': 'zigzag', zigzag: 'zigzag', line: 'lines', lines: 'lines' };
+  var BRIM_TO_CONFIG = { auto: 'auto_brim', outer: 'outer_only', none: 'no_brim' };
+
+  function cfgRaw(config, key) {
+    var v = config ? config[key] : null;
+    if (Array.isArray(v)) v = v[0];
+    return v == null ? '' : String(v).trim();
+  }
+
+  /** The Slice settings a template's project settings hold (the card's starting values). */
+  function settingsFromConfig(config) {
+    var PL = lazy('nso-print-planner.js', 'NSOPrintPlanner');
+    if (!config || !PL) return Object.assign({}, SETTINGS_DEFAULT);
+    var eng = PL.engineOptions(config), o = eng.over;
+    return {
+      nozzle: eng.nozzleMm, layer: o.layerMm, walls: o.wallLoops, density: Math.round(o.sparseDensity * 100),
+      pattern: PATTERN_FROM_CONFIG[cfgRaw(config, 'sparse_infill_pattern')] || o.sparsePattern,
+      angle: o.supportThresholdDeg, brim: o.brimType, interfaceRule: null
+    };
+  }
+
+  /** The settings, each clamped to what its row takes. */
+  function cleanSettings(s) {
+    s = s || {};
+    var n = function (v, d, lo, hi) { v = parseFloat(v); return isFinite(v) ? Math.max(lo, Math.min(hi, v)) : d; };
+    var D = SETTINGS_DEFAULT;
+    return {
+      nozzle: n(s.nozzle, D.nozzle, 0.1, 2),
+      layer: Math.round(n(s.layer, D.layer, 0.05, 0.3) * 1000) / 1000,
+      walls: Math.round(n(s.walls, D.walls, 1, 10)),
+      density: Math.round(n(s.density, D.density, 0, 100)),
+      pattern: PATTERN_TO_CONFIG[s.pattern] ? s.pattern : D.pattern,
+      angle: Math.round(n(s.angle, D.angle, 1, 89)),
+      brim: BRIM_TO_CONFIG[s.brim] ? s.brim : D.brim,
+      interfaceRule: s.interfaceRule === 'column' ? 'column' : null
+    };
+  }
+
+  /**
+   * { config key: value } for every setting that differs from the template's own (only those:
+   * an untouched card slices exactly as the template does). Throws on a nozzle the profile is not.
+   */
+  function configOverlay(config, settings) {
+    var s = cleanSettings(settings), base = settingsFromConfig(config), out = {};
+    if (Math.abs(s.nozzle - base.nozzle) > 1e-6) {
+      throw new Error('This printer profile is for a ' + base.nozzle + ' mm nozzle; a ' + s.nozzle + ' mm nozzle needs its own profile.');
+    }
+    if (Math.abs(s.layer - base.layer) > 1e-6) out.layer_height = String(s.layer);
+    if (s.walls !== base.walls) out.wall_loops = String(s.walls);
+    if (s.density !== base.density) out.sparse_infill_density = s.density + '%';
+    if (s.pattern !== base.pattern) out.sparse_infill_pattern = PATTERN_TO_CONFIG[s.pattern];
+    if (s.angle !== base.angle) out.support_threshold_angle = String(s.angle);
+    if (s.brim !== base.brim) out.brim_type = BRIM_TO_CONFIG[s.brim];
+    return out;
+  }
+
+  /** A copy of the template's project settings with the overlay written in (and listed as the process's own changes). */
+  function withOverlay(config, over) {
+    var keys = Object.keys(over);
+    if (!keys.length) return config;
+    var out = Object.assign({}, config);
+    keys.forEach(function (k) {
+      out[k] = Array.isArray(config[k]) ? config[k].map(function () { return over[k]; }) : over[k];
+    });
+    var diffs = config.different_settings_to_system;
+    if (Array.isArray(diffs) && diffs.length) {
+      diffs = diffs.slice();
+      var had = diffs[0] ? String(diffs[0]).split(';').filter(Boolean) : [];
+      keys.forEach(function (k) { if (had.indexOf(k) < 0) had.push(k); });
+      diffs[0] = had.sort().join(';');
+      out.different_settings_to_system = diffs;
+    }
+    return out;
+  }
+
   /** The profile for a plate picker id, or null. */
   function profileFor(plateId) {
     return Object.prototype.hasOwnProperty.call(PROFILES, plateId) ? PROFILES[plateId] : null;
@@ -131,7 +228,8 @@
    * Slice the objects, plan the G-code, pack the .gcode.3mf.
    * @param objects  pieceObjects()
    * @param assets   { config (the template's project settings), printer (the frozen start / end) }
-   * @param opts     { onStage(name, info) }  'slicing' then 'writing'
+   * @param opts     { onStage(name, info), settings }  stages 'slicing' then 'writing'; `settings` are the card's
+   *                 Slice settings (null: the template's values, and the interface rule G-scope's page holds)
    * @returns {Promise<{ok, reason, bytes, stats, features, objects}>}  never rejects:
    *   a refusal (the engine's, the planner's) comes back as ok:false with its words.
    */
@@ -141,9 +239,13 @@
     var SL = lazy('nso_slicer.js', 'NSO_Slicer'), PL = lazy('nso-print-planner.js', 'NSOPrintPlanner');
     if (!SL) return Promise.resolve({ ok: false, reason: 'The slicer (nso_slicer.js) did not load - check console.' });
     if (!PL) return Promise.resolve({ ok: false, reason: 'The print planner (nso-print-planner.js) did not load - check console.' });
+    var settings = opts.settings ? cleanSettings(opts.settings) : null, over = {}, config = assets.config;
     return Promise.resolve().then(function () {
-      var eng = PL.engineOptions(assets.config);
+      if (settings) { over = configOverlay(assets.config, settings); config = withOverlay(assets.config, over); }
+      var eng = PL.engineOptions(config);
       var o = SL.defaultsFor(eng.nozzleMm, Object.assign({ emitGcode: false }, eng.over));
+      /* the planner reads two patterns off a config (grid, else zigzag); the card's own is the slicer's */
+      if (settings) o.sparsePattern = settings.pattern;
       /* a sheet of more interface layers than the slicer's default says so (the card's Dense: 3): the slicer types its top 3 layers interface, as G-scope's Slice does */
       var ni = 0;
       objects.forEach(function (ob) { if (ob.interfaceLayers > ni) ni = ob.interfaceLayers; });
@@ -152,28 +254,37 @@
       var sl = 0;
       objects.forEach(function (ob) { if (ob.sheetLayerMm > sl) sl = ob.sheetLayerMm; });
       if (sl > 0 && (eng.over || {}).supportLayerMaxMm == null) o.supportLayerMaxMm = 0.28;
-      /* the interface rule G-scope's Slice settings hold (docs/SUPPORT-GATE.md): the same on the printed file as in the preview */
-      var rule = typeof window !== 'undefined' && typeof window.nsoSupportInterfaceRule === 'function' ? window.nsoSupportInterfaceRule() : null;
+      /* the interface rule (docs/SUPPORT-GATE.md): the card's setting - one choice shared with G-scope's Slice settings, read on the
+         page and handed in, since a worker has no window - else the page's own; the same on the printed file as in the preview */
+      var rule = settings ? settings.interfaceRule
+        : typeof window !== 'undefined' && typeof window.nsoSupportInterfaceRule === 'function' ? window.nsoSupportInterfaceRule() : null;
       if (rule && (eng.over || {}).supportInterfaceRule == null) o.supportInterfaceRule = rule;
       stage('slicing', { objects: objects.length });
       return SL.run(objects, o);
     }).then(function (res) {
       if (!res.ok) return { ok: false, reason: 'Slice refused: ' + res.reason };
       stage('writing', { layers: res.planes.length });
-      return PL.toGcode3mf(res, { config: assets.config, printer: assets.printer }).then(function (out) {
+      return PL.toGcode3mf(res, { config: config, printer: assets.printer, configOver: over }).then(function (out) {
         var seen = {};
         out.plan.layers.forEach(function (l) { l.features.forEach(function (f) { seen[f] = 1; }); });
         var st = out.plan.stats;
         return {
           ok: true, reason: '', bytes: out.bytes, features: Object.keys(seen), objects: out.plan.labels.length,
           labels: out.plan.labels.map(function (l) { return { id: l.id, name: l.name, index: l.index }; }),     // the gcode's OBJECT_ID of each object, in the order they were given
-          stats: { layers: st.layers, seconds: st.seconds.total, grams: st.grams, filamentMm: st.filamentMm, maxZ: st.maxZ }
+          stats: { layers: st.layers, seconds: st.seconds.total, grams: st.grams, filamentMm: st.filamentMm, maxZ: st.maxZ },
+          settings: settings, changed: Object.keys(over)                                                         // what was sliced with, and what differs from the profile
         };
       });
     }).catch(function (err) {
       // the planner's refusal (toGcode3mf rejects with plan().reason), or whatever stopped the slice
       return { ok: false, reason: (err && err.message) || String(err) };
     });
+  }
+
+  /** The settings in a few words, for the readout: "0.12 mm layers, 3 walls, 20 % grid, support below 30°, brim auto". */
+  function settingsWords(st) {
+    return st.layer + ' mm layers, ' + st.walls + ' wall' + (st.walls === 1 ? '' : 's') + ', ' + st.density + ' % ' + st.pattern +
+      ', support below ' + st.angle + '°, brim ' + st.brim;
   }
 
   /** Seconds as "1 h 05 min" / "42 min" / "30 s". */
@@ -191,8 +302,8 @@
   }
 
   /** Worker entry (see the card): build, with the file's bytes moved rather than copied. */
-  function buildForWorker(objects, assets, onStage) {
-    return build(objects, assets, { onStage: onStage }).then(function (r) {
+  function buildForWorker(objects, assets, onStage, settings) {
+    return build(objects, assets, { onStage: onStage, settings: settings || null }).then(function (r) {
       var b = r.bytes, move = [];
       if (b) {
         if (b.byteOffset !== 0 || b.byteLength !== b.buffer.byteLength) r.bytes = b = b.slice();
@@ -204,7 +315,9 @@
 
   var api = {
     PROFILES: PROFILES, ENGINE: ENGINE, profileFor: profileFor, readTemplate: readTemplate, pieceObjects: pieceObjects,
-    fileName: fileName, build: build, fmtTime: fmtTime, describe: describe, buildForWorker: buildForWorker
+    fileName: fileName, build: build, fmtTime: fmtTime, describe: describe, buildForWorker: buildForWorker,
+    SETTINGS_DEFAULT: SETTINGS_DEFAULT, settingsFromConfig: settingsFromConfig, cleanSettings: cleanSettings,
+    configOverlay: configOverlay, withOverlay: withOverlay
   };
 
   // ===========================================================================
@@ -214,7 +327,8 @@
   if (typeof document === 'undefined' || !document.getElementById) return api;
 
   var $ = function (id) { return document.getElementById(id); };
-  var S = { busy: false, job: null, result: null, sig: null, pieces: null, profile: null, assets: {}, timer: null, t0: 0, stage: '', hook: null, exporting: false };
+  var S = { busy: false, job: null, result: null, sig: null, setSig: null, pieces: null, profile: null, assets: {}, timer: null, t0: 0, stage: '', hook: null, exporting: false,
+            seededFor: null, touched: false };
 
   function say(msg, isErr) {
     if (typeof setStatus === 'function') setStatus(msg, !!isErr);
@@ -245,6 +359,62 @@
                settings: m && m.slicerSettings ? Object.assign({}, m.slicerSettings) : null };      // a support's own slicer overrides ride into a 3MF
     });
   }
+
+  // ---- the card's Slice settings -----------------------------------------------
+
+  var SET_IDS = ['slice-set-nozzle', 'slice-set-layer', 'slice-set-walls', 'slice-set-density', 'slice-set-pattern',
+                 'slice-set-angle', 'slice-set-brim', 'slice-set-iface'];
+
+  /** The interface rule, one choice shared with G-scope's Slice settings (its page keeps it). */
+  function interfaceRule() {
+    return typeof root.nsoSupportInterfaceRule === 'function' && root.nsoSupportInterfaceRule() === 'column' ? 'column' : null;
+  }
+
+  /** The settings as the card's rows hold them, clamped. */
+  function readSettings() {
+    var v = function (id) { var el = $(id); return el ? el.value : undefined; };
+    return cleanSettings({
+      nozzle: v('slice-set-nozzle'), layer: v('slice-set-layer'), walls: v('slice-set-walls'), density: v('slice-set-density'),
+      pattern: v('slice-set-pattern'), angle: v('slice-set-angle'), brim: v('slice-set-brim'),
+      interfaceRule: $('slice-set-iface') ? v('slice-set-iface') : interfaceRule()
+    });
+  }
+
+  /** The rows to these values (the interface row shows the shared choice). */
+  function showSettings(st) {
+    var set = function (id, val) { var el = $(id); if (el && val != null) el.value = String(val); };
+    set('slice-set-nozzle', st.nozzle); set('slice-set-layer', st.layer); set('slice-set-walls', st.walls);
+    set('slice-set-density', st.density); set('slice-set-pattern', st.pattern); set('slice-set-angle', st.angle);
+    set('slice-set-brim', st.brim);
+    set('slice-set-iface', interfaceRule() || '');
+  }
+
+  /** The rows back to the profile's values: the template's when the card has it, else the profile's usual ones (the same, for both
+   *  profiles) until the open card has fetched it (seedFromTemplate). */
+  function seedSettings(profile) {
+    S.seededFor = profile ? profile.id : null;
+    S.touched = false;
+    var known = profile && S.assets[profile.id];
+    showSettings(known ? settingsFromConfig(known.config) : SETTINGS_DEFAULT);
+  }
+
+  /** The open card fetches its profile's template once, and rows nobody has changed take its values. */
+  function seedFromTemplate(profile) {
+    if (!profile || S.assets[profile.id] || S.touched || S.seeding === profile.id) return;
+    S.seeding = profile.id;
+    loadAssets(profile).then(function (a) {
+      S.seeding = null;
+      if (S.seededFor === profile.id && !S.touched && !S.busy) { showSettings(settingsFromConfig(a.config)); refresh(); }
+    }, function () { S.seeding = null; /* not served: the rows keep the usual values, and Slice says which file is missing */ });
+  }
+
+  function setSettingsOpen(on) {
+    var box = $('slice-settings'), b = $('slice-settings-toggle');
+    if (box) box.hidden = !on;
+    if (b) b.setAttribute('aria-expanded', String(!!on));
+  }
+
+  function settingsSignature() { return JSON.stringify(readSettings()); }
 
   /** What the plate is now, in a line: a slice made from another plate is not this one's. */
   function plateSignature() {
@@ -292,7 +462,7 @@
    * comes back to onStage. A page that cannot start a worker slices in-thread
    * (and freezes while it does).
    */
-  function runAway(objects, assets, onStage) {
+  function runAway(objects, assets, onStage, settings) {
     var urls = engineUrls();
     var canWorker = urls && typeof Worker === 'function' && typeof Blob === 'function' && root.URL && URL.createObjectURL;
     if (!canWorker) {
@@ -300,14 +470,14 @@
       return {
         cancel: function () { dead = true; },
         promise: new Promise(function (go) { setTimeout(go, 0); }).then(function () {
-          return build(objects, assets, { onStage: onStage });
+          return build(objects, assets, { onStage: onStage, settings: settings || null });
         }).then(function (r) { if (dead) return new Promise(function () {}); return r; })
       };
     }
     var code = 'importScripts(' + urls.map(function (u) { return JSON.stringify(u); }).join(',') + ');\n' +
       'self.onmessage = function (e) {\n' +
       '  var d = e.data;\n' +
-      '  self.NSO_Print.buildForWorker(d.objects, d.assets, function (s, info) { self.postMessage({ stage: s, info: info }); })\n' +
+      '  self.NSO_Print.buildForWorker(d.objects, d.assets, function (s, info) { self.postMessage({ stage: s, info: info }); }, d.settings)\n' +
       '    .then(function (o) { self.postMessage({ result: o.result }, o.move); },\n' +
       '          function (err) { self.postMessage({ error: (err && err.message) || String(err) }); });\n' +
       '};\n';
@@ -322,7 +492,7 @@
       };
       w.onerror = function (ev) { done = true; reject(new Error((ev && ev.message) || 'the slicer stopped')); };
       var move = objects.map(function (o) { return o.soup.buffer; });
-      w.postMessage({ objects: objects, assets: assets }, move);
+      w.postMessage({ objects: objects, assets: assets, settings: settings || null }, move);
     }).then(function (r) { cleanup(); return r; }, function (err) { cleanup(); throw err; });
     function cleanup() { try { w.terminate(); } catch (e) { /* gone */ } try { URL.revokeObjectURL(url); } catch (e2) { /* ditto */ } }
     return {
@@ -335,6 +505,7 @@
 
   function setBusy(on) {
     S.busy = on;
+    SET_IDS.concat(['slice-settings-reset']).forEach(function (id) { var el = $(id); if (el) el.disabled = !!on; });
     var go = $('btn-slice-go'), cancel = $('btn-slice-cancel'), bar = $('slice-progress'), stage = $('slice-stage');
     if (go) go.disabled = on;
     if (cancel) cancel.hidden = !on;
@@ -358,7 +529,7 @@
     stageText();
   }
 
-  function isFresh() { return !!(S.result && S.result.ok && S.sig === plateSignature()); }
+  function isFresh() { return !!(S.result && S.result.ok && S.sig === plateSignature() && S.setSig === settingsSignature()); }
 
   /** Export and Preview exist only for a slice of the plate as it stands. */
   function syncActions() {
@@ -375,10 +546,18 @@
         ' plate yet. Slice works on the A1 mini and the A1 / P1S / X1C plate.';
       line.classList.toggle('is-bad', !p);
     }
-    if (S.result && S.result.ok && !S.busy && !isFresh()) {
-      readout('The plate changed since this slice. Press Slice to slice it again.', true);
-    }
+    // a printer picked since the rows were set starts them again at its profile's values
+    if (!S.busy && (p ? p.id : null) !== S.seededFor) seedSettings(p);
+    var menu = $('menu-slice'), iface = $('slice-set-iface');
+    if (menu && menu.open) seedFromTemplate(p);
+    if (iface && !S.busy) iface.value = interfaceRule() || '';           // G-scope may have changed the shared choice
+    if (S.result && S.result.ok && !S.busy && !isFresh()) readout(staleWords(), true);
     syncActions();
+  }
+
+  function staleWords() {
+    return S.sig !== plateSignature() ? 'The plate changed since this slice. Press Slice to slice it again.'
+      : 'The Slice settings changed since this slice. Press Slice to slice it again.';
   }
 
   /**
@@ -398,8 +577,9 @@
     try { pieces = readPieces(); } catch (err) { console.error(err); pieces = null; }
     if (pieces === null) return Promise.resolve(stop('The plate reader (G-scope\'s) did not load - check console.'));
     if (!pieces.length) return Promise.resolve(stop('Nothing on the plate to slice.'));
+    var settings = readSettings();
     S.result = null; S.pieces = null;
-    var sig = plateSignature();
+    var sig = plateSignature(), setSig = JSON.stringify(settings);
     readout('', false);
     S.hook = hook || null;
     S.t0 = Date.now(); S.stage = 'Loading the ' + profile.short + ' profile';
@@ -421,16 +601,17 @@
     loadAssets(profile).then(function (assets) {
       if (mine.cancelled) return null;
       var objects = pieceObjects(pieces, assets.printer.bed);
-      mine.run = runAway(objects, assets, onStage);
+      mine.run = runAway(objects, assets, onStage, settings);
       return mine.run.promise;
     }).then(function (r) {
       if (mine.cancelled || !r) return ended({ ok: false, reason: 'Slice cancelled.', cancelled: true });
       S.job = null;
       if (!r.ok) { setBusy(false); S.result = null; readout(r.reason, true); say('Slice: ' + r.reason, true); return ended({ ok: false, reason: r.reason }); }
-      S.result = r; S.sig = sig; S.pieces = pieces; S.profile = profile;
+      S.result = r; S.sig = sig; S.setSig = setSig; S.pieces = pieces; S.profile = profile; S.settings = settings;
       setBusy(false);
       var sup = pieces.filter(function (p) { return p.support && !p.brim; }).length;
-      readout(describe(r) + ' - ' + pieces.length + ' object' + (pieces.length === 1 ? '' : 's') + (sup ? ' (' + sup + ' support' + (sup === 1 ? '' : 's') + ')' : ''), false);
+      readout(describe(r) + ' - ' + pieces.length + ' object' + (pieces.length === 1 ? '' : 's') + (sup ? ' (' + sup + ' support' + (sup === 1 ? '' : 's') + ')' : '') +
+              (r.changed && r.changed.length ? ' - ' + settingsWords(settings) : ''), false);
       say('Sliced for the ' + profile.short + ': ' + describe(r));
       refresh();                          // a piece moved while it ran: the readout says so, and Export stays shut
       return ended({ ok: true, reason: '', line: describe(r), fresh: isFresh() });
@@ -461,7 +642,7 @@
   /** The finished file, or null (with the reason in the card) when the plate has moved on. */
   function freshFile() {
     if (!S.result || !S.result.ok) return null;
-    if (!isFresh()) { refresh(); readout('The plate changed since this slice. Press Slice to slice it again.', true); return null; }
+    if (!isFresh()) { refresh(); readout(staleWords(), true); return null; }
     return { bytes: S.result.bytes, name: fileName(S.pieces, S.profile) };
   }
 
@@ -487,7 +668,7 @@
     var menu = $('menu-slice');
     if (menu) menu.open = false;
     // a copy: G-scope reads the bytes, and the card keeps its file for Export
-    var rec = { name: f.name, bytes: f.bytes, pieces: S.pieces, labels: S.result.labels || [], profile: S.profile };
+    var rec = { name: f.name, bytes: f.bytes, pieces: S.pieces, labels: S.result.labels || [], profile: S.profile, settings: S.settings || null };
     var opened = MS.openFile(f.name, f.bytes.slice().buffer);
     // G-scope's Export card then offers this slice (exportSlice): the document carries what it was made from
     if (opened && opened.then) opened.then(function (d) {
@@ -559,8 +740,8 @@
       if (!idx) { saveBytes(rec.bytes, rec.name); say('Downloaded ' + rec.name); return Promise.resolve({ ok: true, name: rec.name }); }
       exportBusy(true, 'Slicing ' + what + ' (' + sub.length + ' object' + (sub.length === 1 ? '' : 's') + ')...');
       return loadAssets(rec.profile).then(function (assets) {
-        var run = runAway(pieceObjects(sub, assets.printer.bed), assets, function () {});
-        return run ? run.promise : build(pieceObjects(sub, assets.printer.bed), assets, {});
+        var run = runAway(pieceObjects(sub, assets.printer.bed), assets, function () {}, rec.settings);
+        return run ? run.promise : build(pieceObjects(sub, assets.printer.bed), assets, { settings: rec.settings || null });
       }).then(function (r) {
         if (!r.ok) return fail(r.reason);
         var name = fileName(sub, rec.profile);
@@ -622,6 +803,17 @@
     bind('btn-slice-cancel', cancel);
     bind('btn-slice-export', exportFile);
     bind('btn-slice-preview', previewInGscope);
+    bind('slice-settings-toggle', function () { var box = $('slice-settings'); setSettingsOpen(!!(box && box.hidden)); });
+    bind('slice-settings-reset', function () { seedSettings(profileFor(plateId())); refresh(); });
+    SET_IDS.forEach(function (id) {
+      var el = $(id);
+      if (!el) return;
+      el.addEventListener('change', function () {
+        if (id !== 'slice-set-iface') S.touched = true;           // the interface is a preference, not a profile value
+        if (id === 'slice-set-iface' && typeof root.nsoSetSupportInterfaceRule === 'function') root.nsoSetSupportInterfaceRule(el.value);
+        refresh();
+      });
+    });
     bind('ms-btn-plate-gcode3mf', function () { exportFromCard('gcode3mf', false); });
     bind('ms-btn-plate-3mf', function () { exportFromCard('3mf', false); });
     bind('ms-btn-sel-gcode3mf', function () { exportFromCard('gcode3mf', true); });

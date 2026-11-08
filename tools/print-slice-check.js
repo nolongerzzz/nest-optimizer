@@ -181,6 +181,69 @@ async function main() {
   check('...the readout line has layers, time and grams', /^\d+ layers - .+ - \d+\.\d g filament$/.test(PRINT.describe(out)), PRINT.describe(out));
 
   // ===========================================================================
+  section('3b. The card\'s Slice settings: the profile\'s values, and a changed one in every reader of the file');
+  // ===========================================================================
+  {
+    const base = PRINT.settingsFromConfig(tpl);
+    check('the settings start at the A1 mini template\'s values: 0.4 nozzle, 0.2 mm layers, 2 walls, 15 % grid, support below 30°, auto brim',
+      JSON.stringify(base) === JSON.stringify({ nozzle: 0.4, layer: 0.2, walls: 2, density: 15, pattern: 'grid', angle: 30, brim: 'auto', interfaceRule: null }), JSON.stringify(base));
+    check('...which are the card\'s markup defaults too (shown before the template is fetched)', JSON.stringify(PRINT.SETTINGS_DEFAULT) === JSON.stringify(base));
+    check('an untouched card changes nothing in the template', Object.keys(PRINT.configOverlay(tpl, base)).length === 0 && PRINT.withOverlay(tpl, {}) === tpl);
+    let threw = '';
+    try { PRINT.configOverlay(tpl, Object.assign({}, base, { nozzle: 0.6 })); } catch (e) { threw = e.message; }
+    check('a nozzle the profile is not is refused, not sliced with the 0.4 blocks', /0\.6 mm nozzle needs its own profile/.test(threw), threw);
+    const cl = PRINT.cleanSettings({ layer: '9', walls: '0', density: '150', pattern: 'gyroid', angle: '0', brim: 'x', interfaceRule: 'column' });
+    check('each row is clamped to what it takes, and an unknown pattern / brim is the default', cl.layer === 0.3 && cl.walls === 1 && cl.density === 100 && cl.pattern === 'grid' && cl.angle === 1 && cl.brim === 'auto' && cl.interfaceRule === 'column', JSON.stringify(cl));
+
+    const two = objs.slice(0, 2);
+    const same = await PRINT.build(two, { config: tpl, printer: a1 }, { settings: Object.assign({}, base) });
+    const plain = await PRINT.build(two, { config: tpl, printer: a1 }, {});
+    check('the profile\'s values slice to the same file as no settings at all (the G-code, byte for byte)', same.ok && plain.ok &&
+      L.text(await L.R.openZip(same.bytes).read('Metadata/plate_1.gcode')) === L.text(await L.R.openZip(plain.bytes).read('Metadata/plate_1.gcode')));
+
+    const want = { nozzle: 0.4, layer: 0.1, walls: 3, density: 25, pattern: 'lines', angle: 40, brim: 'none', interfaceRule: null };
+    const SLm = require(path.join(ROOT, 'nso_slicer.js')), realRun = SLm.run;
+    let seenOpts = null;
+    SLm.run = function (ob, o) { seenOpts = o; return realRun.apply(this, arguments); };
+    let changed;
+    try { changed = await PRINT.build(two, { config: tpl, printer: a1 }, { settings: want }); } finally { SLm.run = realRun; }
+    check('changed settings slice', changed.ok, changed.reason);
+    if (changed.ok) {
+      check('...the slicer is given them: 0.1 mm layers (first layer the profile\'s 0.2), 3 walls, 25 % lines, support below 40°, no brim',
+        seenOpts.layerMm === 0.1 && seenOpts.firstLayerMm === 0.2 && seenOpts.wallLoops === 3 && Math.abs(seenOpts.sparseDensity - 0.25) < 1e-9 &&
+          seenOpts.sparsePattern === 'lines' && seenOpts.supportThresholdDeg === 40 && seenOpts.brimType === 'none',
+        JSON.stringify({ l: seenOpts.layerMm, f: seenOpts.firstLayerMm, w: seenOpts.wallLoops, d: seenOpts.sparseDensity, p: seenOpts.sparsePattern, a: seenOpts.supportThresholdDeg, b: seenOpts.brimType }));
+      check('...half the layer height is about twice the layers (' + plain.stats.layers + ' -> ' + changed.stats.layers + ')',
+        changed.stats.layers > plain.stats.layers * 1.8 && changed.stats.layers < plain.stats.layers * 2.2);
+      check('...build() says what it sliced with and which template keys changed',
+        JSON.stringify(changed.changed.sort()) === JSON.stringify(['brim_type', 'layer_height', 'sparse_infill_density', 'sparse_infill_pattern', 'support_threshold_angle', 'wall_loops']), changed.changed.join(', '));
+      const cz = L.R.openZip(changed.bytes);
+      const cg = L.text(await cz.read('Metadata/plate_1.gcode'));
+      const cb = k => (new RegExp('^; ' + k + ' = (.*)$', 'm').exec(cg) || [])[1];
+      check('...the G-code\'s CONFIG_BLOCK records them (layer_height 0.1, wall_loops 3, 25%, line, 40, no_brim), the first layer stays 0.2',
+        cb('layer_height') === '0.1' && cb('wall_loops') === '3' && cb('sparse_infill_density') === '25%' && cb('sparse_infill_pattern') === 'line' &&
+          cb('support_threshold_angle') === '40' && cb('brim_type') === 'no_brim' && cb('initial_layer_print_height') === '0.2',
+        ['layer_height', 'wall_loops', 'sparse_infill_density', 'sparse_infill_pattern', 'support_threshold_angle', 'brim_type'].map(cb).join(' '));
+      const cps = JSON.parse(L.text(await cz.read('Metadata/project_settings.config')));
+      check('...and so does project_settings.config, each listed as a change to the process preset',
+        cps.layer_height === '0.1' && cps.wall_loops === '3' && cps.sparse_infill_density === '25%' && cps.sparse_infill_pattern === 'line' &&
+          cps.support_threshold_angle === '40' && cps.brim_type === 'no_brim' &&
+          ['layer_height', 'wall_loops', 'brim_type'].every(k => cps.different_settings_to_system[0].split(';').includes(k)),
+        JSON.stringify([cps.layer_height, cps.wall_loops, cps.different_settings_to_system[0]]));
+      check('...the template the card holds is not changed by it', tpl.layer_height === '0.2' && tpl.wall_loops === '2');
+      check('...the packager still reads its own file, and the G-code md5 holds',
+        !!(await G3.read(changed.bytes)) && crypto.createHash('md5').update(Buffer.from(cg)).digest('hex').toUpperCase() === L.text(await cz.read('Metadata/plate_1.gcode.md5')).trim());
+    }
+    const ruleSeen = [];
+    SLm.run = function (ob, o) { ruleSeen.push(o.supportInterfaceRule || null); return realRun.apply(this, arguments); };
+    try {
+      await PRINT.build(two, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { interfaceRule: 'column' }) });
+      await PRINT.build(two, { config: tpl, printer: a1 }, { settings: Object.assign({}, base) });
+    } finally { SLm.run = realRun; }
+    check('the interface rule is handed in with the settings (a worker has no window to read it from)', ruleSeen[0] === 'column' && ruleSeen[1] === null, JSON.stringify(ruleSeen));
+  }
+
+  // ===========================================================================
   section('4. A plate the planner refuses shows the planner\'s reason');
   // ===========================================================================
   const off = await PRINT.build(PRINT.pieceObjects(asViewportPieces(plate.objs.slice(0, 1), a1.bed, 110), a1.bed), { config: tpl, printer: a1 });
@@ -239,7 +302,9 @@ async function main() {
     /<button id="btn-microscope" class="vp-bar-btn btn-gscope" type="button"\s+aria-label="G-scope"\s+title="G-scope: put the plate under the lens[^"]*">G-scope<\/button>\s*<input type="file" id="ms-input" accept="\.stl,\.3mf" class="hidden-quiet" \/>/.test(html));
   check('the card is a column card like the others: a details.vp-menu with a summary and a .vp-menu-body holding every button it has',
     (() => { const m = /<details class="vp-menu vp-shell-menu vp-col-menu[^"]*" id="menu-slice"[\s\S]*?<\/details>/.exec(html);
-      return !!m && /<summary class="vp-bar-btn"[^>]*>Slice<\/summary>/.test(m[0]) && ['btn-slice-go', 'btn-slice-cancel', 'btn-slice-export', 'btn-slice-preview', 'slice-profile', 'slice-readout', 'slice-progress']
+      return !!m && /<summary class="vp-bar-btn"[^>]*>Slice<\/summary>/.test(m[0]) && ['btn-slice-go', 'btn-slice-cancel', 'btn-slice-export', 'btn-slice-preview', 'slice-profile', 'slice-readout', 'slice-progress',
+        'slice-settings-toggle', 'slice-settings', 'slice-set-nozzle', 'slice-set-layer', 'slice-set-walls', 'slice-set-density', 'slice-set-pattern',
+        'slice-set-angle', 'slice-set-brim', 'slice-set-iface', 'slice-settings-reset']
         .every(id => m[0].includes('id="' + id + '"')) && /Export \.gcode\.3mf/.test(m[0]) && /Preview in G-scope/.test(m[0]); })());
   const tags = [...html.replace(/<!--[\s\S]*?-->/g, '').matchAll(/<script src="([^"?]+)(?:\?v=\w+)?"/g)].map(m => m[1]);
   const idx = f => tags.indexOf(f);
