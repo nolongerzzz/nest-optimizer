@@ -404,7 +404,7 @@ var NSO_SUPPORTS_CARD = (function () {
     return m.nsoSupportEdits;
   }
   function memOf(id) {
-    if (!S.mem[id]) S.mem[id] = { unreach: {}, built: false, members: [], zonesEmpty: [], builtKnobs: '' };
+    if (!S.mem[id]) S.mem[id] = { unreach: {}, selfHeld: {}, built: false, members: [], zonesEmpty: [], builtKnobs: '' };
     return S.mem[id];
   }
   /* What the user fed in, on the piece: tips and toggled-off spots in its own
@@ -581,7 +581,8 @@ var NSO_SUPPORTS_CARD = (function () {
     });
     var un = memOf(S.hostId).unreach, lost = {}, out = {};
     Object.keys(un).forEach(function (r) { un[r].forEach(function (k) { lost[k] = true; }); });
-    eff.beacons.forEach(function (b) { out[b.key] = b.off ? 'off' : holds[b.key] || (lost[b.key] ? 'unreachable' : 'planned'); });
+    var selfHeld = memOf(S.hostId).selfHeld || {};      /* a spot on a step the part holds (no overhang at the threshold angle): held, by the part */
+    eff.beacons.forEach(function (b) { out[b.key] = b.off ? 'off' : holds[b.key] || (selfHeld[b.key] ? 'held' : (lost[b.key] ? 'unreachable' : 'planned')); });
     return out;
   }
   /* What one area is, over everything on the piece: HELD when every one of its
@@ -1378,11 +1379,24 @@ var NSO_SUPPORTS_CARD = (function () {
         if (sd.holds[cv.byKey] && !sd.holds[cv.key]) { sd.holds[cv.key] = sd.holds[cv.byKey]; sd.keys.push(cv.key); }
       });
     });
+    /* THIN TIPS (plan.oneTrunk.thin, docs/SUPPORT-ONE-TRUNK.md item 25): a ledge no strut fits is held by a thin column the planner drew - it
+       goes with the area's first support (a shell of its own in it), or is the area's support when nothing else was built */
+    ((a.t.oneTrunk && a.t.oneTrunk.thin) || []).forEach(function (tc) {
+      if (!tc.soup || !tc.soup.length) return;
+      var sd = solids[0];
+      if (!sd) { sd = { soup: new Float32Array(0), keys: [], holds: {}, landing: 'plate', regionIds: [a.rid], feet: [] }; solids.push(sd); }
+      var joined = new Float32Array(sd.soup.length + tc.soup.length);
+      joined.set(sd.soup, 0); joined.set(tc.soup, sd.soup.length);
+      sd.soup = joined;
+      sd.holds[tc.key] = tc.rest ? 'rest' : 'held'; sd.keys.push(tc.key);
+    });
+    /* ...a spot on a step narrower than a layer's overhang at the threshold angle is no overhang: the part holds it (plan.oneTrunk.selfHeld) */
+    var selfHeld = ((a.t.oneTrunk && a.t.oneTrunk.selfHeld) || []).map(function (sh) { return sh.key; });     /* kept by the card (memOf().selfHeld): held whether or not a support was built */
     /* ...and a spot on the plate's first layers (the low edge of a tipped part) is held by the plate: said held, with the first support */
     ((a.t.oneTrunk && a.t.oneTrunk.onPlate) || []).forEach(function (op) {
       if (solids.length && !solids[0].holds[op.key]) { solids[0].holds[op.key] = 'held'; solids[0].keys.push(op.key); }
     });
-    return { ok: true, rid: a.rid, solids: solids, unreachable: a.unreach, sideMm: a.t.sideMm, plateZ: a.t.plateZ, reason: a.t.reason,
+    return { ok: true, rid: a.rid, solids: solids, unreachable: a.unreach, selfHeld: selfHeld, sideMm: a.t.sideMm, plateZ: a.t.plateZ, reason: a.t.reason,
       members: u.members || [], zonesEmpty: a.t.zonesEmpty || null };
   }
 
@@ -1478,13 +1492,13 @@ var NSO_SUPPORTS_CARD = (function () {
   function snapshot() {
     var m = modelOf(S.hostId), hostId = S.hostId;
     var ops = editsOf(m).ops.slice(), serial = editsOf(m).serial;
-    var unreach = JSON.parse(JSON.stringify(memOf(hostId).unreach)), built = memOf(hostId).built;
+    var unreach = JSON.parse(JSON.stringify(memOf(hostId).unreach)), selfHeld = Object.assign({}, memOf(hostId).selfHeld || {}), built = memOf(hostId).built;
     var feed = feedCopy(m.nsoSupportFeed), members = memOf(hostId).members, zonesEmpty = memOf(hostId).zonesEmpty, builtKnobs = memOf(hostId).builtKnobs;
     return function () {
       var mm = modelOf(hostId);
       if (mm) mm.nsoSupportEdits = { ops: ops.slice(), serial: serial };
       if (mm) mm.nsoSupportFeed = feedCopy(feed) || undefined;
-      memOf(hostId).unreach = JSON.parse(JSON.stringify(unreach));
+      memOf(hostId).unreach = JSON.parse(JSON.stringify(unreach)); memOf(hostId).selfHeld = Object.assign({}, selfHeld);
       memOf(hostId).members = members; memOf(hostId).zonesEmpty = zonesEmpty;
       memOf(hostId).built = built; memOf(hostId).builtKnobs = builtKnobs;
       S.sel = null; S.hover = null;
@@ -1804,7 +1818,8 @@ var NSO_SUPPORTS_CARD = (function () {
      does not land (the caller puts everything back). c: { hostId, hm, host, D, o }. */
   function placeResults(c, results, added) {
     var mem = memOf(c.hostId), o = c.o, n = 0;
-    mem.unreach = {};
+    mem.unreach = {}; mem.selfHeld = {};
+    results.forEach(function (r) { (r.selfHeld || []).forEach(function (k) { mem.selfHeld[k] = true; }); });
     /* a fed build names its members (the eraser's targets), and which
        circles nothing landed in (empty in every area that was planned) */
     mem.members = S.mode === 'auto' ? [] : [].concat.apply([], results.map(function (r) { return r.members || []; }));
@@ -2023,7 +2038,7 @@ var NSO_SUPPORTS_CARD = (function () {
     var undo = snapshot();
     var removed = removePieces(ids);
     if (reset) {
-      mem.unreach = {}; mem.built = false; mem.members = []; mem.zonesEmpty = []; mem.builtKnobs = '';
+      mem.unreach = {}; mem.selfHeld = {}; mem.built = false; mem.members = []; mem.zonesEmpty = []; mem.builtKnobs = '';
       var mh = modelOf(S.hostId);
       if (mh) mh.nsoSupportFeed = undefined;                         // the card's reset: the user's points, circles and erasures go too
       if (S.tool === 'erase') S.tool = 'tips';

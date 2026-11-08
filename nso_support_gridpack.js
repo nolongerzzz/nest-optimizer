@@ -192,7 +192,20 @@
   var SHEET_SINK_MM = 0.015;   /* weld() only: T1's underside this far into the caps, inside their 0.02 mm upright band (joinSheets) */
   var TIP_LEVELS = [0.05, 0.3, 0.6, 1.0, 1.5];   /* mm below a tip where the tip zone is swept for walls */
   var TIP_RISE_SIDES = 2;     /* a pickup stub's vertical last run, x the strut side */
-  var NUDGE_STEPS = [0.25, 0.5, 0.75, 1];   /* x the strut side: how far a tip may move off a wall */
+  var NUDGE_STEPS = [0.25, 0.5, 0.75, 1];
+  /* THIN TIPS (docs/SUPPORT-ONE-TRUNK.md item 25): a spot no strut can reach - a ledge a strut is too wide for, against a wall - is held as
+     Bambu holds it, by a thin column straight down to the plate: THIN_TIP_SIDE_MM across (one loop of line), moved off the wall along its own
+     face as far as THIN_TIP_NUDGE_MM, standing GAP_MM under the face, its foot flared where there is room */
+  var THIN_TIP_SIDE_MM = 0.85;
+  var THIN_TIP_NUDGE_MM = [0, 0.3, 0.6, 0.9, 1.2, 1.5];
+  var THIN_TIP_FACE_MM = 0.6;       /* the face over a moved column is the spot's own: within this of the spot's height */
+  var THIN_TIP_FLARE = { mm: 2.5, r: 1.4 };   /* the foot: from this radius on the plate to the column's at this height, where there is room */
+  /* A CONE'S TIP (the top of a cavity's ceiling, a few tenths of a mm2 of face over the stack under it) is held through the tip under it:
+     a reached tip of the same area within CONE_TIP_REACH_MM in plan and CONE_TIP_RISE_MM under the spot, with air straight down from the
+     spot to that tip's height */
+  var CONE_TIP_REACH_MM = 2, CONE_TIP_RISE_MM = 1;
+  var THIN_TIP_FOOT_GAP_MM = 0.2;   /* a thin column that stands on the part keeps this off its face (Bambu's support_bottom_z_distance) */
+  var THIN_TIP_REST_MIN_MM = 1;     /* ...and is at least this tall */   /* x the strut side: how far a tip may move off a wall */
   var FOOT_LAYER_MM = 0.2;     /* a foot pad is one first layer thick (the 0.2 mm layers this file's gaps are sized for) */
   var FOOT_CLUSTER_MM = 6;     /* trunks whose feet stand this close (centre to centre, in plan) share one pad */
   var FOOT_GROW_MM = 4;        /* a pad is its trunks' footprints grown by this */
@@ -602,7 +615,9 @@
       }
       return -1;
     }
-    return { leg: leg };
+    /* the nearest face straight down from `org` within maxD (distance from org), or -1 */
+    function down(org, maxD) { var h = A._nearestHitDown(grid, org, RAY_EPS, maxD); return h > 0 ? h : -1; }
+    return { leg: leg, down: down };
   }
 
   /* Two square columns, each free to turn (PHASE), touch inside this
@@ -4645,6 +4660,75 @@
     }
     return out;
   }
+  /* A STEP NO SLICER CALLS AN OVERHANG: the part stands within a layer's reach at the threshold angle (layer / tan(angle), 0.35 mm at
+     0.2 mm and 30 deg) sideways of the spot, just under it - the step where two shells meet a quarter of a mm apart. It prints as the
+     layer's own wall; Bambu does not support it. */
+  var STEP_LAYER_MM = 0.2;
+  function subThresholdStep(b, kit, opts) {
+    if (!kit) return false;
+    var th = ((opts && opts.angleDeg) || (opts && opts.thresholdDeg) || 30) * Math.PI / 180, reach = STEP_LAYER_MM / Math.tan(th);
+    var a = [b.p[0], b.p[1], b.p[2] - 0.05], c = [b.p[0], b.p[1], b.p[2] - 2 * STEP_LAYER_MM];
+    return kit.pr.leg(a, c, reach * Math.SQRT2, 0, 0, 0) >= 0;
+  }
+  /* a cone's tip: held through a reached tip of its area just under it, where there is air straight down from the spot to that tip */
+  function coneTipCover(b, chosen, kit) {
+    if (!kit || !chosen) return null;
+    var best = null, bd = Infinity;
+    chosen.forEach(function (c) {
+      if (c.regionId !== b.regionId) return;
+      var d = Math.hypot(b.p[0] - c.p[0], b.p[1] - c.p[1]), rise = b.p[2] - c.p[2];
+      if (d > CONE_TIP_REACH_MM || rise < -1e-6 || rise > CONE_TIP_RISE_MM || d >= bd) return;
+      var top = [b.p[0], b.p[1], b.p[2] - 0.02], bottom = [b.p[0], b.p[1], Math.min(c.p[2] - GAP_MM, top[2] - 0.05)];
+      if (kit.pr.leg(top, bottom, 0.02, 0, 0, 0.01) >= 0) return;
+      bd = d; best = c;
+    });
+    return best ? { beacon: b.id, key: b.key, regionId: b.regionId, p: b.p.slice(), by: best.id, byKey: best.key, mm: bd, cone: true } : null;
+  }
+  /* a ledge: a thin column straight down to the plate, moved off the wall along the spot's own face; null when none fits */
+  function thinColumn(b, kit) {
+    if (!kit || kit.plateZ == null) return null;
+    var pz = kit.plateZ, S = THIN_TIP_SIDE_MM, rest = null, dbg = ((typeof process !== 'undefined' && process.env && process.env.NSO_THIN_DEBUG) || (root && root.NSO_THIN_DEBUG)) ? { noFace: 0, otherFace: 0, low: 0, blocked: 0, at: [] } : null;
+    for (var di = 0; di < THIN_TIP_NUDGE_MM.length; di++) {
+      var d = THIN_TIP_NUDGE_MM[di];
+      for (var h = 0; h < (d ? STEER_HEADINGS : 1); h++) {
+        var th = 2 * Math.PI * h / STEER_HEADINGS, x = b.p[0] + Math.cos(th) * d, y = b.p[1] + Math.sin(th) * d;
+        /* the face over the moved column: straight down from above the spot (from inside the part, its underside is the first face) */
+        var hz = kit.pr.down([x, y, b.p[2] + THIN_TIP_FACE_MM], 2 * THIN_TIP_FACE_MM);
+        if (hz < 0) { if (dbg) dbg.noFace++; continue; }
+        var fz = b.p[2] + THIN_TIP_FACE_MM - hz;
+        if (Math.abs(fz - b.p[2]) > THIN_TIP_FACE_MM) { if (dbg) dbg.otherFace++; continue; }
+        var top = [x, y, fz - GAP_MM];
+        if (!(top[2] - pz > S)) { if (dbg) dbg.low++; continue; }
+        var hitL = kit.pr.leg(top, [x, y, pz], S, 0, 0);
+        if (hitL >= 0) {
+          /* no way to the plate: the part is under it (a notch's floor). Bambu stands its thin column on the part there (on build plate only is
+             off by default); so does this one, its foot THIN_TIP_FOOT_GAP_MM off the part's face - the one exception "may rest on the part" off
+             allows, and the plan's reason says so. Not when the opening is shorter than THIN_TIP_REST_MIN_MM. */
+          if (rest == null) {
+            var sz = top[2] - hitL;                                    /* the highest point of the floor under the column's whole width */
+            for (var lift = 0; lift <= 0.4 + 1e-9 && rest == null; lift += 0.2) {
+              var bz = sz + THIN_TIP_FOOT_GAP_MM + lift;
+              if (top[2] - bz < THIN_TIP_REST_MIN_MM) break;
+              if (kit.pr.leg(top, [x, y, bz], S, 0, 0) < 0) rest = { x: x, y: y, top: top, bz: bz, sz: sz, d: d };
+            }
+          }
+          if (dbg) { dbg.blocked++; if (dbg.at.length < 12) dbg.at.push([+x.toFixed(2), +y.toFixed(2), +fz.toFixed(2), +(top[2] - hitL).toFixed(2)]); }
+          continue;
+        }
+        /* the foot flares where it has room (a column of 0.85 mm on the plate alone lets go) */
+        var fh = Math.min(THIN_TIP_FLARE.mm, (top[2] - pz) / 3), flare = kit.pr.leg([x, y, pz + fh], [x, y, pz], 2 * THIN_TIP_FLARE.r * Math.SQRT1_2, 0, 0) < 0;
+        var rr = S / 2, rings = flare ? [[pz, THIN_TIP_FLARE.r], [pz + fh * 0.35, (THIN_TIP_FLARE.r + rr) / 2 + 0.1], [pz + fh, rr], [top[2], rr]] : [[pz, rr], [top[2], rr]];
+        return { beacon: b.id, key: b.key, regionId: b.regionId, p: b.p.slice(), top: top, bottom: [x, y, pz], sideMm: S, moveMm: d, flare: flare,
+                 soup: revolveSoup(x, y, rings, 12, 0, 0) };
+      }
+    }
+    if (rest) {
+      return { beacon: b.id, key: b.key, regionId: b.regionId, p: b.p.slice(), top: rest.top, bottom: [rest.x, rest.y, rest.bz], sideMm: S, moveMm: rest.d, flare: false,
+               rest: true, onZ: rest.sz, soup: revolveSoup(rest.x, rest.y, [[rest.bz, S / 2], [rest.top[2], S / 2]], 12, 0, 0) };
+    }
+    if (dbg) console.log('thin column for spot ' + b.p.map(function (v) { return v.toFixed(2); }).join(',') + ': ' + JSON.stringify(dbg));
+    return null;
+  }
   function planOneTrunk(rawTris, opts) {
     var bc = beaconsFor(rawTris, opts);
     if (!bc.ok || !bc.beacons.length) return null;                      /* the ordinary plan says why, in its own words */
@@ -4661,7 +4745,7 @@
     /* a spot whose tip no branch can reach round the piece, even alone (plan.blocked left after every split) has no route to the
        plate: it is not built, and is the plan's unreachable - the same word the lattice planner gives it. The pool is thinned
        again without it, so the spots beside it stand tips of their own. */
-    var lost = {}, nLost = 0, p = null, chosen, covered, thinned, clusters, rounds, onPlate = [], plateZ1 = bc.detect && bc.detect.plateZ != null ? bc.detect.plateZ : 0;
+    var lost = {}, nLost = 0, p = null, chosen, covered, thinned, clusters, rounds, onPlate = [], plateZ1 = bc.detect && bc.detect.plateZ != null ? bc.detect.plateZ : 0, kit = null, stepHeld = [];
     bc.beacons.forEach(function (b) { if (b.p[2] - plateZ1 < ck.lowMm) { lost[b.id] = 'plate'; onPlate.push({ beacon: b.id, key: b.key, regionId: b.regionId, p: b.p.slice() }); } });
     /* A SPOT WITH NO ROUTE DOWN stands no tip, and is not covered by one beside it: a spot over the part's own base, or the middle of
        a tunnel's ceiling, has a neighbour within the sheet's reach whose column reaches the plate, but the sheet does not lie under
@@ -4672,6 +4756,7 @@
       var A0 = SA(opts), st = A0 && A0.buildStrut ? A0.buildStrut(opts) : null, plateZ0 = bc.detect && bc.detect.plateZ;
       if (!st || !st.ok || plateZ0 == null) return;
       var pr = makeProbe(A0, [rawTris].concat(opts.occluders || [])), tanL = Math.tan((opts.branchTiltDeg == null ? ST(opts).BRANCH_TILT_DEG : +opts.branchTiltDeg) * Math.PI / 180) * 0.97, side = st.sideMm;
+      kit = { pr: pr, plateZ: plateZ0 };
       /* the route a tip at `at` has down: straight, leaning to the plate, or leaning a while and then straight (the lattice planner's
          steer: the leaning line walked down a node's height at a time, a clear leg and a clear drop at each) */
       function routeDown(at, straightOnly) {
@@ -4702,6 +4787,7 @@
             ok = routeDown([b.p[0] + dx, b.p[1] + dy, b.p[2] - (b.n[0] * dx + b.n[1] * dy) / b.n[2]], true);   /* a nudged tip: a straight drop (the leaning search is the spot's own, once) */
           }
         }
+        if (!ok && subThresholdStep(b, kit, opts)) { lost[b.id] = 'step'; stepHeld.push({ beacon: b.id, key: b.key, regionId: b.regionId, p: b.p.slice() }); return; }
         if (!ok) { lost[b.id] = true; nLost++; }
       });
     })();
@@ -4722,7 +4808,18 @@
         });
         mine.forEach(function (b) { chosen.push(b); });
       });
-      if (!chosen.length) return null;                                     /* nothing left to stand: the ordinary plan says why */
+      if (!chosen.length) {
+        /* nothing left to stand. Where every spot is on the plate, on a step, or held by a thin column, that is the plan - with no trunk; else
+           the ordinary plan says why */
+        var thin0 = [], rest0 = [];
+        Object.keys(lost).forEach(function (id) { if (lost[id] === true) { var tc = thinColumn(bc.beacons[+id], kit); if (tc) thin0.push(tc); else rest0.push(id); } });
+        if (rest0.length || (!thin0.length && !stepHeld.length && !onPlate.length)) return null;
+        return { ok: true, reason: 'no tips to stand: ' + (thin0.length ? thin0.length + ' thin column(s)' : '') + (thin0.length && stepHeld.length ? ', ' : '') + (stepHeld.length ? stepHeld.length + ' spot(s) on a step the part holds' : '') + '.',
+                 stage: 'done', members: [], stubs: [], merges: [], pickups: [], steered: [], nudged: [], tight: [], unreachable: [], resting: [], inside: [], held: 0,
+                 trunks: [], beacons: [], stations: [], plateZ: plateZ1,
+                 oneTrunk: { coverMm: ck.coverMm, areas: order.length, clusters: [], tips: 0, beacons: bc.beacons.length, thinned: 0, covered: [], onPlate: onPlate, splits: 0, lost: 0,
+                             thin: thin0, coneTips: 0, selfHeld: stepHeld.slice() } };
+      }
       /* 2. the tips of every area, in bands of height, clustered; a cluster whose canopy has a branch with no way round the
          piece (plan.blocked) is split smaller and planned again - a tip is never left without its branch */
       clusters = [];
@@ -4798,14 +4895,29 @@
       if (!found) break;
     }
     if (p.ok) {
-      /* the lost spots, as unreachable beacons of the plan (its beacons list is the card's key for every id it answers with) */
-      Object.keys(lost).filter(function (id) { return lost[id] === true; }).map(Number).sort(function (x, y) { return x - y; }).forEach(function (id) {
+      /* the lost spots: a cone's tip held through the tip under it, a ledge by a thin column; what is left is unreachable */
+      var thin = [], coneHeld = 0, thinHeld = 0, selfHeld = stepHeld.slice();
+      var stillLost = Object.keys(lost).filter(function (id) { return lost[id] === true; }).map(Number).sort(function (x, y) { return x - y; }).filter(function (id) {
+        var b = bc.beacons[id];
+        if (subThresholdStep(b, kit, opts)) { selfHeld.push({ beacon: b.id, key: b.key, regionId: b.regionId, p: b.p.slice() }); return false; }
+        var cv = coneTipCover(b, chosen, kit);
+        if (cv) { covered.push(cv); coneHeld++; return false; }
+        var tc = thinColumn(b, kit);
+        if (tc) { thin.push(tc); thinHeld++; return false; }
+        return true;
+      });
+      stillLost.forEach(function (id) {
         var b = bc.beacons[id], at = p.beacons.length;
         p.beacons.push({ id: at, p: b.p.slice(), n: b.n.slice(), regionId: b.regionId, key: b.key, source: b.source || 'given', tid: tipId(b.p, true) });
         p.unreachable.push(at);
       });
       p.oneTrunk = { coverMm: ck.coverMm, areas: order.length, clusters: clusters.map(function (c) { return { tips: c.tips.length, radiusMm: c.r }; }),
-                     tips: chosen.length, beacons: bc.beacons.length, thinned: thinned, covered: covered, onPlate: onPlate, splits: rounds, lost: nLost };
+                     tips: chosen.length, beacons: bc.beacons.length, thinned: thinned, covered: covered, onPlate: onPlate, splits: rounds, lost: nLost - coneHeld - thinHeld - (selfHeld.length - stepHeld.length),
+                     thin: thin, coneTips: coneHeld, selfHeld: selfHeld };
+      if (thin.length) p.reason += ' ' + thin.length + ' spot(s) on a ledge no strut fits are held by a thin column (' + THIN_TIP_SIDE_MM + ' mm)' +
+        (thin.some(function (t) { return t.rest; }) ? ', ' + thin.filter(function (t) { return t.rest; }).length + ' of them standing on the part (no way to the plate under the ledge)' : '') + '.';
+      if (coneHeld) p.reason += ' ' + coneHeld + ' spot(s) at a cone\'s tip are held through the tip under it.';
+      if (selfHeld.length) p.reason += ' ' + selfHeld.length + ' spot(s) on a step narrower than a layer\'s overhang at the threshold angle are no overhang: the part holds them.';
       p.reason = p.reason + (thinned ? ' ' + thinned + ' more spot(s) of the ' + bc.beacons.length + ' lie within ' + ck.coverMm + ' mm of a tip and are held through it.' : '');
     }
     return p;

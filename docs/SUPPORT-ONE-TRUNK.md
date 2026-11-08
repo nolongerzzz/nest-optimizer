@@ -201,6 +201,22 @@ the option (the shipped Custom feed's bytes are the claude-wip's; `support:feed`
     the perimeter spacing grows with the strip a tip stands under, from `STAIR_PERIM_MM` 2.5 at the low end to `STAIR_PERIM_TOP_MM` 4.0 at the top (the Oblique: 13 tips to 10, three along the
     high edge, the stair's crown body 216 mm3 to about 170). (b) The top strips cover the part only where it is within `STAIR_TOP_REACH_MM` 1.1 over the strip's top (`roomAt`'s own field),
     not out into the fillet where the underside curves up to its wall (it ran 1.6 mm clear of the sheet there): the Oblique's stair is 17 strips, top at 12.0, was 18 at 12.2. A Dense strip is also no longer a bead wider than the stack under the part (`planWidth`): the extra bead put a Support wall line beside the interface at the top layers (z 11.8 - 12.0) where Bambu's slice (the owner's screenshot of the same edge) has the interface tapering to two lines and then one, nothing beside it.
+25. **Nothing unreachable: steps, cone tips and thin tips** (the owner's gate before a print: "the generator flags nothing as unreachable"; and, of option A, "thin tips is
+    the answer, and also seems to be how bambu addresses odd angles where an interface cannot be used"). A spot the one-trunk planner finds no route for (the strut's straight drop,
+    the lean, the nudge off a wall) is no longer named unreachable before three questions:
+    - **A step no slicer calls an overhang** (`subThresholdStep`): the part stands within a layer's reach at the threshold angle (0.2 mm / tan 30 = 0.35 mm) sideways of the
+      spot, just under it. The six heads' 15.3 mm planes, where a head's two shells meet 0.25 mm apart over a wall that slants out to 0.04 mm of the spot, were the merged plate's
+      "unreachable 4" and the Negative Sphere's two "gap" spots. The part holds them (`plan.oneTrunk.selfHeld`; the card keeps them as held, `memOf().selfHeld`, with or without a support).
+    - **A cone's tip** (`coneTipCover`): a reached tip of the same area within 2 mm in plan and 1 mm under the spot, with air straight down from the spot to it - the top of a
+      cavity's ceiling, a few tenths of a mm2 of face over the stack under it. Held through that tip (`covered`, `cone: true`).
+    - **A ledge** (`thinColumn`): a thin column, `THIN_TIP_SIDE_MM` 0.85 (one loop of line), straight down, moved off the wall along the spot's own face up to 1.5 mm, its top
+      the gap under the face, its foot flared (r 1.4 mm over 2.5 mm) where there is room. With no way to the plate under the ledge (a notch's floor) it stands on the part, its
+      foot 0.2 mm off the face (Bambu's `support_bottom_z_distance`; Bambu's own thin columns stand in the necks' notches), the one place a column rests on the part with
+      "may rest on the part" off - the plan's reason says so. `plan.oneTrunk.thin`: the card joins each column to its area's first support (a shell of its own) and says the spot
+      held (or rest). An area with no tip left at all but steps and thin columns is planned with no trunk.
+    Measured: six pieces "unreachable 1" -> 0; the six as one piece (the owner's plate) "unreachable 4" -> 0. A 1.4 mm ledge over a 2 mm slot to the plate: three 0.85 mm
+    columns, plate to 0.18 mm under the ledge, every spot held. `support:gate` fails a build with anything unreachable (`--merged` builds the owner's plate).
+
 **The interface (`interfaceLayers`, `SHEET.densePitchMm`).** `sheet()` takes `interfaceLayers` (2 unless said): 2 transition
 layers and that many interface layers, the interface alternating across and along the sheet's A. The card's **Dense (Bambu)**
 interface is pitch **0.47 mm** (Bambu's 0.46: the strip's joins need a segment of 0.4665, and at 0.46 the stair under

@@ -12,6 +12,7 @@
                                                              NSO's support meshes); several are gated one after another
      --ref f.gcode.3mf     another reference         --json out.json     every number
      --rule column         slice with the column interface rule (NSO_Slicer supportInterfaceRule: 'column')
+     --merged              (a build) the six heads as one piece, as a plate imported whole has them
      --report              print, never fail
      --worst               the five layers per head that differ most from Bambu's
      --dump moves.json     (a build) every move, [head, role, feature, z, h, x0, y0, x1, y1], for a picture
@@ -39,13 +40,21 @@ async function readSliced(file) {
 }
 
 /* the in-node build: the card's own build of supp_ref (tools/nso_support_score.js's harness), sliced piece by piece */
+let CARD_HEAD = null;
 async function buildAndSlice(opts) {
   const lib = require('./nso_support_plate_lib.js');
   const SL = require(path.join(ROOT, 'nso_slicer.js'));
-  const objs = await lib.readFixture(path.join(ROOT, 'fixtures', 'supports', 'supp_ref.3mf'));
+  let objs = await lib.readFixture(path.join(ROOT, 'fixtures', 'supports', 'supp_ref.3mf'));
+  /* --merged: the six heads as ONE piece, as the owner's plate has them ('supp_ref - 6 objects') */
+  if (opts.merged) {
+    let n = 0; objs.forEach(o => { n += o.positions.length; });
+    const pos = new Float32Array(n); let k = 0; objs.forEach(o => { pos.set(o.positions, k); k += o.positions.length; });
+    objs = [{ id: objs[0].id, name: 'supp_ref - 6 objects', positions: pos, triangleCount: n / 9 }];
+  }
   const app = lib.makeApp(); const ids = app.load(objs); app.openCard(); app.setPlateBox(true);
   app.card.angle(+(opts.angle || 30));
   app.click('btn-sup-all'); await app.until(() => app.card.busy()); await app.until(() => !app.card.busy());
+  CARD_HEAD = app.head();
   const WASM = await SL.loadKernel({});
   const moves = [];
   for (let i = 0; i < objs.length; i++) {
@@ -118,9 +127,10 @@ function reHead(moves, refMoves) {
   const runs = [];
   if (files.length) for (const f of files) { const mv = reHead(await readSliced(f), refMoves); runs.push([path.basename(f), GL.measureAll(mv), mv]); }
   else {
-    const mv = await buildAndSlice({ rule: arg('--rule'), angle: arg('--angle') });
+    let mv = await buildAndSlice({ rule: arg('--rule'), angle: arg('--angle'), merged: argv.includes('--merged') });
+    if (argv.includes('--merged')) mv = reHead(mv, refMoves);
     if (arg('--dump')) fs.writeFileSync(arg('--dump'), JSON.stringify(mv.map(m => [m.head, m.role, m.feat, m.z, m.h, +m.x0.toFixed(3), +m.y0.toFixed(3), +m.x1.toFixed(3), +m.y1.toFixed(3)])));
-    runs.push(['NSO build + NSO_Slicer' + (arg('--rule') ? ' (rule ' + arg('--rule') + ')' : ''), GL.measureAll(mv), mv]);
+    runs.push(['NSO build + NSO_Slicer' + (arg('--rule') ? ' (rule ' + arg('--rule') + ')' : '') + (argv.includes('--merged') ? ', the six as one piece' : ''), GL.measureAll(mv), mv]);
   }
   let fails = 0; const json = { ref, runs: {} };
   for (const [name, M, mv] of runs) {
@@ -141,6 +151,13 @@ function reHead(moves, refMoves) {
       if (argv.includes('--worst')) p.worst.forEach(w => console.log('        z ' + w.z.toFixed(3) + (w.oursZ != null ? ' (ours ' + w.oursZ.toFixed(3) + ')' : ' (ours: no layer)') + '  ref ' + w.refMm2 + ' mm2, ours ' + w.oursMm2 + ' mm2, IoU ' + w.iou));
     });
     json.runs[name] = { measures: M, gate: rows, parity: PA };
+  }
+  /* the owner's first gate: the generator flags nothing as unreachable (the card's own count, a build only) */
+  if (CARD_HEAD) {
+    const un = /unreachable (\d+)/.exec(CARD_HEAD), nUn = un ? +un[1] : 0;
+    console.log('\ncard: ' + CARD_HEAD + (nUn ? '   FAIL  nothing may be unreachable' : '   ok'));
+    if (nUn) fails++;
+    json.card = CARD_HEAD;
   }
   if (arg('--json')) fs.writeFileSync(arg('--json'), JSON.stringify(json, null, 1));
   console.log('\n' + (fails ? fails + ' check(s) failed' : 'all checks pass'));

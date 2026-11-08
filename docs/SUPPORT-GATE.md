@@ -33,6 +33,9 @@ Measured on G-code, every head at once, each against Bambu's own slice of the sa
 | sheet carried | (labelled slices) share of each sheet's lowest layer within 1 mm of support below | >= ref - 10 points |
 | depth III+T | (labelled slices) share of contact columns that read interface x3 or more, then transition, top down | >= ref - 15 points |
 
+**Unreachable** (a build only): the card's own count after the build - "Built: ... unreachable U" - must be 0 (the owner's first gate before a print;
+docs/SUPPORT-ONE-TRUNK.md item 25). `--merged` builds the six heads as ONE piece, as the owner's plate has them.
+
 Specks (support islands under 0.8 mm2 under a sheet: tips too thin to hold it) are printed, not gated.
 
 **Parity** (printed, not gated): each of the reference's interface / transition layers set against ours at the same height (within 0.1 mm),
@@ -43,7 +46,7 @@ columns' make-up top down (I interface, T transition, S support).
     node tools/nso_support_gate.js                              build supp_ref with the card (Auto, Dense, 30 deg), slice with NSO_Slicer, gate
     node tools/nso_support_gate.js --rule column                the same with the column rule
     node tools/nso_support_gate.js --gcode a.gcode.3mf ...      gate sliced files: NSO's export, or Bambu Studio's slice of NSO's meshes
-    --report (never fail)   --json out.json   --dump moves.json (a build's moves)   --ref other.gcode.3mf
+    --report (never fail)   --json out.json   --dump moves.json (a build's moves)   --ref other.gcode.3mf   --merged (a build: the six as one piece)   --worst
 
 A file is read by its objects' names: `X` is a part, `X - support ...` its support, `X - brim` left out; inside a part, `Support*`
 features are support (Bambu's own). About 40 s for a build, 3 s for files.
@@ -91,6 +94,11 @@ rim 0.69 - 0.74 and apex 0.6 - 0.82, Oblique 0.70, Sphere 0.56 IoU per layer. It
 a layer at a time.
 
 ## 5. Not done, and named
+
+- **The merged plate's small surfaces.** The six as one piece are read on a 3 mm grid where each alone is read at 1 mm, so the Negative Sphere2's apex
+  has 2 spots (its cone's top) where alone it has 8: a thin column holds the top and the apex's stack is missing (parity 63 %, layer heights 42 %,
+  contact 24 / 47 mm2; the owner's earlier merged slice had the same hole). Alone: 83 % / 100 %. Detection should not depend on how many bodies a
+  piece holds.
 
 - **The rule is opt-in and not printed.** Default slicing is unchanged byte for byte (`slicer:test`, `slicer:bambu`, `slicer:supports`,
   `support:onetrunk` pass). The gate in build mode fails today's default on 7 checks, so it is not in the CI list yet.
