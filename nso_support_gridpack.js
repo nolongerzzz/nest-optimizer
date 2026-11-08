@@ -4731,6 +4731,85 @@
     if (dbg) console.log('thin column for spot ' + b.p.map(function (v) { return v.toFixed(2); }).join(',') + ': ' + JSON.stringify(dbg));
     return null;
   }
+  /* A HORN (the owner's: "add the upper branches back in, to catch those little edges their horns do ... a ring tip or something similar at that
+     point of contact"). A spot on a step no slicer calls an overhang - the shoulder where two shells meet a quarter of a mm apart - stands no
+     interface; Bambu catches its edge with a horn: a twig a ring of line across (0.5 mm) whose top stands under the step's edge, HORN.wallMm off the
+     wall under it, leaning out from the wall at HORN.leanDeg (Bambu's lean 0.6 mm a mm, measured on supp_ref's four domed heads) until it has a
+     straight drop to the plate, and from there a thin column down, its foot flared. The slicer keeps it plain Support (no interface: not an
+     overhang), xy and gap off the part as the tree is. Null when no route is clear. */
+  var HORN = { wallMm: 0.45, topR: 0.25, kneeR: 0.42, leanDeg: 30, stepMm: 0.25, leanMaxMm: 6, wallProbeMm: 1.2, clearMm: 0.05, leanClearMm: 0.15, capMm: 0.8 };   /* leanClearMm: the slicer keeps a twig 0.2 off the part (COLUMN_TWIG_XY_MM) */
+  var HORN_WHY = '';
+  function hornLean(b, kit, top, lx, ly, tanL, S, pz, mv) {
+    for (var dz = 0; dz * tanL <= HORN.leanMaxMm + 1e-9 && top[2] - dz - pz > S; dz += HORN.stepMm) {
+      var q = [top[0] + lx * dz * tanL, top[1] + ly * dz * tanL, top[2] - dz];
+      if (dz > 0 && kit.pr.leg(top, q, HORN.topR * Math.SQRT2, 0, 0, HORN.leanClearMm) >= 0) { HORN_WHY += ' lean blocked at ' + dz; break; }     /* the lean runs into the part: no horn */
+      if (kit.pr.leg(q, [q[0], q[1], pz], S, dz > 0 ? 0 : HORN.capMm, 0, HORN.clearMm) >= 0) continue;
+      var fh = Math.min(THIN_TIP_FLARE.mm, (q[2] - pz) / 3), flare = kit.pr.leg([q[0], q[1], pz + fh], [q[0], q[1], pz], 2 * THIN_TIP_FLARE.r * Math.SQRT1_2, 0, 0) < 0;
+      var rr = S / 2, rings = flare ? [[pz, THIN_TIP_FLARE.r], [pz + fh * 0.35, (THIN_TIP_FLARE.r + rr) / 2 + 0.1], [pz + fh, rr], [q[2], rr]] : [[pz, rr], [q[2], rr]];
+      var col = revolveSoup(q[0], q[1], rings, 12, 0, 0), parts = [col];
+      if (dz > 0) { parts.push(tubeSoup(top, HORN.topR, q, HORN.kneeR, 12, 0)); parts.push(ballSoup(q, rr, 12, 0)); }
+      else { rings[rings.length - 1] = [q[2] - 0.5, rr]; rings.push([q[2], HORN.topR]); parts[0] = revolveSoup(q[0], q[1], rings, 12, 0, 0); }
+      var n0 = 0; parts.forEach(function (sp) { n0 += sp.length; });
+      var soup = new Float32Array(n0), w = 0; parts.forEach(function (sp) { soup.set(sp, w); w += sp.length; });
+      return { beacon: b.id, key: b.key, regionId: b.regionId, p: b.p.slice(), top: top, knee: q, bottom: [q[0], q[1], pz], sideMm: S, moveMm: mv, leanMm: dz * tanL,
+               flare: flare, horn: true, soup: soup };
+    }
+    return null;
+  }
+  function hornColumn(b, kit) {
+    HORN_WHY = 'no kit';
+    if (!kit || kit.plateZ == null) return null;
+    var pz = kit.plateZ, zw = b.p[2] - 0.3, nH = 32, dmin = Infinity, hits = [];
+    /* the wall under the step: the nearest part sideways a layer and a half under the spot */
+    for (var h = 0; h < nH; h++) {
+      var a = 2 * Math.PI * h / nH, ux = Math.cos(a), uy = Math.sin(a);
+      var d = kit.pr.leg([b.p[0], b.p[1], zw], [b.p[0] + ux * HORN.wallProbeMm, b.p[1] + uy * HORN.wallProbeMm, zw], 0, 0, 0, 0);
+      if (d === 0) { HORN_WHY = 'in the part'; return null; }             /* the spot's own column is in the part: no step */
+      if (d > 0) { hits.push([ux, uy, d]); dmin = Math.min(dmin, d); }
+    }
+    HORN_WHY = 'no wall';
+    if (!hits.length) return null;
+    var ox = 0, oy = 0;
+    hits.forEach(function (q) { if (q[2] <= dmin + 0.05) { ox -= q[0]; oy -= q[1]; } });
+    var ol = Math.hypot(ox, oy); if (!(ol > 1e-9)) return null;
+    ox /= ol; oy /= ol;
+    var mv = Math.max(0, HORN.wallMm - dmin), tx = b.p[0] + ox * mv, ty = b.p[1] + oy * mv;
+    /* its top: under the face over it (the step's underside), or level with the spot where the moved top is past the step's edge */
+    var hz = kit.pr.down([tx, ty, b.p[2] + THIN_TIP_FACE_MM], 2 * THIN_TIP_FACE_MM), fz = hz >= 0 ? b.p[2] + THIN_TIP_FACE_MM - hz : b.p[2];
+    if (Math.abs(fz - b.p[2]) > THIN_TIP_FACE_MM) fz = b.p[2];
+    /* the wall can come closer just under the top (a dome bulging under its shoulder): the top keeps HORN.wallMm off it over its first half mm */
+    for (var it = 0; it < 4; it++) {
+      var near = Infinity, rep = [];
+      [0, 0.25, 0.5].forEach(function (dd) {
+        for (var h2 = 0; h2 < nH; h2++) {
+          var a2 = 2 * Math.PI * h2 / nH, d2 = kit.pr.leg([tx, ty, fz - GAP_MM - dd], [tx + Math.cos(a2) * HORN.wallProbeMm, ty + Math.sin(a2) * HORN.wallProbeMm, fz - GAP_MM - dd], 0, 0, 0, 0);
+          if (d2 >= 0) { rep.push([Math.cos(a2), Math.sin(a2), d2]); if (d2 < near) near = d2; }
+        }
+      });
+      if (!(near < HORN.wallMm - 0.02)) break;
+      /* away from every wall nearer than the mark, the nearest the most */
+      var rx = 0, ry = 0;
+      rep.forEach(function (q) { if (q[2] < HORN.wallMm) { var wgt = HORN.wallMm - q[2]; rx -= q[0] * wgt; ry -= q[1] * wgt; } });
+      var rl = Math.hypot(rx, ry); if (!(rl > 1e-9)) break;
+      rx /= rl; ry /= rl;
+      var st = Math.min(0.3, HORN.wallMm - near);
+      tx += rx * st; ty += ry * st; mv += st;
+    }
+    var top = [tx, ty, fz - GAP_MM], tanL = Math.tan(HORN.leanDeg * Math.PI / 180), S = THIN_TIP_SIDE_MM;
+    HORN_WHY = 'low';
+    if (!(top[2] - pz > 2 * S)) return null;
+    HORN_WHY = 'no route from top ' + top.map(function (v) { return v.toFixed(2); }) + ' out ' + ox.toFixed(2) + ',' + oy.toFixed(2) + ' wall ' + dmin.toFixed(2);
+    /* the lean: straight out from the wall first, then turned a sixteenth of a turn at a time either way, as far as square to it */
+    var oa = Math.atan2(oy, ox);
+    for (var t = 0; t <= 4; t++) {
+      for (var sg = t ? -1 : 1; sg <= 1; sg += 2) {
+        var ang = oa + sg * t * Math.PI / 8, lx = Math.cos(ang), ly = Math.sin(ang);
+        var hc = hornLean(b, kit, top, lx, ly, tanL, S, pz, mv);
+        if (hc) return hc;
+      }
+    }
+    return null;
+  }
   function planOneTrunk(rawTris, opts) {
     var bc = beaconsFor(rawTris, opts);
     if (!bc.ok || !bc.beacons.length) return null;                      /* the ordinary plan says why, in its own words */
@@ -4748,6 +4827,19 @@
        plate: it is not built, and is the plan's unreachable - the same word the lattice planner gives it. The pool is thinned
        again without it, so the spots beside it stand tips of their own. */
     var lost = {}, nLost = 0, p = null, chosen, covered, thinned, clusters, rounds, onPlate = [], plateZ1 = bc.detect && bc.detect.plateZ != null ? bc.detect.plateZ : 0, kit = null, stepHeld = [];
+    /* under the column rule a step's spot is caught by a horn (hornColumn); spots within HORN_ONE_MM of one already caught share it */
+    var HORN_ONE_MM = 1.5;
+    function hornsOf(steps) {
+      if (!opts.columnRule) return [];
+      var out = [];
+      steps.forEach(function (sh) {
+        if (out.some(function (h) { return Math.hypot(h.p[0] - sh.p[0], h.p[1] - sh.p[1]) < HORN_ONE_MM && Math.abs(h.p[2] - sh.p[2]) < HORN_ONE_MM; })) return;
+        var hc = hornColumn(bc.beacons[sh.beacon], kit);
+        if (root && root.NSO_STEP_DEBUG) console.log('horn for ' + sh.p.map(function (v) { return v.toFixed(2); }) + ': ' + (hc ? 'top ' + hc.top.map(function (v) { return v.toFixed(2); }) + ' knee ' + hc.knee.map(function (v) { return v.toFixed(2); }) + ' lean ' + hc.leanMm.toFixed(2) : 'none ' + HORN_WHY));
+        if (hc) out.push(hc);
+      });
+      return out;
+    }
     bc.beacons.forEach(function (b) { if (b.p[2] - plateZ1 < ck.lowMm) { lost[b.id] = 'plate'; onPlate.push({ beacon: b.id, key: b.key, regionId: b.regionId, p: b.p.slice() }); } });
     /* A SPOT WITH NO ROUTE DOWN stands no tip, and is not covered by one beside it: a spot over the part's own base, or the middle of
        a tunnel's ceiling, has a neighbour within the sheet's reach whose column reaches the plate, but the sheet does not lie under
@@ -4819,7 +4911,8 @@
         var thin0 = [], rest0 = [];
         Object.keys(lost).forEach(function (id) { if (lost[id] === true) { var tc = thinColumn(bc.beacons[+id], kit); if (tc) thin0.push(tc); else rest0.push(id); } });
         if (rest0.length || (!thin0.length && !stepHeld.length && !onPlate.length)) return null;
-        return { ok: true, reason: 'no tips to stand: ' + (thin0.length ? thin0.length + ' thin column(s)' : '') + (thin0.length && stepHeld.length ? ', ' : '') + (stepHeld.length ? stepHeld.length + ' spot(s) on a step the part holds' : '') + '.',
+        var horns0 = hornsOf(stepHeld); thin0 = thin0.concat(horns0);
+        return { ok: true, reason: 'no tips to stand: ' + (thin0.length ? thin0.length + ' thin column(s)' + (horns0.length ? ' (' + horns0.length + ' of them horns)' : '') : '') + (thin0.length && stepHeld.length ? ', ' : '') + (stepHeld.length ? stepHeld.length + ' spot(s) on a step the part holds' : '') + '.',
                  stage: 'done', members: [], stubs: [], merges: [], pickups: [], steered: [], nudged: [], tight: [], unreachable: [], resting: [], inside: [], held: 0,
                  trunks: [], beacons: [], stations: [], plateZ: plateZ1,
                  oneTrunk: { coverMm: ck.coverMm, areas: order.length, clusters: [], tips: 0, beacons: bc.beacons.length, thinned: 0, covered: [], onPlate: onPlate, splits: 0, lost: 0,
@@ -4911,6 +5004,7 @@
         if (tc) { thin.push(tc); thinHeld++; return false; }
         return true;
       });
+      var horns = hornsOf(selfHeld); thin = thin.concat(horns);
       stillLost.forEach(function (id) {
         var b = bc.beacons[id], at = p.beacons.length;
         p.beacons.push({ id: at, p: b.p.slice(), n: b.n.slice(), regionId: b.regionId, key: b.key, source: b.source || 'given', tid: tipId(b.p, true) });
@@ -4919,6 +5013,8 @@
       p.oneTrunk = { coverMm: ck.coverMm, areas: order.length, clusters: clusters.map(function (c) { return { tips: c.tips.length, radiusMm: c.r }; }),
                      tips: chosen.length, beacons: bc.beacons.length, thinned: thinned, covered: covered, onPlate: onPlate, splits: rounds, lost: nLost - coneHeld - thinHeld - (selfHeld.length - stepHeld.length),
                      thin: thin, coneTips: coneHeld, selfHeld: selfHeld };
+      if (horns.length) p.reason += ' ' + horns.length + ' horn(s) catch the edge of a step no slicer calls an overhang.';
+      thin = thin.filter(function (t) { return !t.horn; });
       if (thin.length) p.reason += ' ' + thin.length + ' spot(s) on a ledge no strut fits are held by a thin column (' + THIN_TIP_SIDE_MM + ' mm)' +
         (thin.some(function (t) { return t.rest; }) ? ', ' + thin.filter(function (t) { return t.rest; }).length + ' of them standing on the part (no way to the plate under the ledge)' : '') + '.';
       if (coneHeld) p.reason += ' ' + coneHeld + ' spot(s) at a cone\'s tip are held through the tip under it.';

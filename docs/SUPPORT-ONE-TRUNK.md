@@ -207,6 +207,8 @@ the option (the shipped Custom feed's bytes are the claude-wip's; `support:feed`
     - **A step no slicer calls an overhang** (`subThresholdStep`): the part stands within a layer's reach at the threshold angle (0.2 mm / tan 30 = 0.35 mm) sideways of the
       spot, just under it. The six heads' 15.3 mm planes, where a head's two shells meet 0.25 mm apart over a wall that slants out to 0.04 mm of the spot, were the merged plate's
       "unreachable 4" and the Negative Sphere's two "gap" spots. The part holds them (`plan.oneTrunk.selfHeld`; the card keeps them as held, `memOf().selfHeld`, with or without a support).
+      Under the column rule (`opts.columnRule`) each is also caught by a **horn** (`hornColumn`, Bambu's: a 0.5 mm twig under the step's edge leaning out at 30 deg, then a thin
+      column to the plate; one per spot within 1.5 mm), listed with the thin columns (`horn: true`) - docs/SUPPORT-GATE.md 4c.
     - **A cone's tip** (`coneTipCover`): a reached tip of the same area within 2 mm in plan and 1 mm under the spot, with air straight down from the spot to it - the top of a
       cavity's ceiling, a few tenths of a mm2 of face over the stack under it. Held through that tip (`covered`, `cone: true`).
     - **A ledge** (`thinColumn`): a thin column, `THIN_TIP_SIDE_MM` 0.85 (one loop of line), straight down, moved off the wall along the spot's own face up to 1.5 mm, its top

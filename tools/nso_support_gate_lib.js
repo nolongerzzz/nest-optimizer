@@ -34,6 +34,8 @@ const FLOAT_MIN_MM2 = 0.3;      /* an island smaller than this is a speck, count
 const FLOAT_LOOK_MM = 0.35;     /* "just below": any layer of the head (part or support) within this under the island's layer */
 const EMPTY_STEP_MM = 0.45;     /* two support layers further apart than this have an empty layer between them */
 const CARRY_MM = 1.0;
+const SPAN_MAX_MM = 5;        /* spans are measured out to this */
+const BRIDGE_MM = 2.5;        /* a sheet's lowest layer further than this from support under it is printed over air (a floater) */
 const AIR_MM = 0.42;          /* a tree's line further than a line's width from what is under it is printed over air */
 const SPECK_MM2 = 0.8;
 const IS_SUPPORT = /^Support( interface| transition)?$/;
@@ -218,7 +220,7 @@ function measureHead(moves) {
   for (let q = 1; q < supZ.length; q++) if (supZ[q] - supZ[q - 1] > EMPTY_STEP_MM) empty.push({ from: supZ[q - 1], to: supZ[q] });
 
   /* 5. carried, 6. depth, 7. specks: labelled slices only */
-  let carried = null, depth = null, specks = null, depthSeqs = null;
+  let carried = null, depth = null, specks = null, depthSeqs = null, spanP95 = null, spanMax = null, overSpan = null, spanAt = [];
   if (labelled) {
     let base = 0, held = 0, nSpeck = 0;
     const sheetZ = supZ.filter(z => L.get(z).I || L.get(z).T);
@@ -243,6 +245,38 @@ function measureHead(moves) {
       }
     }
     carried = base ? held / base : null; specks = nSpeck;
+    /* the span: every cell of a sheet's lowest layer, its distance to the nearest support (any) in the layer under it - how far the transition
+       bridges there. spanP95 the 95th percentile, spanMax the longest, overSpan the area further than BRIDGE_MM */
+    {
+      const spans = [], spanAtM = new Map();
+      for (let q = 1; q < supZ.length; q++) {
+        const o = L.get(supZ[q]); if (!o.I && !o.T) continue;
+        const prev = L.get(supZ[q - 1]);
+        const cells = [];
+        for (let c = 0; c < F.n; c++) {
+          if (!((o.I && o.I[c]) || (o.T && o.T[c]))) continue;
+          if ((prev.I && prev.I[c]) || (prev.T && prev.T[c])) continue;
+          cells.push(c);
+        }
+        if (!cells.length) continue;
+        if (!prev.sup) { cells.forEach(() => spans.push(9)); continue; }
+        /* a distance field by rings of dilation */
+        const dist = new Float32Array(F.n).fill(9); let ring = prev.sup.slice(), d = 0;
+        for (let c = 0; c < F.n; c++) if (ring[c]) dist[c] = 0;
+        while (d < SPAN_MAX_MM) {
+          d += CELL_MM;
+          const nx2 = dilate(F, ring, CELL_MM);
+          for (let c = 0; c < F.n; c++) if (nx2[c] && !ring[c]) dist[c] = d;
+          ring = nx2;
+        }
+        cells.forEach(c => { spans.push(dist[c]); if (dist[c] > BRIDGE_MM) { const k = supZ[q].toFixed(2); const w = spanAtM.get(k) || { z: supZ[q], n: 0, sx: 0, sy: 0 }; const p = cellXY(F, c); w.n++; w.sx += p[0]; w.sy += p[1]; spanAtM.set(k, w); } });
+      }
+      spanAt = [...spanAtM.values()].sort((a, b) => b.n - a.n).slice(0, 3).map(w => ({ z: w.z, areaMm2: +(w.n * A).toFixed(2), x: +(w.sx / w.n).toFixed(1), y: +(w.sy / w.n).toFixed(1) }));
+      spans.sort((a, b) => a - b);
+      spanP95 = spans.length ? spans[Math.floor(0.95 * (spans.length - 1))] : null;
+      spanMax = spans.length ? spans[spans.length - 1] : null;
+      overSpan = spans.filter(v => v > BRIDGE_MM).length * A;
+    }
     /* depth: every contact column, its support layers top down */
     let cols = 0, good = 0; const seqs = new Map();
     for (let c = 0; c < F.n; c++) {
@@ -261,7 +295,7 @@ function measureHead(moves) {
     void sheetZ;
   }
   touchAt.sort((a, b) => b.areaMm2 - a.areaMm2);
-  return { airMm2: +airMm2.toFixed(2), airAt, touchAt, touchMm2: +touch.toFixed(2), thinMm2: +thin.toFixed(2), contactMm2: +(contact * A).toFixed(1), share, floating, empty, carried, depth, depthSeqs, specks, labelled };
+  return { airMm2: +airMm2.toFixed(2), airAt, touchAt, touchMm2: +touch.toFixed(2), thinMm2: +thin.toFixed(2), contactMm2: +(contact * A).toFixed(1), share, floating, empty, carried, depth, depthSeqs, specks, labelled, spanP95, spanMax, spanAt, overSpanMm2: overSpan == null ? null : +overSpan.toFixed(2) };
 }
 
 function byHead(moves) {
@@ -282,6 +316,8 @@ const RULES = [
   { check: 'one-layer gap',    get: r => r.share.one,         ok: (o, r) => o >= r - 0.10,         rule: '>= ref - 0.10', pct: true },
   { check: 'two-layer gap',    get: r => r.share.two,         ok: (o, r) => o <= r + 0.15,         rule: '<= ref + 0.15', pct: true },
   { check: 'tree over air mm2', get: r => r.airMm2,           ok: (o, r) => o <= Math.max(1.5 * r, r + 2), rule: '<= max(1.5 x ref, ref + 2)' },
+  { check: 'span p95 mm',       get: r => r.spanP95,           ok: (o, r) => o <= Math.max(r + 0.5, 1.0), rule: '<= max(ref + 0.5, 1.0)', labelled: true },
+  { check: 'over 2.5 mm mm2',   get: r => r.overSpanMm2,       ok: (o, r) => o <= r + 0.5,          rule: '<= ref + 0.5', labelled: true },
   { check: 'floating islands', get: r => r.floating.length,   ok: (o, r) => o <= r,                rule: '<= ref' },
   { check: 'empty layers',     get: r => r.empty.length,      ok: (o, r) => o <= r,                rule: '<= ref' },
   { check: 'sheet carried',    get: r => r.carried,           ok: (o, r) => o >= r - 0.10,         rule: '>= ref - 0.10', pct: true, labelled: true },

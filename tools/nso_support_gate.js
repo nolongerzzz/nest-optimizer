@@ -89,6 +89,8 @@ function table(name, M) {
       pct(r.carried) + '  ' + pct(r.depth) + '  ' + (r.specks == null ? '  -' : String(r.specks).padStart(4)) + ' | ' + (r.airMm2 != null ? r.airMm2.toFixed(1).padStart(6) : '   -'));
     if (argv.includes('--worst')) (r.airAt || []).slice(0, 3).forEach(t => console.log('      tree over air z ' + t.z.toFixed(2) + '  ' + t.areaMm2 + ' mm2 about X ' + t.x + ' Y ' + t.y));
     r.touchAt.slice(0, 3).forEach(t => console.log('      touching z ' + t.z.toFixed(2) + ' under the part layer ' + t.partZ.toFixed(2) + '  ' + t.areaMm2 + ' mm2 about X ' + t.x + ' Y ' + t.y));
+    if (r.spanP95 != null) console.log('      span under the sheet: p95 ' + r.spanP95.toFixed(1) + ' mm, longest ' + r.spanMax.toFixed(1) + ' mm, ' + r.overSpanMm2 + ' mm2 further than 2.5 mm');
+    (r.spanAt || []).forEach(t => console.log('      span over 2.5 mm z ' + t.z.toFixed(2) + '  ' + t.areaMm2 + ' mm2 about X ' + t.x + ' Y ' + t.y));
     r.floating.slice(0, 3).forEach(f => console.log('      floating island z ' + f.z.toFixed(2) + '  ' + f.areaMm2 + ' mm2 at X ' + f.x + ' Y ' + f.y));
     if (argv.includes('--worst') && r.depthSeqs) console.log('      columns top down (I interface, T transition, S support): ' + r.depthSeqs.join(', '));
     r.empty.slice(0, 3).forEach(e => console.log('      empty layers between z ' + e.from.toFixed(2) + ' and ' + e.to.toFixed(2)));

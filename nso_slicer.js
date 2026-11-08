@@ -2106,6 +2106,16 @@
   var COLUMN_MIN_MM2 = 0.05;
   var COLUMN_SPILL_MM2 = 0.005;  /* a thin ring's bead may reach this much under or into the part (none to speak of: several rings at 0.05 touched 0.6 mm2) */
   var COLUMN_EDGE_OUT_MM = 0.38;  /* the overhang grown this much is the footprint: Bambu's loop centre 0.17 past the face's edge, and half a line */
+  var COLUMN_CUP_REACH_MM = 0.25;  /* THE CUP: a stack's lowest layer further than this past what is under it is cantilevered (its edge loop's bead
+                                      would stand on less than half its width) */
+  var COLUMN_TWIG_MM2 = 0.6;       /* a piece of the support's section smaller than this is a twig (a 0.85 mm thin column is 0.57) */
+  var COLUMN_TWIG_XY_MM = 0.2;     /* ...and keeps this off the part sideways, not the tree's xy distance */
+  var COLUMN_CUP_HOLD_MM = 0.3;    /* a cup's ring stands within this of the ring or tree under it (a line's width less a margin) */
+  var COLUMN_CUP_FIRST_MM = 0.1;   /* the cup's first ring: this far in from the stack's edge, under its edge loop */
+  var COLUMN_CUP_MIN_MM2 = 0.5;    /* ...over at least this much of it */
+  var COLUMN_CUP_RING_MM = 0.9;    /* the cup's wall: two lines */
+  var COLUMN_CUP_DEG = 45;
+  var COLUMN_CUP_HOLE_MM2 = 3;      /* ...not under a plate with a hole bigger than this (a rim round a cavity) */         /* ...stepping in this steeply going down */
   var COLUMN_LAND_MM = 0;        /* under the stack a column may run on down as Support (the base) until it stands on the support's own material, at most this far.
                                     0: no base - the transition spans between the tree's tips, as Bambu's does (a base of 3 mm printed as a block under every plate) */
   var COLUMN_BASE_PITCH_MM = 2;  /* the base's lines (Support), as far apart as this: the transition over it spans no more */
@@ -2153,7 +2163,7 @@
       });
       if (ovk.length) ovByK[k3] = U(ovk);
     }
-    var blocked = [], blockedHard = [], blockedTree = [], contact = [], near = [];
+    var blocked = [], blockedHard = [], blockedTree = [], blockedTwig = [], contact = [], near = [];
     for (var i = 0; i < n; i++) {
       var zt = SP[i].printZ, zb = zt - SP[i].h, hn = i + 1 < n ? SP[i + 1].h : planes[0].h;
       var lat = [], ver = [], up = [], nr = [], upOv = [];
@@ -2179,6 +2189,10 @@
       /* the tree (the support's own section, not the stack) keeps the xy distance from the part just over it too: a branch climbing past an
          overhang's edge (into a cavity, by the rim's hole) stood a bead's width under the rim's first layer */
       blockedTree.push(V0 ? U([U(bl), g.offset(V0, xy)]) : U(bl));
+      /* a twig (a horn's tip, a thin column: a piece of the support's section under COLUMN_TWIG_MM2) keeps COLUMN_TWIG_XY_MM: Bambu's horn
+         stands its ring a hair off the wall under the shoulder it catches */
+      var blT = []; if (L0) blT.push(g.offset(L0, COLUMN_TWIG_XY_MM)); if (V0) blT.push(g.offset(V0, COLUMN_TWIG_XY_MM));
+      blockedTwig.push(U(blT));
     }
     /* the footprint, in plan: the support's sections where the part stands within reach over them, closed by half a line */
     var fp = [];
@@ -2238,7 +2252,14 @@
       Ii = Ii && !g.isEmpty(Ii) ? Ii : null; Ti = Ti && !g.isEmpty(Ti) ? Ti : null;
       /* the support's section on this layer: never where it is blocked, and the stack laid whole - each piece of the stack only where it
          stands on something (the layer below as it is now built): a piece the grown footprint laid over air goes, and what stood on it */
-      var S = P.S[i5], base = !g.isEmpty(S) ? (blockedTree[i5] ? g.diff(S, blockedTree[i5]) : S) : null;
+      var S = P.S[i5], base = null;
+      if (!g.isEmpty(S)) {
+        var twigs = [], boughs = [];
+        g.parts(S).forEach(function (pc) { (g.area(pc) < COLUMN_TWIG_MM2 ? twigs : boughs).push(pc); });
+        var cut = function (list, B) { if (!list.length) return null; var u = g.unionAll(list); return B ? g.diff(u, B) : u; };
+        var bb = [cut(boughs, blockedTree[i5]), cut(twigs, blockedTwig[i5])].filter(function (cs) { return cs && !g.isEmpty(cs); });
+        base = bb.length ? (bb.length > 1 ? g.union(bb[0], bb[1]) : bb[0]) : g.diff(S, S);   /* all of it cut: an empty section, not the uncut one */
+      }
       var wI0 = o.supportWidthMm > 0 ? o.supportWidthMm : o.infillWidthMm;
       var layable = function (cs) {
         if (!cs) return null;
@@ -2270,6 +2291,71 @@
       if (Ti) parts2.push(Ti);
       if (Di) parts2.push(Di);
       P.S[i5] = parts2.length ? g.unionAll(parts2) : (base || S);
+    }
+    /* THE CUP (the owner's: "the interfaces supported from below, within bridge tolerances"; Bambu's dome supports flare up to the plate's edge).
+       Where a stack's lowest layer reaches further than COLUMN_CUP_REACH_MM past the tree under it, a ring wall (COLUMN_CUP_RING_MM wide) stands
+       under its edge and steps in a layer's height each layer down (45 deg: every step printable) until it lands on the tree or closes - one
+       wall, the branches inside it keep their own. */
+    if (COLUMN_CUP_REACH_MM > 0 && !(typeof process !== 'undefined' && process.env && process.env.NSO_NO_CUP)) {
+      var cupStep = Math.tan(COLUMN_CUP_DEG * Math.PI / 180);
+      for (var ic = n - 1; ic >= 1; ic--) {   /* top down: a cup built under a wider layer holds the narrower layers under it too */
+        var stk = I[ic] && T[ic] ? g.union(I[ic], T[ic]) : I[ic] || T[ic];
+        if (!stk) continue;
+        var stkB = I[ic - 1] && T[ic - 1] ? g.union(I[ic - 1], T[ic - 1]) : I[ic - 1] || T[ic - 1];
+        var bottom = stkB ? g.diff(stk, stkB) : stk;
+        if (g.isEmpty(bottom)) continue;
+        bottom = g.dropSmall(bottom, COLUMN_MIN_MM2);
+        g.parts(bottom).forEach(function (pc) {
+          /* a plate with a hole (a rim round a cavity) has nothing for a cup to close onto: its rings narrow into the air. Its branches hold it,
+             as Bambu's rims are held */
+          /* a stack widening up a dome: its lowest layer here is a ring round the stack below - the cup stands under the whole of it */
+          var C0 = pc;
+          if (stkB) { var cu = g.parts(g.union(pc, stkB)).filter(function (q) { return !g.isEmpty(g.inter(q, pc)); }); if (cu.length) C0 = g.unionAll(cu); }
+          var holeArea = 0;
+          g.polys(C0).forEach(function (Q) { var a2 = 0; for (var q = 0; q < Q.length; q++) { var u = Q[q], v = Q[(q + 1) % Q.length]; a2 += u[0] * v[1] - v[0] * u[1]; } if (a2 < 0) holeArea += -a2 / 2; });
+          if (holeArea > COLUMN_CUP_HOLE_MM2) return;
+          var tree = P.S[ic - 1];
+          /* the piece's cantilever: its part further than the reach from what stands under it */
+          var far = g.isEmpty(tree) ? pc : g.diff(pc, g.offset(tree, COLUMN_CUP_REACH_MM));
+          if (g.isEmpty(far) || g.area(far) < COLUMN_CUP_MIN_MM2) return;
+          var C = C0, rings = [], landed = false;
+          for (var jc = ic - 1; jc >= 0; jc--) {
+            /* the cup narrows a layer's height a layer (its first ring right under the stack's edge loop), but not off the tree: where it is over a
+               branch already it stops there (it closes onto the tree, not past it) */
+            var underJ = P.S[jc], Cn = g.offset(C, jc === ic - 1 ? -COLUMN_CUP_FIRST_MM : -SP[jc + 1].h * cupStep);
+            C = !g.isEmpty(underJ) ? g.union(Cn, g.inter(C, g.offset(underJ, -COLUMN_CUP_RING_MM / 2))) : Cn;
+            if (g.isEmpty(C)) break;
+            var ring = g.diff(C, g.offset(C, -COLUMN_CUP_RING_MM)), ring0 = g.area(ring);
+            /* a ring the part cuts (it would stand round the cut, its rings above in the air there) ends the cup, unlanded */
+            if (blockedTree[jc]) { ring = g.diff(ring, blockedTree[jc]); if (ring0 - g.area(ring) > COLUMN_MIN_MM2) break; }
+            ring = g.dropSmall(ring, COLUMN_MIN_MM2);
+            if (g.isEmpty(ring)) break;
+            rings.push({ j: jc, ring: ring });
+            /* landed: no part of the ring further than a line from the tree under it */
+            var under = jc > 0 ? P.S[jc - 1] : null;                   /* what the ring stands on: the layer under it */
+            if (jc === 0 || (!g.isEmpty(under) && g.area(g.diff(ring, g.offset(under, o.outerWallWidthMm))) < COLUMN_MIN_MM2)) { landed = true; break; }
+          }
+          /* a cup that closes before it reaches the tree would hang its last ring in the air: none is built (a rim's ring narrows from both
+             sides and closed over air) */
+          if (typeof process !== 'undefined' && process.env && process.env.NSO_CUP_DEBUG) { var bb = g.bbox ? g.bbox(C0) : null; console.log('cup ' + P.name + ' z ' + SP[ic].printZ.toFixed(3) + ' piece ' + g.area(pc).toFixed(2) + ' C0 ' + g.area(C0).toFixed(2) + ' far ' + g.area(far).toFixed(2) + ' rings ' + rings.length + (rings.length ? ' down to z ' + SP[rings[rings.length - 1].j].printZ.toFixed(3) : '') + (landed ? ' LANDED' : ' dropped') + ' ' + JSON.stringify(g.polys(C0).map(function (Q) { var x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9; Q.forEach(function (v) { x0 = Math.min(x0, v[0]); x1 = Math.max(x1, v[0]); y0 = Math.min(y0, v[1]); y1 = Math.max(y1, v[1]); }); return [+x0.toFixed(1), +x1.toFixed(1), +y0.toFixed(1), +y1.toFixed(1)]; }))); }
+          /* every ring stands on what is under it: from the landing up, a ring keeps only what is within COLUMN_CUP_HOLD_MM of the ring or the
+             tree under it - a band narrowing from both sides (a horseshoe of rim) closes over the air, and that much of it is not built */
+          if (landed) {
+            var kept = [];
+            for (var rr = rings.length - 1; rr >= 0; rr--) {
+              var rg = rings[rr], belowJ = rg.j > 0 ? P.S[rg.j - 1] : null;
+              if (rr < rings.length - 1) {
+                var prev = kept.length ? kept[kept.length - 1] : null;
+                var rest = prev && prev.j === rg.j - 1 ? (g.isEmpty(belowJ) ? prev.ring : g.union(belowJ, prev.ring)) : belowJ;
+                rg = { j: rg.j, ring: g.isEmpty(rest) ? null : g.dropSmall(g.inter(rg.ring, g.offset(rest, COLUMN_CUP_HOLD_MM)), COLUMN_MIN_MM2) };
+                if (!rg.ring || g.isEmpty(rg.ring)) break;
+              }
+              kept.push(rg);
+            }
+            kept.forEach(function (r) { P.S[r.j] = g.isEmpty(P.S[r.j]) ? r.ring : g.union(P.S[r.j], r.ring); });
+          }
+        });
+      }
     }
     if (typeof process !== 'undefined' && process.env && process.env.NSO_COLUMN_DEBUG) {
       var A = function (cs) { return cs && !g.isEmpty(cs) ? g.area(cs).toFixed(2) : '-'; };

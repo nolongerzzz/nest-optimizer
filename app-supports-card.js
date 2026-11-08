@@ -1391,12 +1391,14 @@ var NSO_SUPPORTS_CARD = (function () {
     ((a.t.oneTrunk && a.t.oneTrunk.thin) || []).forEach(function (tc) {
       if (!tc.soup || !tc.soup.length) return;
       var sd = solids[0];
-      if (!sd) { sd = { soup: new Float32Array(0), keys: [], holds: {}, landing: 'plate', regionIds: [a.rid], feet: [] }; solids.push(sd); }
+      if (!sd) { sd = { soup: new Float32Array(0), keys: [], holds: {}, landing: 'plate', regionIds: [a.rid], feet: [], thinOnly: true }; solids.push(sd); }
       var joined = new Float32Array(sd.soup.length + tc.soup.length);
       joined.set(sd.soup, 0); joined.set(tc.soup, sd.soup.length);
       sd.soup = joined;
       sd.holds[tc.key] = tc.rest ? 'rest' : 'held'; sd.keys.push(tc.key);
     });
+    /* a plan with no tips (every spot on a step, or on a ledge): its supports are thin columns only */
+    if (a.t.oneTrunk && !a.t.oneTrunk.tips) solids.forEach(function (sd) { if (!sd.brim) sd.thinOnly = true; });
     /* ...a spot on a step narrower than a layer's overhang at the threshold angle is no overhang: the part holds it (plan.oneTrunk.selfHeld) */
     var selfHeld = ((a.t.oneTrunk && a.t.oneTrunk.selfHeld) || []).map(function (sh) { return sh.key; });     /* kept by the card (memOf().selfHeld): held whether or not a support was built */
     /* ...and a spot on the plate's first layers (the low edge of a tipped part) is held by the plate: said held, with the first support */
@@ -1817,6 +1819,29 @@ var NSO_SUPPORTS_CARD = (function () {
     });
     var failed = results.filter(function (r) { return !r.ok; });
     if (failed.length) return { ok: false, reason: failed[0].reason || 'the planner refused' };
+    /* ONE SUPPORT A PIECE: an area whose only support is thin columns (a horn on a shoulder, planned in an area of its own) goes into the
+       piece's first support of another area - the slicer lays one support on one grid, as Bambu's tree is one object (a support of its own
+       sliced on its own grid interleaved its layers with the tree's). Under the column rule; the sheet build is left as it was */
+    var hosts = [];
+    var boxOf = function (q) { var b = [Infinity, Infinity, -Infinity, -Infinity]; for (var i = 0; i < q.length; i += 3) { if (q[i] < b[0]) b[0] = q[i]; if (q[i] > b[2]) b[2] = q[i]; if (q[i + 1] < b[1]) b[1] = q[i + 1]; if (q[i + 1] > b[3]) b[3] = q[i + 1]; } return b; };
+    if (columnRule()) results.forEach(function (r) { (r.solids || []).forEach(function (sd) { if (!sd.thinOnly && !sd.brim && sd.soup && sd.soup.length) hosts.push({ sd: sd, box: boxOf(sd.soup) }); }); });
+    /* the support nearest it in plan (the six heads as one piece have a support each: a horn goes with its own head's) */
+    var hostFor = function (sd) {
+      var b = boxOf(sd.soup), best = null, bd = Infinity;
+      hosts.forEach(function (h) { var dx = Math.max(0, h.box[0] - b[2], b[0] - h.box[2]), dy = Math.max(0, h.box[1] - b[3], b[1] - h.box[3]), d = Math.hypot(dx, dy); if (d < bd) { bd = d; best = h.sd; } });
+      return best;
+    };
+    if (hosts.length) results.forEach(function (r) {
+      r.solids = (r.solids || []).filter(function (sd) {
+        if (!sd.thinOnly || !sd.soup || !sd.soup.length) return true;
+        var host = hostFor(sd);
+        var joined = new Float32Array(host.soup.length + sd.soup.length);
+        joined.set(host.soup, 0); joined.set(sd.soup, host.soup.length); host.soup = joined;
+        sd.keys.forEach(function (k) { if (!host.holds[k]) { host.holds[k] = sd.holds[k]; host.keys.push(k); } });
+        (sd.regionIds || []).forEach(function (rid) { if (host.regionIds && host.regionIds.indexOf(rid) < 0) host.regionIds.push(rid); });
+        return false;
+      });
+    });
     try { results = shareFeet(results, D); } catch (err) { return { ok: false, reason: (err && err.message) || String(err) }; }
     return { ok: true, results: results };
   }

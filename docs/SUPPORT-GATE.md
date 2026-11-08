@@ -32,6 +32,8 @@ Measured on G-code, every head at once, each against Bambu's own slice of the sa
 | empty layers | a support with no line on a layer between two it prints (Bambu's warning) | <= ref |
 | sheet carried | (labelled slices) share of each sheet's lowest layer within 1 mm of support below | >= ref - 10 points |
 | depth III+T | (labelled slices) share of contact columns that read interface x3 or more, then transition, top down | >= ref - 15 points |
+| span p95 | (labelled slices) the stack's lowest layer: each cell's distance to the nearest support on the layer under it, 95th percentile | <= max(ref + 0.5, 1.0) mm |
+| over 2.5 mm | (labelled slices) the stack's lowest layer further than 2.5 mm from support under it: printed over air | <= ref + 0.5 mm2 |
 
 **Unreachable** (a build only): the card's own count after the build - "Built: ... unreachable U" - must be 0 (the owner's first gate before a print;
 docs/SUPPORT-ONE-TRUNK.md item 25). `--merged` builds the six heads as ONE piece, as the owner's plate has them.
@@ -109,6 +111,30 @@ first layer. A spot on a step no slicer calls an overhang (a quarter of a mm at 
 Still to do: the sheet carried (Base 75 %, Negative Spheres 70 - 76 % against Bambu's 85 - 91 %: too few or too thin tips under a plate), the forks
 of the Negative Spheres' trunks over air (2.7, 2.9 mm2), a twig floating on Circular and Sphere; Bambu's horns up the domes' flanks to those shoulders
 (its reference was sliced with remove-small-overhangs off).
+
+## 4c. Held from below, and the horns (the owner's, 2026-11-08: "the interfaces also supported from below, within bridge tolerances ... add the upper branches back in, to catch those little edges their horns do ... a ring tip")
+
+**The cup** (`nso_slicer.js` columnRule, after the stack is laid). A stack's lowest layer that reaches more than `COLUMN_CUP_REACH_MM` (0.25: its edge
+loop's bead would stand on less than half its width) past what is under it gets a ring wall under its edge: the first ring 0.1 mm in, under the
+edge loop, then stepping in at 45 deg a layer down, two lines wide (`COLUMN_CUP_RING_MM`), until it lands on the tree. Worked top down, so a cup
+under a dome's widest layer holds the narrower layers under it too; a dome's widening ring is filled with the stack under it before the cup is
+drawn. Every ring keeps only what stands within 0.3 mm of the ring or tree under it, from the landing up (a horseshoe of rim narrowing from both
+sides closed over the air: that much is not built). Under a plate with a hole (a rim round a cavity) there is none. Bambu's Sphere tree is the
+same flared cup. `NSO_NO_CUP=1` turns it off, `NSO_CUP_DEBUG=1` lists each cup.
+
+**The horns** (`nso_support_gridpack.js` hornColumn, the card's column-rule build). A spot on a step no slicer calls an overhang (the shoulders,
+a quarter of a mm, z 15.3) stands no tip under the column rule; it is caught as Bambu catches it, measured on supp_ref's four domed heads: a horn
+whose top stands under the step's edge `HORN.wallMm` (0.45) off the walls under it (kept over its first half mm, where a dome bulges under its
+shoulder), a twig 0.5 mm across (one ring of line), leaning out at 30 deg (Bambu's 0.6 mm a mm) until it has a straight drop, then a 0.85 mm
+column to the plate, its foot flared. No interface (it is no overhang). A horn in an area of its own goes into the piece's main support (one
+support object, one layer grid). The slicer keeps a twig (a piece of the support's section under 0.6 mm2) 0.2 mm off the part, not the tree's
+0.35, as Bambu's horn rings stand. Our horn tops: z 14.80 at x +-2.6, y 4.1 on Circular and both Negative Spheres, x +-2.3, y 2.9 on the Sphere;
+Bambu's: z 14.80 at x +-2.6, y 4.2 and x +-2.5, y 3.1. They also hold the Negative Sphere2 rim's two horseshoe ends (span over 2.5 mm 2.9 mm2 -> 0).
+
+Gate after both (`support:gate-column`, 62 of 66): no touching anywhere, no floating stack, every sheet's span p95 within Bambu's + 0.5 mm, parity
+unchanged (Base 97, Circular 87, Negative Sphere 86, Negative Sphere2 79, Oblique 84, Sphere 81 %). Left: Circular's twig floating at z 6.58
+(0.33 mm2), the Negative Spheres' trunk forks over air (2.7, 3.1 mm2 against Bambu's 0.1, 0.5) and the Negative Sphere's sheet carried 76 %
+(Bambu 88 %) - the tree's shape, not the interface.
 
 ## 5. Not done, and named
 
