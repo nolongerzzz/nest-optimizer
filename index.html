@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=c9ed869d" />
+  <link rel="stylesheet" href="styles.css?v=7647bc47" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -358,6 +358,11 @@
                 <p class="cs-hint">Drag a point to move it. Click a point or side to edit it. Double-click a side to add a point. Drag the background to pan, wheel to zoom.</p>
               </div>
               <div class="cs-sel" id="cs-sel-none"><p class="cs-hint">Nothing picked - click a point (a corner) or a side in the outline above.</p></div>
+              <div class="cs-nav" id="cs-sel-nav" hidden>
+                <button id="btn-cs-prev" class="cs-mini" type="button" title="Pick the previous side (or point) - for going round a piece with calipers">‹ Prev</button>
+                <span id="cs-nav-what" class="cs-nav-what"></span>
+                <button id="btn-cs-next" class="cs-mini" type="button" title="Pick the next side (or point)">Next ›</button>
+              </div>
               <div class="cs-sel" id="cs-sel-point" hidden>
                 <span class="fx-sublabel" id="cs-point-title">Point</span>
                 <div class="cs-xy">
@@ -377,6 +382,11 @@
               </div>
               <div class="cs-sel" id="cs-sel-side" hidden>
                 <span class="fx-sublabel" id="cs-side-title">Side</span>
+                <div class="cs-len" id="cs-row-len" title="This side's length, mm, corner to corner: between where its neighbouring sides meet, as if the corners were sharp - what calipers read across the outside of a box-like piece, whatever its corner radii (on a curved side, the straight line between its points). Type a measurement and press Enter.">
+                  <label for="inp-cs-len">Length</label><input type="number" id="inp-cs-len" min="0.1" max="2000" step="0.01" aria-label="Side length" inputmode="decimal">
+                  <select id="sel-cs-len-how" class="vp-select" aria-label="How the length changes" title="Stretch: the shape is cut across this side's middle and the far half pulled along - a box stays square. End / Start: only that point of the side moves, along it.">
+                    <option value="stretch" selected>stretch shape</option><option value="end">move end point</option><option value="start">move start point</option></select>
+                </div>
                 <div class="fs-slider" id="cs-row-wall" title="This side's own wall thickness, mm. Every side can have a different one. Held to 2 nozzle widths with a warning.">
                   <label for="inp-cs-wall-slider">Wall</label><input type="number" id="inp-cs-wall" min="0.4" max="50" step="0.1" value="2" aria-label="Side wall"><span id="cs-wall-read" class="fs-read">2 mm</span>
                   <input type="range" id="inp-cs-wall-slider" min="0.4" max="15" step="0.1" value="2"></div>
@@ -388,6 +398,10 @@
                 </div>
               </div>
               <span class="fx-sublabel">Whole piece</span>
+              <div class="cs-size-row" id="cs-row-size" title="The outline's overall size, outside to outside, mm - what calipers read across the whole piece (corners and curves included; not the lip). Type a measurement and press Enter: the shape is stretched across its middle to fit.">
+                <label for="inp-cs-w">Width</label><input type="number" id="inp-cs-w" min="0.1" max="2000" step="0.01" aria-label="Overall width" inputmode="decimal">
+                <label for="inp-cs-d">Depth</label><input type="number" id="inp-cs-d" min="0.1" max="2000" step="0.01" aria-label="Overall depth" inputmode="decimal">
+              </div>
               <div class="fs-slider" id="cs-row-height" title="The piece's height, mm.">
                 <label for="inp-cs-height-slider">Height</label><input type="number" id="inp-cs-height" min="0.5" max="300" step="0.5" value="25" aria-label="Height"><span id="cs-height-read" class="fs-read">25 mm</span>
                 <input type="range" id="inp-cs-height-slider" min="1" max="120" step="0.5" value="25"></div>
@@ -2859,7 +2873,7 @@
   <script src="nso_tube_neck.js?v=4369044a"></script>
   <script src="nso_thread.js?v=3d986b5e"></script>
   <script src="nso_fittings.js?v=b8b58426"></script>
-  <script src="nso_custom_shape.js?v=6912477d"></script>
+  <script src="nso_custom_shape.js?v=6f02bd43"></script>
   <script src="app-tube-edge.js?v=f95f28f0"></script>
   <!-- Bridge: a web between two places, welded. After NSO_Repair.js,
        nso_planar_fuse.js (the vertex space), nso_thickness.js,
@@ -2892,7 +2906,7 @@
   <script src="app-stock.js?v=04f0e346"></script>
   <script src="app-piece-preview.js?v=730a465a"></script>
   <script src="app-fittings.js?v=d1920e12"></script>
-  <script src="app-custom-shape.js?v=b5377a5b"></script>
+  <script src="app-custom-shape.js?v=123e6575"></script>
   <script src="app-fasteners.js?v=aafaf77d"></script>
   <script src="app-assemble.js?v=60984bfb"></script>
   <script src="app-sel-outline.js?v=e4042b39"></script>

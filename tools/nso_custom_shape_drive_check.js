@@ -15,7 +15,10 @@
      9. Lip tiles and rows change the ghost; With lid shows two ghosts, Add drops both as one Undo; a Solid's In lip and lid are off
     10. Grow / Shrink move the whole outline
     11. Copy from a piece: off with nothing selected; the cut is drawn; Copy reads the tray's outside, then its hole; Ctrl+Z
-        brings back what was there; a cut with no hole says so */
+        brings back what was there; a cut with no hole says so
+    12. Calipers: Width / Depth say the size; a picked side's Length applies on Enter only (stretching the box, or moving
+        only its end point), Next steps on with the box ready to type, Width / Depth stretch to fit exactly, a refused
+        stretch is said and moves nothing, Ctrl+Z steps it back */
 
 const fs = require('fs');
 const { withApp } = require('./nso_app_harness');
@@ -266,6 +269,49 @@ withApp(async (page, logs) => {
   await settle(page);
   check('a cut through the floor has no hole, and says so', await page.evaluate(() => document.getElementById('btn-cs-copy').disabled && /no hole/.test(document.getElementById('cs-copy-src').textContent)), await page.evaluate(() => document.getElementById('cs-copy-src').textContent));
   await shot(page, '9-copied');
+
+  console.log('12. calipers');
+  await page.evaluate(() => { document.getElementById('cs-copy').open = false; nsoCustomShape.preset('rounded'); });
+  await settle(page);
+  const typeEnter = async (id, v) => { await page.fill('#' + id, String(v)); await page.press('#' + id, 'Enter'); await settle(page); };
+  check('Width and Depth say the outline\'s size', JSON.stringify(await page.evaluate(() => [document.getElementById('inp-cs-w').value, document.getElementById('inp-cs-d').value])) === '["80","50"]');
+  await page.evaluate(() => nsoCustomShape.select('side', 0));
+  await settle(page);
+  check('picking side 1: its Length box says 80, Prev / Next are up', await page.evaluate(() => document.getElementById('inp-cs-len').value === '80' && !document.getElementById('cs-sel-nav').hidden && /Side 1 of 4/.test(document.getElementById('cs-nav-what').textContent)));
+  await page.fill('#inp-cs-len', '1');
+  await settle(page);
+  check('a half-typed number does nothing until Enter', (await SPEC(page)).points[1].x === 80);
+  await typeEnter('inp-cs-len', '112.5');
+  sp = await SPEC(page);
+  check('Enter: side 1 is 112.5, the box stretched (the far side moved with it)', JSON.stringify(sp.points.map(p => [p.x, p.y])) === '[[0,0],[112.5,0],[112.5,50],[0,50]]', JSON.stringify(sp.points.map(p => [p.x, p.y])));
+  check('and Width follows: 112.5', (await page.evaluate(() => document.getElementById('inp-cs-w').value)) === '112.5');
+  await page.click('#btn-cs-next');
+  await settle(page);
+  check('Next: side 2, its Length (50) ready to type over', await page.evaluate(() => nsoCustomShape.state().sel.i === 1 && document.activeElement && document.activeElement.id === 'inp-cs-len' && document.getElementById('inp-cs-len').value === '50'));
+  await page.keyboard.type('64.2');
+  await page.keyboard.press('Enter');
+  await settle(page);
+  check('typed straight in: side 2 is 64.2', (await page.evaluate(() => nsoCustomShape.spec().points[2].y)) === 64.2);
+  await page.selectOption('#sel-cs-len-how', 'end');
+  await typeEnter('inp-cs-len', '70');
+  sp = await SPEC(page);
+  check('move end point: only point 3 moves, side 2 is 70', sp.points[2].y === 70 && sp.points[3].y === 64.2, JSON.stringify(sp.points.map(p => [p.x, p.y])));
+  await page.selectOption('#sel-cs-len-how', 'stretch');
+  await page.evaluate(() => nsoCustomShape.preset('rounded'));
+  await settle(page);
+  await typeEnter('inp-cs-d', '61.3');
+  check('Depth 61.3: the outline measures 61.3 deep, corners and all', Math.abs((await ST(page)).last.info.depth - 61.3) < 0.005, (await ST(page)).last.info.depth);
+  await page.evaluate(() => nsoCustomShape.select('side', 0));
+  await settle(page);
+  await typeEnter('inp-cs-len', '0.5');
+  check('a stretch that cannot be: said in words, nothing moved', await page.evaluate(() => /fold over/.test(document.getElementById('cs-readout').textContent) && nsoCustomShape.spec().points[1].x === 80 && document.getElementById('inp-cs-len').value === '80'));
+  await page.locator('#cs-editor').focus();
+  await page.keyboard.press('Control+z');
+  await settle(page);
+  check('Ctrl+Z steps a measurement back', Math.abs((await ST(page)).last.info.depth - 50) < 0.005);
+  await page.evaluate(() => nsoCustomShape.select('side', 0));
+  await page.locator('#cs-editor').scrollIntoViewIfNeeded();
+  await shot(page, '10-calipers');
 
   const errs = logs.filter(l => /\[pageerror\]|\[error\]/.test(l) && /custom|cs-|NSO_CustomShape/i.test(l));
   check('no page errors from the card', errs.length === 0, errs.slice(0, 3).join(' | '));

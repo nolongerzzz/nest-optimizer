@@ -22,6 +22,11 @@
    outside or its biggest hole, drawn in the editor in orange as the controls move; Copy outline turns it into points,
    rounded corners and curved sides (NSO_CustomShape.fromLoop) to within Detail, keeping the walls, height, lip and lid.
 
+   CALIPERS: a picked side's LENGTH is typed in (Enter, or leaving the box, applies it - a half-typed number never does):
+   corner to corner, as calipers read across a box-like piece. It stretches the shape across the side's middle (a box stays
+   square), or moves only the side's end or start point. Width and Depth under Whole piece are the overall size, outside to
+   outside, stretched to fit the same way. Prev / Next step round the sides (or points) for measuring one after another.
+
    THE SPEC is kept in this browser (localStorage, a convenience: it can be missing and the card starts from the Rounded
    preset), so a shape is still there when the card is opened again.
 
@@ -172,6 +177,11 @@
     var ch = $('chk-cs-lipch'); if (ch) ch.checked = !!lip.chamfer;
     setBox('inp-cs-lidt', lid.thickness, 'cs-lidt-read'); setBox('inp-cs-lidd', lid.depth, 'cs-lidd-read');
     setBox('inp-cs-lidfit', lid.fit, 'cs-lidfit-read'); setBox('inp-cs-lidwall', lid.wall, 'cs-lidwall-read');
+    show('cs-sel-nav', !!sel);
+    var nw = $('cs-nav-what'); if (nw && sel) nw.textContent = (sel.kind === 'side' ? 'Side ' : 'Point ') + (sel.i + 1) + ' of ' + sp.points.length;
+    var okOut = S.out && S.out.ok, bw = $('inp-cs-w'), bd = $('inp-cs-d');
+    if (bw && document.activeElement !== bw) bw.value = okOut ? String(r2(S.out.info.width)) : '';
+    if (bd && document.activeElement !== bd) bd.value = okOut ? String(r2(S.out.info.depth)) : '';
     var size = $('cs-size');
     if (size) size.textContent = S.out && S.out.ok ? fmt(S.out.info.width) + ' × ' + fmt(S.out.info.depth) + ' mm' : '—';
 
@@ -196,7 +206,10 @@
       var s = sp.sides[sel.i], n = sp.points.length, len = S.out && S.out.ok ? S.out.info.sideLengths[sel.i] : null;
       var a = sp.points[sel.i], b = sp.points[(sel.i + 1) % n];
       if (len == null) len = Math.hypot(b.x - a.x, b.y - a.y);
-      var st = $('cs-side-title'); if (st) st.textContent = 'Side ' + (sel.i + 1) + ' - point ' + (sel.i + 1) + ' to ' + ((sel.i + 1) % n + 1) + ', ' + fmt(len) + ' mm';
+      var chord = CS().sideLength(sp, sel.i);
+      var st = $('cs-side-title');
+      if (st) st.textContent = 'Side ' + (sel.i + 1) + ' - point ' + (sel.i + 1) + ' to ' + ((sel.i + 1) % n + 1) + (Math.abs(s.bulge) > 1e-6 ? ', ' + fmt(len) + ' mm along its curve' : '');
+      var lb = $('inp-cs-len'); if (lb && document.activeElement !== lb) lb.value = String(r2(chord));
       setBox('inp-cs-wall', s.wall, 'cs-wall-read');
       setBox('inp-cs-bulge', s.bulge, 'cs-bulge-read');
     }
@@ -285,6 +298,41 @@
   function setLid(t) {
     if (CS().LID_TYPES.indexOf(t) < 0 || S.spec.lid.type === t) return;
     remember(); S.spec.lid.type = t; changed(true);
+  }
+  /* a caliper reading typed in: side i's length, or the overall width / depth */
+  function measureSide(i, L, how) {
+    var r = CS().setSideLength(S.spec, i, L, how);
+    if (!r.ok) {
+      readout('Custom shape: ' + r.reason, true);
+      var lb = $('inp-cs-len'); if (lb) lb.value = String(r2(CS().sideLength(S.spec, i)));   // refused: back to what it is, focused or not
+      return r;
+    }
+    remember();
+    S.spec = CS().normalize(r.spec);
+    changed(true);
+    say('Side ' + (i + 1) + ' is ' + fmt(L) + ' mm (was ' + fmt(r.was) + ') - ' + (how === 'end' ? 'its end point moved' : how === 'start' ? 'its start point moved' : 'the shape stretched across its middle') + '.', false);
+    return r;
+  }
+  function measureExtent(axis, W) {
+    var r = CS().setExtent(S.spec, axis, W);
+    if (!r.ok) {
+      readout('Custom shape: ' + r.reason, true);
+      var bx = $(axis === 'y' ? 'inp-cs-d' : 'inp-cs-w'), o = S.out && S.out.ok ? S.out.info : null;
+      if (bx && o) bx.value = String(r2(axis === 'y' ? o.depth : o.width));
+      return r;
+    }
+    remember();
+    S.spec = CS().normalize(r.spec);
+    S.view = null;
+    changed(true);
+    say('The outline is ' + fmt(W) + ' mm ' + (axis === 'y' ? 'deep' : 'wide') + ' (was ' + fmt(r.was) + ') - stretched across its middle.', false);
+    return r;
+  }
+  function step(dir) {
+    var n = S.spec.points.length, sel = S.sel || { kind: 'side', i: dir > 0 ? -1 : 0 };
+    select({ kind: sel.kind, i: ((sel.i + dir) % n + n) % n });
+    var box = $(S.sel.kind === 'side' ? 'inp-cs-len' : 'inp-cs-x');
+    if (box) { try { box.focus({ preventScroll: true }); box.select(); } catch (e) { /* fine */ } }
   }
   function usePreset(name) {
     var p = CS().preset(name);
@@ -396,7 +444,9 @@
       var lx = gg.mx - gg.nx * (14 / S.view.k), ly = gg.my - gg.ny * (14 / S.view.k), ls = toScreen(lx, ly);
       var picked2 = S.sel && S.sel.kind === 'side' && S.sel.i === i;
       ctx.fillStyle = picked2 ? '#fbbf24' : '#94a3b8';
-      ctx.fillText(sp.mode === 'solid' ? 's' + (i + 1) : 's' + (i + 1) + ' · ' + fmt(sp.sides[i].wall), ls[0], ls[1]);
+      var lab = 's' + (i + 1) + (sp.mode === 'solid' ? '' : ' · ' + fmt(sp.sides[i].wall));
+      if (picked2) lab = 's' + (i + 1) + ' · ' + fmt(gg.len) + ' mm';            // the picked side: its length
+      ctx.fillText(lab, ls[0], ls[1]);
     }
     /* curve handles: a diamond in the middle of each side, stood off by its curve */
     for (i = 0; i < n; i++) {
@@ -825,6 +875,25 @@
     if (cb) cb.addEventListener('click', function () {
       try { copyOutline(); } catch (err) { if (typeof console !== 'undefined') console.error('[custom shape]', err); readout('Custom shape: the copy failed (' + ((err && err.message) || err) + ')', true); }
     });
+    var lenBox = $('inp-cs-len');
+    if (lenBox) lenBox.addEventListener('change', function () {
+      var v = parseFloat(lenBox.value), how = ($('sel-cs-len-how') || {}).value || 'stretch';
+      if (!S.sel || S.sel.kind !== 'side' || !isFinite(v)) { syncRows(); return; }
+      if (Math.abs(v - CS().sideLength(S.spec, S.sel.i)) < 0.005) return;
+      measureSide(S.sel.i, v, how);
+    });
+    [['inp-cs-w', 'x'], ['inp-cs-d', 'y']].forEach(function (pr) {
+      var box = $(pr[0]);
+      if (box) box.addEventListener('change', function () {
+        var v = parseFloat(box.value), o = S.out && S.out.ok ? S.out.info : null;
+        if (!isFinite(v) || !o) { syncRows(); return; }
+        if (Math.abs(v - (pr[1] === 'y' ? o.depth : o.width)) < 0.005) return;
+        measureExtent(pr[1], v);
+      });
+    });
+    var pv = $('btn-cs-prev'), nx = $('btn-cs-next');
+    if (pv) pv.addEventListener('click', function () { step(-1); });
+    if (nx) nx.addEventListener('click', function () { step(1); });
     ['x', 'y'].forEach(function (ax) {
       var box = $('inp-cs-' + ax);
       if (box) box.addEventListener('input', function () {
@@ -885,7 +954,7 @@
     setSpec: function (sp) { remember(); S.spec = CS().normalize(sp); S.sel = null; S.view = null; changed(true); return clone(S.spec); },
     select: function (kind, i) { select(kind ? { kind: kind, i: i } : null); return S.sel; },
     preset: usePreset, mode: setMode, split: splitSide, remove: deletePoint, undo: undoEdit, add: add, refresh: refresh,
-    lip: setLip, lid: setLid, grow: grow, copy: copyOutline, syncCopy: syncCopy, ref: function () { return S.ref ? S.ref.slice() : null; },
+    lip: setLip, lid: setLid, grow: grow, copy: copyOutline, sideLength: measureSide, extent: measureExtent, step: step, syncCopy: syncCopy, ref: function () { return S.ref ? S.ref.slice() : null; },
     big: setBig, fit: function () { fit(); draw(); },
     toScreen: function (x, y) { return toScreen(x, y); },
     /* where world (x, y) mm is in the window, as a pointer event's clientX / clientY */

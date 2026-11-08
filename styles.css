@@ -4945,3 +4945,11 @@ body.sup-card-open #adjust-status { display: none; }
 .cs-check { flex: 0 0 100%; box-sizing: border-box; display: flex; align-items: center; gap: 6px; font-size: 11px; color: #94a3b8; margin: 2px 0; }
 .cs-check[hidden], .cs-grow[hidden] { display: none; }
 .cs-lips .fs-tile span, .cs-lids .fs-tile span { font-size: 10px; }
+/* Custom shape: caliper entries - a side's Length (and how it changes), the overall Width / Depth, Prev / Next */
+.cs-len { flex: none; display: grid; grid-template-columns: auto 72px 1fr; align-items: center; column-gap: 6px; font-size: 11px; color: #94a3b8; margin: 3px 0; }
+.cs-len input[type="number"], .cs-size-row input[type="number"] { width: 100%; min-width: 0; font-variant-numeric: tabular-nums; }
+.vp-top-body .cs-len select, .cs-len select { width: 100%; min-width: 0; font-size: 11px; padding: 1px 2px; }
+.cs-size-row { flex: 0 0 100%; box-sizing: border-box; display: grid; grid-template-columns: auto 1fr auto 1fr; align-items: center; column-gap: 6px; font-size: 11px; color: #94a3b8; margin: 3px 0; }
+.cs-nav { flex: 0 0 100%; box-sizing: border-box; display: flex; align-items: center; gap: 6px; margin: 2px 0; }
+.cs-nav[hidden] { display: none; }
+.cs-nav-what { flex: 1 1 auto; text-align: center; font-size: 11px; color: #fbbf24; }

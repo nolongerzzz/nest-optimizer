@@ -785,6 +785,74 @@
   }
   function round2(x) { return Math.round(x * 100) / 100; }
 
+  /* ------------------------------------------------------------- measurements (calipers)
+     A side's LENGTH is point to point: where its two neighbouring sides meet, as if the corners were sharp -
+     what calipers read across a box-like piece whatever its corner radii, and on a curved side its chord.
+
+     setSideLength(spec, i, L, how) gives side i (the user's number, from 0) that length:
+       'stretch' (the default)  the shape is cut across the side's middle and the far half pulled along the
+                                side: every point past the middle moves by the change, so a rectangle stays a
+                                rectangle, an L keeps its notch, and the sides that cross the cut take it up
+       'end'                    only the side's end point moves, along the side
+       'start'                  only its start point moves, back along the side
+     setExtent(spec, 'x' | 'y', W) stretches the outline the same way across its own middle until the outline
+     as built - corners, curves and all - is W across. Both -> { ok, spec } or { ok: false, reason }; the spec
+     comes back whether or not it makes a valid outline (the editor says what is wrong, and Ctrl+Z is there). */
+  function sideLengthOf(spec, i) {
+    var sp = normalize(spec), n = sp.points.length;
+    if (i < 0 || i >= n) return 0;
+    var a = sp.points[i], b = sp.points[(i + 1) % n];
+    return Math.hypot(b.x - a.x, b.y - a.y);
+  }
+  function stretchAlong(sp, mid, d, delta) {
+    sp.points.forEach(function (p) {
+      if ((p.x - mid[0]) * d[0] + (p.y - mid[1]) * d[1] > 1e-6) { p.x = round2(p.x + d[0] * delta); p.y = round2(p.y + d[1] * delta); }
+    });
+  }
+  function setSideLength(spec, i, L, how) {
+    var sp = normalize(spec), n = sp.points.length;
+    if (i < 0 || i >= n) return { ok: false, reason: 'there is no side ' + (i + 1) };
+    L = +L;
+    if (!(L >= 0.01)) return { ok: false, reason: 'a side must be longer than 0 mm' };
+    var a = sp.points[i], b = sp.points[(i + 1) % n], len = Math.hypot(b.x - a.x, b.y - a.y);
+    if (len < 1e-9) return { ok: false, reason: 'side ' + (i + 1) + "'s points are on top of each other - move one first" };
+    var d = [(b.x - a.x) / len, (b.y - a.y) / len];
+    if (how === 'end') { b.x = round2(a.x + d[0] * L); b.y = round2(a.y + d[1] * L); }
+    else if (how === 'start') { a.x = round2(b.x - d[0] * L); a.y = round2(b.y - d[1] * L); }
+    else {
+      var delta = L - len;
+      if (delta < 0) {
+        /* shrinking: a point past the cut may not be pulled back across it */
+        var room = Infinity, mid0 = [(a.x + b.x) / 2, (a.y + b.y) / 2];
+        sp.points.forEach(function (p) { var t = (p.x - mid0[0]) * d[0] + (p.y - mid0[1]) * d[1]; if (t > 1e-6) room = Math.min(room, t); });
+        if (-delta >= room - 1e-6) return { ok: false, reason: 'side ' + (i + 1) + ' cannot be stretched down to ' + fmt(L) + ' mm - the shape across its middle would fold over (the most it can lose is ' + fmt(room) + ' mm). Move only its end point instead' };
+      }
+      stretchAlong(sp, [(a.x + b.x) / 2, (a.y + b.y) / 2], d, delta);
+    }
+    return { ok: true, spec: sp, was: len };
+  }
+  function setExtent(spec, axis, W) {
+    var sp = normalize(spec), k = axis === 'y' ? 1 : 0, d = k ? [0, 1] : [1, 0];
+    W = +W;
+    if (!(W >= 0.1)) return { ok: false, reason: 'the size must be more than 0' };
+    var o = outline(Object.assign({}, sp, { mode: 'solid' }));
+    if (!o.ok) return { ok: false, reason: 'the outline is not valid yet: ' + o.reason };
+    var was = k ? o.info.depth : o.info.width;
+    /* stretch across the outline's own middle; a curve crossing the cut can bend the extent a little, so
+       measure and correct, a few times */
+    for (var it = 0; it < 4; it++) {
+      var cur = k ? o.info.depth : o.info.width, delta = W - cur;
+      if (Math.abs(delta) < 0.005) break;
+      var mid = [(o.info.min[0] + o.info.max[0]) / 2, (o.info.min[1] + o.info.max[1]) / 2], room = Infinity;
+      sp.points.forEach(function (p) { var t = (k ? p.y : p.x) - mid[k]; if (t > 1e-6) room = Math.min(room, t); });
+      if (delta < 0 && -delta >= room - 1e-6) return { ok: false, reason: 'it cannot be made ' + fmt(W) + ' mm ' + (k ? 'deep' : 'wide') + ' by stretching - points past its middle would cross it (the most it can lose is ' + fmt(room) + ' mm)' };
+      stretchAlong(sp, mid, d, delta);
+      o = outline(Object.assign({}, sp, { mode: 'solid' }));
+      if (!o.ok) return { ok: true, spec: sp, was: was };       // made as asked; the editor says what is wrong
+    }
+    return { ok: true, spec: sp, was: was };
+  }
+
   /* ------------------------------------------------------------- an outline from points
      fromLoop(points, { tol, wall }): a closed run of points - a section of a mesh, a trace - made into a spec
      the editor can work with, every side within `tol` mm (default 0.2) of the points:
@@ -1080,7 +1148,7 @@
 
   var API = {
     normalize: normalize, outline: outline, make: make, maxRadius: maxRadius, preset: preset,
-    offsetSpec: offsetSpec, fromLoop: fromLoop,
+    offsetSpec: offsetSpec, fromLoop: fromLoop, setSideLength: setSideLength, sideLength: sideLengthOf, setExtent: setExtent,
     PRESETS: Object.keys(PRESETS), MODES: MODES.slice(), LIP_TYPES: LIP_TYPES.slice(), LID_TYPES: LID_TYPES.slice(), DEFAULTS: DEFAULTS, WALL_NOZZLES: WALL_NOZZLES,
     signedArea: signedArea, fmt: fmt
   };

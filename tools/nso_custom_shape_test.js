@@ -18,7 +18,9 @@
       opening, under an inside lip), hollow or solid or none, and the refusals
   12. GROW / SHRINK (offsetSpec): the exact offset, kept as points, radii and curves
   13. COPY AN OUTLINE (fromLoop): sections of made pieces come back as the points, radii and curves they were made from;
-      a noisy trace still reads as rounded corners; a hole reads the right way round */
+      a noisy trace still reads as rounded corners; a hole reads the right way round
+  14. CALIPERS: a side's length set by stretching (a box stays a box, an L keeps its notch), by its end or start point
+      alone, corner to corner whatever the radii; the overall width / depth set exactly, curves and all; refusals */
 
 const CS = require('../nso_custom_shape.js');
 
@@ -276,6 +278,42 @@ console.log('13. an outline from a section: sides, curves and rounded corners re
   r = CS.fromLoop(noisy, { tol: 0.3 });
   check('a noisy trace (+-0.05) at Detail 0.3: 4 corners, radius within 0.5 of 8', r.ok && r.spec.points.length === 4 && r.spec.points.every(p => Math.abs(p.r - 8) <= 0.5), r.ok && JSON.stringify(pts(r)));
   check('refused: fewer than 3 points', !CS.fromLoop([[0, 0], [1, 1]]).ok);
+}
+
+console.log('14. calipers: a side\'s length, and the overall width and depth');
+{
+  const P = r => JSON.stringify(r.spec.points.map(p => [p.x, p.y]));
+  let r = CS.setSideLength(CS.preset('rect'), 0, 100);
+  check('stretch: a box stays a box', r.ok && P(r) === '[[0,0],[100,0],[100,50],[0,50]]', r.ok && P(r));
+  r = CS.setSideLength(CS.preset('rect'), 0, 100, 'end');
+  check('end: only the end point moves, along the side', r.ok && P(r) === '[[0,0],[100,0],[80,50],[0,50]]', r.ok && P(r));
+  r = CS.setSideLength(CS.preset('rect'), 0, 70, 'start');
+  check('start: only the start point moves, back along it', r.ok && P(r) === '[[10,0],[80,0],[80,50],[0,50]]', r.ok && P(r));
+  r = CS.setSideLength(CS.preset('lshape'), 0, 120);
+  check('an L keeps its notch: the bottom 120, the notch where it was', r.ok && P(r) === '[[0,0],[120,0],[120,35],[35,35],[35,80],[0,80]]', r.ok && P(r));
+  r = CS.setSideLength(CS.preset('scoop'), 0, 120);
+  check('the swept tray\'s long side 120: the top moves up, the sweep stays', r.ok && CS.sideLength(r.spec, 0) === 120 && P(r) === '[[0,50],[0,170],[70,170],[70,0],[30,0]]' && r.spec.sides[4].bulge === 6, r.ok && P(r));
+  const cw = CS.preset('rect'); cw.points.reverse();
+  r = CS.setSideLength(cw, 0, 60);
+  check('points given clockwise: the same stretch', r.ok && CS.sideLength(r.spec, 0) === 60 && CS.outline(Object.assign({}, r.spec, { mode: 'solid' })).ok, r.ok && P(r));
+  r = CS.setSideLength(CS.preset('trapezoid'), 2, 60, 'end');
+  check('a slanted side, end point only: 60 exactly', r.ok && near(CS.sideLength(r.spec, 2), 60, 1e-9));
+  r = CS.setSideLength(CS.preset('rounded'), 1, 64);
+  const o = r.ok && CS.outline(Object.assign({}, r.spec, { mode: 'solid' }));
+  check('rounded corners: the length is corner to corner, so the piece measures 64 across', o && o.ok && near(o.info.depth, 64, 1e-9), o && o.info.depth);
+  r = CS.setSideLength(CS.preset('lshape'), 0, 20);
+  check('refused: a stretch that would fold the shape over, saying how far it can go', !r.ok && /fold over/.test(r.reason) && /45 mm/.test(r.reason), r.reason);
+  check('refused: a length of 0', !CS.setSideLength(CS.preset('rect'), 0, 0).ok);
+  const W = sp => CS.outline(Object.assign({}, sp, { mode: 'solid' })).info;
+  r = CS.setExtent(CS.preset('rounded'), 'x', 123.4);
+  check('Width 123.4: the outline measures 123.4 across', r.ok && near(W(r.spec).width, 123.4, 0.005) && near(W(r.spec).depth, 50, 1e-9), r.ok && W(r.spec).width);
+  r = CS.setExtent(CS.preset('scoop'), 'y', 150);
+  check('Depth 150 on the swept tray: 150, the sweep untouched', r.ok && near(W(r.spec).depth, 150, 0.005) && r.spec.points[4].y === 0 && r.spec.points[0].y === 50, r.ok && P(r));
+  const st = CS.preset('rect'); st.points.forEach(p => { p.r = 0; }); st.sides[1].bulge = 25; st.sides[3].bulge = 25;
+  r = CS.setExtent(st, 'x', 200);
+  check('a stadium, curved ends and all: 200 across', r.ok && near(W(r.spec).width, 200, 0.005), r.ok && W(r.spec).width);
+  r = CS.setExtent(CS.preset('hexagon'), 'x', 100);
+  check('a hexagon: 100 across', r.ok && near(W(r.spec).width, 100, 0.005), r.ok && W(r.spec).width);
 }
 
 console.log(fails ? '\n' + fails + ' FAILED' : '\nall held');

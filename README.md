@@ -48,7 +48,8 @@ Smart build-plate packing for 3D printing.
   not fit. A **Lip** (a flange out, or a rim in, chamfered underneath so it
   prints without support), a **Lid** (a plate with a plug that fits the opening
   with a set clearance, made as a second piece), **Grow / Shrink** for the whole
-  outline, and **Copy from a piece**: cut the selected piece at a height, see the
+  outline, **caliper entry** (type a side's length, or the overall width and
+  depth, and the shape stretches to fit), and **Copy from a piece**: cut the selected piece at a height, see the
   cut drawn, and read it back as editable points, rounded corners and curved
   sides ([docs/CUSTOM-SHAPE.md](docs/CUSTOM-SHAPE.md))
 - **Fittings** (Gen+): a slip-on **Cap** for the selected tube (bore = its Ø plus

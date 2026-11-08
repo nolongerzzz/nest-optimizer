@@ -72,6 +72,32 @@ triangulation (`nso_cdt.js`), so the top ring, floor and walls share every
 corner and the mesh is closed. The piece is centred on its footprint and
 stands on the bed, open side up.
 
+## Measuring with calipers
+
+Pick a side: its **Length** box holds its length **corner to corner** - between
+where its neighbouring sides meet, as if the corners were sharp. That is what
+calipers read across the outside of a box-like piece whatever its corner radii
+(on a curved side, the straight line between its points). Type a measurement and
+press **Enter** (or leave the box); a half-typed number is never applied. Beside
+it, how the length changes:
+
+| | |
+|---|---|
+| **stretch shape** (default) | the shape is cut across the side's middle and the far half pulled along the side: a box stays a box, an L keeps its notch, the swept tray's sweep stays where it is |
+| **move end point** | only the side's end point slides along it |
+| **move start point** | only its start point slides back along it |
+
+**Prev / Next** step round the sides (or points), with the box ready to type
+over - go round the piece with the calipers, one side at a time. Under Whole
+piece, **Width** and **Depth** are the outline's overall size, outside to outside,
+corners and curves included (not the lip): type one and the shape is stretched
+across its middle until it measures exactly that. A stretch that would fold the
+shape over is refused, saying how far it can go; Ctrl+Z steps any measurement
+back.
+
+Measuring a **pocket** for an insert: enter the pocket's own sizes, then
+**Shrink** by the clearance you want.
+
 ## Lip
 
 **Out** puts a flange round the top: the outline moved out by Lip width, its
