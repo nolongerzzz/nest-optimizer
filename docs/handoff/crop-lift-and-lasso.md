@@ -67,3 +67,20 @@ Branch `claude-wip`. Full write-up: **`docs/CROP.md`, "The card"**; Lift's side 
   4,422 triangles for 28 mm2 because the lattice followed the dome's tiny root edges. Now a smooth fit (rms under 0.02 mm) fills with
   the base alone, and the lattice follows the neighbours' triangle size (x1.6 on a smooth fit): sphere ~250 triangles at 0.006 mm,
   cone 64 at 0.004 mm. `lift:list` 7 checks it in the app. The loop crop's copy uses the same fill.
+- **ButVase.3mf study** (2026-11-08; "Ornate Butterfly Pitcher", 947k triangles, one part named `single_color-219_fixed.stl`, one welded
+  shell, no separate bodies to peel off). Goal: list the butterflies, vines and handle individually, leave a plain vase. Findings, all
+  prototyped as numpy scripts in `tools/probes/vase/` (not yet in the app):
+  - Lift today reads 0 features: the piece is over `SCAN_MAX_TRIS` (150k) so only its top is scanned, and 96% of the area is one smooth
+    patch under the 30 deg crease rule - the feet of the features are soft blends, not creases.
+  - What works: **relief above a one-sided local base fit**. A coarse seed grid (5 mm); at each seed take the same-facing surface points
+    within 22 mm, fit a quadric height field to the lower envelope (start from the lowest 35%, refit keeping points < 0.25 mm over the
+    fit, 6 passes); a point's relief is its height above the nearest seed's fit. The vase body comes out flat (about 0 mm) and the
+    vines, leaves, butterflies and handle all stand out (`relief3d.py`, `bands.py`). ~15 s for 315k samples in numpy.
+  - Relief > 0.5 mm is still one connected region (vine, leaves, butterflies and handle are fused), so it must be split. Normal
+    divergence (signed curvature, `curv.py`) shows convex rims round every feature but only weak, broken concave seams; a distance-
+    transform watershed of the feature mask with h-maxima markers (`ws.py`, on the unwrapped (angle, z) image for now) splits it into
+    ~26 pieces that are recognisably leaves, butterfly wings, vine runs and handle sections - but also fragments one vine into
+    several runs and joins the lower vine branch to the handle, so a merge step (or a click-to-merge in the list) is still needed.
+  - Rim and base edges give false relief (fit has no support beyond the edge): mask them.
+  - A real port needs: spatial grid instead of cKDTree, geodesic (surface-graph) distance transform instead of the unwrapped image,
+    and each segment lifted through `NSO_LiftCurved.surface.island` + `lift` as the loop crop does (the handle has two root loops).
