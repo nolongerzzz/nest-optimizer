@@ -31,9 +31,14 @@ Measured on G-code, every head at once, each against Bambu's own slice of the sa
 | floating islands | support islands of 0.3 mm2 or more with nothing within 0.35 mm under them | <= ref |
 | empty layers | a support with no line on a layer between two it prints (Bambu's warning) | <= ref |
 | sheet carried | (labelled slices) share of each sheet's lowest layer within 1 mm of support below | >= ref - 10 points |
-| IIITT depth | (labelled slices) share of contact columns that read interface x3 then transition x2 top down | >= ref - 15 points |
+| depth III+T | (labelled slices) share of contact columns that read interface x3 or more, then transition, top down | >= ref - 15 points |
 
 Specks (support islands under 0.8 mm2 under a sheet: tips too thin to hold it) are printed, not gated.
+
+**Parity** (printed, not gated): each of the reference's interface / transition layers set against ours at the same height (within 0.1 mm),
+lines drawn 0.5 mm wide so a plate's lines are one area, in one frame by the parts' centres - plate IoU, the same with the type matched, and
+the share of the reference's layers we have a layer at (within 0.03 mm). `--worst` lists the five layers per head that differ most and the
+columns' make-up top down (I interface, T transition, S support).
 
     node tools/nso_support_gate.js                              build supp_ref with the card (Auto, Dense, 30 deg), slice with NSO_Slicer, gate
     node tools/nso_support_gate.js --rule column                the same with the column rule
@@ -45,18 +50,20 @@ features are support (Bambu's own). About 40 s for a build, 3 s for files.
 
 ## 3. Measured (2026-11-08)
 
-| head | sheet typing (today's default) | column rule |
-|---|---|---|
-| Base | passes | passes |
-| Circular | touch 0.6 mm2 | passes |
-| Negative Sphere | sheet carried 64 % (ref 88) | passes (contact 64 / ref 57 mm2, carried 100 %) |
-| Negative Sphere2 | IIITT 37 % (ref 57) | passes |
-| Oblique | touch 1.5 mm2 | passes (one-layer 96 %, IIITT 92 %) |
-| Sphere | touch 5.9 mm2, one-layer 44 % (ref 66), floating island | floating island 0.33 mm2 at z 7.7: a twig of the generator's tree |
+Printability (the gate) and parity with Bambu (`support:gate` prints both; parity is reported, not gated):
 
-Sheet typing: 7 checks fail in build mode; the owner's NSO slice of 2026-11-07, gated as a file, fails the same checks but the floating island (6). Column rule: 1 fails, and it is
-the tree, not the interface. The owner's Bambu Studio slice of NSO's meshes (no labels) fails 7: the Negative Sphere's apex floats on
-nothing (empty layers 12.0 - 12.8), the Oblique stair mesh is a layer low (78 % of its contact under two layers of air), and the Sphere touches.
+| head | sheet typing, the owner's slice: gate / plate IoU | column rule: gate / plate IoU / type IoU / layer heights met |
+|---|---|---|
+| Base | passes / 96 % | passes / 98 % / 98 % / 100 % |
+| Circular | touch 0.5 mm2, contact 34 / 38 / 85 % | passes / 91 % / 91 % / 100 % |
+| Negative Sphere | contact 49 / 57 / 66 % | 3 floating twigs of the generator's tree at z 11.9 / 91 % / 90 % / 100 % |
+| Negative Sphere2 | contact 23 / 47 / 59 % | contact 41 / 47 (the apex flank ring, z 14.1 - 14.3) / 83 % / 83 % / 100 % |
+| Oblique | touch 1.5 mm2, a floating island / 84 % | passes / 87 % / 87 % / 100 % |
+| Sphere | touch 5.9 mm2, one-layer 43 %, depth 0 % / 68 % | passes / 85 % / 84 % / 100 % |
+
+Under the column rule no line touches the part on any head, every sheet is carried, and the layer heights are Bambu's. The owner's Bambu
+Studio slice of NSO's meshes (no labels) fails on the Negative Sphere's apex floating on nothing (empty layers 12.0 - 12.8), the Oblique
+stair mesh a layer low (78 % of its contact under two layers of air) and the Sphere touching.
 
 ## 4. The column rule
 
@@ -65,9 +72,12 @@ The interface is read off the part's own layers, column by column, as Bambu lays
 - **blocked** at support layer i: the part at the layer's own height grown by the xy distance (`supportXyMm`, 0.35, Bambu's
   `support_object_xy_distance`), and the part whose underside is less than the gap (`supportGapMm`) over the layer's top.
 - **contact** at layer i: where the next layer up would be blocked.
-- **footprint**: the support's sections where the part is within reach over them (the generator's sheet, caps and tip tops), grown 1 mm
-  to 0.2 mm past the edge of the part's underside, and clipped to the part's overhang at the threshold angle (a layer's section past the
-  one under it by more than a layer / tan(angle), grown 0.5 mm): a dome's steep flank is the tree's.
+- **footprint**: the part's overhang at the threshold angle (a layer's section past the one under it by more than a layer / tan(angle);
+  a piece of a section smaller than a bead is not printed and is no overhang), grown 0.38 mm - Bambu's interface loop runs 0.17 mm past the
+  face's edge, measured on the Base - each region taken whole where the generator's support serves it (meets the support within reach
+  under the part). A dome's steep flank is not an overhang: the tree's to hold.
+- **contact** reaches past an overhang's edge by the same 0.38 mm (not past a wall). Past the edge a column can be a contact on two
+  neighbouring layers: both stand their stacks, 4 interface layers in that column, as Bambu's own do on a slope or a dome (13 - 24 %).
 - **rank**: a column's layers counted down from its contact through the layers it is not blocked on: 0 - 2 interface, 3 - 4 transition.
 - **base**: under the stack a column runs on down as Support until it stands on the support's own material, at most 3 mm; a column that
   lands nowhere is dropped, with what stood on it. The base gets a zig-zag at 2 mm (the transition spans no more).
