@@ -173,7 +173,7 @@ function limbBend(tag, soup, b, back, deg, toward, want) {
   check('a press on the flat end is refused: "press on its side"', !rEnd.ok && /that is the rod's flat end \(Ø30\.84\) - press on its side/.test(rEnd.reason), rEnd.reason);
   const tube = NSO_Stock.revolve(NSO_Stock.profileTube(10, 8.4, 40), 96);
   const rTube = NSO_rodBranchRead(tube, { point: [10, 0, 20] });
-  check('a tube is refused: no flat round end', !rTube.ok && /this piece has none \(its round end is open: a tube\)/.test(rTube.reason), rTube.reason);
+  check('a tube is refused: no flat round end, pointed at Tubes', !rTube.ok && /this piece has none \(its round end is open: a tube is branched from Shape → Tubes\)/.test(rTube.reason), rTube.reason);
   // the root disc: the depth it is buried, against the two rims, measured
   for (const [r, rb, A] of [[15.42, 7.5, 45], [15.42, 15, 90], [5, 2.5, 20], [5, 4.5, 160], [5, 4.9, 30]]) {
     const e = NSO_rbDepth(r, rb, A * Math.PI / 180, 0.05), a = A * Math.PI / 180;
@@ -302,6 +302,66 @@ function limbBend(tag, soup, b, back, deg, toward, want) {
     const b = br.branch, g = b.tip.map((x, k) => x - 7.5 * b.dir[k] + b.tipR * b.v[k]);
     const S = L.prepare(br.tris, g, { hint: NSO_rodLimbHint(br.tris, g, NSO_rodBranchEnds(br.tris)) });
     check('the Ø10.5 × 15 shoot at 45°, grabbed half-way: refused - "grab it further out"', !S.ok && /grab it further out/.test(S.reason), S.reason);
+  }
+
+  console.log('\n=== 4c. Tubes → Branch: a tube out of a tube\'s wall, its bore opened into the tube\'s ===');
+  {
+    const subtract = (a, b) => csg.nsoSubtractSoups(a, b);
+    const { NSO_rodLimbHint, NSO_rodBranchEnds } = ctx;
+    const tube0 = NSO_Stock.revolve(NSO_Stock.profileTube(10, 8.4, 80), 96);
+    let tb = tube0, eu = 0, firstTube = null;
+    for (const [z, az, dia, bore, tip, ang] of [[30, 0, 10, 6.8, '', 45], [55, 120, 8, 4.8, '', 90], [70, 240, 8, 4.8, 6, 120]]) {
+      const ph = az * Math.PI / 180, P = [10 * Math.cos(ph), 10 * Math.sin(ph), z];
+      const tag = `tube Ø20/1.6: branch Ø${dia} / bore Ø${bore}${tip ? ' → Ø' + tip + ' tip' : ''} × 25 at ${ang}°`;
+      const t0 = Date.now();
+      const r = await NSO_rodBranchRaw(tb, { point: P, dia, boreDia: bore, tipDia: tip, length: 25, angle: ang, tube: true, union, subtract });
+      const ms = Date.now() - t0;
+      console.log('   ' + r.reason);
+      check(tag + ': welded on', r.ok, r.reason);
+      if (!r.ok) continue;
+      const T = topo(r.tris);
+      check(tag + ': closed, 2-manifold, wound one way; Euler ' + eu + ' → ' + (eu - 2) + ' (its bore runs from the tube\'s out through its tip)',
+            T.open === 0 && T.nm === 0 && T.flip === 0 && T.euler === eu - 2, `open ${T.open} nm ${T.nm} flip ${T.flip} euler ${T.euler}`);
+      const MV = meshValidate(tag, r.tris);
+      check(tag + ': mesh_validate --gate PASS', MV.pass, (MV.fails || []).join('; '));
+      // the open tip, read back off the output: an open round end at the branch's tip, its Ø and bore
+      const b = r.branch, back = [0, 1, 2].map(k => b.tip[k] - 2 * b.dir[k] + b.tipR * b.v[k]);
+      const rd = NSO_rodBranchRead(r.tris, { point: back, tube: true });
+      const wantRo = (tip === '' ? dia : tip) / 2, wantRi = wantRo - (dia - bore) / 2;
+      check(tag + ': its tip is an open ring Ø' + f3(2 * wantRo) + ' / bore Ø' + f3(2 * wantRi) + ' (± 0.05), read off the output', rd.ok && Math.abs(rd.parent.Ro - wantRo) < 0.025 && Math.abs(rd.parent.Ri - wantRi) < 0.025,
+            rd.ok ? 'Ø' + f3(2 * rd.parent.Ro) + ' / Ø' + f3(2 * rd.parent.Ri) : rd.reason);
+      TABLE.push([tag, tb.length / 9, r.tris.length / 9, ms, 'Euler ' + T.euler]);
+      eu -= 2; tb = r.tris;
+      if (!firstTube) firstTube = r;
+    }
+    if (firstTube) {
+      const b = firstTube.branch, P2 = [0, 1, 2].map(k => b.wall[k] + 15 * b.dir[k] + b.rootR * b.v[k]);
+      const r2 = await NSO_rodBranchRaw(firstTube.tris, { point: P2, dia: 4, boreDia: 2.4, length: 12, angle: 50, tube: true, union, subtract });
+      check('a tube branch off the tube branch (Ø4 / bore Ø2.4, read off its open tip)', r2.ok && topo(r2.tris).euler === -4 && meshValidate('tube sub', r2.tris).pass, r2.reason);
+      const E = NSO_rodBranchEnds(firstTube.tris);
+      for (const back of [3, 12]) {
+        const g = b.tip.map((x, k) => x - back * b.dir[k] + b.tipR * b.v[k]), hint = NSO_rodLimbHint(firstTube.tris, g, E);
+        const S = L.prepare(firstTube.tris, g, { hint });
+        if (!S.ok) { check('Limb on the tube branch, grabbed ' + back + ' mm in: prepared', false, S.reason); continue; }
+        L.displaceBy(S, 5, 20, [0, 1, 0]);
+        const f = L.finish(S, { repair: REPAIR });
+        check('Limb on the tube branch, grabbed ' + back + ' mm in: Extend 5 + Bend 20 sets about its own axis (the hint reads the open tip; the bore is its face too)',
+              f.ok && hint.tube && S.an.rod && dot(S.u0, b.dir) > 0.99999, f.ok ? '' : f.reason);
+        if (f.ok) { const MV = meshValidate('tube limb ' + back, f.tris); check('...mesh_validate PASS', MV.pass, (MV.fails || []).join('; ')); }
+      }
+    }
+    for (const [o, re] of [
+      [{ boreDia: 9.8 }, /a Ø10\.00 branch with a Ø9\.80 bore has a 0\.10 mm wall - under the 0\.42 mm floor/],
+      [{ boreDia: '' }, /enter the branch's bore Ø/],
+      [{ dia: 18, boreDia: 17 }, /a Ø17\.00 bore is as wide as the tube's own \(Ø16\.80 there\) or wider/],
+      [{ tipDia: 3.5 }, /a Ø3\.50 tip keeping the 1\.60 mm wall leaves a Ø0\.30 bore there/]]) {
+      const r = await NSO_rodBranchRaw(tube0, Object.assign({ point: [10, 0, 30], dia: 10, boreDia: 6.8, length: 20, angle: 45, tube: true, union, subtract }, o));
+      check('tube branch refused: ' + JSON.stringify(o), !r.ok && r.tris === tube0 && re.test(r.reason), r.reason);
+    }
+    const rodOnTube = await NSO_rodBranchRaw(tube0, { point: [10, 0, 30], dia: 6, length: 20, angle: 45, union });
+    check('Cylinders → Branch on a tube points at Tubes', !rodOnTube.ok && /a tube is branched from Shape → Tubes/.test(rodOnTube.reason), rodOnTube.reason);
+    const tubeOnRod = await NSO_rodBranchRaw(rod, { point: [R, 0, 30], dia: 6, boreDia: 3, length: 20, angle: 45, tube: true, union, subtract });
+    check('Tubes → Branch on a solid rod points at Cylinders', !tubeOnRod.ok && /a solid rod is branched from Shape → Cylinders/.test(tubeOnRod.reason), tubeOnRod.reason);
   }
 
   console.log('\n=== 5. refusals, the piece unchanged ===');

@@ -373,7 +373,7 @@
     "tube:edges": {"weight":31750,"note":""},
     "tube:edges-drive": {"weight":57250,"note":""},
     "cylinders:drive": {"weight":25000,"note":""},
-    "rod:branch": {"weight":150000,"note":"measured: node tools/nso_rod_branch_test.js, 264 checks, 148 s - Manifold unions, mesh_validate + NSO_Repair on each output, Limb bends"},
+    "rod:branch": {"weight":125000,"note":"measured: node tools/nso_rod_branch_test.js, 287 checks, 123 s - Manifold unions, mesh_validate + NSO_Repair on each output, Limb bends"},
     "fittings": {"weight":13720,"note":"measured: node tools/nso_fittings_test.js, 114 checks, mesh_validate on each output"},
     "fittings:drive": {"weight":35000,"note":"measured: the real Fittings card - 16 drawn tiles, sliders, live preview (generic and tube-read cap, threaded ends, async splitter), Add to plate, refusals"},
     "fittings:thread": {"weight":30000,"note":"measured: node tools/nso_fittings_thread_test.js, 77 checks, splitter with male / female / NPT ends on the Manifold kernel + mesh_validate"},

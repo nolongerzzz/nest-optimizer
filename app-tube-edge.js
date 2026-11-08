@@ -136,8 +136,11 @@ function NSO_teOpts() {
   var walls = NSO_teWallsVal();
   if (verb === 'branch') {
     // Cylinders → Branch (nso_rod_branch.js): Tip Ø blank is the same as Ø
-    return { verb: 'branch', rod: true, point: B.point, dia: num('inp-te-br-dia'), tipDia: num('inp-te-br-tip'),
-             length: num('inp-te-br-len'), angle: num('inp-te-br-angle') };
+    // Tubes → Branch is the same verb on a tube (opts.tube): a Bore Ø too
+    var bo = { verb: 'branch', rod: !!B.rod, point: B.point, dia: num('inp-te-br-dia'), tipDia: num('inp-te-br-tip'),
+               length: num('inp-te-br-len'), angle: num('inp-te-br-angle') };
+    if (!B.rod) { bo.tube = true; bo.boreDia = num('inp-te-br-bore'); }
+    return bo;
   }
   if (verb === 'neck') {
     var no = { verb: 'neck', point: B.point, length: num('inp-te-neck-length'), dr: num('inp-te-neck-dr'),
@@ -823,6 +826,7 @@ function NSO_teSyncRows() {
   ['te-roll-rows'].forEach(function (id) { var el = NSO_teEl(id); if (el) el.hidden = verb !== 'roll'; });
   ['te-neck-rows'].forEach(function (id) { var el = NSO_teEl(id); if (el) el.hidden = verb !== 'neck'; });
   ['te-branch-rows'].forEach(function (id) { var el = NSO_teEl(id); if (el) el.hidden = verb !== 'branch'; });
+  ['te-br-bore-row'].forEach(function (id) { var el = NSO_teEl(id); if (el) el.hidden = verb !== 'branch' || rod; });
   ['te-dir-row'].forEach(function (id) { var el = NSO_teEl(id); if (el) el.hidden = verb !== 'roll'; });
   ['te-walls-row'].forEach(function (id) { var el = NSO_teEl(id); if (el) el.hidden = verb !== 'neck' || rod; });
 }
@@ -841,6 +845,7 @@ function NSO_teReadKind() { var v = NSO_teVerb(); return v === 'neck' ? 'neck' :
 function NSO_teName(neck) {
   var B = NSO_teUI();
   if (B.rod) return NSO_teVerb() === 'branch' ? 'Branch' : 'Cylinder neck';
+  if (NSO_teVerb() === 'branch') return 'Tube branch';
   return neck ? 'Neck' : 'Tube edge';
 }
 
@@ -912,7 +917,7 @@ function NSO_teLoad() {
 // or the branch drag - and the slider is put back in step with it on every
 // preview. Tip Ø's box may be blank (the same as Ø): its slider then sits at Ø.
 var NSO_TE_SLIDERS = [['rng-te-neck-length', 'inp-te-neck-length'], ['rng-te-neck-dr', 'inp-te-neck-dr'],
-                      ['rng-te-br-dia', 'inp-te-br-dia'], ['rng-te-br-tip', 'inp-te-br-tip'],
+                      ['rng-te-br-dia', 'inp-te-br-dia'], ['rng-te-br-bore', 'inp-te-br-bore'], ['rng-te-br-tip', 'inp-te-br-tip'],
                       ['rng-te-br-len', 'inp-te-br-len'], ['rng-te-br-angle', 'inp-te-br-angle']];
 function NSO_teBindSliders() {
   if (typeof window === 'undefined' || !window.nsoLiveSlider) return;
@@ -941,7 +946,7 @@ function NSO_teSetSliderRanges() {
   var B = NSO_teUI(), rd = B.read;
   if (!rd || !rd.ok) return;
   var r1 = function (x) { return Math.round(x * 10) / 10; };
-  if (rd.tube) {
+  if (rd.tube && typeof rd.tube === 'object') {
     var tb = rd.tube, R = tb.endRo;
     NSO_teSliderRange('rng-te-neck-length', 0.5, Math.max(1, r1(tb.lengthMm)), 0.5);
     NSO_teSliderRange('rng-te-neck-dr', -Math.max(0.1, r1(R - 0.4)), Math.max(0.5, r1(R)), 0.1);
@@ -949,6 +954,7 @@ function NSO_teSetSliderRanges() {
     var D = rd.at ? 2 * rd.at.r : 2 * rd.parent.Ro;
     NSO_teSliderRange('rng-te-br-dia', 0.8, Math.max(1, r1(D - 0.2)), 0.1);
     NSO_teSliderRange('rng-te-br-tip', 0.8, Math.max(1, r1(D - 0.2)), 0.1);
+    if (rd.tube) NSO_teSliderRange('rng-te-br-bore', 0.8, Math.max(1, r1((rd.at ? 2 * rd.at.ri : 2 * rd.parent.Ri) - 0.2)), 0.1);
     NSO_teSliderRange('rng-te-br-len', 0.5, Math.max(60, Math.round(3 * D)), 0.5);
   }
   NSO_teSyncSliders();
@@ -959,7 +965,8 @@ function NSO_tePreview() {
   NSO_teSyncSliders();
   var B = NSO_teUI(), m = NSO_teModel();
   var kind = NSO_teReadKind();
-  if (B.open && m && (B.readVerb !== kind || (kind === 'neck' && B.read && B.read.ok && !!B.read.rod !== !!B.rod))) { NSO_teLoad(); return B.result; }
+  if (B.open && m && (B.readVerb !== kind || (kind === 'neck' && B.read && B.read.ok && !!B.read.rod !== !!B.rod) ||
+                      (kind === 'branch' && B.read && B.read.ok && !!B.read.tube !== !B.rod))) { NSO_teLoad(); return B.result; }
   if (!B.open || !m || !B.read || !B.read.ok) { NSO_teSyncButtons(); return null; }
   if (kind === 'branch') return NSO_teBranchPreview(B, m);
   var o = NSO_teOpts(), neck = o.verb === 'neck';
@@ -1037,15 +1044,22 @@ function NSO_teClose() {
 // pressed is set back to that rod's half, so branches off branches start right.
 function NSO_teBranchLoad(B, m) {
   var rd;
-  try { rd = NSO_rodBranchRead(m.rawTris, { point: B.point }); }
+  try { rd = NSO_rodBranchRead(m.rawTris, { point: B.point, tube: !B.rod }); }
   catch (err) { rd = { ok: false, reason: (err && err.message) || String(err) }; }
   B.read = rd;
   NSO_teRemoveRing();
-  if (!rd.ok) { NSO_teReadout('Branch: ' + rd.reason, true); NSO_teClear(); NSO_teSyncButtons(); return; }
+  if (!rd.ok) { NSO_teReadout(NSO_teName(false) + ': ' + rd.reason, true); NSO_teClear(); NSO_teSyncButtons(); return; }
   var D = rd.at ? 2 * rd.at.r : 2 * rd.parent.Ro, nozzle = (typeof NSO_rbNozzle === 'function') ? NSO_rbNozzle() : 0.4;
   var DI = NSO_teEl('inp-te-br-dia'), LE = NSO_teEl('inp-te-br-len'), AN = NSO_teEl('inp-te-br-angle');
   var fit = Math.max(2 * nozzle, Math.round(2 * D / 3) / 2);
   if (DI && (DI.value === '' || (rd.at && !(+DI.value < D - 0.1)))) DI.value = String(fit);
+  // a tube's branch: its bore keeps the tube's own wall (the Ø less two walls), and
+  // starts over when it is blank, no narrower than the Ø, or wider than the tube's bore
+  var BO = NSO_teEl('inp-te-br-bore');
+  if (!B.rod && BO && rd.parent) {
+    var wallT = rd.parent.Ro - rd.parent.Ri, bmax = rd.at ? 2 * rd.at.ri - 0.2 : 2 * rd.parent.Ri - 0.2;
+    if (BO.value === '' || !(+BO.value < +DI.value) || !(+BO.value < bmax)) BO.value = String(Math.max(2 * nozzle, Math.round(10 * (+DI.value - 2 * wallT)) / 10));
+  }
   if (LE && LE.value === '') LE.value = String(Math.max(2, Math.round(1.5 * D)));
   if (AN && AN.value === '') AN.value = '45';
   NSO_teSetSliderRanges();
@@ -1060,7 +1074,7 @@ function NSO_teBranchPreview(B, m) {
   if (!o.point) {
     B.result = null; B.key = key; B.soup = m.rawTris;
     NSO_teRemoveGhost(); NSO_teRemoveRing();
-    NSO_teReadout('Press on the side of the rod where the branch grows out, and drag outward - the branch follows the pointer.');
+    NSO_teReadout('Press on the side of the ' + (B.rod ? 'rod' : 'tube') + ' where the branch grows out, and drag outward - the branch follows the pointer.');
     NSO_teSyncButtons();
     return null;
   }
@@ -1077,7 +1091,7 @@ function NSO_teBranchPreview(B, m) {
     NSO_teReadout(r.reason + ' · Set welds it on' + (aligned ? '' : ' · (no ghost: the piece was turned since it was loaded)'));
   } else {
     NSO_teRemoveGhost(); NSO_teRemoveRing();
-    NSO_teReadout('Branch: ' + r.reason, true);
+    NSO_teReadout(NSO_teName(false) + ': ' + r.reason, true);
   }
   NSO_teSyncButtons();
   return r;
@@ -1161,7 +1175,7 @@ function NSO_teBranchSet() {
     if (typeof setStatus === 'function') setStatus('Branch stood down - ' + painted + ' painted face(s); it welds a new rod on and re-seats the piece. Clear paint to branch it.', true);
     return Promise.resolve(null);
   }
-  var o = NSO_teOpts(), soup = m.rawTris;
+  var o = NSO_teOpts(), soup = m.rawTris, nm = NSO_teName(false);
   if (B.read && B.read.ok) o.read = B.read;
   B.busy = true; NSO_teSyncButtons();
   NSO_teReadout('Welding the branch on…');
@@ -1173,22 +1187,22 @@ function NSO_teBranchSet() {
       return r;
     }
     if (!r.ok) {
-      if (typeof setStatus === 'function') setStatus('Branch refused - piece unchanged (' + r.reason + ')', true);
-      NSO_teReadout('Branch: ' + r.reason, true);
+      if (typeof setStatus === 'function') setStatus(nm + ' refused - piece unchanged (' + r.reason + ')', true);
+      NSO_teReadout(nm + ': ' + r.reason, true);
       NSO_teSyncButtons();
       return r;
     }
-    var txt = 'Branch done - ' + r.reason + '; ' + r.counts.trisIn + ' → ' + r.counts.trisOut + ' faces';
+    var txt = nm + ' done - ' + r.reason + '; ' + r.counts.trisIn + ' → ' + r.counts.trisOut + ' faces';
     B.point = null;
-    NSO_sculptCommitRaw(m, r.tris, 'rodBranchReplace', txt);
+    NSO_sculptCommitRaw(m, r.tris, o.tube ? 'tubeBranchReplace' : 'rodBranchReplace', txt);
     NSO_teLoad();
-    NSO_teReadout('Branch welded on. Press the rod (or the new branch) for the next one - or Limb bends it.');
+    NSO_teReadout('Branch welded on. Press the ' + (o.tube ? 'tube' : 'rod') + ' (or the new branch) for the next one - or Limb bends it.');
     return r;
   }, function (err) {
     B.busy = false; NSO_teSyncButtons();
     var why = (err && err.message) || String(err);
-    if (typeof setStatus === 'function') setStatus('Branch failed - piece unchanged (' + why + ')', true);
-    NSO_teReadout('Branch: ' + why, true);
+    if (typeof setStatus === 'function') setStatus(nm + ' failed - piece unchanged (' + why + ')', true);
+    NSO_teReadout(nm + ': ' + why, true);
     return null;
   });
 }
@@ -1362,7 +1376,7 @@ if (typeof document !== 'undefined') {
         NSO_teSyncRows(); NSO_tePreview();
       });
       ['sel-te-dir', 'sel-te-walls', 'sel-te-profile', 'chk-te-keep', 'inp-te-od2', 'inp-te-id2', 'inp-te-trans', 'inp-te-run', 'inp-te-radius', 'inp-te-roll-angle',
-       'inp-te-neck-length', 'inp-te-neck-dr', 'sel-te-neck-profile', 'inp-te-br-dia', 'inp-te-br-tip', 'inp-te-br-len', 'inp-te-br-angle'].forEach(function (id) {
+       'inp-te-neck-length', 'inp-te-neck-dr', 'sel-te-neck-profile', 'inp-te-br-bore', 'inp-te-br-dia', 'inp-te-br-tip', 'inp-te-br-len', 'inp-te-br-angle'].forEach(function (id) {
         var el = NSO_teEl(id);
         if (el) el.addEventListener('change', NSO_tePreview);
       });

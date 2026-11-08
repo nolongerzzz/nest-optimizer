@@ -1142,3 +1142,56 @@ taper and angle measured off the output, branches off branches, Limb bending
 what Branch made, refusals) and section 6 of the drive
 `tools/nso_cylinders_neck_check.js` (press, drag, Set, a second branch, two
 Undos, in the real page).
+
+## Tubes → Branch — a tube out of a tube's wall (2026-11-08)
+
+The Tube edge button now reads **Tubes**, and its Verb picker has a fourth
+verb, **Branch**: Cylinders → Branch for a tube. Press on the tube's outside
+where the branch grows and drag outward (the tip follows the pointer); Ø,
+**Bore Ø** (the branch's bore at the wall - its wall is (Ø − Bore) / 2), Tip Ø
+(a taper keeps the wall to the tip), Length and Angle, each a slider and a box.
+Set welds it on, its bore opened into the tube's: a tee at 90°, a wye at 45°.
+One Undo (`tubeBranchReplace`, "Undo: Tube branch reverted"); the card stays
+up for the next. Defaults off the tube pressed: Ø a third of its Ø, Bore the Ø
+less two of the tube's own walls (Ø20 / 1.6 wall: Ø6.5 / Ø3.3).
+
+The engine is Branch's (`nso_rod_branch.js`, `opts.tube`):
+
+- **The parent** is read off an **open** round end (Tube edge's 'open' kind):
+  the tube whose outside the press sits on; a press on its bore, or its end,
+  is refused in words. A tube branch's tip is an open ring, so tube branches
+  grow off tube branches.
+- **Three booleans** (`NSO_rbWeldTube`): the branch's outside less a TRIM - the
+  parent's bore, 0.02 mm wider so no face of it lies on the parent's, along
+  the parent's axis over the junction - so the branch fills nothing inside the
+  bore; that added to the tube; then the branch's BORE taken out - rooted with
+  its whole foot inside the parent's bore (solved as the outside's root is; so
+  it cuts only the near wall), ringed facet for facet with the outside, and run
+  1 mm out past the tip with no ring on the tip's plane (one there lay on the
+  tip face, and the kernel answered that exact touch with doubled edges).
+- **The gates**: one solid as before; closed and 2-manifold; the **Euler
+  characteristic down by exactly 2** - one handle more: the branch's bore joins
+  the tube's and opens at its tip (a bore blind at either end would leave it as
+  it was); the volume grown, by no more than the branch's outside solid.
+- **The slicer's weld** (rods too, now): the kernel can leave triangles with an
+  edge under 1e-4 mm. Welded as tools/mesh_validate.py welds, a result that
+  only collapses those (nothing opened or doubled) is used welded - no vertex
+  moves 0.1 µm; anything else at that weld retries the facets' turn.
+- **Refusals**: a wall under the nozzle-safety floor (nso_thickness.js), with
+  the widest bore the Ø allows; a bore as wide as the tube's own; a tip whose
+  bore, keeping the wall, would be under 2 nozzle widths; plus Branch's own.
+  Cylinders → Branch on a tube points at Tubes, Tubes → Branch on a solid rod
+  points at Cylinders.
+- **Limb** bends a tube branch about its own axis the same way: the rod hint
+  reads an open tip too, and counts the bore as the rod's own face.
+- **Speed**: the junction's pre-subdivision is skipped when it balloons (a wall
+  an earlier union cut is slivers - 27,000 triangles became 115,000), and its
+  piercing check counts only triangles near the junction: a third tube branch
+  went from 52 s to 3 s.
+
+Tests: tools/nso_rod_branch_test.js section 4c (three tube branches on one
+tube - 45°, 90°, a 120° taper - each Euler −2 and mesh_validate PASS, the open
+tip read back at its Ø and bore; a tube branch off a tube branch; Limb on one;
+refusals), and section 8 of the Cylinders drive (Tubes reads "Tubes", Branch
+in its Verb, the Bore row, defaults, press + drag, Set, Euler −2 on the page's
+own piece, one Undo; no Bore row in Cylinders).

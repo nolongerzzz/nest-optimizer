@@ -152,7 +152,7 @@ const ORDERED = ['menu-shape', 'menu-add', 'menu-bit', 'menu-surface', 'menu-rep
 /* Tube edge's verbs are Reducer, Roll, Neck. (Soften's four styles are tiles now: SOFTEN_STYLES.) */
 /* Soften's styles, in the shelf's order: Round, Corners, Corners+edges, Bevel. */
 const SOFTEN_STYLES = ['fillet', 'corners', 'cornersedges', 'chamfer'];
-const OPTIONS = { 'sel-te-verb': ['reducer', 'roll', 'neck'],
+const OPTIONS = { 'sel-te-verb': ['reducer', 'roll', 'neck', 'branch'],
                   'sel-brush-mode': ['emboss', 'smooth'], 'sel-measure-mode': ['span', 'edge'],
                   'plate-grid-show': ['auto', 'on', 'off'] };
 

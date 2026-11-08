@@ -382,6 +382,63 @@ withApp(async (page) => {
   await shot(page, 'limb-drag-branch.png');
   await page.click('#btn-limb');
 
+  console.log('\n=== 8. Shape → Tubes → Branch: a tube pulled out of a tube\'s wall, its bore opened into the tube\'s ===');
+  check('the Tube edge button reads "Tubes", and its Verb offers Branch', await page.evaluate(() =>
+    document.getElementById('btn-tube-edge').textContent.trim() === 'Tubes' && [...document.querySelectorAll('#sel-te-verb option')].some(o => o.value === 'branch')));
+  if (await page.evaluate(() => state.tubeEdge && state.tubeEdge.open)) await page.click('#btn-te-cancel');
+  const tbId = await loadSTL(page, writeSTL('tube8.stl', NSO_Stock.revolve(NSO_Stock.profileTube(10, 8.4, 80), 96)));
+  await selectModel(page, tbId);
+  const tBefore = await soupOf(page);
+  await page.click('#btn-tube-edge');
+  await page.waitForFunction(() => state.tubeEdge && state.tubeEdge.open && !state.tubeEdge.rod, null, { timeout: 30000 });
+  await setField(page, 'sel-te-verb', 'branch');
+  await page.waitForFunction(() => state.tubeEdge.readVerb === 'branch', null, { timeout: 30000 });
+  await setField(page, 'inp-te-br-dia', '');
+  await setField(page, 'inp-te-br-bore', '');
+  await setField(page, 'inp-te-br-tip', '');
+  await page.evaluate(() => NSO_teLoad());
+  let T8 = await page.evaluate(() => {
+    const el = id => document.getElementById(id), vis = id => { const e = el(id); return !!e && !e.hidden && e.offsetParent !== null; };
+    return { rows: vis('te-branch-rows'), bore: vis('te-br-bore-row'), walls: vis('te-walls-row'), verb: vis('te-verb-row'), dia: el('inp-te-br-dia').value, b: el('inp-te-br-bore').value,
+             readout: el('te-readout').textContent, rBore: +el('rng-te-br-bore').max };
+  });
+  check('Tubes → Branch: its rows and the Bore Ø row up (Walls hidden); defaults off the Ø20 / 1.6 tube: Ø6.5, bore Ø3.3 (the tube\'s 1.6 wall kept), the Bore slider ranged to the tube\'s bore',
+        T8.rows && T8.bore && !T8.walls && T8.verb && T8.dia === '6.5' && T8.b === '3.3' && Math.abs(T8.rBore - 16.6) < 1e-9 && /^Press on the side of the tube/.test(T8.readout), JSON.stringify(T8));
+  await frame(page, 15, 150);
+  const p8 = await page.evaluate(() => {
+    const m = getActiveModel(), pl = state.placed.find(q => q.sourceId === m.id), mesh = pl.mesh, o = m.centerOffset;
+    const cam = state.camera.position.clone().applyMatrix4(new THREE.Matrix4().copy(mesh.matrixWorld).invert());
+    const cx = cam.x + o.x, cy = -(cam.z + o.z), L = Math.hypot(cx, cy), sd = [-cy / L, cx / L], f = [cx / L, cy / L];
+    const c = Math.cos(50 * Math.PI / 180), sn = Math.sin(50 * Math.PI / 180), dir = [c * sd[0] + sn * f[0], c * sd[1] + sn * f[1]];
+    const local = new THREE.Vector3(10 * dir[0] - o.x, 30 - o.y, -(10 * dir[1]) - o.z);
+    const w = local.applyMatrix4(mesh.matrixWorld).project(state.camera), rc = state.renderer.domElement.getBoundingClientRect();
+    return { x: rc.left + (w.x + 1) / 2 * rc.width, y: rc.top + (1 - w.y) / 2 * rc.height };
+  });
+  await page.mouse.move(p8.x, p8.y);
+  await page.mouse.down();
+  const q8 = await page.evaluate(() => { const D = state.tubeEdge.bdrag; return NSO_teScreen(getActiveModel(), [0, 1, 2].map(k => D.S[k] + 15 * D.e[k] + 15 * D.a[k])); });
+  for (let i = 1; i <= 16; i++) await page.mouse.move(p8.x + (q8.x - p8.x) * i / 16, p8.y + (q8.y - p8.y) * i / 16);
+  await page.mouse.up();
+  T8 = await br();
+  check('press + drag on the tube: the ghost is the branch, 21 mm out at 45° ("Tube branch Ø6.50 / bore Ø3.30 (wall 1.60)")',
+        T8.ghost && /^Tube branch Ø6\.50 \/ bore Ø3\.30 \(wall 1\.60\), 21\.0 mm out at 45° off a Ø20\.00 \/ Ø16\.80 tube/.test(T8.readout), T8.readout);
+  await shot(page, 'tube-branch-drag.png');
+  await page.click('#btn-te-go');
+  await page.waitForFunction(() => /Tube branch (done|refused|failed)/.test(document.getElementById('status').textContent) && !state.tubeEdge.busy, null, { timeout: 60000 });
+  const st8 = await page.evaluate(() => document.getElementById('status').textContent);
+  check('Set: "Tube branch done - …", the card still up for the next', /^Tube branch done - Tube branch Ø6\.50/.test(st8) && (await page.evaluate(() => state.tubeEdge.open)), st8.slice(0, 160));
+  const euler = await page.evaluate(() => NSO_bendTopology(getActiveModel().rawTris).euler);
+  check('the branch\'s bore opens into the tube\'s: the piece\'s Euler characteristic is −2 (a tube is 0; a tee one handle more)', euler === -2, String(euler));
+  await shot(page, 'tube-branch-set.png');
+  await page.click('#btn-undo');
+  await page.waitForFunction(() => /Undo: Tube branch reverted/.test(document.getElementById('status').textContent), null, { timeout: 15000 });
+  check('one Undo ("Undo: Tube branch reverted") puts the tube back bit for bit', (await soupOf(page)) === tBefore);
+  await page.click('#btn-cylinders');
+  await page.waitForFunction(() => state.tubeEdge.open && state.tubeEdge.rod, null, { timeout: 30000 });
+  await setField(page, 'sel-te-rod-verb', 'branch');
+  check('Cylinders → Branch has no Bore Ø row', await page.evaluate(() => document.getElementById('te-br-bore-row').hidden));
+  await page.click('#btn-te-cancel');
+
   console.log('\n' + (fails ? fails + ' FAILED' : 'all gates held'));
   if (fails) process.exitCode = 1;
 });

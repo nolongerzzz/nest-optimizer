@@ -108,13 +108,13 @@ function NSO_rodBranchEnds(soup) {
   var res = { ok: false, reason: '', soup: soup };
   var f32 = (soup instanceof Float32Array) ? soup : new Float32Array(soup);
   if (!(NSO_teVolume(f32, [0, 0, 0]) > 0)) { res.reason = 'the piece is wound inside out (its volume reads negative) - Repair it first'; return res; }
-  var W = NSO_teWeld(f32), FF = NSO_teFaces(W), closed = [], open = 0;
+  var W = NSO_teWeld(f32), FF = NSO_teFaces(W), closed = [], openList = [];
   FF.faces.forEach(function (F) {
     var c = NSO_teClassFace(W, F, FF.region);
     if (c.kind === 'closed' && c.center) closed.push(c);
-    else if (c.kind === 'open') open++;
+    else if (c.kind === 'open' && c.center) openList.push(c);
   });
-  res.ok = true; res.weld = W; res.closed = closed; res.open = open;
+  res.ok = true; res.weld = W; res.closed = closed; res.open = openList.length; res.openList = openList;
   return res;
 }
 
@@ -140,12 +140,15 @@ function NSO_rodBranchRead(soup, opts) {
   res.soup = soup;
   var E = opts.ends && opts.ends.soup === soup ? opts.ends : NSO_rodBranchEnds(soup);
   if (!E.ok) { res.reason = E.reason; return res; }
-  var W = E.weld, closed = E.closed, open = E.open;
-  res.weld = W;
+  var tube = !!opts.tube, W = E.weld, closed = tube ? E.openList : E.closed, open = E.open, noun = tube ? 'tube' : 'rod';
+  res.weld = W; res.tube = tube;
   res.ends = closed.length;
   if (!closed.length) {
-    res.reason = 'Branch grows out of a rod, and reads the rod\'s axis off a flat, round end - this piece has none' +
-      (open ? ' (its round end is open: a tube)' : '');
+    res.reason = tube
+      ? 'Tube branch grows out of a tube, and reads the tube\'s axis off an open, round end (a ring round a bore) - this piece has none' +
+        (E.closed.length ? ' (its round end is closed: a solid rod is branched from Shape → Cylinders)' : '')
+      : 'Branch grows out of a rod, and reads the rod\'s axis off a flat, round end - this piece has none' +
+        (open ? ' (its round end is open: a tube is branched from Shape → Tubes)' : '');
     return res;
   }
   var p = opts.point;
@@ -156,7 +159,7 @@ function NSO_rodBranchRead(soup, opts) {
       if (!top || c.center[2] > top.center[2] + 1e-9 || (Math.abs(c.center[2] - top.center[2]) <= 1e-9 && c.Ro > top.Ro)) top = c;
     });
     res.ok = true; res.parent = NSO_rbParent(top);
-    res.reason = closed.length + ' round end(s) to grow from - press on the side of a rod where the branch goes';
+    res.reason = closed.length + ' round end(s) to grow from - press on the side of a ' + noun + ' where the branch goes';
     return res;
   }
   // every end the press sits behind, scored by how far it is off that end's circle
@@ -171,10 +174,10 @@ function NSO_rodBranchRead(soup, opts) {
   var behind = cands.filter(function (q) { return q.behind; });
   behind.sort(function (x, y) { return x.score - y.score || x.h - y.h; });
   if (on.length && (!behind.length || behind[0].score > NSO_RB_SAME_LINE_MM)) {
-    res.reason = 'that is the rod\'s flat end (Ø' + NSO_rbFmt(2 * on[0].c.Ro) + ') - press on its side, where the branch grows out of the wall';
+    res.reason = 'that is the ' + noun + '\'s ' + (tube ? 'open' : 'flat') + ' end (Ø' + NSO_rbFmt(2 * on[0].c.Ro) + ') - press on its side, where the branch grows out of the wall';
     return res;
   }
-  if (!behind.length) { res.reason = 'that press is not on the side of a rod with a flat, round end'; return res; }
+  if (!behind.length) { res.reason = 'that press is not on the side of a ' + noun + (tube ? ' with an open, round end' : ' with a flat, round end'); return res; }
   var best = behind[0];
   // the same wall read from the rod's other end: the higher end, so Angle reads one way
   behind.forEach(function (q) {
@@ -184,7 +187,12 @@ function NSO_rodBranchRead(soup, opts) {
     if (Math.abs(q.r - best.r) > NSO_RB_SAME_LINE_MM) return;
     if (q.c.center[2] > best.c.center[2] + 1e-6) best = q;
   });
-  if (!(best.r > 1e-6)) { res.reason = 'that press is on the rod\'s axis, not its side'; return res; }
+  if (!(best.r > 1e-6)) { res.reason = 'that press is on the ' + noun + '\'s axis, not its side'; return res; }
+  // a press on a tube's bore, not its outside: the branch grows out of the outside
+  if (tube && best.score > NSO_RB_SAME_LINE_MM && Math.abs(best.r - best.c.Ri) < Math.abs(best.r - best.c.Ro)) {
+    res.reason = 'that is the tube\'s bore - press on its outside, where the branch grows out of the wall';
+    return res;
+  }
   // a straight rod is a polygon: a press on a facet's flat reads up to
   // R (1 - cos(pi / n)) inside its circle - that is the rod's own radius
   var nLoop = best.c.loops && best.c.loops[0] ? best.c.loops[0].v.length : 0;
@@ -196,11 +204,14 @@ function NSO_rodBranchRead(soup, opts) {
   res.ok = true; res.parent = par;
   res.at = { h: best.h, r: best.r, e: e, offMm: best.score,
              S: [C[0] + best.h * a[0] + best.r * e[0], C[1] + best.h * a[1] + best.r * e[1], C[2] + best.h * a[2] + best.r * e[2]] };
-  res.reason = 'on a Ø' + NSO_rbFmt(2 * best.r) + ' rod, ' + NSO_rbFmt(-best.h) + ' mm in from its Ø' + NSO_rbFmt(2 * par.Ro) + ' end';
+  // a tube's bore at the press: its wall carried from the end (a taper keeps the wall)
+  if (tube) res.at.ri = best.r - (par.Ro - par.Ri);
+  res.reason = 'on a Ø' + NSO_rbFmt(2 * best.r) + (tube ? ' / bore Ø' + NSO_rbFmt(2 * res.at.ri) + ' tube, ' : ' rod, ') +
+    NSO_rbFmt(-best.h) + ' mm in from its Ø' + NSO_rbFmt(2 * par.Ro) + ' end';
   return res;
 }
 function NSO_rbParent(c) {
-  return { center: c.center, axis: c.face.n, Ro: c.Ro, frame: c.frame || NSO_teFrame(c.face.n) };
+  return { center: c.center, axis: c.face.n, Ro: c.Ro, Ri: c.Ri || 0, open: c.kind === 'open', frame: c.frame || NSO_teFrame(c.face.n) };
 }
 
 /* LIMB ON A ROD (nso_limb.js, opts.hint). Limb finds a limb by walking the
@@ -218,9 +229,12 @@ function NSO_rbParent(c) {
    hGrab, hHinge (along the axis from the tip, <= 0), radius }. */
 var NSO_RB_HINGE_MM = 1;            // the hinge, this far past the junction
 function NSO_rodLimbHint(soup, point, ends) {
-  var rd = NSO_rodBranchRead(soup, { point: point, ends: ends });
-  if (!rd.ok || !rd.at) return { ok: false, reason: rd.reason || 'not on a rod' };
+  // a rod (flat tip) or a tube (open tip, Tubes → Branch's): whichever's wall the grab sits on more nearly
+  var rr = NSO_rodBranchRead(soup, { point: point, ends: ends }), rt = NSO_rodBranchRead(soup, { point: point, ends: ends, tube: true });
+  var rd = rr.ok && rr.at && (!(rt.ok && rt.at) || rr.at.offMm <= rt.at.offMm) ? rr : rt;
+  if (!rd.ok || !rd.at) return { ok: false, reason: rr.reason || rt.reason || 'not on a rod' };
   var W = rd.weld, P = W.P, a = rd.parent.axis, C = rd.parent.center, hG = rd.at.h, rG = rd.at.r, Ro = rd.parent.Ro;
+  var wall = rd.tube ? rd.parent.Ro - rd.parent.Ri : 0;      // a tube's bore is the rod's own face too, a wall in
   function R(h) { return hG < -1e-9 ? Ro + (rG - Ro) * h / hG : rG; }     // the rod's radius at h: tip to grab, run on
   var top = -Infinity;
   for (var t = 0; t < W.n; t++) {
@@ -233,13 +247,14 @@ function NSO_rodLimbHint(soup, point, ends) {
     if (r > Rh + 1.5) continue;                                          // off the rod: the parent beyond it
     var nr = r > 1e-9 ? (W.N[t * 3] * ex + W.N[t * 3 + 1] * ey + W.N[t * 3 + 2] * ez) / r : 0;
     if (nr >= 0.9 && Math.abs(r - Rh) <= Math.max(0.05, 0.03 * Rh)) continue;   // the rod's own face
+    if (wall > 0 && nr <= -0.9 && Math.abs(r - (Rh - wall)) <= Math.max(0.05, 0.03 * Rh)) continue;   // a tube's bore
     [i0, i1, i2].forEach(function (o) {
       var hv = (P[o] - C[0]) * a[0] + (P[o + 1] - C[1]) * a[1] + (P[o + 2] - C[2]) * a[2];
       if (hv < hG && hv > top) top = hv;
     });
   }
   if (!isFinite(top)) return { ok: false, reason: 'no end to the rod below the grab' };
-  return { ok: true, axis: a, center: C, hGrab: hG, hHinge: top + NSO_RB_HINGE_MM, radius: rG, tipR: Ro };
+  return { ok: true, axis: a, center: C, hGrab: hG, hHinge: top + NSO_RB_HINGE_MM, radius: rG, tipR: Ro, tube: !!rd.tube };
 }
 
 /* =====================================================================
@@ -254,8 +269,8 @@ function NSO_rodLimbHint(soup, point, ends) {
    The least such e, by bisection between the wall (e = 0) and the axis
    (e = r / sin A, the disc centred on it, where the rim is nearest); NaN when
    even there the rim reaches the wall (a branch too wide for its angle). */
-function NSO_rbDepth(r, rb, A, bury) {
-  var sA = Math.sin(A), cA = Math.cos(A), lim = r - bury;
+function NSO_rbDepth(r, rb, A, bury, rLim) {
+  var sA = Math.sin(A), cA = Math.cos(A), lim = (rLim == null ? r : rLim) - bury;
   function far(e) {
     var X = r - e * sA, best = 0;
     for (var k = 0; k < 360; k++) {
@@ -346,8 +361,9 @@ function NSO_rodBranchPlan(soup, opts) {
   opts = opts || {};
   var res = { ok: false, reason: '', tris: soup, verb: 'branch' };
   if (!opts.point) { res.reason = 'press on the side of the rod where the branch grows out, and drag it out'; return res; }
-  var rd = opts.read && opts.read.ok && opts.read.soup === soup && opts.read.at && opts.read.pointKey === String(opts.point) ? opts.read
-         : NSO_rodBranchRead(soup, { point: opts.point });
+  var tube = !!opts.tube;
+  var rd = opts.read && opts.read.ok && opts.read.soup === soup && opts.read.at && opts.read.pointKey === String(opts.point) && !!opts.read.tube === tube ? opts.read
+         : NSO_rodBranchRead(soup, { point: opts.point, tube: tube });
   rd.pointKey = String(opts.point);
   res.read = rd;
   if (!rd.ok) { res.reason = rd.reason; return res; }
@@ -369,10 +385,34 @@ function NSO_rodBranchPlan(soup, opts) {
       NSO_RB_NOZZLES + ' nozzle widths at a ' + NSO_rbFmt(nozzle, 1) + ' mm nozzle)';
     return res;
   }
+  var noun = tube ? 'tube' : 'rod';
   if (!(dia < 2 * r - 2 * NSO_RB_BURY_MM)) {
-    res.reason = 'a Ø' + NSO_rbFmt(dia) + ' branch is as wide as the rod it would grow from (Ø' + NSO_rbFmt(2 * r) + ' there) or wider - ' +
-      'a branch is narrower than its rod: Ø' + NSO_rbFmt(Math.floor((2 * r - 2 * NSO_RB_BURY_MM - 0.005) * 100) / 100) + ' at most here';
+    res.reason = 'a Ø' + NSO_rbFmt(dia) + ' branch is as wide as the ' + noun + ' it would grow from (Ø' + NSO_rbFmt(2 * r) + ' there) or wider - ' +
+      'a branch is narrower than its ' + noun + ': Ø' + NSO_rbFmt(Math.floor((2 * r - 2 * NSO_RB_BURY_MM - 0.005) * 100) / 100) + ' at most here';
     return res;
+  }
+  // A TUBE's branch is a tube: its bore (opts.boreDia, at the wall) runs into the parent's
+  var bore = null, ri = tube ? at.ri : 0;
+  if (tube) {
+    bore = +opts.boreDia;
+    if (opts.boreDia == null || opts.boreDia === '' || !(bore > 0) || !isFinite(bore)) { res.reason = 'enter the branch\'s bore Ø in mm, more than 0'; return res; }
+    var wallFloor = (typeof NSO_teFloor === 'function' && NSO_teFloor(nozzle)) || NSO_RB_NOZZLES * nozzle;
+    var wallB = (dia - bore) / 2;
+    if (!(wallB >= wallFloor - 1e-9)) {
+      res.reason = 'a Ø' + NSO_rbFmt(dia) + ' branch with a Ø' + NSO_rbFmt(bore) + ' bore has a ' + NSO_rbFmt(Math.max(0, wallB)) + ' mm wall - under the ' +
+        NSO_rbFmt(wallFloor) + ' mm floor (nso_thickness.js, a ' + NSO_rbFmt(nozzle, 1) + ' mm nozzle): its bore is Ø' + NSO_rbFmt(dia - 2 * wallFloor) + ' at most';
+      return res;
+    }
+    if (tip - (dia - bore) < NSO_RB_NOZZLES * nozzle - 1e-9) {
+      res.reason = 'a Ø' + NSO_rbFmt(tip) + ' tip keeping the ' + NSO_rbFmt(wallB) + ' mm wall leaves a Ø' + NSO_rbFmt(Math.max(0, tip - (dia - bore))) +
+        ' bore there - under ' + NSO_rbFmt(NSO_RB_NOZZLES * nozzle) + ' mm across: make the tip wider';
+      return res;
+    }
+    if (!(bore < 2 * ri - 2 * NSO_RB_BURY_MM)) {
+      res.reason = 'a Ø' + NSO_rbFmt(bore) + ' bore is as wide as the tube\'s own (Ø' + NSO_rbFmt(2 * ri) + ' there) or wider - its foot would cut the far wall: Ø' +
+        NSO_rbFmt(Math.floor((2 * ri - 2 * NSO_RB_BURY_MM - 0.005) * 100) / 100) + ' at most here';
+      return res;
+    }
   }
   var A = deg * Math.PI / 180, a = par.axis, e = at.e;
   var d = [Math.cos(A) * a[0] + Math.sin(A) * e[0], Math.cos(A) * a[1] + Math.sin(A) * e[1], Math.cos(A) * a[2] + Math.sin(A) * e[2]];
@@ -398,11 +438,41 @@ function NSO_rodBranchPlan(soup, opts) {
   // vertex column when the press is (a Stock rod pressed at 0°, 120°, 240°),
   // and the kernel answers that exact touch with a doubled edge
   var phase = opts.phase == null ? 0.5 : +opts.phase;
-  var bsoup = NSO_rbRevolve(Bc, d, u, v, prof, n, phase, NSO_RB_TIP_RING_MM);
+  var bsoup = NSO_rbRevolve(Bc, d, u, v, prof, n, phase, tube ? null : NSO_RB_TIP_RING_MM);
+  var tubeParts = null;
+  if (tube) {
+    // the BORE: a frustum rooted inside the parent's bore (its whole root disc
+    // there, so it cuts only the near wall) and run 1 mm past the tip, ringed
+    // as the outside is, facet for facet; the tip keeps the wall
+    var rib = bore / 2, rit = rt - (rb - rib), dB = NSO_rbDepth(r, rib, A, NSO_RB_BURY_MM, ri);
+    if (!isFinite(dB)) {
+      res.reason = 'a Ø' + NSO_rbFmt(bore) + ' bore at ' + NSO_rbFmt(deg, 0) + '° does not fit inside the Ø' + NSO_rbFmt(2 * ri) +
+        ' bore it would open into - its foot would cut the far wall: make it narrower, or stand it nearer 90°';
+      return res;
+    }
+    var Bb = [S[0] - dB * d[0], S[1] - dB * d[1], S[2] - dB * d[2]], pb = [[0, rib], [dB, rib]], slope = (rit - rib) / L;
+    // (no ring on the tip's plane: one there lies on the tip face, and the
+    // kernel answers that exact touch with doubled edges - the last stretch
+    // runs straight through it, out past the tip)
+    for (var qb = 1; qb < nr; qb++) pb.push([dB + L * qb / nr, rib + (rit - rib) * qb / nr]);
+    pb.push([dB + L + 1, rit + slope]);
+    // the TRIM: the parent's bore, 0.02 mm wider (so no face of it lies on the
+    // parent's), along the parent's axis over the junction - taken out of the
+    // branch's outside first, so the branch fills nothing inside the bore
+    var hS = at.h, half = depth + rb + 2, rTrim = ri + 0.02, a0 = par.axis, C0 = par.center;
+    var Ta = [C0[0] + (hS - half) * a0[0], C0[1] + (hS - half) * a0[1], C0[2] + (hS - half) * a0[2]];
+    var tf = NSO_teFrame(a0);
+    tubeParts = {
+      bore: NSO_rbRevolve(Bb, d, u, v, pb, n, phase, null),
+      trim: NSO_rbRevolve(Ta, a0, tf.e1, tf.e2, [[0, rTrim], [2 * half, rTrim]], NSO_RB_MAX_SEG, 0.5, null),
+      boreR: rib, boreTipR: rit, boreDepthMm: dB, parentBoreR: ri, wallMm: rb - rib
+    };
+  }
   var pf = n * Math.sin(2 * Math.PI / n) / (2 * Math.PI);
   var outside = pf * Math.PI * L * (rb * rb + rb * rt + rt * rt) / 3, whole = outside + pf * Math.PI * rb * rb * depth;
   var T = [S[0] + L * d[0], S[1] + L * d[1], S[2] + L * d[2]];
-  res.branch = { phase: phase, soup: bsoup, root: Bc, wall: S, tip: T, dir: d, u: u, v: v, rootR: rb, tipR: rt, depthMm: depth, segments: n, rings: nr,
+  if (tubeParts) outside -= pf * Math.PI * L * (tubeParts.boreR * tubeParts.boreR + tubeParts.boreR * tubeParts.boreTipR + tubeParts.boreTipR * tubeParts.boreTipR) / 3;
+  res.branch = { tube: tubeParts, phase: phase, soup: bsoup, root: Bc, wall: S, tip: T, dir: d, u: u, v: v, rootR: rb, tipR: rt, depthMm: depth, segments: n, rings: nr,
                  volumeMm3: whole, outsideMm3: outside, lengthMm: L, angleDeg: deg, parentR: r };
   res.ok = true;
   res.reason = NSO_rodBranchDescribe(res);
@@ -411,7 +481,12 @@ function NSO_rodBranchPlan(soup, opts) {
 
 /* One line: "Branch Ø7.50 → Ø5.00 tip, 30.0 mm out at 45° off a Ø30.84 rod, 20.00 mm in from its end". */
 function NSO_rodBranchDescribe(r) {
-  var b = r.branch, at = r.read.at;
+  var b = r.branch, at = r.read.at, tb = b.tube;
+  if (tb) {
+    return 'Tube branch Ø' + NSO_rbFmt(2 * b.rootR) + ' / bore Ø' + NSO_rbFmt(2 * tb.boreR) + ' (wall ' + NSO_rbFmt(tb.wallMm) + ')' +
+      (Math.abs(b.tipR - b.rootR) > 1e-9 ? ' → Ø' + NSO_rbFmt(2 * b.tipR) + ' tip' : '') + ', ' + NSO_rbFmt(b.lengthMm, 1) + ' mm out at ' +
+      NSO_rbFmt(b.angleDeg, 0) + '° off a Ø' + NSO_rbFmt(2 * b.parentR) + ' / Ø' + NSO_rbFmt(2 * tb.parentBoreR) + ' tube, ' + NSO_rbFmt(-at.h) + ' mm in from its end';
+  }
   return 'Branch Ø' + NSO_rbFmt(2 * b.rootR) + (Math.abs(b.tipR - b.rootR) > 1e-9 ? ' → Ø' + NSO_rbFmt(2 * b.tipR) + ' tip' : '') + ', ' +
     NSO_rbFmt(b.lengthMm, 1) + ' mm out at ' + NSO_rbFmt(b.angleDeg, 0) + '° off a Ø' + NSO_rbFmt(2 * b.parentR) + ' rod, ' +
     NSO_rbFmt(-at.h) + ' mm in from its end';
@@ -431,10 +506,55 @@ function NSO_rbFineHost(f32, b) {
   var reg;
   try { reg = DZ.region(f32, { c: b.wall, r: reach }, { spacing: NSO_RB_FINE_MM }); } catch (e) { return f32; }
   if (!reg || !reg.ok || !reg.changed) return f32;
+  // a wall an earlier union cut is slivers, and bisecting slivers balloons
+  // (27,000 triangles became 115,000 round one tube branch): not this way
+  if (reg.mesh.triCount > 2 * (f32.length / 9) + 20000) return f32;
   var fine = DZ.toSoup(reg.mesh), T0 = NSO_bendTopology(f32), T1 = NSO_bendTopology(fine);
   if (T1.open !== T0.open || T1.nm !== T0.nm || T1.flip !== T0.flip || T1.euler !== T0.euler) return f32;
+  // piercing pairs, counted only near the junction (nothing else moved)
+  var c = b.wall, r2 = (reach + 3) * (reach + 3);
+  function near(s) {
+    var o = [];
+    for (var i = 0; i < s.length; i += 9) {
+      var x = (s[i] + s[i + 3] + s[i + 6]) / 3 - c[0], y = (s[i + 1] + s[i + 4] + s[i + 7]) / 3 - c[1], z = (s[i + 2] + s[i + 5] + s[i + 8]) / 3 - c[2];
+      if (x * x + y * y + z * z <= r2) for (var k = 0; k < 9; k++) o.push(s[i + k]);
+    }
+    return new Float32Array(o);
+  }
   function pierce(s) { var m = DZ.weld(s, 1e-9); return RP._selfIntersectionDetail({ pos: m.pos, faces: m.tri }).pierce; }
-  return pierce(fine) <= pierce(f32) ? fine : f32;
+  return pierce(near(fine)) <= pierce(near(f32)) ? fine : f32;
+}
+
+/* The welded piece as the canonical checker counts it (tools/mesh_validate.py
+   welds at 1e-4 mm): open, doubled and mis-wound edges, and triangles that
+   weld collapses. The kernel can leave two vertices closer than that which
+   are not one: exactly closed, but not to a slicer. */
+function NSO_rbSlicerTopology(s) {
+  var DZ = (typeof NSO_Densify !== 'undefined') ? NSO_Densify : null;
+  if (!DZ) return null;
+  var m = DZ.weld(s, 1e-4), tri = m.tri, nv = m.vertCount, E = new Map();
+  for (var t = 0; t < m.triCount; t++) for (var k = 0; k < 3; k++) {
+    var a = tri[t * 3 + k], b = tri[t * 3 + (k + 1) % 3], key = a < b ? a * nv + b : b * nv + a, e = E.get(key);
+    if (!e) { e = [0, 0]; E.set(key, e); }
+    e[0]++; if (a < b) e[1]++;
+  }
+  var open = 0, nm = 0, flip = 0;
+  E.forEach(function (e) { if (e[0] === 1) open++; else if (e[0] > 2) nm++; else if (e[1] !== 1) flip++; });
+  return { open: open, nm: nm, flip: flip, dropped: ((s.length / 9) | 0) - m.triCount };
+}
+function NSO_rbSlicerBad(s) {
+  var T = NSO_rbSlicerTopology(s);
+  return T && (T.open || T.nm || T.flip || T.dropped) ? T : null;
+}
+/* A kernel result with triangles thinner than that weld (an edge under 1e-4
+   mm), and nothing else wrong at it: welded as a slicer would weld it - those
+   vertices merged, those triangles dropped, no vertex moved 0.1 µm - which is
+   closed exactly. Anything else at that weld: null (the caller retries). */
+function NSO_rbSlicerClean(s) {
+  var T = NSO_rbSlicerTopology(s);
+  if (!T || !T.dropped) return s;
+  if (T.open || T.nm || T.flip) return null;
+  return NSO_Densify.toSoup(NSO_Densify.weld(s, 1e-4));
 }
 
 /* As NSO_rodBranchPlan, then the union (opts.union: a function (a, b) ->
@@ -461,6 +581,7 @@ function NSO_rodBranchRaw(soup, opts) {
 function NSO_rbWeld(soup, opts) {
   var plan = NSO_rodBranchPlan(soup, opts);
   if (!plan.ok) return Promise.resolve(plan);
+  if (plan.branch.tube) return NSO_rbWeldTube(soup, opts, plan);
   var union = opts.union || (typeof nsoUnionSoups === 'function' ? nsoUnionSoups : null);
   if (!union) { plan.ok = false; plan.reason = 'nso_csg.js must be loaded - the branch is welded on with the app\'s boolean'; return Promise.resolve(plan); }
   var f32 = (soup instanceof Float32Array) ? soup : new Float32Array(soup), b = plan.branch;
@@ -475,7 +596,8 @@ function NSO_rbWeld(soup, opts) {
       if (u && u.cancelled) res.cancelled = true;
       return res;
     }
-    var out = (u.soup instanceof Float32Array) ? u.soup : new Float32Array(u.soup);
+    var out = NSO_rbSlicerClean((u.soup instanceof Float32Array) ? u.soup : new Float32Array(u.soup));
+    if (!out) { res.reason = 'internal: the welded piece has edges a slicer\'s weld (1e-4 mm) would double or open'; res.retry = true; return res; }
     res.counts = { trisIn: f32.length / 9, trisOut: out.length / 9, branchTris: b.soup.length / 9, parts: u.parts };
     if (res.counts.trisOut > NSO_RB_MAX_TRIS) { res.reason = 'the result would have ' + res.counts.trisOut + ' triangles, past the ' + NSO_RB_MAX_TRIS + ' limit'; return res; }
     var sh0 = NSO_rbShells(f32), sh1 = NSO_rbShells(out);
@@ -490,6 +612,8 @@ function NSO_rbWeld(soup, opts) {
       res.topology = T1;
       if (T1.open || T1.nm) { res.reason = 'internal: the welded piece is not closed (open ' + T1.open + ', non-manifold ' + T1.nm + ')'; res.retry = true; return res; }
     }
+    var bad = NSO_rbSlicerBad(out);
+    if (bad) { res.reason = 'internal: the welded piece has vertices closer than a slicer\'s weld (at 1e-4 mm: open ' + bad.open + ', doubled ' + bad.nm + ', collapsed ' + bad.dropped + ')'; res.retry = true; return res; }
     var v0 = NSO_teVolume(f32, b.wall), v1 = NSO_teVolume(out, b.wall), dv = v1 - v0;
     res.volume = { before: v0, after: v1, change: dv, branch: b.volumeMm3, outside: b.outsideMm3 };
     if (!(dv >= 0.5 * b.outsideMm3 && dv <= b.volumeMm3 * 1.005 + 1e-3)) {
@@ -501,6 +625,75 @@ function NSO_rbWeld(soup, opts) {
     res.tris = out;
     res.reason = NSO_rodBranchDescribe(res);
     return res;
+  });
+}
+
+/* A TUBE's branch, welded on in three booleans: the branch's outside less the
+   trim (so it fills nothing inside the parent's bore), that added to the tube,
+   and the branch's bore taken out (it cuts the near wall, opening the branch
+   into the parent's bore, and runs out past the tip). opts.subtract: a function
+   (a, b) -> Promise of { ok, soup, reason }; the app's nsoSubtractSoups when
+   not given. THE GATES: one solid as before, closed and 2-manifold, and its
+   Euler characteristic down by exactly 2 - one more handle: the branch's bore
+   joins the parent's and opens at the tip (a bore blind at either end would
+   leave it as it was) - and the volume grown, by no more than the branch's
+   wall standing out of the parent. */
+function NSO_rbWeldTube(soup, opts, plan) {
+  var union = opts.union || (typeof nsoUnionSoups === 'function' ? nsoUnionSoups : null);
+  var subtract = opts.subtract || (typeof nsoSubtractSoups === 'function' ? nsoSubtractSoups : null);
+  if (!union || !subtract) { plan.ok = false; plan.reason = 'nso_csg.js must be loaded - the branch is welded on with the app\'s boolean'; return Promise.resolve(plan); }
+  var f32 = (soup instanceof Float32Array) ? soup : new Float32Array(soup), b = plan.branch, tb = b.tube;
+  var host = NSO_rbFineHost(f32, b);
+  plan.fine = host !== f32;
+  var res = plan;
+  res.tris = soup; res.ok = false;
+  function refused(step, u) {
+    res.reason = 'the boolean refused the branch at its ' + step + (u && u.reason ? ' (' + u.reason + ')' : '');
+    if (u && u.cancelled) res.cancelled = true;
+    return res;
+  }
+  function soupOf(u) { return (u.soup instanceof Float32Array) ? u.soup : new Float32Array(u.soup); }
+  return Promise.resolve(subtract(b.soup, tb.trim, { label: 'Tube branch' })).then(function (u1) {
+    if (!u1 || !u1.ok || !u1.soup) return refused('trim', u1);
+    return Promise.resolve(union(host, soupOf(u1), { label: 'Tube branch' })).then(function (u2) {
+      if (!u2 || !u2.ok || !u2.soup) return refused('weld', u2);
+      return Promise.resolve(subtract(soupOf(u2), tb.bore, { label: 'Tube branch' })).then(function (u3) {
+        if (!u3 || !u3.ok || !u3.soup) return refused('bore', u3);
+        var out = NSO_rbSlicerClean(soupOf(u3));
+        if (!out) { res.reason = 'internal: the welded piece has edges a slicer\'s weld (1e-4 mm) would double or open'; res.retry = true; return res; }
+        res.counts = { trisIn: f32.length / 9, trisOut: out.length / 9, branchTris: b.soup.length / 9 };
+        if (res.counts.trisOut > NSO_RB_MAX_TRIS) { res.reason = 'the result would have ' + res.counts.trisOut + ' triangles, past the ' + NSO_RB_MAX_TRIS + ' limit'; return res; }
+        var sh0 = NSO_rbShells(f32), sh1 = NSO_rbShells(out);
+        res.shells = { before: sh0, after: sh1 };
+        if (sh1 !== sh0) {
+          res.reason = sh1 > sh0 ? 'the branch did not join the tube - it would lie beside it as a solid of its own' : 'internal: the piece went from ' + sh0 + ' solid(s) to ' + sh1;
+          return res;
+        }
+        if (typeof NSO_bendTopology === 'function') {
+          var T0 = NSO_bendTopology(f32), T1 = NSO_bendTopology(out);
+          res.topology = { before: T0, after: T1 };
+          if (T1.open || T1.nm) { res.reason = 'internal: the welded piece is not closed (open ' + T1.open + ', non-manifold ' + T1.nm + ')'; res.retry = true; return res; }
+          if (T1.euler !== T0.euler - 2) {
+            res.reason = 'internal: the branch\'s bore did not open through - from the tube\'s bore out to its tip (Euler ' + T0.euler + ' → ' + T1.euler + ', a through bore makes it ' + (T0.euler - 2) + ')';
+            res.retry = true;
+            return res;
+          }
+        }
+        var bad = NSO_rbSlicerBad(out);
+        if (bad) { res.reason = 'internal: the welded piece has vertices closer than a slicer\'s weld (at 1e-4 mm: open ' + bad.open + ', doubled ' + bad.nm + ', collapsed ' + bad.dropped + ')'; res.retry = true; return res; }
+        var v0 = NSO_teVolume(f32, b.wall), v1 = NSO_teVolume(out, b.wall), dv = v1 - v0;
+        res.volume = { before: v0, after: v1, change: dv, outside: b.outsideMm3, whole: b.volumeMm3 };
+        if (!(dv > 0 && dv <= b.volumeMm3 * 1.005 + 1e-3)) {
+          res.reason = 'internal: the piece grew by ' + NSO_rbFmt(dv, 1) + ' mm³ - a tube branch adds more than nothing and no more than its outside solid (' +
+            NSO_rbFmt(b.volumeMm3, 1) + ' mm³)';
+          return res;
+        }
+        res.ok = true;
+        res.tris = out;
+        res.reason = NSO_rodBranchDescribe(res);
+        return res;
+      });
+    });
   });
 }
 
