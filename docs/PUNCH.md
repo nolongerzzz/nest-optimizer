@@ -25,10 +25,34 @@ with the reason in words; the piece is as it was.
 | `countersink` | `'none'` | the only value for now; anything else is refused |
 | `nozzle` | 0.4 | the wall floor is two of these (0.8) |
 | `pattern` | `'none'` | `'grid'` or `'radial'`, or `{ type, ...fields }` |
-| grid | `rows`, `cols`, `pitchX`, `pitchY`, `anchor` | cols along u at pitchX, rows along v at pitchY; `anchor` `'corner'` (the click is hole 1) or `'centre'` |
+| grid | `rows`, `cols`, `pitchX`, `pitchY`, `anchor`, `stagger` | cols along u at pitchX, rows along v at pitchY; `anchor` `'corner'` (the click is hole 1) or `'centre'`; `stagger` true shifts every other row pitchX / 2 along u (a hex mesh at pitchY = pitchX × √3 / 2; a centred staggered grid stays centred on the click) |
 | radial | `n`, `R` | n holes on a circle of radius R about the click, the first along +u, counter-clockwise seen from outside |
+| `edge` | `'refuse'` | `'drop'`: a hole within the floor of the face's edge is **left out** instead of refusing the punch - a grid bigger than the face is trimmed to its outline (a filter disc, a perforated sheet). The reason counts them with the ones off the face: `264 of 1221 are off the face or within 0.8 mm of its edge and left out; punching 957 holes Ø1.2 through` |
 
-At most 400 holes, 100 rows / cols / n.
+At most 10,000 holes, 200 rows / cols / n (`maxHoles`, `maxCount`). A wall
+within 0.0001 mm of the floor is at it: Ø1 at pitch 1.8 (a 0.8 wall) passes.
+
+## A fine mesh (filter sheets, strainers)
+
+The finest round-hole mesh at a 0.4 nozzle is Ø0.8 holes with 0.8 mm walls
+(pitch 1.6); Ø1 at 1.8 prints more reliably. Staggered (hex) at one pitch,
+every hole has six neighbours at the same wall and the sheet is more open
+than a square grid: Ø1 / pitch 1.8 is 28 % open hex, 24 % square.
+
+In the card: Grid, set Ø and Pitch, tick **Stagger (hex)**, then **Fill face**
+- rows and columns enough to cover the clicked face from the click
+(`NSO_Punch.extent`), Centre anchor, **Trim at edge** on. One PUNCH.
+
+| sheet | holes | plan | boolean (node, one thread) |
+|---|---|---|---|
+| 40 × 40, Ø1 / 1.8 | 400 | 25 ms | 0.5 s |
+| 90 × 90, Ø1 / 1.8 | 2,500 | 0.1 s | 3.6 s |
+| 182 × 182, Ø1 / 1.8 | 10,000 | 67 ms | 31 s |
+
+The boolean's watchdog is 120 s (docs/BOOLEAN-WORKER.md). A curved face
+(a funnel's cone, a basket's side) takes the grid in the click's tangent plane,
+laid onto the surface along n - so one punch covers the side facing the click;
+punch the rest from the other sides.
 
 ## The face's frame
 
@@ -98,15 +122,21 @@ diameter below that, never under 16 (Ø3 -> 24). Its **flats** sit at dia / 2
 in. The app subtracts them in one boolean through the boolean worker
 (docs/BOOLEAN-WORKER.md): the gate subtracts a 12-hole grid as one
 concatenated soup with the shipped `NSO_subtractSoups`. Cutters that meet in
-air (through holes across a tube's bore) overlap, so for those the app should
-union the cutters first (or subtract in turn inside the one job) - one Undo
-either way.
+air (through holes across a tube's bore) cannot share one soup of separate
+shells: `NSO_Punch.cutterGroups(plan)` colours them into sets no two cutters of
+which meet (a slab's grid, however fine, is one set), and the app subtracts the
+sets in turn - one commit, one Undo. `cuttersOverlap(plan)` says whether there
+is more than one.
 
 ## Cost
 
 The soup is read once (weld, edges, smooth surfaces, rims) and kept on its
 array: 2.3 s for 320,000 triangles, then ~0.3 s a re-plan of 60 holes. Rays use
-`NSO_BVH`'s index when it is loaded.
+`NSO_BVH`'s index when it is loaded. The wall between holes is measured only
+for pairs whose spans' boxes come within the floor of each other (sweep and
+prune, `nearPairs`): a 100 × 100 grid is ~10^5 exact tests, not 5 × 10^7, and
+plans in 67 ms (it was 1.4 s). Lists of hole numbers in a reason stop at a
+dozen (`1, 2, ... 171 in all`).
 
 ## The card (app-punch.js)
 
@@ -120,6 +150,7 @@ SUBTRACT › **Punch** arms it; a click on a face of a piece places the hole
 | Depth | Through ▾ or mm (a Deep field appears) |
 | Pattern | None · Grid · Radial |
 | Grid | Rows, Cols, Pitch (one field; × splits it into Pitch X and Pitch Y, Y starting at X), Anchor Corner \| Centre |
+| | **Stagger (hex)**: every other row half a pitch along; with one Pitch the rows close up to Pitch × 0.866 · **Trim at edge**: `edge: 'drop'` · **Fill face**: rows and cols to cover the face at this pitch, Centre, Trim on (up to 200 × 200, 10,000 holes) |
 | Radial | Count, Radius |
 | readout | what the plan says; a refusal in red |
 | PUNCH / Cancel | |
@@ -129,7 +160,10 @@ through the piece) with its entry ring on the surface. A hole the pattern lays
 off the face is a grey ring where it would have been, and the readout counts
 them (`3 holes of 15 fall off the face and were dropped (5, 10, 15) ...`). A
 refusal draws the holes it would have made in red, says why, and PUNCH is off.
-A cross marks the anchor (the click).
+A cross marks the anchor (the click). Every cutter is in ONE mesh and every plain ring in one set of line
+segments per colour (fewer ring sides past 200 holes), so a 10,000-hole sheet
+is a handful of draw calls; only the first hole's ring (the Ø handle) is a
+line of its own.
 
 **Handles** (the neck's pattern, #241). The first hole's **ring** is Ø: drag it
 out or in. The **anchor** - the hole at the click (None, or a corner-anchored

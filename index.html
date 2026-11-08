@@ -1582,9 +1582,9 @@
               </div>
               <div id="punch-grid-rows" class="te-rows" hidden>
                 <label class="vp-bend-field" title="Rows, across the face's longest edge.">Rows
-                  <input type="number" id="inp-punch-rows" value="2" min="1" max="100" step="1" aria-label="Grid rows"><span></span></label>
+                  <input type="number" id="inp-punch-rows" value="2" min="1" max="200" step="1" aria-label="Grid rows"><span></span></label>
                 <label class="vp-bend-field" title="Columns, along the face's longest edge.">Cols
-                  <input type="number" id="inp-punch-cols" value="3" min="1" max="100" step="1" aria-label="Grid columns"><span></span></label>
+                  <input type="number" id="inp-punch-cols" value="3" min="1" max="200" step="1" aria-label="Grid columns"><span></span></label>
                 <div class="vp-bend-field punch-pitch-field" title="Centre to centre. Drag the far-corner hole to change it. &times; gives the columns and the rows a pitch each.">
                   <label for="inp-punch-pitch" id="punch-pitch-label">Pitch</label>
                   <input type="number" id="inp-punch-pitch" value="8" min="0.1" step="0.1" aria-label="Grid pitch, mm">
@@ -1596,10 +1596,17 @@
                   <button class="btn btn-secondary" type="button" data-anchor="corner" aria-pressed="true" title="The click is the grid's first hole">Corner</button>
                   <button class="btn btn-secondary" type="button" data-anchor="centre" aria-pressed="false" title="The click is the grid's middle">Centre</button>
                 </div>
+                <label class="vp-check" title="Every other row shifted half a pitch: a hex mesh. With one Pitch the rows close up to Pitch × 0.866, so every hole is one pitch from its six neighbours - more open area than a square grid at the same wall. A filter sheet's usual pattern.">
+                  <input type="checkbox" id="chk-punch-stagger"> Stagger (hex)
+                </label>
+                <label class="vp-check" title="Holes that would come within two nozzle widths of the face's edge are left out instead of refusing the punch: a grid bigger than the face is trimmed to its outline.">
+                  <input type="checkbox" id="chk-punch-trim"> Trim at edge
+                </label>
+                <button id="btn-punch-fill" class="btn btn-secondary" type="button" title="Rows and columns enough to cover the whole clicked face at this pitch, centred on the click, Trim at edge on: a perforated sheet in one press. Up to 10,000 holes a punch - a bigger face wants a bigger pitch, or a second punch.">Fill face</button>
               </div>
               <div id="punch-radial-rows" class="te-rows" hidden>
                 <label class="vp-bend-field" title="How many holes on the circle.">Count
-                  <input type="number" id="inp-punch-count" value="6" min="1" max="100" step="1" aria-label="Holes on the circle"><span></span></label>
+                  <input type="number" id="inp-punch-count" value="6" min="1" max="200" step="1" aria-label="Holes on the circle"><span></span></label>
                 <label class="vp-bend-field" title="The circle's radius, to the holes' centres. Drag any hole to change it.">Radius
                   <input type="number" id="inp-punch-radius" value="10" min="0.1" step="0.1" aria-label="Circle radius, mm"><span>mm</span></label>
               </div>
@@ -2919,8 +2926,8 @@
   <script src="app-carve.js?v=74c937e2"></script>
   <!-- Punch: round holes through a face, alone, in a grid or on a circle. The
        geometry (nso_punch.js) before its card (app-punch.js). docs/PUNCH.md. -->
-  <script src="nso_punch.js?v=c86b8521"></script>
-  <script src="app-punch.js?v=1836e5ec"></script>
+  <script src="nso_punch.js?v=bf1772f3"></script>
+  <script src="app-punch.js?v=11167ace"></script>
   <!-- Text: type a word, stamp it into a face. The geometry (nso_text.js, which reads
        nso_punch.js's surface probe) before its card (app-text.js). docs/TEXT.md. -->
   <script src="nso_text.js?v=e50a3620"></script>

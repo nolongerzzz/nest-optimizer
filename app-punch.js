@@ -118,13 +118,39 @@ function NSO_punchOpts() {
   if (o.pattern === 'grid') {
     var px = num('inp-punch-pitch');
     o.rows = num('inp-punch-rows'); o.cols = num('inp-punch-cols');
-    o.pitchX = px; o.pitchY = NSO_punchSplit() ? num('inp-punch-pitch-y') : px;
+    var stg = NSO_punchEl('chk-punch-stagger'), trim = NSO_punchEl('chk-punch-trim');
+    o.stagger = !!(stg && stg.checked);
+    // one pitch, staggered: the rows close up to the hex, every hole the same pitch from its six neighbours
+    o.pitchX = px; o.pitchY = NSO_punchSplit() ? num('inp-punch-pitch-y') : (o.stagger ? px * Math.sqrt(3) / 2 : px);
     o.anchor = NSO_punchAnchor();
+    if (trim && trim.checked) o.edge = 'drop';
   } else if (o.pattern === 'radial') {
     o.n = num('inp-punch-count'); o.R = num('inp-punch-radius');
   }
   return o;
 }
+/* Fill: rows and columns enough to cover the clicked face at the current pitch, centred on the click,
+   with Trim at edge on - a filter sheet in one press. Over one punch's 10,000 the readout says so. */
+function NSO_punchFill() {
+  var B = NSO_punchUI(), m = NSO_punchModel();
+  if (!B.open || !m || !B.hit || B.modelId !== m.id || B.busy) { NSO_punchReadout('Click a face first, then Fill covers it.'); return false; }
+  var g = document.querySelector('#punch-pattern-row .btn[data-pattern="grid"]');
+  if (g && NSO_punchPattern() !== 'grid') { NSO_punchPress('punch-pattern-row', g); NSO_punchSyncRows(); }
+  var c = document.querySelector('#punch-anchor-row .btn[data-anchor="centre"]');
+  if (c) NSO_punchPress('punch-anchor-row', c);
+  var trim = NSO_punchEl('chk-punch-trim');
+  if (trim) trim.checked = true;
+  var o = NSO_punchOpts(), ex = NSO_Punch.extent(m.rawTris, B.hit, o);
+  if (!ex.ok) { NSO_punchReadout('Punch: ' + ex.reason, true); return false; }
+  if (!(o.pitchX > 0) || !(o.pitchY > 0)) { NSO_punchReadout('Punch: the grid needs a pitch above 0', true); return false; }
+  var mu = Math.max(-ex.u[0], ex.u[1]) + (o.stagger ? o.pitchX / 2 : 0), mv = Math.max(-ex.v[0], ex.v[1]);
+  var max = NSO_Punch.DEFAULTS.maxCount;
+  var cols = Math.min(max, 2 * Math.ceil(mu / o.pitchX - 1e-9) + 1), rows = Math.min(max, 2 * Math.ceil(mv / o.pitchY - 1e-9) + 1);
+  NSO_punchSetCount('inp-punch-cols', cols); NSO_punchSetCount('inp-punch-rows', rows);
+  NSO_punchPreview();
+  return { rows: rows, cols: cols };
+}
+function NSO_punchSetCount(id, v) { var el = NSO_punchEl(id); if (el) el.value = String(v); }
 function NSO_punchSyncRows() {
   var pat = NSO_punchPattern(), split = NSO_punchSplit();
   var g = NSO_punchEl('punch-grid-rows'), r = NSO_punchEl('punch-radial-rows');
@@ -235,31 +261,47 @@ function NSO_punchDraw(m) {
   var group = new THREE.Group();
   group.name = 'punchGhost';
   group.matrixAutoUpdate = false;
+  // Every cutter in ONE mesh and every plain ring in one set of segments per colour: a 10,000-hole
+  // sheet is a handful of draw calls, not 20,000. Only the first hole's ring (the Ø handle) is its own line.
   var holes = NSO_punchHoles(pl), cut = NSO_Punch.cutters({ holes: holes });
-  holes.forEach(function (H, i) {
-    var soup = cut[i], flat = new Float32Array(soup.length);
-    for (var k = 0; k < soup.length; k += 3) {
-      var d = NSO_punchRawToDisplay(m, [soup[k], soup[k + 1], soup[k + 2]]);
-      flat[k] = d[0]; flat[k + 1] = d[1]; flat[k + 2] = d[2];
-    }
+  var nTri = 0;
+  cut.forEach(function (c) { nTri += c.length; });
+  if (nTri) {
+    var flat = new Float32Array(nTri), q = 0;
+    cut.forEach(function (soup) {
+      for (var k = 0; k < soup.length; k += 3) {
+        var d = NSO_punchRawToDisplay(m, [soup[k], soup[k + 1], soup[k + 2]]);
+        flat[q++] = d[0]; flat[q++] = d[1]; flat[q++] = d[2];
+      }
+    });
     var geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(flat, 3));
-    geo.computeVertexNormals();
     var g = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: pl.ok ? PUNCH_GHOST_COLOR : PUNCH_BAD_COLOR, transparent: true,
       opacity: 0.4, depthTest: false, depthWrite: false, side: THREE.DoubleSide }));
-    g.renderOrder = PUNCH_RENDER_ORDER; g.userData.skipXray = true; g.userData.punchHole = H.n; g.raycast = function () {};
+    g.renderOrder = PUNCH_RENDER_ORDER; g.userData.skipXray = true; g.userData.punchHoles = holes.length; g.raycast = function () {};
     g.frustumCulled = false;
     group.add(g);
+  }
+  var ringN = holes.length > 2000 ? 12 : holes.length > 200 ? 24 : 64;     // a ring's sides: plenty at the size a fine mesh is seen
+  var byColor = {};
+  function ringInto(col, c, a, r, n) {
+    var pts = NSO_punchCircle(c, a, r, n), L = byColor[col] || (byColor[col] = []);
+    for (var i = 0; i < n; i++) L.push(pts[i], pts[(i + 1) % n]);
+  }
+  holes.forEach(function (H, i) {
     var role = NSO_punchRoleOf(H, i, o), col = !pl.ok ? PUNCH_BAD_COLOR : (role === 'pitch' || role === 'radius') ? PUNCH_HANDLE_COLOR : PUNCH_RING_COLOR;
-    var ringTag = i === 0 ? 'dia' : null;
-    var ring = NSO_punchLine(m, NSO_punchCircle(H.centre, H.axis, H.dia / 2, 64), hot === ringTag && ringTag ? PUNCH_HOT_COLOR : col, true, ringTag);
-    group.add(ring);
+    if (i === 0) group.add(NSO_punchLine(m, NSO_punchCircle(H.centre, H.axis, H.dia / 2, 64), hot === 'dia' ? PUNCH_HOT_COLOR : col, true, 'dia'));
+    else ringInto(col, H.centre, H.axis, H.dia / 2, ringN);
   });
-  (pl.droppedAt || []).forEach(function (D) {
-    var ring = NSO_punchLine(m, NSO_punchCircle(D.point, D.axis, o.diaMm / 2, 48), PUNCH_DROP_COLOR, true, null);
-    ring.userData.punchDropped = D.n;
-    group.add(ring);
-  });
+  Object.keys(byColor).forEach(function (col) { group.add(NSO_punchLine(m, byColor[col], +col, false, null)); });
+  var drops = pl.droppedAt || [];
+  if (drops.length) {
+    var dn = drops.length > 2000 ? 12 : drops.length > 200 ? 24 : 48;
+    drops.forEach(function (D) { ringInto('drop', D.point, D.axis, o.diaMm / 2, dn); });
+    var dl = NSO_punchLine(m, byColor.drop, PUNCH_DROP_COLOR, false, null);
+    dl.userData.punchDropped = drops.length;
+    group.add(dl);
+  }
   // the anchor: a cross at the click, along the face's u and v
   var F = pl.frame;
   if (F) {
@@ -496,11 +538,14 @@ function NSO_punchDragMove(ev) {
       }
     } else if (D.handle === 'pitch') {
       var fx = D.far0[0] + du, fy = D.far0[1] + dv, o = D.o, px, py;
+      // a staggered grid's far corner is half a pitch further along u when its last row is shifted,
+      // and (one pitch) its rows are the hex's sqrt(3) / 2 of it apart
+      var sh = o.stagger && o.rows > 1 && (o.rows - 1) % 2 ? 0.5 : 0, hy = o.stagger && !NSO_punchSplit() ? Math.sqrt(3) / 2 : 1;
       if (NSO_punchSplit()) {
-        px = o.cols > 1 ? fx / (D.k * (o.cols - 1)) : o.pitchX;
+        px = o.cols - 1 + sh > 0 ? fx / (D.k * (o.cols - 1 + sh)) : o.pitchX;
         py = o.rows > 1 ? fy / (D.k * (o.rows - 1)) : o.pitchY;
       } else {
-        var a = o.cols - 1, b = o.rows - 1;
+        var a = o.cols - 1 + sh, b = (o.rows - 1) * hy;
         px = py = (fx * a + fy * b) / (D.k * (a * a + b * b));
       }
       px = Math.max(PUNCH_FINE_MM, NSO_punchSnap(px, fine)); py = Math.max(PUNCH_FINE_MM, NSO_punchSnap(py, fine));
@@ -595,25 +640,21 @@ async function NSO_punchGo() {
       pl = NSO_Punch.plan(soup, hit, o);
       if (!pl.ok) return refuse(pl.reason);
     }
-    var cut = NSO_Punch.cutters(pl), tool;
-    if (cut.length > 1 && NSO_Punch.cuttersOverlap(pl)) {
-      // cutters that meet in air are one solid first, so the kernel is handed a closed tool
-      tool = cut[0];
-      for (var i = 1; i < cut.length; i++) {
-        var u = await NSO_unionSoups(tool, cut[i], { label: 'Punching', host: 'punch-readout' });
-        if (!u || !u.ok) return refuse((u && u.reason) || 'the cutters would not join');
-        tool = u.soup;
-      }
-    } else {
-      var n = 0;
-      cut.forEach(function (c) { n += c.length; });
+    // Cutters that meet (in air - through holes crossing a tube's bore) cannot share one soup of separate
+    // shells: NSO_Punch.cutterGroups splits them into sets that do not, each set one subtract, in turn
+    // (a slab's grid, however fine, is one group and one boolean). Still one commit, one Undo.
+    var cut = NSO_Punch.cutters(pl), groups = cut.length > 1 ? NSO_Punch.cutterGroups(pl) : [[0]], res = { ok: true, soup: soup };
+    for (var gi = 0; gi < groups.length; gi++) {
+      var n = 0, tool;
+      groups[gi].forEach(function (i) { n += cut[i].length; });
       tool = new Float32Array(n);
       n = 0;
-      cut.forEach(function (c) { tool.set(c, n); n += c.length; });
-    }
-    var res = await NSO_subtractSoups(soup, tool, { label: 'Punching', host: 'punch-readout' });
-    if (!res || !res.ok || !res.soup || res.soup.length < 9) {
-      return refuse(res && res.cancelled ? 'stopped' : res && res.timedOut ? 'it ran too long and was stopped' : (res && res.reason) || 'the boolean returned nothing');
+      groups[gi].forEach(function (i) { tool.set(cut[i], n); n += cut[i].length; });
+      if (groups.length > 1) NSO_punchReadout('Punching… set ' + (gi + 1) + ' of ' + groups.length);
+      res = await NSO_subtractSoups(res.soup, tool, { label: 'Punching', host: 'punch-readout' });
+      if (!res || !res.ok || !res.soup || res.soup.length < 9) {
+        return refuse(res && res.cancelled ? 'stopped' : res && res.timedOut ? 'it ran too long and was stopped' : (res && res.reason) || 'the boolean returned nothing');
+      }
     }
     if (NSO_punchModel() !== m || m.rawTris !== soup0) return refuse('the piece changed while it was punched');
     var txt = 'Punch done - ' + pl.reason + (sol.merged ? ' - ' + sol.note : '');
@@ -693,8 +734,8 @@ function nsoPunchState() {
   var kids = B.ghost ? B.ghost.children : [];
   return {
     open: !!B.open, busy: !!B.busy, hit: B.hit, ok: !!(pl && pl.ok), reason: pl ? pl.reason : '',
-    ghosts: kids.filter(function (o) { return o.userData.punchHole != null; }).length,
-    dropped: kids.filter(function (o) { return o.userData.punchDropped != null; }).length,
+    ghosts: kids.reduce(function (s, o) { return s + (o.userData.punchHoles || 0); }, 0),
+    dropped: kids.reduce(function (s, o) { return s + (o.userData.punchDropped || 0); }, 0),
     holes: pl ? NSO_punchHoles(pl).map(function (H) { return { n: H.n, centre: H.centre, axis: H.axis, dia: H.dia, depth: H.depth, lift: H.lift }; }) : [],
     readout: (NSO_punchEl('punch-readout') || {}).textContent || '', bad: !!(NSO_punchEl('punch-readout') || { classList: { contains: function () { return false; } } }).classList.contains('is-bad'),
     drag: B.drag ? B.drag.handle : null
@@ -788,7 +829,8 @@ if (typeof document !== 'undefined') {
       if (!btn || btn.dataset.nsoWired === '1') return;
       btn.dataset.nsoWired = '1';
       btn.addEventListener('click', function () { if (NSO_punchUI().open) NSO_punchClose(); else NSO_punchOpen(); });
-      var go = NSO_punchEl('btn-punch-go'), cancel = NSO_punchEl('btn-punch-cancel');
+      var go = NSO_punchEl('btn-punch-go'), cancel = NSO_punchEl('btn-punch-cancel'), fill = NSO_punchEl('btn-punch-fill');
+      if (fill) fill.addEventListener('click', function () { NSO_punchFill(); });
       if (go) go.addEventListener('click', function () { NSO_punchGo(); });
       if (cancel) cancel.addEventListener('click', NSO_punchClose);
       [['punch-pattern-row', 'data-pattern'], ['punch-anchor-row', 'data-anchor']].forEach(function (row) {
@@ -804,7 +846,7 @@ if (typeof document !== 'undefined') {
         NSO_punchSyncRows(); NSO_punchPreview();
       });
       ['inp-punch-dia', 'sel-punch-thread', 'chk-punch-thread-left', 'sel-punch-depth', 'inp-punch-depth', 'inp-punch-rows', 'inp-punch-cols', 'inp-punch-pitch',
-       'inp-punch-pitch-y', 'inp-punch-count', 'inp-punch-radius'].forEach(function (id) {
+       'inp-punch-pitch-y', 'inp-punch-count', 'inp-punch-radius', 'chk-punch-stagger', 'chk-punch-trim'].forEach(function (id) {
         var el = NSO_punchEl(id);
         if (!el) return;
         el.addEventListener('change', function () { NSO_punchSyncRows(); NSO_punchPreview(); });

@@ -97,6 +97,7 @@ merging its list by hand. The list below is generated.
 - [Print planner: NSO writes Bambu's dialect (print-planner-1, #277)](handoff/print-planner-1.md)
 - [Slice card: the plate sliced for its printer (print-slice-main-plate)](handoff/print-slice-main-plate.md)
 - [Punch - engine (2026-10-20)](handoff/punch-engine.md)
+- [Punch - a fine mesh: 10,000 holes, Stagger, Trim at edge, Fill face (2026-11-08)](handoff/punch-fine-mesh.md)
 - [Punch - the card (2026-10-20)](handoff/punch-the-card.md)
 - [Picture -> Trim: clip the flat plate off a relief, keep the item's own edge (2026-11-03)](handoff/relief-trim-outline.md)
 - [Repair loop - Patch, Cap and Bridge from the Findings card (2026-10-16)](handoff/repair-loop-patch-cap-and-bridge-from-the-findings-card.md)
