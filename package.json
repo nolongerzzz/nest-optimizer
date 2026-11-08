@@ -47,6 +47,8 @@
     "support:foot": "node tools/nso_support_foot_check.js",
     "support:everywhere": "node tools/nso_support_everywhere_check.js",
     "support:onetrunk": "node tools/nso_support_onetrunk_check.js",
+    "support:gate": "node tools/nso_support_gate.js",
+    "support:gate-column": "node tools/nso_support_gate.js --rule column",
     "support:footprint": "node tools/nso_support_footprint_check.js",
     "support:coverage": "node tools/nso_support_coverage_check.js",
     "support:region": "node tools/nso_support_region_test.js",

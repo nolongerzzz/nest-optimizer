@@ -98,6 +98,23 @@ var NSO_GSCOPE_SLICE = (function () {
   var PRINTER_SLICE = { a1mini: { nozzle: 0.4, layer: 0.2 } };
   var SLICE_REST = { walls: 2, density: 15, pattern: 'grid', angle: 30, brim: 'auto' };
 
+  /* THE INTERFACE RULE (nso_slicer.js supportInterfaceRule; docs/SUPPORT-GATE.md): a preference, not a profile setting - kept in this
+     browser, never reset by seedSettings, and read by Export print (app-print.js) as well as by Slice. '' is the sheet typing, 'column' the rule. */
+  var IFACE_RULE_KEY = 'nso.supportInterfaceRule';
+  var ifaceRuleMem = null;   /* the choice when the browser keeps nothing */
+  function ifaceRule() {
+    var v = ifaceRuleMem;
+    try { var st = localStorage.getItem(IFACE_RULE_KEY); if (st != null) v = st; } catch (e) { /* storage off: the memory */ }
+    return v === 'column' ? 'column' : null;
+  }
+  function showIfaceRule() { var el = $('ms-slice-iface-rule'); if (el) el.value = ifaceRule() || ''; }
+  window.nsoSupportInterfaceRule = ifaceRule;
+  if (typeof document !== 'undefined' && document.addEventListener) document.addEventListener('change', function (e) {
+    if (!e.target || e.target.id !== 'ms-slice-iface-rule') return;
+    ifaceRuleMem = e.target.value;
+    try { localStorage.setItem(IFACE_RULE_KEY, e.target.value); } catch (er) { /* not kept past this page */ }
+  });
+
   /** { printer, nozzle, layer } for the plate's printer, read as it is now. */
   function profileDefaults() {
     var id = (typeof state !== 'undefined' && state && state.plate) || null;
@@ -118,6 +135,7 @@ var NSO_GSCOPE_SLICE = (function () {
     set('ms-slice-pattern', SLICE_REST.pattern);
     set('ms-slice-angle', SLICE_REST.angle);
     set('ms-slice-brim', SLICE_REST.brim);
+    showIfaceRule();
     return d;
   }
 
@@ -142,6 +160,8 @@ var NSO_GSCOPE_SLICE = (function () {
     if (pat && pat.value) over.sparsePattern = pat.value;
     var brim = $('ms-slice-brim');
     over.brimType = brim && brim.value ? brim.value : SLICE_REST.brim;
+    var rule = ifaceRule();
+    if (rule) over.supportInterfaceRule = rule;
     return { nozzleMm: nozzle, over: over };
   }
 

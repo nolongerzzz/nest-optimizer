@@ -304,6 +304,8 @@
       brimSupportGapMm: 0.02,
       supportLayerMaxMm: 0,                // 0 = supports are cut on the part's layers; 0.28 = on their own (Bambu's independent_support_layer_height): see sliceObjects
       supportInterfaceLayers: null,        // null -> CONSTANTS.supportSheet.interfaceLayers (2); a sheet of more says so
+      supportInterfaceRule: null,          // 'column': the interface read off the part's layers column by column (columnRule; docs/SUPPORT-GATE.md); null: the sheet typing
+      supportXyMm: 0.35,                   // the column rule's xy distance to the part at a support layer's own height (Bambu's support_object_xy_distance)
       weldMm: 1e-4,
       dropToPlate: true,
       filamentDiameterMm: CONSTANTS.flow.filamentDiameterMm,
@@ -1639,7 +1641,8 @@
           sparsePrev = sparse;
         }
       };
-      perObject.forEach(buildLayers);
+      var colRule = function (P) { if (P.role === 'support' && o.supportInterfaceRule === 'column') columnRule(g, P, perObject, planes, o); };
+      perObject.forEach(function (P) { colRule(P); buildLayers(P); });
 
       /* THE SUPPORT'S OWN LAYERS (o.supportLayerMaxMm; Bambu's independent_support_layer_height). A support is not cut on the part's 0.2 grid: its layers run
          from the first layer up to each top of its sheets (where it meets the part) in the fewest equal steps of at most supportLayerMaxMm - 0.2755 mm on a
@@ -1654,6 +1657,7 @@
           if (!own) return;
           var P2 = makeP(objs[k], k, own);
           perObject[k] = P2;
+          colRule(P2);
           buildLayers(P2);
           ownGrids = true;
         });
@@ -2079,6 +2083,253 @@
    * P.sheet (the readout's numbers).
    */
   var OVER_STEP_MM = 0.1;
+
+  /* ===========================================================================
+     THE COLUMN RULE (o.supportInterfaceRule 'column'; docs/SUPPORT-GATE.md). One owner for the interface, and no constant
+     per head: the stack under the part is read off the part's own layers, column by column, as Bambu lays it.
+
+       blocked(i)   the part at support layer i's own height, grown by the xy distance (supportXyMm), and the part whose
+                    underside lies less than the gap (supportGapMm) over the layer's top: no support there, ever
+       contact(i)   where the next layer up would be blocked: the part's underside within gap + that layer over layer i
+       footprint    where the support stands under the part within reach (the generator's sheet, its caps and the tops of its
+                    tips): the stack is laid there whole, on every layer it is not blocked
+       rank         a column's layers counted down from its contact through the layers it is not blocked on: rank 0 - NI-1
+                    interface, NI - NI+NT-1 transition, deeper the tree (the support's own section, Support)
+
+     columnRule() cuts every layer of the support to it (the section less blocked, plus the stack) before its paths are built;
+     columnType() then lays the stack: each region one loop and a zig-zag, the tree outside it Support.
+     =========================================================================== */
+  var COLUMN_REACH_MM = 0.4;     /* the footprint: the support within gap + (NI + NT) layers + this under the part */
+  var COLUMN_FILL_IN_MM = 0.3;   /* a region's zig-zag ends this far in from its loop's line (the regional plate's IFILL_IN_MM) */
+  var COLUMN_MIN_MM2 = 0.05;
+  var COLUMN_GROW_MM = 1.0;      /* the footprint grows this far past the generator's sheet... */
+  var COLUMN_EDGE_MM = 0.2;      /* ...to this far past the edge of the part's underside */
+  var COLUMN_OVER_GROW_MM = 0.5;  /* the overhang at the threshold, grown this much: its edge is a layer's step, the plate's loop stands on it */
+  var COLUMN_LAND_MM = 3;        /* under the stack a column runs on down as Support (the base) until it stands on the support's own material, at most this far */
+  var COLUMN_BASE_PITCH_MM = 2;  /* the base's lines (Support), as far apart as this: the transition over it spans no more */
+  /* the loops a stack's piece is laid with: one half a line in from its edge; a piece narrower than a line (a dome's or a cone's ring of contact,
+     a few tenths wide) one loop down its middle (its outer edge in by half its mean width, 2 x area / perimeter), as Bambu lays such a ring - and
+     that only where its bead stays out of the part and from under it (a line's width spilled under the part welds; into the xy clearance it does not). No loop: the piece is not laid. */
+  function columnLoops(g, pc, wI, Bj) {
+    var loops = g.polys(g.offset(pc, -wI / 2));
+    if (loops.length) return loops;
+    var per = 0; g.polys(pc).forEach(function (Q) { for (var q = 0; q < Q.length; q++) { var u = Q[q], v = Q[(q + 1) % Q.length]; per += Math.hypot(v[0] - u[0], v[1] - u[1]); } });
+    var tw = per > 0 ? 2 * g.area(pc) / per : 0;
+    if (!(tw > 0.02)) return [];
+    return g.polys(g.offset(pc, -0.45 * tw)).filter(function (Q) {
+      var a2 = 0; for (var q = 0; q < Q.length; q++) { var u = Q[q], v = Q[(q + 1) % Q.length]; a2 += u[0] * v[1] - v[0] * u[1]; }
+      if (!(a2 > 0)) return false;
+      if (!Bj || g.isEmpty(Bj)) return true;
+      var rp = g.of([Q], 'Positive'), bead = g.diff(g.offset(rp, wI / 2), g.offset(rp, -wI / 2));
+      return g.area(g.inter(bead, Bj)) <= COLUMN_MIN_MM2;
+    });
+  }
+  function columnRule(g, P, perObject, planes, o) {
+    var C = CONSTANTS.supportSheet;
+    var NI = o.supportInterfaceLayers != null ? o.supportInterfaceLayers : C.interfaceLayers, NT = C.transitionLayers;
+    var gap = o.supportGapMm, xy = o.supportXyMm != null ? o.supportXyMm : 0.35, SP = P.planes || planes, n = SP.length;
+    var hMax = 0; SP.forEach(function (p) { if (p.h > hMax) hMax = p.h; });
+    var reach = gap + (NI + NT) * hMax + COLUMN_REACH_MM;
+    var parts = perObject.filter(function (Q) { return Q.role === 'part'; });
+    var host = P.hostKey != null ? parts.find(function (Q) { return Q.key != null && Q.key === P.hostKey; }) || null : null;
+    var hosts = host ? [host] : parts;
+    var U = function (list) { return list.length ? g.unionAll(list) : null; };
+    var blocked = [], blockedHard = [], contact = [], near = [];
+    for (var i = 0; i < n; i++) {
+      var zt = SP[i].printZ, zb = zt - SP[i].h, hn = i + 1 < n ? SP[i + 1].h : planes[0].h;
+      var lat = [], ver = [], up = [], nr = [];
+      for (var k = 0; k < planes.length; k++) {
+        var pz = planes[k].printZ, b = pz - planes[k].h;
+        if (b > zt + reach) break;
+        if (pz <= zb + 1e-6) continue;
+        var cs = [];
+        hosts.forEach(function (Q) { if (!g.isEmpty(Q.S[k])) cs.push(Q.S[k]); });
+        if (!cs.length) continue;
+        var d = b - zt;
+        if (d < -1e-6) Array.prototype.push.apply(lat, cs);
+        else if (d < gap - 1e-6) Array.prototype.push.apply(ver, cs);
+        else if (d < gap + hn - 1e-6) Array.prototype.push.apply(up, cs);
+        if (d >= -1e-6) Array.prototype.push.apply(nr, cs);
+      }
+      var bl = [], L0 = U(lat), V0 = U(ver), hard = [];
+      if (L0) { bl.push(g.offset(L0, xy)); hard.push(L0); }
+      if (V0) { bl.push(V0); hard.push(V0); }
+      blocked.push(U(bl)); blockedHard.push(U(hard)); contact.push(U(up)); near.push(U(nr));
+    }
+    /* the footprint, in plan: the support's sections where the part stands within reach over them, closed by half a line */
+    var fp = [];
+    for (var i2 = 0; i2 < n; i2++) if (near[i2] && !g.isEmpty(P.S[i2])) { var x = g.inter(P.S[i2], near[i2]); if (!g.isEmpty(x)) fp.push(x); }
+    var F = U(fp);
+    if (!F || g.isEmpty(F)) { P.col = null; return; }
+    var r0 = o.outerWallWidthMm / 2;
+    F = g.offset(g.offset(F, r0), -r0);
+    /* ...and out to the part's own edge: the stack is laid under the part as far as COLUMN_GROW_MM past where the generator stood it, and
+       COLUMN_EDGE_MM past the edge of the part's underside (Bambu's plate stands out to the face's edge; the generator's sheet stops short of it) */
+    if (COLUMN_GROW_MM > 0) {
+      var nAll = near.filter(function (x) { return x && !g.isEmpty(x); });
+      if (nAll.length) F = g.union(F, g.inter(g.offset(F, COLUMN_GROW_MM), g.offset(g.unionAll(nAll), COLUMN_EDGE_MM)));
+    }
+    /* ...and only where the part's underside is an overhang at the threshold angle (supportThresholdDeg): a layer's section past the one under it
+       by more than a layer over tan(angle). A dome's steep flank is the tree's to hold (Bambu's tips), not the plate's. */
+    var th = (o.supportThresholdDeg || 30) * Math.PI / 180, ovs = [], zLo = SP[0].printZ, zHi = SP[n - 1].printZ + reach;
+    for (var k3 = 1; k3 < planes.length; k3++) {
+      if (planes[k3].printZ < zLo || planes[k3].printZ - planes[k3].h > zHi) continue;
+      hosts.forEach(function (Q) {
+        if (g.isEmpty(Q.S[k3])) return;
+        var ov = g.isEmpty(Q.S[k3 - 1]) ? Q.S[k3] : g.diff(Q.S[k3], g.offset(Q.S[k3 - 1], planes[k3].h / Math.tan(th)));
+        if (!g.isEmpty(ov)) ovs.push(ov);
+      });
+    }
+    var FT = U(ovs);
+    if (FT) F = g.inter(F, g.offset(FT, COLUMN_OVER_GROW_MM));
+    var avail = [], I = [], T = [], R0 = [], rank = [];
+    for (var i3 = 0; i3 < n; i3++) avail.push(blocked[i3] ? g.diff(F, blocked[i3]) : F);
+    /* ranks, top down: rank r at layer i is the column available here whose rank r - 1 is on the layer above */
+    for (var i4 = n - 1; i4 >= 0; i4--) {
+      var rk = [];
+      rk.push(contact[i4] ? g.inter(avail[i4], contact[i4]) : null);
+      for (var r = 1; r < NI + NT; r++) {
+        var above = i4 + 1 < n ? rank[i4 + 1][r - 1] : null;
+        rk.push(above && !g.isEmpty(above) ? g.inter(avail[i4], above) : null);
+      }
+      rank[i4] = rk.map(function (cs) { return cs && !g.isEmpty(cs) ? g.dropSmall(cs, COLUMN_MIN_MM2) : null; });
+    }
+    /* THE BASE: under the stack's last rank a column runs on down through the layers it is not blocked on, as Support, until the support's own
+       section is there to stand on (it stops on it), at most COLUMN_LAND_MM - a column that lands nowhere goes, with what stood on it (below) */
+    var hMin = Infinity; SP.forEach(function (p) { if (p.h < hMin) hMin = p.h; });
+    var K = Math.max(1, Math.ceil(COLUMN_LAND_MM / hMin)), deepK = [], deep = [];
+    for (var i7 = n - 1; i7 >= 0; i7--) {
+      var dk = [];
+      for (var k2 = 0; k2 < K; k2++) {
+        var src = k2 === 0 ? (i7 + 1 < n ? rank[i7 + 1][NI + NT - 1] : null) : (i7 + 1 < n ? deepK[i7 + 1][k2 - 1] : null);
+        if (!src || g.isEmpty(src)) { dk.push(null); continue; }
+        var dd = g.inter(avail[i7], src);
+        if (!g.isEmpty(P.S[i7])) dd = g.diff(dd, P.S[i7]);
+        dk.push(g.isEmpty(dd) ? null : g.dropSmall(dd, COLUMN_MIN_MM2));
+      }
+      deepK[i7] = dk;
+      var dl = dk.filter(function (cs) { return cs && !g.isEmpty(cs); });
+      deep[i7] = dl.length ? g.unionAll(dl) : null;
+    }
+    var D = [];
+    for (var i5 = 0; i5 < n; i5++) {
+      var iL = rank[i5].slice(0, NI).filter(function (cs) { return cs && !g.isEmpty(cs); });
+      var tL = rank[i5].slice(NI).filter(function (cs) { return cs && !g.isEmpty(cs); });
+      var Ii = U(iL), Ti = U(tL);
+      if (Ii && Ti) Ti = g.diff(Ti, Ii);
+      Ii = Ii && !g.isEmpty(Ii) ? Ii : null; Ti = Ti && !g.isEmpty(Ti) ? Ti : null;
+      /* the support's section on this layer: never where it is blocked, and the stack laid whole - each piece of the stack only where it
+         stands on something (the layer below as it is now built): a piece the grown footprint laid over air goes, and what stood on it */
+      var S = P.S[i5], base = !g.isEmpty(S) ? (blocked[i5] ? g.diff(S, blocked[i5]) : S) : null;
+      var wI0 = o.supportWidthMm > 0 ? o.supportWidthMm : o.infillWidthMm;
+      var layable = function (cs) {
+        if (!cs) return null;
+        var keep = g.parts(cs).filter(function (pc) { return columnLoops(g, pc, wI0, blockedHard[i5]).length > 0; });
+        return keep.length ? g.unionAll(keep) : null;
+      };
+      Ii = layable(Ii); Ti = layable(Ti);
+      var Di = deep[i5] ? (Ii || Ti ? g.diff(deep[i5], Ii && Ti ? g.union(Ii, Ti) : Ii || Ti) : deep[i5]) : null;
+      if (Di && g.isEmpty(Di)) Di = null;
+      if (i5 > 0 && Di) {
+        var keepD = g.parts(Di).filter(function (pc) { return !g.isEmpty(P.S[i5 - 1]) && g.area(g.inter(pc, P.S[i5 - 1])) > COLUMN_MIN_MM2; });
+        Di = keepD.length ? g.unionAll(keepD) : null;
+      }
+      D.push(Di);
+      if (i5 > 0 && (Ii || Ti)) {
+        var under = P.S[i5 - 1];
+        var held = function (cs) {
+          if (!cs) return null;
+          var keep = g.parts(cs).filter(function (pc) { return g.area(g.inter(pc, under)) > COLUMN_MIN_MM2 || (base && g.area(g.inter(pc, base)) > COLUMN_MIN_MM2); });
+          return keep.length ? g.unionAll(keep) : null;
+        };
+        if (g.isEmpty(under)) { Ii = null; Ti = null; } else { Ii = held(Ii); Ti = held(Ti); }
+        if (R0[i5 - 1] === undefined) { /* nothing */ }
+      }
+      I.push(Ii); T.push(Ti); R0.push(Ii && rank[i5][0] ? g.inter(rank[i5][0], Ii) : null);
+      var parts2 = [];
+      if (base) parts2.push(base);
+      if (Ii) parts2.push(Ii);
+      if (Ti) parts2.push(Ti);
+      if (Di) parts2.push(Di);
+      P.S[i5] = parts2.length ? g.unionAll(parts2) : (base || S);
+    }
+    if (typeof process !== 'undefined' && process.env && process.env.NSO_COLUMN_DEBUG) {
+      var A = function (cs) { return cs && !g.isEmpty(cs) ? g.area(cs).toFixed(2) : '-'; };
+      console.log('column rule ' + P.name + ' (' + (host ? host.name : 'all parts') + '): footprint ' + A(F) + ' mm2');
+      for (var i6 = 0; i6 < n; i6++) if (SP[i6].printZ > +process.env.NSO_COLUMN_DEBUG) console.log('  z ' + SP[i6].printZ.toFixed(3) + ' S ' + A(P.S[i6]) + ' blocked∩F ' + A(blocked[i6] ? g.inter(F, blocked[i6]) : null) + ' contact∩F ' + A(contact[i6] ? g.inter(F, contact[i6]) : null) + ' I ' + A(I[i6]) + ' T ' + A(T[i6]));
+    }
+    P.col = { I: I, T: T, D: D, R0: R0, NI: NI, NT: NT, footprint: F, blocked: blocked, blockedHard: blockedHard };
+  }
+
+  /* the stack laid: each of a layer's regions one loop round its edge (half a line in) and a zig-zag inside it at Bambu's interface
+     pitch (a line and 0.04), the first layer of a stack at 110 degrees and then 45 / 135 up it; every path outside the stack is Support */
+  function columnType(g, P, SP, o, host) {
+    var wI = o.supportWidthMm > 0 ? o.supportWidthMm : o.infillWidthMm, pitch = wI + 0.04, aD = (o.infillDirectionDeg || 45) * Math.PI / 180;
+    var counts = { 'Support': 0, 'Support transition': 0, 'Support interface': 0 }, stackIdx = [], regs = [], sheets = [];
+    var NI = P.col.NI, NT = P.col.NT;
+    P.layers.forEach(function (L, j) {
+      var I = P.col.I[j], T = P.col.T[j];
+      var R = I && T ? g.union(I, T) : I || T;
+      regs[j] = R;
+      stackIdx[j] = R && j > 0 && regs[j - 1] && g.area(g.inter(R, regs[j - 1])) > 0.05 ? stackIdx[j - 1] + 1 : 0;
+      if (P.col.R0[j]) sheets.push({ topLayer: j, zLo: SP[Math.max(0, j - NI - NT + 1)].printZ - SP[Math.max(0, j - NI - NT + 1)].h, zHi: SP[j].printZ, areaMm2: g.area(P.col.R0[j]), tips: 0 });
+      var out = [];
+      var Rp = R ? g.polys(g.offset(R, 1e-3)) : [];
+      L.paths.forEach(function (p) {
+        if (p.colPlate) { out.push(p); return; }
+        if (!Rp.length) { p.feature = 'Support'; out.push(p); return; }
+        /* the tree's paths outside the stack: a path is cut where it runs into a region (the region's own loop replaces the wall there) */
+        var pts = p.pts, np = pts.length, m = p.closed ? np : np - 1, dense = [];
+        for (var e = 0; e < m; e++) {
+          var a = pts[e], b = pts[(e + 1) % np], l = Math.hypot(b[0] - a[0], b[1] - a[1]), ns = Math.max(1, Math.ceil(l / 0.2));
+          for (var q = 0; q < ns; q++) dense.push([a[0] + (b[0] - a[0]) * q / ns, a[1] + (b[1] - a[1]) * q / ns]);
+        }
+        if (!p.closed && np) dense.push(pts[np - 1]);
+        var inn = dense.map(function (pt) { return inside(Rp, pt[0], pt[1]); });
+        if (!inn.some(Boolean)) { p.feature = 'Support'; out.push(p); return; }
+        var run = [];
+        var flush = function () { if (run.length >= 2) { var np2 = {}; Object.keys(p).forEach(function (kk) { np2[kk] = p[kk]; }); np2.pts = run; np2.closed = false; np2.feature = 'Support'; out.push(np2); } run = []; };
+        for (var q2 = 0; q2 < dense.length; q2++) { if (inn[q2]) flush(); else run.push(dense[q2]); }
+        if (p.closed && run.length && !inn[0]) { run.push(dense[0]); }
+        flush();
+      });
+      if (R) {
+        var ang = stackIdx[j] === 0 ? 110 * Math.PI / 180 : (stackIdx[j] % 2 === 1 ? aD : aD + Math.PI / 2);
+        [[I, 'Support interface'], [T, 'Support transition']].forEach(function (rg) {
+          if (!rg[0]) return;
+          g.parts(rg[0]).forEach(function (pc) {
+            var loops = columnLoops(g, pc, wI, P.col.blockedHard[j]);
+            loops.forEach(function (ring) { if (ring.length > 2) out.push({ feature: rg[1], width: wI, closed: true, pts: ring, typed: true, colPlate: true }); });
+          });
+          var inner = g.offset(rg[0], -(wI / 2 + COLUMN_FILL_IN_MM));
+          if (g.isEmpty(inner)) return;
+          var segs = scanFill(g.polys(inner), ang, pitch, 0);
+          if (segs.length) connect(segs, 3 * pitch, g.polys(g.offset(rg[0], 1e-3))).forEach(function (pth) {
+            out.push({ feature: rg[1], width: wI, closed: false, pts: pth.pts, sheetFill: true, colPlate: true });
+          });
+        });
+      }
+      var Dj = P.col.D && P.col.D[j];
+      if (Dj) {
+        var dIn = g.offset(Dj, -wI);
+        if (!g.isEmpty(dIn)) {
+          var dsegs = scanFill(g.polys(dIn), stackIdx[j] % 2 ? aD : aD + Math.PI / 2, COLUMN_BASE_PITCH_MM, 0);
+          if (dsegs.length) connect(dsegs, 1.5 * COLUMN_BASE_PITCH_MM, g.polys(g.offset(Dj, 1e-3))).forEach(function (pth) {
+            out.push({ feature: 'Support', width: wI, closed: false, pts: pth.pts, sheetFill: true, colPlate: true });
+          });
+        }
+      }
+      out.forEach(function (p) { p.overhangMm = p.overhangMm || 0; p.overhangRuns = p.overhangRuns || []; counts[p.feature] = (counts[p.feature] || 0) + 1; });
+      L.paths = out;
+    });
+    P.sheet = {
+      hostName: host ? host.name : null, hostFound: !!host, sheets: sheets, tips: 0,
+      zLo: sheets.length ? Math.min.apply(null, sheets.map(function (s) { return s.zLo; })) : null,
+      zHi: sheets.length ? Math.max.apply(null, sheets.map(function (s) { return s.zHi; })) : null,
+      pathCounts: counts, overhangPaths: { 'Support': 0, 'Support transition': 0, 'Support interface': 0 }, overhangMm: { 'Support': 0, 'Support transition': 0, 'Support interface': 0 },
+      rule: 'column'
+    };
+  }
   function typeSupports(g, perObject, planes, o, minOver) {
     var C = CONSTANTS.supportSheet;
     var NI = o.supportInterfaceLayers != null ? o.supportInterfaceLayers : C.interfaceLayers, NT = C.transitionLayers, R = C.closeMm;   /* o.supportInterfaceLayers: a sheet built with more (sheet() opts.interfaceLayers) */
@@ -2102,6 +2353,7 @@
         if (!feet[i]) feet[i] = g.offset(g.offset(P.S[i], R), -R);
         return feet[i];
       };
+      if (P.col) { columnType(g, P, SP, o, host); return; }
       var tops = [], held = {};
       /* a footprint with its holes filled: what lies OUTSIDE a layer, not in
          a channel of it */

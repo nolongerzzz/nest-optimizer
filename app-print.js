@@ -152,6 +152,9 @@
       var sl = 0;
       objects.forEach(function (ob) { if (ob.sheetLayerMm > sl) sl = ob.sheetLayerMm; });
       if (sl > 0 && (eng.over || {}).supportLayerMaxMm == null) o.supportLayerMaxMm = 0.28;
+      /* the interface rule G-scope's Slice settings hold (docs/SUPPORT-GATE.md): the same on the printed file as in the preview */
+      var rule = typeof window !== 'undefined' && typeof window.nsoSupportInterfaceRule === 'function' ? window.nsoSupportInterfaceRule() : null;
+      if (rule && (eng.over || {}).supportInterfaceRule == null) o.supportInterfaceRule = rule;
       stage('slicing', { objects: objects.length });
       return SL.run(objects, o);
     }).then(function (res) {
