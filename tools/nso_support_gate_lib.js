@@ -39,10 +39,9 @@ const IS_SUPPORT = /^Support( interface| transition)?$/;
 
 function headOf(name) {
   const n = String(name || '').replace(/\.stl$/i, '');
-  const k = n.indexOf(' - ');
-  if (k < 0) return { head: n, kind: 'part' };
-  const rest = n.slice(k + 3).toLowerCase();
-  return { head: n.slice(0, k), kind: rest.startsWith('brim') ? 'brim' : 'support' };
+  const m = / - (support\b.*|brim\b.*)$/i.exec(n);       /* 'X - support 1.1 (Tree)', 'X - brim'; a piece's own name may hold ' - ' ('supp_ref - 6 objects') */
+  if (!m) return { head: n, kind: 'part' };
+  return { head: n.slice(0, m.index), kind: /^brim/i.test(m[1]) ? 'brim' : 'support' };
 }
 
 function movesFromGcode(gcode, sliceInfoXml) {
@@ -196,7 +195,7 @@ function measureHead(moves) {
   for (let q = 1; q < supZ.length; q++) if (supZ[q] - supZ[q - 1] > EMPTY_STEP_MM) empty.push({ from: supZ[q - 1], to: supZ[q] });
 
   /* 5. carried, 6. depth, 7. specks: labelled slices only */
-  let carried = null, depth = null, specks = null;
+  let carried = null, depth = null, specks = null, depthSeqs = null;
   if (labelled) {
     let base = 0, held = 0, nSpeck = 0;
     const sheetZ = supZ.filter(z => L.get(z).I || L.get(z).T);
@@ -222,7 +221,7 @@ function measureHead(moves) {
     }
     carried = base ? held / base : null; specks = nSpeck;
     /* depth: every contact column, its support layers top down */
-    let cols = 0, good = 0;
+    let cols = 0, good = 0; const seqs = new Map();
     for (let c = 0; c < F.n; c++) {
       if (top[c] < 0 || bottom[c] > 1e8 || bottom[c] - top[c] > CONTACT_MM) continue;
       let seq = '';
@@ -232,13 +231,14 @@ function measureHead(moves) {
         seq += o.I && o.I[c] ? 'I' : o.T && o.T[c] ? 'T' : 'S';
       }
       if (!seq.length) continue;
-      cols++; if (seq === 'IIITT') good++;
+      cols++; if (/^I{3,}T/.test(seq)) good++; seqs.set(seq, (seqs.get(seq) || 0) + 1);
     }
     depth = cols ? good / cols : null;
+    depthSeqs = [...seqs.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map(e => e[0] + ' ' + (100 * e[1] / cols).toFixed(0) + '%');
     void sheetZ;
   }
   touchAt.sort((a, b) => b.areaMm2 - a.areaMm2);
-  return { touchAt, touchMm2: +touch.toFixed(2), thinMm2: +thin.toFixed(2), contactMm2: +(contact * A).toFixed(1), share, floating, empty, carried, depth, specks, labelled };
+  return { touchAt, touchMm2: +touch.toFixed(2), thinMm2: +thin.toFixed(2), contactMm2: +(contact * A).toFixed(1), share, floating, empty, carried, depth, depthSeqs, specks, labelled };
 }
 
 function byHead(moves) {
@@ -261,7 +261,7 @@ const RULES = [
   { check: 'floating islands', get: r => r.floating.length,   ok: (o, r) => o <= r,                rule: '<= ref' },
   { check: 'empty layers',     get: r => r.empty.length,      ok: (o, r) => o <= r,                rule: '<= ref' },
   { check: 'sheet carried',    get: r => r.carried,           ok: (o, r) => o >= r - 0.10,         rule: '>= ref - 0.10', pct: true, labelled: true },
-  { check: 'IIITT depth',      get: r => r.depth,             ok: (o, r) => o >= r - 0.15,         rule: '>= ref - 0.15', pct: true, labelled: true }
+  { check: 'depth III+T',      get: r => r.depth,             ok: (o, r) => o >= r - 0.15,         rule: '>= ref - 0.15', pct: true, labelled: true }
 ];
 function gate(test, ref) {
   const rows = [];
@@ -278,4 +278,51 @@ function gate(test, ref) {
   return rows;
 }
 
-module.exports = { movesFromGcode, measureHead, measureAll, gate, headOf, RULES, CELL_MM };
+/* PARITY: how far our interface and transition look like Bambu's, layer by layer - what G-scope's Compare overlays. The two heads are put in
+   one frame by the centres of their parts; each of the reference's interface / transition layers is set against ours on the same height (within
+   PARITY_Z_MM), lines drawn PARITY_FAT_MM wide so lines a pitch apart are one plate.
+     iou    plate both have / plate either has, over all the reference's sheet layers (a layer ours lacks counts all theirs as missed)
+     role   the same with the type matched: interface on interface, transition on transition
+     grid   the share of the reference's sheet layers ours has a layer at, within PARITY_GRID_MM
+     worst  the five layers that differ most: { z, refMm2, oursMm2, iou } */
+const PARITY_Z_MM = 0.1, PARITY_GRID_MM = 0.03, PARITY_FAT_MM = 0.5;
+function parity(testMs, refMs) {
+  const ctr = (ms) => { let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; ms.forEach(m => { if (m.role !== 'part' || m.feat !== 'Outer wall') return; x0 = Math.min(x0, m.x0, m.x1); y0 = Math.min(y0, m.y0, m.y1); x1 = Math.max(x1, m.x0, m.x1); y1 = Math.max(y1, m.y0, m.y1); }); return isFinite(x0) ? [(x0 + x1) / 2, (y0 + y1) / 2] : null; };
+  const ca = ctr(refMs), cb = ctr(testMs);
+  if (!ca || !cb) return null;
+  const dx = ca[0] - cb[0], dy = ca[1] - cb[1];
+  const sheet = (m) => m.role === 'support' && (m.feat === 'Support interface' || m.feat === 'Support transition');
+  const R = refMs.filter(sheet), T = testMs.filter(sheet).map(m => Object.assign({}, m, { x0: m.x0 + dx, x1: m.x1 + dx, y0: m.y0 + dy, y1: m.y1 + dy, pts: m.pts ? m.pts.map(p => [p[0] + dx, p[1] + dy]) : undefined }));
+  if (!R.length) return null;
+  const F = frame(R.concat(T)), A = CELL_MM * CELL_MM;
+  const byZ = (ms) => { const L = new Map(); ms.forEach(m => { if (!L.has(m.z)) L.set(m.z, []); L.get(m.z).push(m); }); return L; };
+  const LR = byZ(R), LT = byZ(T), tz = [...LT.keys()];
+  let both = 0, either = 0, roleBoth = 0, gridHit = 0, n = 0; const rows = [];
+  for (const z of [...LR.keys()].sort((a, b) => a - b)) {
+    n++;
+    let best = null, bd = Infinity; for (const q of tz) { const d = Math.abs(q - z); if (d < bd) { bd = d; best = q; } }
+    if (bd <= PARITY_GRID_MM) gridHit++;
+    const paint = (ms, feat) => { const bm = new Uint8Array(F.n); ms.forEach(m => { if (!feat || m.feat === feat) draw(F, bm, Object.assign({}, m, { w: PARITY_FAT_MM })); }); return bm; };
+    const rI = paint(LR.get(z), 'Support interface'), rT = paint(LR.get(z), 'Support transition');
+    const tm = best != null && bd <= PARITY_Z_MM ? LT.get(best) : [];
+    const oI = paint(tm, 'Support interface'), oT = paint(tm, 'Support transition');
+    let b = 0, e = 0, rb = 0, ra = 0, oa = 0;
+    for (let c = 0; c < F.n; c++) {
+      const r = rI[c] || rT[c], o = oI[c] || oT[c];
+      if (r) ra++; if (o) oa++;
+      if (r && o) b++; if (r || o) e++;
+      if ((rI[c] && oI[c]) || (rT[c] && oT[c] && !rI[c] && !oI[c])) rb++;
+    }
+    both += b; either += e; roleBoth += rb;
+    rows.push({ z, oursZ: tm.length ? best : null, refMm2: +(ra * A).toFixed(1), oursMm2: +(oa * A).toFixed(1), iou: e ? +(b / e).toFixed(2) : null });
+  }
+  rows.sort((a, b) => (a.iou == null ? -1 : a.iou) - (b.iou == null ? -1 : b.iou));
+  return { iou: either ? both / either : null, role: either ? roleBoth / either : null, grid: n ? gridHit / n : null, worst: rows.slice(0, 5) };
+}
+function parityAll(testMoves, refMoves) {
+  const T = byHead(testMoves), R = byHead(refMoves), out = {};
+  for (const [h, rm] of R) { const tm = T.get(h); if (tm) { const p = parity(tm, rm); if (p) out[h] = p; } }
+  return out;
+}
+
+module.exports = { parity, parityAll, movesFromGcode, measureHead, measureAll, gate, headOf, RULES, CELL_MM };

@@ -1983,7 +1983,9 @@
       if (d < 1e-6) return;
       /* a stretch after the first stands off the sheet top below it by one part layer, and the sheet above it by one more (Bambu's, measured on the Negative Sphere and the Sphere:
          10.4, then 10.6, then 12 equal steps to 13.8, then 14.0 and 14.2 - not 14 steps from 10.4 to 14.0). The last stretch ends on the support's own last layer: no sheet above it. */
-      var hp = planes[0].h, offS = prev > z0 + 1e-6 && d > 4 * hp - 1e-6 ? hp : 0, offE = offS && a < zEnd - 1e-6 ? hp : 0;
+      /* (under the column rule the anchors are the contacts themselves - a dome's lowest, then each one over it - and Bambu's stretch runs in equal steps right up to one: 10.6 to 13.8 in 12, no layer stood off under it) */
+      var colGrid = P.sheet && P.sheet.rule === 'column';
+      var hp = planes[0].h, offS = prev > z0 + 1e-6 && d > 4 * hp - 1e-6 ? hp : 0, offE = offS && !colGrid && a < zEnd - 1e-6 ? hp : 0;
       if (offS) { zs.push(prev + offS); prev += offS; d = a - prev; }
       var n = Math.max(1, Math.ceil((d - offE) / maxH - 1e-9));
       for (var q = 1; q <= n; q++) zs.push(prev + (d - offE) * q / n);
@@ -2102,9 +2104,7 @@
   var COLUMN_REACH_MM = 0.4;     /* the footprint: the support within gap + (NI + NT) layers + this under the part */
   var COLUMN_FILL_IN_MM = 0.3;   /* a region's zig-zag ends this far in from its loop's line (the regional plate's IFILL_IN_MM) */
   var COLUMN_MIN_MM2 = 0.05;
-  var COLUMN_GROW_MM = 1.0;      /* the footprint grows this far past the generator's sheet... */
-  var COLUMN_EDGE_MM = 0.2;      /* ...to this far past the edge of the part's underside */
-  var COLUMN_OVER_GROW_MM = 0.5;  /* the overhang at the threshold, grown this much: its edge is a layer's step, the plate's loop stands on it */
+  var COLUMN_EDGE_OUT_MM = 0.38;  /* the overhang grown this much is the footprint: Bambu's loop centre 0.17 past the face's edge, and half a line */
   var COLUMN_LAND_MM = 3;        /* under the stack a column runs on down as Support (the base) until it stands on the support's own material, at most this far */
   var COLUMN_BASE_PITCH_MM = 2;  /* the base's lines (Support), as far apart as this: the transition over it spans no more */
   /* the loops a stack's piece is laid with: one half a line in from its edge; a piece narrower than a line (a dome's or a cone's ring of contact,
@@ -2134,27 +2134,46 @@
     var host = P.hostKey != null ? parts.find(function (Q) { return Q.key != null && Q.key === P.hostKey; }) || null : null;
     var hosts = host ? [host] : parts;
     var U = function (list) { return list.length ? g.unionAll(list) : null; };
+    /* the part's overhang at each of its layers, at the threshold angle (supportThresholdDeg): the layer's section past the one under it by more than
+       a layer / tan(angle) */
+    /* a piece of the part's section smaller than a bead (a line squared: a dome's pole a hair under the slice plane) is not printed: it makes no
+       contact and no overhang (it made a contact of its own a layer under the dome's, and the support's grid was anchored there, off Bambu's) */
+    var specMm2 = o.outerWallWidthMm * o.outerWallWidthMm;
+    var th = (o.supportThresholdDeg || 30) * Math.PI / 180, ovByK = [], zLo = SP[0].printZ, zHi = SP[n - 1].printZ + reach;
+    for (var k3 = 1; k3 < planes.length; k3++) {
+      if (planes[k3].printZ < zLo || planes[k3].printZ - planes[k3].h > zHi) continue;
+      var ovk = [];
+      hosts.forEach(function (Q) {
+        if (g.isEmpty(Q.S[k3])) return;
+        var ov = g.isEmpty(Q.S[k3 - 1]) ? Q.S[k3] : g.diff(Q.S[k3], g.offset(Q.S[k3 - 1], planes[k3].h / Math.tan(th)));
+        if (!g.isEmpty(ov)) ov = g.dropSmall(ov, specMm2);
+        if (!g.isEmpty(ov)) ovk.push(ov);
+      });
+      if (ovk.length) ovByK[k3] = U(ovk);
+    }
     var blocked = [], blockedHard = [], contact = [], near = [];
     for (var i = 0; i < n; i++) {
       var zt = SP[i].printZ, zb = zt - SP[i].h, hn = i + 1 < n ? SP[i + 1].h : planes[0].h;
-      var lat = [], ver = [], up = [], nr = [];
+      var lat = [], ver = [], up = [], nr = [], upOv = [];
       for (var k = 0; k < planes.length; k++) {
         var pz = planes[k].printZ, b = pz - planes[k].h;
         if (b > zt + reach) break;
         if (pz <= zb + 1e-6) continue;
-        var cs = [];
-        hosts.forEach(function (Q) { if (!g.isEmpty(Q.S[k])) cs.push(Q.S[k]); });
+        var cs = [], csUp = [];
+        hosts.forEach(function (Q) { if (!g.isEmpty(Q.S[k])) { cs.push(Q.S[k]); var big = g.dropSmall(Q.S[k], specMm2); if (!g.isEmpty(big)) csUp.push(big); } });
         if (!cs.length) continue;
         var d = b - zt;
         if (d < -1e-6) Array.prototype.push.apply(lat, cs);
         else if (d < gap - 1e-6) Array.prototype.push.apply(ver, cs);
-        else if (d < gap + hn - 1e-6) Array.prototype.push.apply(up, cs);
+        else if (d < gap + hn - 1e-6) { Array.prototype.push.apply(up, csUp); if (ovByK[k]) upOv.push(ovByK[k]); }
         if (d >= -1e-6) Array.prototype.push.apply(nr, cs);
       }
       var bl = [], L0 = U(lat), V0 = U(ver), hard = [];
       if (L0) { bl.push(g.offset(L0, xy)); hard.push(L0); }
       if (V0) { bl.push(V0); hard.push(V0); }
-      blocked.push(U(bl)); blockedHard.push(U(hard)); contact.push(U(up)); near.push(U(nr));
+      /* a contact reaches past the edge of an overhang as the footprint does (not past a wall: the part's section beside it is no underside) */
+      var UP = U(up), UO = U(upOv);
+      blocked.push(U(bl)); blockedHard.push(U(hard)); contact.push(UP && UO ? g.union(UP, g.offset(UO, COLUMN_EDGE_OUT_MM)) : UP); near.push(U(nr));
     }
     /* the footprint, in plan: the support's sections where the part stands within reach over them, closed by half a line */
     var fp = [];
@@ -2163,30 +2182,24 @@
     if (!F || g.isEmpty(F)) { P.col = null; return; }
     var r0 = o.outerWallWidthMm / 2;
     F = g.offset(g.offset(F, r0), -r0);
-    /* ...and out to the part's own edge: the stack is laid under the part as far as COLUMN_GROW_MM past where the generator stood it, and
-       COLUMN_EDGE_MM past the edge of the part's underside (Bambu's plate stands out to the face's edge; the generator's sheet stops short of it) */
-    if (COLUMN_GROW_MM > 0) {
-      var nAll = near.filter(function (x) { return x && !g.isEmpty(x); });
-      if (nAll.length) F = g.union(F, g.inter(g.offset(F, COLUMN_GROW_MM), g.offset(g.unionAll(nAll), COLUMN_EDGE_MM)));
-    }
-    /* ...and only where the part's underside is an overhang at the threshold angle (supportThresholdDeg): a layer's section past the one under it
-       by more than a layer over tan(angle). A dome's steep flank is the tree's to hold (Bambu's tips), not the plate's. */
-    var th = (o.supportThresholdDeg || 30) * Math.PI / 180, ovs = [], zLo = SP[0].printZ, zHi = SP[n - 1].printZ + reach;
-    for (var k3 = 1; k3 < planes.length; k3++) {
-      if (planes[k3].printZ < zLo || planes[k3].printZ - planes[k3].h > zHi) continue;
-      hosts.forEach(function (Q) {
-        if (g.isEmpty(Q.S[k3])) return;
-        var ov = g.isEmpty(Q.S[k3 - 1]) ? Q.S[k3] : g.diff(Q.S[k3], g.offset(Q.S[k3 - 1], planes[k3].h / Math.tan(th)));
-        if (!g.isEmpty(ov)) ovs.push(ov);
-      });
-    }
+    /* THE FOOTPRINT IS THE OVERHANG: the part's underside where it is an overhang at the threshold angle (supportThresholdDeg) - a layer's
+       section past the one under it by more than a layer / tan(angle) - grown COLUMN_EDGE_OUT_MM (Bambu's interface loop runs 0.17 mm past the
+       face's edge: the region's edge is that and half a line). Each overhang region is taken whole where the generator's support serves it
+       (meets its footprint above); a dome's steep flank is not an overhang, and is the tree's to hold (Bambu's tips). */
+    var ovs = ovByK.filter(function (x) { return x && !g.isEmpty(x); });
     var FT = U(ovs);
-    if (FT) F = g.inter(F, g.offset(FT, COLUMN_OVER_GROW_MM));
+    if (FT && !g.isEmpty(FT)) {
+      var served = g.parts(g.offset(FT, COLUMN_EDGE_OUT_MM)).filter(function (pc) { return g.area(g.inter(pc, F)) > COLUMN_MIN_MM2; });
+      if (served.length) F = g.unionAll(served);
+    }
+    if (typeof process !== 'undefined' && process.env && process.env.NSO_COLUMN_DEBUG) console.log('column footprint: overhang ' + (FT ? g.area(FT).toFixed(1) : '-') + ' mm2 in ' + ovs.length + ' pieces, footprint now ' + g.area(F).toFixed(1));
     var avail = [], I = [], T = [], R0 = [], rank = [];
     for (var i3 = 0; i3 < n; i3++) avail.push(blocked[i3] ? g.diff(F, blocked[i3]) : F);
     /* ranks, top down: rank r at layer i is the column available here whose rank r - 1 is on the layer above */
     for (var i4 = n - 1; i4 >= 0; i4--) {
       var rk = [];
+      /* past an overhang's edge the band is a contact on neighbouring layers: both start a stack, and the column holds 4 interface layers -
+         as Bambu's own do on a slope or a dome (13 - 24 % of their columns); following the topmost contact alone cut the plates' match */
       rk.push(contact[i4] ? g.inter(avail[i4], contact[i4]) : null);
       for (var r = 1; r < NI + NT; r++) {
         var above = i4 + 1 < n ? rank[i4 + 1][r - 1] : null;
@@ -2322,6 +2335,7 @@
       out.forEach(function (p) { p.overhangMm = p.overhangMm || 0; p.overhangRuns = p.overhangRuns || []; counts[p.feature] = (counts[p.feature] || 0) + 1; });
       L.paths = out;
     });
+    if (typeof process !== 'undefined' && process.env && process.env.NSO_COLUMN_DEBUG) console.log('column sheets ' + P.name + ' (' + (P.planes ? 'own grid' : 'shared grid') + '): tops at ' + sheets.map(function (sh) { return sh.zHi.toFixed(3) + ' (' + sh.areaMm2.toFixed(2) + ' mm2)'; }).join(', '));
     P.sheet = {
       hostName: host ? host.name : null, hostFound: !!host, sheets: sheets, tips: 0,
       zLo: sheets.length ? Math.min.apply(null, sheets.map(function (s) { return s.zLo; })) : null,

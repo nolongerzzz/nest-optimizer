@@ -13,6 +13,7 @@
      --ref f.gcode.3mf     another reference         --json out.json     every number
      --rule column         slice with the column interface rule (NSO_Slicer supportInterfaceRule: 'column')
      --report              print, never fail
+     --worst               the five layers per head that differ most from Bambu's
      --dump moves.json     (a build) every move, [head, role, feature, z, h, x0, y0, x1, y1], for a picture
 
    Exit 1 when any check fails (not with --report).
@@ -77,22 +78,52 @@ function table(name, M) {
       pct(r.carried) + '  ' + pct(r.depth) + '  ' + (r.specks == null ? '  -' : String(r.specks).padStart(4)));
     r.touchAt.slice(0, 3).forEach(t => console.log('      touching z ' + t.z.toFixed(2) + ' under the part layer ' + t.partZ.toFixed(2) + '  ' + t.areaMm2 + ' mm2 about X ' + t.x + ' Y ' + t.y));
     r.floating.slice(0, 3).forEach(f => console.log('      floating island z ' + f.z.toFixed(2) + '  ' + f.areaMm2 + ' mm2 at X ' + f.x + ' Y ' + f.y));
+    if (argv.includes('--worst') && r.depthSeqs) console.log('      columns top down (I interface, T transition, S support): ' + r.depthSeqs.join(', '));
     r.empty.slice(0, 3).forEach(e => console.log('      empty layers between z ' + e.from.toFixed(2) + ' and ' + e.to.toFixed(2)));
   });
 }
 
+/* a slice whose objects are not named as the reference's heads (the six imported as one piece, 'supp_ref - 6 objects'): each move goes to the
+   head whose part it lies over on the plate, the reference's footprints grown 2 mm; a plate laid out elsewhere is moved onto the reference by the
+   centres of the two plates' parts first */
+function reHead(moves, refMoves) {
+  const box = {};
+  refMoves.forEach(m => { if (m.role !== 'part') return; const b = box[m.head] || (box[m.head] = [Infinity, Infinity, -Infinity, -Infinity]); b[0] = Math.min(b[0], m.x0, m.x1); b[1] = Math.min(b[1], m.y0, m.y1); b[2] = Math.max(b[2], m.x0, m.x1); b[3] = Math.max(b[3], m.y0, m.y1); });
+  const names = Object.keys(box);
+  if (moves.every(m => names.includes(m.head))) return moves;
+  const ctr = (ms) => { let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; ms.forEach(m => { if (m.role !== 'part') return; x0 = Math.min(x0, m.x0); y0 = Math.min(y0, m.y0); x1 = Math.max(x1, m.x0); y1 = Math.max(y1, m.y0); }); return [(x0 + x1) / 2, (y0 + y1) / 2]; };
+  const a = ctr(refMoves), b = ctr(moves), dx = a[0] - b[0], dy = a[1] - b[1];
+  const out = [];
+  for (const m of moves) {
+    const mx = (m.x0 + m.x1) / 2 + dx, my = (m.y0 + m.y1) / 2 + dy;
+    let best = null, bd = Infinity;
+    for (const h of names) {
+      const q = box[h];
+      if (mx < q[0] - 2 || mx > q[2] + 2 || my < q[1] - 2 || my > q[3] + 2) continue;
+      const d = Math.hypot(mx - (q[0] + q[2]) / 2, my - (q[1] + q[3]) / 2);
+      if (d < bd) { bd = d; best = h; }
+    }
+    if (!best) continue;
+    const n = Object.assign({}, m, { head: best, x0: m.x0 + dx, x1: m.x1 + dx, y0: m.y0 + dy, y1: m.y1 + dy });
+    if (m.pts) n.pts = m.pts.map(p => [p[0] + dx, p[1] + dy]);
+    out.push(n);
+  }
+  return out;
+}
+
 (async () => {
-  const ref = GL.measureAll(await readSliced(REF));
+  const refMoves = await readSliced(REF);
+  const ref = GL.measureAll(refMoves);
   table('REFERENCE  ' + path.relative(process.cwd(), REF), ref);
   const runs = [];
-  if (files.length) for (const f of files) runs.push([path.basename(f), GL.measureAll(await readSliced(f))]);
+  if (files.length) for (const f of files) { const mv = reHead(await readSliced(f), refMoves); runs.push([path.basename(f), GL.measureAll(mv), mv]); }
   else {
     const mv = await buildAndSlice({ rule: arg('--rule'), angle: arg('--angle') });
     if (arg('--dump')) fs.writeFileSync(arg('--dump'), JSON.stringify(mv.map(m => [m.head, m.role, m.feat, m.z, m.h, +m.x0.toFixed(3), +m.y0.toFixed(3), +m.x1.toFixed(3), +m.y1.toFixed(3)])));
-    runs.push(['NSO build + NSO_Slicer' + (arg('--rule') ? ' (rule ' + arg('--rule') + ')' : ''), GL.measureAll(mv)]);
+    runs.push(['NSO build + NSO_Slicer' + (arg('--rule') ? ' (rule ' + arg('--rule') + ')' : ''), GL.measureAll(mv), mv]);
   }
   let fails = 0; const json = { ref, runs: {} };
-  for (const [name, M] of runs) {
+  for (const [name, M, mv] of runs) {
     /* the heads are named as the reference names them ('Support Base'); a build names them the same */
     table(name, M);
     const rows = GL.gate(M, ref);
@@ -101,7 +132,15 @@ function table(name, M) {
     const fmt = (r, v) => v == null ? '-' : r.pct ? pct(v).trim() : (+v).toFixed(2).replace(/\.00$/, '');
     console.log('  gate: ' + (rows.length - bad.length) + ' of ' + rows.length + ' pass');
     bad.forEach(r => console.log('    FAIL  ' + r.head.padEnd(25) + r.check.padEnd(18) + 'ours ' + fmt(r, r.ours).padStart(6) + '  ref ' + fmt(r, r.ref).padStart(6) + '   (' + r.rule + ')'));
-    json.runs[name] = { measures: M, gate: rows };
+    /* parity with Bambu's interface and transition (reported; the owner's gate 2: the overlay differences go away) */
+    const PA = GL.parityAll(mv, refMoves);
+    console.log('  parity with Bambu (interface + transition, layer by layer):   plate IoU   type IoU   layer heights met');
+    Object.keys(PA).sort().forEach(h => {
+      const p = PA[h];
+      console.log('    ' + h.padEnd(25) + pct(p.iou).padStart(32) + pct(p.role).padStart(11) + pct(p.grid).padStart(14));
+      if (argv.includes('--worst')) p.worst.forEach(w => console.log('        z ' + w.z.toFixed(3) + (w.oursZ != null ? ' (ours ' + w.oursZ.toFixed(3) + ')' : ' (ours: no layer)') + '  ref ' + w.refMm2 + ' mm2, ours ' + w.oursMm2 + ' mm2, IoU ' + w.iou));
+    });
+    json.runs[name] = { measures: M, gate: rows, parity: PA };
   }
   if (arg('--json')) fs.writeFileSync(arg('--json'), JSON.stringify(json, null, 1));
   console.log('\n' + (fails ? fails + ' check(s) failed' : 'all checks pass'));
