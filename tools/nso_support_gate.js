@@ -51,7 +51,9 @@ async function buildAndSlice(opts) {
     const pos = new Float32Array(n); let k = 0; objs.forEach(o => { pos.set(o.positions, k); k += o.positions.length; });
     objs = [{ id: objs[0].id, name: 'supp_ref - 6 objects', positions: pos, triangleCount: n / 9 }];
   }
-  const app = lib.makeApp(); const ids = app.load(objs); app.openCard(); app.setPlateBox(true);
+  const app = lib.makeApp();
+  if (opts.rule) app.ctx.nsoSupportInterfaceRule = () => opts.rule;      /* the card builds for the slicer's rule (no sheet of its own under the column rule) */
+  const ids = app.load(objs); app.openCard(); app.setPlateBox(true);
   app.card.angle(+(opts.angle || 30));
   app.click('btn-sup-all'); await app.until(() => app.card.busy()); await app.until(() => !app.card.busy());
   CARD_HEAD = app.head();
@@ -79,12 +81,13 @@ async function buildAndSlice(opts) {
 const pct = (v) => v == null ? '  -  ' : (100 * v).toFixed(0).padStart(4) + '%';
 function table(name, M) {
   console.log('\n' + name);
-  console.log('  head                       touch  thin  contact | gap: one   two  | floating empty | carried depth specks');
+  console.log('  head                       touch  thin  contact | gap: one   two  | floating empty | carried depth specks | over air');
   Object.keys(M).sort().forEach(h => {
     const r = M[h];
     console.log('  ' + h.padEnd(25) + r.touchMm2.toFixed(1).padStart(6) + r.thinMm2.toFixed(1).padStart(6) + r.contactMm2.toFixed(0).padStart(8) + '  | ' +
       pct(r.share.one) + ' ' + pct(r.share.two) + ' | ' + String(r.floating.length).padStart(6) + String(r.empty.length).padStart(7) + '  | ' +
-      pct(r.carried) + '  ' + pct(r.depth) + '  ' + (r.specks == null ? '  -' : String(r.specks).padStart(4)));
+      pct(r.carried) + '  ' + pct(r.depth) + '  ' + (r.specks == null ? '  -' : String(r.specks).padStart(4)) + ' | ' + (r.airMm2 != null ? r.airMm2.toFixed(1).padStart(6) : '   -'));
+    if (argv.includes('--worst')) (r.airAt || []).slice(0, 3).forEach(t => console.log('      tree over air z ' + t.z.toFixed(2) + '  ' + t.areaMm2 + ' mm2 about X ' + t.x + ' Y ' + t.y));
     r.touchAt.slice(0, 3).forEach(t => console.log('      touching z ' + t.z.toFixed(2) + ' under the part layer ' + t.partZ.toFixed(2) + '  ' + t.areaMm2 + ' mm2 about X ' + t.x + ' Y ' + t.y));
     r.floating.slice(0, 3).forEach(f => console.log('      floating island z ' + f.z.toFixed(2) + '  ' + f.areaMm2 + ' mm2 at X ' + f.x + ' Y ' + f.y));
     if (argv.includes('--worst') && r.depthSeqs) console.log('      columns top down (I interface, T transition, S support): ' + r.depthSeqs.join(', '));

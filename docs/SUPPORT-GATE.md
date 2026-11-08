@@ -36,6 +36,8 @@ Measured on G-code, every head at once, each against Bambu's own slice of the sa
 **Unreachable** (a build only): the card's own count after the build - "Built: ... unreachable U" - must be 0 (the owner's first gate before a print;
 docs/SUPPORT-ONE-TRUNK.md item 25). `--merged` builds the six heads as ONE piece, as the owner's plate has them.
 
+| tree over air mm2 | the tree's lines (Support, not the plate) further than a line's width from anything in the layers just below: a branch leaning more than a layer's step per layer, or an arm run out flat | <= max(1.5 x ref, ref + 2) |
+
 Specks (support islands under 0.8 mm2 under a sheet: tips too thin to hold it) are printed, not gated.
 
 **Parity** (printed, not gated): each of the reference's interface / transition layers set against ours at the same height (within 0.1 mm),
@@ -92,6 +94,21 @@ The interface is read off the part's own layers, column by column, as Bambu lays
 Measured against Bambu with Bambu's own footprint given (the rule alone deciding heights and types): Base 0.95, Circular 0.82, Negative Sphere
 rim 0.69 - 0.74 and apex 0.6 - 0.82, Oblique 0.70, Sphere 0.56 IoU per layer. It reproduces Bambu's hole round the Sphere's pole that widens
 a layer at a time.
+
+## 4b. One tree from the plate to the interface (the owner's gate 3, 2026-11-09)
+
+Under the column rule the generator builds the TREE ALONE (the card's `partsOptsOf`: `interface: false` when the slicer's interface is column): no sheet,
+caps or plate of its own - left under the slicer's stack they printed as a block of Support a few mm tall between the tree and the interface (Base,
+Oblique, Circular, the Negative Spheres' rim slabs). Its tips run up to the part; the rule cuts them at the gap and lays the stack on them. The rule's
+base (`COLUMN_LAND_MM`) is 0: the transition spans between the tips, as Bambu's does, and a stack piece with nothing under it goes. The tree keeps the
+xy distance from the part just over it as well as at its height (`blockedTree`): a branch climbing past a cavity's rim stood a bead under the rim's
+first layer. A spot on a step no slicer calls an overhang (a quarter of a mm at the heads' shoulders, z 15.3) stands no tip under the column rule
+(`opts.columnRule`): its branch was an arm run out flat to it. Tree over air: Circular 3.4 -> 0.6 mm2, Sphere 2.5 -> 0.0, Negative Sphere2 12.7 -> 2.9
+(Bambu 0.1 - 1.0). Interface parity unchanged; unreachable 0. The default (sheet) build is unchanged (support:onetrunk, support:plate pins).
+
+Still to do: the sheet carried (Base 75 %, Negative Spheres 70 - 76 % against Bambu's 85 - 91 %: too few or too thin tips under a plate), the forks
+of the Negative Spheres' trunks over air (2.7, 2.9 mm2), a twig floating on Circular and Sphere; Bambu's horns up the domes' flanks to those shoulders
+(its reference was sliced with remove-small-overhangs off).
 
 ## 5. Not done, and named
 

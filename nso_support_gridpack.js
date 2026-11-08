@@ -4667,7 +4667,9 @@
   function subThresholdStep(b, kit, opts) {
     if (!kit) return false;
     var th = ((opts && opts.angleDeg) || (opts && opts.thresholdDeg) || 30) * Math.PI / 180, reach = STEP_LAYER_MM / Math.tan(th);
-    var a = [b.p[0], b.p[1], b.p[2] - 0.05], c = [b.p[0], b.p[1], b.p[2] - 2 * STEP_LAYER_MM];
+    /* at ONE layer under the spot, as a slicer asks it (a layer's section past the one under it by more than reach): a probe from z - layer to
+       z - layer - 0.05 (from z - 0.05 down it took a gentle dome's own flank beside the spot for a wall, and the Sphere stood no support) */
+    var a = [b.p[0], b.p[1], b.p[2] - STEP_LAYER_MM], c = [b.p[0], b.p[1], b.p[2] - STEP_LAYER_MM - 0.05];
     return kit.pr.leg(a, c, reach * Math.SQRT2, 0, 0, 0) >= 0;
   }
   /* a cone's tip: held through a reached tip of its area just under it, where there is air straight down from the spot to that tip */
@@ -4779,6 +4781,9 @@
       }
       bc.beacons.forEach(function (b) {
         if (b.p[2] - plateZ0 < ck.lowMm) return;                           /* on the plate's first layers: held by the plate (below) */
+        /* under the column rule (opts.columnRule: the slicer lays the interface) a spot on a step no slicer calls an overhang stands no tip,
+           reachable or not: its branch was an arm run out flat to a shoulder a quarter of a mm deep (the owner's gate 3, printable angles) */
+        if (opts.columnRule && subThresholdStep(b, kit, opts)) { lost[b.id] = 'step'; stepHeld.push({ beacon: b.id, key: b.key, regionId: b.regionId, p: b.p.slice() }); return; }
         var ok = routeDown(b.p);
         /* a tip against a wall is moved off it along its face, as the lattice planner moves one (NUDGE_STEPS of the strut's side) */
         for (var si = 0; si < NUDGE_STEPS.length && !ok && b.n[2] < -1e-6; si++) {

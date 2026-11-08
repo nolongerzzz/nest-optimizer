@@ -2104,8 +2104,10 @@
   var COLUMN_REACH_MM = 0.4;     /* the footprint: the support within gap + (NI + NT) layers + this under the part */
   var COLUMN_FILL_IN_MM = 0.3;   /* a region's zig-zag ends this far in from its loop's line (the regional plate's IFILL_IN_MM) */
   var COLUMN_MIN_MM2 = 0.05;
+  var COLUMN_SPILL_MM2 = 0.005;  /* a thin ring's bead may reach this much under or into the part (none to speak of: several rings at 0.05 touched 0.6 mm2) */
   var COLUMN_EDGE_OUT_MM = 0.38;  /* the overhang grown this much is the footprint: Bambu's loop centre 0.17 past the face's edge, and half a line */
-  var COLUMN_LAND_MM = 3;        /* under the stack a column runs on down as Support (the base) until it stands on the support's own material, at most this far */
+  var COLUMN_LAND_MM = 0;        /* under the stack a column may run on down as Support (the base) until it stands on the support's own material, at most this far.
+                                    0: no base - the transition spans between the tree's tips, as Bambu's does (a base of 3 mm printed as a block under every plate) */
   var COLUMN_BASE_PITCH_MM = 2;  /* the base's lines (Support), as far apart as this: the transition over it spans no more */
   /* the loops a stack's piece is laid with: one half a line in from its edge; a piece narrower than a line (a dome's or a cone's ring of contact,
      a few tenths wide) one loop down its middle (its outer edge in by half its mean width, 2 x area / perimeter), as Bambu lays such a ring - and
@@ -2121,7 +2123,7 @@
       if (!(a2 > 0)) return false;
       if (!Bj || g.isEmpty(Bj)) return true;
       var rp = g.of([Q], 'Positive'), bead = g.diff(g.offset(rp, wI / 2), g.offset(rp, -wI / 2));
-      return g.area(g.inter(bead, Bj)) <= COLUMN_MIN_MM2;
+      return g.area(g.inter(bead, Bj)) <= COLUMN_SPILL_MM2;
     });
   }
   function columnRule(g, P, perObject, planes, o) {
@@ -2151,7 +2153,7 @@
       });
       if (ovk.length) ovByK[k3] = U(ovk);
     }
-    var blocked = [], blockedHard = [], contact = [], near = [];
+    var blocked = [], blockedHard = [], blockedTree = [], contact = [], near = [];
     for (var i = 0; i < n; i++) {
       var zt = SP[i].printZ, zb = zt - SP[i].h, hn = i + 1 < n ? SP[i + 1].h : planes[0].h;
       var lat = [], ver = [], up = [], nr = [], upOv = [];
@@ -2174,6 +2176,9 @@
       /* a contact reaches past the edge of an overhang as the footprint does (not past a wall: the part's section beside it is no underside) */
       var UP = U(up), UO = U(upOv);
       blocked.push(U(bl)); blockedHard.push(U(hard)); contact.push(UP && UO ? g.union(UP, g.offset(UO, COLUMN_EDGE_OUT_MM)) : UP); near.push(U(nr));
+      /* the tree (the support's own section, not the stack) keeps the xy distance from the part just over it too: a branch climbing past an
+         overhang's edge (into a cavity, by the rim's hole) stood a bead's width under the rim's first layer */
+      blockedTree.push(V0 ? U([U(bl), g.offset(V0, xy)]) : U(bl));
     }
     /* the footprint, in plan: the support's sections where the part stands within reach over them, closed by half a line */
     var fp = [];
@@ -2210,7 +2215,7 @@
     /* THE BASE: under the stack's last rank a column runs on down through the layers it is not blocked on, as Support, until the support's own
        section is there to stand on (it stops on it), at most COLUMN_LAND_MM - a column that lands nowhere goes, with what stood on it (below) */
     var hMin = Infinity; SP.forEach(function (p) { if (p.h < hMin) hMin = p.h; });
-    var K = Math.max(1, Math.ceil(COLUMN_LAND_MM / hMin)), deepK = [], deep = [];
+    var K = COLUMN_LAND_MM > 0 ? Math.max(1, Math.ceil(COLUMN_LAND_MM / hMin)) : 0, deepK = [], deep = [];
     for (var i7 = n - 1; i7 >= 0; i7--) {
       var dk = [];
       for (var k2 = 0; k2 < K; k2++) {
@@ -2233,7 +2238,7 @@
       Ii = Ii && !g.isEmpty(Ii) ? Ii : null; Ti = Ti && !g.isEmpty(Ti) ? Ti : null;
       /* the support's section on this layer: never where it is blocked, and the stack laid whole - each piece of the stack only where it
          stands on something (the layer below as it is now built): a piece the grown footprint laid over air goes, and what stood on it */
-      var S = P.S[i5], base = !g.isEmpty(S) ? (blocked[i5] ? g.diff(S, blocked[i5]) : S) : null;
+      var S = P.S[i5], base = !g.isEmpty(S) ? (blockedTree[i5] ? g.diff(S, blockedTree[i5]) : S) : null;
       var wI0 = o.supportWidthMm > 0 ? o.supportWidthMm : o.infillWidthMm;
       var layable = function (cs) {
         if (!cs) return null;

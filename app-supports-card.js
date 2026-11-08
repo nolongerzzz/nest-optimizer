@@ -221,8 +221,14 @@ var NSO_SUPPORTS_CARD = (function () {
        Auto (the one-trunk tree) always lays it. The box now gates only the builds that are not Auto: off, their sheet is built from the tips alone, as it
        was before the region plate (docs/SUPPORT-FOOTPRINT.md section 9). */
     if (o && o.raft === false && !oneTrunkOn(o)) { out.sheetRegionPlate = false; out.sheetSlabPlate = false; out.sheetRegionFlare = false; }
+    /* THE COLUMN RULE (the slicer's interface: column, docs/SUPPORT-GATE.md) lays the interface and the transition itself, off the part's own
+       layers: the generator builds the tree alone - its tips up to the part, cut at the gap by the slicer, the stack laid on them - and no sheet,
+       caps or plate of its own (left under the slicer's stack they printed as a block of Support between the tree and the interface). The sheet's
+       layer height and interface count stay on the support (meta), so the slicer cuts it on Bambu's grid and types 3 interface layers. */
+    if (columnRule()) { out.interface = false; out.trunkGrowth = true; out.columnRule = true; }
     return out;
   }
+  function columnRule() { return typeof window !== 'undefined' && typeof window.nsoSupportInterfaceRule === 'function' && window.nsoSupportInterfaceRule() === 'column'; }
   /* The card's state when the picked piece has no beacons at all. Detection
      only asks what hangs in air; a tall, thin piece that may sway as it
      prints is a different question, not asked yet, and the words say so. */
@@ -1348,6 +1354,7 @@ var NSO_SUPPORTS_CARD = (function () {
     if (feed) opts.feed = feed;
     if (feed && feed.mode === 'custom') delete opts.beacons;         // Custom plans its tips alone: no beacon list goes with them
     if (o.sideMm != null) opts.sideMm = o.sideMm;
+    if (columnRule()) opts.columnRule = true;                      /* the slicer lays the interface: the planner stands no tip on a step it would not call an overhang */
     return planAway(job, D.soup, opts, onProgress).then(function (t) {
       if (!t || typeof t !== 'object') throw new Error('the planner gave no plan');
       var keyOf = function (id) { return t.beacons && t.beacons[id] ? t.beacons[id].key : null; };

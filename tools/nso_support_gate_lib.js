@@ -34,6 +34,7 @@ const FLOAT_MIN_MM2 = 0.3;      /* an island smaller than this is a speck, count
 const FLOAT_LOOK_MM = 0.35;     /* "just below": any layer of the head (part or support) within this under the island's layer */
 const EMPTY_STEP_MM = 0.45;     /* two support layers further apart than this have an empty layer between them */
 const CARRY_MM = 1.0;
+const AIR_MM = 0.42;          /* a tree's line further than a line's width from what is under it is printed over air */
 const SPECK_MM2 = 0.8;
 const IS_SUPPORT = /^Support( interface| transition)?$/;
 
@@ -192,6 +193,26 @@ function measureHead(moves) {
     }
   }
 
+  /* 3b. the tree over air (the owner's gate 3: printable angles): Support (the tree, not the plate) cells further than AIR_MM from any support or
+     part of the layers just below - a branch leaning more than a layer's step per layer, or an arm run out flat */
+  let airMm2 = 0; const airAt = [];
+  {
+    const r = Math.round(AIR_MM / CELL_MM);
+    for (const z of supZ) {
+      if (z <= z0 + 1e-6) continue;
+      const o = L.get(z); if (!o.sup) continue;
+      const U = below(z); if (!U) continue;
+      const Ud = dilate(F, U, AIR_MM);
+      let n = 0, sx = 0, sy = 0;
+      for (let c = 0; c < F.n; c++) {
+        if (!o.sup[c] || (o.I && o.I[c]) || (o.T && o.T[c]) || Ud[c]) continue;
+        n++; const p = cellXY(F, c); sx += p[0]; sy += p[1];
+      }
+      if (n) { airMm2 += n * A; airAt.push({ z, areaMm2: +(n * A).toFixed(2), x: +(sx / n).toFixed(1), y: +(sy / n).toFixed(1) }); }
+    }
+    airAt.sort((a, b) => b.areaMm2 - a.areaMm2);
+  }
+
   /* 4. empty layers between support layers */
   const empty = [];
   for (let q = 1; q < supZ.length; q++) if (supZ[q] - supZ[q - 1] > EMPTY_STEP_MM) empty.push({ from: supZ[q - 1], to: supZ[q] });
@@ -240,7 +261,7 @@ function measureHead(moves) {
     void sheetZ;
   }
   touchAt.sort((a, b) => b.areaMm2 - a.areaMm2);
-  return { touchAt, touchMm2: +touch.toFixed(2), thinMm2: +thin.toFixed(2), contactMm2: +(contact * A).toFixed(1), share, floating, empty, carried, depth, depthSeqs, specks, labelled };
+  return { airMm2: +airMm2.toFixed(2), airAt, touchAt, touchMm2: +touch.toFixed(2), thinMm2: +thin.toFixed(2), contactMm2: +(contact * A).toFixed(1), share, floating, empty, carried, depth, depthSeqs, specks, labelled };
 }
 
 function byHead(moves) {
@@ -260,6 +281,7 @@ const RULES = [
   { check: 'touch mm2',        get: r => r.touchMm2,          ok: (o, r) => o <= r + 0.5,          rule: '<= ref + 0.5' },
   { check: 'one-layer gap',    get: r => r.share.one,         ok: (o, r) => o >= r - 0.10,         rule: '>= ref - 0.10', pct: true },
   { check: 'two-layer gap',    get: r => r.share.two,         ok: (o, r) => o <= r + 0.15,         rule: '<= ref + 0.15', pct: true },
+  { check: 'tree over air mm2', get: r => r.airMm2,           ok: (o, r) => o <= Math.max(1.5 * r, r + 2), rule: '<= max(1.5 x ref, ref + 2)' },
   { check: 'floating islands', get: r => r.floating.length,   ok: (o, r) => o <= r,                rule: '<= ref' },
   { check: 'empty layers',     get: r => r.empty.length,      ok: (o, r) => o <= r,                rule: '<= ref' },
   { check: 'sheet carried',    get: r => r.carried,           ok: (o, r) => o >= r - 0.10,         rule: '>= ref - 0.10', pct: true, labelled: true },
