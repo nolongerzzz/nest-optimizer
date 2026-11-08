@@ -81,7 +81,9 @@ function draw(F, bm, m) {
       const py = F.y0 + (j + 0.5) * CELL_MM;
       for (let i = i0; i <= i1; i++) {
         const px = F.x0 + (i + 0.5) * CELL_MM;
-        let t = L2 > 0 ? ((px - ax) * dx + (py - ay) * dy) / L2 : 0; t = t < 0 ? 0 : t > 1 ? 1 : t;
+        let t = L2 > 0 ? ((px - ax) * dx + (py - ay) * dy) / L2 : 0;
+        if (m.flat && (t < 0 || t > 1)) continue;                 /* flat ends: a line is as long as it is printed, not half a width past its end */
+        t = t < 0 ? 0 : t > 1 ? 1 : t;
         const qx = px - ax - t * dx, qy = py - ay - t * dy;
         if (qx * qx + qy * qy <= r2) bm[j * F.nx + i] = 1;
       }
@@ -280,7 +282,8 @@ function gate(test, ref) {
 
 /* PARITY: how far our interface and transition look like Bambu's, layer by layer - what G-scope's Compare overlays. The two heads are put in
    one frame by the centres of their parts; each of the reference's interface / transition layers is set against ours on the same height (within
-   PARITY_Z_MM), lines drawn PARITY_FAT_MM wide so lines a pitch apart are one plate.
+   PARITY_Z_MM), lines drawn PARITY_FAT_MM wide with flat ends (round ones ran a quarter of a mm past every hatch line's end: past a hole's
+   edge, where Bambu's lines stop) so lines a pitch apart are one plate.
      iou    plate both have / plate either has, over all the reference's sheet layers (a layer ours lacks counts all theirs as missed)
      role   the same with the type matched: interface on interface, transition on transition
      grid   the share of the reference's sheet layers ours has a layer at, within PARITY_GRID_MM
@@ -302,7 +305,7 @@ function parity(testMs, refMs) {
     n++;
     let best = null, bd = Infinity; for (const q of tz) { const d = Math.abs(q - z); if (d < bd) { bd = d; best = q; } }
     if (bd <= PARITY_GRID_MM) gridHit++;
-    const paint = (ms, feat) => { const bm = new Uint8Array(F.n); ms.forEach(m => { if (!feat || m.feat === feat) draw(F, bm, Object.assign({}, m, { w: PARITY_FAT_MM })); }); return bm; };
+    const paint = (ms, feat) => { const bm = new Uint8Array(F.n); ms.forEach(m => { if (!feat || m.feat === feat) draw(F, bm, Object.assign({}, m, { w: PARITY_FAT_MM, flat: true })); }); return bm; };
     const rI = paint(LR.get(z), 'Support interface'), rT = paint(LR.get(z), 'Support transition');
     const tm = best != null && bd <= PARITY_Z_MM ? LT.get(best) : [];
     const oI = paint(tm, 'Support interface'), oT = paint(tm, 'Support transition');
