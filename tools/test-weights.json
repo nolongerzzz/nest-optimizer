@@ -91,6 +91,7 @@
     "brush": {"weight":5250,"note":""},
     "bvh:test": {"weight":3600,"note":""},
     "camera:leash": {"weight":224,"note":""},
+    "camera:reseat": {"weight":300,"note":""},
     "carve:drag": {"weight":103600,"note":""},
     "carve:test": {"weight":14500,"note":""},
     "notch:drive": {"weight":12659,"note":"measured with PW_CHROMIUM, 35 gates"},

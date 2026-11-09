@@ -1070,6 +1070,8 @@ function initThree() {
   };
   // Keep the orbit centre near the plate (see leashOrbitTarget)
   installOrbitLeash(state.camera, state.controls);
+  // ...and at the depth of what each drag grabs (see reseatOrbitTarget)
+  installOrbitReseat(state.controls, state.renderer.domElement, mainViewReseatPick);
 
   // Lights
   const ambient = new THREE.AmbientLight(0xffffff, 0.75);
@@ -1232,11 +1234,14 @@ function onViewportWheel(event) {
   const scale = Math.pow(0.95, Math.min(8, Math.abs(delta) * 0.01));
   const factor = delta < 0 ? scale : 1 / scale;
   const anchor = wheelZoomAnchor(event.clientX, event.clientY) || state.controls.target.clone();
-  // the framing of a 3 x 2 block of beds stands farther back than the 1200 mm one plate is held to
-  const zoomMax = (typeof NSO_BEDS !== 'undefined' && NSO_BEDS.count() > 1)
-    ? Math.max(WHEEL_ZOOM_MAX, 1.6 * NSO_BEDS.frameView(state.camera).distance) : WHEEL_ZOOM_MAX;
-  dollyAbout(state.camera, state.controls, anchor, factor, WHEEL_ZOOM_MIN, zoomMax);
+  dollyAbout(state.camera, state.controls, anchor, factor, WHEEL_ZOOM_MIN, wheelZoomMax());
   if (leashOrbitTarget(state.camera, state.controls)) state.controls.update();
+}
+
+// the framing of a 3 x 2 block of beds stands farther back than the 1200 mm one plate is held to
+function wheelZoomMax() {
+  return (typeof NSO_BEDS !== 'undefined' && NSO_BEDS.count() > 1)
+    ? Math.max(WHEEL_ZOOM_MAX, 1.6 * NSO_BEDS.frameView(state.camera).distance) : WHEEL_ZOOM_MAX;
 }
 
 /* THE LEASH. The orbit target may not sit more than one plate diagonal from
@@ -1250,12 +1255,16 @@ function onViewportWheel(event) {
    Returns true when it moved anything. */
 const _leashShift = new THREE.Vector3();
 
-function leashOrbitTarget(camera, controls) {
-  if (!camera || !controls) return false;
+function orbitLeashReach() {
   const plate = getCurrentPlate() || { w: 180, d: 180 };
   // one plate diagonal from the active bed's centre, plus how far the farthest other bed stands (app-beds.js)
-  const reach = Math.hypot(plate.w || 180, plate.d || 180) +
+  return Math.hypot(plate.w || 180, plate.d || 180) +
     ((typeof NSO_BEDS !== 'undefined' && NSO_BEDS.count() > 1) ? NSO_BEDS.layoutReach() : 0);
+}
+
+function leashOrbitTarget(camera, controls) {
+  if (!camera || !controls) return false;
+  const reach = orbitLeashReach();
   const t = controls.target;
   const r = t.length();
   if (!(r > reach)) return false;
@@ -1270,6 +1279,82 @@ function leashOrbitTarget(camera, controls) {
    orientation is already right. */
 function installOrbitLeash(camera, controls) {
   controls.addEventListener('change', () => leashOrbitTarget(camera, controls));
+}
+
+/* THE ORBIT TARGET IS RE-SEATED AT EVERY DRAG. OrbitControls pans by the
+   target's depth (a pixel of drag moves a point AT the target's depth one
+   pixel) and orbits about the target. Wheel zoom scales camera and target
+   about the point under the cursor, which keeps the ratio of the target's
+   depth to that point's - and pan and orbit keep it too - so after a long
+   bout of zooming, panning and orbiting over pieces at different depths the
+   target is left wherever the arithmetic put it: often far in front of what
+   is on screen. Then a pan moves the picture a fraction of the pointer's
+   travel ("dragging uphill") and an orbit swings about a point in mid-air,
+   until Frame puts the target back.
+
+   So at the press that starts a drag (OrbitControls' 'start'), the target is
+   slid ALONG THE VIEW LINE to the depth of what is grabbed: for a pan, the
+   point under the pointer, which then follows the pointer exactly; for an
+   orbit or a middle-drag dolly, what is at the centre of the view (failing
+   that, under the pointer), so the orbit turns about what is being looked
+   at. The camera does not move and the target stays on its view line, so
+   the picture does not change by a pixel - only what the next drag does.
+   Nothing under the pointer (sky, past the far plane), a depth that would
+   leave the leash, or the same depth: the target is left as it is. The
+   depth is held to the wheel's own [min, max] distance.
+
+   Returns true when the target moved. No controls.update(): camera and
+   view direction are unchanged, and inside 'start' the next update is the
+   drag's own. */
+const _reseatFwd = new THREE.Vector3();
+
+function reseatOrbitTarget(camera, controls, point, minD, maxD, accept) {
+  if (!camera || !controls || !point) return false;
+  const fwd = _reseatFwd.copy(controls.target).sub(camera.position);
+  const d0 = fwd.length();
+  if (!(d0 > 0)) return false;
+  fwd.divideScalar(d0);
+  const depth = point.clone().sub(camera.position).dot(fwd);
+  if (!(depth > 0)) return false;
+  const d = Math.min(maxD, Math.max(minD, depth));
+  if (Math.abs(d - d0) <= 1e-9 * d0) return false;
+  const t = camera.position.clone().addScaledVector(fwd, d);
+  if (accept && !accept(t)) return false;
+  controls.target.copy(t);
+  return true;
+}
+
+/* Wire the re-seat to a viewport: `pick(press)` gets the press that started
+   the drag ({ x, y, button, pan }) and re-seats the target for its own view
+   (its own anchor, limits and leash). The press is recorded in the capture phase, so
+   before OrbitControls' own pointerdown dispatches 'start'; a 'start' with no
+   press behind it (a wheel step that dispatches one) re-seats nothing. */
+function installOrbitReseat(controls, el, pick) {
+  let press = null;
+  el.addEventListener('pointerdown', (e) => {
+    const rec = press = {
+      x: e.clientX, y: e.clientY, button: e.button,
+      // OrbitControls' own mapping: right pans; left pans with ctrl / meta / shift
+      pan: e.button === 2 || (e.button === 0 && !!(e.ctrlKey || e.metaKey || e.shiftKey))
+    };
+    // only for this press's own dispatch
+    setTimeout(() => { if (press === rec) press = null; }, 0);
+  }, true);
+  controls.addEventListener('start', () => {
+    const p = press;
+    press = null;
+    if (p) pick(p);
+  });
+}
+
+function mainViewReseatPick(press) {
+  const cam = state.camera, c = state.controls;
+  const rect = state.renderer.domElement.getBoundingClientRect();
+  const at = press.pan ? wheelZoomAnchor(press.x, press.y)
+    : (wheelZoomAnchor(rect.left + rect.width / 2, rect.top + rect.height / 2) || wheelZoomAnchor(press.x, press.y));
+  if (!at) return false;
+  const reach = orbitLeashReach();
+  return reseatOrbitTarget(cam, c, at, WHEEL_ZOOM_MIN, wheelZoomMax(), (t) => t.length() <= reach);
 }
 
 function onResize() {

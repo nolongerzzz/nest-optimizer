@@ -3475,6 +3475,23 @@ var NSO_MICROSCOPE = (function () {
 
     v.host.addEventListener('wheel', onWheel, { capture: true, passive: false });
 
+    /* Each orbit / pan / dolly drag first slides the target along the view
+       line to the depth of what it grabs (app-core.js's reseatOrbitTarget,
+       shared with the main viewport): a pan, the toolpath or floor under the
+       pointer, which then follows the pointer exactly; an orbit, what is at
+       the centre of the view. Without it, long bouts of wheel zoom, pan and
+       orbit left the target far in front of the toolpath, and a pan crawled
+       at a fraction of the pointer until Frame. The picture does not move. */
+    installOrbitReseat(v.controls, el, function (p) {
+      var rect = el.getBoundingClientRect();
+      var at = p.pan ? wheelAnchor(p.x, p.y)
+        : (wheelAnchor(rect.left + rect.width / 2, rect.top + rect.height / 2) || wheelAnchor(p.x, p.y));
+      if (!at) return false;
+      var c = v.controls;
+      return reseatOrbitTarget(v.camera, c, at, Math.max(c.minDistance, v.camera.near * 2),
+        Math.min(c.maxDistance, v.camera.far), null);
+    });
+
     el.addEventListener('pointerdown', function (e) {
       v.mouseDownPos = [e.clientX, e.clientY];
       v.hookTook = false;
