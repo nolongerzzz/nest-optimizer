@@ -2394,7 +2394,9 @@
               }
               kept.push(rg);
             }
-            kept.forEach(function (r) { P.S[r.j] = g.isEmpty(P.S[r.j]) ? r.ring : g.union(P.S[r.j], r.ring); });
+            /* ...and a cup whose rings stop short of the stack holds nothing: its kept rings were a slab a layer under the stack, the air between them
+               (the Negative Sphere2's horseshoe ends) - all or nothing */
+            if (kept.length === rings.length) kept.forEach(function (r) { P.S[r.j] = g.isEmpty(P.S[r.j]) ? r.ring : g.union(P.S[r.j], r.ring); });
           }
         });
       }
