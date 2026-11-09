@@ -153,6 +153,17 @@ Sphere2 3.0 -> 0.4, Circular's floating twig and the Oblique's arm gone. Gate 63
 Sphere2 rim's tips (three under its horseshoe, Bambu five or six: span over 2.5 mm 3 mm2, carried 73 %) - step 3. Our trunk is about half
 Bambu's (7 - 9 mm2 against 14 - 18).
 
+## 4e. One tree, step 2: the horns off the trunk
+
+A horn is now a branch of the head's tree (`hornToTree`): from its top it leans out as before, drops straight outside the overhangs' stacks (no part
+within 2.2 mm over it, 0.6 mm round, below the first 2.2 mm under its top - the shoulder over its own top is no stack), then meets the tree at no more
+than 45 deg - the shortest route over its knee, drop and join, to any point of the crowns' branches and trunk (and the legs to the tips, under their
+straight columns). With no clear route it stands its own column on the plate as before. Under the column rule the card plans a head's areas at any
+height as one group (no height window), so a shoulder's spots are planned with the tree they join. On the Negative Sphere a branch leaves the trunk at
+5.2, forks at 6.8 into the two horns, which pass the rim's corners outside its interface at 9.6 (+-2.8, 4.1) and climb to the shoulders at 14.6; Circular
+and the Negative Sphere2 the same. The Sphere's horns still stand on the plate (its dome bulges under the shoulder: no clear drop). Gate unchanged,
+63 of 66 (62 merged).
+
 ## 5. Not done, and named
 
 - **The merged plate's small surfaces.** The six as one piece are read on a 3 mm grid where each alone is read at 1 mm, so the Negative Sphere2's apex

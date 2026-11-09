@@ -1320,7 +1320,8 @@ var NSO_SUPPORTS_CARD = (function () {
   function groupAreas(regs, o) {
     var GP = window.NSO_SupportGridpack;
     if (!oneTrunkOn(o) || !GP || typeof GP.oneTrunkGroups !== 'function') return regs.map(function (r) { return [r]; });
-    var groups = GP.oneTrunkGroups(regs.map(function (r) { return { id: r.id, pts: r.beacons.filter(function (b) { return !b.off; }) }; }));
+    /* under the column rule a head's areas at any height are one tree (its shoulders' horns join the trunk under its overhang): no height window */
+    var groups = GP.oneTrunkGroups(regs.map(function (r) { return { id: r.id, pts: r.beacons.filter(function (b) { return !b.off; }) }; }), columnRule() ? { zWindowMm: 1e9 } : undefined);
     return groups.map(function (g) { return g.map(function (i) { return regs[i]; }); });
   }
   /* One area through the planner: the PLANNING step. Resolves { result } when

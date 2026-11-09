@@ -4761,7 +4761,61 @@
     }
     return null;
   }
-  function hornColumn(b, kit) {
+  /* A HORN OFF THE TREE (the owner's reference, Bambu's Negative Sphere: its horns are branches of the one trunk, passing outside the rim's
+     interface and up to the shoulders). From the horn's top it leans out as before; from a knee it drops outside the overhangs' stacks (no part
+     within HORN_TREE.shadowMm over it, HORN_TREE.shadowXyMm round), then joins a branch of the tree under it at no more than HORN_TREE.joinDeg -
+     the highest join it reaches. Null when none is clear (the horn then stands its own column on the plate). */
+  var HORN_TREE = { shadowMm: 2.2, shadowXyMm: 0.6, exemptMm: 2.2, joinDeg: 45, stepMm: 0.25, kneeStepMm: 0.5, kneeMaxMm: 3, dropStepMm: 0.5, joinEndMm: 0.8, cands: 4, rV: 0.5, rJoin: 0.6, headings: 1 };
+  function hornShadow(kit, pt) {
+    var key = Math.round(pt[0] * 20) + ',' + Math.round(pt[1] * 20) + ',' + Math.round(pt[2] * 20), C = kit.shadowCache || (kit.shadowCache = {});
+    if (C[key] === undefined) C[key] = kit.pr.leg(pt, [pt[0], pt[1], pt[2] + HORN_TREE.shadowMm], 0, 0, 0, HORN_TREE.shadowXyMm) >= 0;
+    return C[key];
+  }
+  function hornLegClear(kit, a, c, topZ, endFree) {
+    if (kit.pr.leg(a, c, HORN.topR * Math.SQRT2, 0, 0, HORN.leanClearMm) >= 0) return false;
+    var L = Math.hypot(c[0] - a[0], c[1] - a[1], c[2] - a[2]), n = Math.max(1, Math.ceil(L / HORN_TREE.stepMm));
+    for (var i = 0; i <= n; i++) {
+      var t = i / n, q = [a[0] + (c[0] - a[0]) * t, a[1] + (c[1] - a[1]) * t, a[2] + (c[2] - a[2]) * t];
+      if (q[2] > topZ - HORN_TREE.exemptMm) continue;                       /* the shoulder over the horn's own top is no stack */
+      if (endFree && (1 - t) * L < HORN_TREE.joinEndMm) continue;            /* the join's own end is in the branch it meets */
+      if (hornShadow(kit, q)) return false;
+    }
+    return true;
+  }
+  function hornToTree(b, kit, top, lx, ly, tanL, segs, mv) {
+    if (!segs || !segs.length) return null;
+    var tanJ = Math.tan(HORN_TREE.joinDeg * Math.PI / 180), pz = kit.plateZ, best = null;
+    var D3 = function (u, w) { return Math.hypot(u[0] - w[0], u[1] - w[1], u[2] - w[2]); };
+    for (var dz = HORN_TREE.kneeStepMm; dz * tanL <= HORN_TREE.kneeMaxMm + 1e-9 && top[2] - dz - pz > 1; dz += HORN_TREE.kneeStepMm) {
+      var q = [top[0] + lx * dz * tanL, top[1] + ly * dz * tanL, top[2] - dz], lq = D3(top, q);
+      if (best && lq >= best.len) break;
+      if (!hornLegClear(kit, top, q, top[2], false)) break;                 /* the lean runs into the part or a stack: no further this way */
+      for (var zv = q[2]; zv - pz > 1; zv -= HORN_TREE.dropStepMm) {
+        var v = [q[0], q[1], zv], lv = lq + (q[2] - zv);
+        if (best && lv >= best.len) break;
+        if (zv < q[2] - 1e-9 && !hornLegClear(kit, [q[0], q[1], zv + HORN_TREE.dropStepMm], v, top[2], false)) break;
+        var cand = segs.filter(function (c) { return c[2] < zv - 0.3 && Math.hypot(c[0] - v[0], c[1] - v[1]) <= (zv - c[2]) * tanJ + 1e-9; });
+        cand.sort(function (a2, b2) { return D3(v, a2) - D3(v, b2); });
+        for (var ci = 0; ci < Math.min(cand.length, HORN_TREE.cands); ci++) {
+          var c = cand[ci], len = lv + D3(v, c);
+          if (best && len >= best.len) break;
+          if (!hornLegClear(kit, v, c, top[2], true)) continue;
+          best = { q: q, v: v, c: c.slice(0, 3), len: len, dz: dz };
+          break;
+        }
+      }
+    }
+    if (!best) return null;
+    var q2 = best.q, v2 = best.v, c2 = best.c;
+    var parts = [tubeSoup(top, HORN.topR, q2, HORN.kneeR, 12, 0), ballSoup(q2, HORN.kneeR, 12, 0)];
+    if (v2[2] < q2[2] - 1e-9) { parts.push(tubeSoup(q2, HORN.kneeR, v2, HORN_TREE.rV, 12, 0)); parts.push(ballSoup(v2, HORN_TREE.rV, 12, 0)); }
+    parts.push(tubeSoup(v2, HORN_TREE.rV, c2, HORN_TREE.rJoin, 12, 0)); parts.push(ballSoup(c2, HORN_TREE.rJoin, 12, 0));
+    var n0 = 0; parts.forEach(function (sp) { n0 += sp.length; });
+    var soup = new Float32Array(n0), w = 0; parts.forEach(function (sp) { soup.set(sp, w); w += sp.length; });
+    return { beacon: b.id, key: b.key, regionId: b.regionId, p: b.p.slice(), top: top, knee: q2, drop: v2, join: c2, bottom: c2, sideMm: 2 * HORN.kneeR,
+             moveMm: mv, leanMm: best.dz * tanL, lengthMm: best.len, flare: false, horn: true, onTree: true, soup: soup };
+  }
+  function hornColumn(b, kit, segs) {
     HORN_WHY = 'no kit';
     if (!kit || kit.plateZ == null) return null;
     var pz = kit.plateZ, zw = b.p[2] - 0.3, nH = 32, dmin = Infinity, hits = [];
@@ -4806,6 +4860,14 @@
     HORN_WHY = 'no route from top ' + top.map(function (v) { return v.toFixed(2); }) + ' out ' + ox.toFixed(2) + ',' + oy.toFixed(2) + ' wall ' + dmin.toFixed(2);
     /* the lean: straight out from the wall first, then turned a sixteenth of a turn at a time either way, as far as square to it */
     var oa = Math.atan2(oy, ox);
+    var bestT = null;
+    for (var t0 = 0; t0 <= HORN_TREE.headings && segs && segs.length; t0++) {
+      for (var sg0 = t0 ? -1 : 1; sg0 <= 1; sg0 += 2) {
+        var ang0 = oa + sg0 * t0 * Math.PI / 8, hT = hornToTree(b, kit, top, Math.cos(ang0), Math.sin(ang0), tanL, segs, mv);
+        if (hT && (!bestT || hT.lengthMm < bestT.lengthMm)) bestT = hT;
+      }
+    }
+    if (bestT) return bestT;
     for (var t = 0; t <= 4; t++) {
       for (var sg = t ? -1 : 1; sg <= 1; sg += 2) {
         var ang = oa + sg * t * Math.PI / 8, lx = Math.cos(ang), ly = Math.sin(ang);
@@ -4837,6 +4899,19 @@
     var HORN_COVER = { xyMm: 2.5, downMm: 1.5, upMm: 0.3 };   /* an overhang's spot this near (in plan: the spots' grid and its interface's reach) and this far under the step's (or a hair over) */
     function hornsOf(steps) {
       if (!opts.columnRule) return [];
+      /* the tree a horn may join: the crowns' branches and trunks, and the legs to the tips under their straight columns (which stand in the
+         stacks), sampled every half mm */
+      var treeSegs = [];
+      if (p && p.ok && p.crowns) p.crowns.forEach(function (cr) {
+        (cr.nodes || []).forEach(function (n) {
+          if (!n.pos || !n.to) return;
+          var pts = n.mid ? [n.pos, n.mid, n.to] : [n.pos, n.to], zTipCol = n.kind === 'tip' ? n.pos[2] - COLUMN_CROWN.tipDropMm : Infinity;
+          for (var k = 0; k + 1 < pts.length; k++) {
+            var a = pts[k], c = pts[k + 1], L = Math.hypot(c[0] - a[0], c[1] - a[1], c[2] - a[2]), m = Math.max(1, Math.ceil(L / 0.5));
+            for (var j = 0; j <= m; j++) { var sp = [a[0] + (c[0] - a[0]) * j / m, a[1] + (c[1] - a[1]) * j / m, a[2] + (c[2] - a[2]) * j / m]; if (sp[2] < zTipCol) treeSegs.push(sp); }
+          }
+        });
+      });
       var out = [], isStep = {};
       steps.forEach(function (sh) { isStep[sh.beacon] = true; });
       steps.forEach(function (sh) {
@@ -4849,8 +4924,8 @@
         });
         if (root && root.NSO_STEP_DEBUG && cover) console.log('horn for ' + sh.p.map(function (v) { return v.toFixed(2); }) + ': none, the interface of ' + cover.p.map(function (v) { return v.toFixed(2); }) + ' covers it');
         if (cover) return;
-        var hc = hornColumn(bc.beacons[sh.beacon], kit);
-        if (root && root.NSO_STEP_DEBUG) console.log('horn for ' + sh.p.map(function (v) { return v.toFixed(2); }) + ': ' + (hc ? 'top ' + hc.top.map(function (v) { return v.toFixed(2); }) + ' knee ' + hc.knee.map(function (v) { return v.toFixed(2); }) + ' lean ' + hc.leanMm.toFixed(2) : 'none ' + HORN_WHY));
+        var hc = hornColumn(bc.beacons[sh.beacon], kit, treeSegs);
+        if (root && root.NSO_STEP_DEBUG) console.log('horn for ' + sh.p.map(function (v) { return v.toFixed(2); }) + ': ' + (hc ? 'top ' + hc.top.map(function (v) { return v.toFixed(2); }) + ' knee ' + hc.knee.map(function (v) { return v.toFixed(2); }) + ' lean ' + hc.leanMm.toFixed(2) + (hc.onTree ? ' drop ' + hc.drop[2].toFixed(2) + ' joins the tree at ' + hc.join.map(function (v) { return v.toFixed(2); }) : ' to the plate') + ' (tree ' + treeSegs.length + ' points)' : 'none ' + HORN_WHY));
         if (hc) out.push(hc);
       });
       return out;
