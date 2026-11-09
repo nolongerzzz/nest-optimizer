@@ -187,6 +187,12 @@ var NSO_GSCOPE_SLICE = (function () {
     return m && m.nsoSupport ? m.nsoSupport : null;
   }
 
+  /** The plate piece (state.models entry) behind a mesh-document object, or null. */
+  function modelOfObject(o) {
+    if (o.sourceId == null || typeof state === 'undefined' || !state || !state.models) return null;
+    return state.models.find(function (x) { return x && x.id === o.sourceId; }) || null;
+  }
+
   function refuse(why) {
     var read = $('ms-slice-read');
     if (read) read.textContent = why;
@@ -217,12 +223,13 @@ var NSO_GSCOPE_SLICE = (function () {
     d.objects.forEach(function (o) { var su = supportOf(o); if (su && su.sheetLayerMm > sl) sl = su.sheetLayerMm; });
     if (sl > 0 && !(optsOver && optsOver.supportLayerMaxMm != null)) opts.supportLayerMaxMm = 0.28;
     var flagged = [];
-    /* the column rule's stack the supports card draws (m.nsoSupport.stack) is shown, not sliced: the slicer lays it from the part */
-    var objects = d.objects.filter(function (o) { var su = supportOf(o); return !(su && su.stack); }).map(function (o) {
+    var objects = d.objects.map(function (o) {
       var ns = nonSolidOf(o);
       if (ns) flagged.push(o.name);
       var sup = supportOf(o);
-      return { name: o.name, soup: o.positions, gapCloseMm: ns ? 0 : undefined, key: o.sourceId,
+      /* a support the supports card drew as it prints is sliced as the tree it was built as */
+      var soup = sup && typeof window.nsoSupportSliceSoup === 'function' ? window.nsoSupportSliceSoup(modelOfObject(o), o.positions) : o.positions;
+      return { name: o.name, soup: soup, gapCloseMm: ns ? 0 : undefined, key: o.sourceId,
                role: sup ? (sup.brim ? 'brim' : 'support') : 'part', hostKey: sup ? sup.hostSourceId : undefined };
     });
     var source = { label: d.name, objects: d.objects, docSource: d.source, subtitle: d.subtitle };

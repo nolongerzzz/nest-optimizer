@@ -174,17 +174,23 @@ closer as well (`COLUMN_ONE.coverMm` 2.2 against the sheet build's 3.3: no cap s
 74 -> 99 % (Bambu 91), span over 2.5 mm 2.1 -> 0. Gate 66 of 66 on the six pieces and on the six as one piece (the merged apex's contact too);
 parity unchanged.
 
-## 4g. The stack, shown on the generator
+## 4g. The support drawn as it prints (generate and slice in one motion)
 
-Under the column rule the card builds the tree alone and the slicer lays the interface, so the generator showed a bare tree until Slice and Preview.
-After a build the card now asks the slicer for the stack (`NSO_Slicer.sliceObjects` with `columnStackOnly`: the rule's interface and transition on each
-support's own layers, as hole-free pieces - a piece with a hole cut into strips - in the soup's frame) and places it as a piece of its own,
-"<piece> - interface" (`m.nsoSupport.stack`), each layer a plate a layer thick (`stackStep`). Like the brim it is the card's, taken off and put back
-with the supports, never counted as a support - and never sliced: the print module and G-scope's Slice leave it out, since the slice lays the same stack
-from the part (with the plates in the support's own mesh the cup under the Sphere's stack moved). The preview's slice uses the gate's settings (3
-interface layers, the support's own 0.28 mm grid, gap 0.2, xy 0.35); the layers match a full slice's on all six heads (same count, same heights).
-`support:gate --rule column` now gives the card the slicer, as the page has it (so it builds the brim too, sliced as brim): 66 of 66, every number as
-before.
+Under the column rule the card builds the tree alone and the slicer lays the interface, so the generator showed a bare tree until Slice and Preview -
+and plates drawn over that tree (b878ea6e) were a block with the branches showing through it, not the interface. Now, right after the build, the slicer
+cuts each support (`NSO_Slicer.sliceObjects` with `columnStackOnly`: the column rule run, no paths) and the card draws the support from its sections,
+layer by layer (`stackStep`): the tree cut where the part blocks it, the stack on its tips, the cups - what G-scope shows and the printer lays. The
+support keeps the tree it was built as (`m.nsoSupport.built`, with the drawing's first corner `shownV0`): that is what every slice cuts
+(`window.nsoSupportSliceSoup`, used by the Slice card, G-scope's Slice and support:gate), moved as far as the drawing has been moved since. Slicing the
+drawing itself again grew a few layers by 1 - 2 mm2 (a support's small holes filled, its cups laid again) and over air followed. The drawn layers equal
+a full slice's, layer by layer, on the Base, Negative Sphere, Oblique and Sphere (a sliver at the top of a horn too small for a line is drawn and not
+printed). The preview's slice uses the gate's settings (3 interface layers, the support's own 0.28 mm grid, gap 0.2, xy 0.35). A support saved and
+loaded without its built tree is sliced as drawn.
+
+The drawing showed what the slice had laid since 4c, unseen: a wall of cup rings round the Base's plate (its plate's lowest layer was "further than
+0.25 mm" from tips 2 mm apart). A cup now stands only under a stack stepping out over the layer under it (a dome's), measured against the tree closed
+over gaps of 2 mm each side (`COLUMN_CUP_BRIDGE_MM`: a plate bridges between its tips), and only for 2 mm2 of overhang or more (half a mm2 walled a
+whole dome's stack). A plate stands on its tips (4f). Gate 66 of 66; Base carried 89 % (Bambu 85), over air 0.1.
 
 ## 5. Not done, and named
 

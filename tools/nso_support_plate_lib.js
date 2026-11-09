@@ -159,8 +159,7 @@ function makeApp(opts) {
       return ctx.state.placed.map(p => p.sourceId);
     },
     realIds: () => ctx.state.placed.filter(p => p.mesh && !(ctx.state.models.find(m => m.id === p.sourceId) || {}).nsoSupport).map(p => p.sourceId),
-    supportsOf: id => ctx.state.models.filter(m => m.nsoSupport && m.nsoSupport.hostSourceId === id && !m.nsoSupport.stack),
-    stacksOf: id => ctx.state.models.filter(m => m.nsoSupport && m.nsoSupport.hostSourceId === id && m.nsoSupport.stack),   /* the column rule's drawn stack: shown, not sliced */
+    supportsOf: id => ctx.state.models.filter(m => m.nsoSupport && m.nsoSupport.hostSourceId === id),
     allSupports: () => ctx.state.models.filter(m => m.nsoSupport),
     modelOf: id => ctx.state.models.find(m => m.id === id),
     placedOf: id => ctx.state.placed.find(p => p.sourceId === id),

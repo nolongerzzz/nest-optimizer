@@ -62,7 +62,8 @@ async function buildAndSlice(opts) {
   const moves = [];
   for (let i = 0; i < objs.length; i++) {
     const head = objs[i].name.replace(/\.stl$/i, '');
-    const sups = app.supportsOf(ids[i]).map(m => ({ soup: Array.from(app.soupOf(m.id)), brim: !!m.nsoSupport.brim }));
+    /* what the page slices: a support the card drew as it prints is sliced as the tree it was built as (nsoSupportSliceSoup) */
+    const sups = app.supportsOf(ids[i]).map(m => ({ soup: Array.from(app.ctx.nsoSupportSliceSoup ? app.ctx.nsoSupportSliceSoup(m, app.soupOf(m.id)) : app.soupOf(m.id)), brim: !!m.nsoSupport.brim }));
     const objl = [{ name: 'part', soup: Float32Array.from(app.soupOf(ids[i])), key: 101, role: 'part' }]
       .concat(sups.map((s, k) => ({ name: 's' + k, soup: Float32Array.from(s.soup), key: 201 + k, role: s.brim ? 'brim' : 'support', hostKey: 101 })));
     const so = { supportInterfaceLayers: 3, supportLayerMaxMm: 0.28 };

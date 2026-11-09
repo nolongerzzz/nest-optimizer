@@ -1664,16 +1664,18 @@
       }
 
 
-      /* THE STACK ALONE (o.columnStackOnly): the column rule's interface and transition, each support's layers on its own grid, as hole-free pieces
-         in the soup's frame - the supports card draws them as plates on the tree it built (the rule lays them only when slicing: the generator showed
-         a bare tree) */
+      /* THE SUPPORT AS IT PRINTS (o.columnStackOnly): each support's sections on its own grid after the column rule (S: the whole of it, I / T: its
+         interface and transition), as hole-free pieces in the soup's frame - the supports card draws the support from them, so the generator shows
+         what the slice prints (the rule lays the interface only when slicing: the generator showed a bare tree) */
       if (o.columnStackOnly) {
         return { ok: true, shiftZ: shiftZ, stacks: perObject.filter(function (P) { return P.role === 'support' && P.col; }).map(function (P) {
           var SPp = P.planes || planes, layers = [];
           SPp.forEach(function (pl, i) {
-            var I = P.col.I[i], Tt = P.col.T[i];
-            if ((!I || g.isEmpty(I)) && (!Tt || g.isEmpty(Tt))) return;
-            layers.push({ z0: pl.printZ - pl.h - shiftZ, z1: pl.printZ - shiftZ, I: I && !g.isEmpty(I) ? holeFree(g, I) : [], T: Tt && !g.isEmpty(Tt) ? holeFree(g, Tt) : [] });
+            var I = P.col.I[i], Tt = P.col.T[i], Sx = P.S[i];
+            var hasI = I && !g.isEmpty(I), hasT = Tt && !g.isEmpty(Tt), hasS = Sx && !g.isEmpty(Sx);
+            if (!hasI && !hasT && !hasS) return;
+            /* S: the layer's whole support as it prints (the tree cut where it is blocked, the stack, the cups), I / T its interface and transition */
+            layers.push({ z0: pl.printZ - pl.h - shiftZ, z1: pl.printZ - shiftZ, I: hasI ? holeFree(g, I) : [], T: hasT ? holeFree(g, Tt) : [], S: hasS ? holeFree(g, Sx) : [] });
           });
           return { key: P.key, name: P.name, layers: layers };
         }) };
@@ -2125,9 +2127,10 @@
                                       would stand on less than half its width) */
   var COLUMN_TWIG_MM2 = 0.6;       /* a piece of the support's section smaller than this is a twig (a 0.85 mm thin column is 0.57) */
   var COLUMN_TWIG_XY_MM = 0.2;     /* ...and keeps this off the part sideways, not the tree's xy distance */
+  var COLUMN_CUP_BRIDGE_MM = 2;     /* a stack bridges a gap up to twice this between tips: no cup under the bridge */
   var COLUMN_CUP_HOLD_MM = 0.3;    /* a cup's ring stands within this of the ring or tree under it (a line's width less a margin) */
   var COLUMN_CUP_FIRST_MM = 0.1;   /* the cup's first ring: this far in from the stack's edge, under its edge loop */
-  var COLUMN_CUP_MIN_MM2 = 0.5;    /* ...over at least this much of it */
+  var COLUMN_CUP_MIN_MM2 = 2;      /* ...over at least this much of it (a sliver of half a mm2 walled a whole dome's stack: Circular's collar) */
   var COLUMN_CUP_RING_MM = 0.9;    /* the cup's wall: two lines */
   var COLUMN_CUP_DEG = 45;
   var COLUMN_CUP_HOLE_MM2 = 3;      /* ...not under a plate with a hole bigger than this (a rim round a cavity) */         /* ...stepping in this steeply going down */
@@ -2347,8 +2350,15 @@
           g.polys(C0).forEach(function (Q) { var a2 = 0; for (var q = 0; q < Q.length; q++) { var u = Q[q], v = Q[(q + 1) % Q.length]; a2 += u[0] * v[1] - v[0] * u[1]; } if (a2 < 0) holeArea += -a2 / 2; });
           if (holeArea > COLUMN_CUP_HOLE_MM2) return;
           var tree = P.S[ic - 1];
-          /* the piece's cantilever: its part further than the reach from what stands under it */
-          var far = g.isEmpty(tree) ? pc : g.diff(pc, g.offset(tree, COLUMN_CUP_REACH_MM));
+          /* the piece's cantilever: its part further than the reach from what stands under it. Between tips a plate BRIDGES (the tree closed over
+             gaps of COLUMN_CUP_BRIDGE_MM each side is what holds it); a dome's stack stepping out over the layer under it more than
+             COLUMN_CUP_REACH_MM past that is cantilevered (its ring is over nothing: its own lower layer is the edge it steps from) */
+          var stepOut = stkB && !g.isEmpty(g.inter(g.offset(pc, 0.05), stkB));
+          /* a plate's lowest layer (no stack under it) stands on its tips (the planner's spots fill every plate, nso_support_gridpack.js fillSpots): no
+             wall round its edge - that was a block round the branches (the owner's: "the branches turning into a block") */
+          if (!stepOut) return;
+          var held = g.isEmpty(tree) ? tree : g.offset(g.offset(tree, COLUMN_CUP_BRIDGE_MM), -COLUMN_CUP_BRIDGE_MM);
+          var far = g.isEmpty(tree) ? pc : g.diff(pc, g.offset(held, COLUMN_CUP_REACH_MM));
           if (g.isEmpty(far) || g.area(far) < COLUMN_CUP_MIN_MM2) return;
           var C = C0, rings = [], landed = false;
           for (var jc = ic - 1; jc >= 0; jc--) {
