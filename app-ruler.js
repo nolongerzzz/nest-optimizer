@@ -15,8 +15,9 @@
    the glass is therefore true for exactly one distance from the camera, and
    this one says which:
 
-     * nothing picked - the surface under the middle of the ruler: the piece it
-       is over, else the plate;
+     * nothing picked - the nearest surface under the visible part of the ruler:
+       a piece, or a ghost / preview (Custom shape, Crop's box...), else the
+       plate. The caption says how high that surface is;
      * a point or an edge picked - that point (an edge: its middle), so the
        number the ruler gives for it is true.
 
@@ -194,7 +195,7 @@
   var pos = { x: 144, y: null };   // clear of the left button column    // the spine's top-left, in the viewport's own pixels
   var pick = null, hover = null;   // { kind, a, b, segments, forked, trueMm, piece }
   var pxPerMm = 1.5, depth = 300, depthSource = 'plate';
-  var autoAt = 0, autoDirty = true, autoDepth = null, autoSource = 'plate';
+  var autoAt = 0, autoDirty = true, autoDepth = null, autoSource = 'plate', autoUp = 0, up = null;
   var lastSig = '', raf = 0, live = null;
   var drag = null;
 
@@ -365,31 +366,73 @@
     };
   }
 
-  /* The distance the ruler is true at when nothing is picked: the surface under
-     the middle of the part of it that is on screen. A ray costs a walk of a
-     piece's tree, so at most one every 100 ms while the view is moving; the
-     frame after it settles takes the last one. */
+  /* The distance the ruler is true at when nothing is picked: the nearest
+     surface under the part of the ruler that is on screen.
+
+     WHAT COUNTS AS A SURFACE. A placed piece, and also a ghost: the live preview
+     a generator card shows (Custom shape, Fittings, Fasteners), Crop's box, a
+     lifted ghost. Those are scene objects, deliberately not in state.modelGroup,
+     so the first cut of this asked only the pieces and, with a 30 mm solid being
+     previewed, answered "the plate" - and then read a 160 mm part as 176 mm,
+     because its top is 30 mm nearer the camera than the plate it stands on. The
+     plate itself, its grid and ticks, and Measure's own marks are left out.
+
+     WHERE. Several rays along the visible stretch of the ruler, not one: a ruler
+     wider than the view has no useful "middle" off the screen (the first cut
+     clamped it to the right-hand edge). The nearest hit wins - the face you are
+     laying the ruler beside is the one that is nearest the camera.
+
+     A ray costs a walk of a piece's tree, so at most one set every 100 ms while
+     the view is moving; the frame after it settles takes the last one. */
+  var SAMPLES = 16;               // columns along the visible ruler
+  var ROWS = [0, 16, 34];         // px from the bar's centre, towards where the marks hang
+  function isSurface(o) {
+    for (var n = o; n; n = n.parent) {
+      if (n === state.plateMesh || n === state.plateGrid || n === state.plateBorder) return false;
+      if (n.userData && n.userData.nsoHelper === 'measure') return false;
+    }
+    return true;
+  }
   function autoDepthNow(rects) {
     var dom = state.renderer.domElement;
+    var W = host.clientWidth;
     var Lpx = CORE.lengthMm(unit()) * pxPerMm;
-    var x = clamp(pos.x + Lpx / 2, 8, host.clientWidth - 8);
-    var y = pos.y + SPINE_H / 2;
-    var nx = ((x - (rects.r.left - rects.h.left)) / rects.r.width) * 2 - 1;
-    var ny = -(((y - (rects.r.top - rects.h.top)) / rects.r.height) * 2 - 1);
+    var lo = Math.max(pos.x, 8), hi = Math.min(pos.x + Lpx, W - 8);
+    if (!(hi > lo)) { lo = hi = clamp(pos.x, 8, W - 8); }
     var rc = state.raycaster;
-    rc.setFromCamera({ x: nx, y: ny }, state.camera);
-    var hits = rc.intersectObjects(state.modelGroup.children, true);
-    for (var i = 0; i < hits.length; i++) {
-      var o = hits[i].object;
-      if (hits[i].faceIndex == null) continue;
-      if (window.nsoHelpers && window.nsoHelpers.isHelper && window.nsoHelpers.isHelper(o)) continue;
-      return { depth: viewDepth(hits[i].point), source: 'piece' };
+    var targets = [state.modelGroup];
+    state.scene.children.forEach(function (c) {
+      if (c !== state.modelGroup && c.visible && (c.isMesh || c.isGroup) && isSurface(c)) targets.push(c);
+    });
+    var best = null;
+    for (var q = 0; q < SAMPLES * ROWS.length; q++) {
+      var k = q % SAMPLES, r = (q / SAMPLES) | 0;
+      var x = SAMPLES > 1 ? lo + (hi - lo) * k / (SAMPLES - 1) : lo;
+      var y = pos.y + SPINE_H / 2 + ROWS[r] * dirY();
+      var nx = ((x - (rects.r.left - rects.h.left)) / rects.r.width) * 2 - 1;
+      var ny = -(((y - (rects.r.top - rects.h.top)) / rects.r.height) * 2 - 1);
+      rc.setFromCamera({ x: nx, y: ny }, state.camera);
+      var hits = rc.intersectObjects(targets, true);
+      for (var i = 0; i < hits.length; i++) {
+        var o = hits[i].object;
+        if (hits[i].faceIndex == null || !o.visible || !isSurface(o)) continue;
+        if (o.material && o.material.opacity === 0) continue;
+        if (window.nsoHelpers && window.nsoHelpers.isHelper && window.nsoHelpers.isHelper(o) &&
+            !(window.nsoHelpers.ownerOf && /^(crop|bend|tube-edge)$/.test(window.nsoHelpers.ownerOf(o) || ''))) continue;
+        var d = viewDepth(hits[i].point);
+        if (d > 0 && (!best || d < best.depth)) best = { depth: d, up: hits[i].point.y, source: 'surface' };
+        break;                                   // the nearest on this ray is the first
+      }
     }
+    if (best) return best;
     var pt = new THREE.Vector3();
+    var cx = ((clamp((lo + hi) / 2, 0, W) - (rects.r.left - rects.h.left)) / rects.r.width) * 2 - 1;
+    var cy = -(((pos.y + SPINE_H / 2 - (rects.r.top - rects.h.top)) / rects.r.height) * 2 - 1);
+    rc.setFromCamera({ x: cx, y: cy }, state.camera);
     if (rc.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), pt)) {
-      return { depth: viewDepth(pt), source: 'plate' };
+      return { depth: viewDepth(pt), up: 0, source: 'plate' };
     }
-    return { depth: viewDepth(state.controls.target), source: 'target' };
+    return { depth: viewDepth(state.controls.target), up: null, source: 'target' };
   }
 
   /* One pick, as it stands this frame: its ends on screen, or null if the piece
@@ -403,7 +446,8 @@
     var sa = toHost(wa, rects), sb = wb ? toHost(wb, rects) : null;
     if (sa.behind || (sb && sb.behind) || !(sa.depth > 0)) return { gone: false, hidden: true, p: p };
     return { gone: false, hidden: false, p: p, a: sa, b: sb,
-             focus: sb ? (sa.depth + sb.depth) / 2 : sa.depth };
+             focus: sb ? (sa.depth + sb.depth) / 2 : sa.depth,
+             up: sb ? (wa.y + wb.y) / 2 : wa.y };
   }
 
   /* ---- drawing ---- */
@@ -501,11 +545,14 @@
       text(t.label, Math.round(t.x), y0 + dy * (TICK_MAX + LABEL_H / 2), '#ecfccb');
     }
     // Which distance this is true at - the one thing a perspective ruler owes you.
-    var cap = depthSource === 'pick' ? 'true at the pick'
-            : depthSource === 'piece' ? 'true at the piece under it'
-            : depthSource === 'plate' ? 'true at the plate' : 'true at the orbit centre';
+    /* Say HOW HIGH the scale is true at. "At the plate" and "30 mm up" are
+       different rulers, and a part 30 mm tall reads 10 % long on the first. */
+    var hi = up == null ? '' : (Math.abs(up) < 0.05 ? '' : ' \u00B7 ' + (unit() === 'in' ? (up / 25.4).toFixed(2) + ' in' : up.toFixed(1) + ' mm') + ' up');
+    var cap = depthSource === 'pick' ? 'true at the pick' + hi
+            : depthSource === 'surface' ? 'true at the surface under it' + hi
+            : depthSource === 'plate' ? 'true at the plate (0 up)' : 'true at the orbit centre';
     var capX = clamp(x0 + Lpx, 0, W) - 6;
-    if (capX - 150 > x0 + 90) text(cap, capX, pos.y + SPINE_H / 2, 'rgba(236, 252, 203, 0.7)', 'right');
+    if (capX - 230 > x0 + 90) text(cap, capX, pos.y + SPINE_H / 2, 'rgba(236, 252, 203, 0.7)', 'right');
   }
 
   // Everything one pick draws. `strong` = a click; hover is the same, dimmer.
@@ -621,7 +668,7 @@
     // The scale: the pick's distance if there is one, else the surface below.
     var now = Date.now();
     if (evPick && !evPick.hidden) {
-      depth = evPick.focus; depthSource = 'pick';
+      depth = evPick.focus; depthSource = 'pick'; up = evPick.up;
       autoDirty = false;       // no ray needed while a pick sets the scale
     } else {
       /* Not while the bar is in hand: sliding the ruler on or off a piece would
@@ -629,10 +676,10 @@
          distance (6 % for a 20 mm piece). It settles when you let go. */
       if (autoDirty && !drag && now - autoAt >= 100) {
         var d = autoDepthNow(rects);
-        autoDepth = d.depth; autoSource = d.source; autoAt = now; autoDirty = false;
+        autoDepth = d.depth; autoSource = d.source; autoUp = d.up; autoAt = now; autoDirty = false;
       }
-      if (autoDepth == null) { depth = viewDepth(state.controls.target); depthSource = 'target'; }
-      else { depth = autoDepth; depthSource = autoSource; }
+      if (autoDepth == null) { depth = viewDepth(state.controls.target); depthSource = 'target'; up = null; }
+      else { depth = autoDepth; depthSource = autoSource; up = autoUp; }
     }
     if (!(depth > 0)) return;
     pxPerMm = CORE.pxPerMmAtDepth(depth, state.camera.fov, rects.r.height);
@@ -649,7 +696,7 @@
 
     live = {
       on: true, unit: unit(), lengthMm: CORE.lengthMm(unit()), x0: pos.x, y: pos.y, flip: flip, guides: guides,
-      pxPerMm: pxPerMm, depth: depth, depthSource: depthSource,
+      pxPerMm: pxPerMm, depth: depth, depthSource: depthSource, up: up,
       hover: hover ? hover.kind : null,
       pick: evPick && !evPick.hidden && rp ? {
         kind: pick.kind, aMm: rp.aMm, bMm: rp.bMm == null ? null : rp.bMm,

@@ -331,13 +331,20 @@ twice as far away is half the size. A ruler laid on the glass is therefore true 
 
 | caption | the scale is true at | when |
 |---|---|---|
-| *true at the pick* | the point you picked (an edge: its middle) | a point or edge is picked |
-| *true at the piece under it* | the surface under the middle of the ruler | nothing picked, over a piece |
-| *true at the plate* | the plate, under the middle of the ruler | nothing picked, over the plate |
+| *true at the pick* `· N mm up` | the point you picked (an edge: its middle) | a point or edge is picked |
+| *true at the surface under it* `· N mm up` | the **nearest** surface under the visible part of the ruler: a piece **or a ghost / preview** | nothing picked, over something |
+| *true at the plate (0 up)* | the plate | nothing picked, nothing under the ruler |
+
+The caption says **how high** the scale is true at (`N mm up` above the plate). That
+number is the whole story: "at the plate" and "30 mm up" are different rulers, and a
+part 30 mm tall reads about 10 % long on the first (a 160 mm part read as ~176 mm, and
+as ~185 mm when zoomed in closer, because the same 30 mm is a bigger share of a
+shorter camera distance). The default is a *guess* at the right height; **a pick is the
+exact answer**.
 
 The distance is the depth *along the view direction*, so every point on a plane
-square to the view shares one scale. The ruler is sampled with one ray at most
-every 100 ms, and **not while the bar is in hand** (sliding it over a 20 mm piece
+square to the view shares one scale. The default is sampled with a grid of rays (16 along the visible ruler, 3 rows down
+through the band the marks hang in) at most every 100 ms, and **not while the bar is in hand** (sliding it over a 20 mm piece
 would otherwise re-scale it by 6 % under the pointer); it settles on release.
 
 This is the honest consequence, and worth stating plainly: in a tilted view the
@@ -454,3 +461,29 @@ up; presses claimed by preventDefault / Wheel / Foam are not measurements and an
 unclaimed one is; Cut's live cutter surviving Measure being opened and armed; the
 panels side by side, and Measure returning to the shared spot when alone.
 
+
+---
+
+## 7. Ghosts: reading what is about to be made
+
+A generator card's live preview (Gen+ > Custom shape, Fittings, Fasteners - the
+ghost in `app-piece-preview.js`) is a scene object, not a placed piece, and until
+this section Measure could not see it. Two consequences, both found from a
+screenshot of a 70 x 160 mm Custom shape with the ruler on it reading about 180:
+
+1. **The ruler said "true at the plate"** over a 25-30 mm-tall preview, because its
+   "what is under me" ray only asked the placed pieces. It now asks ghosts too
+   (and, in a view where the ruler is wider than the screen, samples the visible part
+   rather than a clamped edge), and the caption names the height.
+2. **Nothing could be picked on a ghost**, so there was no way to get an exact reading
+   on one. A ghost is now measurable like a piece: Two points, Edge, Align point and
+   Align edge all work on it, in world millimetres. Its anchor is held by reference
+   and ends - saying why - when the card rebuilds the preview (new geometry), the way
+   a re-baked piece ends a pick.
+
+Honest limit that remains: with nothing picked the default can still be wrong by the
+height difference between where it sampled and the edge you are reading. A tray
+viewed from above has a rim 25 mm up and a floor 2 mm up; the rays went down through
+its open middle and the default came out ~16 mm up, an 80 mm rim reading as ~86. The
+caption said `16 mm up`, which is the tell; picking a rim corner (`Align point`) and
+`Zero here` reads it as 80.000. Gates `E1-E3`.

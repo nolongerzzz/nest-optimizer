@@ -925,12 +925,102 @@ async function partD() {
   });
 }
 
+/* ------------------------------------------------------------------ part E
+   The ruler over a GHOST. A generator card's live preview (Gen+ > Custom
+   shape) is a scene object, not a placed piece, and the first cut of the ruler
+   could only see pieces: it said "true at the plate" over a 30 mm-tall preview
+   and read its 70 mm width as 77. A ruler's number is only as good as the
+   distance it is calibrated at, so this is checked against the ghost's own
+   bounding box, measured by three.js. */
+
+async function partE() {
+  await withApp(async (page, logs) => {
+    console.log('\n=== E1. the ruler over a live Custom shape preview ===');
+    await page.click('#menu-gen > summary');
+    await page.click('#menu-cshape > summary');
+    await page.click('[data-preset="rect"]');
+    await page.waitForFunction(() => window.nsoPiecePreview && window.nsoPiecePreview.count() > 0, null, { timeout: 15000 });
+    await page.waitForTimeout(400);
+    // straight down, with the plate shifted right so the ghost is clear of the two open panels
+    await page.evaluate(() => {
+      state.controls.enableDamping = false; state.controls.update();
+      state.camera.position.set(-70, 330, 0.001); state.controls.target.set(-70, 0, 0); state.controls.update();
+    });
+    await page.click('#menu-measure > summary');
+    await page.click('#chk-ruler');
+    const g = await page.evaluate(() => {
+      const m = state.scene.children.find(c => c.userData && c.userData.nsoPiecePreview);
+      const b = new THREE.Box3().setFromObject(m);
+      return { min: b.min.toArray(), max: b.max.toArray(), notPlaced: !state.placed.length && !state.modelGroup.children.includes(m) };
+    });
+    check('the preview is a ghost: not a placed piece, not in the model group', g.notPlaced);
+    const top = g.max[1], cz = (g.min[2] + g.max[2]) / 2, width = g.max[0] - g.min[0];
+    check('and it is tall enough to matter: ' + f3(top - g.min[1]) + ' mm above the plate', top - g.min[1] > 10);
+    const sL = await screenOf(page, [g.min[0], top, cz]);
+    await page.evaluate(y => window.nsoRulerPlace(null, y - 9), sL.y);
+    await page.waitForTimeout(450);
+    let rr = await rulerRead(page);
+    check('the ruler sees the ghost: calibrated on a surface, not the plate', rr && rr.depthSource === 'surface' && rr.up > 0.5, rr ? rr.depthSource + ', ' + f3(rr.up) + ' mm up' : 'off');
+    check('and says how high (the caption carries it): up is a real height, not 0', rr && rr.up > 0.5 && rr.up <= top + 1e-6, rr ? f3(rr.up) : '');
+    const plateScale = await page.evaluate(() => { const c = state.camera, h = state.renderer.domElement.getBoundingClientRect().height; return h / (2 * c.position.y * Math.tan(c.fov * Math.PI / 360)); });
+    const sR0 = await screenOf(page, [g.max[0], top, cz]);
+    const wrong = (sR0.x - sL.x) / plateScale;
+    check('(for the record: at the plate\'s scale the rim reads ' + f3(wrong) + ' mm for a ' + f3(width) + ' mm part, ' + ((wrong / width - 1) * 100).toFixed(1) + ' % long)', wrong > width * 1.03);
+
+    console.log('\n=== E2. picking the rim of the ghost makes the reading exact ===');
+    await page.selectOption('#sel-measure-mode', 'apoint');
+    await page.click('#btn-measure');
+    const pA = [g.min[0] + 0.6, top, g.min[2] + 0.6], pB = [g.max[0] - 0.6, top, g.min[2] + 0.6];
+    const free = await Promise.all([pA, pB].map(async p => { const s = await screenOf(page, p); return page.evaluate(q => document.elementFromPoint(q.x, q.y) === state.renderer.domElement, s); }));
+    check('(both rim corners are on the canvas)', free.every(Boolean), String(free));
+    const sA = await screenOf(page, pA);
+    await page.mouse.move(sA.x, sA.y); await page.waitForTimeout(250);
+    check('hovering a rim corner of the ghost previews it', (await rulerRead(page)).hover === 'point');
+    await page.mouse.down(); await page.mouse.up();
+    await frames(page, 3);
+    rr = await rulerRead(page);
+    check('a point on the ghost can be picked, and the ruler is true at it: ' + f3(top) + ' mm up',
+          rr && rr.pick && rr.pick.kind === 'point' && rr.depthSource === 'pick' && near(rr.up, top, 0.3), rr ? rr.depthSource + ' ' + f3(rr.up) : 'off');
+    check('the status line names it', /the preview/.test(await page.evaluate(() => document.getElementById('status').textContent)));
+    await page.click('#btn-ruler-zero');
+    const sB = await screenOf(page, pB);
+    await page.mouse.move(sB.x, sB.y); await page.mouse.down(); await page.mouse.up();
+    await frames(page, 3);
+    rr = await rulerRead(page);
+    check('zeroed on one rim corner, the other reads ' + f3(width) + ' mm (within 0.15 %)', rr && rr.pick && Math.abs(rr.pick.aMm - width) < 0.0015 * width,
+          rr && rr.pick ? f3(rr.pick.aMm) + ' mm' : 'nothing');
+    // Two points measures the ghost directly, in world mm, no ruler involved
+    await page.selectOption('#sel-measure-mode', 'span');
+    await clickWorld(page, pA);
+    await clickWorld(page, pB);
+    const rd = await readout(page);
+    check('Two points on the ghost measures it too: ' + f3(width) + ' mm', rd && near(rd.mm, width, 5e-3), rd ? f3(rd.mm) : 'nothing');
+    await page.selectOption('#sel-measure-mode', 'apoint');
+    await clickWorld(page, pA);
+    await frames(page, 2);
+    check('(a pick to end)', (await rulerRead(page)).pick !== null);
+    await page.evaluate(() => window.nsoPiecePreview.clear());
+    await frames(page, 4);
+    check('when the ghost is rebuilt or put away its pick goes with it, saying why', (await rulerRead(page)).pick === null &&
+          /cleared/.test(await page.evaluate(() => document.getElementById('status').textContent)));
+
+    console.log('\n=== E3. no ghost, nothing under it: back to the plate ===');
+    await page.evaluate(() => window.nsoRulerPlace(null, 700));
+    await page.waitForTimeout(450);
+    rr = await rulerRead(page);
+    check('calibrated at the plate again, 0 up', rr && rr.depthSource === 'plate' && Math.abs(rr.up) < 1e-9, rr ? rr.depthSource + ' ' + rr.up : 'off');
+    const errs = logs.filter(l => l.startsWith('[pageerror]'));
+    check('no page errors', errs.length === 0, errs.join(' | '));
+  });
+}
+
 (async () => {
   console.log('== Measure: the number on screen against the piece it is measuring ==');
   partA();
   await partB();
   await partC();
   await partD();
+  await partE();
   console.log('\n' + (fails ? fails + ' FAILED' : 'all gates held'));
   process.exit(fails ? 1 : 0);
 })().catch(e => { console.error('MEASURE TEST FAIL', e); process.exit(1); });

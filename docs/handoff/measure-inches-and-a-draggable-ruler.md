@@ -43,3 +43,10 @@ changed for it, and `nso_topbar_accordion_test.js` / `nso_ui_shell_drive_check.j
 now take Measure out of their "exactly one panel open" rosters (everything else in
 them is as it was).
 
+**Follow-up (same day): ghosts.** A 160 mm Custom shape preview read ~176-185 mm on the
+ruler: it was calibrated to the plate while the 30 mm-tall ghost stood nearer the
+camera, because the ruler (and Measure) could only see placed pieces. Now the default
+scale samples ghosts and says how high it is (`N mm up` in the caption), and a ghost
+can be picked and measured (`placedIndex -1`, anchor by reference). A pick is still
+the exact answer; the default is a guess. `docs/MEASURE.md` section 7; gates E1-E3.
+

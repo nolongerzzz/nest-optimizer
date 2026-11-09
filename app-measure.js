@@ -481,14 +481,34 @@
 
   // app-mask.js's hitFace, with this file's own helpers skipped instead of
   // the paint overlay. Same ray, same raycaster, same order of business.
+  /* A GHOST is a generator card's live preview (Gen+ > Custom shape, Fittings,
+     Fasteners - app-piece-preview.js): a scene object, never a placed piece. It
+     is measurable like one - its triangles are real, in world millimetres - and
+     it is the thing you most want a true reading ON, because it is what is about
+     to be made. It is picked as a "piece" with placedIndex -1. */
+  var GHOST = -1;
+  function ghostMeshes() {
+    var out = [];
+    if (!state.scene) return out;
+    for (var i = 0; i < state.scene.children.length; i++) {
+      var c = state.scene.children[i];
+      if (c.isMesh && c.visible && c.userData && c.userData.nsoPiecePreview && c.geometry) out.push(c);
+    }
+    return out;
+  }
+
   function hitPiece(event) {
     if (!state.renderer || !state.camera || !state.modelGroup) return null;
     if (typeof setPointerFromEvent === 'function') setPointerFromEvent(event);
     state.raycaster.setFromCamera(state.pointer, state.camera);
-    var hits = state.raycaster.intersectObjects(state.modelGroup.children, true);
+    var ghosts = ghostMeshes();
+    var hits = state.raycaster.intersectObjects(ghosts.length ? state.modelGroup.children.concat(ghosts) : state.modelGroup.children, true);
     for (var i = 0; i < hits.length; i++) {
       if (helpers.indexOf(hits[i].object) >= 0) continue;
       if (hits[i].faceIndex == null) continue;
+      if (ghosts.indexOf(hits[i].object) >= 0) {
+        return { hit: hits[i], placedIndex: GHOST, placed: { mesh: hits[i].object, sourceId: null, name: 'the preview' } };
+      }
       var obj = hits[i].object;
       while (obj && obj.userData.placedIndex == null && obj.parent) obj = obj.parent;
       var idx = obj && obj.userData ? obj.userData.placedIndex : undefined;
@@ -506,6 +526,8 @@
     return {
       sourceId: pick.placed.sourceId,
       placedIndex: pick.placedIndex,
+      // a ghost is held by reference: it has no place in state.placed to look up
+      ghost: pick.placedIndex === GHOST ? pick.placed.mesh : null,
       geom: pick.placed.mesh.geometry,
       local: localPoint.slice(),
       kind: kind
@@ -513,6 +535,8 @@
   }
 
   function meshFor(anchor) {
+    // A ghost is rebuilt (new geometry) on every change to its card, which ends the anchor like a re-bake.
+    if (anchor.ghost) return anchor.ghost.parent && anchor.ghost.geometry === anchor.geom ? anchor.ghost : null;
     var p = state.placed[anchor.placedIndex];
     if (!p || !p.mesh || p.sourceId !== anchor.sourceId) {
       p = null;
@@ -648,6 +672,7 @@
   }
 
   function pieceName(anchor) {
+    if (anchor.ghost) return 'the preview';
     var p = state.placed[anchor.placedIndex];
     return p && p.name ? p.name : ('#' + (anchor.placedIndex + 1));
   }
@@ -840,17 +865,19 @@
      file already does. The same snap, the same chain, the same anchors - so a
      point the ruler flags is a point Two points would have measured from. */
 
+  function pickName(pick) { return pick.placedIndex === GHOST ? 'the preview' : pieceName({ placedIndex: pick.placedIndex }); }
+
   function alignPickFor(pick, m, quiet) {
     if (m === 'apoint') {
       return { kind: 'point', a: startSpanAt(pick), b: null, segments: 1, forked: false,
-               trueMm: 0, piece: pieceName({ placedIndex: pick.placedIndex }) };
+               trueMm: 0, piece: pickName(pick) };
     }
     var chain = chainAt(pick, quiet);
     if (!chain) return null;
     return { kind: 'edge',
              a: anchorOf(pick, chain.a, 'vertex'), b: anchorOf(pick, chain.b, 'vertex'),
              segments: chain.segments, forked: chain.forked, trueMm: chain.length,
-             piece: pieceName({ placedIndex: pick.placedIndex }) };
+             piece: pickName(pick) };
   }
 
   function takeAlign(pickHit, m) {
