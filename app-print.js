@@ -308,7 +308,8 @@
           labels: out.plan.labels.map(function (l) { return { id: l.id, name: l.name, index: l.index }; }),     // the gcode's OBJECT_ID of each object, in the order they were given
           stats: { layers: st.layers, seconds: st.seconds.total, grams: st.grams, filamentMm: st.filamentMm, maxZ: st.maxZ },
           settings: settings, changed: Object.keys(over),                                                        // what was sliced with, and what differs from the profile
-          stacks: res.stacks ? stacksToPlate(res.stacks, assets.printer.bed) : null                              // the supports as they print, in the plate's frame
+          stacks: res.stacks ? stacksToPlate(res.stacks, assets.printer.bed) : null,                             // the supports as they print, in the plate's frame
+          raft: raftToPlate(res, assets.printer.bed)                                                             // the raft as it prints, for the plate to draw
         };
       });
     }).catch(function (err) {
@@ -324,6 +325,18 @@
     return stacks.map(function (st) {
       return { key: st.key, name: st.name, layers: st.layers.map(function (L) { return { z0: L.z0, z1: L.z1, printed: L.printed, S: back(L.S), I: back(L.I), T: back(L.T) }; }) };
     });
+  }
+
+  /** The raft's layers (nso_slicer.js addRaft) in the plate's frame: xy back from the bed's, z in the pieces' own frame (the raft lies
+   *  under z 0, `lift` deep - the plate stands on it), each layer's outlines (holes and all) and whether it is interface. Null without one. */
+  function raftToPlate(res, bed) {
+    var ob = (res.objects || []).filter(function (x) { return x.role === 'raft'; })[0];
+    if (!ob || !res.raft) return null;
+    var dx = bed.x / 2, dy = bed.y / 2, sz = res.shiftZ || 0;
+    return { lift: res.raft.liftMm, layers: ob.layers.map(function (L) {
+      return { z0: L.printZ - L.h - sz, z1: L.printZ - sz, iface: L.paths.some(function (pth) { return pth.feature === 'Support interface'; }),
+               polys: (L.sectionPolys || []).map(function (poly) { return poly.map(function (pt) { return [pt[0] - dx, pt[1] - dy]; }); }) };
+    }) };
   }
 
   /** The settings in a few words, for the readout: "0.12 mm layers, 3 walls, 20 % grid, support below 30°, brim auto". */
@@ -586,6 +599,71 @@
   }
 
   /** The profile line, and a slice shown stale when the plate has moved on. */
+  /* THE RAFT ON THE PLATE (the owner: "draw the raft on plate too"). A slice with a raft lifts everything on the plate the raft's height
+     (nso_slicer.js raftPlan); the plate is drawn as it prints: the bed (its surface, grid, border and ticks - display only) lowered by that
+     lift and the raft's layers drawn between it and the pieces, the base Support's light green, the interface a darker one. The pieces do
+     not move (the slice stays the plate's), and the raft is no piece: never picked, never sliced, never exported. It goes when the slice
+     it came from is the plate's no more. */
+  var RAFT_VIEW = { group: null, lowered: null, key: null };
+  function bedParts() {
+    if (typeof state === 'undefined' || !state) return [];
+    return [state.plateMesh, state.plateGrid, state.plateBorder].concat(state.plateTicks || []).filter(function (o) { return o && o.position; });
+  }
+  function clearRaftView() {
+    if (RAFT_VIEW.group) {
+      if (RAFT_VIEW.group.parent) RAFT_VIEW.group.parent.remove(RAFT_VIEW.group);
+      RAFT_VIEW.group.traverse(function (o) { if (o.geometry) o.geometry.dispose(); });
+      RAFT_VIEW.mats.forEach(function (m) { m.dispose(); });
+    }
+    if (RAFT_VIEW.lowered) RAFT_VIEW.lowered.forEach(function (e) { e[0].position.y = e[1]; });
+    if (RAFT_VIEW.watch) clearInterval(RAFT_VIEW.watch);
+    RAFT_VIEW = { group: null, lowered: null, key: null, watch: 0 };
+  }
+  function signedArea2(poly) { var a = 0; for (var i = 0, n = poly.length; i < n; i++) { var u = poly[i], v = poly[(i + 1) % n]; a += u[0] * v[1] - v[0] * u[1]; } return a / 2; }
+  function insidePoly(poly, x, y) {
+    var c = false;
+    for (var i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      var a = poly[i], b = poly[j];
+      if ((a[1] > y) !== (b[1] > y) && x < (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1]) + a[0]) c = !c;
+    }
+    return c;
+  }
+  /* a layer's outlines as three.js shapes: each outer loop with the holes inside it */
+  function raftShapes(polys) {
+    var outers = [], holes = [];
+    polys.forEach(function (pl) { if (pl.length >= 3) (signedArea2(pl) > 0 ? outers : holes).push(pl); });
+    return outers.map(function (o) {
+      var sh = new THREE.Shape(o.map(function (pt) { return new THREE.Vector2(pt[0], pt[1]); }));
+      holes.forEach(function (h) { if (insidePoly(o, h[0][0], h[0][1])) sh.holes.push(new THREE.Path(h.map(function (pt) { return new THREE.Vector2(pt[0], pt[1]); }))); });
+      return sh;
+    });
+  }
+  function showRaftView(raft) {
+    clearRaftView();
+    if (!raft || !raft.layers || !raft.layers.length || typeof THREE === 'undefined' || typeof state === 'undefined' || !state || !state.scene) return false;
+    var g = new THREE.Group(), base = new THREE.MeshStandardMaterial({ color: 0x4ade80, roughness: 0.85, metalness: 0 }),
+        face = new THREE.MeshStandardMaterial({ color: 0x15803d, roughness: 0.85, metalness: 0 }), none = function () {};
+    g.name = 'nso-raft-view';
+    raft.layers.forEach(function (L) {
+      var shapes = raftShapes(L.polys || []), h = L.z1 - L.z0;
+      if (!shapes.length || !(h > 0)) return;
+      var geo = new THREE.ExtrudeGeometry(shapes, { depth: h, bevelEnabled: false, curveSegments: 1 });
+      geo.translate(0, 0, L.z0);
+      var m = new THREE.Mesh(geo, L.iface ? face : base);
+      m.rotation.x = -Math.PI / 2;               /* Z-up mm to the scene's Y-up: (x, y, z) -> (x, z, -y) */
+      m.raycast = none;                          /* no piece: a click goes through it */
+      m.castShadow = false; m.receiveShadow = true;
+      g.add(m);
+    });
+    if (!g.children.length) { base.dispose(); face.dispose(); return false; }
+    state.scene.add(g);
+    RAFT_VIEW.group = g; RAFT_VIEW.mats = [base, face];
+    RAFT_VIEW.lowered = bedParts().map(function (o) { var y = o.position.y; o.position.y = y - raft.lift; return [o, y]; });
+    /* nothing tells this card the plate changed: while a raft is drawn it looks once a second, and a piece moved or a setting changed takes it off */
+    RAFT_VIEW.watch = setInterval(function () { if (!S.busy && S.sig && !isFresh()) refresh(); }, 1000);
+    return true;
+  }
+
   function refresh() {
     var p = profileFor(plateId());
     var line = $('slice-profile');
@@ -600,6 +678,7 @@
     if (menu && menu.open) seedFromTemplate(p);
     if (iface && !S.busy) iface.value = interfaceRule() || '';           // G-scope may have changed the shared choice
     if (S.result && S.result.ok && !S.busy && !isFresh()) readout(staleWords(), true);
+    if (RAFT_VIEW.group && (S.busy || !isFresh())) clearRaftView();          // the raft drawn is the fresh slice's, or none
     syncActions();
   }
 
@@ -628,6 +707,7 @@
     if (!pieces.length) return Promise.resolve(stop('Nothing on the plate to slice.'));
     var settings = readSettings();
     S.result = null; S.pieces = null;
+    clearRaftView();
     var sig = plateSignature(), setSig = JSON.stringify(settings);
     readout('', false);
     S.hook = hook || null;
@@ -657,6 +737,7 @@
       S.job = null;
       if (!r.ok) { setBusy(false); S.result = null; readout(r.reason, true); say('Slice: ' + r.reason, true); return ended({ ok: false, reason: r.reason }); }
       S.result = r; S.sig = sig; S.setSig = setSig; S.pieces = pieces; S.profile = profile; S.settings = settings;
+      try { showRaftView(r.raft); } catch (err) { console.error('[slice] raft view', err); }
       setBusy(false);
       var sup = pieces.filter(function (p) { return p.support && !p.brim; }).length;
       readout(describe(r) + ' - ' + pieces.length + ' object' + (pieces.length === 1 ? '' : 's') + (sup ? ' (' + sup + ' support' + (sup === 1 ? '' : 's') + ')' : '') +
@@ -686,6 +767,7 @@
     if (!S.result || !S.result.ok || !S.pieces) return false;
     S.pieces = S.pieces.map(function (p) { return ids && ids[p.sourceId] != null ? Object.assign({}, p, { sourceId: ids[p.sourceId] }) : p; });
     S.sig = plateSignature();
+    if (!RAFT_VIEW.group && S.result.raft) { try { showRaftView(S.result.raft); } catch (err) { console.error('[slice] raft view', err); } }
     refresh();
     return true;
   }
@@ -886,7 +968,7 @@
   }
 
   api.sliceOptionsForPlate = sliceOptionsForPlate;
-  api.card = { slice: slice, sliceAndPreview: sliceAndPreview, cancel: cancel, adopt: adopt, fresh: function () { return isFresh(); }, readPieces: function () { return readPieces(); }, exportFile: exportFile, previewInGscope: previewInGscope, refresh: refresh,
+  api.card = { raftView: function () { return RAFT_VIEW.group ? { layers: RAFT_VIEW.group.children.length, lowered: RAFT_VIEW.lowered.length } : null; }, slice: slice, sliceAndPreview: sliceAndPreview, cancel: cancel, adopt: adopt, fresh: function () { return isFresh(); }, readPieces: function () { return readPieces(); }, exportFile: exportFile, previewInGscope: previewInGscope, refresh: refresh,
                exportSlice: exportSlice, exportFromCard: exportFromCard, indicesFor: indicesFor,
                state: function () { return { busy: S.busy, result: S.result, fresh: isFresh() }; } };
 

@@ -581,6 +581,11 @@ under the six heads' trees). Read off both and built as `raftPlan` / `addRaft`:
 - **Settings**: the Slice card and G-scope's Slice panel have *raft N layers* and *contact mm*; the .gcode.3mf records them as `raft_layers` /
   `raft_contact_distance`, and a profile's own raft keys are read (`nso-print-planner.js` engineOptions).
 
+- **On the plate**: a slice with a raft hands its layers back (`raftToPlate`) and the plate is drawn as it prints - the bed (surface,
+  grid, border, ticks; display only) lowered by the lift and the raft's layers between it and the pieces, base light green, interface dark
+  (`app-print.js` showRaftView). The pieces do not move; the raft is no piece (never picked, sliced or exported) and goes when its slice is
+  the plate's no more (checked once a second while drawn). With a raft the supports card builds no brim.
+
 Not matched yet: under a tree, Bambu's first raft layer is about 0.9 mm *inside* the base layers where under the bare disc it is 1 mm outside; here it
 is outside for both. Bambu's tree also prints its own Support through the raft's interface layers where the trunk stands; here the interface covers it.
 

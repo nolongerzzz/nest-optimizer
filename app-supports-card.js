@@ -1916,9 +1916,11 @@ var NSO_SUPPORTS_CARD = (function () {
     if (res && res.ok) res.sliced = !!(S.sliced && S.sliced.ok);
     return res;
   }
+  function raftLayersSet() { var r = $('slice-set-raft'); var n = r ? parseInt(r.value, 10) : 0; return isFinite(n) && n > 0 ? n : 0; }
   function brimStep(c, results) {
     var SL = window.NSO_Slicer;
-    if (!c.o.brim || !SL || typeof SL.brimFor !== 'function' || typeof SL.loadKernel !== 'function') return Promise.resolve(null);
+    /* a raft is the plate's hold: no brim with it (the slicer prints none) */
+    if (!c.o.brim || raftLayersSet() > 0 || !SL || typeof SL.brimFor !== 'function' || typeof SL.loadKernel !== 'function') return Promise.resolve(null);
     var live = results.filter(function (r) { return r.ok && r.solids.length; });
     if (!live.length) return Promise.resolve(null);
     var avoid = [].concat.apply([], live.map(function (r) { return r.solids.map(function (sd) { return sd.soup; }); })).concat((c.D.opts && c.D.opts.occluders) || []);
