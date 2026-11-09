@@ -126,7 +126,9 @@ same flared cup. `NSO_NO_CUP=1` turns it off, `NSO_CUP_DEBUG=1` lists each cup.
 a quarter of a mm, z 15.3) stands no tip under the column rule; it is caught as Bambu catches it, measured on supp_ref's four domed heads: a horn
 whose top stands under the step's edge `HORN.wallMm` (0.45) off the walls under it (kept over its first half mm, where a dome bulges under its
 shoulder), a twig 0.5 mm across (one ring of line), leaning out at 30 deg (Bambu's 0.6 mm a mm) until it has a straight drop, then a 0.85 mm
-column to the plate, its foot flared. No interface (it is no overhang). A horn in an area of its own goes into the piece's main support (one
+column to the plate, its foot flared. No interface (it is no overhang). No horn where an overhang's own spot lies within 2.5 mm in plan and 1.5 mm
+under the step's (`HORN_COVER`): that edge is the interface's, its stack reaches past it - the Oblique's step at z 9.7 over its slope's interface,
+where Bambu has interface to 8.8 and nothing else, and the Negative Sphere2's step inside its cavity. A horn in an area of its own goes into the piece's main support (one
 support object, one layer grid). The slicer keeps a twig (a piece of the support's section under 0.6 mm2) 0.2 mm off the part, not the tree's
 0.35, as Bambu's horn rings stand. Our horn tops: z 14.80 at x +-2.6, y 4.1 on Circular and both Negative Spheres, x +-2.3, y 2.9 on the Sphere;
 Bambu's: z 14.80 at x +-2.6, y 4.2 and x +-2.5, y 3.1. They also hold the Negative Sphere2 rim's two horseshoe ends (span over 2.5 mm 2.9 mm2 -> 0).

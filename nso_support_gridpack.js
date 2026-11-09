@@ -4829,11 +4829,21 @@
     var lost = {}, nLost = 0, p = null, chosen, covered, thinned, clusters, rounds, onPlate = [], plateZ1 = bc.detect && bc.detect.plateZ != null ? bc.detect.plateZ : 0, kit = null, stepHeld = [];
     /* under the column rule a step's spot is caught by a horn (hornColumn); spots within HORN_ONE_MM of one already caught share it */
     var HORN_ONE_MM = 1.5;
+    var HORN_COVER = { xyMm: 2.5, downMm: 1.5, upMm: 0.3 };   /* an overhang's spot this near (in plan: the spots' grid and its interface's reach) and this far under the step's (or a hair over) */
     function hornsOf(steps) {
       if (!opts.columnRule) return [];
-      var out = [];
+      var out = [], isStep = {};
+      steps.forEach(function (sh) { isStep[sh.beacon] = true; });
       steps.forEach(function (sh) {
         if (out.some(function (h) { return Math.hypot(h.p[0] - sh.p[0], h.p[1] - sh.p[1]) < HORN_ONE_MM && Math.abs(h.p[2] - sh.p[2]) < HORN_ONE_MM; })) return;
+        /* an edge just over an overhang's own spot is the interface's: its stack reaches past that edge (the Oblique's, as Bambu lays it) */
+        var cover = bc.beacons.find(function (o2) {
+          if (isStep[o2.id] || lost[o2.id] === true) return false;
+          var dz = sh.p[2] - o2.p[2];
+          return dz > -HORN_COVER.upMm && dz < HORN_COVER.downMm && Math.hypot(o2.p[0] - sh.p[0], o2.p[1] - sh.p[1]) < HORN_COVER.xyMm;
+        });
+        if (root && root.NSO_STEP_DEBUG && cover) console.log('horn for ' + sh.p.map(function (v) { return v.toFixed(2); }) + ': none, the interface of ' + cover.p.map(function (v) { return v.toFixed(2); }) + ' covers it');
+        if (cover) return;
         var hc = hornColumn(bc.beacons[sh.beacon], kit);
         if (root && root.NSO_STEP_DEBUG) console.log('horn for ' + sh.p.map(function (v) { return v.toFixed(2); }) + ': ' + (hc ? 'top ' + hc.top.map(function (v) { return v.toFixed(2); }) + ' knee ' + hc.knee.map(function (v) { return v.toFixed(2); }) + ' lean ' + hc.leanMm.toFixed(2) : 'none ' + HORN_WHY));
         if (hc) out.push(hc);
