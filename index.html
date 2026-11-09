@@ -1374,6 +1374,8 @@
                        title="The cross-section side of the struts, trunks and branches. Never below the nozzle's wall floor - the planner raises it if asked for less."><span>mm</span></label>
               <label class="vp-check" for="sup-rest" title="Off: every support stands on the plate, and a spot with no clear way down is left unreachable. On: such a spot may be held from a part below it.">
                 <input type="checkbox" id="sup-rest"> May rest on the part</label>
+              <label class="vp-check" for="sup-small" title="On: the small steps - an edge no slicer calls an overhang, which a thin horn off the tree catches - get no horn, and the part holds them as it prints. Every other spot keeps its branch and interface.">
+                <input type="checkbox" id="sup-small"> Exclude small overhangs</label>
               <label class="vp-check" for="sup-one" hidden style="display:none" title="On (Auto, Tree): the way Bambu's tree slim grows - a tip every 5 mm, a sheet between them, one trunk to a cluster of tips. Off: a tip on every spot of the 3 mm grid and as many trunks as the grid needs.">
                 <input type="checkbox" id="sup-one" checked> One trunk per cluster</label>
               <label class="vp-check" for="sup-brim" title="A brim round the piece's foot, built with its supports and sliced as Brim: 5 mm, 10 loops of a 0.5 mm line, 0.1 mm off the wall, one first layer thick - the way Bambu rings the stem of a tall thin piece. It stays off the supports' pads: it meets them and does not join them. Only a piece that is tall for its foot gets one (a flat part stands on its own).">
@@ -2873,7 +2875,7 @@
        merged pairwise on a node lattice, plate first. planTree above is
        this; it needs nso_support_tree.js's contactPoints and union. See
        docs/SUPPORT-GRIDPACK.md. -->
-  <script src="nso_support_gridpack.js?v=41f697be"></script>
+  <script src="nso_support_gridpack.js?v=9280487f"></script>
   <script src="nso_exif.js?v=22458ef3"></script>
   <script src="nso_photoset.js?v=0974faf1"></script>
   <script src="nso-cooling-profiles.js"></script>
@@ -3080,7 +3082,7 @@
        own page code, which listens for the press before the card does. After nso-helpers.js, app-core.js. docs/SUPPORT-BLOCKERS.md. -->
   <script src="nso_support_blockers.js?v=6962a81c"></script>
   <script src="app-support-blockers.js?v=73c8125d"></script>
-  <script src="app-supports-card.js?v=87fdb5fd"></script>
+  <script src="app-supports-card.js?v=1ac2f5e9"></script>
   <script src="app-gscope-slice.js?v=a2eaf7dd"></script>
   <!-- The Slice card (left bar): the plate sliced for its printer, the .gcode.3mf
        it makes. The print planner and the packager are loaded here for it and for

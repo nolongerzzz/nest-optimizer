@@ -69,7 +69,7 @@ function makeDom() {
   }
   const el = id => els[id] || (els[id] = new El(id));
   for (const id of ['sup-count', 'supports-card', 'sup-progress', 'btn-sup-all', 'btn-sup-none', 'btn-sup-remove', 'sup-angle', 'sup-angle-note',
-    'sup-style', 'sup-size', 'sup-rest', 'sup-rows', 'sup-hint', 'sup-tools', 'sup-tune', 'sup-tune-note', 'sup-tune-count', 'sup-tune-defaults',
+    'sup-style', 'sup-size', 'sup-rest', 'sup-small', 'sup-rows', 'sup-hint', 'sup-tools', 'sup-tune', 'sup-tune-note', 'sup-tune-count', 'sup-tune-defaults',
     'sup-knob-tip', 'sup-knob-growth', 'sup-knob-lean', 'sup-knob-node', 'sup-plate', 'sup-plate-row', 'status', 'menu-supports',
     'sup-mode-auto', 'sup-mode-assisted', 'sup-mode-custom', 'sup-tool-tips', 'sup-tool-circles', 'sup-tool-erase',
     'sup-raft', 'sup-paint', 'sup-paint-row', 'sup-paint-clear', 'sup-brush', 'btn-sup-slice', 'btn-sup-slice-cancel', 'sup-slice-line']) el(id);

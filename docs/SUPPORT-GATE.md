@@ -221,6 +221,18 @@ edge (the face falling away) read as a steep flank. Now the shadow is read off a
 past an overhang's edge and a horn's width), built once a head. Every horn of supp_ref is Support from the shoulder down through its trunk to the
 plate (traced line by line in the slice), none through a stack.
 
+## 4j. Every branch at a printable angle; Exclude small overhangs
+
+Each tip's path to the plate (tip, joins, the trunk's top, the plate) was read off the plan for the six heads: the outer branches of the
+Negative Sphere, Negative Sphere2 and Oblique leaned 50 deg into a trunk top held at 3.3 mm, and a join beside the trunk's long axis jogged
+sideways onto it just over the top (bends of 55 - 64 deg, the Circular's zig-zag). Under the column rule the lean limit is now Bambu's branch
+angle, 45 (`COLUMN_ONE.tiltDeg`; a join stands lower where its branches need it), a root's leg lands across the oval as well as along it
+(under its join, not on the axis's line), and it lands where the join stands after it moved round the piece (`landS`, again before the root).
+Every tip's path: lean at most 45 deg, bend at most 49 (a Y where branches from two sides meet). Gate 66 of 66.
+
+**Exclude small overhangs** (card box, `sup-small`, `opts.noHorns`): no horn to a step's edge, the part holds it; every other spot keeps its
+branch and its interface (supp_ref: 8 horns gone, the same 53 tips).
+
 ## 5. Not done, and named
 
 - **The merged plate's small surfaces.** The six as one piece are read on a 3 mm grid where each alone is read at 1 mm, so the Negative Sphere2's apex

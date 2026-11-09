@@ -1277,12 +1277,17 @@
             var w = 1 - n.depth / Dleaf;
             P[n.id] = [n.pos[0] + w * (Ax - n.pos[0]), n.pos[1] + w * (Ay - n.pos[1]), 0];
           });
-          var rEst = rTipOf(n0) * 1.15, kEst = ovalK(rEst), aEst = rEst * Math.sqrt(kEst);
-          rootKids.forEach(function (cid) {
+          var rEst = rTipOf(n0) * 1.15, kEst = ovalK(rEst), aEst = rEst * Math.sqrt(kEst), bEst = rEst / Math.sqrt(kEst);
+          function landS(cid) {
             var cp = P[cid], pr = (cp[0] - Ax) * uAx[0] + (cp[1] - Ay) * uAx[1], lim = Math.max(0, aEst - rTipOf(nodes[cid].tips.length)) * 0.9;
             var s = Math.max(-lim, Math.min(lim, pr));
-            S[cid] = [Ax + uAx[0] * s, Ay + uAx[1] * s, 0];
-          });
+            /* ...and across the oval as far as its short side lets it: a leg landed on the long axis's line from a join beside it jogged
+               sideways just over the trunk's top (a dogleg of 60 deg, the owner's "softer bends") */
+            var pq = -(cp[0] - Ax) * uAx[1] + (cp[1] - Ay) * uAx[0], limB = Math.max(0, bEst - rTipOf(nodes[cid].tips.length)) * 0.9;
+            var t = opts.columnRule ? Math.max(-limB, Math.min(limB, pq)) : 0;
+            S[cid] = [Ax + uAx[0] * s - uAx[1] * t, Ay + uAx[1] * s + uAx[0] * t, 0];
+          }
+          rootKids.forEach(landS);
           order.forEach(function (n) {
             if (n.leaf) { zOf[n.id] = P[n.id][2]; return; }
             var floor = n.root ? zRootMin : zRootMin + n.depth * CK.nodeDropMm;
@@ -1306,6 +1311,8 @@
               });
               return over ? Math.min(zOld, Math.max(zLn, plateZ + LEAN_FLOOR_MM)) : zOld;
             }
+            /* the root's legs land under where their joins now stand (a join moved round the piece landed where it first stood: across the trunk) */
+            if (n.root && check && opts.columnRule) rootKids.forEach(landS);
             if (n.root || !check) { zOf[n.id] = zAt(P[n.id]); if (!n.root) P[n.id][2] = zOf[n.id]; return; }
             /* against the piece (and what is erased): the join stands where its branches reach it clear - at its place, else
                the nearest place round it, first toward the trunk */
@@ -4580,8 +4587,8 @@
      goes to its branches' lean (3.2 mm of tip over a join no lower than 6.5 left them a few tenths: arms 70 deg off). */
   /* ...and its tips: no cap or sheet spreads a tip's hold under the column rule (the slicer's stack spans between tips), so they stand closer - Bambu's
      under its plates are 2 - 3 mm apart */
-  var COLUMN_ONE = { coverMm: 2.2 };
-  var COLUMN_CROWN = { tipDropMm: 1.6, tipRiseMm: 1.6, nodeDropMm: 1.2, rootFloorMm: 3, leanHardDeg: 50, trunk: { flareMm: 1.5 } };   /* leanHardDeg: no leg past the lean limit (Bambu's branch angle 45) */
+  var COLUMN_ONE = { coverMm: 2.2, tiltDeg: 45 };
+  var COLUMN_CROWN = { tipDropMm: 1.6, tipRiseMm: 1.6, nodeDropMm: 1.2, rootFloorMm: 3, leanHardDeg: 45, trunk: { flareMm: 1.5 } };   /* leanHardDeg: no leg past the lean limit (Bambu's branch angle 45) */
   function thinTips(list, coverMm, minTips) {
     var n = list.length;
     if (n <= 1) return list.map(function (b, i) { return i; });
@@ -5013,7 +5020,7 @@
     var HORN_ONE_MM = 1.5;
     var HORN_COVER = { xyMm: 2.5, downMm: 1.5, upMm: 0.3 };   /* an overhang's spot this near (in plan: the spots' grid and its interface's reach) and this far under the step's (or a hair over) */
     function hornsOf(steps) {
-      if (!opts.columnRule) return [];
+      if (!opts.columnRule || opts.noHorns) return [];                   /* the card's Exclude small overhangs: the steps are the part's to hold */
       /* the tree a horn may join: the crowns' branches and trunks, and the legs to the tips under their straight columns (which stand in the
          stacks), sampled every half mm */
       var treeSegs = [];
