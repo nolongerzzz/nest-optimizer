@@ -164,6 +164,16 @@ height as one group (no height window), so a shoulder's spots are planned with t
 and the Negative Sphere2 the same. The Sphere's horns still stand on the plate (its dome bulges under the shoulder: no clear drop). Gate unchanged,
 63 of 66 (62 merged).
 
+## 4f. One tree, step 3: tips under every plate
+
+The detector stood three spots under the Negative Sphere2's rim (a ring 1.5 - 2 mm wide round its cavity, each spot an area of its own); Bambu stands
+five or six tips under it. Under the column rule the planner fills an area's spots (`fillSpots`): on a 1 mm grid out to 4 mm round them, the part's
+lowest face over the point (a cast up from under the area's band), kept as a spot where it is an overhang at the threshold (flatter than tan 30 read
+0.3 mm each way), in the area's height band (1 mm), more than 4 mm over the plate and 1.8 mm from every spot of the area. Its tips then stand
+closer as well (`COLUMN_ONE.coverMm` 2.2 against the sheet build's 3.3: no cap spreads a tip's hold). The rim now has nine tips; carried
+74 -> 99 % (Bambu 91), span over 2.5 mm 2.1 -> 0. Gate 66 of 66 on the six pieces and on the six as one piece (the merged apex's contact too);
+parity unchanged.
+
 ## 5. Not done, and named
 
 - **The merged plate's small surfaces.** The six as one piece are read on a 3 mm grid where each alone is read at 1 mm, so the Negative Sphere2's apex

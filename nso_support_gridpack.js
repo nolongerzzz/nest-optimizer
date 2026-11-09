@@ -4578,6 +4578,9 @@
      branch leaning all the way to a tip a mm and a half straight under the rim). Under the column rule the crown has a short straight tip, a
      short flare and a first join as low as the flare and the trunk's shoulder allow: the height of a head whose overhang is 9 mm over the plate
      goes to its branches' lean (3.2 mm of tip over a join no lower than 6.5 left them a few tenths: arms 70 deg off). */
+  /* ...and its tips: no cap or sheet spreads a tip's hold under the column rule (the slicer's stack spans between tips), so they stand closer - Bambu's
+     under its plates are 2 - 3 mm apart */
+  var COLUMN_ONE = { coverMm: 2.2 };
   var COLUMN_CROWN = { tipDropMm: 1.6, tipRiseMm: 1.6, nodeDropMm: 1.2, rootFloorMm: 3, leanHardDeg: 50, trunk: { flareMm: 1.5 } };   /* leanHardDeg: no leg past the lean limit (Bambu's branch angle 45) */
   function thinTips(list, coverMm, minTips) {
     var n = list.length;
@@ -4766,6 +4769,39 @@
      within HORN_TREE.shadowMm over it, HORN_TREE.shadowXyMm round), then joins a branch of the tree under it at no more than HORN_TREE.joinDeg -
      the highest join it reaches. Null when none is clear (the horn then stands its own column on the plate). */
   var HORN_TREE = { shadowMm: 2.2, shadowXyMm: 0.6, exemptMm: 2.2, joinDeg: 45, stepMm: 0.25, kneeStepMm: 0.5, kneeMaxMm: 3, dropStepMm: 0.5, joinEndMm: 0.8, cands: 4, rV: 0.5, rJoin: 0.6, headings: 1 };
+  /* THE COLUMN RULE'S SPOTS UNDER A PLATE (the owner's: "the interfaces also supported from below"; Bambu's Negative Sphere2 rim stands on five or
+     six tips, ours on the detector's three). Every FILL.pitchMm round an area's spots (FILL.reachMm out), the part's underside straight over the
+     point: kept as a spot of the area where it is an overhang at the threshold (flatter than its tan, read off the underside a FILL.slopeMm step
+     each way), in the area's height band, and no spot of the area within FILL.apartMm. The slicer's stack then has a tip under it every few mm. */
+  var FILL = { pitchMm: 1, reachMm: 4, slopeMm: 0.3, apartMm: 1.8, bandMm: 1 };   /* a 1 mm grid: a rim round a cavity is a ring 1.5 - 2 mm wide */
+  function fillSpots(bc, byArea, kit, ck) {
+    var tanT = Math.tan(((ck && ck.thresholdDeg) || 30) * Math.PI / 180), added = 0;
+    Object.keys(byArea).forEach(function (k) {
+      var list = byArea[k];
+      if (!list.length) return;
+      var x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, zlo = Infinity, zhi = -Infinity;
+      list.forEach(function (b) { x0 = Math.min(x0, b.p[0]); x1 = Math.max(x1, b.p[0]); y0 = Math.min(y0, b.p[1]); y1 = Math.max(y1, b.p[1]); zlo = Math.min(zlo, b.p[2]); zhi = Math.max(zhi, b.p[2]); });
+      var zA = zlo - FILL.bandMm - 2, zB = zhi + FILL.bandMm, why = { apart: 0, none: 0, band: 0, low: 0, steep: 0, at: [] };
+      /* the lowest face over (x, y) in the band: a cast up from the band's foot (a hair off the vertical: the probe's straight casts run down) */
+      var under = function (x, y) { var d = kit.pr.leg([x, y, zA], [x + 1e-5, y, zB], 0, 0, 0, 0); return d > 0 ? zA + d * (zB - zA) / Math.hypot(1e-5, zB - zA) : null; };
+      for (var x = x0 - FILL.reachMm; x <= x1 + FILL.reachMm + 1e-9; x += FILL.pitchMm) {
+        for (var y = y0 - FILL.reachMm; y <= y1 + FILL.reachMm + 1e-9; y += FILL.pitchMm) {
+          if (list.some(function (b) { return Math.hypot(b.p[0] - x, b.p[1] - y) < FILL.apartMm; })) { why.apart++; continue; }
+          var z = under(x, y);
+          if (z == null) { why.none++; continue; }
+          if (z < zlo - FILL.bandMm || z > zhi + FILL.bandMm) { why.band++; if (why.at.length < 6) why.at.push([+x.toFixed(1), +y.toFixed(1), +z.toFixed(2)]); continue; }
+          if (z - kit.plateZ < ONE.lowMm) { why.low++; continue; }
+          var flat = true;
+          [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(function (d) { if (!flat) return; var z2 = under(x + d[0] * FILL.slopeMm, y + d[1] * FILL.slopeMm); if (z2 == null || Math.abs(z2 - z) > tanT * FILL.slopeMm) flat = false; });
+          if (!flat) { why.steep++; continue; }
+          var b = { id: bc.beacons.length, p: [x, y, z], n: [0, 0, -1], regionId: list[0].regionId, key: 'fill:' + x.toFixed(2) + ',' + y.toFixed(2) + ',' + z.toFixed(2), source: 'column-fill' };
+          bc.beacons.push(b); list.push(b); added++;
+        }
+      }
+      if (root && root.NSO_TIPS_DEBUG) console.log('fill area ' + k + ' z ' + zlo.toFixed(2) + '..' + zhi.toFixed(2) + ' plate ' + kit.plateZ + ': ' + JSON.stringify(why));
+    });
+    return added;
+  }
   function hornShadow(kit, pt) {
     var key = Math.round(pt[0] * 20) + ',' + Math.round(pt[1] * 20) + ',' + Math.round(pt[2] * 20), C = kit.shadowCache || (kit.shadowCache = {});
     if (C[key] === undefined) C[key] = kit.pr.leg(pt, [pt[0], pt[1], pt[2] + HORN_TREE.shadowMm], 0, 0, 0, HORN_TREE.shadowXyMm) >= 0;
@@ -4882,7 +4918,7 @@
     if (!bc.ok || !bc.beacons.length) return null;                      /* the ordinary plan says why, in its own words */
     var say = progressOf(opts);
     say('detecting', null, null, true);
-    var ck = Object.assign({}, ONE, (opts.oneTrunk && typeof opts.oneTrunk === 'object') ? opts.oneTrunk : {});
+    var ck = Object.assign({}, ONE, opts.columnRule ? COLUMN_ONE : {}, (opts.oneTrunk && typeof opts.oneTrunk === 'object') ? opts.oneTrunk : {});
     ck.crown = Object.assign({}, ONE.crown, (opts.oneTrunk && opts.oneTrunk.crown) || {});
     var byArea = {}, order = [];
     bc.beacons.forEach(function (b) {
@@ -4941,6 +4977,7 @@
       if (!st || !st.ok || plateZ0 == null) return;
       var pr = makeProbe(A0, [rawTris].concat(opts.occluders || [])), tanL = Math.tan((opts.branchTiltDeg == null ? ST(opts).BRANCH_TILT_DEG : +opts.branchTiltDeg) * Math.PI / 180) * 0.97, side = st.sideMm;
       kit = { pr: pr, plateZ: plateZ0 };
+      if (opts.columnRule) fillSpots(bc, byArea, kit, ck);
       /* the route a tip at `at` has down: straight, leaning to the plate, or leaning a while and then straight (the lattice planner's
          steer: the leaning line walked down a node's height at a time, a clear leg and a clear drop at each) */
       function routeDown(at, straightOnly) {
@@ -5084,6 +5121,7 @@
       p.blocked.forEach(function (bl) { (bl.tips || []).forEach(function (tid) { var b = byTid[tid]; if (b && !lost[b.id]) { lost[b.id] = true; nLost++; found++; } }); });
       if (!found) break;
     }
+    if (root && root.NSO_TIPS_DEBUG && chosen) console.log('spots ' + JSON.stringify(bc.beacons.map(function (b) { return b.p.map(function (v) { return +v.toFixed(1); }).concat([chosen.indexOf(b) >= 0 ? 'T' : lost[b.id] ? 'L' : 'c']); })));
     if (p.ok) {
       /* the lost spots: a cone's tip held through the tip under it, a ledge by a thin column; what is left is unreachable */
       var thin = [], coneHeld = 0, thinHeld = 0, selfHeld = stepHeld.slice();
