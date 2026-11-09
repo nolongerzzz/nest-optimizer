@@ -204,6 +204,16 @@ layers are the G-code's support layers (54 / 55 / 56 / 57 / 50 / 55, the same he
 (100 %). With no printer picked (node, support:gate) the gate's settings stand in. A setting changed after Generate leaves the drawing as it was until
 the next Generate. Generate for plate is the card's default with two or more pieces on the plate.
 
+## 4i. Horns: softer bends, always off the tree
+
+The owner's, drawn on the slice: horns should leave the trunk and bend up to the shoulder, not stand a column of their own on the plate, and bend
+softly. A horn's route (top, a lean out to its knee, a drop outside the stacks, a leg into the tree) is now built with its corners rounded
+(`smoothHornPath`: at each corner the widest fillet of 2, 1.2 or 0.6 mm that stays clear), its tube thin at the top and thick where it meets the tree.
+The stacks a horn keeps out from (`hornShadow`) are now only the overhangs the slicer lays a stack under - part within 2.2 mm over the point whose
+underside is flatter than the threshold - not every part over it: the Sphere's horns had to pass beside its dome's steep flank and stood on the plate;
+now they join its trunk at 4.6 mm. All eight horns of supp_ref join a trunk (none on the plate); a horn's route is 2 - 5 s (the knee's lean searched to
+1.5 mm, the shadow read every 0.5 mm). Gate 66 of 66.
+
 ## 5. Not done, and named
 
 - **The merged plate's small surfaces.** The six as one piece are read on a 3 mm grid where each alone is read at 1 mm, so the Negative Sphere2's apex
