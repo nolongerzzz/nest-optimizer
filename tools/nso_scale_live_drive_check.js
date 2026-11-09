@@ -22,7 +22,10 @@
         after it previews, a refused one after that clears the preview; Enter on
         the refused value says why and changes nothing
      5  Set (button) and Enter both bake; Tab / leaving the field does not
-     6  Offset and the ring rows behave the same way
+     6  Offset and the ring rows behave the same way; a tube taken down - Bore
+        in, then Outer typed below where the bore STOOD - previews and bakes as
+        one ring move (judged on the final ring), and Outer past the NEW bore
+        is refused under Outer
      7  the preview is dropped by another piece, the other mm | in unit, Fit to
         plate and closing the card - the piece never changed
      8  every field stays staged: Length, Width and Height all adjusted (and
@@ -409,6 +412,43 @@ withApp(async (page, logs) => {
   const t4 = await look(page, 'scale-ring-wall');
   check('...Escape clears the reason and puts the field back', t4.why === '' && t4.value === w0.value && t4.soupIsStart && t4.undo === t0.undo,
     JSON.stringify({ why: t4.why, v: t4.value }));
+
+  // Taking the tube down: Bore in first, then Outer typed below where the bore
+  // STOOD. The staged ring fields are one move, judged on the final ring - not
+  // Outer first against the old bore (the report: "outer would reach the bore").
+  const oldBore = +(await look(page, 'scale-ring-bore')).value, small = Math.floor(oldBore) - 4;
+  await type(page, 'scale-ring-bore', 12);
+  await waitPreview(page, +t0.value);
+  await type(page, 'scale-ring-outer', small);
+  await waitPreview(page, small);
+  await settle(page);
+  const t5 = await look(page, 'scale-ring-outer');
+  console.log('   Bore 12, then Outer Ø ' + small + ' (the bore stood at ' + oldBore + '): preview ' + t5.pv[0].toFixed(2) + ', why "' + t5.why + '"');
+  check('Bore 12 then Outer below the old bore: no refusal, the preview is the new outer, Set lit, the piece untouched',
+    t5.why === '' && Math.abs(t5.pv[0] - small) < 1e-2 && !t5.setOff && t5.soupIsStart && t5.undo === t0.undo, t5.note);
+  // ...and past the NEW bore it is still refused, under Outer, the bore alone drawn.
+  await type(page, 'scale-ring-outer', 10);
+  await waitWhy(page, 'scale-ring-outer');
+  await settle(page);
+  const t6 = await look(page, 'scale-ring-outer');
+  console.log('   Outer Ø 10 against Bore 12: why "' + t6.why + '"');
+  check('...Outer 10 against that bore 12 is refused under Outer, Set greyed, the bore change still drawn',
+    /^outer would reach the bore - Ø10 outer against a Ø12 bore$/.test(t6.why) && t6.setOff && t6.previews === 1 &&
+    Math.abs(t6.pv[0] - (+t0.value)) < 1e-2 && t6.soupIsStart, t6.why);
+  await type(page, 'scale-ring-outer', small);
+  await waitPreview(page, small);
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(k => state.undoStack.length > k, t0.undo, { timeout: 30000 });
+  await card(page);
+  const t7 = await look(page, 'scale-ring-outer');
+  const b7 = await look(page, 'scale-ring-bore');
+  console.log('   Set: ' + t7.status + '   readout ' + t7.readout);
+  check('Enter bakes both as one Undo step: Outer and Bore read as typed',
+    /^Outer Ø \+ Bore Ø done - /.test(t7.status) && t7.undo === t0.undo + 1 && Math.abs(+t7.value - small) < 0.05 && Math.abs(+b7.value - 12) < 0.05,
+    JSON.stringify({ outer: t7.value, bore: b7.value, undo: t7.undo - t0.undo }));
+  await page.click('#btn-undo');
+  await page.waitForFunction(() => getActiveModel().rawTris === window.__nsoStart, null, { timeout: 30000 });
+  check('...one Undo returns the tube', (await look(page, 'scale-ring-outer')).soupIsStart);
 
   console.log('\n=== 7. what else drops a preview ===');
   await select(page, trayId);

@@ -993,6 +993,8 @@ function NSO_scaleCardTryAll(verbs, m, soup) {
     return p;
   }
   /* in the piece's frame, as it lies (NSO_scaleSpaceOf), and turned back */
+  verbs = NSO_scaleMergeRing(verbs);
+  first = verbs[0];
   var space = NSO_scaleSpaceOf(m, soup);
   var cur = space.f, ctx = verbs.length > 1 ? { section: NSO_scaleSectionOfSoup(space.f) } : null;
   var said = [], r = null;
@@ -1001,8 +1003,10 @@ function NSO_scaleCardTryAll(verbs, m, soup) {
     r = verb.run(cur, ctx);
     if (!r.ok) {
       r.inline = NSO_scaleText(r.reason);
-      r.status = verb.label + ' refused - piece unchanged (' + r.inline + ')';
-      r.failedKey = verb.key;
+      r.failedKey = verb.keyOf ? verb.keyOf(r) : verb.key;
+      // a merged ring move is refused in the name of the field it blames
+      var said0 = (verb.keys && NSO_SCALE_RING_LABEL[r.failedKey]) || verb.label;
+      r.status = said0 + ' refused - piece unchanged (' + r.inline + ')';
       return r;
     }
     r.said = verb.describe(r);
@@ -1053,6 +1057,7 @@ function NSO_scaleRingVerb(verb, value) {
   var label = NSO_SCALE_RING_LABEL[verb] || verb;
   return {
     label: label, undoType: 'ringReplace', paint: label + NSO_SCALE_FACES_PAINT,
+    ring: verb, value: value,
     run: function (soup) { return NSO_ringApplyRaw(soup, verb, value); },
     describe: function (r) {
       // nso_ring.js's own figures with mm shown (a ring at the card's one
@@ -1061,6 +1066,36 @@ function NSO_scaleRingVerb(verb, value) {
     }
   };
 }
+/* Outer Ø, Bore Ø and Wall staged together are ONE ring move (nso_ring.js's
+   'ring' verb), not three in a row: run one at a time, Outer Ø brought in past
+   where the bore STOOD was refused even with a smaller bore typed beside it,
+   because Outer ran first against the old bore. The merged verb stands where
+   the first of them stood; a refusal names the field nso_ring.js blames. */
+var NSO_SCALE_RING_KEYS = ['outer', 'bore', 'wall'];
+function NSO_scaleMergeRing(verbs) {
+  var ring = verbs.filter(function (v) { return v && NSO_SCALE_RING_KEYS.indexOf(v.ring) >= 0; });
+  if (ring.length < 2) return verbs;
+  var value = { outer: null, bore: null, wall: null }, keys = [];
+  ring.forEach(function (v) { value[v.ring] = v.value; keys.push(v.key || v.ring); });
+  var label = ring.map(function (v) { return v.label; }).join(' + ');
+  var merged = {
+    label: label, undoType: 'ringReplace', paint: label + NSO_SCALE_FACES_PAINT,
+    key: keys[0], keys: keys,
+    run: function (soup) { return NSO_ringApplyRaw(soup, 'ring', value); },
+    keyOf: function (r) {
+      var b = r && r.blame;
+      return b && keys.indexOf(b) >= 0 ? b : keys[keys.length - 1];
+    },
+    describe: ring[0].describe
+  };
+  var out = [], put = false;
+  verbs.forEach(function (v) {
+    if (ring.indexOf(v) < 0) out.push(v);
+    else if (!put) { out.push(merged); put = true; }
+  });
+  return out;
+}
+
 function NSO_scaleRingApply(verb, value) { return NSO_scaleCardApply(NSO_scaleRingVerb(verb, value)); }
 
 /* Length / Width / Height: Extend or Shorten along the piece's own axis that
@@ -1520,7 +1555,9 @@ if (typeof document !== 'undefined') {
         }
         if (r.ok) break;
         var bad = r.failedKey;
-        if (!first) first = r;
+        // What Set (Enter) says: the field being typed in, when it is one of
+        // the refused, else the first refusal.
+        if (!first || (bad === s.lastKey && first.failedKey !== s.lastKey)) first = r;
         if (!bad || !use.some(function (v) { return v.key === bad; })) {
           // a refusal of the whole piece (paint) or a crash: nothing to draw
           why[bad || s.lastKey] = r.inline; n++; use = []; r = null; break;
@@ -1739,7 +1776,10 @@ if (typeof document !== 'undefined') {
         if (e.key === 'Enter') {
           e.preventDefault();
           if (waiting) edit(k);
-          if (sess) commit();                    // every staged field, as the boxes read now
+          if (sess) {
+            sess.lastKey = k;                    // a refusal Set reports is this field's, when it has one
+            commit();                            // every staged field, as the boxes read now
+          }
         } else if (e.key === 'Escape') {
           e.preventDefault();
           if (waiting) { e.stopPropagation(); h.cancel(); el.value = prefill[k] != null ? prefill[k] : ''; setSlider(k); }

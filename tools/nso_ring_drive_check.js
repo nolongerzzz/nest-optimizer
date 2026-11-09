@@ -369,6 +369,11 @@ async function pipe(page) {
     const c = await card(page);
     console.log('   ' + id.replace('scale-ring-', '') + ' ' + value + ': "' + st + '"');
     check(id + ' ' + value + ' refused in words, piece unchanged, no Undo step', st === want && c.soup === last.soup && c.undo === last.undo, st);
+    // Each refusal against the Ø44 / Ø38 piece itself: the card stages every
+    // field moved until Set or Escape, and staged ring fields are judged as
+    // one move, so drop this one before the next is typed.
+    await page.focus('#' + id);
+    await page.keyboard.press('Escape');
   }
   await shot(page, '08-pipe-floor-refused');
 
