@@ -32,3 +32,14 @@ to 1/64). The ruler is never in the scene: not exportable, not swept by
 **Pre-existing, unrelated.** `tools/nso_shell_v3_test.js` fails one gate ("CLEAR
 PLATE takes every piece off the plate and keeps the loaded pieces") on the branch
 tip before this change too.
+
+**Follow-up (same day): beside a live tool.** The Measure card no longer shuts the
+panel in use, and opening another panel no longer shuts it: it is the one
+exemption from app-join.js's one-panel rule, docked to the right of the open panel
+(`dock()` in app-measure.js), with a press on a ghost's handle left to the ghost
+(`claimedElsewhere`) and a live Soften card's face pick left alone when Measure
+arms. `docs/MEASURE.md` section 6; gates D1-D5. `app-join.js` and `app-findings.js`
+changed for it, and `nso_topbar_accordion_test.js` / `nso_ui_shell_drive_check.js`
+now take Measure out of their "exactly one panel open" rosters (everything else in
+them is as it was).
+

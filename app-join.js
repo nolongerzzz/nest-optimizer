@@ -144,7 +144,7 @@ function joinWireCard() {
   menu.dataset.nsoWired = '1';
   const anotherOpen = function () {
     return Array.prototype.some.call(document.querySelectorAll('.vp-menu[open]'),
-      function (d) { return d !== menu && !menu.contains(d); });
+      function (d) { return d !== menu && !menu.contains(d) && d.id !== 'menu-measure'; });
   };
   const show = function () {
     if (!state.joinSession) startJoinSession();
@@ -1548,7 +1548,8 @@ function subtractWireCard() {
   const look = function () {
     if (menu.open) updateSubtractUI();
     if (!state.subtractFlow) return;
-    if (!document.querySelector('.vp-menu[open]')) clearJoinSlots();
+    // Measure is not a panel in this sense (it sits beside the others).
+    if (!document.querySelector('.vp-menu[open]:not(#menu-measure)')) clearJoinSlots();
   };
   new MutationObserver(function () { setTimeout(look, 0); })
     .observe(document.body, { attributes: true, attributeFilter: ['open'], subtree: true });
@@ -3158,6 +3159,14 @@ function setupUI() {
      were open; the observer runs as a microtask, before the next event, and
      sees a programmatic `.open = true` as well as a click.
 
+     ONE EXEMPTION, MEASURE. Its card neither shuts another panel when it opens
+     nor is shut by another opening, so a ruler or a measurement can be used
+     while a ghost is being manipulated or a live card is open (Crop, Scale,
+     Surface texture, Wheel...). Closing a panel ends its live session, so a
+     Measure that shut the panel in use ended the work it was meant to serve.
+     app-measure.js docks its card beside whichever panel is open so the two
+     do not sit on top of each other.
+
      Cut has no exemption. Opening another panel shuts Cut's panel, but the
      cutter itself is a tool, not a panel: closing the <details> leaves
      state.cutterOpen, the blade and its position exactly as they were, and
@@ -3171,8 +3180,10 @@ function setupUI() {
         if (r.oldValue === null && d.open && d.matches('.vp-menu')) opened = d;
       });
       if (!opened) return;
+      if (opened.id === 'menu-measure') return;       // opening Measure shuts nothing
       document.querySelectorAll('.vp-menu[open]').forEach(function (o) {
         if (o === opened || o.contains(opened) || opened.contains(o)) return;
+        if (o.id === 'menu-measure') return;           // and nothing else shuts Measure
         o.open = false;
       });
     }).observe(document.body, { attributes: true, subtree: true,

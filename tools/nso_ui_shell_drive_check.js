@@ -278,10 +278,12 @@ withApp(async (page, logs) => {
         const body = document.querySelector('#' + id + ' > .vp-menu-body').getBoundingClientRect();
         const cs = getComputedStyle(document.querySelector('#' + id + ' > .vp-menu-body'));
         // A member open inside its drop-down (Join's first card, shown with its column) is part of that panel.
-        return { n: [...document.querySelectorAll('.vp-menu[open]')].filter(d => !d.parentElement.closest('.vp-menu[open]')).length, open: document.getElementById(id).open,
+        // Measure's card is not counted: it is the one panel allowed to stay open beside another (app-join.js).
+        return { n: [...document.querySelectorAll('.vp-menu[open]')].filter(d => d.id !== 'menu-measure' && !d.parentElement.closest('.vp-menu[open]')).length, open: document.getElementById(id).open,
                  x: body.left, y: body.top, rad: cs.borderTopLeftRadius, fs: cs.fontSize, tt: cs.textTransform };
       }, id);
-      if (st.n !== 1 || !st.open) counts.push(id + ' n=' + st.n);
+      // Measure is not counted (above), so by itself it leaves none of the others open.
+      if (st.n !== (id === 'menu-measure' ? 0 : 1) || !st.open) counts.push(id + ' n=' + st.n);
       spots.push(Object.assign({ id }, st));
     }
     check('opening each button in turn leaves exactly one .vp-menu[open] (not counting a member inside it)', counts.length === 0,

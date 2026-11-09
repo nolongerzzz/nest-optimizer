@@ -402,3 +402,55 @@ and, looking straight down at `box-20mm`, **Zero here on one corner then the cor
 `20.000` with tilt 0 and both lamps lit, the piece slides 30 mm and both marks move
 30 mm along the ruler, and the 3/4 view puts both lamps out. Re-baking drops the
 pick with a reason, and the piece is afterwards still 12 triangles of 8000 mm3.
+
+---
+
+## 6. Beside a live tool
+
+Measure and the ruler can be used **during** a ghost being manipulated or a live
+card doing work (Crop's box, the Wheel's handles, Cut's blade, Surface texture,
+Foam...) without ending it. Three things used to get in the way, and each has its
+own answer.
+
+**Opening the Measure card shut the card in use.** The page has a one-panel rule
+(`app-join.js`): opening any drop-down shuts every other, because they all open at
+the same spot. Closing a panel ends its session - Cut's cutter, Surface texture's
+preview - so Measure ended exactly the work it was meant to serve. Measure's card is
+now **the one exemption**, in both directions: opening it shuts nothing, and nothing
+shuts it. Every other pair is untouched (D5 checks two other cards still shut each
+other). The places that asked "is some other panel open?" (the Join and Subtract
+sessions, the toast placement in `app-findings.js`) ignore it for the same reason.
+
+**Two panels at one spot would sit on top of each other.** `app-measure.js` docks
+the Measure panel to the *right* of whichever panel is open (`dock()`, kept current
+by a mutation observer on `open` and a resize observer on the panels, so a panel
+that grows - Gen+ with its Stock shelf - moves it), and puts it back at the shared
+spot when it is alone. The panel in use is never moved. Measure's panel is stacked
+above the others (`z-index` 96), so in a window too narrow for both it is the one
+still reachable.
+
+**A press on a handle must not also be a measurement.** With Measure armed, a press
+on a ghost's handle is the ghost's: Crop, Tube edge and Bend stop the event before
+it reaches the canvas, the Wheel `preventDefault`s it, and Foam claims a press on its
+piece. Which listener runs first depends on when each was bound, so Measure does not
+rely on order: it stands down for a press that is `defaultPrevented` or that
+`nsoWheelTakesPointer` / `nsoFoamTakesPointer` report as theirs (`claimedElsewhere`).
+A press that lands on the piece clear of the ghost is still a measurement.
+
+Arming Measure still turns off the **click-waiting** modes (Paint, Carve, the
+brushes, Seat here, Center lock, the Soften and Cap pick) - two of those armed
+would fight over one click, and that is unchanged. It no longer clears a **live**
+Soften card's face pick, which is a preview rather than a mode waiting for a click.
+A tool that arms *after* Measure still turns Measure off, as before.
+
+What to expect while a ghost is up: a press on its body or handles belongs to it
+(you cannot measure *through* a ghost), and Esc is heard by both Crop and Measure.
+
+**Validation** - `D1-D5` in `tools/nso_measure_test.js`: a real Crop box, Measure's
+card opened over it, armed, the box's `x+` handle dragged with the real mouse (the
+box grows 20.00 -> 22.27 and nothing is measured), then two clicks clear of the
+ghost measure 40.000 mm and the box has not moved; the ruler dragged with the ghost
+up; presses claimed by preventDefault / Wheel / Foam are not measurements and an
+unclaimed one is; Cut's live cutter surviving Measure being opened and armed; the
+panels side by side, and Measure returning to the shared spot when alone.
+

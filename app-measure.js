@@ -795,9 +795,16 @@
       if (seatBtn) seatBtn.click();
       else state.seatHereArmed = false;
     }
-    state.softenArmed = false;
-    state.capArmed = false;
-    if (typeof clearFacePick === 'function') clearFacePick();
+    /* The Soften / Cap pick modes wait for a click on a piece, so they stand
+       down. A LIVE Soften card is not one of them - it is previewing a face -
+       and clearing the face pick under it would wreck the preview that
+       Measure is being used alongside. */
+    var softenLive = !!(window.nsoSoftenLive && window.nsoSoftenLive.on && window.nsoSoftenLive.on());
+    if (!softenLive) {
+      state.softenArmed = false;
+      state.capArmed = false;
+      if (typeof clearFacePick === 'function') clearFacePick();
+    }
   }
 
   function enter() {
@@ -920,6 +927,7 @@
      the plate while measuring still works. */
   window.nsoMeasureTakesClick = function (event) {
     if (!state.measureOn || !event || event.button !== 0) return false;
+    if (claimedElsewhere(event)) return false;
     return !!hitPiece(event);
   };
 
@@ -950,8 +958,24 @@
 
   window.nsoMeasureClear = function () { clearShot(null); };
 
+  /* A press a live tool has already claimed is not a measurement. A handle on a
+     ghost (the Wheel's, Crop's, Tube edge's, Bend's) starts a drag with
+     preventDefault, or stops the event outright before it gets here; Foam's
+     spray owns a press on its piece. Which listener on the canvas ran first
+     depends on when each was bound, so this does not rely on order: it asks the
+     same predicates app-core asks, and treats a prevented event as taken. */
+  function claimedElsewhere(event) {
+    if (event.defaultPrevented) return true;
+    var asks = ['nsoWheelTakesPointer', 'nsoFoamTakesPointer'];
+    for (var i = 0; i < asks.length; i++) {
+      if (typeof window[asks[i]] === 'function' && window[asks[i]](event)) return true;
+    }
+    return false;
+  }
+
   function onDown(event) {
     if (!state.measureOn || event.button !== 0) return;
+    if (claimedElsewhere(event)) return;
     var pick = hitPiece(event);
     if (!pick) return;
     event.stopPropagation();
@@ -962,7 +986,51 @@
     else takeSpan(pick);
   }
 
+  /* DOCKING. Every card opens at one spot, so two open at once would sit on top
+     of each other. Measure is allowed to stay open beside another card (see the
+     one-panel rule in app-join.js), so when one is open Measure's panel moves to
+     its right-hand side, and goes back to the shared spot when it is alone. The
+     other panels are never moved: the one in use stays exactly where it is. */
+  var DOCK_GAP = 8;
+  function dock() {
+    var menu = el('menu-measure');
+    var body = menu && menu.querySelector(':scope > .vp-menu-body');
+    if (!body) return;
+    if (!menu.open) { body.style.left = ''; return; }
+    var parent = body.offsetParent;
+    if (!parent) return;
+    var pr = parent.getBoundingClientRect(), right = null;
+    var others = document.querySelectorAll('.vp-shell-menu[open] > .vp-menu-body');
+    for (var i = 0; i < others.length; i++) {
+      if (others[i] === body) continue;
+      var r = others[i].getBoundingClientRect();
+      if (r.width > 0 && (right == null || r.right > right)) right = r.right;
+    }
+    if (right == null) { body.style.left = ''; return; }
+    var left = right - pr.left + DOCK_GAP;
+    // Never past the right-hand edge of the viewport: overlap beats being lost.
+    left = Math.min(left, pr.width - body.offsetWidth - DOCK_GAP);
+    body.style.left = Math.max(0, Math.round(left)) + 'px';
+  }
+
+  var dockWatched = new WeakSet();
+  function watchDock() {
+    dock();
+    if (typeof ResizeObserver !== 'function') return;
+    // A panel that grows or shrinks (Gen+ with its Stock shelf) moves our edge.
+    var ro = watchDock._ro || (watchDock._ro = new ResizeObserver(dock));
+    document.querySelectorAll('.vp-shell-menu > .vp-menu-body').forEach(function (b) {
+      if (!dockWatched.has(b)) { dockWatched.add(b); ro.observe(b); }
+    });
+  }
+
   function bind() {
+    if (!bind._dock && typeof MutationObserver === 'function') {
+      bind._dock = true;
+      new MutationObserver(function () { watchDock(); })
+        .observe(document.body, { attributes: true, subtree: true, attributeFilter: ['open'] });
+      window.addEventListener('resize', dock);
+    }
     var btn = el('btn-measure');
     if (btn && !btn._measureBound) {
       btn.addEventListener('click', toggle);

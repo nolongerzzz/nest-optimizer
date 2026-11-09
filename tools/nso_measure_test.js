@@ -796,11 +796,141 @@ async function partC() {
   });
 }
 
+/* ------------------------------------------------------------------ part D
+   Measure beside a live tool. A ghost being manipulated, or a card doing live
+   work, must survive Measure being opened, armed and used - closing a panel
+   ends its session, and that is what opening Measure used to do. */
+
+const panelRect = (page, id) => page.evaluate(i => {
+  const b = document.querySelector('#' + i + ' > .vp-menu-body');
+  const r = b && b.getBoundingClientRect();
+  return r && r.width > 0 ? { l: r.left, r: r.right, t: r.top, b: r.bottom } : null;
+}, id);
+const overlap = (a, b) => !!a && !!b && a.l < b.r && b.l < a.r && a.t < b.b && b.t < a.b;
+const strays30 = page => page.evaluate(() => { let n = 0; state.scene.traverse(o => { if (o.renderOrder === 30) n++; }); return n; });
+
+async function partD() {
+  await withApp(async (page, logs) => {
+    const id = await loadSTL(page, fx('box_hull_80x40x20-2.stl'));
+    await selectModel(page, id);
+    await page.evaluate(() => { state.camera.position.set(60, 70, 90); state.controls.target.set(0, 5, 0); state.controls.update(); });
+
+    console.log('\n=== D1. a Crop ghost stays up while Measure opens, arms and measures ===');
+    await page.click('#menu-crop > summary');
+    await page.evaluate(() => { selectPlaced(0); });
+    await page.click('#btn-crop-shape-box');
+    await page.waitForFunction(() => { const S = NSO_CropCard.state(); return S.shape && !S.timer && S.plan; }, null, { timeout: 20000 });
+    const box0 = await page.evaluate(() => JSON.parse(JSON.stringify(NSO_CropCard.state().box)));
+    check('a Crop box is up', !!box0 && (await page.evaluate(() => !!NSO_CropCard.state().group)));
+    await page.click('#menu-measure > summary');
+    await page.waitForTimeout(200);
+    const open1 = await page.evaluate(() => ({ crop: document.getElementById('menu-crop').open, measure: document.getElementById('menu-measure').open,
+                                               shape: NSO_CropCard.shape(), group: !!NSO_CropCard.state().group }));
+    check('opening the Measure card shuts nothing: Crop is still open', open1.crop && open1.measure, JSON.stringify(open1));
+    check('and the ghost is still there', !!open1.shape && open1.group);
+    const rc = await panelRect(page, 'menu-crop'), rm = await panelRect(page, 'menu-measure');
+    check('the two panels sit side by side, not on top of each other', !!rc && !!rm && !overlap(rc, rm) && rm.l >= rc.r,
+          'crop ' + JSON.stringify(rc && [Math.round(rc.l), Math.round(rc.r)]) + ' measure ' + JSON.stringify(rm && [Math.round(rm.l), Math.round(rm.r)]));
+    check('Measure is reachable: its button is on screen and clickable', await page.isVisible('#btn-measure'));
+    await page.click('#btn-measure');
+    const armed = await page.evaluate(() => ({ on: state.measureOn, crop: document.getElementById('menu-crop').open, shape: NSO_CropCard.shape() }));
+    check('arming Measure leaves the Crop session alone', armed.on && armed.crop && !!armed.shape, JSON.stringify(armed));
+
+    // a press on a Crop handle is the ghost's, not a measurement
+    const hx = await page.evaluate(() => NSO_CropCard.handleScreen('x+'));
+    await page.mouse.move(hx.x, hx.y); await page.mouse.down();
+    for (let i = 1; i <= 6; i++) await page.mouse.move(hx.x + 7 * i, hx.y + 1 * i);
+    await page.mouse.up();
+    await frames(page, 3);
+    const box1 = await page.evaluate(() => NSO_CropCard.state().box);
+    check('a handle still drags with Measure armed: the box grew on x+', box1.h[0] > box0.h[0] + 0.3, box0.h[0].toFixed(2) + ' -> ' + box1.h[0].toFixed(2));
+    check('...and that press measured nothing (no first point, no marks)',
+          (await readout(page)) === null && (await strays30(page)) === 0 && !/first point/.test(await page.evaluate(() => document.getElementById('status').textContent)));
+
+    // a click on the piece clear of the ghost is a measurement
+    const hb = await boxOf(page, 0);
+    // the +X end: in this view it is on the right of the screen, clear of the two panels on the left
+    const pA = [hb.max[0] - 0.6, hb.max[1], hb.max[2] - 0.6], pB = [hb.max[0] - 0.6, hb.max[1], hb.min[2] + 0.6];
+    const under = await Promise.all([pA, pB].map(async p => { const s = await screenOf(page, p); return page.evaluate(q => document.elementFromPoint(q.x, q.y) === state.renderer.domElement, s); }));
+    check('(the two points are on the canvas, not behind a panel)', under.every(Boolean), String(under));
+    await clickWorld(page, pA);
+    await clickWorld(page, pB);
+    const rd = await readout(page);
+    check('two clicks on the piece, clear of the ghost, measure it (40 mm across the end)', rd && near(rd.mm, hb.max[2] - hb.min[2], 5e-3), rd ? f3(rd.mm) : 'nothing');
+    const box2 = await page.evaluate(() => NSO_CropCard.state().box);
+    check('and the ghost did not move for it', [0, 1, 2].every(k => near(box2.c[k], box1.c[k], 1e-6) && near(box2.h[k], box1.h[k], 1e-6)));
+    check('Crop is still open with its shape', await page.evaluate(() => document.getElementById('menu-crop').open && !!NSO_CropCard.shape()));
+
+    console.log('\n=== D2. the ruler beside a ghost ===');
+    await page.click('#chk-ruler');
+    await frames(page, 3);
+    const sp0 = await page.evaluate(() => { const r = document.getElementById('nso-ruler-spine').getBoundingClientRect(); return { x: r.left, y: r.top, h: r.height }; });
+    await page.mouse.move(sp0.x + 250, sp0.y + sp0.h / 2); await page.mouse.down();
+    await page.mouse.move(sp0.x + 330, sp0.y + sp0.h / 2 - 60, { steps: 6 }); await page.mouse.up();
+    await frames(page, 3);
+    const sp1 = await page.evaluate(() => { const r = document.getElementById('nso-ruler-spine').getBoundingClientRect(); return { x: r.left, y: r.top }; });
+    const box3 = await page.evaluate(() => NSO_CropCard.state().box);
+    check('the ruler drags with a ghost up', near(sp1.x - sp0.x, 80, 1.5) && near(sp1.y - sp0.y, -60, 1.5), (sp1.x - sp0.x).toFixed(1) + ', ' + (sp1.y - sp0.y).toFixed(1));
+    check('...and the ghost is where it was', [0, 1, 2].every(k => near(box3.c[k], box2.c[k], 1e-6)));
+    await page.click('#chk-ruler');
+    await page.click('#btn-measure');   // off
+
+    console.log('\n=== D3. another tool\'s claim on a press wins over Measure ===');
+    // A handle press is preventDefault'd, or reported by a predicate. Either way it is not a measurement.
+    await page.click('#btn-crop-cancel');
+    await page.click('#btn-measure');
+    await page.evaluate(() => window.addEventListener('pointerdown', window.__claim = e => { e.preventDefault(); }, true));
+    await clickWorld(page, pA);
+    check('a press something else prevented is not a measurement', (await strays30(page)) === 0 && (await readout(page)) === null);
+    await page.evaluate(() => { window.removeEventListener('pointerdown', window.__claim, true); window.nsoWheelTakesPointer = () => true; });
+    await clickWorld(page, pA);
+    check('nor is one the Wheel says is its own', (await strays30(page)) === 0 && (await readout(page)) === null);
+    await page.evaluate(() => { delete window.nsoWheelTakesPointer; window.nsoFoamTakesPointer = () => true; });
+    await clickWorld(page, pA);
+    check('nor one Foam says is its own', (await strays30(page)) === 0);
+    await page.evaluate(() => { delete window.nsoFoamTakesPointer; });
+    await clickWorld(page, pA);
+    check('and with nobody claiming it, it is (control)', (await strays30(page)) > 0);
+    await page.click('#btn-measure'); await page.click('#btn-measure');   // off, on: clear the lone first point
+    await page.click('#btn-measure');
+
+    console.log('\n=== D4. a live card with work in progress: Cut ===');
+    await page.evaluate(() => { document.querySelectorAll('.vp-menu[open]').forEach(d => { if (d.id !== 'menu-measure') d.open = false; }); });
+    await page.click('#menu-cut > summary');
+    await page.waitForTimeout(300);
+    const cut0 = await page.evaluate(() => ({ open: state.cutterOpen, measure: document.getElementById('menu-measure').open }));
+    check('the Cut card opens with the Measure card already open (it no longer shuts it)', cut0.open && cut0.measure, JSON.stringify(cut0));
+    const rc2 = await panelRect(page, 'menu-cut'), rm2 = await panelRect(page, 'menu-measure');
+    check('side by side again, Measure having moved over to make room', !overlap(rc2, rm2), JSON.stringify([rc2 && Math.round(rc2.r), rm2 && Math.round(rm2.l)]));
+    await page.click('#btn-measure');
+    const cut1 = await page.evaluate(() => ({ cutter: !!state.cutterOpen, cutOpen: document.getElementById('menu-cut').open, measure: !!state.measureOn }));
+    check('arming Measure over a live cutter leaves the cutter open', cut1.cutter && cut1.cutOpen && cut1.measure, JSON.stringify(cut1));
+    await page.evaluate(() => { document.getElementById('menu-cut').open = false; });
+    await page.waitForTimeout(200);
+    const back = await panelRect(page, 'menu-measure');
+    check('when the other card goes, Measure goes back to the shared spot', !!back && near(back.l, rc2.l, 2), back ? Math.round(back.l) + ' vs ' + Math.round(rc2.l) : 'gone');
+    await page.click('#btn-measure');
+
+    console.log('\n=== D5. what still shuts Measure ===');
+    await page.evaluate(() => { document.getElementById('menu-crop').open = true; });
+    await page.waitForTimeout(100);
+    const two = await page.evaluate(() => [...document.querySelectorAll('.vp-menu[open]')].map(d => d.id).sort().join(','));
+    check('Measure and one other card can be open together', two === 'menu-crop,menu-measure', two);
+    await page.evaluate(() => { document.getElementById('menu-scale').open = true; });
+    await page.waitForTimeout(100);
+    const three = await page.evaluate(() => [...document.querySelectorAll('.vp-menu[open]')].map(d => d.id).sort().join(','));
+    check('but two other cards still shut each other (the rule is otherwise as it was)', three === 'menu-measure,menu-scale', three);
+    const errs = logs.filter(l => l.startsWith('[pageerror]'));
+    check('no page errors', errs.length === 0, errs.join(' | '));
+  });
+}
+
 (async () => {
   console.log('== Measure: the number on screen against the piece it is measuring ==');
   partA();
   await partB();
   await partC();
+  await partD();
   console.log('\n' + (fails ? fails + ' FAILED' : 'all gates held'));
   process.exit(fails ? 1 : 0);
 })().catch(e => { console.error('MEASURE TEST FAIL', e); process.exit(1); });
