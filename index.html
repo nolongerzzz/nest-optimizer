@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=dcc3e156" />
+  <link rel="stylesheet" href="styles.css?v=02dc7b63" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -1357,7 +1357,14 @@
                         title="Build supports for every outlined area. When the piece already has supports they are all replaced. One Undo puts it back. A build that cannot finish says why and adds nothing.">Generate</button>
                 <button id="btn-sup-none" class="btn btn-secondary" type="button" hidden disabled
                         title="Take every support off this piece. The areas stay outlined. In Assisted and Custom this also forgets the tips, spots turned off, circles and erasures. One Undo puts them back.">Remove all</button>
+                <button id="btn-sup-slice-cancel" class="btn btn-secondary" type="button" hidden
+                        title="Stop: the build and the slice it ends with (nothing is added), or a Preview's slice.">Cancel</button>
               </div>
+              <div class="sup-go-row sup-slice-row">
+                <button id="btn-sup-slice" class="btn btn-secondary sup-go" type="button"
+                        title="Open the plate's slice in G-scope. Generate slices the plate as it builds the supports; Preview opens that slice as it is. If the plate or a setting changed since, it slices first.">Preview</button>
+              </div>
+              <p id="sup-slice-line" class="hint sup-slice-line" role="status" hidden></p>
               <ul id="sup-rows" class="sup-rows" hidden aria-label="Areas that need a look"></ul>
               <div class="vp-row vp-row-full">
                 <button id="btn-sup-remove" class="btn btn-secondary" type="button" hidden disabled
@@ -1368,6 +1375,7 @@
                   <option value="strut">Straight strut</option>
                   <option value="tree" selected>Tree</option>
                   <option value="gecko-hand">Gecko-hand</option>
+                  <option value="none">None</option>
                 </select></label>
               <label class="vp-bend-field" for="sup-size">Size
                 <input type="number" id="sup-size" value="1.2" min="0.4" max="6" step="0.1" aria-label="Strut side, mm"
@@ -1387,6 +1395,12 @@
                   <option value="dense" selected>Dense (Bambu)</option>
                   <option value="open">Open</option>
                 </select></label>
+              <label class="vp-bend-field" for="slice-set-raft">Raft
+                <input type="number" id="slice-set-raft" value="0" min="0" max="30" step="1" aria-label="Raft layers"
+                       title="Raft layers under everything on the plate - its own system between the plate and the first layer of every part and support, with or without a support style (Bambu's raft_layers): the top half (rounded up) Support interface, the rest Support. 0: no raft (and the brim as set); with a raft there is no brim. Generate slices with it."><span>layers</span></label>
+              <label class="vp-bend-field" for="slice-set-raft-gap">Raft contact
+                <input type="number" id="slice-set-raft-gap" value="0.1" min="0" max="1" step="0.05" aria-label="Raft contact Z distance, mm"
+                       title="Raft contact Z distance, mm: the gap between the raft's top and the first layer on it (Bambu's raft_contact_distance, 0.1)."><span>mm</span></label>
               <details class="vp-sec sup-tune" id="sup-tune" hidden>
                 <summary class="vp-sec-head" id="sup-tune-head" title="Custom only: the numbers the planner builds its trees by. Nothing rebuilds as you type; Regenerate builds with them.">Tune<span id="sup-tune-count" class="sup-tune-count"></span></summary>
                 <div class="vp-sec-body">
@@ -1410,14 +1424,64 @@
                 </div>
               </details>
               <p id="sup-hint" class="hint sup-hint">Click an outlined area to leave it out, or put it back. Shift-click the piece to add a spot. Click a support to pick it.</p>
-              <!-- SLICE AND PREVIEW: the Slice card's slice of the plate, then its Preview in G-scope. The Slice card is unchanged. -->
-              <div class="sup-go-row sup-slice-row">
-                <button id="btn-sup-slice" class="btn btn-secondary sup-go" type="button"
-                        title="Slice the plate for its printer - every piece, supports included - and open the slice in G-scope to look at it. The same slice as the Slice card's; nothing is added to the plate.">Slice and Preview</button>
-                <button id="btn-sup-slice-cancel" class="btn btn-secondary" type="button" hidden
-                        title="Stop slicing. Nothing is kept.">Cancel</button>
-              </div>
-              <p id="sup-slice-line" class="hint sup-slice-line" role="status" hidden></p>
+              <!-- SLICE: the Slice card, at the foot of the supports card. Generate slices the plate (the supports drawn from that slice) and
+                   Preview, under Generate, opens it in G-scope; this section's settings change the next slice, Slice slices again, Export saves it. -->
+              <details class="vp-sec sup-slice-sec" id="sup-slice-sec" open>
+                <summary class="vp-sec-head" title="The plate's printer and its Slice settings: Generate slices with them; Slice slices again after a change; Export saves the .gcode.3mf.">Slice</summary>
+                <div class="vp-sec-body slice-card" id="slice-card">
+                  <p id="slice-profile" class="bend-readout slice-profile" title="The printer profile of the plate picker's plate. Slice settings start at its values.">&nbsp;</p>
+                  <button id="slice-settings-toggle" type="button" class="slice-disclose"
+                          aria-expanded="false" aria-controls="slice-settings">Slice settings</button>
+                  <div id="slice-settings" hidden>
+                    <label for="slice-set-nozzle">nozzle
+                      <select id="slice-set-nozzle" title="The printer profile's nozzle. A 0.6 nozzle needs its own profile (start and end G-code), which this printer does not have yet.">
+                        <option value="0.4" selected>0.4</option>
+                        <option value="0.6" disabled>0.6</option>
+                      </select></label>
+                    <label for="slice-set-layer">layer
+                      <input type="number" id="slice-set-layer" value="0.2" min="0.05" max="0.3" step="0.05" title="Layer height, mm. The first layer stays the profile's." /></label>
+                    <label for="slice-set-walls">walls
+                      <input type="number" id="slice-set-walls" value="2" min="1" max="10" step="1" /></label>
+                    <label for="slice-set-density">infill
+                      <input type="number" id="slice-set-density" value="15" min="0" max="100" step="5" />%</label>
+                    <select id="slice-set-pattern" title="Sparse infill pattern">
+                      <option value="grid" selected>grid</option>
+                      <option value="zigzag">zigzag</option>
+                      <option value="lines">lines</option>
+                    </select>
+                    <label for="slice-set-angle">support below
+                      <input type="number" id="slice-set-angle" value="30" min="1" max="89" step="1"
+                             title="Printable angle off the plate. 30 is the Bambu profile's support_threshold_angle." />&deg;</label>
+                    <label for="slice-set-brim">brim
+                      <select id="slice-set-brim" title="A brim round the first layer, 5 mm, 0.1 mm off the wall (Bambu's auto_brim: a part that is tall for its foot gets one). It stays off a support's pad.">
+                        <option value="auto" selected>auto</option>
+                        <option value="outer">every part</option>
+                        <option value="none">off</option>
+                      </select></label>
+                    <label for="slice-set-iface">interface
+                      <select id="slice-set-iface" title="How a support's interface and transition are laid. Sheet: as the supports were built. Column: read off the part's own layers column by column (docs/SUPPORT-GATE.md). One choice, shared with G-scope's Slice settings, and remembered.">
+                        <option value="" selected>sheet</option>
+                        <option value="column">column</option>
+                      </select></label>
+                    <p class="slice-settings-note" id="slice-settings-note">From the plate's printer profile. They take effect on the next slice, and the .gcode.3mf records them.</p>
+                    <button id="slice-settings-reset" type="button" class="btn btn-secondary"
+                            title="Every setting but the interface back to the printer profile's value">Profile values</button>
+                  </div>
+                  <div class="sup-go-row">
+                    <button id="btn-slice-go" class="btn btn-secondary sup-go" type="button"
+                            title="Slice every piece on the plate, supports included, for this printer. The page stays usable while it runs.">Slice</button>
+                    <button id="btn-slice-cancel" class="btn btn-secondary" type="button" hidden
+                            title="Stop slicing. Nothing is kept.">Cancel</button>
+                  </div>
+                  <div id="slice-progress" class="sup-progress is-indeterminate" role="progressbar" aria-label="Slicing" hidden><div class="sup-progress-fill"></div></div>
+                  <p id="slice-stage" class="bend-readout" hidden></p>
+                  <p id="slice-readout" class="bend-readout slice-readout" role="status">Press Slice to slice the plate.</p>
+                  <div class="slice-actions">
+                    <button id="btn-slice-export" class="btn btn-secondary" type="button" disabled
+                            title="Download the sliced plate as a Bambu .gcode.3mf: open it in Bambu Studio and print it without slicing it again.">Export .gcode.3mf</button>
+                  </div>
+                </div>
+              </details>
             </div>
           </details>
           <!-- ADD: what builds material onto a piece - Fill / Densify, Foam, Thicken,
@@ -2217,77 +2281,7 @@
             <div class="vp-row vp-row-full"><p id="carve-readout" class="carve-readout">&mdash;</p></div>
             </div>
           </details>
-          <!-- SLICE: the plate sliced for its printer, and the file it makes
-               (app-print.js, docs/PRINT-PLANNER.md). It slices every piece on
-               the plate, supports included, with the shared engine and the print
-               planner, on a worker so the page stays alive; the card shows the
-               stage and the seconds, then layers, time and filament, and offers
-               the .gcode.3mf as a download or, read-only, in G-scope. The printer
-               is the plate's (read here, not edited). Its Slice settings - the
-               same rows G-scope's Slice side has, the card's own - start at the
-               printer profile's values and change the next slice and its file. -->
-          <details class="vp-menu vp-shell-menu vp-col-menu vp-group-start" id="menu-slice" data-sec="slice">
-            <summary class="vp-bar-btn" title="Slice the plate for its printer: every piece, supports included. Download the .gcode.3mf or look at it in G-scope.">Slice</summary>
-            <div class="vp-menu-body vp-top-body slice-card" id="slice-card">
-              <p id="slice-profile" class="bend-readout slice-profile" title="The printer profile of the plate picker's plate. Slice settings start at its values.">&nbsp;</p>
-              <button id="slice-settings-toggle" type="button" class="slice-disclose"
-                      aria-expanded="false" aria-controls="slice-settings">Slice settings</button>
-              <div id="slice-settings" hidden>
-                <label for="slice-set-nozzle">nozzle
-                  <select id="slice-set-nozzle" title="The printer profile's nozzle. A 0.6 nozzle needs its own profile (start and end G-code), which this printer does not have yet.">
-                    <option value="0.4" selected>0.4</option>
-                    <option value="0.6" disabled>0.6</option>
-                  </select></label>
-                <label for="slice-set-layer">layer
-                  <input type="number" id="slice-set-layer" value="0.2" min="0.05" max="0.3" step="0.05" title="Layer height, mm. The first layer stays the profile's." /></label>
-                <label for="slice-set-walls">walls
-                  <input type="number" id="slice-set-walls" value="2" min="1" max="10" step="1" /></label>
-                <label for="slice-set-density">infill
-                  <input type="number" id="slice-set-density" value="15" min="0" max="100" step="5" />%</label>
-                <select id="slice-set-pattern" title="Sparse infill pattern">
-                  <option value="grid" selected>grid</option>
-                  <option value="zigzag">zigzag</option>
-                  <option value="lines">lines</option>
-                </select>
-                <label for="slice-set-angle">support below
-                  <input type="number" id="slice-set-angle" value="30" min="1" max="89" step="1"
-                         title="Printable angle off the plate. 30 is the Bambu profile's support_threshold_angle." />&deg;</label>
-                <label for="slice-set-brim">brim
-                  <select id="slice-set-brim" title="A brim round the first layer, 5 mm, 0.1 mm off the wall (Bambu's auto_brim: a part that is tall for its foot gets one). It stays off a support's pad.">
-                    <option value="auto" selected>auto</option>
-                    <option value="outer">every part</option>
-                    <option value="none">off</option>
-                  </select></label>
-                <label for="slice-set-raft">raft
-                  <input type="number" id="slice-set-raft" value="0" min="0" max="30" step="1" title="Raft layers under everything on the plate - its own system between the plate and the first layer of every part and support, as Bambu's raft_layers: the top half (rounded up) Support interface, the rest Support base. 0: no raft (and the brim as set); with a raft there is no brim." /> layers</label>
-                <label for="slice-set-raft-gap">contact
-                  <input type="number" id="slice-set-raft-gap" value="0.1" min="0" max="1" step="0.05" title="Raft contact Z distance, mm: the gap between the raft's top and the first layer on it (Bambu's raft_contact_distance, 0.1)." /> mm</label>
-                <label for="slice-set-iface">interface
-                  <select id="slice-set-iface" title="How a support's interface and transition are laid. Sheet: as the supports were built. Column: read off the part's own layers column by column (docs/SUPPORT-GATE.md). One choice, shared with G-scope's Slice settings, and remembered.">
-                    <option value="" selected>sheet</option>
-                    <option value="column">column</option>
-                  </select></label>
-                <p class="slice-settings-note" id="slice-settings-note">From the plate's printer profile. They take effect on the next slice, and the .gcode.3mf records them.</p>
-                <button id="slice-settings-reset" type="button" class="btn btn-secondary"
-                        title="Every setting but the interface back to the printer profile's value">Profile values</button>
-              </div>
-              <div class="sup-go-row">
-                <button id="btn-slice-go" class="btn btn-primary sup-go" type="button"
-                        title="Slice every piece on the plate, supports included, for this printer. The page stays usable while it runs.">Slice</button>
-                <button id="btn-slice-cancel" class="btn btn-secondary" type="button" hidden
-                        title="Stop slicing. Nothing is kept.">Cancel</button>
-              </div>
-              <div id="slice-progress" class="sup-progress is-indeterminate" role="progressbar" aria-label="Slicing" hidden><div class="sup-progress-fill"></div></div>
-              <p id="slice-stage" class="bend-readout" hidden></p>
-              <p id="slice-readout" class="bend-readout slice-readout" role="status">Press Slice to slice the plate.</p>
-              <div class="slice-actions">
-                <button id="btn-slice-export" class="btn btn-secondary" type="button" disabled
-                        title="Download the sliced plate as a Bambu .gcode.3mf: open it in Bambu Studio and print it without slicing it again.">Export .gcode.3mf</button>
-                <button id="btn-slice-preview" class="btn btn-secondary" type="button" disabled
-                        title="Open this same file in G-scope, read-only: the supports show as Support, Support interface and Support transition. Nothing is added to the plate.">Preview in G-scope</button>
-              </div>
-            </div>
-          </details>
+          <!-- SLICE moved into the supports card (its last section, #sup-slice-sec): Generate slices the plate. -->
           <!-- G-scope: the ONE G-code / microscope tool. It lays an inspector
                OVER whatever is on the plate, the way X-ray acts on what is
                already there; a sliced .gcode.3mf import (by content, not by
@@ -2894,7 +2888,7 @@
   <script src="nso-gcode-lines.js?v=fe0b823c"></script>
   <script src="nso-gscope-diff.js?v=937f4953"></script>
   <script src="nso-gcode-solid.js?v=ac1a4f02"></script>
-  <script src="nso_slicer.js?v=f3fc2c12"></script>
+  <script src="nso_slicer.js?v=1e0fbc7f"></script>
   <script src="nso_raster_lines.js?v=461ca449"></script>
   <!-- The support interface: the crosshatch's one-direction layers, and the
        sheet a support tree's tips carry under the part (flat caps on the
@@ -3090,7 +3084,7 @@
        own page code, which listens for the press before the card does. After nso-helpers.js, app-core.js. docs/SUPPORT-BLOCKERS.md. -->
   <script src="nso_support_blockers.js?v=6962a81c"></script>
   <script src="app-support-blockers.js?v=73c8125d"></script>
-  <script src="app-supports-card.js?v=1ac2f5e9"></script>
+  <script src="app-supports-card.js?v=71c41bf1"></script>
   <script src="app-gscope-slice.js?v=558d0268"></script>
   <!-- The Slice card (left bar): the plate sliced for its printer, the .gcode.3mf
        it makes. The print planner and the packager are loaded here for it and for
@@ -3100,7 +3094,7 @@
        plate reader and G-code import it calls. See docs/PRINT-PLANNER.md. -->
   <script src="nso-print-planner.js?v=f4b28af6"></script>
   <script src="nso-gcode3mf-write.js?v=cdfa15b4"></script>
-  <script src="app-print.js?v=38eb64f0"></script>
+  <script src="app-print.js?v=11720004"></script>
   <!-- Lift: details off a face, the face left as it was round them. After
        nso_lift.js (Phase 1: a flat face), nso_lift_curved.js (Lift 3: the
        repair under a detail lifted off a curved base), nso_lift_auto.js

@@ -329,8 +329,8 @@ async function main() {
   await page.evaluate((fs) => handleFiles(fs.map(([n, a]) => new File([new Uint8Array(a)], n))), [['cube.stl', CUBE]]);
   await page.waitForFunction(() => state.placed.filter((p) => !state.models.find((m) => m.id === p.sourceId).nsoSupport).length === 2, null, { timeout: 30000 });
   const cubeAt = await page.evaluate(() => { const p = state.placed.find((q) => state.models.find((m) => m.id === q.sourceId).name === 'cube'); const b = new THREE.Box3().setFromObject(p.mesh); return { x: (b.min.x + b.max.x) / 2, y: -(b.min.z + b.max.z) / 2, z: (b.min.y + b.max.y) / 2 }; });
-  const sliceUi = await page.evaluate(() => ({ go: document.getElementById('btn-slice-go').textContent, exp: document.getElementById('btn-slice-export').disabled, prev: document.getElementById('btn-slice-preview').disabled }));
-  check('before: the Slice card has not been used (Export and Preview are off)', sliceUi.exp && sliceUi.prev && sliceUi.go === 'Slice');
+  const sliceUi = await page.evaluate(() => ({ go: document.getElementById('btn-slice-go').textContent, exp: document.getElementById('btn-slice-export').disabled, prev: document.getElementById('btn-sup-slice').textContent }));
+  check('before: the slice Generate made is the plate\'s no more (a cube came after it): Export is off, Preview will slice first', sliceUi.exp && sliceUi.prev === 'Preview' && sliceUi.go === 'Slice');
   await page.click('#btn-sup-slice');
   await page.waitForFunction(() => window.NSO_SUPPORTS_CARD.sliceBusy(), null, { timeout: 5000 });
   await frames(page);
@@ -346,14 +346,14 @@ async function main() {
   await frames(page);
   const after = await page.evaluate(() => ({
     side: window.NSO_MICROSCOPE.cardSide(), card: document.getElementById('menu-supports').open,
-    exp: document.getElementById('btn-slice-export').disabled, prev: document.getElementById('btn-slice-preview').disabled,
+    exp: document.getElementById('btn-slice-export').disabled,
     readout: document.getElementById('slice-readout').textContent, cancel: document.getElementById('btn-slice-cancel').hidden,
-    buttons: ['btn-slice-go', 'btn-slice-cancel', 'btn-slice-export', 'btn-slice-preview'].map((i) => !!document.getElementById(i)),
+    buttons: ['btn-slice-go', 'btn-slice-cancel', 'btn-slice-export', 'btn-sup-slice'].map((i) => !!document.getElementById(i)),
     pieces: state.placed.length
   }));
   check('G-scope opened on the Slice side with the slice loaded', after.side === 'slice', JSON.stringify(after));
   check('...the supports card is put away', !after.card);
-  check('...the Slice card is as it was: its four controls, its readout holding this slice, Export and Preview on', after.buttons.every(Boolean) && !after.exp && !after.prev && /layers/.test(after.readout) && /support/.test(after.readout) && after.cancel, after.readout);
+  check('...the Slice section is as it was: its controls, its readout holding this slice, Export on', after.buttons.every(Boolean) && !after.exp && /layers/.test(after.readout) && /support/.test(after.readout) && after.cancel, after.readout);
   check('...nothing was added to the plate (the bridge, its support, the cube)', after.pieces === 3, String(after.pieces));
   await shot('08-gscope.png');
 

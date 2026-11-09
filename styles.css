@@ -4300,7 +4300,6 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
 /* The bottom stack - Slice, G-scope, Check & repair - is pinned to the bottom
    over the view row; the free space falls above Slice. Slice and G-scope are
    one pair (the column's pitch); Check & repair keeps its group gap above it. */
-.vp-shell-col > #menu-slice { margin-top: auto; }
 .vp-shell-col > .vp-shell-view {
   display: flex;
   gap: var(--shell-col-gap);
@@ -4757,6 +4756,8 @@ body.sup-card-open #adjust-status { display: none; }
 /* The Slice card (app-print.js): the plate's printer, Slice, the stage and the
    seconds while it runs, the readout, and the two actions. The Supports card's
    rows and progress bar, so the two read alike. */
+/* the Slice card is the supports card's last section now: G-scope alone is pinned to the column's foot (Slice used to sit over it) */
+.vp-shell-col > #btn-microscope { margin-top: auto; }
 .slice-card { display: flex; flex-direction: column; gap: 4px; min-width: 250px; }
 .slice-card [hidden] { display: none !important; }
 .slice-card .slice-profile { margin: 0; font-size: 11px; color: #e2e8f0; }

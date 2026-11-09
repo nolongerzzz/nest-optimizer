@@ -296,18 +296,22 @@ async function main() {
   const html = read('index.html');
   const at = s => html.indexOf(s);
   const col = html.slice(at('<div class="vp-shell-col">'));
-  const order = ['id="menu-sculpt"', 'id="menu-slice"', 'id="btn-microscope"', 'id="menu-repair"', 'class="vp-shell-view'].map(s => col.indexOf(s));
-  check('the left bar, top to bottom: ... Sculpt, SLICE, G-SCOPE, CHECK & REPAIR, then the view row', order.every((v, i) => v > 0 && (i === 0 || v > order[i - 1])), order.join(' '));
-  check('...and G-scope is no longer first in the column (Scale is)', col.indexOf('id="menu-scale"') < col.indexOf('id="btn-microscope"') && col.indexOf('id="menu-scale"') > 0 &&
-    col.indexOf('id="menu-scale"') < col.indexOf('id="menu-slice"'));
+  const order = ['id="menu-sculpt"', 'id="btn-microscope"', 'id="menu-repair"', 'class="vp-shell-view'].map(s => col.indexOf(s));
+  check('the left bar, top to bottom: ... Sculpt, G-SCOPE, CHECK & REPAIR, then the view row - no Slice button of its own (it is the supports card\'s)',
+    order.every((v, i) => v > 0 && (i === 0 || v > order[i - 1])) && !html.includes('id="menu-slice"'), order.join(' '));
+  check('...and G-scope is not first in the column (Scale is)', col.indexOf('id="menu-scale"') < col.indexOf('id="btn-microscope"') && col.indexOf('id="menu-scale"') > 0);
   check('G-scope\'s button is the same button: its id, class, label and its file input beside it',
     /<button id="btn-microscope" class="vp-bar-btn btn-gscope" type="button"\s+aria-label="G-scope"\s+title="G-scope: put the plate under the lens[^"]*">G-scope<\/button>\s*<input type="file" id="ms-input" accept="\.stl,\.3mf" class="hidden-quiet" \/>/.test(html));
-  check('the card is a column card like the others: a details.vp-menu with a summary and a .vp-menu-body holding every button it has',
-    (() => { const m = /<details class="vp-menu vp-shell-menu vp-col-menu[^"]*" id="menu-slice"[\s\S]*?<\/details>/.exec(html);
-      return !!m && /<summary class="vp-bar-btn"[^>]*>Slice<\/summary>/.test(m[0]) && ['btn-slice-go', 'btn-slice-cancel', 'btn-slice-export', 'btn-slice-preview', 'slice-profile', 'slice-readout', 'slice-progress',
+  check('the Slice card is the supports card\'s last section (Generate slices; Preview, under Generate, opens it): every button and row it has, the raft in the supports\' own rows',
+    (() => { const m = /<details class="vp-menu vp-shell-menu vp-col-menu" id="menu-supports">[\s\S]*?<\/details>\s*<!-- ADD/.exec(html);
+      if (!m) return false;
+      const sec = /<details class="vp-sec sup-slice-sec" id="sup-slice-sec"[\s\S]*$/.exec(m[0]), settings = /<div id="slice-settings"[\s\S]*?<\/div>/.exec(m[0]);
+      return !!sec && /<summary class="vp-sec-head"[^>]*>Slice<\/summary>/.test(sec[0]) && ['btn-slice-go', 'btn-slice-cancel', 'btn-slice-export', 'slice-profile', 'slice-readout', 'slice-progress',
         'slice-settings-toggle', 'slice-settings', 'slice-set-nozzle', 'slice-set-layer', 'slice-set-walls', 'slice-set-density', 'slice-set-pattern',
         'slice-set-angle', 'slice-set-brim', 'slice-set-iface', 'slice-settings-reset']
-        .every(id => m[0].includes('id="' + id + '"')) && /Export \.gcode\.3mf/.test(m[0]) && /Preview in G-scope/.test(m[0]); })());
+        .every(id => sec[0].includes('id="' + id + '"')) && /Export \.gcode\.3mf/.test(sec[0]) && !sec[0].includes('btn-slice-preview') &&
+        m[0].indexOf('id="btn-sup-all"') < m[0].indexOf('id="btn-sup-slice"') && m[0].indexOf('id="btn-sup-slice"') < m[0].indexOf('id="sup-style"') &&
+        m[0].includes('id="slice-set-raft"') && m[0].includes('id="slice-set-raft-gap"') && !!settings && !settings[0].includes('slice-set-raft'); })());
   const tags = [...html.replace(/<!--[\s\S]*?-->/g, '').matchAll(/<script src="([^"?]+)(?:\?v=\w+)?"/g)].map(m => m[1]);
   const idx = f => tags.indexOf(f);
   check('the planner, the packager and app-print.js are loaded by the page, after the files they read at load and after G-scope',

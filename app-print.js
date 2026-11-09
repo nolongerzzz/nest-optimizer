@@ -36,7 +36,7 @@
  *   the pure half   profileFor, pieceObjects, build, fileName, readTemplate.
  *                   No DOM. It loads on the page, in the slice worker
  *                   (importScripts) and in Node (tools/print-slice-check.js).
- *   the card        guarded by `document`; binds #menu-slice.
+ *   the card        guarded by `document`; binds #slice-card, the Slice section at the foot of the supports card (#menu-supports).
  *
  * THE SLICE RUNS IN A WORKER. The engine is synchronous JS (a 40-layer plate is
  * seconds, a big one a minute), so a worker loads the same engine files the
@@ -293,6 +293,7 @@
     return Promise.resolve().then(function () {
       var so = slicerOptions(SL, PL, objects, assets, settings);
       over = so.over; config = so.config;
+      if (opts.stacks) so.o.columnStacks = true;       /* the supports card's Generate: the supports as they print come back with the file */
       stage('slicing', { objects: objects.length });
       return SL.run(objects, so.o);
     }).then(function (res) {
@@ -306,7 +307,8 @@
           ok: true, reason: '', bytes: out.bytes, features: Object.keys(seen), objects: out.plan.labels.length,
           labels: out.plan.labels.map(function (l) { return { id: l.id, name: l.name, index: l.index }; }),     // the gcode's OBJECT_ID of each object, in the order they were given
           stats: { layers: st.layers, seconds: st.seconds.total, grams: st.grams, filamentMm: st.filamentMm, maxZ: st.maxZ },
-          settings: settings, changed: Object.keys(over)                                                         // what was sliced with, and what differs from the profile
+          settings: settings, changed: Object.keys(over),                                                        // what was sliced with, and what differs from the profile
+          stacks: res.stacks ? stacksToPlate(res.stacks, assets.printer.bed) : null                              // the supports as they print, in the plate's frame
         };
       });
     }).catch(function (err) {
@@ -315,10 +317,19 @@
     });
   }
 
+  /** The slicer's stacks (nso_slicer.js o.columnStacks) back from the bed's frame to the plate's (pieceObjects' shift undone). */
+  function stacksToPlate(stacks, bed) {
+    var dx = bed.x / 2, dy = bed.y / 2;
+    var back = function (polys) { return polys.map(function (poly) { return poly.map(function (pt) { return [pt[0] - dx, pt[1] - dy]; }); }); };
+    return stacks.map(function (st) {
+      return { key: st.key, name: st.name, layers: st.layers.map(function (L) { return { z0: L.z0, z1: L.z1, printed: L.printed, S: back(L.S), I: back(L.I), T: back(L.T) }; }) };
+    });
+  }
+
   /** The settings in a few words, for the readout: "0.12 mm layers, 3 walls, 20 % grid, support below 30°, brim auto". */
   function settingsWords(st) {
     return st.layer + ' mm layers, ' + st.walls + ' wall' + (st.walls === 1 ? '' : 's') + ', ' + st.density + ' % ' + st.pattern +
-      ', support below ' + st.angle + '°, brim ' + st.brim;
+      ', support below ' + st.angle + '°, ' + (st.raft > 0 ? 'raft ' + st.raft + ' layer' + (st.raft === 1 ? '' : 's') + ' (no brim)' : 'brim ' + st.brim);
   }
 
   /** Seconds as "1 h 05 min" / "42 min" / "30 s". */
@@ -336,8 +347,8 @@
   }
 
   /** Worker entry (see the card): build, with the file's bytes moved rather than copied. */
-  function buildForWorker(objects, assets, onStage, settings) {
-    return build(objects, assets, { onStage: onStage, settings: settings || null }).then(function (r) {
+  function buildForWorker(objects, assets, onStage, settings, extra) {
+    return build(objects, assets, { onStage: onStage, settings: settings || null, stacks: !!(extra && extra.stacks) }).then(function (r) {
       var b = r.bytes, move = [];
       if (b) {
         if (b.byteOffset !== 0 || b.byteLength !== b.buffer.byteLength) r.bytes = b = b.slice();
@@ -499,7 +510,7 @@
    * comes back to onStage. A page that cannot start a worker slices in-thread
    * (and freezes while it does).
    */
-  function runAway(objects, assets, onStage, settings) {
+  function runAway(objects, assets, onStage, settings, extra) {
     var urls = engineUrls();
     var canWorker = urls && typeof Worker === 'function' && typeof Blob === 'function' && root.URL && URL.createObjectURL;
     if (!canWorker) {
@@ -507,14 +518,14 @@
       return {
         cancel: function () { dead = true; },
         promise: new Promise(function (go) { setTimeout(go, 0); }).then(function () {
-          return build(objects, assets, { onStage: onStage, settings: settings || null });
+          return build(objects, assets, { onStage: onStage, settings: settings || null, stacks: !!(extra && extra.stacks) });
         }).then(function (r) { if (dead) return new Promise(function () {}); return r; })
       };
     }
     var code = 'importScripts(' + urls.map(function (u) { return JSON.stringify(u); }).join(',') + ');\n' +
       'self.onmessage = function (e) {\n' +
       '  var d = e.data;\n' +
-      '  self.NSO_Print.buildForWorker(d.objects, d.assets, function (s, info) { self.postMessage({ stage: s, info: info }); }, d.settings)\n' +
+      '  self.NSO_Print.buildForWorker(d.objects, d.assets, function (s, info) { self.postMessage({ stage: s, info: info }); }, d.settings, d.extra)\n' +
       '    .then(function (o) { self.postMessage({ result: o.result }, o.move); },\n' +
       '          function (err) { self.postMessage({ error: (err && err.message) || String(err) }); });\n' +
       '};\n';
@@ -529,7 +540,7 @@
       };
       w.onerror = function (ev) { done = true; reject(new Error((ev && ev.message) || 'the slicer stopped')); };
       var move = objects.map(function (o) { return o.soup.buffer; });
-      w.postMessage({ objects: objects, assets: assets, settings: settings || null }, move);
+      w.postMessage({ objects: objects, assets: assets, settings: settings || null, extra: extra || null }, move);
     }).then(function (r) { cleanup(); return r; }, function (err) { cleanup(); throw err; });
     function cleanup() { try { w.terminate(); } catch (e) { /* gone */ } try { URL.revokeObjectURL(url); } catch (e2) { /* ditto */ } }
     return {
@@ -585,7 +596,7 @@
     }
     // a printer picked since the rows were set starts them again at its profile's values
     if (!S.busy && (p ? p.id : null) !== S.seededFor) seedSettings(p);
-    var menu = $('menu-slice'), iface = $('slice-set-iface');
+    var menu = $('menu-supports'), iface = $('slice-set-iface');
     if (menu && menu.open) seedFromTemplate(p);
     if (iface && !S.busy) iface.value = interfaceRule() || '';           // G-scope may have changed the shared choice
     if (S.result && S.result.ok && !S.busy && !isFresh()) readout(staleWords(), true);
@@ -611,7 +622,8 @@
     }
     if (!profile) { refresh(); return Promise.resolve(stop('Pick the A1 mini or the A1 / P1S / X1C plate to slice for.')); }
     var pieces;
-    try { pieces = readPieces(); } catch (err) { console.error(err); pieces = null; }
+    /* hook.pieces: the plate as the supports card is about to leave it (its new supports not placed yet, the ones they replace left out) */
+    try { pieces = hook && hook.pieces ? hook.pieces : readPieces(); } catch (err) { console.error(err); pieces = null; }
     if (pieces === null) return Promise.resolve(stop('The plate reader (G-scope\'s) did not load - check console.'));
     if (!pieces.length) return Promise.resolve(stop('Nothing on the plate to slice.'));
     var settings = readSettings();
@@ -638,7 +650,7 @@
     loadAssets(profile).then(function (assets) {
       if (mine.cancelled) return null;
       var objects = pieceObjects(pieces, assets.printer.bed);
-      mine.run = runAway(objects, assets, onStage, settings);
+      mine.run = runAway(objects, assets, onStage, settings, { stacks: !!(hook && hook.stacks) });
       return mine.run.promise;
     }).then(function (r) {
       if (mine.cancelled || !r) return ended({ ok: false, reason: 'Slice cancelled.', cancelled: true });
@@ -651,7 +663,7 @@
               (r.changed && r.changed.length ? ' - ' + settingsWords(settings) : ''), false);
       say('Sliced for the ' + profile.short + ': ' + describe(r));
       refresh();                          // a piece moved while it ran: the readout says so, and Export stays shut
-      return ended({ ok: true, reason: '', line: describe(r), fresh: isFresh() });
+      return ended({ ok: true, reason: '', line: describe(r), fresh: isFresh(), stacks: r.stacks || null });
     }).catch(function (err) {
       if (mine.cancelled) return ended({ ok: false, reason: 'Slice cancelled.', cancelled: true });
       S.job = null; S.result = null;
@@ -663,6 +675,19 @@
       return ended({ ok: false, reason: why });
     });
     return result;
+  }
+
+  /**
+   * The supports card's Generate sliced the plate before its supports were placed (hook.pieces, each new support under a key of its own); once
+   * placed, the slice is the plate's: `ids` maps those keys to the pieces' ids, and the slice is signed for the plate as it now stands - its
+   * drawing is not what is sliced (nsoSupportSliceSoup), so the slice is fresh for Preview and Export.
+   */
+  function adopt(ids) {
+    if (!S.result || !S.result.ok || !S.pieces) return false;
+    S.pieces = S.pieces.map(function (p) { return ids && ids[p.sourceId] != null ? Object.assign({}, p, { sourceId: ids[p.sourceId] }) : p; });
+    S.sig = plateSignature();
+    refresh();
+    return true;
   }
 
   function cancel() {
@@ -702,7 +727,7 @@
     if (!f) return false;
     var MS = root.NSO_MICROSCOPE;
     if (!MS || !MS.openFile) { readout('G-scope did not load - check console.', true); return false; }
-    var menu = $('menu-slice');
+    var menu = $('menu-supports');
     if (menu) menu.open = false;
     // a copy: G-scope reads the bytes, and the card keeps its file for Export
     var rec = { name: f.name, bytes: f.bytes, pieces: S.pieces, labels: S.result.labels || [], profile: S.profile, settings: S.settings || null };
@@ -833,8 +858,9 @@
   }
 
   function mount() {
-    var menu = $('menu-slice');
-    if (!menu) return;
+    /* the Slice card is the supports card's last section (Generate slices the plate; this re-slices it with changed settings, and exports) */
+    if (!$('slice-card')) return;
+    var menu = $('menu-supports');
     var bind = function (id, fn) { var el = $(id); if (el) el.addEventListener('click', fn); };
     bind('btn-slice-go', function () { slice(); });
     bind('btn-slice-cancel', cancel);
@@ -855,12 +881,12 @@
     bind('ms-btn-plate-3mf', function () { exportFromCard('3mf', false); });
     bind('ms-btn-sel-gcode3mf', function () { exportFromCard('gcode3mf', true); });
     bind('ms-btn-sel-3mf', function () { exportFromCard('3mf', true); });
-    menu.addEventListener('toggle', function () { if (menu.open) refresh(); });
+    if (menu) menu.addEventListener('toggle', function () { if (menu.open) refresh(); });
     refresh();
   }
 
   api.sliceOptionsForPlate = sliceOptionsForPlate;
-  api.card = { slice: slice, sliceAndPreview: sliceAndPreview, cancel: cancel, exportFile: exportFile, previewInGscope: previewInGscope, refresh: refresh,
+  api.card = { slice: slice, sliceAndPreview: sliceAndPreview, cancel: cancel, adopt: adopt, fresh: function () { return isFresh(); }, readPieces: function () { return readPieces(); }, exportFile: exportFile, previewInGscope: previewInGscope, refresh: refresh,
                exportSlice: exportSlice, exportFromCard: exportFromCard, indicesFor: indicesFor,
                state: function () { return { busy: S.busy, result: S.result, fresh: isFresh() }; } };
 

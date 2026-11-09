@@ -27,6 +27,14 @@ plane of one of the area's spots, inside the loops), so an underside area can be
 clicked from above. A spot the footprint does not hold (a crease, a tip, a side
 spot, one placed by hand) keeps its cell.
 
+
+> **Generate is the slice (newest).** Generate builds every piece's supports, then slices the plate ONCE with the Slice section's
+> printer and settings (`sliceStep`: the plate's pieces less the supports being replaced, plus the new ones under keys of their own);
+> each support is drawn from that slice (nso_slicer.js `columnStacks`), the slice is adopted for the plate as placed
+> (`NSO_Print.card.adopt`) and **Preview**, under Generate, opens it in G-scope as it is. Cancel beside Generate stops the build or
+> its slice. Style **None** builds nothing and just slices (with the raft). The Slice card is this card's last section; **Raft** and
+> **Raft contact** are among its settings. The separate drawing slice per piece (`stackStep`) is gone.
+
 ## 0. Detect first
 
 Opening **Supports** - or selecting a piece while it is open - runs detection

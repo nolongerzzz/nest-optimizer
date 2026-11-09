@@ -194,14 +194,20 @@ What Studio's file has that `toGcode()`'s text does not, and where each landed.
 
 ## The Slice card (print-slice-main-plate)
 
-`app-print.js`, `#menu-slice`. A SLICE button in the left bar's bottom stack
-(Slice, G-scope, Check & repair, top to bottom) opens a card shaped like the other
-left-bar cards (a `details.vp-menu`, one open at a time). It is UI only and download
-only: no Send, no printer link.
+`app-print.js`, `#slice-card`: the **last section of the supports card** (`#sup-slice-sec`), not a
+button of its own in the left bar any more (the owner: one job, not a slice to draw the supports and
+another to print them). **Generate slices**: once every piece's supports are built, the plate is
+sliced once with this card's printer and settings (the raft included), the supports are drawn from
+that slice (nso_slicer.js `columnStacks`) and the slice waits here, fresh; **Preview**, right under
+Generate, opens it in G-scope as it is (it slices first only when the plate or a setting changed
+since). Cancel beside Generate stops the build and its slice. Style **None** builds no supports: Generate
+just slices the plate (with its raft). The **Raft** rows sit in the supports card's settings. This
+section keeps the printer line, the folded Slice settings, **Slice** (again, after a change) and
+**Export .gcode.3mf**. It is UI only and download only: no Send, no printer link.
 
 - **What it does.** Slices every piece on the plate, supports included, for the
   plate's printer profile, and reads out layers, estimated time and filament grams.
-  Then **Export .gcode.3mf** downloads the packaged file and **Preview in G-scope**
+  Then **Export .gcode.3mf** downloads the packaged file and **Preview** (the supports card's, under Generate)
   opens that same file through G-scope's existing `.gcode.3mf` import
   (`NSO_MICROSCOPE.openFile`), read-only, so the supports show as Support /
   Support interface / Support transition. A plate the planner refuses (off the bed,

@@ -1671,8 +1671,11 @@
       /* THE SUPPORT AS IT PRINTS (o.columnStackOnly): each support's sections on its own grid after the column rule (S: the whole of it, I / T: its
          interface and transition), as hole-free pieces in the soup's frame - the supports card draws the support from them, so the generator shows
          what the slice prints (the rule lays the interface only when slicing: the generator showed a bare tree) */
-      if (o.columnStackOnly) {
-        return { ok: true, shiftZ: shiftZ, stacks: perObject.filter(function (P) { return P.role === 'support' && P.col; }).map(function (P) {
+      /* ...and with the whole slice (o.columnStacks): the supports card's Generate slices the plate once, draws its supports from this and keeps
+         the slice itself for Preview - one slice, not one to draw and another to print */
+      var stacks = null;
+      if (o.columnStackOnly || o.columnStacks) {
+        stacks = perObject.filter(function (P) { return P.role === 'support' && P.col; }).map(function (P) {
           var SPp = P.planes || planes, layers = [];
           SPp.forEach(function (pl, i) {
             var I = P.col.I[i], Tt = P.col.T[i], Sx = P.S[i];
@@ -1684,7 +1687,8 @@
             layers.push({ z0: pl.printZ - pl.h - shiftZ, z1: pl.printZ - shiftZ, printed: printed, I: hasI ? holeFree(g, I) : [], T: hasT ? holeFree(g, Tt) : [], S: hasS ? holeFree(g, Sx) : [] });
           });
           return { key: P.key, name: P.name, layers: layers };
-        }) };
+        });
+        if (o.columnStackOnly) return { ok: true, shiftZ: shiftZ, stacks: stacks };
       }
 
       if (!rp) addBrims(g, perObject, planes, o);
@@ -1773,6 +1777,7 @@
         }),
         ms: 0
       };
+      if (stacks) result.stacks = stacks;
       if (raftOb) { result.objects.push(raftOb); result.raft = { layers: rp.N, base: rp.nB, interface: rp.nI, topMm: rp.top, liftMm: rp.lift }; }
       result.ms = Date.now() - t0;
       result.report = describe(result);

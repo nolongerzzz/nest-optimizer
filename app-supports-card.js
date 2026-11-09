@@ -915,6 +915,7 @@ var NSO_SUPPORTS_CARD = (function () {
      the percent is the plate's. */
   function progressLine() {
     var pg = S.prog, run = S.run, pre = run ? 'Piece ' + run.k + ' of ' + run.n + ' \u00b7 ' : '';
+    if (pg && pg.phase === 'slicing') return S.sliceStage || 'Slicing the plate \u00b7 ' + S.elapsed + ' s';     /* the Slice card's own stage line, seconds in it */
     if (!pg) return pre + buildingLine();
     var word = PHASE_WORD[pg.phase];
     return pre + (percentOf(pg) == null ? word + ' \u00b7 ' + S.elapsed + ' s'
@@ -971,7 +972,7 @@ var NSO_SUPPORTS_CARD = (function () {
     var en = function (id, on) { var e = $(id); if (e) e.disabled = !on || !!S.busy || SL.busy; };
     var go = $('btn-sup-all');
     if (go) { go.textContent = cs === 'building' ? buildingLine() : cs === 'built' ? 'Regenerate' : 'Generate'; go.classList.toggle('is-stale', stale); }
-    en('btn-sup-all', (cs === 'idle' || cs === 'built') && (wide ? !!(W && W.totals.areas > 0) : a && a.areas > 0));
+    en('btn-sup-all', styleNone() ? !!(state.placed && state.placed.length) : (cs === 'idle' || cs === 'built') && (wide ? !!(W && W.totals.areas > 0) : a && a.areas > 0));
     var none = $('btn-sup-none'), rm = $('btn-sup-remove');
     var wasBuilt = hasHost && memOf(S.hostId).built && (cs === 'built' || cs === 'building');
     if (none) none.hidden = !wasBuilt;          // REMOVE ALL and REMOVE stay per piece: not on the plate's card
@@ -1584,7 +1585,7 @@ var NSO_SUPPORTS_CARD = (function () {
       pr = r;
       if (job.dead) return null;
       pr.s = settleResults(pr.areas, pr.builtOf, D);
-      return pr.s.ok ? stackStep(c, pr.s.results).then(function () { return brimStep(c, pr.s.results); }) : null;
+      return pr.s.ok ? brimStep(c, pr.s.results).then(function () { return sliceStep(J, [{ c: c, results: pr.s.results }], removeIds); }) : null;
     });
 
     /* The one place the plate changes. Synchronous from the first removal to
@@ -1610,7 +1611,7 @@ var NSO_SUPPORTS_CARD = (function () {
       return { ok: true, added: added, removed: removed.map(function (x) { return x.placed.sourceId; }) };
     }
 
-    return finishJob(J, chain.then(commit), afterCommit, function (res) {
+    return finishJob(J, chain.then(commit).then(adoptSlice), afterCommit, function (res) {
       return { ok: true, added: res.added, removed: res.removed,
         stats: areaStats(S.eff, statesFor(S.eff)), line: ($('sup-count') || {}).textContent || '' };
     }).then(function (r) {
@@ -1679,6 +1680,8 @@ var NSO_SUPPORTS_CARD = (function () {
     return { job: job, heard: heard, pause: pause, arm: arm, guard: guard };
   }
   function endJob(job) {
+    /* a build stopped while the plate was being sliced (sliceStep) stops the slice too */
+    if (job.slicing && !job.dead) { job.slicing = false; var PRc = window.NSO_Print && window.NSO_Print.card; if (PRc && PRc.cancel) PRc.cancel(); }
     job.dead = true;
     clearTimeout(job.timer); clearTimeout(job.ceiling); clearInterval(job.clock);
     stopWorker(job);
@@ -1845,35 +1848,49 @@ var NSO_SUPPORTS_CARD = (function () {
   }
   /* the gate's settings: the drawing's slice when no printer is picked (the node harness, support:gate) */
   var STACK_SLICE = { supportInterfaceLayers: 3, supportLayerMaxMm: 0.28, supportInterfaceRule: 'column' };
-  function stackStep(c, results) {
-    var SL = window.NSO_Slicer, GP = window.NSO_SupportGridpack;
-    if (!columnRule() || !SL || typeof SL.sliceObjects !== 'function' || typeof SL.loadKernel !== 'function' || !GP || typeof GP._prismSoup !== 'function') return Promise.resolve(null);
-    var sols = [];
-    results.forEach(function (r) { if (r.ok) (r.solids || []).forEach(function (sd) { if (!sd.brim && sd.soup && sd.soup.length) sols.push(sd); }); });
-    if (!sols.length || !c.D || !c.D.soup) return Promise.resolve(null);
-    /* ONE SLICE: the options the Slice card slices the plate with now - its printer's profile and its Slice settings (NSO_Print.sliceOptionsForPlate,
-       the same function its own slice takes them from) - so the drawing is that slice's layers, not a second slice's. Without a printer picked
-       (or the print module), the gate's settings (STACK_SLICE). */
-    var po = partsOptsOf(c.o), PR = window.NSO_Print;
-    var like = [{ interfaceLayers: po.interfaceLayers || 2, sheetLayerMm: po.sheetLayerMm || 0 }];
-    var optsP = PR && typeof PR.sliceOptionsForPlate === 'function' ? PR.sliceOptionsForPlate(like).catch(function (err) { console.error('[supports card] slice options', err); return null; }) : Promise.resolve(null);
-    return Promise.all([SL.loadKernel({}), optsP]).then(function (got) {
-      var wasm = got[0], plateP = got[1], plateOpts = plateP && plateP.o;
-      var so = plateOpts ? Object.assign({}, plateOpts, { columnStackOnly: true, emitGcode: false }) : SL.defaultsFor(0.4, Object.assign({ columnStackOnly: true }, STACK_SLICE));
-      /* the drawing is of the column rule's slice: it is only drawn under it */
-      if (so.supportInterfaceRule !== 'column') so.supportInterfaceRule = 'column';
-      /* ...cut where the Slice card cuts it: at the bed's coordinates (its pieceObjects shift; the slicer's layers can differ with where a piece
-         stands - the Sphere's grid over its dome moved by a layer's quarter), and drawn back where the piece stands */
-      var dx = plateP ? plateP.dx : 0, dy = plateP ? plateP.dy : 0;
-      var toBed = function (q) { if (!dx && !dy) return q; var out = new Float32Array(q.length); for (var i = 0; i < q.length; i += 3) { out[i] = q[i] + dx; out[i + 1] = q[i + 1] + dy; out[i + 2] = q[i + 2]; } return out; };
-      var objl = [{ name: 'part', soup: toBed(c.D.soup), key: 101, role: 'part' }].concat(sols.map(function (sd, k) { return { name: 's' + k, soup: toBed(sd.soup), key: 201 + k, role: 'support', hostKey: 101 }; }));
-      var r = SL.sliceObjects(objl, so, wasm);
-      if (r && r.ok && r.stacks && (dx || dy)) r.stacks.forEach(function (st) { st.layers.forEach(function (L) { ['S', 'I', 'T'].forEach(function (k) { L[k] = L[k].map(function (poly) { return poly.map(function (pt) { return [pt[0] - dx, pt[1] - dy]; }); }); }); }); });
-      if (!r || !r.ok || !r.stacks) return null;
-      var n = 0;
-      r.stacks.forEach(function (st) {
-        var sd = sols[st.key - 201];
-        if (!sd) return;
+  /* GENERATE IS THE SLICE (the owner: "if generate is performing a slice, have it complete the job and hand off preview to G-scope"). Once
+     every piece's supports are built - before the plate is touched - the plate is sliced ONCE by the Slice card (NSO_Print.card.slice: its
+     printer's profile, its settings, the raft) as it will stand: its pieces, less the supports being replaced, and the new supports under keys
+     of their own. The slicer hands back each support as it prints (nso_slicer.js o.columnStacks) and each is drawn from that; the file is the
+     Slice card's result, which Preview opens in G-scope as it is. No second slice. Cancel stops it as it stops the build. Without a printer
+     picked (or the print module) the supports are drawn as built and the card says why nothing was sliced. */
+  function sliceStep(J, built, removeIds) {
+    var PR = window.NSO_Print && window.NSO_Print.card, GP = window.NSO_SupportGridpack;
+    S.sliceIds = {}; S.sliced = null; S.sliceWhy = null; sliceLine('', false);
+    if (!PR || typeof PR.slice !== 'function' || typeof PR.readPieces !== 'function') return Promise.resolve(null);
+    var job = J.job, pieces = null;
+    try { pieces = PR.readPieces(); } catch (err) { console.error('[supports card] plate', err); }
+    if (!pieces) return Promise.resolve(null);
+    var gone = {};
+    (removeIds || []).forEach(function (id) { gone[id] = true; });
+    pieces = pieces.filter(function (p) { return !gone[p.sourceId]; });
+    var SI = window.NSO_SupportInterface, sheetSet = SI && SI.SHEET && SI.SHEET.slicerSettings ? Object.assign({}, SI.SHEET.slicerSettings) : null, n = 0, byKey = {};
+    built.forEach(function (b) {
+      var po = partsOptsOf(b.c.o);
+      b.results.forEach(function (r) {
+        if (!r.ok) return;
+        (r.solids || []).forEach(function (sd) {
+          if (!sd.soup || !sd.soup.length) return;
+          sd.sliceKey = 'new:' + (++n); byKey[sd.sliceKey] = sd;
+          pieces.push({ name: b.c.hm.name + (sd.brim ? ' - brim' : ' - support'), soup: sd.soup, sourceId: sd.sliceKey, support: true, brim: !!sd.brim,
+                        hostSourceId: b.c.hostId, interfaceLayers: po.interfaceLayers || 2, sheetLayerMm: po.sheetLayerMm || 0, nonSolid: false,
+                        settings: sd.brim ? { wall_generator: 'classic', detect_thin_wall: '0', wall_loops: '10', sparse_infill_density: '0%', top_shell_layers: '0', bottom_shell_layers: '1' } : sheetSet });
+        });
+      });
+    });
+    /* the slice runs in the Slice card's worker: the build's watchdog and ceiling are for the planner, and Cancel (job.stop) stops this too */
+    clearTimeout(job.timer); clearTimeout(job.ceiling);
+    S.run = null; S.prog = { phase: 'slicing' }; job.slicing = true; paintBar(); sync();
+    return PR.slice({ pieces: pieces, stacks: true, onStage: function (t) { if (!job.dead) { S.sliceStage = t; paintBar(); } } }).then(function (r) {
+      job.slicing = false; S.sliceStage = null;
+      if (job.dead) return null;
+      S.sliced = r;
+      if (!r || !r.ok) { S.sliceWhy = r ? r.reason : 'the slice did not run'; return null; }
+      S.sliceWhy = null;
+      var drawn = 0;
+      (r.stacks || []).forEach(function (st) {
+        var sd = byKey[st.key];
+        if (!sd || sd.brim) return;
         var parts = [];
         st.layers.forEach(function (L) {
           /* a layer the slicer prints no line on (a horn's tip, a hair over its last printed layer) is not drawn */
@@ -1884,10 +1901,20 @@ var NSO_SUPPORTS_CARD = (function () {
         var len = 0; parts.forEach(function (ps) { len += ps.length; });
         var soup = new Float32Array(len), w = 0;
         parts.forEach(function (ps) { soup.set(ps, w); w += ps.length; });
-        sd.built = sd.soup; sd.soup = soup; sd.asPrinted = true; sd.drawnFrom = plateOpts ? 'plate' : 'gate'; n += st.layers.length;
+        sd.built = sd.soup; sd.soup = soup; sd.asPrinted = true; sd.drawnFrom = 'plate'; drawn++;
       });
-      return { layers: n };
-    }).catch(function (err) { console.error('[supports card] stack', err); return null; });
+      return { drawn: drawn };
+    });
+  }
+  /* The plate's new supports are placed: the slice is the plate's (NSO_Print.card.adopt), fresh for Preview and Export. */
+  function adoptSlice(res) {
+    var PR = window.NSO_Print && window.NSO_Print.card;
+    if (res && res.ok && S.sliced && S.sliced.ok && PR && typeof PR.adopt === 'function') {
+      PR.adopt(S.sliceIds || {});
+      sliceLine('Sliced: ' + S.sliced.line + '. Preview opens it.', false);
+    }
+    if (res && res.ok) res.sliced = !!(S.sliced && S.sliced.ok);
+    return res;
   }
   function brimStep(c, results) {
     var SL = window.NSO_Slicer;
@@ -1965,6 +1992,7 @@ var NSO_SUPPORTS_CARD = (function () {
         var pl = placeSolid(sd.soup, meta, c.host, c.D.minZ, sd.brim ? c.hm.name + ' - brim' : c.hm.name + ' - support ' + (r.rid + 1) + '.' + (++n) + ' (' + STYLES[o.style] + ')');
         if (!pl.ok) throw new Error(pl.reason);
         added.push(pl.id);
+        if (sd.sliceKey && S.sliceIds) S.sliceIds[sd.sliceKey] = pl.id;              /* the plate slice (sliceStep) knew it by this key: adoptSlice */
       }
     }
   }
@@ -2027,12 +2055,20 @@ var NSO_SUPPORTS_CARD = (function () {
         return runPiece(J, cc, true).then(function (pr) {
           var s = settleResults(pr.areas, pr.builtOf, Dp);
           if (!s.ok) { refused.push({ id: c.hostId, name: c.hm.name, why: 'refused: ' + String(s.reason || 'no reason given').replace(/[.\s]+$/, '') }); return; }
-          return stackStep(cc, s.results).then(function () { return brimStep(cc, s.results); }).then(function () {
+          return brimStep(cc, s.results).then(function () {
             built.push({ c: cc, results: s.results });
             s.results.forEach(function (r) { r.solids.forEach(function (sd) { finals.push(sd.soup); }); });
           });
         });
       });
+    });
+
+    /* ...then the plate sliced ONCE, every piece's new supports in it: they are drawn from that slice, and it is the slice Preview opens */
+    chain = chain.then(function () {
+      if (job.dead || !built.length) return null;
+      var rm = [];
+      built.forEach(function (b) { rm = rm.concat(b.c.removeIds); });
+      return sliceStep(J, built, rm);
     });
 
     /* The one place the plate changes: every piece's old supports off, every piece's new ones on, one Undo step. */
@@ -2065,7 +2101,7 @@ var NSO_SUPPORTS_CARD = (function () {
       return { ok: true, added: added, removed: removed.map(function (x) { return x.placed.sourceId; }) };
     }
 
-    return finishJob(J, chain.then(commit), afterCommitWide, function (res) {
+    return finishJob(J, chain.then(commit).then(adoptSlice), afterCommitWide, function (res) {
       var W2 = S.wideView || wideRead(), by = {};
       W2.pieces.forEach(function (r) { by[r.id] = r; });
       var pieces = S.wideIds.map(function (id) {
@@ -2177,7 +2213,23 @@ var NSO_SUPPORTS_CARD = (function () {
     return { ok: true, removed: ids.slice() };
   }
 
+  function styleNone() { var st = $('sup-style'); return !!(st && st.value === 'none'); }
+  /* STYLE NONE: no supports are built - Generate slices the plate as it stands (the raft, if it has layers, under it), ready for Preview */
+  function sliceOnly() {
+    var P = window.NSO_Print && window.NSO_Print.card;
+    if (SL.busy || S.busy) return Promise.resolve({ ok: false, reason: 'busy' });
+    if (!P || !P.slice) { sliceLine('The slicer did not load - check console.', true); return Promise.resolve({ ok: false, reason: 'no slicer' }); }
+    S.sliceWhy = null; SL.busy = true; sync(); sliceLine('Slicing the plate', false);
+    return P.slice({ onStage: function (t) { if (SL.busy) sliceLine(t, false); } }).then(function (r) {
+      SL.busy = false; SL.last = r;
+      if (r.ok) sliceLine('Sliced, no supports built: ' + r.line + '. Preview opens it.', false);
+      else sliceLine(r.reason, !r.cancelled);
+      sync();
+      return r;
+    });
+  }
   function generate(pre) {
+    if (styleNone()) return sliceOnly();
     if (S.wide) return generateWide();
     if (S.hostId == null) return Promise.resolve({ ok: false, reason: 'no piece' });
     var badKnob = S.mode === 'custom' ? knobBad() : null;
@@ -3122,10 +3174,10 @@ var NSO_SUPPORTS_CARD = (function () {
 
   /* ------------------------------------------------------ slice and preview */
 
-  /* SLICE AND PREVIEW, the card's last button: the Slice card's own slice of the plate (every piece, supports included, for the plate's
-     printer - app-print.js), then its own Preview in G-scope. Nothing here slices or opens anything itself, and the Slice card is as it
-     was; this is the shortest way from the supports just built to the layers they print as. The card says how far it has got on a
-     line under the button (the Slice card's stage line, word for word), and Cancel stops the slice. */
+  /* PREVIEW, under Generate. Generate slices the plate once (sliceStep) and that slice waits in the Slice card: Preview opens it in G-scope as it
+     is. Only when there is none for the plate as it stands now (nothing generated yet, a piece moved, a setting changed) does Preview slice
+     first - the Slice card's own slice of the plate, every piece, supports included. Cancel, beside Generate, stops a build, the slice it
+     ends with, or this one. The card says how far a slice has got on the line under the buttons (the Slice card's stage line, word for word). */
   var SL = { busy: false, last: null };
   function sliceLine(text, bad) {
     var el = $('sup-slice-line');
@@ -3136,14 +3188,23 @@ var NSO_SUPPORTS_CARD = (function () {
   }
   function syncSlice() {
     var go = $('btn-sup-slice'), cx = $('btn-sup-slice-cancel');
-    if (go) { go.disabled = SL.busy || !!S.busy; go.textContent = SL.busy ? 'Slicing\u2026' : 'Slice and Preview'; }
-    if (cx) cx.hidden = !SL.busy;
+    if (go) { go.disabled = SL.busy || !!S.busy; go.textContent = SL.busy ? 'Slicing\u2026' : 'Preview'; }
+    if (cx) cx.hidden = !(SL.busy || S.busy);
+    if (!SL.busy && !S.busy && S.sliceWhy) sliceLine('Not sliced: ' + S.sliceWhy, true);
   }
   function sliceAndPreview() {
     var P = window.NSO_Print && window.NSO_Print.card;
     if (SL.busy) return Promise.resolve({ ok: false, reason: 'busy' });
-    if (S.busy) { sliceLine('Wait for the build to end, then slice.', true); return Promise.resolve({ ok: false, reason: 'building' }); }
+    if (S.busy) { sliceLine('Wait for the build to end, then preview.', true); return Promise.resolve({ ok: false, reason: 'building' }); }
     if (!P || !P.sliceAndPreview) { sliceLine('The slicer did not load - check console.', true); return Promise.resolve({ ok: false, reason: 'no slicer' }); }
+    S.sliceWhy = null;
+    /* the slice Generate made, if it is still the plate's: straight to G-scope */
+    if (typeof P.fresh === 'function' && P.fresh() && typeof P.previewInGscope === 'function') {
+      var opened = P.previewInGscope();
+      if (opened) { sliceLine('', false); var m0 = $('menu-supports'); if (m0 && m0.open) m0.open = false; }
+      else sliceLine('G-scope did not open the slice - check console.', true);
+      return Promise.resolve({ ok: !!opened, reason: opened ? '' : 'G-scope did not open the slice', previewed: !!opened, sliced: false });
+    }
     SL.busy = true; sync(); sliceLine('Slicing the plate', false);
     return P.sliceAndPreview({ onStage: function (t) { if (SL.busy) sliceLine(t, false); } }).then(function (r) {
       SL.busy = false; SL.last = r;
@@ -3157,6 +3218,7 @@ var NSO_SUPPORTS_CARD = (function () {
     });
   }
   function cancelSlice() {
+    if (S.busy) { cancel(); return; }                          // the build, and the slice it ends with
     var P = window.NSO_Print && window.NSO_Print.card;
     if (SL.busy && P && P.cancel) P.cancel();
   }
@@ -3237,6 +3299,7 @@ var NSO_SUPPORTS_CARD = (function () {
     menu.addEventListener('toggle', function () { if (menu.open) open(); else close(); });
     var on = function (id, ev, fn) { var e = $(id); if (e) e.addEventListener(ev, fn); };
     on('btn-sup-all', 'click', function () { generate(); });
+    on('sup-style', 'change', function () { sync(); });                    /* None: Generate slices the plate alone */
     on('btn-sup-none', 'click', function () { removeAll(); });
     on('btn-sup-remove', 'click', function () { removeSelected(); });
     on('sup-plate', 'change', function () { setWide($('sup-plate').checked, { pick: true }); syncPlate(); });

@@ -69,7 +69,7 @@ const GROUPS = [
    ['menu-connect', 'CONNECT'], ['menu-joins', 'JOIN'], ['menu-seat', 'SEAT'], ['menu-supports', 'SUPPORTS'], ['menu-add', 'ADD'],
    ['menu-bit', 'SUBTRACT']],
   [['menu-shape', 'SHAPE'], ['menu-text', 'TEXT'], ['menu-weave', 'WEAVE'], ['menu-paint', 'PAINT'], ['menu-surface', 'SURFACE & EDGES'], ['menu-sculpt', 'SCULPT']],
-  [['menu-slice', 'SLICE'], ['btn-microscope', 'G-SCOPE']],
+  [['btn-microscope', 'G-SCOPE']],
   [['menu-repair', 'CHECK & REPAIR']],
   [['btn-xray', 'X-RAY'], ['btn-watch', 'EYE'], ['btn-frame-view', '◎']]
 ];
@@ -109,7 +109,10 @@ const HOLDS = {
                  'join-gap-bc-on', 'join-gap-bc', 'join-slot-c', 'btn-join', 'btn-join-clear', 'join-readout'],
   'menu-seat': ['btn-seat-support', 'seat-gap', 'btn-seat-here', 'chk-oversize-washer', 'btn-seat-flush', 'btn-flip-port', 'btn-seat-grid'],
   'menu-supports': ['supports-card', 'sup-angle', 'btn-sup-all', 'btn-sup-none', 'sup-style', 'sup-size',
-                    'sup-rest', 'btn-sup-remove'],
+                    'sup-rest', 'btn-sup-remove', 'btn-sup-slice', 'btn-sup-slice-cancel', 'slice-set-raft', 'slice-set-raft-gap',
+                    // ...and SLICE, its last section (app-print.js): the plate's printer, its Slice settings (folded), Slice (and Cancel while it runs), the readout, Export .gcode.3mf
+                    'sup-slice-sec', 'slice-card', 'slice-profile', 'slice-settings-toggle', 'slice-set-layer', 'slice-set-walls', 'slice-set-density', 'slice-set-angle',
+                    'btn-slice-go', 'btn-slice-cancel', 'slice-readout', 'btn-slice-export'],
   // SHAPE: Smooth · Bend · Reducer · Roll · Neck (Tube edge's three verbs)
   'menu-shape': ['btn-smooth', 'btn-bend', 'btn-tube-edge', 'bend-panel', 'te-panel', 'sel-te-verb'],
   // ADD: Fill/Densify · Foam · Thicken out · Thicken in (a live ghost: the slider, Set, Cancel in its panel) · Extend · Bridge
@@ -132,9 +135,6 @@ const HOLDS = {
   // SCULPT: two arms. Brush (Emboss / Smooth here; Size, Force, Hard falloff) and Carve (ball-nose / flat shave / V-groove; Depth, Radius, Roll)
   'menu-sculpt': ['btn-brush', 'sel-brush-mode', 'inp-brush-size', 'inp-brush-intensity', 'chk-brush-hard',
                   'btn-carve', 'carve-blade', 'carve-depth', 'carve-a', 'carve-roll', 'carve-readout'],
-  // SLICE (app-print.js): the plate's printer, its Slice settings (folded), Slice (and Cancel while it runs), the readout, Export .gcode.3mf, Preview in G-scope
-  'menu-slice': ['slice-card', 'slice-profile', 'slice-settings-toggle', 'slice-set-layer', 'slice-set-walls', 'slice-set-density', 'slice-set-angle',
-                 'btn-slice-go', 'btn-slice-cancel', 'slice-readout', 'btn-slice-export', 'btn-slice-preview'],
   // CHECK & REPAIR: Check piece · Cap open faces · Repair · Seal · Non-solid · Solidify
   'menu-repair': ['btn-check-defects', 'btn-cap-open', 'chk-seal-repair', 'btn-seal', 'chk-non-solid', 'btn-solidify']
 };
@@ -435,9 +435,9 @@ withApp(async (page, logs) => {
       view.every(b => b.inCol && Math.abs(b.b - (geo._vp.bottom - 8)) < 0.5 && Math.abs(b.y - view[0].y) < 0.5) &&
       Math.abs(view[0].x - imp.x) < 0.5 && Math.abs(view[2].r - imp.r) < 0.5,
       view.map(b => b.id + '@' + Math.round(b.x) + ',' + Math.round(b.y) + '/' + Math.round(b.w)).join(' ') + '; viewport bottom ' + geo._vp.bottom);
-    check('the bottom stack is Slice then G-scope (the 36 px pitch), pinned under Sculpt, and Check & repair follows it a group gap lower',
-      stack.length === 2 && stack[0].id === 'menu-slice' && stack[1].id === 'btn-microscope' &&
-      Math.abs(stack[1].y - stack[0].y - 36) < 0.5 && Math.abs(repair.y - stack[1].b - 12) < 0.5 && stack[0].y - lastAbove.b >= 12 - 0.5,
+    check('the bottom stack is G-scope alone (Slice is the supports card\'s last section), pinned under Sculpt, and Check & repair follows it a group gap lower',
+      stack.length === 1 && stack[0].id === 'btn-microscope' &&
+      Math.abs(repair.y - stack[0].b - 12) < 0.5 && stack[0].y - lastAbove.b >= 12 - 0.5,
       'sculpt ends ' + Math.round(lastAbove.b) + ', ' + stack.map(b => b.id + ' ' + Math.round(b.y) + '..' + Math.round(b.b)).join(', ') + ', check & repair ' + Math.round(repair.y));
     check('Check & repair is on its own, directly above the view row (a group gap), well below Sculpt',
       Math.abs(view[0].y - repair.b - 12) < 0.5 && repair.y - lastAbove.b >= 12 - 0.5,
