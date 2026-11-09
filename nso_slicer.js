@@ -1658,7 +1658,7 @@
           var P2 = makeP(objs[k], k, own);
           perObject[k] = P2;
           colRule(P2);
-          if (!o.columnStackOnly) buildLayers(P2);
+          buildLayers(P2);
           ownGrids = true;
         });
       }
@@ -1675,7 +1675,9 @@
             var hasI = I && !g.isEmpty(I), hasT = Tt && !g.isEmpty(Tt), hasS = Sx && !g.isEmpty(Sx);
             if (!hasI && !hasT && !hasS) return;
             /* S: the layer's whole support as it prints (the tree cut where it is blocked, the stack, the cups), I / T its interface and transition */
-            layers.push({ z0: pl.printZ - pl.h - shiftZ, z1: pl.printZ - shiftZ, I: hasI ? holeFree(g, I) : [], T: hasT ? holeFree(g, Tt) : [], S: hasS ? holeFree(g, Sx) : [] });
+            /* printed: the layer has lines (a piece too small for one is cut but not printed) */
+            var Lp = P.layers && P.layers[i], printed = !!(Lp && Lp.paths && Lp.paths.length);
+            layers.push({ z0: pl.printZ - pl.h - shiftZ, z1: pl.printZ - shiftZ, printed: printed, I: hasI ? holeFree(g, I) : [], T: hasT ? holeFree(g, Tt) : [], S: hasS ? holeFree(g, Sx) : [] });
           });
           return { key: P.key, name: P.name, layers: layers };
         }) };

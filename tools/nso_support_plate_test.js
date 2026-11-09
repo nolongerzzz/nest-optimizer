@@ -115,7 +115,10 @@ async function main() {
     const app = lib.makeApp();
     const ids = app.load(objs);
     app.openCard();
-    check('six pieces, nothing selected: nothing lit', lit(app).all === 0 && app.state.selectedIndex === -1);
+    /* Generate for plate is the default: the card opens on the whole plate */
+    check('six pieces: the card opens with the option on, every piece lit, none selected', app.card.plate() === true && app.el('sup-plate').checked === true && lit(app).all === 6 && app.state.selectedIndex === -1);
+    app.setPlateBox(false);
+    check('the box off: nothing lit', lit(app).all === 0 && app.state.selectedIndex === -1);
     app.setPlateBox(true);
     check('option on: one outline on every piece', lit(app).all === 6 && lit(app).most === 1, JSON.stringify(app.outlines().per));
     check('option on: every piece wears the selection\'s tint, none is selected', app.emissive().every(v => v === 0.55) && app.state.selectedIndex === -1);

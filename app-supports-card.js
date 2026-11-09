@@ -48,7 +48,7 @@
    the piece back). The angle is a setting, like Style: not an Undo step.
 
    GENERATE FOR PLATE. With two or more pieces on the plate the card offers
-   "Generate for plate" (#sup-plate). It is not a "nothing selected" state: it
+   "Generate for plate" (#sup-plate), and opens with it on (the default). It is not a "nothing selected" state: it
    is switched on, and it highlights every real (non-support) piece first, as a
    selection does, while detection runs on each of them; the readout says
    "N pieces \u00b7 M hanging areas at 35\u00b0". GENERATE then loops the build
@@ -1814,6 +1814,35 @@ var NSO_SUPPORTS_CARD = (function () {
     return out;
   }
   window.nsoSupportSliceSoup = sliceSoupOf;
+  /* A layer's piece as a plate a layer thick: its outline triangulated by three.js's earcut (THREE.ShapeUtils, robust to the slicer's outlines -
+     the planner's ear clipper gave up on whole pieces, 32 mm2 of the Oblique's stack, and the plate showed a layer missing: a split), else the planner's.
+     Top faces up, walls out. Null when nothing triangulates. */
+  function prismOf(poly, z0, z1, GP) {
+    var n = poly.length;
+    if (n < 3) return null;
+    var tri = null;
+    if (typeof THREE !== 'undefined' && THREE.ShapeUtils && typeof THREE.ShapeUtils.triangulateShape === 'function' && THREE.Vector2) {
+      try { tri = THREE.ShapeUtils.triangulateShape(poly.map(function (p) { return new THREE.Vector2(p[0], p[1]); }), []); } catch (err) { tri = null; }
+      if (tri && !tri.length) tri = null;
+    }
+    if (!tri) return GP && typeof GP._prismSoup === 'function' ? GP._prismSoup(poly, z0, z1) : null;
+    var a2 = 0; for (var q = 0; q < n; q++) { var u = poly[q], v = poly[(q + 1) % n]; a2 += u[0] * v[1] - v[0] * u[1]; }
+    var ccw = a2 > 0, out = new Float32Array((tri.length * 2 + n * 2) * 9), w = 0;
+    var put = function (a, b, c) { out[w++] = a[0]; out[w++] = a[1]; out[w++] = a[2]; out[w++] = b[0]; out[w++] = b[1]; out[w++] = b[2]; out[w++] = c[0]; out[w++] = c[1]; out[w++] = c[2]; };
+    tri.forEach(function (t) {
+      var A = poly[t[0]], B = poly[t[1]], C = poly[t[2]];
+      if ((B[0] - A[0]) * (C[1] - A[1]) - (B[1] - A[1]) * (C[0] - A[0]) < 0) { var X = B; B = C; C = X; }     /* each top triangle counter-clockwise: up */
+      put([A[0], A[1], z1], [B[0], B[1], z1], [C[0], C[1], z1]);
+      put([A[0], A[1], z0], [C[0], C[1], z0], [B[0], B[1], z0]);
+    });
+    for (var k = 0; k < n; k++) {
+      var p0 = poly[ccw ? k : (k + 1) % n], p1 = poly[ccw ? (k + 1) % n : k];
+      put([p0[0], p0[1], z0], [p1[0], p1[1], z0], [p1[0], p1[1], z1]);
+      put([p0[0], p0[1], z0], [p1[0], p1[1], z1], [p0[0], p0[1], z1]);
+    }
+    return out;
+  }
+  /* the gate's settings: the drawing's slice when no printer is picked (the node harness, support:gate) */
   var STACK_SLICE = { supportInterfaceLayers: 3, supportLayerMaxMm: 0.28, supportInterfaceRule: 'column' };
   function stackStep(c, results) {
     var SL = window.NSO_Slicer, GP = window.NSO_SupportGridpack;
@@ -1821,9 +1850,24 @@ var NSO_SUPPORTS_CARD = (function () {
     var sols = [];
     results.forEach(function (r) { if (r.ok) (r.solids || []).forEach(function (sd) { if (!sd.brim && sd.soup && sd.soup.length) sols.push(sd); }); });
     if (!sols.length || !c.D || !c.D.soup) return Promise.resolve(null);
-    return SL.loadKernel({}).then(function (wasm) {
-      var objl = [{ name: 'part', soup: c.D.soup, key: 101, role: 'part' }].concat(sols.map(function (sd, k) { return { name: 's' + k, soup: sd.soup, key: 201 + k, role: 'support', hostKey: 101 }; }));
-      var r = SL.sliceObjects(objl, SL.defaultsFor(0.4, Object.assign({ columnStackOnly: true }, STACK_SLICE)), wasm);
+    /* ONE SLICE: the options the Slice card slices the plate with now - its printer's profile and its Slice settings (NSO_Print.sliceOptionsForPlate,
+       the same function its own slice takes them from) - so the drawing is that slice's layers, not a second slice's. Without a printer picked
+       (or the print module), the gate's settings (STACK_SLICE). */
+    var po = partsOptsOf(c.o), PR = window.NSO_Print;
+    var like = [{ interfaceLayers: po.interfaceLayers || 2, sheetLayerMm: po.sheetLayerMm || 0 }];
+    var optsP = PR && typeof PR.sliceOptionsForPlate === 'function' ? PR.sliceOptionsForPlate(like).catch(function (err) { console.error('[supports card] slice options', err); return null; }) : Promise.resolve(null);
+    return Promise.all([SL.loadKernel({}), optsP]).then(function (got) {
+      var wasm = got[0], plateP = got[1], plateOpts = plateP && plateP.o;
+      var so = plateOpts ? Object.assign({}, plateOpts, { columnStackOnly: true, emitGcode: false }) : SL.defaultsFor(0.4, Object.assign({ columnStackOnly: true }, STACK_SLICE));
+      /* the drawing is of the column rule's slice: it is only drawn under it */
+      if (so.supportInterfaceRule !== 'column') so.supportInterfaceRule = 'column';
+      /* ...cut where the Slice card cuts it: at the bed's coordinates (its pieceObjects shift; the slicer's layers can differ with where a piece
+         stands - the Sphere's grid over its dome moved by a layer's quarter), and drawn back where the piece stands */
+      var dx = plateP ? plateP.dx : 0, dy = plateP ? plateP.dy : 0;
+      var toBed = function (q) { if (!dx && !dy) return q; var out = new Float32Array(q.length); for (var i = 0; i < q.length; i += 3) { out[i] = q[i] + dx; out[i + 1] = q[i + 1] + dy; out[i + 2] = q[i + 2]; } return out; };
+      var objl = [{ name: 'part', soup: toBed(c.D.soup), key: 101, role: 'part' }].concat(sols.map(function (sd, k) { return { name: 's' + k, soup: toBed(sd.soup), key: 201 + k, role: 'support', hostKey: 101 }; }));
+      var r = SL.sliceObjects(objl, so, wasm);
+      if (r && r.ok && r.stacks && (dx || dy)) r.stacks.forEach(function (st) { st.layers.forEach(function (L) { ['S', 'I', 'T'].forEach(function (k) { L[k] = L[k].map(function (poly) { return poly.map(function (pt) { return [pt[0] - dx, pt[1] - dy]; }); }); }); }); });
       if (!r || !r.ok || !r.stacks) return null;
       var n = 0;
       r.stacks.forEach(function (st) {
@@ -1831,13 +1875,15 @@ var NSO_SUPPORTS_CARD = (function () {
         if (!sd) return;
         var parts = [];
         st.layers.forEach(function (L) {
-          L.S.forEach(function (poly) { var ps = GP._prismSoup(poly, L.z0, L.z1); if (ps && ps.length) parts.push(ps); });
+          /* a layer the slicer prints no line on (a horn's tip, a hair over its last printed layer) is not drawn */
+          if (L.printed === false) return;
+          L.S.forEach(function (poly) { var ps = prismOf(poly, L.z0, L.z1, GP); if (ps && ps.length) parts.push(ps); else S.prismMissed = (S.prismMissed || 0) + 1; });
         });
         if (!parts.length) return;
         var len = 0; parts.forEach(function (ps) { len += ps.length; });
         var soup = new Float32Array(len), w = 0;
         parts.forEach(function (ps) { soup.set(ps, w); w += ps.length; });
-        sd.built = sd.soup; sd.soup = soup; sd.asPrinted = true; n += st.layers.length;
+        sd.built = sd.soup; sd.soup = soup; sd.asPrinted = true; sd.drawnFrom = plateOpts ? 'plate' : 'gate'; n += st.layers.length;
       });
       return { layers: n };
     }).catch(function (err) { console.error('[supports card] stack', err); return null; });
@@ -1912,7 +1958,7 @@ var NSO_SUPPORTS_CARD = (function () {
           sideMm: r.sideMm || o.sideMm, rest: o.rest, angleDeg: S.angle, mode: S.mode, keys: sd.keys, holds: sd.holds, landing: sd.landing };
         if (sd.brim) meta.brim = true;
         /* a support drawn as it prints (stackStep) keeps the tree it was built as: that is what the slicer cuts (sliceSoupOf), the drawing is its slice */
-        if (sd.asPrinted && sd.built) { meta.built = sd.built; meta.shownV0 = [sd.soup[0], sd.soup[1], sd.soup[2]]; }
+        if (sd.asPrinted && sd.built) { meta.built = sd.built; meta.shownV0 = [sd.soup[0], sd.soup[1], sd.soup[2]]; meta.drawnFrom = sd.drawnFrom; }   /* drawnFrom: 'plate' - the Slice card's options; 'gate' - no printer picked */
         meta.sheetLayerMm = partsOptsOf(o).sheetLayerMm || 0;               /* a Dense sheet's layers are this thick: the slicer cuts the supports on their own layer grid then */
         meta.interfaceLayers = partsOptsOf(o).interfaceLayers || 2;      /* how many interface layers its sheet has: the slicer reads a 3-layer sheet as one */
         var pl = placeSolid(sd.soup, meta, c.host, c.D.minZ, sd.brim ? c.hm.name + ' - brim' : c.hm.name + ' - support ' + (r.rid + 1) + '.' + (++n) + ' (' + STYLES[o.style] + ')');
@@ -3033,8 +3079,10 @@ var NSO_SUPPORTS_CARD = (function () {
   function open() {
     if (S.open) return;
     S.open = true; S.hostId = null; S.selSupport = null; S.msg = null; S.det = null; S.dets = {}; S.occ = {};
-    var w = wanted();
-    if (w != null) pick(w); else refresh();
+    /* GENERATE FOR PLATE is the default (the owner's): with two or more pieces on the plate the card opens on all of them; a click on a piece
+       (or the box) still takes it to that one piece */
+    if (realIds().length >= 2) { refresh(); setWide(true); }
+    else { var w = wanted(); if (w != null) pick(w); else refresh(); }
     S.raf = requestAnimationFrame(tick);
   }
   function close() {

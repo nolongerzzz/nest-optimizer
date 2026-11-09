@@ -192,6 +192,18 @@ The drawing showed what the slice had laid since 4c, unseen: a wall of cup rings
 over gaps of 2 mm each side (`COLUMN_CUP_BRIDGE_MM`: a plate bridges between its tips), and only for 2 mm2 of overhang or more (half a mm2 walled a
 whole dome's stack). A plate stands on its tips (4f). Gate 66 of 66; Base carried 89 % (Bambu 85), over air 0.1.
 
+## 4h. One slice: the plate draws what the Slice card prints
+
+The generator's drawing (4g) was a second slice, with settings of its own (the gate's), so the plate and G-scope disagreed. Now the card draws from
+the slice the Slice card makes: its printer's profile and its Slice settings (`NSO_Print.sliceOptionsForPlate`, from the same `slicerOptions` the
+Slice card's build takes them from), cut at the bed's coordinates as the Slice card cuts them (the slicer's layers can differ with where a piece
+stands: the Sphere's grid over its dome moved a quarter of a layer), and only the layers that slice prints lines on. Each layer's plate is
+triangulated by three.js's earcut (`prismOf`): the planner's ear clipper gave up on whole pieces (32 mm2 of the Oblique's stack) and the plate
+showed a layer missing - the split the owner kept seeing. Measured on the page, after Generate and the Slice card's slice: on all six heads the drawn
+layers are the G-code's support layers (54 / 55 / 56 / 57 / 50 / 55, the same heights) and every printed support line lies inside the drawing
+(100 %). With no printer picked (node, support:gate) the gate's settings stand in. A setting changed after Generate leaves the drawing as it was until
+the next Generate. Generate for plate is the card's default with two or more pieces on the plate.
+
 ## 5. Not done, and named
 
 - **The merged plate's small surfaces.** The six as one piece are read on a 3 mm grid where each alone is read at 1 mm, so the Negative Sphere2's apex

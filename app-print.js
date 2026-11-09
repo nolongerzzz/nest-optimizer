@@ -233,6 +233,52 @@
    * @returns {Promise<{ok, reason, bytes, stats, features, objects}>}  never rejects:
    *   a refusal (the engine's, the planner's) comes back as ok:false with its words.
    */
+  /**
+   * The slicer's options for a slice of `objects` (each may carry interfaceLayers / sheetLayerMm) on the printer `assets`, with the
+   * card's Slice `settings` (cleaned; null: the template's values and the page's interface rule): { o, config, over }. The ONE place
+   * they are made - build() slices with them, and the supports card draws the supports it builds from a slice with them
+   * (sliceOptionsForPlate), so the plate shows what the slice prints.
+   */
+  function slicerOptions(SL, PL, objects, assets, settings) {
+    var over = {}, config = assets.config;
+    if (settings) { over = configOverlay(assets.config, settings); config = withOverlay(assets.config, over); }
+    var eng = PL.engineOptions(config);
+    var o = SL.defaultsFor(eng.nozzleMm, Object.assign({ emitGcode: false }, eng.over));
+    /* the planner reads two patterns off a config (grid, else zigzag); the card's own is the slicer's */
+    if (settings) o.sparsePattern = settings.pattern;
+    /* a sheet of more interface layers than the slicer's default says so (the card's Dense: 3): the slicer types its top 3 layers interface, as G-scope's Slice does */
+    var ni = 0;
+    objects.forEach(function (ob) { if (ob.interfaceLayers > ni) ni = ob.interfaceLayers; });
+    if (ni > 2 && (eng.over || {}).supportInterfaceLayers == null) o.supportInterfaceLayers = ni;
+    /* ...and a Dense sheet's own thicker layers (Bambu's 0.275): the supports are cut on their own layer grid, as G-scope's Slice does */
+    var sl = 0;
+    objects.forEach(function (ob) { if (ob.sheetLayerMm > sl) sl = ob.sheetLayerMm; });
+    if (sl > 0 && (eng.over || {}).supportLayerMaxMm == null) o.supportLayerMaxMm = 0.28;
+    /* the interface rule (docs/SUPPORT-GATE.md): the card's setting - one choice shared with G-scope's Slice settings, read on the
+       page and handed in, since a worker has no window - else the page's own; the same on the printed file as in the preview */
+    var rule = settings ? settings.interfaceRule
+      : typeof window !== 'undefined' && typeof window.nsoSupportInterfaceRule === 'function' ? window.nsoSupportInterfaceRule() : null;
+    if (rule && (eng.over || {}).supportInterfaceRule == null) o.supportInterfaceRule = rule;
+    return { o: o, config: config, over: over };
+  }
+
+  /**
+   * How the Slice card would slice the plate now - its printer's profile and its Slice settings - for objects like `objects` (their
+   * interfaceLayers / sheetLayerMm): a Promise of { o: the slicer's options, dx, dy: the shift pieceObjects() puts every piece through
+   * (the plate's centre to the bed's) }, or null when no printer is picked or the engines are not loaded. The supports card's drawing of
+   * the supports it builds is a slice with these, at the bed's coordinates (the slicer's layers can differ with where a piece stands).
+   */
+  function sliceOptionsForPlate(objects) {
+    var profile = profileFor(plateId());
+    var SL = lazy('nso_slicer.js', 'NSO_Slicer'), PL = lazy('nso-print-planner.js', 'NSOPrintPlanner');
+    if (!profile || !SL || !PL) return Promise.resolve(null);
+    var settings = readSettings();
+    return loadAssets(profile).then(function (assets) {
+      var bed = assets.printer.bed;
+      return { o: slicerOptions(SL, PL, objects || [], assets, settings).o, dx: bed.x / 2, dy: bed.y / 2 };
+    });
+  }
+
   function build(objects, assets, opts) {
     opts = opts || {};
     var stage = opts.onStage || function () {};
@@ -241,26 +287,10 @@
     if (!PL) return Promise.resolve({ ok: false, reason: 'The print planner (nso-print-planner.js) did not load - check console.' });
     var settings = opts.settings ? cleanSettings(opts.settings) : null, over = {}, config = assets.config;
     return Promise.resolve().then(function () {
-      if (settings) { over = configOverlay(assets.config, settings); config = withOverlay(assets.config, over); }
-      var eng = PL.engineOptions(config);
-      var o = SL.defaultsFor(eng.nozzleMm, Object.assign({ emitGcode: false }, eng.over));
-      /* the planner reads two patterns off a config (grid, else zigzag); the card's own is the slicer's */
-      if (settings) o.sparsePattern = settings.pattern;
-      /* a sheet of more interface layers than the slicer's default says so (the card's Dense: 3): the slicer types its top 3 layers interface, as G-scope's Slice does */
-      var ni = 0;
-      objects.forEach(function (ob) { if (ob.interfaceLayers > ni) ni = ob.interfaceLayers; });
-      if (ni > 2 && (eng.over || {}).supportInterfaceLayers == null) o.supportInterfaceLayers = ni;
-      /* ...and a Dense sheet's own thicker layers (Bambu's 0.275): the supports are cut on their own layer grid, as G-scope's Slice does */
-      var sl = 0;
-      objects.forEach(function (ob) { if (ob.sheetLayerMm > sl) sl = ob.sheetLayerMm; });
-      if (sl > 0 && (eng.over || {}).supportLayerMaxMm == null) o.supportLayerMaxMm = 0.28;
-      /* the interface rule (docs/SUPPORT-GATE.md): the card's setting - one choice shared with G-scope's Slice settings, read on the
-         page and handed in, since a worker has no window - else the page's own; the same on the printed file as in the preview */
-      var rule = settings ? settings.interfaceRule
-        : typeof window !== 'undefined' && typeof window.nsoSupportInterfaceRule === 'function' ? window.nsoSupportInterfaceRule() : null;
-      if (rule && (eng.over || {}).supportInterfaceRule == null) o.supportInterfaceRule = rule;
+      var so = slicerOptions(SL, PL, objects, assets, settings);
+      over = so.over; config = so.config;
       stage('slicing', { objects: objects.length });
-      return SL.run(objects, o);
+      return SL.run(objects, so.o);
     }).then(function (res) {
       if (!res.ok) return { ok: false, reason: 'Slice refused: ' + res.reason };
       stage('writing', { layers: res.planes.length });
@@ -824,6 +854,7 @@
     refresh();
   }
 
+  api.sliceOptionsForPlate = sliceOptionsForPlate;
   api.card = { slice: slice, sliceAndPreview: sliceAndPreview, cancel: cancel, exportFile: exportFile, previewInGscope: previewInGscope, refresh: refresh,
                exportSlice: exportSlice, exportFromCard: exportFromCard, indicesFor: indicesFor,
                state: function () { return { busy: S.busy, result: S.result, fresh: isFresh() }; } };
