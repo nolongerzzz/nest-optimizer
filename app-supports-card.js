@@ -573,7 +573,7 @@ var NSO_SUPPORTS_CARD = (function () {
   }
   function cardSupports(hostId, regionId) {
     return supportsOf(hostId).filter(function (m) {
-      return m.nsoSupport.card && !m.nsoSupport.brim && (regionId == null || m.nsoSupport.regionId === regionId);
+      return m.nsoSupport.card && !m.nsoSupport.brim && !m.nsoSupport.stack && (regionId == null || m.nsoSupport.regionId === regionId);
     });
   }
 
@@ -1583,7 +1583,7 @@ var NSO_SUPPORTS_CARD = (function () {
       pr = r;
       if (job.dead) return null;
       pr.s = settleResults(pr.areas, pr.builtOf, D);
-      return pr.s.ok ? brimStep(c, pr.s.results) : null;
+      return pr.s.ok ? stackStep(c, pr.s.results).then(function () { return brimStep(c, pr.s.results); }) : null;
     });
 
     /* The one place the plate changes. Synchronous from the first removal to
@@ -1797,6 +1797,39 @@ var NSO_SUPPORTS_CARD = (function () {
      the piece's first result, flagged brim: placed as a plate piece of its own (named "- brim", never counted as a support) and sliced
      as role 'brim'. Resolves the words the card says, or null when there is nothing to say; never rejects: a build without a brim is
      still a build. c: { D, o }, results: settleResults'. */
+  /* THE STACK, SHOWN (the owner's: "the interfaces have not been showing up on the generator"). Under the column rule the card builds the tree alone
+     and the slicer lays the interface (docs/SUPPORT-GATE.md 4): the slicer is asked for that stack now (NSO_Slicer, columnStackOnly - the rule's
+     interface and transition on each support's own layers) and each layer of it goes onto its support as a plate a layer thick, so the generator shows
+     what the slice will print. The plates are a piece of their own ("- interface", flagged stack, as the brim is "- brim"): shown, never sliced (the
+     slice lays the same stack from the part; plates in the support's own mesh fed back into it - the cup under the Sphere's stack moved) and never
+     counted as a support. Never rejects: a build without them is still a build. */
+  var STACK_SLICE = { supportInterfaceLayers: 3, supportLayerMaxMm: 0.28, supportInterfaceRule: 'column' };
+  function stackStep(c, results) {
+    var SL = window.NSO_Slicer, GP = window.NSO_SupportGridpack;
+    if (!columnRule() || !SL || typeof SL.sliceObjects !== 'function' || typeof SL.loadKernel !== 'function' || !GP || typeof GP._prismSoup !== 'function') return Promise.resolve(null);
+    var sols = [];
+    results.forEach(function (r) { if (r.ok) (r.solids || []).forEach(function (sd) { if (!sd.brim && !sd.stack && sd.soup && sd.soup.length) sols.push(sd); }); });
+    if (!sols.length || !c.D || !c.D.soup) return Promise.resolve(null);
+    return SL.loadKernel({}).then(function (wasm) {
+      var objl = [{ name: 'part', soup: c.D.soup, key: 101, role: 'part' }].concat(sols.map(function (sd, k) { return { name: 's' + k, soup: sd.soup, key: 201 + k, role: 'support', hostKey: 101 }; }));
+      var r = SL.sliceObjects(objl, SL.defaultsFor(0.4, Object.assign({ columnStackOnly: true }, STACK_SLICE)), wasm);
+      if (!r || !r.ok || !r.stacks) return null;
+      var parts = [], n = 0;
+      r.stacks.forEach(function (st) {
+        st.layers.forEach(function (L) {
+          L.I.concat(L.T).forEach(function (poly) { var ps = GP._prismSoup(poly, L.z0, L.z1); if (ps && ps.length) parts.push(ps); });
+        });
+        n += st.layers.length;
+      });
+      if (!parts.length) return null;
+      var len = 0; parts.forEach(function (ps) { len += ps.length; });
+      var soup = new Float32Array(len), w = 0;
+      parts.forEach(function (ps) { soup.set(ps, w); w += ps.length; });
+      var live = results.filter(function (r2) { return r2.ok && r2.solids && r2.solids.length; });
+      live[0].solids.push({ soup: soup, keys: [], holds: {}, landing: 'plate', regionIds: [], stack: true });
+      return { layers: n };
+    }).catch(function (err) { console.error('[supports card] stack', err); return null; });
+  }
   function brimStep(c, results) {
     var SL = window.NSO_Slicer;
     if (!c.o.brim || !SL || typeof SL.brimFor !== 'function' || typeof SL.loadKernel !== 'function') return Promise.resolve(null);
@@ -1866,9 +1899,10 @@ var NSO_SUPPORTS_CARD = (function () {
         var meta = { card: true, hostSourceId: c.hostId, hostName: c.hm.name, regionId: r.rid, style: o.style,
           sideMm: r.sideMm || o.sideMm, rest: o.rest, angleDeg: S.angle, mode: S.mode, keys: sd.keys, holds: sd.holds, landing: sd.landing };
         if (sd.brim) meta.brim = true;
+        if (sd.stack) meta.stack = true;
         meta.sheetLayerMm = partsOptsOf(o).sheetLayerMm || 0;               /* a Dense sheet's layers are this thick: the slicer cuts the supports on their own layer grid then */
         meta.interfaceLayers = partsOptsOf(o).interfaceLayers || 2;      /* how many interface layers its sheet has: the slicer reads a 3-layer sheet as one */
-        var pl = placeSolid(sd.soup, meta, c.host, c.D.minZ, sd.brim ? c.hm.name + ' - brim' : c.hm.name + ' - support ' + (r.rid + 1) + '.' + (++n) + ' (' + STYLES[o.style] + ')');
+        var pl = placeSolid(sd.soup, meta, c.host, c.D.minZ, sd.brim ? c.hm.name + ' - brim' : sd.stack ? c.hm.name + ' - interface' : c.hm.name + ' - support ' + (r.rid + 1) + '.' + (++n) + ' (' + STYLES[o.style] + ')');
         if (!pl.ok) throw new Error(pl.reason);
         added.push(pl.id);
       }
@@ -1933,7 +1967,7 @@ var NSO_SUPPORTS_CARD = (function () {
         return runPiece(J, cc, true).then(function (pr) {
           var s = settleResults(pr.areas, pr.builtOf, Dp);
           if (!s.ok) { refused.push({ id: c.hostId, name: c.hm.name, why: 'refused: ' + String(s.reason || 'no reason given').replace(/[.\s]+$/, '') }); return; }
-          return brimStep(cc, s.results).then(function () {
+          return stackStep(cc, s.results).then(function () { return brimStep(cc, s.results); }).then(function () {
             built.push({ c: cc, results: s.results });
             s.results.forEach(function (r) { r.solids.forEach(function (sd) { finals.push(sd.soup); }); });
           });

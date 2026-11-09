@@ -174,6 +174,18 @@ closer as well (`COLUMN_ONE.coverMm` 2.2 against the sheet build's 3.3: no cap s
 74 -> 99 % (Bambu 91), span over 2.5 mm 2.1 -> 0. Gate 66 of 66 on the six pieces and on the six as one piece (the merged apex's contact too);
 parity unchanged.
 
+## 4g. The stack, shown on the generator
+
+Under the column rule the card builds the tree alone and the slicer lays the interface, so the generator showed a bare tree until Slice and Preview.
+After a build the card now asks the slicer for the stack (`NSO_Slicer.sliceObjects` with `columnStackOnly`: the rule's interface and transition on each
+support's own layers, as hole-free pieces - a piece with a hole cut into strips - in the soup's frame) and places it as a piece of its own,
+"<piece> - interface" (`m.nsoSupport.stack`), each layer a plate a layer thick (`stackStep`). Like the brim it is the card's, taken off and put back
+with the supports, never counted as a support - and never sliced: the print module and G-scope's Slice leave it out, since the slice lays the same stack
+from the part (with the plates in the support's own mesh the cup under the Sphere's stack moved). The preview's slice uses the gate's settings (3
+interface layers, the support's own 0.28 mm grid, gap 0.2, xy 0.35); the layers match a full slice's on all six heads (same count, same heights).
+`support:gate --rule column` now gives the card the slicer, as the page has it (so it builds the brim too, sliced as brim): 66 of 66, every number as
+before.
+
 ## 5. Not done, and named
 
 - **The merged plate's small surfaces.** The six as one piece are read on a 3 mm grid where each alone is read at 1 mm, so the Negative Sphere2's apex
@@ -186,7 +198,7 @@ parity unchanged.
 - **The generator still builds its sheet.** Under the column rule its sheet material outside the stack prints as Support (pale rings round
   the Sphere's stack at 8.3 - 9.4). The generator should hand over only the tree and the tips' tops.
 - **The tree**: specks (Oblique 8, Negative Sphere 2), the Sphere's leaning twig, Bambu's flank tips. Size and shape, not the interface.
-- **Exported meshes** do not carry the rule: Bambu Studio slicing NSO's meshes still sees the generator's sheet. The rule's stack as one-layer
-  prisms in the export would make Bambu print the same layers.
+- **Exported meshes** do not carry the rule: the drawn stack (4g) is left out of every slice and export path that reads pieces for slicing. Sending it to
+  Bambu Studio as support would make Bambu print the same layers - not done.
 - A thin contact ring on the Sphere's flank (z 10.2 - 10.4) where Bambu's interface ends at 10.0.
 - `NSO_COLUMN_DEBUG=<z>` prints the rule's per-layer areas above z.

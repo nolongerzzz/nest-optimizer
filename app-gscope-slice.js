@@ -217,7 +217,8 @@ var NSO_GSCOPE_SLICE = (function () {
     d.objects.forEach(function (o) { var su = supportOf(o); if (su && su.sheetLayerMm > sl) sl = su.sheetLayerMm; });
     if (sl > 0 && !(optsOver && optsOver.supportLayerMaxMm != null)) opts.supportLayerMaxMm = 0.28;
     var flagged = [];
-    var objects = d.objects.map(function (o) {
+    /* the column rule's stack the supports card draws (m.nsoSupport.stack) is shown, not sliced: the slicer lays it from the part */
+    var objects = d.objects.filter(function (o) { var su = supportOf(o); return !(su && su.stack); }).map(function (o) {
       var ns = nonSolidOf(o);
       if (ns) flagged.push(o.name);
       var sup = supportOf(o);

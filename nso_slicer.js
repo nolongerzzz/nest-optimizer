@@ -1658,11 +1658,26 @@
           var P2 = makeP(objs[k], k, own);
           perObject[k] = P2;
           colRule(P2);
-          buildLayers(P2);
+          if (!o.columnStackOnly) buildLayers(P2);
           ownGrids = true;
         });
       }
 
+
+      /* THE STACK ALONE (o.columnStackOnly): the column rule's interface and transition, each support's layers on its own grid, as hole-free pieces
+         in the soup's frame - the supports card draws them as plates on the tree it built (the rule lays them only when slicing: the generator showed
+         a bare tree) */
+      if (o.columnStackOnly) {
+        return { ok: true, shiftZ: shiftZ, stacks: perObject.filter(function (P) { return P.role === 'support' && P.col; }).map(function (P) {
+          var SPp = P.planes || planes, layers = [];
+          SPp.forEach(function (pl, i) {
+            var I = P.col.I[i], Tt = P.col.T[i];
+            if ((!I || g.isEmpty(I)) && (!Tt || g.isEmpty(Tt))) return;
+            layers.push({ z0: pl.printZ - pl.h - shiftZ, z1: pl.printZ - shiftZ, I: I && !g.isEmpty(I) ? holeFree(g, I) : [], T: Tt && !g.isEmpty(Tt) ? holeFree(g, Tt) : [] });
+          });
+          return { key: P.key, name: P.name, layers: layers };
+        }) };
+      }
 
       addBrims(g, perObject, planes, o);
 
@@ -2122,6 +2137,23 @@
   /* the loops a stack's piece is laid with: one half a line in from its edge; a piece narrower than a line (a dome's or a cone's ring of contact,
      a few tenths wide) one loop down its middle (its outer edge in by half its mean width, 2 x area / perimeter), as Bambu lays such a ring - and
      that only where its bead stays out of the part and from under it (a line's width spilled under the part welds; into the xy clearance it does not). No loop: the piece is not laid. */
+  /* a region as hole-free outlines (for a prism each): a piece with a hole is cut into strips STACK_STRIP_MM wide, then narrower, until none has one */
+  var STACK_STRIP_MM = 1;
+  function holeFree(g, cs) {
+    var out = [];
+    var hasHole = function (pc) { return g.polys(pc).some(function (Q) { var a2 = 0; for (var q = 0; q < Q.length; q++) { var u = Q[q], v = Q[(q + 1) % Q.length]; a2 += u[0] * v[1] - v[0] * u[1]; } return a2 < 0; }); };
+    var take = function (pc, w, depth) {
+      if (!hasHole(pc) || depth > 3) { g.polys(pc).forEach(function (Q) { var a2 = 0; for (var q = 0; q < Q.length; q++) { var u = Q[q], v = Q[(q + 1) % Q.length]; a2 += u[0] * v[1] - v[0] * u[1]; } if (a2 > 0) out.push(Q.map(function (pt) { return [pt[0], pt[1]]; })); }); return; }
+      var x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+      g.polys(pc).forEach(function (Q) { Q.forEach(function (pt) { x0 = Math.min(x0, pt[0]); x1 = Math.max(x1, pt[0]); y0 = Math.min(y0, pt[1]); y1 = Math.max(y1, pt[1]); }); });
+      for (var x = x0; x < x1; x += w) {
+        var band = g.inter(pc, g.of([[[x, y0 - 1], [x + w, y0 - 1], [x + w, y1 + 1], [x, y1 + 1]]], 'Positive'));
+        if (!g.isEmpty(band)) g.parts(band).forEach(function (bp) { take(bp, w / 4, depth + 1); });
+      }
+    };
+    g.parts(cs).forEach(function (pc) { take(pc, STACK_STRIP_MM, 0); });
+    return out;
+  }
   function columnLoops(g, pc, wI, Bj) {
     var loops = g.polys(g.offset(pc, -wI / 2));
     if (loops.length) return loops;

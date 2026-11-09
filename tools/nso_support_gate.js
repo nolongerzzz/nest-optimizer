@@ -53,6 +53,7 @@ async function buildAndSlice(opts) {
   }
   const app = lib.makeApp();
   if (opts.rule) app.ctx.nsoSupportInterfaceRule = () => opts.rule;      /* the card builds for the slicer's rule (no sheet of its own under the column rule) */
+  if (opts.rule === 'column') app.ctx.NSO_Slicer = SL;                    /* ...and draws the rule's stack on its supports, as the page does (the brim stays off) */
   const ids = app.load(objs); app.openCard(); app.setPlateBox(true);
   app.card.angle(+(opts.angle || 30));
   app.click('btn-sup-all'); await app.until(() => app.card.busy()); await app.until(() => !app.card.busy());
@@ -61,9 +62,9 @@ async function buildAndSlice(opts) {
   const moves = [];
   for (let i = 0; i < objs.length; i++) {
     const head = objs[i].name.replace(/\.stl$/i, '');
-    const sups = app.supportsOf(ids[i]).map(m => Array.from(app.soupOf(m.id)));
+    const sups = app.supportsOf(ids[i]).map(m => ({ soup: Array.from(app.soupOf(m.id)), brim: !!m.nsoSupport.brim }));
     const objl = [{ name: 'part', soup: Float32Array.from(app.soupOf(ids[i])), key: 101, role: 'part' }]
-      .concat(sups.map((s, k) => ({ name: 's' + k, soup: Float32Array.from(s), key: 201 + k, role: 'support', hostKey: 101 })));
+      .concat(sups.map((s, k) => ({ name: 's' + k, soup: Float32Array.from(s.soup), key: 201 + k, role: s.brim ? 'brim' : 'support', hostKey: 101 })));
     const so = { supportInterfaceLayers: 3, supportLayerMaxMm: 0.28 };
     if (opts.rule) so.supportInterfaceRule = opts.rule;
     const res = SL.sliceObjects(objl, SL.defaultsFor(0.4, so), WASM);

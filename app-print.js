@@ -202,7 +202,8 @@
    */
   function pieceObjects(pieces, bed) {
     var dx = bed.x / 2, dy = bed.y / 2;
-    return pieces.map(function (p) {
+    /* the column rule's stack the supports card draws ("- interface", m.nsoSupport.stack) is shown, not sliced: the slicer lays it from the part */
+    return pieces.filter(function (p) { return !p.stack; }).map(function (p) {
       var soup = new Float32Array(p.soup.length);
       for (var i = 0; i < soup.length; i += 3) {
         soup[i] = p.soup[i] + dx;
@@ -354,7 +355,7 @@
       var sup = m && m.nsoSupport ? m.nsoSupport : null;
       var placed = o.placedIndex != null ? state.placed[o.placedIndex] : null;
       var pm = placed && (state.models || []).find(function (x) { return x && x.id === placed.sourceId; });
-      return { name: o.name, soup: o.positions, sourceId: o.sourceId, support: !!sup, brim: !!(sup && sup.brim), hostSourceId: sup ? sup.hostSourceId : undefined, interfaceLayers: sup ? sup.interfaceLayers : undefined, sheetLayerMm: sup ? sup.sheetLayerMm : undefined,
+      return { name: o.name, soup: o.positions, sourceId: o.sourceId, support: !!sup, brim: !!(sup && sup.brim), stack: !!(sup && sup.stack), hostSourceId: sup ? sup.hostSourceId : undefined, interfaceLayers: sup ? sup.interfaceLayers : undefined, sheetLayerMm: sup ? sup.sheetLayerMm : undefined,
                nonSolid: !!(pm && typeof root.nsoNonSolid === 'function' && root.nsoNonSolid(pm)),
                settings: m && m.slicerSettings ? Object.assign({}, m.slicerSettings) : null };      // a support's own slicer overrides ride into a 3MF
     });
@@ -609,7 +610,7 @@
       if (!r.ok) { setBusy(false); S.result = null; readout(r.reason, true); say('Slice: ' + r.reason, true); return ended({ ok: false, reason: r.reason }); }
       S.result = r; S.sig = sig; S.setSig = setSig; S.pieces = pieces; S.profile = profile; S.settings = settings;
       setBusy(false);
-      var sup = pieces.filter(function (p) { return p.support && !p.brim; }).length;
+      var sup = pieces.filter(function (p) { return p.support && !p.brim && !p.stack; }).length;
       readout(describe(r) + ' - ' + pieces.length + ' object' + (pieces.length === 1 ? '' : 's') + (sup ? ' (' + sup + ' support' + (sup === 1 ? '' : 's') + ')' : '') +
               (r.changed && r.changed.length ? ' - ' + settingsWords(settings) : ''), false);
       say('Sliced for the ' + profile.short + ': ' + describe(r));
