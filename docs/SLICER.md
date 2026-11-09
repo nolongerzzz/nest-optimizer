@@ -562,6 +562,28 @@ Slice turns it on for a Dense sheet (`nsoSupport.sheetLayerMm`) only.
 With it on, every sheet zone is typed by the part's nearness (the stair's way): interface while the part lies within the top support layer's reach (the gap + a layer, 0.4) + 2
 of the support's own layers over it, transition within 2 more, cell by cell, so a slope's plate has the 3 + 2 across its ribbon (`hostEx`).
 
+### The raft (`raftLayers`)
+
+Bambu's raft is its own system between the plate and the first layer of everything on it - part, support or both - not a part of any support style
+(the owner's circle slices, 1 - 10 layers; `fixtures/supports/raft_circle.gcode.3mf`, 8 layers under a 50 mm disc, and `supp_ref_raft.gcode.3mf`, 10
+under the six heads' trees). Read off both and built as `raftPlan` / `addRaft`:
+
+- **Layers**: N = `raft_layers`; the top ceil(N/2) are interface (`Support interface`), the rest base (`Support`) - 1: 1 interface, 2: 1 + 1, 3: 1 + 2,
+  10: 5 + 5. The first at the first layer's height, every other 0.75 x the nozzle (0.2, 0.5, 0.8 ... 2.9 for 10).
+- **The plate on it**: everything is lifted the raft's top + `raft_contact_distance` (0.1), and its first layer is an ordinary layer (2.3 + 0.1 + 0.16 =
+  2.56 for the circle's 8, as Bambu). Each support's first layer gets a layer of its own under it that closes the 0.1 gap (Bambu's 3.0 under each
+  trunk). No brim with a raft.
+- **Region**: the first layer of everything, grown `raft_expansion` (1.5) under the top layer, 0.5 more under the others, 1.0 more again under the first
+  (the circle: 1.5 / 2.0 / 2.9 - 3.4 past the disc).
+- **Lines** (0.42): the first layer solid along Y; the base along X at `support_base_pattern_spacing` + a bead's spacing (2.5 -> 2.856, Bambu's own
+  2.856); the interface at `support_interface_spacing` + a bead's spacing, along Y under supports (supp_ref: 0.45) and 45 / 135 in turn under a part
+  alone (the circle: 0.886). Each layer one zig-zag joined along its edge.
+- **Settings**: the Slice card and G-scope's Slice panel have *raft N layers* and *contact mm*; the .gcode.3mf records them as `raft_layers` /
+  `raft_contact_distance`, and a profile's own raft keys are read (`nso-print-planner.js` engineOptions).
+
+Not matched yet: under a tree, Bambu's first raft layer is about 0.9 mm *inside* the base layers where under the bare disc it is 1 mm outside; here it
+is outside for both. Bambu's tree also prints its own Support through the raft's interface layers where the trunk stands; here the interface covers it.
+
 ## 7. Scope and complexity, as found
 
 - **The real work was measurement.** The textbook core is the smaller part.

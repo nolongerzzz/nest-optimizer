@@ -100,7 +100,7 @@
   // settings (configOverlay), so the engine, the planner, the G-code's CONFIG_BLOCK and
   // the file's project_settings.config all read the same number. The nozzle is the
   // profile's: another nozzle needs its own start / end blocks.
-  var SETTINGS_DEFAULT = { nozzle: 0.4, layer: 0.2, walls: 2, density: 15, pattern: 'grid', angle: 30, brim: 'auto', interfaceRule: null };
+  var SETTINGS_DEFAULT = { nozzle: 0.4, layer: 0.2, walls: 2, density: 15, pattern: 'grid', angle: 30, brim: 'auto', raft: 0, raftGap: 0.1, interfaceRule: null };
   var PATTERN_TO_CONFIG = { grid: 'grid', zigzag: 'zig-zag', lines: 'line' };
   var PATTERN_FROM_CONFIG = { grid: 'grid', 'zig-zag': 'zigzag', zigzag: 'zigzag', line: 'lines', lines: 'lines' };
   var BRIM_TO_CONFIG = { auto: 'auto_brim', outer: 'outer_only', none: 'no_brim' };
@@ -119,7 +119,7 @@
     return {
       nozzle: eng.nozzleMm, layer: o.layerMm, walls: o.wallLoops, density: Math.round(o.sparseDensity * 100),
       pattern: PATTERN_FROM_CONFIG[cfgRaw(config, 'sparse_infill_pattern')] || o.sparsePattern,
-      angle: o.supportThresholdDeg, brim: o.brimType, interfaceRule: null
+      angle: o.supportThresholdDeg, brim: o.brimType, raft: Math.round(o.raftLayers || 0), raftGap: o.raftContactMm != null ? o.raftContactMm : 0.1, interfaceRule: null
     };
   }
 
@@ -136,6 +136,8 @@
       pattern: PATTERN_TO_CONFIG[s.pattern] ? s.pattern : D.pattern,
       angle: Math.round(n(s.angle, D.angle, 1, 89)),
       brim: BRIM_TO_CONFIG[s.brim] ? s.brim : D.brim,
+      raft: Math.round(n(s.raft, D.raft, 0, 30)),
+      raftGap: Math.round(n(s.raftGap, D.raftGap, 0, 1) * 100) / 100,
       interfaceRule: s.interfaceRule === 'column' ? 'column' : null
     };
   }
@@ -155,6 +157,8 @@
     if (s.pattern !== base.pattern) out.sparse_infill_pattern = PATTERN_TO_CONFIG[s.pattern];
     if (s.angle !== base.angle) out.support_threshold_angle = String(s.angle);
     if (s.brim !== base.brim) out.brim_type = BRIM_TO_CONFIG[s.brim];
+    if (s.raft !== base.raft) out.raft_layers = String(s.raft);
+    if (Math.abs(s.raftGap - base.raftGap) > 1e-6) out.raft_contact_distance = String(s.raftGap);
     return out;
   }
 
@@ -395,7 +399,7 @@
   // ---- the card's Slice settings -----------------------------------------------
 
   var SET_IDS = ['slice-set-nozzle', 'slice-set-layer', 'slice-set-walls', 'slice-set-density', 'slice-set-pattern',
-                 'slice-set-angle', 'slice-set-brim', 'slice-set-iface'];
+                 'slice-set-angle', 'slice-set-brim', 'slice-set-raft', 'slice-set-raft-gap', 'slice-set-iface'];
 
   /** The interface rule, one choice shared with G-scope's Slice settings (its page keeps it). */
   function interfaceRule() {
@@ -408,6 +412,7 @@
     return cleanSettings({
       nozzle: v('slice-set-nozzle'), layer: v('slice-set-layer'), walls: v('slice-set-walls'), density: v('slice-set-density'),
       pattern: v('slice-set-pattern'), angle: v('slice-set-angle'), brim: v('slice-set-brim'),
+      raft: v('slice-set-raft'), raftGap: v('slice-set-raft-gap'),
       interfaceRule: $('slice-set-iface') ? v('slice-set-iface') : interfaceRule()
     });
   }
@@ -417,7 +422,7 @@
     var set = function (id, val) { var el = $(id); if (el && val != null) el.value = String(val); };
     set('slice-set-nozzle', st.nozzle); set('slice-set-layer', st.layer); set('slice-set-walls', st.walls);
     set('slice-set-density', st.density); set('slice-set-pattern', st.pattern); set('slice-set-angle', st.angle);
-    set('slice-set-brim', st.brim);
+    set('slice-set-brim', st.brim); set('slice-set-raft', st.raft); set('slice-set-raft-gap', st.raftGap);
     set('slice-set-iface', interfaceRule() || '');
   }
 

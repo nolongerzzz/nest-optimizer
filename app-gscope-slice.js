@@ -169,6 +169,9 @@ var NSO_GSCOPE_SLICE = (function () {
     over.brimType = brim && brim.value ? brim.value : SLICE_REST.brim;
     var rule = ifaceRule();
     if (rule) over.supportInterfaceRule = rule;
+    /* the raft (nso_slicer.js raftPlan): its own system under everything on the plate, Bambu's raft_layers / raft_contact_distance */
+    over.raftLayers = Math.max(0, Math.round(num('ms-slice-raft', 0)));
+    over.raftContactMm = Math.max(0, num('ms-slice-raft-gap', 0.1));
     return { nozzleMm: nozzle, over: over };
   }
 
@@ -449,6 +452,7 @@ var NSO_GSCOPE_SLICE = (function () {
     lines.push(r.planes.length + ' layers at ' + o.layerMm + ' mm, walls ' + o.outerWallWidthMm + ' mm x ' + o.wallLoops +
       ', ' + Math.round(o.sparseDensity * 100) + ' % ' + o.sparsePattern + ', support below ' + o.supportThresholdDeg + '° (' + r.ms + ' ms).');
     r.objects.forEach(function (ob) {
+      if (ob.role === 'raft') { lines.push('Raft: ' + r.raft.layers + ' layer' + (r.raft.layers === 1 ? '' : 's') + ' (' + r.raft.base + ' base, ' + r.raft.interface + ' interface), top at ' + r.raft.topMm.toFixed(2) + ' mm; the plate stands on it at ' + r.raft.liftMm.toFixed(2) + ' mm.'); return; }
       var wc = Object.keys(ob.wallCountHistogram).map(function (k) { return k + '×' + ob.wallCountHistogram[k]; }).join(' ');
       lines.push(ob.name + ': ' + (ob.role === 'support' ? supportWords(ob.support) : 'walls per layer ' + wc + '; ' + overhangWords(ob)) +
         (ob.sectionStats.openChains ? '; ' + ob.sectionStats.openChains + ' open section chain(s)' +

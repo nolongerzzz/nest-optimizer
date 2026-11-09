@@ -288,6 +288,12 @@ per-layer angle histograms and line centres. See `docs/CROSSHATCH.md`.
   `support:everywhere` reads it (Support transition / Support interface
   features, per surface: height, footprint, layers), part by part, matching
   each part to its place on the plate. See docs/SUPPORT-INTERFACE.md section 8.
+- supp_ref_raft.gcode.3mf — the owner's Bambu Studio slice of supp_ref with tree slim AND a 10-layer raft (A1 mini, 0.20mm Standard,
+  raft_contact_distance 0.1, raft_expansion 1.5, support_interface_spacing 0.1, support_base_pattern_spacing 2.5): 5 base layers (Support,
+  z 0.2 / 0.5 - 1.4), 5 interface (Support interface, 1.7 - 2.9), the trees from 3.0, the parts' first layer at 3.2. The reference for
+  nso_slicer.js's raft (docs/SLICER.md "The raft").
+- raft_circle.gcode.3mf — the owner's Bambu Studio slice of a 50 mm disc on an 8-layer raft and no support (A1, 0.16mm High Quality,
+  support_interface_spacing 0.5): 4 base + 4 interface, the disc's first layer at 2.56; the raft 1.5 mm past the disc on its top layer, 2.0 under it.
 - supp_ref.3mf — the owner's Bambu Studio PROJECT of the same six parts (20,572
   triangles; Support Base, Support Oblique, Support Circular, Support Sphere,
   Support Negative Sphere, Support Negative Sphere2, at their places on the

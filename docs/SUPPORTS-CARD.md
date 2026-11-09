@@ -458,7 +458,7 @@ Two additions that work in every mode, Auto included:
   brush covered that no detected footprint holds become a footprint of their own for the raft, laid to the brush's edge. A detected footprint it went over keeps
   its plate to its edge (`marginMm` 0.02 for 0.1). The painted dots draw over the piece (translucent, the brush's size). Clear paint takes all off, one Undo.
   `card.paintStroke([{ p, n }], r)`, `card.paint(on)`, `card.clearPaint()`, `card.paintCount()` are the page's own calls (tests, a script).
-- **Raft interface** (a checkbox, on): the interface and the transition laid from each footprint and its height, layer by layer - the region plate. Off, the sheet is
+- **Platform under flat faces** (a checkbox, on; it was labelled "Raft interface" - it is no raft: the raft is the Slice card's own, docs/SLICER.md "The raft"): the interface and the transition laid from each footprint and its height, layer by layer - the region plate. Off, the sheet is
   built from the tips alone, as it was before the region plate.
 
 ### What survives, what forgets

@@ -458,6 +458,31 @@ function frustum(n, r0, r1, z0, z1) {
     check('the repo meshes slice byte for byte as before the thin-wall pass, with it off and on (' + n + ' slices pinned)', !bad.length, bad.join('; ') || 'all ' + n);
   }
 
+  section('The raft: its own system under the plate, as Bambu lays it (fixtures/supports/raft_circle.gcode.3mf, docs/SLICER.md "The raft")');
+  {
+    const disc = [];
+    for (let i = 0, n = 128; i < n; i++) {
+      const a = 2 * Math.PI * i / n, b = 2 * Math.PI * (i + 1) / n, A = [25 * Math.cos(a), 25 * Math.sin(a)], B = [25 * Math.cos(b), 25 * Math.sin(b)];
+      disc.push(0, 0, 0, B[0], B[1], 0, A[0], A[1], 0, 0, 0, 2.08, A[0], A[1], 2.08, B[0], B[1], 2.08, A[0], A[1], 0, B[0], B[1], 0, B[0], B[1], 2.08, A[0], A[1], 0, B[0], B[1], 2.08, A[0], A[1], 2.08);
+    }
+    const sl = (N) => SL.sliceObjects([{ name: 'disc', soup: disc, key: 1, role: 'part' }], SL.defaultsFor(0.4, { layerMm: 0.16, firstLayerMm: 0.2, supportWidthMm: 0.42, raftLayers: N, raftContactMm: 0.1 }), wasm);
+    const r8 = sl(8), raft = r8.objects.find(ob => ob.role === 'raft'), part = r8.objects.find(ob => ob.role === 'part');
+    const zs = raft.layers.map(L => L.printZ.toFixed(2)).join(' '), kinds = raft.layers.map(L => L.paths[0].feature === 'Support' ? 'B' : 'I').join('');
+    check('8 layers: 4 base (Support) then 4 interface (Support interface) at z 0.2, 0.5 ... 2.3 - Bambu\'s', zs === '0.20 0.50 0.80 1.10 1.40 1.70 2.00 2.30' && kinds === 'BBBBIIII', zs + ' ' + kinds);
+    check('the part\'s first layer is an ordinary 0.16 on the raft\'s top + 0.1: z 2.56 (Bambu\'s)', Math.abs(part.layers[0].printZ - 2.56) < 1e-6 && Math.abs(part.layers[0].h - 0.16) < 1e-6, part.layers[0].printZ + ' / ' + part.layers[0].h);
+    const ys = [];
+    raft.layers[1].paths.forEach(p => { for (let i = 0; i + 1 < p.pts.length; i++) { const a = p.pts[i], b = p.pts[i + 1]; if (Math.abs(b[1] - a[1]) < 1e-6 && Math.abs(b[0] - a[0]) > 1) ys.push(+a[1].toFixed(3)); } });
+    const u = [...new Set(ys)].sort((a, b) => a - b), gap = u.length > 1 ? u[1] - u[0] : 0;
+    check('the base lines run along X 2.856 apart (support_base_pattern_spacing 2.5; Bambu\'s 2.856)', Math.abs(gap - 2.856) < 0.01, gap.toFixed(3));
+    const reach = (L) => { let m = 0; L.paths.forEach(p => p.pts.forEach(q => { m = Math.max(m, Math.hypot(q[0], q[1])); })); return m + 0.21 - 25; };
+    check('it reaches 1.5 past the disc on its top layer, 2.0 under it (the circle\'s 1.5 / 2.0)', Math.abs(reach(raft.layers[7]) - 1.5) < 0.1 && Math.abs(reach(raft.layers[3]) - 2.0) < 0.1, reach(raft.layers[7]).toFixed(2) + ' / ' + reach(raft.layers[3]).toFixed(2));
+    const k = (N) => { const r = sl(N), ra = r.objects.find(ob => ob.role === 'raft'); return ra.layers.map(L => L.paths[0].feature === 'Support' ? 'B' : 'I').join(''); };
+    const splits = [1, 2, 3, 4].map(k).join(' ');
+    check('the split: 1 -> I, 2 -> BI, 3 -> BII, 4 -> BBII (the owner\'s 1 - 4 layer slices)', splits === 'I BI BII BBII', splits);
+    check('no raft (0): no raft object, the part on the plate as before', !sl(0).objects.some(ob => ob.role === 'raft') && Math.abs(sl(0).objects[0].layers[0].printZ - 0.2) < 1e-6);
+    check('the G-code carries it as Bambu writes it: Support and Support interface before the part\'s walls', /FEATURE: Support\n[\s\S]*FEATURE: Support interface[\s\S]*FEATURE: Outer wall/.test(SL.toGcode(r8)));
+  }
+
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
 })().catch(err => { console.error(err); process.exit(1); });

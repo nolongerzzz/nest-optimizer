@@ -212,7 +212,13 @@
       // the project's own brim: auto_brim (a tall thin part gets one), outer_only / outer_and_inner (every part), no_brim
       brimType: ({ auto_brim: 'auto', outer_only: 'outer', outer_and_inner: 'outer', no_brim: 'none' })[raw(config, 'brim_type')] || 'none',
       brimWidthMm: num(config, 'brim_width', 5),
-      brimObjectGapMm: num(config, 'brim_object_gap', 0.1)
+      brimObjectGapMm: num(config, 'brim_object_gap', 0.1),
+      // the raft (nso_slicer.js raftPlan): Bambu's raft_layers, its contact gap and expansion, and the line spacings it lays them at
+      raftLayers: num(config, 'raft_layers', 0),
+      raftContactMm: num(config, 'raft_contact_distance', 0.1),
+      raftExpansionMm: num(config, 'raft_expansion', 1.5),
+      raftBaseSpacingMm: num(config, 'support_base_pattern_spacing', 2.5),
+      raftInterfaceSpacingMm: num(config, 'support_interface_spacing', 0.5)
     };
     return { nozzleMm: nozzle, over: over };
   }

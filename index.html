@@ -1381,7 +1381,7 @@
               <label class="vp-check" for="sup-brim" title="A brim round the piece's foot, built with its supports and sliced as Brim: 5 mm, 10 loops of a 0.5 mm line, 0.1 mm off the wall, one first layer thick - the way Bambu rings the stem of a tall thin piece. It stays off the supports' pads: it meets them and does not join them. Only a piece that is tall for its foot gets one (a flat part stands on its own).">
                 <input type="checkbox" id="sup-brim" checked> Brim round the foot</label>
               <label class="vp-check" for="sup-raft" title="Auto (the tree) always lays the platform under a flat hanging face - the interface and the transition laid from the face itself, layer by layer - whatever this box says. For the other builds: on, the same platform; off, the sheet is built from the tips alone.">
-                <input type="checkbox" id="sup-raft" checked> Raft interface</label>
+                <input type="checkbox" id="sup-raft" checked> Platform under flat faces</label>
               <label class="vp-bend-field" for="sup-interface">Interface
                 <select id="sup-interface" class="vp-select" title="Dense, in the one-trunk build: the transition and interface lines lie 0.47 mm apart (Bambu's interface spacing 0.1 lays them 0.46 apart) and there are 3 interface layers. Open (and every other build): 0.84 mm apart and 2, the pitch the first prints were made with.">
                   <option value="dense" selected>Dense (Bambu)</option>
@@ -2258,6 +2258,10 @@
                     <option value="outer">every part</option>
                     <option value="none">off</option>
                   </select></label>
+                <label for="slice-set-raft">raft
+                  <input type="number" id="slice-set-raft" value="0" min="0" max="30" step="1" title="Raft layers under everything on the plate - its own system between the plate and the first layer of every part and support, as Bambu's raft_layers: the top half (rounded up) Support interface, the rest Support base. 0: no raft (and the brim as set); with a raft there is no brim." /> layers</label>
+                <label for="slice-set-raft-gap">contact
+                  <input type="number" id="slice-set-raft-gap" value="0.1" min="0" max="1" step="0.05" title="Raft contact Z distance, mm: the gap between the raft's top and the first layer on it (Bambu's raft_contact_distance, 0.1)." /> mm</label>
                 <label for="slice-set-iface">interface
                   <select id="slice-set-iface" title="How a support's interface and transition are laid. Sheet: as the supports were built. Column: read off the part's own layers column by column (docs/SUPPORT-GATE.md). One choice, shared with G-scope's Slice settings, and remembered.">
                     <option value="" selected>sheet</option>
@@ -2610,6 +2614,10 @@
                     <option value="outer">every part</option>
                     <option value="none">off</option>
                   </select></label>
+                <label class="ms-note" for="ms-slice-raft" style="margin:0">raft
+                  <input type="number" id="ms-slice-raft" value="0" min="0" max="30" step="1" style="width:3.5em" title="Raft layers under everything on the plate - its own system between the plate and the first layer of every part and support, as Bambu's raft_layers: the top half (rounded up) Support interface, the rest Support base. 0: no raft (and the brim as set); with a raft there is no brim." /> layers</label>
+                <label class="ms-note" for="ms-slice-raft-gap" style="margin:0">contact
+                  <input type="number" id="ms-slice-raft-gap" value="0.1" min="0" max="1" step="0.05" style="width:3.5em" title="Raft contact Z distance, mm: the gap between the raft's top and the first layer on it (Bambu's raft_contact_distance, 0.1)." /> mm</label>
                 <label class="ms-note" for="ms-slice-iface-rule" style="margin:0">interface
                   <select id="ms-slice-iface-rule" style="width:auto" title="How a support's interface and transition are laid. Sheet: as the supports were built (the sheet typing). Column: read off the part's own layers column by column - never a line with no air under the part, 3 interface and 2 transition layers under every contact, the base carried down to the tree (docs/SUPPORT-GATE.md). Remembered, and used by Export print too.">
                     <option value="" selected>sheet</option>
@@ -2886,7 +2894,7 @@
   <script src="nso-gcode-lines.js?v=fe0b823c"></script>
   <script src="nso-gscope-diff.js?v=937f4953"></script>
   <script src="nso-gcode-solid.js?v=ac1a4f02"></script>
-  <script src="nso_slicer.js?v=f248ffab"></script>
+  <script src="nso_slicer.js?v=f3fc2c12"></script>
   <script src="nso_raster_lines.js?v=461ca449"></script>
   <!-- The support interface: the crosshatch's one-direction layers, and the
        sheet a support tree's tips carry under the part (flat caps on the
@@ -3083,16 +3091,16 @@
   <script src="nso_support_blockers.js?v=6962a81c"></script>
   <script src="app-support-blockers.js?v=73c8125d"></script>
   <script src="app-supports-card.js?v=1ac2f5e9"></script>
-  <script src="app-gscope-slice.js?v=a2eaf7dd"></script>
+  <script src="app-gscope-slice.js?v=558d0268"></script>
   <!-- The Slice card (left bar): the plate sliced for its printer, the .gcode.3mf
        it makes. The print planner and the packager are loaded here for it and for
        its slice worker (which importScripts them from these tags); no G-scope file
        uses them. After nso_slicer.js, nso-cooling-profiles.js, nso-3mf.js and
        nso-3mf-read.js, which they read at load, and after app-microscope.js, whose
        plate reader and G-code import it calls. See docs/PRINT-PLANNER.md. -->
-  <script src="nso-print-planner.js?v=d094fd76"></script>
+  <script src="nso-print-planner.js?v=f4b28af6"></script>
   <script src="nso-gcode3mf-write.js?v=cdfa15b4"></script>
-  <script src="app-print.js?v=971aa9fc"></script>
+  <script src="app-print.js?v=38eb64f0"></script>
   <!-- Lift: details off a face, the face left as it was round them. After
        nso_lift.js (Phase 1: a flat face), nso_lift_curved.js (Lift 3: the
        repair under a detail lifted off a curved base), nso_lift_auto.js

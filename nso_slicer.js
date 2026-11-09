@@ -1420,8 +1420,12 @@
         if (ob.soup[i] > zMax) zMax = ob.soup[i];
       }
     });
-    var shiftZ = o.dropToPlate ? -zMin : 0;
-    var planes = slicePlanes(zMin, zMax, o).map(function (p) {
+    /* A RAFT (o.raftLayers; Bambu's raft_layers) lifts the whole plate: the parts and supports stand on its top, raftContactMm over it, and
+       their first layer is an ordinary one (Bambu: 2.9 + 0.1 + 0.2 with 10 raft layers, 2.3 + 0.1 + 0.16 with 8) */
+    var rp = raftPlan(o);
+    if (rp) objs = objs.filter(function (ob) { return ob.role !== 'brim'; });        /* a raft is the plate's hold: no brim with it */
+    var shiftZ = (o.dropToPlate ? -zMin : 0) + (rp ? rp.lift : 0);
+    var planes = slicePlanes(zMin, zMax, rp ? Object.assign({}, o, { firstLayerMm: o.layerMm }) : o).map(function (p) {
       return { index: p.index, printZ: p.printZ + shiftZ, sliceZ: p.sliceZ, h: p.h };
     });
     if (!planes.length) return { ok: false, reason: 'the part is thinner than one layer' };
@@ -1683,7 +1687,8 @@
         }) };
       }
 
-      addBrims(g, perObject, planes, o);
+      if (!rp) addBrims(g, perObject, planes, o);
+      var raftOb = rp ? addRaft(g, perObject, o, rp) : null;
 
       // --- overhang regions in 3D, per object: layer islands linked upward
       // --- conflicts: two objects printing into the same place on one layer.
@@ -1768,6 +1773,7 @@
         }),
         ms: 0
       };
+      if (raftOb) { result.objects.push(raftOb); result.raft = { layers: rp.N, base: rp.nB, interface: rp.nI, topMm: rp.top, liftMm: rp.lift }; }
       result.ms = Date.now() - t0;
       result.report = describe(result);
       if (o.emitGcode) result.gcode = toGcode(result);
@@ -1870,6 +1876,78 @@
    * join; a run shorter than a millimetre is dropped. Printed before everything
    * else on the first layer, as feature 'Brim'.
    */
+  /* THE RAFT (Bambu's raft, read off its own slices: fixtures/supports/supp_ref_raft.gcode.3mf, 10 layers under the six heads' trees, and
+     raft_circle.gcode.3mf, 8 under a 50 mm disc with no support). Its own system between the plate and the first layer of everything on it,
+     whatever that is - a part, a support or both. N layers: the top half (rounded up) interface, the rest base, Prusa's split (1: one interface,
+     2: 1 + 1, 3: 1 + 2, 10: 5 + 5). The first at the first layer's height, the rest 0.75 x the nozzle (0.3 at 0.4: z 0.2, 0.5, 0.8 ...). Features
+     as Bambu writes them: base Support, interface Support interface. The region: the first layer of everything, grown raft_expansion (1.5) under
+     the top layer and 0.5 more under the others (the circle: 1.5 and 2.0 past the disc), the first layer RAFT.firstExtraMm more again (the circle's
+     solid first layer, 2.9 - 3.4). Lines: the first layer solid along Y, the base along X at support_base_pattern_spacing (2.5 -> 2.86 apart),
+     the interface at support_interface_spacing (0.1 -> 0.45 apart along Y under a tree; 0.5 -> 0.89 apart, 45 / 135 in turn, under a part alone),
+     each layer one zig-zag joined along its edge. A support's first layer has a layer of its own under it on the raft's top, raftContactMm thick
+     (Bambu's 0.1 layer at 3.0 under each trunk). */
+  var RAFT = { layerOfNozzle: 0.75, baseExtraMm: 0.5, firstExtraMm: 1.0 };
+  function raftPlan(o) {
+    var N = Math.max(0, Math.min(50, Math.round(+o.raftLayers || 0)));
+    if (!N) return null;
+    var nI = Math.ceil(N / 2), nB = N - nI, h1 = Math.max(o.layerMm, RAFT.layerOfNozzle * o.nozzleMm), z = 0, layers = [];
+    for (var k = 0; k < N; k++) {
+      var h = k === 0 ? o.firstLayerMm : h1;
+      z = Math.round((z + h) * 1e6) / 1e6;
+      layers.push({ printZ: z, h: h, kind: k < nB ? 'base' : 'interface', iface: k - nB });
+    }
+    var gap = o.raftContactMm != null && o.raftContactMm >= 0 ? +o.raftContactMm : 0.1;
+    return { N: N, nB: nB, nI: nI, layers: layers, top: z, gap: gap, lift: Math.round((z + gap) * 1e6) / 1e6 };
+  }
+  function addRaft(g, perObject, o, rp) {
+    var feet = [], supFeet = [];
+    perObject.forEach(function (P) {
+      var S0 = P.S && P.S[0];
+      if (!S0 || g.isEmpty(S0)) return;
+      feet.push(S0);
+      if (P.role === 'support') supFeet.push(S0);
+    });
+    if (!feet.length) return null;
+    var F = g.unionAll(feet), w = o.supportWidthMm > 0 ? o.supportWidthMm : o.infillWidthMm;
+    var exp = o.raftExpansionMm != null ? +o.raftExpansionMm : 1.5, withSup = supFeet.length > 0;
+    var baseSp = o.raftBaseSpacingMm != null ? +o.raftBaseSpacingMm : 2.5, ifSp = o.raftInterfaceSpacingMm != null ? +o.raftInterfaceSpacingMm : 0.5;
+    var planesR = [], layers = [];
+    function fill(region, ang, pitch, feature, h, out) {
+      var inner = g.offset(region, -w / 2);
+      if (g.isEmpty(inner)) return;
+      var segs = scanFill(g.polys(inner), ang, pitch, 0);
+      if (segs.length) connect(segs, pitch + 2 * w + 1, g.polys(g.offset(region, 1e-3))).forEach(function (pth) {
+        out.push({ feature: feature, width: w, closed: false, pts: pth.pts, raft: true, overhangMm: 0, overhangRuns: [] });
+      });
+    }
+    rp.layers.forEach(function (rl, k) {
+      var top = k === rp.N - 1, grow = exp + (rp.N > 1 && !top ? RAFT.baseExtraMm : 0) + (rp.N > 1 && k === 0 ? RAFT.firstExtraMm : 0);
+      var R = g.offset(F, grow, 'Round'), out = [], sp = spacingOf(w, rl.h);
+      if (rl.kind === 'base') {
+        if (k === 0) fill(R, Math.PI / 2, w, 'Support', rl.h, out);
+        else fill(R, 0, baseSp + sp, 'Support', rl.h, out);
+      } else {
+        var ang = withSup ? Math.PI / 2 : (rl.iface % 2 ? 3 : 1) * Math.PI / 4;
+        fill(R, ang, ifSp + sp, 'Support interface', rl.h, out);
+      }
+      planesR.push({ index: k, printZ: rp.layers[k].printZ, sliceZ: null, h: rl.h });
+      layers.push({ index: k, printZ: rl.printZ, h: rl.h, areaMm2: g.area(R), wallCount: 0, wallLoopsByDepth: [], thinWalls: 0, areas: null, overhangMm2: 0,
+                    overhangPolys: [], sectionPolys: g.polys(R), paths: out });
+    });
+    if (withSup && rp.gap > 1e-6) {
+      /* under each support's first layer, a layer that closes the contact gap (it stands on the raft, as Bambu's trunk does) */
+      var Sg = g.unionAll(supFeet), out2 = [];
+      g.polys(Sg).forEach(function (pl) { if (pl.length > 2) out2.push({ feature: 'Support', width: w, closed: true, pts: pl.map(function (q) { return q; }), raft: true, overhangMm: 0, overhangRuns: [] }); });
+      var inS = g.offset(Sg, -w / 2);
+      if (!g.isEmpty(inS)) fill(inS, Math.PI / 2, 2 * w, 'Support', rp.gap, out2);
+      planesR.push({ index: rp.N, printZ: rp.lift, sliceZ: null, h: rp.gap });
+      layers.push({ index: rp.N, printZ: rp.lift, h: rp.gap, areaMm2: g.area(Sg), wallCount: 0, wallLoopsByDepth: [], thinWalls: 0, areas: null, overhangMm2: 0,
+                    overhangPolys: [], sectionPolys: g.polys(Sg), paths: out2 });
+    }
+    return { id: 'raft', name: 'Raft', flipped: false, nonSolid: false, role: 'raft', planes: planesR, support: null, triangles: 0, degenerate: 0,
+             sectionStats: { openChains: 0, stitched: 0, closedByGap: 0, droppedChains: 0 }, wallCountHistogram: {}, layers: layers, overhang: [] };
+  }
+
   function addBrims(g, perObject, planes, o) {
     if (!o.brimType || o.brimType === 'none' || !(o.brimWidthMm > 0)) return;
     var w = o.brimLineWidthMm > 0 ? o.brimLineWidthMm : o.nozzleMm * 1.25, gap = Math.max(0, o.brimObjectGapMm || 0);
@@ -3277,6 +3355,7 @@
       Math.round(res.options.sparseDensity * 100) + ' % ' + res.options.sparsePattern + ', support below ' +
       res.options.supportThresholdDeg + ' deg');
     res.objects.forEach(function (ob) {
+      if (ob.role === 'raft') { lines.push(ob.name + ': ' + res.raft.layers + ' layer(s) - ' + res.raft.base + ' base, ' + res.raft.interface + ' interface - top at ' + res.raft.topMm.toFixed(2) + ' mm, the plate on it at ' + res.raft.liftMm.toFixed(2)); return; }
       var st = ob.sectionStats;
       var hist = Object.keys(ob.wallCountHistogram).sort().map(function (k) {
         return k + ' wall' + (k === '1' ? '' : 's') + ' x' + ob.wallCountHistogram[k];
