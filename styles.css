@@ -1973,6 +1973,53 @@ select:focus, input:focus {
 }
 .measure-label[hidden] { display: none; }
 
+/* Measure's flags (Inches, Ruler, Guides) in Measure's lime, the way the button
+   above them is: the box and the marks it governs are one thing by eye. */
+.vp-flag-measure { --flag-accent: #a3e635; --flag-line: rgba(163, 230, 53, 0.5); --flag-fill: rgba(163, 230, 53, 0.16); }
+
+/* THE RULER (app-ruler.js). Three layers over the viewport, all in the
+   viewport's own pixels. The canvas draws the marks and the pick helpers and
+   takes no pointer at all, so a piece under the ruler can still be orbited,
+   panned and clicked. Only the bar (.nso-ruler-spine) and its three buttons
+   are grabbable. Below the menus (.viewport-overlay is 50) and under the
+   measurement chip (30), above the WebGL canvas. */
+.nso-ruler-canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 20;
+  pointer-events: none;
+}
+.nso-ruler-spine {
+  position: absolute;
+  z-index: 22;
+  box-sizing: border-box;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.nso-ruler-spine.is-dragging { cursor: grabbing; }
+.nso-ruler-tools {
+  position: absolute;
+  z-index: 23;
+  display: flex;
+  gap: 2px;
+}
+.nso-ruler-btn {
+  height: 14px;
+  min-width: 16px;
+  padding: 0 4px;
+  border: 1px solid rgba(163, 230, 53, 0.55);
+  border-radius: 4px;
+  background: rgba(12, 18, 26, 0.95);
+  color: #ecfccb;
+  font: 600 10px/12px ui-monospace, SFMono-Regular, Menlo, monospace;
+  cursor: pointer;
+}
+.nso-ruler-btn:hover { border-color: #a3e635; color: #a3e635; }
+.nso-ruler-canvas[hidden], .nso-ruler-spine[hidden], .nso-ruler-tools[hidden] { display: none; }
+
 /* Finish is one column. Every row states its own grid, so nothing spills into
    an implicit column and every button fills its cell - no orphan half-width
    stragglers next to a full-width Soften. */

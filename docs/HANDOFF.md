@@ -74,6 +74,7 @@ merging its list by hand. The list below is generated.
 - [Lift reads any face (2026-10-15)](handoff/lift-reads-any-face.md)
 - [Live watch - the eye button](handoff/live-watch-the-eye-button.md)
 - [Local brush - freehand surface deformation (added 2026-09-18)](handoff/local-brush-freehand-surface-deformation.md)
+- [Measure: an Inches toggle, and a draggable 300 mm / 12 in ruler (landed, `app-ruler.js`)](handoff/measure-inches-and-a-draggable-ruler.md)
 - [Mirror - exact reflection across one plane (2026-09-21)](handoff/mirror-exact-reflection-across-one-plane.md)
 - [Mold - a two-piece silicone mold from a piece (2026-10-16)](handoff/mold-a-two-piece-silicone-mold-from-a-piece.md)
 - [Move is flat; the grab is Lift's drop alone (2026-10-23)](handoff/move-flat.md)

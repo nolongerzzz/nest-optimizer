@@ -22,6 +22,7 @@
 
 const path = require('path');
 const M = require('../app-measure.js');
+const RL = require('../app-ruler.js');
 const { readSTL } = require('./nso_stl_io');
 const { withApp, loadSTL, selectModel, openMenuFor, ROOT } = require('./nso_app_harness');
 
@@ -199,6 +200,70 @@ function partA() {
   check('20 mm prints as "20.000 mm"', M.formatMm(20) === '20.000 mm', M.formatMm(20));
   check('a metre-ish figure drops to 2 dp', M.formatMm(123.4567) === '123.46 mm', M.formatMm(123.4567));
   check('sub-millimetre keeps its digits', M.formatMm(0.4) === '0.400 mm', M.formatMm(0.4));
+
+  console.log('\n=== A8. inches: the same length, printed the other way ===');
+  check('the inch is exactly 25.4 mm', M.MM_PER_IN === 25.4 && RL.MM_PER_IN === 25.4);
+  check('mm is untouched by the new formatter', M.formatLen(20, 'mm') === M.formatMm(20) && M.formatLen(123.4567) === '123.46 mm',
+        M.formatLen(123.4567));
+  check('25.4 mm is "1.0000 in"', M.formatLen(25.4, 'in') === '1.0000 in', M.formatLen(25.4, 'in'));
+  check('20 mm is "0.7874 in"', M.formatLen(20, 'in') === '0.7874 in', M.formatLen(20, 'in'));
+  check('4 decimals under 100 mm, 3 from there up (3.937 in)',
+        M.formatLen(99.9, 'in') === '3.9331 in' && M.formatLen(100, 'in') === '3.937 in',
+        M.formatLen(99.9, 'in') + ' / ' + M.formatLen(100, 'in'));
+  check('a negative length keeps its sign', M.formatLen(-12.7, 'in') === '-0.5000 in', M.formatLen(-12.7, 'in'));
+  check('per-axis deltas: bare numbers in either unit',
+        M.formatNum(20, 'mm') === '20.000' && M.formatNum(20, 'in') === '0.7874' && M.formatNum(-25.4, 'in') === '-1.0000');
+
+  console.log('\n=== A9. the ruler: what is drawn, and where ===');
+  const labels = ts => ts.filter(t => t.label != null).map(t => t.label);
+  const mm3 = RL.ticks('mm', 3, 0, 0, 1000);
+  check('300 mm long: labelled every 10 mm, 0 to 300, nothing past it',
+        labels(mm3).join(' ') === Array.from({ length: 31 }, (_, i) => i * 10).join(' ') && Math.max(...mm3.map(t => t.x)) === 900,
+        labels(mm3).length + ' labels, last mark at x=' + Math.max(...mm3.map(t => t.x)));
+  check('mm at 3 px/mm: 5 mm is the finest mark that fits (1 mm would be 3 px)', mm3.length === 61, mm3.length + ' marks');
+  const mm6 = RL.ticks('mm', 6, 0, 0, 2000);
+  check('zoomed in to 6 px/mm every millimetre gets a mark and numbers go every 5',
+        mm6.length === 301 && labels(mm6)[1] === '5' && labels(mm6).length === 61, mm6.length + ' marks, ' + labels(mm6).length + ' labels');
+  check('a mark sits exactly at x0 + mm * px/mm', mm3.every(t => Math.abs(t.x - t.v * 3) < 1e-9));
+  const in3 = RL.ticks('in', 3, 0, 0, 1000);
+  check('12 in is a real foot: 304.8 mm', RL.lengthMm('in') === 304.8 && RL.lengthMm('mm') === 300);
+  check('inches: numbered 0..12, whole inches', labels(in3).join(' ') === '0 1 2 3 4 5 6 7 8 9 10 11 12', labels(in3).join(' '));
+  check('inches at 3 px/mm: down to 1/16 (4.76 px), not 1/32 (2.38 px)',
+        in3.length === 12 * 16 + 1 && in3.some(t => Math.abs(t.v - 1 / 16) < 1e-12) && !in3.some(t => Math.abs(t.v - 1 / 32) < 1e-12),
+        in3.length + ' marks');
+  check('the last inch mark is at 304.8 mm', Math.abs(Math.max(...in3.map(t => t.x)) - 304.8 * 3) < 1e-9);
+  const rk = v => in3.find(t => Math.abs(t.v - v) < 1e-12).rank;
+  check('a longer mark for a coarser step: 1/16 < 1/8 < 1/4 < 1/2 < 1 in, and 10 in the longest',
+        rk(1 / 16) === 0 && rk(1 / 16) < rk(1 / 8) && rk(1 / 8) < rk(1 / 4) && rk(1 / 4) < rk(1 / 2) && rk(1 / 2) < rk(1) && rk(1) < rk(10) && rk(10) === 1,
+        [1 / 16, 1 / 8, 1 / 4, 1 / 2, 1, 10].map(rk).map(x => x.toFixed(2)).join(' < '));
+  const clip = RL.ticks('mm', 3, 0, 100, 200);
+  check('only marks inside the asked range are made', clip.length > 0 && clip.every(t => t.x >= 100 && t.x <= 200), clip.length + ' marks');
+  const neg = RL.ticks('mm', 3, -500, 0, 400);
+  check('a ruler dragged half off the left edge still starts where it should',
+        neg[0].x >= 0 && Math.abs(neg[0].v * 3 - 500 - neg[0].x) < 1e-9, 'first mark x=' + neg[0].x + ' (' + neg[0].v + ' mm)');
+  check('seen from very far away there is still a mark', RL.ticks('mm', 0.05, 0, 0, 500).length > 0);
+  check('and never a wall of them: bounded at any zoom', RL.ticks('in', 400, 0, 0, 1600).length < 400, RL.ticks('in', 400, 0, 0, 1600).length + ' marks');
+  check('pixels per mm: 600 px at 300 mm, 45 deg = 2.4142', Math.abs(RL.pxPerMmAtDepth(300, 45, 600) - 2.41421356) < 1e-7,
+        String(RL.pxPerMmAtDepth(300, 45, 600)));
+  check('twice as far is half the scale', Math.abs(RL.pxPerMmAtDepth(600, 45, 600) * 2 - RL.pxPerMmAtDepth(300, 45, 600)) < 1e-12);
+  check('a screen x reads back as mm along the ruler', Math.abs(RL.readingMm(2.5, 40, 140) - 40) < 1e-12);
+
+  console.log('\n=== A10. an edge against the ruler: tilt and depth ===');
+  const E = (ax, ay, bx, by, da, db) => RL.edgeAlignment({ x: ax, y: ay, depth: da == null ? 300 : da },
+                                                         { x: bx, y: by, depth: db == null ? 300 : db }, 2);
+  check('level: tilt 0, parallel', E(0, 0, 100, 0).tiltDeg === 0 && E(0, 0, 100, 0).parallel);
+  check('climbing to the right is +45 (screen y is down)', Math.abs(E(0, 0, 10, -10).tiltDeg - 45) < 1e-9, String(E(0, 0, 10, -10).tiltDeg));
+  check('falling to the right is -45', Math.abs(E(0, 0, 10, 10).tiltDeg + 45) < 1e-9);
+  check('straight up is 90 whichever end is A', E(0, 0, 0, -10).tiltDeg === 90 && E(0, -10, 0, 0).tiltDeg === 90);
+  check('naming the ends the other way round changes nothing',
+        [[0, 0, 30, -7], [5, 5, 80, 60], [10, 0, 0, 3]].every(([a, b, c, d]) => Math.abs(E(a, b, c, d).tiltDeg - E(c, d, a, b).tiltDeg) < 1e-9));
+  check('0.4 deg is along the ruler, 0.6 deg is not',
+        E(0, 0, 1000, -Math.tan(0.4 * Math.PI / 180) * 1000).parallel && !E(0, 0, 1000, -Math.tan(0.6 * Math.PI / 180) * 1000).parallel);
+  check('the span is along the ruler, not the edge length: a 3-4-5 edge spans 3',
+        Math.abs(E(0, 0, 6, 8).spanMm - 3) < 1e-9, String(E(0, 0, 6, 8).spanMm));
+  check('ends equally far from the camera: square to the view', E(0, 0, 10, 0, 300, 300).depthFrac === 0 && E(0, 0, 10, 0, 300, 300).square);
+  check('ends 10 mm apart in depth at 300 mm: 3.3 %, not square',
+        Math.abs(E(0, 0, 10, 0, 300, 310).depthFrac - 10 / 305) < 1e-12 && !E(0, 0, 10, 0, 300, 310).square);
 }
 
 /* ------------------------------------------------------------------ part B */
@@ -240,7 +305,7 @@ async function partB() {
     });
     check('#btn-measure present', !!btn, btn ? 'label "' + btn.text + '"' : 'missing');
     check('listener attached at load', !!btn && btn.wired);
-    check('both modes offered', !!btn && String(btn.modes) === 'span,edge', btn ? String(btn.modes) : '');
+    check('all four modes offered (two measure, two ruler-align)', !!btn && String(btn.modes) === 'span,edge,apoint,aedge', btn ? String(btn.modes) : '');
     check('the core is on the page as window.NSO_Measure',
           await page.evaluate(() => typeof window.NSO_Measure === 'object'));
 
@@ -454,10 +519,288 @@ async function partB() {
   });
 }
 
+
+/* ------------------------------------------------------------------ part C
+   The ruler and the inches toggle, in the real app. The scale is checked the
+   way the rest of this file checks things: against the piece's own size, from
+   a view where the answer is known (straight down, so a 20 mm edge on the top
+   face is square to the camera and the ruler, being true at its depth, must
+   read 20). */
+
+const rulerRead = page => page.evaluate(() => window.nsoRulerReadout());
+const frames = (page, n) => page.evaluate(k => new Promise(r => { let i = 0; (function f() { if (++i >= k) r(); else requestAnimationFrame(f); })(); }), n || 3);
+const topDown = page => page.evaluate(() => {
+  /* OrbitControls is damped: an earlier orbit leaves inertia that keeps turning
+     the camera for seconds. One update() with damping off applies and zeroes it
+     all, so "straight down" stays straight down. Damping stays off for the rest
+     of this test, which has no use for the coast. */
+  state.controls.enableDamping = false;
+  state.controls.update();
+  state.camera.position.set(0, 300, 0.001);
+  state.controls.target.set(0, 0, 0);
+  state.controls.update();
+});
+
+async function partC() {
+  await withApp(async (page, logs) => {
+    const id = await loadSTL(page, fx('box-20mm.stl'));
+    await selectModel(page, id);
+    await openMenuFor(page, '#btn-measure');
+    const box = await boxOf(page, 0);
+    const wantDiag = Math.hypot(box.max[0] - box.min[0], box.max[2] - box.min[2]);
+
+    console.log('\n=== C1. the card: Inches, Ruler, Guides, Zero here ===');
+    const card = await page.evaluate(() => ({
+      inches: !!document.getElementById('chk-measure-inches') && document.getElementById('chk-measure-inches').checked,
+      ruler: !!document.getElementById('chk-ruler') && document.getElementById('chk-ruler').checked,
+      zero: document.getElementById('btn-ruler-zero') && document.getElementById('btn-ruler-zero').disabled,
+      has: ['chk-measure-inches', 'chk-ruler', 'chk-ruler-guides', 'btn-ruler-zero'].every(i => !!document.getElementById(i)),
+      unit: window.NSO_MeasureBridge && window.NSO_MeasureBridge.unit(),
+      readout: window.nsoRulerReadout()
+    }));
+    check('all four controls are in the Measure card', card.has);
+    check('it starts in millimetres, ruler off, Zero here disabled',
+          card.unit === 'mm' && !card.inches && !card.ruler && card.zero === true && card.readout === null, JSON.stringify(card));
+
+    console.log('\n=== C2. inches: the same measurement, printed in inches ===');
+    await page.click('#btn-measure');
+    await clickWorld(page, [box.max[0] - 0.6, box.max[1], box.max[2] - 0.6]);
+    await clickWorld(page, [box.min[0] + 0.6, box.max[1], box.min[2] + 0.6]);
+    let r = await readout(page);
+    check('measured in mm first: ' + f3(wantDiag), r && r.text === f3(wantDiag) + ' mm' && r.unit === 'mm', r ? r.text : 'nothing');
+    await page.click('#chk-measure-inches');
+    await frames(page, 3);
+    r = await readout(page);
+    const wantIn = (wantDiag / 25.4).toFixed(4) + ' in';
+    check('the box is ticked and the number is "' + wantIn + '"', r && r.text === wantIn && r.unit === 'in', r ? r.text : 'nothing');
+    check('but the length itself is still millimetres: mm field and value/25.4',
+          r && near(r.mm, wantDiag, 5e-3) && near(r.value, wantDiag / 25.4, 1e-6), r ? f3(r.mm) + ' / ' + r.value : '');
+    check('the per-axis deltas stay in mm for whoever reads them', r && near(Math.abs(r.dx), 20, 1e-4), r ? f3(r.dx) : '');
+    const chipIn = await page.evaluate(() => document.getElementById('measure-label').textContent);
+    check('the chip on the piece says so', chipIn === wantIn, '"' + chipIn + '"');
+    const stIn = await page.evaluate(() => document.getElementById('status').textContent);
+    check('and the status line, with the axes in inches too',
+          stIn.indexOf('Measure - ' + wantIn) === 0 && /dX -?0\.7874/.test(stIn), stIn);
+    check('the choice is remembered in this browser',
+          await page.evaluate(() => localStorage.getItem('nso.measure.unit')) === 'in');
+    await page.click('#btn-measure');
+    await page.click('#btn-measure');   // off, on: a fresh edge measurement
+    await page.selectOption('#sel-measure-mode', 'edge');
+    await clickWorld(page, [(box.min[0] + box.max[0]) / 2, box.max[1], box.max[2] - 1]);
+    r = await readout(page);
+    check('Edge mode in inches: 20 mm is "0.7874 in"', r && r.text === '0.7874 in' && r.segments === 1, r ? r.text : 'nothing');
+    await page.click('#chk-measure-inches');
+    await frames(page, 2);
+    r = await readout(page);
+    check('back to millimetres: "20.000 mm"', r && r.text === '20.000 mm' && r.unit === 'mm', r ? r.text : 'nothing');
+    await page.click('#btn-measure');   // off
+
+    console.log('\n=== C3. the ruler: on, 300 mm, and 12 in ===');
+    await page.click('#chk-ruler');
+    await frames(page, 3);
+    let rr = await rulerRead(page);
+    const vis = await page.evaluate(() => ['nso-ruler-canvas', 'nso-ruler-spine', 'nso-ruler-tools'].map(i => {
+      const e = document.getElementById(i); return !!e && !e.hidden && e.getBoundingClientRect().width > 0;
+    }));
+    check('canvas, bar and buttons are up', vis.every(Boolean), String(vis));
+    check('300 mm long in millimetres', rr && rr.lengthMm === 300 && rr.unit === 'mm', rr ? rr.lengthMm + ' ' + rr.unit : 'off');
+    const spineW = await page.evaluate(() => document.getElementById('nso-ruler-spine').getBoundingClientRect().width);
+    check('the bar is 300 mm at the scale it reports', rr && near(spineW, 300 * rr.pxPerMm, 1), f3(spineW) + ' px vs ' + f3(300 * rr.pxPerMm));
+    await page.click('#chk-measure-inches');
+    await frames(page, 3);
+    rr = await rulerRead(page);
+    check('ticking Inches makes it a 12 in ruler, 304.8 mm', rr && rr.lengthMm === 304.8 && rr.unit === 'in', rr ? rr.lengthMm + ' ' + rr.unit : '');
+    check('its own unit button reads "in"', (await page.textContent('#nso-ruler-unit')) === 'in');
+    await page.click('#nso-ruler-unit');
+    await frames(page, 3);
+    check('and clicking it switches back, and unticks the box',
+          (await page.evaluate(() => !document.getElementById('chk-measure-inches').checked)) && (await rulerRead(page)).unit === 'mm');
+
+    console.log('\n=== C4. drag it anywhere; it never turns ===');
+    const host = await page.evaluate(() => { const r = document.querySelector('.viewport-section').getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; });
+    const sp = async () => page.evaluate(() => { const r = document.getElementById('nso-ruler-spine').getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; });
+    await page.evaluate(() => window.nsoRulerPlace(300, 300));
+    await page.waitForTimeout(300);     // the scale re-samples at most every 100 ms; let it settle here first
+    let s0 = await sp();
+    const gx = s0.x + 200, gy = s0.y + s0.h / 2;
+    await page.mouse.move(gx, gy); await page.mouse.down();
+    await page.mouse.move(gx + 90, gy - 70, { steps: 6 });
+    await frames(page, 4);
+    const inHand = await sp();      // still held: the scale must not have been re-sampled yet
+    await page.mouse.up();
+    await frames(page, 2);
+    let s1 = await sp();
+    check('dragged 90 right and 70 up by its bar', near(s1.x - s0.x, 90, 1.5) && near(s1.y - s0.y, -70, 1.5), 'moved ' + f3(s1.x - s0.x) + ', ' + f3(s1.y - s0.y));
+    check('no turn: same height and no transform',
+          near(s1.h, s0.h, 0.01) && (await page.evaluate(() => getComputedStyle(document.getElementById('nso-ruler-spine')).transform)) === 'none',
+          'h ' + f3(s1.h));
+    check('the scale held still while the bar was in hand (no breathing as it slid over the piece)',
+          near(inHand.w, s0.w, 0.5), 'width ' + f3(s0.w) + ' -> ' + f3(inHand.w) + ' held');
+    // every corner of the viewport, and then well past it
+    const corners = [['top-left', -2000, -2000], ['top-right', 4000, -2000], ['bottom-right', 4000, 4000], ['bottom-left', -2000, 4000]];
+    for (const [name, dx, dy] of corners) {
+      const a = await sp();
+      await page.mouse.move(a.x + 120, a.y + a.h / 2); await page.mouse.down();
+      await page.mouse.move(Math.max(1, Math.min(host.x + host.w - 1, a.x + 120 + dx)), Math.max(1, Math.min(host.y + host.h - 1, a.y + a.h / 2 + dy)), { steps: 8 });
+      await page.mouse.up();
+      await frames(page, 2);
+      const b = await sp();
+      const wantRight = dx > 0, wantBottom = dy > 0;
+      const onScreen = b.y >= host.y - 0.5 && b.y + b.h <= host.y + host.h + 0.5 && b.x + b.w > host.x + 60 && b.x < host.x + host.w - 60;
+      const atEdge = (wantBottom ? b.y + b.h + 28 >= host.y + host.h - 4 : b.y <= host.y + 18) && (wantRight ? b.x > host.x + host.w * 0.5 : b.x < host.x + host.w * 0.5);
+      check('to the ' + name + ' of the viewport, and no further: still on screen and still grabbable', onScreen && atEdge,
+            'bar ' + Math.round(b.x - host.x) + ',' + Math.round(b.y - host.y) + ' in ' + Math.round(host.w) + 'x' + Math.round(host.h));
+    }
+
+    console.log('\n=== C5. only the bar takes the mouse: the piece under the marks can still be orbited ===');
+    await page.evaluate(() => window.nsoRulerPlace(300, 300));
+    await frames(page, 2);
+    s0 = await sp();
+    const hit = await page.evaluate(p => {
+      const spineEl = document.getElementById('nso-ruler-spine');
+      const at = (x, y) => { const e = document.elementFromPoint(x, y); return e === spineEl ? 'spine' : e === state.renderer.domElement ? 'viewport' : (e ? e.id || e.className || e.tagName : 'nothing'); };
+      return { bar: at(p.x + 400, p.y + p.h / 2), marks: at(p.x + 400, p.y + p.h + 8), labels: at(p.x + 400, p.y + p.h + 22) };
+    }, s0);
+    check('on the bar the pointer is the ruler\'s', hit.bar === 'spine', hit.bar);
+    check('on the marks and the numbers it goes through to the viewport', hit.marks === 'viewport' && hit.labels === 'viewport', hit.marks + ' / ' + hit.labels);
+    const cam0 = await page.evaluate(() => state.camera.position.toArray());
+    await page.mouse.move(s0.x + 700, s0.y + s0.h + 8); await page.mouse.down();
+    await page.mouse.move(s0.x + 780, s0.y + s0.h + 30, { steps: 6 }); await page.mouse.up();
+    const cam1 = await page.evaluate(() => state.camera.position.toArray());
+    check('a drag that starts on the marks orbits the camera', Math.hypot(cam1[0] - cam0[0], cam1[1] - cam0[1], cam1[2] - cam0[2]) > 1,
+          'moved ' + f3(Math.hypot(cam1[0] - cam0[0], cam1[1] - cam0[1], cam1[2] - cam0[2])) + ' mm');
+    check('and the ruler stayed where it was', near((await sp()).x, s0.x, 0.5) && near((await sp()).y, s0.y, 0.5));
+
+    console.log('\n=== C6. Align point: the ruler is true at the point (looking straight down) ===');
+    await topDown(page);
+    await frames(page, 3);
+    await page.selectOption('#sel-measure-mode', 'apoint');
+    await page.click('#btn-measure');
+    check('Align point armed Measure and the ruler is up', await page.evaluate(() => state.measureOn && document.getElementById('chk-ruler').checked));
+    const topY = box.max[1];
+    const pA = [box.min[0] + 0.6, topY, box.min[2] + 0.6], pB = [box.max[0] - 0.6, topY, box.min[2] + 0.6];
+    const sA = await screenOf(page, pA);
+    await page.mouse.move(sA.x, sA.y);
+    await page.waitForTimeout(200);
+    let hv = await rulerRead(page);
+    check('hovering a corner previews it, with no reading (nothing is picked)', hv && hv.hover === 'point' && hv.pick === null, hv ? String(hv.hover) : 'off');
+    await page.mouse.down(); await page.mouse.up();
+    await frames(page, 3);
+    rr = await rulerRead(page);
+    check('picked: a point, and the scale is now true at the pick', rr && rr.pick && rr.pick.kind === 'point' && rr.depthSource === 'pick', rr ? rr.depthSource : 'off');
+    check('Zero here is available', await page.evaluate(() => !document.getElementById('btn-ruler-zero').disabled));
+    await page.click('#btn-ruler-zero');
+    await frames(page, 3);
+    rr = await rulerRead(page);
+    check('Zero here puts the 0 mark on the corner', rr && rr.pick && Math.abs(rr.pick.aMm) < 0.01, rr && rr.pick ? f3(rr.pick.aMm) + ' mm' : 'nothing');
+    const y0 = rr.y;
+    const sB = await screenOf(page, pB);
+    await page.mouse.move(sB.x, sB.y); await page.mouse.down(); await page.mouse.up();
+    await frames(page, 3);
+    rr = await rulerRead(page);
+    check('the corner 20 mm along reads 20.000 on the ruler', rr && rr.pick && near(rr.pick.aMm, 20, 0.02), rr && rr.pick ? f3(rr.pick.aMm) + ' mm' : 'nothing');
+    check('zeroing slid the ruler along but left it level where it was', rr && rr.y === y0, 'y ' + y0 + ' -> ' + rr.y);
+    await page.click('#chk-measure-inches');
+    await frames(page, 3);
+    rr = await rulerRead(page);
+    check('in inches it is 0.7874 in on a 12 in ruler', rr && rr.unit === 'in' && rr.lengthMm === 304.8 && near(rr.pick.aMm / 25.4, 0.7874, 2e-4),
+          rr && rr.pick ? (rr.pick.aMm / 25.4).toFixed(4) + ' in' : 'nothing');
+    await page.click('#chk-measure-inches');
+
+    console.log('\n=== C7. Align edge: span, tilt and depth, and the lamps that say when to trust it ===');
+    await page.selectOption('#sel-measure-mode', 'aedge');
+    await page.click('#btn-measure');   // off
+    await page.click('#btn-measure');   // on, in Align edge
+    const eMid = [(box.min[0] + box.max[0]) / 2, topY, box.min[2] + 1];
+    const sE = await screenOf(page, eMid);
+    await page.mouse.move(sE.x, sE.y); await page.mouse.down(); await page.mouse.up();
+    await frames(page, 3);
+    rr = await rulerRead(page);
+    const ep = rr && rr.pick;
+    check('picked the whole 20 mm edge', ep && ep.kind === 'edge' && near(ep.trueMm, 20, 1e-3) && ep.segments === 1, ep ? f3(ep.trueMm) + ' mm' : 'nothing');
+    check('square to the view: its span on the ruler is its length, 20.000', ep && near(ep.spanMm, 20, 0.02), ep ? f3(ep.spanMm) : '');
+    check('it lies along the ruler: tilt 0 (within 0.05 deg), lamp on', ep && Math.abs(ep.tiltDeg) < 0.05 && ep.parallel === true, ep ? f3(ep.tiltDeg) + ' deg' : '');
+    check('and equally far from the camera at both ends: lamp on', ep && ep.depthFrac < 1e-4 && ep.square === true, ep ? String(ep.depthFrac) : '');
+    // slide the piece 30 mm along X: both marks move 30 mm along the ruler
+    const a0 = ep.aMm, b0 = ep.bMm;
+    await page.evaluate(() => { const p = state.placed[0]; applyPlacedXZ(p, p.x + 30, p.z); });
+    await frames(page, 3);
+    rr = await rulerRead(page);
+    check('the piece moves 30 mm and both ends move 30 mm along the ruler',
+          rr && rr.pick && near(rr.pick.aMm - a0, 30, 0.05) && near(rr.pick.bMm - b0, 30, 0.05) && near(rr.pick.spanMm, 20, 0.02),
+          rr && rr.pick ? 'a ' + f3(rr.pick.aMm - a0) + ', b ' + f3(rr.pick.bMm - b0) : 'nothing');
+    // Orbit to the ordinary 3/4 view: the same edge is no longer square to the view
+    await page.evaluate(() => { state.camera.position.set(160, 180, 200); state.controls.target.set(0, 0, 0); state.controls.update(); });
+    await frames(page, 3);
+    rr = await rulerRead(page);
+    const tp = rr && rr.pick;
+    check('from the 3/4 view the lamps go out: it is tilted and one end is nearer',
+          tp && tp.parallel === false && tp.square === false && Math.abs(tp.tiltDeg) > 1 && tp.depthFrac > 0.005,
+          tp ? 'tilt ' + f3(tp.tiltDeg) + ' deg, depth ' + (tp.depthFrac * 100).toFixed(2) + ' %' : 'nothing');
+    check('and the span on the ruler is no longer the length (it would be wrong to read it as 20)', tp && Math.abs(tp.spanMm - 20) > 0.5, tp ? f3(tp.spanMm) : '');
+    await topDown(page);
+    await frames(page, 3);
+
+    console.log('\n=== C8. picks end when they should ===');
+    await page.keyboard.press('Escape');
+    await frames(page, 2);
+    check('Esc clears the pick', (await rulerRead(page)).pick === null);
+    const sE2 = await screenOf(page, [box.min[0] + 30 + 10, topY, box.min[2] + 1]);
+    await page.mouse.move(sE2.x, sE2.y); await page.mouse.down(); await page.mouse.up();
+    await frames(page, 3);
+    check('picked again', (await rulerRead(page)).pick !== null);
+    await page.evaluate(() => { const p = state.placed[0]; p.mesh.geometry = p.mesh.geometry.clone(); });
+    await frames(page, 4);
+    check('re-baking the piece (new geometry) drops the pick instead of showing a stale one', (await rulerRead(page)).pick === null);
+    check('and says why', /Ruler pick cleared/.test(await page.evaluate(() => document.getElementById('status').textContent)));
+    check('Zero here goes grey again', await page.evaluate(() => document.getElementById('btn-ruler-zero').disabled));
+    await page.click('#btn-measure');   // measure off
+    rr = await rulerRead(page);
+    check('leaving Measure leaves the ruler up (it is not a measure mode)', rr && rr.on === true);
+
+    console.log('\n=== C9. Guides, Flip, and off ===');
+    await page.click('#chk-ruler-guides');
+    await frames(page, 2);
+    check('Guides on', (await rulerRead(page)).guides === true);
+    await page.click('#nso-ruler-flip');
+    await frames(page, 2);
+    check('Flip turns the marks to the other side', (await rulerRead(page)).flip === true);
+    await page.click('#nso-ruler-close');
+    await frames(page, 2);
+    const down = await page.evaluate(() => ({
+      box: document.getElementById('chk-ruler').checked,
+      cv: document.getElementById('nso-ruler-canvas').hidden,
+      spine: document.getElementById('nso-ruler-spine').hidden,
+      readout: window.nsoRulerReadout()
+    }));
+    check('the x button hides it and unticks Ruler', !down.box && down.cv && down.spine && down.readout === null, JSON.stringify(down));
+
+    console.log('\n=== C10. the ruler changes nothing ===');
+    const same = await page.evaluate(i => {
+      const m = state.models.find(mm => mm.id === i);
+      let v = 0;
+      const t = m.rawTris;
+      for (let k = 0; k < t.length / 9; k++) {
+        const o = k * 9;
+        v += (t[o] * (t[o + 4] * t[o + 8] - t[o + 5] * t[o + 7]) - t[o + 1] * (t[o + 3] * t[o + 8] - t[o + 5] * t[o + 6]) + t[o + 2] * (t[o + 3] * t[o + 7] - t[o + 4] * t[o + 6]));
+      }
+      let strays = 0;
+      state.scene.traverse(o => { if (o.renderOrder === 30) strays++; });
+      return { tris: t.length / 9, volume: v / 6, painted: window.nsoMaskCount(m), strays };
+    }, id);
+    check('still 12 triangles of 8000 mm3, nothing painted', same.tris === 12 && near(same.volume, 8000, 1e-2) && same.painted === 0,
+          same.tris + ' tris, ' + f3(same.volume) + ' mm3');
+    check('and it put nothing in the scene (it is drawn on the screen)', same.strays === 0, same.strays + ' at renderOrder 30');
+    const errs = logs.filter(l => l.startsWith('[pageerror]'));
+    check('no page errors', errs.length === 0, errs.join(' | '));
+  });
+}
+
 (async () => {
   console.log('== Measure: the number on screen against the piece it is measuring ==');
   partA();
   await partB();
+  await partC();
   console.log('\n' + (fails ? fails + ' FAILED' : 'all gates held'));
   process.exit(fails ? 1 : 0);
 })().catch(e => { console.error('MEASURE TEST FAIL', e); process.exit(1); });

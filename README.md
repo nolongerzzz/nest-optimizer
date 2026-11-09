@@ -126,9 +126,12 @@ Smart build-plate packing for 3D printing.
 - Auto-nest with optional 45°/90° rotations
 - Adjustable gap between models
 - Live 3D preview
-- **Measure** — click two points on the pieces for the distance between them in mm,
-  or switch to Edge and click one edge for its length. Corners and edges snap, the
-  number is drawn on the piece, and it follows the piece when you move it.
+- **Measure** — click two points on the pieces for the distance between them in mm
+  (or inches, with the **Inches** toggle), or switch to Edge and click one edge for
+  its length. Corners and edges snap, the number is drawn on the piece, and it
+  follows the piece when you move it. **Ruler** lays a 300 mm / 12 in ruler over the
+  viewport: drag it anywhere (it stays level), orbit and pan the piece under it, and
+  use **Align point / Align edge** to see where a corner or an edge sits on its marks.
   See [docs/MEASURE.md](docs/MEASURE.md).
 - **Pottery Wheel**: throw a vessel on an axis - a centred ball sized by
   Pappus's centroid theorem (or just the standard ball, dropped on the plate
@@ -415,7 +418,7 @@ Smart build-plate packing for 3D printing.
 
 ## Where things are (the shell)
 
-- **Top row**, left to right: Import, Measure (Two points / Edge), Move,
+- **Top row**, left to right: Import, Measure (Two points / Edge / Align, Inches, Ruler), Move,
   Rotate, Tip, Align, Gen+ (Wheel, Stock, Fittings, Custom shape, Picture, Mold, Photo), Lock position,
   Lock plate; at the right Undo, Remove and Export, with **Clear plate**
   under Remove and **Optimize** under Export.

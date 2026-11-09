@@ -88,7 +88,7 @@ const DROPDOWNS = ALL.map(([id]) => id).filter(id => id.startsWith('menu-'));
    control listed here has left wherever it was. */
 const HOLDS = {
   'menu-import': ['btn-load-stl', 'btn-library', 'library-list'],
-  'menu-measure': ['btn-measure', 'sel-measure-mode'],
+  'menu-measure': ['btn-measure', 'sel-measure-mode', 'chk-measure-inches', 'chk-ruler', 'chk-ruler-guides', 'btn-ruler-zero'],
   'menu-move': ['chk-move-vertical', 'btn-to-plate', 'btn-nudge-fwd', 'btn-nudge-back', 'btn-nudge-left', 'btn-nudge-right'],
   'menu-rotate': ['btn-rot-left', 'btn-rot-right', 'chk-rot-ring-turn', 'chk-rot-ring-fb', 'chk-rot-ring-ss'],
   'menu-tip': ['btn-flip', 'btn-tip', 'btn-flip-over', 'btn-tip-face', 'btn-tilt-up', 'btn-tilt-dn', 'btn-bank-up', 'btn-bank-dn'],
@@ -153,7 +153,7 @@ const ORDERED = ['menu-shape', 'menu-add', 'menu-bit', 'menu-surface', 'menu-rep
 /* Soften's styles, in the shelf's order: Round, Corners, Corners+edges, Bevel. */
 const SOFTEN_STYLES = ['fillet', 'corners', 'cornersedges', 'chamfer'];
 const OPTIONS = { 'sel-te-verb': ['reducer', 'roll', 'neck', 'branch'],
-                  'sel-brush-mode': ['emboss', 'smooth'], 'sel-measure-mode': ['span', 'edge'],
+                  'sel-brush-mode': ['emboss', 'smooth'], 'sel-measure-mode': ['span', 'edge', 'apoint', 'aedge'],
                   'plate-grid-show': ['auto', 'on', 'off'] };
 
 /* Every control in the shell on claude-wip before v3 (9f68c20): each

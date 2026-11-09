@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=622f7431" />
+  <link rel="stylesheet" href="styles.css?v=8f3b79e2" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -55,13 +55,34 @@
           <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-measure" data-sec="measure">
             <summary class="vp-bar-btn" title="Measure: the distance between two points, or one edge's length">Measure</summary>
             <div class="vp-menu-body vp-finish">
-            <div class="vp-row vp-row-pair">
+            <div class="vp-row vp-row-full">
               <button id="btn-measure" class="btn btn-secondary btn-measure" type="button" aria-pressed="false"
                       title="Click two points on the pieces to read the distance between them in mm, or switch to Edge and click one edge for its length. Corners and edges snap. Measuring changes nothing on the piece. Click this button again to stop; Esc clears the measurement.">Measure</button>
+            </div>
+            <div class="vp-row vp-row-full">
               <select id="sel-measure-mode" class="vp-select" title="What a measure click means. Two points: click twice, get the distance. Edge: click once near an edge, get that edge's whole length." aria-label="Measure mode">
                 <option value="span" selected>Two points</option>
                 <option value="edge">Edge</option>
+                <option value="apoint">Align point</option>
+                <option value="aedge">Align edge</option>
               </select>
+            </div>
+            <!-- Units and the ruler. Inches only change how a length is PRINTED (the chip, the status line,
+                 the ruler's marks); the scene stays in mm. The ruler is app-ruler.js. -->
+            <div class="vp-row vp-row-pair">
+              <label class="vp-flag vp-flag-measure" title="Show lengths in inches instead of millimetres: the measurement chip, the status line and the ruler's marks. The piece is not changed.">
+                <input type="checkbox" id="chk-measure-inches"><span class="vp-flag-face">Inches</span>
+              </label>
+              <label class="vp-flag vp-flag-measure" title="A 300 mm (12 in) ruler over the viewport. Drag its bar anywhere; it stays level. The rest of it is click-through, so orbit and pan the piece under it and line an edge up with a mark. Its scale is true at the surface under it, or at whatever you pick with Align point / Align edge.">
+                <input type="checkbox" id="chk-ruler"><span class="vp-flag-face">Ruler</span>
+              </label>
+            </div>
+            <div class="vp-row vp-row-pair">
+              <label class="vp-flag vp-flag-measure" title="Run a faint line down the viewport from every numbered mark, so a piece's edge can be judged against a mark far from the ruler.">
+                <input type="checkbox" id="chk-ruler-guides"><span class="vp-flag-face">Guides</span>
+              </label>
+              <button id="btn-ruler-zero" class="btn btn-secondary" type="button" disabled
+                      title="Slide the ruler so its 0 sits on the point (or the left end of the edge) picked with Align point / Align edge. Then the marks read straight off it.">Zero here</button>
             </div>
             </div>
           </details>
@@ -3022,7 +3043,9 @@
   <!-- After app-defects.js, whose hooks and scan it uses. -->
   <script src="app-findings.js?v=a9a7a028"></script>
   <script src="app-patch.js?v=c837fc2d"></script>
-  <script src="app-measure.js?v=61a966dc"></script>
+  <script src="app-measure.js?v=b04a4cdd"></script>
+  <!-- After app-measure.js: the ruler reads its anchors and unit through NSO_MeasureBridge. -->
+  <script src="app-ruler.js?v=f912feea"></script>
   <!-- The library write features. access first: it holds the gate, the
        target repository and the token key that the other two read. -->
   <script src="app-library-access.js?v=4724f9d4"></script>
