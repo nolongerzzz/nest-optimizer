@@ -4574,6 +4574,11 @@
     designLeanDeg: 38,    /* the canopy is designed to this lean; Bambu's branch angle is 45 and its joins measure up to 47.7 */
     tiltDeg: 50           /* ...and only a lean past this is marked */
   };
+  /* THE COLUMN RULE'S TREE (the owner's reference, Bambu's Negative Sphere in supp_ref: one trunk, its flare a mm, split from 5 mm, every
+     branch leaning all the way to a tip a mm and a half straight under the rim). Under the column rule the crown has a short straight tip, a
+     short flare and a first join as low as the flare and the trunk's shoulder allow: the height of a head whose overhang is 9 mm over the plate
+     goes to its branches' lean (3.2 mm of tip over a join no lower than 6.5 left them a few tenths: arms 70 deg off). */
+  var COLUMN_CROWN = { tipDropMm: 1.6, tipRiseMm: 1.6, nodeDropMm: 1.2, rootFloorMm: 3, leanHardDeg: 50, trunk: { flareMm: 1.5 } };   /* leanHardDeg: no leg past the lean limit (Bambu's branch angle 45) */
   function thinTips(list, coverMm, minTips) {
     var n = list.length;
     if (n <= 1) return list.map(function (b, i) { return i; });
@@ -4960,7 +4965,8 @@
           /* ...and as many branches to a join as the head's height asks: a squat head has no room for a join under a join (a
              branch from a join 0.5 mm under its tips leans along the underside it should clear), so its tips go to the trunk's top
              in as few levels as the room allows - a flat umbrella - and a tall head keeps Bambu's pairs (2 - 3 to a join) */
-          var room = zlo - ck.crown.rootFloorMm - ck.crown.tipDropMm, allowed = Math.max(0, Math.floor(room / ck.crown.nodeDropMm + 1e-9)), K = 3, mm = c.tips.length, rds = 0;
+          var ckc = opts.columnRule ? Object.assign({}, ck.crown, COLUMN_CROWN) : ck.crown;
+          var room = zlo - ckc.rootFloorMm - ckc.tipDropMm, allowed = Math.max(0, Math.floor(room / ckc.nodeDropMm + 1e-9)), K = 3, mm = c.tips.length, rds = 0;
           for (K = 3; K < c.tips.length; K++) {
             mm = c.tips.length; rds = 0;
             while (mm > K) { mm = Math.max(1, Math.floor(mm / 2)); rds++; }
@@ -4971,7 +4977,8 @@
         });
         var o2 = Object.assign({}, opts, {
           feed: { mode: 'custom', tips: tips, landingZones: zones },
-          crown: Object.assign({ tipRiseMm: ck.tipRiseMm, designLeanDeg: ck.designLeanDeg }, ck.crown || {}, opts.crown || {}, { trunk: Object.assign({ footClearMm: ck.footClearMm }, (ck.crown && ck.crown.trunk) || {}, (opts.crown && opts.crown.trunk) || {}) }),
+          crown: Object.assign({ tipRiseMm: ck.tipRiseMm, designLeanDeg: ck.designLeanDeg }, ck.crown || {}, opts.columnRule ? COLUMN_CROWN : {}, opts.crown || {},
+                               { trunk: Object.assign({ footClearMm: ck.footClearMm }, (ck.crown && ck.crown.trunk) || {}, opts.columnRule ? COLUMN_CROWN.trunk : {}, (opts.crown && opts.crown.trunk) || {}) }),
           branchTiltDeg: opts.branchTiltDeg == null ? ck.tiltDeg : opts.branchTiltDeg,
           beacons: undefined, oneTrunk: undefined
         });

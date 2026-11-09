@@ -138,6 +138,21 @@ unchanged (Base 97, Circular 87, Negative Sphere 86, Negative Sphere2 79, Obliqu
 (0.33 mm2), the Negative Spheres' trunk forks over air (2.7, 3.1 mm2 against Bambu's 0.1, 0.5) and the Negative Sphere's sheet carried 76 %
 (Bambu 88 %) - the tree's shape, not the interface.
 
+## 4d. One tree, step 1: the crown's layout (the owner's reference, 2026-11-09)
+
+The owner's reference is Bambu's Negative Sphere in supp_ref: one trunk on a short flare (28 mm2 on the first layer, 16 by z 0.75) to z 4.6,
+splitting from 5.2 into 2, 3, then 5 branches that lean all the way to their tips under the rim (9.6), one on up through the hole to the apex,
+two past the rim's corners to the shoulders as the horns. Ours split all at once at 7.4 into arms 70 deg off: a tip stood 3.2 mm straight and the
+first join no lower than 6.5 mm, so a rim 9 mm over the plate left a few tenths of a mm for the lean.
+
+Under the column rule the crown now has a short straight tip (1.6 mm, Bambu's), a 1.5 mm flare, a first join as low as 3 mm when the lean asks
+for it (the trunk stops 1 mm under it, over the flare: a join under the flare's top left the flare without its rings), joins 1.2 mm apart, and
+no leg past the 50 deg lean limit (`COLUMN_CROWN` in nso_support_gridpack.js; the default build keeps its own crown). The Negative Sphere's
+trunk now splits at 6.3 into 3, then 6 - 7 branches leaning out to the rim by 9.0. Tree over air: Negative Sphere 2.7 -> 0.2, Negative
+Sphere2 3.0 -> 0.4, Circular's floating twig and the Oblique's arm gone. Gate 63 of 66 (six pieces), 62 merged: what is left is the Negative
+Sphere2 rim's tips (three under its horseshoe, Bambu five or six: span over 2.5 mm 3 mm2, carried 73 %) - step 3. Our trunk is about half
+Bambu's (7 - 9 mm2 against 14 - 18).
+
 ## 5. Not done, and named
 
 - **The merged plate's small surfaces.** The six as one piece are read on a 3 mm grid where each alone is read at 1 mm, so the Negative Sphere2's apex
