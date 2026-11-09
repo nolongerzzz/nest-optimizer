@@ -4768,7 +4768,7 @@
      interface and up to the shoulders). From the horn's top it leans out as before; from a knee it drops outside the overhangs' stacks (no part
      within HORN_TREE.shadowMm over it, HORN_TREE.shadowXyMm round), then joins a branch of the tree under it at no more than HORN_TREE.joinDeg -
      the highest join it reaches. Null when none is clear (the horn then stands its own column on the plate). */
-  var HORN_TREE = { shadowMm: 2.2, shadowXyMm: 0.6, exemptMm: 2.2, joinDeg: 45, stepMm: 0.25, kneeStepMm: 0.5, kneeMaxMm: 1.5, dropStepMm: 0.5, shadowStepMm: 0.5, joinEndMm: 0.8, cands: 4, rV: 0.5, rJoin: 0.6, headings: 1 };
+  var HORN_TREE = { shadowMm: 2.2, shadowXyMm: 1.1, shadowRingsMm: [0.4, 0.75, 1.1], slopeMaxMm: 0.6, exemptMm: 2.2, joinDeg: 45, stepMm: 0.25, kneeStepMm: 0.5, kneeMaxMm: 1.5, dropStepMm: 0.5, shadowStepMm: 0.5, joinEndMm: 0.8, cands: 4, rV: 0.5, rJoin: 0.6, headings: 1 };
   /* THE COLUMN RULE'S SPOTS UNDER A PLATE (the owner's: "the interfaces also supported from below"; Bambu's Negative Sphere2 rim stands on five or
      six tips, ours on the detector's three). Every FILL.pitchMm round an area's spots (FILL.reachMm out), the part's underside straight over the
      point: kept as a spot of the area where it is an overhang at the threshold (flatter than its tan, read off the underside a FILL.slopeMm step
@@ -4802,25 +4802,56 @@
     });
     return added;
   }
-  /* under a stack: part within HORN_TREE.shadowMm over the point (HORN_TREE.shadowXyMm round), where that part's underside is an overhang the slicer
-     lays a stack under - flatter than the threshold (tan 30 = 0.58 rise a mm); a steep flank over the point (a dome's, the Sphere's under its
-     shoulder) has no stack under it and a horn may pass beside it */
-  function hornShadow(kit, pt) {
-    var key = Math.round(pt[0] * 10) + ',' + Math.round(pt[1] * 10) + ',' + Math.round(pt[2] * 10), C = kit.shadowCache || (kit.shadowCache = {});
-    if (C[key] !== undefined) return C[key];
-    HORN_STATS.shadow++;
-    var top = pt[2] + HORN_TREE.shadowMm, any = kit.pr.leg(pt, [pt[0], pt[1], top], 0, 0, 0, HORN_TREE.shadowXyMm) >= 0;
-    if (!any) return (C[key] = false);
-    var up = function (x, y) { var d = kit.pr.leg([x, y, pt[2]], [x + 1e-5, y, top], 0, 0, 0, 0); return d > 0 ? pt[2] + d * HORN_TREE.shadowMm / Math.hypot(1e-5, HORN_TREE.shadowMm) : null; };
-    var flat = false, R = HORN_TREE.shadowXyMm, s = 0.3, tanT = Math.tan(30 * Math.PI / 180);
-    for (var k = 0; k < 5 && !flat; k++) {
-      var x = pt[0] + (k ? R * Math.cos(k * Math.PI / 2) : 0), y = pt[1] + (k ? R * Math.sin(k * Math.PI / 2) : 0), z0 = up(x, y);
-      if (z0 == null) continue;
-      var z1 = up(x + s, y), z2 = up(x - s, y), z3 = up(x, y + s), z4 = up(x, y - s), steep = false;
-      [z1, z2, z3, z4].forEach(function (zz) { if (zz == null || Math.abs(zz - z0) > tanT * s) steep = true; });
-      if (!steep) flat = true;
+  /* under a stack: part within HORN_TREE.shadowMm over the point, out to HORN_TREE.shadowXyMm round it (the stack's reach past an overhang's edge and
+     a horn's own width), whose underside is an overhang the slicer lays a stack under - flatter than the threshold (tan 30 a mm); a steep flank over
+     the point (the Sphere's dome under its shoulder) has no stack under it and a horn may pass beside it. Read off a map of the part's undersides
+     (hornUnderMap: every face met going up, on a HORN_MAP.cellMm grid round the horns, each flat or not), built once a piece. */
+  var HORN_MAP = { cellMm: 0.2, halfMm: 10, hits: 12, reuseMm: 5 };
+  function hornUnderMap(kit, cx, cy) {
+    var M = kit.underMap;
+    if (M && Math.abs(cx - M.cx) < HORN_MAP.reuseMm && Math.abs(cy - M.cy) < HORN_MAP.reuseMm) return M;   /* a head's horns share one */
+    var C = HORN_MAP.cellMm, n = Math.round(2 * HORN_MAP.halfMm / C) + 1, x0 = cx - HORN_MAP.halfMm, y0 = cy - HORN_MAP.halfMm, zA = kit.plateZ - 0.5, zB = kit.plateZ + 60;
+    var faces = new Array(n * n), tanT = Math.tan(30 * Math.PI / 180);
+    for (var j = 0; j < n; j++) for (var i = 0; i < n; i++) {
+      var x = x0 + i * C, y = y0 + j * C, z = zA, under = [];
+      for (var h = 0; h < HORN_MAP.hits; h++) {
+        var d = kit.pr.leg([x, y, z], [x + 1e-5, y, zB], 0, 0, 0, 0);
+        if (!(d >= 0)) break;
+        var zh = z + d * (zB - z) / Math.hypot(1e-5, zB - z);
+        if (h % 2 === 0) under.push(zh);                                   /* going up from air: an underside, then the top of that body, ... */
+        z = zh + 0.01;
+      }
+      faces[j * n + i] = under;
     }
-    return (C[key] = flat);
+    /* each underside flat or not: its neighbours' nearest underside rises no more than the threshold a cell - a face falling away (none near, or one
+       more than HORN_TREE.slopeMaxMm off) is the overhang's edge, not a slope */
+    var flat = new Array(n * n);
+    for (var j2 = 0; j2 < n; j2++) for (var i2 = 0; i2 < n; i2++) {
+      flat[j2 * n + i2] = faces[j2 * n + i2].map(function (z0) {
+        var steep = false;
+        [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(function (o) {
+          var ii = i2 + o[0], jj = j2 + o[1]; if (ii < 0 || jj < 0 || ii >= n || jj >= n) return;
+          var best = null; faces[jj * n + ii].forEach(function (z1) { if (best == null || Math.abs(z1 - z0) < Math.abs(best - z0)) best = z1; });
+          if (best != null && Math.abs(best - z0) > tanT * C + 0.02 && Math.abs(best - z0) <= HORN_TREE.slopeMaxMm) steep = true;
+        });
+        return !steep;
+      });
+    }
+    return (kit.underMap = { cx: cx, cy: cy, x0: x0, y0: y0, n: n, C: C, faces: faces, flat: flat });
+  }
+  function hornShadow(kit, pt) {
+    var M = kit.underMap;
+    if (!M) return false;
+    HORN_STATS.shadow++;
+    var R = HORN_TREE.shadowXyMm, C = M.C, i0 = Math.max(0, Math.floor((pt[0] - R - M.x0) / C)), i1 = Math.min(M.n - 1, Math.ceil((pt[0] + R - M.x0) / C));
+    var j0 = Math.max(0, Math.floor((pt[1] - R - M.y0) / C)), j1 = Math.min(M.n - 1, Math.ceil((pt[1] + R - M.y0) / C));
+    for (var j = j0; j <= j1; j++) for (var i = i0; i <= i1; i++) {
+      var dx = M.x0 + i * C - pt[0], dy = M.y0 + j * C - pt[1];
+      if (dx * dx + dy * dy > R * R) continue;
+      var F = M.faces[j * M.n + i], L = M.flat[j * M.n + i];
+      for (var k = 0; k < F.length; k++) if (F[k] > pt[2] && F[k] <= pt[2] + HORN_TREE.shadowMm && L[k]) return true;
+    }
+    return false;
   }
   var HORN_STATS = { legs: 0, shadow: 0 };
   function hornLegClear(kit, a, c, topZ, endFree) {
@@ -4943,6 +4974,7 @@
     HORN_WHY = 'no route from top ' + top.map(function (v) { return v.toFixed(2); }) + ' out ' + ox.toFixed(2) + ',' + oy.toFixed(2) + ' wall ' + dmin.toFixed(2);
     /* the lean: straight out from the wall first, then turned a sixteenth of a turn at a time either way, as far as square to it */
     var oa = Math.atan2(oy, ox);
+    hornUnderMap(kit, b.p[0], b.p[1]);                                     /* the undersides round it, once a head (hornShadow) */
     var bestT = null;
     for (var t0 = 0; t0 <= HORN_TREE.headings && segs && segs.length; t0++) {
       for (var sg0 = t0 ? -1 : 1; sg0 <= 1; sg0 += 2) {

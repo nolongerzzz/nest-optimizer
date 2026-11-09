@@ -214,6 +214,13 @@ underside is flatter than the threshold - not every part over it: the Sphere's h
 now they join its trunk at 4.6 mm. All eight horns of supp_ref join a trunk (none on the plate); a horn's route is 2 - 5 s (the knee's lean searched to
 1.5 mm, the shadow read every 0.5 mm). Gate 66 of 66.
 
+The owner's slice then showed the Negative Sphere2's horns cut off (Support alone shown): they ran through its rim's stack at 9.6 - 9.9 (typed
+interface / transition there). The shadow's one ring of rails at 0.9 mm slipped between the rim's corner and the horn 0.7 mm from it, and a rim's
+edge (the face falling away) read as a steep flank. Now the shadow is read off a map of the part's undersides round the horns (`hornUnderMap`, a
+0.2 mm grid, every face met going up, each flat or not - a face falling away at an edge is an edge, not a slope), out to 1.1 mm (the stack's 0.38
+past an overhang's edge and a horn's width), built once a head. Every horn of supp_ref is Support from the shoulder down through its trunk to the
+plate (traced line by line in the slice), none through a stack.
+
 ## 5. Not done, and named
 
 - **The merged plate's small surfaces.** The six as one piece are read on a 3 mm grid where each alone is read at 1 mm, so the Negative Sphere2's apex
