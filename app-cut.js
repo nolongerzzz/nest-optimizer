@@ -4776,8 +4776,16 @@ function rawLidSubtractBand2(pieces, poly, ring, limit) {
   const n = poly.length;
   for (let i = 0; i < n; i++) {
     const i1 = (i+1)%n;
-    const q = [poly[i], poly[i1], ring[i1], ring[i]];
-    if (rawPolyArea2(q) < 1e-12) continue;
+    // A ring trimmed at a fold (rawRimTrimFolds2) carries runs of one point;
+    // a quad with two corners on one point is a triangle, and clipping by its
+    // zero-length side would keep the whole piece on both sides of nothing.
+    const q = [];
+    for (const v of [poly[i], poly[i1], ring[i1], ring[i]]) {
+      const last = q[q.length - 1];
+      if (!last || Math.hypot(v[0] - last[0], v[1] - last[1]) > 1e-12) q.push(v);
+    }
+    while (q.length > 1 && Math.hypot(q[0][0] - q[q.length-1][0], q[0][1] - q[q.length-1][1]) <= 1e-12) q.pop();
+    if (q.length < 3 || rawPolyArea2(q) < 1e-12) continue;
     let bx0=Infinity, by0=Infinity, bx1=-Infinity, by1=-Infinity;
     for (const v of q) {
       if (v[0] < bx0) bx0 = v[0];

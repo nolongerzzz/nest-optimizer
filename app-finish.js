@@ -31,6 +31,99 @@
 // back off its plane.
 //
 // opts.profile  'round' (default) quarter circle, or 'chamfer' flat band.
+
+// How far a Round's facets may stand off the true quarter circle, mm.
+var RIM_FACET_MM = 0.05;
+
+// The rows of a Round's quarter circle, as angles from the wall (0) to the lid
+// (pi/2). R 0 is a Bevel: one flat band. Small rounds keep the six rows Round
+// has always had (evenly spaced in height), so nothing already baked at those
+// sizes moves; a larger one gets rows of equal angle, enough of them that no
+// facet stands more than RIM_FACET_MM off the arc.
+function rawRimRows(R) {
+  if (!(R > 0)) return [0, Math.PI / 2];
+  const legacy = [0, 1, 2, 3, 4, 5, 6].map(s => Math.asin(s / 6));
+  const sag = (dphi) => R * (1 - Math.cos(dphi / 2));
+  if (sag(legacy[6] - legacy[5]) <= RIM_FACET_MM) return legacy;
+  const step = 2 * Math.acos(Math.max(-1, 1 - RIM_FACET_MM / R));
+  const N = Math.min(32, Math.max(6, Math.ceil((Math.PI / 2) / step)));
+  const rows = [];
+  for (let s = 0; s <= N; s++) rows.push(s === N ? Math.PI / 2 : (Math.PI / 2) * s / N);
+  return rows;
+}
+
+// Cut the folds off one ring of a rim offset, in place. `ring` is the loop's
+// points each moved in by its own inset; where the loop bends tighter than
+// that inset, a stretch of the ring runs backwards and the ring crosses
+// itself - the swallowtail every offset curve grows past its radius of
+// curvature. The true inset there is the corner where the ring crosses, so
+// every point of the backwards stretch goes to that crossing. The ring keeps
+// one point per loop point (the band joins row to row by index), the
+// collapsed ones simply coincide; the rebuild drops the zero-area triangles
+// that leaves.
+//
+// A crossing whose two sides both run forwards is not a fold, it is the face
+// pinched in two (a neck narrower than twice R): that is refused as R too
+// large, and rawSoftenWithLimit finds the R that fits. `wind` is the sign of
+// the loop's own signed area; `scale` only sets the tolerances.
+function rawRimTrimFolds2(ring, wind, scale) {
+  const n = ring.length;
+  const tTol = 1e-7;
+  const lenTol = 1e-9 * Math.max(1, scale || 1);
+  const signedArea = (pts) => {
+    let a = 0;
+    for (let k = 0; k < pts.length; k++) {
+      const p = pts[k], q = pts[(k + 1) % pts.length];
+      a += p[0] * q[1] - q[0] * p[1];
+    }
+    return a * 0.5;
+  };
+  const crossing = (i, j) => {
+    const p1 = ring[i], p2 = ring[(i + 1) % n], p3 = ring[j], p4 = ring[(j + 1) % n];
+    const d1x = p2[0] - p1[0], d1y = p2[1] - p1[1], d2x = p4[0] - p3[0], d2y = p4[1] - p3[1];
+    if (Math.hypot(d1x, d1y) < lenTol || Math.hypot(d2x, d2y) < lenTol) return null;
+    if (Math.max(p1[0], p2[0]) < Math.min(p3[0], p4[0]) || Math.max(p3[0], p4[0]) < Math.min(p1[0], p2[0]) ||
+        Math.max(p1[1], p2[1]) < Math.min(p3[1], p4[1]) || Math.max(p3[1], p4[1]) < Math.min(p1[1], p2[1])) return null;
+    const den = d1x * d2y - d1y * d2x;
+    if (Math.abs(den) < 1e-14) return null;
+    const t = ((p3[0] - p1[0]) * d2y - (p3[1] - p1[1]) * d2x) / den;
+    const u = ((p3[0] - p1[0]) * d1y - (p3[1] - p1[1]) * d1x) / den;
+    if (!(t > tTol && t < 1 - tTol && u > tTol && u < 1 - tTol)) return null;
+    return [p1[0] + d1x * t, p1[1] + d1y * t];
+  };
+  let trimmed = 0;
+  for (let guard = 0; guard <= n; guard++) {
+    let hit = null;
+    for (let i = 0; i < n && !hit; i++) {
+      for (let j = i + 2; j < n; j++) {
+        if (i === 0 && j === n - 1) continue;
+        const X = crossing(i, j);
+        if (X) { hit = { i: i, j: j, X: X }; break; }
+      }
+    }
+    if (!hit) return trimmed;
+    // The two ways round from the crossing: i+1..j, and j+1..i.
+    const inner = [hit.X], outer = [hit.X];
+    for (let k = hit.i + 1; k <= hit.j; k++) inner.push(ring[k]);
+    for (let k = hit.j + 1; k < n + hit.i + 1; k++) outer.push(ring[k % n]);
+    const ai = signedArea(inner) * wind, ao = signedArea(outer) * wind;
+    let fold;
+    if (ai < 0 && !(ao < 0)) fold = 'inner';
+    else if (ao < 0 && !(ai < 0)) fold = 'outer';
+    else {
+      const e = new Error('R=' + scale + ' pinches this face in two');
+      e.softenTooLarge = true;
+      throw e;
+    }
+    if (fold === 'inner') for (let k = hit.i + 1; k <= hit.j; k++) ring[k] = hit.X.slice();
+    else for (let k = hit.j + 1; k < n + hit.i + 1; k++) ring[k % n] = hit.X.slice();
+    trimmed++;
+  }
+  const e = new Error('R=' + scale + ' folds this face\'s edge past untangling');
+  e.softenTooLarge = true;
+  throw e;
+}
+
 function rawPerimeterFilletInPlace(rawTris, axisIdx, keepMin, requestedR, opts) {
   opts = opts || {};
   // A face that will not take R is refused with the R it will take
@@ -41,7 +134,14 @@ function rawPerimeterFilletInPlace(rawTris, axisIdx, keepMin, requestedR, opts) 
 
 function rawPerimeterFilletBuild(rawTris, axisIdx, keepMin, requestedR, opts) {
   const chamfer = opts.profile === 'chamfer';
-  const STEPS = chamfer ? 1 : 6;
+  // The quarter circle's rows. Six rows spaced evenly in height is what Round
+  // has always been, and it stays that wherever its facets are within
+  // RIM_FACET_MM of the true arc (R up to about 1.2). Past that the top row
+  // spans a third of the arc - 0.6 mm proud at R 15, right where a hand
+  // rests - so a larger round is cut into rows of equal angle, as many as
+  // keep every facet within RIM_FACET_MM.
+  const PHI = rawRimRows(chamfer ? 0 : requestedR);
+  const STEPS = PHI.length - 1;
   const intoBody = keepMin ? 1 : -1;
   const other = [0, 1, 2].filter(a => a !== axisIdx);
 
@@ -53,32 +153,12 @@ function rawPerimeterFilletBuild(rawTris, axisIdx, keepMin, requestedR, opts) {
   const from3 = (uv, along) => { const p=[0,0,0]; p[other[0]]=uv[0]; p[other[1]]=uv[1]; p[axisIdx]=along; return p; };
 
   const loops = [];
-  let peakR = Infinity, loopPts = 0, holes = 0;
+  let peakR = Infinity, loopPts = 0, holes = 0, bends = 0;
   for (const F of fc.loops) {
     if (F.pts.length < 3) throw new Error('cap boundary too small to fillet');
     const poly2d = raw2DWeldLoop(F.pts.map(flat2), 0.08);
     const n = poly2d.length;
     if (n < 3) throw new Error('cap boundary too small after weld');
-
-    // Every loop point carries R - that is the whole difference from Corners.
-    // On the outline R is clamped to the wall available across the face at
-    // that point, skipping only the two segments that touch it
-    // (rawLocalThickness2 skips everything within two indices, so on a
-    // coarse loop it skips the whole loop and falls back to its 4mm default).
-    // Across a hole there is no wall, only the hole: a hole's room is the
-    // material between it and the other loops, which rawSoftenLoopRoom
-    // measures and refuses on rather than clamping.
-    const Rs = new Array(n);
-    let loopPeak = 0;
-    for (let i = 0; i < n; i++) {
-      Rs[i] = F.hole ? requestedR
-                     : Math.min(requestedR, Math.max(0, NSO_Thickness.cornerWall(poly2d, i).mm * 0.45));
-      if (Rs[i] > loopPeak) loopPeak = Rs[i];
-    }
-    if (loopPeak < 0.02) throw new Error('no safe radius anywhere on this face');
-    // The radius reported is the smallest any loop got, so an outline that
-    // clamped while its hole did not still reads as a clamp.
-    if (loopPeak < peakR) peakR = loopPeak;
 
     // Into the material: inside the outline, out from a hole.
     let area2 = 0;
@@ -90,6 +170,23 @@ function rawPerimeterFilletBuild(rawTris, axisIdx, keepMin, requestedR, opts) {
       const len = Math.hypot(nx,ny) || 1e-9;
       return [nx/len, ny/len];
     };
+
+    // Every loop point carries R - that is the whole difference from Corners -
+    // and the SAME R. This used to be clamped point by point to the nearest
+    // other loop point bar the two neighbours, which on a finely sampled curve
+    // is the point two steps along the same curve: a drawn outline with 1 mm
+    // steps read as a 2 mm wall, and R 15 came out R 3.3 on a face 59 mm
+    // across, said only as "wall clamp". A clamp that varies along the loop
+    // also bends the ring backwards without crossing it, which nothing
+    // downstream can see. What a face really allows is settled where it is
+    // decided: a bend tighter than R is trimmed into a hip (ringAt, below), a
+    // face pinched in two or turned inside out is refused, and
+    // rawSoftenWithLimit names the R it does take. Between two loops - an
+    // outline and a hole - rawSoftenLoopRoom refuses with the strip's number.
+    const Rs = new Array(n).fill(requestedR);
+    if (requestedR < 0.02) throw new Error('no safe radius anywhere on this face');
+    if (requestedR < peakR) peakR = requestedR;
+
     const vertexOffset = (i, radius) => {
       const prev=poly2d[(i-1+n)%n], curr=poly2d[i], next=poly2d[(i+1)%n];
       const n1=inwardNormal2(prev,curr), n2=inwardNormal2(curr,next);
@@ -99,16 +196,25 @@ function rawPerimeterFilletBuild(rawTris, axisIdx, keepMin, requestedR, opts) {
       return [curr[0]+bx*(radius/cosHalf), curr[1]+by*(radius/cosHalf)];
     };
     const ringAt = (s) => {
-      const t = s / STEPS;
-      const phi = Math.asin(Math.min(1, Math.max(0, t)));
-      const ring = [];
+      const phi = PHI[s];
+      const t = chamfer ? s / STEPS : Math.sin(phi);
+      const flat = [], depths = [];
       for (let i = 0; i < n; i++) {
         const R = Rs[i];
         const inset = chamfer ? R * t : R * (1 - Math.cos(phi));
-        const depth = chamfer ? R * (1 - t) : R * (1 - Math.sin(phi));
-        ring.push(from3(vertexOffset(i, inset), capPlane + intoBody * depth));
+        depths.push(chamfer ? R * (1 - t) : R * (1 - Math.sin(phi)));
+        flat.push(vertexOffset(i, inset));
       }
-      return ring;
+      // Where the outline bends tighter than the inset, the offset folds back
+      // over itself (a swallowtail). The fold is cut off at the point where it
+      // crosses, which is what an inset by that distance really is: a round
+      // larger than an 8 mm bend meets itself along the bend's bisector, in a
+      // soft hip, instead of being refused at R 8.
+      if (s > 0) {
+        const folds = rawRimTrimFolds2(flat, area2 >= 0 ? 1 : -1, requestedR);
+        if (s === STEPS) bends += folds;
+      }
+      return flat.map((uv, i) => from3(uv, capPlane + intoBody * depths[i]));
     };
     const rings = [];
     for (let s = 0; s <= STEPS; s++) rings.push(ringAt(s));
@@ -127,6 +233,8 @@ function rawPerimeterFilletBuild(rawTris, axisIdx, keepMin, requestedR, opts) {
     loopPts: loopPts,
     loops: loops.length,
     holes: holes,
+    bends: bends,
+    rows: STEPS,
     radius: peakR,
     requested: requestedR
   };
@@ -219,7 +327,13 @@ function rawVertexBallOnly(rawTris, axisIdx, keepMin, requestedR, opts) {
   }
   const hot = [];
   for (let i = 0; i < nL; i++) if (Math.abs(turn[i]) > minTurn) hot.push(i);
-  if (!hot.length) throw new Error('no corners over ' + Math.round(minTurn*180/Math.PI) + 'deg on this face');
+  if (!hot.length) {
+    // Nothing on the loop turns: a disc, a drawn outline that is curve all the
+    // way round. The rim is one edge with no corner on it.
+    const e = new Error('no corners over ' + Math.round(minTurn*180/Math.PI) + 'deg on this face');
+    e.softenRimCurved = true;
+    throw e;
+  }
   const groups = [];
   let cur = [hot[0]];
   for (let q = 1; q < hot.length; q++) {
@@ -299,7 +413,7 @@ function rawVertexBallOnly(rawTris, axisIdx, keepMin, requestedR, opts) {
   };
 
   const balls = [];
-  let skipped = 0;
+  let skipped = 0, wallSkipped = 0;
   for (let t = 0; t < cornerCount; t++) {
     const ai = apex[t];
     if (turn[ai] * wind <= 0) { skipped++; continue; }
@@ -324,7 +438,7 @@ function rawVertexBallOnly(rawTris, axisIdx, keepMin, requestedR, opts) {
     const n1 = [-u1[1]*wind*-1, u1[0]*wind*-1];   // inward normal of the u1 edge
     const n2 = [-u2[1]*wind, u2[0]*wind];         // inward normal of the u2 edge
     if (!wallThere([-n1[0], -n1[1]], V2, Rc * 4) ||
-        !wallThere([-n2[0], -n2[1]], V2, Rc * 4)) { skipped++; continue; }
+        !wallThere([-n2[0], -n2[1]], V2, Rc * 4)) { skipped++; wallSkipped++; continue; }
     const M = [V2[0] + (n1[0]+n2[0])*Rc, V2[1] + (n1[1]+n2[1])*Rc];
     balls.push({
       ai: ai, Rc: Rc, V2: V2, u1: u1, u2: u2, n1: n1, n2: n2, M: M,
@@ -338,6 +452,9 @@ function rawVertexBallOnly(rawTris, axisIdx, keepMin, requestedR, opts) {
     // rounded by an earlier face's bake. The caller decides which it is.
     const e = new Error('no square vertex takes R=' + requestedR + ' on this face');
     e.softenSkippable = true;
+    // None of them square and none backing onto a softened face: the corners
+    // are the outline's own curves.
+    if (skipped && !wallSkipped) e.softenRimCurved = true;
     throw e;
   }
 
@@ -877,7 +994,13 @@ function rawVertexBallCorners(rawTris, axisIdx, keepMin, requestedR, opts) {
   }
   const hot = [];
   for (let i = 0; i < nL; i++) if (Math.abs(turn[i]) > minTurn) hot.push(i);
-  if (!hot.length) throw new Error('no corners over ' + Math.round(minTurn*180/Math.PI) + 'deg on this face');
+  if (!hot.length) {
+    // Nothing on the loop turns: a disc, a drawn outline that is curve all the
+    // way round. The rim is one edge with no corner on it.
+    const e = new Error('no corners over ' + Math.round(minTurn*180/Math.PI) + 'deg on this face');
+    e.softenRimCurved = true;
+    throw e;
+  }
   const groups = [];
   let cur = [hot[0]];
   for (let q = 1; q < hot.length; q++) {
@@ -957,7 +1080,7 @@ function rawVertexBallCorners(rawTris, axisIdx, keepMin, requestedR, opts) {
   };
 
   const balls = [];
-  let skipped = 0;
+  let skipped = 0, wallSkipped = 0;
   for (let t = 0; t < cornerCount; t++) {
     const ai = apex[t];
     if (turn[ai] * wind <= 0) { skipped++; continue; }
@@ -982,13 +1105,36 @@ function rawVertexBallCorners(rawTris, axisIdx, keepMin, requestedR, opts) {
     const n1 = [-u1[1]*wind*-1, u1[0]*wind*-1];   // inward normal of the u1 edge
     const n2 = [-u2[1]*wind, u2[0]*wind];         // inward normal of the u2 edge
     if (!wallThere([-n1[0], -n1[1]], V2, Rc * 4) ||
-        !wallThere([-n2[0], -n2[1]], V2, Rc * 4)) { skipped++; continue; }
+        !wallThere([-n2[0], -n2[1]], V2, Rc * 4)) { skipped++; wallSkipped++; continue; }
     const M = [V2[0] + (n1[0]+n2[0])*Rc, V2[1] + (n1[1]+n2[1])*Rc];
     balls.push({
       ai: ai, Rc: Rc, V2: V2, u1: u1, u2: u2, n1: n1, n2: n2, M: M,
       T1: [V2[0] + u1[0]*Rc, V2[1] + u1[1]*Rc],
       T2: [V2[0] + u2[0]*Rc, V2[1] + u2[1]*Rc]
     });
+  }
+  // The setback is corners joined by STRAIGHT edges: a band runs from one
+  // blend to the next along a line. A rim that bends anywhere between its
+  // corners - a drawn outline with two sharp corners and two rounded ones,
+  // a D - has no line there to band, and the build came out open (77 open
+  // edges on a 60 x 40 face with two r 12 corners). Unless a corner backs onto
+  // a softened face (the refusal below), the caller rounds the whole rim
+  // instead (softenSelectedFace).
+  if (!wallSkipped) {
+    const SMALL = 3 * Math.PI / 180, SHARP = 30 * Math.PI / 180;
+    let bends = 0;
+    for (let i = 0; i < nL; i++) {
+      const a = poly[(i - 1 + nL) % nL], b = poly[i], c = poly[(i + 1) % nL];
+      const t = Math.abs(Math.atan2((b[0]-a[0])*(c[1]-b[1]) - (b[1]-a[1])*(c[0]-b[0]),
+                                    (b[0]-a[0])*(c[0]-b[0]) + (b[1]-a[1])*(c[1]-b[1])));
+      if (t > SMALL && t < SHARP) bends++;
+    }
+    if (bends) {
+      const e = new Error('the rim of this face bends in curves (' + bends + ' loop points) - the setback ' +
+                          'needs square corners joined by straight edges');
+      e.softenRimCurved = true;
+      throw e;
+    }
   }
   // All four corners, or none. Every band ends on a corner blend at each end,
   // and every blend is bounded by its two bands, so on a closed loop the
@@ -997,8 +1143,21 @@ function rawVertexBallCorners(rawTris, axisIdx, keepMin, requestedR, opts) {
   // rather than ship that.
   if (skipped) {
     // Some corners free and some not: a real refusal, never a quiet no-op.
-    throw new Error('Corners+edges needs all ' + cornerCount + ' corners of this face free - ' +
-                    skipped + ' back onto something already softened');
+    // Corners that are not square vertices at all - the face's rim bends
+    // through them, as a drawn outline's rounded corner does - are the
+    // outline's shape, not something already softened, and the caller rounds
+    // the whole rim instead (softenSelectedFace). Only a corner whose wall is
+    // gone is the refusal it says.
+    const e = wallSkipped
+      ? new Error('Corners+edges needs all ' + cornerCount + ' corners of this face free - ' +
+                  wallSkipped + ' back onto something already softened')
+      : new Error('Corners+edges needs all ' + cornerCount + ' corners of this face square - ' +
+                  skipped + (skipped === 1 ? ' is' : ' are') + ' a curve, reflex or not square. ' +
+                  'Round rounds the whole rim');
+    // Not ONE square corner, and nothing softened next door: the rim has no
+    // corner for the setback to start from, so it is all edge.
+    if (!wallSkipped && !balls.length) e.softenRimCurved = true;
+    throw e;
   }
   if (!balls.length) {
     const e = new Error('no square vertex takes R=' + requestedR + ' on this face');
@@ -1598,12 +1757,34 @@ function softenSelectedFace(rawTris, axisIdx, keepMinFace, R, mode, pickPlane) {
   if (mode === 'cornersedges') {
     // Corners+edges: the setback bake. Four vertex blends, four edge bands,
     // no shelf. Its maths is not touched by the split into two modes.
-    return rawVertexBallCorners(rawTris, axisIdx, keepMin, R, { minTurnDeg: 25 });
+    try {
+      return rawVertexBallCorners(rawTris, axisIdx, keepMin, R, { minTurnDeg: 25 });
+    } catch (e) {
+      if (!e || !e.softenRimCurved) throw e;
+      // A face whose rim has no square corner - a drawn outline with rounded
+      // corners, a D, a disc - has one edge running all the way round, and
+      // corners+edges of that is the edge rounded all the way round: the
+      // perimeter fillet. Recorded as this mode's build, with why, so the
+      // status says it was the rim round and not the setback blend.
+      const out = rawPerimeterFilletInPlace(rawTris, axisIdx, keepMin, R, { profile: 'round' });
+      rawVertexBallCorners.lastBuild = Object.assign({}, rawPerimeterFilletInPlace.lastBuild,
+                                                     { rimRound: true, why: e.message });
+      return out;
+    }
   }
   if (mode === 'corners') {
     // Corners: a ball at each VERTEX and nothing else. The face and both walls
     // get the same R, the mid-edges stay square, no band, no shelf.
-    return rawVertexBallOnly(rawTris, axisIdx, keepMin, R, { minTurnDeg: 25 });
+    try {
+      return rawVertexBallOnly(rawTris, axisIdx, keepMin, R, { minTurnDeg: 25 });
+    } catch (e) {
+      if (!e || !e.softenRimCurved) throw e;
+      const said = new Error('Corners rounds square corners and this face has none - its rim bends ' +
+                             'in curves. Corners+edges or Round rounds the whole rim');
+      said.softenSkippable = !!e.softenSkippable;
+      said.softenRimCurved = true;
+      throw said;
+    }
   }
   // Round / fillet: a TRUE perimeter fillet — every point of the loop carries
   // R, so all four edges of a square face get the radius and none stays a
@@ -4457,6 +4638,10 @@ function softenCompute(m, o, commit) {
   // and the loop points the face carries. No sealing claim.
   const live = jobs.filter(j => !j.dead);
   const clamp = (x) => (x.radius < x.requested - 1e-6 ? ' (asked ' + x.requested.toFixed(2) + ', wall clamp)' : '');
+  // A round larger than the outline's tightest bends meets itself across
+  // them; say how many, so a soft hip there is not a surprise.
+  const rimBends = (x) => (x.bends ? ' - ' + x.bends + ' bend' + (x.bends === 1 ? '' : 's') +
+                                     ' tighter than R meet in a soft hip' : '');
   // Says how many faces this piece is carrying once there is more than one,
   // so a second click reads as "kept the first" rather than "moved it".
   const faces = live.length > 1 ? ' [' + live.length + ' faces baked]'
@@ -4468,6 +4653,9 @@ function softenCompute(m, o, commit) {
   let text;
   if (nothingToAdd) {
     text = 'Soften ok - nothing to add on this face (' + nothingToAdd + ')' + faces;
+  } else if (mode === 'cornersedges' && ball && ball.rimRound) {
+    text = 'corners+edges: this rim bends in curves, so all of it is rounded - R ' + ball.radius.toFixed(2) +
+           ' on ' + ball.loopPts + ' loop pts' + rimBends(ball) + faces;
   } else if (mode === 'cornersedges' && ball && ball.vertices != null) {
     text = 'corners+edges setback R ' + ball.radius.toFixed(2) + clamp(ball) +
            ' (' + ball.vertices + ' corners + ' + ball.bands + ' edges, ' +
@@ -4480,7 +4668,7 @@ function softenCompute(m, o, commit) {
   } else if (perim && perim.loopPts != null) {
     const holes = perim.holes ? ' (the edge and ' + (perim.holes === 1 ? 'its hole' : 'its ' + perim.holes + ' holes') + ')' : '';
     text = 'Soften ok - ' + perim.mode + ' on all ' + perim.loopPts + ' loop pts' + holes + ' at R ' +
-           perim.radius.toFixed(2) + clamp(perim) + faces;
+           perim.radius.toFixed(2) + clamp(perim) + rimBends(perim) + faces;
   } else {
     text = 'Soften ok' + faces;
   }
