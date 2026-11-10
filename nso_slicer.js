@@ -2495,16 +2495,57 @@
   }
 
   /* the stack laid: each of a layer's regions one loop round its edge (half a line in) and a zig-zag inside it at Bambu's interface
-     pitch (a line and 0.04), the first layer of a stack at 110 degrees and then 45 / 135 up it; every path outside the stack is Support */
-  function columnType(g, P, SP, o, host) {
+     pitch (a line and 0.04), the first layer of a stack at 110 degrees; every path outside the stack is Support.
+     SQUARE TO THE BRIDGE (Bambu Studio 02.09, the owner's mouse1 slice: transition 90, then 93.6 / 3.6 / 93.6 under a bridge at 3.6; the
+     owner: "every interface is square from the bridge above - parallel lines weld easier"): above its first layer a stack takes the angle
+     of the part's layer that bridges its top - the top layer square to it, and so on down, one turn a layer. */
+  function columnType(g, P, SP, o, host, planes) {
     var wI = o.supportWidthMm > 0 ? o.supportWidthMm : o.infillWidthMm, pitch = wI + 0.04, aD = (o.infillDirectionDeg || 45) * Math.PI / 180;
-    var counts = { 'Support': 0, 'Support transition': 0, 'Support interface': 0 }, stackIdx = [], regs = [], sheets = [];
+    var counts = { 'Support': 0, 'Support transition': 0, 'Support interface': 0 }, stackIdx = [], regs = [], sheets = [], up = [];
     var NI = P.col.NI, NT = P.col.NT;
     P.layers.forEach(function (L, j) {
       var I = P.col.I[j], T = P.col.T[j];
       var R = I && T ? g.union(I, T) : I || T;
       regs[j] = R;
       stackIdx[j] = R && j > 0 && regs[j - 1] && g.area(g.inter(R, regs[j - 1])) > 0.05 ? stackIdx[j - 1] + 1 : 0;
+    });
+    /* how many of the stack's layers lie over each one, and the angle of the part's layer on its top (the solid fill's: infillDirectionDeg, turned a
+       quarter on every other layer - its Bridge over the stack is laid at it) */
+    for (var ju = P.layers.length - 1; ju >= 0; ju--) up[ju] = regs[ju] && ju + 1 < P.layers.length && regs[ju + 1] && stackIdx[ju + 1] === stackIdx[ju] + 1 ? up[ju + 1] + 1 : 0;
+    var PLh = (host && host.planes) || planes, dirB = (o.infillDirectionDeg || 0) * Math.PI / 180;
+    /* the bridge over a stack's top: the lowest of the part's layers over it (within 1.5 mm) whose Bridge / Bottom surface lines cross the top's
+       region - their own direction (the longest run's), so a slope's or a dome's stack takes the layer that really rests on it, gap or none;
+       else the part's first layer a gap over the top, by the solid fill's turn */
+    var bridgeMemo = {};
+    function bridgeAngleOver(jt) {
+      if (bridgeMemo[jt] !== undefined) return bridgeMemo[jt];
+      var res = null, zt = SP[jt].printZ, Rt = regs[jt];
+      var HL = host && host.layers;
+      if (HL && Rt && PLh) {
+        var Rtp = g.polys(g.offset(Rt, 0.2));
+        for (var ih = 0; ih < PLh.length && res == null; ih++) {
+          if (!(PLh[ih].printZ > zt + 1e-6) || PLh[ih].printZ > zt + 1.5) continue;
+          var Lh = HL[ih], bestL = 0;
+          if (!Lh || !Lh.paths) continue;
+          Lh.paths.forEach(function (pth) {
+            if (pth.feature !== 'Bridge' && pth.feature !== 'Bottom surface') return;
+            for (var q = 1; q < pth.pts.length; q++) {
+              var a = pth.pts[q - 1], b = pth.pts[q], l = Math.hypot(b[0] - a[0], b[1] - a[1]);
+              if (l > bestL && inside(Rtp, (a[0] + b[0]) / 2, (a[1] + b[1]) / 2)) { bestL = l; res = Math.atan2(b[1] - a[1], b[0] - a[0]); }
+            }
+          });
+          if (res != null && bestL < 0.6) res = null;                       /* a stub is no direction */
+        }
+      }
+      if (res == null && PLh && PLh.length) {
+        var zg = zt + (o.supportGapMm || 0);                                  /* the part's first layer over the stack is a gap over its top */
+        for (var ig = 0; ig < PLh.length; ig++) if (PLh[ig].printZ - PLh[ig].h >= zg - 1e-6) { res = ig % 2 === 0 ? dirB : dirB + Math.PI / 2; break; }
+      }
+      bridgeMemo[jt] = res;
+      return res;
+    }
+    P.layers.forEach(function (L, j) {
+      var I = P.col.I[j], T = P.col.T[j], R = regs[j];
       if (P.col.R0[j]) sheets.push({ topLayer: j, zLo: SP[Math.max(0, j - NI - NT + 1)].printZ - SP[Math.max(0, j - NI - NT + 1)].h, zHi: SP[j].printZ, areaMm2: g.area(P.col.R0[j]), tips: 0 });
       var out = [];
       var Rp = R ? g.polys(g.offset(R, 1e-3)) : [];
@@ -2527,7 +2568,8 @@
         flush();
       });
       if (R) {
-        var ang = stackIdx[j] === 0 ? 110 * Math.PI / 180 : (stackIdx[j] % 2 === 1 ? aD : aD + Math.PI / 2);
+        var bA = stackIdx[j] > 0 ? bridgeAngleOver(j + up[j]) : null;
+        var ang = stackIdx[j] === 0 ? 110 * Math.PI / 180 : bA != null ? bA + Math.PI / 2 + (up[j] % 2) * Math.PI / 2 : (stackIdx[j] % 2 === 1 ? aD : aD + Math.PI / 2);
         [[I, 'Support interface'], [T, 'Support transition']].forEach(function (rg) {
           if (!rg[0]) return;
           g.parts(rg[0]).forEach(function (pc) {
@@ -2587,7 +2629,7 @@
         if (!feet[i]) feet[i] = g.offset(g.offset(P.S[i], R), -R);
         return feet[i];
       };
-      if (P.col) { columnType(g, P, SP, o, host); return; }
+      if (P.col) { columnType(g, P, SP, o, host, planes); return; }
       var tops = [], held = {};
       /* a footprint with its holes filled: what lies OUTSIDE a layer, not in
          a channel of it */

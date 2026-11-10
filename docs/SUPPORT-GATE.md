@@ -233,6 +233,17 @@ Every tip's path: lean at most 45 deg, bend at most 49 (a Y where branches from 
 **Exclude small overhangs** (card box, `sup-small`, `opts.noHorns`): no horn to a step's edge, the part holds it; every other spot keeps its
 branch and its interface (supp_ref: 8 horns gone, the same 53 tips).
 
+## 4k. The interface square to the bridge above (Studio 02.09)
+
+The owner's P1S slice from Bambu Studio 02.09.01.70 (`fixtures/bambu-templates/p1s-0.4/mouse1.gcode.3mf`, layers 210 - 219): the first
+transition layer on the base grid (90), then 93.6 / 3.6 / 93.6 up the stack, under the part's bridge at 3.6 - the top interface square to
+the bridge, the layers under it a turn each. The owner: every interface is square to the bridge above (parallel lines weld; crossed ones
+release). The column rule now does the same (`columnType`, `bridgeAngleOver`): above its first layer (110, as before) a stack takes the
+direction of the part's Bridge / Bottom surface lines that cross its top's region (the lowest of the part's layers within 1.5 mm, gap or
+none), the top layer square to it and one turn a layer down; with no bridge over it (a slope's or a ring's top, met by walls) the part's
+first layer a gap over the top gives the angle by the solid fill's turn. supp_ref: every stack with a bridge over it is square to it (Base,
+Negative Sphere x 2, Negative Sphere2); gate 66 of 66.
+
 ## 5. Not done, and named
 
 - **The merged plate's small surfaces.** The six as one piece are read on a 3 mm grid where each alone is read at 1 mm, so the Negative Sphere2's apex
