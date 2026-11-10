@@ -641,3 +641,24 @@ from the page and `support:gate --rule column --json` are identical before and a
 | supp_ref_2x (1 piece) | 83 s (slice 70 s) | 42 s (slice 31 s) |
 
 What is left in the 2x slice: the exact sections' closing offsets and `unionAll` in the typing (manifold, about 18 s), and the layers themselves.
+
+**Second round (the typing).** The slice of the page's own Generate job (captured from the worker, replayed in node, the G-code compared byte for byte):
+- `geometry()`'s operations are kept by their inputs: a section is never changed once made, so `unionAll`, `union`, `offset`, `diff`, `inter`
+  and `dropSmall` asked again of the same sections (by identity) and the same numbers return the first answer. The typing asks the host's layers
+  the same unions and cuts for every support layer and every support (the column rule's window of host layers, `dropSmall` of each, the
+  overhang of each layer, per support). Cleared by `free()`.
+- `prepExact` no longer cuts all six reaches of every layer up front: a height is cut when it is first read (1,670 cuts -> 486 on the 2x).
+- `topUnder` makes its `cover` (the next layer's closed, filled footprint) only when the layer reaches under the host at all.
+- `indexSoup`: the weld grid is an open-addressed table on the cells' integer coordinates, not a Map of string keys (10 - 20 x; same V and T,
+  checked on every object of the 2x job).
+- `splitOverhang` tests its points against the layer below through `insideIndex` (edges filed by horizontal bands; every answer is `inside`'s).
+
+| the plate's slice, node replay of the page's job | before | after |
+|---|---|---|
+| supp_ref (sheet typing) | 7.7 s | 4.4 s |
+| supp_ref_2x (sheet typing) | 30.3 s | 14.7 s |
+| supp_ref_2x (column rule) | 38.4 s | 15.1 s (`columnRule` 15.4 -> 4.0 s) |
+
+Headless Chromium, GENERATE to idle: supp_ref 25 -> 18 s, supp_ref_2x 42 -> 26 s, supp_ref_2x with the column rule 41 -> 31 s. The G-code is
+the same bytes in all three; `support:gate` and `support:gate --rule column` print the same JSON. What remains of the slice is mostly the
+layers themselves (walls, infill, the sections of every object: `buildLayers` and `makeP`, about 9 s of the 2x).

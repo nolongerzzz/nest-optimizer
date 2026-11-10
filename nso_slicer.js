@@ -350,36 +350,45 @@
    * neighbours, so two points either side of a cell boundary still weld.
    */
   function indexSoup(soup, q) {
-    var n = Math.floor(soup.length / 9);
-    var grid = new Map();
-    var V = [], T = new Int32Array(n * 3);
+    var n = Math.floor(soup.length / 9), nIn = n * 3;
+    /* the grid is an open-addressed table of cells keyed by their three integer coordinates (a string key per lookup was most of a big part's
+       slice); each cell's points are a list in the order they were added, searched in the same order as before - the same V and T */
+    var cap = 1; while (cap < nIn * 2) cap <<= 1;
+    var mask = cap - 1;
+    var kx = new Int32Array(cap), ky = new Int32Array(cap), kz = new Int32Array(cap), head = new Int32Array(cap).fill(-1), tail = new Int32Array(cap);
+    var next = new Int32Array(Math.max(1, nIn));
+    var V = new Float64Array(Math.max(3, nIn * 3)), nv = 0, T = new Int32Array(n * 3);
     var inv = 1 / q, q2 = q * q;
-    for (var i = 0; i < n * 3; i++) {
+    function slot(cx, cy, cz) {
+      var h = (Math.imul(cx, 73856093) ^ Math.imul(cy, 19349663) ^ Math.imul(cz, 83492791)) & mask;
+      while (head[h] >= 0 && (kx[h] !== cx || ky[h] !== cy || kz[h] !== cz)) h = (h + 1) & mask;
+      return h;
+    }
+    for (var i = 0; i < nIn; i++) {
       var x = soup[i * 3], y = soup[i * 3 + 1], z = soup[i * 3 + 2];
       var cx = Math.floor(x * inv), cy = Math.floor(y * inv), cz = Math.floor(z * inv);
       var id = -1;
       for (var a = -1; a <= 1 && id < 0; a++) {
         for (var b = -1; b <= 1 && id < 0; b++) {
           for (var c = -1; c <= 1 && id < 0; c++) {
-            var cell = grid.get((cx + a) + ',' + (cy + b) + ',' + (cz + c));
-            if (!cell) continue;
-            for (var k = 0; k < cell.length; k++) {
-              var j = cell[k] * 3, dx = V[j] - x, dy = V[j + 1] - y, dz = V[j + 2] - z;
-              if (dx * dx + dy * dy + dz * dz <= q2) { id = cell[k]; break; }
+            var hs = slot(cx + a, cy + b, cz + c);
+            for (var k = head[hs]; k >= 0; k = next[k]) {
+              var j = k * 3, dx = V[j] - x, dy = V[j + 1] - y, dz = V[j + 2] - z;
+              if (dx * dx + dy * dy + dz * dz <= q2) { id = k; break; }
             }
           }
         }
       }
       if (id < 0) {
-        id = V.length / 3;
-        V.push(x, y, z);
-        var key = cx + ',' + cy + ',' + cz;
-        var l = grid.get(key);
-        if (!l) grid.set(key, [id]); else l.push(id);
+        id = nv++;
+        V[id * 3] = x; V[id * 3 + 1] = y; V[id * 3 + 2] = z;
+        next[id] = -1;
+        var h0 = slot(cx, cy, cz);
+        if (head[h0] < 0) { head[h0] = id; tail[h0] = id; kx[h0] = cx; ky[h0] = cy; kz[h0] = cz; } else { next[tail[h0]] = id; tail[h0] = id; }
       }
       T[i] = id;
     }
-    return { V: Float64Array.from(V), T: T, nv: V.length / 3, nt: n };
+    return { V: V.slice(0, nv * 3), T: T, nv: nv, nt: n };
   }
 
   /**
@@ -598,6 +607,12 @@
     var CS = wasm.CrossSection;
     var arena = [];
     function keep(x) { arena.push(x); return x; }
+    /* THE OPERATIONS ARE KEPT BY THEIR INPUTS. A section is never changed once made, so an operation asked again of the same sections (by identity)
+       and the same numbers returns what it returned the first time - the same object, the same bytes. The support typing asks the host's layers
+       the same unions, offsets and cuts for every support layer and every support on it (supp_ref_2x: most of its typing). Cleared by free(). */
+    var ids = new WeakMap(), nextId = 0, opMemo = new Map();
+    function idOf(x) { var v = ids.get(x); if (v == null) { v = ++nextId; ids.set(x, v); } return v; }
+    function memo(key, make) { var r = opMemo.get(key); if (r === undefined) { r = make(); opMemo.set(key, r); } return r; }
     var EMPTY_POLY = [[[0, 0], [0, 0], [0, 0]]];
     function clean(polys) {
       return (polys || []).filter(function (p) { return p && p.length >= 3; });
@@ -610,17 +625,17 @@
       },
       offset: function (cs, d, join, miter) {
         if (cs.isEmpty()) return cs;
-        return keep(cs.offset(d, join || 'Miter', miter || 3, 0));
+        return memo('o' + idOf(cs) + ',' + d + ',' + (join || 'Miter') + ',' + (miter || 3), function () { return keep(cs.offset(d, join || 'Miter', miter || 3, 0)); });
       },
-      union: function (a, b) { return keep(a.add(b)); },
+      union: function (a, b) { return memo('u' + idOf(a) + ',' + idOf(b), function () { return keep(a.add(b)); }); },
       unionAll: function (list) {
         var l = list.filter(function (x) { return x && !x.isEmpty(); });
         if (!l.length) return g.empty();
         if (l.length === 1) return l[0];
-        return keep(CS.union(l));
+        return memo('U' + l.map(idOf).join(','), function () { return keep(CS.union(l)); });
       },
-      diff: function (a, b) { return b.isEmpty() ? a : keep(a.subtract(b)); },
-      inter: function (a, b) { return keep(a.intersect(b)); },
+      diff: function (a, b) { return b.isEmpty() ? a : memo('d' + idOf(a) + ',' + idOf(b), function () { return keep(a.subtract(b)); }); },
+      inter: function (a, b) { return memo('i' + idOf(a) + ',' + idOf(b), function () { return keep(a.intersect(b)); }); },
       simplify: function (cs, eps) { return cs.isEmpty() || !(eps > 0) ? cs : keep(cs.simplify(eps)); },
       area: function (cs) { return cs.area(); },
       isEmpty: function (cs) { return cs.isEmpty(); },
@@ -634,12 +649,15 @@
       /** Drop islands smaller than minArea. */
       dropSmall: function (cs, minArea) {
         if (cs.isEmpty() || !(minArea > 0)) return cs;
-        var parts = g.parts(cs).filter(function (p) { return p.area() >= minArea; });
-        return g.unionAll(parts);
+        return memo('s' + idOf(cs) + ',' + minArea, function () {
+          var parts = g.parts(cs).filter(function (p) { return p.area() >= minArea; });
+          return g.unionAll(parts);
+        });
       },
       free: function () {
         for (var i = 0; i < arena.length; i++) { try { arena[i].delete(); } catch (e) { /* freed */ } }
         arena.length = 0;
+        opMemo.clear();
       },
       arenaSize: function () { return arena.length; }
     };
@@ -707,6 +725,43 @@
   }
 
   /** Even-odd point in polygon set. */
+  /**
+   * inside(polys, x, y) for many points against the same polygons: each edge filed under the horizontal bands it spans, so a point is tested
+   * against the edges of its band only. An edge that does not span the point's y never toggles the crossing count, and the edges that do are tested
+   * by inside's own expression, so every answer is inside's.
+   */
+  function insideIndex(polys) {
+    var ex = [], ymin = Infinity, ymax = -Infinity;
+    for (var p = 0; p < polys.length; p++) {
+      var poly = polys[p];
+      for (var i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        var yi = poly[i][1], yj = poly[j][1];
+        if (yi === yj) continue;                       /* (yi > y) !== (yj > y) is never true */
+        ex.push(poly[i][0], yi, poly[j][0], yj);
+        if (yi < ymin) ymin = yi; if (yi > ymax) ymax = yi; if (yj < ymin) ymin = yj; if (yj > ymax) ymax = yj;
+      }
+    }
+    var ne = ex.length / 4;
+    if (!ne) return function () { return false; };
+    var nb = Math.max(1, Math.min(4096, Math.ceil(ne / 4))), bh = (ymax - ymin) / nb || 1;
+    var band = function (y) { var b = Math.floor((y - ymin) / bh); return b < 0 ? 0 : b >= nb ? nb - 1 : b; };
+    var lists = [];
+    for (var b = 0; b < nb; b++) lists.push([]);
+    for (var e = 0; e < ne; e++) {
+      var y0 = ex[e * 4 + 1], y1 = ex[e * 4 + 3], b0 = band(Math.min(y0, y1)), b1 = band(Math.max(y0, y1));
+      for (var bb = b0; bb <= b1; bb++) lists[bb].push(e);
+    }
+    return function (x, y) {
+      if (!(y >= ymin && y < ymax)) return false;
+      var L = lists[band(y)], inn = false;
+      for (var k = 0; k < L.length; k++) {
+        var e4 = L[k] * 4, xi = ex[e4], yi = ex[e4 + 1], xj = ex[e4 + 2], yj = ex[e4 + 3];
+        if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inn = !inn;
+      }
+      return inn;
+    };
+  }
+
   function inside(polys, x, y) {
     var inn = false;
     for (var p = 0; p < polys.length; p++) {
@@ -1559,13 +1614,13 @@
           over = g.dropSmall(over, minOver);
           L.overhangCs = over;
           L.overhangMm2 = g.area(over);
-          var belowPolys = below ? g.polys(below) : null;
+          var belowPolys = below ? g.polys(below) : null, belowIn = belowPolys ? insideIndex(belowPolys) : null;
 
           per.loops.slice().reverse().forEach(function (lp) {     // inner walls first, outer last
             var feat = lp.depth === 0 ? 'Outer wall' : 'Inner wall';
             var w = lp.depth === 0 ? o.outerWallWidthMm : o.innerWallWidthMm;
             loopsOf(g, lp.cs).forEach(function (path) {
-              splitOverhang(path, belowPolys, i, w, o.overhangEdgeFrac, o.overhangSubMm).forEach(function (piece) {
+              splitOverhang(path, belowPolys, i, w, o.overhangEdgeFrac, o.overhangSubMm, belowIn).forEach(function (piece) {
                 L.paths.push({ feature: piece.over ? 'Overhang wall' : feat, width: w,
                                closed: piece.closed, pts: piece.pts });
               });
@@ -2036,7 +2091,7 @@
    * is over air when its edges' midpoints fall outside the layer below's
    * section. The first layer is never an overhang.
    */
-  function splitOverhang(path, belowPolys, layerIndex, width, frac, subMm) {
+  function splitOverhang(path, belowPolys, layerIndex, width, frac, subMm, belowIn) {
     var pts = path.pts;
     if (layerIndex === 0 || !belowPolys) return [{ over: false, closed: true, pts: pts }];
     var n = pts.length;
@@ -2047,7 +2102,7 @@
     /* the point judged is the line's centre moved (frac - 0.5) widths toward the material - frac 1: its inner edge - along the normal to the right of the
        travel (material is on the left of a loop's travel). A line whose inner edge is over air hangs whole. */
     var reach = (frac != null && width > 0) ? (0.5 - frac) * width : 0, rnx = 0, rny = 0;
-    function over(x, y) { return !inside(belowPolys, x + rnx * reach, y + rny * reach); }
+    function over(x, y) { return !(belowIn ? belowIn(x + rnx * reach, y + rny * reach) : inside(belowPolys, x + rnx * reach, y + rny * reach)); }
     for (var i = 0; i < n; i++) {
       var p = pts[i], q = pts[(i + 1) % n];
       var ex = q[0] - p[0], ey = q[1] - p[1], el = Math.hypot(ex, ey);
@@ -2684,14 +2739,24 @@
       }
       /* the part of layer i under the host's sections `over` - closed, less
          `cover` grown by half a line, opened by half a line */
+      /* the test before the islands, kept by layer and host union (both of a layer's exposedParts ask it) */
+      var reachMemo = new WeakMap();
+      function reaches(i, H) {
+        var m = reachMemo.get(H);
+        if (!m) { m = {}; reachMemo.set(H, m); }
+        if (!(i in m)) m[i] = g.area(g.inter(P.S[i], H)) > 1e-6;
+        return m[i];
+      }
+      /* `cover` may be a function: it is made only when the layer reaches under the host (most do not) */
       function topUnder(i, over, cover, grow, open) {
         if (open == null) open = w / 2;
         var H = g.unionAll(over.map(function (x) { return x.cs; }));
         // most layers reach under no host at all: one test, before the islands
-        if (!(g.area(g.inter(P.S[i], H)) > 1e-6)) return null;
+        if (!reaches(i, H)) return null;
         var isl = g.parts(P.S[i]).filter(function (p) { return g.area(g.inter(p, H)) > 1e-6; });
         if (!isl.length) return null;
         var t = g.offset(g.offset(g.unionAll(isl), R), -R);
+        if (typeof cover === 'function') cover = cover();
         t = g.diff(t, g.offset(cover, grow));
         t = g.dropSmall(g.offset(g.offset(t, -open), open), minOver);
         return g.isEmpty(t) ? null : t;
@@ -2705,7 +2770,7 @@
          a little up the slope, and closeMm of it hid the band's exposed
          edge) */
       function exposedParts(i, over) {
-        return { a: topUnder(i, over, P.footAt(i + 1), R), b: sloped(topUnder(i, over, filled(P.footAt(i + 1)), w / 4, w / 4), i) };
+        return { a: topUnder(i, over, function () { return P.footAt(i + 1); }, R), b: sloped(topUnder(i, over, function () { return filled(P.footAt(i + 1)); }, w / 4, w / 4), i) };
       }
       /* of a stair's tops (the two allowances: against a quarter line of the
          next layer and opened by a quarter line, as a band one line wide
@@ -2757,7 +2822,7 @@
         if (stairH > 0) {
           var deep = overAt(i, gap + stairH);
           if (deep.length > over.length) {
-            var t2 = sloped(topUnder(i, deep, filled(P.footAt(i + 1)), w / 4, w / 4), i);
+            var t2 = sloped(topUnder(i, deep, function () { return filled(P.footAt(i + 1)); }, w / 4, w / 4), i);
             if (t2) { t = t ? g.union(t, t2) : t2; tS = tS ? g.union(tS, t2) : t2; over = deep; }
           }
         }
@@ -2868,7 +2933,7 @@
         }
         if (exactOn && Q0exact) {
           var key = Math.round((sz + d - exShift) * 1e5);
-          hosts.forEach(function (Q) { var e = Q.exact && Q.exact[key]; if (e && !g.isEmpty(e)) cs.push(e); });
+          hosts.forEach(function (Q) { var e = Q.exactGet && Q.exactGet(key); if (e && !g.isEmpty(e)) cs.push(e); });
         }
         return cs.length ? g.unionAll(cs) : null;
       }
@@ -2883,12 +2948,10 @@
           if (!L.paths.length) return;
           [dInEx(j), dTrEx(j), dCl(j, dInEx(j)) + REACH_EXTRA_MM, dCl(j, dTrEx(j)) + REACH_EXTRA_MM, PLATE_UP_MM, PLATE_UP_LOW_MM].forEach(function (dd) { var z = SP[j].printZ + dd - exShift; zs[Math.round(z * 1e5)] = z; });
         });
-        var list = Object.keys(zs).map(function (k) { return zs[k]; }).sort(function (a, b) { return a - b; });
+        /* each height is cut when it is first read (most never are: a layer's six reaches, and only some are asked); exactAt keeps it by its height */
         hosts.forEach(function (Q) {
           if (!Q.exactAt || !Q.soupOk) return;
-          var cs = Q.exactAt(list);
-          Q.exact = {};
-          list.forEach(function (z, i) { Q.exact[Math.round(z * 1e5)] = cs[i]; });
+          Q.exactGet = function (key) { return Object.prototype.hasOwnProperty.call(zs, key) ? Q.exactAt([zs[key]])[0] : undefined; };
           Q0exact = true;
         });
       }
@@ -3120,7 +3183,7 @@
               if (hIc && steady && HOST_GROW_MM > 0) hIc = g.offset(hIc, HOST_GROW_MM);
               if (hTc && steady && HOST_GROW_MM > 0) hTc = g.offset(hTc, HOST_GROW_MM);
               if (EXACT_OUTLINE && !steady && ribbonSlab && Q0exact) {
-                var exAt = function (d) { var key = Math.round((SP[j].printZ + d - exShift) * 1e5), u = null; hosts.forEach(function (Q) { var e = Q.exact && Q.exact[key]; if (e && !g.isEmpty(e)) u = u ? g.union(u, e) : e; }); return u; };
+                var exAt = function (d) { var key = Math.round((SP[j].printZ + d - exShift) * 1e5), u = null; hosts.forEach(function (Q) { var e = Q.exactGet && Q.exactGet(key); if (e && !g.isEmpty(e)) u = u ? g.union(u, e) : e; }); return u; };
                 var eI = exAt(dCl(j, dInEx(j)) + REACH_EXTRA_MM), eT = exAt(dCl(j, dTrEx(j)) + REACH_EXTRA_MM);
                 if (eI && eT) {
                   var XO = PLATE_OUT_MM + loopIn;
