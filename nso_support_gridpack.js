@@ -4936,7 +4936,34 @@
     return { beacon: b.id, key: b.key, regionId: b.regionId, p: b.p.slice(), top: top, knee: q2, drop: v2, join: c2, bottom: c2, sideMm: 2 * HORN.kneeR,
              moveMm: mv, leanMm: best.dz * tanL, lengthMm: best.len, flare: false, horn: true, onTree: true, smooth: true, soup: soup };
   }
-  function hornColumn(b, kit, segs) {
+  /* a branch from a spot straight into the tree (no wall to stand off): its top under the face over the spot, leaning out at the horn's lean
+     on eight headings, the shortest that joins */
+  function treeBranch(b, kit, segs) {
+    if (!kit || kit.plateZ == null || !segs || !segs.length) return null;
+    var tanL = Math.tan(HORN.leanDeg * Math.PI / 180);
+    hornUnderMap(kit, b.p[0], b.p[1]);
+    /* its top where a thin column's would stand: the spot, else moved along its face (THIN_TIP_NUDGE_MM, the nearest first) to where the face is
+       at the spot's height - a ledge's spot whose own column is blocked lower down (the thin pillar stood 2.25 mm off it) */
+    for (var di = 0; di < THIN_TIP_NUDGE_MM.length; di++) {
+      var d = THIN_TIP_NUDGE_MM[di], best = null;
+      for (var hn = 0; hn < (d ? STEER_HEADINGS : 1); hn++) {
+        var th = 2 * Math.PI * hn / STEER_HEADINGS, x = b.p[0] + Math.cos(th) * d, y = b.p[1] + Math.sin(th) * d;
+        var hz = kit.pr.down([x, y, b.p[2] + THIN_TIP_FACE_MM], 2 * THIN_TIP_FACE_MM);
+        if (hz < 0) continue;
+        var fz = b.p[2] + THIN_TIP_FACE_MM - hz;
+        if (Math.abs(fz - b.p[2]) > THIN_TIP_FACE_MM) continue;
+        var top = [x, y, fz - GAP_MM];
+        if (!(top[2] - kit.plateZ > 2 * THIN_TIP_SIDE_MM)) continue;
+        for (var h = 0; h < 8; h++) {
+          var a = 2 * Math.PI * h / 8, hT = hornToTree(b, kit, top, Math.cos(a), Math.sin(a), tanL, segs, d);
+          if (hT && (!best || hT.lengthMm < best.lengthMm)) best = hT;
+        }
+      }
+      if (best) return best;
+    }
+    return null;
+  }
+  function hornColumn(b, kit, segs, treeOnly) {
     HORN_WHY = 'no kit';
     if (!kit || kit.plateZ == null) return null;
     var pz = kit.plateZ, zw = b.p[2] - 0.3, nH = 32, dmin = Infinity, hits = [];
@@ -4990,6 +5017,7 @@
       }
     }
     if (bestT) return bestT;
+    if (treeOnly) { HORN_WHY = 'no way into the tree'; return null; }   /* tree mode: no column of its own to the plate */
     for (var t = 0; t <= 4; t++) {
       for (var sg = t ? -1 : 1; sg <= 1; sg += 2) {
         var ang = oa + sg * t * Math.PI / 8, lx = Math.cos(ang), ly = Math.sin(ang);
@@ -5019,10 +5047,9 @@
     /* under the column rule a step's spot is caught by a horn (hornColumn); spots within HORN_ONE_MM of one already caught share it */
     var HORN_ONE_MM = 1.5;
     var HORN_COVER = { xyMm: 2.5, downMm: 1.5, upMm: 0.3 };   /* an overhang's spot this near (in plan: the spots' grid and its interface's reach) and this far under the step's (or a hair over) */
-    function hornsOf(steps) {
-      if (!opts.columnRule || opts.noHorns) return [];                   /* the card's Exclude small overhangs: the steps are the part's to hold */
-      /* the tree a horn may join: the crowns' branches and trunks, and the legs to the tips under their straight columns (which stand in the
-         stacks), sampled every half mm */
+    /* the tree a horn (or a branch to a spot no leg reached) may join: the crowns' branches and trunks, and the legs to the tips under their
+       straight columns (which stand in the stacks), sampled every half mm */
+    function treeSegsOf() {
       var treeSegs = [];
       if (p && p.ok && p.crowns) p.crowns.forEach(function (cr) {
         (cr.nodes || []).forEach(function (n) {
@@ -5034,6 +5061,11 @@
           }
         });
       });
+      return treeSegs;
+    }
+    function hornsOf(steps) {
+      if (!opts.columnRule || opts.noHorns) return [];                   /* the card's Exclude small overhangs: the steps are the part's to hold */
+      var treeSegs = treeSegsOf();
       var out = [], isStep = {};
       steps.forEach(function (sh) { isStep[sh.beacon] = true; });
       steps.forEach(function (sh) {
@@ -5047,7 +5079,7 @@
         if (root && root.NSO_STEP_DEBUG && cover) console.log('horn for ' + sh.p.map(function (v) { return v.toFixed(2); }) + ': none, the interface of ' + cover.p.map(function (v) { return v.toFixed(2); }) + ' covers it');
         if (cover) return;
         var tH = Date.now(), nLeg0 = HORN_STATS.legs, nSh0 = HORN_STATS.shadow;
-        var hc = hornColumn(bc.beacons[sh.beacon], kit, treeSegs);
+        var hc = hornColumn(bc.beacons[sh.beacon], kit, treeSegs, true);      /* tree mode: a horn joins the tree or is not built - no pillar of its own */
         if (root && root.NSO_STEP_DEBUG) console.log('  horn time ' + (Date.now() - tH) + ' ms, legs ' + (HORN_STATS.legs - nLeg0) + ', shadow checks ' + (HORN_STATS.shadow - nSh0));
         if (root && root.NSO_STEP_DEBUG) console.log('horn for ' + sh.p.map(function (v) { return v.toFixed(2); }) + ': ' + (hc ? 'top ' + hc.top.map(function (v) { return v.toFixed(2); }) + ' knee ' + hc.knee.map(function (v) { return v.toFixed(2); }) + ' lean ' + hc.leanMm.toFixed(2) + (hc.onTree ? ' drop ' + hc.drop[2].toFixed(2) + ' joins the tree at ' + hc.join.map(function (v) { return v.toFixed(2); }) : ' to the plate') + ' (tree ' + treeSegs.length + ' points)' : 'none ' + HORN_WHY));
         if (hc) out.push(hc);
@@ -5219,12 +5251,22 @@
     if (root && root.NSO_TIPS_DEBUG && chosen) console.log('spots ' + JSON.stringify(bc.beacons.map(function (b) { return b.p.map(function (v) { return +v.toFixed(1); }).concat([chosen.indexOf(b) >= 0 ? 'T' : lost[b.id] ? 'L' : 'c']); })));
     if (p.ok) {
       /* the lost spots: a cone's tip held through the tip under it, a ledge by a thin column; what is left is unreachable */
-      var thin = [], coneHeld = 0, thinHeld = 0, selfHeld = stepHeld.slice();
+      var thin = [], coneHeld = 0, thinHeld = 0, branched = 0, segsL = null, selfHeld = stepHeld.slice();
       var stillLost = Object.keys(lost).filter(function (id) { return lost[id] === true; }).map(Number).sort(function (x, y) { return x - y; }).filter(function (id) {
         var b = bc.beacons[id];
         if (subThresholdStep(b, kit, opts)) { selfHeld.push({ beacon: b.id, key: b.key, regionId: b.regionId, p: b.p.slice() }); return false; }
         var cv = coneTipCover(b, chosen, kit);
         if (cv) { covered.push(cv); coneHeld++; return false; }
+        /* TREE MODE HAS NO PILLARS (the owner: "remove the pillars from ever coming back on tree mode, and fix the unreachable zones"): a spot no
+           leg reached is caught by a branch into the tree (the horn's route: off its wall, else straight from the spot), else it is named
+           unreachable - never a thin column of its own on the plate */
+        if (opts.columnRule) {
+          if (!segsL) segsL = treeSegsOf();
+          var br = hornColumn(b, kit, segsL, true) || treeBranch(b, kit, segsL);
+          if (br) { br.branch = true; thin.push(br); branched++; return false; }
+          if (root && root.NSO_BRANCH_DEBUG) console.log('no branch for ' + b.p.map(function (v) { return v.toFixed(2); }) + ': ' + HORN_WHY + ' (tree ' + segsL.length + ' points)');
+          return true;
+        }
         var tc = thinColumn(b, kit);
         if (tc) { thin.push(tc); thinHeld++; return false; }
         return true;
@@ -5236,9 +5278,10 @@
         p.unreachable.push(at);
       });
       p.oneTrunk = { coverMm: ck.coverMm, areas: order.length, clusters: clusters.map(function (c) { return { tips: c.tips.length, radiusMm: c.r }; }),
-                     tips: chosen.length, beacons: bc.beacons.length, thinned: thinned, covered: covered, onPlate: onPlate, splits: rounds, lost: nLost - coneHeld - thinHeld - (selfHeld.length - stepHeld.length),
+                     tips: chosen.length, beacons: bc.beacons.length, thinned: thinned, covered: covered, onPlate: onPlate, splits: rounds, lost: nLost - coneHeld - thinHeld - branched - (selfHeld.length - stepHeld.length), branched: branched,
                      thin: thin, coneTips: coneHeld, selfHeld: selfHeld };
       if (horns.length) p.reason += ' ' + horns.length + ' horn(s) catch the edge of a step no slicer calls an overhang.';
+      if (branched) p.reason += ' ' + branched + ' spot(s) no leg reached are caught by a branch into the tree.';
       thin = thin.filter(function (t) { return !t.horn; });
       if (thin.length) p.reason += ' ' + thin.length + ' spot(s) on a ledge no strut fits are held by a thin column (' + THIN_TIP_SIDE_MM + ' mm)' +
         (thin.some(function (t) { return t.rest; }) ? ', ' + thin.filter(function (t) { return t.rest; }).length + ' of them standing on the part (no way to the plate under the ledge)' : '') + '.';

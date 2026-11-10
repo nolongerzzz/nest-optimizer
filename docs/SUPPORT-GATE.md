@@ -279,6 +279,13 @@ band's trunk now serves as wide a canopy as its height reaches at the lean limit
 under 12 mm): supp_ref_2x, every head on one or two feet (four on one), 9 support pieces where there were 11; at 1x the reach is under
 12 mm and nothing changes (gate 66 / 65 of 66, as before).
 
+**Tree mode has no pillars.** The owner: "remove the pillars from ever coming back on tree mode, and fix the unreachable zones". Under the
+column rule a spot no leg reached (a ledge no strut fits, a spot with no route to the plate) is no longer a thin column of its own: it is
+caught by a branch into the tree (`treeBranch`: its top where a thin column's would stand - the spot, else moved along its face up to
+1.5 mm - then the horn's route: a knee, a drop, a leg into the tree at 45 deg); else it is named unreachable. A horn that cannot join the
+tree is not built (no column to the plate). supp_ref_2x: no pillar, unreachable 0 (was 1, and a pillar), every head on one or two feet;
+supp_ref: six heads, six feet; gate 66 / 65 of 66 as before.
+
 ## 5. Not done, and named
 
 - **Trunk bases and pads, as Bambu's**: a flare over 2 mm floats an island at the Negative Sphere's trunk (z 1.3, beside its stem);
