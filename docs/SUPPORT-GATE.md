@@ -273,6 +273,12 @@ xy distance only from the part at a support layer's own height; the part's layer
 kept `COLUMN_RISER_XY_MM` (0.2, the gap's own) off sideways too: NSO's 2x Oblique p5 0.20, none under 0.15. Gate: 66 of 66 against
 02.08, 65 of 66 against 02.09 (the Negative Sphere's sheet carried, as before).
 
+**One trunk to a head at any scale.** At 2x (supp_ref_2x.3mf) the heads stood two and three trunks and extra pillars, where Bambu's 2x
+stands at most two a head: the one-trunk build gathered tips within a fixed 12 mm (ONE.clusterMm, fitted at 1x). Under the column rule a
+band's trunk now serves as wide a canopy as its height reaches at the lean limit (0.9 x (lowest tip - root floor - tip drop) x tan 45, never
+under 12 mm): supp_ref_2x, every head on one or two feet (four on one), 9 support pieces where there were 11; at 1x the reach is under
+12 mm and nothing changes (gate 66 / 65 of 66, as before).
+
 ## 5. Not done, and named
 
 - **Trunk bases and pads, as Bambu's**: a flare over 2 mm floats an island at the Negative Sphere's trunk (z 1.3, beside its stem);

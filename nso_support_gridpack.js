@@ -5137,7 +5137,14 @@
          piece (plan.blocked) is split smaller and planned again - a tip is never left without its branch */
       clusters = [];
       zBands(chosen, ck.zWindowMm).forEach(function (band) {
-        clusterTips(band.map(function (i) { return chosen[i]; }), ck.clusterMm).forEach(function (g) { clusters.push({ tips: g.map(function (j) { return chosen[band[j]]; }), r: ck.clusterMm }); });
+        /* under the column rule a trunk serves as wide a canopy as its height reaches at the lean limit (a branch at 45 deg goes as far out as
+           it drops), not a fixed 12 mm: a head at 2x stood two and three trunks where Bambu stands one (supp_ref_2x: six feet, one a head) */
+        var rC = ck.clusterMm;
+        if (opts.columnRule) {
+          var zlB = Math.min.apply(null, band.map(function (i) { return chosen[i].p[2]; }));
+          rC = Math.max(rC, 0.9 * (zlB - plateZ1 - COLUMN_CROWN.rootFloorMm - COLUMN_CROWN.tipDropMm) * Math.tan((ck.tiltDeg || 45) * Math.PI / 180));
+        }
+        clusterTips(band.map(function (i) { return chosen[i]; }), rC).forEach(function (g) { clusters.push({ tips: g.map(function (j) { return chosen[band[j]]; }), r: rC }); });
       });
       rounds = 0;
       for (;;) {
