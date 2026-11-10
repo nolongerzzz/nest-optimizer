@@ -305,6 +305,7 @@
       supportLayerMaxMm: 0,                // 0 = supports are cut on the part's layers; 0.28 = on their own (Bambu's independent_support_layer_height): see sliceObjects
       supportInterfaceLayers: null,        // null -> CONSTANTS.supportSheet.interfaceLayers (2); a sheet of more says so
       supportInterfaceRule: null,          // 'column': the interface read off the part's layers column by column (columnRule; docs/SUPPORT-GATE.md); null: the sheet typing
+      supportInterfaceAngle: 'bridge',     // the column rule's stack angles: 'bridge' its top square to the part's bridge over it; 'studio36' Studio 02.09's own (90, then 93.6 / 3.6 up to a top at 93.6, the part's bridges over supports at 3.6 - the owner's P1S print released clean); 'crosshatch' 110, then 45 / 135
       supportXyMm: 0.35,                   // the column rule's xy distance to the part at a support layer's own height (Bambu's support_object_xy_distance)
       weldMm: 1e-4,
       dropToPlate: true,
@@ -1620,7 +1621,10 @@
               L.paths.push({ feature: feat, width: wInf, closed: false, pts: pth.pts });
             });
           }
-          solidFill(bottomOpen, i === 0 ? 'Bottom surface' : 'Bridge');
+          /* Interface angle 3.6 (Studio 02.09): a part's bridge is laid at 3.6, its supports' top square to it */
+          if (i > 0 && o.supportInterfaceAngle === 'studio36' && P.role === 'part' && objs.some(function (ob) { return ob.role === 'support'; })) {
+            var sa0 = solidAngle; solidAngle = STUDIO36_DEG * Math.PI / 180; solidFill(bottomOpen, 'Bridge'); solidAngle = sa0;
+          } else solidFill(bottomOpen, i === 0 ? 'Bottom surface' : 'Bridge');
           solidFill(bridgeInner, 'Bridge');
           solidFill(topOnly, 'Top surface');
           solidFill(internal, 'Internal solid infill');
@@ -2499,6 +2503,7 @@
      SQUARE TO THE BRIDGE (Bambu Studio 02.09, the owner's mouse1 slice: transition 90, then 93.6 / 3.6 / 93.6 under a bridge at 3.6; the
      owner: "every interface is square from the bridge above - parallel lines weld easier"): above its first layer a stack takes the angle
      of the part's layer that bridges its top - the top layer square to it, and so on down, one turn a layer. */
+  var STUDIO36_DEG = 3.6;   /* Studio 02.09's bridge over the owner's mouse1 supports, and the stack's turn under it (layers 210 - 219) */
   function columnType(g, P, SP, o, host, planes) {
     var wI = o.supportWidthMm > 0 ? o.supportWidthMm : o.infillWidthMm, pitch = wI + 0.04, aD = (o.infillDirectionDeg || 45) * Math.PI / 180;
     var counts = { 'Support': 0, 'Support transition': 0, 'Support interface': 0 }, stackIdx = [], regs = [], sheets = [], up = [];
@@ -2568,8 +2573,13 @@
         flush();
       });
       if (R) {
-        var bA = stackIdx[j] > 0 ? bridgeAngleOver(j + up[j]) : null;
-        var ang = stackIdx[j] === 0 ? 110 * Math.PI / 180 : bA != null ? bA + Math.PI / 2 + (up[j] % 2) * Math.PI / 2 : (stackIdx[j] % 2 === 1 ? aD : aD + Math.PI / 2);
+        var mode = o.supportInterfaceAngle || 'bridge', ang;
+        if (mode === 'studio36') ang = stackIdx[j] === 0 ? Math.PI / 2 : (STUDIO36_DEG * Math.PI / 180) + Math.PI / 2 + (up[j] % 2) * Math.PI / 2;
+        else if (mode === 'crosshatch') ang = stackIdx[j] === 0 ? 110 * Math.PI / 180 : (stackIdx[j] % 2 === 1 ? aD : aD + Math.PI / 2);
+        else {
+          var bA = stackIdx[j] > 0 ? bridgeAngleOver(j + up[j]) : null;
+          ang = stackIdx[j] === 0 ? 110 * Math.PI / 180 : bA != null ? bA + Math.PI / 2 + (up[j] % 2) * Math.PI / 2 : (stackIdx[j] % 2 === 1 ? aD : aD + Math.PI / 2);
+        }
         [[I, 'Support interface'], [T, 'Support transition']].forEach(function (rg) {
           if (!rg[0]) return;
           g.parts(rg[0]).forEach(function (pc) {

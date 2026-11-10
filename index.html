@@ -1396,6 +1396,12 @@
                   <option value="dense" selected>Dense (Bambu)</option>
                   <option value="open">Open</option>
                 </select></label>
+              <label class="vp-bend-field" for="slice-set-iface-angle">Interface angle
+                <select id="slice-set-iface-angle" class="vp-select" title="How the support's transition and interface layers turn under the part (the column rule). Square to bridge: the top interface layer crosses the part's bridge lines at 90 degrees, one turn a layer down (parallel lines weld, crossed ones release). 3.6 (Studio 2.9): Bambu Studio 02.09's own - the first layer at 90, then 93.6 / 3.6 up to a top at 93.6, the part's bridges over supports laid at 3.6 (the owner's P1S print released clean). Crosshatch: the old 45 / 135. A testing ground: Generate slices with it.">
+                  <option value="bridge" selected>Square to bridge</option>
+                  <option value="studio36">3.6&deg; (Studio 2.9)</option>
+                  <option value="crosshatch">Crosshatch 45/135</option>
+                </select></label>
               <label class="vp-bend-field" for="slice-set-raft">Raft
                 <input type="number" id="slice-set-raft" value="0" min="0" max="30" step="1" aria-label="Raft layers"
                        title="Raft layers under everything on the plate - its own system between the plate and the first layer of every part and support, with or without a support style (Bambu's raft_layers): the top half (rounded up) Support interface, the rest Support. 0: no raft (and the brim as set); with a raft there is no brim. Generate slices with it."><span>layers</span></label>
@@ -2889,7 +2895,7 @@
   <script src="nso-gcode-lines.js?v=fe0b823c"></script>
   <script src="nso-gscope-diff.js?v=937f4953"></script>
   <script src="nso-gcode-solid.js?v=ac1a4f02"></script>
-  <script src="nso_slicer.js?v=e99c92dd"></script>
+  <script src="nso_slicer.js?v=76f69d27"></script>
   <script src="nso_raster_lines.js?v=461ca449"></script>
   <!-- The support interface: the crosshatch's one-direction layers, and the
        sheet a support tree's tips carry under the part (flat caps on the
@@ -3095,7 +3101,7 @@
        plate reader and G-code import it calls. See docs/PRINT-PLANNER.md. -->
   <script src="nso-print-planner.js?v=f4b28af6"></script>
   <script src="nso-gcode3mf-write.js?v=cdfa15b4"></script>
-  <script src="app-print.js?v=9d64ffd3"></script>
+  <script src="app-print.js?v=78c81c31"></script>
   <!-- Lift: details off a face, the face left as it was round them. After
        nso_lift.js (Phase 1: a flat face), nso_lift_curved.js (Lift 3: the
        repair under a detail lifted off a curved base), nso_lift_auto.js

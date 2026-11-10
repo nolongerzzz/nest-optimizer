@@ -244,6 +244,12 @@ none), the top layer square to it and one turn a layer down; with no bridge over
 first layer a gap over the top gives the angle by the solid fill's turn. supp_ref: every stack with a bridge over it is square to it (Base,
 Negative Sphere x 2, Negative Sphere2); gate 66 of 66.
 
+**Interface angle, a testing ground** (supports card, `slice-set-iface-angle`; nso_slicer.js `supportInterfaceAngle`, carried with the Slice
+settings so Generate slices with it and a change makes the slice stale): *Square to bridge* (`bridge`, the default, above); *3.6 (Studio
+2.9)* (`studio36`: Bambu's own on the owner's P1S print, which released clean - the stack's first layer at 90, then 93.6 / 3.6 up to a top
+at 93.6, and the part's bridges over supports laid at 3.6, so they cross square); *Crosshatch 45/135* (`crosshatch`, the column rule as it
+was: 110, then 45 / 135, parallel to the bridge on some stacks). supp_ref: `studio36` puts every top interface at 93.6 under a bridge at 3.6.
+
 ## 5. Not done, and named
 
 - **The merged plate's small surfaces.** The six as one piece are read on a 3 mm grid where each alone is read at 1 mm, so the Negative Sphere2's apex

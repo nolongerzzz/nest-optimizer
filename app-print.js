@@ -102,7 +102,8 @@
   // settings (configOverlay), so the engine, the planner, the G-code's CONFIG_BLOCK and
   // the file's project_settings.config all read the same number. The nozzle is the
   // profile's: another nozzle needs its own start / end blocks.
-  var SETTINGS_DEFAULT = { nozzle: 0.4, layer: 0.2, walls: 2, density: 15, pattern: 'grid', angle: 30, brim: 'auto', raft: 0, raftGap: 0.1, interfaceRule: null };
+  var SETTINGS_DEFAULT = { nozzle: 0.4, layer: 0.2, walls: 2, density: 15, pattern: 'grid', angle: 30, brim: 'auto', raft: 0, raftGap: 0.1, ifaceAngle: 'bridge', interfaceRule: null };
+  var IFACE_ANGLES = { bridge: 1, studio36: 1, crosshatch: 1 };   /* nso_slicer.js supportInterfaceAngle: NSO's own, no profile key - a testing ground for interfaces */
   var PATTERN_TO_CONFIG = { grid: 'grid', zigzag: 'zig-zag', lines: 'line' };
   var PATTERN_FROM_CONFIG = { grid: 'grid', 'zig-zag': 'zigzag', zigzag: 'zigzag', line: 'lines', lines: 'lines' };
   var BRIM_TO_CONFIG = { auto: 'auto_brim', outer: 'outer_only', none: 'no_brim' };
@@ -121,7 +122,7 @@
     return {
       nozzle: eng.nozzleMm, layer: o.layerMm, walls: o.wallLoops, density: Math.round(o.sparseDensity * 100),
       pattern: PATTERN_FROM_CONFIG[cfgRaw(config, 'sparse_infill_pattern')] || o.sparsePattern,
-      angle: o.supportThresholdDeg, brim: o.brimType, raft: Math.round(o.raftLayers || 0), raftGap: o.raftContactMm != null ? o.raftContactMm : 0.1, interfaceRule: null
+      angle: o.supportThresholdDeg, brim: o.brimType, raft: Math.round(o.raftLayers || 0), raftGap: o.raftContactMm != null ? o.raftContactMm : 0.1, ifaceAngle: 'bridge', interfaceRule: null
     };
   }
 
@@ -140,6 +141,7 @@
       brim: BRIM_TO_CONFIG[s.brim] ? s.brim : D.brim,
       raft: Math.round(n(s.raft, D.raft, 0, 30)),
       raftGap: Math.round(n(s.raftGap, D.raftGap, 0, 1) * 100) / 100,
+      ifaceAngle: IFACE_ANGLES[s.ifaceAngle] ? s.ifaceAngle : D.ifaceAngle,
       interfaceRule: s.interfaceRule === 'column' ? 'column' : null
     };
   }
@@ -265,6 +267,8 @@
     var rule = settings ? settings.interfaceRule
       : typeof window !== 'undefined' && typeof window.nsoSupportInterfaceRule === 'function' ? window.nsoSupportInterfaceRule() : null;
     if (rule && (eng.over || {}).supportInterfaceRule == null) o.supportInterfaceRule = rule;
+    /* the interface angle (supportInterfaceAngle): square to the bridge, Studio 02.09's 3.6, or the old crosshatch - the card's choice */
+    if (settings && settings.ifaceAngle) o.supportInterfaceAngle = settings.ifaceAngle;
     return { o: o, config: config, over: over };
   }
 
@@ -425,7 +429,7 @@
   // ---- the card's Slice settings -----------------------------------------------
 
   var SET_IDS = ['slice-set-nozzle', 'slice-set-layer', 'slice-set-walls', 'slice-set-density', 'slice-set-pattern',
-                 'slice-set-angle', 'slice-set-brim', 'slice-set-raft', 'slice-set-raft-gap', 'slice-set-iface'];
+                 'slice-set-angle', 'slice-set-brim', 'slice-set-raft', 'slice-set-raft-gap', 'slice-set-iface-angle', 'slice-set-iface'];
 
   /** The interface rule, one choice shared with G-scope's Slice settings (its page keeps it). */
   function interfaceRule() {
@@ -438,7 +442,7 @@
     return cleanSettings({
       nozzle: v('slice-set-nozzle'), layer: v('slice-set-layer'), walls: v('slice-set-walls'), density: v('slice-set-density'),
       pattern: v('slice-set-pattern'), angle: v('slice-set-angle'), brim: v('slice-set-brim'),
-      raft: v('slice-set-raft'), raftGap: v('slice-set-raft-gap'),
+      raft: v('slice-set-raft'), raftGap: v('slice-set-raft-gap'), ifaceAngle: v('slice-set-iface-angle'),
       interfaceRule: $('slice-set-iface') ? v('slice-set-iface') : interfaceRule()
     });
   }
@@ -448,7 +452,7 @@
     var set = function (id, val) { var el = $(id); if (el && val != null) el.value = String(val); };
     set('slice-set-nozzle', st.nozzle); set('slice-set-layer', st.layer); set('slice-set-walls', st.walls);
     set('slice-set-density', st.density); set('slice-set-pattern', st.pattern); set('slice-set-angle', st.angle);
-    set('slice-set-brim', st.brim); set('slice-set-raft', st.raft); set('slice-set-raft-gap', st.raftGap);
+    set('slice-set-brim', st.brim); set('slice-set-raft', st.raft); set('slice-set-raft-gap', st.raftGap); set('slice-set-iface-angle', st.ifaceAngle);
     set('slice-set-iface', interfaceRule() || '');
   }
 
