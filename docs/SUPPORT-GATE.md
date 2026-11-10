@@ -286,6 +286,12 @@ caught by a branch into the tree (`treeBranch`: its top where a thin column's wo
 tree is not built (no column to the plate). supp_ref_2x: no pillar, unreachable 0 (was 1, and a pillar), every head on one or two feet;
 supp_ref: six heads, six feet; gate 66 / 65 of 66 as before.
 
+**A head's areas are one group as wide as its trunk reaches.** supp_ref_2x's Negative Sphere2 still stood four legs: its rim in three
+areas (left, right, back) and its upper face were four groups, each planned alone with a trunk of its own - the card grouped areas only
+within 12 mm (`oneTrunkGroups`, ONE.clusterMm). Under the column rule a group is now as wide as one trunk reaches at the lean limit from
+its lowest spot (`reachByHeight`, the same reach planOneTrunk's clusters take): that head two trunks, every head of supp_ref_2x one or two,
+7 support pieces (was 10); 1x unchanged (gate 66 / 65 of 66).
+
 ## 5. Not done, and named
 
 - **Trunk bases and pads, as Bambu's**: a flare over 2 mm floats an island at the Negative Sphere's trunk (z 1.3, beside its stem);

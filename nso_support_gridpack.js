@@ -4668,7 +4668,11 @@
       var cx = 0, cy = 0, lo = Infinity, hi = -Infinity, r = 0;
       list.forEach(function (b) { cx += b.x / list.length; cy += b.y / list.length; lo = Math.min(lo, b.z); hi = Math.max(hi, b.z); });
       list.forEach(function (b) { r = Math.max(r, Math.hypot(b.x - cx, b.y - cy)); });
-      return r <= ck.clusterMm + 1e-9 && hi - lo <= ck.zWindowMm + 1e-9;
+      /* under the column rule a group is as wide as one trunk's canopy reaches at the lean limit from its lowest spot (planOneTrunk's own
+         clusters): a 2x head's rim in three areas stood a trunk each, and a fourth for its upper face - four legs where Bambu stands two */
+      var rMax = ck.clusterMm;
+      if (ck.reachByHeight) rMax = Math.max(rMax, 0.9 * (lo - (ck.plateZ || 0) - COLUMN_CROWN.rootFloorMm - COLUMN_CROWN.tipDropMm) * Math.tan(45 * Math.PI / 180));
+      return r <= rMax + 1e-9 && hi - lo <= ck.zWindowMm + 1e-9;
     }
     var left = areas.map(function (a, i) { return i; }), out = [];
     while (left.length) {
