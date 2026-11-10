@@ -4588,7 +4588,7 @@
   /* ...and its tips: no cap or sheet spreads a tip's hold under the column rule (the slicer's stack spans between tips), so they stand closer - Bambu's
      under its plates are 2 - 3 mm apart */
   var COLUMN_ONE = { coverMm: 2.2, tiltDeg: 45 };
-  var COLUMN_CROWN = { tipDropMm: 1.6, tipRiseMm: 1.6, nodeDropMm: 1.2, rootFloorMm: 3, leanHardDeg: 45, trunk: { flareMm: 1.5 } };   /* leanHardDeg: no leg past the lean limit (Bambu's branch angle 45) */
+  var COLUMN_CROWN = { tipDropMm: 1.6, tipRiseMm: 1.6, nodeDropMm: 1.2, rootFloorMm: 3, leanHardDeg: 45, trunk: { flareMm: 2 } };   /* a 2 mm flare (was 1.5, a stick on a pad: the owner's 2x Oblique came off the plate; Bambu's P1S trunks taper 7.0 -> 4.3 over 7 mm) */   /* leanHardDeg: no leg past the lean limit (Bambu's branch angle 45) */
   function thinTips(list, coverMm, minTips) {
     var n = list.length;
     if (n <= 1) return list.map(function (b, i) { return i; });

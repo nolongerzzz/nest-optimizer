@@ -250,7 +250,26 @@ settings so Generate slices with it and a change makes the slice stale): *Square
 at 93.6, and the part's bridges over supports laid at 3.6, so they cross square); *Crosshatch 45/135* (`crosshatch`, the column rule as it
 was: 110, then 45 / 135, parallel to the bridge on some stacks). supp_ref: `studio36` puts every top interface at 93.6 under a bridge at 3.6.
 
+## 4l. The 2x Oblique: welded, and a trunk off the plate
+
+The owner printed NSO's Oblique at 2x on the A1 mini (`Support Oblique - A1 mini.gcode.3mf`): the first try spaghetti, the second welded
+whole. Read off its G-code against Bambu's own slices:
+
+- **The interface was a solid sheet**: lines 0.46 apart (the column rule's fixed line + 0.04) where the profile asks for
+  `support_interface_spacing` 0.5 - Bambu lays that 0.86 apart (the owner's P1S mouse, which released clean, measures 0.860). The rule now
+  lays the profile's spacing over a bead's (`supportInterfaceSpacingMm`, from the print planner's `engineOptions`): 0.5 -> 0.861 on the
+  Oblique; a profile of 0.1 (supp_ref's) keeps the dense 0.46; no profile value, the sheet as before.
+- **The stair's steps sit 0.2 under the overhang walls** all up the slope (the owner: "every single point is almost touching") - Bambu's
+  own Oblique has as many interface points that tight under its overhang walls; at the dense sheet's pitch every one of them was a
+  bead's contact.
+- **The trunks were a stick on a pad**: a 6.7 mm first layer, then 5.0 -> 4.2 mm within 1 mm; Bambu's P1S trunks taper 7.0 -> 4.3 over
+  7 mm on a 13.5 mm first-layer pad. The column rule's flare is 2 mm now (was 1.5); 2.5 and more float an island at the Negative
+  Sphere's trunk beside its stem (gate 65 of 66) - named below, with the pad.
+
 ## 5. Not done, and named
+
+- **Trunk bases and pads, as Bambu's**: a flare over 2 mm floats an island at the Negative Sphere's trunk (z 1.3, beside its stem);
+  Bambu's first-layer pad is about twice NSO's (13.5 against 6.7 mm across). Next, against the owner's Studio 02.09 slice of supp_ref.
 
 - **The merged plate's small surfaces.** The six as one piece are read on a 3 mm grid where each alone is read at 1 mm, so the Negative Sphere2's apex
   has 2 spots (its cone's top) where alone it has 8: a thin column holds the top and the apex's stack is missing (parity 63 %, layer heights 42 %,

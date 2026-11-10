@@ -305,6 +305,7 @@
       supportLayerMaxMm: 0,                // 0 = supports are cut on the part's layers; 0.28 = on their own (Bambu's independent_support_layer_height): see sliceObjects
       supportInterfaceLayers: null,        // null -> CONSTANTS.supportSheet.interfaceLayers (2); a sheet of more says so
       supportInterfaceRule: null,          // 'column': the interface read off the part's layers column by column (columnRule; docs/SUPPORT-GATE.md); null: the sheet typing
+      supportInterfaceSpacingMm: null,     // the gap between interface lines (Bambu's support_interface_spacing; the print planner reads the profile's): null -> the dense sheet's line + 0.04
       supportInterfaceAngle: 'bridge',     // the column rule's stack angles: 'bridge' its top square to the part's bridge over it; 'studio36' Studio 02.09's own (90, then 93.6 / 3.6 up to a top at 93.6, the part's bridges over supports at 3.6 - the owner's P1S print released clean); 'crosshatch' 110, then 45 / 135
       supportXyMm: 0.35,                   // the column rule's xy distance to the part at a support layer's own height (Bambu's support_object_xy_distance)
       weldMm: 1e-4,
@@ -2588,8 +2589,11 @@
           });
           var inner = g.offset(rg[0], -(wI / 2 + COLUMN_FILL_IN_MM));
           if (g.isEmpty(inner)) return;
-          var segs = scanFill(g.polys(inner), ang, pitch, 0);
-          if (segs.length) connect(segs, 3 * pitch, g.polys(g.offset(rg[0], 1e-3))).forEach(function (pth) {
+          /* the profile's interface spacing (support_interface_spacing: the gap between lines) over a bead's spacing - 0.5 lays them 0.86 apart,
+             Bambu's own on the owner's P1S print that released clean; 0.1 the 0.46 of the dense sheet. Without one, the dense sheet's line + 0.04 */
+          var pj = o.supportInterfaceSpacingMm != null ? spacingOf(wI, SP[j].h || 0.2) + o.supportInterfaceSpacingMm : pitch;
+          var segs = scanFill(g.polys(inner), ang, pj, 0);
+          if (segs.length) connect(segs, 3 * pj, g.polys(g.offset(rg[0], 1e-3))).forEach(function (pth) {
             out.push({ feature: rg[1], width: wI, closed: false, pts: pth.pts, sheetFill: true, colPlate: true });
           });
         });

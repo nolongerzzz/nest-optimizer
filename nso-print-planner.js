@@ -218,7 +218,8 @@
       raftContactMm: num(config, 'raft_contact_distance', 0.1),
       raftExpansionMm: num(config, 'raft_expansion', 1.5),
       raftBaseSpacingMm: num(config, 'support_base_pattern_spacing', 2.5),
-      raftInterfaceSpacingMm: num(config, 'support_interface_spacing', 0.5)
+      raftInterfaceSpacingMm: num(config, 'support_interface_spacing', 0.5),
+      supportInterfaceSpacingMm: num(config, 'support_interface_spacing', 0.5)
     };
     return { nozzleMm: nozzle, over: over };
   }
