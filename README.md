@@ -23,12 +23,15 @@ Smart build-plate packing for 3D printing.
   an even offset and whole-piece scaling apply`), with the build-volume verdict appended
   (`fits A1 Mini` / `5.0 mm too wide for A1 Mini`). Under it, one compact row
   per field that applies: **Length / Width / Height** - the piece's own axes
-  as it lies - each inserting or removing material inside one straight run, so
-  walls, floor, holes and lips keep their size; a ring's **Outer Ø** (bore
+  as it lies (Length the long side of the footprint, Width the short side,
+  Height off the plate) - each inserting or removing material inside one straight
+  run, so walls, floor, holes and lips keep their size, or, where there is no
+  straight run that way, stretching the piece along that side alone; a ring's **Outer Ø** (bore
   kept), **Bore Ø** (outer kept) and **Wall** (outer kept) - each moves one
   face, for pipe work - and a rod's **Diameter**; **Offset** (the
   outside in or out, inner faces following - Fatten / Shrink, folded in) on
-  everything but a ring or rod; **Whole ×**, **Longest** and **Fit to plate**.
+  everything but a ring or rod; **Whole ×**, **Longest** (only where no named
+  row already shows the longest edge) and **Fit to plate**.
   Every row has a **slider** and previews on the piece - a translucent ghost
   over it, the piece untouched - until **Set** bakes it (one Undo step).
   See [docs/SECTION.md](docs/SECTION.md)

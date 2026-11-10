@@ -780,19 +780,28 @@
               </div>
               <p id="scale-readout" class="hint">Select a piece to resize.</p>
               <div id="scale-rows">
+              <!-- Offset first, then Length / Width / Height (the owner's order). -->
+              <div class="edit-row scale-row" id="scale-offset-row" hidden>
+              <label for="scale-offset">Offset</label>
+              <input id="scale-offset" title="Move the whole outside out (positive) or in (negative) by this many mm. Every inner face follows, so walls and floors keep their thickness. Refused where a bore or pocket would close, or a section would drop under the nozzle-safety floor." type="number" min="-20" max="20" step="0.1" aria-label="Offset, mm - positive grows, negative shrinks" aria-describedby="scale-offset-note" />
+              <span class="hint">mm, wall kept</span>
+              </div>
+              <!-- The Offset row's sentence: too long for the row's unit column, so
+                   it sits under the row and goes with it (styles.css). -->
+              <p class="hint scale-note" id="scale-offset-note">Thin features keep their thickness: a 0.6 mm lid strap stays 0.6 mm.</p>
               <div class="edit-row scale-row" id="scale-length-row" hidden>
               <label for="scale-length">Length</label>
-              <input id="scale-length" title="Lengthen or shorten the piece along its own length - longer extends, shorter shortens - by inserting or removing material inside one straight run, so walls, floor, holes and lips keep their size. Shortening says the most it can take." type="number" min="0.1" max="2000" step="0.1" aria-label="Length, mm" />
+              <input id="scale-length" title="Lengthen or shorten the piece along its own length - longer extends, shorter shortens - by inserting or removing material inside one straight run, so walls, floor, holes and lips keep their size. Shortening says the most it can take. With no straight run that way, the piece is stretched along its length instead." type="number" min="0.1" max="2000" step="0.1" aria-label="Length, mm" />
               <span class="hint">mm</span>
               </div>
               <div class="edit-row scale-row" id="scale-width-row" hidden>
               <label for="scale-width">Width</label>
-              <input id="scale-width" title="Widen or narrow the piece across its own width the same way: material goes in or comes out inside one straight run, and every wall, floor, hole and lip keeps its size." type="number" min="0.1" max="2000" step="0.1" aria-label="Width, mm" />
+              <input id="scale-width" title="Widen or narrow the piece across its own width the same way: material goes in or comes out inside one straight run, and every wall, floor, hole and lip keeps its size. With no straight run that way, the piece is stretched across its width instead." type="number" min="0.1" max="2000" step="0.1" aria-label="Width, mm" />
               <span class="hint">mm</span>
               </div>
               <div class="edit-row scale-row" id="scale-height-row" hidden>
               <label for="scale-height">Height</label>
-              <input id="scale-height" title="Make the piece taller or shorter along its own Z the same way: material goes in or comes out inside one straight run, so the floor and every wall keep their thickness." type="number" min="0.1" max="2000" step="0.1" aria-label="Height, mm" />
+              <input id="scale-height" title="Make the piece taller or shorter along its own Z the same way: material goes in or comes out inside one straight run, so the floor and every wall keep their thickness. With no straight run that way, the piece is stretched up the plate vertical instead." type="number" min="0.1" max="2000" step="0.1" aria-label="Height, mm" />
               <span class="hint">mm</span>
               </div>
               <!-- A ring's three rows each move one face (nso_ring.js): Outer Ø the
@@ -817,14 +826,6 @@
               <input id="scale-rod-diameter" title="Move the rod's wall to this diameter. Faces move; nothing is scaled; the length is held." type="number" min="0.1" max="2000" step="0.1" aria-label="Diameter, mm" />
               <span class="hint">length kept</span>
               </div>
-              <div class="edit-row scale-row" id="scale-offset-row" hidden>
-              <label for="scale-offset">Offset</label>
-              <input id="scale-offset" title="Move the whole outside out (positive) or in (negative) by this many mm. Every inner face follows, so walls and floors keep their thickness. Refused where a bore or pocket would close, or a section would drop under the nozzle-safety floor." type="number" min="-20" max="20" step="0.1" aria-label="Offset, mm - positive grows, negative shrinks" aria-describedby="scale-offset-note" />
-              <span class="hint">mm, wall kept</span>
-              </div>
-              <!-- The Offset row's sentence: too long for the row's unit column, so
-                   it sits under the row and goes with it (styles.css). -->
-              <p class="hint scale-note" id="scale-offset-note">Thin features keep their thickness: a 0.6 mm lid strap stays 0.6 mm.</p>
               <!-- Shape rows (nso_shapes.js): a capsule, a sphere or ellipsoid, a
                    torus. Each changes one thing; shown instead of the rows above. -->
               <div class="edit-row scale-row" id="scale-cap-length-row" hidden>
@@ -2980,7 +2981,7 @@
   <!-- Ring verbs: Outer / Bore / Wall, a rod's Diameter. Calls
        nso_section.js and app-fatten.js's face filter at apply time. -->
   <script src="nso_ring.js?v=3686d69c"></script>
-  <script src="app-scale.js?v=81be9349"></script>
+  <script src="app-scale.js?v=06b95bc2"></script>
   <script src="app-brush.js?v=2aff434b"></script>
   <!-- Pull: nso_densify.js is the shared subdivision (the gun will use it too), nso_pull.js the field and its guards, app-pull.js the pointer session. docs/PULL.md -->
   <script src="nso_densify.js?v=0b7748d1"></script>

@@ -58,9 +58,10 @@ const ROWS = ['length', 'width', 'height', 'ring-outer', 'ring-bore', 'ring-wall
               'cap-length', 'cap-diameter', 'ell-a', 'ell-b', 'ell-c', 'torus-ring', 'torus-tube', 'factor', 'longest'];
 
 /* What Scale offers a freshly dropped piece of each shape, and what its
-   readout starts with. A cone has no per-dimension rows: Scale reads it as
-   curved or tapered all over, so only an even offset and whole-piece scaling
-   apply - printed, and said in the PR, rather than assumed. */
+   readout starts with. A cone has no straight run: Scale reads it as curved
+   or tapered all over, and its Length / Width / Height are stretches along
+   one side each (NSO_scaleAsItLies), so Longest - Height's number or
+   Length's - hides behind them. */
 const SCALE = {
   box:       { rows: ['length', 'width', 'height', 'offset', 'factor'], lead: /^Bar / },
   cylinder:  { rows: ['height', 'rod-diameter', 'factor'], lead: /^Rod Ø/ },
@@ -69,7 +70,7 @@ const SCALE = {
   ellipsoid: { rows: ['ell-a', 'ell-b', 'ell-c', 'factor'], lead: /^Ellipsoid .*\(Stock\)/ },
   torus:     { rows: ['torus-ring', 'torus-tube', 'factor', 'longest'], lead: /^Torus ring Ø.*\(Stock\)/ },
   tube:      { rows: ['height', 'ring-outer', 'ring-bore', 'ring-wall', 'factor'], lead: /^Ring Ø/ },
-  cone:      { rows: ['offset', 'factor', 'longest'], lead: /curved or tapered all over/ }
+  cone:      { rows: ['length', 'width', 'height', 'offset', 'factor'], lead: /curved or tapered all over/ }
 };
 
 /* Everything about the plate that a drop should change, and what it should

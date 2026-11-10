@@ -408,7 +408,16 @@ withApp(async (page, logs) => {
   console.log('   readout: ' + c.readout);
   check('the verdict: 5.0 mm too wide -> 0.197 in too wide for A1 Mini', / · 0\.197 in too wide for A1 Mini$/.test(c.readout), c.readout);
   await keepSoup(page);
-  st = await typeAndLeave(page, 'scale-target', '7.0625', 'Scale (done|refused)|stood down');
+  // The tape has Length / Width / Height rows (stretches where it has no
+  // straight run), one of which is its longest edge, so Longest is hidden:
+  // set from script, the field's change fired, and Set clicked.
+  check('...Longest hidden behind Length', !c.shown.longest, JSON.stringify(c.shown));
+  await page.evaluate(() => { document.getElementById('status').textContent = ''; });
+  await setFields(page, { 'scale-target': '7.0625' });
+  await page.waitForFunction(() => !document.getElementById('btn-scale-set').disabled, null, { timeout: 60000 });
+  await page.click('#btn-scale-set');
+  await page.waitForFunction(() => /Scale (done|refused)|stood down/.test(document.getElementById('status').textContent), null, { timeout: 60000 });
+  st = await statusOf(page);
   console.log('   Longest 7.0625 in: ' + st);
   eq = await sameAsEngine(page, 'NSO_scaleSoup(soup, { axis: "longest", targetMm: 7.0625 * 25.4 })');
   check('(b) Longest 7.0625 in = NSO_scaleSoup(longest 179.3875 mm), float for float', eq.ok, eq.why || eq.floats + ' floats');

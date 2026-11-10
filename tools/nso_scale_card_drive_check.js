@@ -473,8 +473,9 @@ withApp(async (page, logs) => {
   // buttons do. Re-pinned (pose-bake): each is baked into the geometry when it
   // ends, and the card reads the piece AS IT LIES (the owner's call), so the
   // bar stands 120 tall and its Height row (a straight run) stands in for
-  // Longest and hides it; the taper has no straight run up its 120, so the
-  // Longest row shows and is typed, as before. The second half loads the same
+  // Longest and hides it; the taper has no straight run up its 120, but its
+  // Height row is there all the same (a stretch up the plate vertical,
+  // NSO_scaleAsItLies) and hides Longest too. The second half loads the same
   // soup back as a file: the same reading.
   const longest = async (real) => {
     await openMenuFor(page, '#scale-readout');
@@ -492,8 +493,8 @@ withApp(async (page, logs) => {
   };
   const spans = () => page.evaluate(() => Array.from(NSO_scaleRawBounds(getActiveModel().rawTris).span));
   // A tapered bar - 120 long, 20 x 10 at one end, 10 x 5 at the other - reads
-  // as tapered, not a bar, so no Length row stands in for Longest and the
-  // row shows: Longest is pressed there typed.
+  // as tapered, not a bar; its Height row is a stretch, and still stands in
+  // for Longest.
   const taper = BOX.quadSoup([
     [[0, 0, 0], [0, 20, 0], [120, 15, 0], [120, 5, 0]],
     [[0, 0, 10], [120, 5, 5], [120, 15, 5], [0, 20, 10]],
@@ -502,7 +503,7 @@ withApp(async (page, logs) => {
     [[0, 0, 0], [0, 0, 10], [0, 20, 10], [0, 20, 0]],
     [[120, 5, 0], [120, 15, 0], [120, 15, 5], [120, 5, 5]]
   ]);
-  for (const [what, soup, real] of [['bar 120 × 20 × 10', BOX.bar(120, 20, 10), false], ['tapered bar 120 long', taper, true]]) {
+  for (const [what, soup, real] of [['bar 120 × 20 × 10', BOX.bar(120, 20, 10), false], ['tapered bar 120 long', taper, false]]) {
     const f0 = path.join(tmp, what.replace(/\W+/g, '_') + '.stl');
     writeSTL(f0, soup, what);
     await select(page, await loadSTL(page, f0));

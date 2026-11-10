@@ -94,7 +94,9 @@ withApp(async (page, logs) => {
   await select(page, blobId);
   const cs = await card(page);
   console.log('   blob:   ' + cs.readout);
-  check('a curved blob: Offset shown, no Length', cs.offset && !cs.length);
+  // No straight run anywhere, so Length is a stretch along the footprint's
+  // long side (NSO_scaleAsItLies) - shown beside Offset.
+  check('a curved blob: Offset shown, and Length as a stretch', cs.offset && cs.length);
 
   console.log('\n=== 3. Offset +0.5 on the blob, typed ===');
   const before = await measure(page);

@@ -641,7 +641,8 @@ function NSO_scaleSelectedModel(spec) {
                        material goes in or comes out inside one clean
                        constant-section band and every wall, floor, hole,
                        pocket and lip keeps its size. An axis with no such band
-                       gets no row. A ring or rod shows its one axis under
+                       still gets its row, as a stretch along that axis alone
+                       (NSO_scaleAsItLies). A ring or rod shows its one axis under
                        the same names - Height when the axis is its Z - and
                        its readout, holds and done lines say the same word.
      Outer Ø / Bore Ø / Wall
@@ -667,7 +668,9 @@ function NSO_scaleSelectedModel(spec) {
      Whole x           today's uniform factor. Reset to 1 on every selection,
                        bake and pose change.
      Longest           today's longest-edge target, prefilled with the longest
-                       edge. Hidden when a named field shows the same number.
+                       edge. Hidden when a named field shows the same number -
+                       on every piece but a ring, rod or recognised shape,
+                       since those always have Length and Height.
      Fit to plate      the largest uniform factor that fits the machine.
 
    Every field shows nso_section.js's one display precision (NSO_sectionShow)
@@ -703,29 +706,9 @@ function NSO_scaleSectionOf(m) {
   if (!raw || typeof NSO_sectionRead !== 'function') return null;
   var soup = NSO_scaleSpaceOf(m, raw).f;
   if (NSO_scaleSectionCache && NSO_scaleSectionCache.has(soup)) return NSO_scaleSectionCache.get(soup);
-  var s = NSO_scaleAsItLies(NSO_sectionRead(soup), soup, NSO_scaleBodyRows(m, raw));
+  var s = NSO_scaleAsItLies(NSO_sectionRead(soup), soup);
   if (NSO_scaleSectionCache) NSO_scaleSectionCache.set(soup, s);
   return s;
-}
-
-/* How many of Length / Width / Height the piece had as it was LOADED - its
-   soup turned back by the turns baked into it since (bakedQ, app-core.js).
-   A piece the pose verbs never turned reads as it is. */
-var NSO_scaleBodyCache = (typeof WeakMap === 'function') ? new WeakMap() : null;
-function NSO_scaleBodyRows(m, raw) {
-  if (NSO_scaleBodyCache && NSO_scaleBodyCache.has(raw)) return NSO_scaleBodyCache.get(raw);
-  var p = (m && typeof state !== 'undefined' && state.placed)
-    ? state.placed.find(function (q) { return q && q.sourceId === m.id; }) : null;
-  var soup = raw;
-  if (p && p.bakedQ && typeof THREE !== 'undefined' && typeof nsoRawTurnRows === 'function') {
-    var bq = new THREE.Quaternion(p.bakedQ[0], p.bakedQ[1], p.bakedQ[2], p.bakedQ[3]);
-    if (Math.abs(Math.abs(bq.w) - 1) > 1e-12) soup = nsoTurnRaw(raw, nsoRawTurnRows(bq.invert()));
-  }
-  var r = (soup === raw) ? NSO_sectionRead(raw) : NSO_sectionRead(soup);
-  var v = r && r.verbs, n = v ? ['length', 'width', 'height'].filter(function (k) { return v[k]; }).length : 0;
-  if (r && r.shape === 'round') n = 0;
-  if (NSO_scaleBodyCache) NSO_scaleBodyCache.set(raw, n);
-  return n;
 }
 
 /* THE PIECE'S FRAME. Length, Width and Height are the piece's as it LIES:
@@ -774,44 +757,48 @@ function NSO_scaleSpaceOf(m, raw) {
   return space;
 }
 
-/* A turn keeps the rows. Where the section reader finds a straight run along
-   a frame axis the row is that run's (Extend / Shorten, as ever). A piece
-   turned off its own axes - leaned, most often - has no straight run along a
-   level line any more, and would lose rows it had as it was loaded; when it
-   reads fewer of Length / Width / Height as it lies than it did then
-   (`bodyRows`), every missing one is the piece's extent along that frame axis,
-   and typing a value STRETCHES it there, every point scaled about the middle
-   along that one axis. A piece that had no straight run to begin with (a cone,
-   a blob) is not given one; rings, rods and the recognised shapes keep their
-   own rows. */
-function NSO_scaleAsItLies(s, soup, bodyRows) {
+/* EVERY PIECE HAS LENGTH, WIDTH AND HEIGHT. Where the section reader finds a
+   straight run along a frame axis the row is that run's (Extend / Shorten, as
+   ever: walls, holes and lips keep their size). Where it finds none - a piece
+   turned off its own axes, a pill sliced in half, a cone, a blob - the row is
+   still there: it is the piece's extent along that frame axis (Length the long
+   side of its footprint, Width the short side, Height off the plate), and
+   typing a value STRETCHES it there, every point scaled about the middle along
+   that one axis. So Longest, which is always Length's or Height's number, hides
+   on every such piece and the card reads Offset, Length, Width, Height,
+   Whole x. Rings, rods and the recognised shapes keep their own rows. */
+function NSO_scaleAsItLies(s, soup) {
   if (!s || !s.verbs || s.shape === 'round' || typeof NSO_sectionAxisWord !== 'function') return s;
   var v = s.verbs, b = NSO_scaleRawBounds(soup);
   var have = ['length', 'width', 'height'].filter(function (k) { return v[k]; }).length;
-  if (!b || have === 3 || !(bodyRows > have)) return s;
+  if (!b || have === 3) return s;
   var out = {}, k;
   for (k in s) out[k] = s[k];
   var nv = {};
   for (k in v) nv[k] = Array.isArray(v[k]) ? v[k].slice() : v[k];
   [0, 1, 2].forEach(function (i) {
     var word = NSO_sectionAxisWord(s, i);
-    if (nv[word]) return;
+    if (nv[word] || !(b.span[i] > 0)) return;     // a flat side has nothing to stretch
     nv[word] = { axisIdx: i, axis: 'xyz'.charAt(i), mm: b.span[i], stretch: true };
   });
-  nv.named = ['length', 'width', 'height'].filter(function (n) { return nv[n]; });
+  var lwh = ['length', 'width', 'height'].filter(function (n) { return nv[n]; });
+  nv.named = lwh.slice();
   if (v.outer || v.diameter) nv.named.push(v.outer ? 'outer' : 'diameter');
   if (v.bore) nv.named.push('bore');
   if (v.wall) nv.named.push('wall');
   var longest = Math.max(b.span[0], b.span[1], b.span[2]);
-  nv.longest = !['length', 'width', 'height'].some(function (n) {
+  nv.longest = !lwh.some(function (n) {
     return NSO_sectionShow(nv[n].mm) === NSO_sectionShow(longest);
   });
   nv.longestMm = longest;
   out.verbs = nv;
-  var stretched = ['length', 'width', 'height'].filter(function (n) { return nv[n].stretch; });
-  out.reason = (s.why || s.reason) + ', so ' + stretched.map(function (n) { return n; }).join(', ') +
-    (stretched.length > 1 ? ' stretch' : ' stretches') + ' as it lies' + (nv.offset ? ', an even offset' : '') +
-    ' and whole-piece scaling apply';
+  var and = function (a) { return a.length > 1 ? a.slice(0, -1).join(', ') + ' and ' + a[a.length - 1] : a[0]; };
+  var can = lwh.slice();
+  if (nv.offset) can.push('an even offset');
+  can.push('whole-piece scaling');
+  var stretched = lwh.filter(function (n) { return nv[n].stretch; });
+  out.reason = (s.why || s.reason) + ', so ' + and(can) + ' apply' + (stretched.length
+    ? ' - ' + and(stretched) + (stretched.length > 1 ? ' each scale' : ' scales') + ' it along that side alone' : '');
   return out;
 }
 
