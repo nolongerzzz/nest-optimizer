@@ -3,7 +3,7 @@
    tools/nso_support_gate.js - THE PRINTABILITY GATE (npm run support:gate, docs/SUPPORT-GATE.md)
 
    Does the interface print and break away the way Bambu's does? Measured on G-code, every head of supp_ref at once,
-   each against Bambu's own slice of the same head (fixtures/supports/tree_slimsupports.gcode.3mf), so a change that
+   each against Bambu's own slice of the same head (fixtures/supports/supp_ref_v2.gcode.3mf, Studio 02.09), so a change that
    mends one head and breaks another fails here.
 
      node tools/nso_support_gate.js                          build supp_ref with the card (Auto, Dense, 30 deg), slice it with
@@ -28,7 +28,9 @@ const R3 = require(path.join(ROOT, 'nso-3mf-read.js'));
 const argv = process.argv.slice(2);
 const arg = (k) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : null; };
 const files = argv.filter((a, i) => /\.3mf$/i.test(a) && argv[i - 1] !== '--ref' && argv[i - 1] !== '--json');
-const REF = arg('--ref') || path.join(ROOT, 'fixtures', 'supports', 'tree_slimsupports.gcode.3mf');
+/* the reference: the owner's slice of supp_ref on Bambu Studio 02.09.01.70 (the Negative Sphere's side wall no longer holed); --ref
+   fixtures/supports/tree_slimsupports.gcode.3mf for the 02.08 one the gate was built on */
+const REF = arg('--ref') || path.join(ROOT, 'fixtures', 'supports', 'supp_ref_v2.gcode.3mf');
 const REPORT = argv.includes('--report');
 
 async function readSliced(file) {

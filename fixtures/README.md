@@ -288,6 +288,11 @@ per-layer angle histograms and line centres. See `docs/CROSSHATCH.md`.
   `support:everywhere` reads it (Support transition / Support interface
   features, per surface: height, footprint, layers), part by part, matching
   each part to its place on the plate. See docs/SUPPORT-INTERFACE.md section 8.
+- supp_ref_v2.gcode.3mf — the owner's slice of supp_ref.3mf on Bambu Studio 02.09.01.70 (A1 mini 0.4, 0.20mm Standard @BBL A1M,
+  Bambu PLA Basic @BBL A1M, tree slim, support_interface_spacing 0.1, 3 top interface layers): the better reference - the Negative
+  Sphere's side wall is no longer holed. The support gate's default reference (tools/nso_support_gate.js).
+- supp_ref_2x.3mf / supp_ref_2x.gcode.3mf — the same six heads at 2x, the project and its 02.09.01.70 slice (support_interface_spacing
+  0.5, 2 top interface layers): the scale the owner's 2x Oblique welded at; first-layer pads 12 - 13 mm, trunks tapering ~7 -> 5 mm.
 - supp_ref_raft.gcode.3mf — the owner's Bambu Studio slice of supp_ref with tree slim AND a 10-layer raft (A1 mini, 0.20mm Standard,
   raft_contact_distance 0.1, raft_expansion 1.5, support_interface_spacing 0.1, support_base_pattern_spacing 2.5): 5 base layers (Support,
   z 0.2 / 0.5 - 1.4), 5 interface (Support interface, 1.7 - 2.9), the trees from 3.0, the parts' first layer at 3.2. The reference for
