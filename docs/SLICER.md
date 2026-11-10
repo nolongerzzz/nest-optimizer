@@ -625,3 +625,19 @@ What the score still shows on the Oblique ribbon (supp_ref): the generated slab 
 Typing one fill by position left the transition strip of a sloped plate one line or none by the phase of the fill's lines (Oblique: 3 to 28 mm of transition a layer against Bambu's steady 23). On a support's own grid the plate is now laid as Bambu lays it (checked on supp_ref's Oblique, z 10.0: a transition loop, an interface loop and the interface zig-zag): the interface region (the part within the interface layers over the cell) and the transition region (within the transition layers over that) each get their loop on the slab's edge, the support's own wall run that lay in them is dropped (the loop replaces it), and the zig-zag fills the interface and the transition wherever it is wider than a line; a narrow transition strip is its loop alone. Foot IoU: Oblique 0.66 -> 0.71, Sphere 0.68 -> 0.78, Circular 0.64 -> 0.67, Negative Sphere 0.69 -> 0.73; Negative Sphere2 0.69 -> 0.62 (its plate is three crescents where Bambu's is one big C round the hole: the footprint is the generator's, not this).
 
 Note on the fill's width test: the zig-zag fills a transition region only where it is wider than 2.4 line widths (the region opened by 1.2 line widths); at 0.6 the strip of the Oblique's ramp was filled too and the transition ran 32 - 42 mm a layer against Bambu's 23 (seen in a real export, 644 vs 468 mm), at 1.2 it is 21 - 23 a layer. Judge a change to this on the per-layer lengths of the real export, not on the score's totals alone.
+
+### Time: the exact cuts are welded once (2026-11-10)
+
+Generate ends with the plate's slice (acdd25e), so the slicer's time is Generate's. On supp_ref_2x (one piece, 10 supports) the slice was 70 of
+Generate's 83 s, and half of it was `indexSoup`: `exactAt` (the support typing's cut of the part at heights of its own: `prepExact`, `cavSection` /
+`holeAtZ`) called `sliceMesh`, which welded the whole part again on every call, and every support asked the part for the same heights again.
+Now `makeP` welds an object once (`prepSoup`: the welded mesh and each triangle's z range) for its layers and every exact cut, and `exactAt`
+keeps each section by its height (the same float), so a height ten supports ask is cut and closed once. Same bytes: the plate's .gcode.3mf
+from the page and `support:gate --rule column --json` are identical before and after.
+
+| headless Chromium, GENERATE pressed to idle | before | after |
+|---|---|---|
+| supp_ref (6 pieces) | 31 s | 25 s |
+| supp_ref_2x (1 piece) | 83 s (slice 70 s) | 42 s (slice 31 s) |
+
+What is left in the 2x slice: the exact sections' closing offsets and `unionAll` in the typing (manifold, about 18 s), and the layers themselves.

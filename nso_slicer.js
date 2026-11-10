@@ -397,21 +397,36 @@
    * For an outward-wound closed mesh that makes outer loops counter-clockwise
    * and holes clockwise - asserted on a tube by tools/nso_slicer_test.js.
    */
-  function sliceMesh(soup, planes, opts) {
-    var q = opts && opts.weldMm > 0 ? opts.weldMm : 1e-4;
-    var gapClose = opts && opts.gapCloseMm != null ? opts.gapCloseMm : 2;
-    var M = indexSoup(soup, q);
-    var V = M.V, T = M.T, nv = M.nv;
-    var zs = planes.map(function (p) { return p.sliceZ; });
-    var buckets = planes.map(function () { return []; });
-    var degenerate = 0;
+  /**
+   * A soup welded once (indexSoup) with each triangle's z range: what
+   * sliceMesh reads, kept so a mesh cut again and again at heights of its own
+   * (makeP's exactAt: the support typing asks one height at a time, hundreds of
+   * times a plate) is not welded again for every cut. Same V / T, same bytes.
+   */
+  function prepSoup(soup, q) {
+    var M = indexSoup(soup, q), V = M.V, T = M.T;
+    var lo = new Float64Array(M.nt), hi = new Float64Array(M.nt), live = new Uint8Array(M.nt), degenerate = 0;
     for (var t = 0; t < M.nt; t++) {
       var a = T[t * 3], b = T[t * 3 + 1], c = T[t * 3 + 2];
       if (a === b || b === c || a === c) { degenerate++; continue; }
       var za = V[a * 3 + 2], zb = V[b * 3 + 2], zc = V[c * 3 + 2];
-      var lo = Math.min(za, zb, zc), hi = Math.max(za, zb, zc);
+      live[t] = 1; lo[t] = Math.min(za, zb, zc); hi[t] = Math.max(za, zb, zc);
+    }
+    return { soup: soup, q: q, M: M, lo: lo, hi: hi, live: live, degenerate: degenerate };
+  }
+
+  function sliceMesh(soup, planes, opts, pre) {
+    var q = opts && opts.weldMm > 0 ? opts.weldMm : 1e-4;
+    var gapClose = opts && opts.gapCloseMm != null ? opts.gapCloseMm : 2;
+    if (!pre || pre.soup !== soup || pre.q !== q) pre = prepSoup(soup, q);
+    var M = pre.M, V = M.V, T = M.T, nv = M.nv, LO = pre.lo, HI = pre.hi, LIVE = pre.live;
+    var zs = planes.map(function (p) { return p.sliceZ; });
+    var buckets = planes.map(function () { return []; });
+    var degenerate = pre.degenerate;
+    for (var t = 0; t < M.nt; t++) {
+      if (!LIVE[t]) continue;
       // planes with lo < z <= hi can be crossed (vertex on the plane = above)
-      var i0 = firstAbove(zs, lo), i1 = firstAbove(zs, hi) - 1;
+      var i0 = firstAbove(zs, LO[t]), i1 = firstAbove(zs, HI[t]) - 1;
       for (var k = i0; k <= i1; k++) buckets[k].push(t);
     }
 
@@ -1457,7 +1472,9 @@
         // Per-object override: a piece the user flagged non-solid is sliced
         // with gapCloseMm 0 - its open edges are the design, not a hole to
         // chord shut (the caller reads the flag; this module never infers it).
-        var sm = sliceMesh(ob.soup, pl, ob.gapCloseMm != null ? { weldMm: o.weldMm, gapCloseMm: ob.gapCloseMm } : o);
+        var smOpts = ob.gapCloseMm != null ? { weldMm: o.weldMm, gapCloseMm: ob.gapCloseMm } : o;
+        var pre = ob.soup && ob.soup.length ? prepSoup(ob.soup, smOpts && smOpts.weldMm > 0 ? smOpts.weldMm : 1e-4) : null;   /* welded once: the layers and every exact cut read it */
+        var sm = sliceMesh(ob.soup, pl, smOpts, pre);
         var flipped = false;
         var total = 0;
         sm.sections.forEach(function (sec) { sec.loops.forEach(function (l) { total += signedArea(l); }); });
@@ -1476,14 +1493,21 @@
         });
         /* the part cut at heights of its own choosing (soup frame, ascending sliceZ): the same section, orientation and closing as its layers - for the
            support typing's exact reach (typeSupports, byDepth) */
+        /* kept by the height itself (the same float, so the same bytes): every support on this part asks it for the same layer heights */
+        var exMemo = new Map();
         var exactAt = function (zsl) {
-          var sm2 = sliceMesh(ob.soup, zsl.map(function (z) { return { sliceZ: z }; }), ob.gapCloseMm != null ? { weldMm: o.weldMm, gapCloseMm: ob.gapCloseMm } : o);
-          return sm2.sections.map(function (sec) {
-            if (flipped) sec.loops.forEach(function (l) { l.reverse(); });
-            var cs = g.of(sec.loops, 'Positive');
-            if (closeR > 0 && !g.isEmpty(cs)) cs = g.offset(g.offset(cs, closeR, 'Miter'), -closeR, 'Miter');
-            return g.simplify(cs, o.resolutionMm);
-          });
+          var miss = [], asked = new Set();
+          zsl.forEach(function (z) { if (!exMemo.has(z) && !asked.has(z)) { asked.add(z); miss.push(z); } });
+          if (miss.length) {
+            var sm2 = sliceMesh(ob.soup, miss.map(function (z) { return { sliceZ: z }; }), smOpts, pre);
+            sm2.sections.forEach(function (sec, i) {
+              if (flipped) sec.loops.forEach(function (l) { l.reverse(); });
+              var cs = g.of(sec.loops, 'Positive');
+              if (closeR > 0 && !g.isEmpty(cs)) cs = g.offset(g.offset(cs, closeR, 'Miter'), -closeR, 'Miter');
+              exMemo.set(miss[i], g.simplify(cs, o.resolutionMm));
+            });
+          }
+          return zsl.map(function (z) { return exMemo.get(z); });
         };
         return { name: ob.name || ('object ' + (oi + 1)), id: oi, mesh: sm, S: S, flipped: flipped, exactAt: exactAt, soupOk: !!(ob.soup && ob.soup.length),
                  nonSolid: ob.gapCloseMm === 0,
