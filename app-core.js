@@ -3,7 +3,8 @@
 // ===================== Plate Presets =====================
 const PLATES = {
   a1mini: { name: 'Bambu A1 Mini', w: 180, d: 180 },
-  a1:     { name: 'Bambu A1 / P1S / X1C', w: 256, d: 256 },
+  a1:     { name: 'Bambu A1 / X1C', w: 256, d: 256 },
+  p1s:    { name: 'Bambu P1S', w: 256, d: 256 },
   prusa:  { name: 'Prusa MK4 / MK3S', w: 250, d: 210 },
   ender:  { name: 'Creality Ender 3', w: 220, d: 220 },
   custom: { name: 'Custom', w: 180, d: 180 }

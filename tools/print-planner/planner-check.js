@@ -11,7 +11,7 @@
  *   A. fixtures/supports/top_clip_x2_supports.gcode.3mf   A1 mini 0.4, the
  *      coupon and its NSO supports, sliced by Studio 02.08.02.61
  *   B. fixtures/supports/simple_overhang_bambu.gcode.3mf  A1 mini 0.4, the arc
- *   C. fixtures/supports/simple_overhang_p1s.gcode.3mf    P1S 0.4, the arc
+ *   C. fixtures/bambu-templates/p1s-0.4/mouse1.gcode.3mf  P1S 0.4, the owner's mouse (its blocks); the arc is planned on it
  *
  * and to the printer template (fixtures/bambu-templates/a1mini-0.4/).
  *
@@ -276,15 +276,16 @@ async function main() {
   const off = PL.plan(res, { config: tpl, printer: Object.assign({}, PR, { bed: { x: 60, y: 60, z: 180 } }) });
   check("a plate that is not on the bed is refused, not clipped", !off.ok && /not on the Bambu Lab A1 mini/.test(off.reason), off.reason);
 
-  // ---- the P1S, from the owner's P1S slice of the bare arc
+  // ---- the P1S, from the owner's P1S project (mouse1.3mf) and its own slice (Studio 02.09.01.70)
   const PS = L.printer('p1s-0.4'), p1sCfg = await L.p1sTemplate();
-  const BP = await L.bambuSlice('fixtures/supports/simple_overhang_p1s.gcode.3mf');
+  const BM = await L.bambuSlice('fixtures/bambu-templates/p1s-0.4/mouse1.gcode.3mf');      /* the blocks' source */
+  const BP = await L.bambuSlice('fixtures/supports/simple_overhang_p1s.gcode.3mf');          /* Studio's P1S arc: the toolpath reference (section 9) */
   check('the P1S blocks are a fresh freeze of the owner\'s P1S slice',
     JSON.stringify((await FZ.build('p1s-0.4')).frozen, null, 1) + '\n' === require('fs').readFileSync(path.join(ROOT, 'fixtures', 'print-planner', 'p1s-0.4', 'frozen.json'), 'utf8'));
   const pb = await L.plateB(128, 128, false, p1sCfg);
   const PP = PL.plan(pb.res, { config: p1sCfg, printer: PS });
   check('the arc plans for the P1S', PP.ok, PP.reason);
-  const ppl = PP.gcode.split('\n'), bpl = BP.gcode.split('\n');
+  const ppl = PP.gcode.split('\n'), bpl = BM.gcode.split('\n');
   const psS = noM73(slab(ppl, 'M203 X500 Y500 Z20 E30', '; MACHINE_START_GCODE_END')), bsS = noM73(slab(bpl, 'M203 X500 Y500 Z20 E30', '; MACHINE_START_GCODE_END'));
   const dS = diffs(psS, bsS);
   check('the P1S start block is Studio\'s, line for line (' + psS.length + ' lines); the bed-leveling box is the one line that differs',
@@ -463,12 +464,15 @@ async function main() {
   const B1 = await L.bambuSlice('fixtures/supports/simple_overhang_bambu.gcode.3mf');
   const pb1t = pb1;            // the arc alone, A1 mini (template-driven slice)
   const P1 = PL.plan(pb1t.res, { config: tpl, printer: PR });
-  const pbP = await L.plateB(128, 128, false, p1sCfg);
-  const PPs = PL.plan(pbP.res, { config: p1sCfg, printer: PS });
+  /* the arc against Studio's own P1S arc: planned with the settings that slice was made with (Generic PLA, 12 mm3/s; the P1S template
+     is now the owner's mouse1 project, Bambu PLA Basic at 21) - the same settings, or the speeds are not the planner's to compare */
+  const arcCfg = BP.config;
+  const pbP = await L.plateB(128, 128, false, arcCfg);
+  const PPs = PL.plan(pbP.res, { config: arcCfg, printer: PS });
   const refs = [
     { name: 'A  coupon + NSO supports, A1 mini', ref: A, ours: P, bIds: ['4044'], nIds: [ids[0]], tol: 0.011, cfg: tpl },
     { name: 'B  arc, A1 mini (Studio\'s trees on it)', ref: B1, ours: P1, bIds: null, nIds: null, tol: 0.06, cfg: tpl },
-    { name: 'C  arc, P1S (Studio\'s trees on it)', ref: BP, ours: PPs, bIds: null, nIds: null, tol: 0.06, cfg: p1sCfg }
+    { name: 'C  arc, P1S (Studio\'s trees on it)', ref: BP, ours: PPs, bIds: null, nIds: null, tol: 0.06, cfg: arcCfg }
   ];
   const results = {};
   for (const R of refs) {
@@ -580,8 +584,8 @@ async function main() {
       new RegExp('key="prediction" value="' + Math.round(P.stats.seconds.total) + '"').test(si));
   console.log('\n  NSO\'s plan against Studio\'s slice of the same plate (the toolpaths differ: supports, infill order):');
   const pb3p = tri;                       // the arc with NSO's two trees, A1 mini
-  const pc3 = await L.plateB(128, 128, true, p1sCfg);
-  const tri2 = PL.plan(pc3.res, { config: p1sCfg, printer: PS });
+  const pc3 = await L.plateB(128, 128, true, arcCfg);
+  const tri2 = PL.plan(pc3.res, { config: arcCfg, printer: PS });
   [['A  coupon + supports', headOf(A.gcode), P, +bh['total filament length [mm] '.trim()] || +bh['total filament length [mm]'], +bh['total filament weight [g]']],
    ['B  arc, A1 (NSO trees)', headOf(B1.gcode), pb3p, null, null], ['C  arc, P1S (NSO trees)', headOf(BP.gcode), tri2, null, null]].forEach(row => {
     const hb = row[1], n = row[2].stats.seconds;

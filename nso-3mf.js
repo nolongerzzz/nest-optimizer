@@ -581,14 +581,19 @@
     if (!Array.isArray(diffs) || diffs.length !== slots + 2) {
       throw new Error('The template\'s different_settings_to_system is not process + ' + slots + ' filaments + printer');
     }
+    /* Studio 2.9 keeps some filament keys once per filament AND extruder variant (filament_extruder_variant: Direct Drive Standard /
+       High Flow), filament_self_index naming each entry's filament (1-based): such a key has one entry per row of that list */
+    var rows = Array.isArray(out.filament_self_index) && out.filament_self_index.length ? out.filament_self_index.map(Number) : null;
     Object.keys(values).forEach(function (k) {
-      if (!Array.isArray(out[k]) || out[k].length !== slots) {
+      var perRow = !!(rows && Array.isArray(out[k]) && out[k].length === rows.length && rows.length !== slots);
+      if (!Array.isArray(out[k]) || (out[k].length !== slots && !perRow)) {
         throw new Error('The template has no per-filament "' + k + '" to overlay');
       }
       out[k] = out[k].map(function (was, i) {
-        if (was !== values[k]) {
-          var keys = diffs[i + 1] ? diffs[i + 1].split(';') : [];
-          if (keys.indexOf(k) === -1) diffs[i + 1] = keys.concat([k]).sort().join(';');
+        var fi = perRow ? rows[i] - 1 : i;
+        if (was !== values[k] && fi >= 0 && fi < slots) {
+          var keys = diffs[fi + 1] ? diffs[fi + 1].split(';') : [];
+          if (keys.indexOf(k) === -1) diffs[fi + 1] = keys.concat([k]).sort().join(';');
         }
         return values[k];
       });

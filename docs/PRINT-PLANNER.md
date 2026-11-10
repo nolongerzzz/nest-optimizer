@@ -28,9 +28,11 @@ sliceObjects()  ->  plan()  ->  gcode  ->  toGcode3mf()  ->  .gcode.3mf
 | the toolpath, its feature names (support paths typed `Support` / `Support interface` / `Support transition`) | the engine |
 
 Templates: A1 mini 0.4 is `fixtures/bambu-templates/a1mini-0.4/` (the Phase 0
-export's). The P1S has no unsliced project yet: its settings are the project the
-owner's P1S slice carries (`simple_overhang_p1s.gcode.3mf`), and its model id
-(`C12`) is the one in that slice's `slice_info.config`.
+export's). P1S 0.4 is `fixtures/bambu-templates/p1s-0.4/`: the owner's own P1S project
+(mouse1.3mf, Studio 02.09.01.70) and its slice, which the start / end are frozen from;
+its model id (`C12`) is the one in that slice's `slice_info.config`. Studio 2.9 keeps some
+filament keys once per filament and extruder variant (`filament_self_index`); the project
+writer's cooling overlay reads that layout too.
 
 ## The planner
 
@@ -136,8 +138,8 @@ The start block's and end block's time are Studio's, from the slice's M73s
 
 - **The gap list** was not in the repo; this page's list below is the ticket's
   own itemisation.
-- **P1S "template".** There is no unsliced P1S project. Its settings are the
-  owner's P1S slice's; the frozen blocks come from the same file.
+- **P1S template.** The owner's own P1S project (mouse1) and its slice; before it, the
+  settings were scraped from the P1S arc slice (still the arc's toolpath reference in print:planner).
 - **`simple_overhang_bambu.gcode.3mf`** was on three unmerged `supports-*`
   branches (the same blob on each); it is added here at the same path.
 - **The CONFIG_BLOCK is frozen too** (Studio's, per printer), not rebuilt from
@@ -214,10 +216,12 @@ section keeps the printer line, the folded Slice settings, **Slice** (again, aft
   too tall, no first layer) shows the planner's reason in the card.
 - **The printer profile** is the plate picker's plate, read, not edited:
   `a1mini` -> A1 mini 0.4 (`fixtures/bambu-templates/a1mini-0.4/project_test.3mf`,
-  `fixtures/print-planner/a1mini-0.4/frozen.json`); `a1` ("A1 / P1S / X1C 256") ->
-  P1S 0.4 (the project inside `fixtures/supports/simple_overhang_p1s.gcode.3mf`,
-  `fixtures/print-planner/p1s-0.4/frozen.json`). Any other plate has no profile and the
-  card says so.
+  `fixtures/print-planner/a1mini-0.4/frozen.json`); `p1s` ("P1S 256") -> P1S 0.4 (the owner's
+  own P1S project, `fixtures/bambu-templates/p1s-0.4/project_test.3mf` - mouse1, Studio 02.09.01.70,
+  Bambu PLA Basic @BBL P1S, 0.20mm Standard @BBL X1C, Textured PEI - and its start / end frozen from
+  that project's slice, `mouse1.gcode.3mf` beside it, into `fixtures/print-planner/p1s-0.4/frozen.json`).
+  The "A1 / X1C 256" plate has no profile any more (it used to take the P1S's, and an A1 is
+  another printer). Any other plate has no profile and the card says so.
 - **Slice settings** (folded under the profile line): the rows G-scope's Slice side
   has - nozzle, layer, walls, infill % and pattern, support below, brim, interface -
   but the card's own (`slice-set-*`; it never reads or writes G-scope's `ms-slice-*`

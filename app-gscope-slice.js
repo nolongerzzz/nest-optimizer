@@ -95,7 +95,7 @@ var NSO_GSCOPE_SLICE = (function () {
   // (nso_thickness.js NOZZLE_DEFAULT, 0.4) and half of it - the slicer's own
   // default (nso_slicer.js defaultsFor). Walls 2, 15 % grid and support below
   // 30 degrees are the same Bambu profile's, whatever the nozzle.
-  var PRINTER_SLICE = { a1mini: { nozzle: 0.4, layer: 0.2 } };
+  var PRINTER_SLICE = { a1mini: { nozzle: 0.4, layer: 0.2 }, p1s: { nozzle: 0.4, layer: 0.2 } };
   var SLICE_REST = { walls: 2, density: 15, pattern: 'grid', angle: 30, brim: 'auto' };
 
   /* THE INTERFACE RULE (nso_slicer.js supportInterfaceRule; docs/SUPPORT-GATE.md): a preference, not a profile setting - kept in this

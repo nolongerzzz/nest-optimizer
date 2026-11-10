@@ -71,7 +71,7 @@ const PRINTERS = {
   },
   'p1s-0.4': {
     printer: 'Bambu Lab P1S', nozzle: '0.4',
-    slice: 'fixtures/supports/simple_overhang_p1s.gcode.3mf',
+    slice: 'fixtures/bambu-templates/p1s-0.4/mouse1.gcode.3mf',          /* the owner's P1S project's own slice (Studio 02.09.01.70) */
     bed: { x: 256, y: 256, z: 256 },
     values: { nozzle: 220, nozzleT: 220, bed: 55 },
     endZ: { hop: 0.5, cap: 250, capLines: ['G1 Z250 F600', 'G1 Z248'] },
@@ -241,7 +241,7 @@ async function build(id) {
     bed: P.bed,
     values: values,
     timing: { totalSeconds: totalSeconds, modelSeconds: modelSeconds, startSeconds: startSeconds,
-              endSeconds: totalSeconds - modelSeconds - startSeconds },
+              endSeconds: Math.max(0, totalSeconds - modelSeconds - startSeconds) },   /* the start is read off a whole percent: on a long print (1 % = 95 s) the rest can come out below 0 */
     purgeMm: purgeMm,
     endZ: { hop: hi.hop, cap: hi.cap },
     start: start, afterStart: after, beforeEnd: beforeEnd, end: end,

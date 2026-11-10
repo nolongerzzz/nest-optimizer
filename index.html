@@ -724,7 +724,8 @@
               <p class="vp-plate-head" title="Plate size, bed grid and snap">Plate</p>
                 <select id="plate-select">
                   <option value="a1mini">A1 Mini 180</option>
-                  <option value="a1">A1 / P1S / X1C 256</option>
+                  <option value="a1">A1 / X1C 256</option>
+                  <option value="p1s">P1S 256</option>
                   <option value="prusa">Prusa 250 × 210</option>
                   <option value="ender">Ender 220</option>
                   <option value="custom">Custom…</option>
@@ -2860,7 +2861,7 @@
        After nso_support_aim.js, whose nearestBase and place it calls. See
        docs/ASSEMBLE.md. -->
   <script src="nso_assemble.js?v=f787a28b"></script>
-  <script src="nso_printer.js?v=138fa6cc"></script>
+  <script src="nso_printer.js?v=28b60d44"></script>
   <!-- New stock: the shape-agnostic sizing app-wheel.js's Ball now calls,
        so it loads ahead of it. See docs/STOCK.md. -->
   <script src="nso_stock.js?v=6eaef717"></script>
@@ -2881,7 +2882,7 @@
   <script src="nso_exif.js?v=22458ef3"></script>
   <script src="nso_photoset.js?v=0974faf1"></script>
   <script src="nso-cooling-profiles.js"></script>
-  <script src="nso-3mf.js?v=2633b80c"></script>
+  <script src="nso-3mf.js?v=0dd8621b"></script>
   <script src="nso-3mf-read.js?v=28d79bcf"></script>
   <script src="nso-3mf-scene.js?v=abb8f614"></script>
   <script src="nso-surface-grid.js?v=c0d97583"></script>
@@ -2903,7 +2904,7 @@
   <script src="nso-helpers.js?v=9c476e39"></script>
   <script src="nso-recent.js?v=f03d6f13"></script>
   <script src="nso-bounds.js?v=778acac4"></script>
-  <script src="app-core.js?v=c086af80"></script>
+  <script src="app-core.js?v=b986a449"></script>
   <!-- Up to six plates (beds): the active one is state.models / state.placed, the rest are kept beside it. docs/BEDS.md. -->
   <script src="app-beds.js?v=3d221bc4"></script>
 
@@ -3085,7 +3086,7 @@
   <script src="nso_support_blockers.js?v=6962a81c"></script>
   <script src="app-support-blockers.js?v=73c8125d"></script>
   <script src="app-supports-card.js?v=f69c0a64"></script>
-  <script src="app-gscope-slice.js?v=558d0268"></script>
+  <script src="app-gscope-slice.js?v=35933b35"></script>
   <!-- The Slice card (left bar): the plate sliced for its printer, the .gcode.3mf
        it makes. The print planner and the packager are loaded here for it and for
        its slice worker (which importScripts them from these tags); no G-scope file
@@ -3094,7 +3095,7 @@
        plate reader and G-code import it calls. See docs/PRINT-PLANNER.md. -->
   <script src="nso-print-planner.js?v=f4b28af6"></script>
   <script src="nso-gcode3mf-write.js?v=cdfa15b4"></script>
-  <script src="app-print.js?v=e75749c3"></script>
+  <script src="app-print.js?v=9d64ffd3"></script>
   <!-- Lift: details off a face, the face left as it was round them. After
        nso_lift.js (Phase 1: a flat face), nso_lift_curved.js (Lift 3: the
        repair under a detail lifted off a curved base), nso_lift_auto.js

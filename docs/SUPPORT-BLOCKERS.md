@@ -91,7 +91,7 @@ was: its four controls, and its readout and Export hold this slice afterwards, e
   not changed under it).
 - Done: G-scope opens on the Slice side with the slice loaded, and the Supports card is put away.
 - Refused or failed: the Slice card's words, in red, under the button, and the card stays open (*Nothing on the plate to
-  slice.*, *Pick the A1 mini or the A1 / P1S / X1C plate to slice for.*, the planner's refusal ...). Cancelled: *Slice
+  slice.*, *Pick the A1 mini or the P1S plate to slice for.*, the planner's refusal ...). Cancelled: *Slice
   cancelled.*, not in red. A plate that moved while it was slicing is not opened: *The plate changed while it was
   slicing. Press Slice and Preview again.*
 - **G-scope's Export card is live on the slice.** A slice opened by Slice and Preview (or the Slice card's Preview) carries

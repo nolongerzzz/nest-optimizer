@@ -96,9 +96,15 @@
       covers: ['A1 Mini']
     },
     a1: {
-      id: 'a1', name: 'Bambu A1 / P1S / X1C',
+      id: 'a1', name: 'Bambu A1 / X1C',
       bedX: 256, bedY: 256, buildZ: 256,
-      covers: ['A1', 'P1S', 'X1C']
+      covers: ['A1', 'X1C']
+    },
+    p1s: {
+      /* its own plate: the Slice card has a P1S profile (the owner's mouse1 project), and P1S G-code must not go to an A1 */
+      id: 'p1s', name: 'Bambu P1S',
+      bedX: 256, bedY: 256, buildZ: 250,
+      covers: ['P1S']
     },
     prusa: {
       /* MK4 is 250 x 210 x 220, MK3S is 250 x 210 x 210. One id, both

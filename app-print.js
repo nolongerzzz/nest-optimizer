@@ -68,9 +68,9 @@
   /**
    * The plate picker's printers that have a profile. `template` is the project
    * the printer's settings come from (an unzipped Metadata/project_settings.config);
-   * `frozen` is the planner's start / end for it. A1 mini first; the P1S uses the
-   * project it already has (the owner's P1S slice). The picker's "A1 / P1S / X1C 256"
-   * plate takes the P1S profile: it is the 256 mm one the planner has.
+   * `frozen` is the planner's start / end for it. A1 mini first; then the P1S plate, from the
+   * owner's own P1S project and its slice (mouse1). The picker's "A1 / X1C 256" plate has no
+   * profile: P1S G-code is not sent to an A1 (a bed-slinger, another start block).
    */
   var PROFILES = {
     a1mini: {
@@ -78,9 +78,11 @@
       template: 'fixtures/bambu-templates/a1mini-0.4/project_test.3mf',
       frozen: 'fixtures/print-planner/a1mini-0.4/frozen.json'
     },
-    a1: {
+    /* the P1S plate (its own: an A1's G-code is another printer's): the owner's P1S project, mouse1.3mf (Studio 02.09.01.70, Bambu PLA
+       Basic @BBL P1S, 0.20mm Standard @BBL X1C, Textured PEI); its start / end frozen from that project's own slice */
+    p1s: {
       id: 'p1s-0.4', short: 'P1S', label: 'Bambu Lab P1S, 0.4 nozzle',
-      template: 'fixtures/supports/simple_overhang_p1s.gcode.3mf',
+      template: 'fixtures/bambu-templates/p1s-0.4/project_test.3mf',
       frozen: 'fixtures/print-planner/p1s-0.4/frozen.json'
     }
   };
@@ -669,7 +671,7 @@
     var line = $('slice-profile');
     if (line) {
       line.textContent = p ? p.label : 'No printer profile for the ' + ((typeof PLATES !== 'undefined' && PLATES[plateId()]) ? PLATES[plateId()].name : 'selected') +
-        ' plate yet. Slice works on the A1 mini and the A1 / P1S / X1C plate.';
+        ' plate yet. Slice works on the A1 mini and the P1S plates.';
       line.classList.toggle('is-bad', !p);
     }
     // a printer picked since the rows were set starts them again at its profile's values
@@ -699,7 +701,7 @@
       if (!quietly) readout(reason, true);
       return { ok: false, reason: reason };
     }
-    if (!profile) { refresh(); return Promise.resolve(stop('Pick the A1 mini or the A1 / P1S / X1C plate to slice for.')); }
+    if (!profile) { refresh(); return Promise.resolve(stop('Pick the A1 mini or the P1S plate to slice for.')); }
     var pieces;
     /* hook.pieces: the plate as the supports card is about to leave it (its new supports not placed yet, the ones they replace left out) */
     try { pieces = hook && hook.pieces ? hook.pieces : readPieces(); } catch (err) { console.error(err); pieces = null; }
@@ -964,6 +966,9 @@
     bind('ms-btn-sel-gcode3mf', function () { exportFromCard('gcode3mf', true); });
     bind('ms-btn-sel-3mf', function () { exportFromCard('3mf', true); });
     if (menu) menu.addEventListener('toggle', function () { if (menu.open) refresh(); });
+    /* the plate picker is the printer: the line, the settings and a slice's freshness follow it at once */
+    var plateSel = $('plate-select');
+    if (plateSel) plateSel.addEventListener('change', function () { setTimeout(refresh, 0); });
     refresh();
   }
 

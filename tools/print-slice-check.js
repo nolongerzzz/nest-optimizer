@@ -8,7 +8,7 @@
  * The card (left bar, SLICE) is driven in a browser by the audit driver session,
  * not here. This holds what it stands on:
  *
- *   - the plate's printer profile (A1 mini; the A1 / P1S / X1C plate takes the P1S)
+ *   - the plate's printer profile (A1 mini; the P1S plate takes the P1S - the owner's mouse1 project; A1 / X1C none)
  *   - the viewport's plate (centred on 0,0) put on the printer's bed, and
  *     round-tripped against the plate the planner gate slices
  *   - a plate with supports through build(): the FEATURE lines carry Support,
@@ -63,11 +63,11 @@ async function main() {
   // ===========================================================================
   section('1. The plate\'s printer profile');
   // ===========================================================================
-  const pa = PRINT.profileFor('a1mini'), pp = PRINT.profileFor('a1');
-  check('the A1 mini plate has the A1 mini 0.4 profile, the A1 / P1S / X1C plate the P1S 0.4 one',
-    pa && pa.id === 'a1mini-0.4' && pp && pp.id === 'p1s-0.4', JSON.stringify([pa, pp]));
-  check('a plate with no profile (Prusa, Ender, Custom, nothing) has none, and the prototype chain is not one',
-    ['prusa', 'ender', 'custom', '', null, undefined, 'toString', 'constructor'].every(id => PRINT.profileFor(id) === null));
+  const pa = PRINT.profileFor('a1mini'), pp = PRINT.profileFor('p1s');
+  check('the A1 mini plate has the A1 mini 0.4 profile, the P1S plate the P1S 0.4 one (the owner\'s mouse1 project)',
+    pa && pa.id === 'a1mini-0.4' && pp && pp.id === 'p1s-0.4' && /bambu-templates\/p1s-0\.4\/project_test\.3mf$/.test(pp.template), JSON.stringify([pa, pp]));
+  check('a plate with no profile (A1 / X1C - an A1 is not sent P1S G-code -, Prusa, Ender, Custom, nothing) has none, and the prototype chain is not one',
+    ['a1', 'prusa', 'ender', 'custom', '', null, undefined, 'toString', 'constructor'].every(id => PRINT.profileFor(id) === null));
   check('every profile points at files that exist: the frozen blocks and the template',
     Object.values(PRINT.PROFILES).every(p => fs.existsSync(path.join(ROOT, p.frozen)) && fs.existsSync(path.join(ROOT, p.template))));
   check('...and the frozen blocks are for the printer the profile names (model id N1 / C12)',

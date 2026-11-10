@@ -48,10 +48,11 @@ function printer(id) {
   return JSON.parse(fs.readFileSync(path.join(ROOT, 'fixtures', 'print-planner', id, 'frozen.json'), 'utf8'));
 }
 
-/** The P1S 0.4 settings: the owner's P1S slice carries the project it was sliced with. */
+/** The P1S 0.4 template's project settings (the owner's mouse1.3mf, saved by Studio 02.09.01.70). */
 async function p1sTemplate() {
-  const s = await bambuSlice('fixtures/supports/simple_overhang_p1s.gcode.3mf');
-  return s.config;
+  const file = path.join(ROOT, 'fixtures', 'bambu-templates', 'p1s-0.4', 'project_test.3mf');
+  const { parts } = await readParts(file, ['Metadata/project_settings.config']);
+  return JSON.parse(text(parts['Metadata/project_settings.config']));
 }
 
 let kernel = null;

@@ -8,7 +8,8 @@ Smart build-plate packing for 3D printing.
 
 - Multi-plate support from day one
   - Bambu A1 Mini (180×180)
-  - Bambu A1 / P1S / X1C (256×256)
+  - Bambu A1 / X1C (256×256)
+  - Bambu P1S (256×256; the Slice card's P1S profile)
   - Prusa MK4 / MK3S
   - Creality Ender 3
   - Custom size
