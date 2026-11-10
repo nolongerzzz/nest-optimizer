@@ -2216,6 +2216,7 @@
   var COLUMN_CUP_REACH_MM = 0.25;  /* THE CUP: a stack's lowest layer further than this past what is under it is cantilevered (its edge loop's bead
                                       would stand on less than half its width) */
   var COLUMN_TWIG_MM2 = 0.6;       /* a piece of the support's section smaller than this is a twig (a 0.85 mm thin column is 0.57) */
+  var COLUMN_RISER_XY_MM = 0.2;   /* a support layer keeps this off the part's layers in the gap over it (a stair's riser): Bambu's 2x Oblique, none closer than 0.18 */
   var COLUMN_TWIG_XY_MM = 0.2;     /* ...and keeps this off the part sideways, not the tree's xy distance */
   var COLUMN_CUP_BRIDGE_MM = 2;     /* a stack bridges a gap up to twice this between tips: no cup under the bridge */
   var COLUMN_CUP_HOLD_MM = 0.3;    /* a cup's ring stands within this of the ring or tree under it (a line's width less a margin) */
@@ -2307,7 +2308,10 @@
       }
       var bl = [], L0 = U(lat), V0 = U(ver), hard = [];
       if (L0) { bl.push(g.offset(L0, xy)); hard.push(L0); }
-      if (V0) { bl.push(V0); hard.push(V0); }
+      /* ...and the part a gap or less over it (a slope's next layer, its riser) kept the gap's own distance sideways (COLUMN_RISER_XY_MM): a stair's
+         tread stood to the riser's edge, a bead's corner under every overhang wall up the slope (the owner's 2x Oblique welded: 8 % of its
+         support beads within 0.1 mm of the part, Bambu's 02.09 none under 0.15) - the treads now end short of it, a slope parallel to the part's */
+      if (V0) { bl.push(g.offset(V0, COLUMN_RISER_XY_MM)); hard.push(V0); }
       /* a contact reaches past the edge of an overhang as the footprint does (not past a wall: the part's section beside it is no underside) */
       var UP = U(up), UO = U(upOv);
       blocked.push(U(bl)); blockedHard.push(U(hard)); contact.push(UP && UO ? g.union(UP, g.offset(UO, COLUMN_EDGE_OUT_MM)) : UP); near.push(U(nr));

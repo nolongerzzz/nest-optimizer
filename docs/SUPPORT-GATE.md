@@ -266,6 +266,13 @@ whole. Read off its G-code against Bambu's own slices:
   7 mm on a 13.5 mm first-layer pad. The column rule's flare is 2 mm now (was 1.5); 2.5 and more float an island at the Negative
   Sphere's trunk beside its stem (gate 65 of 66) - named below, with the pad.
 
+**The stair's treads end short of the riser.** The owner, on Bambu's 2x Oblique: each tread is filled so the support's top runs as a
+slope parallel to the part's. Measured bead to bead in 3D: Bambu 02.09's 2x Oblique has no support bead closer than 0.18 mm to the part
+(p5), NSO's printed one had 8 % within 0.1 (each tread's corner under the overhang wall of the next layer up). The column rule kept the
+xy distance only from the part at a support layer's own height; the part's layers in the gap over it were cut straight down. They are now
+kept `COLUMN_RISER_XY_MM` (0.2, the gap's own) off sideways too: NSO's 2x Oblique p5 0.20, none under 0.15. Gate: 66 of 66 against
+02.08, 65 of 66 against 02.09 (the Negative Sphere's sheet carried, as before).
+
 ## 5. Not done, and named
 
 - **Trunk bases and pads, as Bambu's**: a flare over 2 mm floats an island at the Negative Sphere's trunk (z 1.3, beside its stem);
