@@ -662,3 +662,10 @@ What is left in the 2x slice: the exact sections' closing offsets and `unionAll`
 Headless Chromium, GENERATE to idle: supp_ref 25 -> 18 s, supp_ref_2x 42 -> 26 s, supp_ref_2x with the column rule 41 -> 31 s. The G-code is
 the same bytes in all three; `support:gate` and `support:gate --rule column` print the same JSON. What remains of the slice is mostly the
 layers themselves (walls, infill, the sections of every object: `buildLayers` and `makeP`, about 9 s of the 2x).
+
+**Third round (the build, before the slice).** A probe `leg(a, b, 0, 0, 0, 0)` - a bare line, no section, no clearance - built its eight
+rails at radius 0: the axis itself, cast again eight times to the same answer (and, on a miss, the inside test nine times). The horns' wall
+probes and `hornUnderMap` (18 maps of 101 x 101 columns, up to 12 casts each, on the 2x) are made of them. `leg` now answers a bare line from
+the axis alone: the same numbers. supp_ref_2x with the column rule, the build's own time in the page 13.1 -> 8.4 s, GENERATE 31.7 -> 25.5 s;
+the plate's G-code the same bytes on all three plates, both gates the same JSON. Looked for and not repeated work: the 11 crowns' meshes
+(`blobSoup`) are 11 different bodies, `leg` asked the same question twice is 0.3 s of 1.8, and the thickness probes are built once a mesh.

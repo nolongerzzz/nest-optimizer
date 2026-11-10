@@ -588,6 +588,12 @@
         return h > 0 ? t0 + h : -1;
       }
       var best = cast(a, 0, L), offs = [];
+      /* a bare line (no section, no clearance, no caps): the eight rails are the axis itself, cast again eight times to the same answer, and the
+         inside tests likewise - the horn's probes and its map of the undersides (hornUnderMap) are thousands of these */
+      if (side === 0 && clear === 0 && !capA && !capB) {
+        if (best >= 0) return best;
+        return A.lineInsideAt(obstacles, a, u, L) >= 0 ? 0 : -1;
+      }
       /* Eight rails on the section's circumscribed circle: every member's
          square is turned by its own phase (see PHASE), so the probe takes
          the circle any turn of it fits in. */
