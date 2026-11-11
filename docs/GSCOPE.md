@@ -71,9 +71,10 @@ Picture), and every export that leaves G-scope **put G-scope away with its plate
   as they were left when the rail button opens G-scope again - the same
   documents, what was isolated or selected, the slider, the Features list - on
   the plate that was showing;
-- **plate 1, when it is a read of the main plate, is read again** on that open
-  (the main plate may have changed meanwhile; an empty main plate empties it).
-  Anything else on plate 1 - an import, a slice - is kept as it was;
+- **plate 1, when it is a read of the main plate or empty, is read again** on
+  that open (the main plate may have changed meanwhile; an empty main plate
+  empties it; an emptied plate 1 - CLEAR, then CLOSE - keeps nothing). Anything
+  else on plate 1 - an import, a slice - is kept as it was;
 - a close still ends what is half done: a Compare pick, the drag in hand, the
   ▾ menu or Export card, REGION;
 - while G-scope is put away plate 1 is the active plate, so a file or a slice
@@ -429,9 +430,10 @@ always:
   `fixtures/supports/top_clip_x2_supports.gcode.3mf`, "Bambu Lab A1 mini 0.4
   nozzle", "0.20mm Standard @BBL A1M"); on any other printer the app's 0.4
   nozzle and half of it. Walls 2, 15 % grid and support below 30° are that
-  profile's. They are set from the profile at the start of every visit, an
-  edit lasts the visit, and they take effect on the next slice (Normal, then
-  Slice again), as before.
+  profile's. They are set from the profile when G-scope first opens; CLOSE
+  keeps them with the plates (item 3), and they take effect on the next slice
+  of a file opened here (Normal, then Slice again). The plate's slice is the
+  Supports card's, with that card's settings.
 - The **Features list** stays bottom-left (checkboxes only, item 4; Check all
   in its head), the **slider** on the right, the **corner row** top-right. The
   left wall stays under the card whichever side it shows.

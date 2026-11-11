@@ -6185,8 +6185,8 @@ var NSO_MICROSCOPE = (function () {
    * plate that was showing - so the owner can go back and forth between the main view and G-scope. What a close does
    * end: a Compare pick half made, the drag in hand, the open ▾ menu or Export card, REGION. Plate 1 is the active
    * plate while G-scope is put away, so a file or a slice opened from the main view (Preview, Import) lands on plate 1
-   * as it always has, and the other plates are untouched. A plate 1 that is a read of the main plate is read again on
-   * the next open (the main plate may have changed since); anything else on it - an import, a slice - is kept.
+   * as it always has, and the other plates are untouched. A plate 1 that is a read of the main plate, or empty, is read
+   * again on the next open (the main plate may have changed since); anything else on it - an import, a slice - is kept.
    * With nothing on any plate a close is the old end of the visit: everything back to its defaults.
    */
   var keptPlate = null;           // the plate that was showing when G-scope was put away with its plates kept
@@ -6218,8 +6218,8 @@ var NSO_MICROSCOPE = (function () {
 
   /**
    * The G-scope button after a close that kept the plates: every plate as it was left, on the plate that was showing.
-   * Plate 1, when it is a read of the main plate, is read again (an empty main plate empties it). Null when nothing
-   * was kept.
+   * Plate 1, when it is a read of the main plate or empty, is read again (an empty main plate empties it). Null when
+   * nothing was kept.
    */
   function resumeKept() {
     if (keptPlate == null || !PLATES.some(function (n) { return !!plateDoc(n); })) { keptPlate = null; return null; }
@@ -6229,7 +6229,9 @@ var NSO_MICROSCOPE = (function () {
     if (!view) return null;
     if (plateName !== 'lens') showPlate('lens', { quiet: true });
     var ld = lensDoc();
-    if (ld && ld.source === 'plate' && !openPlate()) emptyPlate('lens');
+    /* a read of the main plate is read again; an EMPTY plate 1 keeps nothing, so it reads the main plate too (CLEAR then CLOSE: the next
+       open shows the plate, as G-scope opened from the main view does) */
+    if ((!ld || ld.source === 'plate') && !openPlate()) emptyPlate('lens');
     if (!plateDoc(back) && back !== 'lens') back = 'lens';
     if (back !== plateName) showPlate(back);
     else { syncPlate(); redrawDoc(false); }

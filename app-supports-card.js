@@ -1875,13 +1875,15 @@ var NSO_SUPPORTS_CARD = (function () {
     pieces = pieces.filter(function (p) { return !gone[p.sourceId]; });
     var SI = window.NSO_SupportInterface, sheetSet = SI && SI.SHEET && SI.SHEET.slicerSettings ? Object.assign({}, SI.SHEET.slicerSettings) : null, n = 0, byKey = {};
     built.forEach(function (b) {
-      var po = partsOptsOf(b.c.o);
+      var po = partsOptsOf(b.c.o), m = 0;
       b.results.forEach(function (r) {
         if (!r.ok) return;
         (r.solids || []).forEach(function (sd) {
           if (!sd.soup || !sd.soup.length) return;
           sd.sliceKey = 'new:' + (++n); byKey[sd.sliceKey] = sd;
-          pieces.push({ name: b.c.hm.name + (sd.brim ? ' - brim' : ' - support'), soup: sd.soup, sourceId: sd.sliceKey, support: true, brim: !!sd.brim,
+          /* the name the plate gives it (placeResults takes this one): the file, G-scope's readout and the plate say the same */
+          sd.pieceName = sd.brim ? b.c.hm.name + ' - brim' : b.c.hm.name + ' - support ' + (r.rid + 1) + '.' + (++m) + ' (' + STYLES[b.c.o.style] + ')';
+          pieces.push({ name: sd.pieceName, soup: sd.soup, sourceId: sd.sliceKey, support: true, brim: !!sd.brim,
                         hostSourceId: b.c.hostId, interfaceLayers: po.interfaceLayers || 2, sheetLayerMm: po.sheetLayerMm || 0, nonSolid: false,
                         settings: sd.brim ? { wall_generator: 'classic', detect_thin_wall: '0', wall_loops: '10', sparse_infill_density: '0%', top_shell_layers: '0', bottom_shell_layers: '1' } : sheetSet });
         });
@@ -2000,7 +2002,8 @@ var NSO_SUPPORTS_CARD = (function () {
         if (sd.asPrinted && sd.built) { meta.built = sd.built; meta.shownV0 = [sd.soup[0], sd.soup[1], sd.soup[2]]; meta.drawnFrom = sd.drawnFrom; }   /* drawnFrom: 'plate' - the Slice card's options; 'gate' - no printer picked */
         meta.sheetLayerMm = partsOptsOf(o).sheetLayerMm || 0;               /* a Dense sheet's layers are this thick: the slicer cuts the supports on their own layer grid then */
         meta.interfaceLayers = partsOptsOf(o).interfaceLayers || 2;      /* how many interface layers its sheet has: the slicer reads a 3-layer sheet as one */
-        var pl = placeSolid(sd.soup, meta, c.host, c.D.minZ, sd.brim ? c.hm.name + ' - brim' : c.hm.name + ' - support ' + (r.rid + 1) + '.' + (++n) + ' (' + STYLES[o.style] + ')');
+        var nm = sd.brim ? c.hm.name + ' - brim' : c.hm.name + ' - support ' + (r.rid + 1) + '.' + (++n) + ' (' + STYLES[o.style] + ')';
+        var pl = placeSolid(sd.soup, meta, c.host, c.D.minZ, sd.pieceName || nm);
         if (!pl.ok) throw new Error(pl.reason);
         added.push(pl.id);
         if (sd.sliceKey && S.sliceIds) S.sliceIds[sd.sliceKey] = pl.id;              /* the plate slice (sliceStep) knew it by this key: adoptSlice */

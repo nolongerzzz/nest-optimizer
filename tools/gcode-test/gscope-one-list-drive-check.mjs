@@ -72,7 +72,9 @@ async function frames(page, n = 2) {
 async function shot(page, file, label) {
   await frames(page);
   const path = join(SHOTS, file);
-  await page.locator('#microscope').screenshot({ path });
+  /* G-scope fills the viewport (#microscope is 0,0 at the viewport's size): the page's picture is the element's, without the element
+     screenshot's wait for a "stable" box - it timed out under the slice's render loop though the box never moves */
+  await page.screenshot({ path });
   const size = (await stat(path)).size;
   console.log(`       ${file}  ${(size / 1024).toFixed(0)} kB`);
   check(`${label}: screenshot written`, size > 5000, true);
