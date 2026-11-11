@@ -47,7 +47,7 @@ async function main() {
       undo: state.undoStack.length, spots: window.NSO_SUPPORTS_CARD.view().beacons.length, cursor: state.renderer.domElement.style.cursor };
   });
   let u = await ui();
-  check('the Raft interface box is there, on', u.raft, true);
+  check('the Platform under flat faces box is there, off (the card\'s default view)', u.raft, false);
   check('the Paint row shows in Auto, Paint on offer, Clear paint off (nothing painted)', [u.row, u.paintOn, u.clearOn, u.pressed], [true, true, false, 'false']);
   check('the brush is 4 mm', u.brush, '4');
 

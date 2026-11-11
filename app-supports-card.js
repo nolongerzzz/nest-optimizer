@@ -1215,7 +1215,7 @@ var NSO_SUPPORTS_CARD = (function () {
     var size = sz ? parseFloat(sz.value) : NaN;
     var one = $('sup-one'), it = $('sup-interface'), br = $('sup-brim'), rf = $('sup-raft'), sm = $('sup-small');
     return { brim: !br || !!br.checked, raft: !rf || !!rf.checked, style: style, sideMm: isFinite(size) ? size : null, rest: !!(rs && rs.checked), noHorns: !!(sm && sm.checked), knobs: S.mode === 'custom' ? knobsGiven() : null,
-      one: !one || !!one.checked || !!(one.parentNode && one.parentNode.hidden), dense: !it || it.value !== 'open', treeKnobs: treeKnobsOf() };   /* hidden: always one-trunk */
+      one: !one || !!one.checked || (!!(one.parentNode && one.parentNode.hidden) && one.dataset.testOff !== '1'), dense: !it || it.value !== 'open', treeKnobs: treeKnobsOf() };   /* hidden: always one-trunk */
   }
 
   /* THE PLANNER'S THREAD. planTree is one synchronous call that can run for

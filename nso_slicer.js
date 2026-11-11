@@ -306,7 +306,7 @@
       supportInterfaceLayers: null,        // null -> CONSTANTS.supportSheet.interfaceLayers (2); a sheet of more says so
       supportInterfaceRule: null,          // 'column': the interface read off the part's layers column by column (columnRule; docs/SUPPORT-GATE.md); null: the sheet typing
       supportInterfaceSpacingMm: null,     // the gap between interface lines (Bambu's support_interface_spacing; the print planner reads the profile's): null -> the dense sheet's line + 0.04
-      supportInterfaceAngle: 'bridge',     // the column rule's stack angles: 'bridge' its top square to the part's bridge over it; 'studio36' Studio 02.09's own (90, then 93.6 / 3.6 up to a top at 93.6, the part's bridges over supports at 3.6 - the owner's P1S print released clean); 'crosshatch' 110, then 45 / 135
+      supportInterfaceAngle: 'bridge',     // the column rule's stack angles (the app slices with the card's, 3.6 by default - app-print.js slicerOptions): 'bridge' its top square to the part's bridge over it; 'studio36' Studio 02.09's own (90, then 93.6 / 3.6 up to a top at 93.6, the part's bridges over supports at 3.6 - the owner's P1S print released clean); 'crosshatch' 110, then 45 / 135
       supportXyMm: 0.35,                   // the column rule's xy distance to the part at a support layer's own height (Bambu's support_object_xy_distance)
       weldMm: 1e-4,
       dropToPlate: true,
@@ -1702,7 +1702,7 @@
             });
           }
           /* Interface angle 3.6 (Studio 02.09): a part's bridge is laid at 3.6, its supports' top square to it */
-          if (i > 0 && o.supportInterfaceAngle === 'studio36' && P.role === 'part' && objs.some(function (ob) { return ob.role === 'support'; })) {
+          if (i > 0 && o.supportInterfaceAngle === 'studio36' && o.supportInterfaceRule === 'column' && P.role === 'part' && objs.some(function (ob) { return ob.role === 'support'; })) {
             var sa0 = solidAngle; solidAngle = STUDIO36_DEG * Math.PI / 180; solidFill(bottomOpen, 'Bridge'); solidAngle = sa0;
           } else solidFill(bottomOpen, i === 0 ? 'Bottom surface' : 'Bridge');
           solidFill(bridgeInner, 'Bridge');
