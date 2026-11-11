@@ -482,7 +482,8 @@ withApp(async (page, logs) => {
     check('...and nothing moved on screen: both floors where they were', J(t.floors) === J(floors0));
     await shot('02-plate2-active');
     await clickPlate(page, 'lens');
-    check('a click on plate 1\'s floor: plate 1 active again, byte-identical', await plate(page) === 'lens' && await lensState(page) === before && J(await T(page, () => window.__t.floorsPx())) === J(floors0));
+    const back1 = { plate: await plate(page), same: (await lensState(page)) === before, floors: J(await T(page, () => window.__t.floorsPx())) === J(floors0) };
+    check('a click on plate 1\'s floor: plate 1 active again, byte-identical', back1.plate === 'lens' && back1.same && back1.floors, J(back1));
     // a drag on the other plate orbits and activates nothing
     const p2 = await T(page, () => window.__t.bareFloorPx('take'));
     const cam0 = await T(page, () => window.__t.camera());
@@ -737,14 +738,21 @@ withApp(async (page, logs) => {
   }
 
   /* ------------------------------------------------------------------ 8 */
-  console.log('\n=== 8. CLOSE and BACK end the visit whole ===');
+  console.log('\n=== 8. CLOSE and BACK keep the plates (docs/GSCOPE.md item 3, 2026-11-11) ===');
   {
-    // the export closed it: the next open is the plate read fresh, plate 2 empty
+    // the export closed it, plate 2 showing: the next open reads plate 1 (the main plate's read) again, keeps plate 2
+    const keptTake = await page.evaluate(() => { window.__keptTake = NSO_MICROSCOPE.plateDoc('take'); return NSO_MICROSCOPE.takePieces().length; });
     await page.click('#btn-microscope');
     await page.waitForFunction(() => NSO_MICROSCOPE.isOpen() && NSO_MICROSCOPE.lensDoc(), null, { timeout: 30000 });
     await frames(page);
-    let f = await freshness(page);
-    check('opened after an export closed it: a fresh read of the plate, nothing kept', isFreshPlate(f), J(f));
+    const k0 = await page.evaluate(() => { const M = NSO_MICROSCOPE; return { plate: M.plate(), lens: M.lensDoc().source, take: M.plateDoc('take') === window.__keptTake, n: M.takePieces().length }; });
+    check('opened after an export closed it: plate 1 the main plate read again, plate 2 kept (' + keptTake + ' pieces), on plate 2 as it was left',
+      k0.plate === 'take' && k0.lens === 'plate' && k0.take && k0.n === keptTake && keptTake > 0, J(k0));
+    // plate 2 emptied, plate 1 active: the dirtying below starts where it always did
+    await page.click('#ms-btn-take-clear');
+    await frames(page);
+    await clickPlate(page, 'lens');
+    await frames(page);
     // dirty everything, then CLOSE: plate 1 sliced here (the card's Slice side),
     // its Slice settings unfolded and edited, REGION armed, Solid, a layer
     // isolated, the slider narrowed, a piece on plate 2 and the ▾ menu open
@@ -785,12 +793,11 @@ withApp(async (page, logs) => {
     await page.click('#btn-microscope');
     await page.waitForFunction(() => NSO_MICROSCOPE.isOpen() && NSO_MICROSCOPE.lensDoc(), null, { timeout: 30000 });
     await frames(page);
-    f = await freshness(page);
-    const dv = await defaultView(page);
-    check('CLOSE, then open: a fresh read of the plate - nothing isolated or selected, slider at All, plate 2 empty, no card open; the card on Normal, REGION off, the Slice settings folded at the profile\'s',
-      isFreshPlate(f) &&
-      await page.evaluate(() => NSO_MICROSCOPE.lensDoc() !== window.__oldDoc), J(f));
-    check('...and the default view: the framing of both plates', dv.same, J(dv));
+    let f = await freshness(page);
+    check('CLOSE, then open: plate 1 is the slice made here as it was left - the same document, still isolated, the slider still narrowed, Solid, its settings as edited; the piece still on plate 2',
+      f.plate === 'lens' && await page.evaluate(() => NSO_MICROSCOPE.lensDoc() === window.__oldDoc) && f.isolated && !f.zrAll && f.render === 'solid' && f.take === 1 &&
+      f.settings[1] === '0.3' && f.settings[2] === '3', J(f));
+    check('...and what a close ends is ended: REGION off, the ▾ menu shut, no card open', !f.region && f.mode === 'piece' && !f.menu && !f.card, J({ region: f.region, mode: f.mode, menu: f.menu, card: f.card }));
     await shot('08-reopened');
     // BACK: a producer's document (Picture's seam), its Back button
     await page.evaluate(() => {
@@ -808,9 +815,8 @@ withApp(async (page, logs) => {
     await page.waitForFunction(() => NSO_MICROSCOPE.isOpen() && NSO_MICROSCOPE.lensDoc(), null, { timeout: 30000 });
     await frames(page);
     f = await freshness(page);
-    check('BACK, then open: a fresh read of the plate (not the producer\'s document), all clean', isFreshPlate(f), J(f));
-    check('...the default view', (await defaultView(page)).same);
-    // an imported file survives - fresh
+    check('BACK, then open: plate 1 is the producer\'s document as it was left (it is not a read of the main plate), plate 2 kept', f.doc === 'Producer' && f.isolated && f.take === 1, J(f));
+    // an imported file: kept as it was left too
     await page.evaluate(([b, n]) => NSO_MICROSCOPE.openFile(n, new Uint8Array(b).buffer), [bytes, 'gt.gcode.3mf']);
     await page.waitForFunction(() => NSO_MICROSCOPE.lensDoc() && NSO_MICROSCOPE.lensDoc().kind === 'toolpath', null, { timeout: 30000 });
     await frames(page);
@@ -820,8 +826,15 @@ withApp(async (page, logs) => {
     await page.waitForFunction(() => NSO_MICROSCOPE.isOpen() && NSO_MICROSCOPE.lensDoc(), null, { timeout: 30000 });
     await frames(page);
     f = await freshness(page);
-    check('an imported file survives a CLOSE - and comes back fresh: nothing hidden, isolated or selected, slider at All', isFresh(f) && f.doc === 'gt.gcode.3mf', J(f));
-    check('...the default view', (await defaultView(page)).same);
+    check('an imported file survives a CLOSE as it was left: still isolated, the slider narrowed, one line type shown', f.doc === 'gt.gcode.3mf' && f.isolated && !f.zrAll && f.featuresOff.length > 1, J(f));
+    // the sections after this one start from a fresh import and an empty plate 2, as they always did
+    await page.evaluate(() => NSO_MICROSCOPE.reset());
+    await page.click('#ms-close');                     // nothing on any plate: the old end of the visit (the Slice settings fold)
+    await page.evaluate(([b, n]) => NSO_MICROSCOPE.openFile(n, new Uint8Array(b).buffer), [bytes, 'gt.gcode.3mf']);
+    await page.waitForFunction(() => NSO_MICROSCOPE.lensDoc() && NSO_MICROSCOPE.lensDoc().kind === 'toolpath', null, { timeout: 30000 });
+    await frames(page);
+    f = await freshness(page);
+    check('NSO_MICROSCOPE.reset() and the import again: fresh, plate 2 empty', isFresh(f) && f.doc === 'gt.gcode.3mf', J(f));
   }
 
   /* ------------------------------------------------------------------ 7b */

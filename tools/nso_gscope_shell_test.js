@@ -676,7 +676,10 @@ withApp(async (page, logs) => {
       return { n: document.querySelectorAll('#ms-btn-step-back').length, disabled: b.disabled, text: b.textContent, left: Math.round(r.left), top: Math.round(r.top), cardRight: Math.round(c.right), cardTop: Math.round(c.top), h: Math.round(r.height) }; });
     check('BACK stands once, grey at the starting point, right of the card\'s head and level with its top', bk.n === 1 && bk.disabled && /Back/.test(bk.text) && bk.left >= bk.cardRight && bk.left - bk.cardRight < 20 && Math.abs(bk.top - bk.cardTop) <= 2, J(bk));
     const rBk = await reach(page, ['ms-btn-step-back']);
-    check('...and a click can reach it (nothing over it)', rBk.blocked.length === 0, J(rBk));
+    // grey, it takes no pointer (styles.css: a disabled control in G-scope lets the press through to what is behind it,
+    // so a right-click there cannot open the browser's menu): what is at its face is its own holder, nothing else
+    check('...and a click can reach it (nothing over it but, while it is grey, its own holder)',
+      rBk.blocked.every((x) => /^ms-btn-step-back \(covered by ms-step-back-hold\)$/.test(x)) && (rBk.blocked.length === 0 || bk.disabled), J(rBk));
     await clickFace(page, '#ms-slice-settings-toggle'); await frames(page);
     await clickFace(page, '#ms-measure-toggle'); await frames(page);
     await page.evaluate(() => NSO_MICROSCOPE.setZRange(0, 5)); await frames(page);
@@ -1107,15 +1110,16 @@ withApp(async (page, logs) => {
     const s5 = await at();
     check('Escape 5, nothing left to undo: G-scope closes', !s5.open && await page.evaluate(() => document.getElementById('microscope').hidden), J(s5));
 
-    // a new visit: the plate read again, the Slice settings folded and back on the printer profile (0.25 forgotten)
+    // the next open: the plates were kept (docs/GSCOPE.md item 3), and the Slice settings with them - the 0.25 as it was
+    // left; what the close ended stays ended (the ▾ shut)
     await page.click('#btn-microscope');
     await waitMesh(page);
     await frames(page);
     const v = await page.evaluate(() => ({ side: document.getElementById('ms-main-card').dataset.side, folded: document.getElementById('ms-slice-settings').hidden,
       aria: document.getElementById('ms-slice-settings-toggle').getAttribute('aria-expanded'), layer: document.getElementById('ms-slice-layer').value,
       nozzle: document.getElementById('ms-slice-nozzle').value, menu: document.getElementById('ms-import-menu').classList.contains('is-open') }));
-    check('a new visit: the Normal side, the ▾ shut, the Slice settings folded and re-seeded (nozzle 0.4, layer 0.2 - the 0.25 is gone)',
-      v.side === 'normal' && v.folded && v.aria === 'false' && v.layer === '0.2' && v.nozzle === '0.4' && !v.menu, J(v));
+    check('the next open, plates kept: the Normal side, the ▾ shut, the Slice settings as they were left (nozzle 0.4, layer 0.25)',
+      v.side === 'normal' && v.layer === '0.25' && v.nozzle === '0.4' && !v.menu, J(v));
     // CLOSE shuts the menu with G-scope
     await clickFace(page, '#ms-btn-import-more');
     const r = await clickFace(page, '#ms-close');

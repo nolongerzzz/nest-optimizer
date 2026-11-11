@@ -251,8 +251,17 @@ var NSO_GSCOPE_SLICE = (function () {
         if (!parsed.moves.length) return refuse('The slice has no extrusion moves - nothing thick enough for one line.');
         var name = d.name + ' - NSO slice (' + opts.nozzleMm + ' mm nozzle, ' + opts.layerMm + ' mm layers)';
         pending = { source: source, result: r, name: name, flagged: flagged, ms: Date.now() - t0 };
+        /* each support is an object of its own in the G-code (OBJECT_ID: the slice's object id): which head it holds,
+           so Compare Pieces takes a head with its supports, as Bambu's slice labels them */
+        var pieceHeads = new Map();
+        (r.objects || []).forEach(function (o) {
+          if (o.role === 'part' || o.hostKey == null) return;
+          var h = r.objects.find(function (q) { return q.role === 'part' && q.key != null && q.key === o.hostKey; });
+          if (h) pieceHeads.set(String(o.id), String(h.id));
+        });
         var nd = MS().openToolpathResult(name, {
-          plate: 1, part: 'NSO in-house slice', plates: [1], parsed: parsed, groups: null, warnings: parsed.warnings
+          plate: 1, part: 'NSO in-house slice', plates: [1], parsed: parsed, groups: null, warnings: parsed.warnings,
+          pieceHeads: pieceHeads
         });
         if (!nd) { pending = null; return refuse('G-scope could not open the slice.'); }
         say('Sliced ' + d.name + ': ' + r.planes.length + ' layers, ' + parsed.moves.length + ' moves' +

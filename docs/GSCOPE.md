@@ -61,24 +61,32 @@ starts in.
 
 Item 9: CLEAR empties the active plate and nothing else. Shift-CLEAR is gone.
 
-## 3. CLOSE and BACK end the visit (round 1a)
+## 3. CLOSE and BACK keep the plates (round 1a; 2026-11-11)
 
-CLOSE, BACK (a producer's way back, e.g. Picture), and every export that leaves
-G-scope end the visit **whole**. The next open starts on plate 1 with:
-- a fresh read of the plate, or of the imported file if either plate was
-  showing it (or a slice made from it) when G-scope closed;
-- nothing isolated, nothing selected, no capture box, the slider at All;
-- the Features list's defaults (Travel off), Toolpath render, REGION off (a
-  click is the piece's), the ▾ menu and the Export card shut, the Slice
-  settings folded and back to the printer profile (item 12);
-- plate 2 empty, and the default view (◎'s framing of both plates).
+Since 2026-11-11 (the owner: "make all plates survive a close, so I can jump back
+and forth between main and G-scope") CLOSE, BACK (a producer's way back, e.g.
+Picture), and every export that leaves G-scope **put G-scope away with its plates**:
 
-**Nothing from the previous visit survives except an imported file**, and a
-CLEAR of the plate that showed it drops that too (item 9).
+- plate 1, plate 2 and plate 3 (a compare, its Compare state with it) come back
+  as they were left when the rail button opens G-scope again - the same
+  documents, what was isolated or selected, the slider, the Features list - on
+  the plate that was showing;
+- **plate 1, when it is a read of the main plate, is read again** on that open
+  (the main plate may have changed meanwhile; an empty main plate empties it).
+  Anything else on plate 1 - an import, a slice - is kept as it was;
+- a close still ends what is half done: a Compare pick, the drag in hand, the
+  ▾ menu or Export card, REGION;
+- while G-scope is put away plate 1 is the active plate, so a file or a slice
+  opened from the main view (Import, the Supports card's Preview) lands on
+  plate 1 as before, and plates 2 and 3 are untouched.
 
-`close()` empties both plates (`reset`) and keeps only `importedDoc`; the rail
-button reopens a copy of `importedDoc` with `open()` (which resets everything
-about it) or reads the plate.
+With nothing on any plate a close is the old end of the visit: `reset()`, and
+the next open reads the plate (or the imported file) fresh. `NSO_MICROSCOPE.reset()`
+still drops everything.
+
+`close()` keeps the scene and records the plate that was showing
+(`keptPlate`); the rail button calls `resumeKept()` before anything else.
+Gate: `gscope:close-keep` (tools/nso_gscope_close_keep_test.js).
 
 ## 4. The Features list: checkboxes only (round 1b)
 
@@ -623,7 +631,23 @@ plate 2, and both land on plate 3. A segment is in when its midpoint is inside t
 centroid is. A loop that holds nothing, or a stroke that encloses nothing (under 3 mm across), is refused and you draw it again; Esc or the button again leaves the pick. **Selected** is the older way: isolate something on each plate - a
 piece with its supports, one line type, a layer band: whatever a drag would carry - then press it. On plate 3,
 plate 1's is at the left in orange and plate 2's at the right in blue, each at the height it came from, the
-camera close on them. Plates 1 and 2 are not touched: with Pieces or Lasso each plate is made whole again (un-isolated,
+camera close on them.
+
+**What a Pieces click takes (2026-11-11).** A piece is a head **with its supports and brim**, as one body, whichever
+of them is clicked:
+- *One OBJECT_ID, many bodies* (a plate exported as one STL, e.g. supp_ref_2x: six heads under id 318): the click takes
+  the **island** under the pointer - the lines of that id that touch it layer on layer (1 mm cells, layers up to
+  0.65 mm below; `islandOf`).
+- *A head and its supports as separate ids* (NSO's own slice: every support and brim is an object of its own, so
+  Export and the exclude mask can name it; Bambu prints them under the head's label): G-scope reads which head each id
+  holds - the Supports card's slice from the document's `nsoPlateSlice` (labels -> plate pieces -> `hostSourceId`),
+  G-scope's Slice switch from `pieceHeads` (the slicer's result now reports each object's `key` / `hostKey`) - and
+  the click takes the head's group, then its island (`headsOf`, `headOf`). The owner's Oblique came out as two
+  pieces, depending on whether the lip was clicked.
+- Outside Compare a click still takes one OBJECT_ID.
+Gates: `gscope:compare-island`, `gscope:compare-heads`.
+
+Plates 1 and 2 are not touched: with Pieces or Lasso each plate is made whole again (un-isolated,
 nothing selected) as soon as its pick is taken, so **Clear compare** empties plate 3 and returns to plates 1 and 2 side by
 side, whole, with no selection. **Overlay** moves the blue
 one so the two parts' outlines coincide (XY only; the heights stay; with no part walls - supports alone - it

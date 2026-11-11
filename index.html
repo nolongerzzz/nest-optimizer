@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=de78c7b1" />
+  <link rel="stylesheet" href="styles.css?v=d456a556" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -2475,8 +2475,10 @@
       <!-- BACK (round 3b, docs/GSCOPE.md item 14): beside the card's head. One step back
            along the view's own changes, per plate; grey at the starting point. It never
            closes G-scope (Close does) and never touches what a plate holds. -->
+      <div class="ms-step-back-hold">
       <button id="ms-btn-step-back" type="button" class="ms-step-back" disabled
               title="Back one step: undo the latest change to the view - an isolate, a box, REGION, an opened card or row, the slider, a line type's check. Grey when there is nothing to step back from">&#8617; Back</button>
+      </div>
       <div id="ms-main-card" class="ms-main-card" role="group" aria-label="G-scope" data-side="normal">
         <div class="ms-main-head">
           <div class="ms-import" role="group" aria-label="Import">
@@ -2921,7 +2923,7 @@
   <script src="nso-gcode-lines.js?v=fe0b823c"></script>
   <script src="nso-gscope-diff.js?v=937f4953"></script>
   <script src="nso-gcode-solid.js?v=ac1a4f02"></script>
-  <script src="nso_slicer.js?v=3c493018"></script>
+  <script src="nso_slicer.js?v=87648c51"></script>
   <script src="nso_raster_lines.js?v=461ca449"></script>
   <!-- The support interface: the crosshatch's one-direction layers, and the
        sheet a support tree's tips carry under the part (flat caps on the
@@ -3099,7 +3101,7 @@
        row each under the Flange row. Pure. docs/GSCOPE-FEATURES.md. -->
   <script src="nso_face_features.js?v=53ee4b23"></script>
   <script src="nso_gscope_measure.js?v=c5595269"></script>
-  <script src="app-microscope.js?v=f4dfbbc0"></script>
+  <script src="app-microscope.js?v=f04a76b5"></script>
   <!-- Detach / Reattach (Cut menu): cap a detected flange's hull on its own
        wall, lift the flange out as a piece, seat it elsewhere with Attach's
        seat. After nso_flange.js, app-crop.js, nso_assemble.js, app-assemble.js
@@ -3118,7 +3120,7 @@
   <script src="nso_support_blockers.js?v=6962a81c"></script>
   <script src="app-support-blockers.js?v=73c8125d"></script>
   <script src="app-supports-card.js?v=85c42f89"></script>
-  <script src="app-gscope-slice.js?v=35933b35"></script>
+  <script src="app-gscope-slice.js?v=5cc6e2f5"></script>
   <!-- The Slice card (left bar): the plate sliced for its printer, the .gcode.3mf
        it makes. The print planner and the packager are loaded here for it and for
        its slice worker (which importScripts them from these tags); no G-scope file

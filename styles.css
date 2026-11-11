@@ -813,6 +813,19 @@ select:focus, input:focus {
   cursor: not-allowed;
 }
 
+/* G-scope: a disabled control takes no pointer - a press, and above all a RIGHT-click, lands on what is behind it.
+   Some browsers (the owner's, 2026-11-11) deliver no mouse event at all to a disabled form control, so the page's guard
+   that shuts the browser's own menu everywhere but the web-tools bubbles (app-core.js wireNativeMenuGate) never heard
+   that right-click, and the browser menu opened over G-scope's disabled Back, Region, Isolate, Clear boxes, Whole part
+   and Export. Behind each is its card, or a holder that is there to catch it (.ms-corner, .ms-step-back-hold) - never
+   the 3D view, which would take the click as its own. The cost: a disabled control shows no tooltip. */
+#microscope button:disabled,
+#microscope input:disabled,
+#microscope select:disabled,
+#microscope textarea:disabled {
+  pointer-events: none;
+}
+
 .btn-primary {
   background: var(--accent);
   color: white;
@@ -3205,7 +3218,7 @@ select:focus, input:focus {
   z-index: 7;
   display: flex;
   gap: var(--shell-gap);
-  pointer-events: none;
+  pointer-events: auto;        /* it catches what a disabled button lets through (above), not the 3D view behind */
 }
 
 /* A card that opens (IMPORT's ▾ menu, Export): the main shell's panel. Only
@@ -3444,11 +3457,15 @@ select:focus, input:focus {
 .ms-main-card .ms-play-scrub { width: 100%; margin: 8px 0 2px; }
 #ms-play-read { white-space: pre-line; }
 /* BACK: beside the card's head, the corner slabs' own glass. */
-.ms-step-back {
+/* the holder is where BACK stands; it catches a press on BACK while it is disabled (above), not the 3D view behind */
+.ms-step-back-hold {
   position: absolute;
   left: calc(var(--shell-pad) - 1px + 300px + 8px);
   top: calc(var(--shell-pad) - 1px);
   z-index: 8;
+  display: flex;
+}
+.ms-step-back {
   height: var(--shell-btn-h);
   display: flex;
   align-items: center;

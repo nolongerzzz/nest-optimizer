@@ -1842,6 +1842,7 @@
           });
           return {
             id: P.id, name: P.name, flipped: P.flipped, nonSolid: P.nonSolid, role: P.role, planes: P.planes || null,
+            key: P.key, hostKey: P.hostKey,       /* the caller's own: G-scope groups a support with the head it holds */
             support: P.sheet || null,
             triangles: P.mesh.triangles, degenerate: P.mesh.degenerate,
             sectionStats: st,

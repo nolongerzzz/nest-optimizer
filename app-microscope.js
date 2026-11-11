@@ -246,6 +246,8 @@ var NSO_MICROSCOPE = (function () {
       zBottom: zBottom,
       parsed: res.parsed,
       objects: null,
+      // OBJECT_ID -> the OBJECT_ID of the head it supports (NSO's slice: each support is an object of its own); see headOf
+      pieceHeads: res.pieceHeads || null,
       // Swept chains, keyed by first:last move - see NSOGcodeSolid.buildSolid.
       // Per document, because a chain key means nothing in another file.
       solidCache: new Map(),
@@ -483,7 +485,7 @@ var NSO_MICROSCOPE = (function () {
   /**
    * Read one file into the view. Resolves with the document, or null on a
    * failure that has already been reported. A file that opens is the
-   * IMPORTED file: the one thing a close does not throw away (close()).
+   * IMPORTED file: the one thing that comes back even after a close that kept nothing (close()).
    */
   function load(filename, arrayBuffer) {
     return loadFile(filename, arrayBuffer).then(function (d) {
@@ -1635,6 +1637,18 @@ var NSO_MICROSCOPE = (function () {
   }
 
   /**
+   * The piece a click on line `sg` takes (a copy): its OBJECT_ID's shown lines - or, in a Compare Pieces pick, the body
+   * under the pointer with its supports (its island), not every body that shares its OBJECT_ID, and not the head
+   * without the supports NSO's slice prints as objects of their own.
+   */
+  function pieceOfSeg(sg) {
+    var shown = shownMemo();
+    if (!shown.byObj.has(sg.obj)) shown.byObj.set(sg.obj, shown.list.filter(function (x) { return x.obj === sg.obj; }));
+    var isle = cmpPick && cmpPick.shape === 'piece' ? islandOf(shown, sg) : null;
+    return (isle || shown.byObj.get(sg.obj)).slice();
+  }
+
+  /**
    * What a click here would take, in the current mode: { items, source, point,
    * label } or null. Items are a slice's segments or a mesh's objects - the one
    * selection every export and pull already reads.
@@ -1654,11 +1668,7 @@ var NSO_MICROSCOPE = (function () {
         t = selectByBox([gcodeBoxOf(tb)]);
         return { items: t, source: 'box', point: lh.point, box: tb, label: 'region', seg: sg };
       }
-      var shown = shownMemo();
-      if (!shown.byObj.has(sg.obj)) shown.byObj.set(sg.obj, shown.list.filter(function (x) { return x.obj === sg.obj; }));
-      // Compare, Pieces: the body under the pointer with its supports (its island), not every body that shares its OBJECT_ID
-      var isle = cmpPick && cmpPick.shape === 'piece' ? islandOf(shown, sg) : null;
-      return { items: (isle || shown.byObj.get(sg.obj)).slice(), source: 'pick', point: lh.point, label: 'piece', seg: sg };
+      return { items: pieceOfSeg(sg), source: 'pick', point: lh.point, label: 'piece', seg: sg };
     }
     var oh = objectHitAt(e);
     if (!oh) return null;
@@ -4157,11 +4167,14 @@ var NSO_MICROSCOPE = (function () {
    */
   var ISLAND_CELL_MM = 1, ISLAND_DZ_MM = 0.65;
   function islandOf(shown, sg) {
-    var kept = shown.islands.get(sg.obj);
+    // the piece is the head with its supports: NSO's slice prints each support as an object of its own (Bambu prints
+    // a head's supports under the head's label), so its lines are grouped by headOf first, then split into islands
+    var heads = headsOf(doc), key = headOf(heads, sg.obj);
+    var kept = shown.islands.get((heads ? 'h' : 'o') + key);
     if (!kept) {
-      if (!shown.byObj.has(sg.obj)) shown.byObj.set(sg.obj, shown.list.filter(function (x) { return x.obj === sg.obj; }));
-      kept = { of: islandsOf(shown.byObj.get(sg.obj)), groups: new Map() };
-      shown.islands.set(sg.obj, kept);
+      var group = shown.list.filter(function (x) { return headOf(heads, x.obj) === key; });
+      kept = { of: islandsOf(group), groups: new Map() };
+      shown.islands.set((heads ? 'h' : 'o') + key, kept);
     }
     var root = kept.of.get(sg);
     if (root == null) return null;
@@ -4171,6 +4184,34 @@ var NSO_MICROSCOPE = (function () {
       kept.groups.set(root, list);
     }
     return kept.groups.get(root);
+  }
+
+  /**
+   * OBJECT_ID -> the OBJECT_ID of the head it supports, for a slice whose supports are objects of their own (a Map, or
+   * null when nothing says so): NSO's slice from the Supports card (the document's nsoPlateSlice: its labels name each
+   * id's plate piece, and a support piece names its host) or from G-scope's Slice switch (pieceHeads, as it sliced).
+   */
+  function headsOf(d) {
+    if (!d) return null;
+    if (d.pieceHeads) return d.pieceHeads;
+    var rec = d.nsoPlateSlice;
+    if (!rec || !rec.labels || !rec.pieces) return null;
+    if (d.headsKept && d.headsKept.rec === rec) return d.headsKept.map;
+    var labelOf = {}, map = new Map();
+    rec.labels.forEach(function (l) { labelOf[l.index] = l.id; });
+    rec.labels.forEach(function (l) {
+      var p = rec.pieces[l.index];
+      if (!p || !p.support || p.hostSourceId == null) return;
+      var h = rec.pieces.findIndex(function (q) { return q && !q.support && q.sourceId === p.hostSourceId; });
+      if (h >= 0 && labelOf[h] != null) map.set(String(l.id), String(labelOf[h]));
+    });
+    d.headsKept = { rec: rec, map: map };
+    return map;
+  }
+  /** The head an OBJECT_ID stands for: its host when it is a support, else itself (keys compared as strings). */
+  function headOf(heads, obj) {
+    var k = obj == null ? '' : String(obj);
+    return heads && heads.has(k) ? heads.get(k) : k;
   }
 
   /** Map segment -> its island's number, for one piece's shown segments (union-find over a grid of cells per layer). */
@@ -6139,16 +6180,19 @@ var NSO_MICROSCOPE = (function () {
   }
 
   /**
-   * CLOSE (and BACK, and every export that leaves G-scope) end the visit
-   * whole. Nothing of it survives but an imported file: plate 2 is thrown
-   * away, plate 1 is emptied, the Display set, the render mode, REGION and the
-   * open ▾ menu or Export card go back to their defaults (the Slice settings
-   * fold and take the printer profile again: app-gscope-slice.js), and the next open starts from a
-   * fresh read of the plate - or of the imported file, if plate 1 was showing
-   * it (or a slice made from it) when G-scope closed.
+   * CLOSE (and BACK, and every export that leaves G-scope) puts G-scope away and KEEPS ITS PLATES: plate 1, plate 2
+   * and plate 3 (a compare, with its state) are as they were left when the G-scope button opens it again, on the
+   * plate that was showing - so the owner can go back and forth between the main view and G-scope. What a close does
+   * end: a Compare pick half made, the drag in hand, the open ▾ menu or Export card, REGION. Plate 1 is the active
+   * plate while G-scope is put away, so a file or a slice opened from the main view (Preview, Import) lands on plate 1
+   * as it always has, and the other plates are untouched. A plate 1 that is a read of the main plate is read again on
+   * the next open (the main plate may have changed since); anything else on it - an import, a slice - is kept.
+   * With nothing on any plate a close is the old end of the visit: everything back to its defaults.
    */
+  var keptPlate = null;           // the plate that was showing when G-scope was put away with its plates kept
   function close() {
     cancelPull();
+    if (cmpPick) comparePickCancel(true);
     var panel = $('microscope');
     if (panel) panel.hidden = true;
     var btn = $('btn-microscope');
@@ -6157,10 +6201,39 @@ var NSO_MICROSCOPE = (function () {
     loop++;                       // retires any frame already in flight
     if (!showsImport(lensDoc()) && !showsImport(plateDoc('take'))) importedDoc = null;
     shellCardClose();
+    var any = PLATES.some(function (n) { return !!plateDoc(n); });
+    if (view && any) {
+      clearHover();
+      setMode('piece');
+      keptPlate = plateName;
+      if (plateName !== 'lens') showPlate('lens', { quiet: true });
+      return;
+    }
+    keptPlate = null;
     reset();
     FEATURE_OFF = new Set(['Travel']);
     renderMode = 'toolpath';
     setMode('piece');
+  }
+
+  /**
+   * The G-scope button after a close that kept the plates: every plate as it was left, on the plate that was showing.
+   * Plate 1, when it is a read of the main plate, is read again (an empty main plate empties it). Null when nothing
+   * was kept.
+   */
+  function resumeKept() {
+    if (keptPlate == null || !PLATES.some(function (n) { return !!plateDoc(n); })) { keptPlate = null; return null; }
+    var back = keptPlate;
+    keptPlate = null;
+    openPanel();
+    if (!view) return null;
+    if (plateName !== 'lens') showPlate('lens', { quiet: true });
+    var ld = lensDoc();
+    if (ld && ld.source === 'plate' && !openPlate()) emptyPlate('lens');
+    if (!plateDoc(back) && back !== 'lens') back = 'lens';
+    if (back !== plateName) showPlate(back);
+    else { syncPlate(); redrawDoc(false); }
+    return plateDoc(plateName) || lensDoc() || true;
   }
 
   /** Is this plate's document the imported file - as opened, re-opened, or a slice made from it? */
@@ -7174,8 +7247,9 @@ var NSO_MICROSCOPE = (function () {
     // ▾ Read plate is how you go back to the plate from one.
     bind('btn-microscope', 'click', function () {
       if (isOpen()) { close(); return; }
-      // Every open is a fresh one (close() ended the last visit whole): the
-      // imported file if one is loaded, else the plate read again.
+      // The plates a close kept, as they were left (plate 1 read again when it is the main plate's read)
+      if (resumeKept()) return;
+      // Nothing kept: the imported file if one is loaded, else the plate read again.
       if (importedDoc && reopenImport()) return;
       if (openPlate()) return;
       openPanel();
@@ -7317,7 +7391,7 @@ var NSO_MICROSCOPE = (function () {
     close: close,
     isOpen: isOpen,
     /** Both plates empty, and an imported file forgotten too: the next open reads the plate. */
-    reset: function () { importedDoc = null; reset(); },
+    reset: function () { importedDoc = null; keptPlate = null; reset(); },
     load: load,
     openPlate: openPlate,
     openObjects: openObjects,
@@ -7336,7 +7410,7 @@ var NSO_MICROSCOPE = (function () {
       return o;
     },
     isIsolated: function () { return isolated; },
-    pressTargetAt: function (x, y) { var t = pressTarget({ clientX: x, clientY: y }); return t ? { source: t.source, count: t.items.length, selected: !!t.selected } : null; },
+    pressTargetAt: function (x, y) { var t = pressTarget({ clientX: x, clientY: y }); return t ? { source: t.source, count: t.items.length, selected: !!t.selected, obj: t.seg ? t.seg.obj : null } : null; },
     mode: function () { return mode; },
     addBoxAt: function (gx, gy, gz, r, h, ry, a) {
       // A capture box placed by G-code coordinates rather than by a click, so a
@@ -7550,6 +7624,16 @@ var NSO_MICROSCOPE = (function () {
       }
       isolate();                                  // a click on a piece isolates it, as clickTarget does
       return currentSelection;
+    },
+    /** A click on line `segId` of the active slice, taken as the 3D view takes one (piece mode, no REGION), without the
+     *  ray: the same piece (pieceOfSeg), selected as a 'pick' - a Compare Pieces pick hears it as it hears a click. */
+    pickSegment: function (segId) {
+      if (!doc || doc.kind !== 'toolpath' || isolated || mode === 'select') return [];
+      var sg = doc.segments[segId];
+      if (!sg || !segShown(sg)) return [];
+      removeAllBalls();
+      setSelection(pieceOfSeg(sg), 'pick');
+      return currentSelection.length;
     },
     getView: function () { return view; },
     /** Switch a control off without dropping the keyboard (app-gscope-slice.js's switch uses it). */

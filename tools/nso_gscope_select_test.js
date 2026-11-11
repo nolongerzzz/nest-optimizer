@@ -950,6 +950,10 @@ withApp(async (page, logs) => {
     const re = await page.evaluate(() => ({ side: NSO_MICROSCOPE.cardSide(), mode: NSO_MICROSCOPE.mode(), n: NSO_MICROSCOPE.getDoc().segments.length,
       folded: document.getElementById('ms-slice-settings').hidden }));
     check('...and G-scope opens again on the imported slice, a fresh visit (Slice side, the piece, the settings folded)', re.side === 'slice' && re.mode === 'piece' && re.n === 51 && re.folded, J(re));
+    // a close keeps the plates now (docs/GSCOPE.md item 3): plate 2's pieces from the sections before are emptied here,
+    // so the sections after start with plate 2 empty, as a close used to leave it
+    await page.evaluate(() => { const M = NSO_MICROSCOPE; M.showPlate('take'); document.getElementById('ms-btn-take-clear').click(); M.showPlate('lens'); });
+    await frames(page);
     dest = await bedPoints();
   }
 

@@ -710,8 +710,8 @@ async function main() {
   await page.focus('#microscope');
   await page.keyboard.press('Escape');
   check('Escape closes it too', await page.isVisible('#microscope'), false);
-  // A close ends the visit whole (docs/GSCOPE.md, item 3): only the imported
-  // file survives it, and the next open reads it again.
+  // A close keeps the plates (docs/GSCOPE.md, item 3): the file is still
+  // there on the next open.
   await openPanelViaRail(page);
   check('and the file stays loaded for the next open',
     await page.evaluate(() => window.NSO_MICROSCOPE.getDoc().segments.length), 202877);
