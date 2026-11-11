@@ -381,6 +381,8 @@
     "tube:edges": {"weight":31750,"note":""},
     "tube:edges-drive": {"weight":57250,"note":""},
     "cylinders:drive": {"weight":25000,"note":""},
+    "tube:square": {"weight":60000,"note":"estimate: node tools/nso_square_tube_test.js locally ~40 s - Manifold unions for 5 square branches, mesh_validate + NSO_Repair on each output"},
+    "tube:square-drive": {"weight":40000,"note":"estimate: node tools/nso_square_tube_drive_check.js locally - two square branches welded in the page"},
     "rod:branch": {"weight":125000,"note":"measured: node tools/nso_rod_branch_test.js, 287 checks, 123 s - Manifold unions, mesh_validate + NSO_Repair on each output, Limb bends"},
     "fittings": {"weight":13720,"note":"measured: node tools/nso_fittings_test.js, 114 checks, mesh_validate on each output"},
     "fittings:drive": {"weight":35000,"note":"measured: the real Fittings card - 16 drawn tiles, sliders, live preview (generic and tube-read cap, threaded ends, async splitter), Add to plate, refusals"},

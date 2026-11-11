@@ -1195,3 +1195,90 @@ tip read back at its Ø and bore; a tube branch off a tube branch; Limb on one;
 refusals), and section 8 of the Cylinders drive (Tubes reads "Tubes", Branch
 in its Verb, the Bore row, defaults, press + drag, Set, Euler −2 on the page's
 own piece, one Undo; no Bore row in Cylinders).
+
+## Square tubes — Reducer, Neck and Branch on a square tube (2026-11-11)
+
+Tubes' card has a **Square tubes** toggle (`chk-te-square`; Tubes only, not
+Cylinders). Ticked, the card works on a tube whose section is a **square
+wall round a square bore** — the trunk and branches of a tree support drawn as
+square tubes, after Bambu's tree trunks. Its verbs are **Reducer**, **Neck**
+and **Branch** (Roll and Keep length are not offered); the same fields, read
+as **sides** (mm across the flats: New side, Side, Bore, Tip) and **Δ** as a
+change of half-side. A row at the top — Side, Wall, Length, **Add square
+tube** — puts a new square tube on the plate (both ends open, standing on the
+plate, selected; one Undo) to start a tree from. Squares mark the end, the
+band and the branch in place of rings; they are markers, not handles (type,
+slide, click the tube for a neck, press and drag for a branch, as Tubes →
+Branch).
+
+```
+node tools/nso_square_tube_test.js           headless: reader, Reducer, Neck, Branch (the shipped boolean), refusals (npm: tube:square)
+node tools/nso_square_tube_drive_check.js    the real app: toggle, Add square tube, each verb's Set, Undo, a press-and-drag branch (npm: tube:square-drive)
+SQ_TUBE_SHOTS=dir node tools/nso_square_tube_drive_check.js   ...and screenshots
+```
+
+The engine is `nso_square_tube.js` (loaded after nso_tube_edge.js,
+nso_bend.js and nso_rod_branch.js, whose weld, face finder, topology counter
+and tube-branch booleans it uses; it carries no copy of them).
+
+**The end.** A flat face (Tube edge's face finder) with two boundary loops,
+each a square: exactly four corners (a turn over ~1°), every other point on
+the line between two corners, four equal sides at right angles (within
+max(0.02 mm, 0.2%)), the two concentric with parallel sides. That gives the
+centre, the axis (the face's normal, outward), the half-sides a and b, the
+wall t = a − b and a frame along the outside's sides. A click picks the end
+nearest it; none, the highest. A rectangle, a closed square end (a solid
+bar) and a round end refuse by name.
+
+**The radial line of a square** is a scaling about the axis: a vertex (x, y)
+of the loop of half-side r goes to (x, y)·r′/r. Each new ring is the old
+ring's vertices carried along theirs, so station 0 is the loop itself (the
+same float32 bits) and the new wall shares the old one's edges. Where two
+loops of different vertices meet (a lip, the last station of a neck and the
+ring above it) they are zipped side by side, a ladder per side, corner to
+corner — each such band is planar per side, so the volume gate's prismatoid
+sum is exact.
+
+| verb | what it does |
+|---|---|
+| **Reducer** | the end becomes a square pipe of side S2 and bore B2: each face from its own half-side to its target over Transition T, Straight (a plane per side) or Trumpet (tangent to the tube, the half-side changing as the square of the length, sampled to 0.01 mm sag), then Run straight on, square and open. The wall at the run is (S2 − B2)/2 exactly; through the transition it is measured square to the faces and held to the floor (nso_thickness.js). Defaults on a new end: 4 mm under its own side and bore over 10 mm — a trunk narrowing. |
+| **Neck** | a band of Length centred where the tube is clicked (blank: its middle), the wall moved by Δ (below 0 a pinch). Smooth: a cosine; Funnel: straight in and out. **Walls Both** carries the section: Smooth's faces are offsets ±t/2 of the mid-wall's curve; Funnel's are the outside's polyline and its lines a wall in, the face on the inside of each bend sharp and the other round it on an arc of radius t — the waist exactly a + Δ / b + Δ, the wall t square to the faces. Outside only / Bore only move that face alone. The band's triangles on each moving face are taken out, grown until they run between two whole rings, and rebuilt. |
+| **Branch** | press a side face and drag outward: a square tube of Side / Bore / Tip (a taper keeps its wall), Length and Angle (20° – 160° off the axis, in the plane of the axis and the face's normal), its square turned to the face (a 90° branch is a square tee, 45° a wye). The foot is moved along the face, if need be, so it stays on that one face. Welded with Tubes → Branch's three booleans (`NSO_rbWeldTube`) and its gates: one solid, closed and 2-manifold, Euler down by exactly 2, the volume grown by no more than the branch's outside solid; a kernel answer that is not clean is tried again with the root buried a little deeper. Its tip is an open square end, so branches grow off branches and a Reducer narrows a tip. |
+
+**Gates (Reducer, Neck)**, on the output: Bend's topology counter — nothing
+opened, doubled or mis-wound, Euler unchanged — and the volume change
+against the frusta within 1e-3. Everything off the rebuilt faces is copied bit
+for bit.
+
+**Refusals**, in words, the piece unchanged: no open square end (a round
+tube points at Tubes with Square tubes off); a bore under 2 nozzle widths
+across; a wall under the floor (with the widest bore it allows); a face
+steeper than 75° (with the transition it needs); a 0 mm transition with a
+change; a neck past either end, too short to carry the wall (with the length
+it needs), closing the bore (with the most it may pinch), or over a stretch
+that is not straight square tube — a neck, a branch's junction, a reducer
+already there (**necks may not overlap**); a branch as wide as the face, a
+press on the end or the bore, an angle outside 20° – 160°.
+
+Undo types `squareReducerReplace`, `squareNeckReplace`,
+`squareBranchReplace` ("Undo: Square … reverted"). Paint stands it down, as
+Tubes.
+
+### Numbers
+
+From `tools/nso_square_tube_test.js` (114 checks; every output closed,
+2-manifold, consistently wound, `mesh_validate.py --gate` PASS with no piercing
+pairs; sections read off the output at a height):
+
+| piece and treatment | in → out triangles | measured |
+|---|---|---|
+| Square tube 20 / 16.8 × 40 (Add square tube's) | — → 3,192 | volume 4,710.40 = (20² − 16.8²) × 40 |
+| reducer → 12 / 8.8 over 10, run 5 | 3,192 → 3,496 | run 12.000 / 8.800; half-way 16.000 / 12.800; volume the frusta's |
+| …then a trumpet reducer on its end → 8 / 5.6 over 6, run 4 | 3,496 → 4,864 | run 8.000 / 5.600 |
+| expander → 28 / 24.8 over 12, trumpet | 3,192 → 4,864 | lip 28 / 24.8 |
+| neck smooth, Both, Δ −2 over 12 | 3,192 → 6,232 | waist 16.0 / 12.8; wall 1.596 |
+| neck funnel, Both, Δ −2 over 12 | 3,192 → 3,120 | waist bore 12.82; wall 1.591 |
+| two necks 10 mm apart | 6,840 → 7,072 | both waists there; a third overlapping refused |
+| four branches on a 20 / 16.8 × 80 trunk (90°, 45°, 30° tapered, 120°), one off a branch, a reducer on a tip, a neck above them | 6,232 → 77,728 | Euler 0 → −10; each tip read back as an open square end at its side and bore |
+
+A square branch welds in 2 – 6 s under node (the kernel's three booleans).

@@ -3964,6 +3964,13 @@ button.ms-legend-btn:disabled { opacity: 0.4; cursor: default; }
    the card is too narrow for two label-field-unit rows side by side, so each
    label stands over its field, the unit after the field */
 .te-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 3px 6px; }
+/* Square tubes: the toggle, and the new square tube's three numbers and its button */
+.vp-flag-tesq { margin-bottom: 2px; }
+.vp-flag-tesq[hidden] { display: none; }
+.te-sq-new { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr); }
+.te-sq-new .btn { grid-column: 1 / -1; }
+.te-pair.te-sq-new .vp-bend-field { grid-template-columns: minmax(0, 1fr); }
+.te-sq-new .vp-bend-field > span { display: none; }
 .te-pair .vp-bend-field { grid-template-columns: minmax(0, 1fr) 18px; row-gap: 1px; }
 .te-pair .te-lbl { grid-column: 1 / -1; font-style: normal; }
 /* The Reducer's on-piece measurement while a handle is in hand: MEASURE's

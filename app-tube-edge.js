@@ -70,6 +70,16 @@
 // from the other; Set's undo type is 'rodNeckReplace'. docs/TUBE-EDGE.md,
 // "Cylinders".
 //
+// SQUARE TUBES (the card's chk-te-square toggle, Tubes only): Reducer, Neck and
+// Branch on a tube whose section is a square wall round a square bore -
+// nso_square_tube.js. The same fields, read as sides (mm across the flats) and
+// Δ as a change of half-side; Roll and Keep length are not offered. Squares mark
+// the end, the band and the branch in place of rings (they are not handles:
+// type, slide, or for a branch press and drag as Tubes → Branch). A row adds a
+// new square tube to the plate to start a tree from. Undo types
+// 'squareReducerReplace', 'squareNeckReplace', 'squareBranchReplace'.
+// docs/TUBE-EDGE.md, "Square tubes".
+//
 // Set commits through the sculpt commit (undo type 'tubeEdgeReplace', or
 // 'tubeNeckReplace' for a neck), so one Undo puts the whole piece back, and
 // the piece re-seats on the plate the way any bake does. Several necks on one
@@ -829,6 +839,20 @@ function NSO_teSyncRows() {
   ['te-br-bore-row'].forEach(function (id) { var el = NSO_teEl(id); if (el) el.hidden = verb !== 'branch' || rod; });
   ['te-dir-row'].forEach(function (id) { var el = NSO_teEl(id); if (el) el.hidden = verb !== 'roll'; });
   ['te-walls-row'].forEach(function (id) { var el = NSO_teEl(id); if (el) el.hidden = verb !== 'neck' || rod; });
+  // Square tubes: no Roll, no Keep length; the sizes read as sides
+  var sq = NSO_teSquareOn(), sr = NSO_teEl('te-square-row'), nr = NSO_teEl('te-sq-new-rows'), ro = NSO_teEl('opt-te-roll');
+  if (sr) sr.hidden = rod;
+  if (nr) nr.hidden = !sq;
+  if (ro) { ro.hidden = sq; ro.disabled = sq; }
+  var vs = NSO_teEl('sel-te-verb');
+  if (sq && vs && vs.value === 'roll') vs.value = 'reducer';
+  var kp = NSO_teEl('chk-te-keep'), kl = kp && kp.closest ? kp.closest('label') : null;
+  if (kl) kl.hidden = sq;
+  if (typeof document !== 'undefined' && document.querySelectorAll) {
+    Array.prototype.forEach.call(document.querySelectorAll('#te-panel [data-sq]'), function (el) {
+      el.textContent = sq ? el.getAttribute('data-sq') : el.getAttribute('data-round');
+    });
+  }
 }
 function NSO_teSyncButtons() {
   var B = NSO_teUI(), go = NSO_teEl('btn-te-go');
@@ -837,13 +861,18 @@ function NSO_teSyncButtons() {
 
 function NSO_teVerb() {
   if (NSO_teUI().rod) return (NSO_teEl('sel-te-rod-verb') || {}).value === 'branch' ? 'branch' : 'neck';
-  return (NSO_teEl('sel-te-verb') || {}).value || 'reducer';
+  var v = (NSO_teEl('sel-te-verb') || {}).value || 'reducer';
+  return v === 'roll' && NSO_teSquareOn() ? 'reducer' : v;
 }
 // What the piece is read for: a neck's axis, a branch's parent rod, or a tube's end.
-function NSO_teReadKind() { var v = NSO_teVerb(); return v === 'neck' ? 'neck' : v === 'branch' ? 'branch' : 'end'; }
+function NSO_teReadKind() {
+  var v = NSO_teVerb(), k = v === 'neck' ? 'neck' : v === 'branch' ? 'branch' : 'end';
+  return NSO_teSquareOn() ? 'sq-' + k : k;
+}
 // What the card is working on, in words: 'Cylinder neck' / 'Branch' for a rod, else the verb's.
 function NSO_teName(neck) {
   var B = NSO_teUI();
+  if (NSO_teSquareOn()) return { reducer: 'Square reducer', neck: 'Square neck', branch: 'Square branch' }[NSO_teVerb()] || 'Square tubes';
   if (B.rod) return NSO_teVerb() === 'branch' ? 'Branch' : 'Cylinder neck';
   if (NSO_teVerb() === 'branch') return 'Tube branch';
   return neck ? 'Neck' : 'Tube edge';
@@ -858,9 +887,11 @@ function NSO_teLoad() {
   B.readVerb = NSO_teReadKind();
   if (!m) {
     B.read = null;
-    NSO_teReadout(B.rod ? 'Select a solid rod or cylinder to ' + (B.readVerb === 'branch' ? 'grow a branch from.' : 'neck.') : 'Select a tube to reduce, expand, roll or neck.', true);
+    NSO_teReadout(B.rod ? 'Select a solid rod or cylinder to ' + (B.readVerb === 'branch' ? 'grow a branch from.' : 'neck.')
+                        : NSO_teSquareOn() ? 'Select a square tube to reduce, neck or branch - or Add square tube to start one.' : 'Select a tube to reduce, expand, roll or neck.', true);
     NSO_teClear(); NSO_teSyncButtons(); return;
   }
+  if (NSO_teSquareOn()) { NSO_teSqLoad(B, m); return; }
   if (B.readVerb === 'branch') { NSO_teBranchLoad(B, m); return; }
   var rd;
   try { rd = neck ? NSO_tubeNeckRead(m.rawTris, B.rod ? { rod: true } : undefined) : NSO_tubeEdgeRead(m.rawTris, { point: B.point }); }
@@ -968,6 +999,7 @@ function NSO_tePreview() {
   if (B.open && m && (B.readVerb !== kind || (kind === 'neck' && B.read && B.read.ok && !!B.read.rod !== !!B.rod) ||
                       (kind === 'branch' && B.read && B.read.ok && !!B.read.tube !== !B.rod))) { NSO_teLoad(); return B.result; }
   if (!B.open || !m || !B.read || !B.read.ok) { NSO_teSyncButtons(); return null; }
+  if (NSO_teSquareOn()) return NSO_teSqPreview(B, m);
   if (kind === 'branch') return NSO_teBranchPreview(B, m);
   var o = NSO_teOpts(), neck = o.verb === 'neck';
   var key = m.id + '|' + JSON.stringify(o);
@@ -1207,6 +1239,257 @@ function NSO_teBranchSet() {
   });
 }
 
+/* ------------------------------------------------------------ Square tubes */
+
+// The toggle: Tubes only (Cylinders is a round rod's).
+function NSO_teSquareOn() {
+  if (NSO_teUI().rod) return false;
+  var el = NSO_teEl('chk-te-square');
+  return !!(el && el.checked);
+}
+// The piece's square ends, read once per soup (every preview asks the same piece).
+function NSO_teSqEnds(B, m) {
+  if (!B.sqEnds || B.sqEnds.soup !== m.rawTris) {
+    try { B.sqEnds = NSO_squareTubeEnds(m.rawTris); }
+    catch (err) { B.sqEnds = { ok: false, reason: (err && err.message) || String(err), soup: m.rawTris }; }
+  }
+  return B.sqEnds;
+}
+function NSO_teSqOpts() {
+  function num(id) { var el = NSO_teEl(id); return el && el.value !== '' ? +el.value : null; }
+  function val(id, d) { var el = NSO_teEl(id); return el ? el.value : d; }
+  var B = NSO_teUI(), verb = NSO_teVerb();
+  if (verb === 'branch') {
+    return { verb: 'branch', square: true, point: B.point, dia: num('inp-te-br-dia'), boreDia: num('inp-te-br-bore'), tipDia: num('inp-te-br-tip'),
+             length: num('inp-te-br-len'), angle: num('inp-te-br-angle') };
+  }
+  if (verb === 'neck') {
+    return { verb: 'neck', square: true, point: B.point, length: num('inp-te-neck-length'), dr: num('inp-te-neck-dr'),
+             profile: val('sel-te-neck-profile', 'smooth'), walls: NSO_teWallsVal() };
+  }
+  return { verb: 'reducer', square: true, point: B.point, side2: num('inp-te-od2'), bore2: num('inp-te-id2'), transitionMm: num('inp-te-trans'),
+           runMm: num('inp-te-run') || 0, profile: val('sel-te-profile', 'straight') };
+}
+
+// Read the selected piece as a square tube and fill the card's blank fields from it.
+function NSO_teSqLoad(B, m) {
+  var verb = NSO_teVerb(), E = NSO_teSqEnds(B, m), rd, r1 = function (x) { return Math.round(x * 10) / 10; };
+  NSO_teRemoveRing();
+  try {
+    rd = verb === 'branch' ? NSO_squareBranchRead(m.rawTris, { point: B.point, ends: E })
+                           : NSO_squareTubeRead(m.rawTris, { point: B.point, ends: E, verb: NSO_teName(false) });
+  } catch (err) { rd = { ok: false, reason: (err && err.message) || String(err) }; }
+  B.read = rd;
+  if (!rd.ok) { NSO_teReadout(NSO_teName(false) + ': ' + rd.reason, true); NSO_teClear(); NSO_teSyncButtons(); return; }
+  if (verb === 'branch') {
+    // defaults off the tube pressed: half its side, the bore keeping its wall, 1.5 sides out at 45°
+    var par = rd.parent, side = rd.at ? 2 * rd.at.r : 2 * par.Ro, wall = par.Ro - par.Ri, nozzle = (typeof NSO_sqNozzle === 'function') ? NSO_sqNozzle() : 0.4;
+    var DI = NSO_teEl('inp-te-br-dia'), BO = NSO_teEl('inp-te-br-bore'), LE = NSO_teEl('inp-te-br-len'), AN = NSO_teEl('inp-te-br-angle');
+    if (DI && (DI.value === '' || !(+DI.value < side - 0.1))) DI.value = String(Math.max(4 * nozzle, Math.round(side) / 2));
+    if (BO && (BO.value === '' || !(+BO.value < +DI.value) || !(+BO.value < 2 * par.Ri - 0.2))) BO.value = String(Math.max(2 * nozzle, r1(+DI.value - 2 * wall)));
+    if (LE && LE.value === '') LE.value = String(Math.max(2, Math.round(1.5 * side)));
+    if (AN && AN.value === '') AN.value = '45';
+    NSO_teSliderRange('rng-te-br-dia', 0.8, Math.max(1, r1(side - 0.2)), 0.1);
+    NSO_teSliderRange('rng-te-br-tip', 0.8, Math.max(1, r1(side - 0.2)), 0.1);
+    NSO_teSliderRange('rng-te-br-bore', 0.8, Math.max(1, r1(2 * par.Ri - 0.2)), 0.1);
+    NSO_teSliderRange('rng-te-br-len', 0.5, Math.max(60, Math.round(3 * side)), 0.5);
+    NSO_tePreview();
+    return;
+  }
+  var e = rd.end, t = e.wallMm;
+  if (verb === 'neck') {
+    // 7.5 walls long, in by 2.5 walls - Tubes' Neck defaults, for a square wall
+    var fresh = B.neckMode != null && B.neckMode !== 'square';
+    B.neckMode = 'square';
+    var NL = NSO_teEl('inp-te-neck-length'), ND = NSO_teEl('inp-te-neck-dr');
+    if (NL && (fresh || NL.value === '')) NL.value = String(Math.max(4, Math.round(7.5 * t)));
+    if (ND && (fresh || ND.value === '')) ND.value = String(-Math.max(0.5, Math.round(5 * t) / 2));
+    NSO_teSliderRange('rng-te-neck-length', 0.5, Math.max(60, r1(4 * e.a)), 0.5);
+    NSO_teSliderRange('rng-te-neck-dr', -Math.max(0.1, r1(e.b - 0.4)), Math.max(0.5, r1(e.a)), 0.1);
+    NSO_tePreview();
+    return;
+  }
+  // Reducer: a new end's sides start 4 mm under its own (the trunk narrowing), kept while it is the same end
+  var dfor = 'sq:' + e.a.toFixed(4) + '/' + e.b.toFixed(4);
+  var OD = NSO_teEl('inp-te-od2'), ID = NSO_teEl('inp-te-id2'), TR = NSO_teEl('inp-te-trans'), RU = NSO_teEl('inp-te-run');
+  var dn = 2 * e.b - 4 >= 1 ? 4 : 0;
+  if (OD && (OD.value === '' || B.diaFor !== dfor)) OD.value = (2 * e.a - dn).toFixed(2);
+  if (ID && (ID.value === '' || B.diaFor !== dfor)) ID.value = (2 * e.b - dn).toFixed(2);
+  B.diaFor = dfor;
+  if (TR && TR.value === '') TR.value = '10';
+  if (RU && RU.value === '') RU.value = '0';
+  NSO_tePreview();
+}
+
+// One square outline (raw centre O, half-side r, in the plane of u / v).
+function NSO_teSquareLine(m, O, u, v, r, color) {
+  var pts = [[1, 1], [-1, 1], [-1, -1], [1, -1]].map(function (s) {
+    return NSO_teRawToDisplay(m, [O[0] + r * (s[0] * u[0] + s[1] * v[0]), O[1] + r * (s[0] * u[1] + s[1] * v[1]), O[2] + r * (s[0] * u[2] + s[1] * v[2])]);
+  });
+  var geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pts.flat()), 3));
+  var line = new THREE.LineLoop(geo, new THREE.LineBasicMaterial({ color: color, transparent: true, depthTest: false, depthWrite: false }));
+  line.renderOrder = TUBE_EDGE_RENDER_ORDER; line.userData.skipXray = true; line.userData.tubeEdgeRing = true;
+  line.raycast = function () {}; line.frustumCulled = false;
+  return line;
+}
+// The squares that mark what the card works on: [[centre, u, v, half-side, colour], ...].
+function NSO_teSetSquares(m, list) {
+  NSO_teRemoveRing();
+  if (typeof THREE === 'undefined' || !state.scene || !list.length) return;
+  var group = new THREE.Group();
+  group.name = 'tubeEdgeRing';
+  group.matrixAutoUpdate = false;
+  list.forEach(function (q) { if (q[3] > 0) group.add(NSO_teSquareLine(m, q[0], q[1], q[2], q[3], q[4])); });
+  nsoHelpers.attach(state.scene, group, 'tube-edge');
+  NSO_teUI().ring = group;
+  NSO_teFollow();
+}
+function NSO_teSqMarks(o, r, rd) {
+  var A = TUBE_EDGE_RING_COLOR, Wc = TUBE_EDGE_WAIST_COLOR;
+  if (o.verb === 'branch') {
+    var b = r && r.branch;
+    return b ? [[b.wall, b.u, b.v, b.rootR, Wc], [b.tip, b.u, b.v, b.tipR, A]] : [];
+  }
+  var e = (r && r.end) || (rd && rd.end);
+  if (!e) return [];
+  function at(h) { return NSO_sqAt(e, 0, 0, h); }
+  if (o.verb === 'neck') {
+    var n = r && r.neck;
+    if (!n) return [[e.center, e.e1, e.e2, e.a, A]];
+    var face = n.walls === 'bore' ? n.b : n.a;
+    return [[at(n.ha), e.e1, e.e2, face, A], [at(n.hb), e.e1, e.e2, face, A], [at(n.h0), e.e1, e.e2, Math.max(0.05, face + n.dr), Wc]];
+  }
+  var q = r && r.reducer, L = [[e.center, e.e1, e.e2, e.a, A], [e.center, e.e1, e.e2, e.b, A]];
+  if (q) { L.push([at(q.T), e.e1, e.e2, q.a2, Wc]); L.push([at(q.T), e.e1, e.e2, q.b2, Wc]); }
+  return L;
+}
+
+// Run the square verb on the current numbers: the ghost, the squares, the readout.
+function NSO_teSqPreview(B, m) {
+  var o = NSO_teSqOpts(), key = 'sq|' + m.id + '|' + JSON.stringify(o);
+  if (B.key === key && B.soup === m.rawTris && B.result) { NSO_teSyncButtons(); return B.result; }
+  if (o.verb === 'branch' && !o.point) {
+    B.result = null; B.key = key; B.soup = m.rawTris;
+    NSO_teRemoveGhost(); NSO_teRemoveRing();
+    NSO_teReadout('Press on a side of the square tube where the branch grows out, and drag outward - the branch follows the pointer.');
+    NSO_teSyncButtons();
+    return null;
+  }
+  o.ends = NSO_teSqEnds(B, m);
+  var r;
+  try {
+    if (o.verb === 'branch') { o.read = B.read; r = NSO_squareBranchPlan(m.rawTris, o); }
+    else r = o.verb === 'neck' ? NSO_squareTubeNeck(m.rawTris, o) : NSO_squareTubeReducer(m.rawTris, o);
+  } catch (err) { r = { ok: false, reason: (err && err.message) || String(err) }; }
+  B.result = r; B.key = key; B.soup = m.rawTris;
+  if (o.verb === 'branch' && r.read && r.read.ok) B.read = r.read;
+  var aligned = (typeof NSO_bendFrameMatches === 'function') ? NSO_bendFrameMatches(m) : true;
+  NSO_teSetSquares(m, NSO_teSqMarks(o, r.ok ? r : null, B.read));
+  if (r.ok) {
+    var tris = o.verb === 'branch' ? r.branch.soup : r.tris;
+    if (aligned) NSO_teSetGhost(m, tris, o.verb === 'neck'); else NSO_teRemoveGhost();
+    NSO_teReadout(r.reason + (o.verb === 'branch' ? ' · Set welds it on' : ' · ' + r.counts.trisIn + ' → ' + r.counts.trisOut + ' faces') +
+      (aligned ? '' : ' · (no ghost: the piece was turned since it was loaded)'));
+  } else {
+    NSO_teRemoveGhost();
+    NSO_teReadout(NSO_teName(false) + ': ' + r.reason, true);
+  }
+  NSO_teSyncButtons();
+  return r;
+}
+
+// Set: the reducer or neck as the ghost shows (one Undo), or the branch welded on
+// (Tubes → Branch's booleans; the card stays up, its root cleared, for the next).
+function NSO_teSqSet() {
+  var B = NSO_teUI(), m = NSO_teModel(), nm = NSO_teName(false);
+  if (!m || B.busy) return Promise.resolve(null);
+  var painted = (typeof nsoMaskCount === 'function') ? nsoMaskCount(m) : 0;
+  if (painted > 0) {
+    if (typeof setStatus === 'function') setStatus(nm + ' stood down - ' + painted + ' painted face(s); it rebuilds the wall and re-seats the piece. Clear paint first.', true);
+    return Promise.resolve(null);
+  }
+  var o = NSO_teSqOpts(), soup = m.rawTris, key = 'sq|' + m.id + '|' + JSON.stringify(o);
+  o.ends = NSO_teSqEnds(B, m);
+  if (o.verb !== 'branch') {
+    var r = B.result && B.key === key && B.soup === soup ? B.result : (o.verb === 'neck' ? NSO_squareTubeNeck(soup, o) : NSO_squareTubeReducer(soup, o));
+    if (!r.ok) {
+      if (typeof setStatus === 'function') setStatus(nm + ' refused - piece unchanged (' + r.reason + ')', true);
+      return Promise.resolve(r);
+    }
+    NSO_sculptCommitRaw(m, r.tris, o.verb === 'neck' ? 'squareNeckReplace' : 'squareReducerReplace',
+                        nm + ' done - ' + r.reason + '; ' + r.counts.trisIn + ' → ' + r.counts.trisOut + ' faces');
+    B.point = null;
+    NSO_teLoad();
+    return Promise.resolve(r);
+  }
+  B.busy = true; NSO_teSyncButtons();
+  NSO_teReadout('Welding the square branch on…');
+  return NSO_squareBranchRaw(soup, o).then(function (r2) {
+    B.busy = false;
+    if (m !== NSO_teModel() || m.rawTris !== soup) {
+      if (typeof setStatus === 'function') setStatus('Square branch not set - the piece changed while it was welded on', true);
+      NSO_teLoad();
+      return r2;
+    }
+    if (!r2.ok) {
+      if (typeof setStatus === 'function') setStatus(nm + ' refused - piece unchanged (' + r2.reason + ')', true);
+      NSO_teReadout(nm + ': ' + r2.reason, true);
+      NSO_teSyncButtons();
+      return r2;
+    }
+    B.point = null;
+    NSO_sculptCommitRaw(m, r2.tris, 'squareBranchReplace', nm + ' done - ' + r2.reason + '; ' + r2.counts.trisIn + ' → ' + r2.counts.trisOut + ' faces');
+    NSO_teLoad();
+    NSO_teReadout('Square branch welded on. Press the tube (or the new branch) for the next one - Reducer narrows its tip, Limb bends it.');
+    return r2;
+  }, function (err) {
+    B.busy = false; NSO_teSyncButtons();
+    var why = (err && err.message) || String(err);
+    if (typeof setStatus === 'function') setStatus(nm + ' failed - piece unchanged (' + why + ')', true);
+    NSO_teReadout(nm + ': ' + why, true);
+    return null;
+  });
+}
+
+// Add square tube: a new piece on the plate at the row's Side, Wall and Length,
+// selected (Stock's drop: one 'addModels' Undo, the nearest free spot).
+function NSO_teSqAdd() {
+  function num(id, d) { var el = NSO_teEl(id), v = el && el.value !== '' ? +el.value : NaN; return isFinite(v) ? v : d; }
+  function say(t, bad) { if (typeof setStatus === 'function') setStatus(t, !!bad); }
+  var side = num('inp-te-sq-side', 20), wall = num('inp-te-sq-wall', 1.6), len = num('inp-te-sq-len', 60);
+  var mk = NSO_squareTubeSoup(side, side - 2 * wall, len);
+  if (!mk.ok) { say('Square tube not added: ' + mk.reason, true); NSO_teReadout('Add square tube: ' + mk.reason, true); return mk; }
+  if (typeof THREE === 'undefined' || typeof addModelFromZUpGeometry !== 'function') { say('Square tubes needs the viewport', true); return { ok: false }; }
+  var top = 0;
+  (state.models || []).forEach(function (q) { var h = /^square tube (\d+)$/.exec((q && q.name) || ''); if (h) top = Math.max(top, +h[1]); });
+  var name = 'square tube ' + (top + 1), editBefore = state.editId, cutBefore = state.cutT;
+  var g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(mk.soup), 3));
+  var id = addModelFromZUpGeometry(name, g, { keepSelection: true, silent: true });
+  if (id == null) { say('Square tube not added - the new piece looked empty', true); return { ok: false }; }
+  var made = state.models.find(function (q) { return q && q.id === id; });
+  if (typeof pushUndo === 'function') pushUndo({ type: 'addModels', ids: [id], editId: editBefore, cutT: cutBefore });
+  var sel = state.selectedIndex >= 0 ? state.placed[state.selectedIndex] : null, want = { x: 0, z: 0 };
+  if (sel && sel.mesh) {
+    var fp = (typeof placedFootprint === 'function') ? placedFootprint(sel) : null;
+    want = { x: (fp ? fp.maxx : sel.x + (sel.width || 0) / 2) + 10 + made.size.x / 2, z: fp ? (fp.minz + fp.maxz) / 2 : sel.z };
+  }
+  var entry = placeModelMovable(made, want.x, want.z), at = { x: want.x, z: want.z, onBed: true };
+  if (entry && typeof nsoFreeSpot === 'function') at = nsoFreeSpot(entry, want);
+  if (entry && typeof applyPlacedXZ === 'function') applyPlacedXZ(entry, at.x, at.z);
+  var idx = entry ? state.placed.indexOf(entry) : -1;
+  if (idx >= 0 && typeof selectPlaced === 'function') selectPlaced(idx);
+  if (typeof renderModelList === 'function') renderModelList();
+  if (typeof updateOptimizeButton === 'function') updateOptimizeButton();
+  if (typeof updateEditSize === 'function') updateEditSize();
+  if (typeof updateAdjustUI === 'function') updateAdjustUI();
+  say('Added ' + name + ' - ' + mk.reason + (at.onBed ? '' : '. The plate has no free room left - it sits past the edge.'), !at.onBed);
+  NSO_teUI().point = null;
+  NSO_teLoad();
+  return { ok: true, modelId: id, name: name };
+}
+
 // Tube edge's session, for the helper registry (nso-helpers.js) - Bend's
 // contract: leave-tool and Clear close it, an Undo under it reloads it.
 if (typeof nsoHelpers !== 'undefined') nsoHelpers.owner('tube-edge', {
@@ -1346,6 +1629,7 @@ if (typeof document !== 'undefined') {
       if (cyl) cyl.addEventListener('click', function () { var B = NSO_teUI(); if (B.open && B.rod) NSO_teClose(); else NSO_teOpen(true); });
       var go = NSO_teEl('btn-te-go'), cancel = NSO_teEl('btn-te-cancel');
       if (go) go.addEventListener('click', function () {
+        if (NSO_teSquareOn()) { NSO_teSqSet(); return; }
         if (NSO_teVerb() === 'branch') { NSO_teBranchSet(); return; }
         try {
           var r = NSO_teSelectedModel();
@@ -1366,6 +1650,18 @@ if (typeof document !== 'undefined') {
         B.point = null; B.keyHandle = null; B.keyLen = null; B.keyDia = null;
         NSO_teClear(); NSO_teSyncRows(); NSO_tePreview();
       });
+      var sqc = NSO_teEl('chk-te-square');
+      if (sqc) sqc.addEventListener('change', function () {
+        // round and square read different ends: start over from the default
+        var B = NSO_teUI();
+        if (B.bdrag) NSO_teBranchEnd(false);
+        if (B.drag) NSO_teDragEnd(false);
+        B.point = null; B.keyHandle = null; B.keyLen = null; B.keyDia = null;
+        NSO_teClear(); NSO_teSyncRows();
+        if (B.open) NSO_teLoad();
+      });
+      var sqn = NSO_teEl('btn-te-sq-new');
+      if (sqn) sqn.addEventListener('click', function () { NSO_teSqAdd(); });
       var verb = NSO_teEl('sel-te-verb');
       if (verb) verb.addEventListener('change', function () {
         // an end's click and a neck's are different places: a switch between

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=d456a556" />
+  <link rel="stylesheet" href="styles.css?v=0bd87686" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -1774,7 +1774,7 @@
             </div>
           </details>
           <details class="vp-menu vp-shell-menu vp-col-menu vp-group-start" id="menu-shape" data-sec="shape">
-            <summary class="vp-bar-btn" title="Smooth, Bend, Tubes (Reducer, Roll, Neck, Branch), Cylinders (Neck, Branch on a solid rod), Pull and Limb">Shape</summary>
+            <summary class="vp-bar-btn" title="Smooth, Bend, Tubes (Reducer, Roll, Neck, Branch; Square tubes: Reducer, Neck, Branch on a square tube), Cylinders (Neck, Branch on a solid rod), Pull and Limb">Shape</summary>
             <div class="vp-menu-body vp-finish">
             <div class="vp-row vp-row-full">
               <button id="btn-smooth" class="btn btn-secondary" type="button"
@@ -1786,7 +1786,7 @@
               <button id="btn-bend" class="btn btn-secondary" type="button" aria-expanded="false" aria-controls="bend-panel"
                       title="Bend the piece like a pipe or plate bender, inside one straight stretch: the section is carried round the arc exactly - a plate's thickness, a tube's bore and wall do not change - and everything past the bend turns with it, rigidly. Opens a panel with a live ghost of the result; click the piece to set where.">Bend</button>
               <button id="btn-tube-edge" class="btn btn-secondary" type="button" aria-expanded="false" aria-controls="te-panel"
-                      title="Tubes: work on a tube (a wall round a bore). Reducer, Roll and Neck on its open end or anywhere along it, and Branch - press on the tube's wall and drag outward to pull a new tube out of it (Ø, Bore Ø, Tip Ø, Length, Angle), welded on with its bore opened into the tube's, at Set; branches grow off branches, and Limb bends them after. Make the open end of a tube a new pipe - a reducer or an expander, its outside and bore set apart - roll it outward, or neck it anywhere along its length (a pinch or a bulge) - the whole wall, or with Walls only its outside or its bore (a socket, a spigot, a funnel mouth). The wall's thickness is carried exactly through the new section and the new wall is welded to the old. Opens a card with a live ghost of the result; click the piece near the end to treat, or where the neck goes. A neck's three rings are handles: drag the waist in or out, an end ring to stretch the band, the band itself to slide it along the tube. A reducer's four rings are handles: the OD and ID rings at the transition's end set the new Ø and bore, the T ring the transition, the R ring the run.">Tubes</button>
+                      title="Tubes: work on a tube (a wall round a bore). Tick Square tubes in the card for a tube with a square section - Reducer, Neck and Branch on it, and a button that adds a new square tube to start a tree from. Reducer, Roll and Neck on its open end or anywhere along it, and Branch - press on the tube's wall and drag outward to pull a new tube out of it (Ø, Bore Ø, Tip Ø, Length, Angle), welded on with its bore opened into the tube's, at Set; branches grow off branches, and Limb bends them after. Make the open end of a tube a new pipe - a reducer or an expander, its outside and bore set apart - roll it outward, or neck it anywhere along its length (a pinch or a bulge) - the whole wall, or with Walls only its outside or its bore (a socket, a spigot, a funnel mouth). The wall's thickness is carried exactly through the new section and the new wall is welded to the old. Opens a card with a live ghost of the result; click the piece near the end to treat, or where the neck goes. A neck's three rings are handles: drag the waist in or out, an end ring to stretch the band, the band itself to slide it along the tube. A reducer's four rings are handles: the OD and ID rings at the transition's end set the new Ø and bore, the T ring the transition, the R ring the run.">Tubes</button>
             </div>
             <!-- CYLINDERS: rod / cylinder work - Neck on a SOLID rod (nso_tube_neck.js with
                  opts.rod), the Tube edge card opened in its rod mode (app-tube-edge.js). -->
@@ -1820,10 +1820,25 @@
                     <option value="branch">Branch</option>
                   </select></label>
               </div>
+              <label class="vp-flag vp-flag-tekeep vp-flag-tesq" id="te-square-row" title="Square tubes: Reducer, Neck and Branch on a tube whose section is a square wall round a square bore - the trunk and branches of a tree support drawn as square tubes. Sizes are sides (mm across the flats), and Δr is the change of half-side. Off: round tubes, as before.">
+                <input type="checkbox" id="chk-te-square" aria-label="Square tubes: work on a tube with a square section"><span class="vp-flag-face">Square tubes</span>
+              </label>
+              <div id="te-sq-new-rows" class="te-rows" hidden>
+                <div class="te-pair te-sq-new">
+                  <label class="vp-bend-field" title="A new square tube's side, mm across its flats."><i class="te-lbl">Side</i>
+                    <input type="number" id="inp-te-sq-side" min="1" step="0.5" value="20" aria-label="New square tube side, mm"><span>mm</span></label>
+                  <label class="vp-bend-field" title="A new square tube's wall, mm (its bore is the side less two walls)."><i class="te-lbl">Wall</i>
+                    <input type="number" id="inp-te-sq-wall" min="0.4" step="0.1" value="1.6" aria-label="New square tube wall, mm"><span>mm</span></label>
+                  <label class="vp-bend-field" title="A new square tube's length, mm. It stands on the plate, both ends open."><i class="te-lbl">Length</i>
+                    <input type="number" id="inp-te-sq-len" min="1" step="1" value="60" aria-label="New square tube length, mm"><span>mm</span></label>
+                  <button id="btn-te-sq-new" class="btn btn-secondary" type="button"
+                          title="Put a new square tube on the plate at this Side, Wall and Length, selected - a trunk to reduce, neck and branch. One Undo takes it away.">Add square tube</button>
+                </div>
+              </div>
               <label class="vp-bend-field" id="te-verb-row" title="Reducer makes the end a new pipe: a new outside Ø and bore over a transition, then a straight run. Roll curls the end over round a bead. Neck pinches or bulges the tube anywhere along it. Branch pulls a new tube out of its wall, its bore opened into the tube's (a tee or a wye).">Verb
                 <select id="sel-te-verb" class="vp-select" aria-label="Tube edge verb">
                   <option value="reducer" selected>Reducer</option>
-                  <option value="roll">Roll</option>
+                  <option value="roll" id="opt-te-roll">Roll</option>
                   <option value="neck">Neck</option>
                   <option value="branch">Branch</option>
                 </select></label>
@@ -1840,7 +1855,7 @@
                 </select></label>
               <div id="te-reducer-rows" class="te-rows">
                 <div class="te-pair">
-                  <label class="vp-bend-field" title="The new pipe's outside Ø, mm. Above the tube's Ø it is an expander, below it a reducer; the tube's own Ø keeps the outside where it is (bore only). Or drag the OD ring at the transition's end toward or away from the axis (Shift: 0.1 mm steps); Left / Right arrows step it 1 mm."><i class="te-lbl">New Ø</i>
+                  <label class="vp-bend-field" title="The new pipe's outside Ø, mm. Above the tube's Ø it is an expander, below it a reducer; the tube's own Ø keeps the outside where it is (bore only). Or drag the OD ring at the transition's end toward or away from the axis (Shift: 0.1 mm steps); Left / Right arrows step it 1 mm."><i class="te-lbl" data-round="New Ø" data-sq="New side">New Ø</i>
                     <input type="number" id="inp-te-od2" min="0.1" step="0.1" aria-label="New outside diameter, mm"><span>mm</span></label>
                   <label class="vp-bend-field" title="The new pipe's bore Ø, mm. Change it by as much as the New Ø to keep the wall; set the two apart to thin or thicken it (the readout says the wall), held to the nozzle-safety floor. Or drag the ID ring at the transition's end (Shift: 0.1 mm steps)."><i class="te-lbl">New bore</i>
                     <input type="number" id="inp-te-id2" min="0.1" step="0.1" aria-label="New bore diameter, mm"><span>mm</span></label>
@@ -1871,7 +1886,7 @@
                 <div class="te-slide" title="How long the neck runs along the tube, in mm, centred where you click the tube. Or drag either end ring on the tube along its axis: the band stretches, its centre held (Shift: 0.1 mm steps)."><label for="rng-te-neck-length">Length</label>
                   <input type="range" id="rng-te-neck-length" min="0.5" max="60" step="0.5" aria-label="Length slider">
                   <input type="number" id="inp-te-neck-length" min="0.1" step="0.5" aria-label="Neck length, mm"><span>mm</span></div>
-                <div class="te-slide" title="How far the wall moves at the neck's waist, in mm: below 0 pinches the tube in, above 0 bulges it out. With Walls Both the wall's thickness is kept; with one face only that face moves. Or drag the waist ring on the tube (it sits on the face that moves): toward the axis pinches, away bulges (Shift: 0.1 mm steps); Left / Right arrows step it 1 mm, Up / Down move the band."><label for="rng-te-neck-dr">Δr</label>
+                <div class="te-slide" title="How far the wall moves at the neck's waist, in mm: below 0 pinches the tube in, above 0 bulges it out. With Walls Both the wall's thickness is kept; with one face only that face moves. Or drag the waist ring on the tube (it sits on the face that moves): toward the axis pinches, away bulges (Shift: 0.1 mm steps); Left / Right arrows step it 1 mm, Up / Down move the band."><label for="rng-te-neck-dr" data-round="Δr" data-sq="Δ">Δr</label>
                   <input type="range" id="rng-te-neck-dr" min="-15" max="15" step="0.1" aria-label="Δr slider">
                   <input type="number" id="inp-te-neck-dr" step="0.5" aria-label="Neck delta r, mm (negative pinches, positive expands)"><span>mm</span></div>
                 <label class="vp-bend-field" title="Smooth: a cosine ease in and out, tangent to the tube at both ends. Funnel: a straight taper in and a straight taper out.">Profile
@@ -1881,13 +1896,13 @@
                   </select></label>
               </div>
               <div id="te-branch-rows" class="te-rows" hidden>
-                <div class="te-slide" title="The branch's Ø where it leaves the wall, mm. Narrower than the rod it grows from; at least 2 nozzle widths."><label for="rng-te-br-dia">Ø</label>
+                <div class="te-slide" title="The branch's Ø where it leaves the wall, mm. Narrower than the rod it grows from; at least 2 nozzle widths."><label for="rng-te-br-dia" data-round="Ø" data-sq="Side">Ø</label>
                   <input type="range" id="rng-te-br-dia" min="0.8" max="30" step="0.1" aria-label="Ø slider">
                   <input type="number" id="inp-te-br-dia" min="0.1" step="0.5" aria-label="Branch diameter, mm"><span>mm</span></div>
-                <div class="te-slide" id="te-br-bore-row" hidden title="Tubes → Branch: the branch's bore Ø where it leaves the wall, mm. The branch's wall is (Ø − Bore) / 2, held to the nozzle-safety floor; the bore runs on into the tube's own bore, so it must be narrower than that. A tapered branch keeps its wall to the tip."><label for="rng-te-br-bore">Bore Ø</label>
+                <div class="te-slide" id="te-br-bore-row" hidden title="Tubes → Branch: the branch's bore Ø where it leaves the wall, mm. The branch's wall is (Ø − Bore) / 2, held to the nozzle-safety floor; the bore runs on into the tube's own bore, so it must be narrower than that. A tapered branch keeps its wall to the tip."><label for="rng-te-br-bore" data-round="Bore Ø" data-sq="Bore">Bore Ø</label>
                   <input type="range" id="rng-te-br-bore" min="0.8" max="30" step="0.1" aria-label="Bore Ø slider">
                   <input type="number" id="inp-te-br-bore" min="0.1" step="0.5" aria-label="Branch bore diameter, mm"><span>mm</span></div>
-                <div class="te-slide" title="The branch's Ø at its tip, mm. Blank: the same as its Ø (a cylinder). Smaller: a shoot that tapers."><label for="rng-te-br-tip">Tip Ø</label>
+                <div class="te-slide" title="The branch's Ø at its tip, mm. Blank: the same as its Ø (a cylinder). Smaller: a shoot that tapers."><label for="rng-te-br-tip" data-round="Tip Ø" data-sq="Tip">Tip Ø</label>
                   <input type="range" id="rng-te-br-tip" min="0.8" max="30" step="0.1" aria-label="Tip Ø slider">
                   <input type="number" id="inp-te-br-tip" min="0.1" step="0.5" placeholder="= Ø" aria-label="Branch tip diameter, mm (blank: the same as its diameter)"><span>mm</span></div>
                 <div class="te-slide" title="How far the branch stands out of the wall, mm, along the branch. Or slide, or drag: press on the rod and pull - the tip follows the pointer (0.5 mm steps, 0.1 with Shift)."><label for="rng-te-br-len">Length</label>
@@ -2938,7 +2953,7 @@
   <script src="nso-helpers.js?v=9c476e39"></script>
   <script src="nso-recent.js?v=f03d6f13"></script>
   <script src="nso-bounds.js?v=778acac4"></script>
-  <script src="app-core.js?v=5b78dc6c"></script>
+  <script src="app-core.js?v=c069c5d9"></script>
   <!-- Up to six plates (beds): the active one is state.models / state.placed, the rest are kept beside it. docs/BEDS.md. -->
   <script src="app-beds.js?v=db261498"></script>
 
@@ -2988,10 +3003,13 @@
        reader, weld and helpers). See docs/TUBE-EDGE.md, "Neck". -->
   <script src="nso_rod_branch.js?v=24d513e8"></script>
   <script src="nso_tube_neck.js?v=4369044a"></script>
+  <!-- Square tubes: Reducer, Neck and Branch on a square tube (Tubes' Square tubes toggle). After
+       nso_tube_edge.js, nso_bend.js and nso_rod_branch.js (its booleans). See docs/TUBE-EDGE.md, "Square tubes". -->
+  <script src="nso_square_tube.js?v=dcd49d4b"></script>
   <script src="nso_thread.js?v=3d986b5e"></script>
   <script src="nso_fittings.js?v=b8b58426"></script>
   <script src="nso_custom_shape.js?v=6f02bd43"></script>
-  <script src="app-tube-edge.js?v=5eff9c08"></script>
+  <script src="app-tube-edge.js?v=e80faeca"></script>
   <!-- Bridge: a web between two places, welded. After NSO_Repair.js,
        nso_planar_fuse.js (the vertex space), nso_thickness.js,
        nso_assemble.js (the seat), nso_path_sweep.js (the rod) and
