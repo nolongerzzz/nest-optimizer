@@ -312,6 +312,9 @@ async function main() {
         .every(id => sec[0].includes('id="' + id + '"')) && /Export \.gcode\.3mf/.test(sec[0]) && !sec[0].includes('btn-slice-preview') &&
         m[0].indexOf('id="btn-sup-all"') < m[0].indexOf('id="btn-sup-slice"') && m[0].indexOf('id="btn-sup-slice"') < m[0].indexOf('id="sup-style"') &&
         m[0].includes('id="slice-set-raft"') && m[0].includes('id="slice-set-raft-gap"') && !!settings && !settings[0].includes('slice-set-raft'); })());
+  const css = read('styles.css');
+  check('while a build runs the supports card is locked (no clicks), all but its Cancel: the build and its slice can be stopped',
+    /\.sup-card\.is-locked \{ pointer-events: none; \}/.test(css) && /\.sup-card\.is-locked #btn-sup-slice-cancel \{ pointer-events: auto;/.test(css));
   const tags = [...html.replace(/<!--[\s\S]*?-->/g, '').matchAll(/<script src="([^"?]+)(?:\?v=\w+)?"/g)].map(m => m[1]);
   const idx = f => tags.indexOf(f);
   check('the planner, the packager and app-print.js are loaded by the page, after the files they read at load and after G-scope',
