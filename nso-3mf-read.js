@@ -491,6 +491,8 @@
    *                    warnings: string[]}>}
    *   positions is a triangle soup [x,y,z, x,y,z, x,y,z, ...] per triangle, in
    *   millimetres, Z up, with all transforms applied - one entry per build item.
+   *   vertexIds (Int32Array, one per soup vertex) says which of the file's
+   *   vertices each one is: equal ids, one vertex; the file's own indexing.
    */
   function parse3MF(bytes, opts) {
     opts = opts || {};
@@ -578,6 +580,9 @@
                 id: item.objectid,
                 name: name,
                 positions: positions,
+                // per soup vertex, its vertex in the file (appendTransformed): the mesh's own indexing, kept so an
+                // export can write it back rather than weld by position
+                vertexIds: Int32Array.from(soup.ids || []),
                 triangleCount: positions.length / 9
               });
             });
@@ -624,6 +629,11 @@
 
   function appendTransformed(mesh, M, soup) {
     var v = mesh.vertices, t = mesh.triangles;
+    // Each soup vertex's identity in the file: this mesh's base (every mesh reached, each time it is reached, gets
+    // its own run) + its vertex index. Two shells that touch keep their own vertices where they meet - welding by
+    // position would join them along the seam, every edge there shared by four faces (docs/BAMBU-PROJECT-EXPORT.md).
+    var ids = soup.ids || (soup.ids = []), base = soup.idBase || 0;
+    soup.idBase = base + v.length / 3;
     // A mirroring transform turns the mesh inside out; swap two corners so the
     // winding still points outward.
     var flip = det3(M) < 0;
@@ -632,6 +642,7 @@
       pushVertex(v, a, M, soup);
       pushVertex(v, b, M, soup);
       pushVertex(v, c, M, soup);
+      ids.push(base + a, base + b, base + c);
     }
   }
 
@@ -650,7 +661,8 @@
     return parse3MF(bytes, opts).then(function (r) {
       var W = typeof self !== 'undefined' && self.NSO_Work;
       if (!W) return r;
-      return W.transfer(r, r.objects.map(function (o) { return o.positions.buffer; }));
+      return W.transfer(r, r.objects.map(function (o) { return o.positions.buffer; })
+        .concat(r.objects.map(function (o) { return o.vertexIds.buffer; })));
     });
   }
 

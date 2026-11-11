@@ -101,6 +101,21 @@ Both shapes:
   nothing to `different_settings_to_system` (*Cooling* below). `export:bambu`
   still exercises the overlay on a copy of the settings with two values moved.
 
+## A piece's own vertices (touching shells)
+
+The owner's first open of the INLINE export (2026-11-11, `export_plate3MF.3mf`) showed Studio's mesh-error mark
+on four of the six supp_ref heads. In those four, the stem and the head are two closed shells that meet at a ring
+of coincident vertices; the file keeps them as separate vertices. The export welded vertices by position
+(`indexTriangleSoup`), so every ring edge was shared by four faces: 40 / 40 / 40 / 119 non-manifold edges, and
+36 / 36 / 36 / 66 vertices fewer than the file.
+
+Now a piece read from a 3MF carries the file's own vertex ids (`nso-3mf-read.js` `vertexIds`, one per soup
+vertex; on the model as `srcVertexIds`, through import, scene restore and Clone), and the export writes that
+indexing back (`app-core.js` `nsoIndexForExport`) - but only while it lines up with the piece's geometry: one id
+per vertex, and every vertex sharing an id at one position. A soup some tool rebuilt fails that and is welded by
+position, as before; so is a piece from an STL, which has no ids. `export:touching-shells` holds it: the plate
+export of `plate_export.3mf` has the file's vertex and triangle counts, every edge on two faces.
+
 ## The plate export's name
 
 The Export card's **Plate file name** names Export plate, STL and 3MF. Empty,

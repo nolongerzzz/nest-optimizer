@@ -2116,7 +2116,8 @@ function import3MF(filename, arrayBuffer) {
         chain = chain.then(() => {
           const geometry = new THREE.BufferGeometry();
           geometry.setAttribute('position', new THREE.BufferAttribute(obj.positions, 3));
-          return addModelFromZUpGeometryAsync(obj.name, geometry, kept && kept.at ? { at: kept.at[i] } : undefined)
+          const o3 = Object.assign({ srcVertexIds: obj.vertexIds || null }, kept && kept.at ? { at: kept.at[i] } : {});
+          return addModelFromZUpGeometryAsync(obj.name, geometry, o3)
             .then(id => { if (id) loaded++; });
         });
       });
@@ -2171,7 +2172,10 @@ function addModel(name, geometry, opts) {
     // their display mesh with the same engine (splitBothSides, app-cut.js).
     rawTris: options.rawTris || null,
     rawAxis: options.rawAxis || null,
-    centerOffset: options.centerOffset || null
+    centerOffset: options.centerOffset || null,
+    // A 3MF's own vertex indexing, one id per soup vertex (nso-3mf-read.js vertexIds): the 3MF export writes it back
+    // while it still lines up with the geometry (nsoIndexForExport), so shells that touch stay apart
+    srcVertexIds: options.srcVertexIds || null
   });
 
   if (!options.keepSelection) {
@@ -2454,6 +2458,7 @@ function cloneSelectedModel(opts) {
       keepSelection: true,
       silent: true,
       rawTris: (src.rawTris && src.rawTris.length) ? new Float32Array(src.rawTris) : null,
+      srcVertexIds: src.srcVertexIds ? new Int32Array(src.srcVertexIds) : null,
       rawAxis: src.rawAxis || null,
       centerOffset: src.centerOffset
         ? { x: src.centerOffset.x, y: src.centerOffset.y, z: src.centerOffset.z }
@@ -5534,6 +5539,45 @@ function setupCoolingProfileUI() {
  * corner, so the same (x, y, z) -> (x, -z, y) swap applies and then a shift by
  * half the plate.
  */
+/**
+ * A piece's triangle soup (Bambu axes) as a 3MF mesh: { vertices, triangles }.
+ *
+ * Welding by position (NSO3MF.indexTriangleSoup) joins two shells wherever they touch: the four supp_ref heads whose
+ * stem and head are separate closed shells meeting at a ring came out with every ring edge shared by four faces, and
+ * Studio marked them as mesh errors. So a piece read from a 3MF keeps the file's own indexing (model.srcVertexIds, one
+ * id per soup vertex) - but only while it still lines up with this soup: one id per vertex, and every vertex sharing an
+ * id at one position. A soup any tool rebuilt (another count, another order) fails that and is welded as before.
+ */
+function nsoIndexForExport(flat, model) {
+  const ids = model && model.srcVertexIds;
+  if (ids && ids.length * 3 === flat.length) {
+    const at = new Map(), vertices = [], slot = new Int32Array(ids.length);
+    let ok = true;
+    for (let k = 0; k < ids.length; k++) {
+      let j = at.get(ids[k]);
+      const x = flat[3 * k], y = flat[3 * k + 1], z = flat[3 * k + 2];
+      if (j === undefined) {
+        j = vertices.length / 3;
+        at.set(ids[k], j);
+        vertices.push(x, y, z);
+      } else if (Math.abs(vertices[3 * j] - x) > 1e-5 || Math.abs(vertices[3 * j + 1] - y) > 1e-5 || Math.abs(vertices[3 * j + 2] - z) > 1e-5) {
+        ok = false;
+        break;
+      }
+      slot[k] = j;
+    }
+    if (ok) {
+      const triangles = [];
+      for (let k = 0; k < slot.length; k += 3) {
+        const a = slot[k], b = slot[k + 1], c = slot[k + 2];
+        if (a !== b && b !== c && a !== c) triangles.push(a, b, c);
+      }
+      return { vertices, triangles, kept: true };
+    }
+  }
+  return window.NSO3MF.indexTriangleSoup(flat);
+}
+
 function buildPlacedObjects3MF() {
   const plate = getCurrentPlate();
   const halfW = plate.w / 2;
@@ -5567,7 +5611,8 @@ function buildPlacedObjects3MF() {
         pos.getY(v)            // Bambu Z (height, plate at 0)
       );
     }
-    const mesh = window.NSO3MF.indexTriangleSoup(flat);
+    const model = (state.models || []).find(m => m && m.id === p.sourceId);
+    const mesh = nsoIndexForExport(flat, model);
     const out = {
       name: p.name || ('piece_' + (i + 1)),
       vertices: mesh.vertices,
@@ -5575,7 +5620,6 @@ function buildPlacedObjects3MF() {
     };
     // A piece's own slicer settings (the Supports card's: its sheet is a thin
     // wall) ride along as the object's override in model_settings.config.
-    const model = (state.models || []).find(m => m && m.id === p.sourceId);
     if (model && model.slicerSettings) out.settings = Object.assign({}, model.slicerSettings);
     return out;
   });
@@ -5775,7 +5819,7 @@ function applyModelSceneState(m, so) {
  *
  * @returns {object|null} the placed entry
  */
-function restoreSceneObject(so, positions) {
+function restoreSceneObject(so, positions, vertexIds) {
   const Scene = window.NSO3MFScene;
   const disp = Scene.transformSoup(so.inverse, positions);
   const C = so.centerOffset || { x: 0, y: 0, z: 0 };
@@ -5789,7 +5833,7 @@ function restoreSceneObject(so, positions) {
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(raw, 3));
-  const id = addModelFromZUpGeometry(so.name, geometry, { silent: true });
+  const id = addModelFromZUpGeometry(so.name, geometry, { silent: true, srcVertexIds: vertexIds || null });
   if (id == null) return null;
   const m = state.models.find(x => x.id === id);
   if (!m) return null;
@@ -5849,13 +5893,13 @@ function restoreSceneFrom3MF(filename, result, scene) {
         // else.
         const geometry = new THREE.BufferGeometry();
         geometry.setAttribute('position', new THREE.BufferAttribute(result.objects[i].positions, 3));
-        const id = addModelFromZUpGeometry(so.name, geometry);
+        const id = addModelFromZUpGeometry(so.name, geometry, { srcVertexIds: result.objects[i].vertexIds || null });
         if (id == null) return;
         const m = state.models.find(x => x.id === id);
         if (!m) return;
         applyModelSceneState(m, so);
         restored++;
-      } else if (restoreSceneObject(so, result.objects[i].positions)) {
+      } else if (restoreSceneObject(so, result.objects[i].positions, result.objects[i].vertexIds)) {
         restored++;
       }
     } catch (err) {
@@ -6006,7 +6050,8 @@ function buildActiveModelObject3MF(m) {
     flat[i + 2] -= minZ;
   }
 
-  const mesh = window.NSO3MF.indexTriangleSoup(flat);
+  // the file's own indexing only when no triangle was dropped and the geometry is the soup it was read as
+  const mesh = nsoIndexForExport(flat, !dropped && !m.geometry.index ? m : null);
   // The same placement as a 12-number transform, for the scene block: model
   // space (x, y, z) -> file (x + dx, -z + dy, y - minZ), re-anchored onto the
   // geometry's own centre so inverting it lands on what addModel hands back.

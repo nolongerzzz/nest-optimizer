@@ -137,6 +137,7 @@
     "export:bambu": {"weight":550,"note":"0.3s local x 1.7, rounded up; export-bambu-project, #264"},
     "export:multi": {"weight":50150,"note":""},
     "export:roundtrip": {"weight":11150,"note":""},
+    "export:touching-shells": {"weight":6000,"note":"3 s locally x 1.7, rounded up"},
     "extend": {"weight":1150,"note":""},
     "extend:canonical": {"weight":1950,"note":""},
     "face-features:test": {"weight":2500,"note":""},
