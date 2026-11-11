@@ -2045,7 +2045,9 @@
     if (N < 1) return;
     perObject.forEach(function (P) {
       if (P.role !== 'part' || !P.layers.length) return;
-      if (perObject.some(function (Q) { return Q.role === 'brim' && Q.hostKey != null && Q.hostKey === P.key; })) return;   // its brim is built, with its supports
+      /* a part on supports: its brim is the supports card's (Brim round the foot, a brim object of its own) or none - never the auto brim
+         round its trunks' feet (the owner: Brim round the foot off is no brim) */
+      if (perObject.some(function (Q) { return (Q.role === 'brim' || Q.role === 'support') && Q.hostKey != null && Q.hostKey === P.key; })) return;
       var S0 = P.S[0];
       if (!S0 || g.isEmpty(S0)) return;
       var outers = g.polys(S0).filter(function (p) { return signedArea(p) > 0; });

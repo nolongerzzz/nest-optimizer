@@ -12,9 +12,9 @@
  *      settings row is not shown there, and its defaults are the plate's
  *      printer profile (0.4 nozzle, 0.2 layers on the A1 mini).
  *   2  A REAL CLICK SLICES THE PLATE and opens the result as a toolpath
- *      document, on the card's Slice side. Its moves are, move for move, what
- *      NSO_Slicer + parseGcode give when called directly on the same pieces
- *      with the same options. On the Slice side the settings row is there, and
+ *      document, on the card's Slice side. It is the plate's one slice - the
+ *      Supports card's file, the one Preview and Export have; G-scope slices
+ *      nothing of its own for the plate. On the Slice side the settings row is there, and
  *      changing its nozzle sets the layer to half of it (for the next slice).
  *   3  IT IS THE SAME KIND OF DOCUMENT an imported .gcode.3mf is: the same
  *      document keys, the same per-segment schema as tabletop.gcode.3mf opened
@@ -123,10 +123,10 @@ async function main() {
   await sliced(page);
   const doc = await page.evaluate(() => {
     const d = window.NSO_MICROSCOPE.getDoc();
-    return { name: d.name, kind: d.kind, moves: d.parsed.moves.length, layers: d.parsed.layers.length,
+    return { name: d.nsoSlice ? d.nsoSlice.name : d.name, kind: d.kind, moves: d.parsed.moves.length, layers: d.parsed.layers.length,
       assumed: d.parsed.meta.assumed, segs: d.segments.length, groups: Object.keys(d.groups).sort() };
   });
-  check('the slice opened as a toolpath document, named for its source and the profile\'s settings',
+  check('the slice opened as a toolpath document (the plate\'s one slice), named for its source and the profile\'s settings',
     [doc.kind, /^Plate - NSO slice \(0\.4 mm nozzle, 0\.2 mm layers\)$/.test(doc.name)], ['toolpath', true]);
   check('... and the card is on its Slice side, the switch showing it',
     await page.evaluate(() => [window.NSO_MICROSCOPE.cardSide(), window.NSO_GSCOPE_SLICE.viewMode(),
@@ -134,21 +134,14 @@ async function main() {
       document.getElementById('ms-cam-slice').getAttribute('aria-pressed'), document.getElementById('ms-cam-normal').disabled]),
     ['slice', 'slice', true, 'true', false]);
   check('parsed with nothing assumed', doc.assumed, false);
+  /* ONE SLICE (the owner: "It needs to be one slice"): the switch opens the plate's slice - the Supports card's, the file Preview and
+     Export have - and slices nothing of its own */
   const direct = await page.evaluate(async (names) => {
-    const d = window.NSO_MICROSCOPE.getDoc(), src = window.NSO_GSCOPE_SLICE.last().source;
-    const objs = src.objects.map((o) => ({ name: o.name, soup: o.positions }));
-    const opts = Object.assign({}, window.NSO_GSCOPE_SLICE.panelOpts().over);
-    const r = await window.NSO_Slicer.run(objs, window.NSO_Slicer.defaultsFor(0.4, opts));
-    const p = window.NSOGcodeLines.parseGcode(r.gcode);
-    let same = p.moves.length === d.parsed.moves.length;
-    for (let i = 0; same && i < p.moves.length; i++) {
-      const a = p.moves[i], b = d.parsed.moves[i];
-      same = a.x0 === b.x0 && a.y0 === b.y0 && a.x1 === b.x1 && a.y1 === b.y1 && a.z === b.z &&
-             a.width === b.width && a.feature === b.feature && a.run === b.run;
-    }
-    return { same, n: p.moves.length, srcNames: src.objects.map((o) => o.name), names };
+    const d = window.NSO_MICROSCOPE.getDoc(), P = window.NSO_Print.card, src = window.NSO_GSCOPE_SLICE.last().source;
+    return { same: !!d.nsoPlateSlice && P.fresh() && d.nsoSlice.result === P.report() && P.state().result.objects === d.nsoPlateSlice.labels.length,
+             srcNames: src.objects.map((o) => o.name), names };
   }, plateObjs);
-  check('its moves are, move for move, NSO_Slicer + parseGcode called directly on the same pieces', direct.same, true);
+  check('it is the plate\'s one slice: the Supports card\'s file, fresh for the plate, the one Preview and Export have', direct.same, true);
   check('it sliced the pieces the plate document held', direct.srcNames, plateObjs);
   // The settings, on the Slice side: the row is there, folded; selectOption unfolds it first.
   check('on the Slice side the Slice settings row is there, folded',
@@ -158,7 +151,7 @@ async function main() {
   check('changing the nozzle sets the layer to half of it (0.6 -> 0.3)',
     [await page.getAttribute('#ms-slice-settings-toggle', 'aria-expanded'), await page.inputValue('#ms-slice-layer')], ['true', '0.3']);
   check('... for the next slice: the slice shown is not touched',
-    await page.evaluate(() => window.NSO_MICROSCOPE.getDoc().name), doc.name);
+    await page.evaluate(() => window.NSO_MICROSCOPE.getDoc().nsoSlice.name), doc.name);
   await page.selectOption('#ms-slice-nozzle', '0.4');
   check('... and back (0.4 -> 0.2)', await page.inputValue('#ms-slice-layer'), '0.2');
   await page.click('#ms-slice-settings-toggle');        // fold the row again
@@ -177,7 +170,7 @@ async function main() {
     const ours = M.getDoc();
     // nsoSlice / groups are the slice's own bookkeeping, importOf the plate copy's link back to the
     // imported file (app-microscope.js importCopy) - none of them is the document's schema
-    const keysOf = (d) => Object.keys(d).filter((k) => k !== 'nsoSlice' && k !== 'groups' && k !== 'importOf').sort();
+    const keysOf = (d) => Object.keys(d).filter((k) => k !== 'nsoSlice' && k !== 'nsoPlateSlice' && k !== 'groups' && k !== 'importOf').sort();
     const segKeys = (d) => Object.keys(d.segments[0]).sort();
     const a = { doc: keysOf(ours), seg: segKeys(ours), mv: Object.keys(ours.segments[0].mv).sort() };
     const saved = window.NSO_GSCOPE_SLICE.last();

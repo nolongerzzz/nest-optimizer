@@ -599,7 +599,7 @@ withApp(async (page, logs) => {
     await frames(page);
     const seen = await page.evaluate(() => { window.__sliceObs.disconnect(); return window.__sliceSeen; });
     check('a real click on Slice slices the mesh: a toolpath made here', r && r.ok, J(r));
-    check('...while it runs the Slice report says "Slicing N object(s)..."', seen.texts.some(t => /^Slicing \d+ object\(s\)\.\.\./.test(t)), seen.texts.slice(0, 3).join(' | ').slice(0, 120));
+    check('...while it runs the Slice report says "Slicing N object(s)..."', seen.texts.some(t => /^Slicing (\d+ object|the plate)/.test(t)), seen.texts.slice(0, 3).join(' | ').slice(0, 120));
     check('...and the switch shows busy (aria-busy on Slice, .is-busy on the switch), its label still "Slice", never "Slicing..."',
       seen.aria && seen.busyCls && seen.labels.every(l => l === 'Slice'), J({ aria: seen.aria, busyCls: seen.busyCls, labels: Array.from(new Set(seen.labels)) }));
     st = await cardState(page);
@@ -909,6 +909,8 @@ withApp(async (page, logs) => {
     // SLICE SETTINGS (VIEW > Slice settings): the Slice row - an edit survives the round trip and the next slice takes it
     await page.fill('#ms-slice-layer', '0.25');
     await page.evaluate(() => document.getElementById('ms-slice-layer').dispatchEvent(new Event('change', { bubbles: true })));
+    /* the plate has one slice, the Supports card's (the owner: "It needs to be one slice"): its layer is the card's Slice settings' */
+    await page.evaluate(() => { const el = document.getElementById('slice-set-layer'); el.value = '0.25'; el.dispatchEvent(new Event('change', { bubbles: true })); });
     // NORMAL / SLICE (VIEW > Normal / Slice view): the switch - the track back to the mesh
     r = await clickFace(page, '.ms-switch-track');
     await waitMesh(page);
@@ -1002,7 +1004,7 @@ withApp(async (page, logs) => {
     await waitSlice(page);
     await frames(page);
     pitch2 = await page.evaluate(() => window.__s.layerPitch());
-    check('Slice settings -> the Slice row: the edit (layer 0.25) is what the next slice (Normal, then Slice again) takes', r && r.ok && pitch2 !== null && Math.abs(pitch2 - 0.25) < 0.005, String(pitch2));
+    check('Slice settings -> the plate\'s slice: the Supports card\'s layer (0.25) is what the next slice (Normal, then Slice again) takes', r && r.ok && pitch2 !== null && Math.abs(pitch2 - 0.25) < 0.005, String(pitch2));
     const f = await page.evaluate(() => {
       const $ = id => document.getElementById(id);
       const d = NSO_MICROSCOPE.getDoc();

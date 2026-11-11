@@ -409,8 +409,13 @@ always:
 - **The switch is the view**: Normal (the mesh) | Slice (the toolpaths). The
   document decides its side: a toolpath - a slice made here, a sliced file,
   moves set down into a slice - is the Slice side; a mesh, pieces or an empty
-  plate is the Normal side. Slice on a mesh slices it with the Slice settings
-  as they stand; Normal on a slice made here goes back to its mesh, whole
+  plate is the Normal side. **The plate has one slice** (the owner: "It needs
+  to be one slice"): Slice on the plate opens the Supports card's slice - the
+  file Generate wrote, the one Preview and Export have - and slices nothing of
+  its own; with no slice of the plate as it stands it makes that slice (the
+  Supports card's settings), then opens it. Slice on an STL / 3MF opened here
+  slices it with G-scope's Slice settings as they stand. Normal on a slice
+  made here or the plate's slice goes back to its mesh, whole
   again; Normal on a mesh re-frames; a sliced file has no mesh, so Normal is
   off there. The track between the two flips it too. **Flipping it changes the
   rows**:

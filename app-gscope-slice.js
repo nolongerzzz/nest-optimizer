@@ -238,16 +238,6 @@ var NSO_GSCOPE_SLICE = (function () {
                role: sup ? (sup.brim ? 'brim' : 'support') : 'part', hostKey: sup ? sup.hostSourceId : undefined };
     });
     var source = { label: d.name, objects: d.objects, docSource: d.source, subtitle: d.subtitle };
-    /* ONE SLICE, ONE DRAWING (the owner: "the g-scope slice is not drawing the same thing as the plate slice"): with the plate's printer
-       picked, the slice is the plate's own - the Slice card's options (its profile's widths and spacings, the card's settings, the raft,
-       the interface angle: NSO_Print.sliceOptionsForPlate, the function Generate and Preview slice with) and at the bed's coordinates, as
-       theirs is cut (the slicer's layers can differ with where a piece stands) - drawn back where the plate stands. Without a printer
-       profile, the panel's own rows, as before. */
-    var PR = window.NSO_Print, plateP = !optsOver && PR && typeof PR.sliceOptionsForPlate === 'function'
-      ? PR.sliceOptionsForPlate(d.objects.map(function (o) { var su = supportOf(o); return { interfaceLayers: su ? su.interfaceLayers : undefined, sheetLayerMm: su ? su.sheetLayerMm : undefined }; }))
-          .catch(function (err) { console.error('[g-scope slice] plate options', err); return null; })
-      : Promise.resolve(null);
-    var shift = { dx: 0, dy: 0 };
     busy = true;
     syncPanel();                          // the switch busy, the Slice report up for its progress
     var read = $('ms-slice-read');
@@ -256,37 +246,11 @@ var NSO_GSCOPE_SLICE = (function () {
     var t0 = Date.now();
     // one frame for the status line to paint before the work starts
     return new Promise(function (res) { setTimeout(res, 0); })
-      .then(function () { return plateP; })
-      .then(function (pp) {
-        if (pp && pp.o) {
-          opts = Object.assign({}, pp.o, { emitGcode: false });
-          /* ...and a row of G-scope's own Slice settings changed from what it was seeded with (the profile's) is that slice's: an edit here
-             is what the next G-scope slice takes; untouched, the slice is the plate's */
-          var dfl = profileDefaults(), ov = po.over;
-          if (Math.abs(ov.layerMm - dfl.layer) > 1e-9) opts.layerMm = ov.layerMm;
-          if (ov.wallLoops !== SLICE_REST.walls) opts.wallLoops = ov.wallLoops;
-          if (Math.abs(ov.sparseDensity - SLICE_REST.density / 100) > 1e-9) opts.sparseDensity = ov.sparseDensity;
-          if (ov.sparsePattern && ov.sparsePattern !== SLICE_REST.pattern) opts.sparsePattern = ov.sparsePattern;
-          if (ov.supportThresholdDeg !== SLICE_REST.angle) opts.supportThresholdDeg = ov.supportThresholdDeg;
-          if (ov.brimType && ov.brimType !== SLICE_REST.brim) opts.brimType = ov.brimType;
-          if (ov.raftLayers > 0) { opts.raftLayers = ov.raftLayers; opts.raftContactMm = ov.raftContactMm; }
-          shift = { dx: pp.dx || 0, dy: pp.dy || 0 };
-          objects.forEach(function (ob) {
-            var q = new Float32Array(ob.soup.length);
-            for (var i = 0; i < q.length; i += 3) { q[i] = ob.soup[i] + shift.dx; q[i + 1] = ob.soup[i + 1] + shift.dy; q[i + 2] = ob.soup[i + 2]; }
-            ob.soup = q;
-          });
-        }
+      .then(function () {
         return SL().run(objects, opts);
       })
       .then(function (r) {
         if (!r.ok) return refuse('Slice refused: ' + r.reason);
-        if (shift.dx || shift.dy || !r.gcode) {
-          /* back from the bed's coordinates to the plate's, then the G-code text from those paths */
-          var back = function (pts) { return pts.map(function (q) { return [q[0] - shift.dx, q[1] - shift.dy]; }); };
-          (r.objects || []).forEach(function (ob) { (ob.layers || []).forEach(function (L) { (L.paths || []).forEach(function (pth) { pth.pts = back(pth.pts); }); }); });
-          r.gcode = SL().toGcode(r);
-        }
         var parsed = window.NSOGcodeLines.parseGcode(r.gcode);
         if (!parsed.moves.length) return refuse('The slice has no extrusion moves - nothing thick enough for one line.');
         var name = d.name + ' - NSO slice (' + opts.nozzleMm + ' mm nozzle, ' + opts.layerMm + ' mm layers)';
@@ -406,17 +370,59 @@ var NSO_GSCOPE_SLICE = (function () {
     return !!(d && d.nsoSlice);
   }
 
-  /** Slice: slice the open mesh now, with the settings as they stand. A toolpath is the Slice side already. */
+  /* ONE SLICE FOR THE PLATE (the owner: "It needs to be one slice"). The plate has one slice: the one Generate makes (or the Supports card's
+     Slice section re-makes), NSO_Print.card's. Slice on the plate shows that slice - the file Generate wrote, as Preview opens it - and slices
+     nothing of its own; with no slice of the plate as it stands, it runs that same card slice, which Preview and Export then share. Only a
+     file opened straight into G-scope (an STL / 3MF, no plate) is sliced here. */
+  function plateCard() { var P = window.NSO_Print && window.NSO_Print.card; return P && P.previewInGscope && P.slice && P.report && P.canSlice && P.canSlice() ? P : null; }
+  function platesSlice() {
+    var P = plateCard(), d = MS().getDoc(), t0 = Date.now();
+    var source = { label: d.name, objects: d.objects, docSource: d.source, subtitle: d.subtitle };
+    var flagged = d.objects.filter(function (o) { return nonSolidOf(o); }).map(function (o) { return o.name; });
+    busy = true; syncPanel();
+    var read = $('ms-slice-read');
+    var made = P.fresh() ? Promise.resolve({ ok: true, already: true }) : (function () {
+      if (read) read.textContent = 'Slicing the plate - its one slice (Generate\'s, made again for the plate as it stands)...';
+      say('Slicing the plate...');
+      return P.slice({ onStage: function (t) { if (read && busy) read.textContent = t; } });
+    })();
+    return made.then(function (r) {
+      if (!r || !r.ok) { busy = false; syncPanel(); return refuse(r && r.reason ? r.reason : 'The plate did not slice.'); }
+      var rep = P.report();
+      if (!rep) { busy = false; syncPanel(); return refuse('The plate changed while it was slicing. Slice again.'); }
+      var o = rep.options || {};
+      pending = { source: source, result: rep, name: d.name + ' - NSO slice (' + o.nozzleMm + ' mm nozzle, ' + o.layerMm + ' mm layers)', flagged: flagged, ms: Date.now() - t0, plate: true };
+      if (!P.previewInGscope({ asSlice: true })) { pending = null; busy = false; syncPanel(); return refuse('G-scope could not open the plate\'s slice.'); }
+      return new Promise(function (res) {
+        var n = 0, wait = function () {
+          var nd = MS().getDoc();
+          if (nd && nd.kind === 'toolpath' && nd.nsoSlice && nd.nsoSlice.result === rep) return res({ ok: true, reason: '', result: rep, doc: nd, plate: true, sliced: !r.already });
+          if (++n > 600) return res(refuse('G-scope could not open the plate\'s slice.'));
+          setTimeout(wait, 50);
+        };
+        wait();
+      }).then(function (out) { busy = false; syncPanel(); return out; });
+    }, function (err) {
+      busy = false; syncPanel();
+      return refuse('Slice failed: ' + (err && err.message ? err.message : err));
+    });
+  }
+
+  /** Slice: the plate's one slice for the plate (above); an STL / 3MF opened here, sliced now. A toolpath is the Slice side already. */
   function sliceView() {
     var d = MS() && MS().getDoc();
+    if (busy) return Promise.resolve({ ok: false, reason: 'already slicing' });
     if (showingSlice() || (d && d.kind === 'toolpath')) return Promise.resolve({ ok: true, reason: 'already in Slice view', doc: d });
+    if (d && d.kind === 'mesh' && d.source === 'plate' && plateCard()) return platesSlice();
     return slice();
   }
 
-  /** Normal: from a slice, back to its mesh; on a mesh, the re-frame Normal always was. */
+  /** Normal: from a slice, back to its mesh (the plate's slice: the plate); on a mesh, the re-frame Normal always was. */
   function normalView() {
     if (busy) return null;
     if (showingSlice()) return backToMesh();
+    var d = MS() && MS().getDoc();
+    if (d && d.nsoPlateSlice && MS().openPlate) return MS().openPlate();
     return MS() ? MS().normalView() : null;
   }
 
@@ -441,8 +447,8 @@ var NSO_GSCOPE_SLICE = (function () {
     if (n) {
       n.classList.toggle('active', !on);
       n.setAttribute('aria-pressed', String(!on));
-      // From a slice made here, Normal is its mesh; a sliced file has no mesh to go back to.
-      off(n, busy || (on && !(d && d.nsoSlice)));
+      // From a slice made here, Normal is its mesh, and from the plate's slice the plate; a sliced file has no mesh to go back to.
+      off(n, busy || (on && !(d && (d.nsoSlice || d.nsoPlateSlice))));
     }
     if (c) {
       c.classList.toggle('active', on);
@@ -498,7 +504,7 @@ var NSO_GSCOPE_SLICE = (function () {
   function report(r, flagged) {
     var lines = [];
     var o = r.options;
-    lines.push(r.planes.length + ' layers at ' + o.layerMm + ' mm, walls ' + o.outerWallWidthMm + ' mm x ' + o.wallLoops +
+    lines.push((r.fileLayers || r.planes.length) + ' layers at ' + o.layerMm + ' mm, walls ' + o.outerWallWidthMm + ' mm x ' + o.wallLoops +
       ', ' + Math.round(o.sparseDensity * 100) + ' % ' + o.sparsePattern + ', support below ' + o.supportThresholdDeg + '° (' + r.ms + ' ms).');
     r.objects.forEach(function (ob) {
       if (ob.role === 'raft') { lines.push('Raft: ' + r.raft.layers + ' layer' + (r.raft.layers === 1 ? '' : 's') + ' (' + r.raft.base + ' base, ' + r.raft.interface + ' interface), top at ' + r.raft.topMm.toFixed(2) + ' mm; the plate stands on it at ' + r.raft.liftMm.toFixed(2) + ' mm.'); return; }
@@ -524,14 +530,18 @@ var NSO_GSCOPE_SLICE = (function () {
     var rd = $('ms-slice-readout');
     if (rd) rd.style.display = busy || (d && (d.kind === 'mesh' || ours)) ? '' : 'none';
     var note = $('ms-slice-settings-note');
-    if (note) note.textContent = d && d.kind === 'toolpath' && !ours
+    var plate = !!(d && ((d.kind === 'mesh' && d.source === 'plate' && plateCard()) || d.nsoPlateSlice));
+    if (note) note.textContent = plate
+      ? 'The plate has one slice: Generate\'s. Its settings are the Supports card\'s (its Slice section); these are for an STL / 3MF opened here.'
+      : d && d.kind === 'toolpath' && !ours
       ? 'This file is sliced already: the settings are for a slice made here, from a mesh.'
       : 'From the plate\'s printer profile. They take effect on the next slice: Normal, then Slice again.';
     var read = $('ms-slice-read');
     if (!read || busy) return;
     if (ours) read.textContent = report(d.nsoSlice.result, d.nsoSlice.flagged);
-    else if (d && d.kind === 'mesh') read.textContent = 'Slice (the switch) slices every ' + (d.source === 'plate' ? 'piece' : 'object') +
-      ' into real layers, walls and infill with the in-house slicer and lists its features.';
+    else if (d && d.kind === 'mesh' && plate) read.textContent = 'Slice (the switch) shows the plate\'s slice - the one Generate made, as Preview opens it; ' +
+      'with none for the plate as it stands, it makes that slice (the Supports card\'s settings).';
+    else if (d && d.kind === 'mesh') read.textContent = 'Slice (the switch) slices every object into real layers, walls and infill with the in-house slicer and lists its features.';
   }
 
   function bind(id, ev, fn) {

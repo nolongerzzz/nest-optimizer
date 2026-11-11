@@ -259,7 +259,9 @@ async function main() {
   });
   check('Slice again shows a real slice of every piece',
     [s1.kind, s1.sliced, out1.srcNames.length], ['toolpath', true, 2]);
-  check('... with the settings as they were set', out1.opts, [0.4, 0.2, 3, 0.2, 'zigzag', 35]);
+  /* ONE SLICE (the owner: "It needs to be one slice"): on the plate the switch shows the plate's slice - the Supports card's, with its
+     settings; G-scope's own rows are for an STL / 3MF opened here, and set nothing of the plate's */
+  check('... the plate\'s one slice, with the Supports card\'s settings (G-scope\'s rows are for a file opened here)', out1.opts, out0.opts);
   check('... real layers, walls and infill',
     [out1.layers === out1.planes && out1.layers > 20, out1.moves > 1000,
      ['Outer wall', 'Inner wall', 'Sparse infill'].every((g) => out1.groups.includes(g))], [true, true, true]);

@@ -536,6 +536,8 @@ layer only, round the part's outer boundary, 10 loops of a 0.5 mm line at the st
 `Brim` (G-code `; FEATURE: Brim`). Each loop is cut where it would come within half a line (+ 0.02 mm) of another object's first layer -
 a support's pad - so the brim and the pad touch edge to edge (Bambu's: 0 - 0.05 mm) and never join; a run under 1 mm is dropped. Auto
 brims a part that is tall for its foot (height over the root of the first layer's area at least 2: the stem of a chalice, a tower).
+**A part on supports gets no auto brim** (the owner: "the box is unchecked" - Brim round the foot off is no brim): its brim is the
+supports card's (Brim round the foot, a brim object of its own, below) or none. Bambu's supp_ref_v2 rings the trunks' feet in auto; NSO does not.
 The brim is a tall thin part's added hold, the way the tree's pad is the support's: for these heads it is all that holds the stem
 when the pad is a hand wider than the trunk. G-scope's Slice settings carry a **brim** select (auto / every part / off, auto at rest);
 the print planner reads the project's own `brim_type` (`auto_brim` -> auto, `outer_only` / `outer_and_inner` -> outer, `no_brim` -> none),

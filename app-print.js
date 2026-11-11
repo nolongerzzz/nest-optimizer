@@ -315,13 +315,42 @@
           stats: { layers: st.layers, seconds: st.seconds.total, grams: st.grams, filamentMm: st.filamentMm, maxZ: st.maxZ },
           settings: settings, changed: Object.keys(over),                                                        // what was sliced with, and what differs from the profile
           stacks: res.stacks ? stacksToPlate(res.stacks, assets.printer.bed) : null,                             // the supports as they print, in the plate's frame
-          raft: raftToPlate(res, assets.printer.bed)                                                             // the raft as it prints, for the plate to draw
+          raft: raftToPlate(res, assets.printer.bed),                                                            // the raft as it prints, for the plate to draw
+          report: sliceReport(res, out.plan.labels, st.layers)                                                              // what G-scope's Slice says of it (no paths)
         };
       });
     }).catch(function (err) {
       // the planner's refusal (toGcode3mf rejects with plan().reason), or whatever stopped the slice
       return { ok: false, reason: (err && err.message) || String(err) };
     });
+  }
+
+  /** The slice in G-scope's words (app-gscope-slice.js report): the slicer's result less its paths - each object's walls, overhangs and
+   *  support, the options, the layers, the conflicts - each object under the OBJECT_ID the file prints it as. G-scope shows the plate's one
+   *  slice with it (its Slice switch opens this slice, never one of its own). */
+  function sliceReport(res, labels, fileLayers) {
+    var idOf = {};
+    (labels || []).forEach(function (l) { idOf[l.index] = l.id; });
+    var opt = {};
+    Object.keys(res.options || {}).forEach(function (k) { var v = res.options[k]; if (v == null || typeof v !== 'object') opt[k] = v; });
+    return {
+      ok: true, ms: res.ms, options: opt, raft: res.raft || null, fileLayers: fileLayers,   /* the file's layers (the support's own grid among the part's) */
+      planes: (res.planes || []).map(function (p) { return { printZ: p.printZ, h: p.h }; }),
+      conflicts: (res.conflicts || []).map(function (c) { return { layer: c.layer, index: c.index, printZ: c.printZ, a: c.a, b: c.b, areaMm2: c.areaMm2 }; }),
+      objects: (res.objects || []).map(function (ob, i) {
+        var sp = ob.support;
+        return {
+          id: idOf[i] != null ? idOf[i] : ob.id, key: ob.key, name: ob.name, role: ob.role, hostKey: ob.hostKey, flipped: !!ob.flipped, nonSolid: !!ob.nonSolid,
+          wallCountHistogram: ob.wallCountHistogram || {}, sectionStats: ob.sectionStats || {},
+          layers: [{ brimLoops: ob.layers && ob.layers[0] ? ob.layers[0].brimLoops || 0 : 0 }],
+          overhang: (ob.overhang || []).map(function (g) {
+            return { firstZ: g.firstZ, footprintMm2: g.footprintMm2, standsOn: g.standsOn, coveredMm2: g.coveredMm2, uncoveredMm2: g.uncoveredMm2,
+                     coveredBy: (g.coveredBy || []).map(function (c) { return { id: c.id, name: c.name }; }) };
+          }),
+          support: sp ? { hostName: sp.hostName, tips: sp.tips, zLo: sp.zLo, zHi: sp.zHi, sheets: (sp.sheets || []).map(function () { return {}; }) } : null
+        };
+      })
+    };
   }
 
   /** The slicer's stacks (nso_slicer.js o.columnStacks) back from the bed's frame to the plate's (pieceObjects' shift undone). */
@@ -489,7 +518,9 @@
     state.placed.forEach(function (p) {
       if (!p || !p.mesh) return;
       p.mesh.updateMatrixWorld(true);
-      parts.push(p.sourceId + ':' + (p.mesh.geometry ? p.mesh.geometry.uuid : '') + ':' + p.mesh.matrixWorld.elements.join(','));
+      var pm = (state.models || []).find(function (m) { return m && m.id === p.sourceId; });
+      var ns = !!(pm && typeof root.nsoNonSolid === 'function' && root.nsoNonSolid(pm));          /* a piece flagged non-solid slices otherwise */
+      parts.push(p.sourceId + ':' + (p.mesh.geometry ? p.mesh.geometry.uuid : '') + ':' + p.mesh.matrixWorld.elements.join(',') + (ns ? ':ns' : ''));
     });
     return parts.join('|');
   }
@@ -810,16 +841,17 @@
     say('Downloaded ' + f.name);
   }
 
-  function previewInGscope() {
+  function previewInGscope(how) {
     var f = freshFile();
     if (!f) return false;
     var MS = root.NSO_MICROSCOPE;
     if (!MS || !MS.openFile) { readout('G-scope did not load - check console.', true); return false; }
+    var asSlice = !!(how && how.asSlice && MS.openSlice);     /* G-scope's Slice switch: the plate's slice, not an imported file */
     var menu = $('menu-supports');
     if (menu) menu.open = false;
     // a copy: G-scope reads the bytes, and the card keeps its file for Export
     var rec = { name: f.name, bytes: f.bytes, pieces: S.pieces, labels: S.result.labels || [], profile: S.profile, settings: S.settings || null };
-    var opened = MS.openFile(f.name, f.bytes.slice().buffer);
+    var opened = (asSlice ? MS.openSlice : MS.openFile)(f.name, f.bytes.slice().buffer);
     // G-scope's Export card then offers this slice (exportSlice): the document carries what it was made from
     if (opened && opened.then) opened.then(function (d) {
       if (!d) return;
@@ -977,7 +1009,7 @@
   }
 
   api.sliceOptionsForPlate = sliceOptionsForPlate;
-  api.card = { raftView: function () { return RAFT_VIEW.group ? { layers: RAFT_VIEW.group.children.length, lowered: RAFT_VIEW.lowered.length } : null; }, slice: slice, sliceAndPreview: sliceAndPreview, cancel: cancel, adopt: adopt, fresh: function () { return isFresh(); }, readPieces: function () { return readPieces(); }, exportFile: exportFile, previewInGscope: previewInGscope, refresh: refresh,
+  api.card = { raftView: function () { return RAFT_VIEW.group ? { layers: RAFT_VIEW.group.children.length, lowered: RAFT_VIEW.lowered.length } : null; }, slice: slice, sliceAndPreview: sliceAndPreview, cancel: cancel, adopt: adopt, fresh: function () { return isFresh(); }, report: function () { return isFresh() ? S.result.report || null : null; }, canSlice: function () { return !!profileFor(plateId()); }, readPieces: function () { return readPieces(); }, exportFile: exportFile, previewInGscope: previewInGscope, refresh: refresh,
                exportSlice: exportSlice, exportFromCard: exportFromCard, indicesFor: indicesFor,
                state: function () { return { busy: S.busy, result: S.result, fresh: isFresh() }; } };
 

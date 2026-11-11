@@ -322,12 +322,19 @@ async function main() {
       idx('nso-print-planner.js') < idx('nso-gcode3mf-write.js') && idx('nso-gcode3mf-write.js') < idx('app-print.js'), tags.filter(t => /print|3mf|gcode3/.test(t)).join(' '));
   check('every file the slice worker loads is one of the page\'s script tags (it finds them there), once', PRINT.ENGINE.every(f => tags.filter(t => t === f).length === 1), PRINT.ENGINE.join(', '));
   const gscopeFiles = fs.readdirSync(ROOT).filter(f => /^app-(microscope|gscope-.*)\.js$/.test(f));
-  const touchers = gscopeFiles.filter(f => /nso-print-planner|nso-gcode3mf-write|NSOPrintPlanner|NSO_Gcode3mf|NSO_Print\b|app-print/.test(read(f)));
-  check('no G-scope file (' + gscopeFiles.join(', ') + ') loads or calls the planner, the packager or this card', gscopeFiles.length >= 3 && touchers.length === 0, touchers.join(', '));
+  const touchers = gscopeFiles.filter(f => /nso-print-planner|nso-gcode3mf-write|NSOPrintPlanner|NSO_Gcode3mf|app-print/.test(read(f)));
+  check('no G-scope file (' + gscopeFiles.join(', ') + ') loads or calls the planner or the packager', gscopeFiles.length >= 3 && touchers.length === 0, touchers.join(', '));
+  /* ONE SLICE (the owner: "It needs to be one slice"): G-scope's Slice switch on the plate shows this card's slice - it reaches the card
+     for that, and for nothing else */
+  const cardUsers = gscopeFiles.filter(f => /NSO_Print\b/.test(read(f).replace(/\/\*[\s\S]*?\*\//g, '')));
+  const gs = read('app-gscope-slice.js').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+  const cardCalls = [...new Set([...gs.matchAll(/\bP\.(\w+)/g)].map(m => m[1]))].sort();
+  check('...only G-scope\'s Slice reaches this card, for the plate\'s one slice: is there one for the plate as it stands, make it, its report, open it',
+    JSON.stringify(cardUsers) === '["app-gscope-slice.js"]' && JSON.stringify(cardCalls) === '["canSlice","fresh","previewInGscope","report","slice"]', JSON.stringify([cardUsers, cardCalls]));
   const src = read('app-print.js').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
   check('the card never reads or writes G-scope\'s Slice settings (ms-slice-*), and does not use toGcode()', !/ms-slice|toGcode\(/.test(src));
-  check('...it calls only G-scope\'s plate reader and its file import, and - for the Export card\'s rows of a slice it opened - the open document, the selection\'s object ids and a re-read of the rows',
-    JSON.stringify([...new Set([...src.matchAll(/\bMS\.(\w+)/g)].map(m => m[1]))].sort()) === '["getDoc","openFile","plateObjects","refreshExport","selectedObjectIds"]');
+  check('...it calls only G-scope\'s plate reader, its file import (and the plate\'s slice opened as no import), and - for the Export card\'s rows of a slice it opened - the open document, the selection\'s object ids and a re-read of the rows',
+    JSON.stringify([...new Set([...src.matchAll(/\bMS\.(\w+)/g)].map(m => m[1]))].sort()) === '["getDoc","openFile","openSlice","plateObjects","refreshExport","selectedObjectIds"]');
 
   console.log('\n' + (fail ? 'FAILED  ' + fail + ' of ' + (pass + fail) : 'PASSED  all ' + pass));
   process.exit(fail ? 1 : 0);

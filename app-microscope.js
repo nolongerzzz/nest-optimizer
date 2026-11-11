@@ -7385,6 +7385,8 @@ var NSO_MICROSCOPE = (function () {
     mount: mount,
     open: openPanel,
     openFile: openFile,
+    /** A slice the app made (the plate's one slice, for the Slice switch): opened as a file is, but not the IMPORTED file - it is the plate's. */
+    openSlice: function (filename, arrayBuffer) { openPanel(); return loadFile(filename, arrayBuffer); },
     isSliced: function (arrayBuffer) {
       return threeMFHasToolpath(arrayBuffer instanceof Uint8Array ? arrayBuffer : new Uint8Array(arrayBuffer));
     },
@@ -7398,7 +7400,7 @@ var NSO_MICROSCOPE = (function () {
     openToolpathResult: openToolpathResult,
     /** The G-code OBJECT_IDs the selection is made of; and a re-read of which Export rows show (a slice from the plate says so after it opens). */
     selectedObjectIds: selectedObjectIds,
-    refreshExport: function () { syncExportRow(); syncShell(); },
+    refreshExport: function () { syncExportRow(); syncShell(); syncCard(); },   /* ...and the switch: a plate's slice has Normal (the plate) */
     plateObjects: plateObjects,
     openPicker: openPicker,
     setMode: function (m) { setMode(m); },
