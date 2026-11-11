@@ -1656,7 +1656,9 @@ var NSO_MICROSCOPE = (function () {
       }
       var shown = shownMemo();
       if (!shown.byObj.has(sg.obj)) shown.byObj.set(sg.obj, shown.list.filter(function (x) { return x.obj === sg.obj; }));
-      return { items: shown.byObj.get(sg.obj).slice(), source: 'pick', point: lh.point, label: 'piece', seg: sg };
+      // Compare, Pieces: the body under the pointer with its supports (its island), not every body that shares its OBJECT_ID
+      var isle = cmpPick && cmpPick.shape === 'piece' ? islandOf(shown, sg) : null;
+      return { items: (isle || shown.byObj.get(sg.obj)).slice(), source: 'pick', point: lh.point, label: 'piece', seg: sg };
     }
     var oh = objectHitAt(e);
     if (!oh) return null;
@@ -4141,9 +4143,70 @@ var NSO_MICROSCOPE = (function () {
   function shownMemo() {
     var key = [featureSig(), CLEARED.size, zr ? zr.lo + ':' + zr.hi + ':' + (zr.part < 1 ? 'p' + scrubTop().cut : '') : ''].join('/');
     if (!shownKept || shownKept.doc !== doc || shownKept.segs !== doc.segments || shownKept.cleared !== CLEARED || shownKept.key !== key) {
-      shownKept = { doc: doc, segs: doc.segments, cleared: CLEARED, key: key, list: shownSegments(), byObj: new Map() };
+      shownKept = { doc: doc, segs: doc.segments, cleared: CLEARED, key: key, list: shownSegments(), byObj: new Map(), islands: new Map() };
     }
     return shownKept;
+  }
+
+  /**
+   * The ISLAND a shown segment stands in: the lines of its piece (same OBJECT_ID) that touch it, layer on layer - one body
+   * with its supports. A slicer may print many bodies under one id (Bambu's slice of supp_ref_2x is one merged STL: six heads
+   * and every tree under OBJECT_ID 318), so a Compare pick by id alone took the whole plate. Lines touch when they pass
+   * through the same ISLAND_CELL_MM cell on one layer, or neighbouring cells on layers up to ISLAND_DZ_MM below (a support's
+   * own layers interleave with the part's). Kept with what is shown: lines switched off do not join islands.
+   */
+  var ISLAND_CELL_MM = 1, ISLAND_DZ_MM = 0.65;
+  function islandOf(shown, sg) {
+    var kept = shown.islands.get(sg.obj);
+    if (!kept) {
+      if (!shown.byObj.has(sg.obj)) shown.byObj.set(sg.obj, shown.list.filter(function (x) { return x.obj === sg.obj; }));
+      kept = { of: islandsOf(shown.byObj.get(sg.obj)), groups: new Map() };
+      shown.islands.set(sg.obj, kept);
+    }
+    var root = kept.of.get(sg);
+    if (root == null) return null;
+    if (!kept.groups.has(root)) {
+      var list = [];
+      kept.of.forEach(function (r, s) { if (r === root) list.push(s); });
+      kept.groups.set(root, list);
+    }
+    return kept.groups.get(root);
+  }
+
+  /** Map segment -> its island's number, for one piece's shown segments (union-find over a grid of cells per layer). */
+  function islandsOf(segs) {
+    var n = segs.length, par = new Int32Array(n), i;
+    for (i = 0; i < n; i++) par[i] = i;
+    function find(a) { while (par[a] !== a) { par[a] = par[par[a]]; a = par[a]; } return a; }
+    function join(a, b) { a = find(a); b = find(b); if (a !== b) par[a] = b; }
+    var zs = [], seen = new Set();
+    segs.forEach(function (s) { if (!seen.has(s.z)) { seen.add(s.z); zs.push(s.z); } });
+    zs.sort(function (a, b) { return a - b; });
+    var lvOf = new Map();
+    zs.forEach(function (z, k) { lvOf.set(z, k); });
+    var lv = new Int32Array(n), ord = [];
+    for (i = 0; i < n; i++) { lv[i] = lvOf.get(segs[i].z); ord.push(i); }
+    ord.sort(function (a, b) { return lv[a] - lv[b]; });
+    var C = ISLAND_CELL_MM, cell = new Map(), OFF = 1024, W = 4096;
+    function key(l, ix, iy) { return (l * W + ix) * W + iy; }
+    ord.forEach(function (si) {
+      var s = segs[si], l = lv[si];
+      var len = Math.hypot(s.x1 - s.x0, s.y1 - s.y0), k = Math.max(1, Math.ceil(len / (C / 2)));
+      for (var t = 0; t <= k; t++) {
+        var ix = Math.floor((s.x0 + (s.x1 - s.x0) * t / k) / C) + OFF, iy = Math.floor((s.y0 + (s.y1 - s.y0) * t / k) / C) + OFF;
+        var kk = key(l, ix, iy), o = cell.get(kk);
+        if (o == null) cell.set(kk, si); else join(si, o);
+        for (var b = 1; b <= 6 && l - b >= 0 && s.z - zs[l - b] <= ISLAND_DZ_MM; b++) {
+          for (var dx = -1; dx <= 1; dx++) for (var dy = -1; dy <= 1; dy++) {
+            var q = cell.get(key(l - b, ix + dx, iy + dy));
+            if (q != null) join(si, q);
+          }
+        }
+      }
+    });
+    var out = new Map();
+    for (i = 0; i < n; i++) out.set(segs[i], find(i));
+    return out;
   }
 
   function clipPlanes() { return view ? view.clip : []; }
