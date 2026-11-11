@@ -979,7 +979,7 @@ var NSO_SUPPORTS_CARD = (function () {
     if (rm) rm.hidden = !wasBuilt;
     en('btn-sup-none', cs === 'built' && !wide);
     en('btn-sup-remove', cs === 'built' && !wide && S.selSupport != null && !!modelOf(S.selSupport));
-    ['sup-angle', 'sup-style', 'sup-size', 'sup-rest', 'sup-small', 'sup-one', 'sup-interface', 'sup-brim', 'sup-raft'].forEach(function (id) { var e = $(id); if (e) e.disabled = !!S.busy; });
+    ['sup-angle', 'sup-style', 'sup-size', 'sup-rest', 'sup-small', 'sup-one', 'sup-interface', 'sup-brim', 'sup-raft', 'sup-tree-distance', 'sup-tree-diameter', 'sup-tree-angle', 'sup-tree-dangle', 'sup-tree-tip'].forEach(function (id) { var e = $(id); if (e) e.disabled = !!S.busy; });
     var note = $('sup-angle-note');
     if (note) note.textContent = S.angle + '\u00b0 \u00b7 Bambu ' + BAMBU_ANGLE + '\u00b0';
     var ang = $('sup-angle');
@@ -1201,13 +1201,21 @@ var NSO_SUPPORTS_CARD = (function () {
 
   /* ------------------------------------------------------------ building */
 
+  /* the card's Tree settings (Bambu's names): branch distance, diameter, angle, diameter angle, tip diameter - each its default when blank */
+  var TREE_KNOB_IDS = { branchDistanceMm: ['sup-tree-distance', 5], branchDiameterMm: ['sup-tree-diameter', 2], branchAngleDeg: ['sup-tree-angle', 45],
+                        branchDiameterAngleDeg: ['sup-tree-dangle', 5], tipDiameterMm: ['sup-tree-tip', 0.8] };
+  function treeKnobsOf() {
+    var out = {};
+    Object.keys(TREE_KNOB_IDS).forEach(function (k) { var e = $(TREE_KNOB_IDS[k][0]), v = e ? parseFloat(e.value) : NaN; out[k] = isFinite(v) && v >= 0 ? v : TREE_KNOB_IDS[k][1]; });
+    return out;
+  }
   function cardOpts() {
     var st = $('sup-style'), sz = $('sup-size'), rs = $('sup-rest');
     var style = st && STYLES[st.value] ? st.value : 'tree';
     var size = sz ? parseFloat(sz.value) : NaN;
     var one = $('sup-one'), it = $('sup-interface'), br = $('sup-brim'), rf = $('sup-raft'), sm = $('sup-small');
     return { brim: !br || !!br.checked, raft: !rf || !!rf.checked, style: style, sideMm: isFinite(size) ? size : null, rest: !!(rs && rs.checked), noHorns: !!(sm && sm.checked), knobs: S.mode === 'custom' ? knobsGiven() : null,
-      one: !one || !!one.checked || !!(one.parentNode && one.parentNode.hidden), dense: !it || it.value !== 'open' };   /* hidden: always one-trunk */
+      one: !one || !!one.checked || !!(one.parentNode && one.parentNode.hidden), dense: !it || it.value !== 'open', treeKnobs: treeKnobsOf() };   /* hidden: always one-trunk */
   }
 
   /* THE PLANNER'S THREAD. planTree is one synchronous call that can run for
@@ -1358,6 +1366,7 @@ var NSO_SUPPORTS_CARD = (function () {
     if (o.sideMm != null) opts.sideMm = o.sideMm;
     if (columnRule()) opts.columnRule = true;                      /* the slicer lays the interface: the planner stands no tip on a step it would not call an overhang */
     if (columnRule() && o.noHorns) opts.noHorns = true;            /* Exclude small overhangs: no horn to a step's edge; the part holds it */
+    if (columnRule() && o.treeKnobs) opts.treeKnobs = o.treeKnobs;  /* the Tree settings: Bambu's law and spacing (nso_support_gridpack.js columnCrownOf) */
     return planAway(job, D.soup, opts, onProgress).then(function (t) {
       if (!t || typeof t !== 'object') throw new Error('the planner gave no plan');
       var keyOf = function (id) { return t.beacons && t.beacons[id] ? t.beacons[id].key : null; };

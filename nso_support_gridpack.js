@@ -275,6 +275,7 @@
       ovalMax: pick(o.ovalMax, CROWN_OVAL_MAX), branchTaperDeg: pick(o.branchTaperDeg, CROWN_BRANCH_TAPER_DEG), rootFloorMm: pick(o.rootFloorMm, CROWN_ROOT_FLOOR_MM), leanHardDeg: pick(o.leanHardDeg, CROWN_LEAN_HARD_DEG),
       designLeanDeg: o.designLeanDeg == null ? null : +o.designLeanDeg, nodeRings: Array.isArray(o.nodeRings) ? o.nodeRings.slice() : CROWN_NODE_RINGS.slice(),
       searchStepMm: pick(o.searchStepMm, CROWN_SEARCH_STEP_MM), tipRiseMm: pick(o.tipRiseMm, 0),
+      bambuLaw: !!o.bambuLaw, tipDiameterMm: o.tipDiameterMm == null ? null : +o.tipDiameterMm,
       smooth: o.smooth == null ? true : !!o.smooth, blendMm: pick(o.blendMm, CROWN_BLEND_MM), blobCellMm: pick(o.blobCellMm, CROWN_BLOB_CELL_MM), tubeSides: Math.max(6, Math.round(pick(o.tubeSides, CROWN_TUBE_SIDES))),
       trunk: { tipMm: pick(t.tipMm, TRUNK_TIP_MM), angleDeg: pick(t.angleDeg, TRUNK_ANGLE_DEG), flareMm: pick(t.flareMm, FLARE_MM), flareAngleDeg: pick(t.flareAngleDeg, FLARE_ANGLE_DEG), footClearMm: pick(t.footClearMm, TRUNK_FOOT_CLEAR_MM), uniformH: t.uniformH == null ? null : +t.uniformH, padGrowMm: t.padGrowMm == null ? null : +t.padGrowMm }
     };
@@ -1356,6 +1357,28 @@
              tube 8 mm across over a 4 mm stem (the owner: "abnormally thick compared to the others") */
           var capR = CK.trunk.uniformH != null ? law(zTop, Hmax) : Infinity;
           var rTop = {}, rBot = {}, Abot = {}, rootA = 0;
+          if (CK.bambuLaw) {
+            /* Bambu's: the branch diameter at a branch's top, tan(angle) more a side for every mm under its highest tip; a tip the tip diameter */
+            var bR = CK.trunk.tipMm / 2, bT = Math.tan(CK.trunk.angleDeg * Math.PI / 180), tipR = CK.tipDiameterMm != null ? CK.tipDiameterMm / 2 : Math.sqrt(tipArea / Math.PI);
+            /* the distance is ALONG the branches, from the farthest tip down to here (Bambu's: a leaning branch is longer than its drop -
+               the 2x Sphere's trunk, 8.2 mm at z 2, is the law along its leaning crown, not straight down from its tips) */
+            var dN = {}, D3 = function (u, w) { return Math.hypot(u[0] - w[0], u[1] - w[1], u[2] - w[2]); };
+            var endOf = function (n) { return nodes[n.parent] && nodes[n.parent].root ? S[n.id] : P[n.parent]; };
+            order.forEach(function (n) {
+              if (n.root) return;
+              if (n.leaf) dN[n.id] = 0;
+              else { var mx = 0; n.kids.forEach(function (cid) { mx = Math.max(mx, dN[cid] + D3(P[cid], P[n.id])); }); dN[n.id] = mx; }
+              var len = D3(P[n.id], endOf(n));
+              if (n.leaf) { rTop[n.id] = tipR; rBot[n.id] = Math.max(tipR, bR + bT * len); }      /* the tip diameter widening to the branch's at its join */
+              else { rTop[n.id] = bR + bT * dN[n.id]; rBot[n.id] = bR + bT * (dN[n.id] + len); }
+              Abot[n.id] = Math.PI * rBot[n.id] * rBot[n.id];
+            });
+            var dRoot = 0;
+            rootKids.forEach(function (cid) { dRoot = Math.max(dRoot, dN[cid] + D3(P[cid], S[cid]) + Math.max(0, S[cid][2] - zTop)); });
+            var pathAdd = Math.max(0, zTop + dRoot - Hmax), lawB = law(zTop, Hmax + pathAdd);
+            return { A: [Ax, Ay], P: P, S: S, z: zOf, zTop: zTop, rTop: rTop, rBot: rBot, rNeed: lawB, lawTop: lawB, rEqTop: lawB, pathAdd: pathAdd,
+                     dR: 0, k: ovalK(lawB), a: lawB * Math.sqrt(ovalK(lawB)), b: lawB / Math.sqrt(ovalK(lawB)) };
+          }
           order.forEach(function (n) {
             if (n.leaf) { rTop[n.id] = rBot[n.id] = Math.sqrt(tipArea / Math.PI); Abot[n.id] = tipArea; return; }
             var A0 = 0;
@@ -1487,7 +1510,7 @@
         });
         var rm = newMember([[sol.A[0], sol.A[1], sol.zTop], [sol.A[0], sol.A[1], plateZ]], n0, beaconsOfNode(root), 'crown', 0);
         rm.round = true; rm.end = 'plate'; rm.free = false; rm.crown = ci; rm.side = 2 * sol.a;
-        rm.oval = { ux: uAx[0], uy: uAx[1], ang: spreadAng, k: sol.k, dR: sol.dR, law: CK.trunk };
+        rm.oval = { ux: uAx[0], uy: uAx[1], ang: spreadAng, k: sol.k, dR: sol.dR, law: sol.pathAdd ? Object.assign({}, CK.trunk, { pathAddMm: sol.pathAdd }) : CK.trunk };
         mOf[root.id] = rm.id;
         edges.forEach(function (e) { if (e.blocked) { M[mOf[e.n.id]].blocked = true; out.blocked.forEach(function (b) { if (b.crown === ci && b.node === e.n.id) b.tips = e.n.tips.map(function (ti) { return list[ti].key; }).sort(); }); } });
         nodes.forEach(function (n) {
@@ -2269,7 +2292,7 @@
     var cr = g.crown, cx = f.c[0], cy = f.c[1], top = Math.max(g.top, z0 + 2 * thick), LW = cr.law;
     if (LW) { ta = Math.tan(LW.angleDeg * Math.PI / 180); tb = Math.tan(LW.flareAngleDeg * Math.PI / 180); zf = plateZ + LW.flareMm; }
     var tipMm = LW ? LW.tipMm : TRUNK_TIP_MM;
-    var Hl = LW && LW.uniformH != null ? plateZ + LW.uniformH : g.H;
+    var Hl = LW && LW.uniformH != null ? plateZ + LW.uniformH : g.H + ((LW && LW.pathAddMm) || 0);   /* Bambu's law: the length along the crown (pathAddMm) */
     var law = function (z) { return tipMm / 2 + ta * Math.max(0, Hl - z) + flareAt(z, zf, tb, LW ? LW.flareMm : FLARE_MM) + cr.dR; };
     var rec = { c: [cx, cy], H: g.H, stemTop: g.top, top: top, rings: null, why: null, crown: true, k: cr.k, ang: cr.ang };
     f.grown = rec;
@@ -3594,7 +3617,7 @@
       /* the trunk: its foot, and (growTrunks) its body */
       if (foot && tr.landing === 'plate' && !(opts._graft && opts._graft[cr.zone] != null)) {
         var A0 = rootM.path[0], H = tipTopOf(tr), LW = rootM.oval.law || { tipMm: TRUNK_TIP_MM, angleDeg: TRUNK_ANGLE_DEG, flareMm: FLARE_MM, flareAngleDeg: FLARE_ANGLE_DEG };
-        var Hlaw = LW.uniformH != null ? p.plateZ + LW.uniformH : H;
+        var Hlaw = LW.uniformH != null ? p.plateZ + LW.uniformH : H + (LW.pathAddMm || 0);
         var zTr = A0[2] - (smooth && prims.length ? CROWN_TRUNK_SINK_MM : 0);   /* the exact trunk stops a little under its top: the crown's smooth body is the shoulder over it */
         var gw = { H: H, top: zTr, side: rootM.side, tips: null, crown: { ang: rootM.oval.ang, k: rootM.oval.k, dR: rootM.oval.dR, law: LW } };
         var aBase = LW.tipMm / 2 + Math.tan(LW.angleDeg * Math.PI / 180) * Math.max(0, Hlaw - p.plateZ) + Math.tan(LW.flareAngleDeg * Math.PI / 180) * LW.flareMm + rootM.oval.dR;
@@ -4594,7 +4617,18 @@
   /* ...and its tips: no cap or sheet spreads a tip's hold under the column rule (the slicer's stack spans between tips), so they stand closer - Bambu's
      under its plates are 2 - 3 mm apart */
   var COLUMN_ONE = { coverMm: 2.2, tiltDeg: 45 };
-  var COLUMN_CROWN = { tipDropMm: 1.6, tipRiseMm: 1.6, nodeDropMm: 1.2, rootFloorMm: 3, leanHardDeg: 45, trunk: { flareMm: 2 } };   /* a 2 mm flare (was 1.5, a stick on a pad: the owner's 2x Oblique came off the plate; Bambu's P1S trunks taper 7.0 -> 4.3 over 7 mm) */   /* leanHardDeg: no leg past the lean limit (Bambu's branch angle 45) */
+  /* BAMBU'S TREE LAW (its Tree settings: branch diameter 2, branch diameter angle 5, tip diameter 0.8): every branch is the branch diameter at
+     its top, widening tan(angle) a side for every mm under its highest tip - the trunk too (supp_ref_2x 02.09: 5.9 mm at z 8 under tips at 30,
+     the law's 5.85). NSO's trunk was capped at a 10 mm-tall law (uniformH): 4.4 mm where Bambu's is 8.2. */
+  var COLUMN_CROWN = { tipDropMm: 1.6, tipRiseMm: 1.6, nodeDropMm: 1.2, rootFloorMm: 3, leanHardDeg: 45, bambuLaw: true, tipDiameterMm: 0.8, trunk: { flareMm: 2, tipMm: 2, angleDeg: 5, uniformH: null } };
+  /* the card's Tree settings (opts.treeKnobs, Bambu's names) over the column crown: branch distance, diameter, angle, diameter angle, tip diameter */
+  var TREE_KNOBS = { branchDistanceMm: 5, branchDiameterMm: 2, branchAngleDeg: 45, branchDiameterAngleDeg: 5, tipDiameterMm: 0.8 };
+  function columnCrownOf(tk) {
+    var k = Object.assign({}, TREE_KNOBS, tk || {}), cc = Object.assign({}, COLUMN_CROWN, { trunk: Object.assign({}, COLUMN_CROWN.trunk) });
+    cc.tipDiameterMm = +k.tipDiameterMm; cc.leanHardDeg = +k.branchAngleDeg;
+    cc.trunk.tipMm = +k.branchDiameterMm; cc.trunk.angleDeg = +k.branchDiameterAngleDeg;
+    return { cc: cc, k: k };
+  }   /* a 2 mm flare (was 1.5, a stick on a pad: the owner's 2x Oblique came off the plate; Bambu's P1S trunks taper 7.0 -> 4.3 over 7 mm) */   /* leanHardDeg: no leg past the lean limit (Bambu's branch angle 45) */
   function thinTips(list, coverMm, minTips) {
     var n = list.length;
     if (n <= 1) return list.map(function (b, i) { return i; });
@@ -5043,6 +5077,11 @@
     var say = progressOf(opts);
     say('detecting', null, null, true);
     var ck = Object.assign({}, ONE, opts.columnRule ? COLUMN_ONE : {}, (opts.oneTrunk && typeof opts.oneTrunk === 'object') ? opts.oneTrunk : {});
+    var CCK = columnCrownOf(opts.treeKnobs), CC = CCK.cc;
+    if (opts.columnRule && opts.treeKnobs) {
+      /* branch distance: tips about that far apart (the cover is the spots' reach to their tip: 5 mm -> 2.2, the column rule's own) */
+      ck.coverMm = 0.44 * CCK.k.branchDistanceMm; ck.tiltDeg = +CCK.k.branchAngleDeg;
+    }
     ck.crown = Object.assign({}, ONE.crown, (opts.oneTrunk && opts.oneTrunk.crown) || {});
     var byArea = {}, order = [];
     bc.beacons.forEach(function (b) {
@@ -5214,7 +5253,7 @@
           /* ...and as many branches to a join as the head's height asks: a squat head has no room for a join under a join (a
              branch from a join 0.5 mm under its tips leans along the underside it should clear), so its tips go to the trunk's top
              in as few levels as the room allows - a flat umbrella - and a tall head keeps Bambu's pairs (2 - 3 to a join) */
-          var ckc = opts.columnRule ? Object.assign({}, ck.crown, COLUMN_CROWN) : ck.crown;
+          var ckc = opts.columnRule ? Object.assign({}, ck.crown, CC) : ck.crown;
           var room = zlo - ckc.rootFloorMm - ckc.tipDropMm, allowed = Math.max(0, Math.floor(room / ckc.nodeDropMm + 1e-9)), K = 3, mm = c.tips.length, rds = 0;
           for (K = 3; K < c.tips.length; K++) {
             mm = c.tips.length; rds = 0;
@@ -5226,8 +5265,8 @@
         });
         var o2 = Object.assign({}, opts, {
           feed: { mode: 'custom', tips: tips, landingZones: zones },
-          crown: Object.assign({ tipRiseMm: ck.tipRiseMm, designLeanDeg: ck.designLeanDeg }, ck.crown || {}, opts.columnRule ? COLUMN_CROWN : {}, opts.crown || {},
-                               { trunk: Object.assign({ footClearMm: ck.footClearMm }, (ck.crown && ck.crown.trunk) || {}, opts.columnRule ? COLUMN_CROWN.trunk : {}, (opts.crown && opts.crown.trunk) || {}) }),
+          crown: Object.assign({ tipRiseMm: ck.tipRiseMm, designLeanDeg: ck.designLeanDeg }, ck.crown || {}, opts.columnRule ? CC : {}, opts.crown || {},
+                               { trunk: Object.assign({ footClearMm: ck.footClearMm }, (ck.crown && ck.crown.trunk) || {}, opts.columnRule ? CC.trunk : {}, (opts.crown && opts.crown.trunk) || {}) }),
           branchTiltDeg: opts.branchTiltDeg == null ? ck.tiltDeg : opts.branchTiltDeg,
           beacons: undefined, oneTrunk: undefined
         });

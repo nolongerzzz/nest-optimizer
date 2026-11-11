@@ -292,9 +292,26 @@ within 12 mm (`oneTrunkGroups`, ONE.clusterMm). Under the column rule a group is
 its lowest spot (`reachByHeight`, the same reach planOneTrunk's clusters take): that head two trunks, every head of supp_ref_2x one or two,
 7 support pieces (was 10); 1x unchanged (gate 66 / 65 of 66).
 
+## 4m. Trunk diameter by Bambu's law; the Tree settings
+
+The owner's new 2x reference (`supp_ref_2x_sep.3mf` and its 02.09.01.70 slice, each head its own object): Bambu's trunks are 9.2 - 9.6 mm
+at the plate, ~8 at z 2, ~6 at z 6 - 8 - exactly its Tree settings' law, the branch diameter (2) widening tan(branch diameter angle, 5)
+a side for every mm under the farthest tip (the Base: 5.85 predicted at z 8, 5.9 measured), plus a flare over its lowest ~4 mm. NSO's
+trunk was capped at a 10 mm-tall law (`uniformH`): 4.4 - 4.6 mm at z 2, 60 % of Bambu's.
+
+The column rule's crown now takes Bambu's law (`COLUMN_CROWN.bambuLaw`): every branch the branch diameter at its top, widening along the
+branches (not straight down - a leaning crown is longer than its drop) from its farthest tip; a tip the tip diameter (0.8) widening to its
+branch's; the trunk the same law from the crown's length (`pathAddMm`). NSO 2x at z 0.5 / 2 now: Base 9.1 / 7.8 (Bambu 9.6 / 8.3),
+Negative Sphere 8.1 / 7.0 (9.4 / 8.1), Circular 6.9 / 5.9 (9.2 / 8.0), Sphere 6.9 / 5.7 (9.4 / 8.2). Bambu's wider flare (4 mm, +2.4 mm
+at the plate) floats an island at the Negative Sphere's trunk beside its stem - the flare stays 2 mm, named below.
+
+**Tree settings** (supports card, Bambu's names and defaults; `opts.treeKnobs`, `columnCrownOf`): Branch distance 5 mm (the tips' spacing:
+the cover is 0.44 of it, 2.2), Branch diameter 2 mm, Branch angle 45 deg (the lean limit), Branch diameter angle 5 deg, Tip diameter 0.8 mm.
+The defaults build what the column rule built before them; Branch diameter 4 widens the 1x Base's trunk 5.3 -> 7.4 mm.
+
 ## 5. Not done, and named
 
-- **Trunk bases and pads, as Bambu's**: a flare over 2 mm floats an island at the Negative Sphere's trunk (z 1.3, beside its stem);
+- **Trunk bases and pads, as Bambu's** (the law is Bambu's now, 4m; the flare is not): a flare over 2 mm floats an island at the Negative Sphere's trunk (z 1.3, beside its stem);
   Bambu's first-layer pad is about twice NSO's (13.5 against 6.7 mm across). Next, against the owner's Studio 02.09 slice of supp_ref.
 
 - **The merged plate's small surfaces.** The six as one piece are read on a 3 mm grid where each alone is read at 1 mm, so the Negative Sphere2's apex

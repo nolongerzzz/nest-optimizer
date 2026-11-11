@@ -293,6 +293,9 @@ per-layer angle histograms and line centres. See `docs/CROSSHATCH.md`.
   Sphere's side wall is no longer holed. The support gate's default reference (tools/nso_support_gate.js).
 - supp_ref_2x.3mf / supp_ref_2x.gcode.3mf — the same six heads at 2x, the project and its 02.09.01.70 slice (support_interface_spacing
   0.5, 2 top interface layers): the scale the owner's 2x Oblique welded at; first-layer pads 12 - 13 mm, trunks tapering ~7 -> 5 mm.
+- supp_ref_2x_sep.3mf / supp_ref_2x_sep.gcode.3mf — supp_ref at 2x with each head its own object (the owner's export now keeps them
+  apart), and its Bambu Studio 02.09.01.70 slice (Tree settings: branch distance 5, diameter 2, angle 45, diameter angle 5, tip 0.8;
+  interface spacing 0.1, 3 layers): the trunk-diameter reference - 9.2 - 9.6 mm at the plate, ~6 mm at z 6 - 8.
 - supp_ref_raft.gcode.3mf — the owner's Bambu Studio slice of supp_ref with tree slim AND a 10-layer raft (A1 mini, 0.20mm Standard,
   raft_contact_distance 0.1, raft_expansion 1.5, support_interface_spacing 0.1, support_base_pattern_spacing 2.5): 5 base layers (Support,
   z 0.2 / 0.5 - 1.4), 5 interface (Support interface, 1.7 - 2.9), the trees from 3.0, the parts' first layer at 3.2. The reference for
