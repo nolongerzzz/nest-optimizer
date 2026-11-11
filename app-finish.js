@@ -6603,9 +6603,14 @@ function modelNameById(id) {
 }
 
 function paintJoinHighlights() {
+  /* A Select all group, or the Supports card's lit plate, is a selection of its
+     own: every piece of it wears the selected look and the active model does
+     not stand out from it (app-core.js, nsoPaintSelLook). */
+  const grp = (typeof nsoSelAllPieces === 'function' ? nsoSelAllPieces() : [])
+    .concat(typeof nsoLitPieces === 'function' ? nsoLitPieces() : []);
   (state.placed || []).forEach(function (pl) {
     if (!pl || !pl.mesh || !pl.mesh.material || !pl.mesh.material.color) return;
-    const selected = pl.sourceId === state.editId;
+    const selected = grp.length ? grp.indexOf(pl) >= 0 : pl.sourceId === state.editId;
     pl.mesh.material.color.setHex(selected ? SELECT_COLOR : PIECE_COLOR);
     if (pl.mesh.material.emissive) {
       pl.mesh.material.emissive.setHex(selected ? 0x9f1239 : 0x0a3a5c);

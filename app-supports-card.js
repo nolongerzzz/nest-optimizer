@@ -3002,28 +3002,25 @@ var NSO_SUPPORTS_CARD = (function () {
 
   /* ---------------------------------------------- the plate option, lit */
 
-  var LIT = { color: 0xdc2626, intensity: 0.55 };      // a selection's own look (selectPlaced)
-
-  /* Every real piece lit as a selection is: the red tint and the white outline. The outline is the app's own
-     (refreshOutline, which draws for the selected piece only, so each piece is "selected" for the call and none is when
-     it returns), kept in the piece's own p.outline slot - the one slot clearSelectionOutline, selectPlaced, the undo
-     restore (nsoDropOutline) and refreshOutline already strip, so one outline per piece and nothing left behind. */
+  /* Every real piece lit as a selection is: the selected piece's rose body and white outline, the very look a Select
+     all group wears (app-core.js nsoPaintSelLook, through state.litSel). The outline is the app's own (refreshOutline,
+     which draws for any piece nsoLooksSelected says is lit), kept in the piece's own p.outline slot - the one slot
+     clearSelectionOutline, selectPlaced, the undo restore (nsoDropOutline) and refreshOutline already strip, so one
+     outline per piece and nothing left behind. */
   function light() {
     unlight();
     if (typeof clearSelectionOutline === 'function') clearSelectionOutline();
     state.selectedIndex = -1;
     S.lit = [];
-    state.placed.forEach(function (p, i) {
-      if (!p || !p.mesh || isSupport(p.sourceId)) return;
-      p.mesh.material.emissive = new THREE.Color(LIT.color);
-      p.mesh.material.emissiveIntensity = LIT.intensity;
-      state.selectedIndex = i;
+    var pieces = state.placed.filter(function (p) { return p && p.mesh && !isSupport(p.sourceId); });
+    state.litSel = pieces;
+    pieces.forEach(function (p) {
       if (typeof refreshOutline === 'function') refreshOutline(p, { now: true });     // on screen before it returns, as it was
       S.lit.push({ p: p, line: p.outline || null });
     });
-    state.selectedIndex = -1;
     if (typeof updateAdjustUI === 'function') updateAdjustUI();
     if (typeof renderModelList === 'function') renderModelList();
+    if (typeof nsoPaintSelLook === 'function') nsoPaintSelLook();         // last: the colour, over whatever the list repainted
     if (typeof nsoInputMode !== 'undefined' && nsoInputMode) setTimeout(function () { nsoInputMode.refresh(); }, 0);
   }
   /* Take back exactly what light() put up: an outline still ours comes off and is disposed; a piece the user has since
@@ -3031,19 +3028,23 @@ var NSO_SUPPORTS_CARD = (function () {
   function unlight() {
     var lit = S.lit || [];
     S.lit = [];
+    var mine = state.litSel && lit.length && state.litSel.indexOf(lit[0].p) >= 0;
+    if (mine || !lit.length) state.litSel = null;
     lit.forEach(function (e) {
       var p = e.p;
-      if (e.line && p.outline === e.line) {
+      var still = typeof nsoLooksSelected === 'function' && nsoLooksSelected(p);
+      if (e.line && p.outline === e.line && !still) {
         if (p.mesh) p.mesh.remove(e.line);
         if (e.line.geometry) e.line.geometry.dispose();
         if (e.line.material) e.line.material.dispose();
         p.outline = null;
       }
-      if (p.mesh && p.mesh.material && state.placed[state.selectedIndex] !== p) {
+      if (p.mesh && p.mesh.material && !still) {
         p.mesh.material.emissive = new THREE.Color(0x000000);
         p.mesh.material.emissiveIntensity = 0;
       }
     });
+    if (lit.length && typeof paintJoinHighlights === 'function') paintJoinHighlights();   // the plain look back, the selection's kept
   }
   /* The highlight IS the option: while it stands the option is on. Anything that takes it down - a piece picked, added
      or removed, an Undo that restores the plate - ends the option with it. */

@@ -38,7 +38,7 @@ const CORE = ['updateUndoBtn', 'pushUndo', 'clearUndo', 'clearRedo', 'undoLast',
   'nsoGeometriesNamed', 'nsoReleaseGeometries', 'nsoPoseBakeGeometries', 'nsoLeavingGeometries', 'nsoDropRedo',
   'nsoCopyFields', 'nsoRestoreFields', 'nsoWorldFingerprint', 'nsoWorldSnapshot', 'nsoDropOutline', 'nsoWorldRestore', 'nsoUndoPoseBake',
   'addModel', 'addModelFromZUpGeometry', 'zUpToYUp', 'placeNewModel', 'placeModelMovable',
-  'clearSelectionOutline', 'selectPlaced'];
+  'clearSelectionOutline', 'selectPlaced', 'nsoSelAllPieces', 'nsoLitPieces', 'nsoLooksSelected', 'nsoPaintSelLook'];
 const ENGINE = ['nso_thickness.js', 'nso_support_beacons.js', 'nso_support_aim.js', 'nso_path_sweep.js',
   'nso_support_tree.js', 'nso_support_gridpack.js', 'nso_raster_lines.js', 'nso_crosshatch.js', 'nso_support_interface.js'];
 
@@ -134,6 +134,7 @@ function makeApp(opts) {
   const core = read('app-core.js'), selOutline = read('app-sel-outline.js'), join = read('app-join.js');
   vm.runInContext([
     'let nextId = 1; const UNDO_MAX = 40; const REDO_LABEL = {}, UNDO_REPLACE_LABEL = {};',
+    core.match(/^const SELECT_COLOR = .*$/m)[0],
     ...CORE.map(n => fnSource(core, n, 'app-core.js')),
     fnSource(join, 'meshToWorldSoup', 'app-join.js'),
     'this.__core = { addModelFromZUpGeometry, placeModelMovable, selectPlaced, clearSelectionOutline, pushUndo, undoLast, redoLast };'

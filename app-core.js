@@ -339,6 +339,7 @@ function undoLast() {
     updateUndoBtn();
   }
   if (typeof cutAfterPoseUndo === 'function') cutAfterPoseUndo();      // the Cut card's Rotate piece wheel reads the pose that came back
+  if (typeof nsoPaintSelLook === 'function') nsoPaintSelLook();   // a Select all group still standing: its look on the meshes the Undo put back
   return r;
 }
 
@@ -359,7 +360,7 @@ function undoLast() {
    the Supports card) keep state of their own that a snapshot of the plate
    does not hold; they are not redoable and an Undo of one empties the stack. */
 const REDO_LABEL = {
-  movePlaced: 'move re-applied', posePlaced: 'pose re-applied', addModels: 'clone re-applied',
+  movePlaced: 'move re-applied', groupMovePlaced: 'group move re-applied', posePlaced: 'pose re-applied', addModels: 'clone re-applied',
   splitReplace: 'Cut re-applied', joinReplace: 'Join re-applied', subtractReplace: 'Subtract re-applied',
   removePlaced: 'piece removed again', removeModel: 'model removed again',
   plateCutReplace: 'whole-plate cut re-applied'
@@ -516,6 +517,7 @@ function redoLast() {
     (UNDO_REPLACE_LABEL[r.entry.type] || '').replace(/^Undo: /, '').replace(/ reverted$/, ' re-applied');
   setStatus('Redo: ' + (say || r.entry.label || 'step re-applied'));
   if (typeof cutAfterPoseUndo === 'function') cutAfterPoseUndo();
+  if (typeof nsoPaintSelLook === 'function') nsoPaintSelLook();
 }
 
 function undoLastStep() {
@@ -987,6 +989,18 @@ function undoLastStep() {
     state.selectedIndex = entry.index;
     updateAdjustUI();
     setStatus('Undo: moved piece back');
+    return;
+  }
+  if (entry.type === 'groupMovePlaced') {
+    // A Select all group dragged together: every piece back where it was picked up, the group still selected.
+    (entry.items || []).forEach(it => {
+      const p = state.placed[it.index];
+      if (!p) return;
+      applyPlacedXZ(p, it.x, it.z);
+      restoreMeshY(p, it.meshY);
+    });
+    updateAdjustUI();
+    setStatus('Undo: moved ' + (entry.items || []).length + ' pieces back');
     return;
   }
   if (entry.type === 'poseBake') {
@@ -2549,11 +2563,13 @@ function renderModelList() {
   el.innerHTML = '';
   const onPlate = modelsOnPlate();
   piecesListSig = onPlate.map(m => m.id).join(',');
+  // a Select all group (or the Supports card's lit plate) is the selection: every one of its rows is lit
+  const grpIds = new Set(typeof nsoSelAllPieces === 'function' ? nsoSelAllPieces().concat(nsoLitPieces()).map(p => p.sourceId) : []);
 
   onPlate.forEach(m => {
     const row = document.createElement('div');
     let cls = 'model-item';
-    if (m.id === state.editId) cls += ' active';
+    if (grpIds.size ? grpIds.has(m.id) : m.id === state.editId) cls += ' active';
     if (m.id === state.joinPartnerId) cls += ' join-partner';
     row.className = cls;
     row.dataset.editId = String(m.id);
@@ -3364,7 +3380,7 @@ function resolveDragPose(p, selfIdx, fromX, fromZ, toX, toZ) {
   applyPlacedXZ(p, g.x, g.z);
 }
 
-function startMoveDrag(idx, event) {
+function startMoveDrag(idx, event, group) {
   /* ...except a piece Lift left in the air, in the Crop card Lift is a button of: grabbing it to drop it elsewhere is Lift's own. */
   const liftedOne = state.cutTool === 'crop' && typeof NSO_LIFT_PLATE !== 'undefined' && NSO_LIFT_PLATE.ownsDrop && NSO_LIFT_PLATE.ownsDrop(state.placed[idx]);
   if (state.cutterOpen && !liftedOne && !cropCardIdle()) {
@@ -3385,6 +3401,8 @@ function startMoveDrag(idx, event) {
   // Position lock (app-poslock.js): a locked piece is still selectable, but
   // the drag never starts and nothing is pushed to undo.
   if (typeof nsoPosLockBlocks === 'function' && nsoPosLockBlocks(p, 'drag')) return false;
+  /* A Select all group moves as one: every piece by the same step, so none of it may be held. */
+  if (group && typeof nsoPosLockBlocks === 'function' && group.some(q => q !== p && nsoPosLockBlocks(q, 'drag'))) return false;
   setPointerFromEvent(event);
   /* The grab offset is read on the plane of the piece's own bottom - the
      bed for a piece on it, as it always was; a piece in the air is held
@@ -3395,11 +3413,15 @@ function startMoveDrag(idx, event) {
   state.moveIndex = idx;
   applyPlateGridVisibility();
   state.moveUndoFrom = { index: idx, x: p.x, z: p.z, meshY: p.mesh ? p.mesh.position.y : null };
+  /* the group's other pieces, each where it was picked up: the drag carries them by the held piece's step */
+  state.moveGroup = (group && group.length > 1) ? group.filter(q => q && q.mesh).map(q => ({
+    p: q, index: state.placed.indexOf(q), x: q.x, z: q.z, meshY: q.mesh.position.y
+  })) : null;
   /* A plate drag is flat: XY only, nothing under the pointer is read. The one
      exception is Lift's own drop (app-lift-plate.js): a piece Lift left in
      the air, grabbed and carried, rests on what it is let go over
      (app-grab-drop.js). Nothing else calls the grab. */
-  state.moveGrabbing = !!(typeof NSO_LIFT_PLATE !== 'undefined' && NSO_LIFT_PLATE.ownsDrop && NSO_LIFT_PLATE.ownsDrop(p) &&
+  state.moveGrabbing = !state.moveGroup && !!(typeof NSO_LIFT_PLATE !== 'undefined' && NSO_LIFT_PLATE.ownsDrop && NSO_LIFT_PLATE.ownsDrop(p) &&
     typeof nsoGrab !== 'undefined' && nsoGrab.begin(p, idx, event));
   state.moveMoved = false;
   state.moveGrab.x = p.x - hit.x;
@@ -3434,7 +3456,20 @@ function dragMovePlaced(event) {
   p.x = g.x;
   p.z = g.z;
   if (p.mesh) { p.mesh.position.x = g.x; p.mesh.position.z = g.z; }
+  if (state.moveGroup) nsoMoveGroupBy(g.x - state.moveUndoFrom.x, g.z - state.moveUndoFrom.z);
   state.moveMoved = true;
+}
+
+/* The Select all group follows the held piece: every other piece where it was picked up, plus the same step. */
+function nsoMoveGroupBy(dx, dz) {
+  const G = state.moveGroup;
+  if (!G) return;
+  const held = state.placed[state.moveIndex];
+  G.forEach(e => {
+    if (e.p === held) return;
+    e.p.x = e.x + dx; e.p.z = e.z + dz;
+    if (e.p.mesh) { e.p.mesh.position.x = e.p.x; e.p.mesh.position.z = e.p.z; }
+  });
 }
 
 /* Escape mid-drag puts a flat drag back where it was picked up (Lift's drop
@@ -3448,10 +3483,14 @@ window.addEventListener('keydown', (e) => {
     p.x = f.x;
     p.z = f.z;
     if (p.mesh) { p.mesh.position.x = f.x; p.mesh.position.z = f.z; }
+    if (state.moveGroup) nsoMoveGroupBy(0, 0);
   }
+  const many = !!state.moveGroup;
   state.moveMoved = false;
-  endMoveDrag();
-  setStatus('Put back - the piece is where it was picked up. Nothing changed.');
+  state.moveEscaped = true;         // not a click: a group put back stays the selection (nsoEndGroupDrag)
+  try { endMoveDrag(); } finally { state.moveEscaped = false; }
+  setStatus(many ? 'Put back - the pieces are where they were picked up. Nothing changed.'
+                 : 'Put back - the piece is where it was picked up. Nothing changed.');
 }, true);
 
 function endMoveDrag() {
@@ -3459,7 +3498,8 @@ function endMoveDrag() {
   clearFenceLines();
   const idx = state.moveIndex;
   const from = state.moveUndoFrom;
-  const grabbing = state.moveGrabbing, flat = state.moveMoved;
+  const grabbing = state.moveGrabbing, flat = state.moveMoved, group = state.moveGroup;
+  state.moveGroup = null;
   state.moveDragging = false;
   state.moveGrabbing = false;
   state.moveMoved = false;
@@ -3484,6 +3524,7 @@ function endMoveDrag() {
        the pose bounds the piece already has - a translation never
        invalidates them, so a piece that has not turned is not re-scanned. */
     if (flat) settlePlacedOnBed(p);
+    if (group) return nsoEndGroupDrag(idx, from, group, flat);
     /* A press on a piece always starts a drag, so a plain click (or an
        Alt-click, which also re-aims the view) ends here too. Only a drag
        that really moved the piece - the same test that decides the undo
@@ -3509,6 +3550,31 @@ function endMoveDrag() {
     if (moved && wasUp) setStatus('Set down on the plate, from ' + pose.liftY.toFixed(2) + ' mm up. One Undo (Ctrl+Z) puts it back.');
     else if (!refusedMove && !reportJoinFlushGap() && moved) setStatus('Moved model #' + (idx + 1));
   }
+}
+
+/* The release of a drag on a Select all group. Not moved: it was a click, and a click on one piece of the group
+   selects that piece alone (Escape puts the group back first and never gets here as a click). Let go over another
+   plate: the whole group goes there (app-beds.js, moveGroup), one Undo. Otherwise every piece moved by the same step:
+   one Undo (groupMovePlaced) puts them all back, and the group stays selected. */
+function nsoEndGroupDrag(idx, from, group, flat) {
+  const p = state.placed[idx];
+  const moved = Math.abs(p.x - from.x) > 0.01 || Math.abs(p.z - from.z) > 0.01;
+  if (!moved) {
+    if (!state.moveEscaped) selectPlaced(idx);
+    return;
+  }
+  if (flat) group.forEach(e => { if (e.p !== p && state.placed.indexOf(e.p) >= 0) settlePlacedOnBed(e.p); });
+  if (typeof NSO_BEDS !== 'undefined' && NSO_BEDS.moveGroup) {
+    const to = NSO_BEDS.dropTarget(p, from);
+    if (to >= 0) {
+      if (NSO_BEDS.moveGroup(group, to)) return;
+      /* refused (it said why): every piece back where it was picked up */
+      group.forEach(e => { if (state.placed.indexOf(e.p) >= 0) { applyPlacedXZ(e.p, e.x, e.z); restoreMeshY(e.p, e.meshY); } });
+      return;
+    }
+  }
+  pushUndo({ type: 'groupMovePlaced', items: group.map(e => ({ index: state.placed.indexOf(e.p), x: e.x, z: e.z, meshY: e.meshY })) });
+  if (!reportJoinFlushGap()) setStatus('Moved ' + group.length + ' pieces - one Undo (Ctrl+Z) puts them all back');
 }
 
 /* Where the pointer puts the blade, along the blade's own travel axis.
@@ -3773,14 +3839,49 @@ function nsoCtxHasPiece() {
 }
 /* SELECT ALL. The app holds ONE selected piece (state.selectedIndex); "all the
    pieces on this plate" is a group beside it, state.multiSel (placed entries),
-   drawn with the selected piece's red glow. While it stands selectedIndex is -1,
-   so no single-piece verb can land on an arbitrary piece; the group answers
-   Delete (one Undo step per piece) and Clear plate, and selecting anything
-   else, switching plate, deleting or clearing ends it (clearSelectionOutline). */
+   drawn exactly as a selected piece is drawn - the rose body and the white
+   outline (nsoPaintSelLook). While it stands selectedIndex is -1, so no
+   single-piece verb can land on an arbitrary piece; the group answers Delete
+   (one Undo step per piece), Clear plate, the Scale card's Whole x (every
+   piece, one Undo), and a drag on any of its pieces (the whole group moves, to
+   another plate as well), and selecting anything else, switching plate,
+   deleting or clearing ends it (clearSelectionOutline). */
 function nsoSelAllPieces() {
   const g = state.multiSel;
   if (!g || !g.length) return [];
   return g.filter(p => state.placed.indexOf(p) >= 0);
+}
+/* Pieces drawn as selected without being a selection: the Supports card's
+   "Generate for plate" lights every piece it will build for (state.litSel).
+   clearSelectionOutline ends it with the rest of the selection's look. */
+function nsoLitPieces() {
+  const g = state.litSel;
+  if (!g || !g.length) return [];
+  return g.filter(p => state.placed.indexOf(p) >= 0);
+}
+/* Does this piece wear the selection's look: the one selected piece, a piece of
+   the Select all group, or one the Supports card lit for the plate. */
+function nsoLooksSelected(p) {
+  if (!p) return false;
+  if (state.placed[state.selectedIndex] === p) return true;
+  return nsoSelAllPieces().indexOf(p) >= 0 || nsoLitPieces().indexOf(p) >= 0;
+}
+/* Every piece of the group (or the lit set) in the one selected look - the
+   colour paintJoinHighlights gives the selected piece and the white outline
+   refreshOutline draws for it. Idempotent: called again after a bake, an Undo
+   or a plate move rebuilt a mesh, it puts the look back on the new one. */
+function nsoPaintSelLook() {
+  const grp = nsoSelAllPieces().concat(nsoLitPieces());
+  if (!grp.length) return 0;
+  if (typeof paintJoinHighlights === 'function') paintJoinHighlights();
+  else grp.forEach(p => {
+    if (!p.mesh || !p.mesh.material) return;
+    p.mesh.material.color.setHex(SELECT_COLOR);
+    p.mesh.material.emissive = new THREE.Color(0x9f1239);
+    p.mesh.material.emissiveIntensity = 0.4;
+  });
+  grp.forEach(p => { if (p.mesh && typeof refreshOutline === 'function') refreshOutline(p); });
+  return grp.length;
 }
 function nsoSelectAllOnPlate() {
   if (!state.placed.length) { setStatus('Nothing on the plate to select', true); return { ok: false, reason: 'empty plate' }; }
@@ -3788,13 +3889,13 @@ function nsoSelectAllOnPlate() {
   state.selectedIndex = -1;
   if (typeof nsoInputMode !== 'undefined' && nsoInputMode) setTimeout(function () { nsoInputMode.refresh(); }, 0);
   const group = state.placed.filter(p => p && p.mesh);
-  group.forEach(p => {
-    p.mesh.material.emissive = new THREE.Color(0xdc2626);
-    p.mesh.material.emissiveIntensity = 0.55;
-  });
   state.multiSel = group;
+  nsoPaintSelLook();
+  renderModelList();                // every row of the group lit in the Pieces card
   updateAdjustUI();
-  setStatus('Selected all ' + group.length + (group.length === 1 ? ' piece' : ' pieces') + ' on this plate - Delete removes them; click one piece to select it alone');
+  if (typeof updateEditSize === 'function') updateEditSize();     // the Scale card reads the group
+  setStatus('Selected all ' + group.length + (group.length === 1 ? ' piece' : ' pieces') +
+    ' on this plate - drag one to move them all (onto another plate too), Scale\'s Whole x sizes them all, Delete removes them; click one piece to select it alone');
   return { ok: true, count: group.length };
 }
 function nsoCtxMenuRefresh() {
@@ -4322,6 +4423,14 @@ function onCanvasPointerDown(event) {
           event.stopPropagation();
           return;
         }
+        /* A press on a piece of the Select all group takes hold of the whole group: a drag moves every piece
+           of it (onto another plate as well), a plain click selects that piece alone (endMoveDrag). */
+        const grp = nsoSelAllPieces();
+        if (grp.length > 1 && hit && grp.indexOf(hit) >= 0) {
+          startMoveDrag(idx, event, grp);
+          event.stopPropagation();
+          return;
+        }
         if (hit && hit.sourceId != null) selectPlaced(idx);
         startMoveDrag(idx, event);
         event.stopPropagation();
@@ -4355,7 +4464,10 @@ function onCanvasPointerDown(event) {
 }
 
 function clearSelectionOutline() {
+  const hadGroup = !!((state.multiSel && state.multiSel.length) || (state.litSel && state.litSel.length));
   state.multiSel = null;           // a Select all group ends with any other selection change
+  state.litSel = null;             // and so does the Supports card's lit plate (it puts its own back)
+  if (hadGroup && typeof document !== 'undefined' && document.getElementById('model-list')) renderModelList();     // its rows go dark with it
   state.placed.forEach((p, i) => {
     if (p.mesh) {
       if (p.outline) {

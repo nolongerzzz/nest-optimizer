@@ -52,7 +52,12 @@
     const k = line && line.userData && line.userData.nsoEdgesOf, pos = positionOf(g);
     return !!(k && pos && k.uuid === g.uuid && k.arr === pos.array && k.version === pos.version && k.count === pos.count);
   }
-  function selected(p) { return typeof state !== 'undefined' && !!state && !!state.placed && state.placed[state.selectedIndex] === p; }
+  /* the selected piece, or one of a group drawn as selected (Select all, the Supports card's lit plate) */
+  function selected(p) {
+    if (typeof state === 'undefined' || !state || !state.placed) return false;
+    if (typeof nsoLooksSelected === 'function') return nsoLooksSelected(p);
+    return state.placed[state.selectedIndex] === p;
+  }
 
   /* true when this geometry's edges go to the worker: the outline's own threshold, or (`now`: a caller that wants the
      line on screen before it returns - the Supports card lighting every piece) the old rule, the BVH's big piece */

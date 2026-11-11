@@ -121,7 +121,8 @@ async function main() {
     check('the box off: nothing lit', lit(app).all === 0 && app.state.selectedIndex === -1);
     app.setPlateBox(true);
     check('option on: one outline on every piece', lit(app).all === 6 && lit(app).most === 1, JSON.stringify(app.outlines().per));
-    check('option on: every piece wears the selection\'s tint, none is selected', app.emissive().every(v => v === 0.55) && app.state.selectedIndex === -1);
+    // the selected look (app-core nsoPaintSelLook) - the one a selected piece and a Select all group wear
+    check('option on: every piece wears the selection\'s look, none is selected', app.emissive().every(v => v === 0.4) && app.state.selectedIndex === -1);
     check('the readout: "6 pieces · M hanging areas at 30°"', /^6 pieces · \d+ hanging areas at 30°$/.test(app.head()), app.head());
     app.frame(); app.frame();
     check('a few frames later: still on, still one outline each', app.card.plate() === true && lit(app).all === 6 && lit(app).most === 1);

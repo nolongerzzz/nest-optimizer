@@ -563,6 +563,75 @@ var NSO_BEDS = (function () {
     return true;
   }
 
+  /* A Select all group dropped over bed `to`: every piece goes, each keeping its pose and its place relative to the
+     others, as ONE move - one pair of Undo entries, as for one piece, each holding the whole group. `group` is the
+     drag's record: [{ p, index, x, z, meshY }], the pose each was picked up in. A copy, a support or a host may go
+     only with what it is tied to (moveRefusal), so the group is refused when it would leave one of those behind. */
+  function moveGroup(group, to) {
+    var T = beds[to], S = beds[active];
+    refused = false;
+    group = (group || []).filter(function (e) { return e && e.p && e.p.mesh && state.placed.indexOf(e.p) >= 0; });
+    if (!group.length || !T || !S || T === S) return false;
+    if (group.length === 1) return movePiece(state.placed.indexOf(group[0].p), to, group[0]);
+    var why = busyReason();
+    if (why) { say(why, true); refused = true; return false; }
+    var going = group.map(function (e) { return e.p; });
+    var modelOf = function (p) { return p.sourceId != null ? state.models.find(function (x) { return x.id === p.sourceId; }) || null : null; };
+    var ids = {};
+    going.forEach(function (p) { if (p.sourceId != null) ids[p.sourceId] = true; });
+    for (var k = 0; k < going.length; k++) {
+      var p0 = going[k], m0 = modelOf(p0), name = p0.name || (m0 && m0.name) || 'A piece';
+      if (state.placed.some(function (q) { return going.indexOf(q) < 0 && q.sourceId === p0.sourceId; })) {
+        say(name + ' has copies of the same model left on this plate - select them all to move them together.', true);
+        refused = true; return false;
+      }
+      if (m0 && m0.nsoSupport && !ids[m0.nsoSupport.hostSourceId]) {
+        say(name + ' is a support - supports stay with the piece they hold up.', true);
+        refused = true; return false;
+      }
+      if (m0 && state.models.some(function (x) { return x.nsoSupport && x.nsoSupport.hostSourceId === m0.id && !ids[x.id]; })) {
+        say(name + ' has supports on this plate that are not moving with it - remove them first.', true);
+        refused = true; return false;
+      }
+    }
+    var off = offsetOf(to), id = ++moveSeq;
+    closeEverything('plate-move');
+    // in plate order, so Undo can put each back at its own index
+    var out = group.map(function (e) {
+      var m = modelOf(e.p);
+      return { item: e.p, model: m, index: state.placed.indexOf(e.p), modelIndex: m ? state.models.indexOf(m) : -1,
+               pose: { x: e.x, z: e.z, meshY: e.meshY } };
+    }).sort(function (a, b) { return a.index - b.index; });
+    pushUndo({ type: 'bedMoveOut', moveId: id, toBed: T.id, group: out, onUndone: NOOP });
+    if (typeof clearSelectionOutline === 'function') clearSelectionOutline();
+    out.forEach(function (e) { takeOff(S, e.item, e.model); });
+    swap(to, { teardown: false });
+    var into = out.map(function (e) {
+      var p = e.item;
+      p.x -= off.x; p.z -= off.z;
+      p.mesh.position.x = p.x; p.mesh.position.z = p.z;
+      var at = putOn(p, e.model, state.placed.length, state.models.length);
+      settlePlacedOnBed(p);
+      nsoInvalidatePlacedBounds(p);
+      return { item: p, model: e.model, index: at, modelIndex: e.model ? state.models.indexOf(e.model) : -1 };
+    });
+    pushUndo({ type: 'bedMoveIn', moveId: id, fromBed: S.id, group: into, onUndone: NOOP });
+    reselectGroup(into.map(function (e) { return e.item; }));
+    say('Moved ' + out.length + ' pieces to Plate ' + (to + 1) + ' - Plate ' + (to + 1) +
+        ' is active and they are still selected. One Undo (Ctrl+Z) puts them all back.');
+    return true;
+  }
+
+  /* The group is still the selection on the bed it landed on (or came back to). */
+  function reselectGroup(pieces) {
+    if (typeof clearSelectionOutline === 'function') clearSelectionOutline();
+    state.selectedIndex = -1;
+    state.multiSel = pieces.slice();
+    if (typeof nsoPaintSelLook === 'function') nsoPaintSelLook();
+    if (typeof updateAdjustUI === 'function') updateAdjustUI();
+    if (typeof updateEditSize === 'function') updateEditSize();
+  }
+
   /* UNDO of a move, from either half. The piece goes back to the bed it left, at the pose it left in, and
      that bed is active. The other half must be the last step of its own bed's line - a move cannot be taken
      back from under later steps on that bed, whose numbers it would shift. Returns { refused } when it
@@ -602,6 +671,28 @@ var NSO_BEDS = (function () {
     var out = isIn ? partnerEntry : entry;
     var S = isIn ? other : beds[active];
     var T = isIn ? beds[active] : other;
+    if (entry.group) {                     // a Select all group's move: every piece back, the group still selected
+      var outG = (isIn ? partnerEntry : entry).group || [];
+      if (typeof clearSelectionOutline === 'function') clearSelectionOutline();
+      outG.forEach(function (e) { takeOff(T, e.item, e.model); });
+      if (S !== beds[active]) swap(indexOfBed(S), { teardown: false });
+      outG.slice().sort(function (a, b) { return a.modelIndex - b.modelIndex; }).forEach(function (e) {
+        if (e.model && state.models.indexOf(e.model) < 0)
+          state.models.splice(Math.min(Math.max(e.modelIndex, 0), state.models.length), 0, e.model);
+      });
+      outG.forEach(function (e) {            // ascending index: each lands where it was
+        var p = e.item;
+        putOn(p, e.model, e.index, e.modelIndex);
+        p.x = e.pose.x; p.z = e.pose.z;
+        applyPlacedXZ(p, p.x, p.z);
+        restoreMeshY(p, e.pose.meshY);
+        nsoInvalidatePlacedBounds(p);
+      });
+      reselectGroup(outG.map(function (e) { return e.item; }));
+      updateUndoBtn();
+      say('Undo: moved ' + outG.length + ' pieces back to Plate ' + (indexOfBed(S) + 1));
+      return { ok: true };
+    }
     var p = entry.item, m = entry.model;
     if (typeof clearSelectionOutline === 'function') clearSelectionOutline();
     takeOff(T, p, m);
@@ -668,7 +759,7 @@ var NSO_BEDS = (function () {
   return {
     MAX: MAX_BEDS,
     count: count, activeIndex: activeIndex, activeNumber: activeNumber, canDelete: canDelete,
-    add: add, activate: activate, deleteActive: deleteActive, movePiece: movePiece, refused: function () { return refused; }, undoMove: undoMove,
+    add: add, activate: activate, deleteActive: deleteActive, movePiece: movePiece, moveGroup: moveGroup, refused: function () { return refused; }, undoMove: undoMove,
     afterPlateBuilt: afterPlateBuilt, setGridVisible: setGridVisible, plateSizeChanged: plateSizeChanged,
     layoutBox: layoutBox, frameView: frameView, layoutReach: layoutReach, offsetOf: offsetOf, bedAt: bedAt,
     pickBed: pickBed, notePress: notePress, releasePress: releasePress, activateUnder: activateUnder,

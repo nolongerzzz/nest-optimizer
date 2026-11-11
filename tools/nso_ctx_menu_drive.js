@@ -235,7 +235,8 @@ withApp(async (page, logs) => {
   await loadSTL(page, fx('box-20mm.stl'));
   await loadSTL(page, fx('box_open.stl'));
   await N(() => { state.undoStack = []; updateUndoBtn(); });
-  const lit = () => N(() => state.placed.map(p => p.mesh.material.emissive.getHex() === 0xdc2626));
+  // lit = the one selected look (app-core nsoPaintSelLook): the rose body and the white outline
+  const lit = () => N(() => state.placed.map(p => p.mesh.material.color.getHex() === 0xf43f5e && !!(p.outline && p.outline.parent === p.mesh)));
   const bare9 = await N(() => window.__c.barePlate());
   await rightClick(bare9);
   check('Select all is live on bare plate', !(await N(() => window.__c.off()))['ctx-select-all']);

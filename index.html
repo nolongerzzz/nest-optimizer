@@ -2911,9 +2911,9 @@
   <script src="nso-helpers.js?v=9c476e39"></script>
   <script src="nso-recent.js?v=f03d6f13"></script>
   <script src="nso-bounds.js?v=778acac4"></script>
-  <script src="app-core.js?v=b986a449"></script>
+  <script src="app-core.js?v=890d36be"></script>
   <!-- Up to six plates (beds): the active one is state.models / state.placed, the rest are kept beside it. docs/BEDS.md. -->
-  <script src="app-beds.js?v=3d221bc4"></script>
+  <script src="app-beds.js?v=db261498"></script>
 
 
 
@@ -2925,7 +2925,7 @@
   <!-- Cut card, Whole plate blade: one level blade across every piece. After app-cut.js, whose cutOneSide / cutOverlay
        it calls, and before the Crop card; it commits through app-sculpt.js's NSO_sculptCommitRaw at press time. docs/CUT-PLATE.md. -->
   <script src="app-cut-plate.js?v=75fbfd3f"></script>
-  <script src="app-finish.js?v=3a07a37e"></script>
+  <script src="app-finish.js?v=3a3036ca"></script>
   <script src="app-sculpt.js?v=f522aee3"></script>
   <script src="app-extend.js?v=e24e3562"></script>
   <!-- Mirror: exact reflection across the cut plane. After app-extend.js,
@@ -2981,7 +2981,7 @@
   <!-- Ring verbs: Outer / Bore / Wall, a rod's Diameter. Calls
        nso_section.js and app-fatten.js's face filter at apply time. -->
   <script src="nso_ring.js?v=3686d69c"></script>
-  <script src="app-scale.js?v=06b95bc2"></script>
+  <script src="app-scale.js?v=68c344d3"></script>
   <script src="app-brush.js?v=2aff434b"></script>
   <!-- Pull: nso_densify.js is the shared subdivision (the gun will use it too), nso_pull.js the field and its guards, app-pull.js the pointer session. docs/PULL.md -->
   <script src="nso_densify.js?v=0b7748d1"></script>
@@ -2999,7 +2999,7 @@
   <script src="app-custom-shape.js?v=123e6575"></script>
   <script src="app-fasteners.js?v=aafaf77d"></script>
   <script src="app-assemble.js?v=60984bfb"></script>
-  <script src="app-sel-outline.js?v=e4042b39"></script>
+  <script src="app-sel-outline.js?v=0e6c3b89"></script>
   <script src="app-join.js?v=8f533056"></script>
   <script src="app-center-lock.js?v=ee95c074"></script>
   <script src="app-oversize-washer.js?v=a445c3ff"></script>
@@ -3074,7 +3074,7 @@
        row each under the Flange row. Pure. docs/GSCOPE-FEATURES.md. -->
   <script src="nso_face_features.js?v=53ee4b23"></script>
   <script src="nso_gscope_measure.js?v=c5595269"></script>
-  <script src="app-microscope.js?v=242f265c"></script>
+  <script src="app-microscope.js?v=f4dfbbc0"></script>
   <!-- Detach / Reattach (Cut menu): cap a detected flange's hull on its own
        wall, lift the flange out as a piece, seat it elsewhere with Attach's
        seat. After nso_flange.js, app-crop.js, nso_assemble.js, app-assemble.js
@@ -3092,7 +3092,7 @@
        own page code, which listens for the press before the card does. After nso-helpers.js, app-core.js. docs/SUPPORT-BLOCKERS.md. -->
   <script src="nso_support_blockers.js?v=6962a81c"></script>
   <script src="app-support-blockers.js?v=73c8125d"></script>
-  <script src="app-supports-card.js?v=8e63dab1"></script>
+  <script src="app-supports-card.js?v=25f748dc"></script>
   <script src="app-gscope-slice.js?v=35933b35"></script>
   <!-- The Slice card (left bar): the plate sliced for its printer, the .gcode.3mf
        it makes. The print planner and the packager are loaded here for it and for

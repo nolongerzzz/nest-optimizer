@@ -58,6 +58,9 @@ camera by the step the beds move.
 - **A piece moves whole or not at all.** A piece with copies of its model on the plate (quantity), with supports, or
   that is a support is not moved between beds - they are tied by id and would be split - and the status line says so.
   A piece that started off its own bed (placed past the edge) is not carried to another by a nudge.
+  A **Select all group** dragged over another bed goes whole (`moveGroup`): every piece keeps its pose and its place
+  relative to the others, copies, supports and hosts may go because they go together, and the group is refused (in
+  words, every piece put back) only when it would leave one of those behind.
 - **Busy.** A job that will put its result onto "the plate" when it finishes must finish on the bed it started on, so
   nothing switches (or adds, or deletes) while `NSO_BoolBusy.active()`, `NSO_SUPPORTS_CARD.busy()`, `state.importsPending`
   (a file being read, parsed or fetched - `handleFiles`, the Library row - or a big piece waiting for its tree), the boolean
@@ -80,6 +83,7 @@ every existing entry, which names pieces by index in that bed's lists, stays val
 | Delete plate | none, and the bed's lines go with it - like Clear plate |
 | Clear plate | none, as before; wipes the active bed's two lines. With pieces on only one plate it also closes every tool and card (a fresh start); with pieces on two or more plates it does not |
 | plate-size change | none, as before (pieces come off every bed; the models stay) |
+| Select all group moved between beds | **one step**, the same two entries, each holding the whole group (`group: [{ item, model, index, modelIndex, pose }]`): Undo puts every piece back at its own pose and index and the group is still selected. |
 | piece moved between beds | **one step**, two entries that name each other: `bedMoveOut` on the bed it left, `bedMoveIn` on the bed it landed on (each bed's line is its own). Undo on either puts the piece back at the pose and index it left from and makes the bed it left active. It needs the other half to be the last step of its own line - a move cannot be taken back from under later steps on that bed, whose indices it would shift - otherwise it changes nothing and says "Undo the later steps on Plate N first". If the other half is gone (that bed was deleted, or the entry fell off the line) the entry is dropped and it says so. A move is not redoable (like the Supports and G-scope Lift steps). |
 
 ## Where a single global plate remains (by design)

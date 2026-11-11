@@ -1221,6 +1221,23 @@ if (typeof document !== 'undefined') {
     function active() { return (typeof getActiveModel === 'function') ? getActiveModel() : null; }
     function fieldOf(k) { for (var i = 0; i < FIELDS.length; i++) if (FIELDS[i][0] === k) return FIELDS[i]; return null; }
 
+    /* SELECT ALL. While a Select all group of two or more pieces stands (app-core.js nsoSelAllPieces) the card is
+       the group's: one row, Whole x, which resizes EVERY piece of it by the same factor, each about its own centre
+       and where it stands. The preview ghosts every piece and stands each result over it; Set bakes them all as
+       ONE Undo step (a stepGroup of the pieces' own scale steps). A piece that refuses the factor (paint, a
+       raw-less piece) names itself under the field and Set waits, so the group is scaled whole or not at all. */
+    function group() {
+      var g = (typeof nsoSelAllPieces === 'function') ? nsoSelAllPieces() : [];
+      if (g.length < 2) return null;
+      var out = [];
+      g.forEach(function (p) {
+        var m = p.sourceId != null ? state.models.find(function (x) { return x.id === p.sourceId; }) : null;
+        if (m && p.mesh) out.push({ p: p, m: m });
+      });
+      return out.length >= 2 ? out : null;
+    }
+    function groupKey(G) { return G ? G.map(function (e) { return e.m.id; }).join(',') : ''; }
+
     // Read only while the card is open. The reading walks the whole soup -
     // about a second on a 49k-triangle piece - and updateEditSize fires on
     // every import, selection and bake anywhere in the app; a shut card has
@@ -1302,12 +1319,17 @@ if (typeof document !== 'undefined') {
     function readout(force) {
       var el = byId('scale-readout');
       if (!el) return;
+      var G = group();
+      if (G) return readoutGroup(el, G, force);
+      if (sess && sess.group) cancel(true);
       var m = active();
       // Another piece selected (or this one changed under it) mid-edit: the
       // preview belongs to the piece it was made on, so it is dropped.
       if (sess && (m !== sess.m || (m && m.rawTris !== sess.soup))) cancel(true);
       if (!cardOpen()) { el.dataset.stale = '1'; return; }
       el.dataset.stale = '0';
+      var fitBtn = byId('btn-scale-fit');
+      if (fitBtn) fitBtn.hidden = false;
       el.textContent = NSO_scaleReadoutText(m);
       lastShape = m ? NSO_scaleShapeOf(m) : null;
       var s = (m && !lastShape) ? NSO_scaleSectionOf(m) : null;
@@ -1320,6 +1342,31 @@ if (typeof document !== 'undefined') {
         populate(s);
       }
     }
+    function readoutGroup(el, G, force) {
+      // the edit belongs to the group it began on: another group, or a piece of it changed under it, drops it
+      if (sess && (!sess.group || sess.key !== groupKey(G) ||
+          sess.group.some(function (e) { return e.m.rawTris !== e.soup; }))) cancel(true);
+      if (!cardOpen()) { el.dataset.stale = '1'; return; }
+      el.dataset.stale = '0';
+      el.textContent = G.length + ' pieces selected (Select all) - Whole \u00d7 resizes every one of them by the same ' +
+        'factor, each about its own centre, where it stands. Set bakes them all; one Undo puts them all back.';
+      lastShape = null; lastReading = null;
+      FIELDS.forEach(function (fd) {
+        var row = byId(fd[2]);
+        if (row) row.hidden = fd[0] !== 'factor';
+      });
+      var fit = byId('btn-scale-fit');
+      if (fit) fit.hidden = true;
+      relabel();
+      var sig = 'group:' + groupKey(G);
+      if (!sess && (force === true || sig !== lastSig || lastSoup !== null)) {
+        lastSig = sig; lastSoup = null;
+        var el2 = byId('scale-factor');
+        prefill.factor = '1';
+        if (el2) el2.value = '1';
+        setSlider('factor');
+      }
+    }
     window.nsoScaleRefresh = function () { readout(true); };
 
     // updateEditSize is not called by every bake (Thicken commits through its
@@ -1330,7 +1377,7 @@ if (typeof document !== 'undefined') {
     var watching = false, seen = null;
     function key() {
       var m = active();
-      return { m: m, soup: m ? m.rawTris : null, sig: signature(m) };
+      return { m: m, soup: m ? m.rawTris : null, sig: signature(m) + '#' + groupKey(group()) };
     }
     function watch() {
       if (!cardOpen()) { watching = false; return; }
@@ -1366,6 +1413,7 @@ if (typeof document !== 'undefined') {
        staged value is one it takes. */
     var GHOST_OPACITY = 0.2;
     var pv = null;             // the preview on screen: { m, mesh, saved, over }
+    var gpv = [];              // a Select all group's preview: one such slot per piece
     var handles = {};          // per field: nsoLiveSlider's handle (paces the preview)
     var NOTE_IDLE = 'Move a slider or type a value to preview it on the piece. Set bakes it; nothing changes until then.';
 
@@ -1389,16 +1437,20 @@ if (typeof document !== 'undefined') {
       });
       if (mesh) mesh.userData.skipXray = saved.skip;
     }
-    function dropOver() {
-      if (!pv || !pv.over) return;
-      var o = pv.over;
-      pv.over = null;
+    function dropOverOf(slot) {
+      if (!slot || !slot.over) return;
+      var o = slot.over;
+      slot.over = null;
       if (o.parent) o.parent.remove(o);
       if (o.geometry) o.geometry.dispose();
       if (o.material) o.material.dispose();
     }
+    function dropOver() { dropOverOf(pv); }
     function closePreview() {
-      if (!pv) return false;
+      var had = !!pv || gpv.length > 0;
+      gpv.forEach(function (slot) { dropOverOf(slot); ghostOff(slot.mesh, slot.saved); });
+      gpv = [];
+      if (!pv) return had;
       var v = pv;
       dropOver();
       pv = null;
@@ -1412,8 +1464,29 @@ if (typeof document !== 'undefined') {
     function showPreview(m, tris) {
       var p = placedOf(m), mesh = p && p.mesh;
       if (!mesh || typeof THREE === 'undefined' || typeof rawResultToDisplayGeometry !== 'function') return false;
+      if (gpv.length) closePreview();
       if (!pv || pv.m !== m || pv.mesh !== mesh) { closePreview(); pv = { m: m, mesh: mesh, saved: ghostOn(mesh), over: null }; }
       dropOver();
+      return standOver(pv, m, mesh, tris);
+    }
+    /* The group's preview: every piece a ghost, each one's result standing over it. */
+    function showGroupPreview(G, results) {
+      if (typeof THREE === 'undefined' || typeof rawResultToDisplayGeometry !== 'function') return false;
+      if (pv) closePreview();
+      var drew = true;
+      G.forEach(function (e, i) {
+        var mesh = e.p.mesh;
+        if (!mesh) { drew = false; return; }
+        var slot = null;
+        for (var k = 0; k < gpv.length; k++) if (gpv[k].mesh === mesh) slot = gpv[k];
+        if (!slot) { slot = { m: e.m, mesh: mesh, saved: ghostOn(mesh), over: null }; gpv.push(slot); }
+        dropOverOf(slot);
+        if (!standOver(slot, e.m, mesh, results[i].tris)) drew = false;
+      });
+      return drew;
+    }
+    /* One result as a translucent piece standing over `mesh`, held in `slot.over`. */
+    function standOver(slot, m, mesh, tris) {
       var geo = rawResultToDisplayGeometry(tris), sz = new THREE.Vector3();
       geo.boundingBox.getSize(sz);
       var o = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
@@ -1426,10 +1499,10 @@ if (typeof document !== 'undefined') {
       o.renderOrder = 41;
       o.userData.skipXray = true;
       var parent = mesh.parent || (typeof state !== 'undefined' ? state.scene : null);
-      if (!parent) { pv.over = null; geo.dispose(); o.material.dispose(); return false; }
+      if (!parent) { slot.over = null; geo.dispose(); o.material.dispose(); return false; }
       if (typeof nsoHelpers !== 'undefined') nsoHelpers.attach(parent, o, 'scale-live');
       else parent.add(o);
-      pv.over = o;
+      slot.over = o;
       return true;
     }
 
@@ -1449,6 +1522,15 @@ if (typeof document !== 'undefined') {
     // Start the session on the first field moved; every later one joins it.
     function edit(k) {
       if (!sess) {
+        var G = group();
+        if (G) {
+          sess = { group: G.map(function (e) {
+                     return { p: e.p, m: e.m, soup: (e.m.rawTris && e.m.rawAxis === 'zup') ? e.m.rawTris : null };
+                   }), key: groupKey(G), m: null, soup: null,
+                   starts: Object.assign({}, prefill), touched: {}, last: null, verbs: [], lastKey: k, marked: {}, refused: 0 };
+          sess.touched[k] = true;
+          return sess;
+        }
         var m = active();
         sess = { m: m, soup: (m && m.rawTris && m.rawAxis === 'zup') ? m.rawTris : null,
                  starts: Object.assign({}, prefill), touched: {}, last: null, verbs: [], lastKey: k, marked: {}, refused: 0 };
@@ -1533,6 +1615,7 @@ if (typeof document !== 'undefined') {
     // bakes is exactly what the boxes say.
     function preview(s) {
       if (!s || sess !== s) return;
+      if (s.group) return previewGroup(s);
       var verbs = verbsOf(s), use = verbs.slice(), r = null, why = {}, first = null, n = 0;
       while (use.length) {
         try { r = NSO_scaleCardTryAll(use, s.m, s.soup); } catch (err) {
@@ -1572,6 +1655,90 @@ if (typeof document !== 'undefined') {
       syncButtons();
     }
 
+    // The group's preview: Whole x on every piece, each from the soup the edit began on. The first piece that
+    // refuses names itself under the field and nothing is drawn: the group is scaled whole or not at all.
+    function previewGroup(s) {
+      var v = verbOf(s, 'factor');
+      s.verbs = v ? [v] : [];
+      if (!v) {
+        s.last = null; s.refused = 0;
+        markSet(s, {});
+        closePreview();
+        note(NOTE_IDLE);
+        syncButtons();
+        return;
+      }
+      var results = [], bad = null;
+      s.group.forEach(function (e) {
+        var r;
+        try { r = NSO_scaleCardTryAll([v], e.m, e.soup); } catch (err) {
+          console.error('[scale]', err);
+          var msg = NSO_scaleText((err && err.message) || String(err));
+          r = { ok: false, reason: msg, inline: msg };
+        }
+        if (!r.ok && !bad) bad = { e: e, r: r };
+        results.push(r);
+      });
+      var n = s.group.length, factor = parseFloat(byId('scale-factor').value);
+      if (bad) {
+        var name = bad.e.m.name || bad.e.p.name || 'a piece';
+        var why = name + ': ' + (bad.r.inline || bad.r.reason || 'refused');
+        s.refused = 1;
+        s.last = { ok: false, status: 'Scale refused on ' + name + ' - no piece changed (' + (bad.r.inline || bad.r.reason) + ')' };
+        markSet(s, { factor: why });
+        closePreview();
+        note('Nothing to show - ' + why + '. Set waits until every piece takes the factor.', true);
+      } else {
+        s.refused = 0;
+        s.last = { ok: true, results: results, label: 'Scale',
+                   status: 'Scale done - ' + n + ' pieces \u00d7' + factor + ', each in place. One Undo puts them all back.' };
+        markSet(s, {});
+        var drew = showGroupPreview(s.group, results);
+        note((drew ? 'Preview: ' : 'No preview on the plate: ') + n + ' pieces \u00d7' + factor +
+             ' - Set bakes them all (one Undo), Esc drops it.');
+      }
+      syncButtons();
+    }
+
+    // Bake the group: one NSO_sculptCommitRaw per piece, gathered into ONE Undo step.
+    function commitGroup(s) {
+      cancelHandles();
+      preview(s);
+      var r = s.last;
+      if (!r || !r.ok || s.refused) {
+        if (typeof setStatus === 'function') setStatus(r ? r.status : 'Scale: nothing to set - move the slider or type a factor', !!r);
+        return r;
+      }
+      sess = null;
+      closePreview();
+      markSet(s, {});
+      var outer = state.undoStack, failed = [];
+      state.undoStack = [];
+      try {
+        s.group.forEach(function (e, i) {
+          if (!(typeof NSO_sculptCommitRaw === 'function' && NSO_sculptCommitRaw(e.m, r.results[i].tris, 'scaleReplace', null)))
+            failed.push(e.m.name || 'a piece');
+        });
+      } finally {
+        var steps = state.undoStack;
+        state.undoStack = outer;
+        if (steps.length > 1) {
+          pushUndo({ type: 'stepGroup', steps: steps, label: 'Undo: Scale reverted on ' + steps.length + ' pieces',
+                     redoLabel: 'Scale re-applied on ' + steps.length + ' pieces' });
+        } else if (steps.length === 1) pushUndo(steps[0]);
+        else if (typeof updateUndoBtn === 'function') updateUndoBtn();
+      }
+      if (typeof nsoPaintSelLook === 'function') nsoPaintSelLook();      // each bake built a fresh mesh: the group's look back on it
+      syncButtons();
+      note(NOTE_IDLE);
+      if (typeof setStatus === 'function') {
+        setStatus(failed.length ? 'Scale: ' + failed.join(', ') + ' failed to commit - the rest are scaled; Undo puts them back' : r.status,
+                  failed.length > 0);
+      }
+      readout(true);
+      return failed.length ? { ok: false, reason: 'commit failed', failed: failed } : r;
+    }
+
     // Put every field the edit moved back where it began.
     function restore(s) {
       Object.keys(s.touched).forEach(function (k) {
@@ -1585,6 +1752,7 @@ if (typeof document !== 'undefined') {
     function commit() {
       var s = sess;
       if (!s) return null;
+      if (s.group) return commitGroup(s);
       cancelHandles();
       preview(s);                                // the boxes as they read now
       var r = s.last;
@@ -1847,7 +2015,7 @@ if (typeof document !== 'undefined') {
     // The preview is a scene helper (nso-helpers.js): Clear, leave-tool and an
     // Undo past it all end it through the same close path as Cancel.
     if (typeof nsoHelpers !== 'undefined') nsoHelpers.owner('scale-live', {
-      live: function () { return !!pv; },
+      live: function () { return !!pv || gpv.length > 0; },
       close: function () { cancel(true); },
       clear: function () { closePreview(); }
     });
