@@ -37,6 +37,8 @@ withApp(async (page, logs) => {
   await page.evaluate(() => { const m = document.getElementById('menu-supports'); if (m) m.open = true; });
   await page.waitForTimeout(300);
   await page.evaluate(() => { const b = document.getElementById('sup-plate'); if (b && !b.checked) { b.checked = true; b.dispatchEvent(new Event('change')); } });
+  /* a head with a support AND a brim: Brim round the foot is off in the card's default view, so this gate turns it on */
+  await page.evaluate(() => { const b = document.getElementById('sup-brim'); if (b) b.checked = true; });
   const g = await page.evaluate(() => NSO_SUPPORTS_CARD.generate().then((r) => ({ ok: !!(r && r.ok), reason: r && r.reason })));
   const s = await page.evaluate(() => NSO_SUPPORTS_CARD.sliceAndPreview().then((r) => ({ ok: r.ok, reason: r.reason })));
   await page.waitForFunction(() => { const d = NSO_MICROSCOPE.getDoc(); return d && d.kind === 'toolpath' && d.nsoPlateSlice; }, null, { timeout: 180000 });

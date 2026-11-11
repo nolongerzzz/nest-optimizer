@@ -238,6 +238,16 @@ var NSO_GSCOPE_SLICE = (function () {
                role: sup ? (sup.brim ? 'brim' : 'support') : 'part', hostKey: sup ? sup.hostSourceId : undefined };
     });
     var source = { label: d.name, objects: d.objects, docSource: d.source, subtitle: d.subtitle };
+    /* ONE SLICE, ONE DRAWING (the owner: "the g-scope slice is not drawing the same thing as the plate slice"): with the plate's printer
+       picked, the slice is the plate's own - the Slice card's options (its profile's widths and spacings, the card's settings, the raft,
+       the interface angle: NSO_Print.sliceOptionsForPlate, the function Generate and Preview slice with) and at the bed's coordinates, as
+       theirs is cut (the slicer's layers can differ with where a piece stands) - drawn back where the plate stands. Without a printer
+       profile, the panel's own rows, as before. */
+    var PR = window.NSO_Print, plateP = !optsOver && PR && typeof PR.sliceOptionsForPlate === 'function'
+      ? PR.sliceOptionsForPlate(d.objects.map(function (o) { var su = supportOf(o); return { interfaceLayers: su ? su.interfaceLayers : undefined, sheetLayerMm: su ? su.sheetLayerMm : undefined }; }))
+          .catch(function (err) { console.error('[g-scope slice] plate options', err); return null; })
+      : Promise.resolve(null);
+    var shift = { dx: 0, dy: 0 };
     busy = true;
     syncPanel();                          // the switch busy, the Slice report up for its progress
     var read = $('ms-slice-read');
@@ -246,9 +256,37 @@ var NSO_GSCOPE_SLICE = (function () {
     var t0 = Date.now();
     // one frame for the status line to paint before the work starts
     return new Promise(function (res) { setTimeout(res, 0); })
-      .then(function () { return SL().run(objects, opts); })
+      .then(function () { return plateP; })
+      .then(function (pp) {
+        if (pp && pp.o) {
+          opts = Object.assign({}, pp.o, { emitGcode: false });
+          /* ...and a row of G-scope's own Slice settings changed from what it was seeded with (the profile's) is that slice's: an edit here
+             is what the next G-scope slice takes; untouched, the slice is the plate's */
+          var dfl = profileDefaults(), ov = po.over;
+          if (Math.abs(ov.layerMm - dfl.layer) > 1e-9) opts.layerMm = ov.layerMm;
+          if (ov.wallLoops !== SLICE_REST.walls) opts.wallLoops = ov.wallLoops;
+          if (Math.abs(ov.sparseDensity - SLICE_REST.density / 100) > 1e-9) opts.sparseDensity = ov.sparseDensity;
+          if (ov.sparsePattern && ov.sparsePattern !== SLICE_REST.pattern) opts.sparsePattern = ov.sparsePattern;
+          if (ov.supportThresholdDeg !== SLICE_REST.angle) opts.supportThresholdDeg = ov.supportThresholdDeg;
+          if (ov.brimType && ov.brimType !== SLICE_REST.brim) opts.brimType = ov.brimType;
+          if (ov.raftLayers > 0) { opts.raftLayers = ov.raftLayers; opts.raftContactMm = ov.raftContactMm; }
+          shift = { dx: pp.dx || 0, dy: pp.dy || 0 };
+          objects.forEach(function (ob) {
+            var q = new Float32Array(ob.soup.length);
+            for (var i = 0; i < q.length; i += 3) { q[i] = ob.soup[i] + shift.dx; q[i + 1] = ob.soup[i + 1] + shift.dy; q[i + 2] = ob.soup[i + 2]; }
+            ob.soup = q;
+          });
+        }
+        return SL().run(objects, opts);
+      })
       .then(function (r) {
         if (!r.ok) return refuse('Slice refused: ' + r.reason);
+        if (shift.dx || shift.dy || !r.gcode) {
+          /* back from the bed's coordinates to the plate's, then the G-code text from those paths */
+          var back = function (pts) { return pts.map(function (q) { return [q[0] - shift.dx, q[1] - shift.dy]; }); };
+          (r.objects || []).forEach(function (ob) { (ob.layers || []).forEach(function (L) { (L.paths || []).forEach(function (pth) { pth.pts = back(pth.pts); }); }); });
+          r.gcode = SL().toGcode(r);
+        }
         var parsed = window.NSOGcodeLines.parseGcode(r.gcode);
         if (!parsed.moves.length) return refuse('The slice has no extrusion moves - nothing thick enough for one line.');
         var name = d.name + ' - NSO slice (' + opts.nozzleMm + ' mm nozzle, ' + opts.layerMm + ' mm layers)';
