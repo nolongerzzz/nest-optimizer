@@ -1493,8 +1493,8 @@
                       </select></label>
                     <label for="slice-set-iface">interface
                       <select id="slice-set-iface" title="How a support's interface and transition are laid. Sheet: as the supports were built. Column: read off the part's own layers column by column (docs/SUPPORT-GATE.md). One choice, shared with G-scope's Slice settings, and remembered." autocomplete="off">
-                        <option value="" selected>sheet</option>
-                        <option value="column">column</option>
+                        <option value="">sheet</option>
+                        <option value="column" selected>column</option>
                       </select></label>
                     <p class="slice-settings-note" id="slice-settings-note">From the plate's printer profile. They take effect on the next slice, and the .gcode.3mf records them.</p>
                     <button id="slice-settings-reset" type="button" class="btn btn-secondary"
@@ -2649,8 +2649,8 @@
                   <input type="number" id="ms-slice-raft-gap" value="0.1" min="0" max="1" step="0.05" style="width:3.5em" title="Raft contact Z distance, mm: the gap between the raft's top and the first layer on it (Bambu's raft_contact_distance, 0.1)." /> mm</label>
                 <label class="ms-note" for="ms-slice-iface-rule" style="margin:0">interface
                   <select id="ms-slice-iface-rule" style="width:auto" title="How a support's interface and transition are laid. Sheet: as the supports were built (the sheet typing). Column: read off the part's own layers column by column - never a line with no air under the part, 3 interface and 2 transition layers under every contact, the base carried down to the tree (docs/SUPPORT-GATE.md). Remembered, and used by Export print too.">
-                    <option value="" selected>sheet</option>
-                    <option value="column">column</option>
+                    <option value="">sheet</option>
+                    <option value="column" selected>column</option>
                   </select></label>
               </div>
               <p class="ms-note" id="ms-slice-settings-note">From the plate's printer profile. They take effect on the next slice: Normal, then Slice again.</p>
@@ -3120,7 +3120,7 @@
   <script src="nso_support_blockers.js?v=6962a81c"></script>
   <script src="app-support-blockers.js?v=73c8125d"></script>
   <script src="app-supports-card.js?v=71a9d201"></script>
-  <script src="app-gscope-slice.js?v=e6e88596"></script>
+  <script src="app-gscope-slice.js?v=5b62b31d"></script>
   <!-- The Slice card (left bar): the plate sliced for its printer, the .gcode.3mf
        it makes. The print planner and the packager are loaded here for it and for
        its slice worker (which importScripts them from these tags); no G-scope file

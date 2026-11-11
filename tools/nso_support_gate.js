@@ -11,7 +11,8 @@
      node tools/nso_support_gate.js --gcode a.gcode.3mf ...  gate sliced files instead (NSO's export, or Bambu Studio's slice of
                                                              NSO's support meshes); several are gated one after another
      --ref f.gcode.3mf     another reference         --json out.json     every number
-     --rule column         slice with the column interface rule (NSO_Slicer supportInterfaceRule: 'column')
+     --rule sheet          slice with the sheet typing (the app's default is the column rule, NSO_Slicer supportInterfaceRule:
+                           'column', and so is the gate's; --rule column says so)
      --merged              (a build) the six heads as one piece, as a plate imported whole has them
      --report              print, never fail
      --worst               the five layers per head that differ most from Bambu's
@@ -136,10 +137,11 @@ function reHead(moves, refMoves) {
   const runs = [];
   if (files.length) for (const f of files) { const mv = reHead(await readSliced(f), refMoves); runs.push([path.basename(f), GL.measureAll(mv), mv]); }
   else {
-    let mv = await buildAndSlice({ rule: arg('--rule'), angle: arg('--angle'), merged: argv.includes('--merged') });
+    const rule = arg('--rule') === 'sheet' ? null : 'column';                /* the app's default (the column rule); --rule sheet the sheet typing */
+    let mv = await buildAndSlice({ rule: rule, angle: arg('--angle'), merged: argv.includes('--merged') });
     if (argv.includes('--merged')) mv = reHead(mv, refMoves);
     if (arg('--dump')) fs.writeFileSync(arg('--dump'), JSON.stringify(mv.map(m => [m.head, m.role, m.feat, m.z, m.h, +m.x0.toFixed(3), +m.y0.toFixed(3), +m.x1.toFixed(3), +m.y1.toFixed(3)])));
-    runs.push(['NSO build + NSO_Slicer' + (arg('--rule') ? ' (rule ' + arg('--rule') + ')' : '') + (argv.includes('--merged') ? ', the six as one piece' : ''), GL.measureAll(mv), mv]);
+    runs.push(['NSO build + NSO_Slicer (rule ' + (rule || 'sheet') + ')' + (argv.includes('--merged') ? ', the six as one piece' : ''), GL.measureAll(mv), mv]);
   }
   let fails = 0; const json = { ref, runs: {} };
   for (const [name, M, mv] of runs) {

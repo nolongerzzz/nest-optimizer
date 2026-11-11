@@ -100,9 +100,10 @@ var NSO_GSCOPE_SLICE = (function () {
 
   /* THE INTERFACE RULE (nso_slicer.js supportInterfaceRule; docs/SUPPORT-GATE.md): a preference, not a profile setting - kept in this
      browser, never reset by seedSettings, and read by the left bar's Slice card as well as by Slice (one choice: its interface row sets it
-     through nsoSetSupportInterfaceRule). '' is the sheet typing, 'column' the rule. */
+     through nsoSetSupportInterfaceRule). '' is the sheet typing, 'column' the rule. THE COLUMN RULE BY DEFAULT (the owner): a browser that
+     holds no choice slices with it - the tree as the owner prints it; the sheet typing only when chosen ('' kept). */
   var IFACE_RULE_KEY = 'nso.supportInterfaceRule';
-  var ifaceRuleMem = null;   /* the choice when the browser keeps nothing */
+  var ifaceRuleMem = 'column';   /* the choice when the browser keeps nothing */
   function ifaceRule() {
     var v = ifaceRuleMem;
     try { var st = localStorage.getItem(IFACE_RULE_KEY); if (st != null) v = st; } catch (e) { /* storage off: the memory */ }

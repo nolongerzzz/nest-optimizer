@@ -2,7 +2,8 @@
 
 `tools/nso_support_gate.js` (`npm run support:gate`), its measuring core `tools/nso_support_gate_lib.js`, and the slicer option
 `supportInterfaceRule: 'column'` in `nso_slicer.js` (`columnRule`, `columnLoops`, `columnType`). G-scope's Slice settings carry it as
-**interface: sheet / column** (remembered in the browser, used by Export print too).
+**interface: sheet / column** (remembered in the browser, used by Export print too). **The column rule is the default** (the owner's
+tree): a browser that holds no choice slices with it, and `support:gate` gates it (`support:gate-sheet` the sheet typing).
 
 ## 1. Why
 
