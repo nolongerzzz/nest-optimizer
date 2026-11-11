@@ -5351,6 +5351,31 @@ function downloadBlob(blob, filename) {
   }, 200);
 }
 
+/** The plate export's default name: nest_<plate>_<n>pcs (no extension). */
+function plateExportDefaultName() {
+  const plateName = getCurrentPlate().name.replace(/\s+/g, '_').replace(/[\/\\?%*:|"<>]/g, '');
+  return `nest_${plateName}_${state.placed.length}pcs`;
+}
+
+/**
+ * The plate export's file name, STL or 3MF: what the Export card's "Plate file name" holds, or the default when it is
+ * empty. A typed .stl / .3mf is dropped (the format decides the extension) and characters no file name can hold become _.
+ */
+function plateExportFilename(ext) {
+  const el = document.getElementById('export-plate-name');
+  const typed = String(el && el.value || '').trim()
+    .replace(/\.(stl|3mf)$/i, '')
+    .replace(/[\/\\?%*:|"<>]/g, '_')
+    .trim();
+  return (typed || plateExportDefaultName()) + '.' + ext;
+}
+
+/** The name field's placeholder is the default as it stands now (the plate and its count change under it). */
+function syncPlateExportName() {
+  const el = document.getElementById('export-plate-name');
+  if (el) el.placeholder = plateExportDefaultName();
+}
+
 function exportSTLs() {
   if (!state.placed.length) {
     setStatus('Nothing to export - run Optimize first', true);
@@ -5364,8 +5389,7 @@ function exportSTLs() {
     const overlapNote = typeof nsoExportOverlapNote === 'function' ? nsoExportOverlapNote({ combined: geo }) : '';
     const buffer = geometryToBinarySTL(geo);
     const blob = new Blob([buffer], { type: 'application/octet-stream' });
-    const plateName = getCurrentPlate().name.replace(/\s+/g, '_').replace(/[\/\\?%*:|"<>]/g, '');
-    const filename = `nest_${plateName}_${state.placed.length}pcs.stl`;
+    const filename = plateExportFilename('stl');
 
     downloadBlob(blob, filename);
     nsoCloseTopCard('menu-export');
@@ -5417,6 +5441,11 @@ function setupExportFormatUI() {
     if (opt) opt.disabled = true;
   }
   sel.value = (EXPORT_FORMATS.indexOf(saved) !== -1 && (saved !== '3mf' || can3mf)) ? saved : 'stl';
+
+  // the default name is shown whenever the Export card opens
+  const menu = document.getElementById('menu-export');
+  if (menu) menu.addEventListener('toggle', () => { if (menu.open) syncPlateExportName(); });
+  syncPlateExportName();
 
   sel.addEventListener('change', () => {
     try { localStorage.setItem(EXPORT_FORMAT_STORAGE_KEY, sel.value); } catch (e) {}
@@ -5913,8 +5942,7 @@ function export3MF() {
   return window.NSO3MF.build3MF({ objects, profileId, plateName: plate.name, sceneJson })
     .then(result => {
       const blob = new Blob([result.bytes], { type: 'application/vnd.ms-package.3dmanufacturing-3dmodel+xml' });
-      const plateName = plate.name.replace(/\s+/g, '_').replace(/[\/\\?%*:|"<>]/g, '');
-      const filename = `nest_${plateName}_${state.placed.length}pcs.3mf`;
+      const filename = plateExportFilename('3mf');
       downloadBlob(blob, filename);
       nsoCloseTopCard('menu-export');
       const profile = window.NSOCoolingProfiles.getProfile(result.profileId);

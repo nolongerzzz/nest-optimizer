@@ -451,6 +451,13 @@
   var PART_CUT_INFO = 'Metadata/cut_information.xml';
   var PART_PLATE_JSON = 'Metadata/plate_1.json';
   var OBJECTS_PREFIX = '3D/Objects/';
+  var AUX_PREFIX = 'Auxiliaries/';
+  var PART_RELS = '_rels/.rels';
+  var REL_THUMBNAIL = 'http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail';
+  // The root model's metadata NSO keeps from the template; every other value (the design's title, designer, licence,
+  // description, MakerWorld ids) is the template's own and is written blank. A '[]' (Studio's empty list) stays.
+  var MODEL_META_KEPT = { 'Application': 1, 'BambuStudio:3mfVersion': 1, 'CreationDate': 1, 'ModificationDate': 1,
+                          'Thumbnail_Middle': 1, 'Thumbnail_Small': 1 };
 
   function bambuUuid(counter, suffix) {
     return hex8(counter) + suffix;
@@ -498,7 +505,9 @@
         if (!Reader || !Reader.openZip) throw new Error('nso-3mf-read.js is not loaded');
         var zip = Reader.openZip(zipBytes);
         var names = zip.names();
-        // The template's own meshes are never used, so they are not inflated.
+        // The template's own meshes are never used, so they are not inflated; nor are its Auxiliaries (a MakerWorld
+        // project's model pictures and thumbnails: the design's, never the export's).
+        names = names.filter(function (n) { return n.indexOf(AUX_PREFIX) !== 0; });
         var wanted = names.filter(function (n) { return n.indexOf(OBJECTS_PREFIX) !== 0; });
         return Promise.all(wanted.map(function (n) { return zip.read(n); })).then(function (datas) {
           var parts = {};
@@ -514,7 +523,10 @@
 
   function parseTemplate(key, record, names, parts) {
     var where = TEMPLATE_DIR + key + '/' + record.file;
-    [PART_MODEL, PART_ROOT_RELS, PART_PROJECT_SETTINGS, PART_MODEL_SETTINGS].forEach(function (n) {
+    // INLINE: the meshes in 3D/3dmodel.model itself (no 3D/Objects/ parts, no 3D/_rels) - the shape of the owner's
+    // plate_export.3mf (Studio 02.09.01.70). SPLIT: one 3D/Objects/object_N.model per object, as a Studio project save.
+    var inline = !names.some(function (n) { return n.indexOf(OBJECTS_PREFIX) === 0; });
+    [PART_MODEL, PART_PROJECT_SETTINGS, PART_MODEL_SETTINGS].concat(inline ? [] : [PART_ROOT_RELS]).forEach(function (n) {
       if (!parts[n]) throw new Error(where + ' has no ' + n);
     });
     names.forEach(function (n) {
@@ -525,6 +537,7 @@
 
     var modelXml = decodeText(parts[PART_MODEL]);
     var head = modelXml.slice(0, modelXml.indexOf('<resources'));
+    var modelOpen = (head.match(/<model\b[^>]*>/) || [MODEL_OPEN])[0];
     var modelMeta = [];
     head.replace(/<metadata name="([^"]*)">([^<]*)<\/metadata>/g, function (m, k, v) {
       modelMeta.push([k, v]);
@@ -546,10 +559,13 @@
     });
     var extruder = (ms.match(/<object id="[^"]*">\s*<metadata key="name" value="[^"]*"\/>\s*<metadata key="extruder" value="([^"]*)"\/>/) || [])[1] || '1';
 
+    if (inline) parts[PART_MODEL] = null;   // its meshes are the template's: only the head above was wanted
     return {
       key: key,
       record: record,
       tag: tag,
+      inline: inline,
+      modelOpen: modelOpen,
       names: names.slice(),
       parts: parts,
       modelMeta: modelMeta,
@@ -645,15 +661,38 @@
   function buildProjectModelXml(objects, places, tpl, date) {
     var out = [];
     out.push('<?xml version="1.0" encoding="UTF-8"?>');
-    out.push(MODEL_OPEN);
+    out.push(tpl.inline ? tpl.modelOpen : MODEL_OPEN);
     tpl.modelMeta.forEach(function (kv) {
       var v = kv[1];
       if (kv[0] === 'Application') v = tpl.tag;
       else if (kv[0] === 'CreationDate' || kv[0] === 'ModificationDate') v = date;
-      else if (kv[0] === 'DesignerUserId') v = '';   // the template owner's account, not the export's
-      out.push(' <metadata name="' + xmlEscape(kv[0]) + '">' + xmlEscape(v) + '</metadata>');
+      else if (!MODEL_META_KEPT[kv[0]] && v !== '[]') v = '';   // the template's design and account, not the export's
+      // the template's text is already escaped as it stands in its XML: written back as it was read
+      out.push(' <metadata name="' + kv[0] + '">' + v + '</metadata>');
     });
     out.push(' <resources>');
+    if (tpl.inline) {
+      // as the reference lays it out: every mesh (2N-1, centred on its own origin), then every wrapper (2N), no UUIDs
+      objects.forEach(function (obj, i) { out.push(meshObjectXml(obj, 2 * (i + 1) - 1, places[i].c, '')); });
+      objects.forEach(function (obj, i) {
+        var n = i + 1;
+        out.push('  <object id="' + (2 * n) + '" type="model">');
+        out.push('   <components>');
+        out.push('    <component objectid="' + (2 * n - 1) + '" transform="' + IDENTITY_3X4 + '"/>');
+        out.push('   </components>');
+        out.push('  </object>');
+      });
+      out.push(' </resources>');
+      out.push(' <build>');
+      objects.forEach(function (obj, i) {
+        var c = places[i].c;
+        out.push('  <item objectid="' + (2 * (i + 1)) + '" transform="1 0 0 0 1 0 0 0 1 ' + num(c[0]) + ' ' + num(c[1]) + ' ' + num(c[2]) +
+                 '" printable="1"/>');
+      });
+      out.push(' </build>');
+      out.push('</model>');
+      return out.join('\n') + '\n';
+    }
     objects.forEach(function (obj, i) {
       var n = i + 1;
       out.push('  <object id="' + (2 * n) + '" p:UUID="' + bambuUuid(n, OBJECT_UUID_SUFFIX) + '" type="model">');
@@ -676,14 +715,10 @@
     return out.join('\n') + '\n';
   }
 
-  function buildObjectPartXml(obj, n, c, tpl) {
-    var version = (tpl.modelMeta.filter(function (kv) { return kv[0] === 'BambuStudio:3mfVersion'; })[0] || [0, '1'])[1];
+  /** One mesh object, centred on c (its placement): `<object id>` ... `</object>`, one string. */
+  function meshObjectXml(obj, id, c, attrs) {
     var out = [];
-    out.push('<?xml version="1.0" encoding="UTF-8"?>');
-    out.push(MODEL_OPEN);
-    out.push(' <metadata name="BambuStudio:3mfVersion">' + xmlEscape(version) + '</metadata>');
-    out.push(' <resources>');
-    out.push('  <object id="' + (2 * n - 1) + '" p:UUID="' + bambuUuid(n << 16, SUB_OBJECT_UUID_SUFFIX) + '" type="model">');
+    out.push('  <object id="' + id + '"' + attrs + ' type="model">');
     out.push('   <mesh>');
     out.push('    <vertices>');
     for (var v = 0; v < obj.vertices.length; v += 3) {
@@ -701,6 +736,33 @@
     out.push('    </triangles>');
     out.push('   </mesh>');
     out.push('  </object>');
+    return out.join('\n');
+  }
+
+  /** _rels/.rels with no relationship to a part the export does not carry (the template's Auxiliaries): its
+   *  thumbnail points at the plate picture instead, as Studio's own project save does; any other such line goes. */
+  function buildPackageRels(tpl) {
+    var xml = decodeText(tpl.parts[PART_RELS]);
+    var has = {};
+    tpl.names.forEach(function (n) { has['/' + n] = true; });
+    return xml.split('\n').filter(function (line) {
+      var m = /Target="([^"]*)"/.exec(line);
+      if (!m || has[m[1]]) return true;
+      return line.indexOf('Type="' + REL_THUMBNAIL + '"') !== -1 && has['/Metadata/plate_1.png'];
+    }).map(function (line) {
+      var m = /Target="([^"]*)"/.exec(line);
+      return m && !has[m[1]] ? line.replace(m[0], 'Target="/Metadata/plate_1.png"') : line;
+    }).join('\n');
+  }
+
+  function buildObjectPartXml(obj, n, c, tpl) {
+    var version = (tpl.modelMeta.filter(function (kv) { return kv[0] === 'BambuStudio:3mfVersion'; })[0] || [0, '1'])[1];
+    var out = [];
+    out.push('<?xml version="1.0" encoding="UTF-8"?>');
+    out.push(MODEL_OPEN);
+    out.push(' <metadata name="BambuStudio:3mfVersion">' + xmlEscape(version) + '</metadata>');
+    out.push(' <resources>');
+    out.push(meshObjectXml(obj, 2 * n - 1, c, ' p:UUID="' + bambuUuid(n << 16, SUB_OBJECT_UUID_SUFFIX) + '"'));
     out.push(' </resources>');
     out.push(' <build/>');
     out.push('</model>');
@@ -837,6 +899,7 @@
     generated[PART_MODEL_SETTINGS] = function () { return buildProjectModelSettings(objects, places, ids, tpl, sourceFile); };
     generated[PART_CUT_INFO] = function () { return buildCutInformation(objects); };
     generated[PART_PLATE_JSON] = function () { return buildPlateJson(objects, places, ids, tpl); };
+    if (tpl.parts[PART_RELS]) generated[PART_RELS] = function () { return buildPackageRels(tpl); };
 
     var entries = [], objectsDone = false;
     tpl.names.forEach(function (name) {
@@ -997,6 +1060,8 @@
     PART_ROOT_RELS: PART_ROOT_RELS,
     PART_CUT_INFO: PART_CUT_INFO,
     PART_PLATE_JSON: PART_PLATE_JSON,
+    PART_RELS: PART_RELS,
+    MODEL_META_KEPT: MODEL_META_KEPT,
     UUID_SUFFIX: {
       object: OBJECT_UUID_SUFFIX,
       subObject: SUB_OBJECT_UUID_SUFFIX,

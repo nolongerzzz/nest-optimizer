@@ -248,7 +248,8 @@ async function main() {
   // nso_scene.json is the plate's own state (nso-3mf-scene.js); the plate
   // export always writes it. export:bambu gates the envelope part for part.
   const tpl = await NSO3MF.loadTemplate();
-  const objectParts = (n) => Array.from({ length: n }, (_, i) => `3D/Objects/object_${i + 1}.model`);
+  // INLINE (the default A1 mini template, plate_export.3mf): the meshes are in 3dmodel.model, no object parts
+  const objectParts = (n) => tpl.inline ? [] : Array.from({ length: n }, (_, i) => `3D/Objects/object_${i + 1}.model`);
   const envelope = (n, scene) => tpl.names.filter((x) => !x.startsWith('3D/Objects/'))
     .concat(objectParts(n), ['Metadata/nso_profile.json'], scene ? ['Metadata/nso_scene.json'] : []).sort();
   check('every OPC part is present, the template\'s and NSO\'s', names, envelope(expectedObjects, true));
@@ -287,35 +288,43 @@ async function main() {
       .map((m) => ({ id: m[1], t: m[2].split(' ').map(Number) }));
     const paths = Object.fromEntries([...model.matchAll(/<object id="(\d+)"[^>]*>\s*<components>\s*<component p:path="\/([^"]*)"/g)]
       .map((m) => [m[1], m[2]]));
+    // INLINE: wrapper id -> its component's mesh object, in this part
+    const inner = Object.fromEntries([...model.matchAll(/<object id="(\d+)"[^>]*>\s*<components>\s*<component objectid="(\d+)"/g)]
+      .map((m) => [m[1], m[2]]));
     const verts = items.map((it) => {
-      const part = execFileSync('unzip', ['-p', f, paths[it.id]], { encoding: 'utf8' });
+      const part = paths[it.id] ? execFileSync('unzip', ['-p', f, paths[it.id]], { encoding: 'utf8' })
+        : ((model.match(new RegExp('<object id="' + inner[it.id] + '"[^>]*>\\s*<mesh>[\\s\\S]*?</object>')) || [''])[0]);
       return [...part.matchAll(/<vertex x="([-\d.e]+)" y="([-\d.e]+)" z="([-\d.e]+)"/g)]
         .map((m) => m.slice(1).map(Number)).map(([x, y, z]) => [x + it.t[9], y + it.t[10], z + it.t[11]]);
     });
-    return { model, items, paths, verts, all: verts.flat(), n };
+    return { model, items, paths, inner, verts, all: verts.flat(), n };
   }
   const plate = geometry(file, expectedObjects);
   const model = plate.model;
-  check('an object per packed piece reached the model part',
-    (model.match(/<object /g) || []).length, expectedObjects);
-  check('each one is a wrapper on its own object part',
+  check('an object per packed piece reached the model part' + (tpl.inline ? ' (a mesh and a wrapper each, INLINE)' : ''),
+    (model.match(/<object /g) || []).length, expectedObjects * (tpl.inline ? 2 : 1));
+  if (tpl.inline) check('each one is a wrapper on its own mesh object in the model part', Object.keys(plate.inner).length, expectedObjects);
+  else check('each one is a wrapper on its own object part',
     Object.values(plate.paths).sort(), objectParts(expectedObjects));
 
   // Per-object identity, on the file the app itself wrote: a project names
   // its objects in model_settings.config, and Studio's counter UUIDs keep
   // them apart. See docs/BAMBU-PROJECT-EXPORT.md.
   const SUFFIXES = Object.values(NSO3MF.UUID_SUFFIX);
-  check('the production extension is declared',
+  if (!tpl.inline) check('the production extension is declared',
     model.includes('xmlns:p="http://schemas.microsoft.com/3dmanufacturing/production/2015/06"'), true);
   const plateSettings = execFileSync('unzip', ['-p', file, NSO3MF.PART_MODEL_SETTINGS], { encoding: 'utf8' });
   check('the names are the pieces the app placed',
     [...plateSettings.matchAll(/<object id="\d+">\s*<metadata key="name" value="([^"]*)"/g)].map((m) => m[1]), placedNames);
   const modelUuids = [...model.matchAll(/p:UUID="([^"]*)"/g)].map((m) => m[1]);
+  if (tpl.inline) check('no UUIDs, as the template writes none', modelUuids.length, 0);
+  else {
   check('object, component, build and item all carry a UUID',
     modelUuids.length, expectedObjects * 3 + 1);
   check('object, component and item UUIDs carry Studio\'s fixed suffixes',
     modelUuids.slice(0, -expectedObjects - 1).concat(modelUuids.slice(-expectedObjects))
       .filter((u) => !SUFFIXES.some((x) => u.endsWith(x))), []);
+  }
   check('no two UUIDs collide', new Set(modelUuids).size, modelUuids.length);
   check('the object parts have vertices', plate.all.length > 0, true);
 
@@ -351,8 +360,8 @@ async function main() {
     pieceText, text);
 
   const piece = geometry(pieceFile, 1);
-  check('selected-model export holds exactly one object',
-    (piece.model.match(/<object /g) || []).length, 1);
+  check('selected-model export holds exactly one object' + (tpl.inline ? ' (its mesh and its wrapper, INLINE)' : ''),
+    [(piece.model.match(/<object /g) || []).length, piece.items.length], [tpl.inline ? 2 : 1, 1]);
   const pv = piece.all;
   check('selected-model has vertices', pv.length > 0, true);
   const pxs = pv.map((v) => v[0]), pys = pv.map((v) => v[1]), pzs = pv.map((v) => v[2]);

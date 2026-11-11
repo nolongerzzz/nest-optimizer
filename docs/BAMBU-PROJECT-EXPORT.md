@@ -1,7 +1,7 @@
 # Bambu project export: NSO's 3MF opens in Bambu Studio as a project
 
 Module: `nso-3mf.js` (`build3MF`, `loadTemplate`)
-Template: `fixtures/bambu-templates/a1mini-0.4/` (`project_test.3mf`, `template.json`)
+Template: `fixtures/bambu-templates/a1mini-0.4/` (`plate_export.3mf`, `template.json`)
 Gate: `npm run export:bambu` (`tools/3mf-test/bambu-project-check.js`)
 
 ## Goal
@@ -19,12 +19,12 @@ wrote, part for part, and overlays only what NSO owns.
 
 ## The compatibility shim, on record
 
-`3D/3dmodel.model` says `<metadata name="Application">BambuStudio-02.08.02.61</metadata>`,
+`3D/3dmodel.model` says `<metadata name="Application">BambuStudio-02.09.01.70</metadata>`,
 even though NSO wrote the file.
 
 - **Why it is deliberate.** Studio loads a 3MF as a project only when Studio
   wrote it, and that tag is how Studio tells.
-- **The version** is the pinned template's, **02.08.02.61**, as recorded in
+- **The version** is the pinned template's, **02.09.01.70** (02.08.02.61 until 2026-11-11), as recorded in
   `fixtures/bambu-templates/a1mini-0.4/template.json` (`studio_version`). It is
   never newer than that.
 - **Two checks hold it:**
@@ -52,9 +52,17 @@ even though NSO wrote the file.
   | `source` | where the file came from |
 
   A sliced template is refused, because its G-code would ride into every export.
-- **A1 mini 0.4** (`a1mini-0.4`) is the default and the only template so far.
-  It is the owner's `project_test.3mf`: top_clip_x2 and one tree support,
-  Generic PLA @BBL A1M, 0.20mm Standard @BBL A1M.
+- **A1 mini 0.4** (`a1mini-0.4`) is the default. Since 2026-11-11 it is the
+  owner's `plate_export.3mf`, **the reference for what NSO's plate export
+  is**: the six supp_ref heads, one object each, saved by Studio 02.09.01.70
+  (Bambu PLA Basic @BBL A1M, 0.20mm Standard @BBL A1M, tree(auto)). Its slice,
+  `plate_export.gcode.3mf`, labels each head with its own `OBJECT_ID` (158,
+  180, ... 268), supports included - the plate export it replaces welded the
+  pieces into one STL, so a slice of it was one id for every head
+  (supp_ref_2x: 318), and G-scope could not pick a head. See *INLINE and SPLIT*.
+  Its predecessor, `project_test.3mf` (Studio 02.08.02.61, top_clip_x2 and one
+  tree support, Generic PLA), stays in the directory: `app-print.js` reads it
+  for the print path.
 - **The P1S template** will be a fixture drop and needs no code: a
   `p1s-0.4/` directory, picked with `build3MF({ template: 'p1s-0.4' })`. Choosing
   it from the printer is later work.
@@ -64,7 +72,44 @@ even though NSO wrote the file.
   with the page). Node reads it off disk. Both open it with
   `nso-3mf-read.js`, and the result is cached per key.
 
-## The envelope, part for part
+## INLINE and SPLIT
+
+The writer takes the template's shape, whichever it is (`tpl.inline`):
+
+- **INLINE** - `plate_export.3mf`, the default. Every mesh is in
+  `3D/3dmodel.model` itself: the mesh objects first (`2N-1`, each centred on
+  its own origin), then the wrappers (`2N`, one `<component objectid="2N-1">`
+  with the identity transform), then `<build>` with one `<item objectid="2N">`
+  per piece carrying its placement. No `3D/Objects/`, no `3D/_rels/`, no
+  UUIDs, no production namespace: the root element is the template's own.
+  No `Metadata/plate_1.json` (the template has none).
+- **SPLIT** - a Studio project save (`project_test.3mf`, the P1S template):
+  the table below.
+
+Both shapes:
+
+- The template's **`Auxiliaries/`** (a MakerWorld project's model pictures,
+  profile pictures and thumbnails - the design's, not the export's) are never
+  read or written. `_rels/.rels`'s thumbnail relationship pointed at one of
+  them, so it points at `Metadata/plate_1.png` instead, as a project save's does.
+- The root model's **design metadata** is written blank: title, designer,
+  licence, description, MakerWorld ids. Kept: Application, 3mfVersion, the
+  dates (the export's) and the thumbnail names (`MODEL_META_KEPT`); a `[]`
+  stays `[]`.
+- **Cooling**: Bambu PLA Basic @BBL A1M already holds NSO's 14 cooling values
+  for every NSO profile, so an export of this template changes none and adds
+  nothing to `different_settings_to_system` (*Cooling* below). `export:bambu`
+  still exercises the overlay on a copy of the settings with two values moved.
+
+## The plate export's name
+
+The Export card's **Plate file name** names Export plate, STL and 3MF. Empty,
+the export takes the default, `nest_<plate>_<n>pcs`, which the field shows as
+its placeholder. A typed `.stl` / `.3mf` is dropped (the format decides the
+extension), and a character no file name can hold becomes `_`.
+`export:roundtrip` downloads both ways.
+
+## The envelope, part for part (SPLIT)
 
 Parts are written in the template's order. NSO's two parts go last.
 
@@ -228,6 +273,8 @@ default is `'project'`.
   - `identify_id` present, unique and stable;
   - the geometry, read back by `nso-3mf-read.js`, where it was; a piece without
     overrides matches the geometry-only envelope's vertices.
+- `export:bambu` and `3mf:roundtrip` check the template's shape, INLINE or
+  SPLIT; `export:bambu` passes on both (run once against each A1 mini record).
 - `3mf:roundtrip`, `3mf:drive`, `3mf:import`, `3mf:import-drive`, `3mf:scene`
   and `export:roundtrip` read the new envelope:
   - geometry through the object parts and build items;

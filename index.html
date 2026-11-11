@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=02dc7b63" />
+  <link rel="stylesheet" href="styles.css?v=6766fe4f" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -704,6 +704,11 @@
               deleting this button and that script tag removes the feature. -->
               <button id="btn-library-save" class="btn btn-secondary" type="button"
               title="Save the selected piece into the Library catalog">Save selected to Library</button>
+              <!-- The plate export's file name (STL and 3MF): empty takes the default, nest_<plate>_<n>pcs, shown as the placeholder.
+              app-core.js plateExportFilename() reads it. -->
+              <label class="hint" for="export-plate-name" style="margin-bottom:4px;display:block">Plate file name</label>
+              <input id="export-plate-name" class="export-name" type="text" spellcheck="false" autocomplete="off"
+              title="Name for Export plate (STL or 3MF). Leave empty for the default shown." placeholder="nest_plate_0pcs">
               <button id="btn-export-stl" class="btn btn-secondary" type="button" disabled>Export plate STL</button>
               <button id="btn-delete-model" class="btn btn-secondary" type="button">Delete model</button>
             </div>
@@ -2889,7 +2894,7 @@
   <script src="nso_exif.js?v=22458ef3"></script>
   <script src="nso_photoset.js?v=0974faf1"></script>
   <script src="nso-cooling-profiles.js"></script>
-  <script src="nso-3mf.js?v=0dd8621b"></script>
+  <script src="nso-3mf.js?v=a333b53c"></script>
   <script src="nso-3mf-read.js?v=28d79bcf"></script>
   <script src="nso-3mf-scene.js?v=abb8f614"></script>
   <script src="nso-surface-grid.js?v=c0d97583"></script>
@@ -2911,7 +2916,7 @@
   <script src="nso-helpers.js?v=9c476e39"></script>
   <script src="nso-recent.js?v=f03d6f13"></script>
   <script src="nso-bounds.js?v=778acac4"></script>
-  <script src="app-core.js?v=890d36be"></script>
+  <script src="app-core.js?v=ea6abd01"></script>
   <!-- Up to six plates (beds): the active one is state.models / state.placed, the rest are kept beside it. docs/BEDS.md. -->
   <script src="app-beds.js?v=db261498"></script>
 

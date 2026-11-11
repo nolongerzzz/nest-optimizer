@@ -131,15 +131,18 @@ async function validateProfile(profileId, outDir) {
 
   // --- re-open and read the parts back ---------------------------------
   const files = readZip(fs.readFileSync(file));
+  const tpl = await NSO3MF.loadTemplate();
+  // INLINE template (the owner's plate_export.3mf): the meshes are in 3dmodel.model, no 3D/Objects, no UUIDs.
+  // SPLIT template (a Studio project save): one 3D/Objects part per piece, Studio's UUIDs. docs/BAMBU-PROJECT-EXPORT.md
+  const INLINE = !!tpl.inline;
 
-  for (const part of ['[Content_Types].xml', '_rels/.rels', NSO3MF.PART_MODEL, NSO3MF.PART_ROOT_RELS,
-                      NSO3MF.PART_PROJECT_SETTINGS, NSO3MF.PART_MODEL_SETTINGS]) {
+  for (const part of ['[Content_Types].xml', '_rels/.rels', NSO3MF.PART_MODEL].concat(INLINE ? [] : [NSO3MF.PART_ROOT_RELS])
+                      .concat([NSO3MF.PART_PROJECT_SETTINGS, NSO3MF.PART_MODEL_SETTINGS])) {
     check('part present: ' + part, files.has(part));
   }
 
   const text = files.get(NSO3MF.PART_PROJECT_SETTINGS).toString('utf8');
   const expected = Profiles.resolveValues(profileId);
-  const tpl = await NSO3MF.loadTemplate();
   check('written as the Bambu project envelope', built.envelope === 'project', built.envelope + ' ' + (built.templateError || ''));
 
   // --- shape: the template's file, each cooling key on every filament slot -
@@ -217,26 +220,32 @@ async function validateProfile(profileId, outDir) {
   // --- geometry survived ------------------------------------------------
   const model = files.get(NSO3MF.PART_MODEL).toString('utf8');
   const objParts = [...files.keys()].filter((n) => n.startsWith('3D/Objects/'));
-  const objXml = objParts.map((n) => files.get(n).toString('utf8')).join('\n');
+  const objXml = INLINE ? model : objParts.map((n) => files.get(n).toString('utf8')).join('\n');
   const vCount = (objXml.match(/<vertex /g) || []).length;
   const tCount = (objXml.match(/<triangle /g) || []).length;
   const iCount = (model.match(/<item /g) || []).length;
-  check('object parts carry the geometry (' + vCount + ' vertices, ' + tCount +
-        ' triangles in ' + objParts.length + ' parts, ' + iCount + ' build items)',
-    vCount === 16 && tCount === 24 && iCount === 2 && objParts.length === 2);
-  check('the root model carries no mesh', !/<mesh>/.test(model));
+  if (INLINE) {
+    check('3dmodel.model carries the geometry, one mesh object per piece (' + vCount + ' vertices, ' + tCount + ' triangles, ' + iCount + ' build items)',
+      vCount === 16 && tCount === 24 && iCount === 2 && objParts.length === 0 && (model.match(/<mesh>/g) || []).length === 2);
+  } else {
+    check('object parts carry the geometry (' + vCount + ' vertices, ' + tCount +
+          ' triangles in ' + objParts.length + ' parts, ' + iCount + ' build items)',
+      vCount === 16 && tCount === 24 && iCount === 2 && objParts.length === 2);
+    check('the root model carries no mesh', !/<mesh>/.test(model));
+  }
 
   // --- per-object identity ---------------------------------------------
   // A project names its objects in model_settings.config and keeps them apart
   // by Studio's own counter UUIDs. See docs/BAMBU-PROJECT-EXPORT.md.
   const settingsXml = files.get(NSO3MF.PART_MODEL_SETTINGS).toString('utf8');
-  check('the production extension is declared',
+  if (!INLINE) check('the production extension is declared',
     model.includes('xmlns:p="http://schemas.microsoft.com/3dmanufacturing/production/2015/06"'));
   check('each object carries its own name in model_settings.config',
     [...settingsXml.matchAll(/<object id="\d+">\s*<metadata key="name" value="([^"]*)"/g)].map((m) => m[1]).join(),
     objects.map((o) => o.name).join());
-  const uuids = [...(model + objXml).matchAll(/p:UUID="([^"]*)"/g)].map((m) => m[1]);
-  check('object, component, sub-object, build and item all carry a UUID (' + uuids.length + ' of them)',
+  const uuids = [...(INLINE ? model : model + objXml).matchAll(/p:UUID="([^"]*)"/g)].map((m) => m[1]);
+  if (INLINE) check('no UUIDs, as the template writes none', uuids.length === 0, uuids.length);
+  else check('object, component, sub-object, build and item all carry a UUID (' + uuids.length + ' of them)',
     uuids.length === objects.length * 4 + 1, uuids.length);
   const SUFFIXES = Object.values(NSO3MF.UUID_SUFFIX);
   const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;

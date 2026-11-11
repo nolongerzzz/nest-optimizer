@@ -5,7 +5,9 @@
  * Reads both shapes nso-3mf.js writes:
  *   - Bambu Studio's project envelope (docs/BAMBU-PROJECT-EXPORT.md): a
  *     wrapper object per piece in 3D/3dmodel.model, one <component> on its
- *     mesh in 3D/Objects/object_N.model, placed by the build item;
+ *     mesh - in 3D/Objects/object_N.model (SPLIT, p:path) or in
+ *     3D/3dmodel.model itself (INLINE, the owner's plate_export.3mf) - placed
+ *     by the build item;
  *   - the geometry-only envelope: each piece's mesh inline in 3D/3dmodel.model.
  *
  * One entry per build item, in build order: { id, verts: [[x, y, z], ...],
@@ -42,9 +44,12 @@ function pieces3MF(file) {
   return items.map((it) => {
     let body = objs.get(it.id) || '';
     let t = it.t;
-    const comp = body.match(/<component p:path="\/([^"]*)" objectid="(\d+)"[^>]*?(?:transform="([^"]*)")?[^>]*\/>/);
+    // <component [p:path="/part"] objectid="N" ... [transform="..."]/>: no p:path, the mesh is in this part
+    const tag = (body.match(/<component\b[^>]*\/>/) || [])[0];
+    const comp = tag && [tag, (tag.match(/p:path="\/([^"]*)"/) || [])[1] || '', (tag.match(/objectid="(\d+)"/) || [])[1],
+                         (tag.match(/transform="([^"]*)"/) || [])[1]];
     if (comp) {
-      if (!cache.has(comp[1])) cache.set(comp[1], objectsIn(part(file, comp[1])));
+      if (!cache.has(comp[1])) cache.set(comp[1], comp[1] ? objectsIn(part(file, comp[1])) : objs);
       const c = parseT(comp[3]);
       // component then item: v * C * T
       t = [0, 1, 2, 3].flatMap((r) => [0, 1, 2].map((k) =>

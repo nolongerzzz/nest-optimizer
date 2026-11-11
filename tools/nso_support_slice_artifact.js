@@ -297,11 +297,12 @@ const fmt = v => v.map(c => c.toFixed(3)).join(', ');
   const settingsXml = readEntry(buf, NSO3MF.PART_MODEL_SETTINGS);
   const nameOf = new Map([...settingsXml.matchAll(/<object id="(\d+)">\s*<metadata key="name" value="([^"]*)"\/>/g)].map(x => [x[1], x[2]]));
   const placeOf = new Map([...model.matchAll(/<item objectid="(\d+)"[^>]*transform="([^"]*)"/g)].map(x => [x[1], x[2].split(' ').slice(9).map(Number)]));
-  const found = [...model.matchAll(/<object id="(\d+)" p:UUID="([^"]+)" type="model">\s*<components>\s*<component p:path="\/([^"]*)" objectid="(\d+)"/g)]
+  /* SPLIT (p:UUID, p:path to 3D/Objects) or INLINE (the mesh in the root model, no UUID: the owner's plate_export.3mf) */
+  const found = [...model.matchAll(/<object id="(\d+)"(?: p:UUID="([^"]+)")? type="model">\s*<components>\s*<component (?:p:path="\/([^"]*)" )?objectid="(\d+)"/g)]
     .map(x => {
-      const f = [x[0], x[1], nameOf.get(x[1]) || '', x[2]];
+      const f = [x[0], x[1], nameOf.get(x[1]) || '', x[2] || '(inline)'];
       f.soup = () => {
-        const xml = readEntry(buf, x[3]);
+        const xml = x[3] ? readEntry(buf, x[3]) : model;
         return objectSoup(xml, xml.indexOf('<object id="' + x[4] + '"'), placeOf.get(x[1]));
       };
       return f;

@@ -111,7 +111,7 @@ main {
 }
 
 /* Form elements */
-select, input[type="number"] {
+select, input[type="number"], input.export-name {
   width: 100%;
   background: var(--bg);
   border: 1px solid var(--border);

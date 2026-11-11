@@ -13,12 +13,15 @@
  *   1. the record: template.json's version is the template's own, in its
  *      Application tag, project settings and slice_info; its sha256 is the file
  *   2. the part list: the template's parts, in its order, one object part per
- *      piece, plus NSO's own two; the parts NSO does not write are the
- *      template's bytes
+ *      piece (a SPLIT template's 3D/Objects), plus NSO's own two; never the
+ *      template's Auxiliaries; the parts NSO does not write are the template's
+ *      bytes
  *   3. 3dmodel.model and the object parts: the template's skeleton (elements,
- *      attributes, metadata order), no mesh in the root model, Studio's UUID
- *      counters and suffixes, each mesh centred on its own origin and placed
- *      by its build item
+ *      attributes, metadata order), the design's metadata blank; SPLIT: no mesh
+ *      in the root model, Studio's UUID counters and suffixes; INLINE (the
+ *      owner's plate_export.3mf): every mesh in the root model, then every
+ *      wrapper, no UUIDs, no 3D/Objects or 3D/_rels; each mesh centred on its
+ *      own origin and placed by its build item
  *   4. model_settings.config: the template's skeleton; names, extruder,
  *      face_count, one normal_part each; the support object's overrides on it
  *      alone; the template's plate block; <assemble> matching the build
@@ -142,6 +145,10 @@ const hex8 = (n) => ('0000000' + (n >>> 0).toString(16)).slice(-8);
     JSON.stringify(record));
   check('its sha256 is the template file\'s', crypto.createHash('sha256').update(tplBytes).digest('hex') === record.sha256);
   const tModel = T.get('3D/3dmodel.model').toString('utf8');
+  const INLINE = ![...T.keys()].some((n) => n.startsWith('3D/Objects/'));
+  // as many pieces as the template has: an export of that many has the template's skeleton line for line
+  const TPL_N = (tModel.match(/<item objectid=/g) || []).length;
+  console.log('  (template shape: ' + (INLINE ? 'INLINE' : 'SPLIT') + ', ' + TPL_N + ' objects)');
   const tSettings = JSON.parse(T.get('Metadata/project_settings.config').toString('utf8'));
   check('the template\'s own Application tag is the recorded version (' + TAG + ')',
     tModel.includes('<metadata name="Application">' + TAG + '</metadata>'));
@@ -170,6 +177,7 @@ const hex8 = (n) => ('0000000' + (n >>> 0).toString(16)).slice(-8);
   const objPart = (n) => '3D/Objects/object_' + n + '.model';
   const want = [];
   [...T.keys()].forEach((n) => {
+    if (n.startsWith('Auxiliaries/')) return;          // the design's pictures: never in an export
     if (n.startsWith('3D/Objects/')) { if (!want.includes(objPart(1))) objects.forEach((o, i) => want.push(objPart(i + 1))); }
     else want.push(n);
   });
@@ -181,10 +189,17 @@ const hex8 = (n) => ('0000000' + (n >>> 0).toString(16)).slice(-8);
     JSON.stringify([...withScene.keys()]) === JSON.stringify(want.concat([W.PART_NSO_SCENE])));
   const GENERATED = [W.PART_MODEL, W.PART_ROOT_RELS, W.PART_PROJECT_SETTINGS, W.PART_MODEL_SETTINGS,
                      W.PART_CUT_INFO, W.PART_PLATE_JSON];
-  const verbatim = [...T.keys()].filter((n) => !n.startsWith('3D/Objects/') && !GENERATED.includes(n));
+  const tRels = T.get(W.PART_RELS).toString('utf8');
+  const dangling = [...tRels.matchAll(/Target="\/([^"]*)"/g)].map((m) => m[1]).filter((t) => t.startsWith('Auxiliaries/'));
+  if (dangling.length) GENERATED.push(W.PART_RELS);
+  const verbatim = [...T.keys()].filter((n) => !n.startsWith('3D/Objects/') && !n.startsWith('Auxiliaries/') && !GENERATED.includes(n));
   check('the parts NSO does not write are the template\'s bytes (' + verbatim.join(', ') + ')',
     verbatim.length > 0 && verbatim.every((n) => E.get(n).equals(T.get(n))),
     verbatim.filter((n) => !E.get(n).equals(T.get(n))).join(', '));
+  const eRels = E.get(W.PART_RELS).toString('utf8');
+  check('_rels/.rels points only at parts the export carries' + (dangling.length ? ' (the template\'s thumbnail, ' + dangling.join(', ') + ', is the plate picture)' : ''),
+    [...eRels.matchAll(/Target="\/([^"]*)"/g)].every((m) => E.has(m[1])) &&
+    eRels.split('\n').length === tRels.split('\n').length - dangling.filter((t) => !/thumbnail_3mf/.test(t)).length, eRels);
   check('the thumbnails the plate block names are in the archive',
     [...T.get('Metadata/model_settings.config').toString('utf8').split('<plate>')[1].matchAll(/key="\w+_file" value="([^"]*)"/g)]
       .every((m) => E.has(m[1])));
@@ -192,42 +207,67 @@ const hex8 = (n) => ('0000000' + (n >>> 0).toString(16)).slice(-8);
   /* ---------- 3. 3dmodel.model and the object parts ---------- */
   console.log('\n--- 3. 3dmodel.model and the object parts ---');
   const model = E.get(W.PART_MODEL).toString('utf8');
-  // The template has two objects; so does an export of two.
-  const two = readZip(Buffer.from((await W.build3MF(Object.assign({}, opts, { objects: plate().slice(0, 2) }))).bytes));
-  check('3dmodel.model has the template\'s skeleton (elements, attributes, metadata order)',
+  // An export with as many pieces as the template has (boxes, the plate's three over and over).
+  const many = () => Array.from({ length: TPL_N }, (x, k) => { const o = plate()[k % 3]; delete o.settings; return o; });
+  const two = readZip(Buffer.from((await W.build3MF(Object.assign({}, opts, { objects: many() }))).bytes));
+  check('3dmodel.model has the template\'s skeleton (elements, attributes, metadata order), with ' + TPL_N + ' pieces',
     skeleton(two.get(W.PART_MODEL).toString('utf8')) === skeleton(tModel),
     skeleton(two.get(W.PART_MODEL).toString('utf8')));
-  check('3D/_rels/3dmodel.model.rels has the template\'s skeleton',
-    skeleton(two.get(W.PART_ROOT_RELS).toString('utf8')) === skeleton(T.get(W.PART_ROOT_RELS).toString('utf8')));
-  check('an object part has the template\'s skeleton',
-    skeleton(two.get(objPart(2)).toString('utf8')) === skeleton(T.get(objPart(2)).toString('utf8')));
-  check('the root element is the template\'s, xmlns:BambuStudio and requiredextensions="p" with it',
+  check('the root element is the template\'s',
     model.split('\n')[1] === tModel.split('\n')[1], model.split('\n')[1]);
   check('Application is "' + TAG + '", 3mfVersion 1',
     model.includes('<metadata name="Application">' + TAG + '</metadata>') &&
     model.includes('<metadata name="BambuStudio:3mfVersion">1</metadata>'));
-  check('the root model carries no mesh', !/<mesh|<vertex/.test(model));
-  const rels = E.get(W.PART_ROOT_RELS).toString('utf8');
-  check('one relationship per object part',
-    JSON.stringify([...rels.matchAll(/Target="\/([^"]*)"/g)].map((m) => m[1])) === JSON.stringify(objects.map((o, i) => objPart(i + 1))));
+  const meta = [...model.split('<resources')[0].matchAll(/<metadata name="([^"]*)">([^<]*)<\/metadata>/g)].map((m) => [m[1], m[2]]);
+  const leaked = meta.filter(([k, v]) => v && v !== '[]' && !W.MODEL_META_KEPT[k]);
+  check('the template\'s design metadata is blank (title, designer, licence, description, MakerWorld ids)', leaked.length === 0, JSON.stringify(leaked));
+  check('...and its thumbnails\' metadata names parts the export carries',
+    meta.filter(([k]) => /^Thumbnail_/.test(k)).every(([k, v]) => E.has(v.replace(/^\//, ''))));
   const S = W.UUID_SUFFIX;
-  check('Studio\'s UUID suffixes are the template\'s',
-    [S.object, S.component, S.buildItem].every((x) => tModel.includes(x)) &&
-    T.get(objPart(1)).toString('utf8').includes(S.subObject));
+  if (INLINE) {
+    check('no 3D/Objects parts and no 3D/_rels: the meshes are in 3dmodel.model',
+      ![...E.keys()].some((n) => n.startsWith('3D/Objects/') || n === W.PART_ROOT_RELS));
+    check('no UUIDs, no production namespace', !/p:UUID|p:path|xmlns:p=/.test(model));
+    check('every mesh object, then every wrapper, as the template lays them out',
+      JSON.stringify([...model.matchAll(/<object id="(\d+)"/g)].map((m) => +m[1])) ===
+      JSON.stringify(objects.map((o, i) => 2 * i + 1).concat(objects.map((o, i) => 2 * i + 2))));
+  } else {
+    check('3D/_rels/3dmodel.model.rels has the template\'s skeleton',
+      skeleton(two.get(W.PART_ROOT_RELS).toString('utf8')) === skeleton(T.get(W.PART_ROOT_RELS).toString('utf8')));
+    check('an object part has the template\'s skeleton',
+      skeleton(two.get(objPart(2)).toString('utf8')) === skeleton(T.get(objPart(2)).toString('utf8')));
+    check('the root model carries no mesh', !/<mesh|<vertex/.test(model));
+    const rels = E.get(W.PART_ROOT_RELS).toString('utf8');
+    check('one relationship per object part',
+      JSON.stringify([...rels.matchAll(/Target="\/([^"]*)"/g)].map((m) => m[1])) === JSON.stringify(objects.map((o, i) => objPart(i + 1))));
+    check('Studio\'s UUID suffixes are the template\'s',
+      [S.object, S.component, S.buildItem].every((x) => tModel.includes(x)) &&
+      T.get(objPart(1)).toString('utf8').includes(S.subObject));
+  }
+  /* piece n's mesh object: its own part (SPLIT), or object 2n-1 in the root model (INLINE) */
+  const meshOf = (Z, n) => INLINE
+    ? (Z.get(W.PART_MODEL).toString('utf8').match(new RegExp('<object id="' + (2 * n - 1) + '" type="model">\\s*<mesh>[\\s\\S]*?</object>')) || [''])[0]
+    : Z.get(objPart(n)).toString('utf8');
 
-  const items = [...model.matchAll(/<item objectid="(\d+)" p:UUID="([^"]*)" transform="([^"]*)" printable="1"\/>/g)];
+  const items = INLINE
+    ? [...model.matchAll(/<item objectid="(\d+)" transform="([^"]*)" printable="1"\/>/g)].map((m) => [m[0], m[1], null, m[2]])
+    : [...model.matchAll(/<item objectid="(\d+)" p:UUID="([^"]*)" transform="([^"]*)" printable="1"\/>/g)];
   let shapeOk = true, centredOk = true, placedOk = true, uuidOk = true;
   const detail = [];
   objects.forEach((o, i) => {
     const n = i + 1;
-    const objRe = new RegExp('<object id="' + 2 * n + '" p:UUID="' + hex8(n) + S.object + '" type="model">\\s*<components>\\s*' +
-      '<component p:path="/' + objPart(n) + '" objectid="' + (2 * n - 1) + '" p:UUID="' + hex8(n << 16) + S.component +
-      '" transform="1 0 0 0 1 0 0 0 1 0 0 0"/>\\s*</components>\\s*</object>');
+    const objRe = INLINE
+      ? new RegExp('<object id="' + 2 * n + '" type="model">\\s*<components>\\s*<component objectid="' + (2 * n - 1) +
+        '" transform="1 0 0 0 1 0 0 0 1 0 0 0"/>\\s*</components>\\s*</object>')
+      : new RegExp('<object id="' + 2 * n + '" p:UUID="' + hex8(n) + S.object + '" type="model">\\s*<components>\\s*' +
+        '<component p:path="/' + objPart(n) + '" objectid="' + (2 * n - 1) + '" p:UUID="' + hex8(n << 16) + S.component +
+        '" transform="1 0 0 0 1 0 0 0 1 0 0 0"/>\\s*</components>\\s*</object>');
     if (!objRe.test(model)) { shapeOk = false; detail.push('object ' + n); }
     const it = items[i];
-    if (!it || it[1] !== String(2 * n) || it[2] !== hex8(2 * n) + S.buildItem) { uuidOk = false; detail.push('item ' + n); return; }
-    const part = E.get(objPart(n)).toString('utf8');
-    if (!part.includes('<object id="' + (2 * n - 1) + '" p:UUID="' + hex8(n << 16) + S.subObject + '" type="model">')) { uuidOk = false; detail.push('sub-object ' + n); }
+    if (!it || it[1] !== String(2 * n) || (!INLINE && it[2] !== hex8(2 * n) + S.buildItem)) { uuidOk = false; detail.push('item ' + n); return; }
+    const part = meshOf(E, n);
+    if (!part) { shapeOk = false; detail.push('mesh ' + n); return; }
+    if (!INLINE && !part.includes('<object id="' + (2 * n - 1) + '" p:UUID="' + hex8(n << 16) + S.subObject + '" type="model">')) { uuidOk = false; detail.push('sub-object ' + n); }
     const t = it[3].split(' ').map(Number);
     const vs = [...part.matchAll(/<vertex x="([^"]*)" y="([^"]*)" z="([^"]*)"\/>/g)].map((m) => m.slice(1).map(Number));
     for (let a = 0; a < 3; a++) {
@@ -239,8 +279,8 @@ const hex8 = (n) => ('0000000' + (n >>> 0).toString(16)).slice(-8);
     const tris = [...part.matchAll(/<triangle v1="(\d+)" v2="(\d+)" v3="(\d+)"\/>/g)].flatMap((m) => m.slice(1).map(Number));
     if (JSON.stringify(tris) !== JSON.stringify(o.triangles)) placedOk = false;
   });
-  check('each piece is a wrapper object 2N whose one component is object 2N-1 in 3D/Objects/object_N.model', shapeOk, detail.join(', '));
-  check('UUIDs: object N, component and sub-object N << 16, build item 2N, eight hex digits, Studio\'s suffixes', uuidOk, detail.join(', '));
+  check('each piece is a wrapper object 2N whose one component is object 2N-1' + (INLINE ? ', in 3dmodel.model' : ' in 3D/Objects/object_N.model'), shapeOk, detail.join(', '));
+  if (!INLINE) check('UUIDs: object N, component and sub-object N << 16, build item 2N, eight hex digits, Studio\'s suffixes', uuidOk, detail.join(', '));
   check('each mesh is centred on its own origin', centredOk);
   check('the build item places it: translation + vertex = the piece, triangles as given, printable="1"',
     placedOk && items.length === objects.length);
@@ -250,9 +290,7 @@ const hex8 = (n) => ('0000000' + (n >>> 0).toString(16)).slice(-8);
   const ms = E.get(W.PART_MODEL_SETTINGS).toString('utf8');
   const tMs = T.get(W.PART_MODEL_SETTINGS).toString('utf8');
   // The skeleton of an export without overrides (the template has none).
-  const plain = plate().slice(0, 2);
-  delete plain[1].settings;
-  const twoPlain = readZip(Buffer.from((await W.build3MF(Object.assign({}, opts, { objects: plain }))).bytes));
+  const twoPlain = two;   // TPL_N pieces, no overrides
   check('without overrides it has the template\'s skeleton: object, part, mesh_stat, plate, model_instance, assemble',
     skeleton(twoPlain.get(W.PART_MODEL_SETTINGS).toString('utf8')) === skeleton(tMs),
     skeleton(twoPlain.get(W.PART_MODEL_SETTINGS).toString('utf8')));
@@ -297,6 +335,9 @@ const hex8 = (n) => ('0000000' + (n >>> 0).toString(16)).slice(-8);
   check('cut_information.xml has one object per piece, in the template\'s shape',
     (E.get(W.PART_CUT_INFO).toString('utf8').match(/<cut_id id="0" check_sum="1" connectors_cnt="0"\/>/g) || []).length === objects.length &&
     skeleton(two.get(W.PART_CUT_INFO).toString('utf8')) === skeleton(T.get(W.PART_CUT_INFO).toString('utf8')));
+  if (!T.has(W.PART_PLATE_JSON)) {
+    check('no plate_1.json, as the template has none', !E.has(W.PART_PLATE_JSON));
+  } else {
   const pj = JSON.parse(E.get(W.PART_PLATE_JSON).toString('utf8'));
   const tPj = JSON.parse(T.get(W.PART_PLATE_JSON).toString('utf8'));
   check('plate_1.json has the template\'s fields, one bbox_objects entry per piece',
@@ -306,6 +347,7 @@ const hex8 = (n) => ('0000000' + (n >>> 0).toString(16)).slice(-8);
   check('its first-layer areas are the pieces\' footprints', pj.bbox_objects.map((b) => b.area).join() ===
     objects.map((o) => { const v = o.vertices, b = [0, 1].map((a) => { const xs = v.filter((x, k) => k % 3 === a); return Math.max(...xs) - Math.min(...xs); }); return +(b[0] * b[1]).toFixed(6); }).join(),
     pj.bbox_objects.map((b) => b.area).join());
+  }
 
   /* ---------- 5. project_settings.config ---------- */
   console.log('\n--- 5. project_settings.config ---');
@@ -331,17 +373,28 @@ const hex8 = (n) => ('0000000' + (n >>> 0).toString(16)).slice(-8);
     cool.forEach((k) => { if (tSettings[k][j - 1] !== values[k]) keys.add(k); });
     return [...keys].sort().join(';');
   });
+  const changed = cool.filter((k) => tSettings[k][0] !== values[k]);
   check(DIFFS + ' lists, per filament slot, the cooling keys NSO changed (' + JSON.stringify(ps[DIFFS]) + ')',
-    JSON.stringify(ps[DIFFS]) === JSON.stringify(wantDiffs) && wantDiffs.slice(1, slots + 1).every((d) => d.length > 0),
+    JSON.stringify(ps[DIFFS]) === JSON.stringify(wantDiffs) && (!changed.length || wantDiffs.slice(1, slots + 1).every((d) => d.length > 0)),
     'want ' + JSON.stringify(wantDiffs));
+  /* The overlay itself, on the template's settings with two cooling values moved off NSO's (the owner's Bambu PLA Basic
+     template already holds NSO's values, so an export of it changes nothing): each slot lists exactly what moved. */
+  const movedS = JSON.parse(JSON.stringify(tSettings));
+  const MOVE = ['slow_down_layer_time', 'pre_start_fan_time'];
+  MOVE.forEach((k) => { movedS[k] = movedS[k].map((v) => String(Number(values[k]) + 3)); });
+  const ov = JSON.parse(W.overlayProjectSettings(movedS, values));
+  check('the overlay names what it changes on every filament slot (' + MOVE.join(', ') + ' moved off NSO\'s values first)',
+    ov[DIFFS].slice(1, slots + 1).every((d, j) => MOVE.every((k) => d.split(';').includes(k)) &&
+      d.split(';').filter((k) => cool.includes(k)).sort().join() === MOVE.concat((tSettings[DIFFS][j + 1] || '').split(';').filter((k) => cool.includes(k))).filter((k, i, a) => a.indexOf(k) === i).sort().join()) &&
+      MOVE.every((k) => ov[k].every((v) => v === values[k])),
+    JSON.stringify(ov[DIFFS]));
   check('version, printer_model and preset ids are the template\'s',
     ['version', 'printer_model', 'printer_settings_id', 'print_settings_id', 'filament_settings_id']
       .every((k) => JSON.stringify(ps[k]) === JSON.stringify(tSettings[k])));
   const badCool = cool.filter((k) => !(Array.isArray(ps[k]) && ps[k].length === tSettings[k].length && ps[k].every((v) => v === values[k])));
   check('NSO\'s value on every filament slot of each cooling key', badCool.length === 0, badCool.join(', '));
-  const changed = cool.filter((k) => tSettings[k][0] !== values[k]);
-  check('the overlay shows: ' + changed.map((k) => k + ' ' + tSettings[k][0] + ' -> ' + values[k]).join(', '),
-    changed.length > 0);
+  console.log('  (the template\'s filament against NSO\'s "' + profileId + '" cooling: ' +
+    (changed.length ? changed.map((k) => k + ' ' + tSettings[k][0] + ' -> ' + values[k]).join(', ') : 'already the same values, nothing changed') + ')');
   check('laid out as Studio writes it', psText === JSON.stringify(ps, null, 4) + '\n');
 
   /* ---------- 6. identify_id ---------- */
@@ -377,7 +430,7 @@ const hex8 = (n) => ('0000000' + (n >>> 0).toString(16)).slice(-8);
     fs.writeFileSync(path.join(badDir, 'template.json'), JSON.stringify(Object.assign({}, record, { studio_version: '02.09.00.01' })));
     let refused = null;
     try { await W.loadTemplate(badKey); } catch (e) { refused = e.message; }
-    check('a template whose tag differs from its record is refused', !!refused && /02\.08\.02\.61/.test(refused) && /02\.09\.00\.01/.test(refused), refused);
+    check('a template whose tag differs from its record is refused', !!refused && refused.includes(record.studio_version) && /02\.09\.00\.01/.test(refused), refused);
     const fell = await W.build3MF(Object.assign({}, opts, { objects: plate(), template: badKey }));
     check('and the export falls back to the geometry-only envelope, saying why',
       fell.envelope === 'nso' && /unavailable/.test(fell.templateError || '') &&
@@ -399,7 +452,7 @@ const hex8 = (n) => ('0000000' + (n >>> 0).toString(16)).slice(-8);
   const lv = [...legacy.get(W.PART_MODEL).toString('utf8').matchAll(/<object id="1"[\s\S]*?<\/object>/g)][0][0];
   const lvs = [...lv.matchAll(/<vertex x="([^"]*)" y="([^"]*)" z="([^"]*)"\/>/g)].map((m) => m.slice(1).map(Number));
   const t0 = items[0][3].split(' ').slice(9).map(Number);
-  const pv = [...E.get(objPart(1)).toString('utf8').matchAll(/<vertex x="([^"]*)" y="([^"]*)" z="([^"]*)"\/>/g)].map((m) => m.slice(1).map(Number));
+  const pv = [...meshOf(E, 1).matchAll(/<vertex x="([^"]*)" y="([^"]*)" z="([^"]*)"\/>/g)].map((m) => m.slice(1).map(Number));
   check('a piece without overrides is the same geometry the geometry-only envelope writes (to the 6 dp written)',
     lvs.length === pv.length && lvs.every((v, k) => v.every((x, a) => Math.abs(x - (pv[k][a] + t0[a])) < 1.5e-6)));
 

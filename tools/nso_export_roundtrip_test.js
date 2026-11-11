@@ -205,8 +205,21 @@ withApp(async (page, logs) => {
   // export-format moved into the top bar's Export dropdown; unfold it first.
   await page.evaluate(() => { const e = document.getElementById('export-format'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   await page.selectOption('#export-format', 'stl');
+  const defName = await page.evaluate(() => document.getElementById('export-plate-name').placeholder);
+  check('the Plate file name field shows the default as its placeholder (nest_<plate>_<n>pcs)', /^nest_.+_2pcs$/.test(defName), defName);
   files.plateSTL = await download(page, '#btn-export-stl', tmp);
   check('downloads a .stl', /\.stl$/i.test(files.plateSTL), path.basename(files.plateSTL));
+  check('...named the default when the field is empty', path.basename(files.plateSTL) === defName + '.stl', path.basename(files.plateSTL));
+  /* a name typed in the field names the plate export, STL and 3MF; a typed extension is the format's, and a character no
+     file name can hold becomes _ */
+  await page.fill('#export-plate-name', 'my plate: v2.3mf');
+  const named = await download(page, '#btn-export-stl', tmp, { prefix: 'named-' });
+  check('a typed name names the STL ("my plate: v2.3mf" -> my plate_ v2.stl)', path.basename(named) === 'named-my plate_ v2.stl', path.basename(named));
+  await page.selectOption('#export-format', '3mf');
+  const named3 = await download(page, '#btn-export-stl', tmp, { prefix: 'named-' });
+  check('...and the 3MF (my plate_ v2.3mf)', path.basename(named3) === 'named-my plate_ v2.3mf', path.basename(named3));
+  await page.fill('#export-plate-name', '');
+  await page.selectOption('#export-format', 'stl');
   let plateSTL = null;
   try { plateSTL = parseBinarySTL(fs.readFileSync(files.plateSTL)); } catch (e) { check('binary STL parses and its length matches the declared count', false, e.message); }
   if (plateSTL) {
