@@ -1207,7 +1207,7 @@ var NSO_SUPPORTS_CARD = (function () {
     var size = sz ? parseFloat(sz.value) : NaN;
     var one = $('sup-one'), it = $('sup-interface'), br = $('sup-brim'), rf = $('sup-raft'), sm = $('sup-small');
     return { brim: !br || !!br.checked, raft: !rf || !!rf.checked, style: style, sideMm: isFinite(size) ? size : null, rest: !!(rs && rs.checked), noHorns: !!(sm && sm.checked), knobs: S.mode === 'custom' ? knobsGiven() : null,
-      one: !one || !!one.checked, dense: !it || it.value !== 'open' };
+      one: !one || !!one.checked || !!(one.parentNode && one.parentNode.hidden), dense: !it || it.value !== 'open' };   /* hidden: always one-trunk */
   }
 
   /* THE PLANNER'S THREAD. planTree is one synchronous call that can run for
@@ -3301,6 +3301,9 @@ var NSO_SUPPORTS_CARD = (function () {
     menu.dataset.nsoWired = '1';
     menu.addEventListener('toggle', function () { if (menu.open) open(); else close(); });
     var on = function (id, ev, fn) { var e = $(id); if (e) e.addEventListener(ev, fn); };
+    /* the one-trunk box is hidden (the tree is always one-trunk in Auto): a browser restoring the card's form state after the card's controls moved
+       restored it unchecked, and Tree built the lattice's straight posts - 'unreachable 6', no tree (the owner's plate). It is set, not restored. */
+    var oneBox = $('sup-one'); if (oneBox) oneBox.checked = true;
     on('btn-sup-all', 'click', function () { generate(); });
     on('sup-style', 'change', function () { sync(); });                    /* None: Generate slices the plate alone */
     on('btn-sup-none', 'click', function () { removeAll(); });
