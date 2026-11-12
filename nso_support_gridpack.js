@@ -4878,6 +4878,7 @@
      interface and up to the shoulders). From the horn's top it leans out as before; from a knee it drops outside the overhangs' stacks (no part
      within HORN_TREE.shadowMm over it, HORN_TREE.shadowXyMm round), then joins a branch of the tree under it at no more than HORN_TREE.joinDeg -
      the highest join it reaches. Null when none is clear (the horn then stands its own column on the plate). */
+  var HORN_SLIDE = { stepsMm: [0.5, 0.75, 1, 1.25, 1.5, 2], headings: 16, roomMm: 0.55 };   /* a pocketed top slides out this far along its face to this much room */
   var HORN_TREE = { shadowMm: 2.2, shadowXyMm: 1.1, shadowRingsMm: [0.4, 0.75, 1.1], slopeMaxMm: 0.6, exemptMm: 2.2, joinDeg: 45, stepMm: 0.25, kneeStepMm: 0.5, kneeMaxMm: 1.5, dropStepMm: 0.5, shadowStepMm: 0.5, joinEndMm: 0.8, cands: 4, rV: 0.5, rJoin: 0.6, headings: 1 };
   /* THE COLUMN RULE'S SPOTS UNDER A PLATE (the owner's: "the interfaces also supported from below"; Bambu's Negative Sphere2 rim stands on five or
      six tips, ours on the detector's three). Every FILL.pitchMm round an area's spots (FILL.reachMm out), the part's underside straight over the
@@ -5120,6 +5121,33 @@
       }
     }
     if (bestT) return bestT;
+    /* A TOP IN A POCKET (the 2x supp_ref's ears: a tab over a post, the spot under it part on three sides half a mm off - every lean from there
+       ran into it, and three heads lost the horns Bambu stands about 1.5 mm out under the tab's open edge): the top slides along the face it
+       stands under, HORN_SLIDE.stepsMm on HORN_SLIDE.headings, to the nearest point with HORN_SLIDE.roomMm of clear round it, and leans from
+       there on every heading */
+    if (segs && segs.length) {
+      for (var si = 0; si < HORN_SLIDE.stepsMm.length && !bestT; si++) {
+        var dS = HORN_SLIDE.stepsMm[si];
+        for (var sh2 = 0; sh2 < HORN_SLIDE.headings; sh2++) {
+          var aS = 2 * Math.PI * sh2 / HORN_SLIDE.headings, sx = top[0] + Math.cos(aS) * dS, sy = top[1] + Math.sin(aS) * dS;
+          var hzS = kit.pr.down([sx, sy, b.p[2] + THIN_TIP_FACE_MM], 2 * THIN_TIP_FACE_MM);
+          if (hzS < 0) continue;                                            /* past the face's edge: nothing over it to hold */
+          var fzS = b.p[2] + THIN_TIP_FACE_MM - hzS;
+          if (Math.abs(fzS - b.p[2]) > THIN_TIP_FACE_MM) continue;
+          var topS = [sx, sy, fzS - GAP_MM], room = Infinity;
+          for (var hr = 0; hr < 16 && room >= HORN_SLIDE.roomMm; hr++) {
+            var ar = 2 * Math.PI * hr / 16, dr = kit.pr.leg(topS, [sx + Math.cos(ar) * HORN_SLIDE.roomMm, sy + Math.sin(ar) * HORN_SLIDE.roomMm, topS[2]], 0, 0, 0, 0);
+            if (dr >= 0) room = Math.min(room, dr);
+          }
+          if (room < HORN_SLIDE.roomMm) continue;
+          for (var hS = 0; hS < 8; hS++) {
+            var aL = 2 * Math.PI * hS / 8, hT2 = hornToTree(b, kit, topS, Math.cos(aL), Math.sin(aL), tanL, segs, mv + dS);
+            if (hT2 && (!bestT || hT2.lengthMm < bestT.lengthMm)) bestT = hT2;
+          }
+        }
+      }
+      if (bestT) return bestT;
+    }
     if (treeOnly) { HORN_WHY = 'no way into the tree'; return null; }   /* tree mode: no column of its own to the plate */
     for (var t = 0; t <= 4; t++) {
       for (var sg = t ? -1 : 1; sg <= 1; sg += 2) {
@@ -5154,7 +5182,7 @@
     var lost = {}, nLost = 0, p = null, chosen, covered, thinned, clusters, rounds, onPlate = [], plateZ1 = bc.detect && bc.detect.plateZ != null ? bc.detect.plateZ : 0, kit = null, stepHeld = [];
     /* under the column rule a step's spot is caught by a horn (hornColumn); spots within HORN_ONE_MM of one already caught share it */
     var HORN_ONE_MM = 1.5;
-    var HORN_COVER = { xyMm: 2.5, downMm: 1.5, upMm: 0.3 };   /* an overhang's spot this near (in plan: the spots' grid and its interface's reach) and this far under the step's (or a hair over) */
+    var HORN_COVER = { xyMm: 4.1, downMm: 1.5, upMm: 0.3 };   /* 4.1: the 2x Oblique's steps 2.8 and 4.05 off a slope's spot sit in its stack (Bambu's interface there, no horn) */   /* an overhang's spot this near (in plan: the spots' grid and its interface's reach) and this far under the step's (or a hair over) */
     /* the tree a horn (or a branch to a spot no leg reached) may join: the crowns' branches and trunks, and the legs to the tips under their
        straight columns (which stand in the stacks), sampled every half mm */
     function treeSegsOf() {
