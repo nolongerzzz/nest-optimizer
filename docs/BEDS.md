@@ -24,6 +24,13 @@ overlaps will land (a later ticket). Queueing and any all-plates behaviour are n
 - **Everything acts on the active bed** - the Pieces card, Select, Clone, Delete, Lift, Cut, Join / Connect, Crop,
   Foam, Fill, Thicken, Extend, Bridge, Close, Patch, Hollow, Optimize, Import placement, Supports, Slice, Export,
   Measure, Undo / Redo, Clear plate. Export and Slice write the active bed only.
+- **Preview goes to G-scope's plate of the same number** (2026-11-12, the owner: "allow multi plate preview, since we
+  have up to 6 plates"). With more than one bed, bed N's Preview (Supports > Preview, the Slice card's Preview) opens
+  its slice on G-scope's plate N; the other G-scope plates keep what they hold, so two beds' support runs stand side by
+  side in G-scope and Compare takes plates 1 and 2. One bed: the active G-scope plate, as ever. `NSO_Print`'s
+  `previewInGscope` passes `{ plate: NSO_BEDS.activeNumber() }` to `NSO_MICROSCOPE.openFile` / `openSlice`. The
+  Slice card still keeps one slice - the active bed's; a bed's slice once previewed lives on in its G-scope plate.
+  See docs/GSCOPE.md item 1. Gate: `gscope:bed-plates`.
 - **Delete plate** (right-click menu, under Clear plate): removes the active bed and its pieces - the wipe Clear plate
   does, for this bed only. No Undo. Disabled with one bed. The beds after it move up one number; the next bed becomes
   active (the previous one when the last was deleted).

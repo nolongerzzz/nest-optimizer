@@ -851,7 +851,11 @@
     if (menu) menu.open = false;
     // a copy: G-scope reads the bytes, and the card keeps its file for Export
     var rec = { name: f.name, bytes: f.bytes, pieces: S.pieces, labels: S.result.labels || [], profile: S.profile, settings: S.settings || null };
-    var opened = (asSlice ? MS.openSlice : MS.openFile)(f.name, f.bytes.slice().buffer);
+    /* MULTI-PLATE PREVIEW (the owner: "allow multi plate preview, since we have up to 6 plates"): with more than one bed, bed N's slice
+       lands on G-scope's plate N, so plate 1's preview stays when plate 2's opens - two support runs side by side, ready for Compare.
+       One bed: the active G-scope plate, as ever. */
+    var B = root.NSO_BEDS, where = B && B.count && B.count() > 1 ? { plate: B.activeNumber() } : undefined;
+    var opened = (asSlice ? MS.openSlice : MS.openFile)(f.name, f.bytes.slice().buffer, where);
     // G-scope's Export card then offers this slice (exportSlice): the document carries what it was made from
     if (opened && opened.then) opened.then(function (d) {
       if (!d) return;

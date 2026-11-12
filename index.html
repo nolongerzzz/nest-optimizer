@@ -2551,20 +2551,20 @@
             <p class="ms-note" id="ms-band-read">&mdash;</p>
           </div>
           <!-- COMPARE, both sides. What is isolated on plate 1 and on plate 2 (a piece with its supports, a line type, a layer band)
-               set down together on plate 3 - side by side - then overlaid in two colours and nudged. Plates 1 and 2 are not touched. Shown only while both plates hold something; folded until opened. -->
+               set down together on the Compare plate - side by side - then overlaid in two colours and nudged. Plates 1 and 2 are not touched. Shown only while both plates hold something; folded until opened. -->
           <div id="ms-compare-row" class="ms-row" data-on="normal slice" style="display:none;">
             <button id="ms-compare-toggle" type="button" class="ms-disclose" aria-expanded="false" aria-controls="ms-compare-body"
-                    title="Set the plates, or a piece from each, side by side on plate 3, then overlay it">Compare</button>
+                    title="Set the plates, or a piece from each, side by side on the Compare plate, then overlay it">Compare</button>
             <div id="ms-compare-body" hidden>
             <div class="ms-btn-row">
               <button id="ms-compare-plates" type="button" disabled
-                      title="Set plate 1 and plate 2, whole, down together on plate 3, side by side">Plates</button>
+                      title="Set plate 1 and plate 2, whole, down together on the Compare plate, side by side">Plates</button>
               <button id="ms-compare-pieces" type="button" disabled aria-pressed="false"
-                      title="Click a piece on plate 1, then a piece on plate 2: both are set down on plate 3, side by side">Pieces</button>
+                      title="Click a piece on plate 1, then a piece on plate 2: both are set down on the Compare plate, side by side">Pieces</button>
               <button id="ms-compare-lasso" type="button" disabled aria-pressed="false"
-                      title="Draw a loop round a piece on plate 1, then on plate 2 - any shape, it closes when you let go: everything inside it, every layer and line type, is set down on plate 3, side by side">Lasso</button>
+                      title="Draw a loop round a piece on plate 1, then on plate 2 - any shape, it closes when you let go: everything inside it, every layer and line type, is set down on the Compare plate, side by side">Lasso</button>
               <button id="ms-compare-start" type="button" disabled
-                      title="Set what is selected on plate 1 and what is selected on plate 2 (a piece, a line type, a layer band) down together on plate 3, side by side">Selected</button>
+                      title="Set what is selected on plate 1 and what is selected on plate 2 (a piece, a line type, a layer band) down together on the Compare plate, side by side">Selected</button>
             </div>
             <div class="ms-btn-row">
               <button id="ms-compare-overlay" type="button" disabled
@@ -2576,7 +2576,7 @@
               <button id="ms-compare-tint" type="button" class="active" aria-pressed="true" disabled
                       title="Plate 1's piece orange, plate 2's blue; off, each in its own line-type colours">Colours</button>
               <button id="ms-compare-restore" type="button" disabled
-                      title="Take plate 3 away: plates 1 and 2 are as they were">Clear compare</button>
+                      title="Take the Compare plate away: plates 1 and 2 are as they were">Clear compare</button>
             </div>
             <div class="ms-btn-row ms-nudge">
               <button id="ms-compare-nx-" type="button" disabled title="Move the blue piece left">&larr;</button>
@@ -2598,7 +2598,7 @@
               <button id="ms-compare-diff-fold" type="button" disabled aria-expanded="true" aria-controls="ms-compare-results"
                       title="Fold the measurement away (the tables and the worst layers) so the rest of the panel - Features, the layer sliders - is in reach while you compare; the numbers are kept">Hide</button>
               <button id="ms-compare-stacks" type="button" disabled aria-pressed="false"
-                      title="Pull the pair's interface layers apart and lay them next to each other on plate 3 - ours in a row at the back, the reference in front, layer by layer - to see the stack's layers, not the stack. Only a view: no Measure, no Overlay. Press again to join them back">Split stack</button>
+                      title="Pull the pair's interface layers apart and lay them next to each other on the Compare plate - ours in a row at the back, the reference in front, layer by layer - to see the stack's layers, not the stack. Only a view: no Measure, no Overlay. Press again to join them back">Split stack</button>
             </div>
             <div id="ms-compare-results">
             <div id="ms-compare-worst" class="ms-btn-row" data-flex="1"></div>
@@ -3119,7 +3119,7 @@
        row each under the Flange row. Pure. docs/GSCOPE-FEATURES.md. -->
   <script src="nso_face_features.js?v=53ee4b23"></script>
   <script src="nso_gscope_measure.js?v=c5595269"></script>
-  <script src="app-microscope.js?v=5ebee548"></script>
+  <script src="app-microscope.js?v=3f8d8ad7"></script>
   <!-- Detach / Reattach (Cut menu): cap a detected flange's hull on its own
        wall, lift the flange out as a piece, seat it elsewhere with Attach's
        seat. After nso_flange.js, app-crop.js, nso_assemble.js, app-assemble.js
@@ -3147,7 +3147,7 @@
        plate reader and G-code import it calls. See docs/PRINT-PLANNER.md. -->
   <script src="nso-print-planner.js?v=705c5279"></script>
   <script src="nso-gcode3mf-write.js?v=cdfa15b4"></script>
-  <script src="app-print.js?v=996a2f34"></script>
+  <script src="app-print.js?v=cc10b6dc"></script>
   <!-- Lift: details off a face, the face left as it was round them. After
        nso_lift.js (Phase 1: a flat face), nso_lift_curved.js (Lift 3: the
        repair under a detail lifted off a curved base), nso_lift_auto.js
