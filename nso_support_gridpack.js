@@ -182,7 +182,8 @@
   var LATTICE_MM = 5;          /* L. Node pitch L/2 in x, y and z. */
   var AREA_CAP = 4;
   var MAX_MERGE = 3;           /* members meeting at one node: pairwise, or three when one stands in the way */            /* a merged section tops out at 4 x the strut area (FLAG) */
-  var CLEAR_MM = 0.2;          /* rails are tested this far outside the section */
+  var CLEAR_MM = 0.2;
+  var CROWN_EDGE_CLEAR_MM = 0.45;   /* a tree's branch under the column rule: the slicer's xy distance (0.35) and a hair (crownPlan edgeClear) */          /* rails are tested this far outside the section */
   var STEER_HEADINGS = 16;
   var STEER_STEP_MM = 5;       /* a leaning route is tried leaning this much further down at a time (twice the node lattice's z step, L/2: the test is a gate, not a planner) */
   var STEER_LEANS = [1, 0.5];
@@ -253,7 +254,7 @@
   var CROWN_TRUNK_SINK_MM = 1;       /* ...the trunk stops this far under its top, inside the smooth body's shoulder */
   var CROWN_BLOB_TWIG_CELLS = 1.7;    /* ...and never coarser than a twig's radius over this (a twig two cells across or more) */
   var CROWN_BLOB_TRIS = 24000;        /* ...and no body is meshed finer than this many triangles allow */
-  var BLOB_REPAIR_TRIES = 20;         /* ...its pinched edges opened this many times before the body is given up for the plain build (8: two of the mouse's trees, at the twig's grid) */
+  var BLOB_REPAIR_TRIES = 20;         /* ...its pinched edges filled this many times before the body is given up for the plain build (8: two of the mouse's trees, at the twig's grid) */
   var CROWN_BLEND_MM = 0.25;          /* the branches of a crown flow into one another and into the trunk: the smooth union's blend (crown.blendMm) */
   var CROWN_BLOB_CELL_MM = 0.25;      /* ...meshed on a grid this fine (crown.blobCellMm) */
   var CROWN_TUBE_SIDES = 20;        /* a branch is a round tube of this many sides... */
@@ -1178,6 +1179,12 @@
          the lean limit (tiltDeg) - its join stands lower, or its end meets the trunk lower, where it is going. A stair's own tree (_stairTree) holds
          the lean limit throughout. The legs between the two are as the plan has always made them (the marked over-lean members). */
       var tanLim = Math.tan(tiltDeg * Math.PI / 180), tanHard = opts._stairTree ? tanLim : Math.tan(Math.max(tiltDeg, CK.leanHardDeg) * Math.PI / 180);
+      /* A BRANCH KEEPS THE SLICER'S DISTANCE FROM THE PART (the owner's 2x Negative Sphere and Base: a branch broken mid path, carried on past the
+         break). The slicer cuts the tree back supportXyMm (0.35) from the part's section on every layer it shares with it; a branch tested at the
+         probe's 0.2 grazed a stem and lost its middle. Under the column rule a branch is tested at that distance and a bead more, and a tip's leg as
+         wide as it is drawn (Bambu's law: the branch diameter, not the strut's square) */
+      var edgeClear = opts.columnRule ? CROWN_EDGE_CLEAR_MM : CLEAR_MM;
+      var leafSide = CK.bambuLaw && CK.trunk && CK.trunk.tipMm ? Math.max(s0, CK.trunk.tipMm / 2 * Math.SQRT2) : s0;
       var thProbes = null;
       function probesTH() {
         if (!thProbes) thProbes = TH && typeof TH.prepare === 'function' ? obstacles.filter(function (sp) { return sp && sp.length >= 9; }).map(function (sp) { return probeOf(TH, sp); }).filter(Boolean) : [];
@@ -1344,7 +1351,7 @@
               var z = zAt(lat), at = [lat[0], lat[1], z];
               for (var ki = 0; ki < n.kids.length; ki++) {
                 var c = nodes[n.kids[ki]];
-                if (probe.leg(P[c.id], at, c.leaf ? s0 : rTipOf(c.tips.length) * Math.SQRT2, c.leaf ? s0 : 0, 0) >= 0) return null;
+                if (probe.leg(P[c.id], at, c.leaf ? leafSide : rTipOf(c.tips.length) * Math.SQRT2, c.leaf ? s0 : 0, 0, edgeClear) >= 0) return null;
               }
               return z;
             }
@@ -1483,10 +1490,10 @@
           var par = nodes[n.parent], t = n.leaf ? list[n.tips[0]] : null;
           var from = sol.P[n.id], to = par.root ? sol.S[n.id] : sol.P[par.id];
           var rB = sol.rBot[n.id];
-          edges.push({ n: n, from: from, to: to, mid: null, side: n.leaf ? s0 : rB * Math.SQRT2, capA: n.leaf ? s0 : 0, tip: t });
+          edges.push({ n: n, from: from, to: to, mid: null, side: n.leaf ? leafSide : rB * Math.SQRT2, capA: n.leaf ? s0 : 0, tip: t });
         });
         edges.forEach(function (e) {
-          if (probe.leg(e.from, e.to, e.side, e.capA, 0) < 0) return;
+          if (probe.leg(e.from, e.to, e.side, e.capA, 0, edgeClear) < 0) return;
           var mid = [(e.from[0] + e.to[0]) / 2, (e.from[1] + e.to[1]) / 2, (e.from[2] + e.to[2]) / 2], W = null, span = e.from[2] - e.to[2];
           /* one bend: out from the middle of the branch, up to 16 mm, at a few heights between its ends, 32 ways round */
           for (var ring = 1; ring <= 16 && !W; ring = ring < 4 ? ring + 1 : ring < 8 ? ring + 2 : ring + 4) {
@@ -1495,7 +1502,7 @@
                 beat();
                 var tt = 2 * Math.PI * h4 / (2 * STEER_HEADINGS), cand = [mid[0] + ring * Math.cos(tt), mid[1] + ring * Math.sin(tt), mid[2] + [0, 0.25, -0.25][fz] * span];
                 if (cand[2] >= e.from[2] - 0.5 || cand[2] <= e.to[2] + 0.5) continue;
-                if (probe.leg(e.from, cand, e.side, e.capA, 0) < 0 && probe.leg(cand, e.to, e.side, 0, 0) < 0) W = cand;
+                if (probe.leg(e.from, cand, e.side, e.capA, 0, edgeClear) < 0 && probe.leg(cand, e.to, e.side, 0, 0, edgeClear) < 0) W = cand;
               }
             }
           }
@@ -2218,12 +2225,14 @@
     for (var attempt = 0; attempt < BLOB_REPAIR_TRIES; attempt++) {
       bads = extract();
       if (!bads.length) break;
+      /* a pinched edge is FILLED: the outside corners of its cells taken in (a hair of body more), never the inside ones put out - opening a pinch on a
+         twig three or four cells across cut it through (the owner's 2x Negative Sphere: a branch with a slit across its middle, carried on past it) */
       bads.forEach(function (vs) {
         vs.forEach(function (vi) {
           var cc = vcell[vi];
           for (var q = 0; q < 8; q++) {
             var ni = (cc[2] + ((q >> 2) & 1)) * ny * nx + (cc[1] + ((q >> 1) & 1)) * nx + cc[0] + (q & 1);
-            if (F[ni] < 0) F[ni] = 0.002;
+            if (F[ni] >= 0) F[ni] = -0.002;
           }
         });
       });

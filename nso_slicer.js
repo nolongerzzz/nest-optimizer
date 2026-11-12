@@ -1730,6 +1730,11 @@
         }
       };
       var colRule = function (P) { if (P.role === 'support' && o.supportInterfaceRule === 'column') columnRule(g, P, perObject, planes, o); };
+      /* claims (columnRule: one stack, one owner) in the pass whose sections print: the shared grid's when the supports keep it, else the own grids'
+         below - the shared pass then finds each support's tops with the whole stack over it, so every support's grid runs up to the stack (with the
+         claims there, the second support's grid stopped under its tips and the stack laid on another grid: 140 layers more, a gap under the sheet) */
+      var ownPass = o.supportLayerMaxMm > 0 && perObject.some(function (P) { return P.role === 'support'; });
+      perObject._colClaim = ownPass ? null : [];
       perObject.forEach(function (P) { colRule(P); buildLayers(P); });
 
       /* THE SUPPORT'S OWN LAYERS (o.supportLayerMaxMm; Bambu's independent_support_layer_height). A support is not cut on the part's 0.2 grid: its layers run
@@ -1739,12 +1744,15 @@
       var ownGrids = false;
       if (o.supportLayerMaxMm > 0 && perObject.some(function (P) { return P.role === 'support'; })) {
         typeSupports(g, perObject, planes, o, minOver);
+        perObject._colClaim = [];
         perObject.forEach(function (P, k) {
           if (P.role !== 'support') return;
           var own = supportGrid(P, planes, o.supportLayerMaxMm, shiftZ);
           if (!own) return;
           var P2 = makeP(objs[k], k, own);
+          var claims = perObject._colClaim;
           perObject[k] = P2;
+          perObject._colClaim = claims;
           colRule(P2);
           buildLayers(P2);
           ownGrids = true;
@@ -2480,6 +2488,20 @@
       Ii = layable(Ii); Ti = layable(Ti);
       var Di = deep[i5] ? (Ii || Ti ? g.diff(deep[i5], Ii && Ti ? g.union(Ii, Ti) : Ii || Ti) : deep[i5]) : null;
       if (Di && g.isEmpty(Di)) Di = null;
+      /* ONE STACK, ONE OWNER (the owner's mouse: 16 supports under one part each laid the whole interface and transition under it - 8.8 x Bambu's
+         lines on the same plates, 55 g of interface against 6; the 2x Oblique's two supports laid two stacks, one's transition over the other's
+         interface). A support lays only what no support before it in this slice has laid at a height its layer meets (perObject._colClaim), and its
+         own section stops under what another's stack holds: the stack is printed once, by the first support that lays it */
+      var claimZt = SP[i5].printZ, claimZb = claimZt - SP[i5].h, Cl = null;
+      if (perObject._colClaim && perObject._colClaim.length) {
+        var cl = perObject._colClaim.filter(function (c) { return Math.min(c.zt, claimZt) - Math.max(c.zb, claimZb) > 1e-6; }).map(function (c) { return c.region; });
+        Cl = cl.length ? (cl.length > 1 ? g.unionAll(cl) : cl[0]) : null;
+      }
+      if (Cl) {
+        var less = function (cs) { if (!cs) return null; var r = g.diff(cs, Cl); r = g.isEmpty(r) ? null : g.dropSmall(r, COLUMN_MIN_MM2); return r && !g.isEmpty(r) ? r : null; };
+        Ii = less(Ii); Ti = less(Ti); Di = less(Di);
+        if (base && !g.isEmpty(base)) base = g.diff(base, Cl);
+      }
       if (i5 > 0 && Di) {
         var keepD = g.parts(Di).filter(function (pc) { return !g.isEmpty(P.S[i5 - 1]) && g.area(g.inter(pc, P.S[i5 - 1])) > COLUMN_MIN_MM2; });
         Di = keepD.length ? g.unionAll(keepD) : null;
@@ -2502,6 +2524,10 @@
       if (Ti) parts2.push(Ti);
       if (Di) parts2.push(Di);
       P.S[i5] = parts2.length ? g.unionAll(parts2) : (base || S);
+      if (perObject._colClaim) {
+        var mine = [Ii, Ti, Di].filter(function (cs) { return cs && !g.isEmpty(cs); });
+        if (mine.length) perObject._colClaim.push({ zb: claimZb, zt: claimZt, region: mine.length > 1 ? g.unionAll(mine) : mine[0] });
+      }
     }
     /* THE CUP (the owner's: "the interfaces supported from below, within bridge tolerances"; Bambu's dome supports flare up to the plate's edge).
        Where a stack's lowest layer reaches further than COLUMN_CUP_REACH_MM past the tree under it, a ring wall (COLUMN_CUP_RING_MM wide) stands
