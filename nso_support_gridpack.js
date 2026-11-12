@@ -4670,6 +4670,7 @@
      nearer Bambu's count, but thinned the small heads' trees: supp_ref's Oblique trunk stepped in from 5.5 to 4 mm over its foot (a wall over
      air), and the gate failed */
   var COLUMN_TIP_COVER = 0.44;
+  var COLUMN_TIP_COVER_WIDE = 1.0, COLUMN_WIDE_SPOTS = 300;   /* ...and an area of this many spots or more, the branch distance itself (below) */
   var RUN_ON_FLOOR_MM = 0.3;     /* a member's run-on into the one it joins stops this far over the plate */
   var TREE_KNOBS = { branchDistanceMm: 5, branchDiameterMm: 2, branchAngleDeg: 45, branchDiameterAngleDeg: 5, tipDiameterMm: 0.8 };
   function columnCrownOf(tk) {
@@ -5129,7 +5130,7 @@
     var CCK = columnCrownOf(opts.treeKnobs), CC = CCK.cc;
     if (opts.columnRule && opts.treeKnobs) {
       /* branch distance: tips about that far apart (the cover is the spots' reach to their tip: 5 mm -> 2.2, the column rule's own) */
-      ck.coverMm = COLUMN_TIP_COVER * CCK.k.branchDistanceMm; ck.tiltDeg = +CCK.k.branchAngleDeg;
+      ck.coverMm = COLUMN_TIP_COVER * CCK.k.branchDistanceMm; ck.coverWideMm = COLUMN_TIP_COVER_WIDE * CCK.k.branchDistanceMm; ck.tiltDeg = +CCK.k.branchAngleDeg;
     }
     ck.crown = Object.assign({}, ONE.crown, (opts.oneTrunk && opts.oneTrunk.crown) || {});
     var byArea = {}, order = [];
@@ -5239,7 +5240,10 @@
       order.forEach(function (k) {
         var pool = byArea[k].filter(function (b) { return !lost[b.id]; });
         if (!pool.length) return;
-        var pick = thinTips(pool, ck.coverMm, Math.min(ck.minTips, pool.length)), isTip = {}, mine = [];
+        /* a big hanging area thins its tips to the branch distance itself (COLUMN_TIP_COVER_WIDE): the owner's mouse, one area of 1800 spots, stood
+           385 tips a mm and a half under it where Bambu stands 194; a small head keeps the close cover its trunk was tuned on (the gate's heads) */
+        var cov = ck.coverWideMm && pool.length >= COLUMN_WIDE_SPOTS ? ck.coverWideMm : ck.coverMm;
+        var pick = thinTips(pool, cov, Math.min(ck.minTips, pool.length)), isTip = {}, mine = [];
         pick.forEach(function (i) { isTip[i] = true; mine.push(pool[i]); });
         pool.forEach(function (b, i) {
           if (isTip[i]) return;
