@@ -4300,6 +4300,7 @@ var NSO_MICROSCOPE = (function () {
     syncZRangeUI();
     syncTakeBand();
     syncRenderRow();
+    syncFilament();
   }
   /**
    * The top handle moved inside its layer: the whole layers below are as built, so
@@ -6362,9 +6363,67 @@ var NSO_MICROSCOPE = (function () {
     return false;
   }
 
+  /* THE FILAMENT READOUT (the owner: "a side by side filament readout in the top centre box, whatever the comparison is"). While the
+     Compare plate holds two sliced pieces - two plates, two pieces, two lassos, two selections - the head box grows a table under its file
+     line: each piece's filament (metres and grams) over the moves it shows - the Features list's checked line types and the slider's band -
+     in total and line type by line type, and how much more or less the orange one takes than the blue. Grams at FIL_DENSITY (PLA's 1.24) of
+     a FIL_DIAMETER_MM filament: the moves carry their filament length (E), the rest is arithmetic. */
+  var FIL_DIAMETER_MM = 1.75, FIL_DENSITY = 1.24, filCache = null;
+  function filamentOf(moves, band) {
+    var by = {}, tot = 0;
+    for (var i = 0; i < moves.length; i++) {
+      var m = moves[i];
+      if (!(m.e > 0) || FEATURE_OFF.has(m.feature)) continue;
+      if (band && (m.z < band[0] - 1e-6 || m.z > band[1] + 1e-6)) continue;
+      by[m.feature] = (by[m.feature] || 0) + m.e;
+      tot += m.e;
+    }
+    return { tot: tot, by: by };
+  }
+  /** { a, b: { name, tot, by: { feature: filament mm } }, band, names: [features] } of the Compare plate's two pieces as shown, or null. */
+  function compareFilament() {
+    if (!compareLive() || !compare.a.moves || !compare.b.moves || !compare.a.moves.length || !compare.b.moves.length) return null;
+    var band = zRangeFull() ? null : zBandMm(), key = [compare.a.moves.length, compare.b.moves.length, featureSig(), band ? band.join(':') : 'all'].join('/');
+    if (filCache && filCache.key === key && filCache.a === compare.a && filCache.b === compare.b) return filCache.out;
+    var A = filamentOf(compare.a.moves, band), B = filamentOf(compare.b.moves, band), seen = {};
+    Object.keys(A.by).concat(Object.keys(B.by)).forEach(function (f) { seen[f] = true; });
+    var out = { a: Object.assign({ name: compare.a.name }, A), b: Object.assign({ name: compare.b.name }, B), band: band, names: Object.keys(seen).sort(function (x, y) { return ((B.by[y] || 0) + (A.by[y] || 0)) - ((B.by[x] || 0) + (A.by[x] || 0)); }) };
+    filCache = { key: key, a: compare.a, b: compare.b, out: out };
+    return out;
+  }
+  function filGrams(mm) { return mm * Math.PI * (FIL_DIAMETER_MM / 2) * (FIL_DIAMETER_MM / 2) / 1000 * FIL_DENSITY; }
+  function filWords(mm) { return (mm / 1000).toFixed(mm < 10000 ? 2 : 1) + ' m · ' + filGrams(mm).toFixed(filGrams(mm) < 10 ? 2 : 1) + ' g'; }
+  function filDelta(a, b) {
+    if (!(b > 0)) return a > 0 ? 'only orange' : '';
+    if (!(a > 0)) return 'only blue';
+    var d = (a - b) / b * 100;
+    if (Math.abs(d) < 0.05) return 'same';
+    return (d > 0 ? '+' : '') + d.toFixed(Math.abs(d) < 10 ? 1 : 0) + ' %';
+  }
+  function syncFilament() {
+    var box = $('ms-head-fil'), head = $('ms-head');
+    if (!box) return;
+    var r = compareFilament();
+    box.hidden = !r;
+    if (head) head.classList.toggle('has-fil', !!r);
+    if (!r) { box.innerHTML = ''; return; }
+    var esc = function (t) { return String(t).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); };
+    var short = function (n) { return String(n).replace(/^Plate \d+: /, ''); };
+    var sw = function (c) { return '<i class="ms-fil-sw" style="background:#' + ('000000' + c.toString(16)).slice(-6) + '"></i>'; };
+    var row = function (label, a, b, cls) { return '<tr' + (cls ? ' class="' + cls + '"' : '') + '><th>' + esc(label) + '</th><td>' + (a > 0 ? filWords(a) : '-') + '</td><td>' + (b > 0 ? filWords(b) : '-') + '</td><td class="ms-fil-d">' + filDelta(a, b) + '</td></tr>'; };
+    var h = '<table class="ms-fil"><thead><tr><th>Filament' + (r.band ? ' <span class="ms-fil-band">z ' + r.band[0].toFixed(2) + ' - ' + r.band[1].toFixed(2) + '</span>' : '') + '</th>' +
+      '<th title="' + esc(r.a.name) + '">' + sw(TINT_A) + esc(short(r.a.name)) + '</th><th title="' + esc(r.b.name) + '">' + sw(TINT_B) + esc(short(r.b.name)) + '</th><th>orange vs blue</th></tr></thead><tbody>';
+    h += row('Shown', r.a.tot, r.b.tot, 'ms-fil-tot');
+    if (r.names.length > 1) r.names.forEach(function (f) { h += row(f, r.a.by[f] || 0, r.b.by[f] || 0); });
+    h += '</tbody></table>';
+    box.innerHTML = h;
+    box.title = 'The line types checked in the Features list' + (r.band ? ', inside the slider\'s band' : '') + '. Grams at ' + FIL_DENSITY + ' g/cm3, a ' + FIL_DIAMETER_MM + ' mm filament.';
+  }
+
   /** The compare row's buttons and its readout. */
   function syncCompare() {
     gapRefresh();
+    syncFilament();
     var live = compareLive(), why = compareReason();
     var row = $('ms-compare-row'), body = $('ms-compare-body'), tg = $('ms-compare-toggle');
     if (row) row.style.display = live || (plateDoc('lens') && plateDoc('take')) ? '' : 'none';
@@ -7478,6 +7537,8 @@ var NSO_MICROSCOPE = (function () {
     compareSideBySide: compareSideBySide,
     compareNudge: compareNudge,
     compareFrame: compareFrame,
+    /** The Compare plate's filament, side by side, as the head box shows it: { a, b: { name, tot, by }, band, names } (filament mm), or null. */
+    compareFilament: function () { var r = compareFilament(); return r ? JSON.parse(JSON.stringify(r)) : null; },
     compareTint: compareTint,
     compareClear: compareClear,
     compareDiff: compareDiff,

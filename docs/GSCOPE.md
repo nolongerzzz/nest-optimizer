@@ -643,6 +643,13 @@ and moved afterwards, as a plate's pieces are.
 
 ## 13. Compare plates: side by side, then overlaid, then measured
 
+**Filament, side by side** (the owner: "a side by side filament readout in the top centre box, whatever the comparison may be"). While the
+Compare plate holds two sliced pieces - Plates, Pieces, Lasso or Selected - the head box deepens: under its file line, a table of each
+piece's filament (metres and grams) over what is shown - the line types checked in the Features list and, when the slider holds a band,
+that band - in total and line type by line type, with how much more or less the orange piece takes than the blue. It is each move's own
+E summed (no estimate); grams at 1.24 g/cm3 of a 1.75 mm filament. `NSO_MICROSCOPE.compareFilament()` returns the same numbers.
+Gate: `gscope:compare`.
+
 **What the user sees.** With a file on each plate, the card shows a folded row, *Compare plates*, with four
 ways in, each one click or two. **Plates** sets both whole plates down side by side on a **third plate**
 (Compare) - nothing to isolate, no region box to drag. **Pieces** asks for a click on a piece on plate 1, then

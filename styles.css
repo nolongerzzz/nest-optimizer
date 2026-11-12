@@ -3626,6 +3626,18 @@ select:focus, input:focus {
 }
 .ms-head-row { display: contents; }
 .ms-head-row h1 { margin: 0; flex: 0 0 auto; }
+/* Compare's filament readout: the box deepens - its file line on top, the table on its own row under it */
+#ms-head.has-fil { flex-wrap: wrap; row-gap: 4px; }
+#ms-head .ms-head-fil { flex: 1 0 100%; min-width: 0; }
+.ms-fil { width: 100%; border-collapse: collapse; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.ms-fil th, .ms-fil td { padding: 1px 6px; text-align: right; white-space: nowrap; }
+.ms-fil th:first-child { text-align: left; font-weight: 500; color: var(--muted, #9aa4b2); }
+.ms-fil thead th { font-weight: 600; max-width: 180px; overflow: hidden; text-overflow: ellipsis; border-bottom: 1px solid var(--border); }
+.ms-fil thead th:first-child { color: inherit; }
+.ms-fil-tot td, .ms-fil-tot th { font-weight: 600; color: inherit; }
+.ms-fil-d { color: var(--muted, #9aa4b2); }
+.ms-fil-band { font-weight: 400; color: var(--muted, #9aa4b2); margin-left: 4px; }
+.ms-fil-sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
 #ms-head .ms-sub {
   flex: 1 1 0;
   min-width: 0;

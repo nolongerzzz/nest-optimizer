@@ -181,6 +181,7 @@
     "gscope:compare-island": {"weight":191000,"note":"112 s locally x 1.7, rounded up (supp_ref_2x is 360k lines on plate 2)"},
     "gscope:compare-heads": {"weight":152000,"note":"89 s locally x 1.7, rounded up (Generate for plate + Slice / Preview of supp_ref)"},
     "gscope:close-keep": {"weight":12000,"note":"7 s locally x 1.7, rounded up"},
+    "gscope:bed-plates": {"weight":9000,"note":"5.1 s locally x 1.7, rounded up"},
     "gscope:native-menu": {"weight":6000,"note":"3 s locally x 1.7, rounded up"},
     "compare:diff": {"weight":1000,"note":"node only, synthetic moves"},
     "gscope:select": {"weight":94050,"note":""},

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=0bd87686" />
+  <link rel="stylesheet" href="styles.css?v=7620467b" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -2460,6 +2460,8 @@
           <div id="ms-mode-badge">Whole part</div>
         </div>
         <p class="ms-sub" id="ms-sub">The plate, or an STL, a 3MF or a sliced .gcode.3mf.</p>
+        <!-- Compare's filament, side by side (app-microscope.js syncFilament): shown while the Compare plate holds two sliced pieces -->
+        <div id="ms-head-fil" class="ms-head-fil" hidden></div>
       </div>
 
       <!-- The top-right corner: Back (only when the document's producer gave
@@ -3119,7 +3121,7 @@
        row each under the Flange row. Pure. docs/GSCOPE-FEATURES.md. -->
   <script src="nso_face_features.js?v=53ee4b23"></script>
   <script src="nso_gscope_measure.js?v=c5595269"></script>
-  <script src="app-microscope.js?v=3f8d8ad7"></script>
+  <script src="app-microscope.js?v=5599be8d"></script>
   <!-- Detach / Reattach (Cut menu): cap a detected flange's hull on its own
        wall, lift the flange out as a piece, seat it elsewhere with Attach's
        seat. After nso_flange.js, app-crop.js, nso_assemble.js, app-assemble.js
