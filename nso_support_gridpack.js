@@ -251,7 +251,9 @@
   var CROWN_BRANCH_TAPER_DEG = 0;   /* between two joins a Bambu branch holds its width (its 30-layer stretches measure -0.5 to -1.0 deg); only the trunk widens, at JOINS.taperDeg and over the law */
   var CROWN_STUB_SIDES = 20;          /* a crown tip's round stub: sides */
   var CROWN_TRUNK_SINK_MM = 1;       /* ...the trunk stops this far under its top, inside the smooth body's shoulder */
+  var CROWN_BLOB_TWIG_CELLS = 1.7;    /* ...and never coarser than a twig's radius over this (a twig two cells across or more) */
   var CROWN_BLOB_TRIS = 24000;        /* ...and no body is meshed finer than this many triangles allow */
+  var BLOB_REPAIR_TRIES = 20;         /* ...its pinched edges opened this many times before the body is given up for the plain build (8: two of the mouse's trees, at the twig's grid) */
   var CROWN_BLEND_MM = 0.25;          /* the branches of a crown flow into one another and into the trunk: the smooth union's blend (crown.blendMm) */
   var CROWN_BLOB_CELL_MM = 0.25;      /* ...meshed on a grid this fine (crown.blobCellMm) */
   var CROWN_TUBE_SIDES = 20;        /* a branch is a round tube of this many sides... */
@@ -273,7 +275,7 @@
     return {
       nudgeTips: o.nudgeTips == null ? true : !!o.nudgeTips, nudgeMarginMm: pick(o.nudgeMarginMm, 0), maxKids: Math.max(2, Math.round(pick(o.maxKids, CROWN_MAX_KIDS))), areaRatio: pick(o.areaRatio, CROWN_AREA_RATIO), tipDropMm: pick(o.tipDropMm, CROWN_TIP_DROP_MM), nodeDropMm: pick(o.nodeDropMm, CROWN_NODE_DROP_MM),
       ovalMax: pick(o.ovalMax, CROWN_OVAL_MAX), branchTaperDeg: pick(o.branchTaperDeg, CROWN_BRANCH_TAPER_DEG), rootFloorMm: pick(o.rootFloorMm, CROWN_ROOT_FLOOR_MM), leanHardDeg: pick(o.leanHardDeg, CROWN_LEAN_HARD_DEG),
-      designLeanDeg: o.designLeanDeg == null ? null : +o.designLeanDeg, nodeRings: Array.isArray(o.nodeRings) ? o.nodeRings.slice() : CROWN_NODE_RINGS.slice(),
+      spreadJoins: !!o.spreadJoins, branchByDrop: !!o.branchByDrop, designLeanDeg: o.designLeanDeg == null ? null : +o.designLeanDeg, nodeRings: Array.isArray(o.nodeRings) ? o.nodeRings.slice() : CROWN_NODE_RINGS.slice(),
       searchStepMm: pick(o.searchStepMm, CROWN_SEARCH_STEP_MM), tipRiseMm: pick(o.tipRiseMm, 0),
       bambuLaw: !!o.bambuLaw, tipDiameterMm: o.tipDiameterMm == null ? null : +o.tipDiameterMm,
       smooth: o.smooth == null ? true : !!o.smooth, blendMm: pick(o.blendMm, CROWN_BLEND_MM), blobCellMm: pick(o.blobCellMm, CROWN_BLOB_CELL_MM), tubeSides: Math.max(6, Math.round(pick(o.tubeSides, CROWN_TUBE_SIDES))),
@@ -1276,15 +1278,19 @@
         var rootKids = root.kids;
 
         /* where everything stands, for a trunk on (Ax, Ay) */
-        function solve(Ax, Ay, check) {
+        function solve(Ax, Ay, check, rLand) {
           var P = {}, S = {}, zOf = {};
           nodes.forEach(function (n) {
             if (n.leaf) { P[n.id] = list[n.tips[0]].attach.slice(); return; }
             if (n.root) return;
-            var w = 1 - n.depth / Dleaf;
+            /* spread joins (below): a depth-d join stands d/(d+1) of the way out from the trunk's axis to its own tips, as it stands that far up
+               - on the line from the trunk's top to its branches, a Y every level, not a bundle at the axis */
+            var w = CK.spreadJoins ? 1 / (n.depth + 1) : 1 - n.depth / Dleaf;
             P[n.id] = [n.pos[0] + w * (Ax - n.pos[0]), n.pos[1] + w * (Ay - n.pos[1]), 0];
           });
-          var rEst = rTipOf(n0) * 1.15, kEst = ovalK(rEst), aEst = rEst * Math.sqrt(kEst), bEst = rEst / Math.sqrt(kEst);
+          /* rLand: the trunk's own top radius (Bambu's law, below) - the legs land inside the trunk they join, not on the width the area law
+             would give it (the owner's mouse: a 30-tip tree's legs landed 2 - 3 mm off a 1.8 mm trunk and ended in the air beside it) */
+          var rEst = rLand != null ? rLand : rTipOf(n0) * 1.15, kEst = ovalK(rEst), aEst = rEst * Math.sqrt(kEst), bEst = rEst / Math.sqrt(kEst);
           function landS(cid) {
             var cp = P[cid], pr = (cp[0] - Ax) * uAx[0] + (cp[1] - Ay) * uAx[1], lim = Math.max(0, aEst - rTipOf(nodes[cid].tips.length)) * 0.9;
             var s = Math.max(-lim, Math.min(lim, pr));
@@ -1310,6 +1316,16 @@
                  bar that will not print (the owner: "comes off the trunk at a 90"). The root's own legs are lowered one by one below (S). */
               var zOld = Math.min(Math.max(base, floor), mn - 0.5);
               if (n.root) return zOld;
+              /* THE JOINS SPREAD DOWN THE TREE (the column rule: the owner's mouse beside Bambu's): a join stands part of the way down from its
+                 branches to the trunk's top - a depth-d join d/(d+1) of the way up - not as high as its lean lets it. Bambu's tree forks all the
+                 way down (the mouse: 20 trunks at the plate, 30, 47, 79, 162 branches every 5 mm up); a tree whose joins all stand under its
+                 tips is a bundle of long legs from there to a stub of a trunk (16 columns to 15 mm, then 280 tips), and its legs cross flat */
+              if (CK.spreadJoins) {
+                var mnB = Infinity;
+                n.kids.forEach(function (cid) { mnB = Math.min(mnB, zOf[cid] - (nodes[cid].leaf ? CK.tipDropMm : CK.nodeDropMm)); });
+                var zSpread = zRootMin + (mnB - zRootMin) * n.depth / (n.depth + 1);
+                if (zSpread < zOld) zOld = Math.max(zSpread, Math.min(floor, zOld));
+              }
               var over = false, zLn = Infinity;
               n.kids.forEach(function (cid) {
                 var top = zOf[cid] - (nodes[cid].leaf ? CK.tipRiseMm : 0), h2 = hdist(P[cid], lat);
@@ -1364,18 +1380,28 @@
                the 2x Sphere's trunk, 8.2 mm at z 2, is the law along its leaning crown, not straight down from its tips) */
             var dN = {}, D3 = function (u, w) { return Math.hypot(u[0] - w[0], u[1] - w[1], u[2] - w[2]); };
             var endOf = function (n) { return nodes[n.parent] && nodes[n.parent].root ? S[n.id] : P[n.parent]; };
+            /* THE BRANCHES APART FROM THE TRUNK (the owner: "separate trunk width from branch width - we are on the super thick side up top"): a
+               branch widens with how far it stands under its highest tip, as Bambu's does layer by layer (the mouse, an island's median width:
+               Bambu's 3.2 mm at z 17 and 4.6 at z 9; ours by the path along a wide crown 5.4 and 7.8); the trunk keeps the path's length (dRoot
+               below: the 2x heads' trunks) */
+            var vTop = {};
             order.forEach(function (n) {
               if (n.root) return;
-              if (n.leaf) dN[n.id] = 0;
-              else { var mx = 0; n.kids.forEach(function (cid) { mx = Math.max(mx, dN[cid] + D3(P[cid], P[n.id])); }); dN[n.id] = mx; }
+              if (n.leaf) { dN[n.id] = 0; vTop[n.id] = P[n.id][2]; }
+              else { var mx = 0, vt = -Infinity; n.kids.forEach(function (cid) { mx = Math.max(mx, dN[cid] + D3(P[cid], P[n.id])); vt = Math.max(vt, vTop[cid]); }); dN[n.id] = mx; vTop[n.id] = vt; }
               var len = D3(P[n.id], endOf(n));
-              if (n.leaf) { rTop[n.id] = tipR; rBot[n.id] = Math.max(tipR, bR + bT * len); }      /* the tip diameter widening to the branch's at its join */
-              else { rTop[n.id] = bR + bT * dN[n.id]; rBot[n.id] = bR + bT * (dN[n.id] + len); }
+              /* ...and at Bambu's rate: its branch diameter angle widens the DIAMETER, tan 5 deg a mm - half of it a side (the mouse at the full
+                 rate: 9.3 mm islands at z 6 where Bambu's are 5.1; at half, 4.6) */
+              var dA = CK.branchByDrop ? vTop[n.id] - P[n.id][2] : dN[n.id], dB = CK.branchByDrop ? vTop[n.id] - endOf(n)[2] : dN[n.id] + len, bTb = CK.branchByDrop ? bT / 2 : bT;
+              if (n.leaf) { rTop[n.id] = tipR; rBot[n.id] = Math.max(tipR, bR + bTb * (CK.branchByDrop ? Math.max(0, dB) : len)); }      /* the tip diameter widening to the branch's at its join */
+              else { rTop[n.id] = bR + bTb * Math.max(0, dA); rBot[n.id] = bR + bTb * Math.max(0, dB); }
               Abot[n.id] = Math.PI * rBot[n.id] * rBot[n.id];
             });
             var dRoot = 0;
             rootKids.forEach(function (cid) { dRoot = Math.max(dRoot, dN[cid] + D3(P[cid], S[cid]) + Math.max(0, S[cid][2] - zTop)); });
             var pathAdd = Math.max(0, zTop + dRoot - Hmax), lawB = law(zTop, Hmax + pathAdd);
+            /* the legs were landed on an estimate of the trunk's width: where the trunk is narrower, they are landed again on its own */
+            if (rLand == null && rEst > lawB + 1e-9) return solve(Ax, Ay, check, lawB);
             return { A: [Ax, Ay], P: P, S: S, z: zOf, zTop: zTop, rTop: rTop, rBot: rBot, rNeed: lawB, lawTop: lawB, rEqTop: lawB, pathAdd: pathAdd,
                      dR: 0, k: ovalK(lawB), a: lawB * Math.sqrt(ovalK(lawB)), b: lawB / Math.sqrt(ovalK(lawB)) };
           }
@@ -1831,8 +1857,11 @@
        same float32 pinch docs/SUPPORT-TREE.md section 5 measured at shared
        branch roots. Run on, each end is its own point inside the column. */
     if (m.end === 'merge' || m.end === 'pickup') {
-      var nL = pts.length, lastU = unit(sub(pts[nL - 1], pts[nL - 2]));
-      pts[nL - 1] = add(pts[nL - 1], mul(lastU, m.childSide / 4));
+      var nL = pts.length, lastU = unit(sub(pts[nL - 1], pts[nL - 2])), runOn = m.childSide / 4;
+      /* ...never through the plate: a leg that lands low on its trunk, steep, ran on under it (the mouse: a support 0.7 - 1.1 mm under the plate,
+         and the whole plate lifted onto it) */
+      if (P && P.plateZ != null && lastU && lastU[2] < -1e-9) runOn = Math.max(0, Math.min(runOn, (pts[nL - 1][2] - P.plateZ - RUN_ON_FLOOR_MM) / -lastU[2]));
+      pts[nL - 1] = add(pts[nL - 1], mul(lastU, runOn));
     }
     var first = unit(sub(pts[1], pts[0])), up = seed || (Math.abs(first[1]) > 0.9 ? [1, 0, 0] : [0, 1, 0]);
     if (m.crownRound > 0 && pts.length >= 2) {
@@ -2024,6 +2053,11 @@
       area += 4 * Math.PI * pr.r[0] * pr.r[0];
     });
     h = Math.max(h, Math.sqrt(2 * area / CROWN_BLOB_TRIS));
+    /* ...but never coarser than the thinnest twig allows (CROWN_BLOB_TWIG_CELLS cells to its radius): a tree of 50 tips was meshed at 0.8 mm,
+       its 0.64 mm twigs fell between the grid's nodes, and came out as beads with gaps (the owner's mouse: branches broken mid path, stray blobs) */
+    var rMin = Infinity;
+    prims.forEach(function (pr) { pr.r.forEach(function (v) { if (v > 0.05) rMin = Math.min(rMin, v); }); });
+    if (rMin < Infinity) h = Math.min(h, Math.max(CROWN_BLOB_CELL_MM, rMin / CROWN_BLOB_TWIG_CELLS));
     var lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity], reach = 7 * k;
     prims.forEach(function (pr) {
       pr.box = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity];
@@ -2181,7 +2215,7 @@
       return bad.concat(broken);
     }
     var bads = null;
-    for (var attempt = 0; attempt < 8; attempt++) {
+    for (var attempt = 0; attempt < BLOB_REPAIR_TRIES; attempt++) {
       bads = extract();
       if (!bads.length) break;
       bads.forEach(function (vs) {
@@ -3565,7 +3599,9 @@
             /* its whole post and leg, from its stub's top to its join: a primitive of the crown's body, cut flat a little under the stub's top and a hair
                thinner along the stub (the stub's own surface is the one seen there); the bend where the post leans into its leg is a round joint of the same
                radius, so the post runs into the leg with no crease */
-            var rt = m.crownRound, st0 = ms.points[0], st1 = ms.points[1], su = unit(sub(st0, st1)), sl = len(sub(st0, st1));
+            /* under Bambu's law a tip's leg is a branch: its diameter (Tree settings' Branch diameter), not the strut's square (the mouse: Bambu's tips
+               are 3 mm2 a millimetre under the contact, ours 1.1 - and a 0.64 mm twig meshed in beads) */
+            var rt = CKn.bambuLaw && CKn.trunk && CKn.trunk.tipMm ? Math.max(m.crownRound, CKn.trunk.tipMm / 2) : m.crownRound, st0 = ms.points[0], st1 = ms.points[1], su = unit(sub(st0, st1)), sl = len(sub(st0, st1));
             var lp = ms.points.map(function (q) { return q.slice(); });
             if (twig) {
               /* the twig narrows to the tip and dies a hair into the strip over it: its top is cut flat there, its radius running from the tip's down to the leg's
@@ -3583,7 +3619,11 @@
         m.points = pts.map(function (q) { return q.slice(); });
         if (smooth) {
           var bp = pts.map(function (q) { return q.slice(); }), bn = bp.length;
-          if (rootKids[m.id]) bp[bn - 1] = add(bp[bn - 1], mul(unit(sub(bp[bn - 1], bp[bn - 2])), R[bn - 1]));
+          if (rootKids[m.id]) {
+            var ubb = unit(sub(bp[bn - 1], bp[bn - 2])), rob = R[bn - 1];
+            if (ubb && ubb[2] < -1e-9) rob = Math.max(0, Math.min(rob, (bp[bn - 1][2] - p.plateZ - RUN_ON_FLOOR_MM) / -ubb[2]));
+            bp[bn - 1] = add(bp[bn - 1], mul(ubb, rob));
+          }
           prims.push({ pts: bp, r: R.slice() });
           continue;
         }
@@ -3591,7 +3631,11 @@
         for (var s = 0; s + 1 < pts.length; s++) {
           var a = pts[s], b = pts[s + 1];
           /* a branch off the trunk runs on into it by its own radius: it ends inside the trunk's body, not on its face */
-          if (s + 2 === pts.length && rootKids[m.id]) b = add(b, mul(unit(sub(b, a)), R[s + 1]));
+          if (s + 2 === pts.length && rootKids[m.id]) {
+            var ub = unit(sub(b, a)), ro = R[s + 1];
+            if (ub && ub[2] < -1e-9) ro = Math.max(0, Math.min(ro, (b[2] - p.plateZ - RUN_ON_FLOOR_MM) / -ub[2]));    /* ...but never through the plate */
+            b = add(b, mul(ub, ro));
+          }
           parts.push({ soup: tubeSoup(a, R[s], b, R[s + 1], TS, crownPhase(m.id + 3 * s + 1, TS)) });
           if (s + 2 < pts.length) parts.push({ soup: ballSoup(pts[s + 1], R[s + 1], TS, crownPhase(m.id + 3 * s + 2, TS)) });
         }
@@ -4620,8 +4664,13 @@
   /* BAMBU'S TREE LAW (its Tree settings: branch diameter 2, branch diameter angle 5, tip diameter 0.8): every branch is the branch diameter at
      its top, widening tan(angle) a side for every mm under its highest tip - the trunk too (supp_ref_2x 02.09: 5.9 mm at z 8 under tips at 30,
      the law's 5.85). NSO's trunk was capped at a 10 mm-tall law (uniformH): 4.4 mm where Bambu's is 8.2. */
-  var COLUMN_CROWN = { tipDropMm: 1.6, tipRiseMm: 1.6, nodeDropMm: 1.2, rootFloorMm: 3, leanHardDeg: 45, bambuLaw: true, tipDiameterMm: 0.8, trunk: { flareMm: 2, tipMm: 2, angleDeg: 5, uniformH: null } };
+  var COLUMN_CROWN = { tipDropMm: 1.6, tipRiseMm: 1.6, nodeDropMm: 1.2, rootFloorMm: 3, leanHardDeg: 45, bambuLaw: true, tipDiameterMm: 0.8, spreadJoins: true, branchByDrop: true, trunk: { flareMm: 2, tipMm: 2, angleDeg: 5, uniformH: null } };
   /* the card's Tree settings (opts.treeKnobs, Bambu's names) over the column crown: branch distance, diameter, angle, diameter angle, tip diameter */
+  /* a spot's reach to its tip, as a share of the Tree settings' branch distance (5 mm -> 2.2). Wider (0.62, 0.8) stood the owner's mouse fewer tips,
+     nearer Bambu's count, but thinned the small heads' trees: supp_ref's Oblique trunk stepped in from 5.5 to 4 mm over its foot (a wall over
+     air), and the gate failed */
+  var COLUMN_TIP_COVER = 0.44;
+  var RUN_ON_FLOOR_MM = 0.3;     /* a member's run-on into the one it joins stops this far over the plate */
   var TREE_KNOBS = { branchDistanceMm: 5, branchDiameterMm: 2, branchAngleDeg: 45, branchDiameterAngleDeg: 5, tipDiameterMm: 0.8 };
   function columnCrownOf(tk) {
     var k = Object.assign({}, TREE_KNOBS, tk || {}), cc = Object.assign({}, COLUMN_CROWN, { trunk: Object.assign({}, COLUMN_CROWN.trunk) });
@@ -5080,7 +5129,7 @@
     var CCK = columnCrownOf(opts.treeKnobs), CC = CCK.cc;
     if (opts.columnRule && opts.treeKnobs) {
       /* branch distance: tips about that far apart (the cover is the spots' reach to their tip: 5 mm -> 2.2, the column rule's own) */
-      ck.coverMm = 0.44 * CCK.k.branchDistanceMm; ck.tiltDeg = +CCK.k.branchAngleDeg;
+      ck.coverMm = COLUMN_TIP_COVER * CCK.k.branchDistanceMm; ck.tiltDeg = +CCK.k.branchAngleDeg;
     }
     ck.crown = Object.assign({}, ONE.crown, (opts.oneTrunk && opts.oneTrunk.crown) || {});
     var byArea = {}, order = [];
