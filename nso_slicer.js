@@ -306,7 +306,9 @@
       supportInterfaceLayers: null,        // null -> CONSTANTS.supportSheet.interfaceLayers (2); a sheet of more says so
       supportInterfaceRule: null,          // 'column': the interface read off the part's layers column by column (columnRule; docs/SUPPORT-GATE.md); null: the sheet typing
       supportInterfaceSpacingMm: null,     // the gap between interface lines (Bambu's support_interface_spacing; the print planner reads the profile's): null -> the dense sheet's line + 0.04
-      supportInterfaceAngle: 'bridge',     // the column rule's stack angles (the app slices with the card's, 3.6 by default - app-print.js slicerOptions): 'bridge' its top square to the part's bridge over it; 'studio36' Studio 02.09's own (90, then 93.6 / 3.6 up to a top at 93.6, the part's bridges over supports at 3.6 - the owner's P1S print released clean); 'crosshatch' 110, then 45 / 135
+      supportAngleDeg: 0,                  // Bambu's support_angle: the 'profile' stack's first layer turns this + 90
+      bridgeAngleDeg: 0,                   // Bambu's bridge_angle: every Bridge laid at it (0: auto - over a support, Studio 02.09's 3.6 under the 'profile' / 'studio36' angles)
+      supportInterfaceAngle: 'bridge',     // the column rule's stack angles (the app slices with the card's, 'profile' by default - app-print.js slicerOptions): 'profile' Bambu's own rule off the profile's support_angle / bridge_angle (its first layer at support_angle + 90, its top square to the bridge at bridge_angle - 0: Studio's 3.6 - one turn a layer down; the owner's 2x supp_ref at 20 / 45: 110, then 45 / 135 to a top at 135); 'bridge' its top square to the part's bridge over it; 'studio36' Studio 02.09's own (90, then 93.6 / 3.6 up to a top at 93.6, the part's bridges over supports at 3.6 - the owner's P1S print released clean); 'crosshatch' 110, then 45 / 135
       supportXyMm: 0.35,                   // the column rule's xy distance to the part at a support layer's own height (Bambu's support_object_xy_distance)
       weldMm: 1e-4,
       dropToPlate: true,
@@ -1701,11 +1703,17 @@
               L.paths.push({ feature: feat, width: wInf, closed: false, pts: pth.pts });
             });
           }
-          /* Interface angle 3.6 (Studio 02.09): a part's bridge is laid at 3.6, its supports' top square to it */
-          if (i > 0 && o.supportInterfaceAngle === 'studio36' && o.supportInterfaceRule === 'column' && P.role === 'part' && objs.some(function (ob) { return ob.role === 'support'; })) {
-            var sa0 = solidAngle; solidAngle = STUDIO36_DEG * Math.PI / 180; solidFill(bottomOpen, 'Bridge'); solidAngle = sa0;
-          } else solidFill(bottomOpen, i === 0 ? 'Bottom surface' : 'Bridge');
+          /* a bridge's angle: the profile's bridge_angle (Bambu lays every bridge at it); else, under the column rule's 3.6 angles (Studio 02.09,
+             bridge_angle 0), a part's bridge over its supports at 3.6, the supports' top square to it */
+          var bridgeAt = null;
+          if (o.bridgeAngleDeg) bridgeAt = o.bridgeAngleDeg * Math.PI / 180;
+          else if ((o.supportInterfaceAngle === 'studio36' || o.supportInterfaceAngle === 'profile') && o.supportInterfaceRule === 'column' && P.role === 'part' && objs.some(function (ob) { return ob.role === 'support'; })) bridgeAt = STUDIO36_DEG * Math.PI / 180;
+          var sa0 = solidAngle;
+          if (i > 0 && bridgeAt != null) { solidAngle = bridgeAt; solidFill(bottomOpen, 'Bridge'); solidAngle = sa0; }
+          else solidFill(bottomOpen, i === 0 ? 'Bottom surface' : 'Bridge');
+          if (o.bridgeAngleDeg) solidAngle = bridgeAt;
           solidFill(bridgeInner, 'Bridge');
+          solidAngle = sa0;
           solidFill(topOnly, 'Top surface');
           solidFill(internal, 'Internal solid infill');
 
@@ -2608,7 +2616,7 @@
       console.log('column rule ' + P.name + ' (' + (host ? host.name : 'all parts') + '): footprint ' + A(F) + ' mm2');
       for (var i6 = 0; i6 < n; i6++) if (SP[i6].printZ > +process.env.NSO_COLUMN_DEBUG) console.log('  z ' + SP[i6].printZ.toFixed(3) + ' S ' + A(P.S[i6]) + ' blocked∩F ' + A(blocked[i6] ? g.inter(F, blocked[i6]) : null) + ' contact∩F ' + A(contact[i6] ? g.inter(F, contact[i6]) : null) + ' I ' + A(I[i6]) + ' T ' + A(T[i6]));
     }
-    P.col = { I: I, T: T, D: D, R0: R0, NI: NI, NT: NT, footprint: F, blocked: blocked, blockedHard: blockedHard };
+    P.col = { I: I, T: T, D: D, R0: R0, NI: NI, NT: NT, footprint: F, blocked: blocked, blockedHard: blockedHard, rank: rank };
   }
 
   /* the stack laid: each of a layer's regions one loop round its edge (half a line in) and a zig-zag inside it at Bambu's interface
@@ -2688,6 +2696,7 @@
       if (R) {
         var mode = o.supportInterfaceAngle || 'bridge', ang;
         if (mode === 'studio36') ang = stackIdx[j] === 0 ? Math.PI / 2 : (STUDIO36_DEG * Math.PI / 180) + Math.PI / 2 + (up[j] % 2) * Math.PI / 2;
+        else if (mode === 'profile') ang = stackIdx[j] === 0 ? ((o.supportAngleDeg || 0) + 90) * Math.PI / 180 : ((o.bridgeAngleDeg || STUDIO36_DEG) + 90 + (up[j] % 2) * 90) * Math.PI / 180;
         else if (mode === 'crosshatch') ang = stackIdx[j] === 0 ? 110 * Math.PI / 180 : (stackIdx[j] % 2 === 1 ? aD : aD + Math.PI / 2);
         else {
           var bA = stackIdx[j] > 0 ? bridgeAngleOver(j + up[j]) : null;
@@ -2701,12 +2710,34 @@
           });
           var inner = g.offset(rg[0], -(wI / 2 + COLUMN_FILL_IN_MM));
           if (g.isEmpty(inner)) return;
+          /* 'profile' (Bambu's rule): each point turns by its own depth under the contact over it (columnRule's ranks), not the region's -
+             a slope's stack is a top contact all the way up (Bambu's 2x Oblique: 135 on every 0.2 layer), the flat sheet under it one turn a
+             layer; a stack's lowest layer (its last rank) at support_angle + 90 */
+          var fills = [[inner, ang]];
+          if (mode === 'profile' && P.col.rank && P.col.rank[j]) {
+            fills = [];
+            var rem = inner, RK = P.col.rank[j];
+            for (var r = 0; r < RK.length && !g.isEmpty(rem); r++) {
+              if (!RK[r]) continue;
+              var pcR = g.inter(rem, RK[r]);
+              if (g.isEmpty(pcR)) continue;
+              rem = g.diff(rem, RK[r]);
+              g.parts(pcR).forEach(function (q) {
+                var first = r === RK.length - 1;
+                fills.push([q, first ? ((o.supportAngleDeg || 0) + 90) * Math.PI / 180 : ((o.bridgeAngleDeg || STUDIO36_DEG) + 90 + (r % 2) * 90) * Math.PI / 180]);
+              });
+            }
+            if (!g.isEmpty(rem)) fills.push([rem, ang]);
+          }
           /* the profile's interface spacing (support_interface_spacing: the gap between lines) over a bead's spacing - 0.5 lays them 0.86 apart,
              Bambu's own on the owner's P1S print that released clean; 0.1 the 0.46 of the dense sheet. Without one, the dense sheet's line + 0.04 */
           var pj = o.supportInterfaceSpacingMm != null ? spacingOf(wI, SP[j].h || 0.2) + o.supportInterfaceSpacingMm : pitch;
-          var segs = scanFill(g.polys(inner), ang, pj, 0);
-          if (segs.length) connect(segs, 3 * pj, g.polys(g.offset(rg[0], 1e-3))).forEach(function (pth) {
-            out.push({ feature: rg[1], width: wI, closed: false, pts: pth.pts, sheetFill: true, colPlate: true });
+          var hullR = g.polys(g.offset(rg[0], 1e-3));
+          fills.forEach(function (fl) {
+            var segs = scanFill(g.polys(fl[0]), fl[1], pj, 0);
+            if (segs.length) connect(segs, 3 * pj, hullR).forEach(function (pth) {
+              out.push({ feature: rg[1], width: wI, closed: false, pts: pth.pts, sheetFill: true, colPlate: true });
+            });
           });
         });
       }

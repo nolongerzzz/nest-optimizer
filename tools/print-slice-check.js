@@ -113,12 +113,24 @@ async function main() {
     dense.filter(o => o.role === 'support').every(o => o.interfaceLayers === 3) && dense.filter(o => o.role !== 'support').every(o => o.interfaceLayers === undefined));
   {
     const SLm = require(path.join(ROOT, 'nso_slicer.js')), realRun = SLm.run, seen = [];
-    SLm.run = function (ob, o) { seen.push(o.supportInterfaceLayers); return realRun.apply(this, arguments); };
+    const opts = [];
+    SLm.run = function (ob, o) { seen.push(o.supportInterfaceLayers); opts.push(o); return realRun.apply(this, arguments); };
+    let dOut = null, pOut = null;
     try {
-      await PRINT.build(dense.slice(0, 2), { config: tpl, printer: a1 }, {});
-      await PRINT.build(objs.slice(0, 2), { config: tpl, printer: a1 }, {});
+      dOut = await PRINT.build(dense.slice(0, 2), { config: tpl, printer: a1 }, {});
+      pOut = await PRINT.build(objs.slice(0, 2), { config: tpl, printer: a1 }, {});
     } finally { SLm.run = realRun; }
     check('build() gives the slicer supportInterfaceLayers 3 for a Dense sheet, and leaves the default alone otherwise', seen.length === 2 && seen[0] === 3 && seen[1] == null, String(seen));
+    /* a Dense support prints with the owner's Bambu reference's support settings (supp_ref_v2: interface spacing 0.1, 3 top layers, support
+       angle 20, bridge angle 45), the stack's angles off them (Bambu's rule) - and the file says so; a plate with none keeps the profile's */
+    const o0 = opts[0] || {}, o1 = opts[1] || {};
+    check('...a Dense support slices at interface spacing 0.1, support angle 20, bridge angle 45, the stack\'s angles off the profile; a plain plate at the profile\'s',
+      o0.supportInterfaceSpacingMm === 0.1 && o0.supportAngleDeg === 20 && o0.bridgeAngleDeg === 45 && o0.supportInterfaceAngle === 'profile' &&
+      o1.supportInterfaceSpacingMm === 0.5 && o1.supportAngleDeg === 0 && o1.bridgeAngleDeg === 0,
+      JSON.stringify([o0.supportInterfaceSpacingMm, o0.supportAngleDeg, o0.bridgeAngleDeg, o0.supportInterfaceAngle, o1.supportInterfaceSpacingMm, o1.supportAngleDeg, o1.bridgeAngleDeg]));
+    check('...and the Dense file\'s settings carry them (Studio reads what printed)',
+      dOut && dOut.ok && ['support_interface_spacing', 'support_interface_top_layers', 'support_angle', 'bridge_angle'].every(k => dOut.changed.indexOf(k) >= 0) && pOut && pOut.ok && pOut.changed.indexOf('bridge_angle') < 0,
+      JSON.stringify([dOut && dOut.changed, pOut && pOut.changed]));
   }
 
   section('3. A plate with supports through build(): the file');
@@ -186,7 +198,7 @@ async function main() {
   {
     const base = PRINT.settingsFromConfig(tpl);
     check('the settings start at the A1 mini template\'s values: 0.4 nozzle, 0.2 mm layers, 2 walls, 15 % grid, support below 30°, auto brim, no raft (0.1 contact)',
-      JSON.stringify(base) === JSON.stringify({ nozzle: 0.4, layer: 0.2, walls: 2, density: 15, pattern: 'grid', angle: 30, brim: 'auto', raft: 0, raftGap: 0.1, ifaceAngle: 'studio36', interfaceRule: null }), JSON.stringify(base));
+      JSON.stringify(base) === JSON.stringify({ nozzle: 0.4, layer: 0.2, walls: 2, density: 15, pattern: 'grid', angle: 30, brim: 'auto', raft: 0, raftGap: 0.1, ifaceAngle: 'profile', interfaceRule: null }), JSON.stringify(base));
     const rov = PRINT.configOverlay(tpl, Object.assign({}, base, { raft: 10 }));
     check('a raft of 10 on the card is the file\'s raft_layers = 10, and nothing else changes', JSON.stringify(rov) === JSON.stringify({ raft_layers: '10' }), JSON.stringify(rov));
     check('...which are the card\'s markup defaults too (shown before the template is fetched)', JSON.stringify(PRINT.SETTINGS_DEFAULT) === JSON.stringify(base));

@@ -219,7 +219,10 @@
       raftExpansionMm: num(config, 'raft_expansion', 1.5),
       raftBaseSpacingMm: num(config, 'support_base_pattern_spacing', 2.5),
       raftInterfaceSpacingMm: num(config, 'support_interface_spacing', 0.5),
-      supportInterfaceSpacingMm: num(config, 'support_interface_spacing', 0.5)
+      supportInterfaceSpacingMm: num(config, 'support_interface_spacing', 0.5),
+      // the stack's first layer turns support_angle + 90; its top crosses the part's bridge, laid at bridge_angle (0: Studio's own choice)
+      supportAngleDeg: num(config, 'support_angle', 0),
+      bridgeAngleDeg: num(config, 'bridge_angle', 0)
     };
     return { nozzleMm: nozzle, over: over };
   }

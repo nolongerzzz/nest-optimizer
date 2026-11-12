@@ -173,8 +173,8 @@ var NSO_GSCOPE_SLICE = (function () {
     /* the raft (nso_slicer.js raftPlan): its own system under everything on the plate, Bambu's raft_layers / raft_contact_distance */
     over.raftLayers = Math.max(0, Math.round(num('ms-slice-raft', 0)));
     over.raftContactMm = Math.max(0, num('ms-slice-raft-gap', 0.1));
-    /* the interface angle is the supports card's choice (Studio 2.9's 3.6 by default): G-scope's slice lays the stack as Generate's does */
-    var ia = $('slice-set-iface-angle'); over.supportInterfaceAngle = ia && ia.value ? ia.value : 'studio36';
+    /* the interface angle is the supports card's choice (the profile's, Bambu's rule, by default): G-scope's slice lays the stack as Generate's does */
+    var ia = $('slice-set-iface-angle'); over.supportInterfaceAngle = ia && ia.value ? ia.value : 'profile';
     return { nozzleMm: nozzle, over: over };
   }
 
@@ -224,6 +224,8 @@ var NSO_GSCOPE_SLICE = (function () {
     var ni = 0;
     d.objects.forEach(function (o) { var su = supportOf(o); if (su && su.interfaceLayers > ni) ni = su.interfaceLayers; });
     if (ni > 2 && !(optsOver && optsOver.supportInterfaceLayers != null)) opts.supportInterfaceLayers = ni;
+    /* ...with the owner's Bambu reference's angles, as the plate's slice prints a Dense support (the Slice card's DENSE_SUPPORT) */
+    if (ni > 2) { if (!(optsOver && optsOver.supportAngleDeg != null)) opts.supportAngleDeg = 20; if (!(optsOver && optsOver.bridgeAngleDeg != null)) opts.bridgeAngleDeg = 45; }
     /* ...and a Dense sheet's thicker layers (Bambu's 0.275) mean the supports are cut on their own layer grid, as Bambu's independent support layer height does */
     var sl = 0;
     d.objects.forEach(function (o) { var su = supportOf(o); if (su && su.sheetLayerMm > sl) sl = su.sheetLayerMm; });

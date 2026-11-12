@@ -246,7 +246,15 @@ first layer a gap over the top gives the angle by the solid fill's turn. supp_re
 Negative Sphere x 2, Negative Sphere2); gate 66 of 66.
 
 **Interface angle, a testing ground** (supports card, `slice-set-iface-angle`; nso_slicer.js `supportInterfaceAngle`, carried with the Slice
-settings so Generate slices with it and a change makes the slice stale): *Square to bridge* (`bridge`, the default, above); *3.6 (Studio
+settings so Generate slices with it and a change makes the slice stale): *Profile (Bambu)* (`profile`, the card's default): Bambu Studio
+02.09's own rule read off the profile's `support_angle` and `bridge_angle` - the stack's lowest layer at support_angle + 90, every bridge at
+bridge_angle, and each point of the stack one turn a layer down from a top square to the bridge, counted by its own depth under the contact
+over it (columnRule's ranks), so a slope's stack is a top contact all the way up. The owner's reference (supp_ref_v2, the 2x supp_ref,
+the P1S mouse: support angle 20, bridge angle 45) gives 110, then 45 / 135 to a top at 135 - 89 % of Bambu's interface length on the 2x
+supp_ref lies at Bambu's angle (3.6: 37 %). A profile at 0 / 0 (the A1 mini / P1S templates) gives exactly *3.6*. A **Dense** support
+(the card's Interface: Dense (Bambu)) prints with the reference's support settings - interface spacing 0.1, 3 top interface layers, support
+angle 20, bridge angle 45 - written into the file's settings (app-print.js `DENSE_SUPPORT`): the template's 0.5 had laid the interface
+lines 0.86 apart, 0.6 x Bambu's. *Square to bridge* (`bridge`, the slicer's own default, above); *3.6 (Studio
 2.9)* (`studio36`: Bambu's own on the owner's P1S print, which released clean - the stack's first layer at 90, then 93.6 / 3.6 up to a top
 at 93.6, and the part's bridges over supports laid at 3.6, so they cross square); *Crosshatch 45/135* (`crosshatch`, the column rule as it
 was: 110, then 45 / 135, parallel to the bridge on some stacks). supp_ref: `studio36` puts every top interface at 93.6 under a bridge at 3.6.

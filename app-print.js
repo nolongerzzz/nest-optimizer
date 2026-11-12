@@ -102,8 +102,10 @@
   // settings (configOverlay), so the engine, the planner, the G-code's CONFIG_BLOCK and
   // the file's project_settings.config all read the same number. The nozzle is the
   // profile's: another nozzle needs its own start / end blocks.
-  var SETTINGS_DEFAULT = { nozzle: 0.4, layer: 0.2, walls: 2, density: 15, pattern: 'grid', angle: 30, brim: 'auto', raft: 0, raftGap: 0.1, ifaceAngle: 'studio36', interfaceRule: null };   /* the card's own defaults (the owner's view): Studio 2.9's 3.6 */
-  var IFACE_ANGLES = { bridge: 1, studio36: 1, crosshatch: 1 };   /* nso_slicer.js supportInterfaceAngle: NSO's own, no profile key - a testing ground for interfaces */
+  var SETTINGS_DEFAULT = { nozzle: 0.4, layer: 0.2, walls: 2, density: 15, pattern: 'grid', angle: 30, brim: 'auto', raft: 0, raftGap: 0.1, ifaceAngle: 'profile', interfaceRule: null };   /* the card's own defaults (the owner's view): the stack's angles off the profile (Bambu's rule) */
+  var IFACE_ANGLES = { profile: 1, bridge: 1, studio36: 1, crosshatch: 1 };   /* nso_slicer.js supportInterfaceAngle: NSO's own, no profile key - a testing ground for interfaces */
+  /* the owner's Bambu reference's support settings (fixtures/supports/supp_ref_v2.gcode.3mf): a Dense support prints with them (slicerOptions) */
+  var DENSE_SUPPORT = { support_interface_spacing: '0.1', support_interface_top_layers: '3', support_angle: '20', bridge_angle: '45' };
   var PATTERN_TO_CONFIG = { grid: 'grid', zigzag: 'zig-zag', lines: 'line' };
   var PATTERN_FROM_CONFIG = { grid: 'grid', 'zig-zag': 'zigzag', zigzag: 'zigzag', line: 'lines', lines: 'lines' };
   var BRIM_TO_CONFIG = { auto: 'auto_brim', outer: 'outer_only', none: 'no_brim' };
@@ -122,7 +124,7 @@
     return {
       nozzle: eng.nozzleMm, layer: o.layerMm, walls: o.wallLoops, density: Math.round(o.sparseDensity * 100),
       pattern: PATTERN_FROM_CONFIG[cfgRaw(config, 'sparse_infill_pattern')] || o.sparsePattern,
-      angle: o.supportThresholdDeg, brim: o.brimType, raft: Math.round(o.raftLayers || 0), raftGap: o.raftContactMm != null ? o.raftContactMm : 0.1, ifaceAngle: 'studio36', interfaceRule: null
+      angle: o.supportThresholdDeg, brim: o.brimType, raft: Math.round(o.raftLayers || 0), raftGap: o.raftContactMm != null ? o.raftContactMm : 0.1, ifaceAngle: 'profile', interfaceRule: null
     };
   }
 
@@ -249,7 +251,14 @@
    */
   function slicerOptions(SL, PL, objects, assets, settings) {
     var over = {}, config = assets.config;
-    if (settings) { over = configOverlay(assets.config, settings); config = withOverlay(assets.config, over); }
+    if (settings) over = configOverlay(assets.config, settings);
+    /* a Dense support (the card's Interface: Dense (Bambu) - a sheet of 3 interface layers) prints with the owner's Bambu reference's support
+       settings (supp_ref_v2 / the 2x supp_ref, Studio 02.09): interface lines 0.1 apart, 3 top interface layers, the stack's first layer at
+       support_angle 20 + 90 and every bridge at 45 - written into the file's settings too, so Studio reads what printed */
+    if (objects.some(function (ob) { return ob.interfaceLayers > 2; })) {
+      Object.keys(DENSE_SUPPORT).forEach(function (k) { if (cfgRaw(assets.config, k) !== DENSE_SUPPORT[k] && over[k] == null) over[k] = DENSE_SUPPORT[k]; });
+    }
+    if (Object.keys(over).length) config = withOverlay(assets.config, over);
     var eng = PL.engineOptions(config);
     var o = SL.defaultsFor(eng.nozzleMm, Object.assign({ emitGcode: false }, eng.over));
     /* the planner reads two patterns off a config (grid, else zigzag); the card's own is the slicer's */
@@ -267,8 +276,8 @@
     var rule = settings ? settings.interfaceRule
       : typeof window !== 'undefined' && typeof window.nsoSupportInterfaceRule === 'function' ? window.nsoSupportInterfaceRule() : null;
     if (rule && (eng.over || {}).supportInterfaceRule == null) o.supportInterfaceRule = rule;
-    /* the interface angle (supportInterfaceAngle): square to the bridge, Studio 02.09's 3.6, or the old crosshatch - the card's choice */
-    o.supportInterfaceAngle = (settings && settings.ifaceAngle) || SETTINGS_DEFAULT.ifaceAngle;   /* no settings: the card's default (3.6) - the same file either way */
+    /* the interface angle (supportInterfaceAngle): the profile's (Bambu's rule), square to the bridge, Studio 02.09's 3.6, or the old crosshatch - the card's choice */
+    o.supportInterfaceAngle = (settings && settings.ifaceAngle) || SETTINGS_DEFAULT.ifaceAngle;   /* no settings: the card's default ('profile') - the same file either way */
     return { o: o, config: config, over: over };
   }
 
