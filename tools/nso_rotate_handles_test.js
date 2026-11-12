@@ -1243,8 +1243,8 @@ withApp(async (page, logs) => {
   if (RUN.bed) {
   console.log('\n=== 18. a bigger bed, the same rings: P1S selected ===');
   {
-    /* Switching the plate clears the plate's pieces (updatePlateInfo ->
-       clearPlaced, as it always has), so a piece is dropped on afterwards. */
+    /* Switching the plate keeps the plate's pieces (updatePlateInfo); a
+       fresh piece is dropped on afterwards and measured. */
     await page.selectOption('#plate-select', 'a1');
     await page.waitForTimeout(200);
     await loadSTL(page, path.join(ROOT, 'fixtures', 'tape_on-edge-single-B101_rounded_v8_FINAL.stl'));

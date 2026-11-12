@@ -3021,11 +3021,44 @@ function updatePlateInfo() {
   document.getElementById('plate-dims').textContent = `${p.w} x ${p.d} mm`;
   document.getElementById('plate-area').textContent = `${(p.w * p.d).toLocaleString()} mm2`;
   if (state.ready) {
+    /* A PLATE CHANGE KEEPS THE PIECES. The plate picker is also the printer the Slice card slices for, so a
+       piece laid out on the A1 Mini has to survive a switch to the P1S (and back). Piece coordinates are
+       plate-centred, so every piece stays where it was relative to the middle of the bed; only the floor is
+       rebuilt. A piece the new, smaller bed no longer holds is left where it is and named in the status line. */
     buildPlateMesh();
-    clearPlaced();
-    // the size is every bed's: the others' pieces come off the plate the same way (app-beds.js)
+    // the size is every bed's: the other beds' floors follow, their pieces stay too (app-beds.js)
     if (typeof NSO_BEDS !== 'undefined') NSO_BEDS.plateSizeChanged();
+    reportPiecesPastPlateEdge(p);
   }
+}
+
+/* The active bed's pieces whose footprint now runs past the plate edge, named in the status line. */
+function piecesPastPlateEdge(p) {
+  const out = [];
+  if (!state.placed || !state.placed.length || typeof THREE === 'undefined') return out;
+  const hw = p.w / 2 + 0.01, hd = p.d / 2 + 0.01;
+  state.placed.forEach(function (pl) {
+    if (!pl || !pl.mesh) return;
+    pl.mesh.updateMatrixWorld(true);
+    const bb = new THREE.Box3().setFromObject(pl.mesh);
+    if (bb.isEmpty()) return;
+    if (bb.min.x < -hw || bb.max.x > hw || bb.min.z < -hd || bb.max.z > hd) out.push(pl.name || 'a piece');
+  });
+  return out;
+}
+
+function reportPiecesPastPlateEdge(p) {
+  if (!state.placed || !state.placed.length) return;
+  const name = p.name || 'this plate';
+  const past = piecesPastPlateEdge(p);
+  if (!past.length) {
+    setStatus(state.placed.length + ' piece' + (state.placed.length === 1 ? '' : 's') + ' kept on ' + name + '.');
+    return;
+  }
+  const list = past.slice(0, 4).join(', ') + (past.length > 4 ? ' and ' + (past.length - 4) + ' more' : '');
+  setStatus(past.length + ' piece' + (past.length === 1 ? '' : 's') + ' hang' + (past.length === 1 ? 's' : '') +
+    ' past the edge of ' + name + ' (' + list + ') - move ' + (past.length === 1 ? 'it' : 'them') +
+    ' onto the bed or press Optimize before slicing.', true);
 }
 
 function setupUI() {

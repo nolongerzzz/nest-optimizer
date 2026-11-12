@@ -89,7 +89,7 @@ every existing entry, which names pieces by index in that bed's lists, stays val
 | make a bed active | none (not an edit) |
 | Delete plate | none, and the bed's lines go with it - like Clear plate |
 | Clear plate | none, as before; wipes the active bed's two lines. With pieces on only one plate it also closes every tool and card (a fresh start); with pieces on two or more plates it does not |
-| plate-size change | none, as before (pieces come off every bed; the models stay) |
+| plate-size change | none, and none needed: every bed keeps its pieces where they were, plate-centred (2026-11-12, the owner: switching A1 Mini -> P1S to slice for the other printer must not lose the piece). A piece the new bed no longer holds stays put and is named in the status line |
 | Select all group moved between beds | **one step**, the same two entries, each holding the whole group (`group: [{ item, model, index, modelIndex, pose }]`): Undo puts every piece back at its own pose and index and the group is still selected. |
 | piece moved between beds | **one step**, two entries that name each other: `bedMoveOut` on the bed it left, `bedMoveIn` on the bed it landed on (each bed's line is its own). Undo on either puts the piece back at the pose and index it left from and makes the bed it left active. It needs the other half to be the last step of its own line - a move cannot be taken back from under later steps on that bed, whose indices it would shift - otherwise it changes nothing and says "Undo the later steps on Plate N first". If the other half is gone (that bed was deleted, or the entry fell off the line) the entry is dropped and it says so. A move is not redoable (like the Supports and G-scope Lift steps). |
 

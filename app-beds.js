@@ -409,25 +409,12 @@ var NSO_BEDS = (function () {
 
   function canDelete() { return count() > 1; }
 
-  /* A plate size change clears the plate (updatePlateInfo); it applies to every bed, each wiped the way the
-     active one is: the pieces come off, the models stay. */
+  /* A plate size change keeps every bed's pieces (updatePlateInfo): the plate picker is also the printer the
+     Slice card slices for, so a layout has to survive switching between machines. A bed's pieces sit in its group
+     in that bed's own plate-centred frame, and afterPlateBuilt -> layoutGroups has already moved each group to its
+     new offset, so there is nothing left to do here but note that the change has been seen. */
   function plateSizeChanged() {
-    if (!resized) return;             // the same size again (a 3MF restoring its plate preset): the other beds are left alone
     resized = false;
-    beds.forEach(function (b, i) {
-      if (i === active || !b.placed) return;
-      b.placed.forEach(function (p) {
-        if (p && p.mesh) {
-          if (p.mesh.parent) p.mesh.parent.remove(p.mesh);
-          if (p.mesh.material) {
-            if (Array.isArray(p.mesh.material)) p.mesh.material.forEach(function (m) { m.dispose(); });
-            else p.mesh.material.dispose();
-          }
-        }
-      });
-      b.placed = [];
-      if (b.pieces) while (b.pieces.children.length) b.pieces.remove(b.pieces.children[0]);
-    });
   }
 
   // ---------------------------------------------------------------- clicks

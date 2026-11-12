@@ -541,12 +541,13 @@ console.log('11 a plate size change');
   const s = setup();
   piece(s, 'a', 0, 0);
   B.add(); piece(s, 'b', 0, 0);
-  const upd = () => { app.buildPlateMesh(); app.clearPlaced(); B.plateSizeChanged(); };   // updatePlateInfo, as app-join.js runs it
+  const upd = () => { app.buildPlateMesh(); B.plateSizeChanged(); };   // updatePlateInfo, as app-join.js runs it
   upd();
-  check('the same size again takes the active bed\'s pieces off (as it always did) and leaves the other bed alone', s.placed.length === 0 && /1:1p/.test(rows()), rows());
+  check('the same size again leaves every bed\'s pieces where they are', s.placed.length === 1 && /1:1p/.test(rows()), rows());
   s.plate = 'prusa';
   upd();
-  check('a new size takes the pieces off every bed (the models stay)', /1:0p/.test(rows()) && B.info().every(b => b.placed === 0) && B.info()[0].models === 1, rows());
+  check('a new size keeps the pieces on every bed (a layout survives a printer switch)', s.placed.length === 1 && B.info().every(b => b.placed === 1) && B.info()[0].models === 1, rows());
+  check('...and the other bed stands at the new stride', (() => { const g = s.scene.children.find(c => c.name === 'nsoBed:1'); const o = B.offsetOf(0); return g && Math.abs(g.position.x - o.x) < 1e-9 && Math.abs(g.position.z - o.z) < 1e-9; })(), JSON.stringify(B.offsetOf(0)));
   const w = s.scene.children.find(c => c.name === 'nsoBed:1');
   check('and the floors are the new size', w && w.children[1].children[0].geometry.parameters.width === 250);
 }
