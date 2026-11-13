@@ -37,7 +37,8 @@ owner's A1 mini temperature tower (2026-11-13, dried spool, 240 down to 210 C):
 
 - **235 C** nozzle. 240 and 235 gave the cleanest walls and the least stringing; 210 - 215 bridged
   best. The spool's own range is 210 - 240 C, so 235 keeps a little margin.
-- **45 C** textured PEI.
+- The bed is Studio's own for the printer, which is what that tower printed on: **30 C** on the
+  A1 mini (`Generic TPU @BBL A1M`), **35 C** on the P1S (`Generic TPU`).
 
 Not yet measured for this spool: the real max flow (3.2 is Studio's conservative Generic value),
 retraction beyond 0.4 mm, the flow ratio, and bridges at 235 C (they sag; slower bridges is the
@@ -62,13 +63,21 @@ from the filament is now a token (`tools/print-planner/freeze.js` has the list a
 | `{?PLA}` `{?PLAHOT}` | a line the template writes only for PLA (and a bed over 45) | kept | dropped |
 
 `outer_wall_volumetric_speed` is the outer wall's speed times its bead, never over the filament's
-limit. The slice only shows the PLA side of each `{PLA?a:b}`; the other side is read off
+limit. The PLA slice only shows the PLA side of each `{PLA?a:b}`; the other side is read off
 `machine_start_gcode` in the printer's template and stated beside its rule. `freeze.js` still
 thaws each block with the slice's own values and requires the slice's own lines back, so PLA is
 unchanged (`print:planner`).
 
+**The A1 mini's TPU side is checked against Studio.**
+`fixtures/print-planner/a1mini-0.4/studio-generic-tpu-tower.gcode.3mf` is the owner's temperature
+tower as Studio 02.09.01.70 sliced it (Generic TPU @BBL A1M, 240 C, bed 30). `print:slice` 3c
+thaws NSO's start block with that slice's numbers and requires Studio's 472 lines back, and the
+filament start G-code after it. The P1S has no TPU slice in the repo yet.
+
 The planner also reads the filament's own retraction (`filament_retraction_length`, where it is
-not `nil`), and the CONFIG_BLOCK holds a changed per-filament value once per slot.
+not `nil`): Studio's TPU slice retracts 0.4 mm while its CONFIG_BLOCK still says
+`retraction_length = 0.8`, and NSO writes the same. The CONFIG_BLOCK holds a changed per-filament
+value once per slot.
 
 ## Temperature steps
 

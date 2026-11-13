@@ -261,9 +261,9 @@ async function main() {
   {
     const base = PRINT.settingsFromConfig(tpl);
     const fb = PRINT.filamentBase(tpl, 'profile'), tb = PRINT.filamentBase(tpl, 'cr-tpu');
-    check('the profile\'s filament is the template\'s PLA: 220 / 220 C, bed 65, 12 mm^3/s; CR-TPU is 235 / 235 C, bed 45, 3.2 mm^3/s, printable 200 - 250 C',
+    check('the profile\'s filament is the template\'s PLA: 220 / 220 C, bed 65, 12 mm^3/s; CR-TPU is 235 / 235 C, bed 30 (Studio: the A1 mini TPU bed), 3.2 mm^3/s, printable 200 - 250 C',
       fb.nozzleTemp === 220 && fb.firstTemp === 220 && fb.bedTemp === 65 && fb.maxFlow === 12 &&
-        tb.nozzleTemp === 235 && tb.firstTemp === 235 && tb.bedTemp === 45 && tb.maxFlow === 3.2 && tb.rangeLow === 200 && tb.rangeHigh === 250, JSON.stringify([fb, tb]));
+        tb.nozzleTemp === 235 && tb.firstTemp === 235 && tb.bedTemp === 30 && tb.maxFlow === 3.2 && tb.rangeLow === 200 && tb.rangeHigh === 250, JSON.stringify([fb, tb]));
     check('the four rows at the filament\'s own values change nothing (the card shows them filled in)',
       Object.keys(PRINT.configOverlay(tpl, Object.assign({}, base, { nozzleTemp: 220, firstTemp: 220, bedTemp: 65, maxFlow: 12 }))).length === 0);
     const rows = PRINT.configOverlay(tpl, Object.assign({}, base, { nozzleTemp: 210, bedTemp: 60, maxFlow: 8 }));
@@ -281,10 +281,10 @@ async function main() {
       const tz = L.R.openZip(tpu.bytes);
       const tg = L.text(await tz.read('Metadata/plate_1.gcode')), pg = L.text(await L.R.openZip(pla.bytes).read('Metadata/plate_1.gcode'));
       const cb = k => (new RegExp('^; ' + k + ' = (.*)$', 'm').exec(tg) || [])[1];
-      check('...the CONFIG_BLOCK names it on both filament slots: TPU, GFU99, Generic TPU @BBL A1M, 235 C, bed 45, 3.2 mm^3/s, 0.4 mm retraction, fan 100',
+      check('...the CONFIG_BLOCK names it on both filament slots: TPU, GFU99, Generic TPU @BBL A1M, 235 C, bed 30, 3.2 mm^3/s, fan 100 (retraction_length stays 0.8 there, as in the Studio TPU slice)',
         cb('filament_type') === 'TPU;TPU' && cb('filament_ids') === 'GFU99;GFU99' && cb('filament_settings_id') === '"Generic TPU @BBL A1M";"Generic TPU @BBL A1M"' &&
-          cb('nozzle_temperature') === '235,235' && cb('textured_plate_temp') === '45,45' && cb('filament_max_volumetric_speed') === '3.2,3.2' &&
-          cb('retraction_length') === '0.4' && cb('fan_min_speed') === '100,100',
+          cb('nozzle_temperature') === '235,235' && cb('textured_plate_temp') === '30,30' && cb('filament_max_volumetric_speed') === '3.2,3.2' &&
+          cb('retraction_length') === '0.8' && cb('fan_min_speed') === '100,100',
         ['filament_type', 'filament_ids', 'filament_settings_id', 'nozzle_temperature', 'textured_plate_temp', 'filament_max_volumetric_speed', 'retraction_length', 'fan_min_speed'].map(cb).join(' | '));
       const tsi = L.text(await tz.read('Metadata/slice_info.config'));
       check('...slice_info tells the printer the filament is TPU (GFU99)', /tray_info_idx="GFU99" type="TPU"/.test(tsi));
@@ -300,8 +300,8 @@ async function main() {
           ts.includes('    M620.1 E F79.8237 T250') && ts.includes('    G1 E50 F79.8237') &&
           ts.includes('G0 X88 E10  F192') && ts.includes('G0 X93 E.3742  F320') && ts.includes('G0 X98 E.3742  F1280') &&
           !ts.some(l => /F(720|4800|299\.339)$/.test(l)) && psl.includes('G0 X88 E10  F720') && psl.includes('    M620.1 E F299.339 T220'));
-      check('...its temperatures are in the start block (bed 45, nozzle 235) and its own filament start G-code replaces PLA\'s',
-        ts.includes('M140 S45') && ts.includes('M190 S45;set bed temp') && ts.includes('M109 S235') && !ts.includes(';Prevent PLA from jamming') && psl.includes(';Prevent PLA from jamming'));
+      check('...its temperatures are in the start block (bed 30, nozzle 235) and its own filament start G-code replaces PLA\'s',
+        ts.includes('M140 S30') && ts.includes('M190 S30;set bed temp') && ts.includes('M109 S235') && !ts.includes(';Prevent PLA from jamming') && psl.includes(';Prevent PLA from jamming'));
       // every extruding move's volumetric rate, from the lines
       const peak = g => {
         const A = Math.PI * 1.75 * 1.75 / 4; let x = null, y = null, f = 0, mx = 0, on = false;
@@ -319,7 +319,34 @@ async function main() {
       const pk = peak(tg), pkPla = peak(pg);
       check('...no move asks the hotend for more than its 3.2 mm^3/s (peak ' + pk.toFixed(3) + '; PLA\'s plate peaks at ' + pkPla.toFixed(2) + ')', pk > 2.5 && pk < 3.2 * 1.005 && pkPla > 3.2 * 1.5);
       check('...it retracts the filament\'s 0.4 mm, and the fan is full from the second layer', /^G1 E-0?\.4 F1800$/m.test(tg) && !/^G1 E-0?\.8 F1800$/m.test(tg) && /^M106 S255$/m.test(tg));
-      check('...the readout names it', tpu.filament === 'Creality CR-TPU 95A, 235 \u00b0C, bed 45 \u00b0C, 3.2 mm\u00b3/s', tpu.filament);
+      check('...the readout names it', tpu.filament === 'Creality CR-TPU 95A, 235 \u00b0C, bed 30 \u00b0C, 3.2 mm\u00b3/s', tpu.filament);
+    }
+
+    // STUDIO'S OWN TPU SLICE (the owner's temperature tower, Generic TPU @BBL A1M, Studio 02.09.01.70): the start block NSO writes for
+    // that filament with that slice's numbers is Studio's, line for line - the non-PLA side of every {if filament_type == "PLA"}
+    {
+      const st = await L.bambuSlice('fixtures/print-planner/a1mini-0.4/studio-generic-tpu-tower.gcode.3mf');
+      const sl = st.gcode.split('\n'), noM73 = a => a.filter(l => !/^@?M73 /.test(l));
+      const iE = sl.indexOf('; EXECUTABLE_BLOCK_START'), iM = sl.indexOf('; MACHINE_START_GCODE_END'), iL = sl.indexOf('; CHANGE_LAYER');
+      const cfg = k => (new RegExp('^; ' + k + ' = (.*)$', 'm').exec(st.gcode) || [])[1];
+      const gm = /X([\d.]+) Y([\d.]+) I([\d.]+) J([\d.]+)/.exec(sl.find(l => /^\s*G29 A1 X/.test(l)));
+      const S = PL.settingsFrom({ filament_type: cfg('filament_type'), filament_max_volumetric_speed: cfg('filament_max_volumetric_speed'), nozzle_temperature_range_high: cfg('nozzle_temperature_range_high'),
+        filament_flush_temp: cfg('filament_flush_temp'), filament_flush_volumetric_speed: cfg('filament_flush_volumetric_speed'), outer_wall_speed: cfg('outer_wall_speed'),
+        outer_wall_line_width: cfg('outer_wall_line_width'), layer_height: cfg('layer_height'), nozzle_temperature: cfg('nozzle_temperature'),
+        nozzle_temperature_initial_layer: cfg('nozzle_temperature_initial_layer'), textured_plate_temp: cfg('textured_plate_temp'), textured_plate_temp_initial_layer: cfg('textured_plate_temp_initial_layer'), curr_bed_type: cfg('curr_bed_type') });
+      const v = { nozzle: S.temp.nozzleInitial, nozzleT: S.temp.nozzle, bed: S.temp.bedInitial, bedMax: Math.max(S.temp.bed, S.temp.bedInitial), box: { x: +gm[1], y: +gm[2], w: +gm[3], h: +gm[4] }, cy: 0, maxZ: 0,
+        filamentType: S.filament.type, flushV: S.filament.flushVolumetric, flushT: S.filament.flushTemp, ow: S.filament.outerWallVolumetric };
+      const want = noM73(sl.slice(iE + 2, iM + 1)), got = noM73(PL.thaw(a1.start, v, {}));
+      const off = want.findIndex((l, i) => l !== got[i]);
+      check('Studio\'s own Generic TPU slice for the A1 mini: NSO\'s start block with that slice\'s numbers is Studio\'s, all ' + want.length + ' lines (TPU, 3.2 mm^3/s, 240 C, bed 30)',
+        S.filament.type === 'TPU' && want.length === got.length && off < 0, off >= 0 ? 'line ' + off + ': ' + JSON.stringify([want[off], got[off]]) : want.length + ' / ' + got.length);
+      const wantAfter = noM73(sl.slice(iM + 1, iL)), fs0 = PRINT.FILAMENTS['cr-tpu'].start(30);
+      const vt = a1.afterStart.findIndex(l => typeof l === 'string' && /^;VT\d/.test(l));
+      const gotAfter = noM73(PL.thaw(fs0.concat(a1.afterStart.slice(vt)), v, {}));
+      check('...and so is the filament\'s own start G-code after it (no fan line at a 30 C bed)', JSON.stringify(wantAfter) === JSON.stringify(gotAfter), JSON.stringify([wantAfter, gotAfter]));
+      const rs = {}; sl.forEach(l => { const m = /^G1 E-(\.?[\d.]+) F1800$/.exec(l); if (m) rs[m[1]] = (rs[m[1]] || 0) + 1; });
+      check('...Studio retracts that filament 0.4 mm (0.38 in the wipe + .02), though its CONFIG_BLOCK keeps retraction_length = 0.8: the planner reads filament_retraction_length',
+        rs['.02'] > 2000 && !rs['.8'] && !rs['.04'] && cfg('retraction_length') === '0.8', JSON.stringify(rs));
     }
 
     // temperature steps: a box 31 mm tall, 240 C down 5 every 10 mm

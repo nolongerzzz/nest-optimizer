@@ -128,10 +128,15 @@
   //
   // CR-TPU (Creality, 95A, no RFID, external spool only). The keys are Bambu Studio's Generic TPU (fdm_filament_tpu > Generic TPU
   // @base: 3.2 mm^3/s, 0.4 mm retraction, flow ratio 1, fan 100 %), with the owner's A1 mini temperature tower of 2026-11-13 on top:
-  // 235 C nozzle (240 and 235 the cleanest walls; the spool's range is 210-240) on a 45 C textured plate.
+  // 235 C nozzle (240 and 235 the cleanest walls; the spool's range is 210-240). The bed is Studio's own for the printer, which is what
+  // that tower printed on: 30 C on the A1 mini (Generic TPU @BBL A1M), 35 C on the P1S (Generic TPU).
+  // The start G-code is Studio's expansion of the Generic TPU filament's, as its own slice of that tower has it
+  // (fixtures/print-planner/a1mini-0.4/studio-generic-tpu-tower.gcode.3mf): the fan line only over 30 C, then one line of a space.
   var TPU_START = function (bed) {
-    return ['; filament start gcode', bed > 35 ? 'M106 P3 S255' : bed > 30 ? 'M106 P3 S180' : '', ' ', ''];
+    var fan = bed > 35 ? 'M106 P3 S255' : bed > 30 ? 'M106 P3 S180' : null;
+    return ['; filament start gcode'].concat(fan ? [fan] : [], [' ']);
   };
+  var isA1Mini = function (config) { return /A1 mini/i.test(cfgRaw(config, 'printer_model') + cfgRaw(config, 'printer_settings_id')); };
   var FILAMENTS = {
     profile: { id: 'profile', label: 'Profile (PLA)' },
     'cr-tpu': {
@@ -141,15 +146,19 @@
         nozzle_temperature: '235', nozzle_temperature_initial_layer: '235',
         nozzle_temperature_range_low: '200', nozzle_temperature_range_high: '250',
         cool_plate_temp: '30', cool_plate_temp_initial_layer: '30', eng_plate_temp: '30', eng_plate_temp_initial_layer: '30',
-        hot_plate_temp: '45', hot_plate_temp_initial_layer: '45', textured_plate_temp: '45', textured_plate_temp_initial_layer: '45',
+        hot_plate_temp: '35', hot_plate_temp_initial_layer: '35', textured_plate_temp: '35', textured_plate_temp_initial_layer: '35',
         supertack_plate_temp: '0', supertack_plate_temp_initial_layer: '0',
         filament_max_volumetric_speed: '3.2', filament_flow_ratio: '1', filament_retraction_length: '0.4',
         filament_density: '1.24', temperature_vitrification: '30', filament_adhesiveness_category: '600', filament_cost: '20',
         close_fan_the_first_x_layers: '1', additional_cooling_fan_speed: '70', close_additional_fan_first_x_layers: '1'
       },
       cooling: { fan_min_speed: '100', fan_max_speed: '100', fan_cooling_layer_time: '100', slow_down_layer_time: '8', slow_down_min_speed: '10' },
+      /* what the printer's own Studio preset changes of those keys */
+      printerKeys: function (config) {
+        return isA1Mini(config) ? { hot_plate_temp: '30', hot_plate_temp_initial_layer: '30', textured_plate_temp: '30', textured_plate_temp_initial_layer: '30' } : {};
+      },
       start: TPU_START,
-      studioId: function (config) { return /A1 mini/i.test(cfgRaw(config, 'printer_model') + cfgRaw(config, 'printer_settings_id')) ? 'Generic TPU @BBL A1M' : 'Generic TPU'; }
+      studioId: function (config) { return isA1Mini(config) ? 'Generic TPU @BBL A1M' : 'Generic TPU'; }
     }
   };
   /* the rows that are a filament's: each the config key the planner reads (the bed's is its plate's, bedKeyOf) */
@@ -163,7 +172,8 @@
   function filamentKeys(config, id) {
     var f = filamentOf(id), out = {};
     if (!f.keys) return out;
-    Object.keys(f.keys).forEach(function (k) { if (config[k] !== undefined) out[k] = f.keys[k]; });
+    var keys = Object.assign({}, f.keys, f.printerKeys ? f.printerKeys(config) : {});
+    Object.keys(keys).forEach(function (k) { if (config[k] !== undefined) out[k] = keys[k]; });
     if (config.filament_settings_id !== undefined) out.filament_settings_id = f.studioId(config);
     return out;
   }

@@ -837,8 +837,6 @@
     return Pr.configBlock.map(function (l) {
       var m = /^; ([^ =]+) = (.*)$/.exec(l);
       if (m && over && Object.prototype.hasOwnProperty.call(over, m[1])) return '; ' + m[1] + ' = ' + configValue(m[2], over[m[1]]);
-      /* Studio's CONFIG_BLOCK holds no filament_retraction_length: the filament's own length is written as retraction_length */
-      if (m && over && m[1] === 'retraction_length' && isFinite(parseFloat(over.filament_retraction_length))) return '; retraction_length = ' + configValue(m[2], over.filament_retraction_length);
       if (!m || !Object.prototype.hasOwnProperty.call(map, m[1])) return l;
       var slots = m[2].split(',').length;
       var v = [];
