@@ -2311,7 +2311,8 @@
   var COLUMN_MIN_MM2 = 0.05;
   var COLUMN_SPILL_MM2 = 0.005;  /* a thin ring's bead may reach this much under or into the part (none to speak of: several rings at 0.05 touched 0.6 mm2) */
   var COLUMN_EDGE_OUT_MM = 0.38;  /* the overhang grown this much is the footprint: Bambu's loop centre 0.17 past the face's edge, and half a line */
-  var COLUMN_CUP_REACH_MM = 0.25;  /* THE CUP: a stack's lowest layer further than this past what is under it is cantilevered (its edge loop's bead
+  var COLUMN_CUP_REACH_MM = 0;     /* THE CUP, OFF (the owner, the 2x Oblique on the A1 mini: "Remove that bar and all of the patches" - on a slope the cup was a rail of Support under the stair's edge, and patches on the branches under the stack; Bambu has neither). 0.25 built it: */
+  var COLUMN_CUP_REACH_MM_WAS = 0.25;  /* THE CUP: a stack's lowest layer further than this past what is under it is cantilevered (its edge loop's bead
                                       would stand on less than half its width) */
   var COLUMN_TWIG_MM2 = 0.6;       /* a piece of the support's section smaller than this is a twig (a 0.85 mm thin column is 0.57) */
   var COLUMN_RISER_XY_MM = 0.2;   /* a support layer keeps this off the part's layers in the gap over it (a stair's riser): Bambu's 2x Oblique, none closer than 0.18 */
@@ -2688,7 +2689,8 @@
         var inn = dense.map(function (pt) { return inside(Rp, pt[0], pt[1]); });
         if (!inn.some(Boolean)) { p.feature = 'Support'; out.push(p); return; }
         var run = [];
-        var flush = function () { if (run.length >= 2) { var np2 = {}; Object.keys(p).forEach(function (kk) { np2[kk] = p[kk]; }); np2.pts = run; np2.closed = false; np2.feature = 'Support'; out.push(np2); } run = []; };
+        /* ...and a run shorter than a millimetre is no line (a dab where a ring's cut ends meet the stack: the owner's "patches") */
+        var flush = function () { var lr = 0; for (var qq = 1; qq < run.length; qq++) lr += Math.hypot(run[qq][0] - run[qq - 1][0], run[qq][1] - run[qq - 1][1]); if (run.length >= 2 && lr >= 1) { var np2 = {}; Object.keys(p).forEach(function (kk) { np2[kk] = p[kk]; }); np2.pts = run; np2.closed = false; np2.feature = 'Support'; out.push(np2); } run = []; };
         for (var q2 = 0; q2 < dense.length; q2++) { if (inn[q2]) flush(); else run.push(dense[q2]); }
         if (p.closed && run.length && !inn[0]) { run.push(dense[0]); }
         flush();
