@@ -42,7 +42,7 @@ owner's A1 mini temperature tower (2026-11-13, dried spool, 240 down to 210 C):
 
 Not yet measured for this spool: the real max flow (3.2 is Studio's conservative Generic value),
 retraction beyond 0.4 mm, the flow ratio, and bridges at 235 C (they sag; slower bridges is the
-first lever). The P1S entry is the same keys and has not been printed.
+first lever). The P1S entry is the same keys with its own bed and has not been printed.
 
 When sending: untick the AMS, and turn off flow dynamics calibration (Bambu's advice for TPU).
 
@@ -68,11 +68,13 @@ limit. The PLA slice only shows the PLA side of each `{PLA?a:b}`; the other side
 thaws each block with the slice's own values and requires the slice's own lines back, so PLA is
 unchanged (`print:planner`).
 
-**The A1 mini's TPU side is checked against Studio.**
-`fixtures/print-planner/a1mini-0.4/studio-generic-tpu-tower.gcode.3mf` is the owner's temperature
-tower as Studio 02.09.01.70 sliced it (Generic TPU @BBL A1M, 240 C, bed 30). `print:slice` 3c
-thaws NSO's start block with that slice's numbers and requires Studio's 472 lines back, and the
-filament start G-code after it. The P1S has no TPU slice in the repo yet.
+**The TPU side is checked against Studio on both printers.**
+`fixtures/print-planner/<printer>/studio-generic-tpu-tower.gcode.3mf` is the owner's temperature
+tower as Studio 02.09.01.70 sliced it: Generic TPU @BBL A1M at 240 C on a 30 C bed for the A1 mini,
+Generic TPU at 240 C on a 35 C bed for the P1S. `print:slice` (3c and 5) thaws NSO's start block
+with each slice's numbers and requires Studio's lines back (472 and 269), and the filament start
+G-code after it. The P1S slice is why a `{?PLA}` line is absent for another filament, not empty:
+Studio's TPU start has none of the PLA fan block's four lines.
 
 The planner also reads the filament's own retraction (`filament_retraction_length`, where it is
 not `nil`): Studio's TPU slice retracts 0.4 mm while its CONFIG_BLOCK still says

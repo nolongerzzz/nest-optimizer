@@ -131,12 +131,13 @@
   // 235 C nozzle (240 and 235 the cleanest walls; the spool's range is 210-240). The bed is Studio's own for the printer, which is what
   // that tower printed on: 30 C on the A1 mini (Generic TPU @BBL A1M), 35 C on the P1S (Generic TPU).
   // The start G-code is Studio's expansion of the Generic TPU filament's, as its own slice of that tower has it
-  // (fixtures/print-planner/a1mini-0.4/studio-generic-tpu-tower.gcode.3mf): the fan line only over 30 C, then one line of a space.
-  var TPU_START = function (bed) {
-    var fan = bed > 35 ? 'M106 P3 S255' : bed > 30 ? 'M106 P3 S180' : null;
-    return ['; filament start gcode'].concat(fan ? [fan] : [], [' ']);
-  };
+  // (fixtures/print-planner/<printer>/studio-generic-tpu-tower.gcode.3mf): the fan line only over 30 C, then one line of a space - and
+  // on the P1S (Generic TPU @base's text, not the A1M preset's) an empty line after it.
   var isA1Mini = function (config) { return /A1 mini/i.test(cfgRaw(config, 'printer_model') + cfgRaw(config, 'printer_settings_id')); };
+  var TPU_START = function (bed, config) {
+    var fan = bed > 35 ? 'M106 P3 S255' : bed > 30 ? 'M106 P3 S180' : null;
+    return ['; filament start gcode'].concat(fan ? [fan] : [], isA1Mini(config) ? [' '] : [' ', '']);
+  };
   var FILAMENTS = {
     profile: { id: 'profile', label: 'Profile (PLA)' },
     'cr-tpu': {
@@ -274,7 +275,7 @@
     var S = PL.settingsFrom(config);
     return {
       cooling: f.cooling && CP ? Object.assign({}, CP.resolveValues(CP.DEFAULT_PROFILE_ID), f.cooling) : undefined,
-      filamentStart: f.start ? f.start(Math.max(S.temp.bed, S.temp.bedInitial)) : undefined,
+      filamentStart: f.start ? f.start(Math.max(S.temp.bed, S.temp.bedInitial), config) : undefined,
       tempSteps: settings.tempStep ? { stepC: settings.tempStep, bandMm: settings.tempBand } : undefined
     };
   }

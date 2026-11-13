@@ -694,7 +694,8 @@
    *   {OW*n} {OW/2.4}    outer_wall_volumetric_speed times n (the purge line's feeds), or / 2.4
    *   {PLA?a:b}          the template's {if filament_type == "PLA"} a {else} b; b may be FLUSHT
    *   {?PLA} {?PLAHOT}   at a line's start: the line is the template's only for PLA
-   *                      (PLAHOT: and a bed over 45); otherwise it is empty
+   *                      (PLAHOT: and a bed over 45). Another filament has no such line;
+   *                      PLA on a cooler bed has an empty one
    * @param {Array} lines  a frozen start / afterStart / beforeEnd / end
    * @param {object} v     { nozzle, nozzleT, bed, bedMax, box:{x,y,w,h}, cy, maxZ, filamentType, flushV, flushT, ow }
    */
@@ -705,8 +706,8 @@
       if (s.charAt(0) === '{' && s.charAt(1) === '?') {
         var cond = /^\{\?(PLAHOT|PLA)\}/.exec(s);
         if (cond) {
-          var keep = pla && (cond[1] === 'PLA' || (v.bedMax != null ? v.bedMax : v.bed) > 45);
-          if (!keep) return '';
+          if (!pla) return null;
+          if (cond[1] === 'PLAHOT' && !((v.bedMax != null ? v.bedMax : v.bed) > 45)) return '';
           s = s.slice(cond[0].length);
         }
       }
@@ -727,7 +728,7 @@
     };
     var out = [];
     lines.forEach(function (l) {
-      if (typeof l === 'string') out.push(sub(l));
+      if (typeof l === 'string') { var t = sub(l); if (t !== null) out.push(t); }
       else if (l.hook) { if (opts[l.hook] !== false) out.push(l.line); }
       else if (l.zTop) (v.maxZ + 100 < l.cap ? l.zTop : l.zTopElse).forEach(function (z) { out.push(sub(z)); });
       else throw new Error('unknown frozen element ' + JSON.stringify(l));

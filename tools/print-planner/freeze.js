@@ -33,7 +33,8 @@
  *   {FLUSHT}            flush_temperatures
  *   {OW*n} {OW/2.4}     outer_wall_volumetric_speed x n, or / 2.4: the purge line's feeds
  *   {PLA?a:b}           the template's {if filament_type == "PLA"} a {else} b {endif}
- *   {?PLA} {?PLAHOT}    a line the template writes only for PLA (PLAHOT: and a bed over 45)
+ *   {?PLA} {?PLAHOT}    a line the template writes only for PLA (PLAHOT: and a bed over 45): another
+ *                       filament's block has no such line at all; PLA on a cooler bed has an empty one
  *
  * The slice shows the PLA side only; the other side of each {PLA?a:b} is read off
  * machine_start_gcode in the printer's template (fixtures/bambu-templates/<id>),
@@ -127,6 +128,18 @@ const PRINTERS = {
       [/^M109 S220$/, 'M109 S{N}', 1],
       [/^( *)G29 A X[\d.]+ Y[\d.]+ I[\d.]+ J[\d.]+$/, '$1G29 A X{BX} Y{BY} I{BW} J{BH}', 1]
     ],
+    /* ...and the lines that block leaves behind for PLA - the four spaces of its inner {if}'s line before the fan line, the empty
+       line of its {endif} after the comment - are PLA's too: Studio's own TPU slice (studio-generic-tpu-tower.gcode.3mf) has none of the four */
+    startAfter: lines => {
+      let n = 0;
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i] !== '{?PLA}    ;Prevent PLA from jamming') continue;
+        if (lines[i - 2] !== '    ' || lines[i + 1] !== '') throw new Error('p1s-0.4 start: the PLA fan block is not the shape expected at line ' + i);
+        lines[i - 2] = '{?PLA}    '; lines[i + 1] = '{?PLA}'; n++;
+      }
+      if (n !== 2) throw new Error('p1s-0.4 start: ' + n + ' PLA fan blocks, expected 2');
+      return lines;
+    },
     end: [
       [/^G1 Z[\d.]+ F900 ; lower z a little$/, 'G1 Z{Z+0.5} F900 ; lower z a little', 1]
     ]
@@ -192,6 +205,7 @@ async function build(id) {
   const startRaw = lines.slice(iExec + 2, iMEnd + 1);
   const afterRaw = lines.slice(iMEnd + 1, iLayer);
   let start = applyRules(freezeM73(startRaw, totalSeconds), P.start, id + ' start');
+  if (P.startAfter) start = P.startAfter(start);
   const spaghettiOpen = afterRaw.filter(l => /^M981 S1 /.test(l));
   let after = freezeM73(afterRaw, totalSeconds);
   after = after.map(l => /^M981 S1 /.test(l) ? { hook: 'spaghetti', line: l } : l);

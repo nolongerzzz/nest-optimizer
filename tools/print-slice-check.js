@@ -340,7 +340,7 @@ async function main() {
       const off = want.findIndex((l, i) => l !== got[i]);
       check('Studio\'s own Generic TPU slice for the A1 mini: NSO\'s start block with that slice\'s numbers is Studio\'s, all ' + want.length + ' lines (TPU, 3.2 mm^3/s, 240 C, bed 30)',
         S.filament.type === 'TPU' && want.length === got.length && off < 0, off >= 0 ? 'line ' + off + ': ' + JSON.stringify([want[off], got[off]]) : want.length + ' / ' + got.length);
-      const wantAfter = noM73(sl.slice(iM + 1, iL)), fs0 = PRINT.FILAMENTS['cr-tpu'].start(30);
+      const wantAfter = noM73(sl.slice(iM + 1, iL)), fs0 = PRINT.FILAMENTS['cr-tpu'].start(30, tpl);
       const vt = a1.afterStart.findIndex(l => typeof l === 'string' && /^;VT\d/.test(l));
       const gotAfter = noM73(PL.thaw(fs0.concat(a1.afterStart.slice(vt)), v, {}));
       check('...and so is the filament\'s own start G-code after it (no fan line at a 30 C bed)', JSON.stringify(wantAfter) === JSON.stringify(gotAfter), JSON.stringify([wantAfter, gotAfter]));
@@ -397,6 +397,29 @@ async function main() {
     check('...the file is the P1S\'s (model id C12) and Studio-shaped (md5 of its G-code)',
       /key="printer_model_id" value="C12"/.test(L.text(await z2.read('Metadata/slice_info.config'))) &&
         crypto.createHash('md5').update(Buffer.from(L.text(await z2.read('Metadata/plate_1.gcode')))).digest('hex').toUpperCase() === L.text(await z2.read('Metadata/plate_1.gcode.md5')).trim());
+  }
+
+  {
+    // STUDIO'S OWN TPU SLICE FOR THE P1S (the owner's temperature tower, Generic TPU, Studio 02.09.01.70): the same check as the A1 mini's (3c)
+    const st = await L.bambuSlice('fixtures/print-planner/p1s-0.4/studio-generic-tpu-tower.gcode.3mf');
+    const sl = st.gcode.split('\n'), noM73 = a => a.filter(l => !/^@?M73 /.test(l));
+    const iE = sl.indexOf('; EXECUTABLE_BLOCK_START'), iM = sl.indexOf('; MACHINE_START_GCODE_END'), iL = sl.indexOf('; CHANGE_LAYER');
+    const cfg = k => ((new RegExp('^; ' + k + ' = (.*)$', 'm').exec(st.gcode) || [])[1] || '').split(',')[0];
+    const gm = /X([\d.]+) Y([\d.]+) I([\d.]+) J([\d.]+)/.exec(sl.find(l => /^\s*G29 A X/.test(l)));
+    const c = {};
+    ['filament_type', 'filament_max_volumetric_speed', 'nozzle_temperature_range_high', 'filament_flush_temp', 'filament_flush_volumetric_speed', 'outer_wall_speed', 'outer_wall_line_width',
+     'layer_height', 'nozzle_temperature', 'nozzle_temperature_initial_layer', 'textured_plate_temp', 'textured_plate_temp_initial_layer', 'curr_bed_type'].forEach(k => { c[k] = cfg(k); });
+    const S = PL.settingsFrom(c);
+    const v = { nozzle: S.temp.nozzleInitial, nozzleT: S.temp.nozzle, bed: S.temp.bedInitial, bedMax: Math.max(S.temp.bed, S.temp.bedInitial), box: { x: +gm[1], y: +gm[2], w: +gm[3], h: +gm[4] }, cy: 0, maxZ: 0,
+      filamentType: S.filament.type, flushV: S.filament.flushVolumetric, flushT: S.filament.flushTemp, ow: S.filament.outerWallVolumetric };
+    const want = noM73(sl.slice(iE + 2, iM + 1)), got = noM73(PL.thaw(p1sPrinter.start, v, {}));
+    const off = want.findIndex((l, i) => l !== got[i]);
+    check('Studio\'s own Generic TPU slice for the P1S: NSO\'s start block with that slice\'s numbers is Studio\'s, all ' + want.length + ' lines (TPU, 3.2 mm^3/s, 240 C, bed 35; no PLA fan block)',
+      S.filament.type === 'TPU' && S.temp.bedInitial === 35 && want.length === got.length && off < 0, off >= 0 ? 'line ' + off + ': ' + JSON.stringify([want[off], got[off]]) : want.length + ' / ' + got.length);
+    const vt = p1sPrinter.afterStart.findIndex(l => typeof l === 'string' && /^;VT\d/.test(l));
+    const wantAfter = noM73(sl.slice(iM + 1, iL)), gotAfter = noM73(PL.thaw(PRINT.FILAMENTS['cr-tpu'].start(35, p1sCfg).concat(p1sPrinter.afterStart.slice(vt)), v, {}));
+    check('...and so is the filament\'s own start G-code after it (M106 P3 S180 at a 35 C bed)', JSON.stringify(wantAfter) === JSON.stringify(gotAfter), JSON.stringify([wantAfter, gotAfter]));
+    check('...the card\'s CR-TPU on the P1S has that bed: 235 C, bed 35, 3.2 mm^3/s', JSON.stringify(PRINT.filamentBase(p1sCfg, 'cr-tpu')) === JSON.stringify({ nozzleTemp: 235, firstTemp: 235, bedTemp: 35, maxFlow: 3.2, rangeLow: 200, rangeHigh: 250 }));
   }
 
   // ===========================================================================
