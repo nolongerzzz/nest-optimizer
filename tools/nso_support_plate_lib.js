@@ -40,7 +40,7 @@ const CORE = ['updateUndoBtn', 'pushUndo', 'clearUndo', 'clearRedo', 'undoLast',
   'addModel', 'addModelFromZUpGeometry', 'zUpToYUp', 'placeNewModel', 'placeModelMovable',
   'clearSelectionOutline', 'selectPlaced', 'nsoSelAllPieces', 'nsoLitPieces', 'nsoLooksSelected', 'nsoPaintSelLook'];
 const ENGINE = ['nso_thickness.js', 'nso_support_beacons.js', 'nso_support_aim.js', 'nso_path_sweep.js',
-  'nso_support_tree.js', 'nso_support_gridpack.js', 'nso_raster_lines.js', 'nso_crosshatch.js', 'nso_support_interface.js'];
+  'nso_support_tree.js', 'nso_support_flow.js', 'nso_support_gridpack.js', 'nso_raster_lines.js', 'nso_crosshatch.js', 'nso_support_interface.js'];
 
 /* A page element: the properties and methods the card touches, and the listeners it adds. */
 function makeDom() {

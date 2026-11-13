@@ -136,6 +136,7 @@ merging its list by hand. The list below is generated.
 - [SUBTRACT card - collapsing sections, one per tool; Detach flange under Lift; Hollow live (2026-10-23)](handoff/subtract-card.md)
 - [Subtract B from A - picks its own A and B, no trip to the Join card (2026-11-06)](handoff/subtract-pick.md)
 - [Support aim - find the overhang, then point one straight strut at it (2026-09-19)](handoff/support-aim-find-the-overhang-then-point-one-straight-strut-at.md)
+- [Support flow - one program grows every tree; Tests #432 green again (2026-11-13)](handoff/support-flow.md)
 - [Support tree - a trunk that stops, and branches that finish the job](handoff/support-tree-a-trunk-that-stops-and-branches-that-finish-the-job.md)
 - [Supports angle default - 35, and Bambu's 30 is from horizontal too (2026-10-21)](handoff/supports-angle-default-35-and-bambus-30-is-from-horizontal-too.md)
 - [Supports Blockers and Slice and Preview](handoff/supports-blockers-and-slice-preview.md)

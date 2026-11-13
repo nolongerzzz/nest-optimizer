@@ -191,7 +191,7 @@ var NSO_SUPPORTS_CARD = (function () {
   var PHASE_SPAN = { planning: [0, 50], building: [50, 100] };
   /* The planner's files, in index.html's order: what the build worker loads. */
   var ENGINE = ['nso_thickness.js', 'nso_support_beacons.js', 'nso_support_aim.js', 'nso_path_sweep.js',
-    'nso_support_tree.js', 'nso_support_gridpack.js', 'nso_raster_lines.js', 'nso_crosshatch.js', 'nso_support_interface.js'];
+    'nso_support_tree.js', 'nso_support_flow.js', 'nso_support_gridpack.js', 'nso_raster_lines.js', 'nso_crosshatch.js', 'nso_support_interface.js'];
   /* What the build asks of NSO_SupportGridpack.parts: every tip that meets the
      part ends in a flat cap under the interface sheet (nso_support_interface.js,
      sheet(): 2 transition and 2 interface layers at 0.84 mm, each a loop

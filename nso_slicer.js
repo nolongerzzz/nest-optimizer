@@ -1605,7 +1605,9 @@
           // Detect thin wall: the thin islands come out of the region and
           // print as their centre passes; with none, the region is as it was
           var thin = P.thin ? thinWalls(g, region, o) : null;
-          var per = perimeters(g, thin ? thin.rest : region, h, oS, oS.onlyOneWallTop ? above : null);
+          /* a support has one loop and no top shell: the one-wall-on-top rule has no loop to drop there, and left to run it kept the fill out from under
+             whatever stands on the layer - a pad with a pocket between its trunks printed hollow under every trunk, their second layer over air */
+          var per = perimeters(g, thin ? thin.rest : region, h, oS, oS.onlyOneWallTop && P.role !== 'support' ? above : null);
           L.wallCount = per.wallCount;
           L.wallLoopsByDepth = per.loops.map(function (lp) { return g.polys(lp.cs).length; });
 
@@ -2328,6 +2330,8 @@
                                     0: no base - the transition spans between the tree's tips, as Bambu's does (a base of 3 mm printed as a block under every plate) */
   var COLUMN_TUBE_FILL_BELOW_MM = 1;     /* the tree's rings are crossed with base lines from this far under the part's lowest stack up (Bambu's) */
   var COLUMN_TUBE_MID_SNAP_MM = 0.4, COLUMN_TUBE_MID_MIN_MM = 0.5;   /* ...and a ring no line of the grid crosses takes one across its middle */
+  var COLUMN_TUBE_FILL_MAX_MM = 2.6;     /* ...a line across a RING (a branch near its top), no longer: branches joined into one body are hollow, and a line across that lies over air */
+  var COLUMN_TUBE_RING_MAX_MM2 = 6;      /* ...and only a piece this small is a ring (a 2 mm tip is 3.1 mm2, 2.6 across 5.3) */
   var COLUMN_TUBE_FILL_PITCH_MM = 2.5;   /* ...that far apart: Bambu's support_base_pattern_spacing */
   var COLUMN_BASE_PITCH_MM = 2;  /* the base's lines (Support), as far apart as this: the transition over it spans no more */
   /* the loops a stack's piece is laid with: one half a line in from its edge; a piece narrower than a line (a dome's or a cone's ring of contact,
@@ -2760,10 +2764,13 @@
         if (!g.isEmpty(treeJ)) g.parts(treeJ).forEach(function (pc) {
           var inC = g.offset(pc, -wI * 0.5);
           if (g.isEmpty(inC)) return;
+          if (pc.area() > COLUMN_TUBE_RING_MAX_MM2) return;                     /* no ring: branches joined into one body, hollow */
           var cs2 = scanFill(g.polys(inC), aD, COLUMN_TUBE_FILL_PITCH_MM, 0), got = 0;
           cs2.forEach(function (sg) {
             var a0 = sg.a, b0 = sg.b;
-            if (Math.hypot(b0[0] - a0[0], b0[1] - a0[1]) >= 1) { out.push({ feature: 'Support', width: wI, closed: false, pts: [a0, b0], sheetFill: true, colPlate: true }); got++; }
+            var lnF = Math.hypot(b0[0] - a0[0], b0[1] - a0[1]);
+            if (lnF > COLUMN_TUBE_FILL_MAX_MM) { got++; return; }      /* no ring: a body of branches joined, hollow - a line across it would lie over air */
+            if (lnF >= 1) { out.push({ feature: 'Support', width: wI, closed: false, pts: [a0, b0], sheetFill: true, colPlate: true }); got++; }
           });
           /* A RING THE GRID MISSES (the owner: "the tips are still not complete" - a tip's ring is 1.5 - 2 mm across, the grid's lines 2.5 apart, and
              most tips' rings stood hollow up to the stack): one line across its middle, on a COLUMN_TUBE_MID_SNAP_MM grid so a straight tip's lines
@@ -2774,7 +2781,8 @@
             var yMid = Math.round((yLo + yHi) / 2 / COLUMN_TUBE_MID_SNAP_MM) * COLUMN_TUBE_MID_SNAP_MM;
             if (!(yMid > yLo && yMid < yHi)) yMid = (yLo + yHi) / 2;
             scanFill(g.polys(inC), aD, 1e6, yMid).forEach(function (sg) {
-              if (Math.hypot(sg.b[0] - sg.a[0], sg.b[1] - sg.a[1]) >= COLUMN_TUBE_MID_MIN_MM) out.push({ feature: 'Support', width: wI, closed: false, pts: [sg.a, sg.b], sheetFill: true, colPlate: true });
+              var lnM = Math.hypot(sg.b[0] - sg.a[0], sg.b[1] - sg.a[1]);
+              if (lnM >= COLUMN_TUBE_MID_MIN_MM && lnM <= COLUMN_TUBE_FILL_MAX_MM) out.push({ feature: 'Support', width: wI, closed: false, pts: [sg.a, sg.b], sheetFill: true, colPlate: true });
             });
           }
         });
