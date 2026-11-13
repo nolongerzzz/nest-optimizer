@@ -124,8 +124,8 @@ async function main() {
     /* a Dense support prints with the profile's own support settings (the owner's P1S, 2x supp_ref: the reference's interface spacing 0.1,
        3 top layers and 20 / 45 angles welded five heads of six; the profile's 0.5 and 3.6 released clean): nothing written over them */
     const o0 = opts[0] || {};
-    check('...a Dense support slices at the profile\'s interface spacing and angles (0.5, 0 / 0), and the file carries no override of them',
-      o0.supportInterfaceSpacingMm === 0.5 && o0.supportAngleDeg === 0 && o0.bridgeAngleDeg === 0 && o0.supportInterfaceAngle === 'profile' &&
+    check('...a Dense support slices at the profile\'s interface spacing (0.5) with the card\'s 3.6 angles, and the file carries no override of them',
+      o0.supportInterfaceSpacingMm === 0.5 && o0.supportAngleDeg === 0 && o0.bridgeAngleDeg === 0 && o0.supportInterfaceAngle === 'studio36' &&
       dOut && dOut.ok && ['support_interface_spacing', 'support_interface_top_layers', 'support_angle', 'bridge_angle'].every(k => dOut.changed.indexOf(k) < 0),
       JSON.stringify([o0.supportInterfaceSpacingMm, o0.supportAngleDeg, o0.bridgeAngleDeg, o0.supportInterfaceAngle, dOut && dOut.changed]));
   }
@@ -195,7 +195,7 @@ async function main() {
   {
     const base = PRINT.settingsFromConfig(tpl);
     check('the settings start at the A1 mini template\'s values: 0.4 nozzle, 0.2 mm layers, 2 walls, 15 % grid, support below 30°, auto brim, no raft (0.1 contact)',
-      JSON.stringify(base) === JSON.stringify({ nozzle: 0.4, layer: 0.2, walls: 2, density: 15, pattern: 'grid', angle: 30, brim: 'auto', raft: 0, raftGap: 0.1, ifaceAngle: 'profile', interfaceRule: null }), JSON.stringify(base));
+      JSON.stringify(base) === JSON.stringify({ nozzle: 0.4, layer: 0.2, walls: 2, density: 15, pattern: 'grid', angle: 30, brim: 'auto', raft: 0, raftGap: 0.1, ifaceAngle: 'studio36', interfaceRule: null }), JSON.stringify(base));
     const rov = PRINT.configOverlay(tpl, Object.assign({}, base, { raft: 10 }));
     check('a raft of 10 on the card is the file\'s raft_layers = 10, and nothing else changes', JSON.stringify(rov) === JSON.stringify({ raft_layers: '10' }), JSON.stringify(rov));
     check('...which are the card\'s markup defaults too (shown before the template is fetched)', JSON.stringify(PRINT.SETTINGS_DEFAULT) === JSON.stringify(base));

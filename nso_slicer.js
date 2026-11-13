@@ -300,8 +300,7 @@
       brimWidthMm: 5,
       brimObjectGapMm: 0.1,
       brimLineWidthMm: null,               // null -> 1.25 x the nozzle (Bambu's first-layer line, 0.5 mm at 0.4)
-      brimAutoRatio: 2,                    // (no width known) height over the root of the foot's area
-      brimAutoAreaRatio: 0.65,             // auto: height / foot area x height / widest plan side (brimWanted; Bambu's 1x heads 0.89 brimmed, 2x 0.45 not)
+      brimAutoRatio: 2,
       brimSupportGapMm: 0.02,
       supportLayerMaxMm: 0,                // 0 = supports are cut on the part's layers; 0.28 = on their own (Bambu's independent_support_layer_height): see sliceObjects
       supportInterfaceLayers: null,        // null -> CONSTANTS.supportSheet.interfaceLayers (2); a sheet of more says so
@@ -1907,20 +1906,9 @@
   }
 
   /** Does this part want a brim? 'outer' every part; 'auto' one tall for its foot. */
-  /* AUTO, AS BAMBU WEIGHS IT (Studio 02.09: supp_ref's heads brimmed at 1x - supp_ref_v2 - and not at 2x - the owner's 2x supp_ref on the A1
-     mini and the P1S, the same shapes): tall for its foot's AREA and for its own width, not a ratio a scale leaves alone - height over the
-     first layer's area times height over the part's widest plan side (xyMm) at least brimAutoAreaRatio (1x heads 0.89, 2x 0.45). Without the
-     width, the old ratio: height over the root of the foot's area */
-  function brimWanted(o, heightMm, footMm2, xyMm) {
+  function brimWanted(o, heightMm, footMm2) {
     if (!o.brimType || o.brimType === 'none') return false;
-    if (o.brimType === 'outer') return true;
-    if (xyMm > 0 && o.brimAutoAreaRatio > 0) return heightMm / Math.max(footMm2, 1e-6) * (heightMm / xyMm) >= o.brimAutoAreaRatio;
-    return heightMm / Math.sqrt(Math.max(footMm2, 1e-6)) >= o.brimAutoRatio;
-  }
-  function xySpan(soup) {
-    var x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
-    for (var i = 0; i + 2 < soup.length; i += 3) { var x = soup[i], y = soup[i + 1]; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
-    return isFinite(x0) ? Math.max(x1 - x0, y1 - y0) : 0;
+    return o.brimType === 'outer' || heightMm / Math.sqrt(Math.max(footMm2, 1e-6)) >= o.brimAutoRatio;
   }
 
   /**
@@ -1954,7 +1942,7 @@
       var S0 = section0(soup);
       if (g.isEmpty(S0)) return { ok: true, needed: false, reason: 'the part has no first layer' };
       var outers = g.polys(S0).filter(function (p) { return signedArea(p) > 0; });
-      if (!brimWanted(o, zMax - zMin, g.area(S0), xySpan(soup))) return { ok: true, needed: false, reason: 'stands on a wide foot' };
+      if (!brimWanted(o, zMax - zMin, g.area(S0))) return { ok: true, needed: false, reason: 'stands on a wide foot' };
       var w = o.brimLineWidthMm > 0 ? o.brimLineWidthMm : o.nozzleMm * 1.25, gap = Math.max(0, o.brimObjectGapMm || 0);
       var region = g.of(outers, 'Positive');
       var ring = g.diff(g.offset(region, o.brimWidthMm, 'Round'), g.offset(region, gap, 'Round'));
@@ -2082,10 +2070,7 @@
       if (!outers.length) return;
       var top = 0;
       P.layers.forEach(function (L) { if (L.areaMm2 > 0 && L.printZ > top) top = L.printZ; });
-      var xyP = 0;
-      P.layers.forEach(function (L2, li) { var Sl = P.S[li]; if (Sl && !g.isEmpty(Sl)) g.polys(Sl).forEach(function (pl) { pl.forEach(function (v) { if (!P._bx) P._bx = [v[0], v[0], v[1], v[1]]; var b = P._bx; if (v[0] < b[0]) b[0] = v[0]; if (v[0] > b[1]) b[1] = v[0]; if (v[1] < b[2]) b[2] = v[1]; if (v[1] > b[3]) b[3] = v[1]; }); }); });
-      if (P._bx) xyP = Math.max(P._bx[1] - P._bx[0], P._bx[3] - P._bx[2]);
-      if (!brimWanted(o, top, g.area(S0), xyP)) return;
+      if (!brimWanted(o, top, g.area(S0))) return;
       var region = g.of(outers, 'Positive');
       var others = [];
       perObject.forEach(function (Q) { if (Q !== P && Q.S[0] && !g.isEmpty(Q.S[0])) others.push(Q.S[0]); });

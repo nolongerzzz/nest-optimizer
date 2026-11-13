@@ -535,7 +535,7 @@ layer only, round the part's outer boundary, 10 loops of a 0.5 mm line at the st
 (centres 0.35 mm off the outline), the outermost 4.46 mm, printed outermost first and before everything else on the layer, as feature
 `Brim` (G-code `; FEATURE: Brim`). Each loop is cut where it would come within half a line (+ 0.02 mm) of another object's first layer -
 a support's pad - so the brim and the pad touch edge to edge (Bambu's: 0 - 0.05 mm) and never join; a run under 1 mm is dropped. Auto
-brims a part that is tall for its foot as Bambu weighs it: height over the first layer's area times height over the part's widest plan side at least 0.65 (`brimAutoAreaRatio`; Studio 02.09 brims supp_ref's heads at 1x - 0.89 - and not at 2x - 0.45, the owner's P1S print welded the 2x pillars to their brims). Not a ratio a scale leaves alone: with no width known, the old height over the root of the foot's area, at least 2.
+brims a part that is tall for its foot (height over the root of the first layer's area at least 2: the stem of a chalice, a tower).
 **A part on supports gets no auto brim** (the owner: "the box is unchecked" - Brim round the foot off is no brim): its brim is the
 supports card's (Brim round the foot, a brim object of its own, below) or none. Bambu's supp_ref_v2 rings the trunks' feet in auto; NSO does not.
 The brim is a tall thin part's added hold, the way the tree's pad is the support's: for these heads it is all that holds the stem
