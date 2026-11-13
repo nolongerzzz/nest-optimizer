@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=7620467b" />
+  <link rel="stylesheet" href="styles.css?v=d880ef9c" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -1499,9 +1499,35 @@
                         <option value="">sheet</option>
                         <option value="column" selected>column</option>
                       </select></label>
+                    <!-- THE FILAMENT (docs/FILAMENTS.md): which filament, the four numbers a filament is tuned by (empty: the filament's own), and
+                         temperature steps by height - any model sliced as a temperature tower -->
+                    <label for="slice-set-filament" class="slice-set-wide slice-set-first">filament
+                      <select id="slice-set-filament" title="The filament the plate prints with. Profile is the printer profile's own (PLA). Another filament brings its own temperatures, max flow, retraction, fan and start G-code, and the file names it so the printer knows what is loaded." autocomplete="off">
+                        <option value="profile" selected>Profile (PLA)</option>
+                        <option value="cr-tpu">Creality CR-TPU 95A</option>
+                      </select></label>
+                    <label for="slice-set-nozzle-temp" class="slice-set-unit">temp
+                      <input type="number" id="slice-set-nozzle-temp" min="170" max="300" step="5" placeholder="auto" inputmode="numeric"
+                             title="Nozzle temperature after the first layer, °C. Empty: the filament's own. With a temp step, this is the temperature the steps start from." autocomplete="off" />&deg;C</label>
+                    <label for="slice-set-first-temp" class="slice-set-unit">first layer
+                      <input type="number" id="slice-set-first-temp" min="170" max="300" step="5" placeholder="auto" inputmode="numeric"
+                             title="Nozzle temperature of the first layer, °C. Empty: the filament's own." autocomplete="off" />&deg;C</label>
+                    <label for="slice-set-bed-temp" class="slice-set-unit">bed
+                      <input type="number" id="slice-set-bed-temp" min="0" max="110" step="5" placeholder="auto" inputmode="numeric"
+                             title="Bed temperature, °C. Empty: the filament's own for this plate." autocomplete="off" />&deg;C</label>
+                    <label for="slice-set-max-flow" class="slice-set-unit">max flow
+                      <input type="number" id="slice-set-max-flow" min="0.5" max="40" step="0.2" placeholder="auto" inputmode="decimal"
+                             title="The most filament the hotend is asked to melt, mm³ a second. Every speed is held under it (and the start's purge line follows it). Empty: the filament's own." autocomplete="off" />mm&sup3;/s</label>
+                    <label for="slice-set-temp-step" class="slice-set-unit">temp step
+                      <input type="number" id="slice-set-temp-step" value="0" min="-25" max="25" step="1" inputmode="numeric"
+                             title="Change the nozzle temperature by this much at every band of height: -5 with temp 240 prints 240, 235, 230 ... up the model (a temperature tower from any model). 0: off. The change is made without stopping, at the layer change." autocomplete="off" />&deg;C</label>
+                    <label for="slice-set-temp-band" class="slice-set-unit">every
+                      <input type="number" id="slice-set-temp-band" value="10" min="1" max="100" step="1" inputmode="decimal"
+                             title="The height of one temperature band, mm, counted from the plate." autocomplete="off" />mm</label>
+                    <p class="slice-settings-note" id="slice-filament-note" hidden></p>
                     <p class="slice-settings-note" id="slice-settings-note">From the plate's printer profile. They take effect on the next slice, and the .gcode.3mf records them.</p>
                     <button id="slice-settings-reset" type="button" class="btn btn-secondary"
-                            title="Every setting but the interface back to the printer profile's value">Profile values</button>
+                            title="Every setting but the interface back to the printer profile's value, the filament included">Profile values</button>
                   </div>
                   <div class="sup-go-row">
                     <button id="btn-slice-go" class="btn btn-secondary sup-go" type="button"
@@ -3150,9 +3176,9 @@
        uses them. After nso_slicer.js, nso-cooling-profiles.js, nso-3mf.js and
        nso-3mf-read.js, which they read at load, and after app-microscope.js, whose
        plate reader and G-code import it calls. See docs/PRINT-PLANNER.md. -->
-  <script src="nso-print-planner.js?v=73a32dd8"></script>
+  <script src="nso-print-planner.js?v=8e1c84de"></script>
   <script src="nso-gcode3mf-write.js?v=cdfa15b4"></script>
-  <script src="app-print.js?v=ae2ee6a9"></script>
+  <script src="app-print.js?v=951c4869"></script>
   <!-- Lift: details off a face, the face left as it was round them. After
        nso_lift.js (Phase 1: a flat face), nso_lift_curved.js (Lift 3: the
        repair under a detail lifted off a curved base), nso_lift_auto.js

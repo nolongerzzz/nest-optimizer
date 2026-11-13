@@ -196,6 +196,9 @@ What Studio's file has that `toGcode()`'s text does not, and where each landed.
 
 ## The Slice card (print-slice-main-plate)
 
+The filament rows (which filament, its temperatures and max flow, temperature steps by height) and what the
+start block takes from the filament are in [FILAMENTS.md](FILAMENTS.md).
+
 `app-print.js`, `#slice-card`: the **last section of the supports card** (`#sup-slice-sec`), not a
 button of its own in the left bar any more (the owner: one job, not a slice to draw the supports and
 another to print them). **Generate slices**: once every piece's supports are built, the plate is

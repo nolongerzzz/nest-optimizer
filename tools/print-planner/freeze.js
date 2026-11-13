@@ -25,6 +25,20 @@
  *                       progress marker (the planner writes P and R from its
  *                       own time model)
  *
+ * and what it computes from the FILAMENT (docs/FILAMENTS.md), so a filament that
+ * is not the slice's PLA gets its own start block and not PLA's:
+ *
+ *   {FTYPE}             filament_type (the A1's "M1002 set_filament_type:")
+ *   {FLUSHF}            flush_volumetric_speeds / 2.4053 * 60
+ *   {FLUSHT}            flush_temperatures
+ *   {OW*n} {OW/2.4}     outer_wall_volumetric_speed x n, or / 2.4: the purge line's feeds
+ *   {PLA?a:b}           the template's {if filament_type == "PLA"} a {else} b {endif}
+ *   {?PLA} {?PLAHOT}    a line the template writes only for PLA (PLAHOT: and a bed over 45)
+ *
+ * The slice shows the PLA side only; the other side of each {PLA?a:b} is read off
+ * machine_start_gcode in the printer's template (fixtures/bambu-templates/<id>),
+ * and stated beside its rule.
+ *
  * Every token rule states how many lines it must change; one that changes
  * another number fails here, not in a print. The tool then puts the slice's own
  * values back and requires the result to equal the slice's lines, M73 lines
@@ -51,9 +65,26 @@ const PRINTERS = {
     printer: 'Bambu Lab A1 mini', nozzle: '0.4',
     slice: 'fixtures/supports/top_clip_x2_supports.gcode.3mf',
     bed: { x: 180, y: 180, z: 180 },
-    values: { nozzle: 220, nozzleT: 220, bed: 65 },
+    /* the filament the slice was made with: Generic PLA @BBL A1M - 12 mm^3/s (its flush speed, and what caps the 200 mm/s outer wall's 15.08), range high 240 */
+    values: { nozzle: 220, nozzleT: 220, bed: 65, bedMax: 65, filamentType: 'PLA', flushV: 12, flushT: 240, ow: 12 },
     endZ: { hop: 0.4, cap: 180, capLines: ['G1 Z180 F600', 'G1 Z180'] },
     start: [
+      [/^( *)M1002 set_filament_type:PLA$/, '$1M1002 set_filament_type:{FTYPE}', 3],
+      /* machine_start_gcode: {if PLA && nozzle != 0.2} M104 S220 {else} M104 S250 {endif}, and further down {else} M104 S{flush_temperatures} */
+      [/^ {4}M104 S220$/, n => n === 0 ? '    M104 S{PLA?220:250}' : '    M104 S{PLA?220:FLUSHT}', 2],
+      /* ...M620.1 E F{flush_volumetric_speeds/2.4053*60} T220 | T{flush_temperatures}, then M109 S220 | S250 */
+      [/^ {4}M620\.1 E F299\.339 T220$/, '    M620.1 E F{FLUSHF} T{PLA?220:FLUSHT}', 1],
+      [/^ {4}M109 S220 ;set nozzle to common flush temp$/, '    M109 S{PLA?220:250} ;set nozzle to common flush temp', 1],
+      [/^ {4}G1 E50 F299\.339$/, '    G1 E50 F{FLUSHF}', 1],
+      [/^ {4}G1 E5 F299\.339$/, '    G1 E5 F{FLUSHF}', 1],
+      /* the purge line, drawn twice (inside the flow-calibration flag and after it): F{outer_wall_volumetric_speed/(24/20)*60}, /(0.3*0.5)/4*60, /(0.3*0.5)*60 */
+      /* (the first: Bambu's template divides 24/20 as whole numbers, so it is x 60 - the slice's F720 at 12 mm^3/s, not F600) */
+      [/^( *)G0 X88 E10 {2}F720$/, '$1G0 X88 E10  F{OW*60}', 2],
+      [/^( *)G0 X(93|103|113) E\.3742 {2}F1200$/, '$1G0 X$2 E.3742  F{OW*100}', 6],
+      [/^( *)G0 X(98|108) E\.3742 {2}F4800$/, '$1G0 X$2 E.3742  F{OW*400}', 4],
+      [/^ {4}G1 E10 F300$/, '    G1 E10 F{OW*25}', 1],
+      [/^( +)M983 F5 A0\.3 H0\.4; cali dynamic extrusion compensation$/, '$1M983 F{OW/2.4} A0.3 H0.4; cali dynamic extrusion compensation', 2],
+      [/^ {4}M984 A0\.1 E1 S1 F5 H0\.4$/, '    M984 A0.1 E1 S1 F{OW/2.4} H0.4', 1],
       [/^M140 S65$/, 'M140 S{B}', 1],
       [/^M190 S65;set bed temp$/, 'M190 S{B};set bed temp', 1],
       [/^ {4}M109 S220$/, '    M109 S{N}', 1],
@@ -73,9 +104,18 @@ const PRINTERS = {
     printer: 'Bambu Lab P1S', nozzle: '0.4',
     slice: 'fixtures/bambu-templates/p1s-0.4/mouse1.gcode.3mf',          /* the owner's P1S project's own slice (Studio 02.09.01.70) */
     bed: { x: 256, y: 256, z: 256 },
-    values: { nozzle: 220, nozzleT: 220, bed: 55 },
+    /* the filament the slice was made with: Bambu PLA Basic @BBL P1S - 21 mm^3/s, range high 240; the outer wall is 200 mm/s x its 0.42 x 0.2 bead = 15.0832 */
+    values: { nozzle: 220, nozzleT: 220, bed: 55, bedMax: 55, filamentType: 'PLA', flushV: 21, flushT: 240, ow: 200 * PL.beadArea(0.42, 0.2) },
     endZ: { hop: 0.5, cap: 250, capLines: ['G1 Z250 F600', 'G1 Z248'] },
     start: [
+      /* machine_start_gcode: {if filament_type == "PLA"} {if bed > 45} M106 P3 S180 {endif};Prevent PLA from jamming {endif}, twice */
+      [/^ {4}M106 P3 S180$/, '{?PLAHOT}    M106 P3 S180', 2],
+      [/^ {4};Prevent PLA from jamming$/, '{?PLA}    ;Prevent PLA from jamming', 2],
+      [/^M620\.1 E F523\.843 T240$/, 'M620.1 E F{FLUSHF} T{FLUSHT}', 1],
+      /* the purge line: F{outer_wall_volumetric_speed/(0.3*0.5)*60} and /4 */
+      [/^G0 X240 E15 F6033\.27$/, 'G0 X240 E15 F{OW*400}', 1],
+      [/^G0 Y11 E0\.700 F1508\.32$/, 'G0 Y11 E0.700 F{OW*100}', 1],
+      [/^G0 X18 E15 F6033\.27$/, 'G0 X18 E15 F{OW*400}', 1],
       [/^M140 S55 ;set bed temp$/, 'M140 S{B} ;set bed temp', 1],
       [/^M190 S55 ;wait for bed temp$/, 'M190 S{B} ;wait for bed temp', 1],
       [/^M104 S220 ;set extruder temp$/, 'M104 S{N} ;set extruder temp', 1],
@@ -102,7 +142,8 @@ function applyRules(lines, rules, where) {
   for (const [re, rep, count] of rules) {
     let n = 0;
     for (let i = 0; i < out.length; i++) {
-      if (typeof out[i] === 'string' && re.test(out[i])) { out[i] = out[i].replace(re, rep); n++; }
+      /* a replacement that is a function is given the match's number (0, 1 ...): two lines that read the same and are not the same rule */
+      if (typeof out[i] === 'string' && re.test(out[i])) { out[i] = out[i].replace(re, typeof rep === 'function' ? rep(n) : rep); n++; }
     }
     if (n !== count) throw new Error(where + ': ' + re + ' changed ' + n + ' line(s), expected ' + count);
   }

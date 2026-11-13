@@ -28,6 +28,13 @@
  * on the page and handed to the worker. Changing a setting makes the slice
  * stale, as moving a piece does.
  *
+ * THE FILAMENT (docs/FILAMENTS.md). The printer template's filament is PLA. The card's
+ * Filament row picks another (FILAMENTS: its Studio keys, its cooling, its own start
+ * G-code), and four rows set what a filament is tuned by - nozzle and first-layer
+ * temperature, bed temperature, max flow (the volumetric limit every speed is held to).
+ * An empty row is the filament's own value. Temp step + every N mm changes the nozzle
+ * temperature by height (the planner's tempSteps): any model is a temperature tower.
+ *
  * G-SCOPE IS NOT TOUCHED. This file reads the plate through G-scope's public
  * plateObjects() and hands a finished file to its openFile(); it never reads
  * or writes G-scope's Slice settings rows, and no G-scope file loads the planner.
@@ -102,11 +109,74 @@
   // settings (configOverlay), so the engine, the planner, the G-code's CONFIG_BLOCK and
   // the file's project_settings.config all read the same number. The nozzle is the
   // profile's: another nozzle needs its own start / end blocks.
-  var SETTINGS_DEFAULT = { nozzle: 0.4, layer: 0.2, walls: 2, density: 15, pattern: 'grid', angle: 30, brim: 'auto', raft: 0, raftGap: 0.1, ifaceAngle: 'studio36', interfaceRule: null };   /* the card's own defaults (the owner's view): Studio 2.9's 3.6 - the owner's mouse1 on the P1S released clean with it */
+  var SETTINGS_DEFAULT = { nozzle: 0.4, layer: 0.2, walls: 2, density: 15, pattern: 'grid', angle: 30, brim: 'auto', raft: 0, raftGap: 0.1, ifaceAngle: 'studio36', interfaceRule: null,
+                           /* the filament: the profile's own; a null row is the filament's value (filamentBase); no temperature steps */
+                           filament: 'profile', nozzleTemp: null, firstTemp: null, bedTemp: null, maxFlow: null, tempStep: 0, tempBand: 10 };   /* the card's own defaults (the owner's view): Studio 2.9's 3.6 - the owner's mouse1 on the P1S released clean with it */
   var IFACE_ANGLES = { profile: 1, bridge: 1, studio36: 1, crosshatch: 1 };   /* nso_slicer.js supportInterfaceAngle: NSO's own, no profile key - a testing ground for interfaces */
   var PATTERN_TO_CONFIG = { grid: 'grid', zigzag: 'zig-zag', lines: 'line' };
   var PATTERN_FROM_CONFIG = { grid: 'grid', 'zig-zag': 'zigzag', zigzag: 'zigzag', line: 'lines', lines: 'lines' };
   var BRIM_TO_CONFIG = { auto: 'auto_brim', outer: 'outer_only', none: 'no_brim' };
+
+  // ---- filaments ---------------------------------------------------------------
+  //
+  // 'profile' is the printer template's own filament (PLA). Every other entry is a filament NSO prints with on these printers:
+  //   keys     its Bambu Studio filament keys, written over the template's on every filament slot (so the planner, the CONFIG_BLOCK
+  //            and project_settings.config all hold them). Only keys the template has are written.
+  //   cooling  what it changes of NSO's cooling keys (nso-cooling-profiles.js) - the planner's fans and layer-time slowdown
+  //   start    its filament start G-code, expanded for a bed temperature (the template's is the PLA filament's)
+  //   studioId the Studio filament preset the file names, for the printer
+  //
+  // CR-TPU (Creality, 95A, no RFID, external spool only). The keys are Bambu Studio's Generic TPU (fdm_filament_tpu > Generic TPU
+  // @base: 3.2 mm^3/s, 0.4 mm retraction, flow ratio 1, fan 100 %), with the owner's A1 mini temperature tower of 2026-11-13 on top:
+  // 235 C nozzle (240 and 235 the cleanest walls; the spool's range is 210-240) on a 45 C textured plate.
+  var TPU_START = function (bed) {
+    return ['; filament start gcode', bed > 35 ? 'M106 P3 S255' : bed > 30 ? 'M106 P3 S180' : '', ' ', ''];
+  };
+  var FILAMENTS = {
+    profile: { id: 'profile', label: 'Profile (PLA)' },
+    'cr-tpu': {
+      id: 'cr-tpu', label: 'Creality CR-TPU 95A', external: true,
+      keys: {
+        filament_type: 'TPU', filament_ids: 'GFU99', filament_vendor: 'Generic',
+        nozzle_temperature: '235', nozzle_temperature_initial_layer: '235',
+        nozzle_temperature_range_low: '200', nozzle_temperature_range_high: '250',
+        cool_plate_temp: '30', cool_plate_temp_initial_layer: '30', eng_plate_temp: '30', eng_plate_temp_initial_layer: '30',
+        hot_plate_temp: '45', hot_plate_temp_initial_layer: '45', textured_plate_temp: '45', textured_plate_temp_initial_layer: '45',
+        supertack_plate_temp: '0', supertack_plate_temp_initial_layer: '0',
+        filament_max_volumetric_speed: '3.2', filament_flow_ratio: '1', filament_retraction_length: '0.4',
+        filament_density: '1.24', temperature_vitrification: '30', filament_adhesiveness_category: '600', filament_cost: '20',
+        close_fan_the_first_x_layers: '1', additional_cooling_fan_speed: '70', close_additional_fan_first_x_layers: '1'
+      },
+      cooling: { fan_min_speed: '100', fan_max_speed: '100', fan_cooling_layer_time: '100', slow_down_layer_time: '8', slow_down_min_speed: '10' },
+      start: TPU_START,
+      studioId: function (config) { return /A1 mini/i.test(cfgRaw(config, 'printer_model') + cfgRaw(config, 'printer_settings_id')) ? 'Generic TPU @BBL A1M' : 'Generic TPU'; }
+    }
+  };
+  /* the rows that are a filament's: each the config key the planner reads (the bed's is its plate's, bedKeyOf) */
+  var BED_KEYS = { 'Cool Plate': 'cool_plate_temp', 'Engineering Plate': 'eng_plate_temp', 'High Temp Plate': 'hot_plate_temp',
+                   'Textured PEI Plate': 'textured_plate_temp', 'Supertack Plate': 'supertack_plate_temp' };
+  function bedKeyOf(config) { return BED_KEYS[cfgRaw(config, 'curr_bed_type')] || 'textured_plate_temp'; }
+
+  function filamentOf(id) { return Object.prototype.hasOwnProperty.call(FILAMENTS, id) ? FILAMENTS[id] : FILAMENTS.profile; }
+
+  /** The filament's Studio keys for this template: { key: value }, only keys the template holds (and the preset's name). */
+  function filamentKeys(config, id) {
+    var f = filamentOf(id), out = {};
+    if (!f.keys) return out;
+    Object.keys(f.keys).forEach(function (k) { if (config[k] !== undefined) out[k] = f.keys[k]; });
+    if (config.filament_settings_id !== undefined) out.filament_settings_id = f.studioId(config);
+    return out;
+  }
+
+  /** What the four filament rows are when empty: the filament's own nozzle, first-layer and bed temperature and max flow on this template. */
+  function filamentBase(config, id) {
+    var PL = lazy('nso-print-planner.js', 'NSOPrintPlanner');
+    if (!config || !PL) return null;
+    var keys = filamentKeys(config, id);
+    var S = PL.settingsFrom(Object.keys(keys).length ? withOverlay(config, keys) : config);
+    return { nozzleTemp: S.temp.nozzle, firstTemp: S.temp.nozzleInitial, bedTemp: S.temp.bedInitial, maxFlow: S.filament.maxVolumetric,
+             rangeLow: S.temp.rangeLow, rangeHigh: S.temp.rangeHigh };
+  }
 
   function cfgRaw(config, key) {
     var v = config ? config[key] : null;
@@ -122,7 +192,8 @@
     return {
       nozzle: eng.nozzleMm, layer: o.layerMm, walls: o.wallLoops, density: Math.round(o.sparseDensity * 100),
       pattern: PATTERN_FROM_CONFIG[cfgRaw(config, 'sparse_infill_pattern')] || o.sparsePattern,
-      angle: o.supportThresholdDeg, brim: o.brimType, raft: Math.round(o.raftLayers || 0), raftGap: o.raftContactMm != null ? o.raftContactMm : 0.1, ifaceAngle: 'studio36', interfaceRule: null
+      angle: o.supportThresholdDeg, brim: o.brimType, raft: Math.round(o.raftLayers || 0), raftGap: o.raftContactMm != null ? o.raftContactMm : 0.1, ifaceAngle: 'studio36', interfaceRule: null,
+      filament: 'profile', nozzleTemp: null, firstTemp: null, bedTemp: null, maxFlow: null, tempStep: 0, tempBand: 10
     };
   }
 
@@ -130,6 +201,8 @@
   function cleanSettings(s) {
     s = s || {};
     var n = function (v, d, lo, hi) { v = parseFloat(v); return isFinite(v) ? Math.max(lo, Math.min(hi, v)) : d; };
+    /* a filament row: a number in its range, or null (empty: the filament's own value) */
+    var opt = function (v, lo, hi, dp) { v = parseFloat(v); if (!isFinite(v)) return null; var k = Math.pow(10, dp); return Math.round(Math.max(lo, Math.min(hi, v)) * k) / k; };
     var D = SETTINGS_DEFAULT;
     return {
       nozzle: n(s.nozzle, D.nozzle, 0.1, 2),
@@ -142,7 +215,11 @@
       raft: Math.round(n(s.raft, D.raft, 0, 30)),
       raftGap: Math.round(n(s.raftGap, D.raftGap, 0, 1) * 100) / 100,
       ifaceAngle: IFACE_ANGLES[s.ifaceAngle] ? s.ifaceAngle : D.ifaceAngle,
-      interfaceRule: s.interfaceRule === 'column' ? 'column' : null
+      interfaceRule: s.interfaceRule === 'column' ? 'column' : null,
+      filament: filamentOf(s.filament).id,
+      nozzleTemp: opt(s.nozzleTemp, 170, 300, 0), firstTemp: opt(s.firstTemp, 170, 300, 0), bedTemp: opt(s.bedTemp, 0, 110, 0),
+      maxFlow: opt(s.maxFlow, 0.5, 40, 2),
+      tempStep: Math.round(n(s.tempStep, D.tempStep, -25, 25)), tempBand: Math.round(n(s.tempBand, D.tempBand, 1, 100) * 10) / 10
     };
   }
 
@@ -163,7 +240,33 @@
     if (s.brim !== base.brim) out.brim_type = BRIM_TO_CONFIG[s.brim];
     if (s.raft !== base.raft) out.raft_layers = String(s.raft);
     if (Math.abs(s.raftGap - base.raftGap) > 1e-6) out.raft_contact_distance = String(s.raftGap);
+    /* the filament: its own keys, then the rows that differ from its own values */
+    var fk = filamentKeys(config, s.filament);
+    Object.keys(fk).forEach(function (k) { if (cfgRaw(config, k) !== fk[k]) out[k] = fk[k]; });
+    var fb = filamentBase(config, s.filament);
+    if (fb) {
+      var bk = bedKeyOf(config);
+      if (s.nozzleTemp != null && s.nozzleTemp !== fb.nozzleTemp) out.nozzle_temperature = String(s.nozzleTemp);
+      if (s.firstTemp != null && s.firstTemp !== fb.firstTemp) out.nozzle_temperature_initial_layer = String(s.firstTemp);
+      if (s.bedTemp != null && s.bedTemp !== fb.bedTemp) { out[bk] = String(s.bedTemp); out[bk + '_initial_layer'] = String(s.bedTemp); }
+      if (s.maxFlow != null && Math.abs(s.maxFlow - fb.maxFlow) > 1e-6) out.filament_max_volumetric_speed = String(s.maxFlow);
+    }
     return out;
+  }
+
+  /** The keys of an overlay that are a filament's (they are listed under the filament in different_settings_to_system, not the process). */
+  var FILAMENT_KEY = /^(filament_|nozzle_temperature|temperature_vitrification|close_fan_|additional_cooling_|close_additional_|(cool|eng|hot|textured|supertack)_plate_temp)/;
+
+  /** What the planner is told beside the config: the filament's cooling (undefined: NSO's default profile), its start G-code, the temperature steps. */
+  function plannerExtras(config, settings) {
+    if (!settings) return { cooling: undefined, filamentStart: undefined, tempSteps: undefined };
+    var f = filamentOf(settings.filament), PL = lazy('nso-print-planner.js', 'NSOPrintPlanner'), CP = lazy('nso-cooling-profiles.js', 'NSOCoolingProfiles');
+    var S = PL.settingsFrom(config);
+    return {
+      cooling: f.cooling && CP ? Object.assign({}, CP.resolveValues(CP.DEFAULT_PROFILE_ID), f.cooling) : undefined,
+      filamentStart: f.start ? f.start(Math.max(S.temp.bed, S.temp.bedInitial)) : undefined,
+      tempSteps: settings.tempStep ? { stepC: settings.tempStep, bandMm: settings.tempBand } : undefined
+    };
   }
 
   /** A copy of the template's project settings with the overlay written in (and listed as the process's own changes). */
@@ -177,9 +280,16 @@
     var diffs = config.different_settings_to_system;
     if (Array.isArray(diffs) && diffs.length) {
       diffs = diffs.slice();
-      var had = diffs[0] ? String(diffs[0]).split(';').filter(Boolean) : [];
-      keys.forEach(function (k) { if (had.indexOf(k) < 0) had.push(k); });
-      diffs[0] = had.sort().join(';');
+      var add = function (slot, list) {
+        if (!list.length) return;
+        var had = diffs[slot] ? String(diffs[slot]).split(';').filter(Boolean) : [];
+        list.forEach(function (k) { if (had.indexOf(k) < 0) had.push(k); });
+        diffs[slot] = had.sort().join(';');
+      };
+      /* [process, each filament ..., printer]: a filament's key is its filament's own change, any other the process's */
+      var fil = keys.filter(function (k) { return FILAMENT_KEY.test(k) && k !== 'filament_settings_id'; });
+      add(0, keys.filter(function (k) { return !FILAMENT_KEY.test(k); }));
+      for (var fi = 1; fi < diffs.length - 1; fi++) add(fi, fil);
       out.different_settings_to_system = diffs;
     }
     return out;
@@ -306,14 +416,16 @@
     }).then(function (res) {
       if (!res.ok) return { ok: false, reason: 'Slice refused: ' + res.reason };
       stage('writing', { layers: res.planes.length });
-      return PL.toGcode3mf(res, { config: config, printer: assets.printer, configOver: over }).then(function (out) {
+      var ex = plannerExtras(config, settings);
+      return PL.toGcode3mf(res, { config: config, printer: assets.printer, configOver: over, cooling: ex.cooling, filamentStart: ex.filamentStart, tempSteps: ex.tempSteps }).then(function (out) {
         var seen = {};
         out.plan.layers.forEach(function (l) { l.features.forEach(function (f) { seen[f] = 1; }); });
         var st = out.plan.stats;
         return {
           ok: true, reason: '', bytes: out.bytes, features: Object.keys(seen), objects: out.plan.labels.length,
           labels: out.plan.labels.map(function (l) { return { id: l.id, name: l.name, index: l.index }; }),     // the gcode's OBJECT_ID of each object, in the order they were given
-          stats: { layers: st.layers, seconds: st.seconds.total, grams: st.grams, filamentMm: st.filamentMm, maxZ: st.maxZ },
+          stats: { layers: st.layers, seconds: st.seconds.total, grams: st.grams, filamentMm: st.filamentMm, maxZ: st.maxZ, tempBands: st.tempBands || null },
+          filament: filamentWords(config, settings),                                                             // what it prints with, in words
           settings: settings, changed: Object.keys(over),                                                        // what was sliced with, and what differs from the profile
           stacks: res.stacks ? stacksToPlate(res.stacks, assets.printer.bed) : null,                             // the supports as they print, in the plate's frame
           raft: raftToPlate(res, assets.printer.bed),                                                            // the raft as it prints, for the plate to draw
@@ -375,6 +487,19 @@
     }) };
   }
 
+  /** The filament a config prints with, in a few words (null with no settings: the profile's, untouched). */
+  function filamentWords(config, settings) {
+    if (!settings) return null;
+    var PL = lazy('nso-print-planner.js', 'NSOPrintPlanner'), S = PL.settingsFrom(config), f = filamentOf(settings.filament);
+    return f.label + ', ' + S.temp.nozzle + ' \u00b0C' + (S.temp.nozzleInitial !== S.temp.nozzle ? ' (first layer ' + S.temp.nozzleInitial + ')' : '') +
+      ', bed ' + S.temp.bedInitial + ' \u00b0C, ' + S.filament.maxVolumetric + ' mm\u00b3/s';
+  }
+  /** The temperature steps as written, for the readout: 240, 235, 230 in 10 mm bands. */
+  function bandWords(bands, bandMm) {
+    if (!bands || bands.length < 2) return '';
+    return 'temperature steps ' + bands.map(function (b) { return b.temp; }).join(', ') + ' \u00b0C in ' + bandMm + ' mm bands';
+  }
+
   /** The settings in a few words, for the readout: "0.12 mm layers, 3 walls, 20 % grid, support below 30°, brim auto". */
   function settingsWords(st) {
     return st.layer + ' mm layers, ' + st.walls + ' wall' + (st.walls === 1 ? '' : 's') + ', ' + st.density + ' % ' + st.pattern +
@@ -411,7 +536,8 @@
     PROFILES: PROFILES, ENGINE: ENGINE, profileFor: profileFor, readTemplate: readTemplate, pieceObjects: pieceObjects,
     fileName: fileName, build: build, fmtTime: fmtTime, describe: describe, buildForWorker: buildForWorker,
     SETTINGS_DEFAULT: SETTINGS_DEFAULT, settingsFromConfig: settingsFromConfig, cleanSettings: cleanSettings,
-    configOverlay: configOverlay, withOverlay: withOverlay
+    configOverlay: configOverlay, withOverlay: withOverlay,
+    FILAMENTS: FILAMENTS, filamentBase: filamentBase, filamentKeys: filamentKeys, filamentWords: filamentWords, bandWords: bandWords
   };
 
   // ===========================================================================
@@ -459,7 +585,40 @@
   // ---- the card's Slice settings -----------------------------------------------
 
   var SET_IDS = ['slice-set-nozzle', 'slice-set-layer', 'slice-set-walls', 'slice-set-density', 'slice-set-pattern',
-                 'slice-set-angle', 'slice-set-brim', 'slice-set-raft', 'slice-set-raft-gap', 'slice-set-iface-angle', 'slice-set-iface'];
+                 'slice-set-angle', 'slice-set-brim', 'slice-set-raft', 'slice-set-raft-gap', 'slice-set-iface-angle', 'slice-set-iface',
+                 'slice-set-filament', 'slice-set-nozzle-temp', 'slice-set-first-temp', 'slice-set-bed-temp', 'slice-set-max-flow',
+                 'slice-set-temp-step', 'slice-set-temp-band'];
+  /* the four rows that are a filament's own numbers: the row, and its name in the settings */
+  var FILAMENT_ROWS = [['slice-set-nozzle-temp', 'nozzleTemp'], ['slice-set-first-temp', 'firstTemp'], ['slice-set-bed-temp', 'bedTemp'], ['slice-set-max-flow', 'maxFlow']];
+
+  /** The plate's printer's template settings, once the card has fetched them (else null). */
+  function knownConfig() {
+    var p = profileFor(plateId()), a = p && S.assets[p.id];
+    return a ? a.config : null;
+  }
+
+  /** The four filament rows at the picked filament's own values (a filament just picked, or the template just fetched). */
+  function showFilamentRows() {
+    var sel = $('slice-set-filament'), base = filamentBase(knownConfig(), sel ? sel.value : 'profile');
+    FILAMENT_ROWS.forEach(function (r) { var el = $(r[0]); if (el) el.value = base ? String(base[r[1]]) : ''; });
+  }
+
+  /** The line under the filament rows: what the picked filament needs of the owner, and the temperature steps as they will be written. */
+  function filamentNote() {
+    var el = $('slice-filament-note');
+    if (!el) return;
+    var st = readSettings(), f = filamentOf(st.filament), base = filamentBase(knownConfig(), st.filament), parts = [];
+    if (f.external) parts.push(f.label + ': external spool only, not the AMS. When sending, untick the AMS and flow dynamics calibration.');
+    if (st.tempStep) {
+      var t0 = st.nozzleTemp != null ? st.nozzleTemp : base ? base.nozzleTemp : null, t1 = st.firstTemp != null ? st.firstTemp : base ? base.firstTemp : null;
+      if (t0 != null) {
+        parts.push('Temperature steps: ' + t0 + ', ' + (t0 + st.tempStep) + ', ' + (t0 + 2 * st.tempStep) + ' \u00b0C ... one band every ' + st.tempBand +
+          ' mm of height, first layer ' + t1 + ' \u00b0C' + (base ? '. This filament prints between ' + base.rangeLow + ' and ' + base.rangeHigh + ' \u00b0C.' : '.'));
+      }
+    }
+    el.textContent = parts.join(' ');
+    el.hidden = !parts.length;
+  }
 
   /** The interface rule, one choice shared with G-scope's Slice settings (its page keeps it). */
   function interfaceRule() {
@@ -473,7 +632,9 @@
       nozzle: v('slice-set-nozzle'), layer: v('slice-set-layer'), walls: v('slice-set-walls'), density: v('slice-set-density'),
       pattern: v('slice-set-pattern'), angle: v('slice-set-angle'), brim: v('slice-set-brim'),
       raft: v('slice-set-raft'), raftGap: v('slice-set-raft-gap'), ifaceAngle: v('slice-set-iface-angle'),
-      interfaceRule: $('slice-set-iface') ? v('slice-set-iface') : interfaceRule()
+      interfaceRule: $('slice-set-iface') ? v('slice-set-iface') : interfaceRule(),
+      filament: v('slice-set-filament'), nozzleTemp: v('slice-set-nozzle-temp'), firstTemp: v('slice-set-first-temp'),
+      bedTemp: v('slice-set-bed-temp'), maxFlow: v('slice-set-max-flow'), tempStep: v('slice-set-temp-step'), tempBand: v('slice-set-temp-band')
     });
   }
 
@@ -484,6 +645,11 @@
     set('slice-set-density', st.density); set('slice-set-pattern', st.pattern); set('slice-set-angle', st.angle);
     set('slice-set-brim', st.brim); set('slice-set-raft', st.raft); set('slice-set-raft-gap', st.raftGap); set('slice-set-iface-angle', st.ifaceAngle);
     set('slice-set-iface', interfaceRule() || '');
+    /* the filament: a null row shows the filament's own value (empty until the template is fetched) */
+    set('slice-set-filament', filamentOf(st.filament).id); set('slice-set-temp-step', st.tempStep == null ? 0 : st.tempStep); set('slice-set-temp-band', st.tempBand == null ? 10 : st.tempBand);
+    showFilamentRows();
+    FILAMENT_ROWS.forEach(function (r) { if (st[r[1]] != null) set(r[0], st[r[1]]); });
+    filamentNote();
   }
 
   /** The rows back to the profile's values: the template's when the card has it, else the profile's usual ones (the same, for both
@@ -497,7 +663,19 @@
 
   /** The open card fetches its profile's template once, and rows nobody has changed take its values. */
   function seedFromTemplate(profile) {
-    if (!profile || S.assets[profile.id] || S.touched || S.seeding === profile.id) return;
+    if (!profile || S.assets[profile.id] || S.seeding === profile.id) return;
+    if (S.touched) {
+      /* rows already changed: fetch the template all the same, so an empty filament row can show the filament's own value */
+      S.seeding = profile.id;
+      loadAssets(profile).then(function () {
+        S.seeding = null;
+        if (S.seededFor !== profile.id || S.busy) return;
+        var base = filamentBase(knownConfig(), ($('slice-set-filament') || {}).value);
+        FILAMENT_ROWS.forEach(function (r) { var el = $(r[0]); if (el && el.value === '' && base) el.value = String(base[r[1]]); });
+        filamentNote(); refresh();
+      }, function () { S.seeding = null; });
+      return;
+    }
     S.seeding = profile.id;
     loadAssets(profile).then(function (a) {
       S.seeding = null;
@@ -778,8 +956,10 @@
       try { showRaftView(r.raft); } catch (err) { console.error('[slice] raft view', err); }
       setBusy(false);
       var sup = pieces.filter(function (p) { return p.support && !p.brim; }).length;
+      var procChanged = (r.changed || []).filter(function (k) { return !FILAMENT_KEY.test(k); }), filChanged = (r.changed || []).length > procChanged.length;
+      var steps = bandWords(r.stats.tempBands, settings.tempBand);
       readout(describe(r) + ' - ' + pieces.length + ' object' + (pieces.length === 1 ? '' : 's') + (sup ? ' (' + sup + ' support' + (sup === 1 ? '' : 's') + ')' : '') +
-              (r.changed && r.changed.length ? ' - ' + settingsWords(settings) : ''), false);
+              (procChanged.length ? ' - ' + settingsWords(settings) : '') + (filChanged && r.filament ? ' - ' + r.filament : '') + (steps ? ' - ' + steps : ''), false);
       say('Sliced for the ' + profile.short + ': ' + describe(r));
       refresh();                          // a piece moved while it ran: the readout says so, and Export stays shut
       return ended({ ok: true, reason: '', line: describe(r), fresh: isFresh(), stacks: r.stacks || null });
@@ -999,6 +1179,8 @@
       el.addEventListener('change', function () {
         if (id !== 'slice-set-iface') S.touched = true;           // the interface is a preference, not a profile value
         if (id === 'slice-set-iface' && typeof root.nsoSetSupportInterfaceRule === 'function') root.nsoSetSupportInterfaceRule(el.value);
+        if (id === 'slice-set-filament') showFilamentRows();      // another filament: its own temperatures and max flow in the four rows
+        filamentNote();
         refresh();
       });
     });

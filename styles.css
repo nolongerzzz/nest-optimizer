@@ -4829,6 +4829,17 @@ body.sup-card-open #adjust-status { display: none; }
 }
 #slice-settings input[type="number"] { width: 5.2em; padding: 4px 4px 4px 6px; }
 #slice-settings select { padding: 4px 6px; }
+/* the filament rows (docs/FILAMENTS.md): the filament picker spans the card, under a rule that sets the filament's rows off from the slice's */
+#slice-settings label.slice-set-wide { grid-column: 1 / -1; }
+#slice-settings label.slice-set-first { margin-top: 4px; padding-top: 8px; border-top: 1px solid rgba(148, 163, 184, 0.25); }
+#slice-settings label.slice-set-wide select { flex: 1 1 auto; min-width: 0; }
+#slice-settings input[type="number"]::placeholder { color: var(--muted, #94a3b8); opacity: 0.7; }
+/* the filament's number rows carry a unit after the box: a narrower box keeps the two columns the width the slice rows gave them */
+#slice-settings label.slice-set-unit input[type="number"] { width: 3.7em; padding-right: 6px; appearance: textfield; -moz-appearance: textfield; }
+#slice-settings label.slice-set-unit input[type="number"]::-webkit-inner-spin-button,
+#slice-settings label.slice-set-unit input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+#slice-settings label.slice-set-unit { gap: 3px; }
+#slice-settings #slice-filament-note { color: #e2e8f0; white-space: normal; }
 #slice-settings > select { justify-self: start; }
 #slice-settings .slice-settings-note { grid-column: 1 / -1; margin: 2px 0 0 0; font-size: 11.5px; line-height: 1.4; color: var(--muted, #94a3b8); }
 #slice-settings > .btn { grid-column: 1 / -1; width: 100%; margin: 0; padding: 6px 10px; font-size: 11px; }

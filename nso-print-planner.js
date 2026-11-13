@@ -25,6 +25,20 @@
  *              bed temperature, filament flow ratio and volumetric limit
  *   NSO        the 14 cooling keys (nso-cooling-profiles.js): fans, slowdown
  *
+ * THE FILAMENT (docs/FILAMENTS.md). The template's filament is PLA. Another
+ * filament is the caller's: its keys written into the config it hands over
+ * (type, temperatures, volumetric limit, retraction), its cooling as
+ * opts.cooling, its own filament start G-code as opts.filamentStart. The start
+ * block follows the config: the filament's type, its flush speed and
+ * temperature, and the purge line's speed (Bambu's outer_wall_volumetric_speed)
+ * are tokens in the frozen block, so a 3.2 mm^3/s TPU is not purged at PLA's 12.
+ *
+ * TEMPERATURE STEPS (opts.tempSteps { stepC, bandMm }). The nozzle temperature
+ * changes by stepC at every bandMm of height: a layer whose underside is at or
+ * above n x bandMm prints at nozzle_temperature + n x stepC. Written as M104
+ * (no wait: an M109 parks the nozzle on the part while it settles) at the layer
+ * change. A step outside the filament's nozzle_temperature_range is refused.
+ *
  * HOW A SPEED IS CHOSEN (measured on the owner's A1 mini and P1S slices)
  *   v = min(feature speed, filament_max_volumetric_speed / bead area)
  *   - bead area is the stadium nso-gcode-lines.js inverts: h (w - h) + pi h^2 / 4
@@ -108,6 +122,17 @@
       'Supertack Plate': 'supertack_plate_temp'
     }[bedType] || 'textured_plate_temp';
     var nozzleT = num(config, 'nozzle_temperature', 220);
+    // the filament's own retraction length (Studio's filament_retraction_length: 'nil' is "the printer's")
+    var retractLen = num(config, 'filament_retraction_length', NaN);
+    if (!isFinite(retractLen)) retractLen = num(config, 'retraction_length', 0.8);
+    var maxVol = num(config, 'filament_max_volumetric_speed', 12);
+    var flushV = num(config, 'filament_flush_volumetric_speed', 0);
+    var flushT = num(config, 'filament_flush_temp', 0);
+    var rangeHigh = num(config, 'nozzle_temperature_range_high', 240);
+    // Bambu's outer_wall_volumetric_speed (the start block's purge line): the outer wall's speed x its bead, never over the filament's limit
+    var layerMm0 = num(config, 'layer_height', 0.2);
+    var owVol = num(config, 'outer_wall_speed', 60) * beadArea(num(config, 'outer_wall_line_width', 0.42), layerMm0);
+    if (maxVol > 0 && owVol > maxVol) owVol = maxVol;
     var S = {
       nozzleMm: num(config, 'nozzle_diameter', 0.4),
       layerMm: num(config, 'layer_height', 0.2),
@@ -145,7 +170,7 @@
         interface: accel('support_interface_acceleration', def)
       },
       retract: {
-        length: num(config, 'retraction_length', 0.8),
+        length: retractLen,
         speed: num(config, 'retraction_speed', 30),
         deretractSpeed: num(config, 'deretraction_speed', num(config, 'retraction_speed', 30)),
         restartExtra: num(config, 'retract_restart_extra', 0),
@@ -160,13 +185,19 @@
       filament: {
         diameter: num(config, 'filament_diameter', 1.75),
         flow: num(config, 'filament_flow_ratio', 1),
-        maxVolumetric: num(config, 'filament_max_volumetric_speed', 12),
-        bridgeFlow: num(config, 'bridge_flow', 1)
+        maxVolumetric: maxVol,
+        bridgeFlow: num(config, 'bridge_flow', 1),
+        type: raw(config, 'filament_type') || 'PLA',
+        flushVolumetric: flushV > 0 ? flushV : maxVol,          // Studio's flush_volumetric_speeds
+        flushTemp: flushT > 0 ? flushT : rangeHigh,             // Studio's flush_temperatures
+        outerWallVolumetric: owVol
       },
       temp: {
         bedType: bedType,
         nozzle: nozzleT,
         nozzleInitial: num(config, 'nozzle_temperature_initial_layer', nozzleT),
+        rangeLow: num(config, 'nozzle_temperature_range_low', 190),
+        rangeHigh: rangeHigh,
         bed: num(config, bedKey, 60),
         bedInitial: num(config, bedKey + '_initial_layer', num(config, bedKey, 60))
       },
@@ -644,6 +675,8 @@
 
   /** A number as the template writes it: 17, not 17.0000. */
   function tnum(v) { return String(+(+v).toFixed(4)); }
+  /** A computed feed rate as Studio writes it: six significant digits (299.339, 6033.27, 720). */
+  function gnum(v) { return String(+(+v).toPrecision(6)); }
 
   /**
    * A frozen block as lines of text with the plate's numbers put in
@@ -653,13 +686,37 @@
    *   { zTop: [..], zTopElse: [..], cap }  the end block's "lift the head" pair
    * and "@M73 <seconds>" lines, which come through as they are for the caller
    * to turn into M73 P/R once it knows the print's time.
+   * The filament's tokens (absent from `v`: PLA at the frozen slice's own numbers are
+   * the caller's to give - plan() always does):
+   *   {FTYPE}            filament_type
+   *   {FLUSHF}           flush_volumetric_speeds / 2.4053 * 60
+   *   {FLUSHT}           flush_temperatures
+   *   {OW*n} {OW/2.4}    outer_wall_volumetric_speed times n (the purge line's feeds), or / 2.4
+   *   {PLA?a:b}          the template's {if filament_type == "PLA"} a {else} b; b may be FLUSHT
+   *   {?PLA} {?PLAHOT}   at a line's start: the line is the template's only for PLA
+   *                      (PLAHOT: and a bed over 45); otherwise it is empty
    * @param {Array} lines  a frozen start / afterStart / beforeEnd / end
-   * @param {object} v     { nozzle, nozzleT, bed, box:{x,y,w,h}, cy, maxZ }
+   * @param {object} v     { nozzle, nozzleT, bed, bedMax, box:{x,y,w,h}, cy, maxZ, filamentType, flushV, flushT, ow }
    */
   function thaw(lines, v, opts) {
     opts = opts || {};
+    var pla = String(v.filamentType || 'PLA') === 'PLA';
     var sub = function (s) {
+      if (s.charAt(0) === '{' && s.charAt(1) === '?') {
+        var cond = /^\{\?(PLAHOT|PLA)\}/.exec(s);
+        if (cond) {
+          var keep = pla && (cond[1] === 'PLA' || (v.bedMax != null ? v.bedMax : v.bed) > 45);
+          if (!keep) return '';
+          s = s.slice(cond[0].length);
+        }
+      }
       return s
+        .replace(/\{PLA\?([^:}]*):([^}]*)\}/g, function (a, yes, no) { var t = pla ? yes : no; return t === 'FLUSHT' ? tnum(v.flushT) : t; })
+        .replace(/\{FTYPE\}/g, String(v.filamentType || 'PLA'))
+        .replace(/\{FLUSHF\}/g, function () { return gnum(v.flushV / 2.4053 * 60); })
+        .replace(/\{FLUSHT\}/g, function () { return tnum(v.flushT); })
+        .replace(/\{OW\*(\d+)\}/g, function (a, n) { return gnum(v.ow * +n); })
+        .replace(/\{OW\/2\.4\}/g, function () { return gnum(v.ow / 2.4); })
         .replace(/\{N-20\}/g, tnum(v.nozzle - 20)).replace(/\{N-40\}/g, tnum(v.nozzle - 40))
         .replace(/\{N\}/g, tnum(v.nozzle)).replace(/\{T\}/g, tnum(v.nozzleT)).replace(/\{B\}/g, tnum(v.bed))
         .replace(/\{BX\}/g, tnum(v.box.x)).replace(/\{BY\}/g, tnum(v.box.y))
@@ -755,19 +812,48 @@
     return lines;
   }
 
+  /** A changed value as the CONFIG_BLOCK holds it: once per slot the line had (a per-filament key on a two-filament
+   *  template: "220,220", PLA;PLA, "a b";"a b"), in quotes when Studio would quote it (a value with a space, a separator or a quote). */
+  function configValue(was, value) {
+    var v = String(value);
+    var slots = [], cur = '', q = false, sep = '';
+    for (var i = 0; i < was.length; i++) {
+      var c = was.charAt(i);
+      if (q) { cur += c; if (c === '\\') { cur += was.charAt(++i); } else if (c === '"') q = false; }
+      else if (c === '"') { q = true; cur += c; }
+      else if (c === ',' || c === ';') { if (!sep) sep = c; if (c === sep) { slots.push(cur); cur = ''; } else cur += c; }
+      else cur += c;
+    }
+    slots.push(cur);
+    var text = /[\s;,"]/.test(v) ? '"' + v.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n') + '"' : v;
+    if (slots.length < 2) return text;
+    return slots.map(function () { return text; }).join(sep);
+  }
+
   /** The CONFIG_BLOCK: Studio's own for this printer, with NSO's cooling keys put in, and any process
    *  setting the caller changed from the template (`over`, { key: value } - the Slice card's settings). */
   function configLines(Pr, S, over) {
-    var map = Cooling.resolveValues(S.coolingId);
+    var map = typeof S.coolingId === 'object' && S.coolingId ? S.coolingId : Cooling.resolveValues(S.coolingId);
     return Pr.configBlock.map(function (l) {
       var m = /^; ([^ =]+) = (.*)$/.exec(l);
-      if (m && over && Object.prototype.hasOwnProperty.call(over, m[1])) return '; ' + m[1] + ' = ' + over[m[1]];
+      if (m && over && Object.prototype.hasOwnProperty.call(over, m[1])) return '; ' + m[1] + ' = ' + configValue(m[2], over[m[1]]);
+      /* Studio's CONFIG_BLOCK holds no filament_retraction_length: the filament's own length is written as retraction_length */
+      if (m && over && m[1] === 'retraction_length' && isFinite(parseFloat(over.filament_retraction_length))) return '; retraction_length = ' + configValue(m[2], over.filament_retraction_length);
       if (!m || !Object.prototype.hasOwnProperty.call(map, m[1])) return l;
       var slots = m[2].split(',').length;
       var v = [];
       for (var i = 0; i < slots; i++) v.push(map[m[1]]);
       return '; ' + m[1] + ' = ' + v.join(',');
     });
+  }
+
+  /** afterStart with the template filament's own start G-code (everything before Studio's ";VT0" line) replaced by another filament's. */
+  function withFilamentStart(afterStart, lines) {
+    if (!lines) return afterStart;
+    var at = -1;
+    for (var i = 0; i < afterStart.length; i++) if (typeof afterStart[i] === 'string' && /^;VT\d/.test(afterStart[i])) { at = i; break; }
+    if (at < 0) throw new Error('the printer\'s frozen afterStart has no ";VT0" line to put the filament\'s start G-code before');
+    return lines.concat(afterStart.slice(at));
   }
 
   // ===========================================================================
@@ -816,6 +902,8 @@
    *   hooks    { spaghetti, timelapse, clog }: false leaves one out; default as the template
    *   labelIds the objects' label ids (default 1001, 1002 ...)
    *   configOver  { key: value } process settings changed from the template (already in `config`), written into the CONFIG_BLOCK
+   *   filamentStart  the filament's own start G-code, expanded (lines): it replaces the template filament's, which opens afterStart
+   *   tempSteps   { stepC, bandMm }: the nozzle temperature changes by stepC at every bandMm of height (see the head of this file)
    * @returns {{ok, reason, gcode, layers, stats, settings, labels}}
    */
   function plan(res, opts) {
@@ -846,8 +934,28 @@
     }
     var top = res.planes[printing[printing.length - 1]].printZ;
     if (top > bed.z) return { ok: false, reason: 'the print is ' + top.toFixed(1) + ' mm tall; the ' + Pr.printer + ' prints ' + bed.z + ' mm' };
-    var vals = { nozzle: S.temp.nozzleInitial, nozzleT: S.temp.nozzle, bed: S.temp.bedInitial, box: box,
-                 cy: box.y + box.h / 2, maxZ: top };
+    var vals = { nozzle: S.temp.nozzleInitial, nozzleT: S.temp.nozzle, bed: S.temp.bedInitial, bedMax: Math.max(S.temp.bed, S.temp.bedInitial), box: box,
+                 cy: box.y + box.h / 2, maxZ: top,
+                 filamentType: F.type, flushV: F.flushVolumetric, flushT: F.flushTemp, ow: F.outerWallVolumetric };
+    // ---- the temperature steps: each printing layer's nozzle temperature (the first layer keeps its own)
+    var steps = opts.tempSteps && +opts.tempSteps.stepC && +opts.tempSteps.bandMm > 0
+      ? { stepC: +opts.tempSteps.stepC, bandMm: +opts.tempSteps.bandMm } : null;
+    var layerTemp = function (pl) {
+      if (!steps) return S.temp.nozzle;
+      return S.temp.nozzle + Math.floor((pl.printZ - pl.h + 1e-6) / steps.bandMm) * steps.stepC;
+    };
+    var bands = [];
+    if (steps) {
+      for (var bi = 1; bi < printing.length; bi++) {
+        var bpl = res.planes[printing[bi]], bt = layerTemp(bpl);
+        if (!bands.length || bands[bands.length - 1].temp !== bt) bands.push({ temp: bt, fromZ: +(bpl.printZ - bpl.h).toFixed(4), layer: bi + 1 });
+      }
+      var bad = bands.filter(function (b) { return b.temp < S.temp.rangeLow || b.temp > S.temp.rangeHigh; })[0];
+      if (bad) {
+        return { ok: false, reason: 'the temperature steps reach ' + bad.temp + ' \u00b0C at ' + bad.fromZ + ' mm; this filament prints between ' +
+          S.temp.rangeLow + ' and ' + S.temp.rangeHigh + ' \u00b0C. Change the start temperature, the step or the band height.' };
+      }
+    }
     var hooks = opts.hooks || {};
     var flags = { spaghetti: hooks.spaghetti !== false, timelapse: hooks.timelapse !== false, clog: hooks.clog !== false };
 
@@ -860,7 +968,7 @@
     // ---- the writer: every line with the print's clock at that line
     var W = { lines: [] };
     var put = function (l) { W.lines.push(l); };
-    var st = { x: null, y: null, z: 0, fan: null, layerFan: null, aux: null, A: null, feature: null, lw: null, lh: null, retracted: false,
+    var st = { nozzleT: S.temp.nozzleInitial, x: null, y: null, z: 0, fan: null, layerFan: null, aux: null, A: null, feature: null, lw: null, lh: null, retracted: false,
                openObj: -1, objId: -1, pending: null, extruded: 0 };
     /** M204 only when the acceleration changes, as Studio writes it. */
     var accel = function (a) { var v = fmt(a, 0); if (st.A !== v) { put('M204 S' + v); st.A = v; } };
@@ -871,7 +979,7 @@
       var m = /^@M73 (\d+)$/.exec(l);
       put(m ? { at: +m[1] } : l);
     });
-    thaw(Pr.afterStart, vals, flags).forEach(function (l) { put(l); });
+    thaw(withFilamentStart(Pr.afterStart, opts.filamentStart), vals, flags).forEach(function (l) { put(l); });
     var bodyFrom = W.lines.length;
 
     var layers = [];
@@ -1000,9 +1108,14 @@
       put('M73 L' + layerNo);
       put('M991 S0 P' + (layerNo - 1) + ' ;notify layer change');
       if (pj === 1) {
-        if (S.temp.nozzle !== S.temp.nozzleInitial) put('M104 S' + fmt(S.temp.nozzle, 0));
+        if (!steps && S.temp.nozzle !== S.temp.nozzleInitial) put('M104 S' + fmt(S.temp.nozzle, 0));
         if (S.temp.bed !== S.temp.bedInitial) put('M140 S' + fmt(S.temp.bed, 0));
       }
+      if (steps && pj >= 1) {
+        var wantT = layerTemp(pl);
+        if (wantT !== st.nozzleT) { put('M104 S' + fmt(wantT, 0) + ' ; NSO temperature step'); st.nozzleT = wantT; }
+      }
+      rec.nozzle = pj === 0 ? S.temp.nozzleInitial : layerTemp(pl);
       if (fan !== st.fan) { put(fanLine(fan)); st.fan = fan; }
       if (S.fan.aux && aux !== st.aux) { put('M106 P2 S' + fc(aux, 2)); st.aux = aux; }
       if (pj === 1) { put('; open powerlost recovery'); put('M1003 S1'); }
@@ -1121,7 +1234,8 @@
     var totalSeconds = Pr.timing.startSeconds + bodySeconds + Pr.timing.endSeconds;
     var lengthMm = st.extruded + (Pr.purgeMm || 0);
     var volume = lengthMm * filA;
-    var density = parseFloat((/^; filament_density = ([\d.]+)/m.exec(Pr.configBlock.join('\n')) || [0, 1.24])[1]);
+    var density = opts.configOver && parseFloat(opts.configOver.filament_density) > 0 ? parseFloat(opts.configOver.filament_density)
+      : parseFloat((/^; filament_density = ([\d.]+)/m.exec(Pr.configBlock.join('\n')) || [0, 1.24])[1]);
     var cfgOf = function (k) { var m = new RegExp('^; ' + k + ' = (.*)$', 'm').exec(Pr.configBlock.join('\n')); return m ? m[1] : ''; };
     var heights = res.objects.map(function (ob) {
       var h = 0; ob.layers.forEach(function (Ly) { if (Ly && Ly.paths.length) h = Math.max(h, Ly.printZ); });
@@ -1176,6 +1290,7 @@
       stats: {
         layers: totalLayers, maxZ: top, filamentMm: lengthMm, bodyFilamentMm: st.extruded, volumeMm3: volume,
         grams: volume / 1000 * density, box: box,
+        tempBands: steps ? bands : null,                       // the temperature steps as written: [{ temp, fromZ, layer }]
         seconds: { start: Pr.timing.startSeconds, body: bodySeconds, end: Pr.timing.endSeconds, total: totalSeconds }
       }
     };
@@ -1233,6 +1348,7 @@
     plan: plan,
     toGcode3mf: toGcode3mf,
     thaw: thaw,
+    configValue: configValue,
     firstLayerBox: firstLayerBox,
     objectMask: objectMask,
     duration: duration,

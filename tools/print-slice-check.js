@@ -195,7 +195,8 @@ async function main() {
   {
     const base = PRINT.settingsFromConfig(tpl);
     check('the settings start at the A1 mini template\'s values: 0.4 nozzle, 0.2 mm layers, 2 walls, 15 % grid, support below 30°, auto brim, no raft (0.1 contact)',
-      JSON.stringify(base) === JSON.stringify({ nozzle: 0.4, layer: 0.2, walls: 2, density: 15, pattern: 'grid', angle: 30, brim: 'auto', raft: 0, raftGap: 0.1, ifaceAngle: 'studio36', interfaceRule: null }), JSON.stringify(base));
+      JSON.stringify(base) === JSON.stringify({ nozzle: 0.4, layer: 0.2, walls: 2, density: 15, pattern: 'grid', angle: 30, brim: 'auto', raft: 0, raftGap: 0.1, ifaceAngle: 'studio36', interfaceRule: null,
+        filament: 'profile', nozzleTemp: null, firstTemp: null, bedTemp: null, maxFlow: null, tempStep: 0, tempBand: 10 }), JSON.stringify(base));
     const rov = PRINT.configOverlay(tpl, Object.assign({}, base, { raft: 10 }));
     check('a raft of 10 on the card is the file\'s raft_layers = 10, and nothing else changes', JSON.stringify(rov) === JSON.stringify({ raft_layers: '10' }), JSON.stringify(rov));
     check('...which are the card\'s markup defaults too (shown before the template is fetched)', JSON.stringify(PRINT.SETTINGS_DEFAULT) === JSON.stringify(base));
@@ -252,6 +253,98 @@ async function main() {
       await PRINT.build(two, { config: tpl, printer: a1 }, { settings: Object.assign({}, base) });
     } finally { SLm.run = realRun; }
     check('the interface rule is handed in with the settings (a worker has no window to read it from)', ruleSeen[0] === 'column' && ruleSeen[1] === null, JSON.stringify(ruleSeen));
+  }
+
+  // ===========================================================================
+  section('3c. The filament: another filament than the template\'s PLA, its rows, and temperature steps (docs/FILAMENTS.md)');
+  // ===========================================================================
+  {
+    const base = PRINT.settingsFromConfig(tpl);
+    const fb = PRINT.filamentBase(tpl, 'profile'), tb = PRINT.filamentBase(tpl, 'cr-tpu');
+    check('the profile\'s filament is the template\'s PLA: 220 / 220 C, bed 65, 12 mm^3/s; CR-TPU is 235 / 235 C, bed 45, 3.2 mm^3/s, printable 200 - 250 C',
+      fb.nozzleTemp === 220 && fb.firstTemp === 220 && fb.bedTemp === 65 && fb.maxFlow === 12 &&
+        tb.nozzleTemp === 235 && tb.firstTemp === 235 && tb.bedTemp === 45 && tb.maxFlow === 3.2 && tb.rangeLow === 200 && tb.rangeHigh === 250, JSON.stringify([fb, tb]));
+    check('the four rows at the filament\'s own values change nothing (the card shows them filled in)',
+      Object.keys(PRINT.configOverlay(tpl, Object.assign({}, base, { nozzleTemp: 220, firstTemp: 220, bedTemp: 65, maxFlow: 12 }))).length === 0);
+    const rows = PRINT.configOverlay(tpl, Object.assign({}, base, { nozzleTemp: 210, bedTemp: 60, maxFlow: 8 }));
+    check('a changed row is its config key: nozzle_temperature, the plate\'s bed temperature (both layers), filament_max_volumetric_speed',
+      JSON.stringify(rows) === JSON.stringify({ nozzle_temperature: '210', textured_plate_temp: '60', textured_plate_temp_initial_layer: '60', filament_max_volumetric_speed: '8' }), JSON.stringify(rows));
+    const cl = PRINT.cleanSettings({ filament: 'nylon', nozzleTemp: '999', firstTemp: '', bedTemp: '-5', maxFlow: '0.01', tempStep: '-99', tempBand: '0' });
+    check('the rows are clamped; an empty one is null (the filament\'s own); an unknown filament is the profile\'s',
+      cl.filament === 'profile' && cl.nozzleTemp === 300 && cl.firstTemp === null && cl.bedTemp === 0 && cl.maxFlow === 0.5 && cl.tempStep === -25 && cl.tempBand === 1, JSON.stringify(cl));
+
+    const one = objs.slice(0, 1);
+    const pla = await PRINT.build(one, { config: tpl, printer: a1 }, { settings: Object.assign({}, base) });
+    const tpu = await PRINT.build(one, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { filament: 'cr-tpu' }) });
+    check('CR-TPU slices', pla.ok && tpu.ok, tpu.reason);
+    if (pla.ok && tpu.ok) {
+      const tz = L.R.openZip(tpu.bytes);
+      const tg = L.text(await tz.read('Metadata/plate_1.gcode')), pg = L.text(await L.R.openZip(pla.bytes).read('Metadata/plate_1.gcode'));
+      const cb = k => (new RegExp('^; ' + k + ' = (.*)$', 'm').exec(tg) || [])[1];
+      check('...the CONFIG_BLOCK names it on both filament slots: TPU, GFU99, Generic TPU @BBL A1M, 235 C, bed 45, 3.2 mm^3/s, 0.4 mm retraction, fan 100',
+        cb('filament_type') === 'TPU;TPU' && cb('filament_ids') === 'GFU99;GFU99' && cb('filament_settings_id') === '"Generic TPU @BBL A1M";"Generic TPU @BBL A1M"' &&
+          cb('nozzle_temperature') === '235,235' && cb('textured_plate_temp') === '45,45' && cb('filament_max_volumetric_speed') === '3.2,3.2' &&
+          cb('retraction_length') === '0.4' && cb('fan_min_speed') === '100,100',
+        ['filament_type', 'filament_ids', 'filament_settings_id', 'nozzle_temperature', 'textured_plate_temp', 'filament_max_volumetric_speed', 'retraction_length', 'fan_min_speed'].map(cb).join(' | '));
+      const tsi = L.text(await tz.read('Metadata/slice_info.config'));
+      check('...slice_info tells the printer the filament is TPU (GFU99)', /tray_info_idx="GFU99" type="TPU"/.test(tsi));
+      const tps = JSON.parse(L.text(await tz.read('Metadata/project_settings.config')));
+      check('...project_settings.config holds it, listed as the filament\'s changes (not the process\'s)',
+        tps.filament_type[0] === 'TPU' && tps.nozzle_temperature[0] === '235' && tps.filament_max_volumetric_speed[0] === '3.2' && tps.fan_min_speed[0] === '100' &&
+          !/nozzle_temperature|filament_/.test(tps.different_settings_to_system[0]) && tps.different_settings_to_system[1].split(';').includes('filament_max_volumetric_speed'),
+        JSON.stringify(tps.different_settings_to_system));
+      const startOf = g => g.slice(g.indexOf('; EXECUTABLE_BLOCK_START'), g.indexOf('; CHANGE_LAYER')).split('\n');
+      const ts = startOf(tg), psl = startOf(pg);
+      check('...the start block is the filament\'s, not PLA\'s: set_filament_type:TPU, flush at 3.2 mm^3/s (F79.8237) and 250 C, the purge line at F192 / F320 / F1280',
+        ts.filter(l => /set_filament_type:TPU$/.test(l)).length === 3 && !ts.some(l => /set_filament_type:PLA/.test(l)) &&
+          ts.includes('    M620.1 E F79.8237 T250') && ts.includes('    G1 E50 F79.8237') &&
+          ts.includes('G0 X88 E10  F192') && ts.includes('G0 X93 E.3742  F320') && ts.includes('G0 X98 E.3742  F1280') &&
+          !ts.some(l => /F(720|4800|299\.339)$/.test(l)) && psl.includes('G0 X88 E10  F720') && psl.includes('    M620.1 E F299.339 T220'));
+      check('...its temperatures are in the start block (bed 45, nozzle 235) and its own filament start G-code replaces PLA\'s',
+        ts.includes('M140 S45') && ts.includes('M190 S45;set bed temp') && ts.includes('M109 S235') && !ts.includes(';Prevent PLA from jamming') && psl.includes(';Prevent PLA from jamming'));
+      // every extruding move's volumetric rate, from the lines
+      const peak = g => {
+        const A = Math.PI * 1.75 * 1.75 / 4; let x = null, y = null, f = 0, mx = 0, on = false;
+        g.split('\n').forEach(l => {
+          if (l === '; MACHINE_START_GCODE_END') on = true; else if (l === '; MACHINE_END_GCODE_START') on = false;
+          if (!/^G[0-3] /.test(l)) return;
+          const d = {}; l.split(';')[0].replace(/([XYEF])(-?[\d.]+)/g, (a, k, v) => { d[k] = +v; return a; });
+          if (d.F != null) f = d.F;
+          const nx = d.X != null ? d.X : x, ny = d.Y != null ? d.Y : y;
+          if (on && d.E > 0 && x != null && (d.X != null || d.Y != null)) { const len = Math.hypot(nx - x, ny - y); if (len > 1e-6) mx = Math.max(mx, d.E * A / (len / (f / 60))); }
+          x = nx; y = ny;
+        });
+        return mx;
+      };
+      const pk = peak(tg), pkPla = peak(pg);
+      check('...no move asks the hotend for more than its 3.2 mm^3/s (peak ' + pk.toFixed(3) + '; PLA\'s plate peaks at ' + pkPla.toFixed(2) + ')', pk > 2.5 && pk < 3.2 * 1.005 && pkPla > 3.2 * 1.5);
+      check('...it retracts the filament\'s 0.4 mm, and the fan is full from the second layer', /^G1 E-0?\.4 F1800$/m.test(tg) && !/^G1 E-0?\.8 F1800$/m.test(tg) && /^M106 S255$/m.test(tg));
+      check('...the readout names it', tpu.filament === 'Creality CR-TPU 95A, 235 \u00b0C, bed 45 \u00b0C, 3.2 mm\u00b3/s', tpu.filament);
+    }
+
+    // temperature steps: a box 31 mm tall, 240 C down 5 every 10 mm
+    const bx = (w, d, h) => { const x = w / 2, y = d / 2, v = [[-x, -y, 0], [x, -y, 0], [x, y, 0], [-x, y, 0], [-x, -y, h], [x, -y, h], [x, y, h], [-x, y, h]];
+      const f = [[0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7], [0, 1, 5], [0, 5, 4], [1, 2, 6], [1, 6, 5], [2, 3, 7], [2, 7, 6], [3, 0, 4], [3, 4, 7]], s = [];
+      f.forEach(t => t.forEach(i => s.push(v[i][0], v[i][1], v[i][2]))); return new Float32Array(s); };
+    const tower = PRINT.pieceObjects([{ name: 'tower', soup: bx(12, 12, 31), sourceId: 1 }], a1.bed);
+    const stepped = await PRINT.build(tower, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { filament: 'cr-tpu', nozzleTemp: 240, tempStep: -5, tempBand: 10 }) });
+    check('temperature steps slice', stepped.ok, stepped.reason);
+    if (stepped.ok) {
+      const sg = L.text(await L.R.openZip(stepped.bytes).read('Metadata/plate_1.gcode')).split('\n');
+      const at = [];
+      let z = 0;
+      sg.forEach(l => { const m = /^; Z_HEIGHT: ([\d.]+)$/.exec(l); if (m) z = +m[1]; const t = /^M104 S(\d+) ; NSO temperature step$/.exec(l); if (t) at.push([+t[1], z]); });
+      check('...240 from the second layer, 235 at the first layer standing on 10 mm, 230 on 20 mm, 225 on 30 mm - each an M104 at its layer change, never an M109',
+        JSON.stringify(at) === JSON.stringify([[240, 0.4], [235, 10.2], [230, 20.2], [225, 30.2]]) && !sg.some(l => /^M109 .*NSO/.test(l)), JSON.stringify(at));
+      check('...build() reports the bands as written', JSON.stringify(stepped.stats.tempBands.map(b => b.temp)) === '[240,235,230,225]' &&
+        PRINT.bandWords(stepped.stats.tempBands, 10) === 'temperature steps 240, 235, 230, 225 \u00b0C in 10 mm bands', JSON.stringify(stepped.stats.tempBands));
+    }
+    const cold = await PRINT.build(tower, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { filament: 'cr-tpu', nozzleTemp: 210, tempStep: -10, tempBand: 10 }) });
+    check('steps that leave the filament\'s range are refused in words, not clamped', !cold.ok && /temperature steps reach 190 .C at 20 mm; this filament prints between 200 and 250/.test(cold.reason), cold.reason);
+    const plain3 = await PRINT.build(tower, { config: tpl, printer: a1 }, { settings: Object.assign({}, base) });
+    const plain0 = await PRINT.build(tower, { config: tpl, printer: a1 }, {});
+    check('no steps and the profile\'s filament: no M104 beyond the template\'s, the same file as no settings',
+      plain3.ok && plain0.ok && L.text(await L.R.openZip(plain3.bytes).read('Metadata/plate_1.gcode')) === L.text(await L.R.openZip(plain0.bytes).read('Metadata/plate_1.gcode')) && plain3.stats.tempBands === null);
   }
 
   // ===========================================================================
@@ -317,7 +410,8 @@ async function main() {
       const sec = /<details class="vp-sec sup-slice-sec" id="sup-slice-sec"[\s\S]*$/.exec(m[0]), settings = /<div id="slice-settings"[\s\S]*?<\/div>/.exec(m[0]);
       return !!sec && /<summary class="vp-sec-head"[^>]*>Slice<\/summary>/.test(sec[0]) && ['btn-slice-go', 'btn-slice-cancel', 'btn-slice-export', 'slice-profile', 'slice-readout', 'slice-progress',
         'slice-settings-toggle', 'slice-settings', 'slice-set-nozzle', 'slice-set-layer', 'slice-set-walls', 'slice-set-density', 'slice-set-pattern',
-        'slice-set-angle', 'slice-set-brim', 'slice-set-iface', 'slice-settings-reset']
+        'slice-set-angle', 'slice-set-brim', 'slice-set-iface', 'slice-settings-reset',
+        'slice-set-filament', 'slice-set-nozzle-temp', 'slice-set-first-temp', 'slice-set-bed-temp', 'slice-set-max-flow', 'slice-set-temp-step', 'slice-set-temp-band', 'slice-filament-note']
         .every(id => sec[0].includes('id="' + id + '"')) && /Export \.gcode\.3mf/.test(sec[0]) && !sec[0].includes('btn-slice-preview') &&
         m[0].indexOf('id="btn-sup-all"') < m[0].indexOf('id="btn-sup-slice"') && m[0].indexOf('id="btn-sup-slice"') < m[0].indexOf('id="sup-style"') &&
         m[0].includes('id="slice-set-raft"') && m[0].includes('id="slice-set-raft-gap"') && !!settings && !settings[0].includes('slice-set-raft'); })());
