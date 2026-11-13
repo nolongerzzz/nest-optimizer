@@ -2327,6 +2327,7 @@
   var COLUMN_LAND_MM = 0;        /* under the stack a column may run on down as Support (the base) until it stands on the support's own material, at most this far.
                                     0: no base - the transition spans between the tree's tips, as Bambu's does (a base of 3 mm printed as a block under every plate) */
   var COLUMN_TUBE_FILL_BELOW_MM = 1;     /* the tree's rings are crossed with base lines from this far under the part's lowest stack up (Bambu's) */
+  var COLUMN_TUBE_MID_SNAP_MM = 0.4, COLUMN_TUBE_MID_MIN_MM = 0.5;   /* ...and a ring no line of the grid crosses takes one across its middle */
   var COLUMN_TUBE_FILL_PITCH_MM = 2.5;   /* ...that far apart: Bambu's support_base_pattern_spacing */
   var COLUMN_BASE_PITCH_MM = 2;  /* the base's lines (Support), as far apart as this: the transition over it spans no more */
   /* the loops a stack's piece is laid with: one half a line in from its edge; a piece narrower than a line (a dome's or a cone's ring of contact,
@@ -2628,7 +2629,7 @@
      owner: "every interface is square from the bridge above - parallel lines weld easier"): above its first layer a stack takes the angle
      of the part's layer that bridges its top - the top layer square to it, and so on down, one turn a layer. */
   var STUDIO36_DEG = 3.6;   /* Studio 02.09's bridge over the owner's mouse1 supports, and the stack's turn under it (layers 210 - 219) */
-  function columnType(g, P, SP, o, host, planes) {
+  function columnType(g, P, SP, o, host, planes, hostStacks) {
     var wI = o.supportWidthMm > 0 ? o.supportWidthMm : o.infillWidthMm, pitch = wI + 0.04, aD = (o.infillDirectionDeg || 45) * Math.PI / 180;
     var counts = { 'Support': 0, 'Support transition': 0, 'Support interface': 0 }, stackIdx = [], regs = [], sheets = [], up = [];
     var NI = P.col.NI, NT = P.col.NT;
@@ -2640,8 +2641,11 @@
     });
     /* how many of the stack's layers lie over each one, and the angle of the part's layer on its top (the solid fill's: infillDirectionDeg, turned a
        quarter on every other layer - its Bridge over the stack is laid at it) */
+    /* the lowest stack under the part - any of its supports' (a stack has one owner: the 2x Oblique's second tree owned none, and every one of its
+       rings stood hollow - the owner's "the tips are still not complete on the other tree") */
     var tubeFillFrom = null;
-    for (var jf = 0; jf < P.layers.length && tubeFillFrom == null; jf++) if (regs[jf] && !g.isEmpty(regs[jf])) tubeFillFrom = SP[jf].printZ - SP[jf].h - COLUMN_TUBE_FILL_BELOW_MM;
+    (hostStacks || []).forEach(function (st) { var zf = st.zb - COLUMN_TUBE_FILL_BELOW_MM; if (tubeFillFrom == null || zf < tubeFillFrom) tubeFillFrom = zf; });
+    for (var jf = 0; jf < P.layers.length; jf++) if (regs[jf] && !g.isEmpty(regs[jf])) { var zf2 = SP[jf].printZ - SP[jf].h - COLUMN_TUBE_FILL_BELOW_MM; if (tubeFillFrom == null || zf2 < tubeFillFrom) tubeFillFrom = zf2; break; }
     for (var ju = P.layers.length - 1; ju >= 0; ju--) up[ju] = regs[ju] && ju + 1 < P.layers.length && regs[ju + 1] && stackIdx[ju + 1] === stackIdx[ju] + 1 ? up[ju + 1] + 1 : 0;
     var PLh = (host && host.planes) || planes, dirB = (o.infillDirectionDeg || 0) * Math.PI / 180;
     /* the bridge over a stack's top: the lowest of the part's layers over it (within 1.5 mm) whose Bridge / Bottom surface lines cross the top's
@@ -2756,11 +2760,23 @@
         if (!g.isEmpty(treeJ)) g.parts(treeJ).forEach(function (pc) {
           var inC = g.offset(pc, -wI * 0.5);
           if (g.isEmpty(inC)) return;
-          var cs2 = scanFill(g.polys(inC), aD, COLUMN_TUBE_FILL_PITCH_MM, 0);
+          var cs2 = scanFill(g.polys(inC), aD, COLUMN_TUBE_FILL_PITCH_MM, 0), got = 0;
           cs2.forEach(function (sg) {
             var a0 = sg.a, b0 = sg.b;
-            if (Math.hypot(b0[0] - a0[0], b0[1] - a0[1]) >= 1) out.push({ feature: 'Support', width: wI, closed: false, pts: [a0, b0], sheetFill: true, colPlate: true });
+            if (Math.hypot(b0[0] - a0[0], b0[1] - a0[1]) >= 1) { out.push({ feature: 'Support', width: wI, closed: false, pts: [a0, b0], sheetFill: true, colPlate: true }); got++; }
           });
+          /* A RING THE GRID MISSES (the owner: "the tips are still not complete" - a tip's ring is 1.5 - 2 mm across, the grid's lines 2.5 apart, and
+             most tips' rings stood hollow up to the stack): one line across its middle, on a COLUMN_TUBE_MID_SNAP_MM grid so a straight tip's lines
+             lie on one another, as Bambu lays a line in every lobe */
+          if (!got) {
+            var cA = Math.cos(aD), sA = Math.sin(aD), yLo = Infinity, yHi = -Infinity;
+            g.polys(inC).forEach(function (pl) { pl.forEach(function (q) { var yr = -q[0] * sA + q[1] * cA; if (yr < yLo) yLo = yr; if (yr > yHi) yHi = yr; }); });
+            var yMid = Math.round((yLo + yHi) / 2 / COLUMN_TUBE_MID_SNAP_MM) * COLUMN_TUBE_MID_SNAP_MM;
+            if (!(yMid > yLo && yMid < yHi)) yMid = (yLo + yHi) / 2;
+            scanFill(g.polys(inC), aD, 1e6, yMid).forEach(function (sg) {
+              if (Math.hypot(sg.b[0] - sg.a[0], sg.b[1] - sg.a[1]) >= COLUMN_TUBE_MID_MIN_MM) out.push({ feature: 'Support', width: wI, closed: false, pts: [sg.a, sg.b], sheetFill: true, colPlate: true });
+            });
+          }
         });
       }
       var Dj = P.col.D && P.col.D[j];
@@ -2795,6 +2811,13 @@
        further below it (C.stairLayers) */
     var stairHOf = function (SP) { return (C.stairLayers || 0) * (SP.length ? SP[SP.length - 1].h : 0.2); };
     var parts = perObject.filter(function (Q) { return Q.role === 'part'; });
+    /* the column rule's stacks of every support, by the part they hold (columnType's tube fill reads the part's lowest) */
+    var stacksBy = {};
+    perObject.forEach(function (Q) {
+      if (Q.role !== 'support' || !Q.col) return;
+      var SPq = Q.planes || planes, arr = stacksBy[Q.hostKey != null ? Q.hostKey : '*'] || (stacksBy[Q.hostKey != null ? Q.hostKey : '*'] = []);
+      for (var jq = 0; jq < Q.layers.length; jq++) if ((Q.col.I[jq] && !g.isEmpty(Q.col.I[jq])) || (Q.col.T[jq] && !g.isEmpty(Q.col.T[jq]))) { arr.push({ z: SPq[jq].printZ, zb: SPq[jq].printZ - SPq[jq].h }); break; }
+    });
     perObject.forEach(function (P) {
       if (P.role !== 'support') return;
       var SP = P.planes || planes;                                             // this support's own layers, and `planes` the part's
@@ -2808,7 +2831,7 @@
         if (!feet[i]) feet[i] = g.offset(g.offset(P.S[i], R), -R);
         return feet[i];
       };
-      if (P.col) { columnType(g, P, SP, o, host, planes); return; }
+      if (P.col) { columnType(g, P, SP, o, host, planes, stacksBy[P.hostKey != null ? P.hostKey : '*']); return; }
       var tops = [], held = {};
       /* a footprint with its holes filled: what lies OUTSIDE a layer, not in
          a channel of it */

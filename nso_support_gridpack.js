@@ -5216,14 +5216,21 @@
      stood one round shoot. Each tip of the column rule's crown takes up to TIP_FORK.max of the spots it covers (TIP_FORK.minMm - maxMm off it,
      TIP_FORK.apartMm apart, within TIP_FORK.dzMm of its height) as tips of its own, joined to it first (crownTopology's fork: a join under the
      shoots, the tip's straight drop under the lower of them); the tree under the fork is grouped as it was. */
-  var TIP_FORK = { max: 2, minMm: 1.0, maxMm: 2.6, apartMm: 1.4, spanMm: 2.6, minHeightMm: 12, dzMm: 1.5, riseMm: 0.3, leanDeg: 30 };
+  var TIP_FORK = { max: 2, minMm: 1.0, maxMm: 2.6, apartMm: 1.4, spanMm: 2.6, otherMm: 2.8, minHeightMm: 12, areaRiseMm: 2, dzMm: 1.5, riseMm: 0.3, leanDeg: 30 };
   function tipForkSpots(chosen, covered, bc, plateZ) {
     var out = {}, byKey = {};
     /* a fork costs its tree a couple of mm of height: a squat head (its tip within TIP_FORK.minHeightMm of the plate) keeps its single shoot - the
        Negative Sphere's tree at 10.8 mm, forked, crowded its joins into its trunk's shoulder and printed 2.8 mm2 over air (Bambu's 0.2) */
-    chosen.forEach(function (b) { if (b.p[2] - plateZ >= TIP_FORK.minHeightMm) byKey[b.key] = b; });
-    var mine = {};
+    /* ...and a flat face keeps its single shoots: the slicer's stack spans its tips, and a forked Base printed its tree over air at the trunk (3 mm2,
+       Bambu's 0.0). A slope (its area's spots TIP_FORK.areaRiseMm or more apart in height) is where Bambu's tips run together in twos and threes */
+    var zr = {};
+    bc.beacons.forEach(function (b) { var r = zr[b.regionId] || (zr[b.regionId] = [Infinity, -Infinity]); r[0] = Math.min(r[0], b.p[2]); r[1] = Math.max(r[1], b.p[2]); });
+    chosen.forEach(function (b) { var r = zr[b.regionId]; if (b.p[2] - plateZ >= TIP_FORK.minHeightMm && r && r[1] - r[0] >= TIP_FORK.areaRiseMm) byKey[b.key] = b; });
+    var mine = {}, taken = [];
     covered.forEach(function (c) { if (!c.cone && byKey[c.byKey]) (mine[c.byKey] = mine[c.byKey] || []).push(c); });
+    /* every shoot keeps TIP_FORK.otherMm off every other tip and its shoots (the owner's 2x Oblique: "some webbing" - a shoot 2 mm off the next
+       tip's ran into it, and the smooth body's blend between them sliced as a thin web of walls) */
+    chosen.forEach(function (b) { taken.push({ k: b.key, p: b.p }); });
     Object.keys(mine).forEach(function (k) {
       var t = byKey[k], took = [];
       mine[k].slice().sort(function (a, b) { return (a.mm - b.mm) || (a.beacon - b.beacon); }).forEach(function (c) {
@@ -5234,6 +5241,8 @@
         if (d < TIP_FORK.minMm || d > TIP_FORK.maxMm || Math.abs(b.p[2] - t.p[2]) > TIP_FORK.dzMm) return;
         if (took.some(function (o) { return Math.hypot(o.p[0] - b.p[0], o.p[1] - b.p[1]) < TIP_FORK.apartMm; })) return;
         if (took.some(function (o) { return Math.hypot(o.p[0] - b.p[0], o.p[1] - b.p[1]) > TIP_FORK.spanMm; })) return;   /* a tight head: no shoot across the fork from another */
+        if (taken.some(function (o) { return o.k !== k && Math.hypot(o.p[0] - b.p[0], o.p[1] - b.p[1]) < TIP_FORK.otherMm; })) return;
+        taken.push({ k: k, p: b.p });
         took.push(b);
       });
       if (took.length) out[k] = took;

@@ -231,7 +231,14 @@ run together in twos and threes a mm or two down (lobed heads, Support 353 mm of
 1.4 - 2.6 mm apart, within 1.5 mm of its height) as tips of its own; crownTopology joins them first under a fork - at their centroid, each shoot a
 0.3 mm straight rise and a lean of 30 deg or less - and groups the rest of the tree as before. The Oblique now stands pairs (306 mm). A tip within
 12 mm of the plate keeps its single shoot: the Negative Sphere (tips at 10.8), forked, crowded its joins into the trunk's shoulder and printed
-2.8 mm2 over air (Bambu's 0.2). `opts.noTipForks` turns it off. Gate 66/66; the Base's tree over air sits at its limit (2.0 against 2.01).
+2.8 mm2 over air (Bambu's 0.2). `opts.noTipForks` turns it off. A shoot keeps 2.8 mm off every other tip and its shoots (closer, the smooth body's blend
+between them sliced as a web of thin walls: the owner's "some webbing"), and only a sloped area (its spots 2 mm or more apart in height) forks: a
+flat face's tips are spanned by the slicer's stack, and the forked Base printed 3 mm2 over air at its trunk. Gate 66/66 (Base 0.5).
+
+**Lines in every tip (nso_slicer.js columnType).** The tube fill starts 1 mm under the part's lowest stack - any support's: a stack has one owner,
+and the 2x Oblique's second tree owned none, so none of its rings had a line ("the tips are still not complete on the other tree"). A ring the
+2.5 mm grid misses (a tip, 1.5 - 2 mm across) takes one line across its middle (COLUMN_TUBE_MID_SNAP_MM). The Oblique's rings from z 16 up with a
+line inside: 304 of 390 (was 171 of 295).
 
 ## 4. Measured (`support:onetrunk`, the six real parts, flat)
 
