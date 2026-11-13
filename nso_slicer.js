@@ -2326,6 +2326,8 @@
   var COLUMN_CUP_HOLE_MM2 = 3;      /* ...not under a plate with a hole bigger than this (a rim round a cavity) */         /* ...stepping in this steeply going down */
   var COLUMN_LAND_MM = 0;        /* under the stack a column may run on down as Support (the base) until it stands on the support's own material, at most this far.
                                     0: no base - the transition spans between the tree's tips, as Bambu's does (a base of 3 mm printed as a block under every plate) */
+  var COLUMN_TUBE_FILL_BELOW_MM = 1;     /* the tree's rings are crossed with base lines from this far under the part's lowest stack up (Bambu's) */
+  var COLUMN_TUBE_FILL_PITCH_MM = 2.5;   /* ...that far apart: Bambu's support_base_pattern_spacing */
   var COLUMN_BASE_PITCH_MM = 2;  /* the base's lines (Support), as far apart as this: the transition over it spans no more */
   /* the loops a stack's piece is laid with: one half a line in from its edge; a piece narrower than a line (a dome's or a cone's ring of contact,
      a few tenths wide) one loop down its middle (its outer edge in by half its mean width, 2 x area / perimeter), as Bambu lays such a ring - and
@@ -2638,6 +2640,8 @@
     });
     /* how many of the stack's layers lie over each one, and the angle of the part's layer on its top (the solid fill's: infillDirectionDeg, turned a
        quarter on every other layer - its Bridge over the stack is laid at it) */
+    var tubeFillFrom = null;
+    for (var jf = 0; jf < P.layers.length && tubeFillFrom == null; jf++) if (regs[jf] && !g.isEmpty(regs[jf])) tubeFillFrom = SP[jf].printZ - SP[jf].h - COLUMN_TUBE_FILL_BELOW_MM;
     for (var ju = P.layers.length - 1; ju >= 0; ju--) up[ju] = regs[ju] && ju + 1 < P.layers.length && regs[ju + 1] && stackIdx[ju + 1] === stackIdx[ju] + 1 ? up[ju + 1] + 1 : 0;
     var PLh = (host && host.planes) || planes, dirB = (o.infillDirectionDeg || 0) * Math.PI / 180;
     /* the bridge over a stack's top: the lowest of the part's layers over it (within 1.5 mm) whose Bridge / Bottom surface lines cross the top's
@@ -2740,6 +2744,22 @@
             if (segs.length) connect(segs, 3 * pj, hullR).forEach(function (pth) {
               out.push({ feature: rg[1], width: wI, closed: false, pts: pth.pts, sheetFill: true, colPlate: true });
             });
+          });
+        });
+      }
+      /* LINES INSIDE THE TUBE NEAR THE TOP (the owner's 2x Oblique against Bambu's: "both should have been within the tube"). Bambu's branch rings
+         carry its base pattern inside - rectilinear, a line or two across a ring - in half its rings from the stack's foot up and seldom lower; ours
+         were hollow, and the cup drew the lines outside the tube instead. From COLUMN_TUBE_FILL_BELOW_MM under the lowest stack of the part's
+         supports, each tree piece is crossed at COLUMN_TUBE_FILL_PITCH_MM at one angle (each layer's lines on the last's) */
+      if (tubeFillFrom != null && SP[j].printZ >= tubeFillFrom && !g.isEmpty(P.S[j])) {
+        var treeJ = R ? g.diff(P.S[j], R) : P.S[j];
+        if (!g.isEmpty(treeJ)) g.parts(treeJ).forEach(function (pc) {
+          var inC = g.offset(pc, -wI * 0.5);
+          if (g.isEmpty(inC)) return;
+          var cs2 = scanFill(g.polys(inC), aD, COLUMN_TUBE_FILL_PITCH_MM, 0);
+          cs2.forEach(function (sg) {
+            var a0 = sg.a, b0 = sg.b;
+            if (Math.hypot(b0[0] - a0[0], b0[1] - a0[1]) >= 1) out.push({ feature: 'Support', width: wI, closed: false, pts: [a0, b0], sheetFill: true, colPlate: true });
           });
         });
       }
