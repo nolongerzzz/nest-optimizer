@@ -1855,6 +1855,37 @@ var NSO_SUPPORTS_CARD = (function () {
     }
     return out;
   }
+  /* A PRISM THAT COVERS ITS OUTLINE (the owner's 2x Oblique on the A1 mini: a band across both trees on the plate, the layer at z 19.4 drawn with a
+     fifth of its sides - the slice printed it whole): a triangulation whose top does not cover the outline's area is taken for a failed one, and the
+     prism is built again by the ear clipper, then by the slicer's own kernel (Manifold's cross-section, extruded), which takes any outline */
+  function topAreaOf(soup, z1) {
+    var a = 0;
+    for (var i = 0; i + 8 < soup.length; i += 9) {
+      if (Math.abs(soup[i + 2] - z1) > 1e-6 || Math.abs(soup[i + 5] - z1) > 1e-6 || Math.abs(soup[i + 8] - z1) > 1e-6) continue;
+      a += Math.abs((soup[i + 3] - soup[i]) * (soup[i + 7] - soup[i + 1]) - (soup[i + 4] - soup[i + 1]) * (soup[i + 6] - soup[i])) / 2;
+    }
+    return a;
+  }
+  function prismChecked(poly, z0, z1, GP, wasm) {
+    if (!poly || poly.length < 3) return null;
+    var a2 = 0; for (var q = 0; q < poly.length; q++) { var u = poly[q], v = poly[(q + 1) % poly.length]; a2 += u[0] * v[1] - v[0] * u[1]; }
+    var A = Math.abs(a2) / 2, ok = function (ps) { return ps && ps.length && Math.abs(topAreaOf(ps, z1) - A) <= 0.01 * A + 0.01; };
+    var ps = prismOf(poly, z0, z1, GP);
+    if (ok(ps)) return ps;
+    var ps2 = GP && typeof GP._prismSoup === 'function' ? GP._prismSoup(poly, z0, z1) : null;
+    if (ok(ps2)) return ps2;
+    if (wasm && wasm.CrossSection) {
+      var cs = null, man = null;
+      try {
+        cs = new wasm.CrossSection([a2 > 0 ? poly : poly.slice().reverse()], 'Positive');
+        man = cs.extrude(z1 - z0);
+        var mesh = man.getMesh(), np = mesh.numProp, V = mesh.vertProperties, Tv = mesh.triVerts, out = new Float32Array(Tv.length * 3);
+        for (var t = 0; t < Tv.length; t++) { out[t * 3] = V[Tv[t] * np]; out[t * 3 + 1] = V[Tv[t] * np + 1]; out[t * 3 + 2] = V[Tv[t] * np + 2] + z0; }
+        if (out.length) { S.prismKernel = (S.prismKernel || 0) + 1; return out; }
+      } catch (e) { /* the kernel could not either */ } finally { try { if (man) man.delete(); if (cs) cs.delete(); } catch (e2) { /* freed */ } }
+    }
+    return ps && ps.length ? ps : ps2;
+  }
   /* the gate's settings: the drawing's slice when no printer is picked (the node harness, support:gate) */
   var STACK_SLICE = { supportInterfaceLayers: 3, supportLayerMaxMm: 0.28, supportInterfaceRule: 'column' };
   /* GENERATE IS THE SLICE (the owner: "if generate is performing a slice, have it complete the job and hand off preview to G-scope"). Once
@@ -1892,7 +1923,11 @@ var NSO_SUPPORTS_CARD = (function () {
     /* the slice runs in the Slice card's worker: the build's watchdog and ceiling are for the planner, and Cancel (job.stop) stops this too */
     clearTimeout(job.timer); clearTimeout(job.ceiling);
     S.run = null; S.prog = { phase: 'slicing' }; job.slicing = true; paintBar(); sync();
+    var SLk = window.NSO_Slicer, kernelP = SLk && typeof SLk.loadKernel === 'function' ? SLk.loadKernel({}).catch(function () { return null; }) : Promise.resolve(null);
     return PR.slice({ pieces: pieces, stacks: true, onStage: function (t) { if (!job.dead) { S.sliceStage = t; paintBar(); } } }).then(function (r) {
+      return kernelP.then(function (wasm) { return [r, wasm]; });
+    }).then(function (rw) {
+      var r = rw[0], wasm = rw[1];
       job.slicing = false; S.sliceStage = null;
       if (job.dead) return null;
       S.sliced = r;
@@ -1906,7 +1941,7 @@ var NSO_SUPPORTS_CARD = (function () {
         st.layers.forEach(function (L) {
           /* a layer the slicer prints no line on (a horn's tip, a hair over its last printed layer) is not drawn */
           if (L.printed === false) return;
-          L.S.forEach(function (poly) { var ps = prismOf(poly, L.z0, L.z1, GP); if (ps && ps.length) parts.push(ps); else S.prismMissed = (S.prismMissed || 0) + 1; });
+          L.S.forEach(function (poly) { var ps = prismChecked(poly, L.z0, L.z1, GP, wasm); if (ps && ps.length) parts.push(ps); else S.prismMissed = (S.prismMissed || 0) + 1; });
         });
         if (!parts.length) return;
         var len = 0; parts.forEach(function (ps) { len += ps.length; });
