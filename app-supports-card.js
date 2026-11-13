@@ -210,12 +210,14 @@ var NSO_SUPPORTS_CARD = (function () {
   /* The sheet's line pitch and its interface layers are the build's own: DENSE is Bambu's (support_interface_spacing 0.1: lines
      0.46 mm apart, and 3 interface layers over the 2 of transition, as the reference slice lays every head); OPEN is the 0.84 mm
      and 2 + 2 layers the first prints were made with. */
+  /* the card's Top interface layers (0 - 3, as Bambu's): the count the slicer types interface under the part; else the build's own */
+  function ifaceLayersOf(o, dflt) { var n = o ? o.ifaceLayers : null; return n != null && isFinite(n) && n >= 0 ? n : dflt; }
   function oneTrunkOn(o) { return S.mode === 'auto' && !!o.one && o.style === 'tree'; }
   function partsOptsOf(o) {
     /* Dense belongs to the one-trunk build: its sheet is planned over the thinned tips the reference's is. A hand-placed row of three
        tips (Custom) did not form a sheet at 0.47 mm that it forms at 0.84 (support:custom), so the other builds stay Open. */
     var SI = window.NSO_SupportInterface, dense = !!o && o.dense !== false && oneTrunkOn(o);
-    var out = dense && SI && SI.SHEET && SI.SHEET.densePitchMm ? Object.assign({}, PARTS_OPTS, { sheetPitchMm: SI.SHEET.densePitchMm, interfaceLayers: SI.SHEET.denseInterfaceLayers, sheetLayerMm: SI.SHEET.denseSheetLayerMm, sheetRegionSlopes: true, sheetFlatGapMm: SI.SHEET.denseFlatGapMaxMm, sheetStairLegMm: SI.SHEET.denseStairLegMm }) : Object.assign({}, PARTS_OPTS);
+    var out = dense && SI && SI.SHEET && SI.SHEET.densePitchMm ? Object.assign({}, PARTS_OPTS, { sheetPitchMm: SI.SHEET.densePitchMm, interfaceLayers: ifaceLayersOf(o, SI.SHEET.denseInterfaceLayers), sheetLayerMm: SI.SHEET.denseSheetLayerMm, sheetRegionSlopes: true, sheetFlatGapMm: SI.SHEET.denseFlatGapMaxMm, sheetStairLegMm: SI.SHEET.denseStairLegMm }) : Object.assign({}, PARTS_OPTS);
     /* THE PLATFORM is the tree's own (the owner's: raft is a support type of its own; the platform under a flat face - the interface and the transition
        laid from each footprint and its height, layer by layer - is the original branch / transition / interface, and was only tied to the Raft box).
        Auto (the one-trunk tree) always lays it. The box now gates only the builds that are not Auto: off, their sheet is built from the tips alone, as it
@@ -225,7 +227,7 @@ var NSO_SUPPORTS_CARD = (function () {
        layers: the generator builds the tree alone - its tips up to the part, cut at the gap by the slicer, the stack laid on them - and no sheet,
        caps or plate of its own (left under the slicer's stack they printed as a block of Support between the tree and the interface). The sheet's
        layer height and interface count stay on the support (meta), so the slicer cuts it on Bambu's grid and types 3 interface layers. */
-    if (columnRule()) { out.interface = false; out.trunkGrowth = true; out.columnRule = true; }
+    if (columnRule()) { out.interface = false; out.trunkGrowth = true; out.columnRule = true; out.interfaceLayers = ifaceLayersOf(o, out.interfaceLayers != null ? out.interfaceLayers : 2); }
     return out;
   }
   function columnRule() { return typeof window !== 'undefined' && typeof window.nsoSupportInterfaceRule === 'function' && window.nsoSupportInterfaceRule() === 'column'; }
@@ -1215,7 +1217,7 @@ var NSO_SUPPORTS_CARD = (function () {
     var size = sz ? parseFloat(sz.value) : NaN;
     var one = $('sup-one'), it = $('sup-interface'), br = $('sup-brim'), rf = $('sup-raft'), sm = $('sup-small');
     return { brim: !br || !!br.checked, raft: !rf || !!rf.checked, style: style, sideMm: isFinite(size) ? size : null, rest: !!(rs && rs.checked), noHorns: !!(sm && sm.checked), knobs: S.mode === 'custom' ? knobsGiven() : null,
-      one: !one || !!one.checked || (!!(one.parentNode && one.parentNode.hidden) && one.dataset.testOff !== '1'), dense: !it || it.value !== 'open', treeKnobs: treeKnobsOf() };   /* hidden: always one-trunk */
+      one: !one || !!one.checked || (!!(one.parentNode && one.parentNode.hidden) && one.dataset.testOff !== '1'), dense: true, ifaceLayers: it && it.value !== '' && isFinite(parseInt(it.value, 10)) ? parseInt(it.value, 10) : null, treeKnobs: treeKnobsOf() };   /* hidden: always one-trunk */
   }
 
   /* THE PLANNER'S THREAD. planTree is one synchronous call that can run for
@@ -1915,7 +1917,7 @@ var NSO_SUPPORTS_CARD = (function () {
           /* the name the plate gives it (placeResults takes this one): the file, G-scope's readout and the plate say the same */
           sd.pieceName = sd.brim ? b.c.hm.name + ' - brim' : b.c.hm.name + ' - support ' + (r.rid + 1) + '.' + (++m) + ' (' + STYLES[b.c.o.style] + ')';
           pieces.push({ name: sd.pieceName, soup: sd.soup, sourceId: sd.sliceKey, support: true, brim: !!sd.brim,
-                        hostSourceId: b.c.hostId, interfaceLayers: po.interfaceLayers || 2, sheetLayerMm: po.sheetLayerMm || 0, nonSolid: false,
+                        hostSourceId: b.c.hostId, interfaceLayers: po.interfaceLayers != null ? po.interfaceLayers : 2, sheetLayerMm: po.sheetLayerMm || 0, nonSolid: false,
                         settings: sd.brim ? { wall_generator: 'classic', detect_thin_wall: '0', wall_loops: '10', sparse_infill_density: '0%', top_shell_layers: '0', bottom_shell_layers: '1' } : sheetSet });
         });
       });
@@ -2036,7 +2038,7 @@ var NSO_SUPPORTS_CARD = (function () {
         /* a support drawn as it prints (stackStep) keeps the tree it was built as: that is what the slicer cuts (sliceSoupOf), the drawing is its slice */
         if (sd.asPrinted && sd.built) { meta.built = sd.built; meta.shownV0 = [sd.soup[0], sd.soup[1], sd.soup[2]]; meta.drawnFrom = sd.drawnFrom; }   /* drawnFrom: 'plate' - the Slice card's options; 'gate' - no printer picked */
         meta.sheetLayerMm = partsOptsOf(o).sheetLayerMm || 0;               /* a Dense sheet's layers are this thick: the slicer cuts the supports on their own layer grid then */
-        meta.interfaceLayers = partsOptsOf(o).interfaceLayers || 2;      /* how many interface layers its sheet has: the slicer reads a 3-layer sheet as one */
+        meta.interfaceLayers = partsOptsOf(o).interfaceLayers != null ? partsOptsOf(o).interfaceLayers : 2;      /* how many interface layers its sheet has: the slicer reads a 3-layer sheet as one */
         var nm = sd.brim ? c.hm.name + ' - brim' : c.hm.name + ' - support ' + (r.rid + 1) + '.' + (++n) + ' (' + STYLES[o.style] + ')';
         var pl = placeSolid(sd.soup, meta, c.host, c.D.minZ, sd.pieceName || nm);
         if (!pl.ok) throw new Error(pl.reason);

@@ -1,7 +1,7 @@
 # Support: one trunk, the way Bambu's tree slim grows (supports-one-trunk)
 
 `opts.oneTrunk` in `nso_support_gridpack.js` (`planOneTrunk`), the Supports card's **One trunk per cluster**
-box and **Interface: Dense (Bambu) / Open** select (`app-supports-card.js`), the sheet's `interfaceLayers`
+box and **Top interface layers** select (0 - 3) (`app-supports-card.js`), the sheet's `interfaceLayers`
 (`nso_support_interface.js`). Gate: `npm run support:onetrunk` (`tools/nso_support_onetrunk_check.js`, ~1.5 min).
 `node tools/nso_support_onetrunk_check.js --export` also writes `tools/supports-onetrunk-out/supp_ref_onetrunk.3mf`
 (the six heads and their supports, git-ignored) for Bambu Studio.
@@ -223,7 +223,7 @@ the option (the shipped Custom feed's bytes are the claude-wip's; `support:feed`
 layers and that many interface layers, the interface alternating across and along the sheet's A. The card's **Dense (Bambu)**
 interface is pitch **0.47 mm** (Bambu's 0.46: the strip's joins need a segment of 0.4665, and at 0.46 the stair under
 the tilted plane did not build) and **3 interface layers** over 2 of transition (`SHEET.denseInterfaceLayers`, as Bambu's reference lays every head; it was 2); **Open** is 0.84 mm, the same 2 + 2. The card's default is
-Dense **in the one-trunk build only**: a hand-placed row of three tips (Custom, `support:custom`) formed no sheet at 0.47 mm where it forms one at 0.84, so every other build stays Open. The slicer's labelling takes `supportInterfaceLayers` (default 2) to read a 3-layer sheet.
+Dense **in the one-trunk build only**: a hand-placed row of three tips (Custom, `support:custom`) formed no sheet at 0.47 mm where it forms one at 0.84, so every other build stays Open. The slicer's labelling takes `supportInterfaceLayers` (default 2) to read a 3-layer sheet. The card no longer offers Open: its **Top interface layers** select (0 / 1 / 2 / 3, default 3, as Bambu's) sets `interfaceLayers` and the slicer's `supportInterfaceLayers` (column rule: NI interface layers over the NT = 2 transition; 0 lays transition only).
 
 ## 4. Measured (`support:onetrunk`, the six real parts, flat)
 

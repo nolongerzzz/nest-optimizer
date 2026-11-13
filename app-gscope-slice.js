@@ -220,10 +220,10 @@ var NSO_GSCOPE_SLICE = (function () {
 
     var po = panelOpts();
     var opts = SL().defaultsFor(po.nozzleMm, Object.assign({}, po.over, optsOver || {}));
-    /* a sheet of more interface layers than the slicer's default says so (the card's Dense: 3): the slicer types its top 3 layers interface */
-    var ni = 0;
-    d.objects.forEach(function (o) { var su = supportOf(o); if (su && su.interfaceLayers > ni) ni = su.interfaceLayers; });
-    if (ni > 2 && !(optsOver && optsOver.supportInterfaceLayers != null)) opts.supportInterfaceLayers = ni;
+    /* the supports' own count of top interface layers (the card's 0 - 3) is the slicer's */
+    var ni = -1;
+    d.objects.forEach(function (o) { var su = supportOf(o); if (su && su.interfaceLayers != null && su.interfaceLayers > ni) ni = su.interfaceLayers; });
+    if (ni >= 0 && !(optsOver && optsOver.supportInterfaceLayers != null)) opts.supportInterfaceLayers = ni;
     /* ...and a Dense sheet's thicker layers (Bambu's 0.275) mean the supports are cut on their own layer grid, as Bambu's independent support layer height does */
     var sl = 0;
     d.objects.forEach(function (o) { var su = supportOf(o); if (su && su.sheetLayerMm > sl) sl = su.sheetLayerMm; });

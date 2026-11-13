@@ -255,10 +255,10 @@
     var o = SL.defaultsFor(eng.nozzleMm, Object.assign({ emitGcode: false }, eng.over));
     /* the planner reads two patterns off a config (grid, else zigzag); the card's own is the slicer's */
     if (settings) o.sparsePattern = settings.pattern;
-    /* a sheet of more interface layers than the slicer's default says so (the card's Dense: 3): the slicer types its top 3 layers interface, as G-scope's Slice does */
-    var ni = 0;
-    objects.forEach(function (ob) { if (ob.interfaceLayers > ni) ni = ob.interfaceLayers; });
-    if (ni > 2 && (eng.over || {}).supportInterfaceLayers == null) o.supportInterfaceLayers = ni;
+    /* the supports' own count of top interface layers (the card's 0 - 3) is the slicer's, as G-scope's Slice does */
+    var ni = -1;
+    objects.forEach(function (ob) { if (ob.interfaceLayers != null && ob.interfaceLayers > ni) ni = ob.interfaceLayers; });
+    if (ni >= 0 && (eng.over || {}).supportInterfaceLayers == null) o.supportInterfaceLayers = ni;
     /* ...and a Dense sheet's own thicker layers (Bambu's 0.275): the supports are cut on their own layer grid, as G-scope's Slice does */
     var sl = 0;
     objects.forEach(function (ob) { if (ob.sheetLayerMm > sl) sl = ob.sheetLayerMm; });
