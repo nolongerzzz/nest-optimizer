@@ -225,6 +225,14 @@ interface is pitch **0.47 mm** (Bambu's 0.46: the strip's joins need a segment o
 the tilted plane did not build) and **3 interface layers** over 2 of transition (`SHEET.denseInterfaceLayers`, as Bambu's reference lays every head; it was 2); **Open** is 0.84 mm, the same 2 + 2. The card's default is
 Dense **in the one-trunk build only**: a hand-placed row of three tips (Custom, `support:custom`) formed no sheet at 0.47 mm where it forms one at 0.84, so every other build stays Open. The slicer's labelling takes `supportInterfaceLayers` (default 2) to read a 3-layer sheet. The card no longer offers Open: its **Top interface layers** select (0 / 1 / 2 / 3, default 3, as Bambu's) sets `interfaceLayers` and the slicer's `supportInterfaceLayers` (column rule: NI interface layers over the NT = 2 transition; 0 lays transition only).
 
+**Split tip shoots (`TIP_FORK`, `tipForkSpots`, crownTopology's fork).** The owner's 2x Oblique beside Bambu's: Bambu's tips under a slope
+run together in twos and threes a mm or two down (lobed heads, Support 353 mm of filament), NSO's one tip every 3 mm stood one round shoot (243 mm):
+"not a cone, not a cup. Split each tip shoot into multiple". Under the column rule each tip takes up to 2 of the spots it covers (1 - 2.6 mm off it,
+1.4 - 2.6 mm apart, within 1.5 mm of its height) as tips of its own; crownTopology joins them first under a fork - at their centroid, each shoot a
+0.3 mm straight rise and a lean of 30 deg or less - and groups the rest of the tree as before. The Oblique now stands pairs (306 mm). A tip within
+12 mm of the plate keeps its single shoot: the Negative Sphere (tips at 10.8), forked, crowded its joins into the trunk's shoulder and printed
+2.8 mm2 over air (Bambu's 0.2). `opts.noTipForks` turns it off. Gate 66/66; the Base's tree over air sits at its limit (2.0 against 2.01).
+
 ## 4. Measured (`support:onetrunk`, the six real parts, flat)
 
 `node tools/nso_support_onetrunk_check.js` - the card's Auto at its defaults (box ticked, Dense), each head flat, built, sliced
