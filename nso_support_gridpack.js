@@ -2305,6 +2305,7 @@
   }
   /* the heights a trunk's rings stand at over its flare: the bottom, FLARE_RINGS between, the flare's top, the top */
   var FLARE_RINGS = 6;
+  var TRUNK_MEET_SLOPE = 0.65;  /* a trunk's shell narrows to its crown's body at most this much a side a mm (0.18 a 0.28 layer, under half a bead: a hollow ring keeps its bead on the one under it; the foot keeps its width) */
   function ringZs(z0, zf, top) {
     var out = [z0];
     if (zf > z0 + 1e-6 && zf < top - 1e-6) {
@@ -2396,13 +2397,40 @@
       taperBase(rings, floorR, zf);
       rec.narrowed = true; rec.k = 1;
     }
+    /* THE SHELL MEETS THE BODY FLUSH (the owner's P1S print: the Circular's and the Base's trunks stepped in 0.33 - 0.52 mm a side in one
+       layer where the shell stopped under its crown's smooth body - the body's radius has no flare - and the hollow ring over the step sagged
+       into an oval): a shell wider than the body at its top narrows to the body's radius there, no faster than TRUNK_MEET_SLOPE a mm on the
+       way up */
+    var topZ = rings[rings.length - 1][0], base0 = rings[0].slice();   /* the foot's pad and core keep the uncapped base */
+    /* the body's radius there: the law without the flare and without the crown's path (stepCrown's rTr: tipTopOf, no pathAddMm) */
+    var Hb = LW && LW.uniformH != null ? plateZ + LW.uniformH : g.H, rBody = tipMm / 2 + ta * Math.max(0, Hb - topZ) + cr.dR;
+    if (Math.max(rings[rings.length - 1][1], rings[rings.length - 1][2]) * cosN > rBody + 0.02) {
+      rings.forEach(function (rg) {
+        var cap = (rBody + TRUNK_MEET_SLOPE * (topZ - rg[0])) / cosN;
+        if (rg[1] > cap || rg[2] > cap) { var sc = cap / Math.max(rg[1], rg[2]); rg[1] *= sc; rg[2] *= sc; }
+      });
+      /* ...and the cap's rings in between, so the narrowing is a cone, not one step at the last ring */
+      var dense = [];
+      for (var ri = 0; ri < rings.length; ri++) {
+        dense.push(rings[ri]);
+        if (ri + 1 < rings.length) {
+          var r0 = rings[ri], r1 = rings[ri + 1], nIn = Math.floor((r1[0] - r0[0]) / 0.5);
+          for (var u = 1; u < nIn; u++) {
+            var zu = r0[0] + (r1[0] - r0[0]) * u / nIn, f0 = u / nIn, a = r0[1] + (r1[1] - r0[1]) * f0, bb = r0[2] + (r1[2] - r0[2]) * f0;
+            var capU = (rBody + TRUNK_MEET_SLOPE * (topZ - zu)) / cosN, scU = Math.min(1, capU / Math.max(a, bb));
+            dense.push([zu, a * scU, bb * scU]);
+          }
+        }
+      }
+      rings = dense;
+    }
     rec.rings = rings;
     rec.top = rings[rings.length - 1][0];
     rec.axis = [ca, sa];
     var ph = ((GOLDEN_DEG * (fi + 1)) % (360 / TRUNK_SIDES)) * Math.PI / 180;
     f.shell = revolveSoup(cx, cy, rings, TRUNK_SIDES, ph, cr.ang);
-    f.core = Math.max(f.r * Math.SQRT1_2, Math.min(rings[0][1], rings[0][2]) * cosN);
-    f.r = Math.max(f.r, rings[0][1]);
+    f.core = Math.max(f.r * Math.SQRT1_2, Math.min(base0[1], base0[2]) * cosN);
+    f.r = Math.max(f.r, base0[1]);
   }
 
   /* Every foot with a trunk record (f.grow: { H, top, side, tips }) gets its

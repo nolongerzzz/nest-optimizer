@@ -153,6 +153,8 @@
         onLayerChange: num(config, 'retract_when_changing_layer', 1) !== 0,
         wipe: num(config, 'wipe', 1) !== 0,
         wipeDistance: num(config, 'wipe_distance', 2),
+        // Bambu's seam_gap: a loop stops this short of its start (a % of the nozzle, or mm)
+        seamGapMm: (function () { var v = String(raw(config, 'seam_gap') || '15%'); var n = parseFloat(v); if (!(n >= 0)) n = 15; return /%/.test(v) ? n / 100 * num(config, 'nozzle_diameter', 0.4) : n; })(),
         minTravel: num(config, 'retraction_minimum_travel', 1)
       },
       filament: {
@@ -473,6 +475,29 @@
     return true;
   }
 
+  /** A path less its last `mm`. */
+  function trimEnd(pts, mm) {
+    var out = pts.slice(), left = mm;
+    while (out.length > 1 && left > EPS) {
+      var a = out[out.length - 2], b = out[out.length - 1], d = dist(a, b);
+      if (d <= left + EPS) { out.pop(); left -= d; continue; }
+      out[out.length - 1] = [b[0] + (a[0] - b[0]) * left / d, b[1] + (a[1] - b[1]) * left / d];
+      left = 0;
+    }
+    return out;
+  }
+  /** A loop's wipe: from where it stopped, on over its start for `wipeMm` (Bambu's, past the seam). */
+  function wipeForward(from, loop, wipeMm) {
+    var out = [from], left = wipeMm, cur = from;
+    for (var i = 0; i < loop.length && left > EPS; i++) {
+      var b = loop[i], d = dist(cur, b);
+      if (d <= EPS) continue;
+      if (d <= left) { out.push(b); left -= d; cur = b; }
+      else { out.push([cur[0] + (b[0] - cur[0]) * left / d, cur[1] + (b[1] - cur[1]) * left / d]); left = 0; }
+    }
+    return out;
+  }
+
   /** The last `wipeMm` of a path walked backwards: the wipe. */
   function wipePath(pts, wipeMm) {
     var out = [pts[pts.length - 1]];
@@ -507,6 +532,14 @@
       L.paths.forEach(function (p) {
         var pts = p.closed && p.pts.length ? p.pts.concat([p.pts[0]]) : p.pts;
         if (pts.length < 2) return;
+        /* A SUPPORT LOOP ENDS AS BAMBU'S DOES (the owner's P1S print: every trunk printed a slit straight up its seam): it stops the seam gap short
+           of its start and wipes on FORWARD over its own cooled start (loop) - the wipe back over the bead just laid, retracting, dragged the seam
+           open on a 15 mm trunk ring */
+        var loop = null;
+        if (p.closed && /^Support/.test(p.feature) && S.retract.seamGapMm > 0) {
+          var full = pathLength(pts);
+          if (full > 4 * S.retract.seamGapMm) { loop = pts; pts = trimEnd(pts, S.retract.seamGapMm); }
+        }
         var bead = beadOf(S, p.feature, p.width, L.h || plane.h);
         var fs = featureSpeed(S, p.feature, first);
         var vCap = S.filament.maxVolumetric > 0 ? S.filament.maxVolumetric / bead.area : Infinity;
@@ -517,7 +550,7 @@
           if (sl > 1e-9) segs.push({ l: sl, ux: sx / sl, uy: sy / sl, v: 0, a: 0 });
         }
         items.push({
-          obj: oi, feature: p.feature, thin: !!p.thinWall, pts: pts, closed: !!p.closed, segs: segs,
+          obj: oi, feature: p.feature, thin: !!p.thinWall, pts: pts, closed: !!p.closed, loop: loop, segs: segs,
           bead: bead, vFeature: fs.v, vWipe: v, v: v, a: fs.a, len: pathLength(pts), rings: rings
         });
       });
@@ -875,7 +908,7 @@
         put('; WIPE_START');
         put('G1 F' + fmt(pd.it.vWipe * 60, 3));
         accel(S.accel.def);
-        var wp = wipePath(pd.lastPts, R.wipeDistance);
+        var wp = pd.it.loop ? wipeForward(pd.lastPts[pd.lastPts.length - 1], pd.it.loop, R.wipeDistance) : wipePath(pd.lastPts, R.wipeDistance);
         var wl = pathLength(wp);
         var spent = 0;
         for (var q = 1; q < wp.length; q++) {
