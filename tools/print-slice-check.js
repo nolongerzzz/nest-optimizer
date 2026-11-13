@@ -121,16 +121,13 @@ async function main() {
       pOut = await PRINT.build(objs.slice(0, 2), { config: tpl, printer: a1 }, {});
     } finally { SLm.run = realRun; }
     check('build() gives the slicer supportInterfaceLayers 3 for a Dense sheet, and leaves the default alone otherwise', seen.length === 2 && seen[0] === 3 && seen[1] == null, String(seen));
-    /* a Dense support prints with the owner's Bambu reference's support settings (supp_ref_v2: interface spacing 0.1, 3 top layers, support
-       angle 20, bridge angle 45), the stack's angles off them (Bambu's rule) - and the file says so; a plate with none keeps the profile's */
-    const o0 = opts[0] || {}, o1 = opts[1] || {};
-    check('...a Dense support slices at interface spacing 0.1, support angle 20, bridge angle 45, the stack\'s angles off the profile; a plain plate at the profile\'s',
-      o0.supportInterfaceSpacingMm === 0.1 && o0.supportAngleDeg === 20 && o0.bridgeAngleDeg === 45 && o0.supportInterfaceAngle === 'profile' &&
-      o1.supportInterfaceSpacingMm === 0.5 && o1.supportAngleDeg === 0 && o1.bridgeAngleDeg === 0,
-      JSON.stringify([o0.supportInterfaceSpacingMm, o0.supportAngleDeg, o0.bridgeAngleDeg, o0.supportInterfaceAngle, o1.supportInterfaceSpacingMm, o1.supportAngleDeg, o1.bridgeAngleDeg]));
-    check('...and the Dense file\'s settings carry them (Studio reads what printed)',
-      dOut && dOut.ok && ['support_interface_spacing', 'support_interface_top_layers', 'support_angle', 'bridge_angle'].every(k => dOut.changed.indexOf(k) >= 0) && pOut && pOut.ok && pOut.changed.indexOf('bridge_angle') < 0,
-      JSON.stringify([dOut && dOut.changed, pOut && pOut.changed]));
+    /* a Dense support prints with the profile's own support settings (the owner's P1S, 2x supp_ref: the reference's interface spacing 0.1,
+       3 top layers and 20 / 45 angles welded five heads of six; the profile's 0.5 and 3.6 released clean): nothing written over them */
+    const o0 = opts[0] || {};
+    check('...a Dense support slices at the profile\'s interface spacing and angles (0.5, 0 / 0), and the file carries no override of them',
+      o0.supportInterfaceSpacingMm === 0.5 && o0.supportAngleDeg === 0 && o0.bridgeAngleDeg === 0 && o0.supportInterfaceAngle === 'profile' &&
+      dOut && dOut.ok && ['support_interface_spacing', 'support_interface_top_layers', 'support_angle', 'bridge_angle'].every(k => dOut.changed.indexOf(k) < 0),
+      JSON.stringify([o0.supportInterfaceSpacingMm, o0.supportAngleDeg, o0.bridgeAngleDeg, o0.supportInterfaceAngle, dOut && dOut.changed]));
   }
 
   section('3. A plate with supports through build(): the file');

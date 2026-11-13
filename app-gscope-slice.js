@@ -224,8 +224,6 @@ var NSO_GSCOPE_SLICE = (function () {
     var ni = 0;
     d.objects.forEach(function (o) { var su = supportOf(o); if (su && su.interfaceLayers > ni) ni = su.interfaceLayers; });
     if (ni > 2 && !(optsOver && optsOver.supportInterfaceLayers != null)) opts.supportInterfaceLayers = ni;
-    /* ...with the owner's Bambu reference's angles, as the plate's slice prints a Dense support (the Slice card's DENSE_SUPPORT) */
-    if (ni > 2) { if (!(optsOver && optsOver.supportAngleDeg != null)) opts.supportAngleDeg = 20; if (!(optsOver && optsOver.bridgeAngleDeg != null)) opts.bridgeAngleDeg = 45; }
     /* ...and a Dense sheet's thicker layers (Bambu's 0.275) mean the supports are cut on their own layer grid, as Bambu's independent support layer height does */
     var sl = 0;
     d.objects.forEach(function (o) { var su = supportOf(o); if (su && su.sheetLayerMm > sl) sl = su.sheetLayerMm; });

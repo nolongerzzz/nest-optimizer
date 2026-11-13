@@ -532,11 +532,12 @@
       L.paths.forEach(function (p) {
         var pts = p.closed && p.pts.length ? p.pts.concat([p.pts[0]]) : p.pts;
         if (pts.length < 2) return;
-        /* A SUPPORT LOOP ENDS AS BAMBU'S DOES (the owner's P1S print: every trunk printed a slit straight up its seam): it stops the seam gap short
+        /* A LOOP ENDS AS BAMBU'S DOES (the owner's P1S prints: every trunk, then the 2x pillars and domes, split straight up the seam): a wall or a
+           support ring (not a brim: Studio closes those) stops the seam gap short
            of its start and wipes on FORWARD over its own cooled start (loop) - the wipe back over the bead just laid, retracting, dragged the seam
            open on a 15 mm trunk ring */
         var loop = null;
-        if (p.closed && /^Support/.test(p.feature) && S.retract.seamGapMm > 0) {
+        if (p.closed && p.feature !== 'Brim' && S.retract.seamGapMm > 0) {
           var full = pathLength(pts);
           if (full > 4 * S.retract.seamGapMm) { loop = pts; pts = trimEnd(pts, S.retract.seamGapMm); }
         }
