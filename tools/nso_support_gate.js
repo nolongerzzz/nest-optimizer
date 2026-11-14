@@ -14,6 +14,8 @@
      --rule sheet          slice with the sheet typing (the app's default is the column rule, NSO_Slicer supportInterfaceRule:
                            'column', and so is the gate's; --rule column says so)
      --merged              (a build) the six heads as one piece, as a plate imported whole has them
+     --fixture f.3mf       (a build) another piece than supp_ref, with --ref its own Bambu slice; --rest ticks May rest on the part
+                           (npm run support:gate-rest: fixtures/supports/supporttest.3mf against the owner's printed slice, threshold 46)
      --report              print, never fail
      --worst               the five layers per head that differ most from Bambu's
      --dump moves.json     (a build) every move, [head, role, feature, z, h, x0, y0, x1, y1], for a picture
@@ -28,7 +30,7 @@ const R3 = require(path.join(ROOT, 'nso-3mf-read.js'));
 
 const argv = process.argv.slice(2);
 const arg = (k) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : null; };
-const files = argv.filter((a, i) => /\.3mf$/i.test(a) && argv[i - 1] !== '--ref' && argv[i - 1] !== '--json');
+const files = argv.filter((a, i) => /\.3mf$/i.test(a) && argv[i - 1] !== '--ref' && argv[i - 1] !== '--json' && argv[i - 1] !== '--fixture');
 /* the reference: the owner's slice of supp_ref on Bambu Studio 02.09.01.70 (the Negative Sphere's side wall no longer holed); --ref
    fixtures/supports/tree_slimsupports.gcode.3mf for the 02.08 one the gate was built on */
 const REF = arg('--ref') || path.join(ROOT, 'fixtures', 'supports', 'supp_ref_v2.gcode.3mf');
@@ -47,7 +49,7 @@ let CARD_HEAD = null;
 async function buildAndSlice(opts) {
   const lib = require('./nso_support_plate_lib.js');
   const SL = require(path.join(ROOT, 'nso_slicer.js'));
-  let objs = await lib.readFixture(path.join(ROOT, 'fixtures', 'supports', 'supp_ref.3mf'));
+  let objs = await lib.readFixture(opts.fixture ? path.resolve(opts.fixture) : path.join(ROOT, 'fixtures', 'supports', 'supp_ref.3mf'));
   /* --merged: the six heads as ONE piece, as the owner's plate has them ('supp_ref - 6 objects') */
   if (opts.merged) {
     let n = 0; objs.forEach(o => { n += o.positions.length; });
@@ -59,6 +61,7 @@ async function buildAndSlice(opts) {
   if (opts.rule === 'column') app.ctx.NSO_Slicer = SL;                    /* ...and draws the rule's stack on its supports, as the page does (the brim stays off) */
   const ids = app.load(objs); app.openCard(); app.setPlateBox(true);
   app.card.angle(+(opts.angle || 30));
+  if (opts.rest) app.setBox('sup-rest', true);                            /* May rest on the part (Bambu's On build plate only, off) */
   app.click('btn-sup-all'); await app.until(() => app.card.busy()); await app.until(() => !app.card.busy());
   CARD_HEAD = app.head();
   const WASM = await SL.loadKernel({});
@@ -71,6 +74,7 @@ async function buildAndSlice(opts) {
       .concat(sups.map((s, k) => ({ name: 's' + k, soup: Float32Array.from(s.soup), key: 201 + k, role: s.brim ? 'brim' : 'support', hostKey: 101 })));
     const so = { supportInterfaceLayers: 3, supportLayerMaxMm: 0.28 };
     if (opts.rule) so.supportInterfaceRule = opts.rule;
+    if (opts.angle) so.supportThresholdDeg = +opts.angle;                  /* the slicer's footprint at the angle the card detected at (the reference's own threshold) */
     const res = SL.sliceObjects(objl, SL.defaultsFor(0.4, so), WASM);
     res.objects.forEach(ob => (ob.layers || []).forEach(L => (L.paths || []).forEach(p => {
       if (p.feature === 'Brim' || p.role === 'brim') return;
@@ -138,8 +142,8 @@ function reHead(moves, refMoves) {
   if (files.length) for (const f of files) { const mv = reHead(await readSliced(f), refMoves); runs.push([path.basename(f), GL.measureAll(mv), mv]); }
   else {
     const rule = arg('--rule') === 'sheet' ? null : 'column';                /* the app's default (the column rule); --rule sheet the sheet typing */
-    let mv = await buildAndSlice({ rule: rule, angle: arg('--angle'), merged: argv.includes('--merged') });
-    if (argv.includes('--merged')) mv = reHead(mv, refMoves);
+    let mv = await buildAndSlice({ rule: rule, angle: arg('--angle'), merged: argv.includes('--merged'), fixture: arg('--fixture'), rest: argv.includes('--rest') });
+    if (argv.includes('--merged') || arg('--fixture')) mv = reHead(mv, refMoves);     /* another fixture stands where the card put it: moved onto the reference by the parts' centres */
     if (arg('--dump')) fs.writeFileSync(arg('--dump'), JSON.stringify(mv.map(m => [m.head, m.role, m.feat, m.z, m.h, +m.x0.toFixed(3), +m.y0.toFixed(3), +m.x1.toFixed(3), +m.y1.toFixed(3)])));
     runs.push(['NSO build + NSO_Slicer (rule ' + (rule || 'sheet') + ')' + (argv.includes('--merged') ? ', the six as one piece' : ''), GL.measureAll(mv), mv]);
   }

@@ -620,3 +620,33 @@ six-part build for development. No browser step.
 As G-scope's row: painted faces are the `skipList`, shifted into the world
 frame when the piece is only moved, refused by name when it is turned and
 painted. The piece itself is never written; supports are new pieces.
+
+## 10. Advanced, and Saved settings (supports-advanced, 2026-11-14)
+
+**Advanced** (a section under Tree settings; `ADV_IDS`, `advKnobsOf`). The flow tree's own numbers (docs/SUPPORT-FLOW.md), each a field with its default
+in its tooltip. Nothing rebuilds as you type; Generate builds with them. A field left at its default sends nothing, so a card left alone builds exactly as
+before; the section's note says how many differ, and **Defaults** puts them back.
+
+| field | default | what it does |
+|---|---|---|
+| Tip spacing | 0.44 x | how far a spot may lie from its tip, as a share of the Branch distance |
+| Tip column | 2.8 mm | how far a tip stands straight under its spot before it may lean and join |
+| Gather | 0.25 | how much a branch heads for the middle of all it can reach, not its nearest neighbour |
+| Join reach | 0.95 x | two branches go for one another when they can meet in this share of the height left |
+| Straight foot | 2.4 mm | nothing leans or joins this near the plate |
+| Flare height / slope | 2 mm / 0.45 | the trunk's widening to its foot |
+| Foot pad | 0.6 mm | the first-layer pad past the trunk's foot |
+| Part clearance | 0.45 mm | how far a branch plans to stay from the part sideways |
+| Bottom distance | 0.2 mm | May rest on the part: the gap under a foot that stands on the part |
+
+**Saved settings** (the row over Style: a list, Save, Delete; Export saved / Import in Advanced; `PRESET_FIELDS`). Save keeps every lever of the card
+under a name - the angle, style, size, Tree settings, the four boxes, Top interface layers, Interface angle, Raft, Raft contact and Advanced - in this
+browser (`localStorage`, `nso.supports.settings.v1`). Picking a name puts every control back and tells it so, as a hand would; nothing rebuilds until
+Generate. Move a control afterwards and the list reads *not saved* again. The name last saved or picked comes back with the page. Export saved writes
+them all to one file (`nso-supports-settings.json`); Import adds a file's to this browser's and reads only the card's own controls from it.
+
+`NSO_SUPPORTS_CARD.settings` is the same for a test: `now()`, `apply(vals)`, `save(name)`, `pick(name)`, `remove(name)`, `names()`, `exportText()`,
+`importText(text)`, `advanced()`. Gates: `npm run support:settings` (Node), `npm run support:settings-drive` (the real page).
+
+**May rest on the part** now reaches the tree itself (docs/SUPPORT-FLOW.md 4b): a branch may end on a top face of the part. The lattice is no longer
+asked for what the tree could not reach.

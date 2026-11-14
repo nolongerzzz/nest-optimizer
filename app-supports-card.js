@@ -981,7 +981,7 @@ var NSO_SUPPORTS_CARD = (function () {
     if (rm) rm.hidden = !wasBuilt;
     en('btn-sup-none', cs === 'built' && !wide);
     en('btn-sup-remove', cs === 'built' && !wide && S.selSupport != null && !!modelOf(S.selSupport));
-    ['sup-angle', 'sup-style', 'sup-size', 'sup-rest', 'sup-small', 'sup-one', 'sup-interface', 'sup-brim', 'sup-raft', 'sup-tree-distance', 'sup-tree-diameter', 'sup-tree-angle', 'sup-tree-dangle', 'sup-tree-tip'].forEach(function (id) { var e = $(id); if (e) e.disabled = !!S.busy; });
+    ['sup-angle', 'sup-style', 'sup-size', 'sup-rest', 'sup-small', 'sup-one', 'sup-interface', 'sup-brim', 'sup-raft', 'sup-tree-distance', 'sup-tree-diameter', 'sup-tree-angle', 'sup-tree-dangle', 'sup-tree-tip', 'sup-preset', 'sup-preset-save'].concat(Object.keys(ADV_IDS).map(function (k) { return ADV_IDS[k][0]; })).forEach(function (id) { var e = $(id); if (e) e.disabled = !!S.busy; });
     var note = $('sup-angle-note');
     if (note) note.textContent = S.angle + '\u00b0 \u00b7 Bambu ' + BAMBU_ANGLE + '\u00b0';
     var ang = $('sup-angle');
@@ -1211,13 +1211,121 @@ var NSO_SUPPORTS_CARD = (function () {
     Object.keys(TREE_KNOB_IDS).forEach(function (k) { var e = $(TREE_KNOB_IDS[k][0]), v = e ? parseFloat(e.value) : NaN; out[k] = isFinite(v) && v >= 0 ? v : TREE_KNOB_IDS[k][1]; });
     return out;
   }
+  /* ADVANCED: the flow tree's own numbers (nso_support_flow.js DEFAULTS, nso_support_gridpack.js FLOW), each a field with its default. Only a
+     value that differs from its default is sent, so a card left alone builds exactly as the defaults do. */
+  var ADV_IDS = { tipCover: ['sup-adv-cover', 0.44], tipDropMm: ['sup-adv-tipdrop', 2.8], gather: ['sup-adv-gather', 0.25], reach: ['sup-adv-reach', 0.95],
+                  rootFloorMm: ['sup-adv-floor', 2.4], flareMm: ['sup-adv-flare', 2], flareTan: ['sup-adv-flaretan', 0.45], padGrowMm: ['sup-adv-pad', 0.6],
+                  xyMm: ['sup-adv-xy', 0.45], bottomGapMm: ['sup-adv-bottom', 0.2] };
+  function advKnobsOf() {
+    var out = {}, n = 0;
+    Object.keys(ADV_IDS).forEach(function (k) {
+      var e = $(ADV_IDS[k][0]), v = e ? parseFloat(e.value) : NaN;
+      if (isFinite(v) && v >= 0 && Math.abs(v - ADV_IDS[k][1]) > 1e-9) { out[k] = v; n++; }
+    });
+    return n ? out : null;
+  }
+  function advSync() {
+    var k = advKnobsOf(), note = $('sup-adv-note'), n = k ? Object.keys(k).length : 0;
+    if (note) note.textContent = n ? n + ' changed from the defaults' : '';
+    var df = $('sup-adv-defaults'); if (df) df.disabled = !n;
+  }
+  function advDefaults() { Object.keys(ADV_IDS).forEach(function (k) { var e = $(ADV_IDS[k][0]); if (e) e.value = String(ADV_IDS[k][1]); }); advSync(); presetTouched(); }
+
+  /* SAVED SETTINGS: every lever of the card under a name, in this browser (localStorage), so what printed well is kept and put back in one pick.
+     A saved setting is { id: value } over PRESET_FIELDS - the card's own controls, by their ids; putting one back sets each control and tells it
+     so (input + change), as a hand on the control would. Nothing rebuilds: Generate does. */
+  var PRESET_KEY = 'nso.supports.settings.v1', PRESET_LAST = 'nso.supports.settings.last';
+  var PRESET_FIELDS = ['sup-angle', 'sup-style', 'sup-size', 'sup-tree-distance', 'sup-tree-diameter', 'sup-tree-angle', 'sup-tree-dangle', 'sup-tree-tip',
+    'sup-rest', 'sup-small', 'sup-brim', 'sup-raft', 'sup-interface', 'slice-set-iface-angle', 'slice-set-raft', 'slice-set-raft-gap']
+    .concat(Object.keys(ADV_IDS).map(function (k) { return ADV_IDS[k][0]; }));
+  function store() { try { return typeof localStorage !== 'undefined' ? localStorage : null; } catch (err) { return null; } }
+  function presetsRead() { var st = store(); if (!st) return {}; try { var o = JSON.parse(st.getItem(PRESET_KEY) || '{}'); return o && typeof o === 'object' ? o : {}; } catch (err) { return {}; } }
+  function presetsWrite(all) { var st = store(); if (!st) return false; try { st.setItem(PRESET_KEY, JSON.stringify(all)); return true; } catch (err) { return false; } }
+  function presetNow() {
+    var out = {};
+    PRESET_FIELDS.forEach(function (id) { var e = $(id); if (!e) return; out[id] = e.type === 'checkbox' ? !!e.checked : String(e.value); });
+    return out;
+  }
+  function presetApply(vals) {
+    if (!vals || S.busy) return false;
+    PRESET_FIELDS.forEach(function (id) {
+      var e = $(id);
+      if (!e || vals[id] === undefined) return;
+      if (e.type === 'checkbox') e.checked = !!vals[id]; else e.value = String(vals[id]);
+      if (id === 'sup-angle') setAngle(vals[id], true);                    /* the angle is the card's state as well as its field */
+      ['input', 'change'].forEach(function (ev) { try { e.dispatchEvent(new Event(ev, { bubbles: true })); } catch (err) { /* a page without Event: the value is set */ } });
+    });
+    advSync(); sync();
+    return true;
+  }
+  function presetList(pick) {
+    var sel = $('sup-preset'); if (!sel || !sel.options) return;
+    var all = presetsRead(), names = Object.keys(all).sort(function (a, b) { return a.localeCompare(b); });
+    while (sel.options.length > 1) sel.remove(1);
+    names.forEach(function (n) { var op = document.createElement('option'); op.value = n; op.textContent = n; sel.appendChild(op); });
+    sel.value = pick && all[pick] ? pick : '';
+    var del = $('sup-preset-delete'); if (del) del.disabled = !sel.value;
+  }
+  /* a control moved by hand after a pick: the card no longer shows the saved setting, and says so */
+  var presetQuiet = false;
+  function presetTouched() { if (presetQuiet) return; var sel = $('sup-preset'); if (sel && sel.value) { sel.value = ''; var del = $('sup-preset-delete'); if (del) del.disabled = true; } }
+  function presetPick(name) {
+    var all = presetsRead();
+    if (!name || !all[name]) { presetList(''); return false; }
+    presetQuiet = true;
+    var ok = presetApply(all[name]);
+    presetQuiet = false;
+    presetList(ok ? name : '');
+    var st = store(); if (st && ok) { try { st.setItem(PRESET_LAST, name); } catch (err) { /* full */ } }
+    return ok;
+  }
+  function presetSave(name) {
+    name = String(name == null ? '' : name).trim().slice(0, 60);
+    if (!name) return false;
+    var all = presetsRead(); all[name] = presetNow();
+    if (!presetsWrite(all)) { if (typeof setStatus === 'function') setStatus('Could not save the settings: this browser keeps no storage for the page.'); return false; }
+    presetList(name);
+    var st = store(); if (st) { try { st.setItem(PRESET_LAST, name); } catch (err) { /* full */ } }
+    if (typeof setStatus === 'function') setStatus('Supports settings saved as "' + name + '".');
+    return true;
+  }
+  function presetDelete(name) {
+    var all = presetsRead();
+    if (!name || !all[name]) return false;
+    delete all[name]; presetsWrite(all); presetList('');
+    return true;
+  }
+  function presetExport() {
+    var text = JSON.stringify({ what: 'nso-supports-settings', version: 1, settings: presetsRead() }, null, 1);
+    try {
+      var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: 'application/json' })); a.download = 'nso-supports-settings.json';
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+    } catch (err) { /* no download in this page */ }
+    return text;
+  }
+  function presetImport(text) {
+    var o; try { o = JSON.parse(text); } catch (err) { o = null; }
+    var src = o && o.what === 'nso-supports-settings' && o.settings && typeof o.settings === 'object' ? o.settings : null;
+    if (!src) { if (typeof setStatus === 'function') setStatus('That file holds no saved supports settings.'); return 0; }
+    var all = presetsRead(), n = 0;
+    Object.keys(src).forEach(function (name) {
+      var v = src[name], keep = {};
+      if (!v || typeof v !== 'object') return;
+      PRESET_FIELDS.forEach(function (id) { if (typeof v[id] === 'string' || typeof v[id] === 'boolean') keep[id] = v[id]; });   /* only this card's own controls, as text or a tick */
+      all[String(name).slice(0, 60)] = keep; n++;
+    });
+    presetsWrite(all); presetList('');
+    if (typeof setStatus === 'function') setStatus(n + ' saved supports setting(s) read.');
+    return n;
+  }
+
   function cardOpts() {
     var st = $('sup-style'), sz = $('sup-size'), rs = $('sup-rest');
     var style = st && STYLES[st.value] ? st.value : 'tree';
     var size = sz ? parseFloat(sz.value) : NaN;
     var one = $('sup-one'), it = $('sup-interface'), br = $('sup-brim'), rf = $('sup-raft'), sm = $('sup-small');
     return { brim: !br || !!br.checked, raft: !rf || !!rf.checked, style: style, sideMm: isFinite(size) ? size : null, rest: !!(rs && rs.checked), noHorns: !!(sm && sm.checked), knobs: S.mode === 'custom' ? knobsGiven() : null,
-      one: !one || !!one.checked || (!!(one.parentNode && one.parentNode.hidden) && one.dataset.testOff !== '1'), dense: true, ifaceLayers: it && it.value !== '' && isFinite(parseInt(it.value, 10)) ? parseInt(it.value, 10) : null, treeKnobs: treeKnobsOf() };   /* hidden: always one-trunk */
+      one: !one || !!one.checked || (!!(one.parentNode && one.parentNode.hidden) && one.dataset.testOff !== '1'), dense: true, ifaceLayers: it && it.value !== '' && isFinite(parseInt(it.value, 10)) ? parseInt(it.value, 10) : null, treeKnobs: treeKnobsOf(), flowKnobs: advKnobsOf() };   /* hidden: always one-trunk */
   }
 
   /* THE PLANNER'S THREAD. planTree is one synchronous call that can run for
@@ -1331,6 +1439,14 @@ var NSO_SUPPORTS_CARD = (function () {
   function groupAreas(regs, o) {
     var GP = window.NSO_SupportGridpack;
     if (!oneTrunkOn(o) || !GP || typeof GP.oneTrunkGroups !== 'function') return regs.map(function (r) { return [r]; });
+    /* THE FLOW TREE (nso_support_flow.js) grows a piece's whole tree at once - every area's tips go down together and join where they meet: one plan, one support a piece */
+    if (columnRule() && window.NSO_SupportFlow && regs.length) {
+      /* ...handed back a support to each group of areas that stand apart (a head's areas one support, a head 20 mm off another: the slicer works a
+         support's layer heights out from its own stacks), and ONE support where areas stand side by side (nso_support_gridpack.js flowShells) */
+      var all = regs.slice();
+      all.solidGroups = regs.map(function (r) { return [r.id]; });
+      return [all];
+    }
     /* under the column rule a head's areas at any height are one tree (its shoulders' horns join the trunk under its overhang): no height window */
     var groups = GP.oneTrunkGroups(regs.map(function (r) { return { id: r.id, pts: r.beacons.filter(function (b) { return !b.off; }) }; }), columnRule() ? { zWindowMm: 1e9, reachByHeight: true, plateZ: S.det && S.det.minZ != null ? S.det.minZ : 0 } : undefined);
     return groups.map(function (g) { return g.map(function (i) { return regs[i]; }); });
@@ -1354,7 +1470,7 @@ var NSO_SUPPORTS_CARD = (function () {
     }
     return feed;
   }
-  function planArea(job, D, rid, beacons, o, onProgress, feed, legacy) {
+  function planArea(job, D, rid, beacons, o, onProgress, feed, legacy, solidGroups) {
     var bs = beacons.map(function (b) { return { x: b.x, y: b.y, z: b.z, normal: b.normal, regionId: b.rid != null ? b.rid : rid, key: b.key }; });
     var opts = Object.assign({}, D.opts, { beacons: bs, style: o.style, restOnModel: o.rest });
     if (boxesNow().length) opts.occluders = occludersOf(D);       // a Supports Blocker is an obstacle, as another piece is
@@ -1368,6 +1484,8 @@ var NSO_SUPPORTS_CARD = (function () {
     if (o.sideMm != null) opts.sideMm = o.sideMm;
     if (columnRule()) opts.columnRule = true;                      /* the slicer lays the interface: the planner stands no tip on a step it would not call an overhang */
     if (columnRule() && o.noHorns) opts.noHorns = true;            /* Exclude small overhangs: no horn to a step's edge; the part holds it */
+    if (solidGroups) opts.solidGroups = solidGroups;               /* the flow tree's supports: one a group of areas (groupAreas) */
+    if (columnRule() && o.flowKnobs) opts.flowKnobs = o.flowKnobs;  /* Advanced: the flow tree's own numbers, those that differ from their defaults */
     if (columnRule() && o.treeKnobs) opts.treeKnobs = o.treeKnobs;  /* the Tree settings: Bambu's law and spacing (nso_support_gridpack.js columnCrownOf) */
     return planAway(job, D.soup, opts, onProgress).then(function (t) {
       if (!t || typeof t !== 'object') throw new Error('the planner gave no plan');
@@ -1764,10 +1882,10 @@ var NSO_SUPPORTS_CARD = (function () {
              build's, summed over the areas. */
           J.heard();
           note(job, m && m.phase === 'planning' ? { phase: 'planning', done: at + m.done, total: spots, own: mine, ownDone: m.done } : m, sent);
-        }, feedFor(hm, beacons, rg.id, o.knobs)).then(function (a) {
+        }, feedFor(hm, beacons, rg.id, o.knobs), false, grp.solidGroups || null).then(function (a) {
           areas.push(a);
           /* MAY REST ON THE PART: the one-trunk build stands on the plate only; what it could not reach is asked of the lattice that may rest on the part */
-          var left = o.rest && oneTrunkOn(o) && a.t && a.unreach ? beacons.filter(function (b) { return !b.off && a.unreach.indexOf(b.key) >= 0; }) : [];
+          var left = o.rest && oneTrunkOn(o) && a.t && !a.t.flow && a.unreach ? beacons.filter(function (b) { return !b.off && a.unreach.indexOf(b.key) >= 0; }) : [];
           if (!left.length) return J.pause() || new Promise(function (go) { setTimeout(go, 0); });
           return planArea(job, D, rg.id, left, o, null, null, true).then(function (a2) {
             if (a2 && a2.t) {
@@ -3362,6 +3480,28 @@ var NSO_SUPPORTS_CARD = (function () {
     on('sup-angle', 'change', function () { setAngle($('sup-angle').value, true); });
     KNOBS.forEach(function (K) { on(K.id, 'input', function () { setKnob(K.key, $(K.id).value); }); });
     on('sup-tune-defaults', 'click', function () { tuneDefaults(); });
+    /* Advanced, and the saved settings */
+    Object.keys(ADV_IDS).forEach(function (k) { on(ADV_IDS[k][0], 'input', function () { advSync(); }); });
+    on('sup-adv-defaults', 'click', function () { advDefaults(); });
+    PRESET_FIELDS.forEach(function (id) { on(id, 'input', presetTouched); on(id, 'change', presetTouched); });
+    on('sup-preset', 'change', function () { var v = $('sup-preset').value; if (v) presetPick(v); else presetList(''); });
+    on('sup-preset-save', 'click', function () {
+      var sel = $('sup-preset'), was = sel && sel.value ? sel.value : '';
+      var name = typeof window.prompt === 'function' ? window.prompt('Save these supports settings as:', was || 'My settings') : was;
+      if (name != null) presetSave(name);
+    });
+    on('sup-preset-delete', 'click', function () { var sel = $('sup-preset'); if (sel && sel.value) presetDelete(sel.value); });
+    on('sup-preset-export', 'click', function () { presetExport(); });
+    on('sup-preset-import', 'click', function () { var fi = $('sup-preset-file'); if (fi) fi.click(); });
+    on('sup-preset-file', 'change', function () {
+      var fi = $('sup-preset-file'), file = fi && fi.files && fi.files[0];
+      if (!file || typeof FileReader === 'undefined') return;
+      var rd = new FileReader(); rd.onload = function () { presetImport(String(rd.result || '')); fi.value = ''; }; rd.readAsText(file);
+    });
+    presetList('');
+    advSync();
+    /* the settings last saved or picked come back with the page: what worked is what the card opens with */
+    (function () { var st = store(), last = null; try { last = st ? st.getItem(PRESET_LAST) : null; } catch (err) { last = null; } if (last && presetsRead()[last]) presetPick(last); })();
     Object.keys(MODES).forEach(function (k) { on('sup-mode-' + k, 'click', function () { setMode(k); }); });
     Object.keys(TOOLS).forEach(function (k) { on('sup-tool-' + k, 'click', function () { setTool(k); }); });
     window.addEventListener('pointerdown', onDown, true);
@@ -3533,6 +3673,10 @@ var NSO_SUPPORTS_CARD = (function () {
         eraseLayer: S.eraseLayer ? S.eraseLayer.children.length : 0, eraseReady: S.hostId != null && eraseReady()
       };
     },
+    /** The saved settings (docs/SUPPORTS-CARD.md "Saved settings"): now() the card's levers as { id: value }, apply(vals), save(name), pick(name),
+        remove(name), names(), exportText(), importText(text) -> how many read; advanced() the Advanced numbers that differ from their defaults. */
+    settings: { fields: PRESET_FIELDS.slice(), now: presetNow, apply: presetApply, save: presetSave, pick: presetPick, remove: presetDelete,
+                names: function () { return Object.keys(presetsRead()).sort(); }, exportText: presetExport, importText: presetImport, advanced: advKnobsOf },
     /** Forget every host's tips, toggles, circles and erasures (what CLEAR PLATE does). */
     forgetAll: forgetAll,
     /** Forget only these pieces (ids): what CLEAR PLATE does when other plates stand beside the one cleared. */

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=d880ef9c" />
+  <link rel="stylesheet" href="styles.css?v=e91bae1c" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -1377,6 +1377,15 @@
                 <button id="btn-sup-remove" class="btn btn-secondary" type="button" hidden disabled
                         title="Take off the one support you clicked. One Undo puts it back.">Remove</button>
               </div>
+              <!-- SAVED SETTINGS (app-supports-card.js PRESETS): every lever of this card under a name, kept in this browser; Export / Import in Advanced -->
+              <div class="sup-preset-row" role="group" aria-label="Saved settings">
+                <select id="sup-preset" class="vp-select" autocomplete="off"
+                        title="Saved settings: every lever of this card - angle, style, Tree settings, Advanced, the interface and raft rows - under a name. Pick one to put its values back; nothing rebuilds until Generate.">
+                  <option value="">Settings: not saved</option>
+                </select>
+                <button id="sup-preset-save" class="sup-seg" type="button" title="Save the card's settings as they stand under a name (a name already there is replaced). Kept in this browser.">Save</button>
+                <button id="sup-preset-delete" class="sup-seg" type="button" disabled title="Take the picked saved settings away.">Delete</button>
+              </div>
               <label class="vp-bend-field" for="sup-style">Style
                 <select id="sup-style" class="vp-select" title="Straight strut: one post per spot. Tree: posts merge on the way down. Gecko-hand: the tree with a hand at every spot." autocomplete="off">
                   <option value="strut">Straight strut</option>
@@ -1405,6 +1414,50 @@
                   <label class="vp-bend-field" for="sup-tree-tip">Tip diameter
                     <input type="number" id="sup-tree-tip" value="0.8" min="0.3" max="3" step="0.1" autocomplete="off" aria-label="Tip diameter, mm"
                            title="A branch's diameter at the tip, where it meets the interface (Bambu's tree_support_tip_diameter). Default 0.8."><span>mm</span></label>
+                </div>
+              </details>
+              <details class="vp-sec sup-adv-sec" id="sup-adv-sec">
+                <summary class="vp-sec-head" title="The tree planner's own numbers (nso_support_flow.js), each with its default. Nothing rebuilds as you type; Generate builds with them. Save keeps them with the rest of the card.">Advanced</summary>
+                <div class="vp-sec-body">
+                  <label class="vp-bend-field" for="sup-adv-cover">Tip spacing
+                    <input type="number" id="sup-adv-cover" value="0.44" min="0.2" max="1.2" step="0.02" autocomplete="off" aria-label="Tip spacing, a share of the branch distance"
+                           title="How far a spot may lie from its tip, as a share of the Branch distance: 0.44 x 5 mm stands a tip about every 3 - 4 mm. Larger: fewer tips, more for the interface to span. Default 0.44."><span>x</span></label>
+                  <label class="vp-bend-field" for="sup-adv-tipdrop">Tip column
+                    <input type="number" id="sup-adv-tipdrop" value="2.8" min="0.8" max="8" step="0.1" autocomplete="off" aria-label="Tip column, mm"
+                           title="How far a tip stands straight under its spot, on its own, before it may lean and join others. Shorter: branches join higher (less material, wider bodies under the interface). Default 2.8."><span>mm</span></label>
+                  <label class="vp-bend-field" for="sup-adv-gather">Gather
+                    <input type="number" id="sup-adv-gather" value="0.25" min="0" max="1" step="0.05" autocomplete="off" aria-label="Gather, 0 to 1"
+                           title="How much a branch heads for the middle of everything it can still reach, rather than its nearest neighbour. 0: neighbours pair up where they stand (more trunks). 1: the whole canopy draws to one point (long leaning branches). Default 0.25."></label>
+                  <label class="vp-bend-field" for="sup-adv-reach">Join reach
+                    <input type="number" id="sup-adv-reach" value="0.95" min="0.2" max="1.5" step="0.05" autocomplete="off" aria-label="Join reach"
+                           title="Two branches go for one another when they can meet within this share of the height they have left. Smaller: fewer long leans, more trunks. Default 0.95."><span>x</span></label>
+                  <label class="vp-bend-field" for="sup-adv-floor">Straight foot
+                    <input type="number" id="sup-adv-floor" value="2.4" min="0.5" max="10" step="0.1" autocomplete="off" aria-label="Straight foot, mm"
+                           title="Over the plate a trunk stands straight this high: nothing leans or joins lower. Default 2.4."><span>mm</span></label>
+                  <label class="vp-bend-field" for="sup-adv-flare">Flare height
+                    <input type="number" id="sup-adv-flare" value="2" min="0" max="6" step="0.1" autocomplete="off" aria-label="Flare height, mm"
+                           title="A trunk widens to its foot over this height above the plate. 0: no flare. Default 2."><span>mm</span></label>
+                  <label class="vp-bend-field" for="sup-adv-flaretan">Flare slope
+                    <input type="number" id="sup-adv-flaretan" value="0.45" min="0" max="1.5" step="0.05" autocomplete="off" aria-label="Flare slope, mm a mm"
+                           title="How much wider a side the flare makes the trunk for every mm of its height: 0.45 x 2 mm is 0.9 mm a side at the plate. Default 0.45."></label>
+                  <label class="vp-bend-field" for="sup-adv-pad">Foot pad
+                    <input type="number" id="sup-adv-pad" value="0.6" min="0" max="4" step="0.1" autocomplete="off" aria-label="Foot pad, mm"
+                           title="The solid first-layer pad under a trunk reaches this far past its foot. Default 0.6."><span>mm</span></label>
+                  <label class="vp-bend-field" for="sup-adv-xy">Part clearance
+                    <input type="number" id="sup-adv-xy" value="0.45" min="0.2" max="2" step="0.05" autocomplete="off" aria-label="Part clearance, mm"
+                           title="How far a branch plans to stay from the part sideways (Bambu's support_object_xy_distance is 0.35; the slicer cuts to that). Larger: branches walk wider round the part. Default 0.45."><span>mm</span></label>
+                  <label class="vp-bend-field" for="sup-adv-bottom">Bottom distance
+                    <input type="number" id="sup-adv-bottom" value="0.2" min="0" max="1" step="0.05" autocomplete="off" aria-label="Bottom distance, mm"
+                           title="With May rest on the part: the gap between a foot that stands on the part and the face under it (Bambu's support_bottom_z_distance). Default 0.2."><span>mm</span></label>
+                  <div class="sup-tune-row">
+                    <span id="sup-adv-note" class="sup-tune-note"></span>
+                    <button id="sup-adv-defaults" class="btn btn-secondary" type="button" title="Put every Advanced number back to its default. Nothing rebuilds; Generate does.">Defaults</button>
+                  </div>
+                  <div class="sup-tune-row">
+                    <button id="sup-preset-export" class="btn btn-secondary" type="button" title="Save every saved setting of this browser as one file (nso-supports-settings.json): a backup, or to carry them to another browser.">Export saved</button>
+                    <button id="sup-preset-import" class="btn btn-secondary" type="button" title="Read a file Export saved wrote: its settings are added to this browser's (one of the same name is replaced).">Import</button>
+                    <input type="file" id="sup-preset-file" accept=".json,application/json" hidden>
+                  </div>
                 </div>
               </details>
               <label class="vp-check" for="sup-rest" title="Off: every support stands on the plate, and a spot with no clear way down is left unreachable. On: such a spot may be held from a part below it.">
@@ -2958,8 +3011,8 @@
        merged pairwise on a node lattice, plate first. planTree above is
        this; it needs nso_support_tree.js's contactPoints and union. See
        docs/SUPPORT-GRIDPACK.md. -->
-  <script src="nso_support_flow.js?v=da8b526e"></script>
-  <script src="nso_support_gridpack.js?v=b1c4a45d"></script>
+  <script src="nso_support_flow.js?v=514008e8"></script>
+  <script src="nso_support_gridpack.js?v=4bc50e2f"></script>
   <script src="nso_exif.js?v=22458ef3"></script>
   <script src="nso_photoset.js?v=0974faf1"></script>
   <script src="nso-cooling-profiles.js"></script>
@@ -2970,7 +3023,7 @@
   <script src="nso-gcode-lines.js?v=fe0b823c"></script>
   <script src="nso-gscope-diff.js?v=937f4953"></script>
   <script src="nso-gcode-solid.js?v=ac1a4f02"></script>
-  <script src="nso_slicer.js?v=6202f760"></script>
+  <script src="nso_slicer.js?v=b1f2f503"></script>
   <script src="nso_raster_lines.js?v=461ca449"></script>
   <!-- The support interface: the crosshatch's one-direction layers, and the
        sheet a support tree's tips carry under the part (flat caps on the
@@ -3169,7 +3222,7 @@
        own page code, which listens for the press before the card does. After nso-helpers.js, app-core.js. docs/SUPPORT-BLOCKERS.md. -->
   <script src="nso_support_blockers.js?v=6962a81c"></script>
   <script src="app-support-blockers.js?v=73c8125d"></script>
-  <script src="app-supports-card.js?v=7fae0329"></script>
+  <script src="app-supports-card.js?v=36e0bb6e"></script>
   <script src="app-gscope-slice.js?v=362825f7"></script>
   <!-- The Slice card (left bar): the plate sliced for its printer, the .gcode.3mf
        it makes. The print planner and the packager are loaded here for it and for

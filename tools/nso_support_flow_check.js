@@ -137,5 +137,42 @@ gates('a ceiling closed in: no way down', [[-10, -10, 0, 10, 10, 2], [-10, -10, 
 /* 9. squat: tips 6 mm up - columns, short, no leaning in the flare */
 gates('a squat slab 6 mm up', [[-10, -10, 6, 10, 10, 8]], gridTips(-8, -8, 8, 8, 4, 6), { unreachable: 0 });
 
+/* 10. MAY REST ON THE PART: a ceiling over the part's own floor, walled in - no way to the plate, a landing on the floor */
+(function () {
+  console.log('\n=== resting on the part: a ceiling closed in over a floor ===');
+  const boxes = [[-10, -10, 0, 10, 10, 2], [-10, -10, 2, -8, 10, 20], [8, -10, 2, 10, 10, 20], [-8, -10, 2, 8, -8, 20], [-8, 8, 2, 8, 10, 20], [-10, -10, 20, 10, 10, 22]];
+  const S = soup(...boxes.map(b => box(...b))), tips = gridTips(-4, -4, 4, 4, 4, 20);
+  const off = FL.plan({ soups: [S], plateZ: 0, tips }), on = FL.plan({ soups: [S], plateZ: 0, tips, opts: { rest: true } });
+  check('plate only: every tip unreachable, nothing built', off.unreachable.length === 9 && off.branches.length === 0);
+  check('may rest: every tip built, none on the plate, every foot on the floor\'s top face', on.unreachable.length === 0 && on.trunks.length === 0 && on.rests.length >= 1 && on.rests.every(r => Math.abs(r.z - 2) < 1e-6),
+    on.rests.length + ' foot/feet at z ' + on.rests.map(r => r.z.toFixed(2)).join(', '));
+  const B = on.branches; let lost = 0;
+  tips.forEach(t => { let b = B.find(x => x.tip === t.id), n = 0; while (b && b.into >= 0 && n++ < 1e4) b = B[b.into]; if (!b || !b.rest) lost++; });
+  check('...and every tip runs down to one of them', lost === 0);
+  check('...no branch point in the part', B.every(b => b.pts.every((q, i) => (b.tip != null && i === 0) || !inBoxes(boxes, [q[0], q[1], q[2] + 0.01], 0))));
+  check('...a foot on the part has no flare (the flare is the plate\'s)', on.rests.every(r => r.r < K.branchDiameterMm / 2 + Math.tan(K.branchDiameterAngleDeg * Math.PI / 180) * 20 + 0.01));
+})();
+/* 11. a pocket: a ceiling 2 mm over the part's floor - no room for a tip's whole column; and a shelf beside it over the plate */
+(function () {
+  console.log('\n=== resting on the part: a low ceiling, and tips that reach the plate keep to it ===');
+  const boxes = [[-12, -12, 0, 12, 0, 6], [-12, -12, 8, 12, 12, 10], [-12, 11, 0, 12, 12, 8]];
+  const S = soup(...boxes.map(b => box(...b))), tips = gridTips(-8, -9, 8, 9, 3, 8).filter(t => t.p[1] < -1.5 || (t.p[1] > 1.5 && t.p[1] < 10));
+  const on = FL.plan({ soups: [S], plateZ: 0, tips, opts: { rest: true } });
+  const over = tips.filter(t => t.p[1] < 0).length;
+  check('every tip built', on.unreachable.length === 0 && on.branches.length > 0, on.reason);
+  check('the low ceiling\'s tips stand on the floor 2 mm under them', on.rests.length > 0 && on.rests.every(r => Math.abs(r.z - 6) < 1e-6) && on.rests.reduce((n, r) => n + r.tips.length, 0) >= over * 0.7,
+    on.rests.reduce((n, r) => n + r.tips.length, 0) + ' of ' + over + ' tip(s) over the floor on ' + on.rests.length + ' foot/feet');
+  check('the shelf\'s tips over the plate stand on the plate', on.trunks.length > 0 && on.trunks.reduce((n, r) => n + r.tips.length, 0) >= (tips.length - over) * 0.9);
+})();
+/* 12. the field is the part's: a second plan of the same piece reads the one kept */
+(function () {
+  console.log('\n=== the field is kept ===');
+  const S = soup(box(-42, -42, 25, 42, 42, 27)), tips = gridTips(-38, -38, 38, 38, 4, 25);
+  FL.plan({ soups: [soup(box(0, 0, 5, 1, 1, 6))], plateZ: 0, tips: [{ id: 0, p: [0.5, 0.5, 5] }] });           /* another piece: the kept field is not this one's */
+  let t0 = Date.now(); const a = FL.plan({ soups: [S], plateZ: 0, tips }); const first = Date.now() - t0;
+  t0 = Date.now(); const b = FL.plan({ soups: [S], plateZ: 0, tips: tips.slice(0, 200) }); const second = Date.now() - t0;
+  check('a second plan of the same piece is quicker and stands the same tips the same way', second < first && JSON.stringify(b.branches.filter(x => x.tip != null && x.tip < 3).map(x => x.pts[1])) === JSON.stringify(a.branches.filter(x => x.tip != null && x.tip < 3).map(x => x.pts[1])), first + ' ms, then ' + second + ' ms');
+})();
+
 console.log('\n' + (fail ? 'FAILED  ' + fail + ' of ' + (pass + fail) : 'PASSED  all ' + pass));
 if (fail) { failed.forEach(f => console.log('  ' + f)); process.exit(1); }

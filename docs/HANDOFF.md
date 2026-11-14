@@ -138,6 +138,7 @@ merging its list by hand. The list below is generated.
 - [Support aim - find the overhang, then point one straight strut at it (2026-09-19)](handoff/support-aim-find-the-overhang-then-point-one-straight-strut-at.md)
 - [Support flow - one program grows every tree; Tests #432 green again (2026-11-13)](handoff/support-flow.md)
 - [Support tree - a trunk that stops, and branches that finish the job](handoff/support-tree-a-trunk-that-stops-and-branches-that-finish-the-job.md)
+- [Supports advanced - the tree rests on the part; Advanced numbers and Saved settings on the card (2026-11-14)](handoff/supports-advanced.md)
 - [Supports angle default - 35, and Bambu's 30 is from horizontal too (2026-10-21)](handoff/supports-angle-default-35-and-bambus-30-is-from-horizontal-too.md)
 - [Supports Blockers and Slice and Preview](handoff/supports-blockers-and-slice-preview.md)
 - [Supports custom card - the Tune section (2026-10-25)](handoff/supports-custom-card.md)

@@ -31,6 +31,7 @@ const CELL_MM = 0.1;
 const LINE_MM = 0.42;
 const TOUCH_MM = 0.05, THIN_MM = 0.15, ONE_MM = 0.25, MID_MM = 0.35, CONTACT_MM = 0.6;
 const FLOAT_MIN_MM2 = 0.3;      /* an island smaller than this is a speck, counted under specks, not floating */
+const REST_LOOK_MM = 0.6;       /* ...and the PART within this: a support standing on the part is a bottom distance (0.2) and up to a layer over its top face (Bambu's own feet on supporttest: 0.4) */
 const FLOAT_LOOK_MM = 0.35;     /* "just below": any layer of the head (part or support) within this under the island's layer */
 const EMPTY_STEP_MM = 0.45;     /* two support layers further apart than this have an empty layer between them */
 const CARRY_MM = 1.0;
@@ -182,7 +183,7 @@ function measureHead(moves) {
 
   /* 3. floating islands, and 7. specks under a sheet */
   const floating = [];
-  const below = (z) => { const u = new Uint8Array(F.n); let any = false; for (const z2 of zs) { if (z2 >= z - 1e-6 || z2 < z - FLOAT_LOOK_MM) continue; const o = L.get(z2); for (const k of ['sup', 'part']) if (o[k]) { any = true; for (let c = 0; c < F.n; c++) if (o[k][c]) u[c] = 1; } } return any ? u : null; };
+  const below = (z) => { const u = new Uint8Array(F.n); let any = false; for (const z2 of zs) { if (z2 >= z - 1e-6 || z2 < z - REST_LOOK_MM) continue; const o = L.get(z2); for (const k of ['sup', 'part']) if (o[k] && (k === 'part' || z2 >= z - FLOAT_LOOK_MM)) { any = true; for (let c = 0; c < F.n; c++) if (o[k][c]) u[c] = 1; } } return any ? u : null; };
   for (const z of supZ) {
     if (z <= z0 + 1e-6) continue;
     const S = L.get(z).sup, U = below(z);

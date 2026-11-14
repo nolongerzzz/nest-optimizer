@@ -2647,8 +2647,8 @@
        quarter on every other layer - its Bridge over the stack is laid at it) */
     /* the lowest stack under the part - any of its supports' (a stack has one owner: the 2x Oblique's second tree owned none, and every one of its
        rings stood hollow - the owner's "the tips are still not complete on the other tree") */
-    var tubeFillFrom = null;
-    (hostStacks || []).forEach(function (st) { var zf = st.zb - COLUMN_TUBE_FILL_BELOW_MM; if (tubeFillFrom == null || zf < tubeFillFrom) tubeFillFrom = zf; });
+    var tubeFillFrom = null, hostFillFrom = null;
+    (hostStacks || []).forEach(function (st) { var zf = st.zb - COLUMN_TUBE_FILL_BELOW_MM; if (tubeFillFrom == null || zf < tubeFillFrom) tubeFillFrom = zf; if (hostFillFrom == null || zf < hostFillFrom) hostFillFrom = zf; });
     for (var jf = 0; jf < P.layers.length; jf++) if (regs[jf] && !g.isEmpty(regs[jf])) { var zf2 = SP[jf].printZ - SP[jf].h - COLUMN_TUBE_FILL_BELOW_MM; if (tubeFillFrom == null || zf2 < tubeFillFrom) tubeFillFrom = zf2; break; }
     for (var ju = P.layers.length - 1; ju >= 0; ju--) up[ju] = regs[ju] && ju + 1 < P.layers.length && regs[ju + 1] && stackIdx[ju + 1] === stackIdx[ju] + 1 ? up[ju + 1] + 1 : 0;
     var PLh = (host && host.planes) || planes, dirB = (o.infillDirectionDeg || 0) * Math.PI / 180;
@@ -2765,6 +2765,13 @@
           var inC = g.offset(pc, -wI * 0.5);
           if (g.isEmpty(inC)) return;
           if (pc.area() > COLUMN_TUBE_RING_MAX_MM2) return;                     /* no ring: branches joined into one body, hollow */
+          /* ...and only a ring UNDER A STACK: one of this support's own stacks within COLUMN_TUBE_FILL_BELOW_MM over it (a support that holds a low
+             rim and a high plate started every ring's lines at the low rim's height - deep under the high plate, over hollow), or - a tree that owns
+             no stack - from the lowest of the part's other supports', as before */
+          var under = hostFillFrom != null && SP[j].printZ >= hostFillFrom;
+          for (var jj = j + 1; !under && jj < P.layers.length && SP[jj].printZ - SP[jj].h - SP[j].printZ <= COLUMN_TUBE_FILL_BELOW_MM + 1e-6; jj++)
+            if (regs[jj] && !g.isEmpty(regs[jj]) && g.area(g.inter(regs[jj], g.offset(pc, 0.5))) > 0.05) under = true;
+          if (!under) return;
           var cs2 = scanFill(g.polys(inC), aD, COLUMN_TUBE_FILL_PITCH_MM, 0), got = 0;
           cs2.forEach(function (sg) {
             var a0 = sg.a, b0 = sg.b;

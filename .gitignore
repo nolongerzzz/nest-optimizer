@@ -6,6 +6,7 @@ __pycache__/
 node_modules/
 tools/wheel-out/
 tools/support-aim-out/
+tools/support-settings-out/
 tools/support-tree-out/
 tools/support-gridpack-out/
 tools/chamfer-band-out/

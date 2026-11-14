@@ -4726,6 +4726,9 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
 /* The switch (Auto / Assisted / Custom) and, in the two fed modes, the tool that holds the pointer. */
 .sup-card .sup-modes, .sup-card .sup-tools { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 0; width: 100%; }
 .sup-card .sup-tools { margin-top: 2px; }
+.sup-card .sup-preset-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 0; width: 100%; margin-top: 4px; }
+.sup-card .sup-preset-row .vp-select { width: 100%; min-width: 0; }
+.sup-card .sup-adv-sec .sup-tune-row { gap: 4px; }
 .sup-card .sup-seg { margin: 0; padding: 5px 4px; font-size: 11px; line-height: 1.2; cursor: pointer; color: #cbd5e1; text-transform: uppercase; letter-spacing: 0.04em;
   background: rgba(148, 163, 184, 0.12); border: 1px solid rgba(148, 163, 184, 0.35); border-left-width: 0; }
 .sup-card .sup-seg:first-child { border-left-width: 1px; border-radius: 4px 0 0 4px; }

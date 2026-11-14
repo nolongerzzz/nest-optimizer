@@ -46,7 +46,7 @@
   var KNOBS = { branchDistanceMm: 5, branchDiameterMm: 2, branchAngleDeg: 45, branchDiameterAngleDeg: 5, tipDiameterMm: 0.8 };
   var DEF = {
     dzMm: 0.4,            /* a level */
-    cellsMax: 5e6,        /* plan cells x levels: the grid is coarsened to hold this */
+    cellsMax: 12e6,       /* plan cells x levels: the grid is coarsened to hold this */
     marginMm: 6,          /* the grid reaches this far past the part and the tips, and a trunk's base radius more */
     binMm: 2,             /* thickness laws are binned by this much height of the highest tip */
     xyMm: 0.45,           /* a branch keeps this off the part in plan (the slicer's xy distance, 0.35, and the body's own keep) */
@@ -66,6 +66,8 @@
     inertia: 0.5,         /* a branch's heading changes by half a level at a time: no kinks */
     twigTopMm: 0.25,      /* a twig's radius at its spot (one ring of line)... */
     twigRMm: 0.45,        /* ...and where it becomes a branch */
+    rest: false,          /* the tree may stand on the part (a landing on any top face), not on the plate only */
+    restMinMm: 0.8,       /* ...a tip over a face of the part is at least this long */
     minRMm: 0.2
   };
 
@@ -150,19 +152,10 @@
     void n;
   }
 
-  function plan(input) {
-    var o = Object.assign({}, DEF, input.opts || {}), K = Object.assign({}, KNOBS, input.knobs || {});
-    var soups = (input.soups || []).filter(function (s) { return s && s.length >= 9; }), plateZ = +input.plateZ || 0, tipsIn = input.tips || [];
-    /* input.candidates + input.pick: every spot that may stand a tip is asked first whether it has a way down (the same start a tip of it would
-       take); pick(ids with none) answers with the tips to grow - the caller thins its spots knowing which cannot stand */
-    var cands = input.candidates || null, spots = cands || tipsIn, candUnreachable = [];
-    if (!spots.length) return { ok: true, reason: 'no tips', branches: [], trunks: [], tips: [], unreachable: [], candUnreachable: [], stats: {} };
-    var rB = K.branchDiameterMm / 2, tanT = Math.tan(K.branchDiameterAngleDeg * Math.PI / 180), tanA = Math.tan(Math.min(60, K.branchAngleDeg) * Math.PI / 180);
+  var CACHE = { key: null, F: null };
+  function buildField(soups, plateZ, o, rB, tanT, tanA, lo, hi, zTipMax) {
     var dz = o.dzMm, m = dz * tanA;
-    /* the box: the part and the tips, the margin and the thickest base more */
-    var lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity], zTipMax = -Infinity;
-    soups.forEach(function (s) { for (var i = 0; i < s.length; i += 3) for (var d = 0; d < 3; d++) { if (s[i + d] < lo[d]) lo[d] = s[i + d]; if (s[i + d] > hi[d]) hi[d] = s[i + d]; } });
-    spots.forEach(function (t) { for (var d = 0; d < 2; d++) { if (t.p[d] < lo[d]) lo[d] = t.p[d]; if (t.p[d] > hi[d]) hi[d] = t.p[d]; } if (t.p[2] > zTipMax) zTipMax = t.p[2]; });
+    /* the box: the part, the margin and the thickest base more */
     var rBase = rB + tanT * Math.max(0, zTipMax - plateZ) + o.flareTan * o.flareMm, pad = o.marginMm + rBase * o.leanAllow + o.xyMm;
     var nLev = Math.max(2, Math.ceil((zTipMax - plateZ) / dz) + 1);
     var c = m / Math.SQRT2;                                                   /* a diagonal step of the grid is a level's lean */
@@ -180,12 +173,27 @@
 
     /* every level's distance to the part, mm */
     var dist = new Array(nLev), blk = new Uint8Array(N), tmp = { f: new Float64Array(Math.max(nx, ny)), v: new Int32Array(Math.max(nx, ny)), z: new Float64Array(Math.max(nx, ny) + 1), d: new Float64Array(Math.max(nx, ny)) };
-    var d2 = new Float64Array(N), FAR = 1e3;
-    for (var k = 0; k < nLev; k++) {
+    var d2 = new Float64Array(N), FAR = 1e3, k, i;
+    for (k = 0; k < nLev; k++) {
       var zc = zOf(k), any = slabBlocked(S, N, zc - dz * 0.5, zc + dz * 0.5 + o.zGapMm, blk), D = new Float32Array(N);
       if (!any) D.fill(FAR);
-      else { edt(blk, nx, ny, d2, tmp); for (var i = 0; i < N; i++) D[i] = Math.sqrt(d2[i]) * c; }
+      else { edt(blk, nx, ny, d2, tmp); for (i = 0; i < N; i++) D[i] = Math.sqrt(d2[i]) * c; }
       dist[k] = D;
+    }
+    /* THE LANDINGS (o.rest: the tree may rest on the part): a cell is a landing on the first level that clears a top face of the part under it -
+       a branch may end there, standing on the part, as it may on the plate */
+    var land = null;
+    if (o.rest) {
+      land = new Array(nLev);
+      for (i = 0; i < N; i++) {
+        for (var q = S.start[i] + 1; q < S.start[i + 1]; q += 2) {
+          var zf = S.zs[q];
+          if (zf - plateZ < 0.05) continue;
+          var kl = Math.ceil((zf + dz * 0.5 - plateZ) / dz - 1e-9);
+          if (kl < 1 || kl >= nLev) continue;
+          (land[kl] || (land[kl] = new Uint8Array(N)))[i] = 1;
+        }
+      }
     }
     /* THE REACH FIELD: free[k][cell] = how many thickness laws (thinnest first) have a way down from here */
     var nCls = Math.max(1, Math.ceil((zTipMax - plateZ) / o.binMm) + 1), free = new Array(nLev);
@@ -194,7 +202,7 @@
     for (var ci = 0; ci < nCls; ci++) {
       var zvC = plateZ + ci * o.binMm, alive = true;
       for (k = 0; k < nLev && alive; k++) {
-        var need = rAt(zvC, zOf(k)) * o.leanAllow + o.xyMm, Dk = dist[k], Fk = free[k], cnt = 0, x, y, idx;
+        var need = rAt(zvC, zOf(k)) * o.leanAllow + o.xyMm, Dk = dist[k], Fk = free[k], Lk = land ? land[k] : null, cnt = 0, x, y, idx;
         if (k > 0) {
           /* the cells next to a free cell of the level below (3 x 3, separably) */
           for (y = 0; y < ny; y++) { var r0 = y * nx; for (x = 0; x < nx; x++) { idx = r0 + x; dil[idx] = prev[idx] | (x > 0 ? prev[idx - 1] : 0) | (x < nx - 1 ? prev[idx + 1] : 0); } }
@@ -204,7 +212,7 @@
           r0 = y * nx;
           for (x = 1; x < nx - 1; x++) {
             idx = r0 + x;
-            var ok = Dk[idx] >= need && (k === 0 || cur[idx]) && (ci === 0 || Fk[idx] === ci);   /* nested: only where the thinner law is free */
+            var ok = Dk[idx] >= need && (k === 0 || cur[idx] || (Lk && Lk[idx])) && (ci === 0 || Fk[idx] === ci);   /* nested: only where the thinner law is free */
             if (ok) { Fk[idx] = ci + 1; cnt++; }
             cur[idx] = ok ? 1 : 0;
           }
@@ -212,10 +220,44 @@
         for (x = 0; x < nx; x++) { cur[x] = 0; cur[(ny - 1) * nx + x] = 0; }
         for (y = 0; y < ny; y++) { cur[y * nx] = 0; cur[y * nx + nx - 1] = 0; }
         var sw = prev; prev = cur; cur = sw;
-        if (!cnt) alive = false;
+        if (!cnt && !land) alive = false;
       }
       prev.fill(0);
     }
+    return { dz: dz, m: m, c: c, G: G, S: S, nLev: nLev, nCls: nCls, free: free, land: land };
+  }
+
+  function plan(input) {
+    var o = Object.assign({}, DEF, input.opts || {}), K = Object.assign({}, KNOBS, input.knobs || {});
+    var soups = (input.soups || []).filter(function (s) { return s && s.length >= 9; }), plateZ = +input.plateZ || 0, tipsIn = input.tips || [];
+    /* input.candidates + input.pick: every spot that may stand a tip is asked first whether it has a way down (the same start a tip of it would
+       take); pick(ids with none) answers with the tips to grow - the caller thins its spots knowing which cannot stand */
+    var cands = input.candidates || null, spots = cands || tipsIn, candUnreachable = [];
+    if (!spots.length) return { ok: true, reason: 'no tips', branches: [], trunks: [], rests: [], tips: [], unreachable: [], candUnreachable: [], stats: {} };
+    var rB = K.branchDiameterMm / 2, tanT = Math.tan(K.branchDiameterAngleDeg * Math.PI / 180), tanA = Math.tan(Math.min(60, K.branchAngleDeg) * Math.PI / 180);
+    /* THE FIELD (the grid, every level's distance to the part, the reach field) is the part's, not the tips': built from the part's own box and
+       height, so every plan of one piece - an area at a time, or a second build with other tips - reads the same one (kept, one piece deep) */
+    var lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity], zTipMax = -Infinity, sig = '';
+    soups.forEach(function (s) {
+      var sum = 0, step = Math.max(3, Math.floor(s.length / 3000) * 3);
+      for (var i = 0; i < s.length; i += 3) for (var d = 0; d < 3; d++) { if (s[i + d] < lo[d]) lo[d] = s[i + d]; if (s[i + d] > hi[d]) hi[d] = s[i + d]; }
+      for (var q = 0; q < s.length; q += step) sum += s[q] * 1.000001 + s[q + 1] * 0.731 + s[q + 2] * 1.37;
+      sig += s.length + ':' + sum.toFixed(4) + ';';
+    });
+    var outside = false;
+    spots.forEach(function (t) { for (var d = 0; d < 2; d++) { if (t.p[d] < lo[d]) { lo[d] = t.p[d]; outside = true; } if (t.p[d] > hi[d]) { hi[d] = t.p[d]; outside = true; } } if (t.p[2] > zTipMax) zTipMax = t.p[2]; });
+    /* ...as high as the highest spot, rounded up to a bin of thickness laws (the part over it is nobody's to hold): a tall part with low
+       overhangs is not read to its top */
+    zTipMax = plateZ + Math.ceil((zTipMax - plateZ) / o.binMm + 1e-9) * o.binMm;
+    var key = outside ? null : sig + '|' + plateZ + '|' + zTipMax.toFixed(3) + '|' + JSON.stringify(K) + '|' + JSON.stringify(o), F = key && CACHE.key === key ? CACHE.F : null;
+    if (!F) {
+      F = buildField(soups, plateZ, o, rB, tanT, tanA, lo, hi, zTipMax);
+      if (key) { CACHE.key = key; CACHE.F = F; }
+    }
+    var dz = F.dz, m = F.m, c = F.c, G = F.G, nx = G.nx, ny = G.ny, N = nx * ny, S = F.S, nLev = F.nLev, nCls = F.nCls, free = F.free, land = F.land, k;
+    function zOf(k2) { return plateZ + k2 * dz; }
+    function flare(z) { var h = z - plateZ; return h < o.flareMm ? o.flareTan * (o.flareMm - Math.max(0, h)) : 0; }
+    function rAt(zv, z) { return Math.max(o.minRMm, rB + tanT * (zv - z)) + flare(z); }
     function clsOf(zv) { return Math.max(0, Math.min(nCls - 1, Math.ceil((zv - plateZ) / o.binMm - 1e-9))); }
     function cellOf(x, y) { var i = Math.floor((x - G.x0) / c), j = Math.floor((y - G.y0) / c); return (i < 0 || j < 0 || i >= nx || j >= ny) ? -1 : j * nx + i; }
     function freeAt(k, x, y, cls) { var idx = cellOf(x, y); return idx >= 0 && free[k][idx] > cls; }
@@ -248,10 +290,20 @@
       var rStart = twig ? o.twigRMm : rB, found = null;                      /* a tip's column is the branch diameter all its length: the law widens it from where it is a branch */
       var tipDrop = twig ? o.twigDropMm : o.tipDropMm, kHi = Math.min(nLev - 1, Math.floor((p[2] - tipDrop - plateZ) / dz + 1e-9)), kLo = Math.max(0, Math.floor((p[2] - o.stubMaxMm - plateZ) / dz));
       if (kHi < 0) kHi = 0;
-      for (var k2 = kHi; k2 >= kLo && !found; k2--) {
-        var zk = zOf(k2), drop = p[2] - zk, zv = zk + (rStart - rB) / tanT, cls = clsOf(zv);
+      var k2, zk, drop, zv, cls, q;
+      for (k2 = kHi; k2 >= kLo && !found; k2--) {
+        zk = zOf(k2); drop = p[2] - zk; zv = zk + (rStart - rB) / tanT; cls = clsOf(zv);
         if (drop < 0.2) continue;
-        var q = freeAt(k2, p[0], p[1], cls) ? [p[0], p[1]] : nearestFree(k2, cls, p[0], p[1], p[0], p[1], drop * tanA);
+        q = freeAt(k2, p[0], p[1], cls) ? [p[0], p[1]] : nearestFree(k2, cls, p[0], p[1], p[0], p[1], drop * tanA);
+        if (q && lineClear(p, [q[0], q[1], zk])) found = { k: k2, x: q[0], y: q[1], zv: zv, cls: cls };
+      }
+      /* resting on the part: a spot a short way over a face of the part (a pocket's ceiling over its floor) has no room for a tip's whole drop -
+         its tip is as long as the room is */
+      if (!found && land) for (k2 = kHi + 1; k2 < nLev && !found; k2++) {
+        zk = zOf(k2); drop = p[2] - zk;
+        if (drop < o.restMinMm) break;
+        zv = zk + (rStart - rB) / tanT; cls = clsOf(zv);
+        q = freeAt(k2, p[0], p[1], cls) ? [p[0], p[1]] : nearestFree(k2, cls, p[0], p[1], p[0], p[1], drop * tanA);
         if (q && lineClear(p, [q[0], q[1], zk])) found = { k: k2, x: q[0], y: q[1], zv: zv, cls: cls };
       }
       return found;
@@ -271,7 +323,7 @@
     });
 
     /* THE DESCENT */
-    var live = [], merges = 0, stuck = 0;
+    var live = [], merges = 0, stuck = 0, rested = {};
     for (k = nLev - 1; k >= 0; k--) {
       (startsAt[k] || []).forEach(function (nd) { live.push(nd); });
       if (!live.length) continue;
@@ -352,43 +404,53 @@
         var tx = nd.x + vx, ty = nd.y + vy;
         if (!freeAt(k - 1, tx, ty, nd.cls)) {
           var q = nearestFree(k - 1, nd.cls, tx, ty, nd.x, nd.y, m * 1.05) || nearestFree(k - 1, nd.cls, tx, ty, nd.x, nd.y, c * 2.2);
-          if (!q) { nd.dead = true; nd.done = true; stuck++; return; }
+          if (!q) {
+            var li = land && land[k] ? cellOf(nd.x, nd.y) : -1;
+            if (li >= 0 && land[k][li]) {                                    /* it stands on the part: its end runs down to the face */
+              var zf = -Infinity;
+              for (var sq = S.start[li] + 1; sq < S.start[li + 1]; sq += 2) if (S.zs[sq] <= zk - dz * 0.5 + 1e-6 && S.zs[sq] > zf) zf = S.zs[sq];
+              nd.rest = true; nd.done = true; nd.gone = true; rested[nd.id] = zf > -Infinity ? zf : zk;
+              if (zf > -Infinity && zf < zk - 1e-6) { nd.pts.push([nd.x, nd.y, zf]); nd.r.push(rAt(nd.zv, zk)); }
+              return;
+            }
+            nd.dead = true; nd.done = true; stuck++; return;
+          }
           vx = q[0] - nd.x; vy = q[1] - nd.y; tx = q[0]; ty = q[1];
         }
         nd.vx = vx; nd.vy = vy; nd.nx = tx; nd.ny = ty; nd.stepped = k;
       });
-      live = live.filter(function (nd) { return !nd.dead; });
+      live = live.filter(function (nd) { return !nd.dead && !nd.gone; });
       live.forEach(function (nd) { nd.x = nd.nx; nd.y = nd.ny; nd.pts.push([nd.x, nd.y, zn]); nd.r.push(rAt(nd.zv, zn)); });
     }
     /* what stands: the branches that reach the plate, and all that run into them */
-    var landed = {}, trunks = [];
+    var landed = {}, trunks = [], rests = [];
     live.forEach(function (nd) { nd.done = true; landed[nd.id] = true; });
     var okNode = {};
     function lands(nd) {
       if (okNode[nd.id] != null) return okNode[nd.id];
-      var r = nd.dead ? false : nd.into < 0 ? !!landed[nd.id] : lands(nodes[nd.into]);
+      var r = nd.dead ? false : nd.into < 0 ? (!!landed[nd.id] || rested[nd.id] != null) : lands(nodes[nd.into]);
       okNode[nd.id] = r; return r;
     }
     var branches = [], idOf = {};
     nodes.forEach(function (nd) {
       if (!lands(nd)) { if (nd.pts[0][2] === nd.zTop && nd.tips.length === 1) unreachable.push(nd.tips[0]); return; }
       idOf[nd.id] = branches.length;
-      branches.push({ id: branches.length, node: nd.id, pts: nd.pts, r: nd.r, into: nd.into, tips: nd.tips.slice(), tip: nd.pts[0][2] === nd.zTop && nd.tips.length === 1 ? nd.tips[0] : null });
+      branches.push({ id: branches.length, node: nd.id, pts: nd.pts, r: nd.r, into: nd.into, rest: rested[nd.id] != null, tips: nd.tips.slice(), tip: nd.pts[0][2] === nd.zTop && nd.tips.length === 1 ? nd.tips[0] : null });
     });
     branches.forEach(function (br) { br.into = br.into < 0 ? -1 : idOf[br.into]; delete br.node; });
     branches.forEach(function (br) {
       if (br.into >= 0) return;
       var e = br.pts[br.pts.length - 1];
-      trunks.push({ branch: br.id, c: [e[0], e[1]], r: br.r[br.r.length - 1], tips: br.tips.slice() });
+      (br.rest ? rests : trunks).push({ branch: br.id, c: [e[0], e[1]], z: e[2], r: br.r[br.r.length - 1], tips: br.tips.slice() });
     });
     /* a dead branch's tips (it lost its way: the reach field says this cannot be, but a coarse grid may) are unreachable, never built */
     var un = {}; unreachable.forEach(function (id) { un[id] = true; });
     nodes.forEach(function (nd) { if (nd.dead) nd.tips.forEach(function (id) { if (!un[id]) { un[id] = true; unreachable.push(id); } }); });
     branches.forEach(function (br) { br.tips = br.tips.filter(function (id) { return !un[id]; }); });
-    trunks.forEach(function (tr) { tr.tips = tr.tips.filter(function (id) { return !un[id]; }); });
-    return { ok: true, reason: trunks.length + ' trunk(s), ' + branches.length + ' branch(es), ' + (tipsIn.length - unreachable.length) + ' tip(s)',
-             branches: branches, trunks: trunks, tips: tipOut, unreachable: unreachable, candUnreachable: candUnreachable, plateZ: plateZ,
-             stats: { levels: nLev, dzMm: dz, cellMm: c, nx: nx, ny: ny, classes: nCls, merges: merges, stuck: stuck } };
+    trunks.concat(rests).forEach(function (tr) { tr.tips = tr.tips.filter(function (id) { return !un[id]; }); });
+    return { ok: true, reason: trunks.length + ' trunk(s), ' + (rests.length ? rests.length + ' standing on the part, ' : '') + branches.length + ' branch(es), ' + (tipsIn.length - unreachable.length) + ' tip(s)',
+             branches: branches, trunks: trunks, rests: rests, tips: tipOut, unreachable: unreachable, candUnreachable: candUnreachable, plateZ: plateZ,
+             stats: { levels: nLev, dzMm: dz, cellMm: c, nx: nx, ny: ny, classes: nCls, merges: merges, stuck: stuck, rests: rests.length } };
   }
 
   /* the branches as tapered capsules, each thinned to the points that matter (a straight run is its two ends) */

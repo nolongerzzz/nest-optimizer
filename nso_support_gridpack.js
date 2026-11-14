@@ -5550,15 +5550,31 @@
      any other; plan.flow carries the tree.
      ===================================================================== */
   function flowOf(opts) { return (opts && opts.supportFlow) || (root && root.NSO_SupportFlow) || null; }
-  var FLOW = { blendMm: 0.18, cellMm: 0.25, keepMm: TRUNK_KEEP_MM + 0.05, padGrowMm: 0.6, twigOneMm: 1.5,
+  var FLOW = { oneSupportMm: 12, blendMm: 0.18, cellMm: 0.3, awayCellMm: 0.5, bottomGapMm: 0.2, keepMm: TRUNK_KEEP_MM + 0.05, padGrowMm: 0.6, twigOneMm: 1.5,
                twigCover: { xyMm: 4.1, downMm: 1.5, upMm: 0.3 } };   /* a step this near an overhang's own spot is in its interface's stack: no twig (the Oblique's steps, as Bambu lays them) */
+  var FLOW_KNOBS = { tipCover: [0.2, 1.2], tipDropMm: [0.8, 8], gather: [0, 1], reach: [0.2, 1.5], rootFloorMm: [0.5, 10], flareMm: [0, 6], flareTan: [0, 1.5],
+                     padGrowMm: [0, 4], xyMm: [0.2, 2], bottomGapMm: [0, 1] };
+  function flowKnobsOf(k) {
+    var out = { flow: {}, given: {} };
+    if (!k || typeof k !== 'object') return out;
+    Object.keys(FLOW_KNOBS).forEach(function (name) {
+      var v = +k[name];
+      if (k[name] == null || !isFinite(v)) return;
+      v = Math.max(FLOW_KNOBS[name][0], Math.min(FLOW_KNOBS[name][1], v));
+      out.given[name] = v;
+      if (name === 'tipCover' || name === 'padGrowMm' || name === 'bottomGapMm') out[name] = v; else out.flow[name] = v;
+    });
+    return out;
+  }
   function planFlow(rawTris, opts) {
     var FL = flowOf(opts), bc = beaconsFor(rawTris, opts);
     if (!FL || !bc.ok || !bc.beacons.length) return null;
     var say = progressOf(opts);
     say('detecting', null, null, true);
     var ck = Object.assign({}, ONE, COLUMN_ONE, (opts.oneTrunk && typeof opts.oneTrunk === 'object') ? opts.oneTrunk : {}), CCK = columnCrownOf(opts.treeKnobs);
-    ck.coverMm = COLUMN_TIP_COVER * CCK.k.branchDistanceMm; ck.coverWideMm = COLUMN_TIP_COVER_WIDE * CCK.k.branchDistanceMm;
+    /* ADVANCED (opts.flowKnobs, the card's Advanced section): the planner's own numbers, each held to a range a tree can be grown in */
+    var AK = flowKnobsOf(opts.flowKnobs);
+    ck.coverMm = (AK.tipCover != null ? AK.tipCover : COLUMN_TIP_COVER) * CCK.k.branchDistanceMm; ck.coverWideMm = Math.max(ck.coverMm, COLUMN_TIP_COVER_WIDE * CCK.k.branchDistanceMm);
     var plateZ = bc.detect && bc.detect.plateZ != null ? bc.detect.plateZ : 0, A0 = SA(opts);
     var kit = A0 ? { pr: makeProbe(A0, [rawTris].concat(opts.occluders || [])), plateZ: plateZ } : null;
     var rec = function (b) { return { beacon: b.id, key: b.key, regionId: b.regionId, p: b.p.slice() }; };
@@ -5585,7 +5601,9 @@
     say('planning', 0, 1, true);
     /* every spot is asked for its way down first (a spot with none stands no tip, and is not covered by one beside it: the middle of a tunnel's
        ceiling has a neighbour by the mouth whose column reaches the plate, but nothing is under the spot for that); the rest are thinned */
-    fl = FL.plan({ soups: soups, plateZ: plateZ, knobs: CCK.k, opts: opts.flow || null,
+    /* May rest on the part (opts.restOnModel): the tree may land on the part's own top faces, as Bambu's does with On build plate only off */
+    var flowOpts = Object.assign({}, AK.flow, opts.flow || {}, { rest: !!opts.restOnModel });
+    fl = FL.plan({ soups: soups, plateZ: plateZ, knobs: CCK.k, opts: flowOpts,
       candidates: pool.map(function (b) { return { id: b.id, p: b.p }; }).concat(twigs.map(function (b) { return { id: b.id, p: b.p, twig: true }; })),
       pick: function (noWay) {
         noWay.forEach(function (id) { lost[id] = true; });
@@ -5630,17 +5648,23 @@
     });
     var twigIds = {}; twigs.forEach(function (b) { twigIds[b.id] = true; });
     fl.branches.forEach(function (br) { br.tips = br.tips.map(function (id) { return at[id]; }); if (br.tip != null) { br.twig = !!twigIds[br.tip]; br.tip = at[br.tip]; } });
-    fl.trunks.forEach(function (tr) { tr.tips = tr.tips.map(function (id) { return at[id]; }); });
+    fl.trunks.concat(fl.rests || []).forEach(function (tr) { tr.tips = tr.tips.map(function (id) { return at[id]; }); });
     var held = chosen.map(function (b) { return at[b.id]; });
+    /* what stands on the plate and what on the part: two entries (the card says each spot's landing), one support */
+    var onPart = {}; (fl.rests || []).forEach(function (rs) { rs.tips.forEach(function (i) { onPart[i] = true; }); });
+    var heldPlate = held.filter(function (i) { return !onPart[i]; }), heldRest = held.filter(function (i) { return onPart[i]; }), trunkList = [];
+    if (fl.trunks.length) trunkList.push({ id: 0, flow: true, members: [], beacons: heldPlate, landing: 'plate', root: null });
+    if ((fl.rests || []).length) trunkList.push({ id: trunkList.length, flow: true, members: [], beacons: heldRest, landing: 'rest', root: null });
     var p = { ok: true, stage: 'done', members: [], stubs: [], merges: [], pickups: [], steered: [], nudged: [], tight: [], resting: [], inside: [], stations: [],
               unreachable: stillLost.map(function (b) { return at[b.id]; }), held: held.length, beacons: beacons, plateZ: plateZ, sideMm: CCK.k.branchDiameterMm,
-              /* ONE support: every trunk of the piece's tree is one entry, holding every tip built */
-              trunks: fl.trunks.length ? [{ id: 0, flow: true, members: [], beacons: held, landing: 'plate', root: null }] : [],
-              flow: { branches: fl.branches, trunks: fl.trunks, stats: fl.stats, knobs: CCK.k, twigs: twigs.length },
+              trunks: trunkList,
+              flow: { branches: fl.branches, trunks: fl.trunks, rests: fl.rests || [], stats: fl.stats, knobs: CCK.k, twigs: twigs.length,
+                      groups: Array.isArray(opts.solidGroups) ? opts.solidGroups.map(function (g) { return g.slice(); }) : null,
+                      adv: { padGrowMm: AK.padGrowMm != null ? AK.padGrowMm : FLOW.padGrowMm, bottomGapMm: AK.bottomGapMm != null ? AK.bottomGapMm : FLOW.bottomGapMm }, advGiven: AK.given },
               oneTrunk: { coverMm: ck.coverMm, areas: order.length, clusters: fl.trunks.map(function (tr) { return { tips: tr.tips.length, radiusMm: tr.r }; }), tips: chosen.length, beacons: bc.beacons.length,
                           thinned: covered.length - coneHeld, covered: covered, onPlate: onPlate, splits: 0, lost: stillLost.length, branched: 0, thin: [], coneTips: coneHeld,
                           selfHeld: selfHeld, forks: 0, twigs: twigs.length } };
-    p.reason = chosen.length + ' tip(s) on ' + fl.trunks.length + ' trunk(s), ' + fl.branches.length + ' branch(es) grown down together.' +
+    p.reason = chosen.length + ' tip(s) on ' + fl.trunks.length + ' trunk(s), ' + ((fl.rests || []).length ? fl.rests.length + ' foot/feet on the part, ' : '') + fl.branches.length + ' branch(es) grown down together.' +
       (twigs.length ? ' ' + twigs.length + ' twig(s) catch the edge of a step no slicer calls an overhang.' : '') +
       (coneHeld ? ' ' + coneHeld + ' spot(s) at a cone\'s tip are held through the tip under it.' : '') +
       (selfHeld.length ? ' ' + selfHeld.length + ' spot(s) on a step narrower than a layer\'s overhang at the threshold angle are no overhang: the part holds them.' : '') +
@@ -5655,10 +5679,35 @@
     function rootB(i) { var guard = 0; while (B[i].into >= 0 && guard++ < 1e5) i = B[i].into; return i; }
     var byRoot = {}, roots = [];
     prims.forEach(function (pr) { var r = rootB(pr.branch); rootOf[pr.branch] = r; if (!byRoot[r]) { byRoot[r] = []; roots.push(r); } byRoot[r].push(pr); });
+    var ADV = p.flow.adv || { padGrowMm: FLOW.padGrowMm, bottomGapMm: FLOW.bottomGapMm };
     var THc = TM(opts), keepR = FLOW.keepMm, probesC = THc ? [opts.rawTris || p.rawTris || []].concat(opts.occluders || p.occluders || []).filter(function (sp) { return sp && sp.length >= 9; })
       .map(function (sp) { return probeOf(THc, sp); }).filter(Boolean) : [];
     var cutB = { zMax: null, zMin: p.plateZ, flat: true, keep: keepR,
-      away: probesC.length ? function (x, y, z) { var d = Infinity; for (var q = 0; q < probesC.length; q++) { var hit = probesC[q].nearest([x, y, z], keepR + 0.3); if (hit && hit.dist < d) d = hit.dist; } return d; } : null };
+      away: probesC.length ? awayFast : null };
+    /* the part's distance, asked once a lattice point (FLOW.awayCellMm) and read between them: the mesher asks it at every node and vertex near the
+       part, and a tree under a low part is near it everywhere (a 40 x 50 mm test piece: 13 of its build's 25 s) */
+    var AL = FLOW.awayCellMm, aCap = keepR + 0.3 + AL, aMap = new Map();
+    function awayAt(ix, iy, iz) {
+      var key = ((iz + 65536) * 131072 + (iy + 65536)) * 131072 + (ix + 65536), v = aMap.get(key);
+      if (v !== undefined) return v;
+      v = aCap;
+      for (var q = 0; q < probesC.length; q++) {
+        var hit = probesC[q].nearest([ix * AL, iy * AL, iz * AL], aCap);
+        if (!hit) continue;
+        /* a face of the part UNDER the point (a foot standing on the part): the body comes down to the bottom distance over it (Bambu's
+           support_bottom_z_distance, 0.2), not the keep it holds off walls and undersides */
+        var dv = hit.point && iz * AL - hit.point[2] > 0.85 * hit.dist ? hit.dist + (keepR - ADV.bottomGapMm) : hit.dist;
+        if (dv < v) v = dv;
+      }
+      aMap.set(key, v);
+      return v;
+    }
+    function awayFast(x, y, z) {
+      var fx = x / AL, fy = y / AL, fz = z / AL, ix = Math.floor(fx), iy = Math.floor(fy), iz = Math.floor(fz), tx = fx - ix, ty = fy - iy, tz = fz - iz;
+      var c00 = awayAt(ix, iy, iz) * (1 - tx) + awayAt(ix + 1, iy, iz) * tx, c10 = awayAt(ix, iy + 1, iz) * (1 - tx) + awayAt(ix + 1, iy + 1, iz) * tx;
+      var c01 = awayAt(ix, iy, iz + 1) * (1 - tx) + awayAt(ix + 1, iy, iz + 1) * tx, c11 = awayAt(ix, iy + 1, iz + 1) * (1 - tx) + awayAt(ix + 1, iy + 1, iz + 1) * tx;
+      return (c00 * (1 - ty) + c10 * ty) * (1 - tz) + (c01 * (1 - ty) + c11 * ty) * tz;
+    }
     var parts = [], n = roots.length;
     say('building', 0, n, true);
     for (var t = 0; t < n; t++) {
@@ -5670,19 +5719,59 @@
       h = Math.max(h, Math.cbrt(vol / 10e6));
       for (var tries = 0; tries < 4 && !(blob && blob.length); tries++) { blob = blobSoup(pr.map(function (q) { return q.clip ? { pts: q.pts, r: q.r, clip: q.clip } : { pts: q.pts, r: q.r }; }), FLOW.blendMm, h, cutB); h *= 1.3; }
       if (!blob || !blob.length) return { ok: false, reason: 'the tree\'s body could not be meshed closed (tree ' + (t + 1) + ' of ' + n + ')' };
-      parts.push({ soup: blob, smooth: true });
+      parts.push({ soup: blob, smooth: true, root: roots[t] });
       say('building', t + 1, n, t + 1 === n);
     }
-    var feet = p.flow.trunks.map(function (tr, i) { return { key: i, trunk: 0, c: tr.c.slice(), r: tr.r, padGrowMm: FLOW.padGrowMm }; });
+    var feet = p.flow.trunks.map(function (tr, i) { return { key: i, trunk: 0, c: tr.c.slice(), r: tr.r, padGrowMm: ADV.padGrowMm, root: tr.branch }; });
     return { ok: true, flow: true, trunks: [{ trunk: 0, parts: parts, fingerParts: [], fingers: 0 }], fingersDropped: 0,
              pads: { count: 0, clusters: 0, clustersSplit: 0, hemmed: 0, holesFilled: 0, holesSlotted: 0 }, padGroups: [], feet: feet };
   }
   function flowShells(p, tp) {
-    var list = []; tp.trunks.forEach(function (x) { x.parts.forEach(function (q) { list.push(q.soup); }); });
-    var soup = joinAll(list), ids = p.trunks.length ? p.trunks[0].beacons.slice() : [];
-    var solids = soup.length ? [{ soup: soup, box: bounds(soup), trunks: [0], sheets: [], beacons: ids, regionIds: regionIdsOf(p.beacons, ids), landing: 'plate',
-      feet: (tp.feet || []).map(function (f) { return { c: f.c, r: f.r, padGrowMm: f.padGrowMm, member: null, carries: [] }; }) }] : [];
-    return { ok: true, soup: soup, solids: solids, shells: list.length, members: [], unsupported: [], fingersDropped: 0, detached: 0, pads: tp.pads, sheet: null, sheetsAlone: 0, reason: p.reason };
+    /* ONE SUPPORT A GROUP OF AREAS (plan.flow.groups, the card's own grouping: a head's areas together, another head's apart), joined where a
+       tree holds tips of two groups; with no groups given, one support. Each tree goes with the group of the tips it holds. */
+    var B = p.flow.branches, groups = p.flow.groups, gOfRegion = {}, parent = [];
+    (groups || []).forEach(function (g, gi) { parent.push(gi); g.forEach(function (rid) { gOfRegion[rid] = gi; }); });
+    function find(x) { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; }
+    var gOfRoot = {}, tipsOfRoot = {}, landOfRoot = {};
+    B.forEach(function (br) {
+      if (br.into >= 0) return;
+      var gs = [];
+      br.tips.forEach(function (i) { var b = p.beacons[i], gi = b && groups ? gOfRegion[b.regionId] : 0; if (gi == null) gi = 0; if (gs.indexOf(gi) < 0) gs.push(gi); });
+      if (!gs.length) gs.push(0);
+      if (groups) for (var q = 1; q < gs.length; q++) { var x = find(gs[0]), y = find(gs[q]); if (x !== y) parent[Math.max(x, y)] = Math.min(x, y); }
+      gOfRoot[br.id] = gs[0]; tipsOfRoot[br.id] = br.tips; landOfRoot[br.id] = br.rest ? 'rest' : 'plate';
+    });
+    var held = {}; p.trunks.forEach(function (t) { t.beacons.forEach(function (i) { held[i] = true; }); });
+    /* ...and where two groups' tips stand within FLOW.oneSupportMm of one another: side by side under one overhang (the slicer lays one stack there,
+       and a stack has one owner), or pocket by pocket in one piece. Heads that stand apart stay supports of their own. */
+    if (groups && groups.length > 1) {
+      var tipsOfG = groups.map(function () { return []; });
+      p.beacons.forEach(function (b, i) { if (!held[i]) return; var gi = gOfRegion[b.regionId]; if (gi != null) tipsOfG[gi].push(b.p); });
+      for (var ga = 0; ga < groups.length; ga++) for (var gb = ga + 1; gb < groups.length; gb++) {
+        if (find(ga) === find(gb)) continue;
+        var near = false, D2 = FLOW.oneSupportMm * FLOW.oneSupportMm;
+        for (var ia = 0; ia < tipsOfG[ga].length && !near; ia++) for (var ib = 0; ib < tipsOfG[gb].length && !near; ib++) {
+          var dx = tipsOfG[ga][ia][0] - tipsOfG[gb][ib][0], dy = tipsOfG[ga][ia][1] - tipsOfG[gb][ib][1];
+          if (dx * dx + dy * dy < D2) near = true;
+        }
+        if (near) { var xa = find(ga), xb = find(gb); parent[Math.max(xa, xb)] = Math.min(xa, xb); }
+      }
+    }
+    var bySet = {}, order = [], count = 0;
+    tp.trunks.forEach(function (x) { x.parts.forEach(function (q) {
+      var gi = groups && q.root != null && gOfRoot[q.root] != null ? find(gOfRoot[q.root]) : 0;
+      if (!bySet[gi]) { bySet[gi] = { soups: [], ids: [], lands: {}, roots: {} }; order.push(gi); }
+      var st = bySet[gi];
+      st.soups.push(q.soup); count++;
+      if (q.root != null) { st.roots[q.root] = true; (tipsOfRoot[q.root] || []).forEach(function (i) { if (held[i]) st.ids.push(i); }); st.lands[landOfRoot[q.root] || 'plate'] = true; }
+      else { p.trunks.forEach(function (t) { t.beacons.forEach(function (i) { st.ids.push(i); }); st.lands[t.landing] = true; }); }
+    }); });
+    var solids = order.sort(function (a, b) { return a - b; }).map(function (gi, k) {
+      var st = bySet[gi], soup = joinAll(st.soups), ls = Object.keys(st.lands), ids = st.ids.slice().sort(function (a, b) { return a - b; });
+      return { soup: soup, box: bounds(soup), trunks: [k], sheets: [], beacons: ids, regionIds: regionIdsOf(p.beacons, ids), landing: ls.length === 1 ? ls[0] : 'mixed',
+        feet: (tp.feet || []).filter(function (f) { return f.root == null || st.roots[f.root]; }).map(function (f) { return { c: f.c, r: f.r, padGrowMm: f.padGrowMm, member: null, carries: [] }; }) };
+    }).filter(function (sd) { return sd.soup.length; });
+    return { ok: true, soup: joinAll(solids.map(function (sd) { return sd.soup; })), solids: solids, shells: count, members: [], unsupported: [], fingersDropped: 0, detached: 0, pads: tp.pads, sheet: null, sheetsAlone: 0, reason: p.reason };
   }
 
   /* plan() keeps what solid() needs to clear gecko fingers. */
