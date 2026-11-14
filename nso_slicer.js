@@ -263,7 +263,7 @@
       topShellThicknessMm: BAMBU_PROFILE_06.topShellThicknessMm,
       bottomShellThicknessMm: 0,
       sparseDensity: BAMBU_PROFILE_06.sparseDensity,
-      sparsePattern: BAMBU_PROFILE_06.sparsePattern,   // 'grid' | 'zigzag' (Bambu's Rectilinear; 'rectilinear' is taken for it) | 'lines' | 'concentric' | 'archimedeanchords' | '3dhoneycomb' | 'gyroid' | 'cubic' | 'adaptivecubic' | 'honeycomb'
+      sparsePattern: BAMBU_PROFILE_06.sparsePattern,   // 'grid' | 'zigzag' (Bambu's Rectilinear; 'rectilinear' is taken for it) | 'lines' | 'concentric' | 'archimedeanchords' | '3dhoneycomb' | 'gyroid' | 'cubic' | 'adaptivecubic' | 'honeycomb' | 'lightning'
       solidPattern: BAMBU_PROFILE_06.solidPattern,     // 'zigzag' | 'lines' | 'concentric' | 'archimedeanchords' | 'hilbertcurve' | 'octagramspiral': the internal solid infill, and the surfaces unless they say
       topPattern: null,                    // the top surface's own pattern ('concentric'); null -> solidPattern
       bottomPattern: null,                 // the first layer's own pattern ('concentric'); null -> solidPattern
@@ -1483,6 +1483,72 @@
     return chainAlongOutline(polys, pieces, linkMm);
   }
 
+  // ===========================================================================
+  // Lightning - only what holds the roofs up
+  // ===========================================================================
+
+  /* LIGHTNING, on a real Bambu Studio 02.09 slice (Lightning_sparse.gcode.3mf: the plate's ten shapes, 35.8 - 43.6 mm tall, 15 %, 0.45 wide;
+     docs/SLICER.md "Lightning"). Bambu grows trees: the sparse layers are empty from the bottom shell up to 39 - 89 layers under the top shell,
+     then branches rooted on the walls reach further in with every layer, until on the last layer under the top they lie about sqrt 2 spacings
+     over the density apart (the length laid over the area inside the walls is 0.247 - 0.268 on all ten shapes; 0.261 = 1 / (sqrt 2 x 2.713)).
+     The trees themselves are grown by a procedure this slicer does not have, and a black-box reading cannot recover it. What is laid here is
+     what the trees are for, by their own measures:
+       - a roof - sparse infill with none over it - is carried by straight lines sqrt 2 spacings over the density apart, along the infill
+         direction, each running from wall to wall;
+       - a layer down, every line is two stubs, one from each wall, each ending one layer height short of where the stub above ended (45
+         degrees: the reference's square, 23 mm inside its walls, has its last branch 57 layers under the top - 11.4 mm for 11.5 mm of half
+         width); a stub is printed while it is longer than a line is wide;
+       - the lines keep to the same places on every layer (they are laid about the middle of the object's box), so each lies on the one below.
+     So the plastic is where Bambu's is and about as much (tools/nso_slicer_test.js), in combs where Bambu draws trees. */
+  var LIGHTNING_SPREAD = Math.SQRT2;  // the roof lines' spacing, in spacings over the density
+  function dirOf(o) { return o.infillDirectionDeg * Math.PI / 180; }
+
+  /**
+   * Lightning for one object: adds each layer's 'Sparse infill' paths to layers[i].paths.
+   *   sparseAt   the layers' sparse regions (CrossSections; undefined where a layer has none)
+   *   PL         the layers' planes ({ h })
+   *   centre     the middle of the object's box: one scan line passes through it
+   */
+  function lightningFill(g, layers, sparseAt, PL, centre, angle, o) {
+    var c = Math.cos(angle), sn = Math.sin(angle), need = new Map();   /* scan line -> [[u0, u1]...] the layer above needs held, already drawn in */
+    var uOf = function (pt) { return pt[0] * c + pt[1] * sn; };
+    for (var i = layers.length - 1; i >= 0; i--) {
+      var sp = sparseAt[i];
+      if (!sp || g.isEmpty(sp)) { need = new Map(); continue; }
+      var h = PL[i].h, w = o.infillWidthMm, pitch = LIGHTNING_SPREAD * spacingOf(w, h) / Math.min(1, o.sparseDensity);
+      var phase = (-centre[0] * sn + centre[1] * c) % pitch;
+      /* the roof: this layer's sparse infill with no sparse infill over it */
+      var above = sparseAt[i + 1], roof = above && !g.isEmpty(above) ? g.diff(sp, above) : sp, roofBy = new Map();
+      if (!g.isEmpty(roof)) scanFill(g.polys(roof), angle, pitch, phase).forEach(function (sg) {
+        var l = roofBy.get(sg.line); if (!l) roofBy.set(sg.line, l = []);
+        l.push([Math.min(uOf(sg.a), uOf(sg.b)), Math.max(uOf(sg.a), uOf(sg.b))]);
+      });
+      var next = new Map(), L = layers[i];
+      scanFill(g.polys(sp), angle, pitch, phase).forEach(function (sg) {
+        var ua = uOf(sg.a), ub = uOf(sg.b), A = ua <= ub ? sg.a : sg.b, B = ua <= ub ? sg.b : sg.a, a = Math.min(ua, ub), b = Math.max(ua, ub), m = (a + b) / 2;
+        /* how far in the stub from each wall has to reach: the furthest thing to hold on its half of the line */
+        var xL = -Infinity, xR = Infinity;
+        (need.get(sg.line) || []).concat(roofBy.get(sg.line) || []).forEach(function (iv) {
+          var lo = Math.max(iv[0], a), hi = Math.min(iv[1], b);
+          if (hi <= lo) return;
+          if (lo < m) xL = Math.max(xL, Math.min(hi, m));
+          if (hi > m) xR = Math.min(xR, Math.max(lo, m));
+        });
+        var at = function (u) { var t = (u - a) / (b - a); return [A[0] + (B[0] - A[0]) * t, A[1] + (B[1] - A[1]) * t]; };
+        var keep = next.get(sg.line); if (!keep) next.set(sg.line, keep = []);
+        if (xL >= m - 1e-9 && xR <= m + 1e-9) L.paths.push({ feature: 'Sparse infill', width: w, closed: false, pts: [A, B] });
+        else {
+          if (xL - a > w) L.paths.push({ feature: 'Sparse infill', width: w, closed: false, pts: [A, at(xL)] });
+          if (b - xR > w) L.paths.push({ feature: 'Sparse infill', width: w, closed: false, pts: [at(xR), B] });
+        }
+        /* what the layer below holds: each stub, a layer height shorter */
+        if (xL - h - a > w) keep.push([a, xL - h]);
+        if (b - xR - h > w) keep.push([xR + h, b]);
+      });
+      need = next;
+    }
+  }
+
   /**
    * Pieces of clipLine's, in order, as paths: one piece's end joined to the next one's start along the outline, the shorter way round, when
    * both lie on the same polygon, that way is no longer than linkMm and no earlier join already runs along any of it (a stretch of wall is
@@ -2225,6 +2291,7 @@
         var PL = P.planes || planes;
         var S = P.S, n = PL.length;
         var sparsePrev = g.empty();
+        var lightningAt = null;                                   /* lightning: each layer's sparse region, by layer */
         /* A SUPPORT IS HOLLOW, as its export says (SHEET.slicerSettings: wall_loops 1, sparse_infill_density 0%) and as Bambu's own tree is: one wall
            round the trunk and no filler inside it. The shells (the first layers, the top under a sheet) stay the profile's. */
         var oS = P.role === 'support' ? Object.assign({}, o, { wallLoops: CONSTANTS.supportWalls.loops, sparseDensity: CONSTANTS.supportWalls.sparseDensity, narrowSparseMm: 0, minSparseAreaMm2: 0 }) : o;
@@ -2418,6 +2485,11 @@
                 P.cubes = adaptiveCubicLattice(pts3, 3 * wInf / dens);
               }
               lineFill = linesFill(g.polys(sparse), 0, P.cubes.pitch, P.cubes.at(PL[i].printZ), o.sparseAnchorMaxMm);
+            } else if (o.sparsePattern === 'lightning') {
+              /* laid when the whole object's layers are known, from the top down (lightningFill) */
+              if (!P.boxCentre) { var lb = region.bounds(); P.boxCentre = [(lb.min[0] + lb.max[0]) / 2, (lb.min[1] + lb.max[1]) / 2]; }
+              (lightningAt || (lightningAt = []))[i] = sparse;
+              lineFill = [];
             } else if (o.sparsePattern === 'honeycomb') lineFill = honeycombFill(g.polys(sparse), P.boxCentre, dirA, i % 3, sInf / dens, sInf, o.sparseAnchorMaxMm);
           }
           if (lineFill) {
@@ -2459,6 +2531,7 @@
           }
           sparsePrev = sparse;
         }
+        if (lightningAt) lightningFill(g, P.layers, lightningAt, PL, P.boxCentre, dirOf(o), o);
       };
       var colRule = function (P) { if (P.role === 'support' && o.supportInterfaceRule === 'column') columnRule(g, P, perObject, planes, o); };
       /* claims (columnRule: one stack, one owner) in the pass whose sections print: the shared grid's when the supports keep it, else the own grids'
@@ -4512,6 +4585,7 @@
     cubicAt: cubicAt,
     adaptiveCubicLattice: adaptiveCubicLattice,
     honeycombFill: honeycombFill,
+    lightningFill: lightningFill,
     GYROID_SCALE: GYROID_SCALE,
     hilbertPoint: hilbertPoint,
     clipLine: clipLine,

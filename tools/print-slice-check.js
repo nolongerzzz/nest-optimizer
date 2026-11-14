@@ -259,6 +259,11 @@ async function main() {
       }
     }
 
+    {
+      const r = await PRINT.build(two, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { pattern: 'lightning' }) });
+      check('lightning inside: slices to a file, with less plastic than the lines\' (' + (r.ok ? r.stats.grams.toFixed(2) : '-') + ' g against ' + plain.stats.grams.toFixed(2) + ')', r.ok && r.stats.grams < plain.stats.grams, r.reason);
+    }
+
     const want = { nozzle: 0.4, layer: 0.1, walls: 3, density: 25, pattern: 'lines', angle: 40, brim: 'none', interfaceRule: null };
     const SLm = require(path.join(ROOT, 'nso_slicer.js')), realRun = SLm.run;
     let seenOpts = null;

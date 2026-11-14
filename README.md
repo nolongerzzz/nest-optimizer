@@ -36,7 +36,7 @@ Smart build-plate packing for 3D printing.
   over it, the piece untouched - until **Set** bakes it (one Undo step).
   See [docs/SECTION.md](docs/SECTION.md)
 - **In-house slicer** (G-scope, **Slice**): exact layer sections, walls offset
-  by the measured line widths, grid / rectilinear / concentric / Archimedean chords / 3D honeycomb / gyroid / honeycomb / cubic / adaptive cubic infill by density, Hilbert curve and octagram spiral surfaces, top and bottom
+  by the measured line widths, grid / rectilinear / concentric / Archimedean chords / 3D honeycomb / gyroid / honeycomb / cubic / adaptive cubic / lightning infill by density, Hilbert curve and octagram spiral surfaces, top and bottom
   shells, and per-layer overhang / support-need calls - opened as a toolpath
   G-scope inspects line by line, like an imported `.gcode.3mf`. Validated
   against real Bambu slices, agreement and disagreement both on record. For

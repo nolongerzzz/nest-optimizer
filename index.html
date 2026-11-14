@@ -1544,6 +1544,7 @@
                       <option value="honeycomb" title="Honeycomb: regular hexagons, drawn as zigzags along one of their three edge directions a layer">honeycomb</option>
                       <option value="cubic" title="Cubic: three families of straight lines that slide with height - cubes standing on a corner">cubic</option>
                       <option value="adaptivecubic" title="Adaptive cubic: the cubic's lines at 0, 60 and 120 degrees, wider apart, about the part's own middle (every cell the finest: Bambu's coarser cells deep inside a large part are not done)">adaptive cubic</option>
+                      <option value="lightning" title="Lightning: only what holds the top up - lines under every roof, shorter with every layer down, none below (combs where Bambu draws trees)">lightning</option>
                     </select>
                     <label for="slice-set-surface">surfaces
                       <select id="slice-set-surface" title="The pattern of the top and bottom surfaces and the solid infill" autocomplete="off">
@@ -2755,6 +2756,7 @@
                     <option value="honeycomb" title="Honeycomb: regular hexagons, drawn as zigzags along one of their three edge directions a layer">honeycomb</option>
                     <option value="cubic" title="Cubic: three families of straight lines that slide with height - cubes standing on a corner">cubic</option>
                     <option value="adaptivecubic" title="Adaptive cubic: the cubic's lines at 0, 60 and 120 degrees, wider apart, about the part's own middle (every cell the finest: Bambu's coarser cells deep inside a large part are not done)">adaptive cubic</option>
+                    <option value="lightning" title="Lightning: only what holds the top up - lines under every roof, shorter with every layer down, none below (combs where Bambu draws trees)">lightning</option>
                   </select>
                   <select id="ms-slice-surface" style="width:auto;min-width:0;flex:1 1 0" title="Surfaces: the pattern of the top and bottom surfaces and the solid infill">
                     <option value="zigzag" selected title="Lines at 45 and 135 degrees, turning with every layer (Bambu's Rectilinear; its Monotonic is the same lines in another order)">rectilinear</option>
@@ -3054,7 +3056,7 @@
   <script src="nso-gcode-lines.js?v=fe0b823c"></script>
   <script src="nso-gscope-diff.js?v=937f4953"></script>
   <script src="nso-gcode-solid.js?v=ac1a4f02"></script>
-  <script src="nso_slicer.js?v=30cfe362"></script>
+  <script src="nso_slicer.js?v=8557b0da"></script>
   <script src="nso_raster_lines.js?v=461ca449"></script>
   <!-- The support interface: the crosshatch's one-direction layers, and the
        sheet a support tree's tips carry under the part (flat caps on the
@@ -3261,9 +3263,9 @@
        uses them. After nso_slicer.js, nso-cooling-profiles.js, nso-3mf.js and
        nso-3mf-read.js, which they read at load, and after app-microscope.js, whose
        plate reader and G-code import it calls. See docs/PRINT-PLANNER.md. -->
-  <script src="nso-print-planner.js?v=71bd5f65"></script>
+  <script src="nso-print-planner.js?v=af9581c5"></script>
   <script src="nso-gcode3mf-write.js?v=cdfa15b4"></script>
-  <script src="app-print.js?v=ad39b72d"></script>
+  <script src="app-print.js?v=084a93cc"></script>
   <!-- Lift: details off a face, the face left as it was round them. After
        nso_lift.js (Phase 1: a flat face), nso_lift_curved.js (Lift 3: the
        repair under a detail lifted off a curved base), nso_lift_auto.js

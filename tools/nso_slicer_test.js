@@ -823,6 +823,45 @@ function frustum(n, r0, r1, z0, z1) {
     check('the lists\' name for adaptive cubic', SL.patternLabel('adaptivecubic') === 'adaptive cubic' && SL.patternLabel('cubic') === 'cubic' && SL.patternLabel('honeycomb') === 'honeycomb');
   }
 
+  section('Lightning - what holds the roofs up, by the measures of a real Bambu slice (fixtures/slicer-lightning-reference.json, docs/SLICER.md "Lightning")');
+  {
+    const fsx = require('fs');
+    const OUT = JSON.parse(fsx.readFileSync(path.join(ROOT, 'fixtures', 'slicer-concentric-reference.json'), 'utf8')).shapes;
+    const REF = JSON.parse(fsx.readFileSync(path.join(ROOT, 'fixtures', 'slicer-lightning-reference.json'), 'utf8')).shapes;
+    const plen = p => { let l = 0; for (let i = 1; i < p.pts.length; i++) l += Math.hypot(p.pts[i][0] - p.pts[i - 1][0], p.pts[i][1] - p.pts[i - 1][1]); return l; };
+    const o = SL.defaultsFor(0.4, { layerMm: 0.2, outerWallWidthMm: 0.42, innerWallWidthMm: 0.45, infillWidthMm: 0.45, topShellLayers: 5, bottomShellLayers: 3, minSparseAreaMm2: 0, sparsePattern: 'lightning' });
+    const res = SL.sliceObjects(REF.map(r => ({ name: r.name, soup: prism(OUT.find(sh => sh.name === r.name).outline, 0, r.tall * 0.2) })), o, wasm);
+    const sp = (ob, li) => ob.layers[li].paths.filter(p => p.feature === 'Sparse infill'), lay = (ob, li) => sp(ob, li).reduce((a, p) => a + plen(p), 0);
+    const dens = REF.map((r, k) => lay(res.objects[k], r.lastSparseLayer - 1) / r.areaInsideWalls), densRef = REF.map(r => r.lengthUnderTop[0][1] / r.areaInsideWalls);
+    check('under the top shell the lines are sqrt 2 spacings over the density apart: 0.23 - 0.27 mm of line a mm2 inside the walls on all seven shapes (Bambu\'s trees: 0.26 - 0.27)',
+          dens.every(d => d > 0.225 && d < 0.275) && densRef.every(d => d > 0.25 && d < 0.275), dens.map(d => d.toFixed(3)).join(' ') + ' | ' + densRef.map(d => d.toFixed(3)).join(' '));
+    const tot = REF.map((r, k) => { let t = 0; for (let li = 3; li < r.lastSparseLayer; li++) t += lay(res.objects[k], li); return t / r.totalLength; });
+    check('the whole object\'s sparse infill is as much as Bambu\'s: 0.65 - 1.35 x on each shape, within 5 % over the seven together',
+          tot.every(t => t > 0.65 && t < 1.35) && Math.abs(REF.reduce((a, r, k) => a + tot[k] * r.totalLength, 0) / REF.reduce((a, r) => a + r.totalLength, 0) - 1) < 0.05,
+          tot.map(t => t.toFixed(2)).join(' ') + ' | together ' + (REF.reduce((a, r, k) => a + tot[k] * r.totalLength, 0) / REF.reduce((a, r) => a + r.totalLength, 0)).toFixed(3));
+    const at20 = REF.map((r, k) => lay(res.objects[k], r.lastSparseLayer - 21) / Math.max(1, r.lengthUnderTop[3][1]));
+    check('...and 20 layers under the top, 0.6 - 1.4 x Bambu\'s on each', at20.every(t => t > 0.6 && t < 1.4), at20.map(t => t.toFixed(2)).join(' '));
+    const firsts = REF.map((r, k) => { for (let li = 3; li < r.lastSparseLayer; li++) if (lay(res.objects[k], li) > 0.5) return li + 1; return 0; });
+    check('nothing is laid in the lower layers: the first sparse line is over 100 layers up on every shape (Bambu\'s: layer ' + REF.map(r => r.firstLayerWithInfill).join(', ') + ')',
+          firsts.every(f => f > 100), firsts.join(', '));
+    const sq = res.objects[REF.findIndex(r => r.name === 'square')], rs = REF.find(r => r.name === 'square'), topLi = rs.lastSparseLayer - 1;
+    const stubs = (li) => sp(sq, li).map(p => plen(p)).sort((a, b) => b - a);
+    check('the roof lines run from wall to wall at 45 degrees; a layer down each is two stubs, every stub one layer height shorter than the one over it',
+          sp(sq, topLi).every(p => Math.abs((p.pts[1][0] - p.pts[0][0]) - (p.pts[1][1] - p.pts[0][1])) < 1e-6) && sp(sq, topLi - 1).length === 2 * sp(sq, topLi).length &&
+          Math.abs(stubs(topLi - 5)[0] - stubs(topLi - 6)[0] - 0.2) < 1e-6, stubs(topLi)[0].toFixed(2) + ' -> ' + stubs(topLi - 1)[0].toFixed(2) + ', ' + stubs(topLi - 5)[0].toFixed(2) + ' -> ' + stubs(topLi - 6)[0].toFixed(2));
+    /* every stub lies on a longer one below it, or on the wall's end of it: the layer below has a stub on the same line, at least as long */
+    const key = p => Math.round((p.pts[0][1] - p.pts[0][0]) * 1e3);
+    let held = 0, all = 0;
+    for (let li = topLi - 30; li <= topLi - 1; li++) { const below = sp(sq, li - 1); sp(sq, li).forEach(p => { all++; if (plen(p) <= 0.2 + 0.45 + 1e-6 || below.some(q => key(q) === key(p) && plen(q) >= plen(p) - 0.2 - 1e-6)) held++; }); }
+    check('every stub lies on the one below it (one layer height shorter at most), down to where it is no longer than a line is wide', held === all, held + ' of ' + all);
+    /* a roof in the middle of a part: a 40 x 40 block with a 20 x 20 x 10 pocket in its top - the pocket's floor is a roof too */
+    const pocket = prism(rect0(0, 40, 0, 40), 0, 20).concat(prism(rect0(0, 40, 0, 10), 20, 30), prism(rect0(0, 40, 30, 40), 20, 30), prism(rect0(0, 10, 10, 30), 20, 30), prism(rect0(30, 40, 10, 30), 20, 30));
+    const rp = SL.sliceObjects([{ name: 'pocket', soup: pocket }], o, wasm).objects[0], mid = (li) => sp(rp, li).filter(p => { const a = p.pts[0], b = p.pts[1];      /* does the line pass through the middle 12 x 12? */
+      for (let t = 0; t <= 1; t += 0.01) { const x = a[0] + (b[0] - a[0]) * t, y = a[1] + (b[1] - a[1]) * t; if (x > 14 && x < 26 && y > 14 && y < 26) return true; } return false; }).length;
+    check('a pocket\'s floor inside a part is a roof too: lines under it (layer 95), none there higher up beside the pocket (layer 120)', mid(94) > 3 && mid(119) === 0 && sp(rp, 119).length > 0, mid(94) + ' / ' + mid(119));
+    check('the lists\' name', SL.patternLabel('lightning') === 'lightning');
+  }
+
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
 })().catch(err => { console.error(err); process.exit(1); });

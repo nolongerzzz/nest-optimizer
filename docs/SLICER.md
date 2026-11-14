@@ -687,6 +687,35 @@ Against the reference: 960 pinned points (three shapes, the three directions
 twice round and layers 50 and 101) within 0.002 mm; the length laid within
 12 %.
 
+### Lightning (`sparsePattern: 'lightning'`)
+
+**Not Bambu's trees - what they are for, by their measures.** In
+`Lightning_sparse.gcode.3mf` (the plate's shapes, 35.8 - 43.6 mm tall, 15 %)
+the sparse layers are empty from the bottom shell up to 39 - 89 layers under
+the top shell; from there branches rooted on the walls reach further in with
+every layer, and on the last layer under the top they lie as dense as lines
+sqrt 2 spacings over the density apart (0.247 - 0.268 mm of line a mm2 inside
+the walls on all ten shapes; 1 / (sqrt 2 x 2.713) = 0.261). The trees are grown
+by a procedure a black-box reading cannot recover, and this slicer does not
+grow them. `lightningFill` lays, from the top of the object down:
+
+- under every **roof** - sparse infill with none over it: the top shell, or
+  the floor of a pocket - straight lines sqrt 2 x spacing / density apart
+  along the infill direction, each from wall to wall;
+- a layer down, each line as two stubs, one from each wall, each one layer
+  height shorter than the stub over it (45 degrees: the reference's square,
+  11.5 mm from wall to middle, has its last branch 57 layers - 11.4 mm - under
+  the top), until a stub is no longer than a line is wide;
+- every line in the same place on every layer, so each stub lies on the one
+  below.
+
+Against the reference's measures (`fixtures/slicer-lightning-reference.json`,
+seven shapes): the length laid under the top 0.235 - 0.249 a mm2 against
+Bambu's 0.255 - 0.268; the whole object's sparse infill 0.68 - 1.29 x Bambu's
+a shape and 1.02 x over the seven together; nothing below layer 107 - 144
+where Bambu's first branch is at layer 90 - 159. The lines are combs, not
+trees: they do not branch and do not lean towards each other.
+
 ### Joining lines along the walls
 
 Every sparse pattern here ends its lines on the fill region and joins one
@@ -702,7 +731,7 @@ lines (adaptive cubic).
 Bambu sets the sparse infill and the surfaces apart (this file: Hilbert curve
 on the surfaces, 3D honeycomb inside), so the print card and G-scope have two
 rows: **infill** (grid, rectilinear, lines, concentric, archimedean chords, 3D
-honeycomb, gyroid, honeycomb, cubic, adaptive cubic -> `sparse_infill_pattern`) and **surfaces** (rectilinear,
+honeycomb, gyroid, honeycomb, cubic, adaptive cubic, lightning -> `sparse_infill_pattern`) and **surfaces** (rectilinear,
 concentric, archimedean chords, hilbert curve, octagram spiral -> `top_surface_pattern`,
 `bottom_surface_pattern`, `internal_solid_infill_pattern`, the three as one
 choice). Concentric and Archimedean chords no longer set both from the infill
