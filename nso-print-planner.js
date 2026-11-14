@@ -222,6 +222,9 @@
    * the planner takes whatever slice it is given.
    * @returns {{nozzleMm, over}}  defaultsFor(nozzleMm, over)
    */
+  /* the project's pattern names the engine draws as themselves; every other one is its lines (zigzag) */
+  var ENGINE_PATTERNS = { grid: 'grid', concentric: 'concentric', archimedeanchords: 'archimedeanchords' };
+
   function engineOptions(config) {
     var pct = function (key, def) { var v = num(config, key, def * 100); return v / 100; };
     var nozzle = num(config, 'nozzle_diameter', 0.4);
@@ -238,7 +241,7 @@
       topShellThicknessMm: num(config, 'top_shell_thickness', 0),
       bottomShellThicknessMm: num(config, 'bottom_shell_thickness', 0),
       sparseDensity: pct('sparse_infill_density', 0.15),
-      sparsePattern: raw(config, 'sparse_infill_pattern') === 'grid' ? 'grid' : raw(config, 'sparse_infill_pattern') === 'concentric' ? 'concentric' : 'zigzag',
+      sparsePattern: ENGINE_PATTERNS[raw(config, 'sparse_infill_pattern')] || 'zigzag',
       infillDirectionDeg: num(config, 'infill_direction', 45),
       detectThinWall: num(config, 'detect_thin_wall', 0) === 1,
       supportThresholdDeg: num(config, 'support_threshold_angle', 30),
@@ -258,9 +261,10 @@
       bridgeAngleDeg: num(config, 'bridge_angle', 0)
     };
     /* a surface or the solid infill the project draws in rings (the other patterns are the engine's lines) */
-    if (raw(config, 'internal_solid_infill_pattern') === 'concentric') over.solidPattern = 'concentric';
-    if (raw(config, 'top_surface_pattern') === 'concentric') over.topPattern = 'concentric';
-    if (raw(config, 'bottom_surface_pattern') === 'concentric') over.bottomPattern = 'concentric';
+    var own = function (key) { var v = raw(config, key); return v !== 'grid' && ENGINE_PATTERNS[v] ? ENGINE_PATTERNS[v] : null; };
+    if (own('internal_solid_infill_pattern')) over.solidPattern = own('internal_solid_infill_pattern');
+    if (own('top_surface_pattern')) over.topPattern = own('top_surface_pattern');
+    if (own('bottom_surface_pattern')) over.bottomPattern = own('bottom_surface_pattern');
     return { nozzleMm: nozzle, over: over };
   }
 

@@ -209,6 +209,16 @@ async function main() {
     const ringOver = PRINT.configOverlay(tpl, Object.assign({}, base, { pattern: 'concentric' }));
     check('pattern concentric is the whole part\'s: the sparse infill, the solid infill and both surfaces in the project settings',
       ['sparse_infill_pattern', 'internal_solid_infill_pattern', 'top_surface_pattern', 'bottom_surface_pattern'].every(k => ringOver[k] === 'concentric') && Object.keys(ringOver).length === 4, JSON.stringify(ringOver));
+    const spiralOver = PRINT.configOverlay(tpl, Object.assign({}, base, { pattern: 'archimedeanchords' }));
+    check('pattern archimedeanchords likewise: all four keys, by Bambu\'s own name for it',
+      ['sparse_infill_pattern', 'internal_solid_infill_pattern', 'top_surface_pattern', 'bottom_surface_pattern'].every(k => spiralOver[k] === 'archimedeanchords') && Object.keys(spiralOver).length === 4, JSON.stringify(spiralOver));
+    {
+      const eo = PL.engineOptions(PRINT.withOverlay ? PRINT.withOverlay(tpl, spiralOver) : Object.assign({}, tpl, spiralOver)).over;
+      check('...and the planner hands the engine the spiral for each of them', eo.sparsePattern === 'archimedeanchords' && eo.solidPattern === 'archimedeanchords' && eo.topPattern === 'archimedeanchords' && eo.bottomPattern === 'archimedeanchords',
+        [eo.sparsePattern, eo.solidPattern, eo.topPattern, eo.bottomPattern].join(' '));
+      const plainO = PL.engineOptions(tpl).over;
+      check('...while the template\'s own patterns stay the engine\'s lines (no surface pattern handed over)', plainO.solidPattern === undefined && plainO.topPattern === undefined && plainO.bottomPattern === undefined, [plainO.sparsePattern, plainO.solidPattern, plainO.topPattern].join(' '));
+    }
 
     const two = objs.slice(0, 2);
     const same = await PRINT.build(two, { config: tpl, printer: a1 }, { settings: Object.assign({}, base) });

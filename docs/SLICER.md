@@ -516,6 +516,38 @@ keeps the nominal spacing; and it draws every layer in one path, where this
 breaks the path at some slanted edges (the hexagon's layer in 9). Like the
 other two files this one is all shell, so its sparse Rectilinear never prints.
 
+### Archimedean chords (`'archimedeanchords'`, any of the four pattern options)
+
+One spiral from the middle outward, cut to the region. Measured black-box on
+`archimedeanchords.gcode.3mf`: the concentric plate's ten shapes, 9.8 mm tall
+(so the sparse infill prints: 44 layers of it), every pattern Archimedean
+chords, sparse 15 % at 0.45. Seven shapes pinned in
+`fixtures/slicer-archimedean-reference.json`.
+
+| rule | measured | here |
+|---|---|---|
+| the curve | from the centre a straight stroke one pitch long at 135 degrees, then counter-clockwise, one pitch further out with every turn; the same on every layer | `spiralFill`: r = pitch (1 + turn), a polyline within 0.01 mm of the curve |
+| the pitch | 0.377 in a solid fill (the bead spacing at 0.42 / 0.2, 0.457 on the first layer's 0.5), 2.713 in the sparse one (0.407 / 15 %) | `spacingOf(w, h)`, over the density when sparse |
+| a solid fill's centre | not the box's middle on a shape without point symmetry: the middle of the fill region's box in the frame turned 45 degrees (`infill_direction`) - the triangle's 7 mm below its box's middle | `turnedBoxCentre(region, 45 deg)`, one spiral a connected piece |
+| a sparse fill's centre | the middle of the object's own box (the part's, not the wall's: 0.105 above the walls' on the triangle, whose apex is mitred), the same on all 44 layers | the middle of the box of all the object's layers |
+| the ends | cut where the spiral leaves the region. Sparse: where it comes back in, the two ends are joined along the wall unless an earlier join already runs there; the ends left turn 1.63 mm along the wall (4 spacings: `infill_anchor` 400 %) | `clipLine`, then joins the shorter way round (`outlineTrack`), sparse up to `sparseAnchorMaxMm` with 4-spacing hooks, solid up to 3 spacings |
+
+Against the reference: on a solid layer of each of the seven shapes the
+spiral's start within 0.005 mm, the length laid within 0.4 %, the number of
+paths the same or one more; on a sparse layer (sliced at the reference's 0.45)
+the start within 0.001 mm and the length within 13 % - the spiral is the same
+curve, the joins and hooks along the walls are placed by a simpler rule than
+Bambu's.
+
+Not matched, or stated: Bambu writes the sparse spiral in arcs (G2 / G3), this
+in short lines; the slicer has one infill width (the reference's sparse lines
+are 0.45, its solid 0.42), so a sparse spiral at 0.42 is 8 % tighter than
+Bambu's; a solid fill in several pieces on one layer (a top beside solid
+infill) is one spiral a piece, which the reference does not show.
+
+The pattern rows list it as **archimedean chords**; like concentric it sets
+the sparse infill, the solid infill and both surfaces.
+
 ### Thin walls (classic walls with Detect thin wall on)
 
 Bambu Studio, with the **classic** wall generator and **Detect thin wall** on,

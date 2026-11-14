@@ -166,7 +166,7 @@ var NSO_GSCOPE_SLICE = (function () {
     };
     var pat = $('ms-slice-pattern');
     if (pat && pat.value) over.sparsePattern = pat.value;
-    if (over.sparsePattern === 'concentric') over.solidPattern = 'concentric';   /* rings throughout: the surfaces and the solid infill too */
+    if (over.sparsePattern === 'concentric' || over.sparsePattern === 'archimedeanchords') over.solidPattern = over.sparsePattern;   /* rings throughout: the surfaces and the solid infill too */
     var brim = $('ms-slice-brim');
     over.brimType = brim && brim.value ? brim.value : SLICE_REST.brim;
     var rule = ifaceRule();
@@ -507,7 +507,7 @@ var NSO_GSCOPE_SLICE = (function () {
     var lines = [];
     var o = r.options;
     lines.push((r.fileLayers || r.planes.length) + ' layers at ' + o.layerMm + ' mm, walls ' + o.outerWallWidthMm + ' mm x ' + o.wallLoops +
-      ', ' + Math.round(o.sparseDensity * 100) + ' % ' + (o.sparsePattern === 'zigzag' ? 'rectilinear' : o.sparsePattern) + ', support below ' + o.supportThresholdDeg + '° (' + r.ms + ' ms).');
+      ', ' + Math.round(o.sparseDensity * 100) + ' % ' + SL().patternLabel(o.sparsePattern) + ', support below ' + o.supportThresholdDeg + '° (' + r.ms + ' ms).');
     r.objects.forEach(function (ob) {
       if (ob.role === 'raft') { lines.push('Raft: ' + r.raft.layers + ' layer' + (r.raft.layers === 1 ? '' : 's') + ' (' + r.raft.base + ' base, ' + r.raft.interface + ' interface), top at ' + r.raft.topMm.toFixed(2) + ' mm; the plate stands on it at ' + r.raft.liftMm.toFixed(2) + ' mm.'); return; }
       var wc = Object.keys(ob.wallCountHistogram).map(function (k) { return k + '×' + ob.wallCountHistogram[k]; }).join(' ');

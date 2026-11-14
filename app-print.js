@@ -103,7 +103,7 @@
   // ---- the card's Slice settings ---------------------------------------------
   //
   // The rows G-scope's Slice side has, kept by the card itself: { nozzle, layer, walls,
-  // density (%), pattern ('grid' | 'zigzag' | 'lines' | 'concentric'), angle (deg), brim ('auto' |
+  // density (%), pattern ('grid' | 'zigzag' | 'lines' | 'concentric' | 'archimedeanchords'), angle (deg), brim ('auto' |
   // 'outer' | 'none'), interfaceRule ('column' | null) }. They start at the template's
   // values; a value the owner changed is written into a copy of the template's project
   // settings (configOverlay), so the engine, the planner, the G-code's CONFIG_BLOCK and
@@ -113,9 +113,10 @@
                            /* the filament: the profile's own; a null row is the filament's value (filamentBase); no temperature steps */
                            filament: 'profile', nozzleTemp: null, firstTemp: null, bedTemp: null, maxFlow: null, tempStep: 0, tempBand: 10 };   /* the card's own defaults (the owner's view): Studio 2.9's 3.6 - the owner's mouse1 on the P1S released clean with it */
   var IFACE_ANGLES = { profile: 1, bridge: 1, studio36: 1, crosshatch: 1 };   /* nso_slicer.js supportInterfaceAngle: NSO's own, no profile key - a testing ground for interfaces */
-  var PATTERN_TO_CONFIG = { grid: 'grid', zigzag: 'zig-zag', lines: 'line', concentric: 'concentric' };
-  var PATTERN_FROM_CONFIG = { grid: 'grid', 'zig-zag': 'zigzag', zigzag: 'zigzag', line: 'lines', lines: 'lines', concentric: 'concentric', rectilinear: 'zigzag' };
-  /* concentric is the whole part's: the sparse infill, the solid infill and both surfaces, as the reference slice has it */
+  var PATTERN_TO_CONFIG = { grid: 'grid', zigzag: 'zig-zag', lines: 'line', concentric: 'concentric', archimedeanchords: 'archimedeanchords' };
+  var PATTERN_FROM_CONFIG = { grid: 'grid', 'zig-zag': 'zigzag', zigzag: 'zigzag', line: 'lines', lines: 'lines', concentric: 'concentric', archimedeanchords: 'archimedeanchords', rectilinear: 'zigzag' };
+  /* concentric and Archimedean chords are the whole part's: the sparse infill, the solid infill and both surfaces, as the reference slices have them */
+  var WHOLE_PART = { concentric: 1, archimedeanchords: 1 };
   var CONCENTRIC_KEYS = ['top_surface_pattern', 'bottom_surface_pattern', 'internal_solid_infill_pattern'];
   var BRIM_TO_CONFIG = { auto: 'auto_brim', outer: 'outer_only', none: 'no_brim' };
 
@@ -250,7 +251,7 @@
     if (s.density !== base.density) out.sparse_infill_density = s.density + '%';
     if (s.pattern !== base.pattern) {
       out.sparse_infill_pattern = PATTERN_TO_CONFIG[s.pattern];
-      if (s.pattern === 'concentric') CONCENTRIC_KEYS.forEach(function (k) { out[k] = 'concentric'; });
+      if (WHOLE_PART[s.pattern]) CONCENTRIC_KEYS.forEach(function (k) { out[k] = PATTERN_TO_CONFIG[s.pattern]; });
     }
     if (s.angle !== base.angle) out.support_threshold_angle = String(s.angle);
     if (s.brim !== base.brim) out.brim_type = BRIM_TO_CONFIG[s.brim];
@@ -518,7 +519,7 @@
 
   /** The settings in a few words, for the readout: "0.12 mm layers, 3 walls, 20 % grid, support below 30°, brim auto". */
   function settingsWords(st) {
-    return st.layer + ' mm layers, ' + st.walls + ' wall' + (st.walls === 1 ? '' : 's') + ', ' + st.density + ' % ' + (st.pattern === 'zigzag' ? 'rectilinear' : st.pattern) +
+    return st.layer + ' mm layers, ' + st.walls + ' wall' + (st.walls === 1 ? '' : 's') + ', ' + st.density + ' % ' + (st.pattern === 'zigzag' ? 'rectilinear' : st.pattern === 'archimedeanchords' ? 'archimedean chords' : st.pattern) +
       ', support below ' + st.angle + '°, ' + (st.raft > 0 ? 'raft ' + st.raft + ' layer' + (st.raft === 1 ? '' : 's') + ' (no brim)' : 'brim ' + st.brim);
   }
 

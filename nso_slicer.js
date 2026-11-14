@@ -227,7 +227,7 @@
   };
 
   /** A pattern by the name Bambu Studio's list gives it: this slicer's zigzag is its Rectilinear. */
-  function patternLabel(p) { return p === 'zigzag' ? 'rectilinear' : p; }
+  function patternLabel(p) { return p === 'zigzag' ? 'rectilinear' : p === 'archimedeanchords' ? 'archimedean chords' : p; }
 
   function wallWidthFor(nozzle) {
     var d = (typeof nozzle === 'number' && nozzle > 0) ? nozzle : 0.4;
@@ -263,8 +263,8 @@
       topShellThicknessMm: BAMBU_PROFILE_06.topShellThicknessMm,
       bottomShellThicknessMm: 0,
       sparseDensity: BAMBU_PROFILE_06.sparseDensity,
-      sparsePattern: BAMBU_PROFILE_06.sparsePattern,   // 'grid' | 'zigzag' (Bambu's Rectilinear; 'rectilinear' is taken for it) | 'lines' | 'concentric'
-      solidPattern: BAMBU_PROFILE_06.solidPattern,     // 'zigzag' | 'lines' | 'concentric': the internal solid infill, and the surfaces unless they say
+      sparsePattern: BAMBU_PROFILE_06.sparsePattern,   // 'grid' | 'zigzag' (Bambu's Rectilinear; 'rectilinear' is taken for it) | 'lines' | 'concentric' | 'archimedeanchords'
+      solidPattern: BAMBU_PROFILE_06.solidPattern,     // 'zigzag' | 'lines' | 'concentric' | 'archimedeanchords': the internal solid infill, and the surfaces unless they say
       topPattern: null,                    // the top surface's own pattern ('concentric'); null -> solidPattern
       bottomPattern: null,                 // the first layer's own pattern ('concentric'); null -> solidPattern
       infillDirectionDeg: BAMBU_PROFILE_06.infillDirectionDeg,
@@ -997,6 +997,178 @@
         if (cur && Math.hypot(e[0] - cur[0], e[1] - cur[1]) < Math.hypot(p.pts[0][0] - cur[0], p.pts[0][1] - cur[1])) p.pts.reverse();
         cur = p.pts[p.pts.length - 1];
       }
+    });
+    return out;
+  }
+
+  // ===========================================================================
+  // Archimedean chords - one spiral, cut to the region
+  // ===========================================================================
+
+  /* Measured on a real Bambu Studio 02.09 slice (archimedeanchords.gcode.3mf: the ten shapes of the concentric plate, 9.8 mm tall, every pattern
+     Archimedean chords; docs/SLICER.md "Archimedean chords"):
+       - one spiral a fill: from its centre a straight stroke one pitch long at 135 degrees, then counter-clockwise outward, a pitch further out
+         with every turn - the same on every layer (it is not turned with the layer);
+       - the pitch is the bead spacing in a solid fill (0.377 at 0.42 / 0.2) and the spacing over the density in a sparse one (2.713 at 0.45, 15 %);
+       - a solid fill's centre is the middle of the region's box in the frame turned 45 degrees (the infill direction); a sparse fill's is the
+         middle of the object's own box, so every sparse layer lies on the one below;
+       - the spiral is cut where it leaves the region; in a sparse fill the cut ends are joined along the walls. */
+  var SPIRAL_START_DEG = 135;
+  var SPIRAL_SAG_MM = 0.01;           // the spiral as a polyline: no further than this from the true curve
+
+  /** The middle of polys' bounding box in the frame turned by angle (rad). */
+  function turnedBoxCentre(polys, angle) {
+    var c = Math.cos(angle), s = Math.sin(angle), u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
+    polys.forEach(function (P) { P.forEach(function (q) {
+      var u = q[0] * c + q[1] * s, v = -q[0] * s + q[1] * c;
+      if (u < u0) u0 = u; if (u > u1) u1 = u; if (v < v0) v0 = v; if (v > v1) v1 = v;
+    }); });
+    var um = (u0 + u1) / 2, vm = (v0 + v1) / 2;
+    return [um * c - vm * s, um * s + vm * c];
+  }
+
+  /**
+   * An open polyline cut to the inside of polys (even-odd) -> its pieces in the line's own order:
+   * [{ pts, a, b }], a / b where the piece starts / ends on the outline ({ p: polygon, e: edge, t: along it }) or null (the line's own end).
+   */
+  function clipLine(pts, polys) {
+    var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, ne = 0;
+    polys.forEach(function (P) { ne += P.length; P.forEach(function (q) { if (q[0] < x0) x0 = q[0]; if (q[0] > x1) x1 = q[0]; if (q[1] < y0) y0 = q[1]; if (q[1] > y1) y1 = q[1]; }); });
+    if (!ne || pts.length < 2) return [];
+    /* the outline's edges on a grid, so a segment meets only the edges near it */
+    var cell = Math.max(0.5, Math.sqrt((x1 - x0) * (y1 - y0) / Math.max(1, ne)) * 2), nx = Math.max(1, Math.ceil((x1 - x0) / cell)), ny = Math.max(1, Math.ceil((y1 - y0) / cell));
+    var grid = new Map(), cx = function (x) { var i = Math.floor((x - x0) / cell); return i < 0 ? 0 : i >= nx ? nx - 1 : i; }, cy = function (y) { var j = Math.floor((y - y0) / cell); return j < 0 ? 0 : j >= ny ? ny - 1 : j; };
+    var E = [];
+    polys.forEach(function (P, pi) {
+      for (var e = 0; e < P.length; e++) {
+        var a = P[e], b = P[(e + 1) % P.length], id = E.length;
+        E.push({ p: pi, e: e, a: a, b: b });
+        for (var i = cx(Math.min(a[0], b[0])); i <= cx(Math.max(a[0], b[0])); i++) for (var j = cy(Math.min(a[1], b[1])); j <= cy(Math.max(a[1], b[1])); j++) {
+          var k = j * nx + i, l = grid.get(k);
+          if (!l) grid.set(k, l = []);
+          l.push(id);
+        }
+      }
+    });
+    var isIn = insideIndex(polys), seen = new Int32Array(E.length).fill(-1), out = [], cur = null;
+    for (var n = 0; n + 1 < pts.length; n++) {
+      var A = pts[n], B = pts[n + 1], dx = B[0] - A[0], dy = B[1] - A[1];
+      if (Math.max(A[0], B[0]) < x0 || Math.min(A[0], B[0]) > x1 || Math.max(A[1], B[1]) < y0 || Math.min(A[1], B[1]) > y1) { if (cur) { out.push(cur); cur = null; } continue; }
+      var cuts = [];
+      for (var i2 = cx(Math.min(A[0], B[0])); i2 <= cx(Math.max(A[0], B[0])); i2++) for (var j2 = cy(Math.min(A[1], B[1])); j2 <= cy(Math.max(A[1], B[1])); j2++) {
+        var l2 = grid.get(j2 * nx + i2);
+        if (!l2) continue;
+        for (var q = 0; q < l2.length; q++) {
+          var id2 = l2[q];
+          if (seen[id2] === n) continue;
+          seen[id2] = n;
+          var ed = E[id2], ex = ed.b[0] - ed.a[0], ey = ed.b[1] - ed.a[1], den = dx * ey - dy * ex;
+          if (Math.abs(den) < 1e-14) continue;
+          var t = ((ed.a[0] - A[0]) * ey - (ed.a[1] - A[1]) * ex) / den, u = ((ed.a[0] - A[0]) * dy - (ed.a[1] - A[1]) * dx) / den;
+          if (t > 0 && t < 1 && u >= 0 && u < 1) cuts.push({ t: t, p: ed.p, e: ed.e, u: u });
+        }
+      }
+      cuts.sort(function (c1, c2) { return c1.t - c2.t; });
+      var t0 = 0, h0 = null;
+      for (var c = 0; c <= cuts.length; c++) {
+        var t1 = c < cuts.length ? cuts[c].t : 1, h1 = c < cuts.length ? cuts[c] : null;
+        if (t1 - t0 > 1e-12) {
+          var tm = (t0 + t1) / 2;
+          if (isIn(A[0] + dx * tm, A[1] + dy * tm)) {
+            if (!cur) cur = { pts: [[A[0] + dx * t0, A[1] + dy * t0]], a: h0 ? { p: h0.p, e: h0.e, t: h0.u } : null, b: null };
+            cur.pts.push([A[0] + dx * t1, A[1] + dy * t1]);
+            cur.b = h1 ? { p: h1.p, e: h1.e, t: h1.u } : null;
+          } else if (cur) { out.push(cur); cur = null; }
+        }
+        t0 = t1; h0 = h1;
+      }
+    }
+    if (cur) out.push(cur);
+    return out;
+  }
+
+  /**
+   * A polygon's outline as a track: where a hit lies along it, and the points passed walking it.
+   *   pos(h)            mm from vertex 0 to the hit { e, t }
+   *   walk(h, dir, d)   the points from the hit on, d mm the way dir (+1 with the vertices, -1 against), the hit itself left out
+   */
+  function outlineTrack(P) {
+    var n = P.length, cum = [0];
+    for (var i = 0; i < n; i++) cum.push(cum[i] + Math.hypot(P[(i + 1) % n][0] - P[i][0], P[(i + 1) % n][1] - P[i][1]));
+    var total = cum[n];
+    var at = function (pos) {
+      pos = ((pos % total) + total) % total;
+      var lo = 0, hi = n - 1;
+      while (lo < hi) { var mid = (lo + hi + 1) >> 1; if (cum[mid] <= pos) lo = mid; else hi = mid - 1; }
+      var l = cum[lo + 1] - cum[lo], t = l > 0 ? (pos - cum[lo]) / l : 0, a = P[lo], b = P[(lo + 1) % n];
+      return { e: lo, pt: [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t] };
+    };
+    return {
+      total: total,
+      pos: function (h) { return cum[h.e] + h.t * (cum[h.e + 1] - cum[h.e]); },
+      walk: function (h, dir, d) {
+        var p0 = cum[h.e] + h.t * (cum[h.e + 1] - cum[h.e]), end = at(p0 + dir * d), out = [], e = h.e, guard = 0;
+        if (dir > 0) { while (e !== end.e && guard++ <= n) { e = (e + 1) % n; out.push(P[e]); } }
+        else { while (e !== end.e && guard++ <= n) { out.push(P[e]); e = (e - 1 + n) % n; } }
+        if (h.e === end.e && d > cum[h.e + 1] - cum[h.e]) return out;      /* all the way round: not asked for */
+        out.push(end.pt);
+        return out;
+      }
+    };
+  }
+
+  /**
+   * A region filled with one Archimedean spiral about `centre` -> [{ closed: false, pts }], from the middle outward.
+   *   pitch    turn to turn
+   *   linkMm   where the spiral leaves the region and comes back, the two cut ends are joined along the outline, the shorter way round, when
+   *            that is no longer than this and no earlier join already runs there (0: never)
+   *   hookMm   two ends left unjoined each turn this far along the outline towards the other (Bambu's infill anchor: 4 spacings); 0: none
+   */
+  function spiralFill(polys, centre, pitch, linkMm, hookMm) {
+    if (!polys.length || !(pitch > 0)) return [];
+    var R = 0;
+    polys.forEach(function (P) { P.forEach(function (q) { var d = Math.hypot(q[0] - centre[0], q[1] - centre[1]); if (d > R) R = d; }); });
+    var a0 = SPIRAL_START_DEG * Math.PI / 180, line = [centre.slice()];
+    for (var phi = 0; ;) {
+      var r = pitch * (1 + phi / (2 * Math.PI));
+      line.push([centre[0] + r * Math.cos(a0 + phi), centre[1] + r * Math.sin(a0 + phi)]);
+      if (r > R + pitch) break;
+      phi += Math.min(0.35, Math.sqrt(8 * SPIRAL_SAG_MM / r));
+    }
+    var tracks = polys.map(function () { return null; }), used = polys.map(function () { return []; });
+    var track = function (p) { return tracks[p] || (tracks[p] = outlineTrack(polys[p])); };
+    /* how far the outline is free from pos the way dir, up to want */
+    var freeFrom = function (p, pos, dir, want) {
+      var T = track(p), best = want;
+      used[p].forEach(function (iv) {
+        var d0 = (((dir > 0 ? iv[0] - pos : pos - iv[1]) % T.total) + T.total) % T.total;      /* to the stretch's near end */
+        var inside = ((((pos - iv[0]) % T.total) + T.total) % T.total) < iv[1] - iv[0] - 1e-9;
+        if (inside) best = 0; else if (d0 < best) best = d0;
+      });
+      return best;
+    };
+    var take = function (p, pos, dir, len) { used[p].push(dir > 0 ? [pos, pos + len] : [pos - len, pos]); };
+    var out = [], path = null, last = null;
+    clipLine(line, polys).forEach(function (pc) {
+      if (pathLength(pc.pts, false) < pitch / 8 && pc.a && pc.b) return;       /* a nick at a corner */
+      var joined = false;
+      if (path && last.b && pc.a && last.b.p === pc.a.p && (linkMm > 0 || hookMm > 0)) {
+        var p = pc.a.p, T = track(p), pf = T.pos(last.b), pt = T.pos(pc.a);
+        var fw = (((pt - pf) % T.total) + T.total) % T.total, dir = fw <= T.total - fw ? 1 : -1, len = dir > 0 ? fw : T.total - fw;
+        if (len <= linkMm && freeFrom(p, pf, dir, len) >= len - 1e-9) {
+          var way = T.walk(last.b, dir, len);
+          way.pop();                                                             /* the far end is the next piece's first point */
+          path.pts = path.pts.concat(way, pc.pts);
+          take(p, pf, dir, len);
+          joined = true;
+        } else if (hookMm > 0) {
+          var h1 = Math.min(freeFrom(p, pf, dir, hookMm), len / 2), h2 = Math.min(freeFrom(p, pt, -dir, hookMm), len / 2);
+          if (h1 > hookMm / 4) { path.pts = path.pts.concat(T.walk(last.b, dir, h1)); take(p, pf, dir, h1); }
+          if (h2 > hookMm / 4) { pc = { pts: T.walk(pc.a, -dir, h2).reverse().concat(pc.pts), a: pc.a, b: pc.b }; take(p, pt, -dir, h2); }
+        }
+      }
+      if (!joined) { path = { closed: false, pts: pc.pts }; out.push(path); }
+      last = pc;
     });
     return out;
   }
@@ -1848,6 +2020,16 @@
           }
           function solidFill(cs, feat, pattern) {
             if (g.isEmpty(cs)) return;
+            if (pattern === 'archimedeanchords') {
+              /* one spiral a piece, about the middle of its box in the infill direction's frame */
+              g.parts(cs).forEach(function (pc) {
+                var pp = g.polys(pc);
+                spiralFill(pp, turnedBoxCentre(pp, dirA), sInf, solidJoin, 0).forEach(function (pth) {
+                  L.paths.push({ feature: feat, width: wInf, closed: false, pts: pth.pts });
+                });
+              });
+              return;
+            }
             if (pattern === 'concentric') {
               var lastP = L.paths.length ? L.paths[L.paths.length - 1] : null;
               concentricFill(g, ringRoom(cs, feat === 'Top surface'), wInf, h, sInf, true, lastP ? (lastP.closed ? lastP.pts[0] : lastP.pts[lastP.pts.length - 1]) : null).forEach(function (pth) {
@@ -1874,7 +2056,17 @@
           solidFill(topOnly, 'Top surface', o.topPattern || o.solidPattern);
           solidFill(internal, 'Internal solid infill', o.solidPattern);
 
-          if (!g.isEmpty(sparse) && oS.sparseDensity > 0 && o.sparsePattern === 'concentric') {
+          if (!g.isEmpty(sparse) && oS.sparseDensity > 0 && o.sparsePattern === 'archimedeanchords') {
+            /* the sparse spiral: about the middle of the object's own box on every layer, so each layer's turns lie on the last one's */
+            if (!P.boxCentre) {
+              var bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+              S.forEach(function (sec) { if (g.isEmpty(sec)) return; var bb = sec.bounds(); bx0 = Math.min(bx0, bb.min[0]); by0 = Math.min(by0, bb.min[1]); bx1 = Math.max(bx1, bb.max[0]); by1 = Math.max(by1, bb.max[1]); });
+              P.boxCentre = [(bx0 + bx1) / 2, (by0 + by1) / 2];
+            }
+            spiralFill(g.polys(sparse), P.boxCentre, sInf / Math.min(1, oS.sparseDensity), o.sparseAnchorMaxMm, 4 * sInf).forEach(function (pth) {
+              L.paths.push({ feature: 'Sparse infill', width: wInf, closed: false, pts: pth.pts });
+            });
+          } else if (!g.isEmpty(sparse) && oS.sparseDensity > 0 && o.sparsePattern === 'concentric') {
             /* sparse rings: the first along the walls, the rest a spacing over the density apart (stated: the reference has no sparse layer) */
             var lastS = L.paths.length ? L.paths[L.paths.length - 1] : null;
             concentricFill(g, ringRoom(sparse), wInf, h, sInf / Math.min(1, oS.sparseDensity), false, lastS ? (lastS.closed ? lastS.pts[0] : lastS.pts[lastS.pts.length - 1]) : null).forEach(function (pth) {
@@ -3943,6 +4135,8 @@
     thinWalls: thinWalls,
     medialPaths: medialPaths,
     concentricFill: concentricFill,
+    spiralFill: spiralFill,
+    clipLine: clipLine,
     patternLabel: patternLabel,
     toGcode: toGcode,
     describe: describe,

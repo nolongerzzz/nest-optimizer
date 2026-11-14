@@ -582,6 +582,70 @@ function frustum(n, r0, r1, z0, z1) {
     check('...typed as Bambu types them, in open lines', kinds === n, kinds + '/' + n);
   }
 
+  section('Archimedean chords - one spiral, against a real Bambu slice (fixtures/slicer-archimedean-reference.json, docs/SLICER.md "Archimedean chords")');
+  {
+    const fsx = require('fs');
+    const OUT = JSON.parse(fsx.readFileSync(path.join(ROOT, 'fixtures', 'slicer-concentric-reference.json'), 'utf8')).shapes;
+    const REF = JSON.parse(fsx.readFileSync(path.join(ROOT, 'fixtures', 'slicer-archimedean-reference.json'), 'utf8')).shapes;
+    const plen = p => { let l = 0; for (let i = 1; i < p.pts.length; i++) l += Math.hypot(p.pts[i][0] - p.pts[i - 1][0], p.pts[i][1] - p.pts[i - 1][1]); return l; };
+    const opt = (over) => SL.defaultsFor(0.4, Object.assign({ layerMm: 0.2, outerWallWidthMm: 0.42, innerWallWidthMm: 0.45, infillWidthMm: 0.42, topShellLayers: 5, bottomShellLayers: 3, minSparseAreaMm2: 0,
+      solidPattern: 'archimedeanchords', sparsePattern: 'archimedeanchords' }, over));
+    const objs = OUT.map(sh => ({ name: sh.name, soup: prism(sh.outline, 0, 9.8) }));
+    const fills = (ob, li) => ob.layers[li].paths.filter(p => !/wall/i.test(p.feature));
+    const dseg = (p, a, b) => { const dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy, t = l2 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2)) : 0; return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy); };
+    /* where the spiral starts: the path end furthest from the outline */
+    const startOf = (paths, outline) => { let best = null; paths.forEach(p => [p.pts[0], p.pts[p.pts.length - 1]].forEach(e => { let d = Infinity; outline.forEach((a, i) => { d = Math.min(d, dseg(e, a, outline[(i + 1) % outline.length])); }); if (!best || d > best.d) best = { d, e }; })); return best.e; };
+    const solid = SL.sliceObjects(objs, opt({}), wasm);
+    let wStart = 0, wLen = 0, wPaths = 0, kinds = 0;
+    REF.forEach((sh, k) => {
+      const mine = fills(solid.objects[k], 1), st = startOf(mine, OUT[k].outline);
+      wStart = Math.max(wStart, Math.hypot(st[0] - sh.solid.start[0], st[1] - sh.solid.start[1]));
+      wLen = Math.max(wLen, Math.abs(mine.reduce((a, p) => a + plen(p), 0) / sh.solid.length - 1));
+      wPaths = Math.max(wPaths, Math.abs(mine.length - sh.solid.paths));
+      if (mine.every(p => p.feature === 'Internal solid infill' && !p.closed && p.width === 0.42)) kinds++;
+    });
+    check('seven shapes, a solid layer: the spiral starts where Bambu\'s does (within 0.01 mm) - the middle of the region\'s box in the 45 degree frame', wStart < 0.01, wStart.toFixed(4));
+    check('...the length laid within 0.6 % of Bambu\'s', wLen < 0.006, (wLen * 100).toFixed(2) + ' %');
+    check('...cut into as many paths as Bambu\'s, within 1', wPaths <= 1, 'worst ' + wPaths);
+    check('...Internal solid infill, open, at the infill\'s width', kinds === REF.length, kinds + '/' + REF.length);
+    const sq = fills(solid.objects[OUT.findIndex(sh => sh.name === 'square')], 1), first = sq[0].pts;
+    const c0 = first[0], turn = (q) => Math.atan2(q[1] - c0[1], q[0] - c0[0]);
+    check('from the centre one straight stroke a spacing long at 135 degrees', Math.abs(Math.hypot(first[1][0] - c0[0], first[1][1] - c0[1]) - SL.spacingOf(0.42, 0.2)) < 1e-6 && Math.abs(turn(first[1]) - 3 * Math.PI / 4) < 1e-6);
+    /* every point of it: a spacing out for the stroke, and one more for every turn made since, going counter-clockwise */
+    let acc = 0, off = 0, back = 0;
+    const sB2 = SL.spacingOf(0.42, 0.2);
+    for (let i = 2; i < first.length && acc < 6 * Math.PI; i++) {
+      let d = turn(first[i]) - turn(first[i - 1]); if (d < -Math.PI) d += 2 * Math.PI;
+      if (d <= 0) back++;
+      acc += d;
+      off = Math.max(off, Math.abs(Math.hypot(first[i][0] - c0[0], first[i][1] - c0[1]) - sB2 * (1 + acc / (2 * Math.PI))));
+    }
+    check('...then counter-clockwise, one spacing further out with every turn (three turns, every point within 0.001 mm)', acc >= 6 * Math.PI && back === 0 && off < 1e-3, off.toExponential(1));
+    const near = (A, B) => A.length === B.length && A.every((p, k) => p.pts.length === B[k].pts.length && p.pts.every((q, m) => Math.hypot(q[0] - B[k].pts[m][0], q[1] - B[k].pts[m][1]) < 1e-6));
+    check('the same on the next layer: the spiral is not turned with the layer', near(fills(solid.objects[0], 1), fills(solid.objects[0], 2)));
+    check('the first layer is the Bottom surface and the top the Top surface, in the spiral', fills(solid.objects[0], 0).every(p => p.feature === 'Bottom surface') && fills(solid.objects[0], 48).every(p => p.feature === 'Top surface') &&
+      Math.abs(fills(solid.objects[0], 0).reduce((a, p) => a + plen(p), 0) / fills(solid.objects[0], 1).reduce((a, p) => a + plen(p), 0) - 1) < 0.01);
+    /* sparse, at the reference's own sparse width (0.45): the spacing over the density, about the object's box */
+    const sparse = SL.sliceObjects(objs, opt({ infillWidthMm: 0.45 }), wasm);
+    let sStart = 0, sLen = 0;
+    REF.forEach((sh, k) => {
+      const mine = fills(sparse.objects[k], 3);
+      if (sh.name !== 'triangle_right') { const st = startOf(mine, OUT[k].outline); sStart = Math.max(sStart, Math.hypot(st[0] - sh.sparse.start[0], st[1] - sh.sparse.start[1])); }
+      sLen = Math.max(sLen, Math.abs(mine.reduce((a, p) => a + plen(p), 0) / sh.sparse.length - 1));
+    });
+    check('a sparse layer: the spiral starts where Bambu\'s does (within 0.01 mm) - the middle of the object\'s own box', sStart < 0.01, sStart.toFixed(4));
+    check('...the length laid within 15 % of Bambu\'s (the spiral is the same; the joins along the walls differ)', sLen < 0.15, (sLen * 100).toFixed(1) + ' %');
+    const sp = fills(sparse.objects[OUT.findIndex(sh => sh.name === 'square')], 3)[0].pts, pitch = SL.spacingOf(0.45, 0.2) / 0.15;
+    check('...its first stroke the spacing over the density long (0.407 / 0.15 = 2.713)', Math.abs(Math.hypot(sp[1][0] - sp[0][0], sp[1][1] - sp[0][1]) - pitch) < 1e-6, f4(pitch));
+    check('...every sparse layer the same lines: each lies on the one below', near(fills(sparse.objects[3], 3), fills(sparse.objects[3], 20)));
+    check('...and every line inside the walls', sparse.objects.every((ob, k) => fills(ob, 3).every(p => p.pts.every(q => SL.inside([OUT[k].outline], q[0], q[1])))));
+    /* clipLine on its own: a line through a square with a square hole */
+    const cl = SL.clipLine([[-5, 5], [15, 5]], [[[0, 0], [10, 0], [10, 10], [0, 10]], [[4, 4], [4, 6], [6, 6], [6, 4]]]);
+    check('clipLine: a line across a square with a hole is two pieces, each end on the outline it meets', cl.length === 2 && Math.abs(cl[0].pts[0][0]) < 1e-9 && Math.abs(cl[0].pts[cl[0].pts.length - 1][0] - 4) < 1e-9 &&
+      Math.abs(cl[1].pts[0][0] - 6) < 1e-9 && Math.abs(cl[1].pts[cl[1].pts.length - 1][0] - 10) < 1e-9 && cl[0].a.p === 0 && cl[0].b.p === 1 && cl[1].a.p === 1 && cl[1].b.p === 0);
+    check('the lists\' name for it', SL.patternLabel('archimedeanchords') === 'archimedean chords');
+  }
+
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
 })().catch(err => { console.error(err); process.exit(1); });
