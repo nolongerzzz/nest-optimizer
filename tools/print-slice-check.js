@@ -535,6 +535,11 @@ async function main() {
         /^id="sup-style"[^>]*>\s*<option value="strut">Straight strut<\/option>\s*<option value="tree" selected>Tree<\/option>\s*<option value="gecko-hand">Gecko Hands<\/option>\s*<\/select>/.test(from('sup-style')) &&
         /* G-scope sets nothing: its Slice switch is a view */
         !/id="ms-slice-set-/.test(html) && html.includes('id="ms-slice-settings-note"'); })());
+  check('the Print card\'s markup closes what it opens (a stray </div></details> ends the left column early: the buttons under Print fall out of the bar)',
+    (() => { const m = /<details class="vp-menu vp-shell-menu vp-col-menu" id="menu-supports">[\s\S]*?<\/details>\s*<!-- ADD/.exec(html);
+      if (!m) return false;
+      const c = m[0].replace(/<!--[\s\S]*?-->/g, '');
+      return ['div', 'details', 'label', 'span', 'select', 'button', 'summary', 'p'].every(t => (c.match(new RegExp('<' + t + '[\\s>]', 'g')) || []).length === (c.match(new RegExp('</' + t + '>', 'g')) || []).length); })());
   const css = read('styles.css');
   check('while a build runs the supports card is locked (no clicks), all but its Cancel: the build and its slice can be stopped',
     /\.sup-card\.is-locked \{ pointer-events: none; \}/.test(css) && /\.sup-card\.is-locked #btn-sup-slice-cancel \{ pointer-events: auto;/.test(css));
