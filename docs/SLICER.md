@@ -882,6 +882,40 @@ under the six heads' trees). Read off both and built as `raftPlan` / `addRaft`:
 Not matched yet: under a tree, Bambu's first raft layer is about 0.9 mm *inside* the base layers where under the bare disc it is 1 mm outside; here it
 is outside for both. Bambu's tree also prints its own Support through the raft's interface layers where the trunk stands; here the interface covers it.
 
+### A free bridge's direction (`freeBridgeAngle`, 2026-11-14)
+
+A bridge line holds only if both its ends rest on the layer below. NSO laid every bridge at the
+layer's solid-infill angle (45 / 135), which is right over a hole with walls all round and wrong
+over a slot that is open on its long sides: the owner's CR-TPU tower level has a roof 30 mm long
+and 8 mm deep between two pillars, and at 45 degrees its bridge lines were 8 - 11 mm long with both
+ends in the air. They printed as hanging loops. Studio's slice of the same level runs them 31 mm,
+pillar to pillar.
+
+For each piece of bridge over open air (`bottomOpen`, a layer above the first, no support object
+under it):
+
+- every 5 degrees is tried: the piece is filled with lines at that angle, and a line counts as
+  held when a point 0.3, 0.8 or 1.5 mm past each of its ends is over the layer below
+  (`BRIDGE_REACH_MM`: a bridge's fill ends inside the walls that stand on what holds it);
+- of the directions that hold as much line as the best (within 2 %), the one with the shortest
+  lines is taken;
+- a piece the layer's own angle already holds whole (98 %) is left at it, so is one nothing holds
+  (a cantilever), and so is one where the best direction is not 5 % better.
+
+When no piece changes, the layer's bridge is filled in one call as before, so those slices are
+byte for byte what they were. `o.bridgeAngleAuto === false` turns it off. A bridge over a support
+object is still laid by the support rules (`bridgeAt`), and `bridge_angle` still wins over both.
+
+The bridge paths over open air carry `free: true` (the ones over sparse infill do not): the print
+planner's bridge temperature counts only those.
+
+Pinned slices that changed: `hinge_knuckle_box` at 0.4 and `top_clip_x2_coupon` at both nozzles
+(`slicer:test`). Held by `print:slice` 3c: a doorway's roof is laid 99 % along its 30 mm gap.
+
+Not done: Studio's thinner strand for a bridge over open air (`thick_bridges = 0`: the layer's
+height, at the flow limit's 41.6 mm/s for CR-TPU), where NSO lays every bridge as a round strand
+of the nozzle's diameter.
+
 ## 7. Scope and complexity, as found
 
 - **The real work was measurement.** The textbook core is the smaller part.

@@ -687,6 +687,10 @@
   // Task 4 - scanline infill (pure JS)
   // ===========================================================================
 
+  /* How far past a bridge line's end the layer below is looked for, mm (freeBridgeAngle): from just past the end to past two walls,
+     since a bridge's fill ends inside the walls that stand on what holds it. */
+  var BRIDGE_REACH_MM = [0.3, 0.8, 1.5];
+
   /**
    * One family of parallel lines at `angle`, `spacing` apart, clipped to the
    * region (polygons with holes, as Clipper hands them back: outer CCW, holes
@@ -2470,8 +2474,56 @@
           if (o.bridgeAngleDeg) bridgeAt = o.bridgeAngleDeg * Math.PI / 180;
           else if ((o.supportInterfaceAngle === 'studio36' || o.supportInterfaceAngle === 'profile') && o.supportInterfaceRule === 'column' && P.role === 'part' && objs.some(function (ob) { return ob.role === 'support'; })) bridgeAt = STUDIO36_DEG * Math.PI / 180;
           var sa0 = solidAngle;
+          /* A FREE BRIDGE IS LAID ACROSS ITS GAP (docs/SLICER.md "A free bridge's direction"). A bridge line holds only if both its ends
+             rest on the layer below; laid at the solid infill's 45 / 135 over a slot open on its long sides, most lines begin and end in the
+             air and hang in loops (the owner's CR-TPU tower level, 2026-11-14: a 30 x 8 mm roof between two pillars, NSO's lines 8 - 11 mm
+             long at 45 degrees where Studio's run 31 mm from pillar to pillar). So each piece of bridge is laid at the direction that holds
+             the most of it: every 5 degrees is tried, a line counted when a point a little past each end is over the layer below, and of
+             the directions that hold as much as the best (within 2 %), the one with the shortest lines. A piece the layer's own angle holds
+             whole is left at it; one nothing holds (a cantilever) too. o.bridgeAngleAuto === false: the layer's angle, always. */
+          function freeBridgeAngle(pc) {
+            if (!belowIn || o.bridgeAngleAuto === false) return null;
+            var pp = g.polys(pc);
+            if (!pp.length) return null;
+            var held = function (p, ux, uy) {
+              for (var q = 0; q < BRIDGE_REACH_MM.length; q++) if (belowIn(p[0] + ux * BRIDGE_REACH_MM[q], p[1] + uy * BRIDGE_REACH_MM[q])) return true;
+              return false;
+            };
+            var score = function (ang) {
+              var both = 0, all = 0, n = 0;
+              scanFill(pp, ang, sInf, 0).forEach(function (sg) {
+                var dx = sg.b[0] - sg.a[0], dy = sg.b[1] - sg.a[1], len = Math.hypot(dx, dy);
+                if (!(len > 1e-6)) return;
+                all += len;
+                if (held(sg.a, -dx / len, -dy / len) && held(sg.b, dx / len, dy / len)) { both += len; n++; }
+              });
+              return { both: both, all: all, mean: n ? both / n : Infinity };
+            };
+            var base = score(solidAngle);
+            if (!(base.all > 0) || base.both >= 0.98 * base.all) return null;
+            var tries = [], most = 0;
+            for (var deg = 0; deg < 180; deg += 5) { var sc = score(deg * Math.PI / 180); sc.ang = deg * Math.PI / 180; tries.push(sc); if (sc.both > most) most = sc.both; }
+            if (!(most > 0) || most <= base.both * 1.05) return null;
+            var pick = null;
+            tries.forEach(function (sc) { if (sc.both >= 0.98 * most && (!pick || sc.mean < pick.mean - 1e-9)) pick = sc; });
+            return pick ? pick.ang : null;
+          }
+          var freeFrom = L.paths.length;
           if (i > 0 && bridgeAt != null) { solidAngle = bridgeAt; solidFill(bottomOpen, 'Bridge'); solidAngle = sa0; }
+          else if (i > 0 && !g.isEmpty(bottomOpen)) {
+            var bParts = g.parts(bottomOpen), bAngles = bParts.map(freeBridgeAngle);
+            if (!bAngles.some(function (a) { return a != null; })) solidFill(bottomOpen, 'Bridge');   /* every piece at the layer's angle: one fill, as it always was */
+            else {
+              bParts.forEach(function (pc, bi) {
+                if (bAngles[bi] != null) { solidAngle = bAngles[bi]; L.bridgeAngles = (L.bridgeAngles || []).concat([Math.round(bAngles[bi] * 180 / Math.PI)]); }
+                solidFill(pc, 'Bridge');                                   /* a bridge is straight lines, whatever the pattern */
+                solidAngle = sa0;
+              });
+            }
+          }
           else solidFill(bottomOpen, i === 0 ? 'Bottom surface' : 'Bridge', i === 0 ? (o.bottomPattern || o.solidPattern) : null);   /* a bridge is straight lines, whatever the pattern */
+          /* these are the bridges over open air (path.free): the ones over sparse infill, next, are held every few millimetres */
+          if (i > 0) for (var fp = freeFrom; fp < L.paths.length; fp++) if (L.paths[fp].feature === 'Bridge') L.paths[fp].free = true;
           if (o.bridgeAngleDeg) solidAngle = bridgeAt;
           solidFill(bridgeInner, 'Bridge');
           solidAngle = sa0;

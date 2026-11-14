@@ -1413,7 +1413,7 @@
                              title="How much plastic a bridge line gets (1 = a strand the nozzle's width). A little under 1 makes a thinner strand that pulls tight instead of drooping." autocomplete="off"></label>
                   <label class="vp-bend-field" for="slice-set-bridge-temp">Bridge temp
                     <input type="number" id="slice-set-bridge-temp" min="170" max="300" step="5" placeholder="off" inputmode="numeric"
-                             title="A nozzle temperature for the bridges alone, °C. On each layer with bridges the nozzle leaves the part, waits at the printer's purge position for this temperature, primes and wipes, prints the bridges, then does the same to come back to the layer's own temperature: two waits a layer. Empty: off - bridges print at the layer's temperature. A1 mini only so far." autocomplete="off"><span>&deg;C</span></label>
+                             title="A nozzle temperature for bridges over open air, °C. Before a layer with such a bridge the nozzle waits at the printer's purge position for this temperature, primes and wipes; that layer and the one over it print whole at it; then the same wait brings the layer's own temperature back. One change in and one out for each stretch of bridge layers. Empty: off. A1 mini only so far." autocomplete="off"><span>&deg;C</span></label>
                   <p class="slice-settings-note" id="slice-bridge-note" hidden></p>
                 </div>
               </details>
@@ -3064,7 +3064,7 @@
   <script src="nso-gcode-lines.js?v=fe0b823c"></script>
   <script src="nso-gscope-diff.js?v=937f4953"></script>
   <script src="nso-gcode-solid.js?v=ac1a4f02"></script>
-  <script src="nso_slicer.js?v=c440fe07"></script>
+  <script src="nso_slicer.js?v=93a24884"></script>
   <script src="nso_raster_lines.js?v=461ca449"></script>
   <!-- The support interface: the crosshatch's one-direction layers, and the
        sheet a support tree's tips carry under the part (flat caps on the
@@ -3271,7 +3271,7 @@
        uses them. After nso_slicer.js, nso-cooling-profiles.js, nso-3mf.js and
        nso-3mf-read.js, which they read at load, and after app-microscope.js, whose
        plate reader and G-code import it calls. See docs/PRINT-PLANNER.md. -->
-  <script src="nso-print-planner.js?v=18d4a5e6"></script>
+  <script src="nso-print-planner.js?v=46b7276e"></script>
   <script src="nso-gcode3mf-write.js?v=cdfa15b4"></script>
   <script src="app-print.js?v=d0726921"></script>
   <!-- Lift: details off a face, the face left as it was round them. After

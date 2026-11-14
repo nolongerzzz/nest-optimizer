@@ -465,8 +465,8 @@ async function main() {
         const body = g.slice(g.indexOf('; MACHINE_START_GCODE_END'), g.indexOf('; MACHINE_END_GCODE_START')).filter(l => !/^M73 /.test(l));   /* (the progress marks fall where they fall) */
         const parks = []; body.forEach((l, i) => { if (/^; NSO bridge temperature: /.test(l)) parks.push(i); });
         const bt = on.stats.bridgeTemp;
-        check('...the coupon has bridges on ' + bt.layers + ' layers: two changes each (' + bt.changes + '), 212 going in and the layer\'s 235 coming out, in turn',
-          bt.layers >= 2 && bt.changes === 2 * bt.layers && parks.length === bt.changes &&
+        check('...the coupon has bridges over open air on ' + bt.layers + ' layers, in stretches: ' + bt.changes + ' changes, 212 going in and the layer\'s 235 coming out, in turn',
+          bt.layers >= 1 && bt.changes >= 2 && bt.changes % 2 === 0 && bt.changes <= 2 * bt.layers && parks.length === bt.changes &&
             parks.every((i, n) => body[i] === (n % 2 === 0 ? '; NSO bridge temperature: 212 for the bridges' : '; NSO bridge temperature: 235 after the bridges')), JSON.stringify(bt));
         const blockOk = parks.every((i, n) => {
           const b = body.slice(i + 1, i + 12), t = n % 2 === 0 ? 212 : 235;
@@ -486,7 +486,7 @@ async function main() {
           if ((m = /^G1 (?:X[-\d.]+ Y[-\d.]+ )?E(-?\.?[\d.]+)/.exec(l))) { lastE = +m[1]; if (cold && +m[1] > 0 && /^G1 X/.test(l)) { if (feat === 'Bridge') coldBridge++; else coldOther++; } }
         });
         const bridgesAll = body.filter((l, i) => l === '; FEATURE: Bridge').length;
-        check('...every bridge line is laid at 212 (' + coldBridge + ' moves) and the nozzle is retracted whenever it leaves for the park', coldBridge > 20 && leftRetracted, JSON.stringify({ coldBridge, coldOther, leftRetracted, bridgesAll }));
+        check('...the open-air bridges are laid at 212 (' + coldBridge + ' bridge moves in the cold stretches) and the nozzle is retracted whenever it leaves for the park', coldBridge > 20 && leftRetracted, JSON.stringify({ coldBridge, coldOther, leftRetracted, bridgesAll }));
         check('...the only M109 in the body are the parks\', and the file without a bridge temperature has none', body.filter(l => /^M109 /.test(l)).length === bt.changes &&
           !g0.slice(g0.indexOf('; MACHINE_START_GCODE_END'), g0.indexOf('; MACHINE_END_GCODE_START')).some(l => /^M109 |NSO bridge/.test(l)));
         check('...the time counts 30 s a change, and the readout says so', Math.abs((on.stats.seconds - off.stats.seconds) - 30 * bt.changes) < 20 &&
@@ -507,6 +507,46 @@ async function main() {
       const same = await PRINT.build(cp, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { filament: 'cr-tpu', bridgeTemp: 235 }) });
       check('a bridge temperature that is the layer\'s own changes nothing: no park', same.ok && same.stats.bridgeTemp.changes === 0 &&
         L.text(await L.R.openZip(same.bytes).read('Metadata/plate_1.gcode')) === L.text(await L.R.openZip(off.bytes).read('Metadata/plate_1.gcode')));
+    }
+
+    // A FREE BRIDGE IS LAID ACROSS ITS GAP, AND ITS STRETCH PRINTS AT THE BRIDGE TEMPERATURE (the owner's tower level, 2026-11-14)
+    {
+      // a doorway: two pillars 5 mm wide, 30 mm apart, a roof 3 mm thick over them from 9 mm up, 8 mm deep and open on both faces
+      const P2 = [[0, 0], [5, 0], [5, 9], [35, 9], [35, 0], [40, 0], [40, 12], [0, 12]], TR = [[0, 1, 2], [0, 2, 7], [7, 2, 6], [2, 3, 6], [3, 4, 5], [3, 5, 6]];
+      const sp = [], D = 8, V = (i, y) => [P2[i][0] - 20, y - D / 2, P2[i][1]];
+      TR.forEach(t => { [t[0], t[1], t[2]].forEach(i => sp.push(...V(i, 0))); [t[0], t[2], t[1]].forEach(i => sp.push(...V(i, D))); });       // the two faces
+      P2.forEach((q, i) => { const j = (i + 1) % P2.length; [[i, 0], [i, D], [j, D]].forEach(a => sp.push(...V(a[0], a[1]))); [[i, 0], [j, D], [j, 0]].forEach(a => sp.push(...V(a[0], a[1]))); });
+      const door = PRINT.pieceObjects([{ name: 'doorway', soup: new Float32Array(sp), sourceId: 1 }], a1.bed);
+      const dr = await PRINT.build(door, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { filament: 'cr-tpu', bridgeTemp: 215 }) });
+      check('a doorway (a 30 x 8 mm roof between two pillars, open on both faces) slices as CR-TPU with a bridge temperature', dr.ok, dr.reason);
+      if (dr.ok) {
+        const g = L.text(await L.R.openZip(dr.bytes).read('Metadata/plate_1.gcode')).split('\n');
+        const body = g.slice(g.indexOf('; MACHINE_START_GCODE_END'), g.indexOf('; MACHINE_END_GCODE_START'));
+        let feat = '', z = 0, x = null, y = null, cold = false; const br = [], coldZ = new Set(), hotFeat = {}, ev = [];
+        body.forEach(l => {
+          let m;
+          if ((m = /^; Z_HEIGHT: ([\d.]+)$/.exec(l))) z = +m[1];
+          else if ((m = /^; FEATURE: (.*)$/.exec(l))) feat = m[1];
+          else if ((m = /^; NSO bridge temperature: (\d+)/.exec(l))) { cold = +m[1] === 215; ev.push([+m[1], z]); }
+          if (!/^G[0-3] /.test(l)) return;
+          const d = {}; l.split(';')[0].replace(/([XYE])(-?\.?[\d.]+)/g, (a, k, v) => { d[k] = +v; return a; });
+          const nx = d.X != null ? d.X : x, ny = d.Y != null ? d.Y : y;
+          if (d.E > 0 && x != null && (d.X != null || d.Y != null)) {
+            const len = Math.hypot(nx - x, ny - y);
+            if (feat === 'Bridge' && z > 8.9) br.push({ len, along: Math.abs(nx - x) / (len || 1), z });
+            if (cold) coldZ.add(z); else if (z >= 9.1 && z <= 9.5) hotFeat[feat] = 1;
+          }
+          x = nx; y = ny;
+        });
+        const z0 = Math.min(...br.map(b => b.z)), roof = br.filter(b => b.z === z0);                        /* the roof's underside (higher up there is a bridge over the roof's own sparse infill) */
+        const total = roof.reduce((a, b) => a + b.len, 0), alongX = roof.filter(b => b.along > 0.99).reduce((a, b) => a + b.len, 0), longest = Math.max(...roof.map(b => b.len));
+        check('...the roof\'s bridge runs from pillar to pillar: ' + Math.round(100 * alongX / total) + ' % of its ' + Math.round(total) + ' mm along the 30 mm gap, the longest line ' + longest.toFixed(1) + ' mm (at 45 degrees none is over 11.4)',
+          total > 300 && alongX / total > 0.85 && longest > 27, JSON.stringify({ total, alongX, longest }));
+        const zs = [...coldZ].sort((a, b) => a - b);
+        check('...one change in and one out: 215 at the bridge layer\'s layer change, 235 two layers on - the bridge layer and the one over it print whole at 215, walls and fill too',
+          ev.length === 2 && ev[0][0] === 215 && ev[1][0] === 235 && zs.length === 2 && Math.abs(zs[1] - zs[0] - 0.2) < 1e-6 && Math.abs(ev[1][1] - zs[1] - 0.2) < 1e-6 && Object.keys(hotFeat).length === 0 &&
+            dr.stats.bridgeTemp.changes === 2 && dr.stats.bridgeTemp.layers === 1, JSON.stringify({ ev, zs, hot: Object.keys(hotFeat), bt: dr.stats.bridgeTemp }));
+      }
     }
 
     // temperature steps: a box 31 mm tall, 240 C down 5 every 10 mm

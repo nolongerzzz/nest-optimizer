@@ -18,5 +18,11 @@ untouched, so the lever is temperature. **Bridge temp** (Quality, empty: off) pr
 park: retract, lift, the A1 mini's purge position, `M109`, prime, wipe, back - once in before the layer's first bridge and once out after its last
 (`parkAt`, `PARK`, docs/FILAMENTS.md "Bridge temperature"). A1 mini only: the P1S is refused in words until its park moves are written. `print:slice` is 131.
 
-**Not built.** The P1S's park, avoid-crossing-walls travel, wipe distance. None has been printed yet: the rows are checked in the
+**The first print with Bridge temp, and what the file said (same day).** It changed temperature six times on one tower level and the bridges still hung in
+loops. The file showed why: NSO laid the level's roof bridge at 45 degrees (lines 8 - 11 mm, both ends in the air) where Studio lays it pillar to pillar
+(31 mm). Two fixes: `nso_slicer.js` `freeBridgeAngle` lays a bridge over open air across its gap (docs/SLICER.md "A free bridge's direction"; three pinned
+slices re-pinned in `slicer:test`), and the bridge temperature is held for a whole stretch - the bridge layer and the layer over it, walls and fill too - with
+one change in and one out at layer changes, counting only bridges over open air (`path.free`). The tower level: two changes, not six. `print:slice` is 134.
+
+**Not built.** The P1S's park, Studio's thinner strand for an open-air bridge (`thick_bridges = 0`), avoid-crossing-walls travel, wipe distance. None has been printed yet: the rows are checked in the
 G-code (feeds, strand width, retraction, lifts), not on a part.

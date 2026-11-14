@@ -127,9 +127,16 @@ Not built: "avoid crossing walls" on travels, and wipe distance as a row.
 
 - **Slower bridges are worse.** Bridge speed 12 against the default's 25.5 mm/s left the strands
   hanging in curls: a soft strand laid slowly has no tension on it.
-- **The bridge is laid as Studio lays it.** Studio's own tower (the fixture) bridges with a 0.4 mm
-  round strand at 24.8 mm/s, full fan - what NSO does untouched. Its 210 C band bridged clean and
-  its 235 - 240 C bands sagged, so what a bridge wants is a lower temperature, not another speed.
+- **The direction was wrong, and that was most of it.** The level's roof is 30 mm long and 8 mm
+  deep, open on both faces: only the two pillars hold it. Studio lays that bridge lengthwise,
+  pillar to pillar (lines up to 31 mm). NSO laid it at the solid infill's 45 degrees, lines
+  8 - 11 mm long with both ends in the air: those are the loops. The slicer now lays a bridge over
+  open air across its gap (docs/SLICER.md "A free bridge's direction").
+- **Temperature is second.** In Studio's tower, with the bridge laid right, the 210 C band bridged
+  clean and the 235 - 240 C bands sagged.
+- Studio's roof bridge is also a thinner strand than NSO's: the layer's height (0.2 mm), 0.43 wide,
+  at 41.6 mm/s (`thick_bridges = 0`), where NSO lays every bridge as a 0.4 mm round strand at
+  25.5 mm/s (what Studio does over sparse infill). Not changed yet.
 
 ## Bridge temperature
 
@@ -148,18 +155,25 @@ A hotend takes tens of seconds to move 25 C, so the change is made off the part
     G1 X-13.5 F3000
     G1 X0 F12000 ;wipe and shake
 
-then the travel back, the nozzle down, the filament forward, and the bridges. After the layer's
-last bridge the same block brings the layer's own temperature back (`... 235 after the bridges`).
+then the travel to the layer's first path, the nozzle down, and the filament forward.
 
-- **One pair a layer.** What lies between a layer's first and last bridge prints at the bridge
-  temperature too. A layer with under 10 mm of bridge gets none.
-- The path before a park ends as a travel's does (wiped, retracted), and the park is outside every
-  object's M624 / M625, so skipping an object does not skip the change.
+- **A whole stretch, one change in and one out** (the owner's first print with it, 2026-11-14,
+  cooled for the bridge lines and came back up for the fill beside and over them, layer after
+  layer: six changes on one tower level). A layer with bridges prints whole at the bridge
+  temperature - its walls over the gap and its fill too - and so does the layer over it, which is
+  laid straight onto the bridge. The layer after that the same block brings the layer's own
+  temperature back (`... 235 after the bridges`). Both changes are made at a layer change.
+  Stretches two layers apart or less are one.
+- **Only a bridge over open air counts** (the slicer's `path.free`), 10 mm of it or more in the
+  layer. A bridge over sparse infill is held from below every few millimetres and prints well hot;
+  it used to cost a pair of waits near the top of every part.
+- The park is outside every object's M624 / M625, so skipping an object does not skip the change.
 - With temperature steps, "after the bridges" is the band's temperature.
 - Refused, in words: a bridge temperature outside the filament's range; any printer but the A1 mini
   (`PARK` holds each printer's own moves, and the P1S's chute, behind the bed, is not written).
 - The print's time counts 30 s a change. That is a round number, not a measurement.
-- The readout: `bridges at 212 °C on 4 layers: 8 nozzle temperature changes at the park, about 4 min`.
+- The readout: `bridges at 215 °C on 1 layer: 2 nozzle temperature changes at the park, about 1 min`.
+- The owner's tower level: two changes a level (in at the roof's bridge layer, out two layers on).
 
 Not printed yet. What a print has to show: that the strand starts clean after the wait (the prime
 and wipe are a first guess), and how long the mini really takes for 235 to 212 and back.

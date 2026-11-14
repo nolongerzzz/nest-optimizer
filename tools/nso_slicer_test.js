@@ -435,15 +435,17 @@ function frustum(n, r0, r1, z0, z1) {
     // the repo meshes, pinned: G-code sha256 (first 16 hex) at both nozzles, flag off and on - the slicer's own defaults.
     // hinge_knuckle_box and the two top_clip_x2 meshes were re-pinned when an overhang wall began to be judged along each edge (overhangSubMm 0.2), not at its midpoint alone: their overhang runs are cut where the layer below ends, not at the next vertex;
     // fixture_sphere_curved, hinge_knuckle_box and shape-torus again when a wall became Overhang wall only where its whole width hangs (overhangEdgeFrac 1, Bambu's: the dome heads' overhang length 170 -> 44 mm against its 44)
+    // hinge_knuckle_box (0.4) and top_clip_x2_coupon (both nozzles) again when a bridge over open air began to be laid across its gap (freeBridgeAngle, docs/SLICER.md
+    // "A free bridge's direction", 2026-11-14): their bridges that the layer's 45 / 135 left with ends in the air now run from support to support.
     const PINS = {
       'fixtures/box-20mm.stl': ['bf4fa6385480d9a1', '1ce8c7eb4eca30e8'],
       'fixtures/cylinder_r10h30_s64.stl': ['4102db1663681585', 'ee3474b981bba976'],
       'fixtures/fixture_sphere_curved.stl': ['b20238310238d62d', '765e9c3a4bbce169'],
-      'fixtures/hinge_knuckle_box.stl': ['65695c31c351d63d', '3f137c8232bffa7e'],
+      'fixtures/hinge_knuckle_box.stl': ['6d9c605f916159e1', '3f137c8232bffa7e'],
       'fixtures/quick/shape-torus.stl': ['95b2b40eb073d5c0', 'e686396781f0952d'],
       'fixtures/quick/shape-tube.stl': ['59dafe6c8652a59d', 'df62d80fe91a6680'],
       'fixtures/supports/top_clip_x2.stl': ['5fc226e22b9cc74a', '4e4837b6bd636b56'],
-      'fixtures/supports/top_clip_x2_coupon.stl': ['a307947b2d6f8c8f', 'eabd2bd7a782ca2c']
+      'fixtures/supports/top_clip_x2_coupon.stl': ['aeec2e4aec219471', '884fc586a2db4cb8']
     };
     const bad = [];
     let n = 0;

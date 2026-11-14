@@ -41,13 +41,13 @@
  *
  * BRIDGE TEMPERATURE (opts.bridgeTemp, docs/FILAMENTS.md). A layer's bridges are
  * printed at their own nozzle temperature. A hotend takes tens of seconds to
- * change, so the change is made off the part: before the layer's first bridge
- * the filament is retracted, the nozzle is lifted and parked where the printer
+ * change, so the change is made off the part: the filament is retracted, the nozzle is lifted and parked where the printer
  * purges (PARK), M109 waits there, a little is primed and wiped off, and the
- * nozzle comes back; after the layer's last bridge the same brings the layer's
- * own temperature back. One pair a layer (what lies between two bridges prints
- * at the bridge's temperature), none for a layer with under BRIDGE_TEMP_MIN_MM
- * of bridge. The park is each printer's own moves: the A1 mini's only, so far.
+ * nozzle comes back. It is done at a layer change, for a whole stretch: a layer
+ * with bridges over open air (BRIDGE_TEMP_MIN_MM or more: one over sparse infill is held from below) prints whole at the bridge
+ * temperature, and so does the layer over it; the layer after that the same
+ * park brings the layer's own temperature back. One change in and one out a
+ * stretch. The park is each printer's own moves: the A1 mini's only, so far.
  *
  * HOW A SPEED IS CHOSEN (measured on the owner's A1 mini and P1S slices)
  *   v = min(feature speed, filament_max_volumetric_speed / bead area)
@@ -79,7 +79,9 @@
   var EPS = 1e-9;
   var RETRACT_DURING_WIPE = 0.95;      // Bambu wipes 0.76 of 0.8 and retracts the last 0.04 after (A1 mini slice)
   var SPIRAL_R = 1.2;                  // mm, the layer-change z-hop circle (Bambu's runs 1.217)
-  var BRIDGE_TEMP_MIN_MM = 10;         // a layer with less bridge than this is not worth two temperature changes
+  var BRIDGE_TEMP_MIN_MM = 10;         // a layer with less bridge than this is not a bridge layer
+  var BRIDGE_TEMP_COVER = 1;           // layers over a bridge layer that stay at the bridge temperature (laid straight onto the bridge)
+  var BRIDGE_TEMP_JOIN = 2;            // warm layers between two cold stretches that are not worth coming up for
   var BRIDGE_TEMP_LIFT = 0.4;          // mm the nozzle is lifted to leave for the park (the timelapse hook's own)
   var BRIDGE_TEMP_PRIME = 1;           // mm of filament primed at the park once the temperature is reached, beyond the retraction
   var BRIDGE_TEMP_SECONDS = 30;        // what one change is counted as in the print's time (not measured: the hotend's own)
@@ -989,6 +991,31 @@
       }
     }
     var bridgeStat = { temp: bridgeT, changes: 0, layers: 0 };
+    /* THE STRETCH (the owner's print, 2026-11-14: cooled for the bridge lines, back up for the fill beside and over them, layer after layer).
+       A layer with bridges prints whole at the bridge temperature - its walls over the gap and the fill beside the bridge too - and so do the
+       BRIDGE_TEMP_COVER layers over it, which are laid straight onto the bridge. Stretches a few layers apart are one. So the nozzle changes
+       once going in and once coming out, both at a layer change. */
+    var coldLayer = [];
+    if (bridgeT != null) {
+      var hasBridge = printing.map(function (li0, pj0) {
+        if (pj0 === 0) return false;
+        var len = 0;
+        res.objects.forEach(function (ob) {
+          var Lr = ob.layers[li0];
+          /* a bridge over open air (the slicer's path.free): one over sparse infill is held from below and prints well hot */
+          if (Lr) Lr.paths.forEach(function (pth) { if (pth.feature === 'Bridge' && pth.free) len += pathLength(pth.closed ? pth.pts.concat([pth.pts[0]]) : pth.pts); });
+        });
+        return len >= BRIDGE_TEMP_MIN_MM;
+      });
+      var lastB = -Infinity;
+      hasBridge.forEach(function (hb, pj0) {
+        if (hb) {
+          if (pj0 - lastB <= BRIDGE_TEMP_COVER + BRIDGE_TEMP_JOIN) for (var f0 = Math.max(0, lastB); f0 < pj0; f0++) coldLayer[f0] = true;
+          lastB = pj0; bridgeStat.layers++;
+        }
+        coldLayer[pj0] = hb || pj0 - lastB <= BRIDGE_TEMP_COVER;
+      });
+    }
     var bands = [];
     if (steps) {
       for (var bi = 1; bi < printing.length; bi++) {
@@ -1162,19 +1189,12 @@
         var wantT = layerTemp(pl);
         if (wantT !== st.nozzleT) { put('M104 S' + fmt(wantT, 0) + ' ; NSO temperature step'); st.nozzleT = wantT; }
       }
-      // ----- the bridge temperature: the layer's first and last bridge, when it has enough of it
-      var bFirst = -1, bLast = -1;
-      if (bridgeT != null && !first) {
-        var bLen = 0;
-        items.forEach(function (bi2, bk) { if (bi2.feature === 'Bridge') { if (bFirst < 0) bFirst = bk; bLast = bk; bLen += bi2.len; } });
-        if (bLen < BRIDGE_TEMP_MIN_MM) { bFirst = -1; bLast = -1; }
-        if (bFirst >= 0) bridgeStat.layers++;
-      }
+      // ----- the bridge temperature: this layer's own, cold through a whole stretch of bridge layers (coldLayer)
       var layerT = pj === 0 ? S.temp.nozzleInitial : layerTemp(pl);
-      /** The temperature item k prints at, and whether the nozzle has to go to the park for it. */
+      /** The temperature the layer prints at, when the nozzle has to go to the park for it: asked before the layer's first path only. */
       var parkFor = function (k) {
-        if (bridgeT == null) return null;
-        var want = bFirst >= 0 && k >= bFirst && k <= bLast ? bridgeT : layerT;
+        if (bridgeT == null || k !== 0) return null;
+        var want = coldLayer[pj] ? bridgeT : layerT;
         return want !== st.nozzleT && (want === bridgeT || st.bridgeCold) ? want : null;
       };
       /** Retracted, lifted, to the park; wait for `temp`; prime and wipe. Ends retracted, lifted, at the park's last move. */
