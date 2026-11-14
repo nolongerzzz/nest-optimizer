@@ -16,16 +16,23 @@ const { chromium } = require('playwright');
 const LIB = require('./nso_library_dir');
 const gscopeCards = require('./nso_gscope_cards');
 
-/* The sandbox ships a pinned Chromium that may not match this playwright
-   build's expected revision, so prefer whatever is actually on disk. */
+/* PW_CHROMIUM wins; then the Chromium this playwright build pins, when it is
+   installed; else the sandbox ships one that may not match this build's
+   revision, so take the newest on disk. Builds from Chrome for Testing (1.57+)
+   unpack to chrome-linux64/, older ones to chrome-linux/ - look in both, so a
+   stale chrome-linux/ build in a runner's cache is not picked over a new one. */
 function chromiumPath() {
   if (process.env.PW_CHROMIUM) return process.env.PW_CHROMIUM;
+  try { const own = chromium.executablePath(); if (own && fs.existsSync(own)) return own; } catch (e) { /* scan below */ }
   const base = process.env.PLAYWRIGHT_BROWSERS_PATH || '/opt/pw-browsers';
   let dirs = [];
   try { dirs = fs.readdirSync(base); } catch (e) { return undefined; }
-  for (const d of dirs.filter(x => /^chromium-/.test(x)).sort().reverse()) {
-    const c = path.join(base, d, 'chrome-linux', 'chrome');
-    if (fs.existsSync(c)) return c;
+  const rev = d => Number((d.match(/^chromium-(\d+)$/) || [])[1]) || -1;
+  for (const d of dirs.filter(x => rev(x) >= 0).sort((a, b) => rev(b) - rev(a))) {
+    for (const sub of ['chrome-linux64', 'chrome-linux']) {
+      const c = path.join(base, d, sub, 'chrome');
+      if (fs.existsSync(c)) return c;
+    }
   }
   return undefined;
 }
