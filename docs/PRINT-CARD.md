@@ -18,8 +18,8 @@ There is one now. The card kept its file and its ids (`sup-*`, `slice-set-*`), s
 | **Slice** | `#btn-sup-all`: the one button that makes the plate's slice (section 2) |
 | **Preview** | `#btn-sup-slice`: opens that slice in G-scope |
 | **Export** | `#btn-slice-export`: saves it as `.gcode.3mf` |
-| Printer and filament | nozzle, filament, temperatures, max flow, temperature steps |
-| Quality | layer height, surface pattern |
+| Printer and filament | nozzle, filament, temperatures, max flow, flow ratio, retraction length and speed, z-hop, temperature steps |
+| Quality | layer height, bridge speed, bridge flow |
 | Strength | walls, infill density and pattern |
 | Supports | the **Supports** tick (`#sup-on`), then Auto / Assisted / Custom, Paint, Supports Blocker, Angle, Type, Size, May rest on the part, Exclude small overhangs, Interface angle, Tree settings, Advanced (Bambu's 17 rows), Tree planner |
 | Adhesion | Brim, Raft layers, Raft contact - outside the part the tick greys, so a raft is set with or without supports |

@@ -125,6 +125,10 @@
     // the filament's own retraction length (Studio's filament_retraction_length: 'nil' is "the printer's")
     var retractLen = num(config, 'filament_retraction_length', NaN);
     if (!isFinite(retractLen)) retractLen = num(config, 'retraction_length', 0.8);
+    /* ...and so with the rest of the filament's retraction (Studio's filament "setting overrides"): each is the printer's unless the
+       filament names its own */
+    var own = function (filKey, key, def) { var v = num(config, filKey, NaN); return isFinite(v) ? v : num(config, key, def); };
+    var retractV = own('filament_retraction_speed', 'retraction_speed', 30);
     var maxVol = num(config, 'filament_max_volumetric_speed', 12);
     var flushV = num(config, 'filament_flush_volumetric_speed', 0);
     var flushT = num(config, 'filament_flush_temp', 0);
@@ -171,16 +175,16 @@
       },
       retract: {
         length: retractLen,
-        speed: num(config, 'retraction_speed', 30),
-        deretractSpeed: num(config, 'deretraction_speed', num(config, 'retraction_speed', 30)),
+        speed: retractV,
+        deretractSpeed: own('filament_deretraction_speed', 'deretraction_speed', retractV),
         restartExtra: num(config, 'retract_restart_extra', 0),
-        hop: num(config, 'z_hop', 0.4),
+        hop: own('filament_z_hop', 'z_hop', 0.4),
         onLayerChange: num(config, 'retract_when_changing_layer', 1) !== 0,
-        wipe: num(config, 'wipe', 1) !== 0,
-        wipeDistance: num(config, 'wipe_distance', 2),
+        wipe: own('filament_wipe', 'wipe', 1) !== 0,
+        wipeDistance: own('filament_wipe_distance', 'wipe_distance', 2),
         // Bambu's seam_gap: a loop stops this short of its start (a % of the nozzle, or mm)
         seamGapMm: (function () { var v = String(raw(config, 'seam_gap') || '15%'); var n = parseFloat(v); if (!(n >= 0)) n = 15; return /%/.test(v) ? n / 100 * num(config, 'nozzle_diameter', 0.4) : n; })(),
-        minTravel: num(config, 'retraction_minimum_travel', 1)
+        minTravel: own('filament_retraction_minimum_travel', 'retraction_minimum_travel', 1)
       },
       filament: {
         diameter: num(config, 'filament_diameter', 1.75),

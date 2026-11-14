@@ -1379,6 +1379,18 @@
                   <label class="vp-bend-field" for="slice-set-max-flow">Max flow
                     <input type="number" id="slice-set-max-flow" min="0.5" max="40" step="0.2" placeholder="auto" inputmode="decimal"
                              title="The most filament the hotend is asked to melt, mm³ a second. Every speed is held under it (and the start's purge line follows it). Empty: the filament's own." autocomplete="off"><span>mm&sup3;/s</span></label>
+                  <label class="vp-bend-field" for="slice-set-flow-ratio">Flow ratio
+                    <input type="number" id="slice-set-flow-ratio" min="0.8" max="1.2" step="0.01" placeholder="auto" inputmode="decimal"
+                             title="How much of the computed filament is extruded (1 = all of it). A little under 1 thins every line: less ooze, fewer blobs and strings. Empty: the filament's own." autocomplete="off"></label>
+                  <label class="vp-bend-field" for="slice-set-retract-len">Retraction length
+                    <input type="number" id="slice-set-retract-len" min="0" max="3" step="0.1" placeholder="auto" inputmode="decimal"
+                             title="How far the filament is pulled back before a travel, mm. Longer pulls more pressure off the nozzle (fewer strings); too long on a soft filament lets it buckle or jam. Empty: the filament's own." autocomplete="off"><span>mm</span></label>
+                  <label class="vp-bend-field" for="slice-set-retract-speed">Retraction speed
+                    <input type="number" id="slice-set-retract-speed" min="5" max="80" step="5" placeholder="auto" inputmode="numeric"
+                             title="How fast the filament is pulled back and pushed forward again, mm/s. A soft filament stretches when pulled fast, so slower can retract more of it. Empty: the filament's own." autocomplete="off"><span>mm/s</span></label>
+                  <label class="vp-bend-field" for="slice-set-zhop">Z hop
+                    <input type="number" id="slice-set-zhop" min="0" max="2" step="0.1" placeholder="auto" inputmode="decimal"
+                             title="How far the nozzle lifts for a travel after retracting, mm. 0: no lift - the nozzle stays on the surface and wipes its ooze off there, at the risk of dragging on the part. Empty: the filament's own." autocomplete="off"><span>mm</span></label>
                   <label class="vp-bend-field" for="slice-set-temp-step">Temp step
                     <input type="number" id="slice-set-temp-step" value="0" min="-25" max="25" step="1" inputmode="numeric"
                              title="Change the nozzle temperature by this much at every band of height: -5 with temp 240 prints 240, 235, 230 ... up the model (a temperature tower from any model). 0: off. The change is made without stopping, at the layer change." autocomplete="off"><span>&deg;C</span></label>
@@ -1389,10 +1401,17 @@
                 </div>
               </details>
               <details class="vp-sec print-sec" id="print-sec-quality">
-                <summary class="vp-sec-head" title="Layer height. The first layer stays the profile's.">Quality</summary>
+                <summary class="vp-sec-head" title="Layer height, and how a bridge is printed. The first layer stays the profile's.">Quality</summary>
                 <div class="vp-sec-body">
                   <label class="vp-bend-field" for="slice-set-layer">Layer height
                     <input type="number" id="slice-set-layer" value="0.2" min="0.05" max="0.3" step="0.05" title="Layer height, mm. The first layer stays the profile's." autocomplete="off"><span>mm</span></label>
+                  <label class="vp-bend-field" for="slice-set-bridge-speed">Bridge speed
+                    <input type="number" id="slice-set-bridge-speed" value="50" min="1" max="300" step="1" inputmode="decimal"
+                             title="How fast a bridge (a line laid over air) is printed, mm/s. Slower gives the fan time to set the strand before it sags. A bridge never prints faster than the filament's max flow allows, whatever is set here." autocomplete="off"><span>mm/s</span></label>
+                  <label class="vp-bend-field" for="slice-set-bridge-flow">Bridge flow
+                    <input type="number" id="slice-set-bridge-flow" value="1" min="0.5" max="1.5" step="0.05" inputmode="decimal"
+                             title="How much plastic a bridge line gets (1 = a strand the nozzle's width). A little under 1 makes a thinner strand that pulls tight instead of drooping." autocomplete="off"></label>
+                  <p class="slice-settings-note" id="slice-bridge-note" hidden></p>
                 </div>
               </details>
               <details class="vp-sec print-sec" id="print-sec-strength">
@@ -3241,7 +3260,7 @@
        own page code, which listens for the press before the card does. After nso-helpers.js, app-core.js. docs/SUPPORT-BLOCKERS.md. -->
   <script src="nso_support_blockers.js?v=6962a81c"></script>
   <script src="app-support-blockers.js?v=73c8125d"></script>
-  <script src="app-supports-card.js?v=d5ce49c6"></script>
+  <script src="app-supports-card.js?v=62acdfba"></script>
   <script src="app-gscope-slice.js?v=ff1ae633"></script>
   <!-- The Slice card (left bar): the plate sliced for its printer, the .gcode.3mf
        it makes. The print planner and the packager are loaded here for it and for
@@ -3249,9 +3268,9 @@
        uses them. After nso_slicer.js, nso-cooling-profiles.js, nso-3mf.js and
        nso-3mf-read.js, which they read at load, and after app-microscope.js, whose
        plate reader and G-code import it calls. See docs/PRINT-PLANNER.md. -->
-  <script src="nso-print-planner.js?v=af9581c5"></script>
+  <script src="nso-print-planner.js?v=e12dce37"></script>
   <script src="nso-gcode3mf-write.js?v=cdfa15b4"></script>
-  <script src="app-print.js?v=e3ef07d3"></script>
+  <script src="app-print.js?v=83256df0"></script>
   <!-- Lift: details off a face, the face left as it was round them. After
        nso_lift.js (Phase 1: a flat face), nso_lift_curved.js (Lift 3: the
        repair under a detail lifted off a curved base), nso_lift_auto.js

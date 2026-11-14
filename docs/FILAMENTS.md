@@ -95,6 +95,34 @@ card's readout lists the bands as written, and `stats.tempBands` holds them.
 
 A temperature tower is then any model: temp 240, temp step -5, every 10 mm.
 
+## Bridges and stringing
+
+Six more rows on the Print card (2026-11-14). The first two are the process's and start at the
+printer profile's values; the other four are the filament's, and an empty one is the filament's own.
+
+| Row | Section | Bambu key | PLA profile | CR-TPU |
+| --- | --- | --- | --- | --- |
+| **Bridge speed** | Quality | `bridge_speed` | 50 mm/s | 50 (prints at 25.5) |
+| **Bridge flow** | Quality | `bridge_flow` | 1 | 1 |
+| **Flow ratio** | Printer and filament | `filament_flow_ratio` | 0.98 | 1 |
+| **Retraction length** | Printer and filament | `filament_retraction_length` | 0.8 mm | 0.4 mm |
+| **Retraction speed** | Printer and filament | `filament_retraction_speed`, `filament_deretraction_speed` | 30 mm/s | 30 mm/s |
+| **Z hop** | Printer and filament | `filament_z_hop` | 0.4 mm | 0.4 mm |
+
+- **A bridge is a round strand** of the nozzle's diameter times the square root of the bridge flow
+  (0.4 mm at 1, 0.379 mm at 0.9). Its speed is the row's, never over what the filament's max flow
+  allows that strand: at 3.2 mm^3/s that is 25.5 mm/s, so for CR-TPU only a Bridge speed under 25.5
+  changes anything. The card says so under the rows when the max flow is what holds the bridges.
+- **The retraction rows are the filament's own keys**, as Studio writes them: the printer's
+  `retraction_length`, `retraction_speed` and `z_hop` stay as they are in the file, and the planner
+  uses the filament's where it names one (`settingsFrom`: `own()`).
+- The readout after a slice gives the numbers as printed:
+  `bridges 12 mm/s (flow 0.9), flow ratio 1, retract 0.8 mm at 30 mm/s, z-hop 0 mm`.
+- Saved settings keep all six.
+
+Not built: a bridge temperature (park, wait, wipe, print the bridges cooler), "avoid crossing
+walls" on travels, and wipe distance as a row.
+
 ## Adding a filament
 
 One entry in `FILAMENTS` (`app-print.js`) and one `<option>` in `#slice-set-filament`

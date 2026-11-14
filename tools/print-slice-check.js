@@ -204,6 +204,7 @@ async function main() {
     check('the settings start at the A1 mini template\'s values: 0.4 nozzle, 0.2 mm layers, 2 walls, 15 % grid, support below 30°, auto brim, no raft (0.1 contact)',
       JSON.stringify(base) === JSON.stringify({ nozzle: 0.4, layer: 0.2, walls: 2, density: 15, pattern: 'grid', surface: 'zigzag', angle: 30, brim: 'auto', raft: 0, raftGap: 0.1, ifaceAngle: 'studio36', interfaceRule: null,
         filament: 'profile', nozzleTemp: null, firstTemp: null, bedTemp: null, maxFlow: null, tempStep: 0, tempBand: 10,
+        bridgeSpeed: 50, bridgeFlow: 1, flowRatio: null, retractLen: null, retractSpeed: null, zHop: null,
         /* Bambu's Advanced support rows start at the template's own values (docs/PRINT-CARD.md "Starting values"): first layer 90 %, top Z 0.2, every bridge held */
         supDensity: 90, supExpand: -1, supWalls: -1, supTopZ: 0.2, supBottomZ: 0.2, supBase: 'default', supBaseSpacing: 2.5, supAngle: 0, supIfacePattern: 'default', supIfaceSpacing: 0.5,
         supExpansion: 0, supXy: 0.35, supZOverXy: false, supFirstGap: 0.2, supBridge: 0, supIndep: true }), JSON.stringify(base));
@@ -410,6 +411,49 @@ async function main() {
         rs['.02'] > 2000 && !rs['.8'] && !rs['.04'] && cfg('retraction_length') === '0.8', JSON.stringify(rs));
     }
 
+    // BRIDGES AND STRINGING (docs/FILAMENTS.md): the bridge's speed and flow (Quality), the filament's flow ratio, retraction and z-hop
+    {
+      const tb2 = PRINT.filamentBase(tpl, 'cr-tpu'), pb2 = PRINT.filamentBase(tpl, 'profile');
+      check('the filament\'s own tuning: PLA flow ratio 0.98, retract 0.8 mm at 30 mm/s, z-hop 0.4; CR-TPU flow ratio 1, retract 0.4 mm at 30 mm/s, z-hop 0.4',
+        pb2.flowRatio === 0.98 && pb2.retractLen === 0.8 && pb2.retractSpeed === 30 && pb2.zHop === 0.4 && tb2.flowRatio === 1 && tb2.retractLen === 0.4 && tb2.retractSpeed === 30 && tb2.zHop === 0.4, JSON.stringify([pb2, tb2]));
+      check('...those rows at the filament\'s own values, and the bridge rows at the profile\'s 50 mm/s and 1, change nothing',
+        Object.keys(PRINT.configOverlay(tpl, Object.assign({}, base, { bridgeSpeed: 50, bridgeFlow: 1, flowRatio: 0.98, retractLen: 0.8, retractSpeed: 30, zHop: 0.4 }))).length === 0);
+      const ov = PRINT.configOverlay(tpl, Object.assign({}, base, { bridgeSpeed: 12, bridgeFlow: 0.9, flowRatio: 0.95, retractLen: 1.2, retractSpeed: 20, zHop: 0 }));
+      check('a changed row is its Bambu key: bridge_speed, bridge_flow (the process\'s), filament_flow_ratio, filament_retraction_length, filament_(de)retraction_speed, filament_z_hop (the filament\'s own, the printer\'s keys left alone)',
+        JSON.stringify(ov) === JSON.stringify({ bridge_speed: '12', bridge_flow: '0.9', filament_flow_ratio: '0.95', filament_retraction_length: '1.2', filament_retraction_speed: '20', filament_deretraction_speed: '20', filament_z_hop: '0' }), JSON.stringify(ov));
+      const read = async r => {
+        const g = L.text(await L.R.openZip(r.bytes).read('Metadata/plate_1.gcode')).split('\n');
+        const body = g.slice(g.indexOf('; MACHINE_START_GCODE_END'), g.indexOf('; MACHINE_END_GCODE_START'));
+        let feat = '', e = 0; const bridgeF = new Set(), bridgeW = new Set(), retr = {};
+        body.forEach((l, i) => {
+          let m;
+          if ((m = /^; FEATURE: (.*)$/.exec(l))) feat = m[1];
+          else if (feat === 'Bridge' && (m = /^G1 F([\d.]+)$/.exec(l))) bridgeF.add(+m[1]);
+          else if (feat === 'Bridge' && (m = /^; LINE_WIDTH: ([\d.]+)$/.exec(l))) bridgeW.add(+m[1]);
+          if ((m = /^G1 E-(\.?[\d.]+) F(\d+)$/.exec(l))) retr[m[1] + '@' + m[2]] = (retr[m[1] + '@' + m[2]] || 0) + 1;
+          if ((m = /^G1 X[-\d.]+ Y[-\d.]+ E(\.?[\d.]+)$/.exec(l))) e += +m[1];
+        });
+        return { bridgeF: [...bridgeF], bridgeW: [...bridgeW], retr, hops: body.filter(l => /^G3 Z/.test(l)).length, e, cfg: k => (new RegExp('^; ' + k + ' = (.*)$', 'm').exec(g.join('\n')) || [])[1] };
+      };
+      const one2 = objs.slice(0, 1);
+      const t0 = await PRINT.build(one2, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { filament: 'cr-tpu' }) });
+      const t1 = await PRINT.build(one2, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { filament: 'cr-tpu', bridgeSpeed: 12, bridgeFlow: 0.9, flowRatio: 0.97, retractLen: 0.8, retractSpeed: 20, zHop: 0 }) });
+      check('CR-TPU slices with the tuning rows changed', t0.ok && t1.ok, t1.reason);
+      if (t0.ok && t1.ok) {
+        const a = await read(t0), b = await read(t1);
+        check('...untouched, a CR-TPU bridge is held to 25.5 mm/s by the 3.2 mm^3/s max flow (F1527.887), a 0.4 mm strand, though the profile says 50',
+          JSON.stringify(a.bridgeF) === '[1527.887]' && JSON.stringify(a.bridgeW) === '[0.4]', JSON.stringify([a.bridgeF, a.bridgeW]));
+        check('...Bridge speed 12 and Bridge flow 0.9: every bridge at F720, a 0.379 mm strand; bridge_speed = 12 and bridge_flow = 0.9 in the file',
+          JSON.stringify(b.bridgeF) === '[720]' && b.bridgeW.length === 1 && Math.abs(b.bridgeW[0] - 0.4 * Math.sqrt(0.9)) < 1e-5 && b.cfg('bridge_speed') === '12' && b.cfg('bridge_flow') === '0.9', JSON.stringify([b.bridgeF, b.bridgeW]));
+        check('...Retraction 0.8 mm at 20 mm/s: 0.76 in the wipe and .04 after, at F1200, where it was .02 at F1800 (0.4 mm at 30 mm/s)',
+          a.retr['.02@1800'] > 100 && !a.retr['.04@1200'] && b.retr['.04@1200'] > 100 && !b.retr['.02@1800'], JSON.stringify([a.retr, b.retr]));
+        check('...Z hop 0: no lift on any travel or layer change (' + a.hops + ' before, ' + b.hops + ' after)', a.hops > 50 && b.hops === 0);
+        check('...Flow ratio 0.97: filament_flow_ratio = 0.97 on both slots, and less filament for the same plate', b.cfg('filament_flow_ratio') === '0.97,0.97' && b.e < a.e, a.e.toFixed(1) + ' -> ' + b.e.toFixed(1));
+        check('...the readout has the numbers as printed', t0.tune === 'bridges 25.5 mm/s (flow 1), flow ratio 1, retract 0.4 mm at 30 mm/s, z-hop 0.4 mm' &&
+          t1.tune === 'bridges 12 mm/s (flow 0.9), flow ratio 0.97, retract 0.8 mm at 20 mm/s, z-hop 0 mm', JSON.stringify([t0.tune, t1.tune]));
+      }
+    }
+
     // temperature steps: a box 31 mm tall, 240 C down 5 every 10 mm
     const bx = (w, d, h) => { const x = w / 2, y = d / 2, v = [[-x, -y, 0], [x, -y, 0], [x, y, 0], [-x, y, 0], [-x, -y, h], [x, -y, h], [x, y, h], [-x, y, h]];
       const f = [[0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7], [0, 1, 5], [0, 5, 4], [1, 2, 6], [1, 6, 5], [2, 3, 7], [2, 7, 6], [3, 0, 4], [3, 4, 7]], s = [];
@@ -480,7 +524,8 @@ async function main() {
     const vt = p1sPrinter.afterStart.findIndex(l => typeof l === 'string' && /^;VT\d/.test(l));
     const wantAfter = noM73(sl.slice(iM + 1, iL)), gotAfter = noM73(PL.thaw(PRINT.FILAMENTS['cr-tpu'].start(35, p1sCfg).concat(p1sPrinter.afterStart.slice(vt)), v, {}));
     check('...and so is the filament\'s own start G-code after it (M106 P3 S180 at a 35 C bed)', JSON.stringify(wantAfter) === JSON.stringify(gotAfter), JSON.stringify([wantAfter, gotAfter]));
-    check('...the card\'s CR-TPU on the P1S has that bed: 235 C, bed 35, 3.2 mm^3/s', JSON.stringify(PRINT.filamentBase(p1sCfg, 'cr-tpu')) === JSON.stringify({ nozzleTemp: 235, firstTemp: 235, bedTemp: 35, maxFlow: 3.2, rangeLow: 200, rangeHigh: 250 }));
+    check('...the card\'s CR-TPU on the P1S has that bed: 235 C, bed 35, 3.2 mm^3/s', JSON.stringify(PRINT.filamentBase(p1sCfg, 'cr-tpu')) === JSON.stringify({ nozzleTemp: 235, firstTemp: 235, bedTemp: 35, maxFlow: 3.2, rangeLow: 200, rangeHigh: 250,
+      flowRatio: 1, retractLen: 0.4, retractSpeed: 30, zHop: 0.4 }));
   }
 
   // ===========================================================================
@@ -523,7 +568,8 @@ async function main() {
       return /<summary class="vp-bar-btn"[^>]*>Print<\/summary>/.test(c) &&
         ['btn-sup-all', 'btn-sup-slice', 'btn-slice-export', 'btn-slice-cancel', 'slice-profile', 'slice-readout', 'slice-progress', 'print-printer', 'sup-on', 'print-sup-body', 'sup-style',
          'slice-set-nozzle', 'slice-set-layer', 'slice-set-walls', 'slice-set-density', 'slice-set-pattern', 'slice-set-brim', 'slice-set-raft', 'slice-set-raft-gap', 'slice-settings-reset',
-         'slice-set-filament', 'slice-set-nozzle-temp', 'slice-set-first-temp', 'slice-set-bed-temp', 'slice-set-max-flow', 'slice-set-temp-step', 'slice-set-temp-band', 'slice-filament-note'].every(has) &&
+         'slice-set-filament', 'slice-set-nozzle-temp', 'slice-set-first-temp', 'slice-set-bed-temp', 'slice-set-max-flow', 'slice-set-temp-step', 'slice-set-temp-band', 'slice-filament-note',
+         'slice-set-bridge-speed', 'slice-set-bridge-flow', 'slice-bridge-note', 'slice-set-flow-ratio', 'slice-set-retract-len', 'slice-set-retract-speed', 'slice-set-zhop'].every(has) &&
         /* ...and nothing of the cards it took the place of: no second Slice button, no None, no Remove, no second angle, no interface rule */
         ['btn-slice-go', 'btn-sup-none', 'btn-sup-remove', 'slice-set-angle', 'slice-set-iface', 'slice-settings-toggle', 'btn-slice-preview', 'sup-plate'].every(id => !html.includes('id="' + id + '"')) &&
         c.indexOf('id="btn-sup-all"') < c.indexOf('id="btn-sup-slice"') && c.indexOf('id="btn-sup-slice"') < c.indexOf('id="btn-slice-export"') && c.indexOf('id="btn-slice-export"') < c.indexOf('id="sup-style"') &&
