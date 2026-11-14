@@ -226,6 +226,9 @@
     onlyOneWallTop: true, minSparseAreaMm2: 15, detectThinWall: false
   };
 
+  /** A pattern by the name Bambu Studio's list gives it: this slicer's zigzag is its Rectilinear. */
+  function patternLabel(p) { return p === 'zigzag' ? 'rectilinear' : p; }
+
   function wallWidthFor(nozzle) {
     var d = (typeof nozzle === 'number' && nozzle > 0) ? nozzle : 0.4;
     return Math.round(d * LINE_RATIO * 1e6) / 1e6;
@@ -260,7 +263,7 @@
       topShellThicknessMm: BAMBU_PROFILE_06.topShellThicknessMm,
       bottomShellThicknessMm: 0,
       sparseDensity: BAMBU_PROFILE_06.sparseDensity,
-      sparsePattern: BAMBU_PROFILE_06.sparsePattern,   // 'grid' | 'zigzag' | 'lines' | 'concentric'
+      sparsePattern: BAMBU_PROFILE_06.sparsePattern,   // 'grid' | 'zigzag' (Bambu's Rectilinear; 'rectilinear' is taken for it) | 'lines' | 'concentric'
       solidPattern: BAMBU_PROFILE_06.solidPattern,     // 'zigzag' | 'lines' | 'concentric': the internal solid infill, and the surfaces unless they say
       topPattern: null,                    // the top surface's own pattern ('concentric'); null -> solidPattern
       bottomPattern: null,                 // the first layer's own pattern ('concentric'); null -> solidPattern
@@ -318,6 +321,8 @@
       emitGcode: true
     };
     if (over) Object.keys(over).forEach(function (k) { if (over[k] !== undefined) o[k] = over[k]; });
+    /* rectilinear is Bambu's name for these lines (its profile's value: zig-zag): one name inside */
+    ['sparsePattern', 'solidPattern', 'topPattern', 'bottomPattern'].forEach(function (k) { if (o[k] === 'rectilinear' || o[k] === 'zig-zag') o[k] = 'zigzag'; });
     if (!(o.firstLayerMm > 0)) o.firstLayerMm = o.layerMm;
     return o;
   }
@@ -3780,7 +3785,7 @@
     var lines = [];
     lines.push(res.planes.length + ' layers at ' + res.options.layerMm + ' mm (first ' + res.options.firstLayerMm +
       ' mm), walls ' + res.options.outerWallWidthMm + ' / ' + res.options.innerWallWidthMm + ' mm, ' +
-      Math.round(res.options.sparseDensity * 100) + ' % ' + res.options.sparsePattern + ', support below ' +
+      Math.round(res.options.sparseDensity * 100) + ' % ' + patternLabel(res.options.sparsePattern) + ', support below ' +
       res.options.supportThresholdDeg + ' deg');
     res.objects.forEach(function (ob) {
       if (ob.role === 'raft') { lines.push(ob.name + ': ' + res.raft.layers + ' layer(s) - ' + res.raft.base + ' base, ' + res.raft.interface + ' interface - top at ' + res.raft.topMm.toFixed(2) + ' mm, the plate on it at ' + res.raft.liftMm.toFixed(2)); return; }
@@ -3938,6 +3943,7 @@
     thinWalls: thinWalls,
     medialPaths: medialPaths,
     concentricFill: concentricFill,
+    patternLabel: patternLabel,
     toGcode: toGcode,
     describe: describe,
     loadKernel: loadKernel,

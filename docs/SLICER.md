@@ -497,6 +497,25 @@ sparse infill, the solid infill and both surfaces, as the reference has them
 concentric for one of them alone is sliced that way
 (`NSOPrintPlanner.engineOptions`).
 
+### Rectilinear (the lists' name for `zigzag`)
+
+Bambu Studio's **Rectilinear** - `zig-zag` in its profile - is the pattern this
+slicer has always called `zigzag`: lines at `infill_direction` (45), turned 90
+degrees with every layer, joined at their ends. The pattern rows of the print
+card and G-scope list it as **rectilinear** (the option's value stays
+`zigzag`), the summaries say rectilinear, and the engine takes `rectilinear`
+or `zig-zag` for any of its four pattern options.
+
+Checked against `rectilinear.gcode.3mf` (the concentric plate cut again with
+every pattern Rectilinear; its walls are the same 72 loops), pinned in
+`fixtures/slicer-rectilinear-reference.json`: on two solid layers and the top
+of each of the seven straight-sided shapes the lines run at Bambu's angle, as
+many of them within 2, the length laid within 3.5 %. The differences: Bambu
+widens the line (0.420 - 0.428) so a whole number fits across, where this
+keeps the nominal spacing; and it draws every layer in one path, where this
+breaks the path at some slanted edges (the hexagon's layer in 9). Like the
+other two files this one is all shell, so its sparse Rectilinear never prints.
+
 ### Thin walls (classic walls with Detect thin wall on)
 
 Bambu Studio, with the **classic** wall generator and **Detect thin wall** on,

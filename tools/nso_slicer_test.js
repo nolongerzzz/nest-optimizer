@@ -548,6 +548,40 @@ function frustum(n, r0, r1, z0, z1) {
           tb.layers[0].paths.filter(p => p.feature === 'Bottom surface').every(p => !p.closed));
   }
 
+  section('Rectilinear - Bambu\'s name for the zigzag lines, against a real Bambu slice (fixtures/slicer-rectilinear-reference.json, docs/SLICER.md "Rectilinear")');
+  {
+    const fsx = require('fs');
+    const OUT = JSON.parse(fsx.readFileSync(path.join(ROOT, 'fixtures', 'slicer-concentric-reference.json'), 'utf8')).shapes;
+    const REF = JSON.parse(fsx.readFileSync(path.join(ROOT, 'fixtures', 'slicer-rectilinear-reference.json'), 'utf8')).shapes;
+    const opt = (over) => SL.defaultsFor(0.4, Object.assign({ layerMm: 0.2, outerWallWidthMm: 0.42, innerWallWidthMm: 0.45, infillWidthMm: 0.42, topShellLayers: 5, bottomShellLayers: 3 }, over));
+    const objs = OUT.map(sh => ({ name: sh.name, soup: prism(sh.outline, 0, sh.layers * 0.2) }));
+    const o = opt({ solidPattern: 'rectilinear', sparsePattern: 'rectilinear' });
+    check('the name is taken: rectilinear (and the profile\'s zig-zag) is the slicer\'s zigzag', o.solidPattern === 'zigzag' && o.sparsePattern === 'zigzag' && opt({ sparsePattern: 'zig-zag' }).sparsePattern === 'zigzag' &&
+      SL.patternLabel('zigzag') === 'rectilinear' && SL.patternLabel('grid') === 'grid');
+    const res = SL.sliceObjects(objs, o, wasm);
+    const stat = (paths) => {
+      let tot = 0; const c = {}; let lines = 0;
+      paths.forEach(p => { for (let i = 1; i < p.pts.length; i++) { const a = p.pts[i - 1], b = p.pts[i], l = Math.hypot(b[0] - a[0], b[1] - a[1]); tot += l;
+        if (l > 1.5) { lines++; const g2 = ((Math.round(Math.atan2(b[1] - a[1], b[0] - a[0]) * 180 / Math.PI) % 180) + 180) % 180; c[g2] = (c[g2] || 0) + 1; } } });
+      return { angle: +Object.keys(c).sort((a, b) => c[b] - c[a])[0], lines: lines, length: tot };
+    };
+    let angles = 0, n = 0, worstLines = 0, worstLen = 0, kinds = 0;
+    REF.forEach((sh, k) => {
+      [['solid', 1], ['solid2', 2], ['top', OUT[k].layers - 1]].forEach(([what, li]) => {
+        const want = sh[what], mine = res.objects[k].layers[li].paths.filter(p => !/wall/i.test(p.feature)), st = stat(mine);
+        n++;
+        if (st.angle === want.angle) angles++;
+        if (mine.every(p => p.feature === want.feature && !p.closed)) kinds++;
+        worstLines = Math.max(worstLines, Math.abs(st.lines - want.lines));
+        worstLen = Math.max(worstLen, Math.abs(st.length / want.length - 1));
+      });
+    });
+    check('seven shapes, two solid layers and the top each: the lines at Bambu\'s angle, 45 and 135 turn about', angles === n, angles + '/' + n);
+    check('...as many lines as Bambu lays, within 2 (it widens the line 0.420 - 0.428 to fit a whole number across)', worstLines <= 2, 'worst ' + worstLines);
+    check('...the length laid within 3.5 % of Bambu\'s', worstLen < 0.035, (worstLen * 100).toFixed(1) + ' %');
+    check('...typed as Bambu types them, in open lines', kinds === n, kinds + '/' + n);
+  }
+
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
 })().catch(err => { console.error(err); process.exit(1); });

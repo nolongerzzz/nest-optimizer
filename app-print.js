@@ -114,7 +114,7 @@
                            filament: 'profile', nozzleTemp: null, firstTemp: null, bedTemp: null, maxFlow: null, tempStep: 0, tempBand: 10 };   /* the card's own defaults (the owner's view): Studio 2.9's 3.6 - the owner's mouse1 on the P1S released clean with it */
   var IFACE_ANGLES = { profile: 1, bridge: 1, studio36: 1, crosshatch: 1 };   /* nso_slicer.js supportInterfaceAngle: NSO's own, no profile key - a testing ground for interfaces */
   var PATTERN_TO_CONFIG = { grid: 'grid', zigzag: 'zig-zag', lines: 'line', concentric: 'concentric' };
-  var PATTERN_FROM_CONFIG = { grid: 'grid', 'zig-zag': 'zigzag', zigzag: 'zigzag', line: 'lines', lines: 'lines', concentric: 'concentric' };
+  var PATTERN_FROM_CONFIG = { grid: 'grid', 'zig-zag': 'zigzag', zigzag: 'zigzag', line: 'lines', lines: 'lines', concentric: 'concentric', rectilinear: 'zigzag' };
   /* concentric is the whole part's: the sparse infill, the solid infill and both surfaces, as the reference slice has it */
   var CONCENTRIC_KEYS = ['top_surface_pattern', 'bottom_surface_pattern', 'internal_solid_infill_pattern'];
   var BRIM_TO_CONFIG = { auto: 'auto_brim', outer: 'outer_only', none: 'no_brim' };
@@ -222,7 +222,7 @@
       layer: Math.round(n(s.layer, D.layer, 0.05, 0.3) * 1000) / 1000,
       walls: Math.round(n(s.walls, D.walls, 1, 10)),
       density: Math.round(n(s.density, D.density, 0, 100)),
-      pattern: PATTERN_TO_CONFIG[s.pattern] ? s.pattern : D.pattern,
+      pattern: s.pattern === 'rectilinear' ? 'zigzag' : PATTERN_TO_CONFIG[s.pattern] ? s.pattern : D.pattern,   /* rectilinear: Bambu's name for zigzag */
       angle: Math.round(n(s.angle, D.angle, 1, 89)),
       brim: BRIM_TO_CONFIG[s.brim] ? s.brim : D.brim,
       raft: Math.round(n(s.raft, D.raft, 0, 30)),
@@ -518,7 +518,7 @@
 
   /** The settings in a few words, for the readout: "0.12 mm layers, 3 walls, 20 % grid, support below 30°, brim auto". */
   function settingsWords(st) {
-    return st.layer + ' mm layers, ' + st.walls + ' wall' + (st.walls === 1 ? '' : 's') + ', ' + st.density + ' % ' + st.pattern +
+    return st.layer + ' mm layers, ' + st.walls + ' wall' + (st.walls === 1 ? '' : 's') + ', ' + st.density + ' % ' + (st.pattern === 'zigzag' ? 'rectilinear' : st.pattern) +
       ', support below ' + st.angle + '°, ' + (st.raft > 0 ? 'raft ' + st.raft + ' layer' + (st.raft === 1 ? '' : 's') + ' (no brim)' : 'brim ' + st.brim);
   }
 
