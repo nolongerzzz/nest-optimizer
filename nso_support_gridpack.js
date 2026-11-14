@@ -529,11 +529,11 @@
   function feedBeacons(rawTris, opts, F) {
     var bc = beaconsFor(rawTris, F.mode === 'custom' && !opts._stairBeacons ? Object.assign({}, opts, { beacons: [] }) : opts);
     if (!bc.ok) return bc;
-    var list = [], off = [], erased = [], refused = [];
+    var list = [], off = [], erased = [], refused = [], offAt = [];
     bc.beacons.forEach(function (b) {
       var id = tipId(b.p, false);
-      if (F.off[id]) { off.push(id); return; }
-      if (F.exSet[id]) { erased.push(id); return; }
+      if (F.off[id]) { off.push(id); offAt.push(b.p.slice()); return; }
+      if (F.exSet[id]) { erased.push(id); offAt.push(b.p.slice()); return; }
       list.push(Object.assign({}, b, { tid: id }));
     });
     var seen = {};
@@ -550,6 +550,7 @@
     list.forEach(function (b, i) { b.id = i; });
     bc.beacons = list;
     bc.feed = { mode: F.mode, off: off, erased: erased, refused: refused };
+    bc.offAt = offAt;                                            /* where the spots left out are: the flow tree fills no spot back in beside one */
     if (!list.length) { bc.ok = false; bc.reason = 'no tips to plan: ' + (refused.length ? refused.length + ' refused, ' : '') + (off.length + erased.length) + ' left out'; }
     return bc;
   }
@@ -5566,9 +5567,15 @@
     });
     return out;
   }
-  function planFlow(rawTris, opts) {
-    var FL = flowOf(opts), bc = beaconsFor(rawTris, opts);
-    if (!FL || !bc.ok || !bc.beacons.length) return null;
+  /* F: the user's feed (feedOf), or none. ASSISTED's spots are the detector's less the ones turned off, thinned to tips as Auto's are; CUSTOM's
+     tips are every tip, each one stood as given (no thinning, no twigs, no spots added). The flow tree has no members to erase and takes no
+     landing circles: it lands where the reach field lets it (docs/PRINT-CARD.md "One planner"). */
+  function planFlow(rawTris, opts, F) {
+    var FL = flowOf(opts);
+    if (!FL) return null;
+    var bc = F ? feedBeacons(rawTris, opts, F) : beaconsFor(rawTris, opts), custom = !!F && F.mode === 'custom';
+    if (F && !bc.ok && /^no tips to plan/.test(bc.reason || '')) return { ok: false, stage: 'feed', reason: bc.reason, feed: bc.feed };
+    if (!bc.ok || !bc.beacons.length) return null;
     var say = progressOf(opts);
     say('detecting', null, null, true);
     var ck = Object.assign({}, ONE, COLUMN_ONE, (opts.oneTrunk && typeof opts.oneTrunk === 'object') ? opts.oneTrunk : {}), CCK = columnCrownOf(opts.treeKnobs);
@@ -5581,10 +5588,18 @@
     /* what each spot is: on the plate's first layers (the plate holds it), a step (a twig, or the part's own to hold), or a tip's */
     var onPlate = [], steps = [], pool = [], lost = {};
     /* the spots: the detector's, and on a 1 mm grid the flat undersides its pitch steps over (a rim round a cavity is a ring 1.5 - 2 mm wide) */
-    if (kit) { var areas0 = {}; bc.beacons.forEach(function (b) { var k0 = b.regionId == null ? -1 : b.regionId; (areas0[k0] = areas0[k0] || []).push(b); }); fillSpots(bc, areas0, kit, ck); }
+    if (kit && !custom) {
+      var areas0 = {}; bc.beacons.forEach(function (b) { var k0 = b.regionId == null ? -1 : b.regionId; (areas0[k0] = areas0[k0] || []).push(b); }); fillSpots(bc, areas0, kit, ck);
+      /* ASSISTED: a spot the user turned off stays off - no filled spot within the detector's pitch of one */
+      if (F && bc.offAt && bc.offAt.length) {
+        var near = Math.max(1.5, +bc.pitchMm || 0);
+        bc.beacons = bc.beacons.filter(function (b) { return b.source !== 'column-fill' || !bc.offAt.some(function (q) { return Math.hypot(q[0] - b.p[0], q[1] - b.p[1]) < near && Math.abs(q[2] - b.p[2]) < near; }); });
+        bc.beacons.forEach(function (b, i) { b.id = i; });
+      }
+    }
     bc.beacons.forEach(function (b) {
       if (b.p[2] - plateZ < ck.lowMm) onPlate.push(rec(b));
-      else if (subThresholdStep(b, kit, opts)) steps.push(b);
+      else if (!custom && subThresholdStep(b, kit, opts)) steps.push(b);
       else pool.push(b);
     });
     var selfHeld = [], twigs = [];
@@ -5611,7 +5626,8 @@
         order.forEach(function (k) {
           var area = byArea[k].filter(function (b) { return !lost[b.id]; });
           if (!area.length) return;
-          var cov = area.length >= COLUMN_WIDE_SPOTS ? ck.coverWideMm : ck.coverMm, pick = thinTips(area, cov, Math.min(ck.minTips, area.length)), isTip = {}, mine = [];
+          var cov = area.length >= COLUMN_WIDE_SPOTS ? ck.coverWideMm : ck.coverMm, isTip = {}, mine = [];
+          var pick = custom ? area.map(function (b, i) { return i; }) : thinTips(area, cov, Math.min(ck.minTips, area.length));
           pick.forEach(function (i) { isTip[i] = true; mine.push(area[i]); });
           area.forEach(function (b, i) {
             if (isTip[i]) return;
@@ -5644,7 +5660,7 @@
     var beacons = [], at = {};
     chosen.concat(twigs).concat(stillLost).forEach(function (b) {
       at[b.id] = beacons.length;
-      beacons.push({ id: beacons.length, p: b.p.slice(), n: b.n.slice(), regionId: b.regionId, key: b.key, source: b.source || 'given', tid: tipId(b.p, true) });
+      beacons.push({ id: beacons.length, p: b.p.slice(), n: b.n.slice(), regionId: b.regionId, key: b.key, source: b.source || 'given', tid: b.tid || tipId(b.p, true) });
     });
     var twigIds = {}; twigs.forEach(function (b) { twigIds[b.id] = true; });
     fl.branches.forEach(function (br) { br.tips = br.tips.map(function (id) { return at[id]; }); if (br.tip != null) { br.twig = !!twigIds[br.tip]; br.tip = at[br.tip]; } });
@@ -5664,6 +5680,11 @@
               oneTrunk: { coverMm: ck.coverMm, areas: order.length, clusters: fl.trunks.map(function (tr) { return { tips: tr.tips.length, radiusMm: tr.r }; }), tips: chosen.length, beacons: bc.beacons.length,
                           thinned: covered.length - coneHeld, covered: covered, onPlate: onPlate, splits: 0, lost: stillLost.length, branched: 0, thin: [], coneTips: coneHeld,
                           selfHeld: selfHeld, forks: 0, twigs: twigs.length } };
+    if (F) {
+      p.feed = bc.feed;
+      p.excluded = { members: [], tips: bc.feed.erased, notErased: [], unknown: F.excluded.filter(function (id) { return bc.feed.erased.indexOf(id) < 0; }) };
+      p.offZone = []; p.zoneLanded = []; p.unmerged = [];
+    }
     p.reason = chosen.length + ' tip(s) on ' + fl.trunks.length + ' trunk(s), ' + ((fl.rests || []).length ? fl.rests.length + ' foot/feet on the part, ' : '') + fl.branches.length + ' branch(es) grown down together.' +
       (twigs.length ? ' ' + twigs.length + ' twig(s) catch the edge of a step no slicer calls an overhang.' : '') +
       (coneHeld ? ' ' + coneHeld + ' spot(s) at a cone\'s tip are held through the tip under it.' : '') +
@@ -5779,6 +5800,8 @@
     var F = feedOf(opts), p;
     if (F && F.error) p = { ok: false, stage: 'feed', reason: F.error };
     else if (opts && opts.oneTrunk && !F) p = (opts.columnRule && flowOf(opts) ? planFlow(rawTris, opts) : null) || planOneTrunk(rawTris, opts) || plan(rawTris, opts);
+    /* Assisted and Custom grow the same tree from the user's spots (opts.oneTrunk with a feed: the Print card's Tree type) */
+    else if (opts && opts.oneTrunk && F && opts.columnRule && flowOf(opts)) p = planFlow(rawTris, opts, F) || planFed(rawTris, opts, F);
     else p = F ? planFed(rawTris, opts, F) : plan(rawTris, opts);
     if (p.ok && p.crowns) crownIds(p);
     p.rawTris = rawTris;

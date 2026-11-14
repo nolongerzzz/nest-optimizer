@@ -1,5 +1,10 @@
 # Supports card: a verb with a state
 
+> **2026-11-14: this card is the Print card now** (docs/PRINT-CARD.md). Its button is **Slice**, supports are a tick, the types are Straight
+> strut / Tree / Gecko Hands, and the slice, printer and adhesion rows live on it. What follows is the supports side of it as it was built -
+> the detector, the modes, the tools, the plate build - which the Print card still runs; where a section says Generate, None or Remove, read
+> Slice and the Supports tick.
+
 `app-supports-card.js`, the column's **Supports** drop-down (make/edit group,
 after Seat). One card on the main page. G-scope keeps its support row for
 layer-view work (`docs/GCODE-SUPPORTS.md`); both call the same planner.

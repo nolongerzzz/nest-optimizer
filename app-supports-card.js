@@ -129,7 +129,7 @@
 var NSO_SUPPORTS_CARD = (function () {
   'use strict';
 
-  var STYLES = { strut: 'Straight strut', tree: 'Tree', 'gecko-hand': 'Gecko-hand' };
+  var STYLES = { strut: 'Straight strut', tree: 'Tree', 'gecko-hand': 'Gecko Hands' };   /* the TYPES of support (the card's Type row) */
   /* The outline of an area: faint white while it will be built, grey once it
      is left out, red when the plate could not reach all of it. */
   var OUTLINE = { on: 0xffffff, off: 0x7b8494, red: 0xff2d2d };
@@ -212,7 +212,10 @@ var NSO_SUPPORTS_CARD = (function () {
      and 2 + 2 layers the first prints were made with. */
   /* the card's Top interface layers (0 - 3, as Bambu's): the count the slicer types interface under the part; else the build's own */
   function ifaceLayersOf(o, dflt) { var n = o ? o.ifaceLayers : null; return n != null && isFinite(n) && n >= 0 ? n : dflt; }
-  function oneTrunkOn(o) { return S.mode === 'auto' && !!o.one && o.style === 'tree'; }
+  /* THE PRINT CARD (docs/PRINT-CARD.md "One planner"): Assisted and Custom grow the Tree type with the planner Auto does - the flow tree,
+     from the user's spots or tips - so every mode acts on the same tree. */
+  function flowFed(o) { return printCard() && S.mode !== 'auto' && !!o && o.style === 'tree' && columnRule() && !!window.NSO_SupportFlow; }
+  function oneTrunkOn(o) { return (S.mode === 'auto' && !!o.one && o.style === 'tree') || flowFed(o); }
   function partsOptsOf(o) {
     /* Dense belongs to the one-trunk build: its sheet is planned over the thinned tips the reference's is. A hand-placed row of three
        tips (Custom) did not form a sheet at 0.47 mm that it forms at 0.84 (support:custom), so the other builds stay Open. */
@@ -974,15 +977,16 @@ var NSO_SUPPORTS_CARD = (function () {
     if (head) { head.textContent = text; head.classList.toggle('is-bad', bad); head.classList.toggle('is-stale', stale); }
     var en = function (id, on) { var e = $(id); if (e) e.disabled = !on || !!S.busy || SL.busy; };
     var go = $('btn-sup-all');
-    if (go) { go.textContent = cs === 'building' ? buildingLine() : cs === 'built' ? 'Regenerate' : 'Generate'; go.classList.toggle('is-stale', stale); }
-    en('btn-sup-all', styleNone() ? !!(state.placed && state.placed.length) : (cs === 'idle' || cs === 'built') && (wide ? !!(W && W.totals.areas > 0) : a && a.areas > 0));
+    if (go) { go.textContent = cs === 'building' ? buildingLine() : printCard() ? 'Slice' : cs === 'built' ? 'Regenerate' : 'Generate'; go.classList.toggle('is-stale', stale && !printCard()); }
+    en('btn-sup-all', printCard() || styleNone() ? !!(state.placed && state.placed.length) : (cs === 'idle' || cs === 'built') && (wide ? !!(W && W.totals.areas > 0) : a && a.areas > 0));
+    printSync();
     var none = $('btn-sup-none'), rm = $('btn-sup-remove');
     var wasBuilt = hasHost && memOf(S.hostId).built && (cs === 'built' || cs === 'building');
     if (none) none.hidden = !wasBuilt;          // REMOVE ALL and REMOVE stay per piece: not on the plate's card
     if (rm) rm.hidden = !wasBuilt;
     en('btn-sup-none', cs === 'built' && !wide);
     en('btn-sup-remove', cs === 'built' && !wide && S.selSupport != null && !!modelOf(S.selSupport));
-    ['sup-angle', 'sup-style', 'sup-size', 'sup-rest', 'sup-small', 'sup-one', 'sup-interface', 'sup-brim', 'sup-raft', 'sup-tree-distance', 'sup-tree-diameter', 'sup-tree-angle', 'sup-tree-dangle', 'sup-tree-tip', 'sup-preset', 'sup-preset-save'].concat(Object.keys(ADV_IDS).map(function (k) { return ADV_IDS[k][0]; })).forEach(function (id) { var e = $(id); if (e) e.disabled = !!S.busy; });
+    ['sup-angle', 'sup-style', 'sup-size', 'sup-rest', 'sup-small', 'sup-one', 'sup-interface', 'sup-brim', 'sup-raft', 'sup-tree-distance', 'sup-tree-diameter', 'sup-tree-angle', 'sup-tree-dangle', 'sup-tree-tip', 'sup-preset', 'sup-preset-save', 'sup-on'].concat(Object.keys(ADV_IDS).map(function (k) { return ADV_IDS[k][0]; })).forEach(function (id) { var e = $(id); if (e) e.disabled = !!S.busy; });
     var note = $('sup-angle-note');
     if (note) note.textContent = S.angle + '\u00b0 \u00b7 Bambu ' + BAMBU_ANGLE + '\u00b0';
     var ang = $('sup-angle');
@@ -1002,7 +1006,7 @@ var NSO_SUPPORTS_CARD = (function () {
   function syncTune(cs, stale) {
     var sec = $('sup-tune');
     if (!sec) return;
-    sec.hidden = S.mode !== 'custom';
+    sec.hidden = S.mode !== 'custom' || flowFed({ style: ($('sup-style') || {}).value });   /* Tune's numbers are the lattice planner's: the flow tree's are Tree settings and Tree planner */
     KNOBS.forEach(function (K) {
       var e = $(K.id);
       if (!e) return;
@@ -1039,7 +1043,10 @@ var NSO_SUPPORTS_CARD = (function () {
       if (b) { b.classList.toggle('is-on', S.mode === k); b.setAttribute('aria-pressed', S.mode === k ? 'true' : 'false'); b.disabled = !!S.busy; }
     });
     var tools = $('sup-tools');
-    if (tools) tools.hidden = !fed || S.wide;                    // the tools work on one piece's points: not on the plate
+    /* the Tree type's flow tree takes spots and tips, and lands where it can: no landing circles and no members to erase (docs/PRINT-CARD.md) */
+    var flowT = flowFed({ style: ($('sup-style') || {}).value });
+    if (flowT && S.tool !== 'tips') S.tool = 'tips';
+    if (tools) tools.hidden = !fed || S.wide || flowT;           // the tools work on one piece's points: not on the plate
     var canErase = fed && hasHost && eraseReady();
     Object.keys(TOOLS).forEach(function (k) {
       var b = $('sup-tool-' + k);
@@ -1247,14 +1254,21 @@ var NSO_SUPPORTS_CARD = (function () {
      A saved setting is { id: value } over PRESET_FIELDS - the card's own controls, by their ids; putting one back sets each control and tells it
      so (input + change), as a hand on the control would. Nothing rebuilds: Generate does. */
   var PRESET_KEY = 'nso.supports.settings.v1', PRESET_LAST = 'nso.supports.settings.last';
-  var PRESET_FIELDS = ['sup-angle', 'sup-style', 'sup-size', 'sup-tree-distance', 'sup-tree-diameter', 'sup-tree-angle', 'sup-tree-dangle', 'sup-tree-tip',
+  var PRESET_FIELDS = ['sup-on', 'sup-angle', 'sup-style', 'sup-size', 'sup-tree-distance', 'sup-tree-diameter', 'sup-tree-angle', 'sup-tree-dangle', 'sup-tree-tip',
     'sup-rest', 'sup-small', 'sup-brim', 'sup-raft', 'sup-interface', 'slice-set-iface-angle', 'slice-set-raft', 'slice-set-raft-gap',
+    /* the Print card's slice rows: quality, strength, adhesion, the filament (not the printer or its nozzle: a saved setting goes with any printer) */
+    'slice-set-layer', 'slice-set-walls', 'slice-set-density', 'slice-set-pattern', 'slice-set-surface', 'slice-set-brim',
+    'slice-set-filament', 'slice-set-nozzle-temp', 'slice-set-first-temp', 'slice-set-bed-temp', 'slice-set-max-flow', 'slice-set-temp-step', 'slice-set-temp-band',
     /* Bambu's Advanced rows */
     'slice-set-sup-density', 'slice-set-sup-expand', 'slice-set-sup-walls', 'slice-set-sup-topz', 'slice-set-sup-bottomz', 'slice-set-sup-base', 'slice-set-sup-base-spacing',
     'slice-set-sup-angle', 'slice-set-sup-iface-pattern', 'slice-set-sup-iface-spacing', 'slice-set-sup-expansion', 'slice-set-sup-xy', 'slice-set-sup-zover',
     'slice-set-sup-first-gap', 'slice-set-sup-bridge', 'slice-set-sup-indep']
     .concat(Object.keys(ADV_IDS).map(function (k) { return ADV_IDS[k][0]; }));
   function store() { try { return typeof localStorage !== 'undefined' ? localStorage : null; } catch (err) { return null; } }
+  /* BUILT IN: the numbers NSO sliced supports with before the rows started at the printer profile's (docs/PRINT-CARD.md "Starting values").
+     Listed with the saved ones, not to be deleted or overwritten; it sets only the rows it names. */
+  var PRESET_BUILTIN = { 'NSO classic': { 'slice-set-sup-topz': '0.18', 'slice-set-sup-density': '100', 'slice-set-sup-bridge': '5' } };
+  function presetsAll() { var all = presetsRead(), out = {}; Object.keys(PRESET_BUILTIN).forEach(function (n) { out[n] = PRESET_BUILTIN[n]; }); Object.keys(all).forEach(function (n) { if (!PRESET_BUILTIN[n]) out[n] = all[n]; }); return out; }
   function presetsRead() { var st = store(); if (!st) return {}; try { var o = JSON.parse(st.getItem(PRESET_KEY) || '{}'); return o && typeof o === 'object' ? o : {}; } catch (err) { return {}; } }
   function presetsWrite(all) { var st = store(); if (!st) return false; try { st.setItem(PRESET_KEY, JSON.stringify(all)); return true; } catch (err) { return false; } }
   function presetNow() {
@@ -1276,17 +1290,17 @@ var NSO_SUPPORTS_CARD = (function () {
   }
   function presetList(pick) {
     var sel = $('sup-preset'); if (!sel || !sel.options) return;
-    var all = presetsRead(), names = Object.keys(all).sort(function (a, b) { return a.localeCompare(b); });
+    var all = presetsAll(), names = Object.keys(all).sort(function (a, b) { return a.localeCompare(b); });
     while (sel.options.length > 1) sel.remove(1);
     names.forEach(function (n) { var op = document.createElement('option'); op.value = n; op.textContent = n; sel.appendChild(op); });
     sel.value = pick && all[pick] ? pick : '';
-    var del = $('sup-preset-delete'); if (del) del.disabled = !sel.value;
+    var del = $('sup-preset-delete'); if (del) del.disabled = !sel.value || !!PRESET_BUILTIN[sel.value];
   }
   /* a control moved by hand after a pick: the card no longer shows the saved setting, and says so */
   var presetQuiet = false;
   function presetTouched() { if (presetQuiet) return; var sel = $('sup-preset'); if (sel && sel.value) { sel.value = ''; var del = $('sup-preset-delete'); if (del) del.disabled = true; } }
   function presetPick(name) {
-    var all = presetsRead();
+    var all = presetsAll();
     if (!name || !all[name]) { presetList(''); return false; }
     presetQuiet = true;
     var ok = presetApply(all[name]);
@@ -1298,6 +1312,7 @@ var NSO_SUPPORTS_CARD = (function () {
   function presetSave(name) {
     name = String(name == null ? '' : name).trim().slice(0, 60);
     if (!name) return false;
+    if (PRESET_BUILTIN[name]) { if (typeof setStatus === 'function') setStatus('"' + name + '" is built in: save under another name.'); return false; }
     var all = presetsRead(); all[name] = presetNow();
     if (!presetsWrite(all)) { if (typeof setStatus === 'function') setStatus('Could not save the settings: this browser keeps no storage for the page.'); return false; }
     presetList(name);
@@ -1335,12 +1350,56 @@ var NSO_SUPPORTS_CARD = (function () {
     return n;
   }
 
+  /* the Print card's own rows: the supports' settings grey out with the box unticked; the Printer row is the Plate panel's picker, shown here too */
+  function printSync() {
+    if (!printCard()) return;
+    var body = $('print-sup-body'), on = supportsOn();
+    if (body) { body.classList.toggle('is-off', !on); if (on) body.removeAttribute('inert'); else body.setAttribute('inert', ''); }
+    var box = $('sup-on'); if (box) box.disabled = !!S.busy || SL.busy;
+    var mine = $('print-printer'), theirs = $('plate-select');
+    if (mine && theirs && theirs.options) {
+      if (mine.options.length !== theirs.options.length) {
+        while (mine.options.length) mine.remove(0);
+        for (var i = 0; i < theirs.options.length; i++) { var op = document.createElement('option'); op.value = theirs.options[i].value; op.textContent = theirs.options[i].textContent; mine.appendChild(op); }
+      }
+      if (mine.value !== theirs.value) mine.value = theirs.value;
+      mine.disabled = !!S.busy || SL.busy;
+    }
+  }
+  /* SETTINGS ARE THE PLATE'S (app-beds.js: up to six plates, one active): every row of the card as the plate left it, kept by the plate's id
+     and put back when the plate is the active one again. A plate the card has not been on starts with the rows as they stand. */
+  var BEDSET = { at: null, by: {} };
+  function bedKey() {
+    var B = window.NSO_BEDS, list = null;
+    try { list = B && typeof B.info === 'function' && B.count() > 1 ? B.info() : null; } catch (err) { list = null; }
+    if (!list) return 'one';
+    for (var i = 0; i < list.length; i++) if (list[i].active) return 'bed' + list[i].id;
+    return 'one';
+  }
+  function bedSync() {
+    if (!printCard() || S.busy || SL.busy) return;
+    var id = bedKey();
+    if (BEDSET.at === id) return;
+    var sel = $('sup-preset');
+    if (BEDSET.at != null) BEDSET.by[BEDSET.at] = { vals: presetNow(), name: sel ? sel.value : '' };
+    var first = BEDSET.at == null;
+    BEDSET.at = id;
+    var mine = BEDSET.by[id];
+    S.printSig = null;
+    if (!mine || first) return;
+    presetQuiet = true;
+    try { presetApply(mine.vals); } finally { presetQuiet = false; }
+    presetList(mine.name);
+  }
+
   function cardOpts() {
     var st = $('sup-style'), sz = $('sup-size'), rs = $('sup-rest');
     var style = st && STYLES[st.value] ? st.value : 'tree';
     var size = sz ? parseFloat(sz.value) : NaN;
     var one = $('sup-one'), it = $('sup-interface'), br = $('sup-brim'), rf = $('sup-raft'), sm = $('sup-small');
-    return { brim: !br || !!br.checked, raft: !rf || !!rf.checked, style: style, sideMm: isFinite(size) ? size : null, rest: !!(rs && rs.checked), noHorns: !!(sm && sm.checked), knobs: S.mode === 'custom' ? knobsGiven() : null,
+    /* the Print card has ONE brim row (the Slice settings' Brim: auto / every part / off): a part on supports gets its ring unless that row says off */
+    var brimSel = $('slice-set-brim'), brimOn = printCard() ? !(brimSel && brimSel.value === 'none') : (!br || !!br.checked);
+    return { brim: brimOn, raft: !rf || !!rf.checked, style: style, sideMm: isFinite(size) ? size : null, rest: !!(rs && rs.checked), noHorns: !!(sm && sm.checked), knobs: S.mode === 'custom' ? knobsGiven() : null,
       one: !one || !!one.checked || (!!(one.parentNode && one.parentNode.hidden) && one.dataset.testOff !== '1'), dense: true, ifaceLayers: it && it.value !== '' && isFinite(parseInt(it.value, 10)) ? parseInt(it.value, 10) : null, treeKnobs: treeKnobsOf(), flowKnobs: advKnobsOf() };   /* hidden: always one-trunk */
   }
 
@@ -1479,7 +1538,7 @@ var NSO_SUPPORTS_CARD = (function () {
     if (S.mode === 'auto') return null;
     var F = feedOf(m), feed = { mode: S.mode, landingZones: F.zones.map(function (z) { return { x: z.x, y: z.y, r: z.r }; }), excluded: F.erased.slice() };
     if (S.mode === 'custom') {
-      feed.tips = beacons.filter(function (b) { return !b.off; }).map(function (b) { return { x: b.x, y: b.y, z: b.z, key: b.key, regionId: rid }; });
+      feed.tips = beacons.filter(function (b) { return !b.off; }).map(function (b) { return { x: b.x, y: b.y, z: b.z, key: b.key, regionId: b.rid != null ? b.rid : rid }; });
       if (knobs) feed.knobs = Object.assign({}, knobs);       // Tune: only the fields that are not at their default
     } else {
       feed.beaconsOff = beacons.filter(function (b) { return b.off && !b.erased; }).map(function (b) { return b.id; });
@@ -1494,7 +1553,7 @@ var NSO_SUPPORTS_CARD = (function () {
        docs/SUPPORT-ONE-TRUNK.md). Straight struts are one post a spot by definition, the gecko hand is the lattice's, and a support
        that may rest on the part has legs the one-trunk crown does not make (it stands on the plate only): with "may rest" the one-trunk
        build runs first, and the spots it could not reach (legacy) are planned again alone, with the lattice that may rest on the part. */
-    if (!feed && !legacy && oneTrunkOn(o)) opts.oneTrunk = true;
+    if (!legacy && oneTrunkOn(o) && (!feed || flowFed(o))) opts.oneTrunk = true;
     if (feed) opts.feed = feed;
     if (feed && feed.mode === 'custom') delete opts.beacons;         // Custom plans its tips alone: no beacon list goes with them
     if (o.sideMm != null) opts.sideMm = o.sideMm;
@@ -2398,7 +2457,12 @@ var NSO_SUPPORTS_CARD = (function () {
     return { ok: true, removed: ids.slice() };
   }
 
-  function styleNone() { var st = $('sup-style'); return !!(st && st.value === 'none'); }
+  /* THE PRINT CARD (docs/PRINT-CARD.md). The card is the Print card when it has the Supports box (#sup-on): Slice is its one build button, it
+     works on the whole plate, and supports are an option of the slice - ticked, they are built first; unticked, the plate's come off and the
+     pieces are sliced alone. Without the box (a page of the old shape, the tests' cards) the card is the Supports card it was. */
+  function printCard() { return !!$('sup-on'); }
+  function supportsOn() { var b = $('sup-on'); if (b) return !!b.checked; var st = $('sup-style'); return !(st && st.value === 'none'); }
+  function styleNone() { return !supportsOn(); }
   /* STYLE NONE: no supports are built - Generate slices the plate as it stands (the raft, if it has layers, under it), ready for Preview */
   function sliceOnly() {
     var P = window.NSO_Print && window.NSO_Print.card;
@@ -2407,13 +2471,86 @@ var NSO_SUPPORTS_CARD = (function () {
     S.sliceWhy = null; SL.busy = true; sync(); sliceLine('Slicing the plate', false);
     return P.slice({ onStage: function (t) { if (SL.busy) sliceLine(t, false); } }).then(function (r) {
       SL.busy = false; SL.last = r;
-      if (r.ok) sliceLine('Sliced, no supports built: ' + r.line + '. Preview opens it.', false);
+      if (r.ok) sliceLine((supportsOn() ? 'Sliced: ' : 'Sliced, no supports built: ') + r.line + '. Preview opens it.', false);
       else sliceLine(r.reason, !r.cancelled);
       sync();
       return r;
     });
   }
+  /* EVERY SUPPORT OFF THE PLATE, one Undo (the Print card's Slice with Supports unticked) */
+  function plateTakeOff() {
+    if (S.busy) return { ok: false, reason: 'busy' };
+    var ids = [], undos = [];
+    realIds().forEach(function (id) {
+      asHost(id, function () {
+        var mine = supportsOf(id).map(function (m) { return m.id; });
+        if (!mine.length) return;
+        undos.push(snapshot());
+        ids = ids.concat(mine);
+        var mem = memOf(id); mem.unreach = {}; mem.selfHeld = {}; mem.built = false; mem.members = []; mem.zonesEmpty = []; mem.builtKnobs = '';
+      });
+    });
+    S.printSig = null;
+    if (!ids.length) return { ok: true, removed: [] };
+    var removed = removePieces(ids);
+    pushUndo({ type: 'supportSwap', removed: removed, addedIds: [], label: 'Undo: the plate\'s supports restored', onUndone: function () { undos.forEach(function (fn) { fn(); }); } });
+    S.msg = null; S.selSupport = null;
+    afterCommit();
+    return { ok: true, removed: ids };
+  }
+  /* what the plate's supports are built by: the settings that shape them and every piece as it stands (its pose, its edits, its supports). The
+     same after a build as before the next Slice: nothing to build again - the plate is sliced as it is */
+  function printSig() {
+    var o = cardOpts();
+    return JSON.stringify([S.angle, S.mode, o.style, o.sideMm, o.rest, o.noHorns, o.ifaceLayers, o.treeKnobs, o.flowKnobs, o.knobs, o.brim, bridgeNow(),
+      realIds().map(function (id) { return asHost(id, hostSignature); })]);
+  }
+  /* SLICE, the Print card's one button: the plate as the card says it. Supports unticked: the plate's supports come off and it is sliced bare.
+     Ticked: the supports are built for every piece on the plate (each with its own left-out areas, tips and blockers) - unless nothing they are
+     built by has changed since the last build - and the plate is sliced with them (the build ends with the slice). */
+  function printSlice(pre) {
+    if (S.busy || SL.busy) return Promise.resolve({ ok: false, reason: 'busy' });
+    var ids = realIds();
+    if (!ids.length) { S.msg = { text: 'Nothing on the plate to slice.', bad: true }; sync(); return Promise.resolve({ ok: false, reason: 'empty plate' }); }
+    if (!supportsOn()) { plateTakeOff(); return sliceOnly(); }
+    if (S.printSig && S.printSig === printSig()) return sliceOnly();
+    var done = function (r) {
+      if (r && r.ok) { S.printSig = printSig(); return r; }
+      /* nothing hangs on the plate (or every area is left out): there is nothing to build, and the plate is sliced as it is */
+      if (r && (r.reason === 'nothing to build' || r.reason === 'nothing needs holding')) { S.msg = null; return sliceOnly(); }
+      return r;
+    };
+    var badKnob = S.mode === 'custom' ? knobBad() : null;
+    if (badKnob) { S.msg = { text: badKnob, bad: true, knob: true }; sync(); return Promise.resolve({ ok: false, reason: badKnob }); }
+    if (ids.length >= 2) {
+      if (!S.wide) {
+        if (state.selectedIndex >= 0 && typeof selectPlaced === 'function') selectPlaced(-1);
+        var w = setWide(true);
+        if (!w.ok) return Promise.resolve(w);
+      }
+      /* the pieces are read as the plate option comes on: a big one in a worker - Slice waits for the read */
+      return new Promise(function (go) {
+        var t0 = Date.now();
+        (function wait() {
+          var W = wideRead();
+          if (W.pending && Date.now() - t0 < 120000) { setTimeout(wait, 50); return; }
+          go(buildWide().then(done));
+        })();
+      });
+    }
+    if (S.hostId !== ids[0]) pick(ids[0]);
+    return new Promise(function (go) {
+      var t0 = Date.now();
+      (function wait() {
+        if (detect() === PENDING && Date.now() - t0 < 120000) { setTimeout(wait, 50); return; }
+        S.eff = effective();
+        if (S.eff.error || !S.eff.beacons.length) { refresh(); go(done({ ok: false, reason: S.eff.error || 'nothing needs holding' })); return; }
+        go(build(pre).then(done));
+      })();
+    });
+  }
   function generate(pre) {
+    if (printCard()) return printSlice(pre);
     if (styleNone()) return sliceOnly();
     if (S.wide) return generateWide();
     if (S.hostId == null) return Promise.resolve({ ok: false, reason: 'no piece' });
@@ -3293,6 +3430,7 @@ var NSO_SUPPORTS_CARD = (function () {
 
   function tick() {
     if (!S.open) return;
+    bedSync();
     var menu = $('menu-supports');
     if (menu && !menu.open) { close(); return; }
     if (!S.busy) {
@@ -3488,7 +3626,16 @@ var NSO_SUPPORTS_CARD = (function () {
        restored it unchecked, and Tree built the lattice's straight posts - 'unreachable 6', no tree (the owner's plate). It is set, not restored. */
     var oneBox = $('sup-one'); if (oneBox) oneBox.checked = true;
     on('btn-sup-all', 'click', function () { generate(); });
-    on('sup-style', 'change', function () { sync(); });                    /* None: Generate slices the plate alone */
+    on('sup-style', 'change', function () { sync(); });
+    on('sup-on', 'change', function () { S.printSig = null; sync(); });      /* the Print card's Supports box */
+    on('print-printer', 'change', function () {
+      var mine = $('print-printer'), theirs = $('plate-select');
+      if (!mine || !theirs || theirs.value === mine.value) return;
+      theirs.value = mine.value;
+      try { theirs.dispatchEvent(new Event('change', { bubbles: true })); } catch (err) { /* the Plate panel's own handler takes it */ }
+      sync();
+    });
+    on('slice-set-brim', 'change', function () { S.printSig = null; });
     on('btn-sup-none', 'click', function () { removeAll(); });
     on('btn-sup-remove', 'click', function () { removeSelected(); });
     on('sup-plate', 'change', function () { setWide($('sup-plate').checked, { pick: true }); syncPlate(); });
@@ -3525,7 +3672,7 @@ var NSO_SUPPORTS_CARD = (function () {
       var sel = $('sup-preset'), name = sel && sel.value;
       if (!name) return;
       if (reset) { presetTouched(); return; }
-      var all = presetsRead(), vals = all[name];
+      var all = presetsAll(), vals = all[name];
       if (!vals) return;
       var only = {};
       PRESET_FIELDS.forEach(function (id) { if (/^slice-set-/.test(id) && vals[id] !== undefined) only[id] = vals[id]; });
@@ -3533,7 +3680,7 @@ var NSO_SUPPORTS_CARD = (function () {
       try { presetApply(only); } finally { presetQuiet = false; }
     };
     /* the settings last saved or picked come back with the page: what worked is what the card opens with */
-    (function () { var st = store(), last = null; try { last = st ? st.getItem(PRESET_LAST) : null; } catch (err) { last = null; } if (last && presetsRead()[last]) presetPick(last); })();
+    (function () { var st = store(), last = null; try { last = st ? st.getItem(PRESET_LAST) : null; } catch (err) { last = null; } if (last && presetsAll()[last]) presetPick(last); })();
     Object.keys(MODES).forEach(function (k) { on('sup-mode-' + k, 'click', function () { setMode(k); }); });
     Object.keys(TOOLS).forEach(function (k) { on('sup-tool-' + k, 'click', function () { setTool(k); }); });
     window.addEventListener('pointerdown', onDown, true);
@@ -3708,7 +3855,7 @@ var NSO_SUPPORTS_CARD = (function () {
     /** The saved settings (docs/SUPPORTS-CARD.md "Saved settings"): now() the card's levers as { id: value }, apply(vals), save(name), pick(name),
         remove(name), names(), exportText(), importText(text) -> how many read; advanced() the Advanced numbers that differ from their defaults. */
     settings: { fields: PRESET_FIELDS.slice(), now: presetNow, apply: presetApply, save: presetSave, pick: presetPick, remove: presetDelete,
-                names: function () { return Object.keys(presetsRead()).sort(); }, exportText: presetExport, importText: presetImport, advanced: advKnobsOf },
+                names: function () { return Object.keys(presetsAll()).sort(); }, exportText: presetExport, importText: presetImport, advanced: advKnobsOf },
     /** Forget every host's tips, toggles, circles and erasures (what CLEAR PLATE does). */
     forgetAll: forgetAll,
     /** Forget only these pieces (ids): what CLEAR PLATE does when other plates stand beside the one cleared. */

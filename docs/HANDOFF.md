@@ -96,6 +96,7 @@ merging its list by hand. The list below is generated.
 - [Pose bake - every pose action is complete when it ends (2026-10-21)](handoff/pose-bake-every-pose-action-is-complete-when-it-ends.md)
 - [Position lock (2026-09-16)](handoff/position-lock.md)
 - [Pottery Wheel - throw a vessel on an axis](handoff/pottery-wheel-throw-a-vessel-on-an-axis.md)
+- [The Print card: the Supports card became the one card for printer, slice and supports (2026-11-14)](handoff/print-card.md)
 - [Print planner: NSO writes Bambu's dialect (print-planner-1, #277)](handoff/print-planner-1.md)
 - [Slice card: the plate sliced for its printer (print-slice-main-plate)](handoff/print-slice-main-plate.md)
 - [Punch - engine (2026-10-20)](handoff/punch-engine.md)

@@ -345,6 +345,7 @@
     "support:paint-drive": {"weight":90000,"note":"headless Chromium: the supp_ref plate loaded, the Negative Sphere painted with real pointer events, built once; ~25 s locally x 3, estimate; supports-footprint"},
     "support:onetrunk": {"weight":150000,"note":"~1.5 min locally x 1.7, rounded up: the reference read, the six real parts built twice (box off, one trunk) and the one-trunk builds sliced and measured; supports-one-trunk"},
     "support:settings-drive": {"weight":120000,"note":"estimate (supports-advanced): a browser; the page loaded twice, the owner's Supporttest built once in the worker (27 s on the cloud box)"},
+    "print:card": {"weight":60000,"note":"estimate (print-card): Node only; the shelter built eight times through the headless card"},
     "support:advanced": {"weight":60000,"note":"estimate (supports-bambu-advanced): Node only; the coupon sliced 16 times through build() (one a row), two small card builds, about 35 s locally"},
     "slicer:support-levers": {"weight":50000,"note":"estimate (supports-bambu-advanced): Node only; a T and its supports sliced about 35 times with the column rule, about 30 s locally"},
     "support:settings": {"weight":40000,"note":"estimate (supports-advanced): Node only; the card's Advanced numbers and saved settings, and two builds of a small shelter (plate only, may rest), about 25 s locally"},

@@ -182,11 +182,18 @@ async function main() {
 
   // ---- the same file as the planner gate's own pipeline makes
   const ref3 = await PL.toGcode3mf(plate.res, { config: tpl, printer: a1 });
-  check('the card\'s file is the planner gate\'s: the same G-code, byte for byte, from the plate as the card reads it',
-    L.text(await zip.read('Metadata/plate_1.gcode')) === ref3.plan.gcode);
-  check('what the card shows is the planner\'s: ' + PRINT.describe(out) + ' - layers ' + ref3.plan.stats.layers + ', ' + Math.round(ref3.plan.stats.seconds.total) + ' s, ' + ref3.plan.stats.grams.toFixed(2) + ' g',
-    out.stats.layers === ref3.plan.stats.layers && out.stats.seconds === ref3.plan.stats.seconds.total && out.stats.grams === ref3.plan.stats.grams &&
-      out.objects === ref3.plan.labels.length);
+  /* the gate's plate is sliced at the engine's own support numbers (first layer solid, 0.18 under the part); the card starts at the profile's
+     (90 %, 0.2 - docs/PRINT-CARD.md "Starting values"), so it is asked for the engine's two to be the same slice */
+  const outEng = await PRINT.build(objs, { config: tpl, printer: a1 }, { settings: Object.assign(PRINT.settingsFromConfig(tpl), { supDensity: 100, supTopZ: 0.18 }) });
+  const gEng = outEng.ok ? L.text(await L.R.openZip(outEng.bytes).read('Metadata/plate_1.gcode')) : '';
+  const lessKeys = t => t.split('\n').filter(l => !/^; (raft_first_layer_density|support_top_z_distance) = /.test(l)).join('\n');
+  check('the card\'s file, at the engine\'s own two support numbers, is the planner gate\'s: the same G-code (but the two keys it records), from the plate as the card reads it',
+    outEng.ok && lessKeys(gEng) === lessKeys(ref3.plan.gcode), outEng.ok ? gEng.length + ' / ' + ref3.plan.gcode.length : outEng.reason);
+  check('...and at the profile\'s own (what the rows start at) only the supports differ: the same layers, the part\'s walls untouched',
+    out.stats.layers === ref3.plan.stats.layers && out.objects === ref3.plan.labels.length);
+  check('what the card shows is the planner\'s: ' + PRINT.describe(outEng) + ' - layers ' + ref3.plan.stats.layers + ', ' + Math.round(ref3.plan.stats.seconds.total) + ' s, ' + ref3.plan.stats.grams.toFixed(2) + ' g',
+    outEng.stats.layers === ref3.plan.stats.layers && outEng.stats.seconds === ref3.plan.stats.seconds.total && outEng.stats.grams === ref3.plan.stats.grams &&
+      outEng.objects === ref3.plan.labels.length);
   check('...the readout line has layers, time and grams', /^\d+ layers - .+ - \d+\.\d g filament$/.test(PRINT.describe(out)), PRINT.describe(out));
 
   // ===========================================================================
@@ -197,9 +204,9 @@ async function main() {
     check('the settings start at the A1 mini template\'s values: 0.4 nozzle, 0.2 mm layers, 2 walls, 15 % grid, support below 30°, auto brim, no raft (0.1 contact)',
       JSON.stringify(base) === JSON.stringify({ nozzle: 0.4, layer: 0.2, walls: 2, density: 15, pattern: 'grid', surface: 'zigzag', angle: 30, brim: 'auto', raft: 0, raftGap: 0.1, ifaceAngle: 'studio36', interfaceRule: null,
         filament: 'profile', nozzleTemp: null, firstTemp: null, bedTemp: null, maxFlow: null, tempStep: 0, tempBand: 10,
-        /* Bambu's Advanced support rows (docs/SUPPORT-ADVANCED.md): the slicer's own values, the pattern angle and the interface spacing the template's */
-        supDensity: 100, supExpand: -1, supWalls: -1, supTopZ: 0.18, supBottomZ: 0.2, supBase: 'default', supBaseSpacing: 2.5, supAngle: 0, supIfacePattern: 'default', supIfaceSpacing: 0.5,
-        supExpansion: 0, supXy: 0.35, supZOverXy: false, supFirstGap: 0.2, supBridge: 5, supIndep: true }), JSON.stringify(base));
+        /* Bambu's Advanced support rows start at the template's own values (docs/PRINT-CARD.md "Starting values"): first layer 90 %, top Z 0.2, every bridge held */
+        supDensity: 90, supExpand: -1, supWalls: -1, supTopZ: 0.2, supBottomZ: 0.2, supBase: 'default', supBaseSpacing: 2.5, supAngle: 0, supIfacePattern: 'default', supIfaceSpacing: 0.5,
+        supExpansion: 0, supXy: 0.35, supZOverXy: false, supFirstGap: 0.2, supBridge: 0, supIndep: true }), JSON.stringify(base));
     const rov = PRINT.configOverlay(tpl, Object.assign({}, base, { raft: 10 }));
     check('a raft of 10 on the card is the file\'s raft_layers = 10, and nothing else changes', JSON.stringify(rov) === JSON.stringify({ raft_layers: '10' }), JSON.stringify(rov));
     check('...which are the card\'s markup defaults too (shown before the template is fetched)', JSON.stringify(PRINT.SETTINGS_DEFAULT) === JSON.stringify(base));
@@ -508,17 +515,26 @@ async function main() {
   check('...and G-scope is not first in the column (Scale is)', col.indexOf('id="menu-scale"') < col.indexOf('id="btn-microscope"') && col.indexOf('id="menu-scale"') > 0);
   check('G-scope\'s button is the same button: its id, class, label and its file input beside it',
     /<button id="btn-microscope" class="vp-bar-btn btn-gscope" type="button"\s+aria-label="G-scope"\s+title="G-scope: put the plate under the lens[^"]*">G-scope<\/button>\s*<input type="file" id="ms-input" accept="\.stl,\.3mf" class="hidden-quiet" \/>/.test(html));
-  check('the Slice card is the supports card\'s last section (Generate slices; Preview, under Generate, opens it): every button and row it has, the raft in the supports\' own rows',
+  check('the Print card (docs/PRINT-CARD.md) is the one card: Slice, Preview and Export its only buttons, a Supports tick, and every slice row in its own sections - printer, quality, strength, supports, adhesion',
     (() => { const m = /<details class="vp-menu vp-shell-menu vp-col-menu" id="menu-supports">[\s\S]*?<\/details>\s*<!-- ADD/.exec(html);
       if (!m) return false;
-      const sec = /<details class="vp-sec sup-slice-sec" id="sup-slice-sec"[\s\S]*$/.exec(m[0]), settings = /<div id="slice-settings"[\s\S]*?<\/div>/.exec(m[0]);
-      return !!sec && /<summary class="vp-sec-head"[^>]*>Slice<\/summary>/.test(sec[0]) && ['btn-slice-go', 'btn-slice-cancel', 'btn-slice-export', 'slice-profile', 'slice-readout', 'slice-progress',
-        'slice-settings-toggle', 'slice-settings', 'slice-set-nozzle', 'slice-set-layer', 'slice-set-walls', 'slice-set-density', 'slice-set-pattern',
-        'slice-set-angle', 'slice-set-brim', 'slice-set-iface', 'slice-settings-reset',
-        'slice-set-filament', 'slice-set-nozzle-temp', 'slice-set-first-temp', 'slice-set-bed-temp', 'slice-set-max-flow', 'slice-set-temp-step', 'slice-set-temp-band', 'slice-filament-note']
-        .every(id => sec[0].includes('id="' + id + '"')) && /Export \.gcode\.3mf/.test(sec[0]) && !sec[0].includes('btn-slice-preview') &&
-        m[0].indexOf('id="btn-sup-all"') < m[0].indexOf('id="btn-sup-slice"') && m[0].indexOf('id="btn-sup-slice"') < m[0].indexOf('id="sup-style"') &&
-        m[0].includes('id="slice-set-raft"') && m[0].includes('id="slice-set-raft-gap"') && !!settings && !settings[0].includes('slice-set-raft'); })());
+      const c = m[0], has = id => c.includes('id="' + id + '"'), from = id => { const i = c.indexOf('id="' + id + '"'); return i < 0 ? '' : c.slice(i); };
+      const sec = id => { const t = from(id), n = t.slice(1).search(/<details class="vp-sec print-sec"/); return n < 0 ? t : t.slice(0, n + 1); };
+      return /<summary class="vp-bar-btn"[^>]*>Print<\/summary>/.test(c) &&
+        ['btn-sup-all', 'btn-sup-slice', 'btn-slice-export', 'btn-slice-cancel', 'slice-profile', 'slice-readout', 'slice-progress', 'print-printer', 'sup-on', 'print-sup-body', 'sup-style',
+         'slice-set-nozzle', 'slice-set-layer', 'slice-set-walls', 'slice-set-density', 'slice-set-pattern', 'slice-set-brim', 'slice-set-raft', 'slice-set-raft-gap', 'slice-settings-reset',
+         'slice-set-filament', 'slice-set-nozzle-temp', 'slice-set-first-temp', 'slice-set-bed-temp', 'slice-set-max-flow', 'slice-set-temp-step', 'slice-set-temp-band', 'slice-filament-note'].every(has) &&
+        /* ...and nothing of the cards it took the place of: no second Slice button, no None, no Remove, no second angle, no interface rule */
+        ['btn-slice-go', 'btn-sup-none', 'btn-sup-remove', 'slice-set-angle', 'slice-set-iface', 'slice-settings-toggle', 'btn-slice-preview', 'sup-plate'].every(id => !html.includes('id="' + id + '"')) &&
+        c.indexOf('id="btn-sup-all"') < c.indexOf('id="btn-sup-slice"') && c.indexOf('id="btn-sup-slice"') < c.indexOf('id="btn-slice-export"') && c.indexOf('id="btn-slice-export"') < c.indexOf('id="sup-style"') &&
+        sec('print-sec-printer').includes('id="slice-set-filament"') && sec('print-sec-quality').includes('id="slice-set-layer"') && sec('print-sec-strength').includes('id="slice-set-walls"') &&
+        /* the raft is adhesion's: reached with Supports unticked (it is outside the body the tick greys) */
+        sec('print-sec-adhesion').includes('id="slice-set-raft"') && sec('print-sec-adhesion').includes('id="slice-set-brim"') && !sec('print-sec-supports').includes('id="slice-set-raft"') &&
+        c.indexOf('id="print-sup-body"') < c.indexOf('id="sup-style"') &&
+        /* the types: Straight strut, Tree, Gecko Hands - None is the tick, not a type */
+        /^id="sup-style"[^>]*>\s*<option value="strut">Straight strut<\/option>\s*<option value="tree" selected>Tree<\/option>\s*<option value="gecko-hand">Gecko Hands<\/option>\s*<\/select>/.test(from('sup-style')) &&
+        /* G-scope sets nothing: its Slice switch is a view */
+        !/id="ms-slice-set-/.test(html) && html.includes('id="ms-slice-settings-note"'); })());
   const css = read('styles.css');
   check('while a build runs the supports card is locked (no clicks), all but its Cancel: the build and its slice can be stopped',
     /\.sup-card\.is-locked \{ pointer-events: none; \}/.test(css) && /\.sup-card\.is-locked #btn-sup-slice-cancel \{ pointer-events: auto;/.test(css));

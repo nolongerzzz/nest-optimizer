@@ -74,6 +74,7 @@ async function buildAndSlice(opts) {
       .concat(sups.map((s, k) => ({ name: 's' + k, soup: Float32Array.from(s.soup), key: 201 + k, role: s.brim ? 'brim' : 'support', hostKey: 101 })));
     const so = { supportInterfaceLayers: 3, supportLayerMaxMm: 0.28 };
     if (opts.rule) so.supportInterfaceRule = opts.rule;
+    if (opts.profile) { so.supportGapMm = 0.2; so.supportFirstLayerDensity = 0.9; }   /* --profile: the printer profile's two support numbers, where the Print card's rows start (docs/PRINT-CARD.md) */
     if (opts.angle) so.supportThresholdDeg = +opts.angle;                  /* the slicer's footprint at the angle the card detected at (the reference's own threshold) */
     const res = SL.sliceObjects(objl, SL.defaultsFor(0.4, so), WASM);
     res.objects.forEach(ob => (ob.layers || []).forEach(L => (L.paths || []).forEach(p => {
@@ -142,7 +143,7 @@ function reHead(moves, refMoves) {
   if (files.length) for (const f of files) { const mv = reHead(await readSliced(f), refMoves); runs.push([path.basename(f), GL.measureAll(mv), mv]); }
   else {
     const rule = arg('--rule') === 'sheet' ? null : 'column';                /* the app's default (the column rule); --rule sheet the sheet typing */
-    let mv = await buildAndSlice({ rule: rule, angle: arg('--angle'), merged: argv.includes('--merged'), fixture: arg('--fixture'), rest: argv.includes('--rest') });
+    let mv = await buildAndSlice({ rule: rule, angle: arg('--angle'), merged: argv.includes('--merged'), fixture: arg('--fixture'), rest: argv.includes('--rest'), profile: argv.includes('--profile') });
     if (argv.includes('--merged') || arg('--fixture')) mv = reHead(mv, refMoves);     /* another fixture stands where the card put it: moved onto the reference by the parts' centres */
     if (arg('--dump')) fs.writeFileSync(arg('--dump'), JSON.stringify(mv.map(m => [m.head, m.role, m.feat, m.z, m.h, +m.x0.toFixed(3), +m.y0.toFixed(3), +m.x1.toFixed(3), +m.y1.toFixed(3)])));
     runs.push(['NSO build + NSO_Slicer (rule ' + (rule || 'sheet') + ')' + (argv.includes('--merged') ? ', the six as one piece' : ''), GL.measureAll(mv), mv]);

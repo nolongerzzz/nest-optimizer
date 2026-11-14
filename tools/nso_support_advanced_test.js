@@ -22,10 +22,10 @@ function check(name, ok, note) { if (ok) pass++; else { fail++; failed.push(name
 
 /* row -> [settings field, a changed value, the slicer's option and its value, Bambu's key and its text] */
 const ROWS = [
-  ['Initial layer density', 'supDensity', 90, 'supportFirstLayerDensity', 0.9, 'raft_first_layer_density', '90%'],
+  ['Initial layer density', 'supDensity', 70, 'supportFirstLayerDensity', 0.7, 'raft_first_layer_density', '70%'],
   ['Initial layer expansion', 'supExpand', 1.5, null, null, 'raft_first_layer_expansion', '1.5'],
   ['Support wall loops', 'supWalls', 2, 'supportWallLoops', 2, 'tree_support_wall_count', '2'],
-  ['Top Z distance', 'supTopZ', 0.2, 'supportGapMm', 0.2, 'support_top_z_distance', '0.2'],
+  ['Top Z distance', 'supTopZ', 0.3, 'supportGapMm', 0.3, 'support_top_z_distance', '0.3'],
   ['Bottom Z distance', 'supBottomZ', 0.3, 'supportBottomGapMm', 0.3, 'support_bottom_z_distance', '0.3'],
   ['Base pattern', 'supBase', 'rectilinear-grid', 'supportBasePattern', 'rectilinear-grid', 'support_base_pattern', 'rectilinear-grid'],
   ['Base pattern spacing', 'supBaseSpacing', 3.5, 'supportBaseSpacingMm', 3.5, 'support_base_pattern_spacing', '3.5'],
@@ -36,7 +36,7 @@ const ROWS = [
   ['Support/object xy distance', 'supXy', 0.5, 'supportXyMm', 0.5, 'support_object_xy_distance', '0.5'],
   ['Z overrides X/Y', 'supZOverXy', true, 'supportZOverridesXy', true, 'top_z_overrides_xy_distance', '1'],
   ['Support/object first layer gap', 'supFirstGap', 0.5, 'supportFirstLayerGapMm', 0.5, 'support_object_first_layer_gap', '0.5'],
-  ['Max bridge length', 'supBridge', 0, null, null, 'max_bridge_length', '0'],
+  ['Max bridge length', 'supBridge', 10, null, null, 'max_bridge_length', '10'],
   ['Independent support layer height', 'supIndep', false, 'supportLayerMaxMm', 0, 'independent_support_layer_height', '0']
 ];
 const KEYS = ROWS.map(r => r[5]);
@@ -56,14 +56,14 @@ const KEYS = ROWS.map(r => r[5]);
   };
 
   console.log('=== 1. Left alone ===');
-  check('the card starts every row at this slicer\'s own value; the pattern angle and the interface spacing at the profile\'s',
-    ROWS.every(r => JSON.stringify(base[r[1]]) === JSON.stringify(D[r[1]])) && base.supDensity === 100 && base.supExpand === -1 && base.supWalls === -1 && base.supTopZ === 0.18 &&
-    base.supBase === 'default' && base.supIfacePattern === 'default' && base.supXy === 0.35 && base.supBridge === 5 && base.supIndep === true && base.supZOverXy === false,
+  check('the card starts every row at the printer profile\'s value (docs/PRINT-CARD.md "Starting values"): first layer 90 %, top Z 0.2, every bridge held (0)',
+    ROWS.every(r => JSON.stringify(base[r[1]]) === JSON.stringify(D[r[1]])) && base.supDensity === 90 && base.supExpand === -1 && base.supWalls === -1 && base.supTopZ === 0.2 &&
+    base.supBase === 'default' && base.supIfacePattern === 'default' && base.supXy === 0.35 && base.supBridge === 0 && base.supIndep === true && base.supZOverXy === false,
     JSON.stringify(ROWS.map(r => base[r[1]])));
   check('an untouched card writes none of the support keys', KEYS.every(k => !(k in PRINT.configOverlay(tpl, base))));
   const none = await run(null), same = await run(base);
   const optKeys = ROWS.map(r => r[3]).filter(Boolean);
-  check('...and hands the slicer what it used with no settings at all', optKeys.every(k => JSON.stringify(none.o[k]) === JSON.stringify(same.o[k])) && same.out.ok && KEYS.every(k => same.out.changed.indexOf(k) < 0),
+  check('...and hands the slicer what a slice with no settings at all is given: the profile\'s', optKeys.every(k => JSON.stringify(none.o[k]) === JSON.stringify(same.o[k])) && same.out.ok && KEYS.every(k => same.out.changed.indexOf(k) < 0),
     optKeys.filter(k => JSON.stringify(none.o[k]) !== JSON.stringify(same.o[k])).map(k => k + ' ' + none.o[k] + ' -> ' + same.o[k]).join(', '));
   check('...the same G-code, line for line', none.out.ok && same.out.ok && none.out.gcode === same.out.gcode);
 

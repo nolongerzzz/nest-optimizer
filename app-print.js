@@ -114,10 +114,11 @@
   var SETTINGS_DEFAULT = { nozzle: 0.4, layer: 0.2, walls: 2, density: 15, pattern: 'grid', surface: 'zigzag', angle: 30, brim: 'auto', raft: 0, raftGap: 0.1, ifaceAngle: 'studio36', interfaceRule: null,
                            /* the filament: the profile's own; a null row is the filament's value (filamentBase); no temperature steps */
                            filament: 'profile', nozzleTemp: null, firstTemp: null, bedTemp: null, maxFlow: null, tempStep: 0, tempBand: 10,
-                           /* BAMBU'S ADVANCED SUPPORT ROWS (docs/SUPPORT-ADVANCED.md), each at what the slicer did before the row existed: the first
-                              layer solid, the pad as built, one wall, the top distance 0.18, lines 2.5 apart, a bridge of 5 mm or less not held */
-                           supDensity: 100, supExpand: -1, supWalls: -1, supTopZ: 0.18, supBottomZ: 0.2, supBase: 'default', supBaseSpacing: 2.5, supAngle: 0,
-                           supIfacePattern: 'default', supIfaceSpacing: 0.5, supExpansion: 0, supXy: 0.35, supZOverXy: false, supFirstGap: 0.2, supBridge: 5, supIndep: true };   /* the card's own defaults (the owner's view): Studio 2.9's 3.6 - the owner's mouse1 on the P1S released clean with it */
+                           /* BAMBU'S ADVANCED SUPPORT ROWS (docs/SUPPORT-ADVANCED.md). They start at the printer profile's values (settingsFromConfig);
+                              these are Bambu's own defaults, for a card with no profile. NSO's old numbers (top 0.18, first layer solid, a bridge of
+                              5 mm not held) are the Print card's built-in saved setting "NSO classic" */
+                           supDensity: 90, supExpand: -1, supWalls: -1, supTopZ: 0.2, supBottomZ: 0.2, supBase: 'default', supBaseSpacing: 2.5, supAngle: 0,
+                           supIfacePattern: 'default', supIfaceSpacing: 0.5, supExpansion: 0, supXy: 0.35, supZOverXy: false, supFirstGap: 0.2, supBridge: 0, supIndep: true };   /* the card's own defaults (the owner's view): Studio 2.9's 3.6 - the owner's mouse1 on the P1S released clean with it */
   var SUP_BASE_TO_CONFIG = { 'default': 'default', rectilinear: 'rectilinear', 'rectilinear-grid': 'rectilinear-grid', hollow: 'hollow' };
   var SUP_IFACE_TO_CONFIG = { 'default': 'auto', rectilinear: 'rectilinear', concentric: 'concentric', rectilinear_interlaced: 'rectilinear_interlaced', grid: 'grid' };
   var IFACE_ANGLES = { profile: 1, bridge: 1, studio36: 1, crosshatch: 1 };   /* nso_slicer.js supportInterfaceAngle: NSO's own, no profile key - a testing ground for interfaces */
@@ -208,6 +209,8 @@
     return v == null ? '' : String(v).trim();
   }
 
+  function numOf(v, d) { var n = parseFloat(v); return isFinite(n) ? n : d; }
+  function pctOf(v, d) { var n = parseFloat(String(v == null ? '' : v).replace('%', '')); return isFinite(n) ? n : d; }
   /** The Slice settings a template's project settings hold (the card's starting values). */
   function settingsFromConfig(config) {
     var PL = lazy('nso-print-planner.js', 'NSOPrintPlanner');
@@ -219,11 +222,19 @@
       surface: o.solidPattern && SURFACE_TO_CONFIG[o.solidPattern] ? o.solidPattern : 'zigzag',
       angle: o.supportThresholdDeg, brim: o.brimType, raft: Math.round(o.raftLayers || 0), raftGap: o.raftContactMm != null ? o.raftContactMm : 0.1, ifaceAngle: 'studio36', interfaceRule: null,
       filament: 'profile', nozzleTemp: null, firstTemp: null, bedTemp: null, maxFlow: null, tempStep: 0, tempBand: 10,
-      /* the support rows: the pattern angle and the interface spacing are the profile's (the engine reads them off it); the rest are this slicer's own */
-      supDensity: D0.supDensity, supExpand: D0.supExpand, supWalls: D0.supWalls, supTopZ: D0.supTopZ, supBottomZ: D0.supBottomZ, supBase: D0.supBase, supBaseSpacing: D0.supBaseSpacing,
-      supAngle: o.supportAngleDeg != null ? o.supportAngleDeg : D0.supAngle, supIfacePattern: D0.supIfacePattern,
+      /* the support rows start at the PROFILE's values (the owner's: the Print card's rows are the profile's until changed), read off Bambu's own
+         keys; a key the profile does not hold is this slicer's own default */
+      supDensity: pctOf(cfgRaw(config, 'raft_first_layer_density'), D0.supDensity), supExpand: numOf(cfgRaw(config, 'raft_first_layer_expansion'), D0.supExpand),
+      supWalls: numOf(cfgRaw(config, 'tree_support_wall_count'), D0.supWalls), supTopZ: numOf(cfgRaw(config, 'support_top_z_distance'), D0.supTopZ),
+      supBottomZ: numOf(cfgRaw(config, 'support_bottom_z_distance'), D0.supBottomZ),
+      supBase: SUP_BASE_TO_CONFIG[cfgRaw(config, 'support_base_pattern')] ? cfgRaw(config, 'support_base_pattern') : D0.supBase,
+      supBaseSpacing: numOf(cfgRaw(config, 'support_base_pattern_spacing'), D0.supBaseSpacing),
+      supAngle: o.supportAngleDeg != null ? o.supportAngleDeg : D0.supAngle,
+      supIfacePattern: (function (v) { return v === 'auto' ? 'default' : SUP_IFACE_TO_CONFIG[v] ? v : D0.supIfacePattern; })(cfgRaw(config, 'support_interface_pattern')),
       supIfaceSpacing: o.supportInterfaceSpacingMm != null ? o.supportInterfaceSpacingMm : D0.supIfaceSpacing,
-      supExpansion: D0.supExpansion, supXy: D0.supXy, supZOverXy: D0.supZOverXy, supFirstGap: D0.supFirstGap, supBridge: D0.supBridge, supIndep: D0.supIndep
+      supExpansion: numOf(cfgRaw(config, 'support_expansion'), D0.supExpansion), supXy: numOf(cfgRaw(config, 'support_object_xy_distance'), D0.supXy),
+      supZOverXy: cfgRaw(config, 'top_z_overrides_xy_distance') === '1', supFirstGap: numOf(cfgRaw(config, 'support_object_first_layer_gap'), D0.supFirstGap),
+      supBridge: numOf(cfgRaw(config, 'max_bridge_length'), D0.supBridge), supIndep: cfgRaw(config, 'independent_support_layer_height') !== '0'
     };
   }
 
@@ -448,19 +459,22 @@
     o.supportInterfaceAngle = (settings && settings.ifaceAngle) || SETTINGS_DEFAULT.ifaceAngle;   /* no settings: the card's default (3.6) - the same file either way */
     /* BAMBU'S ADVANCED SUPPORT ROWS: the card's values are the slicer's. A row at its default hands the slicer what it used before (the bottom
        distance and the first layer gap are handed over only when changed: at their defaults the support's own mesh keeps them). */
+    /* ...and with no settings at all (G-scope's view of a loose piece, a test): the profile's own values, which is where the rows start -
+       the same file as the card's untouched rows make (docs/PRINT-CARD.md "Starting values") */
+    if (!settings && typeof settingsFromConfig === 'function') settings = Object.assign(settingsFromConfig(assets.config), { __profile: true });
     if (settings) {
       var cs = cleanSettings(settings), D = SETTINGS_DEFAULT;
       o.supportFirstLayerDensity = cs.supDensity / 100;
       o.supportWallLoops = cs.supWalls;
       o.supportGapMm = cs.supTopZ;
-      if (Math.abs(cs.supBottomZ - D.supBottomZ) > 1e-6) o.supportBottomGapMm = cs.supBottomZ;
+      if (Math.abs(cs.supBottomZ - 0.2) > 1e-6) o.supportBottomGapMm = cs.supBottomZ;                 /* 0.2: the foot as Generate carves it */
       o.supportBasePattern = cs.supBase;
       o.supportBaseSpacingMm = cs.supBaseSpacing;
       o.supportInterfacePattern = cs.supIfacePattern;
       o.supportExpansionMm = cs.supExpansion;
       o.supportXyMm = cs.supXy;
       o.supportZOverridesXy = cs.supZOverXy;
-      if (Math.abs(cs.supFirstGap - D.supFirstGap) > 1e-6) o.supportFirstLayerGapMm = cs.supFirstGap;
+      if (Math.abs(cs.supFirstGap - 0.2) > 1e-6) o.supportFirstLayerGapMm = cs.supFirstGap;         /* 0.2: the pad as it is drawn */
       if (!cs.supIndep) o.supportLayerMaxMm = 0;
     }
     return { o: o, config: config, over: over };
@@ -714,6 +728,7 @@
 
   /** The interface rule, one choice shared with G-scope's Slice settings (its page keeps it). */
   function interfaceRule() {
+    if ($('sup-on')) return 'column';                      /* the Print card: the column rule, no choice (the sheet typing stays in the engine for the gates) */
     return typeof root.nsoSupportInterfaceRule === 'function' && root.nsoSupportInterfaceRule() === 'column' ? 'column' : null;
   }
 
@@ -723,7 +738,7 @@
     var sup = {}; SUP_ROWS.forEach(function (r) { sup[r[1]] = v(r[0]); });
     return cleanSettings(Object.assign(sup, {
       nozzle: v('slice-set-nozzle'), layer: v('slice-set-layer'), walls: v('slice-set-walls'), density: v('slice-set-density'),
-      pattern: v('slice-set-pattern'), surface: v('slice-set-surface'), angle: v('slice-set-angle'), brim: v('slice-set-brim'),
+      pattern: v('slice-set-pattern'), surface: v('slice-set-surface'), angle: $('slice-set-angle') ? v('slice-set-angle') : v('sup-angle'), brim: v('slice-set-brim'),   /* ONE angle: with no row of its own, the Print card's */
       raft: v('slice-set-raft'), raftGap: v('slice-set-raft-gap'), ifaceAngle: v('slice-set-iface-angle'),
       interfaceRule: $('slice-set-iface') ? v('slice-set-iface') : interfaceRule(),
       filament: v('slice-set-filament'), nozzleTemp: v('slice-set-nozzle-temp'), firstTemp: v('slice-set-first-temp'),
@@ -737,6 +752,11 @@
     var full = cleanSettings(st); SUP_ROWS.forEach(function (r) { set(r[0], full[r[1]]); });
     set('slice-set-nozzle', st.nozzle); set('slice-set-layer', st.layer); set('slice-set-walls', st.walls);
     set('slice-set-density', st.density); set('slice-set-pattern', st.pattern); set('slice-set-surface', st.surface); set('slice-set-angle', st.angle);
+    /* ONE angle: the Print card's Angle starts at the profile's support threshold too (the card reads its areas again at it) */
+    if (!$('slice-set-angle') && $('sup-on') && st.angle != null && root.NSO_SUPPORTS_CARD && typeof root.NSO_SUPPORTS_CARD.angle === 'function' && $('sup-angle') && String($('sup-angle').value) !== String(st.angle)) {
+      $('sup-angle').value = String(st.angle);
+      try { root.NSO_SUPPORTS_CARD.angle(st.angle); } catch (err) { /* the card is closed: its field holds the value */ }
+    }
     set('slice-set-brim', st.brim); set('slice-set-raft', st.raft); set('slice-set-raft-gap', st.raftGap); set('slice-set-iface-angle', st.ifaceAngle);
     set('slice-set-iface', interfaceRule() || '');
     /* the filament: a null row shows the filament's own value (empty until the template is fetched) */

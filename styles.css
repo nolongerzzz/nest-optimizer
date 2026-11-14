@@ -4729,6 +4729,20 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
 .sup-card .sup-preset-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 0; width: 100%; margin-top: 4px; }
 .sup-card .sup-preset-row .vp-select { width: 100%; min-width: 0; }
 .sup-card .sup-adv-sec .sup-tune-row { gap: 4px; }
+/* THE PRINT CARD (docs/PRINT-CARD.md): the Supports card grown into the one card of printer, slice and supports settings */
+.sup-card.print-card { min-width: 270px; }
+.sup-card.print-card .print-two { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-auto-flow: row; }
+.sup-card.print-card .print-two .btn { padding: 9px 8px; font-size: 11px; letter-spacing: 0.05em; }
+.sup-card.print-card .print-sec > .vp-sec-body > .vp-bend-field,
+.sup-card.print-card #print-sup-body > .vp-bend-field,
+.sup-card.print-card > .vp-bend-field { grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) 22px; }
+.sup-card.print-card .print-sec .vp-bend-field .vp-select, .sup-card.print-card > .vp-bend-field .vp-select { grid-column: 2 / 4; }
+.sup-card.print-card .print-sec .vp-bend-field span { white-space: nowrap; }
+.sup-card.print-card #print-sup-body { display: flex; flex-direction: column; gap: 4px; }
+.sup-card.print-card #print-sup-body.is-off { opacity: 0.4; }
+.sup-card.print-card .print-on { font-weight: 600; color: #e8eef6; }
+.sup-card.print-card .slice-settings-note { margin: 2px 0 0 0; font-size: 10.5px; color: #94a3b8; }
+.sup-card.print-card #slice-filament-note { color: #e2e8f0; }
 /* Bambu's Advanced rows and the Tree planner's: the names are long (Support/object first layer gap), so the name takes the row's wide half, as in Studio */
 .sup-card .sup-bambu-sec .vp-bend-field, .sup-card .sup-adv-sec .vp-bend-field, .sup-card .sup-tree-sec .vp-bend-field { grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) 22px; }
 .sup-card .sup-bambu-sec .vp-bend-field .vp-select { grid-column: 2 / 4; }
