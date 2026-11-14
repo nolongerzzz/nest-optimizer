@@ -3855,7 +3855,7 @@ var NSO_SUPPORTS_CARD = (function () {
     /** The saved settings (docs/SUPPORTS-CARD.md "Saved settings"): now() the card's levers as { id: value }, apply(vals), save(name), pick(name),
         remove(name), names(), exportText(), importText(text) -> how many read; advanced() the Advanced numbers that differ from their defaults. */
     settings: { fields: PRESET_FIELDS.slice(), now: presetNow, apply: presetApply, save: presetSave, pick: presetPick, remove: presetDelete,
-                names: function () { return Object.keys(presetsAll()).sort(); }, exportText: presetExport, importText: presetImport, advanced: advKnobsOf },
+                names: function () { return Object.keys(presetsRead()).sort(); }, builtIn: function () { return Object.keys(PRESET_BUILTIN).sort(); }, exportText: presetExport, importText: presetImport, advanced: advKnobsOf },
     /** Forget every host's tips, toggles, circles and erasures (what CLEAR PLATE does). */
     forgetAll: forgetAll,
     /** Forget only these pieces (ids): what CLEAR PLATE does when other plates stand beside the one cleared. */

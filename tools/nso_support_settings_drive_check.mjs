@@ -66,7 +66,7 @@ async function main() {
   await set('slice-set-sup-iface-pattern', 'concentric'); await set('slice-set-sup-base', 'rectilinear'); await set('slice-set-sup-topz', 0.25); await set('slice-set-sup-zover', true);
   check('a changed Advanced number is counted, and Defaults comes on', [await page.evaluate(() => document.getElementById('sup-adv-note').textContent), await page.evaluate(() => document.getElementById('sup-adv-defaults').disabled)], ['1 changed from the defaults', false]);
   await page.click('#sup-preset-save');
-  check('Save asks for a name and lists it, picked', [await val('sup-preset'), await page.evaluate(() => window.NSO_SUPPORTS_CARD.settings.names())], ['PLA slim', ['NSO classic', 'PLA slim']]);
+  check('Save asks for a name and lists it, picked', [await val('sup-preset'), await page.evaluate(() => window.NSO_SUPPORTS_CARD.settings.names())], ['PLA slim', ['PLA slim']]);
   await set('sup-angle', 30); await set('sup-rest', false); await set('sup-adv-tipdrop', 2.8); await set('sup-tree-distance', 5);
   await set('slice-set-sup-iface-pattern', 'default'); await set('slice-set-sup-base', 'default'); await set('slice-set-sup-topz', 0.2); await set('slice-set-sup-zover', false);
   check('a control moved by hand: the list reads not saved', await val('sup-preset'), '');

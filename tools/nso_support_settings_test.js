@@ -49,6 +49,11 @@ function setup() {
   check('a field that is not a number is its default', JSON.stringify(SET.advanced()) === JSON.stringify({ gather: 0.5 }));
 
   console.log('\n=== 2. Saved settings ===');
+  /* the built-in one (docs/PRINT-CARD.md "Starting values"): listed, picked like a saved one, not saved over and not deleted */
+  check('"NSO classic" is built in: not one of the saved names', JSON.stringify(SET.builtIn()) === '["NSO classic"]' && JSON.stringify(SET.names()) === '[]');
+  check('...picked, it sets its three rows (top Z 0.18, first layer solid, bridges to 5 mm) and no other', SET.pick('NSO classic') === true && app.el('slice-set-sup-topz').value === '0.18' &&
+    app.el('slice-set-sup-density').value === '100' && app.el('slice-set-sup-bridge').value === '5', [app.el('slice-set-sup-topz').value, app.el('slice-set-sup-density').value, app.el('slice-set-sup-bridge').value].join(' '));
+  check('...it is not saved over, and not deleted', SET.save('NSO classic') === false && SET.remove('NSO classic') === false && JSON.stringify(SET.names()) === '[]');
   app.el('sup-adv-tipdrop').value = '1.6'; app.el('sup-angle').value = '46'; app.el('sup-rest').checked = true; app.el('sup-tree-distance').value = '4';
   app.el('slice-set-sup-iface-pattern').value = 'concentric'; app.el('slice-set-sup-zover').checked = true; app.el('slice-set-sup-topz').value = '0.2';
   check('Save keeps them under a name', SET.save('PLA slim') === true && JSON.stringify(SET.names()) === '["PLA slim"]');
