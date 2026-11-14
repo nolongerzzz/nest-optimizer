@@ -752,10 +752,16 @@
     var full = cleanSettings(st); SUP_ROWS.forEach(function (r) { set(r[0], full[r[1]]); });
     set('slice-set-nozzle', st.nozzle); set('slice-set-layer', st.layer); set('slice-set-walls', st.walls);
     set('slice-set-density', st.density); set('slice-set-pattern', st.pattern); set('slice-set-surface', st.surface); set('slice-set-angle', st.angle);
-    /* ONE angle: the Print card's Angle starts at the profile's support threshold too (the card reads its areas again at it) */
-    if (!$('slice-set-angle') && $('sup-on') && st.angle != null && root.NSO_SUPPORTS_CARD && typeof root.NSO_SUPPORTS_CARD.angle === 'function' && $('sup-angle') && String($('sup-angle').value) !== String(st.angle)) {
-      $('sup-angle').value = String(st.angle);
-      try { root.NSO_SUPPORTS_CARD.angle(st.angle); } catch (err) { /* the card is closed: its field holds the value */ }
+    /* ONE angle: the Print card's Angle starts at the profile's support threshold too (the card reads its areas again at it). The rows are
+       seeded more than once - when the page opens, and again when the printer's template has been fetched - so an angle changed since the
+       last seed is the owner's and is left alone: only Profile values (S.seedForce) lays the profile's over it. */
+    if (!$('slice-set-angle') && $('sup-on') && st.angle != null && $('sup-angle')) {
+      var fld = $('sup-angle'), mine = S.seedAngle == null || String(fld.value) === String(S.seedAngle) || !!S.seedForce;
+      if (mine && String(fld.value) !== String(st.angle)) {
+        fld.value = String(st.angle);
+        if (root.NSO_SUPPORTS_CARD && typeof root.NSO_SUPPORTS_CARD.angle === 'function') { try { root.NSO_SUPPORTS_CARD.angle(st.angle); } catch (err) { /* the card is closed: its field holds the value */ } }
+      }
+      if (mine) S.seedAngle = st.angle;
     }
     set('slice-set-brim', st.brim); set('slice-set-raft', st.raft); set('slice-set-raft-gap', st.raftGap); set('slice-set-iface-angle', st.ifaceAngle);
     set('slice-set-iface', interfaceRule() || '');
@@ -772,7 +778,8 @@
     S.seededFor = profile ? profile.id : null;
     S.touched = false;
     var known = profile && S.assets[profile.id];
-    showSettings(known ? settingsFromConfig(known.config) : SETTINGS_DEFAULT);
+    S.seedForce = !!reset;
+    try { showSettings(known ? settingsFromConfig(known.config) : SETTINGS_DEFAULT); } finally { S.seedForce = false; }
     seeded(!!reset);
   }
   /* the rows have been put to the profile's values: the Supports card's saved settings (app-supports-card.js) lay their own back over them - a
