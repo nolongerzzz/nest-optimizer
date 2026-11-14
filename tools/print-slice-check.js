@@ -206,12 +206,32 @@ async function main() {
     check('a nozzle the profile is not is refused, not sliced with the 0.4 blocks', /0\.6 mm nozzle needs its own profile/.test(threw), threw);
     const cl = PRINT.cleanSettings({ layer: '9', walls: '0', density: '150', pattern: 'gyroid', angle: '0', brim: 'x', interfaceRule: 'column' });
     check('each row is clamped to what it takes, and an unknown pattern / brim is the default', cl.layer === 0.3 && cl.walls === 1 && cl.density === 100 && cl.pattern === 'grid' && cl.angle === 1 && cl.brim === 'auto' && cl.interfaceRule === 'column', JSON.stringify(cl));
+    const ringOver = PRINT.configOverlay(tpl, Object.assign({}, base, { pattern: 'concentric' }));
+    check('pattern concentric is the whole part\'s: the sparse infill, the solid infill and both surfaces in the project settings',
+      ['sparse_infill_pattern', 'internal_solid_infill_pattern', 'top_surface_pattern', 'bottom_surface_pattern'].every(k => ringOver[k] === 'concentric') && Object.keys(ringOver).length === 4, JSON.stringify(ringOver));
 
     const two = objs.slice(0, 2);
     const same = await PRINT.build(two, { config: tpl, printer: a1 }, { settings: Object.assign({}, base) });
     const plain = await PRINT.build(two, { config: tpl, printer: a1 }, {});
     check('the profile\'s values slice to the same file as no settings at all (the G-code, byte for byte)', same.ok && plain.ok &&
       L.text(await L.R.openZip(same.bytes).read('Metadata/plate_1.gcode')) === L.text(await L.R.openZip(plain.bytes).read('Metadata/plate_1.gcode')));
+
+    {
+      let ringOpts = null;
+      const SLr = require(path.join(ROOT, 'nso_slicer.js')), runR = SLr.run;
+      SLr.run = function (ob, o) { ringOpts = o; return runR.apply(this, arguments); };
+      let rings;
+      try { rings = await PRINT.build(two, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { pattern: 'concentric' }) }); } finally { SLr.run = runR; }
+      check('concentric slices to a file, the slicer told rings for the sparse infill, the solid infill and both surfaces', rings.ok && ringOpts &&
+        ringOpts.sparsePattern === 'concentric' && ringOpts.solidPattern === 'concentric' && ringOpts.topPattern === 'concentric' && ringOpts.bottomPattern === 'concentric', rings.reason);
+      if (rings.ok) {
+        const rg = L.text(await L.R.openZip(rings.bytes).read('Metadata/plate_1.gcode'));
+        check('...its CONFIG_BLOCK says concentric for all four', ['sparse_infill_pattern', 'internal_solid_infill_pattern', 'top_surface_pattern', 'bottom_surface_pattern']
+          .every(k => (new RegExp('^; ' + k + ' = (.*)$', 'm').exec(rg) || [])[1] === 'concentric'));
+        check('...and the print is the same plastic as the lines\' within 5 % (' + plain.stats.grams + ' -> ' + rings.stats.grams + ' g)',
+          Math.abs(rings.stats.grams / plain.stats.grams - 1) < 0.05);
+      }
+    }
 
     const want = { nozzle: 0.4, layer: 0.1, walls: 3, density: 25, pattern: 'lines', angle: 40, brim: 'none', interfaceRule: null };
     const SLm = require(path.join(ROOT, 'nso_slicer.js')), realRun = SLm.run;

@@ -166,6 +166,7 @@ var NSO_GSCOPE_SLICE = (function () {
     };
     var pat = $('ms-slice-pattern');
     if (pat && pat.value) over.sparsePattern = pat.value;
+    if (over.sparsePattern === 'concentric') over.solidPattern = 'concentric';   /* rings throughout: the surfaces and the solid infill too */
     var brim = $('ms-slice-brim');
     over.brimType = brim && brim.value ? brim.value : SLICE_REST.brim;
     var rule = ifaceRule();

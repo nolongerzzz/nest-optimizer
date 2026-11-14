@@ -447,6 +447,56 @@ right over the sheet that holds it.
 `fixtures/supports/top_clip_x2.stl`: a 10 x 10 x 16 post with an 8 x 8 clip
 under its top on each side, and the card-default supports built for it.
 
+### Concentric (`solidPattern` / `topPattern` / `bottomPattern` / `sparsePattern: 'concentric'`)
+
+Rings that follow the region's outline, in place of the lines. Measured
+black-box on a real slice: `concentric.gcode.3mf` (Bambu Studio 02.09.01.70,
+A1 mini, 0.4 nozzle, 0.2 layers, 2 classic walls, ten flat shapes 0.8 - 1.0 mm
+tall with every surface and the solid infill concentric). Seven of its shapes
+(the straight-sided ones) are pinned in
+`fixtures/slicer-concentric-reference.json`. A second slice of the same plate
+in monotonic lines (`monotonic_3dhoneycomb.gcode.3mf`) has the same 72 wall
+loops point for point, so only the fill differs between the two.
+
+| rule | measured | here |
+|---|---|---|
+| ring to ring | 0.377 at 0.42 / 0.2, 0.457 at the first layer's 0.5: the bead spacing | `spacingOf(w, h)` |
+| the outermost ring | 0.333 from the inner wall's centre at 0.45 / 0.42, 0.388 at 0.5 / 0.5: 0.85 x the mean of the two spacings (`infill_wall_overlap` 15 %) | `ringRoom` grows the fill region (bead centres, 0.85 x the wall's spacing) by the difference and half a spacing, along the walls only |
+| the middle | beads across = width / spacing; every ring is nominal but the last, which takes the remainder: one ring 0.354 - 0.63 wide, or one line 0.55 - 0.69 wide down the middle | a piece under two spacings deep is measured (`insetDepth`) and gets 0 - 4 beads: a line under 1.5 spacings, a pair of rings under 2.75, a line between rings under 3.5 |
+| order | from the middle outward, each ring starting beside the last one's start | post-order over the pieces, `ringFrom` |
+| bridges | straight lines | unchanged: only Bottom surface (first layer), Top surface and Internal solid infill take the pattern |
+
+Against the reference, on a solid layer and the top of each of the seven
+shapes: the outermost ring within 0.001 mm, the same number of paths, the
+innermost ring's width within 0.0012 mm, the volume laid within 0.2 %.
+
+Where it differs, and what is stated rather than measured:
+
+- **The reference's pentagon** ends its solid layers in a dot 0.645 wide; this
+  lays a last ring 0.344 wide in the same room (1.6 spacings: one bead there,
+  two here). Its rectangle has two at 1.70 and its right triangle two at 1.42,
+  so the switch is not a width alone.
+- **A middle whose width changes along it** (the semicircle, the ellipse):
+  Bambu steps the line's width every 0.3 - 0.4 mm and may run it as a loop;
+  this lays one medial line (`medialPaths`) with its width stepped by 0.04 to
+  the room, or the last ring.
+- **Necks.** Where a region pinches between two lobes the rings split and each
+  lobe ends in its own middle; the wedge left at the pinch is not filled.
+- **Sparse concentric is stated, not measured**: the reference is all shell
+  (no sparse layer; the second file's 3D honeycomb never prints either). The
+  first ring lies along the walls, the rest a spacing over the density apart,
+  all nominal width.
+- **The first layer's own width** (`initial_layer_line_width` 0.5) is not a
+  setting of this slicer; its first layer is laid at the infill's width.
+- A ring closes on itself; the planner leaves its own seam gap, as on a wall.
+
+The print card's and G-scope's pattern row offer **concentric**: it sets the
+sparse infill, the solid infill and both surfaces, as the reference has them
+(the project's `sparse_infill_pattern`, `internal_solid_infill_pattern`,
+`top_surface_pattern`, `bottom_surface_pattern`). A template that names
+concentric for one of them alone is sliced that way
+(`NSOPrintPlanner.engineOptions`).
+
 ### Thin walls (classic walls with Detect thin wall on)
 
 Bambu Studio, with the **classic** wall generator and **Detect thin wall** on,

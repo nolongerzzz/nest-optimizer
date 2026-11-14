@@ -57,6 +57,7 @@ function prism(fp, z0, z1) {
   return out;
 }
 const rect = (x0, x1, y0, y1) => [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
+const rect0 = rect;
 /** Upright cone frustum, n sides, radius r0 at z0 -> r1 at z1 (outward wound). */
 function frustum(n, r0, r1, z0, z1) {
   const out = [];
@@ -481,6 +482,70 @@ function frustum(n, r0, r1, z0, z1) {
     check('the split: 1 -> I, 2 -> BI, 3 -> BII, 4 -> BBII (the owner\'s 1 - 4 layer slices)', splits === 'I BI BII BBII', splits);
     check('no raft (0): no raft object, the part on the plate as before', !sl(0).objects.some(ob => ob.role === 'raft') && Math.abs(sl(0).objects[0].layers[0].printZ - 0.2) < 1e-6);
     check('the G-code carries it as Bambu writes it: Support and Support interface before the part\'s walls', /FEATURE: Support\n[\s\S]*FEATURE: Support interface[\s\S]*FEATURE: Outer wall/.test(SL.toGcode(r8)));
+  }
+
+  section('Concentric - rings along the outline, against a real Bambu slice (fixtures/slicer-concentric-reference.json, docs/SLICER.md "Concentric")');
+  {
+    const REF = JSON.parse(require('fs').readFileSync(path.join(ROOT, 'fixtures', 'slicer-concentric-reference.json'), 'utf8'));
+    const plen = p => { let l = 0; const q = p.closed ? p.pts.concat([p.pts[0]]) : p.pts; for (let i = 1; i < q.length; i++) l += Math.hypot(q[i][0] - q[i - 1][0], q[i][1] - q[i - 1][1]); return l; };
+    const box = pts => [Math.min(...pts.map(q => q[0])), Math.min(...pts.map(q => q[1])), Math.max(...pts.map(q => q[0])), Math.max(...pts.map(q => q[1]))];
+    const opt = (over) => SL.defaultsFor(0.4, Object.assign({ layerMm: 0.2, outerWallWidthMm: 0.42, innerWallWidthMm: 0.45, infillWidthMm: 0.42, topShellLayers: 5, bottomShellLayers: 3 }, over));
+    const res = SL.sliceObjects(REF.shapes.map(sh => ({ name: sh.name, soup: prism(sh.outline, 0, sh.layers * 0.2) })), opt({ solidPattern: 'concentric' }), wasm);
+    const fills = (ob, li) => ob.layers[li].paths.filter(p => !/wall/i.test(p.feature));
+    /* the reference's pentagon ends its solid layers in a dot 0.645 wide where this lays a last ring 0.344 wide: the same room, shared by two */
+    const KNOWN = { 'pentagon solid': true };
+    let worstBox = 0, worstW = 0, counts = [], kinds = 0, n = 0;
+    REF.shapes.forEach((sh, k) => {
+      [['solid', 1], ['top', sh.layers - 1]].forEach(([what, li]) => {
+        const want = sh[what], mine = fills(res.objects[k], li);
+        const rings = mine.filter(p => p.closed).sort((a, b) => plen(b) - plen(a)), inner = mine.slice().sort((a, b) => plen(a) - plen(b))[0];
+        const b = box(rings[0].pts);
+        b.forEach((v, i) => { worstBox = Math.max(worstBox, Math.abs(v - want.outerRing[i])); });
+        if (mine.every(p => p.feature === want.feature)) kinds++;
+        n++;
+        if (KNOWN[sh.name + ' ' + what]) return;
+        counts.push(mine.length - want.paths);
+        worstW = Math.max(worstW, Math.abs(inner.width - want.innerWidth));
+      });
+    });
+    check('seven shapes, a solid layer and the top each: the outermost ring where Bambu\'s is (within 0.003 mm)', worstBox < 0.003, worstBox.toFixed(4));
+    check('...as many paths as Bambu lays (every ring, and the middle)', counts.every(c => c === 0), counts.join(' '));
+    check('...the innermost one as wide as Bambu\'s (within 0.002 mm): the middle shares out what the spacing does not divide', worstW < 0.002, worstW.toFixed(4));
+    check('...typed as Bambu types them (Internal solid infill; Top surface on top)', kinds === n, kinds + '/' + n);
+    const rect = res.objects[REF.shapes.findIndex(sh => sh.name === 'rectangle')], rr = fills(rect, 1);
+    const xs = rr.map(p => box(p.pts)[2]), steps = xs.slice(2).map((x, i) => x - xs[i + 1]);
+    check('the rings print from the middle outward, one bead spacing apart (0.3771)', steps.every(d => Math.abs(d - SL.spacingOf(0.42, 0.2)) < 1e-3), f4(steps[0]));
+    check('each ring starts beside the last one\'s start: the seams in a row', rr.slice(1).every((p, i) => Math.hypot(p.pts[0][0] - rr[i].pts[0][0], p.pts[0][1] - rr[i].pts[0][1]) < 0.45));
+    const first = fills(rect, 0);
+    check('the first layer is the Bottom surface, in rings', first.length > 10 && first.every(p => p.feature === 'Bottom surface' && p.closed));
+    /* what is laid is what the region holds: bead area x length against the layer's solid area x height */
+    /* the room: the outline in by the outer wall's half width, the two walls' mean spacing and the ring's 0.333, back out by half a bead */
+    const gq = SL.geometry(wasm), sB = SL.spacingOf(0.42, 0.2);
+    const roomOf = (outline) => gq.area(gq.offset(gq.of([outline]), -(0.21 + (sB + SL.spacingOf(0.45, 0.2)) / 2 + 0.85 * (sB + SL.spacingOf(0.45, 0.2)) / 2 - sB / 2))) * 0.2;
+    const vol = rr.reduce((a, p) => a + plen(p) * SL.beadArea(p.width, 0.2), 0), room = roomOf(REF.shapes.find(sh => sh.name === 'rectangle').outline);
+    check('the rings fill the layer: their volume within 1.5 % of the room inside the walls', Math.abs(vol / room - 1) < 0.015, (vol / room).toFixed(3));
+    const moves = G.parseGcode(SL.toGcode(res)).moves.filter(m => m.feature === 'Internal solid infill');
+    check('through the importer: the solid infill\'s widths read back, the middle rings\' own among them', moves.some(m => Math.abs(m.width - 0.42) < 2e-3) && moves.some(m => Math.abs(m.width - 0.483) < 3e-3));
+    /* a part with a notch (an L): the rings split round the corner and each arm ends in its own middle */
+    const L = [[0, 0], [30, 0], [30, 10], [10, 10], [10, 25], [0, 25]];
+    const tri = []; [[0, 1, 2], [0, 2, 3], [0, 3, 5], [3, 4, 5]].forEach(t => { tri.push(t); });
+    const lsoup = []; tri.forEach(t => { const [a, b, c] = t.map(i => L[i]); lsoup.push(a[0], a[1], 1, b[0], b[1], 1, c[0], c[1], 1, a[0], a[1], 0, c[0], c[1], 0, b[0], b[1], 0); });
+    L.forEach((p0, i) => { const q = L[(i + 1) % L.length]; quad(lsoup, [p0[0], p0[1], 0], [q[0], q[1], 0], [q[0], q[1], 1], [p0[0], p0[1], 1]); });
+    const rl = SL.sliceObjects([{ name: 'L', soup: lsoup }], opt({ solidPattern: 'concentric' }), wasm), lf = fills(rl.objects[0], 1);
+    const lvol = lf.reduce((a, p) => a + plen(p) * SL.beadArea(p.width, 0.2), 0), lroom = roomOf(L);
+    check('an L: filled the same (volume within 2.5 %), every line inside the walls', Math.abs(lvol / lroom - 1) < 0.025 && lf.every(p => p.pts.every(q => SL.inside([L], q[0], q[1]))), (lvol / lroom).toFixed(3));
+    /* sparse: the first ring along the walls, the rest a spacing over the density apart */
+    const box20 = prism(rect0(0, 40, 0, 40), 0, 6);
+    const rs = SL.sliceObjects([{ name: 'b', soup: box20 }], opt({ sparsePattern: 'concentric', topShellLayers: 3, sparseDensity: 0.25 }), wasm);
+    const sp = rs.objects[0].layers[15].paths.filter(p => p.feature === 'Sparse infill'), sx = sp.map(p => box(p.pts)[2]).sort((a, b) => b - a);
+    const gaps = sx.slice(1).map((x, i) => sx[i] - x);
+    check('sparse concentric: closed rings, spacing / density apart (0.3771 / 0.25 = 1.508)', sp.length > 5 && sp.every(p => p.closed && p.width === 0.42) && gaps.every(d => Math.abs(d - SL.spacingOf(0.42, 0.2) / 0.25) < 1e-3), sp.length + ' rings, ' + f4(gaps[0]));
+    gq.free();
+    check('...and the shells above it stay lines (solidPattern untouched)', rs.objects[0].layers[29].paths.filter(p => p.feature === 'Top surface').every(p => !p.closed));
+    const tb = SL.sliceObjects([{ name: 'b', soup: box20 }], opt({ topPattern: 'concentric', topShellLayers: 3 }), wasm).objects[0];
+    check('topPattern alone: the top in rings, the solid infill under it and the first layer in lines',
+          tb.layers[29].paths.filter(p => p.feature === 'Top surface').every(p => p.closed) && tb.layers[28].paths.filter(p => p.feature === 'Internal solid infill').every(p => !p.closed) &&
+          tb.layers[0].paths.filter(p => p.feature === 'Bottom surface').every(p => !p.closed));
   }
 
   console.log('\n' + pass + ' passed, ' + fail + ' failed');

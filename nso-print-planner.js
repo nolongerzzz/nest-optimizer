@@ -238,7 +238,7 @@
       topShellThicknessMm: num(config, 'top_shell_thickness', 0),
       bottomShellThicknessMm: num(config, 'bottom_shell_thickness', 0),
       sparseDensity: pct('sparse_infill_density', 0.15),
-      sparsePattern: raw(config, 'sparse_infill_pattern') === 'grid' ? 'grid' : 'zigzag',
+      sparsePattern: raw(config, 'sparse_infill_pattern') === 'grid' ? 'grid' : raw(config, 'sparse_infill_pattern') === 'concentric' ? 'concentric' : 'zigzag',
       infillDirectionDeg: num(config, 'infill_direction', 45),
       detectThinWall: num(config, 'detect_thin_wall', 0) === 1,
       supportThresholdDeg: num(config, 'support_threshold_angle', 30),
@@ -257,6 +257,10 @@
       supportAngleDeg: num(config, 'support_angle', 0),
       bridgeAngleDeg: num(config, 'bridge_angle', 0)
     };
+    /* a surface or the solid infill the project draws in rings (the other patterns are the engine's lines) */
+    if (raw(config, 'internal_solid_infill_pattern') === 'concentric') over.solidPattern = 'concentric';
+    if (raw(config, 'top_surface_pattern') === 'concentric') over.topPattern = 'concentric';
+    if (raw(config, 'bottom_surface_pattern') === 'concentric') over.bottomPattern = 'concentric';
     return { nozzleMm: nozzle, over: over };
   }
 

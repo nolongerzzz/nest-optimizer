@@ -103,7 +103,7 @@
   // ---- the card's Slice settings ---------------------------------------------
   //
   // The rows G-scope's Slice side has, kept by the card itself: { nozzle, layer, walls,
-  // density (%), pattern ('grid' | 'zigzag' | 'lines'), angle (deg), brim ('auto' |
+  // density (%), pattern ('grid' | 'zigzag' | 'lines' | 'concentric'), angle (deg), brim ('auto' |
   // 'outer' | 'none'), interfaceRule ('column' | null) }. They start at the template's
   // values; a value the owner changed is written into a copy of the template's project
   // settings (configOverlay), so the engine, the planner, the G-code's CONFIG_BLOCK and
@@ -113,8 +113,10 @@
                            /* the filament: the profile's own; a null row is the filament's value (filamentBase); no temperature steps */
                            filament: 'profile', nozzleTemp: null, firstTemp: null, bedTemp: null, maxFlow: null, tempStep: 0, tempBand: 10 };   /* the card's own defaults (the owner's view): Studio 2.9's 3.6 - the owner's mouse1 on the P1S released clean with it */
   var IFACE_ANGLES = { profile: 1, bridge: 1, studio36: 1, crosshatch: 1 };   /* nso_slicer.js supportInterfaceAngle: NSO's own, no profile key - a testing ground for interfaces */
-  var PATTERN_TO_CONFIG = { grid: 'grid', zigzag: 'zig-zag', lines: 'line' };
-  var PATTERN_FROM_CONFIG = { grid: 'grid', 'zig-zag': 'zigzag', zigzag: 'zigzag', line: 'lines', lines: 'lines' };
+  var PATTERN_TO_CONFIG = { grid: 'grid', zigzag: 'zig-zag', lines: 'line', concentric: 'concentric' };
+  var PATTERN_FROM_CONFIG = { grid: 'grid', 'zig-zag': 'zigzag', zigzag: 'zigzag', line: 'lines', lines: 'lines', concentric: 'concentric' };
+  /* concentric is the whole part's: the sparse infill, the solid infill and both surfaces, as the reference slice has it */
+  var CONCENTRIC_KEYS = ['top_surface_pattern', 'bottom_surface_pattern', 'internal_solid_infill_pattern'];
   var BRIM_TO_CONFIG = { auto: 'auto_brim', outer: 'outer_only', none: 'no_brim' };
 
   // ---- filaments ---------------------------------------------------------------
@@ -246,7 +248,10 @@
     if (Math.abs(s.layer - base.layer) > 1e-6) out.layer_height = String(s.layer);
     if (s.walls !== base.walls) out.wall_loops = String(s.walls);
     if (s.density !== base.density) out.sparse_infill_density = s.density + '%';
-    if (s.pattern !== base.pattern) out.sparse_infill_pattern = PATTERN_TO_CONFIG[s.pattern];
+    if (s.pattern !== base.pattern) {
+      out.sparse_infill_pattern = PATTERN_TO_CONFIG[s.pattern];
+      if (s.pattern === 'concentric') CONCENTRIC_KEYS.forEach(function (k) { out[k] = 'concentric'; });
+    }
     if (s.angle !== base.angle) out.support_threshold_angle = String(s.angle);
     if (s.brim !== base.brim) out.brim_type = BRIM_TO_CONFIG[s.brim];
     if (s.raft !== base.raft) out.raft_layers = String(s.raft);

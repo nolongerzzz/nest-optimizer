@@ -260,8 +260,10 @@
       topShellThicknessMm: BAMBU_PROFILE_06.topShellThicknessMm,
       bottomShellThicknessMm: 0,
       sparseDensity: BAMBU_PROFILE_06.sparseDensity,
-      sparsePattern: BAMBU_PROFILE_06.sparsePattern,   // 'grid' | 'zigzag' | 'lines'
-      solidPattern: BAMBU_PROFILE_06.solidPattern,     // 'zigzag' | 'lines'
+      sparsePattern: BAMBU_PROFILE_06.sparsePattern,   // 'grid' | 'zigzag' | 'lines' | 'concentric'
+      solidPattern: BAMBU_PROFILE_06.solidPattern,     // 'zigzag' | 'lines' | 'concentric': the internal solid infill, and the surfaces unless they say
+      topPattern: null,                    // the top surface's own pattern ('concentric'); null -> solidPattern
+      bottomPattern: null,                 // the first layer's own pattern ('concentric'); null -> solidPattern
       infillDirectionDeg: BAMBU_PROFILE_06.infillDirectionDeg,
       infillWallOverlap: BAMBU_PROFILE_06.infillWallOverlap,
       sliceClosingRadiusMm: BAMBU_PROFILE_06.sliceClosingRadiusMm,
@@ -861,6 +863,137 @@
       cur = s1;
     }
     return paths;
+  }
+
+  // ===========================================================================
+  // Concentric fill - rings that follow the region's outline
+  // ===========================================================================
+
+  /* Measured on a real Bambu Studio 02.09 slice (concentric.gcode.3mf: ten flat shapes, A1 mini, 0.4 nozzle, 0.2 layers, every surface and the
+     solid infill concentric; docs/SLICER.md "Concentric"):
+       - the outermost ring lies half a line spacing inside the fill region, each next one a whole spacing further in (0.377 at 0.42 / 0.2, 0.457
+         at the first layer's 0.5): every ring but the innermost has the nominal width;
+       - the middle takes up what the spacing does not divide: the beads across the region are its width over the spacing, rounded, and the last
+         one or two share the remainder - an even count ends in a ring wider or narrower than the rest (0.354 - 0.63 against 0.42 / 0.5), an odd
+         count in one line down the middle (0.55 - 0.69);
+       - the rings print from the middle outward, each starting beside the last one's start (the seams in a row). */
+  var CONCENTRIC_DOT_MM = 0.1;        // a middle with no length (a disc's) is a dot this long: the reference's is 0.11
+  var CONCENTRIC_WIDTH_STEP_MM = 0.04; // a middle line's width follows the room along it in steps (the reference's: 0.556, 0.600, 0.643, 0.686)
+
+  /** How deep a piece is: the largest inset that leaves something of it, within (0, hi]. */
+  function insetDepth(g, cs, hi) {
+    var lo = 0;
+    for (var k = 0; k < 14; k++) {
+      var mid = (lo + hi) / 2;
+      if (g.isEmpty(g.offset(cs, -mid))) hi = mid; else lo = mid;
+    }
+    return lo;
+  }
+
+  /** Distance from a point to the outline of polys. */
+  function outlineDistance(polys, x, y) {
+    var best = Infinity;
+    for (var k = 0; k < polys.length; k++) {
+      var P = polys[k], n = P.length;
+      for (var i = 0; i < n; i++) {
+        var a = P[i], b = P[(i + 1) % n];
+        var dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy;
+        var t = l2 > 0 ? Math.max(0, Math.min(1, ((x - a[0]) * dx + (y - a[1]) * dy) / l2)) : 0;
+        var d = Math.hypot(x - a[0] - t * dx, y - a[1] - t * dy);
+        if (d < best) best = d;
+      }
+    }
+    return best;
+  }
+
+  /** A closed ring turned to start at its point nearest `at` (a new vertex where that falls inside an edge). */
+  function ringFrom(pts, at) {
+    var n = pts.length, best = Infinity, bi = 0, bt = 0;
+    for (var i = 0; i < n; i++) {
+      var a = pts[i], b = pts[(i + 1) % n];
+      var dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy;
+      var t = l2 > 0 ? Math.max(0, Math.min(1, ((at[0] - a[0]) * dx + (at[1] - a[1]) * dy) / l2)) : 0;
+      var d = Math.hypot(at[0] - a[0] - t * dx, at[1] - a[1] - t * dy);
+      if (d < best) { best = d; bi = i; bt = t; }
+    }
+    var out = [], a0 = pts[bi], b0 = pts[(bi + 1) % n];
+    if (bt > 1e-6 && bt < 1 - 1e-6) out.push([a0[0] + bt * (b0[0] - a0[0]), a0[1] + bt * (b0[1] - a0[1])]);
+    else if (bt <= 1e-6) bi = (bi + n - 1) % n;
+    for (var k = 1; k <= n; k++) out.push(pts[(bi + k) % n]);
+    return out;
+  }
+
+  /**
+   * A region filled with rings parallel to its outline -> [{ closed, pts, width }], in print order (from each middle outward).
+   *   w, h      the line's width and the layer's height
+   *   pitch     ring to ring; the bead spacing for a solid fill, wider for a sparse one
+   *   solid     the middle shares out the remainder (above); a sparse fill's rings stop where the next does not fit
+   *   startAt   where the nozzle comes from, for the first seam
+   */
+  function concentricFill(g, cs, w, h, pitch, solid, startAt) {
+    if (g.isEmpty(cs)) return [];
+    var s = spacingOf(w, h), fat = w - s, out = [];
+    var rings = function (c, inset, width) {
+      g.polys(g.offset(c, -inset)).forEach(function (pl) { if (pl.length > 2) out.push({ closed: true, pts: pl, width: width }); });
+    };
+    /* one line down the middle of a piece 2r across at its widest, as wide as the room along it */
+    var middle = function (c, r) {
+      var polys = g.polys(c), wMid = 2 * r + fat;
+      var med = medialPaths(polys, wMid, []);
+      if (!med) {
+        var core = g.polys(g.offset(c, -r * 0.98))[0] || polys[0], cx = 0, cy = 0;
+        core.forEach(function (q) { cx += q[0] / core.length; cy += q[1] / core.length; });
+        out.push({ closed: false, pts: [[cx - CONCENTRIC_DOT_MM / 2, cy], [cx + CONCENTRIC_DOT_MM / 2, cy]], width: wMid });
+        return;
+      }
+      med.forEach(function (pa) {
+        var pts = pa.closed ? pa.pts.concat([pa.pts[0]]) : pa.pts, run = null;
+        for (var i = 0; i + 1 < pts.length; i++) {
+          var a = pts[i], b = pts[i + 1], n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / (2 * w)));
+          for (var k = 0; k < n; k++) {
+            var p0 = [a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n], p1 = [a[0] + (b[0] - a[0]) * (k + 1) / n, a[1] + (b[1] - a[1]) * (k + 1) / n];
+            var room = 2 * outlineDistance(polys, (p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2);
+            var wk = room < 0.5 * s ? 0 : Math.round((Math.min(room, 2 * r) + fat) / CONCENTRIC_WIDTH_STEP_MM) * CONCENTRIC_WIDTH_STEP_MM;
+            if (Math.abs(wk - wMid) < CONCENTRIC_WIDTH_STEP_MM) wk = wMid;
+            if (run && run.width === wk) run.pts.push(p1);
+            else { run = wk > 0 ? { closed: false, pts: [p0, p1], width: wk } : null; if (run) out.push(run); }
+          }
+        }
+      });
+    };
+    /* the beads across a middle x spacings wide: a pair of rings takes up to 2.75 before a line goes between them (the reference's hexagon top
+       keeps two at 2.50; its rectangle's first layer has two at 1.70) */
+    var beads = function (x) { return x < 0.5 ? 0 : x < 1.5 ? 1 : x < 2.75 ? 2 : x < 3.5 ? 3 : 4; };
+    /* a piece less than a spacing deep: nothing, a line, or one ring of its own width */
+    var last = function (c, r) {
+      var n = beads(2 * r / s);
+      if (n === 1) middle(c, r);
+      else if (n >= 2) rings(c, r / 2, r + fat);
+    };
+    var fill = function (c) {
+      if (solid && g.isEmpty(g.offset(c, -2 * s))) {
+        var r = insetDepth(g, c, 2 * s);
+        if (beads(2 * r / s) <= 2) { last(c, r); return; }
+        g.parts(g.offset(c, -s)).forEach(function (d) { last(d, insetDepth(g, d, s)); });
+        rings(c, s / 2, w);
+        return;
+      }
+      var ring = g.offset(c, -s / 2);
+      if (g.isEmpty(ring)) return;
+      g.parts(g.offset(c, -pitch)).forEach(fill);
+      rings(c, s / 2, w);
+    };
+    g.parts(cs).forEach(fill);
+    var cur = startAt || null;
+    out.forEach(function (p) {
+      if (p.closed) { if (cur) p.pts = ringFrom(p.pts, cur); cur = p.pts[0]; }
+      else {
+        var e = p.pts[p.pts.length - 1];
+        if (cur && Math.hypot(e[0] - cur[0], e[1] - cur[1]) < Math.hypot(p.pts[0][0] - cur[0], p.pts[0][1] - cur[1])) p.pts.reverse();
+        cur = p.pts[p.pts.length - 1];
+      }
+    });
+    return out;
   }
 
   // ===========================================================================
@@ -1698,8 +1831,25 @@
           var solidAngle = (i % 2 === 0) ? dirA : dirA + Math.PI / 2;
           var hull = g.polys(g.offset(inner, wInf / 2 + 1e-4));
           var solidJoin = o.solidPattern === 'lines' ? 0 : 3 * sInf;
-          function solidFill(cs, feat) {
+          /* A concentric fill's room. The fill region bounds bead CENTRES (perimeters: 0.85 x the wall's spacing in from the last loop); the rings
+             are laid from the beads' outer edge, and the reference's outermost ring lies 0.85 x the mean of the wall's spacing and its own from the
+             last loop (0.333 at 0.45 / 0.42, 0.388 at the first layer's 0.5 / 0.5). So the region grows by the difference plus half a spacing -
+             along the walls only: where a piece borders another fill of the same layer it keeps its edge. */
+          function ringRoom(cs, onTop) {
+            /* a top surface under one wall (onlyOneWallTop) lies along the outer wall, everything else along the last inner one */
+            var wWall = oS.wallLoops > 1 && !(onTop && oS.onlyOneWallTop) ? o.innerWallWidthMm : o.outerWallWidthMm;
+            var grow = sInf / 2 + (1 - o.infillWallOverlap) * (spacingOf(wWall, h) - sInf) / 2;
+            return g.union(cs, g.inter(g.offset(cs, grow), g.diff(g.offset(inner, grow), inner)));
+          }
+          function solidFill(cs, feat, pattern) {
             if (g.isEmpty(cs)) return;
+            if (pattern === 'concentric') {
+              var lastP = L.paths.length ? L.paths[L.paths.length - 1] : null;
+              concentricFill(g, ringRoom(cs, feat === 'Top surface'), wInf, h, sInf, true, lastP ? (lastP.closed ? lastP.pts[0] : lastP.pts[lastP.pts.length - 1]) : null).forEach(function (pth) {
+                L.paths.push({ feature: feat, width: pth.width, closed: pth.closed, pts: pth.pts });
+              });
+              return;
+            }
             var polys = g.polys(cs);
             connect(scanFill(polys, solidAngle, sInf, 0), solidJoin, hull).forEach(function (pth) {
               L.paths.push({ feature: feat, width: wInf, closed: false, pts: pth.pts });
@@ -1712,14 +1862,20 @@
           else if ((o.supportInterfaceAngle === 'studio36' || o.supportInterfaceAngle === 'profile') && o.supportInterfaceRule === 'column' && P.role === 'part' && objs.some(function (ob) { return ob.role === 'support'; })) bridgeAt = STUDIO36_DEG * Math.PI / 180;
           var sa0 = solidAngle;
           if (i > 0 && bridgeAt != null) { solidAngle = bridgeAt; solidFill(bottomOpen, 'Bridge'); solidAngle = sa0; }
-          else solidFill(bottomOpen, i === 0 ? 'Bottom surface' : 'Bridge');
+          else solidFill(bottomOpen, i === 0 ? 'Bottom surface' : 'Bridge', i === 0 ? (o.bottomPattern || o.solidPattern) : null);   /* a bridge is straight lines, whatever the pattern */
           if (o.bridgeAngleDeg) solidAngle = bridgeAt;
           solidFill(bridgeInner, 'Bridge');
           solidAngle = sa0;
-          solidFill(topOnly, 'Top surface');
-          solidFill(internal, 'Internal solid infill');
+          solidFill(topOnly, 'Top surface', o.topPattern || o.solidPattern);
+          solidFill(internal, 'Internal solid infill', o.solidPattern);
 
-          if (!g.isEmpty(sparse) && oS.sparseDensity > 0) {
+          if (!g.isEmpty(sparse) && oS.sparseDensity > 0 && o.sparsePattern === 'concentric') {
+            /* sparse rings: the first along the walls, the rest a spacing over the density apart (stated: the reference has no sparse layer) */
+            var lastS = L.paths.length ? L.paths[L.paths.length - 1] : null;
+            concentricFill(g, ringRoom(sparse), wInf, h, sInf / Math.min(1, oS.sparseDensity), false, lastS ? (lastS.closed ? lastS.pts[0] : lastS.pts[lastS.pts.length - 1]) : null).forEach(function (pth) {
+              L.paths.push({ feature: 'Sparse infill', width: pth.width, closed: pth.closed, pts: pth.pts });
+            });
+          } else if (!g.isEmpty(sparse) && oS.sparseDensity > 0) {
             var sp = g.polys(sparse);
             var fams, lineSp;
             if (o.sparsePattern === 'grid') {
@@ -3781,6 +3937,7 @@
     brimWanted: brimWanted,
     thinWalls: thinWalls,
     medialPaths: medialPaths,
+    concentricFill: concentricFill,
     toGcode: toGcode,
     describe: describe,
     loadKernel: loadKernel,
