@@ -140,6 +140,7 @@ merging its list by hand. The list below is generated.
 - [Support tree - a trunk that stops, and branches that finish the job](handoff/support-tree-a-trunk-that-stops-and-branches-that-finish-the-job.md)
 - [Supports advanced - the tree rests on the part; Advanced numbers and Saved settings on the card (2026-11-14)](handoff/supports-advanced.md)
 - [Supports angle default - 35, and Bambu's 30 is from horizontal too (2026-10-21)](handoff/supports-angle-default-35-and-bambus-30-is-from-horizontal-too.md)
+- [Supports: Bambu's Advanced rows - on the card, in the slicer, in the file (2026-11-14)](handoff/supports-bambu-advanced.md)
 - [Supports Blockers and Slice and Preview](handoff/supports-blockers-and-slice-preview.md)
 - [Supports custom card - the Tune section (2026-10-25)](handoff/supports-custom-card.md)
 - [Supports custom engine - the planner takes the user's points (2026-10-23)](handoff/supports-custom-engine-the-planner-takes-the-users-points.md)

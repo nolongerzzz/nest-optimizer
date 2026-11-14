@@ -125,9 +125,10 @@ It is asked once a 0.5 mm lattice point now and read between them; the body's ce
 
 ## 4c. Advanced, and the saved settings
 
-The card's **Advanced** section (docs/SUPPORTS-CARD.md) is these numbers, each with its default; only one that differs is sent (`opts.flowKnobs`), held to a
+The card's **Tree planner** section (docs/SUPPORTS-CARD.md) is these numbers, each with its default; only one that differs is sent (`opts.flowKnobs`), held to a
 range (`FLOW_KNOBS`): Tip spacing (`tipCover` 0.44 x the branch distance), Tip column (`tipDropMm` 2.8), Gather (0.25), Join reach (0.95), Straight foot
-(`rootFloorMm` 2.4), Flare height / slope (2, 0.45), Foot pad (0.6), Part clearance (`xyMm` 0.45), Bottom distance (0.2). `plan.flow.advGiven` says what a
+(`rootFloorMm` 2.4), Flare height / slope (2, 0.45). The pad (`padGrowMm`), the clearance (`xyMm`) and the bottom distance (`bottomGapMm`) come from Bambu's
+Advanced rows (docs/SUPPORT-ADVANCED.md): Initial layer expansion, Support/object xy distance (a tenth more), Bottom Z distance. `plan.flow.advGiven` says what a
 build was given. **Saved settings** keeps every lever of the card under a name.
 
 ## 5. The planner's own gates - `npm run support:flow`

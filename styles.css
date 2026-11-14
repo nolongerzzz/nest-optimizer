@@ -4729,6 +4729,9 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
 .sup-card .sup-preset-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 0; width: 100%; margin-top: 4px; }
 .sup-card .sup-preset-row .vp-select { width: 100%; min-width: 0; }
 .sup-card .sup-adv-sec .sup-tune-row { gap: 4px; }
+/* Bambu's Advanced rows and the Tree planner's: the names are long (Support/object first layer gap), so the name takes the row's wide half, as in Studio */
+.sup-card .sup-bambu-sec .vp-bend-field, .sup-card .sup-adv-sec .vp-bend-field, .sup-card .sup-tree-sec .vp-bend-field { grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) 22px; }
+.sup-card .sup-bambu-sec .vp-bend-field .vp-select { grid-column: 2 / 4; }
 .sup-card .sup-seg { margin: 0; padding: 5px 4px; font-size: 11px; line-height: 1.2; cursor: pointer; color: #cbd5e1; text-transform: uppercase; letter-spacing: 0.04em;
   background: rgba(148, 163, 184, 0.12); border: 1px solid rgba(148, 163, 184, 0.35); border-left-width: 0; }
 .sup-card .sup-seg:first-child { border-left-width: 1px; border-radius: 4px 0 0 4px; }

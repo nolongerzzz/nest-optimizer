@@ -27,10 +27,13 @@ function setup() {
   const vals = { 'sup-angle': '30', 'sup-style': 'tree', 'sup-size': '1.2', 'sup-tree-distance': '5', 'sup-tree-diameter': '2', 'sup-tree-angle': '45', 'sup-tree-dangle': '5', 'sup-tree-tip': '0.8',
     'sup-interface': '3', 'slice-set-iface-angle': 'studio36', 'slice-set-raft': '0', 'slice-set-raft-gap': '0.1',
     'sup-adv-cover': '0.44', 'sup-adv-tipdrop': '2.8', 'sup-adv-gather': '0.25', 'sup-adv-reach': '0.95', 'sup-adv-floor': '2.4', 'sup-adv-flare': '2', 'sup-adv-flaretan': '0.45',
-    'sup-adv-pad': '0.6', 'sup-adv-xy': '0.45', 'sup-adv-bottom': '0.2' };
+    /* Bambu's Advanced rows (docs/SUPPORT-ADVANCED.md) */
+    'slice-set-sup-density': '100', 'slice-set-sup-expand': '-1', 'slice-set-sup-walls': '-1', 'slice-set-sup-topz': '0.18', 'slice-set-sup-bottomz': '0.2', 'slice-set-sup-base': 'default',
+    'slice-set-sup-base-spacing': '2.5', 'slice-set-sup-angle': '0', 'slice-set-sup-iface-pattern': 'default', 'slice-set-sup-iface-spacing': '0.5', 'slice-set-sup-expansion': '0',
+    'slice-set-sup-xy': '0.35', 'slice-set-sup-first-gap': '0.2', 'slice-set-sup-bridge': '5' };
   Object.keys(vals).forEach(id => { app.el(id).value = vals[id]; });
-  ['sup-rest', 'sup-small', 'sup-brim', 'sup-raft'].forEach(id => { app.el(id).type = 'checkbox'; });
-  app.el('sup-raft').checked = true;
+  ['sup-rest', 'sup-small', 'sup-brim', 'sup-raft', 'slice-set-sup-zover', 'slice-set-sup-indep'].forEach(id => { app.el(id).type = 'checkbox'; });
+  app.el('sup-raft').checked = true; app.el('slice-set-sup-indep').checked = true;
   return { app, mem, vals };
 }
 
@@ -38,7 +41,7 @@ function setup() {
   console.log('=== 1. Advanced ===');
   let { app, mem } = setup();
   const SET = app.card.settings;
-  check('the card has its settings', !!SET && Array.isArray(SET.fields) && SET.fields.length >= 26, SET ? SET.fields.length + ' levers' : '');
+  check('the card has its settings', !!SET && Array.isArray(SET.fields) && SET.fields.length >= 39, SET ? SET.fields.length + ' levers' : '');
   check('Advanced left alone sends nothing', SET.advanced() === null);
   app.el('sup-adv-tipdrop').value = '1.6'; app.el('sup-adv-gather').value = '0.5';
   check('a number changed is sent, and only it', JSON.stringify(SET.advanced()) === JSON.stringify({ tipDropMm: 1.6, gather: 0.5 }), JSON.stringify(SET.advanced()));
@@ -47,11 +50,14 @@ function setup() {
 
   console.log('\n=== 2. Saved settings ===');
   app.el('sup-adv-tipdrop').value = '1.6'; app.el('sup-angle').value = '46'; app.el('sup-rest').checked = true; app.el('sup-tree-distance').value = '4';
+  app.el('slice-set-sup-iface-pattern').value = 'concentric'; app.el('slice-set-sup-zover').checked = true; app.el('slice-set-sup-topz').value = '0.2';
   check('Save keeps them under a name', SET.save('PLA slim') === true && JSON.stringify(SET.names()) === '["PLA slim"]');
   const saved = SET.now();
   app.el('sup-adv-tipdrop').value = '2.8'; app.el('sup-angle').value = '30'; app.el('sup-rest').checked = false; app.el('sup-tree-distance').value = '5'; app.el('sup-adv-gather').value = '0.25';
+  app.el('slice-set-sup-iface-pattern').value = 'default'; app.el('slice-set-sup-zover').checked = false; app.el('slice-set-sup-topz').value = '0.18';
   check('...and a pick puts every control back', SET.pick('PLA slim') === true && JSON.stringify(SET.now()) === JSON.stringify(saved),
-    'angle ' + app.el('sup-angle').value + ', rest ' + app.el('sup-rest').checked + ', tip column ' + app.el('sup-adv-tipdrop').value);
+    'angle ' + app.el('sup-angle').value + ', rest ' + app.el('sup-rest').checked + ', tip column ' + app.el('sup-adv-tipdrop').value + ', interface ' + app.el('slice-set-sup-iface-pattern').value + ', Z overrides X/Y ' + app.el('slice-set-sup-zover').checked);
+  check('...Bambu\'s Advanced rows with them', app.el('slice-set-sup-iface-pattern').value === 'concentric' && app.el('slice-set-sup-zover').checked === true && app.el('slice-set-sup-topz').value === '0.2');
   app.el('sup-angle').value = '40';
   check('a name saved again is replaced, not doubled', SET.save('PLA slim') && SET.names().length === 1 && JSON.parse(mem['nso.supports.settings.v1'])['PLA slim']['sup-angle'] === '40');
   check('a name of nothing is not saved', SET.save('   ') === false && SET.names().length === 1);
@@ -82,7 +88,7 @@ function setup() {
   };
   let head = await build(false);
   check('plate only: the middle of the ceiling is unreachable, said so', /unreachable [1-9]/.test(head) && seen.length === 1 && seen[0].opts.flowKnobs === undefined && !!seen[0].p.flow && seen[0].p.flow.rests.length === 0, head);
-  head = await build(true, { 'sup-adv-tipdrop': '2', 'sup-adv-bottom': '0.3', 'sup-adv-gather': '7' });
+  head = await build(true, { 'sup-adv-tipdrop': '2', 'slice-set-sup-bottomz': '0.3', 'sup-adv-gather': '7' });
   const last = seen[seen.length - 1] || {}, fl = last.p && last.p.flow;
   check('May rest on the part: one plan, the flow tree\'s, with nothing unreachable', seen.length === 1 && !!fl && /unreachable 0/.test(head) && /Built: 1 support/.test(head), head);
   check('...feet on the part\'s floor (z 2) under the middle', !!fl && fl.rests.length >= 1 && fl.rests.every(r => Math.abs(r.z - (last.p.plateZ + 2)) < 1e-4), fl ? fl.rests.length + ' foot/feet on the part, ' + fl.trunks.length + ' on the plate' : '');

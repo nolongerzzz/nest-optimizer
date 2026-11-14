@@ -315,6 +315,16 @@
       bridgeAngleDeg: 0,                   // Bambu's bridge_angle: every Bridge laid at it (0: auto - over a support, Studio 02.09's 3.6 under the 'profile' / 'studio36' angles)
       supportInterfaceAngle: 'bridge',     // the column rule's stack angles (the app slices with the card's, 'profile' by default - app-print.js slicerOptions): 'profile' Bambu's own rule off the profile's support_angle / bridge_angle (its first layer at support_angle + 90, its top square to the bridge at bridge_angle - 0: Studio's 3.6 - one turn a layer down; the owner's 2x supp_ref at 20 / 45: 110, then 45 / 135 to a top at 135); 'bridge' its top square to the part's bridge over it; 'studio36' Studio 02.09's own (90, then 93.6 / 3.6 up to a top at 93.6, the part's bridges over supports at 3.6 - the owner's P1S print released clean); 'crosshatch' 110, then 45 / 135
       supportXyMm: 0.35,                   // the column rule's xy distance to the part at a support layer's own height (Bambu's support_object_xy_distance)
+      /* BAMBU'S ADVANCED SUPPORT ROWS (docs/SUPPORT-ADVANCED.md). Each default is what this slicer did before the row existed. */
+      supportBottomGapMm: null,            // support_bottom_z_distance: a support's layer keeps this far over a top face of the part under it (null: the support's mesh as built)
+      supportZOverridesXy: false,          // top_z_overrides_xy_distance: under an overhang the support comes in to COLUMN_Z_OVER_XY_MM of the wall beside it, not the xy distance - the top distance decides
+      supportInterfacePattern: 'default',  // support_interface_pattern: 'default' (the angle rule above) | 'rectilinear' (one direction) | 'rectilinear_interlaced' (a quarter turn a layer) | 'grid' (both, each layer) | 'concentric'
+      supportBasePattern: 'default',       // support_base_pattern: 'default' (a line across each ring under a stack) | 'hollow' (walls alone) | 'rectilinear' | 'rectilinear-grid' (lines through the whole tree)
+      supportBaseSpacingMm: 2.5,           // support_base_pattern_spacing: the base pattern's lines this far apart
+      supportWallLoops: -1,                // tree_support_wall_count: -1 (or 0) automatic - one; else that many
+      supportFirstLayerDensity: 1,         // raft_first_layer_density: a support's first layer filled this dense (1: solid)
+      supportFirstLayerGapMm: null,        // support_object_first_layer_gap: a support's first layer this far from the part's (null: as built)
+      supportExpansionMm: 0,               // support_expansion: the stack reaches this much further past an overhang's edge (or less far, negative)
       weldMm: 1e-4,
       dropToPlate: true,
       filamentDiameterMm: CONSTANTS.flow.filamentDiameterMm,
@@ -2294,7 +2304,7 @@
         var lightningAt = null;                                   /* lightning: each layer's sparse region, by layer */
         /* A SUPPORT IS HOLLOW, as its export says (SHEET.slicerSettings: wall_loops 1, sparse_infill_density 0%) and as Bambu's own tree is: one wall
            round the trunk and no filler inside it. The shells (the first layers, the top under a sheet) stay the profile's. */
-        var oS = P.role === 'support' ? Object.assign({}, o, { wallLoops: CONSTANTS.supportWalls.loops, sparseDensity: CONSTANTS.supportWalls.sparseDensity, narrowSparseMm: 0, minSparseAreaMm2: 0 }) : o;
+        var oS = P.role === 'support' ? Object.assign({}, o, { wallLoops: o.supportWallLoops >= 1 ? Math.round(o.supportWallLoops) : CONSTANTS.supportWalls.loops, sparseDensity: CONSTANTS.supportWalls.sparseDensity, narrowSparseMm: 0, minSparseAreaMm2: 0 }) : o;
         var TT = P.role === 'support' ? CONSTANTS.supportWalls.topShellLayers : T, BB = P.role === 'support' ? CONSTANTS.supportWalls.bottomShellLayers : B;
         if (P.role === 'brim') {
           /* a brim built with the supports (brimFor): one layer, its section printed as the brim's own loops, nothing else */
@@ -2448,7 +2458,9 @@
               return;
             }
             var polys = g.polys(cs);
-            connect(scanFill(polys, solidAngle, sInf, 0), solidJoin, hull).forEach(function (pth) {
+            /* a support's first layer at its own density (Bambu's Initial layer density): the lines that much further apart */
+            var sFill = P.role === 'support' && i === 0 && o.supportFirstLayerDensity > 0 && o.supportFirstLayerDensity < 1 ? sInf / Math.max(0.2, o.supportFirstLayerDensity) : sInf;
+            connect(scanFill(polys, solidAngle, sFill, 0), sFill > sInf ? 3 * sFill : solidJoin, hull).forEach(function (pth) {
               L.paths.push({ feature: feat, width: wInf, closed: false, pts: pth.pts });
             });
           }
@@ -2539,6 +2551,15 @@
          claims there, the second support's grid stopped under its tips and the stack laid on another grid: 140 layers more, a gap under the sheet) */
       var ownPass = o.supportLayerMaxMm > 0 && perObject.some(function (P) { return P.role === 'support'; });
       perObject._colClaim = ownPass ? null : [];
+      /* a support's first layer stands its first-layer gap off the part's (Bambu's Support/object first layer gap) - on the shared grid and on a
+         support's own (below) */
+      var firstGap = function (P) {
+        if (!(o.supportFirstLayerGapMm != null && o.supportFirstLayerGapMm >= 0) || P.role !== 'support' || !P.S[0] || g.isEmpty(P.S[0])) return;
+        var first = [];
+        perObject.forEach(function (Q) { if (Q.role === 'part' && (P.hostKey == null || Q.key === P.hostKey) && Q.S[0] && !g.isEmpty(Q.S[0])) first.push(Q.S[0]); });
+        if (first.length) P.S[0] = g.diff(P.S[0], g.offset(g.unionAll(first), o.supportFirstLayerGapMm));
+      };
+      perObject.forEach(firstGap);
       perObject.forEach(function (P) { colRule(P); buildLayers(P); });
 
       /* THE SUPPORT'S OWN LAYERS (o.supportLayerMaxMm; Bambu's independent_support_layer_height). A support is not cut on the part's 0.2 grid: its layers run
@@ -2554,6 +2575,7 @@
           var own = supportGrid(P, planes, o.supportLayerMaxMm, shiftZ);
           if (!own) return;
           var P2 = makeP(objs[k], k, own);
+          firstGap(P2);
           var claims = perObject._colClaim;
           perObject[k] = P2;
           perObject._colClaim = claims;
@@ -3126,6 +3148,7 @@
   var COLUMN_TUBE_MID_SNAP_MM = 0.4, COLUMN_TUBE_MID_MIN_MM = 0.5;   /* ...and a ring no line of the grid crosses takes one across its middle */
   var COLUMN_TUBE_FILL_MAX_MM = 2.6;     /* ...a line across a RING (a branch near its top), no longer: branches joined into one body are hollow, and a line across that lies over air */
   var COLUMN_TUBE_RING_MAX_MM2 = 6;      /* ...and only a piece this small is a ring (a 2 mm tip is 3.1 mm2, 2.6 across 5.3) */
+  var COLUMN_Z_OVER_XY_MM = 0.2;         /* Z overrides X/Y: the least a support keeps from a wall beside it under an overhang */
   var COLUMN_TUBE_FILL_PITCH_MM = 2.5;   /* ...that far apart: Bambu's support_base_pattern_spacing */
   var COLUMN_BASE_PITCH_MM = 2;  /* the base's lines (Support), as far apart as this: the transition over it spans no more */
   /* the loops a stack's piece is laid with: one half a line in from its edge; a piece narrower than a line (a dome's or a cone's ring of contact,
@@ -3166,6 +3189,7 @@
     var C = CONSTANTS.supportSheet;
     var NI = o.supportInterfaceLayers != null ? o.supportInterfaceLayers : C.interfaceLayers, NT = C.transitionLayers;
     var gap = o.supportGapMm, xy = o.supportXyMm != null ? o.supportXyMm : 0.35, SP = P.planes || planes, n = SP.length;
+    var botGap = o.supportBottomGapMm > 0 ? o.supportBottomGapMm : 0, zOver = !!o.supportZOverridesXy, edgeOut = Math.max(0, COLUMN_EDGE_OUT_MM + (+o.supportExpansionMm || 0));
     var hMax = 0; SP.forEach(function (p) { if (p.h > hMax) hMax = p.h; });
     var reach = gap + (NI + NT) * hMax + COLUMN_REACH_MM;
     var parts = perObject.filter(function (Q) { return Q.role === 'part'; });
@@ -3189,13 +3213,24 @@
       });
       if (ovk.length) ovByK[k3] = U(ovk);
     }
+    /* Z overrides X/Y: what of the part stands anywhere over each plane (its shadow), worked down from the top once */
+    var shadow = null;
+    if (zOver) {
+      shadow = []; var acc = null;
+      for (var ks = planes.length - 1; ks >= 0; ks--) {
+        hosts.forEach(function (Q) { if (!g.isEmpty(Q.S[ks])) acc = acc ? g.union(acc, Q.S[ks]) : Q.S[ks]; });
+        shadow[ks] = acc;
+      }
+    }
     var blocked = [], blockedHard = [], blockedTree = [], blockedTwig = [], contact = [], near = [];
     for (var i = 0; i < n; i++) {
       var zt = SP[i].printZ, zb = zt - SP[i].h, hn = i + 1 < n ? SP[i + 1].h : planes[0].h;
-      var lat = [], ver = [], up = [], nr = [], upOv = [];
+      var lat = [], ver = [], up = [], nr = [], upOv = [], bot = [];
       for (var k = 0; k < planes.length; k++) {
         var pz = planes[k].printZ, b = pz - planes[k].h;
         if (b > zt + reach) break;
+        /* the part's top face a bottom distance or less under this layer (supportBottomGapMm): the layer does not stand on it */
+        if (botGap > 0 && pz <= zb + 1e-6 && zb - pz < botGap - 1e-6) hosts.forEach(function (Q) { if (!g.isEmpty(Q.S[k])) bot.push(Q.S[k]); });
         if (pz <= zb + 1e-6) continue;
         var cs = [], csUp = [];
         hosts.forEach(function (Q) { if (!g.isEmpty(Q.S[k])) { cs.push(Q.S[k]); var big = g.dropSmall(Q.S[k], specMm2); if (!g.isEmpty(big)) csUp.push(big); } });
@@ -3206,18 +3241,28 @@
         else if (d < gap + hn - 1e-6) { Array.prototype.push.apply(up, csUp); if (ovByK[k]) upOv.push(ovByK[k]); }
         if (d >= -1e-6) Array.prototype.push.apply(nr, cs);
       }
-      var bl = [], L0 = U(lat), V0 = U(ver), hard = [];
-      if (L0) { bl.push(g.offset(L0, xy)); hard.push(L0); }
+      var bl = [], L0 = U(lat), V0 = U(ver), hard = [], B0 = U(bot);
+      var NR = null;
+      if (zOver) { for (var kz = 0; kz < planes.length; kz++) if (planes[kz].printZ - planes[kz].h >= zt - 1e-6) { NR = shadow[kz]; break; } }
+      /* the part beside a layer, grown by the xy distance - or, with Z overrides X/Y, by COLUMN_Z_OVER_XY_MM where the part stands over the layer */
+      var sideOf = function (X) { return NR && xy > COLUMN_Z_OVER_XY_MM ? g.union(g.diff(g.offset(X, xy), g.diff(NR, X)), g.offset(X, COLUMN_Z_OVER_XY_MM)) : g.offset(X, xy); };
+      if (L0) {
+        /* Z OVERRIDES X/Y: under the part (where it stands within reach over this layer) the support keeps the top distance and comes in to
+           COLUMN_Z_OVER_XY_MM of the wall beside it; elsewhere the xy distance, as ever */
+        bl.push(sideOf(L0));
+        hard.push(L0);
+      }
+      if (B0) { bl.push(B0); hard.push(B0); }
       /* ...and the part a gap or less over it (a slope's next layer, its riser) kept the gap's own distance sideways (COLUMN_RISER_XY_MM): a stair's
          tread stood to the riser's edge, a bead's corner under every overhang wall up the slope (the owner's 2x Oblique welded: 8 % of its
          support beads within 0.1 mm of the part, Bambu's 02.09 none under 0.15) - the treads now end short of it, a slope parallel to the part's */
       if (V0) { bl.push(g.offset(V0, COLUMN_RISER_XY_MM)); hard.push(V0); }
       /* a contact reaches past the edge of an overhang as the footprint does (not past a wall: the part's section beside it is no underside) */
       var UP = U(up), UO = U(upOv);
-      blocked.push(U(bl)); blockedHard.push(U(hard)); contact.push(UP && UO ? g.union(UP, g.offset(UO, COLUMN_EDGE_OUT_MM)) : UP); near.push(U(nr));
+      blocked.push(U(bl)); blockedHard.push(U(hard)); contact.push(UP && UO ? g.union(UP, g.offset(UO, edgeOut)) : UP); near.push(U(nr));
       /* the tree (the support's own section, not the stack) keeps the xy distance from the part just over it too: a branch climbing past an
          overhang's edge (into a cavity, by the rim's hole) stood a bead's width under the rim's first layer */
-      blockedTree.push(V0 ? U([U(bl), g.offset(V0, xy)]) : U(bl));
+      blockedTree.push(V0 ? U([U(bl), sideOf(V0)]) : U(bl));
       /* a twig (a horn's tip, a thin column: a piece of the support's section under COLUMN_TWIG_MM2) keeps COLUMN_TWIG_XY_MM: Bambu's horn
          stands its ring a hair off the wall under the shoulder it catches */
       var blT = []; if (L0) blT.push(g.offset(L0, COLUMN_TWIG_XY_MM)); if (V0) blT.push(g.offset(V0, COLUMN_TWIG_XY_MM));
@@ -3237,7 +3282,7 @@
     var ovs = ovByK.filter(function (x) { return x && !g.isEmpty(x); });
     var FT = U(ovs);
     if (FT && !g.isEmpty(FT)) {
-      var served = g.parts(g.offset(FT, COLUMN_EDGE_OUT_MM)).filter(function (pc) { return g.area(g.inter(pc, F)) > COLUMN_MIN_MM2; });
+      var served = g.parts(g.offset(FT, edgeOut)).filter(function (pc) { return g.area(g.inter(pc, F)) > COLUMN_MIN_MM2; });
       if (served.length) F = g.unionAll(served);
     }
     if (typeof process !== 'undefined' && process.env && process.env.NSO_COLUMN_DEBUG) console.log('column footprint: overhang ' + (FT ? g.area(FT).toFixed(1) : '-') + ' mm2 in ' + ovs.length + ' pieces, footprint now ' + g.area(F).toFixed(1));
@@ -3541,7 +3586,23 @@
              Bambu's own on the owner's P1S print that released clean; 0.1 the 0.46 of the dense sheet. Without one, the dense sheet's line + 0.04 */
           var pj = o.supportInterfaceSpacingMm != null ? spacingOf(wI, SP[j].h || 0.2) + o.supportInterfaceSpacingMm : pitch;
           var hullR = g.polys(g.offset(rg[0], 1e-3));
+          /* THE INTERFACE PATTERN (Bambu's Interface pattern; 'default' is the angle rule above): Rectilinear lays every layer of a stack one way
+             (the stack's first layer's), Rectilinear interlaced turns a quarter a layer, Grid lays both ways on every layer at twice the spacing,
+             Concentric rings in from the region's edge */
+          var ipat = o.supportInterfacePattern || 'default';
+          if (ipat !== 'default') {
+            var a0 = mode === 'profile' ? ((o.supportAngleDeg || 0) + 90) * Math.PI / 180 : mode === 'studio36' ? Math.PI / 2 : 110 * Math.PI / 180;
+            if (ipat === 'concentric') {
+              concentricFill(g, inner, wI, SP[j].h || 0.2, pj, false, null).forEach(function (pth) {
+                if (pth.pts.length > 1) out.push({ feature: rg[1], width: wI, closed: !!pth.closed, pts: pth.pts, sheetFill: true, colPlate: true });
+              });
+              return;
+            }
+            fills = ipat === 'grid' ? [[inner, a0, 2 * pj], [inner, a0 + Math.PI / 2, 2 * pj]]
+              : ipat === 'rectilinear_interlaced' ? [[inner, a0 + (stackIdx[j] % 2) * Math.PI / 2]] : [[inner, a0]];
+          }
           fills.forEach(function (fl) {
+            if (fl[2]) { var sg2 = scanFill(g.polys(fl[0]), fl[1], fl[2], 0); if (sg2.length) connect(sg2, 3 * fl[2], hullR).forEach(function (pth) { out.push({ feature: rg[1], width: wI, closed: false, pts: pth.pts, sheetFill: true, colPlate: true }); }); return; }
             var segs = scanFill(g.polys(fl[0]), fl[1], pj, 0);
             if (segs.length) connect(segs, 3 * pj, hullR).forEach(function (pth) {
               out.push({ feature: rg[1], width: wI, closed: false, pts: pth.pts, sheetFill: true, colPlate: true });
@@ -3553,7 +3614,18 @@
          carry its base pattern inside - rectilinear, a line or two across a ring - in half its rings from the stack's foot up and seldom lower; ours
          were hollow, and the cup drew the lines outside the tube instead. From COLUMN_TUBE_FILL_BELOW_MM under the lowest stack of the part's
          supports, each tree piece is crossed at COLUMN_TUBE_FILL_PITCH_MM at one angle (each layer's lines on the last's) */
-      if (tubeFillFrom != null && SP[j].printZ >= tubeFillFrom && !g.isEmpty(P.S[j])) {
+      /* THE BASE PATTERN (Bambu's Base pattern and its spacing): 'hollow' the walls alone; 'rectilinear' lines through every piece of the tree on
+         every layer, one way (Pattern angle), each layer's on the last's; 'rectilinear-grid' both ways; 'default' the ring lines below */
+      var bpat = o.supportBasePattern || 'default', bPitch = o.supportBaseSpacingMm > 0 ? o.supportBaseSpacingMm : COLUMN_TUBE_FILL_PITCH_MM;
+      if ((bpat === 'rectilinear' || bpat === 'rectilinear-grid') && !g.isEmpty(P.S[j])) {
+        var treeB = R ? g.diff(P.S[j], R) : P.S[j], inB = g.isEmpty(treeB) ? treeB : g.offset(treeB, -wI * 0.75), aB = (o.supportAngleDeg || 0) * Math.PI / 180;
+        if (!g.isEmpty(inB)) (bpat === 'rectilinear-grid' ? [aB, aB + Math.PI / 2] : [aB]).forEach(function (ab) {
+          scanFill(g.polys(inB), ab, bPitch, 0).forEach(function (sg) {
+            if (Math.hypot(sg.b[0] - sg.a[0], sg.b[1] - sg.a[1]) >= 1) out.push({ feature: 'Support', width: wI, closed: false, pts: [sg.a, sg.b], sheetFill: true, colPlate: true });
+          });
+        });
+      }
+      if (bpat === 'default' && tubeFillFrom != null && SP[j].printZ >= tubeFillFrom && !g.isEmpty(P.S[j])) {
         var treeJ = R ? g.diff(P.S[j], R) : P.S[j];
         if (!g.isEmpty(treeJ)) g.parts(treeJ).forEach(function (pc) {
           var inC = g.offset(pc, -wI * 0.5);
@@ -3566,7 +3638,7 @@
           for (var jj = j + 1; !under && jj < P.layers.length && SP[jj].printZ - SP[jj].h - SP[j].printZ <= COLUMN_TUBE_FILL_BELOW_MM + 1e-6; jj++)
             if (regs[jj] && !g.isEmpty(regs[jj]) && g.area(g.inter(regs[jj], g.offset(pc, 0.5))) > 0.05) under = true;
           if (!under) return;
-          var cs2 = scanFill(g.polys(inC), aD, COLUMN_TUBE_FILL_PITCH_MM, 0), got = 0;
+          var cs2 = scanFill(g.polys(inC), aD, bPitch, 0), got = 0;
           cs2.forEach(function (sg) {
             var a0 = sg.a, b0 = sg.b;
             var lnF = Math.hypot(b0[0] - a0[0], b0[1] - a0[1]);

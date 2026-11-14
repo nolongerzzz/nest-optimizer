@@ -362,11 +362,12 @@ var NSO_SUPPORTS_CARD = (function () {
     var p = placedOf(S.hostId), m = modelOf(S.hostId);
     if (!p || !m) return null;
     var occ = others(S.hostId);
-    var key = poseKey(p) + '#' + occ.map(poseKey).join('#') + '#' + ((typeof nsoMaskCount === 'function') ? nsoMaskCount(m) : 0) + '@' + S.angle;
+    var key = poseKey(p) + '#' + occ.map(poseKey).join('#') + '#' + ((typeof nsoMaskCount === 'function') ? nsoMaskCount(m) : 0) + '@' + S.angle + '@' + bridgeNow();
     if (S.det && S.det.key === key) return S.det;
     var soup = worldUp(p.mesh), sk = skipListFor(m, p, soup);
     /* beaconInsetMm: a spot stands at least this far in from the edge of the surface it holds (docs/SUPPORT-FOOTPRINT.md) */
     var SBm = window.NSO_SupportBeacons, opts = { skipList: sk.list, angleDeg: S.angle, occluders: occ.map(occluderSoup), beaconInsetMm: SBm && SBm.INSET_PRODUCT_MM || 0, beaconSeedMm: SBm && SBm.SEED_PITCH_PRODUCT_MM || 0, beaconBridgeMinMm: SBm && SBm.BRIDGE_MIN_PRODUCT_MM || 0 };
+    if (Math.abs(bridgeNow() - BRIDGE_DEFAULT) > 1e-9) opts.bridgeMm = bridgeNow();     /* Max bridge length: the span the detector calls a bridge (its own 5 mm when the row is left alone) */
     /* A BIG piece is read in a worker (detection is 10 s of JS on the vase, and
        the card used to freeze the page for all of it on opening). The card
        says "measuring…" and redraws when the read comes back. */
@@ -1214,18 +1215,29 @@ var NSO_SUPPORTS_CARD = (function () {
   /* ADVANCED: the flow tree's own numbers (nso_support_flow.js DEFAULTS, nso_support_gridpack.js FLOW), each a field with its default. Only a
      value that differs from its default is sent, so a card left alone builds exactly as the defaults do. */
   var ADV_IDS = { tipCover: ['sup-adv-cover', 0.44], tipDropMm: ['sup-adv-tipdrop', 2.8], gather: ['sup-adv-gather', 0.25], reach: ['sup-adv-reach', 0.95],
-                  rootFloorMm: ['sup-adv-floor', 2.4], flareMm: ['sup-adv-flare', 2], flareTan: ['sup-adv-flaretan', 0.45], padGrowMm: ['sup-adv-pad', 0.6],
-                  xyMm: ['sup-adv-xy', 0.45], bottomGapMm: ['sup-adv-bottom', 0.2] };
+                  rootFloorMm: ['sup-adv-floor', 2.4], flareMm: ['sup-adv-flare', 2], flareTan: ['sup-adv-flaretan', 0.45] };
+  /* ...and the rows of Bambu's Advanced that shape the tree (index.html #sup-bambu-sec; the slicer reads them all - app-print.js): Initial layer
+     expansion is the pad's reach past a foot (-1: automatic), Bottom Z distance the gap under a foot on the part, the xy distance the tree's
+     clearance (planned a tenth further off than the slicer cuts), Max bridge length the span the detector calls a bridge. Only a row that
+     differs from its default is sent. */
+  var BAMBU_TREE = { padGrowMm: ['slice-set-sup-expand', -1], bottomGapMm: ['slice-set-sup-bottomz', 0.2], xyMm: ['slice-set-sup-xy', 0.35] };
+  var BRIDGE_ID = 'slice-set-sup-bridge', BRIDGE_DEFAULT = 5, XY_PLAN_EXTRA_MM = 0.1;
+  function bridgeNow() { var e = $(BRIDGE_ID), v = e ? parseFloat(e.value) : NaN; return isFinite(v) && v >= 0 ? v : BRIDGE_DEFAULT; }
   function advKnobsOf() {
     var out = {}, n = 0;
     Object.keys(ADV_IDS).forEach(function (k) {
       var e = $(ADV_IDS[k][0]), v = e ? parseFloat(e.value) : NaN;
       if (isFinite(v) && v >= 0 && Math.abs(v - ADV_IDS[k][1]) > 1e-9) { out[k] = v; n++; }
     });
+    Object.keys(BAMBU_TREE).forEach(function (k) {
+      var e = $(BAMBU_TREE[k][0]), v = e ? parseFloat(e.value) : NaN;
+      if (!isFinite(v) || Math.abs(v - BAMBU_TREE[k][1]) <= 1e-9 || v < 0) return;
+      out[k] = k === 'xyMm' ? v + XY_PLAN_EXTRA_MM : v; n++;
+    });
     return n ? out : null;
   }
   function advSync() {
-    var k = advKnobsOf(), note = $('sup-adv-note'), n = k ? Object.keys(k).length : 0;
+    var k = advKnobsOf(), note = $('sup-adv-note'), n = k ? Object.keys(k).filter(function (x) { return !!ADV_IDS[x]; }).length : 0;
     if (note) note.textContent = n ? n + ' changed from the defaults' : '';
     var df = $('sup-adv-defaults'); if (df) df.disabled = !n;
   }
@@ -1236,7 +1248,11 @@ var NSO_SUPPORTS_CARD = (function () {
      so (input + change), as a hand on the control would. Nothing rebuilds: Generate does. */
   var PRESET_KEY = 'nso.supports.settings.v1', PRESET_LAST = 'nso.supports.settings.last';
   var PRESET_FIELDS = ['sup-angle', 'sup-style', 'sup-size', 'sup-tree-distance', 'sup-tree-diameter', 'sup-tree-angle', 'sup-tree-dangle', 'sup-tree-tip',
-    'sup-rest', 'sup-small', 'sup-brim', 'sup-raft', 'sup-interface', 'slice-set-iface-angle', 'slice-set-raft', 'slice-set-raft-gap']
+    'sup-rest', 'sup-small', 'sup-brim', 'sup-raft', 'sup-interface', 'slice-set-iface-angle', 'slice-set-raft', 'slice-set-raft-gap',
+    /* Bambu's Advanced rows */
+    'slice-set-sup-density', 'slice-set-sup-expand', 'slice-set-sup-walls', 'slice-set-sup-topz', 'slice-set-sup-bottomz', 'slice-set-sup-base', 'slice-set-sup-base-spacing',
+    'slice-set-sup-angle', 'slice-set-sup-iface-pattern', 'slice-set-sup-iface-spacing', 'slice-set-sup-expansion', 'slice-set-sup-xy', 'slice-set-sup-zover',
+    'slice-set-sup-first-gap', 'slice-set-sup-bridge', 'slice-set-sup-indep']
     .concat(Object.keys(ADV_IDS).map(function (k) { return ADV_IDS[k][0]; }));
   function store() { try { return typeof localStorage !== 'undefined' ? localStorage : null; } catch (err) { return null; } }
   function presetsRead() { var st = store(); if (!st) return {}; try { var o = JSON.parse(st.getItem(PRESET_KEY) || '{}'); return o && typeof o === 'object' ? o : {}; } catch (err) { return {}; } }
@@ -3483,6 +3499,8 @@ var NSO_SUPPORTS_CARD = (function () {
     /* Advanced, and the saved settings */
     Object.keys(ADV_IDS).forEach(function (k) { on(ADV_IDS[k][0], 'input', function () { advSync(); }); });
     on('sup-adv-defaults', 'click', function () { advDefaults(); });
+    /* Max bridge length changes what hangs: the areas are read again, as on a new angle */
+    on(BRIDGE_ID, 'change', function () { if (S.busy) return; S.det = null; S.dets = {}; refresh(); });
     PRESET_FIELDS.forEach(function (id) { on(id, 'input', presetTouched); on(id, 'change', presetTouched); });
     on('sup-preset', 'change', function () { var v = $('sup-preset').value; if (v) presetPick(v); else presetList(''); });
     on('sup-preset-save', 'click', function () {
@@ -3500,6 +3518,20 @@ var NSO_SUPPORTS_CARD = (function () {
     });
     presetList('');
     advSync();
+    /* the Slice rows are put back to the printer profile's values when the page opens, when the template arrives and when the printer changes
+       (app-print.js seedSettings): the saved setting the card shows lays its own back over them. The Slice section's Reset is the owner asking
+       for the profile's: the card then shows no saved setting. */
+    window.nsoSliceRowsSeeded = function (reset) {
+      var sel = $('sup-preset'), name = sel && sel.value;
+      if (!name) return;
+      if (reset) { presetTouched(); return; }
+      var all = presetsRead(), vals = all[name];
+      if (!vals) return;
+      var only = {};
+      PRESET_FIELDS.forEach(function (id) { if (/^slice-set-/.test(id) && vals[id] !== undefined) only[id] = vals[id]; });
+      presetQuiet = true;
+      try { presetApply(only); } finally { presetQuiet = false; }
+    };
     /* the settings last saved or picked come back with the page: what worked is what the card opens with */
     (function () { var st = store(), last = null; try { last = st ? st.getItem(PRESET_LAST) : null; } catch (err) { last = null; } if (last && presetsRead()[last]) presetPick(last); })();
     Object.keys(MODES).forEach(function (k) { on('sup-mode-' + k, 'click', function () { setMode(k); }); });

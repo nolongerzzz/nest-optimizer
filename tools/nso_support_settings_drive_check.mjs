@@ -45,27 +45,36 @@ async function main() {
   await load();
 
   console.log('-- the controls');
-  const ids = ['sup-adv-sec', 'sup-adv-cover', 'sup-adv-tipdrop', 'sup-adv-gather', 'sup-adv-reach', 'sup-adv-floor', 'sup-adv-flare', 'sup-adv-flaretan', 'sup-adv-pad', 'sup-adv-xy', 'sup-adv-bottom',
+  const ids = ['sup-adv-sec', 'sup-adv-cover', 'sup-adv-tipdrop', 'sup-adv-gather', 'sup-adv-reach', 'sup-adv-floor', 'sup-adv-flare', 'sup-adv-flaretan',
+    'sup-bambu-sec', 'slice-set-sup-density', 'slice-set-sup-expand', 'slice-set-sup-walls', 'slice-set-sup-topz', 'slice-set-sup-bottomz', 'slice-set-sup-base', 'slice-set-sup-base-spacing', 'slice-set-sup-angle',
+    'sup-interface', 'slice-set-sup-iface-pattern', 'slice-set-sup-iface-spacing', 'slice-set-sup-expansion', 'slice-set-sup-xy', 'slice-set-sup-zover', 'slice-set-sup-first-gap', 'slice-set-sup-bridge', 'slice-set-sup-indep',
     'sup-adv-defaults', 'sup-preset', 'sup-preset-save', 'sup-preset-delete', 'sup-preset-export', 'sup-preset-import'];
   const have = await page.evaluate((list) => list.filter((i) => !document.getElementById(i)), ids);
-  check('Advanced and the Saved settings row are on the card', have, []);
+  check('Tree planner, Bambu\'s Advanced rows and the Saved settings row are on the card', have, []);
   check('every lever Saved settings keeps is a control of the page', await page.evaluate(() => window.NSO_SUPPORTS_CARD.settings.fields.filter((i) => !document.getElementById(i))), []);
   check('Advanced at its defaults sends nothing; Defaults is off', [await page.evaluate(() => window.NSO_SUPPORTS_CARD.settings.advanced()), await page.evaluate(() => document.getElementById('sup-adv-defaults').disabled)], [null, true]);
 
   console.log('-- save, move, pick');
+  check('Bambu\'s rows open at this slicer\'s own values, in Bambu\'s order', await page.evaluate(() => [...document.querySelectorAll('#sup-bambu-sec input, #sup-bambu-sec select')].map((e) => e.id + '=' + (e.type === 'checkbox' ? e.checked : e.value))),
+    ['slice-set-sup-density=100', 'slice-set-sup-expand=-1', 'slice-set-sup-walls=-1', 'slice-set-sup-topz=0.18', 'slice-set-sup-bottomz=0.2', 'slice-set-sup-base=default', 'slice-set-sup-base-spacing=2.5', 'slice-set-sup-angle=0',
+      'sup-interface=3', 'slice-set-sup-iface-pattern=default', 'slice-set-sup-iface-spacing=0.5', 'slice-set-sup-expansion=0', 'slice-set-sup-xy=0.35', 'slice-set-sup-zover=false', 'slice-set-sup-first-gap=0.2',
+      'slice-set-sup-bridge=5', 'slice-set-sup-indep=true']);
   await set('sup-angle', 46); await set('sup-rest', true); await set('sup-adv-tipdrop', 2.4); await set('sup-tree-distance', 4.5);
+  await set('slice-set-sup-iface-pattern', 'concentric'); await set('slice-set-sup-base', 'rectilinear'); await set('slice-set-sup-topz', 0.2); await set('slice-set-sup-zover', true);
   check('a changed Advanced number is counted, and Defaults comes on', [await page.evaluate(() => document.getElementById('sup-adv-note').textContent), await page.evaluate(() => document.getElementById('sup-adv-defaults').disabled)], ['1 changed from the defaults', false]);
   await page.click('#sup-preset-save');
   check('Save asks for a name and lists it, picked', [await val('sup-preset'), await page.evaluate(() => window.NSO_SUPPORTS_CARD.settings.names())], ['PLA slim', ['PLA slim']]);
   await set('sup-angle', 30); await set('sup-rest', false); await set('sup-adv-tipdrop', 2.8); await set('sup-tree-distance', 5);
+  await set('slice-set-sup-iface-pattern', 'default'); await set('slice-set-sup-base', 'default'); await set('slice-set-sup-topz', 0.18); await set('slice-set-sup-zover', false);
   check('a control moved by hand: the list reads not saved', await val('sup-preset'), '');
   await page.selectOption('#sup-preset', 'PLA slim');
   check('picking the name puts every control back', [await val('sup-angle'), await val('sup-rest'), await val('sup-adv-tipdrop'), await val('sup-tree-distance'), await val('sup-preset')], ['46', true, '2.4', '4.5', 'PLA slim']);
+  check('...Bambu\'s rows with them', [await val('slice-set-sup-iface-pattern'), await val('slice-set-sup-base'), await val('slice-set-sup-topz'), await val('slice-set-sup-zover')], ['concentric', 'rectilinear', '0.2', true]);
   check('...and the card\'s own angle with it', (await page.evaluate(() => window.NSO_SUPPORTS_CARD.view().line || document.getElementById('sup-count').textContent)).includes('46'), true);
 
   console.log('-- reload');
   await open(); await load();
-  check('the card opens with what was saved last', [await val('sup-preset'), await val('sup-angle'), await val('sup-rest'), await val('sup-adv-tipdrop')], ['PLA slim', '46', true, '2.4']);
+  check('the card opens with what was saved last', [await val('sup-preset'), await val('sup-angle'), await val('sup-rest'), await val('sup-adv-tipdrop'), await val('slice-set-sup-iface-pattern'), await val('slice-set-sup-zover')], ['PLA slim', '46', true, '2.4', 'concentric', true]);
 
   console.log('-- Generate: May rest on the part, at 46 deg');
   const t0 = Date.now();
@@ -76,7 +85,10 @@ async function main() {
   const nSup = await page.evaluate(() => state.models.filter((m) => m.nsoSupport && !m.nsoSupport.brim).length);
   check('one support, nothing unreachable (built in ' + ((Date.now() - t0) / 1000).toFixed(0) + ' s)', [nSup, /unreachable 0/.test(head), /unsupported 0/.test(head)], [1, true, true]);
   console.log('       ' + head);
-  await page.evaluate(() => { const d = document.getElementById('sup-adv-sec'); if (d) d.open = true; });
+  /* the plate's slice (Generate slices it with the Slice settings, these rows among them): the interface is rings, the tree is crossed by lines */
+  const sl = await page.evaluate(() => { const st = window.NSO_Print && NSO_Print.card ? NSO_Print.card.state() : null, r = st && st.result; return r ? { ok: !!r.ok, changed: r.changed || null } : null; });
+  check('the slice Generate made carries the rows that were changed, by Bambu\'s keys', !!sl && sl.ok && ['support_interface_pattern', 'support_base_pattern', 'support_top_z_distance', 'top_z_overrides_xy_distance'].every((k) => (sl.changed || []).indexOf(k) >= 0), true);
+  await page.evaluate(() => { const d = document.getElementById('sup-bambu-sec'); if (d) d.open = true; });
   await page.screenshot({ path: join(SHOTS, 'card-and-plate.png') });
   check('no page error', errors, []);
   await browser.close(); if (served.server && served.server.close) served.server.close();

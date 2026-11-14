@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=e91bae1c" />
+  <link rel="stylesheet" href="styles.css?v=c97b9f6a" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -1416,8 +1416,77 @@
                            title="A branch's diameter at the tip, where it meets the interface (Bambu's tree_support_tip_diameter). Default 0.8."><span>mm</span></label>
                 </div>
               </details>
+              <!-- BAMBU'S ADVANCED SUPPORT ROWS (docs/SUPPORT-ADVANCED.md): by Bambu's names and in its order. They are Slice settings (app-print.js SET_IDS):
+                   the slicer and the exported file read them; Generate reads the four that shape the tree. Each starts at what NSO did before the row existed. -->
+              <details class="vp-sec sup-bambu-sec" id="sup-bambu-sec">
+                <summary class="vp-sec-head" title="Bambu Studio's Advanced support settings, by its names and in its order. Each row starts at what this slicer does today (its tooltip names Bambu's own default where that differs); Save keeps them with the rest of the card.">Advanced</summary>
+                <div class="vp-sec-body">
+                  <label class="vp-bend-field" for="slice-set-sup-density">Initial layer density
+                    <input type="number" id="slice-set-sup-density" value="100" min="10" max="100" step="5" autocomplete="off" aria-label="Initial layer density"
+                           title="How densely a support's first layer is filled (Bambu's raft_first_layer_density, its default 90). 100: solid, as this slicer has always laid it."><span>%</span></label>
+                  <label class="vp-bend-field" for="slice-set-sup-expand">Initial layer expansion
+                    <input type="number" id="slice-set-sup-expand" value="-1" min="-1" max="10" step="0.1" autocomplete="off" aria-label="Initial layer expansion"
+                           title="How far the first-layer pad under a trunk reaches past its foot (Bambu's raft_first_layer_expansion). -1: automatic - 0.6 mm. Generate builds the pad."><span>mm</span></label>
+                  <label class="vp-bend-field" for="slice-set-sup-walls">Support wall loops
+                    <input type="number" id="slice-set-sup-walls" value="-1" min="-1" max="5" step="1" autocomplete="off" aria-label="Support wall loops"
+                           title="Walls round every piece of the tree (Bambu's tree_support_wall_count). -1 (or 0): automatic - one."></label>
+                  <label class="vp-bend-field" for="slice-set-sup-topz">Top Z distance
+                    <input type="number" id="slice-set-sup-topz" value="0.18" min="0" max="2" step="0.01" autocomplete="off" aria-label="Top Z distance"
+                           title="The gap between the support's top and the part over it (Bambu's support_top_z_distance, its default 0.2). 0.18 is this slicer's own. Larger releases easier and sags more."><span>mm</span></label>
+                  <label class="vp-bend-field" for="slice-set-sup-bottomz">Bottom Z distance
+                    <input type="number" id="slice-set-sup-bottomz" value="0.2" min="0" max="2" step="0.05" autocomplete="off" aria-label="Bottom Z distance"
+                           title="With May rest on the part: the gap between a support that stands on the part and the face under it (Bambu's support_bottom_z_distance). Generate builds the foot; the slicer holds its layers to it."><span>mm</span></label>
+                  <label class="vp-bend-field" for="slice-set-sup-base">Base pattern
+                    <select id="slice-set-sup-base" class="vp-select" autocomplete="off" title="What fills the tree (Bambu's support_base_pattern). Default: walls, and a line across each branch ring just under the interface. Rectilinear: lines through the whole tree, one way. Rectilinear grid: both ways. Hollow: walls alone.">
+                      <option value="default" selected>Default</option>
+                      <option value="rectilinear">Rectilinear</option>
+                      <option value="rectilinear-grid">Rectilinear grid</option>
+                      <option value="hollow">Hollow</option>
+                    </select></label>
+                  <label class="vp-bend-field" for="slice-set-sup-base-spacing">Base pattern spacing
+                    <input type="number" id="slice-set-sup-base-spacing" value="2.5" min="0.5" max="20" step="0.1" autocomplete="off" aria-label="Base pattern spacing"
+                           title="How far apart the base pattern's lines lie (Bambu's support_base_pattern_spacing)."><span>mm</span></label>
+                  <label class="vp-bend-field" for="slice-set-sup-angle">Pattern angle
+                    <input type="number" id="slice-set-sup-angle" value="0" min="0" max="180" step="1" autocomplete="off" aria-label="Pattern angle"
+                           title="The direction of the base pattern's lines, and - with Interface angle on Profile - of the interface's first layer, a quarter turn on (Bambu's support_angle)."><span>&deg;</span></label>
+                  <label class="vp-bend-field" for="sup-interface">Top interface layers
+                    <select id="sup-interface" class="vp-select" title="How many interface layers lie under the part (Bambu's support_interface_top_layers). Under them the slicer lays 2 transition layers, then the tree. 0: no interface - the transition meets the part." autocomplete="off">
+                      <option value="0">0</option>
+                      <option value="1">1</option>
+                      <option value="2">2</option>
+                      <option value="3" selected>3</option>
+                    </select></label>
+                  <label class="vp-bend-field" for="slice-set-sup-iface-pattern">Interface pattern
+                    <select id="slice-set-sup-iface-pattern" class="vp-select" autocomplete="off" title="How the interface layers are laid (Bambu's support_interface_pattern). Default: the Interface angle rule below. Rectilinear: every layer one way. Rectilinear Interlaced: a quarter turn a layer. Grid: both ways on every layer. Concentric: rings in from the edge.">
+                      <option value="default" selected>Default</option>
+                      <option value="rectilinear">Rectilinear</option>
+                      <option value="concentric">Concentric</option>
+                      <option value="rectilinear_interlaced">Rectilinear Interlaced</option>
+                      <option value="grid">Grid</option>
+                    </select></label>
+                  <label class="vp-bend-field" for="slice-set-sup-iface-spacing">Top interface spacing
+                    <input type="number" id="slice-set-sup-iface-spacing" value="0.5" min="0" max="5" step="0.05" autocomplete="off" aria-label="Top interface spacing"
+                           title="The gap between the interface's lines (Bambu's support_interface_spacing). 0.5 releases easily; 0.1 is nearly solid."><span>mm</span></label>
+                  <label class="vp-bend-field" for="slice-set-sup-expansion">Normal Support expansion
+                    <input type="number" id="slice-set-sup-expansion" value="0" min="-2" max="5" step="0.1" autocomplete="off" aria-label="Normal Support expansion"
+                           title="How much further past an overhang's edge the interface reaches (Bambu's support_expansion, which widens its normal supports; here the tree's interface). Negative: less far."><span>mm</span></label>
+                  <label class="vp-bend-field" for="slice-set-sup-xy">Support/object xy distance
+                    <input type="number" id="slice-set-sup-xy" value="0.35" min="0" max="3" step="0.05" autocomplete="off" aria-label="Support/object xy distance"
+                           title="How far the support stays from the part beside it (Bambu's support_object_xy_distance). The tree is planned a tenth further off and the slicer cuts to this."><span>mm</span></label>
+                  <label class="vp-check" for="slice-set-sup-zover" title="On: under an overhang the support comes in to 0.2 mm of the wall beside it and the top Z distance decides how close it stands - a slope is held right up to its foot. Off: the xy distance everywhere (Bambu's top_z_overrides_xy_distance).">
+                    <input type="checkbox" id="slice-set-sup-zover" autocomplete="off"> Z overrides X/Y</label>
+                  <label class="vp-bend-field" for="slice-set-sup-first-gap">Support/object first layer gap
+                    <input type="number" id="slice-set-sup-first-gap" value="0.2" min="0" max="3" step="0.05" autocomplete="off" aria-label="Support/object first layer gap"
+                           title="How far a support's first layer stays from the part's first layer (Bambu's support_object_first_layer_gap)."><span>mm</span></label>
+                  <label class="vp-bend-field" for="slice-set-sup-bridge">Max bridge length
+                    <input type="number" id="slice-set-sup-bridge" value="5" min="0" max="100" step="0.5" autocomplete="off" aria-label="Max bridge length"
+                           title="A span this long or shorter between two holds is a bridge and gets no support (Bambu's max_bridge_length). 0: every bridge is supported. 5 is this detector's own. The outlines follow."><span>mm</span></label>
+                  <label class="vp-check" for="slice-set-sup-indep" title="On: the support is cut on layers of its own, as thick as the nozzle allows (0.28), meeting the part's at every interface. Off: on the part's layers (Bambu's independent_support_layer_height).">
+                    <input type="checkbox" id="slice-set-sup-indep" checked autocomplete="off"> Independent support layer height</label>
+                </div>
+              </details>
               <details class="vp-sec sup-adv-sec" id="sup-adv-sec">
-                <summary class="vp-sec-head" title="The tree planner's own numbers (nso_support_flow.js), each with its default. Nothing rebuilds as you type; Generate builds with them. Save keeps them with the rest of the card.">Advanced</summary>
+                <summary class="vp-sec-head" title="The tree planner's own numbers (nso_support_flow.js), each with its default. Nothing rebuilds as you type; Generate builds with them. Save keeps them with the rest of the card.">Tree planner</summary>
                 <div class="vp-sec-body">
                   <label class="vp-bend-field" for="sup-adv-cover">Tip spacing
                     <input type="number" id="sup-adv-cover" value="0.44" min="0.2" max="1.2" step="0.02" autocomplete="off" aria-label="Tip spacing, a share of the branch distance"
@@ -1440,15 +1509,6 @@
                   <label class="vp-bend-field" for="sup-adv-flaretan">Flare slope
                     <input type="number" id="sup-adv-flaretan" value="0.45" min="0" max="1.5" step="0.05" autocomplete="off" aria-label="Flare slope, mm a mm"
                            title="How much wider a side the flare makes the trunk for every mm of its height: 0.45 x 2 mm is 0.9 mm a side at the plate. Default 0.45."></label>
-                  <label class="vp-bend-field" for="sup-adv-pad">Foot pad
-                    <input type="number" id="sup-adv-pad" value="0.6" min="0" max="4" step="0.1" autocomplete="off" aria-label="Foot pad, mm"
-                           title="The solid first-layer pad under a trunk reaches this far past its foot. Default 0.6."><span>mm</span></label>
-                  <label class="vp-bend-field" for="sup-adv-xy">Part clearance
-                    <input type="number" id="sup-adv-xy" value="0.45" min="0.2" max="2" step="0.05" autocomplete="off" aria-label="Part clearance, mm"
-                           title="How far a branch plans to stay from the part sideways (Bambu's support_object_xy_distance is 0.35; the slicer cuts to that). Larger: branches walk wider round the part. Default 0.45."><span>mm</span></label>
-                  <label class="vp-bend-field" for="sup-adv-bottom">Bottom distance
-                    <input type="number" id="sup-adv-bottom" value="0.2" min="0" max="1" step="0.05" autocomplete="off" aria-label="Bottom distance, mm"
-                           title="With May rest on the part: the gap between a foot that stands on the part and the face under it (Bambu's support_bottom_z_distance). Default 0.2."><span>mm</span></label>
                   <div class="sup-tune-row">
                     <span id="sup-adv-note" class="sup-tune-note"></span>
                     <button id="sup-adv-defaults" class="btn btn-secondary" type="button" title="Put every Advanced number back to its default. Nothing rebuilds; Generate does.">Defaults</button>
@@ -1470,13 +1530,6 @@
                 <input type="checkbox" id="sup-brim" autocomplete="off"> Brim round the foot</label>
               <label class="vp-check" for="sup-raft" title="Auto (the tree) always lays the platform under a flat hanging face - the interface and the transition laid from the face itself, layer by layer - whatever this box says. For the other builds: on, the same platform; off, the sheet is built from the tips alone.">
                 <input type="checkbox" id="sup-raft" autocomplete="off"> Platform under flat faces</label>
-              <label class="vp-bend-field" for="sup-interface">Top interface layers
-                <select id="sup-interface" class="vp-select" title="How many interface layers lie under the part, as Bambu's Top interface layers (its default 3). Under them the slicer lays 2 transition layers, then the tree. 0: no interface - the transition meets the part." autocomplete="off">
-                  <option value="0">0</option>
-                  <option value="1">1</option>
-                  <option value="2">2</option>
-                  <option value="3" selected>3</option>
-                </select></label>
               <label class="vp-bend-field" for="slice-set-iface-angle">Interface angle
                 <select id="slice-set-iface-angle" class="vp-select" title="How the support's transition and interface layers turn under the part (the column rule). Profile (Bambu): Bambu's own rule off the profile - the first layer at support_angle + 90, the top square to the bridge at bridge_angle, one turn a layer down (a Dense support prints with the reference's 20 / 45: 110, then 45 / 135). Square to bridge: the top interface layer crosses the part's bridge lines at 90 degrees, one turn a layer down (parallel lines weld, crossed ones release). 3.6 (Studio 2.9): Bambu Studio 02.09's own - the first layer at 90, then 93.6 / 3.6 up to a top at 93.6, the part's bridges over supports laid at 3.6 (the owner's P1S print released clean). Crosshatch: the old 45 / 135. A testing ground: Generate slices with it." autocomplete="off">
                   <option value="profile">Profile (Bambu)</option>
@@ -3056,7 +3109,7 @@
   <script src="nso-gcode-lines.js?v=fe0b823c"></script>
   <script src="nso-gscope-diff.js?v=937f4953"></script>
   <script src="nso-gcode-solid.js?v=ac1a4f02"></script>
-  <script src="nso_slicer.js?v=8557b0da"></script>
+  <script src="nso_slicer.js?v=c440fe07"></script>
   <script src="nso_raster_lines.js?v=461ca449"></script>
   <!-- The support interface: the crosshatch's one-direction layers, and the
        sheet a support tree's tips carry under the part (flat caps on the
@@ -3255,7 +3308,7 @@
        own page code, which listens for the press before the card does. After nso-helpers.js, app-core.js. docs/SUPPORT-BLOCKERS.md. -->
   <script src="nso_support_blockers.js?v=6962a81c"></script>
   <script src="app-support-blockers.js?v=73c8125d"></script>
-  <script src="app-supports-card.js?v=36e0bb6e"></script>
+  <script src="app-supports-card.js?v=1c5afa5a"></script>
   <script src="app-gscope-slice.js?v=6963bdd1"></script>
   <!-- The Slice card (left bar): the plate sliced for its printer, the .gcode.3mf
        it makes. The print planner and the packager are loaded here for it and for
@@ -3265,7 +3318,7 @@
        plate reader and G-code import it calls. See docs/PRINT-PLANNER.md. -->
   <script src="nso-print-planner.js?v=af9581c5"></script>
   <script src="nso-gcode3mf-write.js?v=cdfa15b4"></script>
-  <script src="app-print.js?v=084a93cc"></script>
+  <script src="app-print.js?v=4856ce41"></script>
   <!-- Lift: details off a face, the face left as it was round them. After
        nso_lift.js (Phase 1: a flat face), nso_lift_curved.js (Lift 3: the
        repair under a detail lifted off a curved base), nso_lift_auto.js

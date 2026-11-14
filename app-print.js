@@ -113,7 +113,13 @@
   // profile's: another nozzle needs its own start / end blocks.
   var SETTINGS_DEFAULT = { nozzle: 0.4, layer: 0.2, walls: 2, density: 15, pattern: 'grid', surface: 'zigzag', angle: 30, brim: 'auto', raft: 0, raftGap: 0.1, ifaceAngle: 'studio36', interfaceRule: null,
                            /* the filament: the profile's own; a null row is the filament's value (filamentBase); no temperature steps */
-                           filament: 'profile', nozzleTemp: null, firstTemp: null, bedTemp: null, maxFlow: null, tempStep: 0, tempBand: 10 };   /* the card's own defaults (the owner's view): Studio 2.9's 3.6 - the owner's mouse1 on the P1S released clean with it */
+                           filament: 'profile', nozzleTemp: null, firstTemp: null, bedTemp: null, maxFlow: null, tempStep: 0, tempBand: 10,
+                           /* BAMBU'S ADVANCED SUPPORT ROWS (docs/SUPPORT-ADVANCED.md), each at what the slicer did before the row existed: the first
+                              layer solid, the pad as built, one wall, the top distance 0.18, lines 2.5 apart, a bridge of 5 mm or less not held */
+                           supDensity: 100, supExpand: -1, supWalls: -1, supTopZ: 0.18, supBottomZ: 0.2, supBase: 'default', supBaseSpacing: 2.5, supAngle: 0,
+                           supIfacePattern: 'default', supIfaceSpacing: 0.5, supExpansion: 0, supXy: 0.35, supZOverXy: false, supFirstGap: 0.2, supBridge: 5, supIndep: true };   /* the card's own defaults (the owner's view): Studio 2.9's 3.6 - the owner's mouse1 on the P1S released clean with it */
+  var SUP_BASE_TO_CONFIG = { 'default': 'default', rectilinear: 'rectilinear', 'rectilinear-grid': 'rectilinear-grid', hollow: 'hollow' };
+  var SUP_IFACE_TO_CONFIG = { 'default': 'auto', rectilinear: 'rectilinear', concentric: 'concentric', rectilinear_interlaced: 'rectilinear_interlaced', grid: 'grid' };
   var IFACE_ANGLES = { profile: 1, bridge: 1, studio36: 1, crosshatch: 1 };   /* nso_slicer.js supportInterfaceAngle: NSO's own, no profile key - a testing ground for interfaces */
   var PATTERN_TO_CONFIG = { grid: 'grid', zigzag: 'zig-zag', lines: 'line', concentric: 'concentric', archimedeanchords: 'archimedeanchords', '3dhoneycomb': '3dhoneycomb', gyroid: 'gyroid', cubic: 'cubic', adaptivecubic: 'adaptivecubic', honeycomb: 'honeycomb', lightning: 'lightning' };
   var PATTERN_FROM_CONFIG = { grid: 'grid', 'zig-zag': 'zigzag', zigzag: 'zigzag', line: 'lines', lines: 'lines', concentric: 'concentric', archimedeanchords: 'archimedeanchords', '3dhoneycomb': '3dhoneycomb', gyroid: 'gyroid', cubic: 'cubic', adaptivecubic: 'adaptivecubic', honeycomb: 'honeycomb', lightning: 'lightning', rectilinear: 'zigzag' };
@@ -206,13 +212,18 @@
   function settingsFromConfig(config) {
     var PL = lazy('nso-print-planner.js', 'NSOPrintPlanner');
     if (!config || !PL) return Object.assign({}, SETTINGS_DEFAULT);
-    var eng = PL.engineOptions(config), o = eng.over;
+    var eng = PL.engineOptions(config), o = eng.over, D0 = SETTINGS_DEFAULT;
     return {
       nozzle: eng.nozzleMm, layer: o.layerMm, walls: o.wallLoops, density: Math.round(o.sparseDensity * 100),
       pattern: PATTERN_FROM_CONFIG[cfgRaw(config, 'sparse_infill_pattern')] || o.sparsePattern,
       surface: o.solidPattern && SURFACE_TO_CONFIG[o.solidPattern] ? o.solidPattern : 'zigzag',
       angle: o.supportThresholdDeg, brim: o.brimType, raft: Math.round(o.raftLayers || 0), raftGap: o.raftContactMm != null ? o.raftContactMm : 0.1, ifaceAngle: 'studio36', interfaceRule: null,
-      filament: 'profile', nozzleTemp: null, firstTemp: null, bedTemp: null, maxFlow: null, tempStep: 0, tempBand: 10
+      filament: 'profile', nozzleTemp: null, firstTemp: null, bedTemp: null, maxFlow: null, tempStep: 0, tempBand: 10,
+      /* the support rows: the pattern angle and the interface spacing are the profile's (the engine reads them off it); the rest are this slicer's own */
+      supDensity: D0.supDensity, supExpand: D0.supExpand, supWalls: D0.supWalls, supTopZ: D0.supTopZ, supBottomZ: D0.supBottomZ, supBase: D0.supBase, supBaseSpacing: D0.supBaseSpacing,
+      supAngle: o.supportAngleDeg != null ? o.supportAngleDeg : D0.supAngle, supIfacePattern: D0.supIfacePattern,
+      supIfaceSpacing: o.supportInterfaceSpacingMm != null ? o.supportInterfaceSpacingMm : D0.supIfaceSpacing,
+      supExpansion: D0.supExpansion, supXy: D0.supXy, supZOverXy: D0.supZOverXy, supFirstGap: D0.supFirstGap, supBridge: D0.supBridge, supIndep: D0.supIndep
     };
   }
 
@@ -222,7 +233,7 @@
     var n = function (v, d, lo, hi) { v = parseFloat(v); return isFinite(v) ? Math.max(lo, Math.min(hi, v)) : d; };
     /* a filament row: a number in its range, or null (empty: the filament's own value) */
     var opt = function (v, lo, hi, dp) { v = parseFloat(v); if (!isFinite(v)) return null; var k = Math.pow(10, dp); return Math.round(Math.max(lo, Math.min(hi, v)) * k) / k; };
-    var D = SETTINGS_DEFAULT;
+    var D = SETTINGS_DEFAULT, r2 = function (v) { return Math.round(v * 100) / 100; };
     return {
       nozzle: n(s.nozzle, D.nozzle, 0.1, 2),
       layer: Math.round(n(s.layer, D.layer, 0.05, 0.3) * 1000) / 1000,
@@ -239,7 +250,22 @@
       filament: filamentOf(s.filament).id,
       nozzleTemp: opt(s.nozzleTemp, 170, 300, 0), firstTemp: opt(s.firstTemp, 170, 300, 0), bedTemp: opt(s.bedTemp, 0, 110, 0),
       maxFlow: opt(s.maxFlow, 0.5, 40, 2),
-      tempStep: Math.round(n(s.tempStep, D.tempStep, -25, 25)), tempBand: Math.round(n(s.tempBand, D.tempBand, 1, 100) * 10) / 10
+      tempStep: Math.round(n(s.tempStep, D.tempStep, -25, 25)), tempBand: Math.round(n(s.tempBand, D.tempBand, 1, 100) * 10) / 10,
+      supDensity: Math.round(n(s.supDensity, D.supDensity, 10, 100)),
+      supExpand: (function (v) { return v < 0 ? -1 : r2(v); })(n(s.supExpand, D.supExpand, -1, 10)),
+      supWalls: Math.round(n(s.supWalls, D.supWalls, -1, 5)),
+      supTopZ: r2(n(s.supTopZ, D.supTopZ, 0, 2)), supBottomZ: r2(n(s.supBottomZ, D.supBottomZ, 0, 2)),
+      supBase: SUP_BASE_TO_CONFIG[s.supBase] ? s.supBase : D.supBase,
+      supBaseSpacing: r2(n(s.supBaseSpacing, D.supBaseSpacing, 0.5, 20)),
+      supAngle: Math.round(n(s.supAngle, D.supAngle, 0, 180)),
+      supIfacePattern: s.supIfacePattern === 'auto' ? 'default' : SUP_IFACE_TO_CONFIG[s.supIfacePattern] ? s.supIfacePattern : D.supIfacePattern,
+      supIfaceSpacing: r2(n(s.supIfaceSpacing, D.supIfaceSpacing, 0, 5)),
+      supExpansion: r2(n(s.supExpansion, D.supExpansion, -2, 5)),
+      supXy: r2(n(s.supXy, D.supXy, 0, 3)),
+      supZOverXy: s.supZOverXy === true || s.supZOverXy === 'true' || s.supZOverXy === '1' || s.supZOverXy === 1,
+      supFirstGap: r2(n(s.supFirstGap, D.supFirstGap, 0, 3)),
+      supBridge: r2(n(s.supBridge, D.supBridge, 0, 100)),
+      supIndep: !(s.supIndep === false || s.supIndep === 'false' || s.supIndep === '0' || s.supIndep === 0)
     };
   }
 
@@ -263,6 +289,23 @@
     if (s.brim !== base.brim) out.brim_type = BRIM_TO_CONFIG[s.brim];
     if (s.raft !== base.raft) out.raft_layers = String(s.raft);
     if (Math.abs(s.raftGap - base.raftGap) > 1e-6) out.raft_contact_distance = String(s.raftGap);
+    /* the support rows, by Bambu's keys: only one that differs from what the card started at */
+    if (s.supDensity !== base.supDensity) out.raft_first_layer_density = s.supDensity + '%';
+    if (s.supExpand !== base.supExpand) out.raft_first_layer_expansion = String(s.supExpand);
+    if (s.supWalls !== base.supWalls) out.tree_support_wall_count = String(s.supWalls);
+    if (Math.abs(s.supTopZ - base.supTopZ) > 1e-6) out.support_top_z_distance = String(s.supTopZ);
+    if (Math.abs(s.supBottomZ - base.supBottomZ) > 1e-6) out.support_bottom_z_distance = String(s.supBottomZ);
+    if (s.supBase !== base.supBase) out.support_base_pattern = SUP_BASE_TO_CONFIG[s.supBase];
+    if (Math.abs(s.supBaseSpacing - base.supBaseSpacing) > 1e-6) out.support_base_pattern_spacing = String(s.supBaseSpacing);
+    if (s.supAngle !== base.supAngle) out.support_angle = String(s.supAngle);
+    if (s.supIfacePattern !== base.supIfacePattern) out.support_interface_pattern = SUP_IFACE_TO_CONFIG[s.supIfacePattern];
+    if (Math.abs(s.supIfaceSpacing - base.supIfaceSpacing) > 1e-6) out.support_interface_spacing = String(s.supIfaceSpacing);
+    if (Math.abs(s.supExpansion - base.supExpansion) > 1e-6) out.support_expansion = String(s.supExpansion);
+    if (Math.abs(s.supXy - base.supXy) > 1e-6) out.support_object_xy_distance = String(s.supXy);
+    if (s.supZOverXy !== base.supZOverXy) out.top_z_overrides_xy_distance = s.supZOverXy ? '1' : '0';
+    if (Math.abs(s.supFirstGap - base.supFirstGap) > 1e-6) out.support_object_first_layer_gap = String(s.supFirstGap);
+    if (Math.abs(s.supBridge - base.supBridge) > 1e-6) out.max_bridge_length = String(s.supBridge);
+    if (s.supIndep !== base.supIndep) out.independent_support_layer_height = s.supIndep ? '1' : '0';
     /* the filament: its own keys, then the rows that differ from its own values */
     var fk = filamentKeys(config, s.filament);
     Object.keys(fk).forEach(function (k) { if (cfgRaw(config, k) !== fk[k]) out[k] = fk[k]; });
@@ -403,6 +446,23 @@
     if (rule && (eng.over || {}).supportInterfaceRule == null) o.supportInterfaceRule = rule;
     /* the interface angle (supportInterfaceAngle): the profile's (Bambu's rule), square to the bridge, Studio 02.09's 3.6, or the old crosshatch - the card's choice */
     o.supportInterfaceAngle = (settings && settings.ifaceAngle) || SETTINGS_DEFAULT.ifaceAngle;   /* no settings: the card's default (3.6) - the same file either way */
+    /* BAMBU'S ADVANCED SUPPORT ROWS: the card's values are the slicer's. A row at its default hands the slicer what it used before (the bottom
+       distance and the first layer gap are handed over only when changed: at their defaults the support's own mesh keeps them). */
+    if (settings) {
+      var cs = cleanSettings(settings), D = SETTINGS_DEFAULT;
+      o.supportFirstLayerDensity = cs.supDensity / 100;
+      o.supportWallLoops = cs.supWalls;
+      o.supportGapMm = cs.supTopZ;
+      if (Math.abs(cs.supBottomZ - D.supBottomZ) > 1e-6) o.supportBottomGapMm = cs.supBottomZ;
+      o.supportBasePattern = cs.supBase;
+      o.supportBaseSpacingMm = cs.supBaseSpacing;
+      o.supportInterfacePattern = cs.supIfacePattern;
+      o.supportExpansionMm = cs.supExpansion;
+      o.supportXyMm = cs.supXy;
+      o.supportZOverridesXy = cs.supZOverXy;
+      if (Math.abs(cs.supFirstGap - D.supFirstGap) > 1e-6) o.supportFirstLayerGapMm = cs.supFirstGap;
+      if (!cs.supIndep) o.supportLayerMaxMm = 0;
+    }
     return { o: o, config: config, over: over };
   }
 
@@ -610,7 +670,16 @@
   var SET_IDS = ['slice-set-nozzle', 'slice-set-layer', 'slice-set-walls', 'slice-set-density', 'slice-set-pattern', 'slice-set-surface',
                  'slice-set-angle', 'slice-set-brim', 'slice-set-raft', 'slice-set-raft-gap', 'slice-set-iface-angle', 'slice-set-iface',
                  'slice-set-filament', 'slice-set-nozzle-temp', 'slice-set-first-temp', 'slice-set-bed-temp', 'slice-set-max-flow',
-                 'slice-set-temp-step', 'slice-set-temp-band'];
+                 'slice-set-temp-step', 'slice-set-temp-band',
+                 /* Bambu's Advanced support rows, on the Supports card (docs/SUPPORT-ADVANCED.md) */
+                 'slice-set-sup-density', 'slice-set-sup-expand', 'slice-set-sup-walls', 'slice-set-sup-topz', 'slice-set-sup-bottomz', 'slice-set-sup-base',
+                 'slice-set-sup-base-spacing', 'slice-set-sup-angle', 'slice-set-sup-iface-pattern', 'slice-set-sup-iface-spacing', 'slice-set-sup-expansion',
+                 'slice-set-sup-xy', 'slice-set-sup-zover', 'slice-set-sup-first-gap', 'slice-set-sup-bridge', 'slice-set-sup-indep'];
+  var SUP_ROWS = [['slice-set-sup-density', 'supDensity'], ['slice-set-sup-expand', 'supExpand'], ['slice-set-sup-walls', 'supWalls'], ['slice-set-sup-topz', 'supTopZ'],
+                  ['slice-set-sup-bottomz', 'supBottomZ'], ['slice-set-sup-base', 'supBase'], ['slice-set-sup-base-spacing', 'supBaseSpacing'], ['slice-set-sup-angle', 'supAngle'],
+                  ['slice-set-sup-iface-pattern', 'supIfacePattern'], ['slice-set-sup-iface-spacing', 'supIfaceSpacing'], ['slice-set-sup-expansion', 'supExpansion'],
+                  ['slice-set-sup-xy', 'supXy'], ['slice-set-sup-zover', 'supZOverXy'], ['slice-set-sup-first-gap', 'supFirstGap'], ['slice-set-sup-bridge', 'supBridge'],
+                  ['slice-set-sup-indep', 'supIndep']];
   /* the four rows that are a filament's own numbers: the row, and its name in the settings */
   var FILAMENT_ROWS = [['slice-set-nozzle-temp', 'nozzleTemp'], ['slice-set-first-temp', 'firstTemp'], ['slice-set-bed-temp', 'bedTemp'], ['slice-set-max-flow', 'maxFlow']];
 
@@ -650,20 +719,22 @@
 
   /** The settings as the card's rows hold them, clamped. */
   function readSettings() {
-    var v = function (id) { var el = $(id); return el ? el.value : undefined; };
-    return cleanSettings({
+    var v = function (id) { var el = $(id); return el ? (el.type === 'checkbox' ? !!el.checked : el.value) : undefined; };
+    var sup = {}; SUP_ROWS.forEach(function (r) { sup[r[1]] = v(r[0]); });
+    return cleanSettings(Object.assign(sup, {
       nozzle: v('slice-set-nozzle'), layer: v('slice-set-layer'), walls: v('slice-set-walls'), density: v('slice-set-density'),
       pattern: v('slice-set-pattern'), surface: v('slice-set-surface'), angle: v('slice-set-angle'), brim: v('slice-set-brim'),
       raft: v('slice-set-raft'), raftGap: v('slice-set-raft-gap'), ifaceAngle: v('slice-set-iface-angle'),
       interfaceRule: $('slice-set-iface') ? v('slice-set-iface') : interfaceRule(),
       filament: v('slice-set-filament'), nozzleTemp: v('slice-set-nozzle-temp'), firstTemp: v('slice-set-first-temp'),
       bedTemp: v('slice-set-bed-temp'), maxFlow: v('slice-set-max-flow'), tempStep: v('slice-set-temp-step'), tempBand: v('slice-set-temp-band')
-    });
+    }));
   }
 
   /** The rows to these values (the interface row shows the shared choice). */
   function showSettings(st) {
-    var set = function (id, val) { var el = $(id); if (el && val != null) el.value = String(val); };
+    var set = function (id, val) { var el = $(id); if (!el || val == null) return; if (el.type === 'checkbox') el.checked = !!val; else el.value = String(val); };
+    var full = cleanSettings(st); SUP_ROWS.forEach(function (r) { set(r[0], full[r[1]]); });
     set('slice-set-nozzle', st.nozzle); set('slice-set-layer', st.layer); set('slice-set-walls', st.walls);
     set('slice-set-density', st.density); set('slice-set-pattern', st.pattern); set('slice-set-surface', st.surface); set('slice-set-angle', st.angle);
     set('slice-set-brim', st.brim); set('slice-set-raft', st.raft); set('slice-set-raft-gap', st.raftGap); set('slice-set-iface-angle', st.ifaceAngle);
@@ -677,12 +748,16 @@
 
   /** The rows back to the profile's values: the template's when the card has it, else the profile's usual ones (the same, for both
    *  profiles) until the open card has fetched it (seedFromTemplate). */
-  function seedSettings(profile) {
+  function seedSettings(profile, reset) {
     S.seededFor = profile ? profile.id : null;
     S.touched = false;
     var known = profile && S.assets[profile.id];
     showSettings(known ? settingsFromConfig(known.config) : SETTINGS_DEFAULT);
+    seeded(!!reset);
   }
+  /* the rows have been put to the profile's values: the Supports card's saved settings (app-supports-card.js) lay their own back over them - a
+     saved setting holds through a reload and a change of printer - unless this was the Reset button, which is the owner asking for the profile's */
+  function seeded(reset) { if (root && typeof root.nsoSliceRowsSeeded === 'function') { try { root.nsoSliceRowsSeeded(reset); } catch (err) { /* the card's own */ } } }
 
   /** The open card fetches its profile's template once, and rows nobody has changed take its values. */
   function seedFromTemplate(profile) {
@@ -702,7 +777,7 @@
     S.seeding = profile.id;
     loadAssets(profile).then(function (a) {
       S.seeding = null;
-      if (S.seededFor === profile.id && !S.touched && !S.busy) { showSettings(settingsFromConfig(a.config)); refresh(); }
+      if (S.seededFor === profile.id && !S.touched && !S.busy) { showSettings(settingsFromConfig(a.config)); seeded(false); refresh(); }
     }, function () { S.seeding = null; /* not served: the rows keep the usual values, and Slice says which file is missing */ });
   }
 
@@ -1195,7 +1270,7 @@
     bind('btn-slice-export', exportFile);
     bind('btn-slice-preview', previewInGscope);
     bind('slice-settings-toggle', function () { var box = $('slice-settings'); setSettingsOpen(!!(box && box.hidden)); });
-    bind('slice-settings-reset', function () { seedSettings(profileFor(plateId())); refresh(); });
+    bind('slice-settings-reset', function () { seedSettings(profileFor(plateId()), true); refresh(); });
     SET_IDS.forEach(function (id) {
       var el = $(id);
       if (!el) return;
