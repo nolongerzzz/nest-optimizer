@@ -1255,7 +1255,7 @@ var NSO_SUPPORTS_CARD = (function () {
      so (input + change), as a hand on the control would. Nothing rebuilds: Generate does. */
   var PRESET_KEY = 'nso.supports.settings.v1', PRESET_LAST = 'nso.supports.settings.last';
   var PRESET_FIELDS = ['sup-on', 'sup-angle', 'sup-style', 'sup-size', 'sup-tree-distance', 'sup-tree-diameter', 'sup-tree-angle', 'sup-tree-dangle', 'sup-tree-tip',
-    'sup-rest', 'sup-small', 'sup-brim', 'sup-raft', 'sup-interface', 'slice-set-iface-angle', 'slice-set-raft', 'slice-set-raft-gap',
+    'sup-rest', 'sup-small', 'sup-interface', 'slice-set-iface-angle', 'slice-set-raft', 'slice-set-raft-gap',
     /* the Print card's slice rows: quality, strength, adhesion, the filament (not the printer or its nozzle: a saved setting goes with any printer) */
     'slice-set-layer', 'slice-set-walls', 'slice-set-density', 'slice-set-pattern', 'slice-set-surface', 'slice-set-brim',
     'slice-set-filament', 'slice-set-nozzle-temp', 'slice-set-first-temp', 'slice-set-bed-temp', 'slice-set-max-flow', 'slice-set-temp-step', 'slice-set-temp-band',
@@ -3675,7 +3675,8 @@ var NSO_SUPPORTS_CARD = (function () {
       var all = presetsAll(), vals = all[name];
       if (!vals) return;
       var only = {};
-      PRESET_FIELDS.forEach(function (id) { if (/^slice-set-/.test(id) && vals[id] !== undefined) only[id] = vals[id]; });
+      /* ...the angle with them: the Print card's one angle is a slice row too (the profile's 30 was just laid over it) */
+      PRESET_FIELDS.forEach(function (id) { if ((/^slice-set-/.test(id) || id === 'sup-angle') && vals[id] !== undefined) only[id] = vals[id]; });
       presetQuiet = true;
       try { presetApply(only); } finally { presetQuiet = false; }
     };
