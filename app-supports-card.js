@@ -3431,6 +3431,9 @@ var NSO_SUPPORTS_CARD = (function () {
   function tick() {
     if (!S.open) return;
     bedSync();
+    /* the Printer row is the Plate panel's choice: changed there (or by anything else), it follows at once - not at the card's next redraw */
+    var ppr = $('print-printer'), pls = $('plate-select');
+    if (ppr && pls && ppr.value !== pls.value) printSync();
     var menu = $('menu-supports');
     if (menu && !menu.open) { close(); return; }
     if (!S.busy) {

@@ -130,6 +130,16 @@ async function main() {
   check('...changed on the card, the plate changes', [await val('plate-select'), await page.evaluate(() => state.plate && (state.plate.id || state.plate.key || null))].slice(0, 1), ['p1s']);
   await page.selectOption('#plate-select', 'a1mini'); await page.waitForTimeout(1200);
   check('...changed on the Plate panel, the card follows', await val('print-printer'), 'a1mini');
+  /* ...on a page that never had a piece (nothing else redraws the card there): the owner changed the Plate panel and the card's row stayed
+     as it was until the card was closed and opened again */
+  await open();
+  await page.click('#menu-supports > summary'); await page.waitForTimeout(1200);
+  const seq = [];
+  for (const [id, to] of [['print-printer', 'p1s'], ['plate-select', 'a1mini'], ['plate-select', 'p1s'], ['print-printer', 'a1mini'], ['plate-select', 'p1s']]) {
+    await page.selectOption('#' + id, to); await page.waitForTimeout(600);
+    seq.push([await val('print-printer'), await val('plate-select')].join('/'));
+  }
+  check('...and on an empty page, the card left open: card, panel, panel, card, panel - both rows agree after every change', seq, ['p1s/p1s', 'a1mini/a1mini', 'p1s/p1s', 'a1mini/a1mini', 'p1s/p1s']);
   check('no page error', errors, []);
   await browser.close(); if (served.server && served.server.close) served.server.close();
   process.exit(check.report() ? 1 : 0);
