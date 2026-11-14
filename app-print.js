@@ -627,9 +627,10 @@
     return 'bridges at ' + b.temp + ' \u00b0C on ' + b.layers + ' layer' + (b.layers === 1 ? '' : 's') + ': ' + b.changes + ' nozzle temperature change' + (b.changes === 1 ? '' : 's') +
       ' at the park, about ' + fmtTime(b.changes * b.secondsEach);
   }
-  /** The speed a bridge prints at: bridge_speed, never over what the max flow allows its bead (round, the nozzle's diameter x sqrt(bridge flow)). */
+  /** The speed a bridge over open air prints at: bridge_speed, never over what the max flow allows its bead. */
   function bridgeSpeedOf(S) {
-    var d = S.nozzleMm * Math.sqrt(S.filament.bridgeFlow), area = Math.PI * d * d / 4;
+    var PL = lazy('nso-print-planner.js', 'NSOPrintPlanner');
+    var area = PL.beadOf(S, 'Bridge', S.infillWidthMm, S.layerMm, true).area;      /* a bridge over open air (the planner's own bead for it) */
     return S.filament.maxVolumetric > 0 ? Math.min(S.speed.bridge, S.filament.maxVolumetric / area) : S.speed.bridge;
   }
 

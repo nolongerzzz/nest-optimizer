@@ -165,6 +165,7 @@
     if (maxVol > 0 && owVol > maxVol) owVol = maxVol;
     var S = {
       nozzleMm: num(config, 'nozzle_diameter', 0.4),
+      infillWidthMm: num(config, 'sparse_infill_line_width', 0.45),   // the width the slicer lays a bridge's lines at (beadOf of a bridge over open air)
       layerMm: num(config, 'layer_height', 0.2),
       firstLayerMm: num(config, 'initial_layer_print_height', 0.2),
       speed: {
@@ -217,6 +218,8 @@
         flow: num(config, 'filament_flow_ratio', 1),
         maxVolumetric: maxVol,
         bridgeFlow: num(config, 'bridge_flow', 1),
+        thickBridges: num(config, 'thick_bridges', 0) === 1,                  // a bridge over open air as the round strand (Bambu's default: off)
+        thickInternalBridges: num(config, 'thick_internal_bridges', 1) !== 0, // a bridge over sparse infill as the round strand (Bambu's default: on)
         type: raw(config, 'filament_type') || 'PLA',
         flushVolumetric: flushV > 0 ? flushV : maxVol,          // Studio's flush_volumetric_speeds
         flushTemp: flushT > 0 ? flushT : rangeHigh,             // Studio's flush_temperatures
@@ -342,12 +345,22 @@
     return { v: v, a: a };
   }
 
-  /** What a path prints at: its width and bead height (a bridge is a round
-   *  bead of the nozzle's diameter, as Bambu's is), and its area. */
-  function beadOf(S, feature, width, h) {
+  /**
+   * What a path prints at: its width and bead height, and its area.
+   * A BRIDGE IS BAMBU'S, BY ITS KIND (the owner's Studio slices, each with thick_bridges = 0: the A1 mini coupon, the P1S mouse, the CR-TPU
+   * towers). Over open air (`free`, the slicer's path.free) it is a line of the layer's own height - Studio writes LAYER_HEIGHT 0.2 and a
+   * LINE_WIDTH of 0.40 to 0.43 for it - unless the profile asks for thick bridges; over sparse infill it is the round strand of the
+   * nozzle's diameter (Studio's 0.4 x 0.4, thick_internal_bridges) unless the profile turns that off. bridge_flow scales either. NSO laid
+   * every bridge as the round strand: 1.6 times the plastic of Studio's over a gap, and for a filament held to a volumetric limit a slower one.
+   */
+  function beadOf(S, feature, width, h, free) {
     if (feature === 'Bridge') {
-      var d = S.nozzleMm * Math.sqrt(S.filament.bridgeFlow);
-      return { w: d, h: d, area: beadArea(d, d) };
+      if (free ? S.filament.thickBridges : S.filament.thickInternalBridges) {
+        var d = S.nozzleMm * Math.sqrt(S.filament.bridgeFlow);
+        return { w: d, h: d, area: beadArea(d, d) };
+      }
+      var wb = width * S.filament.bridgeFlow;                 /* the line's own width, as much narrower as the bridge flow asks */
+      return { w: wb, h: h, area: beadArea(width, h) * S.filament.bridgeFlow };
     }
     return { w: width, h: h, area: beadArea(width, h) };
   }
@@ -611,8 +624,11 @@
           var full = pathLength(pts);
           if (full > 4 * S.retract.seamGapMm) { loop = pts; pts = trimEnd(pts, S.retract.seamGapMm); }
         }
-        var bead = beadOf(S, p.feature, p.width, L.h || plane.h);
+        var bead = beadOf(S, p.feature, p.width, L.h || plane.h, !!p.free);
         var fs = featureSpeed(S, p.feature, first);
+        /* a hanging wall that spans (the slicer's path.span) is a bridge: the bridge's speed, and no slowing for the layer's time */
+        var spans = p.feature === 'Overhang wall' && !!p.span && !first;
+        if (spans) fs = { v: S.speed.bridge, a: S.accel.bridge };
         var vCap = S.filament.maxVolumetric > 0 ? S.filament.maxVolumetric / bead.area : Infinity;
         var v = Math.min(fs.v, vCap);
         var segs = [];
@@ -621,7 +637,7 @@
           if (sl > 1e-9) segs.push({ l: sl, ux: sx / sl, uy: sy / sl, v: 0, a: 0 });
         }
         items.push({
-          obj: oi, feature: p.feature, thin: !!p.thinWall, pts: pts, closed: !!p.closed, loop: loop, segs: segs,
+          obj: oi, feature: p.feature, thin: !!p.thinWall, keep: p.feature === 'Bridge' || spans, pts: pts, closed: !!p.closed, loop: loop, segs: segs,
           bead: bead, vFeature: fs.v, vWipe: v, v: v, a: fs.a, len: pathLength(pts), rings: rings
         });
       });
@@ -661,7 +677,7 @@
       var it = items[k];
       var v = it.v;
       if (cap != null) {
-        if (it.feature === 'Bridge') v = it.v;                 // a bridge keeps its speed
+        if (it.keep) v = it.v;                                 // a bridge keeps its speed (and a wall that spans as one)
         else if (mode === 'quality_first') v = Math.max(Math.min(minV, it.v), it.v * cap);
         else v = Math.min(it.v, Math.max(cap, Math.min(minV, it.v)));
       }
@@ -1153,7 +1169,7 @@
       var aux = auxFanFor(S, pj);
       if (cool.cap != null) {
         items.forEach(function (it) {
-          if (it.feature === 'Bridge') return;
+          if (it.keep) return;
           if (cool.mode === 'quality_first') it.v = Math.max(Math.min(S.cooling.slow_down_min_speed, it.v), it.v * cool.cap);
           else it.v = Math.min(it.v, Math.max(cool.cap, Math.min(S.cooling.slow_down_min_speed, it.v)));
         });

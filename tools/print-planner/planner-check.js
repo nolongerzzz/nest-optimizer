@@ -128,11 +128,15 @@ async function main() {
   // every extruding move: its F against its feature's expected speed on that layer
   let over = 0, under = 0, nMoves = 0, slowed = 0;
   const topSpeed = {};
+  /* a hanging wall that spans (the slicer's path.span) prints as a bridge - Studio's own slice of this plate tops its Overhang wall at
+     bridge_speed (F3000) - so an Overhang wall may be at overhang_4_4_speed or at the bridge's */
+  const spanV = (w, h) => Math.min(S.speed.bridge, S.filament.maxVolumetric / stadium(w, h)) * 60;
   sc.moves.forEach(mv => {
     const first = mv.layer === 0;
-    const w = mv.feature === 'Bridge' ? S.nozzleMm : mv.lw, h = mv.feature === 'Bridge' ? S.nozzleMm : mv.lh;
+    const w = mv.lw, h = mv.lh;                               /* a bridge's bead is what the file says it is: the layer's height over open air, the nozzle's over infill */
     const want = expectV(mv.feature, w, h, first) * 60;
     nMoves++;
+    if (mv.feature === 'Overhang wall' && !first && near(mv.F, spanV(w, h), 0.01)) return;
     if (mv.F > want + 0.01) over++;
     else if (mv.F < want - 0.01) { slowed++; if (mv.F < S.cooling.slow_down_min_speed * 60 - 0.01 && mv.F < want - 0.01) under++; }
     const k = mv.feature + (first ? ' L1' : '');
@@ -143,7 +147,7 @@ async function main() {
   const topWant = (feature, first) => {
     // the widest/narrowest beads differ; compare against the speed at the bead the layer printed
     const mv = sc.moves.filter(m => m.feature === feature && (m.layer === 0) === first).sort((a, b) => b.F - a.F)[0];
-    return mv ? { got: mv.F, want: expectV(feature, feature === 'Bridge' ? S.nozzleMm : mv.lw, feature === 'Bridge' ? S.nozzleMm : mv.lh, first) * 60 } : null;
+    return mv ? { got: mv.F, want: expectV(feature, mv.lw, mv.lh, first) * 60 } : null;
   };
   const exact = [];
   ['Outer wall', 'Inner wall', 'Top surface', 'Support'].forEach(f => {
@@ -157,8 +161,11 @@ async function main() {
   const l1b = l1('Bottom surface');
   check('layer 1: the bottom surface at initial_layer_infill_speed (' + S.speed.firstInfill + ' mm/s = F' + S.speed.firstInfill * 60 + ')', l1b && l1b.got === S.speed.firstInfill * 60, l1b && l1b.got);
   const br = sc.moves.filter(m => m.feature === 'Bridge');
-  check('a bridge prints at bridge_speed (F' + S.speed.bridge * 60 + ') as a round bead of the nozzle\'s diameter',
-    br.length > 0 && br.every(m => near(m.F, S.speed.bridge * 60, 0.01) && near(m.lw, S.nozzleMm, 1e-9) && near(m.lh, S.nozzleMm, 1e-9)), br.length + ' bridge moves');
+  /* Studio's slice of this plate (thick_bridges = 0) writes its bridges LAYER_HEIGHT 0.2: a line of the layer's height over open air. The round
+     bead of the nozzle's diameter is the bridge over sparse infill (thick_internal_bridges) */
+  const brThin = br.filter(m => m.lh < S.nozzleMm - 1e-6), brRound = br.filter(m => near(m.lw, S.nozzleMm, 1e-9) && near(m.lh, S.nozzleMm, 1e-9));
+  check('a bridge prints at bridge_speed (F' + S.speed.bridge * 60 + '): over open air a line of the layer\'s height (' + brThin.length + ' moves), over sparse infill a round bead of the nozzle\'s diameter (' + brRound.length + ')',
+    br.length > 0 && brThin.length + brRound.length === br.length && brThin.length > 0 && br.every(m => near(m.F, S.speed.bridge * 60, 0.01)) && brThin.every(m => near(m.lh, 0.2, 1e-6)), br.length + ' bridge moves');
   const accels = [...sc.accels].sort((a, b) => a - b);
   const okA = new Set([S.accel.first, S.accel.def, S.accel.outer, S.accel.top, S.accel.travel, S.accel.short, S.accel.firstTravel, S.accel.inner, S.accel.sparse, S.accel.solid, S.accel.support, S.accel.interface, S.accel.bridge]);
   check('every M204 is one the template names (' + accels.join(', ') + ')', accels.every(a => okA.has(a)), accels.join(', '));
@@ -537,7 +544,7 @@ async function main() {
     });
     // nothing NSO writes is faster than the template permits
     check(R.name.slice(0, 1) + ': no feature in NSO\'s file is faster than the template\'s speed (' + SS.speed.outer + ' outer, ' + SS.speed.inner + ' inner, ' + SS.speed.sparse + ' sparse mm/s) or the volumetric limit',
-      FEATS.every(f => !nt[f] || nt[f].f <= PL.featureSpeed(SS, f, false).v * 60 + 0.01));
+      FEATS.every(f => !nt[f] || nt[f].f <= Math.max(PL.featureSpeed(SS, f, false).v, f === 'Overhang wall' ? SS.speed.bridge : 0) * 60 + 0.01));   /* (a wall that spans a gap is a bridge) */
   }
   // ---- temperatures
   const temps = gc => { const t = new Set(); L.scan(gc).temps.forEach(x => t.add(x.code + ':' + x.s)); return [...t].sort().join(' '); };

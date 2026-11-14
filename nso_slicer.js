@@ -312,6 +312,7 @@
       supportInterfaceRule: null,          // 'column': the interface read off the part's layers column by column (columnRule; docs/SUPPORT-GATE.md); null: the sheet typing
       supportInterfaceSpacingMm: null,     // the gap between interface lines (Bambu's support_interface_spacing; the print planner reads the profile's): null -> the dense sheet's line + 0.04
       supportAngleDeg: 0,                  // Bambu's support_angle: the 'profile' stack's first layer turns this + 90
+      overhangSpanMinMm: 2,                // a hanging wall this long, a line width or more from the layer below on both sides, is printed as a bridge (spanPieces); 0: never
       bridgeAngleDeg: 0,                   // Bambu's bridge_angle: every Bridge laid at it (0: auto - over a support, Studio 02.09's 3.6 under the 'profile' / 'studio36' angles)
       supportInterfaceAngle: 'bridge',     // the column rule's stack angles (the app slices with the card's, 'profile' by default - app-print.js slicerOptions): 'profile' Bambu's own rule off the profile's support_angle / bridge_angle (its first layer at support_angle + 90, its top square to the bridge at bridge_angle - 0: Studio's 3.6 - one turn a layer down; the owner's 2x supp_ref at 20 / 45: 110, then 45 / 135 to a top at 135); 'bridge' its top square to the part's bridge over it; 'studio36' Studio 02.09's own (90, then 93.6 / 3.6 up to a top at 93.6, the part's bridges over supports at 3.6 - the owner's P1S print released clean); 'crosshatch' 110, then 45 / 135
       supportXyMm: 0.35,                   // the column rule's xy distance to the part at a support layer's own height (Bambu's support_object_xy_distance)
@@ -2351,8 +2352,13 @@
             var w = lp.depth === 0 ? o.outerWallWidthMm : o.innerWallWidthMm;
             loopsOf(g, lp.cs).forEach(function (path) {
               splitOverhang(path, belowPolys, i, w, o.overhangEdgeFrac, o.overhangSubMm, belowIn).forEach(function (piece) {
-                L.paths.push({ feature: piece.over ? 'Overhang wall' : feat, width: w,
-                               closed: piece.closed, pts: piece.pts });
+                if (!piece.over) { L.paths.push({ feature: feat, width: w, closed: piece.closed, pts: piece.pts }); return; }
+                /* a hanging wall that is a line width or more from the layer below on both sides is a bridge of its own (path.span) */
+                spanPieces(piece, belowIn, w, o.overhangSpanMinMm).forEach(function (sp) {
+                  var pa = { feature: 'Overhang wall', width: w, closed: sp.closed, pts: sp.pts };
+                  if (sp.span) pa.span = true;
+                  L.paths.push(pa);
+                });
               });
             });
           });
@@ -2980,6 +2986,61 @@
    * is over air when its edges' midpoints fall outside the layer below's
    * section. The first layer is never an overhang.
    */
+  /**
+   * A HANGING WALL THAT SPANS (docs/SLICER.md "A wall over a gap"). An Overhang wall is a wall whose whole width hangs. Bambu prints it two
+   * ways (the owner's Studio slice of the CR-TPU tower, measured move by move against the layer below): one that hugs the layer below - its
+   * centre 0.42 to 0.5 mm from the nearest line of that layer - at overhang_4_4_speed (10 mm/s), and one further out than that - the walls
+   * of a roof between two pillars, 29 mm in one move - at the bridge's speed. NSO printed both at 10 mm/s, and over a gap a soft filament
+   * laid that slowly hangs (the first line of the owner's roof). So a hanging piece is cut where it leaves the layer below by a line width
+   * on both sides: those runs carry span: true, with their points on a straight line dropped (one move, not one every overhangSubMm), and
+   * the planner prints them as a bridge. A run under `minMm` is not worth a change of speed. Nothing spans: the piece comes back as it was.
+   */
+  function spanPieces(piece, belowIn, width, minMm) {
+    if (!belowIn || !(minMm > 0) || !(width > 0)) return [piece];
+    var pts = piece.pts, n = pts.length, m = piece.closed ? n : n - 1;
+    if (m < 1) return [piece];
+    var far = [], len = [], anyFar = false, allFar = true, i;
+    for (i = 0; i < m; i++) {
+      var p = pts[i], q = pts[(i + 1) % n], ex = q[0] - p[0], ey = q[1] - p[1], el = Math.hypot(ex, ey), f = false;
+      if (el > 0) {
+        var nx = ey / el * width, ny = -ex / el * width, mx = (p[0] + q[0]) / 2, my = (p[1] + q[1]) / 2;
+        f = !belowIn(mx + nx, my + ny) && !belowIn(mx - nx, my - ny);
+      }
+      far.push(f); len.push(el);
+      if (f) anyFar = true; else allFar = false;
+    }
+    if (!anyFar) return [piece];
+    /* runs of edges with one flag, from a change of flag on (a closed piece is opened there) */
+    var start = 0;
+    if (piece.closed && !allFar) { for (i = 0; i < m; i++) if (far[i] !== far[(i + m - 1) % m]) { start = i; break; } }
+    var runs = [], cur = null;
+    for (var k = 0; k < m; k++) {
+      var e = (start + k) % m;
+      if (!cur || cur.far !== far[e]) { cur = { far: far[e], len: 0, pts: [pts[e]] }; runs.push(cur); }
+      cur.len += len[e]; cur.pts.push(pts[(e + 1) % n]);
+    }
+    /* a short far run is no span; then neighbours with one flag are one run */
+    runs.forEach(function (r) { if (r.far && r.len < minMm) r.far = false; });
+    var merged = [];
+    runs.forEach(function (r) {
+      var last = merged[merged.length - 1];
+      if (last && last.far === r.far) { last.len += r.len; last.pts = last.pts.concat(r.pts.slice(1)); } else merged.push(r);
+    });
+    if (!merged.some(function (r) { return r.far; })) return [piece];
+    var straight = function (ps) {
+      var out = [ps[0]];
+      for (var j = 1; j + 1 < ps.length; j++) {
+        var a = out[out.length - 1], b = ps[j], c = ps[j + 1];
+        var cr = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]), dt = (b[0] - a[0]) * (c[0] - b[0]) + (b[1] - a[1]) * (c[1] - b[1]);
+        if (Math.abs(cr) > 1e-7 * (1 + Math.hypot(c[0] - a[0], c[1] - a[1])) || dt < 0) out.push(b);
+      }
+      out.push(ps[ps.length - 1]);
+      return out;
+    };
+    if (merged.length === 1 && piece.closed) return [{ over: true, closed: true, pts: pts, span: true }];        /* a ring wholly out in the air */
+    return merged.map(function (r) { return { over: true, closed: false, pts: r.far ? straight(r.pts) : r.pts, span: r.far }; });
+  }
+
   function splitOverhang(path, belowPolys, layerIndex, width, frac, subMm, belowIn) {
     var pts = path.pts;
     if (layerIndex === 0 || !belowPolys) return [{ over: false, closed: true, pts: pts }];

@@ -441,15 +441,16 @@ async function main() {
       check('CR-TPU slices with the tuning rows changed', t0.ok && t1.ok, t1.reason);
       if (t0.ok && t1.ok) {
         const a = await read(t0), b = await read(t1);
-        check('...untouched, a CR-TPU bridge is held to 25.5 mm/s by the 3.2 mm^3/s max flow (F1527.887), a 0.4 mm strand, though the profile says 50',
-          JSON.stringify(a.bridgeF) === '[1527.887]' && JSON.stringify(a.bridgeW) === '[0.4]', JSON.stringify([a.bridgeF, a.bridgeW]));
-        check('...Bridge speed 12 and Bridge flow 0.9: every bridge at F720, a 0.379 mm strand; bridge_speed = 12 and bridge_flow = 0.9 in the file',
-          JSON.stringify(b.bridgeF) === '[720]' && b.bridgeW.length === 1 && Math.abs(b.bridgeW[0] - 0.4 * Math.sqrt(0.9)) < 1e-5 && b.cfg('bridge_speed') === '12' && b.cfg('bridge_flow') === '0.9', JSON.stringify([b.bridgeF, b.bridgeW]));
+        /* a bridge by its kind: over open air a line of the layer's height, 0.45 wide (39.3 mm/s at 3.2 mm^3/s); over sparse infill the 0.4 mm round strand (25.5 mm/s) */
+        check('...untouched, a CR-TPU bridge is held by the 3.2 mm^3/s max flow, though the profile says 50: 39.3 mm/s (F2358.261) over open air, 25.5 mm/s (F1527.887) over sparse infill',
+          a.bridgeF.every(f => f === 2358.261 || f === 1527.887) && a.bridgeF.includes(2358.261) && a.bridgeW.every(w => w === 0.45 || w === 0.4), JSON.stringify([a.bridgeF, a.bridgeW]));
+        check('...Bridge speed 12 and Bridge flow 0.9: every bridge at F720, its strand 0.9 of what it was (0.405 or 0.379 mm); bridge_speed = 12 and bridge_flow = 0.9 in the file',
+          JSON.stringify(b.bridgeF) === '[720]' && b.bridgeW.every(w => Math.abs(w - 0.45 * 0.9) < 1e-5 || Math.abs(w - 0.4 * Math.sqrt(0.9)) < 1e-5) && b.cfg('bridge_speed') === '12' && b.cfg('bridge_flow') === '0.9', JSON.stringify([b.bridgeF, b.bridgeW]));
         check('...Retraction 0.8 mm at 20 mm/s: 0.76 in the wipe and .04 after, at F1200, where it was .02 at F1800 (0.4 mm at 30 mm/s)',
           a.retr['.02@1800'] > 100 && !a.retr['.04@1200'] && b.retr['.04@1200'] > 100 && !b.retr['.02@1800'], JSON.stringify([a.retr, b.retr]));
         check('...Z hop 0: no lift on any travel or layer change (' + a.hops + ' before, ' + b.hops + ' after)', a.hops > 50 && b.hops === 0);
         check('...Flow ratio 0.97: filament_flow_ratio = 0.97 on both slots, and less filament for the same plate', b.cfg('filament_flow_ratio') === '0.97,0.97' && b.e < a.e, a.e.toFixed(1) + ' -> ' + b.e.toFixed(1));
-        check('...the readout has the numbers as printed', t0.tune === 'bridges 25.5 mm/s (flow 1), flow ratio 1, retract 0.4 mm at 30 mm/s, z-hop 0.4 mm' &&
+        check('...the readout has the numbers as printed', t0.tune === 'bridges 39.3 mm/s (flow 1), flow ratio 1, retract 0.4 mm at 30 mm/s, z-hop 0.4 mm' &&
           t1.tune === 'bridges 12 mm/s (flow 0.9), flow ratio 0.97, retract 0.8 mm at 20 mm/s, z-hop 0 mm', JSON.stringify([t0.tune, t1.tune]));
       }
     }
@@ -522,18 +523,20 @@ async function main() {
       if (dr.ok) {
         const g = L.text(await L.R.openZip(dr.bytes).read('Metadata/plate_1.gcode')).split('\n');
         const body = g.slice(g.indexOf('; MACHINE_START_GCODE_END'), g.indexOf('; MACHINE_END_GCODE_START'));
-        let feat = '', z = 0, x = null, y = null, cold = false; const br = [], coldZ = new Set(), hotFeat = {}, ev = [];
+        let feat = '', z = 0, x = null, y = null, cold = false, fNow = 0; const br = [], ow = [], coldZ = new Set(), hotFeat = {}, ev = [];
         body.forEach(l => {
           let m;
           if ((m = /^; Z_HEIGHT: ([\d.]+)$/.exec(l))) z = +m[1];
           else if ((m = /^; FEATURE: (.*)$/.exec(l))) feat = m[1];
           else if ((m = /^; NSO bridge temperature: (\d+)/.exec(l))) { cold = +m[1] === 215; ev.push([+m[1], z]); }
           if (!/^G[0-3] /.test(l)) return;
-          const d = {}; l.split(';')[0].replace(/([XYE])(-?\.?[\d.]+)/g, (a, k, v) => { d[k] = +v; return a; });
+          const d = {}; l.split(';')[0].replace(/([XYEF])(-?\.?[\d.]+)/g, (a, k, v) => { d[k] = +v; return a; });
           const nx = d.X != null ? d.X : x, ny = d.Y != null ? d.Y : y;
+          if (d.F != null) fNow = d.F;
           if (d.E > 0 && x != null && (d.X != null || d.Y != null)) {
             const len = Math.hypot(nx - x, ny - y);
-            if (feat === 'Bridge' && z > 8.9) br.push({ len, along: Math.abs(nx - x) / (len || 1), z });
+            if (feat === 'Bridge' && z > 8.9) br.push({ len, along: Math.abs(nx - x) / (len || 1), z, f: fNow });
+            if (feat === 'Overhang wall' && z > 8.9) ow.push({ len, f: fNow });
             if (cold) coldZ.add(z); else if (z >= 9.1 && z <= 9.5) hotFeat[feat] = 1;
           }
           x = nx; y = ny;
@@ -542,6 +545,13 @@ async function main() {
         const total = roof.reduce((a, b) => a + b.len, 0), alongX = roof.filter(b => b.along > 0.99).reduce((a, b) => a + b.len, 0), longest = Math.max(...roof.map(b => b.len));
         check('...the roof\'s bridge runs from pillar to pillar: ' + Math.round(100 * alongX / total) + ' % of its ' + Math.round(total) + ' mm along the 30 mm gap, the longest line ' + longest.toFixed(1) + ' mm (at 45 degrees none is over 11.4)',
           total > 300 && alongX / total > 0.85 && longest > 27, JSON.stringify({ total, alongX, longest }));
+        const lhOf = {}; let lhNow = null, ftNow = '';
+        body.forEach(l => { let m; if ((m = /^; FEATURE: (.*)$/.exec(l))) ftNow = m[1]; else if ((m = /^; LAYER_HEIGHT: ([\d.]+)$/.exec(l))) { lhNow = +m[1]; } if (ftNow === 'Bridge' && lhNow != null && /^G1 F/.test(l)) lhOf[lhNow] = (lhOf[lhNow] || 0) + 1; });
+        check('...it is Studio\'s strand for a bridge over open air: the layer\'s own height, at the max flow\'s 39.3 mm/s (F2358.261), not the 0.4 mm round one at 25.5',
+          roof.every(b => b.f === 2358.261) && lhOf[0.2] >= 1, JSON.stringify([[...new Set(roof.map(b => b.f))], lhOf]));
+        const spans = ow.filter(b => b.len > 20), slow = ow.filter(b => b.f === 600);
+        check('...the walls over the gap are printed as bridges: ' + spans.length + ' moves of ' + (spans[0] ? spans[0].len.toFixed(1) : '-') + ' mm, each one move at the max flow\'s speed (F2358 / F2545), and only the ends beside the pillars at overhang_4_4_speed (' + slow.length + ' short moves at F600)',
+          spans.length === 4 && spans.every(b => b.f > 2300) && ow.filter(b => b.f === 600).every(b => b.len < 1.5), JSON.stringify(ow.filter(b => b.len > 1).map(b => [+b.len.toFixed(1), b.f])));
         const zs = [...coldZ].sort((a, b) => a - b);
         check('...one change in and one out: 215 at the bridge layer\'s layer change, 235 two layers on - the bridge layer and the one over it print whole at 215, walls and fill too',
           ev.length === 2 && ev[0][0] === 215 && ev[1][0] === 235 && zs.length === 2 && Math.abs(zs[1] - zs[0] - 0.2) < 1e-6 && Math.abs(ev[1][1] - zs[1] - 0.2) < 1e-6 && Object.keys(hotFeat).length === 0 &&

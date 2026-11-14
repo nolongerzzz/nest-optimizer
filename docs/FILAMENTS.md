@@ -102,7 +102,7 @@ printer profile's values; the other four are the filament's, and an empty one is
 
 | Row | Section | Bambu key | PLA profile | CR-TPU |
 | --- | --- | --- | --- | --- |
-| **Bridge speed** | Quality | `bridge_speed` | 50 mm/s | 50 (prints at 25.5) |
+| **Bridge speed** | Quality | `bridge_speed` | 50 mm/s | 50 (prints at 39.3 over open air) |
 | **Bridge flow** | Quality | `bridge_flow` | 1 | 1 |
 | **Bridge temp** | Quality | NSO's own (see below) | off | off |
 | **Flow ratio** | Printer and filament | `filament_flow_ratio` | 0.98 | 1 |
@@ -110,10 +110,11 @@ printer profile's values; the other four are the filament's, and an empty one is
 | **Retraction speed** | Printer and filament | `filament_retraction_speed`, `filament_deretraction_speed` | 30 mm/s | 30 mm/s |
 | **Z hop** | Printer and filament | `filament_z_hop` | 0.4 mm | 0.4 mm |
 
-- **A bridge is a round strand** of the nozzle's diameter times the square root of the bridge flow
-  (0.4 mm at 1, 0.379 mm at 0.9). Its speed is the row's, never over what the filament's max flow
-  allows that strand: at 3.2 mm^3/s that is 25.5 mm/s, so for CR-TPU only a Bridge speed under 25.5
-  changes anything. The card says so under the rows when the max flow is what holds the bridges.
+- **A bridge's speed is the row's, never over what the filament's max flow allows its strand.**
+  Over open air the strand is a line of the layer's height (0.45 x 0.2): at 3.2 mm^3/s that is
+  39.3 mm/s, so for CR-TPU only a Bridge speed under 39.3 changes anything. Over sparse infill it is
+  the round strand of the nozzle's diameter (25.5 mm/s). Bridge flow scales either. The card says
+  so under the rows when the max flow is what holds the bridges.
 - **The retraction rows are the filament's own keys**, as Studio writes them: the printer's
   `retraction_length`, `retraction_speed` and `z_hop` stay as they are in the file, and the planner
   uses the filament's where it names one (`settingsFrom`: `own()`).
@@ -134,9 +135,14 @@ Not built: "avoid crossing walls" on travels, and wipe distance as a row.
   open air across its gap (docs/SLICER.md "A free bridge's direction").
 - **Temperature is second.** In Studio's tower, with the bridge laid right, the 210 C band bridged
   clean and the 235 - 240 C bands sagged.
-- Studio's roof bridge is also a thinner strand than NSO's: the layer's height (0.2 mm), 0.43 wide,
-  at 41.6 mm/s (`thick_bridges = 0`), where NSO lays every bridge as a 0.4 mm round strand at
-  25.5 mm/s (what Studio does over sparse infill). Not changed yet.
+- **The second print (direction fixed, Bridge temp 215):** most of the bridge drew tight; the first
+  perimeter over the gap hung low, and the bridge still drooped as a bundle. The file against
+  Studio's, same layer: NSO printed the walls over the gap at 10 mm/s in 0.2 mm moves where Studio
+  prints each as one move at the bridge's speed, and laid the bridge as a 0.4 mm round strand at
+  25.5 mm/s where Studio lays a line of the layer's height at 41.6. Both are Studio's now
+  (docs/SLICER.md "A wall over a gap", "A bridge's strand, by its kind"). An untouched CR-TPU
+  bridge over open air prints at 39.3 mm/s.
+- Retraction 0.8 mm against 0.4 did not change the stringing.
 
 ## Bridge temperature
 

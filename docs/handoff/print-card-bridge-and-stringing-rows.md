@@ -24,5 +24,13 @@ loops. The file showed why: NSO laid the level's roof bridge at 45 degrees (line
 slices re-pinned in `slicer:test`), and the bridge temperature is held for a whole stretch - the bridge layer and the layer over it, walls and fill too - with
 one change in and one out at layer changes, counting only bridges over open air (`path.free`). The tower level: two changes, not six. `print:slice` is 134.
 
-**Not built.** The P1S's park, Studio's thinner strand for an open-air bridge (`thick_bridges = 0`), avoid-crossing-walls travel, wipe distance. None has been printed yet: the rows are checked in the
+**The second print, and the same layer in both files.** Most of the bridge drew tight; the first perimeter over the gap hung low and the bridge drooped as a
+bundle. Side by side on the roof's layer: NSO's walls over the gap at 10 mm/s in 0.2 mm moves, Studio's each one move at the bridge's speed; NSO's bridge a
+0.4 mm round strand at 25.5 mm/s, Studio's a line of the layer's height at 41.6. Now: `nso_slicer.js` `spanPieces` marks a hanging wall a line width or more
+from the layer below (`path.span`) and the planner prints it as a bridge; the planner's `beadOf` lays a bridge over open air at the layer's height
+(`thick_bridges`) and keeps the round strand for one over sparse infill (`thick_internal_bridges`). This changes PLA too: Studio's PLA coupon slice tops its
+Overhang wall at `bridge_speed` and writes its bridges 0.2 high. `slicer:test` re-pinned (hinge_knuckle_box, top_clip_x2, top_clip_x2_coupon), `print:planner`
+3 checks reworded to the measured behaviour, `print:slice` 136.
+
+**Not built.** The P1S's park, a cleaner restart after the park (the owner: the wipe leaves a string, clipped off), avoid-crossing-walls travel, wipe distance. None has been printed yet: the rows are checked in the
 G-code (feeds, strand width, retraction, lifts), not on a part.

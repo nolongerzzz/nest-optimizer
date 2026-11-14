@@ -45,7 +45,7 @@ the bead being the stadium `nso-gcode-lines.js` inverts. This reproduces
 Studio's own figures exactly: outer wall F9547.055 and inner wall F8843.478 at
 0.42 / 0.45 mm lines, support F9000 (150 mm/s is under the limit). The first
 layer takes `initial_layer_speed` (walls, supports) or `initial_layer_infill_speed`
-(infill, bottom surface). A bridge is a round bead of the nozzle's diameter
+(infill, bottom surface). A bridge over sparse infill is a round bead of the nozzle's diameter, one over open air a line of the layer's height (docs/SLICER.md "A bridge's strand, by its kind"); before 2026-11-14 every bridge was a round bead of the nozzle's diameter
 (`; LAYER_HEIGHT` and `; LINE_WIDTH` both 0.4, as Studio writes it).
 
 **Acceleration.** `M204` per feature from the template (`inner_wall_acceleration`

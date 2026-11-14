@@ -912,9 +912,39 @@ planner's bridge temperature counts only those.
 Pinned slices that changed: `hinge_knuckle_box` at 0.4 and `top_clip_x2_coupon` at both nozzles
 (`slicer:test`). Held by `print:slice` 3c: a doorway's roof is laid 99 % along its 30 mm gap.
 
-Not done: Studio's thinner strand for a bridge over open air (`thick_bridges = 0`: the layer's
-height, at the flow limit's 41.6 mm/s for CR-TPU), where NSO lays every bridge as a round strand
-of the nozzle's diameter.
+### A wall over a gap (`spanPieces`, `path.span`, 2026-11-14)
+
+An Overhang wall is a wall whose whole width hangs. Bambu prints it two ways. Measured on the
+owner's Studio slice of the CR-TPU tower, every Overhang wall move against the nearest line of the
+layer below:
+
+| Studio's speed | moves | how far from the layer below |
+| --- | --- | --- |
+| 10 mm/s (`overhang_4_4_speed`) | 213, 507 mm | 0.42 - 0.5 mm (never over 0.74): it hugs the layer below |
+| 39.5 mm/s (the bridge's, at the flow limit) | 91, 676 mm | up to 8.5 mm: the walls of a roof, 29 mm in one move |
+
+Studio's PLA slice of the A1 mini coupon says the same: its Overhang wall tops out at
+`bridge_speed` (F3000). NSO printed every Overhang wall at 10 mm/s, in a move every 0.2 mm, and over
+a gap a soft filament laid that slowly hangs - the first line of the owner's roof.
+
+So a hanging piece is cut where it is a line width or more from the layer below on both sides.
+Those runs (2 mm or longer, `overhangSpanMinMm`) carry `span: true`, with the points on a straight
+line dropped, and the planner prints them at the bridge's speed and acceleration, exempt from the
+layer-time slowdown as a bridge is. What hugs the layer below stays at `overhang_4_4_speed`. On the
+tower NSO now has 577 mm at 10 mm/s and 623 mm at the bridge's speed, against Studio's 507 and 676.
+
+Pinned slices that changed: `hinge_knuckle_box` 0.4, `top_clip_x2` and `top_clip_x2_coupon` at both
+nozzles. Held by `print:slice` 3c (the doorway's four wall spans, each one 30 mm move) and
+`print:planner` (an Overhang wall is at one speed or the other).
+
+### A bridge's strand, by its kind (the planner's `beadOf`)
+
+Every Studio slice in the repo (`thick_bridges = 0`) writes a bridge over open air as a line of
+the layer's own height, 0.40 - 0.43 wide; only the bridge over sparse infill is the round strand of
+the nozzle's diameter (0.4 x 0.4). NSO laid every bridge as the round one: 1.6 times the plastic
+over a gap, and at a volumetric limit a slower one (25.5 against 39.3 mm/s for CR-TPU). The planner
+now reads `thick_bridges` (default off) for a bridge with `path.free` and
+`thick_internal_bridges` (default on) for the rest.
 
 ## 7. Scope and complexity, as found
 
