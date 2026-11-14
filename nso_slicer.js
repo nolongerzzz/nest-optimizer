@@ -227,7 +227,7 @@
   };
 
   /** A pattern by the name Bambu Studio's list gives it: this slicer's zigzag is its Rectilinear. */
-  function patternLabel(p) { return p === 'zigzag' ? 'rectilinear' : p === 'archimedeanchords' ? 'archimedean chords' : p === 'hilbertcurve' ? 'hilbert curve' : p === 'octagramspiral' ? 'octagram spiral' : p === '3dhoneycomb' ? '3D honeycomb' : p; }
+  function patternLabel(p) { return p === 'zigzag' ? 'rectilinear' : p === 'archimedeanchords' ? 'archimedean chords' : p === 'hilbertcurve' ? 'hilbert curve' : p === 'octagramspiral' ? 'octagram spiral' : p === '3dhoneycomb' ? '3D honeycomb' : p === 'adaptivecubic' ? 'adaptive cubic' : p; }
 
   function wallWidthFor(nozzle) {
     var d = (typeof nozzle === 'number' && nozzle > 0) ? nozzle : 0.4;
@@ -263,7 +263,7 @@
       topShellThicknessMm: BAMBU_PROFILE_06.topShellThicknessMm,
       bottomShellThicknessMm: 0,
       sparseDensity: BAMBU_PROFILE_06.sparseDensity,
-      sparsePattern: BAMBU_PROFILE_06.sparsePattern,   // 'grid' | 'zigzag' (Bambu's Rectilinear; 'rectilinear' is taken for it) | 'lines' | 'concentric' | 'archimedeanchords' | '3dhoneycomb' | 'gyroid'
+      sparsePattern: BAMBU_PROFILE_06.sparsePattern,   // 'grid' | 'zigzag' (Bambu's Rectilinear; 'rectilinear' is taken for it) | 'lines' | 'concentric' | 'archimedeanchords' | '3dhoneycomb' | 'gyroid' | 'cubic' | 'adaptivecubic' | 'honeycomb'
       solidPattern: BAMBU_PROFILE_06.solidPattern,     // 'zigzag' | 'lines' | 'concentric' | 'archimedeanchords' | 'hilbertcurve' | 'octagramspiral': the internal solid infill, and the surfaces unless they say
       topPattern: null,                    // the top surface's own pattern ('concentric'); null -> solidPattern
       bottomPattern: null,                 // the first layer's own pattern ('concentric'); null -> solidPattern
@@ -1386,15 +1386,121 @@
     return chainAlongOutline(polys, pieces, linkMm);
   }
 
-  /** Pieces of clipLine's, in order, as paths: one piece's end joined to the next one's start along the outline when both lie on the same polygon and that way is no longer than linkMm. */
+  // ===========================================================================
+  // Cubic, adaptive cubic and honeycomb - straight lines
+  // ===========================================================================
+
+  /* CUBIC and ADAPTIVE CUBIC, measured on real Bambu Studio 02.09 slices (cubic_sparse.gcode.3mf, Adaptivecubic_sparse.gcode.3mf: 15 %, 0.45
+     wide, 0.2 layers; docs/SLICER.md "Cubic", "Adaptive cubic"). A layer is three families of straight lines 60 degrees apart; each family
+     slides sideways by the layer height over sqrt 2 a layer, the first and third one way, the second the other: the lines are the cut through
+     three sets of planes at right angles to each other - cubes standing on a corner.
+       - cubic: the families at 45, 105 and 165 degrees (the infill direction and on), 3 spacings over the density apart (8.141), all three
+         through the middle of the object's box at the plate (z 0);
+       - adaptive cubic: the families at 0, 60 and 120 degrees, 11.023 apart - cubes 9.000 on edge, which is 3 x the line's WIDTH over the density
+         (0.45 / 15 %; fitted to this one slice) - all three through the middle of the object's box in the cubes' own frame, in all three
+         directions (a prism's: its middle in plan, at half its height). Bambu's cubes grow coarser deep inside a large part; none of the
+         reference's parts (24 - 39 mm) is large enough to show it, so that is not measured and not done: every cell is the finest. */
+  var CUBIC_SIGNS = [-1, 1, -1];
+
+  /**
+   * A region filled with one layer of three line families -> [{ closed: false, pts }].
+   *   angle0   the first family's direction (rad); the others 60 and 120 degrees on
+   *   pitch    line to line in a family
+   *   at       [d0, d1, d2]: where one line of each family lies - its signed distance from the origin along the family's normal (-sin, cos)
+   *   linkMm   a line's end is joined to the next line's along the outline when that is no longer than this
+   */
+  function linesFill(polys, angle0, pitch, at, linkMm) {
+    if (!polys.length || !(pitch > 0)) return [];
+    var pieces = [];
+    for (var f = 0; f < 3; f++) {
+      var an = angle0 + f * Math.PI / 3, dx = Math.cos(an), dy = Math.sin(an), nx = -dy, ny = dx;
+      var t0 = Infinity, t1 = -Infinity, d0 = Infinity, d1 = -Infinity;
+      polys.forEach(function (P) { P.forEach(function (q) { var t = q[0] * dx + q[1] * dy, d = q[0] * nx + q[1] * ny; if (t < t0) t0 = t; if (t > t1) t1 = t; if (d < d0) d0 = d; if (d > d1) d1 = d; }); });
+      var row = 0;
+      for (var m = Math.ceil((d0 - at[f]) / pitch); m <= Math.floor((d1 - at[f]) / pitch); m++, row++) {
+        var d = at[f] + m * pitch;
+        var cut = clipLine([[(t0 - 1) * dx + d * nx, (t0 - 1) * dy + d * ny], [(t1 + 1) * dx + d * nx, (t1 + 1) * dy + d * ny]], polys);
+        if (row % 2 === 1) cut = cut.reverse().map(function (pc) { return { pts: pc.pts.slice().reverse(), a: pc.b, b: pc.a }; });
+        pieces = pieces.concat(cut);
+      }
+    }
+    return chainAlongOutline(polys, pieces, linkMm);
+  }
+
+  /** Where the cubic's three families lie on the layer at z, about `centre` (the middle of the object's box, at the plate). */
+  function cubicAt(centre, angle0, z) {
+    return CUBIC_SIGNS.map(function (sg, f) { var an = angle0 + f * Math.PI / 3; return -centre[0] * Math.sin(an) + centre[1] * Math.cos(an) + sg * z / Math.SQRT2; });
+  }
+
+  /**
+   * The adaptive cubic's lattice for an object: { pitch, at(z) }. The cubes' three axes are the planes' normals; the lattice has a corner at
+   * the middle of the object's box along each of them. pts: the object's points as flat x, y, z (z as printed).
+   */
+  function adaptiveCubicLattice(pts, edge) {
+    var k = Math.sqrt(1.5), mids = CUBIC_SIGNS.map(function (sg, f) {
+      var an = f * Math.PI / 3, ax = -Math.sin(an) / k, ay = Math.cos(an) / k, az = -sg / Math.SQRT2 / k, lo = Infinity, hi = -Infinity;
+      for (var i = 0; i + 2 < pts.length; i += 3) { var t = pts[i] * ax + pts[i + 1] * ay + pts[i + 2] * az; if (t < lo) lo = t; if (t > hi) hi = t; }
+      return (lo + hi) / 2;
+    });
+    return { pitch: edge * k, at: function (z) { return CUBIC_SIGNS.map(function (sg, f) { return k * mids[f] + sg * z / Math.SQRT2; }); } };
+  }
+
+  /* HONEYCOMB, measured on a real Bambu Studio 02.09 slice (honeycomb_sparse.gcode.3mf: 15 %, 0.45 wide; docs/SLICER.md "Honeycomb"). One
+     lattice of regular hexagons for the whole object: two spacings over the density across the flats (5.427), a pair of edges along 135
+     degrees (the infill direction and a quarter turn), the others at 75 and 15. A layer draws it as zigzag lines along one of the three edge
+     directions - 135 on the first sparse layer of the reference (layer 4), 75 on the next, 15 on the third, and round again: where two
+     zigzags meet they run side by side a spacing apart (the doubled walls), each half a spacing off the hexagons' true edge. A hexagon's
+     middle lies (W, a) from the middle of the object's box, W the spacing over the density and a the hexagon's side (2 W / sqrt 3): read off
+     ten shapes, the same on each - but one density, so that it scales with W is stated, not measured. */
+  /**
+   * A region filled with one layer of the honeycomb -> [{ closed: false, pts }].
+   *   centre   the middle of the object's box
+   *   angle    the infill direction (rad)
+   *   turn     0, 1 or 2: which of the three edge directions this layer's zigzags follow (the layer's index modulo 3)
+   *   W        the spacing over the density;  spacing  the bead's
+   */
+  function honeycombFill(polys, centre, angle, turn, W, spacing, linkMm) {
+    if (!polys.length || !(W > 0)) return [];
+    var a = 2 * W / Math.sqrt(3), fa = angle - turn * Math.PI / 3, c = Math.cos(fa), sn = Math.sin(fa);
+    /* the layer's frame: q across the zigzags, p along them, from a hexagon's middle */
+    var hx = centre[0] + W, hy = centre[1] + a;
+    var toQP = function (pt) { return [(pt[0] - hx) * c + (pt[1] - hy) * sn, -(pt[0] - hx) * sn + (pt[1] - hy) * c]; };
+    var toXY = function (q, pp) { return [hx + q * c - pp * sn, hy + q * sn + pp * c]; };
+    var q0 = Infinity, q1 = -Infinity, p0 = Infinity, p1 = -Infinity;
+    polys.forEach(function (P) { P.forEach(function (pt) { var r = toQP(pt); if (r[0] < q0) q0 = r[0]; if (r[0] > q1) q1 = r[0]; if (r[1] < p0) p0 = r[1]; if (r[1] > p1) p1 = r[1]; }); });
+    var half = a / 2 + spacing / (2 * Math.sqrt(3)), pieces = [], row = 0;
+    /* column m: the hexagons' edges along p at q = m W, centred 3 a apart - at the middle's own height on odd columns, 1.5 a off on even ones */
+    for (var m = Math.floor(q0 / W) - 1; m <= Math.ceil(q1 / W); m++, row++) {
+      var cm = (((m % 2) + 2) % 2 === 1) ? 0 : 1.5 * a, line = [];
+      for (var k = Math.floor((p0 - cm) / (3 * a)) - 1; k <= Math.ceil((p1 - cm) / (3 * a)) + 1; k++) {
+        var cc = cm + 3 * a * k;
+        line.push(toXY(m * W + spacing / 2, cc - half), toXY(m * W + spacing / 2, cc + half), toXY((m + 1) * W - spacing / 2, cc + 1.5 * a - half), toXY((m + 1) * W - spacing / 2, cc + 1.5 * a + half));
+      }
+      var cut = clipLine(line, polys);
+      if (row % 2 === 1) cut = cut.reverse().map(function (pc) { return { pts: pc.pts.slice().reverse(), a: pc.b, b: pc.a }; });
+      pieces = pieces.concat(cut);
+    }
+    return chainAlongOutline(polys, pieces, linkMm);
+  }
+
+  /**
+   * Pieces of clipLine's, in order, as paths: one piece's end joined to the next one's start along the outline, the shorter way round, when
+   * both lie on the same polygon, that way is no longer than linkMm and no earlier join already runs along any of it (a stretch of wall is
+   * traced once).
+   */
   function chainAlongOutline(polys, pieces, linkMm) {
-    var out = [], path = null, last = null, tracks = polys.map(function () { return null; });
+    var out = [], path = null, last = null, tracks = polys.map(function () { return null; }), used = polys.map(function () { return []; });
     pieces.forEach(function (pc) {
       var joined = false;
       if (path && linkMm > 0 && last.b && pc.a && last.b.p === pc.a.p) {
-        var Tr = tracks[pc.a.p] || (tracks[pc.a.p] = outlineTrack(polys[pc.a.p])), pf = Tr.pos(last.b), pt2 = Tr.pos(pc.a);
+        var pi = pc.a.p, Tr = tracks[pi] || (tracks[pi] = outlineTrack(polys[pi])), pf = Tr.pos(last.b), pt2 = Tr.pos(pc.a);
         var fw = (((pt2 - pf) % Tr.total) + Tr.total) % Tr.total, dir = fw <= Tr.total - fw ? 1 : -1, len = dir > 0 ? fw : Tr.total - fw;
-        if (len <= linkMm) { var way = Tr.walk(last.b, dir, len); way.pop(); path.pts = path.pts.concat(way, pc.pts); joined = true; }
+        var from = dir > 0 ? pf : pt2;                                         /* the stretch, as [from, from + len) going with the vertices */
+        var free = len <= linkMm && !used[pi].some(function (iv) {
+          var gap = (((iv[0] - from) % Tr.total) + Tr.total) % Tr.total;        /* from this stretch's start on to the other's */
+          return gap < len - 1e-9 || gap + iv[1] > Tr.total + 1e-9;             /* it starts inside this one, or wraps round onto it */
+        });
+        if (free) { var way = Tr.walk(last.b, dir, len); way.pop(); path.pts = path.pts.concat(way, pc.pts); used[pi].push([from, len]); joined = true; }
       }
       if (!joined) { path = { closed: false, pts: pc.pts }; out.push(path); }
       last = pc;
@@ -2105,7 +2211,7 @@
           }
           return zsl.map(function (z) { return exMemo.get(z); });
         };
-        return { name: ob.name || ('object ' + (oi + 1)), id: oi, mesh: sm, S: S, flipped: flipped, exactAt: exactAt, soupOk: !!(ob.soup && ob.soup.length),
+        return { name: ob.name || ('object ' + (oi + 1)), id: oi, mesh: sm, S: S, flipped: flipped, exactAt: exactAt, soupOk: !!(ob.soup && ob.soup.length), soup: ob.soup && ob.soup.length ? ob.soup : null,
                  nonSolid: ob.gapCloseMm === 0,
                  role: ob.role === 'support' ? 'support' : ob.role === 'brim' ? 'brim' : 'part', key: ob.key, hostKey: ob.hostKey,
                  thin: ob.detectThinWall != null ? !!ob.detectThinWall
@@ -2294,12 +2400,29 @@
           solidFill(internal, 'Internal solid infill', o.solidPattern);
 
           /* a spiral and a 3D honeycomb are laid about the middle of the object's own box on every layer, so each layer's lines lie on the last one's */
-          if (!P.boxCentre && !g.isEmpty(sparse) && (o.sparsePattern === 'archimedeanchords' || o.sparsePattern === '3dhoneycomb' || o.sparsePattern === 'gyroid')) {
+          if (!P.boxCentre && !g.isEmpty(sparse) && ({ archimedeanchords: 1, '3dhoneycomb': 1, gyroid: 1, cubic: 1, adaptivecubic: 1, honeycomb: 1 })[o.sparsePattern]) {
             var bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
             S.forEach(function (sec) { if (g.isEmpty(sec)) return; var bb = sec.bounds(); bx0 = Math.min(bx0, bb.min[0]); by0 = Math.min(by0, bb.min[1]); bx1 = Math.max(bx1, bb.max[0]); by1 = Math.max(by1, bb.max[1]); });
             P.boxCentre = [(bx0 + bx1) / 2, (by0 + by1) / 2];
           }
-          if (!g.isEmpty(sparse) && oS.sparseDensity > 0 && o.sparsePattern === 'gyroid') {
+          var dens = Math.min(1, oS.sparseDensity);
+          var lineFill = null;
+          if (!g.isEmpty(sparse) && dens > 0) {
+            if (o.sparsePattern === 'cubic') lineFill = linesFill(g.polys(sparse), dirA, 3 * sInf / dens, cubicAt(P.boxCentre, dirA, PL[i].printZ), o.sparseAnchorMaxMm);
+            else if (o.sparsePattern === 'adaptivecubic') {
+              if (!P.cubes) {
+                /* the object's points as printed: its triangles' corners, or - a section with no mesh behind it - its layers' outlines */
+                var pts3 = [];
+                if (P.soup) for (var q3 = 0; q3 + 2 < P.soup.length; q3 += 3) pts3.push(P.soup[q3], P.soup[q3 + 1], P.soup[q3 + 2] + shiftZ);
+                else S.forEach(function (sec, li) { g.polys(sec).forEach(function (pl) { pl.forEach(function (pt) { pts3.push(pt[0], pt[1], PL[li].printZ - PL[li].h, pt[0], pt[1], PL[li].printZ); }); }); });
+                P.cubes = adaptiveCubicLattice(pts3, 3 * wInf / dens);
+              }
+              lineFill = linesFill(g.polys(sparse), 0, P.cubes.pitch, P.cubes.at(PL[i].printZ), o.sparseAnchorMaxMm);
+            } else if (o.sparsePattern === 'honeycomb') lineFill = honeycombFill(g.polys(sparse), P.boxCentre, dirA, i % 3, sInf / dens, sInf, o.sparseAnchorMaxMm);
+          }
+          if (lineFill) {
+            lineFill.forEach(function (pth) { L.paths.push({ feature: 'Sparse infill', width: wInf, closed: false, pts: pth.pts }); });
+          } else if (!g.isEmpty(sparse) && oS.sparseDensity > 0 && o.sparsePattern === 'gyroid') {
             gyroidFill(g.polys(sparse), P.boxCentre, GYROID_SCALE * sInf / Math.min(1, oS.sparseDensity), PL[i].printZ, o.sparseAnchorMaxMm).forEach(function (pth) {
               L.paths.push({ feature: 'Sparse infill', width: wInf, closed: false, pts: pth.pts });
             });
@@ -4385,6 +4508,10 @@
     honeycomb3dFill: honeycomb3dFill,
     honeycomb3dAt: honeycomb3dAt,
     gyroidFill: gyroidFill,
+    linesFill: linesFill,
+    cubicAt: cubicAt,
+    adaptiveCubicLattice: adaptiveCubicLattice,
+    honeycombFill: honeycombFill,
     GYROID_SCALE: GYROID_SCALE,
     hilbertPoint: hilbertPoint,
     clipLine: clipLine,

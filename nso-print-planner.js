@@ -223,7 +223,7 @@
    * @returns {{nozzleMm, over}}  defaultsFor(nozzleMm, over)
    */
   /* the project's pattern names the engine draws as themselves; every other one is its lines (zigzag) */
-  var ENGINE_PATTERNS = { grid: 'grid', concentric: 'concentric', archimedeanchords: 'archimedeanchords', '3dhoneycomb': '3dhoneycomb', gyroid: 'gyroid' };
+  var ENGINE_PATTERNS = { grid: 'grid', concentric: 'concentric', archimedeanchords: 'archimedeanchords', '3dhoneycomb': '3dhoneycomb', gyroid: 'gyroid', cubic: 'cubic', adaptivecubic: 'adaptivecubic', honeycomb: 'honeycomb' };
   var ENGINE_SURFACES = { concentric: 'concentric', archimedeanchords: 'archimedeanchords', hilbertcurve: 'hilbertcurve', octagramspiral: 'octagramspiral' };
 
   function engineOptions(config) {

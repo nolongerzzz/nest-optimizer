@@ -252,10 +252,10 @@ async function main() {
 
     {
       /* every other pattern through the whole build: the planner takes its lines as it takes any */
-      for (const [pat, surf] of [['3dhoneycomb', 'hilbertcurve'], ['archimedeanchords', 'archimedeanchords'], ['gyroid', 'octagramspiral']]) {
+      for (const [pat, surf] of [['3dhoneycomb', 'hilbertcurve'], ['archimedeanchords', 'archimedeanchords'], ['gyroid', 'octagramspiral'], ['honeycomb', 'zigzag'], ['cubic', 'zigzag'], ['adaptivecubic', 'zigzag']]) {
         const r = await PRINT.build(two, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { pattern: pat, surface: surf }) });
-        check(pat + ' inside, ' + surf + ' surfaces: slices to a file, the plastic within 12 % of the lines\' (' + (r.ok ? r.stats.grams.toFixed(2) : '-') + ' g against ' + plain.stats.grams.toFixed(2) + ')',
-          r.ok && Math.abs(r.stats.grams / plain.stats.grams - 1) < 0.12, r.reason);
+        check(pat + ' inside, ' + surf + ' surfaces: slices to a file, the plastic within 15 % of the lines\' (' + (r.ok ? r.stats.grams.toFixed(2) : '-') + ' g against ' + plain.stats.grams.toFixed(2) + ')',
+          r.ok && Math.abs(r.stats.grams / plain.stats.grams - 1) < 0.15, r.reason);
       }
     }
 

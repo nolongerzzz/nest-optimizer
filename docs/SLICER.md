@@ -629,12 +629,80 @@ the walls).
 2 pi / 2.44 x spacing / density (6.9881 against the measured 6.988). A slice
 at another density would confirm the 2.44.
 
+### Cubic (`sparsePattern: 'cubic'`)
+
+Measured on `cubic_sparse.gcode.3mf` (15 %, 0.45 wide, 0.2 layers; the shapes
+35.8 - 43.6 mm tall), pinned in `fixtures/slicer-cubic-reference.json`. A layer
+is three families of straight lines at 45, 105 and 165 degrees (the infill
+direction and on by 60), each 3 x spacing / density apart (8.141). Each family
+slides sideways by the layer height over sqrt 2 a layer (0.1414), the middle
+one against the other two: the lines are the cut through three sets of planes
+at right angles to each other - cubes standing on a corner. All three pass
+through the middle of the object's box at the plate (z 0), whatever the
+object's height. `linesFill` with `cubicAt`.
+
+Against the reference: 840 points pinned on Bambu's lines (three shapes of
+three heights, layers 4 - 150) lie within 0.02 mm of these.
+
+### Adaptive cubic (`sparsePattern: 'adaptivecubic'`)
+
+Measured on `Adaptivecubic_sparse.gcode.3mf`, pinned in
+`fixtures/slicer-adaptivecubic-reference.json`. The cubic's sliding lines,
+with three differences:
+
+- the families lie at 0, 60 and 120 degrees (not turned by the infill
+  direction);
+- they are 11.023 apart: cubes 9.000 on edge, which is 3 x the line's
+  **width** over the density (0.45 / 15 %) - fitted to this one slice;
+- all three pass through the middle of the object's box in the cubes' own
+  frame, in all three directions: for a prism its middle in plan at half its
+  height (the reference's shapes are of five heights, and each one's lines sit
+  where its own half height puts them). `adaptiveCubicLattice` takes the
+  object's triangles for it.
+
+**The adapting is not measured and not done.** Bambu's cubes grow coarser deep
+inside a large part; none of the reference's parts (24 - 39 mm across) is
+large enough to show a coarser cell, so every cell here is the finest. On a
+large part this lays more than Bambu would. A slice of a part some 80 mm
+across would show the rule.
+
+Against the reference: 840 pinned points within 0.03 mm.
+
+### Honeycomb (`sparsePattern: 'honeycomb'`)
+
+Measured on `honeycomb_sparse.gcode.3mf`, pinned in
+`fixtures/slicer-honeycomb-reference.json`. One lattice of regular hexagons
+for the whole object, the same on every layer: 2 x spacing / density across
+the flats (5.427), a side 3.133, a pair of edges along 135 degrees and the
+others along 75 and 15. A layer draws it as zigzag lines along one of the
+three edge directions - 135 on layer 4 (the first sparse one), 75 on the next,
+15 on the third, and round again (the layer's index modulo 3). Where two
+zigzags meet they run side by side one spacing apart - the doubled walls -
+each half a spacing off the hexagon's true edge, so over three layers every
+edge is doubled once. A hexagon's middle lies (W, a) from the middle of the
+object's box (W = spacing / density, a the side): the same on all ten shapes,
+but read at one density, so that it scales with W is stated. `honeycombFill`.
+
+Against the reference: 960 pinned points (three shapes, the three directions
+twice round and layers 50 and 101) within 0.002 mm; the length laid within
+12 %.
+
+### Joining lines along the walls
+
+Every sparse pattern here ends its lines on the fill region and joins one
+line's end to the next along the wall (`chainAlongOutline`) when that is no
+longer than `sparseAnchorMaxMm` and no earlier join runs there - a stretch of
+wall is traced once. Bambu's own joins and hooks follow a finer rule
+(`infill_anchor`); the lines are the same, the length laid on a sparse layer
+differs by up to 10 - 30 % on these small parts, most where a layer has few
+lines (adaptive cubic).
+
 ### The two pattern rows
 
 Bambu sets the sparse infill and the surfaces apart (this file: Hilbert curve
 on the surfaces, 3D honeycomb inside), so the print card and G-scope have two
 rows: **infill** (grid, rectilinear, lines, concentric, archimedean chords, 3D
-honeycomb, gyroid -> `sparse_infill_pattern`) and **surfaces** (rectilinear,
+honeycomb, gyroid, honeycomb, cubic, adaptive cubic -> `sparse_infill_pattern`) and **surfaces** (rectilinear,
 concentric, archimedean chords, hilbert curve, octagram spiral -> `top_surface_pattern`,
 `bottom_surface_pattern`, `internal_solid_infill_pattern`, the three as one
 choice). Concentric and Archimedean chords no longer set both from the infill

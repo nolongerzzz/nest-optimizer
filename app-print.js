@@ -103,7 +103,8 @@
   // ---- the card's Slice settings ---------------------------------------------
   //
   // The rows G-scope's Slice side has, kept by the card itself: { nozzle, layer, walls,
-  // density (%), pattern ('grid' | 'zigzag' | 'lines' | 'concentric' | 'archimedeanchords' | '3dhoneycomb' | 'gyroid'), surface ('zigzag' |
+  // density (%), pattern ('grid' | 'zigzag' | 'lines' | 'concentric' | 'archimedeanchords' | '3dhoneycomb' | 'gyroid' | 'cubic' |
+  // 'adaptivecubic' | 'honeycomb'), surface ('zigzag' |
   // 'concentric' | 'archimedeanchords' | 'hilbertcurve' | 'octagramspiral': the top, the bottom and the solid infill), angle (deg), brim ('auto' |
   // 'outer' | 'none'), interfaceRule ('column' | null) }. They start at the template's
   // values; a value the owner changed is written into a copy of the template's project
@@ -114,13 +115,13 @@
                            /* the filament: the profile's own; a null row is the filament's value (filamentBase); no temperature steps */
                            filament: 'profile', nozzleTemp: null, firstTemp: null, bedTemp: null, maxFlow: null, tempStep: 0, tempBand: 10 };   /* the card's own defaults (the owner's view): Studio 2.9's 3.6 - the owner's mouse1 on the P1S released clean with it */
   var IFACE_ANGLES = { profile: 1, bridge: 1, studio36: 1, crosshatch: 1 };   /* nso_slicer.js supportInterfaceAngle: NSO's own, no profile key - a testing ground for interfaces */
-  var PATTERN_TO_CONFIG = { grid: 'grid', zigzag: 'zig-zag', lines: 'line', concentric: 'concentric', archimedeanchords: 'archimedeanchords', '3dhoneycomb': '3dhoneycomb', gyroid: 'gyroid' };
-  var PATTERN_FROM_CONFIG = { grid: 'grid', 'zig-zag': 'zigzag', zigzag: 'zigzag', line: 'lines', lines: 'lines', concentric: 'concentric', archimedeanchords: 'archimedeanchords', '3dhoneycomb': '3dhoneycomb', gyroid: 'gyroid', rectilinear: 'zigzag' };
+  var PATTERN_TO_CONFIG = { grid: 'grid', zigzag: 'zig-zag', lines: 'line', concentric: 'concentric', archimedeanchords: 'archimedeanchords', '3dhoneycomb': '3dhoneycomb', gyroid: 'gyroid', cubic: 'cubic', adaptivecubic: 'adaptivecubic', honeycomb: 'honeycomb' };
+  var PATTERN_FROM_CONFIG = { grid: 'grid', 'zig-zag': 'zigzag', zigzag: 'zigzag', line: 'lines', lines: 'lines', concentric: 'concentric', archimedeanchords: 'archimedeanchords', '3dhoneycomb': '3dhoneycomb', gyroid: 'gyroid', cubic: 'cubic', adaptivecubic: 'adaptivecubic', honeycomb: 'honeycomb', rectilinear: 'zigzag' };
   /* the surfaces row: the top, the bottom and the solid infill as one choice (Bambu's three rows); zigzag is its Rectilinear and what any
      other pattern of a template (monotonic...) is sliced as */
   var SURFACE_TO_CONFIG = { zigzag: 'zig-zag', concentric: 'concentric', archimedeanchords: 'archimedeanchords', hilbertcurve: 'hilbertcurve', octagramspiral: 'octagramspiral' };
   var SURFACE_KEYS = ['top_surface_pattern', 'bottom_surface_pattern', 'internal_solid_infill_pattern'];
-  var PATTERN_LABEL = { zigzag: 'rectilinear', archimedeanchords: 'archimedean chords', hilbertcurve: 'hilbert curve', octagramspiral: 'octagram spiral', '3dhoneycomb': '3D honeycomb' };
+  var PATTERN_LABEL = { zigzag: 'rectilinear', archimedeanchords: 'archimedean chords', hilbertcurve: 'hilbert curve', octagramspiral: 'octagram spiral', '3dhoneycomb': '3D honeycomb', adaptivecubic: 'adaptive cubic' };
   var BRIM_TO_CONFIG = { auto: 'auto_brim', outer: 'outer_only', none: 'no_brim' };
 
   // ---- filaments ---------------------------------------------------------------

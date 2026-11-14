@@ -766,6 +766,63 @@ function frustum(n, r0, r1, z0, z1) {
     check('the lists\' name for the star', SL.patternLabel('octagramspiral') === 'octagram spiral' && SL.patternLabel('gyroid') === 'gyroid');
   }
 
+  section('Cubic, adaptive cubic and honeycomb - against real Bambu slices (fixtures/slicer-cubic-, -adaptivecubic-, -honeycomb-reference.json, docs/SLICER.md)');
+  {
+    const fsx = require('fs');
+    const OUT = JSON.parse(fsx.readFileSync(path.join(ROOT, 'fixtures', 'slicer-concentric-reference.json'), 'utf8')).shapes;
+    const dseg = (p, a, b) => { const dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy, t = l2 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2)) : 0; return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy); };
+    const off = (q, paths) => { let d = Infinity; paths.forEach(p => { for (let i = 1; i < p.pts.length; i++) { const e = dseg(q, p.pts[i - 1], p.pts[i]); if (e < d) d = e; } }); return d; };
+    const plen = p => { let l = 0; for (let i = 1; i < p.pts.length; i++) l += Math.hypot(p.pts[i][0] - p.pts[i - 1][0], p.pts[i][1] - p.pts[i - 1][1]); return l; };
+    const opt = (pat) => SL.defaultsFor(0.4, { layerMm: 0.2, outerWallWidthMm: 0.42, innerWallWidthMm: 0.45, infillWidthMm: 0.45, topShellLayers: 5, bottomShellLayers: 3, minSparseAreaMm2: 0, sparsePattern: pat });
+    const sparseOf = (ob, li) => ob.layers[li].paths.filter(p => p.feature === 'Sparse infill');
+    const slices = {};
+    /* a pattern against its reference: each shape sliced at the reference's own height */
+    const against = (pat, file) => {
+      const REF = JSON.parse(fsx.readFileSync(path.join(ROOT, 'fixtures', file), 'utf8')).layers, shapes = [...new Set(REF.map(r => r.shape))];
+      const res = SL.sliceObjects(shapes.map(n => ({ name: n, soup: prism(OUT.find(sh => sh.name === n).outline, 0, REF.find(r => r.shape === n).tall * 0.2) })), opt(pat), wasm);
+      slices[pat] = { res, shapes };
+      let worst = 0, n = 0, len = 0;
+      REF.forEach(r => { const mine = sparseOf(res.objects[shapes.indexOf(r.shape)], r.layer - 1);
+        r.points.forEach(q => { worst = Math.max(worst, off(q, mine)); n++; });
+        len = Math.max(len, Math.abs(mine.reduce((a, p) => a + plen(p), 0) / r.length - 1)); });
+      return { worst, n, len, layers: [...new Set(REF.map(r => r.layer))].join(', ') };
+    };
+    const cu = against('cubic', 'slicer-cubic-reference.json');
+    check('cubic, three shapes of three heights, layers ' + cu.layers + ': every point pinned on Bambu\'s lines lies on these (within 0.03 mm)', cu.worst < 0.03, cu.n + ' points, worst ' + cu.worst.toFixed(4));
+    check('...the length laid within 25 % of Bambu\'s (the lines are the same; the joins along the walls differ)', cu.len < 0.25, (cu.len * 100).toFixed(1) + ' %');
+    const sB = SL.spacingOf(0.45, 0.2);
+    const fam = (paths) => { const m = {}; paths.forEach(p => { for (let i = 1; i < p.pts.length; i++) { const dx = p.pts[i][0] - p.pts[i - 1][0], dy = p.pts[i][1] - p.pts[i - 1][1], l = Math.hypot(dx, dy); if (l < 3) continue;
+      const a = ((Math.round(Math.atan2(dy, dx) * 180 / Math.PI) % 180) + 180) % 180; m[a] = (m[a] || 0) + l; } }); return m; };
+    const sqC = slices.cubic.res.objects[slices.cubic.shapes.indexOf('square')], fc = fam(sparseOf(sqC, 19));
+    check('its three families lie at 45, 105 and 165 degrees', fc[45] > 20 && fc[105] > 20 && fc[165] > 20, JSON.stringify(Object.keys(fc)));
+    const at4 = SL.cubicAt([0, 0], Math.PI / 4, 0.8), at5 = SL.cubicAt([0, 0], Math.PI / 4, 1.0);
+    check('...each slides the layer height over sqrt 2 a layer (0.1414), the middle family against the other two; all three through the centre at the plate',
+          at4.every((d, k) => Math.abs((at5[k] - d) - [-1, 1, -1][k] * 0.2 / Math.SQRT2) < 1e-9) && SL.cubicAt([0, 0], Math.PI / 4, 0).every(d => Math.abs(d) < 1e-12), at4.map(f4).join(' '));
+    const ac = against('adaptivecubic', 'slicer-adaptivecubic-reference.json');
+    check('adaptive cubic, three shapes of three heights, layers ' + ac.layers + ': every point pinned on Bambu\'s lines lies on these (within 0.06 mm)', ac.worst < 0.06, ac.n + ' points, worst ' + ac.worst.toFixed(4));
+    check('...the length laid within 35 % of Bambu\'s (few lines a layer, so the joins along the walls are a large share)', ac.len < 0.35, (ac.len * 100).toFixed(1) + ' %');
+    const fa = fam(sparseOf(slices.adaptivecubic.res.objects[slices.adaptivecubic.shapes.indexOf('pentagon')], 49));
+    check('its three families lie at 0, 60 and 120 degrees', fa[60] > 10 && fa[120] > 10, JSON.stringify(Object.keys(fa)));
+    const box = [0, 0, 0, 20, 0, 0, 20, 30, 0, 0, 30, 0, 0, 0, 40, 20, 0, 40, 20, 30, 40, 0, 30, 40], lat = SL.adaptiveCubicLattice(box, 9);
+    const mid = lat.at(20).map((d, k) => d - (-10 * Math.sin(k * Math.PI / 3) + 15 * Math.cos(k * Math.PI / 3)));
+    check('its lattice: lines 11.023 apart (cubes 9 on edge: 3 x 0.45 / 15 %), all three through the middle of the object\'s box at half its height',
+          Math.abs(lat.pitch - 11.0227) < 1e-3 && mid.every(d => Math.abs(d) < 1e-9), f4(lat.pitch) + ' ' + mid.map(d => d.toExponential(0)).join(' '));
+    const hc = against('honeycomb', 'slicer-honeycomb-reference.json');
+    check('honeycomb, three shapes, layers ' + hc.layers + ' (the three directions, twice round): every point pinned on Bambu\'s lines lies on these (within 0.02 mm)', hc.worst < 0.02, hc.n + ' points, worst ' + hc.worst.toFixed(4));
+    check('...the length laid within 15 % of Bambu\'s', hc.len < 0.15, (hc.len * 100).toFixed(1) + ' %');
+    const sqH = slices.honeycomb.res.objects[slices.honeycomb.shapes.indexOf('square')];
+    const main = (li) => { const m = fam2(sparseOf(sqH, li)); return +Object.keys(m).sort((a, b) => m[b] - m[a])[0]; };
+    function fam2(paths) { const m = {}; paths.forEach(p => { for (let i = 1; i < p.pts.length; i++) { const dx = p.pts[i][0] - p.pts[i - 1][0], dy = p.pts[i][1] - p.pts[i - 1][1], l = Math.hypot(dx, dy); if (l < 1.5) continue;
+      const a = ((Math.round(Math.atan2(dy, dx) * 180 / Math.PI) % 180) + 180) % 180; m[a] = (m[a] || 0) + l; } }); return m; }
+    check('its zigzags run along 135 degrees on layer 4, 75 on layer 5, 15 on layer 6, and round again', [3, 4, 5, 6, 7, 8].map(main).join(' ') === '135 75 15 135 75 15', [3, 4, 5, 6, 7, 8].map(main).join(' '));
+    const W = sB / 0.15, aH = 2 * W / Math.sqrt(3), longest = Math.max(...sparseOf(sqH, 3).flatMap(p => p.pts.slice(1).map((q, i) => { const dx = q[0] - p.pts[i][0], dy = q[1] - p.pts[i][1]; return Math.abs(dx + dy) < 1e-6 ? Math.hypot(dx, dy) : 0; })));
+    check('the hexagons: 5.427 across the flats (two spacings over the density), a side 3.133; a doubled wall\'s stroke the side and a bit (3.368: half a spacing off the true edge at each end)',
+          Math.abs(2 * W - 5.4277) < 1e-3 && Math.abs(longest - (aH + sB / Math.sqrt(3))) < 1e-3, f4(2 * W) + ' ' + f4(aH) + ' ' + f4(longest));
+    check('every line of all three inside the walls', ['cubic', 'adaptivecubic', 'honeycomb'].every(pt => slices[pt].res.objects.every((ob, k) => [5, 20, 60].every(li =>
+          sparseOf(ob, li).every(p => p.pts.every(q => SL.inside([OUT.find(sh => sh.name === slices[pt].shapes[k]).outline], q[0], q[1])))))));
+    check('the lists\' name for adaptive cubic', SL.patternLabel('adaptivecubic') === 'adaptive cubic' && SL.patternLabel('cubic') === 'cubic' && SL.patternLabel('honeycomb') === 'honeycomb');
+  }
+
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
 })().catch(err => { console.error(err); process.exit(1); });
