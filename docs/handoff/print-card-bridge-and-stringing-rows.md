@@ -13,5 +13,10 @@ bridge speed (CR-TPU: 25.5 mm/s whatever is set above that). The readout gives t
 **Why the filament's keys.** Studio's own TPU slice keeps `retraction_length = 0.8` in the file and retracts the filament's 0.4, so the rows write
 `filament_retraction_length` / `_speed` / `filament_z_hop` and leave the printer's keys alone.
 
-**Not built.** Bridge temperature (park, wait, wipe), avoid-crossing-walls travel, wipe distance. None has been printed yet: the rows are checked in the
+**Bridge temp (same day, after the first print).** Bridge speed 12 made the bridges worse (curls), and Studio's own tower bridges exactly as NSO does
+untouched, so the lever is temperature. **Bridge temp** (Quality, empty: off) prints a layer's bridges at their own nozzle temperature, changed at the printer's
+park: retract, lift, the A1 mini's purge position, `M109`, prime, wipe, back - once in before the layer's first bridge and once out after its last
+(`parkAt`, `PARK`, docs/FILAMENTS.md "Bridge temperature"). A1 mini only: the P1S is refused in words until its park moves are written. `print:slice` is 131.
+
+**Not built.** The P1S's park, avoid-crossing-walls travel, wipe distance. None has been printed yet: the rows are checked in the
 G-code (feeds, strand width, retraction, lifts), not on a part.

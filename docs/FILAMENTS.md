@@ -97,13 +97,14 @@ A temperature tower is then any model: temp 240, temp step -5, every 10 mm.
 
 ## Bridges and stringing
 
-Six more rows on the Print card (2026-11-14). The first two are the process's and start at the
+Seven more rows on the Print card (2026-11-14). The first three are the process's and start at the
 printer profile's values; the other four are the filament's, and an empty one is the filament's own.
 
 | Row | Section | Bambu key | PLA profile | CR-TPU |
 | --- | --- | --- | --- | --- |
 | **Bridge speed** | Quality | `bridge_speed` | 50 mm/s | 50 (prints at 25.5) |
 | **Bridge flow** | Quality | `bridge_flow` | 1 | 1 |
+| **Bridge temp** | Quality | NSO's own (see below) | off | off |
 | **Flow ratio** | Printer and filament | `filament_flow_ratio` | 0.98 | 1 |
 | **Retraction length** | Printer and filament | `filament_retraction_length` | 0.8 mm | 0.4 mm |
 | **Retraction speed** | Printer and filament | `filament_retraction_speed`, `filament_deretraction_speed` | 30 mm/s | 30 mm/s |
@@ -120,8 +121,48 @@ printer profile's values; the other four are the filament's, and an empty one is
   `bridges 12 mm/s (flow 0.9), flow ratio 1, retract 0.8 mm at 30 mm/s, z-hop 0 mm`.
 - Saved settings keep all six.
 
-Not built: a bridge temperature (park, wait, wipe, print the bridges cooler), "avoid crossing
-walls" on travels, and wipe distance as a row.
+Not built: "avoid crossing walls" on travels, and wipe distance as a row.
+
+### What the first prints said (CR-TPU, A1 mini, 2026-11-14)
+
+- **Slower bridges are worse.** Bridge speed 12 against the default's 25.5 mm/s left the strands
+  hanging in curls: a soft strand laid slowly has no tension on it.
+- **The bridge is laid as Studio lays it.** Studio's own tower (the fixture) bridges with a 0.4 mm
+  round strand at 24.8 mm/s, full fan - what NSO does untouched. Its 210 C band bridged clean and
+  its 235 - 240 C bands sagged, so what a bridge wants is a lower temperature, not another speed.
+
+## Bridge temperature
+
+**Bridge temp** (Quality; empty: off) prints a layer's bridges at their own nozzle temperature.
+A hotend takes tens of seconds to move 25 C, so the change is made off the part
+(`nso-print-planner.js` `parkAt`, `opts.bridgeTemp`):
+
+    ; NSO bridge temperature: 212 for the bridges
+    G1 Z2.6                           lift 0.4 (or the z-hop, if more)
+    G1 X0 Y90 F18000                  the printer's park: the A1 mini's purge position,
+    G1 X-13.5 F3000                   by the moves its timelapse hook makes every layer
+    M109 S212                         wait there
+    G1 E1.4 F79.8237                  the retraction back and 1 mm more, at the flush speed
+    G1 E-.4 F1800                     retract
+    G1 X0 F18000 ;wipe and shake      the start block's own wipe
+    G1 X-13.5 F3000
+    G1 X0 F12000 ;wipe and shake
+
+then the travel back, the nozzle down, the filament forward, and the bridges. After the layer's
+last bridge the same block brings the layer's own temperature back (`... 235 after the bridges`).
+
+- **One pair a layer.** What lies between a layer's first and last bridge prints at the bridge
+  temperature too. A layer with under 10 mm of bridge gets none.
+- The path before a park ends as a travel's does (wiped, retracted), and the park is outside every
+  object's M624 / M625, so skipping an object does not skip the change.
+- With temperature steps, "after the bridges" is the band's temperature.
+- Refused, in words: a bridge temperature outside the filament's range; any printer but the A1 mini
+  (`PARK` holds each printer's own moves, and the P1S's chute, behind the bed, is not written).
+- The print's time counts 30 s a change. That is a round number, not a measurement.
+- The readout: `bridges at 212 °C on 4 layers: 8 nozzle temperature changes at the park, about 4 min`.
+
+Not printed yet. What a print has to show: that the strand starts clean after the wait (the prime
+and wipe are a first guess), and how long the mini really takes for 235 to 212 and back.
 
 ## Adding a filament
 

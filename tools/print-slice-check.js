@@ -204,7 +204,7 @@ async function main() {
     check('the settings start at the A1 mini template\'s values: 0.4 nozzle, 0.2 mm layers, 2 walls, 15 % grid, support below 30°, auto brim, no raft (0.1 contact)',
       JSON.stringify(base) === JSON.stringify({ nozzle: 0.4, layer: 0.2, walls: 2, density: 15, pattern: 'grid', surface: 'zigzag', angle: 30, brim: 'auto', raft: 0, raftGap: 0.1, ifaceAngle: 'studio36', interfaceRule: null,
         filament: 'profile', nozzleTemp: null, firstTemp: null, bedTemp: null, maxFlow: null, tempStep: 0, tempBand: 10,
-        bridgeSpeed: 50, bridgeFlow: 1, flowRatio: null, retractLen: null, retractSpeed: null, zHop: null,
+        bridgeSpeed: 50, bridgeFlow: 1, flowRatio: null, retractLen: null, retractSpeed: null, zHop: null, bridgeTemp: null,
         /* Bambu's Advanced support rows start at the template's own values (docs/PRINT-CARD.md "Starting values"): first layer 90 %, top Z 0.2, every bridge held */
         supDensity: 90, supExpand: -1, supWalls: -1, supTopZ: 0.2, supBottomZ: 0.2, supBase: 'default', supBaseSpacing: 2.5, supAngle: 0, supIfacePattern: 'default', supIfaceSpacing: 0.5,
         supExpansion: 0, supXy: 0.35, supZOverXy: false, supFirstGap: 0.2, supBridge: 0, supIndep: true }), JSON.stringify(base));
@@ -454,6 +454,61 @@ async function main() {
       }
     }
 
+    // BRIDGE TEMPERATURE: the bridges at their own nozzle temperature, changed at the printer's park (docs/FILAMENTS.md)
+    {
+      const cp = objs.slice(0, 1);
+      const off = await PRINT.build(cp, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { filament: 'cr-tpu' }) });
+      const on = await PRINT.build(cp, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { filament: 'cr-tpu', bridgeTemp: 212 }) });
+      check('CR-TPU slices with a bridge temperature of 212', off.ok && on.ok, on.reason);
+      if (off.ok && on.ok) {
+        const g = L.text(await L.R.openZip(on.bytes).read('Metadata/plate_1.gcode')).split('\n'), g0 = L.text(await L.R.openZip(off.bytes).read('Metadata/plate_1.gcode')).split('\n');
+        const body = g.slice(g.indexOf('; MACHINE_START_GCODE_END'), g.indexOf('; MACHINE_END_GCODE_START')).filter(l => !/^M73 /.test(l));   /* (the progress marks fall where they fall) */
+        const parks = []; body.forEach((l, i) => { if (/^; NSO bridge temperature: /.test(l)) parks.push(i); });
+        const bt = on.stats.bridgeTemp;
+        check('...the coupon has bridges on ' + bt.layers + ' layers: two changes each (' + bt.changes + '), 212 going in and the layer\'s 235 coming out, in turn',
+          bt.layers >= 2 && bt.changes === 2 * bt.layers && parks.length === bt.changes &&
+            parks.every((i, n) => body[i] === (n % 2 === 0 ? '; NSO bridge temperature: 212 for the bridges' : '; NSO bridge temperature: 235 after the bridges')), JSON.stringify(bt));
+        const blockOk = parks.every((i, n) => {
+          const b = body.slice(i + 1, i + 12), t = n % 2 === 0 ? 212 : 235;
+          return /^M204 S\d+$/.test(b[0]) ? /^G1 Z[\d.]+$/.test(b[1]) && b[2] === 'G1 X0 Y90 F18000' && b[3] === 'G1 X-13.5 F3000' && b[4] === 'M109 S' + t && b[5] === 'G1 E1.4 F79.8237' &&
+            b[6] === 'G1 E-.4 F1800' && b[7] === 'G1 X0 F18000 ;wipe and shake' && b[8] === 'G1 X-13.5 F3000' && b[9] === 'G1 X0 F12000 ;wipe and shake'
+            : /^G1 Z[\d.]+$/.test(b[0]) && b[1] === 'G1 X0 Y90 F18000' && b[2] === 'G1 X-13.5 F3000' && b[3] === 'M109 S' + t && b[4] === 'G1 E1.4 F79.8237' &&
+            b[5] === 'G1 E-.4 F1800' && b[6] === 'G1 X0 F18000 ;wipe and shake' && b[7] === 'G1 X-13.5 F3000' && b[8] === 'G1 X0 F12000 ;wipe and shake';
+        });
+        check('...each is the A1 mini\'s own park: lift, X0 Y90, X-13.5, M109, prime the retraction and 1 mm at the flush speed, retract, wipe and shake', blockOk, body.slice(parks[0], parks[0] + 12).join(' / '));
+        // what is extruded between a park in and the park out is a bridge; the nozzle is retracted when it leaves and primed when it is back
+        let feat = '', cold = false, coldOther = 0, coldBridge = 0, lifted = true, lastE = 0, leftRetracted = true;
+        body.forEach((l, i) => {
+          let m;
+          if ((m = /^; FEATURE: (.*)$/.exec(l))) feat = m[1];
+          if (/^; NSO bridge temperature: 212/.test(l)) { cold = true; if (lastE >= 0) leftRetracted = false; }
+          else if (/^; NSO bridge temperature: 235/.test(l)) { cold = false; if (lastE >= 0) leftRetracted = false; }
+          if ((m = /^G1 (?:X[-\d.]+ Y[-\d.]+ )?E(-?\.?[\d.]+)/.exec(l))) { lastE = +m[1]; if (cold && +m[1] > 0 && /^G1 X/.test(l)) { if (feat === 'Bridge') coldBridge++; else coldOther++; } }
+        });
+        const bridgesAll = body.filter((l, i) => l === '; FEATURE: Bridge').length;
+        check('...every bridge line is laid at 212 (' + coldBridge + ' moves) and the nozzle is retracted whenever it leaves for the park', coldBridge > 20 && leftRetracted, JSON.stringify({ coldBridge, coldOther, leftRetracted, bridgesAll }));
+        check('...the only M109 in the body are the parks\', and the file without a bridge temperature has none', body.filter(l => /^M109 /.test(l)).length === bt.changes &&
+          !g0.slice(g0.indexOf('; MACHINE_START_GCODE_END'), g0.indexOf('; MACHINE_END_GCODE_START')).some(l => /^M109 |NSO bridge/.test(l)));
+        check('...the time counts 30 s a change, and the readout says so', Math.abs((on.stats.seconds - off.stats.seconds) - 30 * bt.changes) < 20 &&
+          PRINT.bridgeTempWords(bt) === 'bridges at 212 \u00b0C on ' + bt.layers + ' layers: ' + bt.changes + ' nozzle temperature changes at the park, about ' + PRINT.fmtTime(30 * bt.changes),
+          PRINT.bridgeTempWords(bt) + ' / +' + Math.round(on.stats.seconds - off.stats.seconds) + ' s');
+      }
+      // a plate of labelled objects: the park is no object's
+      const lab = await PRINT.build(objs, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { filament: 'cr-tpu', bridgeTemp: 212 }) });
+      check('a plate of several objects slices with it', lab.ok, lab.reason);
+      if (lab.ok) {
+        const gl = L.text(await L.R.openZip(lab.bytes).read('Metadata/plate_1.gcode')).split('\n');
+        let open = false, inside = 0, n = 0;
+        gl.forEach(l => { if (/^M624 /.test(l)) open = true; else if (l === 'M625') open = false; else if (/^; NSO bridge temperature/.test(l)) { n++; if (open) inside++; } });
+        check('...no park is inside an object\'s M624 / M625 (a skipped object does not take the temperature change with it): ' + n + ' parks', n > 0 && inside === 0, inside + ' inside');
+      }
+      const hot = await PRINT.build(cp, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { filament: 'cr-tpu', bridgeTemp: 190 }) });
+      check('a bridge temperature outside the filament\'s range is refused in words', !hot.ok && /bridge temperature is 190 .C; this filament prints between 200 and 250/.test(hot.reason), hot.reason);
+      const same = await PRINT.build(cp, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { filament: 'cr-tpu', bridgeTemp: 235 }) });
+      check('a bridge temperature that is the layer\'s own changes nothing: no park', same.ok && same.stats.bridgeTemp.changes === 0 &&
+        L.text(await L.R.openZip(same.bytes).read('Metadata/plate_1.gcode')) === L.text(await L.R.openZip(off.bytes).read('Metadata/plate_1.gcode')));
+    }
+
     // temperature steps: a box 31 mm tall, 240 C down 5 every 10 mm
     const bx = (w, d, h) => { const x = w / 2, y = d / 2, v = [[-x, -y, 0], [x, -y, 0], [x, y, 0], [-x, y, 0], [-x, -y, h], [x, -y, h], [x, y, h], [-x, y, h]];
       const f = [[0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7], [0, 1, 5], [0, 5, 4], [1, 2, 6], [1, 6, 5], [2, 3, 7], [2, 7, 6], [3, 0, 4], [3, 4, 7]], s = [];
@@ -524,6 +579,9 @@ async function main() {
     const vt = p1sPrinter.afterStart.findIndex(l => typeof l === 'string' && /^;VT\d/.test(l));
     const wantAfter = noM73(sl.slice(iM + 1, iL)), gotAfter = noM73(PL.thaw(PRINT.FILAMENTS['cr-tpu'].start(35, p1sCfg).concat(p1sPrinter.afterStart.slice(vt)), v, {}));
     check('...and so is the filament\'s own start G-code after it (M106 P3 S180 at a 35 C bed)', JSON.stringify(wantAfter) === JSON.stringify(gotAfter), JSON.stringify([wantAfter, gotAfter]));
+    const p1sBt = await PRINT.build(PRINT.pieceObjects(asViewportPieces(plate.objs.slice(0, 1), a1.bed), p1sPrinter.bed), { config: p1sCfg, printer: p1sPrinter },
+      { settings: Object.assign({}, PRINT.settingsFromConfig(p1sCfg), { filament: 'cr-tpu', bridgeTemp: 212 }) });
+    check('a bridge temperature on the P1S is refused: its park and wipe moves are not written yet', !p1sBt.ok && /written for the A1 mini only so far/.test(p1sBt.reason), p1sBt.reason);
     check('...the card\'s CR-TPU on the P1S has that bed: 235 C, bed 35, 3.2 mm^3/s', JSON.stringify(PRINT.filamentBase(p1sCfg, 'cr-tpu')) === JSON.stringify({ nozzleTemp: 235, firstTemp: 235, bedTemp: 35, maxFlow: 3.2, rangeLow: 200, rangeHigh: 250,
       flowRatio: 1, retractLen: 0.4, retractSpeed: 30, zHop: 0.4 }));
   }
@@ -569,7 +627,7 @@ async function main() {
         ['btn-sup-all', 'btn-sup-slice', 'btn-slice-export', 'btn-slice-cancel', 'slice-profile', 'slice-readout', 'slice-progress', 'print-printer', 'sup-on', 'print-sup-body', 'sup-style',
          'slice-set-nozzle', 'slice-set-layer', 'slice-set-walls', 'slice-set-density', 'slice-set-pattern', 'slice-set-brim', 'slice-set-raft', 'slice-set-raft-gap', 'slice-settings-reset',
          'slice-set-filament', 'slice-set-nozzle-temp', 'slice-set-first-temp', 'slice-set-bed-temp', 'slice-set-max-flow', 'slice-set-temp-step', 'slice-set-temp-band', 'slice-filament-note',
-         'slice-set-bridge-speed', 'slice-set-bridge-flow', 'slice-bridge-note', 'slice-set-flow-ratio', 'slice-set-retract-len', 'slice-set-retract-speed', 'slice-set-zhop'].every(has) &&
+         'slice-set-bridge-speed', 'slice-set-bridge-flow', 'slice-set-bridge-temp', 'slice-bridge-note', 'slice-set-flow-ratio', 'slice-set-retract-len', 'slice-set-retract-speed', 'slice-set-zhop'].every(has) &&
         /* ...and nothing of the cards it took the place of: no second Slice button, no None, no Remove, no second angle, no interface rule */
         ['btn-slice-go', 'btn-sup-none', 'btn-sup-remove', 'slice-set-angle', 'slice-set-iface', 'slice-settings-toggle', 'btn-slice-preview', 'sup-plate'].every(id => !html.includes('id="' + id + '"')) &&
         c.indexOf('id="btn-sup-all"') < c.indexOf('id="btn-sup-slice"') && c.indexOf('id="btn-sup-slice"') < c.indexOf('id="btn-slice-export"') && c.indexOf('id="btn-slice-export"') < c.indexOf('id="sup-style"') &&

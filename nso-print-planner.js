@@ -39,6 +39,16 @@
  * (no wait: an M109 parks the nozzle on the part while it settles) at the layer
  * change. A step outside the filament's nozzle_temperature_range is refused.
  *
+ * BRIDGE TEMPERATURE (opts.bridgeTemp, docs/FILAMENTS.md). A layer's bridges are
+ * printed at their own nozzle temperature. A hotend takes tens of seconds to
+ * change, so the change is made off the part: before the layer's first bridge
+ * the filament is retracted, the nozzle is lifted and parked where the printer
+ * purges (PARK), M109 waits there, a little is primed and wiped off, and the
+ * nozzle comes back; after the layer's last bridge the same brings the layer's
+ * own temperature back. One pair a layer (what lies between two bridges prints
+ * at the bridge's temperature), none for a layer with under BRIDGE_TEMP_MIN_MM
+ * of bridge. The park is each printer's own moves: the A1 mini's only, so far.
+ *
  * HOW A SPEED IS CHOSEN (measured on the owner's A1 mini and P1S slices)
  *   v = min(feature speed, filament_max_volumetric_speed / bead area)
  *   - bead area is the stadium nso-gcode-lines.js inverts: h (w - h) + pi h^2 / 4
@@ -69,6 +79,20 @@
   var EPS = 1e-9;
   var RETRACT_DURING_WIPE = 0.95;      // Bambu wipes 0.76 of 0.8 and retracts the last 0.04 after (A1 mini slice)
   var SPIRAL_R = 1.2;                  // mm, the layer-change z-hop circle (Bambu's runs 1.217)
+  var BRIDGE_TEMP_MIN_MM = 10;         // a layer with less bridge than this is not worth two temperature changes
+  var BRIDGE_TEMP_LIFT = 0.4;          // mm the nozzle is lifted to leave for the park (the timelapse hook's own)
+  var BRIDGE_TEMP_PRIME = 1;           // mm of filament primed at the park once the temperature is reached, beyond the retraction
+  var BRIDGE_TEMP_SECONDS = 30;        // what one change is counted as in the print's time (not measured: the hotend's own)
+  /* Where a printer waits for a nozzle temperature in the middle of a print, by its frozen id: its own moves, off its own G-code.
+     A1 mini: the purge position at the left end of the gantry (the start block purges at X-13.5; the timelapse hook goes there every
+     layer by "G1 X0 Y{CY} F18000" then "G1 X-13.0 F3000"), and the wipe is the start block's "wipe and shake". {CY} is the plate's
+     first-layer centre, as the hook has it. The P1S's chute is behind the bed and has its own moves: not written yet. */
+  var PARK = {
+    'a1mini-0.4': {
+      go: ['G1 X0 Y{CY} F18000', 'G1 X-13.5 F3000'],
+      wipe: ['G1 X0 F18000 ;wipe and shake', 'G1 X-13.5 F3000', 'G1 X0 F12000 ;wipe and shake']
+    }
+  };
 
   // ===========================================================================
   // Settings
@@ -916,6 +940,7 @@
    *   configOver  { key: value } process settings changed from the template (already in `config`), written into the CONFIG_BLOCK
    *   filamentStart  the filament's own start G-code, expanded (lines): it replaces the template filament's, which opens afterStart
    *   tempSteps   { stepC, bandMm }: the nozzle temperature changes by stepC at every bandMm of height (see the head of this file)
+   *   bridgeTemp  the nozzle temperature a layer's bridges print at, changed at the printer's park (see the head of this file)
    * @returns {{ok, reason, gcode, layers, stats, settings, labels}}
    */
   function plan(res, opts) {
@@ -956,6 +981,14 @@
       if (!steps) return S.temp.nozzle;
       return S.temp.nozzle + Math.floor((pl.printZ - pl.h + 1e-6) / steps.bandMm) * steps.stepC;
     };
+    var bridgeT = opts.bridgeTemp != null && isFinite(+opts.bridgeTemp) ? +opts.bridgeTemp : null;
+    if (bridgeT != null) {
+      if (!PARK[Pr.id]) return { ok: false, reason: 'a bridge temperature needs the printer\'s own park and wipe moves, and they are written for the A1 mini only so far. Clear Bridge temp to slice for the ' + Pr.printer + '.' };
+      if (bridgeT < S.temp.rangeLow || bridgeT > S.temp.rangeHigh) {
+        return { ok: false, reason: 'the bridge temperature is ' + bridgeT + ' \u00b0C; this filament prints between ' + S.temp.rangeLow + ' and ' + S.temp.rangeHigh + ' \u00b0C.' };
+      }
+    }
+    var bridgeStat = { temp: bridgeT, changes: 0, layers: 0 };
     var bands = [];
     if (steps) {
       for (var bi = 1; bi < printing.length; bi++) {
@@ -1121,12 +1154,46 @@
       put('M991 S0 P' + (layerNo - 1) + ' ;notify layer change');
       if (pj === 1) {
         if (!steps && S.temp.nozzle !== S.temp.nozzleInitial) put('M104 S' + fmt(S.temp.nozzle, 0));
+        if (!steps) st.nozzleT = S.temp.nozzle;
         if (S.temp.bed !== S.temp.bedInitial) put('M140 S' + fmt(S.temp.bed, 0));
       }
-      if (steps && pj >= 1) {
+      /* (a nozzle still at the bridge temperature of the layer before is brought back at the park, not here) */
+      if (steps && pj >= 1 && !st.bridgeCold) {
         var wantT = layerTemp(pl);
         if (wantT !== st.nozzleT) { put('M104 S' + fmt(wantT, 0) + ' ; NSO temperature step'); st.nozzleT = wantT; }
       }
+      // ----- the bridge temperature: the layer's first and last bridge, when it has enough of it
+      var bFirst = -1, bLast = -1;
+      if (bridgeT != null && !first) {
+        var bLen = 0;
+        items.forEach(function (bi2, bk) { if (bi2.feature === 'Bridge') { if (bFirst < 0) bFirst = bk; bLast = bk; bLen += bi2.len; } });
+        if (bLen < BRIDGE_TEMP_MIN_MM) { bFirst = -1; bLast = -1; }
+        if (bFirst >= 0) bridgeStat.layers++;
+      }
+      var layerT = pj === 0 ? S.temp.nozzleInitial : layerTemp(pl);
+      /** The temperature item k prints at, and whether the nozzle has to go to the park for it. */
+      var parkFor = function (k) {
+        if (bridgeT == null) return null;
+        var want = bFirst >= 0 && k >= bFirst && k <= bLast ? bridgeT : layerT;
+        return want !== st.nozzleT && (want === bridgeT || st.bridgeCold) ? want : null;
+      };
+      /** Retracted, lifted, to the park; wait for `temp`; prime and wipe. Ends retracted, lifted, at the park's last move. */
+      var parkAt = function (temp) {
+        if (!st.retracted && R.length > 0) { put('G1 E-' + fe(R.length) + ' F' + fmt(R.speed * 60, 0)); st.retracted = true; }
+        var subP = function (l) { return l.replace(/\{CY\}/g, tnum(vals.cy)); };
+        put('; NSO bridge temperature: ' + fmt(temp, 0) + (temp === bridgeT ? ' for the bridges' : ' after the bridges'));
+        accel(S.accel.travel);
+        put('G1 Z' + fx(z + Math.max(R.hop, BRIDGE_TEMP_LIFT)));
+        PARK[Pr.id].go.forEach(function (l) { put(subP(l)); });
+        put('M109 S' + fmt(temp, 0));
+        var prime = (st.retracted ? R.length : 0) + BRIDGE_TEMP_PRIME;
+        put('G1 E' + fe(prime) + ' F' + gnum(F.flushVolumetric / 2.4053 * 60));
+        st.extruded += BRIDGE_TEMP_PRIME;
+        if (R.length > 0) { put('G1 E-' + fe(R.length) + ' F' + fmt(R.speed * 60, 0)); st.retracted = true; } else st.retracted = false;
+        PARK[Pr.id].wipe.forEach(function (l) { put(subP(l)); });
+        st.nozzleT = temp; st.bridgeCold = temp === bridgeT;
+        bridgeStat.changes++;
+      };
       rec.nozzle = pj === 0 ? S.temp.nozzleInitial : layerTemp(pl);
       if (fan !== st.fan) { put(fanLine(fan)); st.fan = fan; }
       if (S.fan.aux && aux !== st.aux) { put('M106 P2 S' + fc(aux, 2)); st.aux = aux; }
@@ -1141,8 +1208,10 @@
         var pt = it.pts[0];
         var tFirst = first;
         var prev = k ? items[k - 1] : null;
+        var parkT = parkFor(k);
         // ----- the boundary and the travel to this path
         if (k === 0) {
+          if (parkT != null) parkAt(parkT);
           openObject(it.obj);
           if (first) {
             accel(S.accel.firstTravel);
@@ -1162,6 +1231,7 @@
           }
           deretract();
         } else {
+          if (parkT != null) prev.retractAfter = true;          // the path before a park ends as a travel's does: wiped and retracted
           flushRetract();
           var atHop = false;
           if (k - 1 === hookAt) {
@@ -1174,6 +1244,8 @@
             closeObject();
             openObject(it.obj);
           }
+          /* the park is no object's: a skipped object must not take the temperature change with it */
+          if (parkT != null) { closeObject(); parkAt(parkT); openObject(it.obj); atHop = true; }
           if (t.retract || atHop) {
             accel(travelA(first));
             if (atHop) put('G1 X' + fx(pt[0]) + ' Y' + fx(pt[1]) + ' F' + fmt(travelV(first) * 60, 0));
@@ -1232,7 +1304,7 @@
     var bodyTo = W.lines.length;
     // the time, from the lines themselves
     var est = estimateLines(W.lines.slice(bodyFrom, bodyTo), { jerk: S.jerk, accel: S.accel.def });
-    var bodySeconds = est.seconds;
+    var bodySeconds = est.seconds + bridgeStat.changes * BRIDGE_TEMP_SECONDS;   // each change at the park, counted, not measured
     var lineTime = function (i) { return Pr.timing.startSeconds + est.times[i - bodyFrom]; };
     layers.forEach(function (rec) {
       rec.clockFrom = rec.lineFrom > bodyFrom ? lineTime(rec.lineFrom - 1) : Pr.timing.startSeconds;
@@ -1302,6 +1374,7 @@
       stats: {
         layers: totalLayers, maxZ: top, filamentMm: lengthMm, bodyFilamentMm: st.extruded, volumeMm3: volume,
         grams: volume / 1000 * density, box: box,
+        bridgeTemp: bridgeT != null ? { temp: bridgeT, changes: bridgeStat.changes, layers: bridgeStat.layers, secondsEach: BRIDGE_TEMP_SECONDS } : null,
         tempBands: steps ? bands : null,                       // the temperature steps as written: [{ temp, fromZ, layer }]
         seconds: { start: Pr.timing.startSeconds, body: bodySeconds, end: Pr.timing.endSeconds, total: totalSeconds }
       }

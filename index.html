@@ -1407,10 +1407,13 @@
                     <input type="number" id="slice-set-layer" value="0.2" min="0.05" max="0.3" step="0.05" title="Layer height, mm. The first layer stays the profile's." autocomplete="off"><span>mm</span></label>
                   <label class="vp-bend-field" for="slice-set-bridge-speed">Bridge speed
                     <input type="number" id="slice-set-bridge-speed" value="50" min="1" max="300" step="1" inputmode="decimal"
-                             title="How fast a bridge (a line laid over air) is printed, mm/s. Slower gives the fan time to set the strand before it sags. A bridge never prints faster than the filament's max flow allows, whatever is set here." autocomplete="off"><span>mm/s</span></label>
+                             title="How fast a bridge (a line laid over air) is printed, mm/s. A bridge never prints faster than the filament's max flow allows, whatever is set here. Slower is not always better: on CR-TPU, 12 mm/s left the strands hanging in curls where 25 mm/s did not." autocomplete="off"><span>mm/s</span></label>
                   <label class="vp-bend-field" for="slice-set-bridge-flow">Bridge flow
                     <input type="number" id="slice-set-bridge-flow" value="1" min="0.5" max="1.5" step="0.05" inputmode="decimal"
                              title="How much plastic a bridge line gets (1 = a strand the nozzle's width). A little under 1 makes a thinner strand that pulls tight instead of drooping." autocomplete="off"></label>
+                  <label class="vp-bend-field" for="slice-set-bridge-temp">Bridge temp
+                    <input type="number" id="slice-set-bridge-temp" min="170" max="300" step="5" placeholder="off" inputmode="numeric"
+                             title="A nozzle temperature for the bridges alone, °C. On each layer with bridges the nozzle leaves the part, waits at the printer's purge position for this temperature, primes and wipes, prints the bridges, then does the same to come back to the layer's own temperature: two waits a layer. Empty: off - bridges print at the layer's temperature. A1 mini only so far." autocomplete="off"><span>&deg;C</span></label>
                   <p class="slice-settings-note" id="slice-bridge-note" hidden></p>
                 </div>
               </details>
@@ -3260,7 +3263,7 @@
        own page code, which listens for the press before the card does. After nso-helpers.js, app-core.js. docs/SUPPORT-BLOCKERS.md. -->
   <script src="nso_support_blockers.js?v=6962a81c"></script>
   <script src="app-support-blockers.js?v=73c8125d"></script>
-  <script src="app-supports-card.js?v=62acdfba"></script>
+  <script src="app-supports-card.js?v=8ac0c9a0"></script>
   <script src="app-gscope-slice.js?v=ff1ae633"></script>
   <!-- The Slice card (left bar): the plate sliced for its printer, the .gcode.3mf
        it makes. The print planner and the packager are loaded here for it and for
@@ -3268,9 +3271,9 @@
        uses them. After nso_slicer.js, nso-cooling-profiles.js, nso-3mf.js and
        nso-3mf-read.js, which they read at load, and after app-microscope.js, whose
        plate reader and G-code import it calls. See docs/PRINT-PLANNER.md. -->
-  <script src="nso-print-planner.js?v=e12dce37"></script>
+  <script src="nso-print-planner.js?v=18d4a5e6"></script>
   <script src="nso-gcode3mf-write.js?v=cdfa15b4"></script>
-  <script src="app-print.js?v=83256df0"></script>
+  <script src="app-print.js?v=d0726921"></script>
   <!-- Lift: details off a face, the face left as it was round them. After
        nso_lift.js (Phase 1: a flat face), nso_lift_curved.js (Lift 3: the
        repair under a detail lifted off a curved base), nso_lift_auto.js
