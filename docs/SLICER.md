@@ -490,12 +490,9 @@ Where it differs, and what is stated rather than measured:
   setting of this slicer; its first layer is laid at the infill's width.
 - A ring closes on itself; the planner leaves its own seam gap, as on a wall.
 
-The print card's and G-scope's pattern row offer **concentric**: it sets the
-sparse infill, the solid infill and both surfaces, as the reference has them
-(the project's `sparse_infill_pattern`, `internal_solid_infill_pattern`,
-`top_surface_pattern`, `bottom_surface_pattern`). A template that names
-concentric for one of them alone is sliced that way
-(`NSOPrintPlanner.engineOptions`).
+The print card and G-scope offer **concentric** on both pattern rows (see
+"The two pattern rows"). A template that names concentric for one of the four
+project keys alone is sliced that way (`NSOPrintPlanner.engineOptions`).
 
 ### Rectilinear (the lists' name for `zigzag`)
 
@@ -545,8 +542,104 @@ are 0.45, its solid 0.42), so a sparse spiral at 0.42 is 8 % tighter than
 Bambu's; a solid fill in several pieces on one layer (a top beside solid
 infill) is one spiral a piece, which the reference does not show.
 
-The pattern rows list it as **archimedean chords**; like concentric it sets
-the sparse infill, the solid infill and both surfaces.
+The pattern rows list it as **archimedean chords**, for the infill and for the surfaces.
+
+### Hilbert curve (`'hilbertcurve'`: the surfaces and the solid infill)
+
+One square space-filling line. Measured black-box on
+`hilbertcurve_3dhoneycomb.gcode.3mf` (the concentric plate's shapes, 43.6 mm
+tall; every surface and the solid infill Hilbert curve). Points on Bambu's
+lines are pinned in `fixtures/slicer-hilbert-honeycomb-reference.json`.
+
+| rule | measured | here |
+|---|---|---|
+| the grid | one bead spacing (0.377 at 0.42 / 0.2, 0.457 on the first layer), turned so every stroke lies at 45 or 135 degrees | `hilbertFill`, the frame at 135 degrees |
+| the curve | the plain Hilbert curve of the smallest power of two that covers the region (128 across on every shape), from the low corner of the region's box in that frame; the same on every layer | `hilbertPoint`; quadrants off the box are not made |
+| where the box is | Bambu's region lies 0.013 mm outside this slicer's (0.85 x half the difference of the wall's spacing and the fill's - the concentric rings' measure, found again in the grid's phase) | the box grown by that |
+
+Against the reference, on a solid layer of all ten shapes, 100 % of Bambu's
+line lies on this one (99.8 % on the square) and 96 - 99 % of this one on
+Bambu's: the curve is the same, and more of the cut ends are joined along the
+walls here (4 - 24 paths a layer against 59 - 97), which is the 1 - 4 % more
+length.
+
+### 3D honeycomb (`sparsePattern: '3dhoneycomb'`)
+
+Wavy lines whose waves and direction change with height. Measured on the same
+file's sparse infill (15 %, 0.45 wide, 0.2 layers, 210 layers of it). In the
+frame turned 45 degrees (`infill_direction`), about the middle of the object's
+own box:
+
+| rule | measured | here |
+|---|---|---|
+| a layer | one family of lines D = 3.579 apart, the middle one through the centre; each a square wave with slanted flanks: flats D - 2 a long, a to one side of the line then a to the other, the flanks at 45 degrees to the line (along X or Y on the plate); the wave 2 D long; next-door lines mirror images | `honeycomb3dFill` |
+| with height | a goes + D/4 -> - D/4 over 10 layers, back over the next 10 (0.179 a layer); the lines are straight every 10th layer; they run along the frame's first axis going down, along its second coming back; + D/4 on layers 5, 25, 45... | `honeycomb3dAt` |
+| the ends | cut at the region, joined to the next line along the wall | `clipLine`, joins up to `sparseAnchorMaxMm` |
+
+Against the reference: 960 points pinned on Bambu's lines (three shapes,
+layers 5 - 23, both directions and both sides of straight, clear of the walls)
+lie within 0.005 mm of these lines; the length laid is within 11 % (the joins
+along the walls are placed differently).
+
+**Two numbers are fitted to this one slice, and stated:** D = (1 + sqrt(3)/2)
+/ sqrt(2) x spacing / density (3.5802 against the measured 3.5788), and the
+quarter wave, 5 layers, taken as D / 4 over the layer height rounded up (4.47
+-> 5: a flat never steps further sideways than a layer is tall). A slice at
+another density or layer height would confirm or correct both.
+
+### Octagram spiral (`'octagramspiral'`: the surfaces and the solid infill)
+
+Eight-pointed stars, one inside the next, drawn as one line from the middle
+outward. Measured on `OctogramSpiral_Gyroid.gcode.3mf` (the same plate, the
+surfaces and the solid infill Octagram spiral), pinned in
+`fixtures/slicer-octagram-gyroid-reference.json`. In bead spacings from the
+centre, read off the circle's solid layer: the first stroke goes to (-1, 1);
+star n has its sides n spacings off the two axes, its points n (1 + sqrt 2)
+out and its notches n sqrt 2 out on the axes; it ends on the +Y axis, from
+where the line steps out to the next star's first corner. The centre is the
+Archimedean spiral's (the middle of the region's box in the 45 degree frame),
+and like it the star is the same on every layer. It is `spiralFill` with
+another line.
+
+Against the reference, on a solid layer of all ten shapes: 100 % of Bambu's
+line on this one, 99.6 - 100 % of this one on Bambu's, the length within
+0.2 %.
+
+### Gyroid (`sparsePattern: 'gyroid'`)
+
+Each layer is the cut through one smooth surface. Measured on the same file's
+sparse infill (15 %, 0.45 wide, 210 layers): the lines of every layer lie on
+
+    cos X sin Y + cos Y sin Z + cos Z sin X = 0,   X, Y, Z = 2 pi / wavelength x (x, y, z)
+
+with x and y from the middle of the object's own box and z the layer's top
+from the plate. 145 000 points of four shapes over all 210 layers lie on it
+within 0.03 mm at **one** wavelength for the three axes, 6.988 mm. A layer is
+cut as y(x) where |sin Z| >= |cos Z| (wavy lines along X, half a wavelength
+apart) and as x(y) elsewhere, so the lines turn from one axis to the other
+every eighth of a wavelength up (`gyroidFill`). The ends are joined along the
+walls as the 3D honeycomb's are.
+
+Against the reference: 960 points pinned on Bambu's lines (three shapes,
+layers 4 - 25) lie within 0.06 mm of these (Bambu writes the curves in arcs,
+this in lines 0.15 mm long); the length laid is within 16 % (the joins along
+the walls).
+
+**One number is fitted to this one slice, and stated:** the wavelength is
+2 pi / 2.44 x spacing / density (6.9881 against the measured 6.988). A slice
+at another density would confirm the 2.44.
+
+### The two pattern rows
+
+Bambu sets the sparse infill and the surfaces apart (this file: Hilbert curve
+on the surfaces, 3D honeycomb inside), so the print card and G-scope have two
+rows: **infill** (grid, rectilinear, lines, concentric, archimedean chords, 3D
+honeycomb, gyroid -> `sparse_infill_pattern`) and **surfaces** (rectilinear,
+concentric, archimedean chords, hilbert curve, octagram spiral -> `top_surface_pattern`,
+`bottom_surface_pattern`, `internal_solid_infill_pattern`, the three as one
+choice). Concentric and Archimedean chords no longer set both from the infill
+row. In G-scope the two selects share one cell of the settings grid (infill
+first), so the card is no taller than it was.
 
 ### Thin walls (classic walls with Detect thin wall on)
 

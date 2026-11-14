@@ -227,7 +227,7 @@
   };
 
   /** A pattern by the name Bambu Studio's list gives it: this slicer's zigzag is its Rectilinear. */
-  function patternLabel(p) { return p === 'zigzag' ? 'rectilinear' : p === 'archimedeanchords' ? 'archimedean chords' : p; }
+  function patternLabel(p) { return p === 'zigzag' ? 'rectilinear' : p === 'archimedeanchords' ? 'archimedean chords' : p === 'hilbertcurve' ? 'hilbert curve' : p === 'octagramspiral' ? 'octagram spiral' : p === '3dhoneycomb' ? '3D honeycomb' : p; }
 
   function wallWidthFor(nozzle) {
     var d = (typeof nozzle === 'number' && nozzle > 0) ? nozzle : 0.4;
@@ -263,8 +263,8 @@
       topShellThicknessMm: BAMBU_PROFILE_06.topShellThicknessMm,
       bottomShellThicknessMm: 0,
       sparseDensity: BAMBU_PROFILE_06.sparseDensity,
-      sparsePattern: BAMBU_PROFILE_06.sparsePattern,   // 'grid' | 'zigzag' (Bambu's Rectilinear; 'rectilinear' is taken for it) | 'lines' | 'concentric' | 'archimedeanchords'
-      solidPattern: BAMBU_PROFILE_06.solidPattern,     // 'zigzag' | 'lines' | 'concentric' | 'archimedeanchords': the internal solid infill, and the surfaces unless they say
+      sparsePattern: BAMBU_PROFILE_06.sparsePattern,   // 'grid' | 'zigzag' (Bambu's Rectilinear; 'rectilinear' is taken for it) | 'lines' | 'concentric' | 'archimedeanchords' | '3dhoneycomb' | 'gyroid'
+      solidPattern: BAMBU_PROFILE_06.solidPattern,     // 'zigzag' | 'lines' | 'concentric' | 'archimedeanchords' | 'hilbertcurve' | 'octagramspiral': the internal solid infill, and the surfaces unless they say
       topPattern: null,                    // the top surface's own pattern ('concentric'); null -> solidPattern
       bottomPattern: null,                 // the first layer's own pattern ('concentric'); null -> solidPattern
       infillDirectionDeg: BAMBU_PROFILE_06.infillDirectionDeg,
@@ -1123,13 +1123,26 @@
    *   linkMm   where the spiral leaves the region and comes back, the two cut ends are joined along the outline, the shorter way round, when
    *            that is no longer than this and no earlier join already runs there (0: never)
    *   hookMm   two ends left unjoined each turn this far along the outline towards the other (Bambu's infill anchor: 4 spacings); 0: none
+   *   octagram the spiral of eight-pointed stars in place of the round one (below)
    */
-  function spiralFill(polys, centre, pitch, linkMm, hookMm) {
+  function spiralFill(polys, centre, pitch, linkMm, hookMm, octagram) {
     if (!polys.length || !(pitch > 0)) return [];
     var R = 0;
     polys.forEach(function (P) { P.forEach(function (q) { var d = Math.hypot(q[0] - centre[0], q[1] - centre[1]); if (d > R) R = d; }); });
     var a0 = SPIRAL_START_DEG * Math.PI / 180, line = [centre.slice()];
-    for (var phi = 0; ;) {
+    if (octagram) {
+      /* THE OCTAGRAM SPIRAL (octagramspiral.gcode: Bambu's, read off the circle's solid layer in spacings from the centre). Ring n is an
+         eight-pointed star: its sides lie n spacings from the centre's axes (so ring to ring is one spacing), its points n (1 + sqrt 2) out,
+         its notches n sqrt 2 out on the axes. From the centre the first stroke goes to (-1, 1) - 135 degrees, as the round spiral's - and each
+         ring ends on the +Y axis, from where the line steps out to the next ring's first corner. The same on every layer. */
+      var q2 = Math.SQRT2, at = function (x, y) { line.push([centre[0] + x * pitch, centre[1] + y * pitch]); };
+      for (var n = 1; ; n++) {
+        var k = n * (1 + q2), m = n * q2;
+        if (n > 1) at(-n, (n - 1) * q2 + n);
+        at(-n, n); at(-k, n); at(-m, 0); at(-k, -n); at(-n, -n); at(-n, -k); at(0, -m); at(n, -k); at(n, -n); at(k, -n); at(m, 0); at(k, n); at(n, n); at(n, k); at(0, m);
+        if (n * pitch > R + pitch) break;                                         /* the star's sides are past the region's furthest point */
+      }
+    } else for (var phi = 0; ;) {
       var r = pitch * (1 + phi / (2 * Math.PI));
       line.push([centre[0] + r * Math.cos(a0 + phi), centre[1] + r * Math.sin(a0 + phi)]);
       if (r > R + pitch) break;
@@ -1166,6 +1179,222 @@
           if (h1 > hookMm / 4) { path.pts = path.pts.concat(T.walk(last.b, dir, h1)); take(p, pf, dir, h1); }
           if (h2 > hookMm / 4) { pc = { pts: T.walk(pc.a, -dir, h2).reverse().concat(pc.pts), a: pc.a, b: pc.b }; take(p, pt, -dir, h2); }
         }
+      }
+      if (!joined) { path = { closed: false, pts: pc.pts }; out.push(path); }
+      last = pc;
+    });
+    return out;
+  }
+
+  // ===========================================================================
+  // Hilbert curve - one space-filling line, cut to the region
+  // ===========================================================================
+
+  /* Measured on a real Bambu Studio 02.09 slice (hilbertcurve_3dhoneycomb.gcode.3mf: the concentric plate's shapes, every surface and the solid
+     infill Hilbert curve; docs/SLICER.md "Hilbert curve"):
+       - the curve runs on a square grid one bead spacing apart (0.377 at 0.42 / 0.2), turned 135 degrees: every stroke lies at 45 or 135;
+       - it is the plain Hilbert curve of the smallest power of two that covers the region (128 across on every shape of the plate), its first
+         corner at the low corner of the region's box in that frame - Bambu's region, which lies 0.85 x half the difference of the wall's spacing
+         and the fill's outside this slicer's (0.013 mm at 0.45 / 0.42: the concentric rings' measure, found again in the grid's phase);
+       - the same on every layer; cut where it leaves the region. */
+  var HILBERT_FRAME_DEG = 135;
+
+  /** The d-th point of the Hilbert curve on an n x n grid (n a power of two): from (0, 0) to (n - 1, 0). */
+  function hilbertPoint(n, d) {
+    var x = 0, y = 0, t = d;
+    for (var sN = 1; sN < n; sN *= 2) {
+      var rx = 1 & (t / 2), ry = 1 & (t ^ rx);
+      if (ry === 0) {
+        if (rx === 1) { x = sN - 1 - x; y = sN - 1 - y; }
+        var tmp = x; x = y; y = tmp;
+      }
+      x += sN * rx; y += sN * ry;
+      t = Math.floor(t / 4);
+    }
+    return [x, y];
+  }
+
+  /**
+   * A region filled with the Hilbert curve -> [{ closed: false, pts }], in the curve's order.
+   *   step     grid line to grid line
+   *   linkMm   cut ends are joined along the outline when that is no longer than this (0: never)
+   *   edgeMm   the first grid lines lie this far outside the region's box (above)
+   */
+  function hilbertFill(polys, step, linkMm, edgeMm) {
+    if (!polys.length || !(step > 0)) return [];
+    var a = HILBERT_FRAME_DEG * Math.PI / 180, c = Math.cos(a), sn = Math.sin(a);
+    var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    polys.forEach(function (P) { P.forEach(function (q) {
+      var X = q[0] * c + q[1] * sn, Y = -q[0] * sn + q[1] * c;
+      if (X < x0) x0 = X; if (X > x1) x1 = X; if (Y < y0) y0 = Y; if (Y > y1) y1 = Y;
+    }); });
+    var need = Math.ceil(Math.max(x1 - x0, y1 - y0) / step) + 1, n = 2;
+    while (n < need) n *= 2;
+    if (n > 4096) return [];                                   /* 16 million strokes: not a fill */
+    x0 -= edgeMm || 0; y0 -= edgeMm || 0;
+    var ox = x0, oy = y0;
+    /* the curve, straight runs as one stroke; only the part of it that can reach the box is made */
+    var cols = Math.ceil((x1 - x0) / step) + 1, rows = Math.ceil((y1 - y0) / step) + 1;
+    var pieces = [], line = null, prev = null;
+    var visit = function (X, Y, size, d0) {
+      /* a quadrant wholly off the box is skipped: the line breaks there */
+      if (X >= cols || Y >= rows) { line = null; return; }
+      if (size === 1) {
+        var pt = hilbertPoint(n, d0);
+        if (!line) { line = [pt]; pieces.push(line); }
+        else if (line.length >= 2 && (line[line.length - 2][0] === pt[0] && prev[0] === pt[0] || line[line.length - 2][1] === pt[1] && prev[1] === pt[1])) line[line.length - 1] = pt;
+        else line.push(pt);
+        prev = pt;
+        return;
+      }
+      var h = size / 2, q = h * h;
+      for (var k = 0; k < 4; k++) { var cnr = hilbertPoint(n, d0 + k * q); visit(Math.floor(cnr[0] / h) * h, Math.floor(cnr[1] / h) * h, h, d0 + k * q); }
+    };
+    visit(0, 0, n, 0);
+    var out = [], path = null, last = null, tracks = polys.map(function () { return null; });
+    pieces.forEach(function (ln) {
+      if (ln.length < 2) return;
+      var world = ln.map(function (g2) { var X = ox + g2[0] * step, Y = oy + g2[1] * step; return [X * c - Y * sn, X * sn + Y * c]; });
+      clipLine(world, polys).forEach(function (pc) {
+        var joined = false;
+        if (path && linkMm > 0 && last.b && pc.a && last.b.p === pc.a.p) {
+          var T = tracks[pc.a.p] || (tracks[pc.a.p] = outlineTrack(polys[pc.a.p])), pf = T.pos(last.b), pt2 = T.pos(pc.a);
+          var fw = (((pt2 - pf) % T.total) + T.total) % T.total, dir = fw <= T.total - fw ? 1 : -1, len = dir > 0 ? fw : T.total - fw;
+          if (len <= linkMm) { var way = T.walk(last.b, dir, len); way.pop(); path.pts = path.pts.concat(way, pc.pts); joined = true; }
+        }
+        if (!joined) { path = { closed: false, pts: pc.pts }; out.push(path); }
+        last = pc;
+      });
+    });
+    return out;
+  }
+
+  // ===========================================================================
+  // 3D honeycomb - wavy lines whose waves and direction change with height
+  // ===========================================================================
+
+  /* Measured on a real Bambu Studio 02.09 slice (hilbertcurve_3dhoneycomb.gcode.3mf: sparse infill 3D honeycomb, 15 %, 0.45 wide, 0.2 layers,
+     over 210 layers; docs/SLICER.md "3D honeycomb"). In the frame turned 45 degrees (the infill direction), about the middle of the object's box:
+       - a layer is one family of lines D = 3.579 apart, the middle one through the centre; each line is a square wave with slanted flanks:
+         flats D - 2|a| long, a to one side of the line then a to the other, joined by flanks at 45 degrees to the line (so along X or Y on
+         the plate); the wave is 2 D long, and next-door lines are mirror images, so they close in on each other and part again: the cells;
+       - a, the flats' distance from the line, goes from + D/4 to - D/4 in 10 layers and back in the next 10, a twentieth of D a layer (0.179):
+         the lines are straight every 10th layer; going down the lines run along the frame's first axis, coming back up along its second;
+       - + D/4 falls on layer 5 (z 1.0), 25, 45...: a quarter of the 20 layers up from the plate.
+     Two numbers are fitted to this one slice and stated, not known: D = (1 + sqrt(3)/2) / sqrt(2) x the spacing over the density (3.5802
+     against the measured 3.5788), and the quarter, 5 layers, taken as the fewest layers that keep a flat's sideways step within a layer height
+     (D / 4 over the layer height, rounded up: 4.47 -> 5). */
+  var HONEYCOMB3D_SCALE = (1 + Math.sqrt(3) / 2) / Math.SQRT2;
+
+  /** The 3D honeycomb's numbers for a layer: { D, a, family } - line spacing, the flats' signed distance from their line, 0 (lines along the frame's first axis) or 1. */
+  function honeycomb3dAt(spacing, density, layerH, printZ) {
+    var D = HONEYCOMB3D_SCALE * spacing / density, Q = Math.max(1, Math.ceil(D / (4 * layerH) - 1e-9));
+    var n = (((Math.round(printZ / layerH) - Q) % (4 * Q)) + 4 * Q) % (4 * Q);
+    return n < 2 * Q ? { D: D, a: D / 4 * (1 - n / Q), family: 0, quarter: Q } : { D: D, a: D / 4 * (-1 + (n - 2 * Q) / Q), family: 1, quarter: Q };
+  }
+
+  /**
+   * A region filled with one layer of the 3D honeycomb -> [{ closed: false, pts }].
+   *   centre   the lattice's middle (the object's box's)
+   *   angle    the frame (rad): the infill direction
+   *   cell     honeycomb3dAt()'s { D, a, family }
+   *   linkMm   a line's end is joined to the next line's along the outline when that is no longer than this
+   */
+  function honeycomb3dFill(polys, centre, angle, cell, linkMm) {
+    if (!polys.length || !(cell.D > 0)) return [];
+    var c = Math.cos(angle), sn = Math.sin(angle), D = cell.D, T = 2 * D, a = cell.a, A = Math.abs(a), fam = cell.family;
+    /* the frame: p along the lines, q across them, from the centre */
+    var toPQ = function (pt) { var u = (pt[0] - centre[0]) * c + (pt[1] - centre[1]) * sn, v = -(pt[0] - centre[0]) * sn + (pt[1] - centre[1]) * c; return fam ? [v, u] : [u, v]; };
+    var toXY = function (pp, qq) { var u = fam ? qq : pp, v = fam ? pp : qq; return [centre[0] + u * c - v * sn, centre[1] + u * sn + v * c]; };
+    var p0 = Infinity, p1 = -Infinity, q0 = Infinity, q1 = -Infinity;
+    polys.forEach(function (P) { P.forEach(function (pt) { var r = toPQ(pt); if (r[0] < p0) p0 = r[0]; if (r[0] > p1) p1 = r[0]; if (r[1] < q0) q0 = r[1]; if (r[1] > q1) q1 = r[1]; }); });
+    var pieces = [];
+    for (var k = Math.ceil((q0 - A) / D); k <= Math.floor((q1 + A) / D); k++) {
+      var sg = (k % 2 === 0 ? 1 : -1) * a, line = [];
+      if (A < 1e-9) line = [toXY(p0 - 1, k * D), toXY(p1 + 1, k * D)];
+      else {
+        for (var m = Math.floor((p0 - 1) / T); m <= Math.ceil((p1 + 1) / T); m++) {
+          var b = m * T;
+          line.push(toXY(b - T / 2 + A, k * D + sg), toXY(b - A, k * D + sg), toXY(b + A, k * D - sg), toXY(b + T / 2 - A, k * D - sg));
+        }
+      }
+      var cut = clipLine(line, polys);
+      if ((k % 2 + 2) % 2 === 1) cut = cut.reverse().map(function (pc) { return { pts: pc.pts.slice().reverse(), a: pc.b, b: pc.a }; });   /* there and back */
+      pieces = pieces.concat(cut);
+    }
+    return chainAlongOutline(polys, pieces, linkMm);
+  }
+
+  // ===========================================================================
+  // Gyroid - the layer's cut through the gyroid surface
+  // ===========================================================================
+
+  /* Measured on a real Bambu Studio 02.09 slice (OctogramSpiral_Gyroid.gcode.3mf: sparse infill gyroid, 15 %, 0.45 wide, 0.2 layers, 210 layers;
+     docs/SLICER.md "Gyroid"). The lines of every layer lie on the gyroid
+         cos X sin Y + cos Y sin Z + cos Z sin X = 0,    X, Y, Z = 2 pi / wavelength x (x, y, z)
+     with x and y measured from the middle of the object's own box and z the layer's top from the plate: 145 000 points of four shapes over all
+     210 layers lie on it within 0.03 mm, at one wavelength for all three axes, 6.988. That is 2 pi / 2.44 x the spacing over the density
+     (6.9881 at 0.407 / 15 %): the factor is fitted to this one slice.
+     A layer is cut as y(x) where |sin Z| >= |cos Z| - wavy lines along X, half a wavelength apart - and as x(y) elsewhere: the lines turn from
+     one axis to the other every eighth of a wavelength up. */
+  var GYROID_SCALE = 2 * Math.PI / 2.44;
+  var GYROID_STEPS = 48;              // points a wavelength along a line (0.15 mm at 15 %)
+
+  /**
+   * A region filled with one layer of the gyroid -> [{ closed: false, pts }].
+   *   centre   the surface's origin in the plane (the middle of the object's box)
+   *   lam      the wavelength
+   *   z        the layer's height
+   *   linkMm   a line's end is joined to the next line's along the outline when that is no longer than this
+   */
+  function gyroidFill(polys, centre, lam, z, linkMm) {
+    if (!polys.length || !(lam > 0)) return [];
+    var k = 2 * Math.PI / lam, sz = Math.sin(k * z), cz = Math.cos(k * z), alongX = Math.abs(sz) >= Math.abs(cz);
+    /* p runs along the lines, q across them, both in radians from the centre; the surface in (p, q): A(p) sin q' form below */
+    var p0 = Infinity, p1 = -Infinity, q0 = Infinity, q1 = -Infinity;
+    polys.forEach(function (P) { P.forEach(function (pt) {
+      var X = k * (pt[0] - centre[0]), Y = k * (pt[1] - centre[1]), pp = alongX ? X : Y, qq = alongX ? Y : X;
+      if (pp < p0) p0 = pp; if (pp > p1) p1 = pp; if (qq < q0) q0 = qq; if (qq > q1) q1 = qq;
+    }); });
+    var dp = 2 * Math.PI / GYROID_STEPS, n = Math.ceil((p1 - p0) / dp) + 2, base = [[], []], prevAng = null, turns = 0;
+    for (var i = 0; i <= n; i++) {
+      var pv = p0 - dp + i * dp, R, ang, rhs;
+      if (alongX) { R = Math.hypot(Math.cos(pv), sz); ang = Math.atan2(sz, Math.cos(pv)); rhs = -cz * Math.sin(pv); }     /* cos X sin Y + sin Z cos Y = - cos Z sin X */
+      else { R = Math.hypot(cz, Math.sin(pv)); ang = Math.atan2(Math.sin(pv), cz); rhs = -sz * Math.cos(pv); }            /* cos Z sin X + sin Y cos X = - sin Z cos Y */
+      /* the angle followed along the line, without its jumps of a whole turn */
+      if (prevAng !== null) { if (ang + turns - prevAng > Math.PI) turns -= 2 * Math.PI; else if (ang + turns - prevAng < -Math.PI) turns += 2 * Math.PI; }
+      prevAng = ang + turns;
+      var as = Math.asin(Math.max(-1, Math.min(1, rhs / R)));
+      base[0].push([pv, as - prevAng]);
+      base[1].push([pv, Math.PI - as - prevAng]);
+    }
+    var toXY = function (pv2, qv) { return alongX ? [centre[0] + pv2 / k, centre[1] + qv / k] : [centre[0] + qv / k, centre[1] + pv2 / k]; };
+    /* every line that can reach the region: each of the two, a whole wavelength apart, in the order they lie */
+    var lines = [];
+    base.forEach(function (b) {
+      var lo = Infinity, hi = -Infinity;
+      b.forEach(function (pt) { if (pt[1] < lo) lo = pt[1]; if (pt[1] > hi) hi = pt[1]; });
+      for (var m = Math.ceil((q0 - hi) / (2 * Math.PI)); m <= Math.floor((q1 - lo) / (2 * Math.PI)); m++) lines.push({ mid: (lo + hi) / 2 + m * 2 * Math.PI, shift: m * 2 * Math.PI, b: b });
+    });
+    lines.sort(function (l1, l2) { return l1.mid - l2.mid; });
+    var pieces = [];
+    lines.forEach(function (ln, li) {
+      var cut = clipLine(ln.b.map(function (pt) { return toXY(pt[0], pt[1] + ln.shift); }), polys);
+      if (li % 2 === 1) cut = cut.reverse().map(function (pc) { return { pts: pc.pts.slice().reverse(), a: pc.b, b: pc.a }; });   /* there and back */
+      pieces = pieces.concat(cut);
+    });
+    return chainAlongOutline(polys, pieces, linkMm);
+  }
+
+  /** Pieces of clipLine's, in order, as paths: one piece's end joined to the next one's start along the outline when both lie on the same polygon and that way is no longer than linkMm. */
+  function chainAlongOutline(polys, pieces, linkMm) {
+    var out = [], path = null, last = null, tracks = polys.map(function () { return null; });
+    pieces.forEach(function (pc) {
+      var joined = false;
+      if (path && linkMm > 0 && last.b && pc.a && last.b.p === pc.a.p) {
+        var Tr = tracks[pc.a.p] || (tracks[pc.a.p] = outlineTrack(polys[pc.a.p])), pf = Tr.pos(last.b), pt2 = Tr.pos(pc.a);
+        var fw = (((pt2 - pf) % Tr.total) + Tr.total) % Tr.total, dir = fw <= Tr.total - fw ? 1 : -1, len = dir > 0 ? fw : Tr.total - fw;
+        if (len <= linkMm) { var way = Tr.walk(last.b, dir, len); way.pop(); path.pts = path.pts.concat(way, pc.pts); joined = true; }
       }
       if (!joined) { path = { closed: false, pts: pc.pts }; out.push(path); }
       last = pc;
@@ -2020,11 +2249,19 @@
           }
           function solidFill(cs, feat, pattern) {
             if (g.isEmpty(cs)) return;
-            if (pattern === 'archimedeanchords') {
+            if (pattern === 'hilbertcurve') {
+              g.parts(cs).forEach(function (pc) {
+                hilbertFill(g.polys(pc), sInf, solidJoin, (1 - o.infillWallOverlap) * (spacingOf(oS.wallLoops > 1 && !(feat === 'Top surface' && oS.onlyOneWallTop) ? o.innerWallWidthMm : o.outerWallWidthMm, h) - sInf) / 2).forEach(function (pth) {
+                  L.paths.push({ feature: feat, width: wInf, closed: false, pts: pth.pts });
+                });
+              });
+              return;
+            }
+            if (pattern === 'archimedeanchords' || pattern === 'octagramspiral') {
               /* one spiral a piece, about the middle of its box in the infill direction's frame */
               g.parts(cs).forEach(function (pc) {
                 var pp = g.polys(pc);
-                spiralFill(pp, turnedBoxCentre(pp, dirA), sInf, solidJoin, 0).forEach(function (pth) {
+                spiralFill(pp, turnedBoxCentre(pp, dirA), sInf, solidJoin, 0, pattern === 'octagramspiral').forEach(function (pth) {
                   L.paths.push({ feature: feat, width: wInf, closed: false, pts: pth.pts });
                 });
               });
@@ -2056,13 +2293,21 @@
           solidFill(topOnly, 'Top surface', o.topPattern || o.solidPattern);
           solidFill(internal, 'Internal solid infill', o.solidPattern);
 
-          if (!g.isEmpty(sparse) && oS.sparseDensity > 0 && o.sparsePattern === 'archimedeanchords') {
-            /* the sparse spiral: about the middle of the object's own box on every layer, so each layer's turns lie on the last one's */
-            if (!P.boxCentre) {
-              var bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
-              S.forEach(function (sec) { if (g.isEmpty(sec)) return; var bb = sec.bounds(); bx0 = Math.min(bx0, bb.min[0]); by0 = Math.min(by0, bb.min[1]); bx1 = Math.max(bx1, bb.max[0]); by1 = Math.max(by1, bb.max[1]); });
-              P.boxCentre = [(bx0 + bx1) / 2, (by0 + by1) / 2];
-            }
+          /* a spiral and a 3D honeycomb are laid about the middle of the object's own box on every layer, so each layer's lines lie on the last one's */
+          if (!P.boxCentre && !g.isEmpty(sparse) && (o.sparsePattern === 'archimedeanchords' || o.sparsePattern === '3dhoneycomb' || o.sparsePattern === 'gyroid')) {
+            var bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+            S.forEach(function (sec) { if (g.isEmpty(sec)) return; var bb = sec.bounds(); bx0 = Math.min(bx0, bb.min[0]); by0 = Math.min(by0, bb.min[1]); bx1 = Math.max(bx1, bb.max[0]); by1 = Math.max(by1, bb.max[1]); });
+            P.boxCentre = [(bx0 + bx1) / 2, (by0 + by1) / 2];
+          }
+          if (!g.isEmpty(sparse) && oS.sparseDensity > 0 && o.sparsePattern === 'gyroid') {
+            gyroidFill(g.polys(sparse), P.boxCentre, GYROID_SCALE * sInf / Math.min(1, oS.sparseDensity), PL[i].printZ, o.sparseAnchorMaxMm).forEach(function (pth) {
+              L.paths.push({ feature: 'Sparse infill', width: wInf, closed: false, pts: pth.pts });
+            });
+          } else if (!g.isEmpty(sparse) && oS.sparseDensity > 0 && o.sparsePattern === '3dhoneycomb') {
+            honeycomb3dFill(g.polys(sparse), P.boxCentre, dirA, honeycomb3dAt(sInf, Math.min(1, oS.sparseDensity), o.layerMm, PL[i].printZ), o.sparseAnchorMaxMm).forEach(function (pth) {
+              L.paths.push({ feature: 'Sparse infill', width: wInf, closed: false, pts: pth.pts });
+            });
+          } else if (!g.isEmpty(sparse) && oS.sparseDensity > 0 && o.sparsePattern === 'archimedeanchords') {
             spiralFill(g.polys(sparse), P.boxCentre, sInf / Math.min(1, oS.sparseDensity), o.sparseAnchorMaxMm, 4 * sInf).forEach(function (pth) {
               L.paths.push({ feature: 'Sparse infill', width: wInf, closed: false, pts: pth.pts });
             });
@@ -4136,6 +4381,12 @@
     medialPaths: medialPaths,
     concentricFill: concentricFill,
     spiralFill: spiralFill,
+    hilbertFill: hilbertFill,
+    honeycomb3dFill: honeycomb3dFill,
+    honeycomb3dAt: honeycomb3dAt,
+    gyroidFill: gyroidFill,
+    GYROID_SCALE: GYROID_SCALE,
+    hilbertPoint: hilbertPoint,
     clipLine: clipLine,
     patternLabel: patternLabel,
     toGcode: toGcode,

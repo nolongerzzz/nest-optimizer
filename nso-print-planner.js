@@ -223,7 +223,8 @@
    * @returns {{nozzleMm, over}}  defaultsFor(nozzleMm, over)
    */
   /* the project's pattern names the engine draws as themselves; every other one is its lines (zigzag) */
-  var ENGINE_PATTERNS = { grid: 'grid', concentric: 'concentric', archimedeanchords: 'archimedeanchords' };
+  var ENGINE_PATTERNS = { grid: 'grid', concentric: 'concentric', archimedeanchords: 'archimedeanchords', '3dhoneycomb': '3dhoneycomb', gyroid: 'gyroid' };
+  var ENGINE_SURFACES = { concentric: 'concentric', archimedeanchords: 'archimedeanchords', hilbertcurve: 'hilbertcurve', octagramspiral: 'octagramspiral' };
 
   function engineOptions(config) {
     var pct = function (key, def) { var v = num(config, key, def * 100); return v / 100; };
@@ -261,7 +262,7 @@
       bridgeAngleDeg: num(config, 'bridge_angle', 0)
     };
     /* a surface or the solid infill the project draws in rings (the other patterns are the engine's lines) */
-    var own = function (key) { var v = raw(config, key); return v !== 'grid' && ENGINE_PATTERNS[v] ? ENGINE_PATTERNS[v] : null; };
+    var own = function (key) { return ENGINE_SURFACES[raw(config, key)] || null; };
     if (own('internal_solid_infill_pattern')) over.solidPattern = own('internal_solid_infill_pattern');
     if (own('top_surface_pattern')) over.topPattern = own('top_surface_pattern');
     if (own('bottom_surface_pattern')) over.bottomPattern = own('bottom_surface_pattern');

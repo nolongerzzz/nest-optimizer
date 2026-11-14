@@ -96,7 +96,7 @@ var NSO_GSCOPE_SLICE = (function () {
   // default (nso_slicer.js defaultsFor). Walls 2, 15 % grid and support below
   // 30 degrees are the same Bambu profile's, whatever the nozzle.
   var PRINTER_SLICE = { a1mini: { nozzle: 0.4, layer: 0.2 }, p1s: { nozzle: 0.4, layer: 0.2 } };
-  var SLICE_REST = { walls: 2, density: 15, pattern: 'grid', angle: 30, brim: 'auto' };
+  var SLICE_REST = { walls: 2, density: 15, pattern: 'grid', surface: 'zigzag', angle: 30, brim: 'auto' };
 
   /* THE INTERFACE RULE (nso_slicer.js supportInterfaceRule; docs/SUPPORT-GATE.md): a preference, not a profile setting - kept in this
      browser, never reset by seedSettings, and read by the left bar's Slice card as well as by Slice (one choice: its interface row sets it
@@ -141,6 +141,7 @@ var NSO_GSCOPE_SLICE = (function () {
     set('ms-slice-walls', SLICE_REST.walls);
     set('ms-slice-density', SLICE_REST.density);
     set('ms-slice-pattern', SLICE_REST.pattern);
+    set('ms-slice-surface', SLICE_REST.surface);
     set('ms-slice-angle', SLICE_REST.angle);
     set('ms-slice-brim', SLICE_REST.brim);
     showIfaceRule();
@@ -166,7 +167,8 @@ var NSO_GSCOPE_SLICE = (function () {
     };
     var pat = $('ms-slice-pattern');
     if (pat && pat.value) over.sparsePattern = pat.value;
-    if (over.sparsePattern === 'concentric' || over.sparsePattern === 'archimedeanchords') over.solidPattern = over.sparsePattern;   /* rings throughout: the surfaces and the solid infill too */
+    var surf = $('ms-slice-surface');
+    if (surf && surf.value && surf.value !== 'zigzag') over.solidPattern = surf.value;   /* the surfaces and the solid infill: Bambu's three rows as one */   /* rings throughout: the surfaces and the solid infill too */
     var brim = $('ms-slice-brim');
     over.brimType = brim && brim.value ? brim.value : SLICE_REST.brim;
     var rule = ifaceRule();
@@ -507,7 +509,7 @@ var NSO_GSCOPE_SLICE = (function () {
     var lines = [];
     var o = r.options;
     lines.push((r.fileLayers || r.planes.length) + ' layers at ' + o.layerMm + ' mm, walls ' + o.outerWallWidthMm + ' mm x ' + o.wallLoops +
-      ', ' + Math.round(o.sparseDensity * 100) + ' % ' + ({ zigzag: 'rectilinear', archimedeanchords: 'archimedean chords' }[o.sparsePattern] || o.sparsePattern) + ', support below ' + o.supportThresholdDeg + '° (' + r.ms + ' ms).');
+      ', ' + Math.round(o.sparseDensity * 100) + ' % ' + ({ zigzag: 'rectilinear', archimedeanchords: 'archimedean chords', '3dhoneycomb': '3D honeycomb' }[o.sparsePattern] || o.sparsePattern) + ', support below ' + o.supportThresholdDeg + '° (' + r.ms + ' ms).');
     r.objects.forEach(function (ob) {
       if (ob.role === 'raft') { lines.push('Raft: ' + r.raft.layers + ' layer' + (r.raft.layers === 1 ? '' : 's') + ' (' + r.raft.base + ' base, ' + r.raft.interface + ' interface), top at ' + r.raft.topMm.toFixed(2) + ' mm; the plate stands on it at ' + r.raft.liftMm.toFixed(2) + ' mm.'); return; }
       var wc = Object.keys(ob.wallCountHistogram).map(function (k) { return k + '×' + ob.wallCountHistogram[k]; }).join(' ');

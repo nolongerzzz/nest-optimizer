@@ -1537,9 +1537,19 @@
                       <option value="grid" selected>grid</option>
                       <option value="zigzag" title="Bambu Studio's Rectilinear (zig-zag in its profile): lines at 45 and 135 degrees, turning with every layer, joined at their ends">rectilinear</option>
                       <option value="lines">lines</option>
-                      <option value="concentric" title="Rings that follow the outline, on the surfaces and the solid infill too">concentric</option>
-                      <option value="archimedeanchords" title="Archimedean chords: one spiral from the middle outward, on the surfaces and the solid infill too">archimedean chords</option>
+                      <option value="concentric" title="Rings that follow the walls, a spacing over the density apart">concentric</option>
+                      <option value="archimedeanchords" title="Archimedean chords: one spiral from the middle of the part outward, the same on every layer">archimedean chords</option>
+                      <option value="3dhoneycomb" title="3D honeycomb: wavy lines whose waves and direction change with height, so the cells close over each other">3D honeycomb</option>
+                      <option value="gyroid" title="Gyroid: each layer the cut through one smooth surface, wavy lines that turn from X to Y with height">gyroid</option>
                     </select>
+                    <label for="slice-set-surface">surfaces
+                      <select id="slice-set-surface" title="The pattern of the top and bottom surfaces and the solid infill" autocomplete="off">
+                        <option value="zigzag" selected title="Lines at 45 and 135 degrees, turning with every layer (Bambu's Rectilinear; its Monotonic is the same lines in another order)">rectilinear</option>
+                        <option value="concentric" title="Rings that follow the walls, from the middle outward">concentric</option>
+                        <option value="archimedeanchords" title="Archimedean chords: one spiral from the middle outward">archimedean chords</option>
+                        <option value="hilbertcurve" title="Hilbert curve: one square space-filling line, a spacing apart, at 45 degrees">hilbert curve</option>
+                        <option value="octagramspiral" title="Octagram spiral: eight-pointed stars, one inside the next, drawn as one line from the middle outward">octagram spiral</option>
+                      </select></label>
                     <label for="slice-set-angle">support below
                       <input type="number" id="slice-set-angle" value="30" min="1" max="89" step="1"
                              title="Printable angle off the plate. 30 is the Bambu profile's support_threshold_angle." autocomplete="off" />&deg;</label>
@@ -2730,13 +2740,24 @@
               <div class="ms-btn-row" data-flex="1">
                 <label class="ms-note" for="ms-slice-density" style="margin:0">infill
                   <input type="number" id="ms-slice-density" value="15" min="0" max="100" step="5" />%</label>
-                <select id="ms-slice-pattern" style="width:auto" title="Sparse infill pattern">
-                  <option value="grid" selected>grid</option>
-                  <option value="zigzag" title="Bambu Studio's Rectilinear (zig-zag in its profile): lines at 45 and 135 degrees, turning with every layer, joined at their ends">rectilinear</option>
-                  <option value="lines">lines</option>
-                  <option value="concentric" title="Rings that follow the outline, on the surfaces and the solid infill too">concentric</option>
-                  <option value="archimedeanchords" title="Archimedean chords: one spiral from the middle outward, on the surfaces and the solid infill too">archimedean chords</option>
-                </select>
+                <span id="ms-slice-patterns" style="display:flex;gap:4px;min-width:0" title="The infill's pattern, then the surfaces'">
+                  <select id="ms-slice-pattern" style="width:auto;min-width:0;flex:1 1 0" title="Infill: the sparse infill's pattern">
+                    <option value="grid" selected>grid</option>
+                    <option value="zigzag" title="Bambu Studio's Rectilinear (zig-zag in its profile): lines at 45 and 135 degrees, turning with every layer, joined at their ends">rectilinear</option>
+                    <option value="lines">lines</option>
+                    <option value="concentric" title="Rings that follow the walls, a spacing over the density apart">concentric</option>
+                    <option value="archimedeanchords" title="Archimedean chords: one spiral from the middle of the part outward, the same on every layer">archimedean chords</option>
+                    <option value="3dhoneycomb" title="3D honeycomb: wavy lines whose waves and direction change with height, so the cells close over each other">3D honeycomb</option>
+                    <option value="gyroid" title="Gyroid: each layer the cut through one smooth surface, wavy lines that turn from X to Y with height">gyroid</option>
+                  </select>
+                  <select id="ms-slice-surface" style="width:auto;min-width:0;flex:1 1 0" title="Surfaces: the pattern of the top and bottom surfaces and the solid infill">
+                    <option value="zigzag" selected title="Lines at 45 and 135 degrees, turning with every layer (Bambu's Rectilinear; its Monotonic is the same lines in another order)">rectilinear</option>
+                    <option value="concentric" title="Rings that follow the walls, from the middle outward">concentric</option>
+                    <option value="archimedeanchords" title="Archimedean chords: one spiral from the middle outward">archimedean chords</option>
+                    <option value="hilbertcurve" title="Hilbert curve: one square space-filling line, a spacing apart, at 45 degrees">hilbert curve</option>
+                    <option value="octagramspiral" title="Octagram spiral: eight-pointed stars, one inside the next, drawn as one line from the middle outward">octagram spiral</option>
+                  </select>
+                </span>
                 <label class="ms-note" for="ms-slice-angle" style="margin:0">support below
                   <input type="number" id="ms-slice-angle" value="30" min="1" max="89" step="1"
                          title="Printable angle off the plate. 30 is the real Bambu profile's support_threshold_angle; auto-aim uses 45" />&deg;</label>
@@ -3027,7 +3048,7 @@
   <script src="nso-gcode-lines.js?v=fe0b823c"></script>
   <script src="nso-gscope-diff.js?v=937f4953"></script>
   <script src="nso-gcode-solid.js?v=ac1a4f02"></script>
-  <script src="nso_slicer.js?v=a8190083"></script>
+  <script src="nso_slicer.js?v=dff88157"></script>
   <script src="nso_raster_lines.js?v=461ca449"></script>
   <!-- The support interface: the crosshatch's one-direction layers, and the
        sheet a support tree's tips carry under the part (flat caps on the
@@ -3227,16 +3248,16 @@
   <script src="nso_support_blockers.js?v=6962a81c"></script>
   <script src="app-support-blockers.js?v=73c8125d"></script>
   <script src="app-supports-card.js?v=36e0bb6e"></script>
-  <script src="app-gscope-slice.js?v=78309450"></script>
+  <script src="app-gscope-slice.js?v=6d899588"></script>
   <!-- The Slice card (left bar): the plate sliced for its printer, the .gcode.3mf
        it makes. The print planner and the packager are loaded here for it and for
        its slice worker (which importScripts them from these tags); no G-scope file
        uses them. After nso_slicer.js, nso-cooling-profiles.js, nso-3mf.js and
        nso-3mf-read.js, which they read at load, and after app-microscope.js, whose
        plate reader and G-code import it calls. See docs/PRINT-PLANNER.md. -->
-  <script src="nso-print-planner.js?v=d1af4f33"></script>
+  <script src="nso-print-planner.js?v=4104a8a5"></script>
   <script src="nso-gcode3mf-write.js?v=cdfa15b4"></script>
-  <script src="app-print.js?v=1bafaa3d"></script>
+  <script src="app-print.js?v=eec6b94f"></script>
   <!-- Lift: details off a face, the face left as it was round them. After
        nso_lift.js (Phase 1: a flat face), nso_lift_curved.js (Lift 3: the
        repair under a detail lifted off a curved base), nso_lift_auto.js

@@ -195,7 +195,7 @@ async function main() {
   {
     const base = PRINT.settingsFromConfig(tpl);
     check('the settings start at the A1 mini template\'s values: 0.4 nozzle, 0.2 mm layers, 2 walls, 15 % grid, support below 30°, auto brim, no raft (0.1 contact)',
-      JSON.stringify(base) === JSON.stringify({ nozzle: 0.4, layer: 0.2, walls: 2, density: 15, pattern: 'grid', angle: 30, brim: 'auto', raft: 0, raftGap: 0.1, ifaceAngle: 'studio36', interfaceRule: null,
+      JSON.stringify(base) === JSON.stringify({ nozzle: 0.4, layer: 0.2, walls: 2, density: 15, pattern: 'grid', surface: 'zigzag', angle: 30, brim: 'auto', raft: 0, raftGap: 0.1, ifaceAngle: 'studio36', interfaceRule: null,
         filament: 'profile', nozzleTemp: null, firstTemp: null, bedTemp: null, maxFlow: null, tempStep: 0, tempBand: 10 }), JSON.stringify(base));
     const rov = PRINT.configOverlay(tpl, Object.assign({}, base, { raft: 10 }));
     check('a raft of 10 on the card is the file\'s raft_layers = 10, and nothing else changes', JSON.stringify(rov) === JSON.stringify({ raft_layers: '10' }), JSON.stringify(rov));
@@ -204,20 +204,27 @@ async function main() {
     let threw = '';
     try { PRINT.configOverlay(tpl, Object.assign({}, base, { nozzle: 0.6 })); } catch (e) { threw = e.message; }
     check('a nozzle the profile is not is refused, not sliced with the 0.4 blocks', /0\.6 mm nozzle needs its own profile/.test(threw), threw);
-    const cl = PRINT.cleanSettings({ layer: '9', walls: '0', density: '150', pattern: 'gyroid', angle: '0', brim: 'x', interfaceRule: 'column' });
+    const cl = PRINT.cleanSettings({ layer: '9', walls: '0', density: '150', pattern: 'no-such-pattern', angle: '0', brim: 'x', interfaceRule: 'column' });
     check('each row is clamped to what it takes, and an unknown pattern / brim is the default', cl.layer === 0.3 && cl.walls === 1 && cl.density === 100 && cl.pattern === 'grid' && cl.angle === 1 && cl.brim === 'auto' && cl.interfaceRule === 'column', JSON.stringify(cl));
+    const SURF = ['internal_solid_infill_pattern', 'top_surface_pattern', 'bottom_surface_pattern'];
     const ringOver = PRINT.configOverlay(tpl, Object.assign({}, base, { pattern: 'concentric' }));
-    check('pattern concentric is the whole part\'s: the sparse infill, the solid infill and both surfaces in the project settings',
-      ['sparse_infill_pattern', 'internal_solid_infill_pattern', 'top_surface_pattern', 'bottom_surface_pattern'].every(k => ringOver[k] === 'concentric') && Object.keys(ringOver).length === 4, JSON.stringify(ringOver));
-    const spiralOver = PRINT.configOverlay(tpl, Object.assign({}, base, { pattern: 'archimedeanchords' }));
-    check('pattern archimedeanchords likewise: all four keys, by Bambu\'s own name for it',
-      ['sparse_infill_pattern', 'internal_solid_infill_pattern', 'top_surface_pattern', 'bottom_surface_pattern'].every(k => spiralOver[k] === 'archimedeanchords') && Object.keys(spiralOver).length === 4, JSON.stringify(spiralOver));
+    check('the infill row is the sparse infill\'s alone: concentric changes sparse_infill_pattern and nothing else', ringOver.sparse_infill_pattern === 'concentric' && Object.keys(ringOver).length === 1, JSON.stringify(ringOver));
+    const surfOver = PRINT.configOverlay(tpl, Object.assign({}, base, { surface: 'hilbertcurve' }));
+    check('the surfaces row is the top, the bottom and the solid infill as one: hilbertcurve in all three keys, the sparse infill untouched',
+      SURF.every(k => surfOver[k] === 'hilbertcurve') && Object.keys(surfOver).length === 3, JSON.stringify(surfOver));
+    const bothOver = PRINT.configOverlay(tpl, Object.assign({}, base, { pattern: '3dhoneycomb', surface: 'archimedeanchords' }));
+    check('the two rows together, by Bambu\'s own names: 3dhoneycomb inside, archimedeanchords on the surfaces',
+      bothOver.sparse_infill_pattern === '3dhoneycomb' && SURF.every(k => bothOver[k] === 'archimedeanchords') && Object.keys(bothOver).length === 4, JSON.stringify(bothOver));
     {
-      const eo = PL.engineOptions(PRINT.withOverlay ? PRINT.withOverlay(tpl, spiralOver) : Object.assign({}, tpl, spiralOver)).over;
-      check('...and the planner hands the engine the spiral for each of them', eo.sparsePattern === 'archimedeanchords' && eo.solidPattern === 'archimedeanchords' && eo.topPattern === 'archimedeanchords' && eo.bottomPattern === 'archimedeanchords',
+      const eo = PL.engineOptions(PRINT.withOverlay(tpl, bothOver)).over;
+      check('...and the planner hands the engine each of them', eo.sparsePattern === '3dhoneycomb' && eo.solidPattern === 'archimedeanchords' && eo.topPattern === 'archimedeanchords' && eo.bottomPattern === 'archimedeanchords',
         [eo.sparsePattern, eo.solidPattern, eo.topPattern, eo.bottomPattern].join(' '));
       const plainO = PL.engineOptions(tpl).over;
       check('...while the template\'s own patterns stay the engine\'s lines (no surface pattern handed over)', plainO.solidPattern === undefined && plainO.topPattern === undefined && plainO.bottomPattern === undefined, [plainO.sparsePattern, plainO.solidPattern, plainO.topPattern].join(' '));
+      const back = PRINT.settingsFromConfig ? PRINT.settingsFromConfig(PRINT.withOverlay(tpl, bothOver)) : null;
+      check('...and a template that names them shows them on the card\'s rows', !back || (back.pattern === '3dhoneycomb' && back.surface === 'archimedeanchords'), back && back.pattern + ' / ' + back.surface);
+      const cl2 = PRINT.cleanSettings({ pattern: 'rectilinear', surface: 'gyroid' });
+      check('...rectilinear is taken for zigzag, an unknown surface is the default', cl2.pattern === 'zigzag' && cl2.surface === 'zigzag', cl2.pattern + ' / ' + cl2.surface);
     }
 
     const two = objs.slice(0, 2);
@@ -231,8 +238,8 @@ async function main() {
       const SLr = require(path.join(ROOT, 'nso_slicer.js')), runR = SLr.run;
       SLr.run = function (ob, o) { ringOpts = o; return runR.apply(this, arguments); };
       let rings;
-      try { rings = await PRINT.build(two, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { pattern: 'concentric' }) }); } finally { SLr.run = runR; }
-      check('concentric slices to a file, the slicer told rings for the sparse infill, the solid infill and both surfaces', rings.ok && ringOpts &&
+      try { rings = await PRINT.build(two, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { pattern: 'concentric', surface: 'concentric' }) }); } finally { SLr.run = runR; }
+      check('concentric on both rows slices to a file, the slicer told rings for the sparse infill, the solid infill and both surfaces', rings.ok && ringOpts &&
         ringOpts.sparsePattern === 'concentric' && ringOpts.solidPattern === 'concentric' && ringOpts.topPattern === 'concentric' && ringOpts.bottomPattern === 'concentric', rings.reason);
       if (rings.ok) {
         const rg = L.text(await L.R.openZip(rings.bytes).read('Metadata/plate_1.gcode'));
@@ -240,6 +247,15 @@ async function main() {
           .every(k => (new RegExp('^; ' + k + ' = (.*)$', 'm').exec(rg) || [])[1] === 'concentric'));
         check('...and the print is the same plastic as the lines\' within 5 % (' + plain.stats.grams + ' -> ' + rings.stats.grams + ' g)',
           Math.abs(rings.stats.grams / plain.stats.grams - 1) < 0.05);
+      }
+    }
+
+    {
+      /* every other pattern through the whole build: the planner takes its lines as it takes any */
+      for (const [pat, surf] of [['3dhoneycomb', 'hilbertcurve'], ['archimedeanchords', 'archimedeanchords'], ['gyroid', 'octagramspiral']]) {
+        const r = await PRINT.build(two, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { pattern: pat, surface: surf }) });
+        check(pat + ' inside, ' + surf + ' surfaces: slices to a file, the plastic within 12 % of the lines\' (' + (r.ok ? r.stats.grams.toFixed(2) : '-') + ' g against ' + plain.stats.grams.toFixed(2) + ')',
+          r.ok && Math.abs(r.stats.grams / plain.stats.grams - 1) < 0.12, r.reason);
       }
     }
 

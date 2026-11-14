@@ -646,6 +646,126 @@ function frustum(n, r0, r1, z0, z1) {
     check('the lists\' name for it', SL.patternLabel('archimedeanchords') === 'archimedean chords');
   }
 
+  section('Hilbert curve and 3D honeycomb - against a real Bambu slice (fixtures/slicer-hilbert-honeycomb-reference.json, docs/SLICER.md "Hilbert curve", "3D honeycomb")');
+  {
+    const fsx = require('fs');
+    const OUT = JSON.parse(fsx.readFileSync(path.join(ROOT, 'fixtures', 'slicer-concentric-reference.json'), 'utf8')).shapes;
+    const REF = JSON.parse(fsx.readFileSync(path.join(ROOT, 'fixtures', 'slicer-hilbert-honeycomb-reference.json'), 'utf8')).layers;
+    const dseg = (p, a, b) => { const dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy, t = l2 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2)) : 0; return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy); };
+    /* how far a point is from the nearest of the paths' lines */
+    const off = (q, paths) => { let d = Infinity; paths.forEach(p => { for (let i = 1; i < p.pts.length; i++) { const e = dseg(q, p.pts[i - 1], p.pts[i]); if (e < d) d = e; } }); return d; };
+    const plen = p => { let l = 0; for (let i = 1; i < p.pts.length; i++) l += Math.hypot(p.pts[i][0] - p.pts[i - 1][0], p.pts[i][1] - p.pts[i - 1][1]); return l; };
+    const opt = (over) => SL.defaultsFor(0.4, Object.assign({ layerMm: 0.2, outerWallWidthMm: 0.42, innerWallWidthMm: 0.45, infillWidthMm: 0.42, topShellLayers: 5, bottomShellLayers: 3, minSparseAreaMm2: 0,
+      solidPattern: 'hilbertcurve', sparsePattern: '3dhoneycomb' }, over));
+    const objs = OUT.map(sh => ({ name: sh.name, soup: prism(sh.outline, 0, 6) }));
+    const fills = (ob, li, kind) => ob.layers[li].paths.filter(p => kind === 'sparse' ? p.feature === 'Sparse infill' : !/wall|Sparse/i.test(p.feature));
+    const solid = SL.sliceObjects(objs, opt({}), wasm);
+    let hw = 0, hn = 0, hon = 0, hl = 0, kinds = 0, hs = 0;
+    REF.filter(r => r.what === 'solid').forEach(r => {
+      const k = OUT.findIndex(sh => sh.name === r.shape), mine = fills(solid.objects[k], r.layer - 1, 'solid');
+      r.points.forEach(q => { const d = off(q, mine); hn++; if (d < 0.03) { hw = Math.max(hw, d); hon++; } });
+      hl = Math.max(hl, Math.abs(mine.reduce((a, p) => a + plen(p), 0) / r.length - 1));
+      if (mine.every(p => p.feature === r.feature && !p.closed)) kinds++;
+      hs++;
+    });
+    /* two of the 420 lie on a join Bambu makes between two cut ends, not on the curve */
+    check('Hilbert curve, seven shapes, a solid layer: the points pinned on Bambu\'s line lie on this one (within 0.03 mm; all but 2 of 420)', hn - hon <= 2, hon + ' of ' + hn + ', worst of them ' + hw.toFixed(4));
+    check('...the length laid within 5 % of Bambu\'s (the curve is the same; more cut ends are joined along the walls here)', hl < 0.05, (hl * 100).toFixed(1) + ' %');
+    check('...Internal solid infill, in open lines', kinds === hs, kinds + '/' + hs);
+    const sq = fills(solid.objects[OUT.findIndex(sh => sh.name === 'square')], 1, 'solid'), sB = SL.spacingOf(0.42, 0.2);
+    let strokes = 0, onGrid = 0;
+    sq.forEach(p => { for (let i = 1; i < p.pts.length; i++) { const dx = p.pts[i][0] - p.pts[i - 1][0], dy = p.pts[i][1] - p.pts[i - 1][1], l = Math.hypot(dx, dy); if (l < 0.3) continue; strokes++;
+      if (Math.abs(Math.abs(dx) - Math.abs(dy)) < 1e-6 && Math.abs(l / sB - Math.round(l / sB)) < 1e-6) onGrid++; } });
+    check('its strokes lie at 45 and 135 degrees, whole bead spacings long (the grid is one spacing, turned 45)', strokes > 500 && onGrid / strokes > 0.93, onGrid + ' of ' + strokes);
+    check('hilbertPoint: the plain curve - 16 points of the 4 x 4 one, from (0, 0) to (3, 0), each a step from the last',
+      [...Array(16).keys()].map(d => SL.hilbertPoint(4, d).join('')).join(' ') === '00 10 11 01 02 03 13 12 22 23 33 32 31 21 20 30');
+    const near = (A, B) => A.length === B.length && A.every((p, k) => p.pts.length === B[k].pts.length && p.pts.every((q, m) => Math.hypot(q[0] - B[k].pts[m][0], q[1] - B[k].pts[m][1]) < 1e-6));
+    check('the same on the next layer: the curve is not turned with the layer', near(fills(solid.objects[0], 1, 'solid'), fills(solid.objects[0], 2, 'solid')));
+
+    /* 3D honeycomb, at the reference's own sparse width (0.45): 25 layers of it */
+    const sparse = SL.sliceObjects(objs, opt({ infillWidthMm: 0.45 }), wasm);
+    let cw = 0, cn = 0, cl = 0;
+    REF.filter(r => r.what === 'sparse').forEach(r => {
+      const k = OUT.findIndex(sh => sh.name === r.shape), mine = fills(sparse.objects[k], r.layer - 1, 'sparse');
+      r.points.forEach(q => { cw = Math.max(cw, off(q, mine)); cn++; });
+      cl = Math.max(cl, Math.abs(mine.reduce((a, p) => a + plen(p), 0) / r.length - 1));
+    });
+    check('3D honeycomb, three shapes on layers 5, 8, 10, 13, 15, 18, 20, 23 (both directions, both sides of straight): every point pinned on Bambu\'s lines lies on these (within 0.04 mm)',
+          cw < 0.04, cn + ' points, worst ' + cw.toFixed(4));
+    check('...the length laid within 12 % of Bambu\'s (the lines are the same; the joins along the walls differ)', cl < 0.12, (cl * 100).toFixed(1) + ' %');
+    const at = (L) => SL.honeycomb3dAt(SL.spacingOf(0.45, 0.2), 0.15, 0.2, L * 0.2);
+    check('its numbers at 15 %, 0.45 / 0.2: lines 3.580 apart (measured 3.579), the wave 20 layers long', Math.abs(at(5).D - 3.5802) < 1e-3 && at(5).quarter === 5, f4(at(5).D) + ', quarter ' + at(5).quarter);
+    check('...layer 5 the widest wave (D / 4 to each side), 10 straight, 15 the widest the other way and along the other axis, 20 straight, 25 as 5',
+          Math.abs(at(5).a - at(5).D / 4) < 1e-9 && at(5).family === 0 && Math.abs(at(10).a) < 1e-9 && at(14).family === 0 && Math.abs(at(15).a + at(5).D / 4) < 1e-9 && at(15).family === 1 &&
+          Math.abs(at(20).a) < 1e-9 && at(24).family === 1 && Math.abs(at(25).a - at(5).a) < 1e-9 && at(25).family === 0,
+          [5, 10, 15, 20, 25].map(L => f4(at(L).a) + '/' + at(L).family).join(' '));
+    check('...a flat moves a twentieth of D a layer (0.179): under a layer height, so every layer lies on the last', Math.abs(Math.abs(at(6).a - at(5).a) - at(5).D / 20) < 1e-9 && at(5).D / 20 < 0.2);
+    const sqs = fills(sparse.objects[OUT.findIndex(sh => sh.name === 'square')], 9, 'sparse');
+    let straight = 0, all = 0;
+    sqs.forEach(p => { for (let i = 1; i < p.pts.length; i++) { const dx = p.pts[i][0] - p.pts[i - 1][0], dy = p.pts[i][1] - p.pts[i - 1][1], l = Math.hypot(dx, dy); all += l; if (Math.abs(dx - dy) < 1e-6) straight += l; } });
+    check('layer 10 is straight lines at 45 degrees (but for the joins along the walls)', straight / all > 0.7, (straight / all).toFixed(2));
+    check('...and every line inside the walls, on every layer', sparse.objects.every((ob, k) => [4, 9, 14, 19].every(li => fills(ob, li, 'sparse').every(p => p.pts.every(q => SL.inside([OUT[k].outline], q[0], q[1]))))));
+    check('the solid layers under it stay as they were asked (Hilbert), the sparse ones the honeycomb', fills(sparse.objects[0], 1, 'solid').length > 0 && fills(sparse.objects[0], 9, 'sparse').length > 0 && fills(sparse.objects[0], 9, 'solid').length === 0);
+    check('the lists\' names for them', SL.patternLabel('hilbertcurve') === 'hilbert curve' && SL.patternLabel('3dhoneycomb') === '3D honeycomb');
+  }
+
+  section('Octagram spiral and gyroid - against a real Bambu slice (fixtures/slicer-octagram-gyroid-reference.json, docs/SLICER.md "Octagram spiral", "Gyroid")');
+  {
+    const fsx = require('fs');
+    const OUT = JSON.parse(fsx.readFileSync(path.join(ROOT, 'fixtures', 'slicer-concentric-reference.json'), 'utf8')).shapes;
+    const REF = JSON.parse(fsx.readFileSync(path.join(ROOT, 'fixtures', 'slicer-octagram-gyroid-reference.json'), 'utf8')).layers;
+    const dseg = (p, a, b) => { const dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy, t = l2 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2)) : 0; return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy); };
+    const off = (q, paths) => { let d = Infinity; paths.forEach(p => { for (let i = 1; i < p.pts.length; i++) { const e = dseg(q, p.pts[i - 1], p.pts[i]); if (e < d) d = e; } }); return d; };
+    const plen = p => { let l = 0; for (let i = 1; i < p.pts.length; i++) l += Math.hypot(p.pts[i][0] - p.pts[i - 1][0], p.pts[i][1] - p.pts[i - 1][1]); return l; };
+    const opt = (over) => SL.defaultsFor(0.4, Object.assign({ layerMm: 0.2, outerWallWidthMm: 0.42, innerWallWidthMm: 0.45, infillWidthMm: 0.42, topShellLayers: 5, bottomShellLayers: 3, minSparseAreaMm2: 0,
+      solidPattern: 'octagramspiral', sparsePattern: 'gyroid' }, over));
+    const objs = OUT.map(sh => ({ name: sh.name, soup: prism(sh.outline, 0, 6) }));
+    const fills = (ob, li, kind) => ob.layers[li].paths.filter(p => kind === 'sparse' ? p.feature === 'Sparse infill' : !/wall|Sparse/i.test(p.feature));
+    const solid = SL.sliceObjects(objs, opt({}), wasm);
+    let ow = 0, on = 0, ol = 0;
+    REF.filter(r => r.what === 'solid').forEach(r => {
+      const k = OUT.findIndex(sh => sh.name === r.shape), mine = fills(solid.objects[k], r.layer - 1, 'solid');
+      r.points.forEach(q => { ow = Math.max(ow, off(q, mine)); on++; });
+      ol = Math.max(ol, Math.abs(mine.reduce((a, p) => a + plen(p), 0) / r.length - 1));
+    });
+    check('octagram spiral, seven shapes, a solid layer: every point pinned on Bambu\'s line lies on this one (within 0.02 mm)', ow < 0.02, on + ' points, worst ' + ow.toFixed(4));
+    check('...the length laid within 0.5 % of Bambu\'s', ol < 0.005, (ol * 100).toFixed(2) + ' %');
+    const sq = fills(solid.objects[OUT.findIndex(sh => sh.name === 'square')], 1, 'solid')[0].pts, c0 = sq[0], sB = SL.spacingOf(0.42, 0.2);
+    const rel = sq.slice(0, 19).map(q => [((q[0] - c0[0]) / sB).toFixed(2), ((q[1] - c0[1]) / sB).toFixed(2)].join(',')).join(' ');
+    check('from the centre, in spacings: the stroke to (-1, 1), the first star - sides one spacing off the axes, points 1 + sqrt 2 out, notches sqrt 2 out - then out to the next',
+          rel === '0.00,0.00 -1.00,1.00 -2.41,1.00 -1.41,0.00 -2.41,-1.00 -1.00,-1.00 -1.00,-2.41 0.00,-1.41 1.00,-2.41 1.00,-1.00 2.41,-1.00 1.41,0.00 2.41,1.00 1.00,1.00 1.00,2.41 0.00,1.41 -2.00,3.41 -2.00,2.00 -4.83,2.00', rel);
+    const near = (A, B) => A.length === B.length && A.every((p, k) => p.pts.length === B[k].pts.length && p.pts.every((q, m) => Math.hypot(q[0] - B[k].pts[m][0], q[1] - B[k].pts[m][1]) < 1e-6));
+    check('the same on the next layer', near(fills(solid.objects[0], 1, 'solid'), fills(solid.objects[0], 2, 'solid')));
+
+    /* gyroid, at the reference's own sparse width (0.45) */
+    const sparse = SL.sliceObjects(objs, opt({ infillWidthMm: 0.45 }), wasm);
+    let gw = 0, gn = 0, gl = 0;
+    REF.filter(r => r.what === 'sparse').forEach(r => {
+      const k = OUT.findIndex(sh => sh.name === r.shape), mine = fills(sparse.objects[k], r.layer - 1, 'sparse');
+      r.points.forEach(q => { gw = Math.max(gw, off(q, mine)); gn++; });
+      gl = Math.max(gl, Math.abs(mine.reduce((a, p) => a + plen(p), 0) / r.length - 1));
+    });
+    check('gyroid, three shapes on layers 4, 7 ... 25 (lines along X, along Y and between): every point pinned on Bambu\'s lines lies on these (within 0.08 mm: Bambu writes them in arcs, this in short lines)', gw < 0.08, gn + ' points, worst ' + gw.toFixed(4));
+    check('...the length laid within 18 % of Bambu\'s (the lines are the same; the joins along the walls differ)', gl < 0.18, (gl * 100).toFixed(1) + ' %');
+    const lam = SL.GYROID_SCALE * SL.spacingOf(0.45, 0.2) / 0.15;
+    check('its wavelength at 15 %, 0.45 / 0.2: 6.988 (measured 6.988), the same along X, Y and Z', Math.abs(lam - 6.988) < 2e-3, f4(lam));
+    /* the lines lie on the surface itself: cos X sin Y + cos Y sin Z + cos Z sin X = 0 about the object's middle */
+    const ob = sparse.objects[OUT.findIndex(sh => sh.name === 'square')], sqo = OUT.find(sh => sh.name === 'square').outline;
+    const cx = (Math.min(...sqo.map(q => q[0])) + Math.max(...sqo.map(q => q[0]))) / 2, cy = (Math.min(...sqo.map(q => q[1])) + Math.max(...sqo.map(q => q[1]))) / 2, kk = 2 * Math.PI / lam;
+    let worstG = 0, np = 0;
+    [5, 9, 13, 17, 21].forEach(li => fills(ob, li, 'sparse').forEach(p => p.pts.forEach(q => {
+      if (Math.abs(q[0] - cx) > 9.5 || Math.abs(q[1] - cy) > 9.5) return;                     /* clear of the joins along the walls */
+      const X = kk * (q[0] - cx), Y = kk * (q[1] - cy), Z = kk * (li + 1) * 0.2;
+      worstG = Math.max(worstG, Math.abs(Math.cos(X) * Math.sin(Y) + Math.cos(Y) * Math.sin(Z) + Math.cos(Z) * Math.sin(X))); np++;
+    })));
+    check('every point of its lines lies on the gyroid about the object\'s middle (five layers)', np > 500 && worstG < 1e-6, np + ' points, worst ' + worstG.toExponential(1));
+    const dirOf = (li) => { let ax = 0, ay = 0; fills(ob, li, 'sparse').forEach(p => { for (let i = 1; i < p.pts.length; i++) { ax += Math.abs(p.pts[i][0] - p.pts[i - 1][0]); ay += Math.abs(p.pts[i][1] - p.pts[i - 1][1]); } }); return ax > ay ? 'X' : 'Y'; };
+    /* Z = pi/2 (layer 8.7) the lines run along X, Z = pi (17.5) along Y, towards 3 pi/2 (26.2) along X again */
+    check('the lines turn with height: along X at layer 9, along Y at 17, along X again at 25', dirOf(8) === 'X' && dirOf(16) === 'Y' && dirOf(24) === 'X', [8, 16, 24].map(dirOf).join(' '));
+    check('...and every line inside the walls', sparse.objects.every((o2, k) => [4, 9, 14, 19].every(li => fills(o2, li, 'sparse').every(p => p.pts.every(q => SL.inside([OUT[k].outline], q[0], q[1]))))));
+    check('the lists\' name for the star', SL.patternLabel('octagramspiral') === 'octagram spiral' && SL.patternLabel('gyroid') === 'gyroid');
+  }
+
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
 })().catch(err => { console.error(err); process.exit(1); });

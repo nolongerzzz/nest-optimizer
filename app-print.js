@@ -103,21 +103,24 @@
   // ---- the card's Slice settings ---------------------------------------------
   //
   // The rows G-scope's Slice side has, kept by the card itself: { nozzle, layer, walls,
-  // density (%), pattern ('grid' | 'zigzag' | 'lines' | 'concentric' | 'archimedeanchords'), angle (deg), brim ('auto' |
+  // density (%), pattern ('grid' | 'zigzag' | 'lines' | 'concentric' | 'archimedeanchords' | '3dhoneycomb' | 'gyroid'), surface ('zigzag' |
+  // 'concentric' | 'archimedeanchords' | 'hilbertcurve' | 'octagramspiral': the top, the bottom and the solid infill), angle (deg), brim ('auto' |
   // 'outer' | 'none'), interfaceRule ('column' | null) }. They start at the template's
   // values; a value the owner changed is written into a copy of the template's project
   // settings (configOverlay), so the engine, the planner, the G-code's CONFIG_BLOCK and
   // the file's project_settings.config all read the same number. The nozzle is the
   // profile's: another nozzle needs its own start / end blocks.
-  var SETTINGS_DEFAULT = { nozzle: 0.4, layer: 0.2, walls: 2, density: 15, pattern: 'grid', angle: 30, brim: 'auto', raft: 0, raftGap: 0.1, ifaceAngle: 'studio36', interfaceRule: null,
+  var SETTINGS_DEFAULT = { nozzle: 0.4, layer: 0.2, walls: 2, density: 15, pattern: 'grid', surface: 'zigzag', angle: 30, brim: 'auto', raft: 0, raftGap: 0.1, ifaceAngle: 'studio36', interfaceRule: null,
                            /* the filament: the profile's own; a null row is the filament's value (filamentBase); no temperature steps */
                            filament: 'profile', nozzleTemp: null, firstTemp: null, bedTemp: null, maxFlow: null, tempStep: 0, tempBand: 10 };   /* the card's own defaults (the owner's view): Studio 2.9's 3.6 - the owner's mouse1 on the P1S released clean with it */
   var IFACE_ANGLES = { profile: 1, bridge: 1, studio36: 1, crosshatch: 1 };   /* nso_slicer.js supportInterfaceAngle: NSO's own, no profile key - a testing ground for interfaces */
-  var PATTERN_TO_CONFIG = { grid: 'grid', zigzag: 'zig-zag', lines: 'line', concentric: 'concentric', archimedeanchords: 'archimedeanchords' };
-  var PATTERN_FROM_CONFIG = { grid: 'grid', 'zig-zag': 'zigzag', zigzag: 'zigzag', line: 'lines', lines: 'lines', concentric: 'concentric', archimedeanchords: 'archimedeanchords', rectilinear: 'zigzag' };
-  /* concentric and Archimedean chords are the whole part's: the sparse infill, the solid infill and both surfaces, as the reference slices have them */
-  var WHOLE_PART = { concentric: 1, archimedeanchords: 1 };
-  var CONCENTRIC_KEYS = ['top_surface_pattern', 'bottom_surface_pattern', 'internal_solid_infill_pattern'];
+  var PATTERN_TO_CONFIG = { grid: 'grid', zigzag: 'zig-zag', lines: 'line', concentric: 'concentric', archimedeanchords: 'archimedeanchords', '3dhoneycomb': '3dhoneycomb', gyroid: 'gyroid' };
+  var PATTERN_FROM_CONFIG = { grid: 'grid', 'zig-zag': 'zigzag', zigzag: 'zigzag', line: 'lines', lines: 'lines', concentric: 'concentric', archimedeanchords: 'archimedeanchords', '3dhoneycomb': '3dhoneycomb', gyroid: 'gyroid', rectilinear: 'zigzag' };
+  /* the surfaces row: the top, the bottom and the solid infill as one choice (Bambu's three rows); zigzag is its Rectilinear and what any
+     other pattern of a template (monotonic...) is sliced as */
+  var SURFACE_TO_CONFIG = { zigzag: 'zig-zag', concentric: 'concentric', archimedeanchords: 'archimedeanchords', hilbertcurve: 'hilbertcurve', octagramspiral: 'octagramspiral' };
+  var SURFACE_KEYS = ['top_surface_pattern', 'bottom_surface_pattern', 'internal_solid_infill_pattern'];
+  var PATTERN_LABEL = { zigzag: 'rectilinear', archimedeanchords: 'archimedean chords', hilbertcurve: 'hilbert curve', octagramspiral: 'octagram spiral', '3dhoneycomb': '3D honeycomb' };
   var BRIM_TO_CONFIG = { auto: 'auto_brim', outer: 'outer_only', none: 'no_brim' };
 
   // ---- filaments ---------------------------------------------------------------
@@ -206,6 +209,7 @@
     return {
       nozzle: eng.nozzleMm, layer: o.layerMm, walls: o.wallLoops, density: Math.round(o.sparseDensity * 100),
       pattern: PATTERN_FROM_CONFIG[cfgRaw(config, 'sparse_infill_pattern')] || o.sparsePattern,
+      surface: o.solidPattern && SURFACE_TO_CONFIG[o.solidPattern] ? o.solidPattern : 'zigzag',
       angle: o.supportThresholdDeg, brim: o.brimType, raft: Math.round(o.raftLayers || 0), raftGap: o.raftContactMm != null ? o.raftContactMm : 0.1, ifaceAngle: 'studio36', interfaceRule: null,
       filament: 'profile', nozzleTemp: null, firstTemp: null, bedTemp: null, maxFlow: null, tempStep: 0, tempBand: 10
     };
@@ -224,6 +228,7 @@
       walls: Math.round(n(s.walls, D.walls, 1, 10)),
       density: Math.round(n(s.density, D.density, 0, 100)),
       pattern: s.pattern === 'rectilinear' ? 'zigzag' : PATTERN_TO_CONFIG[s.pattern] ? s.pattern : D.pattern,   /* rectilinear: Bambu's name for zigzag */
+      surface: s.surface === 'rectilinear' ? 'zigzag' : SURFACE_TO_CONFIG[s.surface] ? s.surface : D.surface,
       angle: Math.round(n(s.angle, D.angle, 1, 89)),
       brim: BRIM_TO_CONFIG[s.brim] ? s.brim : D.brim,
       raft: Math.round(n(s.raft, D.raft, 0, 30)),
@@ -251,8 +256,8 @@
     if (s.density !== base.density) out.sparse_infill_density = s.density + '%';
     if (s.pattern !== base.pattern) {
       out.sparse_infill_pattern = PATTERN_TO_CONFIG[s.pattern];
-      if (WHOLE_PART[s.pattern]) CONCENTRIC_KEYS.forEach(function (k) { out[k] = PATTERN_TO_CONFIG[s.pattern]; });
     }
+    if (s.surface !== base.surface) SURFACE_KEYS.forEach(function (k) { out[k] = SURFACE_TO_CONFIG[s.surface]; });
     if (s.angle !== base.angle) out.support_threshold_angle = String(s.angle);
     if (s.brim !== base.brim) out.brim_type = BRIM_TO_CONFIG[s.brim];
     if (s.raft !== base.raft) out.raft_layers = String(s.raft);
@@ -519,7 +524,7 @@
 
   /** The settings in a few words, for the readout: "0.12 mm layers, 3 walls, 20 % grid, support below 30°, brim auto". */
   function settingsWords(st) {
-    return st.layer + ' mm layers, ' + st.walls + ' wall' + (st.walls === 1 ? '' : 's') + ', ' + st.density + ' % ' + (st.pattern === 'zigzag' ? 'rectilinear' : st.pattern === 'archimedeanchords' ? 'archimedean chords' : st.pattern) +
+    return st.layer + ' mm layers, ' + st.walls + ' wall' + (st.walls === 1 ? '' : 's') + ', ' + st.density + ' % ' + (PATTERN_LABEL[st.pattern] || st.pattern) + (st.surface && st.surface !== 'zigzag' ? ', ' + (PATTERN_LABEL[st.surface] || st.surface) + ' surfaces' : '') +
       ', support below ' + st.angle + '°, ' + (st.raft > 0 ? 'raft ' + st.raft + ' layer' + (st.raft === 1 ? '' : 's') + ' (no brim)' : 'brim ' + st.brim);
   }
 
@@ -601,7 +606,7 @@
 
   // ---- the card's Slice settings -----------------------------------------------
 
-  var SET_IDS = ['slice-set-nozzle', 'slice-set-layer', 'slice-set-walls', 'slice-set-density', 'slice-set-pattern',
+  var SET_IDS = ['slice-set-nozzle', 'slice-set-layer', 'slice-set-walls', 'slice-set-density', 'slice-set-pattern', 'slice-set-surface',
                  'slice-set-angle', 'slice-set-brim', 'slice-set-raft', 'slice-set-raft-gap', 'slice-set-iface-angle', 'slice-set-iface',
                  'slice-set-filament', 'slice-set-nozzle-temp', 'slice-set-first-temp', 'slice-set-bed-temp', 'slice-set-max-flow',
                  'slice-set-temp-step', 'slice-set-temp-band'];
@@ -647,7 +652,7 @@
     var v = function (id) { var el = $(id); return el ? el.value : undefined; };
     return cleanSettings({
       nozzle: v('slice-set-nozzle'), layer: v('slice-set-layer'), walls: v('slice-set-walls'), density: v('slice-set-density'),
-      pattern: v('slice-set-pattern'), angle: v('slice-set-angle'), brim: v('slice-set-brim'),
+      pattern: v('slice-set-pattern'), surface: v('slice-set-surface'), angle: v('slice-set-angle'), brim: v('slice-set-brim'),
       raft: v('slice-set-raft'), raftGap: v('slice-set-raft-gap'), ifaceAngle: v('slice-set-iface-angle'),
       interfaceRule: $('slice-set-iface') ? v('slice-set-iface') : interfaceRule(),
       filament: v('slice-set-filament'), nozzleTemp: v('slice-set-nozzle-temp'), firstTemp: v('slice-set-first-temp'),
@@ -659,7 +664,7 @@
   function showSettings(st) {
     var set = function (id, val) { var el = $(id); if (el && val != null) el.value = String(val); };
     set('slice-set-nozzle', st.nozzle); set('slice-set-layer', st.layer); set('slice-set-walls', st.walls);
-    set('slice-set-density', st.density); set('slice-set-pattern', st.pattern); set('slice-set-angle', st.angle);
+    set('slice-set-density', st.density); set('slice-set-pattern', st.pattern); set('slice-set-surface', st.surface); set('slice-set-angle', st.angle);
     set('slice-set-brim', st.brim); set('slice-set-raft', st.raft); set('slice-set-raft-gap', st.raftGap); set('slice-set-iface-angle', st.ifaceAngle);
     set('slice-set-iface', interfaceRule() || '');
     /* the filament: a null row shows the filament's own value (empty until the template is fetched) */
