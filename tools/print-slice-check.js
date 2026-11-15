@@ -104,6 +104,15 @@ async function main() {
   check('...and after the count when there are several pieces; supports are not counted; the extension and bad characters go',
     PRINT.fileName([{ name: 'a.stl' }, { name: 'b' }, { name: 's', support: true }], pp) === '2 pieces - P1S.gcode.3mf' &&
       PRINT.fileName([{ name: 'my: "part".STL' }], pp) === 'my part - P1S.gcode.3mf', PRINT.fileName([{ name: 'my: "part".STL' }], pp));
+  check('...a piece out of a 3MF is named after the file, not the object inside it; pieces of one file share its name, of two files are counted',
+    PRINT.fileName([{ name: 'Ingenious+Leelo-Habbi.stl', file: 'String_test.3mf' }], pa) === 'String_test - A1 mini.gcode.3mf' &&
+      PRINT.fileName([{ name: 'a', file: 'kit.3mf' }, { name: 'b', file: 'kit.3mf' }, { name: 's', support: true }], pa) === 'kit - A1 mini.gcode.3mf' &&
+      PRINT.fileName([{ name: 'cone.stl' }, { name: 'cone.stl' }], pa) === 'cone - A1 mini.gcode.3mf' &&
+      PRINT.fileName([{ name: 'a', file: 'kit.3mf' }, { name: 'b.stl' }], pa) === '2 pieces - A1 mini.gcode.3mf' &&
+      PRINT.fileName([{ name: 'x', file: 'tower - A1 mini.gcode.3mf' }], pp) === 'tower - A1 mini - P1S.gcode.3mf');
+  check('...a name typed for Save as keeps its ending, or gets it back, and loses what a file name cannot hold',
+    PRINT.gcodeName('  cones  210 ') === 'cones 210.gcode.3mf' && PRINT.gcodeName('a/b:c.gcode.3mf') === 'abc.gcode.3mf' && PRINT.gcodeName('x.3mf') === 'x.gcode.3mf' &&
+      PRINT.gcodeName('') === '' && PRINT.gcodeName(null) === '' && PRINT.gcodeName('.gcode.3mf') === '');
   check('seconds read as a person reads them', PRINT.fmtTime(30) === '30 s' && PRINT.fmtTime(125) === '2 min' && PRINT.fmtTime(3725) === '1 h 02 min' && PRINT.fmtTime(7200) === '2 h 00 min');
 
   // ===========================================================================
@@ -699,7 +708,7 @@ async function main() {
       const c = m[0], has = id => c.includes('id="' + id + '"'), from = id => { const i = c.indexOf('id="' + id + '"'); return i < 0 ? '' : c.slice(i); };
       const sec = id => { const t = from(id), n = t.slice(1).search(/<details class="vp-sec print-sec"/); return n < 0 ? t : t.slice(0, n + 1); };
       return /<summary class="vp-bar-btn"[^>]*>Print<\/summary>/.test(c) &&
-        ['btn-sup-all', 'btn-sup-slice', 'btn-slice-export', 'btn-slice-cancel', 'slice-profile', 'slice-readout', 'slice-progress', 'print-printer', 'sup-on', 'print-sup-body', 'sup-style',
+        ['btn-sup-all', 'btn-sup-slice', 'btn-slice-export', 'btn-slice-saveas', 'btn-slice-cancel', 'slice-profile', 'slice-readout', 'slice-progress', 'print-printer', 'sup-on', 'print-sup-body', 'sup-style',
          'slice-set-nozzle', 'slice-set-layer', 'slice-set-walls', 'slice-set-density', 'slice-set-pattern', 'slice-set-brim', 'slice-set-raft', 'slice-set-raft-gap', 'slice-settings-reset',
          'slice-set-filament', 'slice-set-nozzle-temp', 'slice-set-first-temp', 'slice-set-bed-temp', 'slice-set-max-flow', 'slice-set-temp-step', 'slice-set-temp-band', 'slice-filament-note',
          'slice-set-bridge-speed', 'slice-set-bridge-flow', 'slice-set-bridge-temp', 'slice-bridge-note', 'slice-set-flow-ratio', 'slice-set-retract-len', 'slice-set-retract-speed', 'slice-set-retract-before', 'slice-set-zhop'].every(has) &&

@@ -97,3 +97,17 @@ Every inspection tool (regions, gap ruler, bands, features, measure, play) works
 - With Supports unticked the supports leave the plate (Undo brings them back); they are not hidden and kept.
 - The Assisted and Custom tools work on one piece's points (pick the piece to place them); Slice builds every piece on the plate, each with
   its own spots, tips and blockers.
+
+## The export's name, and Save as (2026-11-14)
+
+An export is named after the file its pieces were opened from, then the printer: `String_test - A1 mini.gcode.3mf`.
+A 3MF's objects carry whatever its designer called them (the owner's string test came out as
+"IngeniousLeelo-Habbi"), so a model keeps `sourceFile` (`app-core.js` `import3MF`), the Print card's pieces
+carry it as `file`, and `fileName` (`app-print.js`) uses it before the piece's own name. Pieces of one file
+share its name; of several files they are counted ("3 pieces").
+
+**Save as...** under Export saves the same file under a name its owner picks (`saveAs`, `gcodeName`). Chrome and
+Edge open the system's save dialog (`showSaveFilePicker`), so the folder is picked too; Safari and Firefox have
+no such dialog for a page, so the name is asked for and the file goes to Downloads under it. Checked in
+`print:slice` (the names) and by hand in the page (the buttons).
+

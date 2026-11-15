@@ -449,11 +449,16 @@
     });
   }
 
-  /** "Name - A1 mini.gcode.3mf": the one piece's name, else the piece count. */
+  /**
+   * "Name - A1 mini.gcode.3mf". The name is the file the pieces were opened from (a piece's `file`, else its own name - an STL's piece is
+   * named after its file already): a 3MF's objects carry whatever its designer called them (the owner's string test came out as
+   * "IngeniousLeelo-Habbi"), and the file's name is the one its owner knows. Pieces of more than one file: the piece count.
+   */
   function fileName(pieces, profile) {
     var parts = pieces.filter(function (p) { return !p.support; });
-    var base = parts.length === 1 ? parts[0].name : (parts.length || pieces.length) + ' pieces';
-    base = String(base).replace(/\.(stl|3mf)$/i, '').replace(/[\/\\?%*:|"<>]/g, '').replace(/\s+/g, ' ').trim() || 'plate';
+    var from = parts.map(function (p) { return String(p.file || p.name || ''); }).filter(function (n, i, a) { return a.indexOf(n) === i; });
+    var base = from.length === 1 && from[0] ? from[0] : (parts.length || pieces.length) + ' pieces';
+    base = String(base).replace(/(\.gcode)?\.(stl|3mf)$/i, '').replace(/[\/\\?%*:|"<>]/g, '').replace(/\s+/g, ' ').trim() || 'plate';
     return base + ' - ' + profile.short + '.gcode.3mf';
   }
 
@@ -692,7 +697,7 @@
 
   var api = {
     PROFILES: PROFILES, ENGINE: ENGINE, profileFor: profileFor, readTemplate: readTemplate, pieceObjects: pieceObjects,
-    fileName: fileName, build: build, fmtTime: fmtTime, describe: describe, buildForWorker: buildForWorker,
+    fileName: fileName, gcodeName: gcodeName, build: build, fmtTime: fmtTime, describe: describe, buildForWorker: buildForWorker,
     SETTINGS_DEFAULT: SETTINGS_DEFAULT, settingsFromConfig: settingsFromConfig, cleanSettings: cleanSettings,
     configOverlay: configOverlay, withOverlay: withOverlay,
     FILAMENTS: FILAMENTS, filamentBase: filamentBase, filamentKeys: filamentKeys, filamentWords: filamentWords, bandWords: bandWords, tuneWords: tuneWords, bridgeTempWords: bridgeTempWords, bridgeTempOf: bridgeTempOf
@@ -734,7 +739,7 @@
       var pm = placed && (state.models || []).find(function (x) { return x && x.id === placed.sourceId; });
       /* a support the supports card drew as it prints is sliced as the tree it was built as (nsoSupportSliceSoup) */
       var soup = sup && typeof root.nsoSupportSliceSoup === 'function' ? root.nsoSupportSliceSoup(m, o.positions) : o.positions;
-      return { name: o.name, soup: soup, sourceId: o.sourceId, support: !!sup, brim: !!(sup && sup.brim), hostSourceId: sup ? sup.hostSourceId : undefined, interfaceLayers: sup ? sup.interfaceLayers : undefined, sheetLayerMm: sup ? sup.sheetLayerMm : undefined,
+      return { name: o.name, file: m && m.sourceFile ? m.sourceFile : null, soup: soup, sourceId: o.sourceId, support: !!sup, brim: !!(sup && sup.brim), hostSourceId: sup ? sup.hostSourceId : undefined, interfaceLayers: sup ? sup.interfaceLayers : undefined, sheetLayerMm: sup ? sup.sheetLayerMm : undefined,
                nonSolid: !!(pm && typeof root.nsoNonSolid === 'function' && root.nsoNonSolid(pm)),
                settings: m && m.slicerSettings ? Object.assign({}, m.slicerSettings) : null };      // a support's own slicer overrides ride into a 3MF
     });
@@ -1022,7 +1027,7 @@
   /** Export and Preview exist only for a slice of the plate as it stands. */
   function syncActions() {
     var ok = !S.busy && isFresh();
-    ['btn-slice-export', 'btn-slice-preview'].forEach(function (id) { var b = $(id); if (b) b.disabled = !ok; });
+    ['btn-slice-export', 'btn-slice-saveas', 'btn-slice-preview'].forEach(function (id) { var b = $(id); if (b) b.disabled = !ok; });
   }
 
   /** The profile line, and a slice shown stale when the plate has moved on. */
@@ -1225,14 +1230,7 @@
   function exportFile() {
     var f = freshFile();
     if (!f) return;
-    var blob = new Blob([f.bytes], { type: 'application/octet-stream' });
-    if (typeof downloadBlob === 'function') downloadBlob(blob, f.name);
-    else {
-      var a = document.createElement('a');
-      a.href = URL.createObjectURL(blob); a.download = f.name;
-      document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
-    }
+    saveBytes(f.bytes, f.name);
     say('Downloaded ' + f.name);
   }
 
@@ -1272,6 +1270,34 @@
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
     }
+  }
+  /** A name a person typed, as a .gcode.3mf's: no path characters, and the ending put back if it was dropped. '' for nothing usable. */
+  function gcodeName(typed) {
+    var n = String(typed == null ? '' : typed).replace(/[\/\\?%*:|"<>]/g, '').replace(/\s+/g, ' ').trim().replace(/(\.gcode)?(\.3mf)?$/i, '');
+    return n ? n + '.gcode.3mf' : '';
+  }
+  /**
+   * Save as: the sliced file under a name (and, where the browser has a save dialog, in a folder) its owner picks. Chrome and Edge open the
+   * system's save dialog (showSaveFilePicker); Safari and Firefox have none for a page, so the name is asked for and the file goes to
+   * Downloads under it. Resolves the name saved, or '' when it was cancelled.
+   */
+  function saveAs(bytes, suggested) {
+    if (typeof root.showSaveFilePicker === 'function') {
+      return root.showSaveFilePicker({ suggestedName: suggested, types: [{ description: 'Bambu sliced file', accept: { 'application/octet-stream': ['.3mf'] } }] })
+        .then(function (h) { return h.createWritable().then(function (w) { return w.write(new Blob([bytes])).then(function () { return w.close(); }); }).then(function () { return h.name; }); })
+        .catch(function (err) { if (err && err.name === 'AbortError') return ''; throw err; });
+    }
+    var typed = typeof root.prompt === 'function' ? root.prompt('Save the sliced file as:', suggested) : suggested;
+    var name = gcodeName(typed);
+    if (!name) return Promise.resolve('');
+    saveBytes(bytes, name);
+    return Promise.resolve(name);
+  }
+  function exportFileAs() {
+    var f = freshFile();
+    if (!f) return;
+    saveAs(f.bytes, f.name).then(function (name) { if (name) say('Saved ' + name); })
+      .catch(function (err) { console.error('[save as]', err); say('Save as failed: ' + ((err && err.message) || err), true); });
   }
   /** The slice's objects (indices into rec.pieces) a list of G-code OBJECT_IDs stands for (null: the one unlabelled object of a one-piece plate). */
   function indicesFor(rec, ids) {
@@ -1384,6 +1410,7 @@
     bind('btn-slice-go', function () { slice(); });
     bind('btn-slice-cancel', cancel);
     bind('btn-slice-export', exportFile);
+    bind('btn-slice-saveas', exportFileAs);
     bind('btn-slice-preview', previewInGscope);
     bind('slice-settings-toggle', function () { var box = $('slice-settings'); setSettingsOpen(!!(box && box.hidden)); });
     bind('slice-settings-reset', function () { seedSettings(profileFor(plateId()), true); refresh(); });

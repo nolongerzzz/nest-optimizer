@@ -2119,7 +2119,8 @@ function import3MF(filename, arrayBuffer) {
         chain = chain.then(() => {
           const geometry = new THREE.BufferGeometry();
           geometry.setAttribute('position', new THREE.BufferAttribute(obj.positions, 3));
-          const o3 = Object.assign({ srcVertexIds: obj.vertexIds || null }, kept && kept.at ? { at: kept.at[i] } : {});
+          /* sourceFile: the file the piece came out of - a 3MF's objects carry their designer's names, and an export is named after the file */
+          const o3 = Object.assign({ srcVertexIds: obj.vertexIds || null, sourceFile: filename }, kept && kept.at ? { at: kept.at[i] } : {});
           return addModelFromZUpGeometryAsync(obj.name, geometry, o3)
             .then(id => { if (id) loaded++; });
         });
@@ -2165,6 +2166,7 @@ function addModel(name, geometry, opts) {
   state.models.push({
     id,
     name: name.replace(/\.stl$/i, ''),
+    sourceFile: options.sourceFile || null,            // the file it was opened from, when that is not its name (a 3MF's object)
     geometry,
     quantity: 1,
     size: { x: size2.x, y: size2.y, z: size2.z },

@@ -1347,7 +1347,9 @@
                 <button id="btn-sup-slice" class="btn btn-secondary" type="button"
                         title="Open the plate's slice in G-scope. If the plate or a setting changed since the last Slice, it slices first.">Preview</button>
                 <button id="btn-slice-export" class="btn btn-secondary" type="button" disabled
-                        title="Download the sliced plate as a Bambu .gcode.3mf: open it in Bambu Studio and print it without slicing it again.">Export</button>
+                        title="Download the sliced plate as a Bambu .gcode.3mf, named after the file its pieces were opened from: open it in Bambu Studio and print it without slicing it again.">Export</button>
+                <button id="btn-slice-saveas" class="btn btn-secondary" type="button" disabled style="grid-column: 1 / -1;"
+                        title="Save the sliced plate under a name you pick. Chrome and Edge open the save dialog, so the folder is yours to pick too; Safari and Firefox ask for the name and put the file in Downloads.">Save as&hellip;</button>
               </div>
               <div id="slice-progress" class="sup-progress is-indeterminate" role="progressbar" aria-label="Slicing" hidden><div class="sup-progress-fill"></div></div>
               <p id="slice-stage" class="bend-readout" hidden></p>
@@ -3091,7 +3093,7 @@
   <script src="nso-helpers.js?v=9c476e39"></script>
   <script src="nso-recent.js?v=f03d6f13"></script>
   <script src="nso-bounds.js?v=778acac4"></script>
-  <script src="app-core.js?v=c069c5d9"></script>
+  <script src="app-core.js?v=43ae5425"></script>
   <!-- Up to six plates (beds): the active one is state.models / state.placed, the rest are kept beside it. docs/BEDS.md. -->
   <script src="app-beds.js?v=5b4ec154"></script>
 
@@ -3285,7 +3287,7 @@
        plate reader and G-code import it calls. See docs/PRINT-PLANNER.md. -->
   <script src="nso-print-planner.js?v=265cf803"></script>
   <script src="nso-gcode3mf-write.js?v=cdfa15b4"></script>
-  <script src="app-print.js?v=aa88cb82"></script>
+  <script src="app-print.js?v=d3304d1b"></script>
   <!-- Lift: details off a face, the face left as it was round them. After
        nso_lift.js (Phase 1: a flat face), nso_lift_curved.js (Lift 3: the
        repair under a detail lifted off a curved base), nso_lift_auto.js
