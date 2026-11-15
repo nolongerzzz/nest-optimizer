@@ -84,15 +84,16 @@
   var BRIDGE_TEMP_JOIN = 2;            // warm layers between two cold stretches that are not worth coming up for
   var BRIDGE_TEMP_LIFT = 0.4;          // mm the nozzle is lifted to leave for the park (the timelapse hook's own)
   var BRIDGE_TEMP_PRIME = 1;           // mm of filament primed at the park once the temperature is reached, beyond the retraction
-  var BRIDGE_TEMP_SECONDS = 30;        // what one change is counted as in the print's time (not measured: the hotend's own)
+  var BRIDGE_TEMP_SECONDS = 15;        // what one change is counted as in the print's time: the owner timed the wait at 10-12 s (A1 mini, 235 <-> 215), plus the moves
   /* Where a printer waits for a nozzle temperature in the middle of a print, by its frozen id: its own moves, off its own G-code.
      A1 mini: the purge position at the left end of the gantry (the start block purges at X-13.5; the timelapse hook goes there every
-     layer by "G1 X0 Y{CY} F18000" then "G1 X-13.0 F3000"), and the wipe is the start block's "wipe and shake". {CY} is the plate's
+     layer by "G1 X0 Y{CY} F18000" then "G1 X-13.0 F3000"), and the wipe is the start block's "wipe and shake", all three passes of it
+     (two left a tail of TPU on the part: the owner's prints of 2026-11-14). {CY} is the plate's
      first-layer centre, as the hook has it. The P1S's chute is behind the bed and has its own moves: not written yet. */
   var PARK = {
     'a1mini-0.4': {
       go: ['G1 X0 Y{CY} F18000', 'G1 X-13.5 F3000'],
-      wipe: ['G1 X0 F18000 ;wipe and shake', 'G1 X-13.5 F3000', 'G1 X0 F12000 ;wipe and shake']
+      wipe: ['G1 X0 F30000 ;wipe and shake', 'G1 X-13.5 F3000', 'G1 X0 F30000 ;wipe and shake', 'G1 X-13.5 F3000', 'G1 X0 F12000 ;wipe and shake']
     }
   };
 

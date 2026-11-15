@@ -477,13 +477,13 @@ async function main() {
           bt.layers >= 1 && bt.changes >= 2 && bt.changes % 2 === 0 && bt.changes <= 2 * bt.layers && parks.length === bt.changes &&
             parks.every((i, n) => body[i] === (n % 2 === 0 ? '; NSO bridge temperature: 212 for the bridges' : '; NSO bridge temperature: 235 after the bridges')), JSON.stringify(bt));
         const blockOk = parks.every((i, n) => {
-          const b = body.slice(i + 1, i + 12), t = n % 2 === 0 ? 212 : 235;
+          const b = body.slice(i + 1, i + 14), t = n % 2 === 0 ? 212 : 235;
           return /^M204 S\d+$/.test(b[0]) ? /^G1 Z[\d.]+$/.test(b[1]) && b[2] === 'G1 X0 Y90 F18000' && b[3] === 'G1 X-13.5 F3000' && b[4] === 'M109 S' + t && b[5] === 'G1 E1.4 F79.8237' &&
-            b[6] === 'G1 E-.4 F1800' && b[7] === 'G1 X0 F18000 ;wipe and shake' && b[8] === 'G1 X-13.5 F3000' && b[9] === 'G1 X0 F12000 ;wipe and shake'
+            b[6] === 'G1 E-.4 F1800' && b[7] === 'G1 X0 F30000 ;wipe and shake' && b[8] === 'G1 X-13.5 F3000' && b[9] === 'G1 X0 F30000 ;wipe and shake' && b[10] === 'G1 X-13.5 F3000' && b[11] === 'G1 X0 F12000 ;wipe and shake'
             : /^G1 Z[\d.]+$/.test(b[0]) && b[1] === 'G1 X0 Y90 F18000' && b[2] === 'G1 X-13.5 F3000' && b[3] === 'M109 S' + t && b[4] === 'G1 E1.4 F79.8237' &&
-            b[5] === 'G1 E-.4 F1800' && b[6] === 'G1 X0 F18000 ;wipe and shake' && b[7] === 'G1 X-13.5 F3000' && b[8] === 'G1 X0 F12000 ;wipe and shake';
+            b[5] === 'G1 E-.4 F1800' && b[6] === 'G1 X0 F30000 ;wipe and shake' && b[7] === 'G1 X-13.5 F3000' && b[8] === 'G1 X0 F30000 ;wipe and shake' && b[9] === 'G1 X-13.5 F3000' && b[10] === 'G1 X0 F12000 ;wipe and shake';
         });
-        check('...each is the A1 mini\'s own park: lift, X0 Y90, X-13.5, M109, prime the retraction and 1 mm at the flush speed, retract, wipe and shake', blockOk, body.slice(parks[0], parks[0] + 12).join(' / '));
+        check('...each is the A1 mini\'s own park: lift, X0 Y90, X-13.5, M109, prime the retraction and 1 mm at the flush speed, retract, wipe and shake three times', blockOk, body.slice(parks[0], parks[0] + 14).join(' / '));
         // what is extruded between a park in and the park out is a bridge; the nozzle is retracted when it leaves and primed when it is back
         let feat = '', cold = false, coldOther = 0, coldBridge = 0, lifted = true, lastE = 0, leftRetracted = true;
         body.forEach((l, i) => {
@@ -497,8 +497,8 @@ async function main() {
         check('...the open-air bridges are laid at 212 (' + coldBridge + ' bridge moves in the cold stretches) and the nozzle is retracted whenever it leaves for the park', coldBridge > 20 && leftRetracted, JSON.stringify({ coldBridge, coldOther, leftRetracted, bridgesAll }));
         check('...the only M109 in the body are the parks\', and the file without a bridge temperature has none', body.filter(l => /^M109 /.test(l)).length === bt.changes &&
           !g0.slice(g0.indexOf('; MACHINE_START_GCODE_END'), g0.indexOf('; MACHINE_END_GCODE_START')).some(l => /^M109 |NSO bridge/.test(l)));
-        check('...the time counts 30 s a change, and the readout says so', Math.abs((on.stats.seconds - off.stats.seconds) - 30 * bt.changes) < 20 &&
-          PRINT.bridgeTempWords(bt) === 'bridges at 212 \u00b0C on ' + bt.layers + ' layers: ' + bt.changes + ' nozzle temperature changes at the park, about ' + PRINT.fmtTime(30 * bt.changes),
+        check('...the time counts 15 s a change, and the readout says so', Math.abs((on.stats.seconds - off.stats.seconds) - 15 * bt.changes) < 20 &&
+          PRINT.bridgeTempWords(bt) === 'bridges at 212 \u00b0C on ' + bt.layers + ' layers: ' + bt.changes + ' nozzle temperature changes at the park, about ' + PRINT.fmtTime(15 * bt.changes),
           PRINT.bridgeTempWords(bt) + ' / +' + Math.round(on.stats.seconds - off.stats.seconds) + ' s');
       }
       // a plate of labelled objects: the park is no object's

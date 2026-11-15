@@ -157,7 +157,9 @@ A hotend takes tens of seconds to move 25 C, so the change is made off the part
     M109 S212                         wait there
     G1 E1.4 F79.8237                  the retraction back and 1 mm more, at the flush speed
     G1 E-.4 F1800                     retract
-    G1 X0 F18000 ;wipe and shake      the start block's own wipe
+    G1 X0 F30000 ;wipe and shake      the start block's own wipe, all three passes
+    G1 X-13.5 F3000                   (two left a tail of TPU on the part)
+    G1 X0 F30000 ;wipe and shake
     G1 X-13.5 F3000
     G1 X0 F12000 ;wipe and shake
 
@@ -177,7 +179,7 @@ then the travel to the layer's first path, the nozzle down, and the filament for
 - With temperature steps, "after the bridges" is the band's temperature.
 - Refused, in words: a bridge temperature outside the filament's range; any printer but the A1 mini
   (`PARK` holds each printer's own moves, and the P1S's chute, behind the bed, is not written).
-- The print's time counts 30 s a change. That is a round number, not a measurement.
+- The print's time counts 15 s a change: the owner timed the wait at 10-12 s on the A1 mini (235 to 215 and back), and the moves are added.
 - The readout: `bridges at 215 °C on 1 layer: 2 nozzle temperature changes at the park, about 1 min`.
 - The owner's tower level: two changes a level (in at the roof's bridge layer, out two layers on).
 
