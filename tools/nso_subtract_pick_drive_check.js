@@ -53,7 +53,7 @@ const snap = page => page.evaluate(() => ({
   btnDisabled: document.getElementById('btn-subtract').disabled,
   line: (document.getElementById('subtract-readout') || {}).textContent,
   lineShown: !!document.getElementById('subtract-readout') && !document.getElementById('subtract-readout').hidden,
-  joinCardOpen: !!document.getElementById('menu-joins').open,
+  joinCardOpen: !!document.getElementById('menu-assemble').open,
   status: document.getElementById('status').textContent
 }));
 
@@ -148,7 +148,7 @@ const triCount = (page, id) => page.evaluate(i => { const g = state.models.find(
     await press(page);
     await page.evaluate(() => {
       document.getElementById('menu-bit').open = false;
-      const other = document.querySelector('#menu-move') || document.querySelector('.vp-menu:not(#menu-bit):not(#menu-joins)');
+      const other = document.querySelector('#menu-move') || document.querySelector('.vp-menu:not(#menu-bit):not(#menu-assemble)');
       other.open = true;
     });
     await page.waitForTimeout(150);

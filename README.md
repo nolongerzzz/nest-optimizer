@@ -203,7 +203,15 @@ Smart build-plate packing for 3D printing.
   the piece), press Crop, and the slab inside the box is removed, the far part
   slides back by the box length, and the joint is sealed into one closed piece.
   Stage 1 of two: no sideways alignment yet. See [docs/CROP.md](docs/CROP.md).
-- **Triple join** (Join card) joins three pieces in one press: pick A, B and C,
+- **Assemble** is one card for putting one piece on another - the Join, Seat
+  and Align cards merged. **Open editor** shows the plate's pieces alone on a
+  stage that turns freely: click the face to attach, click where it goes, and a
+  ghost shows it there, face to face, before anything on the plate moves. A
+  3 x 3 pad sets it flush with an edge, into a corner or on the centre; a
+  quarter turn, a nudge and a gap finish it; **Weld into one** or **Place**
+  bakes it as one Undo. The three old cards are sections of the same card,
+  every control where its id says. See [docs/ASSEMBLE-EDITOR.md](docs/ASSEMBLE-EDITOR.md).
+- **Triple join** (Assemble card, Join by slots) joins three pieces in one press: pick A, B and C,
   choose a **vertical stack** or a **horizontal sequence**, and each of the two
   junctions (A-B, B-C) gets Center lock then Seat (support) at **its own gap**.
   Both gaps span the Seat slider's full range - a real air gap at -0.18, zero
@@ -423,13 +431,13 @@ Smart build-plate packing for 3D printing.
 ## Where things are (the shell)
 
 - **Top row**, left to right: Import, Measure (Two points / Edge / Align, Inches, Ruler), Move,
-  Rotate, Tip, Align, Gen+ (Wheel, Stock, Fittings, Custom shape, Picture, Mold, Photo), Lock position,
+  Rotate, Tip, Gen+ (Wheel, Stock, Fittings, Custom shape, Picture, Mold, Photo), Lock position,
   Lock plate; at the right Undo, Remove and Export, with **Clear plate**
   under Remove and **Optimize** under Export.
 - **Plate & pieces**, pinned open in the top-right corner: the plate picker
   (and Custom W · D · H), the bed grid (auto / on / off) and Snap to grid,
   the pieces list and Clone. Always visible, never a drop-down.
-- **Left column**: G-scope, Scale, Cut, Crop, Join (Join, A-B-C), Seat,
+- **Left column**: G-scope, Scale, Cut, Crop, Assemble (the editor; Join, Seat, Align),
   Supports, Add, Subtract · Shape, Text, Paint, Surface & edges, Sculpt · Check &
   repair on its own at the bottom · X (X-ray), 👁 (Watch), ◎ (frame the
   view) in one row under it.

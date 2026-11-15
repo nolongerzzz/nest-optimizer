@@ -19,6 +19,7 @@ merging its list by hand. The list below is generated.
 - [A raster of line art as flat printed lines (2026-09-18)](handoff/a-raster-of-line-art-as-flat-printed-lines.md)
 - [A skin pattern as its own printable object - the patch (2026-09-17)](handoff/a-skin-pattern-as-its-own-printable-object-the-patch.md)
 - [Archive — Soften Corners second pass (corners2), historical](handoff/archive-soften-corners-second-pass-corners2-historical.md)
+- [Assemble - Join, Seat and Align in one card, and an editor: click two faces, see a ghost, weld (2026-11-15)](handoff/assemble-editor.md)
 - [Attach - Stock + auto-aim + Join's union, in one click (2026-09-19)](handoff/attach-stock-auto-aim-joins-union-in-one-click.md)
 - [Bend - a pipe or plate bender (2026-10-13)](handoff/bend-a-pipe-or-plate-bender.md)
 - [Bridge - a web between two places, welded (2026-10-14)](handoff/bridge-a-web-between-two-places-welded.md)

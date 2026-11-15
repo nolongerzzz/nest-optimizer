@@ -87,6 +87,17 @@ const readTool = (page, t) => page.evaluate(a => {
            pressed: b ? b.getAttribute('aria-pressed') : null };
 }, { read: t.read, btn: t.btn });
 
+/* Presses a tool's button with the piece still the active one. Seat here
+   lives in the Assemble card now, and opening that card starts a Join session,
+   which clears the selection the way opening Join always did (slot A is picked
+   afresh) - so after any press the piece is made the active one again, which
+   during a session is picking it as A. What is under test is the arming, not
+   which card a button sits in. */
+async function pressTool(page, sel, id) {
+  await page.click(sel);
+  await selectModel(page, id);
+}
+
 /* Back to a known state without clicking anything: every later case starts
    from the same place whatever the last one left behind. */
 const resetAll = page => page.evaluate(() => {
@@ -136,7 +147,7 @@ withApp(async (page, logs) => {
   console.log('\n=== 2. each tool really arms on its own ===');
   for (const t of TOOLS) {
     await resetAll(page);
-    await page.click('#' + t.btn);
+    await pressTool(page, '#' + t.btn, id);
     const s = await readTool(page, t);
     check(t.name + ' arms from its button', s.armed === true, JSON.stringify(s));
   }
@@ -145,7 +156,7 @@ withApp(async (page, logs) => {
   for (const p of PAINT) {
     for (const t of TOOLS) {
       await resetAll(page);
-      await page.click('#' + t.btn);
+      await pressTool(page, '#' + t.btn, id);
       const before = await readTool(page, t);
       await page.click('#' + p.btn);
       const after = await readTool(page, t);
@@ -209,7 +220,7 @@ withApp(async (page, logs) => {
       await resetAll(page);
       await page.click('#' + p.btn);
       const paintBefore = await page.evaluate(() => state.maskPaint);
-      await page.click('#' + t.btn);
+      await pressTool(page, '#' + t.btn, id);
       const paintAfter = await page.evaluate(() => state.maskPaint);
       const tool = await readTool(page, t);
       const detail = paintBefore + ' -> ' + paintAfter + ', ' + t.name + ' ' + JSON.stringify(tool);

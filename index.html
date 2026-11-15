@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=69aae09c" />
+  <link rel="stylesheet" href="styles.css?v=8ebb0f68" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -148,24 +148,6 @@
               <button id="btn-bank-up" class="vp-bar-btn adjust-btn" disabled title="Tilt: lift the left edge 15°">Tilt →</button>
               <button id="btn-bank-dn" class="vp-bar-btn adjust-btn" disabled title="Tilt: lift the right edge 15°">Tilt ←</button>
               <p class="hint" style="margin:2px 0 0">Arrow keys tilt while this menu is open.</p>
-            </div>
-          </details>
-          <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-align">
-            <summary class="vp-bar-btn" title="Line B up on A: edges, centres, Center lock">Align</summary>
-            <div class="vp-menu-body vp-top-body">
-              <button id="btn-join-align" class="btn btn-secondary" type="button">Align edges</button>
-              <button id="btn-join-cx" class="btn btn-secondary" type="button">Center X</button>
-              <button id="btn-join-cz" class="btn btn-secondary" type="button">Center Z</button>
-              <div class="edit-row">
-                <button id="btn-center-lock" class="btn btn-secondary" type="button"
-                        title="Slide B in XZ until its centre sits on the target point on A. Rough placement - Seat / Align still do the fine work.">Center lock</button>
-                <button id="btn-center-lock-pick" class="btn btn-secondary" type="button"
-                        title="Click a point on A to lock onto instead of A's own centre. Right-click this button to drop a stored target.">Pick target</button>
-              </div>
-              <select id="center-lock-ref" title="Which point on each piece Center lock reads, seen top-down">
-                <option value="bbox">Lock on bounding-box centre</option>
-                <option value="centroid">Lock on centroid</option>
-              </select>
             </div>
           </details>
           <details class="vp-menu vp-top-menu vp-shell-menu" id="menu-gen">
@@ -1231,67 +1213,97 @@
               </div>
             </div>
           </details>
-          <!-- JOIN: one card (docs/JOIN-TRIPLE.md). The Vertical / Horizontal
-               toggle on top, the A, B, C slots with a gap row between each pair
-               they join, one JOIN and Cancel, and a readout line that says what
-               JOIN will do. Two pieces with the A-B gap off is Complete Join;
-               anything else is the A-B-C sequence (app-join-triple.js). Opening
-               the column starts the Join session (app-join.js, joinWireCard). -->
-          <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-joins">
-            <summary class="vp-bar-btn" title="Join two pieces, or three in one go: pick A, B and C, set a gap at each junction, JOIN">Join</summary>
+          <!-- ASSEMBLE: one card for putting one piece on another (docs/ASSEMBLE-EDITOR.md).
+               It is the Join, Seat and Align cards merged. On top, Open editor: the pieces
+               alone on a clear stage, click the face to attach, click where it goes, and a
+               ghost shows the result before anything on the plate moves (app-asm-editor.js).
+               Under it, the three cards as they were, id for id, each a section of this one:
+               Join by slots (docs/JOIN-TRIPLE.md), Seat and Align. Opening the column
+               starts the Join session the three sections work in (app-join.js,
+               joinWireCard); shutting it is Cancel. -->
+          <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-assemble">
+            <summary class="vp-bar-btn" title="Put one piece on another: the editor (click two faces, see a ghost, weld), or Join, Seat and Align by hand">Assemble</summary>
             <div class="vp-menu-body vp-top-body">
-              <div class="joins-card" id="joins-card">
-                <label class="join-orient" for="join-horizontal"
-                       title="Vertical stack: each piece is centred over the one before it and seated down onto it. Horizontal sequence: each piece keeps its place along the run and is centred on the cross axis, then seated sideways against the one before it.">
-                  <span class="join-orient-word join-orient-v">Vertical</span>
-                  <input type="checkbox" id="join-horizontal" class="join-switch" role="switch" aria-label="Horizontal sequence (off: vertical stack)">
-                  <span class="join-orient-word join-orient-h">Horizontal</span>
-                </label>
-                <button type="button" class="join-slot" id="join-slot-a" data-slot="a"><span class="join-badge join-badge-a">A</span><span class="join-slot-name" id="join-name-a">Pick piece A</span></button>
-                <div class="join-gap-row" id="join-gap-ab-row">
-                  <label class="join-gap-check" title="Off: no gap - A-B is seated touching (0). On: A-B is seated at the slider's gap."><input type="checkbox" id="join-gap-ab-on"> gap</label>
-                  <input type="range" id="join-gap-ab" min="-0.25" max="0.05" step="0.01" value="-0.18" disabled title="Gap at the A-B junction, in mm. Same range and meaning as the Seat (support) slider: negative = air gap, 0 = touching, positive = B overlaps into A." aria-label="A to B junction gap in mm" />
-                  <output id="join-gap-ab-value" for="join-gap-ab" title="The gap the A-B junction will be seated at">-0.18 mm</output>
-                </div>
-                <button type="button" class="join-slot" id="join-slot-b" data-slot="b"><span class="join-badge join-badge-b">B</span><span class="join-slot-name" id="join-name-b">Pick piece B</span></button>
-                <div class="join-gap-row" id="join-gap-bc-row">
-                  <label class="join-gap-check" title="Off: no gap - B-C is seated touching (0). On: B-C is seated at the slider's gap. Live once C is picked."><input type="checkbox" id="join-gap-bc-on" disabled> gap</label>
-                  <input type="range" id="join-gap-bc" min="-0.25" max="0.05" step="0.01" value="-0.18" disabled title="Gap at the B-C junction, in mm. Same range and meaning as the Seat (support) slider: negative = air gap, 0 = touching, positive = C overlaps into B." aria-label="B to C junction gap in mm" />
-                  <output id="join-gap-bc-value" for="join-gap-bc" title="The gap the B-C junction will be seated at">-0.18 mm</output>
-                </div>
-                <button type="button" class="join-slot" id="join-slot-c" data-slot="c"><span class="join-badge join-badge-c">C</span><span class="join-slot-name" id="join-name-c">Pick piece C (optional)</span></button>
-                <div class="join-actions">
-                  <button id="btn-join" class="btn btn-primary" type="button" disabled title="Two pieces, A-B gap off: Complete Join - B welded into A as one piece. Otherwise each junction is Center lock then Seat (support) at its own gap. One Undo takes it all back.">JOIN</button>
-                  <button id="btn-join-clear" class="btn btn-ghost" type="button" title="Clear the slots">Cancel</button>
-                </div>
-                <p class="join-readout" id="join-readout" aria-live="polite">Pick A and B</p>
+              <div class="asm-card" id="asm-card">
+                <button id="btn-asm-open" class="btn btn-primary" type="button"
+                        title="Open the assembly editor: the plate's pieces alone, spread apart, on a stage you can turn. Click the face to attach, click where it goes on the other piece, and a ghost shows it there. Set its place on the face, a turn and a gap, then Weld into one or Place. Nothing on the plate moves until then; one Undo takes it back.">Open editor</button>
+                <p class="asm-hint">Click the face to attach, click where it goes. A ghost shows it before anything moves.</p>
+                <details class="vp-sec asm-sec" id="asm-sec-join">
+                  <summary class="vp-sec-head" title="Join two pieces, or three in one go: pick A, B and C, set a gap at each junction, JOIN">Join by slots</summary>
+                  <div class="vp-sec-body">
+                  <div class="joins-card" id="joins-card">
+                    <label class="join-orient" for="join-horizontal"
+                           title="Vertical stack: each piece is centred over the one before it and seated down onto it. Horizontal sequence: each piece keeps its place along the run and is centred on the cross axis, then seated sideways against the one before it.">
+                      <span class="join-orient-word join-orient-v">Vertical</span>
+                      <input type="checkbox" id="join-horizontal" class="join-switch" role="switch" aria-label="Horizontal sequence (off: vertical stack)">
+                      <span class="join-orient-word join-orient-h">Horizontal</span>
+                    </label>
+                    <button type="button" class="join-slot" id="join-slot-a" data-slot="a"><span class="join-badge join-badge-a">A</span><span class="join-slot-name" id="join-name-a">Pick piece A</span></button>
+                    <div class="join-gap-row" id="join-gap-ab-row">
+                      <label class="join-gap-check" title="Off: no gap - A-B is seated touching (0). On: A-B is seated at the slider's gap."><input type="checkbox" id="join-gap-ab-on"> gap</label>
+                      <input type="range" id="join-gap-ab" min="-0.25" max="0.05" step="0.01" value="-0.18" disabled title="Gap at the A-B junction, in mm. Same range and meaning as the Seat (support) slider: negative = air gap, 0 = touching, positive = B overlaps into A." aria-label="A to B junction gap in mm" />
+                      <output id="join-gap-ab-value" for="join-gap-ab" title="The gap the A-B junction will be seated at">-0.18 mm</output>
+                    </div>
+                    <button type="button" class="join-slot" id="join-slot-b" data-slot="b"><span class="join-badge join-badge-b">B</span><span class="join-slot-name" id="join-name-b">Pick piece B</span></button>
+                    <div class="join-gap-row" id="join-gap-bc-row">
+                      <label class="join-gap-check" title="Off: no gap - B-C is seated touching (0). On: B-C is seated at the slider's gap. Live once C is picked."><input type="checkbox" id="join-gap-bc-on" disabled> gap</label>
+                      <input type="range" id="join-gap-bc" min="-0.25" max="0.05" step="0.01" value="-0.18" disabled title="Gap at the B-C junction, in mm. Same range and meaning as the Seat (support) slider: negative = air gap, 0 = touching, positive = C overlaps into B." aria-label="B to C junction gap in mm" />
+                      <output id="join-gap-bc-value" for="join-gap-bc" title="The gap the B-C junction will be seated at">-0.18 mm</output>
+                    </div>
+                    <button type="button" class="join-slot" id="join-slot-c" data-slot="c"><span class="join-badge join-badge-c">C</span><span class="join-slot-name" id="join-name-c">Pick piece C (optional)</span></button>
+                    <div class="join-actions">
+                      <button id="btn-join" class="btn btn-primary" type="button" disabled title="Two pieces, A-B gap off: Complete Join - B welded into A as one piece. Otherwise each junction is Center lock then Seat (support) at its own gap. One Undo takes it all back.">JOIN</button>
+                      <button id="btn-join-clear" class="btn btn-ghost" type="button" title="Clear the slots">Cancel</button>
+                    </div>
+                    <p class="join-readout" id="join-readout" aria-live="polite">Pick A and B</p>
+                  </div>
+                  </div>
+                </details>
+                <details class="vp-sec asm-sec" id="asm-sec-seat">
+                  <summary class="vp-sec-head" title="Seat B on A: support gap, Seat here, washer, flush, port, surface grid">Seat</summary>
+                  <div class="vp-sec-body">
+                      <div class="seat-support">
+                        <button id="btn-seat-support" class="btn btn-secondary" type="button" title="Seat B's mating face at the slider's gap off A's skin (or off the skin tips of a skinned face). B is seated as it lies: a tilt or lean already on it stays, and its current underside is what lands on A's face - Tip or Tilt it first to seat a different face. Negative = air gap, easy release is -0.15 to -0.20. Positive = B overlaps into A. 0 = touching.">Seat (support)</button>
+                        <div class="seat-support-row">
+                          <input type="range" id="seat-gap" min="-0.25" max="0.05" step="0.01" value="-0.18" title="Seat gap in mm, 0.01 steps. -0.25 (air) to +0.05 (overlap); default -0.18, mid easy-release. Arrow keys step 0.01." aria-label="Seat gap in mm" />
+                          <output id="seat-gap-value" for="seat-gap" title="Exact gap the next Seat (support) will use">-0.18 mm</output>
+                        </div>
+                        <button id="btn-seat-here" class="btn btn-secondary" type="button" aria-pressed="false" title="Seat here: click a point on A - curved, irregular or flat - and B is turned to face it and set at the slider's gap. The gap is the true minimum distance between the two surfaces.">Seat here</button>
+                        <label class="vp-check" for="chk-oversize-washer"
+                               title="Oversized washer: for a deliberately close-contact washer or shim WIDER than the piece it sits on. Seat (support) then places B at the typed gap below through the measured-clearance solve instead of the corner-ray fit - which refuses an overhanging piece with 'corner N missed hull along punch axis' - and reports the true minimum distance, the overhang and that verdict on the status line instead of refusing. Off: Seat (support) is exactly the seat it has always been.">
+                          <input type="checkbox" id="chk-oversize-washer"> Oversized washer
+                        </label>
+                        <div class="seat-support-row oversize-row">
+                          <label for="oversize-gap" title="The gap Seat (support) places at while Oversized washer is on, in mm, coupon sign convention: negative = air gap, 0 = touching, positive = the washer overlaps into the target. Typed, not the slider, so a deliberate squeeze past the slider's +0.05 can be asked for at all.">Gap</label>
+                          <input type="number" id="oversize-gap" min="-5" max="5" step="0.01" value="0"
+                                 aria-label="Oversized washer gap in mm" />
+                          <span class="oversize-unit">mm</span>
+                        </div>
+                      </div>
+                      <button id="btn-seat-flush" class="btn btn-secondary" type="button" title="Flush plug seat: bury B in A with its outer face 0.01 mm proud of A's skin, then Subtract. Ignores the gap slider.">Seat flush</button>
+                      <button id="btn-flip-port" class="btn btn-secondary" type="button">Flip port</button>
+                      <button id="btn-seat-grid" class="btn btn-secondary" type="button" title="Faint grid on the top surface of the target piece (A), to line up what goes above it">Surface grid: auto</button>
+                  </div>
+                </details>
+                <details class="vp-sec asm-sec" id="asm-sec-align">
+                  <summary class="vp-sec-head" title="Line B up on A: edges, centres, Center lock">Align</summary>
+                  <div class="vp-sec-body">
+                      <button id="btn-join-align" class="btn btn-secondary" type="button">Align edges</button>
+                      <button id="btn-join-cx" class="btn btn-secondary" type="button">Center X</button>
+                      <button id="btn-join-cz" class="btn btn-secondary" type="button">Center Z</button>
+                      <div class="edit-row">
+                        <button id="btn-center-lock" class="btn btn-secondary" type="button"
+                                title="Slide B in XZ until its centre sits on the target point on A. Rough placement - Seat / Align still do the fine work.">Center lock</button>
+                        <button id="btn-center-lock-pick" class="btn btn-secondary" type="button"
+                                title="Click a point on A to lock onto instead of A's own centre. Right-click this button to drop a stored target.">Pick target</button>
+                      </div>
+                      <select id="center-lock-ref" title="Which point on each piece Center lock reads, seen top-down">
+                        <option value="bbox">Lock on bounding-box centre</option>
+                        <option value="centroid">Lock on centroid</option>
+                      </select>
+                  </div>
+                </details>
               </div>
-            </div>
-          </details>
-          <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-seat">
-            <summary class="vp-bar-btn" title="Seat B on A: support gap, Seat here, washer, flush, port, surface grid">Seat</summary>
-            <div class="vp-menu-body vp-top-body">
-              <div class="seat-support">
-                <button id="btn-seat-support" class="btn btn-secondary" type="button" title="Seat B's mating face at the slider's gap off A's skin (or off the skin tips of a skinned face). B is seated as it lies: a tilt or lean already on it stays, and its current underside is what lands on A's face - Tip or Tilt it first to seat a different face. Negative = air gap, easy release is -0.15 to -0.20. Positive = B overlaps into A. 0 = touching.">Seat (support)</button>
-                <div class="seat-support-row">
-                  <input type="range" id="seat-gap" min="-0.25" max="0.05" step="0.01" value="-0.18" title="Seat gap in mm, 0.01 steps. -0.25 (air) to +0.05 (overlap); default -0.18, mid easy-release. Arrow keys step 0.01." aria-label="Seat gap in mm" />
-                  <output id="seat-gap-value" for="seat-gap" title="Exact gap the next Seat (support) will use">-0.18 mm</output>
-                </div>
-                <button id="btn-seat-here" class="btn btn-secondary" type="button" aria-pressed="false" title="Seat here: click a point on A - curved, irregular or flat - and B is turned to face it and set at the slider's gap. The gap is the true minimum distance between the two surfaces.">Seat here</button>
-                <label class="vp-check" for="chk-oversize-washer"
-                       title="Oversized washer: for a deliberately close-contact washer or shim WIDER than the piece it sits on. Seat (support) then places B at the typed gap below through the measured-clearance solve instead of the corner-ray fit - which refuses an overhanging piece with 'corner N missed hull along punch axis' - and reports the true minimum distance, the overhang and that verdict on the status line instead of refusing. Off: Seat (support) is exactly the seat it has always been.">
-                  <input type="checkbox" id="chk-oversize-washer"> Oversized washer
-                </label>
-                <div class="seat-support-row oversize-row">
-                  <label for="oversize-gap" title="The gap Seat (support) places at while Oversized washer is on, in mm, coupon sign convention: negative = air gap, 0 = touching, positive = the washer overlaps into the target. Typed, not the slider, so a deliberate squeeze past the slider's +0.05 can be asked for at all.">Gap</label>
-                  <input type="number" id="oversize-gap" min="-5" max="5" step="0.01" value="0"
-                         aria-label="Oversized washer gap in mm" />
-                  <span class="oversize-unit">mm</span>
-                </div>
-              </div>
-              <button id="btn-seat-flush" class="btn btn-secondary" type="button" title="Flush plug seat: bury B in A with its outer face 0.01 mm proud of A's skin, then Subtract. Ignores the gap slider.">Seat flush</button>
-              <button id="btn-flip-port" class="btn btn-secondary" type="button">Flip port</button>
-              <button id="btn-seat-grid" class="btn btn-secondary" type="button" title="Faint grid on the top surface of the target piece (A), to line up what goes above it">Surface grid: auto</button>
             </div>
           </details>
           <!-- SUPPORTS: one card on the main page (app-supports-card.js,
@@ -3188,10 +3200,10 @@
   <script src="app-fasteners.js?v=aafaf77d"></script>
   <script src="app-assemble.js?v=60984bfb"></script>
   <script src="app-sel-outline.js?v=0e6c3b89"></script>
-  <script src="app-join.js?v=3e117b0f"></script>
-  <script src="app-center-lock.js?v=ee95c074"></script>
+  <script src="app-join.js?v=405d83c4"></script>
+  <script src="app-center-lock.js?v=88c6bc06"></script>
   <script src="app-oversize-washer.js?v=a445c3ff"></script>
-  <script src="app-join-triple.js?v=95a9c48a"></script>
+  <script src="app-join-triple.js?v=6798e389"></script>
   <script src="app-carve.js?v=74c937e2"></script>
   <!-- Punch: round holes through a face, alone, in a grid or on a circle. The
        geometry (nso_punch.js) before its card (app-punch.js). docs/PUNCH.md. -->
@@ -3217,7 +3229,8 @@
   <script src="app-foam.js?v=16cca4f6"></script>
   <script src="app-thicken-live.js?v=dab1b45f"></script>
   <script src="app-soften-live.js?v=d13157a0"></script>
-  <script src="app-seat-surface.js?v=55908323"></script>
+  <script src="app-seat-surface.js?v=4b0f2e5d"></script>
+  <script src="app-asm-editor.js?v=ba53e6e8"></script>
   <script src="app-skin.js?v=cb03e88b"></script>
   <script src="app-skin-patch.js?v=42ac8ff6"></script>
   <script src="app-raster.js?v=2f85efde"></script>

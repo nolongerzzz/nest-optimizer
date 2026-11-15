@@ -129,17 +129,18 @@ function startJoinSession() {
   updateJoinUI();
 }
 
-/* No Start Join: the Join column is the switch. Opening it starts the session
-   (startJoinSession, what the button ran) and shows the Join card, with its
-   slots, at once; shutting it with the column button again, with Escape, or by
-   the leave-tool gesture is Cancel (clearJoinSlots). A session already
-   live is kept as it is: Seat, Align and Center lock work on the A and B the
-   Join card holds, so opening one of THEIR columns shuts this one and leaves
-   the session standing - returning to Join finds the slots as they were. (The
+/* No Start Join: the Assemble column is the switch. Opening it starts the
+   session (startJoinSession, what the button ran) and shows the Assemble card
+   - the editor button, and the Join by slots, Seat and Align sections, which
+   all work on the A and B the slots hold. Shutting it with the column button
+   again, with Escape, or by the leave-tool gesture is Cancel (clearJoinSlots).
+   A session already live is kept as it is: opening another column (Move,
+   Rotate, Tip - to turn B before a seat) shuts this one and leaves the session
+   standing, so returning to Assemble finds the slots as they were. (The
    card's Cancel clears the slots and leaves the card open.) A MutationObserver
    on `open`, for the reason the one-panel rule below gives. */
 function joinWireCard() {
-  const menu = document.getElementById('menu-joins');
+  const menu = document.getElementById('menu-assemble');
   if (!menu || menu.dataset.nsoWired === '1') return;
   menu.dataset.nsoWired = '1';
   const anotherOpen = function () {
@@ -1731,7 +1732,7 @@ function centerJoinAxis(axis) {
   const idA = state.editId;
   const idB = state.joinPartnerId;
   if (!state.joinSession || idA == null || idB == null || idA === idB) {
-    setStatus('Open JOIN, Pick A and B, then Center', true);
+    setStatus('Open ASSEMBLE, Pick A and B, then Center', true);
     return;
   }
   const placedA = state.placed.find(function (q) { return q && q.sourceId === idA && q.mesh; });
@@ -1772,7 +1773,7 @@ function flipPortOnPunch() {
   const bit = placedB && placedB.mesh;
   const hull = placedA && placedA.mesh;
   if (!bit || !hull) {
-    setStatus('Open JOIN, pick hull A and tunnel B, then Flip port', true);
+    setStatus('Open ASSEMBLE, pick hull A and tunnel B, then Flip port', true);
     return;
   }
   pushUndo(snapshotPlacedPose(state.placed.indexOf(placedB)));
@@ -1869,7 +1870,7 @@ function seatFlushBitToHull() {
   const idA = state.editId;
   const idB = state.joinPartnerId;
   if (!state.joinSession || idA == null || idB == null || idA === idB) {
-    setStatus('Open JOIN, A = hull, B = bit, then Seat flush', true);
+    setStatus('Open ASSEMBLE, A = hull, B = bit, then Seat flush', true);
     return;
   }
   const placedA = state.placed.find(function (p) { return p && p.sourceId === idA && p.mesh; });
@@ -1910,7 +1911,7 @@ function seatSupportBitToHull() {
   const idA = state.editId;
   const idB = state.joinPartnerId;
   if (!state.joinSession || idA == null || idB == null || idA === idB) {
-    setStatus('Open JOIN, A = hull, B = bit, then Seat (support)', true);
+    setStatus('Open ASSEMBLE, A = hull, B = bit, then Seat (support)', true);
     return;
   }
   const placedA = state.placed.find(function (p) { return p && p.sourceId === idA && p.mesh; });
@@ -2249,11 +2250,20 @@ async function extractBitFromSelected(pick) {
   setStatus('Extract bit needs app-extract-bit.js', true);
 }
 
-async function joinSelectedModels() {
+/* opts.inPlace (the assembly editor, app-asm-editor.js): B has just been placed
+   on A, face to face, exactly where it is to be welded. So no route here may
+   move either piece or go looking for a mating of its own - the planar fuse and
+   the plate weld stand down and the kernel union welds the two where they
+   stand, and the result stays where the two were instead of being parked at
+   the midpoint of their plate positions. Every other caller passes nothing (the
+   JOIN button passes its click event) and gets the Join it always got.
+   Resolves true when the pieces were joined. */
+async function joinSelectedModels(opts) {
+  const inPlace = !!(opts && opts.inPlace === true);
   const idA = state.editId;
   const idB = state.joinPartnerId;
   if (!state.joinSession || idA == null || idB == null || idA === idB) {
-    setStatus('Open JOIN, Pick A, Pick B, then JOIN', true);
+    setStatus('Open ASSEMBLE, Pick A, Pick B, then JOIN', true);
     return;
   }
   const modelA = state.models.find(x => x.id === idA);
@@ -2324,7 +2334,9 @@ async function joinSelectedModels() {
   let fuseGeo = null, fuseStats = null, fuseInfo = null, fuseWhy = '';
   const paintedJoin = (typeof nsoMaskCount === 'function')
     ? (nsoMaskCount(modelA) + nsoMaskCount(modelB)) : 0;
-  if (solidOnly) {
+  if (inPlace) {
+    fuseWhy = 'placed face to face - the kernel union welds them where they are';
+  } else if (solidOnly) {
     fuseWhy = 'overlapping shells merged - the kernel union welds them';
   } else if (typeof NSO_fuseFindMating !== 'function' || typeof NSO_planarFusePair !== 'function') {
     fuseWhy = 'fusion module not loaded';
@@ -2406,6 +2418,8 @@ async function joinSelectedModels() {
     // A real fuse already landed. Skip the plate route rather than let it
     // nudge the poses to close a kerf that is no longer there.
     legacyWhy = 'not needed - planar fuse succeeded';
+  } else if (inPlace) {
+    legacyWhy = 'placed face to face - the kernel union welds them where they are';
   } else if (solidOnly) {
     legacyWhy = 'overlapping shells merged - the kernel union welds them';
   } else try {
@@ -2450,7 +2464,7 @@ async function joinSelectedModels() {
   // reopens a wrap - the kernel does not. Only reached when the two pieces
   // already touch; split halves parked a kerf apart come back as two parts and
   // stay with route 1, which closes that gap by moving the far half in.
-  let kernelGeo = null, kernelStats = null, kernelWhy = '', kernelExact = false;
+  let kernelGeo = null, kernelStats = null, kernelWhy = '', kernelExact = false, kernelAt = null;
   if (!fuseGeo && joinSoupA && joinSoupB && (!legacyStats || score(legacyStats) > score(before))) {
     try {
       setStatus('Joining (loading CSG kernel)...');
@@ -2463,6 +2477,16 @@ async function joinSelectedModels() {
       }
       if (u.ok && u.soup && u.soup.length >= 9) {
         kernelGeo = soupToCenteredGeo(u.soup);
+        if (inPlace) {
+          // where the union stands on the plate: the middle of its own world box
+          let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+          for (let i = 0; i < u.soup.length; i += 3) {
+            const ux = u.soup[i], uz = u.soup[i + 2];
+            if (ux < x0) x0 = ux; if (ux > x1) x1 = ux;
+            if (uz < z0) z0 = uz; if (uz > z1) z1 = uz;
+          }
+          kernelAt = { x: (x0 + x1) / 2, z: (z0 + z1) / 2 };
+        }
         // the kernel's own count, not one rounded off the soup
         kernelStats = u.stats || NSO_edgeStats(u.soup);
         kernelExact = !!u.stats;
@@ -2486,7 +2510,7 @@ async function joinSelectedModels() {
     newGeo = kernelGeo; after = kernelStats; route = 'kernel union'; exact = kernelExact;
   }
   if (!newGeo) {
-    const why = legacyWhy || kernelWhy || fuseWhy || 'pieces unchanged';
+    const why = (inPlace && kernelWhy) || legacyWhy || kernelWhy || fuseWhy || 'pieces unchanged';
     setStatus('Join failed - ' + why + ' - A and B unchanged', true);
     return;
   }
@@ -2568,8 +2592,8 @@ async function joinSelectedModels() {
 
   // Park the union at the midpoint of the two halves.
   if (placedA) {
-    const px = (poseA.x + poseB.x) / 2;
-    const pz = (poseA.z + poseB.z) / 2;
+    const px = (route === 'kernel union' && kernelAt) ? kernelAt.x : (poseA.x + poseB.x) / 2;
+    const pz = (route === 'kernel union' && kernelAt) ? kernelAt.z : (poseA.z + poseB.z) / 2;
     placedA.x = px;
     placedA.z = pz;
     if (placedA.mesh && state.modelGroup) {
@@ -2615,6 +2639,7 @@ async function joinSelectedModels() {
             (fuseInfo ? '; seam fused, ' + fuseInfo.removed + ' cap tri(s) removed, ' +
                         fuseInfo.triIn + '\u2192' + fuseInfo.triOut + ' tris' : '') +
             (solJoin.note ? ' - ' + solJoin.note : ''));
+  return true;
 }
 
 

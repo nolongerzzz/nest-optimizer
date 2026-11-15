@@ -797,10 +797,10 @@ async function partG(page) {
       overlay: () => state.modelGroup.children.filter(o => o.isMesh && o.renderOrder === 40),
       paintFindings: from => NSOWatch.events().filter(e => e.seq > from && e.kind === 'phantom' && /paint/.test(e.msg)).map(e => e.msg),
       mark: () => NSOWatch.events().length,
-      // Start Join is the Join column button now: a fresh session from it. A card
+      // Start Join is the Assemble column button now: a fresh session from it. A card
       // already open is shut first (Cancel Join) and the observer given its turn,
       // so the press is always a start, never a toggle off.
-      joinStart: async () => { const d = document.getElementById('menu-joins');
+      joinStart: async () => { const d = document.getElementById('menu-assemble');
         if (d.open) { d.open = false; await Promise.resolve(); }
         d.querySelector(':scope > summary').click(); await Promise.resolve(); }
     };

@@ -240,9 +240,9 @@ withApp(async (page, logs) => {
     ghost: !!(state.connect.ghost && state.connect.ghost.parent), line: !!(state.connect.line && state.connect.line.parent) }));
 
   if (RUN.cards) {
-  console.log('\n=== 1. the drop-down: between Crop and Join ===');
+  console.log('\n=== 1. the drop-down: between Crop and Assemble ===');
   const ui = await page.evaluate(() => {
-    const m = document.getElementById('menu-connect'), crop = document.getElementById('menu-crop'), join = document.getElementById('menu-joins');
+    const m = document.getElementById('menu-connect'), crop = document.getElementById('menu-crop'), join = document.getElementById('menu-assemble');
     const kids = [...m.parentElement.children];
     return { menu: !!m, between: kids.indexOf(m) === kids.indexOf(crop) + 2 && kids.indexOf(m) + 2 === kids.indexOf(join) ||
                                  (kids.filter(k => k.tagName === 'DETAILS').indexOf(m) === kids.filter(k => k.tagName === 'DETAILS').indexOf(crop) + 1 &&
@@ -531,10 +531,10 @@ withApp(async (page, logs) => {
   check('Escape again, with nothing picked, shuts the card', !A.open && !A.menu && A.hidden, JSON.stringify(A));
   await page.click('#menu-connect > summary');
   if (pk) { await page.mouse.click(pk.x, pk.y); }
-  await page.click('#menu-seat > summary');
+  await page.click('#menu-assemble > summary');
   A = await armed();
   check('another column button shuts it and puts the picks away', !A.open && !A.menu && A.hidden && !A.picks && !A.overlay, JSON.stringify(A));
-  await page.click('#menu-seat > summary');
+  await page.click('#menu-assemble > summary');
 
 
   console.log('\n=== 9. Sag and Ends: the ghost follows the fields; Set; Undo ===');

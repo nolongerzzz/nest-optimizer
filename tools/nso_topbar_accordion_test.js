@@ -15,9 +15,9 @@ const check = (name, cond, detail) => {
 /* Every top-level drop-down on the page (shell v3): the row, and the column.
    Members held inside one (Gen+'s four, Join's two) are not top-level;
    section 3 covers them. Plate & pieces is pinned open, not a drop-down. */
-const ROW = ['menu-import', 'menu-measure', 'menu-move', 'menu-rotate', 'menu-tip', 'menu-align',
+const ROW = ['menu-import', 'menu-measure', 'menu-move', 'menu-rotate', 'menu-tip',
              'menu-gen', 'menu-export'];
-const COL = ['menu-scale', 'menu-cut', 'menu-crop', 'menu-joins', 'menu-seat', 'menu-supports', 'menu-add', 'menu-bit',
+const COL = ['menu-scale', 'menu-cut', 'menu-crop', 'menu-assemble', 'menu-supports', 'menu-add', 'menu-bit',
              'menu-shape', 'menu-text', 'menu-weave', 'menu-paint', 'menu-surface', 'menu-sculpt', 'menu-repair'];
 const ALL = ROW.concat(COL);
 /* ONE EXEMPTION: Measure's card stays open beside another (app-join.js's one-panel
@@ -170,7 +170,7 @@ withApp(async (page, logs) => {
     }
     check('opening Wheel, Stock, Picture or Photo leaves Gen+ open and shuts the other three',
       nested.every(n => n.gen && n.it && n.others === 0), JSON.stringify(nested));
-    await openMenu('menu-seat');
+    await openMenu('menu-assemble');
     await page.waitForTimeout(40);
     check('opening another drop-down shuts Gen+ and whatever was open inside it',
       (await openCount()) === 1, (await openCount()) + ' open');

@@ -80,6 +80,7 @@
     "3mf:import-drive": {"weight":9450,"note":""},
     "3mf:roundtrip": {"weight":153,"note":""},
     "3mf:scene": {"weight":230,"note":""},
+    "asm:editor": {"weight":43000,"note":"drive: the assembly editor, real clicks, two kernel unions; 42.8 s locally on a 2-core box (2026-11-15), not yet measured on a runner"},
     "assemble": {"weight":1250,"note":""},
     "assemble:canonical": {"weight":2050,"note":""},
     "beds:test": {"weight":600,"note":"Node only, lifts the plate code and app-beds.js into a vm; measured under a second locally, three.js start-up dominates"},

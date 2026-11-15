@@ -20,9 +20,9 @@ const check = (name, cond, detail) => {
    bottom, in their groups (tools/nso_shell_v3_test.js gates the groups'
    pitch and gaps); the view row (X, the eye, the target) is pinned under
    them. */
-const ROW = ['menu-import', 'menu-measure', 'menu-move', 'menu-rotate', 'menu-tip', 'menu-align',
+const ROW = ['menu-import', 'menu-measure', 'menu-move', 'menu-rotate', 'menu-tip',
              'menu-gen', 'btn-lock-pos', 'btn-plate-lock', 'btn-undo', 'btn-delete-placed', 'menu-export'];
-const COL = ['menu-scale', 'menu-cut', 'menu-crop', 'menu-joins', 'menu-seat', 'menu-supports',
+const COL = ['menu-scale', 'menu-cut', 'menu-crop', 'menu-assemble', 'menu-supports',
              'menu-add', 'menu-bit', 'menu-shape', 'menu-text', 'menu-weave', 'menu-paint', 'menu-surface', 'menu-sculpt',
              'btn-microscope', 'menu-repair'];
 const MENUS = ROW.filter(id => id.startsWith('menu-')).concat(COL.filter(id => id.startsWith('menu-')));
@@ -31,15 +31,17 @@ const MENUS = ROW.filter(id => id.startsWith('menu-')).concat(COL.filter(id => i
    A-B-C as one card under Join; Plate and Pieces in the pinned Plate & pieces panel;
    Pack's Optimize a slab of its own, under Export). */
 const HOME = {
-  'menu-joins': ['join-slot-a', 'join-slot-b', 'join-slot-c',
+  // ASSEMBLE: Open editor, then the Join, Seat and Align cards as its three sections
+  'menu-assemble': ['btn-asm-open',
+                'join-slot-a', 'join-slot-b', 'join-slot-c',
                 'join-name-a', 'join-name-b', 'join-name-c', 'btn-join', 'btn-join-clear',
                 'joins-card', 'join-horizontal', 'join-gap-ab-on', 'join-gap-ab', 'join-gap-ab-value',
-                'join-gap-bc-on', 'join-gap-bc', 'join-gap-bc-value', 'join-readout'],
-  'menu-align': ['btn-join-align', 'btn-join-cx', 'btn-join-cz', 'btn-center-lock',
-                 'btn-center-lock-pick', 'center-lock-ref'],
-  'menu-seat': ['btn-seat-support', 'seat-gap', 'seat-gap-value', 'btn-seat-here',
+                'join-gap-bc-on', 'join-gap-bc', 'join-gap-bc-value', 'join-readout',
+                'btn-seat-support', 'seat-gap', 'seat-gap-value', 'btn-seat-here',
                 'chk-oversize-washer', 'oversize-gap', 'btn-seat-flush', 'btn-flip-port',
-                'btn-seat-grid'],
+                'btn-seat-grid',
+                'btn-join-align', 'btn-join-cx', 'btn-join-cz', 'btn-center-lock',
+                'btn-center-lock-pick', 'center-lock-ref'],
   'menu-bit': ['btn-subtract', 'btn-extract-bit', 'btn-hollow', 'btn-hollow-safe'],
   'menu-crop': ['btn-lift'],      // Lift (with Detach flange in its panel) moved here from Subtract
   'plate-panel': ['plate-select', 'custom-size', 'custom-w', 'custom-d', 'custom-h',
@@ -249,14 +251,14 @@ withApp(async (page, logs) => {
 
     /* Read after the 0.12 s transition, not in the same turn as the open. */
     const look = () => page.evaluate(() => {
-      const cs = getComputedStyle(document.querySelector('#menu-seat > summary'));
+      const cs = getComputedStyle(document.querySelector('#menu-assemble > summary'));
       return { b: cs.borderTopColor, s: cs.boxShadow };
     });
     const lit = { shut: await look() };
-    await page.evaluate(() => { document.getElementById('menu-seat').open = true; });
+    await page.evaluate(() => { document.getElementById('menu-assemble').open = true; });
     await page.waitForTimeout(300);
     lit.open = await look();
-    await page.evaluate(() => { document.getElementById('menu-seat').open = false; });
+    await page.evaluate(() => { document.getElementById('menu-assemble').open = false; });
     check('open shows by a lit border and a glow', lit.open.b !== lit.shut.b && lit.open.s !== lit.shut.s,
       JSON.stringify(lit));
     const dis = await page.evaluate(() => {

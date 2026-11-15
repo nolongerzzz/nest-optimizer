@@ -554,54 +554,57 @@ withApp(async (page, logs) => {
   check('...and takes exactly that one entry off', (await undoTop(page)).mark === m11);
 
   /* ============ 12. no gate: the Join column is the switch ============ */
-  console.log('\n=== 12. no Start Join: the column button starts the session and shows the Join card ===');
+  console.log('\n=== 12. no Start Join: the Assemble column button starts the session and shows the card ===');
   await page.click('#btn-join-clear');
   await page.evaluate(() => document.querySelectorAll('.vp-menu').forEach(d => { d.open = false; }));
-  const jstate = () => page.evaluate(() => ({ session: state.joinSession, col: document.getElementById('menu-joins').open,
+  const jstate = () => page.evaluate(() => ({ session: state.joinSession, col: document.getElementById('menu-assemble').open,
     card: (() => { const c = document.getElementById('joins-card'); return !!c && c.getBoundingClientRect().height > 0; })(),
     slots: (() => { const e = document.getElementById('join-slot-a'), b = e.getBoundingClientRect();
       const hit = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
       return b.height > 0 && !!hit && e.contains(hit); })(),
     a: state.editId, b: state.joinPartnerId }));
-  check('there is no #btn-join-start, and no button in the column card but the real ones',
+  check('there is no #btn-join-start, and no button in the Join by slots section but the real ones',
     await page.evaluate(() => !document.getElementById('btn-join-start') &&
-      [...document.querySelectorAll('#menu-joins > .vp-menu-body button')].map(b => b.id).join()
+      [...document.querySelectorAll('#asm-sec-join button')].map(b => b.id).join()
         === 'join-slot-a,join-slot-b,join-slot-c,btn-join,btn-join-clear'));
   let J = await jstate();
   check('shut: no session, the slots not on screen', !J.session && !J.col && !J.slots, JSON.stringify(J));
-  await page.click('#menu-joins > summary');
+  await page.click('#menu-assemble > summary');
   J = await jstate();
-  check('one click on the column button: session live, the Join card open, its slots on screen',
-    J.session && J.col && J.card && J.slots && J.a == null && J.b == null, JSON.stringify(J));
+  check('one click on the column button: session live, the Assemble card open',
+    J.session && J.col && J.a == null && J.b == null, JSON.stringify(J));
+  await page.evaluate(() => { document.getElementById('asm-sec-join').open = true; });
+  J = await jstate();
+  check('...and its Join by slots section, opened, has the slots on screen', J.session && J.card && J.slots, JSON.stringify(J));
   await page.click('#join-slot-a'); await page.click(`.model-item[data-edit-id="${idA}"]`);
   await page.click('#join-slot-b'); await page.click(`.model-item[data-edit-id="${idB}"]`);
-  await page.click('#menu-joins > summary');
+  await page.click('#menu-assemble > summary');
   J = await jstate();
   check('the column button again shuts it: the session is Cancelled (B\'s pick gone, the slots off screen)',
     !J.session && !J.col && !J.slots && J.b == null, JSON.stringify(J));
   check('...and the Cancel teardown ran (A\'s slot reads empty)',
     await page.evaluate(() => document.getElementById('join-name-a').textContent === 'Pick piece A'));
-  await page.click('#menu-joins > summary');
+  await page.click('#menu-assemble > summary');
   await page.click('#join-slot-a'); await page.click(`.model-item[data-edit-id="${idA}"]`);
   await page.keyboard.press('Escape');
   J = await jstate();
   check('Escape shuts the card and ends the session', !J.session && !J.col, JSON.stringify(J));
-  await page.click('#menu-joins > summary');
+  await page.click('#menu-assemble > summary');
   await page.click('#join-slot-a'); await page.click(`.model-item[data-edit-id="${idA}"]`);
   await page.click('#join-slot-b'); await page.click(`.model-item[data-edit-id="${idB}"]`);
-  await page.click('#menu-seat > summary');
+  await page.click('#menu-move > summary');
   J = await jstate();
-  check('another column button shuts the card but leaves the A and B it holds for Seat, Align and Center lock',
+  check('another menu (Move, to shift B before a seat) shuts the card but leaves the A and B it holds',
     !J.col && J.session && J.a === idA && J.b === idB, JSON.stringify(J));
-  await page.click('#menu-joins > summary');
+  await page.click('#menu-assemble > summary');
   J = await jstate();
-  check('...and coming back to Join finds them as they were, not restarted', J.col && J.session && J.a === idA && J.b === idB, JSON.stringify(J));
+  check('...and coming back to Assemble finds them as they were, not restarted', J.col && J.session && J.a === idA && J.b === idB, JSON.stringify(J));
   await page.click('#btn-join-clear');
   J = await jstate();
   check('Cancel stays in the card: session off, the card still open', !J.session && J.col, JSON.stringify(J));
   await page.click('#join-slot-a');
   check('...and a slot click starts a session again', (await jstate()).session);
-  await page.click('#menu-joins > summary');
+  await page.click('#menu-assemble > summary');
 
   /* ============ 13. two pieces, gap off: Complete Join, as it was ============ */
   console.log('\n=== 13. two pieces, A-B gap off: JOIN is today\'s Complete Join ===');
@@ -786,8 +789,8 @@ withApp(async (page, logs) => {
   check('...the toggle is still Horizontal', afterCancel.h === true);
   check('...and the A-B row still on at -0.18', afterCancel.ab === true && Number(afterCancel.abv) === -0.18, JSON.stringify(afterCancel));
   check('...and the readout asks for the pieces again', afterCancel.ro === 'Pick A and B', afterCancel.ro);
-  await page.click('#menu-joins > summary');
-  await page.click('#menu-joins > summary');
+  await page.click('#menu-assemble > summary');
+  await page.click('#menu-assemble > summary');
   check('shutting and reopening the column keeps it too',
     await page.evaluate(() => document.getElementById('join-horizontal').checked === true && state.joinSession === true));
 
@@ -803,7 +806,7 @@ withApp(async (page, logs) => {
     await setMode(page, mode);
     await page.mouse.move(1, 1);
     const file = path.join(shots, 'join-card-' + mode + '.png');
-    await page.locator('#menu-joins > .vp-menu-body').screenshot({ path: file });
+    await page.locator('#menu-assemble > .vp-menu-body').screenshot({ path: file });
     check('shot: ' + path.relative(ROOT, file), fs.existsSync(file));
   }
   await setMode(page, 'vertical');

@@ -4363,14 +4363,14 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
 .vp-shell-row > * { flex-shrink: 0; }
 .vp-shell-row > #menu-measure,
 .vp-shell-row > #menu-move, .vp-shell-row > #menu-rotate,
-.vp-shell-row > #menu-tip, .vp-shell-row > #menu-align,
+.vp-shell-row > #menu-tip,
 .vp-shell-row > #btn-lock-pos, .vp-shell-row > #btn-plate-lock {
   flex-shrink: 1;
   min-width: 40px;
 }
 #menu-measure > summary,
 #menu-move > summary, #menu-rotate > summary,
-#menu-tip > summary, #menu-align > summary,
+#menu-tip > summary,
 .vp-shell-row > #btn-lock-pos, .vp-shell-row > #btn-plate-lock {
   display: block;
   max-width: 100%;
@@ -5107,3 +5107,233 @@ body.sup-card-open #adjust-status { display: none; }
 .cs-nav { flex: 0 0 100%; box-sizing: border-box; display: flex; align-items: center; gap: 6px; margin: 2px 0; }
 .cs-nav[hidden] { display: none; }
 .cs-nav-what { flex: 1 1 auto; text-align: center; font-size: 11px; color: #fbbf24; }
+
+/* ============================================================
+   ASSEMBLE (docs/ASSEMBLE-EDITOR.md)
+
+   The card: Open editor on top, then the Join, Seat and Align cards as three
+   sections of this one (.vp-sec, the Print card's sections). The sections
+   hold what those cards held, id for id, so their own rules above still
+   style them.
+   ============================================================ */
+.asm-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 248px;
+}
+.asm-card > .btn-primary { width: 100%; }
+.asm-hint {
+  margin: 0 0 2px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--muted);
+}
+.asm-sec > .vp-sec-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 0 4px;
+}
+
+/* The editor: a stage of its own over the whole app. Nothing of the plate
+   shows through it - that is the point of it. */
+.asm-editor {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  background: #0b1a33;
+  color: var(--text);
+  font-family: var(--font);
+}
+.asm-editor[hidden] { display: none; }
+.asm-ed-stage { position: absolute; inset: 0; }
+.asm-ed-stage canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+.asm-ed-return {
+  position: absolute;
+  top: var(--shell-pad);
+  left: var(--shell-pad);
+  height: var(--shell-btn-h);
+  padding: 0 14px;
+}
+.asm-ed-banner {
+  position: absolute;
+  top: var(--shell-pad);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  max-width: calc(100% - 560px);
+  padding: 8px 16px;
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  background: var(--glass-panel);
+  pointer-events: none;
+  white-space: nowrap;
+}
+.asm-ed-banner-n {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #7dd3fc;
+  color: #0b1a33;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 22px;
+  text-align: center;
+}
+.asm-ed-banner-main { font-size: 15px; font-weight: 600; }
+.asm-ed-banner-sub { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+.asm-ed-panel {
+  position: absolute;
+  top: var(--shell-pad);
+  right: var(--shell-pad);
+  width: 248px;
+  max-height: calc(100% - 2 * var(--shell-pad));
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  background: var(--glass-panel);
+}
+.asm-ed-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+.asm-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.asm-chip-n {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #475569;
+  color: #0b1a33;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+}
+.asm-chip-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.asm-chip.is-now { border-color: #f8fafc; color: var(--text); }
+.asm-chip-part.is-set { border-color: #4ade80; background: #102418; color: var(--text); }
+.asm-chip-part.is-set .asm-chip-n { background: #4ade80; }
+.asm-chip-target.is-set { border-color: #fb923c; background: #3a2410; color: var(--text); }
+.asm-chip-target.is-set .asm-chip-n { background: #fb923c; }
+.asm-ed-adjust { display: flex; flex-direction: column; gap: 8px; }
+.asm-ed-adjust.is-idle { opacity: 0.45; }
+.asm-ed-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+.asm-ed-posrow { display: flex; gap: 10px; align-items: flex-start; }
+.asm-ed-poscol { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.asm-ed-poscol > .btn { width: 100%; padding-left: 4px; padding-right: 4px; }
+.asm-pad {
+  flex: none;
+  display: grid;
+  grid-template-columns: repeat(3, 28px);
+  grid-template-rows: repeat(3, 28px);
+  gap: 3px;
+  padding: 4px;
+  border: 1px solid #fb923c;
+  border-radius: 6px;
+  background: rgba(251, 146, 60, 0.08);
+}
+.asm-pad-cell {
+  position: relative;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  cursor: pointer;
+}
+.asm-pad-cell::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  margin: -4px 0 0 -4px;
+  border-radius: 50%;
+  background: #94a3b8;
+}
+.asm-pad-cell:hover:not(:disabled) { border-color: #94a3b8; }
+.asm-pad-cell.is-on { background: #14532d; border-color: #4ade80; }
+.asm-pad-cell.is-on::after { background: #4ade80; }
+.asm-pad-cell:disabled { cursor: default; }
+.asm-pad-cell:focus-visible, .asm-chip:focus-visible { outline: 2px solid #7dd3fc; outline-offset: 1px; }
+#asm-pos-click.is-on { border-color: #4ade80; color: #bbf7d0; }
+.asm-nudge { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; }
+.asm-nudge .btn { padding: 4px 0; min-width: 0; }
+.asm-step { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted); }
+.asm-step input {
+  width: 54px;
+  padding: 3px 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #0f1115;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+.asm-ed-row { display: flex; gap: 6px; }
+.asm-ed-row > .btn { flex: 1; min-width: 0; }
+.asm-ed-gaprow { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.asm-ed-gaprow input[type="range"] { flex: 1; min-width: 0; accent-color: #4ade80; }
+.asm-ed-gaprow output { flex: none; width: 62px; text-align: right; font-variant-numeric: tabular-nums; color: var(--text); }
+.asm-gap-check { flex: none; cursor: pointer; white-space: nowrap; }
+.asm-ed-readout { margin: 0; min-height: 30px; font-size: 11px; line-height: 1.35; color: var(--muted); }
+.asm-ed-foot { padding-top: 6px; border-top: 1px solid rgba(232, 238, 246, 0.12); }
+.asm-ed-keys {
+  position: absolute;
+  left: var(--shell-pad);
+  bottom: var(--shell-pad);
+  font-size: 11px;
+  color: #64748b;
+  pointer-events: none;
+}
+.asm-ed-status {
+  position: absolute;
+  left: 50%;
+  bottom: var(--shell-pad);
+  transform: translateX(-50%);
+  max-width: calc(100% - 420px);
+  padding: 8px 14px;
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  background: var(--glass-panel);
+  color: #86efac;
+  font-size: 12px;
+  text-align: center;
+}
+.asm-ed-status:empty { display: none; }
+.asm-ed-status.is-bad { color: #fca5a5; }
+.asm-under { margin-top: -4px; padding: 2px 6px; font-size: 11px; text-align: left; }
+.asm-under[hidden] { display: none; }

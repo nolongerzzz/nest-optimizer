@@ -105,8 +105,8 @@ function findLarge() {
 
 const PLAN = [];
 const MENU = { 'Import': 'menu-import', 'Measure': 'menu-measure', 'Move': 'menu-move', 'Rotate': 'menu-rotate', 'Tip': 'menu-tip',
-  'Align': 'menu-align', 'Gen+': 'menu-gen', 'Export': 'menu-export', 'Scale': 'menu-scale', 'Cut': 'menu-cut', 'Crop': 'menu-crop',
-  'Connect': 'menu-connect', 'Join': 'menu-joins', 'Seat': 'menu-seat', 'Supports': 'menu-supports', 'Add': 'menu-add',
+  'Align': 'menu-assemble', 'Gen+': 'menu-gen', 'Export': 'menu-export', 'Scale': 'menu-scale', 'Cut': 'menu-cut', 'Crop': 'menu-crop',
+  'Connect': 'menu-connect', 'Join': 'menu-assemble', 'Seat': 'menu-assemble', 'Supports': 'menu-supports', 'Add': 'menu-add',
   'Subtract': 'menu-bit', 'Shape': 'menu-shape', 'Paint': 'menu-paint', 'Surface & edges': 'menu-surface', 'Sculpt': 'menu-sculpt',
   'Check & repair': 'menu-repair' };
 function V(sec, card, id, label, o) {

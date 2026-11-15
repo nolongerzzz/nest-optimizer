@@ -55,7 +55,7 @@ const check = (name, cond, detail) => {
 /* ---------------------------------------------------------------- the ticket */
 const ROW = [
   ['menu-import', 'IMPORT'], ['menu-measure', 'MEASURE'], ['menu-move', 'MOVE'], ['menu-rotate', 'ROTATE'],
-  ['menu-tip', 'TIP'], ['menu-align', 'ALIGN'], ['menu-gen', 'GEN+'],
+  ['menu-tip', 'TIP'], ['menu-gen', 'GEN+'],
   ['btn-lock-pos', 'LOCK POSITION'], ['btn-plate-lock', 'LOCK PLATE']
 ];
 const RIGHT = [['btn-undo', 'UNDO'], ['btn-delete-placed', 'REMOVE'], ['menu-export', 'EXPORT']];
@@ -66,7 +66,7 @@ const PANEL_HOLDS = ['plate-select', 'custom-w', 'custom-d', 'custom-h', 'plate-
                      'model-list', 'clone-count', 'btn-clone'];
 const GROUPS = [
   [['menu-scale', 'SCALE'], ['menu-cut', 'CUT'], ['menu-crop', 'CROP'],
-   ['menu-connect', 'CONNECT'], ['menu-joins', 'JOIN'], ['menu-seat', 'SEAT'], ['menu-supports', 'SUPPORTS'], ['menu-add', 'ADD'],
+   ['menu-connect', 'CONNECT'], ['menu-assemble', 'ASSEMBLE'], ['menu-supports', 'SUPPORTS'], ['menu-add', 'ADD'],
    ['menu-bit', 'SUBTRACT']],
   [['menu-shape', 'SHAPE'], ['menu-text', 'TEXT'], ['menu-weave', 'WEAVE'], ['menu-paint', 'PAINT'], ['menu-surface', 'SURFACE & EDGES'], ['menu-sculpt', 'SCULPT']],
   [['btn-microscope', 'G-SCOPE']],
@@ -92,7 +92,6 @@ const HOLDS = {
   'menu-move': ['chk-move-vertical', 'btn-to-plate', 'btn-nudge-fwd', 'btn-nudge-back', 'btn-nudge-left', 'btn-nudge-right'],
   'menu-rotate': ['btn-rot-left', 'btn-rot-right', 'chk-rot-ring-turn', 'chk-rot-ring-fb', 'chk-rot-ring-ss'],
   'menu-tip': ['btn-flip', 'btn-tip', 'btn-flip-over', 'btn-tip-face', 'btn-tilt-up', 'btn-tilt-dn', 'btn-bank-up', 'btn-bank-dn'],
-  'menu-align': ['btn-join-align', 'btn-join-cx', 'btn-join-cz', 'btn-center-lock', 'btn-center-lock-pick', 'center-lock-ref'],
   'menu-gen': ['.vp-wheel-menu', '.vp-stock-menu', 'stock-shelf', 'btn-stock-box', 'btn-stock-cone', 'menu-relief', 'btn-relief-pick',
                'menu-photo', 'btn-photoset-pick', 'btn-photoset-report', 'btn-photoset-clear'],
   'menu-export': ['export-format', 'btn-export-model', 'btn-library-save', 'btn-export-stl', 'btn-delete-model'],
@@ -104,10 +103,12 @@ const HOLDS = {
                 'btn-lift', 'lift-panel', 'btn-detach'],
   // CONNECT: the builder, and Reattach as its last row (it moved here from the Crop card)
   'menu-connect': ['connect-panel', 'btn-reattach'],
-  // JOIN: one card - the toggle, A, A-B gap, B, B-C gap, C, JOIN, Cancel
-  'menu-joins': ['joins-card', 'join-horizontal', 'join-slot-a', 'join-gap-ab-on', 'join-gap-ab', 'join-slot-b',
-                 'join-gap-bc-on', 'join-gap-bc', 'join-slot-c', 'btn-join', 'btn-join-clear', 'join-readout'],
-  'menu-seat': ['btn-seat-support', 'seat-gap', 'btn-seat-here', 'chk-oversize-washer', 'btn-seat-flush', 'btn-flip-port', 'btn-seat-grid'],
+  // ASSEMBLE: Open editor, then three sections - Join by slots (the toggle, A, A-B gap, B, B-C gap, C, JOIN, Cancel), Seat, Align
+  'menu-assemble': ['asm-card', 'btn-asm-open',
+                 'asm-sec-join', 'joins-card', 'join-horizontal', 'join-slot-a', 'join-gap-ab-on', 'join-gap-ab', 'join-slot-b',
+                 'join-gap-bc-on', 'join-gap-bc', 'join-slot-c', 'btn-join', 'btn-join-clear', 'join-readout',
+                 'asm-sec-seat', 'btn-seat-support', 'seat-gap', 'btn-seat-here', 'chk-oversize-washer', 'btn-seat-flush', 'btn-flip-port', 'btn-seat-grid',
+                 'asm-sec-align', 'btn-join-align', 'btn-join-cx', 'btn-join-cz', 'btn-center-lock', 'btn-center-lock-pick', 'center-lock-ref'],
   'menu-supports': ['supports-card', 'sup-angle', 'btn-sup-all', 'btn-sup-none', 'sup-style', 'sup-size',
                     'sup-rest', 'btn-sup-remove', 'btn-sup-slice', 'btn-sup-slice-cancel', 'slice-set-raft', 'slice-set-raft-gap',
                     // ...and SLICE, its last section (app-print.js): the plate's printer, its Slice settings (folded), Slice (and Cancel while it runs), the readout, Export .gcode.3mf
@@ -204,6 +205,8 @@ const BEFORE = ['menu-import', 'file-input', 'btn-load-stl', 'btn-library', 'men
   'btn-microscope', 'ms-input', 'btn-xray', 'btn-watch', 'btn-frame-view', 'move-vert-slider'];
 /* The ids that went: wrappers whose job is now done by what is listed. */
 const RETIRED = {
+  // The ALIGN, JOIN and SEAT buttons: one ASSEMBLE card, each a section of it (docs/ASSEMBLE-EDITOR.md)
+  'menu-align': ['asm-sec-align'], 'menu-joins': ['asm-sec-join'], 'menu-seat': ['asm-sec-seat'],
   // Soften's Round / Bevel / Corners / Corners+edges drop-down is a shelf of four tiles (app-soften-live.js);
   // state.edgeTreat holds the choice the drop-down used to
   'sel-edge-treat': ['soften-shelf'],
@@ -503,7 +506,7 @@ withApp(async (page, logs) => {
         const ps = state.placed.map((p, i) => ({ p, i })).filter(({ p }) => p && p.mesh && !(p.mesh.userData && p.mesh.userData.nsoSupport));
         return ps.length === 1 ? { i: ps[0].i, id: ps[0].p.sourceId } : null;
       });
-      const want = id === 'menu-joins' ? { i: -1, id: null } : sole || before;
+      const want = id === 'menu-assemble' ? { i: -1, id: null } : sole || before;
       if (after.i !== want.i || after.id !== want.id) keeps.push(id + ' ' + JSON.stringify(want) + ' -> ' + JSON.stringify(after));
     }
     check('every drop-down opens on a click and holds the controls the ticket gives it', holdFails.length === 0,
