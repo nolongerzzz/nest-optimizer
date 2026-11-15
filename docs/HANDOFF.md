@@ -158,6 +158,7 @@ merging its list by hand. The list below is generated.
 - [Supports stair speed - the stair's build, same supports faster (2026-10-26)](handoff/supports-stair-speed.md)
 - [Supports thinning 1 - one tree to a circle (2026-10-25)](handoff/supports-thinning-1-one-tree-to-a-circle.md)
 - [Wrap - one feature (ball, spike, pyramid, bump, dent, line) laid over a face, with a skin for each design on the two plates (2026-11-01)](handoff/surface-wrap.md)
+- [Text - Extrude (raised text) and Raise (lettering already on the piece) (2026-11-15)](handoff/text-extrude-and-raise.md)
 - [Text - type a word, stamp it into a face (2026-10-30)](handoff/text-stamp.md)
 - [The crosshatch welds when stacked - one direction per layer (2026-09-18, same day)](handoff/the-crosshatch-welds-when-stacked-one-direction-per-layer.md)
 - [The Microscope view - the reference tool, with a way in and a way out (2026-09-20)](handoff/the-microscope-view-the-reference-tool-with-a-way-in-and-a-way.md)

@@ -28,6 +28,11 @@
         Remove rows come), click the floor of a letter: the ghost is the fill of all
         three, REMOVE puts the slab back (volume and flat top, one Undo step), and one
         Undo brings the engraving back
+     4b. EXTRUDE: Engrave | Extrude turns the same text into raised text (the row reads
+        Height, the button EXTRUDE); one union, one Undo step, the letters standing on the face
+     7c. RAISE: lettering already on the piece (a shallow label): found and shown faint,
+        hover lights the word, a click locks it, RAISE stands it Height over the face by
+        moving its own corners (one Undo), Height 0 and a click on plain face are refused
      8. a painted piece stands STAMP down by name; Clear paint lets it through
      9. Escape leaves a field, then closes the card; another menu opened over Text
         closes it; Carve armed over it puts it away; no page errors */
@@ -260,6 +265,32 @@ withApp(async (page, logs) => {
   await frames(page, 3);
   check('one Undo restores the slab byte for byte', (await undoDepth(page)) === d0 && (await fingerprint(page)) === fp0, await fingerprint(page));
 
+  console.log('\n=== 4b. EXTRUDE: the same text, standing on the face ===');
+  await click(page, await screenOf(page, mid));
+  await page.waitForFunction(() => nsoTextState().ok, null, { timeout: 5000 });
+  await page.click('#btn-text-dir-out');
+  await page.waitForTimeout(250);
+  st = await S(page);
+  const uiX = await page.evaluate(() => ({ label: document.getElementById('text-depth-label').textContent, go: document.getElementById('btn-text-go').textContent.trim() }));
+  check('Extrude: the Depth row reads Height, the button reads EXTRUDE, the readout says how high, the ghost is drawn',
+    st.dir === 'out' && uiX.label === 'Height' && uiX.go === 'EXTRUDE' && st.ok && /1\.2 mm high/.test(st.readout) && st.ghosts === 1 && st.outlines === 1, JSON.stringify(uiX) + ' ' + st.readout);
+  const cX = await page.evaluate(() => state.text.plan.frame.o), dX = await undoDepth(page);
+  await page.click('#btn-text-go');
+  await page.waitForFunction(d => state.undoStack.length > d && !nsoTextState().busy, dX, { timeout: 60000 }).catch(() => {});
+  const soupX = await soupOf(page);
+  const underX = topAt(soupX, cX[0], cX[1]), awayX = topAt(soupX, cX[0] + 14, cX[1]);
+  st = await S(page);
+  check('EXTRUDE made one Undo step (textReplace): the crossbar of the H stands 1.2 mm over the face, 14 mm away it is untouched',
+    (await undoDepth(page)) === dX + 1 && (await page.evaluate(() => state.undoStack[state.undoStack.length - 1].type)) === 'textReplace' &&
+    Math.abs(underX - before - 1.2) < 0.01 && Math.abs(awayX - before) < 1e-6 && /Extruded/.test(st.readout),
+    'face ' + before.toFixed(3) + ', under ' + underX.toFixed(3) + ', away ' + awayX.toFixed(3) + ' · ' + st.readout);
+  await page.click('#btn-undo');
+  await frames(page, 3);
+  check('one Undo takes the raised text off, byte for byte', (await undoDepth(page)) === dX && (await fingerprint(page)) === fp0);
+  await page.click('#btn-text-dir-in');
+  await page.waitForTimeout(200);
+  check('Engrave puts the card back: Depth, STAMP', await page.evaluate(() => document.getElementById('text-depth-label').textContent === 'Depth' && document.getElementById('btn-text-go').textContent.trim() === 'STAMP' && nsoTextState().dir === 'in'));
+
   console.log('\n=== 6. refusals, in words, nothing cut ===');
   await click(page, await screenOf(page, mid));
   await setField(page, '#inp-text-size', 90);
@@ -395,6 +426,79 @@ withApp(async (page, logs) => {
   st = await S(page);
   check('a click on the plain face is refused in words, nothing locked, REMOVE off', st.bad && /no engraved work/.test(st.readout) && st.sel === 0 && await page.evaluate(() => document.getElementById('btn-text-remove').disabled), st.readout);
   await page.click('#btn-undo');                      // the stamp itself
+  await frames(page, 3);
+  await page.click('#btn-text-mode-stamp');
+  await page.waitForTimeout(200);
+  await page.fill('#inp-text', 'H');
+  await setField(page, '#inp-text-size', 10);
+  await setField(page, '#inp-text-depth', 1.2);
+
+  console.log('\n=== 7c. RAISE: lettering already on the piece ===');
+  await page.fill('#inp-text', 'HEH');
+  await setField(page, '#inp-text-size', 6);
+  await setField(page, '#inp-text-depth', 0.1);                    // a shallow label, as a file modelled for two colours has
+  await click(page, await screenOf(page, mid));
+  await page.waitForFunction(() => nsoTextState().ok, null, { timeout: 5000 });
+  const stemL = await page.evaluate(() => { const D = state.text.plan.data; return D.o[0] + Math.min(...D.V.map(v => v[0])) + 0.5; });
+  const dL0 = await undoDepth(page);
+  await page.click('#btn-text-go');
+  await page.waitForFunction(d => state.undoStack.length > d && !nsoTextState().busy, dL0, { timeout: 60000 }).catch(() => {});
+  const fpLabel = await fingerprint(page), soupLabel = await soupOf(page);
+  await page.click('#btn-text-mode-raise');
+  await page.waitForTimeout(300);
+  st = await S(page);
+  const uiL = await page.evaluate(() => {
+    const vis = id => { const e = document.getElementById(id); const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    return { stampRows: vis('inp-text') || vis('inp-text-size') || vis('btn-text-go') || vis('text-dir-row'), remove: vis('btn-text-remove'),
+             raiseRows: vis('btn-text-raise') && vis('inp-text-lift') && vis('chk-text-word') && vis('inp-text-reach'), off: document.getElementById('btn-text-raise').disabled };
+  });
+  check('Raise mode swaps the card: Height, Whole word, Reach and RAISE (off); the stamp rows and REMOVE go',
+    st.mode === 'raise' && !uiL.stampRows && !uiL.remove && uiL.raiseRows && uiL.off, JSON.stringify(uiL));
+  check('the three letters are found and shown faint before any click', st.found === 3 && st.faint === 1 && /3 letter-like patches found/.test(st.readout), st.readout);
+  const letterPx = await screenOf(page, [stemL, mid[1], mid[2] - 0.1]);
+  await setField(page, '#inp-text-reach', 5);
+  await page.mouse.move(letterPx.x - 3, letterPx.y - 3);
+  await page.mouse.move(letterPx.x, letterPx.y);
+  await page.waitForFunction(() => nsoTextState().hover > 0, null, { timeout: 5000 }).catch(() => {});
+  st = await S(page);
+  check('moving over the first H lights the word (3, amber) and locks nothing', st.hover === 3 && st.sel === 0 && uiL.off, st.readout);
+  await click(page, letterPx);
+  st = await S(page);
+  check('a click locks them: 3 letters, 0.10 mm under the face, RAISE is on', st.sel === 3 && st.ok && /3 letters locked/.test(st.readout) && /-0\.10 mm from the face/.test(st.readout) &&
+    !(await page.evaluate(() => document.getElementById('btn-text-raise').disabled)), st.readout);
+  await setField(page, '#inp-text-lift', 0);
+  st = await S(page);
+  check('Height 0 is refused in words and RAISE goes off', st.bad && /flush with the face/.test(st.readout) && await page.evaluate(() => document.getElementById('btn-text-raise').disabled), st.readout);
+  await setField(page, '#inp-text-lift', 0.8);
+  const dL = await undoDepth(page);
+  await page.click('#btn-text-raise');
+  await page.waitForTimeout(400);
+  const soupUp = await soupOf(page);
+  st = await S(page);
+  check('RAISE: one Undo step (textReplace), the stem of the H stands 0.8 mm over the face, the face beside it has not moved, as many triangles as before',
+    (await undoDepth(page)) === dL + 1 && (await page.evaluate(() => state.undoStack[state.undoStack.length - 1].type)) === 'textReplace' &&
+    Math.abs(topAt(soupUp, stemL, mid[1]) - mid[2] - 0.8) < 1e-3 && Math.abs(topAt(soupUp, mid[0] + 22, mid[1]) - mid[2]) < 1e-6 && soupUp.length === soupLabel.length && /Raised - 3 letters/.test(st.readout),
+    'stem ' + topAt(soupUp, stemL, mid[1]).toFixed(3) + ', beside ' + topAt(soupUp, mid[0] + 22, mid[1]).toFixed(3) + ' · ' + st.readout);
+  check('the card is ready for more: nothing locked, the raised letters found again', st.sel === 0 && st.found === 3 && st.mode === 'raise', JSON.stringify({ sel: st.sel, found: st.found }));
+  await page.click('#btn-undo');
+  await frames(page, 3);
+  check('one Undo puts the label back byte for byte', (await undoDepth(page)) === dL && (await fingerprint(page)) === fpLabel);
+  await page.uncheck('#chk-text-word');
+  await page.waitForTimeout(200);
+  await click(page, letterPx);
+  st = await S(page);
+  const one = st.sel;
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(150);
+  st = await S(page);
+  check('Whole word off: a click locks the one letter; Escape lets it go and leaves the card open', one === 1 && st.sel === 0 && st.open && st.mode === 'raise', 'locked ' + one);
+  await click(page, await screenOf(page, [mid[0] + 22, mid[1] + 12, mid[2]]));
+  st = await S(page);
+  check('a click on the plain face says there is no letter there and locks nothing', st.bad && /no letter under that point/.test(st.readout) && st.sel === 0, st.readout);
+  await page.check('#chk-text-word');
+  await setField(page, '#inp-text-reach', 3);
+  await setField(page, '#inp-text-lift', 0.6);
+  await page.click('#btn-undo');                      // the label itself
   await frames(page, 3);
   await page.click('#btn-text-mode-stamp');
   await page.waitForTimeout(200);

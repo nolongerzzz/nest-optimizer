@@ -1,7 +1,8 @@
 # Text
 
-Type a word, click a face of a piece, get it engraved there - any depth, any
-size, a font from the list or one loaded from a file. The geometry is
+Type a word, click a face of a piece, get it engraved there - or **extruded**,
+standing on the face - any depth, any size, a font from the list or one loaded
+from a file. **Raise** does the same for lettering the piece already has. The geometry is
 `nso_text.js` (THREE-free, node-tested: `npm run text:test`); the card is
 `app-text.js`, the **TEXT** button on the left bar between SHAPE and WEAVE (docs/WEAVE.md)
 (driven: `npm run text:drive`).
@@ -17,7 +18,8 @@ button inside it. Close the menu (or Escape, or Cancel) and it is put away.
 | Font | Sans, Serif, Mono, Heavy, Script - the machine's own faces by name, with the usual fallbacks - and **Font file**: a `.ttf`, `.otf`, `.woff` or `.woff2` read in the page (`FontFace`, nothing is uploaded) and added to the list under its file name |
 | Bold, Italic | the canvas's own (a face without them is synthesised) |
 | Size | the height of a **capital letter**, mm (0.5 to 500). Lines are 1.2 em apart |
-| Depth | mm below the surface, **square to the surface** (0.1 to 50) |
+| Engrave, Extrude | cut the text in, or stand it on the face (below) |
+| Depth | mm below the surface, **square to the surface** (0.1 to 50). With Extrude the row reads **Height**: mm above it |
 | Angle | degrees, counter-clockwise seen from outside; 0 reads along the face's longest straight edge |
 | Mirror | read backwards, for a stamp or a mould |
 
@@ -35,9 +37,45 @@ for the next face with its numbers kept. While it is open:
   the card. Opening another menu, or arming Carve or Paint, puts Text away too (one
   click-owning tool at a time).
 
+## Extrude
+
+**Engrave | Extrude**, under the mode switch. Extrude is the same text, click, ghost, drag and arrows, but
+the solid stands on the face: its top `Height` above the surface and following it (one height all over a
+cylinder), its bottom 0.2 mm inside the piece so the union has something to bite. The button reads
+**EXTRUDE** and joins it with `NSO_unionSoups` - one boolean, one Undo (`textReplace`). Lettering that reads
+in one colour. Off the face is refused as for an engraving; the wall-under-the-text rule does not apply
+(nothing is cut). In the engine it is `plan(..., { raise: true })`: `data.hta` is the top at each vertex and
+`cutter()` returns the solid to add.
+
+## Raise
+
+The third mode, **Stamp | Remove | Raise**: lettering the piece **already has**. A label modelled for a
+second colour is letters outlined in the mesh about 0.01 mm deep, each a flat patch walled all round;
+Bambu Studio's colour paint (`paint_color`) sits on those patches. This app carries no colour, so such a
+piece arrives one colour with letters nobody can see - and far too shallow for Remove's rays.
+
+- Open Raise and every letter-like patch found on the piece is drawn **faint**; the readout says how many.
+- **Hover** lights a letter amber, a **click** locks it green; **Whole word** and **Reach** are Remove's (a
+  letter and every one in the same plane, at the same level, within Reach mm of it, edge to edge). Click
+  more to add, click a locked one to let it go, **Escape** lets go of all.
+- **RAISE** stands what is green **Height** mm over the face round it; a negative Height sinks it that far
+  below instead (an engraving, for a label that prints face down on the bed). One Undo (`textReplace`).
+
+The engine (`NSO_Text.islands`, `islandAt`, `islandGroup`, `islandTris`, `lift`) reads the triangles: a patch
+is one plane (triangles joined within a degree), everything else that touches its corners is a wall (60
+degrees or more off the plane), the walls' far corners stand at one height (within 0.05 mm), and a face
+looking the same way meets that rim - so the top of a box is not lettering, and the middle of an `O` is a
+patch of its own that Whole word never takes with the ring (another level). `lift` moves the patch's own
+corners along its normal and nothing else: the walls are joined to them, so a wall that went 0.01 mm down
+to a floor now goes up to a top and turns itself to face out. No boolean, no new triangle; the piece is as
+closed as it was. Raised letters are lettering too: read again, they can be lowered.
+
+Refused in words: a height under 0.05 mm (flush with the face), a click with no letter under it, a piece
+with no lettering outlined in its mesh (the readout points at Stamp with Extrude), a painted piece.
+
 ## Remove
 
-The switch at the top of the card, **Stamp | Remove**. In Remove the pointer is the tool:
+The switch at the top of the card, **Stamp | Remove | Raise**. In Remove the pointer is the tool:
 
 - **Hover** a letter (or any engraving, trench, recess): its floor and walls light up **amber** - that is
   what a click would lock.
@@ -132,9 +170,9 @@ its faces by axis and side, so any paint stands it down.
 
 ## Not in the first cut
 
-- **Emboss** (raised text): the same cutter, unioned instead of subtracted, its
-  bottom at the surface and its top `depth` above it. The engine's prism already
-  has both ends.
+- **Colour.** A 3MF's per-triangle colour paint is not read, shown or written; a painted label
+  arrives as its outlines only (Raise finds them).
+- Raise on a **curved** face: a patch is one plane.
 - **Wrapping** text across an edge or round a tube's whole circumference: the
   prism is straight along n, so text stops where the face's smooth surface does.
 - **Letter spacing, line spacing, alignment, outlines of a font's own name list**
@@ -153,6 +191,9 @@ its faces by axis and side, so any paint stands it down.
   (`tools/nso_csg_node.js`); every number is read off its output.
 - `tools/nso_text_drive_check.js` (`npm run text:drive`): the real page, real
   mouse and keyboard, the browser's own fonts (a loaded DejaVu face included).
+- Extrude: gate 11 of `text:test` (the solid, the union's volume, a thin plate, a cylinder's radius) and
+  step 4b of `text:drive`. Raise: gate 12 (a 0.01 mm label made with the shipped subtract: found, picked,
+  grouped, lifted, sunk, the app's checker clean, the refusals) and step 7c of `text:drive`.
 - Remove: the rim-cap engine is gate 10 of `text:test`; the card's Remove is `resurface:test` (`tools/nso_resurface_test.js`: the slab, a trench, a hole straight through, a cylinder, a skewed axis, every subset of three letters) and 7b and the cylinder step of `text:drive` (hover lights, click locks, Escape lets go, Whole word on and off, REMOVE fills, one Undo).
 - a Text row in `tools/nso_pick_release_test.js`: armed, after STAMP and after
   Escape, a left-drag on the bare plate orbits.

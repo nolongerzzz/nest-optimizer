@@ -4953,6 +4953,16 @@ body.sup-card-open #adjust-status { display: none; }
 .text-card.is-remove .vp-clone.text-remove-only { display: flex; }
 .text-card.is-remove .btn.text-remove-only { display: block; }
 .text-card .text-mode-row, #text-mode-row { margin-bottom: 3px; }
+/* Raise (lettering already on the piece): its own Height row and button; Whole word and Reach are Remove's */
+.text-card .text-raise-only { display: none; }
+.text-card.is-raise .text-stamp-only { display: none; }
+.text-card.is-raise .text-raise-only { display: revert; }
+.text-card.is-raise .vp-bend-field.text-raise-only { display: grid; }
+.text-card.is-raise .vp-clone.text-raise-only { display: flex; }
+.text-card.is-raise .btn.text-raise-only { display: block; }
+.text-card.is-remove .btn.text-raise-only, .text-card.is-remove #btn-text-raise { display: none; }
+.text-card.is-raise #btn-text-remove { display: none; }
+#text-dir-row { margin-bottom: 3px; }
 #viewport canvas.text-cur-grab { cursor: grab; }
 
 /* COMPARE's measurement: a table in a fixed-width face, scrolling inside the card rather than growing it */

@@ -37,6 +37,13 @@
 //      click fills one letter, "word" fills all three; an O's island is kept; a
 //      click on the plain face, a cylinder, and a stamp thinner than the face
 //      says why; a second stamp of another depth is left alone
+//  11. EXTRUDE (opts.raise): the solid stands from 0.2 inside the face to the height
+//      above it, the shipped union adds exactly area x height; a thin plate is not
+//      refused, off the face is; on a cylinder the top follows the surface
+//  12. RAISE: letters outlined 0.01 mm deep (a label modelled for a second colour)
+//      are read off the mesh, picked by point, grouped by Reach, and lifted by
+//      moving their own corners: closed, clean, the right volume; sunk with a
+//      negative height; refusals in words; a plain slab has no lettering
 
 'use strict';
 
@@ -491,6 +498,102 @@ const polyArea = (sh) => sh.area;
       if (cf.ok && rayTop(cyl, wx, wy) - rayTop(cut.soup, wx, wy) > 0.3) { worst = Math.max(worst, Math.abs(rayTop(cf.soup, wx, wy) - rayTop(cyl, wx, wy))); cn++; }
     }
     gate('10o the surface is back to the cylinder’s within 0.03 mm over the letters', cn >= 2 && worst < 0.03, cn + ' points, worst ' + worst.toFixed(4) + ' mm');
+  }
+
+  /* 11 -------------------------------------------------------------- EXTRUDE */
+  {
+    const sh = T.shape(letterH());
+    const pl = T.plan(SLAB, CLICK, sh, { depth: 0.8, raise: true });
+    gate('11a raised text plans on a flat slab and says how high', pl.ok && pl.stats.raise && /0\.8 mm high/.test(pl.reason), pl.reason);
+    const add = T.cutter(pl), want = sh.area * (0.8 + 0.2);
+    gate('11b its solid is closed, wound outward: area x (height + 0.2 sunk in)', closed(add) && near(volume(add), want, 1e-6 * want),
+      'volume ' + volume(add).toFixed(4) + ' of ' + want.toFixed(4));
+    let zl = Infinity, zh = -Infinity;
+    for (let i = 2; i < add.length; i += 3) { zl = Math.min(zl, add[i]); zh = Math.max(zh, add[i]); }
+    gate('11c it stands from 0.2 inside the face to 0.8 above it', near(zl, 5.8, 1e-5) && near(zh, 6.8, 1e-5), zl.toFixed(3) + ' .. ' + zh.toFixed(3));
+    const res = await csg.NSO_unionSoups(SLAB, add);
+    const gained = (res.soup ? volume(res.soup) : NaN) - volume(SLAB);
+    gate('11d the shipped union adds exactly area x height and the piece is one closed solid', res.ok && closed(res.soup) && near(gained, sh.area * 0.8, 2e-3 * sh.area * 0.8),
+      'gained ' + gained.toFixed(4) + ' of ' + (sh.area * 0.8).toFixed(4) + ' mm3');
+    gate('11e the crossbar of the H stands 0.8 over the face, the slab beside it does not move',
+      res.ok && near(rayTop(res.soup, 30, 20), 6.8, 1e-3) && near(rayTop(res.soup, 30, 23), 6, 1e-3) && near(rayTop(res.soup, 45, 20), 6, 1e-3),
+      [rayTop(res.soup, 30, 20), rayTop(res.soup, 30, 23), rayTop(res.soup, 45, 20)].map(v => v.toFixed(3)).join(' / '));
+    // a wall too thin to engrave is no reason to refuse raised text
+    const thin = box([0, 0, 0], [60, 40, 1]);
+    const tp = T.plan(thin, { point: [30, 20, 1], normal: [0, 0, 1] }, sh, { depth: 3, raise: true });
+    gate('11f raised text on a 1 mm plate is not refused for its wall (nothing is cut)', tp.ok, tp.reason);
+    const off = T.plan(SLAB, { point: [58, 20, 6], normal: [0, 0, 1] }, sh, { depth: 0.8, raise: true });
+    gate('11g raised text that runs off the face is refused all the same', !off.ok && /runs off the face/.test(off.reason), off.reason);
+    // a cylinder: the top follows the surface, the same height all over
+    const cyl = cylinder(15, 40, 96), cs = T.shape(word(2));
+    const cp = T.plan(cyl, { point: [20, 0, 15], normal: [0, 0, 1] }, cs, { depth: 1, angle: 90, raise: true });
+    const cu = cp.ok ? await csg.NSO_unionSoups(cyl, T.cutter(cp)) : { ok: false };
+    let worst = 0, cn = 0;
+    if (cu.ok) {
+      const D = cp.data;
+      D.T.forEach(t => {
+        const cx = (D.V[t[0]][0] + D.V[t[1]][0] + D.V[t[2]][0]) / 3, cy = (D.V[t[0]][1] + D.V[t[1]][1] + D.V[t[2]][1]) / 3;
+        const wx = D.o[0] + D.ex[0] * cx + D.ey[0] * cy, wy = D.o[1] + D.ex[1] * cx + D.ey[1] * cy;
+        const r = Math.hypot(wy, rayTop(cu.soup, wx, wy));          // the cylinder's axis is X
+        worst = Math.max(worst, Math.abs(r - 16)); cn++;
+      });
+    }
+    gate('11h on a faceted cylinder (R 15) the raised top is at radius 16 within 0.05 mm, everywhere', cu.ok && closed(cu.soup) && cn > 20 && worst < 0.05,
+      cn + ' triangles, worst ' + worst.toFixed(4) + ' mm' + (cp.ok ? '' : ' ' + cp.reason));
+  }
+
+  /* 12 -------------------------------------------------------------- RAISE */
+  {
+    // a label as a CAD file models it for a second colour: three letters outlined 0.01 mm deep, and an O
+    const word3 = T.shape(word(3)), ring = T.shape(ringO());
+    const p1 = T.plan(SLAB, { point: [22, 20, 6], normal: [0, 0, 1] }, word3, { depth: 0.01 });
+    const s1 = (await csg.NSO_subtractSoups(SLAB, T.cutter(p1))).soup;
+    const p2 = T.plan(s1, { point: [48, 20, 6], normal: [0, 0, 1] }, ring, { depth: 0.01 });
+    const label = (await csg.NSO_subtractSoups(s1, T.cutter(p2))).soup;
+    const before = fingerprint(label);
+    const isl = T.islands(label), pits = isl.list.filter(o => o.level < 0), bumps = isl.list.filter(o => o.level > 0);
+    gate('12a four letters are read off the mesh, 0.01 mm under the face, and the O’s middle as an island of its own; the slab’s six faces are not lettering',
+      pits.length === 4 && bumps.length === 1 && isl.list.length === 5 && pits.every(o => near(o.level, -0.01, 1e-4) && near(o.n[2], 1, 1e-6)) && near(bumps[0].level, 0.01, 1e-4),
+      isl.list.map(o => o.level.toFixed(3)).join(' '));
+    gate('12b their areas are the letters’ own', near(pits.reduce((a, o) => a + o.area, 0), word3.area + ring.area, 1e-3 * (word3.area + ring.area)),
+      pits.reduce((a, o) => a + o.area, 0).toFixed(3) + ' of ' + (word3.area + ring.area).toFixed(3));
+    const D = p1.data, fx = D.o[0] + D.V.reduce((m, v) => Math.min(m, v[0]), Infinity) + 0.6;
+    const first = T.islandAt(isl, [fx, 20, 5.99], [0, 0, 1]);
+    gate('12c a point on a letter’s floor is that letter; a point on the plain face is none; a point on the underside is none',
+      first >= 0 && isl.list[first].level < 0 && T.islandAt(isl, [5, 5, 6], [0, 0, 1]) === -1 && T.islandAt(isl, [fx, 20, 0], [0, 0, -1]) === -1, 'letter ' + first);
+    const g3 = T.islandGroup(isl, first, 5), g0 = T.islandGroup(isl, first, 0), gAll = T.islandGroup(isl, first, 30);
+    gate('12d Whole word: reach 5 takes the three letters of the word, reach 0 the one, reach 30 the O too - never the O’s middle',
+      g3.length === 3 && g0.length === 1 && gAll.length === 4 && gAll.indexOf(bumps[0].id) < 0, g0.length + ' / ' + g3.length + ' / ' + gAll.length);
+    const up = T.lift(label, isl, gAll, 0.6), A = word3.area + ring.area;
+    gate('12e lift 0.6: the piece is closed, triangle for triangle the same count, its volume up by area x 0.61',
+      up.ok && closed(up.soup) && up.soup.length === label.length && near(volume(up.soup) - volume(label), A * 0.61, 2e-3 * A),
+      up.ok ? 'gained ' + (volume(up.soup) - volume(label)).toFixed(4) + ' of ' + (A * 0.61).toFixed(4) : up.reason);
+    gate('12f the letters stand at 6.6, the face at 6, the O’s middle still at 6',
+      up.ok && near(rayTop(up.soup, fx, 20), 6.6, 1e-4) && near(rayTop(up.soup, 5, 5), 6, 1e-6) && near(rayTop(up.soup, 48, 20), 6, 1e-4) && near(rayTop(up.soup, 48 + 5, 20), 6.6, 1e-4),
+      [rayTop(up.soup, fx, 20), rayTop(up.soup, 5, 5), rayTop(up.soup, 48, 20), rayTop(up.soup, 53, 20)].map(v => v.toFixed(3)).join(' / '));
+    const vm = require('vm'), fs = require('fs'), path = require('path');
+    const sb = { window: {} };
+    vm.createContext(sb);
+    for (const f of ['NSO_Repair.js', 'nso-defects.js']) vm.runInContext(fs.readFileSync(path.join(__dirname, '..', f), 'utf8'), sb, { filename: f });
+    const chk = up.ok ? sb.window.NSO_Defects.locate(up.soup, {}) : {};
+    gate('12g the app’s checker finds the raised piece clean (no open, flipped or piercing triangles)',
+      up.ok && chk.openEdges === 0 && chk.nonManifoldEdges === 0 && chk.flippedEdges === 0 && !chk.pierce, JSON.stringify({ open: chk.openEdges, nm: chk.nonManifoldEdges, flip: chk.flippedEdges, pierce: chk.pierce }));
+    const down = T.lift(label, isl, g3, -0.5);
+    gate('12h a negative height sinks them: 0.5 under the face, closed, volume down by area x 0.49',
+      down.ok && closed(down.soup) && near(rayTop(down.soup, fx, 20), 5.5, 1e-4) && near(volume(label) - volume(down.soup), word3.area * 0.49, 2e-3 * word3.area),
+      down.ok ? rayTop(down.soup, fx, 20).toFixed(3) : down.reason);
+    gate('12i the soup handed in is untouched; one letter alone lifts alone', fingerprint(label) === before && (() => {
+      const one = T.lift(label, isl, g0, 1); return one.ok && near(volume(one.soup) - volume(label), isl.list[first].area * 1.01, 1e-2);
+    })());
+    const flush = T.lift(label, isl, g3, 0.01), nan = T.lift(label, isl, g3, NaN), none = T.lift(label, isl, [], 1), stale = T.lift(SLAB, isl, g3, 1);
+    gate('12j refused in words: flush with the face, no number, nothing locked, another soup',
+      !flush.ok && /flush with the face/.test(flush.reason) && !nan.ok && /needs a number/.test(nan.reason) && !none.ok && /nothing is locked/.test(none.reason) && !stale.ok && /changed/.test(stale.reason),
+      [flush.reason, nan.reason, none.reason, stale.reason].join(' | '));
+    gate('12k a plain slab and a cylinder have no lettering', T.islands(SLAB).list.length === 0 && T.islands(cylinder(15, 40, 96)).list.length === 0,
+      T.islands(SLAB).list.length + ' / ' + T.islands(cylinder(15, 40, 96)).list.length);
+    // raised letters are lettering too: read again, they can be put back down
+    const again = up.ok ? T.islands(up.soup) : { list: [] }, tall = again.list.filter(o => near(o.level, 0.6, 1e-3));
+    gate('12l read again, the raised letters stand 0.6 over the face and can be lowered', tall.length === 4, again.list.map(o => o.level.toFixed(2)).join(' '));
   }
 
   console.log(fails ? '\n' + fails + ' FAILED' : '\nPASSED all gates');

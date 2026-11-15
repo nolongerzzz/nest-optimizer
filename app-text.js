@@ -45,6 +45,18 @@
 // stamped last week, after other edits, on a flat face or a curved one, on a scan full of splinters.
 // Drag and the arrows are the stamp's, off here. docs/RESURFACE.md.
 //
+// EXTRUDE (the Engrave | Extrude switch under Stamp): the same text, the same click, the same ghost, but the
+// solid stands on the face - its top Depth (the row reads Height) above the surface, following it, its
+// bottom 0.2 mm inside - and STAMP (the button reads EXTRUDE) joins it with NSO_unionSoups. Lettering that
+// reads in one colour.
+//
+// RAISE (the third mode): lettering the piece already has. A label modelled for a second colour is letters
+// outlined in the mesh 0.01 mm deep (Bambu Studio's colour paint sits on them; this app carries no colour, so
+// the piece arrives with letters nobody can see). NSO_Text.islands reads every such patch off the triangles;
+// they are drawn faint so they can be found, the pointer over one lights it, a click locks it (Whole word and
+// Reach as in Remove), and RAISE stands them Height mm off the face round them (negative: sinks them) by
+// moving their own corners - NSO_Text.lift, no boolean - one Undo (textReplace).
+//
 // PAINT SCOPE: WHOLE-PIECE. Per the scoping rule in docs/HANDOFF.md: the text
 // is cut through whatever faces it meets, curved ones too, and paint names its
 // faces by axis and side - so any paint stands it down, naming the count:
@@ -63,6 +75,8 @@ var TEXT_PPM = 16;                      // pixels a mm in the picture of the let
 var TEXT_MAX_PX = 4096;                 // and no side of it longer than this
 var TEXT_MIN_PPM = 4;                   // coarser than this and the letters are not worth tracing
 var TEXT_DEBOUNCE_MS = 90;
+var TEXT_FAINT_MAX = 600;               // Raise draws every letter it found faintly, up to this many
+var TEXT_FAINT_LEVEL = 2;               // and only those within this many mm of their face (lettering, not steps)
 
 var TEXT_FONTS = {
   sans:   { css: '"Helvetica Neue", Helvetica, Arial, "Liberation Sans", "DejaVu Sans", sans-serif' },
@@ -108,7 +122,7 @@ function NSO_textPressed(id) { var b = NSO_textEl(id); return !!(b && b.getAttri
 /* The card's numbers as NSO_Text.plan opts. */
 function NSO_textOpts() {
   var mir = NSO_textEl('chk-text-mirror');
-  return { depth: NSO_textNum('inp-text-depth'), angle: NSO_textNum('inp-text-angle'), mirror: !!(mir && mir.checked) };
+  return { depth: NSO_textNum('inp-text-depth'), angle: NSO_textNum('inp-text-angle'), mirror: !!(mir && mir.checked), raise: NSO_textPressed('btn-text-dir-out') };
 }
 /* What the picture is made of; the same spec, the same picture. */
 function NSO_textSpec() {
@@ -127,9 +141,23 @@ function NSO_textReadout(text, bad) {
   NSO_textUI().said = { text: text, bad: !!bad };
 }
 function NSO_textSyncButtons() {
-  var B = NSO_textUI(), go = NSO_textEl('btn-text-go'), rm = NSO_textEl('btn-text-remove'), ok = !B.busy && !!(B.plan && B.plan.ok);
+  var B = NSO_textUI(), go = NSO_textEl('btn-text-go'), rm = NSO_textEl('btn-text-remove'), up = NSO_textEl('btn-text-raise'), ok = !B.busy && !!(B.plan && B.plan.ok);
   if (go) go.disabled = !ok || B.mode !== 'stamp';
   if (rm) rm.disabled = !ok || B.mode !== 'remove';
+  if (up) up.disabled = !ok || B.mode !== 'raise';
+}
+/* Engrave | Extrude: which way the typed text goes. The Depth row reads Height and STAMP reads EXTRUDE. */
+function NSO_textSetDir(out) {
+  [['btn-text-dir-in', !out], ['btn-text-dir-out', !!out]].forEach(function (p) {
+    var b = NSO_textEl(p[0]);
+    if (b) b.setAttribute('aria-pressed', p[1] ? 'true' : 'false');
+  });
+  var lab = NSO_textEl('text-depth-label'), go = NSO_textEl('btn-text-go'), dep = NSO_textEl('inp-text-depth');
+  if (lab) lab.textContent = out ? 'Height' : 'Depth';
+  if (dep) dep.setAttribute('aria-label', out ? 'Raised height, mm' : 'Engraving depth, mm');
+  if (go) go.textContent = out ? 'EXTRUDE' : 'STAMP';
+  NSO_textUI().key = '';
+  NSO_textPreview();
 }
 /* Stamp | Remove. */
 function NSO_textSetMode(mode) {
@@ -139,16 +167,18 @@ function NSO_textSetMode(mode) {
   B.mode = mode;
   B.hit = null; B.plan = null; B.key = '';
   if (B.rm) { if (B.rm.timer) clearTimeout(B.rm.timer); B.rm = null; }
+  if (B.lf) { if (B.lf.timer) clearTimeout(B.lf.timer); B.lf = null; }
   NSO_textClearGhost();
   var card = NSO_textEl('text-card');
-  if (card) card.classList.toggle('is-remove', mode === 'remove');
-  [['btn-text-mode-stamp', 'stamp'], ['btn-text-mode-remove', 'remove']].forEach(function (p) {
+  if (card) { card.classList.toggle('is-remove', mode === 'remove'); card.classList.toggle('is-raise', mode === 'raise'); }
+  [['btn-text-mode-stamp', 'stamp'], ['btn-text-mode-remove', 'remove'], ['btn-text-mode-raise', 'raise']].forEach(function (p) {
     var b = NSO_textEl(p[0]);
     if (b) b.setAttribute('aria-pressed', p[1] === mode ? 'true' : 'false');
   });
   NSO_textPreview();
   if (typeof setStatus === 'function') {
-    setStatus(mode === 'remove' ? 'Text remove - move over an engraved letter, click to lock it, click more to add, then REMOVE. Escape clears, then closes.'
+    setStatus(mode === 'raise' ? 'Text raise - the lettering found on the piece is shown faint: move over a letter, click to lock it, then RAISE. Escape clears, then closes.' :
+              mode === 'remove' ? 'Text remove - move over an engraved letter, click to lock it, click more to add, then REMOVE. Escape clears, then closes.'
                                 : 'Text open - type the text, then click a face to place it. Close the menu or press Escape to stop.');
   }
 }
@@ -211,6 +241,7 @@ function NSO_textPreview() {
   var B = NSO_textUI(), m = NSO_textModel();
   if (!B.open) return null;
   if (B.mode === 'remove') return NSO_textPreviewRemove(m);
+  if (B.mode === 'raise') return NSO_textPreviewRaise(m);
   var sh = NSO_textShape();
   function nothing(msg, bad) {
     B.plan = null; B.key = '';
@@ -457,7 +488,7 @@ function NSO_textDraw(m) {
   var D = pl.data, lines = [];
   (D.edges || []).forEach(function (e) {
     [e[0], e[1]].forEach(function (i) {
-      var x = D.V[i][0], y = D.V[i][1], w = D.hb[i];
+      var x = D.V[i][0], y = D.V[i][1], w = D.hta ? D.hta[i] : D.hb[i];      // the floor of an engraving, the top of raised text
       var raw = [D.o[0] + D.ex[0] * x + D.ey[0] * y + D.n[0] * w, D.o[1] + D.ex[1] * x + D.ey[1] * y + D.n[1] * w,
                  D.o[2] + D.ex[2] * x + D.ey[2] * y + D.n[2] * w];
       var dd = NSO_textRawToDisplay(m, raw);
@@ -669,9 +700,9 @@ async function NSO_textGo() {
   var soup0 = m.rawTris, hit = B.hit, o = NSO_textOpts(), sh = B.shape, job = null;
   B.busy = true;
   NSO_textSyncButtons();
-  NSO_textReadout('Stamping…');
+  NSO_textReadout(o.raise ? 'Extruding…' : 'Stamping…');
   var bar = setTimeout(function () {
-    if (B.busy && typeof NSO_BoolBusy !== 'undefined') job = NSO_BoolBusy.begin('Stamping', 'text-readout');
+    if (B.busy && typeof NSO_BoolBusy !== 'undefined') job = NSO_BoolBusy.begin(o.raise ? 'Extruding' : 'Stamping', 'text-readout');
   }, TEXT_BAR_MS);
   try {
     // Work as is (nso-helpers.js, nsoOverlap): overlapping shells are merged for the boolean
@@ -682,19 +713,21 @@ async function NSO_textGo() {
       pl = NSO_Text.plan(soup, hit, sh, o);
       if (!pl.ok) return refuse(pl.reason);
     }
-    var res = await NSO_subtractSoups(soup, NSO_Text.cutter(pl), { label: 'Stamping', host: 'text-readout' });
+    if (o.raise && typeof NSO_unionSoups !== 'function') return refuse('Extrude needs the union (app-join.js)');
+    var res = o.raise ? await NSO_unionSoups(soup, NSO_Text.cutter(pl), { label: 'Extruding', host: 'text-readout' })
+                      : await NSO_subtractSoups(soup, NSO_Text.cutter(pl), { label: 'Stamping', host: 'text-readout' });
     if (!res || !res.ok || !res.soup || res.soup.length < 9) {
       return refuse(res && res.cancelled ? 'stopped' : res && res.timedOut ? 'it ran too long and was stopped' : (res && res.reason) || 'the boolean returned nothing');
     }
     if (NSO_textModel() !== m || m.rawTris !== soup0) return refuse('the piece changed while it was stamped');
-    var txt = 'Text done - ' + NSO_textFmt(sh.width) + ' × ' + NSO_textFmt(sh.height) + ' mm, ' + NSO_textFmt(o.depth) + ' mm deep' +
+    var txt = 'Text done - ' + NSO_textFmt(sh.width) + ' × ' + NSO_textFmt(sh.height) + ' mm, ' + NSO_textFmt(o.depth) + (o.raise ? ' mm high' : ' mm deep') +
       (sol.merged ? ' - ' + sol.note : '');
     if (!NSO_sculptCommitRaw(m, res.soup, 'textReplace', txt)) return refuse('the result could not be committed');
     if (typeof updateAdjustUI === 'function') updateAdjustUI();
     // open for the next face: the click goes, the numbers stay
     B.hit = null; B.plan = null; B.key = '';
     NSO_textClearGhost();
-    NSO_textReadout('Stamped ' + NSO_textFmt(sh.width) + ' × ' + NSO_textFmt(sh.height) + ' mm - click the next face.');
+    NSO_textReadout((o.raise ? 'Extruded ' : 'Stamped ') + NSO_textFmt(sh.width) + ' × ' + NSO_textFmt(sh.height) + ' mm - click the next face.');
     return { ok: true, plan: pl };
   } catch (err) {
     console.error('[text]', err);
@@ -740,6 +773,182 @@ function NSO_textRemoveGo() {
   NSO_textRmReset(false);
   NSO_textReadout('Removed - ' + (R.sel.length === 1 ? '1 piece' : R.sel.length + ' pieces') + '. Move over the next letter.');
   return { ok: true, plan: pl };
+}
+
+/* ------------------------------------------------ RAISE: lettering already there */
+
+function NSO_textLf() {
+  var B = NSO_textUI();
+  if (!B.lf) B.lf = { soup: null, modelId: null, isl: null, faint: [], sel: [], hover: [], timer: 0, pend: null };
+  return B.lf;
+}
+function NSO_textLfHeight() { return NSO_textNum('inp-text-lift'); }
+// The lettering of the piece, read again when its soup is another one (a bake, an Undo).
+function NSO_textLfEnsure(m) {
+  var L = NSO_textLf();
+  if (L.isl && L.soup === m.rawTris && L.modelId === m.id) return L.isl;
+  L.soup = m.rawTris; L.modelId = m.id; L.sel = []; L.hover = []; L.note = '';
+  try { L.isl = NSO_Text.islands(m.rawTris); }
+  catch (err) { console.error('[text]', err); L.isl = null; }
+  L.faint = L.isl ? L.isl.list.filter(function (o) { return Math.abs(o.level) <= TEXT_FAINT_LEVEL; }).map(function (o) { return o.id; }) : [];
+  if (L.faint.length > TEXT_FAINT_MAX) L.faint = [];
+  return L.isl;
+}
+function NSO_textLfGroup(id) {
+  var L = NSO_textLf(), o = NSO_textRemoveOpts();
+  if (id < 0 || !L.isl) return [];
+  return o.word ? NSO_Text.islandGroup(L.isl, id, o.reach) : [id];
+}
+// What the card says, and whether RAISE is on (B.plan.ok).
+function NSO_textLfSay() {
+  var B = NSO_textUI(), L = NSO_textLf(), m = NSO_textModel(), h = NSO_textLfHeight();
+  B.plan = null; B.key = '';
+  if (!m) NSO_textReadout('Select a piece, then move over a letter on it.');
+  else if (!L.isl || !L.isl.list.length) {
+    NSO_textReadout('No lettering is outlined in this piece’s mesh. Raise lifts letters that are already there; to add raised text, use Stamp with Extrude.');
+  } else if (!L.sel.length) {
+    var n = L.faint.length;
+    NSO_textReadout(L.hover.length ? 'Click to lock ' + (L.hover.length === 1 ? 'this letter' : L.hover.length + ' letters') + ' for RAISE.'
+      : L.note ? L.note            // what RAISE just did, until the pointer finds the next letter
+      : (n ? n + (n === 1 ? ' letter-like patch' : ' letter-like patches') + ' found (shown faint). ' : '') + 'Move over a letter, click it to lock it, click more to add. RAISE lifts the green.');
+  } else {
+    var area = 0, lo = Infinity, hi = -Infinity;
+    L.sel.forEach(function (id) { var o = L.isl.list[id]; area += o.area; lo = Math.min(lo, o.level); hi = Math.max(hi, o.level); });
+    var now = Math.abs(hi - lo) < 0.005 ? (Math.round(lo * 100) / 100).toFixed(2) : (Math.round(lo * 100) / 100).toFixed(2) + ' to ' + (Math.round(hi * 100) / 100).toFixed(2);
+    var head = L.sel.length + (L.sel.length === 1 ? ' letter' : ' letters') + ' locked, ' + NSO_textFmt(area) + ' mm², now ' + now + ' mm from the face';
+    if (!isFinite(h)) NSO_textReadout('Text: the height needs a number.', true);
+    else if (Math.abs(h) < 0.05) NSO_textReadout('Text: a height under 0.05 mm leaves the letters flush with the face - nothing to print.', true);
+    else if (Math.abs(h) > 50) NSO_textReadout('Text: a height of ' + NSO_textFmt(h) + ' mm is more than one lift makes (50).', true);
+    else {
+      B.plan = { ok: true, reason: head, count: L.sel.length }; B.key = 'lf';
+      NSO_textReadout(head + ' - RAISE ' + (h > 0 ? 'stands ' + (L.sel.length === 1 ? 'it ' : 'them ') + NSO_textFmt(h) + ' mm above it' : 'sinks ' + (L.sel.length === 1 ? 'it ' : 'them ') + NSO_textFmt(-h) + ' mm below it') +
+        '. Click a locked one to let it go, Escape to clear.');
+    }
+  }
+  NSO_textSyncButtons();
+}
+// Faint: every letter found. Amber: under the pointer. Green: locked.
+function NSO_textLfDraw() {
+  NSO_textClearGhost();
+  var B = NSO_textUI(), L = NSO_textLf(), m = NSO_textModel();
+  if (typeof THREE === 'undefined' || !state.scene || !m || !L.isl || L.soup !== m.rawTris) return;
+  var group = new THREE.Group();
+  group.name = 'textGhost';
+  group.matrixAutoUpdate = false;
+  function add(ids, color, opacity, tag) {
+    var parts = ids.map(function (id) { return NSO_Text.islandTris(L.isl, id); }), n = 0, at = 0, k;
+    parts.forEach(function (a) { n += a.length; });
+    if (!n) return;
+    var flat = new Float32Array(n);
+    parts.forEach(function (a) {
+      for (k = 0; k < a.length; k += 3) {
+        var d = NSO_textRawToDisplay(m, [a[k], a[k + 1], a[k + 2]]);
+        flat[at++] = d[0]; flat[at++] = d[1]; flat[at++] = d[2];
+      }
+    });
+    var geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(flat, 3));
+    var mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: color, transparent: true, opacity: opacity, side: THREE.DoubleSide,
+      depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }));
+    mesh.renderOrder = TEXT_RENDER_ORDER; mesh.userData.skipXray = true; mesh.userData[tag] = true;
+    mesh.raycast = function () {}; mesh.frustumCulled = false;
+    group.add(mesh);
+  }
+  var lit = {};
+  L.sel.forEach(function (id) { lit[id] = 1; });
+  var hov = L.hover.filter(function (id) { return !lit[id]; });
+  hov.forEach(function (id) { lit[id] = 1; });
+  add(L.faint.filter(function (id) { return !lit[id]; }), TEXT_GHOST_COLOR, 0.3, 'textFaint');
+  add(hov, TEXT_GHOST_COLOR, 0.8, 'textFill');
+  add(L.sel, TEXT_FILL_COLOR, 0.85, 'textFill');
+  if (!group.children.length) return;
+  if (typeof nsoHelpers !== 'undefined') nsoHelpers.attach(state.scene, group, 'text'); else state.scene.add(group);
+  B.ghost = group;
+  NSO_textFollow();
+}
+function NSO_textLfAt(clientX, clientY) {
+  var m = NSO_textModel(), L = NSO_textLf(), hit = NSO_textRmHit(clientX, clientY);
+  if (!m || !hit) return null;
+  var isl = NSO_textLfEnsure(m);
+  return { id: isl ? NSO_Text.islandAt(isl, hit.point, hit.normal) : -1 };
+}
+function NSO_textLfHoverSoon(clientX, clientY) {
+  var L = NSO_textLf();
+  L.pend = { x: clientX, y: clientY };
+  if (L.timer) return;
+  L.timer = setTimeout(function () {
+    var B = NSO_textUI(), L2 = B.lf, p = L2 && L2.pend;
+    if (!L2) return;
+    L2.timer = 0; L2.pend = null;
+    if (B.open && B.mode === 'raise' && p && !B.busy) {
+      var at = NSO_textLfAt(p.x, p.y), ids = at ? NSO_textLfGroup(at.id) : [];
+      if (ids.join() === L2.hover.join()) return;
+      L2.hover = ids;
+      if (ids.length) L2.note = '';
+      NSO_textLfDraw();
+      if (!L2.sel.length) NSO_textLfSay();
+    }
+  }, 40);
+}
+// A press: lock the letter (and the ones with it), or let a locked one go. False when the press is not on a piece.
+function NSO_textLfClick(clientX, clientY) {
+  var B = NSO_textUI(), L = NSO_textLf(), m = NSO_textModel(), at = NSO_textLfAt(clientX, clientY);
+  if (!m || !at) return false;
+  B.modelId = m.id;
+  L.note = '';
+  if (at.id < 0) {
+    NSO_textReadout(L.isl && L.isl.list.length ? 'Text: no letter under that point - the ones found are shown faint.' : 'Text: no lettering is outlined in this piece’s mesh - to add raised text, use Stamp with Extrude.', true);
+    return true;
+  }
+  var ids = NSO_textLfGroup(at.id), allIn = ids.every(function (i) { return L.sel.indexOf(i) >= 0; });
+  if (allIn) L.sel = L.sel.filter(function (i) { return ids.indexOf(i) < 0; });
+  else ids.forEach(function (i) { if (L.sel.indexOf(i) < 0) L.sel.push(i); });
+  L.hover = ids;
+  NSO_textLfDraw();
+  NSO_textLfSay();
+  return true;
+}
+function NSO_textPreviewRaise(m) {
+  var B = NSO_textUI();
+  if (!m) { if (B.lf) { B.lf.isl = null; B.lf.sel = []; B.lf.hover = []; B.lf.faint = []; } NSO_textClearGhost(); NSO_textLfSay(); return null; }
+  NSO_textLfEnsure(m);
+  NSO_textLfDraw();
+  NSO_textLfSay();
+  return B.plan || null;
+}
+// PAINT SCOPE: WHOLE-PIECE - see the header and docs/HANDOFF.md.
+// RAISE moves corners (NSO_Text.lift): no boolean, no worker, no bar.
+function NSO_textRaiseGo() {
+  var B = NSO_textUI(), m = NSO_textModel();
+  if (B.busy) return { ok: false, reason: 'busy' };
+  function refuse(why) {
+    if (typeof setStatus === 'function') setStatus('Text raise refused - piece unchanged (' + why + ')', true);
+    NSO_textReadout('Text: ' + why, true);
+    return { ok: false, reason: why };
+  }
+  if (!m) return refuse('select a piece and click a letter on it first');
+  var painted = (typeof nsoMaskCount === 'function') ? nsoMaskCount(m) : 0;
+  if (painted > 0) {
+    if (typeof setStatus === 'function') {
+      setStatus('Text stood down - ' + painted + ' painted face(s); raising a letter moves the face it is in. Clear paint to raise text.', true);
+    }
+    return { ok: false, reason: 'painted faces: ' + painted, painted: painted };
+  }
+  var L = B.lf;
+  if (!L || !L.isl || !L.sel.length || L.soup !== m.rawTris) return refuse('click a letter first - it turns green when it is locked');
+  var h = NSO_textLfHeight(), n = L.sel.length, res;
+  try { res = NSO_Text.lift(m.rawTris, L.isl, L.sel, h); }
+  catch (err) { console.error('[text]', err); return refuse((err && err.message) || String(err)); }
+  if (!res.ok) return refuse(res.reason);
+  var what = n + (n === 1 ? ' letter' : ' letters') + (h > 0 ? ', ' + NSO_textFmt(h) + ' mm above the face' : ', ' + NSO_textFmt(-h) + ' mm below the face');
+  if (!NSO_sculptCommitRaw(m, res.soup, 'textReplace', 'Text raised - ' + what)) return refuse('the result could not be committed');
+  if (typeof updateAdjustUI === 'function') updateAdjustUI();
+  B.hit = null; B.lf = null; B.plan = null; B.key = '';
+  NSO_textClearGhost();
+  if (NSO_textModel()) { NSO_textLfEnsure(NSO_textModel()); NSO_textLfDraw(); }
+  NSO_textLf().note = (h > 0 ? 'Raised - ' : 'Sunk - ') + what + '. One Undo puts ' + (n === 1 ? 'it' : 'them') + ' back.';
+  NSO_textLfSay();
+  return { ok: true, count: n, height: h, area: res.area };
 }
 
 /* ------------------------------------------------------------ a font file */
@@ -790,6 +999,7 @@ function NSO_textClose() {
   B.hover = false;
   B.open = false; B.hit = null; B.plan = null; B.key = '';
   if (B.rm) { if (B.rm.timer) clearTimeout(B.rm.timer); B.rm = null; }
+  if (B.lf) { if (B.lf.timer) clearTimeout(B.lf.timer); B.lf = null; }
   NSO_textClearGhost();
   var cv = state.renderer && state.renderer.domElement;
   if (cv) cv.classList.remove('text-cur-grab');
@@ -821,6 +1031,10 @@ function NSO_textTick() {
     if (B.rm && m && B.rm.scan && (B.rm.soup !== m.rawTris || B.rm.modelId !== m.id)) NSO_textRmReset();   // another bake, an Undo: the readings are stale
     else NSO_textFollow();
   }
+  else if (B.mode === 'raise') {
+    if (m && B.lf && B.lf.soup !== m.rawTris) NSO_textPreview();          // another bake, an Undo: read the lettering again
+    else NSO_textFollow();
+  }
   else if (m && B.hit && m.rawTris !== B.soup && !B.busy) NSO_textPreview();
   else NSO_textFollow();
   B.raf = (typeof requestAnimationFrame === 'function') ? requestAnimationFrame(NSO_textTick) : 0;
@@ -831,7 +1045,8 @@ function nsoTextState() {
   var B = NSO_textUI(), pl = B.plan, sh = B.shape;
   var kids = B.ghost ? B.ghost.children : [];
   return {
-    open: !!B.open, mode: B.mode, busy: !!B.busy, hit: B.hit, ok: !!(pl && pl.ok), reason: pl ? pl.reason : '',
+    open: !!B.open, mode: B.mode, busy: !!B.busy, dir: NSO_textPressed('btn-text-dir-out') ? 'out' : 'in',
+    faint: kids.filter(function (o) { return o.userData.textFaint; }).length, found: B.lf && B.lf.isl ? B.lf.isl.list.length : 0, hit: B.hit, ok: !!(pl && pl.ok), reason: pl ? pl.reason : '',
     ghosts: kids.filter(function (o) { return o.userData.textFill; }).length,
     outlines: kids.filter(function (o) { return o.userData.textOutline; }).length,
     count: pl && pl.count || 0,
@@ -841,7 +1056,8 @@ function nsoTextState() {
     readout: (NSO_textEl('text-readout') || {}).textContent || '',
     bad: !!(NSO_textEl('text-readout') && NSO_textEl('text-readout').classList.contains('is-bad')),
     drag: !!B.drag,
-    sel: B.rm ? B.rm.sel.length : 0, hover: B.rm ? B.rm.hover.length : 0
+    sel: B.mode === 'raise' ? (B.lf ? B.lf.sel.length : 0) : B.rm ? B.rm.sel.length : 0,
+    hover: B.mode === 'raise' ? (B.lf ? B.lf.hover.length : 0) : B.rm ? B.rm.hover.length : 0
   };
 }
 /* For the drive check: the text's middle on the screen, in client pixels. */
@@ -870,6 +1086,12 @@ if (typeof document !== 'undefined') {
         ev.preventDefault();
         return;
       }
+      if (B.mode === 'raise') {
+        if (!NSO_textLfClick(ev.clientX, ev.clientY)) return;       // a press off the piece orbits as ever
+        ev.stopImmediatePropagation();
+        ev.preventDefault();
+        return;
+      }
       if (NSO_textHitAt(ev.clientX, ev.clientY) && NSO_textDragBegin(ev)) {
         // out of a field, so the arrows are the text's after the drag
         var f = document.activeElement, card = NSO_textEl('text-card');
@@ -890,6 +1112,7 @@ if (typeof document !== 'undefined') {
         return;
       }
       if (B.mode === 'remove') { NSO_textRmHoverSoon(ev.clientX, ev.clientY); return; }
+      if (B.mode === 'raise') { NSO_textLfHoverSoon(ev.clientX, ev.clientY); return; }
       NSO_textHover(NSO_textHitAt(ev.clientX, ev.clientY));
     }
     function onUp(ev) {
@@ -925,6 +1148,12 @@ if (typeof document !== 'undefined') {
           ev.preventDefault(); ev.stopImmediatePropagation();
           return;
         }
+        if (B.mode === 'raise' && B.lf && B.lf.sel.length) {       // and the same in Raise
+          B.lf.sel = []; B.lf.hover = [];
+          NSO_textLfDraw(); NSO_textLfSay();
+          ev.preventDefault(); ev.stopImmediatePropagation();
+          return;
+        }
         NSO_textClose();
         if (typeof setStatus === 'function') setStatus('Text off');
         ev.preventDefault(); ev.stopImmediatePropagation();
@@ -943,11 +1172,17 @@ if (typeof document !== 'undefined') {
       var go = NSO_textEl('btn-text-go'), cancel = NSO_textEl('btn-text-cancel'), rm = NSO_textEl('btn-text-remove');
       if (go) go.addEventListener('click', function () { NSO_textGo(); });
       if (rm) rm.addEventListener('click', function () { NSO_textRemoveGo(); });
-      [['btn-text-mode-stamp', 'stamp'], ['btn-text-mode-remove', 'remove']].forEach(function (p) {
+      var up = NSO_textEl('btn-text-raise');
+      if (up) up.addEventListener('click', function () { NSO_textRaiseGo(); });
+      [['btn-text-dir-in', false], ['btn-text-dir-out', true]].forEach(function (p) {
+        var b = NSO_textEl(p[0]);
+        if (b) b.addEventListener('click', function () { NSO_textSetDir(p[1]); });
+      });
+      [['btn-text-mode-stamp', 'stamp'], ['btn-text-mode-remove', 'remove'], ['btn-text-mode-raise', 'raise']].forEach(function (p) {
         var b = NSO_textEl(p[0]);
         if (b) b.addEventListener('click', function () { NSO_textSetMode(p[1]); });
       });
-      ['chk-text-word', 'inp-text-reach'].forEach(function (id) {
+      ['chk-text-word', 'inp-text-reach', 'inp-text-lift'].forEach(function (id) {
         var el = NSO_textEl(id);
         if (!el) return;
         el.addEventListener('change', function () { NSO_textSchedule(); });
