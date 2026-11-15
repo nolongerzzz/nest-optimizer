@@ -5963,6 +5963,12 @@ function readSceneBlock(filename, result) {
   }
 }
 
+/* The Bambu project template an exported 3MF is written from: the PLATE'S PRINTER, where there is one for it (fixtures/bambu-templates/) -
+   a P1S plate exported from the A1 mini's template opened in Studio as an A1 mini project (the owner: "it's telling me it's configured for
+   A1 mini"). A plate with no template of its own (A1, Prusa, Ender, custom) is written from the A1 mini's, as before. */
+var NSO_BAMBU_TEMPLATES = { a1mini: 'a1mini-0.4', p1s: 'p1s-0.4' };
+function nsoBambuTemplateFor(plateId) { return NSO_BAMBU_TEMPLATES[plateId == null ? state.plate : plateId] || 'a1mini-0.4'; }
+
 function export3MF() {
   if (!window.NSO3MF || !window.NSOCoolingProfiles) {
     setStatus('3MF modules failed to load - check console', true);
@@ -5988,7 +5994,7 @@ function export3MF() {
   const plate = getCurrentPlate();
   const sceneJson = buildPlateSceneJson();
   const overlapNote = typeof nsoExportOverlapNote === 'function' ? nsoExportOverlapNote({ objects }) : '';
-  return window.NSO3MF.build3MF({ objects, profileId, plateName: plate.name, sceneJson })
+  return window.NSO3MF.build3MF({ objects, profileId, plateName: plate.name, sceneJson, template: nsoBambuTemplateFor() })
     .then(result => {
       const blob = new Blob([result.bytes], { type: 'application/vnd.ms-package.3dmanufacturing-3dmodel+xml' });
       const filename = plateExportFilename('3mf');
@@ -6120,7 +6126,7 @@ function exportActiveModel3MF() {
   setStatus('Building 3MF...');
   const plate = getCurrentPlate();
   const sceneJson = buildModelSceneJson(m, object.basis);
-  return window.NSO3MF.build3MF({ objects: [object], profileId, plateName: plate.name, sceneJson })
+  return window.NSO3MF.build3MF({ objects: [object], profileId, plateName: plate.name, sceneJson, template: nsoBambuTemplateFor() })
     .then(result => {
       const blob = new Blob([result.bytes], { type: 'application/vnd.ms-package.3dmanufacturing-3dmodel+xml' });
       downloadBlob(blob, filename);

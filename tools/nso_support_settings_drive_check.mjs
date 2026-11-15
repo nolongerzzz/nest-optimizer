@@ -140,6 +140,23 @@ async function main() {
     seq.push([await val('print-printer'), await val('plate-select')].join('/'));
   }
   check('...and on an empty page, the card left open: card, panel, panel, card, panel - both rows agree after every change', seq, ['p1s/p1s', 'a1mini/a1mini', 'p1s/p1s', 'a1mini/a1mini', 'p1s/p1s']);
+  /* a printer that changed with no hand on a picker (a saved scene opened: applySavedPlate sets it): the profile line follows the Printer row */
+  await page.evaluate(() => { state.plate = 'a1mini'; document.getElementById('plate-select').value = 'a1mini'; });
+  await page.waitForTimeout(1300);
+  const lineA = await page.evaluate(() => document.getElementById('slice-profile').textContent);
+  await page.evaluate(() => { state.plate = 'p1s'; document.getElementById('plate-select').value = 'p1s'; });
+  await page.waitForTimeout(1300);
+  check('the printer set by an opened file: the Printer row and the profile line both say it', [/A1 mini/.test(lineA), await val('print-printer'), /P1S/.test(await page.evaluate(() => document.getElementById('slice-profile').textContent))], [true, 'p1s', true]);
+  /* ...and the plate's 3MF export is that printer's project */
+  await load();
+  const tplAsked = await page.evaluate(async () => {
+    const real = NSO3MF.build3MF, seen = [];
+    NSO3MF.build3MF = function (o) { seen.push(o.template); return real.apply(this, arguments); };
+    const dl = window.downloadBlob; window.downloadBlob = function () {};
+    try { await export3MF(); state.plate = 'a1mini'; await export3MF(); } finally { NSO3MF.build3MF = real; window.downloadBlob = dl; state.plate = 'p1s'; }
+    return seen;
+  });
+  check('Export plate 3MF is written from the plate\'s own printer template: the P1S\'s on a P1S plate, the A1 mini\'s on its plate', tplAsked, ['p1s-0.4', 'a1mini-0.4']);
   check('no page error', errors, []);
   await browser.close(); if (served.server && served.server.close) served.server.close();
   process.exit(check.report() ? 1 : 0);

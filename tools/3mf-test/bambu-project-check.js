@@ -456,6 +456,18 @@ const hex8 = (n) => ('0000000' + (n >>> 0).toString(16)).slice(-8);
   check('a piece without overrides is the same geometry the geometry-only envelope writes (to the 6 dp written)',
     lvs.length === pv.length && lvs.every((v, k) => v.every((x, a) => Math.abs(x - (pv[k][a] + t0[a])) < 1.5e-6)));
 
+  /* ---------- the plate's printer is the project's ---------- */
+  console.log('\n--- the P1S plate exports a P1S project ---');
+  {
+    const p1 = await W.build3MF(Object.assign({}, opts, { objects: plate(), template: 'p1s-0.4' }));
+    const ps = p1.envelope === 'project' ? JSON.parse(readZip(Buffer.from(p1.bytes)).get('Metadata/project_settings.config').toString('utf8')) : {};
+    check('written from the P1S template, the project is a P1S one (Studio does not ask to adapt an A1 mini file)', p1.envelope === 'project' && p1.template === 'p1s-0.4' &&
+      ps.printer_model === 'Bambu Lab P1S' && /P1S/.test(String(ps.printer_settings_id)), (ps.printer_model || p1.templateError) + ' / ' + ps.printer_settings_id);
+    const core = fs.readFileSync(path.join(__dirname, '..', '..', 'app-core.js'), 'utf8');
+    check('the page asks for the plate\'s template at both exports (the plate, a selected piece), and knows the P1S\'s',
+      (core.match(/build3MF\(\{[^}]*template: nsoBambuTemplateFor\(\)/g) || []).length === 2 && /p1s: 'p1s-0\.4'/.test(core) && fs.existsSync(path.join(__dirname, '..', '..', 'fixtures', 'bambu-templates', 'p1s-0.4', 'template.json')));
+  }
+
   console.log('\n' + (fail ? 'FAILED  ' + fail + ' of ' + (pass + fail) : 'PASSED  all ' + pass) + '  (' + file + ')');
   process.exit(fail ? 1 : 0);
 })().catch((err) => {

@@ -1098,6 +1098,7 @@
 
   function refresh() {
     var p = profileFor(plateId());
+    S.shownPlate = plateId();
     var line = $('slice-profile');
     if (line) {
       line.textContent = p ? p.label : 'No printer profile for the ' + ((typeof PLATES !== 'undefined' && PLATES[plateId()]) ? PLATES[plateId()].name : 'selected') +
@@ -1433,6 +1434,9 @@
     /* the plate picker is the printer: the line, the settings and a slice's freshness follow it at once */
     var plateSel = $('plate-select');
     if (plateSel) plateSel.addEventListener('change', function () { setTimeout(refresh, 0); });
+    /* ...and a printer changed by anything but a hand on that picker (a file opened that brings its plate, a plate switched, an Undo): the line
+       said "A1 mini" under a Printer row that said P1S. The open card looks twice a second and follows. */
+    setInterval(function () { if (menu && menu.open && !S.busy && plateId() !== S.shownPlate) refresh(); }, 500);
     refresh();
   }
 
