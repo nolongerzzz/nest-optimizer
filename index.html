@@ -1416,6 +1416,9 @@
                   <label class="vp-bend-field" for="slice-set-bridge-flow">Bridge flow
                     <input type="number" id="slice-set-bridge-flow" min="0.5" max="1.5" step="0.05" placeholder="auto" inputmode="decimal"
                              title="How much plastic a bridge line gets (1 = a strand the nozzle's width). A little under 1 makes a thinner strand that pulls tight instead of drooping." autocomplete="off"></label>
+                  <label class="vp-bend-field" for="slice-set-hang-speed">Hanging wall speed
+                    <input type="number" id="slice-set-hang-speed" min="1" max="300" step="1" placeholder="auto" inputmode="decimal"
+                             title="How fast a wall that hangs over open air from end to end is printed, mm/s - the edge of a roof over a window, found automatically the way overhangs are. Empty: the filament's own (CR-TPU: 10), else the bridge's speed, as Studio prints it. Never faster than the bridge speed; walls that only partly hang keep the profile's overhang speeds." autocomplete="off"><span>mm/s</span></label>
                   <label class="vp-bend-field" for="slice-set-bridge-temp">Bridge temp
                     <input type="number" id="slice-set-bridge-temp" min="0" max="300" step="5" placeholder="off" inputmode="numeric"
                              title="A nozzle temperature for bridges over open air, °C. Before a layer with such a bridge the nozzle waits at the printer's purge position for this temperature, primes and wipes; that layer and the one over it print whole at it; then the same wait brings the layer's own temperature back. One change in and one out for each stretch of bridge layers. A filament can bring its own (CR-TPU: 215 on the A1 mini); empty is the filament's, 0 turns it off. A1 mini only so far." autocomplete="off"><span>&deg;C</span></label>
@@ -3277,7 +3280,7 @@
        own page code, which listens for the press before the card does. After nso-helpers.js, app-core.js. docs/SUPPORT-BLOCKERS.md. -->
   <script src="nso_support_blockers.js?v=6962a81c"></script>
   <script src="app-support-blockers.js?v=73c8125d"></script>
-  <script src="app-supports-card.js?v=fda8e643"></script>
+  <script src="app-supports-card.js?v=6ebbd813"></script>
   <script src="app-gscope-slice.js?v=ff1ae633"></script>
   <!-- The Slice card (left bar): the plate sliced for its printer, the .gcode.3mf
        it makes. The print planner and the packager are loaded here for it and for
@@ -3285,9 +3288,9 @@
        uses them. After nso_slicer.js, nso-cooling-profiles.js, nso-3mf.js and
        nso-3mf-read.js, which they read at load, and after app-microscope.js, whose
        plate reader and G-code import it calls. See docs/PRINT-PLANNER.md. -->
-  <script src="nso-print-planner.js?v=265cf803"></script>
+  <script src="nso-print-planner.js?v=9e73af22"></script>
   <script src="nso-gcode3mf-write.js?v=cdfa15b4"></script>
-  <script src="app-print.js?v=e6b45236"></script>
+  <script src="app-print.js?v=21aaf43c"></script>
   <!-- Lift: details off a face, the face left as it was round them. After
        nso_lift.js (Phase 1: a flat face), nso_lift_curved.js (Lift 3: the
        repair under a detail lifted off a curved base), nso_lift_auto.js

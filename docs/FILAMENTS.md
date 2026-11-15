@@ -231,6 +231,7 @@ them in, and a number typed in wins. For Bridge temp, 0 is "none" whatever the f
 | --- | --- | --- | --- |
 | Bridge speed | the profile's 50 | 50 | 50 |
 | Bridge flow | the profile's 1 | 1 | 1 |
+| Hanging wall speed | the bridge's speed | **10** | **10** |
 | Bridge temp | none | none (it prints at 215) | none (no park moves written) |
 
 - CR-TPU carried a Bridge temp of 215 on the A1 mini from 2026-11-14 (its nozzle was 235) until
@@ -241,6 +242,20 @@ them in, and a number typed in wins. For Bridge temp, 0 is "none" whatever the f
   rows says what the filament brought.
 - A tested value goes into the entry's `keys` (a Studio filament key) or its `tune` (the rest), with
   the print it came from beside it. Saved settings are still there for a job's own levers.
+
+## Hanging wall speed (the card's row, 2026-11-15)
+
+A wall that hangs over open air from end to end - the edge of a roof over a window - is found by the
+slicer the way overhangs are (`spanPieces`, `path.span`, docs/SLICER.md "A wall over a gap") and
+printed at the bridge's speed, as Studio prints it. For CR-TPU that is the max flow's 42 mm/s, and the
+front lip of the owner's 215 level sagged there; his Studio reference printed those walls at 10.
+
+**Hanging wall speed** (Quality, beside the bridge rows) slows just those walls: empty is the
+filament's own (`tune`: CR-TPU brings 10), else the bridge's speed; never faster than the bridge's
+speed, and the max flow still holds it. The bridge lines keep their speed (slower bridges curled on
+TPU), and walls that only partly hang keep the profile's overhang speeds (10 mm/s at 75-100 %). The
+readout says "hanging walls 10 mm/s" when it applies. `app-print.js` `hangSpeedOf`, the planner's
+`opts.hangSpeed` / `S.speed.hang`; checked in `print:slice` (the doorway).
 
 ## Adding a filament
 

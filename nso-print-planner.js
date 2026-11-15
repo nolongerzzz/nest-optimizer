@@ -631,7 +631,7 @@
         var fs = featureSpeed(S, p.feature, first);
         /* a hanging wall that spans (the slicer's path.span) is a bridge: the bridge's speed, and no slowing for the layer's time */
         var spans = p.feature === 'Overhang wall' && !!p.span && !first;
-        if (spans) fs = { v: S.speed.bridge, a: S.accel.bridge };
+        if (spans) fs = { v: S.speed.hang != null ? S.speed.hang : S.speed.bridge, a: S.accel.bridge };
         var vCap = S.filament.maxVolumetric > 0 ? S.filament.maxVolumetric / bead.area : Infinity;
         var v = Math.min(fs.v, vCap);
         var segs = [];
@@ -974,6 +974,10 @@
     var cooling = opts.cooling == null ? Cooling.DEFAULT_PROFILE_ID : opts.cooling;
     var S = settingsFrom(opts.config, cooling);
     S.coolingId = cooling;
+    /* HANGING WALL SPEED (opts.hangSpeed, docs/FILAMENTS.md): a wall that hangs over open air from end to end (the slicer's path.span) prints
+       at the bridge's speed, as Studio's does; a filament can slow it on its own (CR-TPU: the owner's tower level of 2026-11-15, its front lip
+       sagging at 42 mm/s). Never faster than the bridge's speed, and the max flow still holds it. */
+    S.speed.hang = opts.hangSpeed > 0 ? Math.min(+opts.hangSpeed, S.speed.bridge) : S.speed.bridge;
     var F = S.filament, R = S.retract;
     var filA = Math.PI * F.diameter * F.diameter / 4;
 

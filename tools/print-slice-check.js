@@ -213,7 +213,7 @@ async function main() {
     check('the settings start at the A1 mini template\'s values: 0.4 nozzle, 0.2 mm layers, 2 walls, 15 % grid, support below 30°, auto brim, no raft (0.1 contact)',
       JSON.stringify(base) === JSON.stringify({ nozzle: 0.4, layer: 0.2, walls: 2, density: 15, pattern: 'grid', surface: 'zigzag', angle: 30, brim: 'auto', raft: 0, raftGap: 0.1, ifaceAngle: 'studio36', interfaceRule: null,
         filament: 'profile', nozzleTemp: null, firstTemp: null, bedTemp: null, maxFlow: null, tempStep: 0, tempBand: 10,
-        bridgeSpeed: null, bridgeFlow: null, flowRatio: null, retractLen: null, retractSpeed: null, retractBefore: null, zHop: null, bridgeTemp: null,   /* the filament's own */
+        bridgeSpeed: null, bridgeFlow: null, hangSpeed: null, flowRatio: null, retractLen: null, retractSpeed: null, retractBefore: null, zHop: null, bridgeTemp: null,   /* the filament's own */
         /* Bambu's Advanced support rows start at the template's own values (docs/PRINT-CARD.md "Starting values"): first layer 90 %, top Z 0.2, every bridge held */
         supDensity: 90, supExpand: -1, supWalls: -1, supTopZ: 0.2, supBottomZ: 0.2, supBase: 'default', supBaseSpacing: 2.5, supAngle: 0, supIfacePattern: 'default', supIfaceSpacing: 0.5,
         supExpansion: 0, supXy: 0.35, supZOverXy: false, supFirstGap: 0.2, supBridge: 0, supIndep: true }), JSON.stringify(base));
@@ -474,8 +474,8 @@ async function main() {
           a.retr['.02@1800'] > 100 && !a.retr['.04@1200'] && b.retr['.04@1200'] > 100 && !b.retr['.02@1800'], JSON.stringify([a.retr, b.retr]));
         check('...Z hop 0: no lift on any travel or layer change (' + a.hops + ' before, ' + b.hops + ' after)', a.hops > 50 && b.hops === 0);
         check('...Flow ratio 0.97: filament_flow_ratio = 0.97 on both slots, and less filament for the same plate', b.cfg('filament_flow_ratio') === '0.97,0.97' && b.e < a.e, a.e.toFixed(1) + ' -> ' + b.e.toFixed(1));
-        check('...the readout has the numbers as printed', t0.tune === 'bridges 39.3 mm/s (flow 1), flow ratio 1, retract 0.4 mm at 30 mm/s, z-hop 0.4 mm' &&
-          t1.tune === 'bridges 12 mm/s (flow 0.9), flow ratio 0.97, retract 0.8 mm at 20 mm/s, z-hop 0 mm', JSON.stringify([t0.tune, t1.tune]));
+        check('...the readout has the numbers as printed', t0.tune === 'bridges 39.3 mm/s (flow 1), hanging walls 10 mm/s, flow ratio 1, retract 0.4 mm at 30 mm/s, z-hop 0.4 mm' &&
+          t1.tune === 'bridges 12 mm/s (flow 0.9), hanging walls 10 mm/s, flow ratio 0.97, retract 0.8 mm at 20 mm/s, z-hop 0 mm', JSON.stringify([t0.tune, t1.tune]));
       }
     }
 
@@ -549,7 +549,7 @@ async function main() {
       TR.forEach(t => { [t[0], t[1], t[2]].forEach(i => sp.push(...V(i, 0))); [t[0], t[2], t[1]].forEach(i => sp.push(...V(i, D))); });       // the two faces
       P2.forEach((q, i) => { const j = (i + 1) % P2.length; [[i, 0], [i, D], [j, D]].forEach(a => sp.push(...V(a[0], a[1]))); [[i, 0], [j, D], [j, 0]].forEach(a => sp.push(...V(a[0], a[1]))); });
       const door = PRINT.pieceObjects([{ name: 'doorway', soup: new Float32Array(sp), sourceId: 1 }], a1.bed);
-      const dr = await PRINT.build(door, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { filament: 'cr-tpu', nozzleTemp: 235, bridgeTemp: 215 }) });
+      const dr = await PRINT.build(door, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { filament: 'cr-tpu', nozzleTemp: 235, bridgeTemp: 215, hangSpeed: 300 }) });   /* hanging walls at the bridge's speed, as Studio prints them (CR-TPU's own 10 is checked after) */
       check('a doorway (a 30 x 8 mm roof between two pillars, open on both faces) slices as CR-TPU with a bridge temperature', dr.ok, dr.reason);
       if (dr.ok) {
         const g = L.text(await L.R.openZip(dr.bytes).read('Metadata/plate_1.gcode')).split('\n');
@@ -583,6 +583,19 @@ async function main() {
         const spans = ow.filter(b => b.len > 20), slow = ow.filter(b => b.f === 600);
         check('...the walls over the gap are printed as bridges: ' + spans.length + ' moves of ' + (spans[0] ? spans[0].len.toFixed(1) : '-') + ' mm, each one move at the max flow\'s speed (F2358 / F2545), and only the ends beside the pillars at overhang_4_4_speed (' + slow.length + ' short moves at F600)',
           spans.length === 4 && spans.every(b => b.f > 2300) && ow.filter(b => b.f === 600).every(b => b.len < 1.5), JSON.stringify(ow.filter(b => b.len > 1).map(b => [+b.len.toFixed(1), b.f])));
+        /* HANGING WALL SPEED: CR-TPU's own 10 mm/s slows those four walls - and nothing else - where the profile's PLA keeps the bridge's speed */
+        const wallsOf = async st => { const r = await PRINT.build(door, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, st) }); const gg = L.text(await L.R.openZip(r.bytes).read('Metadata/plate_1.gcode')).split('\n');
+          let ft = '', zz = 0, px = null, py = null, f = 0; const out = [], other = [];
+          gg.forEach(l => { let m; if ((m = /^; Z_HEIGHT: ([\d.]+)$/.exec(l))) zz = +m[1]; else if ((m = /^; FEATURE: (.*)$/.exec(l))) ft = m[1]; if (!/^G1 /.test(l)) return;
+            const d = {}; l.split(';')[0].replace(/([XYEF])(-?\.?[\d.]+)/g, (a, k, v) => { d[k] = +v; return a; }); const nx = d.X != null ? d.X : px, ny = d.Y != null ? d.Y : py; if (d.F != null) f = d.F;
+            if (d.E > 0 && px != null) { const len = Math.hypot(nx - px, ny - py); if (ft === 'Overhang wall' && len > 20) out.push(f); else if (ft === 'Bridge' && len > 20) other.push(f); }
+            px = nx; py = ny; });
+          return { walls: out, bridges: [...new Set(other)], tune: r.tune }; };
+        const tw = await wallsOf({ filament: 'cr-tpu' }), pw = await wallsOf({}), typed = await wallsOf({ filament: 'cr-tpu', hangSpeed: 20 });
+        check('Hanging wall speed: CR-TPU\'s own 10 mm/s prints the four walls over the gap at F600, its bridge lines still at F2358; the profile\'s PLA keeps them at the bridge\'s speed; a row typed in wins (20: F1200)',
+          tw.walls.length === 4 && tw.walls.every(f => f === 600) && tw.bridges.length === 1 && tw.bridges[0] === 2358.261 && pw.walls.length === 4 && pw.walls.every(f => f > 2300) &&
+            typed.walls.every(f => f === 1200) && PRINT.hangSpeedOf(tpl, { filament: 'profile', hangSpeed: null }) === null && PRINT.hangSpeedOf(tpl, { filament: 'cr-tpu', hangSpeed: null }) === 10,
+          JSON.stringify({ tpu: tw, pla: pw, typed: typed.walls }));
         const zs = [...coldZ].sort((a, b) => a - b);
         check('...one change in and one out: 215 at the bridge layer\'s layer change, 235 two layers on - the bridge layer and the one over it print whole at 215, walls and fill too',
           ev.length === 2 && ev[0][0] === 215 && ev[1][0] === 235 && zs.length === 2 && Math.abs(zs[1] - zs[0] - 0.2) < 1e-6 && Math.abs(ev[1][1] - zs[1] - 0.2) < 1e-6 && Object.keys(hotFeat).length === 0 &&
@@ -664,7 +677,7 @@ async function main() {
       { settings: Object.assign({}, PRINT.settingsFromConfig(p1sCfg), { filament: 'cr-tpu', bridgeTemp: 212 }) });
     check('a bridge temperature on the P1S is refused: its park and wipe moves are not written yet', !p1sBt.ok && /written for the A1 mini only so far/.test(p1sBt.reason), p1sBt.reason);
     check('...the card\'s CR-TPU on the P1S has that bed: 215 C (first layer 235), bed 35, 3.2 mm^3/s', JSON.stringify(PRINT.filamentBase(p1sCfg, 'cr-tpu')) === JSON.stringify({ nozzleTemp: 215, firstTemp: 235, bedTemp: 35, maxFlow: 3.2, rangeLow: 200, rangeHigh: 250,
-      flowRatio: 1, retractLen: 0.4, retractSpeed: 30, retractBefore: 0, zHop: 0.4, bridgeSpeed: 50, bridgeFlow: 1, bridgeTemp: null }));
+      flowRatio: 1, retractLen: 0.4, retractSpeed: 30, retractBefore: 0, zHop: 0.4, bridgeSpeed: 50, bridgeFlow: 1, hangSpeed: 10, bridgeTemp: null }));
     const p1sOwn = await PRINT.build(PRINT.pieceObjects(asViewportPieces(plate.objs.slice(0, 1), a1.bed), p1sPrinter.bed), { config: p1sCfg, printer: p1sPrinter },
       { settings: Object.assign({}, PRINT.settingsFromConfig(p1sCfg), { filament: 'cr-tpu' }) });
     check('...and CR-TPU with every row empty slices for the P1S: the filament asks for no bridge temperature where the printer has no park (only a number typed in the row is refused)', p1sOwn.ok && p1sOwn.stats.bridgeTemp === null, p1sOwn.reason);
