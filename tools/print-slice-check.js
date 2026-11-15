@@ -332,9 +332,9 @@ async function main() {
   {
     const base = PRINT.settingsFromConfig(tpl);
     const fb = PRINT.filamentBase(tpl, 'profile'), tb = PRINT.filamentBase(tpl, 'cr-tpu');
-    check('the profile\'s filament is the template\'s PLA: 220 / 220 C, bed 65, 12 mm^3/s; CR-TPU is 235 / 235 C, bed 30 (Studio: the A1 mini TPU bed), 3.2 mm^3/s, printable 200 - 250 C',
+    check('the profile\'s filament is the template\'s PLA: 220 / 220 C, bed 65, 12 mm^3/s; CR-TPU is 215 / 235 C (first layer), bed 30 (Studio: the A1 mini TPU bed), 3.2 mm^3/s, printable 200 - 250 C',
       fb.nozzleTemp === 220 && fb.firstTemp === 220 && fb.bedTemp === 65 && fb.maxFlow === 12 &&
-        tb.nozzleTemp === 235 && tb.firstTemp === 235 && tb.bedTemp === 30 && tb.maxFlow === 3.2 && tb.rangeLow === 200 && tb.rangeHigh === 250, JSON.stringify([fb, tb]));
+        tb.nozzleTemp === 215 && tb.firstTemp === 235 && tb.bedTemp === 30 && tb.maxFlow === 3.2 && tb.rangeLow === 200 && tb.rangeHigh === 250, JSON.stringify([fb, tb]));
     check('the four rows at the filament\'s own values change nothing (the card shows them filled in)',
       Object.keys(PRINT.configOverlay(tpl, Object.assign({}, base, { nozzleTemp: 220, firstTemp: 220, bedTemp: 65, maxFlow: 12 }))).length === 0);
     const rows = PRINT.configOverlay(tpl, Object.assign({}, base, { nozzleTemp: 210, bedTemp: 60, maxFlow: 8 }));
@@ -352,16 +352,16 @@ async function main() {
       const tz = L.R.openZip(tpu.bytes);
       const tg = L.text(await tz.read('Metadata/plate_1.gcode')), pg = L.text(await L.R.openZip(pla.bytes).read('Metadata/plate_1.gcode'));
       const cb = k => (new RegExp('^; ' + k + ' = (.*)$', 'm').exec(tg) || [])[1];
-      check('...the CONFIG_BLOCK names it on both filament slots: TPU, GFU99, Generic TPU @BBL A1M, 235 C, bed 30, 3.2 mm^3/s, fan 100 (retraction_length stays 0.8 there, as in the Studio TPU slice)',
+      check('...the CONFIG_BLOCK names it on both filament slots: TPU, GFU99, Generic TPU @BBL A1M, 215 C, bed 30, 3.2 mm^3/s, fan 100 (retraction_length stays 0.8 there, as in the Studio TPU slice)',
         cb('filament_type') === 'TPU;TPU' && cb('filament_ids') === 'GFU99;GFU99' && cb('filament_settings_id') === '"Generic TPU @BBL A1M";"Generic TPU @BBL A1M"' &&
-          cb('nozzle_temperature') === '235,235' && cb('textured_plate_temp') === '30,30' && cb('filament_max_volumetric_speed') === '3.2,3.2' &&
+          cb('nozzle_temperature') === '215,215' && cb('textured_plate_temp') === '30,30' && cb('filament_max_volumetric_speed') === '3.2,3.2' &&
           cb('retraction_length') === '0.8' && cb('fan_min_speed') === '100,100',
         ['filament_type', 'filament_ids', 'filament_settings_id', 'nozzle_temperature', 'textured_plate_temp', 'filament_max_volumetric_speed', 'retraction_length', 'fan_min_speed'].map(cb).join(' | '));
       const tsi = L.text(await tz.read('Metadata/slice_info.config'));
       check('...slice_info tells the printer the filament is TPU (GFU99)', /tray_info_idx="GFU99" type="TPU"/.test(tsi));
       const tps = JSON.parse(L.text(await tz.read('Metadata/project_settings.config')));
       check('...project_settings.config holds it, listed as the filament\'s changes (not the process\'s)',
-        tps.filament_type[0] === 'TPU' && tps.nozzle_temperature[0] === '235' && tps.filament_max_volumetric_speed[0] === '3.2' && tps.fan_min_speed[0] === '100' &&
+        tps.filament_type[0] === 'TPU' && tps.nozzle_temperature[0] === '215' && tps.filament_max_volumetric_speed[0] === '3.2' && tps.fan_min_speed[0] === '100' &&
           !/nozzle_temperature|filament_/.test(tps.different_settings_to_system[0]) && tps.different_settings_to_system[1].split(';').includes('filament_max_volumetric_speed'),
         JSON.stringify(tps.different_settings_to_system));
       const startOf = g => g.slice(g.indexOf('; EXECUTABLE_BLOCK_START'), g.indexOf('; CHANGE_LAYER')).split('\n');
@@ -371,8 +371,8 @@ async function main() {
           ts.includes('    M620.1 E F79.8237 T250') && ts.includes('    G1 E50 F79.8237') &&
           ts.includes('G0 X88 E10  F192') && ts.includes('G0 X93 E.3742  F320') && ts.includes('G0 X98 E.3742  F1280') &&
           !ts.some(l => /F(720|4800|299\.339)$/.test(l)) && psl.includes('G0 X88 E10  F720') && psl.includes('    M620.1 E F299.339 T220'));
-      check('...its temperatures are in the start block (bed 30, nozzle 235) and its own filament start G-code replaces PLA\'s',
-        ts.includes('M140 S30') && ts.includes('M190 S30;set bed temp') && ts.includes('M109 S235') && !ts.includes(';Prevent PLA from jamming') && psl.includes(';Prevent PLA from jamming'));
+      check('...its temperatures are in the start block (bed 30, the first layer\'s 235 and the print\'s 215 where Bambu\'s template puts each) and its own filament start G-code replaces PLA\'s',
+        ts.includes('M140 S30') && ts.includes('M190 S30;set bed temp') && ts.includes('    M109 S235') && ts.includes('M109 S215') && !ts.includes(';Prevent PLA from jamming') && psl.includes(';Prevent PLA from jamming'));
       // every extruding move's volumetric rate, from the lines
       const peak = g => {
         const A = Math.PI * 1.75 * 1.75 / 4; let x = null, y = null, f = 0, mx = 0, on = false;
@@ -390,7 +390,7 @@ async function main() {
       const pk = peak(tg), pkPla = peak(pg);
       check('...no move asks the hotend for more than its 3.2 mm^3/s (peak ' + pk.toFixed(3) + '; PLA\'s plate peaks at ' + pkPla.toFixed(2) + ')', pk > 2.5 && pk < 3.2 * 1.005 && pkPla > 3.2 * 1.5);
       check('...it retracts the filament\'s 0.4 mm, and the fan is full from the second layer', /^G1 E-0?\.4 F1800$/m.test(tg) && !/^G1 E-0?\.8 F1800$/m.test(tg) && /^M106 S255$/m.test(tg));
-      check('...the readout names it', tpu.filament === 'Creality CR-TPU 95A, 235 \u00b0C, bed 30 \u00b0C, 3.2 mm\u00b3/s', tpu.filament);
+      check('...the readout names it', tpu.filament === 'Creality CR-TPU 95A, 215 \u00b0C (first layer 235), bed 30 \u00b0C, 3.2 mm\u00b3/s', tpu.filament);
     }
 
     // STUDIO'S OWN TPU SLICE (the owner's temperature tower, Generic TPU @BBL A1M, Studio 02.09.01.70): the start block NSO writes for
@@ -485,12 +485,12 @@ async function main() {
       /* THE FILAMENT HOLDS ITS DIALS: CR-TPU brings a bridge temperature of its own on the A1 mini (215); the row at 0 turns it off, a number in the row wins */
       const own = await PRINT.build(cp, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { filament: 'cr-tpu' }) });
       const plaB = await PRINT.build(cp, { config: tpl, printer: a1 }, { settings: Object.assign({}, base) });
-      check('picking CR-TPU is enough: with every row empty its bridges print at its own 215 C on the A1 mini, and the profile\'s PLA has no bridge temperature',
-        own.ok && plaB.ok && own.stats.bridgeTemp && own.stats.bridgeTemp.temp === 215 && own.stats.bridgeTemp.changes >= 2 && plaB.stats.bridgeTemp === null &&
-          PRINT.filamentBase(tpl, 'cr-tpu').bridgeTemp === 215 && PRINT.filamentBase(tpl, 'profile').bridgeTemp === null && PRINT.cleanSettings({ bridgeTemp: '0' }).bridgeTemp === 0 && PRINT.cleanSettings({ bridgeTemp: '' }).bridgeTemp === null,
+      check('picking CR-TPU is enough: it prints at its own 215 C, its bridges too (the owner\'s 2026-11-15 roof), so it asks for no bridge temperature and makes no stop at the park; nor does the profile\'s PLA',
+        own.ok && plaB.ok && own.stats.bridgeTemp === null && plaB.stats.bridgeTemp === null &&
+          PRINT.filamentBase(tpl, 'cr-tpu').bridgeTemp === null && PRINT.filamentBase(tpl, 'profile').bridgeTemp === null && PRINT.cleanSettings({ bridgeTemp: '0' }).bridgeTemp === 0 && PRINT.cleanSettings({ bridgeTemp: '' }).bridgeTemp === null,
         JSON.stringify([own.stats && own.stats.bridgeTemp, plaB.stats && plaB.stats.bridgeTemp]));
-      const off = await PRINT.build(cp, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { filament: 'cr-tpu', bridgeTemp: 0 }) });
-      const on = await PRINT.build(cp, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { filament: 'cr-tpu', bridgeTemp: 212 }) });
+      const off = await PRINT.build(cp, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { filament: 'cr-tpu', nozzleTemp: 235, bridgeTemp: 0 }) });
+      const on = await PRINT.build(cp, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { filament: 'cr-tpu', nozzleTemp: 235, bridgeTemp: 212 }) });
       check('CR-TPU slices with a bridge temperature of 212', off.ok && on.ok, on.reason);
       if (off.ok && on.ok) {
         const g = L.text(await L.R.openZip(on.bytes).read('Metadata/plate_1.gcode')).split('\n'), g0 = L.text(await L.R.openZip(off.bytes).read('Metadata/plate_1.gcode')).split('\n');
@@ -526,7 +526,7 @@ async function main() {
           PRINT.bridgeTempWords(bt) + ' / +' + Math.round(on.stats.seconds - off.stats.seconds) + ' s');
       }
       // a plate of labelled objects: the park is no object's
-      const lab = await PRINT.build(objs, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { filament: 'cr-tpu', bridgeTemp: 212 }) });
+      const lab = await PRINT.build(objs, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { filament: 'cr-tpu', nozzleTemp: 235, bridgeTemp: 212 }) });
       check('a plate of several objects slices with it', lab.ok, lab.reason);
       if (lab.ok) {
         const gl = L.text(await L.R.openZip(lab.bytes).read('Metadata/plate_1.gcode')).split('\n');
@@ -534,9 +534,9 @@ async function main() {
         gl.forEach(l => { if (/^M624 /.test(l)) open = true; else if (l === 'M625') open = false; else if (/^; NSO bridge temperature/.test(l)) { n++; if (open) inside++; } });
         check('...no park is inside an object\'s M624 / M625 (a skipped object does not take the temperature change with it): ' + n + ' parks', n > 0 && inside === 0, inside + ' inside');
       }
-      const hot = await PRINT.build(cp, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { filament: 'cr-tpu', bridgeTemp: 190 }) });
+      const hot = await PRINT.build(cp, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { filament: 'cr-tpu', nozzleTemp: 235, bridgeTemp: 190 }) });
       check('a bridge temperature outside the filament\'s range is refused in words', !hot.ok && /bridge temperature is 190 .C; this filament prints between 200 and 250/.test(hot.reason), hot.reason);
-      const same = await PRINT.build(cp, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { filament: 'cr-tpu', bridgeTemp: 235 }) });
+      const same = await PRINT.build(cp, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { filament: 'cr-tpu', nozzleTemp: 235, bridgeTemp: 235 }) });
       check('a bridge temperature that is the layer\'s own changes nothing: no park', same.ok && same.stats.bridgeTemp.changes === 0 &&
         L.text(await L.R.openZip(same.bytes).read('Metadata/plate_1.gcode')) === L.text(await L.R.openZip(off.bytes).read('Metadata/plate_1.gcode')));
     }
@@ -549,7 +549,7 @@ async function main() {
       TR.forEach(t => { [t[0], t[1], t[2]].forEach(i => sp.push(...V(i, 0))); [t[0], t[2], t[1]].forEach(i => sp.push(...V(i, D))); });       // the two faces
       P2.forEach((q, i) => { const j = (i + 1) % P2.length; [[i, 0], [i, D], [j, D]].forEach(a => sp.push(...V(a[0], a[1]))); [[i, 0], [j, D], [j, 0]].forEach(a => sp.push(...V(a[0], a[1]))); });
       const door = PRINT.pieceObjects([{ name: 'doorway', soup: new Float32Array(sp), sourceId: 1 }], a1.bed);
-      const dr = await PRINT.build(door, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { filament: 'cr-tpu', bridgeTemp: 215 }) });
+      const dr = await PRINT.build(door, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { filament: 'cr-tpu', nozzleTemp: 235, bridgeTemp: 215 }) });
       check('a doorway (a 30 x 8 mm roof between two pillars, open on both faces) slices as CR-TPU with a bridge temperature', dr.ok, dr.reason);
       if (dr.ok) {
         const g = L.text(await L.R.openZip(dr.bytes).read('Metadata/plate_1.gcode')).split('\n');
@@ -663,7 +663,7 @@ async function main() {
     const p1sBt = await PRINT.build(PRINT.pieceObjects(asViewportPieces(plate.objs.slice(0, 1), a1.bed), p1sPrinter.bed), { config: p1sCfg, printer: p1sPrinter },
       { settings: Object.assign({}, PRINT.settingsFromConfig(p1sCfg), { filament: 'cr-tpu', bridgeTemp: 212 }) });
     check('a bridge temperature on the P1S is refused: its park and wipe moves are not written yet', !p1sBt.ok && /written for the A1 mini only so far/.test(p1sBt.reason), p1sBt.reason);
-    check('...the card\'s CR-TPU on the P1S has that bed: 235 C, bed 35, 3.2 mm^3/s', JSON.stringify(PRINT.filamentBase(p1sCfg, 'cr-tpu')) === JSON.stringify({ nozzleTemp: 235, firstTemp: 235, bedTemp: 35, maxFlow: 3.2, rangeLow: 200, rangeHigh: 250,
+    check('...the card\'s CR-TPU on the P1S has that bed: 215 C (first layer 235), bed 35, 3.2 mm^3/s', JSON.stringify(PRINT.filamentBase(p1sCfg, 'cr-tpu')) === JSON.stringify({ nozzleTemp: 215, firstTemp: 235, bedTemp: 35, maxFlow: 3.2, rangeLow: 200, rangeHigh: 250,
       flowRatio: 1, retractLen: 0.4, retractSpeed: 30, retractBefore: 0, zHop: 0.4, bridgeSpeed: 50, bridgeFlow: 1, bridgeTemp: null }));
     const p1sOwn = await PRINT.build(PRINT.pieceObjects(asViewportPieces(plate.objs.slice(0, 1), a1.bed), p1sPrinter.bed), { config: p1sCfg, printer: p1sPrinter },
       { settings: Object.assign({}, PRINT.settingsFromConfig(p1sCfg), { filament: 'cr-tpu' }) });

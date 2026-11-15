@@ -35,14 +35,15 @@ The keys are Bambu Studio's Generic TPU (`fdm_filament_tpu` > `Generic TPU @base
 3.2 mm^3/s, 0.4 mm retraction, flow ratio 1, fan 100 %, printable 200 - 250 C. On top of them, the
 owner's A1 mini temperature tower (2026-11-13, dried spool, 240 down to 210 C):
 
-- **235 C** nozzle. 240 and 235 gave the cleanest walls and the least stringing; 210 - 215 bridged
-  best. The spool's own range is 210 - 240 C, so 235 keeps a little margin.
+- **215 C** nozzle, **235 C** the first layer (since 2026-11-15; 235 throughout before). The tower
+  said 240 - 235 for walls and 210 - 215 for bridges; the string test and the roof prints below settled
+  it at 215 once the slicer printed islands one at a time and anchored its bridges.
 - The bed is Studio's own for the printer, which is what that tower printed on: **30 C** on the
   A1 mini (`Generic TPU @BBL A1M`), **35 C** on the P1S (`Generic TPU`).
 
 Not yet measured for this spool: the real max flow (3.2 is Studio's conservative Generic value),
-retraction beyond 0.4 mm, the flow ratio, and bridges at 235 C (they sag; slower bridges is the
-first lever). The P1S entry is the same keys with its own bed and has not been printed.
+retraction beyond 0.4 mm and the flow ratio. The P1S entry is the same keys with its own bed and
+has not been printed: its 215 is the A1 mini's.
 
 When sending: untick the AMS, and turn off flow dynamics calibration (Bambu's advice for TPU).
 
@@ -190,9 +191,21 @@ and wipe are a first guess), and how long the mini really takes for 235 to 212 a
 
 The owner printed a two-cone string test in CR-TPU on the A1 mini five ways. The baseline (235 C,
 0.4 mm retraction, 0.4 mm Z hop) was clean for the bottom two thirds and strung where the layers get
-small. 225 C was worse, from the first layers up; 245 C was no better; no Z hop was no better. So
-235 C stays, and no row on the card is the lever. What changed is the slicer's order - one island,
-then the next (docs/SLICER.md) - which takes the cones from five crossings a layer to one.
+small. 225 C was worse, from the first layers up; 245 C was no better; no Z hop was no better. What
+changed it was the slicer's order - one island, then the next (docs/SLICER.md) - which takes the
+cones from five crossings a layer to one. With that order the cooler prints won: 210 and 220 were
+nearly clean (210 bonded solid, no give when pulled apart), 215 between them, and 235 strung top to
+bottom.
+
+### Locked: 215 C, no bridge temperature (2026-11-15)
+
+A tower level at a flat 210 and then 215 C (Bridge temp off) dropped the roof's lines into the window.
+The roof was not anchored: its bridge lines stopped at the gap's edge, and a strip was left open along
+the front wall (docs/SLICER.md "A bridge reaches onto what holds it", "A bridge fills its gap wall to
+wall"). With both fixed the same level at a flat 215 printed the owner's best bridge so far, the
+window's inside clean; a little sag on the front lip. So CR-TPU prints at 215 (first layer 235) and
+asks for no bridge temperature: no stop at the park. Bridge temp stays on the card for a job that
+wants it.
 
 ### Retract before wipe (the card's row, `filament_retract_before_wipe`)
 
@@ -218,9 +231,10 @@ them in, and a number typed in wins. For Bridge temp, 0 is "none" whatever the f
 | --- | --- | --- | --- |
 | Bridge speed | the profile's 50 | 50 | 50 |
 | Bridge flow | the profile's 1 | 1 | 1 |
-| Bridge temp | none | **215** | none (no park moves written) |
+| Bridge temp | none | none (it prints at 215) | none (no park moves written) |
 
-- CR-TPU's 215 is from the owner's A1 mini prints of 2026-11-14 with Bridge temp 215 against 235.
+- CR-TPU carried a Bridge temp of 215 on the A1 mini from 2026-11-14 (its nozzle was 235) until
+  2026-11-15, when 215 became its nozzle temperature.
 - On a printer with no park moves the filament asks for no bridge temperature, so CR-TPU still
   slices for the P1S; only a number typed into the row there is refused.
 - What a slice is made with is `bridgeTempOf(config, settings)`; the card's note under the filament

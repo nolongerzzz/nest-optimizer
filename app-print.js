@@ -164,7 +164,7 @@
       id: 'cr-tpu', label: 'Creality CR-TPU 95A', external: true,
       keys: {
         filament_type: 'TPU', filament_ids: 'GFU99', filament_vendor: 'Generic',
-        nozzle_temperature: '235', nozzle_temperature_initial_layer: '235',
+        nozzle_temperature: '215', nozzle_temperature_initial_layer: '235',   // 215: the owner's prints of 2026-11-14/15 (below)
         nozzle_temperature_range_low: '200', nozzle_temperature_range_high: '250',
         cool_plate_temp: '30', cool_plate_temp_initial_layer: '30', eng_plate_temp: '30', eng_plate_temp_initial_layer: '30',
         hot_plate_temp: '35', hot_plate_temp_initial_layer: '35', textured_plate_temp: '35', textured_plate_temp_initial_layer: '35',
@@ -175,9 +175,11 @@
       },
       cooling: { fan_min_speed: '100', fan_max_speed: '100', fan_cooling_layer_time: '100', slow_down_layer_time: '8', slow_down_min_speed: '10' },
       /* ITS OWN DIALS (docs/FILAMENTS.md "The filament holds its dials"): the rows that are not a Studio filament key but were found for this
-         filament, so picking it is all a job needs. Bridge temp 215: the owner's A1 mini prints of 2026-11-14 (the roof drew tight at 215 where
-         it sagged at 235) - on the A1 mini only, the one printer with park moves written; elsewhere the filament asks for none. */
-      tune: function (config) { return isA1Mini(config) ? { bridgeTemp: 215 } : {}; },
+         filament, so picking it is all a job needs. The nozzle prints at 215 (the first layer at 235, for the bed): the owner's A1 mini prints
+         of 2026-11-14/15 - the string test clean at 210-220 once the cones were printed one at a time, where 235 strung top to bottom, and the
+         tower level's roof flat at a flat 215 once a bridge reached onto its pillars and filled its gap wall to wall. 215 is also the bridge
+         temperature that had held the roof at 235, so the filament asks for no bridge temperature of its own: no stop at the park. */
+      tune: function () { return {}; },
       /* what the printer's own Studio preset changes of those keys */
       printerKeys: function (config) {
         return isA1Mini(config) ? { hot_plate_temp: '30', hot_plate_temp_initial_layer: '30', textured_plate_temp: '30', textured_plate_temp_initial_layer: '30' } : {};
@@ -803,7 +805,7 @@
     var st = readSettings(), f = filamentOf(st.filament), base = filamentBase(knownConfig(), st.filament), parts = [];
     if (f.external) parts.push(f.label + ': external spool only, not the AMS. When sending, untick the AMS and flow dynamics calibration.');
     if (f.tune && base) parts.push(base.bridgeTemp ? 'It brings its own bridge temperature (' + base.bridgeTemp + ' \u00b0C, under Quality; 0 there turns it off).'
-      : 'Its bridge temperature is not set up for this printer yet: bridges print at the nozzle temperature.');
+      : 'Its bridges print at its own nozzle temperature: no stop at the park. A Bridge temp typed under Quality changes that for this job.');
     if (st.tempStep) {
       var t0 = st.nozzleTemp != null ? st.nozzleTemp : base ? base.nozzleTemp : null, t1 = st.firstTemp != null ? st.firstTemp : base ? base.firstTemp : null;
       if (t0 != null) {
