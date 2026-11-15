@@ -5824,7 +5824,7 @@ function applyModelSceneState(m, so) {
  *
  * @returns {object|null} the placed entry
  */
-function restoreSceneObject(so, positions, vertexIds) {
+function restoreSceneObject(so, positions, vertexIds, filename) {
   const Scene = window.NSO3MFScene;
   const disp = Scene.transformSoup(so.inverse, positions);
   const C = so.centerOffset || { x: 0, y: 0, z: 0 };
@@ -5838,7 +5838,7 @@ function restoreSceneObject(so, positions, vertexIds) {
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(raw, 3));
-  const id = addModelFromZUpGeometry(so.name, geometry, { silent: true, srcVertexIds: vertexIds || null });
+  const id = addModelFromZUpGeometry(so.name, geometry, { silent: true, srcVertexIds: vertexIds || null, sourceFile: filename || null });
   if (id == null) return null;
   const m = state.models.find(x => x.id === id);
   if (!m) return null;
@@ -5898,13 +5898,13 @@ function restoreSceneFrom3MF(filename, result, scene) {
         // else.
         const geometry = new THREE.BufferGeometry();
         geometry.setAttribute('position', new THREE.BufferAttribute(result.objects[i].positions, 3));
-        const id = addModelFromZUpGeometry(so.name, geometry, { srcVertexIds: result.objects[i].vertexIds || null });
+        const id = addModelFromZUpGeometry(so.name, geometry, { srcVertexIds: result.objects[i].vertexIds || null, sourceFile: filename });   // an export is named after the file opened (app-print.js fileName)
         if (id == null) return;
         const m = state.models.find(x => x.id === id);
         if (!m) return;
         applyModelSceneState(m, so);
         restored++;
-      } else if (restoreSceneObject(so, result.objects[i].positions, result.objects[i].vertexIds)) {
+      } else if (restoreSceneObject(so, result.objects[i].positions, result.objects[i].vertexIds, filename)) {
         restored++;
       }
     } catch (err) {
