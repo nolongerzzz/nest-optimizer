@@ -179,9 +179,9 @@
          of 2026-11-14/15 - the string test clean at 210-220 once the cones were printed one at a time, where 235 strung top to bottom, and the
          tower level's roof flat at a flat 215 once a bridge reached onto its pillars and filled its gap wall to wall. 215 is also the bridge
          temperature that had held the roof at 235, so the filament asks for no bridge temperature of its own: no stop at the park. */
-      /* Hanging wall speed 10: a wall over open air from end to end (the window's front lip) sagged at 42 mm/s on the owner's 215 level of
-         2026-11-15; his Studio reference printed those walls at 10. */
-      tune: function () { return { hangSpeed: 10 }; },
+      /* No Hanging wall speed of its own: 10 mm/s on those walls (the window's lip) was tried on the owner's 215 level of 2026-11-15 and
+         made the lip no better and the bridges worse, so they print at the bridge's speed, as Studio's do. */
+      tune: function () { return {}; },
       /* what the printer's own Studio preset changes of those keys */
       printerKeys: function (config) {
         return isA1Mini(config) ? { hot_plate_temp: '30', hot_plate_temp_initial_layer: '30', textured_plate_temp: '30', textured_plate_temp_initial_layer: '30' } : {};
