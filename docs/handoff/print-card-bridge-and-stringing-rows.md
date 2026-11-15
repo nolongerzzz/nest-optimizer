@@ -32,5 +32,9 @@ from the layer below (`path.span`) and the planner prints it as a bridge; the pl
 Overhang wall at `bridge_speed` and writes its bridges 0.2 high. `slicer:test` re-pinned (hinge_knuckle_box, top_clip_x2, top_clip_x2_coupon), `print:planner`
 3 checks reworded to the measured behaviour, `print:slice` 136.
 
+**The filament holds its dials (the owner: lock TPU in the filament, so nothing outside it moves).** `FILAMENTS[id].tune(config)` is the filament's own
+Bridge speed / flow / temp; those rows are filament rows now (empty: the filament's own; Bridge temp 0: none). CR-TPU brings Bridge temp 215 on the A1 mini
+and none on the P1S, so it still slices there. `print:slice` is 138.
+
 **Not built.** The P1S's park, a cleaner restart after the park (the owner: the wipe leaves a string, clipped off), avoid-crossing-walls travel, wipe distance. None has been printed yet: the rows are checked in the
 G-code (feeds, strand width, retraction, lifts), not on a part.

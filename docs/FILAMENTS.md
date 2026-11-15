@@ -184,6 +184,30 @@ then the travel to the layer's first path, the nozzle down, and the filament for
 Not printed yet. What a print has to show: that the strand starts clean after the wait (the prime
 and wipe are a first guess), and how long the mini really takes for 235 to 212 and back.
 
+## The filament holds its dials
+
+The owner (2026-11-14): TPU is what made these dials necessary, so they belong to the filament -
+picking it is all a TPU job should need, and nothing outside that filament moves.
+
+A `FILAMENTS` entry has, beside its Studio keys, `tune(config)`: its own values for the rows that
+are not a filament key in Studio - **Bridge speed**, **Bridge flow**, **Bridge temp**. Those three
+rows now work like the other filament rows: empty is the filament's own, picking a filament fills
+them in, and a number typed in wins. For Bridge temp, 0 is "none" whatever the filament brings.
+
+| | Profile (PLA) | CR-TPU, A1 mini | CR-TPU, P1S |
+| --- | --- | --- | --- |
+| Bridge speed | the profile's 50 | 50 | 50 |
+| Bridge flow | the profile's 1 | 1 | 1 |
+| Bridge temp | none | **215** | none (no park moves written) |
+
+- CR-TPU's 215 is from the owner's A1 mini prints of 2026-11-14 with Bridge temp 215 against 235.
+- On a printer with no park moves the filament asks for no bridge temperature, so CR-TPU still
+  slices for the P1S; only a number typed into the row there is refused.
+- What a slice is made with is `bridgeTempOf(config, settings)`; the card's note under the filament
+  rows says what the filament brought.
+- A tested value goes into the entry's `keys` (a Studio filament key) or its `tune` (the rest), with
+  the print it came from beside it. Saved settings are still there for a job's own levers.
+
 ## Adding a filament
 
 One entry in `FILAMENTS` (`app-print.js`) and one `<option>` in `#slice-set-filament`

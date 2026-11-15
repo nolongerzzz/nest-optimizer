@@ -204,7 +204,7 @@ async function main() {
     check('the settings start at the A1 mini template\'s values: 0.4 nozzle, 0.2 mm layers, 2 walls, 15 % grid, support below 30°, auto brim, no raft (0.1 contact)',
       JSON.stringify(base) === JSON.stringify({ nozzle: 0.4, layer: 0.2, walls: 2, density: 15, pattern: 'grid', surface: 'zigzag', angle: 30, brim: 'auto', raft: 0, raftGap: 0.1, ifaceAngle: 'studio36', interfaceRule: null,
         filament: 'profile', nozzleTemp: null, firstTemp: null, bedTemp: null, maxFlow: null, tempStep: 0, tempBand: 10,
-        bridgeSpeed: 50, bridgeFlow: 1, flowRatio: null, retractLen: null, retractSpeed: null, zHop: null, bridgeTemp: null,
+        bridgeSpeed: null, bridgeFlow: null, flowRatio: null, retractLen: null, retractSpeed: null, zHop: null, bridgeTemp: null,   /* the filament's own */
         /* Bambu's Advanced support rows start at the template's own values (docs/PRINT-CARD.md "Starting values"): first layer 90 %, top Z 0.2, every bridge held */
         supDensity: 90, supExpand: -1, supWalls: -1, supTopZ: 0.2, supBottomZ: 0.2, supBase: 'default', supBaseSpacing: 2.5, supAngle: 0, supIfacePattern: 'default', supIfaceSpacing: 0.5,
         supExpansion: 0, supXy: 0.35, supZOverXy: false, supFirstGap: 0.2, supBridge: 0, supIndep: true }), JSON.stringify(base));
@@ -420,7 +420,7 @@ async function main() {
         Object.keys(PRINT.configOverlay(tpl, Object.assign({}, base, { bridgeSpeed: 50, bridgeFlow: 1, flowRatio: 0.98, retractLen: 0.8, retractSpeed: 30, zHop: 0.4 }))).length === 0);
       const ov = PRINT.configOverlay(tpl, Object.assign({}, base, { bridgeSpeed: 12, bridgeFlow: 0.9, flowRatio: 0.95, retractLen: 1.2, retractSpeed: 20, zHop: 0 }));
       check('a changed row is its Bambu key: bridge_speed, bridge_flow (the process\'s), filament_flow_ratio, filament_retraction_length, filament_(de)retraction_speed, filament_z_hop (the filament\'s own, the printer\'s keys left alone)',
-        JSON.stringify(ov) === JSON.stringify({ bridge_speed: '12', bridge_flow: '0.9', filament_flow_ratio: '0.95', filament_retraction_length: '1.2', filament_retraction_speed: '20', filament_deretraction_speed: '20', filament_z_hop: '0' }), JSON.stringify(ov));
+        JSON.stringify(ov) === JSON.stringify({ filament_flow_ratio: '0.95', filament_retraction_length: '1.2', filament_retraction_speed: '20', filament_deretraction_speed: '20', filament_z_hop: '0', bridge_speed: '12', bridge_flow: '0.9' }), JSON.stringify(ov));
       const read = async r => {
         const g = L.text(await L.R.openZip(r.bytes).read('Metadata/plate_1.gcode')).split('\n');
         const body = g.slice(g.indexOf('; MACHINE_START_GCODE_END'), g.indexOf('; MACHINE_END_GCODE_START'));
@@ -458,7 +458,14 @@ async function main() {
     // BRIDGE TEMPERATURE: the bridges at their own nozzle temperature, changed at the printer's park (docs/FILAMENTS.md)
     {
       const cp = objs.slice(0, 1);
-      const off = await PRINT.build(cp, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { filament: 'cr-tpu' }) });
+      /* THE FILAMENT HOLDS ITS DIALS: CR-TPU brings a bridge temperature of its own on the A1 mini (215); the row at 0 turns it off, a number in the row wins */
+      const own = await PRINT.build(cp, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { filament: 'cr-tpu' }) });
+      const plaB = await PRINT.build(cp, { config: tpl, printer: a1 }, { settings: Object.assign({}, base) });
+      check('picking CR-TPU is enough: with every row empty its bridges print at its own 215 C on the A1 mini, and the profile\'s PLA has no bridge temperature',
+        own.ok && plaB.ok && own.stats.bridgeTemp && own.stats.bridgeTemp.temp === 215 && own.stats.bridgeTemp.changes >= 2 && plaB.stats.bridgeTemp === null &&
+          PRINT.filamentBase(tpl, 'cr-tpu').bridgeTemp === 215 && PRINT.filamentBase(tpl, 'profile').bridgeTemp === null && PRINT.cleanSettings({ bridgeTemp: '0' }).bridgeTemp === 0 && PRINT.cleanSettings({ bridgeTemp: '' }).bridgeTemp === null,
+        JSON.stringify([own.stats && own.stats.bridgeTemp, plaB.stats && plaB.stats.bridgeTemp]));
+      const off = await PRINT.build(cp, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { filament: 'cr-tpu', bridgeTemp: 0 }) });
       const on = await PRINT.build(cp, { config: tpl, printer: a1 }, { settings: Object.assign({}, base, { filament: 'cr-tpu', bridgeTemp: 212 }) });
       check('CR-TPU slices with a bridge temperature of 212', off.ok && on.ok, on.reason);
       if (off.ok && on.ok) {
@@ -633,7 +640,10 @@ async function main() {
       { settings: Object.assign({}, PRINT.settingsFromConfig(p1sCfg), { filament: 'cr-tpu', bridgeTemp: 212 }) });
     check('a bridge temperature on the P1S is refused: its park and wipe moves are not written yet', !p1sBt.ok && /written for the A1 mini only so far/.test(p1sBt.reason), p1sBt.reason);
     check('...the card\'s CR-TPU on the P1S has that bed: 235 C, bed 35, 3.2 mm^3/s', JSON.stringify(PRINT.filamentBase(p1sCfg, 'cr-tpu')) === JSON.stringify({ nozzleTemp: 235, firstTemp: 235, bedTemp: 35, maxFlow: 3.2, rangeLow: 200, rangeHigh: 250,
-      flowRatio: 1, retractLen: 0.4, retractSpeed: 30, zHop: 0.4 }));
+      flowRatio: 1, retractLen: 0.4, retractSpeed: 30, zHop: 0.4, bridgeSpeed: 50, bridgeFlow: 1, bridgeTemp: null }));
+    const p1sOwn = await PRINT.build(PRINT.pieceObjects(asViewportPieces(plate.objs.slice(0, 1), a1.bed), p1sPrinter.bed), { config: p1sCfg, printer: p1sPrinter },
+      { settings: Object.assign({}, PRINT.settingsFromConfig(p1sCfg), { filament: 'cr-tpu' }) });
+    check('...and CR-TPU with every row empty slices for the P1S: the filament asks for no bridge temperature where the printer has no park (only a number typed in the row is refused)', p1sOwn.ok && p1sOwn.stats.bridgeTemp === null, p1sOwn.reason);
   }
 
   // ===========================================================================

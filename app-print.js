@@ -116,8 +116,9 @@
                            filament: 'profile', nozzleTemp: null, firstTemp: null, bedTemp: null, maxFlow: null, tempStep: 0, tempBand: 10,
                            /* TUNING (docs/FILAMENTS.md "Bridges and stringing"): the bridge's speed and flow are the process's (the profile's 50 mm/s
                               and 1); the flow ratio, the retraction and the z-hop are the filament's - a null row is the filament's own */
-                           bridgeSpeed: 50, bridgeFlow: 1, flowRatio: null, retractLen: null, retractSpeed: null, zHop: null,
-                           /* the bridges' own nozzle temperature (null: none - they print at the layer's), changed at the printer's park */
+                           bridgeSpeed: null, bridgeFlow: null, flowRatio: null, retractLen: null, retractSpeed: null, zHop: null,
+                           /* the bridges' own nozzle temperature, changed at the printer's park: null is the filament's own (none for the
+                              profile's PLA, 215 for CR-TPU on the A1 mini), 0 is none whatever the filament */
                            bridgeTemp: null,
                            /* BAMBU'S ADVANCED SUPPORT ROWS (docs/SUPPORT-ADVANCED.md). They start at the printer profile's values (settingsFromConfig);
                               these are Bambu's own defaults, for a card with no profile. NSO's old numbers (top 0.18, first layer solid, a bridge of
@@ -173,6 +174,10 @@
         close_fan_the_first_x_layers: '1', additional_cooling_fan_speed: '70', close_additional_fan_first_x_layers: '1'
       },
       cooling: { fan_min_speed: '100', fan_max_speed: '100', fan_cooling_layer_time: '100', slow_down_layer_time: '8', slow_down_min_speed: '10' },
+      /* ITS OWN DIALS (docs/FILAMENTS.md "The filament holds its dials"): the rows that are not a Studio filament key but were found for this
+         filament, so picking it is all a job needs. Bridge temp 215: the owner's A1 mini prints of 2026-11-14 (the roof drew tight at 215 where
+         it sagged at 235) - on the A1 mini only, the one printer with park moves written; elsewhere the filament asks for none. */
+      tune: function (config) { return isA1Mini(config) ? { bridgeTemp: 215 } : {}; },
       /* what the printer's own Studio preset changes of those keys */
       printerKeys: function (config) {
         return isA1Mini(config) ? { hot_plate_temp: '30', hot_plate_temp_initial_layer: '30', textured_plate_temp: '30', textured_plate_temp_initial_layer: '30' } : {};
@@ -204,9 +209,12 @@
     if (!config || !PL) return null;
     var keys = filamentKeys(config, id);
     var S = PL.settingsFrom(Object.keys(keys).length ? withOverlay(config, keys) : config);
-    return { nozzleTemp: S.temp.nozzle, firstTemp: S.temp.nozzleInitial, bedTemp: S.temp.bedInitial, maxFlow: S.filament.maxVolumetric,
+    var f = filamentOf(id);
+    return Object.assign({ nozzleTemp: S.temp.nozzle, firstTemp: S.temp.nozzleInitial, bedTemp: S.temp.bedInitial, maxFlow: S.filament.maxVolumetric,
              rangeLow: S.temp.rangeLow, rangeHigh: S.temp.rangeHigh,
-             flowRatio: S.filament.flow, retractLen: S.retract.length, retractSpeed: S.retract.speed, zHop: S.retract.hop };
+             flowRatio: S.filament.flow, retractLen: S.retract.length, retractSpeed: S.retract.speed, zHop: S.retract.hop,
+             /* the bridge's rows: the profile's speed and flow, no bridge temperature - unless the filament brings its own (tune) */
+             bridgeSpeed: S.speed.bridge, bridgeFlow: S.filament.bridgeFlow, bridgeTemp: null }, f.tune ? f.tune(config) : {});
   }
 
   function cfgRaw(config, key) {
@@ -228,8 +236,7 @@
       surface: o.solidPattern && SURFACE_TO_CONFIG[o.solidPattern] ? o.solidPattern : 'zigzag',
       angle: o.supportThresholdDeg, brim: o.brimType, raft: Math.round(o.raftLayers || 0), raftGap: o.raftContactMm != null ? o.raftContactMm : 0.1, ifaceAngle: 'studio36', interfaceRule: null,
       filament: 'profile', nozzleTemp: null, firstTemp: null, bedTemp: null, maxFlow: null, tempStep: 0, tempBand: 10,
-      bridgeSpeed: numOf(cfgRaw(config, 'bridge_speed'), D0.bridgeSpeed), bridgeFlow: numOf(cfgRaw(config, 'bridge_flow'), D0.bridgeFlow),
-      flowRatio: null, retractLen: null, retractSpeed: null, zHop: null, bridgeTemp: null,
+      bridgeSpeed: null, bridgeFlow: null, flowRatio: null, retractLen: null, retractSpeed: null, zHop: null, bridgeTemp: null,
       /* the support rows start at the PROFILE's values (the owner's: the Print card's rows are the profile's until changed), read off Bambu's own
          keys; a key the profile does not hold is this slicer's own default */
       supDensity: pctOf(cfgRaw(config, 'raft_first_layer_density'), D0.supDensity), supExpand: numOf(cfgRaw(config, 'raft_first_layer_expansion'), D0.supExpand),
@@ -270,9 +277,9 @@
       nozzleTemp: opt(s.nozzleTemp, 170, 300, 0), firstTemp: opt(s.firstTemp, 170, 300, 0), bedTemp: opt(s.bedTemp, 0, 110, 0),
       maxFlow: opt(s.maxFlow, 0.5, 40, 2),
       tempStep: Math.round(n(s.tempStep, D.tempStep, -25, 25)), tempBand: Math.round(n(s.tempBand, D.tempBand, 1, 100) * 10) / 10,
-      bridgeSpeed: Math.round(n(s.bridgeSpeed, D.bridgeSpeed, 1, 300) * 10) / 10, bridgeFlow: r2(n(s.bridgeFlow, D.bridgeFlow, 0.5, 1.5)),
+      bridgeSpeed: opt(s.bridgeSpeed, 1, 300, 1), bridgeFlow: opt(s.bridgeFlow, 0.5, 1.5, 2),
       flowRatio: opt(s.flowRatio, 0.8, 1.2, 3), retractLen: opt(s.retractLen, 0, 3, 2), retractSpeed: opt(s.retractSpeed, 5, 80, 0), zHop: opt(s.zHop, 0, 2, 2),
-      bridgeTemp: opt(s.bridgeTemp, 170, 300, 0),
+      bridgeTemp: (function (v) { v = parseFloat(v); return !isFinite(v) ? null : v <= 0 ? 0 : Math.round(Math.max(170, Math.min(300, v))); })(s.bridgeTemp),   /* 0: none */
       supDensity: Math.round(n(s.supDensity, D.supDensity, 10, 100)),
       supExpand: (function (v) { return v < 0 ? -1 : r2(v); })(n(s.supExpand, D.supExpand, -1, 10)),
       supWalls: Math.round(n(s.supWalls, D.supWalls, -1, 5)),
@@ -328,8 +335,6 @@
     if (Math.abs(s.supFirstGap - base.supFirstGap) > 1e-6) out.support_object_first_layer_gap = String(s.supFirstGap);
     if (Math.abs(s.supBridge - base.supBridge) > 1e-6) out.max_bridge_length = String(s.supBridge);
     if (s.supIndep !== base.supIndep) out.independent_support_layer_height = s.supIndep ? '1' : '0';
-    if (Math.abs(s.bridgeSpeed - base.bridgeSpeed) > 1e-6) out.bridge_speed = String(s.bridgeSpeed);
-    if (Math.abs(s.bridgeFlow - base.bridgeFlow) > 1e-6) out.bridge_flow = String(s.bridgeFlow);
     /* the filament: its own keys, then the rows that differ from its own values */
     var fk = filamentKeys(config, s.filament);
     Object.keys(fk).forEach(function (k) { if (cfgRaw(config, k) !== fk[k]) out[k] = fk[k]; });
@@ -346,12 +351,24 @@
       if (s.retractLen != null && Math.abs(s.retractLen - fb.retractLen) > 1e-6) out.filament_retraction_length = String(s.retractLen);
       if (s.retractSpeed != null && s.retractSpeed !== fb.retractSpeed) { out.filament_retraction_speed = String(s.retractSpeed); out.filament_deretraction_speed = String(s.retractSpeed); }
       if (s.zHop != null && Math.abs(s.zHop - fb.zHop) > 1e-6) out.filament_z_hop = String(s.zHop);
+      /* the bridge's speed and flow: the row's, else the filament's own; written where that is not the template's */
+      var bSpeed = s.bridgeSpeed != null ? s.bridgeSpeed : fb.bridgeSpeed, bFlow = s.bridgeFlow != null ? s.bridgeFlow : fb.bridgeFlow;
+      if (Math.abs(bSpeed - numOf(cfgRaw(config, 'bridge_speed'), bSpeed)) > 1e-6) out.bridge_speed = String(bSpeed);
+      if (Math.abs(bFlow - numOf(cfgRaw(config, 'bridge_flow'), bFlow)) > 1e-6) out.bridge_flow = String(bFlow);
     }
     return out;
   }
 
   /** The keys of an overlay that are a filament's (they are listed under the filament in different_settings_to_system, not the process). */
   var FILAMENT_KEY = /^(filament_|nozzle_temperature|temperature_vitrification|close_fan_|additional_cooling_|close_additional_|(cool|eng|hot|textured|supertack)_plate_temp)/;
+
+  /** The bridge temperature a slice is made with: the row's (0: none), else the filament's own on this printer; null for none. */
+  function bridgeTempOf(config, settings) {
+    if (!settings) return null;
+    if (settings.bridgeTemp != null) return settings.bridgeTemp > 0 ? settings.bridgeTemp : null;
+    var fb = filamentBase(config, settings.filament);
+    return fb && fb.bridgeTemp ? fb.bridgeTemp : null;
+  }
 
   /** What the planner is told beside the config: the filament's cooling (undefined: NSO's default profile), its start G-code, the temperature steps. */
   function plannerExtras(config, settings) {
@@ -362,7 +379,7 @@
       cooling: f.cooling && CP ? Object.assign({}, CP.resolveValues(CP.DEFAULT_PROFILE_ID), f.cooling) : undefined,
       filamentStart: f.start ? f.start(Math.max(S.temp.bed, S.temp.bedInitial), config) : undefined,
       tempSteps: settings.tempStep ? { stepC: settings.tempStep, bandMm: settings.tempBand } : undefined,
-      bridgeTemp: settings.bridgeTemp != null ? settings.bridgeTemp : undefined
+      bridgeTemp: bridgeTempOf(config, settings) || undefined
     };
   }
 
@@ -677,7 +694,7 @@
     fileName: fileName, build: build, fmtTime: fmtTime, describe: describe, buildForWorker: buildForWorker,
     SETTINGS_DEFAULT: SETTINGS_DEFAULT, settingsFromConfig: settingsFromConfig, cleanSettings: cleanSettings,
     configOverlay: configOverlay, withOverlay: withOverlay,
-    FILAMENTS: FILAMENTS, filamentBase: filamentBase, filamentKeys: filamentKeys, filamentWords: filamentWords, bandWords: bandWords, tuneWords: tuneWords, bridgeTempWords: bridgeTempWords
+    FILAMENTS: FILAMENTS, filamentBase: filamentBase, filamentKeys: filamentKeys, filamentWords: filamentWords, bandWords: bandWords, tuneWords: tuneWords, bridgeTempWords: bridgeTempWords, bridgeTempOf: bridgeTempOf
   };
 
   // ===========================================================================
@@ -740,7 +757,8 @@
                   ['slice-set-sup-indep', 'supIndep']];
   /* the four rows that are a filament's own numbers: the row, and its name in the settings */
   var FILAMENT_ROWS = [['slice-set-nozzle-temp', 'nozzleTemp'], ['slice-set-first-temp', 'firstTemp'], ['slice-set-bed-temp', 'bedTemp'], ['slice-set-max-flow', 'maxFlow'],
-                       ['slice-set-flow-ratio', 'flowRatio'], ['slice-set-retract-len', 'retractLen'], ['slice-set-retract-speed', 'retractSpeed'], ['slice-set-zhop', 'zHop']];
+                       ['slice-set-flow-ratio', 'flowRatio'], ['slice-set-retract-len', 'retractLen'], ['slice-set-retract-speed', 'retractSpeed'], ['slice-set-zhop', 'zHop'],
+                       ['slice-set-bridge-speed', 'bridgeSpeed'], ['slice-set-bridge-flow', 'bridgeFlow'], ['slice-set-bridge-temp', 'bridgeTemp']];
 
   /** The line under the bridge rows: the speed a bridge will really print at (the row's, or what the filament's max flow allows). */
   function bridgeNote() {
@@ -769,7 +787,7 @@
   /** The four filament rows at the picked filament's own values (a filament just picked, or the template just fetched). */
   function showFilamentRows() {
     var sel = $('slice-set-filament'), base = filamentBase(knownConfig(), sel ? sel.value : 'profile');
-    FILAMENT_ROWS.forEach(function (r) { var el = $(r[0]); if (el) el.value = base ? String(base[r[1]]) : ''; });
+    FILAMENT_ROWS.forEach(function (r) { var el = $(r[0]); if (el) el.value = base && base[r[1]] != null ? String(base[r[1]]) : ''; });
   }
 
   /** The line under the filament rows: what the picked filament needs of the owner, and the temperature steps as they will be written. */
@@ -778,6 +796,8 @@
     if (!el) return;
     var st = readSettings(), f = filamentOf(st.filament), base = filamentBase(knownConfig(), st.filament), parts = [];
     if (f.external) parts.push(f.label + ': external spool only, not the AMS. When sending, untick the AMS and flow dynamics calibration.');
+    if (f.tune && base) parts.push(base.bridgeTemp ? 'It brings its own bridge temperature (' + base.bridgeTemp + ' \u00b0C, under Quality; 0 there turns it off).'
+      : 'Its bridge temperature is not set up for this printer yet: bridges print at the nozzle temperature.');
     if (st.tempStep) {
       var t0 = st.nozzleTemp != null ? st.nozzleTemp : base ? base.nozzleTemp : null, t1 = st.firstTemp != null ? st.firstTemp : base ? base.firstTemp : null;
       if (t0 != null) {
@@ -834,8 +854,6 @@
     set('slice-set-filament', filamentOf(st.filament).id); set('slice-set-temp-step', st.tempStep == null ? 0 : st.tempStep); set('slice-set-temp-band', st.tempBand == null ? 10 : st.tempBand);
     showFilamentRows();
     FILAMENT_ROWS.forEach(function (r) { if (st[r[1]] != null) set(r[0], st[r[1]]); });
-    set('slice-set-bridge-speed', full.bridgeSpeed); set('slice-set-bridge-flow', full.bridgeFlow);
-    var btEl = $('slice-set-bridge-temp'); if (btEl) btEl.value = full.bridgeTemp == null ? '' : String(full.bridgeTemp);   /* empty: none */
     filamentNote(); bridgeNote();
   }
 
@@ -863,7 +881,7 @@
         S.seeding = null;
         if (S.seededFor !== profile.id || S.busy) return;
         var base = filamentBase(knownConfig(), ($('slice-set-filament') || {}).value);
-        FILAMENT_ROWS.forEach(function (r) { var el = $(r[0]); if (el && el.value === '' && base) el.value = String(base[r[1]]); });
+        FILAMENT_ROWS.forEach(function (r) { var el = $(r[0]); if (el && el.value === '' && base && base[r[1]] != null) el.value = String(base[r[1]]); });
         filamentNote(); refresh();
       }, function () { S.seeding = null; });
       return;
