@@ -937,6 +937,28 @@ Pinned slices that changed: `hinge_knuckle_box` 0.4, `top_clip_x2` and `top_clip
 nozzles. Held by `print:slice` 3c (the doorway's four wall spans, each one 30 mm move) and
 `print:planner` (an Overhang wall is at one speed or the other).
 
+
+### One island, then the next
+
+A layer's walls are built a depth at a time and its fill after them, so a layer of two islands used
+to run inner wall, inner wall, outer wall, outer wall, fill, fill: five crossings of the gap between
+them every layer, each one a retraction and a chance of a string. The owner's TPU string test
+(two 5 mm cones 10 mm apart, 2026-11-14) strung from where the layers get small, and nozzle
+temperature (225, 235, 245), no Z hop and a longer retraction did not move it.
+
+Bambu Studio finishes an island - its walls, then its fill - and goes to the next (its Generic TPU
+slice of the temperature tower, `fixtures/print-planner/a1mini-0.4/studio-generic-tpu-tower.gcode.3mf`,
+any layer of several islands). `islandOrder` (`nso_slicer.js`) does the same after a part's layers
+are built: the paths are filed by the island of the layer's section they lie in, keep their order
+inside it, and the islands follow nearest first, starting from the one nearest where the layer
+below ended. The cones went from 74 crossings to 20, one a layer.
+
+- A part only: a support's layers keep their own order.
+- A layer of one island is not touched, so a part that is one piece at every height slices byte for
+  byte as before.
+- `islandOrder: false` is the order by depth, for comparing.
+- Checked in `slicer:test` ("Islands"): two posts, one move across a layer, the same paths.
+
 ### A bridge's strand, by its kind (the planner's `beadOf`)
 
 Every Studio slice in the repo (`thick_bridges = 0`) writes a bridge over open air as a line of

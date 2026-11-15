@@ -443,11 +443,11 @@ function frustum(n, r0, r1, z0, z1) {
       'fixtures/box-20mm.stl': ['bf4fa6385480d9a1', '1ce8c7eb4eca30e8'],
       'fixtures/cylinder_r10h30_s64.stl': ['4102db1663681585', 'ee3474b981bba976'],
       'fixtures/fixture_sphere_curved.stl': ['b20238310238d62d', '765e9c3a4bbce169'],
-      'fixtures/hinge_knuckle_box.stl': ['4f3015df4d0f1e91', '3f137c8232bffa7e'],
+      'fixtures/hinge_knuckle_box.stl': ['c104a37c08dffe26', '4174c3c59ca772f4'],
       'fixtures/quick/shape-torus.stl': ['95b2b40eb073d5c0', 'e686396781f0952d'],
       'fixtures/quick/shape-tube.stl': ['59dafe6c8652a59d', 'df62d80fe91a6680'],
       'fixtures/supports/top_clip_x2.stl': ['d3febc5055751be2', 'a932143294926598'],
-      'fixtures/supports/top_clip_x2_coupon.stl': ['38ecd8dbb0b2ced3', 'ba6f62381625c990']
+      'fixtures/supports/top_clip_x2_coupon.stl': ['84730d8adee5882d', '60d73f3a13efd53f']
     };
     const bad = [];
     let n = 0;
@@ -550,6 +550,25 @@ function frustum(n, r0, r1, z0, z1) {
     check('topPattern alone: the top in rings, the solid infill under it and the first layer in lines',
           tb.layers[29].paths.filter(p => p.feature === 'Top surface').every(p => p.closed) && tb.layers[28].paths.filter(p => p.feature === 'Internal solid infill').every(p => !p.closed) &&
           tb.layers[0].paths.filter(p => p.feature === 'Bottom surface').every(p => !p.closed));
+  }
+
+  section('Islands - a layer\'s separate islands print one after the other, each whole (docs/SLICER.md "One island, then the next")');
+  {
+    const opt = (over) => SL.defaultsFor(0.4, Object.assign({ layerMm: 0.2, outerWallWidthMm: 0.42, innerWallWidthMm: 0.45, infillWidthMm: 0.42, topShellLayers: 5, bottomShellLayers: 3 }, over));
+    /* two 6 mm posts 10 mm apart in one object: walls and fill on both, every layer */
+    const two = Array.from(prism(rect0(0, 6, 0, 6), 0, 4)).concat(Array.from(prism(rect0(16, 22, 0, 6), 0, 4)));
+    const sideOf = p => (p.pts[0][0] < 11 ? 0 : 1);
+    const runsOf = L => L.paths.map(sideOf).filter((v, i, a) => i === 0 || v !== a[i - 1]).length;
+    const on = SL.sliceObjects([{ name: 'two', soup: two }], opt({}), wasm).objects[0];
+    const off = SL.sliceObjects([{ name: 'two', soup: two }], opt({ islandOrder: false }), wasm).objects[0];
+    const endOf = L => { const lp = L.paths[L.paths.length - 1]; return sideOf({ pts: [lp.closed ? lp.pts[0] : lp.pts[lp.pts.length - 1]] }); };
+    check('each post is printed whole before the other: one move across a layer (by depth it was more)',
+          on.layers.every(L => runsOf(L) === 2) && off.layers.some(L => runsOf(L) > 2), on.layers.map(runsOf).join('') + ' / ' + off.layers.map(runsOf).join(''));
+    check('...a layer starts on the post the layer below ended on', on.layers.every((L, i) => i === 0 || sideOf(L.paths[0]) === endOf(on.layers[i - 1])));
+    const key = L => L.paths.map(p => p.feature + ':' + p.pts.length + ':' + p.pts[0].join(',')).sort().join('|');
+    check('...the same paths, only their order', on.layers.every((L, i) => key(L) === key(off.layers[i])));
+    check('...and inside a post the order is as it was: walls from the inside out, then the fill',
+          on.layers.every((L, i) => [0, 1].every(sd => JSON.stringify(L.paths.filter(p => sideOf(p) === sd).map(p => p.feature)) === JSON.stringify(off.layers[i].paths.filter(p => sideOf(p) === sd).map(p => p.feature)))));
   }
 
   section('Rectilinear - Bambu\'s name for the zigzag lines, against a real Bambu slice (fixtures/slicer-rectilinear-reference.json, docs/SLICER.md "Rectilinear")');

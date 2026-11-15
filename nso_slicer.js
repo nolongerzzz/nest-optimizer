@@ -312,6 +312,7 @@
       supportInterfaceRule: null,          // 'column': the interface read off the part's layers column by column (columnRule; docs/SUPPORT-GATE.md); null: the sheet typing
       supportInterfaceSpacingMm: null,     // the gap between interface lines (Bambu's support_interface_spacing; the print planner reads the profile's): null -> the dense sheet's line + 0.04
       supportAngleDeg: 0,                  // Bambu's support_angle: the 'profile' stack's first layer turns this + 90
+      islandOrder: true,                   // a layer's separate islands print one after the other, each whole (islandOrder), as Studio's do; false: every island's inner walls, then every outer wall, then the fill
       overhangSpanMinMm: 2,                // a hanging wall this long, a line width or more from the layer below on both sides, is printed as a bridge (spanPieces); 0: never
       bridgeAngleDeg: 0,                   // Bambu's bridge_angle: every Bridge laid at it (0: auto - over a support, Studio 02.09's 3.6 under the 'profile' / 'studio36' angles)
       supportInterfaceAngle: 'bridge',     // the column rule's stack angles (the app slices with the card's, 'profile' by default - app-print.js slicerOptions): 'profile' Bambu's own rule off the profile's support_angle / bridge_angle (its first layer at support_angle + 90, its top square to the bridge at bridge_angle - 0: Studio's 3.6 - one turn a layer down; the owner's 2x supp_ref at 20 / 45: 110, then 45 / 135 to a top at 135); 'bridge' its top square to the part's bridge over it; 'studio36' Studio 02.09's own (90, then 93.6 / 3.6 up to a top at 93.6, the part's bridges over supports at 3.6 - the owner's P1S print released clean); 'crosshatch' 110, then 45 / 135
@@ -746,6 +747,67 @@
       }
     }
     return out;
+  }
+
+  /**
+   * A layer's separate islands, each printed whole before the next.
+   *
+   * The walls are built a depth at a time and the fill after them, so a layer of
+   * two islands ran inner wall, inner wall, outer wall, outer wall, fill, fill:
+   * five crossings of the gap a layer where one will do, and every crossing is a
+   * retraction and a chance of a string (the owner's TPU string test, 2026-11-14:
+   * two 5 mm cones, strung across from where the layers get small). Bambu Studio
+   * finishes an island - its walls and its fill - and then goes to the next (its
+   * Generic TPU slice of the temperature tower, layer by layer).
+   *
+   * The paths keep their order inside an island; the islands follow each other
+   * nearest first, from the one nearest `from` - where the layer below ended, so
+   * a layer starts on the island the nozzle is already over - or, with no
+   * `from`, the one the layer started on. A layer of one island is left as it
+   * is. Returns where the layer ends.
+   */
+  function islandOrder(g, L, region, from) {
+    var endOf = function (paths) {
+      if (!paths.length) return from || null;
+      var lp = paths[paths.length - 1];
+      return lp.closed ? lp.pts[0] : lp.pts[lp.pts.length - 1];
+    };
+    if (!L || L.paths.length < 2 || !region || g.isEmpty(region)) return endOf(L ? L.paths : []);
+    var parts = g.parts(region);
+    if (parts.length < 2) return endOf(L.paths);
+    var ins = parts.map(function (pc) { return insideIndex(g.polys(pc)); });
+    var groups = parts.map(function () { return []; }), last = -1;
+    var of = function (p) {
+      var pts = p.pts, tries = [pts[0], pts[pts.length >> 1], pts[pts.length - 1]];
+      for (var t = 0; t < tries.length; t++) for (var k = 0; k < ins.length; k++) if (ins[k](tries[t][0], tries[t][1])) return k;
+      return -1;
+    };
+    for (var q = 0; q < L.paths.length; q++) {
+      var k = of(L.paths[q]);
+      if (k < 0) k = last < 0 ? 0 : last;                  /* on no island's inside (a point on an edge): with the path before it */
+      groups[k].push(L.paths[q]); last = k;
+    }
+    groups = groups.filter(function (gr) { return gr.length; });
+    if (groups.length < 2) return endOf(L.paths);
+    var first = 0, fd = Infinity;
+    for (var f = 0; f < groups.length; f++) {
+      if (!from) { if (groups[f][0] === L.paths[0]) first = f; continue; }
+      var fs = groups[f][0].pts[0], dd = Math.hypot(fs[0] - from[0], fs[1] - from[1]);
+      if (dd < fd) { fd = dd; first = f; }
+    }
+    var out = [], cur = groups.splice(first, 1)[0];
+    while (cur) {
+      out = out.concat(cur);
+      var end = endOf(cur);
+      var best = -1, bd = Infinity;
+      for (var n = 0; n < groups.length; n++) {
+        var st = groups[n][0].pts[0], d = Math.hypot(st[0] - end[0], st[1] - end[1]);
+        if (d < bd) { bd = d; best = n; }
+      }
+      cur = best < 0 ? null : groups.splice(best, 1)[0];
+    }
+    L.paths = out;
+    return endOf(out);
   }
 
   /** Even-odd point in polygon set. */
@@ -2602,6 +2664,7 @@
           sparsePrev = sparse;
         }
         if (lightningAt) lightningFill(g, P.layers, lightningAt, PL, P.boxCentre, dirOf(o), o);
+        if (P.role === 'part' && o.islandOrder) { var endAt = null; P.layers.forEach(function (L, li) { endAt = islandOrder(g, L, S[li], endAt); }); }
       };
       var colRule = function (P) { if (P.role === 'support' && o.supportInterfaceRule === 'column') columnRule(g, P, perObject, planes, o); };
       /* claims (columnRule: one stack, one owner) in the pass whose sections print: the shared grid's when the supports keep it, else the own grids'

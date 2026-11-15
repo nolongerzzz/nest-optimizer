@@ -186,6 +186,14 @@ then the travel to the layer's first path, the nozzle down, and the filament for
 Not printed yet. What a print has to show: that the strand starts clean after the wait (the prime
 and wipe are a first guess), and how long the mini really takes for 235 to 212 and back.
 
+## Stringing: what the string test said (2026-11-14)
+
+The owner printed a two-cone string test in CR-TPU on the A1 mini five ways. The baseline (235 C,
+0.4 mm retraction, 0.4 mm Z hop) was clean for the bottom two thirds and strung where the layers get
+small. 225 C was worse, from the first layers up; 245 C was no better; no Z hop was no better. So
+235 C stays, and no row on the card is the lever. What changed is the slicer's order - one island,
+then the next (docs/SLICER.md) - which takes the cones from five crossings a layer to one.
+
 ## The filament holds its dials
 
 The owner (2026-11-14): TPU is what made these dials necessary, so they belong to the filament -
