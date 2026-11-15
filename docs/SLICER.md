@@ -912,6 +912,24 @@ planner's bridge temperature counts only those.
 Pinned slices that changed: `hinge_knuckle_box` at 0.4 and `top_clip_x2_coupon` at both nozzles
 (`slicer:test`). Held by `print:slice` 3c: a doorway's roof is laid 99 % along its 30 mm gap.
 
+### A bridge reaches onto what holds it (`bridgeAnchorMm`, 2026-11-15)
+
+An open-air bridge is the layer's solid minus the layer below, so its lines used to stop at the gap's
+edge: on the owner's TPU tower roof 11 of 40 line ends lay on nothing and the rest on 0.05 mm, and the
+roof's lines dropped into the window on two prints (210 and 215 C, 2026-11-14 and -15). Bambu Studio
+carries the bridge on past the edge: on its slice of the same tower
+(`fixtures/print-planner/a1mini-0.4/studio-generic-tpu-tower.gcode.3mf`, z 9.354, 19.304, 29.453,
+39.403) every roof line has 0.65 to 2.2 mm of its last 3 mm over the layer below.
+
+Each open-air piece wide enough to be a bridge (two lines across, so the slivers along a sloping wall
+are left alone) now grows `bridgeAnchorMm` (1 mm) into the layer's fill that is not top surface,
+solid or sparse, and that ground is laid as part of the bridge, in its direction; it is taken out of
+the solid, internal-bridge and sparse fill. The direction is still chosen on the gap itself
+(`freeBridgeAngle`). 1 mm puts NSO's roof line ends where Studio's are (left 71.5 / 83.0 against
+Studio's 71.2-71.6 / 82.6-82.8, right 102.2 against 101.9) and gives every end 0.85 to 1.85 mm on
+material. `bridgeAnchorMm: 0` is the old edge. Checked in `slicer:test` ("Bridges"): two posts under
+a roof, every turn of the bridge at least 0.6 mm over a post.
+
 ### A wall over a gap (`spanPieces`, `path.span`, 2026-11-14)
 
 An Overhang wall is a wall whose whole width hangs. Bambu prints it two ways. Measured on the

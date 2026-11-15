@@ -439,15 +439,17 @@ function frustum(n, r0, r1, z0, z1) {
     // "A free bridge's direction", 2026-11-14): their bridges that the layer's 45 / 135 left with ends in the air now run from support to support.
     // ...and those three with top_clip_x2 the same day, when a hanging wall a line width or more from the layer below became a path of its own (spanPieces, path.span:
     // docs/SLICER.md "A wall over a gap"): the same wall, cut where it leaves the layer below, its straight run one move.
+    // ...and those three again on 2026-11-15, when an open-air bridge began to reach 1 mm onto the fill beside its gap (bridgeAnchorMm: docs/SLICER.md
+    // "A bridge reaches onto what holds it"); the sphere, torus and tube, whose overhangs are slivers along a sloping wall, are untouched.
     const PINS = {
       'fixtures/box-20mm.stl': ['bf4fa6385480d9a1', '1ce8c7eb4eca30e8'],
       'fixtures/cylinder_r10h30_s64.stl': ['4102db1663681585', 'ee3474b981bba976'],
       'fixtures/fixture_sphere_curved.stl': ['b20238310238d62d', '765e9c3a4bbce169'],
-      'fixtures/hinge_knuckle_box.stl': ['c104a37c08dffe26', '4174c3c59ca772f4'],
+      'fixtures/hinge_knuckle_box.stl': ['3774e9a34aed52c4', '4174c3c59ca772f4'],
       'fixtures/quick/shape-torus.stl': ['95b2b40eb073d5c0', 'e686396781f0952d'],
       'fixtures/quick/shape-tube.stl': ['59dafe6c8652a59d', 'df62d80fe91a6680'],
-      'fixtures/supports/top_clip_x2.stl': ['d3febc5055751be2', 'a932143294926598'],
-      'fixtures/supports/top_clip_x2_coupon.stl': ['84730d8adee5882d', '60d73f3a13efd53f']
+      'fixtures/supports/top_clip_x2.stl': ['9c0fa5619be5f2fe', '4fd432e1f4ba6f63'],
+      'fixtures/supports/top_clip_x2_coupon.stl': ['d00ddff6961e6cb1', '47c147f65a418bdb']
     };
     const bad = [];
     let n = 0;
@@ -550,6 +552,23 @@ function frustum(n, r0, r1, z0, z1) {
     check('topPattern alone: the top in rings, the solid infill under it and the first layer in lines',
           tb.layers[29].paths.filter(p => p.feature === 'Top surface').every(p => p.closed) && tb.layers[28].paths.filter(p => p.feature === 'Internal solid infill').every(p => !p.closed) &&
           tb.layers[0].paths.filter(p => p.feature === 'Bottom surface').every(p => !p.closed));
+  }
+
+  section('Bridges - an open-air bridge reaches onto what holds it (docs/SLICER.md "A bridge reaches onto what holds it")');
+  {
+    const opt = (over) => SL.defaultsFor(0.4, Object.assign({ layerMm: 0.2, outerWallWidthMm: 0.42, innerWallWidthMm: 0.45, infillWidthMm: 0.42, topShellLayers: 3, bottomShellLayers: 3 }, over));
+    /* two 8 mm posts 12 mm apart under a 1 mm roof: the roof's first layer is a 12 mm bridge */
+    const roof = Array.from(prism(rect0(0, 8, 0, 8), 0, 4)).concat(Array.from(prism(rect0(20, 28, 0, 8), 0, 4)), Array.from(prism(rect0(0, 28, 0, 8), 4, 5)));
+    const at = (o, z) => o.layers.find(L => Math.abs(L.printZ - z) < 1e-6);
+    const onPost = x => x <= 8 || x >= 20;
+    const ends = o => { const L = at(o, 4.2); return L.paths.filter(p => p.feature === 'Bridge' && p.free).map(p => p.pts); };   /* a zigzag: every vertex is a line's end */
+    const reach = pr => Math.min(...pr.map(q => q[0] <= 14 ? 8 - q[0] : q[0] - 20));
+    const on = SL.sliceObjects([{ name: 'roof', soup: roof }], opt({}), wasm).objects[0], off = SL.sliceObjects([{ name: 'roof', soup: roof }], opt({ bridgeAnchorMm: 0 }), wasm).objects[0];
+    const eOn = ends(on), eOff = ends(off);
+    check('the roof is one open-air bridge, laid post to post', eOn.length >= 1 && eOn.every(pr => pr.every(q => onPost(q[0]))) , JSON.stringify(eOn.slice(0, 2)));
+    check('...every line of it (each turn of the zigzag) ends at least 0.6 mm over a post (Studio\'s roof lines: 0.65 to 2.2 mm)', eOn.every(pr => reach(pr) >= 0.6), eOn.map(reach).map(v => v.toFixed(2)).join(' '));
+    check('...where without the reach it stopped at the gap\'s edge', eOff.length >= 1 && eOff.every(pr => reach(pr) < 0.3), eOff.map(reach).map(v => v.toFixed(2)).join(' '));
+    check('...and the ground it took is not filled twice: no solid infill under the bridge\'s ends', at(on, 4.2).paths.filter(p => p.feature === 'Internal solid infill').every(p => p.pts.every(q => q[0] < 8 - 1.0 - 0.3 || q[0] > 20 + 1.0 + 0.3)));
   }
 
   section('Islands - a layer\'s separate islands print one after the other, each whole (docs/SLICER.md "One island, then the next")');

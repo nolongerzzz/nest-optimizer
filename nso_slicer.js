@@ -313,6 +313,7 @@
       supportInterfaceSpacingMm: null,     // the gap between interface lines (Bambu's support_interface_spacing; the print planner reads the profile's): null -> the dense sheet's line + 0.04
       supportAngleDeg: 0,                  // Bambu's support_angle: the 'profile' stack's first layer turns this + 90
       islandOrder: true,                   // a layer's separate islands print one after the other, each whole (islandOrder), as Studio's do; false: every island's inner walls, then every outer wall, then the fill
+      bridgeAnchorMm: 1,                   // an open-air bridge reaches this far onto the solid fill beside its gap, so its lines end on the layer below (bridgeReach); 0: they stop at the gap
       overhangSpanMinMm: 2,                // a hanging wall this long, a line width or more from the layer below on both sides, is printed as a bridge (spanPieces); 0: never
       bridgeAngleDeg: 0,                   // Bambu's bridge_angle: every Bridge laid at it (0: auto - over a support, Studio 02.09's 3.6 under the 'profile' / 'studio36' angles)
       supportInterfaceAngle: 'bridge',     // the column rule's stack angles (the app slices with the card's, 'profile' by default - app-print.js slicerOptions): 'profile' Bambu's own rule off the profile's support_angle / bridge_angle (its first layer at support_angle + 90, its top square to the bridge at bridge_angle - 0: Studio's 3.6 - one turn a layer down; the owner's 2x supp_ref at 20 / 45: 110, then 45 / 135 to a top at 135); 'bridge' its top square to the part's bridge over it; 'studio36' Studio 02.09's own (90, then 93.6 / 3.6 up to a top at 93.6, the part's bridges over supports at 3.6 - the owner's P1S print released clean); 'crosshatch' 110, then 45 / 135
@@ -2482,6 +2483,27 @@
             var intNarrow = g.diff(internal, g.offset(g.offset(internal, -narrowR), narrowR));
             if (g.area(intNarrow) > 1e-6) { topOnly = g.union(topOnly, intNarrow); internal = g.diff(internal, intNarrow); }
           }
+          /* A BRIDGE REACHES ONTO WHAT HOLDS IT (the owner's TPU tower, 2026-11-15: the roof's lines dropped into the window). The open-air region
+             is the layer's solid minus the layer below, so its lines stopped at the gap's edge - 12 of the roof's 40 line ends on nothing at all,
+             the rest on no more than 0.05 mm. Bambu Studio carries a bridge on into the solid fill beside the gap: on the owner's Studio slice of
+             the same tower every roof line end lies 0.55 to 2.2 mm over the layer below (fixtures/print-planner/a1mini-0.4/
+             studio-generic-tpu-tower.gcode.3mf, z 9.354 / 19.304 / 29.453 / 39.403). So each open-air piece wide enough to be a bridge (two lines
+             across: the slivers along a sloping wall are not) grows o.bridgeAnchorMm into this layer's fill that is not top surface - solid or
+             sparse, as Studio's does - and that ground is laid as part of the bridge, in its direction, not as solid or sparse infill. The direction is still chosen on the gap itself. */
+          var bridgePieces = null;
+          if (i > 0 && below && o.bridgeAnchorMm > 0 && !g.isEmpty(bottomOpen)) {
+            var room = g.diff(g.union(solid, sparse), top), claimed = g.empty(), rawParts = g.parts(bottomOpen);
+            bridgePieces = rawParts.map(function (pc, k) {
+              var core = g.offset(g.offset(pc, -wInfB), wInfB);
+              if (g.isEmpty(core)) return { raw: pc, fill: pc };
+              var others = g.unionAll(rawParts.filter(function (q, j) { return j !== k; }));
+              var grown = g.diff(g.diff(g.inter(g.offset(pc, o.bridgeAnchorMm), g.union(room, pc)), others), claimed);
+              claimed = g.union(claimed, g.diff(grown, pc));
+              return { raw: pc, fill: grown };
+            });
+            if (!g.isEmpty(claimed)) { internal = g.diff(internal, claimed); bridgeInner = g.diff(bridgeInner, claimed); sparse = g.diff(sparse, claimed); }
+            else bridgePieces = null;
+          }
           L.areas = {
             solid: g.area(solid), sparse: g.area(sparse), top: g.area(topOnly),
             bottom: g.area(bottomOpen), bridge: g.area(bridgeInner), internal: g.area(internal)
@@ -2577,14 +2599,15 @@
             return pick ? pick.ang : null;
           }
           var freeFrom = L.paths.length;
-          if (i > 0 && bridgeAt != null) { solidAngle = bridgeAt; solidFill(bottomOpen, 'Bridge'); solidAngle = sa0; }
+          var bridgeAll = bridgePieces ? g.unionAll(bridgePieces.map(function (bp) { return bp.fill; })) : bottomOpen;
+          if (i > 0 && bridgeAt != null) { solidAngle = bridgeAt; solidFill(bridgeAll, 'Bridge'); solidAngle = sa0; }
           else if (i > 0 && !g.isEmpty(bottomOpen)) {
-            var bParts = g.parts(bottomOpen), bAngles = bParts.map(freeBridgeAngle);
-            if (!bAngles.some(function (a) { return a != null; })) solidFill(bottomOpen, 'Bridge');   /* every piece at the layer's angle: one fill, as it always was */
+            var bParts = bridgePieces ? bridgePieces.map(function (bp) { return bp.raw; }) : g.parts(bottomOpen), bAngles = bParts.map(freeBridgeAngle);
+            if (!bAngles.some(function (a) { return a != null; })) solidFill(bridgeAll, 'Bridge');   /* every piece at the layer's angle: one fill, as it always was */
             else {
               bParts.forEach(function (pc, bi) {
                 if (bAngles[bi] != null) { solidAngle = bAngles[bi]; L.bridgeAngles = (L.bridgeAngles || []).concat([Math.round(bAngles[bi] * 180 / Math.PI)]); }
-                solidFill(pc, 'Bridge');                                   /* a bridge is straight lines, whatever the pattern */
+                solidFill(bridgePieces ? bridgePieces[bi].fill : pc, 'Bridge');   /* a bridge is straight lines, whatever the pattern */
                 solidAngle = sa0;
               });
             }
