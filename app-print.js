@@ -116,7 +116,7 @@
                            filament: 'profile', nozzleTemp: null, firstTemp: null, bedTemp: null, maxFlow: null, tempStep: 0, tempBand: 10,
                            /* TUNING (docs/FILAMENTS.md "Bridges and stringing"): the bridge's speed and flow are the process's (the profile's 50 mm/s
                               and 1); the flow ratio, the retraction and the z-hop are the filament's - a null row is the filament's own */
-                           bridgeSpeed: null, bridgeFlow: null, flowRatio: null, retractLen: null, retractSpeed: null, zHop: null,
+                           bridgeSpeed: null, bridgeFlow: null, flowRatio: null, retractLen: null, retractSpeed: null, retractBefore: null, zHop: null,
                            /* the bridges' own nozzle temperature, changed at the printer's park: null is the filament's own (none for the
                               profile's PLA, 215 for CR-TPU on the A1 mini), 0 is none whatever the filament */
                            bridgeTemp: null,
@@ -212,7 +212,7 @@
     var f = filamentOf(id);
     return Object.assign({ nozzleTemp: S.temp.nozzle, firstTemp: S.temp.nozzleInitial, bedTemp: S.temp.bedInitial, maxFlow: S.filament.maxVolumetric,
              rangeLow: S.temp.rangeLow, rangeHigh: S.temp.rangeHigh,
-             flowRatio: S.filament.flow, retractLen: S.retract.length, retractSpeed: S.retract.speed, zHop: S.retract.hop,
+             flowRatio: S.filament.flow, retractLen: S.retract.length, retractSpeed: S.retract.speed, retractBefore: Math.round(S.retract.beforeWipe * 100), zHop: S.retract.hop,
              /* the bridge's rows: the profile's speed and flow, no bridge temperature - unless the filament brings its own (tune) */
              bridgeSpeed: S.speed.bridge, bridgeFlow: S.filament.bridgeFlow, bridgeTemp: null }, f.tune ? f.tune(config) : {});
   }
@@ -236,7 +236,7 @@
       surface: o.solidPattern && SURFACE_TO_CONFIG[o.solidPattern] ? o.solidPattern : 'zigzag',
       angle: o.supportThresholdDeg, brim: o.brimType, raft: Math.round(o.raftLayers || 0), raftGap: o.raftContactMm != null ? o.raftContactMm : 0.1, ifaceAngle: 'studio36', interfaceRule: null,
       filament: 'profile', nozzleTemp: null, firstTemp: null, bedTemp: null, maxFlow: null, tempStep: 0, tempBand: 10,
-      bridgeSpeed: null, bridgeFlow: null, flowRatio: null, retractLen: null, retractSpeed: null, zHop: null, bridgeTemp: null,
+      bridgeSpeed: null, bridgeFlow: null, flowRatio: null, retractLen: null, retractSpeed: null, retractBefore: null, zHop: null, bridgeTemp: null,
       /* the support rows start at the PROFILE's values (the owner's: the Print card's rows are the profile's until changed), read off Bambu's own
          keys; a key the profile does not hold is this slicer's own default */
       supDensity: pctOf(cfgRaw(config, 'raft_first_layer_density'), D0.supDensity), supExpand: numOf(cfgRaw(config, 'raft_first_layer_expansion'), D0.supExpand),
@@ -278,7 +278,7 @@
       maxFlow: opt(s.maxFlow, 0.5, 40, 2),
       tempStep: Math.round(n(s.tempStep, D.tempStep, -25, 25)), tempBand: Math.round(n(s.tempBand, D.tempBand, 1, 100) * 10) / 10,
       bridgeSpeed: opt(s.bridgeSpeed, 1, 300, 1), bridgeFlow: opt(s.bridgeFlow, 0.5, 1.5, 2),
-      flowRatio: opt(s.flowRatio, 0.8, 1.2, 3), retractLen: opt(s.retractLen, 0, 3, 2), retractSpeed: opt(s.retractSpeed, 5, 80, 0), zHop: opt(s.zHop, 0, 2, 2),
+      flowRatio: opt(s.flowRatio, 0.8, 1.2, 3), retractLen: opt(s.retractLen, 0, 3, 2), retractSpeed: opt(s.retractSpeed, 5, 80, 0), retractBefore: opt(s.retractBefore, 0, 100, 0), zHop: opt(s.zHop, 0, 2, 2),
       bridgeTemp: (function (v) { v = parseFloat(v); return !isFinite(v) ? null : v <= 0 ? 0 : Math.round(Math.max(170, Math.min(300, v))); })(s.bridgeTemp),   /* 0: none */
       supDensity: Math.round(n(s.supDensity, D.supDensity, 10, 100)),
       supExpand: (function (v) { return v < 0 ? -1 : r2(v); })(n(s.supExpand, D.supExpand, -1, 10)),
@@ -349,6 +349,7 @@
          they are, as Studio leaves them - its TPU slice retracts 0.4 with retraction_length = 0.8 in the file) */
       if (s.flowRatio != null && Math.abs(s.flowRatio - fb.flowRatio) > 1e-6) out.filament_flow_ratio = String(s.flowRatio);
       if (s.retractLen != null && Math.abs(s.retractLen - fb.retractLen) > 1e-6) out.filament_retraction_length = String(s.retractLen);
+      if (s.retractBefore != null && s.retractBefore !== fb.retractBefore) out.filament_retract_before_wipe = s.retractBefore + '%';
       if (s.retractSpeed != null && s.retractSpeed !== fb.retractSpeed) { out.filament_retraction_speed = String(s.retractSpeed); out.filament_deretraction_speed = String(s.retractSpeed); }
       if (s.zHop != null && Math.abs(s.zHop - fb.zHop) > 1e-6) out.filament_z_hop = String(s.zHop);
       /* the bridge's speed and flow: the row's, else the filament's own; written where that is not the template's */
@@ -745,7 +746,7 @@
                  'slice-set-angle', 'slice-set-brim', 'slice-set-raft', 'slice-set-raft-gap', 'slice-set-iface-angle', 'slice-set-iface',
                  'slice-set-filament', 'slice-set-nozzle-temp', 'slice-set-first-temp', 'slice-set-bed-temp', 'slice-set-max-flow',
                  'slice-set-temp-step', 'slice-set-temp-band',
-                 'slice-set-bridge-speed', 'slice-set-bridge-flow', 'slice-set-bridge-temp', 'slice-set-flow-ratio', 'slice-set-retract-len', 'slice-set-retract-speed', 'slice-set-zhop',
+                 'slice-set-bridge-speed', 'slice-set-bridge-flow', 'slice-set-bridge-temp', 'slice-set-flow-ratio', 'slice-set-retract-len', 'slice-set-retract-speed', 'slice-set-retract-before', 'slice-set-zhop',
                  /* Bambu's Advanced support rows, on the Supports card (docs/SUPPORT-ADVANCED.md) */
                  'slice-set-sup-density', 'slice-set-sup-expand', 'slice-set-sup-walls', 'slice-set-sup-topz', 'slice-set-sup-bottomz', 'slice-set-sup-base',
                  'slice-set-sup-base-spacing', 'slice-set-sup-angle', 'slice-set-sup-iface-pattern', 'slice-set-sup-iface-spacing', 'slice-set-sup-expansion',
@@ -757,7 +758,7 @@
                   ['slice-set-sup-indep', 'supIndep']];
   /* the four rows that are a filament's own numbers: the row, and its name in the settings */
   var FILAMENT_ROWS = [['slice-set-nozzle-temp', 'nozzleTemp'], ['slice-set-first-temp', 'firstTemp'], ['slice-set-bed-temp', 'bedTemp'], ['slice-set-max-flow', 'maxFlow'],
-                       ['slice-set-flow-ratio', 'flowRatio'], ['slice-set-retract-len', 'retractLen'], ['slice-set-retract-speed', 'retractSpeed'], ['slice-set-zhop', 'zHop'],
+                       ['slice-set-flow-ratio', 'flowRatio'], ['slice-set-retract-len', 'retractLen'], ['slice-set-retract-speed', 'retractSpeed'], ['slice-set-retract-before', 'retractBefore'], ['slice-set-zhop', 'zHop'],
                        ['slice-set-bridge-speed', 'bridgeSpeed'], ['slice-set-bridge-flow', 'bridgeFlow'], ['slice-set-bridge-temp', 'bridgeTemp']];
 
   /** The line under the bridge rows: the speed a bridge will really print at (the row's, or what the filament's max flow allows). */
@@ -827,7 +828,7 @@
       filament: v('slice-set-filament'), nozzleTemp: v('slice-set-nozzle-temp'), firstTemp: v('slice-set-first-temp'),
       bedTemp: v('slice-set-bed-temp'), maxFlow: v('slice-set-max-flow'), tempStep: v('slice-set-temp-step'), tempBand: v('slice-set-temp-band'),
       bridgeSpeed: v('slice-set-bridge-speed'), bridgeFlow: v('slice-set-bridge-flow'), bridgeTemp: v('slice-set-bridge-temp'),
-      flowRatio: v('slice-set-flow-ratio'), retractLen: v('slice-set-retract-len'), retractSpeed: v('slice-set-retract-speed'), zHop: v('slice-set-zhop')
+      flowRatio: v('slice-set-flow-ratio'), retractLen: v('slice-set-retract-len'), retractSpeed: v('slice-set-retract-speed'), retractBefore: v('slice-set-retract-before'), zHop: v('slice-set-zhop')
     }));
   }
 

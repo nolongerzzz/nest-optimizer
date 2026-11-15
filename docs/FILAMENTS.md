@@ -194,6 +194,16 @@ small. 225 C was worse, from the first layers up; 245 C was no better; no Z hop 
 235 C stays, and no row on the card is the lever. What changed is the slicer's order - one island,
 then the next (docs/SLICER.md) - which takes the cones from five crossings a layer to one.
 
+### Retract before wipe (the card's row, `filament_retract_before_wipe`)
+
+Bambu's profiles pull the retraction along the wipe: the nozzle moves back over the wall it has just
+laid while the filament comes out of it. On a small hot TPU layer that is a nozzle still under
+pressure dragging through soft plastic. The row is Bambu's `retract_before_wipe`, a per cent: that
+share is pulled standing still at the end of the line (`G1 E-.4 F1800`), then `; WIPE_START`, and
+the rest along the wipe. At 100 the wipe is bare moves. Empty is the filament's own (0 so far, for
+every filament: not printed yet, so not CR-TPU's own). `nso-print-planner.js` `flushRetract`,
+`S.retract.beforeWipe`; checked in `print:slice` 3c.
+
 ## The filament holds its dials
 
 The owner (2026-11-14): TPU is what made these dials necessary, so they belong to the filament -

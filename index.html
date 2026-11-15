@@ -1388,6 +1388,9 @@
                   <label class="vp-bend-field" for="slice-set-retract-speed">Retraction speed
                     <input type="number" id="slice-set-retract-speed" min="5" max="80" step="5" placeholder="auto" inputmode="numeric"
                              title="How fast the filament is pulled back and pushed forward again, mm/s. A soft filament stretches when pulled fast, so slower can retract more of it. Empty: the filament's own." autocomplete="off"><span>mm/s</span></label>
+                  <label class="vp-bend-field" for="slice-set-retract-before">Retract before wipe
+                    <input type="number" id="slice-set-retract-before" min="0" max="100" step="10" placeholder="auto" inputmode="numeric"
+                             title="How much of the retraction is pulled standing still at the end of a line, before the nozzle wipes and leaves. 0: all of it during the wipe, as Bambu's profiles do. 100: all of it first, so the nozzle leaves with the pressure off - for a soft filament that strings. Empty: the filament's own." autocomplete="off"><span>%</span></label>
                   <label class="vp-bend-field" for="slice-set-zhop">Z hop
                     <input type="number" id="slice-set-zhop" min="0" max="2" step="0.1" placeholder="auto" inputmode="decimal"
                              title="How far the nozzle lifts for a travel after retracting, mm. 0: no lift - the nozzle stays on the surface and wipes its ooze off there, at the risk of dragging on the part. Empty: the filament's own." autocomplete="off"><span>mm</span></label>
@@ -3272,7 +3275,7 @@
        own page code, which listens for the press before the card does. After nso-helpers.js, app-core.js. docs/SUPPORT-BLOCKERS.md. -->
   <script src="nso_support_blockers.js?v=6962a81c"></script>
   <script src="app-support-blockers.js?v=73c8125d"></script>
-  <script src="app-supports-card.js?v=8ac0c9a0"></script>
+  <script src="app-supports-card.js?v=fda8e643"></script>
   <script src="app-gscope-slice.js?v=ff1ae633"></script>
   <!-- The Slice card (left bar): the plate sliced for its printer, the .gcode.3mf
        it makes. The print planner and the packager are loaded here for it and for
@@ -3280,9 +3283,9 @@
        uses them. After nso_slicer.js, nso-cooling-profiles.js, nso-3mf.js and
        nso-3mf-read.js, which they read at load, and after app-microscope.js, whose
        plate reader and G-code import it calls. See docs/PRINT-PLANNER.md. -->
-  <script src="nso-print-planner.js?v=0471effc"></script>
+  <script src="nso-print-planner.js?v=265cf803"></script>
   <script src="nso-gcode3mf-write.js?v=cdfa15b4"></script>
-  <script src="app-print.js?v=4ca164aa"></script>
+  <script src="app-print.js?v=aa88cb82"></script>
   <!-- Lift: details off a face, the face left as it was round them. After
        nso_lift.js (Phase 1: a flat face), nso_lift_curved.js (Lift 3: the
        repair under a detail lifted off a curved base), nso_lift_auto.js

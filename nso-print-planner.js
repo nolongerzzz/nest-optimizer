@@ -210,6 +210,8 @@
         onLayerChange: num(config, 'retract_when_changing_layer', 1) !== 0,
         wipe: own('filament_wipe', 'wipe', 1) !== 0,
         wipeDistance: own('filament_wipe_distance', 'wipe_distance', 2),
+        // Bambu's retract_before_wipe: this share of the retraction is pulled standing still, before the wipe; the rest during it
+        beforeWipe: Math.max(0, Math.min(1, own('filament_retract_before_wipe', 'retract_before_wipe', 0) / 100)),
         // Bambu's seam_gap: a loop stops this short of its start (a % of the nozzle, or mm)
         seamGapMm: (function () { var v = String(raw(config, 'seam_gap') || '15%'); var n = parseFloat(v); if (!(n >= 0)) n = 15; return /%/.test(v) ? n / 100 * num(config, 'nozzle_diameter', 0.4) : n; })(),
         minTravel: own('filament_retraction_minimum_travel', 'retraction_minimum_travel', 1)
@@ -1103,6 +1105,11 @@
       st.pending = null;
       if (!pd.it.retractAfter || R.length <= 0) return;
       if (R.wipe && R.wipeDistance > 0 && pd.lastPts.length > 1) {
+        /* retract_before_wipe: that share standing still at the path's end, so the nozzle leaves with the pressure already off it (the owner's TPU
+           string test: retracting along the wipe drags a nozzle still pushing through the soft wall it has just laid). The rest during the wipe;
+           with all of it before, the wipe is a bare move. */
+        var before = +fe(R.length * R.beforeWipe), rest = +(R.length - before).toFixed(5);
+        if (before > 0) put('G1 E-' + fe(before) + ' F' + fmt(R.speed * 60, 0));
         put('; WIPE_START');
         put('G1 F' + fmt(pd.it.vWipe * 60, 3));
         accel(S.accel.def);
@@ -1111,12 +1118,13 @@
         var spent = 0;
         for (var q = 1; q < wp.length; q++) {
           // what the file says, so the cycle sums to the retraction to the last digit
-          var share = +fe(R.length * RETRACT_DURING_WIPE * dist(wp[q - 1], wp[q]) / wl);
-          put('G1 X' + fx(wp[q][0]) + ' Y' + fx(wp[q][1]) + ' E-' + fe(share));
+          var share = +fe(rest * RETRACT_DURING_WIPE * dist(wp[q - 1], wp[q]) / wl);
+          put('G1 X' + fx(wp[q][0]) + ' Y' + fx(wp[q][1]) + (share > 0 ? ' E-' + fe(share) : ''));
           spent += share;
         }
         put('; WIPE_END');
-        put('G1 E-' + fe(+(R.length - spent).toFixed(5)) + ' F' + fmt(R.speed * 60, 0));
+        var tail = +(rest - spent).toFixed(5);
+        if (tail > 0) put('G1 E-' + fe(tail) + ' F' + fmt(R.speed * 60, 0));
       } else {
         put('G1 E-' + fe(R.length) + ' F' + fmt(R.speed * 60, 0));
       }
