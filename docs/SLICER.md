@@ -930,6 +930,18 @@ Studio's 71.2-71.6 / 82.6-82.8, right 102.2 against 101.9) and gives every end 0
 material. `bridgeAnchorMm: 0` is the old edge. Checked in `slicer:test` ("Bridges"): two posts under
 a roof, every turn of the bridge at least 0.6 mm over a post.
 
+### A bridge fills its gap wall to wall (`bridgeFitSpacing`, 2026-11-15)
+
+The fill lines sit on a global grid, so across the owner's 8.1 mm roof gap the first bridge line fell
+0.35 mm in from the region's edge and a strip about 0.25 mm wide was left open along the front wall -
+in Studio's preview of NSO's file, a line missing. Bambu evens out a solid fill's spacing to the
+width it fills (`adjust_solid_spacing`): its slice of the same tower lays the roof as 22 lines from
+85.9 to 94.1, the outer two on the walls. An open-air bridge piece now gets its own spacing, its
+width across the lines over the nearest whole number of spacings, with a line on each edge: the roof
+is 21 lines, 85.96 to 94.04, 0.404 apart. Slivers along a sloping wall (narrower than two lines) and
+the bridges over sparse infill keep the grid. `bridgeFitSpacing: false` is the grid. Checked in
+`slicer:test` ("Bridges").
+
 ### A wall over a gap (`spanPieces`, `path.span`, 2026-11-14)
 
 An Overhang wall is a wall whose whole width hangs. Bambu prints it two ways. Measured on the

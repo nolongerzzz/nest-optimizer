@@ -440,16 +440,17 @@ function frustum(n, r0, r1, z0, z1) {
     // ...and those three with top_clip_x2 the same day, when a hanging wall a line width or more from the layer below became a path of its own (spanPieces, path.span:
     // docs/SLICER.md "A wall over a gap"): the same wall, cut where it leaves the layer below, its straight run one move.
     // ...and those three again on 2026-11-15, when an open-air bridge began to reach 1 mm onto the fill beside its gap (bridgeAnchorMm: docs/SLICER.md
-    // "A bridge reaches onto what holds it"); the sphere, torus and tube, whose overhangs are slivers along a sloping wall, are untouched.
+    // "A bridge reaches onto what holds it"); the sphere, torus and tube, whose overhangs are slivers along a sloping wall, are untouched. Again
+    // the same day when an open-air bridge's lines were evened out to fill its gap wall to wall (bridgeFitSpacing), the slivers still on the grid.
     const PINS = {
       'fixtures/box-20mm.stl': ['bf4fa6385480d9a1', '1ce8c7eb4eca30e8'],
       'fixtures/cylinder_r10h30_s64.stl': ['4102db1663681585', 'ee3474b981bba976'],
       'fixtures/fixture_sphere_curved.stl': ['b20238310238d62d', '765e9c3a4bbce169'],
-      'fixtures/hinge_knuckle_box.stl': ['3774e9a34aed52c4', '4174c3c59ca772f4'],
+      'fixtures/hinge_knuckle_box.stl': ['c89a50295c97bee5', '0156b77d8893373f'],
       'fixtures/quick/shape-torus.stl': ['95b2b40eb073d5c0', 'e686396781f0952d'],
       'fixtures/quick/shape-tube.stl': ['59dafe6c8652a59d', 'df62d80fe91a6680'],
-      'fixtures/supports/top_clip_x2.stl': ['9c0fa5619be5f2fe', '4fd432e1f4ba6f63'],
-      'fixtures/supports/top_clip_x2_coupon.stl': ['d00ddff6961e6cb1', '47c147f65a418bdb']
+      'fixtures/supports/top_clip_x2.stl': ['75ed15ac0996f214', '022b9449f42d4ac7'],
+      'fixtures/supports/top_clip_x2_coupon.stl': ['330dcada8cf125c2', 'a2a6cdfa95f459bf']
     };
     const bad = [];
     let n = 0;
@@ -568,6 +569,16 @@ function frustum(n, r0, r1, z0, z1) {
     check('the roof is one open-air bridge, laid post to post', eOn.length >= 1 && eOn.every(pr => pr.every(q => onPost(q[0]))) , JSON.stringify(eOn.slice(0, 2)));
     check('...every line of it (each turn of the zigzag) ends at least 0.6 mm over a post (Studio\'s roof lines: 0.65 to 2.2 mm)', eOn.every(pr => reach(pr) >= 0.6), eOn.map(reach).map(v => v.toFixed(2)).join(' '));
     check('...where without the reach it stopped at the gap\'s edge', eOff.length >= 1 && eOff.every(pr => reach(pr) < 0.3), eOff.map(reach).map(v => v.toFixed(2)).join(' '));
+    {
+      /* wall to wall: the 8 mm roof's lines run from one wall to the other, none left off along either (Bambu's adjust_solid_spacing) */
+      const span = (o) => { const L = at(o, 4.2), ys = [].concat(...L.paths.filter(p => p.feature === 'Bridge' && p.free).map(p => p.pts.map(q => q[1])));
+        const wy = [].concat(...L.paths.filter(p => /wall/i.test(p.feature)).map(p => p.pts.map(q => q[1])));
+        const lo = Math.max(...wy.filter(v => v < 4)), hi = Math.min(...wy.filter(v => v > 4));
+        return { front: Math.min(...ys) - lo, back: hi - Math.max(...ys) }; };
+      const fit = span(on), grid = span(SL.sliceObjects([{ name: 'roof', soup: roof }], opt({ bridgeFitSpacing: false }), wasm).objects[0]);
+      check('...and fills the gap wall to wall: its outer lines 0.4 mm or less from the walls on both sides, evenly (the global grid left over 0.5 on one)',
+        fit.front <= 0.4 && fit.back <= 0.4 && Math.abs(fit.front - fit.back) < 0.02 && Math.max(grid.front, grid.back) > 0.5, JSON.stringify({ fit, grid }));
+    }
     check('...and the ground it took is not filled twice: no solid infill under the bridge\'s ends', at(on, 4.2).paths.filter(p => p.feature === 'Internal solid infill').every(p => p.pts.every(q => q[0] < 8 - 1.0 - 0.3 || q[0] > 20 + 1.0 + 0.3)));
   }
 

@@ -313,6 +313,7 @@
       supportInterfaceSpacingMm: null,     // the gap between interface lines (Bambu's support_interface_spacing; the print planner reads the profile's): null -> the dense sheet's line + 0.04
       supportAngleDeg: 0,                  // Bambu's support_angle: the 'profile' stack's first layer turns this + 90
       islandOrder: true,                   // a layer's separate islands print one after the other, each whole (islandOrder), as Studio's do; false: every island's inner walls, then every outer wall, then the fill
+      bridgeFitSpacing: true,              // an open-air bridge's lines evened out to fill its gap wall to wall (Bambu's adjust_solid_spacing); false: the global grid
       bridgeAnchorMm: 1,                   // an open-air bridge reaches this far onto the solid fill beside its gap, so its lines end on the layer below (bridgeReach); 0: they stop at the gap
       overhangSpanMinMm: 2,                // a hanging wall this long, a line width or more from the layer below on both sides, is printed as a bridge (spanPieces); 0: never
       bridgeAngleDeg: 0,                   // Bambu's bridge_angle: every Bridge laid at it (0: auto - over a support, Studio 02.09's 3.6 under the 'profile' / 'studio36' angles)
@@ -2552,6 +2553,30 @@
               return;
             }
             var polys = g.polys(cs);
+            /* AN OPEN-AIR BRIDGE FILLS ITS GAP WALL TO WALL (the owner's TPU tower, 2026-11-15: a line missing along the roof's front wall).
+               The lines sit on a global grid, so across an 8.1 mm gap the first fell 0.35 mm in from the region's edge and a strip 0.25 mm wide
+               was left open along the wall. Bambu evens out a solid fill's spacing to the width it fills (adjust_solid_spacing): on its slice
+               of the same tower the roof is 22 lines, 85.9 to 94.1, the outer two on the walls. So a bridge piece gets its own spacing - the
+               width across the lines over the nearest whole number of spacings - and a line on each edge. */
+            if (feat === 'Bridge' && fitBridge) {
+              var ca = Math.cos(solidAngle), sa = Math.sin(solidAngle), EPS_FIT = 0.01;
+              g.parts(cs).forEach(function (pc) {
+                var pp = g.polys(pc), lo = Infinity, hi = -Infinity;
+                /* a sliver along a sloping wall (narrower than two lines: bridgePieces' test) keeps the grid, as it always has */
+                if (g.isEmpty(g.offset(g.offset(pc, -wInf), wInf))) {
+                  connect(scanFill(pp, solidAngle, sInf, 0), solidJoin, hull).forEach(function (pth) { L.paths.push({ feature: feat, width: wInf, closed: false, pts: pth.pts }); });
+                  return;
+                }
+                pp.forEach(function (pl) { pl.forEach(function (q) { var yr = -q[0] * sa + q[1] * ca; if (yr < lo) lo = yr; if (yr > hi) hi = yr; }); });
+                var wd = hi - lo - 2 * EPS_FIT;
+                if (!(wd > 0)) return;
+                var nGap = Math.max(1, Math.round(wd / sInf)), sp = wd / nGap;
+                connect(scanFill(pp, solidAngle, sp, lo + EPS_FIT), solidJoin, hull).forEach(function (pth) {
+                  L.paths.push({ feature: feat, width: wInf, closed: false, pts: pth.pts });
+                });
+              });
+              return;
+            }
             /* a support's first layer at its own density (Bambu's Initial layer density): the lines that much further apart */
             var sFill = P.role === 'support' && i === 0 && o.supportFirstLayerDensity > 0 && o.supportFirstLayerDensity < 1 ? sInf / Math.max(0.2, o.supportFirstLayerDensity) : sInf;
             connect(scanFill(polys, solidAngle, sFill, 0), sFill > sInf ? 3 * sFill : solidJoin, hull).forEach(function (pth) {
@@ -2598,7 +2623,7 @@
             tries.forEach(function (sc) { if (sc.both >= 0.98 * most && (!pick || sc.mean < pick.mean - 1e-9)) pick = sc; });
             return pick ? pick.ang : null;
           }
-          var freeFrom = L.paths.length;
+          var freeFrom = L.paths.length, fitBridge = o.bridgeFitSpacing !== false;
           var bridgeAll = bridgePieces ? g.unionAll(bridgePieces.map(function (bp) { return bp.fill; })) : bottomOpen;
           if (i > 0 && bridgeAt != null) { solidAngle = bridgeAt; solidFill(bridgeAll, 'Bridge'); solidAngle = sa0; }
           else if (i > 0 && !g.isEmpty(bottomOpen)) {
@@ -2615,6 +2640,7 @@
           else solidFill(bottomOpen, i === 0 ? 'Bottom surface' : 'Bridge', i === 0 ? (o.bottomPattern || o.solidPattern) : null);   /* a bridge is straight lines, whatever the pattern */
           /* these are the bridges over open air (path.free): the ones over sparse infill, next, are held every few millimetres */
           if (i > 0) for (var fp = freeFrom; fp < L.paths.length; fp++) if (L.paths[fp].feature === 'Bridge') L.paths[fp].free = true;
+          fitBridge = false;                                   /* the bridges over sparse infill (next) and the rest keep the global grid */
           if (o.bridgeAngleDeg) solidAngle = bridgeAt;
           solidFill(bridgeInner, 'Bridge');
           solidAngle = sa0;
