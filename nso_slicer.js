@@ -312,6 +312,7 @@
       supportInterfaceRule: null,          // 'column': the interface read off the part's layers column by column (columnRule; docs/SUPPORT-GATE.md); null: the sheet typing
       supportInterfaceSpacingMm: null,     // the gap between interface lines (Bambu's support_interface_spacing; the print planner reads the profile's): null -> the dense sheet's line + 0.04
       supportAngleDeg: 0,                  // Bambu's support_angle: the 'profile' stack's first layer turns this + 90
+      seamOffOverhang: true,               // a wall loop cut by an overhang begins at a piece on the layer below, not at one hanging over air; false: where its seam fell
       bridgeFirst: false,                  // a layer's open-air bridges laid before its walls (a soft filament's: the walls first, the nozzle rides a hanging wall down); false: walls first, as Studio
       islandOrder: true,                   // a layer's separate islands print one after the other, each whole (islandOrder), as Studio's do; false: every island's inner walls, then every outer wall, then the fill
       bridgeFitSpacing: true,              // an open-air bridge's lines evened out to fill its gap wall to wall (Bambu's adjust_solid_spacing); false: the global grid
@@ -2416,15 +2417,27 @@
             var feat = lp.depth === 0 ? 'Outer wall' : 'Inner wall';
             var w = lp.depth === 0 ? o.outerWallWidthMm : o.innerWallWidthMm;
             loopsOf(g, lp.cs).forEach(function (path) {
+              var seq = [];
               splitOverhang(path, belowPolys, i, w, o.overhangEdgeFrac, o.overhangSubMm, belowIn).forEach(function (piece) {
-                if (!piece.over) { L.paths.push({ feature: feat, width: w, closed: piece.closed, pts: piece.pts }); return; }
+                if (!piece.over) { seq.push({ feature: feat, width: w, closed: piece.closed, pts: piece.pts }); return; }
                 /* a hanging wall that is a line width or more from the layer below on both sides is a bridge of its own (path.span) */
                 spanPieces(piece, belowIn, w, o.overhangSpanMinMm).forEach(function (sp) {
                   var pa = { feature: 'Overhang wall', width: w, closed: sp.closed, pts: sp.pts };
                   if (sp.span) pa.span = true;
-                  L.paths.push(pa);
+                  seq.push(pa);
                 });
               });
+              /* A LOOP STARTS WHERE IT IS HELD (o.seamOffOverhang): a loop cut into pieces is the same loop, so it may begin at any of them.
+                 Begun at a piece that hangs - the seam fell on a corner of the gap - its first line is laid into the air from a start that
+                 rests on nothing, and pulled along: the owner's CR-TPU roof threw its back walls off the back edge, both loops starting at the
+                 gap's corner with a 15.7 mm hanging run (2026-11-15), where the front walls, entered from the block beside the gap, held. So
+                 the pieces are turned to start at the first one laid on the layer below; the loop ends where it began, on that same point. */
+              if (o.seamOffOverhang !== false && seq.length > 1 && seq[0].feature === 'Overhang wall') {
+                var k0 = -1;
+                for (var sk = 1; sk < seq.length; sk++) if (seq[sk].feature !== 'Overhang wall') { k0 = sk; break; }
+                if (k0 > 0) seq = seq.slice(k0).concat(seq.slice(0, k0));
+              }
+              seq.forEach(function (pa) { L.paths.push(pa); });
             });
           });
 

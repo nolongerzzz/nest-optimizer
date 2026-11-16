@@ -442,16 +442,17 @@ function frustum(n, r0, r1, z0, z1) {
     // ...and those three again on 2026-11-15, when an open-air bridge began to reach 1 mm onto the fill beside its gap (bridgeAnchorMm: docs/SLICER.md
     // "A bridge reaches onto what holds it"); the sphere, torus and tube, whose overhangs are slivers along a sloping wall, are untouched. Again
     // the same day when an open-air bridge's lines were evened out to fill its gap wall to wall (bridgeFitSpacing), the slivers still on the grid;
-    // and hinge_knuckle_box @0.4 once more when a free bridge's direction among the angles that hold went to the gap's short way across (freeBridgeAngle).
+    // and hinge_knuckle_box @0.4 once more when a free bridge's direction among the angles that hold went to the gap's short way across (freeBridgeAngle);
+    // and those three when a wall loop cut by an overhang began at a piece on the layer below (seamOffOverhang).
     const PINS = {
       'fixtures/box-20mm.stl': ['bf4fa6385480d9a1', '1ce8c7eb4eca30e8'],
       'fixtures/cylinder_r10h30_s64.stl': ['4102db1663681585', 'ee3474b981bba976'],
       'fixtures/fixture_sphere_curved.stl': ['b20238310238d62d', '765e9c3a4bbce169'],
-      'fixtures/hinge_knuckle_box.stl': ['20e5be5f129c19b2', '0156b77d8893373f'],
+      'fixtures/hinge_knuckle_box.stl': ['bd0d0a2e696c6feb', 'f956cc128ea10ccf'],
       'fixtures/quick/shape-torus.stl': ['95b2b40eb073d5c0', 'e686396781f0952d'],
       'fixtures/quick/shape-tube.stl': ['59dafe6c8652a59d', 'df62d80fe91a6680'],
-      'fixtures/supports/top_clip_x2.stl': ['75ed15ac0996f214', '022b9449f42d4ac7'],
-      'fixtures/supports/top_clip_x2_coupon.stl': ['330dcada8cf125c2', 'a2a6cdfa95f459bf']
+      'fixtures/supports/top_clip_x2.stl': ['cf3f1622e5186cbf', '43b605ebdd2f8c66'],
+      'fixtures/supports/top_clip_x2_coupon.stl': ['086b57f7a2e81a86', '65551253b6a94c4a']
     };
     const bad = [];
     let n = 0;
@@ -596,6 +597,17 @@ function frustum(n, r0, r1, z0, z1) {
       check('...bridgeFirst lays the open-air bridge before the walls, and changes nothing else (walls first by default, as Studio)',
         k > 0 && Lb.paths.slice(k).every(p => !(p.feature === 'Bridge' && p.free)) && keyOf(Lb) === keyOf(La) && /wall/i.test(La.paths[0].feature) &&
           bf.layers.every((L, i) => i === 0 || L.paths.some(p => p.feature === 'Bridge' && p.free) || keyOf(L) === keyOf(on.layers[i])), JSON.stringify(Lb.paths.map(p => p.feature).slice(0, 4)));
+    }
+    {
+      /* a loop cut by the roof's gap begins on a post, never on its hanging run (it began at the gap's corner on the owner's tower) */
+      const loopsOk = o => { const L = at(o, 4.2); let ok = true, prevWall = null;
+        L.paths.forEach((p, k) => { if (!/wall/i.test(p.feature)) return; const prev = L.paths[k - 1];
+          const startsLoop = !prev || !/wall/i.test(prev.feature) || Math.hypot(prev.pts[prev.pts.length - 1][0] - p.pts[0][0], prev.pts[prev.pts.length - 1][1] - p.pts[0][1]) > 0.05;
+          if (startsLoop && p.feature === 'Overhang wall') ok = false; });
+        return ok; };
+      const roofOff = SL.sliceObjects([{ name: 'roof', soup: roof }], opt({ seamOffOverhang: false }), wasm).objects[0];
+      check('...each wall loop cut by the gap begins on a post, not on the run that hangs over it (seamOffOverhang)', loopsOk(on) && !loopsOk(roofOff),
+        JSON.stringify(at(on, 4.2).paths.filter(p => /wall/i.test(p.feature)).map(p => p.feature + '@' + p.pts[0].map(v => v.toFixed(1)))));
     }
     check('...and the ground it took is not filled twice: no solid infill under the bridge\'s ends', at(on, 4.2).paths.filter(p => p.feature === 'Internal solid infill').every(p => p.pts.every(q => q[0] < 8 - 1.0 - 0.3 || q[0] > 20 + 1.0 + 0.3)));
   }

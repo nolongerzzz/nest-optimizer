@@ -953,6 +953,17 @@ is 21 lines, 85.96 to 94.04, 0.404 apart. Slivers along a sloping wall (narrower
 the bridges over sparse infill keep the grid. `bridgeFitSpacing: false` is the grid. Checked in
 `slicer:test` ("Bridges").
 
+### A loop starts where it is held (`seamOffOverhang`, 2026-11-15)
+
+A wall loop that an overhang cuts into pieces is still one loop, laid piece after piece. Its seam
+fell on a corner of the owner's roof gap, so both back walls began with their 15.7 mm hanging run:
+the first line laid into the air from a start that rested on nothing and was pulled along, and on
+CR-TPU it went off the back edge (a bump the next layer printed over), where the front walls,
+entered from the block beside the gap, held. The pieces of such a loop are now turned to begin at
+the first one laid on the layer below; the loop ends where it began, on that same point, and a
+hanging run is always entered from a held one. `seamOffOverhang: false` is the seam where it fell.
+Checked in `slicer:test` ("Bridges").
+
 ### A wall over a gap (`spanPieces`, `path.span`, 2026-11-14)
 
 An Overhang wall is a wall whose whole width hangs. Bambu prints it two ways. Measured on the
