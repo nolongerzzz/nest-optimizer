@@ -282,3 +282,14 @@ the first retraction and z-hop, and that the head lifts clear at the end.
 ## Supports on their own layer grid
 
 A Dense support (`sheetLayerMm` 0.275 in its meta) is sliced on its own layer grid (`supportLayerMaxMm` 0.28, see docs/SLICER.md), as G-scope's Slice does. The Print card sets the option the same way (`build()` in app-print.js), and `plan()` first puts the objects' grids into one timeline (`alignGrids`): every height any object prints at, ascending, each object's layers on the heights it has. A slice with no own grids passes through untouched. A bead takes its own layer's height, so the gcode carries a `; LAYER_HEIGHT` line where a support's layer differs from the part's. Checked on the real page with `node tools/nso_support_plate_page_slice.mjs out.json print.gcode.3mf` (Generate, Print card Slice, save the file): the six supp_ref supports start their transition/interface at Bambu's heights.
+
+## The start routine's time follows the filament (2026-11-15)
+
+`timing.startSeconds` is measured on the Studio slice a printer's blocks were frozen from (PLA). The
+block's purges run at the filament's flush speed (`{FLUSHF}`, `{OW*n}`), so a TPU start - 3.2 mm^3/s
+against PLA's 12 - takes about a minute longer: Studio read NSO's TPU string test as 6 m 54 s of
+preparation where NSO had counted 5 m 40 s. `plan()` now times the start block's own moves twice, with
+this print's values and with the frozen slice's (`Pr.values`), and adds the difference; the waits for
+temperature stay as measured. The block's lines are indented inside `M620`, so they are trimmed before
+timing. PLA's start is unchanged (340 s on the A1 mini); `build()` reports it as `stats.startSeconds`.
+Checked in `print:slice` 3c.

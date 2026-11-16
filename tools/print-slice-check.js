@@ -390,6 +390,8 @@ async function main() {
       const pk = peak(tg), pkPla = peak(pg);
       check('...no move asks the hotend for more than its 3.2 mm^3/s (peak ' + pk.toFixed(3) + '; PLA\'s plate peaks at ' + pkPla.toFixed(2) + ')', pk > 2.5 && pk < 3.2 * 1.005 && pkPla > 3.2 * 1.5);
       check('...it retracts the filament\'s 0.4 mm, and the fan is full from the second layer', /^G1 E-0?\.4 F1800$/m.test(tg) && !/^G1 E-0?\.8 F1800$/m.test(tg) && /^M106 S255$/m.test(tg));
+      check('...its start routine is timed with its own purges: the frozen 340 s for PLA, about a minute more for TPU\'s 3.2 mm^3/s flushes (Studio counted 6 m 54 s on the owner\'s TPU file)',
+        pla.stats.startSeconds === 340 && tpu.stats.startSeconds > 340 + 40 && tpu.stats.startSeconds < 340 + 120, JSON.stringify([pla.stats.startSeconds, tpu.stats.startSeconds]));
       check('...the readout names it', tpu.filament === 'Creality CR-TPU 95A, 215 \u00b0C (first layer 235), bed 30 \u00b0C, 3.2 mm\u00b3/s', tpu.filament);
     }
 

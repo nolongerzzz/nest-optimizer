@@ -1354,9 +1354,20 @@
     // the time, from the lines themselves
     var est = estimateLines(W.lines.slice(bodyFrom, bodyTo), { jerk: S.jerk, accel: S.accel.def });
     var bodySeconds = est.seconds + bridgeStat.changes * BRIDGE_TEMP_SECONDS;   // each change at the park, counted, not measured
-    var lineTime = function (i) { return Pr.timing.startSeconds + est.times[i - bodyFrom]; };
+    /* THE START ROUTINE'S TIME, FOR THIS FILAMENT (the owner, 2026-11-15: Studio read NSO's TPU string test as 6 m 54 s of preparation, NSO
+       had counted 5 m 40 s). Pr.timing.startSeconds is measured on the Studio slice the block was frozen from, a PLA one; the block's purges run
+       at the filament's own flush speed (3.2 mm^3/s for TPU, 12 for PLA), so the same block takes longer. The difference is the block's own
+       moves timed twice - with this print's values and with the frozen slice's - so the waits for temperature, which are the printer's, stay
+       as measured. */
+    var startS = Pr.timing.startSeconds;
+    if (Pr.values) {
+      var startTime = function (v) { return estimateLines(thaw(Pr.start, v, flags).filter(function (l) { return typeof l === 'string' && l.charAt(0) !== '@'; }).map(function (l) { return l.trim(); })   /* the purges are indented inside M620 */, { jerk: S.jerk, accel: S.accel.def }).seconds; };
+      var refVals = Object.assign({}, vals, { nozzle: Pr.values.nozzle, nozzleT: Pr.values.nozzleT, filamentType: Pr.values.filamentType, flushV: Pr.values.flushV, flushT: Pr.values.flushT, ow: Pr.values.ow });
+      startS = Math.max(0, startS + startTime(vals) - startTime(refVals));
+    }
+    var lineTime = function (i) { return startS + est.times[i - bodyFrom]; };
     layers.forEach(function (rec) {
-      rec.clockFrom = rec.lineFrom > bodyFrom ? lineTime(rec.lineFrom - 1) : Pr.timing.startSeconds;
+      rec.clockFrom = rec.lineFrom > bodyFrom ? lineTime(rec.lineFrom - 1) : startS;
       rec.clockTo = lineTime(rec.lineTo - 1);
     });
 
@@ -1364,7 +1375,7 @@
     thaw(Pr.end, vals, flags).forEach(function (l) { if (l.charAt(0) !== '@') put(l); });
 
     // ----- the file
-    var totalSeconds = Pr.timing.startSeconds + bodySeconds + Pr.timing.endSeconds;
+    var totalSeconds = startS + bodySeconds + Pr.timing.endSeconds;
     var lengthMm = st.extruded + (Pr.purgeMm || 0);
     var volume = lengthMm * filA;
     var density = opts.configOver && parseFloat(opts.configOver.filament_density) > 0 ? parseFloat(opts.configOver.filament_density)
@@ -1425,7 +1436,7 @@
         grams: volume / 1000 * density, box: box,
         bridgeTemp: bridgeT != null ? { temp: bridgeT, changes: bridgeStat.changes, layers: bridgeStat.layers, secondsEach: BRIDGE_TEMP_SECONDS } : null,
         tempBands: steps ? bands : null,                       // the temperature steps as written: [{ temp, fromZ, layer }]
-        seconds: { start: Pr.timing.startSeconds, body: bodySeconds, end: Pr.timing.endSeconds, total: totalSeconds }
+        seconds: { start: startS, body: bodySeconds, end: Pr.timing.endSeconds, total: totalSeconds }
       }
     };
   }
